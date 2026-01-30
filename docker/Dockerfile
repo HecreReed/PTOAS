@@ -83,6 +83,12 @@ WORKDIR /test
 RUN python -c "import mlir.ir"
 RUN python -c "from mlir.dialects import pto"
 
+WORKDIR $PTO_SOURCE_DIR/test/samples/MatMul/
+RUN python ./tmatmulk.py > ./tmatmulk.pto
+RUN ptoas ./tmatmulk.pto -o ./tmatmulk.cpp
+# TODO: test compilation of the cpp file using `bisheng`
+# TODO: also test `ptoas --enable-insert-sync`
+
 # show the built wheel by default
 WORKDIR $PY_PACKAGE_DIR/dist
 
