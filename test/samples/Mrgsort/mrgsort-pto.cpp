@@ -16,12 +16,12 @@ __global__ AICORE void vec_add_scalar_kernel_2d(__gm__ float* v1, __gm__ float* 
   unsigned v14 = v5 * v13;
   unsigned v15 = v12 + v14;
   __gm__ float* v16 = v1 + v15;
-  using GTShape_94291109290544 = pto::Shape<1, 256>;
-  using GTStride_94291109290544 = pto::Stride<256, 1>;
-  GTShape_94291109290544 v17 = GTShape_94291109290544();
-  GTStride_94291109290544 v18 = GTStride_94291109290544();
-  using GT_94291109290544 = GlobalTensor<float, GTShape_94291109290544, GTStride_94291109290544>;
-  GT_94291109290544 v19 = GT_94291109290544(v16, v17, v18);
+  using GTShape_5208312896 = pto::Shape<1, 256>;
+  using GTStride_5208312896 = pto::Stride<256, 1>;
+  GTShape_5208312896 v17 = GTShape_5208312896();
+  GTStride_5208312896 v18 = GTStride_5208312896();
+  using GT_5208312896 = GlobalTensor<float, GTShape_5208312896, GTStride_5208312896>;
+  GT_5208312896 v19 = GT_5208312896(v16, v17, v18);
   Tile<TileType::Vec, float, 1, 256, BLayout::RowMajor, 1, 256, SLayout::NoneBox, 512, PadValue::Null> v20;
   TASSIGN(v20, v8);
   Tile<TileType::Vec, float, 1, 256, BLayout::RowMajor, 1, 256, SLayout::NoneBox, 512, PadValue::Null> v21;
@@ -35,12 +35,14 @@ __global__ AICORE void vec_add_scalar_kernel_2d(__gm__ float* v1, __gm__ float* 
   unsigned v26 = v5 * v25;
   unsigned v27 = v24 + v26;
   __gm__ float* v28 = v2 + v27;
-  using GTShape_94291109290720 = pto::Shape<32, 32>;
-  using GTStride_94291109290720 = pto::Stride<256, 1>;
-  GTShape_94291109290720 v29 = GTShape_94291109290720();
-  GTStride_94291109290720 v30 = GTStride_94291109290720();
-  using GT_94291109290720 = GlobalTensor<float, GTShape_94291109290720, GTStride_94291109290720>;
-  GT_94291109290720 v31 = GT_94291109290720(v28, v29, v30);
+  using GTShape_5208313280 = pto::Shape<32, 32>;
+  using GTStride_5208313280 = pto::Stride<256, 1>;
+  GTShape_5208313280 v29 = GTShape_5208313280();
+  GTStride_5208313280 v30 = GTStride_5208313280();
+  using GT_5208313280 = GlobalTensor<float, GTShape_5208313280, GTStride_5208313280>;
+  GT_5208313280 v31 = GT_5208313280(v28, v29, v30);
   TSTORE(v31, v21);
   return;
 }
+
+

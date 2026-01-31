@@ -17,12 +17,12 @@ __global__ AICORE void vec_colsum_kernel_2d(__gm__ float* v1, __gm__ float* v2, 
   unsigned v16 = v6 * v15;
   unsigned v17 = v14 + v16;
   __gm__ float* v18 = v1 + v17;
-  using GTShape_94366817293888 = pto::Shape<32, 32>;
-  using GTStride_94366817293888 = pto::Stride<32, 1>;
-  GTShape_94366817293888 v19 = GTShape_94366817293888();
-  GTStride_94366817293888 v20 = GTStride_94366817293888();
-  using GT_94366817293888 = GlobalTensor<float, GTShape_94366817293888, GTStride_94366817293888>;
-  GT_94366817293888 v21 = GT_94366817293888(v18, v19, v20);
+  using GTShape_4999647744 = pto::Shape<32, 32>;
+  using GTStride_4999647744 = pto::Stride<32, 1>;
+  GTShape_4999647744 v19 = GTShape_4999647744();
+  GTStride_4999647744 v20 = GTStride_4999647744();
+  using GT_4999647744 = GlobalTensor<float, GTShape_4999647744, GTStride_4999647744>;
+  GT_4999647744 v21 = GT_4999647744(v18, v19, v20);
   unsigned v22 = (unsigned) v7;
   unsigned v23 = v6 * v22;
   unsigned v24 = v6 + v23;
@@ -30,12 +30,12 @@ __global__ AICORE void vec_colsum_kernel_2d(__gm__ float* v1, __gm__ float* v2, 
   unsigned v26 = v6 * v25;
   unsigned v27 = v24 + v26;
   __gm__ float* v28 = v2 + v27;
-  using GTShape_94366817294064 = pto::Shape<32, 32>;
-  using GTStride_94366817294064 = pto::Stride<32, 1>;
-  GTShape_94366817294064 v29 = GTShape_94366817294064();
-  GTStride_94366817294064 v30 = GTStride_94366817294064();
-  using GT_94366817294064 = GlobalTensor<float, GTShape_94366817294064, GTStride_94366817294064>;
-  GT_94366817294064 v31 = GT_94366817294064(v28, v29, v30);
+  using GTShape_4999647920 = pto::Shape<32, 32>;
+  using GTStride_4999647920 = pto::Stride<32, 1>;
+  GTShape_4999647920 v29 = GTShape_4999647920();
+  GTStride_4999647920 v30 = GTStride_4999647920();
+  using GT_4999647920 = GlobalTensor<float, GTShape_4999647920, GTStride_4999647920>;
+  GT_4999647920 v31 = GT_4999647920(v28, v29, v30);
   unsigned v32 = (unsigned) v7;
   unsigned v33 = v6 * v32;
   unsigned v34 = v6 + v33;
@@ -43,12 +43,12 @@ __global__ AICORE void vec_colsum_kernel_2d(__gm__ float* v1, __gm__ float* v2, 
   unsigned v36 = v6 * v35;
   unsigned v37 = v34 + v36;
   __gm__ float* v38 = v3 + v37;
-  using GTShape_94366817613952 = pto::Shape<1, 32>;
-  using GTStride_94366817613952 = pto::Stride<32, 1>;
-  GTShape_94366817613952 v39 = GTShape_94366817613952();
-  GTStride_94366817613952 v40 = GTStride_94366817613952();
-  using GT_94366817613952 = GlobalTensor<float, GTShape_94366817613952, GTStride_94366817613952>;
-  GT_94366817613952 v41 = GT_94366817613952(v38, v39, v40);
+  using GTShape_4999648304 = pto::Shape<1, 32>;
+  using GTStride_4999648304 = pto::Stride<32, 1>;
+  GTShape_4999648304 v39 = GTShape_4999648304();
+  GTStride_4999648304 v40 = GTStride_4999648304();
+  using GT_4999648304 = GlobalTensor<float, GTShape_4999648304, GTStride_4999648304>;
+  GT_4999648304 v41 = GT_4999648304(v38, v39, v40);
   Tile<TileType::Vec, float, 32, 32, BLayout::RowMajor, 32, 32, SLayout::NoneBox, 512, PadValue::Null> v42;
   TASSIGN(v42, v9);
   Tile<TileType::Vec, float, 32, 32, BLayout::RowMajor, 32, 32, SLayout::NoneBox, 512, PadValue::Null> v43;
@@ -62,3 +62,5 @@ __global__ AICORE void vec_colsum_kernel_2d(__gm__ float* v1, __gm__ float* v2, 
   TSTORE(v41, v44);
   return;
 }
+
+

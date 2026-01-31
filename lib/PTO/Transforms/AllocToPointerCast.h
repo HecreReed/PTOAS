@@ -22,12 +22,22 @@ public:
   /// note: the buffer which does multibuffer n optimization will be allocated n
   /// addresses.
   DenseMap<Value, SmallVector<uint64_t>> buffer2Offsets;
+  mutable uint64_t fallbackNextOffset = 0;
 
   explicit MemrefAllocaOpToPointerCastOpPattern(
       MLIRContext *context,
       DenseMap<Value, SmallVector<uint64_t>> buffer2Offsets)
       : OpRewritePattern<memref::AllocOp>(context),
-        buffer2Offsets(buffer2Offsets) {}
+        buffer2Offsets(std::move(buffer2Offsets)) {
+    // Seed fallback offsets above any known planned offsets to reduce collisions.
+    constexpr uint64_t kAlign = 4096;
+    uint64_t maxOff = 0;
+    for (const auto &kv : this->buffer2Offsets) {
+      for (uint64_t off : kv.second)
+        maxOff = std::max(maxOff, off);
+    }
+    fallbackNextOffset = ((maxOff + kAlign - 1) / kAlign) * kAlign;
+  }
   LogicalResult matchAndRewrite(memref::AllocOp op,
                                 PatternRewriter &rewriter) const final;
 };

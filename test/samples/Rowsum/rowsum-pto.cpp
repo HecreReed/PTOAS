@@ -15,12 +15,12 @@ __global__ AICORE void rowsum_kernel_2d(__gm__ float* v1, __gm__ float* v2) {
   unsigned v13 = v4 * v12;
   unsigned v14 = v11 + v13;
   __gm__ float* v15 = v1 + v14;
-  using GTShape_94907249095776 = pto::Shape<32, 32>;
-  using GTStride_94907249095776 = pto::Stride<32, 1>;
-  GTShape_94907249095776 v16 = GTShape_94907249095776();
-  GTStride_94907249095776 v17 = GTStride_94907249095776();
-  using GT_94907249095776 = GlobalTensor<float, GTShape_94907249095776, GTStride_94907249095776>;
-  GT_94907249095776 v18 = GT_94907249095776(v15, v16, v17);
+  using GTShape_5602778768 = pto::Shape<32, 32>;
+  using GTStride_5602778768 = pto::Stride<32, 1>;
+  GTShape_5602778768 v16 = GTShape_5602778768();
+  GTStride_5602778768 v17 = GTStride_5602778768();
+  using GT_5602778768 = GlobalTensor<float, GTShape_5602778768, GTStride_5602778768>;
+  GT_5602778768 v18 = GT_5602778768(v15, v16, v17);
   Tile<TileType::Vec, float, 32, 32, BLayout::RowMajor, 32, 32, SLayout::NoneBox, 512, PadValue::Null> v19;
   TASSIGN(v19, v7);
   Tile<TileType::Vec, float, 32, 32, BLayout::RowMajor, 32, 32, SLayout::NoneBox, 512, PadValue::Null> v20;
@@ -34,12 +34,14 @@ __global__ AICORE void rowsum_kernel_2d(__gm__ float* v1, __gm__ float* v2) {
   unsigned v25 = v4 * v24;
   unsigned v26 = v23 + v25;
   __gm__ float* v27 = v2 + v26;
-  using GTShape_94907249095952 = pto::Shape<32, 32>;
-  using GTStride_94907249095952 = pto::Stride<32, 1>;
-  GTShape_94907249095952 v28 = GTShape_94907249095952();
-  GTStride_94907249095952 v29 = GTStride_94907249095952();
-  using GT_94907249095952 = GlobalTensor<float, GTShape_94907249095952, GTStride_94907249095952>;
-  GT_94907249095952 v30 = GT_94907249095952(v27, v28, v29);
+  using GTShape_5602780288 = pto::Shape<32, 32>;
+  using GTStride_5602780288 = pto::Stride<32, 1>;
+  GTShape_5602780288 v28 = GTShape_5602780288();
+  GTStride_5602780288 v29 = GTStride_5602780288();
+  using GT_5602780288 = GlobalTensor<float, GTShape_5602780288, GTStride_5602780288>;
+  GT_5602780288 v30 = GT_5602780288(v27, v28, v29);
   TSTORE(v30, v20);
   return;
 }
+
+

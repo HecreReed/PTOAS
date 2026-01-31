@@ -16,12 +16,12 @@ __global__ AICORE void vec_add_kernel_2d(__gm__ float* v1, __gm__ int32_t* v2, _
   unsigned v15 = v5 * v14;
   unsigned v16 = v13 + v15;
   __gm__ float* v17 = v1 + v16;
-  using GTShape_94432103369792 = pto::Shape<32, 32>;
-  using GTStride_94432103369792 = pto::Stride<32, 1>;
-  GTShape_94432103369792 v18 = GTShape_94432103369792();
-  GTStride_94432103369792 v19 = GTStride_94432103369792();
-  using GT_94432103369792 = GlobalTensor<float, GTShape_94432103369792, GTStride_94432103369792>;
-  GT_94432103369792 v20 = GT_94432103369792(v17, v18, v19);
+  using GTShape_4914003264 = pto::Shape<32, 32>;
+  using GTStride_4914003264 = pto::Stride<32, 1>;
+  GTShape_4914003264 v18 = GTShape_4914003264();
+  GTStride_4914003264 v19 = GTStride_4914003264();
+  using GT_4914003264 = GlobalTensor<float, GTShape_4914003264, GTStride_4914003264>;
+  GT_4914003264 v20 = GT_4914003264(v17, v18, v19);
   unsigned v21 = (unsigned) v6;
   unsigned v22 = v5 * v21;
   unsigned v23 = v5 + v22;
@@ -29,12 +29,12 @@ __global__ AICORE void vec_add_kernel_2d(__gm__ float* v1, __gm__ int32_t* v2, _
   unsigned v25 = v5 * v24;
   unsigned v26 = v23 + v25;
   __gm__ int32_t* v27 = v2 + v26;
-  using GTShape_94432103173424 = pto::Shape<32, 32>;
-  using GTStride_94432103173424 = pto::Stride<32, 1>;
-  GTShape_94432103173424 v28 = GTShape_94432103173424();
-  GTStride_94432103173424 v29 = GTStride_94432103173424();
-  using GT_94432103173424 = GlobalTensor<int32_t, GTShape_94432103173424, GTStride_94432103173424>;
-  GT_94432103173424 v30 = GT_94432103173424(v27, v28, v29);
+  using GTShape_4914004240 = pto::Shape<32, 32>;
+  using GTStride_4914004240 = pto::Stride<32, 1>;
+  GTShape_4914004240 v28 = GTShape_4914004240();
+  GTStride_4914004240 v29 = GTStride_4914004240();
+  using GT_4914004240 = GlobalTensor<int32_t, GTShape_4914004240, GTStride_4914004240>;
+  GT_4914004240 v30 = GT_4914004240(v27, v28, v29);
   Tile<TileType::Vec, float, 32, 32, BLayout::RowMajor, 32, 32, SLayout::NoneBox, 512, PadValue::Null> v31;
   TASSIGN(v31, v8);
   Tile<TileType::Vec, int32_t, 32, 32, BLayout::RowMajor, 32, 32, SLayout::NoneBox, 512, PadValue::Null> v32;
@@ -51,12 +51,14 @@ __global__ AICORE void vec_add_kernel_2d(__gm__ float* v1, __gm__ int32_t* v2, _
   unsigned v38 = v5 * v37;
   unsigned v39 = v36 + v38;
   __gm__ float* v40 = v3 + v39;
-  using GTShape_94432103490912 = pto::Shape<32, 32>;
-  using GTStride_94432103490912 = pto::Stride<32, 1>;
-  GTShape_94432103490912 v41 = GTShape_94432103490912();
-  GTStride_94432103490912 v42 = GTStride_94432103490912();
-  using GT_94432103490912 = GlobalTensor<float, GTShape_94432103490912, GTStride_94432103490912>;
-  GT_94432103490912 v43 = GT_94432103490912(v40, v41, v42);
+  using GTShape_4914004864 = pto::Shape<32, 32>;
+  using GTStride_4914004864 = pto::Stride<32, 1>;
+  GTShape_4914004864 v41 = GTShape_4914004864();
+  GTStride_4914004864 v42 = GTStride_4914004864();
+  using GT_4914004864 = GlobalTensor<float, GTShape_4914004864, GTStride_4914004864>;
+  GT_4914004864 v43 = GT_4914004864(v40, v41, v42);
   TSTORE(v43, v33);
   return;
 }
+
+

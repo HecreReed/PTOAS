@@ -15,12 +15,12 @@ __global__ AICORE void abs_kernel_2d(__gm__ float* v1, __gm__ float* v2) {
   unsigned v13 = v4 * v12;
   unsigned v14 = v11 + v13;
   __gm__ float* v15 = v1 + v14;
-  using GTShape_94480702608784 = pto::Shape<32, 32>;
-  using GTStride_94480702608784 = pto::Stride<32, 1>;
-  GTShape_94480702608784 v16 = GTShape_94480702608784();
-  GTStride_94480702608784 v17 = GTStride_94480702608784();
-  using GT_94480702608784 = GlobalTensor<float, GTShape_94480702608784, GTStride_94480702608784>;
-  GT_94480702608784 v18 = GT_94480702608784(v15, v16, v17);
+  using GTShape_5914133648 = pto::Shape<32, 32>;
+  using GTStride_5914133648 = pto::Stride<32, 1>;
+  GTShape_5914133648 v16 = GTShape_5914133648();
+  GTStride_5914133648 v17 = GTStride_5914133648();
+  using GT_5914133648 = GlobalTensor<float, GTShape_5914133648, GTStride_5914133648>;
+  GT_5914133648 v18 = GT_5914133648(v15, v16, v17);
   Tile<TileType::Vec, float, 32, 32, BLayout::RowMajor, 32, 32, SLayout::NoneBox, 512, PadValue::Null> v19;
   TASSIGN(v19, v7);
   Tile<TileType::Vec, float, 32, 32, BLayout::RowMajor, 32, 32, SLayout::NoneBox, 512, PadValue::Null> v20;
@@ -34,12 +34,14 @@ __global__ AICORE void abs_kernel_2d(__gm__ float* v1, __gm__ float* v2) {
   unsigned v25 = v4 * v24;
   unsigned v26 = v23 + v25;
   __gm__ float* v27 = v2 + v26;
-  using GTShape_94480702608960 = pto::Shape<32, 32>;
-  using GTStride_94480702608960 = pto::Stride<32, 1>;
-  GTShape_94480702608960 v28 = GTShape_94480702608960();
-  GTStride_94480702608960 v29 = GTStride_94480702608960();
-  using GT_94480702608960 = GlobalTensor<float, GTShape_94480702608960, GTStride_94480702608960>;
-  GT_94480702608960 v30 = GT_94480702608960(v27, v28, v29);
+  using GTShape_5914134912 = pto::Shape<32, 32>;
+  using GTStride_5914134912 = pto::Stride<32, 1>;
+  GTShape_5914134912 v28 = GTShape_5914134912();
+  GTStride_5914134912 v29 = GTStride_5914134912();
+  using GT_5914134912 = GlobalTensor<float, GTShape_5914134912, GTStride_5914134912>;
+  GT_5914134912 v30 = GT_5914134912(v27, v28, v29);
   TSTORE(v30, v20);
   return;
 }
+
+

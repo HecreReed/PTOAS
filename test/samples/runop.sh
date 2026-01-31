@@ -1,128 +1,185 @@
 #!/usr/bin/env bash
 set -uo pipefail   # 注意：去掉 -e，避免失败直接退出整个脚本
 
-BASE_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
-MLIR_PTO="${BASE_DIR}/../../../../build/bin/ptoas"
+BASE_DIR="$(cd -- "$(dirname -- "$0")" && pwd)"
+
+# Allow overriding tool/python explicitly:
+#   PTOAS_BIN=/path/to/ptoas PYTHON_BIN=/path/to/python ./runop.sh all
+PTOAS_BIN="${PTOAS_BIN:-}"
+PYTHON_BIN="${PYTHON_BIN:-}"
+PTOAS_OUT_DIR="${PTOAS_OUT_DIR:-}"
 
 usage() {
   cat <<EOF
 Usage:
   $0 -t <name>   # e.g. -t a  -> uses folder A, script a.py
   $0 all         # traverse every subfolder under ${BASE_DIR}
+
+Env:
+  PTOAS_BIN   # path to ptoas executable (optional)
+  PYTHON_BIN  # python executable to run samples (optional)
+  PTOAS_OUT_DIR  # where generated *.mlir/*.cpp go (optional; defaults to a temp dir)
 EOF
   exit 1
 }
 
-ucfirst() { echo "${1^}"; }
-lcfirst() { echo "${1,}"; }
+ucfirst() {
+  local s="$1"
+  local first="${s:0:1}"
+  local rest="${s:1}"
+  printf '%s%s\n' "$(printf '%s' "$first" | tr '[:lower:]' '[:upper:]')" "$rest"
+}
 
-# 记录结果：name -> "OK|FAIL|SKIP"
-declare -A RESULT
-declare -A DETAIL
+lcfirst() {
+  local s="$1"
+  local first="${s:0:1}"
+  local rest="${s:1}"
+  printf '%s%s\n' "$(printf '%s' "$first" | tr '[:upper:]' '[:lower:]')" "$rest"
+}
 
-process_one() {
-  local a="$1"          # e.g. a
-  local A dir py mlir cpp tmp
-  A="$(ucfirst "$a")"
+resolve_ptoas_bin() {
+  if [[ -n "${PTOAS_BIN}" ]]; then
+    echo "${PTOAS_BIN}"
+    return 0
+  fi
 
+  # Common locations:
+  # - out-of-tree build in repo: PTOAS/build/tools/ptoas/ptoas
+  # - legacy layout: build/bin/ptoas
+  local cand
+  cand="${BASE_DIR}/../../build/tools/ptoas/ptoas"
+  [[ -x "$cand" ]] && { echo "$cand"; return 0; }
+  cand="${BASE_DIR}/../../../../build/bin/ptoas"
+  [[ -x "$cand" ]] && { echo "$cand"; return 0; }
+  cand="$(command -v ptoas 2>/dev/null || true)"
+  [[ -n "$cand" && -x "$cand" ]] && { echo "$cand"; return 0; }
+
+  echo ""
+  return 1
+}
+
+resolve_python_bin() {
+  if [[ -n "${PYTHON_BIN}" ]]; then
+    echo "${PYTHON_BIN}"
+    return 0
+  fi
+  local cand
+  cand="$(command -v python 2>/dev/null || true)"
+  [[ -n "$cand" ]] && { echo "$cand"; return 0; }
+  cand="$(command -v python3 2>/dev/null || true)"
+  [[ -n "$cand" ]] && { echo "$cand"; return 0; }
+  echo ""
+  return 1
+}
+
+has_exact_file() {
+  local dir="$1"
+  local want="$2"
+  local f base
+  for f in "$dir"/*.py; do
+    [[ -e "$f" ]] || continue
+    base="$(basename "$f")"
+    if [[ "$base" == "$want" ]]; then
+      return 0
+    fi
+  done
+  return 1
+}
+
+process_one_dir() {
+  local A="$1" # folder name (e.g. Abs)
+  local out_dir="$2"
+  local dir py mlir cpp ptoas python out_subdir
   dir="${BASE_DIR}/${A}"
-  py="${dir}/${a}.py"
-  mlir="${dir}/${a}-pto-ir.mlir"
-  cpp="${dir}/${a}-pto.cpp"
+  out_subdir="${out_dir}/${A}"
+  mkdir -p "${out_subdir}"
+  mlir="${out_subdir}/$(lcfirst "$A")-pto-ir.pto"
+  cpp="${out_subdir}/$(lcfirst "$A")-pto.cpp"
 
-  # 工具不存在：这是全局致命错误
-  if [[ ! -x "$MLIR_PTO" ]]; then
-    RESULT["$A"]="FAIL"
-    DETAIL["$A"]="Missing executable: $MLIR_PTO"
-    return 1
+  ptoas="$(resolve_ptoas_bin)"
+  python="$(resolve_python_bin)"
+
+  if [[ -z "$ptoas" || ! -x "$ptoas" ]]; then
+    echo -e "${A}\tFAIL\tMissing executable: PTOAS_BIN (searched common paths)"
+    return 0
   fi
-
-  # 目录不存在：这里也算 SKIP（你也可以改成 FAIL）
+  if [[ -z "$python" || ! -x "$python" ]]; then
+    echo -e "${A}\tFAIL\tMissing python: PYTHON_BIN (python/python3 not found)"
+    return 0
+  fi
   if [[ ! -d "$dir" ]]; then
-    RESULT["$A"]="SKIP"
-    DETAIL["$A"]="Missing dir: $dir"
-    return 2
+    echo -e "${A}\tSKIP\tMissing dir: $dir"
+    return 0
   fi
 
-  # 找不到 py：按你的需求 SKIP，继续下一个
-  if [[ ! -f "$py" ]]; then
-    RESULT["$A"]="SKIP"
-    DETAIL["$A"]="Missing python: $py"
-    return 2
+  py="${dir}/$(lcfirst "$A").py"
+  if ! has_exact_file "$dir" "$(basename "$py")"; then
+    echo -e "${A}\tSKIP\tMissing python: $(basename "$py")"
+    return 0
   fi
 
-  # 2) python -> mlir
-  if ! python3 "$py" > "$mlir"; then
-    RESULT["$A"]="FAIL"
-    DETAIL["$A"]="python3 failed: $py"
-    return 1
+  if ! "$python" "$py" > "$mlir"; then
+    echo -e "${A}\tFAIL\tpython failed: $(basename "$py")"
+    return 0
   fi
 
-  # 3) mlir-pto -> cpp
-  if ! "$MLIR_PTO" "$mlir" > "$cpp"; then
-    RESULT["$A"]="FAIL"
-    DETAIL["$A"]="ptoas failed: $mlir"
-    return 1
+  # Write output via -o to avoid mixing debug prints with generated C++.
+  if ! "$ptoas" "$mlir" -o "$cpp" >/dev/null 2>&1; then
+    echo -e "${A}\tFAIL\tptoas failed: $(basename "$mlir")"
+    return 0
   fi
 
-  # 4) post-process cpp
-  tmp="$(mktemp)"
-
-  awk '
-    $0 == "#include \"common/pto_instr.hpp\"" { keep=1 }
-    keep { print }
-  ' "$cpp" > "$tmp"
-
-  # delete last 3 lines（文件行数不足也不致命：失败则记 FAIL）
-  if ! sed -i '$d' "$tmp" || ! sed -i '$d' "$tmp" || ! sed -i '$d' "$tmp"; then
-    rm -f "$tmp"
-    RESULT["$A"]="FAIL"
-    DETAIL["$A"]="post-process sed failed: $cpp"
-    return 1
-  fi
-
-  mv "$tmp" "$cpp"
-
-  RESULT["$A"]="OK"
-  DETAIL["$A"]="generated: $cpp"
+  echo -e "${A}\tOK\tgenerated: $(basename "$cpp")"
   return 0
 }
 
-print_summary() {
-  local ok=0 fail=0 skip=0
+run_all() {
+  local results tmp out_dir
+  out_dir="${PTOAS_OUT_DIR}"
+  if [[ -z "${out_dir}" ]]; then
+    out_dir="$(mktemp -d -t ptoas.samples.XXXXXX)"
+  else
+    mkdir -p "${out_dir}"
+  fi
+
+  echo "PTOAS_OUT_DIR=${out_dir}"
+
+  tmp="$(mktemp -t ptoas.runop.XXXXXX)"
+  for d in "${BASE_DIR}"/*/; do
+    [[ -d "$d" ]] || continue
+    process_one_dir "$(basename "$d")" "$out_dir" >>"$tmp"
+  done
+
   echo "========== SUMMARY =========="
-  # 为了输出稳定，按字母序打印
-  for k in "${!RESULT[@]}"; do
-    :
-  done | true
-
-  # bash 无法直接对 assoc key 排序，这里用 printf+sort
-  while IFS= read -r A; do
-    printf "%-6s %-4s %s\n" "$A" "${RESULT[$A]}" "${DETAIL[$A]}"
-    case "${RESULT[$A]}" in
-      OK)   ((ok++)) ;;
-      FAIL) ((fail++)) ;;
-      SKIP) ((skip++)) ;;
-    esac
-  done < <(printf "%s\n" "${!RESULT[@]}" | sort)
-
-  echo "-----------------------------"
-  echo "OK=$ok  FAIL=$fail  SKIP=$skip"
-  echo "============================="
+  sort "$tmp" | awk -F'\t' '
+    BEGIN { ok=0; fail=0; skip=0; }
+    {
+      printf "%-12s %-4s %s\n", $1, $2, $3;
+      if ($2=="OK") ok++;
+      else if ($2=="FAIL") fail++;
+      else if ($2=="SKIP") skip++;
+    }
+    END {
+      print "-----------------------------";
+      printf "OK=%d  FAIL=%d  SKIP=%d\n", ok, fail, skip;
+      print "=============================";
+      exit (fail==0 ? 0 : 1);
+    }'
 }
 
 if [[ $# -eq 1 && "$1" == "all" ]]; then
-  shopt -s nullglob
-  for d in "${BASE_DIR}"/*/; do
-    A="$(basename "$d")"
-    a="$(lcfirst "$A")"
-    process_one "$a" || true   # 不让单个失败中断 all
-  done
-  print_summary
+  run_all
 elif [[ $# -eq 2 && "$1" == "-t" ]]; then
-  a="$2"
-  process_one "$a" || true
-  print_summary
+  A="$(ucfirst "$2")"
+  out_dir="${PTOAS_OUT_DIR}"
+  if [[ -z "${out_dir}" ]]; then
+    out_dir="$(mktemp -d -t ptoas.samples.XXXXXX)"
+  else
+    mkdir -p "${out_dir}"
+  fi
+  echo "PTOAS_OUT_DIR=${out_dir}"
+  echo "========== SUMMARY =========="
+  process_one_dir "$A" "$out_dir" | awk -F'\t' '{ printf "%-12s %-4s %s\n", $1, $2, $3 }'
 else
   usage
 fi

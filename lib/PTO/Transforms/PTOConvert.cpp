@@ -205,33 +205,38 @@ struct ArithCastOPToEmitC : public OpConversionPattern<arith::IndexCastOp> {
   }
 };
 
-struct ArithConstantToEmitC : public OpConversionPattern<arith::ConstantOp> {
-  using OpConversionPattern<arith::ConstantOp>::OpConversionPattern;
+	struct ArithConstantToEmitC : public OpConversionPattern<arith::ConstantOp> {
+	  using OpConversionPattern<arith::ConstantOp>::OpConversionPattern;
+	
+	  LogicalResult matchAndRewrite(arith::ConstantOp op, OpAdaptor adaptor,
+	                                ConversionPatternRewriter &rewriter) const override {
+	    Type newType = getTypeConverter()->convertType(op.getType());
+	    if (!newType) return failure();
+	
+	    // `adaptor.getValue()` may be null if attribute conversion isn't defined.
+	    // Use the original attribute as fallback and always cast null-safely.
+	    Attribute valueAttr = adaptor.getValue();
+	    if (!valueAttr) valueAttr = op.getValue();
 
-  LogicalResult matchAndRewrite(arith::ConstantOp op, OpAdaptor adaptor,
-                                ConversionPatternRewriter &rewriter) const override {
-    Type newType = getTypeConverter()->convertType(op.getType());
-    if (!newType) return failure();
-
-    if (auto floatAttr = dyn_cast<FloatAttr>(adaptor.getValue())) {
-      SmallString<32> valStr;
-      floatAttr.getValue().toString(valStr);
-      valStr.append("f");
-      auto constAttr = emitc::OpaqueAttr::get(rewriter.getContext(), valStr);
-      rewriter.replaceOpWithNewOp<emitc::ConstantOp>(op, newType, constAttr);
-      return success();
-    }
-
-    if (auto intAttr = dyn_cast<IntegerAttr>(adaptor.getValue())) {
-      std::string valStr = std::to_string(intAttr.getValue().getSExtValue());
-      auto constAttr = emitc::OpaqueAttr::get(rewriter.getContext(), valStr);
-      rewriter.replaceOpWithNewOp<emitc::ConstantOp>(op, newType, constAttr);
-      return success();
-    }
-
-    return failure();
-  }
-};
+	    if (auto floatAttr = dyn_cast_or_null<FloatAttr>(valueAttr)) {
+	      SmallString<32> valStr;
+	      floatAttr.getValue().toString(valStr);
+	      valStr.append("f");
+	      auto constAttr = emitc::OpaqueAttr::get(rewriter.getContext(), valStr);
+	      rewriter.replaceOpWithNewOp<emitc::ConstantOp>(op, newType, constAttr);
+	      return success();
+	    }
+	
+	    if (auto intAttr = dyn_cast_or_null<IntegerAttr>(valueAttr)) {
+	      std::string valStr = std::to_string(intAttr.getValue().getSExtValue());
+	      auto constAttr = emitc::OpaqueAttr::get(rewriter.getContext(), valStr);
+	      rewriter.replaceOpWithNewOp<emitc::ConstantOp>(op, newType, constAttr);
+	      return success();
+	    }
+	
+	    return failure();
+	  }
+	};
 //===----------------------------------------------------------------------===//
 // pto.mgather lowering -> MGATHER(dst, mem, idx)
 // %dst = pto.mgather %mem, %idx : memref<...>, memref<...> -> memref<...>
@@ -2378,24 +2383,22 @@ struct PTOLogToEmitC : public OpConversionPattern<pto::LogOp_DPS> {
 // TLRELU lowering to EmitC (PTOConvert.cpp)
 //===----------------------------------------------------------------------===//
 
-struct PTOLReluToEmitC : public OpConversionPattern<pto::LReluOp_DPS> {
-  using OpConversionPattern<pto::LReluOp_DPS>::OpConversionPattern;
+	struct PTOLReluToEmitC : public OpConversionPattern<pto::LReluOp_DPS> {
+	  using OpConversionPattern<pto::LReluOp_DPS>::OpConversionPattern;
+	
+	  LogicalResult matchAndRewrite(pto::LReluOp_DPS op, OpAdaptor adaptor,
+	                                ConversionPatternRewriter &rewriter) const override {
+	    auto loc = op.getLoc();
+	
+	    Value src = peelUnrealized(adaptor.getSrc());
+	    Value slope = peelUnrealized(adaptor.getSlope());
+	    Value dst = peelUnrealized(adaptor.getDst());
 
-  LogicalResult matchAndRewrite(pto::LReluOp_DPS op, OpAdaptor adaptor,
-                                ConversionPatternRewriter &rewriter) const override {
-    auto loc = op.getLoc();
-
-    Value src = peelUnrealized(adaptor.getSrc());
-    Value dst = peelUnrealized(adaptor.getDst());
-
-    auto f32Ty = rewriter.getF32Type();
-    auto slopeVal = rewriter.create<arith::ConstantOp>(loc, f32Ty, op.getSlope());
-
-    SmallVector<Value, 3> operands{dst, src, slopeVal};
-    rewriter.create<emitc::CallOpaqueOp>(
-        loc, TypeRange{}, "TLRELU",
-        /*args=*/ArrayAttr{}, /*templateArgs=*/ArrayAttr{},
-        /*operands=*/operands);
+	    SmallVector<Value, 3> operands{dst, src, slope};
+	    rewriter.create<emitc::CallOpaqueOp>(
+	        loc, TypeRange{}, "TLRELU",
+	        /*args=*/ArrayAttr{}, /*templateArgs=*/ArrayAttr{},
+	        /*operands=*/operands);
 
     rewriter.eraseOp(op);
     return success();
@@ -2432,23 +2435,21 @@ struct PTOMaxToEmitC : public OpConversionPattern<pto::MaxOp_DPS> {
 // TMAXS lowering to EmitC (PTOConvert.cpp)
 //===----------------------------------------------------------------------===//
 
-struct PTOMaxSToEmitC : public OpConversionPattern<pto::MaxSOp_DPS> {
-  using OpConversionPattern<pto::MaxSOp_DPS>::OpConversionPattern;
+	struct PTOMaxSToEmitC : public OpConversionPattern<pto::MaxSOp_DPS> {
+	  using OpConversionPattern<pto::MaxSOp_DPS>::OpConversionPattern;
+	
+	  LogicalResult matchAndRewrite(pto::MaxSOp_DPS op, OpAdaptor adaptor,
+	                                ConversionPatternRewriter &rewriter) const override {
+	    auto loc = op.getLoc();
+	
+	    Value src0 = peelUnrealized(adaptor.getSrc0());
+	    Value scalar = peelUnrealized(adaptor.getScalar());
+	    Value dst  = peelUnrealized(adaptor.getDst());
 
-  LogicalResult matchAndRewrite(pto::MaxSOp_DPS op, OpAdaptor adaptor,
-                                ConversionPatternRewriter &rewriter) const override {
-    auto loc = op.getLoc();
-
-    Value src0 = peelUnrealized(adaptor.getSrc0());
-    Value dst  = peelUnrealized(adaptor.getDst());
-
-    auto f32Ty = rewriter.getF32Type();
-    Value scalar = rewriter.create<arith::ConstantOp>(loc, f32Ty, op.getScalar());
-
-    SmallVector<Value, 3> operands{dst, src0, scalar};
-    rewriter.create<emitc::CallOpaqueOp>(
-        loc, TypeRange{}, "TMAXS",
-        /*args=*/ArrayAttr{}, /*templateArgs=*/ArrayAttr{},
+	    SmallVector<Value, 3> operands{dst, src0, scalar};
+	    rewriter.create<emitc::CallOpaqueOp>(
+	        loc, TypeRange{}, "TMAXS",
+	        /*args=*/ArrayAttr{}, /*templateArgs=*/ArrayAttr{},
         /*operands=*/operands);
 
     rewriter.eraseOp(op);
@@ -2730,22 +2731,10 @@ struct PTOOrsToEmitC : public OpConversionPattern<pto::OrsOp_DPS> {
 
     Value src0 = peelUnrealized(adaptor.getSrc0());
     Value dst  = peelUnrealized(adaptor.getDst());
-
-    // materialize scalar as integer value (match element width, extend/trunc as needed)
-    auto elemTy = mlir::cast<MemRefType>(op.getSrc0().getType()).getElementType();
-    auto elemITy = mlir::cast<IntegerType>(elemTy);
-    auto iTy = rewriter.getIntegerType(elemITy.getWidth(), /*isSigned=*/false);
-
+    // NOTE: The conversion type system may materialize integers as emitc.opaque
+    // (e.g. "int32_t"). For EmitC call emission we can pass the scalar through
+    // directly without arith casts here.
     Value s = adaptor.getScalar();
-    if (auto sITy = mlir::dyn_cast<IntegerType>(s.getType())) {
-      if (sITy.getWidth() != elemITy.getWidth())
-        s = rewriter.create<arith::TruncIOp>(loc, iTy, s);
-      else if (sITy != iTy)
-        s = rewriter.create<arith::ExtUIOp>(loc, iTy, s);
-    } else {
-      // should not happen due to verifier, but keep it robust
-      return rewriter.notifyMatchFailure(op, "scalar is not integer");
-    }
 
     SmallVector<Value, 3> operands{dst, src0, s};
     rewriter.create<emitc::CallOpaqueOp>(

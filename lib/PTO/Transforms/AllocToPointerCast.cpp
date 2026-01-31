@@ -26,11 +26,49 @@ LogicalResult MemrefAllocaOpToPointerCastOpPattern::matchAndRewrite(
     memref::AllocOp op, PatternRewriter &rewriter) const {
   const auto &currentMemRefType = cast<BaseMemRefType>(op.getType());
   
+  constexpr uint64_t kAlign = 4096;
   auto iter = buffer2Offsets.find(op.getResult());
-  // assert(iter != buffer2Offsets.end() && "address should be found");
-  
+
+  // If MemPlan didn't assign an address, synthesize a unique, aligned offset so
+  // downstream PointerCast lowering won't crash on empty addrs.
+  SmallVector<uint64_t> offsets;
+  if (iter != buffer2Offsets.end())
+    offsets = iter->second;
+
+  if (offsets.empty()) {
+    // Estimate buffer size (best-effort). Most PTO tile buffers are 32x32 and
+    // naturally align to 4096 bytes.
+    uint64_t bytes = kAlign;
+    if (auto memrefTy = dyn_cast<MemRefType>(currentMemRefType)) {
+      uint64_t elemBytes = 0;
+      Type elemTy = memrefTy.getElementType();
+      if (elemTy.isF16()) elemBytes = 2;
+      else if (elemTy.isF32()) elemBytes = 4;
+      else if (auto it = dyn_cast<IntegerType>(elemTy)) elemBytes = it.getWidth() / 8;
+
+      if (elemBytes != 0) {
+        uint64_t numel = 1;
+        bool allStatic = true;
+        for (int64_t d : memrefTy.getShape()) {
+          if (d == ShapedType::kDynamic) {
+            allStatic = false;
+            break;
+          }
+          numel *= static_cast<uint64_t>(d);
+        }
+        if (allStatic && numel != 0)
+          bytes = numel * elemBytes;
+      }
+    }
+    uint64_t stride = ((bytes + kAlign - 1) / kAlign) * kAlign;
+    uint64_t off = fallbackNextOffset;
+    fallbackNextOffset += std::max<uint64_t>(stride, kAlign);
+    offsets.push_back(off);
+  }
+
   SmallVector<Value> addrs;
-  for (auto &offset : iter->second) {
+  addrs.reserve(offsets.size());
+  for (uint64_t offset : offsets) {
     auto constantIntOffsetOp =
         rewriter.create<arith::ConstantIntOp>(op->getLoc(), offset, 64);
     addrs.push_back(constantIntOffsetOp);

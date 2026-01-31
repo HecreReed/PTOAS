@@ -17,12 +17,12 @@ __global__ AICORE void Sel_kernel_2d(__gm__ int8_t* v1, __gm__ float* v2, __gm__
   unsigned v17 = v6 * v16;
   unsigned v18 = v15 + v17;
   __gm__ int32_t* v19 = v1 + v18;
-  using GTShape_94654135447248 = pto::Shape<32, 32>;
-  using GTStride_94654135447248 = pto::Stride<32, 1>;
-  GTShape_94654135447248 v20 = GTShape_94654135447248();
-  GTStride_94654135447248 v21 = GTStride_94654135447248();
-  using GT_94654135447248 = GlobalTensor<int8_t, GTShape_94654135447248, GTStride_94654135447248>;
-  GT_94654135447248 v22 = GT_94654135447248(v19, v20, v21);
+  using GTShape_5266325152 = pto::Shape<32, 32>;
+  using GTStride_5266325152 = pto::Stride<32, 1>;
+  GTShape_5266325152 v20 = GTShape_5266325152();
+  GTStride_5266325152 v21 = GTStride_5266325152();
+  using GT_5266325152 = GlobalTensor<int8_t, GTShape_5266325152, GTStride_5266325152>;
+  GT_5266325152 v22 = GT_5266325152(v19, v20, v21);
   unsigned v23 = (unsigned) v7;
   unsigned v24 = v6 * v23;
   unsigned v25 = v6 + v24;
@@ -30,12 +30,12 @@ __global__ AICORE void Sel_kernel_2d(__gm__ int8_t* v1, __gm__ float* v2, __gm__
   unsigned v27 = v6 * v26;
   unsigned v28 = v25 + v27;
   __gm__ float* v29 = v2 + v28;
-  using GTShape_94654135666336 = pto::Shape<32, 32>;
-  using GTStride_94654135666336 = pto::Stride<32, 1>;
-  GTShape_94654135666336 v30 = GTShape_94654135666336();
-  GTStride_94654135666336 v31 = GTStride_94654135666336();
-  using GT_94654135666336 = GlobalTensor<float, GTShape_94654135666336, GTStride_94654135666336>;
-  GT_94654135666336 v32 = GT_94654135666336(v29, v30, v31);
+  using GTShape_5266326736 = pto::Shape<32, 32>;
+  using GTStride_5266326736 = pto::Stride<32, 1>;
+  GTShape_5266326736 v30 = GTShape_5266326736();
+  GTStride_5266326736 v31 = GTStride_5266326736();
+  using GT_5266326736 = GlobalTensor<float, GTShape_5266326736, GTStride_5266326736>;
+  GT_5266326736 v32 = GT_5266326736(v29, v30, v31);
   unsigned v33 = (unsigned) v7;
   unsigned v34 = v6 * v33;
   unsigned v35 = v6 + v34;
@@ -43,12 +43,12 @@ __global__ AICORE void Sel_kernel_2d(__gm__ int8_t* v1, __gm__ float* v2, __gm__
   unsigned v37 = v6 * v36;
   unsigned v38 = v35 + v37;
   __gm__ float* v39 = v3 + v38;
-  using GTShape_94654135761088 = pto::Shape<32, 32>;
-  using GTStride_94654135761088 = pto::Stride<32, 1>;
-  GTShape_94654135761088 v40 = GTShape_94654135761088();
-  GTStride_94654135761088 v41 = GTStride_94654135761088();
-  using GT_94654135761088 = GlobalTensor<float, GTShape_94654135761088, GTStride_94654135761088>;
-  GT_94654135761088 v42 = GT_94654135761088(v39, v40, v41);
+  using GTShape_5266327616 = pto::Shape<32, 32>;
+  using GTStride_5266327616 = pto::Stride<32, 1>;
+  GTShape_5266327616 v40 = GTShape_5266327616();
+  GTStride_5266327616 v41 = GTStride_5266327616();
+  using GT_5266327616 = GlobalTensor<float, GTShape_5266327616, GTStride_5266327616>;
+  GT_5266327616 v42 = GT_5266327616(v39, v40, v41);
   Tile<TileType::Vec, int8_t, 32, 32, BLayout::RowMajor, 32, 32, SLayout::NoneBox, 512, PadValue::Null> v43;
   TASSIGN(v43, v9);
   Tile<TileType::Vec, float, 32, 32, BLayout::RowMajor, 32, 32, SLayout::NoneBox, 512, PadValue::Null> v44;
@@ -68,12 +68,14 @@ __global__ AICORE void Sel_kernel_2d(__gm__ int8_t* v1, __gm__ float* v2, __gm__
   unsigned v51 = v6 * v50;
   unsigned v52 = v49 + v51;
   __gm__ float* v53 = v4 + v52;
-  using GTShape_94654135761264 = pto::Shape<32, 32>;
-  using GTStride_94654135761264 = pto::Stride<32, 1>;
-  GTShape_94654135761264 v54 = GTShape_94654135761264();
-  GTStride_94654135761264 v55 = GTStride_94654135761264();
-  using GT_94654135761264 = GlobalTensor<float, GTShape_94654135761264, GTStride_94654135761264>;
-  GT_94654135761264 v56 = GT_94654135761264(v53, v54, v55);
+  using GTShape_5266328688 = pto::Shape<32, 32>;
+  using GTStride_5266328688 = pto::Stride<32, 1>;
+  GTShape_5266328688 v54 = GTShape_5266328688();
+  GTStride_5266328688 v55 = GTStride_5266328688();
+  using GT_5266328688 = GlobalTensor<float, GTShape_5266328688, GTStride_5266328688>;
+  GT_5266328688 v56 = GT_5266328688(v53, v54, v55);
   TSTORE(v56, v46);
   return;
 }
+
+

@@ -17,12 +17,12 @@ __global__ AICORE void vec_add_ternary_kernel_2d(__gm__ float* v1, __gm__ float*
   unsigned v17 = v6 * v16;
   unsigned v18 = v15 + v17;
   __gm__ float* v19 = v1 + v18;
-  using GTShape_93864900865472 = pto::Shape<32, 32>;
-  using GTStride_93864900865472 = pto::Stride<32, 1>;
-  GTShape_93864900865472 v20 = GTShape_93864900865472();
-  GTStride_93864900865472 v21 = GTStride_93864900865472();
-  using GT_93864900865472 = GlobalTensor<float, GTShape_93864900865472, GTStride_93864900865472>;
-  GT_93864900865472 v22 = GT_93864900865472(v19, v20, v21);
+  using GTShape_5526371792 = pto::Shape<32, 32>;
+  using GTStride_5526371792 = pto::Stride<32, 1>;
+  GTShape_5526371792 v20 = GTShape_5526371792();
+  GTStride_5526371792 v21 = GTStride_5526371792();
+  using GT_5526371792 = GlobalTensor<float, GTShape_5526371792, GTStride_5526371792>;
+  GT_5526371792 v22 = GT_5526371792(v19, v20, v21);
   unsigned v23 = (unsigned) v7;
   unsigned v24 = v6 * v23;
   unsigned v25 = v6 + v24;
@@ -30,12 +30,12 @@ __global__ AICORE void vec_add_ternary_kernel_2d(__gm__ float* v1, __gm__ float*
   unsigned v27 = v6 * v26;
   unsigned v28 = v25 + v27;
   __gm__ float* v29 = v2 + v28;
-  using GTShape_93864901087920 = pto::Shape<32, 32>;
-  using GTStride_93864901087920 = pto::Stride<32, 1>;
-  GTShape_93864901087920 v30 = GTShape_93864901087920();
-  GTStride_93864901087920 v31 = GTStride_93864901087920();
-  using GT_93864901087920 = GlobalTensor<float, GTShape_93864901087920, GTStride_93864901087920>;
-  GT_93864901087920 v32 = GT_93864901087920(v29, v30, v31);
+  using GTShape_5526373328 = pto::Shape<32, 32>;
+  using GTStride_5526373328 = pto::Stride<32, 1>;
+  GTShape_5526373328 v30 = GTShape_5526373328();
+  GTStride_5526373328 v31 = GTStride_5526373328();
+  using GT_5526373328 = GlobalTensor<float, GTShape_5526373328, GTStride_5526373328>;
+  GT_5526373328 v32 = GT_5526373328(v29, v30, v31);
   unsigned v33 = (unsigned) v7;
   unsigned v34 = v6 * v33;
   unsigned v35 = v6 + v34;
@@ -43,12 +43,12 @@ __global__ AICORE void vec_add_ternary_kernel_2d(__gm__ float* v1, __gm__ float*
   unsigned v37 = v6 * v36;
   unsigned v38 = v35 + v37;
   __gm__ float* v39 = v3 + v38;
-  using GTShape_93864901176848 = pto::Shape<32, 32>;
-  using GTStride_93864901176848 = pto::Stride<32, 1>;
-  GTShape_93864901176848 v40 = GTShape_93864901176848();
-  GTStride_93864901176848 v41 = GTStride_93864901176848();
-  using GT_93864901176848 = GlobalTensor<float, GTShape_93864901176848, GTStride_93864901176848>;
-  GT_93864901176848 v42 = GT_93864901176848(v39, v40, v41);
+  using GTShape_5526373744 = pto::Shape<32, 32>;
+  using GTStride_5526373744 = pto::Stride<32, 1>;
+  GTShape_5526373744 v40 = GTShape_5526373744();
+  GTStride_5526373744 v41 = GTStride_5526373744();
+  using GT_5526373744 = GlobalTensor<float, GTShape_5526373744, GTStride_5526373744>;
+  GT_5526373744 v42 = GT_5526373744(v39, v40, v41);
   Tile<TileType::Vec, float, 32, 32, BLayout::RowMajor, 32, 32, SLayout::NoneBox, 512, PadValue::Null> v43;
   TASSIGN(v43, v9);
   Tile<TileType::Vec, float, 32, 32, BLayout::RowMajor, 32, 32, SLayout::NoneBox, 512, PadValue::Null> v44;
@@ -68,12 +68,14 @@ __global__ AICORE void vec_add_ternary_kernel_2d(__gm__ float* v1, __gm__ float*
   unsigned v51 = v6 * v50;
   unsigned v52 = v49 + v51;
   __gm__ float* v53 = v4 + v52;
-  using GTShape_93864901177024 = pto::Shape<32, 32>;
-  using GTStride_93864901177024 = pto::Stride<32, 1>;
-  GTShape_93864901177024 v54 = GTShape_93864901177024();
-  GTStride_93864901177024 v55 = GTStride_93864901177024();
-  using GT_93864901177024 = GlobalTensor<float, GTShape_93864901177024, GTStride_93864901177024>;
-  GT_93864901177024 v56 = GT_93864901177024(v53, v54, v55);
+  using GTShape_5526374816 = pto::Shape<32, 32>;
+  using GTStride_5526374816 = pto::Stride<32, 1>;
+  GTShape_5526374816 v54 = GTShape_5526374816();
+  GTStride_5526374816 v55 = GTStride_5526374816();
+  using GT_5526374816 = GlobalTensor<float, GTShape_5526374816, GTStride_5526374816>;
+  GT_5526374816 v56 = GT_5526374816(v53, v54, v55);
   TSTORE(v56, v46);
   return;
 }
+
+

@@ -16,12 +16,12 @@ __global__ AICORE void max_kernel_2d(__gm__ float* v1, __gm__ float* v2, __gm__ 
   unsigned v15 = v5 * v14;
   unsigned v16 = v13 + v15;
   __gm__ float* v17 = v1 + v16;
-  using GTShape_94595540738688 = pto::Shape<32, 32>;
-  using GTStride_94595540738688 = pto::Stride<32, 1>;
-  GTShape_94595540738688 v18 = GTShape_94595540738688();
-  GTStride_94595540738688 v19 = GTStride_94595540738688();
-  using GT_94595540738688 = GlobalTensor<float, GTShape_94595540738688, GTStride_94595540738688>;
-  GT_94595540738688 v20 = GT_94595540738688(v17, v18, v19);
+  using GTShape_5198144800 = pto::Shape<32, 32>;
+  using GTStride_5198144800 = pto::Stride<32, 1>;
+  GTShape_5198144800 v18 = GTShape_5198144800();
+  GTStride_5198144800 v19 = GTStride_5198144800();
+  using GT_5198144800 = GlobalTensor<float, GTShape_5198144800, GTStride_5198144800>;
+  GT_5198144800 v20 = GT_5198144800(v17, v18, v19);
   unsigned v21 = (unsigned) v6;
   unsigned v22 = v5 * v21;
   unsigned v23 = v5 + v22;
@@ -29,12 +29,12 @@ __global__ AICORE void max_kernel_2d(__gm__ float* v1, __gm__ float* v2, __gm__ 
   unsigned v25 = v5 * v24;
   unsigned v26 = v23 + v25;
   __gm__ float* v27 = v2 + v26;
-  using GTShape_94595540738864 = pto::Shape<32, 32>;
-  using GTStride_94595540738864 = pto::Stride<32, 1>;
-  GTShape_94595540738864 v28 = GTShape_94595540738864();
-  GTStride_94595540738864 v29 = GTStride_94595540738864();
-  using GT_94595540738864 = GlobalTensor<float, GTShape_94595540738864, GTStride_94595540738864>;
-  GT_94595540738864 v30 = GT_94595540738864(v27, v28, v29);
+  using GTShape_5198145712 = pto::Shape<32, 32>;
+  using GTStride_5198145712 = pto::Stride<32, 1>;
+  GTShape_5198145712 v28 = GTShape_5198145712();
+  GTStride_5198145712 v29 = GTStride_5198145712();
+  using GT_5198145712 = GlobalTensor<float, GTShape_5198145712, GTStride_5198145712>;
+  GT_5198145712 v30 = GT_5198145712(v27, v28, v29);
   Tile<TileType::Vec, float, 32, 32, BLayout::RowMajor, 32, 32, SLayout::NoneBox, 512, PadValue::Null> v31;
   TASSIGN(v31, v8);
   Tile<TileType::Vec, float, 32, 32, BLayout::RowMajor, 32, 32, SLayout::NoneBox, 512, PadValue::Null> v32;
@@ -51,12 +51,14 @@ __global__ AICORE void max_kernel_2d(__gm__ float* v1, __gm__ float* v2, __gm__ 
   unsigned v38 = v5 * v37;
   unsigned v39 = v36 + v38;
   __gm__ float* v40 = v3 + v39;
-  using GTShape_94595541053632 = pto::Shape<32, 32>;
-  using GTStride_94595541053632 = pto::Stride<32, 1>;
-  GTShape_94595541053632 v41 = GTShape_94595541053632();
-  GTStride_94595541053632 v42 = GTStride_94595541053632();
-  using GT_94595541053632 = GlobalTensor<float, GTShape_94595541053632, GTStride_94595541053632>;
-  GT_94595541053632 v43 = GT_94595541053632(v40, v41, v42);
+  using GTShape_5198146128 = pto::Shape<32, 32>;
+  using GTStride_5198146128 = pto::Stride<32, 1>;
+  GTShape_5198146128 v41 = GTShape_5198146128();
+  GTStride_5198146128 v42 = GTStride_5198146128();
+  using GT_5198146128 = GlobalTensor<float, GTShape_5198146128, GTStride_5198146128>;
+  GT_5198146128 v43 = GT_5198146128(v40, v41, v42);
   TSTORE(v43, v33);
   return;
 }
+
+

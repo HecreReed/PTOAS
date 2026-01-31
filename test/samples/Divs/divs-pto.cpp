@@ -16,12 +16,12 @@ __global__ AICORE void vec_divs_kernel_2d(__gm__ float* v1, __gm__ float* v2) {
   unsigned v14 = v4 * v13;
   unsigned v15 = v12 + v14;
   __gm__ float* v16 = v1 + v15;
-  using GTShape_94393800960304 = pto::Shape<32, 32>;
-  using GTStride_94393800960304 = pto::Stride<32, 1>;
-  GTShape_94393800960304 v17 = GTShape_94393800960304();
-  GTStride_94393800960304 v18 = GTStride_94393800960304();
-  using GT_94393800960304 = GlobalTensor<float, GTShape_94393800960304, GTStride_94393800960304>;
-  GT_94393800960304 v19 = GT_94393800960304(v16, v17, v18);
+  using GTShape_5459283216 = pto::Shape<32, 32>;
+  using GTStride_5459283216 = pto::Stride<32, 1>;
+  GTShape_5459283216 v17 = GTShape_5459283216();
+  GTStride_5459283216 v18 = GTStride_5459283216();
+  using GT_5459283216 = GlobalTensor<float, GTShape_5459283216, GTStride_5459283216>;
+  GT_5459283216 v19 = GT_5459283216(v16, v17, v18);
   unsigned v20 = (unsigned) v6;
   unsigned v21 = v4 * v20;
   unsigned v22 = v4 + v21;
@@ -29,12 +29,12 @@ __global__ AICORE void vec_divs_kernel_2d(__gm__ float* v1, __gm__ float* v2) {
   unsigned v24 = v4 * v23;
   unsigned v25 = v22 + v24;
   __gm__ float* v26 = v2 + v25;
-  using GTShape_94393800960480 = pto::Shape<32, 32>;
-  using GTStride_94393800960480 = pto::Stride<32, 1>;
-  GTShape_94393800960480 v27 = GTShape_94393800960480();
-  GTStride_94393800960480 v28 = GTStride_94393800960480();
-  using GT_94393800960480 = GlobalTensor<float, GTShape_94393800960480, GTStride_94393800960480>;
-  GT_94393800960480 v29 = GT_94393800960480(v26, v27, v28);
+  using GTShape_5459263488 = pto::Shape<32, 32>;
+  using GTStride_5459263488 = pto::Stride<32, 1>;
+  GTShape_5459263488 v27 = GTShape_5459263488();
+  GTStride_5459263488 v28 = GTStride_5459263488();
+  using GT_5459263488 = GlobalTensor<float, GTShape_5459263488, GTStride_5459263488>;
+  GT_5459263488 v29 = GT_5459263488(v26, v27, v28);
   Tile<TileType::Vec, float, 32, 32, BLayout::RowMajor, 32, 32, SLayout::NoneBox, 512, PadValue::Null> v30;
   TASSIGN(v30, v8);
   Tile<TileType::Vec, float, 32, 32, BLayout::RowMajor, 32, 32, SLayout::NoneBox, 512, PadValue::Null> v31;
@@ -45,3 +45,5 @@ __global__ AICORE void vec_divs_kernel_2d(__gm__ float* v1, __gm__ float* v2) {
   TSTORE(v29, v31);
   return;
 }
+
+

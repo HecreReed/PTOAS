@@ -17,12 +17,14 @@ __global__ AICORE void vec_ci_kernel_2d(__gm__ int32_t* v1, int32_t v2) {
   unsigned v13 = v4 * v12;
   unsigned v14 = v11 + v13;
   __gm__ int32_t* v15 = v1 + v14;
-  using GTShape_94918777430832 = pto::Shape<32, 32>;
-  using GTStride_94918777430832 = pto::Stride<32, 1>;
-  GTShape_94918777430832 v16 = GTShape_94918777430832();
-  GTStride_94918777430832 v17 = GTStride_94918777430832();
-  using GT_94918777430832 = GlobalTensor<int32_t, GTShape_94918777430832, GTStride_94918777430832>;
-  GT_94918777430832 v18 = GT_94918777430832(v15, v16, v17);
+  using GTShape_5627053088 = pto::Shape<32, 32>;
+  using GTStride_5627053088 = pto::Stride<32, 1>;
+  GTShape_5627053088 v16 = GTShape_5627053088();
+  GTStride_5627053088 v17 = GTStride_5627053088();
+  using GT_5627053088 = GlobalTensor<int32_t, GTShape_5627053088, GTStride_5627053088>;
+  GT_5627053088 v18 = GT_5627053088(v15, v16, v17);
   TSTORE(v18, v8);
   return;
 }
+
+
