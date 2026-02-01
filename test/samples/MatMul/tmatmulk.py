@@ -6,15 +6,15 @@ from mlir.dialects import func, arith, scf, pto, builtin
 from mlir.dialects.arith import CmpIPredicate
 
 
-def parse_attr(ctx, s: str, what: str):
+def parse_attr(s: str, what: str):
     try:
-        return Attribute.parse(s, ctx)
+        return Attribute.parse(s)
     except Exception as e:
         raise RuntimeError(f"Failed to parse {what} attr from: {s}\nError: {e}")
 
 
-def _idx_const(ctx, v: int):
-    return arith.ConstantOp(IndexType.get(ctx), v).result
+def _idx_const(v: int):
+    return arith.ConstantOp(IndexType.get(), v).result
 
 
 def build(
@@ -33,113 +33,107 @@ def build(
 
         with Location.unknown(ctx):
             module = builtin.ModuleOp()
-            module.attributes["pto.device-spec"] = StringAttr.get("Ascend910B1", ctx)
+            module.attributes["pto.device-spec"] = StringAttr.get("Ascend910B1")
 
             # ---- element types ----
-            t_out = F32Type.get(ctx)
-            t_a = F32Type.get(ctx)
-            t_b = F32Type.get(ctx)
-            t_bias = F32Type.get(ctx)
+            t_out = F32Type.get()
+            t_a = F32Type.get()
+            t_b = F32Type.get()
+            t_bias = F32Type.get()
 
             # ---- ptr types ----
-            ptr_out = pto.PtrType.get(t_out, ctx)
-            ptr_a = pto.PtrType.get(t_a, ctx)
-            ptr_b = pto.PtrType.get(t_b, ctx)
-            ptr_bias = pto.PtrType.get(t_bias, ctx)
+            ptr_out = pto.PtrType.get(t_out)
+            ptr_a = pto.PtrType.get(t_a)
+            ptr_b = pto.PtrType.get(t_b)
+            ptr_bias = pto.PtrType.get(t_bias)
 
-            i1 = IntegerType.get_signless(1, ctx)
+            i1 = IntegerType.get_signless(1)
 
             # ---- tensor view types ----
-            tv2_a = pto.TensorViewType.get(2, t_a, ctx)        # [validM, validK]
-            tv2_b = pto.TensorViewType.get(2, t_b, ctx)        # [validK, validN]
-            tv2_out = pto.TensorViewType.get(2, t_out, ctx)    # [validM, validN]
-            tv2_bias = pto.TensorViewType.get(2, t_bias, ctx)  # [1, validN]
+            tv2_a = pto.TensorViewType.get(2, t_a)        # [validM, validK]
+            tv2_b = pto.TensorViewType.get(2, t_b)        # [validK, validN]
+            tv2_out = pto.TensorViewType.get(2, t_out)    # [validM, validN]
+            tv2_bias = pto.TensorViewType.get(2, t_bias)  # [1, validN]
 
             # ---- tile view types ----
-            tile_view_a = pto.TileViewType.get([M, BASEK], t_a, ctx)
-            tile_view_b = pto.TileViewType.get([BASEK, N], t_b, ctx)
-            tile_view_out = pto.TileViewType.get([M, N], t_out, ctx)
-            tile_view_bias = pto.TileViewType.get([1, N], t_bias, ctx)
+            tile_view_a = pto.TileViewType.get([M, BASEK], t_a)
+            tile_view_b = pto.TileViewType.get([BASEK, N], t_b)
+            tile_view_out = pto.TileViewType.get([M, N], t_out)
+            tile_view_bias = pto.TileViewType.get([1, N], t_bias)
 
             # ---- address spaces ----
-            mat = pto.AddressSpaceAttr.get(pto.AddressSpace.MAT, ctx)
-            left = pto.AddressSpaceAttr.get(pto.AddressSpace.LEFT, ctx)
-            right = pto.AddressSpaceAttr.get(pto.AddressSpace.RIGHT, ctx)
-            acc = pto.AddressSpaceAttr.get(pto.AddressSpace.ACC, ctx)
-            bias = pto.AddressSpaceAttr.get(pto.AddressSpace.BIAS, ctx)
+            mat = pto.AddressSpaceAttr.get(pto.AddressSpace.MAT)
+            left = pto.AddressSpaceAttr.get(pto.AddressSpace.LEFT)
+            right = pto.AddressSpaceAttr.get(pto.AddressSpace.RIGHT)
+            acc = pto.AddressSpaceAttr.get(pto.AddressSpace.ACC)
+            bias = pto.AddressSpaceAttr.get(pto.AddressSpace.BIAS)
 
             # ---- configs (3rd arg = s_fractal_size) ----
             # 说明：下面 layout/pad 都是“合理默认”，你按 C++ Tile 定义微调即可
             # MAT tile：搬运用，常见 row_major
             cfg_mat = pto.TileBufConfigAttr.get(
-                pto.BLayoutAttr.get(pto.BLayout.ColMajor, ctx),
-                pto.SLayoutAttr.get(pto.SLayout.RowMajor, ctx),
+                pto.BLayoutAttr.get(pto.BLayout.ColMajor),
+                pto.SLayoutAttr.get(pto.SLayout.RowMajor),
                 s_fractal_ab,  # 这里也可以单独给 MAT 一个 size
-                pto.PadValueAttr.get(pto.PadValue.Null, ctx),
-                ctx,
+                pto.PadValueAttr.get(pto.PadValue.Null)
             )
             
             cfg_mat_bias = pto.TileBufConfigAttr.get(
-                pto.BLayoutAttr.get(pto.BLayout.RowMajor, ctx),
-                pto.SLayoutAttr.get(pto.SLayout.NoneBox, ctx),
+                pto.BLayoutAttr.get(pto.BLayout.RowMajor),
+                pto.SLayoutAttr.get(pto.SLayout.NoneBox),
                 s_fractal_ab,  # 这里也可以单独给 MAT 一个 size
-                pto.PadValueAttr.get(pto.PadValue.Null, ctx),
-                ctx,
+                pto.PadValueAttr.get(pto.PadValue.Null)
             )
 
 
             # LEFT tile：TileLeft ... BLayout RowMajor, SLayout RowMajor, fractalAB
             cfg_left = pto.TileBufConfigAttr.get(
-                pto.BLayoutAttr.get(pto.BLayout.RowMajor, ctx),
-                pto.SLayoutAttr.get(pto.SLayout.RowMajor, ctx),
+                pto.BLayoutAttr.get(pto.BLayout.RowMajor),
+                pto.SLayoutAttr.get(pto.SLayout.RowMajor),
                 s_fractal_ab,
-                pto.PadValueAttr.get(pto.PadValue.Null, ctx),
-                ctx,
+                pto.PadValueAttr.get(pto.PadValue.Null)
             )
 
             # RIGHT tile：TileRight ... BLayout RowMajor, SLayout ColMajor, fractalAB
             cfg_right = pto.TileBufConfigAttr.get(
-                pto.BLayoutAttr.get(pto.BLayout.RowMajor, ctx),
-                pto.SLayoutAttr.get(pto.SLayout.ColMajor, ctx),
+                pto.BLayoutAttr.get(pto.BLayout.RowMajor),
+                pto.SLayoutAttr.get(pto.SLayout.ColMajor),
                 s_fractal_ab,
-                pto.PadValueAttr.get(pto.PadValue.Null, ctx),
-                ctx,
+                pto.PadValueAttr.get(pto.PadValue.Null)
             )
 
             # ACC tile：TileAcc ... BLayout ColMajor, SLayout RowMajor, fractalC
             cfg_acc = pto.TileBufConfigAttr.get(
-                pto.BLayoutAttr.get(pto.BLayout.ColMajor, ctx),
-                pto.SLayoutAttr.get(pto.SLayout.RowMajor, ctx),
+                pto.BLayoutAttr.get(pto.BLayout.ColMajor),
+                pto.SLayoutAttr.get(pto.SLayout.RowMajor),
                 s_fractal_c,
-                pto.PadValueAttr.get(pto.PadValue.Null, ctx),
-                ctx,
+                pto.PadValueAttr.get(pto.PadValue.Null)
             )
 
             # BIAS tile：一般不需要分形（这里给 0；你也可给一个专用 size）
             cfg_bias = pto.TileBufConfigAttr.get(
-                pto.BLayoutAttr.get(pto.BLayout.RowMajor, ctx),
-                pto.SLayoutAttr.get(pto.SLayout.NoneBox, ctx), 
+                pto.BLayoutAttr.get(pto.BLayout.RowMajor),
+                pto.SLayoutAttr.get(pto.SLayout.NoneBox), 
                 512,
-                pto.PadValueAttr.get(pto.PadValue.Null, ctx),
-                ctx,
+                pto.PadValueAttr.get(pto.PadValue.Null)
             )
 
             # ---- tile buf types (each has its own cfg) ----
-            tile_buf_aMat = pto.TileBufType.get([M, BASEK], t_a, mat, [M, BASEK], cfg_mat, ctx)
-            tile_buf_bMat = pto.TileBufType.get([BASEK, N], t_b, mat, [BASEK, N], cfg_mat, ctx)
-            tile_buf_biasData = pto.TileBufType.get([1, N], t_bias, mat, [1, N], cfg_mat_bias, ctx)
+            tile_buf_aMat = pto.TileBufType.get([M, BASEK], t_a, mat, [M, BASEK], cfg_mat)
+            tile_buf_bMat = pto.TileBufType.get([BASEK, N], t_b, mat, [BASEK, N], cfg_mat)
+            tile_buf_biasData = pto.TileBufType.get([1, N], t_bias, mat, [1, N], cfg_mat_bias)
 
-            tile_buf_aTile = pto.TileBufType.get([M, BASEK], t_a, left, [M, BASEK], cfg_left, ctx)
-            tile_buf_bTile = pto.TileBufType.get([BASEK, N], t_b, right, [BASEK, N], cfg_right, ctx)
-            tile_buf_cTile = pto.TileBufType.get([M, N], t_out, acc, [M,N], cfg_acc, ctx)
-            tile_buf_biasTile = pto.TileBufType.get([1, N], t_bias, bias, [1, N], cfg_bias, ctx)
+            tile_buf_aTile = pto.TileBufType.get([M, BASEK], t_a, left, [M, BASEK], cfg_left)
+            tile_buf_bTile = pto.TileBufType.get([BASEK, N], t_b, right, [BASEK, N], cfg_right)
+            tile_buf_cTile = pto.TileBufType.get([M, N], t_out, acc, [M,N], cfg_acc)
+            tile_buf_biasTile = pto.TileBufType.get([1, N], t_bias, bias, [1, N], cfg_bias)
 
             # ---- enum attrs ----
-            EVENT_ID0 = parse_attr(ctx, "#pto.event<EVENT_ID0>", "EVENT_ID0")
-            PIPE_MTE2 = parse_attr(ctx, "#pto.pipe<PIPE_MTE2>", "PIPE_MTE2")
-            PIPE_MTE1 = parse_attr(ctx, "#pto.pipe<PIPE_MTE1>", "PIPE_MTE1")
-            PIPE_M = parse_attr(ctx, "#pto.pipe<PIPE_M>", "PIPE_M")
-            PIPE_FIX = parse_attr(ctx, "#pto.pipe<PIPE_FIX>", "PIPE_FIX")
+            EVENT_ID0 = parse_attr("#pto.event<EVENT_ID0>", "EVENT_ID0")
+            PIPE_MTE2 = parse_attr("#pto.pipe<PIPE_MTE2>", "PIPE_MTE2")
+            PIPE_MTE1 = parse_attr("#pto.pipe<PIPE_MTE1>", "PIPE_MTE1")
+            PIPE_M = parse_attr("#pto.pipe<PIPE_M>", "PIPE_M")
+            PIPE_FIX = parse_attr("#pto.pipe<PIPE_FIX>", "PIPE_FIX")
 
             # ---- function ----
             # (out, A, B, bias, isBias)
@@ -152,19 +146,19 @@ def build(
                 out_ptr, a_ptr, b_ptr, bias_ptr, isBias = entry.arguments
 
                 # ---- constants ----
-                c0 = _idx_const(ctx, 0)
-                c1 = _idx_const(ctx, 1)
-                cOne = _idx_const(ctx, 1)
+                c0 = _idx_const(0)
+                c1 = _idx_const(1)
+                cOne = _idx_const(1)
 
-                cM = _idx_const(ctx, validM)
-                cK = _idx_const(ctx, validK)
-                cN = _idx_const(ctx, validN)
+                cM = _idx_const(validM)
+                cK = _idx_const(validK)
+                cN = _idx_const(validN)
 
-                cBASEK = _idx_const(ctx, BASEK)
-                cIter = _idx_const(ctx, iters)
+                cBASEK = _idx_const(BASEK)
+                cIter = _idx_const(iters)
                 
-                cTileM = _idx_const(ctx, M)
-                cTileN = _idx_const(ctx, N)
+                cTileM = _idx_const(M)
+                cTileN = _idx_const(N)
 
                 # ---- make_tensor_view ----
                 # A: [validM, validK], stride [validK, 1]
