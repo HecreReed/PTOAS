@@ -233,8 +233,32 @@ MlirAttribute mlirPTOPadValueAttrGet(MlirContext ctx, int32_t value) {
 
 MlirAttribute mlirPTORoundModeAttrGet(MlirContext ctx, int32_t value) {
   auto *c = unwrap(ctx);
-  auto i32 = mlir::IntegerType::get(c, 32);
-  return wrap(mlir::IntegerAttr::get(i32, value));
+  auto mode = static_cast<mlir::pto::RoundMode>(value);
+  return wrap(mlir::pto::RoundModeAttr::get(c, mode));
+}
+
+bool mlirPTOAttrIsARoundModeAttr(MlirAttribute attr) {
+  return mlir::isa<mlir::pto::RoundModeAttr>(unwrap(attr));
+}
+
+int32_t mlirPTORoundModeAttrGetValue(MlirAttribute attr) {
+  auto a = mlir::cast<mlir::pto::RoundModeAttr>(unwrap(attr));
+  return static_cast<int32_t>(a.getValue());
+}
+
+bool mlirAttributeIsAPTOCmpModeAttr(MlirAttribute attr) {
+  return mlir::isa<mlir::pto::CmpModeAttr>(unwrap(attr));
+}
+
+MlirAttribute mlirPTOCmpModeAttrGet(MlirContext ctx, MlirPTOCmpMode value) {
+  auto *c = unwrap(ctx);
+  auto mode = static_cast<mlir::pto::CmpMode>(value);
+  return wrap(mlir::pto::CmpModeAttr::get(c, mode));
+}
+
+MlirPTOCmpMode mlirPTOCmpModeAttrGetValue(MlirAttribute attr) {
+  auto a = mlir::cast<mlir::pto::CmpModeAttr>(unwrap(attr));
+  return static_cast<MlirPTOCmpMode>(static_cast<uint32_t>(a.getValue()));
 }
 
 bool mlirPTOAttrIsATileBufConfigAttr(MlirAttribute attr) {

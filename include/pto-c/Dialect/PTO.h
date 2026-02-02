@@ -63,6 +63,22 @@ MLIR_CAPI_EXPORTED MlirAttribute mlirPTOBLayoutAttrGet(MlirContext ctx, int32_t 
 MLIR_CAPI_EXPORTED MlirAttribute mlirPTOSLayoutAttrGet(MlirContext ctx, int32_t value);
 MLIR_CAPI_EXPORTED MlirAttribute mlirPTOPadValueAttrGet(MlirContext ctx, int32_t value);
 MLIR_CAPI_EXPORTED MlirAttribute mlirPTORoundModeAttrGet(MlirContext ctx, int32_t value);
+MLIR_CAPI_EXPORTED bool mlirPTOAttrIsARoundModeAttr(MlirAttribute attr);
+MLIR_CAPI_EXPORTED int32_t mlirPTORoundModeAttrGetValue(MlirAttribute attr);
+
+// ---- CmpMode (compare mode for cmp/cvt) ----
+typedef enum MlirPTOCmpMode {
+  MlirPTOCmpMode_EQ = 0,
+  MlirPTOCmpMode_NE = 1,
+  MlirPTOCmpMode_LT = 2,
+  MlirPTOCmpMode_LE = 3,
+  MlirPTOCmpMode_GT = 4,
+  MlirPTOCmpMode_GE = 5,
+} MlirPTOCmpMode;
+MLIR_CAPI_EXPORTED bool mlirAttributeIsAPTOCmpModeAttr(MlirAttribute attr);
+MLIR_CAPI_EXPORTED MlirAttribute mlirPTOCmpModeAttrGet(MlirContext ctx, MlirPTOCmpMode value);
+MLIR_CAPI_EXPORTED MlirPTOCmpMode mlirPTOCmpModeAttrGetValue(MlirAttribute attr);
+
 // ---- TileBufConfigAttr ----
 MLIR_CAPI_EXPORTED bool mlirPTOAttrIsATileBufConfigAttr(MlirAttribute attr);
 

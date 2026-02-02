@@ -39,6 +39,10 @@ target_link_libraries(_pto PRIVATE
 set_target_properties(_pto PROPERTIES
   LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/python/mlir/_mlir_libs"
 )
+# macOS: 避免 ld 警告 "-undefined suppress is deprecated"，仅保留 -undefined dynamic_lookup
+if(APPLE)
+  target_link_options(_pto PRIVATE "LINKER:-undefined,dynamic_lookup")
+endif()
 
 install(TARGETS _pto
   LIBRARY DESTINATION "${MLIR_PYTHON_PACKAGE_DIR}/mlir/_mlir_libs"

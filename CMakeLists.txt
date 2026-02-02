@@ -37,6 +37,14 @@ include(AddMLIR)
 # =========================================================
 # 3. 配置构建环境
 # =========================================================
+# macOS: 移除已废弃的 -undefined suppress，避免 ld 警告（保留 -undefined dynamic_lookup 即可）
+if(APPLE)
+  foreach(_var CMAKE_SHARED_MODULE_CREATE_CXX_FLAGS CMAKE_MODULE_LINKER_FLAGS)
+    string(REPLACE "-Wl,-undefined -Wl,suppress" "" ${_var} "${${_var}}")
+    string(REPLACE "-undefined suppress" "" ${_var} "${${_var}}")
+  endforeach()
+endif()
+
 include_directories(${LLVM_INCLUDE_DIRS})
 include_directories(${MLIR_INCLUDE_DIRS})
 include_directories(${PROJECT_SOURCE_DIR}/include)
