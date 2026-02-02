@@ -37,19 +37,19 @@ def build(M=32, N=32, K=32, TM=32, TN=32, TK=32):
                 pto.BLayout.ColMajor, ctx), pto.SLayoutAttr.get(pto.SLayout.RowMajor, ctx), 1024, pd, ctx)
 
             # ub type and layout
-            ub_tile = pto.TileBufType.get([TM, TN], f32, ub, ub_nd_cfg, ctx)
+            ub_tile = pto.TileBufType.get([TM, TN], f32, ub, [TM, TN], ub_nd_cfg, ctx)
             ub_reduce_tile = pto.TileBufType.get(
-                [TM, 1], f32, ub, ub_dn_cfg, ctx)
+                [TM, 1], f32, ub, [TM, 1], ub_dn_cfg, ctx)
 
             # cbuf type and layout
-            mat_tile_a = pto.TileBufType.get([TM, TK], f32, mat, cfg_mat, ctx)
-            mat_tile_b = pto.TileBufType.get([TK, TN], f32, mat, cfg_mat, ctx)
+            mat_tile_a = pto.TileBufType.get([TM, TK], f32, mat, [TM, TK], cfg_mat, ctx)
+            mat_tile_b = pto.TileBufType.get([TK, TN], f32, mat, [TK, TN], cfg_mat, ctx)
 
             # l0 type and layout
-            left_tile = pto.TileBufType.get([TM, TK], f32, left, cfg_mat, ctx)
+            left_tile = pto.TileBufType.get([TM, TK], f32, left, [TM, TK], cfg_mat, ctx)
             right_tile = pto.TileBufType.get(
-                [TK, TN], f32, right, cfg_right, ctx)
-            acc_tile = pto.TileBufType.get([TM, TN], f32, acc, cfg_acc, ctx)
+                [TK, TN], f32, right, [TK, TN], cfg_right, ctx)
+            acc_tile = pto.TileBufType.get([TM, TN], f32, acc, [TM, TN], cfg_acc, ctx)
 
             PIPE_FIX = Attribute.parse("#pto.pipe<PIPE_FIX>", ctx)
             PIPE_V = Attribute.parse("#pto.pipe<PIPE_V>", ctx)
@@ -104,17 +104,17 @@ def build(M=32, N=32, K=32, TM=32, TN=32, TK=32):
                 ubReduceTile = pto.AllocTileOp(ub_reduce_tile)
 
                 # load from gm to cbuf
-                pto.TLoadOp(None, sv0, aMatTile, [],)
-                pto.TLoadOp(None, sv1, bMatTile, [],)
+                pto.TLoadOp(None, sv0, aMatTile)
+                pto.TLoadOp(None, sv1, bMatTile)
 
                 # move to l0A/l0B from cbuf
-                pto.TMovOp(None, aMatTile, aTile, [],)
-                pto.TMovOp(None, bMatTile, bTile, [],)
+                pto.TMovOp(None, aMatTile, aTile)
+                pto.TMovOp(None, bMatTile, bTile)
 
-                pto.TMatmulOp(None, aTile, bTile, cTile, [ctm, ctk, ctn])
+                pto.TMatmulOp(None, aTile, bTile, cTile)
 
                 # move result from l0c to
-                pto.TMovOp(None, cTile, ubTile, [],)
+                pto.TMovOp(None, cTile, ubTile)
 
                 pto.SyncSetOp(PIPE_FIX, 0)
                 pto.SyncSetOp(PIPE_FIX, 16)
