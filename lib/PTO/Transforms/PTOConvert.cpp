@@ -619,24 +619,22 @@ struct SubviewToEmitCPattern : public OpConversionPattern<memref::SubViewOp> {
         elemTypeStr = "int64_t";
     }
 
-    // 2. 生成 Shape 模板参数
-    std::string shapeParams;
+    // 2. 生成 Shape 模板参数（若不足 5 维，则后续补齐为 1）
+    SmallVector<std::string> shapeParamsVec;
     auto resShape = resTy.getShape();
     for (int i = 0; i < resTy.getRank(); ++i) {
-        if (i > 0) shapeParams += ", ";
         if (resShape[i] == ShapedType::kDynamic) {
-            shapeParams += "-1";
+            shapeParamsVec.push_back("-1");
         } else {
-            shapeParams += std::to_string(resShape[i]);
+            shapeParamsVec.push_back(std::to_string(resShape[i]));
         }
     }
 
-    // 3. 生成 Stride 模板参数 & 收集动态 Stride 变量
-    std::string strideParams;
+    // 3. 生成 Stride 模板参数 & 收集动态 Stride 变量（若不足 5 维则推导补齐）
+    SmallVector<std::string> strideParamsVec;
     auto subViewSteps = op.getMixedStrides();
 
     for (int i = 0; i < rank; ++i) {
-        if (i > 0) strideParams += ", ";
         int64_t finalStride = 1;
         bool isDynamic = false;
 
@@ -661,12 +659,43 @@ struct SubviewToEmitCPattern : public OpConversionPattern<memref::SubViewOp> {
              // 如果 step 也是动态的 (极少见)，这里暂未处理收集逻辑，默认乘法会由模板处理
         }
 
-        if (isDynamic) {
-            strideParams += "-1";
+        strideParamsVec.push_back(isDynamic ? "-1" : std::to_string(finalStride));
+    }
+
+    // 3.1 若维度不足 5，补足 shape=1，并按连续存储规则推导 stride
+    auto deriveContiguous = [](StringRef prevStride, StringRef prevShape) -> std::string {
+        if (prevStride == "-1" || prevShape == "-1")
+            return "-1";
+        int64_t s = 1, sh = 1;
+        (void)llvm::to_integer(prevStride, s);
+        (void)llvm::to_integer(prevShape, sh);
+        return std::to_string(s * sh);
+    };
+
+    while (shapeParamsVec.size() < 5) {
+        // 默认补 1
+        shapeParamsVec.push_back("1");
+        // 依据上一维推导 stride；若为空则从 1 开始
+        if (strideParamsVec.empty()) {
+            strideParamsVec.push_back("1");
         } else {
-            strideParams += std::to_string(finalStride);
+            strideParamsVec.push_back(
+                deriveContiguous(strideParamsVec.back(), shapeParamsVec[shapeParamsVec.size() - 2]));
         }
     }
+
+    // 组装模板参数字符串
+    auto joinParams = [](const SmallVector<std::string> &vec) {
+        std::string out;
+        for (size_t i = 0; i < vec.size(); ++i) {
+            if (i > 0) out += ", ";
+            out += vec[i];
+        }
+        return out;
+    };
+
+    std::string shapeParams = joinParams(shapeParamsVec);
+    std::string strideParams = joinParams(strideParamsVec);
 
     // 4. 发射 typedef 语句
     rewriter.create<emitc::VerbatimOp>(loc, "using " + shapeTypeName + " = pto::Shape<" + shapeParams + ">;");
