@@ -4,6 +4,11 @@ on:
   push:
   pull_request:
   workflow_dispatch:
+  release:
+    types: [published]
+
+permissions:
+  contents: write
 
 env:
   LLVM_TAG: llvmorg-19.1.7
@@ -307,3 +312,33 @@ jobs:
         with:
           name: ptoas-bin-aarch64
           path: ptoas-dist-out/
+
+  upload_release_assets:
+    name: Upload release assets
+    if: github.event_name == 'release'
+    needs:
+      - build_wheel_x86_64
+      - build_wheel_aarch64
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: release-artifacts
+
+      - name: Package ptoas binaries
+        run: |
+          set -euo pipefail
+          for bin_dir in release-artifacts/ptoas-bin-*; do
+            if [ -d "${bin_dir}" ]; then
+              archive_name="$(basename "${bin_dir}").tar.gz"
+              tar -czf "release-artifacts/${archive_name}" -C "${bin_dir}" .
+            fi
+          done
+
+      - name: Upload assets to GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            release-artifacts/**/*.whl
+            release-artifacts/*.tar.gz
