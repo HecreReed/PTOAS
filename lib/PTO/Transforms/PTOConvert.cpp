@@ -700,6 +700,66 @@ struct SubviewToEmitCPattern : public OpConversionPattern<memref::SubViewOp> {
     rewriter.create<emitc::VerbatimOp>(loc, "using " + shapeTypeName + " = pto::Shape<" + shapeParams + ">;");
     rewriter.create<emitc::VerbatimOp>(loc, "using " + strideTypeName + " = pto::Stride<" + strideParams + ">;");
 
+    // 3.0 计算推导出的 Layout；若用户已指定 layout，保持一致性校验
+    auto strToInt = [](const std::string &s, int64_t &out) -> bool {
+        return s != "-1" && llvm::to_integer(s, out);
+    };
+    SmallVector<int64_t, 5> shapeInt(5, -1), strideInt(5, -1);
+    bool allStatic = true;
+    for (int i = 0; i < 5; ++i) {
+        if (!strToInt(finalShape[i], shapeInt[i]) || !strToInt(finalStride[i], strideInt[i]))
+            allStatic = false;
+    }
+    // 推导规则与 InferPTOLayout 保持一致
+    int layoutTag = 0; // ND
+    auto elemBytes = 4; // default float
+    if (elemTypeStr.find("half") != std::string::npos || elemTypeStr.find("f16") != std::string::npos)
+        elemBytes = 2;
+    else if (elemTypeStr.find("double") != std::string::npos || elemTypeStr.find("f64") != std::string::npos)
+        elemBytes = 8;
+    if (allStatic) {
+        // NZ 判定
+        if (shapeInt[2] == 16 && shapeInt[2] * shapeInt[3] * elemBytes == 512 &&
+            strideInt[4] == 1 && strideInt[3] == shapeInt[4]) {
+            layoutTag = 2; // NZ
+        } else {
+            bool isRow = strideInt[4] == 1;
+            for (int i = 3; i >= 0; --i)
+                isRow &= (strideInt[i] == strideInt[i + 1] * shapeInt[i + 1]);
+            bool isCol = strideInt[0] == 1;
+            for (int i = 0; i < 4; ++i)
+                isCol &= (strideInt[i + 1] == strideInt[i] * shapeInt[i]);
+            if (isCol) layoutTag = 1; // DN
+            else layoutTag = isRow ? 0 : 0; // fallback ND
+        }
+    }
+    // 若源 IR 上存在 layout 属性，则校验是否一致，不一致时报错
+    if (auto attr = op->getAttrOfType<mlir::pto::LayoutAttr>("layout")) {
+        int userTag = 0;
+        switch (attr.getLayout()) {
+        case mlir::pto::Layout::ND: userTag = 0; break;
+        case mlir::pto::Layout::DN: userTag = 1; break;
+        case mlir::pto::Layout::NZ: userTag = 2; break;
+        }
+        if (userTag != layoutTag) {
+            return rewriter.notifyMatchFailure(
+                op, "layout mismatch: user-specified layout=" +
+                        std::string(attr.getLayout() == mlir::pto::Layout::ND ? "ND" :
+                                    attr.getLayout() == mlir::pto::Layout::DN ? "DN" : "NZ") +
+                        " but inferred layout tag=" + std::to_string(layoutTag));
+        }
+        layoutTag = userTag; // align with user
+    }
+    // 生成枚举字符串
+    std::string layoutEnum = "pto::Layout::ND";
+    if (layoutTag == 1)
+        layoutEnum = "pto::Layout::DN";
+    else if (layoutTag == 2)
+        layoutEnum = "pto::Layout::NZ";
+    std::string layoutConstName = gtTypeName + "_layout";
+    rewriter.create<emitc::VerbatimOp>(
+        loc, "constexpr pto::Layout " + layoutConstName + " = " + layoutEnum + ";");
+
 
     // -------------------------------------------------------------------------
     // Part 3: 显式对象实例化 (Explicit Object Instantiation)
@@ -741,7 +801,7 @@ struct SubviewToEmitCPattern : public OpConversionPattern<memref::SubViewOp> {
     // 发射 GlobalTensor typedef
     rewriter.create<emitc::VerbatimOp>(
         loc, 
-        "using " + gtTypeName + " = GlobalTensor<" + elemTypeStr + ", " + shapeTypeName + ", " + strideTypeName + ">;"
+        "using " + gtTypeName + " = GlobalTensor<" + elemTypeStr + ", " + shapeTypeName + ", " + strideTypeName + ", " + layoutConstName + ">;"
     );
     auto gtType = emitc::OpaqueType::get(ctx, gtTypeName);
 
