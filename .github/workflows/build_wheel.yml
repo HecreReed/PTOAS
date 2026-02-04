@@ -70,13 +70,18 @@ jobs:
           path: /llvm-workspace/llvm-project/build-shared
           key: llvm-${{ env.LLVM_TAG }}-manylinux_2_34-x86_64-${{ matrix.python }}-v1
 
-      - name: Clone LLVM
+      - name: Prepare LLVM source
         run: |
-          mkdir -p $WORKSPACE_DIR
-          cd $WORKSPACE_DIR
-          if [ ! -d llvm-project ]; then
-            git clone --depth 1 --branch ${{ env.LLVM_TAG }} https://github.com/llvm/llvm-project.git
+          mkdir -p $LLVM_SOURCE_DIR
+          cd $LLVM_SOURCE_DIR
+          # Cache only restores build-shared, so we need source files too
+          # Initialize git repo in-place to preserve cached build-shared directory
+          if [ ! -d .git ]; then
+            git init
+            git remote add origin https://github.com/llvm/llvm-project.git
           fi
+          git fetch --depth 1 origin tag ${{ env.LLVM_TAG }}
+          git checkout ${{ env.LLVM_TAG }}
 
       - name: Build LLVM/MLIR
         if: steps.cache-llvm.outputs.cache-hit != 'true'
@@ -238,12 +243,16 @@ jobs:
             PTO_SOURCE_DIR=/github/workspace
             PTO_INSTALL_DIR=/github/workspace/install
             
-            # Clone LLVM if not exists
-            mkdir -p $WORKSPACE_DIR
-            cd $WORKSPACE_DIR
-            if [ ! -d llvm-project ]; then
-              git clone --depth 1 --branch ${LLVM_TAG} https://github.com/llvm/llvm-project.git
+            # Prepare LLVM source (cache only restores build-shared)
+            # Initialize git repo in-place to preserve cached build-shared directory
+            mkdir -p $LLVM_SOURCE_DIR
+            cd $LLVM_SOURCE_DIR
+            if [ ! -d .git ]; then
+              git init
+              git remote add origin https://github.com/llvm/llvm-project.git
             fi
+            git fetch --depth 1 origin tag ${LLVM_TAG}
+            git checkout ${LLVM_TAG}
             
             # Build LLVM/MLIR if not cached
             if [ ! -f "$LLVM_BUILD_DIR/lib/cmake/mlir/MLIRConfig.cmake" ]; then
