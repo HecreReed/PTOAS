@@ -94,6 +94,14 @@ jobs:
             -DLLVM_TARGETS_TO_BUILD="host"
           ninja -C $LLVM_BUILD_DIR
 
+      # Upload cache immediately after the build step , to avoid `build-shared` directory get polluted by later steps.
+      - name: Save LLVM cache
+        if: steps.cache-llvm.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: /llvm-workspace/llvm-project/build-shared
+          key: llvm-${{ env.LLVM_TAG }}-manylinux_2_34-${{ matrix.arch }}-${{ matrix.python }}-v1
+
       - name: Build PTOAS
         run: |
           export PATH="${PY_PATH}/bin:$PATH"
