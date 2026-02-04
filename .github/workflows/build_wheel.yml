@@ -2,7 +2,6 @@ name: Build Wheel
 
 on:
   push:
-    branches: [main, master, ci_wheel]
   pull_request:
   workflow_dispatch:
 
@@ -16,8 +15,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        python: ["3.9", "3.10", "3.11"]
-        arch: [x86_64, aarch64]
+        python: ["3.11", "3.12"]
+        arch: [x86_64]  # TODO: aarch64 need QEMU  https://github.com/marketplace/actions/run-on-architecture
 
     container:
       image: quay.io/pypa/manylinux_2_34_${{ matrix.arch }}
@@ -172,6 +171,7 @@ jobs:
           path: wheelhouse/*.whl
 
       - name: Collect ptoas binary and dependencies
+        if: matrix.python == '3.11'
         run: |
           export LD_LIBRARY_PATH=$LLVM_BUILD_DIR/lib:$PTO_INSTALL_DIR/lib:$LD_LIBRARY_PATH
           
@@ -217,45 +217,8 @@ jobs:
           du -sh $PTOAS_DEPS_DIR/
 
       - name: Upload ptoas binary artifact
+        if: matrix.python == '3.11'
         uses: actions/upload-artifact@v4
         with:
           name: ptoas-bin-${{ matrix.arch }}
           path: ptoas-dist/
-
-  collect_artifacts:
-    name: Collect all artifacts
-    needs: build_wheel
-    runs-on: ubuntu-latest
-    steps:
-      - name: Download all wheel artifacts
-        uses: actions/download-artifact@v4
-        with:
-          path: all-wheels
-          pattern: ptoas-wheel-*
-          merge-multiple: true
-
-      - name: Download all ptoas binary artifacts
-        uses: actions/download-artifact@v4
-        with:
-          path: all-ptoas-bin
-          pattern: ptoas-bin-*
-          merge-multiple: true
-
-      - name: List artifacts
-        run: |
-          echo "=== Wheels ==="
-          ls -la all-wheels/
-          echo "=== ptoas binaries ==="
-          ls -laR all-ptoas-bin/
-
-      - name: Upload combined wheels
-        uses: actions/upload-artifact@v4
-        with:
-          name: ptoas-wheels-all
-          path: all-wheels/*.whl
-
-      - name: Upload combined ptoas binaries
-        uses: actions/upload-artifact@v4
-        with:
-          name: ptoas-bin-all
-          path: all-ptoas-bin/
