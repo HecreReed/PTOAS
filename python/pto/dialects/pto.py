@@ -23,7 +23,11 @@ from .._mlir_libs._pto import (
     RoundMode,
     RoundModeAttr,
     CmpMode,
-    CmpModeAttr
+    CmpModeAttr,
+    SyncOpType,
+    SyncOpTypeAttr,
+    EVENT,
+    EventAttr
 )
 
 __all__ = [
@@ -42,5 +46,7 @@ __all__ = [
     "PadValue","PadValueAttr",
     "RoundMode", "RoundModeAttr",
     "CmpMode", "CmpModeAttr",
+    "SyncOpType", "SyncOpTypeAttr",
+    "EVENT", "EventAttr",
     "get_gm_type", "TileBufConfigAttr"
 ]
