@@ -123,6 +123,10 @@ void MemLivenessAnalysis::RecursionIR(Region *region, Liveness live) {
     //   return WalkResult::advance();
     } else if (auto loadOp = dyn_cast<memref::LoadOp>(op)) {
       OpKillHandle(curOpInfo, live, op->getBlock());
+    } else if (auto getValDpsOp = dyn_cast<pto::GetValDpsOp>(op)) {
+      // GetValDpsOp only reads from buffer, similar to LoadOp.
+      (void)getValDpsOp;
+      OpKillHandle(curOpInfo, live, op->getBlock());
     } else if (auto tprintOp = dyn_cast<pto::TPrintOp>(op)) {
       // TPrintOp only reads from buffer, similar to LoadOp
       OpKillHandle(curOpInfo, live, op->getBlock());
