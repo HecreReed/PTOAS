@@ -2616,8 +2616,8 @@ struct PTOViewToMemrefPass
         rewriter.replaceOpWithNewOp<pto::MGatherDpsOp>(
             op,
             TypeRange{},
-            idx,
             mem,
+            idx,
             dst);
       }
 

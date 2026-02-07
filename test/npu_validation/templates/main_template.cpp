@@ -10,19 +10,37 @@ See LICENSE in the root of the software repository for the full text of the Lice
 
 #include "test_common.h"
 #include "acl/acl.h"
+#include <cstdio>
 #include <cstdlib>
 
 using namespace PtoTestCommon;
+
+#define ACL_CHECK(expr)                                                                          \
+    do {                                                                                         \
+        const aclError _ret = (expr);                                                            \
+        if (_ret != ACL_SUCCESS) {                                                               \
+            std::fprintf(stderr, "[ERROR] %s failed: %d (%s:%d)\n", #expr, (int)_ret, __FILE__, __LINE__); \
+            const char *_recent = aclGetRecentErrMsg();                                          \
+            if (_recent != nullptr && _recent[0] != '\0') {                                      \
+                std::fprintf(stderr, "[ERROR] RecentErrMsg: %s\n", _recent);                     \
+            }                                                                                    \
+            return 1;                                                                            \
+        }                                                                                        \
+    } while (0)
 
 @LAUNCH_DECL@
 
 int main() {
     @PARAM_DECLS@
 
-    aclInit(nullptr);
-    aclrtSetDevice(0);
-    aclrtStream stream;
-    aclrtCreateStream(&stream);
+    ACL_CHECK(aclInit(nullptr));
+    int deviceId = 0;
+    if (const char *envDevice = std::getenv("ACL_DEVICE_ID")) {
+        deviceId = std::atoi(envDevice);
+    }
+    ACL_CHECK(aclrtSetDevice(deviceId));
+    aclrtStream stream = nullptr;
+    ACL_CHECK(aclrtCreateStream(&stream));
 
     @ALLOC_HOST@
     @ALLOC_DEVICE@
@@ -31,16 +49,16 @@ int main() {
     @COPY_TO_DEVICE@
     @LAUNCH_CALL@
 
-    aclrtSynchronizeStream(stream);
+    ACL_CHECK(aclrtSynchronizeStream(stream));
     @COPY_BACK@
 
     @WRITE_OUTPUT@
 
     @FREE_DEVICE@
     @FREE_HOST@
-    aclrtDestroyStream(stream);
-    aclrtResetDevice(0);
-    aclFinalize();
+    ACL_CHECK(aclrtDestroyStream(stream));
+    ACL_CHECK(aclrtResetDevice(deviceId));
+    ACL_CHECK(aclFinalize());
 
     return 0;
 }
