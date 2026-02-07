@@ -2857,15 +2857,31 @@ struct PTOMovFPToEmitC : public OpConversionPattern<pto::MovFPOp_DPS> {
   LogicalResult matchAndRewrite(pto::MovFPOp_DPS op, OpAdaptor adaptor,
                                 ConversionPatternRewriter &rewriter) const override {
     auto loc = op.getLoc();
+    auto *ctx = rewriter.getContext();
 
+    Value dst = peelUnrealized(adaptor.getDst());
     Value src = peelUnrealized(adaptor.getSrc());
     Value fp  = peelUnrealized(adaptor.getFp());
-    Value dst = peelUnrealized(adaptor.getDst());
+
+    // TMOV_FP<DstTileData, AccTile, FbTile>(dstTileData, cTile, fbTile)
+    ArrayAttr templateArgs;
+    auto dstOT = dst.getType().dyn_cast<emitc::OpaqueType>();
+    auto srcOT = src.getType().dyn_cast<emitc::OpaqueType>();
+    auto fpOT  = fp.getType().dyn_cast<emitc::OpaqueType>();
+    if (dstOT && srcOT && fpOT) {
+      templateArgs = rewriter.getArrayAttr({
+          emitc::OpaqueAttr::get(ctx, dstOT.getValue().str()),
+          emitc::OpaqueAttr::get(ctx, srcOT.getValue().str()),
+          emitc::OpaqueAttr::get(ctx, fpOT.getValue().str()),
+      });
+    } else {
+      templateArgs = ArrayAttr{};
+    }
 
     SmallVector<Value, 3> operands{dst, src, fp};
     rewriter.create<emitc::CallOpaqueOp>(
         loc, TypeRange{}, "TMOV_FP",
-        /*args=*/ArrayAttr{}, /*templateArgs=*/ArrayAttr{},
+        /*args=*/ArrayAttr{}, /*templateArgs=*/templateArgs,
         /*operands=*/operands);
 
     rewriter.eraseOp(op);
