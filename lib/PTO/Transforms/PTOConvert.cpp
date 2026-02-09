@@ -1538,26 +1538,31 @@ struct ArithMulIToEmitC : public OpConversionPattern<arith::MulIOp> {
                                 ConversionPatternRewriter &rewriter) const override {
     auto loc = op.getLoc();
 
-    auto intTy = dyn_cast<IntegerType>(op.getType());
-    if (!intTy)
-      return rewriter.notifyMatchFailure(op, "expected scalar integer type");
+    Type opTy = op.getType();
+    auto intTy = dyn_cast<IntegerType>(opTy);
+    const bool isIndex = isa<IndexType>(opTy);
+    if (!intTy && !isIndex)
+      return rewriter.notifyMatchFailure(op, "expected scalar integer or index type");
 
-    Type dstTy = getTypeConverter()->convertType(intTy);
+    const unsigned bitWidth =
+        intTy ? intTy.getWidth() : static_cast<unsigned>(kPTOIndexBitWidth);
+
+    Type dstTy = getTypeConverter()->convertType(opTy);
     if (!dstTy)
       return failure();
 
     // i1 mul is equivalent to bitwise AND (mod 2 arithmetic).
-    if (intTy.getWidth() == 1) {
-      rewriter.replaceOpWithNewOp<emitc::BitwiseAndOp>(op, intTy, adaptor.getLhs(),
+    if (bitWidth == 1) {
+      rewriter.replaceOpWithNewOp<emitc::BitwiseAndOp>(op, opTy, adaptor.getLhs(),
                                                       adaptor.getRhs());
       return success();
     }
 
-    auto uTy = getUnsignedIntOpaqueType(rewriter.getContext(), intTy.getWidth());
+    auto uTy = getUnsignedIntOpaqueType(rewriter.getContext(), bitWidth);
     Value lhsU = castSignlessIntToUnsignedSameWidth(rewriter, loc, adaptor.getLhs(),
-                                                    intTy.getWidth());
+                                                    bitWidth);
     Value rhsU = castSignlessIntToUnsignedSameWidth(rewriter, loc, adaptor.getRhs(),
-                                                    intTy.getWidth());
+                                                    bitWidth);
     Value mulU = rewriter.create<emitc::MulOp>(loc, uTy, lhsU, rhsU);
     Value result = emitCCast(rewriter, loc, dstTy, mulU);
     rewriter.replaceOp(op, result);
@@ -1572,26 +1577,31 @@ struct ArithAddIToEmitC : public OpConversionPattern<arith::AddIOp> {
                                 ConversionPatternRewriter &rewriter) const override {
     auto loc = op.getLoc();
 
-    auto intTy = dyn_cast<IntegerType>(op.getType());
-    if (!intTy)
-      return rewriter.notifyMatchFailure(op, "expected scalar integer type");
+    Type opTy = op.getType();
+    auto intTy = dyn_cast<IntegerType>(opTy);
+    const bool isIndex = isa<IndexType>(opTy);
+    if (!intTy && !isIndex)
+      return rewriter.notifyMatchFailure(op, "expected scalar integer or index type");
 
-    Type dstTy = getTypeConverter()->convertType(intTy);
+    const unsigned bitWidth =
+        intTy ? intTy.getWidth() : static_cast<unsigned>(kPTOIndexBitWidth);
+
+    Type dstTy = getTypeConverter()->convertType(opTy);
     if (!dstTy)
       return failure();
 
     // i1 add is equivalent to XOR (mod 2 arithmetic).
-    if (intTy.getWidth() == 1) {
-      rewriter.replaceOpWithNewOp<emitc::BitwiseXorOp>(op, intTy, adaptor.getLhs(),
+    if (bitWidth == 1) {
+      rewriter.replaceOpWithNewOp<emitc::BitwiseXorOp>(op, opTy, adaptor.getLhs(),
                                                       adaptor.getRhs());
       return success();
     }
 
-    auto uTy = getUnsignedIntOpaqueType(rewriter.getContext(), intTy.getWidth());
+    auto uTy = getUnsignedIntOpaqueType(rewriter.getContext(), bitWidth);
     Value lhsU = castSignlessIntToUnsignedSameWidth(rewriter, loc, adaptor.getLhs(),
-                                                    intTy.getWidth());
+                                                    bitWidth);
     Value rhsU = castSignlessIntToUnsignedSameWidth(rewriter, loc, adaptor.getRhs(),
-                                                    intTy.getWidth());
+                                                    bitWidth);
     Value addU = rewriter.create<emitc::AddOp>(loc, uTy, lhsU, rhsU);
     Value result = emitCCast(rewriter, loc, dstTy, addU);
     rewriter.replaceOp(op, result);
@@ -1620,26 +1630,31 @@ struct ArithSubIToEmitC : public OpConversionPattern<arith::SubIOp> {
                                 ConversionPatternRewriter &rewriter) const override {
     auto loc = op.getLoc();
 
-    auto intTy = dyn_cast<IntegerType>(op.getType());
-    if (!intTy)
-      return rewriter.notifyMatchFailure(op, "expected scalar integer type");
+    Type opTy = op.getType();
+    auto intTy = dyn_cast<IntegerType>(opTy);
+    const bool isIndex = isa<IndexType>(opTy);
+    if (!intTy && !isIndex)
+      return rewriter.notifyMatchFailure(op, "expected scalar integer or index type");
 
-    Type dstTy = getTypeConverter()->convertType(intTy);
+    const unsigned bitWidth =
+        intTy ? intTy.getWidth() : static_cast<unsigned>(kPTOIndexBitWidth);
+
+    Type dstTy = getTypeConverter()->convertType(opTy);
     if (!dstTy)
       return failure();
 
     // i1 sub is equivalent to XOR (mod 2 arithmetic).
-    if (intTy.getWidth() == 1) {
-      rewriter.replaceOpWithNewOp<emitc::BitwiseXorOp>(op, intTy, adaptor.getLhs(),
+    if (bitWidth == 1) {
+      rewriter.replaceOpWithNewOp<emitc::BitwiseXorOp>(op, opTy, adaptor.getLhs(),
                                                       adaptor.getRhs());
       return success();
     }
 
-    auto uTy = getUnsignedIntOpaqueType(rewriter.getContext(), intTy.getWidth());
+    auto uTy = getUnsignedIntOpaqueType(rewriter.getContext(), bitWidth);
     Value lhsU = castSignlessIntToUnsignedSameWidth(rewriter, loc, adaptor.getLhs(),
-                                                    intTy.getWidth());
+                                                    bitWidth);
     Value rhsU = castSignlessIntToUnsignedSameWidth(rewriter, loc, adaptor.getRhs(),
-                                                    intTy.getWidth());
+                                                    bitWidth);
     Value subU = rewriter.create<emitc::SubOp>(loc, uTy, lhsU, rhsU);
     Value result = emitCCast(rewriter, loc, dstTy, subU);
     rewriter.replaceOp(op, result);
