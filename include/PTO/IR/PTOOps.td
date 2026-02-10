@@ -2023,7 +2023,10 @@ def PTO_AddCOp_DPS : PTO_DpsOp<"addc_dps", []> {
 // dst = src + scalar
 //===----------------------------------------------------------------------===//
 
-def PTO_AddSOp_DPS : PTO_DpsOp<"adds_dps", []> {
+def PTO_AddSOp_DPS : PTO_DpsOp<"adds_dps", [
+  OpPipeInterface,
+  DeclareOpInterfaceMethods<MemoryEffectsOpInterface>
+]> {
   let summary = "Elementwise add a scalar to a tile ";
   let description = [{
     For each element (i, j): dst[i,j] = src[i,j] + scalar.
@@ -2045,6 +2048,11 @@ def PTO_AddSOp_DPS : PTO_DpsOp<"adds_dps", []> {
   }];
 
   let hasVerifier = 1;
+
+  let extraClassDeclaration = [{
+    ::mlir::pto::PIPE getPipe() { return ::mlir::pto::PIPE::PIPE_V; }
+    ::mlir::MutableOperandRange getDpsInitsMutable() { return getDstMutable(); }
+  }];
 }
 //===----------------------------------------------------------------------===//
 // TADDSC (sync, tilebuf-based tile + scalar + tile)
@@ -2290,7 +2298,10 @@ def PTO_CvtOp_DPS : PTO_DpsOp<"cvt_dps", []> {
 // dst = src0 / src1 elementwise
 //===----------------------------------------------------------------------===//
 
-def PTO_DivOp_DPS : PTO_DpsOp<"div_dps", []> {
+def PTO_DivOp_DPS : PTO_DpsOp<"div_dps", [
+  OpPipeInterface,
+  DeclareOpInterfaceMethods<MemoryEffectsOpInterface>
+]> {
   let summary = "Elementwise division of two tiles (tilebuf, DPS)";
   let description = [{
     For each element (i, j): dst[i,j] = src0[i,j] / src1[i,j].
@@ -2313,13 +2324,21 @@ def PTO_DivOp_DPS : PTO_DpsOp<"div_dps", []> {
     attr-dict
   }];
 
+  let extraClassDeclaration = [{
+    ::mlir::pto::PIPE getPipe() { return ::mlir::pto::PIPE::PIPE_V; }
+    ::mlir::MutableOperandRange getDpsInitsMutable() { return getDstMutable(); }
+  }];
+
 }
 //===----------------------------------------------------------------------===//
 // TDIVS (tilebuf, DPS)
 // pto.tdivs ins(%src, %scalar) outs(%dst) [scalar_lhs = true|false]
 //===----------------------------------------------------------------------===//
 
-def PTO_DivSOp_DPS : PTO_DpsOp<"divs_dps", []> {
+def PTO_DivSOp_DPS : PTO_DpsOp<"divs_dps", [
+  OpPipeInterface,
+  DeclareOpInterfaceMethods<MemoryEffectsOpInterface>
+]> {
   let summary = "Elementwise division with a scalar (tilebuf, DPS)";
 
   let arguments = (ins
@@ -2333,6 +2352,11 @@ def PTO_DivSOp_DPS : PTO_DpsOp<"divs_dps", []> {
   let hasVerifier = 1;
 
   let hasCustomAssemblyFormat = 1;
+
+  let extraClassDeclaration = [{
+    ::mlir::pto::PIPE getPipe() { return ::mlir::pto::PIPE::PIPE_V; }
+    ::mlir::MutableOperandRange getDpsInitsMutable() { return getDstMutable(); }
+  }];
 }
 
 //===----------------------------------------------------------------------===//
@@ -2542,7 +2566,10 @@ def PTO_LReluOp_DPS : PTO_DpsOp<"lrelu_dps", []> {
 // TMAX (tilebuf, DPS)
 //===----------------------------------------------------------------------===//
 
-def PTO_MaxOp_DPS : PTO_DpsOp<"max_dps", []> {
+def PTO_MaxOp_DPS : PTO_DpsOp<"max_dps", [
+  OpPipeInterface,
+  DeclareOpInterfaceMethods<MemoryEffectsOpInterface>
+]> {
   let summary = "Elementwise maximum of two tiles (tilebuf, DPS)";
 
   let arguments = (ins
@@ -2560,12 +2587,20 @@ def PTO_MaxOp_DPS : PTO_DpsOp<"max_dps", []> {
     `outs` `(` $dst `:` qualified(type($dst) ) `)`
     attr-dict
   }];
+
+  let extraClassDeclaration = [{
+    ::mlir::pto::PIPE getPipe() { return ::mlir::pto::PIPE::PIPE_V; }
+    ::mlir::MutableOperandRange getDpsInitsMutable() { return getDstMutable(); }
+  }];
 }
 //===----------------------------------------------------------------------===//
 // TMAXS (tilebuf, DPS)
 //===----------------------------------------------------------------------===//
 
-def PTO_MaxSOp_DPS : PTO_DpsOp<"maxs_dps", []> {
+def PTO_MaxSOp_DPS : PTO_DpsOp<"maxs_dps", [
+  OpPipeInterface,
+  DeclareOpInterfaceMethods<MemoryEffectsOpInterface>
+]> {
   let summary = "Elementwise max of a tile and a scalar (tilebuf, DPS)";
 
   let arguments = (ins
@@ -2583,12 +2618,20 @@ def PTO_MaxSOp_DPS : PTO_DpsOp<"maxs_dps", []> {
     `outs` `(` $dst `:` qualified(type($dst) ) `)`
     attr-dict
   }];
+
+  let extraClassDeclaration = [{
+    ::mlir::pto::PIPE getPipe() { return ::mlir::pto::PIPE::PIPE_V; }
+    ::mlir::MutableOperandRange getDpsInitsMutable() { return getDstMutable(); }
+  }];
 }
 //===----------------------------------------------------------------------===//
 // TMIN (tilebuf, DPS)
 //===----------------------------------------------------------------------===//
 
-def PTO_MinOp_DPS : PTO_DpsOp<"min_dps", []> {
+def PTO_MinOp_DPS : PTO_DpsOp<"min_dps", [
+  OpPipeInterface,
+  DeclareOpInterfaceMethods<MemoryEffectsOpInterface>
+]> {
   let summary = "Elementwise minimum of two tiles (tilebuf, DPS)";
 
   let arguments = (ins
@@ -2606,13 +2649,21 @@ def PTO_MinOp_DPS : PTO_DpsOp<"min_dps", []> {
     `outs` `(` $dst `:` qualified(type($dst) ) `)`
     attr-dict
   }];
+
+  let extraClassDeclaration = [{
+    ::mlir::pto::PIPE getPipe() { return ::mlir::pto::PIPE::PIPE_V; }
+    ::mlir::MutableOperandRange getDpsInitsMutable() { return getDstMutable(); }
+  }];
 }
 
 //===----------------------------------------------------------------------===//
 // TMINS (tilebuf, DPS)
 //===----------------------------------------------------------------------===//
 
-def PTO_MinsOp_DPS : PTO_DpsOp<"mins_dps", []> {
+def PTO_MinsOp_DPS : PTO_DpsOp<"mins_dps", [
+  OpPipeInterface,
+  DeclareOpInterfaceMethods<MemoryEffectsOpInterface>
+]> {
   let summary = "Elementwise minimum of a tile and a scalar (tilebuf, DPS)";
 
   let arguments = (ins
@@ -2629,6 +2680,11 @@ def PTO_MinsOp_DPS : PTO_DpsOp<"mins_dps", []> {
     `ins` `(` $src `,` $scalar `:` qualified(type($src)) `,` type($scalar) `)`
     `outs` `(` $dst `:` qualified(type($dst) ) `)`
     attr-dict
+  }];
+
+  let extraClassDeclaration = [{
+    ::mlir::pto::PIPE getPipe() { return ::mlir::pto::PIPE::PIPE_V; }
+    ::mlir::MutableOperandRange getDpsInitsMutable() { return getDstMutable(); }
   }];
 }
 
@@ -2688,7 +2744,10 @@ def PTO_MrgSortOp_DPS : PTO_DpsOp<"mrgsort_dps", [AttrSizedOperandSegments]> {
 // PTOOps.td  (add TMUL DPS/tilebuf op)
 //===----------------------------------------------------------------------===//
 
-def PTO_MulOp_DPS : PTO_DpsOp<"mul_dps", []> {
+def PTO_MulOp_DPS : PTO_DpsOp<"mul_dps", [
+  OpPipeInterface,
+  DeclareOpInterfaceMethods<MemoryEffectsOpInterface>
+]> {
   let summary = "TMUL: elementwise multiply (tilebuf, DPS)";
 
   let arguments = (ins
@@ -2706,12 +2765,20 @@ def PTO_MulOp_DPS : PTO_DpsOp<"mul_dps", []> {
     `outs` `(` $dst `:` qualified(type($dst) ) `)`
     attr-dict
   }];
+
+  let extraClassDeclaration = [{
+    ::mlir::pto::PIPE getPipe() { return ::mlir::pto::PIPE::PIPE_V; }
+    ::mlir::MutableOperandRange getDpsInitsMutable() { return getDstMutable(); }
+  }];
 }
 //===----------------------------------------------------------------------===//
 // PTOOps.td  (add TMULS DPS/tilebuf op)
 //===----------------------------------------------------------------------===//
 
-def PTO_MulsOp_DPS : PTO_DpsOp<"muls_dps", []> {
+def PTO_MulsOp_DPS : PTO_DpsOp<"muls_dps", [
+  OpPipeInterface,
+  DeclareOpInterfaceMethods<MemoryEffectsOpInterface>
+]> {
   let summary = "TMULS: elementwise multiply by scalar (tilebuf, DPS)";
 
   let arguments = (ins
@@ -2728,6 +2795,11 @@ def PTO_MulsOp_DPS : PTO_DpsOp<"muls_dps", []> {
     `ins` `(` $src0 `,` $scalar `:` qualified(type($src0)) `,` type($scalar) `)`
     `outs` `(` $dst `:` qualified(type($dst) ) `)`
     attr-dict
+  }];
+
+  let extraClassDeclaration = [{
+    ::mlir::pto::PIPE getPipe() { return ::mlir::pto::PIPE::PIPE_V; }
+    ::mlir::MutableOperandRange getDpsInitsMutable() { return getDstMutable(); }
   }];
 }
 //===----------------------------------------------------------------------===//
