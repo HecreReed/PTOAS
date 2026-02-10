@@ -89,7 +89,7 @@ process_one_dir() {
   ptoas="$(resolve_ptoas_bin)"
   python="$(resolve_python_bin)"
   local -a ptoas_flags=()
-  if [[ -n "${PTOAS_FLAGS:-}" ]]; then
+  if [[ -n "${PTOAS_FLAGS}" ]]; then
     # shellcheck disable=SC2206
     ptoas_flags=(${PTOAS_FLAGS})
   fi
@@ -104,6 +104,10 @@ process_one_dir() {
       done
     fi
     [[ $has_insync -eq 1 ]] || ptoas_flags+=(--enable-insert-sync)
+  fi
+  local -a ptoas_cmd_base=("$ptoas")
+  if (( ${#ptoas_flags[@]} )); then
+    ptoas_cmd_base+=("${ptoas_flags[@]}")
   fi
 
   if [[ -z "$ptoas" || ! -x "$ptoas" ]]; then
@@ -134,7 +138,8 @@ process_one_dir() {
     fi
 
     # Write output via -o to avoid mixing debug prints with generated C++.
-    if ! "$ptoas" ${ptoas_flags[@]+"${ptoas_flags[@]}"} "$mlir" -o "$cpp" >/dev/null 2>&1; then
+    local -a ptoas_cmd=("${ptoas_cmd_base[@]}" "$mlir" -o "$cpp")
+    if ! "${ptoas_cmd[@]}" >/dev/null 2>&1; then
       echo -e "${A}(${base}.py)\tFAIL\tptoas failed: $(basename "$mlir")"
       overall=1
       continue
@@ -161,7 +166,8 @@ process_one_dir() {
       base="$(basename "$f" .pto)"
       cpp="${out_subdir}/${base}.cpp"
 
-      if ! "$ptoas" ${ptoas_flags[@]+"${ptoas_flags[@]}"} "$f" -o "$cpp" >/dev/null 2>&1; then
+      local -a ptoas_cmd=("${ptoas_cmd_base[@]}" "$f" -o "$cpp")
+      if ! "${ptoas_cmd[@]}" >/dev/null 2>&1; then
         echo -e "${A}(${base}.pto)\tFAIL\tptoas failed: $(basename "$f")"
         overall=1
         continue
