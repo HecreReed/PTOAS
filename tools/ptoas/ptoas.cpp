@@ -294,7 +294,6 @@ int main(int argc, char **argv) {
   
   pm.addPass(createCSEPass());
   pm.addPass(pto::createEmitPTOManualPass());
-  pm.addPass(mlir::createCanonicalizerPass());
   pm.addPass(mlir::createCSEPass());
   
   if (failed(pm.run(*module))) {
@@ -309,7 +308,11 @@ int main(int argc, char **argv) {
   // Emit C++ to string, then post-process, then write to output file.
   std::string cppOutput;
   llvm::raw_string_ostream cppOS(cppOutput);
-  if (failed(emitc::translateToCpp(*module, cppOS))) {
+  // CFG-style lowering (e.g. scf.while -> cf.br/cf.cond_br) may introduce
+  // multiple blocks, requiring variables to be declared at the top for valid
+  // C++ emission.
+  if (failed(emitc::translateToCpp(*module, cppOS,
+                                  /*declareVariablesAtTop=*/true))) {
     llvm::errs() << "Error: Failed to emit C++.\n";
     return 1;
   }
