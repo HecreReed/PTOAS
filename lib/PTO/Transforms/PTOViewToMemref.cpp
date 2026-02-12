@@ -1311,7 +1311,7 @@ struct PTOViewToMemrefPass
           return;
         }
 
-        rewriter.replaceOpWithNewOp<pto::AbsOp_DPS>(
+        rewriter.replaceOpWithNewOp<pto::TAbsOp>(
             op,
             TypeRange{},
             src,
