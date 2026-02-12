@@ -1350,39 +1350,6 @@ def TMGatherOp : PTO_TOp<"mgather", [
 // MSCATTER (DPS)  +  TMSCATTER (tile world TOp)
 //===----------------------------------------------------------------------===//
 
-// ---- DPS version (no 't' prefix) ----
-// pto.mscatter_dps ins(%src, %idx) outs(%mem) [ ...]
-def MScatterDpsOp : PTO_DpsOp<"mscatter_dps", [
-  OpPipeInterface,
-  DeclareOpInterfaceMethods<MemoryEffectsOpInterface>
-]> {
-  let summary = "Scatter-store elements from a tile into global memory using per-element indices (DPS).";
-
-  let arguments = (ins
-    PTODpsType:$src,
-    PTODpsType:$idx,
-    AnyMemRef:$mem);
-
-  let results = (outs);
-
-  let hasVerifier = 1;
-
-  let assemblyFormat = [{
-    `ins` `(` $src `,` $idx `:` qualified(type($src)) `,` type($idx) `)`
-    `outs` `(` $mem `:` type($mem) `)`
-    attr-dict
-  }];
-
-  let extraClassDeclaration = [{
-    static StringRef getIntrinsicName() { return "MSCATTER"; }
-    ::mlir::pto::PIPE getPipe() { return ::mlir::pto::PIPE::PIPE_MTE3; }
-
-    // DestinationStyleOpInterface hook: declare explicitly for THIS op.
-    ::mlir::MutableOperandRange getDpsInitsMutable() {
-      return getMemMutable();
-    }
-  }];
-}
 //===----------------------------------------------------------------------===//
 // GETVAL (DPS)  +  TGETVAL (tile world TOp)
 //   Read a single element into a scalar.
@@ -1417,40 +1384,6 @@ def GetValDpsOp : PTO_Op<"getval_dps", []> {
 // SETVAL (DPS) + TSETVAL (tile world TOp)
 //   Write a scalar into a single element at offset.
 //===----------------------------------------------------------------------===//
-
-// ---- DPS version ----
-// pto.setval_dps ins(%offset, %val) outs(%dst) : memref<...>, index, T
-def SetValDpsOp : PTO_DpsOp<"setval_dps", [
-  OpPipeInterface,
-  DeclareOpInterfaceMethods<MemoryEffectsOpInterface>
-]> {
-  let summary = "Write a scalar value into a single element of dst at offset (DPS, ins/outs).";
-
-  let arguments = (ins
-    AnyMemRef:$dst,      // written memory (outs)
-    Index:$offset,
-    AnyType:$val
-  );
-
-  let results = (outs);
-
-  let hasVerifier = 1;
-
-  // Keep ins/outs style: put offset+val in ins, dst in outs.
-  let assemblyFormat = [{
-    `ins` `(` $offset `,` $val `:` type($offset) `,` type($val) `)`
-    `outs` `(` $dst `:` qualified(type($dst) ) `)`
-    attr-dict
-  }];
-
-  let extraClassDeclaration = [{
-    static StringRef getIntrinsicName() { return "SETVAL"; }
-    ::mlir::pto::PIPE getPipe() { return ::mlir::pto::PIPE::PIPE_V; }
-
-    // DestinationStyleOpInterface hook (avoid relying on base class injection)
-    ::mlir::MutableOperandRange getDpsInitsMutable() { return getDstMutable(); }
-  }];
-}
 
 // ---- tile-world TOp version ----
 // pto.tsetval ins(%offset, %val) outs(%dst) : PTODpsType, index, T
@@ -1547,91 +1480,11 @@ def TMScatterOp : PTO_TOp<"mscatter", [
 // dst = src + scalar
 //===----------------------------------------------------------------------===//
 
-def PTO_AddSOp_DPS : PTO_DpsOp<"adds_dps", [
-  OpPipeInterface,
-  DeclareOpInterfaceMethods<MemoryEffectsOpInterface>
-]> {
-  let summary = "Elementwise add a scalar to a tile ";
-  let description = [{
-    For each element (i, j): dst[i,j] = src[i,j] + scalar.
-    Tile operands are tilebuffers; scalar is a builtin scalar type (e.g. f32).
-  }];
-
-  let arguments = (ins
-    PTODpsType:$src,
-    AnyType:$scalar,
-    PTODpsType:$dst
-  );
-
-  let results = (outs);
-
-  let assemblyFormat = [{
-    `ins` `(` $src `,` $scalar `:` qualified(type($src)) `,` type($scalar) `)`
-    `outs` `(` $dst `:` qualified(type($dst) ) `)`
-    attr-dict
-  }];
-
-  let hasVerifier = 1;
-
-  let extraClassDeclaration = [{
-    ::mlir::pto::PIPE getPipe() { return ::mlir::pto::PIPE::PIPE_V; }
-    ::mlir::MutableOperandRange getDpsInitsMutable() { return getDstMutable(); }
-  }];
-}
 //===----------------------------------------------------------------------===//
 // TADDSC (sync, tilebuf-based tile + scalar + tile)
 // dst = src0 + scalar + src1
 //===----------------------------------------------------------------------===//
 
-def PTO_AddSCOp_DPS : PTO_DpsOp<"addsc_dps", [
-  OpPipeInterface,
-  DeclareOpInterfaceMethods<MemoryEffectsOpInterface>
-]> {
-  let summary = "dst = src0 + scalar + src1 ";
-  let arguments = (ins
-    PTODpsType:$src0,
-    AnyType:$scalar,
-    PTODpsType:$src1,
-    PTODpsType:$dst
-  );
-  let results = (outs);
-
-  let assemblyFormat = [{
-    `ins` `(` $src0 `,` $scalar `,` $src1 `:` qualified(type($src0)) `,` type($scalar) `,` qualified(type($src1)) `)`
-    `outs` `(` $dst `:` qualified(type($dst) ) `)`
-    attr-dict
-  }];
-
-  let hasVerifier = 1;
-
-  let extraClassDeclaration = [{
-    ::mlir::pto::PIPE getPipe() { return ::mlir::pto::PIPE::PIPE_V; }
-    ::mlir::MutableOperandRange getDpsInitsMutable() { return getDstMutable(); }
-  }];
-}
-
-
-def PTO_AndSOp_DPS : PTO_DpsOp<"ands_dps", [
-  OpPipeInterface,
-  DeclareOpInterfaceMethods<MemoryEffectsOpInterface>
-]> {
-  let summary = "TANDS(dst, src, scalar) bitwise-and tile with scalar";
-  let arguments = (ins PTODpsType:$src, AnyType:$scalar, PTODpsType:$dst);
-  let results = (outs);
-
-  let assemblyFormat = [{
-    `ins` `(` $src `,` $scalar `:` qualified(type($src)) `,` type($scalar) `)`
-    `outs` `(` $dst `:` qualified(type($dst) ) `)`
-    attr-dict
-  }];
-
-  let hasVerifier = 1;
-
-  let extraClassDeclaration = [{
-    ::mlir::pto::PIPE getPipe() { return ::mlir::pto::PIPE::PIPE_V; }
-    ::mlir::MutableOperandRange getDpsInitsMutable() { return getDstMutable(); }
-  }];
-}
 def PTO_CmpOp_DPS : PTO_DpsOp<"cmp_dps", [
   OpPipeInterface,
   DeclareOpInterfaceMethods<MemoryEffectsOpInterface>

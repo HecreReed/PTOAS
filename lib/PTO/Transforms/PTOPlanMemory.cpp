@@ -149,6 +149,46 @@ void MemLivenessAnalysis::RecursionIR(Region *region, Liveness live) {
       // tci is a write(dst) op with scalar seed S.
       UpdateOpGenInfo(curOpInfo, llvm::to_vector(tciOp->getOperands()));
       OpKillHandle(curOpInfo, live, op->getBlock());
+    } else if (auto taddsOp = dyn_cast<pto::TAddSOp>(op)) {
+      (void)taddsOp;
+      UpdateOpGenInfo(curOpInfo, llvm::to_vector(op->getOperands()));
+      OpKillHandle(curOpInfo, live, op->getBlock());
+    } else if (auto taddscOp = dyn_cast<pto::TAddSCOp>(op)) {
+      (void)taddscOp;
+      UpdateOpGenInfo(curOpInfo, llvm::to_vector(op->getOperands()));
+      OpKillHandle(curOpInfo, live, op->getBlock());
+    } else if (auto tandsOp = dyn_cast<pto::TAndSOp>(op)) {
+      (void)tandsOp;
+      UpdateOpGenInfo(curOpInfo, llvm::to_vector(op->getOperands()));
+      OpKillHandle(curOpInfo, live, op->getBlock());
+    } else if (auto tgemvOp = dyn_cast<pto::TGemvOp>(op)) {
+      (void)tgemvOp;
+      UpdateOpGenInfo(curOpInfo, llvm::to_vector(op->getOperands()));
+      OpKillHandle(curOpInfo, live, op->getBlock());
+    } else if (auto tgemvAccOp = dyn_cast<pto::TGemvAccOp>(op)) {
+      (void)tgemvAccOp;
+      UpdateOpGenInfo(curOpInfo, llvm::to_vector(op->getOperands()));
+      OpKillHandle(curOpInfo, live, op->getBlock());
+    } else if (auto tgemvBiasOp = dyn_cast<pto::TGemvBiasOp>(op)) {
+      (void)tgemvBiasOp;
+      UpdateOpGenInfo(curOpInfo, llvm::to_vector(op->getOperands()));
+      OpKillHandle(curOpInfo, live, op->getBlock());
+    } else if (auto tmgatherOp = dyn_cast<pto::TMGatherOp>(op)) {
+      (void)tmgatherOp;
+      UpdateOpGenInfo(curOpInfo, llvm::to_vector(op->getOperands()));
+      OpKillHandle(curOpInfo, live, op->getBlock());
+    } else if (auto tmscatterOp = dyn_cast<pto::TMScatterOp>(op)) {
+      (void)tmscatterOp;
+      UpdateOpGenInfo(curOpInfo, llvm::to_vector(op->getOperands()));
+      OpKillHandle(curOpInfo, live, op->getBlock());
+    } else if (auto tsetvalOp = dyn_cast<pto::TSetValOp>(op)) {
+      (void)tsetvalOp;
+      UpdateOpGenInfo(curOpInfo, llvm::to_vector(op->getOperands()));
+      OpKillHandle(curOpInfo, live, op->getBlock());
+    } else if (auto tgetvalOp = dyn_cast<pto::TGetValOp>(op)) {
+      (void)tgetvalOp;
+      UpdateOpGenInfo(curOpInfo, llvm::to_vector(op->getOperands()));
+      OpKillHandle(curOpInfo, live, op->getBlock());
     } else if (auto tloadOp = dyn_cast<pto::TLoadOp>(op)) {
       (void)tloadOp;
       UpdateOpGenInfo(curOpInfo, llvm::to_vector(op->getOperands()));

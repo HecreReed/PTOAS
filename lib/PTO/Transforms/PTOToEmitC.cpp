@@ -3701,10 +3701,10 @@ struct PTOGetSubBlockNumToEmitC
 // pto.mscatter %src, %mem, %idx : memref<...>, memref<...>, memref<...>
 //===----------------------------------------------------------------------===//
 
-struct PTOMScatterToMSCATTER : public OpConversionPattern<pto::MScatterDpsOp> {
-  using OpConversionPattern<pto::MScatterDpsOp>::OpConversionPattern;
+struct PTOMScatterToMSCATTER : public OpConversionPattern<pto::TMScatterOp> {
+  using OpConversionPattern<pto::TMScatterOp>::OpConversionPattern;
 
-  LogicalResult matchAndRewrite(pto::MScatterDpsOp op, OpAdaptor adaptor,
+  LogicalResult matchAndRewrite(pto::TMScatterOp op, OpAdaptor adaptor,
                                 ConversionPatternRewriter &rewriter) const override {
     Value src = peelUnrealized(adaptor.getSrc());
     Value mem = peelUnrealized(adaptor.getMem());
@@ -3720,10 +3720,10 @@ struct PTOMScatterToMSCATTER : public OpConversionPattern<pto::MScatterDpsOp> {
     return success();
   }
 };
-struct PTOSetValToSETVAL : public OpConversionPattern<pto::SetValDpsOp> {
-  using OpConversionPattern<pto::SetValDpsOp>::OpConversionPattern;
+struct PTOSetValToSETVAL : public OpConversionPattern<pto::TSetValOp> {
+  using OpConversionPattern<pto::TSetValOp>::OpConversionPattern;
 
-  LogicalResult matchAndRewrite(pto::SetValDpsOp op, OpAdaptor adaptor,
+  LogicalResult matchAndRewrite(pto::TSetValOp op, OpAdaptor adaptor,
                                 ConversionPatternRewriter &rewriter) const override {
     Value dst = peelUnrealized(adaptor.getDst());
     Value val = peelUnrealized(adaptor.getVal());
@@ -4064,10 +4064,10 @@ struct PTOTAddCToTADDC : public OpConversionPattern<pto::TAddCOp> {
 // pto.tadds lowering -> TADDS(dst, src, scalar)
 //===----------------------------------------------------------------------===//
 
-struct PTOAddSToTADDS : public OpConversionPattern<pto::AddSOp_DPS> {
-  using OpConversionPattern<pto::AddSOp_DPS>::OpConversionPattern;
+struct PTOAddSToTADDS : public OpConversionPattern<pto::TAddSOp> {
+  using OpConversionPattern<pto::TAddSOp>::OpConversionPattern;
 
-  LogicalResult matchAndRewrite(pto::AddSOp_DPS op, OpAdaptor adaptor,
+  LogicalResult matchAndRewrite(pto::TAddSOp op, OpAdaptor adaptor,
                                 ConversionPatternRewriter &rewriter) const override {
     Value src    = peelUnrealized(adaptor.getSrc());
     Value dst    = peelUnrealized(adaptor.getDst());
@@ -4086,10 +4086,10 @@ struct PTOAddSToTADDS : public OpConversionPattern<pto::AddSOp_DPS> {
 // pto.taddsc lowering -> TADDSC(dst, src0, scalar, src1)
 //===----------------------------------------------------------------------===//
 
-struct PTOAddSCToTADDSC : public OpConversionPattern<pto::AddSCOp_DPS> {
-  using OpConversionPattern<pto::AddSCOp_DPS>::OpConversionPattern;
+struct PTOAddSCToTADDSC : public OpConversionPattern<pto::TAddSCOp> {
+  using OpConversionPattern<pto::TAddSCOp>::OpConversionPattern;
 
-  LogicalResult matchAndRewrite(pto::AddSCOp_DPS op, OpAdaptor adaptor,
+  LogicalResult matchAndRewrite(pto::TAddSCOp op, OpAdaptor adaptor,
                                 ConversionPatternRewriter &rewriter) const override {
     auto loc = op.getLoc();
     Value src0    = peelUnrealized(adaptor.getSrc0());
@@ -4130,10 +4130,10 @@ struct PTOTAndToEmitC : public OpConversionPattern<pto::TAndOp> {
     return success();
   }
 };
-struct PTOAndSToEmitC : public OpConversionPattern<pto::AndSOp_DPS> {
-  using OpConversionPattern<pto::AndSOp_DPS>::OpConversionPattern;
+struct PTOAndSToEmitC : public OpConversionPattern<pto::TAndSOp> {
+  using OpConversionPattern<pto::TAndSOp>::OpConversionPattern;
 
-  LogicalResult matchAndRewrite(pto::AndSOp_DPS op, OpAdaptor adaptor,
+  LogicalResult matchAndRewrite(pto::TAndSOp op, OpAdaptor adaptor,
                                 ConversionPatternRewriter &rewriter) const override {
     Value src    = peelUnrealized(adaptor.getSrc());
     Value scalar = peelUnrealized(adaptor.getScalar());
