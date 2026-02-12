@@ -1485,164 +1485,20 @@ def TMScatterOp : PTO_TOp<"mscatter", [
 // dst = src0 + scalar + src1
 //===----------------------------------------------------------------------===//
 
-def PTO_CmpOp_DPS : PTO_DpsOp<"cmp_dps", [
-  OpPipeInterface,
-  DeclareOpInterfaceMethods<MemoryEffectsOpInterface>
-]> {
-  let summary = "Compare two tiles and write a packed predicate mask";
-
-  let arguments = (ins
-    PTODpsType:$src0,
-    PTODpsType:$src1,
-    PTODpsType:$dst,
-    OptionalAttr<PTO_CmpModeAttr>:$cmpMode
-  );
-  let results = (outs);
-
-  let assemblyFormat = [{
-    `ins` `(` $src0 `,` $src1
-          (`{` `cmpMode` `=` $cmpMode^ `}`)?
-          `:` qualified(type($src0)) `,` qualified(type($src1)) `)`
-    `outs` `(` $dst `:` qualified(type($dst) ) `)`
-    attr-dict
-  }];
-
-  let builders = [
-    OpBuilder<(ins "TypeRange":$res, "Value":$src0, "Value":$src1, "Value":$dst), [{
-      build($_builder, $_state, res, src0, src1, dst, /*cmpMode=*/nullptr); 
-    }]>];
-
-  let hasVerifier = 1;
-
-  let extraClassDeclaration = [{
-    ::mlir::pto::PIPE getPipe() { return ::mlir::pto::PIPE::PIPE_V; }
-    ::mlir::MutableOperandRange getDpsInitsMutable() { return getDstMutable(); }
-  }];
-}
-
-// ---- TCMPS ----
-def PTO_CmpSOp_DPS : PTO_DpsOp<"cmps_dps", [
-  OpPipeInterface,
-  DeclareOpInterfaceMethods<MemoryEffectsOpInterface>
-]> {
-  let summary = "Compare scalar value against a tile and write a packed predicate mask";
-
-  let arguments = (ins
-    PTODpsType:$src,
-    AnyTypeOf<[AnyFloat, AnySignlessInteger, Index]>:$scalar,
-    PTODpsType:$dst,
-    DefaultValuedAttr<PTO_CmpModeAttr, "::mlir::pto::CmpMode::EQ">:$cmpMode
-  );
-
-  let results = (outs);
-  let hasVerifier = 1;
-
-  let extraClassDeclaration = [{
-    ::mlir::pto::PIPE getPipe() { return ::mlir::pto::PIPE::PIPE_V; }
-    ::mlir::MutableOperandRange getDpsInitsMutable() { return getDstMutable(); }
-  }];
-
-  let assemblyFormat = [{
-    `ins` `(` $src `,` $scalar
-          (`{` `cmpMode` `=` $cmpMode^ `}`)?
-          `:` qualified(type($src)) `,` type($scalar) `)`
-    `outs` `(` $dst `:` qualified(type($dst) ) `)`
-    attr-dict
-  }];
-}
-
 //===----------------------------------------------------------------------===//
 // TCOLEXPAND (tilebuf, DPS style: ins/outs, 0 result)
 //===----------------------------------------------------------------------===//
 
-def PTO_ColExpandOp_DPS : PTO_DpsOp<"colexpand_dps", [
-  OpPipeInterface,
-  DeclareOpInterfaceMethods<MemoryEffectsOpInterface>
-]> {
-  let summary = "Broadcast src(0, j) to all rows in column j ";
-
-  let arguments = (ins
-    PTODpsType:$src,
-    PTODpsType:$dst
-  );
-
-  let results = (outs);
-
-  let hasVerifier = 1;
-
-  let assemblyFormat = [{
-    `ins` `(` $src `:` qualified(type($src)) `)`
-    `outs` `(` $dst `:` qualified(type($dst) ) `)`
-    attr-dict
-  }];
-
-  let extraClassDeclaration = [{
-    ::mlir::pto::PIPE getPipe() { return ::mlir::pto::PIPE::PIPE_V; }
-    ::mlir::MutableOperandRange getDpsInitsMutable() { return getDstMutable(); }
-  }];
-}
 //===----------------------------------------------------------------------===//
 // TCOLMAX (tilebuf, DPS style: ins/outs, 0 result)
 // dst[0, j] = max_i src[i, j]
 //===----------------------------------------------------------------------===//
 
-def PTO_ColMaxOp_DPS : PTO_DpsOp<"colmax_dps", [
-  OpPipeInterface,
-  DeclareOpInterfaceMethods<MemoryEffectsOpInterface>
-]> {
-  let summary = "Reduce each column by taking the maximum across rows ";
-
-  let arguments = (ins
-    PTODpsType:$src,
-    PTODpsType:$dst
-  );
-
-  let results = (outs);
-
-  let hasVerifier = 1;
-
-  let assemblyFormat = [{
-    `ins` `(` $src `:` qualified(type($src)) `)`
-    `outs` `(` $dst `:` qualified(type($dst) ) `)`
-    attr-dict
-  }];
-
-  let extraClassDeclaration = [{
-    ::mlir::pto::PIPE getPipe() { return ::mlir::pto::PIPE::PIPE_V; }
-    ::mlir::MutableOperandRange getDpsInitsMutable() { return getDstMutable(); }
-  }];
-}
 //===----------------------------------------------------------------------===//
 // TCOLMIN (tilebuf, DPS style: ins/outs, 0 result)
 // dst[0, j] = min_i src[i, j]
 //===----------------------------------------------------------------------===//
 
-def PTO_ColMinOp_DPS : PTO_DpsOp<"colmin_dps", [
-  OpPipeInterface,
-  DeclareOpInterfaceMethods<MemoryEffectsOpInterface>
-]> {
-  let summary = "Reduce each column by taking the minimum across rows ";
-
-  let arguments = (ins
-    PTODpsType:$src,
-    PTODpsType:$dst
-  );
-
-  let results = (outs);
-
-  let hasVerifier = 1;
-
-  let assemblyFormat = [{
-    `ins` `(` $src `:` qualified(type($src)) `)`
-    `outs` `(` $dst `:` qualified(type($dst) ) `)`
-    attr-dict
-  }];
-
-  let extraClassDeclaration = [{
-    ::mlir::pto::PIPE getPipe() { return ::mlir::pto::PIPE::PIPE_V; }
-    ::mlir::MutableOperandRange getDpsInitsMutable() { return getDstMutable(); }
-  }];
-}
 //===----------------------------------------------------------------------===//
 // TCOLSUM (tilebuf, DPS style: ins/outs, explicit tmp)
 // dst[0, j] = sum_i src[i, j]

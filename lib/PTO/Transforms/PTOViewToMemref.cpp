@@ -1508,7 +1508,7 @@ struct PTOViewToMemrefPass
           return;
         }
 
-         auto newOp = rewriter.create<pto::CmpOp_DPS>(
+         auto newOp = rewriter.create<pto::TCmpOp>(
             op.getLoc(),
             TypeRange{},
             src0,
@@ -1541,15 +1541,14 @@ struct PTOViewToMemrefPass
           return;
         }
 
-        auto newOp = rewriter.create<pto::CmpSOp_DPS>(
+        auto cmpMode = op.getCmpModeAttr();
+        auto newOp = rewriter.create<pto::TCmpSOp>(
             op.getLoc(),
             TypeRange{},
             src,
             scalar,
+            cmpMode,
             dst);
-
-        if (auto a = op.getCmpModeAttr())
-          newOp->setAttr("cmpMode", a);
 
         rewriter.replaceOp(op, newOp->getResults()); // 0 results -> OK
       }
@@ -1572,7 +1571,7 @@ struct PTOViewToMemrefPass
           return;
         }
 
-        rewriter.replaceOpWithNewOp<pto::ColExpandOp_DPS>(
+        rewriter.replaceOpWithNewOp<pto::TColExpandOp>(
             op,
             TypeRange{},
             src,
@@ -1597,7 +1596,7 @@ struct PTOViewToMemrefPass
           return;
         }
 
-        rewriter.replaceOpWithNewOp<pto::ColMaxOp_DPS>(
+        rewriter.replaceOpWithNewOp<pto::TColMaxOp>(
             op,
             TypeRange{},
             src,
@@ -1622,7 +1621,7 @@ struct PTOViewToMemrefPass
           return;
         }
 
-        rewriter.replaceOpWithNewOp<pto::ColMinOp_DPS>(
+        rewriter.replaceOpWithNewOp<pto::TColMinOp>(
             op,
             TypeRange{},
             src,

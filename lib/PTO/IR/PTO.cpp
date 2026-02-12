@@ -1199,88 +1199,6 @@ LogicalResult mlir::pto::TransOp::verify() {
 }
 
 
-LogicalResult pto::CmpOp_DPS::verify() {
-  auto dstTy  = dyn_cast<mlir::MemRefType>(getDst().getType());
-  auto src0Ty = dyn_cast<mlir::MemRefType>(getSrc0().getType());
-  auto src1Ty = dyn_cast<mlir::MemRefType>(getSrc1().getType());
-  if (!dstTy || !src0Ty || !src1Ty)
-    return emitOpError("expects dst/src0/src1 to be memref");
-
-  if (src0Ty.getElementType() != src1Ty.getElementType())
-    return emitOpError("expects src0/src1 element types to match");
-  return success();
-}
-
-// ---- TCMPS verify ----
-LogicalResult pto::CmpSOp_DPS::verify() {
-  auto dstTy = dyn_cast<mlir::MemRefType>(getDst().getType());
-  auto srcTy = dyn_cast<mlir::MemRefType>(getSrc().getType());
-  if (!dstTy || !srcTy)
-    return emitOpError("expects dst/src to be memref");
-
-  Type elemTy = srcTy.getElementType();
-  Type scalarTy = getScalar().getType();
-
-  if (scalarTy != elemTy)
-    return emitOpError("expects scalar type to match src element type");
-
-  return success();
-}
-LogicalResult pto::ColExpandOp_DPS::verify() {
-  auto dstTy = dyn_cast<mlir::MemRefType>(getDst().getType());
-  auto srcTy = dyn_cast<mlir::MemRefType>(getSrc().getType());
-  if (!dstTy || !srcTy)
-    return emitOpError("expects dst/src to be memref");
-
-  if (dstTy.getElementType() != srcTy.getElementType())
-    return emitOpError("expects dst/src element types to match");
-
-
-  return success();
-}
-LogicalResult pto::ColMaxOp_DPS::verify() {
-  auto srcTy = dyn_cast<mlir::MemRefType>(getSrc().getType());
-  auto dstTy = dyn_cast<mlir::MemRefType>(getDst().getType());
-  if (!srcTy || !dstTy)
-    return emitOpError("expects src/dst to be memref");
-
-  // element type must match
-  if (srcTy.getElementType() != dstTy.getElementType())
-    return emitOpError("expects src/dst element types to match");
-
-  if (srcTy.getRank() != dstTy.getRank())
-    return emitOpError("expects src/dst to have same rank");
-
-  if (srcTy.getRank() >= 2 && dstTy.getRank() >= 2) {
-    int64_t srcC = srcTy.getShape()[1];
-    int64_t dstC = dstTy.getShape()[1];
-    if (srcC != ShapedType::kDynamic && dstC != ShapedType::kDynamic && srcC != dstC)
-      return emitOpError("expects src/dst to have same number of columns (dim1)");
-  }
-
-  return success();
-}
-LogicalResult pto::ColMinOp_DPS::verify() {
-  auto srcTy = dyn_cast<mlir::MemRefType>(getSrc().getType());
-  auto dstTy = dyn_cast<mlir::MemRefType>(getDst().getType());
-  if (!srcTy || !dstTy)
-    return emitOpError("expects src/dst to be memref");
-
-  if (srcTy.getElementType() != dstTy.getElementType())
-    return emitOpError("expects src/dst element types to match");
-
-  if (srcTy.getRank() != dstTy.getRank())
-    return emitOpError("expects src/dst to have same rank");
-
-  if (srcTy.getRank() >= 2 && dstTy.getRank() >= 2) {
-    int64_t srcC = srcTy.getShape()[1];
-    int64_t dstC = dstTy.getShape()[1];
-    if (srcC != ShapedType::kDynamic && dstC != ShapedType::kDynamic && srcC != dstC)
-      return emitOpError("expects src/dst to have same number of columns (dim1)");
-  }
-
-  return success();
-}
 
 //===----------------------------------------------------------------------===//
 // ColSumOp_DPS custom assembly format
@@ -3524,85 +3442,75 @@ LogicalResult pto::TCIOp::verify() {
   return success();
 }
 LogicalResult pto::TCmpOp::verify() {
-  auto dstTy  = dyn_cast<mlir::pto::TileBufType>(getDst().getType());
-  auto src0Ty = dyn_cast<mlir::pto::TileBufType>(getSrc0().getType());
-  auto src1Ty = dyn_cast<mlir::pto::TileBufType>(getSrc1().getType());
-  if (!dstTy || !src0Ty || !src1Ty)
-    return emitOpError("expects dst/src0/src1 to be tilebuf");
-
-  if (src0Ty.getElementType() != src1Ty.getElementType())
-    return emitOpError("expects src0/src1 element types to match");
+  Type t0 = getSrc0().getType();
+  Type t1 = getSrc1().getType();
+  Type td = getDst().getType();
+  if (!isPTOShapedLike(t0) || !isPTOShapedLike(t1) || !isPTOShapedLike(td))
+    return emitOpError("expects src0/src1/dst to be PTO shaped-like types");
+  Type e0 = getElemTy(t0);
+  Type e1 = getElemTy(t1);
+  Type ed = getElemTy(td);
+  if (!e0 || !e1 || !ed)
+    return emitOpError("failed to get element type for src0/src1/dst");
+  if (e0 != e1)
+    return emitOpError("src0/src1 element types must match");
+  if (!ed.isIntOrIndex())
+    return emitOpError("dst element type must be integer/index mask type");
+  if (getShapeVec(t0) != getShapeVec(t1) || getShapeVec(t0) != getShapeVec(td))
+    return emitOpError("expects src0/src1/dst to have same shape");
   return success();
 }
 
 // ---- TCMPS verify ----
 LogicalResult pto::TCmpSOp::verify() {
-  auto dstTy = dyn_cast<mlir::pto::TileBufType>(getDst().getType());
-  auto srcTy = dyn_cast<mlir::pto::TileBufType>(getSrc().getType());
-  if (!dstTy || !srcTy)
-    return emitOpError("expects dst/src to be tilebuf");
-
-  Type elemTy = srcTy.getElementType();
+  Type srcTy = getSrc().getType();
+  Type dstTy = getDst().getType();
+  if (!isPTOShapedLike(srcTy) || !isPTOShapedLike(dstTy))
+    return emitOpError("expects src/dst to be PTO shaped-like types");
+  Type elemTy = getElemTy(srcTy);
+  Type dstElemTy = getElemTy(dstTy);
+  if (!elemTy || !dstElemTy)
+    return emitOpError("failed to get element type for src/dst");
+  if (!dstElemTy.isIntOrIndex())
+    return emitOpError("expects dst element type to be integer/index mask type");
   Type scalarTy = getScalar().getType();
-
   if (scalarTy != elemTy)
     return emitOpError("expects scalar type to match src element type");
-
+  if (getShapeVec(srcTy) != getShapeVec(dstTy))
+    return emitOpError("expects src/dst to have same shape");
   return success();
 }
 LogicalResult pto::TColExpandOp::verify() {
-  auto dstTy = dyn_cast<mlir::pto::TileBufType>(getDst().getType());
-  auto srcTy = dyn_cast<mlir::pto::TileBufType>(getSrc().getType());
-  if (!dstTy || !srcTy)
-    return emitOpError("expects dst/src to be tilebuf");
-
-  if (dstTy.getElementType() != srcTy.getElementType())
+  Type srcTy = getSrc().getType();
+  Type dstTy = getDst().getType();
+  if (!isPTOShapedLike(srcTy) || !isPTOShapedLike(dstTy))
+    return emitOpError("expects src/dst to be PTO shaped-like types");
+  if (getElemTy(srcTy) != getElemTy(dstTy))
     return emitOpError("expects dst/src element types to match");
-
-
+  if (getShapeVec(srcTy) != getShapeVec(dstTy))
+    return emitOpError("expects src/dst to have same shape");
   return success();
 }
 LogicalResult pto::TColMaxOp::verify() {
-  auto srcTy = dyn_cast<mlir::pto::TileBufType>(getSrc().getType());
-  auto dstTy = dyn_cast<mlir::pto::TileBufType>(getDst().getType());
-  if (!srcTy || !dstTy)
-    return emitOpError("expects src/dst to be tilebuf");
-
-  // element type must match
-  if (srcTy.getElementType() != dstTy.getElementType())
+  Type srcTy = getSrc().getType();
+  Type dstTy = getDst().getType();
+  if (!isPTOShapedLike(srcTy) || !isPTOShapedLike(dstTy))
+    return emitOpError("expects src/dst to be PTO shaped-like types");
+  if (getElemTy(srcTy) != getElemTy(dstTy))
     return emitOpError("expects src/dst element types to match");
-
-  if (srcTy.getRank() != dstTy.getRank())
-    return emitOpError("expects src/dst to have same rank");
-
-  if (srcTy.getRank() >= 2 && dstTy.getRank() >= 2) {
-    int64_t srcC = srcTy.getShape()[1];
-    int64_t dstC = dstTy.getShape()[1];
-    if (srcC != ShapedType::kDynamic && dstC != ShapedType::kDynamic && srcC != dstC)
-      return emitOpError("expects src/dst to have same number of columns (dim1)");
-  }
-
+  if (getShapeVec(srcTy) != getShapeVec(dstTy))
+    return emitOpError("expects src/dst to have same shape");
   return success();
 }
 LogicalResult pto::TColMinOp::verify() {
-  auto srcTy = dyn_cast<mlir::pto::TileBufType>(getSrc().getType());
-  auto dstTy = dyn_cast<mlir::pto::TileBufType>(getDst().getType());
-  if (!srcTy || !dstTy)
-    return emitOpError("expects src/dst to be tilebuf");
-
-  if (srcTy.getElementType() != dstTy.getElementType())
+  Type srcTy = getSrc().getType();
+  Type dstTy = getDst().getType();
+  if (!isPTOShapedLike(srcTy) || !isPTOShapedLike(dstTy))
+    return emitOpError("expects src/dst to be PTO shaped-like types");
+  if (getElemTy(srcTy) != getElemTy(dstTy))
     return emitOpError("expects src/dst element types to match");
-
-  if (srcTy.getRank() != dstTy.getRank())
-    return emitOpError("expects src/dst to have same rank");
-
-  if (srcTy.getRank() >= 2 && dstTy.getRank() >= 2) {
-    int64_t srcC = srcTy.getShape()[1];
-    int64_t dstC = dstTy.getShape()[1];
-    if (srcC != ShapedType::kDynamic && dstC != ShapedType::kDynamic && srcC != dstC)
-      return emitOpError("expects src/dst to have same number of columns (dim1)");
-  }
-
+  if (getShapeVec(srcTy) != getShapeVec(dstTy))
+    return emitOpError("expects src/dst to have same shape");
   return success();
 }
 
@@ -6749,19 +6657,6 @@ void StoreScalarOp::getEffects(
     SmallVectorImpl<SideEffects::EffectInstance<MemoryEffects::Effect>> &effects) {
   PTO_ADD_WRITE(getPtrMutable());
 }
-
-PTO_DEFINE_BINARY_EFFECTS(CmpOp_DPS, getSrc0Mutable(), getSrc1Mutable(), getDstMutable())
-
-void CmpSOp_DPS::getEffects(
-    SmallVectorImpl<SideEffects::EffectInstance<MemoryEffects::Effect>> &effects) {
-  PTO_ADD_READ(getSrcMutable());
-  PTO_ADD_READ(getScalarMutable());
-  PTO_ADD_WRITE(getDstMutable());
-}
-
-PTO_DEFINE_UNARY_EFFECTS(ColExpandOp_DPS, getSrcMutable(), getDstMutable())
-PTO_DEFINE_UNARY_EFFECTS(ColMaxOp_DPS, getSrcMutable(), getDstMutable())
-PTO_DEFINE_UNARY_EFFECTS(ColMinOp_DPS, getSrcMutable(), getDstMutable())
 
 void ColSumOp_DPS::getEffects(
     SmallVectorImpl<SideEffects::EffectInstance<MemoryEffects::Effect>> &effects) {

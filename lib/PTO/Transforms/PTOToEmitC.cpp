@@ -4205,10 +4205,10 @@ static std::string cmpModeTok(pto::CmpModeAttr a) {
   }
   return "CmpMode::EQ";
 }
-struct PTOColExpandToEmitC : public OpConversionPattern<pto::ColExpandOp_DPS> {
-  using OpConversionPattern<pto::ColExpandOp_DPS>::OpConversionPattern;
+struct PTOColExpandToEmitC : public OpConversionPattern<pto::TColExpandOp> {
+  using OpConversionPattern<pto::TColExpandOp>::OpConversionPattern;
 
-  LogicalResult matchAndRewrite(pto::ColExpandOp_DPS op, OpAdaptor adaptor,
+  LogicalResult matchAndRewrite(pto::TColExpandOp op, OpAdaptor adaptor,
                                 ConversionPatternRewriter &rewriter) const override {
     auto loc = op.getLoc();
     auto *ctx = rewriter.getContext();
@@ -4227,10 +4227,10 @@ struct PTOColExpandToEmitC : public OpConversionPattern<pto::ColExpandOp_DPS> {
   }
 };
 
-struct PTOCmpToEmitC : public OpConversionPattern<pto::CmpOp_DPS> {
-  using OpConversionPattern<pto::CmpOp_DPS>::OpConversionPattern;
+struct PTOCmpToEmitC : public OpConversionPattern<pto::TCmpOp> {
+  using OpConversionPattern<pto::TCmpOp>::OpConversionPattern;
 
-  LogicalResult matchAndRewrite(pto::CmpOp_DPS op, OpAdaptor adaptor,
+  LogicalResult matchAndRewrite(pto::TCmpOp op, OpAdaptor adaptor,
                                 ConversionPatternRewriter &rewriter) const override {
     auto loc = op.getLoc();
     auto *ctx = rewriter.getContext();
@@ -4262,10 +4262,10 @@ struct PTOCmpToEmitC : public OpConversionPattern<pto::CmpOp_DPS> {
   }
 };
 
-struct PTOCmpSToEmitC : public OpConversionPattern<pto::CmpSOp_DPS> {
-  using OpConversionPattern<pto::CmpSOp_DPS>::OpConversionPattern;
+struct PTOCmpSToEmitC : public OpConversionPattern<pto::TCmpSOp> {
+  using OpConversionPattern<pto::TCmpSOp>::OpConversionPattern;
 
-  LogicalResult matchAndRewrite(pto::CmpSOp_DPS op, OpAdaptor adaptor,
+  LogicalResult matchAndRewrite(pto::TCmpSOp op, OpAdaptor adaptor,
                                 ConversionPatternRewriter &rewriter) const override {
     auto loc = op.getLoc();
     auto *ctx = rewriter.getContext();
@@ -4296,10 +4296,10 @@ struct PTOCmpSToEmitC : public OpConversionPattern<pto::CmpSOp_DPS> {
 };
 
 
-struct PTOColMaxToEmitC : public OpConversionPattern<pto::ColMaxOp_DPS> {
-  using OpConversionPattern<pto::ColMaxOp_DPS>::OpConversionPattern;
+struct PTOColMaxToEmitC : public OpConversionPattern<pto::TColMaxOp> {
+  using OpConversionPattern<pto::TColMaxOp>::OpConversionPattern;
 
-  LogicalResult matchAndRewrite(pto::ColMaxOp_DPS op, OpAdaptor adaptor,
+  LogicalResult matchAndRewrite(pto::TColMaxOp op, OpAdaptor adaptor,
                                 ConversionPatternRewriter &rewriter) const override {
     auto loc = op.getLoc();
     auto *ctx = rewriter.getContext();
@@ -4318,10 +4318,10 @@ struct PTOColMaxToEmitC : public OpConversionPattern<pto::ColMaxOp_DPS> {
     return success();
   }
 };
-struct PTOColMinToEmitC : public OpConversionPattern<pto::ColMinOp_DPS> {
-  using OpConversionPattern<pto::ColMinOp_DPS>::OpConversionPattern;
+struct PTOColMinToEmitC : public OpConversionPattern<pto::TColMinOp> {
+  using OpConversionPattern<pto::TColMinOp>::OpConversionPattern;
 
-  LogicalResult matchAndRewrite(pto::ColMinOp_DPS op, OpAdaptor adaptor,
+  LogicalResult matchAndRewrite(pto::TColMinOp op, OpAdaptor adaptor,
                                 ConversionPatternRewriter &rewriter) const override {
     auto loc = op.getLoc();
     auto *ctx = rewriter.getContext();
