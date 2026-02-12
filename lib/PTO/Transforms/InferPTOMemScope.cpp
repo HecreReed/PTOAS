@@ -223,7 +223,7 @@ LogicalResult pto::inferAndPropagateMemScopeForMovDps(pto::MovDpsOp op) {
   return success();
 }
 
-LogicalResult pto::inferAndPropagateMemScopeForMatmulAccDps(pto::MatmulAccDpsOp op) {
+LogicalResult pto::inferAndPropagateMemScopeForMatmulAccDps(pto::TMatmulAccOp op) {
   // 替换 hasPureBufferSemantics()
   // 在 PTO 的语义中，如果 Op 没有返回值 (Result)，就意味着它是 Buffer 语义（操作的是 TileBuf 或 MemRef）
   if (op.getNumResults() != 0) {
@@ -369,7 +369,7 @@ LogicalResult pto::inferAndPropagateMemScopeForMatmulBiasDps(pto::TMatmulBiasOp 
   return success();
 }
 
-LogicalResult pto::inferAndPropagateMemScopeForMatmulDps(pto::MatmulDpsOp op) {
+LogicalResult pto::inferAndPropagateMemScopeForMatmulDps(pto::TMatmulOp op) {
   // 替换 hasPureBufferSemantics()
   // 在 PTO 的语义中，如果 Op 没有返回值 (Result)，就意味着它是 Buffer 语义（操作的是 TileBuf 或 MemRef）
   if (op.getNumResults() != 0) {
@@ -646,12 +646,12 @@ void InferPTOMemScopePass::runOnOperation() {
   // Infer and propagate memory scope for device functions.
   for (auto func : deviceFuncList) {
     // Set the memory scope of values related to `pto::MmadL1Op` to L1 or L0C.
-    func->walk([&](mlir::pto::MatmulDpsOp op) {
+    func->walk([&](mlir::pto::TMatmulOp op) {
       if (failed(pto::inferAndPropagateMemScopeForMatmulDps(op)))
         signalPassFailure();
     });
 
-    func->walk([&](mlir::pto::MatmulAccDpsOp op) {
+    func->walk([&](mlir::pto::TMatmulAccOp op) {
       if (failed(pto::inferAndPropagateMemScopeForMatmulAccDps(op)))
         signalPassFailure();
     });

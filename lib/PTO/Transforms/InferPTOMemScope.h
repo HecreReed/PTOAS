@@ -48,8 +48,8 @@ private:
 /// \note MmadL1Op should be bufferized beforehand.
 //LogicalResult inferAndPropagateMemScopeForMmadL1(MmadL1Op op);
 
-LogicalResult inferAndPropagateMemScopeForMatmulDps(MatmulDpsOp op);
-LogicalResult inferAndPropagateMemScopeForMatmulAccDps(MatmulAccDpsOp op);
+LogicalResult inferAndPropagateMemScopeForMatmulDps(TMatmulOp op);
+LogicalResult inferAndPropagateMemScopeForMatmulAccDps(TMatmulAccOp op);
 LogicalResult inferAndPropagateMemScopeForMatmulBiasDps(TMatmulBiasOp op);
 LogicalResult inferAndPropagateMemScopeForMovDps(MovDpsOp op);
 /// Infer, propagate, and set memory scope information to FuncOp.

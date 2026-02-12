@@ -400,8 +400,8 @@ def TStoreOp: PTO_TOp<"tstore", [
   }];
 
   let arguments = (ins
-    TileBufType:$src,
-    PartitionTensorViewType:$dst
+    PTODpsType:$src,
+    PTODpsType:$dst
   );
 
   let results = (outs
@@ -649,15 +649,17 @@ def TMatmulOp : PTO_TOp<"tmatmul", [
   let summary = "PTO matrix multiplication operation (optional bias), destination-style (DPS) in tile world.";
 
   let arguments = (ins
-    TileBufType:$lhs,
-    TileBufType:$rhs,
-    Optional<TileBufType>:$bias,
-    TileBufType:$dst
+    PTODpsType:$lhs,
+    PTODpsType:$rhs,
+    Optional<PTODpsType>:$bias,
+    PTODpsType:$dst
   );
 
   let results = (outs
     Optional<AnyRankedTensor>:$result
   );
+
+  let hasVerifier = 1;
 
   let assemblyFormat = [{
     `ins` `(` $lhs `,` $rhs `:` qualified(type($lhs)) `,` qualified(type($rhs)) `)`
@@ -682,15 +684,17 @@ def TMatmulAccOp : PTO_TOp<"tmatmul.acc", [
   let summary = "PTO matrix multiplication accumulate operation, destination-style (DPS, no bias).";
 
   let arguments = (ins
-    TileBufType:$acc_in,
-    TileBufType:$lhs,
-    TileBufType:$rhs,
-    TileBufType:$dst
+    PTODpsType:$acc_in,
+    PTODpsType:$lhs,
+    PTODpsType:$rhs,
+    PTODpsType:$dst
   );
 
   let results = (outs
     Optional<AnyRankedTensor>:$result
   );
+
+  let hasVerifier = 1;
 
   let assemblyFormat = [{
     `ins` `(` $acc_in `,` $lhs `,` $rhs `:` qualified(type($acc_in) ) `,` qualified(type($lhs)) `,` qualified(type($rhs)) `)`
@@ -805,8 +809,8 @@ def TMovOp  : PTO_TOp<"tmov", [
   let summary = "Move data between domains (DPS version).";
   
   let arguments = (ins
-    TileBufType:$src,
-    TileBufType:$dst
+    PTODpsType:$src,
+    PTODpsType:$dst
   );
 
   let results = (outs
@@ -856,138 +860,6 @@ def TMovOp  : PTO_TOp<"tmov", [
 
       // Fallback: treat as vector pipe (safe default for most intra-domain moves).
       return ::mlir::pto::PIPE::PIPE_V;
-    }
-  }];
-}
-
-def CopyOp : PTO_DpsOp<"copy",[
-    OpPipeInterface,
-    DeclareOpInterfaceMethods<MemoryEffectsOpInterface>
-  ]> {
-  let summary = "PTO data copy operation";
-  let description = [{
-    Copy the data between local memory hierarchies.
-    Currently support:
-      - UB to UB
-      - UB to L1 (for Ascend910_95 series)
-
-    Examples:
-    ```mlir
-    pto.hir.copy ins(%src : memref<16x16xf16, #pto.address_space<ub>>) outs(%dst : memref<16x16xf16, #pto.address_space<ub>>)
-    ```
-
-    Constraints:
-    - `src` and `dst` are expected to have the same element type.
-    - If `pad_mode` is not set, `src` and `dst` shape should be the same.
-    - Only support left padding.
-    - `pad_value` should have the same element type as `src` and `dst`.
-  }];
-  let arguments = (ins TensorOrMemref:$src,
-                       TensorOrMemref:$dst,
-                       OptionalAttr<PTO_PadModeAttr>:$pad_mode,
-                       Optional<AnyType>:$pad_value
-  );
-  let results = (outs Optional<AnyRankedTensor>:$result_tensor);
-  let builders = [
-    OpBuilder<(ins "TypeRange":$result_tensor, "Value":$src, "Value":$dst)>,
-    OpBuilder<(ins "TypeRange":$result_tensor, "Value":$src, "Value":$dst)>
-  ];
-  let assemblyFormat = [{
-    `ins` `(` $src `:` qualified(type($src)) `)`
-    `outs` `(` $dst `:` qualified(type($dst) ) `)`
-    attr-dict
-    (`pad_mode` `=` $pad_mode^)?
-    (`pad_value` `=` $pad_value^ `:` type($pad_value))?
-    (`->` qualified(type($result_tensor) )^)?
-  }];
-
-  let extraClassDeclaration = [{
-    ::mlir::pto::PIPE getPipe();
-    static StringRef getOpName() { return "pto_copy"; }
-    ::mlir::MutableOperandRange getDpsInitsMutable() {
-        return getDstMutable();
-    }
-  }];
-}
-
-def TransDpsOp : PTO_DpsOp<"trans_dps", [
-  OpPipeInterface,
-  DeclareOpInterfaceMethods<MemoryEffectsOpInterface>
-]> {
-  let summary = "PTO matrix transpose operation (destination-style, DPS).";
-  let description = [{
-    DPS form:
-      tile buf:  pto.trans_dps ins(%src) outs(%dst)
-  }];
-  let arguments = (ins
-    PTODpsType:$src,
-    PTODpsType:$tmp,
-    PTODpsType:$dst);
-  let results = (outs);
-
-  let assemblyFormat = [{
-    `ins` `(` $src `,` $tmp `:` qualified(type($src)) `,` qualified(type($tmp)) `)`
-    `outs` `(` $dst `:` qualified(type($dst) ) `)`
-    attr-dict
-  }];
-
-  let extraClassDeclaration = [{
-    // TTRANS is a vector compute op (V pipe). The inserted sync pass relies on
-    // this pipe classification to build correct event dependencies.
-    ::mlir::pto::PIPE getPipe() { return ::mlir::pto::PIPE::PIPE_V; }
-    ::mlir::MutableOperandRange getDpsInitsMutable() { return getDstMutable(); }
-  }];
-}
-
-def StoreDpsOp : PTO_DpsOp<"store_dps", [
-  OpPipeInterface,
-  DeclareOpInterfaceMethods<MemoryEffectsOpInterface>
-]> {
-  let summary = "PTO data store operation (destination-style, DPS).";
-  let description = [{
-    DPS form:
-      tensor:  %res = pto.store_dps ins(%src) outs(%dst) -> tensor<...>  (optional result)
-      memref:  pto.store_dps ins(%src) outs(%dst)
-  }];
-
-  let arguments = (ins
-    PTODpsType:$src,
-    PTODpsType:$dst);
-
-  let results = (outs
-    Optional<AnyRankedTensor>:$result
-  );
-
-  let hasVerifier = 1;
-
-  let assemblyFormat = [{
-    `ins` `(` $src `:` qualified(type($src)) `)`
-    `outs` `(` $dst `:` qualified(type($dst) ) `)`
-    attr-dict
-    (`->` qualified(type($result))^)?
-  }];
-  
-  let extraClassDeclaration = [{
-    ::mlir::pto::PIPE getPipe() {
-      // ACC (L0C) -> GM stores are implemented via FIX-pipe instructions in
-      // pto-isa; other domains use MTE3.
-      if (auto tb = ::mlir::dyn_cast<::mlir::pto::TileBufType>(getSrc().getType())) {
-        if (auto as = ::mlir::dyn_cast_or_null<::mlir::pto::AddressSpaceAttr>(
-                tb.getMemorySpace())) {
-          if (as.getAddressSpace() == ::mlir::pto::AddressSpace::ACC)
-            return ::mlir::pto::PIPE::PIPE_FIX;
-        }
-      } else if (auto mr = ::mlir::dyn_cast<::mlir::MemRefType>(getSrc().getType())) {
-        if (auto as = ::mlir::dyn_cast_or_null<::mlir::pto::AddressSpaceAttr>(
-                mr.getMemorySpace())) {
-          if (as.getAddressSpace() == ::mlir::pto::AddressSpace::ACC)
-            return ::mlir::pto::PIPE::PIPE_FIX;
-        }
-      }
-      return ::mlir::pto::PIPE::PIPE_MTE3;
-    }
-    ::mlir::MutableOperandRange getDpsInitsMutable() {
-        return getDstMutable();
     }
   }];
 }
@@ -1353,47 +1225,6 @@ def BarrierOp : PTO_Op<"barrier"> {
 // Matmul Ops
 //===----------------------------------------------------------------------===//
 
-def MatmulDpsOp : PTO_DpsOp<"matmul_dps", [
-    DeclareOpInterfaceMethods<InferTypeOpInterface>,
-    OpPipeInterface,
-    DeclareOpInterfaceMethods<MemoryEffectsOpInterface>
-  ]> {
-  let summary = "PTO matrix multiplication operation (optional bias), destination-style (DPS).";
-
-  let arguments = (ins
-    PTODpsType:$lhs, // L0A Buffer
-    PTODpsType:$rhs, // L0B Buffer
-    Optional<PTODpsType>:$bias, // L1 Bias (Optional)
-    PTODpsType:$dst , // L0C Buffer (Accumulator)
- 
-    // 硬件关键属性
-    DefaultValuedAttr<BoolAttr, "false">:$transpose_a,
-    DefaultValuedAttr<BoolAttr, "false">:$transpose_b
-  );
-
-  let results = (outs
-    Optional<AnyRankedTensor>:$result
-  );
-
-  let hasVerifier = 1;
-
-  let assemblyFormat = [{
-    `ins` `(` $lhs `,` $rhs `:` qualified(type($lhs)) `,` qualified(type($rhs)) `)`
-    ( `bias` `=` $bias^ `:` qualified(type($bias)) )?
-    `outs` `(` $dst `:` qualified(type($dst) ) `)`
-    attr-dict
-    ( `->` qualified(type($result))^ )?
-  }];
-
-  let extraClassDeclaration = [{
-   ::mlir::pto::PIPE getPipe() { return ::mlir::pto::PIPE::PIPE_M; }
-    static StringRef getOpName() { return "matmul_dps"; }
-    ::mlir::MutableOperandRange getDpsInitsMutable() {
-      return getDstMutable();
-    }
-  }];
-}
-
 def MatmulOp : PTO_Op<"matmul", [
     DeclareOpInterfaceMethods<InferTypeOpInterface>
   ]> {
@@ -1441,39 +1272,6 @@ def MatmulAccOp : PTO_Op<"matmul_acc", [
     `ins` `(` $acc_in `,` $lhs `,` $rhs `:` qualified(type($acc_in) ) `,` qualified(type($lhs)) `,` qualified(type($rhs)) `)`
     attr-dict
     `->` qualified(type($result))
-  }];
-}
-
-def MatmulAccDpsOp : PTO_DpsOp<"matmul_acc_dps", [
-    DeclareOpInterfaceMethods<InferTypeOpInterface>,
-    OpPipeInterface,
-    DeclareOpInterfaceMethods<MemoryEffectsOpInterface>
-  ]> {
-  let summary = "PTO matrix multiplication accumulate operation, destination-style (DPS, no bias).";
-
-  let arguments = (ins
-    PTODpsType:$acc_in,
-    PTODpsType:$lhs,
-    PTODpsType:$rhs,
-    PTODpsType:$dst
-  );
-
-  let results = (outs
-    Optional<AnyRankedTensor>:$result
-  );
-
-  let hasVerifier = 1;
-
-  let assemblyFormat = [{
-    `ins` `(` $acc_in `,` $lhs `,` $rhs `:` qualified(type($acc_in) ) `,` qualified(type($lhs)) `,` qualified(type($rhs)) `)`
-    `outs` `(` $dst `:` qualified(type($dst) ) `)`
-    attr-dict
-    ( `->` qualified(type($result))^ )?
-  }];
-
-  let extraClassDeclaration = [{
-    ::mlir::pto::PIPE getPipe() { return ::mlir::pto::PIPE::PIPE_M; }
-    ::mlir::MutableOperandRange getDpsInitsMutable() { return getDstMutable(); }
   }];
 }
 

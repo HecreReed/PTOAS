@@ -129,15 +129,15 @@ struct HighDimLoadDPSLowering : public OpRewritePattern<pto::TLoadOp> {
 };
 
 // --------------------------------------------------------------------------
-// Specialized Lowering for StoreDpsOp
+// Specialized Lowering for TStoreOp
 // --------------------------------------------------------------------------
-struct HighDimStoreDPSLowering : public OpRewritePattern<pto::StoreDpsOp> {
-  using OpRewritePattern<pto::StoreDpsOp>::OpRewritePattern;
+struct HighDimStoreDPSLowering : public OpRewritePattern<pto::TStoreOp> {
+  using OpRewritePattern<pto::TStoreOp>::OpRewritePattern;
 
-  LogicalResult matchAndRewrite(pto::StoreDpsOp op, PatternRewriter &rewriter) const override {
+  LogicalResult matchAndRewrite(pto::TStoreOp op, PatternRewriter &rewriter) const override {
     Location loc = op.getLoc();
 
-    llvm::errs() << "\n=== [PTOHighDim] Start Matching StoreDpsOp ===\n";
+    llvm::errs() << "\n=== [PTOHighDim] Start Matching TStoreOp ===\n";
 
     Value src = op.getSrc();
     Value dst = op.getDst();
@@ -159,7 +159,7 @@ struct HighDimStoreDPSLowering : public OpRewritePattern<pto::StoreDpsOp> {
           Value subSrc = createSlice(builder, loc, src, srcType, ivs, outerDimsCount, rank);
           Value subDst = createSlice(builder, loc, dst, dstType, ivs, outerDimsCount, rank);
 
-          builder.create<pto::StoreDpsOp>(
+          builder.create<pto::TStoreOp>(
               loc, TypeRange{}, subSrc, subDst
           );
         });

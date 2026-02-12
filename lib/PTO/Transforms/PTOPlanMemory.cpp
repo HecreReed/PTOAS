@@ -149,6 +149,50 @@ void MemLivenessAnalysis::RecursionIR(Region *region, Liveness live) {
       // tci is a write(dst) op with scalar seed S.
       UpdateOpGenInfo(curOpInfo, llvm::to_vector(tciOp->getOperands()));
       OpKillHandle(curOpInfo, live, op->getBlock());
+    } else if (auto tloadOp = dyn_cast<pto::TLoadOp>(op)) {
+      (void)tloadOp;
+      UpdateOpGenInfo(curOpInfo, llvm::to_vector(op->getOperands()));
+      OpKillHandle(curOpInfo, live, op->getBlock());
+    } else if (auto tstoreOp = dyn_cast<pto::TStoreOp>(op)) {
+      (void)tstoreOp;
+      UpdateOpGenInfo(curOpInfo, llvm::to_vector(op->getOperands()));
+      OpKillHandle(curOpInfo, live, op->getBlock());
+    } else if (auto tmovOp = dyn_cast<pto::TMovOp>(op)) {
+      (void)tmovOp;
+      UpdateOpGenInfo(curOpInfo, llvm::to_vector(op->getOperands()));
+      OpKillHandle(curOpInfo, live, op->getBlock());
+    } else if (auto ttransOp = dyn_cast<pto::TTransOp>(op)) {
+      (void)ttransOp;
+      UpdateOpGenInfo(curOpInfo, llvm::to_vector(op->getOperands()));
+      OpKillHandle(curOpInfo, live, op->getBlock());
+    } else if (auto tmatmulOp = dyn_cast<pto::TMatmulOp>(op)) {
+      (void)tmatmulOp;
+      UpdateOpGenInfo(curOpInfo, llvm::to_vector(op->getOperands()));
+      OpKillHandle(curOpInfo, live, op->getBlock());
+    } else if (auto tmatmulAccOp = dyn_cast<pto::TMatmulAccOp>(op)) {
+      (void)tmatmulAccOp;
+      UpdateOpGenInfo(curOpInfo, llvm::to_vector(op->getOperands()));
+      OpKillHandle(curOpInfo, live, op->getBlock());
+    } else if (auto movDpsOp = dyn_cast<pto::MovDpsOp>(op)) {
+      (void)movDpsOp;
+      UpdateOpGenInfo(curOpInfo, llvm::to_vector(op->getOperands()));
+      OpKillHandle(curOpInfo, live, op->getBlock());
+    } else if (auto tmatmulBiasOp = dyn_cast<pto::TMatmulBiasOp>(op)) {
+      (void)tmatmulBiasOp;
+      UpdateOpGenInfo(curOpInfo, llvm::to_vector(op->getOperands()));
+      OpKillHandle(curOpInfo, live, op->getBlock());
+    } else if (auto tmatmulMxOp = dyn_cast<pto::TMatmulMxOp>(op)) {
+      (void)tmatmulMxOp;
+      UpdateOpGenInfo(curOpInfo, llvm::to_vector(op->getOperands()));
+      OpKillHandle(curOpInfo, live, op->getBlock());
+    } else if (auto tmatmulMxAccOp = dyn_cast<pto::TMatmulMxAccOp>(op)) {
+      (void)tmatmulMxAccOp;
+      UpdateOpGenInfo(curOpInfo, llvm::to_vector(op->getOperands()));
+      OpKillHandle(curOpInfo, live, op->getBlock());
+    } else if (auto tmatmulMxBiasOp = dyn_cast<pto::TMatmulMxBiasOp>(op)) {
+      (void)tmatmulMxBiasOp;
+      UpdateOpGenInfo(curOpInfo, llvm::to_vector(op->getOperands()));
+      OpKillHandle(curOpInfo, live, op->getBlock());
     } else if (auto storeOp = dyn_cast<memref::StoreOp>(op)) {
       UpdateStoreOpInfo(curOpInfo, storeOp.getMemRef(), live);
     } else if (auto dstStyleOp = dyn_cast<DestinationStyleOpInterface>(op)) {

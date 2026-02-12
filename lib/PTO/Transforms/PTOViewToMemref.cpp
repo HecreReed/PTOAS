@@ -1015,7 +1015,7 @@ struct PTOViewToMemrefPass
 
         auto config = lookupConfig(src); // Config on Tile
 
-        rewriter.replaceOpWithNewOp<pto::StoreDpsOp>(op, TypeRange{}, src, dst);
+        rewriter.replaceOpWithNewOp<pto::TStoreOp>(op, TypeRange{}, src, dst);
       }
 
        // --- TTransOp [Src, Tmp, Dst] ---
@@ -1024,7 +1024,7 @@ struct PTOViewToMemrefPass
       for (auto op : trans) {
         IRRewriter rewriter(ctx);
         rewriter.setInsertionPoint(op);
-        rewriter.replaceOpWithNewOp<pto::TransDpsOp>(
+        rewriter.replaceOpWithNewOp<pto::TTransOp>(
             op, TypeRange{}, op->getOperand(0), op->getOperand(1), op->getOperand(2));
       }
 
@@ -1148,7 +1148,7 @@ struct PTOViewToMemrefPass
 
         auto config = lookupConfig(lhs);
 
-        rewriter.replaceOpWithNewOp<pto::MatmulDpsOp>(
+        rewriter.replaceOpWithNewOp<pto::TMatmulOp>(
           op, TypeRange{}, lhs, rhs, bias, dst);
       }
 
@@ -1158,7 +1158,7 @@ struct PTOViewToMemrefPass
       for (auto op : matmulAccs) {
         IRRewriter rewriter(ctx);
         rewriter.setInsertionPoint(op);
-        rewriter.replaceOpWithNewOp<pto::MatmulAccDpsOp>(
+        rewriter.replaceOpWithNewOp<pto::TMatmulAccOp>(
           op, TypeRange{}, 
           op->getOperand(0), op->getOperand(1), op->getOperand(2), op->getOperand(3));
       }

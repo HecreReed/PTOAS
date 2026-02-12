@@ -114,7 +114,7 @@ static bool match(func::FuncOp func, MatchInfo &mi) {
 
   // 1) find matmul_dps and dst(CC)
   for (Operation &op : func.front().getOperations()) {
-    if (op.getName().getStringRef() != "pto.matmul_dps")
+    if (op.getName().getStringRef() != "pto.tmatmul")
       continue;
     if (op.getNumOperands() < 1)
       continue;
@@ -130,7 +130,7 @@ static bool match(func::FuncOp func, MatchInfo &mi) {
 
   // 2) find final store_dps (CBUF -> GM)
   for (Operation &op : func.front().getOperations()) {
-    if (op.getName().getStringRef() != "pto.store_dps")
+    if (op.getName().getStringRef() != "pto.tstore")
       continue;
     if (op.getNumOperands() < 2)
       continue;
@@ -165,7 +165,7 @@ static bool match(func::FuncOp func, MatchInfo &mi) {
   // 4) locate CC->CBUF op producing one add input
   auto isCCtoCBUF = [&](Operation *op, Value &dstOut) -> bool {
     StringRef n = op->getName().getStringRef();
-    if (n != "pto.tload" && n != "pto.copy" && n != "pto.mov")
+    if (n != "pto.tload" && n != "pto.tmov" && n != "pto.mov")
       return false;
     if (op->getNumOperands() < 2)
       return false;
@@ -335,7 +335,7 @@ struct InsertLoadStoreForMixCVPass
         loc, wsTileTy, argWS, c0, ValueRange{}).getResult();
 
     // CC -> workspace(GM)
-    rewriter.create<pto::StoreDpsOp>(loc, TypeRange{}, mi.mmCCBuf, wsTile);
+    rewriter.create<pto::TStoreOp>(loc, TypeRange{}, mi.mmCCBuf, wsTile);
 
     // workspace(GM) -> UB
     auto tmatUb = createAllocWithAlign(rewriter, loc, ubTileTy, 64);
@@ -351,7 +351,7 @@ struct InsertLoadStoreForMixCVPass
                                     tmatUb.getResult(), outUb.getResult());
 
     // UB -> OUT(GM)
-    rewriter.create<pto::StoreDpsOp>(loc, TypeRange{}, outUb.getResult(), mi.outGMSubview);
+    rewriter.create<pto::TStoreOp>(loc, TypeRange{}, outUb.getResult(), mi.outGMSubview);
 
     // (H) erase old tail ops
     rewriter.eraseOp(mi.storeToOut);
