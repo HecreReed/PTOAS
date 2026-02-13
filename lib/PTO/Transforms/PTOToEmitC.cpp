@@ -5219,10 +5219,10 @@ struct PTOPartAddToEmitC : public OpConversionPattern<pto::TPartAddOp> {
 // PTOConvert.cpp  (add lowering + patterns.add for TPARTMAX DPS/memref op)
 //===----------------------------------------------------------------------===//
 
-struct PTOPartMaxToEmitC : public OpConversionPattern<pto::PartMaxOp_DPS> {
-  using OpConversionPattern<pto::PartMaxOp_DPS>::OpConversionPattern;
+struct PTOPartMaxToEmitC : public OpConversionPattern<pto::TPartMaxOp> {
+  using OpConversionPattern<pto::TPartMaxOp>::OpConversionPattern;
 
-  LogicalResult matchAndRewrite(pto::PartMaxOp_DPS op, OpAdaptor adaptor,
+  LogicalResult matchAndRewrite(pto::TPartMaxOp op, OpAdaptor adaptor,
                                 ConversionPatternRewriter &rewriter) const override {
     auto loc = op.getLoc();
 
@@ -5245,10 +5245,10 @@ struct PTOPartMaxToEmitC : public OpConversionPattern<pto::PartMaxOp_DPS> {
 // PTOConvert.cpp  (add lowering + patterns.add for TPARTMIN DPS/memref op)
 //===----------------------------------------------------------------------===//
 
-struct PTOPartMinToEmitC : public OpConversionPattern<pto::PartMinOp_DPS> {
-  using OpConversionPattern<pto::PartMinOp_DPS>::OpConversionPattern;
+struct PTOPartMinToEmitC : public OpConversionPattern<pto::TPartMinOp> {
+  using OpConversionPattern<pto::TPartMinOp>::OpConversionPattern;
 
-  LogicalResult matchAndRewrite(pto::PartMinOp_DPS op, OpAdaptor adaptor,
+  LogicalResult matchAndRewrite(pto::TPartMinOp op, OpAdaptor adaptor,
                                 ConversionPatternRewriter &rewriter) const override {
     auto loc = op.getLoc();
 
@@ -5270,10 +5270,10 @@ struct PTOPartMinToEmitC : public OpConversionPattern<pto::PartMinOp_DPS> {
 // PTOConvert.cpp  (add lowering + patterns.add for TPRELU DPS/memref op)
 //===----------------------------------------------------------------------===//
 
-struct PTOPreluToEmitC : public OpConversionPattern<pto::PreluOp_DPS> {
-  using OpConversionPattern<pto::PreluOp_DPS>::OpConversionPattern;
+struct PTOPreluToEmitC : public OpConversionPattern<pto::TPreluOp> {
+  using OpConversionPattern<pto::TPreluOp>::OpConversionPattern;
 
-  LogicalResult matchAndRewrite(pto::PreluOp_DPS op, OpAdaptor adaptor,
+  LogicalResult matchAndRewrite(pto::TPreluOp op, OpAdaptor adaptor,
                                 ConversionPatternRewriter &rewriter) const override {
     auto loc = op.getLoc();
 
@@ -5297,10 +5297,10 @@ struct PTOPreluToEmitC : public OpConversionPattern<pto::PreluOp_DPS> {
 // PTOConvert.cpp  (add lowering + patterns.add for TRECIP DPS/memref op)
 //===----------------------------------------------------------------------===//
 
-struct PTORecipToEmitC : public OpConversionPattern<pto::RecipOp_DPS> {
-  using OpConversionPattern<pto::RecipOp_DPS>::OpConversionPattern;
+struct PTORecipToEmitC : public OpConversionPattern<pto::TRecipOp> {
+  using OpConversionPattern<pto::TRecipOp>::OpConversionPattern;
 
-  LogicalResult matchAndRewrite(pto::RecipOp_DPS op, OpAdaptor adaptor,
+  LogicalResult matchAndRewrite(pto::TRecipOp op, OpAdaptor adaptor,
                                 ConversionPatternRewriter &rewriter) const override {
     auto loc = op.getLoc();
 
@@ -5321,10 +5321,10 @@ struct PTORecipToEmitC : public OpConversionPattern<pto::RecipOp_DPS> {
 // PTOConvert.cpp  (add lowering + patterns.add for TRELU DPS/memref op)
 //===----------------------------------------------------------------------===//
 
-struct PTOReluToEmitC : public OpConversionPattern<pto::ReluOp_DPS> {
-  using OpConversionPattern<pto::ReluOp_DPS>::OpConversionPattern;
+struct PTOReluToEmitC : public OpConversionPattern<pto::TReluOp> {
+  using OpConversionPattern<pto::TReluOp>::OpConversionPattern;
 
-  LogicalResult matchAndRewrite(pto::ReluOp_DPS op, OpAdaptor adaptor,
+  LogicalResult matchAndRewrite(pto::TReluOp op, OpAdaptor adaptor,
                                 ConversionPatternRewriter &rewriter) const override {
     auto loc = op.getLoc();
 

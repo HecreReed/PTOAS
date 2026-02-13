@@ -281,6 +281,26 @@ void MemLivenessAnalysis::RecursionIR(Region *region, Liveness live) {
       (void)tpartaddOp;
       UpdateOpGenInfo(curOpInfo, llvm::to_vector(op->getOperands()));
       OpKillHandle(curOpInfo, live, op->getBlock());
+    } else if (auto tpartmaxOp = dyn_cast<pto::TPartMaxOp>(op)) {
+      (void)tpartmaxOp;
+      UpdateOpGenInfo(curOpInfo, llvm::to_vector(op->getOperands()));
+      OpKillHandle(curOpInfo, live, op->getBlock());
+    } else if (auto tpartminOp = dyn_cast<pto::TPartMinOp>(op)) {
+      (void)tpartminOp;
+      UpdateOpGenInfo(curOpInfo, llvm::to_vector(op->getOperands()));
+      OpKillHandle(curOpInfo, live, op->getBlock());
+    } else if (auto tpreluOp = dyn_cast<pto::TPreluOp>(op)) {
+      (void)tpreluOp;
+      UpdateOpGenInfo(curOpInfo, llvm::to_vector(op->getOperands()));
+      OpKillHandle(curOpInfo, live, op->getBlock());
+    } else if (auto trecipOp = dyn_cast<pto::TRecipOp>(op)) {
+      (void)trecipOp;
+      UpdateOpGenInfo(curOpInfo, llvm::to_vector(op->getOperands()));
+      OpKillHandle(curOpInfo, live, op->getBlock());
+    } else if (auto treluOp = dyn_cast<pto::TReluOp>(op)) {
+      (void)treluOp;
+      UpdateOpGenInfo(curOpInfo, llvm::to_vector(op->getOperands()));
+      OpKillHandle(curOpInfo, live, op->getBlock());
     } else if (auto tgemvOp = dyn_cast<pto::TGemvOp>(op)) {
       (void)tgemvOp;
       UpdateOpGenInfo(curOpInfo, llvm::to_vector(op->getOperands()));
