@@ -269,25 +269,30 @@ struct ArithUnsignedBitwiseBinaryToEmitC : public OpConversionPattern<ArithOp> {
   matchAndRewrite(ArithOp op, typename ArithOp::Adaptor adaptor,
                   ConversionPatternRewriter &rewriter) const override {
     auto loc = op.getLoc();
-    auto intTy = dyn_cast<IntegerType>(op.getType());
-    if (!intTy)
-      return rewriter.notifyMatchFailure(op, "expected scalar integer type");
+    Type opTy = op.getType();
+    auto intTy = dyn_cast<IntegerType>(opTy);
+    const bool isIndex = isa<IndexType>(opTy);
+    if (!intTy && !isIndex)
+      return rewriter.notifyMatchFailure(op, "expected scalar integer or index type");
 
-    Type dstTy = this->getTypeConverter()->convertType(intTy);
+    const unsigned bitWidth =
+        intTy ? intTy.getWidth() : static_cast<unsigned>(kPTOIndexBitWidth);
+
+    Type dstTy = this->getTypeConverter()->convertType(opTy);
     if (!dstTy)
       return failure();
 
-    if (intTy.getWidth() == 1) {
-      rewriter.replaceOpWithNewOp<EmitCOp>(op, intTy, adaptor.getLhs(),
+    if (bitWidth == 1) {
+      rewriter.replaceOpWithNewOp<EmitCOp>(op, dstTy, adaptor.getLhs(),
                                            adaptor.getRhs());
       return success();
     }
 
-    auto uTy = getUnsignedIntOpaqueType(rewriter.getContext(), intTy.getWidth());
+    auto uTy = getUnsignedIntOpaqueType(rewriter.getContext(), bitWidth);
     Value lhsU = castSignlessIntToUnsignedSameWidth(rewriter, loc, adaptor.getLhs(),
-                                                    intTy.getWidth());
+                                                    bitWidth);
     Value rhsU = castSignlessIntToUnsignedSameWidth(rewriter, loc, adaptor.getRhs(),
-                                                    intTy.getWidth());
+                                                    bitWidth);
     Value resU = rewriter.create<EmitCOp>(loc, uTy, lhsU, rhsU);
     Value result = emitCCast(rewriter, loc, dstTy, resU);
     rewriter.replaceOp(op, result);
@@ -300,19 +305,24 @@ struct ArithDivUIToEmitC : public OpConversionPattern<arith::DivUIOp> {
   LogicalResult matchAndRewrite(arith::DivUIOp op, OpAdaptor adaptor,
                                 ConversionPatternRewriter &rewriter) const override {
     auto loc = op.getLoc();
-    auto intTy = dyn_cast<IntegerType>(op.getType());
-    if (!intTy)
-      return rewriter.notifyMatchFailure(op, "expected scalar integer type");
+    Type opTy = op.getType();
+    auto intTy = dyn_cast<IntegerType>(opTy);
+    const bool isIndex = isa<IndexType>(opTy);
+    if (!intTy && !isIndex)
+      return rewriter.notifyMatchFailure(op, "expected scalar integer or index type");
 
-    Type dstTy = getTypeConverter()->convertType(intTy);
+    const unsigned bitWidth =
+        intTy ? intTy.getWidth() : static_cast<unsigned>(kPTOIndexBitWidth);
+
+    Type dstTy = getTypeConverter()->convertType(opTy);
     if (!dstTy)
       return failure();
 
-    auto uTy = getUnsignedIntOpaqueType(rewriter.getContext(), intTy.getWidth());
+    auto uTy = getUnsignedIntOpaqueType(rewriter.getContext(), bitWidth);
     Value lhsU = castSignlessIntToUnsignedSameWidth(rewriter, loc, adaptor.getLhs(),
-                                                    intTy.getWidth());
+                                                    bitWidth);
     Value rhsU = castSignlessIntToUnsignedSameWidth(rewriter, loc, adaptor.getRhs(),
-                                                    intTy.getWidth());
+                                                    bitWidth);
     Value divU = rewriter.create<emitc::DivOp>(loc, uTy, lhsU, rhsU);
     Value result = emitCCast(rewriter, loc, dstTy, divU);
     rewriter.replaceOp(op, result);
@@ -325,19 +335,24 @@ struct ArithRemUIToEmitC : public OpConversionPattern<arith::RemUIOp> {
   LogicalResult matchAndRewrite(arith::RemUIOp op, OpAdaptor adaptor,
                                 ConversionPatternRewriter &rewriter) const override {
     auto loc = op.getLoc();
-    auto intTy = dyn_cast<IntegerType>(op.getType());
-    if (!intTy)
-      return rewriter.notifyMatchFailure(op, "expected scalar integer type");
+    Type opTy = op.getType();
+    auto intTy = dyn_cast<IntegerType>(opTy);
+    const bool isIndex = isa<IndexType>(opTy);
+    if (!intTy && !isIndex)
+      return rewriter.notifyMatchFailure(op, "expected scalar integer or index type");
 
-    Type dstTy = getTypeConverter()->convertType(intTy);
+    const unsigned bitWidth =
+        intTy ? intTy.getWidth() : static_cast<unsigned>(kPTOIndexBitWidth);
+
+    Type dstTy = getTypeConverter()->convertType(opTy);
     if (!dstTy)
       return failure();
 
-    auto uTy = getUnsignedIntOpaqueType(rewriter.getContext(), intTy.getWidth());
+    auto uTy = getUnsignedIntOpaqueType(rewriter.getContext(), bitWidth);
     Value lhsU = castSignlessIntToUnsignedSameWidth(rewriter, loc, adaptor.getLhs(),
-                                                    intTy.getWidth());
+                                                    bitWidth);
     Value rhsU = castSignlessIntToUnsignedSameWidth(rewriter, loc, adaptor.getRhs(),
-                                                    intTy.getWidth());
+                                                    bitWidth);
     Value remU = rewriter.create<emitc::RemOp>(loc, uTy, lhsU, rhsU);
     Value result = emitCCast(rewriter, loc, dstTy, remU);
     rewriter.replaceOp(op, result);
@@ -350,19 +365,24 @@ struct ArithCeilDivUIToEmitC : public OpConversionPattern<arith::CeilDivUIOp> {
   LogicalResult matchAndRewrite(arith::CeilDivUIOp op, OpAdaptor adaptor,
                                 ConversionPatternRewriter &rewriter) const override {
     auto loc = op.getLoc();
-    auto intTy = dyn_cast<IntegerType>(op.getType());
-    if (!intTy)
-      return rewriter.notifyMatchFailure(op, "expected scalar integer type");
+    Type opTy = op.getType();
+    auto intTy = dyn_cast<IntegerType>(opTy);
+    const bool isIndex = isa<IndexType>(opTy);
+    if (!intTy && !isIndex)
+      return rewriter.notifyMatchFailure(op, "expected scalar integer or index type");
 
-    Type dstTy = getTypeConverter()->convertType(intTy);
+    const unsigned bitWidth =
+        intTy ? intTy.getWidth() : static_cast<unsigned>(kPTOIndexBitWidth);
+
+    Type dstTy = getTypeConverter()->convertType(opTy);
     if (!dstTy)
       return failure();
 
-    auto uTy = getUnsignedIntOpaqueType(rewriter.getContext(), intTy.getWidth());
+    auto uTy = getUnsignedIntOpaqueType(rewriter.getContext(), bitWidth);
     Value lhsU = castSignlessIntToUnsignedSameWidth(rewriter, loc, adaptor.getLhs(),
-                                                    intTy.getWidth());
+                                                    bitWidth);
     Value rhsU = castSignlessIntToUnsignedSameWidth(rewriter, loc, adaptor.getRhs(),
-                                                    intTy.getWidth());
+                                                    bitWidth);
     Value one = makeEmitCIntConstant(rewriter, loc, uTy, 1);
     Value rhsMinusOne = rewriter.create<emitc::SubOp>(loc, uTy, rhsU, one);
     Value num = rewriter.create<emitc::AddOp>(loc, uTy, lhsU, rhsMinusOne);
@@ -378,11 +398,13 @@ struct ArithCeilDivSIToEmitC : public OpConversionPattern<arith::CeilDivSIOp> {
   LogicalResult matchAndRewrite(arith::CeilDivSIOp op, OpAdaptor adaptor,
                                 ConversionPatternRewriter &rewriter) const override {
     auto loc = op.getLoc();
-    auto intTy = dyn_cast<IntegerType>(op.getType());
-    if (!intTy)
-      return rewriter.notifyMatchFailure(op, "expected scalar integer type");
+    Type opTy = op.getType();
+    auto intTy = dyn_cast<IntegerType>(opTy);
+    const bool isIndex = isa<IndexType>(opTy);
+    if (!intTy && !isIndex)
+      return rewriter.notifyMatchFailure(op, "expected scalar integer or index type");
 
-    Type dstTy = getTypeConverter()->convertType(intTy);
+    Type dstTy = getTypeConverter()->convertType(opTy);
     if (!dstTy)
       return failure();
 
@@ -425,11 +447,13 @@ struct ArithFloorDivSIToEmitC : public OpConversionPattern<arith::FloorDivSIOp> 
   LogicalResult matchAndRewrite(arith::FloorDivSIOp op, OpAdaptor adaptor,
                                 ConversionPatternRewriter &rewriter) const override {
     auto loc = op.getLoc();
-    auto intTy = dyn_cast<IntegerType>(op.getType());
-    if (!intTy)
-      return rewriter.notifyMatchFailure(op, "expected scalar integer type");
+    Type opTy = op.getType();
+    auto intTy = dyn_cast<IntegerType>(opTy);
+    const bool isIndex = isa<IndexType>(opTy);
+    if (!intTy && !isIndex)
+      return rewriter.notifyMatchFailure(op, "expected scalar integer or index type");
 
-    Type dstTy = getTypeConverter()->convertType(intTy);
+    Type dstTy = getTypeConverter()->convertType(opTy);
     if (!dstTy)
       return failure();
 
@@ -472,15 +496,20 @@ struct ArithShiftLeftToEmitC : public OpConversionPattern<arith::ShLIOp> {
   LogicalResult matchAndRewrite(arith::ShLIOp op, OpAdaptor adaptor,
                                 ConversionPatternRewriter &rewriter) const override {
     auto loc = op.getLoc();
-    auto intTy = dyn_cast<IntegerType>(op.getType());
-    if (!intTy)
-      return rewriter.notifyMatchFailure(op, "expected scalar integer type");
+    Type opTy = op.getType();
+    auto intTy = dyn_cast<IntegerType>(opTy);
+    const bool isIndex = isa<IndexType>(opTy);
+    if (!intTy && !isIndex)
+      return rewriter.notifyMatchFailure(op, "expected scalar integer or index type");
 
-    Type dstTy = getTypeConverter()->convertType(intTy);
+    const unsigned bitWidth =
+        intTy ? intTy.getWidth() : static_cast<unsigned>(kPTOIndexBitWidth);
+
+    Type dstTy = getTypeConverter()->convertType(opTy);
     if (!dstTy)
       return failure();
 
-    if (intTy.getWidth() == 1) {
+    if (bitWidth == 1) {
       // Compute on u8 and truncate to i1.
       auto u8Ty = getUnsignedIntOpaqueType(rewriter.getContext(), 8);
       Value lhsU8 = emitCCast(rewriter, loc, u8Ty, adaptor.getLhs());
@@ -495,11 +524,11 @@ struct ArithShiftLeftToEmitC : public OpConversionPattern<arith::ShLIOp> {
       return success();
     }
 
-    auto uTy = getUnsignedIntOpaqueType(rewriter.getContext(), intTy.getWidth());
+    auto uTy = getUnsignedIntOpaqueType(rewriter.getContext(), bitWidth);
     Value lhsU = castSignlessIntToUnsignedSameWidth(rewriter, loc, adaptor.getLhs(),
-                                                    intTy.getWidth());
+                                                    bitWidth);
     Value rhsU = castSignlessIntToUnsignedSameWidth(rewriter, loc, adaptor.getRhs(),
-                                                    intTy.getWidth());
+                                                    bitWidth);
     Value shU =
         rewriter.create<emitc::BitwiseLeftShiftOp>(loc, uTy, lhsU, rhsU);
     Value result = emitCCast(rewriter, loc, dstTy, shU);
@@ -513,15 +542,20 @@ struct ArithShiftRightUIToEmitC : public OpConversionPattern<arith::ShRUIOp> {
   LogicalResult matchAndRewrite(arith::ShRUIOp op, OpAdaptor adaptor,
                                 ConversionPatternRewriter &rewriter) const override {
     auto loc = op.getLoc();
-    auto intTy = dyn_cast<IntegerType>(op.getType());
-    if (!intTy)
-      return rewriter.notifyMatchFailure(op, "expected scalar integer type");
+    Type opTy = op.getType();
+    auto intTy = dyn_cast<IntegerType>(opTy);
+    const bool isIndex = isa<IndexType>(opTy);
+    if (!intTy && !isIndex)
+      return rewriter.notifyMatchFailure(op, "expected scalar integer or index type");
 
-    Type dstTy = getTypeConverter()->convertType(intTy);
+    const unsigned bitWidth =
+        intTy ? intTy.getWidth() : static_cast<unsigned>(kPTOIndexBitWidth);
+
+    Type dstTy = getTypeConverter()->convertType(opTy);
     if (!dstTy)
       return failure();
 
-    if (intTy.getWidth() == 1) {
+    if (bitWidth == 1) {
       // (x >> y) on i1 is either x (y==0) or 0 (y!=0); approximate in u8.
       auto u8Ty = getUnsignedIntOpaqueType(rewriter.getContext(), 8);
       Value lhsU8 = emitCCast(rewriter, loc, u8Ty, adaptor.getLhs());
@@ -536,11 +570,11 @@ struct ArithShiftRightUIToEmitC : public OpConversionPattern<arith::ShRUIOp> {
       return success();
     }
 
-    auto uTy = getUnsignedIntOpaqueType(rewriter.getContext(), intTy.getWidth());
+    auto uTy = getUnsignedIntOpaqueType(rewriter.getContext(), bitWidth);
     Value lhsU = castSignlessIntToUnsignedSameWidth(rewriter, loc, adaptor.getLhs(),
-                                                    intTy.getWidth());
+                                                    bitWidth);
     Value rhsU = castSignlessIntToUnsignedSameWidth(rewriter, loc, adaptor.getRhs(),
-                                                    intTy.getWidth());
+                                                    bitWidth);
     Value shU =
         rewriter.create<emitc::BitwiseRightShiftOp>(loc, uTy, lhsU, rhsU);
     Value result = emitCCast(rewriter, loc, dstTy, shU);
@@ -554,15 +588,20 @@ struct ArithShiftRightSIToEmitC : public OpConversionPattern<arith::ShRSIOp> {
   LogicalResult matchAndRewrite(arith::ShRSIOp op, OpAdaptor adaptor,
                                 ConversionPatternRewriter &rewriter) const override {
     auto loc = op.getLoc();
-    auto intTy = dyn_cast<IntegerType>(op.getType());
-    if (!intTy)
-      return rewriter.notifyMatchFailure(op, "expected scalar integer type");
+    Type opTy = op.getType();
+    auto intTy = dyn_cast<IntegerType>(opTy);
+    const bool isIndex = isa<IndexType>(opTy);
+    if (!intTy && !isIndex)
+      return rewriter.notifyMatchFailure(op, "expected scalar integer or index type");
 
-    Type dstTy = getTypeConverter()->convertType(intTy);
+    const unsigned bitWidth =
+        intTy ? intTy.getWidth() : static_cast<unsigned>(kPTOIndexBitWidth);
+
+    Type dstTy = getTypeConverter()->convertType(opTy);
     if (!dstTy)
       return failure();
 
-    if (intTy.getWidth() == 1) {
+    if (bitWidth == 1) {
       // (x >> y) on i1 is either x (y==0) or 0 (y!=0); approximate in u8.
       auto u8Ty = getUnsignedIntOpaqueType(rewriter.getContext(), 8);
       Value lhsU8 = emitCCast(rewriter, loc, u8Ty, adaptor.getLhs());
@@ -578,9 +617,8 @@ struct ArithShiftRightSIToEmitC : public OpConversionPattern<arith::ShRSIOp> {
     }
 
     // Signed arithmetic shift; cast RHS to unsigned to interpret shift amount.
-    auto uShiftTy = getUnsignedIntOpaqueType(rewriter.getContext(), intTy.getWidth());
     Value rhsU = castSignlessIntToUnsignedSameWidth(rewriter, loc, adaptor.getRhs(),
-                                                    intTy.getWidth());
+                                                    bitWidth);
     Value sh =
         rewriter.create<emitc::BitwiseRightShiftOp>(loc, dstTy, adaptor.getLhs(),
                                                     rhsU);
@@ -1025,9 +1063,15 @@ struct ArithAddUIExtendedToEmitC
   matchAndRewrite(arith::AddUIExtendedOp op, OpAdaptor adaptor,
                   ConversionPatternRewriter &rewriter) const override {
     auto loc = op.getLoc();
-    auto intTy = dyn_cast<IntegerType>(op.getSum().getType());
-    if (!intTy)
-      return rewriter.notifyMatchFailure(op, "expected scalar integer operands");
+    Type opTy = op.getSum().getType();
+    auto intTy = dyn_cast<IntegerType>(opTy);
+    const bool isIndex = isa<IndexType>(opTy);
+    if (!intTy && !isIndex)
+      return rewriter.notifyMatchFailure(op,
+                                         "expected scalar integer or index operands");
+
+    const unsigned bitWidth =
+        intTy ? intTy.getWidth() : static_cast<unsigned>(kPTOIndexBitWidth);
 
     SmallVector<Type> newResultTypes;
     if (failed(getTypeConverter()->convertTypes(op->getResultTypes(),
@@ -1039,14 +1083,13 @@ struct ArithAddUIExtendedToEmitC
     Type sumDstTy = newResultTypes[0];
     Type overflowDstTy = newResultTypes[1];
 
-    auto uTy = getUnsignedIntOpaqueType(rewriter.getContext(), intTy.getWidth());
-    auto wideTy =
-        getWiderUnsignedIntOpaqueType(rewriter.getContext(), intTy.getWidth());
+    auto uTy = getUnsignedIntOpaqueType(rewriter.getContext(), bitWidth);
+    auto wideTy = getWiderUnsignedIntOpaqueType(rewriter.getContext(), bitWidth);
 
     Value lhsU = castSignlessIntToUnsignedSameWidth(rewriter, loc, adaptor.getLhs(),
-                                                    intTy.getWidth());
+                                                    bitWidth);
     Value rhsU = castSignlessIntToUnsignedSameWidth(rewriter, loc, adaptor.getRhs(),
-                                                    intTy.getWidth());
+                                                    bitWidth);
     Value lhsWide = emitCCast(rewriter, loc, wideTy, lhsU);
     Value rhsWide = emitCCast(rewriter, loc, wideTy, rhsU);
     Value sumWide =
@@ -1055,7 +1098,7 @@ struct ArithAddUIExtendedToEmitC
     Value sumN = emitCCast(rewriter, loc, uTy, sumWide);
     Value sum = emitCCast(rewriter, loc, sumDstTy, sumN);
 
-    Value shiftAmt = makeEmitCIntConstant(rewriter, loc, wideTy, intTy.getWidth());
+    Value shiftAmt = makeEmitCIntConstant(rewriter, loc, wideTy, bitWidth);
     Value high = rewriter
                      .create<emitc::BitwiseRightShiftOp>(loc, wideTy, sumWide,
                                                          shiftAmt)
@@ -1080,9 +1123,15 @@ struct ArithMulExtendedToEmitC : public OpConversionPattern<ArithOp> {
   LogicalResult matchAndRewrite(ArithOp op, typename ArithOp::Adaptor adaptor,
                                 ConversionPatternRewriter &rewriter) const override {
     auto loc = op.getLoc();
-    auto intTy = dyn_cast<IntegerType>(op.getResult(0).getType());
-    if (!intTy)
-      return rewriter.notifyMatchFailure(op, "expected scalar integer operands");
+    Type opTy = op.getResult(0).getType();
+    auto intTy = dyn_cast<IntegerType>(opTy);
+    const bool isIndex = isa<IndexType>(opTy);
+    if (!intTy && !isIndex)
+      return rewriter.notifyMatchFailure(op,
+                                         "expected scalar integer or index operands");
+
+    const unsigned bitWidth =
+        intTy ? intTy.getWidth() : static_cast<unsigned>(kPTOIndexBitWidth);
 
     SmallVector<Type> newResultTypes;
     if (failed(this->getTypeConverter()->convertTypes(op->getResultTypes(),
@@ -1095,17 +1144,17 @@ struct ArithMulExtendedToEmitC : public OpConversionPattern<ArithOp> {
     Type highDstTy = newResultTypes[1];
 
     Type wideTy = isUnsigned ? (Type)getWiderUnsignedIntOpaqueType(rewriter.getContext(),
-                                                                   intTy.getWidth())
+                                                                   bitWidth)
                              : (Type)getWiderSignedIntOpaqueType(rewriter.getContext(),
-                                                                 intTy.getWidth());
+                                                                 bitWidth);
 
     Value lhsWide;
     Value rhsWide;
     if constexpr (isUnsigned) {
       Value lhsU = castSignlessIntToUnsignedSameWidth(rewriter, loc, adaptor.getLhs(),
-                                                      intTy.getWidth());
+                                                      bitWidth);
       Value rhsU = castSignlessIntToUnsignedSameWidth(rewriter, loc, adaptor.getRhs(),
-                                                      intTy.getWidth());
+                                                      bitWidth);
       lhsWide = emitCCast(rewriter, loc, wideTy, lhsU);
       rhsWide = emitCCast(rewriter, loc, wideTy, rhsU);
     } else {
@@ -1117,7 +1166,7 @@ struct ArithMulExtendedToEmitC : public OpConversionPattern<ArithOp> {
         rewriter.create<emitc::MulOp>(loc, wideTy, lhsWide, rhsWide).getResult();
     Value low = emitCCast(rewriter, loc, lowDstTy, prodWide);
 
-    Value shiftAmt = makeEmitCIntConstant(rewriter, loc, wideTy, intTy.getWidth());
+    Value shiftAmt = makeEmitCIntConstant(rewriter, loc, wideTy, bitWidth);
     Value highWide = rewriter
                          .create<emitc::BitwiseRightShiftOp>(loc, wideTy, prodWide,
                                                              shiftAmt)
@@ -1191,19 +1240,25 @@ struct ArithMaxUIToEmitC : public OpConversionPattern<arith::MaxUIOp>,
   LogicalResult matchAndRewrite(arith::MaxUIOp op, OpAdaptor adaptor,
                                 ConversionPatternRewriter &rewriter) const override {
     auto loc = op.getLoc();
-    auto intTy = dyn_cast<IntegerType>(op.getType());
-    if (!intTy)
-      return rewriter.notifyMatchFailure(op, "expected scalar integer type");
-    Type dstTy = getTypeConverter()->convertType(intTy);
+    Type opTy = op.getType();
+    auto intTy = dyn_cast<IntegerType>(opTy);
+    const bool isIndex = isa<IndexType>(opTy);
+    if (!intTy && !isIndex)
+      return rewriter.notifyMatchFailure(op, "expected scalar integer or index type");
+
+    const unsigned bitWidth =
+        intTy ? intTy.getWidth() : static_cast<unsigned>(kPTOIndexBitWidth);
+
+    Type dstTy = getTypeConverter()->convertType(opTy);
     if (!dstTy)
       return failure();
 
     Value lhsU =
         castSignlessIntToUnsignedSameWidth(rewriter, loc, adaptor.getLhs(),
-                                           intTy.getWidth());
+                                           bitWidth);
     Value rhsU =
         castSignlessIntToUnsignedSameWidth(rewriter, loc, adaptor.getRhs(),
-                                           intTy.getWidth());
+                                           bitWidth);
     Value cond = rewriter
                      .create<emitc::CmpOp>(loc, rewriter.getI1Type(),
                                            emitc::CmpPredicate::lt, lhsU, rhsU)
@@ -1221,19 +1276,25 @@ struct ArithMinUIToEmitC : public OpConversionPattern<arith::MinUIOp>,
   LogicalResult matchAndRewrite(arith::MinUIOp op, OpAdaptor adaptor,
                                 ConversionPatternRewriter &rewriter) const override {
     auto loc = op.getLoc();
-    auto intTy = dyn_cast<IntegerType>(op.getType());
-    if (!intTy)
-      return rewriter.notifyMatchFailure(op, "expected scalar integer type");
-    Type dstTy = getTypeConverter()->convertType(intTy);
+    Type opTy = op.getType();
+    auto intTy = dyn_cast<IntegerType>(opTy);
+    const bool isIndex = isa<IndexType>(opTy);
+    if (!intTy && !isIndex)
+      return rewriter.notifyMatchFailure(op, "expected scalar integer or index type");
+
+    const unsigned bitWidth =
+        intTy ? intTy.getWidth() : static_cast<unsigned>(kPTOIndexBitWidth);
+
+    Type dstTy = getTypeConverter()->convertType(opTy);
     if (!dstTy)
       return failure();
 
     Value lhsU =
         castSignlessIntToUnsignedSameWidth(rewriter, loc, adaptor.getLhs(),
-                                           intTy.getWidth());
+                                           bitWidth);
     Value rhsU =
         castSignlessIntToUnsignedSameWidth(rewriter, loc, adaptor.getRhs(),
-                                           intTy.getWidth());
+                                           bitWidth);
     Value cond = rewriter
                      .create<emitc::CmpOp>(loc, rewriter.getI1Type(),
                                            emitc::CmpPredicate::lt, lhsU, rhsU)
@@ -6120,12 +6181,18 @@ public:
     Value lhs = adaptor.getLhs();
     Value rhs = adaptor.getRhs();
     if (isUnsignedPred) {
-      auto intTy = dyn_cast<IntegerType>(op.getLhs().getType());
-      if (!intTy)
-        return rewriter.notifyMatchFailure(op, "expected scalar integer operands");
-      if (intTy.getWidth() != 1) {
-        lhs = castSignlessIntToUnsignedSameWidth(rewriter, loc, lhs, intTy.getWidth());
-        rhs = castSignlessIntToUnsignedSameWidth(rewriter, loc, rhs, intTy.getWidth());
+      Type opTy = op.getLhs().getType();
+      auto intTy = dyn_cast<IntegerType>(opTy);
+      const bool isIndex = isa<IndexType>(opTy);
+      if (!intTy && !isIndex)
+        return rewriter.notifyMatchFailure(
+            op, "expected scalar integer or index operands");
+
+      const unsigned bitWidth =
+          intTy ? intTy.getWidth() : static_cast<unsigned>(kPTOIndexBitWidth);
+      if (bitWidth != 1) {
+        lhs = castSignlessIntToUnsignedSameWidth(rewriter, loc, lhs, bitWidth);
+        rhs = castSignlessIntToUnsignedSameWidth(rewriter, loc, rhs, bitWidth);
       }
     }
 
