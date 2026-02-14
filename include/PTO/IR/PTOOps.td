@@ -281,6 +281,7 @@ def PTO_SubsetOp : PTO_Op<"subset", [
 // DPS versions in tile world
 // -------------------------
 def TLoadOp  : PTO_TOp<"tload", [
+  PTO_DpsInitOpInterface,
   AttrSizedOperandSegments,
   OpPipeInterface,
   DeclareOpInterfaceMethods<MemoryEffectsOpInterface>
@@ -384,10 +385,12 @@ def TLoadOp  : PTO_TOp<"tload", [
     ::mlir::pto::PIPE getPipe() {
       return ::mlir::pto::PIPE::PIPE_MTE2;
     }
+    ::mlir::MutableOperandRange getDpsInitsMutable() { return getDstMutable(); }
   }];
 }
 
 def TStoreOp: PTO_TOp<"tstore", [
+  PTO_DpsInitOpInterface,
   OpPipeInterface,
   DeclareOpInterfaceMethods<MemoryEffectsOpInterface>
 ]> {
@@ -434,6 +437,7 @@ def TStoreOp: PTO_TOp<"tstore", [
       }
       return ::mlir::pto::PIPE::PIPE_MTE3;
     }
+    ::mlir::MutableOperandRange getDpsInitsMutable() { return getDstMutable(); }
   }];
 }
 
@@ -460,6 +464,7 @@ class PTO_TBinaryFloatOp<string mnemonic, list<Trait> traits = []>
 }
 
 def TTransOp : PTO_TOp<"ttrans", [
+  PTO_DpsInitOpInterface,
   OpPipeInterface,
   DeclareOpInterfaceMethods<MemoryEffectsOpInterface>
 ]> {
@@ -508,6 +513,7 @@ def TTransOp : PTO_TOp<"ttrans", [
 // -------------------------
 
 def TMatmulBiasOp : PTO_TOp<"tmatmul.bias", [
+  PTO_DpsInitOpInterface,
   OpPipeInterface,
   DeclareOpInterfaceMethods<MemoryEffectsOpInterface>
 ]> {
@@ -539,11 +545,13 @@ def TMatmulBiasOp : PTO_TOp<"tmatmul.bias", [
   let extraClassDeclaration = [{
     static StringRef getIntrinsicName() { return "TMATMUL_BIAS"; }
     ::mlir::pto::PIPE getPipe() { return ::mlir::pto::PIPE::PIPE_M; }
+    ::mlir::MutableOperandRange getDpsInitsMutable() { return getDstMutable(); }
   }];
 }
 
 // pto.tmatmul.mx ins(%a,%a_scale,%b,%b_scale) outs(%dst) -> tensor?
 def TMatmulMxOp : PTO_TOp<"tmatmul.mx", [
+    PTO_DpsInitOpInterface,
     OpPipeInterface,
     DeclareOpInterfaceMethods<MemoryEffectsOpInterface>
   ]> {
@@ -572,11 +580,13 @@ def TMatmulMxOp : PTO_TOp<"tmatmul.mx", [
     ::mlir::pto::PIPE getPipe() {
       return ::mlir::pto::PIPE::PIPE_M;
     }
+    ::mlir::MutableOperandRange getDpsInitsMutable() { return getDstMutable(); }
   }];
 }
 
 // pto.tmatmul.mx.acc ins(%c_in,%a,%a_scale,%b,%b_scale) outs(%dst) -> tensor?
 def TMatmulMxAccOp : PTO_TOp<"tmatmul.mx.acc", [
+  PTO_DpsInitOpInterface,
   OpPipeInterface,
   DeclareOpInterfaceMethods<MemoryEffectsOpInterface>
 ]> {
@@ -606,11 +616,13 @@ def TMatmulMxAccOp : PTO_TOp<"tmatmul.mx.acc", [
     ::mlir::pto::PIPE getPipe() {
       return ::mlir::pto::PIPE::PIPE_M;
     }
+    ::mlir::MutableOperandRange getDpsInitsMutable() { return getDstMutable(); }
   }];
 }
 
 // pto.tmatmul.mx.bias ins(%a,%a_scale,%b,%b_scale,%bias) outs(%dst)  -> tensor?
 def TMatmulMxBiasOp : PTO_TOp<"tmatmul.mx.bias",[
+  PTO_DpsInitOpInterface,
   OpPipeInterface,
   DeclareOpInterfaceMethods<MemoryEffectsOpInterface>
 ]> {
@@ -639,10 +651,12 @@ def TMatmulMxBiasOp : PTO_TOp<"tmatmul.mx.bias",[
   let extraClassDeclaration = [{
     static StringRef getIntrinsicName() { return "TMATMUL_MX_BIAS"; }
     ::mlir::pto::PIPE getPipe() { return ::mlir::pto::PIPE::PIPE_M; }
+    ::mlir::MutableOperandRange getDpsInitsMutable() { return getDstMutable(); }
   }];
 }
 
 def TMatmulOp : PTO_TOp<"tmatmul", [
+  PTO_DpsInitOpInterface,
   OpPipeInterface,
   DeclareOpInterfaceMethods<MemoryEffectsOpInterface>
 ]> {
@@ -674,10 +688,12 @@ def TMatmulOp : PTO_TOp<"tmatmul", [
     ::mlir::pto::PIPE getPipe() {
       return ::mlir::pto::PIPE::PIPE_M; 
     }
+    ::mlir::MutableOperandRange getDpsInitsMutable() { return getDstMutable(); }
   }];
 }
 
 def TMatmulAccOp : PTO_TOp<"tmatmul.acc", [
+  PTO_DpsInitOpInterface,
   OpPipeInterface,
   DeclareOpInterfaceMethods<MemoryEffectsOpInterface>
 ]> {
@@ -707,10 +723,12 @@ def TMatmulAccOp : PTO_TOp<"tmatmul.acc", [
       ::mlir::pto::PIPE getPipe() {
         return ::mlir::pto::PIPE::PIPE_M; 
       }
+      ::mlir::MutableOperandRange getDpsInitsMutable() { return getDstMutable(); }
   }];
 }
 
 def TGemvOp : PTO_TOp<"tgemv", [
+  PTO_DpsInitOpInterface,
   OpPipeInterface,
   DeclareOpInterfaceMethods<MemoryEffectsOpInterface>
 ]> {
@@ -740,10 +758,12 @@ def TGemvOp : PTO_TOp<"tgemv", [
     ::mlir::pto::PIPE getPipe() {
       return ::mlir::pto::PIPE::PIPE_M; 
     }
+    ::mlir::MutableOperandRange getDpsInitsMutable() { return getDstMutable(); }
   }];
 }
 
 def TGemvAccOp : PTO_TOp<"tgemv.acc", [
+  PTO_DpsInitOpInterface,
   OpPipeInterface,
   DeclareOpInterfaceMethods<MemoryEffectsOpInterface>
 ]> {
@@ -773,10 +793,12 @@ def TGemvAccOp : PTO_TOp<"tgemv.acc", [
       ::mlir::pto::PIPE getPipe() {
         return ::mlir::pto::PIPE::PIPE_M; 
       }
+      ::mlir::MutableOperandRange getDpsInitsMutable() { return getDstMutable(); }
   }];
 }
 
 def TGemvBiasOp : PTO_TOp<"tgemv.bias", [
+  PTO_DpsInitOpInterface,
   OpPipeInterface,
   DeclareOpInterfaceMethods<MemoryEffectsOpInterface>
 ]> {
@@ -805,10 +827,12 @@ def TGemvBiasOp : PTO_TOp<"tgemv.bias", [
     ::mlir::pto::PIPE getPipe() {
       return ::mlir::pto::PIPE::PIPE_M; 
     }
+    ::mlir::MutableOperandRange getDpsInitsMutable() { return getDstMutable(); }
   }];
 }
 
 def TMovOp  : PTO_TOp<"tmov", [
+  PTO_DpsInitOpInterface,
   OpPipeInterface,
   DeclareOpInterfaceMethods<MemoryEffectsOpInterface>
 ]> {
@@ -867,6 +891,7 @@ def TMovOp  : PTO_TOp<"tmov", [
       // Fallback: treat as vector pipe (safe default for most intra-domain moves).
       return ::mlir::pto::PIPE::PIPE_V;
     }
+    ::mlir::MutableOperandRange getDpsInitsMutable() { return getDstMutable(); }
   }];
 }
 
@@ -1320,6 +1345,7 @@ def SetFFTsOp : PTO_Op<"set_ffts", [MemoryEffects<[MemRead, MemWrite]>]> {
 // ---- tile-world TOp version (with 't') ----
 // pto.tmgather ins(%mem, %idx) outs(%dst) [ ...] -> tensor?
 def TMGatherOp : PTO_TOp<"mgather", [
+  PTO_DpsInitOpInterface,
   OpPipeInterface,
   DeclareOpInterfaceMethods<MemoryEffectsOpInterface>
 ]> {
@@ -1343,6 +1369,7 @@ def TMGatherOp : PTO_TOp<"mgather", [
   let extraClassDeclaration = [{
     static StringRef getIntrinsicName() { return "MGATHER"; }
     ::mlir::pto::PIPE getPipe() { return ::mlir::pto::PIPE::PIPE_MTE2; }
+    ::mlir::MutableOperandRange getDpsInitsMutable() { return getDstMutable(); }
   }];
 }
 
@@ -1388,6 +1415,7 @@ def GetValDpsOp : PTO_Op<"getval_dps", []> {
 // ---- tile-world TOp version ----
 // pto.tsetval ins(%offset, %val) outs(%dst) : PTODpsType, index, T
 def TSetValOp : PTO_TOp<"tsetval", [
+  PTO_DpsInitOpInterface,
   OpPipeInterface,
   DeclareOpInterfaceMethods<MemoryEffectsOpInterface>
 ]> {
@@ -1412,6 +1440,7 @@ def TSetValOp : PTO_TOp<"tsetval", [
   let extraClassDeclaration = [{
     static StringRef getIntrinsicName() { return "SETVAL"; }
     ::mlir::pto::PIPE getPipe() { return ::mlir::pto::PIPE::PIPE_V; }
+    ::mlir::MutableOperandRange getDpsInitsMutable() { return getDstMutable(); }
   }];
 }
 
@@ -1448,6 +1477,7 @@ def TGetValOp : PTO_TOp<"tgetval", [
 // ---- tile-world TOp version (with 't') ----
 // pto.tmscatter ins(%src, %idx) outs(%mem) [ ...]
 def TMScatterOp : PTO_TOp<"mscatter", [
+  PTO_DpsInitOpInterface,
   OpPipeInterface,
   DeclareOpInterfaceMethods<MemoryEffectsOpInterface>
 ]> {
@@ -1472,6 +1502,7 @@ def TMScatterOp : PTO_TOp<"mscatter", [
   let extraClassDeclaration = [{
     static StringRef getIntrinsicName() { return "MSCATTER"; }
     ::mlir::pto::PIPE getPipe() { return ::mlir::pto::PIPE::PIPE_MTE3; }
+    ::mlir::MutableOperandRange getDpsInitsMutable() { return getMemMutable(); }
   }];
 }
 
@@ -1635,6 +1666,7 @@ def PTO_PrintOp_DPS: PTO_TOp<"print_dps", [
 //===----------------------------------------------------------------------===//
 
 def PTO_TAbsOp : PTO_TOp<"tabs", [
+  PTO_DpsInitOpInterface,
   OpPipeInterface,
   DeclareOpInterfaceMethods<MemoryEffectsOpInterface>
 ]> {
@@ -1661,10 +1693,12 @@ def PTO_TAbsOp : PTO_TOp<"tabs", [
     ::mlir::pto::PIPE getPipe() {
       return ::mlir::pto::PIPE::PIPE_V; // Vector pipe for elementwise ops
     }
+    ::mlir::MutableOperandRange getDpsInitsMutable() { return getDstMutable(); }
   }];
 }
 
 def PTO_TAddOp : PTO_TOp<"tadd", [
+  PTO_DpsInitOpInterface,
   OpPipeInterface,
   DeclareOpInterfaceMethods<MemoryEffectsOpInterface>
 ]> {
@@ -1701,6 +1735,7 @@ def PTO_TAddOp : PTO_TOp<"tadd", [
 }
 
 def PTO_TAddCOp : PTO_TOp<"taddc", [
+  PTO_DpsInitOpInterface,
   OpPipeInterface,
   DeclareOpInterfaceMethods<MemoryEffectsOpInterface>
 ]> {
@@ -1729,10 +1764,12 @@ def PTO_TAddCOp : PTO_TOp<"taddc", [
 
   let extraClassDeclaration = [{
     ::mlir::pto::PIPE getPipe() { return ::mlir::pto::PIPE::PIPE_V; }
+    ::mlir::MutableOperandRange getDpsInitsMutable() { return getDstMutable(); }
   }];
 }
 
 def PTO_TAddSOp : PTO_TOp<"tadds", [
+  PTO_DpsInitOpInterface,
   OpPipeInterface,
   DeclareOpInterfaceMethods<MemoryEffectsOpInterface>
 ]> {
@@ -1760,10 +1797,12 @@ def PTO_TAddSOp : PTO_TOp<"tadds", [
 
   let extraClassDeclaration = [{
     ::mlir::pto::PIPE getPipe() { return ::mlir::pto::PIPE::PIPE_V; }
+    ::mlir::MutableOperandRange getDpsInitsMutable() { return getDstMutable(); }
   }];
 }
 
 def PTO_TAddSCOp : PTO_TOp<"taddsc", [
+  PTO_DpsInitOpInterface,
   OpPipeInterface,
   DeclareOpInterfaceMethods<MemoryEffectsOpInterface>
 ]> {
@@ -1786,11 +1825,13 @@ def PTO_TAddSCOp : PTO_TOp<"taddsc", [
 
   let extraClassDeclaration = [{
     ::mlir::pto::PIPE getPipe() { return ::mlir::pto::PIPE::PIPE_V; }
+    ::mlir::MutableOperandRange getDpsInitsMutable() { return getDstMutable(); }
   }];
 }
 
 
 def PTO_TAndOp : PTO_TOp<"tand", [
+  PTO_DpsInitOpInterface,
   OpPipeInterface,
   DeclareOpInterfaceMethods<MemoryEffectsOpInterface>
 ]> {
@@ -1808,10 +1849,12 @@ def PTO_TAndOp : PTO_TOp<"tand", [
 
   let extraClassDeclaration = [{
     ::mlir::pto::PIPE getPipe() { return ::mlir::pto::PIPE::PIPE_V; }
+    ::mlir::MutableOperandRange getDpsInitsMutable() { return getDstMutable(); }
   }];
 }
 
 def PTO_TAndSOp : PTO_TOp<"tands", [
+  PTO_DpsInitOpInterface,
   OpPipeInterface,
   DeclareOpInterfaceMethods<MemoryEffectsOpInterface>
 ]> {
@@ -1829,11 +1872,13 @@ def PTO_TAndSOp : PTO_TOp<"tands", [
 
   let extraClassDeclaration = [{
     ::mlir::pto::PIPE getPipe() { return ::mlir::pto::PIPE::PIPE_V; }
+    ::mlir::MutableOperandRange getDpsInitsMutable() { return getDstMutable(); }
   }];
 }
 
 
 def PTO_TCIOp : PTO_TOp<"tci", [
+  PTO_DpsInitOpInterface,
   OpPipeInterface,
   DeclareOpInterfaceMethods<MemoryEffectsOpInterface>
 ]> {
@@ -1857,10 +1902,12 @@ def PTO_TCIOp : PTO_TOp<"tci", [
 
   let extraClassDeclaration = [{
     ::mlir::pto::PIPE getPipe() { return ::mlir::pto::PIPE::PIPE_V; }
+    ::mlir::MutableOperandRange getDpsInitsMutable() { return getDstMutable(); }
   }];
 }
 
 def PTO_TCmpOp : PTO_TOp<"tcmp", [
+  PTO_DpsInitOpInterface,
   OpPipeInterface,
   DeclareOpInterfaceMethods<MemoryEffectsOpInterface>
 ]> {
@@ -1890,10 +1937,12 @@ def PTO_TCmpOp : PTO_TOp<"tcmp", [
 
   let extraClassDeclaration = [{
     ::mlir::pto::PIPE getPipe() { return ::mlir::pto::PIPE::PIPE_V; }
+    ::mlir::MutableOperandRange getDpsInitsMutable() { return getDstMutable(); }
   }];
 }
 
 def PTO_TCmpSOp : PTO_TOp<"tcmps", [
+  PTO_DpsInitOpInterface,
   OpPipeInterface,
   DeclareOpInterfaceMethods<MemoryEffectsOpInterface>
 ]> {
@@ -1911,6 +1960,7 @@ def PTO_TCmpSOp : PTO_TOp<"tcmps", [
 
   let extraClassDeclaration = [{
     ::mlir::pto::PIPE getPipe() { return ::mlir::pto::PIPE::PIPE_V; }
+    ::mlir::MutableOperandRange getDpsInitsMutable() { return getDstMutable(); }
   }];
 
   let assemblyFormat = [{
@@ -1923,6 +1973,7 @@ def PTO_TCmpSOp : PTO_TOp<"tcmps", [
 }
 
 def PTO_TColExpandOp : PTO_TOp<"tcolexpand", [
+  PTO_DpsInitOpInterface,
   OpPipeInterface,
   DeclareOpInterfaceMethods<MemoryEffectsOpInterface>
 ]> {
@@ -1939,6 +1990,7 @@ def PTO_TColExpandOp : PTO_TOp<"tcolexpand", [
 
   let extraClassDeclaration = [{
     ::mlir::pto::PIPE getPipe() { return ::mlir::pto::PIPE::PIPE_V; }
+    ::mlir::MutableOperandRange getDpsInitsMutable() { return getDstMutable(); }
   }];
 
   let assemblyFormat = [{
@@ -1949,6 +2001,7 @@ def PTO_TColExpandOp : PTO_TOp<"tcolexpand", [
 }
 
 def PTO_TColMaxOp : PTO_TOp<"tcolmax", [
+  PTO_DpsInitOpInterface,
   OpPipeInterface,
   DeclareOpInterfaceMethods<MemoryEffectsOpInterface>
 ]> {
@@ -1965,6 +2018,7 @@ def PTO_TColMaxOp : PTO_TOp<"tcolmax", [
 
   let extraClassDeclaration = [{
     ::mlir::pto::PIPE getPipe() { return ::mlir::pto::PIPE::PIPE_V; }
+    ::mlir::MutableOperandRange getDpsInitsMutable() { return getDstMutable(); }
   }];
 
   let assemblyFormat = [{
@@ -1975,6 +2029,7 @@ def PTO_TColMaxOp : PTO_TOp<"tcolmax", [
 }
 
 def PTO_TColMinOp : PTO_TOp<"tcolmin", [
+  PTO_DpsInitOpInterface,
   OpPipeInterface,
   DeclareOpInterfaceMethods<MemoryEffectsOpInterface>
 ]> {
@@ -1991,6 +2046,7 @@ def PTO_TColMinOp : PTO_TOp<"tcolmin", [
 
   let extraClassDeclaration = [{
     ::mlir::pto::PIPE getPipe() { return ::mlir::pto::PIPE::PIPE_V; }
+    ::mlir::MutableOperandRange getDpsInitsMutable() { return getDstMutable(); }
   }];
 
   let assemblyFormat = [{
@@ -2001,6 +2057,7 @@ def PTO_TColMinOp : PTO_TOp<"tcolmin", [
 }
 
 def PTO_TColSumOp : PTO_TOp<"tcolsum", [
+  PTO_DpsInitOpInterface,
   OpPipeInterface,
   DeclareOpInterfaceMethods<MemoryEffectsOpInterface>
 ]> {
@@ -2021,10 +2078,14 @@ def PTO_TColSumOp : PTO_TOp<"tcolsum", [
 
   let extraClassDeclaration = [{
     ::mlir::pto::PIPE getPipe() { return ::mlir::pto::PIPE::PIPE_V; }
+    ::mlir::MutableOperandRange getDpsInitsMutable() {
+      return ::mlir::MutableOperandRange(getOperation(), 1, getOperation()->getNumOperands());
+    }
   }];
 }
 
 def PTO_TCvtOp : PTO_TOp<"tcvt", [
+  PTO_DpsInitOpInterface,
   OpPipeInterface,
   DeclareOpInterfaceMethods<MemoryEffectsOpInterface>
 ]> {
@@ -2041,6 +2102,7 @@ def PTO_TCvtOp : PTO_TOp<"tcvt", [
 
   let extraClassDeclaration = [{
     ::mlir::pto::PIPE getPipe() { return ::mlir::pto::PIPE::PIPE_V; }
+    ::mlir::MutableOperandRange getDpsInitsMutable() { return getDstMutable(); }
   }];
 
   let assemblyFormat = [{
@@ -2052,6 +2114,7 @@ def PTO_TCvtOp : PTO_TOp<"tcvt", [
 }
 
 def PTO_TDivOp : PTO_TOp<"tdiv", [
+  PTO_DpsInitOpInterface,
   OpPipeInterface,
   DeclareOpInterfaceMethods<MemoryEffectsOpInterface>
 ]> {
@@ -2073,6 +2136,7 @@ def PTO_TDivOp : PTO_TOp<"tdiv", [
 
   let extraClassDeclaration = [{
     ::mlir::pto::PIPE getPipe() { return ::mlir::pto::PIPE::PIPE_V; }
+    ::mlir::MutableOperandRange getDpsInitsMutable() { return getDstMutable(); }
   }];
 
   let assemblyFormat = [{
@@ -2084,6 +2148,7 @@ def PTO_TDivOp : PTO_TOp<"tdiv", [
 }
 
 def PTO_TDivSOp : PTO_TOp<"tdivs", [
+  PTO_DpsInitOpInterface,
   OpPipeInterface,
   DeclareOpInterfaceMethods<MemoryEffectsOpInterface>
 ]> {
@@ -2103,11 +2168,13 @@ def PTO_TDivSOp : PTO_TOp<"tdivs", [
 
   let extraClassDeclaration = [{
     ::mlir::pto::PIPE getPipe() { return ::mlir::pto::PIPE::PIPE_V; }
+    ::mlir::MutableOperandRange getDpsInitsMutable() { return getDstMutable(); }
   }];
 
 }
 
 def PTO_TExpOp : PTO_TOp<"texp", [
+  PTO_DpsInitOpInterface,
   OpPipeInterface,
   DeclareOpInterfaceMethods<MemoryEffectsOpInterface>
 ]> {
@@ -2130,10 +2197,12 @@ def PTO_TExpOp : PTO_TOp<"texp", [
 
   let extraClassDeclaration = [{
     ::mlir::pto::PIPE getPipe() { return ::mlir::pto::PIPE::PIPE_V; }
+    ::mlir::MutableOperandRange getDpsInitsMutable() { return getDstMutable(); }
   }];
 }
 
 def PTO_TExpandsOp : PTO_TOp<"texpands", [
+  PTO_DpsInitOpInterface,
   OpPipeInterface,
   DeclareOpInterfaceMethods<MemoryEffectsOpInterface>
 ]> {
@@ -2156,10 +2225,12 @@ def PTO_TExpandsOp : PTO_TOp<"texpands", [
 
   let extraClassDeclaration = [{
     ::mlir::pto::PIPE getPipe() { return ::mlir::pto::PIPE::PIPE_V; }
+    ::mlir::MutableOperandRange getDpsInitsMutable() { return getDstMutable(); }
   }];
 }
 
 def PTO_TExtractOp : PTO_TOp<"textract", [
+  PTO_DpsInitOpInterface,
   OpPipeInterface,
   DeclareOpInterfaceMethods<MemoryEffectsOpInterface>
 ]> {
@@ -2186,10 +2257,12 @@ def PTO_TExtractOp : PTO_TOp<"textract", [
     // TEXTRACT moves data between memory domains (L1/cbuf -> L0A/L0B/L0C),
     // which is executed by the MTE1 pipeline.
     ::mlir::pto::PIPE getPipe() { return ::mlir::pto::PIPE::PIPE_MTE1; }
+    ::mlir::MutableOperandRange getDpsInitsMutable() { return getDstMutable(); }
   }];
 }
 
 def PTO_TFillPadOp : PTO_TOp<"tfillpad", [
+  PTO_DpsInitOpInterface,
   OpPipeInterface,
   DeclareOpInterfaceMethods<MemoryEffectsOpInterface>
 ]> {
@@ -2212,10 +2285,12 @@ def PTO_TFillPadOp : PTO_TOp<"tfillpad", [
 
   let extraClassDeclaration = [{
     ::mlir::pto::PIPE getPipe() { return ::mlir::pto::PIPE::PIPE_V; }
+    ::mlir::MutableOperandRange getDpsInitsMutable() { return getDstMutable(); }
   }];
 }
 
 def PTO_TGatherOp : PTO_TOp<"tgather", [
+  PTO_DpsInitOpInterface,
   OpPipeInterface,
   DeclareOpInterfaceMethods<MemoryEffectsOpInterface>
 ]> {
@@ -2237,10 +2312,12 @@ def PTO_TGatherOp : PTO_TOp<"tgather", [
 
   let extraClassDeclaration = [{
     ::mlir::pto::PIPE getPipe() { return ::mlir::pto::PIPE::PIPE_V; }
+    ::mlir::MutableOperandRange getDpsInitsMutable() { return getDstMutable(); }
   }];
 }
 
 def PTO_TGatherbOp : PTO_TOp<"tgatherb", [
+  PTO_DpsInitOpInterface,
   OpPipeInterface,
   DeclareOpInterfaceMethods<MemoryEffectsOpInterface>
 ]> {
@@ -2264,10 +2341,12 @@ def PTO_TGatherbOp : PTO_TOp<"tgatherb", [
 
   let extraClassDeclaration = [{
     ::mlir::pto::PIPE getPipe() { return ::mlir::pto::PIPE::PIPE_V; }
+    ::mlir::MutableOperandRange getDpsInitsMutable() { return getDstMutable(); }
   }];
 }
 
 def PTO_TLogOp : PTO_TOp<"tlog", [
+  PTO_DpsInitOpInterface,
   OpPipeInterface,
   DeclareOpInterfaceMethods<MemoryEffectsOpInterface>
 ]> {
@@ -2290,10 +2369,12 @@ def PTO_TLogOp : PTO_TOp<"tlog", [
 
   let extraClassDeclaration = [{
     ::mlir::pto::PIPE getPipe() { return ::mlir::pto::PIPE::PIPE_V; }
+    ::mlir::MutableOperandRange getDpsInitsMutable() { return getDstMutable(); }
   }];
 }
 
 def PTO_TLReluOp : PTO_TOp<"tlrelu", [
+  PTO_DpsInitOpInterface,
   OpPipeInterface,
   DeclareOpInterfaceMethods<MemoryEffectsOpInterface>
 ]> {
@@ -2317,10 +2398,12 @@ def PTO_TLReluOp : PTO_TOp<"tlrelu", [
 
   let extraClassDeclaration = [{
     ::mlir::pto::PIPE getPipe() { return ::mlir::pto::PIPE::PIPE_V; }
+    ::mlir::MutableOperandRange getDpsInitsMutable() { return getDstMutable(); }
   }];
 }
 
 def PTO_TMaxOp : PTO_TOp<"tmax", [
+  PTO_DpsInitOpInterface,
   OpPipeInterface,
   DeclareOpInterfaceMethods<MemoryEffectsOpInterface>
 ]> {
@@ -2344,10 +2427,12 @@ def PTO_TMaxOp : PTO_TOp<"tmax", [
 
   let extraClassDeclaration = [{
     ::mlir::pto::PIPE getPipe() { return ::mlir::pto::PIPE::PIPE_V; }
+    ::mlir::MutableOperandRange getDpsInitsMutable() { return getDstMutable(); }
   }];
 }
 
 def PTO_TMaxSOp : PTO_TOp<"tmaxs", [
+  PTO_DpsInitOpInterface,
   OpPipeInterface,
   DeclareOpInterfaceMethods<MemoryEffectsOpInterface>
 ]> {
@@ -2371,10 +2456,12 @@ def PTO_TMaxSOp : PTO_TOp<"tmaxs", [
 
   let extraClassDeclaration = [{
     ::mlir::pto::PIPE getPipe() { return ::mlir::pto::PIPE::PIPE_V; }
+    ::mlir::MutableOperandRange getDpsInitsMutable() { return getDstMutable(); }
   }];
 }
 
 def PTO_TMinOp : PTO_TOp<"tmin", [
+  PTO_DpsInitOpInterface,
   OpPipeInterface,
   DeclareOpInterfaceMethods<MemoryEffectsOpInterface>
 ]> {
@@ -2398,10 +2485,12 @@ def PTO_TMinOp : PTO_TOp<"tmin", [
 
   let extraClassDeclaration = [{
     ::mlir::pto::PIPE getPipe() { return ::mlir::pto::PIPE::PIPE_V; }
+    ::mlir::MutableOperandRange getDpsInitsMutable() { return getDstMutable(); }
   }];
 }
 
 def PTO_TMinsOp : PTO_TOp<"tmins", [
+  PTO_DpsInitOpInterface,
   OpPipeInterface,
   DeclareOpInterfaceMethods<MemoryEffectsOpInterface>
 ]> {
@@ -2425,10 +2514,12 @@ def PTO_TMinsOp : PTO_TOp<"tmins", [
 
   let extraClassDeclaration = [{
     ::mlir::pto::PIPE getPipe() { return ::mlir::pto::PIPE::PIPE_V; }
+    ::mlir::MutableOperandRange getDpsInitsMutable() { return getDstMutable(); }
   }];
 }
 
 def PTO_TMovFPOp : PTO_TOp<"tmov.fp", [
+  PTO_DpsInitOpInterface,
   OpPipeInterface,
   DeclareOpInterfaceMethods<MemoryEffectsOpInterface>
 ]> {
@@ -2454,11 +2545,13 @@ def PTO_TMovFPOp : PTO_TOp<"tmov.fp", [
     // TMOV_FP is an ACC->MAT move (Cc->Cb) with vector quant parameters in
     // SCALING (fbuf). Treat it as a data-movement op for sync insertion.
     ::mlir::pto::PIPE getPipe() { return ::mlir::pto::PIPE::PIPE_MTE1; }
+    ::mlir::MutableOperandRange getDpsInitsMutable() { return getDstMutable(); }
   }];
 }
 
 def PTO_TMrgSortOp: PTO_TOp<"tmrgsort", [
   AttrSizedOperandSegments,
+  PTO_DpsInitOpInterface,
   OpPipeInterface,
   DeclareOpInterfaceMethods<MemoryEffectsOpInterface>
 ]> {
@@ -2490,6 +2583,7 @@ def PTO_TMrgSortOp: PTO_TOp<"tmrgsort", [
 }
 
 def PTO_TMulOp: PTO_TOp<"tmul", [
+  PTO_DpsInitOpInterface,
   OpPipeInterface,
   DeclareOpInterfaceMethods<MemoryEffectsOpInterface>
 ]> {
@@ -2513,6 +2607,7 @@ def PTO_TMulOp: PTO_TOp<"tmul", [
 
   let extraClassDeclaration = [{
     ::mlir::pto::PIPE getPipe() { return ::mlir::pto::PIPE::PIPE_V; }
+    ::mlir::MutableOperandRange getDpsInitsMutable() { return getDstMutable(); }
   }];
 }
 
@@ -2521,6 +2616,7 @@ def PTO_TMulOp: PTO_TOp<"tmul", [
 //===----------------------------------------------------------------------===//
 
 def PTO_TMulsOp: PTO_TOp<"tmuls", [
+  PTO_DpsInitOpInterface,
   OpPipeInterface,
   DeclareOpInterfaceMethods<MemoryEffectsOpInterface>
 ]> {
@@ -2544,6 +2640,7 @@ def PTO_TMulsOp: PTO_TOp<"tmuls", [
 
   let extraClassDeclaration = [{
     ::mlir::pto::PIPE getPipe() { return ::mlir::pto::PIPE::PIPE_V; }
+    ::mlir::MutableOperandRange getDpsInitsMutable() { return getDstMutable(); }
   }];
 }
 //===----------------------------------------------------------------------===//
@@ -2551,6 +2648,7 @@ def PTO_TMulsOp: PTO_TOp<"tmuls", [
 //===----------------------------------------------------------------------===//
 
 def PTO_TNegOp: PTO_TOp<"tneg", [
+  PTO_DpsInitOpInterface,
   OpPipeInterface,
   DeclareOpInterfaceMethods<MemoryEffectsOpInterface>
 ]> {
@@ -2573,6 +2671,7 @@ def PTO_TNegOp: PTO_TOp<"tneg", [
 
   let extraClassDeclaration = [{
     ::mlir::pto::PIPE getPipe() { return ::mlir::pto::PIPE::PIPE_V; }
+    ::mlir::MutableOperandRange getDpsInitsMutable() { return getDstMutable(); }
   }];
 }
 //===----------------------------------------------------------------------===//
@@ -2580,6 +2679,7 @@ def PTO_TNegOp: PTO_TOp<"tneg", [
 //===----------------------------------------------------------------------===//
 
 def PTO_TNotOp: PTO_TOp<"tnot", [
+  PTO_DpsInitOpInterface,
   OpPipeInterface,
   DeclareOpInterfaceMethods<MemoryEffectsOpInterface>
 ]> {
@@ -2602,6 +2702,7 @@ def PTO_TNotOp: PTO_TOp<"tnot", [
 
   let extraClassDeclaration = [{
     ::mlir::pto::PIPE getPipe() { return ::mlir::pto::PIPE::PIPE_V; }
+    ::mlir::MutableOperandRange getDpsInitsMutable() { return getDstMutable(); }
   }];
 }
 //===----------------------------------------------------------------------===//
@@ -2609,6 +2710,7 @@ def PTO_TNotOp: PTO_TOp<"tnot", [
 //===----------------------------------------------------------------------===//
 
 def PTO_TOrOp: PTO_TOp<"tor", [
+  PTO_DpsInitOpInterface,
   OpPipeInterface,
   DeclareOpInterfaceMethods<MemoryEffectsOpInterface>
 ]> {
@@ -2632,6 +2734,7 @@ def PTO_TOrOp: PTO_TOp<"tor", [
 
   let extraClassDeclaration = [{
     ::mlir::pto::PIPE getPipe() { return ::mlir::pto::PIPE::PIPE_V; }
+    ::mlir::MutableOperandRange getDpsInitsMutable() { return getDstMutable(); }
   }];
 }
 //===----------------------------------------------------------------------===//
@@ -2639,6 +2742,7 @@ def PTO_TOrOp: PTO_TOp<"tor", [
 //===----------------------------------------------------------------------===//
 
 def PTO_TOrsOp: PTO_TOp<"tors", [
+  PTO_DpsInitOpInterface,
   OpPipeInterface,
   DeclareOpInterfaceMethods<MemoryEffectsOpInterface>
 ]> {
@@ -2662,6 +2766,7 @@ def PTO_TOrsOp: PTO_TOp<"tors", [
 
   let extraClassDeclaration = [{
     ::mlir::pto::PIPE getPipe() { return ::mlir::pto::PIPE::PIPE_V; }
+    ::mlir::MutableOperandRange getDpsInitsMutable() { return getDstMutable(); }
   }];
 }
 //===----------------------------------------------------------------------===//
@@ -2669,6 +2774,7 @@ def PTO_TOrsOp: PTO_TOp<"tors", [
 //===----------------------------------------------------------------------===//
 
 def PTO_TPartAddOp: PTO_TOp<"tpartadd", [
+  PTO_DpsInitOpInterface,
   OpPipeInterface,
   DeclareOpInterfaceMethods<MemoryEffectsOpInterface>
 ]> {
@@ -2692,6 +2798,7 @@ def PTO_TPartAddOp: PTO_TOp<"tpartadd", [
 
   let extraClassDeclaration = [{
     ::mlir::pto::PIPE getPipe() { return ::mlir::pto::PIPE::PIPE_V; }
+    ::mlir::MutableOperandRange getDpsInitsMutable() { return getDstMutable(); }
   }];
 }
 //===----------------------------------------------------------------------===//
@@ -2699,6 +2806,7 @@ def PTO_TPartAddOp: PTO_TOp<"tpartadd", [
 //===----------------------------------------------------------------------===//
 
 def PTO_TPartMaxOp: PTO_TOp<"tpartmax", [
+  PTO_DpsInitOpInterface,
   OpPipeInterface,
   DeclareOpInterfaceMethods<MemoryEffectsOpInterface>
 ]> {
@@ -2722,6 +2830,7 @@ def PTO_TPartMaxOp: PTO_TOp<"tpartmax", [
 
   let extraClassDeclaration = [{
     ::mlir::pto::PIPE getPipe() { return ::mlir::pto::PIPE::PIPE_V; }
+    ::mlir::MutableOperandRange getDpsInitsMutable() { return getDstMutable(); }
   }];
 }
 //===----------------------------------------------------------------------===//
@@ -2729,6 +2838,7 @@ def PTO_TPartMaxOp: PTO_TOp<"tpartmax", [
 //===----------------------------------------------------------------------===//
 
 def PTO_TPartMinOp: PTO_TOp<"tpartmin", [
+  PTO_DpsInitOpInterface,
   OpPipeInterface,
   DeclareOpInterfaceMethods<MemoryEffectsOpInterface>
 ]> {
@@ -2752,6 +2862,7 @@ def PTO_TPartMinOp: PTO_TOp<"tpartmin", [
 
   let extraClassDeclaration = [{
     ::mlir::pto::PIPE getPipe() { return ::mlir::pto::PIPE::PIPE_V; }
+    ::mlir::MutableOperandRange getDpsInitsMutable() { return getDstMutable(); }
   }];
 }
 //===----------------------------------------------------------------------===//
@@ -2759,6 +2870,7 @@ def PTO_TPartMinOp: PTO_TOp<"tpartmin", [
 //===----------------------------------------------------------------------===//
 
 def PTO_TPreluOp: PTO_TOp<"tprelu", [
+  PTO_DpsInitOpInterface,
   OpPipeInterface,
   DeclareOpInterfaceMethods<MemoryEffectsOpInterface>
 ]> {
@@ -2782,6 +2894,7 @@ def PTO_TPreluOp: PTO_TOp<"tprelu", [
 
   let extraClassDeclaration = [{
     ::mlir::pto::PIPE getPipe() { return ::mlir::pto::PIPE::PIPE_V; }
+    ::mlir::MutableOperandRange getDpsInitsMutable() { return getDstMutable(); }
   }];
 }
 //===----------------------------------------------------------------------===//
@@ -2789,6 +2902,7 @@ def PTO_TPreluOp: PTO_TOp<"tprelu", [
 //===----------------------------------------------------------------------===//
 
 def PTO_TRecipOp: PTO_TOp<"trecip", [
+  PTO_DpsInitOpInterface,
   OpPipeInterface,
   DeclareOpInterfaceMethods<MemoryEffectsOpInterface>
 ]> {
@@ -2811,6 +2925,7 @@ def PTO_TRecipOp: PTO_TOp<"trecip", [
 
   let extraClassDeclaration = [{
     ::mlir::pto::PIPE getPipe() { return ::mlir::pto::PIPE::PIPE_V; }
+    ::mlir::MutableOperandRange getDpsInitsMutable() { return getDstMutable(); }
   }];
 }
 //===----------------------------------------------------------------------===//
@@ -2818,6 +2933,7 @@ def PTO_TRecipOp: PTO_TOp<"trecip", [
 //===----------------------------------------------------------------------===//
 
 def PTO_TReluOp: PTO_TOp<"trelu", [
+  PTO_DpsInitOpInterface,
   OpPipeInterface,
   DeclareOpInterfaceMethods<MemoryEffectsOpInterface>
 ]> {
@@ -2840,6 +2956,7 @@ def PTO_TReluOp: PTO_TOp<"trelu", [
 
   let extraClassDeclaration = [{
     ::mlir::pto::PIPE getPipe() { return ::mlir::pto::PIPE::PIPE_V; }
+    ::mlir::MutableOperandRange getDpsInitsMutable() { return getDstMutable(); }
   }];
 }
 //===----------------------------------------------------------------------===//
@@ -2847,6 +2964,7 @@ def PTO_TReluOp: PTO_TOp<"trelu", [
 //===----------------------------------------------------------------------===//
 
 def PTO_TRemOp: PTO_TOp<"trem", [
+  PTO_DpsInitOpInterface,
   OpPipeInterface,
   DeclareOpInterfaceMethods<MemoryEffectsOpInterface>
 ]> {
@@ -2870,6 +2988,7 @@ def PTO_TRemOp: PTO_TOp<"trem", [
 
   let extraClassDeclaration = [{
     ::mlir::pto::PIPE getPipe() { return ::mlir::pto::PIPE::PIPE_V; }
+    ::mlir::MutableOperandRange getDpsInitsMutable() { return getDstMutable(); }
   }];
 }
 //===----------------------------------------------------------------------===//
@@ -2877,6 +2996,7 @@ def PTO_TRemOp: PTO_TOp<"trem", [
 //===----------------------------------------------------------------------===//
 
 def PTO_TRemSOp: PTO_TOp<"trems", [
+  PTO_DpsInitOpInterface,
   OpPipeInterface,
   DeclareOpInterfaceMethods<MemoryEffectsOpInterface>
 ]> {
@@ -2900,6 +3020,7 @@ def PTO_TRemSOp: PTO_TOp<"trems", [
 
   let extraClassDeclaration = [{
     ::mlir::pto::PIPE getPipe() { return ::mlir::pto::PIPE::PIPE_V; }
+    ::mlir::MutableOperandRange getDpsInitsMutable() { return getDstMutable(); }
   }];
 }
 //===----------------------------------------------------------------------===//
@@ -2907,6 +3028,7 @@ def PTO_TRemSOp: PTO_TOp<"trems", [
 //===----------------------------------------------------------------------===//
 
 def PTO_TReshapeOp: PTO_TOp<"treshape", [
+  PTO_DpsInitOpInterface,
   OpPipeInterface,
   DeclareOpInterfaceMethods<MemoryEffectsOpInterface>
 ]> {
@@ -2929,6 +3051,7 @@ def PTO_TReshapeOp: PTO_TOp<"treshape", [
 
   let extraClassDeclaration = [{
     ::mlir::pto::PIPE getPipe() { return ::mlir::pto::PIPE::PIPE_V; }
+    ::mlir::MutableOperandRange getDpsInitsMutable() { return getDstMutable(); }
   }];
 }
 //===----------------------------------------------------------------------===//
@@ -2936,6 +3059,7 @@ def PTO_TReshapeOp: PTO_TOp<"treshape", [
 //===----------------------------------------------------------------------===//
 
 def PTO_TRowExpandOp: PTO_TOp<"trowexpand", [
+  PTO_DpsInitOpInterface,
   OpPipeInterface,
   DeclareOpInterfaceMethods<MemoryEffectsOpInterface>
 ]> {
@@ -2958,6 +3082,7 @@ def PTO_TRowExpandOp: PTO_TOp<"trowexpand", [
 
   let extraClassDeclaration = [{
     ::mlir::pto::PIPE getPipe() { return ::mlir::pto::PIPE::PIPE_V; }
+    ::mlir::MutableOperandRange getDpsInitsMutable() { return getDstMutable(); }
   }];
 }
 //===----------------------------------------------------------------------===//
@@ -2965,6 +3090,7 @@ def PTO_TRowExpandOp: PTO_TOp<"trowexpand", [
 //===----------------------------------------------------------------------===//
 
 def PTO_TRowExpandDivOp: PTO_TOp<"trowexpanddiv", [
+  PTO_DpsInitOpInterface,
   OpPipeInterface,
   DeclareOpInterfaceMethods<MemoryEffectsOpInterface>
 ]> {
@@ -2988,6 +3114,7 @@ def PTO_TRowExpandDivOp: PTO_TOp<"trowexpanddiv", [
 
   let extraClassDeclaration = [{
     ::mlir::pto::PIPE getPipe() { return ::mlir::pto::PIPE::PIPE_V; }
+    ::mlir::MutableOperandRange getDpsInitsMutable() { return getDstMutable(); }
   }];
 }
 //===----------------------------------------------------------------------===//
@@ -2995,6 +3122,7 @@ def PTO_TRowExpandDivOp: PTO_TOp<"trowexpanddiv", [
 //===----------------------------------------------------------------------===//
 
 def PTO_TRowExpandMulOp: PTO_TOp<"trowexpandmul", [
+  PTO_DpsInitOpInterface,
   OpPipeInterface,
   DeclareOpInterfaceMethods<MemoryEffectsOpInterface>
 ]> {
@@ -3018,6 +3146,7 @@ def PTO_TRowExpandMulOp: PTO_TOp<"trowexpandmul", [
 
   let extraClassDeclaration = [{
     ::mlir::pto::PIPE getPipe() { return ::mlir::pto::PIPE::PIPE_V; }
+    ::mlir::MutableOperandRange getDpsInitsMutable() { return getDstMutable(); }
   }];
 }
 //===----------------------------------------------------------------------===//
@@ -3025,6 +3154,7 @@ def PTO_TRowExpandMulOp: PTO_TOp<"trowexpandmul", [
 //===----------------------------------------------------------------------===//
 
 def PTO_TRowExpandSubOp: PTO_TOp<"trowexpandsub", [
+  PTO_DpsInitOpInterface,
   OpPipeInterface,
   DeclareOpInterfaceMethods<MemoryEffectsOpInterface>
 ]> {
@@ -3048,6 +3178,7 @@ def PTO_TRowExpandSubOp: PTO_TOp<"trowexpandsub", [
 
   let extraClassDeclaration = [{
     ::mlir::pto::PIPE getPipe() { return ::mlir::pto::PIPE::PIPE_V; }
+    ::mlir::MutableOperandRange getDpsInitsMutable() { return getDstMutable(); }
   }];
 }
 //===----------------------------------------------------------------------===//
@@ -3055,6 +3186,7 @@ def PTO_TRowExpandSubOp: PTO_TOp<"trowexpandsub", [
 //===----------------------------------------------------------------------===//
 
 def PTO_TRowMaxOp: PTO_TOp<"trowmax", [
+  PTO_DpsInitOpInterface,
   OpPipeInterface,
   DeclareOpInterfaceMethods<MemoryEffectsOpInterface>
 ]> {
@@ -3078,6 +3210,7 @@ def PTO_TRowMaxOp: PTO_TOp<"trowmax", [
 
   let extraClassDeclaration = [{
     ::mlir::pto::PIPE getPipe() { return ::mlir::pto::PIPE::PIPE_V; }
+    ::mlir::MutableOperandRange getDpsInitsMutable() { return getDstMutable(); }
   }];
 }
 //===----------------------------------------------------------------------===//
@@ -3085,6 +3218,7 @@ def PTO_TRowMaxOp: PTO_TOp<"trowmax", [
 //===----------------------------------------------------------------------===//
 
 def PTO_TRowMinOp: PTO_TOp<"trowmin", [
+  PTO_DpsInitOpInterface,
   OpPipeInterface,
   DeclareOpInterfaceMethods<MemoryEffectsOpInterface>
 ]> {
@@ -3108,6 +3242,7 @@ def PTO_TRowMinOp: PTO_TOp<"trowmin", [
 
   let extraClassDeclaration = [{
     ::mlir::pto::PIPE getPipe() { return ::mlir::pto::PIPE::PIPE_V; }
+    ::mlir::MutableOperandRange getDpsInitsMutable() { return getDstMutable(); }
   }];
 }
 //===----------------------------------------------------------------------===//
@@ -3115,6 +3250,7 @@ def PTO_TRowMinOp: PTO_TOp<"trowmin", [
 //===----------------------------------------------------------------------===//
 
 def PTO_TRowSumOp: PTO_TOp<"trowsum", [
+  PTO_DpsInitOpInterface,
   OpPipeInterface,
   DeclareOpInterfaceMethods<MemoryEffectsOpInterface>
 ]> {
@@ -3138,6 +3274,7 @@ def PTO_TRowSumOp: PTO_TOp<"trowsum", [
 
   let extraClassDeclaration = [{
     ::mlir::pto::PIPE getPipe() { return ::mlir::pto::PIPE::PIPE_V; }
+    ::mlir::MutableOperandRange getDpsInitsMutable() { return getDstMutable(); }
   }];
 }
 //===----------------------------------------------------------------------===//
@@ -3145,6 +3282,7 @@ def PTO_TRowSumOp: PTO_TOp<"trowsum", [
 //===----------------------------------------------------------------------===//
 
 def PTO_TRsqrtOp: PTO_TOp<"trsqrt", [
+  PTO_DpsInitOpInterface,
   OpPipeInterface,
   DeclareOpInterfaceMethods<MemoryEffectsOpInterface>
 ]> {
@@ -3167,6 +3305,7 @@ def PTO_TRsqrtOp: PTO_TOp<"trsqrt", [
 
   let extraClassDeclaration = [{
     ::mlir::pto::PIPE getPipe() { return ::mlir::pto::PIPE::PIPE_V; }
+    ::mlir::MutableOperandRange getDpsInitsMutable() { return getDstMutable(); }
   }];
 }
 //===----------------------------------------------------------------------===//
@@ -3174,6 +3313,7 @@ def PTO_TRsqrtOp: PTO_TOp<"trsqrt", [
 //===----------------------------------------------------------------------===//
 
 def PTO_TScatterOp: PTO_TOp<"tscatter", [
+  PTO_DpsInitOpInterface,
   OpPipeInterface,
   DeclareOpInterfaceMethods<MemoryEffectsOpInterface>
 ]> {
@@ -3197,6 +3337,7 @@ def PTO_TScatterOp: PTO_TOp<"tscatter", [
 
   let extraClassDeclaration = [{
     ::mlir::pto::PIPE getPipe() { return ::mlir::pto::PIPE::PIPE_V; }
+    ::mlir::MutableOperandRange getDpsInitsMutable() { return getDstMutable(); }
   }];
 }
 //===----------------------------------------------------------------------===//
@@ -3204,6 +3345,7 @@ def PTO_TScatterOp: PTO_TOp<"tscatter", [
 //===----------------------------------------------------------------------===//
 
 def PTO_TSelOp: PTO_TOp<"tsel", [
+  PTO_DpsInitOpInterface,
   OpPipeInterface,
   DeclareOpInterfaceMethods<MemoryEffectsOpInterface>
 ]> {
@@ -3228,6 +3370,7 @@ def PTO_TSelOp: PTO_TOp<"tsel", [
 
   let extraClassDeclaration = [{
     ::mlir::pto::PIPE getPipe() { return ::mlir::pto::PIPE::PIPE_V; }
+    ::mlir::MutableOperandRange getDpsInitsMutable() { return getDstMutable(); }
   }];
 }
 //===----------------------------------------------------------------------===//
@@ -3235,6 +3378,7 @@ def PTO_TSelOp: PTO_TOp<"tsel", [
 //===----------------------------------------------------------------------===//
 
 def PTO_TSelsOp: PTO_TOp<"tsels", [
+  PTO_DpsInitOpInterface,
   OpPipeInterface,
   DeclareOpInterfaceMethods<MemoryEffectsOpInterface>
 ]> {
@@ -3259,6 +3403,7 @@ def PTO_TSelsOp: PTO_TOp<"tsels", [
 
   let extraClassDeclaration = [{
     ::mlir::pto::PIPE getPipe() { return ::mlir::pto::PIPE::PIPE_V; }
+    ::mlir::MutableOperandRange getDpsInitsMutable() { return getDstMutable(); }
   }];
 }
 //===----------------------------------------------------------------------===//
@@ -3266,6 +3411,7 @@ def PTO_TSelsOp: PTO_TOp<"tsels", [
 //===----------------------------------------------------------------------===//
 
 def PTO_TShlOp: PTO_TOp<"tshl", [
+  PTO_DpsInitOpInterface,
   OpPipeInterface,
   DeclareOpInterfaceMethods<MemoryEffectsOpInterface>
 ]> {
@@ -3289,6 +3435,7 @@ def PTO_TShlOp: PTO_TOp<"tshl", [
 
   let extraClassDeclaration = [{
     ::mlir::pto::PIPE getPipe() { return ::mlir::pto::PIPE::PIPE_V; }
+    ::mlir::MutableOperandRange getDpsInitsMutable() { return getDstMutable(); }
   }];
 }
 //===----------------------------------------------------------------------===//
@@ -3296,6 +3443,7 @@ def PTO_TShlOp: PTO_TOp<"tshl", [
 //===----------------------------------------------------------------------===//
 
 def PTO_TShrOp: PTO_TOp<"tshr", [
+  PTO_DpsInitOpInterface,
   OpPipeInterface,
   DeclareOpInterfaceMethods<MemoryEffectsOpInterface>
 ]> {
@@ -3319,6 +3467,7 @@ def PTO_TShrOp: PTO_TOp<"tshr", [
 
   let extraClassDeclaration = [{
     ::mlir::pto::PIPE getPipe() { return ::mlir::pto::PIPE::PIPE_V; }
+    ::mlir::MutableOperandRange getDpsInitsMutable() { return getDstMutable(); }
   }];
 }
 //===----------------------------------------------------------------------===//
@@ -3326,6 +3475,7 @@ def PTO_TShrOp: PTO_TOp<"tshr", [
 //===----------------------------------------------------------------------===//
 
 def PTO_TShlSOp : PTO_TOp<"tshls", [
+  PTO_DpsInitOpInterface,
   OpPipeInterface,
   DeclareOpInterfaceMethods<MemoryEffectsOpInterface>
 ]> {
@@ -3339,6 +3489,7 @@ def PTO_TShlSOp : PTO_TOp<"tshls", [
   let hasVerifier = 1;
   let extraClassDeclaration = [{
     ::mlir::pto::PIPE getPipe() { return ::mlir::pto::PIPE::PIPE_V; }
+    ::mlir::MutableOperandRange getDpsInitsMutable() { return getDstMutable(); }
   }];
   let assemblyFormat = [{
     `ins` `(` $src `,` $scalar `:` qualified(type($src)) `,` type($scalar) `)`
@@ -3348,6 +3499,7 @@ def PTO_TShlSOp : PTO_TOp<"tshls", [
 }
 
 def PTO_TShrSOp : PTO_TOp<"tshrs", [
+  PTO_DpsInitOpInterface,
   OpPipeInterface,
   DeclareOpInterfaceMethods<MemoryEffectsOpInterface>
 ]> {
@@ -3361,6 +3513,7 @@ def PTO_TShrSOp : PTO_TOp<"tshrs", [
   let hasVerifier = 1;
   let extraClassDeclaration = [{
     ::mlir::pto::PIPE getPipe() { return ::mlir::pto::PIPE::PIPE_V; }
+    ::mlir::MutableOperandRange getDpsInitsMutable() { return getDstMutable(); }
   }];
   let assemblyFormat = [{
     `ins` `(` $src `,` $scalar `:` qualified(type($src)) `,` type($scalar) `)`
@@ -3373,6 +3526,7 @@ def PTO_TShrSOp : PTO_TOp<"tshrs", [
 //===----------------------------------------------------------------------===//
 
 def PTO_TSort32Op: PTO_TOp<"tsort32", [
+  PTO_DpsInitOpInterface,
   OpPipeInterface,
   DeclareOpInterfaceMethods<MemoryEffectsOpInterface>
 ]> {
@@ -3396,6 +3550,7 @@ def PTO_TSort32Op: PTO_TOp<"tsort32", [
 
   let extraClassDeclaration = [{
     ::mlir::pto::PIPE getPipe() { return ::mlir::pto::PIPE::PIPE_V; }
+    ::mlir::MutableOperandRange getDpsInitsMutable() { return getDstMutable(); }
   }];
 }
 //===----------------------------------------------------------------------===//
@@ -3403,7 +3558,8 @@ def PTO_TSort32Op: PTO_TOp<"tsort32", [
 //===----------------------------------------------------------------------===//
 
 def PTO_TSqrtOp: PTO_TOp<"tsqrt", [
-  OpPipeInterface,
+  PTO_DpsInitOpInterface,
+  OpPipeInterface,  
   DeclareOpInterfaceMethods<MemoryEffectsOpInterface>
 ]> {
   let summary = "TSQRT: Elementwise square root.";
@@ -3425,6 +3581,7 @@ def PTO_TSqrtOp: PTO_TOp<"tsqrt", [
 
   let extraClassDeclaration = [{
     ::mlir::pto::PIPE getPipe() { return ::mlir::pto::PIPE::PIPE_V; }
+    ::mlir::MutableOperandRange getDpsInitsMutable() { return getDstMutable(); }
   }];
 }
 
@@ -3432,7 +3589,9 @@ def PTO_TSqrtOp: PTO_TOp<"tsqrt", [
 // PTOOps.td  (add TSTORE_FP TBDPS/tile buffer op)
 //===----------------------------------------------------------------------===//
 
-def PTO_TStoreFPOp: PTO_TOp<"tstore_fp", []> {
+def PTO_TStoreFPOp: PTO_TOp<"tstore_fp", [
+  PTO_DpsInitOpInterface,
+]> {
   let summary = "TSTORE_FP: Store an accumulator tile into global memory using a scaling (fp) tile for vector quantization parameters.";
 
   let arguments = (ins
@@ -3450,12 +3609,16 @@ def PTO_TStoreFPOp: PTO_TOp<"tstore_fp", []> {
     `outs` `(` $dst `:` qualified(type($dst) ) `)`
     attr-dict
   }];
+  let extraClassDeclaration = [{
+    ::mlir::MutableOperandRange getDpsInitsMutable() { return getDstMutable(); }
+  }];
 }
 //===----------------------------------------------------------------------===//
 // PTOOps.td  (add TSUB TBDPS/tile buffer op)
 //===----------------------------------------------------------------------===//
 
 def PTO_TSubOp: PTO_TOp<"tsub", [
+  PTO_DpsInitOpInterface,
   OpPipeInterface,
   DeclareOpInterfaceMethods<MemoryEffectsOpInterface>
 ]> {
@@ -3479,6 +3642,7 @@ def PTO_TSubOp: PTO_TOp<"tsub", [
 
   let extraClassDeclaration = [{
     ::mlir::pto::PIPE getPipe() { return ::mlir::pto::PIPE::PIPE_V; }
+    ::mlir::MutableOperandRange getDpsInitsMutable() { return getDstMutable(); }
   }];
 }
 //===----------------------------------------------------------------------===//
@@ -3486,6 +3650,7 @@ def PTO_TSubOp: PTO_TOp<"tsub", [
 //===----------------------------------------------------------------------===//
 
 def PTO_TSubCOp: PTO_TOp<"tsubc", [
+  PTO_DpsInitOpInterface,
   OpPipeInterface,
   DeclareOpInterfaceMethods<MemoryEffectsOpInterface>
 ]> {
@@ -3511,6 +3676,7 @@ def PTO_TSubCOp: PTO_TOp<"tsubc", [
 
   let extraClassDeclaration = [{
     ::mlir::pto::PIPE getPipe() { return ::mlir::pto::PIPE::PIPE_V; }
+    ::mlir::MutableOperandRange getDpsInitsMutable() { return getDstMutable(); }
   }];
 
 
@@ -3520,6 +3686,7 @@ def PTO_TSubCOp: PTO_TOp<"tsubc", [
 //===----------------------------------------------------------------------===//
 
 def PTO_TSubSOp: PTO_TOp<"tsubs", [
+  PTO_DpsInitOpInterface,
   OpPipeInterface,
   DeclareOpInterfaceMethods<MemoryEffectsOpInterface>
 ]> {
@@ -3543,6 +3710,7 @@ def PTO_TSubSOp: PTO_TOp<"tsubs", [
 
   let extraClassDeclaration = [{
     ::mlir::pto::PIPE getPipe() { return ::mlir::pto::PIPE::PIPE_V; }
+    ::mlir::MutableOperandRange getDpsInitsMutable() { return getDstMutable(); }
   }];
 
 
@@ -3552,6 +3720,7 @@ def PTO_TSubSOp: PTO_TOp<"tsubs", [
 //===----------------------------------------------------------------------===//
 
 def PTO_TSubSCOp: PTO_TOp<"tsubsc", [
+  PTO_DpsInitOpInterface,
   OpPipeInterface,
   DeclareOpInterfaceMethods<MemoryEffectsOpInterface>
 ]> {
@@ -3577,6 +3746,7 @@ def PTO_TSubSCOp: PTO_TOp<"tsubsc", [
 
   let extraClassDeclaration = [{
     ::mlir::pto::PIPE getPipe() { return ::mlir::pto::PIPE::PIPE_V; }
+    ::mlir::MutableOperandRange getDpsInitsMutable() { return getDstMutable(); }
   }];
 
 }
@@ -3586,6 +3756,7 @@ def PTO_TSubSCOp: PTO_TOp<"tsubsc", [
 //===----------------------------------------------------------------------===//
 
 def PTO_TXORSOp: PTO_TOp<"txors", [
+  PTO_DpsInitOpInterface,
   OpPipeInterface,
   DeclareOpInterfaceMethods<MemoryEffectsOpInterface>
 ]> {
@@ -3609,6 +3780,7 @@ def PTO_TXORSOp: PTO_TOp<"txors", [
 
   let extraClassDeclaration = [{
     ::mlir::pto::PIPE getPipe() { return ::mlir::pto::PIPE::PIPE_V; }
+    ::mlir::MutableOperandRange getDpsInitsMutable() { return getDstMutable(); }
   }];
 
 }
@@ -3616,7 +3788,9 @@ def PTO_TXORSOp: PTO_TOp<"txors", [
 // PTOOps.td  (add TSYNC TBDPS/tile buffer op)
 //===----------------------------------------------------------------------===//
 
-def PTO_TSYNCOp: PTO_TOp<"tsync", []> {
+def PTO_TSYNCOp: PTO_TOp<"tsync", [
+  PTO_DpsInitOpInterface,
+]> {
   let summary = "TSYNC: Synchronize PTO execution with event tokens or single-op barrier.";
 
   let arguments = (ins
@@ -3633,7 +3807,9 @@ def PTO_TSYNCOp: PTO_TOp<"tsync", []> {
     `outs` `(` $dst `:` qualified(type($dst) ) `)`
     attr-dict
   }];
-
+  let extraClassDeclaration = [{
+    ::mlir::MutableOperandRange getDpsInitsMutable() { return getDstMutable(); }
+  }];
 }
 
 //===----------------------------------------------------------------------===//
@@ -3641,6 +3817,7 @@ def PTO_TSYNCOp: PTO_TOp<"tsync", []> {
 //===----------------------------------------------------------------------===//
 
 def PTO_TXOROp: PTO_TOp<"txor", [
+  PTO_DpsInitOpInterface,
   OpPipeInterface,
   DeclareOpInterfaceMethods<MemoryEffectsOpInterface>
 ]> {
@@ -3664,6 +3841,7 @@ def PTO_TXOROp: PTO_TOp<"txor", [
 
   let extraClassDeclaration = [{
     ::mlir::pto::PIPE getPipe() { return ::mlir::pto::PIPE::PIPE_V; }
+    ::mlir::MutableOperandRange getDpsInitsMutable() { return getDstMutable(); }
   }];
 
 }
