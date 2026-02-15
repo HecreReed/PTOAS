@@ -115,7 +115,7 @@ A logical partition (slice) of a `tensor_view`. Holds shape and stride informati
 
 | Parameter | Type | Description |
 |-----------|------|-------------|
-| `loc` | keyword (`vec/mat/left/right/acc/bias`) | Local memory domain (`vec` is UB in current tests; some legacy tests use `ub`) |
+| `loc` | keyword (`vec/mat/left/right/acc/bias`) | Local memory domain (`vec` maps to UB; use `vec` in textual IR) |
 | `dtype` | `element-type(i1/i8/i16/i32/f16/f32...)` | Element data type |
 | `rows` | `int64` | Physical row count |
 | `cols` | `int64` | Physical column count |
@@ -3321,6 +3321,8 @@ Comparison modes for `pto.tcmp` / `pto.tcmps`.
 | `GT` | 4 | `greater_than` |
 | `GE` | 5 | `greater_equal` |
 
+**Attribute syntax:** `#pto<cmp less_than>`
+
 ---
 
 #### `pto.tcmp`
@@ -3364,7 +3366,7 @@ pto.tcmp ins(<src0>, <src1> {cmpMode = <mode>} : <type0>, <type1>)
 **Basic Example:**
 
 ```mlir
-pto.tcmp ins(%a, %b {cmpMode = #pto.cmp<less_than>} :
+pto.tcmp ins(%a, %b {cmpMode = #pto<cmp less_than>} :
              !pto.tile_buf<loc=vec, dtype=f16, rows=16, cols=16,
              v_row=16, v_col=16, blayout=row_major, slayout=none_box,
              fractal=512, pad=0>,
@@ -3412,7 +3414,7 @@ For each element (i, j):
 **Basic Example:**
 
 ```mlir
-pto.tcmps ins(%a, %s {cmpMode = #pto.cmp<less_than>} :
+pto.tcmps ins(%a, %s {cmpMode = #pto<cmp less_than>} :
               !pto.tile_buf<loc=vec, dtype=f16, rows=16, cols=16,
               v_row=16, v_col=16, blayout=row_major, slayout=none_box,
               fractal=512, pad=0>, f16)
@@ -4463,6 +4465,8 @@ Rounding modes for type conversion (`pto.tcvt`) operations.
 | `ODD` | 6 | Round to odd |
 | `CAST_RINT` | 7 | Cast with round-to-nearest (default) |
 
+**Attribute syntax:** `#pto<round_mode FLOOR>`
+
 ---
 
 ##### `pto.tcvt` - Elementwise Type Conversion
@@ -4496,7 +4500,7 @@ dst[i, j] = cast(src[i, j], rmode)
 **Basic Example:**
 
 ```mlir
-pto.tcvt ins(%src {round_mode = #pto.round_mode<FLOOR>} : !pto.tile_buf<loc=vec, dtype=f32, rows=16, cols=16, v_row=16, v_col=16, blayout=row_major, slayout=none_box, fractal=512, pad=0>)
+pto.tcvt ins(%src {rmode = #pto<round_mode FLOOR>} : !pto.tile_buf<loc=vec, dtype=f32, rows=16, cols=16, v_row=16, v_col=16, blayout=row_major, slayout=none_box, fractal=512, pad=0>)
          outs(%dst : !pto.tile_buf<loc=vec, dtype=f16, rows=16, cols=16, v_row=16, v_col=16, blayout=row_major, slayout=none_box, fractal=512, pad=0>)
 ```
 
