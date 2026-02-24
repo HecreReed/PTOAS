@@ -14,6 +14,9 @@ RUN_ONLY_CASES="${RUN_ONLY_CASES:-}"  # comma/space separated testcase names
 REPEAT_CASES="${REPEAT_CASES:-insertSync,injectSync}"  # comma/space separated testcase names
 REPEAT_ITERS="${REPEAT_ITERS:-10}"                     # iteration count for REPEAT_CASES
 DEFAULT_ITERS="${DEFAULT_ITERS:-1}"                    # iteration count for all other cases
+# Delete per-case build dirs on success to reduce disk usage. This helps avoid
+# "No space left on device" failures on long runs.
+CLEANUP_BUILD_DIRS="${CLEANUP_BUILD_DIRS:-1}"          # 0 = keep build dirs
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 if [[ -f "${SCRIPT_DIR}/test/npu_validation/scripts/generate_testcase.py" ]]; then
@@ -34,6 +37,7 @@ log "DEVICE_ID=${DEVICE_ID}"
 log "PTO_ISA_REPO=${PTO_ISA_REPO}"
 log "PTO_ISA_COMMIT=${PTO_ISA_COMMIT}"
 log "REPEAT_CASES=${REPEAT_CASES} REPEAT_ITERS=${REPEAT_ITERS} DEFAULT_ITERS=${DEFAULT_ITERS}"
+log "CLEANUP_BUILD_DIRS=${CLEANUP_BUILD_DIRS}"
 log "ROOT_DIR=${ROOT_DIR}"
 
 RESULTS_TSV="${RESULTS_TSV:-${ROOT_DIR}/remote_npu_validation_results.tsv}"
@@ -339,6 +343,10 @@ while IFS= read -r -d '' cpp; do
   else
     ok_count=$((ok_count + 1))
     printf "%s\tOK\t%s\t%s\n" "${testcase}" "${STAGE}" "${info}" >> "${RESULTS_TSV}"
+  fi
+
+  if [[ "${CLEANUP_BUILD_DIRS}" != "0" && $case_rc -eq 0 ]]; then
+    rm -rf "${nv_dir}/build" >/dev/null 2>&1 || true
   fi
 done < <(find "${ROOT_DIR}/test/samples" -type f -name '*-pto.cpp' -print0)
 

@@ -343,6 +343,18 @@ def _infer_aicore_arch(kernel_text: str, soc_version: str) -> str:
 
     sv = (soc_version or "").lower()
     if "910b" in sv:
+        # Ascend910B* (A5 / dav-c310) is stricter about which PIPE_* values are
+        # legal under the "vec" arch for set_flag/wait_flag/pipe_barrier.
+        # Some sync-heavy kernels (e.g. SyncHigh) use PIPE_FIX/PIPE_MTE1/PIPE_M
+        # and must be compiled with the cube arch.
+        a5_vec_illegal_pipe_markers = (
+            "PIPE_FIX",
+            "PIPE_MTE1",
+            # Match PIPE_M as a whole token (avoid matching PIPE_MTE*).
+            "PIPE_M,",
+            "PIPE_M)",
+        )
+        needs_cube = needs_cube or any(m in kernel_text for m in a5_vec_illegal_pipe_markers)
         # Ascend910B* (e.g. Ascend910B1) uses dav-c310 toolchain arch.
         return "dav-c310-cube" if needs_cube else "dav-c310-vec"
 
