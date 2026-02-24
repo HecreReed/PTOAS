@@ -49,13 +49,30 @@ static PIPE getPipeFromOpType(SyncOpType opType) {
   }
 }
 
+static FailureOr<SyncOpType> getSyncOpTypeFromAttr(Attribute attr, Operation *op,
+                                                   StringRef name) {
+  if (auto a = attr.dyn_cast<SyncOpTypeAttr>())
+    return a.getOpType();
+  if (auto a = attr.dyn_cast<PipeEventTypeAttr>())
+    return a.getOpType();
+  (void)op->emitError("expected SyncOpTypeAttr or PipeEventTypeAttr for ")
+      << name;
+  return failure();
+}
+
 struct RecordEventLowering : public OpRewritePattern<RecordEventOp> {
   using OpRewritePattern<RecordEventOp>::OpRewritePattern;
 
   LogicalResult matchAndRewrite(RecordEventOp op,
                                 PatternRewriter &rewriter) const override {
-    SyncOpType srcType = op.getSrcOp().getOpType();
-    SyncOpType dstType = op.getDstOp().getOpType();
+    auto srcTypeOr = getSyncOpTypeFromAttr(op.getSrcOpAttr(), op, "src_op");
+    if (failed(srcTypeOr))
+      return failure();
+    auto dstTypeOr = getSyncOpTypeFromAttr(op.getDstOpAttr(), op, "dst_op");
+    if (failed(dstTypeOr))
+      return failure();
+    SyncOpType srcType = *srcTypeOr;
+    SyncOpType dstType = *dstTypeOr;
 
     PIPE srcPipe = getPipeFromOpType(srcType);
     PIPE dstPipe = getPipeFromOpType(dstType);
@@ -74,8 +91,14 @@ struct WaitEventLowering : public OpRewritePattern<WaitEventOp> {
 
   LogicalResult matchAndRewrite(WaitEventOp op,
                                 PatternRewriter &rewriter) const override {
-    SyncOpType srcType = op.getSrcOp().getOpType();
-    SyncOpType dstType = op.getDstOp().getOpType();
+    auto srcTypeOr = getSyncOpTypeFromAttr(op.getSrcOpAttr(), op, "src_op");
+    if (failed(srcTypeOr))
+      return failure();
+    auto dstTypeOr = getSyncOpTypeFromAttr(op.getDstOpAttr(), op, "dst_op");
+    if (failed(dstTypeOr))
+      return failure();
+    SyncOpType srcType = *srcTypeOr;
+    SyncOpType dstType = *dstTypeOr;
 
     PIPE srcPipe = getPipeFromOpType(srcType);
     PIPE dstPipe = getPipeFromOpType(dstType);
