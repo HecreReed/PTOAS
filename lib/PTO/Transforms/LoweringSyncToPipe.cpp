@@ -51,9 +51,9 @@ static PIPE getPipeFromOpType(SyncOpType opType) {
 
 static FailureOr<SyncOpType> getSyncOpTypeFromAttr(Attribute attr, Operation *op,
                                                    StringRef name) {
-  if (auto a = attr.dyn_cast<SyncOpTypeAttr>())
-    return a.getOpType();
   if (auto a = attr.dyn_cast<PipeEventTypeAttr>())
+    return a.getOpType();
+  if (auto a = attr.dyn_cast<SyncOpTypeAttr>())
     return a.getOpType();
   (void)op->emitError("expected SyncOpTypeAttr or PipeEventTypeAttr for ")
       << name;

@@ -3,8 +3,8 @@
 本文档基于 `include/PTO/IR/PTOOps.td`，按 PTO Dialect 的 op 定义整理出使用约定与 op 分类索引，便于在编写/解析 MLIR 时快速查阅。
 
 同步相关说明：
-- `pto.record_event` / `pto.wait_event` 的操作类型属性使用 `#pto.sync_op_type<...>` 为规范写法。
-- 为兼容历史文档/示例，`#pto.pipe_event_type<...>` 也被接受，但推荐使用 `sync_op_type`。
+- `pto.record_event` / `pto.wait_event` 的操作类型属性规范写法为 `#pto.pipe_event_type<...>`。
+- `#pto.sync_op_type<...>` 为历史别名，仍可解析，但不建议继续使用。
 
 ## PTO Op IR 格式速查表（DPS 格式）
 
