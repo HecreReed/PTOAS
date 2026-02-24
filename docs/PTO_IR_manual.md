@@ -81,8 +81,6 @@ A pointer to global memory.
 
 **Syntax:** `!pto.ptr<f16>`
 
-**Note:** TBD.
-
 ---
 
 ### 2.3 `!pto.tensor_view<d0 x d1 x elementType>`
@@ -127,7 +125,6 @@ A logical partition (slice) of a `tensor_view`. Holds shape and stride informati
 | `slayout` | `SLayout` mnemonic | Secondary layout (`none_box` / `row_major` / `col_major`) |
 | `fractal` | `int32` | Fractal size |
 | `pad` | `PadValue` mnemonic or integer literal | Padding policy/value selector (tests commonly use `pad=0`) |
-| `valid` (legacy) | `<int>x<int>` | Legacy alias in older tests (equivalent to `v_row`/`v_col`) |
 
 Here, `?` denotes a dynamic symbol resolved at runtime.
 
@@ -160,49 +157,33 @@ Defines the physical storage location of a buffer in the Ascend NPU memory hiera
 | `VEC` | 6 | `vec` | UB (unified buffer) |
 | `BIAS` | 7 | `bias` | Bias buffer |
 
-**Attribute syntax:** `#pto.address_space<vec>`
-
-In `pto.tile_buf` textual types used by `PTOAS/test`, the same concept is encoded as `loc=<mnemonic>` (for example, `loc=vec`) rather than `#pto.address_space<...>`.
+**Attribute syntax:** `loc=<mnemonic>` (for example, `loc=vec`)
 
 ---
 
-### 3.2 PipeEventType
+### 3.2 PipeEventKind
 
-Synchronization endpoint types used by `pto.record_event` and `pto.wait_event`. Lowering maps these operation categories to concrete hardware pipelines/events.
+Defines intra-core pipeline synchronization event kinds in PTO IR, used to express dependencies between pipelines (for example, in [`pto.record_event`](#ptorecord_event) and [`pto.wait_event`](#ptowait_event)).
 
 | Value | Int | Description |
 |-------|-----|-------------|
-| `TLOAD` | 0 | Load from GM |
-| `TSTORE_ACC` | 1 | Store from accumulator |
-| `TSTORE_VEC` | 2 | Store from vector/UB |
-| `TMOV_M2L` | 3 | Move: MAT -> LEFT |
-| `TMOV_M2S` | 4 | Move: MAT -> scalar |
-| `TMOV_M2B` | 5 | Move: MAT -> BIAS |
-| `TMOV_M2V` | 6 | Move: MAT -> VEC |
-| `TMOV_V2M` | 7 | Move: VEC -> MAT |
-| `TMATMUL` | 8 | Matrix multiplication |
-| `TVEC` | 9 | Vector operation |
-| `TVECWAIT_EVENT` | 10 | Vector wait event |
+| `EVENT_LOAD_FROM_GM` | 0 | Load from GM |
+| `EVENT_STORE_FROM_ACC` | 1 | Store from accumulator |
+| `EVENT_STORE_FROM_VEC` | 2 | Store from vector/UB |
+| `EVENT_MOVE_MAT_TO_LEFT` | 3 | Move: MAT -> LEFT |
+| `EVENT_MOVE_MAT_TO_SCALAR` | 4 | Move: MAT -> scalar |
+| `EVENT_MOVE_MAT_TO_BIAS` | 5 | Move: MAT -> BIAS |
+| `EVENT_MOVE_MAT_TO_VEC` | 6 | Move: MAT -> VEC |
+| `EVENT_MOVE_VEC_TO_MAT` | 7 | Move: VEC -> MAT |
+| `EVENT_COMPUTE_MATMUL` | 8 | Matrix multiplication |
+| `EVENT_COMPUTE_VEC` | 9 | Vector operation |
+| `EVENT_VEC_WAITPOINT` | 10 | Vector wait event |
 
-**Attribute syntax:** `#pto.pipe_event_type<TLOAD>`
-
----
-
-### 3.3 Layout
-
-Global tensor layout inference for `tensor_view`/`partition_tensor_view`. Tile buffers additionally use **Tile Buf config** (see 3.5) to describe physical/fractal layout and padding policy, aligned with PTO ISA conventions.
-
-| Value | Int | Mnemonic | Description |
-|-------|-----|----------|-------------|
-| `ND` | 0 | `nd` | Row-major (Normal-Dimension) |
-| `DN` | 1 | `dn` | Column-major (Dimension-Normal) |
-| `NZ` | 2 | `nz` | Fractal/blocked layout |
-
-**Attribute syntax:** `#pto.layout<nd>`
+**Attribute syntax:** `#pto.pipe_event_type<EVENT_LOAD_FROM_GM>`
 
 ---
 
-### 3.4 EVENT (Hardware Event IDs)
+### 3.3 EVENT (Hardware Event IDs)
 
 8 hardware event IDs for synchronization primitives.
 
@@ -214,7 +195,7 @@ Global tensor layout inference for `tensor_view`/`partition_tensor_view`. Tile b
 
 ---
 
-### 3.5 Tile Buf config
+### 3.4 Tile Buf config
 
 Composite attribute and component enums for tile buffer configuration.
 
@@ -250,6 +231,20 @@ Composite attribute and component enums for tile buffer configuration.
 | `Zero` | 1 | `zero` |
 | `Max` | 2 | `max` |
 | `Min` | 3 | `min` |
+
+---
+
+### 3.5 Layout
+
+Global tensor layout inference for [`tensor_view` (Section 2.3)](#23-ptotensor_viewd0-x-d1-x-elementtype)/[`partition_tensor_view` (Section 2.4)](#24-ptopartition_tensor_viewd0-x-d1-x-elementtype). Tile buffers additionally use **Tile Buf config** (see 3.4) to describe physical/fractal layout.
+
+| Value | Int | Mnemonic | Description |
+|-------|-----|----------|-------------|
+| `ND` | 0 | `nd` | Row-major (Normal-Dimension) |
+| `DN` | 1 | `dn` | Column-major (Dimension-Normal) |
+| `NZ` | 2 | `nz` | Fractal/blocked layout |
+
+**Attribute syntax:** `#pto.layout<nd>`
 
 ---
 
@@ -635,7 +630,7 @@ For each (i, j):
 
 **Hardware Mapping:**
 
-- Executes on the **Matrix/Cube pipeline** (`PIPE_M`)
+- Executes on the **Matrix pipeline** (`PIPE_M`)
 
 **Basic Example:**
 
@@ -675,7 +670,7 @@ For each (i, j):
 
 **Hardware Mapping:**
 
-- Executes on the **Matrix/Cube pipeline** (`PIPE_M`)
+- Executes on the **Matrix pipeline** (`PIPE_M`)
 
 **Basic Example:**
 
@@ -716,7 +711,7 @@ For each (i, j):
 
 **Hardware Mapping:**
 
-- Executes on the **Matrix/Cube pipeline** (`PIPE_M`)
+- Executes on the **Matrix pipeline** (`PIPE_M`)
 
 **Basic Example:**
 
@@ -759,7 +754,7 @@ For each (i, j):
 
 **Hardware Mapping:**
 
-- Executes on the **Matrix/Cube pipeline** (`PIPE_M`)
+- Executes on the **Matrix pipeline** (`PIPE_M`)
 
 **Basic Example:**
 
@@ -800,7 +795,7 @@ dst = acc_in + (lhs * rhs)   // scaling tiles configure target-defined behavior
 
 **Hardware Mapping:**
 
-- Executes on the **Matrix/Cube pipeline** (`PIPE_M`)
+- Executes on the **Matrix pipeline** (`PIPE_M`)
 
 **Basic Example:**
 
@@ -841,7 +836,7 @@ dst = (lhs * rhs) + bias   // scaling tiles configure target-defined behavior
 
 **Hardware Mapping:**
 
-- Executes on the **Matrix/Cube pipeline** (`PIPE_M`)
+- Executes on the **Matrix pipeline** (`PIPE_M`)
 
 **Basic Example:**
 
@@ -880,7 +875,7 @@ For each row i:
 
 **Hardware Mapping:**
 
-- Executes on the **Matrix/Cube pipeline** (`PIPE_M`)
+- Executes on the **Matrix pipeline** (`PIPE_M`)
 
 **Basic Example:**
 
@@ -918,7 +913,7 @@ dst = acc_in + (lhs * rhs)
 
 **Hardware Mapping:**
 
-- Executes on the **Matrix/Cube pipeline** (`PIPE_M`)
+- Executes on the **Matrix pipeline** (`PIPE_M`)
 
 **Basic Example:**
 
@@ -956,7 +951,7 @@ dst = (lhs * rhs) + bias
 
 **Hardware Mapping:**
 
-- Executes on the **Matrix/Cube pipeline** (`PIPE_M`)
+- Executes on the **Matrix pipeline** (`PIPE_M`)
 
 **Basic Example:**
 
@@ -4745,8 +4740,8 @@ record_event(src_op, dst_op, event_id)
 
 | Name | Type | Description |
 |------|------|-------------|
-| `src_op` | `PipeEventTypeAttr` | Source operation type |
-| `dst_op` | `PipeEventTypeAttr` | Destination operation type |
+| `src_op` | `PipeEventKindAttr` | Source operation type |
+| `dst_op` | `PipeEventKindAttr` | Destination operation type |
 | `event_id` | `EventAttr` | Event ID |
 
 **Results:** None.
@@ -4762,7 +4757,7 @@ record_event(src_op, dst_op, event_id)
 **Basic Example:**
 
 ```mlir
-pto.record_event [#pto.pipe_event_type<TLOAD>, #pto.pipe_event_type<TVEC>, #pto.event<EVENT_ID0>]
+pto.record_event [#pto.pipe_event_type<EVENT_LOAD_FROM_GM>, #pto.pipe_event_type<EVENT_COMPUTE_VEC>, #pto.event<EVENT_ID0>]
 ```
 
 ---
@@ -4781,8 +4776,8 @@ wait_event(src_op, dst_op, event_id)
 
 | Name | Type | Description |
 |------|------|-------------|
-| `src_op` | `PipeEventTypeAttr` | Source operation type |
-| `dst_op` | `PipeEventTypeAttr` | Destination operation type |
+| `src_op` | `PipeEventKindAttr` | Source operation type |
+| `dst_op` | `PipeEventKindAttr` | Destination operation type |
 | `event_id` | `EventAttr` | Event ID |
 
 **Results:** None.
@@ -4798,7 +4793,7 @@ wait_event(src_op, dst_op, event_id)
 **Basic Example:**
 
 ```mlir
-pto.wait_event [#pto.pipe_event_type<TLOAD>, #pto.pipe_event_type<TVEC>, #pto.event<EVENT_ID0>]
+pto.wait_event [#pto.pipe_event_type<EVENT_LOAD_FROM_GM>, #pto.pipe_event_type<EVENT_COMPUTE_VEC>, #pto.event<EVENT_ID0>]
 ```
 
 ---
