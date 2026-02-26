@@ -49,6 +49,17 @@ INCLUDE_REPLACEMENT = (
     "#endif\n"
     "#include <pto/pto-inst.hpp>\n"
     "#include <pto/common/constants.hpp>\n"
+    "\n"
+    "// PTOAS arch compatibility: pto-isa uses PIPE_S for some ops on a2a3 but\n"
+    "// PIPE_V on a5 (dav-c310). When we validate determinism across SoCs, keep\n"
+    "// generated kernels portable by mapping PIPE_S -> PIPE_V on a5.\n"
+    "#ifndef PTOAS_PIPE_S_OR_V\n"
+    "#if defined(REGISTER_BASE)\n"
+    "#define PTOAS_PIPE_S_OR_V PIPE_V\n"
+    "#else\n"
+    "#define PTOAS_PIPE_S_OR_V PIPE_S\n"
+    "#endif\n"
+    "#endif\n"
     "#ifndef __CPU_SIM\n"
     "#include \"acl/acl.h\"\n"
     "#endif\n"
@@ -225,6 +236,25 @@ def _np_dtype_for_cpp(cpp_type: str) -> str:
         "uint64_t": "np.uint64",
     }
     return mapping.get(cpp_type, "np.float32")
+
+
+def _bytes_per_cpp_type(cpp_type: str) -> int:
+    mapping = {
+        "float": 4,
+        "half": 2,
+        "aclFloat16": 2,
+        "__bf16": 2,
+        "bfloat16_t": 2,
+        "int8_t": 1,
+        "uint8_t": 1,
+        "int16_t": 2,
+        "uint16_t": 2,
+        "int32_t": 4,
+        "uint32_t": 4,
+        "int64_t": 8,
+        "uint64_t": 8,
+    }
+    return mapping.get(cpp_type, 4)
 
 
 def _cpp_host_type(cpp_type: str) -> str:
@@ -1035,16 +1065,28 @@ def generate_testcase(
     golden_template = (templates_root / "golden_template.py").read_text(encoding="utf-8")
     input_generate = []
     elem_count = logical_elem_count
-    # Some kernels use an integer tensor as "indices". The safe in-range domain
-    # depends on the op semantics. For the pto-isa a2a3 implementations:
+    # Some kernels use an integer tensor as indices/offsets. The safe in-range
+    # domain depends on the op semantics:
     # - TSCATTER: indices are linear indices in [0, rows*cols)
-    # - TGATHER/TGATHERB: indices are linear indices in [0, rows*cols)
+    # - TGATHER: indices are linear indices in [0, rows*cols)
+    # - TGATHERB: offsets are *byte offsets* (typically 32B-aligned blocks)
+    has_tscatter = re.search(r"\bTSCATTER\b", raw_kernel) is not None
+    has_tgather = re.search(r"\bTGATHER\b", raw_kernel) is not None
+    has_tgatherb = re.search(r"\bTGATHERB\b", raw_kernel) is not None
     index_mod = None
-    if "TSCATTER" in raw_kernel:
+    if has_tscatter:
         index_mod = max(elem_count, 1)
-    elif any(m in raw_kernel for m in ("TGATHER", "TGATHERB")):
+    elif has_tgather:
         index_mod = max(elem_count, 1)
     mrgsort_packed = "TMRGSORT" in raw_kernel
+    gatherb_offset_align = 32
+    gatherb_offset_bucket_count = 1
+    if has_tgatherb and output_ptrs:
+        out_elem_bytes = _bytes_per_cpp_type(output_ptrs[0]["cpp_type"])
+        tile_bytes = max(elem_count, 1) * max(out_elem_bytes, 1)
+        # TGATHERB reads 32B blocks; keep offsets in-range: offset + 32 <= tile_bytes.
+        max_valid_offset = max(tile_bytes - gatherb_offset_align, 0)
+        gatherb_offset_bucket_count = max(max_valid_offset // gatherb_offset_align + 1, 1)
     for p in init_ptrs:
         np_dtype = _np_dtype_for_cpp(p["cpp_type"])
         name = p["name"]
@@ -1116,7 +1158,13 @@ def generate_testcase(
             input_generate.append(f"    {name}__packed['i'] = {name}__idx")
             input_generate.append(f"    {name}__packed.tofile(\"{name}.bin\")")
         elif np_dtype.startswith("np.int") or np_dtype.startswith("np.uint"):
-            if index_mod is not None:
+            if has_tgatherb and (not is_output):
+                # TGATHERB offsets are byte offsets. Upstream pto-isa tests use
+                # 32B blocks; keep offsets aligned and in-range for all dtypes.
+                input_generate.append(
+                    f"    {name} = ((np.arange({size}, dtype=np.uint64) % {gatherb_offset_bucket_count}) * {gatherb_offset_align}).astype({np_dtype})"
+                )
+            elif index_mod is not None:
                 input_generate.append(
                     f"    {name} = (np.arange({size}, dtype=np.int64) % {index_mod}).astype({np_dtype})"
                 )
@@ -1148,6 +1196,11 @@ def generate_testcase(
                     cols=cols,
                     logical_elem_count=logical_elem_count,
                 )
+
+    # Keep PIPE_S portable across SoCs: some pto-isa implementations treat the
+    # underlying instruction as PIPE_S on a2a3 but PIPE_V on a5. Replace with a
+    # macro that maps based on the compile-time arch.
+    kernel_text_out = re.sub(r"\bPIPE_S\b", "PTOAS_PIPE_S_OR_V", kernel_text_out)
 
     kernel_out = output_dir / f"{testcase}_kernel.cpp"
     kernel_out.write_text(_replace_includes(kernel_text_out), encoding="utf-8")
