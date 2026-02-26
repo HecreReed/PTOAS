@@ -19,9 +19,7 @@ def build():
             tv2_u32 = pto.TensorViewType.get(2, u32, ctx)
 
             tile_view_f32 = pto.PartitionTensorViewType.get([32, 32], f32, ctx)
-            # TGATHERB consumes 32-byte block offsets; for f32 each offset covers
-            # 8 elements (32B / 4B). So the offsets tile has cols = 32 / 8 = 4.
-            tile_view_u32 = pto.PartitionTensorViewType.get([32, 4], u32, ctx)
+            tile_view_u32 = pto.PartitionTensorViewType.get([32, 32], u32, ctx)
 
             vec = pto.AddressSpaceAttr.get(pto.AddressSpace.VEC, ctx)
             bl = pto.BLayoutAttr.get(pto.BLayout.RowMajor, ctx)
@@ -31,7 +29,7 @@ def build():
             fractal_ab_size = pto.TileConfig.fractalABSize
             cfg = pto.TileBufConfigAttr.get(bl, sl, fractal_ab_size, pd, ctx)
             tile_buf_f32 = pto.TileBufType.get([32, 32], f32, vec, [32, 32], cfg, ctx)
-            tile_buf_u32 = pto.TileBufType.get([32, 4], u32, vec, [32, 4], cfg, ctx)
+            tile_buf_u32 = pto.TileBufType.get([32, 32], u32, vec, [32, 32], cfg, ctx)
 
             fn_ty = func.FunctionType.get([ptr_f32, ptr_u32, ptr_f32], [])
             with InsertionPoint(m.body):
@@ -42,7 +40,6 @@ def build():
                 # constants
                 c0 = arith.ConstantOp(IndexType.get(ctx), 0).result
                 c1 = arith.ConstantOp(IndexType.get(ctx), 1).result
-                c4 = arith.ConstantOp(IndexType.get(ctx), 4).result
                 c32 = arith.ConstantOp(IndexType.get(ctx), 32).result
 
                 arg0, arg1, arg2 = entry.arguments
@@ -50,12 +47,12 @@ def build():
                 # %0/%1/%2 = pto.make_tensor_view %arg?, shape=[%c32,%c32] strides=[%c32,%c1]
                 # 这里用原生 builder：通常签名会是 (result_type, ptr, shape, strides)
                 tv0 = pto.MakeTensorViewOp(tv2_f32, arg0, [c32, c32], [c32, c1]).result
-                tv1 = pto.MakeTensorViewOp(tv2_u32, arg1, [c32, c4], [c4, c1]).result
+                tv1 = pto.MakeTensorViewOp(tv2_u32, arg1, [c32, c32], [c32, c1]).result
                 tv2 = pto.MakeTensorViewOp(tv2_f32, arg2, [c32, c32], [c32, c1]).result
 
                 # %3/%4/%8 = pto.subview %tv, offsets=[%c0,%c0], sizes=[32,32]
                 sv0 = pto.PartitionViewOp(tile_view_f32, tv0, offsets=[c0, c0], sizes=[c32, c32]).result
-                sv1 = pto.PartitionViewOp(tile_view_u32, tv1, offsets=[c0, c0], sizes=[c32, c4]).result
+                sv1 = pto.PartitionViewOp(tile_view_u32, tv1, offsets=[c0, c0], sizes=[c32, c32]).result
 
                 # %5/%6/%7 = pto.alloc_tile : <32x32xf32>
                 tb0 = pto.AllocTileOp(tile_buf_f32).result
