@@ -263,7 +263,20 @@ void SyncEventIdAllocation::FindUseEventID(unsigned int begin, unsigned int end,
                                            const SyncOperation *s,
                                            SmallVector<bool> &eventId) {
   const auto eventIdSize = eventId.size();
-  if (begin < end) llvm::errs() << "begin: " << begin << " end: " << end << "\n";
+  if (!(begin < end)) {
+    llvm::errs() << "[SyncEventIdAllocation] invalid interval in FindUseEventID"
+                 << " begin=" << begin << " end=" << end
+                 << " syncIndex=" << s->GetSyncIndex()
+                 << " type=" << SyncOperation::TypeName(s->GetType())
+                 << " src=" << static_cast<unsigned>(s->GetSrcPipe())
+                 << " dst=" << static_cast<unsigned>(s->GetDstPipe())
+                 << " forEndIndex=";
+    if (s->GetForEndIndex().has_value())
+      llvm::errs() << s->GetForEndIndex().value();
+    else
+      llvm::errs() << "null";
+    llvm::errs() << "\n";
+  }
   assert(begin < end);
   int scopePair = ScopePair(s);
   eventCyclePool.try_emplace(scopePair, EventCyclePool(eventIdSize));
@@ -397,6 +410,20 @@ void SyncEventIdAllocation::UpdateBackwardMatchSync(
 void SyncEventIdAllocation::SetUseEventID(unsigned int begin, unsigned int end,
                                           const SyncOperation *setFlag,
                                           unsigned int eventId) {
+  if (!(begin < end)) {
+    llvm::errs() << "[SyncEventIdAllocation] invalid interval in SetUseEventID"
+                 << " begin=" << begin << " end=" << end
+                 << " syncIndex=" << setFlag->GetSyncIndex()
+                 << " type=" << SyncOperation::TypeName(setFlag->GetType())
+                 << " src=" << static_cast<unsigned>(setFlag->GetSrcPipe())
+                 << " dst=" << static_cast<unsigned>(setFlag->GetDstPipe())
+                 << " forEndIndex=";
+    if (setFlag->GetForEndIndex().has_value())
+      llvm::errs() << setFlag->GetForEndIndex().value();
+    else
+      llvm::errs() << "null";
+    llvm::errs() << "\n";
+  }
   assert(begin < end);
   int scopePair = ScopePair(setFlag);
   const size_t poolSize =

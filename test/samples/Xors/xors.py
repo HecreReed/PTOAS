@@ -51,7 +51,8 @@ def build():
 
                 pto.TLoadOp(None, sv_src, tb_src)  # result=None
 
-                pto.TXorSOp(tb_src, scale, tb_dst)
+                # NOTE: Python bindings generate TXORSOp / txors.
+                pto.txors(tb_src, scale, tb_dst)
 
                 # output subview
                 sv_dst = pto.PartitionViewOp(tile_view_32, tv_dst, offsets=[c0, c0], sizes=[c32, c32]).result

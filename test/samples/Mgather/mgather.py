@@ -51,7 +51,8 @@ def build():
                 # pto.load_dps_tb ins(%sv) outs(%tb)
                 pto.TLoadOp(None, sv1, tb1)  # result=None
 
-                pto.MGatherOp(sv0, tb1, tb2)
+                # NOTE: Python bindings generate TMGatherOp / mgather.
+                pto.mgather(sv0, tb1, tb2)
 
                 # %8 = subview on output tensor_view
                 sv2 = pto.PartitionViewOp(tile_view_32, tv2, offsets=[c0, c0], sizes=[c32, c32]).result
