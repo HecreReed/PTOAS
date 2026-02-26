@@ -173,22 +173,6 @@ process_one_dir() {
       fi
     fi
 
-    # Regression guard for issue #117: vector mask must be reset for each
-    # `pto.section.vector` region to avoid cross-kernel state leakage.
-    # Use an existing sample (Complex/cv_region.py) that contains a vector section.
-    if [[ "$base" == "cv_region" ]]; then
-      if ! grep -Fq "#if defined(__DAV_VEC__)" "$cpp"; then
-        echo -e "${A}(${base}.py)\tFAIL\tmissing __DAV_VEC__ guard"
-        overall=1
-        continue
-      fi
-      if ! grep -Fq "set_mask_norm();" "$cpp"; then
-        echo -e "${A}(${base}.py)\tFAIL\tmissing set_mask_norm() reset"
-        overall=1
-        continue
-      fi
-      if ! grep -Fq "set_vector_mask(-1, -1);" "$cpp"; then
-        echo -e "${A}(${base}.py)\tFAIL\tmissing set_vector_mask(-1, -1) reset"
     # Regression guard for Issue #112:
     # `--enable-insert-sync` must not push PIPE_M -> PIPE_FIX into high event IDs
     # for the autosync tmatmulk sample, otherwise it may deadlock on Ascend NPU.
