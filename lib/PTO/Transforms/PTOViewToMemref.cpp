@@ -611,6 +611,27 @@ struct PTOViewToMemrefPass
       }
 
       // ------------------------------------------------------------------
+      // Stage 1.25: Lower pto.get_tensor_view_dim -> memref.dim
+      // ------------------------------------------------------------------
+      SmallVector<mlir::pto::GetTensorViewDimOp, 8> tvDims;
+      func.walk([&](mlir::pto::GetTensorViewDimOp op) { tvDims.push_back(op); });
+
+      for (auto op : tvDims) {
+        IRRewriter rewriter(ctx);
+        rewriter.setInsertionPoint(op);
+        Location loc = op.getLoc();
+
+        Value view = op.getTensorView();
+        auto mrTy = dyn_cast<BaseMemRefType>(view.getType());
+        if (!mrTy)
+          continue; // leave it to later passes if it hasn't been lowered yet
+
+        Value dimIdx = op.getDimIndex();
+        Value dim = rewriter.create<memref::DimOp>(loc, view, dimIdx);
+        rewriter.replaceOp(op, dim);
+      }
+
+      // ------------------------------------------------------------------
       // Stage 1.5: Fold pto.addptr chains into load/store_scalar.
       // ------------------------------------------------------------------
       SmallVector<mlir::pto::LoadScalarOp, 8> loadScalars;

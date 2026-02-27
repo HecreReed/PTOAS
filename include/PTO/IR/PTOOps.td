@@ -185,6 +185,35 @@ def PartitionViewOp : PTO_Op<"partition_view", [AttrSizedOperandSegments]> {
   }];
 }
 
+// Helper: tensor_view or memref (after lowering tensor_view to memref).
+def TensorViewOrMemRef :
+  AnyTypeOf<[TensorViewType, AnyMemRef], "TensorView or MemRef">;
+
+// Get the size of a dimension of a tensor_view or its lowered memref view.
+// Result type: Index (use arith.index_cast if i32 is needed).
+def GetTensorViewDimOp : PTO_Op<"get_tensor_view_dim", [Pure]> {
+  let summary = "Get the size of a dimension of a tensor_view.";
+  let description = [{
+    Returns the size of the given dimension of a logical tensor view.
+    This op accepts either !pto.tensor_view or the memref it is lowered to.
+    IR (tensor_view form):
+      %dim_size = pto.get_tensor_view_dim %tv, %dim_index
+        : !pto.tensor_view, index -> index
+    IR (memref form, after lowering):
+      %dim_size = pto.get_tensor_view_dim %mr, %dim_index
+        : memref<...>, index -> index
+  }];
+  let arguments = (ins
+    TensorViewOrMemRef:$tensor_view,
+    Index:$dim_index
+  );
+  let results = (outs Index:$result);
+  let assemblyFormat = [{
+    $tensor_view `,` $dim_index `:` qualified(type($tensor_view)) `->` qualified(type($result))
+    attr-dict
+  }];
+}
+
 def AllocTileOp : PTO_Op<"alloc_tile", [AttrSizedOperandSegments]> {
   let summary = "Allocates a tile buffer (logical buffer).";
 
