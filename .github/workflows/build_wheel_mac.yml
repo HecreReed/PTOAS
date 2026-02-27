@@ -164,22 +164,84 @@ jobs:
           mkdir -p "$OUT_DIR/bin" "$OUT_DIR/lib"
           cp "$PTOAS_BIN" "$OUT_DIR/bin/"
 
+          # Resolve @rpath / @loader_path / absolute dep install names to a
+          # concrete file path that can be copied into the bundle.
+          resolve_dep_path() {
+            local owner="$1"
+            local dep="$2"
+            local owner_dir
+            owner_dir="$(dirname "$owner")"
+
+            # Candidate rpaths from the owner binary/library itself.
+            mapfile -t owner_rpaths < <(
+              otool -l "$owner" | awk '
+                $1=="cmd" && $2=="LC_RPATH" {want=1; next}
+                want && $1=="path" {print $2; want=0}
+              '
+            )
+
+            local dep_tail="$dep"
+            if [[ "$dep" == @rpath/* ]]; then
+              dep_tail="${dep#@rpath/}"
+            fi
+
+            # Ordered candidates: direct absolute path first, then rpath-based probes.
+            local candidates=()
+            if [[ "$dep" = /* ]]; then
+              candidates+=("$dep")
+            fi
+            if [[ "$dep" == @loader_path/* ]]; then
+              candidates+=("${owner_dir}/${dep#@loader_path/}")
+            fi
+            if [[ "$dep" == @executable_path/* ]]; then
+              candidates+=("$OUT_DIR/bin/${dep#@executable_path/}")
+            fi
+            if [[ "$dep" == @rpath/* ]]; then
+              for rp in "${owner_rpaths[@]}"; do
+                case "$rp" in
+                  @loader_path/*) rp="${owner_dir}/${rp#@loader_path/}" ;;
+                  @executable_path/*) rp="$OUT_DIR/bin/${rp#@executable_path/}" ;;
+                esac
+                candidates+=("${rp}/${dep_tail}")
+              done
+              # Fallback probe locations commonly used in this build.
+              candidates+=(
+                "$LLVM_BUILD_DIR/lib/${dep_tail}"
+                "$PTO_INSTALL_DIR/lib/${dep_tail}"
+                "$owner_dir/${dep_tail}"
+              )
+            fi
+
+            local c
+            for c in "${candidates[@]}"; do
+              if [[ -f "$c" ]]; then
+                echo "$c"
+                return 0
+              fi
+            done
+            return 1
+          }
+
           collect_dylibs() {
             local bin="$1"
-            otool -L "$bin" | awk 'NR>1 {print $1}' | while read -r dep; do
-              case "$dep" in
-                "$LLVM_BUILD_DIR"/*|"$PTO_INSTALL_DIR"/*)
-                  local base
-                  base=$(basename "$dep")
-                  if [ ! -f "$OUT_DIR/lib/$base" ]; then
-                    cp "$dep" "$OUT_DIR/lib/$base"
-                    install_name_tool -id "@loader_path/../lib/$base" "$OUT_DIR/lib/$base" || true
-                    collect_dylibs "$OUT_DIR/lib/$base"
-                  fi
-                  install_name_tool -change "$dep" "@loader_path/../lib/$base" "$bin" || true
-                  ;;
-              esac
-            done
+            while read -r dep; do
+              [ -n "$dep" ] || continue
+              local resolved
+              resolved="$(resolve_dep_path "$bin" "$dep" || true)"
+              if [ -z "$resolved" ]; then
+                echo "WARN: unresolved dep for $bin -> $dep"
+                continue
+              fi
+
+              local base
+              base="$(basename "$resolved")"
+              if [ ! -f "$OUT_DIR/lib/$base" ]; then
+                cp "$resolved" "$OUT_DIR/lib/$base"
+                install_name_tool -id "@loader_path/$base" "$OUT_DIR/lib/$base" || true
+                collect_dylibs "$OUT_DIR/lib/$base"
+              fi
+              install_name_tool -change "$dep" "@loader_path/../lib/$base" "$bin" || true
+            done < <(otool -L "$bin" | awk 'NR>1 {print $1}')
           }
 
           collect_dylibs "$OUT_DIR/bin/ptoas"
