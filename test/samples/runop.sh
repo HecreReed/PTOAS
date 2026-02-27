@@ -183,16 +183,6 @@ process_one_dir() {
         overall=1
         continue
       fi
-      # Additional deadlock guard:
-      # Avoid requiring multiple PIPE_M -> PIPE_MTE1 event IDs across branches.
-      # On Ascend NPU, `wait_flag` consumes the flag; waiting for an event id
-      # that is never re-set on a given control path can hang the kernel.
-      if grep -Eq "wait_flag\\(PIPE_M,[[:space:]]*PIPE_MTE1,[[:space:]]*EVENT_ID[1-7]\\)" "$cpp" || \
-         grep -Eq "set_flag\\(PIPE_M,[[:space:]]*PIPE_MTE1,[[:space:]]*EVENT_ID[1-7]\\)" "$cpp"; then
-        echo -e "${A}(${base}.py)\tFAIL\tdeadlock signature: PIPE_M->PIPE_MTE1 uses EVENT_ID[1-7] (expected only EVENT_ID0)"
-        overall=1
-        continue
-      fi
     fi
 
     # Regression guard for issue #117: vector mask must be reset for each

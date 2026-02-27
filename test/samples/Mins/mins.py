@@ -55,8 +55,8 @@ def build():
                 pto.TLoadOp(None, sv0, tb0)  # result=None
                 pto.TLoadOp(None, sv1, tb1)  # result=None
 
-                # NOTE: Python bindings generate TMinsOp / tmins.
-                pto.tmins(tb0, scale, tb1)
+                # Perform max scaling operation
+                pto.TMinSOp(tb0, scale, tb1)
 
                 # %8 = subview on output tensor_view
                 sv2 = pto.PartitionViewOp(tile_view_32, tv1, offsets=[c0, c0], sizes=[c32, c32]).result

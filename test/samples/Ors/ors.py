@@ -53,8 +53,7 @@ def build():
 
                 pto.TLoadOp(None, sv_src, tb_src)  # result=None
 
-                # NOTE: Python bindings generate TOrsOp / tors.
-                pto.tors(tb_src, scale, tb_dst)
+                pto.TOrSOp(tb_src, scale, tb_dst)
 
                 # pto.store_dps_tb ins(%tb1) outs(%sv1)
                 pto.TStoreOp(None, tb_dst, sv_dst)

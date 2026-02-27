@@ -51,8 +51,7 @@ def build():
 
                 pto.TLoadOp(None, sv0, tb0)  # result=None
 
-                # NOTE: Python bindings generate TMulsOp / tmuls.
-                pto.tmuls(tb0, scale, tb1)
+                pto.TMulSOp(tb0, scale, tb1)
 
                 # %8 = subview on output tensor_view
                 sv1 = pto.PartitionViewOp(tile_view_32, tv1, offsets=[c0, c0], sizes=[c32, c32]).result
