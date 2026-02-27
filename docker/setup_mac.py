@@ -1,4 +1,12 @@
 from setuptools import find_namespace_packages, setup
+from setuptools.dist import Distribution
+
+
+class BinaryDistribution(Distribution):
+    """Force a platform-tagged wheel for macOS artifacts."""
+
+    def has_ext_modules(self):
+        return True
 
 setup(
     name="ptoas",
@@ -21,4 +29,5 @@ setup(
     include_package_data=True,
     zip_safe=False,
     python_requires=">=3.9",
+    distclass=BinaryDistribution,
 )
