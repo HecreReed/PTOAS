@@ -135,6 +135,24 @@ collect_dylibs() {
 echo "Collecting dylib dependencies..."
 collect_dylibs "${PTOAS_DIST_DIR}/bin/ptoas"
 
+if ! command -v codesign >/dev/null 2>&1; then
+  echo "Error: codesign is required on macOS to sign packaged artifacts" >&2
+  exit 1
+fi
+
+echo "Ad-hoc signing packaged binaries and dylibs..."
+shopt -s nullglob
+SIGN_TARGETS=("${PTOAS_DIST_DIR}/bin/ptoas" "${PTOAS_DEPS_DIR}"/*.dylib)
+for target in "${SIGN_TARGETS[@]}"; do
+  codesign --force --sign - --timestamp=none "$target"
+done
+
+echo "Verifying code signatures..."
+for target in "${SIGN_TARGETS[@]}"; do
+  codesign --verify --strict --verbose=2 "$target"
+done
+shopt -u nullglob
+
 echo "Creating wrapper script..."
 cat > "${PTOAS_DIST_DIR}/ptoas" << 'WRAPPER_EOF'
 #!/bin/bash
@@ -143,6 +161,9 @@ export DYLD_LIBRARY_PATH="${SCRIPT_DIR}/lib:${DYLD_LIBRARY_PATH}"
 exec "${SCRIPT_DIR}/bin/ptoas" "$@"
 WRAPPER_EOF
 chmod +x "${PTOAS_DIST_DIR}/ptoas"
+
+echo "Smoke testing packaged ptoas dist..."
+"${PTOAS_DIST_DIR}/ptoas" --version
 
 echo ""
 echo "=== ptoas distribution contents ==="

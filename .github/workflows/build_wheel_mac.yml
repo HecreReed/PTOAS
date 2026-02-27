@@ -189,6 +189,13 @@ jobs:
         run: |
           bash "$PTO_SOURCE_DIR/docker/collect_ptoas_dist_mac.sh" "$GITHUB_WORKSPACE/ptoas-dist"
 
+      - name: Smoke test wheel imports after collecting artifacts
+        if: matrix.python == '3.11'
+        run: |
+          # Keep a post-collect wheel import check so release packaging changes
+          # don't reintroduce ARM runtime kills (e.g. cs_invalid_page regressions).
+          bash "$PTO_SOURCE_DIR/docker/test_wheel_imports.sh"
+
       - name: Upload ptoas binary artifact
         if: matrix.python == '3.11'
         uses: actions/upload-artifact@v4
