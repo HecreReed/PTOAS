@@ -2923,7 +2923,7 @@ struct PointerCastConversion : public OpConversionPattern<pto::PointerCastOp> {
         int32_t padVal = 0;
         if (auto attr = dyn_cast<PadValueAttr>(config.getPad()))
             padVal = static_cast<int32_t>(attr.getValue());
-
+ 
         std::string padStr = "PadValue::Null";
         switch (padVal) {
             case 1: padStr = "PadValue::Zero"; break;
