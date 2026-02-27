@@ -7,28 +7,41 @@ if [[ -z "${PTOBC_BIN}" ]]; then
   exit 2
 fi
 
-TESTDATA_DIR=${TESTDATA_DIR:-"$(cd "$(dirname "${BASH_SOURCE[0]}")/../testdata" && pwd)"}
+# You can pass multiple roots separated by ':'
+# Default: ptobc testdata + PTOAS test/samples
+DEFAULT_A="$(cd "$(dirname "${BASH_SOURCE[0]}")/../testdata" && pwd)"
+DEFAULT_B="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)/test/samples"
+TESTDATA_DIRS=${TESTDATA_DIRS:-"${DEFAULT_A}:${DEFAULT_B}"}
+
 OUT_DIR=${OUT_DIR:-"${PWD}/ptobc_stage9_out"}
 mkdir -p "${OUT_DIR}"
 
 failed=0
-for f in "${TESTDATA_DIR}"/*.pto; do
-  [[ -e "$f" ]] || continue
-  base=$(basename "$f" .pto)
+IFS=':' read -r -a roots <<< "${TESTDATA_DIRS}"
+for root in "${roots[@]}"; do
+  [[ -d "${root}" ]] || continue
+  while IFS= read -r -d '' f; do
+    base=$(basename "$f" .pto)
+    # avoid name collisions across directories
+    hash=$(python3 - <<PY
+import hashlib,sys
+print(hashlib.sha1(sys.argv[1].encode()).hexdigest()[:8])
+PY
+"$f")
+    base="${base}.${hash}"
 
   bc1="${OUT_DIR}/${base}.ptobc"
   pto2="${OUT_DIR}/${base}.roundtrip.pto"
   bc2="${OUT_DIR}/${base}.roundtrip.ptobc"
 
-  "${PTOBC_BIN}" encode "$f" -o "$bc1"
-  "${PTOBC_BIN}" decode "$bc1" -o "$pto2"
-  "${PTOBC_BIN}" encode "$pto2" -o "$bc2"
+    "${PTOBC_BIN}" encode "$f" -o "$bc1" || { echo "encode failed: $f"; failed=1; continue; }
+    "${PTOBC_BIN}" decode "$bc1" -o "$pto2" || { echo "decode failed: $f"; failed=1; continue; }
+    "${PTOBC_BIN}" encode "$pto2" -o "$bc2" || { echo "re-encode failed: $f"; failed=1; continue; }
 
-  # If xxd exists, compare bytes; otherwise just ensure we produced outputs.
-  if command -v cmp >/dev/null 2>&1; then
-    cmp "$bc1" "$bc2" || { echo "mismatch: $base"; failed=1; }
-  fi
-
+    if command -v cmp >/dev/null 2>&1; then
+      cmp "$bc1" "$bc2" || { echo "mismatch: $f"; failed=1; }
+    fi
+  done < <(find "${root}" -type f -name '*.pto' -print0)
 done
 
 exit $failed

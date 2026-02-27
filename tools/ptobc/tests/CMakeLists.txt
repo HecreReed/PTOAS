@@ -7,7 +7,7 @@ set(PTObc_TESTDATA_DIR "${CMAKE_CURRENT_LIST_DIR}/../testdata")
 add_test(NAME ptobc_stage9_e2e
   COMMAND ${CMAKE_COMMAND} -E env
     PTOBC_BIN=$<TARGET_FILE:ptobc>
-    TESTDATA_DIR=${PTObc_TESTDATA_DIR}
+    TESTDATA_DIRS=${PTObc_TESTDATA_DIR}:${CMAKE_SOURCE_DIR}/test/samples
     ${CMAKE_CURRENT_LIST_DIR}/stage9_e2e.sh
 )
 
