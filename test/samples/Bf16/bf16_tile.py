@@ -28,7 +28,7 @@ def build():
 
         mat = pto.AddressSpaceAttr.get(pto.AddressSpace.MAT)
         cfg = pto.TileBufConfigAttr.get(
-            pto.BLayoutAttr.get(pto.BLayout.RowMajor),
+            pto.BLayoutAttr.get(pto.BLayout.ColMajor),
             pto.SLayoutAttr.get(pto.SLayout.RowMajor),
             pto.TileConfig.fractalABSize,
             pto.PadValueAttr.get(pto.PadValue.Null),

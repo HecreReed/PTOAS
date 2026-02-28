@@ -235,6 +235,12 @@ def _cpp_host_type(cpp_type: str) -> str:
     return cpp_type
 
 
+def _rewrite_host_unsupported_types(text: str) -> str:
+    # `bisheng -xcce` performs a host-side pass that parses kernel launch code.
+    # Some device-only builtin types (e.g. `__bf16`) are rejected there.
+    return text.replace("__bf16", "bfloat16_t")
+
+
 def _default_eps_for_cpp_type(cpp_type: str) -> float:
     # CPU golden vs NPU results may have small floating-point differences.
     if cpp_type in {"half", "aclFloat16"}:
@@ -1141,19 +1147,33 @@ def generate_testcase(
     kernel_out.write_text(_replace_includes(kernel_text_out), encoding="utf-8")
 
     launch_fn_params = ", ".join(launch_decl_params + ["void *stream"])
-    kernel_call_args = []
+    kernel_call_args_device = []
+    kernel_call_args_host = []
     for p in params:
         if p["kind"] == "ptr":
-            kernel_call_args.append(f"({_strip_param_name(p['raw'], p['name'])}){p['name']}")
+            cast_ty = _strip_param_name(p["raw"], p["name"])
+            kernel_call_args_device.append(f"({cast_ty}){p['name']}")
+            kernel_call_args_host.append(f"({_rewrite_host_unsupported_types(cast_ty)}){p['name']}")
         else:
-            kernel_call_args.append(p["name"])
-    kernel_call_args = ", ".join(kernel_call_args)
+            kernel_call_args_device.append(p["name"])
+            kernel_call_args_host.append(p["name"])
+    kernel_call_args_device = ", ".join(kernel_call_args_device)
+    kernel_call_args_host = ", ".join(kernel_call_args_host)
+    raw_params_host = [_rewrite_host_unsupported_types(p) for p in raw_params]
     launch_cpp = (
         INCLUDE_REPLACEMENT
         + "\n"
-        f"__global__ AICORE void {kernel_name}({', '.join(raw_params)});\n\n"
+        "#if defined(__CCE_AICORE__)\n"
+        f"__global__ AICORE void {kernel_name}({', '.join(raw_params)});\n"
+        "#else\n"
+        f"__global__ AICORE void {kernel_name}({', '.join(raw_params_host)});\n"
+        "#endif\n\n"
         f"void {launch_name}({launch_fn_params}) {{\n"
-        f"    {kernel_name}<<<1, nullptr, stream>>>({kernel_call_args});\n"
+        "#if defined(__CCE_AICORE__)\n"
+        f"    {kernel_name}<<<1, nullptr, stream>>>({kernel_call_args_device});\n"
+        "#else\n"
+        f"    {kernel_name}<<<1, nullptr, stream>>>({kernel_call_args_host});\n"
+        "#endif\n"
         f"}}\n"
     )
     (output_dir / "launch.cpp").write_text(launch_cpp, encoding="utf-8")
