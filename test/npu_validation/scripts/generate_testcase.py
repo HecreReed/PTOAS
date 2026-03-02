@@ -349,8 +349,9 @@ def _infer_aicore_arch(kernel_text: str, soc_version: str) -> str:
 
     sv = (soc_version or "").lower()
     if "950" in sv or "a5" in sv:
-        # Ascend950 (A5) uses dav-l310 toolchain arch.
-        return "dav-l310-cube" if needs_cube else "dav-l310-vec"
+        # Ascend950 (A5) uses A5 instruction set. pto-isa examples build A5
+        # kernels with dav-c310-{vec|cube}.
+        return "dav-c310-cube" if needs_cube else "dav-c310-vec"
     if "910b" in sv:
         # Ascend910B* (e.g. Ascend910B1) uses dav-c310 toolchain arch.
         return "dav-c310-cube" if needs_cube else "dav-c310-vec"
@@ -831,7 +832,7 @@ def generate_testcase(
         if has_dav_cube or has_dav_vec:
             sv = (soc_version or "").lower()
             if "950" in sv or "a5" in sv:
-                aicore_arch = "dav-l310-vec"
+                aicore_arch = "dav-c310-vec"
             elif "910b" in sv:
                 aicore_arch = "dav-c310-vec"
             else:
@@ -1393,7 +1394,7 @@ def main():
     parser.add_argument(
         "--aicore-arch",
         default=None,
-        help="Override AICore arch passed to bisheng (e.g. dav-c220-vec|dav-c220-cube|dav-c310-vec|dav-c310-cube|dav-l310-vec|dav-l310-cube)",
+        help="Override AICore arch passed to bisheng (e.g. dav-c220-vec|dav-c220-cube|dav-c310-vec|dav-c310-cube)",
     )
     args = parser.parse_args()
 
