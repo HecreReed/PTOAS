@@ -83,7 +83,7 @@ def build(
         )
 
         cfg_left = pto.TileBufConfigAttr.get(
-            pto.BLayoutAttr.get(pto.BLayout.RowMajor),
+            pto.BLayoutAttr.get(pto.BLayout.ColMajor),
             pto.SLayoutAttr.get(pto.SLayout.RowMajor),
             s_fractal_ab,
             pto.PadValueAttr.get(pto.PadValue.Null),
