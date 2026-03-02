@@ -508,7 +508,7 @@ def _safe_eval_int_expr(expr: str, env: dict) -> Optional[int]:
     return ev(parsed)
 
 
-def _infer_int_var_maxima(kernel_text: str) -> dict:
+def _infer_int_var_maxima(kernel_text: str, seed_maxima: Optional[dict] = None) -> dict:
     """
     Infer max values for simple integer temporaries (e.g. v23) used in pointer
     arithmetic, by evaluating constant-ish assignments and simple for-loop ranges.
@@ -554,6 +554,14 @@ def _infer_int_var_maxima(kernel_text: str) -> dict:
         loops.append((ind, start, end, step))
 
     maxima: dict[str, Optional[int]] = {}
+    if seed_maxima:
+        for k, v in seed_maxima.items():
+            if v is None:
+                continue
+            try:
+                maxima[str(k)] = int(v)
+            except (TypeError, ValueError):
+                continue
 
     def set_max(name: str, value: int) -> bool:
         cur = maxima.get(name)
@@ -598,7 +606,7 @@ def _infer_int_var_maxima(kernel_text: str) -> dict:
     return {k: (0 if v is None else int(v)) for k, v in maxima.items()}
 
 
-def _infer_gm_pointer_elem_counts(kernel_text: str, pointer_param_names):
+def _infer_gm_pointer_elem_counts(kernel_text: str, pointer_param_names, *, seed_int_env: Optional[dict] = None):
     """
     Infer minimum element counts for each __gm__ pointer param from GlobalTensor
     shape/stride metadata found in PTOAS-generated kernels.
@@ -612,7 +620,7 @@ def _infer_gm_pointer_elem_counts(kernel_text: str, pointer_param_names):
 
     pointer_params = set(pointer_param_names)
 
-    int_max = _infer_int_var_maxima(kernel_text)
+    int_max = _infer_int_var_maxima(kernel_text, seed_maxima=seed_int_env)
 
     pointer_like = set(pointer_param_names)
     for m in re.finditer(r"__gm__\s+[\w:<>]+\s*\*\s*(\w+)\s*(?:=[^;]+)?;", kernel_text):
@@ -915,8 +923,22 @@ def generate_testcase(
     init_ptrs = [p for p in params if p["kind"] == "ptr"]
     output_ptrs = [p for p in params if p["kind"] == "ptr" and p["role"] == "output"]
 
+    seed_int_env = {}
+    for p in params:
+        if p["kind"] != "scalar":
+            continue
+        t = p["host_type"]
+        if t == "bool":
+            seed_int_env[p["name"]] = 1
+        elif re.match(r"^(u?int)(8|16|32|64)_t$", t) or t in {"int", "unsigned", "size_t"}:
+            seed_int_env[p["name"]] = 1
+
     ptr_elem_counts = {p["name"]: logical_elem_count for p in params if p["kind"] == "ptr"}
-    inferred_counts = _infer_gm_pointer_elem_counts(raw_kernel_for_analysis, pointer_param_names)
+    inferred_counts = _infer_gm_pointer_elem_counts(
+        raw_kernel_for_analysis,
+        pointer_param_names,
+        seed_int_env=seed_int_env,
+    )
     for name, cnt in inferred_counts.items():
         ptr_elem_counts[name] = max(ptr_elem_counts.get(name, logical_elem_count), cnt)
 
