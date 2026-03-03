@@ -557,6 +557,80 @@ struct PTOViewToMemrefPass
       }
 
       // ------------------------------------------------------------------
+      // Stage 0.75: Canonicalize pto.tcvt dst to alias src buffer when safe
+      // ------------------------------------------------------------------
+      //
+      // For narrowing/same-width conversions, letting `tcvt` write to a
+      // separately-allocated dst tile can create avoidable UB pressure in
+      // MemPlan. Model dst as an alias bind of src storage so liveness/planning
+      // matches the intended in-place reuse behavior for this case.
+      //
+      // Keep widening conversions conservative (dst element width > src), since
+      // they may require larger storage.
+      SmallVector<mlir::pto::TCvtOp, 8> tcvts;
+      func.walk([&](mlir::pto::TCvtOp op) { tcvts.push_back(op); });
+
+      auto unwrapBindSource = [](Value v) -> Value {
+        if (auto bind = v.getDefiningOp<mlir::pto::BindTileOp>())
+          return bind.getSource();
+        return v;
+      };
+
+      for (auto op : tcvts) {
+        Value src = op.getSrc();
+        Value dst = op.getDst();
+
+        auto dstBind = dst.getDefiningOp<mlir::pto::BindTileOp>();
+        if (!dstBind)
+          continue;
+
+        Value dstBase = dstBind.getSource();
+        if (!dstBase || !dstBase.hasOneUse())
+          continue;
+
+        if (!dstBase.getDefiningOp<memref::AllocOp>() &&
+            !dstBase.getDefiningOp<mlir::pto::PointerCastOp>())
+          continue;
+
+        auto srcMr = dyn_cast<MemRefType>(src.getType());
+        auto dstMr = dyn_cast<MemRefType>(dstBind.getType());
+        if (!srcMr || !dstMr)
+          continue;
+        if (srcMr.getMemorySpace() != dstMr.getMemorySpace())
+          continue;
+        if (srcMr.getShape() != dstMr.getShape())
+          continue;
+
+        Type srcElemTy = srcMr.getElementType();
+        Type dstElemTy = dstMr.getElementType();
+        if (!srcElemTy.isIntOrFloat() || !dstElemTy.isIntOrFloat())
+          continue;
+        if (srcElemTy.getIntOrFloatBitWidth() <
+            dstElemTy.getIntOrFloatBitWidth())
+          continue;
+
+        Value srcBase = unwrapBindSource(src);
+
+        IRRewriter rewriter(ctx);
+        rewriter.setInsertionPoint(dstBind);
+        auto aliasBind = rewriter.create<mlir::pto::BindTileOp>(
+            dstBind.getLoc(), dstBind.getType(), srcBase, dstBind.getValidRow(),
+            dstBind.getValidCol(), dstBind.getConfig());
+
+        rewriter.replaceAllUsesWith(dstBind.getResult(), aliasBind.getResult());
+        rewriter.eraseOp(dstBind);
+
+        if (auto alloc = dstBase.getDefiningOp<memref::AllocOp>()) {
+          if (alloc->use_empty())
+            rewriter.eraseOp(alloc);
+        } else if (auto pc =
+                       dstBase.getDefiningOp<mlir::pto::PointerCastOp>()) {
+          if (pc->use_empty())
+            rewriter.eraseOp(pc);
+        }
+      }
+
+      // ------------------------------------------------------------------
       // Stage 1: Lower pto.make_tensor_view -> memref.reinterpret_cast
       // ------------------------------------------------------------------
       SmallVector<mlir::pto::MakeTensorViewOp, 8> makeViews;
