@@ -4300,7 +4300,7 @@ pto.mscatter ins(%src, %idx : !pto.tile_buf<...>, !pto.tile_buf<...>)
 
 ##### `pto.treshape` - Reinterpret Tile Shape/Layout
 
-**Summary:** Reinterprets a tile buffer with a new shape/layout (no data movement).
+**Summary:** Reinterprets a tile buffer with a new shape/layout (no data movement; aliases `src`).
 
 **Semantics:**
 
@@ -4313,9 +4313,8 @@ dst = reinterpret(src)
 | Name | Type | Description |
 |------|------|-------------|
 | `src` | `pto.tile_buf` | Source tile |
-| `dst` | `pto.tile_buf` | Destination tile (different shape) |
 
-**Results:** None. Writes into `dst` via DPS pattern.
+**Results:** One tile buffer result that aliases `src`.
 
 **Constraints & Verification:**
 
@@ -4328,7 +4327,7 @@ dst = reinterpret(src)
 **Basic Example:**
 
 ```mlir
-pto.treshape ins(%src : !pto.tile_buf<...>) outs(%dst : !pto.tile_buf<...>)
+%dst = pto.treshape %src : !pto.tile_buf<...> -> !pto.tile_buf<...>
 ```
 
 ---
@@ -4537,6 +4536,16 @@ dst[i, j] = cast(src[i, j], rmode)
 ```mlir
 pto.tcvt ins(%src {rmode = #pto<round_mode FLOOR>} : !pto.tile_buf<loc=vec, dtype=f32, rows=16, cols=16, v_row=16, v_col=16, blayout=row_major, slayout=none_box, fractal=512, pad=0>)
          outs(%dst : !pto.tile_buf<loc=vec, dtype=f16, rows=16, cols=16, v_row=16, v_col=16, blayout=row_major, slayout=none_box, fractal=512, pad=0>)
+```
+
+##### `pto.cvt` - Elementwise Type Conversion (SSA)
+
+**Summary:** SSA form of `pto.tcvt`. The result aliases the source tile buffer address (in-place conversion) and does not require a pre-allocated `dst`.
+
+**Basic Example:**
+
+```mlir
+%dst = pto.cvt %src {rmode = #pto<round_mode FLOOR>} : !pto.tile_buf<...> -> !pto.tile_buf<...>
 ```
 
 ---

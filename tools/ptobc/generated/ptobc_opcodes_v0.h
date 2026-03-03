@@ -105,7 +105,7 @@ inline constexpr OpInfo kOpTable[] = {
   {0x1049, "pto.trelu", 0, 0x00, 0x00, 2, 0, 0, 0x00},
   {0x104A, "pto.trem", 0, 0x00, 0x00, 3, 0, 0, 0x00},
   {0x104B, "pto.trems", 0, 0x00, 0x00, 3, 0, 0, 0x00},
-  {0x104C, "pto.treshape", 0, 0x00, 0x00, 2, 0, 0, 0x00},
+  {0x104C, "pto.treshape", 0, 0x01, 0x00, 1, 1, 0, 0x00},
   {0x104D, "pto.trowexpand", 0, 0x00, 0x00, 2, 0, 0, 0x00},
   {0x104E, "pto.trowexpandadd", 0, 0x00, 0x00, 3, 0, 0, 0x00},
   {0x104F, "pto.trowexpandexpdif", 0, 0x00, 0x00, 3, 0, 0, 0x00},
@@ -142,6 +142,7 @@ inline constexpr OpInfo kOpTable[] = {
   {0x106E, "pto.txor", 0, 0x00, 0x00, 3, 0, 0, 0x00},
   {0x106F, "pto.txors", 0, 0x00, 0x00, 3, 0, 0, 0x00},
   {0x1070, "pto.wait_event", 0, 0x00, 0x00, 0, 0, 0, 0x02},
+  {0x1071, "pto.cvt", 0, 0x01, 0x00, 1, 1, 0, 0x00},
   {0x2000, "arith.addi", 0, 0x01, 0x00, 2, 1, 0, 0x00},
   {0x2001, "arith.ceildivsi", 0, 0x01, 0x00, 2, 1, 0, 0x00},
   {0x2002, "arith.cmpi", 0, 0x01, 0x00, 2, 1, 0, 0x01},
@@ -303,6 +304,7 @@ inline std::optional<uint16_t> lookupOpcodeByName(llvm::StringRef name) {
     .Case("pto.txor", 0x106E)
     .Case("pto.txors", 0x106F)
     .Case("pto.wait_event", 0x1070)
+    .Case("pto.cvt", 0x1071)
     .Case("scf.for", 0x4000)
     .Case("scf.if", 0x4001)
     .Case("scf.yield", 0x4002)
@@ -450,6 +452,7 @@ inline std::optional<OpcodeAndVariant> lookupOpcodeAndVariantByFullName(llvm::St
     .Case("pto.txor", OpcodeAndVariant{0x106E, 0, 0})
     .Case("pto.txors", OpcodeAndVariant{0x106F, 0, 0})
     .Case("pto.wait_event", OpcodeAndVariant{0x1070, 0, 0})
+    .Case("pto.cvt", OpcodeAndVariant{0x1071, 0, 0})
     .Case("scf.for", OpcodeAndVariant{0x4000, 0, 0})
     .Case("scf.if", OpcodeAndVariant{0x4001, 0, 0})
     .Case("scf.yield", OpcodeAndVariant{0x4002, 0, 0})

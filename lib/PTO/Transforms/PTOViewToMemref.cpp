@@ -1627,6 +1627,57 @@ struct PTOViewToMemrefPass
       SmallVector<mlir::pto::TCvtOp, 8> cvtops;
       func.walk([&](mlir::pto::TCvtOp op) { cvtops.push_back(op); });
 
+      // Lower SSA-form ops that alias the same tile buffer into memref form so
+      // downstream PTOToEmitC (memref-only) can legalize them.
+      //
+      // - pto.treshape (SSA): pure alias/view, lower to the src memref.
+      // - pto.cvt (SSA): in-place conversion, lower to `pto.tcvt` with src==dst
+      //   and replace the SSA result with the src memref.
+      {
+        SmallVector<mlir::pto::TReshapeOp, 8> reshapes;
+        func.walk([&](mlir::pto::TReshapeOp op) { reshapes.push_back(op); });
+
+        for (auto op : reshapes) {
+          IRRewriter rewriter(ctx);
+          rewriter.setInsertionPoint(op);
+
+          Value src = op.getSrc();
+          if (!isa<MemRefType>(src.getType())) {
+            op.emitError("treshape src is not memref yet");
+            signalPassFailure();
+            return;
+          }
+
+          // Alias-only: after tile_buf -> memref lowering, the result is the same
+          // tile buffer with memref type.
+          rewriter.replaceOp(op, src);
+        }
+
+        SmallVector<mlir::pto::CvtOp, 8> cvtSsa;
+        func.walk([&](mlir::pto::CvtOp op) { cvtSsa.push_back(op); });
+
+        for (auto op : cvtSsa) {
+          IRRewriter rewriter(ctx);
+          rewriter.setInsertionPoint(op);
+
+          Value src = op.getSrc();
+          if (!isa<MemRefType>(src.getType())) {
+            op.emitError("cvt src is not memref yet");
+            signalPassFailure();
+            return;
+          }
+
+          auto rmodeAttr = op.getRmodeAttr(); // PTO_RoundModeAttr
+          auto newOp = rewriter.create<pto::TCvtOp>(
+              op.getLoc(), TypeRange{}, src, src);
+          if (rmodeAttr)
+            newOp->setAttr("rmode", rmodeAttr);
+
+          // SSA form aliases src buffer: replace result with src memref.
+          rewriter.replaceOp(op, src);
+        }
+      }
+
       for (auto op : cvtops) {
         IRRewriter rewriter(ctx);
         rewriter.setInsertionPoint(op);

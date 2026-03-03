@@ -54,6 +54,7 @@
 |  | TNOT | Elementwise bitwise NOT of a tile. | `pto.tnot ins(%src : !pto.tile_buf<...>) outs(%dst : !pto.tile_buf<...>)` |
 |  | TRELU | Elementwise ReLU of a tile. | `pto.trelu ins(%src : !pto.tile_buf<...>) outs(%dst : !pto.tile_buf<...>)` |
 |  | TCVT | Elementwise type conversion with a specified rounding mode. | `pto.tcvt ins(%src {rmode = #pto<round_mode xx>} : !pto.tile_buf<...>) outs(%dst : !pto.tile_buf<...>)` |
+|  | CVT | Elementwise type conversion with rounding mode (SSA; aliases src buffer). | `%dst = pto.cvt %src {rmode = #pto<round_mode xx>} : !pto.tile_buf<...> -> !pto.tile_buf<...>` |
 |  | TADDC | Elementwise ternary add: `src0 + src1 + src2`. | `pto.taddc ins(%src0, %src1, %src2 : !pto.tile_buf<...>, !pto.tile_buf<...>, !pto.tile_buf<...>) outs(%dst : !pto.tile_buf<...>)` |
 |  | TSUBC | Elementwise ternary op: `src0 - src1 + src2`. | `pto.tsubc ins(%src0, %src1, %src2 : !pto.tile_buf<...>, !pto.tile_buf<...>, !pto.tile_buf<...>) outs(%dst : !pto.tile_buf<...>)` |
 |  | TSEL | Select between two tiles using a mask tile (per-element selection). | `pto.tsel ins(%mask, %src0, %src1 : !pto.tile_buf<...>, !pto.tile_buf<...>, !pto.tile_buf<...>) outs(%dst : !pto.tile_buf<...>)` |
@@ -96,7 +97,7 @@
 |  | TMOV_FP | Move/convert from an accumulator tile into a destination tile, using a scaling (`fp`) tile for vector quantization parameters. `TMOV_FP` is a named wrapper around the `TMOV_IMPL(..., fp)` path and is part of the `TMOV` family. | `pto.tmov.fp ins(%src, %fp : !pto.tile_buf<...>, !pto.tile_buf<...>) outs(%dst : !pto.tile_buf<...>)` |
 |  | TTRANS | Transpose with an implementation-defined temporary tile. | `pto.ttrans ins(%src : !pto.tile_buf<...>) outs(%dst : !pto.tile_buf<...>)` |
 |  | TEXTRACT | Extract a sub-tile from a source tile. | `pto.textract ins(%src, %idxrow, %idxcol : !pto.tile_buf<...>, dtype, dtype) outs(%dst : !pto.tile_buf<...>)` |
-|  | TRESHAPE | Reinterpret a tile as another tile type/shape while preserving the underlying bytes. This is a *bitwise* reshape: it does not change values, it only changes how the same byte buffer is viewed. | `pto.treshape ins(%src : !pto.tile_buf<...>) outs(%dst : !pto.tile_buf<...>)` |
+|  | TRESHAPE | Reinterpret a tile as another tile type/shape while preserving the underlying bytes. This is a *bitwise* reshape: it does not change values, it only changes how the same byte buffer is viewed. | `%dst = pto.treshape %src : !pto.tile_buf<...> -> !pto.tile_buf<...>` |
 |  | TASSIGN |  | `pto.tassign ins(%tile, %addr : !pto.tile_buf<...>, dtype)` |
 | 复杂指令 | TCI | Generate a contiguous integer sequence into a destination tile. | `pto.tci ins(%scalar {descending = false} : dtype) outs(%dst : !pto.tile_buf<...>)` |
 |  | TGATHER | Gather/select elements using either an index tile or a compile-time mask pattern. | `pto.tgather ins(%src, %indices : !pto.tile_buf<...>, !pto.tile_buf<...>) outs(%dst : !pto.tile_buf<...>)` |

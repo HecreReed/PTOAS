@@ -102,6 +102,10 @@ std::optional<std::pair<Value, Value>> getOperationAliasInfo(Operation *op) {
     return std::make_pair(toTensorOp.getResult(), toTensorOp.getOperand());
   } else if (auto toMemrefOp = dyn_cast<bufferization::ToMemrefOp>(op)) {
     return std::make_pair(toMemrefOp.getResult(), toMemrefOp.getOperand());
+  } else if (auto treshapeOp = dyn_cast<TReshapeOp>(op)) {
+    return std::make_pair(treshapeOp.getResult(), treshapeOp.getSrc());
+  } else if (auto cvtOp = dyn_cast<CvtOp>(op)) {
+    return std::make_pair(cvtOp.getResult(), cvtOp.getSrc());
   }
 //   } else if (auto bitCastOp = dyn_cast<pto::BitcastOp>(op)) {
 //     return std::make_pair(bitCastOp.getResult(), bitCastOp.getSrc());

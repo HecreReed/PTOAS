@@ -1517,6 +1517,17 @@ llvm::LogicalResult mlir::pto::TCvtOp::verify() {
   return mlir::success();
 }
 
+llvm::LogicalResult mlir::pto::CvtOp::verify() {
+  Type srcTy = getSrc().getType();
+  Type resTy = getResult().getType();
+  if (!isPTOShapedLike(srcTy) || !isPTOShapedLike(resTy))
+    return emitOpError("expects src/result to be PTO shaped-like types");
+  if (getShapeVec(srcTy) != getShapeVec(resTy))
+    return emitOpError("src/result shape mismatch");
+
+  return mlir::success();
+}
+
 LogicalResult mlir::pto::TDivOp::verify() {
   Type src0Ty = getSrc0().getType();
   Type src1Ty = getSrc1().getType();
@@ -2755,9 +2766,9 @@ mlir::LogicalResult mlir::pto::TRemSOp::verify() {
 
 mlir::LogicalResult mlir::pto::TReshapeOp::verify() {
   Type ts = getSrc().getType();
-  Type td = getDst().getType();
-  if (!isPTOShapedLike(ts) || !isPTOShapedLike(td))
-    return emitOpError("expects src/dst to be memref/tensor/tile_buf/tile_view types");
+  Type tr = getResult().getType();
+  if (!isPTOShapedLike(ts) || !isPTOShapedLike(tr))
+    return emitOpError("expects src/result to be PTO shaped-like types");
   return mlir::success();
 }
 //===----------------------------------------------------------------------===//
@@ -4235,6 +4246,7 @@ void TColSumOp::getEffects(
 }
 
 PTO_DEFINE_UNARY_EFFECTS(TCvtOp, getSrcMutable(), getDstMutable())
+PTO_DEFINE_UNARY_EFFECTS(CvtOp, getSrcMutable(), getSrcMutable())
 PTO_DEFINE_BINARY_EFFECTS(TDivOp, getSrc0Mutable(), getSrc1Mutable(), getDstMutable())
 
 // TDIVS has custom assembly format; conservatively treat first 2 operands as reads.
@@ -4313,7 +4325,6 @@ PTO_DEFINE_UNARY_EFFECTS(TRecipOp, getSrcMutable(), getDstMutable())
 PTO_DEFINE_UNARY_EFFECTS(TReluOp, getSrcMutable(), getDstMutable())
 PTO_DEFINE_BINARY_EFFECTS(TRemOp, getSrc0Mutable(), getSrc1Mutable(), getDstMutable())
 PTO_DEFINE_UNARY_EFFECTS(TRemSOp, getSrcMutable(), getDstMutable())
-PTO_DEFINE_UNARY_EFFECTS(TReshapeOp, getSrcMutable(), getDstMutable())
 PTO_DEFINE_UNARY_EFFECTS(TRowExpandOp, getSrcMutable(), getDstMutable())
 PTO_DEFINE_BINARY_EFFECTS(TRowExpandDivOp, getSrc0Mutable(), getSrc1Mutable(), getDstMutable())
 PTO_DEFINE_BINARY_EFFECTS(TRowExpandMulOp, getSrc0Mutable(), getSrc1Mutable(), getDstMutable())

@@ -1923,6 +1923,27 @@ def TCvtOp : PTO_TOp<"tcvt", [
   }];
 }
 
+def CvtOp : PTO_TOp<"cvt", [
+  OpPipeInterface,
+  DeclareOpInterfaceMethods<MemoryEffectsOpInterface>
+]> {
+  let summary = "Elementwise type conversion with rounding mode (tilebuf, SSA; aliases src buffer)";
+
+  let arguments = (ins
+    PTODpsType:$src,
+    DefaultValuedAttr<PTO_RoundModeAttr, "::mlir::pto::RoundMode::CAST_RINT">:$rmode
+  );
+
+  let results = (outs PTODpsType:$result);
+  let hasVerifier = 1;
+
+  let extraClassDeclaration = [{
+    ::mlir::pto::PIPE getPipe() { return ::mlir::pto::PIPE::PIPE_V; }
+  }];
+
+  let assemblyFormat = "$src attr-dict `:` qualified(type($src)) `->` qualified(type($result))";
+}
+
 def TDivOp : PTO_TOp<"tdiv", [
   PTO_DpsInitOpInterface,
   OpPipeInterface,
@@ -2838,30 +2859,23 @@ def TRemSOp: PTO_TOp<"trems", [
 //===----------------------------------------------------------------------===//
 
 def TReshapeOp: PTO_TOp<"treshape", [
-  PTO_DpsInitOpInterface,
   OpPipeInterface,
-  DeclareOpInterfaceMethods<MemoryEffectsOpInterface>
+  Pure
 ]> {
-  let summary = "TRESHAPE: Elementwise remainder with a scalar";
+  let summary = "TRESHAPE: Reinterpret a tile as another tile type/shape (SSA; aliases src buffer)";
 
   let arguments = (ins
-    PTODpsType:$src,
-    PTODpsType:$dst
+    PTODpsType:$src
   );
 
-  let results = (outs);
+  let results = (outs PTODpsType:$result);
 
   let hasVerifier = 1;
 
-  let assemblyFormat = [{
-    `ins` `(` $src `:` qualified(type($src)) `)`
-    `outs` `(` $dst `:` qualified(type($dst) ) `)`
-    attr-dict
-  }];
+  let assemblyFormat = "$src attr-dict `:` qualified(type($src)) `->` qualified(type($result))";
 
   let extraClassDeclaration = [{
     ::mlir::pto::PIPE getPipe() { return ::mlir::pto::PIPE::PIPE_V; }
-    ::mlir::MutableOperandRange getDpsInitsMutable() { return getDstMutable(); }
   }];
 }
 //===----------------------------------------------------------------------===//

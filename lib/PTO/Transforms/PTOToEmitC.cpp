@@ -5452,17 +5452,118 @@ struct PTOReshapeToEmitC : public OpConversionPattern<pto::TReshapeOp> {
   LogicalResult matchAndRewrite(pto::TReshapeOp op, OpAdaptor adaptor,
                                 ConversionPatternRewriter &rewriter) const override {
     auto loc = op.getLoc();
+    auto *ctx = rewriter.getContext();
 
     Value src = peelUnrealized(adaptor.getSrc());
-    Value dst = peelUnrealized(adaptor.getDst());
 
-    SmallVector<Value, 2> operands{dst, src};
+    Type dstTy = getTypeConverter()->convertType(op.getResult().getType());
+    if (!dstTy)
+      return rewriter.notifyMatchFailure(op, "failed to convert result type");
+
+    Value dst = rewriter
+                    .create<emitc::VariableOp>(loc, dstTy,
+                                               emitc::OpaqueAttr::get(ctx, ""))
+                    .getResult();
+
+    auto u64Ty = emitc::OpaqueType::get(ctx, "uint64_t");
+    auto rcU64 =
+        rewriter.getArrayAttr({emitc::OpaqueAttr::get(ctx, "uint64_t")});
+
+    Value rawPtr = src;
+    if (auto ot = dyn_cast<emitc::OpaqueType>(src.getType())) {
+      if (ot.getValue().starts_with("Tile<")) {
+        auto rawPtrTy = emitc::OpaqueType::get(ctx, "void*");
+        rawPtr = rewriter
+                     .create<emitc::CallOpaqueOp>(loc, rawPtrTy,
+                                                  "PTOAS__TILE_DATA", ArrayAttr{},
+                                                  ArrayAttr{}, ValueRange{src})
+                     .getResult(0);
+      }
+    }
+
+    Value addr =
+        rewriter
+            .create<emitc::CallOpaqueOp>(loc, u64Ty, "reinterpret_cast",
+                                         /*args=*/ArrayAttr{},
+                                         /*templateArgs=*/rcU64,
+                                         /*operands=*/ValueRange{rawPtr})
+            .getResult(0);
+
+    rewriter.create<emitc::CallOpaqueOp>(loc, TypeRange{}, "TASSIGN",
+                                         /*args=*/ArrayAttr{},
+                                         /*templateArgs=*/ArrayAttr{},
+                                         /*operands=*/ValueRange{dst, addr});
+
+    rewriter.replaceOp(op, dst);
+    return success();
+  }
+};
+
+struct PTOCvtSSAToEmitC : public OpConversionPattern<pto::CvtOp> {
+  using OpConversionPattern<pto::CvtOp>::OpConversionPattern;
+
+  LogicalResult matchAndRewrite(pto::CvtOp op, OpAdaptor adaptor,
+                                ConversionPatternRewriter &rewriter) const override {
+    auto loc = op.getLoc();
+    auto *ctx = rewriter.getContext();
+
+    Value src = peelUnrealized(adaptor.getSrc());
+
+    Type dstTy = getTypeConverter()->convertType(op.getResult().getType());
+    if (!dstTy)
+      return rewriter.notifyMatchFailure(op, "failed to convert result type");
+
+    Value dst = rewriter
+                    .create<emitc::VariableOp>(loc, dstTy,
+                                               emitc::OpaqueAttr::get(ctx, ""))
+                    .getResult();
+
+    // Bind dst to src's buffer address (SSA form aliases the original tile buf).
+    auto u64Ty = emitc::OpaqueType::get(ctx, "uint64_t");
+    auto rcU64 =
+        rewriter.getArrayAttr({emitc::OpaqueAttr::get(ctx, "uint64_t")});
+
+    Value rawPtr = src;
+    if (auto ot = dyn_cast<emitc::OpaqueType>(src.getType())) {
+      if (ot.getValue().starts_with("Tile<")) {
+        auto rawPtrTy = emitc::OpaqueType::get(ctx, "void*");
+        rawPtr = rewriter
+                     .create<emitc::CallOpaqueOp>(loc, rawPtrTy,
+                                                  "PTOAS__TILE_DATA", ArrayAttr{},
+                                                  ArrayAttr{}, ValueRange{src})
+                     .getResult(0);
+      }
+    }
+
+    Value addr =
+        rewriter
+            .create<emitc::CallOpaqueOp>(loc, u64Ty, "reinterpret_cast",
+                                         /*args=*/ArrayAttr{},
+                                         /*templateArgs=*/rcU64,
+                                         /*operands=*/ValueRange{rawPtr})
+            .getResult(0);
+
+    rewriter.create<emitc::CallOpaqueOp>(loc, TypeRange{}, "TASSIGN",
+                                         /*args=*/ArrayAttr{},
+                                         /*templateArgs=*/ArrayAttr{},
+                                         /*operands=*/ValueRange{dst, addr});
+
+    // rmode default: CAST_RINT
+    pto::RoundModeAttr rmAttr = op.getRmodeAttr();
+    std::string rmTok = rmAttr ? roundModeTok(rmAttr)
+                               : std::string("RoundMode::CAST_RINT");
+
+    auto rmodeTy = emitc::OpaqueType::get(ctx, "RoundMode");
+    Value rmodeVal = rewriter.create<emitc::ConstantOp>(
+        loc, rmodeTy, emitc::OpaqueAttr::get(ctx, rmTok));
+
+    // 生成: TCVT(dst, src, RoundMode::XXX)
     rewriter.create<emitc::CallOpaqueOp>(
-        loc, TypeRange{}, "TRESHAPE",
+        loc, TypeRange{}, "TCVT",
         /*args=*/ArrayAttr{}, /*templateArgs=*/ArrayAttr{},
-        /*operands=*/operands);
+        /*operands=*/ValueRange{dst, src, rmodeVal});
 
-    rewriter.eraseOp(op);
+    rewriter.replaceOp(op, dst);
     return success();
   }
 };
@@ -6998,6 +7099,7 @@ static void populatePTOToEmitCPatterns(RewritePatternSet &patterns,
   patterns.add<PTOMulToEmitC>(typeConverter, ctx);
   patterns.add<PTOAndSToEmitC>(typeConverter, ctx);
   patterns.add<PTOCvtToEmitC>(typeConverter, ctx);
+  patterns.add<PTOCvtSSAToEmitC>(typeConverter, ctx);
   patterns.add<PTODivToTDIV>(typeConverter, ctx);
   patterns.add<PTOMaxToEmitC>(typeConverter, ctx);
   patterns.add<PTOMaxSToEmitC>(typeConverter, ctx);
