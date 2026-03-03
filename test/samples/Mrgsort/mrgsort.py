@@ -13,7 +13,12 @@ def build():
             f32 = F32Type.get(ctx)
             ptr_f32 = pto.PtrType.get(f32, ctx)
 
-            # Mergesort on a 32x32 tile (flattened to a 1x1024 list for TMrgSort)
+            # Mergesort on a 32x32 tile (flattened to a 1x1024 list for TMrgSort).
+            #
+            # NOTE: On newer SoCs (e.g. A5), pto-isa's TLOAD enforces that
+            # vecTile(valid_row/valid_col) matches the tiled GlobalTensor shape.
+            # Load/store therefore use a 32x32 view, then TRESHAPE aliases it to
+            # a 1x1024 view for TMrgSort (which requires Rows == 1).
             tv2_f32 = pto.TensorViewType.get([32, 32], f32, ctx)
             part_view_32x32 = pto.PartitionTensorViewType.get([32, 32], f32, ctx)
             vec = pto.AddressSpaceAttr.get(pto.AddressSpace.VEC, ctx)
@@ -23,6 +28,7 @@ def build():
 
             fractal_ab_size = pto.TileConfig.fractalABSize
             cfg = pto.TileBufConfigAttr.get(bl, sl, fractal_ab_size, pd, ctx)
+            tile_buf_32x32 = pto.TileBufType.get([32, 32], f32, vec, [32, 32], cfg, ctx)
             tile_buf_1x1024 = pto.TileBufType.get([1, 1024], f32, vec, [1, 1024], cfg, ctx)
 
             fn_ty = func.FunctionType.get([ptr_f32, ptr_f32], [])
@@ -49,20 +55,24 @@ def build():
                 # %3/%4/%8 = pto.partition_view %tv, offsets=[%c0,%c0], sizes=[%c32,%c32]
                 sv0 = pto.PartitionViewOp(part_view_32x32, tv0, offsets=[c0, c0], sizes=[c32, c32]).result
 
-                # %5/%6/%7 = pto.alloc_tile : <1x1024xf32>
-                tb0 = pto.AllocTileOp(tile_buf_1x1024).result
-                tb1 = pto.AllocTileOp(tile_buf_1x1024).result
+                # Load/store use a 32x32 tile view; TMrgSort uses a 1x1024 view.
+                tb_src_32x32 = pto.AllocTileOp(tile_buf_32x32).result
+                tb_src_1x1024 = pto.AllocTileOp(tile_buf_1x1024).result
+                tb_dst_1x1024 = pto.AllocTileOp(tile_buf_1x1024).result
+                tb_dst_32x32 = pto.AllocTileOp(tile_buf_32x32).result
 
-                pto.TLoadOp(None, sv0, tb0)  # result=None
+                pto.TLoadOp(None, sv0, tb_src_32x32)  # result=None
+                pto.TReshapeOp(tb_src_32x32, tb_src_1x1024)
 
                 # Format1: ins(%src, %blockLen : tile_buf, i32) outs(%dst : tile_buf)
-                pto.TMrgSortOp(srcs=[tb0], dsts=[tb1], blockLen=c64_i32)
+                pto.TMrgSortOp(srcs=[tb_src_1x1024], dsts=[tb_dst_1x1024], blockLen=c64_i32)
 
                 # %8 = partition_view on output tensor_view
                 sv1 = pto.PartitionViewOp(part_view_32x32, tv1, offsets=[c0, c0], sizes=[c32, c32]).result
 
                 # pto.store_dps_tb ins(%tb1) outs(%sv1)
-                pto.TStoreOp(None, tb1, sv1)
+                pto.TReshapeOp(tb_dst_1x1024, tb_dst_32x32)
+                pto.TStoreOp(None, tb_dst_32x32, sv1)
 
                 func.ReturnOp([])
 

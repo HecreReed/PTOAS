@@ -256,6 +256,26 @@ process_one_dir() {
       fi
     fi
 
+    # A5 compat guard: pto-isa(a5) does not allow TSTORE from TileType::Mat.
+    # Keep Partition5D samples on Vec tiles so they compile across SoCs.
+    if [[ "$base" == "partition5d" || "$base" == "partition5d_dynamic" ]]; then
+      if grep -Fq "Tile<TileType::Mat, float, 256, 16" "$cpp"; then
+        echo -e "${A}(${base}.py)\tFAIL\tPartition5D must not lower to TileType::Mat (A5 TSTORE rejects Mat)"
+        overall=1
+        continue
+      fi
+    fi
+
+    # A5 compat guard: pto-isa(a5) enforces TLOAD vecTile(valid) matches GlobalTensor shape for static shapes.
+    # Mrgsort loads via a 32x32 view then reshapes to 1x1024 for TMrgSort.
+    if [[ "$base" == "mrgsort" ]]; then
+      if ! grep -Eq "Tile<TileType::Vec, float, 32, 32" "$cpp" || ! grep -Fq "TRESHAPE" "$cpp"; then
+        echo -e "${A}(${base}.py)\tFAIL\tMrgsort must use 32x32 view + TRESHAPE for A5 compatibility"
+        overall=1
+        continue
+      fi
+    fi
+
     # Regression guard for Issue #112:
     # `--enable-insert-sync` must not push PIPE_M -> PIPE_FIX into high event IDs
     # for the autosync tmatmulk sample, otherwise it may deadlock on Ascend NPU.
@@ -263,6 +283,13 @@ process_one_dir() {
       if grep -Eq "set_flag\\(PIPE_M,[[:space:]]*PIPE_FIX,[[:space:]]*EVENT_ID[3-7]\\)" "$cpp" || \
          grep -Eq "wait_flag\\(PIPE_M,[[:space:]]*PIPE_FIX,[[:space:]]*EVENT_ID[3-7]\\)" "$cpp"; then
         echo -e "${A}(${base}.py)\tFAIL\tdeadlock signature: PIPE_M->PIPE_FIX uses EVENT_ID[3-7]"
+        overall=1
+        continue
+      fi
+
+      # A5 compat guard: pto-isa(a5) requires Left tiles to be ColMajor.
+      if grep -Fq "Tile<TileType::Left, float, 32, 32, BLayout::RowMajor" "$cpp"; then
+        echo -e "${A}(${base}.py)\tFAIL\tA5 requires Left tile BLayout::ColMajor (RowMajor breaks TMOV/TMATMUL)"
         overall=1
         continue
       fi
