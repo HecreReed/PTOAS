@@ -1,0 +1,39 @@
+module attributes {"pto.device-spec" = "Ascend910B1"} {
+  func.func @tfusion_emitc_add_mul(%arg0: !pto.ptr<f32>, %arg1: !pto.ptr<f32>, %arg2: !pto.ptr<f32>) {
+    %c0 = arith.constant 0 : index
+    %c1 = arith.constant 1 : index
+    %c32 = arith.constant 32 : index
+
+    pto.section.vector {
+      %tv0 = pto.make_tensor_view %arg0, shape = [%c32] strides = [%c1] : !pto.tensor_view<?xf32>
+      %tv1 = pto.make_tensor_view %arg1, shape = [%c32] strides = [%c1] : !pto.tensor_view<?xf32>
+      %tvo = pto.make_tensor_view %arg2, shape = [%c32] strides = [%c1] : !pto.tensor_view<?xf32>
+
+      %ptv0 = pto.partition_view %tv0, offsets = [%c0], sizes = [%c32] : !pto.tensor_view<?xf32> -> !pto.partition_tensor_view<32xf32>
+      %ptv1 = pto.partition_view %tv1, offsets = [%c0], sizes = [%c32] : !pto.tensor_view<?xf32> -> !pto.partition_tensor_view<32xf32>
+      %ptvo = pto.partition_view %tvo, offsets = [%c0], sizes = [%c32] : !pto.tensor_view<?xf32> -> !pto.partition_tensor_view<32xf32>
+
+      %a = pto.alloc_tile : !pto.tile_buf<loc=vec, dtype=f32, rows=1, cols=32, v_row=1, v_col=32, blayout=row_major, slayout=none_box, fractal=512, pad=0>
+      %b = pto.alloc_tile : !pto.tile_buf<loc=vec, dtype=f32, rows=1, cols=32, v_row=1, v_col=32, blayout=row_major, slayout=none_box, fractal=512, pad=0>
+      %c = pto.alloc_tile : !pto.tile_buf<loc=vec, dtype=f32, rows=1, cols=32, v_row=1, v_col=32, blayout=row_major, slayout=none_box, fractal=512, pad=0>
+      %out = pto.alloc_tile : !pto.tile_buf<loc=vec, dtype=f32, rows=1, cols=32, v_row=1, v_col=32, blayout=row_major, slayout=none_box, fractal=512, pad=0>
+
+      pto.tload ins(%ptv0 : !pto.partition_tensor_view<32xf32>) outs(%a : !pto.tile_buf<loc=vec, dtype=f32, rows=1, cols=32, v_row=1, v_col=32, blayout=row_major, slayout=none_box, fractal=512, pad=0>)
+      pto.tload ins(%ptv1 : !pto.partition_tensor_view<32xf32>) outs(%b : !pto.tile_buf<loc=vec, dtype=f32, rows=1, cols=32, v_row=1, v_col=32, blayout=row_major, slayout=none_box, fractal=512, pad=0>)
+      pto.tload ins(%ptv0 : !pto.partition_tensor_view<32xf32>) outs(%c : !pto.tile_buf<loc=vec, dtype=f32, rows=1, cols=32, v_row=1, v_col=32, blayout=row_major, slayout=none_box, fractal=512, pad=0>)
+
+      // s0 = a + b
+      // s1 = s0 * c
+      pto.tfusion ins(%a, %b, %c : !pto.tile_buf<loc=vec, dtype=f32, rows=1, cols=32, v_row=1, v_col=32, blayout=row_major, slayout=none_box, fractal=512, pad=0>, !pto.tile_buf<loc=vec, dtype=f32, rows=1, cols=32, v_row=1, v_col=32, blayout=row_major, slayout=none_box, fractal=512, pad=0>, !pto.tile_buf<loc=vec, dtype=f32, rows=1, cols=32, v_row=1, v_col=32, blayout=row_major, slayout=none_box, fractal=512, pad=0>)
+                 outs(%out : !pto.tile_buf<loc=vec, dtype=f32, rows=1, cols=32, v_row=1, v_col=32, blayout=row_major, slayout=none_box, fractal=512, pad=0>)
+                 ops = [0, 2],
+                 prev_pos = [0],
+                 keep_stage = [],
+                 fusion_kind = "elemwise_chain"
+
+      pto.tstore ins(%out : !pto.tile_buf<loc=vec, dtype=f32, rows=1, cols=32, v_row=1, v_col=32, blayout=row_major, slayout=none_box, fractal=512, pad=0>) outs(%ptvo : !pto.partition_tensor_view<32xf32>)
+    }
+    return
+  }
+}
+

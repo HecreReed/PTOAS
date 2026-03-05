@@ -86,6 +86,161 @@ static Value peelUnrealized(Value v) {
 }
 
 //===----------------------------------------------------------------------===//
+// Tile Fusion (v0.1): EmitC helper generation for pto.tfusion
+//===----------------------------------------------------------------------===//
+
+static constexpr llvm::StringLiteral kTFusionHelperNameAttr =
+    "ptoas.tfusion_helper_name";
+
+static llvm::StringRef getTFusionBinInstrName(int32_t opCode) {
+  switch (opCode) {
+  case 0:
+    return "vadd";
+  case 1:
+    return "vsub";
+  case 2:
+    return "vmul";
+  case 3:
+    return "vdiv";
+  default:
+    return "";
+  }
+}
+
+static FailureOr<std::string>
+buildTFusionCCECHelper(pto::TFusionOp op, llvm::StringRef helperName) {
+  DenseI32ArrayAttr opsAttr = op.getOpsAttr();
+  DenseI32ArrayAttr prevPosAttr = op.getPrevPosAttr();
+  DenseI32ArrayAttr keepStageAttr = op.getKeepStageAttr();
+
+  ArrayRef<int32_t> ops = opsAttr.asArrayRef();
+  ArrayRef<int32_t> prevPos = prevPosAttr.asArrayRef();
+  ArrayRef<int32_t> keepStage = keepStageAttr.asArrayRef();
+
+  if (op.getFusionKindAttr().getValue() != "elemwise_chain")
+    return failure();
+  if (ops.size() < 2)
+    return failure();
+  if (op.getSrcs().size() != ops.size() + 1)
+    return failure();
+  if (prevPos.size() != ops.size() - 1)
+    return failure();
+  if (op.getDsts().empty())
+    return failure();
+  if (keepStage.size() != op.getDsts().size() - 1)
+    return failure();
+
+  const unsigned numStages = static_cast<unsigned>(ops.size());
+  const unsigned numSrcs = static_cast<unsigned>(op.getSrcs().size());
+  const unsigned numKeeps = static_cast<unsigned>(op.getDsts().size() - 1);
+
+  // stage -> keep index (0..numKeeps-1). keepStage is strictly increasing.
+  llvm::SmallDenseMap<unsigned, unsigned> stageToKeepIndex;
+  for (unsigned k = 0; k < numKeeps; ++k) {
+    int32_t stage = keepStage[k];
+    if (stage < 0 ||
+        stage >= static_cast<int32_t>(numStages > 0 ? numStages - 1 : 0))
+      return failure();
+    stageToKeepIndex[static_cast<unsigned>(stage)] = k;
+  }
+
+  std::string code;
+  llvm::raw_string_ostream os(code);
+
+  os << "\n";
+  os << "template <typename DstFinal";
+  for (unsigned k = 0; k < numKeeps; ++k)
+    os << ", typename Keep" << k;
+  for (unsigned i = 0; i < numSrcs; ++i)
+    os << ", typename Src" << i;
+  os << ">\n";
+  os << "static inline void " << helperName << "(";
+  os << "DstFinal &dst0";
+  for (unsigned k = 0; k < numKeeps; ++k)
+    os << ", Keep" << k << " &k" << k;
+  for (unsigned i = 0; i < numSrcs; ++i)
+    os << ", Src" << i << " &s" << i;
+  os << ") {\n";
+  os << "  using T = typename DstFinal::DType;\n";
+  os << "  constexpr unsigned EPR = REPEAT_BYTE / sizeof(T);\n";
+  os << "  unsigned validRows = dst0.GetValidRow();\n";
+  os << "  unsigned validCols = dst0.GetValidCol();\n";
+  os << "  uint16_t repeatTimes = CeilDivision(validCols, EPR);\n";
+  os << "  __ubuf__ T *dstPtr = (__ubuf__ T *)__cce_get_tile_ptr(dst0.data());\n";
+  for (unsigned k = 0; k < numKeeps; ++k) {
+    os << "  __ubuf__ T *k" << k
+       << "Ptr = (__ubuf__ T *)__cce_get_tile_ptr(k" << k << ".data());\n";
+  }
+  for (unsigned i = 0; i < numSrcs; ++i) {
+    os << "  __ubuf__ T *s" << i
+       << "Ptr = (__ubuf__ T *)__cce_get_tile_ptr(s" << i << ".data());\n";
+  }
+  os << "  __VEC_SCOPE__ {\n";
+  os << "    RegTensor<T> regPrev, regA, regB;\n";
+  os << "    MaskReg preg;\n";
+  os << "    constexpr auto distValue =\n";
+  os << "      std::integral_constant<::DistVST, static_cast<::DistVST>(GetDistVst<T, DistVST::DIST_NORM>())>();\n";
+  os << "    for (uint16_t i = 0; i < (uint16_t)validRows; ++i) {\n";
+  os << "      uint32_t sreg = (uint32_t)validCols;\n";
+  os << "      for (uint16_t j = 0; j < (uint16_t)repeatTimes; ++j) {\n";
+  os << "        preg = CreatePredicate<T>(sreg);\n";
+  os << "        const uint32_t off = (uint32_t)i * (uint32_t)DstFinal::RowStride + (uint32_t)j * (uint32_t)EPR;\n";
+
+  // Stage 0: src0 op src1.
+  {
+    const int32_t opCode = ops[0];
+    llvm::StringRef bin = getTFusionBinInstrName(opCode);
+    if (bin.empty())
+      return failure();
+    os << "        vlds(regA, s0Ptr, off, NORM);\n";
+    os << "        vlds(regB, s1Ptr, off, NORM);\n";
+    os << "        " << bin
+       << "(regPrev, regA, regB, preg, MODE_ZEROING);\n";
+    auto it = stageToKeepIndex.find(0);
+    if (it != stageToKeepIndex.end()) {
+      os << "        vsts(regPrev, k" << it->second
+         << "Ptr, off, distValue, preg);\n";
+    }
+  }
+
+  // Stage i>0: prev op src(i+1) with operand placement controlled by prev_pos.
+  for (unsigned stage = 1; stage < numStages; ++stage) {
+    const int32_t opCode = ops[stage];
+    llvm::StringRef bin = getTFusionBinInstrName(opCode);
+    if (bin.empty())
+      return failure();
+    const int32_t pos = prevPos[stage - 1];
+    if (pos != 0 && pos != 1)
+      return failure();
+
+    os << "        vlds(regB, s" << (stage + 1) << "Ptr, off, NORM);\n";
+    if (pos == 0) {
+      os << "        " << bin
+         << "(regPrev, regPrev, regB, preg, MODE_ZEROING);\n";
+    } else {
+      os << "        " << bin
+         << "(regPrev, regB, regPrev, preg, MODE_ZEROING);\n";
+    }
+
+    auto it = stageToKeepIndex.find(stage);
+    if (it != stageToKeepIndex.end()) {
+      os << "        vsts(regPrev, k" << it->second
+         << "Ptr, off, distValue, preg);\n";
+    }
+  }
+
+  // Final store.
+  os << "        vsts(regPrev, dstPtr, off, distValue, preg);\n";
+  os << "      }\n";
+  os << "    }\n";
+  os << "  }\n";
+  os << "}\n";
+
+  os.flush();
+  return code;
+}
+
+//===----------------------------------------------------------------------===//
 // Type Converter
 //===----------------------------------------------------------------------===//
 
@@ -3919,6 +4074,41 @@ struct PTOTAddToTADD : public OpConversionPattern<pto::TAddOp> {
 };
 
 //===----------------------------------------------------------------------===//
+// pto.tfusion lowering -> __ptoas_tfusion_*(dst_final, keep..., src...)
+//===----------------------------------------------------------------------===//
+
+struct PTOFusionToEmitC : public OpConversionPattern<pto::TFusionOp> {
+  using OpConversionPattern<pto::TFusionOp>::OpConversionPattern;
+
+  LogicalResult matchAndRewrite(pto::TFusionOp op, OpAdaptor adaptor,
+                                ConversionPatternRewriter &rewriter) const override {
+    if (op.getFusionKindAttr().getValue() != "elemwise_chain")
+      return rewriter.notifyMatchFailure(op,
+                                         "expected fusion_kind == \"elemwise_chain\"");
+
+    auto helperAttr =
+        op->getAttrOfType<StringAttr>(kTFusionHelperNameAttr);
+    if (!helperAttr)
+      return rewriter.notifyMatchFailure(op,
+                                         "missing pre-generated tfusion helper name");
+
+    SmallVector<Value, 8> args;
+    args.reserve(adaptor.getDsts().size() + adaptor.getSrcs().size());
+
+    for (Value dst : adaptor.getDsts())
+      args.push_back(peelUnrealized(dst));
+    for (Value src : adaptor.getSrcs())
+      args.push_back(peelUnrealized(src));
+
+    rewriter.create<emitc::CallOpaqueOp>(
+        op.getLoc(), TypeRange{}, helperAttr.getValue(), ArrayAttr{},
+        ArrayAttr{}, ValueRange(args));
+    rewriter.eraseOp(op);
+    return success();
+  }
+};
+
+//===----------------------------------------------------------------------===//
 // populate patterns
 //===----------------------------------------------------------------------===
 struct ReinterpretCastToEmitC : public OpConversionPattern<memref::ReinterpretCastOp> {
@@ -6935,6 +7125,7 @@ static void populatePTOToEmitCPatterns(RewritePatternSet &patterns,
   (void)solver;
   patterns.add<ArithCmpIToEmitC>(typeConverter, ctx);
   patterns.add<PTOBindTileToEmitC>(typeConverter, ctx);
+  patterns.add<PTOFusionToEmitC>(typeConverter, ctx);
   patterns.add<PTOSetFlagToEmitC>(typeConverter, ctx);
   patterns.add<PTOSubSCToEmitC>(typeConverter, ctx);
   patterns.add<PTOSubCSToEmitC>(typeConverter, ctx);
@@ -7171,6 +7362,41 @@ struct EmitPTOManualPass
 		}
 		)cpp"));
 	    }
+
+      // 1.25 Tile fusion helpers (v0.1): emit one CCEC-style helper per tfusion.
+      {
+        bool tfusionHelpersFailed = false;
+        int funcOrdinal = 0;
+        for (func::FuncOp func : mop.getOps<func::FuncOp>()) {
+          int siteOrdinal = 0;
+          func.walk([&](pto::TFusionOp tfusion) {
+            std::string helperName = ("__ptoas_tfusion_f" +
+                                      std::to_string(funcOrdinal) + "_s" +
+                                      std::to_string(siteOrdinal));
+            tfusion->setAttr(kTFusionHelperNameAttr,
+                             builder.getStringAttr(helperName));
+
+            FailureOr<std::string> helper =
+                buildTFusionCCECHelper(tfusion, helperName);
+            if (failed(helper)) {
+              tfusion.emitError()
+                  << "failed to build EmitC helper for pto.tfusion";
+              tfusionHelpersFailed = true;
+              return WalkResult::interrupt();
+            }
+
+            builder.create<emitc::VerbatimOp>(loc,
+                                              builder.getStringAttr(*helper));
+            ++siteOrdinal;
+            return WalkResult::advance();
+          });
+          if (tfusionHelpersFailed) {
+            signalPassFailure();
+            return;
+          }
+          ++funcOrdinal;
+        }
+      }
 
 	    // 1.5 Pre-lower SCF constructs not handled by SCFToEmitC.
 	    {

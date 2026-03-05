@@ -432,6 +432,48 @@ process_one_dir() {
         fi
       fi
 
+      # Regression guard: pto.tfusion must lower to a CCEC helper + call (no TADD/TMUL/...).
+      if [[ "$base" == "tfusion_emitc_add_mul" ]]; then
+        if ! grep -Fq "static inline void __ptoas_tfusion_f0_s0" "$cpp"; then
+          echo -e "${A}(${base}.pto)\tFAIL\tmissing tfusion helper definition"
+          overall=1
+          continue
+        fi
+        if ! grep -Fq "__ptoas_tfusion_f0_s0(" "$cpp"; then
+          echo -e "${A}(${base}.pto)\tFAIL\tmissing tfusion helper call"
+          overall=1
+          continue
+        fi
+        if ! grep -Fq "vlds(" "$cpp" || ! grep -Fq "vadd(" "$cpp" || ! grep -Fq "vmul(" "$cpp" || ! grep -Fq "vsts(" "$cpp"; then
+          echo -e "${A}(${base}.pto)\tFAIL\tmissing expected CCEC ops in helper"
+          overall=1
+          continue
+        fi
+        if grep -Fq "TADD(" "$cpp" || grep -Fq "TSUB(" "$cpp" || grep -Fq "TMUL(" "$cpp" || grep -Fq "TDIV(" "$cpp"; then
+          echo -e "${A}(${base}.pto)\tFAIL\ttfusion unexpectedly lowered via TADD/TSUB/TMUL/TDIV"
+          overall=1
+          continue
+        fi
+      fi
+
+      if [[ "$base" == "tfusion_emitc_keep_stage0" ]]; then
+        if ! grep -Fq "static inline void __ptoas_tfusion_f0_s0" "$cpp"; then
+          echo -e "${A}(${base}.pto)\tFAIL\tmissing tfusion helper definition"
+          overall=1
+          continue
+        fi
+        if ! grep -Fq "k0Ptr" "$cpp" || ! grep -Fq "vsts(regPrev, k0Ptr" "$cpp"; then
+          echo -e "${A}(${base}.pto)\tFAIL\tmissing keep_stage vsts to k0Ptr"
+          overall=1
+          continue
+        fi
+        if grep -Fq "TADD(" "$cpp" || grep -Fq "TSUB(" "$cpp" || grep -Fq "TMUL(" "$cpp" || grep -Fq "TDIV(" "$cpp"; then
+          echo -e "${A}(${base}.pto)\tFAIL\ttfusion unexpectedly lowered via TADD/TSUB/TMUL/TDIV"
+          overall=1
+          continue
+        fi
+      fi
+
       echo -e "${A}(${base}.pto)\tOK\tgenerated: $(basename "$cpp")"
     done
   fi
