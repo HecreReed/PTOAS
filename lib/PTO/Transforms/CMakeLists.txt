@@ -29,6 +29,7 @@ add_mlir_dialect_library(PTOTransforms
   PTOCreateFusionGroups.cpp
   PTOMaterializeFusionGroupsFromOpLib.cpp
   PTOInstantiateAndInlineOpLib.cpp
+  PTOLowerCCECToLoops.cpp
   PTOLowLevelLoopFusion.cpp
 
   ADDITIONAL_HEADER_DIRS

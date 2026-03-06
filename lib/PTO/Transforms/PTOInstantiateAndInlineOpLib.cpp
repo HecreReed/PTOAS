@@ -1,3 +1,4 @@
+#include "PTO/IR/CCEC.h"
 #include "PTO/Transforms/Passes.h"
 
 #include "mlir/Dialect/Arith/IR/Arith.h"
@@ -134,7 +135,7 @@ createConcreteInstanceFromSeed(ModuleOp module, func::FuncOp seed,
 
   MLIRContext *ctx = module.getContext();
   auto seedTy = seed.getFunctionType();
-  if (seedTy.getNumInputs() != static_cast<int>(concreteInputs.size()))
+  if (seedTy.getNumInputs() != concreteInputs.size())
     return failure();
 
   std::string sym = ("__pto_oplib_inst_" + opName + "__" +

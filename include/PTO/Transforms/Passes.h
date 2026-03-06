@@ -69,6 +69,7 @@ std::unique_ptr<Pass> createPTOMaterializeFusionGroupsFromOpLibPass(
     const PTOMaterializeFusionGroupsFromOpLibOptions &options = {});
 std::unique_ptr<Pass> createPTOInstantiateAndInlineOpLibPass(
     const PTOInstantiateAndInlineOpLibOptions &options = {});
+std::unique_ptr<Pass> createPTOLowerCCECToLoopsPass();
 std::unique_ptr<Pass> createPTOLowLevelLoopFusionPass(
     const PTOLowLevelLoopFusionOptions &options = {});
 // Declare register function

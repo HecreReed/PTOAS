@@ -139,6 +139,7 @@ def PTOMaterializeFusionGroupsFromOpLib : Pass<"pto-materialize-fusion-groups-fr
   }];
   let constructor = "mlir::pto::createPTOMaterializeFusionGroupsFromOpLibPass()";
   let dependentDialects = [
+    "mlir::ccec::CCECDialect",
     "mlir::func::FuncDialect",
     "mlir::memref::MemRefDialect",
     "mlir::arith::ArithDialect",
@@ -164,6 +165,7 @@ def PTOInstantiateAndInlineOpLib : Pass<"pto-instantiate-inline-oplib", "ModuleO
   }];
   let constructor = "mlir::pto::createPTOInstantiateAndInlineOpLibPass()";
   let dependentDialects = [
+    "mlir::ccec::CCECDialect",
     "mlir::func::FuncDialect",
     "mlir::memref::MemRefDialect",
     "mlir::arith::ArithDialect",
@@ -173,6 +175,23 @@ def PTOInstantiateAndInlineOpLib : Pass<"pto-instantiate-inline-oplib", "ModuleO
     Option<"debug", "debug", "bool",
            /*default=*/"false",
            "Enable verbose debug logging for OP-Lib instantiation/inlining">
+  ];
+}
+
+def PTOLowerCCECToLoops : Pass<"pto-lower-ccec-to-loops", "ModuleOp"> {
+  let summary = "Lower minimal CCEC vector ops to memref/scf/arith loops";
+  let description = [{
+    Rewrites the initial CCEC element-wise vector subset into explicit nested
+    loops so the existing PTOAS optimization and codegen pipeline can continue
+    to operate on memref/scf/arith IR.
+  }];
+  let constructor = "mlir::pto::createPTOLowerCCECToLoopsPass()";
+  let dependentDialects = [
+    "mlir::ccec::CCECDialect",
+    "mlir::func::FuncDialect",
+    "mlir::memref::MemRefDialect",
+    "mlir::arith::ArithDialect",
+    "mlir::scf::SCFDialect"
   ];
 }
 

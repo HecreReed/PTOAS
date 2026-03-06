@@ -1,4 +1,5 @@
 #include "PTO/IR/PTO.h"
+#include "PTO/IR/CCEC.h"
 #include "PTO/Transforms/Passes.h"
 
 #include "mlir/Dialect/Arith/IR/Arith.h"
@@ -56,7 +57,8 @@ static constexpr llvm::StringLiteral kOpLibKindBinaryTemplate =
     "binary_elementwise_template";
 
 static bool isSupportedFusionOp(Operation *op) {
-  return isa<pto::TMulOp, pto::TDivOp, pto::TAddOp, pto::TSubOp>(op);
+  return isa<pto::TMulOp, pto::TDivOp, pto::TAddOp, pto::TSubOp,
+             pto::TMaxOp, pto::TMinOp>(op);
 }
 
 static StringRef getFusionOpName(Operation *op) {
@@ -68,6 +70,10 @@ static StringRef getFusionOpName(Operation *op) {
     return "tadd";
   if (isa<pto::TSubOp>(op))
     return "tsub";
+  if (isa<pto::TMaxOp>(op))
+    return "tmax";
+  if (isa<pto::TMinOp>(op))
+    return "tmin";
   return "";
 }
 
@@ -80,6 +86,10 @@ static Value getBinaryDst(Operation *op) {
     return add.getDst();
   if (auto sub = dyn_cast<pto::TSubOp>(op))
     return sub.getDst();
+  if (auto max = dyn_cast<pto::TMaxOp>(op))
+    return max.getDst();
+  if (auto min = dyn_cast<pto::TMinOp>(op))
+    return min.getDst();
   return {};
 }
 
@@ -92,6 +102,10 @@ static SmallVector<Value, 2> getBinarySrcs(Operation *op) {
     return {add.getSrc0(), add.getSrc1()};
   if (auto sub = dyn_cast<pto::TSubOp>(op))
     return {sub.getSrc0(), sub.getSrc1()};
+  if (auto max = dyn_cast<pto::TMaxOp>(op))
+    return {max.getSrc0(), max.getSrc1()};
+  if (auto min = dyn_cast<pto::TMinOp>(op))
+    return {min.getSrc0(), min.getSrc1()};
   return {};
 }
 
@@ -103,6 +117,7 @@ static bool isAllowedTemplateOp(Operation *op) {
   if (isa<func::FuncOp, func::ReturnOp, scf::YieldOp, scf::ForOp,
           memref::LoadOp, memref::StoreOp, memref::DimOp,
           arith::AddFOp, arith::SubFOp, arith::MulFOp, arith::DivFOp,
+          arith::MaximumFOp, arith::MinimumFOp, ccec::VBinOp,
           arith::ConstantIndexOp, arith::ConstantIntOp, arith::ConstantOp>(op))
     return true;
   return false;
@@ -122,7 +137,36 @@ static bool isExpectedArithOpForTemplate(Operation *op, StringRef opName) {
     return isa<arith::MulFOp>(op);
   if (opName == "tdiv")
     return isa<arith::DivFOp>(op);
+  if (opName == "tmax")
+    return isa<arith::MaximumFOp>(op);
+  if (opName == "tmin")
+    return isa<arith::MinimumFOp>(op);
   return false;
+}
+
+static bool isTemplateArithCoreOp(Operation *op) {
+  return isa<arith::AddFOp, arith::SubFOp, arith::MulFOp, arith::DivFOp,
+             arith::MaximumFOp, arith::MinimumFOp>(op);
+}
+
+static bool isExpectedCCECOpForTemplate(Operation *op, StringRef opName) {
+  auto vbin = dyn_cast<ccec::VBinOp>(op);
+  if (!vbin)
+    return false;
+  StringRef expectedKind = ccec::getExpectedVBinKindForOpLibOp(opName);
+  return !expectedKind.empty() && vbin.getKind() == expectedKind;
+}
+
+static MemRefType getAllocCompatibleMemRefType(MemRefType ty) {
+  SmallVector<int64_t, 4> strides;
+  int64_t offset = 0;
+  if (failed(getStridesAndOffset(ty, strides, offset)))
+    return ty;
+  if (offset == 0)
+    return ty;
+  return MemRefType::get(ty.getShape(), ty.getElementType(),
+                         StridedLayoutAttr::get(ty.getContext(), 0, strides),
+                         ty.getMemorySpace());
 }
 
 static bool isFloatDTypeSupported(Type ty) {
@@ -291,6 +335,9 @@ struct TemplateRegistry {
   llvm::StringMap<func::FuncOp> seedByOp;
   llvm::StringMap<func::FuncOp> instanceByKey;
 
+  TemplateRegistry(ModuleOp module, SymbolTable &symbolTable, bool debug)
+      : module(module), symbolTable(symbolTable), debug(debug) {}
+
   LogicalResult emitFailure(Operation *anchor, const Twine &msg) {
     anchor->emitError(msg);
     return failure();
@@ -330,6 +377,8 @@ struct TemplateRegistry {
 
     bool hasExpectedArithCore = false;
     bool hasUnexpectedArithCore = false;
+    bool hasExpectedCCECCore = false;
+    bool hasUnexpectedCCECCore = false;
     int64_t forCount = 0;
     bool hasNestedFor = false;
     bool bodyOk = true;
@@ -353,26 +402,53 @@ struct TemplateRegistry {
           }
         }
       }
-      if (isa<arith::AddFOp, arith::SubFOp, arith::MulFOp, arith::DivFOp>(op)) {
+      if (isTemplateArithCoreOp(op)) {
         if (isExpectedArithOpForTemplate(op, opName))
           hasExpectedArithCore = true;
         else
           hasUnexpectedArithCore = true;
+      }
+      if (isa<ccec::VBinOp>(op)) {
+        if (isExpectedCCECOpForTemplate(op, opName))
+          hasExpectedCCECCore = true;
+        else
+          hasUnexpectedCCECCore = true;
       }
       return WalkResult::advance();
     });
     if (!bodyOk)
       return failure();
 
-    if (forCount < 2 || !hasNestedFor) {
-      fn.emitError() << "template for op '" << opName
-                     << "' must contain a 2-level nested scf.for loop";
-      return failure();
-    }
-
     if (hasUnexpectedArithCore) {
       fn.emitError() << "template for op '" << opName
                      << "' contains arith floating ops that do not match the OP contract";
+      return failure();
+    }
+
+    if (hasUnexpectedCCECCore) {
+      fn.emitError() << "template for op '" << opName
+                     << "' contains ccec ops that do not match the OP contract";
+      return failure();
+    }
+
+    if (hasExpectedArithCore && hasExpectedCCECCore) {
+      fn.emitError() << "template for op '" << opName
+                     << "' must use either legacy arith loops or direct ccec ops, not both";
+      return failure();
+    }
+
+    if (hasExpectedCCECCore) {
+      if (forCount != 0) {
+        fn.emitError() << "template for op '" << opName
+                       << "' using ccec ops must not contain scf.for loops";
+        return failure();
+      }
+      return success();
+    }
+
+    if (forCount < 2 || !hasNestedFor) {
+      fn.emitError() << "template for op '" << opName
+                     << "' must contain a 2-level nested scf.for loop";
       return failure();
     }
 
@@ -434,7 +510,7 @@ struct TemplateRegistry {
 
         StringRef opName = opAttr.getValue();
         if (opName != "tmul" && opName != "tdiv" && opName != "tadd" &&
-            opName != "tsub") {
+            opName != "tsub" && opName != "tmax" && opName != "tmin") {
           libFunc.emitError() << "unsupported template op attr: " << opName;
           return failure();
         }
@@ -634,8 +710,11 @@ static LogicalResult materializeGroupOps(GroupInfo &group,
         dynSizes.push_back(
             bodyBuilder.create<memref::DimOp>(op->getLoc(), src0, dimIdx));
       }
-      mappedDst =
-          bodyBuilder.create<memref::AllocOp>(op->getLoc(), origDstTy, dynSizes);
+      MemRefType allocTy = getAllocCompatibleMemRefType(origDstTy);
+      Value alloc = bodyBuilder.create<memref::AllocOp>(op->getLoc(), allocTy, dynSizes);
+      mappedDst = allocTy == origDstTy
+                      ? alloc
+                      : bodyBuilder.create<memref::CastOp>(op->getLoc(), origDstTy, alloc);
       valueMap[dst] = mappedDst;
     }
 
@@ -791,7 +870,7 @@ struct PTOMaterializeFusionGroupsFromOpLibPass
     MLIRContext *ctx = &getContext();
     SymbolTable symbolTable(module);
 
-    TemplateRegistry registry{module, symbolTable, debug};
+    TemplateRegistry registry(module, symbolTable, debug);
     if (failed(registry.loadFromDir(opLibDir, ctx, module.getLoc()))) {
       signalPassFailure();
       return;

@@ -37,3 +37,12 @@ endif()
 # 3. 注册聚合目标
 # ============================================================
 add_public_tablegen_target(PTOOpsIncGen)
+
+set(LLVM_TARGET_DEFINITIONS CCECOps.td)
+
+mlir_tablegen(CCECDialect.h.inc -gen-dialect-decls -dialect=ccec)
+mlir_tablegen(CCECDialect.cpp.inc -gen-dialect-defs -dialect=ccec)
+mlir_tablegen(CCECOps.h.inc -gen-op-decls)
+mlir_tablegen(CCECOps.cpp.inc -gen-op-defs)
+
+add_public_tablegen_target(CCECOpsIncGen)

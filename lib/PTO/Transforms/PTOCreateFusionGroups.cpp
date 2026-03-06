@@ -19,7 +19,8 @@ using namespace mlir;
 namespace {
 
 static bool isFusibleBinaryOp(Operation *op) {
-  return isa<pto::TMulOp, pto::TDivOp, pto::TAddOp, pto::TSubOp>(op);
+  return isa<pto::TMulOp, pto::TDivOp, pto::TAddOp, pto::TSubOp,
+             pto::TMaxOp, pto::TMinOp>(op);
 }
 
 static Value getBinaryDst(Operation *op) {
@@ -31,6 +32,10 @@ static Value getBinaryDst(Operation *op) {
     return add.getDst();
   if (auto sub = dyn_cast<pto::TSubOp>(op))
     return sub.getDst();
+  if (auto max = dyn_cast<pto::TMaxOp>(op))
+    return max.getDst();
+  if (auto min = dyn_cast<pto::TMinOp>(op))
+    return min.getDst();
   return {};
 }
 
@@ -43,6 +48,10 @@ static SmallVector<Value, 2> getBinarySrcs(Operation *op) {
     return {add.getSrc0(), add.getSrc1()};
   if (auto sub = dyn_cast<pto::TSubOp>(op))
     return {sub.getSrc0(), sub.getSrc1()};
+  if (auto max = dyn_cast<pto::TMaxOp>(op))
+    return {max.getSrc0(), max.getSrc1()};
+  if (auto min = dyn_cast<pto::TMinOp>(op))
+    return {min.getSrc0(), min.getSrc1()};
   return {};
 }
 

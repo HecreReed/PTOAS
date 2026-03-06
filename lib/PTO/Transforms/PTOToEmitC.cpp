@@ -27,6 +27,7 @@
 #include "mlir/IR/IRMapping.h"
 #include "mlir/IR/Operation.h"
 #include "mlir/IR/PatternMatch.h"
+#include "mlir/IR/SymbolTable.h"
 #include "mlir/IR/TypeRange.h"
 
 #include "mlir/Pass/Pass.h"
@@ -80,8 +81,8 @@ static const char *addrSpaceQualifier(pto::AddressSpace as) {
 }
 
 static Value peelUnrealized(Value v) {
-  if (auto castOp = v.getDefiningOp<UnrealizedConversionCastOp>())
-    return castOp.getOperand(0);
+  while (auto castOp = v.getDefiningOp<UnrealizedConversionCastOp>())
+    v = castOp.getOperand(0);
   return v;
 }
 
@@ -1645,6 +1646,74 @@ static Value castSignlessIntToUnsignedSameWidth(ConversionPatternRewriter &rewri
                                                 unsigned bitWidth) {
   auto uTy = getUnsignedIntOpaqueType(rewriter.getContext(), bitWidth);
   return emitCCast(rewriter, loc, uTy, v);
+}
+
+static bool isTileLikeEmitCType(Type type) {
+  auto opaqueTy = dyn_cast<emitc::OpaqueType>(type);
+  if (!opaqueTy)
+    return false;
+  StringRef tyName = opaqueTy.getValue();
+  return tyName.starts_with("Tile<") || tyName.starts_with("ConvTile<");
+}
+
+static bool isPointerLikeEmitCType(Type type) {
+  if (isa<emitc::PointerType>(type))
+    return true;
+  auto opaqueTy = dyn_cast<emitc::OpaqueType>(type);
+  return opaqueTy && opaqueTy.getValue().ends_with("*");
+}
+
+static FailureOr<SmallVector<int64_t, 4>>
+getStaticLinearizedStrides(MemRefType memrefTy) {
+  SmallVector<int64_t, 4> strides;
+  int64_t offset = 0;
+  if (succeeded(getStridesAndOffset(memrefTy, strides, offset))) {
+    bool hasDynamicStride =
+        llvm::any_of(strides, [](int64_t stride) { return stride == ShapedType::kDynamic; });
+    if (!hasDynamicStride)
+      return strides;
+  }
+
+  ArrayRef<int64_t> shape = memrefTy.getShape();
+  strides.resize(shape.size());
+  int64_t runningStride = 1;
+  for (int64_t dim = static_cast<int64_t>(shape.size()) - 1; dim >= 0; --dim) {
+    if (shape[dim] == ShapedType::kDynamic)
+      return failure();
+    strides[dim] = runningStride;
+    runningStride *= shape[dim];
+  }
+  return strides;
+}
+
+static FailureOr<Value>
+linearizeMemRefIndices(ConversionPatternRewriter &rewriter, Location loc,
+                       MemRefType memrefTy, ValueRange indices) {
+  if (indices.size() != static_cast<size_t>(memrefTy.getRank()))
+    return failure();
+
+  Type idxTy = emitc::OpaqueType::get(rewriter.getContext(), "int32_t");
+  if (!indices.empty())
+    idxTy = indices.front().getType();
+
+  Value linear = makeEmitCIntConstant(rewriter, loc, idxTy, 0);
+  if (indices.empty())
+    return linear;
+
+  auto stridesOr = getStaticLinearizedStrides(memrefTy);
+  if (failed(stridesOr))
+    return failure();
+
+  for (auto [idx, stride] : llvm::zip(indices, *stridesOr)) {
+    Value term = emitCCast(rewriter, loc, idxTy, idx);
+    if (stride != 1) {
+      Value strideVal = makeEmitCIntConstant(rewriter, loc, idxTy, stride);
+      term = rewriter.create<emitc::MulOp>(loc, idxTy, term, strideVal);
+    }
+    linear = rewriter.create<emitc::AddOp>(loc, idxTy, linear, term);
+  }
+
+  return linear;
 }
 
 struct ArithMulIToEmitC : public OpConversionPattern<arith::MulIOp> {
@@ -3807,6 +3876,88 @@ struct PTOStoreScalarToEmitC : public OpConversionPattern<pto::StoreScalarOp> {
         op.getLoc(), TypeRange{}, "PTOAS__PTR_STORE",
         ArrayAttr{}, ArrayAttr{}, ValueRange{ptr, offset, val});
 
+    rewriter.eraseOp(op);
+    return success();
+  }
+};
+
+struct MemRefLoadToEmitC : public OpConversionPattern<memref::LoadOp> {
+  using OpConversionPattern<memref::LoadOp>::OpConversionPattern;
+
+  LogicalResult matchAndRewrite(memref::LoadOp op, OpAdaptor adaptor,
+                                ConversionPatternRewriter &rewriter) const override {
+    auto memrefTy = dyn_cast<MemRefType>(op.getMemRefType());
+    if (!memrefTy)
+      return failure();
+
+    auto linearOr =
+        linearizeMemRefIndices(rewriter, op.getLoc(), memrefTy, adaptor.getIndices());
+    if (failed(linearOr)) {
+      return rewriter.notifyMatchFailure(
+          op, "requires static/row-major strides for memref.load EmitC lowering");
+    }
+
+    Value base = peelUnrealized(adaptor.getMemref());
+    Type dstTy = getTypeConverter()->convertType(op.getType());
+    if (!dstTy)
+      return failure();
+
+    if (isTileLikeEmitCType(base.getType())) {
+      auto call = rewriter.create<emitc::CallOpaqueOp>(
+          op.getLoc(), TypeRange{dstTy}, "PTOAS__TILE_GET_VALUE", ArrayAttr{},
+          ArrayAttr{}, ValueRange{base, *linearOr});
+      rewriter.replaceOp(op, call.getResults());
+      return success();
+    }
+
+    if (!isPointerLikeEmitCType(base.getType())) {
+      return rewriter.notifyMatchFailure(op,
+                                         "expected tile-like or pointer-like memref base");
+    }
+
+    auto call = rewriter.create<emitc::CallOpaqueOp>(
+        op.getLoc(), TypeRange{dstTy}, "PTOAS__PTR_LOAD", ArrayAttr{},
+        ArrayAttr{}, ValueRange{base, *linearOr});
+    rewriter.replaceOp(op, call.getResults());
+    return success();
+  }
+};
+
+struct MemRefStoreToEmitC : public OpConversionPattern<memref::StoreOp> {
+  using OpConversionPattern<memref::StoreOp>::OpConversionPattern;
+
+  LogicalResult matchAndRewrite(memref::StoreOp op, OpAdaptor adaptor,
+                                ConversionPatternRewriter &rewriter) const override {
+    auto memrefTy = dyn_cast<MemRefType>(op.getMemRefType());
+    if (!memrefTy)
+      return failure();
+
+    auto linearOr =
+        linearizeMemRefIndices(rewriter, op.getLoc(), memrefTy, adaptor.getIndices());
+    if (failed(linearOr)) {
+      return rewriter.notifyMatchFailure(
+          op, "requires static/row-major strides for memref.store EmitC lowering");
+    }
+
+    Value base = peelUnrealized(adaptor.getMemref());
+    Value value = peelUnrealized(adaptor.getValue());
+
+    if (isTileLikeEmitCType(base.getType())) {
+      rewriter.create<emitc::CallOpaqueOp>(
+          op.getLoc(), TypeRange{}, "PTOAS__TILE_SET_VALUE", ArrayAttr{},
+          ArrayAttr{}, ValueRange{base, *linearOr, value});
+      rewriter.eraseOp(op);
+      return success();
+    }
+
+    if (!isPointerLikeEmitCType(base.getType())) {
+      return rewriter.notifyMatchFailure(op,
+                                         "expected tile-like or pointer-like memref base");
+    }
+
+    rewriter.create<emitc::CallOpaqueOp>(
+        op.getLoc(), TypeRange{}, "PTOAS__PTR_STORE", ArrayAttr{}, ArrayAttr{},
+        ValueRange{base, *linearOr, value});
     rewriter.eraseOp(op);
     return success();
   }
@@ -6943,7 +7094,8 @@ static void populatePTOToEmitCPatterns(RewritePatternSet &patterns,
   patterns.add<SubviewToEmitCPattern>(typeConverter, ctx);
   patterns.add<PointerCastConversion>(typeConverter, ctx);
   patterns.add<PTOSetValToSETVAL, PTOGetValToGETVAL,
-               PTOLoadScalarToEmitC, PTOStoreScalarToEmitC>(typeConverter, ctx);
+               PTOLoadScalarToEmitC, PTOStoreScalarToEmitC, MemRefLoadToEmitC,
+               MemRefStoreToEmitC>(typeConverter, ctx);
   patterns.add<PTOTAndToEmitC>(typeConverter, ctx);
   patterns.add<PTOMulToEmitC>(typeConverter, ctx);
   patterns.add<PTOAndSToEmitC>(typeConverter, ctx);
@@ -6975,8 +7127,10 @@ static void populatePTOToEmitCPatterns(RewritePatternSet &patterns,
   patterns.add<ArithMinSIToEmitC>(typeConverter, ctx);
   patterns.add<ArithMinUIToEmitC>(typeConverter, ctx);
   patterns.add<ArithNegFToEmitC>(typeConverter, ctx);
+  patterns.add<ArithSimpleBinaryToEmitC<arith::AddFOp, emitc::AddOp>>(typeConverter,
+                                                                      ctx);
   patterns.add<ArithSimpleBinaryToEmitC<arith::SubFOp, emitc::SubOp>>(typeConverter,
-                                                                     ctx);
+                                                                      ctx);
   patterns.add<ArithSimpleBinaryToEmitC<arith::MulFOp, emitc::MulOp>>(typeConverter,
                                                                      ctx);
   patterns.add<ArithSimpleBinaryToEmitC<arith::DivFOp, emitc::DivOp>>(typeConverter,
@@ -7077,6 +7231,78 @@ struct EmitPTOManualPass
 	    MLIRContext *ctx = &getContext();
 	    ModuleOp mop = getOperation();
 
+    SmallVector<func::CallOp> fusionCalls;
+    mop.walk([&](func::CallOp call) {
+      auto callee =
+          SymbolTable::lookupNearestSymbolFrom<func::FuncOp>(call, call.getCalleeAttr());
+      if (!callee || !callee->hasAttr("pto.fusion.group_id"))
+        return;
+      fusionCalls.push_back(call);
+    });
+
+    for (func::CallOp call : fusionCalls) {
+      auto callee =
+          SymbolTable::lookupNearestSymbolFrom<func::FuncOp>(call, call.getCalleeAttr());
+      if (!callee || !callee.getBody().hasOneBlock()) {
+        call.emitError("expected single-block fusion helper for EmitC inlining");
+        return signalPassFailure();
+      }
+
+      auto ret = dyn_cast<func::ReturnOp>(callee.front().getTerminator());
+      if (!ret) {
+        call.emitError("expected func.return terminator in fusion helper");
+        return signalPassFailure();
+      }
+      if (ret.getNumOperands() != call.getNumResults()) {
+        call.emitError("fusion helper result count mismatch during EmitC inlining");
+        return signalPassFailure();
+      }
+
+      IRMapping mapping;
+      for (auto [arg, operand] : llvm::zip(callee.front().getArguments(), call.getOperands()))
+        mapping.map(arg, operand);
+
+      OpBuilder builder(call);
+      for (Operation &inner : callee.front().without_terminator())
+        builder.clone(inner, mapping);
+
+      SmallVector<Value> mappedResults;
+      mappedResults.reserve(ret.getNumOperands());
+      for (Value result : ret.getOperands())
+        mappedResults.push_back(mapping.lookupOrDefault(result));
+
+      if (call.getNumResults() != 0)
+        call.replaceAllUsesWith(mappedResults);
+      call.erase();
+    }
+
+    // Drop dead private helper symbols first. OP-fusion currently leaves
+    // unused OP-Lib seed/instance funcs around, and they may still contain
+    // high-level memref ops (e.g. memref.dim on dynamic shapes) that EmitC
+    // cannot legalize.
+    bool erasedAnyDeadFunc = true;
+    while (erasedAnyDeadFunc) {
+      erasedAnyDeadFunc = false;
+      SmallVector<func::FuncOp> deadFuncs;
+      for (func::FuncOp func : mop.getOps<func::FuncOp>()) {
+        if (!func.isPrivate())
+          continue;
+        StringRef symName = func.getSymName();
+        if (symName.starts_with("__pto_oplib_seed_") ||
+            symName.starts_with("__pto_oplib_inst_")) {
+          deadFuncs.push_back(func);
+          continue;
+        }
+        if (!SymbolTable::symbolKnownUseEmpty(func, mop))
+          continue;
+        deadFuncs.push_back(func);
+      }
+      for (func::FuncOp func : deadFuncs) {
+        func.erase();
+        erasedAnyDeadFunc = true;
+      }
+    }
+
 		    // 1. 插入头文件
 	    auto loc = mop->getLoc();
 	    OpBuilder builder(ctx);
@@ -7100,7 +7326,7 @@ struct EmitPTOManualPass
 	      builder.create<emitc::VerbatimOp>(
 	          loc, builder.getStringAttr(R"cpp(
 		template <typename To, typename From>
-		static inline To ptoas_bitcast(From from) {
+		PTO_INTERNAL To ptoas_bitcast(From from) {
 		  static_assert(sizeof(To) == sizeof(From), "ptoas_bitcast: size mismatch");
 		  To to;
 		  __builtin_memcpy(&to, &from, sizeof(To));

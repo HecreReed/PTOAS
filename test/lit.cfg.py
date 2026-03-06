@@ -12,6 +12,7 @@ config.excludes = [
     "README.md",
     "lit.cfg.py",
     "oplib",
+    "oplib_ccec",
 ]
 
 config.test_source_root = os.path.dirname(__file__)

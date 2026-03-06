@@ -7,6 +7,7 @@
 //===----------------------------------------------------------------------===//
 
 #include "PTO/IR/PTO.h"
+#include "PTO/IR/CCEC.h"
 #include "PTO/Transforms/Passes.h"
 #include "PTO/Transforms/BufferizableOpInterfaceImpl.h"
 #include "mlir/IR/MLIRContext.h"
@@ -550,6 +551,7 @@ int main(int argc, char **argv) {
   registry.insert<mlir::scf::SCFDialect>();
 
   registry.insert<mlir::pto::PTODialect>();
+  registry.insert<mlir::ccec::CCECDialect>();
   //mlir::registerAllDialects(registry);
   arith::registerBufferizableOpInterfaceExternalModels(registry);
   tensor::registerBufferizableOpInterfaceExternalModels(registry);
@@ -577,6 +579,7 @@ int main(int argc, char **argv) {
 
   context.getOrLoadDialect<emitc::EmitCDialect>();
   context.getOrLoadDialect<mlir::pto::PTODialect>();
+  context.getOrLoadDialect<mlir::ccec::CCECDialect>();
   context.getOrLoadDialect<func::FuncDialect>();
   context.getOrLoadDialect<arith::ArithDialect>();
   context.getOrLoadDialect<memref::MemRefDialect>();
@@ -686,6 +689,7 @@ int main(int argc, char **argv) {
       instantiateInlineOptions.debug = opFusionDebug;
       preCodegenPm.addPass(
           pto::createPTOInstantiateAndInlineOpLibPass(instantiateInlineOptions));
+      preCodegenPm.addPass(pto::createPTOLowerCCECToLoopsPass());
       preCodegenPm.addPass(createCanonicalizerPass());
       preCodegenPm.addPass(createCSEPass());
 
