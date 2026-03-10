@@ -1,0 +1,13 @@
+module {
+  func.func @test_a5_buf_sync() {
+    // Minimal smoke for A5 buffer-id synchronization ops.
+    // These ops are lowered to the CCEC builtin intrinsics `get_buf/rls_buf`.
+    pto.section.cube {
+      pto.get_buf[#pto.pipe_event_type<TLOAD>, 0]
+      pto.rls_buf[#pto.pipe_event_type<TLOAD>, 0]
+      pto.get_buf[#pto.pipe_event_type<TVEC>, 0]
+      pto.rls_buf[#pto.pipe_event_type<TVEC>, 0]
+    }
+    return
+  }
+}
