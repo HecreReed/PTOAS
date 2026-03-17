@@ -121,3 +121,11 @@ install(FILES
     "${CMAKE_CURRENT_BINARY_DIR}/PTOASConfig.cmake"
     DESTINATION ${PTOAS_CMAKE_INSTALL_DIR}
 )
+
+if(ENABLE_PACKAGE)
+  include(cmake/package.cmake)
+  include(cmake/func.cmake)
+  include(version.cmake)
+  add_version_info_targets()
+  pack_built_in()
+endif()
