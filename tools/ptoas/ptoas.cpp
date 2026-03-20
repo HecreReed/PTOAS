@@ -29,16 +29,140 @@
 #include "llvm/Support/FileSystem.h" // [Fix] Required for OF_None
 #include "ptobc/ptobc_decode.h"
 #include "mlir/Dialect/Bufferization/Transforms/OneShotAnalysis.h"
+#include "mlir/Dialect/ControlFlow/IR/ControlFlowOps.h"
 #include "mlir/Dialect/LLVMIR/LLVMDialect.h"
 #include "mlir/Dialect/EmitC/IR/EmitC.h"
 #include "mlir/Dialect/EmitC/Transforms/Passes.h"
 #include "llvm/Support/CommandLine.h"
+#include "llvm/Support/raw_ostream.h"
+#include "llvm/ADT/DenseMap.h"
+#include "llvm/ADT/SmallPtrSet.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/StringRef.h"
 #include <string>
 
 using namespace mlir;
 using namespace pto;
+
+#ifndef PTOAS_RELEASE_VERSION
+#define PTOAS_RELEASE_VERSION "unknown"
+#endif
+
+static void printPTOASVersion(llvm::raw_ostream &os) {
+  os << "ptoas " << PTOAS_RELEASE_VERSION << "\n";
+}
+
+static LogicalResult reorderEmitCFunctions(ModuleOp module) {
+  SmallVector<emitc::FuncOp> declarations;
+  SmallVector<emitc::FuncOp> definitions;
+  llvm::DenseMap<StringAttr, emitc::FuncOp> definitionsByName;
+
+  for (auto func : module.getOps<emitc::FuncOp>()) {
+    if (func.isDeclaration()) {
+      declarations.push_back(func);
+      continue;
+    }
+    definitions.push_back(func);
+    definitionsByName[func.getSymNameAttr()] = func;
+  }
+
+  llvm::DenseMap<Operation *, unsigned> indegree;
+  llvm::DenseMap<Operation *, SmallVector<Operation *>> outgoing;
+  for (auto func : definitions)
+    indegree[func.getOperation()] = 0;
+
+  for (auto caller : definitions) {
+    Operation *callerOp = caller.getOperation();
+    llvm::SmallPtrSet<Operation *, 8> seenCallees;
+    bool hasCycle = false;
+    caller.walk([&](emitc::CallOp call) {
+      auto calleeAttr = call.getCalleeAttr();
+      if (!calleeAttr)
+        return;
+      auto it = definitionsByName.find(calleeAttr.getLeafReference());
+      if (it == definitionsByName.end())
+        return;
+      Operation *calleeOp = it->second.getOperation();
+      if (calleeOp == callerOp) {
+        hasCycle = true;
+        return;
+      }
+      if (!seenCallees.insert(calleeOp).second)
+        return;
+      outgoing[calleeOp].push_back(callerOp);
+      ++indegree[callerOp];
+    });
+    if (hasCycle) {
+      return caller.emitOpError()
+             << "recursive function calls are not supported for EmitC C++ "
+                "emission";
+    }
+  }
+
+  SmallVector<Operation *> ready;
+  for (auto func : definitions) {
+    if (indegree[func.getOperation()] == 0)
+      ready.push_back(func.getOperation());
+  }
+
+  SmallVector<emitc::FuncOp> sortedDefinitions;
+  while (!ready.empty()) {
+    Operation *next = ready.front();
+    ready.erase(ready.begin());
+    auto nextFunc = cast<emitc::FuncOp>(next);
+    sortedDefinitions.push_back(nextFunc);
+
+    for (Operation *user : outgoing[next]) {
+      unsigned &userIndegree = indegree[user];
+      if (--userIndegree == 0)
+        ready.push_back(user);
+    }
+  }
+
+  if (sortedDefinitions.size() != definitions.size()) {
+    return module.emitError()
+           << "cyclic function call graph is not supported for EmitC C++ emission";
+  }
+
+  if (declarations.empty() && definitions.size() <= 1)
+    return success();
+
+  SmallVector<emitc::FuncOp> desiredOrder;
+  desiredOrder.append(declarations.begin(), declarations.end());
+  desiredOrder.append(sortedDefinitions.begin(), sortedDefinitions.end());
+
+  Block &body = module.getBodyRegion().front();
+  Operation *anchor = nullptr;
+  for (Operation &op : body.getOperations()) {
+    if (isa<emitc::FuncOp>(op)) {
+      anchor = &op;
+      break;
+    }
+  }
+  if (!anchor)
+    return success();
+
+  auto advanceAnchor = [&]() {
+    while (anchor) {
+      anchor = anchor->getNextNode();
+      if (!anchor || isa<emitc::FuncOp>(anchor))
+        return;
+    }
+  };
+
+  for (auto func : desiredOrder) {
+    if (func.getOperation() == anchor) {
+      advanceAnchor();
+      continue;
+    }
+    if (anchor)
+      func->moveBefore(anchor);
+    else
+      func->moveBefore(&body, body.end());
+  }
+
+  return success();
+}
 
 // #define ADD_CANONICALIZER_PASS \
 //    CanonicalizerOptions options; \
@@ -143,6 +267,28 @@ static bool parseBuildLevel(llvm::StringRef levelStr, PTOBuildLevel &out) {
   }
   if (s == "level3") {
     out = PTOBuildLevel::Level3;
+    return true;
+  }
+  return false;
+}
+
+static constexpr llvm::StringLiteral kAutoSyncTailPolicyBarrierAll =
+    "barrier_all";
+static constexpr llvm::StringLiteral kAutoSyncTailPolicyMte3ToSEvent0 =
+    "setwait_mte3_to_s_event0";
+
+static bool parseAutoSyncTailHint(llvm::StringRef hintStr, std::string &normalized) {
+  std::string s = hintStr.str();
+  for (char &c : s)
+    c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+  if (s == "barrier-all" || s == "barrier_all" || s == "default") {
+    normalized = kAutoSyncTailPolicyBarrierAll.str();
+    return true;
+  }
+  if (s == "mte3-to-s-event0" || s == "mte3_to_s_event0" ||
+      s == "setwait-mte3-to-s-event0" ||
+      s == "setwait_mte3_to_s_event0") {
+    normalized = kAutoSyncTailPolicyMte3ToSEvent0.str();
     return true;
   }
   return false;
@@ -283,6 +429,53 @@ static void dropEmptyEmitCExpressions(Operation *rootOp) {
   });
   for (emitc::ExpressionOp expr : llvm::reverse(toErase))
     expr.erase();
+}
+
+static Attribute getDefaultEmitCVariableInitAttr(OpBuilder &builder, Type type) {
+  if (auto intTy = dyn_cast<IntegerType>(type))
+    return builder.getIntegerAttr(intTy, 0);
+  if (isa<IndexType>(type))
+    return builder.getIndexAttr(0);
+  if (auto floatTy = dyn_cast<FloatType>(type))
+    return builder.getFloatAttr(floatTy, 0.0);
+  if (isa<emitc::OpaqueType, emitc::PointerType>(type))
+    return emitc::OpaqueAttr::get(builder.getContext(), "");
+  return Attribute{};
+}
+
+// FormExpressions may inline conditions into emitc.expression, but the C++
+// emitter prints cf.br/cf.cond_br operands by variable name rather than by
+// recursively emitting an expression. Materialize such operands so CFG-based
+// lowering (e.g. scf.while -> cf.*) stays valid.
+static void materializeControlFlowOperands(Operation *rootOp) {
+  llvm::SmallVector<Operation *, 16> branches;
+  rootOp->walk([&](Operation *op) {
+    if (isa<cf::BranchOp, cf::CondBranchOp>(op))
+      branches.push_back(op);
+  });
+
+  OpBuilder builder(rootOp->getContext());
+  for (Operation *op : branches) {
+    builder.setInsertionPoint(op);
+    for (OpOperand &operand : op->getOpOperands()) {
+      Value value = operand.get();
+      auto expr = dyn_cast_or_null<emitc::ExpressionOp>(value.getDefiningOp());
+      if (!expr)
+        continue;
+
+      Attribute initAttr =
+          getDefaultEmitCVariableInitAttr(builder, value.getType());
+      if (!initAttr)
+        continue;
+
+      Value tmp =
+          builder.create<emitc::VariableOp>(op->getLoc(), value.getType(),
+                                            initAttr)
+              .getResult();
+      builder.create<emitc::AssignOp>(op->getLoc(), tmp, value);
+      operand.set(tmp);
+    }
+  }
 }
 
 static bool rewriteMarkerCallToSubscript(std::string &cpp, llvm::StringRef marker,
@@ -538,6 +731,8 @@ int main(int argc, char **argv) {
   registry.insert<emitc::EmitCDialect>();
   registry.insert<mlir::LLVM::LLVMDialect>();
 
+  llvm::cl::SetVersionPrinter(printPTOASVersion);
+
   // Parse command line options
   llvm::cl::ParseCommandLineOptions(argc, argv, "PTO Assembler (ptoas)\n");
 
@@ -601,6 +796,28 @@ int main(int argc, char **argv) {
     return 1;
   }
 
+  bool invalidAutoSyncTailHint = false;
+  module->walk([&](mlir::func::FuncOp func) {
+    auto hintAttr =
+        func->getAttrOfType<mlir::StringAttr>("pto.auto_sync_tail_hint");
+    if (!hintAttr)
+      return;
+
+    std::string normalizedHint;
+    if (!parseAutoSyncTailHint(hintAttr.getValue(), normalizedHint)) {
+      func.emitError("invalid pto.auto_sync_tail_hint '")
+          << hintAttr.getValue()
+          << "'. Expected 'barrier-all' (or 'default') or "
+             "'mte3-to-s-event0'.";
+      invalidAutoSyncTailHint = true;
+      return;
+    }
+    func->setAttr("pto.auto_sync_tail_hint",
+                  mlir::StringAttr::get(&context, normalizedHint));
+  });
+  if (invalidAutoSyncTailHint)
+    return 1;
+
   if (effectiveLevel == PTOBuildLevel::Level3) {
     bool missing = false;
     module->walk([&](pto::AllocTileOp op) {
@@ -654,15 +871,9 @@ int main(int argc, char **argv) {
     pm.addPass(pto::createPlanMemoryPass(planMemoryOption));
   }
 
-  // Conditionally add Sync pass based on flag
-  if (enableInsertSync) {
-    if (effectiveLevel == PTOBuildLevel::Level3) {
-      llvm::errs()
-          << "Warning: --enable-insert-sync is ignored because --pto-level=level3.\n";
-    } else {
-      pm.addNestedPass<mlir::func::FuncOp>(pto::createPTOInsertSyncPass());
-    }
-  }
+  // Conditionally add Sync pass based on flag.
+  if (enableInsertSync)
+    pm.addNestedPass<mlir::func::FuncOp>(pto::createPTOInsertSyncPass());
 
   // pm.addNestedPass<mlir::func::FuncOp>(pto::createPTORemoveRedundantBarrierPass());
   // pm.addNestedPass<mlir::func::FuncOp>(pto::createPTOHighDimLoweringPass());
@@ -693,10 +904,11 @@ int main(int argc, char **argv) {
   }
 
   dropEmptyEmitCExpressions(module.get());
-
-  // llvm::outs() << "\n===== EmitC IR (before translateToCpp) =====\n";
-  // module->print(llvm::outs());
-  // llvm::outs() << "\n===== End EmitC IR =====\n";
+  materializeControlFlowOperands(module.get());
+  if (failed(reorderEmitCFunctions(module.get()))) {
+    llvm::errs() << "Error: Failed to order emitted functions for C++ emission.\n";
+    return 1;
+  }
 
   // Emit C++ to string, then post-process, then write to output file.
   std::string cppOutput;
@@ -709,6 +921,14 @@ int main(int argc, char **argv) {
     if (func.getBlocks().size() > 1) {
       declareVariablesAtTop = true;
       break;
+    }
+  }
+  if (!declareVariablesAtTop) {
+    for (auto func : module->getOps<emitc::FuncOp>()) {
+      if (func.getBlocks().size() > 1) {
+        declareVariablesAtTop = true;
+        break;
+      }
     }
   }
   if (failed(emitc::translateToCpp(*module, cppOS,

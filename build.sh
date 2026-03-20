@@ -146,7 +146,7 @@ build_only() {
   export PATH=$PTO_SOURCE_DIR/build/tools/ptoas:$PATH
 
   bash test/samples/runop.sh --enablebc all
-  STAGE='${STAGE}' RUN_MODE='npu' SOC_VERSION='-Ascend910B' DEVICE_ID='0' SKIP_CASES='mix_kernel,vadd_validshape,vadd_validshape_dynamic,print' bash test/npu_validation/scripts/run_remote_npu_validation.sh
+ STAGE="${STAGE:-run}" RUN_MODE='npu' SOC_VERSION='Ascend910' SKIP_CASES='mix_kernel,vadd_validshape,vadd_validshape_dynamic,print' bash test/npu_validation/scripts/run_remote_npu_validation.sh
 
   echo "execute samples success"
 }

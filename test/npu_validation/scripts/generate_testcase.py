@@ -186,6 +186,92 @@ def _detect_output_pointer_param(text: str, pointer_param_names):
     return None
 
 
+def _detect_set_ffts_pointer_params(text: str, pointer_param_names):
+    if not pointer_param_names:
+        return set()
+
+    def _is_fully_wrapped_by_parentheses(expr: str) -> bool:
+        if not (expr.startswith("(") and expr.endswith(")")):
+            return False
+        depth = 0
+        for i, ch in enumerate(expr):
+            if ch == "(":
+                depth += 1
+            elif ch == ")":
+                depth -= 1
+                if depth == 0 and i != len(expr) - 1:
+                    return False
+        return depth == 0
+
+    def _extract_identifier(expr: str) -> Optional[str]:
+        cur = expr.strip()
+        for _ in range(8):
+            prev = cur
+            while _is_fully_wrapped_by_parentheses(cur):
+                cur = cur[1:-1].strip()
+
+            m = re.match(r"^(?:reinterpret_cast|static_cast|const_cast|dynamic_cast)\s*<[^>]+>\s*\((.*)\)$", cur, re.S)
+            if m:
+                cur = m.group(1).strip()
+                continue
+
+            # C-style cast: (uint64_t) v1 / (__gm__ int64_t*) v1
+            m = re.match(r"^\(\s*[^()]+\s*\)\s*(.+)$", cur, re.S)
+            if m:
+                cur = m.group(1).strip()
+                continue
+
+            if cur == prev:
+                break
+
+        return cur if re.fullmatch(r"[A-Za-z_]\w*", cur) else None
+
+    pointer_set = set(pointer_param_names)
+    alias = {}
+    # Track simple alias chains introduced by casted assignments, e.g.:
+    #   uint64_t v6 = (uint64_t)v1;
+    #   auto v7 = reinterpret_cast<uint64_t>(v6);
+    for m in re.finditer(r"\b([A-Za-z_]\w*)\s*=\s*([^;]+);", text):
+        lhs = m.group(1)
+        rhs = m.group(2).strip()
+        src = _extract_identifier(rhs)
+        if src:
+            alias[lhs] = src
+
+    def _resolve_pointer_param(name: str) -> Optional[str]:
+        cur = name
+        seen = set()
+        for _ in range(12):
+            if cur in seen:
+                break
+            seen.add(cur)
+            if cur in pointer_set:
+                return cur
+            nxt = alias.get(cur)
+            if not nxt:
+                return None
+            cur = nxt
+        return None
+
+    hits = set()
+    for m in re.finditer(r"\bset_ffts_base_addr\s*\(([^)]*)\)", text, re.S):
+        raw_arg = m.group(1).strip()
+        arg_name = _extract_identifier(raw_arg)
+        if not arg_name:
+            continue
+        resolved = _resolve_pointer_param(arg_name)
+        if resolved:
+            hits.add(resolved)
+
+    # Compatibility fallback for unusual formatting.
+    if not hits:
+        for name in pointer_param_names:
+            pat = rf"\bset_ffts_base_addr\b[^\n;]*\b{re.escape(name)}\b"
+            if re.search(pat, text):
+                hits.add(name)
+    return hits
+
+
 def _parse_kernel_params(text: str):
     match = re.search(r"__global__\s+(?:\w+\s+)*void\s+\w+\s*\(([^)]*)\)", text, re.S)
     if not match:
@@ -874,9 +960,16 @@ def generate_testcase(
             if inferred:
                 inferred_void_ptr_types[name] = inferred
 
-    output_ptr = _detect_output_pointer_param(raw_kernel_for_analysis, pointer_param_names)
-    if output_ptr is None and pointer_param_names:
-        output_ptr = pointer_param_names[0] if len(pointer_param_names) == 1 else pointer_param_names[-1]
+    ffts_param_names = _detect_set_ffts_pointer_params(raw_kernel_for_analysis, pointer_param_names)
+    non_ffts_pointer_param_names = [n for n in pointer_param_names if n not in ffts_param_names]
+
+    output_ptr = _detect_output_pointer_param(raw_kernel_for_analysis, non_ffts_pointer_param_names)
+    if output_ptr is None and non_ffts_pointer_param_names:
+        output_ptr = (
+            non_ffts_pointer_param_names[0]
+            if len(non_ffts_pointer_param_names) == 1
+            else non_ffts_pointer_param_names[-1]
+        )
 
     params = []
     for raw in raw_params:
@@ -892,7 +985,11 @@ def generate_testcase(
                     "name": name,
                     "cpp_type": cpp_type,
                     "host_type": _cpp_host_type(cpp_type),
-                    "role": "output" if name == output_ptr else "input",
+                    "role": (
+                        "ffts"
+                        if name in ffts_param_names
+                        else ("output" if name == output_ptr else "input")
+                    ),
                 }
             )
         else:
@@ -912,13 +1009,16 @@ def generate_testcase(
     # - Some kernels are in-place (single pointer param) or may read from an
     #   "output" pointer as scratch. Leaving buffers uninitialized leads to
     #   non-determinism between CPU golden and real NPU.
-    init_ptrs = [p for p in params if p["kind"] == "ptr"]
-    output_ptrs = [p for p in params if p["kind"] == "ptr" and p["role"] == "output"]
+    data_ptrs = [p for p in params if p["kind"] == "ptr" and p["role"] != "ffts"]
+    ffts_ptrs = [p for p in params if p["kind"] == "ptr" and p["role"] == "ffts"]
+    init_ptrs = list(data_ptrs)
+    output_ptrs = [p for p in data_ptrs if p["role"] == "output"]
 
-    ptr_elem_counts = {p["name"]: logical_elem_count for p in params if p["kind"] == "ptr"}
+    ptr_elem_counts = {p["name"]: logical_elem_count for p in data_ptrs}
     inferred_counts = _infer_gm_pointer_elem_counts(raw_kernel_for_analysis, pointer_param_names)
     for name, cnt in inferred_counts.items():
-        ptr_elem_counts[name] = max(ptr_elem_counts.get(name, logical_elem_count), cnt)
+        if name in ptr_elem_counts:
+            ptr_elem_counts[name] = max(ptr_elem_counts.get(name, logical_elem_count), cnt)
 
     templates_root = Path(__file__).resolve().parents[1] / "templates"
     template = (templates_root / "main_template.cpp").read_text(encoding="utf-8")
@@ -937,10 +1037,8 @@ def generate_testcase(
             launch_call_args.append(p["name"])
 
     param_decls_lines = []
-    if any(p["kind"] == "ptr" for p in params):
-        for p in params:
-            if p["kind"] != "ptr":
-                continue
+    if data_ptrs:
+        for p in data_ptrs:
             elem_cnt = ptr_elem_counts.get(p["name"], logical_elem_count)
             param_decls_lines.append(f"    size_t elemCount_{p['name']} = {elem_cnt};")
             param_decls_lines.append(
@@ -975,16 +1073,20 @@ def generate_testcase(
     for p in params:
         if p["kind"] != "ptr":
             continue
-        param_decls_lines.append(f"    {p['host_type']} *{p['name']}Host = nullptr;")
-        param_decls_lines.append(f"    {p['host_type']} *{p['name']}Device = nullptr;")
+        if p["role"] == "ffts":
+            param_decls_lines.append(f"    {p['host_type']} *{p['name']}Device = nullptr;")
+            param_decls_lines.append(f"    uint64_t {p['name']}FftsAddr = 0;")
+            param_decls_lines.append(f"    uint32_t {p['name']}FftsLen = 0;")
+        else:
+            param_decls_lines.append(f"    {p['host_type']} *{p['name']}Host = nullptr;")
+            param_decls_lines.append(f"    {p['host_type']} *{p['name']}Device = nullptr;")
 
     alloc_host = []
     alloc_device = []
+    init_runtime_ptrs = []
     free_host = []
     free_device = []
-    for p in params:
-        if p["kind"] != "ptr":
-            continue
+    for p in data_ptrs:
         size_var = f"fileSize_{p['name']}"
         alloc_host.append(
             f"    ACL_CHECK(aclrtMallocHost((void **)(&{p['name']}Host), {size_var}));"
@@ -994,6 +1096,19 @@ def generate_testcase(
         )
         free_device.append(f"    aclrtFree({p['name']}Device);")
         free_host.append(f"    aclrtFreeHost({p['name']}Host);")
+    for p in ffts_ptrs:
+        init_runtime_ptrs.append(
+            f"    if (const rtError_t _rt = rtGetC2cCtrlAddr(&{p['name']}FftsAddr, &{p['name']}FftsLen); _rt != RT_ERROR_NONE) {{"
+        )
+        init_runtime_ptrs.append(
+            f"        std::fprintf(stderr, \"[ERROR] rtGetC2cCtrlAddr failed for {p['name']}: %d (%s:%d)\\n\", (int)_rt, __FILE__, __LINE__);"
+        )
+        init_runtime_ptrs.append("        rc = 1;")
+        init_runtime_ptrs.append("        goto cleanup;")
+        init_runtime_ptrs.append("    }")
+        init_runtime_ptrs.append(
+            f"    {p['name']}Device = reinterpret_cast<{p['host_type']} *>({p['name']}FftsAddr);"
+        )
 
     read_inputs = []
     copy_inputs = []
@@ -1017,11 +1132,24 @@ def generate_testcase(
             f"    WriteFile(\"./{p['name']}.bin\", {p['name']}Host, {size_var});"
         )
 
+    runtime_rt_include = '#include "runtime/rt.h"' if ffts_ptrs else ""
+    runtime_host_include_dirs = ""
+    if ffts_ptrs:
+        runtime_host_include_dirs = "    ${ASCEND_HOME_PATH}/pkg_inc/runtime\n"
+
     param_decls = "\n".join(param_decls_lines)
+    runtime_rt_include = ""
+    if ffts_ptrs:
+        # `rtGetC2cCtrlAddr` is provided by CANN runtime. Use ccelib runtime
+        # header here instead of `runtime/rt.h` to avoid environment-specific
+        # include path issues on some board images.
+        runtime_rt_include = '#include <stdint.h>\n#include <ccelib/common/runtime.h>'
     main_cpp = (
         template
+        .replace("@RUNTIME_RT_INCLUDE@", runtime_rt_include)
         .replace("@TEST_SUITE@", testcase.upper())
         .replace("@CASE_NAME@", case_name)
+        .replace("@RUNTIME_RT_INCLUDE@", runtime_rt_include)
         .replace(
             "@LAUNCH_DECL@",
             f"void {launch_name}({', '.join(launch_decl_params + ['void *stream'])});",
@@ -1029,6 +1157,7 @@ def generate_testcase(
         .replace("@PARAM_DECLS@", param_decls)
         .replace("@ALLOC_HOST@", "\n".join(alloc_host))
         .replace("@ALLOC_DEVICE@", "\n".join(alloc_device))
+        .replace("@INIT_RUNTIME_PTRS@", "\n".join(init_runtime_ptrs))
         .replace("@READ_INPUTS@", "\n".join(read_inputs))
         .replace("@COPY_TO_DEVICE@", "\n".join(copy_inputs))
         .replace(
@@ -1213,6 +1342,8 @@ def generate_testcase(
     if not aicore_arch.startswith(("dav-l310", "dav-l311")):
         cce_stack_size_opt = '    "SHELL:-mllvm -cce-aicore-stack-size=0x8000"\n'
 
+    pto_test_common_dir = (Path(__file__).resolve().parent.parent / "common").as_posix()
+
     cmake_content = f"""
 cmake_minimum_required(VERSION 3.16)
 
@@ -1234,24 +1365,6 @@ if(NOT DEFINED ENV{{ASCEND_HOME_PATH}})
     message(FATAL_ERROR "Cannot find ASCEND_HOME_PATH, please source the CANN set_env.sh.")
 else()
     set(ASCEND_HOME_PATH $ENV{{ASCEND_HOME_PATH}})
-endif()
-
-set(PTO_ISA_ROOT "" CACHE PATH "Path to pto-isa repo")
-if(NOT PTO_ISA_ROOT)
-    set(_PTO_ISA_CANDIDATES
-        "${{CMAKE_CURRENT_LIST_DIR}}/../../../../pto-isa"
-        "${{CMAKE_CURRENT_LIST_DIR}}/../../../../../pto-isa"
-        "${{CMAKE_CURRENT_LIST_DIR}}/../../../../../../pto-isa"
-    )
-    foreach(_cand IN LISTS _PTO_ISA_CANDIDATES)
-        if(EXISTS "${{_cand}}/include" AND EXISTS "${{_cand}}/tests/common")
-            set(PTO_ISA_ROOT "${{_cand}}" CACHE PATH "Path to pto-isa repo" FORCE)
-            break()
-        endif()
-    endforeach()
-endif()
-if(NOT PTO_ISA_ROOT)
-    message(FATAL_ERROR "Cannot find PTO_ISA_ROOT, please pass -DPTO_ISA_ROOT=/path/to/pto-isa.")
 endif()
 
 set(ASCEND_DRIVER_PATH /usr/local/Ascend/driver)
@@ -1290,9 +1403,25 @@ set(CMAKE_CPP_COMPILE_OPTIONS
     "SHELL:-include stddef.h"
 )
 
+set(PTO_ISA_ROOT "${{PTO_ISA_ROOT}}" CACHE PATH "Optional PTO headers root")
+set(PTO_INCLUDE_DIR "${{ASCEND_HOME_PATH}}/include")
+if(PTO_ISA_ROOT)
+    if(EXISTS "${{PTO_ISA_ROOT}}/include/pto/pto-inst.hpp")
+        set(PTO_INCLUDE_DIR "${{PTO_ISA_ROOT}}/include")
+    elseif(EXISTS "${{PTO_ISA_ROOT}}/pto-inst.hpp")
+        set(PTO_INCLUDE_DIR "${{PTO_ISA_ROOT}}")
+    elseif(EXISTS "${{PTO_ISA_ROOT}}/pto/pto-inst.hpp")
+        set(PTO_INCLUDE_DIR "${{PTO_ISA_ROOT}}")
+    else()
+        message(FATAL_ERROR "Cannot find PTO headers under PTO_ISA_ROOT=${{PTO_ISA_ROOT}}.")
+    endif()
+endif()
+
+set(PTO_TEST_COMMON_DIR "{pto_test_common_dir}")
+
 include_directories(
-    ${{PTO_ISA_ROOT}}/include
-    ${{PTO_ISA_ROOT}}/tests/common
+    ${{PTO_INCLUDE_DIR}}
+    ${{PTO_TEST_COMMON_DIR}}
     ${{ASCEND_HOME_PATH}}/include
     ${{ASCEND_DRIVER_PATH}}/kernel/inc
 )
@@ -1309,9 +1438,9 @@ target_link_options({testcase}_kernel PRIVATE --cce-fatobj-link)
 add_executable({testcase} main.cpp)
 target_compile_options({testcase} PRIVATE ${{CMAKE_CPP_COMPILE_OPTIONS}})
 target_include_directories({testcase} PRIVATE
-    ${{PTO_ISA_ROOT}}/include
-    ${{PTO_ISA_ROOT}}/tests/common
-)
+    ${{PTO_INCLUDE_DIR}}
+    ${{PTO_TEST_COMMON_DIR}}
+{runtime_host_include_dirs})
 
 target_link_directories({testcase} PUBLIC
     ${{ASCEND_HOME_PATH}}/lib64
@@ -1328,9 +1457,9 @@ if(ENABLE_SIM_GOLDEN)
     add_executable({testcase}_sim main.cpp)
     target_compile_options({testcase}_sim PRIVATE ${{CMAKE_CPP_COMPILE_OPTIONS}})
     target_include_directories({testcase}_sim PRIVATE
-        ${{PTO_ISA_ROOT}}/include
-        ${{PTO_ISA_ROOT}}/tests/common
-    )
+        ${{PTO_INCLUDE_DIR}}
+        ${{PTO_TEST_COMMON_DIR}}
+{runtime_host_include_dirs})
     target_link_directories({testcase}_sim PUBLIC
         ${{ASCEND_HOME_PATH}}/lib64
         ${{ASCEND_HOME_PATH}}/aarch64-linux/simulator/${{SOC_VERSION}}/lib

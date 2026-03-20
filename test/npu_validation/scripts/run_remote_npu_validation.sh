@@ -6,7 +6,7 @@ RUN_MODE="${RUN_MODE:-npu}"   # npu|sim
 SOC_VERSION="${SOC_VERSION:-Ascend910}"
 GOLDEN_MODE="${GOLDEN_MODE:-npu}"  # sim|npu|skip
 PTO_ISA_COMMIT="${PTO_ISA_COMMIT:-}"
-DEVICE_ID="${DEVICE_ID:-0}"
+DEVICE_ID="${DEVICE_ID:-}"
 SKIP_CASES="${SKIP_CASES:-}"          # comma/space separated testcase names
 RUN_ONLY_CASES="${RUN_ONLY_CASES:-}"  # comma/space separated testcase names
 
@@ -25,7 +25,7 @@ log() { echo "[$(date +'%F %T')] $*"; }
 log "=== Remote NPU Validation ==="
 log "STAGE=${STAGE} RUN_MODE=${RUN_MODE} SOC_VERSION=${SOC_VERSION}"
 log "GOLDEN_MODE=${GOLDEN_MODE}"
-log "DEVICE_ID=${DEVICE_ID}"
+log "DEVICE_ID=${DEVICE_ID:-auto}"
 log "PTO_ISA_COMMIT=${PTO_ISA_COMMIT}"
 log "ROOT_DIR=${ROOT_DIR}"
 
@@ -72,7 +72,14 @@ for f in "$HOME/.bash_profile" "$HOME/.bashrc"; do
   source_rc "$f"
 done
 
-if [[ -f "/usr/local/Ascend/ascend-toolkit/latest/set_env.sh" ]]; then
+if [[ -f "/usr/local/Ascend/cann/set_env.sh" ]]; then
+  log "Sourcing /usr/local/Ascend/cann/set_env.sh"
+  set +e +u +o pipefail
+  # shellcheck disable=SC1091
+  source "/usr/local/Ascend/cann/set_env.sh" || true
+  set -euo pipefail
+  set -o pipefail
+elif [[ -f "/usr/local/Ascend/ascend-toolkit/latest/set_env.sh" ]]; then
   log "Sourcing /usr/local/Ascend/ascend-toolkit/latest/set_env.sh"
   set +e +u +o pipefail
   # shellcheck disable=SC1091
@@ -92,7 +99,7 @@ command -v bisheng || true
 bisheng --version || true
 
 if [[ -z "${ASCEND_HOME_PATH:-}" ]]; then
-  for d in /usr/local/Ascend/ascend-toolkit/latest /usr/local/Ascend/cann-*; do
+  for d in /usr/local/Ascend/cann /usr/local/Ascend/cann-* /usr/local/Ascend/ascend-toolkit/latest; do
     [[ -d "$d" ]] || continue
     export ASCEND_HOME_PATH="$d"
     break
@@ -137,12 +144,79 @@ if [[ "${STAGE}" == "run" ]]; then
   log "=== NPU Device Check ==="
   id || true
   ls -l /dev/davinci* 2>/dev/null || true
-  devnode="/dev/davinci${DEVICE_ID}"
-  [[ -e "${devnode}" ]] || { log "ERROR: ${devnode} not found"; exit 1; }
-  [[ -r "${devnode}" && -w "${devnode}" ]] || {
-    log "ERROR: no access to ${devnode} (need HwHiAiUser group)";
-    exit 1;
-  }
+  available_devnodes=()
+  auto_device_ids=()
+  visible_phys_ids=()
+  shopt -s nullglob
+  for node in /dev/davinci[0-9]*; do
+    [[ -e "${node}" ]] || continue
+    available_devnodes+=("${node}")
+  done
+  shopt -u nullglob
+
+  # In containers, ACL expects logical device ids [0..N-1], while /dev/davinciX
+  # often exposes physical ids. Prefer visible-device mapping for runtime ids.
+  if [[ -n "${ASCEND_VISIBLE_DEVICES:-}" ]]; then
+    IFS=',' read -r -a _vis_raw <<< "${ASCEND_VISIBLE_DEVICES}"
+    unset IFS
+    for v in "${_vis_raw[@]}"; do
+      v="${v//[[:space:]]/}"
+      [[ -n "${v}" ]] || continue
+      [[ "${v}" =~ ^[0-9]+$ ]] || continue
+      visible_phys_ids+=("${v}")
+    done
+  fi
+
+  if [[ -z "${DEVICE_ID}" ]]; then
+    [[ ${#available_devnodes[@]} -gt 0 ]] || {
+      log "ERROR: no /dev/davinciN device found"
+      exit 1
+    }
+    IFS=$'\n' available_devnodes=($(printf '%s\n' "${available_devnodes[@]}" | sort -V))
+    unset IFS
+    for devnode in "${available_devnodes[@]}"; do
+      [[ -r "${devnode}" && -w "${devnode}" ]] || {
+        log "WARN: skip ${devnode} (need read/write access)"
+        continue
+      }
+      # Keep this for diagnostics only; runtime ids are built below.
+      :
+    done
+    [[ ${#available_devnodes[@]} -gt 0 ]] || {
+      log "ERROR: no accessible /dev/davinciN device found"
+      exit 1
+    }
+
+    logical_count=0
+    if [[ ${#visible_phys_ids[@]} -gt 0 ]]; then
+      logical_count=${#visible_phys_ids[@]}
+      log "ASCEND_VISIBLE_DEVICES=${ASCEND_VISIBLE_DEVICES} (logical count=${logical_count})"
+    else
+      logical_count=${#available_devnodes[@]}
+      log "ASCEND_VISIBLE_DEVICES not set; fallback logical count from /dev nodes=${logical_count}"
+    fi
+    for ((i=0; i<logical_count; ++i)); do
+      auto_device_ids+=("${i}")
+    done
+    [[ ${#auto_device_ids[@]} -gt 0 ]] || {
+      log "ERROR: failed to construct logical DEVICE_ID candidates"
+      exit 1
+    }
+    log "Auto-select logical DEVICE_ID candidates: ${auto_device_ids[*]}"
+  else
+    [[ "${DEVICE_ID}" =~ ^[0-9]+$ ]] || {
+      log "ERROR: DEVICE_ID must be a non-negative integer, got: ${DEVICE_ID}";
+      exit 1;
+    }
+    # With container remapping, logical DEVICE_ID may not equal /dev/davinciX suffix.
+    # Validate by visible range first when available.
+    if [[ ${#visible_phys_ids[@]} -gt 0 ]]; then
+      if (( DEVICE_ID < 0 || DEVICE_ID >= ${#visible_phys_ids[@]} )); then
+        log "ERROR: DEVICE_ID=${DEVICE_ID} out of logical range [0, ${#visible_phys_ids[@]}) under ASCEND_VISIBLE_DEVICES=${ASCEND_VISIBLE_DEVICES}"
+        exit 1
+      fi
+    fi
+  fi
   python3 -c "import numpy as np; print('numpy', np.__version__)" >/dev/null
 fi
 
@@ -205,7 +279,6 @@ while IFS= read -r -d '' cpp; do
   (
     set -euo pipefail
     cd "${nv_dir}"
-    export ACL_DEVICE_ID="${DEVICE_ID}"
 
     enable_sim_golden="OFF"
     [[ "${GOLDEN_MODE}" == "sim" ]] && enable_sim_golden="ON"
@@ -220,12 +293,49 @@ while IFS= read -r -d '' cpp; do
       exit 0
     fi
 
+    run_case_once() {
+      case "${GOLDEN_MODE}" in
+        sim)
+          python3 ./golden.py || return $?
+          LD_LIBRARY_PATH="${LD_LIBRARY_PATH_SIM}" ./build/${testcase}_sim || return $?
+          copy_outputs_as_golden || return $?
+          if [[ "${RUN_MODE}" == "npu" ]]; then
+            LD_LIBRARY_PATH="${LD_LIBRARY_PATH_NPU}" ./build/${testcase} || return $?
+          fi
+          COMPARE_STRICT=1 python3 ./compare.py || return $?
+          ;;
+        npu)
+          if [[ "${RUN_MODE}" != "npu" ]]; then
+            log "ERROR: GOLDEN_MODE=npu requires RUN_MODE=npu"
+            return 2
+          fi
+          python3 ./golden.py || return $?
+          LD_LIBRARY_PATH="${LD_LIBRARY_PATH_NPU}" ./build/${testcase} || return $?
+          copy_outputs_as_golden || return $?
+          python3 ./golden.py || return $?
+          LD_LIBRARY_PATH="${LD_LIBRARY_PATH_NPU}" ./build/${testcase} || return $?
+          COMPARE_STRICT=1 python3 ./compare.py || return $?
+          ;;
+        skip)
+          python3 ./golden.py || return $?
+          if [[ "${RUN_MODE}" == "npu" ]]; then
+            LD_LIBRARY_PATH="${LD_LIBRARY_PATH_NPU}" ./build/${testcase} || return $?
+          fi
+          log "WARN: compare skipped (GOLDEN_MODE=skip)"
+          ;;
+        *)
+          log "ERROR: unknown GOLDEN_MODE=${GOLDEN_MODE} (expected: sim|npu|skip)"
+          return 2
+          ;;
+      esac
+    }
+
     copy_outputs_as_golden() {
       if [[ -f "./outputs.txt" ]]; then
         while IFS= read -r name; do
           [[ -n "${name}" ]] || continue
           cp -f "./${name}.bin" "./golden_${name}.bin"
-        done < "./outputs.txt"
+      done < "./outputs.txt"
         return 0
       fi
       for f in ./*.bin; do
@@ -235,40 +345,31 @@ while IFS= read -r -d '' cpp; do
       done
     }
 
-    case "${GOLDEN_MODE}" in
-      sim)
-        python3 ./golden.py
-        LD_LIBRARY_PATH="${LD_LIBRARY_PATH_SIM}" ./build/${testcase}_sim
-        copy_outputs_as_golden
-        if [[ "${RUN_MODE}" == "npu" ]]; then
-          LD_LIBRARY_PATH="${LD_LIBRARY_PATH_NPU}" ./build/${testcase}
+    candidate_device_ids=("${DEVICE_ID}")
+    if [[ -z "${DEVICE_ID}" ]]; then
+      candidate_device_ids=("${auto_device_ids[@]}")
+    fi
+
+    last_run_rc=1
+    for run_device_id in "${candidate_device_ids[@]}"; do
+      if [[ -z "${DEVICE_ID}" ]]; then
+        log "Trying DEVICE_ID=${run_device_id} for ${testcase}"
+      fi
+      if (
+        set -euo pipefail
+        export ACL_DEVICE_ID="${run_device_id}"
+        run_case_once
+      ); then
+        if [[ -z "${DEVICE_ID}" ]]; then
+          log "Selected DEVICE_ID=${run_device_id} for ${testcase}"
         fi
-        COMPARE_STRICT=1 python3 ./compare.py
-        ;;
-      npu)
-        if [[ "${RUN_MODE}" != "npu" ]]; then
-          log "ERROR: GOLDEN_MODE=npu requires RUN_MODE=npu"
-          exit 2
-        fi
-        python3 ./golden.py
-        LD_LIBRARY_PATH="${LD_LIBRARY_PATH_NPU}" ./build/${testcase}
-        copy_outputs_as_golden
-        python3 ./golden.py
-        LD_LIBRARY_PATH="${LD_LIBRARY_PATH_NPU}" ./build/${testcase}
-        COMPARE_STRICT=1 python3 ./compare.py
-        ;;
-      skip)
-        python3 ./golden.py
-        if [[ "${RUN_MODE}" == "npu" ]]; then
-          LD_LIBRARY_PATH="${LD_LIBRARY_PATH_NPU}" ./build/${testcase}
-        fi
-        log "WARN: compare skipped (GOLDEN_MODE=skip)"
-        ;;
-      *)
-        log "ERROR: unknown GOLDEN_MODE=${GOLDEN_MODE} (expected: sim|npu|skip)"
-        exit 2
-        ;;
-    esac
+        last_run_rc=0
+        break
+      else
+        last_run_rc=$?
+      fi
+    done
+    [[ ${last_run_rc} -eq 0 ]] || exit "${last_run_rc}"
     log "OK: ${testcase}"
   )
   case_rc=$?

@@ -176,6 +176,8 @@ def PartitionViewOp : PTO_Op<"partition_view", [AttrSizedOperandSegments]> {
 
   let results = (outs PartitionTensorViewType:$result); // 输出: 逻辑切片
 
+  let hasVerifier = 1;
+
   let assemblyFormat = [{
     $source `,` `offsets` `=` `[` $offsets `]` `,` `sizes` `=` `[` $sizes `]`
     attr-dict `:` qualified(type($source)) `->` qualified(type($result))
@@ -947,12 +949,18 @@ def TMovOp  : PTO_TOp<"tmov", [
         return ::mlir::pto::PIPE::PIPE_V;
       }
 
-      // MAT -> L0 (Left/Right/Bias/Scaling) and ACC -> MAT are MTE1 moves.
+      // MAT -> L0 (Left/Right/Bias/Scaling) are MTE1 moves.
       if ((s == ::mlir::pto::AddressSpace::MAT &&
            (d == ::mlir::pto::AddressSpace::LEFT || d == ::mlir::pto::AddressSpace::RIGHT ||
-            d == ::mlir::pto::AddressSpace::BIAS || d == ::mlir::pto::AddressSpace::SCALING)) ||
-          (s == ::mlir::pto::AddressSpace::ACC && d == ::mlir::pto::AddressSpace::MAT)) {
+            d == ::mlir::pto::AddressSpace::BIAS || d == ::mlir::pto::AddressSpace::SCALING))) {
         return ::mlir::pto::PIPE::PIPE_MTE1;
+      }
+
+      // ACC -> MAT uses FIX in PTO-ISA sync mapping (TMOV_A2M/TMOV_V2M class),
+      // and InsertSync relies on this pipe classification to generate the
+      // required M->FIX and FIX->MTE1 dependency edges.
+      if (s == ::mlir::pto::AddressSpace::ACC && d == ::mlir::pto::AddressSpace::MAT) {
+        return ::mlir::pto::PIPE::PIPE_FIX;
       }
 
       // Fallback: treat as vector pipe (safe default for most intra-domain moves).
@@ -1766,6 +1774,93 @@ def TColExpandOp : PTO_TOp<"tcolexpand", [
   }];
 }
 
+def TColExpandMulOp : PTO_TOp<"tcolexpandmul", [
+  PTO_DpsInitOpInterface,
+  OpPipeInterface,
+  DeclareOpInterfaceMethods<MemoryEffectsOpInterface>
+]> {
+  let summary = "Column-wise broadcast multiply: multiply each element of src0 by a per-column scalar vector src1 ";
+
+  let arguments = (ins
+    PTODpsType:$src0,
+    PTODpsType:$src1,
+    PTODpsType:$dst
+  );
+
+  let results = (outs);
+
+  let hasVerifier = 1;
+
+  let extraClassDeclaration = [{
+    ::mlir::pto::PIPE getPipe() { return ::mlir::pto::PIPE::PIPE_V; }
+    ::mlir::MutableOperandRange getDpsInitsMutable() { return getDstMutable(); }
+  }];
+
+  let assemblyFormat = [{
+    `ins` `(` $src0 `,` $src1 `:` qualified(type($src0)) `,` qualified(type($src1)) `)`
+    `outs` `(` $dst `:` qualified(type($dst) ) `)`
+    attr-dict
+  }];
+}
+
+def TColExpandMaxOp : PTO_TOp<"tcolexpandmax", [
+  PTO_DpsInitOpInterface,
+  OpPipeInterface,
+  DeclareOpInterfaceMethods<MemoryEffectsOpInterface>
+]> {
+  let summary = "Column-wise broadcast max: take max(src0, src1) using a per-column scalar vector src1 ";
+
+  let arguments = (ins
+    PTODpsType:$src0,
+    PTODpsType:$src1,
+    PTODpsType:$dst
+  );
+
+  let results = (outs);
+
+  let hasVerifier = 1;
+
+  let extraClassDeclaration = [{
+    ::mlir::pto::PIPE getPipe() { return ::mlir::pto::PIPE::PIPE_V; }
+    ::mlir::MutableOperandRange getDpsInitsMutable() { return getDstMutable(); }
+  }];
+
+  let assemblyFormat = [{
+    `ins` `(` $src0 `,` $src1 `:` qualified(type($src0)) `,` qualified(type($src1)) `)`
+    `outs` `(` $dst `:` qualified(type($dst) ) `)`
+    attr-dict
+  }];
+}
+
+def TColExpandMinOp : PTO_TOp<"tcolexpandmin", [
+  PTO_DpsInitOpInterface,
+  OpPipeInterface,
+  DeclareOpInterfaceMethods<MemoryEffectsOpInterface>
+]> {
+  let summary = "Column-wise broadcast min: take min(src0, src1) using a per-column scalar vector src1 ";
+
+  let arguments = (ins
+    PTODpsType:$src0,
+    PTODpsType:$src1,
+    PTODpsType:$dst
+  );
+
+  let results = (outs);
+
+  let hasVerifier = 1;
+
+  let extraClassDeclaration = [{
+    ::mlir::pto::PIPE getPipe() { return ::mlir::pto::PIPE::PIPE_V; }
+    ::mlir::MutableOperandRange getDpsInitsMutable() { return getDstMutable(); }
+  }];
+
+  let assemblyFormat = [{
+    `ins` `(` $src0 `,` $src1 `:` qualified(type($src0)) `,` qualified(type($src1)) `)`
+    `outs` `(` $dst `:` qualified(type($dst) ) `)`
+    attr-dict
+  }];
+}
+
 def TColMaxOp : PTO_TOp<"tcolmax", [
   PTO_DpsInitOpInterface,
   OpPipeInterface,
@@ -2027,12 +2122,121 @@ def TExtractOp : PTO_TOp<"textract", [
   }];
 }
 
+def TInsertOp : PTO_TOp<"tinsert", [
+  PTO_DpsInitOpInterface,
+  OpPipeInterface,
+  DeclareOpInterfaceMethods<MemoryEffectsOpInterface>
+]> {
+  let summary = "Insert src sub-tile into dst at (indexRow, indexCol) (tilebuf, DPS)";
+
+  let arguments = (ins
+    PTODpsType:$src,
+    Index:$indexRow,
+    Index:$indexCol,
+    PTODpsType:$dst
+  );
+
+  let results = (outs);
+
+  let hasVerifier = 1;
+
+  let assemblyFormat = [{
+    `ins` `(` $src `,` $indexRow `,` $indexCol `:` qualified(type($src)) `,` type($indexRow) `,` type($indexCol) `)`
+    `outs` `(` $dst `:` qualified(type($dst) ) `)`
+    attr-dict
+  }];
+
+  let extraClassDeclaration = [{
+    // TINSERT runs on different pipes depending on target/path:
+    // - A5 Vec(UB)->Mat(L1): PIPE_MTE3 (custom UB->L1 copy path).
+    // - Acc->Mat (A2/A3/A5 regular path): PIPE_FIX.
+    ::mlir::pto::PIPE getPipe() {
+      auto isA5Target = [&]() -> bool {
+        auto moduleOp = getOperation()->getParentOfType<::mlir::ModuleOp>();
+        if (!moduleOp)
+          return false;
+
+        if (auto arch =
+                moduleOp->getAttrOfType<::mlir::StringAttr>("pto.target_arch")) {
+          if (arch.getValue().equals_insensitive("a5"))
+            return true;
+        }
+
+        if (auto spec =
+                moduleOp->getAttrOfType<::mlir::StringAttr>("pto.device-spec")) {
+          auto s = spec.getValue();
+          if (s.starts_with("Ascend950") || s.starts_with("Ascend910_95"))
+            return true;
+        }
+        return false;
+      };
+
+      auto getASFromType = [](Type ty)
+          -> std::optional<::mlir::pto::AddressSpace> {
+        if (auto tb = ::mlir::dyn_cast<::mlir::pto::TileBufType>(ty)) {
+          if (auto as = ::mlir::dyn_cast_or_null<::mlir::pto::AddressSpaceAttr>(
+                  tb.getMemorySpace()))
+            return as.getAddressSpace();
+          return std::nullopt;
+        }
+        if (auto mr = ::mlir::dyn_cast<::mlir::MemRefType>(ty)) {
+          if (auto ms = mr.getMemorySpace()) {
+            if (auto as = ::mlir::dyn_cast<::mlir::pto::AddressSpaceAttr>(ms))
+              return as.getAddressSpace();
+          }
+          return std::nullopt;
+        }
+        return std::nullopt;
+      };
+
+      auto sOpt = getASFromType(getSrc().getType());
+      auto dOpt = getASFromType(getDst().getType());
+      if (isA5Target() && sOpt.has_value() && dOpt.has_value() &&
+          sOpt.value() == ::mlir::pto::AddressSpace::VEC &&
+          dOpt.value() == ::mlir::pto::AddressSpace::MAT)
+        return ::mlir::pto::PIPE::PIPE_MTE3;
+
+      // Default and Acc->Mat path.
+      return ::mlir::pto::PIPE::PIPE_FIX;
+    }
+    ::mlir::MutableOperandRange getDpsInitsMutable() { return getDstMutable(); }
+  }];
+}
+
 def TFillPadOp : PTO_TOp<"tfillpad", [
   PTO_DpsInitOpInterface,
   OpPipeInterface,
   DeclareOpInterfaceMethods<MemoryEffectsOpInterface>
 ]> {
   let summary = "Copy src into dst and fill padded elements using dst PadVal (tilebuf, DPS)";
+
+  let arguments = (ins
+    PTODpsType:$src,
+    PTODpsType:$dst
+  );
+
+  let results = (outs);
+
+  let hasVerifier = 1;
+
+  let assemblyFormat = [{
+    `ins`  `(` $src `:` qualified(type($src)) `)`
+    `outs` `(` $dst `:` qualified(type($dst) ) `)`
+    attr-dict
+  }];
+
+  let extraClassDeclaration = [{
+    ::mlir::pto::PIPE getPipe() { return ::mlir::pto::PIPE::PIPE_V; }
+    ::mlir::MutableOperandRange getDpsInitsMutable() { return getDstMutable(); }
+  }];
+}
+
+def TFillPadExpandOp : PTO_TOp<"tfillpad_expand", [
+  PTO_DpsInitOpInterface,
+  OpPipeInterface,
+  DeclareOpInterfaceMethods<MemoryEffectsOpInterface>
+]> {
+  let summary = "Copy src into dst and fill padded elements using dst PadVal, allowing dst to be larger (tilebuf, DPS)";
 
   let arguments = (ins
     PTODpsType:$src,
@@ -3580,10 +3784,16 @@ def TXorOp: PTO_TOp<"txor", [
   DeclareOpInterfaceMethods<MemoryEffectsOpInterface>
 ]> {
   let summary = "TXOR: Elementwise bitwise XOR of two tiles.";
+  let description = [{
+    DPS form:
+      without tmp: pto.txor ins(%src0, %src1) outs(%dst)
+      with tmp:    pto.txor ins(%src0, %src1, %tmp) outs(%dst)
+  }];
 
   let arguments = (ins
     PTODpsType:$src0,
     PTODpsType:$src1,
+    PTODpsType:$tmp,
     PTODpsType:$dst
   );
 
@@ -3592,7 +3802,7 @@ def TXorOp: PTO_TOp<"txor", [
   let hasVerifier = 1;
 
   let assemblyFormat = [{
-    `ins` `(` $src0 `,` $src1 `:` qualified(type($src0)) `,` qualified(type($src1)) `)`
+    `ins` `(` $src0 `,` $src1  `,` $tmp `:` qualified(type($src0)) `,` qualified(type($src1)) `,` qualified(type($tmp)) `)`
     `outs` `(` $dst `:` qualified(type($dst) ) `)`
     attr-dict
   }];
