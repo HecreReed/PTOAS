@@ -180,14 +180,18 @@ package() {
 
   cd $LLVM_SOURCE_DIR
   cmake -G Ninja -S llvm -B $LLVM_BUILD_DIR \
-      -DLLVM_ENABLE_PROJECTS="mlir;clang" \
-      -DBUILD_SHARED_LIBS=ON \
-      -DMLIR_ENABLE_BINDINGS_PYTHON=ON \
-      -DPython3_EXECUTABLE=$(which python3) \
-      -DCMAKE_BUILD_TYPE=Release \
-      -DLLVM_TARGETS_TO_BUILD="host"
+       -DLLVM_ENABLE_PROJECTS="mlir;clang" \
+       -DBUILD_SHARED_LIBS=ON \
+       -DMLIR_ENABLE_BINDINGS_PYTHON=ON \
+       -DPython3_EXECUTABLE=$(which python3) \
+       -DCMAKE_BUILD_TYPE=Release \
+       -DLLVM_TARGETS_TO_BUILD="host"
 
   ninja -C $LLVM_BUILD_DIR
+
+ # export LLVM_BUILD_DIR=/home/y30038433/code/ptoas/pkg/pto-as/build/llvm-project/build-shared
+ # export PTO_SOURCE_DIR=$BASE_PATH
+ # export PTO_INSTALL_DIR=$PTO_SOURCE_DIR/install
 
   cd $PTO_SOURCE_DIR
   export PYBIND11_CMAKE_DIR=$(python3 -m pybind11 --cmakedir)
@@ -208,7 +212,7 @@ package() {
   ninja -C build
   ninja -C build install
   cd $BUILD_PATH
-  make package
+  ninja package
 }
 
 main() {

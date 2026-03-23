@@ -25,9 +25,9 @@ function(pack_built_in)
       message(WARNING "Unknown architecture: ${CMAKE_SYSTEM_PROCESSOR}")
   endif ()
 
-  set(script_prefix ${CMAKE_SOURCE_DIR}/scripts/package/pto_isa/scripts)
+  set(script_prefix ${CMAKE_SOURCE_DIR}/scripts/package/pto_as/scripts)
   install(DIRECTORY ${script_prefix}/
-      DESTINATION share/info/pto_isa/script
+      DESTINATION share/info/pto_as/script
       FILE_PERMISSIONS
       OWNER_READ OWNER_WRITE OWNER_EXECUTE  # 文件权限
       GROUP_READ GROUP_EXECUTE
@@ -49,7 +49,7 @@ function(pack_built_in)
   )
 
   install(FILES ${SCRIPTS_FILES}
-      DESTINATION share/info/pto_isa/script
+      DESTINATION share/info/pto_as/script
   )
   set(COMMON_FILES
       ${CMAKE_SOURCE_DIR}/scripts/package/common/sh/install_common_parser.sh
@@ -72,15 +72,15 @@ function(pack_built_in)
   set(CONF_FILES
       ${CMAKE_SOURCE_DIR}/scripts/package/common/cfg/path.cfg
   )
-  install(FILES ${CMAKE_BINARY_DIR}/version.pto-isa.info
-      DESTINATION share/info/pto_isa
+  install(FILES ${CMAKE_BINARY_DIR}/version.pto-as.info
+      DESTINATION share/info/pto_as
       RENAME version.info
   )
   install(FILES ${CONF_FILES}
-      DESTINATION share/info/pto_isa/conf
+      DESTINATION share/info/pto_as/conf
   )
   install(FILES ${PACKAGE_FILES}
-      DESTINATION share/info/pto_isa/script
+      DESTINATION share/info/pto_as/script
   )
   install(FILES ${LATEST_MANGER_FILES}
       DESTINATION latest_manager
@@ -88,13 +88,23 @@ function(pack_built_in)
   install(DIRECTORY ${CMAKE_SOURCE_DIR}/scripts/package/latest_manager/scripts/
       DESTINATION latest_manager
   )
-
   set(pto_source ${CMAKE_SOURCE_DIR}/include)
   install(DIRECTORY ${pto_source}/
-      DESTINATION share/info/pto_isa/include/
-      FILE_PERMISSIONS
-      OWNER_READ OWNER_WRITE
-      GROUP_READ GROUP_EXECUTE
+          DESTINATION share/info/pto_as/include/
+          FILE_PERMISSIONS
+          OWNER_READ OWNER_WRITE
+          GROUP_READ GROUP_EXECUTE
+  )
+  install(FILES ${CMAKE_BINARY_DIR}/tools/ptoas/ptoas
+       DESTINATION tools/pto_as
+       OPTIONAL
+  )
+  set(pto_lib ${CMAKE_BINARY_DIR}/llvm-project/build-shared/lib)
+  install(DIRECTORY ${pto_lib}/
+          DESTINATION tools/pto_as/lib
+          FILE_PERMISSIONS
+          OWNER_READ OWNER_WRITE
+          GROUP_READ GROUP_EXECUTE
   )
 
   string(FIND "${ASCEND_COMPUTE_UNIT}" ";" SEMICOLON_INDEX)

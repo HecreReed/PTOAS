@@ -33,7 +33,7 @@ endif()
 # 生成安装配置文件
 set(CSV_OUTPUT ${CPACK_CMAKE_BINARY_DIR}/filelist.csv)
 execute_process(
-        COMMAND python3 ${CPACK_CMAKE_SOURCE_DIR}/scripts/package/package.py --pkg_name pto_isa --chip_name ${CPACK_SOC} --os_arch linux-${CPACK_ARCH}
+        COMMAND python3 ${CPACK_CMAKE_SOURCE_DIR}/scripts/package/package.py --pkg_name pto_as --chip_name ${CPACK_SOC} --os_arch linux-${CPACK_ARCH}
         WORKING_DIRECTORY ${CPACK_CMAKE_BINARY_DIR}
         OUTPUT_VARIABLE result
         ERROR_VARIABLE error
@@ -54,22 +54,22 @@ set(SCENE_OUT_PUT
         ${CPACK_CMAKE_BINARY_DIR}/scene.info
 )
 set(NN_VERSION_OUT_PUT
-        ${CPACK_CMAKE_BINARY_DIR}/pto_isa_version.h
+        ${CPACK_CMAKE_BINARY_DIR}/pto_as_version.h
 )
 
 configure_file(
         ${SCENE_OUT_PUT}
-        ${STAGING_DIR}/share/info/pto_isa/
+        ${STAGING_DIR}/share/info/pto_as/
         COPYONLY
 )
 configure_file(
         ${CSV_OUTPUT}
-        ${STAGING_DIR}/share/info/pto_isa/script/
+        ${STAGING_DIR}/share/info/pto_as/script/
         COPYONLY
 )
 configure_file(
         ${NN_VERSION_OUT_PUT}
-        ${STAGING_DIR}/share/info/pto_isa/
+        ${STAGING_DIR}/share/info/pto_as/
         COPYONLY
 )
 # makeself打包
@@ -87,8 +87,8 @@ message(STATUS "package: ${package_name}")
 
 execute_process(COMMAND bash ${MAKESELF_EXE}
         --header ${MAKESELF_HEADER_EXE}
-        --help-header share/info/pto_isa/script/help.info
-        ${makeself_param_string} share/info/pto_isa/script/install.sh
+        --help-header share/info/pto_as/script/help.info
+        ${makeself_param_string} share/info/pto_as/script/install.sh
         WORKING_DIRECTORY ${STAGING_DIR}
         RESULT_VARIABLE EXEC_RESULT
         ERROR_VARIABLE  EXEC_ERROR
