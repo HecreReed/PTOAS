@@ -301,9 +301,10 @@ static bool parseAutoSyncTailHint(llvm::StringRef hintStr, std::string &normaliz
 // first-class op for member-function invocation. After translation, we rewrite:
 //   PTOAS__TILE_SET_VALUE(dst, offset, val) -> dst.SetValue(offset, val)
 //   PTOAS__TILE_GET_VALUE(src, offset)      -> src.GetValue(offset)
-//   PTOAS__TILE_DATA(obj)                  -> obj.data()
-//   PTOAS__PTR_LOAD(ptr, offset)           -> ptr[offset]
-//   PTOAS__PTR_STORE(ptr, offset, val)     -> ptr[offset] = val
+//   PTOAS__TILE_DATA(obj)                   -> obj.data()
+//   PTOAS__TILE_SET_VALIDSHAPE(obj, r, c)   -> obj.SetValidShape(r, c)
+//   PTOAS__PTR_LOAD(ptr, offset)            -> ptr[offset]
+//   PTOAS__PTR_STORE(ptr, offset, val)      -> ptr[offset] = val
 // --------------------------------------------------------------------------
 static bool rewriteMarkerCallToMember(std::string &cpp, llvm::StringRef marker,
                                       llvm::StringRef memberName,
@@ -401,6 +402,9 @@ static void rewriteTileGetSetValueMarkers(std::string &cpp) {
         cpp, "PTOAS__TILE_GET_VALUE", "GetValue", /*expectedNumArgs=*/2);
     changed |= rewriteMarkerCallToMember(
         cpp, "PTOAS__TILE_DATA", "data", /*expectedNumArgs=*/1);
+    changed |= rewriteMarkerCallToMember(
+        cpp, "PTOAS__TILE_SET_VALIDSHAPE", "SetValidShape",
+        /*expectedNumArgs=*/3);
   }
 }
 
@@ -757,6 +761,15 @@ int main(int argc, char **argv) {
   context.getOrLoadDialect<affine::AffineDialect>();
   context.getOrLoadDialect<mlir::LLVM::LLVMDialect>();
 
+  std::string arch = ptoTargetArch;
+  for (char &c : arch)
+    c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+  if (arch != "a3" && arch != "a5") {
+    llvm::errs() << "Error: invalid --pto-arch='" << ptoTargetArch
+                 << "'. Expected 'a3' or 'a5'.\n";
+    return 1;
+  }
+
   OwningOpRef<ModuleOp> module;
   llvm::StringRef buf = (*fileOrErr)->getBuffer();
   const bool isPTOBC = (buf.size() >= 6 && std::memcmp(buf.data(), "PTOBC\0", 6) == 0);
@@ -782,6 +795,9 @@ int main(int argc, char **argv) {
     // Parse textual MLIR (.pto).
     llvm::SourceMgr sourceMgr;
     sourceMgr.AddNewSourceBuffer(std::move(*fileOrErr), llvm::SMLoc());
+    pto::ScopedPTOParserTargetArch scopedParserArch(
+        arch == "a5" ? pto::PTOParserTargetArch::A5
+                     : pto::PTOParserTargetArch::A3);
     module = parseSourceFile<ModuleOp>(sourceMgr, &context);
     if (!module) {
       llvm::errs() << "Error: Failed to parse MLIR.\n";
@@ -855,6 +871,11 @@ int main(int argc, char **argv) {
   // pm.addNestedPass<mlir::func::FuncOp>(pto::createPTOInsertCVMovPass());
   // pm.addNestedPass<mlir::func::FuncOp>(pto::createPTOConvertToDPSPass());
   // pm.addNestedPass<mlir::func::FuncOp>(pto::createPTOInsertLoadStoreForMixCVPass());
+  pm.addNestedPass<mlir::func::FuncOp>(
+      pto::createPTOLowerFrontendPipeOpsPass());
+  pm.addNestedPass<mlir::func::FuncOp>(
+      pto::createPTOWrapFunctionsInSectionsPass());
+  pm.addNestedPass<mlir::func::FuncOp>(pto::createPTOVerifyTFreePass());
   pm.addNestedPass<mlir::func::FuncOp>(pto::createLoweringSyncToPipePass());
   
   if (!disableInferLayout)
@@ -869,6 +890,7 @@ int main(int argc, char **argv) {
     planMemoryOption.enableGlobalReuse = false;
     planMemoryOption.enablePrintMemoryAllocatedSize = false;
     pm.addPass(pto::createPlanMemoryPass(planMemoryOption));
+    pm.addPass(pto::createPTOResolveReservedBuffersPass());
   }
 
   // Conditionally add Sync pass based on flag.
@@ -880,14 +902,6 @@ int main(int argc, char **argv) {
   // pm.addNestedPass<mlir::func::FuncOp>(pto::createPTOVFloopGatherPass());
 
   pm.addPass(createCSEPass());
-  std::string arch = ptoTargetArch;
-  for (char &c : arch)
-    c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
-  if (arch != "a3" && arch != "a5") {
-    llvm::errs() << "Error: invalid --pto-arch='" << ptoTargetArch
-                 << "'. Expected 'a3' or 'a5'.\n";
-    return 1;
-  }
   module->getOperation()->setAttr("pto.target_arch",
                                   mlir::StringAttr::get(&context, arch));
   if (arch == "a3") {
