@@ -53,16 +53,10 @@ static int64_t alignUpBytes(int64_t value, int64_t align) {
 }
 
 static LocalMemSpec getLocalMemSpec(Operation *op, AddressSpace as) {
-  auto moduleOp = op->getParentOfType<ModuleOp>();
-  bool isA5 = false;
-  if (moduleOp) {
-    if (auto archAttr = moduleOp->getAttrOfType<StringAttr>("pto.target_arch"))
-      isA5 = archAttr.getValue().equals_insensitive("a5");
-  }
-
   switch (as) {
   case AddressSpace::VEC:
-    return isA5 ? LocalMemSpec{2031616, 256} : LocalMemSpec{1572864, 256};
+    return isTargetArchA5(op) ? LocalMemSpec{2031616, 256}
+                              : LocalMemSpec{1572864, 256};
   case AddressSpace::MAT:
     return LocalMemSpec{4194304, 256};
   default:
@@ -2043,20 +2037,10 @@ LogicalResult MemPlan::InitMemSpecsFromModule(func::FuncOp funcOp) {
   // Default to a3.
   applySpec(kA3);
 
-  auto moduleOp = getTopLevelModuleOp(funcOp);
-  StringAttr archAttr = moduleOp->getAttrOfType<StringAttr>("pto.target_arch");
-  if (!archAttr) {
-    return success();
-  }
-
-  std::string arch = archAttr.getValue().str();
-  for (char &c : arch)
-    c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
-
   // --pto-arch options:
   // a3 -> default memory spec
   // a5 -> override memory spec
-  if (arch == "a5") {
+  if (isTargetArchA5(getTopLevelModuleOp(funcOp))) {
     applySpec(kA5);
   }
   return success();

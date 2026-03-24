@@ -24,17 +24,6 @@ struct FrontendPipeHandles {
   Operation *anchorOp = nullptr;
 };
 
-static PTOArch getTargetArch(Operation *op) {
-  auto module = op->getParentOfType<ModuleOp>();
-  if (!module)
-    return PTOArch::A3;
-
-  auto arch = module->getAttrOfType<StringAttr>("pto.target_arch");
-  if (arch && arch.getValue().equals_insensitive("a5"))
-    return PTOArch::A5;
-  return PTOArch::A3;
-}
-
 template <typename InitOpT>
 static FailureOr<FrontendPipeHandles> lowerFrontendInitOp(InitOpT initOp,
                                                           IRRewriter &rewriter) {

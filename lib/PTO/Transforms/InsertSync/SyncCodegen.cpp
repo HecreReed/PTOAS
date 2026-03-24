@@ -23,14 +23,6 @@ static pto::EventAttr getEventAttr(Builder &builder, int id) {
   auto odsEventVal = static_cast<pto::EVENT>(id);
   return pto::EventAttr::get(builder.getContext(), odsEventVal);
 }
-
-static bool isTargetArchA5(func::FuncOp func) {
-  auto module = func.getOperation()->getParentOfType<ModuleOp>();
-  if (!module)
-    return false;
-  auto arch = module->getAttrOfType<StringAttr>("pto.target_arch");
-  return arch && arch.getValue().equals_insensitive("a5");
-}
  
 static bool IsSyncExist(const SyncOps &list, SyncOperation *newSync) {
   for (auto *existing : list) {
@@ -227,7 +219,7 @@ void SyncCodegen::CreateBarrierOp(IRRewriter &rewriter, Operation *op,
                                   SyncOperation *sync, bool beforeInsert) {
   // A5: PIPE_V intra-pipe ordering is guaranteed by hardware; do not emit
   // explicit vector barrier (it is also rejected by backend checks).
-  if (isTargetArchA5(func_) &&
+  if (isTargetArchA5(func_.getOperation()) &&
       sync->GetActualSrcPipe() == PipelineType::PIPE_V) {
     return;
   }

@@ -2441,6 +2441,22 @@ static void inferTileMNK(func::FuncOp f, int &M, int &N, int &K) {
   }
 }
 
+static std::optional<StringRef> getKernelKindMacro(func::FuncOp funcOp) {
+  auto kernelKindAttr =
+      funcOp->getAttrOfType<FunctionKernelKindAttr>(FunctionKernelKindAttr::name);
+  if (!kernelKindAttr)
+    return std::nullopt;
+
+  switch (kernelKindAttr.getKernelKind()) {
+  case FunctionKernelKind::Cube:
+    return StringRef("__DAV_CUBE__");
+  case FunctionKernelKind::Vector:
+    return StringRef("__DAV_VEC__");
+  }
+
+  llvm_unreachable("unexpected kernel kind");
+}
+
 struct FuncToEmitC : public OpConversionPattern<func::FuncOp> {
   using OpConversionPattern<func::FuncOp>::OpConversionPattern;
 
@@ -3073,6 +3089,11 @@ static std::string getElemTypeStringForGT(Type elemTy) {
   return "float";
 }
 
+static uint64_t nextGlobalTensorNameId() {
+  static uint64_t counter = 0;
+  return counter++;
+}
+
 static Value buildGlobalTensorFromMemref(ConversionPatternRewriter &rewriter,
                                          Location loc, Value basePtr,
                                          MemRefType mrTy,
@@ -3115,7 +3136,8 @@ static Value buildGlobalTensorFromMemref(ConversionPatternRewriter &rewriter,
                                         offVal);
   }
 
-  std::string suffix = "_" + std::to_string(reinterpret_cast<uintptr_t>(anchor));
+  (void)anchor;
+  std::string suffix = "_" + std::to_string(nextGlobalTensorNameId());
   std::string shapeTypeName  = "GTShape"  + suffix;
   std::string strideTypeName = "GTStride" + suffix;
   std::string gtTypeName     = "GT"       + suffix;
@@ -5654,7 +5676,78 @@ struct PTOExtractToEmitC : public OpConversionPattern<pto::TExtractOp> {
 };
 //===----------------------------------------------------------------------===//
 // pto.tinsert lowering -> TINSERT(dst, src, indexRow, indexCol)
+// A5 specializations:
+//   vec->vec : TINSERT<TInsertMode::ND_VEC>(...)
+//   vec->mat : TINSERT<TInsertMode::ND/NZ>(...)
 //===----------------------------------------------------------------------===//
+
+static std::optional<pto::AddressSpace> getAddressSpaceFromType(Type ty) {
+  if (auto tb = dyn_cast<pto::TileBufType>(ty)) {
+    if (auto as = dyn_cast_or_null<pto::AddressSpaceAttr>(tb.getMemorySpace()))
+      return as.getAddressSpace();
+    return std::nullopt;
+  }
+  if (auto mr = dyn_cast<MemRefType>(ty)) {
+    if (auto ms = mr.getMemorySpace()) {
+      if (auto as = dyn_cast<pto::AddressSpaceAttr>(ms))
+        return as.getAddressSpace();
+      return std::nullopt;
+    }
+    return pto::AddressSpace::GM;
+  }
+  return std::nullopt;
+}
+
+static bool isA5TargetForTInsert(pto::TInsertOp op) {
+  auto moduleOp = op->getParentOfType<ModuleOp>();
+  if (!moduleOp)
+    return false;
+  if (auto arch = moduleOp->getAttrOfType<StringAttr>("pto.target_arch")) {
+    if (arch.getValue().equals_insensitive("a5"))
+      return true;
+  }
+  if (auto spec = moduleOp->getAttrOfType<StringAttr>("pto.device-spec")) {
+    auto s = spec.getValue();
+    if (s.starts_with("Ascend950") || s.starts_with("Ascend910_95"))
+      return true;
+  }
+  return false;
+}
+
+static std::optional<StringRef> getA5TInsertModeToken(pto::TInsertOp op) {
+  if (!isA5TargetForTInsert(op))
+    return std::nullopt;
+  auto srcAs = getAddressSpaceFromType(op.getSrc().getType());
+  auto dstAs = getAddressSpaceFromType(op.getDst().getType());
+  if (!srcAs || !dstAs)
+    return std::nullopt;
+  if (*srcAs == pto::AddressSpace::VEC && *dstAs == pto::AddressSpace::VEC)
+    return StringRef("TInsertMode::ND_VEC");
+  if (*srcAs == pto::AddressSpace::VEC && *dstAs == pto::AddressSpace::MAT) {
+    if (auto srcTb = dyn_cast<pto::TileBufType>(op.getSrc().getType())) {
+      int32_t bl = srcTb.getBLayoutValueI32();
+      int32_t sl = srcTb.getSLayoutValueI32();
+      bool srcIsND = bl == static_cast<int32_t>(pto::BLayout::RowMajor) &&
+                     sl == static_cast<int32_t>(pto::SLayout::NoneBox);
+      return srcIsND ? StringRef("TInsertMode::ND") : StringRef("TInsertMode::NZ");
+    }
+    // Best effort for memref path: recover from paired tload's layout attr.
+    for (Operation *user : op.getSrc().getUsers()) {
+      auto tload = dyn_cast<pto::TLoadOp>(user);
+      if (!tload || tload.getDst() != op.getSrc())
+        continue;
+      auto layoutAttr = tload->getAttrOfType<pto::LayoutAttr>("layout");
+      if (!layoutAttr)
+        continue;
+      return layoutAttr.getLayout() == pto::Layout::ND
+                 ? StringRef("TInsertMode::ND")
+                 : StringRef("TInsertMode::NZ");
+    }
+    // MemRef source loses explicit tile layout metadata; keep legacy default.
+    return StringRef("TInsertMode::NZ");
+  }
+  return std::nullopt;
+}
 
 struct PTOInsertToEmitC : public OpConversionPattern<pto::TInsertOp> {
   using OpConversionPattern<pto::TInsertOp>::OpConversionPattern;
@@ -5662,15 +5755,22 @@ struct PTOInsertToEmitC : public OpConversionPattern<pto::TInsertOp> {
   LogicalResult matchAndRewrite(pto::TInsertOp op, OpAdaptor adaptor,
                                 ConversionPatternRewriter &rewriter) const override {
     auto loc = op.getLoc();
+    auto *ctx = rewriter.getContext();
 
     Value src = peelUnrealized(adaptor.getSrc());
     Value dst = peelUnrealized(adaptor.getDst());
     Value r0  = peelUnrealized(adaptor.getIndexRow());
     Value c0  = peelUnrealized(adaptor.getIndexCol());
 
+    ArrayAttr templateArgs = ArrayAttr{};
+    if (auto modeTok = getA5TInsertModeToken(op)) {
+      templateArgs = rewriter.getArrayAttr(
+          {emitc::OpaqueAttr::get(ctx, modeTok->str())});
+    }
+
     rewriter.create<emitc::CallOpaqueOp>(
         loc, TypeRange{}, "TINSERT",
-        /*args=*/ArrayAttr{}, /*templateArgs=*/ArrayAttr{},
+        /*args=*/ArrayAttr{}, /*templateArgs=*/templateArgs,
         /*operands=*/ValueRange{dst, src, r0, c0});
 
     rewriter.eraseOp(op);
@@ -7056,8 +7156,22 @@ struct PTOStoreFPSToEmitC : public OpConversionPattern<pto::TStoreFPOp> {
     Value src = peelUnrealized(adaptor.getSrc());
     Value fp = peelUnrealized(adaptor.getFp());
     Value dst = peelUnrealized(adaptor.getDst());
+    Value dstArg = dst;
+    if (auto dstMrTy = dyn_cast<MemRefType>(op.getDst().getType())) {
+      bool isGlobal = true;
+      if (auto asAttr =
+              dyn_cast_or_null<pto::AddressSpaceAttr>(dstMrTy.getMemorySpace())) {
+        auto as = asAttr.getAddressSpace();
+        isGlobal = (as == pto::AddressSpace::GM || as == pto::AddressSpace::Zero);
+      }
+      if (isGlobal) {
+        if (Value gt = buildGlobalTensorFromMemref(rewriter, loc, dst, dstMrTy,
+                                                  op.getOperation()))
+          dstArg = gt;
+      }
+    }
 
-    SmallVector<Value, 4> operands{dst, src, fp};
+    SmallVector<Value, 3> operands{dstArg, src, fp};
     rewriter.create<emitc::CallOpaqueOp>(
         loc, TypeRange{}, "TSTORE_FP",
         /*args=*/ArrayAttr{}, /*templateArgs=*/ArrayAttr{},
