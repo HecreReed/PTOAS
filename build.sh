@@ -171,8 +171,11 @@ package() {
   mkdir $BUILD_PATH
   mkdir $BUILD_OUT_PATH
   cd $BUILD_PATH
-
-  git clone https://gitcode.com/GitHub_Trending/ll/llvm-project.git -b llvmorg-19.1.7
+  if [ -d "$CANN_3RD_LIB_PATH/llvm-19" ]; then
+    cp -r $CANN_3RD_LIB_PATH/llvm-19 $BUILD_PATH/llvm-project
+  else
+    git clone https://gitcode.com/GitHub_Trending/ll/llvm-project.git -b llvmorg-19.1.7
+  fi
   export LLVM_SOURCE_DIR=$BUILD_PATH/llvm-project
   export LLVM_BUILD_DIR=$LLVM_SOURCE_DIR/build-shared
   export PTO_SOURCE_DIR=$BASE_PATH
