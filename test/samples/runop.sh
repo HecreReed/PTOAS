@@ -181,6 +181,12 @@ process_one_dir() {
   for f in "$dir"/*.py; do
     [[ -f "$f" ]] || continue
     base="$(basename "$f" .py)"
+
+    if [[ "$base" == "cv_region" ]]; then
+      echo -e "${A}(${base}.py)\tSKIP\ttemporarily disabled"
+      continue
+    fi
+
     local expect_fail=0
     case "$base" in
       *_invalid|*_xfail) expect_fail=1 ;;

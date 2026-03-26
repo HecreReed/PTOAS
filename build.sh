@@ -115,6 +115,8 @@ build_only() {
   cmake -G Ninja -S llvm -B $LLVM_BUILD_DIR \
       -DLLVM_ENABLE_PROJECTS="mlir;clang" \
       -DBUILD_SHARED_LIBS=ON \
+      -DCMAKE_C_COMPILER=clang \
+      -DCMAKE_CXX_COMPILER=clang++ \
       -DMLIR_ENABLE_BINDINGS_PYTHON=ON \
       -DPython3_EXECUTABLE=$(which python3) \
       -DCMAKE_BUILD_TYPE=Release \
@@ -185,6 +187,8 @@ package() {
   cmake -G Ninja -S llvm -B $LLVM_BUILD_DIR \
        -DLLVM_ENABLE_PROJECTS="mlir;clang" \
        -DBUILD_SHARED_LIBS=ON \
+       -DCMAKE_C_COMPILER=clang \
+       -DCMAKE_CXX_COMPILER=clang++ \
        -DMLIR_ENABLE_BINDINGS_PYTHON=ON \
        -DPython3_EXECUTABLE=$(which python3) \
        -DCMAKE_BUILD_TYPE=Release \
