@@ -31,46 +31,43 @@ def build():
             tile_buf_f32 = pto.TileBufType.get([32, 32], f32, vec, [32, 32], cfg, ctx)
             tile_buf_u32 = pto.TileBufType.get([32, 32], u32, vec, [32, 32], cfg, ctx)
 
-            def build_sort32_func(name: str, use_tmp: bool):
-                fn_ty = func.FunctionType.get([ptr_f32, ptr_f32, ptr_u32], [])
-                with InsertionPoint(m.body):
-                    fn = func.FuncOp(name, fn_ty)
-                    entry = fn.add_entry_block()
+            fn_ty = func.FunctionType.get([ptr_f32, ptr_f32, ptr_u32], [])
+            with InsertionPoint(m.body):
+                fn = func.FuncOp("sort32_kernel", fn_ty)
+                entry = fn.add_entry_block()
 
-                with InsertionPoint(entry):
-                    c0 = arith.ConstantOp(IndexType.get(ctx), 0).result
-                    c1 = arith.ConstantOp(IndexType.get(ctx), 1).result
-                    c32 = arith.ConstantOp(IndexType.get(ctx), 32).result
+            with InsertionPoint(entry):
+                c0 = arith.ConstantOp(IndexType.get(ctx), 0).result
+                c1 = arith.ConstantOp(IndexType.get(ctx), 1).result
+                c32 = arith.ConstantOp(IndexType.get(ctx), 32).result
 
-                    arg0, arg1, arg2 = entry.arguments
+                arg0, arg1, arg2 = entry.arguments
 
-                    tv0 = pto.MakeTensorViewOp(tv2_f32, arg0, [c32, c32], [c32, c1]).result
-                    tv1 = pto.MakeTensorViewOp(tv2_f32, arg1, [c32, c32], [c32, c1]).result
-                    tv2 = pto.MakeTensorViewOp(tv2_u32, arg2, [c32, c32], [c32, c1]).result
+                tv0 = pto.MakeTensorViewOp(tv2_f32, arg0, [c32, c32], [c32, c1]).result
+                tv1 = pto.MakeTensorViewOp(tv2_f32, arg1, [c32, c32], [c32, c1]).result
+                tv2 = pto.MakeTensorViewOp(tv2_u32, arg2, [c32, c32], [c32, c1]).result
 
-                    sv0 = pto.PartitionViewOp(tile_view_f32, tv0, offsets=[c0, c0], sizes=[c32, c32]).result
-                    sv1 = pto.PartitionViewOp(tile_view_f32, tv1, offsets=[c0, c0], sizes=[c32, c32]).result
-                    sv2 = pto.PartitionViewOp(tile_view_u32, tv2, offsets=[c0, c0], sizes=[c32, c32]).result
+                sv0 = pto.PartitionViewOp(tile_view_f32, tv0, offsets=[c0, c0], sizes=[c32, c32]).result
+                sv1 = pto.PartitionViewOp(tile_view_f32, tv1, offsets=[c0, c0], sizes=[c32, c32]).result
+                sv2 = pto.PartitionViewOp(tile_view_u32, tv2, offsets=[c0, c0], sizes=[c32, c32]).result
 
-                    tb0 = pto.AllocTileOp(tile_buf_f32).result
-                    tb1 = pto.AllocTileOp(tile_buf_f32).result
-                    tb2 = pto.AllocTileOp(tile_buf_u32).result
+                tb_src = pto.AllocTileOp(tile_buf_f32).result
+                tb_stage0 = pto.AllocTileOp(tile_buf_f32).result
+                tb_dst = pto.AllocTileOp(tile_buf_f32).result
+                tb_idx = pto.AllocTileOp(tile_buf_u32).result
+                tb_tmp = pto.AllocTileOp(tile_buf_f32).result
 
-                    pto.TLoadOp(None, sv0, tb0)
-                    pto.TLoadOp(None, sv2, tb2)
+                pto.TLoadOp(None, sv0, tb_src)
+                pto.TLoadOp(None, sv2, tb_idx)
 
-                    if use_tmp:
-                        tb_tmp = pto.AllocTileOp(tile_buf_f32).result
-                        pto.TSort32Op(tb0, tb2, tb1, tmp=tb_tmp)
-                    else:
-                        pto.TSort32Op(tb0, tb2, tb1)
+                # Exercise the no-tmp form first.
+                pto.TSort32Op(src=tb_src, idx=tb_idx, dst=tb_stage0)
+                # Then exercise the tmp-taking form using the first result as input.
+                pto.TSort32Op(src=tb_stage0, idx=tb_idx, dst=tb_dst, tmp=tb_tmp)
 
-                    pto.TStoreOp(None, tb1, sv1)
-                    pto.TStoreOp(None, tb2, sv2)
-                    func.ReturnOp([])
-
-            build_sort32_func("sort32_kernel_2d", use_tmp=False)
-            build_sort32_func("sort32_kernel_2d_tmp", use_tmp=True)
+                pto.TStoreOp(None, tb_dst, sv1)
+                pto.TStoreOp(None, tb_idx, sv2)
+                func.ReturnOp([])
 
             m.operation.verify()
 
