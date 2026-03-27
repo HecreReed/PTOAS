@@ -479,6 +479,14 @@ struct InterCoreSyncCallDesc {
   SmallVector<Value, 2> operands;
 };
 
+static Value castInterCoreEventIdToI32(ConversionPatternRewriter &rewriter,
+                                       Location loc, Value eventId) {
+  auto i32Ty = emitc::OpaqueType::get(rewriter.getContext(), "int32_t");
+  if (eventId.getType() == i32Ty)
+    return eventId;
+  return emitCCast(rewriter, loc, i32Ty, eventId);
+}
+
 static InterCoreSyncCallDesc buildInterCoreSyncSetCall(
     ConversionPatternRewriter &rewriter, Location loc, PTOArch targetArch,
     pto::PipeAttr pipeAttr, IntegerAttr eventIdAttr) {
@@ -520,6 +528,47 @@ static InterCoreSyncCallDesc buildInterCoreSyncSetCall(
   return desc;
 }
 
+static InterCoreSyncCallDesc buildInterCoreSyncSetCallDyn(
+    ConversionPatternRewriter &rewriter, Location loc, PTOArch targetArch,
+    pto::PipeAttr pipeAttr, Value eventIdVal) {
+  auto *ctx = rewriter.getContext();
+  std::string pipeTok = pipeTokFromPipeAttr(pipeAttr);
+  Value eventI32 = castInterCoreEventIdToI32(rewriter, loc, eventIdVal);
+
+  if (targetArch == PTOArch::A3) {
+    auto msgTy = emitc::OpaqueType::get(ctx, "uint16_t");
+    auto msgArgs = rewriter.getArrayAttr({
+        emitc::OpaqueAttr::get(ctx, "FFTS_MODE_VAL"),
+        IntegerAttr::get(IndexType::get(ctx), 0),
+    });
+    Value msgVal =
+        rewriter
+            .create<emitc::CallOpaqueOp>(loc, msgTy, "getFFTSMsg",
+                                         /*args=*/msgArgs,
+                                         /*templateArgs=*/ArrayAttr{},
+                                         /*operands=*/ValueRange{eventI32})
+            .getResult(0);
+
+    InterCoreSyncCallDesc desc;
+    desc.callee = "ffts_cross_core_sync";
+    desc.args = rewriter.getArrayAttr({
+        emitc::OpaqueAttr::get(ctx, pipeTok),
+        IntegerAttr::get(IndexType::get(ctx), 0),
+    });
+    desc.operands.push_back(msgVal);
+    return desc;
+  }
+
+  InterCoreSyncCallDesc desc;
+  desc.callee = "set_intra_block";
+  desc.args = rewriter.getArrayAttr({
+      emitc::OpaqueAttr::get(ctx, pipeTok),
+      IntegerAttr::get(IndexType::get(ctx), 0),
+  });
+  desc.operands.push_back(eventI32);
+  return desc;
+}
+
 static InterCoreSyncCallDesc buildInterCoreSyncWaitCall(
     ConversionPatternRewriter &rewriter, PTOArch targetArch,
     pto::PipeAttr pipeAttr, IntegerAttr eventIdAttr) {
@@ -536,6 +585,30 @@ static InterCoreSyncCallDesc buildInterCoreSyncWaitCall(
   desc.callee = "wait_intra_block";
   desc.args = rewriter.getArrayAttr(
       {emitc::OpaqueAttr::get(ctx, pipeTok), eventIdAttr});
+  return desc;
+}
+
+static InterCoreSyncCallDesc buildInterCoreSyncWaitCallDyn(
+    ConversionPatternRewriter &rewriter, Location loc, PTOArch targetArch,
+    pto::PipeAttr pipeAttr, Value eventIdVal) {
+  auto *ctx = rewriter.getContext();
+  std::string pipeTok = pipeTokFromPipeAttr(pipeAttr);
+  Value eventI32 = castInterCoreEventIdToI32(rewriter, loc, eventIdVal);
+
+  InterCoreSyncCallDesc desc;
+  if (targetArch == PTOArch::A3) {
+    desc.callee = "wait_flag_dev";
+    desc.args = rewriter.getArrayAttr({IntegerAttr::get(IndexType::get(ctx), 0)});
+    desc.operands.push_back(eventI32);
+    return desc;
+  }
+
+  desc.callee = "wait_intra_block";
+  desc.args = rewriter.getArrayAttr({
+      emitc::OpaqueAttr::get(ctx, pipeTok),
+      IntegerAttr::get(IndexType::get(ctx), 0),
+  });
+  desc.operands.push_back(eventI32);
   return desc;
 }
 
@@ -4156,10 +4229,22 @@ struct PTOSyncSetToEmitC : public OpConversionPattern<mlir::pto::SyncSetOp> {
   LogicalResult
   matchAndRewrite(mlir::pto::SyncSetOp op, OpAdaptor adaptor,
                   ConversionPatternRewriter &rewriter) const override {
-    (void)adaptor;
     auto loc = op->getLoc();
-    auto desc = buildInterCoreSyncSetCall(rewriter, loc, targetArch, op.getPipe(),
-                                          op.getEventIdAttr());
+    IntegerAttr eventIdAttr = op.getEventIdAttr();
+    Value eventIdDyn = adaptor.getEventIdDyn();
+
+    if ((eventIdAttr != nullptr) == static_cast<bool>(eventIdDyn))
+      return rewriter.notifyMatchFailure(
+          op, "expects exactly one of static event_id attr or dynamic event_id operand");
+
+    InterCoreSyncCallDesc desc;
+    if (eventIdAttr) {
+      desc = buildInterCoreSyncSetCall(rewriter, loc, targetArch, op.getPipe(),
+                                       eventIdAttr);
+    } else {
+      desc = buildInterCoreSyncSetCallDyn(rewriter, loc, targetArch, op.getPipe(),
+                                          eventIdDyn);
+    }
     rewriter.create<emitc::CallOpaqueOp>(loc, TypeRange{}, desc.callee,
                                          /*args=*/desc.args,
                                          /*templateArgs=*/ArrayAttr{},
@@ -4181,10 +4266,22 @@ struct PTOSyncWaitToEmitC : public OpConversionPattern<mlir::pto::SyncWaitOp> {
   LogicalResult
   matchAndRewrite(mlir::pto::SyncWaitOp op, OpAdaptor adaptor,
                   ConversionPatternRewriter &rewriter) const override {
-    (void)adaptor;
     auto loc = op->getLoc();
-    auto desc = buildInterCoreSyncWaitCall(rewriter, targetArch, op.getPipe(),
-                                           op.getEventIdAttr());
+    IntegerAttr eventIdAttr = op.getEventIdAttr();
+    Value eventIdDyn = adaptor.getEventIdDyn();
+
+    if ((eventIdAttr != nullptr) == static_cast<bool>(eventIdDyn))
+      return rewriter.notifyMatchFailure(
+          op, "expects exactly one of static event_id attr or dynamic event_id operand");
+
+    InterCoreSyncCallDesc desc;
+    if (eventIdAttr) {
+      desc = buildInterCoreSyncWaitCall(rewriter, targetArch, op.getPipe(),
+                                        eventIdAttr);
+    } else {
+      desc = buildInterCoreSyncWaitCallDyn(rewriter, loc, targetArch, op.getPipe(),
+                                           eventIdDyn);
+    }
     rewriter.create<emitc::CallOpaqueOp>(loc, TypeRange{}, desc.callee,
                                          desc.args, ArrayAttr{}, desc.operands);
 
@@ -5631,7 +5728,8 @@ struct PTOFillPadExpandToEmitC
 };
 //===----------------------------------------------------------------------===//
 // pto.tgather lowering
-// - Index form: TGATHER(dst, src0, indices)
+// - Index form  : TGATHER(dst, src0, indices, tmp)
+// - Compare form: TGATHER<DstT, SrcT, CDstT, TmpT, CmpMode::GT, 7>(dst, src0, kValue, cdst, tmp)
 // - Mask form : TGATHER<dstTileTok, srcTileTok, pto::MaskPattern::Pxxxx>(dst, src0)
 //===----------------------------------------------------------------------===//
 
@@ -5652,29 +5750,67 @@ struct PTOGatherToEmitC : public OpConversionPattern<pto::TGatherOp> {
     Value dst  = peelUnrealized(adaptor.getDst());
     Value src0 = peelUnrealized(adaptor.getSrc());
 
-    // Case 1: index-based TGATHER(dst, src0, indices)
-    if (Value idx = adaptor.getIndices()) {
-      idx = peelUnrealized(idx);
-
-      rewriter.create<emitc::CallOpaqueOp>(
-          loc, TypeRange{}, "TGATHER",
-          /*args=*/ArrayAttr{}, /*templateArgs=*/ArrayAttr{},
-          /*operands=*/ValueRange{dst, src0, idx});
-
-      rewriter.eraseOp(op);
-      return success();
-    }
-
-    // Case 2: mask-pattern TGATHER<DstT, SrcT, MaskPattern::P0101>(dst, src0)
-    auto mp = op.getMaskPatternAttr();
-    if (!mp)
-      return rewriter.notifyMatchFailure(op, "expected maskPattern when indices is absent");
-
     auto getOpaqueTok = [&](Value v, StringRef name) -> FailureOr<std::string> {
       if (auto ot = v.getType().dyn_cast<emitc::OpaqueType>())
         return ot.getValue().str();
       return rewriter.notifyMatchFailure(op, (name + " must be emitc::OpaqueType (tile)").str());
     };
+
+    // Case 1: index-based TGATHER(dst, src0, indices, tmp)
+    if (Value idx = adaptor.getIndices()) {
+      idx = peelUnrealized(idx);
+      Value tmp = peelUnrealized(adaptor.getTmp());
+
+      rewriter.create<emitc::CallOpaqueOp>(
+          loc, TypeRange{}, "TGATHER",
+          /*args=*/ArrayAttr{}, /*templateArgs=*/ArrayAttr{},
+          /*operands=*/ValueRange{dst, src0, idx, tmp});
+
+      rewriter.eraseOp(op);
+      return success();
+    }
+
+    // Case 2: compare-based TGATHER<DstT, SrcT, CDstT, TmpT, CmpMode::GT, offset>(...)
+    if (Value cdst = adaptor.getCdst()) {
+      cdst = peelUnrealized(cdst);
+      Value tmp = peelUnrealized(adaptor.getTmp());
+      Value kValue = peelUnrealized(adaptor.getKValue());
+
+      auto dstTokOr = getOpaqueTok(dst, "dst");
+      auto srcTokOr = getOpaqueTok(src0, "src0");
+      auto cdstTokOr = getOpaqueTok(cdst, "cdst");
+      auto tmpTokOr = getOpaqueTok(tmp, "tmp");
+      if (failed(dstTokOr) || failed(srcTokOr) || failed(cdstTokOr) || failed(tmpTokOr))
+        return failure();
+
+      auto cmpAttr = op.getCmpModeAttr();
+      std::string cmpTok = cmpAttr ? cmpModeTok(cmpAttr) : "CmpMode::EQ";
+      int64_t offset = 0;
+      if (auto offsetAttr = op.getOffsetAttr())
+        offset = offsetAttr.getInt();
+
+      auto targs = rewriter.getArrayAttr({
+          emitc::OpaqueAttr::get(ctx, *dstTokOr),
+          emitc::OpaqueAttr::get(ctx, *srcTokOr),
+          emitc::OpaqueAttr::get(ctx, *cdstTokOr),
+          emitc::OpaqueAttr::get(ctx, *tmpTokOr),
+          emitc::OpaqueAttr::get(ctx, cmpTok),
+          emitc::OpaqueAttr::get(ctx, std::to_string(offset)),
+      });
+
+      rewriter.create<emitc::CallOpaqueOp>(
+          loc, TypeRange{}, "TGATHER",
+          /*args=*/ArrayAttr{}, /*templateArgs=*/targs,
+          /*operands=*/ValueRange{dst, src0, kValue, cdst, tmp});
+
+      rewriter.eraseOp(op);
+      return success();
+    }
+
+    // Case 3: mask-pattern TGATHER<DstT, SrcT, MaskPattern::P0101>(dst, src0)
+    auto mp = op.getMaskPatternAttr();
+    if (!mp)
+      return rewriter.notifyMatchFailure(op, "expected maskPattern, indices, or cdst on tgather");
 
     auto dstTokOr = getOpaqueTok(dst, "dst");
     auto srcTokOr = getOpaqueTok(src0, "src0");
@@ -6893,7 +7029,7 @@ struct PTOShrSConstToEmitC : public OpConversionPattern<pto::TShrSOp> {
 };
 
 //===----------------------------------------------------------------------===//
-// PTOConvert.cpp  (add lowering + patterns.add for TSORT32 DPS/memref op)
+// PTOConvert.cpp  (TSORT32 DPS/memref op: ins(src, idx[, tmp]) outs(dst))
 //===----------------------------------------------------------------------===//
 
 struct PTOSORT32SToEmitC : public OpConversionPattern<pto::TSort32Op> {
