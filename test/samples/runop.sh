@@ -1,4 +1,12 @@
 #!/usr/bin/env bash
+# Copyright (c) 2026 Huawei Technologies Co., Ltd.
+# This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+# CANN Open Software License Agreement Version 2.0 (the "License").
+# Please refer to the License for details. You may not use this file except in compliance with the License.
+# THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+# INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+# See LICENSE in the root of the software repository for the full text of the License.
+
 set -uo pipefail   # 注意：去掉 -e，避免失败直接退出整个脚本
 
 BASE_DIR="$(cd -- "$(dirname -- "$0")" && pwd)"
@@ -105,6 +113,30 @@ resolve_ptobc_bin() {
   return 1
 }
 
+copy_validation_assets() {
+  local sample_dir="$1"
+  local out_root="$2"
+  local out_sample_dir="$3"
+  local asset rel
+
+  if [[ -f "${BASE_DIR}/validation_runtime.py" ]]; then
+    cp -f "${BASE_DIR}/validation_runtime.py" "${out_root}/validation_runtime.py"
+  fi
+
+  for asset in "${sample_dir}"/*_golden.py "${sample_dir}"/*_compare.py; do
+    [[ -f "$asset" ]] || continue
+    cp -f "$asset" "${out_sample_dir}/"
+  done
+
+  if [[ -d "${sample_dir}/npu_validation" ]]; then
+    while IFS= read -r -d '' asset; do
+      rel="${asset#${sample_dir}/}"
+      mkdir -p "${out_sample_dir}/$(dirname "${rel}")"
+      cp -f "$asset" "${out_sample_dir}/${rel}"
+    done < <(find "${sample_dir}/npu_validation" -type f \( -name 'golden.py' -o -name 'compare.py' \) -print0)
+  fi
+}
+
 process_one_dir() {
   local A="$1" # folder name (e.g. Abs)
   local out_dir="$2"
@@ -112,6 +144,7 @@ process_one_dir() {
   dir="${BASE_DIR}/${A}"
   out_subdir="${out_dir}/${A}"
   mkdir -p "${out_subdir}"
+  copy_validation_assets "${dir}" "${out_dir}" "${out_subdir}"
 
   ptoas="$(resolve_ptoas_bin)"
   ptobc="$(resolve_ptobc_bin)"
@@ -180,6 +213,11 @@ process_one_dir() {
   local f mlir ptobc_file decoded_pto cpp base overall=0
   for f in "$dir"/*.py; do
     [[ -f "$f" ]] || continue
+    case "$(basename "$f")" in
+      *_golden.py|*_compare.py)
+        continue
+        ;;
+    esac
     base="$(basename "$f" .py)"
 
     if [[ "$base" == "cv_region" ]]; then
@@ -222,6 +260,10 @@ process_one_dir() {
       continue
     fi
     if [[ "$base" == "test_intercore_sync_a3_dyn" && "$(printf '%s' "$target_arch" | tr '[:upper:]' '[:lower:]')" != "a3" ]]; then
+      echo -e "${A}(${base}.py)\tSKIP\trequires --pto-arch=a3"
+      continue
+    fi
+    if [[ "$base" == "test_intercore_sync_a3_modes" && "$(printf '%s' "$target_arch" | tr '[:upper:]' '[:lower:]')" != "a3" ]]; then
       echo -e "${A}(${base}.py)\tSKIP\trequires --pto-arch=a3"
       continue
     fi
@@ -510,6 +552,23 @@ process_one_dir() {
       fi
       if grep -Fq "wait_flag_dev(3)" "$cpp"; then
         echo -e "${A}(${base}.py)\tFAIL\tunexpected static wait_flag_dev(3) in dynamic test"
+        overall=1
+        continue
+      fi
+    fi
+    if [[ "$base" == "test_intercore_sync_a3_modes" ]]; then
+      if ! grep -Fq "set_ffts_base_addr(" "$cpp"; then
+        echo -e "${A}(${base}.py)\tFAIL\tmissing set_ffts_base_addr() lowering"
+        overall=1
+        continue
+      fi
+      if ! grep -Fq "getFFTSMsg(0," "$cpp"; then
+        echo -e "${A}(${base}.py)\tFAIL\tmissing A3 getFFTSMsg(0, ...) lowering"
+        overall=1
+        continue
+      fi
+      if ! grep -Fq "getFFTSMsg(1," "$cpp"; then
+        echo -e "${A}(${base}.py)\tFAIL\tmissing A3 getFFTSMsg(1, ...) lowering"
         overall=1
         continue
       fi

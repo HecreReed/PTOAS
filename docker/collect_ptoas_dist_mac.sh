@@ -1,4 +1,12 @@
 #!/usr/bin/env bash
+# Copyright (c) 2026 Huawei Technologies Co., Ltd.
+# This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+# CANN Open Software License Agreement Version 2.0 (the "License").
+# Please refer to the License for details. You may not use this file except in compliance with the License.
+# THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+# INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+# See LICENSE in the root of the software repository for the full text of the License.
+
 # Collect ptoas binary and macOS dylib dependencies into a self-contained distribution.
 #
 # Usage: ./collect_ptoas_dist_mac.sh <output_directory>
@@ -41,7 +49,8 @@ if [ ! -f "$PTOAS_BIN" ]; then
 fi
 
 mkdir -p "${PTOAS_DIST_DIR}/bin" "${PTOAS_DEPS_DIR}"
-cp "$PTOAS_BIN" "${PTOAS_DIST_DIR}/bin/"
+cp -fL "$PTOAS_BIN" "${PTOAS_DIST_DIR}/bin/"
+chmod +x "${PTOAS_DIST_DIR}/bin/ptoas"
 
 # Resolve @rpath / @loader_path / @executable_path / absolute install names.
 resolve_dep_path() {
@@ -124,7 +133,7 @@ collect_dylibs() {
     local base
     base="$(basename "$resolved")"
     if [ ! -f "${PTOAS_DEPS_DIR}/${base}" ]; then
-      cp "$resolved" "${PTOAS_DEPS_DIR}/${base}"
+      cp -fL "$resolved" "${PTOAS_DEPS_DIR}/${base}"
       install_name_tool -id "@loader_path/${base}" "${PTOAS_DEPS_DIR}/${base}" || true
       collect_dylibs "${PTOAS_DEPS_DIR}/${base}"
     fi
@@ -132,8 +141,101 @@ collect_dylibs() {
   done < <(otool -L "$bin" | awk 'NR>1 {print $1}')
 }
 
+packaged_dep_ref() {
+  local owner="$1"
+  local dep_base="$2"
+  case "$owner" in
+    "${PTOAS_DIST_DIR}/bin/"*)
+      echo "@loader_path/../lib/${dep_base}"
+      ;;
+    "${PTOAS_DEPS_DIR}/"*)
+      echo "@loader_path/${dep_base}"
+      ;;
+    *)
+      echo "@loader_path/${dep_base}"
+      ;;
+  esac
+}
+
+rewrite_packaged_install_names() {
+  local target dep base replacement
+  while IFS= read -r target; do
+    while IFS= read -r dep; do
+      [ -n "$dep" ] || continue
+      case "$dep" in
+        @loader_path/*|@rpath/*|@executable_path/*|/usr/lib/*|/System/Library/*)
+          continue
+          ;;
+      esac
+
+      base="$(basename "$dep")"
+      if [ ! -f "${PTOAS_DEPS_DIR}/${base}" ]; then
+        continue
+      fi
+
+      replacement="$(packaged_dep_ref "$target" "$base")"
+      if [ "$dep" != "$replacement" ]; then
+        echo "rewrite install name: ${target} :: ${dep} -> ${replacement}"
+        install_name_tool -change "$dep" "$replacement" "$target"
+      fi
+    done < <(otool -L "$target" | awk 'NR>1 {print $1}')
+  done < <(find "${PTOAS_DIST_DIR}/bin" "${PTOAS_DEPS_DIR}" -type f \( -name 'ptoas' -o -name '*.dylib' \))
+}
+
 echo "Collecting dylib dependencies..."
 collect_dylibs "${PTOAS_DIST_DIR}/bin/ptoas"
+
+echo "Rewriting packaged install names..."
+rewrite_packaged_install_names
+
+echo "Validating packaged dependency install names..."
+if ! python3 - "${PTOAS_DIST_DIR}" <<'PY'
+import os
+import subprocess
+import sys
+
+root = sys.argv[1]
+allowed_prefixes = (
+    "@loader_path/",
+    "@rpath/",
+    "@executable_path/",
+    "/usr/lib/",
+    "/System/Library/",
+)
+
+bad = []
+for base, _, files in os.walk(root):
+    for name in files:
+        if name != "ptoas" and not name.endswith(".dylib"):
+            continue
+        path = os.path.join(base, name)
+        try:
+            output = subprocess.check_output(
+                ["otool", "-L", path],
+                stderr=subprocess.STDOUT,
+                text=True,
+            )
+        except subprocess.CalledProcessError as exc:
+            print(f"ERROR: failed to inspect {path}: {exc.output.strip()}",
+                  file=sys.stderr)
+            sys.exit(2)
+
+        for line in output.splitlines()[1:]:
+            dep = line.strip().split(" ", 1)[0]
+            if dep.startswith(allowed_prefixes):
+                continue
+            bad.append((path, dep))
+
+for path, dep in bad:
+    print(f"ERROR: non-portable dependency in {path} -> {dep}", file=sys.stderr)
+
+print(f"portable dependency scan checked {root} ({len(bad)} offending deps)")
+sys.exit(1 if bad else 0)
+PY
+then
+  echo "Error: found non-portable dependency install names" >&2
+  exit 1
+fi
 
 if ! command -v codesign >/dev/null 2>&1; then
   echo "Error: codesign is required on macOS to sign packaged artifacts" >&2
@@ -163,7 +265,11 @@ WRAPPER_EOF
 chmod +x "${PTOAS_DIST_DIR}/ptoas"
 
 echo "Smoke testing packaged ptoas dist..."
-"${PTOAS_DIST_DIR}/ptoas" --version
+env -u DYLD_LIBRARY_PATH -u LD_LIBRARY_PATH "${PTOAS_DIST_DIR}/ptoas" --version
+env -u DYLD_LIBRARY_PATH -u LD_LIBRARY_PATH \
+  "${PTOAS_DIST_DIR}/ptoas" \
+  "${PTO_SOURCE_DIR}/test/basic/kernel_kind_vector_scf_while_emitc.pto" \
+  >/dev/null
 
 echo ""
 echo "=== ptoas distribution contents ==="

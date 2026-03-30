@@ -1,9 +1,12 @@
+// Copyright (c) 2026 Huawei Technologies Co., Ltd.
+// This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+// CANN Open Software License Agreement Version 2.0 (the "License").
+// Please refer to the License for details. You may not use this file except in compliance with the License.
+// THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+// INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+// See LICENSE in the root of the software repository for the full text of the License.
+
 //===- PTOOps.td - Pattern descriptor operations -----------*- tablegen -*-===//
-//
-// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
-// See https://llvm.org/LICENSE.txt for license information.
-// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
-//
 //===----------------------------------------------------------------------===//
 //
 // This file declares the PTO dialect operations.
@@ -1492,6 +1495,50 @@ def DeclareTileOp : PTO_Op<"declare_tile", [Pure]> {
   }];
 }
 
+def DeclareEventIdArrayOp : PTO_Op<"declare_eventid_array"> {
+  let summary = "Declare a manual-only local event-id array";
+  let description = [{
+    Declares a local array used to store dynamic event ids in manual sync code.
+    This is a frontend/EmitC convenience feature and is not intended to
+    participate in PlanMemory or automatic synchronization passes.
+  }];
+
+  let results = (outs EventIdArrayType:$array);
+
+  let assemblyFormat = [{
+    attr-dict `->` qualified(type($array))
+  }];
+}
+
+def EventIdArrayGetOp : PTO_Op<"eventid_array_get"> {
+  let summary = "Read one element from a manual event-id array";
+
+  let arguments = (ins
+    EventIdArrayType:$array,
+    Index:$index
+  );
+  let results = (outs Index:$result);
+
+  let assemblyFormat = [{
+    $array `[` $index `]` attr-dict `:` qualified(type($array))
+  }];
+}
+
+def EventIdArraySetOp : PTO_Op<"eventid_array_set"> {
+  let summary = "Write one element into a manual event-id array";
+
+  let arguments = (ins
+    EventIdArrayType:$array,
+    Index:$index,
+    Index:$value
+  );
+  let results = (outs);
+
+  let assemblyFormat = [{
+    $array `[` $index `]` `,` $value attr-dict `:` qualified(type($array))
+  }];
+}
+
 def DeclareTileMemRefOp : PTO_Op<"declare_tile_memref", [Pure]> {
   let summary = "Internal memref placeholder for a tile whose address is assigned later";
   let description = [{
@@ -1723,11 +1770,14 @@ def SyncSetOp : PTO_Op<"sync.set"> {
   let description = [{
     Sets a synchronization signal on the specified pipeline stage.
     Corresponds to `ffts_cross_core_sync` (A3) or `set_intra_block` (A5).
+    On A3, the optional `ffts_mode` attribute selects the first argument passed
+    to `getFFTSMsg`; if omitted, the legacy `FFTS_MODE_VAL` path is preserved.
   }];
 
   let arguments = (ins
     PTO_PipeAttr:$pipe,
     OptionalAttr<I32Attr>:$event_id,
+    OptionalAttr<I32Attr>:$ffts_mode,
     Optional<Index>:$event_id_dyn
   );
 
@@ -3518,6 +3568,50 @@ def TPReluOp: PTO_TOp<"tprelu", [
     `outs` `(` $dst `:` qualified(type($dst) ) `)`
     attr-dict
   }];
+
+  let extraClassDeclaration = [{
+    ::mlir::pto::PIPE getPipe() { return ::mlir::pto::PIPE::PIPE_V; }
+    ::mlir::MutableOperandRange getDpsInitsMutable() { return getDstMutable(); }
+  }];
+}
+//===----------------------------------------------------------------------===//
+// TQuantOp
+//===----------------------------------------------------------------------===//
+
+def TQuantOp : PTO_TOp<"tquant", [
+  PTO_DpsInitOpInterface,
+  OpPipeInterface,
+  DeclareOpInterfaceMethods<MemoryEffectsOpInterface>
+]> {
+  let summary = "TQUANT: Quantize a tile using a scaling (fp) tile.";
+
+  let description = [{
+    Converts src tile elements to a lower-precision format using the scaling
+    parameters held in the fp tile, writing results into dst.
+
+    For INT8_ASYM an additional offset tile must be supplied in ins.
+
+    DPS form (INT8_SYM):
+      pto.tquant ins(%src, %fp : <src_type>, <fp_type>)
+                 outs(%dst : <dst_type>) {quant_type = #pto<quant_type INT8_SYM>}
+    DPS form (INT8_ASYM):
+      pto.tquant ins(%src, %fp, %offset : <src_type>, <fp_type>, <offset_type>)
+                 outs(%dst : <dst_type>) {quant_type = #pto<quant_type INT8_ASYM>}
+  }];
+
+  let arguments = (ins
+    PTODpsType:$src,
+    PTODpsType:$fp,
+    Optional<PTODpsType>:$offset,
+    PTODpsType:$dst,
+    PTO_QuantTypeAttr:$quant_type
+  );
+
+  let results = (outs);
+
+  let hasVerifier = 1;
+
+  let hasCustomAssemblyFormat = 1;
 
   let extraClassDeclaration = [{
     ::mlir::pto::PIPE getPipe() { return ::mlir::pto::PIPE::PIPE_V; }

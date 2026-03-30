@@ -6301,6 +6301,55 @@ pto.tmov.fp ins(%acc, %fp : !pto.tile_buf<...>, !pto.tile_buf<...>)
 
 ---
 
+##### `pto.tquant` - Quantize Tile with Scaling Tile
+
+**Summary:** Quantizes `f32` source tile elements into a lower-precision integer format using a scaling (`fp`) tile. The quantization mode is controlled by the `quant_type` attribute.
+
+**Semantics:**
+
+```
+dst[i, j] = Quantize(src[i, j]; fp, quant_type)
+```
+
+- `INT8_SYM`: symmetric quantization; `dst` element type must be `i8`.
+- `INT8_ASYM`: asymmetric quantization; `dst` element type must be `ui8`.
+
+**Arguments:**
+
+| Name | Type | Description |
+|------|------|-------------|
+| `src` | `pto.tile_buf` | Source tile (`f32`) |
+| `fp` | `pto.tile_buf` | Scaling parameter tile |
+| `dst` | `pto.tile_buf` | Destination tile (`i8` for SYM, `ui8` for ASYM) |
+
+**Attributes:**
+
+| Name | Type | Description |
+|------|------|-------------|
+| `quant_type` | `#pto.quant_type` | `INT8_SYM` or `INT8_ASYM` |
+
+**Results:** None. Writes into `dst` via DPS pattern.
+
+**Constraints & Verification:**
+
+- `src` element type must be `f32`.
+- `dst` element type must be `i8` (`INT8_SYM`) or `ui8` (`INT8_ASYM`).
+- A2/A3: `src` and `dst` must use row-major layout.
+
+**Hardware Mapping:**
+
+- Executes on the **Vector pipeline** (`PIPE_V`)
+
+**Basic Example:**
+
+```mlir
+pto.tquant ins(%src, %fp : !pto.tile_buf<...>, !pto.tile_buf<...>)
+           outs(%dst : !pto.tile_buf<...>)
+           {quant_type = #pto<quant_type INT8_SYM>}
+```
+
+---
+
 ##### `pto.tstore_fp` - Store Accumulator with Scaling
 
 **Summary:** Stores an accumulator tile into global memory using a scaling (`fp`) tile.
@@ -7256,10 +7305,10 @@ pto.trap
 | Type Conversion | 1 | V |
 | Integer Sequence Generation | 1 | V |
 | Scalar Element Access | 2 | V |
-| MX Quantized | 2 | M/V |
+| MX Quantized | 3 | M/V |
 | Synchronization | 5 | - |
 | CV-Related | 2 | - |
 | Runtime Intrinsics | 4 | - (Pure) |
 | Debug | 3 | - |
 
-**Total: 106 operations**
+**Total: 107 operations**

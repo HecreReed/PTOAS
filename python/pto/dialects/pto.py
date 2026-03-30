@@ -1,6 +1,11 @@
-#  Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
-#  See https://llvm.org/LICENSE.txt for license information.
-#  SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+# Copyright (c) 2026 Huawei Technologies Co., Ltd.
+# This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+# CANN Open Software License Agreement Version 2.0 (the "License").
+# Please refer to the License for details. You may not use this file except in compliance with the License.
+# THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+# INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+# See LICENSE in the root of the software repository for the full text of the License.
+
 from . import _pto_ops_gen as _pto_ops_gen
 from ._pto_ops_gen import *
 from mlir import ir as _ods_ir
@@ -266,39 +271,60 @@ def wait_flag(src_pipe, dst_pipe, event_id, *, loc=None, ip=None):
 # -----------------------------------------------------------------------------
 # Inter-core sync helpers (pto.sync.set / pto.sync.wait / pto.set_ffts)
 # -----------------------------------------------------------------------------
-def sync_set_dyn(pipe, event_id, *, loc=None, ip=None):
+def sync_set_dyn(pipe, event_id, ffts_mode=2, *, loc=None, ip=None):
     ctx = loc.context if loc else _ods_ir.Context.current
     pipe_attr = _ensure_pipe_attr(pipe, ctx)
     event_val = _pto_ops_gen._get_op_result_or_value(event_id)
+    mode_attr = None
+    if ffts_mode != 2:
+        mode_attr = _ensure_i32_attr(ffts_mode, "ffts_mode", ctx)
     # Preferred unified-op path: pto.sync.set(pipe, event_id_dyn=%v)
     try:
         return _pto_ops_gen.sync_set(
-            pipe_attr, event_id=None, event_id_dyn=event_val, loc=loc, ip=ip
+            pipe_attr,
+            event_id=None,
+            ffts_mode=mode_attr,
+            event_id_dyn=event_val,
+            loc=loc,
+            ip=ip,
         )
     except TypeError:
-        # Backward compatibility: older generated bindings with dedicated op.
-        if hasattr(_pto_ops_gen, "sync_set_dyn"):
-            return _pto_ops_gen.sync_set_dyn(pipe_attr, event_val, loc=loc, ip=ip)
-        raise
+        attrs = {"pipe": pipe_attr}
+        if mode_attr is not None:
+            attrs["ffts_mode"] = mode_attr
+        return _ods_ir.Operation.create(
+            "pto.sync.set", attributes=attrs, operands=[event_val], loc=loc, ip=ip
+        )
 
 
-def sync_set(pipe, event_id, *, loc=None, ip=None):
+def sync_set(pipe, event_id, ffts_mode=2, *, loc=None, ip=None):
     ctx = loc.context if loc else _ods_ir.Context.current
     pipe_attr = _ensure_pipe_attr(pipe, ctx)
+    mode_attr = None
+    if ffts_mode != 2:
+        mode_attr = _ensure_i32_attr(ffts_mode, "ffts_mode", ctx)
     if _is_static_i32_event_id(event_id):
         event_attr = _ensure_i32_attr(event_id, "event_id", ctx)
         try:
             return _pto_ops_gen.sync_set(
-                pipe_attr, event_id=event_attr, event_id_dyn=None, loc=loc, ip=ip
-            )
-        except TypeError:
-            return _ods_ir.Operation.create(
-                "pto.sync.set",
-                attributes={"pipe": pipe_attr, "event_id": event_attr},
+                pipe_attr,
+                event_id=event_attr,
+                ffts_mode=mode_attr,
+                event_id_dyn=None,
                 loc=loc,
                 ip=ip,
             )
-    return sync_set_dyn(pipe_attr, event_id, loc=loc, ip=ip)
+        except TypeError:
+            attrs = {"pipe": pipe_attr, "event_id": event_attr}
+            if mode_attr is not None:
+                attrs["ffts_mode"] = mode_attr
+            return _ods_ir.Operation.create(
+                "pto.sync.set",
+                attributes=attrs,
+                loc=loc,
+                ip=ip,
+            )
+    return sync_set_dyn(pipe_attr, event_id, ffts_mode=ffts_mode, loc=loc, ip=ip)
 
 
 def sync_wait_dyn(pipe, event_id, *, loc=None, ip=None):

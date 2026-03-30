@@ -1,9 +1,12 @@
+// Copyright (c) 2026 Huawei Technologies Co., Ltd.
+// This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+// CANN Open Software License Agreement Version 2.0 (the "License").
+// Please refer to the License for details. You may not use this file except in compliance with the License.
+// THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+// INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+// See LICENSE in the root of the software repository for the full text of the License.
+
 //===- PTO.cpp - PTO Dialect ----------------------------------------------===//
-//
-// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
-// See https://llvm.org/LICENSE.txt for license information.
-// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
-//
 //===----------------------------------------------------------------------===//
 
 #include "PTO/IR/PTO.h"
@@ -1532,6 +1535,12 @@ LogicalResult mlir::pto::SyncSetOp::verify() {
   if (hasStatic == hasDynamic)
     return emitOpError()
            << "expects exactly one event-id form: static attr or dynamic index operand";
+  if (IntegerAttr fftsModeAttr = getFftsModeAttr()) {
+    int64_t fftsMode = fftsModeAttr.getInt();
+    if (fftsMode < 0 || fftsMode > 2)
+      return emitOpError() << "requires ffts_mode in range [0, 2], but got "
+                           << fftsMode;
+  }
   return success();
 }
 
@@ -5159,6 +5168,142 @@ mlir::LogicalResult mlir::pto::TPReluOp::verify() {
   return dispatchVerifierByArch(getOperation(), verifyA2A3, verifyA5);
 }
 
+ParseResult mlir::pto::TQuantOp::parse(OpAsmParser &parser,
+                                       OperationState &result) {
+  OpAsmParser::UnresolvedOperand src, fp, offset, dst;
+  Type srcTy, fpTy, offsetTy, dstTy;
+  bool hasOffset = false;
+
+  if (parser.parseKeyword("ins") || parser.parseLParen() ||
+      parser.parseOperand(src) || parser.parseComma() ||
+      parser.parseOperand(fp))
+    return failure();
+  if (succeeded(parser.parseOptionalComma())) {
+    if (parser.parseOperand(offset))
+      return failure();
+    hasOffset = true;
+  }
+  if (parser.parseColon() ||
+      parser.parseType(srcTy) || parser.parseComma() ||
+      parser.parseType(fpTy))
+    return failure();
+  if (hasOffset) {
+    if (parser.parseComma() || parser.parseType(offsetTy))
+      return failure();
+  }
+  if (parser.parseRParen())
+    return failure();
+  if (parser.parseKeyword("outs") || parser.parseLParen() ||
+      parser.parseOperand(dst) || parser.parseColonType(dstTy) ||
+      parser.parseRParen())
+    return failure();
+  if (parser.parseOptionalAttrDict(result.attributes))
+    return failure();
+
+  if (parser.resolveOperand(src, srcTy, result.operands) ||
+      parser.resolveOperand(fp, fpTy, result.operands))
+    return failure();
+  if (hasOffset) {
+    if (parser.resolveOperand(offset, offsetTy, result.operands))
+      return failure();
+  }
+  if (parser.resolveOperand(dst, dstTy, result.operands))
+    return failure();
+
+  result.addAttribute(
+      "operandSegmentSizes",
+      parser.getBuilder().getDenseI32ArrayAttr({1, 1, hasOffset ? 1 : 0, 1}));
+  return success();
+}
+
+void mlir::pto::TQuantOp::print(OpAsmPrinter &p) {
+  p << " ins(" << getSrc() << ", " << getFp();
+  if (getOffset()) {
+    p << ", " << getOffset();
+    p << " : " << getSrc().getType() << ", " << getFp().getType() << ", "
+      << getOffset().getType() << ")";
+  } else {
+    p << " : " << getSrc().getType() << ", " << getFp().getType() << ")";
+  }
+  p << " outs(" << getDst() << " : " << getDst().getType() << ")";
+  p.printOptionalAttrDict((*this)->getAttrs(),
+                          /*elidedAttrs=*/{"operandSegmentSizes"});
+}
+
+mlir::LogicalResult mlir::pto::TQuantOp::verify() {
+  // Structural checks: always run regardless of operand representation
+  // (applies both before and after PTOViewToMemref lowering).
+  auto verifyStructural = [&]() -> LogicalResult {
+    // dst elem type and offset presence must be consistent with quant_type.
+    Type dstTy = getDst().getType();
+    Type dstElemTy = getElemTy(dstTy);
+    auto dstIntTy = dyn_cast<IntegerType>(dstElemTy);
+    if (getQuantType() == mlir::pto::QuantType::INT8_SYM) {
+      if (!dstIntTy || dstIntTy.getWidth() != 8 ||
+          !(dstIntTy.isSignless() || dstIntTy.isSigned()))
+        return emitOpError()
+               << "expects dst element type i8 for INT8_SYM quantization";
+      if (getOffset())
+        return emitOpError()
+               << "INT8_SYM quantization must not have an offset operand";
+    } else {
+      // INT8_ASYM
+      if (!dstIntTy || dstIntTy.getWidth() != 8 || !dstIntTy.isUnsigned())
+        return emitOpError()
+               << "expects dst element type ui8 for INT8_ASYM quantization";
+      if (!getOffset())
+        return emitOpError()
+               << "INT8_ASYM quantization requires an offset operand";
+    }
+    return success();
+  };
+
+  if (failed(verifyStructural()))
+    return failure();
+
+  // Layout/tile-buffer checks: only meaningful for pre-lowering tile types.
+  // Skip when operands are already plain MemRefs (post PTOViewToMemref).
+  if (shouldBypassDecodedMemrefVerifier(getOperation()))
+    return success();
+
+  auto verifyCommon = [&]() -> LogicalResult {
+    Type srcTy = getSrc().getType();
+    Type fpTy  = getFp().getType();
+    Type dstTy = getDst().getType();
+    if (failed(verifyTileBufCommon(*this, srcTy, "src")) ||
+        failed(verifyTileBufCommon(*this, fpTy, "fp")) ||
+        failed(verifyTileBufCommon(*this, dstTy, "dst")))
+      return failure();
+    // src must be f32 (ISA static_assert)
+    if (!getElemTy(srcTy).isF32())
+      return emitOpError() << "expects src to have element type f32";
+    if (getOffset()) {
+      Type offsetTy = getOffset().getType();
+      if (failed(verifyTileBufCommon(*this, offsetTy, "offset")))
+        return failure();
+      if (!getElemTy(offsetTy).isF32())
+        return emitOpError() << "expects offset to have element type f32";
+    }
+    return success();
+  };
+
+  auto verifyA2A3 = [&]() -> LogicalResult {
+    if (failed(verifyCommon()))
+      return failure();
+    Type srcTy = getSrc().getType();
+    Type dstTy = getDst().getType();
+    if (!isRowMajorTileBuf(srcTy) || !isRowMajorTileBuf(dstTy))
+      return emitOpError() << "expects A2/A3 src and dst to use row-major layout";
+    return success();
+  };
+
+  auto verifyA5 = [&]() -> LogicalResult {
+    return verifyCommon();
+  };
+
+  return dispatchVerifierByArch(getOperation(), verifyA2A3, verifyA5);
+}
+
 mlir::LogicalResult mlir::pto::TRecipOp::verify() {
   if (shouldBypassDecodedMemrefVerifier(getOperation()))
     return success();
@@ -7811,6 +7956,15 @@ void TPReluOp::getEffects(
   PTO_ADD_WRITE(getDstMutable());
 }
 
+void TQuantOp::getEffects(
+    SmallVectorImpl<SideEffects::EffectInstance<MemoryEffects::Effect>> &effects) {
+  PTO_ADD_READ(getSrcMutable());
+  PTO_ADD_READ(getFpMutable());
+  auto offsetRange = getOffsetMutable();
+  if (!offsetRange.empty())
+    PTO_ADD_READ(offsetRange[0]);
+  PTO_ADD_WRITE(getDstMutable());
+}
 PTO_DEFINE_UNARY_EFFECTS(TRecipOp, getSrcMutable(), getDstMutable())
 PTO_DEFINE_UNARY_EFFECTS(TReluOp, getSrcMutable(), getDstMutable())
 PTO_DEFINE_BINARY_EFFECTS(TRemOp, getSrc0Mutable(), getSrc1Mutable(), getDstMutable())

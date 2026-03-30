@@ -1,9 +1,12 @@
+// Copyright (c) 2026 Huawei Technologies Co., Ltd.
+// This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+// CANN Open Software License Agreement Version 2.0 (the "License").
+// Please refer to the License for details. You may not use this file except in compliance with the License.
+// THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+// INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+// See LICENSE in the root of the software repository for the full text of the License.
+
 //===- PTOViewToMemref.cpp ------------------------------------------------===//
-//
-// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
-// See https://llvm.org/LICENSE.txt for license information.
-// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
-//
 //===----------------------------------------------------------------------===//
 //
 // Lower PTO tile/view operations to memref-based IR while preserving tile
@@ -2596,6 +2599,42 @@ struct PTOViewToMemrefPass
             src,
             fp,
             dst);
+      }
+
+      SmallVector<mlir::pto::TQuantOp, 8> quantops;
+      func.walk([&](mlir::pto::TQuantOp op) { quantops.push_back(op); });
+
+      for (auto op : quantops) {
+        IRRewriter rewriter(ctx);
+        rewriter.setInsertionPoint(op);
+
+        Value src = op.getSrc();
+        Value fp = op.getFp();
+        Value offset = op.getOffset();
+        Value dst = op.getDst();
+
+        auto srcTy = dyn_cast<MemRefType>(src.getType());
+        auto fpTy = dyn_cast<MemRefType>(fp.getType());
+        auto dstTy = dyn_cast<MemRefType>(dst.getType());
+        if (!srcTy || !fpTy || !dstTy) {
+          op.emitError("ins/outs are not memref yet");
+          signalPassFailure();
+          return;
+        }
+        if (offset && !dyn_cast<MemRefType>(offset.getType())) {
+          op.emitError("offset is not memref yet");
+          signalPassFailure();
+          return;
+        }
+
+        rewriter.replaceOpWithNewOp<pto::TQuantOp>(
+            op,
+            TypeRange{},
+            src,
+            fp,
+            offset,
+            dst,
+            op.getQuantTypeAttr());
       }
 
       SmallVector<mlir::pto::TMrgSortOp, 8> mrgsortops;
