@@ -118,8 +118,9 @@ build_only() {
         -DLLVM_ENABLE_PROJECTS="mlir;llvm" \
          -DCMAKE_C_COMPILER=clang \
          -DCMAKE_CXX_COMPILER=clang++ \
-         -DCMAKE_C_FLAGS="--sysroot=/opt/rh/devtoolset-7/root" \
+         -DCMAKE_C_FLAGS="--sysroot=/opt/rh/devtoolset-7/root --gcc-toolchain=/opt/rh/devtoolset-7/root/usr" \
          -DCMAKE_CXX_FLAGS="--sysroot=/opt/rh/devtoolset-7/root --gcc-toolchain=/opt/rh/devtoolset-7/root/usr" \
+         -DLLVM_USE_LINKER=lld \
          -DLLVM_ENABLE_ZSTD=OFF \
         -DBUILD_SHARED_LIBS=ON \
         -DMLIR_ENABLE_BINDINGS_PYTHON=ON \
@@ -153,8 +154,9 @@ build_only() {
         -DMLIR_ENABLE_BINDINGS_PYTHON=ON \
          -DCMAKE_C_COMPILER=clang \
          -DCMAKE_CXX_COMPILER=clang++ \
-         -DCMAKE_C_FLAGS="--sysroot=/opt/rh/devtoolset-7/root" \
+         -DCMAKE_C_FLAGS="--sysroot=/opt/rh/devtoolset-7/root --gcc-toolchain=/opt/rh/devtoolset-7/root/usr" \
          -DCMAKE_CXX_FLAGS="--sysroot=/opt/rh/devtoolset-7/root --gcc-toolchain=/opt/rh/devtoolset-7/root/usr" \
+         -DLLVM_USE_LINKER=lld \
         -DMLIR_PYTHON_PACKAGE_DIR=$LLVM_BUILD_DIR/tools/mlir/python_packages/mlir_core \
         -DCMAKE_INSTALL_PREFIX="$PTO_INSTALL_DIR"
   else
@@ -223,8 +225,9 @@ package() {
          -DLLVM_ENABLE_PROJECTS="mlir;llvm" \
          -DCMAKE_C_COMPILER=clang \
          -DCMAKE_CXX_COMPILER=clang++ \
-         -DCMAKE_C_FLAGS="--sysroot=/opt/rh/devtoolset-7/root" \
+         -DCMAKE_C_FLAGS="--sysroot=/opt/rh/devtoolset-7/root --gcc-toolchain=/opt/rh/devtoolset-7/root/usr" \
          -DCMAKE_CXX_FLAGS="--sysroot=/opt/rh/devtoolset-7/root --gcc-toolchain=/opt/rh/devtoolset-7/root/usr" \
+         -DLLVM_USE_LINKER=lld \
          -DLLVM_ENABLE_ZSTD=OFF \
          -DBUILD_SHARED_LIBS=ON \
          -DMLIR_ENABLE_BINDINGS_PYTHON=ON \
@@ -258,8 +261,9 @@ package() {
         -DMLIR_ENABLE_BINDINGS_PYTHON=ON \
         -DCMAKE_C_COMPILER=clang \
         -DCMAKE_CXX_COMPILER=clang++ \
-        -DCMAKE_C_FLAGS="--sysroot=/opt/rh/devtoolset-7/root" \
+        -DCMAKE_C_FLAGS="--sysroot=/opt/rh/devtoolset-7/root --gcc-toolchain=/opt/rh/devtoolset-7/root/usr" \
         -DCMAKE_CXX_FLAGS="--sysroot=/opt/rh/devtoolset-7/root --gcc-toolchain=/opt/rh/devtoolset-7/root/usr" \
+        -DLLVM_USE_LINKER=lld \
         -DMLIR_PYTHON_PACKAGE_DIR=$LLVM_BUILD_DIR/tools/mlir/python_packages/mlir_core \
         -DCMAKE_INSTALL_PREFIX="$PTO_INSTALL_DIR" \
         ${CMAKE_ARGS}
