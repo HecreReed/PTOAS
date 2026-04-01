@@ -112,29 +112,64 @@ build_only() {
   export PTO_INSTALL_DIR=$PTO_SOURCE_DIR/install
 
   cd $LLVM_SOURCE_DIR
-  cmake -G Ninja -S llvm -B $LLVM_BUILD_DIR \
-      -DLLVM_ENABLE_PROJECTS="mlir;clang" \
-      -DBUILD_SHARED_LIBS=ON \
-      -DMLIR_ENABLE_BINDINGS_PYTHON=ON \
-      -DPython3_EXECUTABLE=$(which python3) \
-      -DCMAKE_BUILD_TYPE=Release \
-      -DLLVM_TARGETS_TO_BUILD="host"
+
+  if [ -d "$CANN_3RD_LIB_PATH/llvm-19" ]; then
+    cmake -G Ninja -S llvm -B $LLVM_BUILD_DIR \
+        -DLLVM_ENABLE_PROJECTS="mlir;llvm" \
+         -DCMAKE_C_COMPILER=clang \
+         -DCMAKE_CXX_COMPILER=clang++ \
+         -DCMAKE_C_FLAGS="--sysroot=/opt/rh/devtoolset-7/root" \
+         -DCMAKE_CXX_FLAGS="--sysroot=/opt/rh/devtoolset-7/root --gcc-toolchain=/opt/rh/devtoolset-7/root/usr" \
+         -DLLVM_ENABLE_ZSTD=OFF \
+        -DBUILD_SHARED_LIBS=ON \
+        -DMLIR_ENABLE_BINDINGS_PYTHON=ON \
+        -DPython3_EXECUTABLE=$(which python3) \
+        -DCMAKE_BUILD_TYPE=Release \
+        -DLLVM_TARGETS_TO_BUILD="host"
+  else
+    cmake -G Ninja -S llvm -B $LLVM_BUILD_DIR \
+        -DLLVM_ENABLE_PROJECTS="mlir;clang" \
+        -DBUILD_SHARED_LIBS=ON \
+        -DMLIR_ENABLE_BINDINGS_PYTHON=ON \
+        -DPython3_EXECUTABLE=$(which python3) \
+        -DCMAKE_BUILD_TYPE=Release \
+        -DLLVM_TARGETS_TO_BUILD="host"
+  fi
 
   ninja -C $LLVM_BUILD_DIR
 
   cd $PTO_SOURCE_DIR
   export PYBIND11_CMAKE_DIR=$(python3 -m pybind11 --cmakedir)
-  cmake -G Ninja \
-      -S . \
-      -B build \
-      -DLLVM_DIR=$LLVM_BUILD_DIR/lib/cmake/llvm \
-      -DMLIR_DIR=$LLVM_BUILD_DIR/lib/cmake/mlir \
-      -DPython3_EXECUTABLE=$(which python3) \
-      -DPython3_FIND_STRATEGY=LOCATION \
-      -Dpybind11_DIR="${PYBIND11_CMAKE_DIR}" \
-      -DMLIR_ENABLE_BINDINGS_PYTHON=ON \
-      -DMLIR_PYTHON_PACKAGE_DIR=$LLVM_BUILD_DIR/tools/mlir/python_packages/mlir_core \
-      -DCMAKE_INSTALL_PREFIX="$PTO_INSTALL_DIR"
+
+  if [ -d "$CANN_3RD_LIB_PATH/llvm-19" ]; then
+    cmake -G Ninja \
+        -S . \
+        -B build \
+        -DLLVM_DIR=$LLVM_BUILD_DIR/lib/cmake/llvm \
+        -DMLIR_DIR=$LLVM_BUILD_DIR/lib/cmake/mlir \
+        -DPython3_EXECUTABLE=$(which python3) \
+        -DPython3_FIND_STRATEGY=LOCATION \
+        -Dpybind11_DIR="${PYBIND11_CMAKE_DIR}" \
+        -DMLIR_ENABLE_BINDINGS_PYTHON=ON \
+         -DCMAKE_C_COMPILER=clang \
+         -DCMAKE_CXX_COMPILER=clang++ \
+         -DCMAKE_C_FLAGS="--sysroot=/opt/rh/devtoolset-7/root" \
+         -DCMAKE_CXX_FLAGS="--sysroot=/opt/rh/devtoolset-7/root --gcc-toolchain=/opt/rh/devtoolset-7/root/usr" \
+        -DMLIR_PYTHON_PACKAGE_DIR=$LLVM_BUILD_DIR/tools/mlir/python_packages/mlir_core \
+        -DCMAKE_INSTALL_PREFIX="$PTO_INSTALL_DIR"
+  else
+    cmake -G Ninja \
+        -S . \
+        -B build \
+        -DLLVM_DIR=$LLVM_BUILD_DIR/lib/cmake/llvm \
+        -DMLIR_DIR=$LLVM_BUILD_DIR/lib/cmake/mlir \
+        -DPython3_EXECUTABLE=$(which python3) \
+        -DPython3_FIND_STRATEGY=LOCATION \
+        -Dpybind11_DIR="${PYBIND11_CMAKE_DIR}" \
+        -DMLIR_ENABLE_BINDINGS_PYTHON=ON \
+        -DMLIR_PYTHON_PACKAGE_DIR=$LLVM_BUILD_DIR/tools/mlir/python_packages/mlir_core \
+        -DCMAKE_INSTALL_PREFIX="$PTO_INSTALL_DIR"
+  fi
 
   ninja -C build
   ninja -C build install
@@ -182,35 +217,66 @@ package() {
   export PTO_INSTALL_DIR=$PTO_SOURCE_DIR/install
 
   cd $LLVM_SOURCE_DIR
-  cmake -G Ninja -S llvm -B $LLVM_BUILD_DIR \
-       -DLLVM_ENABLE_PROJECTS="mlir;clang" \
-       -DBUILD_SHARED_LIBS=ON \
-       -DMLIR_ENABLE_BINDINGS_PYTHON=ON \
-       -DPython3_EXECUTABLE=$(which python3) \
-       -DCMAKE_BUILD_TYPE=Release \
-       -DLLVM_TARGETS_TO_BUILD="host"
+
+  if [ -d "$CANN_3RD_LIB_PATH/llvm-19" ]; then
+    cmake -G Ninja -S llvm -B $LLVM_BUILD_DIR \
+         -DLLVM_ENABLE_PROJECTS="mlir;llvm" \
+         -DCMAKE_C_COMPILER=clang \
+         -DCMAKE_CXX_COMPILER=clang++ \
+         -DCMAKE_C_FLAGS="--sysroot=/opt/rh/devtoolset-7/root" \
+         -DCMAKE_CXX_FLAGS="--sysroot=/opt/rh/devtoolset-7/root --gcc-toolchain=/opt/rh/devtoolset-7/root/usr" \
+         -DLLVM_ENABLE_ZSTD=OFF \
+         -DBUILD_SHARED_LIBS=ON \
+         -DMLIR_ENABLE_BINDINGS_PYTHON=ON \
+         -DPython3_EXECUTABLE=$(which python3) \
+         -DCMAKE_BUILD_TYPE=Release \
+         -DLLVM_TARGETS_TO_BUILD="host"
+  else
+    cmake -G Ninja -S llvm -B $LLVM_BUILD_DIR \
+         -DLLVM_ENABLE_PROJECTS="mlir;llvm" \
+         -DBUILD_SHARED_LIBS=ON \
+         -DMLIR_ENABLE_BINDINGS_PYTHON=ON \
+         -DPython3_EXECUTABLE=$(which python3) \
+         -DCMAKE_BUILD_TYPE=Release \
+         -DLLVM_TARGETS_TO_BUILD="host"
+  fi
 
   ninja -C $LLVM_BUILD_DIR
-
- # export LLVM_BUILD_DIR=/home/y30038433/code/ptoas/pkg/pto-as/build/llvm-project/build-shared
- # export PTO_SOURCE_DIR=$BASE_PATH
- # export PTO_INSTALL_DIR=$PTO_SOURCE_DIR/install
 
   cd $PTO_SOURCE_DIR
   export PYBIND11_CMAKE_DIR=$(python3 -m pybind11 --cmakedir)
 
-  cmake -G Ninja \
-      -S . \
-      -B build \
-      -DLLVM_DIR=$LLVM_BUILD_DIR/lib/cmake/llvm \
-      -DMLIR_DIR=$LLVM_BUILD_DIR/lib/cmake/mlir \
-      -DPython3_EXECUTABLE=$(which python3) \
-      -DPython3_FIND_STRATEGY=LOCATION \
-      -Dpybind11_DIR="${PYBIND11_CMAKE_DIR}" \
-      -DMLIR_ENABLE_BINDINGS_PYTHON=ON \
-      -DMLIR_PYTHON_PACKAGE_DIR=$LLVM_BUILD_DIR/tools/mlir/python_packages/mlir_core \
-      -DCMAKE_INSTALL_PREFIX="$PTO_INSTALL_DIR" \
-      ${CMAKE_ARGS}
+  if [ -d "$CANN_3RD_LIB_PATH/llvm-19" ]; then
+    cmake -G Ninja \
+        -S . \
+        -B build \
+        -DLLVM_DIR=$LLVM_BUILD_DIR/lib/cmake/llvm \
+        -DMLIR_DIR=$LLVM_BUILD_DIR/lib/cmake/mlir \
+        -DPython3_EXECUTABLE=$(which python3) \
+        -DPython3_FIND_STRATEGY=LOCATION \
+        -Dpybind11_DIR="${PYBIND11_CMAKE_DIR}" \
+        -DMLIR_ENABLE_BINDINGS_PYTHON=ON \
+        -DCMAKE_C_COMPILER=clang \
+        -DCMAKE_CXX_COMPILER=clang++ \
+        -DCMAKE_C_FLAGS="--sysroot=/opt/rh/devtoolset-7/root" \
+        -DCMAKE_CXX_FLAGS="--sysroot=/opt/rh/devtoolset-7/root --gcc-toolchain=/opt/rh/devtoolset-7/root/usr" \
+        -DMLIR_PYTHON_PACKAGE_DIR=$LLVM_BUILD_DIR/tools/mlir/python_packages/mlir_core \
+        -DCMAKE_INSTALL_PREFIX="$PTO_INSTALL_DIR" \
+        ${CMAKE_ARGS}
+  else
+    cmake -G Ninja \
+        -S . \
+        -B build \
+        -DLLVM_DIR=$LLVM_BUILD_DIR/lib/cmake/llvm \
+        -DMLIR_DIR=$LLVM_BUILD_DIR/lib/cmake/mlir \
+        -DPython3_EXECUTABLE=$(which python3) \
+        -DPython3_FIND_STRATEGY=LOCATION \
+        -Dpybind11_DIR="${PYBIND11_CMAKE_DIR}" \
+        -DMLIR_ENABLE_BINDINGS_PYTHON=ON \
+        -DMLIR_PYTHON_PACKAGE_DIR=$LLVM_BUILD_DIR/tools/mlir/python_packages/mlir_core \
+        -DCMAKE_INSTALL_PREFIX="$PTO_INSTALL_DIR" \
+        ${CMAKE_ARGS}
+  fi
 
   ninja -C build
   ninja -C build install
