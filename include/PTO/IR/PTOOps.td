@@ -918,6 +918,107 @@ def TGemvBiasOp : PTO_TOp<"tgemv.bias", [
   }];
 }
 
+def TGemvMxOp : PTO_TOp<"tgemv.mx", [
+  PTO_DpsInitOpInterface,
+  OpPipeInterface,
+  DeclareOpInterfaceMethods<MemoryEffectsOpInterface>
+]> {
+  let summary = "Mixed-precision GEMV with scale tiles (tile world, ins/outs).";
+
+  let arguments = (ins
+    PTODpsType:$a,
+    PTODpsType:$a_scale,
+    PTODpsType:$b,
+    PTODpsType:$b_scale,
+    PTODpsType:$dst
+  );
+
+  let results = (outs Optional<AnyRankedTensor>:$result);
+  let hasVerifier = 1;
+
+  let assemblyFormat = [{
+    `ins` `(` $a `,` $a_scale `,` $b `,` $b_scale
+          `:` type($a) `,` type($a_scale) `,` type($b) `,` type($b_scale) `)`
+    `outs` `(` $dst `:` qualified(type($dst) ) `)`
+    attr-dict
+    (`->` qualified(type($result))^)?
+  }];
+
+  let extraClassDeclaration = [{
+    static StringRef getIntrinsicName() { return "TGEMV_MX"; }
+    ::mlir::pto::PIPE getPipe() { return ::mlir::pto::PIPE::PIPE_M; }
+    ::mlir::MutableOperandRange getDpsInitsMutable() { return getDstMutable(); }
+  }];
+}
+
+def TGemvMxAccOp : PTO_TOp<"tgemv.mx.acc", [
+  PTO_DpsInitOpInterface,
+  OpPipeInterface,
+  DeclareOpInterfaceMethods<MemoryEffectsOpInterface>
+]> {
+  let summary = "Mixed-precision GEMV accumulate with scale tiles (tile world, ins/outs).";
+
+  let arguments = (ins
+    PTODpsType:$c_in,
+    PTODpsType:$a,
+    PTODpsType:$a_scale,
+    PTODpsType:$b,
+    PTODpsType:$b_scale,
+    PTODpsType:$dst
+  );
+
+  let results = (outs Optional<AnyRankedTensor>:$result);
+  let hasVerifier = 1;
+
+  let assemblyFormat = [{
+    `ins` `(` $c_in `,` $a `,` $a_scale `,` $b `,` $b_scale
+          `:` type($c_in) `,` type($a) `,` type($a_scale) `,` type($b) `,` type($b_scale) `)`
+    `outs` `(` $dst `:` qualified(type($dst) ) `)`
+    attr-dict
+    (`->` qualified(type($result))^)?
+  }];
+
+  let extraClassDeclaration = [{
+    static StringRef getIntrinsicName() { return "TGEMV_MX"; }
+    ::mlir::pto::PIPE getPipe() { return ::mlir::pto::PIPE::PIPE_M; }
+    ::mlir::MutableOperandRange getDpsInitsMutable() { return getDstMutable(); }
+  }];
+}
+
+def TGemvMxBiasOp : PTO_TOp<"tgemv.mx.bias", [
+  PTO_DpsInitOpInterface,
+  OpPipeInterface,
+  DeclareOpInterfaceMethods<MemoryEffectsOpInterface>
+]> {
+  let summary = "Mixed-precision GEMV with bias and scale tiles (tile world, ins/outs).";
+
+  let arguments = (ins
+    PTODpsType:$a,
+    PTODpsType:$a_scale,
+    PTODpsType:$b,
+    PTODpsType:$b_scale,
+    PTODpsType:$bias,
+    PTODpsType:$dst
+  );
+
+  let results = (outs Optional<AnyRankedTensor>:$result);
+  let hasVerifier = 1;
+
+  let assemblyFormat = [{
+    `ins` `(` $a `,` $a_scale `,` $b `,` $b_scale `,` $bias
+          `:` type($a) `,` type($a_scale) `,` type($b) `,` type($b_scale) `,` qualified(type($bias)) `)`
+    `outs` `(` $dst `:` qualified(type($dst) ) `)`
+    attr-dict
+    (`->` qualified(type($result))^)?
+  }];
+
+  let extraClassDeclaration = [{
+    static StringRef getIntrinsicName() { return "TGEMV_MX"; }
+    ::mlir::pto::PIPE getPipe() { return ::mlir::pto::PIPE::PIPE_M; }
+    ::mlir::MutableOperandRange getDpsInitsMutable() { return getDstMutable(); }
+  }];
+}
+
 def TMovOp  : PTO_TOp<"tmov", [
   PTO_DpsInitOpInterface,
   OpPipeInterface,
@@ -1492,6 +1593,29 @@ def DeclareTileOp : PTO_Op<"declare_tile", [Pure]> {
 
   let assemblyFormat = [{
     attr-dict `->` qualified(type($tile))
+  }];
+}
+
+def TAssignOp : PTO_Op<"tassign", [Pure]> {
+  let summary = "Rebind a declared tile handle to a runtime address";
+  let description = [{
+    Rebinds an existing tile handle to a new address. This op is intended for
+    manual synchronization workflows (for example, rebinding inside loops while
+    keeping the tile declaration outside the loop).
+  }];
+
+  let arguments = (ins
+    PTODpsType:$tile,
+    I64:$addr
+  );
+  let results = (outs PTODpsType:$result);
+
+  let assemblyFormat = [{
+    $tile `,` $addr attr-dict `:` qualified(type($tile)) `->` qualified(type($result))
+  }];
+
+  let extraClassDeclaration = [{
+    ::mlir::LogicalResult verify();
   }];
 }
 

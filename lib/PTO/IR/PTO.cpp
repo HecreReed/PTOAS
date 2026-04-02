@@ -1400,6 +1400,13 @@ LogicalResult AllocTileOp::verify() {
   return success();
 }
 
+LogicalResult TAssignOp::verify() {
+  if (getTile().getType() != getResult().getType()) {
+    return emitOpError("result type must match tile operand type");
+  }
+  return success();
+}
+
 LogicalResult TLoadOp::verify() {
   auto verifyCommon = [&]() -> FailureOr<std::pair<pto::PartitionTensorViewType, pto::TileBufType>> {
     auto srcPart = dyn_cast<pto::PartitionTensorViewType>(getSrc().getType());
@@ -4380,6 +4387,51 @@ LogicalResult TGemvBiasOp::verify() {
     if (failed(verifyMatmulTypeTriple(*this, getElemTy(getA().getType()),
                                       getElemTy(getB().getType()),
                                       getElemTy(getDst().getType()))))
+      return failure();
+    return verifyMatmulLike(*this, getA().getType(), getB().getType(),
+                            getDst().getType());
+  };
+  auto verifyA5 = [&]() -> LogicalResult { return verifyA2A3(); };
+  return dispatchVerifierByArch(getOperation(), verifyA2A3, verifyA5);
+}
+
+LogicalResult TGemvMxOp::verify() {
+  auto verifyA2A3 = [&]() -> LogicalResult {
+    if (failed(verifyTileBufCommon(*this, getAScale().getType(), "a_scale")) ||
+        failed(verifyTileBufCommon(*this, getBScale().getType(), "b_scale")) ||
+        failed(verifyGemvTileOperands(*this, getA().getType(), getB().getType(),
+                                      getDst().getType())))
+      return failure();
+    return verifyMatmulLike(*this, getA().getType(), getB().getType(),
+                            getDst().getType());
+  };
+  auto verifyA5 = [&]() -> LogicalResult { return verifyA2A3(); };
+  return dispatchVerifierByArch(getOperation(), verifyA2A3, verifyA5);
+}
+
+LogicalResult TGemvMxAccOp::verify() {
+  auto verifyA2A3 = [&]() -> LogicalResult {
+    if (failed(verifyAccTileCommon(*this, getCIn().getType(), "c_in")) ||
+        failed(verifyTileBufCommon(*this, getAScale().getType(), "a_scale")) ||
+        failed(verifyTileBufCommon(*this, getBScale().getType(), "b_scale")) ||
+        failed(verifyGemvTileOperands(*this, getA().getType(), getB().getType(),
+                                      getDst().getType())))
+      return failure();
+    return verifyMatmulLike(*this, getA().getType(), getB().getType(),
+                            getDst().getType());
+  };
+  auto verifyA5 = [&]() -> LogicalResult { return verifyA2A3(); };
+  return dispatchVerifierByArch(getOperation(), verifyA2A3, verifyA5);
+}
+
+LogicalResult TGemvMxBiasOp::verify() {
+  auto verifyA2A3 = [&]() -> LogicalResult {
+    if (failed(verifyTileBufCommon(*this, getAScale().getType(), "a_scale")) ||
+        failed(verifyTileBufCommon(*this, getBScale().getType(), "b_scale")) ||
+        failed(verifyGemvTileOperands(*this, getA().getType(), getB().getType(),
+                                      getDst().getType())) ||
+        failed(verifyMatBiasTile(*this, getBias().getType(), getDst().getType(),
+                                 /*requireFloatBias=*/true)))
       return failure();
     return verifyMatmulLike(*this, getA().getType(), getB().getType(),
                             getDst().getType());
@@ -8199,6 +8251,38 @@ void TGemvAccOp::getEffects(SmallVectorImpl<SideEffects::EffectInstance<MemoryEf
 void TGemvBiasOp::getEffects(SmallVectorImpl<SideEffects::EffectInstance<MemoryEffects::Effect>> &effects) {
   addEffect(effects, &getAMutable(), MemoryEffects::Read::get());
   addEffect(effects, &getBMutable(), MemoryEffects::Read::get());
+  addEffect(effects, &getBiasMutable(), MemoryEffects::Read::get());
+  addEffect(effects, &getDstMutable(), MemoryEffects::Write::get());
+}
+
+// === TGemvMxOp ===
+// Read: a, a_scale, b, b_scale, Write: dst
+void TGemvMxOp::getEffects(SmallVectorImpl<SideEffects::EffectInstance<MemoryEffects::Effect>> &effects) {
+  addEffect(effects, &getAMutable(), MemoryEffects::Read::get());
+  addEffect(effects, &getAScaleMutable(), MemoryEffects::Read::get());
+  addEffect(effects, &getBMutable(), MemoryEffects::Read::get());
+  addEffect(effects, &getBScaleMutable(), MemoryEffects::Read::get());
+  addEffect(effects, &getDstMutable(), MemoryEffects::Write::get());
+}
+
+// === TGemvMxAccOp ===
+// Read: c_in, a, a_scale, b, b_scale, Write: dst
+void TGemvMxAccOp::getEffects(SmallVectorImpl<SideEffects::EffectInstance<MemoryEffects::Effect>> &effects) {
+  addEffect(effects, &getCInMutable(), MemoryEffects::Read::get());
+  addEffect(effects, &getAMutable(), MemoryEffects::Read::get());
+  addEffect(effects, &getAScaleMutable(), MemoryEffects::Read::get());
+  addEffect(effects, &getBMutable(), MemoryEffects::Read::get());
+  addEffect(effects, &getBScaleMutable(), MemoryEffects::Read::get());
+  addEffect(effects, &getDstMutable(), MemoryEffects::Write::get());
+}
+
+// === TGemvMxBiasOp ===
+// Read: a, a_scale, b, b_scale, bias, Write: dst
+void TGemvMxBiasOp::getEffects(SmallVectorImpl<SideEffects::EffectInstance<MemoryEffects::Effect>> &effects) {
+  addEffect(effects, &getAMutable(), MemoryEffects::Read::get());
+  addEffect(effects, &getAScaleMutable(), MemoryEffects::Read::get());
+  addEffect(effects, &getBMutable(), MemoryEffects::Read::get());
+  addEffect(effects, &getBScaleMutable(), MemoryEffects::Read::get());
   addEffect(effects, &getBiasMutable(), MemoryEffects::Read::get());
   addEffect(effects, &getDstMutable(), MemoryEffects::Write::get());
 }

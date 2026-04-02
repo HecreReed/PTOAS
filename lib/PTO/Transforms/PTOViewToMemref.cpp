@@ -635,7 +635,7 @@ struct PTOViewToMemrefPass
           continue;
         }
 
-        // 7. Otherwise, allocate a concrete memref buffer and bind metadata.
+        // 7. Otherwise allocate a concrete memref buffer and bind tile.
         // memref.alloc 要求明确的 layout，不能是动态 offset。
         auto allocLayout = StridedLayoutAttr::get(ctx, 0, strides); // offset = 0
         auto allocType = MemRefType::get(shape, elemTy, allocLayout, tbTy.getMemorySpace());
@@ -706,6 +706,24 @@ struct PTOViewToMemrefPass
         markForceDynamicValidShape(bindOp, tbTy.hasDynamicValid(), ctx);
 
         rewriter.replaceOp(op, bindOp.getResult());
+      }
+
+      // ------------------------------------------------------------------
+      // Stage 0.8: normalize pto.tassign result type to match tile operand
+      // after tile_buf -> memref lowering (required for verifier consistency).
+      // ------------------------------------------------------------------
+      SmallVector<mlir::pto::TAssignOp, 8> tassignOps;
+      func.walk([&](mlir::pto::TAssignOp op) { tassignOps.push_back(op); });
+      for (auto op : tassignOps) {
+        Type targetTy = op.getTile().getType();
+        if (op.getResult().getType() == targetTy)
+          continue;
+        IRRewriter rewriter(ctx);
+        rewriter.setInsertionPoint(op);
+        auto normalized =
+            rewriter.create<pto::TAssignOp>(op.getLoc(), targetTy, op.getTile(),
+                                            op.getAddr());
+        rewriter.replaceOp(op, normalized.getResult());
       }
 
       // ------------------------------------------------------------------
@@ -1489,6 +1507,41 @@ struct PTOViewToMemrefPass
         rewriter.replaceOpWithNewOp<pto::TGemvBiasOp>(
           op, TypeRange{}, 
           op->getOperand(0), op->getOperand(1), op->getOperand(2), op->getOperand(3));
+      }
+
+      // --- TGemvMxOp [A, AScale, B, BScale, Dst] ---
+      SmallVector<mlir::pto::TGemvMxOp , 8> gemvMxs;
+      func.walk([&](mlir::pto::TGemvMxOp  op) { gemvMxs.push_back(op); });
+      for (auto op : gemvMxs) {
+        IRRewriter rewriter(ctx);
+        rewriter.setInsertionPoint(op);
+        rewriter.replaceOpWithNewOp<pto::TGemvMxOp>(
+          op, TypeRange{},
+          op->getOperand(0), op->getOperand(1), op->getOperand(2), op->getOperand(3), op->getOperand(4));
+      }
+
+      // --- TGemvMxAccOp [CIn, A, AScale, B, BScale, Dst] ---
+      SmallVector<mlir::pto::TGemvMxAccOp , 8> gemvMxAccs;
+      func.walk([&](mlir::pto::TGemvMxAccOp  op) { gemvMxAccs.push_back(op); });
+      for (auto op : gemvMxAccs) {
+        IRRewriter rewriter(ctx);
+        rewriter.setInsertionPoint(op);
+        rewriter.replaceOpWithNewOp<pto::TGemvMxAccOp>(
+          op, TypeRange{},
+          op->getOperand(0), op->getOperand(1), op->getOperand(2),
+          op->getOperand(3), op->getOperand(4), op->getOperand(5));
+      }
+
+      // --- TGemvMxBiasOp [A, AScale, B, BScale, Bias, Dst] ---
+      SmallVector<mlir::pto::TGemvMxBiasOp , 8> gemvMxBiass;
+      func.walk([&](mlir::pto::TGemvMxBiasOp  op) { gemvMxBiass.push_back(op); });
+      for (auto op : gemvMxBiass) {
+        IRRewriter rewriter(ctx);
+        rewriter.setInsertionPoint(op);
+        rewriter.replaceOpWithNewOp<pto::TGemvMxBiasOp>(
+          op, TypeRange{},
+          op->getOperand(0), op->getOperand(1), op->getOperand(2),
+          op->getOperand(3), op->getOperand(4), op->getOperand(5));
       }
 
       // --- TMovOp [Src, Dst] ---

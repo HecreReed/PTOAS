@@ -35,3 +35,6 @@ grep -F "pto.subset " "${ROUNDTRIP}" >/dev/null
 grep -F "pto.tprint ins(" "${ROUNDTRIP}" >/dev/null
 grep -F "pto.trowexpanddiv ins(" "${ROUNDTRIP}" >/dev/null
 grep -F "pto.trowexpandmul ins(" "${ROUNDTRIP}" >/dev/null
+grep -F "pto.tgemv.mx ins(" "${ROUNDTRIP}" >/dev/null
+grep -F "pto.tgemv.mx.acc ins(" "${ROUNDTRIP}" >/dev/null
+grep -F "pto.tgemv.mx.bias ins(" "${ROUNDTRIP}" >/dev/null
