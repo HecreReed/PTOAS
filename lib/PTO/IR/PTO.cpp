@@ -4395,51 +4395,6 @@ LogicalResult TGemvBiasOp::verify() {
   return dispatchVerifierByArch(getOperation(), verifyA2A3, verifyA5);
 }
 
-LogicalResult TGemvMxOp::verify() {
-  auto verifyA2A3 = [&]() -> LogicalResult {
-    if (failed(verifyTileBufCommon(*this, getAScale().getType(), "a_scale")) ||
-        failed(verifyTileBufCommon(*this, getBScale().getType(), "b_scale")) ||
-        failed(verifyGemvTileOperands(*this, getA().getType(), getB().getType(),
-                                      getDst().getType())))
-      return failure();
-    return verifyMatmulLike(*this, getA().getType(), getB().getType(),
-                            getDst().getType());
-  };
-  auto verifyA5 = [&]() -> LogicalResult { return verifyA2A3(); };
-  return dispatchVerifierByArch(getOperation(), verifyA2A3, verifyA5);
-}
-
-LogicalResult TGemvMxAccOp::verify() {
-  auto verifyA2A3 = [&]() -> LogicalResult {
-    if (failed(verifyAccTileCommon(*this, getCIn().getType(), "c_in")) ||
-        failed(verifyTileBufCommon(*this, getAScale().getType(), "a_scale")) ||
-        failed(verifyTileBufCommon(*this, getBScale().getType(), "b_scale")) ||
-        failed(verifyGemvTileOperands(*this, getA().getType(), getB().getType(),
-                                      getDst().getType())))
-      return failure();
-    return verifyMatmulLike(*this, getA().getType(), getB().getType(),
-                            getDst().getType());
-  };
-  auto verifyA5 = [&]() -> LogicalResult { return verifyA2A3(); };
-  return dispatchVerifierByArch(getOperation(), verifyA2A3, verifyA5);
-}
-
-LogicalResult TGemvMxBiasOp::verify() {
-  auto verifyA2A3 = [&]() -> LogicalResult {
-    if (failed(verifyTileBufCommon(*this, getAScale().getType(), "a_scale")) ||
-        failed(verifyTileBufCommon(*this, getBScale().getType(), "b_scale")) ||
-        failed(verifyGemvTileOperands(*this, getA().getType(), getB().getType(),
-                                      getDst().getType())) ||
-        failed(verifyMatBiasTile(*this, getBias().getType(), getDst().getType(),
-                                 /*requireFloatBias=*/true)))
-      return failure();
-    return verifyMatmulLike(*this, getA().getType(), getB().getType(),
-                            getDst().getType());
-  };
-  auto verifyA5 = [&]() -> LogicalResult { return verifyA2A3(); };
-  return dispatchVerifierByArch(getOperation(), verifyA2A3, verifyA5);
-}
-
 LogicalResult TMatmulBiasOp::verify() {
   auto verifyA2A3 = [&]() -> LogicalResult {
     if (failed(verifyMatTileOperands(*this, getA().getType(), getB().getType(),
@@ -5507,8 +5462,6 @@ mlir::LogicalResult mlir::pto::TRemSOp::verify() {
     return failure();
   if (failed(verifyTileBufSameShapeAndElem(*this, ts, td, "src", "dst")))
     return failure();
-  if (!mlir::isa<mlir::FloatType>(getScalar().getType()))
-    return emitOpError("expects scalar to be a float type");
   return mlir::success();
 }
 
@@ -5837,6 +5790,55 @@ void mlir::pto::TSort32Op::print(OpAsmPrinter &p) {
   }
   p << " outs(" << getDst() << " : " << getDst().getType() << ")";
   p.printOptionalAttrDict((*this)->getAttrs(), /*elidedAttrs=*/{"operandSegmentSizes"});
+}
+
+ParseResult mlir::pto::TRsqrtOp::parse(OpAsmParser &parser, OperationState &result) {
+  OpAsmParser::UnresolvedOperand src, tmp, dst;
+  Type srcTy, tmpTy, dstTy;
+  bool hasTmp = false;
+
+  if (parser.parseKeyword("ins") || parser.parseLParen() || parser.parseOperand(src))
+    return failure();
+  if (succeeded(parser.parseOptionalComma())) {
+    if (parser.parseOperand(tmp))
+      return failure();
+    hasTmp = true;
+  }
+  if (parser.parseColonType(srcTy))
+    return failure();
+  if (hasTmp) {
+    if (parser.parseComma() || parser.parseType(tmpTy))
+      return failure();
+  }
+  if (parser.parseRParen())
+    return failure();
+
+  if (parser.parseKeyword("outs") || parser.parseLParen() ||
+      parser.parseOperand(dst) || parser.parseColonType(dstTy) ||
+      parser.parseRParen())
+    return failure();
+  if (parser.parseOptionalAttrDict(result.attributes))
+    return failure();
+
+  if (parser.resolveOperand(src, srcTy, result.operands) ||
+      parser.resolveOperand(dst, dstTy, result.operands))
+    return failure();
+  if (hasTmp && parser.resolveOperand(tmp, tmpTy, result.operands))
+    return failure();
+
+  return success();
+}
+
+void mlir::pto::TRsqrtOp::print(OpAsmPrinter &p) {
+  p << " ins(" << getSrc();
+  if (getTmp())
+    p << ", " << getTmp();
+  p << " : " << getSrc().getType();
+  if (getTmp())
+    p << ", " << getTmp().getType();
+  p << ")";
+  p << " outs(" << getDst() << " : " << getDst().getType() << ")";
+  p.printOptionalAttrDict((*this)->getAttrs());
 }
 
 ParseResult mlir::pto::TRowExpandDivOp::parse(OpAsmParser &parser, OperationState &result) {
@@ -6283,6 +6285,19 @@ mlir::LogicalResult mlir::pto::TRsqrtOp::verify() {
   auto ft = getElemTy(ts).dyn_cast<mlir::FloatType>();
   if (!ft || (!ft.isF16() && !ft.isF32()))
     return emitOpError("expects element type to be f16 or f32");
+  if (auto tmp = getTmp()) {
+    Type tt = tmp.getType();
+    if (failed(verifyVecTileCommon(*this, tt, "tmp")))
+      return failure();
+
+    auto tmpElemTy = getElemTy(tt);
+    auto tmpElemBytes = getElemBytes(tmpElemTy);
+    auto tmpNumel = getStaticNumElements(getShapeVec(tt));
+    if (!tmpElemBytes.has_value() || !tmpNumel.has_value())
+      return emitOpError("expects tmp to have a static, byte-addressable tile type");
+    if (tmpElemBytes.value() * tmpNumel.value() < 32)
+      return emitOpError("expects tmp to be at least 32 bytes when provided");
+  }
   return mlir::success();
 }
 
@@ -8120,7 +8135,14 @@ void TRowSumOp::getEffects(
   PTO_ADD_WRITE(getDstMutable());
 }
 
-PTO_DEFINE_UNARY_EFFECTS(TRsqrtOp, getSrcMutable(), getDstMutable())
+void TRsqrtOp::getEffects(
+    SmallVectorImpl<SideEffects::EffectInstance<MemoryEffects::Effect>> &effects) {
+  PTO_ADD_READ(getSrcMutable());
+  auto tmp = getTmpMutable();
+  if (!tmp.empty())
+    PTO_ADD_READ(tmp[0]);
+  PTO_ADD_WRITE(getDstMutable());
+}
 PTO_DEFINE_BINARY_EFFECTS(TScatterOp, getSrcMutable(), getIndexesMutable(), getDstMutable())
 
 // Select: Read(mask, src0, src1) -> Write(tmp, dst)
@@ -8251,38 +8273,6 @@ void TGemvAccOp::getEffects(SmallVectorImpl<SideEffects::EffectInstance<MemoryEf
 void TGemvBiasOp::getEffects(SmallVectorImpl<SideEffects::EffectInstance<MemoryEffects::Effect>> &effects) {
   addEffect(effects, &getAMutable(), MemoryEffects::Read::get());
   addEffect(effects, &getBMutable(), MemoryEffects::Read::get());
-  addEffect(effects, &getBiasMutable(), MemoryEffects::Read::get());
-  addEffect(effects, &getDstMutable(), MemoryEffects::Write::get());
-}
-
-// === TGemvMxOp ===
-// Read: a, a_scale, b, b_scale, Write: dst
-void TGemvMxOp::getEffects(SmallVectorImpl<SideEffects::EffectInstance<MemoryEffects::Effect>> &effects) {
-  addEffect(effects, &getAMutable(), MemoryEffects::Read::get());
-  addEffect(effects, &getAScaleMutable(), MemoryEffects::Read::get());
-  addEffect(effects, &getBMutable(), MemoryEffects::Read::get());
-  addEffect(effects, &getBScaleMutable(), MemoryEffects::Read::get());
-  addEffect(effects, &getDstMutable(), MemoryEffects::Write::get());
-}
-
-// === TGemvMxAccOp ===
-// Read: c_in, a, a_scale, b, b_scale, Write: dst
-void TGemvMxAccOp::getEffects(SmallVectorImpl<SideEffects::EffectInstance<MemoryEffects::Effect>> &effects) {
-  addEffect(effects, &getCInMutable(), MemoryEffects::Read::get());
-  addEffect(effects, &getAMutable(), MemoryEffects::Read::get());
-  addEffect(effects, &getAScaleMutable(), MemoryEffects::Read::get());
-  addEffect(effects, &getBMutable(), MemoryEffects::Read::get());
-  addEffect(effects, &getBScaleMutable(), MemoryEffects::Read::get());
-  addEffect(effects, &getDstMutable(), MemoryEffects::Write::get());
-}
-
-// === TGemvMxBiasOp ===
-// Read: a, a_scale, b, b_scale, bias, Write: dst
-void TGemvMxBiasOp::getEffects(SmallVectorImpl<SideEffects::EffectInstance<MemoryEffects::Effect>> &effects) {
-  addEffect(effects, &getAMutable(), MemoryEffects::Read::get());
-  addEffect(effects, &getAScaleMutable(), MemoryEffects::Read::get());
-  addEffect(effects, &getBMutable(), MemoryEffects::Read::get());
-  addEffect(effects, &getBScaleMutable(), MemoryEffects::Read::get());
   addEffect(effects, &getBiasMutable(), MemoryEffects::Read::get());
   addEffect(effects, &getDstMutable(), MemoryEffects::Write::get());
 }

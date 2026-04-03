@@ -127,7 +127,7 @@ inline constexpr OpInfo kOpTable[] = {
   {0x1052, "pto.trowmax", 0, 0x00, 0x00, 3, 0, 0, 0x00},
   {0x1053, "pto.trowmin", 0, 0x00, 0x00, 3, 0, 0, 0x00},
   {0x1054, "pto.trowsum", 0, 0x00, 0x00, 3, 0, 0, 0x00},
-  {0x1055, "pto.trsqrt", 0, 0x00, 0x00, 2, 0, 0, 0x00},
+  {0x1055, "pto.trsqrt", 0, 0x00, 0x02, 0, 0, 0, 0x00},
   {0x1056, "pto.tscatter", 0, 0x00, 0x00, 3, 0, 0, 0x00},
   {0x1057, "pto.tsel", 0, 0x00, 0x00, 5, 0, 0, 0x00},
   {0x1058, "pto.tsels", 0, 0x00, 0x00, 5, 0, 0, 0x00},
@@ -484,8 +484,6 @@ inline std::optional<OpcodeAndVariant> lookupOpcodeAndVariantByFullName(llvm::St
     .Case("pto.tgemv.acc", OpcodeAndVariant{0x102A, 1, 1})
     .Case("pto.tgemv.bias", OpcodeAndVariant{0x102A, 1, 2})
     .Case("pto.tgemv.mx", OpcodeAndVariant{0x102A, 1, 3})
-    .Case("pto.tgemv.mx.acc", OpcodeAndVariant{0x102A, 1, 4})
-    .Case("pto.tgemv.mx.bias", OpcodeAndVariant{0x102A, 1, 5})
     .Case("pto.tmatmul", OpcodeAndVariant{0x1032, 1, 0})
     .Case("pto.tmatmul.acc", OpcodeAndVariant{0x1032, 1, 1})
     .Case("pto.tmatmul.bias", OpcodeAndVariant{0x1032, 1, 2})
@@ -512,8 +510,6 @@ inline const char *fullNameFromOpcodeVariant(uint16_t opcode, uint8_t variant) {
     case 1: return "pto.tgemv.acc";
     case 2: return "pto.tgemv.bias";
     case 3: return "pto.tgemv.mx";
-    case 4: return "pto.tgemv.mx.acc";
-    case 5: return "pto.tgemv.mx.bias";
     default: return info->name;
     }
   case 0x1032:
@@ -542,8 +538,6 @@ inline std::optional<int> lookupOperandsByVariant(uint16_t opcode, uint8_t varia
     case 1: return 4;
     case 2: return 4;
     case 3: return 5;
-    case 4: return 6;
-    case 5: return 6;
     default: return std::nullopt;
     }
   case 0x1032:
