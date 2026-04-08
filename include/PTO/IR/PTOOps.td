@@ -504,7 +504,11 @@ def TStoreOp: PTO_TOp<"tstore", [
 
   let arguments = (ins
     PTODpsType:$src,
-    PTODpsType:$dst
+    PTODpsType:$dst,
+    Optional<I64>:$preQuantScalar,
+    DefaultValuedAttr<PTO_STPhaseAttr, "::mlir::pto::STPhase::Unspecified">:$stPhase,
+    DefaultValuedAttr<PTO_AtomicTypeAttr, "::mlir::pto::AtomicType::AtomicNone">:$atomicType,
+    DefaultValuedAttr<PTO_ReluPreModeAttr, "::mlir::pto::ReluPreMode::NoRelu">:$reluPreMode
   );
 
   let results = (outs
@@ -514,7 +518,8 @@ def TStoreOp: PTO_TOp<"tstore", [
   let hasVerifier = 1;
 
   let assemblyFormat = [{
-    `ins` `(` $src `:` qualified(type($src)) `)`
+    `ins` `(` $src `:` qualified(type($src))
+           (`,` $preQuantScalar^ `:` type($preQuantScalar))? `)`
     `outs` `(` $dst `:` qualified(type($dst) ) `)`
     attr-dict
     (`->` qualified(type($result))^)?
@@ -914,6 +919,107 @@ def TGemvBiasOp : PTO_TOp<"tgemv.bias", [
     ::mlir::pto::PIPE getPipe() {
       return ::mlir::pto::PIPE::PIPE_M; 
     }
+    ::mlir::MutableOperandRange getDpsInitsMutable() { return getDstMutable(); }
+  }];
+}
+
+def TGemvMxOp : PTO_TOp<"tgemv.mx", [
+  PTO_DpsInitOpInterface,
+  OpPipeInterface,
+  DeclareOpInterfaceMethods<MemoryEffectsOpInterface>
+]> {
+  let summary = "Mixed-precision GEMV with scale tiles (tile world, ins/outs).";
+
+  let arguments = (ins
+    PTODpsType:$a,
+    PTODpsType:$a_scale,
+    PTODpsType:$b,
+    PTODpsType:$b_scale,
+    PTODpsType:$dst
+  );
+
+  let results = (outs Optional<AnyRankedTensor>:$result);
+  let hasVerifier = 1;
+
+  let assemblyFormat = [{
+    `ins` `(` $a `,` $a_scale `,` $b `,` $b_scale
+          `:` type($a) `,` type($a_scale) `,` type($b) `,` type($b_scale) `)`
+    `outs` `(` $dst `:` qualified(type($dst) ) `)`
+    attr-dict
+    (`->` qualified(type($result))^)?
+  }];
+
+  let extraClassDeclaration = [{
+    static StringRef getIntrinsicName() { return "TGEMV_MX"; }
+    ::mlir::pto::PIPE getPipe() { return ::mlir::pto::PIPE::PIPE_M; }
+    ::mlir::MutableOperandRange getDpsInitsMutable() { return getDstMutable(); }
+  }];
+}
+
+def TGemvMxAccOp : PTO_TOp<"tgemv.mx.acc", [
+  PTO_DpsInitOpInterface,
+  OpPipeInterface,
+  DeclareOpInterfaceMethods<MemoryEffectsOpInterface>
+]> {
+  let summary = "Mixed-precision GEMV accumulate with scale tiles (tile world, ins/outs).";
+
+  let arguments = (ins
+    PTODpsType:$c_in,
+    PTODpsType:$a,
+    PTODpsType:$a_scale,
+    PTODpsType:$b,
+    PTODpsType:$b_scale,
+    PTODpsType:$dst
+  );
+
+  let results = (outs Optional<AnyRankedTensor>:$result);
+  let hasVerifier = 1;
+
+  let assemblyFormat = [{
+    `ins` `(` $c_in `,` $a `,` $a_scale `,` $b `,` $b_scale
+          `:` type($c_in) `,` type($a) `,` type($a_scale) `,` type($b) `,` type($b_scale) `)`
+    `outs` `(` $dst `:` qualified(type($dst) ) `)`
+    attr-dict
+    (`->` qualified(type($result))^)?
+  }];
+
+  let extraClassDeclaration = [{
+    static StringRef getIntrinsicName() { return "TGEMV_MX"; }
+    ::mlir::pto::PIPE getPipe() { return ::mlir::pto::PIPE::PIPE_M; }
+    ::mlir::MutableOperandRange getDpsInitsMutable() { return getDstMutable(); }
+  }];
+}
+
+def TGemvMxBiasOp : PTO_TOp<"tgemv.mx.bias", [
+  PTO_DpsInitOpInterface,
+  OpPipeInterface,
+  DeclareOpInterfaceMethods<MemoryEffectsOpInterface>
+]> {
+  let summary = "Mixed-precision GEMV with bias and scale tiles (tile world, ins/outs).";
+
+  let arguments = (ins
+    PTODpsType:$a,
+    PTODpsType:$a_scale,
+    PTODpsType:$b,
+    PTODpsType:$b_scale,
+    PTODpsType:$bias,
+    PTODpsType:$dst
+  );
+
+  let results = (outs Optional<AnyRankedTensor>:$result);
+  let hasVerifier = 1;
+
+  let assemblyFormat = [{
+    `ins` `(` $a `,` $a_scale `,` $b `,` $b_scale `,` $bias
+          `:` type($a) `,` type($a_scale) `,` type($b) `,` type($b_scale) `,` qualified(type($bias)) `)`
+    `outs` `(` $dst `:` qualified(type($dst) ) `)`
+    attr-dict
+    (`->` qualified(type($result))^)?
+  }];
+
+  let extraClassDeclaration = [{
+    static StringRef getIntrinsicName() { return "TGEMV_MX"; }
+    ::mlir::pto::PIPE getPipe() { return ::mlir::pto::PIPE::PIPE_M; }
     ::mlir::MutableOperandRange getDpsInitsMutable() { return getDstMutable(); }
   }];
 }
@@ -1372,6 +1478,110 @@ def ImportReservedBufferOp : PTO_Op<"import_reserved_buffer"> {
 //===----------------------------------------------------------------------===//
 // TPUSH/TPOP Pipe Communication Ops
 //===----------------------------------------------------------------------===//
+
+def BuildAsyncSessionOp : PTO_Op<"build_async_session", [
+    DeclareOpInterfaceMethods<MemoryEffectsOpInterface>
+]> {
+  let summary = "Build an async DMA session handle for TPUT_ASYNC/TGET_ASYNC";
+
+  let arguments = (ins
+      TileBufOrMemRef:$scratch,
+      ScalarPtrOrMemRef:$workspace,
+      OptionalAttr<I32Attr>:$sync_id,
+      OptionalAttr<I64Attr>:$block_bytes,
+      OptionalAttr<I64Attr>:$comm_block_offset,
+      OptionalAttr<I32Attr>:$queue_num,
+      OptionalAttr<I64Attr>:$channel_group_idx
+  );
+
+  let results = (outs AsyncSessionType:$session);
+  let hasVerifier = 1;
+
+  let assemblyFormat = [{
+    `(` $scratch `,` $workspace `:` qualified(type($scratch)) `,` type($workspace) `)`
+    attr-dict `->` qualified(type($session))
+  }];
+}
+
+def TPutAsyncOp : PTO_Op<"tput_async", [
+    DeclareOpInterfaceMethods<MemoryEffectsOpInterface>
+]> {
+  let summary = "Asynchronous remote write from local GM to remote GM";
+
+  let arguments = (ins
+      PTODpsType:$dst,
+      PTODpsType:$src,
+      AsyncSessionType:$session
+  );
+
+  let results = (outs AsyncEventType:$event);
+  let hasVerifier = 1;
+
+  let assemblyFormat = [{
+    `(` $dst `,` $src `,` $session `:`
+        type($dst) `,` type($src) `,` qualified(type($session)) `)`
+    attr-dict `->` qualified(type($event))
+  }];
+}
+
+def TGetAsyncOp : PTO_Op<"tget_async", [
+    DeclareOpInterfaceMethods<MemoryEffectsOpInterface>
+]> {
+  let summary = "Asynchronous remote read from remote GM to local GM";
+
+  let arguments = (ins
+      PTODpsType:$dst,
+      PTODpsType:$src,
+      AsyncSessionType:$session
+  );
+
+  let results = (outs AsyncEventType:$event);
+  let hasVerifier = 1;
+
+  let assemblyFormat = [{
+    `(` $dst `,` $src `,` $session `:`
+        type($dst) `,` type($src) `,` qualified(type($session)) `)`
+    attr-dict `->` qualified(type($event))
+  }];
+}
+
+def WaitAsyncEventOp : PTO_Op<"wait_async_event", [
+    DeclareOpInterfaceMethods<MemoryEffectsOpInterface>
+]> {
+  let summary = "Block until an async DMA event completes";
+
+  let arguments = (ins
+      AsyncEventType:$event,
+      AsyncSessionType:$session
+  );
+
+  let results = (outs I1:$completed);
+
+  let assemblyFormat = [{
+    `(` $event `,` $session `:`
+        qualified(type($event)) `,` qualified(type($session)) `)`
+    attr-dict `->` type($completed)
+  }];
+}
+
+def TestAsyncEventOp : PTO_Op<"test_async_event", [
+    DeclareOpInterfaceMethods<MemoryEffectsOpInterface>
+]> {
+  let summary = "Non-blocking completion test for an async DMA event";
+
+  let arguments = (ins
+      AsyncEventType:$event,
+      AsyncSessionType:$session
+  );
+
+  let results = (outs I1:$completed);
+
+  let assemblyFormat = [{
+    `(` $event `,` $session `:`
+        qualified(type($event)) `,` qualified(type($session)) `)`
+    attr-dict `->` type($completed)
+  }];
+}
 
 def InitializeL2G2LPipeOp : PTO_Op<"initialize_l2g2l_pipe", [
     DeclareOpInterfaceMethods<MemoryEffectsOpInterface>
@@ -2374,6 +2584,35 @@ def TColExpandOp : PTO_TOp<"tcolexpand", [
   }];
 }
 
+def TColExpandAddOp : PTO_TOp<"tcolexpandadd", [
+  PTO_DpsInitOpInterface,
+  OpPipeInterface,
+  DeclareOpInterfaceMethods<MemoryEffectsOpInterface>
+]> {
+  let summary = "Column-wise broadcast add: add a per-column scalar vector src1 to src0 ";
+
+  let arguments = (ins
+    PTODpsType:$src0,
+    PTODpsType:$src1,
+    PTODpsType:$dst
+  );
+
+  let results = (outs);
+
+  let hasVerifier = 1;
+
+  let extraClassDeclaration = [{
+    ::mlir::pto::PIPE getPipe() { return ::mlir::pto::PIPE::PIPE_V; }
+    ::mlir::MutableOperandRange getDpsInitsMutable() { return getDstMutable(); }
+  }];
+
+  let assemblyFormat = [{
+    `ins` `(` $src0 `,` $src1 `:` qualified(type($src0)) `,` qualified(type($src1)) `)`
+    `outs` `(` $dst `:` qualified(type($dst) ) `)`
+    attr-dict
+  }];
+}
+
 def TColExpandMulOp : PTO_TOp<"tcolexpandmul", [
   PTO_DpsInitOpInterface,
   OpPipeInterface,
@@ -2438,6 +2677,35 @@ def TColExpandSubOp : PTO_TOp<"tcolexpandsub", [
   DeclareOpInterfaceMethods<MemoryEffectsOpInterface>
 ]> {
   let summary = "Column-wise broadcast subtract: subtract a per-column scalar vector src1 from src0 ";
+
+  let arguments = (ins
+    PTODpsType:$src0,
+    PTODpsType:$src1,
+    PTODpsType:$dst
+  );
+
+  let results = (outs);
+
+  let hasVerifier = 1;
+
+  let extraClassDeclaration = [{
+    ::mlir::pto::PIPE getPipe() { return ::mlir::pto::PIPE::PIPE_V; }
+    ::mlir::MutableOperandRange getDpsInitsMutable() { return getDstMutable(); }
+  }];
+
+  let assemblyFormat = [{
+    `ins` `(` $src0 `,` $src1 `:` qualified(type($src0)) `,` qualified(type($src1)) `)`
+    `outs` `(` $dst `:` qualified(type($dst) ) `)`
+    attr-dict
+  }];
+}
+
+def TColExpandExpdifOp : PTO_TOp<"tcolexpandexpdif", [
+  PTO_DpsInitOpInterface,
+  OpPipeInterface,
+  DeclareOpInterfaceMethods<MemoryEffectsOpInterface>
+]> {
+  let summary = "Column-wise broadcast expdif: compute exp(src0 - src1) using a per-column scalar vector src1 ";
 
   let arguments = (ins
     PTODpsType:$src0,
@@ -2603,6 +2871,34 @@ def TColSumOp : PTO_TOp<"tcolsum", [
   }];
 }
 
+def TColProdOp : PTO_TOp<"tcolprod", [
+  PTO_DpsInitOpInterface,
+  OpPipeInterface,
+  DeclareOpInterfaceMethods<MemoryEffectsOpInterface>
+]> {
+  let summary = "Reduce each column by multiplying across rows";
+
+  let arguments = (ins
+    PTODpsType:$src,
+    PTODpsType:$dst
+  );
+
+  let results = (outs);
+
+  let hasVerifier = 1;
+
+  let extraClassDeclaration = [{
+    ::mlir::pto::PIPE getPipe() { return ::mlir::pto::PIPE::PIPE_V; }
+    ::mlir::MutableOperandRange getDpsInitsMutable() { return getDstMutable(); }
+  }];
+
+  let assemblyFormat = [{
+    `ins` `(` $src `:` qualified(type($src)) `)`
+    `outs` `(` $dst `:` qualified(type($dst) ) `)`
+    attr-dict
+  }];
+}
+
 def TCvtOp : PTO_TOp<"tcvt", [
   PTO_DpsInitOpInterface,
   OpPipeInterface,
@@ -2690,6 +2986,64 @@ def TDivSOp : PTO_TOp<"tdivs", [
     ::mlir::MutableOperandRange getDpsInitsMutable() { return getDstMutable(); }
   }];
 
+}
+
+def TFModOp : PTO_TOp<"tfmod", [
+  PTO_DpsInitOpInterface,
+  OpPipeInterface,
+  DeclareOpInterfaceMethods<MemoryEffectsOpInterface>
+]> {
+  let summary = "Elementwise fmod/remainder of two tiles (tilebuf, DPS)";
+
+  let arguments = (ins
+    PTODpsType:$src0,
+    PTODpsType:$src1,
+    PTODpsType:$dst
+  );
+
+  let results = (outs);
+
+  let hasVerifier = 1;
+
+  let extraClassDeclaration = [{
+    ::mlir::pto::PIPE getPipe() { return ::mlir::pto::PIPE::PIPE_V; }
+    ::mlir::MutableOperandRange getDpsInitsMutable() { return getDstMutable(); }
+  }];
+
+  let assemblyFormat = [{
+    `ins` `(` $src0 `,` $src1 `:` qualified(type($src0)) `,` qualified(type($src1)) `)`
+    `outs` `(` $dst `:` qualified(type($dst) ) `)`
+    attr-dict
+  }];
+}
+
+def TFModSOp : PTO_TOp<"tfmods", [
+  PTO_DpsInitOpInterface,
+  OpPipeInterface,
+  DeclareOpInterfaceMethods<MemoryEffectsOpInterface>
+]> {
+  let summary = "Elementwise fmod/remainder with a scalar (tilebuf, DPS)";
+
+  let arguments = (ins
+    PTODpsType:$src,
+    ScalarType:$scalar,
+    PTODpsType:$dst
+  );
+
+  let results = (outs);
+
+  let hasVerifier = 1;
+
+  let assemblyFormat = [{
+    `ins` `(` $src `,` $scalar `:` qualified(type($src)) `,` type($scalar) `)`
+    `outs` `(` $dst `:` qualified(type($dst) ) `)`
+    attr-dict
+  }];
+
+  let extraClassDeclaration = [{
+    ::mlir::pto::PIPE getPipe() { return ::mlir::pto::PIPE::PIPE_V; }
+    ::mlir::MutableOperandRange getDpsInitsMutable() { return getDstMutable(); }
+  }];
 }
 
 def TExpOp : PTO_TOp<"texp", [
@@ -2833,6 +3187,37 @@ def TExtractOp : PTO_TOp<"textract", [
   }];
 }
 
+def TExtractFPOp : PTO_TOp<"textract_fp", [
+  PTO_DpsInitOpInterface,
+  OpPipeInterface,
+  DeclareOpInterfaceMethods<MemoryEffectsOpInterface>
+]> {
+  let summary = "Extract acc tile window into dst using fp/scaling tile (tilebuf, DPS)";
+
+  let arguments = (ins
+    PTODpsType:$src,
+    PTODpsType:$fp,
+    Index:$indexRow,
+    Index:$indexCol,
+    PTODpsType:$dst
+  );
+
+  let results = (outs);
+
+  let hasVerifier = 1;
+
+  let assemblyFormat = [{
+    `ins` `(` $src `,` $fp `,` $indexRow `,` $indexCol `:` qualified(type($src)) `,` qualified(type($fp)) `,` type($indexRow) `,` type($indexCol) `)`
+    `outs` `(` $dst `:` qualified(type($dst) ) `)`
+    attr-dict
+  }];
+
+  let extraClassDeclaration = [{
+    ::mlir::pto::PIPE getPipe() { return ::mlir::pto::PIPE::PIPE_FIX; }
+    ::mlir::MutableOperandRange getDpsInitsMutable() { return getDstMutable(); }
+  }];
+}
+
 def TInsertOp : PTO_TOp<"tinsert", [
   PTO_DpsInitOpInterface,
   OpPipeInterface,
@@ -2915,6 +3300,37 @@ def TInsertOp : PTO_TOp<"tinsert", [
       // Default and Acc->Mat path.
       return ::mlir::pto::PIPE::PIPE_FIX;
     }
+    ::mlir::MutableOperandRange getDpsInitsMutable() { return getDstMutable(); }
+  }];
+}
+
+def TInsertFPOp : PTO_TOp<"tinsert_fp", [
+  PTO_DpsInitOpInterface,
+  OpPipeInterface,
+  DeclareOpInterfaceMethods<MemoryEffectsOpInterface>
+]> {
+  let summary = "Insert acc tile window into dst using fp/scaling tile (tilebuf, DPS)";
+
+  let arguments = (ins
+    PTODpsType:$src,
+    PTODpsType:$fp,
+    Index:$indexRow,
+    Index:$indexCol,
+    PTODpsType:$dst
+  );
+
+  let results = (outs);
+
+  let hasVerifier = 1;
+
+  let assemblyFormat = [{
+    `ins` `(` $src `,` $fp `,` $indexRow `,` $indexCol `:` qualified(type($src)) `,` qualified(type($fp)) `,` type($indexRow) `,` type($indexCol) `)`
+    `outs` `(` $dst `:` qualified(type($dst) ) `)`
+    attr-dict
+  }];
+
+  let extraClassDeclaration = [{
+    ::mlir::pto::PIPE getPipe() { return ::mlir::pto::PIPE::PIPE_FIX; }
     ::mlir::MutableOperandRange getDpsInitsMutable() { return getDstMutable(); }
   }];
 }
@@ -3561,6 +3977,38 @@ def TPartMinOp: PTO_TOp<"tpartmin", [
   }];
 }
 //===----------------------------------------------------------------------===//
+// PTOOps.td  (add TPARTMUL TBDPS/tile buffer op)
+//===----------------------------------------------------------------------===//
+
+def TPartMulOp: PTO_TOp<"tpartmul", [
+  PTO_DpsInitOpInterface,
+  OpPipeInterface,
+  DeclareOpInterfaceMethods<MemoryEffectsOpInterface>
+]> {
+  let summary = "Partial elementwise mul with implementation-defined handling of mismatched valid regions.";
+
+  let arguments = (ins
+    PTODpsType:$src0,
+    PTODpsType:$src1,
+    PTODpsType:$dst
+  );
+
+  let results = (outs);
+
+  let hasVerifier = 1;
+
+  let assemblyFormat = [{
+    `ins` `(` $src0 `,` $src1 `:` qualified(type($src0)) `,` qualified(type($src1)) `)`
+    `outs` `(` $dst `:` qualified(type($dst) ) `)`
+    attr-dict
+  }];
+
+  let extraClassDeclaration = [{
+    ::mlir::pto::PIPE getPipe() { return ::mlir::pto::PIPE::PIPE_V; }
+    ::mlir::MutableOperandRange getDpsInitsMutable() { return getDstMutable(); }
+  }];
+}
+//===----------------------------------------------------------------------===//
 // PTOOps.td  (add TPRELU TBDPS/tile buffer op)
 //===----------------------------------------------------------------------===//
 
@@ -3952,6 +4400,93 @@ def TRowExpandAddOp: PTO_TOp<"trowexpandadd", [
     ::mlir::MutableOperandRange getDpsInitsMutable() { return getDstMutable(); }
   }];
 }
+
+def TRowExpandExpdifOp: PTO_TOp<"trowexpandexpdif", [
+  PTO_DpsInitOpInterface,
+  OpPipeInterface,
+  DeclareOpInterfaceMethods<MemoryEffectsOpInterface>
+]> {
+  let summary = "TROWEXPANDEXPDIF: Row-wise broadcast expdif with per-row scalar vector.";
+  let description = [{
+    pto-isa has overloads with/without tmp on A2/A3; A5 supports the 3-operand form only.
+  }];
+
+  let arguments = (ins
+    PTODpsType:$src0,
+    PTODpsType:$src1,
+    Optional<PTODpsType>:$tmp,
+    PTODpsType:$dst
+  );
+
+  let results = (outs);
+
+  let hasVerifier = 1;
+
+  let hasCustomAssemblyFormat = 1;
+
+  let extraClassDeclaration = [{
+    ::mlir::pto::PIPE getPipe() { return ::mlir::pto::PIPE::PIPE_V; }
+    ::mlir::MutableOperandRange getDpsInitsMutable() { return getDstMutable(); }
+  }];
+}
+
+def TRowExpandMaxOp: PTO_TOp<"trowexpandmax", [
+  PTO_DpsInitOpInterface,
+  OpPipeInterface,
+  DeclareOpInterfaceMethods<MemoryEffectsOpInterface>
+]> {
+  let summary = "TROWEXPANDMAX: Row-wise broadcast max with per-row scalar vector.";
+  let description = [{
+    pto-isa has overloads with/without tmp on A2/A3; A5 supports the 3-operand form only.
+  }];
+
+  let arguments = (ins
+    PTODpsType:$src0,
+    PTODpsType:$src1,
+    Optional<PTODpsType>:$tmp,
+    PTODpsType:$dst
+  );
+
+  let results = (outs);
+
+  let hasVerifier = 1;
+
+  let hasCustomAssemblyFormat = 1;
+
+  let extraClassDeclaration = [{
+    ::mlir::pto::PIPE getPipe() { return ::mlir::pto::PIPE::PIPE_V; }
+    ::mlir::MutableOperandRange getDpsInitsMutable() { return getDstMutable(); }
+  }];
+}
+
+def TRowExpandMinOp: PTO_TOp<"trowexpandmin", [
+  PTO_DpsInitOpInterface,
+  OpPipeInterface,
+  DeclareOpInterfaceMethods<MemoryEffectsOpInterface>
+]> {
+  let summary = "TROWEXPANDMIN: Row-wise broadcast min with per-row scalar vector.";
+  let description = [{
+    pto-isa has overloads with/without tmp on A2/A3; A5 supports the 3-operand form only.
+  }];
+
+  let arguments = (ins
+    PTODpsType:$src0,
+    PTODpsType:$src1,
+    Optional<PTODpsType>:$tmp,
+    PTODpsType:$dst
+  );
+
+  let results = (outs);
+
+  let hasVerifier = 1;
+
+  let hasCustomAssemblyFormat = 1;
+
+  let extraClassDeclaration = [{
+    ::mlir::pto::PIPE getPipe() { return ::mlir::pto::PIPE::PIPE_V; }
+    ::mlir::MutableOperandRange getDpsInitsMutable() { return getDstMutable(); }
+  }];
+}
 //===----------------------------------------------------------------------===//
 // PTOOps.td  (add TROWMAX TBDPS/tile buffer op)
 //===----------------------------------------------------------------------===//
@@ -4026,6 +4561,35 @@ def TRowSumOp: PTO_TOp<"trowsum", [
   DeclareOpInterfaceMethods<MemoryEffectsOpInterface>
 ]> {
   let summary = "TROWSUM: Reduce each row by summing across columns.";
+
+  let arguments = (ins
+    PTODpsType:$src,
+    PTODpsType:$tmp,
+    PTODpsType:$dst
+  );
+
+  let results = (outs);
+
+  let hasVerifier = 1;
+
+  let assemblyFormat = [{
+    `ins` `(` $src `,` $tmp `:` qualified(type($src)) `,` qualified(type($tmp)) `)`
+    `outs` `(` $dst `:` qualified(type($dst) ) `)`
+    attr-dict
+  }];
+
+  let extraClassDeclaration = [{
+    ::mlir::pto::PIPE getPipe() { return ::mlir::pto::PIPE::PIPE_V; }
+    ::mlir::MutableOperandRange getDpsInitsMutable() { return getDstMutable(); }
+  }];
+}
+
+def TRowProdOp: PTO_TOp<"trowprod", [
+  PTO_DpsInitOpInterface,
+  OpPipeInterface,
+  DeclareOpInterfaceMethods<MemoryEffectsOpInterface>
+]> {
+  let summary = "TROWPROD: Reduce each row by multiplying across columns.";
 
   let arguments = (ins
     PTODpsType:$src,
