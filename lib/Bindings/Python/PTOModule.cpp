@@ -141,6 +141,18 @@ PYBIND11_MODULE(_pto, m) {
       .value("DN", mlir::pto::Layout::DN)
       .value("NZ", mlir::pto::Layout::NZ);
 
+    py::enum_<mlir::pto::AccToVecMode>(m, "AccToVecMode")
+      .value("SingleModeVec0", mlir::pto::AccToVecMode::SingleModeVec0)
+      .value("SingleModeVec1", mlir::pto::AccToVecMode::SingleModeVec1)
+      .value("DualModeSplitM", mlir::pto::AccToVecMode::DualModeSplitM)
+      .value("DualModeSplitN", mlir::pto::AccToVecMode::DualModeSplitN)
+      .export_values();
+
+    py::enum_<mlir::pto::ReluPreMode>(m, "ReluPreMode")
+      .value("NoRelu", mlir::pto::ReluPreMode::NoRelu)
+      .value("NormalRelu", mlir::pto::ReluPreMode::NormalRelu)
+      .export_values();
+
     py::enum_<mlir::pto::SyncOpType>(m, "SyncOpType")
       .value("TLOAD", mlir::pto::SyncOpType::TLOAD)
       .value("TSTORE_ACC", mlir::pto::SyncOpType::TSTORE_ACC)
@@ -224,6 +236,32 @@ PYBIND11_MODULE(_pto, m) {
             "get",
             [](py::object cls, mlir::pto::CompactMode value, MlirContext ctx) -> py::object {
             MlirAttribute a = mlirPTOCompactModeAttrGet(ctx, static_cast<int32_t>(value));
+            if (mlirAttributeIsNull(a)) return py::none();
+            return cls(a);
+            },
+            py::arg("cls"), py::arg("value"), py::arg("context") = py::none());
+
+    mlir_attribute_subclass(m, "AccToVecModeAttr",
+                            [](MlirAttribute a) -> bool {
+                            return mlirPTOAttrIsAAccToVecModeAttr(a);
+                            })
+        .def_classmethod(
+            "get",
+            [](py::object cls, mlir::pto::AccToVecMode value, MlirContext ctx) -> py::object {
+            MlirAttribute a = mlirPTOAccToVecModeAttrGet(ctx, static_cast<int32_t>(value));
+            if (mlirAttributeIsNull(a)) return py::none();
+            return cls(a);
+            },
+            py::arg("cls"), py::arg("value"), py::arg("context") = py::none());
+
+    mlir_attribute_subclass(m, "ReluPreModeAttr",
+                            [](MlirAttribute a) -> bool {
+                            return mlirPTOAttrIsAReluPreModeAttr(a);
+                            })
+        .def_classmethod(
+            "get",
+            [](py::object cls, mlir::pto::ReluPreMode value, MlirContext ctx) -> py::object {
+            MlirAttribute a = mlirPTOReluPreModeAttrGet(ctx, static_cast<int32_t>(value));
             if (mlirAttributeIsNull(a)) return py::none();
             return cls(a);
             },

@@ -1581,7 +1581,9 @@ struct PTOViewToMemrefPass
         IRRewriter rewriter(ctx);
         rewriter.setInsertionPoint(op);
         rewriter.replaceOpWithNewOp<pto::TMovOp>(
-            op, TypeRange{}, op->getOperand(0), op->getOperand(1));
+            op, TypeRange{}, op.getSrc(), op.getDst(), op.getFp(),
+            op.getPreQuantScalar(), op.getAccToVecModeAttr(),
+            op.getReluPreModeAttr());
       }
 
       SmallVector<mlir::pto::TAbsOp, 8> abseops;

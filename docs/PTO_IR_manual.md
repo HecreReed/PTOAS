@@ -893,7 +893,7 @@ pto.store_scalar %val, %ptr[%offset] : !pto.ptr<f32>, f32
 
 ##### `pto.tmov` - Tile Move Between Local Domains
 
-**Summary:** Moves data between local memory domains (e.g., ACC <-> VEC) using tile buffers.
+**Summary:** Moves data between local memory domains (for example `mat/acc/vec/bias/scaling`) using tile buffers, and supports the same optional parameter families as the `TMOV/TMOV_FP` APIs in `pto-isa`.
 
 **Semantics:**
 
@@ -908,8 +908,28 @@ For each element (i, j):
 |------|------|-------------|
 | `src` | `pto.tile_buf` | Source tile buffer |
 | `dst` | `pto.tile_buf` | Destination tile buffer |
+| `fp` | `pto.tile_buf` | Optional scaling tile (`loc=scaling`) used by fp-quant/dequant TMOV forms |
+| `preQuantScalar` | `i64` | Optional scalar pre-quant parameter used by scalar-quant TMOV forms |
+| `accToVecMode` | `pto.acc_to_vec_mode` | Optional acc-to-vec mode template parameter |
+| `reluPreMode` | `pto.relu_pre_mode` | Optional relu mode template parameter, default is `NoRelu` |
 
 **Results:** None. Writes into `dst` via DPS pattern.
+
+**Supported PTO IR Forms:**
+
+- `pto.tmov ins(%src) outs(%dst)`
+  - maps to `TMOV(dst, src)`
+- `pto.tmov ins(%src) outs(%dst) {reluPreMode = ...}`
+  - maps to `TMOV<..., ReluPreMode>(dst, src)`
+- `pto.tmov ins(%src) outs(%dst) {accToVecMode = ..., reluPreMode = ...}`
+  - maps to `TMOV<..., AccToVecMode, ReluPreMode>(dst, src)`
+- `pto.tmov ins(%src, %fp) outs(%dst) {reluPreMode = ...}`
+  - maps to `TMOV_FP<..., FpTileData, ReluPreMode>(dst, src, fp)`
+- `pto.tmov ins(%src, %fp) outs(%dst) {accToVecMode = ..., reluPreMode = ...}`
+  - maps to `TMOV<..., FpTileData, AccToVecMode, ReluPreMode>(dst, src, fp)`
+- `pto.tmov` with `preQuantScalar`
+  - maps to `TMOV<..., ReluPreMode>(dst, src, preQuantScalar)`
+  - or `TMOV<..., AccToVecMode, ReluPreMode>(dst, src, preQuantScalar)`
 
 **Constraints & Verification:**
 
@@ -918,21 +938,30 @@ For each element (i, j):
   - Supported location pairs (compile-time checked):
     - `loc=mat -> loc=left/right/bias/scaling`
     - `loc=vec -> loc=vec`
-    - `loc=acc -> loc=mat` (including optional pre-quant / relu / fp variants via overloads)
+    - `loc=acc -> loc=mat`
+    - `loc=acc -> loc=vec`
+  - `accToVecMode` is only valid for `loc=acc -> loc=vec`.
+  - When `fp` or `preQuantScalar` is present, only single-mode acc-to-vec forms are legal.
+  - `reluPreMode` / `fp` / `preQuantScalar` forms require `loc=acc` source.
   - For `loc=acc -> loc=mat`, additional fractal and dtype constraints apply (for example `acc` uses accumulator-style layout, `mat` uses `fractal=512`, and only selected dtype conversions are legal).
 - **Implementation checks (A5)**
   - For `loc=mat -> *`, static tile shapes must match; for some `loc=vec` moves, the effective copy size is the min of the source and destination valid regions.
   - Supported location pairs include (target-dependent):
     - `loc=mat -> loc=left/right/bias/scaling/scale`
     - `loc=vec -> loc=vec` and `loc=vec -> loc=mat`
-    - `loc=acc -> loc=vec` and `loc=acc -> loc=mat` (including optional pre-quant / relu / fp variants via overloads)
+    - `loc=acc -> loc=vec` and `loc=acc -> loc=mat`
+  - `accToVecMode` is only valid for `loc=acc -> loc=vec`.
+  - When `fp` or `preQuantScalar` is present, only single-mode acc-to-vec forms are legal.
+  - `reluPreMode` / `fp` / `preQuantScalar` forms require `loc=acc` source.
   - `loc=mat -> loc=left/right` has additional target-specific fractal and dtype constraints.
   - `loc=acc -> loc=vec/mat` has additional target-specific fractal, dtype, and alignment constraints.
   - `loc=mat -> loc=scale` has additional target-specific fractal and dtype constraints.
 
 **Hardware Mapping:**
 
-- Executes on the **Vector pipeline** (`PIPE_V`)
+- `vec -> vec` executes on **PIPE_V**
+- `mat -> left/right/bias/scaling` executes on **PIPE_MTE1**
+- `acc -> mat/vec` executes on **PIPE_FIX**
 
 **Basic Example:**
 
@@ -6224,7 +6253,7 @@ dst = merge_sort(src, blockLen)
 
 | Name | Type | Description |
 |------|------|-------------|
-| `src` / `src0..src3` | PTO shaped-like type | Input tile(s) |
+| `src` / `src0..src3` | PTO shaped-like type | Input tile(s); format2 supports 2 to 4 sources |
 | `blockLen` | `AnyInteger` operand | Block length for format1 |
 | `dst` | PTO shaped-like type | Output tile |
 | `tmp` | PTO shaped-like type | Temporary output tile for format2 |
@@ -6237,7 +6266,7 @@ dst = merge_sort(src, blockLen)
 ```
   - `pto.tmrgsort` has two accepted forms:
     - format1: `ins(src, blockLen : src_type, blockLen_type) outs(dst : dst_type)`
-    - format2: `ins(src0, src1, src2, src3 {exhausted = <bool>} : src0_type, src1_type, src2_type, src3_type) outs(dst, tmp, excuted : dst_type, tmp_type, vector<4xi16>)`
+    - format2: `ins(src0, src1[, src2[, src3]] {exhausted = <bool>} : src0_type, src1_type[, src2_type[, src3_type]]) outs(dst, tmp, excuted : dst_type, tmp_type, vector<4xi16>)`
 ```
 
 
@@ -6251,7 +6280,14 @@ dst = merge_sort(src, blockLen)
   - `src valid column` must be an integer multiple of `blockLen * 4`.
   - `repeatTimes = src valid column / (blockLen * 4)` must be in `[1, 255]`.
 - **Multi-list variants**:
-  - `tmp` is required and `executedNumList` is written by the implementation; supported list counts and exact semantics are target-defined.
+  - Accepts 2-way, 3-way, and 4-way merge forms.
+  - `dst` and `tmp` must have the same element type and shape.
+  - Every `src` must have the same element type as `dst/tmp`.
+  - `excuted` must be `vector<4xi16>`.
+  - PTOAS maps these forms to the following `pto-isa` APIs:
+    - `pto.tmrgsort ins(src0, src1, ...) outs(dst, tmp, excuted)` -> `TMRGSORT(dst, excuted, tmp, src0, src1)`
+    - `pto.tmrgsort ins(src0, src1, src2, ...) outs(dst, tmp, excuted)` -> `TMRGSORT(dst, excuted, tmp, src0, src1, src2)`
+    - `pto.tmrgsort ins(src0, src1, src2, src3, ...) outs(dst, tmp, excuted)` -> `TMRGSORT(dst, excuted, tmp, src0, src1, src2, src3)`
 
 **Hardware Mapping:**
 
@@ -6265,10 +6301,20 @@ pto.tmrgsort ins(%src, %blockLen : !pto.tile_buf<...>, i32)
              outs(%dst : !pto.tile_buf<...>)
 
 // format2
+pto.tmrgsort ins(%src0, %src1 {exhausted = false} :
+                 !pto.tile_buf<...>, !pto.tile_buf<...>)
+             outs(%dst2, %tmp2, %excuted :
+                 !pto.tile_buf<...>, !pto.tile_buf<...>, vector<4xi16>)
+
+pto.tmrgsort ins(%src0, %src1, %src2 {exhausted = true} :
+                 !pto.tile_buf<...>, !pto.tile_buf<...>, !pto.tile_buf<...>)
+             outs(%dst3, %tmp3, %excuted :
+                 !pto.tile_buf<...>, !pto.tile_buf<...>, vector<4xi16>)
+
 pto.tmrgsort ins(%src0, %src1, %src2, %src3 {exhausted = false} :
                  !pto.tile_buf<...>, !pto.tile_buf<...>,
                  !pto.tile_buf<...>, !pto.tile_buf<...>)
-             outs(%dst, %tmp, %excuted :
+             outs(%dst4, %tmp4, %excuted :
                  !pto.tile_buf<...>, !pto.tile_buf<...>, vector<4xi16>)
 ```
 
@@ -6456,7 +6502,7 @@ pto.tsetval ins(%off, %val : index, f16) outs(%dst : !pto.tile_buf<loc=vec, dtyp
 
 ##### `pto.tmov.fp` - Move/Convert with Scaling Tile
 
-**Summary:** Moves/converts from an accumulator tile using a scaling (`fp`) tile for quantization.
+**Summary:** Legacy dedicated fp-TMOV op. New code should prefer `pto.tmov` with an `fp` operand, which lowers to the same `TMOV_FP` / fp-parameterized `TMOV` APIs.
 
 **Semantics:**
 

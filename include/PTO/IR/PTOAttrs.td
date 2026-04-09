@@ -403,6 +403,18 @@ def PTO_ReluPreModeEnum : PTO_I32Enum<
 def PTO_ReluPreModeAttr : EnumAttr<PTO_Dialect, PTO_ReluPreModeEnum, "relu_pre_mode"> {
   let summary = "TSTORE relu pre mode attribute";
 }
+
+def PTO_AccToVecMode_Enum : PTO_I32Enum<"AccToVecMode", "TMOV acc-to-vec mode", [
+  I32EnumAttrCase<"SingleModeVec0", 0, "single_mode_vec0">,
+  I32EnumAttrCase<"SingleModeVec1", 1, "single_mode_vec1">,
+  I32EnumAttrCase<"DualModeSplitM", 2, "dual_mode_split_m">,
+  I32EnumAttrCase<"DualModeSplitN", 3, "dual_mode_split_n">
+  ]>;
+
+def PTO_AccToVecModeAttr : PTO_Attr<"AccToVecMode", "acc_to_vec_mode"> {
+  let parameters = (ins EnumParameter<PTO_AccToVecMode_Enum>:$value);
+  let assemblyFormat = "`<` params `>`";
+}
 //===----------------------------------------------------------------------===//
 // MaskPattern
 //===----------------------------------------------------------------------===//

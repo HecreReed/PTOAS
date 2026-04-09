@@ -555,6 +555,36 @@ int32_t mlirPTOCompactModeAttrGetValue(MlirAttribute attr) {
   return static_cast<int32_t>(a.getValue());
 }
 
+bool mlirPTOAttrIsAAccToVecModeAttr(MlirAttribute attr) {
+  return unwrap(attr).isa<mlir::pto::AccToVecModeAttr>();
+}
+
+MlirAttribute mlirPTOAccToVecModeAttrGet(MlirContext ctx, int32_t value) {
+  auto *c = unwrap(ctx);
+  return wrap(mlir::pto::AccToVecModeAttr::get(
+      c, static_cast<mlir::pto::AccToVecMode>(value)));
+}
+
+int32_t mlirPTOAccToVecModeAttrGetValue(MlirAttribute attr) {
+  auto a = mlir::cast<mlir::pto::AccToVecModeAttr>(unwrap(attr));
+  return static_cast<int32_t>(a.getValue());
+}
+
+bool mlirPTOAttrIsAReluPreModeAttr(MlirAttribute attr) {
+  return unwrap(attr).isa<mlir::pto::ReluPreModeAttr>();
+}
+
+MlirAttribute mlirPTOReluPreModeAttrGet(MlirContext ctx, int32_t value) {
+  auto *c = unwrap(ctx);
+  return wrap(mlir::pto::ReluPreModeAttr::get(
+      c, static_cast<mlir::pto::ReluPreMode>(value)));
+}
+
+int32_t mlirPTOReluPreModeAttrGetValue(MlirAttribute attr) {
+  auto a = mlir::cast<mlir::pto::ReluPreModeAttr>(unwrap(attr));
+  return static_cast<int32_t>(a.getValue());
+}
+
 MlirAttribute mlirPTOTileBufConfigAttrGet(MlirContext ctx,
                                           MlirAttribute bLayout,
                                           MlirAttribute sLayout,

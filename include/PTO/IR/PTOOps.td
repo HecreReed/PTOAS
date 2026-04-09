@@ -1025,6 +1025,7 @@ def TGemvMxBiasOp : PTO_TOp<"tgemv.mx.bias", [
 }
 
 def TMovOp  : PTO_TOp<"tmov", [
+  AttrSizedOperandSegments,
   PTO_DpsInitOpInterface,
   OpPipeInterface,
   DeclareOpInterfaceMethods<MemoryEffectsOpInterface>
@@ -1033,7 +1034,11 @@ def TMovOp  : PTO_TOp<"tmov", [
   
   let arguments = (ins
     PTODpsType:$src,
-    PTODpsType:$dst
+    PTODpsType:$dst,
+    Optional<PTODpsType>:$fp,
+    Optional<I64>:$preQuantScalar,
+    OptionalAttr<PTO_AccToVecModeAttr>:$accToVecMode,
+    DefaultValuedAttr<PTO_ReluPreModeAttr, "::mlir::pto::ReluPreMode::NoRelu">:$reluPreMode
   );
 
   let results = (outs
@@ -1041,7 +1046,10 @@ def TMovOp  : PTO_TOp<"tmov", [
   );
 
   let assemblyFormat = [{
-    `ins` `(` $src `:` qualified(type($src)) `)`
+    `ins` `(` $src `:` qualified(type($src))
+    (`,` $fp^ `:` qualified(type($fp)))?
+    (`,` $preQuantScalar^ `:` type($preQuantScalar))?
+    `)`
     `outs` `(` $dst `:` qualified(type($dst) ) `)`
     attr-dict
     ( `->` qualified(type($result))^ )?
@@ -1096,10 +1104,10 @@ def TMovOp  : PTO_TOp<"tmov", [
         return ::mlir::pto::PIPE::PIPE_MTE1;
       }
 
-      // ACC -> MAT uses FIX in PTO-ISA sync mapping (TMOV_A2M/TMOV_V2M class),
-      // and InsertSync relies on this pipe classification to generate the
-      // required M->FIX and FIX->MTE1 dependency edges.
-      if (s == ::mlir::pto::AddressSpace::ACC && d == ::mlir::pto::AddressSpace::MAT) {
+      // ACC -> MAT / VEC use FIX in PTO-ISA sync mapping (TMOV_A2M/TMOV_A2V).
+      if (s == ::mlir::pto::AddressSpace::ACC &&
+          (d == ::mlir::pto::AddressSpace::MAT ||
+           d == ::mlir::pto::AddressSpace::VEC)) {
         return ::mlir::pto::PIPE::PIPE_FIX;
       }
 
@@ -3666,7 +3674,7 @@ def TMrgSortOp: PTO_TOp<"tmrgsort", [
   OpPipeInterface,
   DeclareOpInterfaceMethods<MemoryEffectsOpInterface>
 ]> {
-  let summary = "TMRGSORT: Merge sort (format1: ins(src,blockLen) out(dst); format2: ins(src0..src3) outs(dst,tmp,executed)).";
+  let summary = "TMRGSORT: Merge sort (format1: ins(src,blockLen) out(dst); format2: ins(2 to 4 srcs), outs(dst,tmp,executed)).";
 
   let arguments = (ins
     Variadic<PTODpsType>:$srcs,
@@ -3682,7 +3690,7 @@ def TMrgSortOp: PTO_TOp<"tmrgsort", [
 
   let extraClassDeclaration = [{
     bool isFormat1() { return getSrcs().size() == 1u && getBlockLen() && getDsts().size() == 1u; }
-    bool isFormat2() { return getSrcs().size() == 4u && getDsts().size() == 2u && getExcuted(); }
+    bool isFormat2() { return getSrcs().size() >= 2u && getSrcs().size() <= 4u && getDsts().size() == 2u && getExcuted(); }
     Value getSrc() { return getSrcs().front(); }
     Value getDst() { return getDsts().front(); }
     Value getTmp() { return getDsts()[1]; }
@@ -4089,6 +4097,50 @@ def TQuantOp : PTO_TOp<"tquant", [
     ::mlir::MutableOperandRange getDpsInitsMutable() { return getDstMutable(); }
   }];
 }
+//===----------------------------------------------------------------------===//
+// TDequantOp
+//===----------------------------------------------------------------------===//
+
+def TDequantOp : PTO_TOp<"tdequant", [
+  PTO_DpsInitOpInterface,
+  OpPipeInterface,
+  DeclareOpInterfaceMethods<MemoryEffectsOpInterface>
+]> {
+  let summary = "TDEQUANT: Dequantize an integer tile using per-row scale and offset tiles.";
+
+  let description = [{
+    Converts an integer (int8 or int16) src tile to float32, applying per-row
+    scale and offset parameters held in the scale and offset tiles.
+
+    Formula: dst[i][j] = (float(src[i][j]) - offset[i][0]) * scale[i][0]
+
+    The scale and offset tiles are row-vectors: one f32 value per row is
+    broadcast across all columns of that row.
+
+    DPS form:
+      pto.tdequant ins(%src, %scale, %offset : <src_type>, <scale_type>, <offset_type>)
+                   outs(%dst : <dst_type>)
+  }];
+
+  let arguments = (ins
+    PTODpsType:$src,
+    PTODpsType:$scale,
+    PTODpsType:$offset,
+    PTODpsType:$dst
+  );
+
+  let results = (outs);
+
+  let hasVerifier = 1;
+
+  let hasCustomAssemblyFormat = 1;
+
+  let extraClassDeclaration = [{
+    ::mlir::pto::PIPE getPipe() { return ::mlir::pto::PIPE::PIPE_V; }
+    ::mlir::MutableOperandRange getDpsInitsMutable() { return getDstMutable(); }
+  }];
+}
+
 //===----------------------------------------------------------------------===//
 // PTOOps.td  (add TRECIP TBDPS/tile buffer op)
 //===----------------------------------------------------------------------===//

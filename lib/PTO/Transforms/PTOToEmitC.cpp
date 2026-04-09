@@ -6769,14 +6769,101 @@ struct PTOMovToEmitC : public OpConversionPattern<pto::TMovOp> {
   LogicalResult matchAndRewrite(pto::TMovOp op, OpAdaptor adaptor,
                                 ConversionPatternRewriter &rewriter) const override {
     auto loc = op.getLoc();
+    auto *ctx = rewriter.getContext();
 
     Value src = peelUnrealized(adaptor.getSrc());
     Value dst = peelUnrealized(adaptor.getDst());
+    Value fp;
+    if (op.getFp())
+      fp = peelUnrealized(adaptor.getFp());
+    Value preQuantScalar;
+    if (op.getPreQuantScalar())
+      preQuantScalar = peelUnrealized(adaptor.getPreQuantScalar());
 
-    SmallVector<Value, 2> operands{dst, src};
+    auto dstOT = dst.getType().dyn_cast<emitc::OpaqueType>();
+    auto srcOT = src.getType().dyn_cast<emitc::OpaqueType>();
+    if (!dstOT || !srcOT)
+      return rewriter.notifyMatchFailure(
+          op, "tmov lowering expects opaque dst/src types");
+
+    auto modeTok = [&](pto::AccToVecMode mode) -> StringRef {
+      switch (mode) {
+      case pto::AccToVecMode::SingleModeVec0:
+        return "pto::AccToVecMode::SingleModeVec0";
+      case pto::AccToVecMode::SingleModeVec1:
+        return "pto::AccToVecMode::SingleModeVec1";
+      case pto::AccToVecMode::DualModeSplitM:
+        return "pto::AccToVecMode::DualModeSplitM";
+      case pto::AccToVecMode::DualModeSplitN:
+        return "pto::AccToVecMode::DualModeSplitN";
+      }
+      llvm_unreachable("unknown AccToVecMode");
+    };
+
+    auto modeAttr = op.getAccToVecModeAttr();
+    auto reluTok = [&](pto::ReluPreMode mode) -> StringRef {
+      switch (mode) {
+      case pto::ReluPreMode::NoRelu:
+        return "ReluPreMode::NoRelu";
+      case pto::ReluPreMode::NormalRelu:
+        return "ReluPreMode::NormalRelu";
+      }
+      llvm_unreachable("unknown ReluPreMode");
+    };
+
+    const bool hasFp = static_cast<bool>(fp);
+    const bool hasPreQuantScalar = static_cast<bool>(preQuantScalar);
+    const bool hasMode = static_cast<bool>(modeAttr);
+    const bool reluNonDefault = op.getReluPreMode() != pto::ReluPreMode::NoRelu;
+
+    SmallVector<Value, 4> operands{dst, src};
+    SmallVector<Attribute, 5> templateArgVec{
+        emitc::OpaqueAttr::get(ctx, dstOT.getValue().str()),
+        emitc::OpaqueAttr::get(ctx, srcOT.getValue().str()),
+    };
+    StringRef callee = "TMOV";
+
+    if (hasFp) {
+      auto fpOT = fp.getType().dyn_cast<emitc::OpaqueType>();
+      if (!fpOT)
+        return rewriter.notifyMatchFailure(
+            op, "tmov fp lowering expects opaque fp type");
+      operands.push_back(fp);
+      templateArgVec.push_back(emitc::OpaqueAttr::get(ctx, fpOT.getValue().str()));
+      if (hasMode)
+        templateArgVec.push_back(
+            emitc::OpaqueAttr::get(ctx, modeTok(modeAttr.getValue())));
+      if (hasMode || reluNonDefault)
+        templateArgVec.push_back(
+            emitc::OpaqueAttr::get(ctx, reluTok(op.getReluPreMode())));
+      callee = hasMode ? "TMOV" : "TMOV_FP";
+    } else if (hasPreQuantScalar) {
+      operands.push_back(preQuantScalar);
+      if (hasMode)
+        templateArgVec.push_back(
+            emitc::OpaqueAttr::get(ctx, modeTok(modeAttr.getValue())));
+      if (hasMode || reluNonDefault)
+        templateArgVec.push_back(
+            emitc::OpaqueAttr::get(ctx, reluTok(op.getReluPreMode())));
+    } else if (hasMode) {
+      templateArgVec.push_back(
+          emitc::OpaqueAttr::get(ctx, modeTok(modeAttr.getValue())));
+      templateArgVec.push_back(
+          emitc::OpaqueAttr::get(ctx, reluTok(op.getReluPreMode())));
+    } else if (reluNonDefault) {
+      templateArgVec.push_back(
+          emitc::OpaqueAttr::get(ctx, reluTok(op.getReluPreMode())));
+    }
+
+    ArrayAttr templateArgs =
+        templateArgVec.size() == 2 && !hasFp && !hasPreQuantScalar &&
+                !hasMode && !reluNonDefault
+            ? ArrayAttr{}
+            : rewriter.getArrayAttr(templateArgVec);
+
     rewriter.create<emitc::CallOpaqueOp>(
-        loc, TypeRange{}, "TMOV",
-        /*args=*/ArrayAttr{}, /*templateArgs=*/ArrayAttr{},
+        loc, TypeRange{}, callee,
+        /*args=*/ArrayAttr{}, /*templateArgs=*/templateArgs,
         /*operands=*/operands);
 
     rewriter.eraseOp(op);
@@ -6884,6 +6971,44 @@ struct PTOQuantToEmitC : public OpConversionPattern<pto::TQuantOp> {
     return success();
   }
 };
+struct PTODequantToEmitC : public OpConversionPattern<pto::TDequantOp> {
+  using OpConversionPattern<pto::TDequantOp>::OpConversionPattern;
+
+  LogicalResult matchAndRewrite(pto::TDequantOp op, OpAdaptor adaptor,
+                                ConversionPatternRewriter &rewriter) const override {
+    auto loc = op.getLoc();
+    auto *ctx = rewriter.getContext();
+
+    Value dst    = peelUnrealized(adaptor.getDst());
+    Value src    = peelUnrealized(adaptor.getSrc());
+    Value scale  = peelUnrealized(adaptor.getScale());
+    Value offset = peelUnrealized(adaptor.getOffset());
+
+    // TDEQUANT<DstTile, SrcTile, ParaTile>(dst, src, scale, offset)
+    ArrayAttr templateArgs;
+    auto dstOT   = dst.getType().dyn_cast<emitc::OpaqueType>();
+    auto srcOT   = src.getType().dyn_cast<emitc::OpaqueType>();
+    auto scaleOT = scale.getType().dyn_cast<emitc::OpaqueType>();
+    if (dstOT && srcOT && scaleOT) {
+      templateArgs = rewriter.getArrayAttr({
+          emitc::OpaqueAttr::get(ctx, dstOT.getValue().str()),
+          emitc::OpaqueAttr::get(ctx, srcOT.getValue().str()),
+          emitc::OpaqueAttr::get(ctx, scaleOT.getValue().str()),
+      });
+    } else {
+      templateArgs = ArrayAttr{};
+    }
+
+    rewriter.create<emitc::CallOpaqueOp>(
+        loc, TypeRange{}, "TDEQUANT",
+        /*args=*/ArrayAttr{}, /*templateArgs=*/templateArgs,
+        /*operands=*/SmallVector<Value>{dst, src, scale, offset});
+
+    rewriter.eraseOp(op);
+    return success();
+  }
+};
+
 //===----------------------------------------------------------------------===//
 // PTOConvert.cpp  (add lowering + patterns.add for TMRGSORT DPS/memref op)
 //===----------------------------------------------------------------------===//
@@ -6906,8 +7031,8 @@ struct PTOMrgSortToEmitC : public OpConversionPattern<pto::TMrgSortOp> {
           ArrayAttr{}, ArrayAttr{}, operands);
     } else if (op.isFormat2()) {
       // pto-isa API:
-      //   TMRGSORT<DstTile, TmpTile, Src0, Src1, Src2, Src3, exhausted>(
-      //       dst, executedNumList, tmp, src0, src1, src2, src3);
+      //   TMRGSORT<DstTile, TmpTile, Src0, Src1[, Src2[, Src3]], exhausted>(
+      //       dst, executedNumList, tmp, src0, src1[, src2[, src3]]);
       auto *ctx = rewriter.getContext();
 
       Value dst = peelUnrealized(adaptor.getDsts()[0]);
@@ -6915,17 +7040,17 @@ struct PTOMrgSortToEmitC : public OpConversionPattern<pto::TMrgSortOp> {
       Value excuted = peelUnrealized(adaptor.getExcuted());
 
       SmallVector<Value, 4> srcs;
-      srcs.reserve(4);
+      srcs.reserve(adaptor.getSrcs().size());
       for (Value v : adaptor.getSrcs())
         srcs.push_back(peelUnrealized(v));
 
       auto dstOT = dst.getType().dyn_cast<emitc::OpaqueType>();
       auto tmpOT = tmp.getType().dyn_cast<emitc::OpaqueType>();
-      if (!dstOT || !tmpOT || srcs.size() != 4)
-        return op.emitOpError("format2 expects (dst,tmp) tilebufs and exactly 4 srcs");
+      if (!dstOT || !tmpOT || srcs.size() < 2 || srcs.size() > 4)
+        return op.emitOpError("format2 expects (dst,tmp) tilebufs and 2 to 4 srcs");
 
       SmallVector<Attribute, 8> targs;
-      targs.reserve(7);
+      targs.reserve(2 + srcs.size() + 1);
       targs.push_back(emitc::OpaqueAttr::get(ctx, dstOT.getValue().str()));
       targs.push_back(emitc::OpaqueAttr::get(ctx, tmpOT.getValue().str()));
       for (Value v : srcs) {
@@ -9429,6 +9554,7 @@ static void populatePTOToEmitCPatterns(RewritePatternSet &patterns,
   patterns.add<PTOGatherbToEmitC>(typeConverter, ctx);
   patterns.add<PTOMovFPToEmitC>(typeConverter, ctx);
   patterns.add<PTOQuantToEmitC>(typeConverter, ctx);
+  patterns.add<PTODequantToEmitC>(typeConverter, ctx);
   patterns.add<PTOOrsToEmitC>(typeConverter, ctx);
   patterns.add<PTOLogToEmitC>(typeConverter, ctx);
   patterns.add<FuncToEmitC>(typeConverter, ctx);
