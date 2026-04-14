@@ -67,6 +67,45 @@ static LocalMemSpec getLocalMemSpec(Operation *op, AddressSpace as) {
   }
 }
 
+static SmallVector<Value> getScratchBuffersFromEffects(Operation *op,
+                                                       ValueRange dpsInits) {
+  SmallVector<Value> scratchBuffers;
+  auto memEffect = dyn_cast<MemoryEffectOpInterface>(op);
+  if (!memEffect)
+    return scratchBuffers;
+
+  SmallVector<SideEffects::EffectInstance<MemoryEffects::Effect>, 8> effects;
+  memEffect.getEffects(effects);
+  for (const auto &effect : effects) {
+    if (!isa<MemoryEffects::Write>(effect.getEffect()))
+      continue;
+    Value value = effect.getValue();
+    if (!value)
+      continue;
+    if (!llvm::is_contained(op->getOperands(), value))
+      continue;
+    if (llvm::is_contained(dpsInits, value))
+      continue;
+    if (!llvm::is_contained(scratchBuffers, value))
+      scratchBuffers.push_back(value);
+  }
+  return scratchBuffers;
+}
+
+static SmallVector<ValuePair>
+getScratchConflictPairsFromEffects(Operation *op, ValueRange dpsInits) {
+  SmallVector<ValuePair> conflictPairs;
+  SmallVector<Value> scratchBuffers = getScratchBuffersFromEffects(op, dpsInits);
+  for (Value scratch : scratchBuffers) {
+    for (Value dst : dpsInits) {
+      if (!scratch || !dst || scratch == dst)
+        continue;
+      conflictPairs.emplace_back(scratch, dst);
+    }
+  }
+  return conflictPairs;
+}
+
 enum class ReserveBufferMode {
   None,
   Auto,
@@ -288,7 +327,15 @@ void MemLivenessAnalysis::RecursionIR(Region *region, Liveness live) {
     } else if (auto ptoDpsOp = dyn_cast<pto::PTO_DpsInitOpInterface>(op)) {
       // PTO ops with destination (tile_buf, partition_view, etc.); no
       // tensor/memref-only verification.
-      UpdateOpGenInfo(curOpInfo, llvm::to_vector(ptoDpsOp.getDpsInits()));
+      SmallVector<Value> genBuffers = llvm::to_vector(ptoDpsOp.getDpsInits());
+      auto scratchBuffers =
+          getScratchBuffersFromEffects(op, ptoDpsOp.getDpsInits());
+      genBuffers.append(scratchBuffers.begin(), scratchBuffers.end());
+      UpdateOpGenInfo(curOpInfo, genBuffers);
+      for (const auto &conflictPair :
+           getScratchConflictPairsFromEffects(op, ptoDpsOp.getDpsInits())) {
+        RecordSemanticConflict(conflictPair.first, conflictPair.second);
+      }
       OpKillHandle(curOpInfo, live, op->getBlock());
     } else if (auto dstStyleOp = dyn_cast<DestinationStyleOpInterface>(op)) {
       // Process the operation of pto instructions as follows:
@@ -626,6 +673,25 @@ bool MemLivenessAnalysis::AllDeadAfter(Operation *op, SetVector<Value> aliasVec,
   return true;
 }
 
+void MemLivenessAnalysis::RecordSemanticConflict(Value lhs, Value rhs) {
+  SetVector<Value> lhsAliases = GetAliasBuffers(lhs);
+  lhsAliases.insert(lhs);
+  SetVector<Value> rhsAliases = GetAliasBuffers(rhs);
+  rhsAliases.insert(rhs);
+
+  auto appendUniquePair = [&](Value a, Value b) {
+    if (!a || !b || a == b)
+      return;
+    ValuePair pair = isLessValue(a, b) ? ValuePair(a, b) : ValuePair(b, a);
+    if (!llvm::is_contained(semanticConflictPairs, pair))
+      semanticConflictPairs.push_back(pair);
+  };
+
+  for (Value a : lhsAliases)
+    for (Value b : rhsAliases)
+      appendUniquePair(a, b);
+}
+
 BufferInfo MemLivenessAnalysis::GenerateBufferInfo(Operation *op,
                                                    Value operand) {
   auto memorySpaceAttr = GetBufferSpaceAttr(operand);
@@ -786,6 +852,31 @@ bool MemPlan::RecordOverflowIfAny() {
   }
 
   return !failApplyBufferInfo.empty();
+}
+
+bool MemPlan::HasSemanticConflict(const StorageEntry *entry,
+                                  const BufferLifeVec &bufferLives) const {
+  if (!entry || semanticConflictPairs.empty() || bufferLives.empty())
+    return false;
+
+  auto containsPair = [&](Value lhs, Value rhs) {
+    ValuePair pair = isLessValue(lhs, rhs) ? ValuePair(lhs, rhs)
+                                           : ValuePair(rhs, lhs);
+    return llvm::is_contained(semanticConflictPairs, pair);
+  };
+
+  for (Value entryBuffer : entry->inplaceBuffers) {
+    for (const auto &life : bufferLives) {
+      if (!life)
+        continue;
+      Value otherBuffer = life->buffer;
+      if (!otherBuffer || entryBuffer == otherBuffer)
+        continue;
+      if (containsPair(entryBuffer, otherBuffer))
+        return true;
+    }
+  }
+  return false;
 }
 
 // Plan Memory algorithm.
@@ -1508,6 +1599,8 @@ bool MemPlan::IsBufferLifeVecConflict(PlanRecord &r, uint64_t offset,
                                       const StorageEntry *e) const {
   if ((r.firstMemBound->offset + r.allExtent > offset) &&
       (r.firstMemBound->offset < offset + e->alignedConstBits)) {
+    if (HasSemanticConflict(e, r.firstMemBound->bufferLifeVec))
+      return true;
     DenseMap<ValuePair, BufferLife> intersection =
         GetOverlapBufferLife(r.entry->bufferLifeVec, e->bufferLifeVec);
     return !intersection.empty();
@@ -1720,6 +1813,8 @@ bool MemPlan::IsSamePlanAsLastRollBack(uint64_t allocOffset, int curChildIdx,
 inline bool
 MemPlan::VerifyConflictStage0(StorageEntry *e,
                               const std::shared_ptr<MemoryBound> &last) {
+  if (HasSemanticConflict(e, last->bufferLifeVec))
+    return true;
   // level_0: offset = 0, offset means life distance
   DenseMap<ValuePair, BufferLife> intersection =
       GetOverlapBufferLife(e->bufferLifeVec, last->bufferLifeVec);
@@ -2008,6 +2103,7 @@ void PlanMemoryPass::runOnOperation() {
     memPlan.SetGenKillMap(memLiveness.genKillMap);
     memPlan.SetBuffer2MultiNum(memLiveness.buffer2MultiNum);
     memPlan.SetInplacePairList(memLiveness.inplacePairList);
+    memPlan.SetSemanticConflictPairs(memLiveness.semanticConflictPairs);
     if (failed(memPlan.plan())) {
       return signalPassFailure();
     }

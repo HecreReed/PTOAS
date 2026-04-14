@@ -99,6 +99,14 @@ static Value peelUnrealized(Value v) {
   return v;
 }
 
+static Value buildGlobalTensorFromMemref(ConversionPatternRewriter &rewriter,
+                                         Location loc, Value basePtr,
+                                         MemRefType mrTy, Operation *anchor);
+
+static Value maybeWrapGlobalMemrefAsGlobalTensor(
+    ConversionPatternRewriter &rewriter, Location loc, Value loweredValue,
+    Type originalType, Operation *anchor);
+
 static std::optional<mlir::pto::Layout> getLayoutAttrFromOp(Operation *op) {
   if (!op)
     return std::nullopt;
@@ -2344,8 +2352,7 @@ struct ArithTruncIToEmitC : public OpConversionPattern<arith::TruncIOp> {
 	  }
 	};
 //===----------------------------------------------------------------------===//
-// pto.mgather lowering -> MGATHER(dst, mem, idx)
-// %dst = pto.mgather %mem, %idx : memref<...>, memref<...> -> memref<...>
+// pto.mgather lowering -> MGATHER(dst, src, indexes)  (pto-isa)
 //===----------------------------------------------------------------------===//
 
 struct PTOMGatherToMGATHER : public OpConversionPattern<pto::MGatherOp> {
@@ -2353,17 +2360,39 @@ struct PTOMGatherToMGATHER : public OpConversionPattern<pto::MGatherOp> {
 
   LogicalResult matchAndRewrite(pto::MGatherOp op, OpAdaptor adaptor,
                                 ConversionPatternRewriter &rewriter) const override {
+    auto *ctx = rewriter.getContext();
     Value mem = peelUnrealized(adaptor.getMem());
+    Value idx = peelUnrealized(adaptor.getIdx());
     Value dst = peelUnrealized(adaptor.getDst());
 
-    // pto-isa currently has no NPU implementation for MGATHER/MSCATTER.
-    // Fallback to a smoke-friendly lowering to keep compile/run coverage.
-    rewriter.create<emitc::CallOpaqueOp>(
-        op.getLoc(), TypeRange{}, "TLOAD",
-        ArrayAttr{}, ArrayAttr{},
-        ValueRange{dst, mem});
+    Value memArg = maybeWrapGlobalMemrefAsGlobalTensor(
+        rewriter, op.getLoc(), mem, op.getMem().getType(), op.getOperation());
 
-     if (op->getNumResults() == 0) {
+    ArrayAttr templateArgs;
+    if (op.getGatherOob() != pto::GatherOOB::Undefined) {
+      auto gatherOobTok = [&](pto::GatherOOB mode) -> StringRef {
+        switch (mode) {
+        case pto::GatherOOB::Undefined:
+          return "pto::GatherOOB::Undefined";
+        case pto::GatherOOB::Clamp:
+          return "pto::GatherOOB::Clamp";
+        case pto::GatherOOB::Wrap:
+          return "pto::GatherOOB::Wrap";
+        case pto::GatherOOB::Zero:
+          return "pto::GatherOOB::Zero";
+        }
+        llvm_unreachable("unknown GatherOOB");
+      };
+      templateArgs = rewriter.getArrayAttr(
+          {emitc::OpaqueAttr::get(ctx, gatherOobTok(op.getGatherOob()))});
+    }
+
+    rewriter.create<emitc::CallOpaqueOp>(
+        op.getLoc(), TypeRange{}, "MGATHER",
+        ArrayAttr{}, templateArgs,
+        ValueRange{dst, memArg, idx});
+
+    if (op->getNumResults() == 0) {
       rewriter.eraseOp(op);
     } else {
       rewriter.replaceOp(op, dst);
@@ -3275,6 +3304,28 @@ static Value buildGlobalTensorFromMemref(ConversionPatternRewriter &rewriter,
   return gtInst.getResult(0);
 }
 
+static Value maybeWrapGlobalMemrefAsGlobalTensor(
+    ConversionPatternRewriter &rewriter, Location loc, Value loweredValue,
+    Type originalType, Operation *anchor) {
+  auto mrTy = dyn_cast<MemRefType>(originalType);
+  if (!mrTy)
+    return loweredValue;
+
+  bool isGlobal = true;
+  if (auto asAttr =
+          dyn_cast_or_null<pto::AddressSpaceAttr>(mrTy.getMemorySpace())) {
+    auto as = asAttr.getAddressSpace();
+    isGlobal = (as == pto::AddressSpace::GM || as == pto::AddressSpace::Zero);
+  }
+  if (!isGlobal)
+    return loweredValue;
+
+  if (Value gt =
+          buildGlobalTensorFromMemref(rewriter, loc, loweredValue, mrTy, anchor))
+    return gt;
+  return loweredValue;
+}
+
 static Value castToGMBytePointer(ConversionPatternRewriter &rewriter,
                                  Location loc, Value value) {
   auto *ctx = rewriter.getContext();
@@ -3720,6 +3771,57 @@ struct PTOTLoadToTLOAD : public OpConversionPattern<pto::TLoadOp> {
     } else {
       rewriter.eraseOp(op);
     }
+    return success();
+  }
+};
+
+struct PTOTPrefetchToTPREFETCH : public OpConversionPattern<pto::TPrefetchOp> {
+  using OpConversionPattern<pto::TPrefetchOp>::OpConversionPattern;
+
+  LogicalResult matchAndRewrite(pto::TPrefetchOp op, OpAdaptor adaptor,
+                                ConversionPatternRewriter &rewriter) const override {
+    if (!op.getDst())
+      return rewriter.notifyMatchFailure(op, "expected outs(dst) on pto.tprefetch");
+
+    Value src = peelUnrealized(adaptor.getSrc());
+    Value dst = peelUnrealized(adaptor.getDst());
+    Value srcArg = src;
+    if (auto srcMrTy = dyn_cast<MemRefType>(op.getSrc().getType())) {
+      bool isGlobal = true;
+      if (auto asAttr = dyn_cast_or_null<pto::AddressSpaceAttr>(srcMrTy.getMemorySpace())) {
+        auto as = asAttr.getAddressSpace();
+        isGlobal = (as == pto::AddressSpace::GM || as == pto::AddressSpace::Zero);
+      }
+      if (isGlobal) {
+        if (Value gt = buildGlobalTensorFromMemref(rewriter, op.getLoc(), src, srcMrTy,
+                                                  op.getOperation()))
+          srcArg = gt;
+      }
+    }
+
+    rewriter.create<emitc::CallOpaqueOp>(
+        op.getLoc(), TypeRange{}, "TPREFETCH",
+        ArrayAttr{}, ArrayAttr{}, ValueRange{dst, srcArg});
+    rewriter.eraseOp(op);
+    return success();
+  }
+};
+
+struct PTOTPackToTPACK : public OpConversionPattern<pto::TPackOp> {
+  using OpConversionPattern<pto::TPackOp>::OpConversionPattern;
+
+  LogicalResult matchAndRewrite(pto::TPackOp op, OpAdaptor adaptor,
+                                ConversionPatternRewriter &rewriter) const override {
+    if (!op.getDst())
+      return rewriter.notifyMatchFailure(op, "expected outs(dst) on pto.tpack");
+
+    Value src = peelUnrealized(adaptor.getSrc());
+    Value dst = peelUnrealized(adaptor.getDst());
+
+    rewriter.create<emitc::CallOpaqueOp>(
+        op.getLoc(), TypeRange{}, "TPACK",
+        ArrayAttr{}, ArrayAttr{}, ValueRange{dst, src});
+    rewriter.eraseOp(op);
     return success();
   }
 };
@@ -4739,15 +4841,57 @@ struct PTOMScatterToMSCATTER : public OpConversionPattern<pto::MScatterOp> {
 
   LogicalResult matchAndRewrite(pto::MScatterOp op, OpAdaptor adaptor,
                                 ConversionPatternRewriter &rewriter) const override {
+    auto *ctx = rewriter.getContext();
     Value src = peelUnrealized(adaptor.getSrc());
+    Value idx = peelUnrealized(adaptor.getIdx());
     Value mem = peelUnrealized(adaptor.getMem());
 
-    // pto-isa currently has no NPU implementation for MGATHER/MSCATTER.
-    // Fallback to a smoke-friendly lowering to keep compile/run coverage.
+    Value memArg = maybeWrapGlobalMemrefAsGlobalTensor(
+        rewriter, op.getLoc(), mem, op.getMem().getType(), op.getOperation());
+
+    auto scatterAtomicTok = [&](pto::ScatterAtomicOp atomic) -> StringRef {
+      switch (atomic) {
+      case pto::ScatterAtomicOp::None:
+        return "pto::ScatterAtomicOp::None";
+      case pto::ScatterAtomicOp::Add:
+        return "pto::ScatterAtomicOp::Add";
+      case pto::ScatterAtomicOp::Max:
+        return "pto::ScatterAtomicOp::Max";
+      case pto::ScatterAtomicOp::Min:
+        return "pto::ScatterAtomicOp::Min";
+      }
+      llvm_unreachable("unknown ScatterAtomicOp");
+    };
+    auto scatterOobTok = [&](pto::ScatterOOB mode) -> StringRef {
+      switch (mode) {
+      case pto::ScatterOOB::Undefined:
+        return "pto::ScatterOOB::Undefined";
+      case pto::ScatterOOB::Skip:
+        return "pto::ScatterOOB::Skip";
+      case pto::ScatterOOB::Clamp:
+        return "pto::ScatterOOB::Clamp";
+      case pto::ScatterOOB::Wrap:
+        return "pto::ScatterOOB::Wrap";
+      }
+      llvm_unreachable("unknown ScatterOOB");
+    };
+
+    SmallVector<Attribute, 2> templateArgVec;
+    if (op.getScatterAtomicOp() != pto::ScatterAtomicOp::None ||
+        op.getScatterOob() != pto::ScatterOOB::Undefined) {
+      templateArgVec.push_back(
+          emitc::OpaqueAttr::get(ctx, scatterAtomicTok(op.getScatterAtomicOp())));
+      if (op.getScatterOob() != pto::ScatterOOB::Undefined)
+        templateArgVec.push_back(
+            emitc::OpaqueAttr::get(ctx, scatterOobTok(op.getScatterOob())));
+    }
+    ArrayAttr templateArgs =
+        templateArgVec.empty() ? ArrayAttr{} : rewriter.getArrayAttr(templateArgVec);
+
     rewriter.create<emitc::CallOpaqueOp>(
-        op.getLoc(), TypeRange{}, "TSTORE",
-        ArrayAttr{}, ArrayAttr{},
-        ValueRange{mem, src});
+        op.getLoc(), TypeRange{}, "MSCATTER",
+        ArrayAttr{}, templateArgs,
+        ValueRange{memArg, src, idx});
 
     rewriter.eraseOp(op);
     return success();
@@ -4797,6 +4941,72 @@ struct PTOGetValToGETVAL : public OpConversionPattern<pto::TGetValOp> {
         ValueRange{src, offset});
 
     rewriter.replaceOp(op, call.getResults());
+    return success();
+  }
+};
+
+struct PTOTAxpyToEmitC : public OpConversionPattern<pto::TAxpyOp> {
+  using OpConversionPattern<pto::TAxpyOp>::OpConversionPattern;
+
+  LogicalResult matchAndRewrite(pto::TAxpyOp op, OpAdaptor adaptor,
+                                ConversionPatternRewriter &rewriter) const override {
+    auto loc = op.getLoc();
+
+    Value src = peelUnrealized(adaptor.getSrc());
+    Value dst = peelUnrealized(adaptor.getDst());
+    Value scalar = peelUnrealized(adaptor.getScalar());
+
+    rewriter.create<emitc::CallOpaqueOp>(
+        loc, TypeRange{}, "TAXPY",
+        /*args=*/ArrayAttr{}, /*templateArgs=*/ArrayAttr{},
+        /*operands=*/ValueRange{dst, src, scalar});
+
+    rewriter.eraseOp(op);
+    return success();
+  }
+};
+
+struct PTOHistogramToEmitC : public OpConversionPattern<pto::THistogramOp> {
+  using OpConversionPattern<pto::THistogramOp>::OpConversionPattern;
+
+  LogicalResult matchAndRewrite(pto::THistogramOp op, OpAdaptor adaptor,
+                                ConversionPatternRewriter &rewriter) const override {
+    auto loc = op.getLoc();
+    auto *ctx = rewriter.getContext();
+
+    Value src = peelUnrealized(adaptor.getSrc());
+    Value idx = peelUnrealized(adaptor.getIdx());
+    Value dst = peelUnrealized(adaptor.getDst());
+
+    auto templateArgs = rewriter.getArrayAttr(
+        {emitc::OpaqueAttr::get(ctx, op.getIsMSB() ? "true" : "false")});
+    rewriter.create<emitc::CallOpaqueOp>(
+        loc, TypeRange{}, "THISTOGRAM",
+        /*args=*/ArrayAttr{}, /*templateArgs=*/templateArgs,
+        /*operands=*/ValueRange{dst, src, idx});
+
+    rewriter.eraseOp(op);
+    return success();
+  }
+};
+
+struct PTOGetScaleAddrToEmitC
+    : public OpConversionPattern<pto::TGetScaleAddrOp> {
+  using OpConversionPattern<pto::TGetScaleAddrOp>::OpConversionPattern;
+
+  LogicalResult matchAndRewrite(pto::TGetScaleAddrOp op, OpAdaptor adaptor,
+                                ConversionPatternRewriter &rewriter) const override {
+    auto loc = op.getLoc();
+
+    Value src = peelUnrealized(adaptor.getSrc());
+    Value dst = peelUnrealized(adaptor.getDst());
+
+    rewriter.create<emitc::CallOpaqueOp>(
+        loc, TypeRange{}, "TGET_SCALE_ADDR",
+        /*args=*/ArrayAttr{}, /*templateArgs=*/ArrayAttr{},
+        /*operands=*/ValueRange{dst, src});
+
+    rewriter.eraseOp(op);
     return success();
   }
 };
@@ -5918,6 +6128,37 @@ struct PTOColExpandMinToEmitC : public OpConversionPattern<pto::TColExpandMinOp>
   }
 };
 
+struct PTOTTriToEmitC : public OpConversionPattern<pto::TTriOp> {
+  using OpConversionPattern<pto::TTriOp>::OpConversionPattern;
+
+  LogicalResult matchAndRewrite(pto::TTriOp op, OpAdaptor adaptor,
+                                ConversionPatternRewriter &rewriter) const override {
+    auto loc = op.getLoc();
+    auto *ctx = rewriter.getContext();
+
+    Value dst = peelUnrealized(adaptor.getDst());
+    Value diagonal = peelUnrealized(adaptor.getDiagonal());
+
+    ArrayAttr templateArgs;
+    if (auto dstOT = dst.getType().dyn_cast<emitc::OpaqueType>()) {
+      templateArgs = rewriter.getArrayAttr({
+          emitc::OpaqueAttr::get(ctx, dstOT.getValue().str()),
+          emitc::OpaqueAttr::get(ctx, std::to_string(op.getUpperOrLower())),
+      });
+    } else {
+      templateArgs = ArrayAttr{};
+    }
+
+    SmallVector<Value, 2> operands{dst, diagonal};
+    rewriter.create<emitc::CallOpaqueOp>(
+        loc, TypeRange{}, "TTRI",
+        /*args=*/ArrayAttr{}, /*templateArgs=*/templateArgs, operands);
+
+    rewriter.eraseOp(op);
+    return success();
+  }
+};
+
 struct PTOCmpToEmitC : public OpConversionPattern<pto::TCmpOp> {
   using OpConversionPattern<pto::TCmpOp>::OpConversionPattern;
 
@@ -6009,6 +6250,29 @@ struct PTOColMaxToEmitC : public OpConversionPattern<pto::TColMaxOp> {
     return success();
   }
 };
+
+struct PTOColArgMaxToEmitC : public OpConversionPattern<pto::TColArgMaxOp> {
+  using OpConversionPattern<pto::TColArgMaxOp>::OpConversionPattern;
+
+  LogicalResult matchAndRewrite(pto::TColArgMaxOp op, OpAdaptor adaptor,
+                                ConversionPatternRewriter &rewriter) const override {
+    auto loc = op.getLoc();
+
+    Value src = peelUnrealized(adaptor.getSrc());
+    Value tmp = peelUnrealized(adaptor.getTmp());
+    Value dst = peelUnrealized(adaptor.getDst());
+
+    rewriter.create<emitc::CallOpaqueOp>(
+        loc, TypeRange{}, "TCOLARGMAX",
+        /*args=*/ArrayAttr{},
+        /*templateArgs=*/ArrayAttr{},
+        /*operands=*/ValueRange{dst, src, tmp});
+
+    rewriter.eraseOp(op);
+    return success();
+  }
+};
+
 struct PTOColMinToEmitC : public OpConversionPattern<pto::TColMinOp> {
   using OpConversionPattern<pto::TColMinOp>::OpConversionPattern;
 
@@ -6031,6 +6295,29 @@ struct PTOColMinToEmitC : public OpConversionPattern<pto::TColMinOp> {
     return success();
   }
 };
+
+struct PTOColArgMinToEmitC : public OpConversionPattern<pto::TColArgMinOp> {
+  using OpConversionPattern<pto::TColArgMinOp>::OpConversionPattern;
+
+  LogicalResult matchAndRewrite(pto::TColArgMinOp op, OpAdaptor adaptor,
+                                ConversionPatternRewriter &rewriter) const override {
+    auto loc = op.getLoc();
+
+    Value src = peelUnrealized(adaptor.getSrc());
+    Value tmp = peelUnrealized(adaptor.getTmp());
+    Value dst = peelUnrealized(adaptor.getDst());
+
+    rewriter.create<emitc::CallOpaqueOp>(
+        loc, TypeRange{}, "TCOLARGMIN",
+        /*args=*/ArrayAttr{},
+        /*templateArgs=*/ArrayAttr{},
+        /*operands=*/ValueRange{dst, src, tmp});
+
+    rewriter.eraseOp(op);
+    return success();
+  }
+};
+
 struct PTOColSumToEmitC : public OpConversionPattern<pto::TColSumOp> {
   using OpConversionPattern<pto::TColSumOp>::OpConversionPattern;
 
@@ -7419,9 +7706,9 @@ struct PTORemToEmitC : public OpConversionPattern<pto::TRemOp> {
 
     Value src0 = peelUnrealized(adaptor.getSrc0());
     Value src1 = peelUnrealized(adaptor.getSrc1());
+    Value tmp  = peelUnrealized(adaptor.getTmp());
     Value dst  = peelUnrealized(adaptor.getDst());
-
-    SmallVector<Value, 3> operands{dst, src0, src1};
+    SmallVector<Value, 4> operands{dst, src0, src1, tmp};
     rewriter.create<emitc::CallOpaqueOp>(
         loc, TypeRange{}, "TREM",
         /*args=*/ArrayAttr{}, /*templateArgs=*/ArrayAttr{},
@@ -7465,10 +7752,10 @@ struct PTORemSToEmitC : public OpConversionPattern<pto::TRemSOp> {
     auto loc = op.getLoc();
 
     Value src = peelUnrealized(adaptor.getSrc());
+    Value tmp = peelUnrealized(adaptor.getTmp());
     Value dst = peelUnrealized(adaptor.getDst());
     Value scalar = peelUnrealized(adaptor.getScalar());
-    
-    SmallVector<Value, 3> operands{dst, src, scalar};
+    SmallVector<Value, 4> operands{dst, src, scalar, tmp};
     rewriter.create<emitc::CallOpaqueOp>(
         loc, TypeRange{}, "TREMS",
         /*args=*/ArrayAttr{}, /*templateArgs=*/ArrayAttr{},
@@ -7919,6 +8206,28 @@ struct PTORowMaxToEmitC : public OpConversionPattern<pto::TRowMaxOp> {
     return success();
   }
 };
+
+struct PTORowArgMaxToEmitC
+    : public OpConversionPattern<pto::TRowArgMaxOp> {
+  using OpConversionPattern<pto::TRowArgMaxOp>::OpConversionPattern;
+
+  LogicalResult matchAndRewrite(pto::TRowArgMaxOp op, OpAdaptor adaptor,
+                                ConversionPatternRewriter &rewriter) const override {
+    auto loc = op.getLoc();
+
+    Value src = peelUnrealized(adaptor.getSrc());
+    Value tmp = peelUnrealized(adaptor.getTmp());
+    Value dst = peelUnrealized(adaptor.getDst());
+
+    rewriter.create<emitc::CallOpaqueOp>(
+        loc, TypeRange{}, "TROWARGMAX",
+        /*args=*/ArrayAttr{}, /*templateArgs=*/ArrayAttr{},
+        /*operands=*/ValueRange{dst, src, tmp});
+
+    rewriter.eraseOp(op);
+    return success();
+  }
+};
 //===----------------------------------------------------------------------===//
 // PTOConvert.cpp  (add lowering + patterns.add for TROWMIN DPS/memref op)
 //===----------------------------------------------------------------------===//
@@ -7939,6 +8248,28 @@ struct PTORowMinToEmitC : public OpConversionPattern<pto::TRowMinOp> {
         loc, TypeRange{}, "TROWMIN",
         /*args=*/ArrayAttr{}, /*templateArgs=*/ArrayAttr{},
         /*operands=*/operands);
+
+    rewriter.eraseOp(op);
+    return success();
+  }
+};
+
+struct PTORowArgMinToEmitC
+    : public OpConversionPattern<pto::TRowArgMinOp> {
+  using OpConversionPattern<pto::TRowArgMinOp>::OpConversionPattern;
+
+  LogicalResult matchAndRewrite(pto::TRowArgMinOp op, OpAdaptor adaptor,
+                                ConversionPatternRewriter &rewriter) const override {
+    auto loc = op.getLoc();
+
+    Value src = peelUnrealized(adaptor.getSrc());
+    Value tmp = peelUnrealized(adaptor.getTmp());
+    Value dst = peelUnrealized(adaptor.getDst());
+
+    rewriter.create<emitc::CallOpaqueOp>(
+        loc, TypeRange{}, "TROWARGMIN",
+        /*args=*/ArrayAttr{}, /*templateArgs=*/ArrayAttr{},
+        /*operands=*/ValueRange{dst, src, tmp});
 
     rewriter.eraseOp(op);
     return success();
@@ -9524,11 +9855,13 @@ static void populatePTOToEmitCPatterns(RewritePatternSet &patterns,
   patterns.add<PTORowExpandToEmitC>(typeConverter, ctx);
   patterns.add<PTORsqrtToEmitC>(typeConverter, ctx);
   patterns.add<PTORowMaxToEmitC>(typeConverter, ctx);
+  patterns.add<PTORowArgMaxToEmitC>(typeConverter, ctx);
   patterns.add<PTORowExpandMulToEmitC>(typeConverter, ctx);
   patterns.add<PTORowExpandDivToEmitC>(typeConverter, ctx);
   patterns.add<PTORowProdToEmitC>(typeConverter, ctx);
   patterns.add<PTORowSumToEmitC>(typeConverter, ctx);
   patterns.add<PTORowMinToEmitC>(typeConverter, ctx);
+  patterns.add<PTORowArgMinToEmitC>(typeConverter, ctx);
   patterns.add<PTODivSToEmitC>(typeConverter, ctx);
   patterns.add<PTOTDivSToEmitC>(typeConverter, ctx);
   patterns.add<PTOFModToEmitC>(typeConverter, ctx);
@@ -9566,6 +9899,7 @@ static void populatePTOToEmitCPatterns(RewritePatternSet &patterns,
   patterns.add<AffineApplyMulConstToEmitC>(typeConverter, ctx);
   patterns.add<PTONegToEmitC>(typeConverter, ctx);
   patterns.add<PTOTCIToEmitC>(typeConverter, ctx);
+  patterns.add<PTOTTriToEmitC>(typeConverter, ctx);
   patterns.add<PTOCmpToEmitC>(typeConverter, ctx);
   patterns.add<PTOCmpSToEmitC>(typeConverter, ctx);
   patterns.add<PTOColSumToEmitC>(typeConverter, ctx);
@@ -9576,6 +9910,8 @@ static void populatePTOToEmitCPatterns(RewritePatternSet &patterns,
   patterns.add<PTOSetValToSETVAL, PTOGetValToGETVAL, PTOSetValidShapeToEmitC,
                PTOTAssignToEmitC, PTOLoadScalarToEmitC,
                PTOStoreScalarToEmitC>(typeConverter, ctx);
+  patterns.add<PTOTAxpyToEmitC, PTOHistogramToEmitC, PTOGetScaleAddrToEmitC>(
+      typeConverter, ctx);
   patterns.add<PTOTAndToEmitC>(typeConverter, ctx);
   patterns.add<PTOMulToEmitC>(typeConverter, ctx);
   patterns.add<PTOAndSToEmitC>(typeConverter, ctx);
@@ -9632,9 +9968,13 @@ static void populatePTOToEmitCPatterns(RewritePatternSet &patterns,
   patterns.add<ArithBitcastToEmitC>(typeConverter, ctx);
   patterns.add<PTOAddSToTADDS>(typeConverter, ctx);
   patterns.add<PTOColExpandToEmitC>(typeConverter, ctx);
+  patterns.add<PTOColArgMaxToEmitC>(typeConverter, ctx);
   patterns.add<PTOColMaxToEmitC>(typeConverter, ctx);
+  patterns.add<PTOColArgMinToEmitC>(typeConverter, ctx);
   patterns.add<PTOMinToEmitC>(typeConverter, ctx);
   patterns.add<PTOTLoadToTLOAD>(typeConverter, ctx);
+  patterns.add<PTOTPrefetchToTPREFETCH>(typeConverter, ctx);
+  patterns.add<PTOTPackToTPACK>(typeConverter, ctx);
   patterns.add<PTOTStoreToTSTORE>(typeConverter, ctx);
   patterns.add<PTOMScatterToMSCATTER>(typeConverter, ctx);
   patterns.add<PTOTAddCToTADDC>(typeConverter, ctx);

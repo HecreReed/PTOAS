@@ -489,6 +489,42 @@ def TLoadOp  : PTO_TOp<"tload", [
   }];
 }
 
+def TPrefetchOp : PTO_TOp<"tprefetch", [
+  PTO_DpsInitOpInterface,
+  OpPipeInterface,
+  DeclareOpInterfaceMethods<MemoryEffectsOpInterface>
+]> {
+  let summary = "Prefetch global data into a local tile buffer.";
+  let description = [{
+    Prefetches data from a global partition view into a temporary local tile
+    buffer. Unlike most PTO intrinsics, TPREFETCH does not carry implicit
+    TSYNC(wait_events...) semantics in PTO-ISA.
+
+    DPS form:
+      pto.tprefetch ins(%src) outs(%dst)
+  }];
+
+  let arguments = (ins
+    PTODpsType:$src,
+    PTODpsType:$dst
+  );
+
+  let results = (outs);
+
+  let hasVerifier = 1;
+
+  let assemblyFormat = [{
+    `ins` `(` $src `:` qualified(type($src)) `)`
+    `outs` `(` $dst `:` qualified(type($dst)) `)`
+    attr-dict
+  }];
+
+  let extraClassDeclaration = [{
+    ::mlir::pto::PIPE getPipe() { return ::mlir::pto::PIPE::PIPE_MTE2; }
+    ::mlir::MutableOperandRange getDpsInitsMutable() { return getDstMutable(); }
+  }];
+}
+
 def TStoreOp: PTO_TOp<"tstore", [
   PTO_DpsInitOpInterface,
   OpPipeInterface,
@@ -553,6 +589,34 @@ def TStoreOp: PTO_TOp<"tstore", [
         return ::mlir::pto::PIPE::PIPE_FIX;
       return ::mlir::pto::PIPE::PIPE_MTE3;
     }
+    ::mlir::MutableOperandRange getDpsInitsMutable() { return getDstMutable(); }
+  }];
+}
+
+def TPackOp : PTO_TOp<"tpack", [
+  PTO_DpsInitOpInterface,
+  OpPipeInterface,
+  DeclareOpInterfaceMethods<MemoryEffectsOpInterface>
+]> {
+  let summary = "Pack a wider vec tile into a narrower vec tile (A5).";
+
+  let arguments = (ins
+    PTODpsType:$src,
+    PTODpsType:$dst
+  );
+
+  let results = (outs);
+
+  let hasVerifier = 1;
+
+  let assemblyFormat = [{
+    `ins` `(` $src `:` qualified(type($src)) `)`
+    `outs` `(` $dst `:` qualified(type($dst)) `)`
+    attr-dict
+  }];
+
+  let extraClassDeclaration = [{
+    ::mlir::pto::PIPE getPipe() { return ::mlir::pto::PIPE::PIPE_V; }
     ::mlir::MutableOperandRange getDpsInitsMutable() { return getDstMutable(); }
   }];
 }
@@ -2102,7 +2166,8 @@ def MGatherOp : PTO_TOp<"mgather", [
   let arguments = (ins
     PTODpsType:$mem,
     PTODpsType:$idx,
-    PTODpsType:$dst);
+    PTODpsType:$dst,
+    DefaultValuedAttr<PTO_GatherOOBAttr, "::mlir::pto::GatherOOB::Undefined">:$gatherOob);
 
   let results = (outs);
 
@@ -2184,6 +2249,64 @@ def TGetValOp : PTO_TOp<"tgetval", [
   }];
 }
 
+def THistogramOp : PTO_TOp<"thistogram", [
+  PTO_DpsInitOpInterface,
+  OpPipeInterface,
+  DeclareOpInterfaceMethods<MemoryEffectsOpInterface>
+]> {
+  let summary = "THISTOGRAM: accumulate per-row 256-bin histograms.";
+
+  let arguments = (ins
+    PTODpsType:$src,
+    PTODpsType:$idx,
+    PTODpsType:$dst,
+    DefaultValuedOptionalAttr<BoolAttr, "true">:$isMSB
+  );
+
+  let results = (outs);
+
+  let hasVerifier = 1;
+
+  let assemblyFormat = [{
+    `ins` `(` $src `,` $idx `:` qualified(type($src)) `,` qualified(type($idx)) `)`
+    `outs` `(` $dst `:` qualified(type($dst) ) `)`
+    attr-dict
+  }];
+
+  let extraClassDeclaration = [{
+    ::mlir::pto::PIPE getPipe() { return ::mlir::pto::PIPE::PIPE_V; }
+    ::mlir::MutableOperandRange getDpsInitsMutable() { return getDstMutable(); }
+  }];
+}
+
+def TGetScaleAddrOp : PTO_TOp<"tget_scale_addr", [
+  PTO_DpsInitOpInterface,
+  OpPipeInterface,
+  DeclareOpInterfaceMethods<MemoryEffectsOpInterface>
+]> {
+  let summary = "Bind a scaling tile to the scaled address of a source tile.";
+
+  let arguments = (ins
+    PTODpsType:$src,
+    PTODpsType:$dst
+  );
+
+  let results = (outs);
+
+  let hasVerifier = 1;
+
+  let assemblyFormat = [{
+    `ins` `(` $src `:` qualified(type($src)) `)`
+    `outs` `(` $dst `:` qualified(type($dst) ) `)`
+    attr-dict
+  }];
+
+  let extraClassDeclaration = [{
+    ::mlir::pto::PIPE getPipe() { return ::mlir::pto::PIPE::PIPE_S; }
+    ::mlir::MutableOperandRange getDpsInitsMutable() { return getDstMutable(); }
+  }];
+}
+
 
 // ---- tile-world TOp version (with 't') ----
 // pto.mscatter ins(%src, %idx) outs(%mem) [ ...]
@@ -2197,7 +2320,9 @@ def MScatterOp : PTO_TOp<"mscatter", [
   let arguments = (ins
     PTODpsType:$src,
     PTODpsType:$idx,
-    PTODpsType:$mem               // outs target
+    PTODpsType:$mem,               // outs target
+    DefaultValuedAttr<PTO_ScatterAtomicOpAttr, "::mlir::pto::ScatterAtomicOp::None">:$scatterAtomicOp,
+    DefaultValuedAttr<PTO_ScatterOOBAttr, "::mlir::pto::ScatterOOB::Undefined">:$scatterOob
   );
 
   let results = (outs);
@@ -2357,6 +2482,35 @@ def TAddSOp : PTO_TOp<"tadds", [
   }];
 }
 
+def TAxpyOp : PTO_TOp<"taxpy", [
+  PTO_DpsInitOpInterface,
+  OpPipeInterface,
+  DeclareOpInterfaceMethods<MemoryEffectsOpInterface>
+]> {
+  let summary = "TAXPY: dst += src * scalar.";
+
+  let arguments = (ins
+    PTODpsType:$src,
+    ScalarType:$scalar,
+    PTODpsType:$dst
+  );
+
+  let results = (outs);
+
+  let assemblyFormat = [{
+    `ins` `(` $src `,` $scalar `:` qualified(type($src)) `,` type($scalar) `)`
+    `outs` `(` $dst `:` qualified(type($dst) ) `)`
+    attr-dict
+  }];
+
+  let hasVerifier = 1;
+
+  let extraClassDeclaration = [{
+    ::mlir::pto::PIPE getPipe() { return ::mlir::pto::PIPE::PIPE_V; }
+    ::mlir::MutableOperandRange getDpsInitsMutable() { return getDstMutable(); }
+  }];
+}
+
 def TAddSCOp : PTO_TOp<"taddsc", [
   PTO_DpsInitOpInterface,
   OpPipeInterface,
@@ -2487,6 +2641,35 @@ def TCIOp : PTO_TOp<"tci", [
     `ins` `(` $S 
     attr-dict
     `:` type($S) `)`
+    `outs` `(` $dst `:` qualified(type($dst) ) `)`
+  }];
+
+  let hasVerifier = 1;
+
+  let extraClassDeclaration = [{
+    ::mlir::pto::PIPE getPipe() { return ::mlir::pto::PIPE::PIPE_V; }
+    ::mlir::MutableOperandRange getDpsInitsMutable() { return getDstMutable(); }
+  }];
+}
+
+def TTriOp : PTO_TOp<"ttri", [
+  PTO_DpsInitOpInterface,
+  OpPipeInterface,
+  DeclareOpInterfaceMethods<MemoryEffectsOpInterface>
+]> {
+  let summary = "Generate a lower/upper triangular mask tile";
+
+  let arguments = (ins
+    AnyInteger:$diagonal,
+    PTODpsType:$dst,
+    DefaultValuedAttr<I32Attr, "0">:$upperOrLower
+  );
+  let results = (outs);
+
+  let assemblyFormat = [{
+    `ins` `(` $diagonal
+    attr-dict
+    `:` type($diagonal) `)`
     `outs` `(` $dst `:` qualified(type($dst) ) `)`
   }];
 
@@ -2823,6 +3006,35 @@ def TColMaxOp : PTO_TOp<"tcolmax", [
   }];
 }
 
+def TColArgMaxOp : PTO_TOp<"tcolargmax", [
+  PTO_DpsInitOpInterface,
+  OpPipeInterface,
+  DeclareOpInterfaceMethods<MemoryEffectsOpInterface>
+]> {
+  let summary = "Reduce each column to the row index of the maximum element ";
+
+  let arguments = (ins
+    PTODpsType:$src,
+    PTODpsType:$tmp,
+    PTODpsType:$dst
+  );
+
+  let results = (outs);
+
+  let hasVerifier = 1;
+
+  let extraClassDeclaration = [{
+    ::mlir::pto::PIPE getPipe() { return ::mlir::pto::PIPE::PIPE_V; }
+    ::mlir::MutableOperandRange getDpsInitsMutable() { return getDstMutable(); }
+  }];
+
+  let assemblyFormat = [{
+    `ins` `(` $src `,` $tmp `:` qualified(type($src)) `,` qualified(type($tmp)) `)`
+    `outs` `(` $dst `:` qualified(type($dst) ) `)`
+    attr-dict
+  }];
+}
+
 def TColMinOp : PTO_TOp<"tcolmin", [
   PTO_DpsInitOpInterface,
   OpPipeInterface,
@@ -2846,6 +3058,35 @@ def TColMinOp : PTO_TOp<"tcolmin", [
 
   let assemblyFormat = [{
     `ins` `(` $src `:` qualified(type($src)) `)`
+    `outs` `(` $dst `:` qualified(type($dst) ) `)`
+    attr-dict
+  }];
+}
+
+def TColArgMinOp : PTO_TOp<"tcolargmin", [
+  PTO_DpsInitOpInterface,
+  OpPipeInterface,
+  DeclareOpInterfaceMethods<MemoryEffectsOpInterface>
+]> {
+  let summary = "Reduce each column to the row index of the minimum element ";
+
+  let arguments = (ins
+    PTODpsType:$src,
+    PTODpsType:$tmp,
+    PTODpsType:$dst
+  );
+
+  let results = (outs);
+
+  let hasVerifier = 1;
+
+  let extraClassDeclaration = [{
+    ::mlir::pto::PIPE getPipe() { return ::mlir::pto::PIPE::PIPE_V; }
+    ::mlir::MutableOperandRange getDpsInitsMutable() { return getDstMutable(); }
+  }];
+
+  let assemblyFormat = [{
+    `ins` `(` $src `,` $tmp `:` qualified(type($src)) `,` qualified(type($tmp)) `)`
     `outs` `(` $dst `:` qualified(type($dst) ) `)`
     attr-dict
   }];
@@ -4217,6 +4458,7 @@ def TRemOp: PTO_TOp<"trem", [
   let arguments = (ins
     PTODpsType:$src0,
     PTODpsType:$src1,
+    PTODpsType:$tmp,
     PTODpsType:$dst
   );
 
@@ -4225,7 +4467,7 @@ def TRemOp: PTO_TOp<"trem", [
   let hasVerifier = 1;
 
   let assemblyFormat = [{
-    `ins` `(` $src0 `,` $src1 `:` qualified(type($src0)) `,` qualified(type($src1)) `)`
+    `ins` `(` $src0 `,` $src1 `,` $tmp `:` qualified(type($src0)) `,` qualified(type($src1)) `,` qualified(type($tmp)) `)`
     `outs` `(` $dst `:` qualified(type($dst) ) `)`
     attr-dict
   }];
@@ -4249,6 +4491,7 @@ def TRemSOp: PTO_TOp<"trems", [
   let arguments = (ins
     PTODpsType:$src,
     ScalarType:$scalar,
+    PTODpsType:$tmp,
     PTODpsType:$dst
   );
 
@@ -4257,7 +4500,7 @@ def TRemSOp: PTO_TOp<"trems", [
   let hasVerifier = 1;
 
   let assemblyFormat = [{
-    `ins` `(` $src `,` $scalar `:` qualified(type($src)) `,` type($scalar) `)`
+    `ins` `(` $src `,` $scalar `,` $tmp `:` qualified(type($src)) `,` type($scalar) `,` qualified(type($tmp)) `)`
     `outs` `(` $dst `:` qualified(type($dst) ) `)`
     attr-dict
   }];
@@ -4571,6 +4814,35 @@ def TRowMaxOp: PTO_TOp<"trowmax", [
     ::mlir::MutableOperandRange getDpsInitsMutable() { return getDstMutable(); }
   }];
 }
+
+def TRowArgMaxOp: PTO_TOp<"trowargmax", [
+  PTO_DpsInitOpInterface,
+  OpPipeInterface,
+  DeclareOpInterfaceMethods<MemoryEffectsOpInterface>
+]> {
+  let summary = "TROWARGMAX: Reduce each row to the column index of the maximum element.";
+
+  let arguments = (ins
+    PTODpsType:$src,
+    PTODpsType:$tmp,
+    PTODpsType:$dst
+  );
+
+  let results = (outs);
+
+  let hasVerifier = 1;
+
+  let assemblyFormat = [{
+    `ins` `(` $src `,` $tmp `:` qualified(type($src)) `,` qualified(type($tmp)) `)`
+    `outs` `(` $dst `:` qualified(type($dst) ) `)`
+    attr-dict
+  }];
+
+  let extraClassDeclaration = [{
+    ::mlir::pto::PIPE getPipe() { return ::mlir::pto::PIPE::PIPE_V; }
+    ::mlir::MutableOperandRange getDpsInitsMutable() { return getDstMutable(); }
+  }];
+}
 //===----------------------------------------------------------------------===//
 // PTOOps.td  (add TROWMIN TBDPS/tile buffer op)
 //===----------------------------------------------------------------------===//
@@ -4581,6 +4853,35 @@ def TRowMinOp: PTO_TOp<"trowmin", [
   DeclareOpInterfaceMethods<MemoryEffectsOpInterface>
 ]> {
   let summary = "TROWMIN: Reduce each row by taking the minimum across columns.";
+
+  let arguments = (ins
+    PTODpsType:$src,
+    PTODpsType:$tmp,
+    PTODpsType:$dst
+  );
+
+  let results = (outs);
+
+  let hasVerifier = 1;
+
+  let assemblyFormat = [{
+    `ins` `(` $src `,` $tmp `:` qualified(type($src)) `,` qualified(type($tmp)) `)`
+    `outs` `(` $dst `:` qualified(type($dst) ) `)`
+    attr-dict
+  }];
+
+  let extraClassDeclaration = [{
+    ::mlir::pto::PIPE getPipe() { return ::mlir::pto::PIPE::PIPE_V; }
+    ::mlir::MutableOperandRange getDpsInitsMutable() { return getDstMutable(); }
+  }];
+}
+
+def TRowArgMinOp: PTO_TOp<"trowargmin", [
+  PTO_DpsInitOpInterface,
+  OpPipeInterface,
+  DeclareOpInterfaceMethods<MemoryEffectsOpInterface>
+]> {
+  let summary = "TROWARGMIN: Reduce each row to the column index of the minimum element.";
 
   let arguments = (ins
     PTODpsType:$src,
