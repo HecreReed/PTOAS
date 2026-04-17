@@ -6,11 +6,6 @@
 // INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
 // See LICENSE in the root of the software repository for the full text of the License.
 
-// Please refer to the License for details. You may not use this file except in compliance with the License.
-// THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
-// INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
-// See LICENSE in the root of the software repository for the full text of the License.
-
 //===- PTOAttrs.cpp ------------------------------------------------*- C++ -*-===//
 #include "PTO/IR/PTO.h"
 #include "mlir/IR/Builders.h"
@@ -132,7 +127,8 @@ Attribute TileBufConfigAttr::parse(AsmParser &p, Type) {
   if (succeeded(p.parseOptionalGreater()))
     return TileBufConfigAttr::get(ctx, bl, sl, sz, pv, compact);
 
-  while (true) {
+  bool parsedGreater = false;
+  while (!parsedGreater) {
     StringRef key;
     if (p.parseKeyword(&key)) return {};
     if (p.parseEqual()) return {};
@@ -166,7 +162,8 @@ Attribute TileBufConfigAttr::parse(AsmParser &p, Type) {
       return {};
     }
 
-    if (succeeded(p.parseOptionalGreater()))
+    parsedGreater = succeeded(p.parseOptionalGreater());
+    if (parsedGreater)
       break;
     if (p.parseComma()) return {};
   }

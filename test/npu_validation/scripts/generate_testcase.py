@@ -86,25 +86,56 @@ UNSTABLE_A3_CUSTOM_GOLDEN_CASES = frozenset({
 })
 
 CASE_INT_SCALAR_DEFAULTS = {
-    "qwen3_decode_layer_incore_13": {
-        "v7": 64,
+    "qwen3_decode_incore_4": {
+        "v11": 1,
+        "v12": 0,
+        "v13": 1,
     },
-    "qwen3_decode_layer_incore_14": {
+    "qwen3_decode_incore_5": {
+        "v4": 1,
+        "v5": 1,
+        "v6": 1,
+        "v7": 0,
+    },
+    "qwen3_decode_incore_6": {
+        "v5": 1,
+        "v6": 1,
+        "v7": 0,
+    },
+    "qwen3_decode_incore_7": {
+        "v4": 1,
+        "v5": 1,
+        "v6": 1,
+        "v7": 0,
+    },
+    "qwen3_decode_incore_8": {
+        "v5": 2,
+        "v6": 1,
+    },
+    "qwen3_decode_incore_9": {
         "v4": 1,
         "v5": 64,
+    },
+    "qwen3_decode_incore_10": {
+        "v4": 1,
+        "v5": 64,
+    },
+    "qwen3_decode_incore_12": {
+        "v4": 256,
+    },
+    "qwen3_decode_incore_13": {
+        "v4": 256,
+    },
+    "qwen3_decode_incore_15": {
+        "v4": 128,
+    },
+    "qwen3_decode_incore_16": {
+        "v4": 1,
+        "v5": 128,
     },
 }
 
 CASE_POINTER_COUNT_MINIMUMS = {
-    "qwen3_decode_layer_incore_13": {
-        "v2": 20480,
-        "v4": 131046528,
-        "v5": 131046528,
-    },
-    "qwen3_decode_layer_incore_14": {
-        "v1": 16384,
-        "v3": 651264,
-    },
 }
 
 
@@ -809,6 +840,10 @@ def _cpp_host_type(cpp_type: str) -> str:
     return cpp_type
 
 
+def _is_bf16_cpp_type(cpp_type: str) -> bool:
+    return cpp_type in {"__bf16", "bfloat16_t"}
+
+
 def _rewrite_host_unsupported_types(text: str) -> str:
     # `bisheng -xcce` performs a host-side pass that parses kernel launch code.
     # Some device-only builtin types (e.g. `__bf16`) are rejected there.
@@ -822,6 +857,10 @@ def _default_eps_for_cpp_type(cpp_type: str) -> float:
     if cpp_type in {"float"}:
         return 1e-4
     return 0.0
+
+
+def _default_bf16_max_ulp_for_cpp_type(cpp_type: str) -> int:
+    return 1 if _is_bf16_cpp_type(cpp_type) else 0
 
 
 def _integer_scalar_default_value(testcase: str, name: str, host_type: str) -> Optional[int]:
@@ -876,6 +915,11 @@ def _copy_asset_if_needed(src: Path, dst: Path):
     if src.resolve() == dst.resolve():
         return
     shutil.copy2(src, dst)
+
+
+def _copy_custom_golden_helpers(sample_root: Path, output_dir: Path):
+    for helper in sample_root.glob("*_golden_*.py"):
+        _copy_asset_if_needed(helper, output_dir / helper.name)
 
 
 def _replace_includes(text: str) -> str:
@@ -1937,8 +1981,10 @@ def generate_testcase(
     else:
         golden_py = golden_template.replace("@INPUT_GENERATE@", "\n".join(input_generate))
         golden_dst.write_text(golden_py, encoding="utf-8")
-    if (custom_golden is not None or custom_compare is not None) and shared_validation_runtime.is_file():
-        _copy_asset_if_needed(shared_validation_runtime, output_dir / "validation_runtime.py")
+    if custom_golden is not None or custom_compare is not None:
+        _copy_custom_golden_helpers(sample_root, output_dir)
+        if shared_validation_runtime.is_file():
+            _copy_asset_if_needed(shared_validation_runtime, output_dir / "validation_runtime.py")
 
     # Emit the kernel source, optionally injecting a packed-predicate preload to
     # make TCMP/TCMPS outputs deterministic for byte-wise compares.
@@ -2194,11 +2240,19 @@ endif()
         np_dtype = _np_dtype_for_cpp(p["cpp_type"])
         name = p["name"]
         eps = _default_eps_for_cpp_type(p["cpp_type"])
+        is_bf16_output = _is_bf16_cpp_type(p["cpp_type"])
+        bf16_max_ulp = _default_bf16_max_ulp_for_cpp_type(p["cpp_type"])
         if kernel_has_tscatter and tscatter_indices_input is not None:
-            compare_lines.append(
-                f"    ok = compare_bin_at_indices(\"golden_{name}.bin\", \"{name}.bin\", {np_dtype}, {eps}, "
-                f"\"{tscatter_indices_input['name']}.bin\", {_np_dtype_for_cpp(tscatter_indices_input['cpp_type'])}) and ok"
-            )
+            if is_bf16_output:
+                compare_lines.append(
+                    f"    ok = compare_bf16_bin_at_indices(\"golden_{name}.bin\", \"{name}.bin\", {bf16_max_ulp}, "
+                    f"\"{tscatter_indices_input['name']}.bin\", {_np_dtype_for_cpp(tscatter_indices_input['cpp_type'])}) and ok"
+                )
+            else:
+                compare_lines.append(
+                    f"    ok = compare_bin_at_indices(\"golden_{name}.bin\", \"{name}.bin\", {np_dtype}, {eps}, "
+                    f"\"{tscatter_indices_input['name']}.bin\", {_np_dtype_for_cpp(tscatter_indices_input['cpp_type'])}) and ok"
+                )
         elif has_packed_pred_mask and p["cpp_type"] in {"uint8_t", "int8_t"}:
             compare_lines.append(
                 f"    ok = compare_packed_pred_mask(\"golden_{name}.bin\", \"{name}.bin\", {rows}, {cols}) and ok"
@@ -2206,13 +2260,23 @@ endif()
         else:
             prefix_cnt = compare_prefix_counts.get(name)
             if prefix_cnt is not None:
-                compare_lines.append(
-                    f"    ok = compare_bin_prefix(\"golden_{name}.bin\", \"{name}.bin\", {np_dtype}, {eps}, {prefix_cnt}) and ok"
-                )
+                if is_bf16_output:
+                    compare_lines.append(
+                        f"    ok = compare_bf16_bin_prefix(\"golden_{name}.bin\", \"{name}.bin\", {bf16_max_ulp}, {prefix_cnt}) and ok"
+                    )
+                else:
+                    compare_lines.append(
+                        f"    ok = compare_bin_prefix(\"golden_{name}.bin\", \"{name}.bin\", {np_dtype}, {eps}, {prefix_cnt}) and ok"
+                    )
             else:
-                compare_lines.append(
-                    f"    ok = compare_bin(\"golden_{name}.bin\", \"{name}.bin\", {np_dtype}, {eps}) and ok"
-                )
+                if is_bf16_output:
+                    compare_lines.append(
+                        f"    ok = compare_bf16_bin(\"golden_{name}.bin\", \"{name}.bin\", {bf16_max_ulp}) and ok"
+                    )
+                else:
+                    compare_lines.append(
+                        f"    ok = compare_bin(\"golden_{name}.bin\", \"{name}.bin\", {np_dtype}, {eps}) and ok"
+                    )
     if testcase in {"test_intercore_sync_a5_functional", "test_intercore_sync_a5_ptoisa_vec"}:
         # Extra functional check (not just run-to-run determinism):
         # core0 writes 2.0 to output[0], core1 waits then mirrors to output[1].

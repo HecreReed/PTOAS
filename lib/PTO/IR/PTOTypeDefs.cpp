@@ -6,39 +6,54 @@
 // INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
 // See LICENSE in the root of the software repository for the full text of the License.
 
-// Please refer to the License for details. You may not use this file except in compliance with the License.
-// THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
-// INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
-// See LICENSE in the root of the software repository for the full text of the License.
-
 //===- PTOTypeDefs.cpp --------------------------------------------*- C++ -*-===//
 #include "PTO/IR/PTO.h"
 #include "mlir/IR/DialectImplementation.h"
+#include <limits>
+#include <mutex>
+#include <unordered_map>
 
 using namespace mlir;
 using namespace mlir::pto;
 
 namespace {
-thread_local PTOParserTargetArch currentParserTargetArch =
-    PTOParserTargetArch::Unspecified;
+std::mutex parserTargetArchMutex;
+std::unordered_map<const MLIRContext *, PTOParserTargetArch>
+    parserTargetArchByContext;
 }
 
-void mlir::pto::setPTOParserTargetArch(PTOParserTargetArch arch) {
-  currentParserTargetArch = arch;
+void mlir::pto::setPTOParserTargetArch(MLIRContext *context,
+                                       PTOParserTargetArch arch) {
+  if (!context)
+    return;
+
+  std::lock_guard<std::mutex> lock(parserTargetArchMutex);
+  if (arch == PTOParserTargetArch::Unspecified) {
+    parserTargetArchByContext.erase(context);
+    return;
+  }
+  parserTargetArchByContext[context] = arch;
 }
 
-PTOParserTargetArch mlir::pto::getPTOParserTargetArch() {
-  return currentParserTargetArch;
+PTOParserTargetArch mlir::pto::getPTOParserTargetArch(MLIRContext *context) {
+  if (!context)
+    return PTOParserTargetArch::Unspecified;
+
+  std::lock_guard<std::mutex> lock(parserTargetArchMutex);
+  auto it = parserTargetArchByContext.find(context);
+  if (it == parserTargetArchByContext.end())
+    return PTOParserTargetArch::Unspecified;
+  return it->second;
 }
 
 mlir::pto::ScopedPTOParserTargetArch::ScopedPTOParserTargetArch(
-    PTOParserTargetArch arch)
-    : previousArch(getPTOParserTargetArch()) {
-  setPTOParserTargetArch(arch);
+    MLIRContext *context, PTOParserTargetArch arch)
+    : context(context), previousArch(getPTOParserTargetArch(context)) {
+  setPTOParserTargetArch(context, arch);
 }
 
 mlir::pto::ScopedPTOParserTargetArch::~ScopedPTOParserTargetArch() {
-  setPTOParserTargetArch(previousArch);
+  setPTOParserTargetArch(context, previousArch);
 }
 
 static SmallVector<int64_t, 4> canonicalizeTileBufValidShape(ArrayRef<int64_t> validShape) {
@@ -47,6 +62,120 @@ static SmallVector<int64_t, 4> canonicalizeTileBufValidShape(ArrayRef<int64_t> v
   for (int64_t dim : validShape)
     canonical.push_back(dim < 0 ? ShapedType::kDynamic : dim);
   return canonical;
+}
+
+static LogicalResult parseTileBufKeyEq(AsmParser &parser,
+                                       StringRef expectedKey) {
+  if (failed(parser.parseKeyword(expectedKey)))
+    return failure();
+  return parser.parseEqual();
+}
+
+static LogicalResult parseTileBufComma(AsmParser &parser) {
+  return parser.parseComma();
+}
+
+static LogicalResult parseTileBufKeywordField(AsmParser &parser, StringRef key,
+                                              std::string &value) {
+  if (failed(parseTileBufKeyEq(parser, key)))
+    return failure();
+  if (failed(parser.parseKeywordOrString(&value)))
+    return failure();
+  return parseTileBufComma(parser);
+}
+
+static LogicalResult parseTileBufTypeField(AsmParser &parser, StringRef key,
+                                           Type &value) {
+  if (failed(parseTileBufKeyEq(parser, key)))
+    return failure();
+  if (failed(parser.parseType(value)))
+    return failure();
+  return parseTileBufComma(parser);
+}
+
+static LogicalResult parseTileBufIntegerField(AsmParser &parser, StringRef key,
+                                              int64_t &value) {
+  if (failed(parseTileBufKeyEq(parser, key)))
+    return failure();
+  if (failed(parser.parseInteger(value)))
+    return failure();
+  return parseTileBufComma(parser);
+}
+
+static LogicalResult parseTileBufValidDim(AsmParser &parser, StringRef key,
+                                          int64_t &value) {
+  if (failed(parseTileBufKeyEq(parser, key)))
+    return failure();
+
+  if (succeeded(parser.parseOptionalQuestion())) {
+    value = -1;
+    return success();
+  }
+
+  if (failed(parser.parseInteger(value)))
+    return failure();
+  if (value < -1) {
+    parser.emitError(parser.getCurrentLocation(),
+                     key + " must be '?', -1, or a non-negative integer");
+    return failure();
+  }
+  return success();
+}
+
+static LogicalResult parseTileBufValidShapeFields(AsmParser &parser,
+                                                  int64_t &vrow,
+                                                  int64_t &vcol) {
+  if (failed(parseTileBufValidDim(parser, "v_row", vrow)))
+    return failure();
+  if (failed(parseTileBufComma(parser)))
+    return failure();
+  if (failed(parseTileBufValidDim(parser, "v_col", vcol)))
+    return failure();
+  return parseTileBufComma(parser);
+}
+
+static LogicalResult parseTileBufPadField(AsmParser &parser, uint32_t &padInt) {
+  int64_t parsedPad = 0;
+  if (failed(parseTileBufKeyEq(parser, "pad")))
+    return failure();
+  if (failed(parser.parseInteger(parsedPad)))
+    return failure();
+  if (parsedPad < 0 || parsedPad > std::numeric_limits<uint32_t>::max()) {
+    parser.emitError(parser.getCurrentLocation(),
+                     "pad must be a non-negative 32-bit integer");
+    return failure();
+  }
+  padInt = static_cast<uint32_t>(parsedPad);
+  return success();
+}
+
+static std::optional<AddressSpace> resolveTileBufMemorySpace(StringRef locStr) {
+  return ::llvm::StringSwitch<::std::optional<AddressSpace>>(locStr)
+      .Case("mat", AddressSpace::MAT)
+      .Case("left", AddressSpace::LEFT)
+      .Case("right", AddressSpace::RIGHT)
+      .Case("acc", AddressSpace::ACC)
+      .Case("vec", AddressSpace::VEC)
+      .Case("bias", AddressSpace::BIAS)
+      .Case("scaling", AddressSpace::SCALING)
+      .Default(::std::nullopt);
+}
+
+static BLayout resolveTileBufBLayout(MLIRContext *context,
+                                     AddressSpace memorySpace,
+                                     BLayout parsedLayout) {
+  if (memorySpace != AddressSpace::LEFT)
+    return parsedLayout;
+
+  switch (getPTOParserTargetArch(context)) {
+  case PTOParserTargetArch::A3:
+    return BLayout::RowMajor;
+  case PTOParserTargetArch::A5:
+    return BLayout::ColMajor;
+  case PTOParserTargetArch::Unspecified:
+    return parsedLayout;
+  }
+  return parsedLayout;
 }
 
 TileBufConfigAttr TileBufType::getConfigAttr() const {
@@ -118,16 +247,23 @@ struct ParsedTileBufFields {
   uint32_t compactInt = 0;
 };
 
+static LogicalResult parseTileBufUInt32Value(AsmParser &parser, StringRef key,
+                                             uint32_t &value) {
+  int64_t parsedValue = 0;
+  if (failed(parser.parseInteger(parsedValue)))
+    return failure();
+  if (parsedValue < 0 ||
+      parsedValue > std::numeric_limits<uint32_t>::max()) {
+    parser.emitError(parser.getCurrentLocation())
+        << key << " must be a non-negative 32-bit integer";
+    return failure();
+  }
+  value = static_cast<uint32_t>(parsedValue);
+  return success();
+}
+
 static LogicalResult parseLegacyTileBufFields(AsmParser &parser,
                                               ParsedTileBufFields &fields) {
-  auto parseKeyEq = [&](StringRef expectedKey) -> LogicalResult {
-    if (failed(parser.parseKeyword(expectedKey)))
-      return failure();
-    if (failed(parser.parseEqual()))
-      return failure();
-    return success();
-  };
-
   if (failed(parser.parseEqual()))
     return failure();
   if (failed(parser.parseKeywordOrString(&fields.locStr)))
@@ -135,84 +271,16 @@ static LogicalResult parseLegacyTileBufFields(AsmParser &parser,
   if (failed(parser.parseComma()))
     return failure();
 
-  if (failed(parseKeyEq("dtype")))
+  if (failed(parseTileBufTypeField(parser, "dtype", fields.dtype)) ||
+      failed(parseTileBufIntegerField(parser, "rows", fields.rows)) ||
+      failed(parseTileBufIntegerField(parser, "cols", fields.cols)) ||
+      failed(parseTileBufValidShapeFields(parser, fields.vrow, fields.vcol)) ||
+      failed(parseTileBufKeywordField(parser, "blayout", fields.blayoutStr)) ||
+      failed(parseTileBufKeywordField(parser, "slayout", fields.slayoutStr)) ||
+      failed(parseTileBufIntegerField(parser, "fractal", fields.fractal)) ||
+      failed(parseTileBufPadField(parser, fields.padInt))) {
     return failure();
-  if (failed(parser.parseType(fields.dtype)))
-    return failure();
-  if (failed(parser.parseComma()))
-    return failure();
-
-  if (failed(parseKeyEq("rows")))
-    return failure();
-  if (failed(parser.parseInteger(fields.rows)))
-    return failure();
-  if (failed(parser.parseComma()))
-    return failure();
-
-  if (failed(parseKeyEq("cols")))
-    return failure();
-  if (failed(parser.parseInteger(fields.cols)))
-    return failure();
-  if (failed(parser.parseComma()))
-    return failure();
-
-  if (failed(parseKeyEq("v_row")))
-    return failure();
-  if (succeeded(parser.parseOptionalQuestion())) {
-    fields.vrow = -1;
-  } else {
-    if (failed(parser.parseInteger(fields.vrow)))
-      return failure();
-    if (fields.vrow < -1) {
-      parser.emitError(parser.getCurrentLocation(),
-                       "v_row must be '?', -1, or a non-negative integer");
-      return failure();
-    }
   }
-  if (failed(parser.parseComma()))
-    return failure();
-
-  if (failed(parseKeyEq("v_col")))
-    return failure();
-  if (succeeded(parser.parseOptionalQuestion())) {
-    fields.vcol = -1;
-  } else {
-    if (failed(parser.parseInteger(fields.vcol)))
-      return failure();
-    if (fields.vcol < -1) {
-      parser.emitError(parser.getCurrentLocation(),
-                       "v_col must be '?', -1, or a non-negative integer");
-      return failure();
-    }
-  }
-  if (failed(parser.parseComma()))
-    return failure();
-
-  if (failed(parseKeyEq("blayout")))
-    return failure();
-  if (failed(parser.parseKeywordOrString(&fields.blayoutStr)))
-    return failure();
-  if (failed(parser.parseComma()))
-    return failure();
-
-  if (failed(parseKeyEq("slayout")))
-    return failure();
-  if (failed(parser.parseKeywordOrString(&fields.slayoutStr)))
-    return failure();
-  if (failed(parser.parseComma()))
-    return failure();
-
-  if (failed(parseKeyEq("fractal")))
-    return failure();
-  if (failed(parser.parseInteger(fields.fractal)))
-    return failure();
-  if (failed(parser.parseComma()))
-    return failure();
-
-  if (failed(parseKeyEq("pad")))
-    return failure();
-  if (failed(parser.parseInteger(fields.padInt)))
-    return failure();
 
   return success();
 }
@@ -267,9 +335,7 @@ static LogicalResult parseCompactTileBufFields(AsmParser &parser,
 
   while (succeeded(parser.parseOptionalComma())) {
     StringRef key;
-    if (failed(parser.parseKeyword(&key)))
-      return failure();
-    if (failed(parser.parseEqual()))
+    if (failed(parser.parseKeyword(&key)) || failed(parser.parseEqual()))
       return failure();
 
     if (key == "valid") {
@@ -282,8 +348,9 @@ static LogicalResult parseCompactTileBufFields(AsmParser &parser,
 
       SmallVector<int64_t, 2> validShape;
       if (failed(parser.parseDimensionList(validShape, /*allowDynamic=*/true,
-                                           /*withTrailingX=*/false)))
+                                           /*withTrailingX=*/false))) {
         return failure();
+      }
       if (validShape.size() != 2) {
         parser.emitError(parser.getCurrentLocation(),
                          "tile_buf valid must have exactly two dims");
@@ -337,7 +404,7 @@ static LogicalResult parseCompactTileBufFields(AsmParser &parser,
         return failure();
       }
       seenPad = true;
-      if (failed(parser.parseInteger(fields.padInt)))
+      if (failed(parseTileBufUInt32Value(parser, key, fields.padInt)))
         return failure();
       continue;
     }
@@ -349,7 +416,7 @@ static LogicalResult parseCompactTileBufFields(AsmParser &parser,
         return failure();
       }
       seenCompact = true;
-      if (failed(parser.parseInteger(fields.compactInt)))
+      if (failed(parseTileBufUInt32Value(parser, key, fields.compactInt)))
         return failure();
       continue;
     }
@@ -372,16 +439,7 @@ static Type buildTileBufType(AsmParser &parser,
     return Type();
   }
 
-  auto memorySpace = ::llvm::StringSwitch<::std::optional<AddressSpace>>(
-                         fields.locStr)
-                         .Case("mat", AddressSpace::MAT)
-                         .Case("left", AddressSpace::LEFT)
-                         .Case("right", AddressSpace::RIGHT)
-                         .Case("acc", AddressSpace::ACC)
-                         .Case("vec", AddressSpace::VEC)
-                         .Case("bias", AddressSpace::BIAS)
-                         .Case("scaling", AddressSpace::SCALING)
-                         .Default(::std::nullopt);
+  auto memorySpace = resolveTileBufMemorySpace(fields.locStr);
   if (!memorySpace.has_value()) {
     parser.emitError(parser.getNameLoc(), "unknown loc: ") << fields.locStr;
     return Type();
@@ -411,28 +469,9 @@ static Type buildTileBufType(AsmParser &parser,
     return Type();
   }
 
-  auto normalizeParserBLayout = [&](AddressSpace memorySpace,
-                                    BLayout parsedBLayout) -> BLayout {
-    // LEFT tiles are parser-normalized from the scoped target arch rather than
-    // from the textual blayout spelling. This preserves the longstanding
-    // --pto-arch behavior for both legacy and compact tile_buf syntax.
-    if (memorySpace != AddressSpace::LEFT)
-      return parsedBLayout;
-
-    switch (getPTOParserTargetArch()) {
-    case PTOParserTargetArch::A3:
-      return BLayout::RowMajor;
-    case PTOParserTargetArch::A5:
-      return BLayout::ColMajor;
-    case PTOParserTargetArch::Unspecified:
-      return parsedBLayout;
-    }
-
-    return parsedBLayout;
-  };
-
   BLayout effectiveBLayout =
-      normalizeParserBLayout(memorySpace.value(), bl.value());
+      resolveTileBufBLayout(parser.getContext(), memorySpace.value(),
+                            bl.value());
 
   auto blAttr = BLayoutAttr::get(ctx, effectiveBLayout);
   auto slAttr = SLayoutAttr::get(ctx, sl.value());
@@ -476,18 +515,10 @@ Type TileBufType::parse(AsmParser &parser) {
   }
 
   if (isLegacySyntax && succeeded(parser.parseOptionalComma())) {
-    auto parseKeyEq = [&](StringRef expectedKey) -> LogicalResult {
-      if (failed(parser.parseKeyword(expectedKey)))
-        return failure();
-      if (failed(parser.parseEqual()))
-        return failure();
-      return success();
-    };
-
-    if (failed(parseKeyEq("compact")))
+    if (failed(parseTileBufKeyEq(parser, "compact")) ||
+        failed(parseTileBufUInt32Value(parser, "compact", fields.compactInt))) {
       return Type();
-    if (failed(parser.parseInteger(fields.compactInt)))
-      return Type();
+    }
   }
 
   if (failed(parser.parseGreater()))

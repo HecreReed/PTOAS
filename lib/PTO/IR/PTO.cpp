@@ -35,6 +35,7 @@
 #include "mlir/IR/AffineExpr.h"
 #include "mlir/IR/AffineMap.h"
 #include "mlir/Dialect/Utils/StaticValueUtils.h"
+#include "llvm/Support/ErrorHandling.h"
 
 #include <algorithm>
 #include <limits>
@@ -250,7 +251,7 @@ static VerifierTargetArch getVerifierTargetArch(Operation *op) {
                             : VerifierTargetArch::A2A3;
   }
 
-  switch (getPTOParserTargetArch()) {
+  switch (getPTOParserTargetArch(op ? op->getContext() : nullptr)) {
   case PTOParserTargetArch::A5:
     return VerifierTargetArch::A5;
   case PTOParserTargetArch::A3:
@@ -1216,9 +1217,11 @@ void PTODialect::initialize() {
 
 AddressSpaceAttr mlir::pto::getPTOAddressSpaceAttr(Type type) {
   auto memRefType = dyn_cast<BaseMemRefType>(type);
-  assert(memRefType && "input type must be a memref type");
+  if (!memRefType)
+    return {};
   auto scopeAttr = dyn_cast<AddressSpaceAttr>(memRefType.getMemorySpace());
-  assert(scopeAttr && "memory scope should be a pto address scope");
+  if (!scopeAttr)
+    return {};
   return scopeAttr;
 }
 
@@ -5738,8 +5741,7 @@ void mlir::pto::TMrgSortOp::print(OpAsmPrinter &p) {
     p << " ins(" << getSrc() << ", " << getBlockLen() << " : " << getSrc().getType()
       << ", " << getBlockLen().getType() << ") outs(" << getDst() << " : "
       << getDst().getType() << ")";
-  } else {
-    assert(isFormat2());
+  } else if (isFormat2()) {
     p << " ins(";
     llvm::interleaveComma(getSrcs(), p, [&](Value src) { p << src; });
     p << " {exhausted = " << (getExhausted() ? "true" : "false") << "} : ";
@@ -5747,6 +5749,8 @@ void mlir::pto::TMrgSortOp::print(OpAsmPrinter &p) {
     p << ") outs(" << getDst() << ", " << getTmp() << ", " << getExcuted()
       << " : " << getDst().getType() << ", " << getTmp().getType() << ", "
       << getExcuted().getType() << ")";
+  } else {
+    llvm::report_fatal_error("TMrgSortOp print expects format1 or format2");
   }
   p.printOptionalAttrDict((*this)->getAttrs(), /*elidedAttrs=*/{"operandSegmentSizes", "exhausted"});
 }
@@ -6999,7 +7003,8 @@ static bool isLocallyBoundTileSource(Value value) {
   if (!value || isa<BlockArgument>(value))
     return false;
 
-  if (isa<AllocTileOp, BindTileOp, PointerCastOp>(value.getDefiningOp()))
+  if (isa<AllocTileOp, DeclareTileOp, BindTileOp, PointerCastOp>(
+          value.getDefiningOp()))
     return true;
 
   if (auto bitcast = value.getDefiningOp<BitcastOp>())
@@ -10340,6 +10345,32 @@ static LogicalResult verifyFrontendSplitOp(Operation *op,
   return verifySplitAttr(op, split);
 }
 
+template <typename FrontendPopOpT>
+static LogicalResult verifyFrontendPopOp(FrontendPopOpT op,
+                                         FunctionKernelKind expected,
+                                         StringRef kernelName) {
+  if (failed(verifyFrontendSplitOp(op.getOperation(), expected, kernelName,
+                                   op.getSplit())))
+    return failure();
+
+  bool hasValidRow = static_cast<bool>(op.getValidRow());
+  bool hasValidCol = static_cast<bool>(op.getValidCol());
+  if (hasValidRow != hasValidCol)
+    return op.emitOpError(
+        "expects valid_row and valid_col operands to be provided together");
+  if (!hasValidRow)
+    return success();
+
+  auto tileTy = dyn_cast<TileBufType>(op.getTile().getType());
+  if (!tileTy)
+    return op.emitOpError(
+        "expects tile result to be !pto.tile_buf when valid_row/valid_col operands are provided");
+  if (!tileTy.hasDynamicValid())
+    return op.emitOpError(
+        "expects tile result to have dynamic validShape (?, ?) when valid_row/valid_col operands are provided");
+  return success();
+}
+
 static LogicalResult verifyPipeShape(Operation *op, int8_t dirMask, int32_t slotSize,
                                      int32_t slotNum,
                                      std::optional<int32_t> flagBase) {
@@ -10474,13 +10505,11 @@ LogicalResult TPushToAicOp::verify() {
 }
 
 LogicalResult TPopFromAicOp::verify() {
-  return verifyFrontendSplitOp(getOperation(), FunctionKernelKind::Vector,
-                               "vector", getSplit());
+  return verifyFrontendPopOp(*this, FunctionKernelKind::Vector, "vector");
 }
 
 LogicalResult TPopFromAivOp::verify() {
-  return verifyFrontendSplitOp(getOperation(), FunctionKernelKind::Cube,
-                               "cube", getSplit());
+  return verifyFrontendPopOp(*this, FunctionKernelKind::Cube, "cube");
 }
 
 LogicalResult TFreeFromAicOp::verify() {
