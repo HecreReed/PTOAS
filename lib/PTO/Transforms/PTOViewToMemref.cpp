@@ -237,6 +237,31 @@ static TileLayoutConfig getTileLayoutConfig(mlir::pto::TileBufConfigAttr cfg) {
   return config;
 }
 
+static bool getFractal512InnerExtent(int64_t elemBytes, int64_t &extent) {
+  switch (elemBytes) {
+  case 1:
+    extent = 32;
+    return true;
+  case 2:
+    extent = 16;
+    return true;
+  case 4:
+    extent = 8;
+    return true;
+  case 8:
+    extent = 4;
+    return true;
+  case 16:
+    extent = 2;
+    return true;
+  case 32:
+    extent = 1;
+    return true;
+  default:
+    return false;
+  }
+}
+
 static bool computeBoxInnerShape(const TileLayoutConfig &config, Type elemTy,
                                  TileLayoutInfo &info) {
   info.boxed = config.sLayout != 0;
@@ -262,11 +287,11 @@ static bool computeBoxInnerShape(const TileLayoutConfig &config, Type elemTy,
   case 512:
     if (config.sLayout == 1) {
       info.innerRows = 16;
-      info.innerCols = 32 / elemBytes;
-      return true;
+      return getFractal512InnerExtent(elemBytes, info.innerCols);
     }
     if (config.sLayout == 2) {
-      info.innerRows = 32 / elemBytes;
+      if (!getFractal512InnerExtent(elemBytes, info.innerRows))
+        return false;
       info.innerCols = 16;
       return true;
     }
