@@ -787,6 +787,20 @@ static std::pair<uint8_t, std::vector<uint8_t>> readSection(Reader &r, bool dbg)
   return {sid, bytes};
 }
 
+struct DecodeTables {
+  std::vector<std::string> strings;
+  std::vector<TypeEntry> types;
+  std::vector<AttrEntry> attrs;
+};
+
+static DecodeTables buildDecodeTables(const RequiredSections &sections) {
+  DecodeTables tables;
+  parseStringsSection(sections.strings, tables.strings);
+  parseTypesSection(sections.types, tables.strings, tables.types);
+  parseAttrsSection(sections.attrs, tables.strings, tables.attrs);
+  return tables;
+}
+
 static void validatePTOBCFileHeader(llvm::ArrayRef<uint8_t> fileBytes) {
   if (fileBytes.size() < 14)
     throw std::runtime_error("file too small");
@@ -894,20 +908,12 @@ decodePTOBCToModule(llvm::ArrayRef<uint8_t> fileBytes, mlir::MLIRContext &ctx) {
   RequiredSections sections = readRequiredSections(r, dbg);
   std::optional<DebugInfo> dbgInfo = readOptionalDebugSections(r, dbg);
   validateSectionOrder(sections);
-
-  std::vector<std::string> strings;
-  parseStringsSection(sections.strings, strings);
-
-  std::vector<TypeEntry> types;
-  parseTypesSection(sections.types, strings, types);
-
-  std::vector<AttrEntry> attrs;
-  parseAttrsSection(sections.attrs, strings, attrs);
+  DecodeTables tables = buildDecodeTables(sections);
 
   if (dbg) {
-    llvm::errs() << "[ptobc] strings=" << strings.size()
-                 << " types=" << types.size()
-                 << " attrs=" << attrs.size()
+    llvm::errs() << "[ptobc] strings=" << tables.strings.size()
+                 << " types=" << tables.types.size()
+                 << " attrs=" << tables.attrs.size()
                  << " moduleBytes=" << sections.module.size() << "\n";
   }
 
@@ -916,15 +922,27 @@ decodePTOBCToModule(llvm::ArrayRef<uint8_t> fileBytes, mlir::MLIRContext &ctx) {
   if (dbg) llvm::errs() << "[ptobc] decoding module...\n";
 
   std::vector<std::vector<mlir::Operation*>> opsByFunc;
-  auto module = decodeToModule(ctx, strings, types, attrs, sections.constPool,
+  auto module = decodeToModule(ctx, tables.strings, tables.types, tables.attrs,
+                               sections.constPool,
                                sections.module,
                                dbgInfo ? &opsByFunc : nullptr);
 
   // Apply op locations from DEBUGINFO (best-effort).
   if (dbgInfo)
-    applyDebugLocations(ctx, strings, *dbgInfo, opsByFunc);
+    applyDebugLocations(ctx, tables.strings, *dbgInfo, opsByFunc);
 
   return module;
+}
+
+static mlir::DialectRegistry buildDecodeDialectRegistry() {
+  mlir::DialectRegistry registry;
+  registry.insert<mlir::func::FuncDialect,
+                  mlir::arith::ArithDialect,
+                  mlir::affine::AffineDialect,
+                  mlir::memref::MemRefDialect,
+                  mlir::scf::SCFDialect,
+                  mlir::pto::PTODialect>();
+  return registry;
 }
 
 void decodeFileToPTO(const std::string& inPath, const std::string& outPath) {
@@ -933,14 +951,7 @@ void decodeFileToPTO(const std::string& inPath, const std::string& outPath) {
   if (dbg) llvm::errs() << "[ptobc] decode: reading file: " << inPath << "\n";
   auto data = readFile(inPath);
 
-  mlir::DialectRegistry registry;
-  registry.insert<mlir::func::FuncDialect,
-                  mlir::arith::ArithDialect,
-                  mlir::affine::AffineDialect,
-                  mlir::memref::MemRefDialect,
-                  mlir::scf::SCFDialect,
-                  mlir::pto::PTODialect>();
-  mlir::MLIRContext ctx(registry);
+  mlir::MLIRContext ctx(buildDecodeDialectRegistry());
   ctx.allowUnregisteredDialects(true);
 
   auto module = decodePTOBCToModule(data, ctx);
