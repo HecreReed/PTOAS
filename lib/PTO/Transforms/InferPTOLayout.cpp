@@ -148,6 +148,21 @@ static std::optional<Layout> inferMinor2DLayout(
   return dn ? Layout::DN : Layout::ND;
 }
 
+static std::optional<Layout> inferNZLayout(ArrayRef<int64_t> shape,
+                                           ArrayRef<int64_t> stride,
+                                           unsigned elemBytes) {
+  int64_t sh3 = shape[2];
+  int64_t sh4 = shape[3];
+  int64_t sh5 = shape[4];
+  int64_t st4 = stride[3];
+  int64_t st5 = stride[4];
+  bool alignMatch = (sh3 == 16) && (sh3 * sh4 * elemBytes == 512);
+  bool strideMatch = (st5 == 1) && (st4 == sh5);
+  if (alignMatch && strideMatch)
+    return Layout::NZ;
+  return std::nullopt;
+}
+
 static std::optional<Layout> inferLayout5D(ArrayRef<int64_t> shape,
                                            ArrayRef<int64_t> strides,
                                            unsigned elemBytes,
@@ -158,33 +173,19 @@ static std::optional<Layout> inferLayout5D(ArrayRef<int64_t> shape,
     return std::nullopt;
   if (isMinor2DAmbiguous)
     *isMinor2DAmbiguous = false;
-  if (auto padded = rightAlignTo5D(shape, strides)) {
-    auto &sh = padded->shape;
-    auto &st = padded->stride;
+  auto padded = rightAlignTo5D(shape, strides);
+  if (!padded)
+    return std::nullopt;
 
-    // NZ: 5D right-aligned, check middle dims (sh3/sh4/sh5 per spec)
-    int64_t sh3 = sh[2], sh4 = sh[3], sh5 = sh[4];
-    int64_t st4 = st[3], st5 = st[4];
-    bool alignMatch = (sh3 == 16) && (sh3 * sh4 * elemBytes == 512);
-    bool strideMatch = (st5 == 1) && (st4 == sh5);
-    if (alignMatch && strideMatch)
-      return Layout::NZ;
+  if (auto nz = inferNZLayout(padded->shape, padded->stride, elemBytes))
+    return nz;
 
-    // ND/DN are minor-2D layout hints for the last two dimensions
-    // (DIM_3 = rows, DIM_4 = cols). They are not a full 5D row/col-major tag.
-    //
-    // For vector-like shapes where one minor dim is 1, multiple stride patterns
-    // are semantically equivalent. Prefer:
-    //   - DN when cols == 1 (column vector)
-    //   - ND when rows == 1 (row vector)
-    const int64_t rows = sh[3];
-    const int64_t cols = sh[4];
-    const int64_t rowStride = st[3];
-    const int64_t colStride = st[4];
-    return inferMinor2DLayout(rows, cols, rowStride, colStride,
-                              preferredMinor2D, isMinor2DAmbiguous);
-  }
-  return std::nullopt;
+  const int64_t rows = padded->shape[3];
+  const int64_t cols = padded->shape[4];
+  const int64_t rowStride = padded->stride[3];
+  const int64_t colStride = padded->stride[4];
+  return inferMinor2DLayout(rows, cols, rowStride, colStride,
+                            preferredMinor2D, isMinor2DAmbiguous);
 }
 
 static std::optional<Layout> tileBLayoutToGlobalLayout(Type tileLikeTy) {
@@ -430,153 +431,157 @@ static ResolvedLayoutInfo resolveLayoutFromViewValue(Value v) {
   return info;
 }
 
+static std::optional<Layout> inferMakeTensorViewLayout(
+    MakeTensorViewOp op, ArrayRef<int64_t> shape, ArrayRef<int64_t> strides,
+    bool &isAmbiguous) {
+  auto pref = collectPreferredLayoutFromConsumers(op.getResult());
+  auto preferredForAmbiguous =
+      (!pref.conflict && isMinorColsOne(shape)) ? pref.preferred
+                                                : std::nullopt;
+  return inferLayout5D(
+      shape, strides,
+      elemByteSize(cast<TensorViewType>(op.getResult().getType())
+                       .getElementType()),
+      preferredForAmbiguous, &isAmbiguous);
+}
+
+static void reconcileAmbiguousTensorViewLayout(MakeTensorViewOp op,
+                                               ArrayRef<int64_t> shape) {
+  auto pref = collectPreferredLayoutFromConsumers(op.getResult());
+  if (!isMinorColsOne(shape))
+    return;
+  if (!op->getAttrOfType<BoolAttr>(kInferredLayoutAttrName))
+    return;
+  auto cur = op->getAttrOfType<LayoutAttr>(kLayoutAttrName);
+  if (cur && pref.preferred && *pref.preferred != cur.getLayout())
+    setLayoutAttr(op.getOperation(), *pref.preferred, /*inferred=*/true);
+}
+
+template <typename SignalFailureFn>
+static bool getConstFoldResults(ArrayRef<OpFoldResult> values,
+                                SmallVectorImpl<int64_t> &result,
+                                SignalFailureFn signalFailure,
+                                Operation *op) {
+  result.clear();
+  result.reserve(values.size());
+  for (OpFoldResult value : values) {
+    auto folded = getConstInt(value);
+    if (!folded) {
+      verifyOrSetLayoutAttr(op, std::nullopt, signalFailure);
+      return false;
+    }
+    result.push_back(*folded);
+  }
+  return true;
+}
+
+template <typename SignalFailureFn>
+static void inferMakeTensorViewLayoutAttr(MakeTensorViewOp op,
+                                          SignalFailureFn signalFailure) {
+  SmallVector<int64_t> shape;
+  SmallVector<int64_t> strides;
+  if (!getStaticShapeAndStride(op, shape, strides)) {
+    verifyOrSetLayoutAttr(op.getOperation(), std::nullopt, signalFailure);
+    return;
+  }
+
+  bool isAmbiguous = false;
+  auto inferred = inferMakeTensorViewLayout(op, shape, strides, isAmbiguous);
+  verifyOrSetLayoutAttr(op.getOperation(), inferred, signalFailure,
+                        isAmbiguous);
+  if (isAmbiguous)
+    reconcileAmbiguousTensorViewLayout(op, shape);
+}
+
+template <typename SignalFailureFn>
+static void inferReinterpretCastLayoutAttr(memref::ReinterpretCastOp op,
+                                           SignalFailureFn signalFailure) {
+  auto mrTy = dyn_cast<MemRefType>(op.getType());
+  if (!mrTy || !isGlobalMemRef(mrTy))
+    return;
+
+  const size_t rank = op.getMixedSizes().size();
+  if (rank == 0 || rank > 5) {
+    verifyOrSetLayoutAttr(op.getOperation(), std::nullopt, signalFailure);
+    return;
+  }
+
+  SmallVector<int64_t> shape;
+  SmallVector<int64_t> strides;
+  if (!getConstFoldResults(op.getMixedSizes(), shape, signalFailure,
+                           op.getOperation()) ||
+      !getConstFoldResults(op.getMixedStrides(), strides, signalFailure,
+                           op.getOperation())) {
+    return;
+  }
+
+  bool isMinor2DAmbiguous = false;
+  auto inferred =
+      inferLayout5D(shape, strides, elemByteSize(mrTy.getElementType()),
+                    std::nullopt, &isMinor2DAmbiguous);
+  verifyOrSetLayoutAttr(op.getOperation(), inferred, signalFailure,
+                        isMinor2DAmbiguous);
+}
+
+static void inferSubviewLayoutAttr(memref::SubViewOp op) {
+  auto resTy = dyn_cast<MemRefType>(op.getType());
+  if (!resTy || !isGlobalMemRef(resTy))
+    return;
+
+  if (op->getAttrOfType<LayoutAttr>(kLayoutAttrName))
+    return;
+
+  if (Operation *def = op.getSource().getDefiningOp()) {
+    if (auto srcLayout = def->getAttrOfType<LayoutAttr>(kLayoutAttrName)) {
+      op->setAttr(kLayoutAttrName, srcLayout);
+      if (auto inferred =
+              def->getAttrOfType<BoolAttr>(kInferredLayoutAttrName)) {
+        op->setAttr(kInferredLayoutAttrName, inferred);
+      }
+      return;
+    }
+  }
+
+  auto srcTy = dyn_cast<MemRefType>(op.getSource().getType());
+  if (!srcTy || !srcTy.hasStaticShape()) {
+    setLayoutAttr(op.getOperation(), Layout::ND, /*inferred=*/true);
+    return;
+  }
+
+  SmallVector<int64_t> strideInts;
+  int64_t offset = ShapedType::kDynamic;
+  if (failed(getStridesAndOffset(srcTy, strideInts, offset)) ||
+      offset == ShapedType::kDynamic ||
+      llvm::any_of(strideInts,
+                   [](int64_t s) { return s == ShapedType::kDynamic; })) {
+    setLayoutAttr(op.getOperation(), Layout::ND, /*inferred=*/true);
+    return;
+  }
+
+  auto inferred =
+      inferLayout5D(srcTy.getShape(), strideInts, elemByteSize(srcTy.getElementType()));
+  setLayoutAttr(op.getOperation(), inferred.value_or(Layout::ND),
+                /*inferred=*/true);
+}
+
 struct InferPTOLayoutPass
     : public PassWrapper<InferPTOLayoutPass, OperationPass<func::FuncOp>> {
   MLIR_DEFINE_EXPLICIT_INTERNAL_INLINE_TYPE_ID(InferPTOLayoutPass)
 
   void runOnOperation() override {
     func::FuncOp func = getOperation();
-    // ------------------------------------------------------------------
-    // 1) pto.make_tensor_view (only if it still exists in the pipeline)
-    // ------------------------------------------------------------------
+    auto signalFailure = [this] { signalPassFailure(); };
     func.walk([&](MakeTensorViewOp op) {
-      SmallVector<int64_t> shape, strides;
-      if (!getStaticShapeAndStride(op, shape, strides)) {
-        verifyOrSetLayoutAttr(op.getOperation(), std::nullopt,
-                              [this] { signalPassFailure(); });
-        return;
-      }
-
-      auto pref = collectPreferredLayoutFromConsumers(op.getResult());
-      // Guard rail: only use consumer preference for minor-2D ambiguous
-      // "column-vector-like" outputs (cols == 1). This is the row-reduction
-      // case we need to repair; applying it more broadly can violate pto-isa
-      // static layout constraints (e.g. some GEMV/GEMM outputs).
-      auto preferredForAmbiguous =
-          (!pref.conflict && isMinorColsOne(shape)) ? pref.preferred
-                                                    : std::nullopt;
-      bool isAmbiguous = false;
-      auto inferred = inferLayout5D(
-          shape, strides,
-          elemByteSize(cast<TensorViewType>(op.getResult().getType())
-                           .getElementType()),
-          preferredForAmbiguous, &isAmbiguous);
-      verifyOrSetLayoutAttr(op.getOperation(), inferred,
-                            [this] { signalPassFailure(); }, isAmbiguous);
-
-      // If this make_tensor_view layout was inferred in an ambiguous ND/DN
-      // shape and a downstream tile has a clear BLayout preference, force-align
-      // to that preference to avoid GlobalTensor/Tile mismatch.
-      if (isAmbiguous && isMinorColsOne(shape) &&
-          op->getAttrOfType<BoolAttr>(kInferredLayoutAttrName)) {
-        auto cur = op->getAttrOfType<LayoutAttr>(kLayoutAttrName);
-        if (cur && pref.preferred && *pref.preferred != cur.getLayout())
-          setLayoutAttr(op.getOperation(), *pref.preferred, /*inferred=*/true);
-      }
+      inferMakeTensorViewLayoutAttr(op, signalFailure);
     });
-
-    // ------------------------------------------------------------------
-    // 2) memref.reinterpret_cast (lowered from make_tensor_view)
-    // ------------------------------------------------------------------
     func.walk([&](memref::ReinterpretCastOp op) {
-      auto mrTy = dyn_cast<MemRefType>(op.getType());
-      if (!mrTy || !isGlobalMemRef(mrTy))
-        return;
-
-      const size_t rank = op.getMixedSizes().size();
-      if (rank == 0 || rank > 5) {
-        verifyOrSetLayoutAttr(op.getOperation(), std::nullopt,
-                              [this] { signalPassFailure(); });
-        return;
-      }
-
-      SmallVector<int64_t> shape;
-      shape.reserve(rank);
-      for (OpFoldResult s : op.getMixedSizes()) {
-        auto v = getConstInt(s);
-        if (!v) {
-          verifyOrSetLayoutAttr(op.getOperation(), std::nullopt,
-                                [this] { signalPassFailure(); });
-          return;
-        }
-        shape.push_back(*v);
-      }
-
-      SmallVector<int64_t> strides;
-      strides.reserve(rank);
-      for (OpFoldResult s : op.getMixedStrides()) {
-        auto v = getConstInt(s);
-        if (!v) {
-          verifyOrSetLayoutAttr(op.getOperation(), std::nullopt,
-                                [this] { signalPassFailure(); });
-          return;
-        }
-        strides.push_back(*v);
-      }
-
-      bool isMinor2DAmbiguous = false;
-      auto inferred =
-          inferLayout5D(shape, strides, elemByteSize(mrTy.getElementType()),
-                        std::nullopt, &isMinor2DAmbiguous);
-      verifyOrSetLayoutAttr(op.getOperation(), inferred,
-                            [this] { signalPassFailure(); },
-                            isMinor2DAmbiguous);
+      inferReinterpretCastLayoutAttr(op, signalFailure);
     });
-
-    // ------------------------------------------------------------------
-    // 3) memref.subview: layout is preserved from the source view
-    // ------------------------------------------------------------------
-    func.walk([&](memref::SubViewOp op) {
-      auto resTy = dyn_cast<MemRefType>(op.getType());
-      if (!resTy || !isGlobalMemRef(resTy))
-        return;
-
-      if (op->getAttrOfType<LayoutAttr>(kLayoutAttrName))
-        return;
-
-      if (Operation *def = op.getSource().getDefiningOp()) {
-        if (auto srcLayout = def->getAttrOfType<LayoutAttr>(kLayoutAttrName)) {
-          op->setAttr(kLayoutAttrName, srcLayout);
-          if (auto inferred =
-                  def->getAttrOfType<BoolAttr>(kInferredLayoutAttrName)) {
-            op->setAttr(kInferredLayoutAttrName, inferred);
-          }
-          return;
-        }
-      }
-
-      // Fallback: if source memref type is fully static, infer from it.
-      auto srcTy = dyn_cast<MemRefType>(op.getSource().getType());
-      if (!srcTy || !srcTy.hasStaticShape()) {
-        setLayoutAttr(op.getOperation(), Layout::ND, /*inferred=*/true);
-        return;
-      }
-
-      SmallVector<int64_t> strideInts;
-      int64_t offset = ShapedType::kDynamic;
-      if (failed(getStridesAndOffset(srcTy, strideInts, offset)) ||
-          offset == ShapedType::kDynamic ||
-          llvm::any_of(strideInts,
-                       [](int64_t s) { return s == ShapedType::kDynamic; })) {
-        setLayoutAttr(op.getOperation(), Layout::ND, /*inferred=*/true);
-        return;
-      }
-
-      auto inferred = inferLayout5D(srcTy.getShape(), strideInts,
-                                    elemByteSize(srcTy.getElementType()));
-      setLayoutAttr(op.getOperation(), inferred.value_or(Layout::ND),
-                    /*inferred=*/true);
-    });
-
-    // ------------------------------------------------------------------
-    // 4) pto.tload / pto.tstore: attach layout for static GM memrefs so EmitC
-    //    doesn't need to infer again in buildGlobalTensorFromMemref().
-    // ------------------------------------------------------------------
+    func.walk([](memref::SubViewOp op) { inferSubviewLayoutAttr(op); });
     func.walk([&](pto::TLoadOp op) {
       attachLoadStoreLayout(op, [](auto load) { return load.getSrc(); },
                             [](auto load) { return load.getDst(); });
     });
-
     func.walk([&](pto::TStoreOp op) {
       attachLoadStoreLayout(op, [](auto store) { return store.getDst(); },
                             [](auto store) { return store.getSrc(); });
