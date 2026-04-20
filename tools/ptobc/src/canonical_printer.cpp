@@ -223,34 +223,41 @@ static std::string getCanonicalSSAName(const std::vector<std::string> &lines,
   return newName;
 }
 
+static void collectSSADefinition(const std::string &line,
+                                 std::vector<std::string> &defs) {
+  if (line.find("func.func") != std::string::npos ||
+      (!line.empty() && line[0] == '^')) {
+    collectSSADefsFromSignature(line, defs);
+    return;
+  }
+
+  // Op results at start of line.
+  // e.g. "  %12 = ..." or "  %c0 = ..." or "%0:2 = ...".
+  size_t pos = line.find('%');
+  if (pos == std::string::npos)
+    return;
+
+  // Require this to be a definition: '%' must appear before '='.
+  size_t eq = line.find('=');
+  if (eq == std::string::npos || pos > eq)
+    return;
+
+  size_t end = pos + 1;
+  while (end < line.size() && isSSAIdentChar(line[end]))
+    ++end;
+  if (end == pos + 1)
+    return;
+  defs.push_back(line.substr(pos + 1, end - (pos + 1)));
+}
+
 static std::string canonicalizeSSANames(const std::string &printed) {
   auto lines = splitLinesPreserveEmpty(printed);
 
   std::vector<std::string> defs;
   defs.reserve(256);
 
-  for (const auto &ln : lines) {
-    if (ln.find("func.func") != std::string::npos) {
-      collectSSADefsFromSignature(ln, defs);
-      continue;
-    }
-    if (!ln.empty() && ln[0] == '^') {
-      collectSSADefsFromSignature(ln, defs);
-      continue;
-    }
-    // Op results at start of line.
-    // e.g. "  %12 = ..." or "  %c0 = ..." or "%0:2 = ...".
-    size_t pos = ln.find('%');
-    if (pos == std::string::npos) continue;
-    // Require this to be a definition: '%' must appear before '='.
-    size_t eq = ln.find('=');
-    if (eq == std::string::npos || pos > eq) continue;
-
-    size_t j = pos + 1;
-    while (j < ln.size() && isSSAIdentChar(ln[j])) ++j;
-    if (j == pos + 1) continue;
-    defs.push_back(ln.substr(pos + 1, j - (pos + 1)));
-  }
+  for (const auto &line : lines)
+    collectSSADefinition(line, defs);
 
   std::unordered_map<std::string, std::string> ren;
   ren.reserve(defs.size() * 2);
