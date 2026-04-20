@@ -345,28 +345,32 @@ static mlir::Attribute buildIntegerConstAttr(BuildCtx &bc,
   return mlir::IntegerAttr::get(intType, bits);
 }
 
+static mlir::Attribute buildScalarIntConstAttr(BuildCtx &bc,
+                                               const ConstEntryParsed &entry) {
+  auto ty = getType(bc, entry.typeId);
+  auto intType = mlir::dyn_cast<mlir::IntegerType>(ty);
+  if (!mlir::isa<mlir::IndexType>(ty) && !intType)
+    throw std::runtime_error("ConstInt type is not integer/index");
+  return mlir::IntegerAttr::get(ty, entry.intValue);
+}
+
 static mlir::Attribute buildConstAttr(BuildCtx &bc, uint64_t constId) {
-  if (!bc.consts) throw std::runtime_error("constpool not available");
-  if (constId >= bc.consts->size()) throw std::runtime_error("const_id out of range");
+  if (!bc.consts)
+    throw std::runtime_error("constpool not available");
+  if (constId >= bc.consts->size())
+    throw std::runtime_error("const_id out of range");
   const auto &e = (*bc.consts)[constId];
 
-  if (e.tag == 0x01) {
-    auto ty = getType(bc, e.typeId);
-    auto it = mlir::dyn_cast<mlir::IntegerType>(ty);
-    if (mlir::isa<mlir::IndexType>(ty)) {
-      return mlir::IntegerAttr::get(ty, e.intValue);
-    }
-    if (!it) throw std::runtime_error("ConstInt type is not integer/index");
-    return mlir::IntegerAttr::get(ty, e.intValue);
-  }
-
-  if (e.tag == 0x02)
+  switch (e.tag) {
+  case 0x01:
+    return buildScalarIntConstAttr(bc, e);
+  case 0x02:
     return buildFloatConstAttr(bc, e);
-
-  if (e.tag == 0x04)
+  case 0x04:
     return buildIntegerConstAttr(bc, e);
-
-  throw std::runtime_error("unsupported const tag");
+  default:
+    throw std::runtime_error("unsupported const tag");
+  }
 }
 
 static void addAttrDictionary(mlir::OperationState &state,
