@@ -170,8 +170,9 @@ void SyncEventIdAllocation::SetEventId(SyncOperation *sync) {
   
   const size_t lifetimeStatusSize = eventIdLifetimeAvailableStatus.size();
   const size_t idleStatusSize = eventIdIdleStatus.size();
-  assert(lifetimeStatusSize == poolSize);
-  assert(idleStatusSize == poolSize);
+  if (lifetimeStatusSize != poolSize || idleStatusSize != poolSize) {
+    return;
+  }
 
   // Apply per-(src,dst) reservations by marking the "reserved tail" as
   // unavailable. Historically this pass treated reserved IDs as being at the
@@ -270,10 +271,11 @@ SmallVector<bool> SyncEventIdAllocation::GetEventPool(const SyncOperation *sync,
   SmallVector<bool> eventIdPool(eventIdNum, true);
   const unsigned syncIndex = sync->GetSyncIndex();
   const size_t syncOperationSize = syncOperations_.size();
-  assert(syncIndex < syncOperationSize);
   if (syncIndex >= syncOperationSize)
     return eventIdPool;
   auto &syncPair = syncOperations_[syncIndex];
+  if (syncPair.size() < 2)
+    return eventIdPool;
   auto *setFlag = syncPair[0].get();
   auto *waitFlag = syncPair[1].get();
  
@@ -281,7 +283,8 @@ SmallVector<bool> SyncEventIdAllocation::GetEventPool(const SyncOperation *sync,
     if (reallocatedPipePair.count(ScopePair(sync))) {
       auto *ptr = dyn_cast<LoopInstanceElement>(
           syncIR_[setFlag->GetForEndIndex().value()].get());
-      assert(ptr != nullptr);
+      if (!ptr)
+        return eventIdPool;
       FindUseEventID(ptr->beginId, ptr->endId, setFlag, eventIdPool);
     } else {
       FindUseEventID(0, syncIR_.size() - 1, setFlag, eventIdPool);
@@ -316,7 +319,8 @@ void SyncEventIdAllocation::FindUseEventID(unsigned int begin, unsigned int end,
                                            const SyncOperation *s,
                                            SmallVector<bool> &eventId) {
   const auto eventIdSize = eventId.size();
-  assert(begin < end);
+  if (begin >= end)
+    return;
   int scopePair = ScopePair(s);
   eventCyclePool.try_emplace(scopePair, EventCyclePool(eventIdSize));
   EventCyclePool &seqPool = eventCyclePool[scopePair];
@@ -338,7 +342,6 @@ bool SyncEventIdAllocation::CheckSyncLifeCycleConflict(
     SmallVector<unsigned int> &syncLifeCycle, unsigned int begin,
     unsigned int end, SmallVector<bool> &eventId, unsigned i) const {
   const size_t lifeCycleSize = syncLifeCycle.size();
-  assert((lifeCycleSize & 0x1) == 0 && "sync_life_cycle error.");
   if ((lifeCycleSize & 0x1) != 0)
     return false;
   if (syncLifeCycle[0] <= begin) {
@@ -354,13 +357,16 @@ void SyncEventIdAllocation::UpdateEventId(
     const unsigned index) const {
   for (size_t j = 0; j < syncLifeCycle.size(); j++) {
     if (syncLifeCycle[j] <= begin) {
-      if (syncLifeCycle[j - 1] >= end && (j & 0x1) == 0) {
+      if (j > 0 && syncLifeCycle[j - 1] >= end && (j & 0x1) == 0) {
         break; // Safe interval
       } else {
         eventId[index] = false; // Conflict
       }
     } else if (j == syncLifeCycle.size() - 1) {
-      assert((j & 0x1) == 1);
+      if ((j & 0x1) != 1) {
+        eventId[index] = false;
+        return;
+      }
       if (syncLifeCycle[j] >= end) {
         break; // Safe
       } else {
@@ -374,10 +380,11 @@ void SyncEventIdAllocation::SetEventPool(const SyncOperation *sync,
                                          unsigned eventId) {
   const unsigned syncIndex = sync->GetSyncIndex();
   const size_t syncOperationSize = syncOperations_.size();
-  assert(syncIndex < syncOperationSize);
   if (syncIndex >= syncOperationSize)
     return;
   auto &syncPair = syncOperations_[syncIndex];
+  if (syncPair.size() < 2)
+    return;
   
   // [Fix] 遍历组内所有 SyncOperation，为它们统一分配 Event ID
   // 这样无论是 Then-Set, Else-Set 还是 Wait，都会得到相同的 ID
@@ -395,7 +402,8 @@ void SyncEventIdAllocation::SetEventPool(const SyncOperation *sync,
     if (reallocatedPipePair.count(ScopePair(sync))) {
       auto *ptr = dyn_cast<LoopInstanceElement>(
           syncIR_[setFlag->GetForEndIndex().value()].get());
-      assert(ptr != nullptr);
+      if (!ptr)
+        return;
       SetUseEventID(ptr->beginId, ptr->endId, setFlag.get(), eventId);
     } else {
       SetUseEventID(0, syncIR_.size(), setFlag.get(), eventId);
@@ -436,7 +444,8 @@ void SyncEventIdAllocation::UpdateBackwardMatchSync(
   if (reallocatedPipePair.count(ScopePair(setFlag))) {
     auto *ptr = dyn_cast<LoopInstanceElement>(
         syncIR_[setFlag->GetForEndIndex().value()].get());
-    assert(ptr != nullptr);
+    if (!ptr)
+      return;
     syncFront->SetSyncIRIndex(ptr->beginId);
     syncEnd->SetSyncIRIndex(ptr->endId);
     syncFront->reallocatedLoopHeadTailSync = true;

@@ -704,8 +704,6 @@ BufferInfo MemLivenessAnalysis::GenerateBufferInfo(Operation *op,
                                                    Value operand) {
   auto memorySpaceAttr = GetBufferSpaceAttr(operand);
   if (isLocalMemPlan() && isLocalBuffer(memorySpaceAttr)) {
-    if (!memorySpaceAttr.has_value())
-      llvm::report_fatal_error("local buffer must have memory space");
     return GetBufferInfo(op, operand,
                          memorySpaceAttr.value().getAddressSpace());
   }

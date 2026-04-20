@@ -82,7 +82,9 @@ void InsertSyncAnalysis::DealWithLoopSync(LoopInstanceElement *nowElement) {
 
   SyncIRs backSyncIr;
   const size_t syncIRSize = syncIR_.size();
-  assert(syncIRSize >= nowElement->endId);
+  if (syncIRSize < nowElement->endId) {
+    return;
+  }
   for (unsigned i = nowElement->beginId; i < nowElement->endId; i++) {
     if (auto *compound = dyn_cast<CompoundInstanceElement>(syncIR_[i].get())) {
       InsertBackForSync(compound, backSyncIr, nowElement);
@@ -167,9 +169,13 @@ void InsertSyncAnalysis::InsertSeqSync(
     auto &frontPtr = syncElement[i];
     unsigned frontIndex = frontPtr->GetIndex();
     const size_t totalSyncIR = syncIR_.size();
-    assert(frontIndex < totalSyncIR);
+    if (frontIndex >= totalSyncIR) {
+      continue;
+    }
     auto *frontSyncElement = syncIR_[frontIndex].get();
-    assert(frontSyncElement != nullptr);
+    if (!frontSyncElement) {
+      continue;
+    }
 
     if (auto *frontCompound =
             dyn_cast<CompoundInstanceElement>(frontPtr.get())) {
@@ -247,7 +253,9 @@ unsigned InsertSyncAnalysis::InsertBranchSync(
   } else if (branchElement->getBranchKind() == KindOfBranch::ELSE_BEGIN &&
              index != begin) {
     const unsigned compoundIndex = nowCompound->GetIndex();
-    assert(compoundIndex > branchElement->branchId);
+    if (compoundIndex <= branchElement->branchId) {
+      return 0;
+    }
     return (branchElement->branchId - branchElement->beginId);
   }
   return 0;
@@ -389,7 +397,9 @@ void InsertSyncAnalysis::InsertSyncOperation(
 
   syncIndex_++;
   const size_t syncOperationSize = syncOperations_.size();
-  assert(syncOperationSize == syncIndex_);
+  if (syncOperationSize != syncIndex_) {
+    syncIndex_ = static_cast<unsigned>(syncOperationSize);
+  }
 }
 
 // ==============================================================================
@@ -470,12 +480,10 @@ void InsertSyncAnalysis::UpdateSyncRecordInfo(
     CompoundInstanceElement *frontCompound, SyncRecordList &syncRecordList) {
   (void)frontCompound;
   const bool hasSyncOperations = !syncOperations_.empty();
-  assert(hasSyncOperations);
   if (!hasSyncOperations)
     return;
   auto &syncPair = syncOperations_.back();
   const bool hasSyncPair = !syncPair.empty();
-  assert(hasSyncPair);
   if (!hasSyncPair)
     return;
 

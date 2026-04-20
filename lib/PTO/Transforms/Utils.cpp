@@ -110,8 +110,6 @@ std::optional<std::pair<Value, Value>> getOperationAliasInfo(Operation *op) {
     return std::make_pair(toMemrefOp.getResult(), toMemrefOp.getOperand());
   } else if (auto toTensorOp = dyn_cast<bufferization::ToTensorOp>(op)) {
     return std::make_pair(toTensorOp.getResult(), toTensorOp.getOperand());
-  } else if (auto toMemrefOp = dyn_cast<bufferization::ToMemrefOp>(op)) {
-    return std::make_pair(toMemrefOp.getResult(), toMemrefOp.getOperand());
   }
   return std::nullopt;
 }

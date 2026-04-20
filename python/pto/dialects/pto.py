@@ -60,6 +60,7 @@ def get_op_result_or_value(value):
 
 _export_generated_symbols()
 
+
 register_dialect = _pto_mod.register_dialect
 PtrType = _pto_mod.PtrType
 AsyncSessionType = _pto_mod.AsyncSessionType
@@ -190,6 +191,7 @@ __all__ = [
     "EVENT_ID6",
     "EVENT_ID7",
 ]
+
 
 # -----------------------------------------------------------------------------
 # Convenience wrappers for high-level sync to allow passing enums directly
