@@ -730,19 +730,33 @@ static void buildFunctionBody(BuildCtx &bc, Reader &r, mlir::func::FuncOp fn,
     opsByFuncOut->push_back(std::move(opsById));
 }
 
-static mlir::ModuleOp decodeToModule(mlir::MLIRContext& ctx,
-                                    const std::vector<std::string>& strings,
-                                    const std::vector<TypeEntry>& types,
-                                    const std::vector<AttrEntry>& attrs,
-                                    const std::vector<uint8_t>& constPool,
-                                    const std::vector<uint8_t>& moduleBytes,
-                                    std::vector<std::vector<mlir::Operation*>>* opsByFuncOut) {
+static BuildCtx buildDecodeContext(mlir::MLIRContext &ctx,
+                                   const std::vector<std::string> &strings,
+                                   const std::vector<TypeEntry> &types,
+                                   const std::vector<AttrEntry> &attrs,
+                                   const std::vector<uint8_t> &constPool,
+                                   std::vector<ConstEntryParsed> &consts) {
+  parseConstPoolSection(constPool, consts);
+  return BuildCtx{&ctx, &strings, &types, &attrs, &consts, {}, nullptr, nullptr};
+}
+
+static mlir::func::FuncOp createDecodedFunc(mlir::MLIRContext &ctx,
+                                            const FuncDecl &decl) {
+  return mlir::func::FuncOp::create(mlir::UnknownLoc::get(&ctx), decl.name,
+                                    decl.type);
+}
+
+static mlir::ModuleOp decodeToModule(
+    mlir::MLIRContext &ctx, const std::vector<std::string> &strings,
+    const std::vector<TypeEntry> &types, const std::vector<AttrEntry> &attrs,
+    const std::vector<uint8_t> &constPool,
+    const std::vector<uint8_t> &moduleBytes,
+    std::vector<std::vector<mlir::Operation *>> *opsByFuncOut) {
   const bool dbg = debugEnabled();
 
   Reader r{moduleBytes.data(), moduleBytes.data() + moduleBytes.size()};
   std::vector<ConstEntryParsed> consts;
-  parseConstPoolSection(constPool, consts);
-  BuildCtx bc{&ctx, &strings, &types, &attrs, &consts, {}, nullptr, nullptr};
+  BuildCtx bc = buildDecodeContext(ctx, strings, types, attrs, constPool, consts);
   uint64_t moduleAttrId = readModuleHeader(r, dbg);
   std::vector<FuncDecl> decls = readFunctionDecls(bc, r, dbg);
 
@@ -752,8 +766,7 @@ static mlir::ModuleOp decodeToModule(mlir::MLIRContext& ctx,
   for (const auto &decl : decls) {
     if (dbg)
       llvm::errs() << "[ptobc] building func body: " << decl.name << "\n";
-    auto fn = mlir::func::FuncOp::create(mlir::UnknownLoc::get(&ctx), decl.name,
-                                         decl.type);
+    auto fn = createDecodedFunc(ctx, decl);
     if (dbg) llvm::errs() << "[ptobc] created func op\n";
     applyAttrDictionary(fn, decl.attrs);
     buildFunctionBody(bc, r, fn, decl.flags, dbg, opsByFuncOut);
@@ -772,6 +785,81 @@ static std::pair<uint8_t, std::vector<uint8_t>> readSection(Reader &r, bool dbg)
     llvm::errs() << "[ptobc] section id=" << unsigned(sid)
                  << " len=" << sectionLen << "\n";
   return {sid, bytes};
+}
+
+static void validatePTOBCFileHeader(llvm::ArrayRef<uint8_t> fileBytes) {
+  if (fileBytes.size() < 14)
+    throw std::runtime_error("file too small");
+  if (std::memcmp(fileBytes.data(), "PTOBC\0", 6) != 0)
+    throw std::runtime_error("bad magic");
+
+  uint16_t version = uint16_t(fileBytes[6]) | (uint16_t(fileBytes[7]) << 8);
+  if (version != kVersionV0)
+    throw std::runtime_error("unsupported version");
+
+  uint32_t payloadLen = uint32_t(fileBytes[10]) |
+                        (uint32_t(fileBytes[11]) << 8) |
+                        (uint32_t(fileBytes[12]) << 16) |
+                        (uint32_t(fileBytes[13]) << 24);
+  if (payloadLen != fileBytes.size() - 14)
+    throw std::runtime_error("payload_len mismatch");
+}
+
+struct RequiredSections {
+  uint8_t stringsId = 0;
+  uint8_t typesId = 0;
+  uint8_t attrsId = 0;
+  uint8_t constPoolId = 0;
+  uint8_t moduleId = 0;
+  std::vector<uint8_t> strings;
+  std::vector<uint8_t> types;
+  std::vector<uint8_t> attrs;
+  std::vector<uint8_t> constPool;
+  std::vector<uint8_t> module;
+};
+
+static RequiredSections readRequiredSections(Reader &r, bool dbg) {
+  RequiredSections sections;
+  std::tie(sections.stringsId, sections.strings) = readSection(r, dbg);
+  std::tie(sections.typesId, sections.types) = readSection(r, dbg);
+  std::tie(sections.attrsId, sections.attrs) = readSection(r, dbg);
+  std::tie(sections.constPoolId, sections.constPool) = readSection(r, dbg);
+  std::tie(sections.moduleId, sections.module) = readSection(r, dbg);
+  return sections;
+}
+
+static std::optional<DebugInfo> readOptionalDebugSections(Reader &r, bool dbg) {
+  std::optional<DebugInfo> dbgInfo;
+  while (r.p != r.end) {
+    auto [sid, sec] = readSection(r, dbg);
+    if (sid == kSectionDebugInfo) {
+      if (dbgInfo)
+        throw std::runtime_error("duplicate DEBUGINFO section");
+      dbgInfo = parseDebugInfoSection(sec);
+      continue;
+    }
+    if (sid == kSectionExtra)
+      continue;
+    throw std::runtime_error("unexpected trailing section id");
+  }
+  return dbgInfo;
+}
+
+static void validateSectionOrder(const RequiredSections &sections) {
+  if (sections.stringsId != kSectionStrings ||
+      sections.typesId != kSectionTypes ||
+      sections.attrsId != kSectionAttrs ||
+      sections.constPoolId != kSectionConstPool ||
+      sections.moduleId != kSectionModule) {
+    throw std::runtime_error("unexpected section order");
+  }
+}
+
+static void ensureDecodeDialectsLoaded(mlir::MLIRContext &ctx) {
+  (void)ctx.getOrLoadDialect<mlir::func::FuncDialect>();
+  (void)ctx.getOrLoadDialect<mlir::arith::ArithDialect>();
+  (void)ctx.getOrLoadDialect<mlir::scf::SCFDialect>();
+  (void)ctx.getOrLoadDialect<mlir::pto::PTODialect>();
 }
 
 static void applyDebugLocations(mlir::MLIRContext &ctx,
@@ -800,63 +888,37 @@ mlir::OwningOpRef<mlir::ModuleOp>
 decodePTOBCToModule(llvm::ArrayRef<uint8_t> fileBytes, mlir::MLIRContext &ctx) {
   const bool dbg = debugEnabled();
 
-  if (fileBytes.size() < 14) throw std::runtime_error("file too small");
-  if (std::memcmp(fileBytes.data(), "PTOBC\0", 6) != 0) throw std::runtime_error("bad magic");
-
-  uint16_t ver = uint16_t(fileBytes[6]) | (uint16_t(fileBytes[7]) << 8);
-  if (ver != kVersionV0) throw std::runtime_error("unsupported version");
-
-  uint32_t payloadLen = uint32_t(fileBytes[10]) | (uint32_t(fileBytes[11]) << 8) | (uint32_t(fileBytes[12]) << 16) | (uint32_t(fileBytes[13]) << 24);
-  if (payloadLen != fileBytes.size() - 14) throw std::runtime_error("payload_len mismatch");
+  validatePTOBCFileHeader(fileBytes);
 
   Reader r{fileBytes.data() + 14, fileBytes.data() + fileBytes.size()};
-  auto [s1, d1] = readSection(r, dbg);
-  auto [s2, d2] = readSection(r, dbg);
-  auto [s3, d3] = readSection(r, dbg);
-  auto [s4, d4] = readSection(r, dbg);
-  auto [s6, d6] = readSection(r, dbg);
-
-  std::optional<DebugInfo> dbgInfo;
-  // Optional trailing sections: DEBUGINFO, EXTRA.
-  while (r.p != r.end) {
-    auto [sid, sec] = readSection(r, dbg);
-    if (sid == kSectionDebugInfo) {
-      if (dbgInfo) throw std::runtime_error("duplicate DEBUGINFO section");
-      dbgInfo = parseDebugInfoSection(sec);
-    } else if (sid == kSectionExtra) {
-      // Ignore EXTRA payload for now.
-    } else {
-      throw std::runtime_error("unexpected trailing section id");
-    }
-  }
-
-  if (s1 != kSectionStrings || s2 != kSectionTypes || s3 != kSectionAttrs || s4 != kSectionConstPool || s6 != kSectionModule) {
-    throw std::runtime_error("unexpected section order");
-  }
+  RequiredSections sections = readRequiredSections(r, dbg);
+  std::optional<DebugInfo> dbgInfo = readOptionalDebugSections(r, dbg);
+  validateSectionOrder(sections);
 
   std::vector<std::string> strings;
-  parseStringsSection(d1, strings);
+  parseStringsSection(sections.strings, strings);
 
   std::vector<TypeEntry> types;
-  parseTypesSection(d2, strings, types);
+  parseTypesSection(sections.types, strings, types);
 
   std::vector<AttrEntry> attrs;
-  parseAttrsSection(d3, strings, attrs);
+  parseAttrsSection(sections.attrs, strings, attrs);
 
   if (dbg) {
-    llvm::errs() << "[ptobc] strings=" << strings.size() << " types=" << types.size() << " attrs=" << attrs.size() << " moduleBytes=" << d6.size() << "\n";
+    llvm::errs() << "[ptobc] strings=" << strings.size()
+                 << " types=" << types.size()
+                 << " attrs=" << attrs.size()
+                 << " moduleBytes=" << sections.module.size() << "\n";
   }
 
-  // Ensure dialects are loaded before we start materializing ops.
-  (void)ctx.getOrLoadDialect<mlir::func::FuncDialect>();
-  (void)ctx.getOrLoadDialect<mlir::arith::ArithDialect>();
-  (void)ctx.getOrLoadDialect<mlir::scf::SCFDialect>();
-  (void)ctx.getOrLoadDialect<mlir::pto::PTODialect>();
+  ensureDecodeDialectsLoaded(ctx);
 
   if (dbg) llvm::errs() << "[ptobc] decoding module...\n";
 
   std::vector<std::vector<mlir::Operation*>> opsByFunc;
-  auto module = decodeToModule(ctx, strings, types, attrs, d4, d6, dbgInfo ? &opsByFunc : nullptr);
+  auto module = decodeToModule(ctx, strings, types, attrs, sections.constPool,
+                               sections.module,
+                               dbgInfo ? &opsByFunc : nullptr);
 
   // Apply op locations from DEBUGINFO (best-effort).
   if (dbgInfo)
