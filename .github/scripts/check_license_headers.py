@@ -30,7 +30,21 @@ HEADER_BODY = [
 HASH_HEADER = [f"# {line}" for line in HEADER_BODY]
 SLASH_HEADER = [f"// {line}" for line in HEADER_BODY]
 HASH_FILE_SUFFIXES = {".py", ".sh", ".cmake"}
-SLASH_FILE_SUFFIXES = {".c", ".cc", ".cpp", ".cxx", ".h", ".hh", ".hpp", ".hxx", ".td"}
+SLASH_FILE_SUFFIXES = {
+    ".c",
+    ".cc",
+    ".cpp",
+    ".cxx",
+    ".h",
+    ".hh",
+    ".hpp",
+    ".hxx",
+    ".td",
+}
+SKIP_EXACT_PATHS = {
+    "tools/ptobc/testdata/add_static_multicore.pto",
+    "tools/ptobc/testdata/matmul_static_singlecore.pto",
+}
 HASH_FILE_BASENAMES = {"CMakeLists.txt"}
 SHEBANG_SUFFIXES = {".py", ".sh"}
 ZERO_SHA = "0" * 40
@@ -48,6 +62,8 @@ def parse_args() -> argparse.Namespace:
 
 
 def comment_style_for(path_str: str) -> str | None:
+    if path_str in SKIP_EXACT_PATHS:
+        return None
     path = Path(path_str)
     suffix = path.suffix.lower()
     if path.name in HASH_FILE_BASENAMES or suffix in HASH_FILE_SUFFIXES:

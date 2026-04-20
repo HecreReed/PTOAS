@@ -488,7 +488,9 @@ def set_ffts(ffts, *, loc=None, ip=None):
 def get_buf(op_type, buf_id, mode=0, *, loc=None, ip=None):
     ctx = loc.context if loc else _ods_ir.Context.current
     if isinstance(op_type, (PipeAttr, PIPE)):
-        raise TypeError("get_buf expects SyncOpType (or SyncOpTypeAttr), not PIPE/PipeAttr")
+        raise TypeError(
+            "get_buf expects SyncOpType (or SyncOpTypeAttr), not PIPE/PipeAttr"
+        )
     attrs = {
         "op_type": _ensure_sync_attr(op_type, ctx),
         "buf_id": _ensure_i32_attr(buf_id, "buf_id", ctx),
@@ -505,7 +507,9 @@ def get_buf(op_type, buf_id, mode=0, *, loc=None, ip=None):
 def rls_buf(op_type, buf_id, mode=0, *, loc=None, ip=None):
     ctx = loc.context if loc else _ods_ir.Context.current
     if isinstance(op_type, (PipeAttr, PIPE)):
-        raise TypeError("rls_buf expects SyncOpType (or SyncOpTypeAttr), not PIPE/PipeAttr")
+        raise TypeError(
+            "rls_buf expects SyncOpType (or SyncOpTypeAttr), not PIPE/PipeAttr"
+        )
     attrs = {
         "op_type": _ensure_sync_attr(op_type, ctx),
         "buf_id": _ensure_i32_attr(buf_id, "buf_id", ctx),
@@ -576,6 +580,7 @@ EVENT_ID4 = EVENT.EVENT_ID4
 EVENT_ID5 = EVENT.EVENT_ID5
 EVENT_ID6 = EVENT.EVENT_ID6
 EVENT_ID7 = EVENT.EVENT_ID7
+
 
 class TileConfig:
     alignedSize = 32
