@@ -275,6 +275,18 @@ struct ParsedMarkerCall {
   llvm::SmallVector<llvm::StringRef, 4> args;
 };
 
+struct MarkerRewriteSpec {
+  llvm::StringRef marker;
+  llvm::StringRef memberName;
+  unsigned expectedNumArgs = 0;
+};
+
+struct MarkerSubscriptRewriteSpec {
+  llvm::StringRef marker;
+  unsigned expectedNumArgs = 0;
+  bool isStore = false;
+};
+
 static bool parseMarkerArgs(llvm::StringRef argsRef,
                             llvm::SmallVectorImpl<llvm::StringRef> &args) {
   size_t partBegin = 0;
@@ -378,32 +390,96 @@ static bool rewriteMarkerCallToMember(std::string &cpp, llvm::StringRef marker,
   return changed;
 }
 
-static void rewriteTileGetSetValueMarkers(std::string &cpp) {
-  // Keep applying until fixed-point in case rewrites shift subsequent matches.
+static void rewriteMarkerCallsToMembers(
+    std::string &cpp, llvm::ArrayRef<MarkerRewriteSpec> rewrites) {
   bool changed = true;
   while (changed) {
     changed = false;
-    changed |= rewriteMarkerCallToMember(
-        cpp, "PTOAS__TILE_SET_VALUE", "SetValue", /*expectedNumArgs=*/3);
-    changed |= rewriteMarkerCallToMember(
-        cpp, "PTOAS__TILE_GET_VALUE", "GetValue", /*expectedNumArgs=*/2);
-    changed |= rewriteMarkerCallToMember(
-        cpp, "PTOAS__TILE_DATA", "data", /*expectedNumArgs=*/1);
-    changed |= rewriteMarkerCallToMember(
-        cpp, "PTOAS__TILE_SET_VALIDSHAPE", "SetValidShape",
-        /*expectedNumArgs=*/3);
+    for (const MarkerRewriteSpec &rewrite : rewrites) {
+      changed |= rewriteMarkerCallToMember(cpp, rewrite.marker,
+                                           rewrite.memberName,
+                                           rewrite.expectedNumArgs);
+    }
   }
 }
 
+static void rewriteTileGetSetValueMarkers(std::string &cpp) {
+  static constexpr MarkerRewriteSpec kTileMarkerRewrites[] = {
+      {"PTOAS__TILE_SET_VALUE", "SetValue", 3},
+      {"PTOAS__TILE_GET_VALUE", "GetValue", 2},
+      {"PTOAS__TILE_DATA", "data", 1},
+      {"PTOAS__TILE_SET_VALIDSHAPE", "SetValidShape", 3},
+  };
+  rewriteMarkerCallsToMembers(cpp, kTileMarkerRewrites);
+}
+
 static void rewriteAsyncEventMarkers(std::string &cpp) {
+  static constexpr MarkerRewriteSpec kAsyncEventMarkerRewrites[] = {
+      {"PTOAS__ASYNC_EVENT_WAIT", "Wait", 2},
+      {"PTOAS__ASYNC_EVENT_TEST", "Test", 2},
+  };
+  rewriteMarkerCallsToMembers(cpp, kAsyncEventMarkerRewrites);
+}
+
+static bool rewriteMarkerCallToSubscript(std::string &cpp, llvm::StringRef marker,
+                                         unsigned expectedNumArgs,
+                                         bool isStore) {
+  size_t searchPos = 0;
+  bool changed = false;
+  for (auto call = findNextMarkerCall(cpp, marker, searchPos); call;
+       call = findNextMarkerCall(cpp, marker, searchPos)) {
+    if (call->rparenPos == std::string::npos) {
+      searchPos = call->markerPos + marker.size();
+      continue;
+    }
+    if (call->args.size() != expectedNumArgs) {
+      searchPos = call->rparenPos + 1;
+      continue;
+    }
+
+    std::string replacement;
+    if (isStore) {
+      replacement =
+          (call->args[0] + "[" + call->args[1] + "] = " + call->args[2]).str();
+    } else {
+      replacement = (call->args[0] + "[" + call->args[1] + "]").str();
+    }
+
+    cpp.replace(call->markerPos, (call->rparenPos - call->markerPos) + 1,
+                replacement);
+    changed = true;
+    searchPos = call->markerPos + replacement.size();
+  }
+  return changed;
+}
+
+static void rewriteMarkerCallsToSubscripts(
+    std::string &cpp, llvm::ArrayRef<MarkerSubscriptRewriteSpec> rewrites) {
   bool changed = true;
   while (changed) {
     changed = false;
-    changed |= rewriteMarkerCallToMember(
-        cpp, "PTOAS__ASYNC_EVENT_WAIT", "Wait", /*expectedNumArgs=*/2);
-    changed |= rewriteMarkerCallToMember(
-        cpp, "PTOAS__ASYNC_EVENT_TEST", "Test", /*expectedNumArgs=*/2);
+    for (const MarkerSubscriptRewriteSpec &rewrite : rewrites) {
+      changed |= rewriteMarkerCallToSubscript(cpp, rewrite.marker,
+                                              rewrite.expectedNumArgs,
+                                              rewrite.isStore);
+    }
   }
+}
+
+static void rewritePtrScalarMarkers(std::string &cpp) {
+  static constexpr MarkerSubscriptRewriteSpec kPtrScalarMarkerRewrites[] = {
+      {"PTOAS__PTR_LOAD", 2, false},
+      {"PTOAS__PTR_STORE", 3, true},
+  };
+  rewriteMarkerCallsToSubscripts(cpp, kPtrScalarMarkerRewrites);
+}
+
+static void rewriteEventIdArrayMarkers(std::string &cpp) {
+  static constexpr MarkerSubscriptRewriteSpec kEventIdArrayMarkerRewrites[] = {
+      {"PTOAS__EVENTID_ARRAY_LOAD", 2, false},
+      {"PTOAS__EVENTID_ARRAY_STORE", 3, true},
+  };
+  rewriteMarkerCallsToSubscripts(cpp, kEventIdArrayMarkerRewrites);
 }
 
 // --------------------------------------------------------------------------
@@ -477,62 +553,6 @@ static void materializeControlFlowOperands(Operation *rootOp) {
       builder.create<emitc::AssignOp>(op->getLoc(), tmp, value);
       operand.set(tmp);
     }
-  }
-}
-
-static bool rewriteMarkerCallToSubscript(std::string &cpp, llvm::StringRef marker,
-                                         unsigned expectedNumArgs,
-                                         bool isStore) {
-  size_t searchPos = 0;
-  bool changed = false;
-  for (auto call = findNextMarkerCall(cpp, marker, searchPos); call;
-       call = findNextMarkerCall(cpp, marker, searchPos)) {
-    if (call->rparenPos == std::string::npos) {
-      searchPos = call->markerPos + marker.size();
-      continue;
-    }
-    if (call->args.size() != expectedNumArgs) {
-      searchPos = call->rparenPos + 1;
-      continue;
-    }
-
-    std::string replacement;
-    if (isStore) {
-      replacement =
-          (call->args[0] + "[" + call->args[1] + "] = " + call->args[2]).str();
-    } else {
-      replacement = (call->args[0] + "[" + call->args[1] + "]").str();
-    }
-
-    cpp.replace(call->markerPos, (call->rparenPos - call->markerPos) + 1,
-                replacement);
-    changed = true;
-    searchPos = call->markerPos + replacement.size();
-  }
-  return changed;
-}
-
-static void rewritePtrScalarMarkers(std::string &cpp) {
-  bool changed = true;
-  while (changed) {
-    changed = false;
-    changed |= rewriteMarkerCallToSubscript(
-        cpp, "PTOAS__PTR_LOAD", /*expectedNumArgs=*/2, /*isStore=*/false);
-    changed |= rewriteMarkerCallToSubscript(
-        cpp, "PTOAS__PTR_STORE", /*expectedNumArgs=*/3, /*isStore=*/true);
-  }
-}
-
-static void rewriteEventIdArrayMarkers(std::string &cpp) {
-  bool changed = true;
-  while (changed) {
-    changed = false;
-    changed |= rewriteMarkerCallToSubscript(
-        cpp, "PTOAS__EVENTID_ARRAY_LOAD", /*expectedNumArgs=*/2,
-        /*isStore=*/false);
-    changed |= rewriteMarkerCallToSubscript(
-        cpp, "PTOAS__EVENTID_ARRAY_STORE", /*expectedNumArgs=*/3,
-        /*isStore=*/true);
   }
 }
 

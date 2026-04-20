@@ -200,11 +200,9 @@ struct Encoder {
     std::unordered_map<std::string, int> constCounts;
 
     for (uint64_t vid = 0; vid < valueById.size(); ++vid) {
-      mlir::Value v = valueById[vid];
-      std::string name = buildScalarConstantDebugName(v, constCounts)
-                             .value_or(std::to_string(vid));
-
-      uint64_t nameSid = file.strings.intern(name);
+      uint64_t nameSid = file.strings.intern(
+          buildScalarConstantDebugName(valueById[vid], constCounts)
+              .value_or(std::to_string(vid)));
       file.dbgValueNames.push_back(DebugValueNameEntry{funcId, vid, nameSid});
     }
   }
