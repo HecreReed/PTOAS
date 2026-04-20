@@ -100,6 +100,56 @@ buildRowMajorReinterpretType(MLIRContext *ctx, pto::TileBufType srcType) {
                                srcType.getMemorySpace(), swappedValid, newCfg);
 }
 
+static LogicalResult normalizeRiskyTMov(func::FuncOp func, pto::TMovOp op,
+                                        IRRewriter &rewriter) {
+  auto srcTb = cast<pto::TileBufType>(op.getSrc().getType());
+  auto dstTb = cast<pto::TileBufType>(op.getDst().getType());
+
+  FailureOr<pto::TileBufType> srcRowTy =
+      buildRowMajorReinterpretType(func.getContext(), srcTb);
+  FailureOr<pto::TileBufType> dstRowTy =
+      buildRowMajorReinterpretType(func.getContext(), dstTb);
+  if (failed(srcRowTy) || failed(dstRowTy)) {
+    return op.emitOpError(
+        "cannot normalize A5 vec->vec col_major TMOV: requires static 2D "
+        "tile_buf shape/valid_shape for treshape reinterpret");
+  }
+
+  rewriter.setInsertionPoint(op);
+  auto srcRow =
+      rewriter.create<pto::TReshapeOp>(op.getLoc(), *srcRowTy, op.getSrc());
+  auto dstRow =
+      rewriter.create<pto::TReshapeOp>(op.getLoc(), *dstRowTy, op.getDst());
+  SmallVector<Value, 4> newOperands(op->operand_begin(), op->operand_end());
+  if (newOperands.size() < 2)
+    return op.emitOpError("unexpected operand count while normalizing TMOV");
+
+  newOperands[0] = srcRow.getResult();
+  newOperands[1] = dstRow.getResult();
+
+  OperationState state(op.getLoc(), pto::TMovOp::getOperationName());
+  state.addOperands(newOperands);
+  state.addTypes(op->getResultTypes());
+  state.addAttributes(op->getAttrs());
+  rewriter.create(state);
+  rewriter.eraseOp(op);
+  return success();
+}
+
+static LogicalResult verifyNoResidualRisk(func::FuncOp func) {
+  bool hasResidualRisk = false;
+  func.walk([&](pto::TMovOp op) {
+    if (!isA5RiskyVecVecColMajorTMov(op))
+      return WalkResult::advance();
+    op.emitOpError(
+        "A5 vec->vec TMOV on col_major/none_box tile is unsupported; "
+        "expected normalization to row_major via pto.treshape");
+    hasResidualRisk = true;
+    return WalkResult::interrupt();
+  });
+  return success(!hasResidualRisk);
+}
+
 struct PTOA5NormalizeTMovPass
     : public mlir::pto::impl::PTOA5NormalizeTMovBase<PTOA5NormalizeTMovPass> {
   void runOnOperation() override {
@@ -115,56 +165,13 @@ struct PTOA5NormalizeTMovPass
 
     IRRewriter rewriter(func.getContext());
     for (pto::TMovOp op : riskyOps) {
-      auto srcTb = cast<pto::TileBufType>(op.getSrc().getType());
-      auto dstTb = cast<pto::TileBufType>(op.getDst().getType());
-
-      FailureOr<pto::TileBufType> srcRowTy =
-          buildRowMajorReinterpretType(func.getContext(), srcTb);
-      FailureOr<pto::TileBufType> dstRowTy =
-          buildRowMajorReinterpretType(func.getContext(), dstTb);
-      if (failed(srcRowTy) || failed(dstRowTy)) {
-        op.emitOpError(
-            "cannot normalize A5 vec->vec col_major TMOV: requires static 2D "
-            "tile_buf shape/valid_shape for treshape reinterpret");
+      if (failed(normalizeRiskyTMov(func, op, rewriter))) {
         signalPassFailure();
         return;
       }
-
-      rewriter.setInsertionPoint(op);
-      auto srcRow =
-          rewriter.create<pto::TReshapeOp>(op.getLoc(), *srcRowTy, op.getSrc());
-      auto dstRow =
-          rewriter.create<pto::TReshapeOp>(op.getLoc(), *dstRowTy, op.getDst());
-      SmallVector<Value, 4> newOperands(op->operand_begin(), op->operand_end());
-      if (newOperands.size() < 2) {
-        op.emitOpError("unexpected operand count while normalizing TMOV");
-        signalPassFailure();
-        return;
-      }
-      newOperands[0] = srcRow.getResult();
-      newOperands[1] = dstRow.getResult();
-
-      OperationState state(op.getLoc(), pto::TMovOp::getOperationName());
-      state.addOperands(newOperands);
-      state.addTypes(op->getResultTypes());
-      state.addAttributes(op->getAttrs());
-      auto *created = rewriter.create(state);
-      auto newTmov = cast<pto::TMovOp>(created);
-      (void)newTmov;
-      rewriter.eraseOp(op);
     }
 
-    bool hasResidualRisk = false;
-    func.walk([&](pto::TMovOp op) {
-      if (!isA5RiskyVecVecColMajorTMov(op))
-        return WalkResult::advance();
-      op.emitOpError(
-          "A5 vec->vec TMOV on col_major/none_box tile is unsupported; "
-          "expected normalization to row_major via pto.treshape");
-      hasResidualRisk = true;
-      return WalkResult::interrupt();
-    });
-    if (hasResidualRisk)
+    if (failed(verifyNoResidualRisk(func)))
       signalPassFailure();
   }
 };

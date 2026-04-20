@@ -23,6 +23,7 @@
 
 
 #include <list>
+#include <optional>
 
 namespace mlir {
 namespace pto {
@@ -294,6 +295,18 @@ public:
 
 private:
   void RecursionIR(Region *region, Liveness live);
+  std::optional<WalkResult> HandleRecursiveControlFlowOp(Operation *op,
+                                                         Liveness live);
+  std::optional<WalkResult> HandleAliasOnlyOp(Operation *op);
+  std::optional<WalkResult> HandleReadOnlyLinearOp(Operation *op, OpInfo *opInfo,
+                                                   Liveness live);
+  std::optional<WalkResult> HandleEffectTrackedLinearOp(Operation *op,
+                                                        OpInfo *opInfo,
+                                                        Liveness live);
+  std::optional<WalkResult> HandleCallLikeLinearOp(Operation *op, OpInfo *opInfo,
+                                                   Liveness live);
+  std::optional<WalkResult> HandleKnownLinearOp(Operation *op, OpInfo *opInfo,
+                                                Liveness live);
 
   /// Get the buffer used within the loop and defined outside the loop.
   SmallVector<Value> GetLiveBuffersInLoop(scf::ForOp forOp, Liveness live);
@@ -538,6 +551,10 @@ private:
   /// plan buffer in speculative ways.
   LogicalResult SpecAlloc(MemBoundList &outline, PlanRecHis &his,
                           StorageEntry *e, const SpecInfo &si, int localLevel);
+  bool TryApplySpecAllocCandidate(MemBoundList &outline, PlanRecHis &his,
+                                  StorageEntry *e, int localLevel,
+                                  const OutlineSectionInfo &section,
+                                  uint64_t allocOffset);
 
   /// spec_level == SPEC_LEVEL_2, mte2/3 do not reuse with vector.
   bool VerifyConflictStage2(PlanRecHis &his, const StorageEntry *e,
@@ -575,6 +592,19 @@ private:
   void UpdateOutline(MemBoundList &outline, PlanRecHis &his, StorageEntry *e,
                      const OutlineSectionInfo &outlineInfo,
                      int localLevel) const;
+  SmallVector<std::shared_ptr<MemoryBound>>
+  BuildSplitBounds(StorageEntry *e, MemBoundListConstIter start,
+                   MemBoundListConstIter end) const;
+  MemBoundListConstIter InsertAllocatedBounds(
+      MemBoundList &outline, MemBoundListConstIter end,
+      ArrayRef<std::shared_ptr<MemoryBound>> splitBound,
+      const std::shared_ptr<MemoryBound> &last, uint64_t remainingBits) const;
+  void RecordOutlinePlan(PlanRecHis &his, MemBoundList &outline,
+                         MemBoundListConstIter start, MemBoundListConstIter end,
+                         StorageEntry *e, int localLevel, bool tailed,
+                         size_t splitCount,
+                         const OutlineSectionInfo &outlineInfo,
+                         const std::shared_ptr<MemoryBound> &firstBound) const;
 
   /// plan strategy is achieved through split method.
   void AddMemBoundInSectionalWay(

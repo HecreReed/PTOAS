@@ -6,28 +6,23 @@
 // INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
 // See LICENSE in the root of the software repository for the full text of the License.
 
-// Please refer to the License for details. You may not use this file except in compliance with the License.
-// THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
-// INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
-// See LICENSE in the root of the software repository for the full text of the License.
-
 #include "PTO/Transforms/InsertSync/MemoryDependentAnalyzer.h"
 #include "PTO/Transforms/InsertSync/InsertSyncDebug.h"
-#include "mlir/Interfaces/ViewLikeInterface.h"
 #include "mlir/Dialect/MemRef/IR/MemRef.h"
+#include "mlir/Interfaces/ViewLikeInterface.h"
 #include "llvm/Support/Debug.h"
- 
+#include <optional>
+
 #define DEBUG_TYPE "pto-inject-sync"
- 
+
 using namespace mlir;
 using namespace mlir::pto;
 
 static bool isTraceEnabled() {
   return isInsertSyncDebugEnabled(InsertSyncDebugLevel::Trace);
 }
- 
-// [Debug] 打印 Value 详细信息
-static void printValueDebug(const char* tag, Value v) {
+
+static void printValueDebug(const char *tag, Value v) {
   if (!isTraceEnabled())
     return;
   llvm::errs() << tag << ": ";
@@ -35,7 +30,6 @@ static void printValueDebug(const char* tag, Value v) {
     llvm::errs() << "NULL\n";
     return;
   }
-  
   if (auto *op = v.getDefiningOp()) {
     llvm::errs() << "OpResult defined by [" << op->getName() << "]";
   } else {
@@ -43,59 +37,56 @@ static void printValueDebug(const char* tag, Value v) {
   }
   llvm::errs() << " | Type: " << v.getType() << "\n";
 }
- 
-// [Fix & Debug] 增强版 GetRealRoot
+
+static void traceRootPeel(bool trace, StringRef message) {
+  if (trace)
+    llvm::errs() << message << "\n";
+}
+
+static std::optional<Value> peelRootOnce(Operation *defOp, bool trace) {
+  if (auto op = dyn_cast<memref::CollapseShapeOp>(defOp)) {
+    traceRootPeel(trace, "    -> Hit CollapseShapeOp. Peel off.");
+    return op.getSrc();
+  }
+  if (auto op = dyn_cast<memref::ExpandShapeOp>(defOp)) {
+    traceRootPeel(trace, "    -> Hit ExpandShapeOp. Peel off.");
+    return op.getSrc();
+  }
+  if (auto op = dyn_cast<memref::ViewOp>(defOp)) {
+    traceRootPeel(trace, "    -> Hit ViewOp. Peel off.");
+    return op.getSource();
+  }
+  if (auto view = dyn_cast<ViewLikeOpInterface>(defOp)) {
+    traceRootPeel(trace, "    -> Hit ViewLikeInterface. Peel off.");
+    return view.getViewSource();
+  }
+  if (auto cast = dyn_cast<memref::CastOp>(defOp))
+    return cast.getSource();
+  if (auto recast = dyn_cast<memref::ReinterpretCastOp>(defOp))
+    return recast.getSource();
+  return std::nullopt;
+}
+
 static Value GetRealRoot(Value v) {
   const bool trace = isTraceEnabled();
   if (trace) {
     llvm::errs() << "  [Trace] GetRealRoot Start:\n";
     printValueDebug("    Current", v);
   }
-  
+
   int depth = 0;
   const int maxDepth = 20;
- 
+
   while (v && depth++ < maxDepth) {
     Operation *defOp = v.getDefiningOp();
     if (!defOp) {
-        if (trace)
-          llvm::errs() << "    -> Reached BlockArgument. Stop.\n";
-        break; 
+      traceRootPeel(trace, "    -> Reached BlockArgument. Stop.");
+      break;
     }
- 
-    if (auto op = dyn_cast<memref::CollapseShapeOp>(defOp)) {
-        if (trace)
-          llvm::errs() << "    -> Hit CollapseShapeOp. Peel off.\n";
-        v = op.getSrc();
-        continue;
+    if (std::optional<Value> peeled = peelRootOnce(defOp, trace)) {
+      v = *peeled;
+      continue;
     }
-    if (auto op = dyn_cast<memref::ExpandShapeOp>(defOp)) {
-        if (trace)
-          llvm::errs() << "    -> Hit ExpandShapeOp. Peel off.\n";
-        v = op.getSrc();
-        continue;
-    }
-    if (auto op = dyn_cast<memref::ViewOp>(defOp)) {
-        if (trace)
-          llvm::errs() << "    -> Hit ViewOp. Peel off.\n";
-        v = op.getSource();
-        continue;
-    }
-    if (auto view = dyn_cast<ViewLikeOpInterface>(defOp)) {
-        if (trace)
-          llvm::errs() << "    -> Hit ViewLikeInterface. Peel off.\n";
-        v = view.getViewSource();
-        continue;
-    }
-    if (auto cast = dyn_cast<memref::CastOp>(defOp)) {
-        v = cast.getSource();
-        continue;
-    }
-    if (auto reCast = dyn_cast<memref::ReinterpretCastOp>(defOp)) {
-        v = reCast.getSource();
-        continue;
-    }
- 
     if (trace) {
       llvm::errs() << "    -> Hit Alloc/Other [" << defOp->getName()
                    << "]. Stop.\n";
@@ -109,14 +100,12 @@ bool MemoryDependentAnalyzer::DepBetween(
     const SmallVector<const BaseMemInfo *> &a,
     const SmallVector<const BaseMemInfo *> &b,
     DepBaseMemInfoPairVec &depBaseMemInfosVec) {
-  
-  // [Debug Log] 关键入口信息
   if (isTraceEnabled()) {
     llvm::errs() << "\n[DepBetween] Checking dependency...\n";
     llvm::errs() << "  Vec A Size: " << a.size() << "\n";
     llvm::errs() << "  Vec B Size: " << b.size() << "\n";
   }
- 
+
   bool hasAlias = false;
   for (auto &i : a) {
     for (auto &j : b) {
@@ -128,13 +117,30 @@ bool MemoryDependentAnalyzer::DepBetween(
   }
   return hasAlias;
 }
- 
+
+static bool hasSameLocalRoot(const BaseMemInfo *a, const BaseMemInfo *b) {
+  if (a->rootBuffer == b->rootBuffer)
+    return true;
+  Value realRootA = GetRealRoot(a->rootBuffer);
+  Value realRootB = GetRealRoot(b->rootBuffer);
+  if (isTraceEnabled()) {
+    llvm::errs() << "    [Deep Check] Surface Roots differ. Digging deeper...\n";
+    printValueDebug("      Real Root A", realRootA);
+    printValueDebug("      Real Root B", realRootB);
+  }
+  if (realRootA == realRootB && realRootA) {
+    traceRootPeel(isTraceEnabled(), "      -> MATCH! Real roots are the same.");
+    return true;
+  }
+  traceRootPeel(isTraceEnabled(), "      -> Mismatch. Real roots differ.");
+  return false;
+}
+
 bool MemoryDependentAnalyzer::MemAlias(const BaseMemInfo *a,
                                        const BaseMemInfo *b) {
   pto::AddressSpace as = a->scope;
   pto::AddressSpace bs = b->scope;
- 
-  // [Debug Log] 打印比较对象
+
   if (isTraceEnabled()) {
     llvm::errs() << "  [MemAlias Check]\n";
     printValueDebug("    Root A", a->rootBuffer);
@@ -142,70 +148,41 @@ bool MemoryDependentAnalyzer::MemAlias(const BaseMemInfo *a,
     llvm::errs() << "    Scope A: " << (int)as << ", Scope B: " << (int)bs
                  << "\n";
   }
- 
   if (as != bs) {
-    if (isTraceEnabled())
-      llvm::errs() << "    -> Scope Mismatch. False.\n";
+    traceRootPeel(isTraceEnabled(), "    -> Scope Mismatch. False.");
     return false;
   }
- 
-  // 1. GM 内存
-  if (as == pto::AddressSpace::GM) {
+
+  if (as == pto::AddressSpace::GM)
     return isGMBufferOverlap(a, b);
-  }
- 
-  // 2. Local Memory (UB/L1)
-  
-  if (a->rootBuffer == b->rootBuffer) {
-    if (a->baseAddresses.empty() || b->baseAddresses.empty()) return true;
+
+  if (hasSameLocalRoot(a, b)) {
+    if (a->baseAddresses.empty() || b->baseAddresses.empty())
+      return true;
     return isBufferAddressRangeOverlap(a, b);
   }
- 
-  // 2.2 深层比较：穿透 View
-  Value realRootA = GetRealRoot(a->rootBuffer);
-  Value realRootB = GetRealRoot(b->rootBuffer);
- 
-  if (isTraceEnabled()) {
-    llvm::errs() << "    [Deep Check] Surface Roots differ. Digging deeper...\n";
-    printValueDebug("      Real Root A", realRootA);
-    printValueDebug("      Real Root B", realRootB);
-  }
- 
-  if (realRootA == realRootB && realRootA != nullptr) {
-      if (isTraceEnabled())
-        llvm::errs() << "      -> MATCH! Real roots are the same.\n";
-      return true;
-  } else {
-      if (isTraceEnabled())
-        llvm::errs() << "      -> Mismatch. Real roots differ.\n";
-  }
- 
   return false;
 }
- 
+
 bool MemoryDependentAnalyzer::isGMBufferOverlap(const BaseMemInfo *a,
                                                 const BaseMemInfo *b) {
   if (a->rootBuffer != b->rootBuffer) {
     Value realRootA = GetRealRoot(a->rootBuffer);
     Value realRootB = GetRealRoot(b->rootBuffer);
-    
-    if (realRootA != realRootB) {
-        return false;
-    }
-    return true; 
+    return realRootA == realRootB;
   }
- 
-  if (a->baseAddresses.empty() || b->baseAddresses.empty()) return true; 
-  if (a->allocateSize == 0 || b->allocateSize == 0) return true;
- 
+
+  if (a->baseAddresses.empty() || b->baseAddresses.empty())
+    return true;
+  if (a->allocateSize == 0 || b->allocateSize == 0)
+    return true;
   return isBufferAddressRangeOverlap(a, b);
 }
- 
+
 bool MemoryDependentAnalyzer::isBufferAddressRangeOverlap(
     const BaseMemInfo *a, const BaseMemInfo *b) {
   int aBaseAddressesSize = static_cast<int>(a->baseAddresses.size());
   int bBaseAddressesSize = static_cast<int>(b->baseAddresses.size());
-  
   for (int i = 0; i < aBaseAddressesSize; i++) {
     for (int j = 0; j < bBaseAddressesSize; j++) {
       if (isBufferOverlap(a, b, i, j)) {
@@ -215,7 +192,7 @@ bool MemoryDependentAnalyzer::isBufferAddressRangeOverlap(
   }
   return false;
 }
- 
+
 bool MemoryDependentAnalyzer::isBufferOverlap(const BaseMemInfo *a,
                                               const BaseMemInfo *b, int aIndex,
                                               int bIndex) {

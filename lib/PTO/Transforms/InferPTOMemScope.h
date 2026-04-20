@@ -34,11 +34,9 @@ namespace pto {
 class MemScopeInferAndPropagateHelper {
 public:
   LogicalResult Run(Value operand, const AddressSpaceAttr &targetMemScope);
-
-private:
-  /// Propagate the memory scope change to users of the value.
   LogicalResult propagateMemScopeToUsers(Value val);
 
+private:
   /// Set memory scope for the root alloc op.
   void setMemRefAllocScope(memref::AllocOp op,
                            const AddressSpaceAttr &newScope);

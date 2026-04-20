@@ -6,11 +6,6 @@
 // INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
 // See LICENSE in the root of the software repository for the full text of the License.
 
-// Please refer to the License for details. You may not use this file except in compliance with the License.
-// THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
-// INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
-// See LICENSE in the root of the software repository for the full text of the License.
-
 #include "PTO/Transforms/InsertSync/InsertSyncAnalysis.h"
 #include "PTO/Transforms/InsertSync/SyncCommon.h"
 #include "mlir/Dialect/MemRef/IR/MemRef.h"
@@ -34,6 +29,22 @@ static constexpr unsigned kPipeStateSize =
 
 static bool isValidPipeIndex(PipelineType pipe) {
   return static_cast<unsigned>(pipe) < kPipeStateSize;
+}
+
+static void appendSingleSyncGroup(SyncOperations &syncOperations,
+                                  std::unique_ptr<SyncOperation> syncOp) {
+  SmallVector<std::unique_ptr<SyncOperation>> newSync;
+  newSync.emplace_back(std::move(syncOp));
+  syncOperations.emplace_back(std::move(newSync));
+}
+
+static void appendSetWaitSyncGroup(
+    SyncOperations &syncOperations, std::unique_ptr<SyncOperation> setOp,
+    std::unique_ptr<SyncOperation> waitOp) {
+  SmallVector<std::unique_ptr<SyncOperation>> newSync;
+  newSync.emplace_back(std::move(setOp));
+  newSync.emplace_back(std::move(waitOp));
+  syncOperations.emplace_back(std::move(newSync));
 }
 
 // ==============================================================================
@@ -362,10 +373,7 @@ void InsertSyncAnalysis::InsertSyncOperation(
     barrierOp->SetDepSyncIRIndex(frontCompound->GetIndex());
     syncIR_[insertBarrierId]->pipeBefore.push_back(barrierOp.get());
     barrierOp->SetSyncIRIndex(insertBarrierId);
-
-    SmallVector<std::unique_ptr<SyncOperation>> newSync;
-    newSync.emplace_back(std::move(barrierOp));
-    syncOperations_.emplace_back(std::move(newSync));
+    appendSingleSyncGroup(syncOperations_, std::move(barrierOp));
   } else {
     unsigned insertWaitId = nowCompound->GetIndex();
     unsigned insertSetId = frontCompound->GetIndex();
@@ -379,7 +387,6 @@ void InsertSyncAnalysis::InsertSyncOperation(
     setOp->SetDepSyncIRIndex(frontCompound->GetIndex());
     waitOp->SetDepSyncIRIndex(frontCompound->GetIndex());
 
-    // Back-edge dependencies may require multi-buffer event IDs.
     if (forEndIndex.has_value()) {
       int eventIdNum = GetEventIdNum(depBaseMemInfosVec);
       setOp->eventIdNum = eventIdNum;
@@ -388,11 +395,8 @@ void InsertSyncAnalysis::InsertSyncOperation(
 
     syncIR_[insertSetId]->pipeAfter.push_back(setOp.get());
     syncIR_[insertWaitId]->pipeBefore.push_back(waitOp.get());
-
-    SmallVector<std::unique_ptr<SyncOperation>> newSync;
-    newSync.emplace_back(std::move(setOp));
-    newSync.emplace_back(std::move(waitOp));
-    syncOperations_.emplace_back(std::move(newSync));
+    appendSetWaitSyncGroup(syncOperations_, std::move(setOp),
+                           std::move(waitOp));
   }
 
   syncIndex_++;

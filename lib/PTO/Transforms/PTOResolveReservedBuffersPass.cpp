@@ -206,6 +206,76 @@ static void assignMissingFlagBases(const SmallVector<PipeInitInfo> &inits,
   }
 }
 
+static Value createResolvedBaseConstant(OpBuilder &builder, Operation *op,
+                                        IntegerAttr baseAttr) {
+  builder.setInsertionPoint(op);
+  return builder.create<arith::ConstantIntOp>(op->getLoc(), baseAttr.getInt(),
+                                              32);
+}
+
+static LogicalResult materializeReserveBufferBases(
+    func::FuncOp funcOp, OpBuilder &builder,
+    SmallVectorImpl<Operation *> &eraseOps) {
+  SmallVector<ReserveBufferOp> reserveOps;
+  funcOp.walk([&](ReserveBufferOp reserveOp) { reserveOps.push_back(reserveOp); });
+  for (ReserveBufferOp reserveOp : reserveOps) {
+    auto baseAttr = reserveOp.getBaseAttr();
+    if (!baseAttr) {
+      return reserveOp.emitOpError(
+          "expects 'base' to be resolved before address materialization");
+    }
+
+    Value constantBase =
+        createResolvedBaseConstant(builder, reserveOp.getOperation(), baseAttr);
+    reserveOp.getAddr().replaceAllUsesWith(constantBase);
+    eraseOps.push_back(reserveOp.getOperation());
+  }
+  return success();
+}
+
+static FailureOr<IntegerAttr>
+getImportedReserveBaseAttr(ImportReservedBufferOp importOp) {
+  auto peerFunc = SymbolTable::lookupNearestSymbolFrom<func::FuncOp>(
+      importOp.getOperation(), importOp.getPeerFuncAttr());
+  if (!peerFunc) {
+    return importOp.emitOpError(
+        "expects 'peer_func' to reference an existing func.func");
+  }
+
+  auto peerReserve = findReserveBufferByName(peerFunc, importOp.getName());
+  if (!peerReserve)
+    return importOp.emitOpError(
+        "expects matching peer reserve_buffer to exist");
+
+  auto baseAttr = peerReserve.getBaseAttr();
+  if (!baseAttr) {
+    return importOp.emitOpError(
+        "expects peer reserve_buffer base to be resolved");
+  }
+  return baseAttr;
+}
+
+static LogicalResult materializeImportedReserveBases(
+    func::FuncOp funcOp, OpBuilder &builder,
+    SmallVectorImpl<Operation *> &eraseOps) {
+  SmallVector<ImportReservedBufferOp> importOps;
+  funcOp.walk([&](ImportReservedBufferOp importOp) {
+    importOps.push_back(importOp);
+  });
+  for (ImportReservedBufferOp importOp : importOps) {
+    auto baseAttrOr = getImportedReserveBaseAttr(importOp);
+    if (failed(baseAttrOr))
+      return failure();
+
+    Value constantBase = createResolvedBaseConstant(builder,
+                                                   importOp.getOperation(),
+                                                   *baseAttrOr);
+    importOp.getAddr().replaceAllUsesWith(constantBase);
+    eraseOps.push_back(importOp.getOperation());
+  }
+  return success();
+}
+
 struct PTOResolveReservedBuffersPass
     : public mlir::pto::impl::PTOResolveReservedBuffersBase<
           PTOResolveReservedBuffersPass> {
@@ -250,58 +320,9 @@ struct PTOResolveReservedBuffersPass
 
     for (func::FuncOp funcOp : moduleOp.getOps<func::FuncOp>()) {
       OpBuilder builder(funcOp.getContext());
-
-      SmallVector<ReserveBufferOp> reserveOps;
-      funcOp.walk(
-          [&](ReserveBufferOp reserveOp) { reserveOps.push_back(reserveOp); });
-      for (ReserveBufferOp reserveOp : reserveOps) {
-        auto baseAttr = reserveOp.getBaseAttr();
-        if (!baseAttr) {
-          return reserveOp.emitOpError(
-              "expects 'base' to be resolved before address materialization");
-        }
-        // After PlanMemory, reserve_buffer is only a frontend marker. Replace
-        // its SSA result with the resolved constant base so later passes only
-        // see plain local addresses.
-        builder.setInsertionPoint(reserveOp);
-        Value cst = builder.create<arith::ConstantIntOp>(reserveOp.getLoc(),
-                                                         baseAttr.getInt(), 32);
-        reserveOp.getAddr().replaceAllUsesWith(cst);
-        eraseOps.push_back(reserveOp.getOperation());
-      }
-
-      SmallVector<ImportReservedBufferOp> importOps;
-      funcOp.walk([&](ImportReservedBufferOp importOp) {
-        importOps.push_back(importOp);
-      });
-      for (ImportReservedBufferOp importOp : importOps) {
-        auto peerFunc = SymbolTable::lookupNearestSymbolFrom<func::FuncOp>(
-            importOp.getOperation(), importOp.getPeerFuncAttr());
-        if (!peerFunc) {
-          return importOp.emitOpError(
-              "expects 'peer_func' to reference an existing func.func");
-        }
-
-        auto peerReserve =
-            findReserveBufferByName(peerFunc, importOp.getName());
-        if (!peerReserve)
-          return importOp.emitOpError(
-              "expects matching peer reserve_buffer to exist");
-
-        auto baseAttr = peerReserve.getBaseAttr();
-        if (!baseAttr) {
-          return importOp.emitOpError(
-              "expects peer reserve_buffer base to be resolved");
-        }
-
-        // import_reserved_buffer never allocates memory locally. It is just a
-        // symbolic reference to the peer reserve_buffer and is materialized to
-        // the same resolved constant base here.
-        builder.setInsertionPoint(importOp);
-        Value cst = builder.create<arith::ConstantIntOp>(importOp.getLoc(),
-                                                         baseAttr.getInt(), 32);
-        importOp.getAddr().replaceAllUsesWith(cst);
-        eraseOps.push_back(importOp.getOperation());
+      if (failed(materializeReserveBufferBases(funcOp, builder, eraseOps)) ||
+          failed(materializeImportedReserveBases(funcOp, builder, eraseOps))) {
+        return failure();
       }
     }
 

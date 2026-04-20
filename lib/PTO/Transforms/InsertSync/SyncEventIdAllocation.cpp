@@ -719,41 +719,60 @@ bool SyncEventIdAllocation::TryWidenByOtherSync(const SyncOperation *sync) {
   }
   return true;
 }
+
+static int getFindWidenSyncEndIndex(
+    const SyncOperation *setSync,
+    const SmallVector<std::unique_ptr<InstanceElement>> &syncIR) {
+  if (!setSync->GetForEndIndex().has_value())
+    return 0;
+  auto *forCompound = dyn_cast<LoopInstanceElement>(
+      syncIR[setSync->GetForEndIndex().value()].get());
+  return static_cast<int>(forCompound->beginId);
+}
+
+static bool advancePastLoopEndIfNeeded(const InstanceElement *element,
+                                       int &loopId) {
+  auto *loopInst = dyn_cast<LoopInstanceElement>(element);
+  if (!loopInst)
+    return false;
+  if (loopInst->getLoopKind() == KindOfLoop::LOOP_BEGIN)
+    return true;
+  if (loopInst->getLoopKind() == KindOfLoop::LOOP_END)
+    loopId = static_cast<int>(loopInst->beginId);
+  return false;
+}
+
+static bool isCompatibleWidenSet(const SyncOperation *candidate,
+                                 const SyncOperation *setSync) {
+  bool isSameTypeSync = candidate != setSync &&
+                        candidate->GetDstPipe() == setSync->GetDstPipe() &&
+                        candidate->GetSrcPipe() == setSync->GetSrcPipe();
+  bool sameLoopScope =
+      candidate->GetForEndIndex() == setSync->GetForEndIndex();
+  return isSameTypeSync && sameLoopScope && !candidate->uselessSync &&
+         !candidate->eventIds.empty() &&
+         hasSameDepRootsForWiden(candidate, setSync);
+}
+
+static bool canForwardReuseSync(const SyncOperation *setSync,
+                                const SyncOperation *setSame,
+                                const SyncOperation *waitSame) {
+  return setSync->GetSyncIRIndex() > setSame->GetSyncIRIndex() &&
+         setSync->GetSyncIRIndex() <= waitSame->GetSyncIRIndex();
+}
  
 SyncOperation *
 SyncEventIdAllocation::FindWidenSync(const SyncOperation *setSync,
                                      const SyncOperation *waitSync) {
-  // Complex logic to find a compatible sync to widen (reuse ID)
-  // Iterating backwards from setSync position
-  int endIndex = 0;
-  if (setSync->GetForEndIndex().has_value()) {
-     auto *forCompound = dyn_cast<LoopInstanceElement>(syncIR_[setSync->GetForEndIndex().value()].get());
-     endIndex = static_cast<int>(forCompound->beginId);
-  }
+  int endIndex = getFindWidenSyncEndIndex(setSync, syncIR_);
  
   for (int loopId = static_cast<int>(setSync->GetSyncIRIndex()); loopId >= endIndex; loopId--) {
     auto *tmpIr = syncIR_[loopId].get();
-    
-    // Stop at control flow boundaries logic...
-    if (auto *loopInst = dyn_cast<LoopInstanceElement>(tmpIr)) {
-       if (loopInst->getLoopKind() == KindOfLoop::LOOP_BEGIN) break;
-       if (loopInst->getLoopKind() == KindOfLoop::LOOP_END) loopId = static_cast<int>(loopInst->beginId);
-    }
-    // ... Branch checks ...
+    if (advancePastLoopEndIfNeeded(tmpIr, loopId))
+      break;
  
     for (auto &setSame : tmpIr->pipeAfter) {
-        // ... Logic to check compatibility (Type, Pipe, Direction) ...
-        bool isSameTypeSync = (setSame != setSync) &&
-                              (setSame->GetDstPipe() == setSync->GetDstPipe()) &&
-                              (setSame->GetSrcPipe() == setSync->GetSrcPipe());
-
-        bool sameLoopScope =
-            (setSame->GetForEndIndex() == setSync->GetForEndIndex());
-        if (!isSameTypeSync || !sameLoopScope || setSame->uselessSync ||
-            setSame->eventIds.empty()) {
-          continue;
-        }
-        if (!hasSameDepRootsForWiden(setSame, setSync)) {
+        if (!isCompatibleWidenSet(setSame, setSync)) {
           continue;
         }
  
@@ -762,15 +781,8 @@ SyncEventIdAllocation::FindWidenSync(const SyncOperation *setSync,
         if (waitSame->GetForEndIndex() != waitSync->GetForEndIndex()) {
           continue;
         }
- 
-        // Check coverage/overlap
-        bool canForwardReuse =
-            (setSync->GetSyncIRIndex() > setSame->GetSyncIRIndex() &&
-             setSync->GetSyncIRIndex() <= waitSame->GetSyncIRIndex());
-        
-        // ... Backward reuse logic ...
- 
-        if (canForwardReuse /* || canBackwardReuse */) {
+
+        if (canForwardReuseSync(setSync, setSame, waitSame)) {
             return setSame; // Simplification: return first valid match
         }
     }

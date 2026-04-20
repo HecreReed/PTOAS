@@ -6,11 +6,6 @@
 // INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
 // See LICENSE in the root of the software repository for the full text of the License.
 
-// Please refer to the License for details. You may not use this file except in compliance with the License.
-// THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
-// INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
-// See LICENSE in the root of the software repository for the full text of the License.
-
 #include "PTO/Transforms/InsertSync/RemoveRedundantSync.h"
 #include "llvm/ADT/STLExtras.h"
 #include <algorithm>
@@ -50,82 +45,70 @@ bool hasSameDepRoots(const SyncOperation *lhs, const SyncOperation *rhs) {
   return lhsRoots == rhsRoots;
 }
 
+using SyncPair = std::pair<SyncOperation *, SyncOperation *>;
+
+static std::vector<SyncPair> collectSyncPairs(const SyncOperations &syncOperations) {
+  std::vector<SyncPair> syncOps;
+  for (const auto &syncPair : syncOperations) {
+    if (syncPair.size() == 2)
+      syncOps.emplace_back(syncPair[0].get(), syncPair[1].get());
+  }
+  return syncOps;
+}
+
+static bool shouldSortBefore(const SyncPair &lhs, const SyncPair &rhs) {
+  auto *syncOp1 = lhs.first;
+  auto *syncOp2 = rhs.first;
+
+  bool hasLoop1 = syncOp1->GetForEndIndex().has_value();
+  bool hasLoop2 = syncOp2->GetForEndIndex().has_value();
+  if (hasLoop1 && hasLoop2) {
+    if (syncOp1->GetForEndIndex().value() != syncOp2->GetForEndIndex().value())
+      return syncOp1->GetForEndIndex().value() >
+             syncOp2->GetForEndIndex().value();
+    return syncOp1->GetSyncIndex() > syncOp2->GetSyncIndex();
+  }
+  if (hasLoop1 || hasLoop2)
+    return hasLoop1 > hasLoop2;
+  return syncOp1->GetSyncIndex() > syncOp2->GetSyncIndex();
+}
+
+static bool canRemoveSyncPair(SyncOperation *setFlag, SyncOperation *waitFlag) {
+  if (setFlag->eventIdNum != 1 || waitFlag->eventIdNum != 1)
+    return false;
+  if (setFlag->isCompensation || waitFlag->isCompensation)
+    return false;
+  return hasSameDepRoots(setFlag, waitFlag);
+}
+
+static void eraseSyncFromIR(SyncIRs &syncIR, SyncOperation *sync, bool eraseAfter) {
+  auto &syncList = eraseAfter ? syncIR[sync->GetSyncIRIndex()]->pipeAfter
+                              : syncIR[sync->GetSyncIRIndex()]->pipeBefore;
+  auto it = std::find(syncList.begin(), syncList.end(), sync);
+  if (it != syncList.end())
+    syncList.erase(it);
+}
+
+static void markSyncPairUseless(SyncIRs &syncIR, SyncOperation *setFlag,
+                                SyncOperation *waitFlag) {
+  eraseSyncFromIR(syncIR, setFlag, /*eraseAfter=*/true);
+  eraseSyncFromIR(syncIR, waitFlag, /*eraseAfter=*/false);
+  setFlag->uselessSync = true;
+  waitFlag->uselessSync = true;
+}
+
 } // namespace
  
 void RemoveRedundantSync::Run() {
-  // 1. 收集所有成对的同步指令 (Set/Wait)
-  std::vector<std::pair<SyncOperation *, SyncOperation *>> syncOps;
-  for (auto &syncPair : syncOperations_) {
-    // 只有成对的 (Set, Wait) 才能进行此类消除，Barrier 不适用
-    if (syncPair.size() == 2) {
-      auto *setFlag = syncPair[0].get();
-      auto *waitFlag = syncPair[1].get();
-      syncOps.push_back(std::make_pair(setFlag, waitFlag));
-    }
-  }
- 
-  // 2. 排序：优先处理范围较小的或者是 Loop 内部的，
-  // 这样如果它们被保留，可以用来消除外部更大的。
-  // (这里采用简单且稳定的排序策略，确保处理顺序可预测)
-  std::sort(syncOps.begin(), syncOps.end(),
-       [](std::pair<SyncOperation *, SyncOperation *> syncPair1,
-          std::pair<SyncOperation *, SyncOperation *> syncPair2) {
-         auto *syncOp1 = syncPair1.first;
-         auto *syncOp2 = syncPair2.first;
-         
-         bool hasLoop1 = syncOp1->GetForEndIndex().has_value();
-         bool hasLoop2 = syncOp2->GetForEndIndex().has_value();
- 
-         if (hasLoop1 && hasLoop2) {
-           if (syncOp1->GetForEndIndex().value() != syncOp2->GetForEndIndex().value()) {
-             return syncOp1->GetForEndIndex().value() > syncOp2->GetForEndIndex().value();
-           } else {
-             return syncOp1->GetSyncIndex() > syncOp2->GetSyncIndex();
-           }
-         }
-         if (hasLoop1 || hasLoop2) {
-           return hasLoop1 > hasLoop2;
-         }
-         return syncOp1->GetSyncIndex() > syncOp2->GetSyncIndex();
-       });
- 
-  // 3. 逐个检查并移除冗余
-  for (auto [setFlag, waitFlag] : syncOps) {
-    // Conservative mode:
-    // 1) keep multi-buffer and compensation syncs
-    // 2) only prune syncs that carry concrete dependency signatures
-    if (setFlag->eventIdNum != 1 || waitFlag->eventIdNum != 1) {
-      continue;
-    }
-    if (setFlag->isCompensation || waitFlag->isCompensation) {
-      continue;
-    }
-    if (!hasSameDepRoots(setFlag, waitFlag)) {
-      continue;
-    }
+  std::vector<SyncPair> syncOps = collectSyncPairs(syncOperations_);
+  std::sort(syncOps.begin(), syncOps.end(), shouldSortBefore);
 
-    bool useless = CheckAllSync(setFlag, waitFlag);
-    if (useless) {
-      // 标记为冗余 (虽然这里是物理移除)
-      
-      // 从 SyncIR 中移除 Set
-      auto &pipeAfter = syncIR_[setFlag->GetSyncIRIndex()]->pipeAfter;
-      auto it0 = std::find(pipeAfter.begin(), pipeAfter.end(), setFlag);
-      if (it0 != pipeAfter.end()) {
-        pipeAfter.erase(it0);
-      }
- 
-      // 从 SyncIR 中移除 Wait
-      auto &pipeBefore = syncIR_[waitFlag->GetSyncIRIndex()]->pipeBefore;
-      auto it1 = std::find(pipeBefore.begin(), pipeBefore.end(), waitFlag);
-      if (it1 != pipeBefore.end()) {
-        pipeBefore.erase(it1);
-      }
-      
-      // 标记对象本身，避免 EventID 分配时分配给它
-      setFlag->uselessSync = true;
-      waitFlag->uselessSync = true;
-    }
+  for (auto [setFlag, waitFlag] : syncOps) {
+    if (!canRemoveSyncPair(setFlag, waitFlag))
+      continue;
+    if (!CheckAllSync(setFlag, waitFlag))
+      continue;
+    markSyncPairUseless(syncIR_, setFlag, waitFlag);
   }
 }
  

@@ -331,6 +331,48 @@ static void encodeEventImmediates(mlir::Operation &op, Buffer &out,
   imms.append({srcValue, dstValue, eventValue});
 }
 
+static void appendListModeSizes(Buffer &out,
+                                llvm::SmallVectorImpl<uint64_t> &imms,
+                                size_t first, size_t second) {
+  uint8_t listMode = 0;
+  out.appendU8(listMode);
+  writeULEB128(first, out.bytes);
+  writeULEB128(second, out.bytes);
+  imms.append({listMode, uint64_t(first), uint64_t(second)});
+}
+
+static void encodeMakeTensorViewImmediates(
+    mlir::Operation &op, Buffer &out, llvm::SmallVectorImpl<uint64_t> &imms) {
+  auto mtv = llvm::dyn_cast<mlir::pto::MakeTensorViewOp>(&op);
+  if (!mtv)
+    throw std::runtime_error(
+        "imm_kind=make_tensor_view but op is not pto.make_tensor_view");
+  appendListModeSizes(out, imms, mtv.getShape().size(), mtv.getStrides().size());
+}
+
+static void encodePartitionViewImmediates(
+    mlir::Operation &op, Buffer &out, llvm::SmallVectorImpl<uint64_t> &imms) {
+  auto pv = llvm::dyn_cast<mlir::pto::PartitionViewOp>(&op);
+  if (!pv)
+    throw std::runtime_error(
+        "imm_kind=partition_view but op is not pto.partition_view");
+  appendListModeSizes(out, imms, pv.getOffsets().size(), pv.getSizes().size());
+}
+
+static void encodeAllocTileImmediates(
+    mlir::Operation &op, Buffer &out, llvm::SmallVectorImpl<uint64_t> &imms) {
+  auto at = llvm::dyn_cast<mlir::pto::AllocTileOp>(&op);
+  if (!at)
+    throw std::runtime_error("imm_kind=alloc_tile but op is not pto.alloc_tile");
+  uint8_t mask = 0;
+  if (at.getValidRow())
+    mask |= 0x1;
+  if (at.getValidCol())
+    mask |= 0x2;
+  out.appendU8(mask);
+  imms.push_back(mask);
+}
+
 uint64_t Encoder::encodeConstId(mlir::arith::ConstantOp cst) {
   mlir::Attribute attr = cst.getValue();
   uint64_t typeId = internType(file, cst.getType());
@@ -377,43 +419,15 @@ void Encoder::encodeKnownOpImmediates(
     return;
   }
   case 0x06: {
-    auto mtv = llvm::dyn_cast<mlir::pto::MakeTensorViewOp>(&op);
-    if (!mtv)
-      throw std::runtime_error(
-          "imm_kind=make_tensor_view but op is not pto.make_tensor_view");
-    uint8_t listMode = 0;
-    out.appendU8(listMode);
-    writeULEB128(mtv.getShape().size(), out.bytes);
-    writeULEB128(mtv.getStrides().size(), out.bytes);
-    imms.append({listMode, uint64_t(mtv.getShape().size()),
-                 uint64_t(mtv.getStrides().size())});
+    encodeMakeTensorViewImmediates(op, out, imms);
     return;
   }
   case 0x07: {
-    auto pv = llvm::dyn_cast<mlir::pto::PartitionViewOp>(&op);
-    if (!pv)
-      throw std::runtime_error(
-          "imm_kind=partition_view but op is not pto.partition_view");
-    uint8_t listMode = 0;
-    out.appendU8(listMode);
-    writeULEB128(pv.getOffsets().size(), out.bytes);
-    writeULEB128(pv.getSizes().size(), out.bytes);
-    imms.append({listMode, uint64_t(pv.getOffsets().size()),
-                 uint64_t(pv.getSizes().size())});
+    encodePartitionViewImmediates(op, out, imms);
     return;
   }
   case 0x08: {
-    auto at = llvm::dyn_cast<mlir::pto::AllocTileOp>(&op);
-    if (!at)
-      throw std::runtime_error(
-          "imm_kind=alloc_tile but op is not pto.alloc_tile");
-    uint8_t mask = 0;
-    if (at.getValidRow())
-      mask |= 0x1;
-    if (at.getValidCol())
-      mask |= 0x2;
-    out.appendU8(mask);
-    imms.push_back(mask);
+    encodeAllocTileImmediates(op, out, imms);
     return;
   }
   default:
@@ -556,6 +570,47 @@ void Encoder::encodeOp(mlir::Operation& op, Buffer& out) {
   encodeGenericOp(op, out);
 }
 
+static llvm::SmallVector<mlir::func::FuncOp, 8>
+collectModuleFuncs(mlir::ModuleOp module) {
+  llvm::SmallVector<mlir::func::FuncOp, 8> funcs;
+  for (auto func : module.getOps<mlir::func::FuncOp>())
+    funcs.push_back(func);
+  return funcs;
+}
+
+static void encodeModuleHeader(Encoder &enc, mlir::ModuleOp module, Buffer &out) {
+  out.appendU8(0);
+  out.appendU8(64);
+  uint64_t modAttrId = internAttr(enc.file, module->getAttrDictionary());
+  writeULEB128(modAttrId, out.bytes);
+  writeULEB128(0, out.bytes);
+}
+
+static void encodeFunctionDecls(Encoder &enc, Buffer &out,
+                                llvm::ArrayRef<mlir::func::FuncOp> funcs) {
+  writeULEB128(funcs.size(), out.bytes);
+  for (auto func : funcs) {
+    auto nameSid = enc.file.strings.intern(func.getName().str());
+    auto funcTypeId = internType(enc.file, func.getFunctionType());
+    uint8_t flags = 0;
+    auto funcAttrId = internAttr(enc.file, func->getAttrDictionary());
+    writeULEB128(nameSid, out.bytes);
+    writeULEB128(funcTypeId, out.bytes);
+    out.appendU8(flags);
+    writeULEB128(funcAttrId, out.bytes);
+  }
+}
+
+static void encodeFunctionBodies(Encoder &enc, Buffer &out,
+                                 llvm::ArrayRef<mlir::func::FuncOp> funcs) {
+  for (size_t i = 0; i < funcs.size(); ++i) {
+    auto func = funcs[i];
+    enc.resetForFunction(i);
+    enc.encodeRegion(func.getBody(), out);
+    enc.finalizeValueNamesForFunction();
+  }
+}
+
 PTOBCFile encodeFromMLIRModule(mlir::ModuleOp module) {
   Encoder enc;
   enc.emitDebugInfo = (std::getenv("PTOBC_EMIT_DEBUGINFO") != nullptr);
@@ -565,54 +620,11 @@ PTOBCFile encodeFromMLIRModule(mlir::ModuleOp module) {
   enc.file.strings.intern("func.func");
   enc.file.strings.intern("func.return");
 
-  // MODULE encoding
   Buffer m;
-  // profile_id=0 (unspecified), index_width=64
-  m.appendU8(0);
-  m.appendU8(64);
-
-  // module_attr_id
-  uint64_t modAttrId = internAttr(enc.file, module->getAttrDictionary());
-  writeULEB128(modAttrId, m.bytes);
-
-  // globals count
-  writeULEB128(0, m.bytes);
-
-  // function decls (top-level order)
-  llvm::SmallVector<mlir::func::FuncOp, 8> funcs;
-  for (auto f : module.getOps<mlir::func::FuncOp>()) {
-    funcs.push_back(f);
-  }
-
-  writeULEB128(funcs.size(), m.bytes);
-
-  // encode decls
-  for (auto f : funcs) {
-    auto nameSid = enc.file.strings.intern(f.getName().str());
-    // func type as opaque asm in type table
-    auto funcTypeId = internType(enc.file, f.getFunctionType());
-    // flags: bit0 import? (0)
-    uint8_t flags = 0;
-    auto funcAttrId = internAttr(enc.file, f->getAttrDictionary());
-
-    writeULEB128(nameSid, m.bytes);
-    writeULEB128(funcTypeId, m.bytes);
-    m.appendU8(flags);
-    writeULEB128(funcAttrId, m.bytes);
-  }
-
-  // bodies: for each function, encode its body region
-  for (size_t i = 0; i < funcs.size(); ++i) {
-    auto f = funcs[i];
-    enc.resetForFunction(i);
-
-    // function body is region #0
-    enc.encodeRegion(f.getBody(), m);
-
-    // DebugInfo: deterministic value names for this function.
-    enc.finalizeValueNamesForFunction();
-  }
-
+  auto funcs = collectModuleFuncs(module);
+  encodeModuleHeader(enc, module, m);
+  encodeFunctionDecls(enc, m, funcs);
+  encodeFunctionBodies(enc, m, funcs);
   enc.file.moduleBytes = std::move(m.bytes);
   return enc.file;
 }

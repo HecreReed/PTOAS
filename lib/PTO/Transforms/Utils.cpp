@@ -114,70 +114,62 @@ std::optional<std::pair<Value, Value>> getOperationAliasInfo(Operation *op) {
   return std::nullopt;
 }
 
-Value tracebackImpl(Value memrefVal) {
-  // case 1: v is the iter_arg of a scf.for
-  if (auto arg = dyn_cast<BlockArgument>(memrefVal)) {
-    if (auto forOp =
-            dyn_cast<scf::ForOp>(arg.getParentRegion()->getParentOp())) {
-      if (arg.getArgNumber() > 0 &&
-          forOp.getInitArgs().size() > arg.getArgNumber() - 1) {
-        return forOp.getInitArgs()[arg.getArgNumber() - 1];
-      }
-    }
+static Value tracebackLoopIterArg(Value memrefVal) {
+  auto arg = dyn_cast<BlockArgument>(memrefVal);
+  if (!arg)
+    return {};
+  auto forOp = dyn_cast<scf::ForOp>(arg.getParentRegion()->getParentOp());
+  if (!forOp || arg.getArgNumber() == 0 ||
+      forOp.getInitArgs().size() <= arg.getArgNumber() - 1) {
+    return {};
   }
+  return forOp.getInitArgs()[arg.getArgNumber() - 1];
+}
 
-  Value result;
-  Operation *def = memrefVal.getDefiningOp();
-  if (!def) {
-    // failed to trace back
-    return result;
-  }
-
-  // case 2: v is the result of cast-like ops
-  //  - memref.cast
-  //  - memref.collapse_shape
-  //  - memref.expand_shape
-  //  - memref.memory_space_cast
-  //  - memref.reinterpret_cast
-  //  - memref.reshape
-  //  - memref.transpose
+static Value tracebackCastLikeOp(Operation *def, Value memrefVal) {
   if (auto op = dyn_cast<memref::CastOp>(def)) {
-    result = op.getSource();
-  } else if (auto op = dyn_cast<memref::CollapseShapeOp>(def)) {
-    result = op.getSrc();
-  } else if (auto op = dyn_cast<memref::ExpandShapeOp>(def)) {
-    result = op.getSrc();
-  } else if (auto op = dyn_cast<memref::MemorySpaceCastOp>(def)) {
-    result = op.getSource();
-  } else if (auto op = dyn_cast<memref::ReinterpretCastOp>(def)) {
-    result = op.getSource();
-  } else if (auto op = dyn_cast<memref::ReshapeOp>(def)) {
-    result = op.getSource();
-  } else if (auto op = dyn_cast<memref::TransposeOp>(def)) {
-    result = op.getIn();
-  } else if (auto op = dyn_cast<UnrealizedConversionCastOp>(def)) {
-    result = op.getOperand(cast<OpResult>(memrefVal).getResultNumber());
-  } else if (auto op = dyn_cast<scf::ForOp>(def)) {
-    // trace back memref.alloc support scf.for
-    result = op.getInitArgs()[cast<OpResult>(memrefVal).getResultNumber()];
-  } else if (auto op = dyn_cast<pto::BindTileOp>(def)) {
-    result = op.getSource();
+    return op.getSource();
   }
+  if (auto op = dyn_cast<memref::CollapseShapeOp>(def))
+    return op.getSrc();
+  if (auto op = dyn_cast<memref::ExpandShapeOp>(def))
+    return op.getSrc();
+  if (auto op = dyn_cast<memref::MemorySpaceCastOp>(def))
+    return op.getSource();
+  if (auto op = dyn_cast<memref::ReinterpretCastOp>(def))
+    return op.getSource();
+  if (auto op = dyn_cast<memref::ReshapeOp>(def))
+    return op.getSource();
+  if (auto op = dyn_cast<memref::TransposeOp>(def))
+    return op.getIn();
+  if (auto op = dyn_cast<UnrealizedConversionCastOp>(def))
+    return op.getOperand(cast<OpResult>(memrefVal).getResultNumber());
+  if (auto op = dyn_cast<scf::ForOp>(def))
+    return op.getInitArgs()[cast<OpResult>(memrefVal).getResultNumber()];
+  if (auto op = dyn_cast<pto::BindTileOp>(def))
+    return op.getSource();
+  return {};
+}
 
-  if (result) {
-    return result;
-  }
-
-  // case 3: v is the result of the view-like ops
-  //  - memref::view
-  //  - memref::subview
+static Value tracebackViewLikeOp(Operation *def) {
   if (auto op = dyn_cast<memref::ViewOp>(def)) {
-    result = op.getViewSource();
-  } else if (auto op = dyn_cast<memref::SubViewOp>(def)) {
-    result = op.getViewSource();
+    return op.getViewSource();
   }
+  if (auto op = dyn_cast<memref::SubViewOp>(def))
+    return op.getViewSource();
+  return {};
+}
 
-  return result;
+Value tracebackImpl(Value memrefVal) {
+  if (Value loopInitArg = tracebackLoopIterArg(memrefVal))
+    return loopInitArg;
+
+  Operation *def = memrefVal.getDefiningOp();
+  if (!def)
+    return {};
+  if (Value castLikeSource = tracebackCastLikeOp(def, memrefVal))
+    return castLikeSource;
+  return tracebackViewLikeOp(def);
 }
 
 bool isAllocLikeOp(Operation *op) {

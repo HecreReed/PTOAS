@@ -126,14 +126,10 @@ struct DebugInfo {
   std::vector<DbgSnippetEntry> snippets;
 };
 
-static DebugInfo parseDebugInfoSection(const std::vector<uint8_t>& data) {
-  Reader r{data.data(), data.data() + data.size()};
-  DebugInfo di;
-
-  // FileTable
-  uint64_t fcnt = r.readULEB();
-  di.files.reserve(fcnt);
-  for (uint64_t i = 0; i < fcnt; ++i) {
+static void parseDbgFiles(Reader &r, DebugInfo &di) {
+  uint64_t count = r.readULEB();
+  di.files.reserve(count);
+  for (uint64_t i = 0; i < count; ++i) {
     uint64_t psid = r.readULEB();
     uint8_t hk = r.readU8();
     std::vector<uint8_t> hb;
@@ -143,21 +139,23 @@ static DebugInfo parseDebugInfoSection(const std::vector<uint8_t>& data) {
     }
     di.files.push_back({psid, hk, std::move(hb)});
   }
+}
 
-  // ValueNames
-  uint64_t vcnt = r.readULEB();
-  di.valueNames.reserve(vcnt);
-  for (uint64_t i = 0; i < vcnt; ++i) {
+static void parseDbgValueNames(Reader &r, DebugInfo &di) {
+  uint64_t count = r.readULEB();
+  di.valueNames.reserve(count);
+  for (uint64_t i = 0; i < count; ++i) {
     uint64_t fid = r.readULEB();
     uint64_t vid = r.readULEB();
     uint64_t nsid = r.readULEB();
     di.valueNames.push_back({fid, vid, nsid});
   }
+}
 
-  // OpLocations
-  uint64_t lcnt = r.readULEB();
-  di.locations.reserve(lcnt);
-  for (uint64_t i = 0; i < lcnt; ++i) {
+static void parseDbgLocations(Reader &r, DebugInfo &di) {
+  uint64_t count = r.readULEB();
+  di.locations.reserve(count);
+  for (uint64_t i = 0; i < count; ++i) {
     uint64_t fid = r.readULEB();
     uint64_t opid = r.readULEB();
     uint64_t fileid = r.readULEB();
@@ -167,18 +165,28 @@ static DebugInfo parseDebugInfoSection(const std::vector<uint8_t>& data) {
     uint64_t ec = r.readULEB();
     di.locations.push_back({fid, opid, fileid, sl, sc, el, ec});
   }
+}
 
-  // OpSnippets
-  uint64_t scnt = r.readULEB();
-  di.snippets.reserve(scnt);
-  for (uint64_t i = 0; i < scnt; ++i) {
+static void parseDbgSnippets(Reader &r, DebugInfo &di) {
+  uint64_t count = r.readULEB();
+  di.snippets.reserve(count);
+  for (uint64_t i = 0; i < count; ++i) {
     uint64_t fid = r.readULEB();
     uint64_t opid = r.readULEB();
     uint64_t ssid = r.readULEB();
     di.snippets.push_back({fid, opid, ssid});
   }
+}
 
-  if (r.p != r.end) throw std::runtime_error("trailing bytes in DEBUGINFO");
+static DebugInfo parseDebugInfoSection(const std::vector<uint8_t>& data) {
+  Reader r{data.data(), data.data() + data.size()};
+  DebugInfo di;
+  parseDbgFiles(r, di);
+  parseDbgValueNames(r, di);
+  parseDbgLocations(r, di);
+  parseDbgSnippets(r, di);
+  if (r.p != r.end)
+    throw std::runtime_error("trailing bytes in DEBUGINFO");
   return di;
 }
 
@@ -793,6 +801,19 @@ struct DecodeTables {
   std::vector<AttrEntry> attrs;
 };
 
+struct RequiredSections {
+  uint8_t stringsId = 0;
+  uint8_t typesId = 0;
+  uint8_t attrsId = 0;
+  uint8_t constPoolId = 0;
+  uint8_t moduleId = 0;
+  std::vector<uint8_t> strings;
+  std::vector<uint8_t> types;
+  std::vector<uint8_t> attrs;
+  std::vector<uint8_t> constPool;
+  std::vector<uint8_t> module;
+};
+
 static DecodeTables buildDecodeTables(const RequiredSections &sections) {
   DecodeTables tables;
   parseStringsSection(sections.strings, tables.strings);
@@ -818,19 +839,6 @@ static void validatePTOBCFileHeader(llvm::ArrayRef<uint8_t> fileBytes) {
   if (payloadLen != fileBytes.size() - 14)
     throw std::runtime_error("payload_len mismatch");
 }
-
-struct RequiredSections {
-  uint8_t stringsId = 0;
-  uint8_t typesId = 0;
-  uint8_t attrsId = 0;
-  uint8_t constPoolId = 0;
-  uint8_t moduleId = 0;
-  std::vector<uint8_t> strings;
-  std::vector<uint8_t> types;
-  std::vector<uint8_t> attrs;
-  std::vector<uint8_t> constPool;
-  std::vector<uint8_t> module;
-};
 
 static RequiredSections readRequiredSections(Reader &r, bool dbg) {
   RequiredSections sections;

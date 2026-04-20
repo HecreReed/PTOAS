@@ -14,6 +14,8 @@
 #include "mlir/IR/AsmState.h"
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/FormatVariadic.h"
+#include <cstddef>
+#include <iterator>
 
 using namespace mlir;
 using namespace mlir::pto;
@@ -35,38 +37,26 @@ bool mlir::pto::isInsertSyncDebugEnabled(InsertSyncDebugLevel minLevel) {
 }
 
 static llvm::StringRef getPipelineName(PipelineType pipe) {
-  switch (pipe) {
-  case PipelineType::PIPE_S:
-    return "PIPE_S";
-  case PipelineType::PIPE_V:
-    return "PIPE_V";
-  case PipelineType::PIPE_M:
-    return "PIPE_M";
-  case PipelineType::PIPE_MTE1:
-    return "PIPE_MTE1";
-  case PipelineType::PIPE_MTE2:
-    return "PIPE_MTE2";
-  case PipelineType::PIPE_MTE3:
-    return "PIPE_MTE3";
-  case PipelineType::PIPE_ALL:
-    return "PIPE_ALL";
-  case PipelineType::PIPE_MTE4:
-    return "PIPE_MTE4";
-  case PipelineType::PIPE_MTE5:
-    return "PIPE_MTE5";
-  case PipelineType::PIPE_V2:
-    return "PIPE_V2";
-  case PipelineType::PIPE_FIX:
-    return "PIPE_FIX";
-  case PipelineType::VIRTUAL_PIPE_MTE2_L1A:
-    return "VIRTUAL_PIPE_MTE2_L1A";
-  case PipelineType::VIRTUAL_PIPE_MTE2_L1B:
-    return "VIRTUAL_PIPE_MTE2_L1B";
-  case PipelineType::PIPE_NUM:
-    return "PIPE_NUM";
-  case PipelineType::PIPE_UNASSIGNED:
-    return "PIPE_UNASSIGNED";
-  }
+  static constexpr llvm::StringLiteral kPipelineNames[] = {
+      "PIPE_S",
+      "PIPE_V",
+      "PIPE_M",
+      "PIPE_MTE1",
+      "PIPE_MTE2",
+      "PIPE_MTE3",
+      "PIPE_ALL",
+      "PIPE_MTE4",
+      "PIPE_MTE5",
+      "PIPE_V2",
+      "PIPE_FIX",
+      "VIRTUAL_PIPE_MTE2_L1A",
+      "VIRTUAL_PIPE_MTE2_L1B",
+      "PIPE_NUM",
+      "PIPE_UNASSIGNED",
+  };
+  size_t index = static_cast<size_t>(pipe);
+  if (index < std::size(kPipelineNames))
+    return kPipelineNames[index];
   return "PIPE_UNKNOWN";
 }
 
@@ -295,56 +285,77 @@ static void dumpSyncIR(llvm::raw_ostream &os, const SyncIRs &syncIR,
   }
 }
 
-void mlir::pto::dumpInsertSyncPhase(llvm::StringRef phase, const SyncIRs &syncIR,
-                                   const SyncOperations &syncOperations,
-                                   Operation *opForPrinting,
-                                   llvm::raw_ostream &os) {
-  const unsigned level = getInsertSyncDebugLevel();
-  if (level < static_cast<unsigned>(InsertSyncDebugLevel::Phase))
+struct SyncOperationSummary {
+  unsigned activeOps = 0;
+  unsigned setCnt = 0;
+  unsigned waitCnt = 0;
+  unsigned barrierCnt = 0;
+  unsigned blockSetCnt = 0;
+  unsigned blockWaitCnt = 0;
+  unsigned blockAllCnt = 0;
+};
+
+static void updateSyncOperationSummary(SyncOperationSummary &summary,
+                                       const SyncOperation &op) {
+  if (op.uselessSync)
     return;
 
-  unsigned activeOps = 0;
-  unsigned setCnt = 0, waitCnt = 0, barrierCnt = 0;
-  unsigned blockSetCnt = 0, blockWaitCnt = 0, blockAllCnt = 0;
+  ++summary.activeOps;
+  switch (op.GetType()) {
+  case SyncOperation::TYPE::SET_EVENT:
+    ++summary.setCnt;
+    return;
+  case SyncOperation::TYPE::WAIT_EVENT:
+    ++summary.waitCnt;
+    return;
+  case SyncOperation::TYPE::PIPE_BARRIER:
+  case SyncOperation::TYPE::PIPE_BARRIER_CUBE:
+  case SyncOperation::TYPE::PIPE_BARRIER_VECTOR:
+    ++summary.barrierCnt;
+    return;
+  case SyncOperation::TYPE::SYNC_BLOCK_SET:
+    ++summary.blockSetCnt;
+    return;
+  case SyncOperation::TYPE::SYNC_BLOCK_WAIT:
+    ++summary.blockWaitCnt;
+    return;
+  case SyncOperation::TYPE::SYNC_BLOCK_ALL:
+    ++summary.blockAllCnt;
+    return;
+  }
+}
+
+static SyncOperationSummary
+summarizeSyncOperations(const SyncOperations &syncOperations) {
+  SyncOperationSummary summary;
   for (const auto &group : syncOperations) {
     for (const auto &op : group) {
       if (!op)
         continue;
-      if (op->uselessSync)
-        continue;
-      activeOps++;
-      switch (op->GetType()) {
-      case SyncOperation::TYPE::SET_EVENT:
-        setCnt++;
-        break;
-      case SyncOperation::TYPE::WAIT_EVENT:
-        waitCnt++;
-        break;
-      case SyncOperation::TYPE::PIPE_BARRIER:
-      case SyncOperation::TYPE::PIPE_BARRIER_CUBE:
-      case SyncOperation::TYPE::PIPE_BARRIER_VECTOR:
-        barrierCnt++;
-        break;
-      case SyncOperation::TYPE::SYNC_BLOCK_SET:
-        blockSetCnt++;
-        break;
-      case SyncOperation::TYPE::SYNC_BLOCK_WAIT:
-        blockWaitCnt++;
-        break;
-      case SyncOperation::TYPE::SYNC_BLOCK_ALL:
-        blockAllCnt++;
-        break;
-      }
+      updateSyncOperationSummary(summary, *op);
     }
   }
+  return summary;
+}
+
+void mlir::pto::dumpInsertSyncPhase(llvm::StringRef phase, const SyncIRs &syncIR,
+                                    const SyncOperations &syncOperations,
+                                    Operation *opForPrinting,
+                                    llvm::raw_ostream &os) {
+  const unsigned level = getInsertSyncDebugLevel();
+  if (level < static_cast<unsigned>(InsertSyncDebugLevel::Phase))
+    return;
+
+  SyncOperationSummary summary = summarizeSyncOperations(syncOperations);
 
   os << "\n// === [PTOInsertSync Debug] " << phase << " === //\n";
   os << llvm::formatv("// nodes={0}, syncGroups={1}, activeOps={2} "
                       "(set={3}, wait={4}, barrier={5}, blockSet={6}, "
                       "blockWait={7}, blockAll={8})\n",
-                      syncIR.size(), syncOperations.size(), activeOps, setCnt,
-                      waitCnt, barrierCnt, blockSetCnt, blockWaitCnt,
-                      blockAllCnt);
+                      syncIR.size(), syncOperations.size(), summary.activeOps,
+                      summary.setCnt, summary.waitCnt, summary.barrierCnt,
+                      summary.blockSetCnt, summary.blockWaitCnt,
+                      summary.blockAllCnt);
 
   if (level < static_cast<unsigned>(InsertSyncDebugLevel::SyncIR)) {
     os << "// ========================================= //\n";

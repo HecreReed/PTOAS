@@ -55,72 +55,83 @@ static LogicalResult propagateAllocScope(Operation *op, Value value,
            << "Failed to infer/propagate memory scope for " << valueName;
   return success();
 }
+
+static bool hasMemRefResults(Operation *op) {
+  return llvm::any_of(op->getResults(), [](OpResult result) {
+    return isa<MemRefType>(result.getType());
+  });
+}
+
+static LogicalResult propagateYieldScope(MemScopeInferAndPropagateHelper &helper,
+                                         Value val,
+                                         const AddressSpaceAttr &memrefScope,
+                                         OpOperand &user) {
+  auto op = cast<scf::YieldOp>(user.getOwner());
+  Operation *parentOp = op->getParentOp();
+  auto yieldResult = op.getOperand(user.getOperandNumber());
+  auto parentResult = parentOp->getResult(user.getOperandNumber());
+  auto yieldType = dyn_cast<BaseMemRefType>(yieldResult.getType());
+  auto valType = dyn_cast<BaseMemRefType>(val.getType());
+  if (!yieldType || !valType ||
+      yieldType.getElementType() != valType.getElementType()) {
+    return success();
+  }
+  setBaseMemRefTypeScope(parentResult, memrefScope);
+  return helper.propagateMemScopeToUsers(parentResult);
+}
+
+static LogicalResult propagateForScope(MemScopeInferAndPropagateHelper &helper,
+                                       const AddressSpaceAttr &memrefScope,
+                                       OpOperand &user) {
+  auto op = cast<scf::ForOp>(user.getOwner());
+  auto result = op.getTiedLoopResult(&user);
+  auto bbArg = op.getTiedLoopRegionIterArg(&user);
+  setBaseMemRefTypeScope(result, memrefScope);
+  setBaseMemRefTypeScope(bbArg, memrefScope);
+  return success(helper.propagateMemScopeToUsers(bbArg).succeeded() &&
+                 helper.propagateMemScopeToUsers(result).succeeded());
+}
+
+static LogicalResult
+propagateViewLikeScope(MemScopeInferAndPropagateHelper &helper,
+                       const AddressSpaceAttr &memrefScope, Operation *op) {
+  auto result = op->getResult(0);
+  setBaseMemRefTypeScope(result, memrefScope);
+  return helper.propagateMemScopeToUsers(result);
+}
+
+static LogicalResult
+propagateMemScopeToUser(MemScopeInferAndPropagateHelper &helper, Value val,
+                        const AddressSpaceAttr &memrefScope, OpOperand &user) {
+  Operation *owner = user.getOwner();
+  return TypeSwitch<Operation *, LogicalResult>(owner)
+      .Case<scf::YieldOp>([&](scf::YieldOp) {
+        return propagateYieldScope(helper, val, memrefScope, user);
+      })
+      .Case<scf::ForOp>([&](scf::ForOp) {
+        return propagateForScope(helper, memrefScope, user);
+      })
+      .Case<memref::SubViewOp, memref::ViewOp, memref::ReinterpretCastOp,
+            memref::CastOp, memref::CollapseShapeOp, memref::ExpandShapeOp,
+            memref::ReshapeOp, memref::TransposeOp,
+            memref::ExtractStridedMetadataOp>([&](auto op) {
+        return propagateViewLikeScope(helper, memrefScope, op);
+      })
+      .Case<func::CallOp, gpu::LaunchFuncOp>([&](auto) { return success(); })
+      .Default([&](Operation *op) {
+        if (op->getNumResults() == 0 || !hasMemRefResults(op))
+          return success();
+        op->emitOpError("Unsupported user for root alloc op.");
+        return failure();
+      });
+}
 } // namespace
 
 LogicalResult
 MemScopeInferAndPropagateHelper::propagateMemScopeToUsers(Value val) {
   auto memrefScope = getPTOAddressSpaceAttr(val.getType());
-  auto propagateFn = [&](OpOperand &user) -> LogicalResult {
-    Operation *userDefiningOp = user.getOwner();
-    return TypeSwitch<Operation *, LogicalResult>(userDefiningOp)
-        .Case<scf::YieldOp>([&](scf::YieldOp op) {
-          Operation *parentOp = op->getParentOp();
-          auto yieldResult = op.getOperand(user.getOperandNumber());
-          auto parentResult = parentOp->getResult(user.getOperandNumber());
-          auto yieldType = dyn_cast<BaseMemRefType>(yieldResult.getType());
-          auto valType = dyn_cast<BaseMemRefType>(val.getType());
-          if (!yieldType || !valType ||
-              yieldType.getElementType() != valType.getElementType())
-            return success();
-          setBaseMemRefTypeScope(parentResult, memrefScope);
-          return propagateMemScopeToUsers(parentResult);
-        })
-        .Case<scf::ForOp>([&](scf::ForOp op) {
-          auto result = op.getTiedLoopResult(&user);
-          setBaseMemRefTypeScope(result, memrefScope);
-          auto bbArg = op.getTiedLoopRegionIterArg(&user);
-          setBaseMemRefTypeScope(bbArg, memrefScope);
-          return success(propagateMemScopeToUsers(bbArg).succeeded() &&
-                         propagateMemScopeToUsers(result).succeeded());
-        })
-        .Case<memref::SubViewOp, memref::ViewOp, memref::ReinterpretCastOp,
-              memref::CastOp, memref::CollapseShapeOp, memref::ExpandShapeOp,
-              memref::ReshapeOp, memref::TransposeOp,
-              memref::ExtractStridedMetadataOp>([&](auto op) {
-          auto result = op->getResult(0);
-          setBaseMemRefTypeScope(result, memrefScope);
-          return propagateMemScopeToUsers(result);
-        })
-        .Case<func::CallOp>([&](auto op) {
-          // For function calls, we cannot propagate the memory scope because
-          // we don't know the relationship between the inputs and results.
-          // But we don't need to report failure because we can run propagation
-          // for the results.
-          return success();
-        })
-        .Case<gpu::LaunchFuncOp>([&](auto op) {
-          // Same as above
-          return success();
-        })
-        .Default([&](Operation *op) {
-          // Don't need to update Ops that don't have results.
-          if (op->getNumResults() == 0) {
-            return success();
-          }
-          // Or results that are not memrefs.
-          if (llvm::none_of(op->getResults(), [&](OpResult result) {
-                return isa<MemRefType>(result.getType());
-              })) {
-            return success();
-          }
-          op->emitOpError("Unsupported user for root alloc op.");
-          return failure();
-        });
-  };
-  // Iterate over the users of the val.
   for (OpOperand &user : val.getUses()) {
-    // Update the type of the result that corresponds to the operand.
-    if (failed(propagateFn(user))) {
+    if (failed(propagateMemScopeToUser(*this, val, memrefScope, user))) {
       return failure();
     }
   }
@@ -463,35 +474,37 @@ static SmallVector<gpu::GPUFuncOp> collectGpuFunctions(Operation *rootOp) {
   return gpuFuncs;
 }
 
-static void inferDeviceFunctionOperandScopes(func::FuncOp func,
-                                             InferPTOMemScopePass &pass) {
+static LogicalResult inferDeviceFunctionOperandScopes(func::FuncOp func) {
+  bool failedInference = false;
   func->walk([&](mlir::pto::TMatmulOp op) {
     if (failed(pto::inferAndPropagateMemScopeForMatmulDps(op)))
-      pass.signalPassFailure();
+      failedInference = true;
   });
 
   func->walk([&](mlir::pto::TMatmulAccOp op) {
     if (failed(pto::inferAndPropagateMemScopeForMatmulAccDps(op)))
-      pass.signalPassFailure();
+      failedInference = true;
   });
 
   func->walk([&](mlir::pto::TMatmulBiasOp op) {
     if (failed(pto::inferAndPropagateMemScopeForMatmulBiasDps(op)))
-      pass.signalPassFailure();
+      failedInference = true;
   });
 
   func->walk([&](mlir::pto::TMovOp op) {
     if (failed(pto::inferAndPropagateMemScopeForMovDps(op)))
-      pass.signalPassFailure();
+      failedInference = true;
   });
+  return failure(failedInference);
 }
 
-static void inferRemainingAllocScopes(func::FuncOp func,
-                                      InferPTOMemScopePass &pass) {
+static LogicalResult inferRemainingAllocScopes(func::FuncOp func) {
+  bool failedInference = false;
   func->walk([&](memref::AllocOp op) {
     if (failed(pto::inferAndPropagateUbufMemScope(op)))
-      pass.signalPassFailure();
+      failedInference = true;
   });
+  return failure(failedInference);
 }
 
 void InferPTOMemScopePass::runOnOperation() {
@@ -506,14 +519,16 @@ void InferPTOMemScopePass::runOnOperation() {
 
   // Infer and propagate memory scope for device functions.
   for (auto func : deviceFuncList) {
-    inferDeviceFunctionOperandScopes(func, *this);
+    if (failed(inferDeviceFunctionOperandScopes(func)))
+      signalPassFailure();
 
     // Set device function arguments' memory scope to GM.
     if (failed(pto::inferAndPropagateMemScopeForFunc(func)))
       signalPassFailure();
 
     // Finally, set the remaining memory scope in the device kernel to UB.
-    inferRemainingAllocScopes(func, *this);
+    if (failed(inferRemainingAllocScopes(func)))
+      signalPassFailure();
   }
 
   for (auto func : deviceFuncList) {

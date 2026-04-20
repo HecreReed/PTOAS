@@ -39,71 +39,101 @@ bool TileBufConfigAttr::isDefault() const {
 }
 
 static int32_t getLayoutInt(Attribute a, int32_t def) {
-  if (auto bl = mlir::dyn_cast<BLayoutAttr>(a)) return static_cast<int32_t>(bl.getValue());
-  if (auto sl = mlir::dyn_cast<SLayoutAttr>(a)) return static_cast<int32_t>(sl.getValue());
-  if (auto pv = mlir::dyn_cast<PadValueAttr>(a)) return static_cast<int32_t>(pv.getValue());
-  if (auto cm = mlir::dyn_cast<CompactModeAttr>(a)) return static_cast<int32_t>(cm.getValue());
-  if (auto ia = mlir::dyn_cast<IntegerAttr>(a)) return static_cast<int32_t>(ia.getInt());
+  if (auto bl = mlir::dyn_cast<BLayoutAttr>(a))
+    return static_cast<int32_t>(bl.getValue());
+  if (auto sl = mlir::dyn_cast<SLayoutAttr>(a))
+    return static_cast<int32_t>(sl.getValue());
+  if (auto pv = mlir::dyn_cast<PadValueAttr>(a))
+    return static_cast<int32_t>(pv.getValue());
+  if (auto cm = mlir::dyn_cast<CompactModeAttr>(a))
+    return static_cast<int32_t>(cm.getValue());
+  if (auto ia = mlir::dyn_cast<IntegerAttr>(a))
+    return static_cast<int32_t>(ia.getInt());
   return def;
 }
 
-LogicalResult TileBufConfigAttr::verify(function_ref<InFlightDiagnostic()> emitError,
-                                       Attribute bLayout,
-                                       Attribute sLayout,
-                                       IntegerAttr sFractalSize,
-                                       Attribute pad,
-                                       Attribute compactMode) {
-  if (!bLayout || (!mlir::isa<BLayoutAttr>(bLayout) && !mlir::isa<IntegerAttr>(bLayout)))
-    return emitError() << "blayout must be BLayoutAttr or i32 integer attr", failure();
-  if (!sLayout || (!mlir::isa<SLayoutAttr>(sLayout) && !mlir::isa<IntegerAttr>(sLayout)))
-    return emitError() << "slayout must be SLayoutAttr or i32 integer attr", failure();
-  if (!pad || (!mlir::isa<PadValueAttr>(pad) && !mlir::isa<IntegerAttr>(pad)))
-    return emitError() << "pad must be PadValueAttr or i32 integer attr", failure();
-  if (!compactMode ||
-      (!mlir::isa<CompactModeAttr>(compactMode) &&
-       !mlir::isa<IntegerAttr>(compactMode)))
-    return emitError() << "compact_mode must be CompactModeAttr or i32 integer attr", failure();
+static LogicalResult verifyLayoutLikeAttr(
+    function_ref<InFlightDiagnostic()> emitError, Attribute attr, StringRef name,
+    function_ref<bool(Attribute)> predicate) {
+  if (attr && predicate(attr))
+    return success();
+  return emitError() << name << " must be the expected enum attr or i32 integer attr",
+         failure();
+}
+
+static LogicalResult verifyValueRange(function_ref<InFlightDiagnostic()> emitError,
+                                      int32_t value, int32_t min, int32_t max,
+                                      StringRef name) {
+  if (value >= min && value <= max)
+    return success();
+  return emitError() << "unsupported " << name << " value: " << value, failure();
+}
+
+LogicalResult TileBufConfigAttr::verify(
+    function_ref<InFlightDiagnostic()> emitError, Attribute bLayout,
+    Attribute sLayout, IntegerAttr sFractalSize, Attribute pad,
+    Attribute compactMode) {
+  auto isBLayoutLike = [](Attribute attr) {
+    return mlir::isa<BLayoutAttr, IntegerAttr>(attr);
+  };
+  auto isSLayoutLike = [](Attribute attr) {
+    return mlir::isa<SLayoutAttr, IntegerAttr>(attr);
+  };
+  auto isPadLike = [](Attribute attr) {
+    return mlir::isa<PadValueAttr, IntegerAttr>(attr);
+  };
+  auto isCompactLike = [](Attribute attr) {
+    return mlir::isa<CompactModeAttr, IntegerAttr>(attr);
+  };
+
+  if (failed(verifyLayoutLikeAttr(emitError, bLayout, "blayout", isBLayoutLike)) ||
+      failed(verifyLayoutLikeAttr(emitError, sLayout, "slayout", isSLayoutLike)) ||
+      failed(verifyLayoutLikeAttr(emitError, pad, "pad", isPadLike)) ||
+      failed(verifyLayoutLikeAttr(emitError, compactMode, "compact_mode",
+                                  isCompactLike))) {
+    return failure();
+  }
 
   if (!sFractalSize || !sFractalSize.getType().isInteger(32))
     return emitError() << "s_fractal_size must be i32", failure();
 
-  int32_t s = (int32_t)sFractalSize.getInt();
+  int32_t s = static_cast<int32_t>(sFractalSize.getInt());
   if (s != 32 && s != 16 && s != 512 && s != 1024)
     return emitError() << "unsupported s_fractal_size: " << s, failure();
 
-  int32_t blv = getLayoutInt(bLayout, -1);
-  if (blv != 0 && blv != 1)
-    return emitError() << "unsupported blayout value: " << blv, failure();
-
-  int32_t slv = getLayoutInt(sLayout, -1);
-  if (slv < 0 || slv > 2)
-    return emitError() << "unsupported slayout value: " << slv, failure();
-
-  int32_t pvv = getLayoutInt(pad, -1);
-  if (pvv < 0 || pvv > 3)
-    return emitError() << "unsupported pad value: " << pvv, failure();
-
-  int32_t cmv = getLayoutInt(compactMode, -1);
-  if (cmv < 0 || cmv > 2)
-    return emitError() << "unsupported compact_mode value: " << cmv, failure();
-
+  if (failed(verifyValueRange(emitError, getLayoutInt(bLayout, -1), 0, 1,
+                              "blayout")) ||
+      failed(verifyValueRange(emitError, getLayoutInt(sLayout, -1), 0, 2,
+                              "slayout")) ||
+      failed(verifyValueRange(emitError, getLayoutInt(pad, -1), 0, 3,
+                              "pad")) ||
+      failed(verifyValueRange(emitError, getLayoutInt(compactMode, -1), 0, 2,
+                              "compact_mode"))) {
+    return failure();
+  }
   return success();
 }
 
 // Helper: parse Attribute and convert to BLayoutAttr/SLayoutAttr/PadValueAttr
 static BLayoutAttr toBLayoutAttr(MLIRContext *ctx, Attribute a) {
-  if (auto bl = mlir::dyn_cast<BLayoutAttr>(a)) return bl;
-  if (auto ia = mlir::dyn_cast<IntegerAttr>(a)) return BLayoutAttr::get(ctx, static_cast<BLayout>(ia.getInt()));
+  if (auto bl = mlir::dyn_cast<BLayoutAttr>(a))
+    return bl;
+  if (auto ia = mlir::dyn_cast<IntegerAttr>(a))
+    return BLayoutAttr::get(ctx, static_cast<BLayout>(ia.getInt()));
   return {};
 }
 static SLayoutAttr toSLayoutAttr(MLIRContext *ctx, Attribute a) {
-  if (auto sl = mlir::dyn_cast<SLayoutAttr>(a)) return sl;
-  if (auto ia = mlir::dyn_cast<IntegerAttr>(a)) return SLayoutAttr::get(ctx, static_cast<SLayout>(ia.getInt()));
+  if (auto sl = mlir::dyn_cast<SLayoutAttr>(a))
+    return sl;
+  if (auto ia = mlir::dyn_cast<IntegerAttr>(a))
+    return SLayoutAttr::get(ctx, static_cast<SLayout>(ia.getInt()));
   return {};
 }
 static PadValueAttr toPadValueAttr(MLIRContext *ctx, Attribute a) {
-  if (auto pv = mlir::dyn_cast<PadValueAttr>(a)) return pv;
-  if (auto ia = mlir::dyn_cast<IntegerAttr>(a)) return PadValueAttr::get(ctx, static_cast<PadValue>(ia.getInt()));
+  if (auto pv = mlir::dyn_cast<PadValueAttr>(a))
+    return pv;
+  if (auto ia = mlir::dyn_cast<IntegerAttr>(a))
+    return PadValueAttr::get(ctx, static_cast<PadValue>(ia.getInt()));
   return {};
 }
 static CompactModeAttr toCompactModeAttr(MLIRContext *ctx, Attribute a) {
@@ -111,6 +141,50 @@ static CompactModeAttr toCompactModeAttr(MLIRContext *ctx, Attribute a) {
   if (auto ia = mlir::dyn_cast<IntegerAttr>(a))
     return CompactModeAttr::get(ctx, static_cast<CompactMode>(ia.getInt()));
   return {};
+}
+
+static ParseResult parseTileBufConfigField(AsmParser &p, MLIRContext *ctx,
+                                           StringRef key, BLayoutAttr &bl,
+                                           SLayoutAttr &sl, IntegerAttr &sz,
+                                           PadValueAttr &pv,
+                                           CompactModeAttr &compact) {
+  if (key == "blayout") {
+    Attribute a;
+    if (p.parseAttribute(a))
+      return failure();
+    bl = toBLayoutAttr(ctx, a);
+    return bl ? success() : failure();
+  }
+  if (key == "slayout") {
+    Attribute a;
+    if (p.parseAttribute(a))
+      return failure();
+    sl = toSLayoutAttr(ctx, a);
+    return sl ? success() : failure();
+  }
+  if (key == "s_fractal_size") {
+    int32_t v;
+    if (p.parseInteger(v))
+      return failure();
+    sz = IntegerAttr::get(IntegerType::get(ctx, 32), v);
+    return success();
+  }
+  if (key == "pad") {
+    Attribute a;
+    if (p.parseAttribute(a))
+      return failure();
+    pv = toPadValueAttr(ctx, a);
+    return pv ? success() : failure();
+  }
+  if (key == "compact") {
+    Attribute a;
+    if (p.parseAttribute(a))
+      return failure();
+    compact = toCompactModeAttr(ctx, a);
+    return compact ? success() : failure();
+  }
+  p.emitError(p.getCurrentLocation(), "unknown key in tile_buf_config: ") << key;
+  return failure();
 }
 
 Attribute TileBufConfigAttr::parse(AsmParser &p, Type) {
@@ -127,43 +201,19 @@ Attribute TileBufConfigAttr::parse(AsmParser &p, Type) {
   if (succeeded(p.parseOptionalGreater()))
     return TileBufConfigAttr::get(ctx, bl, sl, sz, pv, compact);
 
-  for (;;) {
+  bool done = false;
+  while (!done) {
     StringRef key;
-    if (p.parseKeyword(&key)) return {};
-    if (p.parseEqual()) return {};
-
-    if (key == "blayout") {
-      Attribute a;
-      if (p.parseAttribute(a)) return {};
-      bl = toBLayoutAttr(ctx, a);
-      if (!bl) return {};
-    } else if (key == "slayout") {
-      Attribute a;
-      if (p.parseAttribute(a)) return {};
-      sl = toSLayoutAttr(ctx, a);
-      if (!sl) return {};
-    } else if (key == "s_fractal_size") {
-      int32_t v;
-      if (p.parseInteger(v)) return {};
-      sz = IntegerAttr::get(IntegerType::get(ctx, 32), v);
-    } else if (key == "pad") {
-      Attribute a;
-      if (p.parseAttribute(a)) return {};
-      pv = toPadValueAttr(ctx, a);
-      if (!pv) return {};
-    } else if (key == "compact") {
-      Attribute a;
-      if (p.parseAttribute(a)) return {};
-      compact = toCompactModeAttr(ctx, a);
-      if (!compact) return {};
-    } else {
-      p.emitError(p.getCurrentLocation(), "unknown key in tile_buf_config: ") << key;
+    if (p.parseKeyword(&key) || p.parseEqual())
       return {};
+    if (failed(parseTileBufConfigField(p, ctx, key, bl, sl, sz, pv, compact)))
+      return {};
+    if (succeeded(p.parseOptionalGreater())) {
+      done = true;
+      continue;
     }
-
-    if (succeeded(p.parseOptionalGreater()))
-      break;
-    if (p.parseComma()) return {};
+    if (p.parseComma())
+      return {};
   }
 
   return TileBufConfigAttr::get(ctx, bl, sl, sz, pv, compact);
