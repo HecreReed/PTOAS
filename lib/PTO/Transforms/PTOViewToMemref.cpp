@@ -150,40 +150,29 @@ static int64_t getElemBytes(Type elemTy) {
   return -1;
 }
 
-static bool readBLayoutI32(Attribute attr, int32_t &out) {
-  if (auto a = dyn_cast<BLayoutAttr>(attr)) {
-    out = (int32_t)a.getValue();
+template <typename EnumAttrTy>
+static bool readEnumAttrOrIntegerI32(Attribute attr, int32_t &out) {
+  if (auto enumAttr = dyn_cast<EnumAttrTy>(attr)) {
+    out = static_cast<int32_t>(enumAttr.getValue());
     return true;
   }
-  if (auto a = dyn_cast<IntegerAttr>(attr)) {
-    out = (int32_t)a.getInt();
+  if (auto intAttr = dyn_cast<IntegerAttr>(attr)) {
+    out = static_cast<int32_t>(intAttr.getInt());
     return true;
   }
   return false;
+}
+
+static bool readBLayoutI32(Attribute attr, int32_t &out) {
+  return readEnumAttrOrIntegerI32<BLayoutAttr>(attr, out);
 }
 
 static bool readSLayoutI32(Attribute attr, int32_t &out) {
-  if (auto a = dyn_cast<SLayoutAttr>(attr)) {
-    out = (int32_t)a.getValue();
-    return true;
-  }
-  if (auto a = dyn_cast<IntegerAttr>(attr)) {
-    out = (int32_t)a.getInt();
-    return true;
-  }
-  return false;
+  return readEnumAttrOrIntegerI32<SLayoutAttr>(attr, out);
 }
 
 static bool readCompactModeI32(Attribute attr, int32_t &out) {
-  if (auto a = dyn_cast<CompactModeAttr>(attr)) {
-    out = (int32_t)a.getValue();
-    return true;
-  }
-  if (auto a = dyn_cast<IntegerAttr>(attr)) {
-    out = (int32_t)a.getInt();
-    return true;
-  }
-  return false;
+  return readEnumAttrOrIntegerI32<CompactModeAttr>(attr, out);
 }
 
 static Value peelIndexLikeCast(Value value) {

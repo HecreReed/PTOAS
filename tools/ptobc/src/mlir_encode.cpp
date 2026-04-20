@@ -231,18 +231,20 @@ struct Encoder {
     return internConst(/*tag=*/0x01, p.bytes);
   }
 
-  uint64_t internConstIntBits(uint64_t typeId, const llvm::APInt &bits) {
+  uint64_t internConstBits(uint8_t tag, uint64_t typeId,
+                           const llvm::APInt &bits) {
     Buffer p;
     writeULEB128(typeId, p.bytes);
     appendAPIntBytesLE(p, bits);
-    return internConst(/*tag=*/0x04, p.bytes);
+    return internConst(tag, p.bytes);
+  }
+
+  uint64_t internConstIntBits(uint64_t typeId, const llvm::APInt &bits) {
+    return internConstBits(/*tag=*/0x04, typeId, bits);
   }
 
   uint64_t internConstFloatBits(uint64_t dtypeId, const llvm::APInt &bits) {
-    Buffer p;
-    writeULEB128(dtypeId, p.bytes);
-    appendAPIntBytesLE(p, bits);
-    return internConst(/*tag=*/0x02, p.bytes);
+    return internConstBits(/*tag=*/0x02, dtypeId, bits);
   }
 
   void resetForFunction(uint64_t fid) {

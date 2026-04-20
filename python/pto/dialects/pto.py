@@ -52,7 +52,8 @@ def _export_generated_symbols():
 def get_op_result_or_value(value):
     if _ods_get_op_result_or_value is None:
         raise RuntimeError(
-            "missing get_op_result_or_value helper in mlir.dialects._ods_common"
+            "missing get_op_result_or_value helper in "
+            "mlir.dialects._ods_common"
         )
     return _ods_get_op_result_or_value(value)
 
@@ -196,7 +197,8 @@ __all__ = [
 
 
 def _ensure_sync_attr(val, ctx):
-    # Accept SyncOpType enum, SyncOpTypeAttr, or string name ("TMATMUL"/"tmatmul").
+    # Accept SyncOpType enum, SyncOpTypeAttr, or string name
+    # ("TMATMUL"/"tmatmul").
     if isinstance(val, SyncOpType):
         return SyncOpTypeAttr.get(val, ctx)
     if isinstance(val, str):
@@ -252,7 +254,9 @@ def _ensure_i32_attr(val, name, ctx):
     if isinstance(val, int):
         i32 = _ods_ir.IntegerType.get_signless(32, ctx)
         return _ods_ir.IntegerAttr.get(i32, val)
-    raise TypeError(f"{name} must be int or IntegerAttr, got {type(val).__name__}")
+    raise TypeError(
+        f"{name} must be int or IntegerAttr, got {type(val).__name__}"
+    )
 
 
 def record_event(src_op, dst_op, event_id, *, loc=None, ip=None):
@@ -299,7 +303,9 @@ def _is_static_i32_event_id(event_id):
     return False
 
 
-def _create_pipe_event_op(op_name, src_attr, dst_attr, event_id, *, loc=None, ip=None):
+def _create_pipe_event_op(
+    op_name, src_attr, dst_attr, event_id, *, loc=None, ip=None
+):
     return _ods_ir.Operation.create(
         op_name,
         attributes={"src_pipe": src_attr, "dst_pipe": dst_attr},
@@ -356,7 +362,11 @@ def set_flag(src_pipe, dst_pipe, event_id, *, loc=None, ip=None):
     dst_attr = _ensure_pipe_attr(dst_pipe, ctx)
     if _is_static_event_id(event_id):
         return _pto_ops_gen.set_flag(
-            src_attr, dst_attr, _ensure_event_attr(event_id, ctx), loc=loc, ip=ip
+            src_attr,
+            dst_attr,
+            _ensure_event_attr(event_id, ctx),
+            loc=loc,
+            ip=ip,
         )
     return set_flag_dyn(src_attr, dst_attr, event_id, loc=loc, ip=ip)
 
@@ -372,7 +382,11 @@ def wait_flag(src_pipe, dst_pipe, event_id, *, loc=None, ip=None):
     dst_attr = _ensure_pipe_attr(dst_pipe, ctx)
     if _is_static_event_id(event_id):
         return _pto_ops_gen.wait_flag(
-            src_attr, dst_attr, _ensure_event_attr(event_id, ctx), loc=loc, ip=ip
+            src_attr,
+            dst_attr,
+            _ensure_event_attr(event_id, ctx),
+            loc=loc,
+            ip=ip,
         )
     return wait_flag_dyn(src_attr, dst_attr, event_id, loc=loc, ip=ip)
 
@@ -403,9 +417,11 @@ def sync_set_dyn(pipe, event_id, ffts_mode=2, *, loc=None, ip=None):
         attrs = {"pipe": pipe_attr}
         if mode_attr is not None:
             attrs["ffts_mode"] = mode_attr
-        return _ods_ir.Operation.create(
-            "pto.sync.set", attributes=attrs, operands=[event_val], loc=loc, ip=ip
-        )
+        return _ods_ir.Operation.create("pto.sync.set",
+                                        attributes=attrs,
+                                        operands=[event_val],
+                                        loc=loc,
+                                        ip=ip)
 
 
 def sync_set(pipe, event_id, ffts_mode=2, *, loc=None, ip=None):
@@ -435,7 +451,9 @@ def sync_set(pipe, event_id, ffts_mode=2, *, loc=None, ip=None):
                 loc=loc,
                 ip=ip,
             )
-    return sync_set_dyn(pipe_attr, event_id, ffts_mode=ffts_mode, loc=loc, ip=ip)
+    return sync_set_dyn(
+        pipe_attr, event_id, ffts_mode=ffts_mode, loc=loc, ip=ip
+    )
 
 
 def sync_wait_dyn(pipe, event_id, *, loc=None, ip=None):
@@ -448,7 +466,9 @@ def sync_wait_dyn(pipe, event_id, *, loc=None, ip=None):
         )
     except TypeError:
         if hasattr(_pto_ops_gen, "sync_wait_dyn"):
-            return _pto_ops_gen.sync_wait_dyn(pipe_attr, event_val, loc=loc, ip=ip)
+            return _pto_ops_gen.sync_wait_dyn(
+                pipe_attr, event_val, loc=loc, ip=ip
+            )
         raise
 
 
@@ -459,7 +479,11 @@ def sync_wait(pipe, event_id, *, loc=None, ip=None):
         event_attr = _ensure_i32_attr(event_id, "event_id", ctx)
         try:
             return _pto_ops_gen.sync_wait(
-                pipe_attr, event_id=event_attr, event_id_dyn=None, loc=loc, ip=ip
+                pipe_attr,
+                event_id=event_attr,
+                event_id_dyn=None,
+                loc=loc,
+                ip=ip,
             )
         except TypeError:
             return _ods_ir.Operation.create(
@@ -558,7 +582,8 @@ def store_scalar(ptr, offset, value, *, loc=None, ip=None):
 
 
 # -----------------------------------------------------------------------------
-# Export enum aliases for terse calls: pto.record_event(TLOAD, TLOAD, EVENT_ID0)
+# Export enum aliases for terse calls:
+# pto.record_event(TLOAD, TLOAD, EVENT_ID0)
 # -----------------------------------------------------------------------------
 TLOAD = SyncOpType.TLOAD
 TSTORE_ACC = SyncOpType.TSTORE_ACC
