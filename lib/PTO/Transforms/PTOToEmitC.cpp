@@ -4295,15 +4295,18 @@ static constexpr llvm::StringLiteral kAutoSyncTailModeBarrierAllToken =
 static constexpr llvm::StringLiteral kAutoSyncTailModeMte3ToSEvent0Token =
     "PTOAutoSyncTailMode::kSetWaitMte3ToSEvent0";
 
+static std::string getAutoSyncTailModeTokenForHint(StringRef hint) {
+  if (hint == kAutoSyncTailPolicyBarrierAll)
+    return kAutoSyncTailModeBarrierAllToken.str();
+  if (hint == kAutoSyncTailPolicyMte3ToSEvent0)
+    return kAutoSyncTailModeMte3ToSEvent0Token.str();
+  return kAutoSyncTailModeBarrierAllToken.str();
+}
+
 static std::string getAutoSyncTailModeToken(Operation *op) {
-  if (op) {
-    if (auto hintAttr = op->getAttrOfType<StringAttr>(kAutoSyncTailHintAttr)) {
-      if (hintAttr.getValue() == kAutoSyncTailPolicyBarrierAll)
-        return kAutoSyncTailModeBarrierAllToken.str();
-      if (hintAttr.getValue() == kAutoSyncTailPolicyMte3ToSEvent0)
-        return kAutoSyncTailModeMte3ToSEvent0Token.str();
-    }
-  }
+  if (op)
+    if (auto hintAttr = op->getAttrOfType<StringAttr>(kAutoSyncTailHintAttr))
+      return getAutoSyncTailModeTokenForHint(hintAttr.getValue());
 
   auto func = op ? op->getParentOfType<func::FuncOp>() : func::FuncOp();
   if (!func)
@@ -4312,14 +4315,7 @@ static std::string getAutoSyncTailModeToken(Operation *op) {
   auto hintAttr = func->getAttrOfType<StringAttr>(kAutoSyncTailHintAttr);
   if (!hintAttr)
     return kAutoSyncTailModeBarrierAllToken.str();
-
-  if (hintAttr.getValue() == kAutoSyncTailPolicyBarrierAll)
-    return kAutoSyncTailModeBarrierAllToken.str();
-  if (hintAttr.getValue() == kAutoSyncTailPolicyMte3ToSEvent0)
-    return kAutoSyncTailModeMte3ToSEvent0Token.str();
-
-  // Fallback to the conservative behavior when seeing unknown policies.
-  return kAutoSyncTailModeBarrierAllToken.str();
+  return getAutoSyncTailModeTokenForHint(hintAttr.getValue());
 }
 
 static std::string getPipeName(pto::PIPE pipe) {

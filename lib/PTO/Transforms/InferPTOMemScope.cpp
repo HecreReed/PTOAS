@@ -161,10 +161,33 @@ private:
 };
 } // namespace
 
-LogicalResult pto::inferAndPropagateMemScopeForMovDps(pto::TMovOp op) {
-  if (op.getNumResults() != 0)
+template <typename OpT>
+static LogicalResult ensureDpsOnlyOp(OpT op) {
+  if (op.getNumResults() != 0) {
     return op->emitOpError(
         "Run infer memory scope after bufferization (Op must have 0 results).");
+  }
+  return success();
+}
+
+static AddressSpaceAttr getMemScopeAttr(MLIRContext *ctx,
+                                        pto::AddressSpace scope) {
+  return AddressSpaceAttr::get(ctx, scope);
+}
+
+static LogicalResult propagateOperandScopes(
+    Operation *op, ArrayRef<std::tuple<Value, StringRef, AddressSpaceAttr>> specs) {
+  MemScopeInferAndPropagateHelper helper;
+  for (const auto &[value, valueName, targetScope] : specs) {
+    if (failed(propagateAllocScope(op, value, valueName, targetScope, helper)))
+      return failure();
+  }
+  return success();
+}
+
+LogicalResult pto::inferAndPropagateMemScopeForMovDps(pto::TMovOp op) {
+  if (failed(ensureDpsOnlyOp(op)))
+    return failure();
 
   auto dstAlloc = requireRootAlloc(op, op.getDst(), "mB");
   if (!dstAlloc.has_value())
@@ -178,99 +201,69 @@ LogicalResult pto::inferAndPropagateMemScopeForMovDps(pto::TMovOp op) {
   if (!memSpace)
     return success();
 
-  auto l0aSpaceAttr =
-      AddressSpaceAttr::get(op->getContext(), pto::AddressSpace::LEFT);
-  auto l0bSpaceAttr =
-      AddressSpaceAttr::get(op->getContext(), pto::AddressSpace::RIGHT);
-  auto l0cSpaceAttr =
-      AddressSpaceAttr::get(op->getContext(), pto::AddressSpace::ACC);
-  auto l1SpaceAttr =
-      AddressSpaceAttr::get(op->getContext(), pto::AddressSpace::MAT);
-  auto ubSpaceAttr =
-      AddressSpaceAttr::get(op->getContext(), pto::AddressSpace::VEC);
+  auto ubSpaceAttr = getMemScopeAttr(op->getContext(), pto::AddressSpace::VEC);
+  auto l1SpaceAttr = getMemScopeAttr(op->getContext(), pto::AddressSpace::MAT);
+  auto l0cSpaceAttr = getMemScopeAttr(op->getContext(), pto::AddressSpace::ACC);
+  auto l0aSpaceAttr = getMemScopeAttr(op->getContext(), pto::AddressSpace::LEFT);
+  auto l0bSpaceAttr = getMemScopeAttr(op->getContext(), pto::AddressSpace::RIGHT);
   auto biasSpaceAttr =
-      AddressSpaceAttr::get(op->getContext(), pto::AddressSpace::BIAS);
-
-  MemScopeInferAndPropagateHelper helper;
+      getMemScopeAttr(op->getContext(), pto::AddressSpace::BIAS);
   if (memSpace == ubSpaceAttr)
-    return propagateAllocScope(op, op.getSrc(), "mA", ubSpaceAttr, helper);
+    return propagateOperandScopes(op, {{op.getSrc(), "mA", ubSpaceAttr}});
   if (memSpace == l1SpaceAttr)
-    return propagateAllocScope(op, op.getSrc(), "mA", l0cSpaceAttr, helper);
+    return propagateOperandScopes(op, {{op.getSrc(), "mA", l0cSpaceAttr}});
   if (memSpace == l0aSpaceAttr || memSpace == l0bSpaceAttr ||
       memSpace == biasSpaceAttr) {
-    return propagateAllocScope(op, op.getSrc(), "mA", l1SpaceAttr, helper);
+    return propagateOperandScopes(op, {{op.getSrc(), "mA", l1SpaceAttr}});
   }
   return success();
 }
 
 LogicalResult pto::inferAndPropagateMemScopeForMatmulAccDps(pto::TMatmulAccOp op) {
-  if (op.getNumResults() != 0)
-    return op->emitOpError(
-        "Run infer memory scope after bufferization (Op must have 0 results).");
-
-  auto l0aSpaceAttr =
-      AddressSpaceAttr::get(op->getContext(), pto::AddressSpace::LEFT);
-  auto l0bSpaceAttr =
-      AddressSpaceAttr::get(op->getContext(), pto::AddressSpace::RIGHT);
-  auto l0cSpaceAttr =
-      AddressSpaceAttr::get(op->getContext(), pto::AddressSpace::ACC);
-
-  MemScopeInferAndPropagateHelper helper;
-  if (failed(propagateAllocScope(op, op.getAccIn(), "mAcc", l0cSpaceAttr,
-                                 helper)) ||
-      failed(propagateAllocScope(op, op.getLhs(), "mA", l0aSpaceAttr, helper)) ||
-      failed(propagateAllocScope(op, op.getRhs(), "mB", l0bSpaceAttr, helper)) ||
-      failed(propagateAllocScope(op, op.getDst(), "mC", l0cSpaceAttr, helper))) {
+  if (failed(ensureDpsOnlyOp(op)))
     return failure();
-  }
-  return success();
+
+  return propagateOperandScopes(
+      op,
+      {{op.getAccIn(), "mAcc",
+        getMemScopeAttr(op->getContext(), pto::AddressSpace::ACC)},
+       {op.getLhs(), "mA",
+        getMemScopeAttr(op->getContext(), pto::AddressSpace::LEFT)},
+       {op.getRhs(), "mB",
+        getMemScopeAttr(op->getContext(), pto::AddressSpace::RIGHT)},
+       {op.getDst(), "mC",
+        getMemScopeAttr(op->getContext(), pto::AddressSpace::ACC)}});
 }
 
 
 LogicalResult pto::inferAndPropagateMemScopeForMatmulBiasDps(pto::TMatmulBiasOp op) {
-  if (op.getNumResults() != 0)
-    return op->emitOpError(
-        "Run infer memory scope after bufferization (Op must have 0 results).");
-
-  auto l0aSpaceAttr =
-      AddressSpaceAttr::get(op->getContext(), pto::AddressSpace::LEFT);
-  auto l0bSpaceAttr =
-      AddressSpaceAttr::get(op->getContext(), pto::AddressSpace::RIGHT);
-  auto l0cSpaceAttr =
-      AddressSpaceAttr::get(op->getContext(), pto::AddressSpace::ACC);
-  auto biasSpaceAttr =
-      AddressSpaceAttr::get(op->getContext(), pto::AddressSpace::BIAS);
-
-  MemScopeInferAndPropagateHelper helper;
-  if (failed(propagateAllocScope(op, op.getA(), "mA", l0aSpaceAttr, helper)) ||
-      failed(propagateAllocScope(op, op.getB(), "mB", l0bSpaceAttr, helper)) ||
-      failed(propagateAllocScope(op, op.getDst(), "mC", l0cSpaceAttr, helper)) ||
-      failed(
-          propagateAllocScope(op, op.getBias(), "mD", biasSpaceAttr, helper))) {
+  if (failed(ensureDpsOnlyOp(op)))
     return failure();
-  }
-  return success();
+
+  return propagateOperandScopes(
+      op,
+      {{op.getA(), "mA",
+        getMemScopeAttr(op->getContext(), pto::AddressSpace::LEFT)},
+       {op.getB(), "mB",
+        getMemScopeAttr(op->getContext(), pto::AddressSpace::RIGHT)},
+       {op.getDst(), "mC",
+        getMemScopeAttr(op->getContext(), pto::AddressSpace::ACC)},
+       {op.getBias(), "mD",
+        getMemScopeAttr(op->getContext(), pto::AddressSpace::BIAS)}});
 }
 
 LogicalResult pto::inferAndPropagateMemScopeForMatmulDps(pto::TMatmulOp op) {
-  if (op.getNumResults() != 0)
-    return op->emitOpError(
-        "Run infer memory scope after bufferization (Op must have 0 results).");
-
-  auto l0aSpaceAttr =
-      AddressSpaceAttr::get(op->getContext(), pto::AddressSpace::LEFT);
-  auto l0bSpaceAttr =
-      AddressSpaceAttr::get(op->getContext(), pto::AddressSpace::RIGHT);
-  auto l0cSpaceAttr =
-      AddressSpaceAttr::get(op->getContext(), pto::AddressSpace::ACC);
-
-  MemScopeInferAndPropagateHelper helper;
-  if (failed(propagateAllocScope(op, op.getLhs(), "mA", l0aSpaceAttr, helper)) ||
-      failed(propagateAllocScope(op, op.getRhs(), "mB", l0bSpaceAttr, helper)) ||
-      failed(propagateAllocScope(op, op.getDst(), "mC", l0cSpaceAttr, helper))) {
+  if (failed(ensureDpsOnlyOp(op)))
     return failure();
-  }
-  return success();
+
+  return propagateOperandScopes(
+      op,
+      {{op.getLhs(), "mA",
+        getMemScopeAttr(op->getContext(), pto::AddressSpace::LEFT)},
+       {op.getRhs(), "mB",
+        getMemScopeAttr(op->getContext(), pto::AddressSpace::RIGHT)},
+       {op.getDst(), "mC",
+        getMemScopeAttr(op->getContext(), pto::AddressSpace::ACC)}});
 }
 
 LogicalResult InferPTOMemScopePass::fixDeviceCallSite(func::FuncOp op) {
