@@ -4,29 +4,29 @@ module attributes {"pto.device-spec" = "Ascend950"} {
   // A5: tmov acc->mat should be treated as PIPE_FIX for sync insertion.
   func.func @tmov_acc_mat_pipeline(%a: memref<32x32xf16, #pto.address_space<gm>>,
                                    %b: memref<32x32xf16, #pto.address_space<gm>>) {
-    %a_mat = memref.alloc() : memref<32x32xf16, #pto.address_space<mat>>
-    %b_mat = memref.alloc() : memref<32x32xf16, #pto.address_space<mat>>
-    %a_left = memref.alloc() : memref<32x32xf16, #pto.address_space<left>>
-    %b_right = memref.alloc() : memref<32x32xf16, #pto.address_space<right>>
-    %acc = memref.alloc() : memref<32x32xf32, #pto.address_space<acc>>
-    %dst_mat = memref.alloc() : memref<32x32xf16, #pto.address_space<mat>>
-    %dst_left = memref.alloc() : memref<32x32xf16, #pto.address_space<left>>
+    %a_mat = pto.alloc_tile : !pto.tile_buf<loc=mat, dtype=f16, rows=32, cols=32, v_row=32, v_col=32, blayout=col_major, slayout=row_major, fractal=512, pad=0>
+    %b_mat = pto.alloc_tile : !pto.tile_buf<loc=mat, dtype=f16, rows=32, cols=32, v_row=32, v_col=32, blayout=col_major, slayout=row_major, fractal=512, pad=0>
+    %a_left = pto.alloc_tile : !pto.tile_buf<loc=left, dtype=f16, rows=32, cols=32, v_row=32, v_col=32, blayout=row_major, slayout=row_major, fractal=512, pad=0>
+    %b_right = pto.alloc_tile : !pto.tile_buf<loc=right, dtype=f16, rows=32, cols=32, v_row=32, v_col=32, blayout=row_major, slayout=col_major, fractal=512, pad=0>
+    %acc = pto.alloc_tile : !pto.tile_buf<loc=acc, dtype=f32, rows=32, cols=32, v_row=32, v_col=32, blayout=col_major, slayout=row_major, fractal=1024, pad=0>
+    %dst_mat = pto.alloc_tile : !pto.tile_buf<loc=mat, dtype=f16, rows=32, cols=32, v_row=32, v_col=32, blayout=col_major, slayout=row_major, fractal=512, pad=0>
+    %dst_left = pto.alloc_tile : !pto.tile_buf<loc=left, dtype=f16, rows=32, cols=32, v_row=32, v_col=32, blayout=row_major, slayout=row_major, fractal=512, pad=0>
 
     pto.tload ins(%a : memref<32x32xf16, #pto.address_space<gm>>)
-              outs(%a_mat : memref<32x32xf16, #pto.address_space<mat>>)
+              outs(%a_mat : !pto.tile_buf<loc=mat, dtype=f16, rows=32, cols=32, v_row=32, v_col=32, blayout=col_major, slayout=row_major, fractal=512, pad=0>)
     pto.tload ins(%b : memref<32x32xf16, #pto.address_space<gm>>)
-              outs(%b_mat : memref<32x32xf16, #pto.address_space<mat>>)
-    pto.tmov ins(%a_mat : memref<32x32xf16, #pto.address_space<mat>>)
-             outs(%a_left : memref<32x32xf16, #pto.address_space<left>>)
-    pto.tmov ins(%b_mat : memref<32x32xf16, #pto.address_space<mat>>)
-             outs(%b_right : memref<32x32xf16, #pto.address_space<right>>)
-    pto.tmatmul ins(%a_left, %b_right : memref<32x32xf16, #pto.address_space<left>>,
-                                        memref<32x32xf16, #pto.address_space<right>>)
-                outs(%acc : memref<32x32xf32, #pto.address_space<acc>>)
-    pto.tmov ins(%acc : memref<32x32xf32, #pto.address_space<acc>>)
-             outs(%dst_mat : memref<32x32xf16, #pto.address_space<mat>>)
-    pto.tmov ins(%dst_mat : memref<32x32xf16, #pto.address_space<mat>>)
-             outs(%dst_left : memref<32x32xf16, #pto.address_space<left>>)
+              outs(%b_mat : !pto.tile_buf<loc=mat, dtype=f16, rows=32, cols=32, v_row=32, v_col=32, blayout=col_major, slayout=row_major, fractal=512, pad=0>)
+    pto.tmov ins(%a_mat : !pto.tile_buf<loc=mat, dtype=f16, rows=32, cols=32, v_row=32, v_col=32, blayout=col_major, slayout=row_major, fractal=512, pad=0>)
+             outs(%a_left : !pto.tile_buf<loc=left, dtype=f16, rows=32, cols=32, v_row=32, v_col=32, blayout=row_major, slayout=row_major, fractal=512, pad=0>)
+    pto.tmov ins(%b_mat : !pto.tile_buf<loc=mat, dtype=f16, rows=32, cols=32, v_row=32, v_col=32, blayout=col_major, slayout=row_major, fractal=512, pad=0>)
+             outs(%b_right : !pto.tile_buf<loc=right, dtype=f16, rows=32, cols=32, v_row=32, v_col=32, blayout=row_major, slayout=col_major, fractal=512, pad=0>)
+    pto.tmatmul ins(%a_left, %b_right : !pto.tile_buf<loc=left, dtype=f16, rows=32, cols=32, v_row=32, v_col=32, blayout=row_major, slayout=row_major, fractal=512, pad=0>,
+                                        !pto.tile_buf<loc=right, dtype=f16, rows=32, cols=32, v_row=32, v_col=32, blayout=row_major, slayout=col_major, fractal=512, pad=0>)
+                outs(%acc : !pto.tile_buf<loc=acc, dtype=f32, rows=32, cols=32, v_row=32, v_col=32, blayout=col_major, slayout=row_major, fractal=1024, pad=0>)
+    pto.tmov ins(%acc : !pto.tile_buf<loc=acc, dtype=f32, rows=32, cols=32, v_row=32, v_col=32, blayout=col_major, slayout=row_major, fractal=1024, pad=0>)
+             outs(%dst_mat : !pto.tile_buf<loc=mat, dtype=f16, rows=32, cols=32, v_row=32, v_col=32, blayout=col_major, slayout=row_major, fractal=512, pad=0>)
+    pto.tmov ins(%dst_mat : !pto.tile_buf<loc=mat, dtype=f16, rows=32, cols=32, v_row=32, v_col=32, blayout=col_major, slayout=row_major, fractal=512, pad=0>)
+             outs(%dst_left : !pto.tile_buf<loc=left, dtype=f16, rows=32, cols=32, v_row=32, v_col=32, blayout=row_major, slayout=row_major, fractal=512, pad=0>)
     return
   }
 }

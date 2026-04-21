@@ -4,16 +4,16 @@ module attributes {"pto.device-spec" = "Ascend950"} {
   // A5: vec->vec TINSERT keeps PIPE_V path and no explicit mode template.
   func.func @tinsert_vec_vec_pipeline(%a: memref<32x32xf16, #pto.address_space<gm>>) {
     %c0 = arith.constant 0 : index
-    %src_vec = memref.alloc() : memref<32x32xf16, #pto.address_space<vec>>
-    %dst_vec = memref.alloc() : memref<32x32xf16, #pto.address_space<vec>>
-    %out_vec = memref.alloc() : memref<32x32xf16, #pto.address_space<vec>>
+    %src_vec = pto.alloc_tile : !pto.tile_buf<loc=vec, dtype=f16, rows=32, cols=32, v_row=32, v_col=32, blayout=row_major, slayout=none_box, fractal=512, pad=0>
+    %dst_vec = pto.alloc_tile : !pto.tile_buf<loc=vec, dtype=f16, rows=32, cols=32, v_row=32, v_col=32, blayout=row_major, slayout=none_box, fractal=512, pad=0>
+    %out_vec = pto.alloc_tile : !pto.tile_buf<loc=vec, dtype=f16, rows=32, cols=32, v_row=32, v_col=32, blayout=row_major, slayout=none_box, fractal=512, pad=0>
 
     pto.tload ins(%a : memref<32x32xf16, #pto.address_space<gm>>)
-              outs(%src_vec : memref<32x32xf16, #pto.address_space<vec>>) {layout = #pto.layout<nd>}
-    pto.tinsert ins(%src_vec, %c0, %c0 : memref<32x32xf16, #pto.address_space<vec>>, index, index)
-               outs(%dst_vec : memref<32x32xf16, #pto.address_space<vec>>)
-    pto.tmov ins(%dst_vec : memref<32x32xf16, #pto.address_space<vec>>)
-             outs(%out_vec : memref<32x32xf16, #pto.address_space<vec>>)
+              outs(%src_vec : !pto.tile_buf<loc=vec, dtype=f16, rows=32, cols=32, v_row=32, v_col=32, blayout=row_major, slayout=none_box, fractal=512, pad=0>) {layout = #pto.layout<nd>}
+    pto.tinsert ins(%src_vec, %c0, %c0 : !pto.tile_buf<loc=vec, dtype=f16, rows=32, cols=32, v_row=32, v_col=32, blayout=row_major, slayout=none_box, fractal=512, pad=0>, index, index)
+               outs(%dst_vec : !pto.tile_buf<loc=vec, dtype=f16, rows=32, cols=32, v_row=32, v_col=32, blayout=row_major, slayout=none_box, fractal=512, pad=0>)
+    pto.tmov ins(%dst_vec : !pto.tile_buf<loc=vec, dtype=f16, rows=32, cols=32, v_row=32, v_col=32, blayout=row_major, slayout=none_box, fractal=512, pad=0>)
+             outs(%out_vec : !pto.tile_buf<loc=vec, dtype=f16, rows=32, cols=32, v_row=32, v_col=32, blayout=row_major, slayout=none_box, fractal=512, pad=0>)
     return
   }
 }

@@ -2,10 +2,13 @@
 
 module attributes {"pto.target_arch" = "a5"} {
   func.func @compact_left_blayout_parser_a5() {
-    %0 = pto.alloc_tile : !pto.tile_buf<left, 32x32xf32, slayout=row_major>
+    %lhs = pto.alloc_tile : !pto.tile_buf<left, 16x16xf16, slayout=row_major>
+    %rhs = pto.alloc_tile : !pto.tile_buf<right, 16x16xf16, slayout=col_major>
+    %acc = pto.alloc_tile : !pto.tile_buf<acc, 16x16xf32, blayout=col_major, slayout=row_major, fractal=1024>
+    pto.tmatmul ins(%lhs, %rhs : !pto.tile_buf<left, 16x16xf16, slayout=row_major>, !pto.tile_buf<right, 16x16xf16, slayout=col_major>) outs(%acc : !pto.tile_buf<acc, 16x16xf32, blayout=col_major, slayout=row_major, fractal=1024>)
     return
   }
 }
 
-// CHECK-LABEL: func.func @compact_left_blayout_parser_a5() {
-// CHECK: #pto.tile_buf_config<blayout=#pto.blayout<col_major>, slayout=#pto.slayout<row_major>, s_fractal_size=512, pad=#pto.pad_value<null>, compact=#pto.compact_mode<null>>
+// CHECK-LABEL: AICORE void compact_left_blayout_parser_a5()
+// CHECK: Tile<TileType::Left, half, 16, 16, BLayout::ColMajor, 16, 16, SLayout::RowMajor, 512, PadValue::Null, CompactMode::Null>

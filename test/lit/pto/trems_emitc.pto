@@ -11,6 +11,5 @@ module {
   }
 }
 
-// A3: pto.trems ins(%{{.*}}, %{{.*}}, %{{.*}} : memref<1x16xf32
-// A3: outs(%{{.*}} : memref<1x16xf32
+// A3: pto.trems ins(%{{.*}}, %{{.*}}, %{{.*}} : !pto.tile_buf<vec, 1x16xf32>, f32, !pto.tile_buf<vec, 1x16xf32>) outs(%{{.*}} : !pto.tile_buf<vec, 1x16xf32>)
 // A3: TREMS({{.*}}, {{.*}}, {{.*}}, {{.*}});
