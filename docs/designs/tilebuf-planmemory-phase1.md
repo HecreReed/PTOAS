@@ -12,8 +12,8 @@ PlanMemory previously consumed mainly memref-centric alias/shape/space signals.
 Tile metadata (`bind_tile/subset/bitcast/treshape`) was available but not normalized
 as a reusable semantic layer.
 
-This phase introduces a tile semantic input path while keeping the core planner
-(`MultiSpecPlan`, rollback/reuse) unchanged.
+This phase moves PlanMemory to a tilebuf-native input path while keeping the
+core planner (`MultiSpecPlan`, rollback/reuse) unchanged.
 
 ## Changes
 1. Unified tile semantic extraction in `Utils`:
@@ -23,12 +23,13 @@ This phase introduces a tile semantic input path while keeping the core planner
 
 2. PlanMemory liveness/buffer info wiring:
 - `MemLivenessAnalysis` uses unified alias API
-- local buffer definition accepts `memref.alloc` and `pto.alloc_tile`
-- `GetBufferInfo` prefers tile-native semantic extraction and keeps a legacy fallback
+- local buffer definition is `pto.alloc_tile` / `pto.declare_tile`; local
+  `memref.alloc` is intentionally rejected in this branch
+- `GetBufferInfo` consumes tile-native semantic extraction
 
 3. No algorithm rewrite:
 - Allocation/reuse/rollback algorithm unchanged
-- Boundary fallback remains internal (no new user-visible switch)
+- No memref-bridge fallback is kept in the user path
 
 ## Capability -> Test Mapping
 - Unified semantic smoke:

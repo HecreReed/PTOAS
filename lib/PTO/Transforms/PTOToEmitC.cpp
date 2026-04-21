@@ -237,6 +237,31 @@ static bool isEmitCGlobalTensorLikeType(Type ty) {
   return opaqueTy && opaqueTy.getValue().contains("GlobalTensor<");
 }
 
+static bool isEmitCTileLikeType(Type ty) {
+  auto opaqueTy = dyn_cast<emitc::OpaqueType>(ty);
+  if (!opaqueTy)
+    return false;
+  StringRef typeStr = opaqueTy.getValue();
+  return typeStr.contains("Tile<") || typeStr.contains("ConvTile<");
+}
+
+static Value getTileLikeEmitCValue(Value value) {
+  while (value) {
+    if (auto castOp = value.getDefiningOp<emitc::CastOp>()) {
+      value = castOp.getOperand();
+      continue;
+    }
+    if (auto castOp = value.getDefiningOp<UnrealizedConversionCastOp>()) {
+      value = castOp.getOperand(0);
+      continue;
+    }
+    if (isEmitCTileLikeType(value.getType()))
+      return value;
+    break;
+  }
+  return value;
+}
+
 static std::string getEmitCScalarTypeToken(Type elemTy) {
   if (elemTy.isFloat8E4M3() || elemTy.isFloat8E4M3FN() ||
       elemTy.isFloat8E4M3FNUZ() || elemTy.isFloat8E4M3B11FNUZ())
@@ -5500,26 +5525,11 @@ struct PTOSetValidShapeToEmitC : public OpConversionPattern<pto::SetValidShapeOp
 
   LogicalResult matchAndRewrite(pto::SetValidShapeOp op, OpAdaptor adaptor,
                                 ConversionPatternRewriter &rewriter) const override {
-    auto peelAllCasts = [](Value v) {
-      while (auto castOp = v.getDefiningOp<UnrealizedConversionCastOp>())
-        v = castOp.getOperand(0);
-      if (auto castOp = v.getDefiningOp<emitc::CastOp>())
-        v = castOp.getOperand();
-      return v;
-    };
-    auto isTileLike = [](Value v) -> bool {
-      auto ot = dyn_cast<emitc::OpaqueType>(v.getType());
-      if (!ot)
-        return false;
-      StringRef s = ot.getValue();
-      return s.contains("Tile<") || s.contains("ConvTile<");
-    };
-
-    Value src = peelAllCasts(peelUnrealized(adaptor.getSource()));
+    Value src = getTileLikeEmitCValue(adaptor.getSource());
     Value row = peelUnrealized(adaptor.getValidRow());
     Value col = peelUnrealized(adaptor.getValidCol());
 
-    if (!isTileLike(src))
+    if (!isEmitCTileLikeType(src.getType()))
       return rewriter.notifyMatchFailure(
           op, "set_validshape source must lower to a tile-like value");
 
@@ -5537,26 +5547,11 @@ struct PTOTAssignToEmitC : public OpConversionPattern<pto::TAssignOp> {
 
   LogicalResult matchAndRewrite(pto::TAssignOp op, OpAdaptor adaptor,
                                 ConversionPatternRewriter &rewriter) const override {
-    auto peelAllCasts = [](Value v) {
-      while (auto castOp = v.getDefiningOp<UnrealizedConversionCastOp>())
-        v = castOp.getOperand(0);
-      if (auto castOp = v.getDefiningOp<emitc::CastOp>())
-        v = castOp.getOperand();
-      return v;
-    };
-    auto isTileLike = [](Value v) -> bool {
-      auto ot = dyn_cast<emitc::OpaqueType>(v.getType());
-      if (!ot)
-        return false;
-      StringRef s = ot.getValue();
-      return s.contains("Tile<") || s.contains("ConvTile<");
-    };
-
     auto loc = op.getLoc();
     auto *ctx = rewriter.getContext();
 
-    Value tile = peelAllCasts(peelUnrealized(adaptor.getTile()));
-    if (!isTileLike(tile))
+    Value tile = getTileLikeEmitCValue(adaptor.getTile());
+    if (!isEmitCTileLikeType(tile.getType()))
       return rewriter.notifyMatchFailure(
           op, "tassign tile must lower to a tile-like value");
 
@@ -5930,6 +5925,191 @@ struct PTODeclareTileMemRefToEmitC
   }
 };
 
+struct PTODeclareTileToEmitC
+    : public OpConversionPattern<mlir::pto::DeclareTileOp> {
+  using OpConversionPattern<mlir::pto::DeclareTileOp>::OpConversionPattern;
+
+  LogicalResult matchAndRewrite(mlir::pto::DeclareTileOp op, OpAdaptor adaptor,
+                                ConversionPatternRewriter &rewriter) const override {
+    (void)adaptor;
+    auto *ctx = rewriter.getContext();
+    auto tileType = dyn_cast<pto::TileBufType>(op.getTile().getType());
+    if (!tileType) {
+      Type convertedType = getTypeConverter()->convertType(op.getResult().getType());
+      if (!convertedType)
+        return rewriter.notifyMatchFailure(
+            op, "failed to convert declare_tile result type");
+      auto varOp = rewriter.create<emitc::VariableOp>(
+          op.getLoc(), convertedType, emitc::OpaqueAttr::get(ctx, ""));
+      rewriter.replaceOp(op, varOp.getResult());
+      return success();
+    }
+
+    ArrayRef<int64_t> shape = tileType.getShape();
+    ArrayRef<int64_t> validShape = tileType.getValidShape();
+    if (shape.size() < 2 || validShape.size() < 2)
+      return rewriter.notifyMatchFailure(
+          op, "declare_tile expects rank-2 tile buffer with valid-shape metadata");
+
+    auto dimToString = [](int64_t dim, const char *symbol) -> std::string {
+      return dim == ShapedType::kDynamic ? std::string(symbol)
+                                         : std::to_string(dim);
+    };
+
+    pto::AddressSpace as = pto::AddressSpace::Zero;
+    if (auto asAttr =
+            dyn_cast_or_null<pto::AddressSpaceAttr>(tileType.getMemorySpace())) {
+      as = asAttr.getAddressSpace();
+    }
+
+    const char *roleTok = "TileType::Vec";
+    switch (as) {
+    case pto::AddressSpace::LEFT:
+      roleTok = "TileType::Left";
+      break;
+    case pto::AddressSpace::RIGHT:
+      roleTok = "TileType::Right";
+      break;
+    case pto::AddressSpace::ACC:
+      roleTok = "TileType::Acc";
+      break;
+    case pto::AddressSpace::BIAS:
+      roleTok = "TileType::Bias";
+      break;
+    case pto::AddressSpace::MAT:
+      roleTok = "TileType::Mat";
+      break;
+    case pto::AddressSpace::SCALING:
+      roleTok = "TileType::Scaling";
+      break;
+    case pto::AddressSpace::VEC:
+    case pto::AddressSpace::GM:
+    case pto::AddressSpace::Zero:
+      roleTok = "TileType::Vec";
+      break;
+    }
+
+    std::string dimStr;
+    switch (as) {
+    case pto::AddressSpace::LEFT:
+      dimStr = dimToString(shape[0], "M") + ", " + dimToString(shape[1], "K");
+      break;
+    case pto::AddressSpace::RIGHT:
+      dimStr = dimToString(shape[0], "K") + ", " + dimToString(shape[1], "N");
+      break;
+    case pto::AddressSpace::BIAS:
+      dimStr = "1, " + dimToString(shape[1], "N");
+      break;
+    default:
+      dimStr = dimToString(shape[0], "M") + ", " + dimToString(shape[1], "N");
+      break;
+    }
+
+    std::string elemTypeStr = getEmitCScalarTypeToken(tileType.getElementType());
+    TileBufConfigAttr configAttr = tileType.getConfigAttr();
+    if (!configAttr)
+      configAttr = TileBufConfigAttr::getDefault(ctx);
+
+    std::string blTok = "BLayout::RowMajor";
+    if (auto blAttr = dyn_cast<BLayoutAttr>(configAttr.getBLayout())) {
+      if (static_cast<int32_t>(blAttr.getValue()) == 1)
+        blTok = "BLayout::ColMajor";
+    }
+
+    std::string slTok = "SLayout::NoneBox";
+    if (auto slAttr = dyn_cast<SLayoutAttr>(configAttr.getSLayout())) {
+      int32_t slVal = static_cast<int32_t>(slAttr.getValue());
+      slTok = (slVal == 1) ? "SLayout::RowMajor"
+                           : (slVal == 2) ? "SLayout::ColMajor"
+                                          : "SLayout::NoneBox";
+    }
+
+    int32_t fractal = 512;
+    if (auto frAttr = dyn_cast<IntegerAttr>(configAttr.getSFractalSize()))
+      fractal = frAttr.getInt();
+
+    std::string padTok = "PadValue::Null";
+    if (auto padAttr = dyn_cast<PadValueAttr>(configAttr.getPad())) {
+      switch (static_cast<int32_t>(padAttr.getValue())) {
+      case 1:
+        padTok = "PadValue::Zero";
+        break;
+      case 2:
+        padTok = "PadValue::Max";
+        break;
+      case 3:
+        padTok = "PadValue::Min";
+        break;
+      default:
+        padTok = "PadValue::Null";
+        break;
+      }
+    }
+
+    std::string compactTok = "CompactMode::Null";
+    if (auto compactAttr = dyn_cast<CompactModeAttr>(configAttr.getCompactMode())) {
+      switch (static_cast<int32_t>(compactAttr.getValue())) {
+      case 1:
+        compactTok = "CompactMode::Normal";
+        break;
+      case 2:
+        compactTok = "CompactMode::RowPlusOne";
+        break;
+      default:
+        compactTok = "CompactMode::Null";
+        break;
+      }
+    }
+
+    std::string vrowTok =
+        validShape[0] == ShapedType::kDynamic ? "-1"
+                                              : std::to_string(validShape[0]);
+    std::string vcolTok =
+        validShape[1] == ShapedType::kDynamic ? "-1"
+                                              : std::to_string(validShape[1]);
+    bool useConstructor =
+        validShape[0] == ShapedType::kDynamic || validShape[1] == ShapedType::kDynamic;
+
+    auto i32Ty = emitc::OpaqueType::get(ctx, "int32_t");
+    SmallVector<Value> ctorArgs;
+    if (validShape[0] == ShapedType::kDynamic) {
+      ctorArgs.push_back(makeEmitCIntConstant(
+          rewriter, op.getLoc(), i32Ty,
+          shape[0] == ShapedType::kDynamic ? 0 : shape[0]));
+    }
+    if (validShape[1] == ShapedType::kDynamic) {
+      ctorArgs.push_back(makeEmitCIntConstant(
+          rewriter, op.getLoc(), i32Ty,
+          shape[1] == ShapedType::kDynamic ? 0 : shape[1]));
+    }
+
+    std::string tileTypeStr = std::string("Tile<") + roleTok + ", " +
+                              elemTypeStr + ", " + dimStr + ", " + blTok +
+                              ", " + vrowTok + ", " + vcolTok + ", " + slTok +
+                              ", " + std::to_string(fractal) + ", " + padTok +
+                              ", " + compactTok + ">";
+    auto emitcTileType = emitc::OpaqueType::get(ctx, tileTypeStr);
+
+    Value tileValue;
+    if (useConstructor) {
+      tileValue = rewriter
+                      .create<emitc::CallOpaqueOp>(op.getLoc(), emitcTileType,
+                                                   tileTypeStr, ArrayAttr{},
+                                                   ArrayAttr{}, ValueRange(ctorArgs))
+                      .getResult(0);
+    } else {
+      tileValue = rewriter
+                      .create<emitc::VariableOp>(
+                          op.getLoc(), emitcTileType,
+                          emitc::OpaqueAttr::get(ctx, ""))
+                      .getResult();
+    }
+
+    rewriter.replaceOp(op, tileValue);
+    return success();
+  }
+};
+
 struct PTODeclareEventIdArrayToEmitC
     : public OpConversionPattern<mlir::pto::DeclareEventIdArrayOp> {
   using OpConversionPattern<
@@ -6010,7 +6190,7 @@ struct PTOTPushToEmitC : public OpConversionPattern<mlir::pto::TPushOp> {
       return rewriter.notifyMatchFailure(op, "failed to resolve pipe token");
     // Read the tile type token from the already-converted OpaqueType, which
     // preserves the exact layout produced by BindTileOp / PointerCastOp EmitC.
-    Value convertedTile = peelUnrealized(adaptor.getTile());
+    Value convertedTile = getTileLikeEmitCValue(adaptor.getTile());
     auto opaqueT = dyn_cast<emitc::OpaqueType>(convertedTile.getType());
     if (!opaqueT || !opaqueT.getValue().contains("Tile<"))
       return rewriter.notifyMatchFailure(op, "failed to resolve tile token");
@@ -6041,7 +6221,7 @@ struct PTOTPopToEmitC : public OpConversionPattern<mlir::pto::TPopOp> {
     auto pipeTok = getTPipeTokenFromValue(op.getPipeHandle(), targetArch);
     if (failed(pipeTok))
       return rewriter.notifyMatchFailure(op, "failed to resolve pipe token");
-    Value convertedTile = peelUnrealized(adaptor.getTile());
+    Value convertedTile = getTileLikeEmitCValue(adaptor.getTile());
     auto opaqueT = dyn_cast<emitc::OpaqueType>(convertedTile.getType());
     if (!opaqueT || !opaqueT.getValue().contains("Tile<"))
       return rewriter.notifyMatchFailure(op, "failed to resolve tile token");
@@ -10672,7 +10852,7 @@ static void populatePTOToEmitCPatterns(RewritePatternSet &patterns,
       typeConverter, ctx, "PTOAS__ASYNC_EVENT_TEST");
   patterns.add<PTOInitializeL2G2LPipeToEmitC>(typeConverter, ctx, targetArch);
   patterns.add<PTOInitializeL2LPipeToEmitC>(typeConverter, ctx, targetArch);
-  patterns.add<PTODeclareTileMemRefToEmitC>(typeConverter, ctx);
+  patterns.add<PTODeclareTileMemRefToEmitC, PTODeclareTileToEmitC>(typeConverter, ctx);
   patterns.add<PTODeclareEventIdArrayToEmitC>(typeConverter, ctx);
   patterns.add<PTOEventIdArrayGetToEmitC>(typeConverter, ctx);
   patterns.add<PTOEventIdArraySetToEmitC>(typeConverter, ctx);

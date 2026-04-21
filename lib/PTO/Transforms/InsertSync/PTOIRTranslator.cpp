@@ -140,6 +140,11 @@ void PTOIRTranslator::RecursionIR(Region *region) {
           return WalkResult::interrupt();
        }
     }
+    else if (auto declareTileOp = dyn_cast<pto::DeclareTileOp>(op)) {
+      if (failed(UpdateDeclareTileOpMemInfo(declareTileOp))) {
+        return WalkResult::interrupt();
+      }
+    }
     else if (auto declareOp = dyn_cast<pto::DeclareTileMemRefOp>(op)) {
       if (failed(UpdateDeclareTileMemRefOpMemInfo(declareOp))) {
         return WalkResult::interrupt();
@@ -155,6 +160,15 @@ void PTOIRTranslator::RecursionIR(Region *region) {
     } 
     else if (auto bindTileOp = dyn_cast<pto::BindTileOp>(op)) {
       UpdateAliasBufferInfo(bindTileOp.getResult(), bindTileOp.getSource());
+    }
+    else if (auto subViewOp = dyn_cast<pto::SubViewOp>(op)) {
+      UpdateAliasBufferInfo(subViewOp.getResult(), subViewOp.getSource());
+    }
+    else if (auto bitcastOp = dyn_cast<pto::BitcastOp>(op)) {
+      UpdateAliasBufferInfo(bitcastOp.getResult(), bitcastOp.getSrc());
+    }
+    else if (auto reshapeOp = dyn_cast<pto::TReshapeOp>(op)) {
+      UpdateAliasBufferInfo(reshapeOp.getResult(), reshapeOp.getSrc());
     }
     else if (auto subViewOp = dyn_cast<pto::PartitionViewOp>(op)) {
       UpdateAliasBufferInfo(subViewOp.getResult(), subViewOp.getSource());
@@ -310,6 +324,44 @@ LogicalResult PTOIRTranslator::UpdatePointerCastOpMemInfo(pto::PointerCastOp op)
       sizeInBytes
   );
  
+  buffer2MemInfoMap_[res].emplace_back(newMemInfo->clone());
+  return success();
+}
+
+LogicalResult PTOIRTranslator::UpdateDeclareTileOpMemInfo(pto::DeclareTileOp op) {
+  Value res = op.getResult();
+  auto tileType = dyn_cast<pto::TileBufType>(res.getType());
+  if (!tileType)
+    return failure();
+
+  uint64_t sizeInBytes = 0;
+  bool isStatic = llvm::none_of(tileType.getShape(), [](int64_t dim) {
+    return dim == ShapedType::kDynamic;
+  });
+  if (isStatic) {
+    int64_t elemSize = tileType.getElementType().getIntOrFloatBitWidth() / 8;
+    if (elemSize == 0)
+      elemSize = 1;
+
+    int64_t numElements = 1;
+    for (auto dim : tileType.getShape())
+      numElements *= dim;
+    sizeInBytes = numElements * elemSize;
+  }
+
+  pto::AddressSpace space = pto::AddressSpace::MAT;
+  if (auto attr = tileType.getMemorySpace()) {
+    if (auto ptoAttr = dyn_cast<pto::AddressSpaceAttr>(attr))
+      space = ptoAttr.getAddressSpace();
+  }
+
+  auto newMemInfo = std::make_unique<BaseMemInfo>(
+      res,
+      res,
+      space,
+      SmallVector<uint64_t>{0},
+      sizeInBytes);
+
   buffer2MemInfoMap_[res].emplace_back(newMemInfo->clone());
   return success();
 }

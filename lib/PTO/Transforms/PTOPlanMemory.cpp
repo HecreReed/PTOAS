@@ -325,9 +325,9 @@ void MemLivenessAnalysis::RecursionIR(Region *region, Liveness live) {
         return WalkResult::interrupt();
       }
       return WalkResult::advance();
-    } else if (isa<pto::DeclareTileMemRefOp>(op)) {
+    } else if (isa<pto::DeclareTileOp, pto::DeclareTileMemRefOp>(op)) {
       // Internal placeholder for a tile whose runtime address is assigned by
-      // pipe operations such as tpop. This op does not allocate local storage
+      // pipe operations such as tpop. These ops do not allocate local storage
       // and should not participate in memory planning.
       return WalkResult::advance();
     } else if (auto bindOp = dyn_cast<pto::BindTileOp>(op)) {
