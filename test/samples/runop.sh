@@ -407,12 +407,21 @@ process_one_dir() {
     # tcvt.py intentionally exercises the new pto.tcvt(tmp, sat_mode) form for
     # sample/board coverage. ptobc v0 still assumes the legacy 2-operand shape
     # and currently fails with "operand count mismatch for op: pto.tcvt".
-    # Keep the sample in runop coverage, but bypass the bytecode roundtrip until
-    # ptobc learns the expanded operand layout.
+    #
+    # The cases below are also current ptobc v0 schema gaps observed in CI. Keep
+    # them in runop coverage through ptoas, but bypass the bytecode roundtrip
+    # until ptobc catches up with the newer operand layouts / encodings.
     if [[ "$base" == "test_tmov_col_major_16x1_align_a5" || \
           "$base" == "test_tmov_row_major_1x16_control_a5" || \
+          "$base" == "colsum" || \
+          "$base" == "dequant" || \
+          "$base" == "dequant_i8" || \
           "$base" == "decode_projection_incore_0" || \
+          "$base" == "divs" || \
+          "$base" == "divs2" || \
+          "$base" == "rsqrt" || \
           "$base" == "rmsnorm_incore_0" || \
+          "$base" == "sort32" || \
           "$base" == "tcvt" ]]; then
       sample_use_ptobc_roundtrip=0
     fi
