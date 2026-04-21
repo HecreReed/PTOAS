@@ -395,6 +395,134 @@ public:
       return emitc::OpaqueType::get(Ctx, "pto::comm::AsyncEvent");
     });
 
+    addConversion([Ctx](pto::TileBufType type) -> Type {
+      ArrayRef<int64_t> shape = type.getShape();
+      if (shape.size() < 2)
+        return Type{};
+
+      auto dimToString = [](int64_t dim, const char *symbol) -> std::string {
+        return dim == ShapedType::kDynamic ? std::string(symbol)
+                                           : std::to_string(dim);
+      };
+
+      pto::AddressSpace as = pto::AddressSpace::Zero;
+      if (auto asAttr =
+              dyn_cast_or_null<pto::AddressSpaceAttr>(type.getMemorySpace())) {
+        as = asAttr.getAddressSpace();
+      }
+
+      const char *roleTok = "TileType::Vec";
+      switch (as) {
+      case pto::AddressSpace::LEFT:
+        roleTok = "TileType::Left";
+        break;
+      case pto::AddressSpace::RIGHT:
+        roleTok = "TileType::Right";
+        break;
+      case pto::AddressSpace::ACC:
+        roleTok = "TileType::Acc";
+        break;
+      case pto::AddressSpace::BIAS:
+        roleTok = "TileType::Bias";
+        break;
+      case pto::AddressSpace::MAT:
+        roleTok = "TileType::Mat";
+        break;
+      case pto::AddressSpace::SCALING:
+        roleTok = "TileType::Scaling";
+        break;
+      case pto::AddressSpace::VEC:
+      case pto::AddressSpace::GM:
+      case pto::AddressSpace::Zero:
+        roleTok = "TileType::Vec";
+        break;
+      }
+
+      std::string dimStr;
+      switch (as) {
+      case pto::AddressSpace::LEFT:
+        dimStr = dimToString(shape[0], "M") + ", " + dimToString(shape[1], "K");
+        break;
+      case pto::AddressSpace::RIGHT:
+        dimStr = dimToString(shape[0], "K") + ", " + dimToString(shape[1], "N");
+        break;
+      case pto::AddressSpace::BIAS:
+        dimStr = "1, " + dimToString(shape[1], "N");
+        break;
+      default:
+        dimStr = dimToString(shape[0], "M") + ", " + dimToString(shape[1], "N");
+        break;
+      }
+
+      std::string elemTypeStr = getEmitCScalarTypeToken(type.getElementType());
+      TileBufConfigAttr configAttr = type.getConfigAttr();
+      if (!configAttr) {
+        return emitc::OpaqueType::get(
+            Ctx, "Tile<" + std::string(roleTok) + ", " + elemTypeStr + ", " +
+                     dimStr +
+                     ", BLayout::RowMajor, SLayout::NoneBox, 512, "
+                     "PadValue::Null, CompactMode::Null>");
+      }
+
+      std::string blTok = "BLayout::RowMajor";
+      if (auto blAttr = dyn_cast<BLayoutAttr>(configAttr.getBLayout())) {
+        if (static_cast<int32_t>(blAttr.getValue()) == 1)
+          blTok = "BLayout::ColMajor";
+      }
+
+      std::string slTok = "SLayout::NoneBox";
+      if (auto slAttr = dyn_cast<SLayoutAttr>(configAttr.getSLayout())) {
+        int32_t slVal = static_cast<int32_t>(slAttr.getValue());
+        slTok = (slVal == 1) ? "SLayout::RowMajor"
+                             : (slVal == 2) ? "SLayout::ColMajor"
+                                            : "SLayout::NoneBox";
+      }
+
+      int32_t fractal = 512;
+      if (auto frAttr = dyn_cast<IntegerAttr>(configAttr.getSFractalSize()))
+        fractal = frAttr.getInt();
+
+      std::string padTok = "PadValue::Null";
+      if (auto padAttr = dyn_cast<PadValueAttr>(configAttr.getPad())) {
+        switch (static_cast<int32_t>(padAttr.getValue())) {
+        case 1:
+          padTok = "PadValue::Zero";
+          break;
+        case 2:
+          padTok = "PadValue::Max";
+          break;
+        case 3:
+          padTok = "PadValue::Min";
+          break;
+        default:
+          padTok = "PadValue::Null";
+          break;
+        }
+      }
+
+      std::string compactTok = "CompactMode::Null";
+      if (auto compactAttr =
+              dyn_cast<CompactModeAttr>(configAttr.getCompactMode())) {
+        switch (static_cast<int32_t>(compactAttr.getValue())) {
+        case 1:
+          compactTok = "CompactMode::Normal";
+          break;
+        case 2:
+          compactTok = "CompactMode::RowPlusOne";
+          break;
+        default:
+          compactTok = "CompactMode::Null";
+          break;
+        }
+      }
+
+      return emitc::OpaqueType::get(
+          Ctx, "Tile<" + std::string(roleTok) + ", " + elemTypeStr + ", " +
+                   dimStr + ", " + blTok + ", " + slTok + ", " +
+                   std::to_string(fractal) + ", " + padTok + ", " +
+                   compactTok + ">");
+    });
+
     // ---------------------------------------------------------
     // 3. MemRef 转换 (Debug 重点)
     // ---------------------------------------------------------
