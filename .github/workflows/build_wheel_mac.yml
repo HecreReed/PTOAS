@@ -148,6 +148,7 @@ jobs:
           cmake -G Ninja \
             -S . \
             -B build \
+            -DBUILD_TESTING=OFF \
             -DLLVM_DIR=$LLVM_BUILD_DIR/lib/cmake/llvm \
             -DMLIR_DIR=$LLVM_BUILD_DIR/lib/cmake/mlir \
             -DPython3_ROOT_DIR=${PY_PATH} \

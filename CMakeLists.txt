@@ -119,21 +119,21 @@ include(CTest)
 if(BUILD_TESTING)
   enable_testing()
   add_subdirectory(tools/ptobc/tests)
-  add_custom_target(check-pto-smoke
-      COMMAND "${CMAKE_COMMAND}" -E make_directory "${CMAKE_BINARY_DIR}/check-pto-smoke"
+  add_custom_target(check-pto
+      COMMAND "${CMAKE_COMMAND}" -E make_directory "${CMAKE_BINARY_DIR}/check-pto"
       COMMAND "$<TARGET_FILE:pto-opt>" --version
       COMMAND "$<TARGET_FILE:pto-opt>"
         "${CMAKE_SOURCE_DIR}/test/basic/empty_func.pto"
-        -o "${CMAKE_BINARY_DIR}/check-pto-smoke/empty_func.cpp"
+        -o "${CMAKE_BINARY_DIR}/check-pto/empty_func.cpp"
       COMMAND "${PTOAS_LLVM_TOOLS_DIR}/not"
         "$<TARGET_FILE:pto-opt>"
         "${CMAKE_SOURCE_DIR}/test/basic/async_put_invalid_non_1d.pto"
       COMMAND "$<TARGET_FILE:ptobc>" encode
         "${CMAKE_SOURCE_DIR}/tools/ptobc/testdata/add_static_multicore.pto"
-        -o "${CMAKE_BINARY_DIR}/check-pto-smoke/add_static_multicore.ptobc"
+        -o "${CMAKE_BINARY_DIR}/check-pto/add_static_multicore.ptobc"
       COMMAND "$<TARGET_FILE:ptobc>" decode
-        "${CMAKE_BINARY_DIR}/check-pto-smoke/add_static_multicore.ptobc"
-        -o "${CMAKE_BINARY_DIR}/check-pto-smoke/add_static_multicore.roundtrip.pto"
+        "${CMAKE_BINARY_DIR}/check-pto/add_static_multicore.ptobc"
+        -o "${CMAKE_BINARY_DIR}/check-pto/add_static_multicore.roundtrip.pto"
       DEPENDS pto-opt ptobc
       USES_TERMINAL
     )
