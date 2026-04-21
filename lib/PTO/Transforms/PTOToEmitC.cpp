@@ -150,6 +150,58 @@ materializeStaticValidDims(ConversionPatternRewriter &rewriter, Location loc,
   return {vRow, vCol};
 }
 
+static int64_t getEmitCScalarByteWidth(Type elemTy);
+
+static FailureOr<Value> materializeTileSubviewByteOffset(
+    ConversionPatternRewriter &rewriter, Location loc, pto::TileBufType srcType,
+    ValueRange offsets) {
+  if (srcType.getShape().size() != 2 || offsets.size() != 2)
+    return failure();
+
+  auto shape = srcType.getShape();
+  if (shape[0] == ShapedType::kDynamic || shape[1] == ShapedType::kDynamic)
+    return failure();
+
+  auto configAttr = srcType.getConfigAttr();
+  if (!configAttr)
+    return failure();
+
+  int64_t elemBytes = getEmitCScalarByteWidth(srcType.getElementType());
+  int64_t majorStride = shape[1];
+  if (auto blAttr = dyn_cast<BLayoutAttr>(configAttr.getBLayout())) {
+    if (blAttr.getValue() == pto::BLayout::ColMajor)
+      majorStride = shape[0];
+  }
+
+  auto asIndex = [&](Value v) -> Value {
+    v = peelUnrealized(v);
+    if (v.getType().isa<IndexType>())
+      return v;
+    return rewriter.create<arith::IndexCastOp>(loc, rewriter.getIndexType(), v)
+        .getResult();
+  };
+
+  Value row = asIndex(offsets[0]);
+  Value col = asIndex(offsets[1]);
+  Value strideCst = rewriter.create<arith::ConstantIndexOp>(loc, majorStride);
+  Value elemBytesCst = rewriter.create<arith::ConstantIndexOp>(loc, elemBytes);
+  Value linearOffset;
+  if (auto blAttr = dyn_cast<BLayoutAttr>(configAttr.getBLayout());
+      blAttr && blAttr.getValue() == pto::BLayout::ColMajor) {
+    linearOffset = rewriter.create<arith::AddIOp>(
+        loc,
+        rewriter.create<arith::MulIOp>(loc, col, strideCst).getResult(), row);
+  } else {
+    linearOffset = rewriter.create<arith::AddIOp>(
+        loc,
+        rewriter.create<arith::MulIOp>(loc, row, strideCst).getResult(), col);
+  }
+  Value byteOffset =
+      rewriter.create<arith::MulIOp>(loc, linearOffset, elemBytesCst).getResult();
+  return rewriter.create<arith::IndexCastOp>(loc, rewriter.getI64Type(), byteOffset)
+      .getResult();
+}
+
 // Traces view-like source to the defining pointer_cast and returns its addrs.
 // WIP constraint: subset hops are only supported when all offsets are zero.
 static FailureOr<SmallVector<Value>>
@@ -3752,6 +3804,71 @@ lookupConvertedValue(ConversionPatternRewriter &rewriter, Location loc,
 }
 
 static FailureOr<Value>
+materializeConvertedIndexValue(ConversionPatternRewriter &rewriter, Location loc,
+                               Type targetType, Value value) {
+  value = peelUnrealized(value);
+  if (!value)
+    return failure();
+  if (value.getType() == targetType)
+    return value;
+  if (emitc::isSupportedEmitCType(value.getType()) &&
+      emitc::isSupportedEmitCType(targetType))
+    return rewriter.create<emitc::CastOp>(loc, targetType, value).getResult();
+  if (auto cst = getConstIndexLikeValue(value))
+    return makeEmitCIntConstant(rewriter, loc, targetType, *cst);
+  return failure();
+}
+
+static FailureOr<Value>
+resolveTensorViewDimValue(ConversionPatternRewriter &rewriter, Location loc,
+                          Value tensorView, int64_t dimIndex, Type resultType) {
+  tensorView = peelUnrealized(tensorView);
+  if (!tensorView)
+    return failure();
+
+  if (auto makeView = tensorView.getDefiningOp<pto::MakeTensorViewOp>()) {
+    auto tvTy = dyn_cast<pto::TensorViewType>(makeView.getResult().getType());
+    if (!tvTy || dimIndex < 0 || dimIndex >= tvTy.getRank())
+      return failure();
+    if (tvTy.getShape()[dimIndex] != ShapedType::kDynamic)
+      return makeEmitCIntConstant(rewriter, loc, resultType,
+                                  tvTy.getShape()[dimIndex]);
+    return materializeConvertedIndexValue(rewriter, loc, resultType,
+                                          makeView.getShape()[dimIndex]);
+  }
+
+  if (auto partView = tensorView.getDefiningOp<pto::PartitionViewOp>()) {
+    auto pvTy =
+        dyn_cast<pto::PartitionTensorViewType>(partView.getResult().getType());
+    if (!pvTy || dimIndex < 0 || dimIndex >= pvTy.getRank())
+      return failure();
+    if (pvTy.getShape()[dimIndex] != ShapedType::kDynamic)
+      return makeEmitCIntConstant(rewriter, loc, resultType,
+                                  pvTy.getShape()[dimIndex]);
+    return materializeConvertedIndexValue(rewriter, loc, resultType,
+                                          partView.getSizes()[dimIndex]);
+  }
+
+  if (auto cast = tensorView.getDefiningOp<UnrealizedConversionCastOp>()) {
+    if (cast->getNumOperands() != 1)
+      return failure();
+    return resolveTensorViewDimValue(rewriter, loc, cast.getOperand(0), dimIndex,
+                                     resultType);
+  }
+
+  if (auto mrTy = dyn_cast<BaseMemRefType>(tensorView.getType())) {
+    if (dimIndex < 0 || dimIndex >= mrTy.getRank())
+      return failure();
+    int64_t dim = mrTy.getDimSize(dimIndex);
+    if (dim == ShapedType::kDynamic)
+      return failure();
+    return makeEmitCIntConstant(rewriter, loc, resultType, dim);
+  }
+
+  return failure();
+}
+
+static FailureOr<Value>
 foldAddPtrChainToBasePointer(ConversionPatternRewriter &rewriter, Location loc,
                              Value ptrValue) {
   auto *ctx = rewriter.getContext();
@@ -4217,22 +4334,40 @@ struct PTOSubViewToPointerCast : public OpConversionPattern<pto::SubViewOp> {
     auto dstType = dyn_cast<pto::TileBufType>(op.getResult().getType());
     if (!dstType)
       return failure();
-
-    // WIP scope: support zero-offset subview by rebinding to the same base addr.
-    for (Value offset : op.getOffsets()) {
-      if (!isConstZeroIndexLike(offset))
-        return rewriter.notifyMatchFailure(
-            op, "subview->pointer_cast currently supports only zero offsets");
-    }
+    auto srcType = dyn_cast<pto::TileBufType>(op.getSource().getType());
+    if (!srcType)
+      return rewriter.notifyMatchFailure(op,
+                                         "expects tile_buf source on subview");
 
     FailureOr<SmallVector<Value>> addrs =
         tracePointerCastAddrsFromSource(op.getSource());
     if (failed(addrs))
       return rewriter.notifyMatchFailure(op, "expects subview source from pointer_cast");
 
+    FailureOr<Value> byteOffset = materializeTileSubviewByteOffset(
+        rewriter, op.getLoc(), srcType, op.getOffsets());
+    if (failed(byteOffset))
+      return rewriter.notifyMatchFailure(
+          op, "failed to materialize byte offset for tile subview");
+
+    SmallVector<Value> shiftedAddrs;
+    shiftedAddrs.reserve(addrs->size());
+    for (Value addr : *addrs) {
+      if (auto cst = getConstIndexLikeValue(*byteOffset)) {
+        Value byteOffsetCst =
+            rewriter.create<arith::ConstantIntOp>(op.getLoc(), *cst, 64);
+        shiftedAddrs.push_back(
+            rewriter.create<arith::AddIOp>(op.getLoc(), addr, byteOffsetCst));
+        continue;
+      }
+      shiftedAddrs.push_back(
+          rewriter.create<arith::AddIOp>(op.getLoc(), addr, *byteOffset));
+    }
+
     auto [vRow, vCol] = materializeStaticValidDims(rewriter, op.getLoc(), dstType);
     auto newCast = rewriter.create<pto::PointerCastOp>(
-        op.getLoc(), dstType, *addrs, vRow ? vRow : Value(), vCol ? vCol : Value(),
+        op.getLoc(), dstType, shiftedAddrs, vRow ? vRow : Value(),
+        vCol ? vCol : Value(),
         dstType.getConfigAttr());
     rewriter.replaceOp(op, newCast.getResult());
     return success();
@@ -4563,6 +4698,87 @@ struct PTOPartitionViewToEmitC
     if (!gt)
       return rewriter.notifyMatchFailure(op, "failed to lower partition_view");
     rewriter.replaceOp(op, gt);
+    return success();
+  }
+};
+
+struct PTOBitcastToEmitC : public OpConversionPattern<pto::BitcastOp> {
+  using OpConversionPattern<pto::BitcastOp>::OpConversionPattern;
+
+  LogicalResult matchAndRewrite(pto::BitcastOp op, OpAdaptor adaptor,
+                                ConversionPatternRewriter &rewriter) const override {
+    auto dstTileTy = dyn_cast<pto::TileBufType>(op.getResult().getType());
+    auto srcTileTy = dyn_cast<pto::TileBufType>(op.getSrc().getType());
+    if (!dstTileTy || !srcTileTy)
+      return rewriter.notifyMatchFailure(op, "expected tile_buf bitcast");
+
+    Type emitcDstTy = getTypeConverter()->convertType(dstTileTy);
+    auto opaqueDstTy = dyn_cast_or_null<emitc::OpaqueType>(emitcDstTy);
+    if (!opaqueDstTy)
+      return rewriter.notifyMatchFailure(op, "failed to convert bitcast result type");
+
+    Value srcTile = getTileLikeEmitCValue(adaptor.getSrc());
+    if (!srcTile || !isEmitCTileLikeType(srcTile.getType()))
+      return rewriter.notifyMatchFailure(op, "expected lowered tile source");
+
+    auto *ctx = rewriter.getContext();
+    Value dstTile = rewriter
+                        .create<emitc::VariableOp>(
+                            op.getLoc(), opaqueDstTy, emitc::OpaqueAttr::get(ctx, ""))
+                        .getResult();
+    auto srcAsAttr =
+        dyn_cast_or_null<pto::AddressSpaceAttr>(srcTileTy.getMemorySpace());
+    if (!srcAsAttr)
+      return rewriter.notifyMatchFailure(op,
+                                         "bitcast source tile is missing address_space");
+
+    std::string srcElemTok = getEmitCScalarTypeToken(srcTileTy.getElementType());
+    Value rawAddr = materializeTileDataValue(rewriter, op.getLoc(), srcTile,
+                                             srcAsAttr.getAddressSpace(),
+                                             srcElemTok);
+    if (isa<emitc::PointerType>(rawAddr.getType()) ||
+        (isa<emitc::OpaqueType>(rawAddr.getType()) &&
+         cast<emitc::OpaqueType>(rawAddr.getType()).getValue().ends_with("*"))) {
+      auto u64Ty = emitc::OpaqueType::get(ctx, "uint64_t");
+      auto castTyAttr =
+          rewriter.getArrayAttr({emitc::OpaqueAttr::get(ctx, "uint64_t")});
+      rawAddr = rewriter
+                    .create<emitc::CallOpaqueOp>(op.getLoc(), u64Ty,
+                                                 "reinterpret_cast", ArrayAttr{},
+                                                 castTyAttr, ValueRange{rawAddr})
+                    .getResult(0);
+    }
+    rewriter.create<emitc::CallOpaqueOp>(op.getLoc(), TypeRange{}, "TASSIGN",
+                                         ArrayAttr{}, ArrayAttr{},
+                                         ValueRange{dstTile, rawAddr});
+    rewriter.replaceOp(op, dstTile);
+    return success();
+  }
+};
+
+struct PTOGetTensorViewDimToEmitC
+    : public OpConversionPattern<pto::GetTensorViewDimOp> {
+  using OpConversionPattern<pto::GetTensorViewDimOp>::OpConversionPattern;
+
+  LogicalResult matchAndRewrite(pto::GetTensorViewDimOp op, OpAdaptor adaptor,
+                                ConversionPatternRewriter &rewriter) const override {
+    auto dimIndex = getConstIndexLikeValue(op.getDimIndex());
+    if (!dimIndex)
+      return rewriter.notifyMatchFailure(
+          op, "dynamic get_tensor_view_dim indices are not supported yet");
+
+    Type resultType = getTypeConverter()->convertType(op.getResult().getType());
+    if (!resultType)
+      return rewriter.notifyMatchFailure(
+          op, "failed to convert get_tensor_view_dim result type");
+
+    FailureOr<Value> dimValue = resolveTensorViewDimValue(
+        rewriter, op.getLoc(), op.getTensorView(), *dimIndex, resultType);
+    if (failed(dimValue))
+      return rewriter.notifyMatchFailure(
+          op, "failed to resolve get_tensor_view_dim from tensor_view source");
+
+    rewriter.replaceOp(op, *dimValue);
     return success();
   }
 };
@@ -11145,8 +11361,8 @@ static void populatePTOToEmitCPatterns(RewritePatternSet &patterns,
   patterns.add<PTORandomToEmitC>(typeConverter, ctx);
   patterns.add<SubviewToEmitCPattern>(typeConverter, ctx);
   patterns.add<PTOAllocTileToPointerCast>(typeConverter, ctx);
-  patterns.add<PTOBitcastToPointerCast, PTOTReshapeToPointerCast,
-               PTOSubViewToPointerCast>(typeConverter, ctx);
+  patterns.add<PTOTReshapeToPointerCast, PTOSubViewToPointerCast>(
+      typeConverter, ctx);
   patterns.add<PointerCastConversion>(typeConverter, ctx);
   patterns.add<PTOSetValToSETVAL, PTOGetValToGETVAL, PTOSetValidShapeToEmitC,
                PTOTAssignToEmitC, PTOLoadScalarToEmitC,
@@ -11216,6 +11432,8 @@ static void populatePTOToEmitCPatterns(RewritePatternSet &patterns,
   patterns.add<PTOAddPtrToEmitC>(typeConverter, ctx);
   patterns.add<PTOMakeTensorViewToEmitC>(typeConverter, ctx);
   patterns.add<PTOPartitionViewToEmitC>(typeConverter, ctx);
+  patterns.add<PTOBitcastToEmitC>(typeConverter, ctx);
+  patterns.add<PTOGetTensorViewDimToEmitC>(typeConverter, ctx);
   patterns.add<PTOTLoadToTLOAD>(typeConverter, ctx);
   patterns.add<PTOTPrefetchToTPREFETCH>(typeConverter, ctx);
   patterns.add<PTOTPackToTPACK>(typeConverter, ctx);
@@ -11597,6 +11815,19 @@ static AICORE inline void ptoas_auto_sync_tail(
       // bridge casts. At this stage, the producing value is already in the
       // lowered EmitC pointer form; keep it and drop the bridge cast.
       if (isEmitCPointerLikeType(inTy) && isa<BaseMemRefType>(outTy)) {
+        output.replaceAllUsesWith(input);
+        castsToErase.push_back(cast);
+        return;
+      }
+
+      // Tile-native/view-native lowering materializes concrete EmitC values
+      // (often via "auto") and can leave bridge casts back to the original PTO
+      // view/tile types around SCF result plumbing. Those old PTO types are
+      // illegal at this stage; keep the lowered EmitC value and drop the bridge.
+      if (emitc::isSupportedEmitCType(inTy) &&
+          (isa<pto::TensorViewType, pto::PartitionTensorViewType,
+               pto::TileBufType, pto::PtrType, pto::PipeType>(outTy) ||
+           isa<BaseMemRefType>(outTy))) {
         output.replaceAllUsesWith(input);
         castsToErase.push_back(cast);
         return;

@@ -1056,26 +1056,27 @@ PY
       fi
     fi
 
-	    # Regression guard for Issue #190:
-	    # Infer layout for a 2D column-vector view (16 x 1) should prefer DN.
-	    if [[ "$base" == "tensor_view_infer_layout_dn" ]]; then
-	      if ! grep -Eq "pto::Shape<1, 1, 1, 16, 1>.*pto::Layout::DN" "$cpp"; then
-	        echo -e "${A}(${base}.py)\tFAIL\texpected pto::Layout::DN for shape (16 x 1) GlobalTensor"
-	        overall=1
-	        continue
-	      fi
-	    fi
+    # Regression guard for Issue #190:
+    # Infer layout for a 2D column-vector view (16 x 1) should prefer DN.
+    # EmitC prints Shape and Layout on different lines, so match across lines.
+    if [[ "$base" == "tensor_view_infer_layout_dn" ]]; then
+      if ! perl -0ne 'exit((/pto::Shape<1, 1, 1, 16, 1>.*?pto::Layout::DN/s) ? 0 : 1)' "$cpp"; then
+        echo -e "${A}(${base}.py)\tFAIL\texpected pto::Layout::DN for shape (16 x 1) GlobalTensor"
+        overall=1
+        continue
+      fi
+    fi
 
     # Regression guard for row-reduction kernels:
     # (32 x 1) row-major outputs are minor-2D ambiguous; layout must align with
     # row-major tiles (ND), otherwise pto-isa can hit layout/tile static_assert.
     if [[ "$base" == "rowmin" || "$base" == "rowsum" || "$base" == "rowmax" || "$base" == "rowprod" ]]; then
-      if ! grep -Eq "pto::Shape<1, 1, 1, 32, 1>.*pto::Layout::ND" "$cpp"; then
+      if ! perl -0ne 'exit((/pto::Shape<1, 1, 1, 32, 1>.*?pto::Layout::ND/s) ? 0 : 1)' "$cpp"; then
         echo -e "${A}(${base}.py)\tFAIL\texpected pto::Layout::ND for shape (32 x 1) GlobalTensor"
         overall=1
         continue
       fi
-      if grep -Eq "pto::Shape<1, 1, 1, 32, 1>.*pto::Layout::DN" "$cpp"; then
+      if perl -0ne 'exit((/pto::Shape<1, 1, 1, 32, 1>.*?pto::Layout::DN/s) ? 0 : 1)' "$cpp"; then
         echo -e "${A}(${base}.py)\tFAIL\tunexpected pto::Layout::DN for shape (32 x 1) GlobalTensor"
         overall=1
         continue

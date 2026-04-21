@@ -15,9 +15,11 @@ module {
     %base = pto.alloc_tile
       : !pto.tile_buf<loc=vec, dtype=f16, rows=32, cols=32, v_row=32, v_col=32,
                       blayout=row_major, slayout=none_box, fractal=512, pad=0>
-    %sub = pto.subset %base[%c0, %c0] sizes [16, 32]
+    %sub = pto.subview %base[%c0, %c0] sizes [16, 32]
       : !pto.tile_buf<loc=vec, dtype=f16, rows=32, cols=32, v_row=32, v_col=32,
                       blayout=row_major, slayout=none_box, fractal=512, pad=0>
+        -> !pto.tile_buf<loc=vec, dtype=f16, rows=16, cols=32, v_row=16, v_col=32,
+                         blayout=row_major, slayout=none_box, fractal=512, pad=0>
     %reshape = pto.treshape %sub
       : !pto.tile_buf<loc=vec, dtype=f16, rows=16, cols=32, v_row=16, v_col=32,
                       blayout=row_major, slayout=none_box, fractal=512, pad=0>
