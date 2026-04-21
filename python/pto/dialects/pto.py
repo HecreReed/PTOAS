@@ -25,6 +25,10 @@ except ImportError:
 
 from . import _pto_ops_gen as _pto_ops_gen
 
+_generated_get_op_result_or_value = getattr(
+    _pto_ops_gen, "_get_op_result_or_value", None
+)
+
 
 def _load_local_pto_ext():
     lib_dir = Path(__file__).resolve().parent.parent / "_mlir_libs"
@@ -54,12 +58,15 @@ def _export_generated_symbols():
 
 
 def get_op_result_or_value(value):
+    if _ods_get_op_result_or_value is not None:
+        return _ods_get_op_result_or_value(value)
+    if _generated_get_op_result_or_value is not None:
+        return _generated_get_op_result_or_value(value)
     if _ods_get_op_result_or_value is None:
         raise RuntimeError(
             "missing get_op_result_or_value helper in "
-            "mlir.dialects._ods_common"
+            "mlir.dialects._ods_common and generated PTO bindings"
         )
-    return _ods_get_op_result_or_value(value)
 
 
 _export_generated_symbols()
