@@ -209,6 +209,11 @@ tracePointerCastAddrsFromSource(Value source) {
   source = peelUnrealized(source);
   int depthGuard = 64;
   while (source && depthGuard-- > 0) {
+    if (auto allocOp = source.getDefiningOp<pto::AllocTileOp>()) {
+      if (allocOp.getAddr())
+        return SmallVector<Value>{allocOp.getAddr()};
+      return failure();
+    }
     if (auto srcCast = source.getDefiningOp<pto::PointerCastOp>()) {
       SmallVector<Value> addrs(srcCast.getAddrs().begin(), srcCast.getAddrs().end());
       if (addrs.empty())
@@ -305,7 +310,10 @@ static std::string layoutToEmitCString(mlir::pto::Layout layout) {
 
 static bool isEmitCGlobalTensorLikeType(Type ty) {
   auto opaqueTy = dyn_cast<emitc::OpaqueType>(ty);
-  return opaqueTy && opaqueTy.getValue().contains("GlobalTensor<");
+  if (!opaqueTy)
+    return false;
+  StringRef typeStr = opaqueTy.getValue();
+  return typeStr.contains("GlobalTensor<") || typeStr.starts_with("GT_");
 }
 
 static bool isEmitCTileLikeType(Type ty) {
@@ -4112,6 +4120,39 @@ static Value materializeDynamicGlobalTensor(ConversionPatternRewriter &rewriter,
   return gtInst.getResult(0);
 }
 
+static Value materializeGlobalTensorFromViewLike(
+    ConversionPatternRewriter &rewriter, Location loc, Value originalValue,
+    Value loweredValue, Operation *anchor) {
+  Value candidate = peelUnrealized(loweredValue);
+  if (candidate && isEmitCGlobalTensorLikeType(candidate.getType()))
+    return candidate;
+
+  originalValue = peelUnrealized(originalValue);
+  if (!originalValue)
+    return Value();
+
+  if (auto partView = originalValue.getDefiningOp<pto::PartitionViewOp>()) {
+    FailureOr<DynamicGlobalTensorDesc> desc = buildPartitionViewDesc(
+        rewriter, loc, partView, ValueRange(), ValueRange());
+    if (failed(desc))
+      return Value();
+    return materializeDynamicGlobalTensor(rewriter, loc, *desc,
+                                          anchor ? anchor : partView);
+  }
+
+  if (auto makeView = originalValue.getDefiningOp<pto::MakeTensorViewOp>()) {
+    FailureOr<DynamicGlobalTensorDesc> desc =
+        buildMakeTensorViewDesc(rewriter, loc, makeView);
+    if (failed(desc))
+      return Value();
+    return materializeDynamicGlobalTensor(rewriter, loc, *desc,
+                                          anchor ? anchor : makeView);
+  }
+
+  return maybeWrapGlobalMemrefAsGlobalTensor(rewriter, loc, loweredValue,
+                                             originalValue.getType(), anchor);
+}
+
 static Value castToGMBytePointer(ConversionPatternRewriter &rewriter,
                                  Location loc, Value value) {
   auto *ctx = rewriter.getContext();
@@ -4313,7 +4354,11 @@ struct PTOTReshapeToPointerCast : public OpConversionPattern<pto::TReshapeOp> {
     if (!dstType)
       return failure();
 
-    FailureOr<SmallVector<Value>> addrs = tracePointerCastAddrsFromSource(op.getSrc());
+    Value remappedSrc = adaptor.getSrc() ? adaptor.getSrc() : op.getSrc();
+    FailureOr<SmallVector<Value>> addrs =
+        tracePointerCastAddrsFromSource(remappedSrc);
+    if (failed(addrs))
+      addrs = tracePointerCastAddrsFromSource(op.getSrc());
     if (failed(addrs))
       return rewriter.notifyMatchFailure(op, "expects treshape source from pointer_cast");
 
@@ -6453,28 +6498,20 @@ struct PTOAsyncTransferToEmitC : public OpConversionPattern<AsyncOp> {
                                 ConversionPatternRewriter &rewriter) const override {
     Value dst = peelUnrealized(adaptor.getDst());
     Value src = peelUnrealized(adaptor.getSrc());
-    Value dstGT = dst;
-    Value srcGT = src;
-    if (!isEmitCGlobalTensorLikeType(dstGT.getType())) {
-      auto dstMrTy = dyn_cast<MemRefType>(op.getDst().getType());
-      if (!dstMrTy)
-        return rewriter.notifyMatchFailure(op, "expected dst to lower to GlobalTensor or memref");
-      dstGT = buildGlobalTensorFromMemref(rewriter, op.getLoc(), dst, dstMrTy,
-                                          op.getDst().getDefiningOp()
-                                              ? op.getDst().getDefiningOp()
-                                              : op.getOperation());
-    }
-    if (!isEmitCGlobalTensorLikeType(srcGT.getType())) {
-      auto srcMrTy = dyn_cast<MemRefType>(op.getSrc().getType());
-      if (!srcMrTy)
-        return rewriter.notifyMatchFailure(op, "expected src to lower to GlobalTensor or memref");
-      srcGT = buildGlobalTensorFromMemref(rewriter, op.getLoc(), src, srcMrTy,
-                                          op.getSrc().getDefiningOp()
-                                              ? op.getSrc().getDefiningOp()
-                                              : op.getOperation());
-    }
+    Value dstGT = materializeGlobalTensorFromViewLike(
+        rewriter, op.getLoc(), op.getDst(), dst,
+        op.getDst().getDefiningOp() ? op.getDst().getDefiningOp()
+                                    : op.getOperation());
+    Value srcGT = materializeGlobalTensorFromViewLike(
+        rewriter, op.getLoc(), op.getSrc(), src,
+        op.getSrc().getDefiningOp() ? op.getSrc().getDefiningOp()
+                                    : op.getOperation());
     if (!dstGT || !srcGT)
       return rewriter.notifyMatchFailure(op, "failed to build GlobalTensor operands");
+    if (!isEmitCGlobalTensorLikeType(dstGT.getType()) ||
+        !isEmitCGlobalTensorLikeType(srcGT.getType()))
+      return rewriter.notifyMatchFailure(
+          op, "expected async operands to lower to GlobalTensor");
 
     Type eventTy = this->getTypeConverter()->convertType(op.getEvent().getType());
     if (!eventTy)
