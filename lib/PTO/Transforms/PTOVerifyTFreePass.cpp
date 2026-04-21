@@ -1,3 +1,16 @@
+// Copyright (c) 2026 Huawei Technologies Co., Ltd.
+// This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+// CANN Open Software License Agreement Version 2.0 (the "License").
+// Please refer to the License for details. You may not use this file except in compliance with the License.
+// THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+// INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+// See LICENSE in the root of the software repository for the full text of the License.
+
+// Please refer to the License for details. You may not use this file except in compliance with the License.
+// THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+// INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+// See LICENSE in the root of the software repository for the full text of the License.
+
 #include "PTO/IR/PTO.h"
 #include "PTO/Transforms/Passes.h"
 #include "mlir/Dialect/Func/IR/FuncOps.h"
@@ -96,6 +109,14 @@ static LogicalResult verifyNoTileUsesAfterTFree(TPopOp tpopOp,
   return success();
 }
 
+static bool isInsideSectionOrAttributedKernel(TPopOp tpopOp, func::FuncOp funcOp) {
+  if (tpopOp->getParentOfType<SectionCubeOp>() ||
+      tpopOp->getParentOfType<SectionVectorOp>())
+    return true;
+  return funcOp &&
+         funcOp->hasAttr(FunctionKernelKindAttr::name);
+}
+
 struct PTOVerifyTFreePass
     : public mlir::pto::impl::PTOVerifyTFreeBase<PTOVerifyTFreePass> {
   void runOnOperation() override {
@@ -105,8 +126,7 @@ struct PTOVerifyTFreePass
     funcOp.walk([&](TPopOp op) { tpops.push_back(op); });
 
     for (TPopOp tpopOp : tpops) {
-      if (!tpopOp->getParentOfType<SectionCubeOp>() &&
-          !tpopOp->getParentOfType<SectionVectorOp>())
+      if (!isInsideSectionOrAttributedKernel(tpopOp, funcOp))
         continue;
 
       TFreeOp existingTFree = findMatchingTFree(tpopOp);

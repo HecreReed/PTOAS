@@ -1,4 +1,12 @@
 #!/usr/bin/env bash
+# Copyright (c) 2026 Huawei Technologies Co., Ltd.
+# This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+# CANN Open Software License Agreement Version 2.0 (the "License").
+# Please refer to the License for details. You may not use this file except in compliance with the License.
+# THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+# INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+# See LICENSE in the root of the software repository for the full text of the License.
+
 # Collect ptoas binary and its dependencies into a self-contained distribution.
 #
 # Usage: ./collect_ptoas_dist.sh <output_directory>
@@ -75,6 +83,20 @@ export LD_LIBRARY_PATH="${SCRIPT_DIR}/lib:${LD_LIBRARY_PATH}"
 exec "${SCRIPT_DIR}/bin/ptoas" "$@"
 WRAPPER_EOF
 chmod +x "${PTOAS_DIST_DIR}/ptoas"
+
+echo "Smoke testing packaged ptoas dist..."
+VERSION_OUTPUT="$(env -u PYTHONPATH -u DYLD_LIBRARY_PATH -u LD_LIBRARY_PATH \
+  "${PTOAS_DIST_DIR}/ptoas" --version | tr -d '\r')"
+echo "$VERSION_OUTPUT"
+if [ -n "${PTOAS_VERSION:-}" ]; then
+  EXPECTED_VERSION_OUTPUT="ptoas ${PTOAS_VERSION}"
+  if [ "${VERSION_OUTPUT}" != "${EXPECTED_VERSION_OUTPUT}" ]; then
+    echo "Error: expected '${EXPECTED_VERSION_OUTPUT}', got '${VERSION_OUTPUT}'" >&2
+    exit 1
+  fi
+else
+  echo "$VERSION_OUTPUT" | grep -Eq '^ptoas [0-9]+\.[0-9]+$'
+fi
 
 # Show collected files
 echo ""

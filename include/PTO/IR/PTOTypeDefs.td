@@ -1,3 +1,16 @@
+// Copyright (c) 2026 Huawei Technologies Co., Ltd.
+// This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+// CANN Open Software License Agreement Version 2.0 (the "License").
+// Please refer to the License for details. You may not use this file except in compliance with the License.
+// THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+// INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+// See LICENSE in the root of the software repository for the full text of the License.
+
+// Please refer to the License for details. You may not use this file except in compliance with the License.
+// THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+// INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+// See LICENSE in the root of the software repository for the full text of the License.
+
 //===- PTOTypeDefs.td --------------------------------------------------*- tablegen -*-===//
 include "mlir/IR/AttrTypeBase.td"
 include "PTO/IR/PTODialect.td"
@@ -187,15 +200,36 @@ def TileBufType : TypeDef<PTO_Dialect, "TileBuf"> {
     mlir::Attribute getSLayoutAttr() const;
     int32_t getSFractalSizeI32() const;
     mlir::Attribute getPadValueAttr() const;
+    mlir::Attribute getCompactModeAttr() const;
 
     // 如果你仍然想要“数值枚举”，就提供 int getter（不会依赖 enum 类型）
     int32_t getBLayoutValueI32() const;   // 0 row_major, 1 col_major
     int32_t getSLayoutValueI32() const;   // 0 none_box, 1 row_major, 2 col_major
     int32_t getPadValueI32() const;       // 0 null, 1 zero, 2 max, 3 min
+    int32_t getCompactModeI32() const;    // 0 null, 1 normal, 2 row_plus_one
   }];
+}
+
+def EventIdArrayType : TypeDef<PTO_Dialect, "EventIdArray"> {
+  let mnemonic = "eventid_array";
+  let summary = "Manual-only local array for dynamic event ids";
+  let parameters = (ins
+    "int64_t":$size
+  );
+  let assemblyFormat = "`<` $size `>`";
 }
 
 def PipeType : TypeDef<PTO_Dialect, "Pipe"> {
   let mnemonic = "pipe";
   let summary = "Opaque pipe handle type for TPUSH/TPOP communication";
+}
+
+def AsyncSessionType : TypeDef<PTO_Dialect, "AsyncSession"> {
+  let mnemonic = "async_session";
+  let summary = "Opaque async DMA session handle type";
+}
+
+def AsyncEventType : TypeDef<PTO_Dialect, "AsyncEvent"> {
+  let mnemonic = "async_event";
+  let summary = "Opaque async DMA event handle type";
 }

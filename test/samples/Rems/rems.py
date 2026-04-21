@@ -1,3 +1,11 @@
+# Copyright (c) 2026 Huawei Technologies Co., Ltd.
+# This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+# CANN Open Software License Agreement Version 2.0 (the "License").
+# Please refer to the License for details. You may not use this file except in compliance with the License.
+# THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+# INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+# See LICENSE in the root of the software repository for the full text of the License.
+
 from mlir.ir import Context, Location, Module, InsertionPoint
 from mlir.dialects import func, arith, pto
 from mlir.ir import F32Type, IndexType
@@ -48,11 +56,12 @@ def build():
 
                 # %5/%6/%7 = pto.alloc_tile : <32x32xf32>
                 tb0 = pto.AllocTileOp(tile_buf_32).result
+                tmp = pto.AllocTileOp(tile_buf_32).result
                 tb1 = pto.AllocTileOp(tile_buf_32).result
 
                 pto.TLoadOp(None, sv0, tb0)  # result=None
 
-                pto.TRemSOp(tb0, scale, tb1)
+                pto.TRemSOp(tb0, scale, tmp, tb1)
 
                 # %8 = subview on output tensor_view
                 sv1 = pto.PartitionViewOp(tile_view_32, tv1, offsets=[c0, c0], sizes=[c32, c32]).result

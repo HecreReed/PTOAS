@@ -1,9 +1,12 @@
+// Copyright (c) 2026 Huawei Technologies Co., Ltd.
+// This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+// CANN Open Software License Agreement Version 2.0 (the "License").
+// Please refer to the License for details. You may not use this file except in compliance with the License.
+// THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+// INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+// See LICENSE in the root of the software repository for the full text of the License.
+
 //===- PTO.h - PTO Dialect --------------------------------------*- C++ -*-===//
-//
-// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
-// See https://llvm.org/LICENSE.txt for license information.
-// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
-//
 //===----------------------------------------------------------------------===//
 //
 // This file defines the dialect for the PTO Dialect.
@@ -67,9 +70,12 @@
 #include "PTO/IR/PTOOps.h.inc"
 
 namespace mlir {
+class MLIRContext;
 class TypeConverter;
 
 namespace pto {
+
+inline constexpr char kPTOTargetArchAttrName[] = "pto.target_arch";
 
 /// Get PTO Address Space Attr from input type.
 AddressSpaceAttr getPTOAddressSpaceAttr(Type type);
@@ -77,21 +83,36 @@ AddressSpaceAttr getPTOAddressSpaceAttr(Type type);
 /// Return true if type is a ptr/memref in GM address space (or default).
 bool isScalarPtrOrMemRef(Type type);
 
+enum class PTOArch {
+  A3,
+  A5,
+};
+
+/// Resolve the effective PTO target architecture from module-level IR state.
+PTOArch getTargetArch(ModuleOp module);
+PTOArch getTargetArch(Operation *op);
+bool isTargetArchA3(ModuleOp module);
+bool isTargetArchA5(ModuleOp module);
+bool isTargetArchA3(Operation *op);
+bool isTargetArchA5(Operation *op);
+
 enum class PTOParserTargetArch {
   Unspecified,
   A3,
   A5,
 };
 
-void setPTOParserTargetArch(PTOParserTargetArch arch);
-PTOParserTargetArch getPTOParserTargetArch();
+void setPTOParserTargetArch(MLIRContext *context, PTOParserTargetArch arch);
+PTOParserTargetArch getPTOParserTargetArch(MLIRContext *context);
 
 class ScopedPTOParserTargetArch {
 public:
-  explicit ScopedPTOParserTargetArch(PTOParserTargetArch arch);
+  explicit ScopedPTOParserTargetArch(MLIRContext *context,
+                                     PTOParserTargetArch arch);
   ~ScopedPTOParserTargetArch();
 
 private:
+  MLIRContext *context;
   PTOParserTargetArch previousArch;
 };
 

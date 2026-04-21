@@ -1,9 +1,12 @@
+// Copyright (c) 2026 Huawei Technologies Co., Ltd.
+// This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+// CANN Open Software License Agreement Version 2.0 (the "License").
+// Please refer to the License for details. You may not use this file except in compliance with the License.
+// THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+// INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+// See LICENSE in the root of the software repository for the full text of the License.
+
 //===- PTOAttrs.td - PTO dialect attributes definitions ----*- tablegen -*-===//
-//
-// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
-// See https://llvm.org/LICENSE.txt for license information.
-// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
-//
 //===----------------------------------------------------------------------===//
 //
 // This is the definition file for PTO dialect attributes.
@@ -366,18 +369,115 @@ def PTO_RoundModeEnum : PTO_I32Enum<
 def PTO_RoundModeAttr : EnumAttr<PTO_Dialect, PTO_RoundModeEnum, "round_mode"> {
   let summary = "rounding mode attribute";
 }
+
+//===----------------------------------------------------------------------===//
+// SaturationMode
+//===----------------------------------------------------------------------===//
+
+def PTO_SaturationModeEnum : PTO_I32Enum<
+  "SaturationMode", "PTO saturation mode", [
+    I32EnumAttrCase<"ON",  0>,
+    I32EnumAttrCase<"OFF", 1>
+  ]>;
+
+def PTO_SaturationModeAttr : EnumAttr<PTO_Dialect, PTO_SaturationModeEnum, "saturation_mode"> {
+  let summary = "saturation mode attribute";
+}
+//===----------------------------------------------------------------------===//
+// TStore template controls
+//===----------------------------------------------------------------------===//
+
+def PTO_STPhaseEnum : PTO_I32Enum<
+  "STPhase", "PTO TSTORE store phase", [
+    I32EnumAttrCase<"Unspecified", 0, "unspecified">,
+    I32EnumAttrCase<"Partial", 2, "partial">,
+    I32EnumAttrCase<"Final", 3, "final">
+  ]>;
+
+def PTO_STPhaseAttr : EnumAttr<PTO_Dialect, PTO_STPhaseEnum, "st_phase"> {
+  let summary = "TSTORE phase attribute";
+}
+
+def PTO_AtomicTypeEnum : PTO_I32Enum<
+  "AtomicType", "PTO TSTORE atomic mode", [
+    I32EnumAttrCase<"AtomicNone", 0, "atomic_none">,
+    I32EnumAttrCase<"AtomicAdd", 1, "atomic_add">
+  ]>;
+
+def PTO_AtomicTypeAttr : EnumAttr<PTO_Dialect, PTO_AtomicTypeEnum, "atomic_type"> {
+  let summary = "TSTORE atomic type attribute";
+}
+
+def PTO_ReluPreModeEnum : PTO_I32Enum<
+  "ReluPreMode", "PTO TSTORE relu pre mode", [
+    I32EnumAttrCase<"NoRelu", 0, "no_relu">,
+    I32EnumAttrCase<"NormalRelu", 1, "normal_relu">
+  ]>;
+
+def PTO_ReluPreModeAttr : EnumAttr<PTO_Dialect, PTO_ReluPreModeEnum, "relu_pre_mode"> {
+  let summary = "TSTORE relu pre mode attribute";
+}
+
+def PTO_GatherOOBEnum : PTO_I32Enum<
+  "GatherOOB", "PTO MGATHER out-of-bounds mode", [
+    I32EnumAttrCase<"Undefined", 0, "undefined">,
+    I32EnumAttrCase<"Clamp", 1, "clamp">,
+    I32EnumAttrCase<"Wrap", 2, "wrap">,
+    I32EnumAttrCase<"Zero", 3, "zero">
+  ]>;
+
+def PTO_GatherOOBAttr : EnumAttr<PTO_Dialect, PTO_GatherOOBEnum, "gather_oob"> {
+  let summary = "MGATHER out-of-bounds handling mode";
+}
+
+def PTO_ScatterAtomicOpEnum : PTO_I32Enum<
+  "ScatterAtomicOp", "PTO MSCATTER atomic mode", [
+    I32EnumAttrCase<"None", 0, "none">,
+    I32EnumAttrCase<"Add", 1, "add">,
+    I32EnumAttrCase<"Max", 2, "max">,
+    I32EnumAttrCase<"Min", 3, "min">
+  ]>;
+
+def PTO_ScatterAtomicOpAttr : EnumAttr<PTO_Dialect, PTO_ScatterAtomicOpEnum, "scatter_atomic_op"> {
+  let summary = "MSCATTER atomic mode";
+}
+
+def PTO_ScatterOOBEnum : PTO_I32Enum<
+  "ScatterOOB", "PTO MSCATTER out-of-bounds mode", [
+    I32EnumAttrCase<"Undefined", 0, "undefined">,
+    I32EnumAttrCase<"Skip", 1, "skip">,
+    I32EnumAttrCase<"Clamp", 2, "clamp">,
+    I32EnumAttrCase<"Wrap", 3, "wrap">
+  ]>;
+
+def PTO_ScatterOOBAttr : EnumAttr<PTO_Dialect, PTO_ScatterOOBEnum, "scatter_oob"> {
+  let summary = "MSCATTER out-of-bounds handling mode";
+}
+
+def PTO_AccToVecMode_Enum : PTO_I32Enum<"AccToVecMode", "TMOV acc-to-vec mode", [
+  I32EnumAttrCase<"SingleModeVec0", 0, "single_mode_vec0">,
+  I32EnumAttrCase<"SingleModeVec1", 1, "single_mode_vec1">,
+  I32EnumAttrCase<"DualModeSplitM", 2, "dual_mode_split_m">,
+  I32EnumAttrCase<"DualModeSplitN", 3, "dual_mode_split_n">
+  ]>;
+
+def PTO_AccToVecModeAttr : PTO_Attr<"AccToVecMode", "acc_to_vec_mode"> {
+  let parameters = (ins EnumParameter<PTO_AccToVecMode_Enum>:$value);
+  let assemblyFormat = "`<` params `>`";
+}
 //===----------------------------------------------------------------------===//
 // MaskPattern
 //===----------------------------------------------------------------------===//
 
 def PTO_MaskPatternEnum : PTO_I32Enum<
   "MaskPattern", "PTO mask pattern", [
-    I32EnumAttrCase<"P0101", 0>,
-    I32EnumAttrCase<"P0011", 1>,
-    I32EnumAttrCase<"P0110", 2>,
+    I32EnumAttrCase<"P0101", 1>,
+    I32EnumAttrCase<"P1010", 2>,
     I32EnumAttrCase<"P0001", 3>,
-    I32EnumAttrCase<"P1111", 4>,
-    I32EnumAttrCase<"P1010", 5>
+    I32EnumAttrCase<"P0010", 4>,
+    I32EnumAttrCase<"P0100", 5>,
+    I32EnumAttrCase<"P1000", 6>,
+    I32EnumAttrCase<"P1111", 7>
   ]
 >;
 
@@ -421,6 +521,17 @@ def PTO_PadValueAttr : PTO_Attr<"PadValue", "pad_value"> {
   let assemblyFormat = "`<` params `>`";
 }
 
+def PTO_CompactMode_Enum : PTO_I32Enum<"CompactMode", "Tile compact mode", [
+  I32EnumAttrCase<"Null", 0, "null">,
+  I32EnumAttrCase<"Normal", 1, "normal">,
+  I32EnumAttrCase<"RowPlusOne", 2, "row_plus_one">
+  ]>;
+
+def PTO_CompactModeAttr : PTO_Attr<"CompactMode", "compact_mode"> {
+  let parameters = (ins EnumParameter<PTO_CompactMode_Enum>:$value);
+  let assemblyFormat = "`<` params `>`";
+}
+
 // ---------- tile_buf_config (NO b_fractal / s_fractal) ----------
 def TileBufConfigAttr : AttrDef<PTO_Dialect, "TileBufConfig"> {
   let mnemonic = "tile_buf_config";
@@ -428,7 +539,8 @@ def TileBufConfigAttr : AttrDef<PTO_Dialect, "TileBufConfig"> {
     "BLayoutAttr":$bLayout,
     "SLayoutAttr":$sLayout,
     "mlir::IntegerAttr":$sFractalSize, // i32
-    "PadValueAttr":$pad
+    "PadValueAttr":$pad,
+    "CompactModeAttr":$compactMode
   );
 
   let hasCustomAssemblyFormat = 1;
@@ -438,7 +550,8 @@ def TileBufConfigAttr : AttrDef<PTO_Dialect, "TileBufConfig"> {
       "BLayoutAttr":$bLayout,
       "SLayoutAttr":$sLayout,
       "mlir::IntegerAttr":$sFractalSize,
-      "PadValueAttr":$pad
+      "PadValueAttr":$pad,
+      "CompactModeAttr":$compactMode
     )>
   ];
 
@@ -450,8 +563,23 @@ def TileBufConfigAttr : AttrDef<PTO_Dialect, "TileBufConfig"> {
                                 mlir::Attribute bLayout,
                                 mlir::Attribute sLayout,
                                 mlir::IntegerAttr sFractalSize,
-                                mlir::Attribute pad);
+                                mlir::Attribute pad,
+                                mlir::Attribute compactMode);
   }];
+}
+
+//===----------------------------------------------------------------------===//
+// QuantType
+//===----------------------------------------------------------------------===//
+
+def PTO_QuantTypeEnum : PTO_I32Enum<
+  "QuantType", "PTO quantization type", [
+    I32EnumAttrCase<"INT8_SYM",  0>,
+    I32EnumAttrCase<"INT8_ASYM", 1>
+  ]>;
+
+def PTO_QuantTypeAttr : EnumAttr<PTO_Dialect, PTO_QuantTypeEnum, "quant_type"> {
+  let summary = "quantization type attribute";
 }
 
 #endif // MLIR_DIALECT_PTO_IR_PTOATTRS

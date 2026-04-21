@@ -1,12 +1,16 @@
-//===- AllocToPointerCast.cpp - convert alloc_tile to pto.pointer_cast. -------//
-//
-// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
-// See https://llvm.org/LICENSE.txt for license information.
-// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
-//
+// Copyright (c) 2026 Huawei Technologies Co., Ltd.
+// This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+// CANN Open Software License Agreement Version 2.0 (the "License").
+// Please refer to the License for details. You may not use this file except in compliance with the License.
+// THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+// INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+// See LICENSE in the root of the software repository for the full text of the License.
+
+//===- AllocToPointerCast.cpp - convert alloc_tile to pto.pointer_cast. ---===//
 //===----------------------------------------------------------------------===//
 
 #include "AllocToPointerCast.h"
+
 #include "PTO/Transforms/Passes.h"
 #include "mlir/Dialect/Arith/IR/Arith.h"
 #include "mlir/Transforms/GreedyPatternRewriteDriver.h"
@@ -14,7 +18,6 @@
 namespace mlir {
 #define GEN_PASS_DEF_ALLOCTOPOINTERCAST
 #include "PTO/Transforms/Passes.h.inc"
-
 } // namespace mlir
 
 using namespace mlir;
@@ -22,9 +25,8 @@ using namespace mlir::pto;
 
 namespace {} // namespace
 
-LogicalResult
-AllocTileOpToPointerCastOpPattern::matchAndRewrite(pto::AllocTileOp op,
-                                                   PatternRewriter &rewriter) const {
+LogicalResult AllocTileOpToPointerCastOpPattern::matchAndRewrite(
+    pto::AllocTileOp op, PatternRewriter &rewriter) const {
   // Manual-address alloc_tile is already fully bound and must not be remapped.
   if (op.getAddr())
     return failure();
@@ -39,15 +41,13 @@ AllocTileOpToPointerCastOpPattern::matchAndRewrite(pto::AllocTileOp op,
 
   constexpr uint64_t kAlign = 4096;
   auto iter = buffer2Offsets.find(op.getResult());
-
-  // If MemPlan didn't assign an address, synthesize a unique, aligned offset so
-  // downstream PointerCast lowering won't crash on empty addrs.
   SmallVector<uint64_t> offsets;
   if (iter != buffer2Offsets.end())
     offsets = iter->second;
 
+  // If MemPlan didn't assign an address, synthesize a unique, aligned offset so
+  // downstream PointerCast lowering won't crash on empty addrs.
   if (offsets.empty()) {
-    // Estimate tile size in bytes using the static tile descriptor.
     uint64_t bytes = kAlign;
     uint64_t elemBytes = 0;
     Type elemTy = tileType.getElementType();
@@ -90,9 +90,8 @@ AllocTileOpToPointerCastOpPattern::matchAndRewrite(pto::AllocTileOp op,
   // - dynamic valid dims: forward alloc_tile operands
   // - static valid dims: materialize constants from TileBufType
   // This keeps semantics identical to alloc_tile across PlanMemory rewrite.
-  Value vRow, vCol;
-  vRow = op.getValidRow();
-  vCol = op.getValidCol();
+  Value vRow = op.getValidRow();
+  Value vCol = op.getValidCol();
   auto validShape = tileType.getValidShape();
   if (validShape.size() >= 2) {
     auto indexType = rewriter.getIndexType();
@@ -107,39 +106,10 @@ AllocTileOpToPointerCastOpPattern::matchAndRewrite(pto::AllocTileOp op,
     }
   }
 
-  // Build tile-native pointer_cast with assigned physical address.
-  auto ptoPointerCastOp = rewriter.create<pto::PointerCastOp>(
-      op.getLoc(), tileType,
-      ValueRange(addrs),      // addrs
-      vRow ? vRow : Value(),  // valid_row
-      vCol ? vCol : Value(),  // valid_col
-      configAttr              // config from tile descriptor
-  );
+  auto pointerCastOp = rewriter.create<pto::PointerCastOp>(
+      op.getLoc(), tileType, ValueRange(addrs), vRow ? vRow : Value(),
+      vCol ? vCol : Value(), configAttr);
 
-  rewriter.replaceOp(op, ptoPointerCastOp->getResults());
+  rewriter.replaceOp(op, pointerCastOp->getResults());
   return success();
 }
-
-// LogicalResult UpdateWorkSpaceAllocaOpOffsetPattern::matchAndRewrite(
-//     bishengir::memref_ext::AllocWorkspaceOp op,
-//     PatternRewriter &rewriter) const {
-//   if (!op.getOffset().empty()) {
-//     return failure();
-//   }
-//   auto iter = buffer2Offsets.find(op.getResult());
-//   assert(iter != buffer2Offsets.end() && "address should be found");
-
-//   SmallVector<Value> argOffset;
-//   for (auto &offset : iter->second) {
-//     Value newOffset =
-//         rewriter.create<arith::ConstantIndexOp>(op->getLoc(), offset)
-//             .getResult();
-//     argOffset.push_back(newOffset);
-//   }
-//   auto allocWorkspaceOp =
-//       rewriter.create<bishengir::memref_ext::AllocWorkspaceOp>(
-//           op.getLoc(), op->getResultTypes(), op.getWorkspaceArg(),
-//           op.getDynamicSize(), argOffset);
-//   rewriter.replaceOp(op, allocWorkspaceOp->getResults());
-//   return success();
-// }

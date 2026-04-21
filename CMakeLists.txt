@@ -1,9 +1,38 @@
+# Copyright (c) 2026 Huawei Technologies Co., Ltd.
+# This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+# CANN Open Software License Agreement Version 2.0 (the "License").
+# Please refer to the License for details. You may not use this file except in compliance with the License.
+# THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+# INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+# See LICENSE in the root of the software repository for the full text of the License.
+
 cmake_minimum_required(VERSION 3.20.0)
-project(ptoas VERSION 0.12)
+project(ptoas VERSION 0.28)
 
 set(PTOAS_RELEASE_VERSION_OVERRIDE ""
     CACHE STRING "Override the version printed by ptoas --version")
+set(PTOAS_EXACT_GIT_TAG_VERSION "")
+if(EXISTS "${PROJECT_SOURCE_DIR}/.git")
+  find_package(Git QUIET)
+  if(GIT_FOUND)
+    execute_process(
+      COMMAND "${GIT_EXECUTABLE}" -C "${PROJECT_SOURCE_DIR}"
+              describe --tags --exact-match --match "v[0-9]*.[0-9]*"
+      RESULT_VARIABLE PTOAS_GIT_DESCRIBE_RESULT
+      OUTPUT_VARIABLE PTOAS_EXACT_GIT_TAG
+      OUTPUT_STRIP_TRAILING_WHITESPACE
+      ERROR_QUIET)
+    if(PTOAS_GIT_DESCRIBE_RESULT EQUAL 0
+       AND PTOAS_EXACT_GIT_TAG MATCHES "^v([0-9]+\\.[0-9]+)$")
+      set(PTOAS_EXACT_GIT_TAG_VERSION "${CMAKE_MATCH_1}")
+    endif()
+  endif()
+endif()
+
 set(PTOAS_CLI_VERSION "${PROJECT_VERSION}")
+if(PTOAS_EXACT_GIT_TAG_VERSION)
+  set(PTOAS_CLI_VERSION "${PTOAS_EXACT_GIT_TAG_VERSION}")
+endif()
 if(PTOAS_RELEASE_VERSION_OVERRIDE)
   set(PTOAS_CLI_VERSION "${PTOAS_RELEASE_VERSION_OVERRIDE}")
 endif()
@@ -88,6 +117,13 @@ include(CTest)
 if(BUILD_TESTING)
   enable_testing()
   add_subdirectory(tools/ptobc/tests)
+endif()
+
+# =========================================================
+# 4.2 Lit tests
+# =========================================================
+if(BUILD_TESTING)
+  add_subdirectory(test/lit)
 endif()
 
 # =========================================================

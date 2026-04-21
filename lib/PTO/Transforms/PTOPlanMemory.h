@@ -1,9 +1,12 @@
+// Copyright (c) 2026 Huawei Technologies Co., Ltd.
+// This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+// CANN Open Software License Agreement Version 2.0 (the "License").
+// Please refer to the License for details. You may not use this file except in compliance with the License.
+// THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+// INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+// See LICENSE in the root of the software repository for the full text of the License.
+
 //===- PlanMemory.h ----Plan Buffer Memory Address ------------------------===//
-//
-// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
-// See https://llvm.org/LICENSE.txt for license information.
-// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
-//
 //===----------------------------------------------------------------------===//
 #ifndef PTO_PLAN_MEMORY_H
 #define PTO_PLAN_MEMORY_H
@@ -293,6 +296,9 @@ public:
   /// record inplace pair list.
   SmallVector<ValuePair> inplacePairList;
 
+  /// record semantic conflict pair list.
+  SmallVector<ValuePair> semanticConflictPairs;
+
   /// now plan mode is LOCAL_MEM_PLAN.
   bool isLocalMemPlan() const;
 
@@ -366,9 +372,6 @@ private:
   /// Determine whether the current operation can be skipped.
   bool isSkippableOp(Operation *op) const;
 
-  /// Update multi buffer information.
-  //void UpdateMultiBufferInfo(annotation::MarkOp markOp);
-
   /// Update store op information.
   void UpdateStoreOpInfo(OpInfo *opInfo, const Value storeValue, Liveness live);
 
@@ -396,6 +399,10 @@ private:
   /// namely, the alias buffers of memref.alloc,
   /// e.g. for iter arg and for yield.
   void InitializeInplacePairList();
+
+  /// Record semantic non-reuse pairs for buffers that may be used
+  /// simultaneously inside one instruction, such as scratch and dst.
+  void RecordSemanticConflict(Value lhs, Value rhs);
 
   func::FuncOp func_;
 
@@ -459,9 +466,9 @@ public:
     inplacePairList = inplaceList;
   }
 
-  // inline void SetVFInplaceReuseInfo(VFCallInplaceReuseInfo *inplaceReuseInfo) {
-  //   vfInplaceReuseInfo = inplaceReuseInfo;
-  // }
+  inline void SetSemanticConflictPairs(SmallVector<ValuePair> conflictPairs) {
+    semanticConflictPairs = std::move(conflictPairs);
+  }
 
   /// Setup the device's storage specs
   LogicalResult InitMemSpecsFromModule(func::FuncOp funcOp);
@@ -632,6 +639,9 @@ private:
   DenseMap<ValuePair, BufferLife>
   GetOverlapBufferLife(const BufferLifeVec &b1, const BufferLifeVec &b2) const;
 
+  bool HasSemanticConflict(const StorageEntry *entry,
+                           const BufferLifeVec &bufferLives) const;
+
   /// Reorder and make the storage entries of ping and pong continuous.
   void
   ReorderContinuousPingPongEntry(SmallVector<StorageEntry *> &storageEntryVec);
@@ -726,6 +736,9 @@ private:
 
   /// record inplace pair list.
   SmallVector<ValuePair> inplacePairList;
+
+  /// record semantic conflict pair list.
+  SmallVector<ValuePair> semanticConflictPairs;
 
   /// inplace-reuse info for the vf call.
   //VFCallInplaceReuseInfo *vfInplaceReuseInfo;

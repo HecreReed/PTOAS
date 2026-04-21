@@ -1,3 +1,11 @@
+// Copyright (c) 2026 Huawei Technologies Co., Ltd.
+// This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+// CANN Open Software License Agreement Version 2.0 (the "License").
+// Please refer to the License for details. You may not use this file except in compliance with the License.
+// THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+// INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+// See LICENSE in the root of the software repository for the full text of the License.
+
 //===- DialectPTO.cpp -----------------------------------------------------===//
 //
 // Python bindings for the PTO dialect types (pybind11 version).
@@ -39,7 +47,8 @@ void populatePTODialectSubmodule(pybind11::module &m);
 void populatePTODialectSubmodule(pybind11::module &m) {
   (void)m;
 }
-PYBIND11_MODULE(_pto, m) {
+
+static void bindPTOModule(pybind11::module &m) {
     m.doc() = "PTO dialect Python bindings (pybind11).";
 
     // --------------------------------------------------------------------------
@@ -82,6 +91,11 @@ PYBIND11_MODULE(_pto, m) {
     .value("Max", mlir::pto::PadValue::Max)
     .value("Min", mlir::pto::PadValue::Min);
 
+    py::enum_<mlir::pto::CompactMode>(m, "CompactMode")
+    .value("Null", mlir::pto::CompactMode::Null)
+    .value("Normal", mlir::pto::CompactMode::Normal)
+    .value("RowPlusOne", mlir::pto::CompactMode::RowPlusOne);
+
     py::enum_<mlir::pto::RoundMode>(m, "RoundMode")
     .value("NONE", mlir::pto::RoundMode::NONE)
     .value("RINT", mlir::pto::RoundMode::RINT)
@@ -91,6 +105,10 @@ PYBIND11_MODULE(_pto, m) {
     .value("TRUNC", mlir::pto::RoundMode::TRUNC)
     .value("ODD", mlir::pto::RoundMode::ODD)
     .value("CAST_RINT", mlir::pto::RoundMode::CAST_RINT);
+
+    py::enum_<mlir::pto::SaturationMode>(m, "SaturationMode")
+    .value("ON", mlir::pto::SaturationMode::ON)
+    .value("OFF", mlir::pto::SaturationMode::OFF);
 
     py::enum_<MlirPTOCmpMode>(m, "CmpMode")
       .value("EQ", MlirPTOCmpMode_EQ)
@@ -123,6 +141,18 @@ PYBIND11_MODULE(_pto, m) {
       .value("DN", mlir::pto::Layout::DN)
       .value("NZ", mlir::pto::Layout::NZ);
 
+    py::enum_<mlir::pto::AccToVecMode>(m, "AccToVecMode")
+      .value("SingleModeVec0", mlir::pto::AccToVecMode::SingleModeVec0)
+      .value("SingleModeVec1", mlir::pto::AccToVecMode::SingleModeVec1)
+      .value("DualModeSplitM", mlir::pto::AccToVecMode::DualModeSplitM)
+      .value("DualModeSplitN", mlir::pto::AccToVecMode::DualModeSplitN)
+      .export_values();
+
+    py::enum_<mlir::pto::ReluPreMode>(m, "ReluPreMode")
+      .value("NoRelu", mlir::pto::ReluPreMode::NoRelu)
+      .value("NormalRelu", mlir::pto::ReluPreMode::NormalRelu)
+      .export_values();
+
     py::enum_<mlir::pto::SyncOpType>(m, "SyncOpType")
       .value("TLOAD", mlir::pto::SyncOpType::TLOAD)
       .value("TSTORE_ACC", mlir::pto::SyncOpType::TSTORE_ACC)
@@ -150,12 +180,14 @@ PYBIND11_MODULE(_pto, m) {
 
     py::enum_<mlir::pto::MaskPattern>(m, "MaskPattern")
       .value("P0101", mlir::pto::MaskPattern::P0101)
-      .value("P0011", mlir::pto::MaskPattern::P0011)
-      .value("P0110", mlir::pto::MaskPattern::P0110)
-      .value("P0001", mlir::pto::MaskPattern::P0001)
-      .value("P1111", mlir::pto::MaskPattern::P1111)
       .value("P1010", mlir::pto::MaskPattern::P1010)
+      .value("P0001", mlir::pto::MaskPattern::P0001)
+      .value("P0010", mlir::pto::MaskPattern::P0010)
+      .value("P0100", mlir::pto::MaskPattern::P0100)
+      .value("P1000", mlir::pto::MaskPattern::P1000)
+      .value("P1111", mlir::pto::MaskPattern::P1111)
       .export_values();
+    py::object maskPatternEnumType = m.attr("MaskPattern");
 
     mlir_attribute_subclass(m, "BLayoutAttr",
                         [](MlirAttribute a) -> bool {
@@ -191,6 +223,45 @@ PYBIND11_MODULE(_pto, m) {
             "get",
             [](py::object cls, mlir::pto::PadValue value, MlirContext ctx) -> py::object {
             MlirAttribute a = mlirPTOPadValueAttrGet(ctx, static_cast<int32_t>(value));
+            if (mlirAttributeIsNull(a)) return py::none();
+            return cls(a);
+            },
+            py::arg("cls"), py::arg("value"), py::arg("context") = py::none());
+
+    mlir_attribute_subclass(m, "CompactModeAttr",
+                            [](MlirAttribute a) -> bool {
+                            return mlirPTOAttrIsACompactModeAttr(a);
+                            })
+        .def_classmethod(
+            "get",
+            [](py::object cls, mlir::pto::CompactMode value, MlirContext ctx) -> py::object {
+            MlirAttribute a = mlirPTOCompactModeAttrGet(ctx, static_cast<int32_t>(value));
+            if (mlirAttributeIsNull(a)) return py::none();
+            return cls(a);
+            },
+            py::arg("cls"), py::arg("value"), py::arg("context") = py::none());
+
+    mlir_attribute_subclass(m, "AccToVecModeAttr",
+                            [](MlirAttribute a) -> bool {
+                            return mlirPTOAttrIsAAccToVecModeAttr(a);
+                            })
+        .def_classmethod(
+            "get",
+            [](py::object cls, mlir::pto::AccToVecMode value, MlirContext ctx) -> py::object {
+            MlirAttribute a = mlirPTOAccToVecModeAttrGet(ctx, static_cast<int32_t>(value));
+            if (mlirAttributeIsNull(a)) return py::none();
+            return cls(a);
+            },
+            py::arg("cls"), py::arg("value"), py::arg("context") = py::none());
+
+    mlir_attribute_subclass(m, "ReluPreModeAttr",
+                            [](MlirAttribute a) -> bool {
+                            return mlirPTOAttrIsAReluPreModeAttr(a);
+                            })
+        .def_classmethod(
+            "get",
+            [](py::object cls, mlir::pto::ReluPreMode value, MlirContext ctx) -> py::object {
+            MlirAttribute a = mlirPTOReluPreModeAttrGet(ctx, static_cast<int32_t>(value));
             if (mlirAttributeIsNull(a)) return py::none();
             return cls(a);
             },
@@ -246,6 +317,33 @@ PYBIND11_MODULE(_pto, m) {
         "value",
         [](MlirAttribute self) -> int32_t {
         return mlirPTORoundModeAttrGetValue(self);
+        });
+
+    mlir_attribute_subclass(
+        m, "SaturationModeAttr",
+        [](MlirAttribute a) { return mlirPTOAttrIsASaturationModeAttr(a); })
+     .def_classmethod(
+         "get",
+        [](py::object cls, py::object value, MlirContext ctx) -> py::object {
+        int32_t v = 0;
+        if (py::isinstance<py::int_>(value)) {
+            v = value.cast<int32_t>();
+        } else if (py::hasattr(value, "value")) {
+            v = value.attr("value").cast<int32_t>();
+        } else {
+            throw std::runtime_error("SaturationModeAttr.get expects int or SaturationMode enum");
+        }
+
+        MlirAttribute a = mlirPTOSaturationModeAttrGet(ctx, v);
+        if (mlirAttributeIsNull(a)) return py::none();
+        return cls.attr("__call__")(a);
+         },
+        py::arg("cls"), py::arg("value"), py::arg("context") = py::none())
+
+    .def_property_readonly(
+        "value",
+        [](MlirAttribute self) -> int32_t {
+        return mlirPTOSaturationModeAttrGetValue(self);
         });
 
     mlir_attribute_subclass(
@@ -363,9 +461,14 @@ PYBIND11_MODULE(_pto, m) {
             return mlirPTOEventAttrGetValue(self);
           });
 
+    py::enum_<mlir::pto::QuantType>(m, "QuantType")
+      .value("INT8_SYM",  mlir::pto::QuantType::INT8_SYM)
+      .value("INT8_ASYM", mlir::pto::QuantType::INT8_ASYM)
+      .export_values();
+
     mlir_attribute_subclass(
-        m, "MaskPatternAttr",
-        [](MlirAttribute a) { return mlirPTOAttrIsAMaskPatternAttr(a); })
+        m, "QuantTypeAttr",
+        [](MlirAttribute a) { return mlirPTOAttrIsAQuantTypeAttr(a); })
       .def_classmethod(
           "get",
           [](py::object cls, py::object value, MlirContext ctx) -> py::object {
@@ -375,15 +478,63 @@ PYBIND11_MODULE(_pto, m) {
             } else if (py::hasattr(value, "value")) {
               v = value.attr("value").cast<int32_t>();
             } else {
-              throw std::runtime_error("MaskPatternAttr.get expects int or MaskPattern enum");
+              throw std::runtime_error("QuantTypeAttr.get expects int or QuantType enum");
             }
-            MlirAttribute a = mlirPTOMaskPatternAttrGet(ctx, v);
+            MlirAttribute a = mlirPTOQuantTypeAttrGet(ctx, v);
             if (mlirAttributeIsNull(a)) return py::none();
             return cls.attr("__call__")(a);
           },
           py::arg("cls"), py::arg("value"), py::arg("context") = py::none())
       .def_property_readonly(
           "value",
+          [](MlirAttribute self) -> int32_t {
+            return mlirPTOQuantTypeAttrGetValue(self);
+          });
+
+    mlir_attribute_subclass(
+        m, "MaskPatternAttr",
+        [](MlirAttribute a) { return mlirPTOAttrIsAMaskPatternAttr(a); })
+      .def_classmethod(
+          "get",
+          [maskPatternEnumType](py::object cls, py::object value,
+                                MlirContext ctx) -> py::object {
+            MlirAttribute a{nullptr};
+            if (py::isinstance(value, maskPatternEnumType)) {
+              auto v =
+                  static_cast<MlirPTOMaskPattern>(value.attr("value").cast<int32_t>());
+              a = mlirPTOMaskPatternAttrGetEnum(ctx, v);
+            } else if (py::isinstance<py::int_>(value)) {
+              int32_t v = py::cast<int32_t>(value);
+              a = mlirPTOMaskPatternAttrGet(ctx, v);
+              if (mlirAttributeIsNull(a))
+                throw std::runtime_error(
+                    "MaskPatternAttr.get(int, ...) only accepts unambiguous values {0,3,6,7}; "
+                    "use MaskPattern enum for ISA values and get_legacy_raw(...) for historical raw encodings");
+            } else {
+              throw std::runtime_error("MaskPatternAttr.get expects int or MaskPattern enum");
+            }
+            if (mlirAttributeIsNull(a)) return py::none();
+            return cls.attr("__call__")(a);
+          },
+          py::arg("cls"), py::arg("value"), py::arg("context") = py::none())
+      .def_classmethod(
+          "get_legacy_raw",
+          [](py::object cls, int32_t value, MlirContext ctx) -> py::object {
+            MlirAttribute a = mlirPTOMaskPatternAttrGetLegacyRaw(ctx, value);
+            if (mlirAttributeIsNull(a))
+              throw std::runtime_error(
+                  "MaskPatternAttr.get_legacy_raw(...) only accepts historical raw values {0,3,4,5}");
+            return cls.attr("__call__")(a);
+          },
+          py::arg("cls"), py::arg("value"), py::arg("context") = py::none())
+      .def_property_readonly(
+          "value",
+          [](MlirAttribute self) -> mlir::pto::MaskPattern {
+            return static_cast<mlir::pto::MaskPattern>(
+                mlirPTOMaskPatternAttrGetEnumValue(self));
+          })
+      .def_property_readonly(
+          "int_value",
           [](MlirAttribute self) -> int32_t {
             return mlirPTOMaskPatternAttrGetValue(self);
           });
@@ -411,6 +562,28 @@ PYBIND11_MODULE(_pto, m) {
             [](MlirType self) -> MlirType {
                 return mlirPTOPtrTypeGetElementType(self);
             });
+
+    mlir_type_subclass(
+        m, "AsyncSessionType",
+        [](MlirType type) -> bool { return mlirPTOTypeIsAAsyncSessionType(type); })
+        .def_classmethod(
+            "get",
+            [](py::object cls, MlirContext context) -> py::object {
+                MlirType t = mlirPTOAsyncSessionTypeGet(context);
+                return cls.attr("__call__")(t);
+            },
+            py::arg("cls"), py::arg("context") = py::none());
+
+    mlir_type_subclass(
+        m, "AsyncEventType",
+        [](MlirType type) -> bool { return mlirPTOTypeIsAAsyncEventType(type); })
+        .def_classmethod(
+            "get",
+            [](py::object cls, MlirContext context) -> py::object {
+                MlirType t = mlirPTOAsyncEventTypeGet(context);
+                return cls.attr("__call__")(t);
+            },
+            py::arg("cls"), py::arg("context") = py::none());
 
     // --------------------------------------------------------------------------
     // !pto.tensor_view<shape x elem>
@@ -533,11 +706,25 @@ PYBIND11_MODULE(_pto, m) {
                 MlirAttribute slayout,
                 int32_t s_fractal_size,
                 MlirAttribute pad,
-                MlirContext ctx) -> py::object {
+                MlirContext ctx,
+                py::object compactModeObj) -> py::object {
                 MlirType i32 = mlirIntegerTypeGet(ctx, 32);
                 MlirAttribute sz = mlirIntegerAttrGet(i32, s_fractal_size);
-
-                MlirAttribute a = mlirPTOTileBufConfigAttrGet(ctx, blayout, slayout, sz, pad);
+                MlirAttribute compactMode = mlirPTOCompactModeAttrGet(
+                    ctx, static_cast<int32_t>(mlir::pto::CompactMode::Null));
+                if (!compactModeObj.is_none()) {
+                  if (py::isinstance<py::int_>(compactModeObj)) {
+                    compactMode = mlirPTOCompactModeAttrGet(
+                        ctx, compactModeObj.cast<int32_t>());
+                  } else if (py::hasattr(compactModeObj, "value")) {
+                    compactMode = mlirPTOCompactModeAttrGet(
+                        ctx, compactModeObj.attr("value").cast<int32_t>());
+                  } else {
+                    compactMode = compactModeObj.cast<MlirAttribute>();
+                  }
+                }
+                MlirAttribute a = mlirPTOTileBufConfigAttrGetWithCompactMode(
+                    ctx, blayout, slayout, sz, pad, compactMode);
                 if (mlirAttributeIsNull(a)) return py::none();
                 return cls(a);
             },
@@ -546,7 +733,8 @@ PYBIND11_MODULE(_pto, m) {
             py::arg("slayout"),
             py::arg("s_fractal_size"),
             py::arg("pad"),
-            py::arg("context") = py::none());
+            py::arg("context") = py::none(),
+            py::arg("compact_mode") = py::none());
 
     // ---- TileBufType ----
     mlir_type_subclass(m, "TileBufType",
@@ -620,4 +808,8 @@ PYBIND11_MODULE(_pto, m) {
             py::arg("cls"), py::arg("type"));
 	
 	populatePTODialectSubmodule(m);
+}
+
+PYBIND11_MODULE(_pto, m) {
+  bindPTOModule(m);
 }

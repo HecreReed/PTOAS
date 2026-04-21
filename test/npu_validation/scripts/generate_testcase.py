@@ -1,9 +1,19 @@
 #!/usr/bin/env python3
+# Copyright (c) 2026 Huawei Technologies Co., Ltd.
+# This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+# CANN Open Software License Agreement Version 2.0 (the "License").
+# Please refer to the License for details. You may not use this file except in compliance with the License.
+# THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+# INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+# See LICENSE in the root of the software repository for the full text of the License.
+
 # coding=utf-8
 
 import argparse
 import ast
+import os
 import re
+import shutil
 from pathlib import Path
 from typing import Optional
 
@@ -61,6 +71,73 @@ INCLUDE_REPLACEMENT = (
     "#endif\n"
 )
 
+UNSTABLE_A3_CUSTOM_GOLDEN_CASES = frozenset({
+    "abs",
+    "partmin",
+    "prelu",
+    "rowexpanddiv",
+    "rowexpandmul",
+    "rowexpandsub",
+    "scatter",
+    "sel",
+    "sels",
+    "sub",
+    "xor",
+})
+
+CASE_INT_SCALAR_DEFAULTS = {
+    "qwen3_decode_incore_4": {
+        "v11": 1,
+        "v12": 0,
+        "v13": 1,
+    },
+    "qwen3_decode_incore_5": {
+        "v4": 1,
+        "v5": 1,
+        "v6": 1,
+        "v7": 0,
+    },
+    "qwen3_decode_incore_6": {
+        "v5": 1,
+        "v6": 1,
+        "v7": 0,
+    },
+    "qwen3_decode_incore_7": {
+        "v4": 1,
+        "v5": 1,
+        "v6": 1,
+        "v7": 0,
+    },
+    "qwen3_decode_incore_8": {
+        "v5": 2,
+        "v6": 1,
+    },
+    "qwen3_decode_incore_9": {
+        "v4": 1,
+        "v5": 64,
+    },
+    "qwen3_decode_incore_10": {
+        "v4": 1,
+        "v5": 64,
+    },
+    "qwen3_decode_incore_12": {
+        "v4": 256,
+    },
+    "qwen3_decode_incore_13": {
+        "v4": 256,
+    },
+    "qwen3_decode_incore_15": {
+        "v4": 128,
+    },
+    "qwen3_decode_incore_16": {
+        "v4": 1,
+        "v5": 128,
+    },
+}
+
+CASE_POINTER_COUNT_MINIMUMS = {
+}
+
 
 def _parse_shape(text: str):
     match = re.search(r"Shape<(\d+)\s*,\s*(\d+)>", text)
@@ -70,6 +147,388 @@ def _parse_shape(text: str):
     if match:
         return int(match.group(1)), int(match.group(2))
     return 32, 32
+
+
+def _split_params_blob(params_blob: str):
+    params_blob = params_blob.strip()
+    if not params_blob:
+        return []
+    params = []
+    depth = 0
+    start = 0
+    for idx, ch in enumerate(params_blob):
+        if ch == "<":
+            depth += 1
+        elif ch == ">":
+            depth = max(depth - 1, 0)
+        elif ch == "," and depth == 0:
+            params.append(params_blob[start:idx].strip())
+            start = idx + 1
+    last = params_blob[start:].strip()
+    if last:
+        params.append(last)
+    return params
+
+
+def _find_matching_brace(text: str, open_brace_index: int) -> Optional[int]:
+    depth = 0
+    for idx in range(open_brace_index, len(text)):
+        ch = text[idx]
+        if ch == "{":
+            depth += 1
+        elif ch == "}":
+            depth -= 1
+            if depth == 0:
+                return idx
+    return None
+
+
+def _find_matching_paren(text: str, open_paren_index: int) -> Optional[int]:
+    depth = 0
+    for idx in range(open_paren_index, len(text)):
+        ch = text[idx]
+        if ch == "(":
+            depth += 1
+        elif ch == ")":
+            depth -= 1
+            if depth == 0:
+                return idx
+    return None
+
+
+def _split_top_level(text: str, sep: str) -> list[str]:
+    parts = []
+    start = 0
+    paren_depth = 0
+    brace_depth = 0
+    bracket_depth = 0
+    for idx, ch in enumerate(text):
+        if ch == "(":
+            paren_depth += 1
+        elif ch == ")":
+            paren_depth = max(paren_depth - 1, 0)
+        elif ch == "{":
+            brace_depth += 1
+        elif ch == "}":
+            brace_depth = max(brace_depth - 1, 0)
+        elif ch == "[":
+            bracket_depth += 1
+        elif ch == "]":
+            bracket_depth = max(bracket_depth - 1, 0)
+        elif (
+            ch == sep
+            and paren_depth == 0
+            and brace_depth == 0
+            and bracket_depth == 0
+        ):
+            parts.append(text[start:idx].strip())
+            start = idx + 1
+    parts.append(text[start:].strip())
+    return parts
+
+
+def _extract_function_body(function_text: str) -> str:
+    brace_index = function_text.find("{")
+    if brace_index < 0:
+        return ""
+    end_index = _find_matching_brace(function_text, brace_index)
+    if end_index is None:
+        return ""
+    body = function_text[brace_index + 1:end_index].strip()
+    body = re.sub(r"\breturn\s*;\s*$", "", body, flags=re.S).rstrip()
+    return body
+
+
+def _strip_ptoas_auto_sync_tail(body: str) -> tuple[str, bool]:
+    pattern = re.compile(
+        r"\n?\s*ptoas_auto_sync_tail\s*\([^;]*\)\s*;\s*$",
+        re.S,
+    )
+    updated = pattern.sub("", body.rstrip())
+    return updated.rstrip(), updated != body.rstrip()
+
+
+def _indent_block(text: str, spaces: int = 4) -> str:
+    prefix = " " * spaces
+    return "\n".join((prefix + line) if line else "" for line in text.splitlines())
+
+
+def _split_cpp_args(text: str):
+    text = text.strip()
+    if not text:
+        return []
+    parts = []
+    depth_angle = 0
+    depth_paren = 0
+    depth_brace = 0
+    depth_bracket = 0
+    start = 0
+    for idx, ch in enumerate(text):
+        if ch == "<":
+            depth_angle += 1
+        elif ch == ">":
+            depth_angle = max(depth_angle - 1, 0)
+        elif ch == "(":
+            depth_paren += 1
+        elif ch == ")":
+            depth_paren = max(depth_paren - 1, 0)
+        elif ch == "{":
+            depth_brace += 1
+        elif ch == "}":
+            depth_brace = max(depth_brace - 1, 0)
+        elif ch == "[":
+            depth_bracket += 1
+        elif ch == "]":
+            depth_bracket = max(depth_bracket - 1, 0)
+        elif ch == "," and depth_angle == 0 and depth_paren == 0 and depth_brace == 0 and depth_bracket == 0:
+            parts.append(text[start:idx].strip())
+            start = idx + 1
+    parts.append(text[start:].strip())
+    return [part for part in parts if part]
+
+
+def _extract_aicore_functions(text: str):
+    pattern = re.compile(
+        r"(?P<global>__global__\s+)?AICORE\s+void\s+(?P<name>\w+)\s*\((?P<params>[^)]*)\)\s*\{",
+        re.S,
+    )
+    functions = []
+    for match in pattern.finditer(text):
+        brace_index = text.find("{", match.end("params"))
+        if brace_index < 0:
+            continue
+        end_index = _find_matching_brace(text, brace_index)
+        if end_index is None:
+            continue
+        params_blob = match.group("params").strip()
+        functions.append(
+            {
+                "name": match.group("name"),
+                "params_blob": params_blob,
+                "raw_params": _split_params_blob(params_blob),
+                "is_global": bool(match.group("global")),
+                "text": text[match.start():end_index + 1],
+            }
+        )
+    return functions
+
+
+def _describe_kernel_source(text: str):
+    functions = _extract_aicore_functions(text)
+    for func in functions:
+        if func["is_global"]:
+            return {
+                "kind": "global",
+                "kernel_name": func["name"],
+                "raw_params": func["raw_params"],
+                "analysis_texts": [func["text"]],
+                "writer_texts": [func["text"]],
+                "call_text": func["text"],
+            }
+
+    mixed_groups = {}
+    for func in functions:
+        name = func["name"]
+        for suffix in ("_aic", "_aiv"):
+            if not name.endswith(suffix):
+                continue
+            base = name[: -len(suffix)]
+            group = mixed_groups.setdefault(base, {})
+            group[suffix[1:]] = func
+            break
+
+    for base, group in mixed_groups.items():
+        if "aic" in group and "aiv" in group:
+            params = group["aiv"]["raw_params"] or group["aic"]["raw_params"]
+            return {
+                "kind": "mixed",
+                "kernel_name": base,
+                "raw_params": params,
+                "analysis_texts": [group["aic"]["text"], group["aiv"]["text"]],
+                "writer_texts": [group["aiv"]["text"]],
+                "aic_text": group["aic"]["text"],
+                "aiv_text": group["aiv"]["text"],
+                "call_text": group["aiv"]["text"],
+            }
+
+    return {
+        "kind": "fallback",
+        "kernel_name": "kernel",
+        "raw_params": [],
+        "analysis_texts": [text],
+        "writer_texts": [text],
+        "call_text": text,
+    }
+
+
+def _append_mixed_kernel_wrapper(
+    kernel_text: str,
+    kernel_name: str,
+    raw_params: list[str],
+    aic_text: str,
+    aiv_text: str,
+) -> str:
+    pipe_decl_pattern = re.compile(
+        r"^(?P<indent>\s*)auto\s+(?P<name>\w+)\s*=\s*(?P<type>TPipe<[^;=]+>)\s*\((?P<args>[^;]*)\)\s*;\s*$",
+        re.M,
+    )
+    param_names = {_extract_cpp_name(param) for param in raw_params}
+    safe_identifiers = {"nullptr", "NULL", "true", "false"}
+
+    def _find_decl_init(prefix: str, name: str):
+        pattern = re.compile(
+            rf"^\s*(?P<type>[^=\n;]+?)\s+{re.escape(name)}\s*=\s*(?P<init>[^;]+);\s*$",
+            re.M,
+        )
+        match = None
+        for current in pattern.finditer(prefix):
+            match = current
+        if match is None:
+            return None, None, None
+        return match.group("type").strip(), match.group("init").strip(), match.start()
+
+    def _render_pointer_init(type_text: str, init_text: str) -> str:
+        expr = init_text.strip()
+        if "*" not in type_text:
+            return expr
+        if expr.startswith("(") or expr.startswith("reinterpret_cast") or expr.startswith("static_cast"):
+            return expr
+        return f"({type_text}){expr}"
+
+    def _resolve_ctor_arg(arg_text: str, prefix: str, depth: int = 0):
+        arg_text = arg_text.strip()
+        if not arg_text:
+            return None
+        if depth > 8:
+            return None
+        if not re.fullmatch(r"[A-Za-z_]\w*", arg_text):
+            return arg_text
+        if arg_text in safe_identifiers:
+            return arg_text
+        if arg_text in param_names:
+            return arg_text
+        type_text, init_text, decl_start = _find_decl_init(prefix, arg_text)
+        if type_text is None or init_text is None:
+            return None
+        resolved_init = init_text
+        if (
+            re.fullmatch(r"[A-Za-z_]\w*", init_text)
+            and init_text not in param_names
+            and init_text not in safe_identifiers
+        ):
+            resolved_init = _resolve_ctor_arg(init_text, prefix[:decl_start], depth + 1)
+            if resolved_init is None:
+                return None
+        return _render_pointer_init(type_text, resolved_init)
+
+    def _extract_pipe_decls(body: str):
+        decls = []
+        for match in pipe_decl_pattern.finditer(body):
+            ctor_args = _split_cpp_args(match.group("args"))
+            prefix = body[:match.start()]
+            resolved_args = []
+            for arg in ctor_args:
+                resolved = _resolve_ctor_arg(arg, prefix)
+                if resolved is None:
+                    break
+                resolved_args.append(resolved)
+            else:
+                decls.append(
+                    {
+                        "name": match.group("name"),
+                        "type_text": match.group("type").strip(),
+                        "ctor_args": tuple(resolved_args),
+                        "span": match.span(),
+                    }
+                )
+        return decls
+
+    def _rewrite_body(body: str, replacements):
+        rewritten = body
+        for replacement in sorted(replacements, key=lambda item: item["span"][0], reverse=True):
+            start, end = replacement["span"]
+            rewritten = rewritten[:start] + rewritten[end:]
+        for replacement in replacements:
+            rewritten = re.sub(
+                rf"\b{re.escape(replacement['old_name'])}\b",
+                replacement["new_name"],
+                rewritten,
+            )
+        return rewritten.strip()
+
+    def _next_shared_name(seed: int, texts: list[str]) -> str:
+        index = seed
+        while True:
+            name = f"__ptoas_shared_pipe{index}"
+            if all(name not in text for text in texts):
+                return name
+            index += 1
+
+    aic_body = _extract_function_body(aic_text)
+    aiv_body = _extract_function_body(aiv_text)
+    aic_body, aic_has_tail = _strip_ptoas_auto_sync_tail(aic_body)
+    aiv_body, aiv_has_tail = _strip_ptoas_auto_sync_tail(aiv_body)
+    aic_decls = _extract_pipe_decls(aic_body)
+    aiv_decls = _extract_pipe_decls(aiv_body)
+
+    shared_pairs = []
+    aiv_by_key = {}
+    for decl in aiv_decls:
+        key = (decl["type_text"], decl["ctor_args"])
+        aiv_by_key.setdefault(key, []).append(decl)
+    for decl in aic_decls:
+        key = (decl["type_text"], decl["ctor_args"])
+        bucket = aiv_by_key.get(key)
+        if not bucket:
+            continue
+        shared_pairs.append((decl, bucket.pop(0)))
+
+    shared_decls = []
+    aic_replacements = []
+    aiv_replacements = []
+    shared_seed = 0
+    texts_for_name_check = [kernel_text, aic_body, aiv_body]
+    for aic_decl, aiv_decl in shared_pairs:
+        shared_name = _next_shared_name(shared_seed, texts_for_name_check)
+        shared_seed += 1
+        texts_for_name_check.append(shared_name)
+        shared_decls.append(
+            f"  auto {shared_name} = {aic_decl['type_text']}({', '.join(aic_decl['ctor_args'])});"
+        )
+        aic_replacements.append(
+            {
+                "old_name": aic_decl["name"],
+                "new_name": shared_name,
+                "span": aic_decl["span"],
+            }
+        )
+        aiv_replacements.append(
+            {
+                "old_name": aiv_decl["name"],
+                "new_name": shared_name,
+                "span": aiv_decl["span"],
+            }
+        )
+
+    wrapper_blocks = []
+    for body in (_rewrite_body(aic_body, aic_replacements), _rewrite_body(aiv_body, aiv_replacements)):
+        if not body:
+            continue
+        wrapper_blocks.append("  {\n" + _indent_block(body) + "\n  }")
+
+    if not wrapper_blocks:
+        return kernel_text
+
+    wrapper = (
+        "\n\n"
+        f"__global__ AICORE void {kernel_name}({', '.join(raw_params)}) {{\n"
+        + ("\n".join(shared_decls) + ("\n\n" if shared_decls else ""))
+        + "\n".join(wrapper_blocks)
+        + ("\n  ptoas_auto_sync_tail(PTOAutoSyncTailMode::kBarrierAll);" if (aic_has_tail or aiv_has_tail) else "")
+        + "\n"
+        "}\n"
+    )
+    return kernel_text.rstrip() + wrapper
 
 
 def _is_gm_pointer_param(param: str) -> bool:
@@ -112,6 +571,44 @@ def _strip_param_name(raw: str, name: str) -> str:
     return stripped.strip()
 
 
+def _strip_enclosing_parens(expr: str) -> str:
+    expr = expr.strip()
+    while expr.startswith("(") and expr.endswith(")"):
+        depth = 0
+        ok = True
+        for idx, ch in enumerate(expr):
+            if ch == "(":
+                depth += 1
+            elif ch == ")":
+                depth -= 1
+                if depth == 0 and idx != len(expr) - 1:
+                    ok = False
+                    break
+        if ok and depth == 0:
+            expr = expr[1:-1].strip()
+        else:
+            break
+    return expr
+
+
+def _strip_simple_casts(expr: str) -> str:
+    cur = expr.strip()
+    for _ in range(8):
+        prev = cur
+        cur = _strip_enclosing_parens(cur)
+        match = re.match(r"^(?:reinterpret_cast|static_cast|const_cast|dynamic_cast)\s*<[^>]+>\s*\((.*)\)$", cur, re.S)
+        if match:
+            cur = match.group(1).strip()
+            continue
+        match = re.match(r"^\(\s*[^()]+\s*\)\s*(.+)$", cur, re.S)
+        if match:
+            cur = match.group(1).strip()
+            continue
+        if cur == prev:
+            break
+    return cur
+
+
 def _infer_void_gm_pointee_type(text: str, param_name: str) -> Optional[str]:
     # Common patterns in PTOAS-generated kernels:
     #   __gm__ int16_t* v16 = (__gm__ int16_t*) v1;
@@ -134,56 +631,88 @@ def _infer_void_gm_pointee_type(text: str, param_name: str) -> Optional[str]:
     return None
 
 
-def _detect_output_pointer_param(text: str, pointer_param_names):
-    if not pointer_param_names:
+def _ordered_unique(items):
+    seen = set()
+    out = []
+    for item in items:
+        if item in seen:
+            continue
+        seen.add(item)
+        out.append(item)
+    return out
+
+
+def _resolve_pointer_param_from_expr(expr: str, pointer_param_names, ptr_to_param, ptr_to_base) -> Optional[str]:
+    if not expr:
         return None
+    cur = _strip_simple_casts(expr)
+    match = re.match(r"^(\w+)\s*\+", cur)
+    if match:
+        cur = match.group(1)
+    elif re.fullmatch(r"[A-Za-z_]\w*", cur):
+        cur = cur
+    else:
+        return None
+
+    pointer_params = set(pointer_param_names)
+    seen = set()
+    for _ in range(12):
+        if cur in seen:
+            break
+        seen.add(cur)
+        if cur in pointer_params:
+            return cur
+        mapped = ptr_to_param.get(cur)
+        if mapped:
+            cur = mapped
+            continue
+        mapped = ptr_to_base.get(cur)
+        if mapped:
+            cur = mapped
+            continue
+        break
+    return None
+
+
+def _detect_output_pointer_params(text: str, pointer_param_names):
+    if not pointer_param_names:
+        return []
 
     tstore_gts = re.findall(r"\bTSTORE\s*\(\s*(\w+)\s*,", text)
     if not tstore_gts:
-        return None
+        return []
 
-    gt_to_ptr = {}
-    for m in re.finditer(r"\b(\w+)\s*=\s*[\w:<>]+\s*\(\s*(\w+)\s*[,)]", text):
-        gt_to_ptr[m.group(1)] = m.group(2)
+    gt_to_expr = {}
+    for match in re.finditer(
+        r"\bGlobalTensor<[^;\n]*>\s+(\w+)\s*=\s*GlobalTensor<[^;\n]*>\(([^,]+?)\s*,",
+        text,
+    ):
+        gt_to_expr.setdefault(match.group(1), match.group(2).strip())
+    for match in re.finditer(r"\b(\w+)\s+(\w+)\s*=\s*\1\s*\(([^,]+?)\s*,", text):
+        gt_to_expr.setdefault(match.group(2), match.group(3).strip())
 
     ptr_to_base = {}
-    for m in re.finditer(r"__gm__\s+[\w:<>]+\s*\*\s*(\w+)\s*=\s*(\w+)\s*\+", text):
-        ptr_to_base[m.group(1)] = m.group(2)
+    for match in re.finditer(r"__gm__\s+[\w:<>]+\s*\*\s*(\w+)\s*=\s*(\w+)\s*\+", text):
+        ptr_to_base[match.group(1)] = match.group(2)
+    for match in re.finditer(r"\b(\w+)\s*=\s*(\w+)\s*\+\s*[^;]+;", text):
+        ptr_to_base.setdefault(match.group(1), match.group(2))
 
     ptr_to_param = {}
-    for m in re.finditer(
+    for match in re.finditer(
         r"__gm__\s+[\w:<>]+\s*\*\s*(\w+)\s*=\s*\(__gm__\s+[\w:<>]+\s*\*\)\s*(\w+)\b",
         text,
     ):
-        ptr_to_param[m.group(1)] = m.group(2)
+        ptr_to_param[match.group(1)] = match.group(2)
+    for match in re.finditer(r"\b(\w+)\s*=\s*\(__gm__\s+[\w:<>]+\s*\*\)\s*(\w+)\b", text):
+        ptr_to_param.setdefault(match.group(1), match.group(2))
 
-    def resolve_param(ptr: Optional[str]) -> Optional[str]:
-        if not ptr:
-            return None
-        cur = ptr
-        seen = set()
-        for _ in range(8):
-            if cur in seen:
-                break
-            seen.add(cur)
-            if cur in pointer_param_names:
-                return cur
-            mapped = ptr_to_param.get(cur)
-            if mapped in pointer_param_names:
-                return mapped
-            cur = ptr_to_base.get(cur)
-            if cur is None:
-                break
-        return None
-
+    outputs = []
     for gt in tstore_gts:
-        ptr = gt_to_ptr.get(gt)
-        if not ptr:
-            continue
-        resolved = resolve_param(ptr)
-        if resolved:
-            return resolved
-    return None
+        expr = gt_to_expr.get(gt)
+        param = _resolve_pointer_param_from_expr(expr, pointer_param_names, ptr_to_param, ptr_to_base)
+        if param:
+            outputs.append(param)
+    return _ordered_unique(outputs)
 
 
 def _detect_set_ffts_pointer_params(text: str, pointer_param_names):
@@ -276,24 +805,7 @@ def _parse_kernel_params(text: str):
     match = re.search(r"__global__\s+(?:\w+\s+)*void\s+\w+\s*\(([^)]*)\)", text, re.S)
     if not match:
         return []
-    params_blob = match.group(1).strip()
-    if not params_blob:
-        return []
-    params = []
-    depth = 0
-    start = 0
-    for idx, ch in enumerate(params_blob):
-        if ch == "<":
-            depth += 1
-        elif ch == ">":
-            depth = max(depth - 1, 0)
-        elif ch == "," and depth == 0:
-            params.append(params_blob[start:idx].strip())
-            start = idx + 1
-    last = params_blob[start:].strip()
-    if last:
-        params.append(last)
-    return params
+    return _split_params_blob(match.group(1))
 
 
 def _parse_kernel_name(text: str) -> str:
@@ -328,6 +840,10 @@ def _cpp_host_type(cpp_type: str) -> str:
     return cpp_type
 
 
+def _is_bf16_cpp_type(cpp_type: str) -> bool:
+    return cpp_type in {"__bf16", "bfloat16_t"}
+
+
 def _rewrite_host_unsupported_types(text: str) -> str:
     # `bisheng -xcce` performs a host-side pass that parses kernel launch code.
     # Some device-only builtin types (e.g. `__bf16`) are rejected there.
@@ -343,6 +859,19 @@ def _default_eps_for_cpp_type(cpp_type: str) -> float:
     return 0.0
 
 
+def _default_bf16_max_ulp_for_cpp_type(cpp_type: str) -> int:
+    return 1 if _is_bf16_cpp_type(cpp_type) else 0
+
+
+def _integer_scalar_default_value(testcase: str, name: str, host_type: str) -> Optional[int]:
+    override = CASE_INT_SCALAR_DEFAULTS.get(testcase, {}).get(name)
+    if override is not None:
+        return int(override)
+    if re.match(r"^(u?int)(8|16|32|64)_t$", host_type) or host_type in {"int", "unsigned", "size_t"}:
+        return 1
+    return None
+
+
 def _derive_testcase_name(input_cpp: Path) -> str:
     name = input_cpp.stem
     if name.endswith("-pto"):
@@ -350,6 +879,47 @@ def _derive_testcase_name(input_cpp: Path) -> str:
     if name.endswith("_pto"):
         name = name[:-4]
     return name
+
+
+def _resolve_sample_root(input_cpp: Path) -> Path:
+    parent = input_cpp.parent
+    if parent.name == "npu_validation":
+        return parent.parent
+    if parent.parent.name == "npu_validation":
+        return parent.parent.parent
+    return parent
+
+
+def _find_custom_case_asset(sample_root: Path, testcase: str, filename: str) -> Optional[Path]:
+    candidates = (
+        sample_root / f"{testcase}_{filename}",
+        sample_root / "npu_validation" / testcase / filename,
+        sample_root / "npu_validation" / filename,
+    )
+    for candidate in candidates:
+        if candidate.is_file():
+            return candidate
+    return None
+
+
+def _use_custom_golden_for_case(testcase: str, soc_version: str) -> bool:
+    testcase_lc = testcase.lower()
+    soc_lc = (soc_version or "").lower()
+    is_a3 = "910b" in soc_lc or os.environ.get("PTOAS_BOARD_IS_A3") == "1"
+    if is_a3 and testcase_lc in UNSTABLE_A3_CUSTOM_GOLDEN_CASES:
+        return False
+    return True
+
+
+def _copy_asset_if_needed(src: Path, dst: Path):
+    if src.resolve() == dst.resolve():
+        return
+    shutil.copy2(src, dst)
+
+
+def _copy_custom_golden_helpers(sample_root: Path, output_dir: Path):
+    for helper in sample_root.glob("*_golden_*.py"):
+        _copy_asset_if_needed(helper, output_dir / helper.name)
 
 
 def _replace_includes(text: str) -> str:
@@ -423,6 +993,9 @@ def _infer_aicore_arch(kernel_text: str, soc_version: str) -> str:
     # the "cube" arch; pure vector kernels can use the vector arch.
     #
     # IMPORTANT: the default arch depends on the Ascend SoC.
+    has_mix_macros = "__DAV_CUBE__" in kernel_text and "__DAV_VEC__" in kernel_text
+    has_intra_block_sync = "set_intra_block(" in kernel_text or "wait_intra_block(" in kernel_text
+    has_mixed_section_sync = has_mix_macros and has_intra_block_sync
     cube_markers = (
         "TileType::Mat",
         "TileType::Left",
@@ -442,15 +1015,30 @@ def _infer_aicore_arch(kernel_text: str, soc_version: str) -> str:
 
     sv = (soc_version or "").lower()
     if "950" in sv or "a5" in sv:
+        # Sectioned kernels that synchronize across DAV cube/vector regions
+        # need PTO-ISA's mixed-kernel compile mode so the toolchain chooses
+        # the correct pipe restrictions and DAV macro ownership.
+        if has_mixed_section_sync:
+            return "dav-c310"
         # Ascend950 (A5) uses A5 instruction set. pto-isa examples build A5
         # kernels with dav-c310-{vec|cube}.
         return "dav-c310-cube" if needs_cube else "dav-c310-vec"
     if "910b" in sv:
+        if has_mixed_section_sync:
+            return "dav-c310"
         # Ascend910B* (e.g. Ascend910B1) uses dav-c310 toolchain arch.
         return "dav-c310-cube" if needs_cube else "dav-c310-vec"
 
     # Default to Ascend910 (dav-c220) when SoC is unknown.
     return "dav-c220-cube" if needs_cube else "dav-c220-vec"
+
+
+def _infer_launch_block_count(kernel_text: str, testcase: str) -> int:
+    # Inter-core sync functional cases need at least two cores:
+    # one producer core does sync.set, one consumer core does sync.wait.
+    if testcase.startswith("test_intercore_sync_") and "get_block_idx()" in kernel_text:
+        return 2
+    return 1
 
 
 def _parse_int_list(blob: str):
@@ -594,7 +1182,7 @@ def _safe_eval_int_expr(expr: str, env: dict) -> Optional[int]:
     return ev(parsed)
 
 
-def _infer_int_var_maxima(kernel_text: str) -> dict:
+def _infer_int_var_maxima(kernel_text: str, seed_env: Optional[dict] = None) -> dict:
     """
     Infer max values for simple integer temporaries (e.g. v23) used in pointer
     arithmetic, by evaluating constant-ish assignments and simple for-loop ranges.
@@ -629,17 +1217,35 @@ def _infer_int_var_maxima(kernel_text: str) -> dict:
         assigns.append((name, expr))
 
     loops = []
-    for m in re.finditer(
-        r"for\s*\(\s*(?:unsigned|int|long|size_t|int(?:8|16|32|64)_t|uint(?:8|16|32|64)_t)\s+(\w+)\s*=\s*([^;]+?)\s*;\s*\1\s*<\s*([^;]+?)\s*;\s*\1\s*\+=\s*([^)]+?)\s*\)",
-        kernel_text,
-    ):
-        ind = m.group(1)
-        start = m.group(2).strip()
-        end = m.group(3).strip()
-        step = m.group(4).strip()
-        loops.append((ind, start, end, step))
+    for m in re.finditer(r"\bfor\s*\(", kernel_text):
+        open_paren = kernel_text.find("(", m.start())
+        if open_paren < 0:
+            continue
+        close_paren = _find_matching_paren(kernel_text, open_paren)
+        if close_paren is None:
+            continue
+        header = kernel_text[open_paren + 1:close_paren]
+        parts = _split_top_level(header, ";")
+        if len(parts) != 3:
+            continue
+        init, cond, step = parts
+        init_m = re.match(
+            r"^\s*(?:unsigned|int|long|size_t|int(?:8|16|32|64)_t|uint(?:8|16|32|64)_t)\s+(\w+)\s*=\s*(.+?)\s*$",
+            init,
+        )
+        if not init_m:
+            continue
+        ind = init_m.group(1)
+        cond_m = re.match(rf"^\s*{re.escape(ind)}\s*<\s*(.+?)\s*$", cond)
+        step_m = re.match(rf"^\s*{re.escape(ind)}\s*\+=\s*(.+?)\s*$", step)
+        if not cond_m or not step_m:
+            continue
+        loops.append((ind, init_m.group(2).strip(), cond_m.group(1).strip(), step_m.group(1).strip()))
 
-    maxima: dict[str, Optional[int]] = {}
+    maxima: dict[str, Optional[int]] = {
+        k: (None if v is None else int(v))
+        for k, v in (seed_env or {}).items()
+    }
 
     def set_max(name: str, value: int) -> bool:
         cur = maxima.get(name)
@@ -684,7 +1290,7 @@ def _infer_int_var_maxima(kernel_text: str) -> dict:
     return {k: (0 if v is None else int(v)) for k, v in maxima.items()}
 
 
-def _infer_gm_pointer_elem_counts(kernel_text: str, pointer_param_names):
+def _infer_gm_pointer_elem_counts(kernel_text: str, pointer_param_names, seed_int_env: Optional[dict] = None):
     """
     Infer minimum element counts for each __gm__ pointer param from GlobalTensor
     shape/stride metadata found in PTOAS-generated kernels.
@@ -698,7 +1304,7 @@ def _infer_gm_pointer_elem_counts(kernel_text: str, pointer_param_names):
 
     pointer_params = set(pointer_param_names)
 
-    int_max = _infer_int_var_maxima(kernel_text)
+    int_max = _infer_int_var_maxima(kernel_text, seed_env=seed_int_env)
 
     pointer_like = set(pointer_param_names)
     for m in re.finditer(r"__gm__\s+[\w:<>]+\s*\*\s*(\w+)\s*(?:=[^;]+)?;", kernel_text):
@@ -764,25 +1370,6 @@ def _infer_gm_pointer_elem_counts(kernel_text: str, pointer_param_names):
             break
         return None, None
 
-    def strip_enclosing_parens(expr: str) -> str:
-        expr = expr.strip()
-        while expr.startswith("(") and expr.endswith(")"):
-            depth = 0
-            ok = True
-            for i, ch in enumerate(expr):
-                if ch == "(":
-                    depth += 1
-                elif ch == ")":
-                    depth -= 1
-                    if depth == 0 and i != len(expr) - 1:
-                        ok = False
-                        break
-            if ok and depth == 0:
-                expr = expr[1:-1].strip()
-            else:
-                break
-        return expr
-
     def resolve_param_and_offset_expr(ptr_expr: str):
         """
         Resolve a pointer expression passed to GlobalTensor(...) back to a GM
@@ -794,22 +1381,22 @@ def _infer_gm_pointer_elem_counts(kernel_text: str, pointer_param_names):
           reinterpret_cast<__gm__ float*>(v1 + expr)
           (__gm__ float*)(v1 + expr)
         """
-        expr = strip_enclosing_parens(ptr_expr.strip())
+        expr = _strip_enclosing_parens(ptr_expr.strip())
         if not expr:
             return None, None
 
         m = re.match(r"^(?:reinterpret_cast|static_cast)<[^>]+>\((.*)\)$", expr)
         if m:
-            expr = strip_enclosing_parens(m.group(1).strip())
+            expr = _strip_enclosing_parens(m.group(1).strip())
 
         # C-style cast prefix: (__gm__ float*)expr / (float*)expr
         m = re.match(r"^\(\s*__gm__[^)]*\)\s*(.+)$", expr)
         if m:
-            expr = strip_enclosing_parens(m.group(1).strip())
+            expr = _strip_enclosing_parens(m.group(1).strip())
         else:
             m = re.match(r"^\(\s*[\w:<> ]+\*\s*\)\s*(.+)$", expr)
             if m:
-                expr = strip_enclosing_parens(m.group(1).strip())
+                expr = _strip_enclosing_parens(m.group(1).strip())
 
         m = re.match(r"^(\w+)\s*\+\s*(.+)$", expr)
         if m:
@@ -900,29 +1487,72 @@ def generate_testcase(
     soc_version: str,
     aicore_arch: Optional[str] = None,
 ):
-    sample_dir = input_cpp.parent
+    sample_root = _resolve_sample_root(input_cpp)
     if output_root:
-        output_dir = output_root / sample_dir.name / testcase
+        output_dir = output_root / sample_root.name / testcase
     else:
-        output_dir = sample_dir / "npu_validation" / testcase
+        output_dir = sample_root / "npu_validation" / testcase
     output_dir.mkdir(parents=True, exist_ok=True)
+
+    use_custom_golden = _use_custom_golden_for_case(testcase, soc_version)
+    custom_golden = _find_custom_case_asset(sample_root, testcase, "golden.py") if use_custom_golden else None
+    custom_compare = _find_custom_case_asset(sample_root, testcase, "compare.py") if use_custom_golden else None
+    shared_validation_runtime = sample_root.parent / "validation_runtime.py"
 
     raw_kernel = input_cpp.read_text(encoding="utf-8")
     raw_kernel_for_analysis = raw_kernel
+    kernel_info = _describe_kernel_source(raw_kernel_for_analysis)
     # pto.tcmp / pto.tcmps produce packed predicate masks and leave parts of the
     # logical u8 tile undefined. This can make byte-wise compares flaky.
     has_packed_pred_mask = re.search(r"\bTCMPS?\s*\(", raw_kernel_for_analysis) is not None
     has_dav_cube = "__DAV_CUBE__" in raw_kernel
     has_dav_vec = "__DAV_VEC__" in raw_kernel
+    has_intra_block_sync = "set_intra_block(" in raw_kernel or "wait_intra_block(" in raw_kernel
+    has_mixed_section_sync = has_dav_cube and has_dav_vec and has_intra_block_sync
+    has_cube_only_section = has_dav_cube and not has_dav_vec
+    has_vec_only_section = has_dav_vec and not has_dav_cube
+
+    is_mixed_kernel = kernel_info["kind"] == "mixed"
 
     if aicore_arch is None:
+        if is_mixed_kernel:
+            sv = (soc_version or "").lower()
+            if "950" in sv or "a5" in sv or "910b" in sv:
+                aicore_arch = "dav-c310"
+            else:
+                aicore_arch = "dav-c220"
         # Sectioned kernels contain `#if defined(__DAV_CUBE__)` / `__DAV_VEC__`
-        # blocks. They frequently rely on cross-section synchronization (e.g.
-        # set_flag in cube section + wait_flag in vector section). If we build
-        # with a cube-only arch, common vector intrinsics (vabs/set_vector_mask)
-        # may be unavailable; build with a vector arch and explicitly enable the
-        # section macros instead.
-        if has_dav_cube or has_dav_vec:
+        # blocks. If they also carry explicit pipe synchronization, align to
+        # PTO-ISA mix-kernel compile mode (`dav-c310`) so the toolchain owns
+        # DAV macro definition and pipe legality checks.
+        elif has_mixed_section_sync:
+            sv = (soc_version or "").lower()
+            if "950" in sv or "a5" in sv:
+                aicore_arch = "dav-c310"
+            elif "910b" in sv:
+                aicore_arch = "dav-c310"
+            else:
+                aicore_arch = "dav-c220"
+        elif has_cube_only_section:
+            # A cube-only section must keep the cube arch. Building it as vec
+            # while forcing `__DAV_CUBE__` makes AIC pipe synchronization fail
+            # legality checks on A5.
+            sv = (soc_version or "").lower()
+            if "950" in sv or "a5" in sv or "910b" in sv:
+                aicore_arch = "dav-c310-cube"
+            else:
+                aicore_arch = "dav-c220-cube"
+        elif has_vec_only_section:
+            sv = (soc_version or "").lower()
+            if "950" in sv or "a5" in sv:
+                aicore_arch = "dav-c310-vec"
+            elif "910b" in sv:
+                aicore_arch = "dav-c310-vec"
+            else:
+                aicore_arch = "dav-c220-vec"
+        elif has_dav_cube or has_dav_vec:
+            # Generic multi-section kernels without mixed-kernel sync keep the
+            # historical vec-arch + forced-macro path.
             sv = (soc_version or "").lower()
             if "950" in sv or "a5" in sv:
                 aicore_arch = "dav-c310-vec"
@@ -933,19 +1563,21 @@ def generate_testcase(
         else:
             aicore_arch = _infer_aicore_arch(raw_kernel, soc_version)
 
-    # Force-define DAV section macros so both sections are compiled into the
-    # same binary. This keeps the generated validation executable self-contained
-    # and avoids deadlocks when one side of a set/wait pair is compiled out.
+    # For single-section kernels, force-define DAV macro(s) to keep section
+    # bodies visible to the selected compile arch.
+    # For mix-kernel arch (dav-c310/dav-c220), do not force-define macros.
     dav_defines = ""
-    if has_dav_cube:
-        dav_defines += " -D__DAV_CUBE__"
-    if has_dav_vec:
-        dav_defines += " -D__DAV_VEC__"
+    is_mix_arch = aicore_arch in {"dav-c310", "dav-c220"}
+    if not is_mix_arch:
+        if has_dav_cube:
+            dav_defines += " -D__DAV_CUBE__"
+        if has_dav_vec:
+            dav_defines += " -D__DAV_VEC__"
 
-    rows, cols = _parse_shape(raw_kernel_for_analysis)
+    rows, cols = _parse_shape(kernel_info["call_text"])
     logical_elem_count = rows * cols
-    kernel_name = _parse_kernel_name(raw_kernel_for_analysis)
-    raw_params = _parse_kernel_params(raw_kernel_for_analysis)
+    kernel_name = kernel_info["kernel_name"]
+    raw_params = kernel_info["raw_params"]
     mrgsort_block_len = _infer_mrgsort_block_len(raw_kernel_for_analysis) if "TMRGSORT" in raw_kernel_for_analysis else None
 
     pointer_param_names = [_extract_cpp_name(p) for p in raw_params if _is_gm_pointer_param(p)]
@@ -963,13 +1595,17 @@ def generate_testcase(
     ffts_param_names = _detect_set_ffts_pointer_params(raw_kernel_for_analysis, pointer_param_names)
     non_ffts_pointer_param_names = [n for n in pointer_param_names if n not in ffts_param_names]
 
-    output_ptr = _detect_output_pointer_param(raw_kernel_for_analysis, non_ffts_pointer_param_names)
-    if output_ptr is None and non_ffts_pointer_param_names:
-        output_ptr = (
+    output_param_names = []
+    for writer_text in kernel_info["writer_texts"]:
+        output_param_names.extend(_detect_output_pointer_params(writer_text, non_ffts_pointer_param_names))
+    output_param_names = _ordered_unique(output_param_names)
+    if not output_param_names and non_ffts_pointer_param_names:
+        output_param_names = [
             non_ffts_pointer_param_names[0]
             if len(non_ffts_pointer_param_names) == 1
             else non_ffts_pointer_param_names[-1]
-        )
+        ]
+    output_param_name_set = set(output_param_names)
 
     params = []
     for raw in raw_params:
@@ -988,7 +1624,7 @@ def generate_testcase(
                     "role": (
                         "ffts"
                         if name in ffts_param_names
-                        else ("output" if name == output_ptr else "input")
+                        else ("output" if name in output_param_name_set else "input")
                     ),
                 }
             )
@@ -1014,11 +1650,41 @@ def generate_testcase(
     init_ptrs = list(data_ptrs)
     output_ptrs = [p for p in data_ptrs if p["role"] == "output"]
 
-    ptr_elem_counts = {p["name"]: logical_elem_count for p in data_ptrs}
-    inferred_counts = _infer_gm_pointer_elem_counts(raw_kernel_for_analysis, pointer_param_names)
-    for name, cnt in inferred_counts.items():
-        if name in ptr_elem_counts:
-            ptr_elem_counts[name] = max(ptr_elem_counts.get(name, logical_elem_count), cnt)
+    scalar_int_defaults = {
+        p["name"]: default_value
+        for p in params
+        if p["kind"] == "scalar"
+        for default_value in [_integer_scalar_default_value(testcase, p["name"], p["host_type"])]
+        if default_value is not None
+    }
+    inferred_counts = {}
+    for analysis_text in kernel_info["analysis_texts"]:
+        partial_counts = _infer_gm_pointer_elem_counts(analysis_text, pointer_param_names, seed_int_env=scalar_int_defaults)
+        for name, count in partial_counts.items():
+            inferred_counts[name] = max(inferred_counts.get(name, 0), count)
+    for name, count in CASE_POINTER_COUNT_MINIMUMS.get(testcase, {}).items():
+        inferred_counts[name] = max(inferred_counts.get(name, 0), int(count))
+    ptr_elem_counts = {}
+    for p in data_ptrs:
+        inferred = inferred_counts.get(p["name"])
+        ptr_elem_counts[p["name"]] = int(inferred) if inferred and int(inferred) > 0 else logical_elem_count
+    if testcase in {"rmsnorm_incore_0", "decode_projection_incore_0"}:
+        # These repro kernels partition a [16, hidden] ND view with a row
+        # offset. Board validation runs a single-block case, so keep bf16
+        # input/output buffers large enough for the full 16xhidden window.
+        required_elems = 16 * (5120 if testcase == "rmsnorm_incore_0" else 8192)
+        for p in data_ptrs:
+            if p["host_type"] != "uint16_t":
+                continue
+            cur = int(ptr_elem_counts.get(p["name"], logical_elem_count))
+            ptr_elem_counts[p["name"]] = max(cur, required_elems)
+        if testcase == "decode_projection_incore_0":
+            # decode_projection_incore_0 also reads gamma as f32[1, 8192].
+            for p in data_ptrs:
+                if p["host_type"] != "float":
+                    continue
+                cur = int(ptr_elem_counts.get(p["name"], logical_elem_count))
+                ptr_elem_counts[p["name"]] = max(cur, 8192)
 
     templates_root = Path(__file__).resolve().parents[1] / "templates"
     template = (templates_root / "main_template.cpp").read_text(encoding="utf-8")
@@ -1049,6 +1715,24 @@ def generate_testcase(
         if p["kind"] != "scalar":
             continue
         t = p["host_type"]
+        if testcase in {"rmsnorm_incore_0", "decode_projection_incore_0"} and t in {
+            "int8_t",
+            "uint8_t",
+            "int16_t",
+            "uint16_t",
+            "int32_t",
+            "uint32_t",
+            "int64_t",
+            "uint64_t",
+            "int",
+            "unsigned",
+            "size_t",
+        }:
+            # These kernels use this scalar as row offset (%arg3).
+            # Keep it at 0 for single-block validation to avoid shifted windows.
+            value = "0"
+            param_decls_lines.append(f"    {t} {p['name']} = {value};")
+            continue
         # Some PTO-ISA APIs use small POD structs as scalar parameters.
         # Example: pto::MrgSortExecutedNumList (used by TMRGSORT multi-list variants).
         if t.endswith("MrgSortExecutedNumList"):
@@ -1061,7 +1745,7 @@ def generate_testcase(
         if t == "bool":
             value = "true"
         elif re.match(r"^(u?int)(8|16|32|64)_t$", t) or t in {"int", "unsigned", "size_t"}:
-            value = "1"
+            value = str(_integer_scalar_default_value(testcase, p["name"], t) or 1)
         elif t in {"float"}:
             value = "1.0f"
         elif t in {"double"}:
@@ -1174,14 +1858,19 @@ def generate_testcase(
     golden_template = (templates_root / "golden_template.py").read_text(encoding="utf-8")
     input_generate = []
     elem_count = logical_elem_count
+    kernel_has_tscatter = "TSCATTER" in raw_kernel
+    kernel_has_tgather = "TGATHER" in raw_kernel
+    kernel_has_tgatherb = "TGATHERB" in raw_kernel
     # Some kernels use an integer tensor as "indices". The safe in-range domain
-    # depends on the op semantics (see pto-isa docs):
-    # - TSCATTER: indices are linear indices in [0, rows*cols)
-    # - TGATHER/TGATHERB: indices are linear indices in [0, rows*cols)
+    # depends on the op semantics:
+    # - TSCATTER: use a deterministic, collision-free permutation so NPU-vs-NPU
+    #   golden mode stays stable across runs.
+    # - TGATHER: indices are linear indices in [0, rows*cols).
+    # - TGATHERB: offsets are block addresses (bytes), not per-element indices.
     index_mod = None
-    if "TSCATTER" in raw_kernel:
+    if kernel_has_tscatter:
         index_mod = max(elem_count, 1)
-    elif any(m in raw_kernel for m in ("TGATHER", "TGATHERB")):
+    elif kernel_has_tgather and not kernel_has_tgatherb:
         index_mod = max(elem_count, 1)
     mrgsort_packed = "TMRGSORT" in raw_kernel
     for p in init_ptrs:
@@ -1189,6 +1878,10 @@ def generate_testcase(
         name = p["name"]
         size = ptr_elem_counts.get(name, elem_count)
         is_output = p.get("role") == "output"
+        is_integer = np_dtype.startswith("np.int") or np_dtype.startswith("np.uint")
+        is_tscatter_indices = kernel_has_tscatter and p.get("role") == "input" and is_integer and size == elem_count
+        is_tgatherb_offset = kernel_has_tgatherb and p.get("role") == "input" and is_integer and size < elem_count
+        is_tgatherb_src = kernel_has_tgatherb and p.get("role") == "input" and not is_tgatherb_offset
         # If the kernel has both inputs and outputs, default to zero-init for
         # output buffers to match pto-isa ST conventions (and improve determinism).
         zero_init = is_output and len(init_ptrs) > 1
@@ -1254,7 +1947,23 @@ def generate_testcase(
                 input_generate.append(f"    {name}__packed['pad'] = np.uint16(0)")
             input_generate.append(f"    {name}__packed['i'] = {name}__idx")
             input_generate.append(f"    {name}__packed.tofile(\"{name}.bin\")")
-        elif np_dtype.startswith("np.int") or np_dtype.startswith("np.uint"):
+        elif is_tscatter_indices:
+            input_generate.append(f"    {name}__cols = np.arange({cols}, dtype=np.int64).reshape(1, {cols})")
+            input_generate.append(f"    {name}__row_perm = np.random.permutation({rows}).astype(np.int64).reshape({rows}, 1)")
+            input_generate.append(
+                f"    {name} = ({name}__row_perm * {cols} + {name}__cols).astype({np_dtype}).reshape(-1)"
+            )
+            input_generate.append(f"    {name}.tofile(\"{name}.bin\")")
+        elif is_tgatherb_offset:
+            input_generate.append(f"    {name} = (np.arange({size}, dtype=np.uint32) * 32).astype({np_dtype})")
+            input_generate.append(f"    {name}.tofile(\"{name}.bin\")")
+        elif is_tgatherb_src:
+            if is_integer:
+                input_generate.append(f"    {name} = np.arange({size}, dtype=np.int64).astype({np_dtype})")
+            else:
+                input_generate.append(f"    {name} = np.arange({size}, dtype=np.float32).astype({np_dtype})")
+            input_generate.append(f"    {name}.tofile(\"{name}.bin\")")
+        elif is_integer:
             if index_mod is not None:
                 input_generate.append(
                     f"    {name} = (np.arange({size}, dtype=np.int64) % {index_mod}).astype({np_dtype})"
@@ -1266,8 +1975,16 @@ def generate_testcase(
             input_generate.append(f"    {name} = np.random.random(size=({size},)).astype({np_dtype})")
             input_generate.append(f"    {name}.tofile(\"{name}.bin\")")
 
-    golden_py = golden_template.replace("@INPUT_GENERATE@", "\n".join(input_generate))
-    (output_dir / "golden.py").write_text(golden_py, encoding="utf-8")
+    golden_dst = output_dir / "golden.py"
+    if custom_golden is not None:
+        _copy_asset_if_needed(custom_golden, golden_dst)
+    else:
+        golden_py = golden_template.replace("@INPUT_GENERATE@", "\n".join(input_generate))
+        golden_dst.write_text(golden_py, encoding="utf-8")
+    if custom_golden is not None or custom_compare is not None:
+        _copy_custom_golden_helpers(sample_root, output_dir)
+        if shared_validation_runtime.is_file():
+            _copy_asset_if_needed(shared_validation_runtime, output_dir / "validation_runtime.py")
 
     # Emit the kernel source, optionally injecting a packed-predicate preload to
     # make TCMP/TCMPS outputs deterministic for byte-wise compares.
@@ -1288,6 +2005,15 @@ def generate_testcase(
                     logical_elem_count=logical_elem_count,
                 )
 
+    if is_mixed_kernel:
+        kernel_text_out = _append_mixed_kernel_wrapper(
+            kernel_text_out,
+            kernel_name,
+            raw_params,
+            kernel_info["aic_text"],
+            kernel_info["aiv_text"],
+        )
+
     kernel_out = output_dir / f"{testcase}_kernel.cpp"
     kernel_out.write_text(_replace_includes(kernel_text_out), encoding="utf-8")
 
@@ -1305,6 +2031,7 @@ def generate_testcase(
     kernel_call_args_device = ", ".join(kernel_call_args_device)
     kernel_call_args_host = ", ".join(kernel_call_args_host)
     raw_params_host = [_rewrite_host_unsupported_types(p) for p in raw_params]
+    launch_block_count = _infer_launch_block_count(raw_kernel_for_analysis, testcase)
     launch_cpp = (
         INCLUDE_REPLACEMENT
         + "\n"
@@ -1315,9 +2042,9 @@ def generate_testcase(
         "#endif\n\n"
         f"void {launch_name}({launch_fn_params}) {{\n"
         "#if defined(__CCE_AICORE__)\n"
-        f"    {kernel_name}<<<1, nullptr, stream>>>({kernel_call_args_device});\n"
+        f"    {kernel_name}<<<{launch_block_count}, nullptr, stream>>>({kernel_call_args_device});\n"
         "#else\n"
-        f"    {kernel_name}<<<1, nullptr, stream>>>({kernel_call_args_host});\n"
+        f"    {kernel_name}<<<{launch_block_count}, nullptr, stream>>>({kernel_call_args_host});\n"
         "#endif\n"
         f"}}\n"
     )
@@ -1331,7 +2058,7 @@ def generate_testcase(
         mem_base_define = "REGISTER_BASE"
 
     # CCE printing support is gated behind `--cce-enable-print` on some bisheng
-    # toolchains. Only enable it for kernels that actually emit printf.
+    # toolchains. Only enable it when kernels emit printf.
     needs_cce_print = bool(re.search(r"\b(?:bisheng::)?cce::printf\s*\(", raw_kernel_for_analysis))
     cce_enable_print_opt = "    --cce-enable-print" if needs_cce_print else ""
     cce_print_define_opt = "    -DPTOAS_ENABLE_CCE_PRINT=1" if needs_cce_print else ""
@@ -1478,6 +2205,13 @@ endif()
     compare_template = (templates_root / "compare_template.py").read_text(encoding="utf-8")
     compare_lines = ["    ok = True"]
     compare_prefix_counts = {}
+    tscatter_indices_input = None
+    if kernel_has_tscatter:
+        for p in init_ptrs:
+            p_dtype = _np_dtype_for_cpp(p["cpp_type"])
+            if p.get("role") == "input" and (p_dtype.startswith("np.int") or p_dtype.startswith("np.uint")):
+                tscatter_indices_input = p
+                break
     for p in output_ptrs:
         name = p["name"]
         req = inferred_counts.get(name)
@@ -1492,26 +2226,92 @@ endif()
         file_cnt = ptr_elem_counts.get(name, logical_elem_count)
         if file_cnt and req < int(file_cnt):
             compare_prefix_counts[name] = req
+    # TMRGSORT format2 testcase writes three contiguous regions:
+    # 2-way (256) + 3-way (384) + 4-way (up to 512).
+    # With 4-way exhausted mode, the stable worst-case valid prefix for 4-way
+    # is 128 elements, so compare 256 + 384 + 128 = 768 elements.
+    testcase_lc = testcase.lower()
+    if testcase_lc == "mrgsort_format2":
+        for p in output_ptrs:
+            name = p["name"]
+            file_cnt = int(ptr_elem_counts.get(name, logical_elem_count))
+            compare_prefix_counts[name] = min(file_cnt, 768)
     for p in output_ptrs:
         np_dtype = _np_dtype_for_cpp(p["cpp_type"])
         name = p["name"]
         eps = _default_eps_for_cpp_type(p["cpp_type"])
-        if has_packed_pred_mask and p["cpp_type"] in {"uint8_t", "int8_t"}:
+        is_bf16_output = _is_bf16_cpp_type(p["cpp_type"])
+        bf16_max_ulp = _default_bf16_max_ulp_for_cpp_type(p["cpp_type"])
+        if kernel_has_tscatter and tscatter_indices_input is not None:
+            if is_bf16_output:
+                compare_lines.append(
+                    f"    ok = compare_bf16_bin_at_indices(\"golden_{name}.bin\", \"{name}.bin\", {bf16_max_ulp}, "
+                    f"\"{tscatter_indices_input['name']}.bin\", {_np_dtype_for_cpp(tscatter_indices_input['cpp_type'])}) and ok"
+                )
+            else:
+                compare_lines.append(
+                    f"    ok = compare_bin_at_indices(\"golden_{name}.bin\", \"{name}.bin\", {np_dtype}, {eps}, "
+                    f"\"{tscatter_indices_input['name']}.bin\", {_np_dtype_for_cpp(tscatter_indices_input['cpp_type'])}) and ok"
+                )
+        elif has_packed_pred_mask and p["cpp_type"] in {"uint8_t", "int8_t"}:
             compare_lines.append(
                 f"    ok = compare_packed_pred_mask(\"golden_{name}.bin\", \"{name}.bin\", {rows}, {cols}) and ok"
             )
         else:
             prefix_cnt = compare_prefix_counts.get(name)
             if prefix_cnt is not None:
-                compare_lines.append(
-                    f"    ok = compare_bin_prefix(\"golden_{name}.bin\", \"{name}.bin\", {np_dtype}, {eps}, {prefix_cnt}) and ok"
-                )
+                if is_bf16_output:
+                    compare_lines.append(
+                        f"    ok = compare_bf16_bin_prefix(\"golden_{name}.bin\", \"{name}.bin\", {bf16_max_ulp}, {prefix_cnt}) and ok"
+                    )
+                else:
+                    compare_lines.append(
+                        f"    ok = compare_bin_prefix(\"golden_{name}.bin\", \"{name}.bin\", {np_dtype}, {eps}, {prefix_cnt}) and ok"
+                    )
             else:
-                compare_lines.append(
-                    f"    ok = compare_bin(\"golden_{name}.bin\", \"{name}.bin\", {np_dtype}, {eps}) and ok"
-                )
-    compare_py = compare_template.replace("@COMPARES@", "\n".join(compare_lines))
-    (output_dir / "compare.py").write_text(compare_py, encoding="utf-8")
+                if is_bf16_output:
+                    compare_lines.append(
+                        f"    ok = compare_bf16_bin(\"golden_{name}.bin\", \"{name}.bin\", {bf16_max_ulp}) and ok"
+                    )
+                else:
+                    compare_lines.append(
+                        f"    ok = compare_bin(\"golden_{name}.bin\", \"{name}.bin\", {np_dtype}, {eps}) and ok"
+                    )
+    if testcase in {"test_intercore_sync_a5_functional", "test_intercore_sync_a5_ptoisa_vec"}:
+        # Extra functional check (not just run-to-run determinism):
+        # core0 writes 2.0 to output[0], core1 waits then mirrors to output[1].
+        out_name = output_ptrs[0]["name"] if output_ptrs else "v1"
+        compare_lines.append(f"    __inter_out = np.fromfile(\"{out_name}.bin\", dtype=np.float32)")
+        compare_lines.append("    if __inter_out.size < 2:")
+        compare_lines.append("        print(f\"[ERROR] intercore check requires >=2 elements, got {__inter_out.size}\")")
+        compare_lines.append("        ok = False")
+        compare_lines.append("    else:")
+        compare_lines.append("        if abs(float(__inter_out[0]) - 2.0) > 1e-6:")
+        compare_lines.append(
+            "            print(f\"[ERROR] intercore check failed: out[0]={float(__inter_out[0])}, expect 2.0\")"
+        )
+        compare_lines.append("            ok = False")
+        compare_lines.append("        if abs(float(__inter_out[1]) - 2.0) > 1e-6:")
+        compare_lines.append(
+            "            print(f\"[ERROR] intercore check failed: out[1]={float(__inter_out[1])}, expect 2.0\")"
+        )
+        compare_lines.append("            ok = False")
+    compare_dst = output_dir / "compare.py"
+    if custom_compare is not None:
+        _copy_asset_if_needed(custom_compare, compare_dst)
+    else:
+        compare_py = compare_template.replace("@COMPARES@", "\n".join(compare_lines))
+        compare_dst.write_text(compare_py, encoding="utf-8")
+    (output_dir / "validation_meta.env").write_text(
+        "\n".join(
+            [
+                f"CUSTOM_GOLDEN={1 if custom_golden is not None else 0}",
+                f"CUSTOM_COMPARE={1 if custom_compare is not None else 0}",
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
 
     # Let the runner know which bins are outputs (for sim->golden copying).
     (output_dir / "outputs.txt").write_text(

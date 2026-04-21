@@ -37,8 +37,8 @@ std::optional<std::pair<Value, Value>> getBufferAliasInfo(Operation *op) {
 
   if (auto bindOp = dyn_cast<pto::BindTileOp>(op))
     return std::make_pair(bindOp.getResult(), bindOp.getSource());
-  if (auto subsetOp = dyn_cast<pto::SubsetOp>(op))
-    return std::make_pair(subsetOp.getResult(), subsetOp.getSource());
+  if (auto subviewOp = dyn_cast<pto::SubViewOp>(op))
+    return std::make_pair(subviewOp.getResult(), subviewOp.getSource());
   if (auto bitcastOp = dyn_cast<pto::BitcastOp>(op))
     return std::make_pair(bitcastOp.getResult(), bitcastOp.getSrc());
   if (auto treshapeOp = dyn_cast<pto::TReshapeOp>(op))
@@ -64,7 +64,7 @@ TileViewKind getTileViewKind(Operation *op) {
     return TileViewKind::BindTile;
   }
 
-  if (isa<pto::SubsetOp>(op))
+  if (isa<pto::SubViewOp>(op))
     return TileViewKind::Subset;
   if (isa<pto::BitcastOp>(op))
     return TileViewKind::Bitcast;
