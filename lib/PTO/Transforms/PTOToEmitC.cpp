@@ -9078,6 +9078,7 @@ struct PTOBindTileToEmitC : public OpConversionPattern<pto::BindTileOp> {
     auto *ctx = rewriter.getContext();
     auto configAttr = op.getConfigAttr();
     auto viewSemantics = op->getAttrOfType<StringAttr>("pto.view_semantics");
+    bool isSubView = viewSemantics && viewSemantics.getValue() == "subview";
 
     auto peelAllCasts = [](Value v) {
       while (auto castOp = v.getDefiningOp<UnrealizedConversionCastOp>())
@@ -9377,6 +9378,25 @@ struct PTOBindTileToEmitC : public OpConversionPattern<pto::BindTileOp> {
       return success();
     }
 
+    // Subview origins are kept distinct from generic tile rebinding:
+    // even when source/destination C++ tile types match, subview may carry
+    // shifted base address semantics and should materialize a fresh handle.
+    if (isSubView) {
+      FailureOr<TileBuildSpec> tileSpec = buildTileSpec();
+      if (failed(tileSpec))
+        return failure();
+      Value dstTile = buildTileValue(*tileSpec);
+      FailureOr<Value> addr = buildIntegralAddress(tileCandidate);
+      if (failed(addr))
+        return failure();
+
+      rewriter.create<emitc::CallOpaqueOp>(loc, TypeRange{}, "TASSIGN",
+                                           ArrayAttr{}, ArrayAttr{},
+                                           ValueRange{dstTile, *addr});
+      rewriter.replaceOp(op, dstTile);
+      return success();
+    }
+
     // Generic tile-to-tile rebind path: preserve the same backing storage and
     // rebuild a sibling tile with updated metadata/valid dims.
     if (isTileLike(tileCandidate)) {
@@ -9424,6 +9444,8 @@ struct PTOBindTileToEmitC : public OpConversionPattern<pto::BindTileOp> {
     auto newCast = rewriter.create<pto::PointerCastOp>(
         loc, op.getType(), physAddrs, vRow ? vRow : Value(),
         vCol ? vCol : Value(), configAttr);
+    if (viewSemantics)
+      newCast->setAttr("pto.view_semantics", viewSemantics);
     if (op->hasAttr(kForceDynamicValidShapeAttrName))
       newCast->setAttr(kForceDynamicValidShapeAttrName,
                        op->getAttr(kForceDynamicValidShapeAttrName));

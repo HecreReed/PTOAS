@@ -56,7 +56,7 @@ static void markForceDynamicValidShape(Operation *op, bool force,
 static Type convertPTOTypeToMemRef(Type t);
 static LogicalResult lowerPartitionViewOps(func::FuncOp func,
                                            MLIRContext *ctx);
-static LogicalResult lowerSubsetOps(func::FuncOp func, MLIRContext *ctx);
+static LogicalResult lowerSubViewOps(func::FuncOp func, MLIRContext *ctx);
 static LogicalResult lowerTileBufViewLikeOps(func::FuncOp func,
                                              MLIRContext *ctx);
 
@@ -445,46 +445,21 @@ static Value ensureIndex(IRRewriter &rewriter, Location loc, Value v,
   return Value();
 }
 
-static Value computeSubsetValidDim(IRRewriter &rewriter, Location loc,
-                                   Value parentValid, Value offset,
-                                   int64_t size, Operation *anchorOp) {
+static Value clampSubViewValidDim(IRRewriter &rewriter, Location loc,
+                                  Value explicitValid, int64_t size,
+                                  Operation *anchorOp) {
   Value sizeVal = rewriter.create<arith::ConstantIndexOp>(loc, size);
-  if (!parentValid)
+  if (!explicitValid)
     return sizeVal;
 
-  int64_t pvConst = 0, offConst = 0;
-  if (getConstIndexValue(parentValid, pvConst) &&
-      getConstIndexValue(offset, offConst)) {
-    int64_t diff = 0;
-    if (pvConst > 0) {
-      int64_t offMod = offConst % pvConst;
-      if (offMod < 0)
-        offMod += pvConst;
-      diff = pvConst - offMod; // in [1, pvConst] when pvConst>0
-    }
-    if (diff < 0)
-      diff = 0;
-    int64_t clipped = std::min<int64_t>(size, diff);
-    return rewriter.create<arith::ConstantIndexOp>(loc, clipped);
-  }
+  int64_t cst = 0;
+  if (getConstIndexValue(explicitValid, cst))
+    return rewriter.create<arith::ConstantIndexOp>(loc, std::min(cst, size));
 
-  Value pv = ensureIndex(rewriter, loc, parentValid, anchorOp);
-  Value off = ensureIndex(rewriter, loc, offset, anchorOp);
-
-  // Use the same "periodic valid dims" rule as SubsetOp::inferReturnTypes:
-  // diff = pv - (off % pv), so offsets that land on the next tile (off == pv)
-  // still produce a full valid dim (diff == pv), instead of 0.
-  Type i64Ty = rewriter.getI64Type();
-  Value pvI64 = rewriter.create<arith::IndexCastOp>(loc, i64Ty, pv);
-  Value offI64 = rewriter.create<arith::IndexCastOp>(loc, i64Ty, off);
-  Value remI64 = rewriter.create<arith::RemUIOp>(loc, offI64, pvI64);
-  Value diffI64 = rewriter.create<arith::SubIOp>(loc, pvI64, remI64);
-  Value diff = rewriter.create<arith::IndexCastOp>(loc, rewriter.getIndexType(),
-                                                   diffI64);
-
-  Value lt = rewriter.create<arith::CmpIOp>(loc, arith::CmpIPredicate::slt, diff,
+  Value v = ensureIndex(rewriter, loc, explicitValid, anchorOp);
+  Value lt = rewriter.create<arith::CmpIOp>(loc, arith::CmpIPredicate::slt, v,
                                             sizeVal);
-  return rewriter.create<arith::SelectOp>(loc, lt, diff, sizeVal);
+  return rewriter.create<arith::SelectOp>(loc, lt, v, sizeVal);
 }
 
 static void dumpPretty(Operation *op, llvm::raw_ostream &os) {
@@ -1091,7 +1066,7 @@ static LogicalResult lowerSingleFunction(func::FuncOp func, MLIRContext *ctx) {
       failed(lowerMakeTensorViewOps(func, ctx)) ||
       failed(lowerTensorViewDimOps(func, ctx)) ||
       failed(lowerPartitionViewOps(func, ctx)) ||
-      failed(lowerSubsetOps(func, ctx)) ||
+      failed(lowerSubViewOps(func, ctx)) ||
       failed(lowerTileBufViewLikeOps(func, ctx)) ||
       failed(foldAddPtrIntoScalarOps(func, ctx)) ||
       failed(foldAddPtrIntoPipeInitOps(func, ctx)) ||
@@ -1192,15 +1167,15 @@ static LogicalResult lowerPartitionViewOps(func::FuncOp func, MLIRContext *ctx) 
   return success();
 }
 
-static SmallVector<int64_t> getSubsetStaticSizes(mlir::pto::SubsetOp op) {
+static SmallVector<int64_t> getSubViewStaticSizes(mlir::pto::SubViewOp op) {
   SmallVector<int64_t> staticSizes;
   for (Attribute attr : op.getSizes())
     staticSizes.push_back(cast<IntegerAttr>(attr).getInt());
   return staticSizes;
 }
 
-static SmallVector<OpFoldResult> getSubsetMixedSizes(IRRewriter &rewriter,
-                                                     ArrayRef<int64_t> staticSizes) {
+static SmallVector<OpFoldResult> getSubViewMixedSizes(
+    IRRewriter &rewriter, ArrayRef<int64_t> staticSizes) {
   SmallVector<OpFoldResult> mixedSizes;
   for (int64_t size : staticSizes)
     mixedSizes.push_back(rewriter.getIndexAttr(size));
@@ -1208,8 +1183,8 @@ static SmallVector<OpFoldResult> getSubsetMixedSizes(IRRewriter &rewriter,
 }
 
 static SmallVector<OpFoldResult>
-buildSubsetMixedOffsets(IRRewriter &rewriter, Location loc,
-                        mlir::pto::SubsetOp op) {
+buildSubViewMixedOffsets(IRRewriter &rewriter, Location loc,
+                         mlir::pto::SubViewOp op) {
   SmallVector<OpFoldResult> mixedOffsets;
   for (Value offset : op.getOffsets()) {
     IntegerAttr constAttr;
@@ -1228,14 +1203,12 @@ buildSubsetMixedOffsets(IRRewriter &rewriter, Location loc,
   return mixedOffsets;
 }
 
-static LogicalResult validateBoxedSubsetAlignment(mlir::pto::SubsetOp op,
-                                                  ArrayRef<int64_t> staticSizes,
-                                                  const TileLayoutInfo &layoutInfo,
-                                                  int64_t &off0, int64_t &off1,
-                                                  bool &off0Const,
-                                                  bool &off1Const) {
+static LogicalResult validateBoxedSubViewAlignment(
+    mlir::pto::SubViewOp op, ArrayRef<int64_t> staticSizes,
+    const TileLayoutInfo &layoutInfo, int64_t &off0, int64_t &off1,
+    bool &off0Const, bool &off1Const) {
   if (staticSizes.size() != 2 || op.getOffsets().size() != 2) {
-    op.emitError("boxed layout subset expects 2D sizes/offsets");
+    op.emitError("boxed layout subview expects 2D sizes/offsets");
     return failure();
   }
   if (!checkMultipleOf(op, staticSizes[0], layoutInfo.innerRows, "row size") ||
@@ -1256,13 +1229,10 @@ static LogicalResult validateBoxedSubsetAlignment(mlir::pto::SubsetOp op,
   return success();
 }
 
-static LogicalResult validateBoxedSubsetFullAxis(mlir::pto::SubsetOp op,
-                                                 MemRefType srcMrTy,
-                                                 pto::TileBufConfigAttr configAttr,
-                                                 ArrayRef<int64_t> staticSizes,
-                                                 int64_t off0, int64_t off1,
-                                                 bool off0Const,
-                                                 bool off1Const) {
+static LogicalResult validateBoxedSubViewFullAxis(
+    mlir::pto::SubViewOp op, MemRefType srcMrTy,
+    pto::TileBufConfigAttr configAttr, ArrayRef<int64_t> staticSizes,
+    int64_t off0, int64_t off1, bool off0Const, bool off1Const) {
   int32_t bl = 0;
   (void)readBLayoutI32(configAttr.getBLayout(), bl);
   auto srcShape = srcMrTy.getShape();
@@ -1270,32 +1240,31 @@ static LogicalResult validateBoxedSubsetFullAxis(mlir::pto::SubsetOp op,
     return success();
   if (bl == 0) {
     if (staticSizes[1] != srcShape[1]) {
-      op.emitError("boxed RowMajor subset must keep full cols");
+      op.emitError("boxed RowMajor subview must keep full cols");
       return failure();
     }
     if (!off1Const || off1 != 0) {
-      op.emitError("boxed RowMajor subset requires static col offset = 0");
+      op.emitError("boxed RowMajor subview requires static col offset = 0");
       return failure();
     }
     return success();
   }
 
   if (staticSizes[0] != srcShape[0]) {
-    op.emitError("boxed ColMajor subset must keep full rows");
+    op.emitError("boxed ColMajor subview must keep full rows");
     return failure();
   }
   if (!off0Const || off0 != 0) {
-    op.emitError("boxed ColMajor subset requires static row offset = 0");
+    op.emitError("boxed ColMajor subview requires static row offset = 0");
     return failure();
   }
   return success();
 }
 
-static LogicalResult validateBoxedSubsetLayout(mlir::pto::SubsetOp op,
-                                               MemRefType srcMrTy,
-                                               pto::TileBufConfigAttr configAttr,
-                                               ArrayRef<int64_t> staticSizes,
-                                               const TileLayoutInfo &layoutInfo) {
+static LogicalResult validateBoxedSubViewLayout(
+    mlir::pto::SubViewOp op, MemRefType srcMrTy,
+    pto::TileBufConfigAttr configAttr, ArrayRef<int64_t> staticSizes,
+    const TileLayoutInfo &layoutInfo) {
   if (!layoutInfo.boxed)
     return success();
 
@@ -1303,15 +1272,28 @@ static LogicalResult validateBoxedSubsetLayout(mlir::pto::SubsetOp op,
   int64_t off1 = 0;
   bool off0Const = false;
   bool off1Const = false;
-  if (failed(validateBoxedSubsetAlignment(op, staticSizes, layoutInfo, off0,
-                                          off1, off0Const, off1Const))) {
+  if (failed(validateBoxedSubViewAlignment(op, staticSizes, layoutInfo, off0,
+                                           off1, off0Const, off1Const))) {
     return failure();
   }
-  return validateBoxedSubsetFullAxis(op, srcMrTy, configAttr, staticSizes, off0,
-                                     off1, off0Const, off1Const);
+  return validateBoxedSubViewFullAxis(op, srcMrTy, configAttr, staticSizes,
+                                      off0, off1, off0Const, off1Const);
 }
 
-static MemRefType buildSubsetResultMemRefType(MLIRContext *ctx,
+static MemRefType buildSubViewResultMemRefType(MLIRContext *ctx,
+                                               MemRefType srcMrTy) {
+  SmallVector<int64_t> srcStrides;
+  int64_t srcOffset = ShapedType::kDynamic;
+  if (failed(getStridesAndOffset(srcMrTy, srcStrides, srcOffset)))
+    srcStrides = computeCompactStrides(srcMrTy.getShape());
+
+  auto resultLayout =
+      StridedLayoutAttr::get(ctx, ShapedType::kDynamic, srcStrides);
+  return MemRefType::get(srcMrTy.getShape(), srcMrTy.getElementType(),
+                         resultLayout, srcMrTy.getMemorySpace());
+}
+
+static MemRefType buildSubViewSliceMemRefType(MLIRContext *ctx,
                                               MemRefType srcMrTy,
                                               ArrayRef<int64_t> staticSizes) {
   SmallVector<int64_t> srcStrides;
@@ -1325,59 +1307,57 @@ static MemRefType buildSubsetResultMemRefType(MLIRContext *ctx,
                          srcMrTy.getMemorySpace());
 }
 
-static void computeSubsetBoundValidDims(IRRewriter &rewriter, Location loc,
-                                        mlir::pto::SubsetOp op,
-                                        ArrayRef<int64_t> staticSizes, Value src,
-                                        Value &vRow, Value &vCol) {
-  Value parentVRow;
-  Value parentVCol;
-  lookupValidDims(src, parentVRow, parentVCol);
-  if (!staticSizes.empty()) {
-    vRow = computeSubsetValidDim(rewriter, loc, parentVRow, op.getOffsets()[0],
-                                 staticSizes[0], op);
-  }
-  if (staticSizes.size() > 1) {
-    vCol = computeSubsetValidDim(rewriter, loc, parentVCol, op.getOffsets()[1],
-                                 staticSizes[1], op);
-  }
+static void computeSubViewValidDims(IRRewriter &rewriter, Location loc,
+                                    mlir::pto::SubViewOp op,
+                                    ArrayRef<int64_t> staticSizes, Value &vRow,
+                                    Value &vCol) {
+  if (!staticSizes.empty())
+    vRow = clampSubViewValidDim(rewriter, loc, op.getValidRow(),
+                                staticSizes[0], op);
+  if (staticSizes.size() > 1)
+    vCol = clampSubViewValidDim(rewriter, loc, op.getValidCol(),
+                                staticSizes[1], op);
 }
 
-static Value bindSubsetSubviewResult(IRRewriter &rewriter, Location loc,
-                                     mlir::pto::SubsetOp op,
-                                     MemRefType resultMemRefType, Value subView,
-                                     pto::TileBufConfigAttr configAttr,
-                                     ArrayRef<int64_t> staticSizes, Value src,
-                                     mlir::pto::TileBufType resultTileTy,
-                                     MLIRContext *ctx) {
+static Value bindSubViewResult(IRRewriter &rewriter, Location loc,
+                               MemRefType resultMemRefType, Value subView,
+                               pto::TileBufConfigAttr configAttr,
+                               ArrayRef<int64_t> staticSizes,
+                               mlir::pto::SubViewOp op,
+                               mlir::pto::TileBufType resultTileTy,
+                               MLIRContext *ctx) {
   Value vRow;
   Value vCol;
-  computeSubsetBoundValidDims(rewriter, loc, op, staticSizes, src, vRow, vCol);
+  computeSubViewValidDims(rewriter, loc, op, staticSizes, vRow, vCol);
   auto bindOp = rewriter.create<pto::BindTileOp>(
       loc, resultMemRefType, subView, vRow ? vRow : Value(),
       vCol ? vCol : Value(), configAttr);
   markForceDynamicValidShape(bindOp,
                              resultTileTy && resultTileTy.hasDynamicValid(),
                              ctx);
+  bindOp->setAttr("pto.view_semantics", rewriter.getStringAttr("subview"));
   return bindOp.getResult();
 }
 
-static LogicalResult lowerSingleSubsetOp(mlir::pto::SubsetOp op,
-                                         MLIRContext *ctx) {
+static LogicalResult lowerSingleSubViewOp(mlir::pto::SubViewOp op,
+                                          MLIRContext *ctx) {
   IRRewriter rewriter(ctx);
   rewriter.setInsertionPoint(op);
   Location loc = op.getLoc();
-  auto resultTileTy = dyn_cast<mlir::pto::TileBufType>(op.getResult().getType());
+  auto resultTileTy =
+      dyn_cast<mlir::pto::TileBufType>(op.getResult().getType());
   Value src = op->getOperand(0);
   auto srcMrTy = dyn_cast<MemRefType>(src.getType());
   if (!srcMrTy) {
-    op.emitError("pto.subset source must be lowered to memref first");
+    op.emitError("pto.subview source must be lowered to memref first");
     return failure();
   }
 
-  SmallVector<int64_t> staticSizes = getSubsetStaticSizes(op);
-  SmallVector<OpFoldResult> mixedSizes = getSubsetMixedSizes(rewriter, staticSizes);
+  SmallVector<int64_t> staticSizes = getSubViewStaticSizes(op);
+  SmallVector<OpFoldResult> mixedSizes =
+      getSubViewMixedSizes(rewriter, staticSizes);
   SmallVector<OpFoldResult> mixedOffsets =
-      buildSubsetMixedOffsets(rewriter, loc, op);
+      buildSubViewMixedOffsets(rewriter, loc, op);
 
   auto configAttr = lookupConfig(src);
   if (!configAttr)
@@ -1386,32 +1366,34 @@ static LogicalResult lowerSingleSubsetOp(mlir::pto::SubsetOp op,
   TileLayoutInfo layoutInfo;
   if (!computeTileLayoutInfo(configAttr, srcMrTy.getElementType(),
                              srcMrTy.getShape(), layoutInfo)) {
-    op.emitError("unsupported tile layout for pto.subset");
+    op.emitError("unsupported tile layout for pto.subview");
     return failure();
   }
-  if (failed(validateBoxedSubsetLayout(op, srcMrTy, configAttr, staticSizes,
-                                       layoutInfo))) {
+  if (failed(validateBoxedSubViewLayout(op, srcMrTy, configAttr, staticSizes,
+                                        layoutInfo))) {
     return failure();
   }
 
-  auto resultMemRefType = buildSubsetResultMemRefType(ctx, srcMrTy, staticSizes);
+  auto resultMemRefType = buildSubViewResultMemRefType(ctx, srcMrTy);
+  auto sliceMemRefType =
+      buildSubViewSliceMemRefType(ctx, srcMrTy, staticSizes);
   SmallVector<OpFoldResult> mixedStrides(staticSizes.size(),
                                          rewriter.getIndexAttr(1));
-  auto sv = rewriter.create<memref::SubViewOp>(loc, resultMemRefType, src,
+  auto sv = rewriter.create<memref::SubViewOp>(loc, sliceMemRefType, src,
                                                mixedOffsets, mixedSizes,
                                                mixedStrides);
-  rewriter.replaceOp(op, bindSubsetSubviewResult(
-                             rewriter, loc, op, resultMemRefType, sv.getResult(),
-                             configAttr, staticSizes, src, resultTileTy, ctx));
+  rewriter.replaceOp(op, bindSubViewResult(rewriter, loc, resultMemRefType,
+                                           sv.getResult(), configAttr,
+                                           staticSizes, op, resultTileTy, ctx));
   return success();
 }
 
-static LogicalResult lowerSubsetOps(func::FuncOp func, MLIRContext *ctx) {
-  SmallVector<mlir::pto::SubsetOp, 8> subsets;
-  func.walk([&](mlir::pto::SubsetOp op) { subsets.push_back(op); });
+static LogicalResult lowerSubViewOps(func::FuncOp func, MLIRContext *ctx) {
+  SmallVector<mlir::pto::SubViewOp, 8> subViews;
+  func.walk([&](mlir::pto::SubViewOp op) { subViews.push_back(op); });
 
-  for (auto op : subsets)
-    if (failed(lowerSingleSubsetOp(op, ctx)))
+  for (auto op : subViews)
+    if (failed(lowerSingleSubViewOp(op, ctx)))
       return failure();
   return success();
 }

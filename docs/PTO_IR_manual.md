@@ -65,7 +65,7 @@ Common element categories include:
 Element type constraints are operation-specific:
 
 - **Shape/type consistency**: most elementwise ops require all operands and results to have the same element type.
-- **Numeric domain**: reductions, math ops, and division typically restrict element types to floating-point or a subset of integer types.
+- **Numeric domain**: reductions, math ops, and division typically restrict element types to floating-point or a limited set of integer types.
 - **Bitwise ops**: require integer element types.
 - **Conversions**: `pto.tcvt` defines explicit element type changes and is controlled by `RoundMode` when converting between numeric domains.
 
@@ -467,14 +467,16 @@ result = alloc_tile(base_addr, valid_row, valid_col)   // operands are optional
 %tb3 = pto.alloc_tile addr = %ad : !pto.tile_buf<loc=vec, dtype=f16, rows=16, cols=16, v_row=16, v_col=16, blayout=row_major, slayout=none_box, fractal=512, pad=0>
 ```
 
-##### `pto.subset` - Subview Tile View
+##### `pto.subview` - Tile SubView
 
-**Summary:** Create a strided view from a parent tile. The result tile buffer is a logical subset of the input tile buffer.
+**Summary:** Create a logical subview from a parent tile. The subview window is expressed by `offsets + sizes`, and the result tile type shape equals `sizes`.
 
 **Semantics:**
 
 ```
 result = source[offsets] with static sizes
+result.shape = sizes
+result.valid = clip(explicit_valid_or_sizes, sizes)
 ```
 
 **Arguments:**
@@ -484,27 +486,37 @@ result = source[offsets] with static sizes
 | `source` | `pto.tile_buf` | Parent tile buffer |
 | `offsets` | `Variadic<Index>` | Runtime dynamic offsets [i, j] |
 | `sizes` | `I64ArrayAttr` | Static shape [rows, cols] |
+| `valid_row` | `Optional<Index>` | Optional explicit valid row |
+| `valid_col` | `Optional<Index>` | Optional explicit valid col |
 
 **Results:** `pto.tile_buf`
 
 **Constraints & Verification:**
 
 - The verifier derives boxed-vs-non-boxed behavior from `source`'s tile config (`blayout`, `slayout`, `fractal`) and element type.
-- For non-boxed layouts (`slayout=none_box`), no additional subset-specific structural checks are enforced.
+- For non-boxed layouts (`slayout=none_box`), no additional subview-specific structural checks are enforced.
 - For boxed layouts (`slayout != none_box`):
-  - The tile layout must be one of the subset layouts supported by the current implementation; otherwise verification fails.
-  - `sizes` must be present, must have length 2, and both subset sizes must be positive.
-  - The subset sizes must be multiples of the inferred inner boxed shape.
+  - The tile layout must be one of the subview layouts supported by the current implementation; otherwise verification fails.
+  - `sizes` must be present, must have length 2, and both subview sizes must be positive.
+  - The subview sizes must be multiples of the inferred inner boxed shape.
   - `offsets` must have length 2.
   - If an offset is compile-time constant, it must be non-negative and must be a multiple of the inferred inner boxed shape in that dimension.
   - The source tile shape must be statically known.
-  - For boxed row-major tiles, the subset must keep the full source column extent, and the column offset must be the constant `0`.
-  - For boxed col-major tiles, the subset must keep the full source row extent, and the row offset must be the constant `0`.
+  - For boxed row-major tiles, the subview must keep the full source column extent, and the column offset must be the constant `0`.
+  - For boxed col-major tiles, the subview must keep the full source row extent, and the row offset must be the constant `0`.
+- `valid_row` and `valid_col` must be both present or both absent.
+- If `valid_row/valid_col` are omitted, result `valid_shape` defaults to `sizes`.
+- If `valid_row/valid_col` are provided:
+  - constant values must be positive and `<= sizes` in each dimension
+  - non-constant values are represented as dynamic valid dims in the result type
 - The inferred result type uses:
-  - `shape = sizes`
+  - `shape = sizes` (logical subview size)
   - the same element type and address space as `source`
   - the same tile config as `source`
-  - a `valid_shape` derived from the parent `valid_shape` and constant offsets when possible, otherwise dynamic in that dimension
+  - `valid_shape` defaults to `sizes`
+  - if explicit `valid_row/valid_col` are provided, `valid_shape` is clipped by `sizes`
+- Lowering keeps parent physical stride/base semantics for non-compact access,
+  so EmitC behavior remains unchanged from the previous implementation.
 
 **Hardware Mapping:**
 
@@ -513,7 +525,12 @@ result = source[offsets] with static sizes
 **Basic Example:**
 
 ```mlir
-%sub = pto.subset %src[%i, %j] sizes [32, 32] : !pto.tile_buf<loc=vec, dtype=f16, rows=64, cols=64, v_row=64, v_col=64, blayout=row_major, slayout=none_box, fractal=512, pad=0>
+%sub = pto.subview %src[%i, %j] sizes [32, 32] :
+  !pto.tile_buf<loc=vec, dtype=f16, rows=64, cols=64, v_row=64, v_col=64, blayout=row_major, slayout=none_box, fractal=512, pad=0>
+  -> !pto.tile_buf<loc=vec, dtype=f16, rows=32, cols=32, v_row=32, v_col=32, blayout=row_major, slayout=none_box, fractal=512, pad=0>
+%sub2 = pto.subview %src[%i, %j] sizes [32, 32] valid [%vr, %vc] :
+  !pto.tile_buf<loc=vec, dtype=f16, rows=64, cols=64, v_row=64, v_col=64, blayout=row_major, slayout=none_box, fractal=512, pad=0>
+  -> !pto.tile_buf<loc=vec, dtype=f16, rows=32, cols=32, v_row=?, v_col=?, blayout=row_major, slayout=none_box, fractal=512, pad=0>
 ```
 
 ##### `pto.set_validshape` - Update Dynamic Tile Valid Row/Col In Place
@@ -7791,13 +7808,36 @@ generated IR. The detailed design document is:
   - `1`: C2V
   - `2`: V2C
   - `3`: both directions at frontend level
+- `id` is a compile-time integer attribute used to bind
+  `pto.aic_initialize_pipe` / `pto.aiv_initialize_pipe` with the matching
+  `pto.tpush_*` / `pto.tpop_*` / `pto.tfree_*` ops in the same function.
 - `slot_size` is expressed in bytes and uses the pre-split logical tile size.
+- `nosplit` is an optional compile-time boolean attribute on
+  `pto.aic_initialize_pipe` / `pto.aiv_initialize_pipe`.
 - `split` is a compile-time attribute, not a runtime SSA operand.
 - `split = 0/1/2` corresponds to `TILE_NO_SPLIT`, `TILE_UP_DOWN`, and
   `TILE_LEFT_RIGHT`.
 - `pto.tpop_from_aic` and `pto.tpop_from_aiv` are result-valued frontend ops.
-- A single function currently models at most one logical C2V pipe and one
-  logical V2C pipe.
+- A single logical pipe cannot mix `split = 0` with `split = 1` / `2`.
+  `nosplit = true` requires all bound data-transfer ops to use `split = 0`;
+  `nosplit = false` requires all bound data-transfer ops to use `split = 1`
+  or `split = 2`.
+- Multiple logical pipes are allowed in one function.
+- A frontend logical pipe is uniquely identified by `function + id + direction`.
+- When `dir_mask = 1` or `2`, one `id` denotes one single-direction logical
+  pipe.
+- When `dir_mask = 3`, one `id` denotes one DIR_BOTH physical pipe covering
+  both logical directions.
+
+`nosplit` platform restrictions:
+
+- On A5, `nosplit` supports a `1C:1V` pipe communication mode. The vector side
+  may execute the pipe sequence on a single vector core.
+- On A2/A3, `nosplit` follows the hardware `1C:2V` synchronization
+  configuration. The two vector cores must run the same code for the same
+  logical pipe, and the `tpush` / `tpop` / `tfree` sequence for that pipe must
+  be identical in order on both vector cores. They do not need to reach each
+  operation at the same time; only the relative order must remain consistent.
 
 ##### `pto.reserve_buffer` - Reserve Local Consumer FIFO Buffer
 
@@ -7840,7 +7880,8 @@ When the address is already fixed in the input IR:
 
 **Constraints & Verification:**
 
-- At most one `pto.reserve_buffer` is expected in one function
+- Multiple `pto.reserve_buffer` ops are allowed in one function, but `name`
+  must be unique within that function
 - `location` must be a supported local address space
 - Op-level verification requires:
   - `auto = false` must provide `base`
@@ -7876,7 +7917,8 @@ function's reserved buffer declaration.
 
 **Constraints & Verification:**
 
-- At most one `pto.import_reserved_buffer` is expected in one function
+- Multiple `pto.import_reserved_buffer` ops are allowed in one function, but
+  the `(name, peer_func)` pair must be unique within that function
 - `peer_func` must contain a matching `pto.reserve_buffer`
 - The imported address is resolved by `pto-resolve-reserved-buffers`
   - from the peer `reserve_buffer.base` filled by `PlanMemory` when the active
@@ -7892,21 +7934,24 @@ function's reserved buffer declaration.
 
 ```mlir
 // A2/A3 (with GM slot buffer):
-pto.aic_initialize_pipe {dir_mask = 1, slot_size = 1024}
+pto.aic_initialize_pipe {id = 0, dir_mask = 1, slot_size = 1024}
   (gm_slot_buffer = %gm_buf : !pto.ptr<f32>,
    c2v_consumer_buf = %c2v_import : i32,
    v2c_consumer_buf = %c0_i32 : i32)
 
 // A5 (without GM slot buffer):
-pto.aic_initialize_pipe {dir_mask = 1, slot_size = 1024}
+pto.aic_initialize_pipe {id = 0, dir_mask = 1, slot_size = 1024, nosplit = true}
   (c2v_consumer_buf = %c2v_import : i32,
    v2c_consumer_buf = %c0_i32 : i32)
 ```
 
 **Arguments:**
 
+- `id`: compile-time pipe identifier, unique among frontend initialize ops in
+  the same function
 - `dir_mask`: communication direction encoding
 - `slot_size`: logical slot size in bytes
+- `nosplit`: optional compile-time boolean controlling no-split pipe mode
 - `gm_slot_buffer`: optional GM pointer (`!pto.ptr<T>`), required on A2/A3, omitted on A5
 - `c2v_consumer_buf`: C2V consumer local base address
 - `v2c_consumer_buf`: V2C consumer local base address
@@ -7916,7 +7961,12 @@ pto.aic_initialize_pipe {dir_mask = 1, slot_size = 1024}
 **Constraints & Verification:**
 
 - Must appear in Cube kernels
-- At most one `pto.aic_initialize_pipe` is expected in one Cube function
+- Multiple `pto.aic_initialize_pipe` ops are allowed in one Cube function, but
+  `id` must be unique among frontend initialize ops in that function
+- If `nosplit = true`, all frontend data-transfer ops bound to the same logical
+  pipe must use `split = 0`
+- If `nosplit = false`, all frontend data-transfer ops bound to the same
+  logical pipe must use `split = 1` or `split = 2`
 
 ##### `pto.aiv_initialize_pipe` - Frontend Vector Pipe Initialization
 
@@ -7926,13 +7976,13 @@ pto.aic_initialize_pipe {dir_mask = 1, slot_size = 1024}
 
 ```mlir
 // A2/A3 (with GM slot buffer):
-pto.aiv_initialize_pipe {dir_mask = 1, slot_size = 1024}
+pto.aiv_initialize_pipe {id = 0, dir_mask = 1, slot_size = 1024}
   (gm_slot_buffer = %gm_buf : !pto.ptr<f32>,
    c2v_consumer_buf = %c2v_local : i32,
    v2c_consumer_buf = %c0_i32 : i32)
 
 // A5 (without GM slot buffer):
-pto.aiv_initialize_pipe {dir_mask = 1, slot_size = 1024}
+pto.aiv_initialize_pipe {id = 0, dir_mask = 1, slot_size = 1024, nosplit = true}
   (c2v_consumer_buf = %c2v_local : i32,
    v2c_consumer_buf = %c0_i32 : i32)
 ```
@@ -7945,7 +7995,12 @@ pto.aiv_initialize_pipe {dir_mask = 1, slot_size = 1024}
 **Constraints & Verification:**
 
 - Must appear in Vector kernels
-- At most one `pto.aiv_initialize_pipe` is expected in one Vector function
+- Multiple `pto.aiv_initialize_pipe` ops are allowed in one Vector function,
+  but `id` must be unique among frontend initialize ops in that function
+- If `nosplit = true`, all frontend data-transfer ops bound to the same logical
+  pipe must use `split = 0`
+- If `nosplit = false`, all frontend data-transfer ops bound to the same
+  logical pipe must use `split = 1` or `split = 2`
 
 ##### `pto.tpush_to_aiv` - Frontend C2V Producer Push
 
@@ -7954,12 +8009,13 @@ pto.aiv_initialize_pipe {dir_mask = 1, slot_size = 1024}
 **Syntax:**
 
 ```mlir
-pto.tpush_to_aiv(%tile : !pto.tile_buf<...>) {split = 1}
+pto.tpush_to_aiv(%tile : !pto.tile_buf<...>) {id = 0, split = 1}
 ```
 
 **Arguments:**
 
 - one tile operand
+- compile-time `id` attribute
 - compile-time `split` attribute
 
 **Results:** None.
@@ -7968,6 +8024,8 @@ pto.tpush_to_aiv(%tile : !pto.tile_buf<...>) {split = 1}
 
 - Must appear in Cube kernels
 - Represents the producer side of a C2V transfer
+- `id` must match exactly one frontend initialize_pipe op in the same function
+  with `dir_mask = 1` or `dir_mask = 3`
 
 ##### `pto.tpush_to_aic` - Frontend V2C Producer Push
 
@@ -7976,12 +8034,13 @@ pto.tpush_to_aiv(%tile : !pto.tile_buf<...>) {split = 1}
 **Syntax:**
 
 ```mlir
-pto.tpush_to_aic(%tile : !pto.tile_buf<...>) {split = 1}
+pto.tpush_to_aic(%tile : !pto.tile_buf<...>) {id = 0, split = 1}
 ```
 
 **Arguments:**
 
 - one tile operand
+- compile-time `id` attribute
 - compile-time `split` attribute
 
 **Results:** None.
@@ -7990,6 +8049,8 @@ pto.tpush_to_aic(%tile : !pto.tile_buf<...>) {split = 1}
 
 - Must appear in Vector kernels
 - Represents the producer side of a V2C transfer
+- `id` must match exactly one frontend initialize_pipe op in the same function
+  with `dir_mask = 2` or `dir_mask = 3`
 
 ##### `pto.tpop_from_aic` - Frontend C2V Consumer Pop
 
@@ -7998,10 +8059,10 @@ pto.tpush_to_aic(%tile : !pto.tile_buf<...>) {split = 1}
 **Syntax:**
 
 ```mlir
-%tile = pto.tpop_from_aic {split = 1} -> !pto.tile_buf<...>
+%tile = pto.tpop_from_aic {id = 0, split = 1} -> !pto.tile_buf<...>
 ```
 
-**Arguments:** compile-time `split` attribute.
+**Arguments:** compile-time `id` and `split` attributes.
 
 **Results:** one `!pto.tile_buf<...>` result tile.
 
@@ -8009,6 +8070,8 @@ pto.tpush_to_aic(%tile : !pto.tile_buf<...>) {split = 1}
 
 - Must appear in Vector kernels
 - Represents the consumer side of a C2V transfer
+- `id` must match exactly one frontend initialize_pipe op in the same function
+  with `dir_mask = 1` or `dir_mask = 3`
 
 ##### `pto.tpop_from_aiv` - Frontend V2C Consumer Pop
 
@@ -8017,10 +8080,10 @@ pto.tpush_to_aic(%tile : !pto.tile_buf<...>) {split = 1}
 **Syntax:**
 
 ```mlir
-%tile = pto.tpop_from_aiv {split = 1} -> !pto.tile_buf<...>
+%tile = pto.tpop_from_aiv {id = 0, split = 1} -> !pto.tile_buf<...>
 ```
 
-**Arguments:** compile-time `split` attribute.
+**Arguments:** compile-time `id` and `split` attributes.
 
 **Results:** one `!pto.tile_buf<...>` result tile.
 
@@ -8028,6 +8091,8 @@ pto.tpush_to_aic(%tile : !pto.tile_buf<...>) {split = 1}
 
 - Must appear in Cube kernels
 - Represents the consumer side of a V2C transfer
+- `id` must match exactly one frontend initialize_pipe op in the same function
+  with `dir_mask = 2` or `dir_mask = 3`
 
 ##### `pto.tfree_from_aic` - Frontend C2V Consumer Free
 
@@ -8036,10 +8101,10 @@ pto.tpush_to_aic(%tile : !pto.tile_buf<...>) {split = 1}
 **Syntax:**
 
 ```mlir
-pto.tfree_from_aic {split = 1}
+pto.tfree_from_aic {id = 0, split = 1}
 ```
 
-**Arguments:** compile-time `split` attribute.
+**Arguments:** compile-time `id` and `split` attributes.
 
 **Results:** None.
 
@@ -8047,6 +8112,8 @@ pto.tfree_from_aic {split = 1}
 
 - Must appear in Vector kernels
 - Represents the consumer free side of a C2V transfer
+- `id` must match exactly one frontend initialize_pipe op in the same function
+  with `dir_mask = 1` or `dir_mask = 3`
 
 ##### `pto.tfree_from_aiv` - Frontend V2C Consumer Free
 
@@ -8055,10 +8122,10 @@ pto.tfree_from_aic {split = 1}
 **Syntax:**
 
 ```mlir
-pto.tfree_from_aiv {split = 1}
+pto.tfree_from_aiv {id = 0, split = 1}
 ```
 
-**Arguments:** compile-time `split` attribute.
+**Arguments:** compile-time `id` and `split` attributes.
 
 **Results:** None.
 
@@ -8066,6 +8133,8 @@ pto.tfree_from_aiv {split = 1}
 
 - Must appear in Cube kernels
 - Represents the consumer free side of a V2C transfer
+- `id` must match exactly one frontend initialize_pipe op in the same function
+  with `dir_mask = 2` or `dir_mask = 3`
 
 ---
 
