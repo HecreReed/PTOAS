@@ -484,4 +484,3 @@ def run_case(case_name: str):
     buffers, golden = BUILDERS[case_name](meta, generator, ints)
     write_buffers(meta, buffers)
     write_golden(meta, golden)
-

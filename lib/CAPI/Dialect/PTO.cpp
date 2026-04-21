@@ -323,6 +323,21 @@ int32_t mlirPTORoundModeAttrGetValue(MlirAttribute attr) {
   return static_cast<int32_t>(a.getValue());
 }
 
+MlirAttribute mlirPTOSaturationModeAttrGet(MlirContext ctx, int32_t value) {
+  auto *c = unwrap(ctx);
+  auto mode = static_cast<mlir::pto::SaturationMode>(value);
+  return wrap(mlir::pto::SaturationModeAttr::get(c, mode));
+}
+
+bool mlirPTOAttrIsASaturationModeAttr(MlirAttribute attr) {
+  return mlir::isa<mlir::pto::SaturationModeAttr>(unwrap(attr));
+}
+
+int32_t mlirPTOSaturationModeAttrGetValue(MlirAttribute attr) {
+  auto a = mlir::cast<mlir::pto::SaturationModeAttr>(unwrap(attr));
+  return static_cast<int32_t>(a.getValue());
+}
+
 MlirAttribute mlirPTOPipeAttrGet(MlirContext ctx, int32_t value) {
   auto *c = unwrap(ctx);
   auto v = static_cast<mlir::pto::PIPE>(value);

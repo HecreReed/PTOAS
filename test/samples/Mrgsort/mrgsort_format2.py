@@ -7,7 +7,7 @@
 # See LICENSE in the root of the software repository for the full text of the License.
 
 """
-TMrgSortOp format2: ins(src0..srcN) outs(dst, tmp, excuted) with exhausted attr,
+TMrgSortOp format2: ins(src0..srcN, tmp) outs(dst, excuted) with exhausted attr,
 where N is 1, 2, or 3 (2-way / 3-way / 4-way merge).
 
 Important notes for on-device execution:
@@ -115,7 +115,8 @@ def build():
                 # 2-way: src0 + src1 -> 1x256
                 pto.TMrgSortOp(
                     srcs=[tb_s0, tb_s1],
-                    dsts=[tb_dst2, tb_tmp2],
+                    dsts=[tb_dst2],
+                    tmp=tb_tmp2,
                     excuted=excuted,
                     exhausted=False,
                 )
@@ -123,7 +124,8 @@ def build():
                 # 3-way: src0 + src1 + src2 -> 1x384
                 pto.TMrgSortOp(
                     srcs=[tb_s0, tb_s1, tb_s2],
-                    dsts=[tb_dst3, tb_tmp3],
+                    dsts=[tb_dst3],
+                    tmp=tb_tmp3,
                     excuted=excuted,
                     exhausted=False,
                 )
@@ -131,7 +133,8 @@ def build():
                 # 4-way: src0 + src1 + src2 + src3 -> 1x512
                 pto.TMrgSortOp(
                     srcs=[tb_s0, tb_s1, tb_s2, tb_s3],
-                    dsts=[tb_dst4, tb_tmp4],
+                    dsts=[tb_dst4],
+                    tmp=tb_tmp4,
                     excuted=excuted,
                     exhausted=True,
                 )

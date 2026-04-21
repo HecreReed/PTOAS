@@ -106,6 +106,10 @@ static void bindPTOModule(pybind11::module &m) {
     .value("ODD", mlir::pto::RoundMode::ODD)
     .value("CAST_RINT", mlir::pto::RoundMode::CAST_RINT);
 
+    py::enum_<mlir::pto::SaturationMode>(m, "SaturationMode")
+    .value("ON", mlir::pto::SaturationMode::ON)
+    .value("OFF", mlir::pto::SaturationMode::OFF);
+
     py::enum_<MlirPTOCmpMode>(m, "CmpMode")
       .value("EQ", MlirPTOCmpMode_EQ)
       .value("NE", MlirPTOCmpMode_NE)
@@ -313,6 +317,33 @@ static void bindPTOModule(pybind11::module &m) {
         "value",
         [](MlirAttribute self) -> int32_t {
         return mlirPTORoundModeAttrGetValue(self);
+        });
+
+    mlir_attribute_subclass(
+        m, "SaturationModeAttr",
+        [](MlirAttribute a) { return mlirPTOAttrIsASaturationModeAttr(a); })
+     .def_classmethod(
+         "get",
+        [](py::object cls, py::object value, MlirContext ctx) -> py::object {
+        int32_t v = 0;
+        if (py::isinstance<py::int_>(value)) {
+            v = value.cast<int32_t>();
+        } else if (py::hasattr(value, "value")) {
+            v = value.attr("value").cast<int32_t>();
+        } else {
+            throw std::runtime_error("SaturationModeAttr.get expects int or SaturationMode enum");
+        }
+
+        MlirAttribute a = mlirPTOSaturationModeAttrGet(ctx, v);
+        if (mlirAttributeIsNull(a)) return py::none();
+        return cls.attr("__call__")(a);
+         },
+        py::arg("cls"), py::arg("value"), py::arg("context") = py::none())
+
+    .def_property_readonly(
+        "value",
+        [](MlirAttribute self) -> int32_t {
+        return mlirPTOSaturationModeAttrGetValue(self);
         });
 
     mlir_attribute_subclass(

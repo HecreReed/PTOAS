@@ -152,6 +152,29 @@ def PTOLowerFrontendPipeOps : Pass<"pto-lower-frontend-pipe-ops", "func::FuncOp"
   ];
 }
 
+def PTOInferValidatePipeInit : Pass<"pto-infer-validate-pipe-init", "ModuleOp"> {
+  let summary = "Infer and validate internal pipe init nosplit configuration";
+  let description = [{
+    Runs after frontend pipe lowering and before memory planning. For each
+    logical pipe, this pass:
+    - validates that downstream `pto.tpush` / `pto.tpop` / `pto.tfree` users
+      do not mix `split = 0` with `split = 1/2`
+    - preserves explicit `nosplit` attrs on internal pipe init ops and rejects
+      conflicts across peer pipe init pairs
+    - infers missing `nosplit` attrs from downstream split usage for backward
+      compatibility with older IR that omitted init-level `nosplit`
+    - propagates the resolved `nosplit` value across peer pipe init pairs so
+      both ends of one logical pipe agree before EmitC lowering
+  }];
+
+  let constructor = "mlir::pto::createPTOInferValidatePipeInitPass()";
+
+  let dependentDialects = [
+    "mlir::pto::PTODialect",
+    "mlir::func::FuncDialect"
+  ];
+}
+
 def PTOResolveReservedBuffers : Pass<"pto-resolve-reserved-buffers", "ModuleOp"> {
   let summary = "Resolve reserved local buffer addresses and peer pipe flag bases";
   let description = [{

@@ -451,12 +451,12 @@ getTPipeDirectionToken(bool isL2G2L, int8_t dirMask, PTOArch targetArch) {
 
 static std::string buildTPipeToken(int32_t flagBase, llvm::StringRef dirTok,
                                    int32_t slotSize, int32_t slotNum,
-                                   std::optional<int32_t> localSlotNum) {
+                                   int32_t localSlotNum, bool nosplit) {
   std::string token = "TPipe<" + std::to_string(flagBase) + ", " + dirTok.str() +
                       ", " + std::to_string(slotSize) + ", " +
                       std::to_string(slotNum);
-  if (localSlotNum)
-    token += ", " + std::to_string(*localSlotNum);
+  token += ", " + std::to_string(localSlotNum);
+  token += nosplit ? ", true" : ", false";
   token += ">";
   return token;
 }
@@ -474,8 +474,10 @@ static FailureOr<std::string> buildTPipeTokenFromInitOp(Operation *op,
                                ? initOp.getLocalSlotNumAttr().getInt()
                                : initOp.getSlotNum();
     return buildTPipeToken(initOp.getFlagBaseAttr().getInt(), *dirTok,
-                           initOp.getSlotSize(),
-                           initOp.getSlotNum(), localSlotNum);
+                           initOp.getSlotSize(), initOp.getSlotNum(),
+                           localSlotNum,
+                           initOp.getNosplitAttr() &&
+                               initOp.getNosplitAttr().getValue());
   }
 
   if (auto initOp = dyn_cast<pto::InitializeL2LPipeOp>(op)) {
@@ -486,8 +488,9 @@ static FailureOr<std::string> buildTPipeTokenFromInitOp(Operation *op,
     if (failed(dirTok))
       return failure();
     return buildTPipeToken(initOp.getFlagBaseAttr().getInt(), *dirTok,
-                           initOp.getSlotSize(),
-                           initOp.getSlotNum(), std::nullopt);
+                           initOp.getSlotSize(), initOp.getSlotNum(), 2,
+                           initOp.getNosplitAttr() &&
+                               initOp.getNosplitAttr().getValue());
   }
 
   return failure();
@@ -4641,6 +4644,26 @@ struct PTOWaitFlagToEmitC : public OpConversionPattern<mlir::pto::WaitFlagOp> {
   }
 };
 
+struct PTOSyncToEmitC : public OpConversionPattern<mlir::pto::TSyncOp> {
+  using OpConversionPattern<mlir::pto::TSyncOp>::OpConversionPattern;
+
+  LogicalResult matchAndRewrite(mlir::pto::TSyncOp op, OpAdaptor adaptor,
+                                ConversionPatternRewriter &rewriter) const override {
+    SmallVector<Value, 4> operands;
+    operands.reserve(adaptor.getEvents().size());
+    for (Value event : adaptor.getEvents())
+      operands.push_back(peelUnrealized(event));
+
+    rewriter.create<emitc::CallOpaqueOp>(
+        op.getLoc(), TypeRange{}, "TSYNC",
+        /*args=*/ArrayAttr{},
+        /*templateArgs=*/ArrayAttr{},
+        /*operands=*/ValueRange(operands));
+    rewriter.eraseOp(op);
+    return success();
+  }
+};
+
 struct PTOSyncFlagDynToEmitC : public ConversionPattern {
   PTOSyncFlagDynToEmitC(TypeConverter &typeConverter, MLIRContext *ctx,
                         StringRef opName, StringRef callee)
@@ -6535,6 +6558,14 @@ static std::string roundModeTok(mlir::pto::RoundModeAttr attr) {
   }
   return "RoundMode::CAST_RINT";
 }
+static std::string saturationModeTok(mlir::pto::SaturationModeAttr attr) {
+  using SM = mlir::pto::SaturationMode;
+  switch (attr.getValue()) {
+  case SM::ON:  return "SaturationMode::ON";
+  case SM::OFF: return "SaturationMode::OFF";
+  }
+  return "SaturationMode::ON";
+}
 struct PTOCvtToEmitC : public OpConversionPattern<pto::TCvtOp> {
   using OpConversionPattern<pto::TCvtOp>::OpConversionPattern;
 
@@ -6545,24 +6576,61 @@ struct PTOCvtToEmitC : public OpConversionPattern<pto::TCvtOp> {
 
     Value src = peelUnrealized(adaptor.getSrc());
     Value dst = peelUnrealized(adaptor.getDst());
+    Value tmp = adaptor.getTmp() ? peelUnrealized(adaptor.getTmp()) : Value{};
 
-    // rmode default: CAST_RINT
     pto::RoundModeAttr rmAttr = op.getRmodeAttr();
     std::string rmTok = rmAttr ? roundModeTok(rmAttr)
                                : std::string("RoundMode::CAST_RINT");
-
-    // 生成: TCVT(dst, src, RoundMode::XXX)
     auto rmodeTy = emitc::OpaqueType::get(ctx, "RoundMode");
     Value rmodeVal = rewriter.create<emitc::ConstantOp>(
         loc, rmodeTy, emitc::OpaqueAttr::get(ctx, rmTok));
 
-    // 这里 args 被清空，只保留 operands，包括 src, dst 和 rmode
+    SmallVector<Value, 5> operands{dst, src};
+    if (tmp)
+      operands.push_back(tmp);
+    operands.push_back(rmodeVal);
+
+    if (auto satAttr = op.getSatModeAttr()) {
+      auto satModeTy = emitc::OpaqueType::get(ctx, "SaturationMode");
+      Value satModeVal = rewriter.create<emitc::ConstantOp>(
+          loc, satModeTy, emitc::OpaqueAttr::get(ctx, saturationModeTok(satAttr)));
+      operands.push_back(satModeVal);
+    }
+
     rewriter.create<emitc::CallOpaqueOp>(
         loc, TypeRange{}, "TCVT",
-        /*args=*/ArrayAttr{},                  // 不使用 args
+        /*args=*/ArrayAttr{},
         /*templateArgs=*/ArrayAttr{},
-        /*operands=*/ValueRange{dst, src, rmodeVal}); // 传递 dst, src 和 rmode
+        /*operands=*/operands);
 
+    rewriter.eraseOp(op);
+    return success();
+  }
+};
+struct PTORandomToEmitC : public OpConversionPattern<pto::TRandomOp> {
+  using OpConversionPattern<pto::TRandomOp>::OpConversionPattern;
+
+  LogicalResult matchAndRewrite(pto::TRandomOp op, OpAdaptor adaptor,
+                                ConversionPatternRewriter &rewriter) const override {
+    auto loc = op.getLoc();
+    auto *ctx = rewriter.getContext();
+
+    Value dst = peelUnrealized(adaptor.getDst());
+    SmallVector<Value, 7> operands{
+        dst,
+        peelUnrealized(adaptor.getKey0()),
+        peelUnrealized(adaptor.getKey1()),
+        peelUnrealized(adaptor.getCounter0()),
+        peelUnrealized(adaptor.getCounter1()),
+        peelUnrealized(adaptor.getCounter2()),
+        peelUnrealized(adaptor.getCounter3()),
+    };
+    ArrayAttr templateArgs = rewriter.getArrayAttr(
+        {emitc::OpaqueAttr::get(ctx, std::to_string(op.getRounds()))});
+
+    rewriter.create<emitc::CallOpaqueOp>(
+        loc, TypeRange{}, "PTOAS__TRANDOM",
+        /*args=*/ArrayAttr{}, /*templateArgs=*/templateArgs, operands);
     rewriter.eraseOp(op);
     return success();
   }
@@ -6602,43 +6670,16 @@ struct PTODivSToEmitC : public OpConversionPattern<pto::TDivSOp> {
                                 ConversionPatternRewriter &rewriter) const override {
     auto loc = op.getLoc();
 
-    // Check types BEFORE conversion (using original op types, not adaptor types)
-    // The adaptor types may already be converted to emitc.opaque
-    Value origSrc = op.getSrc();
-    Value origScalar = op.getScalar();
-    
-    // Determine order based on original operand types
-    // Check if src is memref/tensor/partition_tensor_view/tile (not scalar)
-    bool srcIsMemref = (isa<MemRefType>(origSrc.getType()) || 
-                        isa<RankedTensorType>(origSrc.getType()) ||
-                        isa<mlir::pto::PartitionTensorViewType>(origSrc.getType()) ||
-                        isa<mlir::pto::TileBufType>(origSrc.getType()));
-    // Check if scalar is memref/tensor/partition_tensor_view/tile (not scalar)
-    bool scalarIsMemref = (isa<MemRefType>(origScalar.getType()) || 
-                           isa<RankedTensorType>(origScalar.getType()) ||
-                           isa<mlir::pto::PartitionTensorViewType>(origScalar.getType()) ||
-                           isa<mlir::pto::TileBufType>(origScalar.getType()));
-
     Value src    = peelUnrealized(adaptor.getSrc());
     Value scalar = peelUnrealized(adaptor.getScalar());
     Value dst    = peelUnrealized(adaptor.getDst());
-
-    if (srcIsMemref && !scalarIsMemref) {
-      // memref/scalar: TDIVS(dst, src, scalar) - normal order
-      rewriter.create<emitc::CallOpaqueOp>(
-          loc, TypeRange{}, "TDIVS",
-          ArrayAttr{}, ArrayAttr{},
-          ValueRange{dst, src, scalar});
-    } else if (!srcIsMemref && scalarIsMemref) {
-          // scalar/memref: TDIVS(dst, scalar, src) - swapped order
-      rewriter.create<emitc::CallOpaqueOp>(
-          loc, TypeRange{}, "TDIVS",
-          ArrayAttr{}, ArrayAttr{},
-          ValueRange{dst, scalar, src});
-    } else {
-      // This should not happen if verifier is correct, but provide a fallback
-      return op.emitError("TDivSOp: expected exactly one memref/tensor operand and one scalar operand");
-    }
+    // Preserve source order from textual parse:
+    // ins(tile, scalar)   -> TDIVS(dst, tile, scalar)
+    // ins(scalar, tile)   -> TDIVS(dst, scalar, tile)
+    rewriter.create<emitc::CallOpaqueOp>(
+        loc, TypeRange{}, "TDIVS",
+        ArrayAttr{}, ArrayAttr{},
+        ValueRange{dst, src, scalar});
 
     rewriter.eraseOp(op);
     return success();
@@ -6661,30 +6702,10 @@ struct PTOTDivSToEmitC : public OpConversionPattern<pto::TDivSOp> {
     Value src    = peelUnrealized(adaptor.getSrc());
     Value scalar = peelUnrealized(adaptor.getScalar());
     Value dst    = peelUnrealized(adaptor.getDst());
-
-    // Determine order based on operand types
-    bool srcIsTile = isa<mlir::pto::TileBufType>(src.getType());
-    bool scalarIsTile = isa<mlir::pto::TileBufType>(scalar.getType());
-
-    if (srcIsTile && !scalarIsTile) {
-      // tile/scalar: TDIVS(dst, src, scalar)
-      rewriter.create<emitc::CallOpaqueOp>(
-          loc, TypeRange{}, "TDIVS",
-          ArrayAttr{}, ArrayAttr{},
-          ValueRange{dst, src, scalar});
-    } else if (!srcIsTile && scalarIsTile) {
-      // scalar/tile: TDIVS(dst, scalar, src)
-      rewriter.create<emitc::CallOpaqueOp>(
-          loc, TypeRange{}, "TDIVS",
-          ArrayAttr{}, ArrayAttr{},
-          ValueRange{dst, scalar, src});
-    } else {
-      // Default: assume src is tile (should not happen if types are correct)
-      rewriter.create<emitc::CallOpaqueOp>(
-          loc, TypeRange{}, "TDIVS",
-          ArrayAttr{}, ArrayAttr{},
-          ValueRange{dst, src, scalar});
-    }
+    rewriter.create<emitc::CallOpaqueOp>(
+        loc, TypeRange{}, "TDIVS",
+        ArrayAttr{}, ArrayAttr{},
+        ValueRange{dst, src, scalar});
 
     rewriter.eraseOp(op);
     return success();
@@ -7484,7 +7505,7 @@ struct PTOMrgSortToEmitC : public OpConversionPattern<pto::TMrgSortOp> {
       auto *ctx = rewriter.getContext();
 
       Value dst = peelUnrealized(adaptor.getDsts()[0]);
-      Value tmp = peelUnrealized(adaptor.getDsts()[1]);
+      Value tmp = peelUnrealized(adaptor.getTmp());
       Value excuted = peelUnrealized(adaptor.getExcuted());
 
       SmallVector<Value, 4> srcs;
@@ -7495,7 +7516,7 @@ struct PTOMrgSortToEmitC : public OpConversionPattern<pto::TMrgSortOp> {
       auto dstOT = dst.getType().dyn_cast<emitc::OpaqueType>();
       auto tmpOT = tmp.getType().dyn_cast<emitc::OpaqueType>();
       if (!dstOT || !tmpOT || srcs.size() < 2 || srcs.size() > 4)
-        return op.emitOpError("format2 expects (dst,tmp) tilebufs and 2 to 4 srcs");
+        return op.emitOpError("format2 expects dst/tmp tilebufs and 2 to 4 srcs");
 
       SmallVector<Attribute, 8> targs;
       targs.reserve(2 + srcs.size() + 1);
@@ -8175,7 +8196,7 @@ struct PTOTMatmulMXAccToTMATMUL_MX_ACC
     Value bScale  = peelUnrealized(adaptor.getBScale());
     Value dst     = peelUnrealized(adaptor.getDst());
 
-    replaceOrEraseWithOpaqueCall(op.getOperation(), "TMATMUL_MX_ACC",
+    replaceOrEraseWithOpaqueCall(op.getOperation(), "TMATMUL_MX",
                                 {dst, cIn, a, aScale, b, bScale}, rewriter);
     return success();
   }
@@ -8194,7 +8215,7 @@ struct PTOTMatmulMXBiasToTMATMUL_MX_BIAS
     Value bias    = peelUnrealized(adaptor.getBias());
     Value dst     = peelUnrealized(adaptor.getDst());
 
-    replaceOrEraseWithOpaqueCall(op.getOperation(), "TMATMUL_MX_BIAS",
+    replaceOrEraseWithOpaqueCall(op.getOperation(), "TMATMUL_MX",
                                 {dst, a, aScale, b, bScale, bias}, rewriter);
     return success();
   }
@@ -10132,6 +10153,7 @@ static void populatePTOToEmitCPatterns(RewritePatternSet &patterns,
   patterns.add<PTOSubSCToEmitC>(typeConverter, ctx);
   patterns.add<PTOSubCSToEmitC>(typeConverter, ctx);
   patterns.add<PTOWaitFlagToEmitC>(typeConverter, ctx);
+  patterns.add<PTOSyncToEmitC>(typeConverter, ctx);
   patterns.add<PTOGetBufToEmitC>(typeConverter, ctx);
   patterns.add<PTORlsBufToEmitC>(typeConverter, ctx);
   patterns.add<PTOSetFFTsToEmitC>(typeConverter, ctx);
@@ -10219,6 +10241,7 @@ static void populatePTOToEmitCPatterns(RewritePatternSet &patterns,
   patterns.add<PTOColSumToEmitC>(typeConverter, ctx);
   patterns.add<PTOLReluToEmitC>(typeConverter, ctx);
   patterns.add<PTOMrgSortToEmitC>(typeConverter, ctx);
+  patterns.add<PTORandomToEmitC>(typeConverter, ctx);
   patterns.add<SubviewToEmitCPattern>(typeConverter, ctx);
   patterns.add<PointerCastConversion>(typeConverter, ctx);
   patterns.add<PTOSetValToSETVAL, PTOGetValToGETVAL, PTOSetValidShapeToEmitC,
@@ -10407,9 +10430,12 @@ struct EmitPTOManualPass
     }
 
         bool needsEventIdArrayHelper = false;
+        bool needsTRandomHelper = false;
         mop.walk([&](Operation *op) {
           if (isa<mlir::pto::DeclareEventIdArrayOp>(op))
             needsEventIdArrayHelper = true;
+          if (isa<mlir::pto::TRandomOp>(op))
+            needsTRandomHelper = true;
         });
 
 		    // 1. 插入头文件
@@ -10431,6 +10457,19 @@ struct PTOAS_EventIdArray {
   AICORE inline int32_t &operator[](int32_t idx) { return data[idx]; }
   AICORE inline const int32_t &operator[](int32_t idx) const { return data[idx]; }
 };
+)cpp"));
+        }
+        if (needsTRandomHelper) {
+	      builder.create<emitc::VerbatimOp>(
+	          loc, builder.getStringAttr(R"cpp(
+template <uint16_t Rounds, typename DstTile>
+static AICORE inline void PTOAS__TRANDOM(
+    DstTile &dst, uint32_t key0, uint32_t key1, uint32_t counter0,
+    uint32_t counter1, uint32_t counter2, uint32_t counter3) {
+  TRandomKey key = {key0, key1};
+  TRandomCounter counter = {counter0, counter1, counter2, counter3};
+  TRANDOM<Rounds>(dst, key, counter);
+}
 )cpp"));
         }
 	    builder.create<emitc::VerbatimOp>(

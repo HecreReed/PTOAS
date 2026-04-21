@@ -49,11 +49,12 @@ static FailureOr<Value> createFrontendPipe(InitOpT initOp, IRRewriter &rewriter,
   auto dirAttr = rewriter.getI8IntegerAttr(dirMask);
   auto slotSizeAttr = rewriter.getI32IntegerAttr(initOp.getSlotSize());
   auto slotNumAttr = rewriter.getI32IntegerAttr(slotNum);
+  auto noSplitAttr = initOp.getNosplitAttr();
 
   if (arch == PTOArch::A5) {
     auto pipe = rewriter.create<InitializeL2LPipeOp>(
         loc, pipeTy, dirAttr, slotSizeAttr, slotNumAttr, IntegerAttr{},
-        localAddr, peerLocalAddr);
+        noSplitAttr, localAddr, peerLocalAddr);
     return pipe.getPipe();
   }
 
@@ -63,7 +64,8 @@ static FailureOr<Value> createFrontendPipe(InitOpT initOp, IRRewriter &rewriter,
   auto localSlotNumAttr = rewriter.getI32IntegerAttr(slotNum);
   auto pipe = rewriter.create<InitializeL2G2LPipeOp>(
       loc, pipeTy, dirAttr, slotSizeAttr, slotNumAttr, localSlotNumAttr,
-      IntegerAttr{}, initOp.getGmSlotBuffer(), localAddr, peerLocalAddr);
+      IntegerAttr{}, noSplitAttr, initOp.getGmSlotBuffer(), localAddr,
+      peerLocalAddr);
   return pipe.getPipe();
 }
 
@@ -168,12 +170,34 @@ static LogicalResult validateFrontendInitOps(func::FuncOp funcOp,
 }
 
 template <typename InitOpT>
+static void propagateFrontendNoSplitAttr(InitOpT initOp,
+                                         const FrontendPipeHandles &handles) {
+  auto noSplitAttr = initOp.getNosplitAttr();
+  if (!noSplitAttr)
+    return;
+
+  if (handles.anchorOp)
+    handles.anchorOp->setAttr("nosplit", noSplitAttr);
+
+  Operation *c2vOp =
+      handles.c2vPipe ? handles.c2vPipe.getDefiningOp() : nullptr;
+  Operation *v2cOp =
+      handles.v2cPipe ? handles.v2cPipe.getDefiningOp() : nullptr;
+
+  if (c2vOp && c2vOp != handles.anchorOp)
+    c2vOp->setAttr("nosplit", noSplitAttr);
+  if (v2cOp && v2cOp != handles.anchorOp && v2cOp != c2vOp)
+    v2cOp->setAttr("nosplit", noSplitAttr);
+}
+
+template <typename InitOpT>
 static FailureOr<FrontendPipeHandles> lowerAndEraseFrontendInit(InitOpT initOp,
                                                                 IRRewriter &rewriter) {
   rewriter.setInsertionPoint(initOp);
   auto loweredOr = lowerFrontendInitOp(initOp, rewriter);
   if (failed(loweredOr))
     return failure();
+  propagateFrontendNoSplitAttr(initOp, *loweredOr);
   rewriter.eraseOp(initOp);
   return *loweredOr;
 }

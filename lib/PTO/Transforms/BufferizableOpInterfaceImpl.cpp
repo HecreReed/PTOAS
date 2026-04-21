@@ -148,8 +148,8 @@ struct PTOStoreOpInterface
   }
 };
 
-/// TMrgSortOp format2 has dsts = [memref, vector<4xi16>]. The vector init
-/// must not participate in bufferization (not a tensor/memref).
+/// TMrgSortOp format2 keeps only the destination tile in dsts. The executed
+/// vector result remains a non-bufferizable side operand/result.
 struct PTOMrgSortDpsOpInterface
     : public DstBufferizableOpInterfaceExternalModel<PTOMrgSortDpsOpInterface,
                                                      pto::TMrgSortOp> {

@@ -101,6 +101,9 @@ MLIR_CAPI_EXPORTED int32_t mlirPTOReluPreModeAttrGetValue(MlirAttribute attr);
 MLIR_CAPI_EXPORTED MlirAttribute mlirPTORoundModeAttrGet(MlirContext ctx, int32_t value);
 MLIR_CAPI_EXPORTED bool mlirPTOAttrIsARoundModeAttr(MlirAttribute attr);
 MLIR_CAPI_EXPORTED int32_t mlirPTORoundModeAttrGetValue(MlirAttribute attr);
+MLIR_CAPI_EXPORTED MlirAttribute mlirPTOSaturationModeAttrGet(MlirContext ctx, int32_t value);
+MLIR_CAPI_EXPORTED bool mlirPTOAttrIsASaturationModeAttr(MlirAttribute attr);
+MLIR_CAPI_EXPORTED int32_t mlirPTOSaturationModeAttrGetValue(MlirAttribute attr);
 // ---- Pipe attr ----
 MLIR_CAPI_EXPORTED MlirAttribute mlirPTOPipeAttrGet(MlirContext ctx, int32_t value);
 MLIR_CAPI_EXPORTED bool mlirPTOAttrIsAPipeAttr(MlirAttribute attr);

@@ -73,6 +73,8 @@ ReluPreMode = _pto_mod.ReluPreMode
 ReluPreModeAttr = _pto_mod.ReluPreModeAttr
 RoundMode = _pto_mod.RoundMode
 RoundModeAttr = _pto_mod.RoundModeAttr
+SaturationMode = _pto_mod.SaturationMode
+SaturationModeAttr = _pto_mod.SaturationModeAttr
 CmpMode = _pto_mod.CmpMode
 CmpModeAttr = _pto_mod.CmpModeAttr
 PIPE = _pto_mod.PIPE
@@ -115,6 +117,8 @@ __all__ = [
     "ReluPreModeAttr",
     "RoundMode",
     "RoundModeAttr",
+    "SaturationMode",
+    "SaturationModeAttr",
     "CmpMode",
     "CmpModeAttr",
     "PIPE",

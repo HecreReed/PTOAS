@@ -369,6 +369,20 @@ def PTO_RoundModeEnum : PTO_I32Enum<
 def PTO_RoundModeAttr : EnumAttr<PTO_Dialect, PTO_RoundModeEnum, "round_mode"> {
   let summary = "rounding mode attribute";
 }
+
+//===----------------------------------------------------------------------===//
+// SaturationMode
+//===----------------------------------------------------------------------===//
+
+def PTO_SaturationModeEnum : PTO_I32Enum<
+  "SaturationMode", "PTO saturation mode", [
+    I32EnumAttrCase<"ON",  0>,
+    I32EnumAttrCase<"OFF", 1>
+  ]>;
+
+def PTO_SaturationModeAttr : EnumAttr<PTO_Dialect, PTO_SaturationModeEnum, "saturation_mode"> {
+  let summary = "saturation mode attribute";
+}
 //===----------------------------------------------------------------------===//
 // TStore template controls
 //===----------------------------------------------------------------------===//

@@ -1590,7 +1590,7 @@ struct PTOViewToMemrefPass
           bool eligible = !op->use_empty();
           for (Operation *user : op->getUsers()) {
             auto init = dyn_cast<mlir::pto::InitializeL2G2LPipeOp>(user);
-            if (!init || init.getGmAddr() != op.getResult()) {
+            if (!init || init.getGmAddr() != op->getResult(0)) {
               eligible = false;
               break;
             }
@@ -1604,12 +1604,12 @@ struct PTOViewToMemrefPass
           rewriter.setInsertionPoint(op);
           Location loc = op.getLoc();
 
-          Value base = op.getPtr();
-          Value totalOffset = ensureIndex(rewriter, loc, op.getOffset(), op);
+          Value base = op->getOperand(0);
+          Value totalOffset = ensureIndex(rewriter, loc, op->getOperand(1), op);
           while (auto add = base.getDefiningOp<mlir::pto::AddPtrOp>()) {
-            Value off = ensureIndex(rewriter, loc, add.getOffset(), add);
+            Value off = ensureIndex(rewriter, loc, add->getOperand(1), add);
             totalOffset = rewriter.create<arith::AddIOp>(loc, totalOffset, off);
-            base = add.getPtr();
+            base = add->getOperand(0);
           }
 
           auto baseMrTy = dyn_cast<MemRefType>(base.getType());
@@ -2438,6 +2438,7 @@ struct PTOViewToMemrefPass
 
         Value src = op.getSrc();
         Value dst = op.getDst();
+        Value tmp = op.getTmp();
 
         auto srcTy = dyn_cast<MemRefType>(src.getType());
         auto dstTy = dyn_cast<MemRefType>(dst.getType());
@@ -2446,19 +2447,25 @@ struct PTOViewToMemrefPass
           signalPassFailure();
           return;
         }
+        if (tmp && !dyn_cast<MemRefType>(tmp.getType())) {
+          op.emitError("tmp is not memref yet");
+          signalPassFailure();
+          return;
+        }
 
         auto rmodeAttr = op.getRmodeAttr(); // PTO_RoundModeAttr
+        auto satModeAttr = op.getSatModeAttr();
 
         auto newOp = rewriter.create<pto::TCvtOp>(
             op.getLoc(),
             TypeRange{},
             src,
-            dst);
+            dst,
+            tmp,
+            rmodeAttr,
+            satModeAttr);
 
-       if (rmodeAttr)
-         newOp->setAttr("rmode", rmodeAttr);
- 
-         rewriter.replaceOp(op, newOp->getResults());
+        rewriter.replaceOp(op, newOp->getResults());
       }
 
       SmallVector<mlir::pto::TDivOp, 8> divops;
@@ -2503,13 +2510,12 @@ struct PTOViewToMemrefPass
         // Check types - they might still be TileBufType or already converted to MemRefType
         auto srcTy = dyn_cast<MemRefType>(src.getType());
         auto srcTileTy = dyn_cast<mlir::pto::TileBufType>(src.getType());
-        auto scaleTy = dyn_cast<FloatType>(scale.getType());
         auto scaleTileTy = dyn_cast<mlir::pto::TileBufType>(scale.getType());
         auto dstTy = dyn_cast<MemRefType>(dst.getType());
         auto dstTileTy = dyn_cast<mlir::pto::TileBufType>(dst.getType());
         
-        // Determine which operand is the tile/memref and which is the scalar
-        // TDivSOp expects (memref, scalar, dst) internally, so we need to ensure correct order
+        // Determine which operand is tile-like and which is scalar-like.
+        // Keep the original operand order (set by parser textual form).
         // Check if src is memref/tensor/tile (not scalar)
         bool srcIsMemref = (srcTy != nullptr || srcTileTy != nullptr || 
                             isa<RankedTensorType>(src.getType()) ||
@@ -2537,23 +2543,11 @@ struct PTOViewToMemrefPass
           signalPassFailure();
           return;
         }
-        Value memrefOperand, scalarOperand;
-        if (srcIsMemref) {
-          // Normal order: (src=tile/memref, scale=scalar, dst)
-          memrefOperand = src;
-          scalarOperand = scale;
-        } else {
-          // Swapped order: (src=scalar, scale=tile/memref, dst)
-          // Need to swap to (memref, scalar, dst) for TDivSOp
-          memrefOperand = scale;
-          scalarOperand = src;
-        }
-
         rewriter.replaceOpWithNewOp<pto::TDivSOp>(
             op,
             TypeRange{},
-            memrefOperand,
-            scalarOperand,
+            src,
+            scale,
             dst);
       }
 
@@ -3097,6 +3091,7 @@ struct PTOViewToMemrefPass
               ValueRange{src},
               blockLenVal,
               ValueRange{dst},
+              Value() /*tmp*/,
               Value() /*excuted*/,
               op.getExhaustedAttr());
         } else if (op.isFormat2()) {
@@ -3108,8 +3103,8 @@ struct PTOViewToMemrefPass
             signalPassFailure();
             return;
           }
-          if (op.getDsts().size() != 2u) {
-            op.emitError("format2 expects outs(dst, tmp) tile buffers");
+          if (op.getDsts().size() != 1u || !op.getTmp()) {
+            op.emitError("format2 expects outs(dst) and ins(tmp)");
             signalPassFailure();
             return;
           }
@@ -3118,7 +3113,7 @@ struct PTOViewToMemrefPass
           Value tmp = op.getTmp();
           Value excuted = op.getExcuted();
           if (!dyn_cast<MemRefType>(dst.getType()) || !dyn_cast<MemRefType>(tmp.getType())) {
-            op.emitError("format2 outs(dst/tmp) must be memref");
+            op.emitError("format2 dst/tmp must be memref");
             signalPassFailure();
             return;
           }
@@ -3133,7 +3128,8 @@ struct PTOViewToMemrefPass
               TypeRange{},
               op.getSrcs(),
               Value() /*blockLen*/,
-              ValueRange{dst, tmp},
+              ValueRange{dst},
+              tmp,
               excuted,
               op.getExhaustedAttr());
         } else {

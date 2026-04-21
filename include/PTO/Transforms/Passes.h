@@ -35,6 +35,7 @@ namespace pto {
 
 std::unique_ptr<Pass> createLoweringSyncToPipePass();
 std::unique_ptr<Pass> createPTOLowerFrontendPipeOpsPass();
+std::unique_ptr<Pass> createPTOInferValidatePipeInitPass();
 std::unique_ptr<Pass> createPTOResolveReservedBuffersPass();
 std::unique_ptr<Pass> createPTOWrapFunctionsInSectionsPass();
 std::unique_ptr<Pass> createPTOVerifyTFreePass();

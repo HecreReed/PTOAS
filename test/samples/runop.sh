@@ -405,10 +405,17 @@ process_one_dir() {
     # TODO(ptobc): alloc_tile addr operand is required by ptoas level3 for
     # these A5 repro/control samples, but ptobc v0 currently rejects this
     # form with "operand count mismatch for op: pto.alloc_tile".
+    #
+    # tcvt.py intentionally exercises the new pto.tcvt(tmp, sat_mode) form for
+    # sample/board coverage. ptobc v0 still assumes the legacy 2-operand shape
+    # and currently fails with "operand count mismatch for op: pto.tcvt".
+    # Keep the sample in runop coverage, but bypass the bytecode roundtrip until
+    # ptobc learns the expanded operand layout.
     if [[ "$base" == "test_tmov_col_major_16x1_align_a5" || \
           "$base" == "test_tmov_row_major_1x16_control_a5" || \
           "$base" == "decode_projection_incore_0" || \
-          "$base" == "rmsnorm_incore_0" ]]; then
+          "$base" == "rmsnorm_incore_0" || \
+          "$base" == "tcvt" ]]; then
       sample_use_ptobc_roundtrip=0
     fi
     if [[ $sample_use_ptobc_roundtrip -eq 1 ]]; then
@@ -985,6 +992,16 @@ PY
     if [[ "$base" == "tcvt" ]]; then
       if ! grep -Fq "TCVT(" "$cpp"; then
         echo -e "${A}(${base}.py)\tFAIL\tmissing TCVT() lowering for pto.tcvt"
+        overall=1
+        continue
+      fi
+      if ! grep -Fq "SaturationMode::ON" "$cpp"; then
+        echo -e "${A}(${base}.py)\tFAIL\tmissing SaturationMode::ON lowering for pto.tcvt"
+        overall=1
+        continue
+      fi
+      if ! grep -Fq "RoundMode::CAST_TRUNC" "$cpp"; then
+        echo -e "${A}(${base}.py)\tFAIL\tmissing CAST_TRUNC lowering for pto.tcvt"
         overall=1
         continue
       fi

@@ -13,6 +13,8 @@
 // Covers:
 //   - f32 -> f16 with the default rmode (CAST_RINT, attribute elided)
 //   - f32 -> bf16 with an explicit ROUND rmode
+//   - f32 -> i16 with explicit saturation mode
+//   - f32 -> i16 with tmp tile + explicit saturation mode
 
 module attributes {"pto.device-spec" = "Ascend910B3"} {
 
@@ -42,6 +44,33 @@ module attributes {"pto.device-spec" = "Ascend910B3"} {
     return
   }
 
+  // -----------------------------------------------------------------------
+  // f32 -> i16 with explicit OFF saturation mode
+  // -----------------------------------------------------------------------
+  func.func @tcvt_f32_to_i16_sat_off() attributes {pto.kernel_kind = #pto.kernel_kind<vector>} {
+    %src = pto.alloc_tile : !pto.tile_buf<loc=vec, dtype=f32, rows=16, cols=16, v_row=16, v_col=16, blayout=row_major, slayout=none_box, fractal=512, pad=0>
+    %dst = pto.alloc_tile : !pto.tile_buf<loc=vec, dtype=i16, rows=16, cols=16, v_row=16, v_col=16, blayout=row_major, slayout=none_box, fractal=512, pad=0>
+
+    pto.tcvt ins(%src {rmode = #pto<round_mode TRUNC>, sat_mode = #pto<saturation_mode OFF>} : !pto.tile_buf<loc=vec, dtype=f32, rows=16, cols=16, v_row=16, v_col=16, blayout=row_major, slayout=none_box, fractal=512, pad=0>)
+             outs(%dst : !pto.tile_buf<loc=vec, dtype=i16, rows=16, cols=16, v_row=16, v_col=16, blayout=row_major, slayout=none_box, fractal=512, pad=0>)
+
+    return
+  }
+
+  // -----------------------------------------------------------------------
+  // f32 -> i16 with tmp tile + explicit ON saturation mode
+  // -----------------------------------------------------------------------
+  func.func @tcvt_f32_to_i16_with_tmp() attributes {pto.kernel_kind = #pto.kernel_kind<vector>} {
+    %src = pto.alloc_tile : !pto.tile_buf<loc=vec, dtype=f32, rows=16, cols=16, v_row=16, v_col=16, blayout=row_major, slayout=none_box, fractal=512, pad=0>
+    %dst = pto.alloc_tile : !pto.tile_buf<loc=vec, dtype=i16, rows=16, cols=16, v_row=16, v_col=16, blayout=row_major, slayout=none_box, fractal=512, pad=0>
+    %tmp = pto.alloc_tile : !pto.tile_buf<loc=vec, dtype=f32, rows=16, cols=16, v_row=16, v_col=16, blayout=row_major, slayout=none_box, fractal=512, pad=0>
+
+    pto.tcvt ins(%src, %tmp {rmode = #pto<round_mode ROUND>, sat_mode = #pto<saturation_mode ON>} : !pto.tile_buf<loc=vec, dtype=f32, rows=16, cols=16, v_row=16, v_col=16, blayout=row_major, slayout=none_box, fractal=512, pad=0>, !pto.tile_buf<loc=vec, dtype=f32, rows=16, cols=16, v_row=16, v_col=16, blayout=row_major, slayout=none_box, fractal=512, pad=0>)
+             outs(%dst : !pto.tile_buf<loc=vec, dtype=i16, rows=16, cols=16, v_row=16, v_col=16, blayout=row_major, slayout=none_box, fractal=512, pad=0>)
+
+    return
+  }
+
 }
 
 // A3-LABEL: AICORE void tcvt_f32_to_f16(
@@ -52,10 +81,30 @@ module attributes {"pto.device-spec" = "Ascend910B3"} {
 // A3:       RoundMode::CAST_ROUND
 // A3:       TCVT(
 
+// A3-LABEL: AICORE void tcvt_f32_to_i16_sat_off(
+// A3:       SaturationMode::OFF
+// A3:       RoundMode::CAST_TRUNC
+// A3:       TCVT(
+
+// A3-LABEL: AICORE void tcvt_f32_to_i16_with_tmp(
+// A3:       SaturationMode::ON
+// A3:       RoundMode::CAST_ROUND
+// A3:       TCVT(
+
 // A5-LABEL: AICORE void tcvt_f32_to_f16(
 // A5:       RoundMode::CAST_RINT
 // A5:       TCVT(
 
 // A5-LABEL: AICORE void tcvt_f32_to_bf16_round(
+// A5:       RoundMode::CAST_ROUND
+// A5:       TCVT(
+
+// A5-LABEL: AICORE void tcvt_f32_to_i16_sat_off(
+// A5:       SaturationMode::OFF
+// A5:       RoundMode::CAST_TRUNC
+// A5:       TCVT(
+
+// A5-LABEL: AICORE void tcvt_f32_to_i16_with_tmp(
+// A5:       SaturationMode::ON
 // A5:       RoundMode::CAST_ROUND
 // A5:       TCVT(
