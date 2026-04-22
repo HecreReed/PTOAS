@@ -12,15 +12,15 @@
 // CHECK: error: 'pto.tquant' op INT8_SYM quantization must not have an offset operand
 
 func.func @tquant_sym_with_offset() attributes {pto.kernel_kind = #pto.kernel_kind<vector>} {
-  %src = memref.alloc() : memref<16x16xf32, #pto.address_space<vec>>
-  %fp = memref.alloc() : memref<16x16xf32, #pto.address_space<vec>>
-  %offset = memref.alloc() : memref<16x16xf32, #pto.address_space<vec>>
-  %dst = memref.alloc() : memref<16x16xi8, #pto.address_space<vec>>
+  %src = pto.alloc_tile : !pto.tile_buf<loc=vec, dtype=f32, rows=16, cols=16, v_row=16, v_col=16, blayout=row_major, slayout=none_box, fractal=512, pad=0>
+  %fp = pto.alloc_tile : !pto.tile_buf<loc=vec, dtype=f32, rows=16, cols=16, v_row=16, v_col=16, blayout=row_major, slayout=none_box, fractal=512, pad=0>
+  %offset = pto.alloc_tile : !pto.tile_buf<loc=vec, dtype=f32, rows=16, cols=16, v_row=16, v_col=16, blayout=row_major, slayout=none_box, fractal=512, pad=0>
+  %dst = pto.alloc_tile : !pto.tile_buf<loc=vec, dtype=i8, rows=16, cols=16, v_row=16, v_col=16, blayout=row_major, slayout=none_box, fractal=512, pad=0>
 
-  pto.tquant ins(%src, %fp, %offset : memref<16x16xf32, #pto.address_space<vec>>,
-                                      memref<16x16xf32, #pto.address_space<vec>>,
-                                      memref<16x16xf32, #pto.address_space<vec>>)
-             outs(%dst : memref<16x16xi8, #pto.address_space<vec>>)
+  pto.tquant ins(%src, %fp, %offset : !pto.tile_buf<loc=vec, dtype=f32, rows=16, cols=16, v_row=16, v_col=16, blayout=row_major, slayout=none_box, fractal=512, pad=0>,
+                                      !pto.tile_buf<loc=vec, dtype=f32, rows=16, cols=16, v_row=16, v_col=16, blayout=row_major, slayout=none_box, fractal=512, pad=0>,
+                                      !pto.tile_buf<loc=vec, dtype=f32, rows=16, cols=16, v_row=16, v_col=16, blayout=row_major, slayout=none_box, fractal=512, pad=0>)
+             outs(%dst : !pto.tile_buf<loc=vec, dtype=i8, rows=16, cols=16, v_row=16, v_col=16, blayout=row_major, slayout=none_box, fractal=512, pad=0>)
              {quant_type = #pto<quant_type INT8_SYM>}
 
   return

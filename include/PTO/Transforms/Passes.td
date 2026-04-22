@@ -71,12 +71,6 @@ def PTOA5NormalizeTMov : Pass<"pto-a5-normalize-tmov", "func::FuncOp"> {
 }
 
 
-def InferPTOMemScope : Pass<"pto-infer-mem-scope"> {
-  let summary = "Infer memory scope for PTO Ops";
-  let constructor = "mlir::pto::createInferPTOMemScopePass()";
-  let dependentDialects = ["pto::PTODialect", "memref::MemRefDialect", ];
-}
-
 def PlanMemory : Pass<"pto-plan-memory", "ModuleOp"> {
   let summary = "Plan memory for PTO Ops";
   let constructor = "mlir::pto::createPlanMemoryPass()";
@@ -87,7 +81,7 @@ def PlanMemory : Pass<"pto-plan-memory", "ModuleOp"> {
            "plan mem mode (default is LOCAL_MEM_PLAN)",
            [{::llvm::cl::values(
                clEnumValN(pto::MemPlanMode::LOCAL_MEM_PLAN, "local-mem-plan",
-                          "plan mem mode is for memref.alloc"),
+                          "plan mem mode is for local tile buffers"),
                clEnumValN(
                    pto::MemPlanMode::GLOBAL_WORKSPACE_PLAN,
                    "global-work-space-plan",

@@ -165,9 +165,6 @@ private:
   /// 辅助函数：获取所有涉及的 Buffer (用于 LCA 计算，虽然现在简化了，保留接口)
   SmallVector<Value> GetMemInfoBuffers(const DepBaseMemInfoPairVec &depBaseMemInfosVec);
  
-  /// 判断 buffer 是否是 Alloc 类操作 (用于溯源)
-  bool IsMemAllocOp(Operation *op) const;
- 
   /// 判断两个操作是否构成GM的读写冲突
   bool IsGMHazard(const CompoundInstanceElement *nowCompound,
                   const CompoundInstanceElement *frontCompound) const;

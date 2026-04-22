@@ -20,7 +20,12 @@ module {
   }
 }
 
-// RowPlusOne: major stride should be 17 (not 16).
-// CHECK-DAG: memref.alloc() : memref<16x16xf32, strided<[17, 1]>, #pto.address_space<vec>>
-// CHECK-DAG: memref.subview {{.*}} to memref<8x8xf32, strided<[17, 1], offset: ?>, #pto.address_space<vec>>
-// CHECK-DAG: Tile<TileType::Vec, float, 16, 16, BLayout::RowMajor, 8, 8, SLayout::NoneBox, 512, PadValue::Null, CompactMode::RowPlusOne>
+// RowPlusOne: tile-native lowering should preserve compact=row_plus_one and
+// compute the subview address with an extra row stride.
+// CHECK-DAG: pto.pointer_cast(%c0_i64) %c16, %c16 {{.*}}compact=#pto.compact_mode<row_plus_one>{{.*}} : !pto.tile_buf<vec, 16x16xf32, compact=2>
+// CHECK-DAG: %[[SUB:.*]] = pto.subview %{{.*}}[%c8, %c8] sizes [8, 8] : !pto.tile_buf<vec, 16x16xf32, compact=2> -> !pto.tile_buf<vec, 8x8xf32, compact=2>
+// CHECK-DAG: Tile<TileType::Vec, float, 16, 16, BLayout::RowMajor, 16, 16, SLayout::NoneBox, 512, PadValue::Null, CompactMode::RowPlusOne>
+// CHECK-DAG: Tile<TileType::Vec, float, 8, 8, BLayout::RowMajor, 8, 8, SLayout::NoneBox, 512, PadValue::Null, CompactMode::RowPlusOne>
+// CHECK-DAG: const int32_t [[BASE:v[0-9]+]] = 128;
+// CHECK-DAG: const int32_t [[OFF:v[0-9]+]] = 8;
+// CHECK: int64_t {{.*}} = (int64_t) ((int32_t) (uint32_t) ((int32_t) (uint32_t) [[BASE]] + (uint32_t) [[OFF]]) * (uint32_t) 4);

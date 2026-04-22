@@ -68,9 +68,7 @@ private:
   void UpdateKernelArgMemInfo();
   LogicalResult UpdateAllocTileOpMemInfo(pto::AllocTileOp op);
   LogicalResult UpdateDeclareTileOpMemInfo(pto::DeclareTileOp op);
-  LogicalResult UpdateDeclareTileMemRefOpMemInfo(pto::DeclareTileMemRefOp op);
   LogicalResult UpdatePointerCastOpMemInfo(pto::PointerCastOp op);
-  LogicalResult UpdateMemrefAllocOpMemInfo(memref::AllocOp op);
   
   // 处理 View/Alias (MakeTensorView, Subview, Mov)
   void UpdateAliasBufferInfo(Value result, Value source);

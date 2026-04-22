@@ -51,16 +51,11 @@ std::unique_ptr<Pass> createEmitPTOManualPass(PTOArch arch);
 /// Create a pass to convert ops from other dialects to PTO Ops.
 std::unique_ptr<Pass> createConvertToPTOOpPass();
 
-/// Create a pass to infer, propagate, and add memory scope information to
-/// PTO Ops.
-std::unique_ptr<Pass> createInferPTOMemScopePass();
-
 /// Create a pass to plan memory.
 std::unique_ptr<Pass>
 createPlanMemoryPass(const PlanMemoryOptions &planMemoryOption = {});
 
 std::unique_ptr<Pass> createPTORemoveRedundantBarrierPass();
-std::unique_ptr<Pass> createPTOViewToMemrefPass();
 std::unique_ptr<Pass> createInferPTOLayoutPass();
 std::unique_ptr<Pass> createPTOA5NormalizeTMovPass();
 // Declare register function

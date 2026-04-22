@@ -14,13 +14,11 @@
 add_mlir_dialect_library(PTOTransforms
   InsertSync/PTOInsertSync.cpp
   InsertSync/InsertSyncDebug.cpp
-  PTOViewToMemref.cpp
   PTOToEmitC.cpp
   Utils.cpp
   TileBufferSemantics.cpp
   OptMemPlanForPipeline.cpp
   AllocToPointerCast.cpp
-  InferPTOMemScope.cpp
   PTOPlanMemory.cpp
   PTORemoveRedundantBarrier.cpp
   InferPTOLayout.cpp

@@ -13,15 +13,13 @@
 
 #include "PTO/Transforms/InsertSync/PTOIRTranslator.h"
 #include "mlir/Dialect/Arith/IR/Arith.h"
+#include "mlir/Dialect/MemRef/IR/MemRef.h"
 #include "mlir/Dialect/SCF/IR/SCF.h"
-#include "mlir/Dialect/MemRef/IR/MemRef.h"
-#include "llvm/Support/Debug.h"
 #include "mlir/IR/AsmState.h"
-#include "llvm/Support/FormatVariadic.h"
-#include "mlir/Dialect/MemRef/IR/MemRef.h"
 #include "mlir/IR/Matchers.h"
-// [P0 新增] 引入副作用接口和 PTO 接口
 #include "mlir/Interfaces/SideEffectInterfaces.h"
+#include "llvm/Support/Debug.h"
+#include "llvm/Support/FormatVariadic.h"
  
 #define DEBUG_TYPE "pto-ir-translator"
  
@@ -134,19 +132,8 @@ void PTOIRTranslator::RecursionIR(Region *region) {
         return WalkResult::interrupt();
       }
     }
-    // 支持标准 memref.alloc
-    else if (auto memAllocOp = dyn_cast<memref::AllocOp>(op)) {
-       if (failed(UpdateMemrefAllocOpMemInfo(memAllocOp))) {
-          return WalkResult::interrupt();
-       }
-    }
     else if (auto declareTileOp = dyn_cast<pto::DeclareTileOp>(op)) {
       if (failed(UpdateDeclareTileOpMemInfo(declareTileOp))) {
-        return WalkResult::interrupt();
-      }
-    }
-    else if (auto declareOp = dyn_cast<pto::DeclareTileMemRefOp>(op)) {
-      if (failed(UpdateDeclareTileMemRefOpMemInfo(declareOp))) {
         return WalkResult::interrupt();
       }
     }
@@ -172,19 +159,6 @@ void PTOIRTranslator::RecursionIR(Region *region) {
     }
     else if (auto subViewOp = dyn_cast<pto::PartitionViewOp>(op)) {
       UpdateAliasBufferInfo(subViewOp.getResult(), subViewOp.getSource());
-    } 
-    else if (auto memrefSubView = dyn_cast<memref::SubViewOp>(op)) {
-      UpdateAliasBufferInfo(memrefSubView.getResult(), memrefSubView.getSource());
-    }
-    else if (auto castOp = dyn_cast<memref::ReinterpretCastOp>(op)) {
-      UpdateAliasBufferInfo(castOp.getResult(), castOp.getSource());
-    }
-    // [Fix] 添加 CollapseShape 和 ExpandShape 的支持
-    else if (auto collapseOp = dyn_cast<memref::CollapseShapeOp>(op)) {
-      UpdateAliasBufferInfo(collapseOp.getResult(), collapseOp.getSrc());
-    }
-    else if (auto expandOp = dyn_cast<memref::ExpandShapeOp>(op)) {
-      UpdateAliasBufferInfo(expandOp.getResult(), expandOp.getSrc());
     }
  
     // --- Case C: 控制流 (SCF) ---
@@ -366,45 +340,6 @@ LogicalResult PTOIRTranslator::UpdateDeclareTileOpMemInfo(pto::DeclareTileOp op)
   return success();
 }
 
-LogicalResult
-PTOIRTranslator::UpdateDeclareTileMemRefOpMemInfo(pto::DeclareTileMemRefOp op) {
-  Value res = op.getResult();
-  auto memRefType = dyn_cast<MemRefType>(res.getType());
-  if (!memRefType)
-    return failure();
-
-  uint64_t sizeInBytes = 0;
-  if (memRefType.hasStaticShape()) {
-    int64_t elemSize = memRefType.getElementType().getIntOrFloatBitWidth() / 8;
-    if (elemSize == 0)
-      elemSize = 1;
-
-    int64_t numElements = 1;
-    for (auto dim : memRefType.getShape())
-      numElements *= dim;
-    sizeInBytes = numElements * elemSize;
-  }
-
-  pto::AddressSpace space = pto::AddressSpace::MAT;
-  if (auto attr = memRefType.getMemorySpace()) {
-    if (auto ptoAttr = dyn_cast<pto::AddressSpaceAttr>(attr))
-      space = ptoAttr.getAddressSpace();
-  }
-
-  // declare_tile_memref is only a symbolic placeholder. Use its SSA result as
-  // both base/root so later bind_tile aliases and tpop consumers can be
-  // connected by InsertSync without inventing a fake allocation.
-  auto newMemInfo = std::make_unique<BaseMemInfo>(
-      res,
-      res,
-      space,
-      SmallVector<uint64_t>{0},
-      sizeInBytes);
-
-  buffer2MemInfoMap_[res].emplace_back(newMemInfo->clone());
-  return success();
-}
- 
 // ============================================================================
 // 5. [P0 修改] 更新 PTO Op 信息 (通用接口版)
 // ============================================================================
@@ -641,50 +576,6 @@ void PTOIRTranslator::UpdateAliasBufferInfo(Value result, Value source) {
  
     resultMemInfoVec.emplace_back(std::move(newInfo));
   }
-}
- 
-// ============================================================================
-// 实现 UpdateMemrefAllocOpMemInfo
-// ============================================================================
-LogicalResult PTOIRTranslator::UpdateMemrefAllocOpMemInfo(memref::AllocOp op) {
-  Value res = op.getResult();
-  auto memRefType = dyn_cast<MemRefType>(res.getType());
-  if (!memRefType) return failure();
- 
-  // 1. 计算大小 (Bytes)
-  uint64_t sizeInBytes = 0;
-  if (memRefType.hasStaticShape()) {
-    int64_t elemSize = memRefType.getElementType().getIntOrFloatBitWidth() / 8;
-    if (elemSize == 0) elemSize = 1; // bool case
-    
-    int64_t numElements = 1;
-    for (auto dim : memRefType.getShape()) numElements *= dim;
-    sizeInBytes = numElements * elemSize;
-  }
- 
-  // 2. 解析地址空间 (Scope)
-  // 默认视为 MAT/UB (Local Memory)，这是 alloc 的常见用途
-  // 如果有显式属性，则覆盖
-  pto::AddressSpace space = pto::AddressSpace::MAT; 
-  
-  if (auto attr = memRefType.getMemorySpace()) {
-    if (auto ptoAttr = dyn_cast<pto::AddressSpaceAttr>(attr)) {
-      space = ptoAttr.getAddressSpace();
-    }
-  }
- 
-  // 3. 注册 Buffer 信息
-  // 对于 alloc，它自己就是 Root
-  auto newMemInfo = std::make_unique<BaseMemInfo>(
-      res,                      // baseBuffer
-      res,                      // rootBuffer (Self is root)
-      space,
-      SmallVector<uint64_t>{0}, // Base Addresses (Offset 0)
-      sizeInBytes
-  );
- 
-  buffer2MemInfoMap_[res].emplace_back(newMemInfo->clone());
-  return success();
 }
  
 void PTOIRTranslator::UpdateDefUseVec(ValueRange values, SmallVector<const BaseMemInfo *> &vec) {

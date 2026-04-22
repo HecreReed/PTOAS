@@ -10,14 +10,20 @@ module {
       base = 0
     } -> i32
 
-    %ub = scf.if %cond -> (memref<16x16x16xf16, #pto.address_space<vec>>) {
-      %true_ub = memref.alloc() : memref<16x16x16xf16, #pto.address_space<vec>>
-      scf.yield %true_ub : memref<16x16x16xf16, #pto.address_space<vec>>
+    %ub = scf.if %cond -> (!pto.tile_buf<loc=vec, dtype=f16, rows=16, cols=16, v_row=16, v_col=16,
+                                      blayout=row_major, slayout=none_box, fractal=512, pad=0>) {
+      %true_ub = pto.alloc_tile : !pto.tile_buf<loc=vec, dtype=f16, rows=16, cols=16, v_row=16, v_col=16,
+                                                blayout=row_major, slayout=none_box, fractal=512, pad=0>
+      scf.yield %true_ub : !pto.tile_buf<loc=vec, dtype=f16, rows=16, cols=16, v_row=16, v_col=16,
+                                         blayout=row_major, slayout=none_box, fractal=512, pad=0>
     } else {
-      %false_ub = memref.alloc() : memref<16x16x16xf16, #pto.address_space<vec>>
-      scf.yield %false_ub : memref<16x16x16xf16, #pto.address_space<vec>>
+      %false_ub = pto.alloc_tile : !pto.tile_buf<loc=vec, dtype=f16, rows=16, cols=16, v_row=16, v_col=16,
+                                                 blayout=row_major, slayout=none_box, fractal=512, pad=0>
+      scf.yield %false_ub : !pto.tile_buf<loc=vec, dtype=f16, rows=16, cols=16, v_row=16, v_col=16,
+                                          blayout=row_major, slayout=none_box, fractal=512, pad=0>
     }
-    memref.dealloc %ub : memref<16x16x16xf16, #pto.address_space<vec>>
+    pto.tprint ins(%ub : !pto.tile_buf<loc=vec, dtype=f16, rows=16, cols=16, v_row=16, v_col=16,
+                                      blayout=row_major, slayout=none_box, fractal=512, pad=0>)
     return
   }
 }

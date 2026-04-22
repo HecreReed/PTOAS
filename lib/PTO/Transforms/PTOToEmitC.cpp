@@ -87,10 +87,6 @@ static const char *addrSpaceQualifier(pto::AddressSpace as) {
   return "__gm__";
 }
 
-static constexpr llvm::StringLiteral kLoweredSetValidShapeAttrName =
-    "__pto.lowered_set_validshape";
-static constexpr llvm::StringLiteral kLoweredSetValidShapeConfigAttrName =
-    "__pto.lowered_set_validshape_config";
 static constexpr llvm::StringLiteral kForceDynamicValidShapeAttrName =
     "__pto.force_dynamic_valid_shape";
 
@@ -6551,25 +6547,6 @@ struct PTOAsyncEventToEmitC : public OpConversionPattern<AsyncEventOp> {
   std::string callee;
 };
 
-struct PTODeclareTileMemRefToEmitC
-    : public OpConversionPattern<mlir::pto::DeclareTileMemRefOp> {
-  using OpConversionPattern<
-      mlir::pto::DeclareTileMemRefOp>::OpConversionPattern;
-
-  LogicalResult matchAndRewrite(mlir::pto::DeclareTileMemRefOp op,
-                                OpAdaptor adaptor,
-                                ConversionPatternRewriter &rewriter) const override {
-    (void)adaptor;
-    Type convertedType = getTypeConverter()->convertType(op.getResult().getType());
-    if (!convertedType)
-      return rewriter.notifyMatchFailure(
-          op, "failed to convert declare_tile_memref result type");
-    rewriter.replaceOp(op, makeEmitCOpaqueConstant(rewriter, op.getLoc(),
-                                                   convertedType, "nullptr"));
-    return success();
-  }
-};
-
 struct PTODeclareTileToEmitC
     : public OpConversionPattern<mlir::pto::DeclareTileOp> {
   using OpConversionPattern<mlir::pto::DeclareTileOp>::OpConversionPattern;
@@ -10467,7 +10444,7 @@ struct PTOBindTileToEmitC : public OpConversionPattern<pto::BindTileOp> {
       return rewriter.create<emitc::CastOp>(loc, u64Ty, rawPtr).getResult();
     };
 
-    if (op.getSource().getDefiningOp<pto::DeclareTileMemRefOp>()) {
+    if (op.getSource().getDefiningOp<pto::DeclareTileOp>()) {
       auto hasFollowingSetValidShape = [&]() {
         for (Operation *user : op->getUsers()) {
           auto setValidShape = dyn_cast<pto::SetValidShapeOp>(user);
@@ -11502,7 +11479,7 @@ static void populatePTOToEmitCPatterns(RewritePatternSet &patterns,
       typeConverter, ctx, "PTOAS__ASYNC_EVENT_TEST");
   patterns.add<PTOInitializeL2G2LPipeToEmitC>(typeConverter, ctx, targetArch);
   patterns.add<PTOInitializeL2LPipeToEmitC>(typeConverter, ctx, targetArch);
-  patterns.add<PTODeclareTileMemRefToEmitC, PTODeclareTileToEmitC>(typeConverter, ctx);
+  patterns.add<PTODeclareTileToEmitC>(typeConverter, ctx);
   patterns.add<PTODeclareEventIdArrayToEmitC>(typeConverter, ctx);
   patterns.add<PTOEventIdArrayGetToEmitC>(typeConverter, ctx);
   patterns.add<PTOEventIdArraySetToEmitC>(typeConverter, ctx);

@@ -329,7 +329,7 @@ def SetValidShapeOp : PTO_Op<"set_validshape", [
   }];
 
   let arguments = (ins
-    TileBufOrMemRef:$source,
+    TileBufType:$source,
     Index:$valid_row,
     Index:$valid_col
   );
@@ -1136,8 +1136,8 @@ def TMovOp  : PTO_TOp<"tmov", [
             return as.getAddressSpace();
           return std::nullopt;
         }
-        // Post PTOViewToMemref: tile_buf is erased to memref but memorySpace is
-        // preserved in memref's memorySpace attribute.
+        // Legacy memref-typed IR still preserves the PTO address-space attr in
+        // memref.memorySpace, so keep reading it defensively here.
         if (auto mr = llvm::dyn_cast<::mlir::MemRefType>(ty)) {
           if (auto ms = mr.getMemorySpace()) {
             if (auto as =
@@ -1858,22 +1858,6 @@ def EventIdArraySetOp : PTO_Op<"eventid_array_set"> {
 
   let assemblyFormat = [{
     $array `[` $index `]` `,` $value attr-dict `:` qualified(type($array))
-  }];
-}
-
-def DeclareTileMemRefOp : PTO_Op<"declare_tile_memref", [Pure]> {
-  let summary = "Internal memref placeholder for a tile whose address is assigned later";
-  let description = [{
-    Internal lowering op used by PTOViewToMemref. This op does not allocate
-    storage; it only provides a memref-typed SSA handle so later passes can
-    attach tile metadata through pto.bind_tile before the address is filled by
-    pipe operations such as pto.tpop.
-  }];
-
-  let results = (outs AnyMemRef:$result);
-
-  let assemblyFormat = [{
-    attr-dict `->` qualified(type($result))
   }];
 }
 

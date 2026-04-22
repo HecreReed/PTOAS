@@ -6710,8 +6710,8 @@ void mlir::pto::TQuantOp::print(OpAsmPrinter &p) {
 }
 
 mlir::LogicalResult mlir::pto::TQuantOp::verify() {
-  // Structural checks: always run regardless of operand representation
-  // (applies both before and after PTOViewToMemref lowering).
+  // Structural checks run before tile-layout validation so type-only failures
+  // are still reported for any legacy memref-typed IR.
   auto verifyStructural = [&]() -> LogicalResult {
     // dst elem type and offset presence must be consistent with quant_type.
     Type dstTy = getDst().getType();
@@ -6740,8 +6740,7 @@ mlir::LogicalResult mlir::pto::TQuantOp::verify() {
   if (failed(verifyStructural()))
     return failure();
 
-  // Layout/tile-buffer checks: only meaningful for pre-lowering tile types.
-  // Skip when operands are already plain MemRefs (post PTOViewToMemref).
+  // Tile-layout checks only apply once the IR is tile-native.
   if (shouldBypassDecodedMemrefVerifier(getOperation()))
     return success();
 
@@ -7119,13 +7118,6 @@ static std::optional<int64_t> getElemBytes(Type elemTy) {
   return std::nullopt;
 }
 
-static bool isTileBufOrMemref(Type ty) {
-  return ty.isa<MemRefType, pto::TileBufType>();
-}
-
-static constexpr llvm::StringLiteral kLoweredSetValidShapeAttrName =
-    "__pto.lowered_set_validshape";
-
 static bool isLocallyBoundTileSource(Value value) {
   if (!value || isa<BlockArgument>(value))
     return false;
@@ -7164,32 +7156,24 @@ static std::optional<int64_t> getConstIndexLike(Value v) {
 
 mlir::LogicalResult mlir::pto::SetValidShapeOp::verify() {
   SmallVector<int64_t> shape;
-  if (auto srcTy = llvm::dyn_cast<TileBufType>(getSource().getType())) {
-    if (srcTy.getRank() != 2)
-      return emitOpError("expects rank-2 tile_buf source");
+  auto srcTy = llvm::dyn_cast<TileBufType>(getSource().getType());
+  if (!srcTy)
+    return emitOpError("expects tile_buf source");
+  if (srcTy.getRank() != 2)
+    return emitOpError("expects rank-2 tile_buf source");
 
-    ArrayRef<int64_t> validShape = srcTy.getValidShape();
-    if (validShape.size() != 2)
-      return emitOpError("expects source validShape to be rank-2");
-    if (!srcTy.hasDynamicValid())
-      return emitOpError("expects source tile_buf to have dynamic validShape (?, ?)");
+  ArrayRef<int64_t> validShape = srcTy.getValidShape();
+  if (validShape.size() != 2)
+    return emitOpError("expects source validShape to be rank-2");
+  if (!srcTy.hasDynamicValid())
+    return emitOpError("expects source tile_buf to have dynamic validShape (?, ?)");
 
-    shape.assign(srcTy.getShape().begin(), srcTy.getShape().end());
+  shape.assign(srcTy.getShape().begin(), srcTy.getShape().end());
 
-    if (!isLocallyBoundTileSource(getSource()))
-      return emitOpError(
-          "requires a locally bound tile source; function arguments/results "
-          "are unsupported");
-  } else if (auto srcTy = llvm::dyn_cast<MemRefType>(getSource().getType())) {
-    if (!(*this)->hasAttr(kLoweredSetValidShapeAttrName))
-      return emitOpError(
-          "expects tile_buf source; memref source is only valid for the internal lowered form");
-    if (srcTy.getRank() != 2)
-      return emitOpError("expects rank-2 memref source after tile lowering");
-    shape.assign(srcTy.getShape().begin(), srcTy.getShape().end());
-  } else {
-    return emitOpError("expects tile_buf source (or lowered memref source)");
-  }
+  if (!isLocallyBoundTileSource(getSource()))
+    return emitOpError(
+        "requires a locally bound tile source; function arguments/results "
+        "are unsupported");
 
   auto checkDim = [&](Value operand, unsigned dimIdx,
                       StringRef dimName) -> LogicalResult {

@@ -395,9 +395,8 @@ private:
   /// Generate buffer's life time.
   void GenerateBufferLife();
 
-  /// initialize the buffers that must be inplaced together
-  /// namely, the alias buffers of memref.alloc,
-  /// e.g. for iter arg and for yield.
+  /// Initialize buffers that must be inplaced together, such as aliases tied
+  /// through iter_args / yields.
   void InitializeInplacePairList();
 
   /// Record semantic non-reuse pairs for buffers that may be used
@@ -497,7 +496,7 @@ private:
   /// Post-plan sanity check for local memory overflow.
   bool RecordOverflowIfAny();
 
-  /// Prepare the memref.alloc plan.
+  /// Prepare the local tile-buffer address plan.
   PlanStatus PlanLocalMemAddress();
 
   /// Prepare the memrefExt.alloc_workspace plan.

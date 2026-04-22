@@ -1088,9 +1088,7 @@ int main(int argc, char **argv) {
     pm.addNestedPass<mlir::func::FuncOp>(pto::createInferPTOLayoutPass());
   pm.addNestedPass<mlir::func::FuncOp>(pto::createPTOA5NormalizeTMovPass());
   // Tile-native pipeline: keep tile_buf descriptors through PlanMemory/EmitC.
-  // The legacy memref bridge pass is intentionally disabled here.
-  // bufferizationPipeline(pm);
-  // pm.addPass(createInferPTOMemScopePass());
+  // The legacy memref bridge has been removed from this pipeline.
 
   if (effectiveLevel != PTOBuildLevel::Level3) {
     PlanMemoryOptions planMemoryOption;

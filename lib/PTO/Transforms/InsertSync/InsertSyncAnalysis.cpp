@@ -503,14 +503,6 @@ void InsertSyncAnalysis::InsertLastPipeAll() {
   }
 }
 
-// ==============================================================================
-// 7. Helpers
-// ==============================================================================
-
-bool InsertSyncAnalysis::IsMemAllocOp(Operation *op) const {
-  return isa<memref::AllocOp>(op) || isa<pto::PointerCastOp>(op);
-}
-
 SmallVector<Value> InsertSyncAnalysis::GetMemInfoBuffers(
     const DepBaseMemInfoPairVec &depBaseMemInfosVec) {
   llvm::DenseSet<Value> touchedBuffer;
