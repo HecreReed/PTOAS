@@ -61,6 +61,17 @@ namespace mlir {
 using namespace mlir;
 using namespace mlir::pto;
 
+static std::string getElemTypeStringForGT(Type elemTy);
+static bool getStaticMemrefLayout(MemRefType mrTy,
+                                  SmallVectorImpl<int64_t> &strides,
+                                  int64_t &offset);
+static int64_t multiplyOrDynamic(int64_t lhs, int64_t rhs);
+static void buildGlobalTensorShapeAndStride(ArrayRef<int64_t> shape,
+                                            ArrayRef<int64_t> strides,
+                                            SmallVectorImpl<int64_t> &shape5D,
+                                            SmallVectorImpl<int64_t> &stride5D);
+static std::string joinIntTemplateParams(ArrayRef<int64_t> values);
+
 static const char *addrSpaceQualifier(pto::AddressSpace as) {
   switch (as) {
   case pto::AddressSpace::Zero:
@@ -2805,12 +2816,10 @@ struct SubviewToEmitCPattern : public OpConversionPattern<memref::SubViewOp> {
         bool useTypeStrides = succeeded(getStridesAndOffset(srcType, strideInts, offset));
         (void)offset;
         if (useTypeStrides) {
-            for (int64_t s : strideInts) {
-                if (s == ShapedType::kDynamic) {
-                    useTypeStrides = false;
-                    break;
-                }
-            }
+          for (int64_t s : strideInts) {
+            if (s == ShapedType::kDynamic)
+              useTypeStrides = false;
+          }
         }
         if (useTypeStrides) {
             for (int64_t s : strideInts) {
@@ -2941,47 +2950,20 @@ struct SubviewToEmitCPattern : public OpConversionPattern<memref::SubViewOp> {
 
     auto resTy = mlir::cast<MemRefType>(op.getResult().getType());
     
-    // 1. 解析具体元素类型 (完整逻辑，不省略)
-    std::string elemTypeStr = "float"; 
-    Type elemTy = resTy.getElementType();
-    
-	    if (elemTy.isF16()) {
-	        elemTypeStr = "half";
-	    } else if (elemTy.isBF16()) {
-	        elemTypeStr = "bfloat16_t";
-	    } else if (elemTy.isF32()) {
-	        elemTypeStr = "float";
-	    } else if (elemTy.isInteger(8)) {
-        // 区分有符号/无符号通常依赖上下文，但在 EmitC 中 int8_t 比较通用
-        if (elemTy.isSignlessInteger(8) || elemTy.isSignedInteger(8))
-            elemTypeStr = "int8_t";
-        else 
-            elemTypeStr = "uint8_t";
-    } else if (elemTy.isInteger(16)) {
-        if (elemTy.isSignlessInteger(16) || elemTy.isSignedInteger(16))
-            elemTypeStr = "int16_t";
-        else
-            elemTypeStr = "uint16_t";
-    } else if (elemTy.isInteger(32)) {
-        if (elemTy.isSignlessInteger(32) || elemTy.isSignedInteger(32))
-            elemTypeStr = "int32_t";
-        else 
-            elemTypeStr = "uint32_t";
-    } else if (elemTy.isInteger(64)) {
-        elemTypeStr = cast<IntegerType>(elemTy).isUnsigned() ? "uint64_t" : "int64_t";
-    }
+    // 1. 解析具体元素类型
+    std::string elemTypeStr = getElemTypeStringForGT(resTy.getElementType());
 
     // 2. 生成 Shape 模板参数，之后会右对齐有效维度并补齐到 5 维（高维填 1）
-    SmallVector<std::string> shapeParamsVec;
+    SmallVector<int64_t> shapeParamsVec;
     SmallVector<Value> sizeValues; // 每个维度对应的运行时 size（统一为 unsigned）
     auto resShape = resTy.getShape();
     auto mixedSizes = op.getMixedSizes();
     sizeValues.reserve(rank);
     for (int i = 0; i < resTy.getRank(); ++i) {
       if (resShape[i] == ShapedType::kDynamic) {
-        shapeParamsVec.push_back("-1");
+        shapeParamsVec.push_back(-1);
       } else {
-        shapeParamsVec.push_back(std::to_string(resShape[i]));
+        shapeParamsVec.push_back(resShape[i]);
       }
       // size 值：优先从 op.getMixedSizes() 取（可动态/静态），否则退化为类型里的静态 shape。
       if (i < (int)mixedSizes.size())
@@ -2992,9 +2974,9 @@ struct SubviewToEmitCPattern : public OpConversionPattern<memref::SubViewOp> {
     }
 
     // 3. 生成 Stride 模板参数 + 运行时 stride 值（考虑 subview step）
-    SmallVector<std::string> dummyStrideVec;
+    SmallVector<int64_t> strideTemplateVec;
     SmallVector<Value> strideValues; // 每个维度对应的运行时 stride（统一为 unsigned）
-    dummyStrideVec.reserve(rank);
+    strideTemplateVec.reserve(rank);
     strideValues.reserve(rank);
     auto subViewSteps = op.getMixedStrides();
     for (int i = 0; i < rank; ++i) {
@@ -3009,12 +2991,12 @@ struct SubviewToEmitCPattern : public OpConversionPattern<memref::SubViewOp> {
       auto stepStatic = extractStaticInt(stepOfr);
       if (srcStatic && stepStatic) {
         int64_t finalStride = (*srcStatic) * (*stepStatic);
-        dummyStrideVec.push_back(std::to_string(finalStride));
+        strideTemplateVec.push_back(finalStride);
         strideValues.push_back(mkU32(finalStride));
         continue;
       }
 
-      dummyStrideVec.push_back("-1");
+      strideTemplateVec.push_back(-1);
       Value srcV = ofrToEmitCValue(srcStrideOfr);
       Value stepV = ofrToEmitCValue(stepOfr);
       // 尽量避免乘以 1 生成冗余指令
@@ -3029,8 +3011,10 @@ struct SubviewToEmitCPattern : public OpConversionPattern<memref::SubViewOp> {
 
     // 3.1 右对齐到 5 维：shape 补 1；已有维度继承原 stride；
     //      被补出来的高维按“紧密升维”规则连续推导：stride[i] = shape[i+1] * stride[i+1]
-    SmallVector<std::string, 5> finalShape(5, "1");
-    SmallVector<std::string, 5> finalStride(5, "1");
+    SmallVector<int64_t, 5> finalShape;
+    SmallVector<int64_t, 5> finalStride;
+    buildGlobalTensorShapeAndStride(shapeParamsVec, strideTemplateVec,
+                                    finalShape, finalStride);
     Value oneU32 = mkU32(1);
     SmallVector<Value, 5> finalShapeValues(5, oneU32);
     SmallVector<Value, 5> finalStrideValues(5, oneU32);
@@ -3038,36 +3022,21 @@ struct SubviewToEmitCPattern : public OpConversionPattern<memref::SubViewOp> {
 
     // 先放入原始 shape/stride（保持用户提供的值）
     for (int i = 0; i < rank && i < 5; ++i) {
-      finalShape[shift + i] = shapeParamsVec[i];
-      finalStride[shift + i] = dummyStrideVec[i];
       finalShapeValues[shift + i] = sizeValues[i];
       finalStrideValues[shift + i] = strideValues[i];
     }
-
-    auto mulOrDyn = [](const std::string &a, const std::string &b) -> std::string {
-        if (a == "-1" || b == "-1")
-            return "-1";
-        int64_t va = 1, vb = 1;
-        (void)llvm::to_integer(a, va);
-        (void)llvm::to_integer(b, vb);
-        return std::to_string(va * vb);
-    };
 
     // 从低维到高维倒推补齐 stride（仅对补出来的前置维度生效）
     for (int i = 3; i >= 0; --i) {
       // 如果该维已由原始 rank 覆盖，则保持原值
       if (i >= shift)
         continue;
-      // 补维：shape 已经是 1，stride = shape[i+1] * stride[i+1]（或动态）
-      finalStride[i] = mulOrDyn(finalShape[i + 1], finalStride[i + 1]);
-      if (finalStride[i] != "-1") {
-        int64_t si = 1;
-        (void)llvm::to_integer(finalStride[i], si);
-        finalStrideValues[i] = mkU32(si);
+      if (finalStride[i] != -1) {
+        finalStrideValues[i] = mkU32(finalStride[i]);
         continue;
       }
       // 动态推导：stride[i] = shape[i+1] * stride[i+1]
-      if (finalShape[i + 1] == "1") {
+      if (finalShape[i + 1] == 1) {
         finalStrideValues[i] = finalStrideValues[i + 1];
       } else {
         finalStrideValues[i] = rewriter.create<emitc::MulOp>(
@@ -3075,17 +3044,8 @@ struct SubviewToEmitCPattern : public OpConversionPattern<memref::SubViewOp> {
       }
     }
 
-    auto joinParams = [](llvm::ArrayRef<std::string> vec) {
-        std::string out;
-        for (size_t i = 0; i < vec.size(); ++i) {
-            if (i > 0) out += ", ";
-            out += vec[i];
-        }
-        return out;
-    };
-
-    std::string shapeParams = joinParams(finalShape);
-    std::string strideParams = joinParams(finalStride);
+    std::string shapeParams = joinIntTemplateParams(finalShape);
+    std::string strideParams = joinIntTemplateParams(finalStride);
 
     // Spelled-out C++ types.
     std::string shapeCppType = "pto::Shape<" + shapeParams + ">";
@@ -3097,16 +3057,9 @@ struct SubviewToEmitCPattern : public OpConversionPattern<memref::SubViewOp> {
     if (auto layout = resolveLayoutForGlobalTensor(op, op.getSource())) {
       layoutEnum = layoutToEmitCString(*layout);
     } else {
-      auto strToInt = [](const std::string &s, int64_t &out) -> bool {
-        return s != "-1" && llvm::to_integer(s, out);
-      };
-      SmallVector<int64_t, 5> shapeInt(5, -1), strideInt(5, -1);
-      bool allStatic = true;
-      for (int i = 0; i < 5; ++i) {
-        if (!strToInt(finalShape[i], shapeInt[i]) ||
-            !strToInt(finalStride[i], strideInt[i]))
-          allStatic = false;
-      }
+      bool allStatic =
+          llvm::all_of(finalShape, [](int64_t value) { return value != -1; }) &&
+          llvm::all_of(finalStride, [](int64_t value) { return value != -1; });
 
       int layoutTag = 0; // ND
       auto elemBytes = 4; // default float
@@ -3119,16 +3072,19 @@ struct SubviewToEmitCPattern : public OpConversionPattern<memref::SubViewOp> {
         elemBytes = 8;
 
       if (allStatic) {
-        if (shapeInt[2] == 16 && shapeInt[2] * shapeInt[3] * elemBytes == 512 &&
-            strideInt[4] == 1 && strideInt[3] == shapeInt[4]) {
+        if (finalShape[2] == 16 &&
+            finalShape[2] * finalShape[3] * elemBytes == 512 &&
+            finalStride[4] == 1 && finalStride[3] == finalShape[4]) {
           layoutTag = 2; // NZ
         } else {
-          bool isRow = strideInt[4] == 1;
+          bool isRow = finalStride[4] == 1;
           for (int i = 3; i >= 0; --i)
-            isRow &= (strideInt[i] == strideInt[i + 1] * shapeInt[i + 1]);
-          bool isCol = strideInt[0] == 1;
+            isRow &= (finalStride[i] ==
+                      multiplyOrDynamic(finalStride[i + 1], finalShape[i + 1]));
+          bool isCol = finalStride[0] == 1;
           for (int i = 0; i < 4; ++i)
-            isCol &= (strideInt[i + 1] == strideInt[i] * shapeInt[i]);
+            isCol &= (finalStride[i + 1] ==
+                      multiplyOrDynamic(finalStride[i], finalShape[i]));
           if (isCol)
             layoutTag = 1; // DN
           else
@@ -3172,7 +3128,7 @@ struct SubviewToEmitCPattern : public OpConversionPattern<memref::SubViewOp> {
     SmallVector<Value> strideCtorArgs;
     strideCtorArgs.reserve(5);
     for (int i = 0; i < 5; ++i) {
-      if (finalStride[i] == "-1")
+      if (finalStride[i] == -1)
         strideCtorArgs.push_back(finalStrideValues[i]);
     }
     auto strideInstOp = rewriter.create<emitc::CallOpaqueOp>(
@@ -9093,6 +9049,7 @@ struct PTOBindTileToEmitC : public OpConversionPattern<pto::BindTileOp> {
     auto *ctx = rewriter.getContext();
     auto configAttr = op.getConfigAttr();
     auto viewSemantics = op->getAttrOfType<StringAttr>("pto.view_semantics");
+    bool isSubView = viewSemantics && viewSemantics.getValue() == "subview";
 
     auto peelAllCasts = [](Value v) {
       while (auto castOp = v.getDefiningOp<UnrealizedConversionCastOp>())
@@ -9392,6 +9349,25 @@ struct PTOBindTileToEmitC : public OpConversionPattern<pto::BindTileOp> {
       return success();
     }
 
+    // Subview origins are kept distinct from generic tile rebinding:
+    // even when source/destination C++ tile types match, subview may carry
+    // shifted base address semantics and should materialize a fresh handle.
+    if (isSubView) {
+      FailureOr<TileBuildSpec> tileSpec = buildTileSpec();
+      if (failed(tileSpec))
+        return failure();
+      Value dstTile = buildTileValue(*tileSpec);
+      FailureOr<Value> addr = buildIntegralAddress(tileCandidate);
+      if (failed(addr))
+        return failure();
+
+      rewriter.create<emitc::CallOpaqueOp>(loc, TypeRange{}, "TASSIGN",
+                                           ArrayAttr{}, ArrayAttr{},
+                                           ValueRange{dstTile, *addr});
+      rewriter.replaceOp(op, dstTile);
+      return success();
+    }
+
     // Generic tile-to-tile rebind path: preserve the same backing storage and
     // rebuild a sibling tile with updated metadata/valid dims.
     if (isTileLike(tileCandidate)) {
@@ -9439,6 +9415,8 @@ struct PTOBindTileToEmitC : public OpConversionPattern<pto::BindTileOp> {
     auto newCast = rewriter.create<pto::PointerCastOp>(
         loc, op.getType(), physAddrs, vRow ? vRow : Value(),
         vCol ? vCol : Value(), configAttr);
+    if (viewSemantics)
+      newCast->setAttr("pto.view_semantics", viewSemantics);
     if (op->hasAttr(kForceDynamicValidShapeAttrName))
       newCast->setAttr(kForceDynamicValidShapeAttrName,
                        op->getAttr(kForceDynamicValidShapeAttrName));

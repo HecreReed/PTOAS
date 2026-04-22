@@ -1219,73 +1219,83 @@ PlanStatus MemPlan::PlanMemAddressOfWholeLocalBuffer() {
     size_t align = bufferSpaceInfo.first;
     size_t maxBits = bufferSpaceInfo.second;
     if (rootStorageEntry->mergedChildren.empty()) {
-      // Only one buffer needs to be allocated within the same scope, allocate
-      // directly.
-      uint64_t needAlignedBits =
-          AlignUp(rootStorageEntry->bufInfo->constBits, align);
-      if (needAlignedBits > maxBits) {
-        failApplyBufferInfo[rootStorageEntry->bufInfo->bufferScope] =
-            needAlignedBits;
-        return PlanStatus::PLAN_FAILED;
-      }
-      rootStorageEntry->bitsOffset = 0;
-      rootStorageEntry->alignedConstBits = needAlignedBits;
+      PlanStatus status = PlanSingleLocalBuffer(rootStorageEntry, align, maxBits);
+      if (status != PlanStatus::PLAN_SUCCESS)
+        return status;
       continue;
     }
     if (IsEnoughForBuffersNoReuse(rootStorageEntry, maxBits, align)) {
       continue;
     }
-    rootStorageEntry = GetReorderRootStorageEntry(rootStorageEntry);
-    ReportMemLifeDebugInfo(rootStorageEntry);
-    // memory outline in a given buffer scope.
-    MemBoundList outline;
-    PlanRecHis history;
-    SpecInfo si;
-    si.specLevel = si.maxLevel;
-    int childrenNum = static_cast<int>(rootStorageEntry->mergedChildren.size());
-    outline.push_back(
-        std::make_shared<MemoryBound>(BufferLifeVec(), 0, maxBits, nullptr));
-
-    // The initial value is rootStorageEntry.
-    StorageEntry *curEntry = rootStorageEntry;
-    while (si.childIdx < childrenNum) {
-      uint64_t needBits = static_cast<uint64_t>(curEntry->bufInfo->constBits);
-      curEntry->alignedConstBits = AlignUp(needBits, align);
-      curEntry->childIdx = si.childIdx;
-      LDBG("\n");
-      LDBG("----------Need-Plan-CurEntry---------\n");
-      ReportCurEntryDebugInfo(curEntry);
-      LDBG("\n");
-      LogicalResult planResult = MultiSpecPlan(si, outline, history, curEntry);
-      if (failed(planResult)) {
-        StatusWrapper statusWrapper = {false,   curEntry->alignedConstBits,
-                                       &si,     outline,
-                                       history, rootStorageEntry};
-        LDBG("\n");
-        LDBG("----------ApplyFailStrategy---------\n");
-        ReportCurEntryDebugInfo(curEntry);
-        LDBG("\n");
-        PlanStatus as = ApplyFailStrategy(statusWrapper, maxBits);
-        if (as == PlanStatus::RESTART_NEW_PLAN) {
-          // Restart plan.
-          si = SpecInfo();
-          curEntry = rootStorageEntry;
-          continue;
-        }
-        if (as == PlanStatus::PLAN_FAILED) {
-          ReportAllocatedEntryDebugInfo(rootStorageEntry);
-          PlanMemAddressForLevel0(rootStorageEntry);
-          return as;
-        }
-      }
-      if (si.childIdx >= childrenNum) {
-        break;
-      }
-      curEntry = rootStorageEntry->mergedChildren[si.childIdx];
-    }
+    PlanStatus status = PlanReusableLocalBuffer(rootStorageEntry, align, maxBits);
+    if (status != PlanStatus::PLAN_SUCCESS)
+      return status;
   }
   planStatus = PlanStatus::PLAN_SUCCESS;
   return planStatus;
+}
+
+PlanStatus MemPlan::PlanSingleLocalBuffer(StorageEntry *rootStorageEntry,
+                                          size_t align, size_t maxBits) {
+  uint64_t needAlignedBits = AlignUp(rootStorageEntry->bufInfo->constBits, align);
+  if (needAlignedBits > maxBits) {
+    failApplyBufferInfo[rootStorageEntry->bufInfo->bufferScope] =
+        needAlignedBits;
+    return PlanStatus::PLAN_FAILED;
+  }
+  rootStorageEntry->bitsOffset = 0;
+  rootStorageEntry->alignedConstBits = needAlignedBits;
+  return PlanStatus::PLAN_SUCCESS;
+}
+
+PlanStatus MemPlan::PlanReusableLocalBuffer(StorageEntry *rootStorageEntry,
+                                            size_t align, size_t maxBits) {
+  rootStorageEntry = GetReorderRootStorageEntry(rootStorageEntry);
+  ReportMemLifeDebugInfo(rootStorageEntry);
+
+  MemBoundList outline;
+  PlanRecHis history;
+  SpecInfo si;
+  si.specLevel = si.maxLevel;
+  int childrenNum = static_cast<int>(rootStorageEntry->mergedChildren.size());
+  outline.push_back(
+      std::make_shared<MemoryBound>(BufferLifeVec(), 0, maxBits, nullptr));
+
+  StorageEntry *curEntry = rootStorageEntry;
+  while (si.childIdx < childrenNum) {
+    uint64_t needBits = static_cast<uint64_t>(curEntry->bufInfo->constBits);
+    curEntry->alignedConstBits = AlignUp(needBits, align);
+    curEntry->childIdx = si.childIdx;
+    LDBG("\n");
+    LDBG("----------Need-Plan-CurEntry---------\n");
+    ReportCurEntryDebugInfo(curEntry);
+    LDBG("\n");
+    LogicalResult planResult = MultiSpecPlan(si, outline, history, curEntry);
+    if (failed(planResult)) {
+      StatusWrapper statusWrapper = {false,   curEntry->alignedConstBits,
+                                     &si,     outline,
+                                     history, rootStorageEntry};
+      LDBG("\n");
+      LDBG("----------ApplyFailStrategy---------\n");
+      ReportCurEntryDebugInfo(curEntry);
+      LDBG("\n");
+      PlanStatus status = ApplyFailStrategy(statusWrapper, maxBits);
+      if (status == PlanStatus::RESTART_NEW_PLAN) {
+        si = SpecInfo();
+        curEntry = rootStorageEntry;
+        continue;
+      }
+      if (status == PlanStatus::PLAN_FAILED) {
+        ReportAllocatedEntryDebugInfo(rootStorageEntry);
+        PlanMemAddressForLevel0(rootStorageEntry);
+        return status;
+      }
+    }
+    if (si.childIdx >= childrenNum)
+      break;
+    curEntry = rootStorageEntry->mergedChildren[si.childIdx];
+  }
+  return PlanStatus::PLAN_SUCCESS;
 }
 
 void MemPlan::ReportMemLifeDebugInfo(StorageEntry *rootStorageEntry) {

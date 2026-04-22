@@ -150,40 +150,29 @@ static int64_t getElemBytes(Type elemTy) {
   return -1;
 }
 
-static bool readBLayoutI32(Attribute attr, int32_t &out) {
-  if (auto a = dyn_cast<BLayoutAttr>(attr)) {
-    out = (int32_t)a.getValue();
+template <typename EnumAttrTy>
+static bool readEnumAttrOrIntegerI32(Attribute attr, int32_t &out) {
+  if (auto enumAttr = dyn_cast<EnumAttrTy>(attr)) {
+    out = static_cast<int32_t>(enumAttr.getValue());
     return true;
   }
-  if (auto a = dyn_cast<IntegerAttr>(attr)) {
-    out = (int32_t)a.getInt();
+  if (auto intAttr = dyn_cast<IntegerAttr>(attr)) {
+    out = static_cast<int32_t>(intAttr.getInt());
     return true;
   }
   return false;
+}
+
+static bool readBLayoutI32(Attribute attr, int32_t &out) {
+  return readEnumAttrOrIntegerI32<BLayoutAttr>(attr, out);
 }
 
 static bool readSLayoutI32(Attribute attr, int32_t &out) {
-  if (auto a = dyn_cast<SLayoutAttr>(attr)) {
-    out = (int32_t)a.getValue();
-    return true;
-  }
-  if (auto a = dyn_cast<IntegerAttr>(attr)) {
-    out = (int32_t)a.getInt();
-    return true;
-  }
-  return false;
+  return readEnumAttrOrIntegerI32<SLayoutAttr>(attr, out);
 }
 
 static bool readCompactModeI32(Attribute attr, int32_t &out) {
-  if (auto a = dyn_cast<CompactModeAttr>(attr)) {
-    out = (int32_t)a.getValue();
-    return true;
-  }
-  if (auto a = dyn_cast<IntegerAttr>(attr)) {
-    out = (int32_t)a.getInt();
-    return true;
-  }
-  return false;
+  return readEnumAttrOrIntegerI32<CompactModeAttr>(attr, out);
 }
 
 static Value peelIndexLikeCast(Value value) {
@@ -237,6 +226,31 @@ static TileLayoutConfig getTileLayoutConfig(mlir::pto::TileBufConfigAttr cfg) {
   return config;
 }
 
+static bool getFractal512InnerExtent(int64_t elemBytes, int64_t &extent) {
+  switch (elemBytes) {
+  case 1:
+    extent = 32;
+    return true;
+  case 2:
+    extent = 16;
+    return true;
+  case 4:
+    extent = 8;
+    return true;
+  case 8:
+    extent = 4;
+    return true;
+  case 16:
+    extent = 2;
+    return true;
+  case 32:
+    extent = 1;
+    return true;
+  default:
+    return false;
+  }
+}
+
 static bool computeBoxInnerShape(const TileLayoutConfig &config, Type elemTy,
                                  TileLayoutInfo &info) {
   info.boxed = config.sLayout != 0;
@@ -262,11 +276,11 @@ static bool computeBoxInnerShape(const TileLayoutConfig &config, Type elemTy,
   case 512:
     if (config.sLayout == 1) {
       info.innerRows = 16;
-      info.innerCols = 32 / elemBytes;
-      return true;
+      return getFractal512InnerExtent(elemBytes, info.innerCols);
     }
     if (config.sLayout == 2) {
-      info.innerRows = 32 / elemBytes;
+      if (!getFractal512InnerExtent(elemBytes, info.innerRows))
+        return false;
       info.innerCols = 16;
       return true;
     }
@@ -426,46 +440,21 @@ static Value ensureIndex(IRRewriter &rewriter, Location loc, Value v,
   return Value();
 }
 
-static Value computeSubsetValidDim(IRRewriter &rewriter, Location loc,
-                                   Value parentValid, Value offset,
-                                   int64_t size, Operation *anchorOp) {
+static Value clampSubViewValidDim(IRRewriter &rewriter, Location loc,
+                                  Value explicitValid, int64_t size,
+                                  Operation *anchorOp) {
   Value sizeVal = rewriter.create<arith::ConstantIndexOp>(loc, size);
-  if (!parentValid)
+  if (!explicitValid)
     return sizeVal;
 
-  int64_t pvConst = 0, offConst = 0;
-  if (getConstIndexValue(parentValid, pvConst) &&
-      getConstIndexValue(offset, offConst)) {
-    int64_t diff = 0;
-    if (pvConst > 0) {
-      int64_t offMod = offConst % pvConst;
-      if (offMod < 0)
-        offMod += pvConst;
-      diff = pvConst - offMod; // in [1, pvConst] when pvConst>0
-    }
-    if (diff < 0)
-      diff = 0;
-    int64_t clipped = std::min<int64_t>(size, diff);
-    return rewriter.create<arith::ConstantIndexOp>(loc, clipped);
-  }
+  int64_t cst = 0;
+  if (getConstIndexValue(explicitValid, cst))
+    return rewriter.create<arith::ConstantIndexOp>(loc, std::min(cst, size));
 
-  Value pv = ensureIndex(rewriter, loc, parentValid, anchorOp);
-  Value off = ensureIndex(rewriter, loc, offset, anchorOp);
-
-  // Use the same "periodic valid dims" rule as SubsetOp::inferReturnTypes:
-  // diff = pv - (off % pv), so offsets that land on the next tile (off == pv)
-  // still produce a full valid dim (diff == pv), instead of 0.
-  Type i64Ty = rewriter.getI64Type();
-  Value pvI64 = rewriter.create<arith::IndexCastOp>(loc, i64Ty, pv);
-  Value offI64 = rewriter.create<arith::IndexCastOp>(loc, i64Ty, off);
-  Value remI64 = rewriter.create<arith::RemUIOp>(loc, offI64, pvI64);
-  Value diffI64 = rewriter.create<arith::SubIOp>(loc, pvI64, remI64);
-  Value diff = rewriter.create<arith::IndexCastOp>(loc, rewriter.getIndexType(),
-                                                   diffI64);
-
-  Value lt = rewriter.create<arith::CmpIOp>(loc, arith::CmpIPredicate::slt, diff,
+  Value v = ensureIndex(rewriter, loc, explicitValid, anchorOp);
+  Value lt = rewriter.create<arith::CmpIOp>(loc, arith::CmpIPredicate::slt, v,
                                             sizeVal);
-  return rewriter.create<arith::SelectOp>(loc, lt, diff, sizeVal);
+  return rewriter.create<arith::SelectOp>(loc, lt, v, sizeVal);
 }
 
 static void dumpPretty(Operation *op, llvm::raw_ostream &os) {
@@ -481,6 +470,23 @@ static void dumpPretty(Operation *op, llvm::raw_ostream &os) {
 // Type Converter Logic
 // =============================================================================
 
+static SmallVector<int64_t> buildTileMemRefStrides(mlir::pto::TileBufType tbTy) {
+  TileLayoutInfo info;
+  if (computeTileLayoutInfo(tbTy.getConfigAttr(), tbTy.getElementType(),
+                            tbTy.getShape(), info)) {
+    return {info.rowStride, info.colStride};
+  }
+  return computeCompactStrides(tbTy.getShape());
+}
+
+static Type convertTileBufTypeToMemRef(mlir::pto::TileBufType tbTy) {
+  auto layoutAttr = StridedLayoutAttr::get(tbTy.getContext(),
+                                           ShapedType::kDynamic,
+                                           buildTileMemRefStrides(tbTy));
+  return MemRefType::get(tbTy.getShape(), tbTy.getElementType(), layoutAttr,
+                         tbTy.getMemorySpace());
+}
+
 static Type convertPTOTypeToMemRef(Type t) {
   // 1. 处理 !pto.ptr<T>
   if (auto pty = dyn_cast<mlir::pto::PtrType>(t)) {
@@ -489,47 +495,8 @@ static Type convertPTOTypeToMemRef(Type t) {
   }
   
   // 2. 处理 !pto.tile_buf<...>
-  if (auto tbTy = dyn_cast<mlir::pto::TileBufType>(t)) {
-    SmallVector<int64_t> strides;
-    
-    // Try layout-aware strides first (BLayout/SLayout-aware).
-    auto shape = tbTy.getShape();
-    TileLayoutInfo info;
-    bool gotLayout = false;
-    if (computeTileLayoutInfo(tbTy.getConfigAttr(), tbTy.getElementType(), shape,
-                              info)) {
-      strides = {info.rowStride, info.colStride};
-      gotLayout = true;
-    }
-
-    // Fallback: Row-Major contiguous strides.
-    if (!gotLayout) {
-      strides.resize(shape.size());
-      int64_t s = 1;
-      for (int i = (int)shape.size() - 1; i >= 0; --i) {
-        strides[i] = s;
-        if (shape[i] != ShapedType::kDynamic)
-          s *= shape[i];
-        else
-          s = ShapedType::kDynamic;
-      }
-    }
-
-    // 构造归一化的 Strided Layout
-    // 【关键】Offset 设为 Dynamic (?)。
-    // 这对于 Subview 出来的 MemRef 和 Alloc 出来的 MemRef 都必须一致，
-    // 否则 TAdd 的两个输入类型不匹配会报错。
-    auto layoutAttr = StridedLayoutAttr::get(t.getContext(), 
-                                             ShapedType::kDynamic, // offset: ?
-                                             strides);
-
-    return MemRefType::get(
-        tbTy.getShape(), 
-        tbTy.getElementType(), 
-        layoutAttr,
-        tbTy.getMemorySpace()
-    );
-  }
+  if (auto tbTy = dyn_cast<mlir::pto::TileBufType>(t))
+    return convertTileBufTypeToMemRef(tbTy);
   // 其他类型透传
   return t;
 }
@@ -636,15 +603,10 @@ static LogicalResult lowerAllocTileOps(func::FuncOp func, MLIRContext *ctx) {
     if (!tbTy)
       continue;
 
-    SmallVector<int64_t, 4> shape(tbTy.getShape().begin(), tbTy.getShape().end());
+    SmallVector<int64_t, 4> shape(tbTy.getShape().begin(),
+                                  tbTy.getShape().end());
     Type elemTy = tbTy.getElementType();
-
-    SmallVector<int64_t> strides;
-    TileLayoutInfo info;
-    if (computeTileLayoutInfo(tbTy.getConfigAttr(), elemTy, shape, info))
-      strides = {info.rowStride, info.colStride};
-    else
-      strides = computeCompactStrides(shape);
+    SmallVector<int64_t> strides = buildTileMemRefStrides(tbTy);
 
     auto targetLayout =
         StridedLayoutAttr::get(ctx, ShapedType::kDynamic, strides);
@@ -945,19 +907,20 @@ static LogicalResult lowerPartitionViewOps(func::FuncOp func, MLIRContext *ctx) 
   return success();
 }
 
-static LogicalResult lowerSubsetOps(func::FuncOp func, MLIRContext *ctx) {
-  SmallVector<mlir::pto::SubsetOp, 8> subsets;
-  func.walk([&](mlir::pto::SubsetOp op) { subsets.push_back(op); });
+static LogicalResult lowerSubViewOps(func::FuncOp func, MLIRContext *ctx) {
+  SmallVector<mlir::pto::SubViewOp, 8> subViews;
+  func.walk([&](mlir::pto::SubViewOp op) { subViews.push_back(op); });
 
-  for (auto op : subsets) {
+  for (auto op : subViews) {
     IRRewriter rewriter(ctx);
     rewriter.setInsertionPoint(op);
     Location loc = op.getLoc();
-    auto resultTileTy = dyn_cast<mlir::pto::TileBufType>(op.getResult().getType());
+    auto resultTileTy =
+        dyn_cast<mlir::pto::TileBufType>(op.getResult().getType());
     Value src = op->getOperand(0);
     auto srcMrTy = dyn_cast<MemRefType>(src.getType());
     if (!srcMrTy) {
-      op.emitError("pto.subset source must be lowered to memref first");
+      op.emitError("pto.subview source must be lowered to memref first");
       return failure();
     }
 
@@ -993,13 +956,13 @@ static LogicalResult lowerSubsetOps(func::FuncOp func, MLIRContext *ctx) {
     TileLayoutInfo layoutInfo;
     if (!computeTileLayoutInfo(configAttr, srcMrTy.getElementType(),
                                srcMrTy.getShape(), layoutInfo)) {
-      op.emitError("unsupported tile layout for pto.subset");
+      op.emitError("unsupported tile layout for pto.subview");
       return failure();
     }
 
     if (layoutInfo.boxed) {
       if (staticSizes.size() != 2 || op.getOffsets().size() != 2) {
-        op.emitError("boxed layout subset expects 2D sizes/offsets");
+        op.emitError("boxed layout subview expects 2D sizes/offsets");
         return failure();
       }
       if (!checkMultipleOf(op, staticSizes[0], layoutInfo.innerRows, "row size") ||
@@ -1026,20 +989,20 @@ static LogicalResult lowerSubsetOps(func::FuncOp func, MLIRContext *ctx) {
       if (srcShape.size() == 2) {
         if (bl == 0) {
           if (staticSizes[1] != srcShape[1]) {
-            op.emitError("boxed RowMajor subset must keep full cols");
+            op.emitError("boxed RowMajor subview must keep full cols");
             return failure();
           }
           if (!off1Const || off1 != 0) {
-            op.emitError("boxed RowMajor subset requires static col offset = 0");
+            op.emitError("boxed RowMajor subview requires static col offset = 0");
             return failure();
           }
         } else {
           if (staticSizes[0] != srcShape[0]) {
-            op.emitError("boxed ColMajor subset must keep full rows");
+            op.emitError("boxed ColMajor subview must keep full rows");
             return failure();
           }
           if (!off0Const || off0 != 0) {
-            op.emitError("boxed ColMajor subset requires static row offset = 0");
+            op.emitError("boxed ColMajor subview requires static row offset = 0");
             return failure();
           }
         }
@@ -1051,28 +1014,33 @@ static LogicalResult lowerSubsetOps(func::FuncOp func, MLIRContext *ctx) {
     if (failed(getStridesAndOffset(srcMrTy, srcStrides, srcOffset)))
       srcStrides = computeCompactStrides(srcMrTy.getShape());
 
+    // Keep parent physical shape + strides for bound tile semantics.
     auto resultLayout =
         StridedLayoutAttr::get(ctx, ShapedType::kDynamic, srcStrides);
+    auto parentShape = srcMrTy.getShape();
     auto resultMemRefType =
+        MemRefType::get(parentShape, srcMrTy.getElementType(), resultLayout,
+                        srcMrTy.getMemorySpace());
+
+    // Intermediate memref.subview keeps logical subview size.
+    auto subViewMemRefType =
         MemRefType::get(staticSizes, srcMrTy.getElementType(), resultLayout,
                         srcMrTy.getMemorySpace());
+
     SmallVector<OpFoldResult> mixedStrides(staticSizes.size(),
                                            rewriter.getIndexAttr(1));
-    auto sv = rewriter.create<memref::SubViewOp>(loc, resultMemRefType, src,
+    auto sv = rewriter.create<memref::SubViewOp>(loc, subViewMemRefType, src,
                                                  mixedOffsets, mixedSizes,
                                                  mixedStrides);
 
-    Value parentVRow;
-    Value parentVCol;
-    lookupValidDims(src, parentVRow, parentVCol);
     Value vRow;
     Value vCol;
     if (!staticSizes.empty())
-      vRow = computeSubsetValidDim(rewriter, loc, parentVRow, op.getOffsets()[0],
-                                   staticSizes[0], op);
+      vRow = clampSubViewValidDim(rewriter, loc, op.getValidRow(),
+                                  staticSizes[0], op);
     if (staticSizes.size() > 1)
-      vCol = computeSubsetValidDim(rewriter, loc, parentVCol, op.getOffsets()[1],
-                                   staticSizes[1], op);
+      vCol = clampSubViewValidDim(rewriter, loc, op.getValidCol(),
+                                  staticSizes[1], op);
 
     auto bindOp = rewriter.create<pto::BindTileOp>(
         loc, resultMemRefType, sv.getResult(), vRow ? vRow : Value(),
@@ -1080,6 +1048,7 @@ static LogicalResult lowerSubsetOps(func::FuncOp func, MLIRContext *ctx) {
     markForceDynamicValidShape(bindOp,
                                resultTileTy && resultTileTy.hasDynamicValid(),
                                ctx);
+    bindOp->setAttr("pto.view_semantics", rewriter.getStringAttr("subview"));
     rewriter.replaceOp(op, bindOp.getResult());
   }
   return success();
@@ -1501,9 +1470,9 @@ struct PTOViewToMemrefPass
       }
 
       // ------------------------------------------------------------------
-      // Stage 1.35: Lower pto.subset -> memref.subview + pto.bind_tile
+      // Stage 1.35: Lower pto.subview -> memref.subview + pto.bind_tile
       // ------------------------------------------------------------------
-      if (failed(lowerSubsetOps(func, ctx))) {
+      if (failed(lowerSubViewOps(func, ctx))) {
         signalPassFailure();
         return;
       }
@@ -2929,10 +2898,10 @@ struct PTOViewToMemrefPass
         Value dst = op.getDst();
 
         auto srcTy = dyn_cast<MemRefType>(src.getType());
-        auto scalarTy = dyn_cast<FloatType>(scalar.getType());
         auto dstTy = dyn_cast<MemRefType>(dst.getType());
-        if (!srcTy || !scalarTy || !dstTy) {
-          op.emitError("ins/outs are not memref yet");
+        bool scalarIsScalar = isa<IntegerType, FloatType>(scalar.getType());
+        if (!srcTy || !scalarIsScalar || !dstTy) {
+          op.emitError("expects src/dst to be memref and scalar to be integer/float");
           signalPassFailure();
           return;
         }
@@ -2985,10 +2954,10 @@ struct PTOViewToMemrefPass
         Value dst = op.getDst();
 
         auto srcTy = dyn_cast<MemRefType>(src.getType());
-        auto scalarTy = dyn_cast<FloatType>(scalar.getType());
         auto dstTy = dyn_cast<MemRefType>(dst.getType());
-        if (!srcTy || !scalarTy || !dstTy) {
-          op.emitError("ins/outs are not memref yet");
+        bool scalarIsScalar = isa<IntegerType, FloatType>(scalar.getType());
+        if (!srcTy || !scalarIsScalar || !dstTy) {
+          op.emitError("expects src/dst to be memref and scalar to be integer/float");
           signalPassFailure();
           return;
         }
