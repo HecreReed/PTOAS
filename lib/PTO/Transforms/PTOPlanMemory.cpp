@@ -123,58 +123,59 @@ struct ReserveBufferPlan {
   int64_t alignBytes = 1;
 };
 
-static LogicalResult analyzeReserveBufferPlan(func::FuncOp funcOp,
-                                              ReserveBufferPlan &plan) {
+using ReserveBufferPlans = SmallVector<ReserveBufferPlan>;
+
+static LogicalResult analyzeReserveBufferPlans(func::FuncOp funcOp,
+                                               ReserveBufferPlans &plans) {
   SmallVector<ReserveBufferOp> reserveOps;
   funcOp.walk(
       [&](ReserveBufferOp reserveOp) { reserveOps.push_back(reserveOp); });
 
   if (reserveOps.empty())
     return success();
-  if (reserveOps.size() > 1) {
-    return funcOp.emitOpError(
-        "expects at most one pto.reserve_buffer per function");
-  }
 
-  ReserveBufferOp reserveOp = reserveOps.front();
-  AddressSpace as = reserveOp.getLocation().getAddressSpace();
-  auto spec = getLocalMemSpec(reserveOp.getOperation(), as);
-  if (spec.capacityBits <= 0 || spec.alignBytes <= 0)
-    return reserveOp.emitOpError("unsupported reserve_buffer location");
+  for (ReserveBufferOp reserveOp : reserveOps) {
+    AddressSpace as = reserveOp.getLocation().getAddressSpace();
+    auto spec = getLocalMemSpec(reserveOp.getOperation(), as);
+    if (spec.capacityBits <= 0 || spec.alignBytes <= 0)
+      return reserveOp.emitOpError("unsupported reserve_buffer location");
 
-  int64_t capacityBytes = spec.capacityBits / 8;
-  int64_t sizeBytes = reserveOp.getSize();
-  bool autoAlloc = reserveOp.getAutoAlloc();
-  plan.mode = autoAlloc ? ReserveBufferMode::Auto : ReserveBufferMode::Manual;
-  plan.reserveOp = reserveOp;
-  plan.addressSpace = as;
-  plan.sizeBytes = sizeBytes;
-  plan.capacityBytes = capacityBytes;
-  plan.alignBytes = spec.alignBytes;
+    int64_t capacityBytes = spec.capacityBits / 8;
+    int64_t sizeBytes = reserveOp.getSize();
+    bool autoAlloc = reserveOp.getAutoAlloc();
 
-  // Auto mode only declares that one contiguous region must be reserved.
-  // The concrete base is filled later from a hole in the target local space.
-  if (autoAlloc) {
-    if (reserveOp.getBaseAttr()) {
-      return reserveOp.emitOpError(
-          "expects 'base' to be absent when 'auto' is true");
+    ReserveBufferPlan &plan = plans.emplace_back();
+    plan.mode = autoAlloc ? ReserveBufferMode::Auto : ReserveBufferMode::Manual;
+    plan.reserveOp = reserveOp;
+    plan.addressSpace = as;
+    plan.sizeBytes = sizeBytes;
+    plan.capacityBytes = capacityBytes;
+    plan.alignBytes = spec.alignBytes;
+
+    // Auto mode only declares that one contiguous region must be reserved.
+    // The concrete base is filled later from a hole in the target local space.
+    if (autoAlloc) {
+      if (reserveOp.getBaseAttr()) {
+        return reserveOp.emitOpError(
+            "expects 'base' to be absent when 'auto' is true");
+      }
+      continue;
     }
-    return success();
-  }
 
-  // In manual mode, reserve_buffer.base is already fixed by the frontend or an
-  // earlier stage. Only basic validation is needed here.
-  auto baseAttr = reserveOp.getBaseAttr();
-  if (!baseAttr)
-    return reserveOp.emitOpError("expects 'base' when 'auto' is false");
+    // In manual mode, reserve_buffer.base is already fixed by the frontend or
+    // an earlier stage. Only basic validation is needed here.
+    auto baseAttr = reserveOp.getBaseAttr();
+    if (!baseAttr)
+      return reserveOp.emitOpError("expects 'base' when 'auto' is false");
 
-  int64_t baseBytes = baseAttr.getInt();
-  if (baseBytes % spec.alignBytes != 0) {
-    return reserveOp.emitOpError(
-        "expects 'base' to satisfy the address-space alignment");
-  }
-  if (baseBytes + sizeBytes > capacityBytes) {
-    return reserveOp.emitOpError("exceeds available local memory capacity");
+    int64_t baseBytes = baseAttr.getInt();
+    if (baseBytes % spec.alignBytes != 0) {
+      return reserveOp.emitOpError(
+          "expects 'base' to satisfy the address-space alignment");
+    }
+    if (baseBytes + sizeBytes > capacityBytes) {
+      return reserveOp.emitOpError("exceeds available local memory capacity");
+    }
   }
 
   return success();
@@ -185,19 +186,14 @@ struct OccupiedByteRange {
   int64_t end = 0;
 };
 
-static LogicalResult assignAutoReserveBufferBase(
-    ReserveBufferPlan &plan,
+static LogicalResult assignAutoReserveBufferBases(
+    ReserveBufferPlans &plans,
     const std::map<Value, BufferInfo, ValueComparator> &bufferInfos,
     const DenseMap<Value, SmallVector<uint64_t>> &buffer2Offsets) {
-  if (plan.mode != ReserveBufferMode::Auto || !plan.reserveOp)
-    return success();
-
-  SmallVector<OccupiedByteRange> occupied;
+  std::map<AddressSpace, SmallVector<OccupiedByteRange>> occupiedByAddressSpace;
   for (const auto &it : bufferInfos) {
     Value buffer = it.first;
     const BufferInfo &bufferInfo = it.second;
-    if (bufferInfo.bufferScope != plan.addressSpace)
-      continue;
 
     auto offsetsIt = buffer2Offsets.find(buffer);
     if (offsetsIt == buffer2Offsets.end())
@@ -207,51 +203,66 @@ static LogicalResult assignAutoReserveBufferBase(
     // Reconstruct the already occupied byte ranges from the planned local
     // buffers, then place reserve_buffer into the first aligned hole.
     int64_t occupiedSizeBytes =
-        alignUpBytes(ceilDivBitsToBytes(bufferInfo.constBits), plan.alignBytes);
+        alignUpBytes(ceilDivBitsToBytes(bufferInfo.constBits), /*align=*/1);
     for (uint64_t offsetBytes : offsetsIt->second) {
-      occupied.push_back(OccupiedByteRange{static_cast<int64_t>(offsetBytes),
-                                           static_cast<int64_t>(offsetBytes) +
-                                               occupiedSizeBytes});
+      occupiedByAddressSpace[bufferInfo.bufferScope].push_back(
+          OccupiedByteRange{static_cast<int64_t>(offsetBytes),
+                            static_cast<int64_t>(offsetBytes) + occupiedSizeBytes});
     }
   }
 
-  llvm::sort(occupied,
-             [](const OccupiedByteRange &lhs, const OccupiedByteRange &rhs) {
-               return lhs.begin < rhs.begin;
-             });
+  auto normalizeRanges = [](SmallVector<OccupiedByteRange> &ranges) {
+    llvm::sort(ranges,
+               [](const OccupiedByteRange &lhs, const OccupiedByteRange &rhs) {
+                 return lhs.begin < rhs.begin;
+               });
 
-  // Merge overlapping or adjacent occupied ranges first so the later scan only
-  // needs to reason about real holes between disjoint intervals.
-  SmallVector<OccupiedByteRange> merged;
-  for (const OccupiedByteRange &range : occupied) {
-    if (merged.empty() || range.begin > merged.back().end) {
-      merged.push_back(range);
+    SmallVector<OccupiedByteRange> merged;
+    for (const OccupiedByteRange &range : ranges) {
+      if (merged.empty() || range.begin > merged.back().end) {
+        merged.push_back(range);
+        continue;
+      }
+      merged.back().end = std::max(merged.back().end, range.end);
+    }
+    ranges.swap(merged);
+  };
+
+  for (auto &it : occupiedByAddressSpace)
+    normalizeRanges(it.second);
+
+  for (ReserveBufferPlan &plan : plans) {
+    if (plan.mode != ReserveBufferMode::Auto || !plan.reserveOp)
       continue;
+
+    SmallVector<OccupiedByteRange> &occupied =
+        occupiedByAddressSpace[plan.addressSpace];
+
+    // First-fit search: try address 0 first, then keep moving the candidate to
+    // the end of the current occupied interval until a large-enough aligned
+    // hole is found.
+    int64_t candidateBase = 0;
+    for (const OccupiedByteRange &range : occupied) {
+      candidateBase = alignUpBytes(candidateBase, plan.alignBytes);
+      if (candidateBase + plan.sizeBytes <= range.begin)
+        break;
+      candidateBase = std::max(candidateBase, range.end);
     }
-    merged.back().end = std::max(merged.back().end, range.end);
-  }
-
-  // First-fit search: try address 0 first, then keep moving the candidate to
-  // the end of the current occupied interval until a large-enough aligned hole
-  // is found.
-  int64_t candidateBase = 0;
-  for (const OccupiedByteRange &range : merged) {
     candidateBase = alignUpBytes(candidateBase, plan.alignBytes);
-    if (candidateBase + plan.sizeBytes <= range.begin)
-      break;
-    candidateBase = std::max(candidateBase, range.end);
-  }
-  candidateBase = alignUpBytes(candidateBase, plan.alignBytes);
 
-  if (candidateBase + plan.sizeBytes > plan.capacityBytes) {
-    return plan.reserveOp.emitOpError(
-        "failed to allocate local memory hole for reserve_buffer");
-  }
+    if (candidateBase + plan.sizeBytes > plan.capacityBytes) {
+      return plan.reserveOp.emitOpError(
+          "failed to allocate local memory hole for reserve_buffer");
+    }
 
-  plan.reserveOp->setAttr(
-      "base",
-      IntegerAttr::get(IntegerType::get(plan.reserveOp.getContext(), 32),
-                       candidateBase));
+    plan.reserveOp->setAttr(
+        "base",
+        IntegerAttr::get(IntegerType::get(plan.reserveOp.getContext(), 32),
+                         candidateBase));
+    occupied.push_back(
+        OccupiedByteRange{candidateBase, candidateBase + plan.sizeBytes});
+    normalizeRanges(occupied);
+  }
   return success();
 }
 
@@ -2101,17 +2112,20 @@ private:
 void PlanMemoryPass::runOnOperation() {
   ModuleOp moduleOp = getOperation();
   for (auto funcOp : moduleOp.getOps<func::FuncOp>()) {
-    ReserveBufferPlan reservePlan;
+    ReserveBufferPlans reservePlans;
     if (this->memMode == MemPlanMode::LOCAL_MEM_PLAN &&
-        failed(analyzeReserveBufferPlan(funcOp, reservePlan))) {
+        failed(analyzeReserveBufferPlans(funcOp, reservePlans))) {
       return signalPassFailure();
     }
-    if (this->memMode == MemPlanMode::LOCAL_MEM_PLAN &&
-        reservePlan.mode == ReserveBufferMode::Manual) {
-      reservePlan.reserveOp.emitOpError(
-          "pto.reserve_buffer with explicit 'base' (auto = false) is not "
-          "supported in PlanMemory; use --pto-level=level3 or set auto = true");
-      return signalPassFailure();
+    if (this->memMode == MemPlanMode::LOCAL_MEM_PLAN) {
+      for (ReserveBufferPlan &reservePlan : reservePlans) {
+        if (reservePlan.mode != ReserveBufferMode::Manual)
+          continue;
+        reservePlan.reserveOp.emitOpError(
+            "pto.reserve_buffer with explicit 'base' (auto = false) is not "
+            "supported in PlanMemory; use --pto-level=level3 or set auto = true");
+        return signalPassFailure();
+      }
     }
 
     MemLivenessAnalysis memLiveness(funcOp, this->memMode);
@@ -2138,8 +2152,8 @@ void PlanMemoryPass::runOnOperation() {
     // normal local buffers are planned first, then reserve_buffer claims one
     // aligned hole in its target address space.
     if (this->memMode == MemPlanMode::LOCAL_MEM_PLAN &&
-        failed(assignAutoReserveBufferBase(reservePlan, memLiveness.bufferInfos,
-                                           memPlan.GetBuffer2Offsets()))) {
+        failed(assignAutoReserveBufferBases(reservePlans, memLiveness.bufferInfos,
+                                            memPlan.GetBuffer2Offsets()))) {
       return signalPassFailure();
     }
 
