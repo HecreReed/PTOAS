@@ -15,6 +15,7 @@
 add_mlir_dialect_library(PTOIR
   PTO.cpp
   PTOAttrs.cpp
+  PTOLayoutUtils.cpp
   PTOSyncUtils.cpp
   PTOTypeDefs.cpp
 

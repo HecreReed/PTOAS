@@ -21,6 +21,7 @@
 //===----------------------------------------------------------------------===//
 
 #include "PTO/IR/PTO.h"
+#include "PTO/IR/PTOLayoutUtils.h"
 #include "PTO/Transforms/Passes.h"
 #include "mlir/Dialect/Arith/IR/Arith.h"
 #include "mlir/Dialect/Func/IR/FuncOps.h"
@@ -151,16 +152,8 @@ static std::optional<Layout> inferMinor2DLayout(
 static std::optional<Layout> inferNZLayout(ArrayRef<int64_t> shape,
                                            ArrayRef<int64_t> stride,
                                            unsigned elemBytes) {
-  int64_t sh3 = shape[2];
-  int64_t sh4 = shape[3];
-  int64_t sh5 = shape[4];
-  int64_t st4 = stride[3];
-  int64_t st5 = stride[4];
-  bool alignMatch = (sh3 == 16) && (sh3 * sh4 * elemBytes == 512);
-  bool strideMatch = (st5 == 1) && (st4 == sh5);
-  if (alignMatch && strideMatch)
-    return Layout::NZ;
-  return std::nullopt;
+  return isNZLayout(shape, stride, elemBytes) ? std::optional(Layout::NZ)
+                                              : std::nullopt;
 }
 
 static std::optional<Layout> inferLayout5D(ArrayRef<int64_t> shape,

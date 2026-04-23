@@ -10,6 +10,7 @@
 //===----------------------------------------------------------------------===//
 
 #include "PTO/IR/PTO.h"
+#include "PTO/IR/PTOLayoutUtils.h"
 #include "PTO/IR/PTOSyncUtils.h"
 
 #include "mlir/AsmParser/AsmParser.h"
@@ -875,15 +876,8 @@ inferLayout(ArrayRef<int64_t> shape, ArrayRef<int64_t> strides,
   if (shape.size() != strides.size() || elemBytes == 0)
     return std::nullopt;
 
-  // NZ / fractal: rank>=5, check middle dims (sh3/sh4/sh5 per spec)
-  if (shape.size() >= 5) {
-    int64_t sh3 = shape[2], sh4 = shape[3], sh5 = shape[4];
-    int64_t st4 = strides[3], st5 = strides[4];
-    bool alignMatch = (sh3 == 16) && (sh3 * sh4 * elemBytes == 512);
-    bool strideMatch = (st5 == 1) && (st4 == sh5);
-    if (alignMatch && strideMatch)
-      return mlir::pto::Layout::NZ;
-  }
+  if (isNZLayout(shape, strides, elemBytes))
+    return mlir::pto::Layout::NZ;
 
   // ND: row-major contiguous
   bool isRowMajor = true;

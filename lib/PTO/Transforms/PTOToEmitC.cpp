@@ -12,6 +12,7 @@
 #include <climits>
 
 #include "PTO/IR/PTO.h"
+#include "PTO/IR/PTOLayoutUtils.h"
 #include "PTO/IR/PTOSyncUtils.h"
 #include "PTO/Transforms/Passes.h"
 
@@ -3072,9 +3073,7 @@ struct SubviewToEmitCPattern : public OpConversionPattern<memref::SubViewOp> {
         elemBytes = 8;
 
       if (allStatic) {
-        if (finalShape[2] == 16 &&
-            finalShape[2] * finalShape[3] * elemBytes == 512 &&
-            finalStride[4] == 1 && finalStride[3] == finalShape[4]) {
+        if (isNZLayout(finalShape, finalStride, elemBytes)) {
           layoutTag = 2; // NZ
         } else {
           bool isRow = finalStride[4] == 1;
@@ -3274,8 +3273,7 @@ static std::string inferFallbackGlobalTensorLayout(ArrayRef<int64_t> shape5D,
                                                    ArrayRef<int64_t> stride5D,
                                                    StringRef elemTypeStr) {
   int elemBytes = getGlobalTensorElementBytes(elemTypeStr);
-  if (shape5D[2] == 16 && multiplyOrDynamic(shape5D[2], shape5D[3]) * elemBytes == 512 &&
-      stride5D[4] == 1 && stride5D[3] == shape5D[4]) {
+  if (isNZLayout(shape5D, stride5D, elemBytes)) {
     return "pto::Layout::NZ";
   }
 
