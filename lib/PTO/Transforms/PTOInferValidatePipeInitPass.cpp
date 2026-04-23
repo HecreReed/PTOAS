@@ -14,11 +14,13 @@
 #include "PTO/IR/PTO.h"
 #include "PTO/Transforms/Passes.h"
 
+#include "mlir/Dialect/SCF/IR/SCF.h"
 #include "mlir/Dialect/Func/IR/FuncOps.h"
 #include "mlir/IR/SymbolTable.h"
 #include "mlir/Pass/Pass.h"
 
 #include "llvm/ADT/DenseMap.h"
+#include "llvm/ADT/DenseSet.h"
 #include "llvm/ADT/SmallPtrSet.h"
 
 #include <algorithm>
@@ -215,6 +217,159 @@ resolveNoSplitComponent(ArrayRef<PipeInitInfo *> component, OpBuilder &builder) 
   return success();
 }
 
+static bool isVectorKernel(func::FuncOp funcOp) {
+  auto kernelKindAttr = funcOp->getAttrOfType<FunctionKernelKindAttr>(
+      FunctionKernelKindAttr::name);
+  return kernelKindAttr &&
+         kernelKindAttr.getKernelKind() == FunctionKernelKind::Vector;
+}
+
+static bool dependsOnSubblockIdx(Value value, llvm::DenseMap<Value, bool> &cache,
+                                 llvm::DenseSet<Value> &visiting);
+
+static bool anyDependsOnSubblockIdx(ValueRange values,
+                                    llvm::DenseMap<Value, bool> &cache,
+                                    llvm::DenseSet<Value> &visiting) {
+  return llvm::any_of(values, [&](Value value) {
+    return dependsOnSubblockIdx(value, cache, visiting);
+  });
+}
+
+static bool blockArgDependsOnSubblockIdx(BlockArgument blockArg,
+                                         llvm::DenseMap<Value, bool> &cache,
+                                         llvm::DenseSet<Value> &visiting) {
+  Block *block = blockArg.getOwner();
+  Operation *parentOp = block->getParentOp();
+  if (isa_and_nonnull<func::FuncOp>(parentOp))
+    return false;
+
+  if (auto forOp = dyn_cast<scf::ForOp>(parentOp)) {
+    if (blockArg.getArgNumber() == 0) {
+      return anyDependsOnSubblockIdx(
+          ValueRange{forOp.getLowerBound(), forOp.getUpperBound(),
+                     forOp.getStep()},
+          cache, visiting);
+    }
+    unsigned iterIdx = blockArg.getArgNumber() - 1;
+    if (iterIdx < forOp.getInitArgs().size())
+      return dependsOnSubblockIdx(forOp.getInitArgs()[iterIdx], cache,
+                                  visiting);
+    return false;
+  }
+
+  if (auto whileOp = dyn_cast<scf::WhileOp>(parentOp))
+    return anyDependsOnSubblockIdx(whileOp.getOperands(), cache, visiting);
+
+  return false;
+}
+
+static bool dependsOnSubblockIdx(Value value, llvm::DenseMap<Value, bool> &cache,
+                                 llvm::DenseSet<Value> &visiting) {
+  if (auto it = cache.find(value); it != cache.end())
+    return it->second;
+
+  if (!visiting.insert(value).second)
+    return false;
+
+  bool result = false;
+  if (auto blockArg = dyn_cast<BlockArgument>(value)) {
+    result = blockArgDependsOnSubblockIdx(blockArg, cache, visiting);
+  } else if (Operation *defOp = value.getDefiningOp()) {
+    if (isa<GetSubBlockIdxOp>(defOp)) {
+      result = true;
+    } else {
+      result = anyDependsOnSubblockIdx(defOp->getOperands(), cache, visiting);
+    }
+  }
+
+  visiting.erase(value);
+  cache[value] = result;
+  return result;
+}
+
+static Operation *findSubblockDivergentAncestor(Operation *op,
+                                                llvm::DenseMap<Value, bool> &cache,
+                                                llvm::DenseSet<Value> &visiting) {
+  for (Operation *ancestor = op->getParentOp(); ancestor;
+       ancestor = ancestor->getParentOp()) {
+    if (auto ifOp = dyn_cast<scf::IfOp>(ancestor)) {
+      if (dependsOnSubblockIdx(ifOp.getCondition(), cache, visiting))
+        return ancestor;
+      continue;
+    }
+
+    if (auto forOp = dyn_cast<scf::ForOp>(ancestor)) {
+      if (anyDependsOnSubblockIdx(
+              ValueRange{forOp.getLowerBound(), forOp.getUpperBound(),
+                         forOp.getStep()},
+              cache, visiting)) {
+        return ancestor;
+      }
+      continue;
+    }
+
+    if (auto indexSwitchOp = dyn_cast<scf::IndexSwitchOp>(ancestor)) {
+      if (dependsOnSubblockIdx(indexSwitchOp.getArg(), cache, visiting))
+        return ancestor;
+      continue;
+    }
+  }
+
+  return nullptr;
+}
+
+static LogicalResult
+validateA2A3NoSplitSubblockControl(ArrayRef<PipeInitInfo *> component) {
+  llvm::DenseMap<Value, bool> subblockDependencyCache;
+  llvm::DenseSet<Value> dependencyVisiting;
+
+  for (PipeInitInfo *info : component) {
+    if (!isVectorKernel(info->funcOp))
+      continue;
+    if (getTargetArch(info->op) != PTOArch::A3)
+      continue;
+
+    bool noSplit = false;
+    if (auto initOp = dyn_cast<InitializeL2LPipeOp>(info->op)) {
+      noSplit = initOp.getNosplitAttr() && initOp.getNosplitAttr().getValue();
+      if (!noSplit)
+        continue;
+
+      for (Operation *user : initOp.getPipe().getUsers()) {
+        if (!isa<TPushOp, TPopOp, TFreeOp>(user))
+          continue;
+        if (!findSubblockDivergentAncestor(user, subblockDependencyCache,
+                                           dependencyVisiting))
+          continue;
+        return user->emitOpError(
+            "A2/A3 nosplit pipe ops must not be nested under "
+            "subblock-dependent control flow; both vector subblocks must "
+            "execute the same tpush/tpop/tfree sequence in the same order");
+      }
+      continue;
+    }
+
+    auto initOp = cast<InitializeL2G2LPipeOp>(info->op);
+    noSplit = initOp.getNosplitAttr() && initOp.getNosplitAttr().getValue();
+    if (!noSplit)
+      continue;
+
+    for (Operation *user : initOp.getPipe().getUsers()) {
+      if (!isa<TPushOp, TPopOp, TFreeOp>(user))
+        continue;
+      if (!findSubblockDivergentAncestor(user, subblockDependencyCache,
+                                         dependencyVisiting))
+        continue;
+      return user->emitOpError(
+          "A2/A3 nosplit pipe ops must not be nested under "
+          "subblock-dependent control flow; both vector subblocks must "
+          "execute the same tpush/tpop/tfree sequence in the same order");
+    }
+  }
+
+  return success();
+}
+
 struct PTOInferValidatePipeInitPass
     : public mlir::pto::impl::PTOInferValidatePipeInitBase<
           PTOInferValidatePipeInitPass> {
@@ -293,6 +448,11 @@ struct PTOInferValidatePipeInitPass
       }
 
       if (failed(resolveNoSplitComponent(component, builder))) {
+        signalPassFailure();
+        return;
+      }
+
+      if (failed(validateA2A3NoSplitSubblockControl(component))) {
         signalPassFailure();
         return;
       }

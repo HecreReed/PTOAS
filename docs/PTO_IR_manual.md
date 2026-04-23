@@ -7873,6 +7873,9 @@ generated IR. The detailed design document is:
   logical pipe, and the `tpush` / `tpop` / `tfree` sequence for that pipe must
   be identical in order on both vector cores. They do not need to reach each
   operation at the same time; only the relative order must remain consistent.
+  In practice, for the same logical pipe on the vector side, these pipe ops
+  must not be nested under control flow whose condition or loop bounds depend
+  on `pto.get_subblock_idx`.
 
 ##### `pto.reserve_buffer` - Reserve Local Consumer FIFO Buffer
 

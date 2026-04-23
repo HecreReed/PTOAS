@@ -182,6 +182,9 @@ def PTOInferValidatePipeInit : Pass<"pto-infer-validate-pipe-init", "ModuleOp"> 
       compatibility with older IR that omitted init-level `nosplit`
     - propagates the resolved `nosplit` value across peer pipe init pairs so
       both ends of one logical pipe agree before EmitC lowering
+    - rejects A2/A3 vector-side `nosplit` pipe ops nested under
+      `pto.get_subblock_idx`-dependent control flow because both vector
+      subblocks must execute the same pipe sequence
   }];
 
   let constructor = "mlir::pto::createPTOInferValidatePipeInitPass()";
