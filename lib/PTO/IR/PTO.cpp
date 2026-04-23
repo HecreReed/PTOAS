@@ -11,6 +11,7 @@
 
 #include "PTO/IR/PTO.h"
 #include "PTO/IR/PTOLayoutUtils.h"
+#include "PTO/IR/PTOTypeUtils.h"
 #include "PTO/IR/PTOSyncUtils.h"
 
 #include "mlir/AsmParser/AsmParser.h"
@@ -264,6 +265,55 @@ bool mlir::pto::isTargetArchA3(Operation *op) {
 
 bool mlir::pto::isTargetArchA5(Operation *op) {
   return getTargetArch(op) == PTOArch::A5;
+}
+
+static llvm::TypeSize getOneByteTypeSize() {
+  return llvm::TypeSize::getFixed(8);
+}
+
+llvm::TypeSize mlir::pto::HiF8Type::getTypeSizeInBits(
+    const DataLayout &, DataLayoutEntryListRef) const {
+  return getOneByteTypeSize();
+}
+
+uint64_t mlir::pto::HiF8Type::getABIAlignment(const DataLayout &,
+                                              DataLayoutEntryListRef) const {
+  return 1;
+}
+
+uint64_t mlir::pto::HiF8Type::getPreferredAlignment(
+    const DataLayout &, DataLayoutEntryListRef) const {
+  return 1;
+}
+
+llvm::TypeSize mlir::pto::F4E1M2x2Type::getTypeSizeInBits(
+    const DataLayout &, DataLayoutEntryListRef) const {
+  return getOneByteTypeSize();
+}
+
+uint64_t mlir::pto::F4E1M2x2Type::getABIAlignment(
+    const DataLayout &, DataLayoutEntryListRef) const {
+  return 1;
+}
+
+uint64_t mlir::pto::F4E1M2x2Type::getPreferredAlignment(
+    const DataLayout &, DataLayoutEntryListRef) const {
+  return 1;
+}
+
+llvm::TypeSize mlir::pto::F4E2M1x2Type::getTypeSizeInBits(
+    const DataLayout &, DataLayoutEntryListRef) const {
+  return getOneByteTypeSize();
+}
+
+uint64_t mlir::pto::F4E2M1x2Type::getABIAlignment(
+    const DataLayout &, DataLayoutEntryListRef) const {
+  return 1;
+}
+
+uint64_t mlir::pto::F4E2M1x2Type::getPreferredAlignment(
+    const DataLayout &, DataLayoutEntryListRef) const {
+  return 1;
 }
 
 static VerifierTargetArch getVerifierTargetArch(Operation *op) {
@@ -831,11 +881,7 @@ static std::optional<int64_t> getConstIndexValue(Value v) {
 }
 
 static unsigned getElemByteSize(Type ty) {
-  if (auto f = dyn_cast<FloatType>(ty))
-    return f.getWidth() / 8;
-  if (auto i = dyn_cast<IntegerType>(ty))
-    return i.getWidth() / 8;
-  return 0;
+  return getPTOStorageElemByteSize(ty);
 }
 
 static bool isSupportedLoadStoreElemTypeA2A3(Type ty) {
@@ -1421,6 +1467,11 @@ static LogicalResult verifyMemrefTensorStore(Operation *op, Value dst, Value src
 
 LogicalResult AllocTileOp::verify() {
   auto ty = getResult().getType(); // TileBufType
+
+  Type elemTy = ty.getElementType();
+  if (isPTOLowPrecisionType(elemTy))
+    return emitOpError() << "result dtype " << elemTy
+                         << " is not supported by pto.alloc_tile yet";
 
   // op 上有没有传 operands
   bool hasVR = getValidRow() != nullptr;
@@ -2218,9 +2269,16 @@ static LogicalResult verifyTileBufCommon(Operation *op, Type ty, StringRef name)
   if (tb) {
     if (tb.getRank() != 2)
       return op->emitOpError() << "expects " << name << " to be a rank-2 tile_buf";
+    Type elemTy = tb.getElementType();
+    if (isPTOLowPrecisionType(elemTy))
+      return op->emitOpError() << name << ": dtype " << elemTy
+                               << " is not supported by this op yet";
   } else if (auto mr = dyn_cast<MemRefType>(ty)) {
     if (mr.getRank() != 2)
       return op->emitOpError() << "expects " << name << " to be a rank-2 memref";
+    if (isPTOLowPrecisionType(mr.getElementType()))
+      return op->emitOpError() << name << ": dtype " << mr.getElementType()
+                               << " is not supported by this op yet";
   } else {
     return op->emitOpError() << "expects " << name << " to be a !pto.tile_buf or rank-2 memref";
   }
