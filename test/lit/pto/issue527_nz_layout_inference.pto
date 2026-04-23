@@ -31,6 +31,17 @@ module attributes {"pto.target_arch" = "a5"} {
     pto.tload ins(%part : !pto.partition_tensor_view<2x1x16x8x16xf32>) outs(%tile : !pto.tile_buf<loc=vec, dtype=f32, rows=64, cols=64, v_row=64, v_col=64, blayout=col_major, slayout=row_major, fractal=512, pad=0>)
     return
   }
+
+  func.func @degenerate_nd_not_nz(%src: !pto.ptr<f16>) {
+    %c0 = arith.constant 0 : index
+    %c1 = arith.constant 1 : index
+    %c16 = arith.constant 16 : index
+    %view = pto.make_tensor_view %src, shape = [%c16, %c16], strides = [%c16, %c1] : !pto.tensor_view<16x16xf16>
+    %part = pto.partition_view %view, offsets = [%c0, %c0], sizes = [%c16, %c16] : !pto.tensor_view<16x16xf16> -> !pto.partition_tensor_view<16x16xf16>
+    %tile = pto.alloc_tile : !pto.tile_buf<loc=vec, dtype=f16, rows=16, cols=16, v_row=16, v_col=16, blayout=row_major, slayout=none_box, fractal=512, pad=0>
+    pto.tload ins(%part : !pto.partition_tensor_view<16x16xf16>) outs(%tile : !pto.tile_buf<loc=vec, dtype=f16, rows=16, cols=16, v_row=16, v_col=16, blayout=row_major, slayout=none_box, fractal=512, pad=0>)
+    return
+  }
 }
 
 // INFER-LABEL: AICORE void canonical_c2d_nz(
@@ -39,8 +50,16 @@ module attributes {"pto.target_arch" = "a5"} {
 // INFER-LABEL: AICORE void legacy_nz_compat(
 // INFER: pto::Layout::NZ
 
+// INFER-LABEL: AICORE void degenerate_nd_not_nz(
+// INFER-NOT: pto::Layout::NZ
+// INFER: pto::Layout::ND
+
 // FALLBACK-LABEL: AICORE void canonical_c2d_nz(
 // FALLBACK: pto::Layout::NZ
 
 // FALLBACK-LABEL: AICORE void legacy_nz_compat(
 // FALLBACK: pto::Layout::NZ
+
+// FALLBACK-LABEL: AICORE void degenerate_nd_not_nz(
+// FALLBACK-NOT: pto::Layout::NZ
+// FALLBACK: pto::Layout::ND

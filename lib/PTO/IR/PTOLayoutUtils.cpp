@@ -1,5 +1,3 @@
-//===- PTOLayoutUtils.cpp - Shared PTO layout inference helpers -----------===//
-//
 // Copyright (c) 2026 Huawei Technologies Co., Ltd.
 // This program is free software, you can redistribute it and/or modify it under the terms and conditions of
 // CANN Open Software License Agreement Version 2.0 (the "License").
@@ -7,6 +5,8 @@
 // THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
 // INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
 // See LICENSE in the root of the software repository for the full text of the License.
+//
+//===- PTOLayoutUtils.cpp - Shared PTO layout inference helpers -----------===//
 //
 //===----------------------------------------------------------------------===//
 
@@ -60,6 +60,11 @@ bool isCanonical2DNZLayout5D(ArrayRef<int64_t> shape5D,
 
   const int64_t c0 = 32 / elemBytes;
   if (shape5D[0] != 1)
+    return false;
+  // The degenerate [1, 1, 1, 16, c0] form is ambiguous with a plain 2D
+  // row-major tensor of shape (16 x c0). Keep that case on the existing ND/DN
+  // path unless the user specifies NZ explicitly.
+  if (shape5D[1] == 1 && shape5D[2] == 1)
     return false;
   if (shape5D[3] != 16 || shape5D[4] != c0)
     return false;
