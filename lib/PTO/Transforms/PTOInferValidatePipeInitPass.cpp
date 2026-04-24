@@ -308,6 +308,13 @@ static Operation *findSubblockDivergentAncestor(Operation *op,
       continue;
     }
 
+    if (auto whileOp = dyn_cast<scf::WhileOp>(ancestor)) {
+      if (dependsOnSubblockIdx(whileOp.getConditionOp().getCondition(), cache,
+                               visiting))
+        return ancestor;
+      continue;
+    }
+
     if (auto indexSwitchOp = dyn_cast<scf::IndexSwitchOp>(ancestor)) {
       if (dependsOnSubblockIdx(indexSwitchOp.getArg(), cache, visiting))
         return ancestor;
