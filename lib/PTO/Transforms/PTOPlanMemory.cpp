@@ -42,12 +42,24 @@ using namespace pto;
 
 namespace {
 
+constexpr int64_t kBitsPerByte = 8;
+constexpr unsigned kI32BitWidth = 32;
+constexpr unsigned kMemoryEffectReserveSize = 8;
+constexpr int kSingleBufferCount = 1;
+constexpr int kDoubleBufferCount = 2;
+constexpr int64_t kA5VecLocalMemBits = 2031616;
+constexpr int64_t kA3VecLocalMemBits = 1572864;
+constexpr int64_t kMatLocalMemBits = 4194304;
+constexpr int64_t kLocalMemAlignmentBytes = 256;
+
 struct LocalMemSpec {
   int64_t capacityBits = 0;
   int64_t alignBytes = 1;
 };
 
-static int64_t ceilDivBitsToBytes(int64_t bits) { return (bits + 7) / 8; }
+static int64_t ceilDivBitsToBytes(int64_t bits) {
+  return (bits + kBitsPerByte - 1) / kBitsPerByte;
+}
 
 static int64_t alignUpBytes(int64_t value, int64_t align) {
   int64_t safeAlign = std::max<int64_t>(align, 1);
@@ -62,10 +74,11 @@ static int64_t alignUpBytes(int64_t value, int64_t align) {
 static LocalMemSpec getLocalMemSpec(Operation *op, AddressSpace as) {
   switch (as) {
   case AddressSpace::VEC:
-    return isTargetArchA5(op) ? LocalMemSpec{2031616, 256}
-                              : LocalMemSpec{1572864, 256};
+    return isTargetArchA5(op)
+               ? LocalMemSpec{kA5VecLocalMemBits, kLocalMemAlignmentBytes}
+               : LocalMemSpec{kA3VecLocalMemBits, kLocalMemAlignmentBytes};
   case AddressSpace::MAT:
-    return LocalMemSpec{4194304, 256};
+    return LocalMemSpec{kMatLocalMemBits, kLocalMemAlignmentBytes};
   default:
     return LocalMemSpec{};
   }
@@ -91,7 +104,9 @@ static SmallVector<Value> getScratchBuffersFromEffects(Operation *op,
   if (!memEffect)
     return scratchBuffers;
 
-  SmallVector<SideEffects::EffectInstance<MemoryEffects::Effect>, 8> effects;
+  SmallVector<SideEffects::EffectInstance<MemoryEffects::Effect>,
+              kMemoryEffectReserveSize>
+      effects;
   memEffect.getEffects(effects);
   for (const auto &effect : effects) {
     if (!isa<MemoryEffects::Write>(effect.getEffect()))
@@ -156,7 +171,7 @@ static LogicalResult analyzeReserveBufferPlans(func::FuncOp funcOp,
     if (spec.capacityBits <= 0 || spec.alignBytes <= 0)
       return reserveOp.emitOpError("unsupported reserve_buffer location");
 
-    int64_t capacityBytes = spec.capacityBits / 8;
+    int64_t capacityBytes = spec.capacityBits / kBitsPerByte;
     int64_t sizeBytes = reserveOp.getSize();
     bool autoAlloc = reserveOp.getAutoAlloc();
 
@@ -273,8 +288,9 @@ static LogicalResult assignAutoReserveBufferBases(
 
     plan.reserveOp->setAttr(
         "base",
-        IntegerAttr::get(IntegerType::get(plan.reserveOp.getContext(), 32),
-                         candidateBase));
+        IntegerAttr::get(
+            IntegerType::get(plan.reserveOp.getContext(), kI32BitWidth),
+            candidateBase));
     occupied.push_back(
         OccupiedByteRange{candidateBase, candidateBase + plan.sizeBytes});
     normalizeRanges(occupied);
@@ -291,7 +307,6 @@ void MemLivenessAnalysis::build() {
   RecursionIR(&funcRegion, live);
   // the lifetime of the buffer.
   GenerateBufferLife();
-  //InitializeInplacePairList();
 }
 
 bool MemLivenessAnalysis::isLocalMemPlan() const {
@@ -1472,7 +1487,7 @@ void MemPlan::ReorderContinuousPingPongEntry(
                         reorderedStorageEntryVec.end(), storageEntry);
     if (it == reorderedStorageEntryVec.end()) {
       reorderedStorageEntryVec.push_back(storageEntry);
-      if (storageEntry->multiBufferNum == 2 &&
+      if (storageEntry->multiBufferNum == kDoubleBufferCount &&
           storageEntry->relationPongEntry) {
         // Ping Pong continuous save.
         reorderedStorageEntryVec.push_back(storageEntry->relationPongEntry);
@@ -1500,7 +1515,7 @@ MemPlan::GetBufferSpaceInfo(pto::AddressSpace &space) const {
   case pto::AddressSpace::SCALING:
     return std::make_pair(scalingAlignSize, scalingSpaceSize);
   }
-  
+
   llvm_unreachable("Temporarily unsupported memory buffer space !");
 }
 
@@ -1623,8 +1638,8 @@ bool MemPlan::VerifyConflictStage1(MemBoundList &outline, PlanRecHis &his,
   StorageEntry *multiRelationPongEntry =
       GetMultiRelationPongEntry(reuseBoundStorageEntry);
   if (multiRelationPongEntry) {
-    if (e->multiBufferNum == 1 ||
-        (e->multiBufferNum == 2 && e->relationPongEntry &&
+    if (e->multiBufferNum == kSingleBufferCount ||
+        (e->multiBufferNum == kDoubleBufferCount && e->relationPongEntry &&
          (e->relationPongEntry->bitsOffset != 0))) {
       auto parentLoop1 = GetBufferParentLoop(e->inplaceBuffers);
       auto parentLoop2 =
@@ -1652,7 +1667,7 @@ bool MemPlan::VerifyConflictStage1(MemBoundList &outline, PlanRecHis &his,
 
 StorageEntry *
 MemPlan::GetMultiRelationPongEntry(const StorageEntry *reuseBoundStorageEntry) {
-  if (reuseBoundStorageEntry->multiBufferNum == 2 &&
+  if (reuseBoundStorageEntry->multiBufferNum == kDoubleBufferCount &&
       reuseBoundStorageEntry->relationPongEntry &&
       (reuseBoundStorageEntry->relationPongEntry->bitsOffset != 0)) {
     // If the reuseBoundStorageEntry itself requires db, directly match and
@@ -1688,7 +1703,7 @@ void MemPlan::SpecAllocRelationPongEntry(MemBoundList &outline, PlanRecHis &his,
       if (iter != pingEntry2RelationPongEntry.end()) {
         pongStorageEntry = iter->second.get();
       }
-      if (e->multiBufferNum == 2 && e->relationPongEntry) {
+      if (e->multiBufferNum == kDoubleBufferCount && e->relationPongEntry) {
         pongStorageEntry = e->relationPongEntry;
       }
       if (!pongStorageEntry)
@@ -1714,7 +1729,7 @@ bool MemPlan::IsBufferLifeVecConflict(PlanRecord &r, uint64_t offset,
 }
 
 void MemPlan::PlanRelationPongEntryAddress(uint64_t offset, StorageEntry *e) {
-  if (e->multiBufferNum == 1) {
+  if (e->multiBufferNum == kSingleBufferCount) {
     std::unique_ptr<StorageEntry> entry = std::make_unique<StorageEntry>();
     entry->bufInfo = e->bufInfo;
     entry->bufferLifeVec = e->bufferLifeVec;
@@ -1723,7 +1738,7 @@ void MemPlan::PlanRelationPongEntryAddress(uint64_t offset, StorageEntry *e) {
     entry->multiBufferNum = e->multiBufferNum;
     entry->bitsOffset = offset;
     pingEntry2RelationPongEntry[e] = std::move(entry);
-  } else if (e->multiBufferNum == 2) {
+  } else if (e->multiBufferNum == kDoubleBufferCount) {
     e->relationPongEntry->bitsOffset = offset;
   } else {
     llvm_unreachable("Does not support multi buffer num greater than 2 !");
@@ -2111,7 +2126,8 @@ void MemPlan::RollBackForAllocFailInner(StatusWrapper &statusWrapper,
       pingEntry2RelationPongEntry.erase(iter);
     }
     if (r.isDirectlyRollback ||
-        (r.entry->multiBufferNum == 2 && !r.entry->relationPongEntry)) {
+        (r.entry->multiBufferNum == kDoubleBufferCount &&
+         !r.entry->relationPongEntry)) {
       continue;
     }
     si->childIdx = r.childIdx;

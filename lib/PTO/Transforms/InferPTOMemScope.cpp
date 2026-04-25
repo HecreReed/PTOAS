@@ -320,7 +320,6 @@ LogicalResult InferPTOMemScopePass::fixDeviceCallSite(func::FuncOp op) {
 }
 
 /// Update the function type for the host function.
-///
 /// Because we propagate information from the call site to the caller, we only
 /// updated the memref type of the BlockArgument of or the return operation
 /// within the function (if they are updated at all). So we need to use those
@@ -426,7 +425,8 @@ LogicalResult pto::inferAndPropagateMemScopeForGpuFunc(gpu::GPUFuncOp op) {
       continue;
     }
 
-    // TODO: handle case when ub arguments are passed in the GPUFuncOp
+    // GPUFuncOp arguments are currently treated as GM unless a caller-provided
+    // scope overrides them.
     if (failed(helper.Run(arg, gmSpaceAttr))) {
       return op->emitOpError()
              << "Failed to propagate memory scope for argument #"

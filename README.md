@@ -46,7 +46,7 @@ pto-as/
 
 ```bash
 # ================= 配置区域 (请修改这里) =================
-# 设置您的工作根目录 (建议创建一个专门的目录存放 LLVM 和 ptoas)
+# 设置您的工作根目录 (建议创建一个专门的目录存放 LLVM 和 pto-as)
 export WORKSPACE_DIR=$HOME/llvm-workspace
 
 # LLVM 源码与构建路径
@@ -71,9 +71,13 @@ mkdir -p $WORKSPACE_DIR
 * **Python**: 3.8+
 * **Python Packages**: `pybind11`, `numpy`
 ```bash
-pip3 install pybind11 numpy
+python3 -m pip install pybind11==2.12.0 numpy
 
 ```
+
+> 说明：当前 LLVM/MLIR Python 绑定与 `pybind11` 3.x 不兼容。
+> 如果编译 LLVM 时遇到 `def_property family does not currently support keep_alive` 等报错，
+> 请先执行上面的降级命令。
 
 
 
@@ -104,14 +108,14 @@ ninja -C $LLVM_BUILD_DIR
 
 ```
 
-### 3.3 第二步：构建 ptoas (Out-of-Tree)
+### 3.3 第二步：构建 pto-as (Out-of-Tree)
 
-下载 ptoas 源码并基于刚刚编译好的 LLVM 19 进行构建。
+下载 pto-as 源码并基于刚刚编译好的 LLVM 19 进行构建。
 
 ```bash
-# 1. 下载 ptoas 源码
+# 1. 下载 pto-as 源码
 cd $WORKSPACE_DIR
-git clone https://github.com/hw-native-sys/PTOAS.git
+git clone https://gitcode.com/cann/pto-as.git pto-as
 cd $PTO_SOURCE_DIR
 
 # 2. 获取 pybind11 的 CMake 路径
