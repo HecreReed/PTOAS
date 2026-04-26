@@ -27,13 +27,6 @@ export BUILD_PATH="${BASE_PATH}/build"
 export BUILD_OUT_PATH="${BASE_PATH}/build_out"
 CANN_3RD_LIB_PATH="${BASE_PATH}/third_party"
 CMAKE_ARGS=""
-HARDENING_CACHE_FILE="${BASE_PATH}/cmake/LinuxHardeningCache.cmake"
-TOOLCHAIN_SYSROOT_FLAGS="--sysroot=/opt/rh/devtoolset-7/root --gcc-toolchain=/opt/rh/devtoolset-7/root/usr"
-HARDENING_CFLAGS="-D_FORTIFY_SOURCE=2 -fstack-protector-strong -ftrapv"
-HARDENING_LDFLAGS="-Wl,-z,relro -Wl,-z,now"
-TOOLCHAIN_HARDENED_CFLAGS="${TOOLCHAIN_SYSROOT_FLAGS} ${HARDENING_CFLAGS}"
-TOOLCHAIN_HARDENED_CXXFLAGS="${TOOLCHAIN_SYSROOT_FLAGS} ${HARDENING_CFLAGS}"
-TOOLCHAIN_HARDENED_LDFLAGS="${TOOLCHAIN_SYSROOT_FLAGS} ${HARDENING_LDFLAGS}"
 
 #print usage message
 usage() {
@@ -60,13 +53,6 @@ print_error() {
   echo -e "${COLOR_RED}[ERROR] ${msg}${COLOR_RESET}"
   echo $dotted_line
   echo
-}
-
-ensure_hardening_cache() {
-  if [ ! -f "${HARDENING_CACHE_FILE}" ]; then
-    print_error "missing hardening cache: ${HARDENING_CACHE_FILE}"
-    exit 1
-  fi
 }
 
 checkopts() {
@@ -119,7 +105,6 @@ checkopts() {
 build_only() {
   echo $dotted_line
   echo "build only"
-  ensure_hardening_cache
   git clone https://gitcode.com/GitHub_Trending/ll/llvm-project.git -b llvmorg-19.1.7
   export LLVM_SOURCE_DIR=$WORKSPACE/llvm-project
   export LLVM_BUILD_DIR=$LLVM_SOURCE_DIR/build-shared
@@ -129,15 +114,12 @@ build_only() {
   cd $LLVM_SOURCE_DIR
 
   if [ -d "$CANN_3RD_LIB_PATH/llvm-19" ]; then
-    cmake -C "${HARDENING_CACHE_FILE}" -G Ninja -S llvm -B $LLVM_BUILD_DIR \
+    cmake -G Ninja -S llvm -B $LLVM_BUILD_DIR \
         -DLLVM_ENABLE_PROJECTS="mlir;llvm" \
          -DCMAKE_C_COMPILER=clang \
          -DCMAKE_CXX_COMPILER=clang++ \
-         -DCMAKE_C_FLAGS="${TOOLCHAIN_HARDENED_CFLAGS}" \
-         -DCMAKE_CXX_FLAGS="${TOOLCHAIN_HARDENED_CXXFLAGS}" \
-         -DCMAKE_EXE_LINKER_FLAGS="${TOOLCHAIN_HARDENED_LDFLAGS}" \
-         -DCMAKE_SHARED_LINKER_FLAGS="${TOOLCHAIN_HARDENED_LDFLAGS}" \
-         -DCMAKE_MODULE_LINKER_FLAGS="${TOOLCHAIN_HARDENED_LDFLAGS}" \
+         -DCMAKE_C_FLAGS="--sysroot=/opt/rh/devtoolset-7/root --gcc-toolchain=/opt/rh/devtoolset-7/root/usr" \
+         -DCMAKE_CXX_FLAGS="--sysroot=/opt/rh/devtoolset-7/root --gcc-toolchain=/opt/rh/devtoolset-7/root/usr" \
          -DLLVM_USE_LINKER=lld \
          -DLLVM_ENABLE_ZSTD=OFF \
         -DBUILD_SHARED_LIBS=ON \
@@ -146,7 +128,7 @@ build_only() {
         -DCMAKE_BUILD_TYPE=Release \
         -DLLVM_TARGETS_TO_BUILD="host"
   else
-    cmake -C "${HARDENING_CACHE_FILE}" -G Ninja -S llvm -B $LLVM_BUILD_DIR \
+    cmake -G Ninja -S llvm -B $LLVM_BUILD_DIR \
         -DLLVM_ENABLE_PROJECTS="mlir;clang" \
         -DBUILD_SHARED_LIBS=ON \
         -DMLIR_ENABLE_BINDINGS_PYTHON=ON \
@@ -161,7 +143,7 @@ build_only() {
   export PYBIND11_CMAKE_DIR=$(python3 -m pybind11 --cmakedir)
 
   if [ -d "$CANN_3RD_LIB_PATH/llvm-19" ]; then
-    cmake -C "${HARDENING_CACHE_FILE}" -G Ninja \
+    cmake -G Ninja \
         -S . \
         -B build \
         -DLLVM_DIR=$LLVM_BUILD_DIR/lib/cmake/llvm \
@@ -172,16 +154,13 @@ build_only() {
         -DMLIR_ENABLE_BINDINGS_PYTHON=ON \
          -DCMAKE_C_COMPILER=clang \
          -DCMAKE_CXX_COMPILER=clang++ \
-         -DCMAKE_C_FLAGS="${TOOLCHAIN_HARDENED_CFLAGS}" \
-         -DCMAKE_CXX_FLAGS="${TOOLCHAIN_HARDENED_CXXFLAGS}" \
-         -DCMAKE_EXE_LINKER_FLAGS="${TOOLCHAIN_HARDENED_LDFLAGS}" \
-         -DCMAKE_SHARED_LINKER_FLAGS="${TOOLCHAIN_HARDENED_LDFLAGS}" \
-         -DCMAKE_MODULE_LINKER_FLAGS="${TOOLCHAIN_HARDENED_LDFLAGS}" \
+         -DCMAKE_C_FLAGS="--sysroot=/opt/rh/devtoolset-7/root --gcc-toolchain=/opt/rh/devtoolset-7/root/usr" \
+         -DCMAKE_CXX_FLAGS="--sysroot=/opt/rh/devtoolset-7/root --gcc-toolchain=/opt/rh/devtoolset-7/root/usr" \
          -DLLVM_USE_LINKER=lld \
         -DMLIR_PYTHON_PACKAGE_DIR=$LLVM_BUILD_DIR/tools/mlir/python_packages/mlir_core \
         -DCMAKE_INSTALL_PREFIX="$PTO_INSTALL_DIR"
   else
-    cmake -C "${HARDENING_CACHE_FILE}" -G Ninja \
+    cmake -G Ninja \
         -S . \
         -B build \
         -DLLVM_DIR=$LLVM_BUILD_DIR/lib/cmake/llvm \
@@ -224,7 +203,6 @@ clean_build_out() {
 package() {
   echo $dotted_line
   echo "package start"
-  ensure_hardening_cache
   clean_build_out
   clean_build
   mkdir $BUILD_PATH
@@ -243,15 +221,12 @@ package() {
   cd $LLVM_SOURCE_DIR
 
   if [ -d "$CANN_3RD_LIB_PATH/llvm-19" ]; then
-    cmake -C "${HARDENING_CACHE_FILE}" -G Ninja -S llvm -B $LLVM_BUILD_DIR \
+    cmake -G Ninja -S llvm -B $LLVM_BUILD_DIR \
          -DLLVM_ENABLE_PROJECTS="mlir;llvm" \
          -DCMAKE_C_COMPILER=clang \
          -DCMAKE_CXX_COMPILER=clang++ \
-         -DCMAKE_C_FLAGS="${TOOLCHAIN_HARDENED_CFLAGS}" \
-         -DCMAKE_CXX_FLAGS="${TOOLCHAIN_HARDENED_CXXFLAGS}" \
-         -DCMAKE_EXE_LINKER_FLAGS="${TOOLCHAIN_HARDENED_LDFLAGS}" \
-         -DCMAKE_SHARED_LINKER_FLAGS="${TOOLCHAIN_HARDENED_LDFLAGS}" \
-         -DCMAKE_MODULE_LINKER_FLAGS="${TOOLCHAIN_HARDENED_LDFLAGS}" \
+         -DCMAKE_C_FLAGS="--sysroot=/opt/rh/devtoolset-7/root --gcc-toolchain=/opt/rh/devtoolset-7/root/usr" \
+         -DCMAKE_CXX_FLAGS="--sysroot=/opt/rh/devtoolset-7/root --gcc-toolchain=/opt/rh/devtoolset-7/root/usr" \
          -DLLVM_USE_LINKER=lld \
          -DLLVM_ENABLE_ZSTD=OFF \
          -DBUILD_SHARED_LIBS=ON \
@@ -260,7 +235,7 @@ package() {
          -DCMAKE_BUILD_TYPE=Release \
          -DLLVM_TARGETS_TO_BUILD="host"
   else
-    cmake -C "${HARDENING_CACHE_FILE}" -G Ninja -S llvm -B $LLVM_BUILD_DIR \
+    cmake -G Ninja -S llvm -B $LLVM_BUILD_DIR \
          -DLLVM_ENABLE_PROJECTS="mlir;llvm" \
          -DBUILD_SHARED_LIBS=ON \
          -DMLIR_ENABLE_BINDINGS_PYTHON=ON \
@@ -275,7 +250,7 @@ package() {
   export PYBIND11_CMAKE_DIR=$(python3 -m pybind11 --cmakedir)
 
   if [ -d "$CANN_3RD_LIB_PATH/llvm-19" ]; then
-    cmake -C "${HARDENING_CACHE_FILE}" -G Ninja \
+    cmake -G Ninja \
         -S . \
         -B build \
         -DLLVM_DIR=$LLVM_BUILD_DIR/lib/cmake/llvm \
@@ -286,17 +261,14 @@ package() {
         -DMLIR_ENABLE_BINDINGS_PYTHON=ON \
         -DCMAKE_C_COMPILER=clang \
         -DCMAKE_CXX_COMPILER=clang++ \
-        -DCMAKE_C_FLAGS="${TOOLCHAIN_HARDENED_CFLAGS}" \
-        -DCMAKE_CXX_FLAGS="${TOOLCHAIN_HARDENED_CXXFLAGS}" \
-        -DCMAKE_EXE_LINKER_FLAGS="${TOOLCHAIN_HARDENED_LDFLAGS}" \
-        -DCMAKE_SHARED_LINKER_FLAGS="${TOOLCHAIN_HARDENED_LDFLAGS}" \
-        -DCMAKE_MODULE_LINKER_FLAGS="${TOOLCHAIN_HARDENED_LDFLAGS}" \
+        -DCMAKE_C_FLAGS="--sysroot=/opt/rh/devtoolset-7/root --gcc-toolchain=/opt/rh/devtoolset-7/root/usr" \
+        -DCMAKE_CXX_FLAGS="--sysroot=/opt/rh/devtoolset-7/root --gcc-toolchain=/opt/rh/devtoolset-7/root/usr" \
         -DLLVM_USE_LINKER=lld \
         -DMLIR_PYTHON_PACKAGE_DIR=$LLVM_BUILD_DIR/tools/mlir/python_packages/mlir_core \
         -DCMAKE_INSTALL_PREFIX="$PTO_INSTALL_DIR" \
         ${CMAKE_ARGS}
   else
-    cmake -C "${HARDENING_CACHE_FILE}" -G Ninja \
+    cmake -G Ninja \
         -S . \
         -B build \
         -DLLVM_DIR=$LLVM_BUILD_DIR/lib/cmake/llvm \
