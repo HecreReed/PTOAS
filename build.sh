@@ -27,6 +27,11 @@ export BUILD_PATH="${BASE_PATH}/build"
 export BUILD_OUT_PATH="${BASE_PATH}/build_out"
 CANN_3RD_LIB_PATH="${BASE_PATH}/third_party"
 CMAKE_ARGS=""
+HARDENING_CACHE_FILE="${BASE_PATH}/cmake/LinuxHardeningCache.cmake"
+LLVM_GIT_URL="https://gitcode.com/GitHub_Trending/ll/llvm-project.git"
+LLVM_GIT_REF="llvmorg-19.1.7"
+LLVM_CLONE_RETRY_COUNT=3
+LLVM_CLONE_RETRY_INTERVAL=5
 
 #print usage message
 usage() {
@@ -53,6 +58,79 @@ print_error() {
   echo -e "${COLOR_RED}[ERROR] ${msg}${COLOR_RESET}"
   echo $dotted_line
   echo
+}
+
+ensure_hardening_cache() {
+  if [ ! -f "${HARDENING_CACHE_FILE}" ]; then
+    print_error "missing hardening cache: ${HARDENING_CACHE_FILE}"
+    exit 1
+  fi
+}
+
+clone_llvm_source() {
+  local target_dir="$1"
+  local attempt=1
+
+  rm -rf "${target_dir}"
+
+  if [ -d "${CANN_3RD_LIB_PATH}/llvm-19" ]; then
+    cp -r "${CANN_3RD_LIB_PATH}/llvm-19" "${target_dir}"
+    return 0
+  fi
+
+  while [ "${attempt}" -le "${LLVM_CLONE_RETRY_COUNT}" ]; do
+    if git -c http.version=HTTP/1.1 clone \
+      --depth 1 \
+      --single-branch \
+      --branch "${LLVM_GIT_REF}" \
+      "${LLVM_GIT_URL}" \
+      "${target_dir}"; then
+      return 0
+    fi
+
+    rm -rf "${target_dir}"
+
+    if [ "${attempt}" -lt "${LLVM_CLONE_RETRY_COUNT}" ]; then
+      sleep "${LLVM_CLONE_RETRY_INTERVAL}"
+    fi
+
+    attempt=$((attempt + 1))
+  done
+
+  print_error "failed to prepare llvm-project source"
+  exit 1
+}
+
+configure_llvm_build() {
+  cmake -C "${HARDENING_CACHE_FILE}" -G Ninja -S llvm -B "${LLVM_BUILD_DIR}" \
+    -DLLVM_ENABLE_PROJECTS="mlir" \
+    -DBUILD_SHARED_LIBS=ON \
+    -DCMAKE_C_COMPILER=clang \
+    -DCMAKE_CXX_COMPILER=clang++ \
+    -DLLVM_USE_LINKER=lld \
+    -DMLIR_ENABLE_BINDINGS_PYTHON=ON \
+    -DPython3_EXECUTABLE="$(which python3)" \
+    -DCMAKE_BUILD_TYPE=Release \
+    -DLLVM_TARGETS_TO_BUILD="host" \
+    "$@"
+}
+
+configure_ptoas_build() {
+  cmake -C "${HARDENING_CACHE_FILE}" -G Ninja \
+    -S . \
+    -B build \
+    -DLLVM_DIR="${LLVM_BUILD_DIR}/lib/cmake/llvm" \
+    -DMLIR_DIR="${LLVM_BUILD_DIR}/lib/cmake/mlir" \
+    -DPython3_EXECUTABLE="$(which python3)" \
+    -DPython3_FIND_STRATEGY=LOCATION \
+    -Dpybind11_DIR="${PYBIND11_CMAKE_DIR}" \
+    -DMLIR_ENABLE_BINDINGS_PYTHON=ON \
+    -DCMAKE_C_COMPILER=clang \
+    -DCMAKE_CXX_COMPILER=clang++ \
+    -DLLVM_USE_LINKER=lld \
+    -DMLIR_PYTHON_PACKAGE_DIR="${LLVM_BUILD_DIR}/tools/mlir/python_packages/mlir_core" \
+    -DCMAKE_INSTALL_PREFIX="${PTO_INSTALL_DIR}" \
+    "$@"
 }
 
 checkopts() {
@@ -105,36 +183,20 @@ checkopts() {
 build_only() {
   echo $dotted_line
   echo "build only"
-  git clone https://gitcode.com/GitHub_Trending/ll/llvm-project.git -b llvmorg-19.1.7
+  ensure_hardening_cache
   export LLVM_SOURCE_DIR=$WORKSPACE/llvm-project
+  clone_llvm_source "${LLVM_SOURCE_DIR}"
   export LLVM_BUILD_DIR=$LLVM_SOURCE_DIR/build-shared
   export PTO_SOURCE_DIR=$WORKSPACE
   export PTO_INSTALL_DIR=$PTO_SOURCE_DIR/install
 
   cd $LLVM_SOURCE_DIR
+  rm -rf "${LLVM_BUILD_DIR}"
 
   if [ -d "$CANN_3RD_LIB_PATH/llvm-19" ]; then
-    cmake -G Ninja -S llvm -B $LLVM_BUILD_DIR \
-        -DLLVM_ENABLE_PROJECTS="mlir;llvm" \
-         -DCMAKE_C_COMPILER=clang \
-         -DCMAKE_CXX_COMPILER=clang++ \
-         -DCMAKE_C_FLAGS="--sysroot=/opt/rh/devtoolset-7/root --gcc-toolchain=/opt/rh/devtoolset-7/root/usr" \
-         -DCMAKE_CXX_FLAGS="--sysroot=/opt/rh/devtoolset-7/root --gcc-toolchain=/opt/rh/devtoolset-7/root/usr" \
-         -DLLVM_USE_LINKER=lld \
-         -DLLVM_ENABLE_ZSTD=OFF \
-        -DBUILD_SHARED_LIBS=ON \
-        -DMLIR_ENABLE_BINDINGS_PYTHON=ON \
-        -DPython3_EXECUTABLE=$(which python3) \
-        -DCMAKE_BUILD_TYPE=Release \
-        -DLLVM_TARGETS_TO_BUILD="host"
+    configure_llvm_build -DLLVM_ENABLE_ZSTD=OFF
   else
-    cmake -G Ninja -S llvm -B $LLVM_BUILD_DIR \
-        -DLLVM_ENABLE_PROJECTS="mlir;clang" \
-        -DBUILD_SHARED_LIBS=ON \
-        -DMLIR_ENABLE_BINDINGS_PYTHON=ON \
-        -DPython3_EXECUTABLE=$(which python3) \
-        -DCMAKE_BUILD_TYPE=Release \
-        -DLLVM_TARGETS_TO_BUILD="host"
+    configure_llvm_build
   fi
 
   ninja -C $LLVM_BUILD_DIR
@@ -143,34 +205,9 @@ build_only() {
   export PYBIND11_CMAKE_DIR=$(python3 -m pybind11 --cmakedir)
 
   if [ -d "$CANN_3RD_LIB_PATH/llvm-19" ]; then
-    cmake -G Ninja \
-        -S . \
-        -B build \
-        -DLLVM_DIR=$LLVM_BUILD_DIR/lib/cmake/llvm \
-        -DMLIR_DIR=$LLVM_BUILD_DIR/lib/cmake/mlir \
-        -DPython3_EXECUTABLE=$(which python3) \
-        -DPython3_FIND_STRATEGY=LOCATION \
-        -Dpybind11_DIR="${PYBIND11_CMAKE_DIR}" \
-        -DMLIR_ENABLE_BINDINGS_PYTHON=ON \
-         -DCMAKE_C_COMPILER=clang \
-         -DCMAKE_CXX_COMPILER=clang++ \
-         -DCMAKE_C_FLAGS="--sysroot=/opt/rh/devtoolset-7/root --gcc-toolchain=/opt/rh/devtoolset-7/root/usr" \
-         -DCMAKE_CXX_FLAGS="--sysroot=/opt/rh/devtoolset-7/root --gcc-toolchain=/opt/rh/devtoolset-7/root/usr" \
-         -DLLVM_USE_LINKER=lld \
-        -DMLIR_PYTHON_PACKAGE_DIR=$LLVM_BUILD_DIR/tools/mlir/python_packages/mlir_core \
-        -DCMAKE_INSTALL_PREFIX="$PTO_INSTALL_DIR"
+    configure_ptoas_build
   else
-    cmake -G Ninja \
-        -S . \
-        -B build \
-        -DLLVM_DIR=$LLVM_BUILD_DIR/lib/cmake/llvm \
-        -DMLIR_DIR=$LLVM_BUILD_DIR/lib/cmake/mlir \
-        -DPython3_EXECUTABLE=$(which python3) \
-        -DPython3_FIND_STRATEGY=LOCATION \
-        -Dpybind11_DIR="${PYBIND11_CMAKE_DIR}" \
-        -DMLIR_ENABLE_BINDINGS_PYTHON=ON \
-        -DMLIR_PYTHON_PACKAGE_DIR=$LLVM_BUILD_DIR/tools/mlir/python_packages/mlir_core \
-        -DCMAKE_INSTALL_PREFIX="$PTO_INSTALL_DIR"
+    configure_ptoas_build
   fi
 
   ninja -C build
@@ -203,45 +240,25 @@ clean_build_out() {
 package() {
   echo $dotted_line
   echo "package start"
+  ensure_hardening_cache
   clean_build_out
   clean_build
   mkdir $BUILD_PATH
   mkdir $BUILD_OUT_PATH
   cd $BUILD_PATH
-  if [ -d "$CANN_3RD_LIB_PATH/llvm-19" ]; then
-    cp -r $CANN_3RD_LIB_PATH/llvm-19 $BUILD_PATH/llvm-project
-  else
-    git clone https://gitcode.com/GitHub_Trending/ll/llvm-project.git -b llvmorg-19.1.7
-  fi
   export LLVM_SOURCE_DIR=$BUILD_PATH/llvm-project
+  clone_llvm_source "${LLVM_SOURCE_DIR}"
   export LLVM_BUILD_DIR=$LLVM_SOURCE_DIR/build-shared
   export PTO_SOURCE_DIR=$BASE_PATH
   export PTO_INSTALL_DIR=$PTO_SOURCE_DIR/install
 
   cd $LLVM_SOURCE_DIR
+  rm -rf "${LLVM_BUILD_DIR}"
 
   if [ -d "$CANN_3RD_LIB_PATH/llvm-19" ]; then
-    cmake -G Ninja -S llvm -B $LLVM_BUILD_DIR \
-         -DLLVM_ENABLE_PROJECTS="mlir;llvm" \
-         -DCMAKE_C_COMPILER=clang \
-         -DCMAKE_CXX_COMPILER=clang++ \
-         -DCMAKE_C_FLAGS="--sysroot=/opt/rh/devtoolset-7/root --gcc-toolchain=/opt/rh/devtoolset-7/root/usr" \
-         -DCMAKE_CXX_FLAGS="--sysroot=/opt/rh/devtoolset-7/root --gcc-toolchain=/opt/rh/devtoolset-7/root/usr" \
-         -DLLVM_USE_LINKER=lld \
-         -DLLVM_ENABLE_ZSTD=OFF \
-         -DBUILD_SHARED_LIBS=ON \
-         -DMLIR_ENABLE_BINDINGS_PYTHON=ON \
-         -DPython3_EXECUTABLE=$(which python3) \
-         -DCMAKE_BUILD_TYPE=Release \
-         -DLLVM_TARGETS_TO_BUILD="host"
+    configure_llvm_build -DLLVM_ENABLE_ZSTD=OFF
   else
-    cmake -G Ninja -S llvm -B $LLVM_BUILD_DIR \
-         -DLLVM_ENABLE_PROJECTS="mlir;llvm" \
-         -DBUILD_SHARED_LIBS=ON \
-         -DMLIR_ENABLE_BINDINGS_PYTHON=ON \
-         -DPython3_EXECUTABLE=$(which python3) \
-         -DCMAKE_BUILD_TYPE=Release \
-         -DLLVM_TARGETS_TO_BUILD="host"
+    configure_llvm_build
   fi
 
   ninja -C $LLVM_BUILD_DIR
@@ -250,36 +267,9 @@ package() {
   export PYBIND11_CMAKE_DIR=$(python3 -m pybind11 --cmakedir)
 
   if [ -d "$CANN_3RD_LIB_PATH/llvm-19" ]; then
-    cmake -G Ninja \
-        -S . \
-        -B build \
-        -DLLVM_DIR=$LLVM_BUILD_DIR/lib/cmake/llvm \
-        -DMLIR_DIR=$LLVM_BUILD_DIR/lib/cmake/mlir \
-        -DPython3_EXECUTABLE=$(which python3) \
-        -DPython3_FIND_STRATEGY=LOCATION \
-        -Dpybind11_DIR="${PYBIND11_CMAKE_DIR}" \
-        -DMLIR_ENABLE_BINDINGS_PYTHON=ON \
-        -DCMAKE_C_COMPILER=clang \
-        -DCMAKE_CXX_COMPILER=clang++ \
-        -DCMAKE_C_FLAGS="--sysroot=/opt/rh/devtoolset-7/root --gcc-toolchain=/opt/rh/devtoolset-7/root/usr" \
-        -DCMAKE_CXX_FLAGS="--sysroot=/opt/rh/devtoolset-7/root --gcc-toolchain=/opt/rh/devtoolset-7/root/usr" \
-        -DLLVM_USE_LINKER=lld \
-        -DMLIR_PYTHON_PACKAGE_DIR=$LLVM_BUILD_DIR/tools/mlir/python_packages/mlir_core \
-        -DCMAKE_INSTALL_PREFIX="$PTO_INSTALL_DIR" \
-        ${CMAKE_ARGS}
+    configure_ptoas_build ${CMAKE_ARGS}
   else
-    cmake -G Ninja \
-        -S . \
-        -B build \
-        -DLLVM_DIR=$LLVM_BUILD_DIR/lib/cmake/llvm \
-        -DMLIR_DIR=$LLVM_BUILD_DIR/lib/cmake/mlir \
-        -DPython3_EXECUTABLE=$(which python3) \
-        -DPython3_FIND_STRATEGY=LOCATION \
-        -Dpybind11_DIR="${PYBIND11_CMAKE_DIR}" \
-        -DMLIR_ENABLE_BINDINGS_PYTHON=ON \
-        -DMLIR_PYTHON_PACKAGE_DIR=$LLVM_BUILD_DIR/tools/mlir/python_packages/mlir_core \
-        -DCMAKE_INSTALL_PREFIX="$PTO_INSTALL_DIR" \
-        ${CMAKE_ARGS}
+    configure_ptoas_build ${CMAKE_ARGS}
   fi
 
   ninja -C build

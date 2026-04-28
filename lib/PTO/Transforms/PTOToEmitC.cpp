@@ -10540,7 +10540,7 @@ struct EmitPTOManualPass
 	    OpBuilder builder(ctx);
 	    builder.setInsertionPointToStart(mop.getBody());
 	    builder.create<emitc::IncludeOp>(
-	        loc, builder.getStringAttr("pto/pto-inst.hpp"), /*isAngled=*/nullptr);
+	        loc, "pto/pto-inst.hpp", /*is_standard_include=*/false);
 	    builder.create<emitc::VerbatimOp>(
 	        loc, builder.getStringAttr("using namespace pto;"));
         if (needsEventIdArrayHelper) {
