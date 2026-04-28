@@ -239,6 +239,111 @@ static bool parseBuildLevel(llvm::StringRef levelStr, PTOBuildLevel &out) {
   return false;
 }
 
+static llvm::StringRef describeBuildLevel(PTOBuildLevel level) {
+  switch (level) {
+  case PTOBuildLevel::Level1:
+    return "level1";
+  case PTOBuildLevel::Level2:
+    return "level2";
+  case PTOBuildLevel::Level3:
+    return "level3";
+  }
+  llvm_unreachable("unknown PTO build level");
+}
+
+static bool isPlanMemoryManagedLocalAddressSpace(pto::AddressSpace addressSpace) {
+  switch (addressSpace) {
+  case pto::AddressSpace::VEC:
+  case pto::AddressSpace::MAT:
+  case pto::AddressSpace::ACC:
+  case pto::AddressSpace::LEFT:
+  case pto::AddressSpace::RIGHT:
+  case pto::AddressSpace::BIAS:
+  case pto::AddressSpace::SCALING:
+    return true;
+  default:
+    return false;
+  }
+}
+
+static llvm::StringRef describeAddressSpace(pto::AddressSpace addressSpace) {
+  switch (addressSpace) {
+  case pto::AddressSpace::VEC:
+    return "vec";
+  case pto::AddressSpace::MAT:
+    return "mat";
+  case pto::AddressSpace::ACC:
+    return "acc";
+  case pto::AddressSpace::LEFT:
+    return "left";
+  case pto::AddressSpace::RIGHT:
+    return "right";
+  case pto::AddressSpace::BIAS:
+    return "bias";
+  case pto::AddressSpace::SCALING:
+    return "scaling";
+  default:
+    return "unknown";
+  }
+}
+
+static LogicalResult verifyAllocTileAddrMixing(ModuleOp module,
+                                               PTOBuildLevel effectiveLevel) {
+  if (effectiveLevel == PTOBuildLevel::Level3)
+    return success();
+
+  for (func::FuncOp funcOp : module.getOps<func::FuncOp>()) {
+    llvm::DenseMap<unsigned, Operation *> firstManualAllocByScope;
+    llvm::DenseMap<unsigned, Operation *> firstAutoAllocByScope;
+    WalkResult walkResult = funcOp.walk([&](pto::AllocTileOp op) -> WalkResult {
+      auto tileType = dyn_cast<pto::TileBufType>(op.getResult().getType());
+      if (!tileType)
+        return WalkResult::advance();
+
+      auto addressSpaceAttr =
+          dyn_cast_or_null<pto::AddressSpaceAttr>(tileType.getMemorySpace());
+      if (!addressSpaceAttr)
+        return WalkResult::advance();
+
+      pto::AddressSpace addressSpace = addressSpaceAttr.getAddressSpace();
+      if (!isPlanMemoryManagedLocalAddressSpace(addressSpace))
+        return WalkResult::advance();
+
+      const unsigned scopeKey = static_cast<unsigned>(addressSpace);
+      const bool hasExplicitAddr = static_cast<bool>(op.getAddr());
+      auto &sameKindAllocs =
+          hasExplicitAddr ? firstManualAllocByScope : firstAutoAllocByScope;
+      auto &otherKindAllocs =
+          hasExplicitAddr ? firstAutoAllocByScope : firstManualAllocByScope;
+
+      auto conflictingIt = otherKindAllocs.find(scopeKey);
+      if (conflictingIt != otherKindAllocs.end()) {
+        InFlightDiagnostic diag =
+            op.emitOpError()
+            << "cannot mix alloc_tile with and without explicit 'addr' in "
+               "local scope '"
+            << describeAddressSpace(addressSpace) << "' when --pto-level="
+            << describeBuildLevel(effectiveLevel)
+            << " enables PlanMemory; use either all-explicit or all-automatic "
+               "alloc_tile in that scope";
+        diag.attachNote(conflictingIt->second->getLoc())
+            << "conflicting "
+            << (hasExplicitAddr ? "automatic alloc_tile"
+                                : "alloc_tile with explicit 'addr'")
+            << " is here";
+        return WalkResult::interrupt();
+      }
+
+      sameKindAllocs.try_emplace(scopeKey, op.getOperation());
+      return WalkResult::advance();
+    });
+    if (walkResult.wasInterrupted())
+      return failure();
+  }
+
+  return success();
+}
+
 static constexpr llvm::StringLiteral kAutoSyncTailPolicyBarrierAll =
     "barrier_all";
 static constexpr llvm::StringLiteral kAutoSyncTailPolicyMte3ToSEvent0 =
@@ -1079,6 +1184,8 @@ int main(int argc, char **argv) {
     });
     if (missing)
       return 1;
+  } else if (failed(verifyAllocTileAddrMixing(*module, effectiveLevel))) {
+    return 1;
   }
 
   // Main PassManager

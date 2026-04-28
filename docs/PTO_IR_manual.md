@@ -486,8 +486,9 @@ result = alloc_tile(base_addr, valid_row, valid_col)   // operands are optional
   - If result `v_row`/`v_col` are dynamic (`?`), the corresponding operands must be present
   - If result `v_row`/`v_col` are static, the corresponding operands must be absent
 - If `base_addr` is omitted, the address is assigned by the compiler
-- Level-2 may mix compiler-planned tiles with tiles that carry an explicit
-  `base_addr`
+- Level-1 / Level-2 accept explicit `base_addr`, but within the same function
+  and local memory scope (`vec` / `mat` / `acc` / `left` / `right` / `bias` /
+  `scaling`) they cannot mix compiler-planned tiles and explicit-address tiles
 - Level-3 requires every `pto.alloc_tile` to carry an explicit `base_addr`
 
 **Hardware Mapping:**

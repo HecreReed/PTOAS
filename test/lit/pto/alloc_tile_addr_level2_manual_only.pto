@@ -1,0 +1,21 @@
+// RUN: ptoas --pto-arch=a5 %s | FileCheck %s
+
+module {
+  func.func @manual_only_level2(%base0: i64, %base1: i64) {
+    %tile0 = pto.alloc_tile addr = %base0
+      : !pto.tile_buf<loc=vec, dtype=f32, rows=32, cols=32, v_row=32, v_col=32, blayout=row_major, slayout=none_box, fractal=512, pad=0>
+    %tile1 = pto.alloc_tile addr = %base1
+      : !pto.tile_buf<loc=vec, dtype=f32, rows=32, cols=32, v_row=32, v_col=32, blayout=row_major, slayout=none_box, fractal=512, pad=0>
+    pto.tmov ins(%tile0 : !pto.tile_buf<loc=vec, dtype=f32, rows=32, cols=32, v_row=32, v_col=32, blayout=row_major, slayout=none_box, fractal=512, pad=0>)
+             outs(%tile1 : !pto.tile_buf<loc=vec, dtype=f32, rows=32, cols=32, v_row=32, v_col=32, blayout=row_major, slayout=none_box, fractal=512, pad=0>)
+    return
+  }
+}
+
+// CHECK-LABEL: __global__ AICORE void manual_only_level2(
+// CHECK-SAME: int64_t [[BASE0:v[0-9]+]], int64_t [[BASE1:v[0-9]+]]
+// CHECK: Tile<TileType::Vec, float, 32, 32, BLayout::RowMajor, 32, 32, SLayout::NoneBox, 512, PadValue::Null, CompactMode::Null> [[TILE0:v[0-9]+]];
+// CHECK: TASSIGN([[TILE0]], [[BASE0]]);
+// CHECK: Tile<TileType::Vec, float, 32, 32, BLayout::RowMajor, 32, 32, SLayout::NoneBox, 512, PadValue::Null, CompactMode::Null> [[TILE1:v[0-9]+]];
+// CHECK: TASSIGN([[TILE1]], [[BASE1]]);
+// CHECK: TMOV([[TILE1]], [[TILE0]]);

@@ -37,7 +37,9 @@ def build():
             # Demo signature: (base_addr:i64, vrow:i32, vcol:i32) -> ()
             #
             # Note: explicit `addr` is accepted in the default Level-2 pipeline
-            # as well. Level-3 is stricter: every alloc_tile must provide `addr`.
+            # as well. When PlanMemory is enabled (Level-1/Level-2), keep one
+            # local-memory scope either fully explicit or fully automatic.
+            # Level-3 is stricter: every alloc_tile must provide `addr`.
             fn_ty = func.FunctionType.get([i64, i32, i32], [])
             with InsertionPoint(m.body):
                 fn = func.FuncOp("alloc_tile_with_addr_demo", fn_ty)
