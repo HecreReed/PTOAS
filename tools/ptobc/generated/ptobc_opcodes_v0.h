@@ -199,6 +199,12 @@ inline constexpr OpInfo kOpTable[] = {
   {0x1088, "pto.set_validshape", 0, 0x00, 0x00, 3, 0, 0, 0x00},
   {0x1089, "pto.tconcat", 0, 0x00, 0x00, 3, 0, 0, 0x00},
   {0x108A, "pto.trowprod", 0, 0x00, 0x00, 3, 0, 0, 0x00},
+  {0x108B, "pto.initialize_l2g2l_pipe", 0, 0x01, 0x02, 0, 1, 0, 0x00},
+  {0x108C, "pto.initialize_l2l_pipe", 0, 0x01, 0x02, 0, 1, 0, 0x00},
+  {0x108D, "pto.tpush", 0, 0x00, 0x00, 2, 0, 0, 0x00},
+  {0x108E, "pto.declare_tile", 0, 0x01, 0x00, 0, 1, 0, 0x00},
+  {0x108F, "pto.tpop", 0, 0x00, 0x00, 2, 0, 0, 0x00},
+  {0x1090, "pto.tfree", 0, 0x00, 0x00, 1, 0, 0, 0x00},
   {0x2000, "arith.addi", 0, 0x01, 0x00, 2, 1, 0, 0x00},
   {0x2001, "arith.ceildivsi", 0, 0x01, 0x00, 2, 1, 0, 0x00},
   {0x2002, "arith.cmpi", 0, 0x01, 0x00, 2, 1, 0, 0x01},
@@ -388,6 +394,12 @@ inline std::optional<uint16_t> lookupOpcodeByName(llvm::StringRef name) {
     .Case("pto.set_validshape", 0x1088)
     .Case("pto.tconcat", 0x1089)
     .Case("pto.trowprod", 0x108A)
+    .Case("pto.initialize_l2g2l_pipe", 0x108B)
+    .Case("pto.initialize_l2l_pipe", 0x108C)
+    .Case("pto.tpush", 0x108D)
+    .Case("pto.declare_tile", 0x108E)
+    .Case("pto.tpop", 0x108F)
+    .Case("pto.tfree", 0x1090)
     .Case("scf.for", 0x4000)
     .Case("scf.if", 0x4001)
     .Case("scf.yield", 0x4002)
@@ -562,6 +574,12 @@ inline std::optional<OpcodeAndVariant> lookupOpcodeAndVariantByFullName(llvm::St
     .Case("pto.set_validshape", OpcodeAndVariant{0x1088, 0, 0})
     .Case("pto.tconcat", OpcodeAndVariant{0x1089, 0, 0})
     .Case("pto.trowprod", OpcodeAndVariant{0x108A, 0, 0})
+    .Case("pto.initialize_l2g2l_pipe", OpcodeAndVariant{0x108B, 0, 0})
+    .Case("pto.initialize_l2l_pipe", OpcodeAndVariant{0x108C, 0, 0})
+    .Case("pto.tpush", OpcodeAndVariant{0x108D, 0, 0})
+    .Case("pto.declare_tile", OpcodeAndVariant{0x108E, 0, 0})
+    .Case("pto.tpop", OpcodeAndVariant{0x108F, 0, 0})
+    .Case("pto.tfree", OpcodeAndVariant{0x1090, 0, 0})
     .Case("scf.for", OpcodeAndVariant{0x4000, 0, 0})
     .Case("scf.if", OpcodeAndVariant{0x4001, 0, 0})
     .Case("scf.yield", OpcodeAndVariant{0x4002, 0, 0})
