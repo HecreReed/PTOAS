@@ -458,6 +458,11 @@ public:
     stableValueOrder = std::move(valueOrder);
   }
 
+  inline void
+  SetReservedBufferBitsByScope(DenseMap<pto::AddressSpace, uint64_t> reservedBits) {
+    reservedBufferBitsByScope = std::move(reservedBits);
+  }
+
   /// Setup the device's storage specs
   LogicalResult InitMemSpecsFromModule(func::FuncOp funcOp);
 
@@ -540,6 +545,10 @@ private:
 
   /// Obtain buffer space size and alignment information.
   std::pair<size_t, size_t> GetBufferSpaceInfo(pto::AddressSpace &space) const;
+
+  /// Obtain effective buffer space size after accounting for reserve_buffer.
+  std::pair<size_t, size_t>
+  GetPlannableBufferSpaceInfo(pto::AddressSpace &space) const;
 
   /// Emit buffer applied failure message.
   void EmitPlanMemoryFailureInfo();
@@ -714,6 +723,9 @@ private:
   /// map from buffer scope to its required size to plan rest memory without any
   /// reuse.
   DenseMap<pto::AddressSpace, size_t> bufferScope2RequiredSize;
+
+  /// total aligned auto-reserved capacity per local address space, in bits.
+  DenseMap<pto::AddressSpace, uint64_t> reservedBufferBitsByScope;
 
   /// map from buffer value to its storage entry info
   DenseMap<Value, StorageEntry *> buffer2storageEntry;

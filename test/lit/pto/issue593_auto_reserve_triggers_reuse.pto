@@ -1,0 +1,93 @@
+// RUN: ptoas --mlir-print-ir-after=pto-plan-memory %s 2>&1 1>/dev/null | FileCheck %s
+// RUN: ptoas %s >/dev/null
+// RUN: ptoas --enable-insert-sync %s >/dev/null
+//
+// 11 * 16KiB fits inside raw A3 vec UB, so the old planner chose the no-reuse
+// path and only failed later when auto reserve_buffer placement needed another
+// 32KiB hole. reserve_buffer must be accounted before deciding reuse.
+
+module {
+  func.func @reserve_needs_reuse(%arg0: memref<16x16x32xf16, #pto.address_space<gm>>,
+                                 %arg1: memref<16x16x32xf16, #pto.address_space<gm>>) {
+    %fifo = pto.reserve_buffer {
+      name = "fifo",
+      size = 32768,
+      location = #pto.address_space<vec>,
+      auto = true
+    } -> i32
+
+    %ub0 = memref.alloc() : memref<16x16x32xf16, #pto.address_space<vec>>
+    pto.tload ins(%arg0 : memref<16x16x32xf16, #pto.address_space<gm>>)
+             outs(%ub0 : memref<16x16x32xf16, #pto.address_space<vec>>)
+    pto.tstore ins(%ub0 : memref<16x16x32xf16, #pto.address_space<vec>>)
+              outs(%arg1 : memref<16x16x32xf16, #pto.address_space<gm>>)
+
+    %ub1 = memref.alloc() : memref<16x16x32xf16, #pto.address_space<vec>>
+    pto.tload ins(%arg0 : memref<16x16x32xf16, #pto.address_space<gm>>)
+             outs(%ub1 : memref<16x16x32xf16, #pto.address_space<vec>>)
+    pto.tstore ins(%ub1 : memref<16x16x32xf16, #pto.address_space<vec>>)
+              outs(%arg1 : memref<16x16x32xf16, #pto.address_space<gm>>)
+
+    %ub2 = memref.alloc() : memref<16x16x32xf16, #pto.address_space<vec>>
+    pto.tload ins(%arg0 : memref<16x16x32xf16, #pto.address_space<gm>>)
+             outs(%ub2 : memref<16x16x32xf16, #pto.address_space<vec>>)
+    pto.tstore ins(%ub2 : memref<16x16x32xf16, #pto.address_space<vec>>)
+              outs(%arg1 : memref<16x16x32xf16, #pto.address_space<gm>>)
+
+    %ub3 = memref.alloc() : memref<16x16x32xf16, #pto.address_space<vec>>
+    pto.tload ins(%arg0 : memref<16x16x32xf16, #pto.address_space<gm>>)
+             outs(%ub3 : memref<16x16x32xf16, #pto.address_space<vec>>)
+    pto.tstore ins(%ub3 : memref<16x16x32xf16, #pto.address_space<vec>>)
+              outs(%arg1 : memref<16x16x32xf16, #pto.address_space<gm>>)
+
+    %ub4 = memref.alloc() : memref<16x16x32xf16, #pto.address_space<vec>>
+    pto.tload ins(%arg0 : memref<16x16x32xf16, #pto.address_space<gm>>)
+             outs(%ub4 : memref<16x16x32xf16, #pto.address_space<vec>>)
+    pto.tstore ins(%ub4 : memref<16x16x32xf16, #pto.address_space<vec>>)
+              outs(%arg1 : memref<16x16x32xf16, #pto.address_space<gm>>)
+
+    %ub5 = memref.alloc() : memref<16x16x32xf16, #pto.address_space<vec>>
+    pto.tload ins(%arg0 : memref<16x16x32xf16, #pto.address_space<gm>>)
+             outs(%ub5 : memref<16x16x32xf16, #pto.address_space<vec>>)
+    pto.tstore ins(%ub5 : memref<16x16x32xf16, #pto.address_space<vec>>)
+              outs(%arg1 : memref<16x16x32xf16, #pto.address_space<gm>>)
+
+    %ub6 = memref.alloc() : memref<16x16x32xf16, #pto.address_space<vec>>
+    pto.tload ins(%arg0 : memref<16x16x32xf16, #pto.address_space<gm>>)
+             outs(%ub6 : memref<16x16x32xf16, #pto.address_space<vec>>)
+    pto.tstore ins(%ub6 : memref<16x16x32xf16, #pto.address_space<vec>>)
+              outs(%arg1 : memref<16x16x32xf16, #pto.address_space<gm>>)
+
+    %ub7 = memref.alloc() : memref<16x16x32xf16, #pto.address_space<vec>>
+    pto.tload ins(%arg0 : memref<16x16x32xf16, #pto.address_space<gm>>)
+             outs(%ub7 : memref<16x16x32xf16, #pto.address_space<vec>>)
+    pto.tstore ins(%ub7 : memref<16x16x32xf16, #pto.address_space<vec>>)
+              outs(%arg1 : memref<16x16x32xf16, #pto.address_space<gm>>)
+
+    %ub8 = memref.alloc() : memref<16x16x32xf16, #pto.address_space<vec>>
+    pto.tload ins(%arg0 : memref<16x16x32xf16, #pto.address_space<gm>>)
+             outs(%ub8 : memref<16x16x32xf16, #pto.address_space<vec>>)
+    pto.tstore ins(%ub8 : memref<16x16x32xf16, #pto.address_space<vec>>)
+              outs(%arg1 : memref<16x16x32xf16, #pto.address_space<gm>>)
+
+    %ub9 = memref.alloc() : memref<16x16x32xf16, #pto.address_space<vec>>
+    pto.tload ins(%arg0 : memref<16x16x32xf16, #pto.address_space<gm>>)
+             outs(%ub9 : memref<16x16x32xf16, #pto.address_space<vec>>)
+    pto.tstore ins(%ub9 : memref<16x16x32xf16, #pto.address_space<vec>>)
+              outs(%arg1 : memref<16x16x32xf16, #pto.address_space<gm>>)
+
+    %ub10 = memref.alloc() : memref<16x16x32xf16, #pto.address_space<vec>>
+    pto.tload ins(%arg0 : memref<16x16x32xf16, #pto.address_space<gm>>)
+             outs(%ub10 : memref<16x16x32xf16, #pto.address_space<vec>>)
+    pto.tstore ins(%ub10 : memref<16x16x32xf16, #pto.address_space<vec>>)
+              outs(%arg1 : memref<16x16x32xf16, #pto.address_space<gm>>)
+    return
+  }
+}
+
+// CHECK: IR Dump After PlanMemory
+// CHECK-LABEL: func.func @reserve_needs_reuse(
+// CHECK-DAG: %c0_i64 = arith.constant 0 : i64
+// CHECK: %{{.*}} = pto.reserve_buffer{name = "fifo", size = 32768, location = <vec>, auto = true, base = 16384} -> i32
+// CHECK-DAG: pto.pointer_cast(%c0_i64) : memref<16x16x32xf16, #pto.address_space<{{vec|ub}}>>
+// CHECK-DAG: pto.pointer_cast(%c0_i64) : memref<16x16x32xf16, #pto.address_space<{{vec|ub}}>>

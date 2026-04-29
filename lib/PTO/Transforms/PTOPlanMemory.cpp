@@ -357,6 +357,19 @@ static LogicalResult assignAutoReserveBufferBases(
   return success();
 }
 
+static DenseMap<AddressSpace, uint64_t>
+collectAutoReserveBufferBitsByAddressSpace(const ReserveBufferPlans &plans) {
+  DenseMap<AddressSpace, uint64_t> reservedBitsByAddressSpace;
+  for (const ReserveBufferPlan &plan : plans) {
+    if (plan.mode != ReserveBufferMode::Auto)
+      continue;
+    int64_t alignedSizeBytes = alignUpBytes(plan.sizeBytes, plan.alignBytes);
+    reservedBitsByAddressSpace[plan.addressSpace] +=
+        static_cast<uint64_t>(alignedSizeBytes) * kBitsPerByte;
+  }
+  return reservedBitsByAddressSpace;
+}
+
 } // namespace
 
 void MemLivenessAnalysis::build() {
@@ -938,9 +951,10 @@ void MemPlan::EmitPlanMemoryFailureInfo() {
     return;
   for (auto &iter : failApplyBufferInfo) {
     AddressSpace space = iter.first;
+    auto bufferSpaceInfo = GetPlannableBufferSpaceInfo(space);
     func_.emitError() << stringifyEnum(space) << " overflow, requires "
-                      << iter.second << " bits while "
-                      << GetBufferSpaceInfo(space).second << " bits avaliable!";
+                      << iter.second << " bits while " << bufferSpaceInfo.second
+                      << " bits avaliable!";
   }
 }
 
@@ -959,7 +973,7 @@ bool MemPlan::RecordOverflowIfAny() {
       continue;
     }
     auto bufferSpaceInfo =
-        GetBufferSpaceInfo(rootStorageEntry->bufInfo->bufferScope);
+        GetPlannableBufferSpaceInfo(rootStorageEntry->bufInfo->bufferScope);
     size_t maxBits = bufferSpaceInfo.second;
     uint64_t maxAllocBits = rootStorageEntry->alignedConstBits;
     for (auto *child : rootStorageEntry->mergedChildren) {
@@ -1311,7 +1325,7 @@ void MemPlan::MergeSameScopeSE() {
 
   // set bufferScope2RequiredSize for all StorageEntry
   for (auto &rootStorageEntry : memscope2rootStorageEntry) {
-    auto bufferSpaceInfo = GetBufferSpaceInfo(rootStorageEntry.first);
+    auto bufferSpaceInfo = GetPlannableBufferSpaceInfo(rootStorageEntry.first);
     size_t accumulateSize = AlignUp(rootStorageEntry.second->bufInfo->constBits,
                                     bufferSpaceInfo.first);
     for (auto &childrenStorageEntry : rootStorageEntry.second->mergedChildren) {
@@ -1370,7 +1384,7 @@ PlanStatus MemPlan::PlanMemAddressOfWholeLocalBuffer() {
     StorageEntry *rootStorageEntry = it.second;
     // get the buffer info for a given scope.
     auto bufferSpaceInfo =
-        GetBufferSpaceInfo(rootStorageEntry->bufInfo->bufferScope);
+        GetPlannableBufferSpaceInfo(rootStorageEntry->bufInfo->bufferScope);
     size_t align = bufferSpaceInfo.first;
     size_t maxBits = bufferSpaceInfo.second;
     if (rootStorageEntry->mergedChildren.empty()) {
@@ -1578,6 +1592,20 @@ MemPlan::GetBufferSpaceInfo(pto::AddressSpace &space) const {
   }
 
   llvm_unreachable("Temporarily unsupported memory buffer space !");
+}
+
+std::pair<size_t, size_t>
+MemPlan::GetPlannableBufferSpaceInfo(pto::AddressSpace &space) const {
+  auto bufferSpaceInfo = GetBufferSpaceInfo(space);
+  auto it = reservedBufferBitsByScope.find(space);
+  if (it == reservedBufferBitsByScope.end()) {
+    return bufferSpaceInfo;
+  }
+  if (it->second >= bufferSpaceInfo.second) {
+    return std::make_pair(bufferSpaceInfo.first, size_t{0});
+  }
+  return std::make_pair(bufferSpaceInfo.first,
+                        bufferSpaceInfo.second - it->second);
 }
 
 LogicalResult MemPlan::MultiSpecPlan(SpecInfo &si, MemBoundList &outline,
@@ -2291,6 +2319,8 @@ void PlanMemoryPass::runOnOperation() {
     memPlan.SetInplacePairList(memLiveness.inplacePairList);
     memPlan.SetSemanticConflictPairs(memLiveness.semanticConflictPairs);
     memPlan.SetStableValueOrder(std::move(memLiveness.stableValueOrder));
+    memPlan.SetReservedBufferBitsByScope(
+        collectAutoReserveBufferBitsByAddressSpace(reservePlans));
     if (failed(memPlan.plan())) {
       return signalPassFailure();
     }
