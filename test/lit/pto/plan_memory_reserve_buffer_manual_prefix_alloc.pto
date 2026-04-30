@@ -1,0 +1,28 @@
+// RUN: ptoas --mlir-print-ir-after=pto-plan-memory %s 2>&1 1>/dev/null | FileCheck %s
+// RUN: ptoas %s >/dev/null
+
+module {
+  func.func @manual_prefix_alloc(%arg0: memref<16x16x16xf16, #pto.address_space<gm>>,
+                                 %arg1: memref<16x16x16xf16, #pto.address_space<gm>>) {
+    %fifo = pto.reserve_buffer {
+      name = "fifo",
+      size = 8192,
+      location = #pto.address_space<vec>,
+      auto = false,
+      base = 0
+    } -> i32
+
+    %ub = memref.alloc() : memref<16x16x16xf16, #pto.address_space<vec>>
+    pto.tload ins(%arg0 : memref<16x16x16xf16, #pto.address_space<gm>>)
+             outs(%ub : memref<16x16x16xf16, #pto.address_space<vec>>)
+    pto.tstore ins(%ub : memref<16x16x16xf16, #pto.address_space<vec>>)
+              outs(%arg1 : memref<16x16x16xf16, #pto.address_space<gm>>)
+    return
+  }
+}
+
+// CHECK: IR Dump After PlanMemory
+// CHECK-LABEL: func.func @manual_prefix_alloc(
+// CHECK-DAG: %c8192_i64 = arith.constant 8192 : i64
+// CHECK: %{{.*}} = pto.reserve_buffer{name = "fifo", size = 8192, location = <vec>, auto = false, base = 0} -> i32
+// CHECK: pto.pointer_cast(%c8192_i64) : memref<16x16x16xf16, #pto.address_space<{{vec|ub}}>>

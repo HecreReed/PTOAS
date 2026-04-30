@@ -49,9 +49,12 @@ constexpr unsigned kI32BitWidth = 32;
 constexpr unsigned kMemoryEffectReserveSize = 8;
 constexpr int kSingleBufferCount = 1;
 constexpr int kDoubleBufferCount = 2;
-constexpr int64_t kA5VecLocalMemBits = 2031616;
-constexpr int64_t kA3VecLocalMemBits = 1572864;
-constexpr int64_t kMatLocalMemBits = 4194304;
+// A3/A5 local-memory capacities are recorded in bytes in frontend/manual
+// address conventions; PlanMemory stores internal capacities in bits.
+constexpr int64_t bytesToBits(int64_t bytes) { return bytes * kBitsPerByte; }
+constexpr int64_t kA5VecLocalMemBits = bytesToBits(2031616);
+constexpr int64_t kA3VecLocalMemBits = bytesToBits(1572864);
+constexpr int64_t kMatLocalMemBits = bytesToBits(4194304);
 constexpr int64_t kLocalMemAlignmentBytes = 256;
 
 struct LocalMemSpec {
@@ -209,11 +212,21 @@ struct ReserveBufferPlan {
   ReserveBufferOp reserveOp;
   AddressSpace addressSpace = AddressSpace::Zero;
   int64_t sizeBytes = 0;
+  int64_t baseBytes = 0;
   int64_t capacityBytes = 0;
   int64_t alignBytes = 1;
 };
 
 using ReserveBufferPlans = SmallVector<ReserveBufferPlan>;
+
+struct ReservedByteRange {
+  int64_t begin = 0;
+  int64_t end = 0;
+  ReserveBufferOp reserveOp;
+};
+
+using ManualReservedRangesByAddressSpace =
+    DenseMap<AddressSpace, SmallVector<ReservedByteRange>>;
 
 static LogicalResult analyzeReserveBufferPlans(func::FuncOp funcOp,
                                                ReserveBufferPlans &plans) {
@@ -266,9 +279,89 @@ static LogicalResult analyzeReserveBufferPlans(func::FuncOp funcOp,
     if (baseBytes + sizeBytes > capacityBytes) {
       return reserveOp.emitOpError("exceeds available local memory capacity");
     }
+    plan.baseBytes = baseBytes;
   }
 
   return success();
+}
+
+static LogicalResult collectManualReservedRangesByAddressSpace(
+    const ReserveBufferPlans &plans,
+    ManualReservedRangesByAddressSpace &rangesByAddressSpace) {
+  for (const ReserveBufferPlan &plan : plans) {
+    if (plan.mode != ReserveBufferMode::Manual || !plan.reserveOp)
+      continue;
+    rangesByAddressSpace[plan.addressSpace].push_back(
+        ReservedByteRange{plan.baseBytes, plan.baseBytes + plan.sizeBytes,
+                          plan.reserveOp});
+  }
+
+  for (auto &it : rangesByAddressSpace) {
+    SmallVector<ReservedByteRange> &ranges = it.second;
+    llvm::sort(ranges, [](const ReservedByteRange &lhs,
+                          const ReservedByteRange &rhs) {
+      if (lhs.begin != rhs.begin)
+        return lhs.begin < rhs.begin;
+      return lhs.end < rhs.end;
+    });
+    for (size_t i = 1; i < ranges.size(); ++i) {
+      if (ranges[i - 1].end <= ranges[i].begin)
+        continue;
+      return ranges[i].reserveOp.emitOpError(
+          "overlaps another explicit reserve_buffer in the same address space");
+    }
+  }
+  return success();
+}
+
+static DenseMap<AddressSpace, PlannableBufferWindow>
+computePlannableWindowsByAddressSpace(
+    const ReserveBufferPlans &plans,
+    const ManualReservedRangesByAddressSpace &rangesByAddressSpace) {
+  DenseMap<AddressSpace, std::pair<int64_t, int64_t>> specByAddressSpace;
+  for (const ReserveBufferPlan &plan : plans) {
+    specByAddressSpace.try_emplace(plan.addressSpace,
+                                   std::make_pair(plan.capacityBytes,
+                                                  plan.alignBytes));
+  }
+
+  DenseMap<AddressSpace, PlannableBufferWindow> windowsByAddressSpace;
+  for (const auto &it : rangesByAddressSpace) {
+    AddressSpace addressSpace = it.first;
+    const SmallVector<ReservedByteRange> &ranges = it.second;
+    auto specIt = specByAddressSpace.find(addressSpace);
+    if (specIt == specByAddressSpace.end())
+      continue;
+
+    int64_t capacityBytes = specIt->second.first;
+    int64_t alignBytes = specIt->second.second;
+    int64_t bestBaseBytes = 0;
+    int64_t bestCapacityBytes = 0;
+    auto considerHole = [&](int64_t holeBegin, int64_t holeEnd) {
+      int64_t alignedBegin = alignUpBytes(holeBegin, alignBytes);
+      if (alignedBegin >= holeEnd)
+        return;
+      int64_t holeCapacityBytes = holeEnd - alignedBegin;
+      if (holeCapacityBytes > bestCapacityBytes ||
+          (holeCapacityBytes == bestCapacityBytes &&
+           alignedBegin < bestBaseBytes)) {
+        bestBaseBytes = alignedBegin;
+        bestCapacityBytes = holeCapacityBytes;
+      }
+    };
+
+    int64_t cursor = 0;
+    for (const ReservedByteRange &range : ranges) {
+      considerHole(cursor, range.begin);
+      cursor = std::max(cursor, range.end);
+    }
+    considerHole(cursor, capacityBytes);
+
+    windowsByAddressSpace[addressSpace] = PlannableBufferWindow{
+        static_cast<uint64_t>(bytesToBits(bestBaseBytes)),
+        static_cast<uint64_t>(bytesToBits(bestCapacityBytes))};
+  }
+  return windowsByAddressSpace;
 }
 
 struct OccupiedByteRange {
@@ -278,9 +371,17 @@ struct OccupiedByteRange {
 
 static LogicalResult assignAutoReserveBufferBases(
     ReserveBufferPlans &plans,
+    const ManualReservedRangesByAddressSpace &manualRangesByAddressSpace,
     const std::map<Value, BufferInfo, ValueComparator> &bufferInfos,
     const DenseMap<Value, SmallVector<uint64_t>> &buffer2Offsets) {
   std::map<AddressSpace, SmallVector<OccupiedByteRange>> occupiedByAddressSpace;
+  for (const auto &it : manualRangesByAddressSpace) {
+    SmallVector<OccupiedByteRange> &occupied =
+        occupiedByAddressSpace[it.first];
+    for (const ReservedByteRange &range : it.second) {
+      occupied.push_back(OccupiedByteRange{range.begin, range.end});
+    }
+  }
   for (const auto &it : bufferInfos) {
     Value buffer = it.first;
     const BufferInfo &bufferInfo = it.second;
@@ -1134,10 +1235,11 @@ void MemPlan::ValidateParameters(std::unique_ptr<StorageEntry> &e) const {
 
 void MemPlan::UpdateBuffer2Offsets() {
   for (auto &e : StorageEntryVec) {
+    uint64_t baseBits = GetPlannableBufferBaseBits(e->bufInfo->bufferScope);
     for (Value &buffer : e->inplaceBuffers) {
       // MultiBuffer can cause multiple addrs.
       buffer2Offsets[buffer].push_back(
-          (e->bitsOffset + kBitsToByte - 1) / kBitsToByte);
+          (baseBits + e->bitsOffset + kBitsToByte - 1) / kBitsToByte);
     }
   }
   // In the MultiBuffer scenario, single reuse db will result in additional
@@ -1151,10 +1253,12 @@ void MemPlan::UpdateMultiBufferReuseExtraOffset() {
   }
 
   for (auto &relationEntry : pingEntry2RelationPongEntry) {
+    uint64_t baseBits =
+        GetPlannableBufferBaseBits(relationEntry.second->bufInfo->bufferScope);
     for (Value &buffer : relationEntry.second->inplaceBuffers) {
       // MultiBuffer can cause multiple addrs.
       buffer2Offsets[buffer].push_back(
-          (relationEntry.second->bitsOffset + kBitsToByte - 1) /
+          (baseBits + relationEntry.second->bitsOffset + kBitsToByte - 1) /
           kBitsToByte);
     }
   }
@@ -1597,6 +1701,11 @@ MemPlan::GetBufferSpaceInfo(pto::AddressSpace &space) const {
 std::pair<size_t, size_t>
 MemPlan::GetPlannableBufferSpaceInfo(pto::AddressSpace &space) const {
   auto bufferSpaceInfo = GetBufferSpaceInfo(space);
+  auto windowIt = plannableWindowByScope.find(space);
+  if (windowIt != plannableWindowByScope.end()) {
+    bufferSpaceInfo.second = std::min<size_t>(
+        bufferSpaceInfo.second, windowIt->second.capacityBits);
+  }
   auto it = reservedBufferBitsByScope.find(space);
   if (it == reservedBufferBitsByScope.end()) {
     return bufferSpaceInfo;
@@ -1606,6 +1715,13 @@ MemPlan::GetPlannableBufferSpaceInfo(pto::AddressSpace &space) const {
   }
   return std::make_pair(bufferSpaceInfo.first,
                         bufferSpaceInfo.second - it->second);
+}
+
+uint64_t MemPlan::GetPlannableBufferBaseBits(pto::AddressSpace space) const {
+  auto it = plannableWindowByScope.find(space);
+  if (it == plannableWindowByScope.end())
+    return 0;
+  return it->second.baseBits;
 }
 
 LogicalResult MemPlan::MultiSpecPlan(SpecInfo &si, MemBoundList &outline,
@@ -2153,11 +2269,17 @@ LogicalResult MemPlan::InitMemSpecsFromModule(func::FuncOp funcOp) {
   };
 
   const MemSpec kA3 = {
-      1572864, 4194304, 524288, 524288, 1048576, 256, 256,
-      4096,    4096,    4096,   256,    524288, 256, 1572864};
+      bytesToBits(1572864), bytesToBits(4194304),
+      bytesToBits(524288),  bytesToBits(524288),
+      bytesToBits(1048576), 256, 256, 4096, 4096, 4096,
+      256,                  bytesToBits(524288),
+      256,                  bytesToBits(1572864)};
   const MemSpec kA5 = {
-      2031616, 4194304, 524288, 524288, 2097152, 256, 256,
-      4096,    4096,    4096,   256,    524288, 256, 2031616};
+      bytesToBits(2031616), bytesToBits(4194304),
+      bytesToBits(524288),  bytesToBits(524288),
+      bytesToBits(2097152), 256, 256, 4096, 4096, 4096,
+      256,                  bytesToBits(524288),
+      256,                  bytesToBits(2031616)};
 
   auto applySpec = [this](const MemSpec &spec) {
     ubSpaceSize = spec.ubSpaceSize;
@@ -2286,19 +2408,15 @@ void PlanMemoryPass::runOnOperation() {
   ModuleOp moduleOp = getOperation();
   for (auto funcOp : moduleOp.getOps<func::FuncOp>()) {
     ReserveBufferPlans reservePlans;
+    ManualReservedRangesByAddressSpace manualRangesByAddressSpace;
     if (this->memMode == MemPlanMode::LOCAL_MEM_PLAN &&
         failed(analyzeReserveBufferPlans(funcOp, reservePlans))) {
       return signalPassFailure();
     }
-    if (this->memMode == MemPlanMode::LOCAL_MEM_PLAN) {
-      for (ReserveBufferPlan &reservePlan : reservePlans) {
-        if (reservePlan.mode != ReserveBufferMode::Manual)
-          continue;
-        reservePlan.reserveOp.emitOpError(
-            "pto.reserve_buffer with explicit 'base' (auto = false) is not "
-            "supported in PlanMemory; use --pto-level=level3 or set auto = true");
-        return signalPassFailure();
-      }
+    if (this->memMode == MemPlanMode::LOCAL_MEM_PLAN &&
+        failed(collectManualReservedRangesByAddressSpace(
+            reservePlans, manualRangesByAddressSpace))) {
+      return signalPassFailure();
     }
 
     MemLivenessAnalysis memLiveness(funcOp, this->memMode);
@@ -2309,6 +2427,10 @@ void PlanMemoryPass::runOnOperation() {
                     this->restrictInplaceAsISA);
     if (failed(memPlan.InitMemSpecsFromModule(funcOp))) {
       return signalPassFailure();
+    }
+    if (this->memMode == MemPlanMode::LOCAL_MEM_PLAN) {
+      memPlan.SetPlannableWindowByScope(computePlannableWindowsByAddressSpace(
+          reservePlans, manualRangesByAddressSpace));
     }
     memPlan.func_ = funcOp;
     memPlan.SetLinearOperation(memLiveness.linearOperation);
@@ -2328,8 +2450,9 @@ void PlanMemoryPass::runOnOperation() {
     // normal local buffers are planned first, then reserve_buffer claims one
     // aligned hole in its target address space.
     if (this->memMode == MemPlanMode::LOCAL_MEM_PLAN &&
-        failed(assignAutoReserveBufferBases(reservePlans, memLiveness.bufferInfos,
-                                            memPlan.GetBuffer2Offsets()))) {
+        failed(assignAutoReserveBufferBases(
+            reservePlans, manualRangesByAddressSpace, memLiveness.bufferInfos,
+            memPlan.GetBuffer2Offsets()))) {
       return signalPassFailure();
     }
 

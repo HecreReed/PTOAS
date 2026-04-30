@@ -257,6 +257,11 @@ struct StatusWrapper {
   StorageEntry *RootE;
 };
 
+struct PlannableBufferWindow {
+  uint64_t baseBits{0};
+  uint64_t capacityBits{0};
+};
+
 class MemLivenessAnalysis {
 public:
   MemLivenessAnalysis(func::FuncOp func, MemPlanMode planMode)
@@ -463,6 +468,11 @@ public:
     reservedBufferBitsByScope = std::move(reservedBits);
   }
 
+  inline void
+  SetPlannableWindowByScope(DenseMap<pto::AddressSpace, PlannableBufferWindow> windows) {
+    plannableWindowByScope = std::move(windows);
+  }
+
   /// Setup the device's storage specs
   LogicalResult InitMemSpecsFromModule(func::FuncOp funcOp);
 
@@ -549,6 +559,9 @@ private:
   /// Obtain effective buffer space size after accounting for reserve_buffer.
   std::pair<size_t, size_t>
   GetPlannableBufferSpaceInfo(pto::AddressSpace &space) const;
+
+  /// Obtain planned base offset for a local buffer scope.
+  uint64_t GetPlannableBufferBaseBits(pto::AddressSpace space) const;
 
   /// Emit buffer applied failure message.
   void EmitPlanMemoryFailureInfo();
@@ -726,6 +739,9 @@ private:
 
   /// total aligned auto-reserved capacity per local address space, in bits.
   DenseMap<pto::AddressSpace, uint64_t> reservedBufferBitsByScope;
+
+  /// selected contiguous planning window per local address space, in bits.
+  DenseMap<pto::AddressSpace, PlannableBufferWindow> plannableWindowByScope;
 
   /// map from buffer value to its storage entry info
   DenseMap<Value, StorageEntry *> buffer2storageEntry;
