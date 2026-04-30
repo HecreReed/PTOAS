@@ -102,8 +102,6 @@ function(pack_built_in)
   set(pto_lib ${CMAKE_BINARY_DIR}/llvm-project/build-shared/lib)
   install(DIRECTORY ${pto_lib}/
           DESTINATION tools/pto_as/lib
-          FILES_MATCHING
-          PATTERN "*.so*"
           FILE_PERMISSIONS
           OWNER_READ OWNER_WRITE
           GROUP_READ GROUP_EXECUTE
