@@ -105,6 +105,8 @@ function(pack_built_in)
           FILE_PERMISSIONS
           OWNER_READ OWNER_WRITE
           GROUP_READ GROUP_EXECUTE
+          FILES_MATCHING
+          PATTERN "*.so*"
   )
 
   string(FIND "${ASCEND_COMPUTE_UNIT}" ";" SEMICOLON_INDEX)
