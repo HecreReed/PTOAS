@@ -40,6 +40,10 @@ def TensorOrMemref :
 def PTODpsType :
   AnyTypeOf<[AnyRankedTensor, AnyMemRef, PartitionTensorViewType, TileBufType]>;
 
+def PTOPipeEntryType :
+  AnyTypeOf<[AnyRankedTensor, AnyMemRef, TensorViewType, TileBufType],
+            "TensorView, TileBuf, Tensor, or MemRef">;
+
 def PtrOrMemRef :
   AnyTypeOf<[PtrType, AnyMemRef], "Ptr or MemRef">;
 
@@ -586,34 +590,6 @@ def TStoreOp: PTO_TOp<"tstore", [
         return ::mlir::pto::PIPE::PIPE_FIX;
       return ::mlir::pto::PIPE::PIPE_MTE3;
     }
-    ::mlir::MutableOperandRange getDpsInitsMutable() { return getDstMutable(); }
-  }];
-}
-
-def TPackOp : PTO_TOp<"tpack", [
-  PTO_DpsInitOpInterface,
-  OpPipeInterface,
-  DeclareOpInterfaceMethods<MemoryEffectsOpInterface>
-]> {
-  let summary = "Pack a wider vec tile into a narrower vec tile (A5).";
-
-  let arguments = (ins
-    PTODpsType:$src,
-    PTODpsType:$dst
-  );
-
-  let results = (outs);
-
-  let hasVerifier = 1;
-
-  let assemblyFormat = [{
-    `ins` `(` $src `:` qualified(type($src)) `)`
-    `outs` `(` $dst `:` qualified(type($dst)) `)`
-    attr-dict
-  }];
-
-  let extraClassDeclaration = [{
-    ::mlir::pto::PIPE getPipe() { return ::mlir::pto::PIPE::PIPE_V; }
     ::mlir::MutableOperandRange getDpsInitsMutable() { return getDstMutable(); }
   }];
 }
@@ -1356,7 +1332,8 @@ def SectionVectorOp : PTO_SectionOp<"section.vector">;
 // Frontend TPUSH/TPOP Pipe Communication Ops
 //===----------------------------------------------------------------------===//
 
-def AicInitializePipeOp : PTO_Op<"aic_initialize_pipe"> {
+def AicInitializePipeOp : PTO_Op<"aic_initialize_pipe",
+                                 [AttrSizedOperandSegments]> {
   let summary = "Frontend Cube-kernel pipe initialization";
 
   let arguments = (ins
@@ -1366,8 +1343,9 @@ def AicInitializePipeOp : PTO_Op<"aic_initialize_pipe"> {
       OptionalAttr<I32Attr>:$local_slot_num,
       OptionalAttr<BoolAttr>:$nosplit,
       Optional<PtrType>:$gm_slot_buffer,
-      I32:$c2v_consumer_buf,
-      I32:$v2c_consumer_buf
+      Optional<TensorViewType>:$gm_slot_tensor,
+      Optional<I32>:$c2v_consumer_buf,
+      Optional<I32>:$v2c_consumer_buf
   );
 
   let results = (outs);
@@ -1375,7 +1353,8 @@ def AicInitializePipeOp : PTO_Op<"aic_initialize_pipe"> {
   let hasCustomAssemblyFormat = 1;
 }
 
-def AivInitializePipeOp : PTO_Op<"aiv_initialize_pipe"> {
+def AivInitializePipeOp : PTO_Op<"aiv_initialize_pipe",
+                                 [AttrSizedOperandSegments]> {
   let summary = "Frontend Vector-kernel pipe initialization";
 
   let arguments = (ins
@@ -1385,8 +1364,9 @@ def AivInitializePipeOp : PTO_Op<"aiv_initialize_pipe"> {
       OptionalAttr<I32Attr>:$local_slot_num,
       OptionalAttr<BoolAttr>:$nosplit,
       Optional<PtrType>:$gm_slot_buffer,
-      I32:$c2v_consumer_buf,
-      I32:$v2c_consumer_buf
+      Optional<TensorViewType>:$gm_slot_tensor,
+      Optional<I32>:$c2v_consumer_buf,
+      Optional<I32>:$v2c_consumer_buf
   );
 
   let results = (outs);
@@ -1394,11 +1374,45 @@ def AivInitializePipeOp : PTO_Op<"aiv_initialize_pipe"> {
   let hasCustomAssemblyFormat = 1;
 }
 
+def TAllocToAivOp : PTO_TOp<"talloc_to_aiv"> {
+  let summary = "Frontend C2V producer alloc of a GlobalTensor FIFO entry";
+
+  let arguments = (ins
+      DefaultValuedOptionalAttr<I32Attr, "0">:$id,
+      I8Attr:$split
+  );
+
+  let results = (outs TensorViewType:$entry);
+  let hasVerifier = 1;
+
+  let assemblyFormat = [{
+    `{` (`id` `=` $id^ `,`)? `split` `=` $split `}` attr-dict
+    `->` qualified(type($entry))
+  }];
+}
+
+def TAllocToAicOp : PTO_TOp<"talloc_to_aic"> {
+  let summary = "Frontend V2C producer alloc of a GlobalTensor FIFO entry";
+
+  let arguments = (ins
+      DefaultValuedOptionalAttr<I32Attr, "0">:$id,
+      I8Attr:$split
+  );
+
+  let results = (outs TensorViewType:$entry);
+  let hasVerifier = 1;
+
+  let assemblyFormat = [{
+    `{` (`id` `=` $id^ `,`)? `split` `=` $split `}` attr-dict
+    `->` qualified(type($entry))
+  }];
+}
+
 def TPushToAivOp : PTO_TOp<"tpush_to_aiv"> {
   let summary = "Frontend C2V producer push from Cube to Vector";
 
   let arguments = (ins
-      PTODpsType:$tile,
+      PTOPipeEntryType:$tile,
       DefaultValuedOptionalAttr<I32Attr, "0">:$id,
       I8Attr:$split
   );
@@ -1416,7 +1430,7 @@ def TPushToAicOp : PTO_TOp<"tpush_to_aic"> {
   let summary = "Frontend V2C producer push from Vector to Cube";
 
   let arguments = (ins
-      PTODpsType:$tile,
+      PTOPipeEntryType:$tile,
       DefaultValuedOptionalAttr<I32Attr, "0">:$id,
       I8Attr:$split
   );
@@ -1440,7 +1454,7 @@ def TPopFromAicOp : PTO_TOp<"tpop_from_aic", [AttrSizedOperandSegments]> {
       I8Attr:$split
   );
 
-  let results = (outs PTODpsType:$tile);
+  let results = (outs PTOPipeEntryType:$tile);
   let hasVerifier = 1;
 
   let assemblyFormat = [{
@@ -1459,7 +1473,7 @@ def TPopFromAivOp : PTO_TOp<"tpop_from_aiv", [AttrSizedOperandSegments]> {
       I8Attr:$split
   );
 
-  let results = (outs PTODpsType:$tile);
+  let results = (outs PTOPipeEntryType:$tile);
   let hasVerifier = 1;
 
   let assemblyFormat = [{
@@ -1472,6 +1486,7 @@ def TFreeFromAicOp : PTO_TOp<"tfree_from_aic"> {
   let summary = "Frontend C2V consumer free in Vector kernel";
 
   let arguments = (ins
+      Optional<PTOPipeEntryType>:$entry,
       DefaultValuedOptionalAttr<I32Attr, "0">:$id,
       I8Attr:$split
   );
@@ -1480,6 +1495,7 @@ def TFreeFromAicOp : PTO_TOp<"tfree_from_aic"> {
   let hasVerifier = 1;
 
   let assemblyFormat = [{
+    (`(` $entry^ `:` qualified(type($entry)) `)`)?
     `{` (`id` `=` $id^ `,`)? `split` `=` $split `}` attr-dict
   }];
 }
@@ -1488,6 +1504,7 @@ def TFreeFromAivOp : PTO_TOp<"tfree_from_aiv"> {
   let summary = "Frontend V2C consumer free in Cube kernel";
 
   let arguments = (ins
+      Optional<PTOPipeEntryType>:$entry,
       DefaultValuedOptionalAttr<I32Attr, "0">:$id,
       I8Attr:$split
   );
@@ -1496,6 +1513,7 @@ def TFreeFromAivOp : PTO_TOp<"tfree_from_aiv"> {
   let hasVerifier = 1;
 
   let assemblyFormat = [{
+    (`(` $entry^ `:` qualified(type($entry)) `)`)?
     `{` (`id` `=` $id^ `,`)? `split` `=` $split `}` attr-dict
   }];
 }
@@ -1546,7 +1564,7 @@ def ImportReservedBufferOp : PTO_Op<"import_reserved_buffer"> {
 // TPUSH/TPOP Pipe Communication Ops
 //===----------------------------------------------------------------------===//
 
-def BuildAsyncSessionOp : PTO_Op<"build_async_session", [
+def BuildAsyncSessionOp : PTO_Op<"comm.build_async_session", [
     DeclareOpInterfaceMethods<MemoryEffectsOpInterface>
 ]> {
   let summary = "Build an async DMA session handle for TPUT_ASYNC/TGET_ASYNC";
@@ -1570,7 +1588,7 @@ def BuildAsyncSessionOp : PTO_Op<"build_async_session", [
   }];
 }
 
-def TPutAsyncOp : PTO_Op<"tput_async", [
+def TPutAsyncOp : PTO_Op<"comm.tput_async", [
     DeclareOpInterfaceMethods<MemoryEffectsOpInterface>
 ]> {
   let summary = "Asynchronous remote write from local GM to remote GM";
@@ -1591,7 +1609,7 @@ def TPutAsyncOp : PTO_Op<"tput_async", [
   }];
 }
 
-def TGetAsyncOp : PTO_Op<"tget_async", [
+def TGetAsyncOp : PTO_Op<"comm.tget_async", [
     DeclareOpInterfaceMethods<MemoryEffectsOpInterface>
 ]> {
   let summary = "Asynchronous remote read from remote GM to local GM";
@@ -1612,7 +1630,7 @@ def TGetAsyncOp : PTO_Op<"tget_async", [
   }];
 }
 
-def WaitAsyncEventOp : PTO_Op<"wait_async_event", [
+def WaitAsyncEventOp : PTO_Op<"comm.wait_async_event", [
     DeclareOpInterfaceMethods<MemoryEffectsOpInterface>
 ]> {
   let summary = "Block until an async DMA event completes";
@@ -1631,7 +1649,7 @@ def WaitAsyncEventOp : PTO_Op<"wait_async_event", [
   }];
 }
 
-def TestAsyncEventOp : PTO_Op<"test_async_event", [
+def TestAsyncEventOp : PTO_Op<"comm.test_async_event", [
     DeclareOpInterfaceMethods<MemoryEffectsOpInterface>
 ]> {
   let summary = "Non-blocking completion test for an async DMA event";
@@ -1650,7 +1668,142 @@ def TestAsyncEventOp : PTO_Op<"test_async_event", [
   }];
 }
 
+def TPutOp : PTO_Op<"comm.tput", [
+    DeclareOpInterfaceMethods<MemoryEffectsOpInterface>
+]> {
+  let summary = "Synchronous remote write from local GM to remote GM";
+  let arguments = (ins
+      PTODpsType:$dst,
+      PTODpsType:$src,
+      PTODpsType:$ping,
+      Optional<PTODpsType>:$pong,
+      DefaultValuedAttr<PTO_AtomicTypeAttr, "::mlir::pto::AtomicType::AtomicNone">:$atomicType
+  );
+  let results = (outs);
+  let hasVerifier = 1;
+}
+
+def TGetOp : PTO_Op<"comm.tget", [
+    DeclareOpInterfaceMethods<MemoryEffectsOpInterface>
+]> {
+  let summary = "Synchronous remote read from remote GM to local GM";
+  let arguments = (ins
+      PTODpsType:$dst,
+      PTODpsType:$src,
+      PTODpsType:$ping,
+      Optional<PTODpsType>:$pong
+  );
+  let results = (outs);
+  let hasVerifier = 1;
+}
+
+def TNotifyOp : PTO_Op<"comm.tnotify", [
+    DeclareOpInterfaceMethods<MemoryEffectsOpInterface>
+]> {
+  let summary = "Send a signal notification to remote GM";
+  let arguments = (ins
+      PTODpsType:$signal,
+      AnySignlessInteger:$value,
+      PTO_NotifyOpAttr:$notifyOp
+  );
+  let results = (outs);
+  let hasVerifier = 1;
+}
+
+def TWaitOp : PTO_Op<"comm.twait", [
+    DeclareOpInterfaceMethods<MemoryEffectsOpInterface>
+]> {
+  let summary = "Block until signal(s) satisfy a comparison";
+  let arguments = (ins
+      PTODpsType:$signal,
+      AnySignlessInteger:$cmpValue,
+      PTO_WaitCmpAttr:$cmp
+  );
+  let results = (outs);
+  let hasVerifier = 1;
+}
+
+def TTestOp : PTO_Op<"comm.ttest", [
+    DeclareOpInterfaceMethods<MemoryEffectsOpInterface>
+]> {
+  let summary = "Non-blocking signal comparison test";
+  let arguments = (ins
+      PTODpsType:$signal,
+      AnySignlessInteger:$cmpValue,
+      PTO_WaitCmpAttr:$cmp
+  );
+  let results = (outs I1:$result);
+  let hasVerifier = 1;
+}
+
+def TBroadcastOp : PTO_Op<"comm.tbroadcast", [
+    AttrSizedOperandSegments,
+    DeclareOpInterfaceMethods<MemoryEffectsOpInterface>
+]> {
+  let summary = "Broadcast local GM data to all group members";
+  let arguments = (ins
+      PTODpsType:$src,
+      PTODpsType:$ping,
+      Optional<PTODpsType>:$pong,
+      Variadic<PTODpsType>:$group,
+      I32Attr:$root
+  );
+  let results = (outs);
+  let hasVerifier = 1;
+}
+
+def CommTGatherOp : PTO_Op<"comm.comm_tgather", [
+    AttrSizedOperandSegments,
+    DeclareOpInterfaceMethods<MemoryEffectsOpInterface>
+]> {
+  let summary = "Gather remote GM data from a communication group";
+  let arguments = (ins
+      PTODpsType:$dst,
+      PTODpsType:$ping,
+      Optional<PTODpsType>:$pong,
+      Variadic<PTODpsType>:$group,
+      I32Attr:$root
+  );
+  let results = (outs);
+  let hasVerifier = 1;
+}
+
+def CommTScatterOp : PTO_Op<"comm.comm_tscatter", [
+    AttrSizedOperandSegments,
+    DeclareOpInterfaceMethods<MemoryEffectsOpInterface>
+]> {
+  let summary = "Scatter local GM data to a communication group";
+  let arguments = (ins
+      PTODpsType:$src,
+      PTODpsType:$ping,
+      Optional<PTODpsType>:$pong,
+      Variadic<PTODpsType>:$group,
+      I32Attr:$root
+  );
+  let results = (outs);
+  let hasVerifier = 1;
+}
+
+def TReduceOp : PTO_Op<"comm.treduce", [
+    AttrSizedOperandSegments,
+    DeclareOpInterfaceMethods<MemoryEffectsOpInterface>
+]> {
+  let summary = "Reduce remote GM data from a communication group";
+  let arguments = (ins
+      PTODpsType:$dst,
+      PTODpsType:$acc,
+      PTODpsType:$recvPing,
+      Optional<PTODpsType>:$recvPong,
+      Variadic<PTODpsType>:$group,
+      PTO_ReduceOpAttr:$reduceOp,
+      I32Attr:$root
+  );
+  let results = (outs);
+  let hasVerifier = 1;
+}
+
 def InitializeL2G2LPipeOp : PTO_Op<"initialize_l2g2l_pipe", [
+    AttrSizedOperandSegments,
     DeclareOpInterfaceMethods<MemoryEffectsOpInterface>
 ]> {
   let summary = "Initialize a local-to-global-to-local pipe handle";
@@ -1663,7 +1816,7 @@ def InitializeL2G2LPipeOp : PTO_Op<"initialize_l2g2l_pipe", [
       OptionalAttr<I32Attr>:$flag_base,
       OptionalAttr<BoolAttr>:$nosplit,
       AnyType:$gm_addr,
-      AnyType:$local_addr,
+      Optional<AnyType>:$local_addr,
       Optional<AnyType>:$peer_local_addr
   );
 
@@ -1678,7 +1831,8 @@ def InitializeL2G2LPipeOp : PTO_Op<"initialize_l2g2l_pipe", [
         (`,` `flag_base` `=` $flag_base^)?
         (`,` `nosplit` `=` $nosplit^)?
         `}`
-    `(` $gm_addr `:` type($gm_addr) `,` $local_addr `:` type($local_addr)
+    `(` $gm_addr `:` type($gm_addr)
+        (`,` $local_addr^ `:` type($local_addr))?
         (`,` $peer_local_addr^ `:` type($peer_local_addr))? `)`
     attr-dict `->` qualified(type($pipe))
   }];
@@ -1722,7 +1876,7 @@ def TPushOp : PTO_TOp<"tpush", [
   let summary = "Push tile data through a unified pipe handle";
 
   let arguments = (ins
-      PTODpsType:$tile,
+      PTOPipeEntryType:$tile,
       PipeType:$pipe_handle,
       I8Attr:$split
   );
@@ -1773,6 +1927,41 @@ def DeclareTileOp : PTO_Op<"declare_tile"> {
 
   let assemblyFormat = [{
     attr-dict `->` qualified(type($tile))
+  }];
+}
+
+def DeclareGlobalOp : PTO_Op<"declare_global"> {
+  let summary = "Declare a GlobalTensor descriptor whose address is assigned later";
+
+  let results = (outs TensorViewType:$entry);
+
+  let assemblyFormat = [{
+    attr-dict `->` qualified(type($entry))
+  }];
+}
+
+def TAllocOp : PTO_TOp<"talloc", [
+    OpPipeInterface,
+    DeclareOpInterfaceMethods<MemoryEffectsOpInterface>
+]> {
+  let summary = "Bind a declared GlobalTensor descriptor to the next producer FIFO slot";
+
+  let arguments = (ins
+      TensorViewType:$entry,
+      PipeType:$pipe_handle,
+      I8Attr:$split
+  );
+
+  let results = (outs);
+  let hasVerifier = 1;
+
+  let assemblyFormat = [{
+    `(` $entry `,` $pipe_handle `:` qualified(type($entry)) `,` qualified(type($pipe_handle)) `)`
+    `{` `split` `=` $split `}` attr-dict
+  }];
+
+  let extraClassDeclaration = [{
+    ::mlir::pto::PIPE getPipe() { return ::mlir::pto::PIPE::PIPE_MTE3; }
   }];
 }
 
@@ -1867,7 +2056,7 @@ def TPopOp : PTO_TOp<"tpop", [
   let summary = "Bind a declared consumer tile to the next FIFO slot";
 
   let arguments = (ins
-      PTODpsType:$tile,
+      PTOPipeEntryType:$tile,
       PipeType:$pipe_handle,
       I8Attr:$split
   );
@@ -1938,17 +2127,14 @@ def TFreeOp : PTO_TOp<"tfree", [
   let summary = "Release the current consumer slot for a pipe";
 
   let arguments = (ins
+      Optional<PTOPipeEntryType>:$entry,
       PipeType:$pipe_handle,
       I8Attr:$split
   );
 
   let results = (outs);
   let hasVerifier = 1;
-
-  let assemblyFormat = [{
-    `(` $pipe_handle `:` qualified(type($pipe_handle)) `)`
-    `{` `split` `=` $split `}` attr-dict
-  }];
+  let hasCustomAssemblyFormat = 1;
 
   let extraClassDeclaration = [{
     ::mlir::pto::PIPE getPipe() { return ::mlir::pto::PIPE::PIPE_S; }
@@ -4446,7 +4632,11 @@ def TQuantOp : PTO_TOp<"tquant", [
 
   let hasVerifier = 1;
 
-  let hasCustomAssemblyFormat = 1;
+  let assemblyFormat = [{
+    `ins` `(` $src `,` $fp (`,` $offset^)? `:` qualified(type($src)) `,` qualified(type($fp)) (`,` qualified(type($offset))^)? `)`
+    `outs` `(` $dst `:` qualified(type($dst)) `)`
+    attr-dict
+  }];
 
   let extraClassDeclaration = [{
     ::mlir::pto::PIPE getPipe() { return ::mlir::pto::PIPE::PIPE_V; }
@@ -4489,7 +4679,11 @@ def TDequantOp : PTO_TOp<"tdequant", [
 
   let hasVerifier = 1;
 
-  let hasCustomAssemblyFormat = 1;
+  let assemblyFormat = [{
+    `ins` `(` $src `,` $scale `,` $offset `:` qualified(type($src)) `,` qualified(type($scale)) `,` qualified(type($offset)) `)`
+    `outs` `(` $dst `:` qualified(type($dst)) `)`
+    attr-dict
+  }];
 
   let extraClassDeclaration = [{
     ::mlir::pto::PIPE getPipe() { return ::mlir::pto::PIPE::PIPE_V; }

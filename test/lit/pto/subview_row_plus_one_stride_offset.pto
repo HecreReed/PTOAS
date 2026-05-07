@@ -1,4 +1,4 @@
-// RUN: ptoas %s 2>&1 | FileCheck %s
+// RUN: ptoas %s 2>&1 --mlir-print-ir-after=pto-view-to-memref | FileCheck %s
 
 module {
   func.func @subview_row_plus_one_stride_offset(

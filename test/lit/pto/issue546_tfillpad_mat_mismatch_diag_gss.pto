@@ -1,4 +1,4 @@
-// RUN: not ptoas --pto-arch=a3 --enable-insert-sync %s -o - 2>&1 | FileCheck %s
+// RUN: not ptoas --pto-arch=a3 --enable-graph-sync-solver --graph-sync-solver-event-id-max=64 %s -o - 2>&1 | FileCheck %s
 
 module {
   func.func @issue546_tfillpad_mat_mismatch(
@@ -10,6 +10,6 @@ module {
   }
 }
 
-// CHECK: error: 'pto.tfillpad' op expects src/dst tile types to be lowerable to TFILLPAD for loc=mat
+// CHECK: error: expects src/dst tile types to be lowerable to TFILLPAD for loc=mat
 // CHECK-SAME: mismatching fields: v_row (? vs 16), v_col (? vs 64), pad (0 vs 1)
 // CHECK: note: heterogeneous TFILLPAD overload is only available for loc=vec

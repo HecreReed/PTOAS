@@ -162,6 +162,7 @@ public:
   Value lowestCommonAncestorBuffer{nullptr};
   int reuseCntForWiden{0};
   bool reallocatedLoopHeadTailSync{false};
+  bool autoSyncTailBarrier{false};
   TCoreType syncCoreType{TCoreType::CUBE_OR_VECTOR};
   Value block_sync_event_value{nullptr};
  
@@ -169,9 +170,9 @@ public:
   SyncOperation(TYPE type, pto::PipelineType srcPipe, pto::PipelineType dstPipe,
                 unsigned kSyncIndex, unsigned syncIRIndex,
                 std::optional<int> forEndIndex, bool isComp = false)
-      : eventIds({}), type_(type), srcPipe_(srcPipe), dstPipe_(dstPipe),
-        kSyncIndex_(kSyncIndex), syncIRIndex_(syncIRIndex),
-        forEndIndex_(forEndIndex), isCompensation(isComp) {};
+      : isCompensation(isComp), eventIds({}), type_(type), srcPipe_(srcPipe),
+        dstPipe_(dstPipe), kSyncIndex_(kSyncIndex), syncIRIndex_(syncIRIndex),
+        forEndIndex_(forEndIndex) {};
  
   ~SyncOperation() = default;
  
@@ -207,6 +208,8 @@ public:
  
   // 设置为 PipeAll (用于资源耗尽时的降级)
   void SetPipeAll();
+  bool IsAutoSyncTailBarrier() const { return autoSyncTailBarrier; }
+  void MarkAutoSyncTailBarrier() { autoSyncTailBarrier = true; }
  
 private:
   TYPE type_;

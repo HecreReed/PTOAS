@@ -457,9 +457,13 @@ void MemLivenessAnalysis::RecursionIR(Region *region, Liveness live) {
     } else if (auto callOp = dyn_cast<func::CallOp>(op)) {
       UpdateOpGenInfo(curOpInfo, llvm::to_vector(callOp->getOperands()));
       OpKillHandle(curOpInfo, live, op->getBlock());
-    } else if (isa<pto::TPushOp, pto::TFreeOp, pto::InitializeL2LPipeOp,
-                   pto::InitializeL2G2LPipeOp, pto::BuildAsyncSessionOp,
-                   pto::TPutAsyncOp, pto::TGetAsyncOp>(op)) {
+    } else if (isa<pto::TAllocOp, pto::TPushOp, pto::TFreeOp,
+                   pto::InitializeL2LPipeOp, pto::InitializeL2G2LPipeOp,
+                   pto::BuildAsyncSessionOp,
+                   pto::TPutAsyncOp, pto::TGetAsyncOp, pto::TPutOp,
+                   pto::TGetOp, pto::TNotifyOp, pto::TWaitOp, pto::TTestOp,
+                   pto::TBroadcastOp, pto::CommTGatherOp,
+                   pto::CommTScatterOp, pto::TReduceOp>(op)) {
       UpdateOpGenInfo(curOpInfo, llvm::to_vector(op->getOperands()));
       OpKillHandle(curOpInfo, live, op->getBlock());
     } else if (auto gpuLaunchOp = dyn_cast<gpu::LaunchFuncOp>(op)) {
@@ -572,7 +576,7 @@ void MemLivenessAnalysis::RecursiveIfOp(scf::IfOp ifOp, Liveness live) {
   //        scf.yield %alloc0: memref<16xf16, #pto.address_space<ub>>
   //      else:
   //        scf.yield %alloc1 : memref<16xf16, #pto.address_space<ub>>
-  auto curIfThen = UpdateLinearOperation(ifOp.getOperation());
+  UpdateLinearOperation(ifOp.getOperation());
   RecursionIR(&ifOp.getThenRegion(), live);
   auto curIfElse = UpdateLinearOperation(ifOp.getOperation());
   UpdateIfOpBufferAlias(ifOp, ifOp.thenYield());
@@ -1575,6 +1579,9 @@ MemPlan::GetBufferSpaceInfo(pto::AddressSpace &space) const {
     return std::make_pair(biasAlignSize, biasSpaceSize);
   case pto::AddressSpace::SCALING:
     return std::make_pair(scalingAlignSize, scalingSpaceSize);
+  case pto::AddressSpace::Zero:
+  case pto::AddressSpace::GM:
+    return std::make_pair(size_t{0}, size_t{0});
   }
 
   llvm_unreachable("Temporarily unsupported memory buffer space !");

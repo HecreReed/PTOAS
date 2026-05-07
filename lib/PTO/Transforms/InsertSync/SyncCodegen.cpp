@@ -45,6 +45,8 @@ static bool IsSameSyncSignature(const SyncOperation *existing,
     return false;
   if (existing->GetActualDstPipe() != candidate->GetActualDstPipe())
     return false;
+  if (existing->IsAutoSyncTailBarrier() != candidate->IsAutoSyncTailBarrier())
+    return false;
   if (candidate->isSyncSetType() || candidate->isSyncWaitType())
     return existing->eventIds == candidate->eventIds;
   return true;
@@ -240,7 +242,6 @@ void SyncCodegen::updatePlaceHolderOpInsertSync(PlaceHolderInstanceElement *plac
   else if (placeHolder->elementOp == placeHolder->parentIfOp) {
       // 之前的 Translator 逻辑把 Normal Placeholder 也映射到了 ifOp
       // 我们需要修正它指向 Yield
-      auto ifOp = dyn_cast<scf::IfOp>(placeHolder->elementOp);
       // 判断是 Then 还是 Else
       // 简单判断：看 index。或者 Translator 里直接存 Yield Op。
       // 这里假设 Translator 存的是 IfOp，我们需要找到对应的 Yield。
@@ -283,9 +284,10 @@ void SyncCodegen::CreateBarrierOp(IRRewriter &rewriter, Operation *op,
     return;
   }
 
-  // Compiler-inserted tail clean barrier must be anchored at function tail.
-  if (sync->GetActualSrcPipe() == PipelineType::PIPE_ALL &&
-      sync->GetActualDstPipe() == PipelineType::PIPE_ALL) {
+  // Only the compiler-inserted tail clean barrier is deferred to function tail.
+  // Other PIPE_ALL barriers, including event-id-exhaustion fallbacks, must stay
+  // at their original program point to preserve local ordering.
+  if (sync->IsAutoSyncTailBarrier()) {
     pendingAutoSyncTailBarrier_ = true;
     return;
   }
