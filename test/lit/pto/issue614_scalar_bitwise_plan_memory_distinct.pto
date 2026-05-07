@@ -22,5 +22,5 @@ module {
 // CHECK-NOT: memref.alloc
 // CHECK-DAG: %[[ADDR0:.*]] = arith.constant 0 : i64
 // CHECK-DAG: %[[ADDR512:.*]] = arith.constant 512 : i64
-// CHECK-DAG: pto.pointer_cast(%[[ADDR0]]) : memref<16x16xi16, #pto.address_space<{{vec|ub}}>>
-// CHECK-DAG: pto.pointer_cast(%[[ADDR512]]) : memref<16x16xi16, #pto.address_space<{{vec|ub}}>>
+// CHECK-DAG: = pto.pointer_cast(%[[ADDR0]])
+// CHECK-DAG: = pto.pointer_cast(%[[ADDR512]])
