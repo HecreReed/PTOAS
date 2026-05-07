@@ -436,6 +436,15 @@ void MemLivenessAnalysis::RecursionIR(Region *region, Liveness live) {
           op, ptoDpsOp.getDpsInits(), stableValueOrder);
       genBuffers.append(scratchBuffers.begin(), scratchBuffers.end());
       UpdateOpGenInfo(curOpInfo, genBuffers);
+      // These scalar bitwise ops are lowered to ISA forms that require src
+      // and dst to reside in distinct local storage.
+      if (auto tandsOp = dyn_cast<pto::TAndSOp>(op)) {
+        RecordSemanticConflict(tandsOp.getSrc(), tandsOp.getDst());
+      } else if (auto torsOp = dyn_cast<pto::TOrSOp>(op)) {
+        RecordSemanticConflict(torsOp.getSrc(), torsOp.getDst());
+      } else if (auto txorsOp = dyn_cast<pto::TXorSOp>(op)) {
+        RecordSemanticConflict(txorsOp.getSrc(), txorsOp.getDst());
+      }
       for (const auto &conflictPair :
            getScratchConflictPairsFromEffects(op, ptoDpsOp.getDpsInits(),
                                               stableValueOrder)) {

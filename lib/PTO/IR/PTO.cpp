@@ -2803,10 +2803,61 @@ verifyShiftLikeBinaryTileOpCommon(Operation *op, Type src0Ty, Type src1Ty,
   return e0;
 }
 
+struct StaticLocalTileStorage {
+  pto::AddressSpace addressSpace;
+  int64_t addr;
+};
+
+static bool isLocalStorageSpace(std::optional<pto::AddressSpace> addressSpace) {
+  return addressSpace && *addressSpace != pto::AddressSpace::GM &&
+         *addressSpace != pto::AddressSpace::Zero;
+}
+
+static std::optional<StaticLocalTileStorage>
+getStaticLocalTileStorage(Value value) {
+  if (!value || isa<BlockArgument>(value))
+    return std::nullopt;
+
+  if (auto bitcast = value.getDefiningOp<pto::BitcastOp>())
+    return getStaticLocalTileStorage(bitcast.getSrc());
+  if (auto reshape = value.getDefiningOp<pto::TReshapeOp>())
+    return getStaticLocalTileStorage(reshape.getSrc());
+  if (auto setValidShape = value.getDefiningOp<pto::SetValidShapeOp>())
+    return getStaticLocalTileStorage(setValidShape.getSource());
+  if (auto subview = value.getDefiningOp<pto::SubViewOp>()) {
+    // Only zero-offset subviews provably preserve the same base address.
+    for (Value offset : subview.getOffsets()) {
+      auto constOffset = getConstIndexValue(offset);
+      if (!constOffset || *constOffset != 0)
+        return std::nullopt;
+    }
+    return getStaticLocalTileStorage(subview.getSource());
+  }
+  if (auto allocTile = value.getDefiningOp<pto::AllocTileOp>()) {
+    auto addressSpace = getPTOMemorySpaceEnum(allocTile.getResult().getType());
+    if (!isLocalStorageSpace(addressSpace) || !allocTile.getAddr())
+      return std::nullopt;
+    auto addr = getConstantIntegerValue(allocTile.getAddr());
+    if (!addr)
+      return std::nullopt;
+    return StaticLocalTileStorage{*addressSpace, *addr};
+  }
+
+  return std::nullopt;
+}
+
+static bool haveProvenSameStaticLocalTileStorage(Value lhs, Value rhs) {
+  auto lhsStorage = getStaticLocalTileStorage(lhs);
+  auto rhsStorage = getStaticLocalTileStorage(rhs);
+  return lhsStorage && rhsStorage &&
+         lhsStorage->addressSpace == rhsStorage->addressSpace &&
+         lhsStorage->addr == rhsStorage->addr;
+}
+
 static FailureOr<Type> verifyDistinctRowMajorUnaryTileOpCommon(
     Operation *op, Value src, Value dst, StringRef srcName = "src",
     StringRef dstName = "dst") {
-  if (src == dst) {
+  if (src == dst || haveProvenSameStaticLocalTileStorage(src, dst)) {
     op->emitOpError("expects src and dst to use different storage");
     return failure();
   }
