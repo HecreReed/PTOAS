@@ -137,6 +137,8 @@ static LogicalResult verifyMatTileOperandsA2A3(Operation *op, Type lhsTy,
                                                Type rhsTy, Type dstTy);
 static LogicalResult verifyMatTileOperandsA5(Operation *op, Type lhsTy,
                                              Type rhsTy, Type dstTy);
+static LogicalResult verifyMadTileLayoutsA5(Operation *op, Type lhsTy,
+                                            Type rhsTy, Type dstTy);
 static LogicalResult verifyGemvTileOperands(Operation *op, Type lhsTy, Type rhsTy,
                                             Type dstTy);
 static LogicalResult verifyGemvTileOperandsA2A3(Operation *op, Type lhsTy,
@@ -3131,6 +3133,11 @@ static LogicalResult verifyMatTileOperandsA5(Operation *op, Type lhsTy,
   if (failed(verifyMatTileOperandsA2A3(op, lhsTy, rhsTy, dstTy)))
     return failure();
 
+  return verifyMadTileLayoutsA5(op, lhsTy, rhsTy, dstTy);
+}
+
+static LogicalResult verifyMadTileLayoutsA5(Operation *op, Type lhsTy,
+                                            Type rhsTy, Type dstTy) {
   auto lhsTb = mlir::dyn_cast<pto::TileBufType>(lhsTy);
   auto rhsTb = mlir::dyn_cast<pto::TileBufType>(rhsTy);
   auto dstTb = mlir::dyn_cast<pto::TileBufType>(dstTy);
@@ -3204,7 +3211,7 @@ static LogicalResult verifyGemvTileOperandsA5(Operation *op, Type lhsTy,
                                               Type rhsTy, Type dstTy) {
   if (failed(verifyGemvTileOperandsA2A3(op, lhsTy, rhsTy, dstTy)))
     return failure();
-  return verifyMatTileOperandsA5(op, lhsTy, rhsTy, dstTy);
+  return verifyMadTileLayoutsA5(op, lhsTy, rhsTy, dstTy);
 }
 
 static LogicalResult verifyGemvTileOperands(Operation *op, Type lhsTy, Type rhsTy,

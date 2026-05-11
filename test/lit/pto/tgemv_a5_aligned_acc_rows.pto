@@ -1,0 +1,24 @@
+// RUN: ptoas --pto-arch=a5 %s | FileCheck %s
+
+module {
+  func.func @tgemv_a5_aligned_acc_rows() {
+    %lhs = pto.alloc_tile : !pto.tile_buf<loc=left, dtype=f16, rows=1, cols=64, v_row=1, v_col=64, blayout=col_major, slayout=row_major, fractal=512, pad=0>
+    %rhs = pto.alloc_tile : !pto.tile_buf<loc=right, dtype=f16, rows=64, cols=80, v_row=64, v_col=80, blayout=row_major, slayout=col_major, fractal=512, pad=0>
+    %bias = pto.alloc_tile : !pto.tile_buf<loc=bias, dtype=f32, rows=1, cols=80, v_row=1, v_col=80, blayout=row_major, slayout=none_box, fractal=512, pad=0>
+    %acc_in = pto.alloc_tile : !pto.tile_buf<loc=acc, dtype=f32, rows=80, cols=80, v_row=1, v_col=80, blayout=col_major, slayout=row_major, fractal=1024, pad=0>
+    %dst0 = pto.alloc_tile : !pto.tile_buf<loc=acc, dtype=f32, rows=80, cols=80, v_row=1, v_col=80, blayout=col_major, slayout=row_major, fractal=1024, pad=0>
+    %dst1 = pto.alloc_tile : !pto.tile_buf<loc=acc, dtype=f32, rows=80, cols=80, v_row=1, v_col=80, blayout=col_major, slayout=row_major, fractal=1024, pad=0>
+    %dst2 = pto.alloc_tile : !pto.tile_buf<loc=acc, dtype=f32, rows=80, cols=80, v_row=1, v_col=80, blayout=col_major, slayout=row_major, fractal=1024, pad=0>
+
+    pto.tgemv ins(%lhs, %rhs : !pto.tile_buf<loc=left, dtype=f16, rows=1, cols=64, v_row=1, v_col=64, blayout=col_major, slayout=row_major, fractal=512, pad=0>, !pto.tile_buf<loc=right, dtype=f16, rows=64, cols=80, v_row=64, v_col=80, blayout=row_major, slayout=col_major, fractal=512, pad=0>) outs(%dst0 : !pto.tile_buf<loc=acc, dtype=f32, rows=80, cols=80, v_row=1, v_col=80, blayout=col_major, slayout=row_major, fractal=1024, pad=0>)
+    pto.tgemv.acc ins(%acc_in, %lhs, %rhs : !pto.tile_buf<loc=acc, dtype=f32, rows=80, cols=80, v_row=1, v_col=80, blayout=col_major, slayout=row_major, fractal=1024, pad=0>, !pto.tile_buf<loc=left, dtype=f16, rows=1, cols=64, v_row=1, v_col=64, blayout=col_major, slayout=row_major, fractal=512, pad=0>, !pto.tile_buf<loc=right, dtype=f16, rows=64, cols=80, v_row=64, v_col=80, blayout=row_major, slayout=col_major, fractal=512, pad=0>) outs(%dst1 : !pto.tile_buf<loc=acc, dtype=f32, rows=80, cols=80, v_row=1, v_col=80, blayout=col_major, slayout=row_major, fractal=1024, pad=0>)
+    pto.tgemv.bias ins(%lhs, %rhs, %bias : !pto.tile_buf<loc=left, dtype=f16, rows=1, cols=64, v_row=1, v_col=64, blayout=col_major, slayout=row_major, fractal=512, pad=0>, !pto.tile_buf<loc=right, dtype=f16, rows=64, cols=80, v_row=64, v_col=80, blayout=row_major, slayout=col_major, fractal=512, pad=0>, !pto.tile_buf<loc=bias, dtype=f32, rows=1, cols=80, v_row=1, v_col=80, blayout=row_major, slayout=none_box, fractal=512, pad=0>) outs(%dst2 : !pto.tile_buf<loc=acc, dtype=f32, rows=80, cols=80, v_row=1, v_col=80, blayout=col_major, slayout=row_major, fractal=1024, pad=0>)
+
+    return
+  }
+}
+
+// CHECK-LABEL: __global__ AICORE void tgemv_a5_aligned_acc_rows()
+// CHECK: TGEMV(
+// CHECK: TGEMV_ACC(
+// CHECK: TGEMV_BIAS(
