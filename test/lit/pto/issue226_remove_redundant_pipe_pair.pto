@@ -15,15 +15,15 @@
 
 module {
   func.func @remove_redundant_pipe_pair(
-      %arg0: memref<64x1xf16, strided<[1, 1]>, #pto.address_space<vec>>) {
+      %arg0: !pto.ptr<f16>) {
     %c0 = arith.constant 0 : index
     %c1 = arith.constant 1 : index
     %c2 = arith.constant 2 : index
     %c64 = arith.constant 64 : index
-    %vbuf0 = pto.bind_tile %arg0, %c64, %c1
-      {config = #pto.tile_buf_config<blayout=1 : i32, slayout=2 : i32, s_fractal_size=512, pad=0 : i32>}
-      : memref<64x1xf16, strided<[1, 1]>, #pto.address_space<vec>>
-     -> memref<64x1xf16, strided<[1, 1], offset: ?>, #pto.address_space<vec>>
+    %vview = pto.make_tensor_view %arg0, shape = [%c64, %c1], strides = [%c1, %c1]
+      : !pto.tensor_view<64x1xf16>
+    %vbuf0 = pto.partition_view %vview, offsets = [%c0, %c0], sizes = [%c64, %c1]
+      : !pto.tensor_view<64x1xf16> -> !pto.partition_tensor_view<64x1xf16>
 
     pto.section.cube {
       %mat_a = pto.alloc_tile : !pto.tile_buf<loc=mat, dtype=f16, rows=32, cols=32, v_row=32, v_col=32, blayout=col_major, slayout=row_major, fractal=512, pad=0>
@@ -33,7 +33,7 @@ module {
       %acc = pto.alloc_tile : !pto.tile_buf<loc=acc, dtype=f32, rows=32, cols=32, v_row=32, v_col=32, blayout=col_major, slayout=row_major, fractal=1024, pad=0>
 
       scf.for %i = %c0 to %c2 step %c1 {
-        pto.tload ins(%vbuf0 : memref<64x1xf16, strided<[1, 1], offset: ?>, #pto.address_space<vec>>)
+        pto.tload ins(%vbuf0 : !pto.partition_tensor_view<64x1xf16>)
             outs(%mat_a : !pto.tile_buf<loc=mat, dtype=f16, rows=32, cols=32, v_row=32, v_col=32, blayout=col_major, slayout=row_major, fractal=512, pad=0>)
         pto.tmov ins(%mat_a : !pto.tile_buf<loc=mat, dtype=f16, rows=32, cols=32, v_row=32, v_col=32, blayout=col_major, slayout=row_major, fractal=512, pad=0>)
             outs(%left : !pto.tile_buf<loc=left, dtype=f16, rows=32, cols=32, v_row=32, v_col=32, blayout=row_major, slayout=row_major, fractal=512, pad=0>)
