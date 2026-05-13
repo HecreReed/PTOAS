@@ -9,8 +9,9 @@
         <version>package/pto_as/version.xml</version>
         <cleanup>share/info/pto_as/script/cleanup.sh</cleanup>
         <parallel>true</parallel>
+        <copy_all>true</copy_all>
     </package_info>
-    <generate_info value="pto_as_version.h" dst_path="share/info/pto_as" install_path="$(TARGET_ENV)/include/version" install_mod="440" install_type="devel" generator="version_header">
+    <generate_info value="pto_as_version.h" dst_path="$(TARGET_ENV)/include/version" install_path="$(TARGET_ENV)/include/version" install_mod="440" install_type="devel" generator="version_header">
        <pto_as_VERSION>$(ASCEND_VER)</pto_as_VERSION>
        <pto_as_TIMESTAMP>$(TIMESTAMP_NO)</pto_as_TIMESTAMP>
     </generate_info>
@@ -23,11 +24,11 @@
         <file value="script" entity="true"/>
         <file value="version.info" dst_path="share/info/pto_as" install_path="share/info/pto_as"/>
     </file_info>
-    <file_info value="ptoas" copy_type="source" src_path="" dst_path="tools/pto_as/" install_path="tools/ptoas">
+    <file_info value="ptoas" copy_type="source" src_path="" dst_path="tools/ptoas" install_path="tools/ptoas">
         <file value="lib" install_mod="550" entity="true"/>
-        <file value="ptoas" dst_path="tools/pto_as/" install_path="tools/ptoas/bin"/>
+        <file value="ptoas" dst_path="tools/ptoas/bin" install_path="tools/ptoas/bin"/>
     </file_info>
-    <block_info dependtree="false" dst_path="share/info/pto_as" block_conf_path="ascend">
+    <block_info dependtree="false" dst_path="" block_conf_path="ascend">
         <block name="EngineeringCommon"/>
         <block name="EngineeringFiles"/>
     </block_info>

@@ -618,11 +618,23 @@ install_pto() {
   update_install_infos "${TARGET_USERNAME}" "${TARGET_USERGROUP}" "${INSTALL_TYPE}" "${relative_path_val}"
   log_with_errorlevel "$?" "error" "[ERROR]: ERR_NO:${INSTALL_FAILED};ERR_DES:Update pto install info failed."
 
-  bash "${COMMON_PARSER_FILE}" --package="${PTO_PLATFORM_DIR}" --install --username="${TARGET_USERNAME}" \
+  bash "${COMMON_PARSER_FILE}" --copy_all --package="${PTO_PLATFORM_DIR}" --install --username="${TARGET_USERNAME}" \
     --usergroup="${TARGET_USERGROUP}" --set-cann-uninstall --version=$RUN_PKG_VERSION \
     --version-dir=$PKG_VERSION_DIR --use-share-info $INSTALL_OPTION ${INSTALL_FOR_ALL} "--feature=all" "--chip=all" \
     "${INSTALL_TYPE}" "${TARGET_INSTALL_PATH}" "${FILELIST_FILE}"
   log_with_errorlevel "$?" "error" "[ERROR]: ERR_NO:${INSTALL_FAILED};ERR_DES:Install pto module files failed."
+
+  # Removed lib directory from package root
+  if [ -d "${TARGET_VERSION_DIR}/lib" ]; then
+    rm -rf "${TARGET_VERSION_DIR}/lib"
+    logandprint "[INFO]: Removed lib directory from package root."
+  fi
+
+  # Removed mlir directory from package root
+  if [ -d "${TARGET_VERSION_DIR}/mlir" ]; then
+    rm -rf "${TARGET_VERSION_DIR}/mlir"
+    logandprint "[INFO]: Removed mlir directory from package root."
+  fi
 
   logandprint "[INFO]: upgradePercentage:30%"
 

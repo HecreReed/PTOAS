@@ -50,6 +50,10 @@ function(pack_built_in)
 
   install(FILES ${SCRIPTS_FILES}
       DESTINATION share/info/pto_as/script
+      PERMISSIONS
+      OWNER_READ OWNER_WRITE OWNER_EXECUTE  # 文件权限
+      GROUP_READ GROUP_EXECUTE
+      WORLD_READ WORLD_EXECUTE
   )
   set(COMMON_FILES
       ${CMAKE_SOURCE_DIR}/scripts/package/common/sh/install_common_parser.sh
@@ -77,31 +81,28 @@ function(pack_built_in)
       RENAME version.info
   )
   install(FILES ${CONF_FILES}
-      DESTINATION share/info/pto_as/conf
+      DESTINATION ${CMAKE_SYSTEM_PROCESSOR}-linux/conf
   )
   install(FILES ${PACKAGE_FILES}
       DESTINATION share/info/pto_as/script
   )
-  install(FILES ${LATEST_MANGER_FILES}
-      DESTINATION latest_manager
-  )
-  install(DIRECTORY ${CMAKE_SOURCE_DIR}/scripts/package/latest_manager/scripts/
-      DESTINATION latest_manager
-  )
+
   set(pto_source ${CMAKE_SOURCE_DIR}/include)
   install(DIRECTORY ${pto_source}/
-          DESTINATION share/info/pto_as/include/
+          DESTINATION ${CMAKE_SYSTEM_PROCESSOR}-linux/include
           FILE_PERMISSIONS
           OWNER_READ OWNER_WRITE
           GROUP_READ GROUP_EXECUTE
-  )
+          PATTERN "CMakeLists.txt" EXCLUDE
+          PATTERN "pto-c" EXCLUDE
+          PATTERN "PTO" EXCLUDE)
   install(FILES ${CMAKE_BINARY_DIR}/tools/ptoas/ptoas
-       DESTINATION tools/pto_as
-       OPTIONAL
+       DESTINATION tools/ptoas/bin
+       PERMISSIONS OWNER_READ OWNER_EXECUTE GROUP_READ GROUP_EXECUTE
   )
-  set(pto_lib ${CMAKE_BINARY_DIR}/llvm-project/build-shared/lib)
+  set(pto_lib ${CMAKE_BINARY_DIR}/../llvm-project/build-shared/lib)
   install(DIRECTORY ${pto_lib}/
-          DESTINATION tools/pto_as/lib
+          DESTINATION tools/ptoas/lib
           FILE_PERMISSIONS
           OWNER_READ OWNER_WRITE
           GROUP_READ GROUP_EXECUTE
