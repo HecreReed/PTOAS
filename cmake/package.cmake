@@ -100,7 +100,7 @@ function(pack_built_in)
        DESTINATION tools/ptoas/bin
        PERMISSIONS OWNER_READ OWNER_EXECUTE GROUP_READ GROUP_EXECUTE
   )
-  set(pto_lib ${CMAKE_BINARY_DIR}/../llvm-project/build-shared/lib)
+  set(pto_lib ${CMAKE_BINARY_DIR}/llvm-project/build-shared/lib)
   install(DIRECTORY ${pto_lib}/
           DESTINATION tools/ptoas/lib
           FILE_PERMISSIONS
