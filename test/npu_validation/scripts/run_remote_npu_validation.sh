@@ -476,4 +476,8 @@ log "=== SUMMARY ==="
 log "OK=${ok_count} FAIL=${fail_count} SKIP=${skip_count}"
 log "RESULTS_TSV=${RESULTS_TSV}"
 
+if [[ ${fail_count} -eq 0 ]]; then
+  log "execute samples success"
+fi
+
 exit "${status}"
