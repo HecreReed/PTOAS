@@ -1,6 +1,6 @@
 ---
 name: ptoas-usability-eval
-description: Evaluate PTOAS repository usability for operator reproduction/deployment and the PTOAS-supported subset of basic operator implementation. Use PTOAS repo docs, scripts, samples, and CI config as evidence; score scene 01 as the primary template, score only the build/run/validation subset of scene 04, and mark unsupported scene 02/03/05/06 items as N/A.
+description: Evaluate PTOAS repository usability for operator reproduction/deployment and the PTOAS-supported subset of basic operator implementation. Always classify the evaluation by environment layer first, use PTOAS repo docs, scripts, samples, and CI config as evidence, score scene 01 as the primary template, score only the build/run/validation subset of scene 04, and mark unsupported or untested layers as 未实测 or N/A.
 ---
 
 # PTOAS Usability Eval
@@ -15,6 +15,21 @@ description: Evaluate PTOAS repository usability for operator reproduction/deplo
 - 对 `04` 里超出 PTOAS 边界的项，例如完整需求分析、完整方案设计、通用算子编码开发、精度/性能优化全流程，默认标 `N/A`。
 
 先读 [references/scope.md](references/scope.md) 确认映射边界。
+
+## 先判层级
+
+开始评分前，必须先声明本次评估覆盖到哪一层。没有层级，不能直接混着打分。
+
+可选层级：
+- `L1 文档审阅层`：只看仓库文档、脚本、样例、CI，不做运行。
+- `L2 本地最小运行层`：当前机器已有 `ptoas` / `ptobc` / Python 绑定，可做最小命令验证。
+- `L3 Linux compile-only 层`：需要 Linux + CANN/bisheng + `PTO_ISA_ROOT`，不要求带卡。
+- `L4 NPU 上板层`：需要带卡 Linux、驱动、权限、`/dev/davinci*` 与对应用户组。
+
+约束：
+- 没进入某层，就把该层指标记为 `未实测`，不能因为当前机器缺环境就给 PTOAS 低分。
+- `bisheng` / CANN compile-only 一般不应在本地 Mac 上评；它属于 `L3`。
+- 带卡运行、设备权限、驱动、ACL、用户组属于 `L4`。
 
 ## 证据来源
 
@@ -32,14 +47,15 @@ description: Evaluate PTOAS repository usability for operator reproduction/deplo
 ## 工作流
 
 1. 先判断用户要的是 `01`、`04-子集`，还是两者都要；未说明时默认 `01`。
-2. 从仓库内收集证据，记录每次检索轮次、文档跳转次数、执行命令、耗时、成功/失败结果。
-3. `01` 场景读 [references/metrics-01.md](references/metrics-01.md)。
-4. `04` 场景读 [references/metrics-04.md](references/metrics-04.md)。
-5. 对每个指标都输出：原始观测值、评分、证据路径、说明。没有实测的数据不要猜，记为 `未实测` 或 `N/A`。
-6. 明确区分：
+2. 再判断本次覆盖层级：`L1/L2/L3/L4`。输出中必须显式写出来。
+3. 从仓库内收集证据，记录每次检索轮次、文档跳转次数、执行命令、耗时、成功/失败结果。
+4. `01` 场景读 [references/metrics-01.md](references/metrics-01.md)。
+5. `04` 场景读 [references/metrics-04.md](references/metrics-04.md)。
+6. 对每个指标都输出：原始观测值、评分、证据路径、说明。没有实测的数据不要猜，记为 `未实测` 或 `N/A`。
+7. 明确区分：
    - PTOAS 仓库已提供的能力
    - 外部前置条件，例如 LLVM、CANN、NPU、`pto-isa`、驱动/权限
-7. 若文档描述与实际运行冲突，以实际命令结果为准，并指出冲突位置。
+8. 若文档描述与实际运行冲突，以实际命令结果为准，并指出冲突位置。
 
 ## 计量规则
 
@@ -47,16 +63,18 @@ description: Evaluate PTOAS repository usability for operator reproduction/deplo
 - `文档跳转次数`：命中首个目标文档后，每跨一个文档/README/脚本入口算 1 次。
 - `耗时`：尽量记录真实墙钟时间；拿不到就写 `未实测`，不要臆测。
 - `成功率`：只基于当前任务里真实执行或真实定位到的结果计算。
-- `N/A`：只用于超出 PTOAS 能力边界，或当前任务明确未执行且无法合理推断的项。
+- `未实测`：当前会话未覆盖到对应环境层级，或该层级前置条件不存在。
+- `N/A`：只用于超出 PTOAS 能力边界，或当前任务明确不纳入本次评估范围的项。
 
 ## 输出格式
 
 按下面顺序输出：
 
 1. `评估范围`
-2. `分项评分`
-3. `关键证据`
-4. `主要短板`
-5. `建议动作`
+2. `评估层级`
+3. `分项评分`
+4. `关键证据`
+5. `主要短板`
+6. `建议动作`
 
-如果用户只要简版结论，也要至少保留：场景归类、总评、最低分项、证据路径。
+如果用户只要简版结论，也要至少保留：场景归类、评估层级、总评、最低分项、证据路径。
