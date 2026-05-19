@@ -1,0 +1,4 @@
+interface:
+  display_name: "PTOAS Usability Eval"
+  short_description: "评估 PTOAS 在 01/04 场景下的易用性"
+  default_prompt: "Use $ptoas-usability-eval to evaluate this PTOAS repo for 01 operator reproduction/deployment and the PTOAS-supported subset of 04 basic operator implementation."
