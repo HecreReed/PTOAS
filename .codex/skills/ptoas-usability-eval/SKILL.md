@@ -1,6 +1,6 @@
 ---
 name: ptoas-usability-eval
-description: Evaluate PTOAS repository usability across scene 01 as the primary template plus the PTOAS-supported subsets of scenes 02, 04, 05, and 06. Always classify the evaluation by environment layer first, use only repo-native docs/scripts/samples/CI as primary evidence, keep the user's mixed 10-point and 100-point scoring rules, and mark unsupported or untested dimensions as 未实测 or N/A.
+description: Evaluate PTOAS repository usability across scene 01 as the primary template plus the PTOAS-supported subsets of scenes 02, 04, 05, and 06. Always classify the evaluation by environment layer first, use only repo-native docs/scripts/samples/CI as primary evidence, keep the user's mixed 10-point and 100-point scoring rules, compute normalized support and measured totals, and mark unsupported or untested dimensions as 未实测 or N/A.
 ---
 
 # PTOAS Usability Eval
@@ -60,16 +60,18 @@ description: Evaluate PTOAS repository usability across scene 01 as the primary 
 6. `04` 场景读 [references/metrics-04.md](references/metrics-04.md)。
 7. `05` 场景读 [references/metrics-05.md](references/metrics-05.md)。
 8. `06` 场景读 [references/metrics-06.md](references/metrics-06.md)。
-9. 对每个指标都输出：原始观测值、评分、证据路径、说明。没有实测的数据不要猜，记为 `未实测` 或 `N/A`。
-10. 明确区分：
+9. 需要汇总总分时，读 [references/scoring.md](references/scoring.md)。
+10. 对每个指标都输出：原始观测值、评分、证据路径、说明。没有实测的数据不要猜，记为 `未实测` 或 `N/A`。
+11. 明确区分：
     - PTOAS 仓库已提供的能力
     - 外部前置条件，例如 LLVM、CANN、`pto-isa`、NPU、驱动/权限、业务 baseline
-11. 若文档描述与实际运行冲突，以实际命令结果为准，并指出冲突位置。
+12. 若文档描述与实际运行冲突，以实际命令结果为准，并指出冲突位置。
+13. 默认给两个总分：`总分（支撑）` 和 `总分（实测）`。如果用户只要分项，不强制输出总分。
 
 ## 计量规则
 
-- 保留用户原始口径，不强行把 `10 分制` 和 `100 分制` 归一成一个分值。
-- 如果看板必须统一量纲，可以额外给一个“归一化展示值”，但原始分必须保留。
+- 保留用户原始口径，不强行覆盖各指标的原始分制。
+- 但做总分汇总时，必须按 [references/scoring.md](references/scoring.md) 做归一化。
 - `检索轮次`：每次新的定向搜索或定位尝试算 1 轮。
 - `文档跳转次数`：命中首个目标文档后，每跨一个文档/README/脚本入口算 1 次。
 - `耗时`：尽量记录真实墙钟时间；拿不到就写 `未实测`，不要臆测。
@@ -83,9 +85,12 @@ description: Evaluate PTOAS repository usability across scene 01 as the primary 
 
 1. `评估范围`
 2. `评估层级`
-3. `分场景评分`
-4. `关键证据`
-5. `主要短板`
-6. `建议动作`
+3. `总分（支撑）`
+4. `总分（实测）`
+5. `分场景评分`
+6. `覆盖说明`
+7. `关键证据`
+8. `主要短板`
+9. `建议动作`
 
 如果用户只要简版结论，也要至少保留：场景归类、评估层级、总评、最低分项、证据路径。
