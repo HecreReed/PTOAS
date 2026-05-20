@@ -27,6 +27,7 @@ export BUILD_PATH="${BASE_PATH}/build"
 export BUILD_OUT_PATH="${BASE_PATH}/build_out"
 CANN_3RD_LIB_PATH="${BASE_PATH}/third_party"
 CMAKE_ARGS=""
+HARDENING_CACHE_FILE="${BASE_PATH}/cmake/LinuxHardeningCache.cmake"
 
 #print usage message
 usage() {
@@ -55,6 +56,13 @@ print_error() {
   echo -e "${COLOR_RED}[ERROR] ${msg}${COLOR_RESET}"
   echo $dotted_line
   echo
+}
+
+ensure_hardening_cache() {
+  if [ ! -f "${HARDENING_CACHE_FILE}" ]; then
+    print_error "missing hardening cache: ${HARDENING_CACHE_FILE}"
+    exit 1
+  fi
 }
 
 run_post_build_tests() {
@@ -123,6 +131,7 @@ checkopts() {
 build_only() {
   echo $dotted_line
   echo "build only"
+  ensure_hardening_cache
   git clone https://gitcode.com/GitHub_Trending/ll/llvm-project.git -b llvmorg-19.1.7
   export LLVM_SOURCE_DIR=$WORKSPACE/llvm-project
   export LLVM_BUILD_DIR=$LLVM_SOURCE_DIR/build-shared
@@ -131,7 +140,7 @@ build_only() {
 
   cd $LLVM_SOURCE_DIR
 
-    cmake -G Ninja -S llvm -B $LLVM_BUILD_DIR \
+    cmake -C "${HARDENING_CACHE_FILE}" -G Ninja -S llvm -B $LLVM_BUILD_DIR \
         -DLLVM_ENABLE_PROJECTS="mlir;llvm" \
          -DCMAKE_C_COMPILER=clang \
          -DCMAKE_CXX_COMPILER=clang++ \
@@ -150,7 +159,7 @@ build_only() {
   cd $PTO_SOURCE_DIR
   export PYBIND11_CMAKE_DIR=$(python3 -m pybind11 --cmakedir)
 
-    cmake -G Ninja \
+    cmake -C "${HARDENING_CACHE_FILE}" -G Ninja \
         -S . \
         -B build \
         -DLLVM_DIR=$LLVM_BUILD_DIR/lib/cmake/llvm \
@@ -193,6 +202,7 @@ clean_build_out() {
 package() {
   echo $dotted_line
   echo "package start"
+  ensure_hardening_cache
   clean_build_out
   clean_build
   mkdir $BUILD_PATH
@@ -210,7 +220,7 @@ package() {
 
   cd $LLVM_SOURCE_DIR
 
-    cmake -G Ninja -S llvm -B $LLVM_BUILD_DIR \
+    cmake -C "${HARDENING_CACHE_FILE}" -G Ninja -S llvm -B $LLVM_BUILD_DIR \
          -DLLVM_ENABLE_PROJECTS="mlir;llvm" \
          -DCMAKE_C_COMPILER=clang \
          -DCMAKE_CXX_COMPILER=clang++ \
@@ -230,7 +240,7 @@ package() {
   cd $PTO_SOURCE_DIR
   export PYBIND11_CMAKE_DIR=$(python3 -m pybind11 --cmakedir)
 
-    cmake -G Ninja \
+    cmake -C "${HARDENING_CACHE_FILE}" -G Ninja \
         -S . \
         -B build \
         -DLLVM_DIR=$LLVM_BUILD_DIR/lib/cmake/llvm \
