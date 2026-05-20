@@ -68,7 +68,7 @@ mkdir -p $WORKSPACE_DIR
 * **OS**: Linux (Ubuntu 20.04+ 推荐)
 * **Compiler**: GCC >= 9 或 Clang (支持 C++17)
 * **Build System**: CMake >= 3.20, Ninja
-* **Python**: 3.8+
+* **Python**: 3.9+ (python宣布3.7.x/3.8.x已经EOL，CANN即将停止对该版本的支持，请升级到>=3.9.x的版本)
 * **Python Packages**: `pybind11`, `numpy`
 ```bash
 python3 -m pip install pybind11==2.12.0 numpy
