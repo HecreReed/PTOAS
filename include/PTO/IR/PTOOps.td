@@ -273,6 +273,34 @@ def BindTileOp : PTO_Op<"bind_tile", [
   }];
 }
 
+def MaterializeTileOp : PTO_Op<"materialize_tile", [
+    Pure,
+    AttrSizedOperandSegments
+  ]> {
+  let summary = "Materializes a tile buffer handle from a planned memref";
+  let description = [{
+    Bridges the memref-based memory-planning/sync IR back into tile-buffer
+    handle IR immediately before EmitC. The source remains the planned memref
+    address, while the result carries the tile type, valid dims, and config
+    expected by tile operations and C++ tile codegen.
+  }];
+
+  let arguments = (ins
+    AnyMemRef:$source,
+    Optional<Index>:$valid_row,
+    Optional<Index>:$valid_col,
+    TileBufConfigAttr:$config
+  );
+
+  let results = (outs TileBufType:$result);
+
+  let hasVerifier = 1;
+
+  let assemblyFormat = [{
+    $source (`,` $valid_row^ `,` $valid_col)? attr-dict `:` qualified(type($source)) `->` qualified(type($result))
+  }];
+}
+
 def SubViewOp : PTO_Op<"subview", [
     Pure,
     ViewLikeOpInterface,
@@ -796,7 +824,8 @@ def TMatmulOp : PTO_TOp<"tmatmul", [
   let arguments = (ins
     PTODpsType:$lhs,
     PTODpsType:$rhs,
-    PTODpsType:$dst
+    PTODpsType:$dst,
+    DefaultValuedAttr<PTO_AccPhaseAttr, "::mlir::pto::AccPhase::Unspecified">:$accPhase
   );
 
   let results = (outs
@@ -832,7 +861,8 @@ def TMatmulAccOp : PTO_TOp<"tmatmul.acc", [
     PTODpsType:$acc_in,
     PTODpsType:$lhs,
     PTODpsType:$rhs,
-    PTODpsType:$dst
+    PTODpsType:$dst,
+    DefaultValuedAttr<PTO_AccPhaseAttr, "::mlir::pto::AccPhase::Unspecified">:$accPhase
   );
 
   let results = (outs
@@ -1681,6 +1711,11 @@ def TPutOp : PTO_Op<"comm.tput", [
   );
   let results = (outs);
   let hasVerifier = 1;
+  let assemblyFormat = [{
+    `(` $dst `,` $src `,` `buf` `(` $ping (`,` $pong^)? `)`
+    `:` type($dst) `,` type($src) `,` type($ping) (`,` type($pong)^)? `)`
+    attr-dict
+  }];
 }
 
 def TGetOp : PTO_Op<"comm.tget", [
@@ -1695,6 +1730,11 @@ def TGetOp : PTO_Op<"comm.tget", [
   );
   let results = (outs);
   let hasVerifier = 1;
+  let assemblyFormat = [{
+    `(` $dst `,` $src `,` `buf` `(` $ping (`,` $pong^)? `)`
+    `:` type($dst) `,` type($src) `,` type($ping) (`,` type($pong)^)? `)`
+    attr-dict
+  }];
 }
 
 def TNotifyOp : PTO_Op<"comm.tnotify", [
@@ -1708,6 +1748,10 @@ def TNotifyOp : PTO_Op<"comm.tnotify", [
   );
   let results = (outs);
   let hasVerifier = 1;
+  let assemblyFormat = [{
+    `(` $signal `,` $value `:` type($signal) `,` type($value) `)`
+    attr-dict
+  }];
 }
 
 def TWaitOp : PTO_Op<"comm.twait", [
@@ -1721,6 +1765,10 @@ def TWaitOp : PTO_Op<"comm.twait", [
   );
   let results = (outs);
   let hasVerifier = 1;
+  let assemblyFormat = [{
+    `(` $signal `,` $cmpValue `:` type($signal) `,` type($cmpValue) `)`
+    attr-dict
+  }];
 }
 
 def TTestOp : PTO_Op<"comm.ttest", [
@@ -1734,6 +1782,10 @@ def TTestOp : PTO_Op<"comm.ttest", [
   );
   let results = (outs I1:$result);
   let hasVerifier = 1;
+  let assemblyFormat = [{
+    `(` $signal `,` $cmpValue `:` type($signal) `,` type($cmpValue) `)`
+    attr-dict `->` type($result)
+  }];
 }
 
 def TBroadcastOp : PTO_Op<"comm.tbroadcast", [
@@ -1750,9 +1802,10 @@ def TBroadcastOp : PTO_Op<"comm.tbroadcast", [
   );
   let results = (outs);
   let hasVerifier = 1;
+  let hasCustomAssemblyFormat = 1;
 }
 
-def CommTGatherOp : PTO_Op<"comm.comm_tgather", [
+def CommTGatherOp : PTO_Op<"comm.tgather", [
     AttrSizedOperandSegments,
     DeclareOpInterfaceMethods<MemoryEffectsOpInterface>
 ]> {
@@ -1766,9 +1819,10 @@ def CommTGatherOp : PTO_Op<"comm.comm_tgather", [
   );
   let results = (outs);
   let hasVerifier = 1;
+  let hasCustomAssemblyFormat = 1;
 }
 
-def CommTScatterOp : PTO_Op<"comm.comm_tscatter", [
+def CommTScatterOp : PTO_Op<"comm.tscatter", [
     AttrSizedOperandSegments,
     DeclareOpInterfaceMethods<MemoryEffectsOpInterface>
 ]> {
@@ -1782,6 +1836,7 @@ def CommTScatterOp : PTO_Op<"comm.comm_tscatter", [
   );
   let results = (outs);
   let hasVerifier = 1;
+  let hasCustomAssemblyFormat = 1;
 }
 
 def TReduceOp : PTO_Op<"comm.treduce", [
@@ -1800,6 +1855,7 @@ def TReduceOp : PTO_Op<"comm.treduce", [
   );
   let results = (outs);
   let hasVerifier = 1;
+  let hasCustomAssemblyFormat = 1;
 }
 
 def InitializeL2G2LPipeOp : PTO_Op<"initialize_l2g2l_pipe", [
@@ -2029,6 +2085,75 @@ def EventIdArraySetOp : PTO_Op<"eventid_array_set"> {
 
   let assemblyFormat = [{
     $array `[` $index `]` `,` $value attr-dict `:` qualified(type($array))
+  }];
+}
+
+//===----------------------------------------------------------------------===//
+// Stack-local array (minimum set)
+//===----------------------------------------------------------------------===//
+//
+// Mirrors the `eventid_array` triad (declare / get / set) for a generic
+// statically-shaped scalar stack array. Disjoint from the tile-buf / scratch
+// memory world: the array's address is decided by the host C++ compiler at
+// codegen time, never by PTO memory planning or `pto.pointer_cast`.
+
+def DeclareLocalArrayOp : PTO_Op<"declare_local_array"> {
+  let summary = "Declare a stack-local statically-shaped array";
+  let description = [{
+    Lowers to a plain C++ stack variable like `T a[d1][d2]...;`. The element
+    type is restricted to scalars (integer / float); no nested aggregates.
+
+    This op does not participate in PTO memory planning. The resulting array's
+    address is determined by the host C++ compiler.
+  }];
+
+  let results = (outs LocalArrayType:$array);
+
+  let assemblyFormat = [{
+    attr-dict `->` qualified(type($array))
+  }];
+}
+
+def LocalArrayGetOp : PTO_Op<"local_array_get"> {
+  let summary = "Read one element from a stack-local array";
+  let description = [{
+    Lowers to `a[i0][i1]...[iN-1]` (an rvalue) in the emitted C++. The number
+    of indices must equal the array's rank.
+  }];
+
+  let arguments = (ins
+    LocalArrayType:$array,
+    Variadic<Index>:$indices
+  );
+  let results = (outs ScalarType:$result);
+
+  let hasVerifier = 1;
+
+  let assemblyFormat = [{
+    $array `[` $indices `]` attr-dict
+      `:` qualified(type($array)) `->` type($result)
+  }];
+}
+
+def LocalArraySetOp : PTO_Op<"local_array_set"> {
+  let summary = "Write one element into a stack-local array";
+  let description = [{
+    Lowers to `a[i0][i1]...[iN-1] = v;` in the emitted C++. The number of
+    indices must equal the array's rank.
+  }];
+
+  let arguments = (ins
+    LocalArrayType:$array,
+    Variadic<Index>:$indices,
+    ScalarType:$value
+  );
+  let results = (outs);
+
+  let hasVerifier = 1;
+
+  let assemblyFormat = [{
+    $array `[` $indices `]` `,` $value attr-dict
+      `:` qualified(type($array)) `,` type($value)
   }];
 }
 
@@ -2381,7 +2506,31 @@ def MGatherOp : PTO_TOp<"mgather", [
 
   let extraClassDeclaration = [{
     static StringRef getIntrinsicName() { return "MGATHER"; }
-    ::mlir::pto::PIPE getPipe() { return ::mlir::pto::PIPE::PIPE_MTE2; }
+    ::mlir::pto::PIPE getPipe() {
+      auto isA5Target = [&]() -> bool {
+        auto moduleOp = getOperation()->getParentOfType<::mlir::ModuleOp>();
+        if (!moduleOp)
+          return false;
+
+        if (auto arch =
+                moduleOp->getAttrOfType<::mlir::StringAttr>("pto.target_arch")) {
+          if (arch.getValue().equals_insensitive("a5"))
+            return true;
+        }
+
+        if (auto spec =
+                moduleOp->getAttrOfType<::mlir::StringAttr>("pto.device-spec")) {
+          auto s = spec.getValue();
+          if (s.starts_with("Ascend950") || s.starts_with("Ascend910_95"))
+            return true;
+        }
+
+        return false;
+      };
+
+      return isA5Target() ? ::mlir::pto::PIPE::PIPE_V
+                          : ::mlir::pto::PIPE::PIPE_MTE2;
+    }
     ::mlir::MutableOperandRange getDpsInitsMutable() { return getDstMutable(); }
   }];
 }
@@ -2537,7 +2686,31 @@ def MScatterOp : PTO_TOp<"mscatter", [
 
   let extraClassDeclaration = [{
     static StringRef getIntrinsicName() { return "MSCATTER"; }
-    ::mlir::pto::PIPE getPipe() { return ::mlir::pto::PIPE::PIPE_MTE3; }
+    ::mlir::pto::PIPE getPipe() {
+      auto isA5Target = [&]() -> bool {
+        auto moduleOp = getOperation()->getParentOfType<::mlir::ModuleOp>();
+        if (!moduleOp)
+          return false;
+
+        if (auto arch =
+                moduleOp->getAttrOfType<::mlir::StringAttr>("pto.target_arch")) {
+          if (arch.getValue().equals_insensitive("a5"))
+            return true;
+        }
+
+        if (auto spec =
+                moduleOp->getAttrOfType<::mlir::StringAttr>("pto.device-spec")) {
+          auto s = spec.getValue();
+          if (s.starts_with("Ascend950") || s.starts_with("Ascend910_95"))
+            return true;
+        }
+
+        return false;
+      };
+
+      return isA5Target() ? ::mlir::pto::PIPE::PIPE_V
+                          : ::mlir::pto::PIPE::PIPE_MTE3;
+    }
     ::mlir::MutableOperandRange getDpsInitsMutable() { return getMemMutable(); }
   }];
 }
@@ -3396,14 +3569,13 @@ def TCvtOp : PTO_TOp<"tcvt", [
   OpPipeInterface,
   DeclareOpInterfaceMethods<MemoryEffectsOpInterface>
 ]> {
-  let summary = "Elementwise type conversion with optional tmp tile and saturation mode (tilebuf, DPS)";
+  let summary = "Elementwise type conversion with optional saturation mode (tilebuf, DPS)";
 
   let arguments = (ins
     PTODpsType:$src,
     PTODpsType:$dst,
-    Optional<PTODpsType>:$tmp,
     DefaultValuedAttr<PTO_RoundModeAttr, "::mlir::pto::RoundMode::CAST_RINT">:$rmode,
-    OptionalAttr<PTO_SaturationModeAttr>:$sat_mode
+    DefaultValuedAttr<PTO_SaturationModeAttr, "::mlir::pto::SaturationMode::OFF">:$sat_mode
   );
 
   let results = (outs);
@@ -4526,6 +4698,80 @@ def TPartMinOp: PTO_TOp<"tpartmin", [
     ::mlir::MutableOperandRange getDpsInitsMutable() { return getDstMutable(); }
   }];
 }
+
+def TPartArgMaxOp: PTO_TOp<"tpartargmax", [
+  PTO_DpsInitOpInterface,
+  OpPipeInterface,
+  DeclareOpInterfaceMethods<MemoryEffectsOpInterface>
+]> {
+  let summary = "Partial elementwise max with value and index tiles.";
+
+  let arguments = (ins
+    PTODpsType:$src0,
+    PTODpsType:$src1,
+    PTODpsType:$src0Idx,
+    PTODpsType:$src1Idx,
+    PTODpsType:$dst,
+    PTODpsType:$dstIdx
+  );
+
+  let results = (outs);
+
+  let hasVerifier = 1;
+
+  let assemblyFormat = [{
+    `ins` `(` $src0 `,` $src1 `,` $src0Idx `,` $src1Idx `:`
+      qualified(type($src0)) `,` qualified(type($src1)) `,`
+      qualified(type($src0Idx)) `,` qualified(type($src1Idx)) `)`
+    `outs` `(` $dst `,` $dstIdx `:`
+      qualified(type($dst)) `,` qualified(type($dstIdx)) `)`
+    attr-dict
+  }];
+
+  let extraClassDeclaration = [{
+    ::mlir::pto::PIPE getPipe() { return ::mlir::pto::PIPE::PIPE_V; }
+    ::mlir::MutableOperandRange getDpsInitsMutable() {
+      return ::mlir::MutableOperandRange(getOperation(), 4, 2);
+    }
+  }];
+}
+
+def TPartArgMinOp: PTO_TOp<"tpartargmin", [
+  PTO_DpsInitOpInterface,
+  OpPipeInterface,
+  DeclareOpInterfaceMethods<MemoryEffectsOpInterface>
+]> {
+  let summary = "Partial elementwise min with value and index tiles.";
+
+  let arguments = (ins
+    PTODpsType:$src0,
+    PTODpsType:$src1,
+    PTODpsType:$src0Idx,
+    PTODpsType:$src1Idx,
+    PTODpsType:$dst,
+    PTODpsType:$dstIdx
+  );
+
+  let results = (outs);
+
+  let hasVerifier = 1;
+
+  let assemblyFormat = [{
+    `ins` `(` $src0 `,` $src1 `,` $src0Idx `,` $src1Idx `:`
+      qualified(type($src0)) `,` qualified(type($src1)) `,`
+      qualified(type($src0Idx)) `,` qualified(type($src1Idx)) `)`
+    `outs` `(` $dst `,` $dstIdx `:`
+      qualified(type($dst)) `,` qualified(type($dstIdx)) `)`
+    attr-dict
+  }];
+
+  let extraClassDeclaration = [{
+    ::mlir::pto::PIPE getPipe() { return ::mlir::pto::PIPE::PIPE_V; }
+    ::mlir::MutableOperandRange getDpsInitsMutable() {
+      return ::mlir::MutableOperandRange(getOperation(), 4, 2);
+    }
+  }];
+}
 //===----------------------------------------------------------------------===//
 // PTOOps.td  (add TPARTMUL TBDPS/tile buffer op)
 //===----------------------------------------------------------------------===//
@@ -5310,28 +5556,29 @@ def TScatterOp: PTO_TOp<"tscatter", [
   OpPipeInterface,
   DeclareOpInterfaceMethods<MemoryEffectsOpInterface>
 ]> {
-  let summary = "TSCATTER: Scatter elements of a source tile into a destination tile using per-element indices.";
+  let summary = "TSCATTER: Scatter elements of a source tile into a destination tile using indices or a mask pattern.";
 
   let arguments = (ins
     PTODpsType:$src,
-    PTODpsType:$indexes,
-    PTODpsType:$dst
+    PTODpsType:$dst,
+    Optional<PTODpsType>:$indexes,
+    OptionalAttr<PTO_MaskPatternAttr>:$maskPattern
   );
 
   let results = (outs);
 
   let hasVerifier = 1;
-
-  let assemblyFormat = [{
-    `ins` `(` $src `,` $indexes `:` qualified(type($src)) `,` qualified(type($indexes) ) `)`
-    `outs` `(` $dst `:` qualified(type($dst) ) `)`
-    attr-dict
-  }];
+  let hasCustomAssemblyFormat = 1;
 
   let extraClassDeclaration = [{
+    bool hasIndexForm() { return static_cast<bool>(getIndexes()); }
+    bool hasMaskForm() { return static_cast<bool>(getMaskPatternAttr()); }
     ::mlir::pto::PIPE getPipe() {
+      if (hasMaskForm())
+        return ::mlir::pto::PIPE::PIPE_V;
+
       // NOTE:
-      // - On A2/A3, pto-isa TSCATTER is a scalar UB loop (PIPE_S).
+      // - On A2/A3, indexed TSCATTER lowers to a scalar UB loop (PIPE_S).
       // - On A5, pto-isa TSCATTER is vector scatter (PIPE_V).
       // We accept either `pto.target_arch=a5` or A5 `pto.device-spec`.
       auto isA5Target = [&]() -> bool {

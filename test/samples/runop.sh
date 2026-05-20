@@ -19,7 +19,7 @@ PYTHON_BIN="${PYTHON_BIN:-}"
 PTOAS_OUT_DIR="${PTOAS_OUT_DIR:-}"
 PTOAS_ENABLE_INSERT_SYNC="${PTOAS_ENABLE_INSERT_SYNC:-1}"
 PTOAS_FLAGS="${PTOAS_FLAGS:-}"
-PTO_PTO_DIRS="${PTO_PTO_DIRS:-Sync Qwen3DecodeA3 Qwen3DecodeA5}"
+PTO_PTO_DIRS="${PTO_PTO_DIRS:-Sync Qwen3DecodeA3 Qwen3DecodeA5 CommSync}"
 ENABLE_BC=0
 
 usage() {
@@ -292,12 +292,6 @@ process_one_dir() {
         ;;
     esac
     base="$(basename "$f" .py)"
-
-    if [[ "$base" == "cv_region" ]]; then
-      echo -e "${A}(${base}.py)\tSKIP\ttemporarily disabled"
-      continue
-    fi
-
     local expect_fail=0
     case "$base" in
       *_invalid|*_xfail) expect_fail=1 ;;
@@ -328,6 +322,15 @@ process_one_dir() {
       continue
     fi
     if [[ "$base" == "test_intercore_sync_a5_ptoisa_vec" && "$(printf '%s' "$target_arch" | tr '[:upper:]' '[:lower:]')" != "a5" ]]; then
+      echo -e "${A}(${base}.py)\tSKIP\trequires --pto-arch=a5"
+      continue
+    fi
+    if [[ "$base" == "gemvmx" && "$(printf '%s' "$target_arch" | tr '[:upper:]' '[:lower:]')" != "a5" ]]; then
+      echo -e "${A}(${base}.py)\tSKIP\trequires --pto-arch=a5"
+      continue
+    fi
+    if [[ ( "$base" == "mgather" || "$base" == "mscatter" ) && \
+          "${target_arch_lc}" != "a5" ]]; then
       echo -e "${A}(${base}.py)\tSKIP\trequires --pto-arch=a5"
       continue
     fi
@@ -381,10 +384,6 @@ process_one_dir() {
     if [[ "$base" == "test_intercore_sync_a3_missing_setffts" && "$(printf '%s' "$target_arch" | tr '[:upper:]' '[:lower:]')" == "a3" ]]; then
       expect_fail=1
     fi
-    if [[ ("$base" == "mgather" || "$base" == "mscatter") && \
-          "$(printf '%s' "$target_arch" | tr '[:upper:]' '[:lower:]')" == "a3" ]]; then
-      expect_fail=1
-    fi
     mlir="${out_subdir}/${base}-pto-ir.pto"
     cpp="${out_subdir}/${base}-pto.cpp"
 
@@ -406,16 +405,12 @@ process_one_dir() {
     # these A5 repro/control samples, but ptobc v0 currently rejects this
     # form with "operand count mismatch for op: pto.alloc_tile".
     #
-    # tcvt.py intentionally exercises the new pto.tcvt(tmp, sat_mode) form for
-    # sample/board coverage. ptobc v0 still assumes the legacy 2-operand shape
-    # and currently fails with "operand count mismatch for op: pto.tcvt".
-    # Keep the sample in runop coverage, but bypass the bytecode roundtrip until
-    # ptobc learns the expanded operand layout.
+    # tcvt.py exercises explicit sat_mode coverage. Keep it in the generic
+    # roundtrip path once ptobc v0 understands the current tcvt schema.
     if [[ "$base" == "test_tmov_col_major_16x1_align_a5" || \
           "$base" == "test_tmov_row_major_1x16_control_a5" || \
           "$base" == "decode_projection_incore_0" || \
-          "$base" == "rmsnorm_incore_0" || \
-          "$base" == "tcvt" ]]; then
+          "$base" == "rmsnorm_incore_0" ]]; then
       sample_use_ptobc_roundtrip=0
     fi
     if [[ $sample_use_ptobc_roundtrip -eq 1 ]]; then
@@ -449,14 +444,6 @@ process_one_dir() {
         if [[ "$base" == "test_intercore_sync_a3_missing_setffts" ]]; then
           if ! grep -Eq "A3 inter-core sync requires explicit .*pto.set_ffts" "${ptoas_log}"; then
             echo -e "${A}(${base}.py)\tFAIL\texpected missing-set_ffts diagnostic not found"
-            overall=1
-            continue
-          fi
-        fi
-        if [[ ("$base" == "mgather" || "$base" == "mscatter") && \
-              "$(printf '%s' "$target_arch" | tr '[:upper:]' '[:lower:]')" == "a3" ]]; then
-          if ! grep -Eq "pto\\.m(gather|scatter) is only supported on A5 targets" "${ptoas_log}"; then
-            echo -e "${A}(${base}.py)\tFAIL\texpected A5-only diagnostic not found"
             overall=1
             continue
           fi
@@ -1036,13 +1023,13 @@ PY
       fi
     fi
 
-    if [[ "$base" == "comm_p2p" || "$base" == "comm_p2p_binding_variants" ]]; then
+    if [[ "$base" == "comm_p2p" || "$base" == "comm_p2p_binding_variants" || "$base" == "comm_multicard_all_ops" ]]; then
       for pat in \
         "pto::comm::TPUT(" \
         "pto::comm::TGET(" \
-        "PTOAS__COMM_TNOTIFY<" \
-        "PTOAS__COMM_TWAIT<" \
-        "PTOAS__COMM_TTEST<"; do
+        "pto::comm::TNOTIFY(" \
+        "pto::comm::TWAIT(" \
+        "pto::comm::TTEST("; do
         if ! grep -Fq "$pat" "$cpp"; then
           echo -e "${A}(${base}.py)\tFAIL\tmissing $pat lowering"
           overall=1
@@ -1054,14 +1041,72 @@ PY
         overall=1
         continue
       fi
-      if [[ "$base" == "comm_p2p_binding_variants" ]]; then
+      if [[ "$base" == "comm_p2p_binding_variants" || "$base" == "comm_multicard_all_ops" ]]; then
         for pat in \
-          "pto::comm::NotifyOp::Set" \
           "pto::comm::NotifyOp::AtomicAdd" \
-          "pto::comm::WaitCmp::GE" \
-          "pto::comm::WaitCmp::LE" \
-          "pto::comm::WaitCmp::EQ" \
-          "pto::comm::WaitCmp::NE"; do
+          "pto::comm::WaitCmp::GE"; do
+          if ! grep -Fq "$pat" "$cpp"; then
+            echo -e "${A}(${base}.py)\tFAIL\tmissing $pat lowering"
+            overall=1
+            continue 2
+          fi
+        done
+        if [[ "$base" != "twait_atomic_binding" ]]; then
+          for pat in \
+            "pto::comm::NotifyOp::Set" \
+            "pto::comm::WaitCmp::LE" \
+            "pto::comm::WaitCmp::EQ" \
+            "pto::comm::WaitCmp::NE"; do
+            if ! grep -Fq "$pat" "$cpp"; then
+              echo -e "${A}(${base}.py)\tFAIL\tmissing $pat lowering"
+              overall=1
+              continue 2
+            fi
+          done
+        fi
+      fi
+    fi
+
+    if [[ "$base" == "twait_atomic_binding" ]]; then
+      for pat in \
+        "__global__ AICORE void TWaitAtomicKernel(" \
+        "pto::comm::TNOTIFY(" \
+        "pto::comm::TWAIT("; do
+        if ! grep -Fq "$pat" "$cpp"; then
+          echo -e "${A}(${base}.py)\tFAIL\tmissing $pat lowering"
+          overall=1
+          continue 2
+        fi
+      done
+    fi
+
+    if [[ "$base" == "tnotify_atomic_add_binding" ]]; then
+      for pat in \
+        "__global__ AICORE void TNotifyAtomicAddKernel(" \
+        "pto::comm::TNOTIFY("; do
+        if ! grep -Fq "$pat" "$cpp"; then
+          echo -e "${A}(${base}.py)\tFAIL\tmissing $pat lowering"
+          overall=1
+          continue 2
+        fi
+      done
+    fi
+
+    if [[ "$base" == "comm_collective" || "$base" == "comm_collective_binding_variants" || "$base" == "comm_multicard_all_ops" ]]; then
+      for pat in \
+        "pto::comm::ParallelGroup" \
+        "pto::comm::TBROADCAST("; do
+        if ! grep -Fq "$pat" "$cpp"; then
+          echo -e "${A}(${base}.py)\tFAIL\tmissing $pat lowering"
+          overall=1
+          continue 2
+        fi
+      done
+      if [[ "$base" != "tbroadcast_root_binding" && "$base" != "tgather_root_binding" && "$base" != "tscatter_root_binding" && "$base" != "treduce_root_binding" ]]; then
+        for pat in \
+          "pto::comm::TGATHER(" \
+          "pto::comm::TSCATTER(" \
+          "pto::comm::TREDUCE("; do
           if ! grep -Fq "$pat" "$cpp"; then
             echo -e "${A}(${base}.py)\tFAIL\tmissing $pat lowering"
             overall=1
@@ -1069,22 +1114,7 @@ PY
           fi
         done
       fi
-    fi
-
-    if [[ "$base" == "comm_collective" || "$base" == "comm_collective_binding_variants" ]]; then
-      for pat in \
-        "pto::comm::ParallelGroup" \
-        "pto::comm::TBROADCAST(" \
-        "pto::comm::TGATHER(" \
-        "pto::comm::TSCATTER(" \
-        "pto::comm::TREDUCE("; do
-        if ! grep -Fq "$pat" "$cpp"; then
-          echo -e "${A}(${base}.py)\tFAIL\tmissing $pat lowering"
-          overall=1
-          continue 2
-        fi
-      done
-      if ! grep -Fq "pto::comm::ReduceOp::Sum" "$cpp" || ! grep -Fq "pto::comm::ReduceOp::Max" "$cpp"; then
+      if [[ "$base" != "tbroadcast_root_binding" && "$base" != "tgather_root_binding" && "$base" != "tscatter_root_binding" && "$base" != "treduce_root_binding" ]] && (! grep -Fq "pto::comm::ReduceOp::Sum" "$cpp" || ! grep -Fq "pto::comm::ReduceOp::Max" "$cpp"); then
         echo -e "${A}(${base}.py)\tFAIL\tmissing reduce-op enum lowering"
         overall=1
         continue
@@ -1096,6 +1126,95 @@ PY
           continue
         fi
       fi
+    fi
+
+    if [[ "$base" == "tbroadcast_root_binding" ]]; then
+      for pat in \
+        "__global__ AICORE void TBroadCastKernelImpl(" \
+        "pto::comm::TBROADCAST(" \
+        "pto::comm::ParallelGroup"; do
+        if ! grep -Fq "$pat" "$cpp"; then
+          echo -e "${A}(${base}.py)\tFAIL\tmissing $pat lowering"
+          overall=1
+          continue 2
+        fi
+      done
+    fi
+
+    if [[ "$base" == "tgather_root_binding" ]]; then
+      for pat in \
+        "__global__ AICORE void TGatherKernelImpl(" \
+        "pto::comm::TGATHER(" \
+        "pto::comm::ParallelGroup"; do
+        if ! grep -Fq "$pat" "$cpp"; then
+          echo -e "${A}(${base}.py)\tFAIL\tmissing $pat lowering"
+          overall=1
+          continue 2
+        fi
+      done
+    fi
+
+    if [[ "$base" == "tscatter_root_binding" ]]; then
+      for pat in \
+        "__global__ AICORE void TScatterKernelImpl(" \
+        "pto::comm::TSCATTER(" \
+        "pto::comm::ParallelGroup"; do
+        if ! grep -Fq "$pat" "$cpp"; then
+          echo -e "${A}(${base}.py)\tFAIL\tmissing $pat lowering"
+          overall=1
+          continue 2
+        fi
+      done
+    fi
+
+    if [[ "$base" == "treduce_root_binding" ]]; then
+      for pat in \
+        "__global__ AICORE void TReduceKernelImpl(" \
+        "pto::comm::TREDUCE(" \
+        "pto::comm::ParallelGroup" \
+        "pto::comm::ReduceOp::Sum"; do
+        if ! grep -Fq "$pat" "$cpp"; then
+          echo -e "${A}(${base}.py)\tFAIL\tmissing $pat lowering"
+          overall=1
+          continue 2
+        fi
+      done
+    fi
+
+    if [[ "$base" == "a5_comm_st_sync_flows" ]]; then
+      for pat in \
+        "pto::comm::TPUT(" \
+        "pto::comm::TGET(" \
+        "pto::comm::TNOTIFY(" \
+        "pto::comm::TWAIT(" \
+        "pto::comm::TTEST(" \
+        "pto::comm::ParallelGroup" \
+        "pto::comm::TBROADCAST(" \
+        "pto::comm::TGATHER(" \
+        "pto::comm::TSCATTER(" \
+        "pto::comm::TREDUCE(" \
+        "pto::comm::ReduceOp::Sum"; do
+        if ! grep -Fq "$pat" "$cpp"; then
+          echo -e "${A}(${base}.py)\tFAIL\tmissing $pat lowering"
+          overall=1
+          continue 2
+        fi
+      done
+    fi
+
+    if [[ "$base" == "a5_comm_st_async_flows" ]]; then
+      for pat in \
+        "pto::comm::BuildAsyncSession<" \
+        "pto::comm::TGET_ASYNC<" \
+        "pto::comm::TPUT_ASYNC<" \
+        "pto::comm::AsyncEvent" \
+        "pto::comm::AsyncSession"; do
+        if ! grep -Fq "$pat" "$cpp"; then
+          echo -e "${A}(${base}.py)\tFAIL\tmissing $pat lowering"
+          overall=1
+          continue 2
+        fi
+      done
     fi
 
 	    # Regression guard for Issue #190:

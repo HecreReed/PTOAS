@@ -141,10 +141,10 @@ MLIR_CAPI_EXPORTED MlirAttribute mlirPTOEventAttrGet(MlirContext ctx, int32_t va
 MLIR_CAPI_EXPORTED bool mlirPTOAttrIsAEventAttr(MlirAttribute attr);
 MLIR_CAPI_EXPORTED int32_t mlirPTOEventAttrGetValue(MlirAttribute attr);
 // ---- MaskPattern attr ----
-// Backward-compatible int entry point:
-//   accepts only unambiguous values {0,3,6,7};
-//   rejects ambiguous raw ints {1,2,4,5} so callers must choose either the
-//   ISA-aligned enum API below or the explicit legacy-raw compatibility API.
+// Backward-compatible int entry point that accepts only unambiguous values
+// {0, 3, 6, 7}. It rejects ambiguous raw ints {1, 2, 4, 5} so callers must
+// choose either the ISA-aligned enum API below or the explicit legacy-raw
+// compatibility API.
 MLIR_CAPI_EXPORTED MlirAttribute mlirPTOMaskPatternAttrGet(MlirContext ctx, int32_t value);
 MLIR_CAPI_EXPORTED bool mlirPTOAttrIsAMaskPatternAttr(MlirAttribute attr);
 // Returns the ISA-aligned numeric value {1..7}.

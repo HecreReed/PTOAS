@@ -41,7 +41,6 @@ struct InsertSyncDumpOptions {
 };
 
 /// Print per-phase state for the InsertSync pipeline.
-///
 /// - Level >= Phase: prints a compact summary header and counts.
 /// - Level >= SyncIR: prints a structured SyncIR dump.
 /// - Level >= Trace: may include additional details (e.g. def/use mem infos).

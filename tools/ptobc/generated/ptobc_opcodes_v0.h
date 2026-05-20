@@ -26,6 +26,7 @@ inline constexpr uint8_t kVariantMxBias = 5;
 inline constexpr uint8_t kSectionCubeVariant = 0;
 inline constexpr uint8_t kSectionVectorVariant = 1;
 inline constexpr uint8_t kHasVariant = 1;
+inline constexpr uint16_t kTscatterMaskOpcode = 0x109C;
 
 inline constexpr int kTgemvOperandCount = 3;
 inline constexpr int kTgemvAccOperandCount = 4;
@@ -162,7 +163,7 @@ inline constexpr OpInfo kOpTable[] = {
   {0x1063, "pto.tsort32", 0, 0x00, 0x02, 0, 0, 0, 0x00},
   {0x1064, "pto.tsqrt", 0, 0x00, 0x00, 2, 0, 0, 0x00},
   {0x1065, "pto.tstore", 0, 0x00, 0x02, 0, 0, 0, 0x00},
-  {0x1066, "pto.tstore.fp", 0, 0x00, 0x00, 3, 0, 0, 0x00},
+  {0x1066, "pto.tstore_fp", 0, 0x00, 0x00, 3, 0, 0, 0x00},
   {0x1067, "pto.tsub", 0, 0x00, 0x00, 3, 0, 0, 0x00},
   {0x1068, "pto.tsubc", 0, 0x00, 0x00, 4, 0, 0, 0x00},
   {0x1069, "pto.tsubs", 0, 0x00, 0x00, 3, 0, 0, 0x00},
@@ -177,6 +178,7 @@ inline constexpr OpInfo kOpTable[] = {
   {0x1072, "pto.subview", 0, 0x01, 0x02, 0, 1, 0, 0x00},
   {0x1073, "pto.trowexpanddiv", 0, 0x00, 0x02, 0, 0, 0, 0x00},
   {0x1074, "pto.trowexpandmul", 0, 0x00, 0x02, 0, 0, 0, 0x00},
+  {0x1075, "pto.tdequant", 0, 0x00, 0x00, 4, 0, 0, 0x00},
   {0x1076, "pto.taxpy", 0, 0x00, 0x00, 3, 0, 0, 0x00},
   {0x1077, "pto.thistogram", 0, 0x00, 0x00, 3, 0, 0, 0x00},
   {0x1078, "pto.tget_scale_addr", 0, 0x00, 0x00, 2, 0, 0, 0x00},
@@ -210,9 +212,12 @@ inline constexpr OpInfo kOpTable[] = {
   {0x1094, "pto.comm.twait", 0, 0x00, 0x02, 0, 0, 0, 0x00},
   {0x1095, "pto.comm.ttest", 0, 0x01, 0x02, 0, 1, 0, 0x00},
   {0x1096, "pto.comm.tbroadcast", 0, 0x00, 0x02, 0, 0, 0, 0x00},
-  {0x1097, "pto.comm.comm_tgather", 0, 0x00, 0x02, 0, 0, 0, 0x00},
-  {0x1098, "pto.comm.comm_tscatter", 0, 0x00, 0x02, 0, 0, 0, 0x00},
+  {0x1097, "pto.comm.tgather", 0, 0x00, 0x02, 0, 0, 0, 0x00},
+  {0x1098, "pto.comm.tscatter", 0, 0x00, 0x02, 0, 0, 0, 0x00},
   {0x1099, "pto.comm.treduce", 0, 0x00, 0x02, 0, 0, 0, 0x00},
+  {0x109A, "pto.tpartargmax", 0, 0x00, 0x00, 6, 0, 0, 0x00},
+  {0x109B, "pto.tpartargmin", 0, 0x00, 0x00, 6, 0, 0, 0x00},
+  {0x109C, "pto.tscatter.maskpattern", 0, 0x00, 0x00, 2, 0, 0, 0x00},
   {0x2000, "arith.addi", 0, 0x01, 0x00, 2, 1, 0, 0x00},
   {0x2001, "arith.ceildivsi", 0, 0x01, 0x00, 2, 1, 0, 0x00},
   {0x2002, "arith.cmpi", 0, 0x01, 0x00, 2, 1, 0, 0x01},
@@ -365,7 +370,7 @@ inline std::optional<uint16_t> lookupOpcodeByName(llvm::StringRef name) {
     .Case("pto.tsort32", 0x1063)
     .Case("pto.tsqrt", 0x1064)
     .Case("pto.tstore", 0x1065)
-    .Case("pto.tstore.fp", 0x1066)
+    .Case("pto.tstore_fp", 0x1066)
     .Case("pto.tsub", 0x1067)
     .Case("pto.tsubc", 0x1068)
     .Case("pto.tsubs", 0x1069)
@@ -380,6 +385,7 @@ inline std::optional<uint16_t> lookupOpcodeByName(llvm::StringRef name) {
     .Case("pto.subview", 0x1072)
     .Case("pto.trowexpanddiv", 0x1073)
     .Case("pto.trowexpandmul", 0x1074)
+    .Case("pto.tdequant", 0x1075)
     .Case("pto.taxpy", 0x1076)
     .Case("pto.thistogram", 0x1077)
     .Case("pto.tget_scale_addr", 0x1078)
@@ -413,9 +419,11 @@ inline std::optional<uint16_t> lookupOpcodeByName(llvm::StringRef name) {
     .Case("pto.comm.twait", 0x1094)
     .Case("pto.comm.ttest", 0x1095)
     .Case("pto.comm.tbroadcast", 0x1096)
-    .Case("pto.comm.comm_tgather", 0x1097)
-    .Case("pto.comm.comm_tscatter", 0x1098)
+    .Case("pto.comm.tgather", 0x1097)
+    .Case("pto.comm.tscatter", 0x1098)
     .Case("pto.comm.treduce", 0x1099)
+    .Case("pto.tpartargmax", 0x109A)
+    .Case("pto.tpartargmin", 0x109B)
     .Case("scf.for", 0x4000)
     .Case("scf.if", 0x4001)
     .Case("scf.yield", 0x4002)
@@ -553,7 +561,7 @@ inline std::optional<OpcodeAndVariant> lookupOpcodeAndVariantByFullName(llvm::St
     .Case("pto.tsort32", OpcodeAndVariant{0x1063, 0, 0})
     .Case("pto.tsqrt", OpcodeAndVariant{0x1064, 0, 0})
     .Case("pto.tstore", OpcodeAndVariant{0x1065, 0, 0})
-    .Case("pto.tstore.fp", OpcodeAndVariant{0x1066, 0, 0})
+    .Case("pto.tstore_fp", OpcodeAndVariant{0x1066, 0, 0})
     .Case("pto.tsub", OpcodeAndVariant{0x1067, 0, 0})
     .Case("pto.tsubc", OpcodeAndVariant{0x1068, 0, 0})
     .Case("pto.tsubs", OpcodeAndVariant{0x1069, 0, 0})
@@ -568,6 +576,7 @@ inline std::optional<OpcodeAndVariant> lookupOpcodeAndVariantByFullName(llvm::St
     .Case("pto.subview", OpcodeAndVariant{0x1072, 0, 0})
     .Case("pto.trowexpanddiv", OpcodeAndVariant{0x1073, 0, 0})
     .Case("pto.trowexpandmul", OpcodeAndVariant{0x1074, 0, 0})
+    .Case("pto.tdequant", OpcodeAndVariant{0x1075, 0, 0})
     .Case("pto.taxpy", OpcodeAndVariant{0x1076, 0, 0})
     .Case("pto.thistogram", OpcodeAndVariant{0x1077, 0, 0})
     .Case("pto.tget_scale_addr", OpcodeAndVariant{0x1078, 0, 0})
@@ -601,9 +610,11 @@ inline std::optional<OpcodeAndVariant> lookupOpcodeAndVariantByFullName(llvm::St
     .Case("pto.comm.twait", OpcodeAndVariant{0x1094, 0, 0})
     .Case("pto.comm.ttest", OpcodeAndVariant{0x1095, 0, 0})
     .Case("pto.comm.tbroadcast", OpcodeAndVariant{0x1096, 0, 0})
-    .Case("pto.comm.comm_tgather", OpcodeAndVariant{0x1097, 0, 0})
-    .Case("pto.comm.comm_tscatter", OpcodeAndVariant{0x1098, 0, 0})
+    .Case("pto.comm.tgather", OpcodeAndVariant{0x1097, 0, 0})
+    .Case("pto.comm.tscatter", OpcodeAndVariant{0x1098, 0, 0})
     .Case("pto.comm.treduce", OpcodeAndVariant{0x1099, 0, 0})
+    .Case("pto.tpartargmax", OpcodeAndVariant{0x109A, 0, 0})
+    .Case("pto.tpartargmin", OpcodeAndVariant{0x109B, 0, 0})
     .Case("scf.for", OpcodeAndVariant{0x4000, 0, 0})
     .Case("scf.if", OpcodeAndVariant{0x4001, 0, 0})
     .Case("scf.yield", OpcodeAndVariant{0x4002, 0, 0})
@@ -641,6 +652,7 @@ inline std::optional<OpcodeAndVariant> lookupOpcodeAndVariantByFullName(llvm::St
 inline const char *fullNameFromOpcodeVariant(uint16_t opcode, uint8_t variant) {
   const OpInfo *info = lookupByOpcode(opcode);
   if (!info) return nullptr;
+  if (opcode == kTscatterMaskOpcode) return "pto.tscatter";
   if (!info->has_variant_u8) return info->name;
   switch (opcode) {
   case 0x0006:

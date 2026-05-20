@@ -1,0 +1,91 @@
+// RUN: ptoas --pto-level=level3 --pto-arch=a3 --enable-insert-sync %s -o - 2>&1 | FileCheck %s
+
+module {
+  // CHECK-LABEL: AICORE void pipev_repeat16_skip(
+  // CHECK: TADD(
+  // CHECK-NOT: pipe_barrier(PIPE_V);
+  // CHECK: TROWEXPANDDIV(
+  func.func @pipev_repeat16_skip() {
+    %c0_i64 = arith.constant 0 : i64
+    %c4096_i64 = arith.constant 4096 : i64
+    %c8192_i64 = arith.constant 8192 : i64
+    %acc = pto.alloc_tile addr = %c0_i64 : !pto.tile_buf<loc=vec, dtype=f32, rows=16, cols=64, v_row=16, v_col=64, blayout=row_major, slayout=none_box, fractal=512, pad=0>
+    %src1 = pto.alloc_tile addr = %c4096_i64 : !pto.tile_buf<loc=vec, dtype=f32, rows=16, cols=64, v_row=16, v_col=64, blayout=row_major, slayout=none_box, fractal=512, pad=0>
+    %scale = pto.alloc_tile addr = %c8192_i64 : !pto.tile_buf<loc=vec, dtype=f32, rows=16, cols=1, v_row=16, v_col=1, blayout=col_major, slayout=none_box, fractal=512, pad=0>
+    pto.tadd ins(%acc, %src1 : !pto.tile_buf<loc=vec, dtype=f32, rows=16, cols=64, v_row=16, v_col=64, blayout=row_major, slayout=none_box, fractal=512, pad=0>, !pto.tile_buf<loc=vec, dtype=f32, rows=16, cols=64, v_row=16, v_col=64, blayout=row_major, slayout=none_box, fractal=512, pad=0>) outs(%acc : !pto.tile_buf<loc=vec, dtype=f32, rows=16, cols=64, v_row=16, v_col=64, blayout=row_major, slayout=none_box, fractal=512, pad=0>)
+    pto.trowexpanddiv ins(%acc, %scale : !pto.tile_buf<loc=vec, dtype=f32, rows=16, cols=64, v_row=16, v_col=64, blayout=row_major, slayout=none_box, fractal=512, pad=0>, !pto.tile_buf<loc=vec, dtype=f32, rows=16, cols=1, v_row=16, v_col=1, blayout=col_major, slayout=none_box, fractal=512, pad=0>) outs(%acc : !pto.tile_buf<loc=vec, dtype=f32, rows=16, cols=64, v_row=16, v_col=64, blayout=row_major, slayout=none_box, fractal=512, pad=0>)
+    return
+  }
+
+  // CHECK-LABEL: AICORE void pipev_repeat15_keep(
+  // CHECK: TADD(
+  // CHECK: pipe_barrier(PIPE_V);
+  // CHECK: TROWEXPANDDIV(
+  func.func @pipev_repeat15_keep() {
+    %c0_i64 = arith.constant 0 : i64
+    %c4096_i64 = arith.constant 4096 : i64
+    %c12288_i64 = arith.constant 12288 : i64
+    %acc = pto.alloc_tile addr = %c0_i64 : !pto.tile_buf<loc=vec, dtype=f32, rows=16, cols=64, v_row=15, v_col=64, blayout=row_major, slayout=none_box, fractal=512, pad=0>
+    %src1 = pto.alloc_tile addr = %c4096_i64 : !pto.tile_buf<loc=vec, dtype=f32, rows=16, cols=64, v_row=15, v_col=64, blayout=row_major, slayout=none_box, fractal=512, pad=0>
+    %scale = pto.alloc_tile addr = %c12288_i64 : !pto.tile_buf<loc=vec, dtype=f32, rows=16, cols=1, v_row=15, v_col=1, blayout=col_major, slayout=none_box, fractal=512, pad=0>
+    pto.tadd ins(%acc, %src1 : !pto.tile_buf<loc=vec, dtype=f32, rows=16, cols=64, v_row=15, v_col=64, blayout=row_major, slayout=none_box, fractal=512, pad=0>, !pto.tile_buf<loc=vec, dtype=f32, rows=16, cols=64, v_row=15, v_col=64, blayout=row_major, slayout=none_box, fractal=512, pad=0>) outs(%acc : !pto.tile_buf<loc=vec, dtype=f32, rows=16, cols=64, v_row=15, v_col=64, blayout=row_major, slayout=none_box, fractal=512, pad=0>)
+    pto.trowexpanddiv ins(%acc, %scale : !pto.tile_buf<loc=vec, dtype=f32, rows=16, cols=64, v_row=15, v_col=64, blayout=row_major, slayout=none_box, fractal=512, pad=0>, !pto.tile_buf<loc=vec, dtype=f32, rows=16, cols=1, v_row=15, v_col=1, blayout=col_major, slayout=none_box, fractal=512, pad=0>) outs(%acc : !pto.tile_buf<loc=vec, dtype=f32, rows=16, cols=64, v_row=15, v_col=64, blayout=row_major, slayout=none_box, fractal=512, pad=0>)
+    return
+  }
+
+  // CHECK-LABEL: AICORE void pipev_noncontiguous_repeat_keep(
+  // CHECK: TADD(
+  // CHECK: pipe_barrier(PIPE_V);
+  // CHECK: TROWEXPANDDIV(
+  func.func @pipev_noncontiguous_repeat_keep() {
+    %c0_i64 = arith.constant 0 : i64
+    %c4096_i64 = arith.constant 4096 : i64
+    %c8192_i64 = arith.constant 8192 : i64
+    %acc = pto.alloc_tile addr = %c0_i64 : !pto.tile_buf<loc=vec, dtype=f32, rows=16, cols=128, v_row=15, v_col=65, blayout=row_major, slayout=none_box, fractal=512, pad=0>
+    %src1 = pto.alloc_tile addr = %c4096_i64 : !pto.tile_buf<loc=vec, dtype=f32, rows=16, cols=128, v_row=15, v_col=65, blayout=row_major, slayout=none_box, fractal=512, pad=0>
+    %scale = pto.alloc_tile addr = %c8192_i64 : !pto.tile_buf<loc=vec, dtype=f32, rows=16, cols=1, v_row=15, v_col=1, blayout=col_major, slayout=none_box, fractal=512, pad=0>
+    pto.tadd ins(%acc, %src1 : !pto.tile_buf<loc=vec, dtype=f32, rows=16, cols=128, v_row=15, v_col=65, blayout=row_major, slayout=none_box, fractal=512, pad=0>, !pto.tile_buf<loc=vec, dtype=f32, rows=16, cols=128, v_row=15, v_col=65, blayout=row_major, slayout=none_box, fractal=512, pad=0>) outs(%acc : !pto.tile_buf<loc=vec, dtype=f32, rows=16, cols=128, v_row=15, v_col=65, blayout=row_major, slayout=none_box, fractal=512, pad=0>)
+    pto.trowexpanddiv ins(%acc, %scale : !pto.tile_buf<loc=vec, dtype=f32, rows=16, cols=128, v_row=15, v_col=65, blayout=row_major, slayout=none_box, fractal=512, pad=0>, !pto.tile_buf<loc=vec, dtype=f32, rows=16, cols=1, v_row=15, v_col=1, blayout=col_major, slayout=none_box, fractal=512, pad=0>) outs(%acc : !pto.tile_buf<loc=vec, dtype=f32, rows=16, cols=128, v_row=15, v_col=65, blayout=row_major, slayout=none_box, fractal=512, pad=0>)
+    return
+  }
+
+  // CHECK-LABEL: AICORE void pipev_interleaved_disjoint_skip(
+  // CHECK: TADD(
+  // CHECK: TADD(
+  // CHECK-NOT: pipe_barrier(PIPE_V);
+  // CHECK: TROWEXPANDDIV(
+  func.func @pipev_interleaved_disjoint_skip() {
+    %c0_i64 = arith.constant 0 : i64
+    %c4096_i64 = arith.constant 4096 : i64
+    %c8192_i64 = arith.constant 8192 : i64
+    %c12288_i64 = arith.constant 12288 : i64
+    %c16384_i64 = arith.constant 16384 : i64
+    %acc = pto.alloc_tile addr = %c0_i64 : !pto.tile_buf<loc=vec, dtype=f32, rows=16, cols=64, v_row=16, v_col=64, blayout=row_major, slayout=none_box, fractal=512, pad=0>
+    %src1 = pto.alloc_tile addr = %c4096_i64 : !pto.tile_buf<loc=vec, dtype=f32, rows=16, cols=64, v_row=16, v_col=64, blayout=row_major, slayout=none_box, fractal=512, pad=0>
+    %scale = pto.alloc_tile addr = %c8192_i64 : !pto.tile_buf<loc=vec, dtype=f32, rows=16, cols=1, v_row=16, v_col=1, blayout=col_major, slayout=none_box, fractal=512, pad=0>
+    %tmp = pto.alloc_tile addr = %c12288_i64 : !pto.tile_buf<loc=vec, dtype=f32, rows=16, cols=64, v_row=16, v_col=64, blayout=row_major, slayout=none_box, fractal=512, pad=0>
+    %tmp_src = pto.alloc_tile addr = %c16384_i64 : !pto.tile_buf<loc=vec, dtype=f32, rows=16, cols=64, v_row=16, v_col=64, blayout=row_major, slayout=none_box, fractal=512, pad=0>
+    pto.tadd ins(%acc, %src1 : !pto.tile_buf<loc=vec, dtype=f32, rows=16, cols=64, v_row=16, v_col=64, blayout=row_major, slayout=none_box, fractal=512, pad=0>, !pto.tile_buf<loc=vec, dtype=f32, rows=16, cols=64, v_row=16, v_col=64, blayout=row_major, slayout=none_box, fractal=512, pad=0>) outs(%acc : !pto.tile_buf<loc=vec, dtype=f32, rows=16, cols=64, v_row=16, v_col=64, blayout=row_major, slayout=none_box, fractal=512, pad=0>)
+    pto.tadd ins(%tmp, %tmp_src : !pto.tile_buf<loc=vec, dtype=f32, rows=16, cols=64, v_row=16, v_col=64, blayout=row_major, slayout=none_box, fractal=512, pad=0>, !pto.tile_buf<loc=vec, dtype=f32, rows=16, cols=64, v_row=16, v_col=64, blayout=row_major, slayout=none_box, fractal=512, pad=0>) outs(%tmp : !pto.tile_buf<loc=vec, dtype=f32, rows=16, cols=64, v_row=16, v_col=64, blayout=row_major, slayout=none_box, fractal=512, pad=0>)
+    pto.trowexpanddiv ins(%acc, %scale : !pto.tile_buf<loc=vec, dtype=f32, rows=16, cols=64, v_row=16, v_col=64, blayout=row_major, slayout=none_box, fractal=512, pad=0>, !pto.tile_buf<loc=vec, dtype=f32, rows=16, cols=1, v_row=16, v_col=1, blayout=col_major, slayout=none_box, fractal=512, pad=0>) outs(%acc : !pto.tile_buf<loc=vec, dtype=f32, rows=16, cols=64, v_row=16, v_col=64, blayout=row_major, slayout=none_box, fractal=512, pad=0>)
+    return
+  }
+
+  // CHECK-LABEL: AICORE void pipev_mixed_tmp_waw_keep(
+  // CHECK: TROWEXPANDMUL(
+  // CHECK: pipe_barrier(PIPE_V);
+  // CHECK: TROWEXPANDDIV(
+  func.func @pipev_mixed_tmp_waw_keep() {
+    %c0_i64 = arith.constant 0 : i64
+    %c4096_i64 = arith.constant 4096 : i64
+    %c8192_i64 = arith.constant 8192 : i64
+    %c12288_i64 = arith.constant 12288 : i64
+    %acc = pto.alloc_tile addr = %c0_i64 : !pto.tile_buf<loc=vec, dtype=f32, rows=16, cols=64, v_row=16, v_col=64, blayout=row_major, slayout=none_box, fractal=512, pad=0>
+    %scale = pto.alloc_tile addr = %c4096_i64 : !pto.tile_buf<loc=vec, dtype=f32, rows=16, cols=1, v_row=16, v_col=1, blayout=col_major, slayout=none_box, fractal=512, pad=0>
+    %tmp = pto.alloc_tile addr = %c8192_i64 : !pto.tile_buf<loc=vec, dtype=f32, rows=16, cols=64, v_row=16, v_col=64, blayout=row_major, slayout=none_box, fractal=512, pad=0>
+    %scale2 = pto.alloc_tile addr = %c12288_i64 : !pto.tile_buf<loc=vec, dtype=f32, rows=16, cols=1, v_row=16, v_col=1, blayout=col_major, slayout=none_box, fractal=512, pad=0>
+    pto.trowexpandmul ins(%acc, %scale, %tmp : !pto.tile_buf<loc=vec, dtype=f32, rows=16, cols=64, v_row=16, v_col=64, blayout=row_major, slayout=none_box, fractal=512, pad=0>, !pto.tile_buf<loc=vec, dtype=f32, rows=16, cols=1, v_row=16, v_col=1, blayout=col_major, slayout=none_box, fractal=512, pad=0>, !pto.tile_buf<loc=vec, dtype=f32, rows=16, cols=64, v_row=16, v_col=64, blayout=row_major, slayout=none_box, fractal=512, pad=0>) outs(%acc : !pto.tile_buf<loc=vec, dtype=f32, rows=16, cols=64, v_row=16, v_col=64, blayout=row_major, slayout=none_box, fractal=512, pad=0>)
+    pto.trowexpanddiv ins(%acc, %scale2, %tmp : !pto.tile_buf<loc=vec, dtype=f32, rows=16, cols=64, v_row=16, v_col=64, blayout=row_major, slayout=none_box, fractal=512, pad=0>, !pto.tile_buf<loc=vec, dtype=f32, rows=16, cols=1, v_row=16, v_col=1, blayout=col_major, slayout=none_box, fractal=512, pad=0>, !pto.tile_buf<loc=vec, dtype=f32, rows=16, cols=64, v_row=16, v_col=64, blayout=row_major, slayout=none_box, fractal=512, pad=0>) outs(%acc : !pto.tile_buf<loc=vec, dtype=f32, rows=16, cols=64, v_row=16, v_col=64, blayout=row_major, slayout=none_box, fractal=512, pad=0>)
+    return
+  }
+}

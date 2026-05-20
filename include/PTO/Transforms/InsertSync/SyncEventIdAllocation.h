@@ -27,6 +27,8 @@ constexpr const uint kBlockSyncAllCubeEventId = 14;
 constexpr const uint kBlockSyncAllVectorEventId = 15;
 constexpr const uint kBlockSyncSetWaitEventIdNum = 16;
 constexpr const uint kMaxWidenTryNum = 99;
+constexpr const uint kReallocatedPipePairInlineCapacity = 16;
+constexpr const uint kReservedBlockSyncEventIdNum = 2;
  
 /// Event ID 生命周期池
 struct EventCyclePool {
@@ -110,7 +112,7 @@ private:
   SyncIRs &syncIR_;
   SyncOperations &syncOperations_;
   SyncCycle eventCyclePool;
-  llvm::SmallSet<int, 16> reallocatedPipePair;
+  llvm::SmallSet<int, kReallocatedPipePairInlineCapacity> reallocatedPipePair;
   llvm::DenseSet<SyncOperation *> insertedBackwardSync;
  
   static const llvm::DenseMap<std::pair<PipelineType, PipelineType>, uint64_t>

@@ -177,7 +177,6 @@ static LogicalResult collectPeerAwareInit(InitOpT initOp,
                                           SmallVectorImpl<PipeInitInfo> &initInfos,
                                           PipeInitGroups &keyedInits) {
   PipeInitInfo info = buildPipeInitInfo(initOp);
-
   if (info.globalOnly) {
     keyedInits[getGlobalTensorPipeKey(info)].push_back(info.op);
     initInfos.push_back(info);
@@ -506,7 +505,6 @@ struct PTOResolveReservedBuffersPass
 
   void runOnOperation() override {
     ModuleOp moduleOp = getOperation();
-
     if (failed(assignPeerAwareFlagBases(moduleOp)) ||
         failed(materializeResolvedAddresses(moduleOp))) {
       signalPassFailure();

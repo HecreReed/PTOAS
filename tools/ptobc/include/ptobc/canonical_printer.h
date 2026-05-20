@@ -32,7 +32,6 @@ struct CanonicalPrintOptions {
 };
 
 /// Print a ModuleOp in a canonical, parseable `.pto` form.
-///
 /// Today this is implemented as: MLIR pretty printer + targeted canonicalization
 /// of scalar float constants.
 std::string printModuleCanonical(mlir::ModuleOp module,

@@ -37,7 +37,10 @@ public:
       syncIR_(syncIR), 
       buffer2MemInfoMap_(buffer2MemInfoMap),
       memAnalyzer_(memDepAnalyzer),
-      mode_(syncAnalysisMode) { };
+      mode_(syncAnalysisMode) {
+    (void)memAnalyzer_;
+    (void)mode_;
+  };
  
   // 核心入口：执行 IR 分析和转换
   void Build();
@@ -73,6 +76,9 @@ private:
   
   // 处理 View/Alias (MakeTensorView, Subview, Mov)
   void UpdateAliasBufferInfo(Value result, Value source);
+  void UpdateConservativeAliasBufferInfo(Value result, Value source);
+  void UpdateMemrefSubViewAliasBufferInfo(memref::SubViewOp op);
+  void UpdateTileSubViewAliasBufferInfo(pto::SubViewOp op);
  
   // --- 控制流处理 (SCF) ---
   void UpdateForOpInfo(scf::ForOp forOp);

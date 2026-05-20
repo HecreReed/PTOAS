@@ -876,7 +876,6 @@ static void bindPTOModule(pybind11::module &m) {
             py::object validShapeObj,
             py::object configObj,
             MlirContext ctx) -> py::object {
-
             // 1) 计算 validShape（默认=shape）
             std::vector<int64_t> validShape = shape;
 

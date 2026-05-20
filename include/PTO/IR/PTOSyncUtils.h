@@ -18,10 +18,9 @@
 namespace mlir {
 namespace pto {
 
-/// Parse a sync endpoint-like attribute used by high-level sync operations.
-/// Supported attribute kinds are:
-///   - pto.pipe_event_type<...>
-///   - pto.sync_op_type<...>
+// Parse a sync endpoint-like attribute used by high-level sync operations.
+// Accepted forms include `pto.pipe_event_type<...>` and
+// `pto.sync_op_type<...>`.
 FailureOr<SyncOpType> parseSyncOpTypeLikeAttr(Attribute attr);
 
 /// Map high-level sync operation type to concrete hardware PIPE.

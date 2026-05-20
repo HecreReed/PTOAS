@@ -279,6 +279,15 @@ PTO_ISA_ROOT="${ASCEND_HOME_PATH}/include/pto"
 # Allow CI to vendor a pto-isa working tree into the payload (no `.git`).
 # This avoids requiring outbound GitHub connectivity on the remote NPU host.
 
+pto_isa_has_symbol() {
+  local symbol="$1"
+  [[ -n "${symbol}" ]] || return 1
+  find "${PTO_ISA_ROOT}/include" "${PTO_ISA_ROOT}/tests" \
+    -type f \( -name '*.h' -o -name '*.hpp' -o -name '*.cpp' -o -name '*.cc' \) \
+    -print0 2>/dev/null \
+    | xargs -0 grep -F -q "${symbol}"
+}
+
 status=0
 ok_count=0
 fail_count=0
@@ -313,6 +322,12 @@ while IFS= read -r -d '' cpp; do
     skip_count=$((skip_count + 1))
     printf "%s\tSKIP\t%s\tlisted in SKIP_CASES\n" "${testcase}" "${STAGE}" >> "${RESULTS_TSV}"
     log "SKIP: ${testcase} (SKIP_CASES)"
+    continue
+  fi
+  if [[ "${testcase}" == "partarg" ]] && ! pto_isa_has_symbol "TPARTARGMAX("; then
+    skip_count=$((skip_count + 1))
+    printf "%s\tSKIP\t%s\tpto-isa missing TPARTARGMAX/TPARTARGMIN\n" "${testcase}" "${STAGE}" >> "${RESULTS_TSV}"
+    log "SKIP: ${testcase} (pto-isa missing TPARTARG intrinsics)"
     continue
   fi
   if [[ "${testcase}" == "gemvmx" ]]; then

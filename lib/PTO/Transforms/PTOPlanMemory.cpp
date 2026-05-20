@@ -339,7 +339,6 @@ static LogicalResult assignAutoReserveBufferBases(
       candidateBase = std::max(candidateBase, range.end);
     }
     candidateBase = alignUpBytes(candidateBase, plan.alignBytes);
-
     if (candidateBase + plan.sizeBytes > plan.capacityBytes) {
       return plan.reserveOp.emitOpError(
           "failed to allocate local memory hole for reserve_buffer");
@@ -1474,6 +1473,7 @@ void MemPlan::MemLifeDebugInfo(StorageEntry *storageEntry) {
     }
   }
   for (auto &bufferLife : storageEntry->bufferLifeVec) {
+    (void)bufferLife;
     LDBG("bufferLife : "
          << "allocTime : " << bufferLife->allocTime
          << " , freeTime : " << bufferLife->freeTime << "\n");
@@ -2079,11 +2079,14 @@ void MemPlan::ReportAllocatedEntryDebugInfo(StorageEntry *rootStorageEntry) {
         (entry->alignedConstBits + kBitsToByte - 1) / kBitsToByte;
     uint64_t offsetByte =
         (entry->bitsOffset + kBitsToByte - 1) / kBitsToByte;
+    (void)needByte;
+    (void)offsetByte;
     ReportCurEntryDebugInfo(entry);
     LDBG(", offset: " << offsetByte);
     LDBG(", extent: " << needByte);
     LDBG(", buffer life: ");
     for (auto &bufferLife : entry->bufferLifeVec) {
+      (void)bufferLife;
       LDBG("[" << bufferLife->allocTime << "-" << bufferLife->freeTime
                << "], ");
     }

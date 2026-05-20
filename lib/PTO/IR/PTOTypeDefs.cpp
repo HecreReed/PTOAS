@@ -20,6 +20,14 @@ namespace {
 std::mutex parserTargetArchMutex;
 std::unordered_map<const MLIRContext *, PTOParserTargetArch>
     parserTargetArchByContext;
+
+constexpr unsigned kTileBufRank2D = 2;
+constexpr unsigned kTileBufValidShapeInlineCapacity = 4;
+constexpr unsigned kI32BitWidth = 32;
+
+using TileBufShape = SmallVector<int64_t, kTileBufRank2D>;
+using TileBufValidShapeVector =
+    SmallVector<int64_t, kTileBufValidShapeInlineCapacity>;
 }
 
 void mlir::pto::setPTOParserTargetArch(MLIRContext *context,
@@ -56,8 +64,9 @@ mlir::pto::ScopedPTOParserTargetArch::~ScopedPTOParserTargetArch() {
   setPTOParserTargetArch(context, previousArch);
 }
 
-static SmallVector<int64_t, 4> canonicalizeTileBufValidShape(ArrayRef<int64_t> validShape) {
-  SmallVector<int64_t, 4> canonical;
+static TileBufValidShapeVector
+canonicalizeTileBufValidShape(ArrayRef<int64_t> validShape) {
+  TileBufValidShapeVector canonical;
   canonical.reserve(validShape.size());
   for (int64_t dim : validShape)
     canonical.push_back(dim < 0 ? ShapedType::kDynamic : dim);
@@ -293,12 +302,12 @@ static LogicalResult parseCompactTileBufFields(AsmParser &parser,
   if (failed(parser.parseComma()))
     return failure();
 
-  SmallVector<int64_t, 2> shape;
+  TileBufShape shape;
   if (failed(parser.parseDimensionList(shape, /*allowDynamic=*/false)))
     return failure();
   if (failed(parser.parseType(fields.dtype)))
     return failure();
-  if (shape.size() != 2) {
+  if (shape.size() != kTileBufRank2D) {
     parser.emitError(parser.getCurrentLocation(),
                      "tile_buf compact syntax expects exactly two shape dims");
     return failure();
@@ -346,12 +355,12 @@ static LogicalResult parseCompactTileBufFields(AsmParser &parser,
       }
       seenValid = true;
 
-      SmallVector<int64_t, 2> validShape;
+      TileBufShape validShape;
       if (failed(parser.parseDimensionList(validShape, /*allowDynamic=*/true,
                                            /*withTrailingX=*/false))) {
         return failure();
       }
-      if (validShape.size() != 2) {
+      if (validShape.size() != kTileBufRank2D) {
         parser.emitError(parser.getCurrentLocation(),
                          "tile_buf valid must have exactly two dims");
         return failure();
@@ -476,15 +485,15 @@ static Type buildTileBufType(AsmParser &parser,
   auto blAttr = BLayoutAttr::get(ctx, effectiveBLayout);
   auto slAttr = SLayoutAttr::get(ctx, sl.value());
   auto fractalAttr =
-      IntegerAttr::get(IntegerType::get(ctx, 32), fields.fractal);
+      IntegerAttr::get(IntegerType::get(ctx, kI32BitWidth), fields.fractal);
   auto padAttr = PadValueAttr::get(ctx, pv.value());
   auto compactAttr = CompactModeAttr::get(ctx, compact.value());
   auto memorySpaceAttr = AddressSpaceAttr::get(ctx, memorySpace.value());
   auto cfg = TileBufConfigAttr::get(ctx, blAttr, slAttr, fractalAttr, padAttr,
                                     compactAttr);
 
-  SmallVector<int64_t, 2> shape{fields.rows, fields.cols};
-  SmallVector<int64_t, 2> validShape{fields.vrow, fields.vcol};
+  TileBufShape shape{fields.rows, fields.cols};
+  TileBufShape validShape{fields.vrow, fields.vcol};
   auto canonicalValidShape = canonicalizeTileBufValidShape(validShape);
 
   return TileBufType::get(ctx, shape, fields.dtype, memorySpaceAttr,
@@ -530,6 +539,9 @@ Type TileBufType::parse(AsmParser &parser) {
 static llvm::StringRef stringifyLocFromMemorySpace(mlir::Attribute memorySpace) {
   auto asAttr = llvm::dyn_cast_or_null<AddressSpaceAttr>(memorySpace);
   switch (asAttr.getAddressSpace()) {
+    case AddressSpace::Zero:
+    case AddressSpace::GM:
+      return "illegal";
     case AddressSpace::MAT: return "mat";
     case AddressSpace::LEFT: return "left";
     case AddressSpace::RIGHT: return "right";
@@ -537,8 +549,8 @@ static llvm::StringRef stringifyLocFromMemorySpace(mlir::Attribute memorySpace) 
     case AddressSpace::VEC: return "vec";
     case AddressSpace::BIAS: return "bias";
     case AddressSpace::SCALING: return "scaling";
-    default: return "illegal";
   }
+  return "illegal";
 }
 
 static llvm::StringRef stringifyLocFromPad(mlir::Attribute pad) {
@@ -550,9 +562,8 @@ static llvm::StringRef stringifyLocFromPad(mlir::Attribute pad) {
     case PadValue::Zero: return "1";
     case PadValue::Max: return "2";
     case PadValue::Min: return "3";
-    default:
-      return "9999";
   }
+  return "9999";
 }
 
 static llvm::StringRef stringifyCompactModeInt(mlir::Attribute compactMode) {
@@ -567,9 +578,8 @@ static llvm::StringRef stringifyCompactModeInt(mlir::Attribute compactMode) {
     return "1";
   case CompactMode::RowPlusOne:
     return "2";
-  default:
-    return "9999";
   }
+  return "9999";
 }
 
 static void printTileBufDim(AsmPrinter &printer, int64_t dim) {
@@ -603,7 +613,7 @@ void mlir::pto::TileBufType::print(mlir::AsmPrinter &printer) const {
   auto vs = getValidShape();
   int64_t vrow = rows;
   int64_t vcol = cols;
-  if (vs.size() >= 2) {
+  if (vs.size() >= kTileBufRank2D) {
     vrow = vs[0];
     vcol = vs[1];
   }

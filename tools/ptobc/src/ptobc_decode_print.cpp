@@ -29,6 +29,7 @@
 
 #include <llvm/Support/raw_ostream.h>
 
+#include <climits>
 #include <cstdlib>
 #include <cstring>
 #include <fstream>
@@ -45,6 +46,18 @@ static bool debugEnabled() {
   return std::getenv("PTOBC_DEBUG") != nullptr;
 }
 
+constexpr unsigned kBitsPerByte = CHAR_BIT;
+constexpr unsigned kWordInlineCapacity = 4;
+constexpr unsigned kValueIdInlineCapacity = 8;
+constexpr unsigned kOperandInlineCapacity = 8;
+constexpr unsigned kResultTypeInlineCapacity = 4;
+constexpr size_t kBytesPerWord = sizeof(uint64_t);
+constexpr char kPTOBCMagic[] = "PTOBC\0";
+constexpr size_t kPTOBCMagicSize = 6;
+constexpr size_t kPTOBCHeaderSize = 14;
+constexpr size_t kPTOBCVersionOffset = 6;
+constexpr size_t kPTOBCPayloadLengthOffset = 10;
+
 struct Reader {
   const uint8_t* p;
   const uint8_t* end;
@@ -56,14 +69,16 @@ struct Reader {
   uint16_t readU16LE() {
     uint16_t lo = readU8();
     uint16_t hi = readU8();
-    return lo | (hi << 8);
+    return lo | (hi << kBitsPerByte);
   }
   uint32_t readU32LE() {
     uint32_t b0 = readU8();
     uint32_t b1 = readU8();
     uint32_t b2 = readU8();
     uint32_t b3 = readU8();
-    return b0 | (b1 << 8) | (b2 << 16) | (b3 << 24);
+    return b0 | (b1 << kBitsPerByte) |
+           (b2 << (kBitsPerByte * 2U)) |
+           (b3 << (kBitsPerByte * 3U));
   }
   uint64_t readULEB() {
     uint64_t v;
@@ -303,10 +318,10 @@ static void buildRegionInto(BuildCtx& bc, Reader& r, mlir::Region& region);
 static llvm::APInt rebuildAPIntFromBytes(llvm::ArrayRef<uint8_t> bytes,
                                          unsigned bitWidth) {
   const unsigned numWords = (bitWidth + 63) / 64;
-  llvm::SmallVector<uint64_t, 4> words(numWords, 0);
+  llvm::SmallVector<uint64_t, kWordInlineCapacity> words(numWords, 0);
   for (unsigned i = 0; i < bytes.size(); ++i) {
-    unsigned word = i / 8;
-    unsigned off = (i % 8) * 8;
+    unsigned word = i / kBytesPerWord;
+    unsigned off = (i % kBytesPerWord) * kBitsPerByte;
     words[word] |= (uint64_t(bytes[i]) << off);
   }
   return llvm::APInt(bitWidth, words);
@@ -389,8 +404,9 @@ static void assignDecodedResults(BuildCtx &bc, size_t resStart,
     bc.values[resStart + i] = op->getResult(i);
 }
 
-static llvm::SmallVector<uint64_t, 8> readValueIds(Reader &r, size_t count) {
-  llvm::SmallVector<uint64_t, 8> ids;
+static llvm::SmallVector<uint64_t, kValueIdInlineCapacity>
+readValueIds(Reader &r, size_t count) {
+  llvm::SmallVector<uint64_t, kValueIdInlineCapacity> ids;
   ids.reserve(count);
   for (size_t i = 0; i < count; ++i)
     ids.push_back(r.readULEB());
@@ -440,38 +456,47 @@ static KnownOpImmediates readKnownOpImmediates(Reader &r,
   }
 }
 
-static llvm::SmallVector<uint64_t, 8>
+static llvm::SmallVector<uint64_t, kValueIdInlineCapacity>
 readKnownOperandIds(BuildCtx &bc, Reader &r, uint16_t opcode, uint8_t variant,
                     const ptobc::v0::OpInfo &info,
                     const KnownOpImmediates &imms) {
+  auto reorderLegacyIndexedTscatter = [&](llvm::SmallVector<uint64_t, 8> ids) {
+    if (opcode != 0x1056 || ids.size() != 3)
+      return ids;
+    // Historical v0 indexed tscatter payload is (src, indexes, dst), while the
+    // current IR operand order is (src, dst, indexes).
+    return llvm::SmallVector<uint64_t, 8>{ids[0], ids[2], ids[1]};
+  };
   switch (info.operand_mode) {
   case 0x00:
-    return readValueIds(r, info.num_operands);
+    return reorderLegacyIndexedTscatter(readValueIds(r, info.num_operands));
   case 0x01: {
     auto count = ptobc::v0::lookupOperandsByVariant(opcode, variant);
     if (!count)
       throw std::runtime_error("missing by-variant operand count");
-    return readValueIds(r, *count);
+    return reorderLegacyIndexedTscatter(readValueIds(r, *count));
   }
   case 0x02:
-    return readValueIds(r, r.readULEB());
+    return reorderLegacyIndexedTscatter(readValueIds(r, r.readULEB()));
   case 0x03:
     if (imms.listMode != 0)
       throw std::runtime_error("list_mode=1 not supported yet");
-    return readValueIds(r, size_t(info.num_operands) + size_t(imms.n1) +
-                               size_t(imms.n2));
+    return reorderLegacyIndexedTscatter(
+        readValueIds(r, size_t(info.num_operands) + size_t(imms.n1) +
+                            size_t(imms.n2)));
   case 0x04:
-    return readValueIds(r, ((imms.optMask & 0x1) ? 1 : 0) +
-                               ((imms.optMask & 0x2) ? 1 : 0));
+    return reorderLegacyIndexedTscatter(
+        readValueIds(r, ((imms.optMask & 0x1) ? 1 : 0) +
+                            ((imms.optMask & 0x2) ? 1 : 0)));
   default:
     (void)bc;
     throw std::runtime_error("unknown operand_mode");
   }
 }
 
-static llvm::SmallVector<mlir::Value, 8>
+static llvm::SmallVector<mlir::Value, kOperandInlineCapacity>
 materializeOperands(BuildCtx &bc, llvm::ArrayRef<uint64_t> operandIds) {
-  llvm::SmallVector<mlir::Value, 8> operands;
+  llvm::SmallVector<mlir::Value, kOperandInlineCapacity> operands;
   operands.reserve(operandIds.size());
   for (uint64_t valueId : operandIds) {
     if (valueId >= bc.values.size())
@@ -491,7 +516,7 @@ static mlir::Operation *buildGenericOpFromReader(BuildCtx &bc, Reader &r,
   std::string opName = (*bc.strings)[nameSid];
 
   uint64_t nres = r.readULEB();
-  llvm::SmallVector<mlir::Type, 4> resultTypes;
+  llvm::SmallVector<mlir::Type, kResultTypeInlineCapacity> resultTypes;
   resultTypes.reserve(nres);
 
   const size_t resStart = bc.values.size();
@@ -560,7 +585,7 @@ static mlir::Operation *buildKnownOpFromReader(BuildCtx &bc, Reader &r,
   auto operands = materializeOperands(bc, operandIds);
 
   uint64_t numResults = info->num_results;
-  llvm::SmallVector<mlir::Type, 4> resultTypes;
+  llvm::SmallVector<mlir::Type, kResultTypeInlineCapacity> resultTypes;
   switch (info->result_type_mode) {
   case 0x00:
     resultTypes.reserve(numResults);
@@ -808,17 +833,24 @@ static void applyDebugLocations(mlir::MLIRContext &ctx,
 mlir::OwningOpRef<mlir::ModuleOp>
 decodePTOBCToModule(llvm::ArrayRef<uint8_t> fileBytes, mlir::MLIRContext &ctx) {
   const bool dbg = debugEnabled();
+  if (fileBytes.size() < kPTOBCHeaderSize)
+    throw std::runtime_error("file too small");
+  if (std::memcmp(fileBytes.data(), kPTOBCMagic, kPTOBCMagicSize) != 0)
+    throw std::runtime_error("bad magic");
 
-  if (fileBytes.size() < 14) throw std::runtime_error("file too small");
-  if (std::memcmp(fileBytes.data(), "PTOBC\0", 6) != 0) throw std::runtime_error("bad magic");
-
-  uint16_t ver = uint16_t(fileBytes[6]) | (uint16_t(fileBytes[7]) << 8);
+  Reader versionReader{fileBytes.data() + kPTOBCVersionOffset,
+                       fileBytes.data() + fileBytes.size()};
+  uint16_t ver = versionReader.readU16LE();
   if (ver != kVersionV0) throw std::runtime_error("unsupported version");
 
-  uint32_t payloadLen = uint32_t(fileBytes[10]) | (uint32_t(fileBytes[11]) << 8) | (uint32_t(fileBytes[12]) << 16) | (uint32_t(fileBytes[13]) << 24);
-  if (payloadLen != fileBytes.size() - 14) throw std::runtime_error("payload_len mismatch");
+  Reader payloadLengthReader{fileBytes.data() + kPTOBCPayloadLengthOffset,
+                             fileBytes.data() + fileBytes.size()};
+  uint32_t payloadLen = payloadLengthReader.readU32LE();
+  if (payloadLen != fileBytes.size() - kPTOBCHeaderSize)
+    throw std::runtime_error("payload_len mismatch");
 
-  Reader r{fileBytes.data() + 14, fileBytes.data() + fileBytes.size()};
+  Reader r{fileBytes.data() + kPTOBCHeaderSize,
+           fileBytes.data() + fileBytes.size()};
   auto [s1, d1] = readSection(r, dbg);
   auto [s2, d2] = readSection(r, dbg);
   auto [s3, d3] = readSection(r, dbg);
@@ -876,7 +908,6 @@ decodePTOBCToModule(llvm::ArrayRef<uint8_t> fileBytes, mlir::MLIRContext &ctx) {
 
 void decodeFileToPTO(const std::string& inPath, const std::string& outPath) {
   const bool dbg = debugEnabled();
-
   if (dbg) llvm::errs() << "[ptobc] decode: reading file: " << inPath << "\n";
   auto data = readFile(inPath);
 
