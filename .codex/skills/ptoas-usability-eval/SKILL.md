@@ -16,7 +16,7 @@ description: Evaluate PTOAS repository usability across scene 01 as the primary 
 - `06 泛化 shape 性能优化`：纳入，但只评 PTOAS 的 dynamic/valid-shape、多 shape 样例与验证支撑能力。
 - `03 builtin 算子定制修改`：默认不纳入量化，标 `N/A`；必要时只做差距说明。
 
-先读 [references/scope.md](references/scope.md) 确认各场景的边界和 `未实测/N/A` 规则。
+先读 [references/touchpoint-selection.md](references/touchpoint-selection.md) 选定适用触点，再读 [references/scope.md](references/scope.md) 确认各场景的边界和 `未实测/N/A` 规则。
 
 ## 先判层级
 
@@ -54,19 +54,20 @@ description: Evaluate PTOAS repository usability across scene 01 as the primary 
 
 1. 先判断用户要的是 `01`、`02`、`04`、`05`、`06` 中哪些场景；未说明时默认 `01`。
 2. 再判断本次覆盖层级：`L1/L2/L3/L4`。输出中必须显式写出来。
-3. 从仓库内收集证据，记录每次检索轮次、文档跳转次数、执行命令、耗时、成功/失败结果。
-4. `01` 场景读 [references/metrics-01.md](references/metrics-01.md)。
-5. `02` 场景读 [references/metrics-02.md](references/metrics-02.md)。
-6. `04` 场景读 [references/metrics-04.md](references/metrics-04.md)。
-7. `05` 场景读 [references/metrics-05.md](references/metrics-05.md)。
-8. `06` 场景读 [references/metrics-06.md](references/metrics-06.md)。
-9. 需要汇总总分时，读 [references/scoring.md](references/scoring.md)。
-10. 对每个指标都输出：原始观测值、评分、证据路径、说明。没有实测的数据不要猜，记为 `未实测` 或 `N/A`。
-11. 明确区分：
+3. 先读 [references/touchpoint-selection.md](references/touchpoint-selection.md)，按场景选定本次的 `Core / Conditional / Excluded` 触点。
+4. 从仓库内收集证据，记录每次检索轮次、文档跳转次数、执行命令、耗时、成功/失败结果。
+5. `01` 场景读 [references/metrics-01.md](references/metrics-01.md)。
+6. `02` 场景读 [references/metrics-02.md](references/metrics-02.md)。
+7. `04` 场景读 [references/metrics-04.md](references/metrics-04.md)。
+8. `05` 场景读 [references/metrics-05.md](references/metrics-05.md)。
+9. `06` 场景读 [references/metrics-06.md](references/metrics-06.md)。
+10. 需要汇总总分时，读 [references/scoring.md](references/scoring.md)。
+11. 对每个指标都输出：原始观测值、评分、证据路径、说明。没有实测的数据不要猜，记为 `未实测` 或 `N/A`。
+12. 明确区分：
     - PTOAS 仓库已提供的能力
     - 外部前置条件，例如 LLVM、CANN、`pto-isa`、NPU、驱动/权限、业务 baseline
-12. 若文档描述与实际运行冲突，以实际命令结果为准，并指出冲突位置。
-13. 默认给两个总分：`总分（支撑）` 和 `总分（实测）`。如果用户只要分项，不强制输出总分。
+13. 若文档描述与实际运行冲突，以实际命令结果为准，并指出冲突位置。
+14. 默认给两个总分：`总分（支撑）` 和 `总分（实测）`。如果用户只要分项，不强制输出总分。
 
 ## 计量规则
 
@@ -84,13 +85,14 @@ description: Evaluate PTOAS repository usability across scene 01 as the primary 
 按下面顺序输出：
 
 1. `评估范围`
-2. `评估层级`
-3. `总分（支撑）`
-4. `总分（实测）`
-5. `分场景评分`
-6. `覆盖说明`
-7. `关键证据`
-8. `主要短板`
-9. `建议动作`
+2. `触点选择`
+3. `评估层级`
+4. `总分（支撑）`
+5. `总分（实测）`
+6. `分场景评分`
+7. `覆盖说明`
+8. `关键证据`
+9. `主要短板`
+10. `建议动作`
 
 如果用户只要简版结论，也要至少保留：场景归类、评估层级、总评、最低分项、证据路径。
