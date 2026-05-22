@@ -32,6 +32,11 @@ using namespace mlir;
 using namespace mlir::pto;
 using namespace mlir::pto::syncsolver;
 
+namespace {
+constexpr unsigned kMemoryEffectInlineCapacity = 4;
+constexpr int64_t kBalancedOccurrenceSplitFactor = 2;
+} // namespace
+
 llvm::SmallVector<Value> IRTranslator::tracebackMemValsStep(Value val) {
   llvm::SmallVector<Value> out;
   if (auto blockArg = dyn_cast<BlockArgument>(val)) {
@@ -134,7 +139,9 @@ IRTranslator::getReadWriteMemoryOps(Operation *op) {
   llvm::SmallVector<Value> writes;
 
   if (auto memEffect = dyn_cast<MemoryEffectOpInterface>(op)) {
-    SmallVector<SideEffects::EffectInstance<MemoryEffects::Effect>, 4> effects;
+    SmallVector<SideEffects::EffectInstance<MemoryEffects::Effect>,
+                kMemoryEffectInlineCapacity>
+        effects;
     memEffect.getEffects(effects);
     for (auto &effect : effects) {
       Value value = effect.getValue();
@@ -387,11 +394,12 @@ void IRTranslator::generateProcessingOrders(Scope *scopeOp, Occurrence *occ,
 void IRTranslator::generateProcessingOrders(Loop *loopOp, Occurrence *occ,
                                             bool isUseless) {
   int64_t childNum = static_cast<int64_t>(occ->childOccs.size());
-  if (childNum == 0 || childNum % 2 != 0)
+  if (childNum == 0 || childNum % kBalancedOccurrenceSplitFactor != 0)
     return;
+  int64_t halfChildNum = childNum / kBalancedOccurrenceSplitFactor;
   SmallVector<Occurrence *> first(occ->childOccs.begin(),
-                                  occ->childOccs.begin() + childNum / 2);
-  SmallVector<Occurrence *> second(occ->childOccs.begin() + childNum / 2,
+                                  occ->childOccs.begin() + halfChildNum);
+  SmallVector<Occurrence *> second(occ->childOccs.begin() + halfChildNum,
                                    occ->childOccs.end());
   generateProcessingOrders(first, isUseless);
   generateProcessingOrders(second, /*isUseless=*/true);

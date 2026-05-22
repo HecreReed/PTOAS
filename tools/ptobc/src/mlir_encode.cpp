@@ -39,6 +39,32 @@
 
 namespace ptobc {
 
+namespace {
+
+constexpr unsigned kNamedAttributeInlineCapacity = 8;
+constexpr unsigned kDigitInlineCapacity = 32;
+constexpr unsigned kWordInlineCapacity = 4;
+constexpr unsigned kFunctionInlineCapacity = 8;
+constexpr unsigned kHexadecimalRadix = 16;
+constexpr unsigned kDecimalRadix = 10;
+constexpr uint8_t kDefaultModuleIndexWidth = 64;
+constexpr size_t kSegmentedOperandImmediateCount = 3;
+constexpr uint8_t kCmpPredicateEqEncoding = 0;
+constexpr uint8_t kCmpPredicateNeEncoding = 1;
+constexpr uint8_t kCmpPredicateSltEncoding = 2;
+constexpr uint8_t kCmpPredicateSleEncoding = 3;
+constexpr uint8_t kCmpPredicateSgtEncoding = 4;
+constexpr uint8_t kCmpPredicateSgeEncoding = 5;
+
+using NamedAttributeVector =
+    llvm::SmallVector<mlir::NamedAttribute, kNamedAttributeInlineCapacity>;
+using DigitBuffer = llvm::SmallVector<char, kDigitInlineCapacity>;
+using WordVector = llvm::SmallVector<uint64_t, kWordInlineCapacity>;
+using FunctionVector = llvm::SmallVector<mlir::func::FuncOp,
+                                         kFunctionInlineCapacity>;
+
+} // namespace
+
 static uint64_t internType(PTOBCFile& f, mlir::Type t) {
   std::string s = printType(t);
   f.strings.intern(s);
@@ -50,16 +76,37 @@ static uint64_t internType(PTOBCFile& f, mlir::Type t) {
   return f.typeAsm.size();
 }
 
-static mlir::DictionaryAttr stripAttr(mlir::MLIRContext *ctx, mlir::DictionaryAttr dict, llvm::StringRef key) {
-  if (!dict) return dict;
-  if (!dict.get(key)) return dict;
+static mlir::DictionaryAttr stripAttrs(mlir::MLIRContext *ctx,
+                                       mlir::DictionaryAttr dict,
+                                       llvm::ArrayRef<llvm::StringRef> keys) {
+  if (!dict || dict.empty() || keys.empty())
+    return dict;
+
   llvm::SmallVector<mlir::NamedAttribute, 8> keep;
   keep.reserve(dict.size());
   for (auto na : dict) {
-    if (na.getName().getValue() == key) continue;
+    if (llvm::is_contained(keys, na.getName().getValue()))
+      continue;
     keep.push_back(na);
   }
+  if (keep.size() == dict.size())
+    return dict;
   return mlir::DictionaryAttr::get(ctx, keep);
+}
+
+static mlir::DictionaryAttr stripKnownImmediateAttrs(
+    mlir::MLIRContext *ctx, mlir::DictionaryAttr dict,
+    const ptobc::v0::OpInfo &info) {
+  switch (info.imm_kind) {
+  case 0x01:
+    return stripAttrs(ctx, dict, {"predicate"});
+  case 0x02:
+    return stripAttrs(ctx, dict, {"src_op", "dst_op", "event_id"});
+  case 0x05:
+    return stripAttrs(ctx, dict, {"value"});
+  default:
+    return dict;
+  }
 }
 
 static uint64_t internAttr(PTOBCFile& f, mlir::DictionaryAttr dict) {
@@ -74,28 +121,29 @@ static uint64_t internAttr(PTOBCFile& f, mlir::DictionaryAttr dict) {
 }
 
 static std::string hexFloatLiteral(mlir::FloatAttr a) {
-  llvm::SmallVector<char, 32> digits;
+  DigitBuffer digits;
   llvm::APInt bits = a.getValue().bitcastToAPInt();
-  bits.toString(digits, /*Radix=*/16, /*Signed=*/false, /*formatAsCLiteral=*/true);
+  bits.toString(digits, /*Radix=*/kHexadecimalRadix, /*Signed=*/false,
+                /*formatAsCLiteral=*/true);
   return std::string(digits.data(), digits.size());
 }
 
 static std::string apIntToSignedDecimal(const llvm::APInt &v) {
-  llvm::SmallVector<char, 32> digits;
-  v.toString(digits, /*Radix=*/10, /*Signed=*/true, /*formatAsCLiteral=*/false);
+  DigitBuffer digits;
+  v.toString(digits, /*Radix=*/kDecimalRadix, /*Signed=*/true,
+             /*formatAsCLiteral=*/false);
   return std::string(digits.data(), digits.size());
 }
 
-static llvm::SmallVector<uint64_t, 4> copyAPIntWords(const llvm::APInt &bits) {
-  return llvm::SmallVector<uint64_t, 4>(bits.getRawData(),
-                                        bits.getRawData() + bits.getNumWords());
+static WordVector copyAPIntWords(const llvm::APInt &bits) {
+  return WordVector(bits.getRawData(), bits.getRawData() + bits.getNumWords());
 }
 
 static void appendAPIntBytesLE(Buffer &buffer, const llvm::APInt &bits) {
   const unsigned byteLen = (bits.getBitWidth() + 7) / 8;
   writeULEB128(byteLen, buffer.bytes);
 
-  llvm::SmallVector<uint64_t, 4> words = copyAPIntWords(bits);
+  WordVector words = copyAPIntWords(bits);
   for (unsigned i = 0; i < byteLen; ++i) {
     unsigned word = i / 8;
     unsigned off = (i % 8) * 8;
@@ -308,22 +356,22 @@ void Encoder::encodeKnownOpImmediates(
     uint8_t predicate = 0;
     switch (cmp.getPredicate()) {
     case mlir::arith::CmpIPredicate::eq:
-      predicate = 0;
+      predicate = kCmpPredicateEqEncoding;
       break;
     case mlir::arith::CmpIPredicate::ne:
-      predicate = 1;
+      predicate = kCmpPredicateNeEncoding;
       break;
     case mlir::arith::CmpIPredicate::slt:
-      predicate = 2;
+      predicate = kCmpPredicateSltEncoding;
       break;
     case mlir::arith::CmpIPredicate::sle:
-      predicate = 3;
+      predicate = kCmpPredicateSleEncoding;
       break;
     case mlir::arith::CmpIPredicate::sgt:
-      predicate = 4;
+      predicate = kCmpPredicateSgtEncoding;
       break;
     case mlir::arith::CmpIPredicate::sge:
-      predicate = 5;
+      predicate = kCmpPredicateSgeEncoding;
       break;
     default:
       throw std::runtime_error(
@@ -468,7 +516,7 @@ void Encoder::encodeKnownOpOperands(
       writeULEB128(getValueId(value), out.bytes);
     return;
   case 0x03: {
-    if (imms.size() < 3)
+    if (imms.size() < kSegmentedOperandImmediateCount)
       throw std::runtime_error("segmented operands missing immediates");
     if (imms[0] != 0)
       throw std::runtime_error(
@@ -496,14 +544,13 @@ void Encoder::encodeKnownOp(mlir::Operation &op, Buffer &out,
 
   out.appendU16LE(variantInfo.opcode);
   mlir::DictionaryAttr dict = op.getAttrDictionary();
-  if (llvm::isa<mlir::arith::ConstantOp>(&op))
-    dict = stripAttr(op.getContext(), dict, "value");
+  dict = stripKnownImmediateAttrs(op.getContext(), dict, info);
   writeULEB128(internAttr(file, dict), out.bytes);
 
   if (info.has_variant_u8)
     out.appendU8(variantInfo.variant);
 
-  llvm::SmallVector<uint64_t, 4> imms;
+  WordVector imms;
   encodeKnownOpImmediates(op, out, info, variantInfo, imms);
   encodeKnownOpOperands(op, out, info, variantInfo, imms);
 
@@ -604,7 +651,7 @@ PTOBCFile encodeFromMLIRModule(mlir::ModuleOp module) {
   Buffer m;
   // profile_id=0 (unspecified), index_width=64
   m.appendU8(0);
-  m.appendU8(64);
+  m.appendU8(kDefaultModuleIndexWidth);
 
   // module_attr_id
   uint64_t modAttrId = internAttr(enc.file, module->getAttrDictionary());
@@ -614,7 +661,7 @@ PTOBCFile encodeFromMLIRModule(mlir::ModuleOp module) {
   writeULEB128(0, m.bytes);
 
   // function decls (top-level order)
-  llvm::SmallVector<mlir::func::FuncOp, 8> funcs;
+  FunctionVector funcs;
   for (auto f : module.getOps<mlir::func::FuncOp>()) {
     funcs.push_back(f);
   }

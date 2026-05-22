@@ -337,6 +337,83 @@ NOTE: These third-party ops are supported only to the extent required by PTOAS f
 
 ### 4.1 Pointer & View Operations
 
+##### `pto.ptrtoint` - Convert Pointer to Byte Address
+
+**Summary:** Converts a global pointer to an `i64` byte address.
+
+**Semantics:**
+
+```
+result = reinterpret_cast<i64>(ptr)
+```
+
+If the source is produced by `pto.addptr`, the addptr offset is materialized as an explicit byte offset:
+
+```
+pto.ptrtoint(pto.addptr %p, %idx) == pto.ptrtoint(%p) + idx * sizeof(elementType)
+```
+
+**Arguments:**
+
+| Name | Type | Description |
+|------|------|-------------|
+| `ptr` | `!pto.ptr<elementType>` | Source global pointer |
+
+**Results:** `i64`
+
+**Lowering Notes:**
+
+- PTO view lowering accepts either PTO pointer form or the lowered rank-1 GM memref form.
+- `pto.addptr` sources are folded into explicit byte-address arithmetic before EmitC lowering.
+- EmitC lowering emits a C++ `reinterpret_cast<int64_t>`.
+
+##### `pto.inttoptr` - Convert Byte Address to Pointer
+
+**Summary:** Converts an `i64` byte address to a global pointer of the requested element type.
+
+**Semantics:**
+
+```
+result = reinterpret_cast<result-element-type *>(addr)
+```
+
+This op is an escape hatch for explicit byte-address arithmetic and
+cross-element-type pointer reinterpretation.
+
+To limit provenance loss from integer-derived pointers, the result is
+restricted to scalar memory access: every direct use must be the pointer operand
+of `pto.load_scalar` or `pto.store_scalar`. The result cannot feed
+`pto.addptr`, `pto.make_tensor_view`, returns, or other general pointer users.
+Use the offset operand on `pto.load_scalar` / `pto.store_scalar` for element
+offsets from an `inttoptr` pointer.
+
+The result element type must be representable by EmitC scalar pointer lowering:
+floating-point element types (`f16`, `bf16`, `f32`, `f64`), 8/16/32/64-bit
+integer element types, and PTO low-precision floating-point element types are
+accepted. Non-scalar element types such as `index` are rejected by the verifier.
+
+**Arguments:**
+
+| Name | Type | Description |
+|------|------|-------------|
+| `addr` | `i64` | Source byte address |
+
+**Results:** `!pto.ptr<resultElementType>`
+
+**Lowering Notes:**
+
+- PTO view lowering rewrites the result to an equivalent rank-1 GM memref form.
+- EmitC lowering emits a C++ `reinterpret_cast<__gm__ T*>`.
+
+**Basic Example:**
+
+```mlir
+%p64_off = pto.addptr %p64, %idx : !pto.ptr<ui64> -> !pto.ptr<ui64>
+%addr = pto.ptrtoint %p64_off : !pto.ptr<ui64> -> i64
+%p32 = pto.inttoptr %addr : i64 -> !pto.ptr<ui32>
+%val = pto.load_scalar %p32[%c0] : !pto.ptr<ui32> -> ui32
+```
+
 ##### `pto.addptr` - Add Element Offset to Pointer
 
 **Summary:** Computes a new pointer by adding an element offset to the base pointer.
@@ -400,6 +477,9 @@ This operation defines the physical "base" and stride rules for global memory. I
   - `ptr` must be `!pto.ptr<...>` and its element type must match the result element type
   - `shape` and `strides` operand counts must match the tensor_view rank
   - If `layout` is provided with static shapes/strides, it must be consistent with inferred layout
+- `pto.inttoptr` results cannot feed `pto.make_tensor_view`. Tensor views must
+  be constructed from a source pointer that already carries the desired element
+  type.
 
 **Notes:**
 
@@ -834,6 +914,57 @@ pto.tprefetch ins(%pv : !pto.partition_tensor_view<16x16xf16>)
               outs(%tb : !pto.tile_buf<loc=vec, dtype=f16, rows=16, cols=16,
                     v_row=16, v_col=16, blayout=row_major, slayout=none_box,
                     fractal=512, pad=0>)
+```
+
+---
+
+##### `pto.tprefetch_async` - Asynchronous GM Prefetch into L2
+
+**Summary:** Starts an SDMA-backed asynchronous prefetch from GM into cache and returns the async event. The associated async session is obtained separately from an explicit prefetch context SSA value.
+
+**Semantics:**
+
+```
+%event = pto.tprefetch_async(%src, %ctx)
+%session = pto.get_prefetch_async_session %ctx
+```
+
+Lowering maps `%ctx` to `pto::PrefetchAsyncContext`, emits
+`TPREFETCH_ASYNC(src, ctx)`, and projects `ctx.session` through
+`pto.get_prefetch_async_session`.
+
+**Arguments:**
+
+| Name | Type | Description |
+|------|------|-------------|
+| `src` | GM memref / `pto.tensor_view` / `pto.partition_tensor_view` | Source GM region to prefetch |
+| `ctx` | `!pto.prefetch_async_context` | Explicit PTO prefetch async context |
+
+**Results:**
+
+| Name | Type | Description |
+|------|------|-------------|
+| `event` | `!pto.async_event` | Async completion event returned by PTO-ISA |
+
+**Constraints & Verification:**
+
+- `src` must be a flat contiguous logical-1D GM view-like value.
+- `ctx` must be a valid `!pto.prefetch_async_context`.
+- This op intentionally mirrors the PTO-ISA API input checks in `verify()`, so shape/address-space mismatches fail at PTO IR verification time.
+
+**Basic Example:**
+
+```mlir
+%ctx = pto.make_prefetch_async_context(%workspace : !pto.ptr<i8>)
+    -> !pto.prefetch_async_context
+%event = pto.tprefetch_async(
+    %src, %ctx
+    : memref<128xf32, #pto.address_space<gm>>,
+      !pto.prefetch_async_context)
+    -> !pto.async_event
+%session = pto.get_prefetch_async_session %ctx
+    : !pto.prefetch_async_context -> !pto.async_session
+%done = pto.comm.wait_async_event(%event, %session : !pto.async_event, !pto.async_session) -> i1
 ```
 
 ---
@@ -7901,6 +8032,61 @@ pto.wait_event [#pto.pipe_event_type<EVENT_LOAD_FROM_GM>, #pto.pipe_event_type<E
 ---
 
 #### Cross-Core Synchronization
+
+##### `pto.syncall`
+
+**Summary:** Models the PTO-ISA `SYNCALL` family for all-participant synchronization across AIC/AIV cores.
+
+**Forms:**
+
+- Hard sync: no workspace operands
+- Soft AIV-only sync: `gm_workspace + ub_workspace [+ used_cores]`
+- Soft AIC-only sync: `gm_workspace + l1_workspace [+ used_cores]`
+- Soft mixed sync: `gm_workspace + ub_workspace + l1_workspace [+ used_cores]`
+
+**Arguments:**
+
+| Name | Type | Description |
+|------|------|-------------|
+| `gm_workspace` | optional GM memref of `i32` | Global shared workspace used by soft mode |
+| `ub_workspace` | optional VEC tile/memref of `i32` | Vector-core local workspace for soft mode |
+| `l1_workspace` | optional MAT tile/memref of `i32` | Cube-core local workspace for soft mode |
+| `used_cores` | optional `i32` | Explicit participant count for soft mode |
+| `mode` | `#pto.sync_all_mode<...>` | `hard` or `soft` |
+| `core_type` | `#pto.sync_core_type<...>` | `aiv_only`, `aic_only`, or `mix` |
+
+**Results:** None.
+
+**Constraints & Verification:**
+
+- Hard mode requires no workspace operands and no `used_cores`.
+- Soft mode always requires `gm_workspace`.
+- Soft `aiv_only` requires `ub_workspace` and forbids `l1_workspace`.
+- Soft `aic_only` requires `l1_workspace` and forbids `ub_workspace`.
+- Soft `mix` requires both `ub_workspace` and `l1_workspace`.
+- `gm_workspace` must be a ranked GM memref of `i32`.
+- `ub_workspace` / `l1_workspace` must be rank-1 or rank-2 `i32` tile/memref values in `vec` / `mat` address space respectively.
+- These constraints intentionally mirror the corresponding PTO-ISA API parameter checks in `verify()`.
+
+**Basic Example:**
+
+```mlir
+"pto.syncall"(%gm, %ub, %used) {
+  operandSegmentSizes = array<i32: 1, 1, 0, 1>,
+  mode = #pto.sync_all_mode<soft>,
+  core_type = #pto.sync_core_type<aiv_only>
+} : (memref<64xi32, #pto.address_space<gm>>,
+     memref<64xi32, #pto.address_space<vec>>,
+     i32) -> ()
+
+"pto.syncall"() {
+  operandSegmentSizes = array<i32: 0, 0, 0, 0>,
+  mode = #pto.sync_all_mode<hard>,
+  core_type = #pto.sync_core_type<mix>
+} : () -> ()
+```
+
+---
 
 ##### `pto.sync.set`
 

@@ -272,6 +272,12 @@ def AsyncEventType : TypeDef<PTO_Dialect, "AsyncEvent"> {
   let summary = "Opaque async DMA event handle type";
 }
 
+def PrefetchAsyncContextType
+    : TypeDef<PTO_Dialect, "PrefetchAsyncContext"> {
+  let mnemonic = "prefetch_async_context";
+  let summary = "Opaque PTO prefetch async context handle type";
+}
+
 // ---- !pto.hif8 ---- Corresponding type name: hifloat8_t (1 byte)
 def HiF8Type : TypeDef<PTO_Dialect, "HiF8", [
     DeclareTypeInterfaceMethods<DataLayoutTypeInterface,

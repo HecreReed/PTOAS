@@ -1,0 +1,28 @@
+// RUN: ptoas --pto-level=level3 --pto-arch=a5 %s -o - | FileCheck %s
+
+module attributes {pto.target_arch = "a5"} {
+  func.func @get_validshape_emitc() {
+    %c8 = arith.constant 8 : index
+    %c16 = arith.constant 16 : index
+    %c0_i64 = arith.constant 0 : i64
+
+    %tile = pto.alloc_tile addr = %c0_i64 valid_row = %c8 valid_col = %c16
+      : !pto.tile_buf<loc=vec, dtype=f32, rows=16, cols=16, v_row=?, v_col=?,
+                      blayout=row_major, slayout=none_box, fractal=512, pad=0>
+
+    %valid_row, %valid_col = pto.get_validshape %tile
+      : !pto.tile_buf<loc=vec, dtype=f32, rows=16, cols=16, v_row=?, v_col=?,
+                      blayout=row_major, slayout=none_box, fractal=512, pad=0>
+    pto.set_validshape %tile, %valid_row, %valid_col
+      : !pto.tile_buf<loc=vec, dtype=f32, rows=16, cols=16, v_row=?, v_col=?,
+                      blayout=row_major, slayout=none_box, fractal=512, pad=0>
+
+    return
+  }
+}
+
+// CHECK-LABEL: __global__ AICORE void get_validshape_emitc()
+// CHECK: Tile<TileType::Vec, float, 16, 16, BLayout::RowMajor, -1, -1, SLayout::NoneBox, 512, PadValue::Null, CompactMode::Null> [[TILE:v[0-9]+]] = Tile
+// CHECK: int32_t [[ROW:v[0-9]+]] = [[TILE]].GetValidRow();
+// CHECK-NEXT: int32_t [[COL:v[0-9]+]] = [[TILE]].GetValidCol();
+// CHECK-NEXT: [[TILE]].SetValidShape([[ROW]], [[COL]]);

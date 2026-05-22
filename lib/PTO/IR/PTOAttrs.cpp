@@ -19,13 +19,32 @@
 using namespace mlir;
 using namespace mlir::pto;
 
+namespace {
+
+constexpr unsigned kI32BitWidth = 32;
+constexpr int32_t kFractalSize16 = 16;
+constexpr int32_t kFractalSize32 = 32;
+constexpr int32_t kFractalSize512 = 512;
+constexpr int32_t kFractalSize1024 = 1024;
+constexpr int32_t kBLayoutRowMajor = static_cast<int32_t>(BLayout::RowMajor);
+constexpr int32_t kBLayoutColMajor = static_cast<int32_t>(BLayout::ColMajor);
+constexpr int32_t kSLayoutNoneBox = static_cast<int32_t>(SLayout::NoneBox);
+constexpr int32_t kSLayoutColMajor = static_cast<int32_t>(SLayout::ColMajor);
+constexpr int32_t kPadValueNull = static_cast<int32_t>(PadValue::Null);
+constexpr int32_t kPadValueMin = static_cast<int32_t>(PadValue::Min);
+constexpr int32_t kCompactModeNull = static_cast<int32_t>(CompactMode::Null);
+constexpr int32_t kCompactModeRowPlusOne =
+    static_cast<int32_t>(CompactMode::RowPlusOne);
+
+} // namespace
+
 TileBufConfigAttr TileBufConfigAttr::getDefault(MLIRContext *ctx) {
   Builder b(ctx);
   BLayoutAttr bl = BLayoutAttr::get(ctx, BLayout::RowMajor);
   SLayoutAttr sl = SLayoutAttr::get(ctx, SLayout::NoneBox);
   PadValueAttr pv = PadValueAttr::get(ctx, PadValue::Null);
   CompactModeAttr compact = CompactModeAttr::get(ctx, CompactMode::Null);
-  IntegerAttr sz = b.getI32IntegerAttr(512);
+  IntegerAttr sz = b.getI32IntegerAttr(kFractalSize512);
   return TileBufConfigAttr::get(ctx, bl, sl, sz, pv, compact);
 }
 
@@ -64,27 +83,28 @@ LogicalResult TileBufConfigAttr::verify(function_ref<InFlightDiagnostic()> emitE
        !mlir::isa<IntegerAttr>(compactMode)))
     return emitError() << "compact_mode must be CompactModeAttr or i32 integer attr", failure();
 
-  if (!sFractalSize || !sFractalSize.getType().isInteger(32))
+  if (!sFractalSize || !sFractalSize.getType().isInteger(kI32BitWidth))
     return emitError() << "s_fractal_size must be i32", failure();
 
   int32_t s = (int32_t)sFractalSize.getInt();
-  if (s != 32 && s != 16 && s != 512 && s != 1024)
+  if (s != kFractalSize32 && s != kFractalSize16 &&
+      s != kFractalSize512 && s != kFractalSize1024)
     return emitError() << "unsupported s_fractal_size: " << s, failure();
 
   int32_t blv = getLayoutInt(bLayout, -1);
-  if (blv != 0 && blv != 1)
+  if (blv != kBLayoutRowMajor && blv != kBLayoutColMajor)
     return emitError() << "unsupported blayout value: " << blv, failure();
 
   int32_t slv = getLayoutInt(sLayout, -1);
-  if (slv < 0 || slv > 2)
+  if (slv < kSLayoutNoneBox || slv > kSLayoutColMajor)
     return emitError() << "unsupported slayout value: " << slv, failure();
 
   int32_t pvv = getLayoutInt(pad, -1);
-  if (pvv < 0 || pvv > 3)
+  if (pvv < kPadValueNull || pvv > kPadValueMin)
     return emitError() << "unsupported pad value: " << pvv, failure();
 
   int32_t cmv = getLayoutInt(compactMode, -1);
-  if (cmv < 0 || cmv > 2)
+  if (cmv < kCompactModeNull || cmv > kCompactModeRowPlusOne)
     return emitError() << "unsupported compact_mode value: " << cmv, failure();
 
   return success();
@@ -146,7 +166,7 @@ Attribute TileBufConfigAttr::parse(AsmParser &p, Type) {
     } else if (key == "s_fractal_size") {
       int32_t v = 0;
       if (p.parseInteger(v)) return {};
-      sz = IntegerAttr::get(IntegerType::get(ctx, 32), v);
+      sz = IntegerAttr::get(IntegerType::get(ctx, kI32BitWidth), v);
     } else if (key == "pad") {
       Attribute a;
       if (p.parseAttribute(a)) return {};

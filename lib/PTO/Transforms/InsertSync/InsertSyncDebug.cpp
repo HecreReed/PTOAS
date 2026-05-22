@@ -20,6 +20,8 @@ using namespace mlir::pto;
 
 namespace {
 
+constexpr unsigned kDebugDumpIndentSpaces = 2;
+
 llvm::cl::opt<unsigned> insertSyncDebugLevelOpt(
     "pto-insert-sync-debug",
     llvm::cl::desc("Debug verbosity for PTOInsertSync: "
@@ -216,10 +218,10 @@ static void dumpSyncIR(llvm::raw_ostream &os, const SyncIRs &syncIR,
          << getPipelineName(comp->kPipeValue) << "]";
       os << "\n";
       if (showMemInfo) {
-        os.indent(indentBy(2));
+        os.indent(indentBy(kDebugDumpIndentSpaces));
         dumpMemInfoList(os, "def", comp->defVec, state ? &*state : nullptr);
         os << "\n";
-        os.indent(indentBy(2));
+        os.indent(indentBy(kDebugDumpIndentSpaces));
         dumpMemInfoList(os, "use", comp->useVec, state ? &*state : nullptr);
         os << "\n";
       }
@@ -254,7 +256,7 @@ static void dumpSyncIR(llvm::raw_ostream &os, const SyncIRs &syncIR,
           continue;
         if (op->uselessSync && !options.showUselessSync)
           continue;
-        os.indent(indentBy(2));
+        os.indent(indentBy(kDebugDumpIndentSpaces));
         os << prefix << ": ";
         dumpSyncOp(os, op, options.showUselessSync);
         os << "\n";

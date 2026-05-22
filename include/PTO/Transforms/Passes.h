@@ -9,7 +9,7 @@
 //===- Passes.h - Pass Entrypoints ------------------------------*- C++ -*-===//
 //===----------------------------------------------------------------------===//
 //
-// TODO.
+// Pass factory declarations for PTO transform pipelines.
 //
 //===----------------------------------------------------------------------===//
 
@@ -67,9 +67,12 @@ createPlanMemoryPass(const PlanMemoryOptions &planMemoryOption = {});
 
 std::unique_ptr<Pass> createPTORemoveRedundantBarrierPass();
 std::unique_ptr<Pass> createPTOViewToMemrefPass();
+std::unique_ptr<Pass> createPTOValidateIntToPtrUsesPass();
 std::unique_ptr<Pass> createPTOMaterializeTileHandlesPass();
 std::unique_ptr<Pass> createInferPTOLayoutPass();
 std::unique_ptr<Pass> createPTOA5NormalizeTMovPass();
+
+LogicalResult validateIntToPtrUses(func::FuncOp func);
 
 //===----------------------------------------------------------------------===//
 // Registration

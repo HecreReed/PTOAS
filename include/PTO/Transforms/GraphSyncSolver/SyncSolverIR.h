@@ -17,10 +17,19 @@
 #include "mlir/Interfaces/LoopLikeInterface.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/Support/Casting.h"
+#include <cassert>
 #include <memory>
 #include <utility>
 
 namespace mlir::pto::syncsolver {
+
+#ifndef ASSERT
+#ifndef NDEBUG
+#define ASSERT(condition) assert(condition)
+#else
+#define ASSERT(condition) ((void)0)
+#endif
+#endif
 
 // PTO does not currently expose HIVM's unit-flag interface. Keep the upstream
 // fields and method names, but make the feature inert unless matching PTO ops
@@ -253,30 +262,30 @@ public:
       this->setTrueScope(std::move(trueScope));
     }
     if (falseScope != nullptr) {
-      assert(this->trueScope != nullptr);
+      ASSERT(this->trueScope != nullptr);
       this->setFalseScope(std::move(falseScope));
     }
   };
 
   Scope *getTrueScope() const {
-    assert(this->trueScope != nullptr);
+    ASSERT(this->trueScope != nullptr);
     return this->trueScope;
   }
 
   Scope *getFalseScope() const {
-    assert(this->falseScope != nullptr);
+    ASSERT(this->falseScope != nullptr);
     return this->falseScope;
   }
 
   void setFalseScope(std::unique_ptr<Scope> falseScope) {
-    assert(falseScope != nullptr);
+    ASSERT(falseScope != nullptr);
     falseScope->parentOp = this;
     this->falseScope = falseScope.get();
     this->body.push_back(std::move(falseScope));
   }
 
   void setTrueScope(std::unique_ptr<Scope> trueScope) {
-    assert(trueScope != nullptr);
+    ASSERT(trueScope != nullptr);
     trueScope->parentOp = this;
     this->trueScope = trueScope.get();
     this->body.push_back(std::move(trueScope));

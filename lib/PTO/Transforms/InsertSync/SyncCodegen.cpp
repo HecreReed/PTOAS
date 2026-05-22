@@ -17,26 +17,32 @@
 #include "mlir/Dialect/SCF/IR/SCF.h"
 #include "mlir/IR/BuiltinOps.h"
 #include "llvm/ADT/STLExtras.h"
- 
+
 #define DEBUG_TYPE "pto-inject-sync"
- 
+
 using namespace mlir;
 using namespace mlir::pto;
- 
+
+namespace {
+
+constexpr unsigned kReturnOpInlineCapacity = 4;
+
+} // namespace
+
 // ==============================================================================
 // 1. Helper Functions
 // ==============================================================================
- 
+
 static pto::PipeAttr getPipeAttr(Builder &builder, PipelineType pipe) {
   auto odsPipeVal = static_cast<pto::PIPE>(pipe);
   return pto::PipeAttr::get(builder.getContext(), odsPipeVal);
 }
- 
+
 static pto::EventAttr getEventAttr(Builder &builder, int id) {
   auto odsEventVal = static_cast<pto::EVENT>(id);
   return pto::EventAttr::get(builder.getContext(), odsEventVal);
 }
- 
+
 static bool IsSameSyncSignature(const SyncOperation *existing,
                                 const SyncOperation *candidate) {
   if (existing->GetType() != candidate->GetType())
@@ -70,7 +76,7 @@ static bool IsSyncExist(const SyncOps &list, SyncOperation *newSync) {
   }
   return false;
 }
- 
+
 static void MergeSyncList(SyncOps &dstList, const SyncOps &srcList) {
   for (auto *sync : srcList) {
     if (sync->uselessSync)
@@ -141,20 +147,20 @@ static void createSetOrWaitFlagOp(IRRewriter &rewriter, Operation *op,
   }
   rewriter.create<pto::SetFlagOp>(op->getLoc(), srcPipe, dstPipe, eventId);
 }
- 
+
 // ==============================================================================
 // 2. SyncCodegen Implementation
 // ==============================================================================
- 
+
 void SyncCodegen::Run() {
   MLIRContext *ctx = func_->getContext();
   IRRewriter rewriter(ctx);
-  
+
   UpdateOpInsertSync(rewriter);
- 
+
   // [Optional Debug] 这里的 Debug 打印可以保留或注释掉
   // ...
- 
+
   func_->walk<WalkOrder::PreOrder>([&](Operation *op) {
     if (op2InsertSync.count(op)) {
       // 处理 PRE Sync
@@ -172,7 +178,7 @@ void SyncCodegen::Run() {
   // return, instead of being interleaved with other trailing sync ops.
   AppendAutoSyncTailBarrierIfNeeded(rewriter);
 }
- 
+
 void SyncCodegen::UpdateOpInsertSync(IRRewriter &rewriter) {
   for (auto &nowElement : syncIR_) {
     if (auto *compoundElement = dyn_cast<CompoundInstanceElement>(nowElement.get())) {
@@ -186,13 +192,13 @@ void SyncCodegen::UpdateOpInsertSync(IRRewriter &rewriter) {
     }
   }
 }
- 
+
 void SyncCodegen::UpdateCompoundOpInsertSync(CompoundInstanceElement *nowCompound) {
   auto &pipeBuild = op2InsertSync[nowCompound->elementOp];
   MergeSyncList(pipeBuild.pipeBefore, nowCompound->pipeBefore);
   MergeSyncList(pipeBuild.pipeAfter, nowCompound->pipeAfter);
 }
- 
+
 void SyncCodegen::UpdateLoopOpInsertSync(LoopInstanceElement *nowElement) {
   if (nowElement->getLoopKind() == KindOfLoop::LOOP_END) {
     auto *loopBegin = dyn_cast<LoopInstanceElement>(syncIR_[nowElement->beginId].get());
@@ -201,7 +207,7 @@ void SyncCodegen::UpdateLoopOpInsertSync(LoopInstanceElement *nowElement) {
     MergeSyncList(pipeBuild.pipeAfter, nowElement->pipeAfter);
   }
 }
- 
+
 void SyncCodegen::UpdateBranchOpInsertSync(BranchInstanceElement *nowElement) {
   if (nowElement->getBranchKind() == KindOfBranch::IF_END) {
     auto *branchBegin = dyn_cast<BranchInstanceElement>(syncIR_[nowElement->beginId].get());
@@ -210,13 +216,13 @@ void SyncCodegen::UpdateBranchOpInsertSync(BranchInstanceElement *nowElement) {
     MergeSyncList(pipeBuild.pipeAfter, nowElement->pipeAfter);
   }
 }
- 
+
 void SyncCodegen::updatePlaceHolderOpInsertSync(PlaceHolderInstanceElement *placeHolder) {
   // 1. 处理 Virtual Else
   if (placeHolder->isVirtualElse) {
       auto ifOp = dyn_cast<scf::IfOp>(placeHolder->parentIfOp);
       if (!ifOp) return;
- 
+
       // 如果还没有 else block，创建一个
       if (!ifOp.elseBlock()) {
           OpBuilder builder(ifOp.getContext());
@@ -229,7 +235,7 @@ void SyncCodegen::updatePlaceHolderOpInsertSync(PlaceHolderInstanceElement *plac
                builder.create<scf::YieldOp>(ifOp.getLoc());
           }
       }
-      
+
       // 更新映射：将 Virtual Placeholder 映射到新创建的 Yield Op
       if (ifOp.elseBlock()) {
           placeHolder->elementOp = ifOp.getElseRegion().front().getTerminator();
@@ -237,7 +243,7 @@ void SyncCodegen::updatePlaceHolderOpInsertSync(PlaceHolderInstanceElement *plac
           // 依然没有 Sync 需要插入，直接返回
           return;
       }
-  } 
+  }
   // 2. 处理 Normal PlaceHolder (Then End or Existing Else End)
   else if (placeHolder->elementOp == placeHolder->parentIfOp) {
       // 之前的 Translator 逻辑把 Normal Placeholder 也映射到了 ifOp
@@ -245,17 +251,17 @@ void SyncCodegen::updatePlaceHolderOpInsertSync(PlaceHolderInstanceElement *plac
       // 判断是 Then 还是 Else
       // 简单判断：看 index。或者 Translator 里直接存 Yield Op。
       // 这里假设 Translator 存的是 IfOp，我们需要找到对应的 Yield。
-      // ... 
+      // ...
       // 建议在 Translator 里直接让 elementOp 指向 Yield Op（如果存在）。
   }
- 
+
   // 执行常规的 Sync 插入
   if (!placeHolder->elementOp) return;
   auto &pipeBuild = op2InsertSync[placeHolder->elementOp];
   MergeSyncList(pipeBuild.pipeBefore, placeHolder->pipeBefore);
   MergeSyncList(pipeBuild.pipeAfter, placeHolder->pipeAfter);
 }
- 
+
 void SyncCodegen::SyncInsert(IRRewriter &rewriter, Operation *op,
                              SyncOperation *sync, bool beforeInsert) {
   if (sync->uselessSync)
@@ -271,9 +277,9 @@ void SyncCodegen::SyncInsert(IRRewriter &rewriter, Operation *op,
     } else {
       CreateSetWaitOpForMultiBuffer(rewriter, insertAnchorOp, sync, forceBefore);
     }
-  } 
+  }
 }
- 
+
 // [核心修改] 加强版 CreateBarrierOp
 void SyncCodegen::CreateBarrierOp(IRRewriter &rewriter, Operation *op,
                                   SyncOperation *sync, bool beforeInsert) {
@@ -297,7 +303,6 @@ void SyncCodegen::CreateBarrierOp(IRRewriter &rewriter, Operation *op,
   Block *block = rewriter.getInsertionBlock();
   Block::iterator ip = rewriter.getInsertionPoint();
   auto currentPipeAttr = getPipeAttr(rewriter, sync->GetActualSrcPipe());
-
   if (hasNeighborBarrier(block, ip, currentPipeAttr, insertAtPos))
     return;
 
@@ -310,7 +315,7 @@ void SyncCodegen::AppendAutoSyncTailBarrierIfNeeded(IRRewriter &rewriter) {
   if (!pendingAutoSyncTailBarrier_)
     return;
 
-  SmallVector<func::ReturnOp, 4> returns;
+  SmallVector<func::ReturnOp, kReturnOpInlineCapacity> returns;
   func_.walk([&](func::ReturnOp ret) { returns.push_back(ret); });
   if (returns.empty())
     return;
@@ -328,7 +333,7 @@ void SyncCodegen::AppendAutoSyncTailBarrierIfNeeded(IRRewriter &rewriter) {
 
   pendingAutoSyncTailBarrier_ = false;
 }
- 
+
 void SyncCodegen::CreateSetWaitOpForSingleBuffer(IRRewriter &rewriter,
                                                  Operation *op,
                                                  SyncOperation *sync,
@@ -340,14 +345,14 @@ void SyncCodegen::CreateSetWaitOpForSingleBuffer(IRRewriter &rewriter,
   auto eventId = getEventAttr(rewriter, sync->eventIds[0]);
   createSetOrWaitFlagOp(rewriter, op, sync, srcPipe, dstPipe, eventId);
 }
- 
+
 void SyncCodegen::CreateSetWaitOpForMultiBuffer(IRRewriter &rewriter,
                                                 Operation *op,
                                                 SyncOperation *sync,
                                                 bool beforeInsert) {
   Value bufferSelected = GetBufferSelected(rewriter, op, sync);
   (void)bufferSelected;
- 
+
   auto srcPipe = getPipeAttr(rewriter, sync->GetActualSrcPipe());
   auto dstPipe = getPipeAttr(rewriter, sync->GetActualDstPipe());
   auto eventId = getEventAttr(rewriter, sync->eventIds[0]);
@@ -355,16 +360,16 @@ void SyncCodegen::CreateSetWaitOpForMultiBuffer(IRRewriter &rewriter,
                         beforeInsert || op->hasTrait<OpTrait::IsTerminator>());
   createSetOrWaitFlagOp(rewriter, op, sync, srcPipe, dstPipe, eventId);
 }
- 
+
 Value SyncCodegen::GetBufferSelected(IRRewriter &rewriter, Operation *op,
                                      SyncOperation *sync) {
   if (SyncIndex2SelectBuffer.count(sync->GetSyncIndex())) {
     return SyncIndex2SelectBuffer[sync->GetSyncIndex()];
   }
- 
+
   auto parentLoop = op->getParentOfType<scf::ForOp>();
   if (!parentLoop) return nullptr;
- 
+
   Value counter;
   if (loop2BufferCounter.count(parentLoop)) {
     counter = loop2BufferCounter[parentLoop];
@@ -375,16 +380,16 @@ Value SyncCodegen::GetBufferSelected(IRRewriter &rewriter, Operation *op,
     counter = rewriter.create<arith::RemUIOp>(op->getLoc(), iv, c2);
     loop2BufferCounter[parentLoop] = counter;
   }
- 
+
   rewriter.setInsertionPointAfter(counter.getDefiningOp());
   Value id0 = rewriter.create<arith::ConstantIndexOp>(op->getLoc(), sync->eventIds[0]);
   Value id1 = rewriter.create<arith::ConstantIndexOp>(op->getLoc(), sync->eventIds[1]);
-  
-  Value isZero = rewriter.create<arith::CmpIOp>(op->getLoc(), arith::CmpIPredicate::eq, counter, 
+
+  Value isZero = rewriter.create<arith::CmpIOp>(op->getLoc(), arith::CmpIPredicate::eq, counter,
       rewriter.create<arith::ConstantIndexOp>(op->getLoc(), 0));
-  
+
   Value selected = rewriter.create<arith::SelectOp>(op->getLoc(), isZero, id0, id1);
-  
+
   SyncIndex2SelectBuffer[sync->GetSyncIndex()] = selected;
   return selected;
 }

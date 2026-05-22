@@ -170,6 +170,46 @@ def PTO_SyncOpTypeAttr : PTO_Attr<"SyncOpType", "sync_op_type"> {
 }
 
 //===----------------------------------------------------------------------===//
+// SYNCALL enums
+//===----------------------------------------------------------------------===//
+
+def PTO_SYNCALL_MODE_HARD : I32EnumAttrCase<"Hard", 0, "hard">;
+def PTO_SYNCALL_MODE_SOFT : I32EnumAttrCase<"Soft", 1, "soft">;
+
+def PTO_SyncAllModeEnum : PTO_I32Enum<
+  "SyncAllMode", "PTO SYNCALL mode", [
+    PTO_SYNCALL_MODE_HARD,
+    PTO_SYNCALL_MODE_SOFT
+  ]>;
+
+def PTO_SyncAllModeAttr : PTO_Attr<"SyncAllMode", "sync_all_mode"> {
+  let parameters = (ins EnumParameter<PTO_SyncAllModeEnum>:$value);
+  let assemblyFormat = "`<` params `>`";
+  let description = [{
+    SYNCALL mode: hard barrier or workspace-backed soft barrier.
+  }];
+}
+
+def PTO_SYNC_CORE_AIV_ONLY : I32EnumAttrCase<"AIVOnly", 0, "aiv_only">;
+def PTO_SYNC_CORE_AIC_ONLY : I32EnumAttrCase<"AICOnly", 1, "aic_only">;
+def PTO_SYNC_CORE_MIX : I32EnumAttrCase<"Mix", 2, "mix">;
+
+def PTO_SyncCoreTypeEnum : PTO_I32Enum<
+  "SyncCoreType", "PTO SYNCALL core participation kind", [
+    PTO_SYNC_CORE_AIV_ONLY,
+    PTO_SYNC_CORE_AIC_ONLY,
+    PTO_SYNC_CORE_MIX
+  ]>;
+
+def PTO_SyncCoreTypeAttr : PTO_Attr<"SyncCoreType", "sync_core_type"> {
+  let parameters = (ins EnumParameter<PTO_SyncCoreTypeEnum>:$value);
+  let assemblyFormat = "`<` params `>`";
+  let description = [{
+    SYNCALL core participation kind: AIV only, AIC only, or mixed AIC/AIV.
+  }];
+}
+
+//===----------------------------------------------------------------------===//
 // Layout (GlobalTensor layout inference)
 //===----------------------------------------------------------------------===//
 

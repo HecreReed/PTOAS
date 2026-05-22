@@ -109,6 +109,17 @@ buildRowMajorReinterpretType(MLIRContext *ctx, pto::TileBufType srcType) {
                                srcType.getMemorySpace(), swappedValid, newCfg);
 }
 
+static void setSwappedDynamicValidShapeIfNeeded(
+    IRRewriter &rewriter, Location loc, Value sourceTile, Value reshapedTile,
+    pto::TileBufType reshapedType) {
+  if (!reshapedType.hasDynamicValid())
+    return;
+
+  auto validShape = rewriter.create<pto::GetValidShapeOp>(loc, sourceTile);
+  rewriter.create<pto::SetValidShapeOp>(
+      loc, reshapedTile, validShape.getValidCol(), validShape.getValidRow());
+}
+
 struct PTOA5NormalizeTMovPass
     : public mlir::pto::impl::PTOA5NormalizeTMovBase<PTOA5NormalizeTMovPass> {
   void runOnOperation() override {
@@ -144,6 +155,10 @@ struct PTOA5NormalizeTMovPass
           rewriter.create<pto::TReshapeOp>(op.getLoc(), *srcRowTy, op.getSrc());
       auto dstRow =
           rewriter.create<pto::TReshapeOp>(op.getLoc(), *dstRowTy, op.getDst());
+      setSwappedDynamicValidShapeIfNeeded(
+          rewriter, op.getLoc(), op.getSrc(), srcRow.getResult(), *srcRowTy);
+      setSwappedDynamicValidShapeIfNeeded(
+          rewriter, op.getLoc(), op.getDst(), dstRow.getResult(), *dstRowTy);
       SmallVector<Value, kTMovOperandReserveSize> newOperands(
           op->operand_begin(), op->operand_end());
       if (newOperands.size() < kTileRank2D) {

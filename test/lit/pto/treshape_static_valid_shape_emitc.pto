@@ -1,0 +1,41 @@
+// RUN: ptoas --pto-level=level3 --pto-arch=a5 %s -o - | FileCheck %s
+
+module attributes {pto.target_arch = "a5"} {
+  func.func @treshape_static_valid_shape_emitc() {
+    %c0_i64 = arith.constant 0 : i64
+    %c1024_i64 = arith.constant 1024 : i64
+
+    %src = pto.alloc_tile addr = %c0_i64
+      : !pto.tile_buf<loc=vec, dtype=f32, rows=16, cols=1, v_row=16, v_col=1,
+                      blayout=col_major, slayout=none_box, fractal=512, pad=0>
+
+    %reshaped = pto.treshape %src
+      : !pto.tile_buf<loc=vec, dtype=f32, rows=16, cols=1, v_row=16, v_col=1,
+                      blayout=col_major, slayout=none_box, fractal=512, pad=0>
+     -> !pto.tile_buf<loc=vec, dtype=f32, rows=1, cols=16, v_row=1, v_col=16,
+                      blayout=row_major, slayout=none_box, fractal=512, pad=0>
+
+    %out = pto.alloc_tile addr = %c1024_i64
+      : !pto.tile_buf<loc=vec, dtype=f32, rows=1, cols=16, v_row=1, v_col=16,
+                      blayout=row_major, slayout=none_box, fractal=512, pad=0>
+
+    pto.tmov
+      ins(%reshaped
+          : !pto.tile_buf<loc=vec, dtype=f32, rows=1, cols=16, v_row=1, v_col=16,
+                          blayout=row_major, slayout=none_box, fractal=512, pad=0>)
+      outs(%out
+          : !pto.tile_buf<loc=vec, dtype=f32, rows=1, cols=16, v_row=1, v_col=16,
+                          blayout=row_major, slayout=none_box, fractal=512, pad=0>)
+
+    return
+  }
+}
+
+// CHECK-LABEL: __global__ AICORE void treshape_static_valid_shape_emitc()
+// CHECK: Tile<TileType::Vec, float, 16, 1, BLayout::ColMajor, 16, 1, SLayout::NoneBox, 512, PadValue::Null, CompactMode::Null> [[SRC:v[0-9]+]];
+// CHECK: TASSIGN([[SRC]],
+// CHECK: Tile<TileType::Vec, float, 1, 16, BLayout::RowMajor, 1, 16, SLayout::NoneBox, 512, PadValue::Null, CompactMode::Null> [[RESHAPED:v[0-9]+]];
+// CHECK-NEXT: TRESHAPE([[RESHAPED]], [[SRC]]);
+// CHECK-NOT: SetValidShape
+// CHECK-NOT: TRESHAPE
+// CHECK: TMOV({{v[0-9]+}}, [[RESHAPED]]);

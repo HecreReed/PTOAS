@@ -683,6 +683,19 @@ static void bindPTOModule(pybind11::module &m) {
             py::arg("cls"), py::arg("context") = py::none());
 
     mlir_type_subclass(
+        m, "PrefetchAsyncContextType",
+        [](MlirType type) -> bool {
+            return mlirPTOTypeIsAPrefetchAsyncContextType(type);
+        })
+        .def_classmethod(
+            "get",
+            [](py::object cls, MlirContext context) -> py::object {
+                MlirType t = mlirPTOPrefetchAsyncContextTypeGet(context);
+                return cls.attr("__call__")(t);
+            },
+            py::arg("cls"), py::arg("context") = py::none());
+
+    mlir_type_subclass(
         m, "HiF8Type",
         [](MlirType type) -> bool { return mlirPTOTypeIsAHiF8Type(type); })
         .def_classmethod(
@@ -876,7 +889,6 @@ static void bindPTOModule(pybind11::module &m) {
             py::object validShapeObj,
             py::object configObj,
             MlirContext ctx) -> py::object {
-
             // 1) 计算 validShape（默认=shape）
             std::vector<int64_t> validShape = shape;
 

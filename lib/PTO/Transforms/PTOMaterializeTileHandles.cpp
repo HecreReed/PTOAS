@@ -31,6 +31,7 @@
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/StringRef.h"
 #include "llvm/ADT/DenseMap.h"
+#include "llvm/ADT/DenseSet.h"
 
 #include <memory>
 #include <optional>
@@ -92,6 +93,8 @@ static bool shouldMaterializeOperand(Operation *owner) {
 
   StringRef name = owner->getName().getStringRef();
   if (name == "pto.set_validshape")
+    return true;
+  if (name == "pto.get_validshape")
     return true;
   if (name == "pto.build_async_session")
     return true;
@@ -764,9 +767,15 @@ static void updateResultTypesAfterMaterializingOperand(Operation *op,
   }
 }
 
+static bool isTileViewSemantics(StringAttr viewSemantics) {
+  return viewSemantics && (viewSemantics.getValue() == "treshape" ||
+                           viewSemantics.getValue() == "bitcast");
+}
+
 static Value materializeAnchorResult(Operation *anchor, Value anchoredValue,
                                      OpBuilder &builder, MLIRContext *ctx,
                                      DenseMap<Value, Value> &tileHandles,
+                                     const DenseSet<Value> &mustMaterialize,
                                      bool &failedMaterialization) {
   auto memTy = dyn_cast<MemRefType>(anchoredValue.getType());
   if (!memTy || !isLocalTileMemRef(memTy))
@@ -782,10 +791,9 @@ static Value materializeAnchorResult(Operation *anchor, Value anchoredValue,
   TileHandleMetadata meta = getTileHandleMetadata(anchoredValue, ctx);
   auto viewSemantics = dyn_cast_or_null<StringAttr>(
       getAttr(meta.attrs, "pto.view_semantics"));
-  bool isTileView =
-      viewSemantics && (viewSemantics.getValue() == "treshape" ||
-                        viewSemantics.getValue() == "bitcast");
-  if (usesToRewrite.empty() && !isTileView)
+  bool isTileView = isTileViewSemantics(viewSemantics);
+  if (usesToRewrite.empty() && !isTileView &&
+      !mustMaterialize.contains(anchoredValue))
     return Value();
 
   for (OpOperand *use : usesToRewrite)
@@ -843,6 +851,7 @@ struct PTOMaterializeTileHandlesPass
 
     OpBuilder builder(ctx);
     DenseMap<Value, Value> tileHandles;
+    DenseSet<Value> mustMaterialize;
     bool failedMaterialization = false;
 
     SmallVector<Operation *, 32> anchors;
@@ -851,12 +860,25 @@ struct PTOMaterializeTileHandlesPass
         return;
       anchors.push_back(op);
     });
+    for (Operation *anchor : anchors) {
+      if (anchor->getNumResults() != 1)
+        continue;
+      Value anchoredValue = anchor->getResult(0);
+      if (!isLocalTileMemRef(anchoredValue.getType()))
+        continue;
+      TileHandleMetadata meta = getTileHandleMetadata(anchoredValue, ctx);
+      auto viewSemantics = dyn_cast_or_null<StringAttr>(
+          getAttr(meta.attrs, "pto.view_semantics"));
+      if (isTileViewSemantics(viewSemantics) && meta.source)
+        mustMaterialize.insert(meta.source);
+    }
 
     for (Operation *anchor : anchors) {
       if (anchor->getNumResults() != 1)
         continue;
       materializeAnchorResult(anchor, anchor->getResult(0), builder, ctx,
-                              tileHandles, failedMaterialization);
+                              tileHandles, mustMaterialize,
+                              failedMaterialization);
     }
 
     if (failedMaterialization) {

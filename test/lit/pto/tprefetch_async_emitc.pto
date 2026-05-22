@@ -1,0 +1,18 @@
+// RUN: ptoas --pto-arch=a3 %s 2>&1 | FileCheck %s
+
+module {
+  func.func @tprefetch_async_emitc(%src: memref<128xf32, #pto.address_space<gm>>,
+                                   %workspace: !pto.ptr<i8>) {
+    %ctx = pto.make_prefetch_async_context(%workspace : !pto.ptr<i8>) -> !pto.prefetch_async_context
+    %event = pto.tprefetch_async(%src, %ctx : memref<128xf32, #pto.address_space<gm>>, !pto.prefetch_async_context) -> !pto.async_event
+    %session = pto.get_prefetch_async_session %ctx : !pto.prefetch_async_context -> !pto.async_session
+    %done = pto.comm.wait_async_event(%event, %session : !pto.async_event, !pto.async_session) -> i1
+    return
+  }
+}
+
+// CHECK-LABEL: AICORE void tprefetch_async_emitc(
+// CHECK: pto::PrefetchAsyncContext [[CTX:v[0-9]+]] = pto::PrefetchAsyncContext(
+// CHECK: pto::comm::AsyncEvent [[EVT:v[0-9]+]] = TPREFETCH_ASYNC(
+// CHECK: pto::comm::AsyncSession [[SESSION:v[0-9]+]] = [[CTX]].session;
+// CHECK: bool [[DONE:v[0-9]+]] = [[EVT]].Wait([[SESSION]]);

@@ -12,12 +12,17 @@
 // See LICENSE in the root of the software repository for the full text of the License.
 
 #include "PTO/Transforms/InsertSync/InsertSyncAnalysis.h"
+#include "PTO/IR/PTOTypeUtils.h"
 #include "PTO/Transforms/InsertSync/SyncCommon.h"
 #include "mlir/Dialect/MemRef/IR/MemRef.h"
 #include "mlir/Dialect/SCF/IR/SCF.h"
+#include "mlir/IR/BuiltinTypes.h"
+#include "mlir/IR/Matchers.h"
+#include "llvm/ADT/STLExtras.h"
 #include "llvm/Support/Casting.h"
 #include "llvm/Support/ErrorHandling.h"
 #include <algorithm>
+#include <limits>
 #include <memory>
 #include <optional>
 #include <utility>
@@ -28,6 +33,145 @@ using namespace mlir;
 using namespace mlir::pto;
 
 namespace mlir::pto {
+
+namespace {
+
+static constexpr uint64_t kVectorRegisterSizeInBytes = 256U;
+static constexpr unsigned kPipeVPruneMinRepeat = 16U;
+
+struct RepeatAccessShape {
+  SmallVector<int64_t, 2> fullShape;
+  SmallVector<int64_t, 2> validShape;
+  Type elementType;
+};
+
+static std::optional<RepeatAccessShape> getKnownRepeatAccessShapeFromType(Type ty) {
+  if (auto tileTy = dyn_cast<TileBufType>(ty)) {
+    ArrayRef<int64_t> fullShape = tileTy.getShape();
+    ArrayRef<int64_t> validShape = tileTy.getValidShape();
+    if (fullShape.size() != 2 || validShape.size() != 2) return std::nullopt;
+    if (fullShape[0] < 0 || fullShape[1] < 0 || validShape[0] < 0 ||
+        validShape[1] < 0)
+      return std::nullopt;
+    if (validShape[0] > fullShape[0] || validShape[1] > fullShape[1])
+      return std::nullopt;
+    return RepeatAccessShape{
+        SmallVector<int64_t, 2>{fullShape[0], fullShape[1]},
+        SmallVector<int64_t, 2>{validShape[0], validShape[1]},
+        tileTy.getElementType()};
+  }
+
+  if (auto memRefTy = dyn_cast<MemRefType>(ty)) {
+    if (!memRefTy.hasStaticShape() || memRefTy.getRank() != 2)
+      return std::nullopt;
+    auto shape = memRefTy.getShape();
+    return RepeatAccessShape{SmallVector<int64_t, 2>{shape[0], shape[1]},
+                             SmallVector<int64_t, 2>{shape[0], shape[1]},
+                             memRefTy.getElementType()};
+  }
+
+  return std::nullopt;
+}
+
+static std::optional<int64_t> getConstantIndex(Value value) {
+  if (!value) return std::nullopt;
+  APInt intValue;
+  if (!matchPattern(value, m_ConstantInt(&intValue))) return std::nullopt;
+  return intValue.getSExtValue();
+}
+
+static std::optional<RepeatAccessShape> getKnownRepeatAccessShape(Value access) {
+  if (!access) return std::nullopt;
+  auto shape = getKnownRepeatAccessShapeFromType(access.getType());
+  if (!shape) return std::nullopt;
+
+  if (auto bind = access.getDefiningOp<BindTileOp>()) {
+    auto row = getConstantIndex(bind.getValidRow());
+    auto col = getConstantIndex(bind.getValidCol());
+    if (row && col) {
+      if (*row < 0 || *col < 0 || *row > shape->fullShape[0] ||
+          *col > shape->fullShape[1])
+        return std::nullopt;
+      shape->validShape = SmallVector<int64_t, 2>{*row, *col};
+    } else if (bind.getValidRow() || bind.getValidCol()) {
+      return std::nullopt;
+    }
+  }
+
+  return shape;
+}
+
+static std::optional<BLayout> getKnownBLayout(Type ty) {
+  if (auto tileTy = dyn_cast<TileBufType>(ty)) {
+    int32_t layout = tileTy.getBLayoutValueI32();
+    if (layout == static_cast<int32_t>(BLayout::RowMajor))
+      return BLayout::RowMajor;
+    if (layout == static_cast<int32_t>(BLayout::ColMajor))
+      return BLayout::ColMajor;
+  }
+
+  if (auto memRefTy = dyn_cast<MemRefType>(ty)) {
+    SmallVector<int64_t> strides;
+    int64_t offset = 0;
+    if (failed(getStridesAndOffset(memRefTy, strides, offset)) ||
+        strides.size() != 2) {
+      return std::nullopt;
+    }
+    ArrayRef<int64_t> shape = memRefTy.getShape();
+    if (strides[1] == 1 && strides[0] == shape[1]) return BLayout::RowMajor;
+    if (strides[0] == 1 && strides[1] == shape[0]) return BLayout::ColMajor;
+  }
+
+  return std::nullopt;
+}
+
+static bool isProvenContiguousAccess(Value access,
+                                     const RepeatAccessShape &shape) {
+  auto layout = getKnownBLayout(access.getType());
+  if (!layout) return false;
+
+  int64_t fullRow = shape.fullShape[0];
+  int64_t fullCol = shape.fullShape[1];
+  int64_t validRow = shape.validShape[0];
+  int64_t validCol = shape.validShape[1];
+
+  if (*layout == BLayout::RowMajor)
+    return validCol == fullCol || validRow == 1;
+  if (*layout == BLayout::ColMajor)
+    return validRow == fullRow || validCol == 1;
+  return false;
+}
+
+static std::optional<unsigned> getRepeatCountForAccess(Value access) {
+  if (!access) return std::nullopt;
+  auto shape = getKnownRepeatAccessShape(access);
+  if (!shape || !isProvenContiguousAccess(access, *shape)) return std::nullopt;
+
+  unsigned elemBytes = pto::getPTOStorageElemByteSize(shape->elementType);
+  if (elemBytes == 0) return std::nullopt;
+
+  uint64_t validElems = static_cast<uint64_t>(shape->validShape[0]) *
+                        static_cast<uint64_t>(shape->validShape[1]);
+  uint64_t elemsPerRepeat = kVectorRegisterSizeInBytes / elemBytes;
+  if (elemsPerRepeat == 0) return std::nullopt;
+
+  uint64_t repeat = (validElems + elemsPerRepeat - 1U) / elemsPerRepeat;
+  if (repeat > std::numeric_limits<unsigned>::max()) return std::nullopt;
+  return static_cast<unsigned>(repeat);
+}
+
+static bool isSameExactAccess(const BaseMemInfo *lhs, const BaseMemInfo *rhs) {
+  return lhs && rhs && *lhs == *rhs;
+}
+
+static bool containsExactAccess(const SmallVector<const BaseMemInfo *> &infos,
+                                const BaseMemInfo *access) {
+  return llvm::any_of(infos, [&](const BaseMemInfo *info) {
+    return isSameExactAccess(info, access);
+  });
+}
+
+} // namespace
 
 static constexpr unsigned kPipeStateSize =
     static_cast<unsigned>(PipelineType::PIPE_LAST) + 1U;
@@ -305,6 +449,10 @@ void InsertSyncAnalysis::MemAnalyze(
     return;
   }
 
+  if (CanPrunePipeVBarrier(nowCompound, frontCompound, depVec, forEndIndex)) {
+    return;
+  }
+
   if (forEndIndex.has_value()) {
     int eventIdNum = GetEventIdNum(depVec);
     for (int i = 1; i < eventIdNum; i++) {
@@ -351,6 +499,48 @@ bool InsertSyncAnalysis::IsMemInfoHasDependency(
   }
 
   return hasDependency;
+}
+
+bool InsertSyncAnalysis::CanPrunePipeVBarrier(
+    const CompoundInstanceElement *nowCompound,
+    const CompoundInstanceElement *frontCompound,
+    const DepBaseMemInfoPairVec &depBaseMemInfosVec,
+    const std::optional<unsigned> &forEndIndex) const {
+  if (forEndIndex.has_value()) return false;
+  if (!nowCompound || !frontCompound) return false;
+  if (nowCompound->kPipeValue != PipelineType::PIPE_V ||
+      frontCompound->kPipeValue != PipelineType::PIPE_V) {
+    return false;
+  }
+
+  // PIPE_V has a hardware-safe same-access chain case: exact same-access
+  // dependencies from the producer result to the consumer source do not require
+  // a vector-pipe barrier once the producer repeat is large enough. Keep the
+  // check conservative: all dependency pairs for this candidate must describe
+  // the exact same access.
+  SmallVector<const BaseMemInfo *, 2> producerAccesses;
+  for (const auto &pair : depBaseMemInfosVec) {
+    if (!isSameExactAccess(pair.first, pair.second)) return false;
+
+    if (containsExactAccess(nowCompound->useVec, pair.first) &&
+        containsExactAccess(frontCompound->defVec, pair.second)) {
+      if (!llvm::is_contained(producerAccesses, pair.second))
+        producerAccesses.push_back(pair.second);
+    } else {
+      return false;
+    }
+  }
+  if (producerAccesses.empty()) return false;
+
+  // The caller is analyzing this specific front->now dependency. Do not look
+  // for a later text-order writer here; it may belong to a different branch
+  // path or a zero-trip loop body.
+  for (const BaseMemInfo *producerAccess : producerAccesses) {
+    auto repeat = getRepeatCountForAccess(producerAccess->baseBuffer);
+    if (!repeat || *repeat < kPipeVPruneMinRepeat) return false;
+  }
+
+  return true;
 }
 
 void InsertSyncAnalysis::InsertSyncOperation(

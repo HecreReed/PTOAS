@@ -139,7 +139,13 @@ private:
                      CompoundInstanceElement *frontCompound,
                      SyncRecordList &syncRecordList, 
                      unsigned recordListIndex);
- 
+
+  bool CanPrunePipeVBarrier(
+      const CompoundInstanceElement *nowCompound,
+      const CompoundInstanceElement *frontCompound,
+      const DepBaseMemInfoPairVec &depBaseMemInfosVec,
+      const std::optional<unsigned> &forEndIndex) const;
+
   /// 更新 SyncRecord (当插入新同步后)
   void UpdateAlreadySync(const SyncOps &syncVector,
                          SyncRecordList &syncRecordList,

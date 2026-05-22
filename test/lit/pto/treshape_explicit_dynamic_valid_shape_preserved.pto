@@ -1,0 +1,38 @@
+// RUN: ptoas --pto-level=level3 --pto-arch=a5 \
+// RUN:   --mlir-print-ir-after=pto-view-to-memref %s -o - 2>&1 | FileCheck %s
+
+module {
+  func.func @treshape_explicit_dynamic_valid_shape_preserved() {
+    %c8 = arith.constant 8 : index
+    %c16 = arith.constant 16 : index
+    %c0_i64 = arith.constant 0 : i64
+    %c1024_i64 = arith.constant 1024 : i64
+
+    %src = pto.alloc_tile addr = %c0_i64 valid_row = %c8 valid_col = %c16
+      : !pto.tile_buf<loc=vec, dtype=f32, rows=16, cols=16, v_row=?, v_col=?,
+                      blayout=row_major, slayout=none_box, fractal=512, pad=0>
+
+    %dst = pto.treshape %src
+      : !pto.tile_buf<loc=vec, dtype=f32, rows=16, cols=16, v_row=?, v_col=?,
+                      blayout=row_major, slayout=none_box, fractal=512, pad=0>
+     -> !pto.tile_buf<loc=vec, dtype=f32, rows=16, cols=16, v_row=?, v_col=?,
+                      blayout=col_major, slayout=none_box, fractal=512, pad=0>
+
+    %out = pto.alloc_tile addr = %c1024_i64 valid_row = %c8 valid_col = %c16
+      : !pto.tile_buf<loc=vec, dtype=f32, rows=16, cols=16, v_row=?, v_col=?,
+                      blayout=col_major, slayout=none_box, fractal=512, pad=0>
+    pto.tmov
+      ins(%dst
+          : !pto.tile_buf<loc=vec, dtype=f32, rows=16, cols=16, v_row=?, v_col=?,
+                          blayout=col_major, slayout=none_box, fractal=512, pad=0>)
+      outs(%out
+          : !pto.tile_buf<loc=vec, dtype=f32, rows=16, cols=16, v_row=?, v_col=?,
+                          blayout=col_major, slayout=none_box, fractal=512, pad=0>)
+
+    return
+  }
+}
+
+// CHECK-DAG: [[PART:%[A-Za-z0-9_]+]] = arith.constant 8 : index
+// CHECK-DAG: [[FULL:%[A-Za-z0-9_]+]] = arith.constant 16 : index
+// CHECK: pto.bind_tile {{.*}}, [[PART]], [[FULL]] {{.*}}blayout=#pto.blayout<col_major>{{.*}}pto.view_semantics = "treshape"

@@ -20,6 +20,7 @@
 
 #include <iostream>
 #include <optional>
+#include <vector>
 
 namespace ptobc {
 mlir::OwningOpRef<mlir::ModuleOp> parsePTOFile(mlir::MLIRContext& ctx, const std::string& path);
@@ -40,21 +41,42 @@ struct CommandLineOptions {
   std::string output;
 };
 
-static std::optional<CommandLineOptions> parseCommandLine(int argc, char **argv) {
-  if (argc < 2)
+namespace {
+
+constexpr size_t kCommandArgumentCount = 2;
+constexpr size_t kFullCommandArgumentCount = 5;
+constexpr size_t kCommandArgumentIndex = 1;
+constexpr size_t kInputArgumentIndex = 2;
+constexpr size_t kFirstOptionArgumentIndex = 3;
+constexpr size_t kNextArgumentOffset = 1;
+constexpr int kUsageExitCode = 2;
+
+static std::vector<std::string> collectArguments(int argc, char *argv[]) {
+  std::vector<std::string> args;
+  args.reserve(static_cast<size_t>(argc));
+  for (int i = 0; i < argc; ++i)
+    args.emplace_back(argv[i]);
+  return args;
+}
+
+} // namespace
+
+static std::optional<CommandLineOptions>
+parseCommandLine(const std::vector<std::string> &args) {
+  if (args.size() < kCommandArgumentCount)
     return std::nullopt;
 
-  CommandLineOptions options{argv[1], "", ""};
+  CommandLineOptions options{args[kCommandArgumentIndex], "", ""};
   if (options.cmd != "encode" && options.cmd != "decode")
     return options;
-  if (argc < 5)
+  if (args.size() < kFullCommandArgumentCount)
     return std::nullopt;
 
-  options.input = argv[2];
-  for (int i = 3; i < argc; ++i) {
-    std::string arg = argv[i];
-    if (arg == "-o" && i + 1 < argc)
-      options.output = argv[++i];
+  options.input = args[kInputArgumentIndex];
+  for (size_t i = kFirstOptionArgumentIndex; i < args.size(); ++i) {
+    const std::string &arg = args[i];
+    if (arg == "-o" && i + kNextArgumentOffset < args.size())
+      options.output = args[++i];
   }
   if (options.output.empty())
     return std::nullopt;
@@ -96,10 +118,11 @@ static int runDecode(const CommandLineOptions &options) {
 }
 
 int main(int argc, char **argv) {
-  auto options = parseCommandLine(argc, argv);
+  auto args = collectArguments(argc, argv);
+  auto options = parseCommandLine(args);
   if (!options) {
     usage();
-    return 2;
+    return kUsageExitCode;
   }
 
   try {
@@ -108,7 +131,7 @@ int main(int argc, char **argv) {
     if (options->cmd == "decode")
       return runDecode(*options);
     usage();
-    return 2;
+    return kUsageExitCode;
   } catch (const std::exception& e) {
     std::cerr << "ERROR: " << e.what() << "\n";
     return 1;
