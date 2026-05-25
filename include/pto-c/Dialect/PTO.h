@@ -33,6 +33,8 @@ bool mlirPTOTypeIsAAsyncSessionType(MlirType type);
 MlirType mlirPTOAsyncSessionTypeGet(MlirContext ctx);
 bool mlirPTOTypeIsAAsyncEventType(MlirType type);
 MlirType mlirPTOAsyncEventTypeGet(MlirContext ctx);
+bool mlirPTOTypeIsAPrefetchAsyncContextType(MlirType type);
+MlirType mlirPTOPrefetchAsyncContextTypeGet(MlirContext ctx);
 
 // ---- !pto.hif8 / !pto.f4E1M2x2 / !pto.f4E2M1x2 ----
 bool mlirPTOTypeIsAHiF8Type(MlirType type);

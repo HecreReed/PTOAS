@@ -105,6 +105,54 @@ def AddPtrOp : PTO_Op<"addptr", [
   }];
 }
 
+def PtrToIntOp : PTO_Op<"ptrtoint", [Pure]> {
+  let summary = "Convert a global pointer to a byte address";
+  let description = [{
+    Converts a global pointer value to an i64 byte address. If the source
+    pointer is produced by `pto.addptr`, lowering materializes the addptr
+    offset as an explicit byte offset before converting to EmitC.
+  }];
+
+  let arguments = (ins
+    PtrOrMemRef:$ptr
+  );
+
+  let results = (outs
+    I64:$result
+  );
+
+  let hasVerifier = 1;
+
+  let assemblyFormat = [{
+    $ptr attr-dict `:` type($ptr) `->` type($result)
+  }];
+}
+
+def IntToPtrOp : PTO_Op<"inttoptr", [Pure]> {
+  let summary = "Convert an i64 byte address to a global pointer";
+  let description = [{
+    Converts an i64 byte address to a global pointer of the requested element
+    type. This is an escape hatch for explicit byte-address arithmetic and
+    cross-element-type pointer reinterpretation. To keep byte-address-derived
+    pointers from escaping into general pointer IR, the result may only be used
+    directly as the pointer operand of `pto.load_scalar` or `pto.store_scalar`.
+  }];
+
+  let arguments = (ins
+    AnyInteger:$addr
+  );
+
+  let results = (outs
+    PtrOrMemRef:$result
+  );
+
+  let hasVerifier = 1;
+
+  let assemblyFormat = [{
+    $addr attr-dict `:` type($addr) `->` type($result)
+  }];
+}
+
 //===----------------------------------------------------------------------===//
 // Scalar pointer load/store
 //===----------------------------------------------------------------------===//
@@ -370,6 +418,30 @@ def SetValidShapeOp : PTO_Op<"set_validshape", [
   }];
 }
 
+def GetValidShapeOp : PTO_Op<"get_validshape", [
+    DeclareOpInterfaceMethods<MemoryEffectsOpInterface>
+  ]> {
+  let summary = "Read runtime valid row/col metadata from a tile";
+  let description = [{
+    Reads the current runtime valid_row/valid_col metadata from a tile_buf
+    handle. This op observes prior set_validshape updates and returns the
+    current values as index-typed SSA values.
+  }];
+
+  let arguments = (ins
+    TileBufOrMemRef:$source
+  );
+
+  let results = (outs
+    Index:$valid_row,
+    Index:$valid_col
+  );
+
+  let hasVerifier = 1;
+
+  let assemblyFormat = "$source attr-dict `:` qualified(type($source))";
+}
+
 // ============================================================================
 // SSA TileBuf Config Ops (aliasing views)
 // ============================================================================
@@ -551,6 +623,69 @@ def TPrefetchOp : PTO_TOp<"tprefetch", [
   let extraClassDeclaration = [{
     ::mlir::pto::PIPE getPipe() { return ::mlir::pto::PIPE::PIPE_MTE2; }
     ::mlir::MutableOperandRange getDpsInitsMutable() { return getDstMutable(); }
+  }];
+}
+
+def MakePrefetchAsyncContextOp : PTO_Op<"make_prefetch_async_context"> {
+  let summary = "Build a PrefetchAsyncContext from GM workspace.";
+  let description = [{
+    Materializes a first-class PTO IR `PrefetchAsyncContext` value from a GM
+    workspace pointer.
+  }];
+
+  let arguments = (ins
+    ScalarPtrOrMemRef:$workspace
+  );
+
+  let results = (outs
+    PrefetchAsyncContextType:$ctx
+  );
+
+  let hasVerifier = 1;
+
+  let assemblyFormat = [{
+    `(` $workspace `:` qualified(type($workspace)) `)`
+    attr-dict `->` qualified(type($ctx))
+  }];
+}
+
+def GetPrefetchAsyncSessionOp : PTO_Op<"get_prefetch_async_session", [Pure]> {
+  let summary = "Project session from a PrefetchAsyncContext.";
+
+  let arguments = (ins
+    PrefetchAsyncContextType:$ctx
+  );
+
+  let results = (outs
+    AsyncSessionType:$session
+  );
+
+  let assemblyFormat = [{
+    $ctx attr-dict `:` qualified(type($ctx)) `->` qualified(type($session))
+  }];
+}
+
+def TPrefetchAsyncOp : PTO_Op<"tprefetch_async"> {
+  let summary = "Asynchronously prefetch global data into L2 cache via SDMA CMO.";
+  let description = [{
+    Starts one asynchronous prefetch operation.
+  }];
+
+  let arguments = (ins
+    PTODpsType:$src,
+    PrefetchAsyncContextType:$ctx
+  );
+
+  let results = (outs
+    AsyncEventType:$event
+  );
+
+  let hasVerifier = 1;
+
+  let assemblyFormat = [{
+    `(` $src `,` $ctx `:`
+        qualified(type($src)) `,` qualified(type($ctx)) `)`
+    attr-dict `->` qualified(type($event))
   }];
 }
 
@@ -2438,6 +2573,37 @@ def TSyncOp : PTO_TOp<"tsync"> {
   }];
 }
 
+def SyncAllOp : PTO_Op<"syncall", [AttrSizedOperandSegments]> {
+  let summary = "Cross-core all-participant synchronization.";
+  let description = [{
+    Models `pto::SYNCALL`.
+
+    Supported IR forms:
+    - hard sync: no operands, `mode = hard`
+    - soft AIV-only sync: `gm_workspace`, `ub_workspace`, optional `used_cores`
+    - soft AIC-only sync: `gm_workspace`, `l1_workspace`, optional `used_cores`
+    - soft mixed sync: `gm_workspace`, `ub_workspace`, `l1_workspace`,
+      optional `used_cores`
+
+    The verifier mirrors the input-form constraints exposed by the public
+    `pto-isa` API.
+  }];
+
+  let arguments = (ins
+    Optional<PTODpsType>:$gm_workspace,
+    Optional<PTODpsType>:$ub_workspace,
+    Optional<PTODpsType>:$l1_workspace,
+    Optional<I32>:$used_cores,
+    PTO_SyncAllModeAttr:$mode,
+    PTO_SyncCoreTypeAttr:$core_type
+  );
+
+  let results = (outs);
+
+  let hasVerifier = 1;
+  let hasCustomAssemblyFormat = 1;
+}
+
 
 //===----------------------------------------------------------------------===//
 // FFT Configuration Operation
@@ -3531,7 +3697,9 @@ def TColSumOp : PTO_TOp<"tcolsum", [
   let extraClassDeclaration = [{
     ::mlir::pto::PIPE getPipe() { return ::mlir::pto::PIPE::PIPE_V; }
     ::mlir::MutableOperandRange getDpsInitsMutable() {
-      return ::mlir::MutableOperandRange(getOperation(), 1, getOperation()->getNumOperands());
+      return ::mlir::MutableOperandRange(getOperation(),
+                                         getOperation()->getNumOperands() - 1,
+                                         1);
     }
   }];
 }

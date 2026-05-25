@@ -1,0 +1,18 @@
+// RUN: ptoas --pto-arch=a5 %s 2>&1 | FileCheck %s
+
+module {
+  func.func @syncall_emitc(%gm: memref<64xi32, #pto.address_space<gm>>,
+                           %ub: memref<64xi32, #pto.address_space<vec>>,
+                           %l1: memref<64xi32, #pto.address_space<mat>>,
+                           %used: i32) {
+    pto.syncall(%gm, %ub, %l1, %used : memref<64xi32, #pto.address_space<gm>>, memref<64xi32, #pto.address_space<vec>>, memref<64xi32, #pto.address_space<mat>>, i32) mode = #pto.sync_all_mode<soft>, core_type = #pto.sync_core_type<mix>
+    pto.syncall() mode = #pto.sync_all_mode<hard>, core_type = #pto.sync_core_type<mix>
+    return
+  }
+}
+
+// CHECK-LABEL: __global__ AICORE void syncall_emitc(
+// CHECK: Tile<TileType::Vec, int32_t, 1, 64
+// CHECK: Tile<TileType::Mat, int32_t, 1, 64
+// CHECK: SYNCALL<SyncAllMode::Soft, SyncCoreType::Mix>(
+// CHECK: SYNCALL<SyncCoreType::Mix>();

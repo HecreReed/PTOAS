@@ -1,0 +1,48 @@
+// Copyright (c) 2026 Huawei Technologies Co., Ltd.
+// This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+// CANN Open Software License Agreement Version 2.0 (the "License").
+// Please refer to the License for details. You may not use this file except in compliance with the License.
+// THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+// INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+// See LICENSE in the root of the software repository for the full text of the License.
+
+// RUN: ptoas --pto-arch=a3 %s 2>&1 | FileCheck %s --check-prefix=A3
+
+module {
+  func.func @comm_globaltensor_bf16_nz(
+      %src: memref<16x16x16xbf16, #pto.address_space<gm>>,
+      %peer0: memref<16x16x16xbf16, #pto.address_space<gm>>) {
+    %ping = pto.alloc_tile : !pto.tile_buf<loc=vec, dtype=bf16, rows=1, cols=256, v_row=1, v_col=256, blayout=row_major, slayout=none_box, fractal=512, pad=0>
+    pto.comm.tbroadcast(%src, recv(%ping), group(%peer0) : memref<16x16x16xbf16, #pto.address_space<gm>>, !pto.tile_buf<loc=vec, dtype=bf16, rows=1, cols=256, v_row=1, v_col=256, blayout=row_major, slayout=none_box, fractal=512, pad=0>, memref<16x16x16xbf16, #pto.address_space<gm>>) {root = 0 : i32}
+    return
+  }
+
+  func.func @comm_globaltensor_i8_nz(
+      %src: memref<16x32x16xi8, #pto.address_space<gm>>,
+      %peer0: memref<16x32x16xi8, #pto.address_space<gm>>) {
+    %ping = pto.alloc_tile : !pto.tile_buf<loc=vec, dtype=i8, rows=1, cols=256, v_row=1, v_col=256, blayout=row_major, slayout=none_box, fractal=512, pad=0>
+    pto.comm.tbroadcast(%src, recv(%ping), group(%peer0) : memref<16x32x16xi8, #pto.address_space<gm>>, !pto.tile_buf<loc=vec, dtype=i8, rows=1, cols=256, v_row=1, v_col=256, blayout=row_major, slayout=none_box, fractal=512, pad=0>, memref<16x32x16xi8, #pto.address_space<gm>>) {root = 0 : i32}
+    return
+  }
+
+  func.func @comm_globaltensor_i64_nz(
+      %src: memref<1x1x16x4x1xi64, #pto.address_space<gm>>,
+      %peer0: memref<1x1x16x4x1xi64, #pto.address_space<gm>>) {
+    %ping = pto.alloc_tile : !pto.tile_buf<loc=vec, dtype=i64, rows=1, cols=64, v_row=1, v_col=64, blayout=row_major, slayout=none_box, fractal=512, pad=0>
+    pto.comm.tbroadcast(%src, recv(%ping), group(%peer0) : memref<1x1x16x4x1xi64, #pto.address_space<gm>>, !pto.tile_buf<loc=vec, dtype=i64, rows=1, cols=64, v_row=1, v_col=64, blayout=row_major, slayout=none_box, fractal=512, pad=0>, memref<1x1x16x4x1xi64, #pto.address_space<gm>>) {root = 0 : i32}
+    return
+  }
+}
+
+// A3: using [[BF16_SHAPE:GTShape.*]] = pto::Shape<1, 1, 16, 16, 16>;
+// A3: using [[BF16_STRIDE:GTStride.*]] = pto::Stride<4096, 4096, 256, 16, 1>;
+// A3: constexpr pto::Layout [[BF16_LAYOUT:GT.*_layout]] = pto::Layout::NZ;
+// A3: using [[BF16_GT:GT.*]] = GlobalTensor<bfloat16_t, [[BF16_SHAPE]], [[BF16_STRIDE]], [[BF16_LAYOUT]]>;
+// A3: using [[I8_SHAPE:GTShape.*]] = pto::Shape<1, 1, 16, 32, 16>;
+// A3: using [[I8_STRIDE:GTStride.*]] = pto::Stride<8192, 8192, 512, 16, 1>;
+// A3: constexpr pto::Layout [[I8_LAYOUT:GT.*_layout]] = pto::Layout::NZ;
+// A3: using [[I8_GT:GT.*]] = GlobalTensor<int8_t, [[I8_SHAPE]], [[I8_STRIDE]], [[I8_LAYOUT]]>;
+// A3: using [[I64_SHAPE:GTShape.*]] = pto::Shape<1, 1, 16, 4, 1>;
+// A3: using [[I64_STRIDE:GTStride.*]] = pto::Stride<64, 64, 4, 1, 1>;
+// A3: constexpr pto::Layout [[I64_LAYOUT:GT.*_layout]] = pto::Layout::NZ;
+// A3: using [[I64_GT:GT.*]] = GlobalTensor<int64_t, [[I64_SHAPE]], [[I64_STRIDE]], [[I64_LAYOUT]]>;

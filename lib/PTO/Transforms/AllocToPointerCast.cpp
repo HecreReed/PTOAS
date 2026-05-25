@@ -10,6 +10,7 @@
 //===----------------------------------------------------------------------===//
 
 #include "AllocToPointerCast.h"
+#include "PTO/IR/PTOTypeUtils.h"
 #include "PTO/Transforms/Passes.h"
 #include "mlir/Dialect/MemRef/IR/MemRef.h"
 #include "mlir/Transforms/GreedyPatternRewriteDriver.h"
@@ -27,9 +28,6 @@ namespace {} // namespace
 
 namespace {
 constexpr uint64_t kDefaultAllocAlignmentBytes = 4096;
-constexpr uint64_t kF16ByteSize = 2;
-constexpr uint64_t kF32ByteSize = 4;
-constexpr unsigned kBitsPerByte = 8;
 constexpr size_t kDynamicValidShapeRank = 2;
 
 static TileBufConfigAttr inferBindTileConfig(memref::AllocOp op) {
@@ -65,15 +63,7 @@ static SmallVector<uint64_t> getAllocatedOffsets(memref::AllocOp op,
     // naturally align to 4096 bytes.
     uint64_t bytes = kDefaultAllocAlignmentBytes;
     if (auto memrefTy = dyn_cast<MemRefType>(memRefType)) {
-      uint64_t elemBytes = 0;
-      Type elemTy = memrefTy.getElementType();
-      if (elemTy.isF16())
-        elemBytes = kF16ByteSize;
-      else if (elemTy.isF32())
-        elemBytes = kF32ByteSize;
-      else if (auto it = dyn_cast<IntegerType>(elemTy))
-        elemBytes = it.getWidth() / kBitsPerByte;
-
+      uint64_t elemBytes = getPTOStorageElemByteSize(memrefTy.getElementType());
       if (elemBytes != 0) {
         uint64_t numel = 1;
         bool allStatic = true;

@@ -205,8 +205,10 @@ static std::pair<int64_t, int64_t> getStaticOffsetAndSize(Operation *op, Value s
   auto srcType = dyn_cast<MemRefType>(src.getType());
   if (!srcType) return {0, 0};
 
-  int64_t elemSize = srcType.getElementType().getIntOrFloatBitWidth() / 8;
-  if (elemSize == 0) elemSize = 1;
+  int64_t elemSize =
+      static_cast<int64_t>(pto::getPTOStorageElemByteSize(srcType.getElementType()));
+  if (elemSize == 0)
+    return {-1, -1};
 
   // === Case 1: memref.subview ===
   if (auto subView = dyn_cast<memref::SubViewOp>(op)) {
@@ -402,7 +404,10 @@ LogicalResult PTOIRTranslator::UpdateAllocTileOpMemInfo(pto::AllocTileOp op) {
     }
 
     if (isStatic) {
-      int64_t elemSize = tileType.getElementType().getIntOrFloatBitWidth() / 8;
+      int64_t elemSize = static_cast<int64_t>(
+          pto::getPTOStorageElemByteSize(tileType.getElementType()));
+      if (elemSize == 0)
+        return failure();
       int64_t numElements = 1;
       for (auto dim : shape) numElements *= dim;
       sizeInBytes = numElements * elemSize;
@@ -447,7 +452,10 @@ LogicalResult PTOIRTranslator::UpdatePointerCastOpMemInfo(pto::PointerCastOp op)
 
   uint64_t sizeInBytes = 0;
   if (memRefType.hasStaticShape()) {
-    int64_t elemSize = memRefType.getElementType().getIntOrFloatBitWidth() / 8;
+    int64_t elemSize = static_cast<int64_t>(
+        pto::getPTOStorageElemByteSize(memRefType.getElementType()));
+    if (elemSize == 0)
+      return failure();
     int64_t numElements = 1;
     for (auto dim : memRefType.getShape()) numElements *= dim;
     sizeInBytes = numElements * elemSize;
@@ -481,9 +489,10 @@ PTOIRTranslator::UpdateDeclareTileMemRefOpMemInfo(pto::DeclareTileMemRefOp op) {
 
   uint64_t sizeInBytes = 0;
   if (memRefType.hasStaticShape()) {
-    int64_t elemSize = memRefType.getElementType().getIntOrFloatBitWidth() / 8;
+    int64_t elemSize = static_cast<int64_t>(
+        pto::getPTOStorageElemByteSize(memRefType.getElementType()));
     if (elemSize == 0)
-      elemSize = 1;
+      return failure();
 
     int64_t numElements = 1;
     for (auto dim : memRefType.getShape())
@@ -885,8 +894,10 @@ LogicalResult PTOIRTranslator::UpdateMemrefAllocOpMemInfo(memref::AllocOp op) {
   // 1. 计算大小 (Bytes)
   uint64_t sizeInBytes = 0;
   if (memRefType.hasStaticShape()) {
-    int64_t elemSize = memRefType.getElementType().getIntOrFloatBitWidth() / 8;
-    if (elemSize == 0) elemSize = 1; // bool case
+    int64_t elemSize = static_cast<int64_t>(
+        pto::getPTOStorageElemByteSize(memRefType.getElementType()));
+    if (elemSize == 0)
+      return failure();
 
     int64_t numElements = 1;
     for (auto dim : memRefType.getShape()) numElements *= dim;

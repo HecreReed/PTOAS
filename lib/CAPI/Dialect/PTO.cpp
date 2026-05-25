@@ -97,6 +97,14 @@ MlirType mlirPTOAsyncEventTypeGet(MlirContext ctx) {
   return wrap(mlir::pto::AsyncEventType::get(unwrap(ctx)));
 }
 
+bool mlirPTOTypeIsAPrefetchAsyncContextType(MlirType type) {
+  return isa<mlir::pto::PrefetchAsyncContextType>(unwrap(type));
+}
+
+MlirType mlirPTOPrefetchAsyncContextTypeGet(MlirContext ctx) {
+  return wrap(mlir::pto::PrefetchAsyncContextType::get(unwrap(ctx)));
+}
+
 bool mlirPTOTypeIsAHiF8Type(MlirType type) {
   return isa<mlir::pto::HiF8Type>(unwrap(type));
 }

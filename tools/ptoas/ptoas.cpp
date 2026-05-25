@@ -308,6 +308,8 @@ static bool parseAutoSyncTailHint(llvm::StringRef hintStr, std::string &normaliz
 //   PTOAS__TILE_GET_VALUE(src, offset)      -> src.GetValue(offset)
 //   PTOAS__TILE_DATA(obj)                   -> obj.data()
 //   PTOAS__TILE_SET_VALIDSHAPE(obj, r, c)   -> obj.SetValidShape(r, c)
+//   PTOAS__TILE_GET_VALID_ROW(obj)          -> obj.GetValidRow()
+//   PTOAS__TILE_GET_VALID_COL(obj)          -> obj.GetValidCol()
 //   PTOAS__PTR_LOAD(ptr, offset)            -> ptr[offset]
 //   PTOAS__PTR_STORE(ptr, offset, val)      -> ptr[offset] = val
 //   PTOAS__EVENTID_ARRAY_LOAD(arr, idx)     -> arr[idx]
@@ -458,12 +460,32 @@ static void rewriteMarkerCallsToMembers(
   }
 }
 
+static bool rewriteMarkerCallToField(std::string &cpp, llvm::StringRef marker,
+                                     llvm::StringRef fieldName,
+                                     size_t expectedNumArgs) {
+  return rewriteMarkerCalls(
+      cpp, marker, [&](const ParsedMarkerCall &call) -> std::optional<std::string> {
+        if (call.args.size() != expectedNumArgs)
+          return std::nullopt;
+        if (call.args.empty())
+          return std::nullopt;
+        std::string replacement;
+        replacement.reserve(call.args.front().size() + fieldName.size() + 1);
+        replacement.append(call.args.front().str());
+        replacement.push_back('.');
+        replacement.append(fieldName.str());
+        return replacement;
+      });
+}
+
 static void rewriteTileGetSetValueMarkers(std::string &cpp) {
   static const MarkerRewriteSpec kTileMarkerRewrites[] = {
       {"PTOAS__TILE_SET_VALUE", "SetValue", 3},
       {"PTOAS__TILE_GET_VALUE", "GetValue", 2},
       {"PTOAS__TILE_DATA", "data", 1},
       {"PTOAS__TILE_SET_VALIDSHAPE", "SetValidShape", 3},
+      {"PTOAS__TILE_GET_VALID_ROW", "GetValidRow", 1},
+      {"PTOAS__TILE_GET_VALID_COL", "GetValidCol", 1},
   };
   rewriteMarkerCallsToMembers(cpp, kTileMarkerRewrites);
 }
@@ -474,21 +496,24 @@ static void rewriteAsyncEventMarkers(std::string &cpp) {
       {"PTOAS__ASYNC_EVENT_TEST", "Test", 2},
   };
   rewriteMarkerCallsToMembers(cpp, kAsyncEventMarkerRewrites);
+  (void)rewriteMarkerCallToField(cpp, "PTOAS__PREFETCH_CTX_SESSION",
+                                 "session", 1);
 }
 
 // --------------------------------------------------------------------------
-// EmitC cleanup: drop empty emitc.expression ops.
-// After FormExpressions + CSE, EmitC expressions can become empty when their
-// root op is CSE'd with an equivalent dominating value outside the expression
-// region. Such expressions crash mlir::emitc::translateToCpp because
-// ExpressionOp::getRootOp() returns nullptr.
+// EmitC cleanup: drop trivial emitc.expression ops.
+// After FormExpressions + CSE, EmitC expressions can become invalid in two
+// ways:
+//   1. the root op is CSE'd away, leaving an empty expression region
+//   2. the region degenerates to `emitc.yield %outer_value`, i.e. the yielded
+//      value is defined outside the expression body
+// Both cases crash mlir::emitc::translateToCpp because ExpressionOp expects a
+// root op defined within the region.
 // --------------------------------------------------------------------------
 static void dropEmptyEmitCExpressions(Operation *rootOp) {
   llvm::SmallVector<emitc::ExpressionOp, kEmptyExpressionInlineCapacity>
       toErase;
   rootOp->walk([&](emitc::ExpressionOp expr) {
-    if (expr.getRootOp())
-      return;
     Block *body = expr.getBody();
     if (!body)
       return;
@@ -496,6 +521,10 @@ static void dropEmptyEmitCExpressions(Operation *rootOp) {
     if (!yield || yield.getNumOperands() != 1)
       return;
     Value yielded = yield.getOperand(0);
+    Operation *defOp = yielded.getDefiningOp();
+    bool yieldedFromOutside = !defOp || defOp->getBlock() != body;
+    if (!yieldedFromOutside && expr.getRootOp())
+      return;
     expr.getResult().replaceAllUsesWith(yielded);
     toErase.push_back(expr);
   });
@@ -1162,6 +1191,8 @@ int main(int argc, char **argv) {
   if (!disableInferLayout)
     pm.addNestedPass<mlir::func::FuncOp>(pto::createInferPTOLayoutPass());
   pm.addNestedPass<mlir::func::FuncOp>(pto::createPTOA5NormalizeTMovPass());
+  pm.addNestedPass<mlir::func::FuncOp>(
+      pto::createPTOValidateIntToPtrUsesPass());
   pm.addPass(pto::createPTOViewToMemrefPass());
 
   if (effectiveLevel != PTOBuildLevel::Level3) {

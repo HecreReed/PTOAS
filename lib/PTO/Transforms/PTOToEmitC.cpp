@@ -301,6 +301,25 @@ static std::string getEmitCScalarTypeToken(Type elemTy) {
   return "float";
 }
 
+static emitc::PointerType getEmitCPointerType(MLIRContext *ctx,
+                                              StringRef pointeeTypeStr) {
+  return emitc::PointerType::get(emitc::OpaqueType::get(ctx, pointeeTypeStr));
+}
+
+static emitc::PointerType getEmitCPointerType(MLIRContext *ctx,
+                                              StringRef qualifier,
+                                              StringRef elemTypeStr) {
+  return getEmitCPointerType(ctx, (qualifier + " " + elemTypeStr).str());
+}
+
+static bool isEmitCPointerLikeType(Type ty) {
+  if (isa<emitc::PointerType>(ty))
+    return true;
+  if (auto opaqueTy = dyn_cast<emitc::OpaqueType>(ty))
+    return opaqueTy.getValue().ends_with("*");
+  return false;
+}
+
 static int64_t getEmitCScalarByteWidth(Type elemTy) {
   if (pto::getPTOStorageElemByteSize(elemTy) == 1)
     return 1;
@@ -503,8 +522,7 @@ public:
       std::string qualifier = "__gm__";
 
       std::string finalTypeStr = qualifier + " " + elemTypeStr;
-      return emitc::PointerType::get(
-          emitc::OpaqueType::get(Ctx, finalTypeStr));
+      return getEmitCPointerType(Ctx, finalTypeStr);
     });
 
     addConversion([Ctx](pto::PipeType type) -> Type {
@@ -534,6 +552,11 @@ public:
     addConversion([Ctx](pto::AsyncEventType type) -> Type {
       (void)type;
       return emitc::OpaqueType::get(Ctx, "pto::comm::AsyncEvent");
+    });
+
+    addConversion([Ctx](pto::PrefetchAsyncContextType type) -> Type {
+      (void)type;
+      return emitc::OpaqueType::get(Ctx, "pto::PrefetchAsyncContext");
     });
 
     addConversion([Ctx](pto::TensorViewType type) -> Type {
@@ -592,7 +615,7 @@ public:
       std::string finalTypeStr = qualifier + " " + elemTypeStr;
       LLVM_DEBUG(llvm::dbgs() << "  [Success] -> " << finalTypeStr << "*\n");
       
-      return emitc::PointerType::get(emitc::OpaqueType::get(Ctx, finalTypeStr));
+      return getEmitCPointerType(Ctx, finalTypeStr);
     });
 
     // ---------------------------------------------------------
@@ -733,24 +756,18 @@ static FailureOr<std::string> getTPipeTokenFromValue(Value pipeHandle,
 }
 
 static bool isSetFFTsPointerLikeType(Type ty) {
-  if (isa<emitc::PointerType>(ty))
-    return true;
-  if (auto opaqueTy = dyn_cast<emitc::OpaqueType>(ty))
-    return opaqueTy.getValue().ends_with("*");
-  return false;
+  return isEmitCPointerLikeType(ty);
 }
 
 static bool tileDataReturnsIntegralAddress(pto::AddressSpace as) {
   return as == pto::AddressSpace::BIAS;
 }
 
-static emitc::OpaqueType getTileDataResultType(MLIRContext *ctx,
-                                               pto::AddressSpace as,
-                                               StringRef elemTok) {
+static Type getTileDataResultType(MLIRContext *ctx, pto::AddressSpace as,
+                                  StringRef elemTok) {
   if (tileDataReturnsIntegralAddress(as))
     return emitc::OpaqueType::get(ctx, "uint64_t");
-  return emitc::OpaqueType::get(
-      ctx, std::string(addrSpaceQualifier(as)) + " " + elemTok.str() + "*");
+  return getEmitCPointerType(ctx, addrSpaceQualifier(as), elemTok);
 }
 
 static Value materializeTileDataValue(ConversionPatternRewriter &rewriter,
@@ -772,7 +789,7 @@ static Value materializeAddressAsPointer(ConversionPatternRewriter &rewriter,
   auto *ctx = rewriter.getContext();
   std::string ptrTyStr =
       std::string(addrSpaceQualifier(as)) + " " + elemTok.str() + "*";
-  auto ptrTy = emitc::OpaqueType::get(ctx, ptrTyStr);
+  auto ptrTy = getEmitCPointerType(ctx, addrSpaceQualifier(as), elemTok);
   if (isSetFFTsPointerLikeType(addr.getType())) {
     if (addr.getType() == ptrTy)
       return addr;
@@ -3381,29 +3398,7 @@ struct SubviewToEmitCPattern : public OpConversionPattern<memref::SubViewOp> {
 //===----------------------------------------------------------------------===//
 
 static std::string getElemTypeStringForGT(Type elemTy) {
-  if (elemTy.isF16()) return "half";
-  if (elemTy.isBF16()) return "bfloat16_t";
-  if (elemTy.isF32()) return "float";
-  if (elemTy.isF64()) return "double";
-  if (elemTy.isInteger(8)) {
-    if (elemTy.isSignlessInteger(8) || elemTy.isSignedInteger(8))
-      return "int8_t";
-    return "uint8_t";
-  }
-  if (elemTy.isInteger(16)) {
-    if (elemTy.isSignlessInteger(16) || elemTy.isSignedInteger(16))
-      return "int16_t";
-    return "uint16_t";
-  }
-  if (elemTy.isInteger(32)) {
-    if (elemTy.isSignlessInteger(32) || elemTy.isSignedInteger(32))
-      return "int32_t";
-    return "uint32_t";
-  }
-  if (elemTy.isInteger(64)) {
-    return cast<IntegerType>(elemTy).isUnsigned() ? "uint64_t" : "int64_t";
-  }
-  return "float";
+  return getEmitCScalarTypeToken(elemTy);
 }
 
 static bool hasStaticShape(MemRefType mrTy) {
@@ -3443,12 +3438,8 @@ static Value applyStaticMemrefOffset(ConversionPatternRewriter &rewriter,
   return rewriter.create<emitc::AddOp>(loc, basePtr.getType(), basePtr, offVal);
 }
 
-static int getGlobalTensorElementBytes(StringRef elemTypeStr) {
-  if (elemTypeStr.contains("half") || elemTypeStr.contains("bf16"))
-    return 2;
-  if (elemTypeStr.contains("double"))
-    return 8;
-  return 4;
+static int getGlobalTensorElementBytes(Type elemTy) {
+  return static_cast<int>(getPTOStorageElemByteSize(elemTy));
 }
 
 static int64_t multiplyOrDynamic(int64_t lhs, int64_t rhs) {
@@ -3528,8 +3519,10 @@ static emitc::OpaqueType getGlobalTensorOpaqueTypeFromShape(
 
 static std::string inferFallbackGlobalTensorLayout(ArrayRef<int64_t> shape5D,
                                                    ArrayRef<int64_t> stride5D,
-                                                   StringRef elemTypeStr) {
-  int elemBytes = getGlobalTensorElementBytes(elemTypeStr);
+                                                   Type elemTy) {
+  int elemBytes = getGlobalTensorElementBytes(elemTy);
+  if (elemBytes == 0)
+    return "pto::Layout::ND";
   if (shape5D[2] == 16 && multiplyOrDynamic(shape5D[2], shape5D[3]) * elemBytes == 512 &&
       stride5D[4] == 1 && stride5D[3] == shape5D[4]) {
     return "pto::Layout::NZ";
@@ -3551,10 +3544,10 @@ static std::string inferFallbackGlobalTensorLayout(ArrayRef<int64_t> shape5D,
 static std::string resolveGlobalTensorLayout(Operation *anchor, Value basePtr,
                                              ArrayRef<int64_t> shape5D,
                                              ArrayRef<int64_t> stride5D,
-                                             StringRef elemTypeStr) {
+                                             Type elemTy) {
   if (auto layout = resolveLayoutForGlobalTensor(anchor, basePtr))
     return layoutToEmitCString(*layout);
-  return inferFallbackGlobalTensorLayout(shape5D, stride5D, elemTypeStr);
+  return inferFallbackGlobalTensorLayout(shape5D, stride5D, elemTy);
 }
 
 struct GlobalTensorTypeNames {
@@ -3602,8 +3595,8 @@ static Value buildGlobalTensorFromMemref(ConversionPatternRewriter &rewriter,
       loc, "using " + names.strideTypeName + " = pto::Stride<" +
                joinIntTemplateParams(stride5D) + ">;");
 
-  std::string layoutEnum = resolveGlobalTensorLayout(anchor, basePtr, shape5D,
-                                                     stride5D, elemTypeStr);
+  std::string layoutEnum = resolveGlobalTensorLayout(
+      anchor, basePtr, shape5D, stride5D, mrTy.getElementType());
   rewriter.create<emitc::VerbatimOp>(loc, "constexpr pto::Layout " +
                                               names.layoutConstName + " = " +
                                               layoutEnum + ";");
@@ -3815,6 +3808,76 @@ static FailureOr<Value> buildAsyncScratchTileValue(
   rewriter.create<emitc::CallOpaqueOp>(loc, TypeRange{}, "TASSIGN",
                                        ArrayAttr{}, ArrayAttr{},
                                        ValueRange{tile, scratchAddr});
+  return tile;
+}
+
+static FailureOr<Value> buildSyncAllWorkspaceTileValue(
+    ConversionPatternRewriter &rewriter, Location loc, Value originalWorkspace,
+    Value emittedWorkspace) {
+  Value workspace = peelUnrealized(emittedWorkspace);
+  if (auto opaqueTy = dyn_cast<emitc::OpaqueType>(workspace.getType())) {
+    StringRef typeStr = opaqueTy.getValue();
+    if (typeStr.contains("Tile<") || typeStr.contains("ConvTile<"))
+      return workspace;
+  }
+
+  auto memTy = dyn_cast<MemRefType>(originalWorkspace.getType());
+  if (!memTy)
+    return failure();
+  if (!memTy.hasStaticShape())
+    return failure();
+
+  ArrayRef<int64_t> rawShape = memTy.getShape();
+  if (rawShape.empty() || rawShape.size() > 2)
+    return failure();
+
+  int64_t rows = rawShape.size() == 1 ? 1 : rawShape[0];
+  int64_t cols = rawShape.size() == 1 ? rawShape[0] : rawShape[1];
+  SmallVector<int64_t, 2> shape{rows, cols};
+  SmallVector<int64_t, 2> validShape{rows, cols};
+
+  auto *ctx = rewriter.getContext();
+  pto::TileBufConfigAttr configAttr = pto::TileBufConfigAttr::getDefault(ctx);
+  if (auto bind = originalWorkspace.getDefiningOp<pto::BindTileOp>()) {
+    configAttr = bind.getConfig();
+  } else if (auto cast = originalWorkspace.getDefiningOp<pto::PointerCastOp>()) {
+    if (auto config = cast.getConfig())
+      configAttr = *config;
+  }
+
+  Attribute memorySpace = memTy.getMemorySpace();
+  if (!memorySpace)
+    return failure();
+
+  auto tileTy = pto::TileBufType::get(ctx, shape, memTy.getElementType(),
+                                      memorySpace, validShape, configAttr);
+  auto tileTypeString = getEmitCTileTypeString(tileTy);
+  if (!tileTypeString)
+    return failure();
+
+  auto tileEmitTy = emitc::OpaqueType::get(ctx, *tileTypeString);
+  Value tile = rewriter
+                   .create<emitc::VariableOp>(loc, tileEmitTy,
+                                              emitc::OpaqueAttr::get(ctx, ""))
+                   .getResult();
+
+  Value rawPtr = workspace;
+  auto u64Ty = emitc::OpaqueType::get(ctx, "uint64_t");
+  if (isSetFFTsPointerLikeType(rawPtr.getType())) {
+    auto rcU64 =
+        rewriter.getArrayAttr({emitc::OpaqueAttr::get(ctx, "uint64_t")});
+    rawPtr = rewriter
+                 .create<emitc::CallOpaqueOp>(loc, u64Ty, "reinterpret_cast",
+                                              ArrayAttr{}, rcU64,
+                                              ValueRange{rawPtr})
+                 .getResult(0);
+  } else if (rawPtr.getType() != u64Ty) {
+    rawPtr = rewriter.create<emitc::CastOp>(loc, u64Ty, rawPtr).getResult();
+  }
+
+  rewriter.create<emitc::CallOpaqueOp>(loc, TypeRange{}, "TASSIGN",
+                                       ArrayAttr{}, ArrayAttr{},
+                                       ValueRange{tile, rawPtr});
   return tile;
 }
 
@@ -4206,6 +4269,98 @@ struct PTOTPrefetchToTPREFETCH : public OpConversionPattern<pto::TPrefetchOp> {
         op.getLoc(), TypeRange{}, "TPREFETCH",
         ArrayAttr{}, ArrayAttr{}, ValueRange{dst, srcArg});
     rewriter.eraseOp(op);
+    return success();
+  }
+};
+
+struct PTOTPrefetchAsyncToEmitC
+    : public OpConversionPattern<pto::TPrefetchAsyncOp> {
+  using OpConversionPattern<pto::TPrefetchAsyncOp>::OpConversionPattern;
+
+  LogicalResult matchAndRewrite(pto::TPrefetchAsyncOp op, OpAdaptor adaptor,
+                                ConversionPatternRewriter &rewriter) const override {
+    Value src = peelUnrealized(adaptor.getSrc());
+    Value srcArg = src;
+    if (!isEmitCGlobalTensorLikeType(srcArg.getType())) {
+      auto srcMrTy = dyn_cast<MemRefType>(op.getSrc().getType());
+      if (!srcMrTy)
+        return rewriter.notifyMatchFailure(
+            op, "expected src to lower to GlobalTensor or memref");
+      srcArg = buildGlobalTensorFromMemref(rewriter, op.getLoc(), src, srcMrTy,
+                                           op.getSrc().getDefiningOp()
+                                               ? op.getSrc().getDefiningOp()
+                                               : op.getOperation());
+    }
+    if (!srcArg)
+      return rewriter.notifyMatchFailure(op,
+                                         "failed to build GlobalTensor src");
+
+    Value prefetchCtx = peelUnrealized(adaptor.getCtx());
+
+    Type eventTy = getTypeConverter()->convertType(op.getEvent().getType());
+    if (!eventTy)
+      return rewriter.notifyMatchFailure(
+          op, "failed to convert tprefetch_async result type");
+
+    Value event = rewriter
+                      .create<emitc::CallOpaqueOp>(
+                          op.getLoc(), TypeRange{eventTy}, "TPREFETCH_ASYNC",
+                          ArrayAttr{}, ArrayAttr{},
+                          ValueRange{srcArg, prefetchCtx})
+                      .getResult(0);
+
+    rewriter.replaceOp(op, ValueRange{event});
+    return success();
+  }
+};
+
+struct PTOMakePrefetchAsyncContextToEmitC
+    : public OpConversionPattern<pto::MakePrefetchAsyncContextOp> {
+  using OpConversionPattern<pto::MakePrefetchAsyncContextOp>::OpConversionPattern;
+
+  LogicalResult matchAndRewrite(pto::MakePrefetchAsyncContextOp op,
+                                OpAdaptor adaptor,
+                                ConversionPatternRewriter &rewriter) const override {
+    Type ctxTy = getTypeConverter()->convertType(op.getCtx().getType());
+    if (!ctxTy)
+      return rewriter.notifyMatchFailure(
+          op, "failed to convert make_prefetch_async_context result type");
+
+    Value workspace = peelUnrealized(adaptor.getWorkspace());
+    workspace = castToGMBytePointer(rewriter, op.getLoc(), workspace);
+
+    Value ctx = rewriter
+                    .create<emitc::CallOpaqueOp>(
+                        op.getLoc(), TypeRange{ctxTy}, "pto::PrefetchAsyncContext",
+                        ArrayAttr{}, ArrayAttr{}, ValueRange{workspace})
+                    .getResult(0);
+
+    rewriter.replaceOp(op, ValueRange{ctx});
+    return success();
+  }
+};
+
+struct PTOGetPrefetchAsyncSessionToEmitC
+    : public OpConversionPattern<pto::GetPrefetchAsyncSessionOp> {
+  using OpConversionPattern<pto::GetPrefetchAsyncSessionOp>::OpConversionPattern;
+
+  LogicalResult matchAndRewrite(pto::GetPrefetchAsyncSessionOp op,
+                                OpAdaptor adaptor,
+                                ConversionPatternRewriter &rewriter) const override {
+    Type sessionTy = getTypeConverter()->convertType(op.getSession().getType());
+    if (!sessionTy)
+      return rewriter.notifyMatchFailure(
+          op, "failed to convert get_prefetch_async_session result type");
+
+    Value ctx = peelUnrealized(adaptor.getCtx());
+    Value session = rewriter
+                        .create<emitc::CallOpaqueOp>(
+                            op.getLoc(), TypeRange{sessionTy},
+                            "PTOAS__PREFETCH_CTX_SESSION", ArrayAttr{},
+                            ArrayAttr{}, ValueRange{ctx})
+                        .getResult(0);
+
+    rewriter.replaceOp(op, ValueRange{session});
     return success();
   }
 };
@@ -4961,6 +5116,120 @@ struct PTOSyncToEmitC : public OpConversionPattern<mlir::pto::TSyncOp> {
   }
 };
 
+struct PTOSyncAllToEmitC : public OpConversionPattern<mlir::pto::SyncAllOp> {
+  using OpConversionPattern<mlir::pto::SyncAllOp>::OpConversionPattern;
+
+  static StringRef coreTypeTok(pto::SyncCoreType coreType) {
+    switch (coreType) {
+    case pto::SyncCoreType::AIVOnly:
+      return "SyncCoreType::AIVOnly";
+    case pto::SyncCoreType::AICOnly:
+      return "SyncCoreType::AICOnly";
+    case pto::SyncCoreType::Mix:
+      return "SyncCoreType::Mix";
+    }
+    llvm_unreachable("unhandled SyncCoreType");
+  }
+
+  LogicalResult matchAndRewrite(mlir::pto::SyncAllOp op, OpAdaptor adaptor,
+                                ConversionPatternRewriter &rewriter) const override {
+    auto mode = op.getMode().getValue();
+    auto coreType = op.getCoreType().getValue();
+
+    auto buildGmWorkspace = [&]() -> FailureOr<Value> {
+      Value gm = peelUnrealized(adaptor.getGmWorkspace());
+      if (isEmitCGlobalTensorLikeType(gm.getType()))
+        return gm;
+
+      auto memTy = dyn_cast<MemRefType>(op.getGmWorkspace().getType());
+      if (!memTy)
+        return failure();
+
+      Value gt = buildGlobalTensorFromMemref(rewriter, op.getLoc(), gm, memTy,
+                                            op.getGmWorkspace().getDefiningOp()
+                                                ? op.getGmWorkspace().getDefiningOp()
+                                                : op.getOperation());
+      if (!gt)
+        return failure();
+      return gt;
+    };
+
+    if (mode == pto::SyncAllMode::Hard) {
+      std::string callee = "SYNCALL<" + coreTypeTok(coreType).str() + ">";
+      rewriter.create<emitc::CallOpaqueOp>(op.getLoc(), TypeRange{}, callee,
+                                           ArrayAttr{}, ArrayAttr{},
+                                           ValueRange{});
+      rewriter.eraseOp(op);
+      return success();
+    }
+
+    FailureOr<Value> gmWorkspace = buildGmWorkspace();
+    if (failed(gmWorkspace))
+      return rewriter.notifyMatchFailure(op,
+                                         "failed to build gm_workspace GlobalTensor");
+
+    auto i32Ty = emitc::OpaqueType::get(rewriter.getContext(), "int32_t");
+    Value usedCores = adaptor.getUsedCores()
+                          ? peelUnrealized(adaptor.getUsedCores())
+                          : makeEmitCIntConstant(rewriter, op.getLoc(), i32Ty, 0);
+    if (usedCores.getType() != i32Ty)
+      usedCores = rewriter.create<emitc::CastOp>(op.getLoc(), i32Ty, usedCores)
+                      .getResult();
+
+    std::string callee =
+        "SYNCALL<SyncAllMode::Soft, " + coreTypeTok(coreType).str() + ">";
+
+    SmallVector<Value, 4> operands{*gmWorkspace};
+    switch (coreType) {
+    case pto::SyncCoreType::AIVOnly: {
+      FailureOr<Value> ubWorkspace =
+          buildSyncAllWorkspaceTileValue(rewriter, op.getLoc(),
+                                         op.getUbWorkspace(),
+                                         adaptor.getUbWorkspace());
+      if (failed(ubWorkspace))
+        return rewriter.notifyMatchFailure(
+            op, "failed to materialize ub_workspace tile");
+      operands.push_back(*ubWorkspace);
+      break;
+    }
+    case pto::SyncCoreType::AICOnly: {
+      FailureOr<Value> l1Workspace =
+          buildSyncAllWorkspaceTileValue(rewriter, op.getLoc(),
+                                         op.getL1Workspace(),
+                                         adaptor.getL1Workspace());
+      if (failed(l1Workspace))
+        return rewriter.notifyMatchFailure(
+            op, "failed to materialize l1_workspace tile");
+      operands.push_back(*l1Workspace);
+      break;
+    }
+    case pto::SyncCoreType::Mix: {
+      FailureOr<Value> ubWorkspace =
+          buildSyncAllWorkspaceTileValue(rewriter, op.getLoc(),
+                                         op.getUbWorkspace(),
+                                         adaptor.getUbWorkspace());
+      FailureOr<Value> l1Workspace =
+          buildSyncAllWorkspaceTileValue(rewriter, op.getLoc(),
+                                         op.getL1Workspace(),
+                                         adaptor.getL1Workspace());
+      if (failed(ubWorkspace) || failed(l1Workspace))
+        return rewriter.notifyMatchFailure(
+            op, "failed to materialize mixed syncall workspace tiles");
+      operands.push_back(*ubWorkspace);
+      operands.push_back(*l1Workspace);
+      break;
+    }
+    }
+
+    operands.push_back(usedCores);
+    rewriter.create<emitc::CallOpaqueOp>(op.getLoc(), TypeRange{}, callee,
+                                         ArrayAttr{}, ArrayAttr{},
+                                         ValueRange(operands));
+    rewriter.eraseOp(op);
+    return success();
+  }
+};
+
 struct PTOSyncFlagDynToEmitC : public ConversionPattern {
   PTOSyncFlagDynToEmitC(TypeConverter &typeConverter, MLIRContext *ctx,
                         StringRef opName, StringRef callee)
@@ -5511,6 +5780,53 @@ struct PTOSetValidShapeToEmitC : public OpConversionPattern<pto::SetValidShapeOp
   }
 };
 
+struct PTOGetValidShapeToEmitC
+    : public OpConversionPattern<pto::GetValidShapeOp> {
+  using OpConversionPattern<pto::GetValidShapeOp>::OpConversionPattern;
+
+  LogicalResult matchAndRewrite(pto::GetValidShapeOp op, OpAdaptor adaptor,
+                                ConversionPatternRewriter &rewriter) const override {
+    auto peelAllCasts = [](Value v) {
+      while (auto castOp = v.getDefiningOp<UnrealizedConversionCastOp>())
+        v = castOp.getOperand(0);
+      if (auto castOp = v.getDefiningOp<emitc::CastOp>())
+        v = castOp.getOperand();
+      return v;
+    };
+    auto isTileLike = [](Value v) -> bool {
+      auto ot = dyn_cast<emitc::OpaqueType>(v.getType());
+      if (!ot)
+        return false;
+      StringRef s = ot.getValue();
+      return s.contains("Tile<") || s.contains("ConvTile<");
+    };
+
+    Value src = peelAllCasts(peelUnrealized(adaptor.getSource()));
+    if (!isTileLike(src))
+      return rewriter.notifyMatchFailure(
+          op, "get_validshape source must lower to a tile-like value");
+
+    auto resultTy = getTypeConverter()->convertType(rewriter.getIndexType());
+    if (!resultTy)
+      return failure();
+
+    Value row = rewriter
+                    .create<emitc::CallOpaqueOp>(
+                        op.getLoc(), resultTy,
+                        "PTOAS__TILE_GET_VALID_ROW", ArrayAttr{},
+                        ArrayAttr{}, ValueRange{src})
+                    .getResult(0);
+    Value col = rewriter
+                    .create<emitc::CallOpaqueOp>(
+                        op.getLoc(), resultTy,
+                        "PTOAS__TILE_GET_VALID_COL", ArrayAttr{},
+                        ArrayAttr{}, ValueRange{src})
+                    .getResult(0);
+    rewriter.replaceOp(op, ValueRange{row, col});
+    return success();
+  }
+};
+
 struct PTOTAssignToEmitC : public OpConversionPattern<pto::TAssignOp> {
   using OpConversionPattern<pto::TAssignOp>::OpConversionPattern;
 
@@ -5566,6 +5882,66 @@ struct PTOTAssignToEmitC : public OpConversionPattern<pto::TAssignOp> {
 //===----------------------------------------------------------------------===//
 // pto.load_scalar / pto.store_scalar lowering -> ptr[offset]
 //===----------------------------------------------------------------------===//
+
+static Type getPointerLikeElementType(Type type) {
+  if (auto ptrTy = dyn_cast<pto::PtrType>(type))
+    return ptrTy.getElementType();
+  if (auto memTy = dyn_cast<MemRefType>(type))
+    return memTy.getElementType();
+  return Type();
+}
+
+struct PTOPtrToIntToEmitC : public OpConversionPattern<pto::PtrToIntOp> {
+  using OpConversionPattern<pto::PtrToIntOp>::OpConversionPattern;
+
+  LogicalResult matchAndRewrite(pto::PtrToIntOp op, OpAdaptor adaptor,
+                                ConversionPatternRewriter &rewriter) const override {
+    Value ptr = peelUnrealized(adaptor.getPtr());
+    Type dstTy = getTypeConverter()->convertType(op.getResult().getType());
+    if (!dstTy)
+      return failure();
+
+    auto dstOpaque = dyn_cast<emitc::OpaqueType>(dstTy);
+    if (!dstOpaque)
+      return failure();
+
+    auto templateArgs =
+        rewriter.getArrayAttr({emitc::OpaqueAttr::get(rewriter.getContext(),
+                                                      dstOpaque.getValue())});
+    auto cast = rewriter.create<emitc::CallOpaqueOp>(
+        op.getLoc(), dstTy, "reinterpret_cast", ArrayAttr{}, templateArgs,
+        ValueRange{ptr});
+    rewriter.replaceOp(op, cast.getResult(0));
+    return success();
+  }
+};
+
+struct PTOIntToPtrToEmitC : public OpConversionPattern<pto::IntToPtrOp> {
+  using OpConversionPattern<pto::IntToPtrOp>::OpConversionPattern;
+
+  LogicalResult matchAndRewrite(pto::IntToPtrOp op, OpAdaptor adaptor,
+                                ConversionPatternRewriter &rewriter) const override {
+    Value addr = peelUnrealized(adaptor.getAddr());
+    Type dstTy = getTypeConverter()->convertType(op.getResult().getType());
+    if (!dstTy)
+      return failure();
+
+    Type dstElemTy = getPointerLikeElementType(op.getResult().getType());
+    if (!dstElemTy)
+      return failure();
+
+    std::string castType =
+        std::string("__gm__ ") + getEmitCScalarTypeToken(dstElemTy) + "*";
+    auto templateArgs =
+        rewriter.getArrayAttr({emitc::OpaqueAttr::get(rewriter.getContext(),
+                                                      castType)});
+    auto cast = rewriter.create<emitc::CallOpaqueOp>(
+        op.getLoc(), dstTy, "reinterpret_cast", ArrayAttr{}, templateArgs,
+        ValueRange{addr});
+    rewriter.replaceOp(op, cast.getResult(0));
+    return success();
+  }
+};
 
 struct PTOLoadScalarToEmitC : public OpConversionPattern<pto::LoadScalarOp> {
   using OpConversionPattern<pto::LoadScalarOp>::OpConversionPattern;
@@ -10451,9 +10827,10 @@ struct PTOBindTileToEmitC : public OpConversionPattern<pto::BindTileOp> {
       return TileBuildSpec{tileTypeStr, useConstructor, constructorArgs};
     };
 
-    auto buildTileValue = [&](const TileBuildSpec &spec) -> Value {
+    auto buildTileValue = [&](const TileBuildSpec &spec,
+                              bool forceDeclaration = false) -> Value {
       auto tileType = emitc::OpaqueType::get(ctx, spec.tileTypeStr);
-      if (spec.useConstructor) {
+      if (spec.useConstructor && !forceDeclaration) {
         return rewriter
             .create<emitc::CallOpaqueOp>(loc, tileType, spec.tileTypeStr,
                                          ArrayAttr{}, ArrayAttr{},
@@ -10535,7 +10912,7 @@ struct PTOBindTileToEmitC : public OpConversionPattern<pto::BindTileOp> {
       FailureOr<TileBuildSpec> tileSpec = buildTileSpec();
       if (failed(tileSpec))
         return failure();
-      Value dstTile = buildTileValue(*tileSpec);
+      Value dstTile = buildTileValue(*tileSpec, /*forceDeclaration=*/true);
 
       rewriter.create<emitc::CallOpaqueOp>(loc, TypeRange{}, "TRESHAPE",
                                            ArrayAttr{}, ArrayAttr{},
@@ -11682,6 +12059,7 @@ static void populatePTOToEmitCPatterns(RewritePatternSet &patterns,
   patterns.add<PTOSubCSToEmitC>(typeConverter, ctx);
   patterns.add<PTOWaitFlagToEmitC>(typeConverter, ctx);
   patterns.add<PTOSyncToEmitC>(typeConverter, ctx);
+  patterns.add<PTOSyncAllToEmitC>(typeConverter, ctx);
   patterns.add<PTOGetBufToEmitC>(typeConverter, ctx);
   patterns.add<PTORlsBufToEmitC>(typeConverter, ctx);
   patterns.add<PTOSetFFTsToEmitC>(typeConverter, ctx);
@@ -11774,7 +12152,8 @@ static void populatePTOToEmitCPatterns(RewritePatternSet &patterns,
   patterns.add<SubviewToEmitCPattern>(typeConverter, ctx);
   patterns.add<PointerCastConversion>(typeConverter, ctx);
   patterns.add<PTOSetValToSETVAL, PTOGetValToGETVAL, PTOSetValidShapeToEmitC,
-               PTOTAssignToEmitC, PTOLoadScalarToEmitC,
+               PTOGetValidShapeToEmitC, PTOTAssignToEmitC,
+               PTOPtrToIntToEmitC, PTOIntToPtrToEmitC, PTOLoadScalarToEmitC,
                PTOStoreScalarToEmitC>(typeConverter, ctx);
   patterns.add<PTOTAxpyToEmitC, PTOHistogramToEmitC, PTOGetScaleAddrToEmitC>(
       typeConverter, ctx);
@@ -11840,6 +12219,9 @@ static void populatePTOToEmitCPatterns(RewritePatternSet &patterns,
   patterns.add<PTOMinToEmitC>(typeConverter, ctx);
   patterns.add<PTOTLoadToTLOAD>(typeConverter, ctx);
   patterns.add<PTOTPrefetchToTPREFETCH>(typeConverter, ctx);
+  patterns.add<PTOMakePrefetchAsyncContextToEmitC>(typeConverter, ctx);
+  patterns.add<PTOGetPrefetchAsyncSessionToEmitC>(typeConverter, ctx);
+  patterns.add<PTOTPrefetchAsyncToEmitC>(typeConverter, ctx);
   patterns.add<PTOTStoreToTSTORE>(typeConverter, ctx);
   patterns.add<PTOMScatterToMSCATTER>(typeConverter, ctx);
   patterns.add<PTOTAddCToTADDC>(typeConverter, ctx);
@@ -11995,8 +12377,9 @@ struct EmitPTOManualPass
           if (isa<mlir::pto::PartitionViewOp>(op))
             needsGlobalTensorDataHelper = true;
           if (isa<mlir::pto::BuildAsyncSessionOp, mlir::pto::TPutAsyncOp,
-                  mlir::pto::TGetAsyncOp, mlir::pto::WaitAsyncEventOp,
-                  mlir::pto::TestAsyncEventOp, mlir::pto::TPutOp,
+                  mlir::pto::TGetAsyncOp, mlir::pto::TPrefetchAsyncOp,
+                  mlir::pto::WaitAsyncEventOp, mlir::pto::TestAsyncEventOp,
+                  mlir::pto::TPutOp,
                   mlir::pto::TGetOp, mlir::pto::TNotifyOp, mlir::pto::TWaitOp,
                   mlir::pto::TTestOp, mlir::pto::TBroadcastOp,
                   mlir::pto::CommTGatherOp, mlir::pto::CommTScatterOp,
@@ -12236,13 +12619,6 @@ static AICORE inline void ptoas_auto_sync_tail(
     // --- Step A: 清理 UnrealizedConversionCastOp ---
     // Prefer dropping redundant/unused casts; otherwise lower to emitc.cast
     // so the C++ emitter can print it.
-    auto isEmitCPointerLikeType = [](Type ty) {
-      if (isa<emitc::PointerType>(ty))
-        return true;
-      if (auto opaqueTy = dyn_cast<emitc::OpaqueType>(ty))
-        return opaqueTy.getValue().ends_with("*");
-      return false;
-    };
     auto isEmitCTileLikeType = [](Type ty) {
       auto opaqueTy = dyn_cast<emitc::OpaqueType>(ty);
       if (!opaqueTy)

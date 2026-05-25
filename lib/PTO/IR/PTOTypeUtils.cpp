@@ -32,12 +32,17 @@ bool mlir::pto::isPTOLowPrecisionType(Type t) {
   return isPTOFloat8Type(t) || isPTOHiFloat8Type(t) || isPTOFloat4PackedType(t);
 }
 
-unsigned mlir::pto::getPTOStorageElemByteSize(Type t) {
+unsigned mlir::pto::getPTOStorageElemBitWidth(Type t) {
   if (isPTOLowPrecisionType(t))
-    return 1;
+    return kBitsPerByte;
   if (auto floatTy = dyn_cast<FloatType>(t))
-    return floatTy.getWidth() / kBitsPerByte;
+    return floatTy.getWidth();
   if (auto intTy = dyn_cast<IntegerType>(t))
-    return intTy.getWidth() / kBitsPerByte;
+    return intTy.getWidth();
   return 0;
+}
+
+unsigned mlir::pto::getPTOStorageElemByteSize(Type t) {
+  unsigned bitWidth = getPTOStorageElemBitWidth(t);
+  return bitWidth == 0 ? 0 : bitWidth / kBitsPerByte;
 }

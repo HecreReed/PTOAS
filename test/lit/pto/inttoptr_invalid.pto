@@ -1,0 +1,11 @@
+// RUN: not ptoas --pto-arch=a3 %s -o /dev/null 2>&1 | FileCheck %s
+
+module {
+  func.func @inttoptr_invalid(%addr: i32) attributes {pto.kernel_kind = #pto.kernel_kind<vector>} {
+    %ptr = pto.inttoptr %addr : i32 -> !pto.ptr<ui32>
+    return
+  }
+}
+
+// CHECK: pto.inttoptr
+// CHECK: address operand must be i64

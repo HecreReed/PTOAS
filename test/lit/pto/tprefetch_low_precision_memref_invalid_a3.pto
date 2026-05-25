@@ -1,0 +1,19 @@
+// Copyright (c) 2026 Huawei Technologies Co., Ltd.
+// This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+// CANN Open Software License Agreement Version 2.0 (the "License").
+// Please refer to the License for details. You may not use this file except in compliance with the License.
+// THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+// INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+// See LICENSE in the root of the software repository for the full text of the License.
+
+// RUN: not ptoas --pto-arch=a3 %s 2>&1 | FileCheck %s
+
+func.func @tprefetch_low_precision_memref_invalid_a3(
+    %src: memref<16x16x!pto.hif8, #pto.address_space<gm>>,
+    %dst: memref<16x16xi8, #pto.address_space<vec>>) {
+  pto.tprefetch ins(%src : memref<16x16x!pto.hif8, #pto.address_space<gm>>)
+                outs(%dst : memref<16x16xi8, #pto.address_space<vec>>)
+  return
+}
+
+// CHECK: error: 'pto.tprefetch' op expects A2/A3 tprefetch low-precision element types to be unsupported

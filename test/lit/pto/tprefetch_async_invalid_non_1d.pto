@@ -1,0 +1,12 @@
+// RUN: not ptoas %s 2>&1 | FileCheck %s
+
+module {
+  func.func @bad_tprefetch_async(%src: memref<4x32xf32, #pto.address_space<gm>>,
+                                 %workspace: !pto.ptr<i8>) {
+    %ctx = pto.make_prefetch_async_context(%workspace : !pto.ptr<i8>) -> !pto.prefetch_async_context
+    %event = pto.tprefetch_async(%src, %ctx : memref<4x32xf32, #pto.address_space<gm>>, !pto.prefetch_async_context) -> !pto.async_event
+    return
+  }
+}
+
+// CHECK: error: 'pto.tprefetch_async' op expects src to be a static flat contiguous logical 1D GM memref

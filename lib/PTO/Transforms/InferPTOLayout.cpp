@@ -21,6 +21,7 @@
 //===----------------------------------------------------------------------===//
 
 #include "PTO/IR/PTO.h"
+#include "PTO/IR/PTOTypeUtils.h"
 #include "PTO/Transforms/Passes.h"
 #include "mlir/Dialect/Arith/IR/Arith.h"
 #include "mlir/Dialect/Func/IR/FuncOps.h"
@@ -43,7 +44,6 @@ namespace {
 static constexpr llvm::StringLiteral kLayoutAttrName = "layout";
 static constexpr llvm::StringLiteral kInferredLayoutAttrName =
     "pto.inferred_layout";
-static constexpr unsigned kBitsPerByte = 8;
 static constexpr unsigned kPaddedLayoutRank = 5;
 static constexpr int64_t kUnitExtent = 1;
 static constexpr int64_t kNZInnerRows = 16;
@@ -73,11 +73,7 @@ static std::optional<int64_t> getConstInt(OpFoldResult ofr) {
 }
 
 static unsigned elemByteSize(Type ty) {
-  if (auto f = dyn_cast<FloatType>(ty))
-    return f.getWidth() / kBitsPerByte;
-  if (auto i = dyn_cast<IntegerType>(ty))
-    return i.getWidth() / kBitsPerByte;
-  return 0;
+  return getPTOStorageElemByteSize(ty);
 }
 
 static bool isGlobalMemRef(MemRefType ty) {

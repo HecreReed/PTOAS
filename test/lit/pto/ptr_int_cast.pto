@@ -1,0 +1,59 @@
+// RUN: ptoas --pto-arch=a3 --mlir-print-ir-after=pto-view-to-memref %s -o /dev/null 2>&1 | FileCheck %s --check-prefix=IR
+// RUN: ptoas --pto-arch=a3 %s -o - 2>&1 | FileCheck %s --check-prefix=CPP
+
+module {
+  func.func @ptr_int_cast_kernel(%src64: !pto.ptr<ui64>, %dst32: !pto.ptr<ui32>, %idx: index) attributes {pto.kernel_kind = #pto.kernel_kind<vector>} {
+    %c0 = arith.constant 0 : index
+    %src64_off = pto.addptr %src64, %idx : !pto.ptr<ui64> -> !pto.ptr<ui64>
+    %addr = pto.ptrtoint %src64_off : !pto.ptr<ui64> -> i64
+    %src32 = pto.inttoptr %addr : i64 -> !pto.ptr<ui32>
+    %val = pto.load_scalar %src32[%c0] : !pto.ptr<ui32> -> ui32
+    pto.store_scalar %val, %dst32[%idx] : !pto.ptr<ui32>, ui32
+    return
+  }
+
+  func.func @ptrtoint_addptr_multi_consumer(%src64: !pto.ptr<ui64>, %dst64: !pto.ptr<ui64>, %dst_addr: !pto.ptr<i64>, %idx: index) attributes {pto.kernel_kind = #pto.kernel_kind<vector>} {
+    %c0 = arith.constant 0 : index
+    %off = pto.addptr %src64, %idx : !pto.ptr<ui64> -> !pto.ptr<ui64>
+    %a = pto.load_scalar %off[%c0] : !pto.ptr<ui64> -> ui64
+    %addr = pto.ptrtoint %off : !pto.ptr<ui64> -> i64
+    pto.store_scalar %a, %dst64[%c0] : !pto.ptr<ui64>, ui64
+    pto.store_scalar %addr, %dst_addr[%c0] : !pto.ptr<i64>, i64
+    return
+  }
+}
+
+// IR-LABEL: func.func @ptr_int_cast_kernel
+// IR: pto.ptrtoint {{.*}} : memref<?xui64> -> i64
+// IR: arith.index_cast {{.*}} : index to i64
+// IR: arith.constant 8 : i64
+// IR: arith.muli {{.*}} : i64
+// IR: arith.addi {{.*}} : i64
+// IR: pto.inttoptr {{.*}} : i64 -> memref<?xui32>
+// IR-NOT: !pto.ptr
+
+// CPP-LABEL: AICORE void ptr_int_cast_kernel
+// CPP-SAME: (__gm__ uint64_t* [[SRC:v[0-9]+]], __gm__ uint32_t* [[DST:v[0-9]+]], int32_t [[IDX:v[0-9]+]])
+// CPP: int64_t [[ADDR:v[0-9]+]] = reinterpret_cast<int64_t>([[SRC]]);
+// CPP: __gm__ uint32_t* [[SRC32:v[0-9]+]] = reinterpret_cast<__gm__ uint32_t*>({{.*}}[[ADDR]]
+// CPP: uint32_t [[VAL:v[0-9]+]] = [[SRC32]][{{.*}}];
+// CPP: [[DST]][[[IDX]]] = [[VAL]];
+
+// IR-LABEL: func.func @ptrtoint_addptr_multi_consumer
+// IR: pto.load_scalar {{.*}} : memref<?xui64> -> ui64
+// IR: pto.ptrtoint {{.*}} : memref<?xui64> -> i64
+// IR: arith.index_cast {{.*}} : index to i64
+// IR: arith.constant 8 : i64
+// IR: arith.muli {{.*}} : i64
+// IR: arith.addi {{.*}} : i64
+// IR-NOT: !pto.ptr
+
+// CPP-LABEL: AICORE void ptrtoint_addptr_multi_consumer
+// CPP-SAME: (__gm__ uint64_t* [[SRC64:v[0-9]+]], __gm__ uint64_t* [[DST64:v[0-9]+]], __gm__ int64_t* [[DSTADDR:v[0-9]+]], int32_t [[IDX2:v[0-9]+]])
+// CPP: const int32_t [[ZERO:v[0-9]+]] = 0;
+// CPP: const int64_t [[ELEM_BYTES:v[0-9]+]] = 8;
+// CPP: uint64_t [[A:v[0-9]+]] = [[SRC64]][[[IDX2]]];
+// CPP: int64_t [[ADDR2:v[0-9]+]] = reinterpret_cast<int64_t>([[SRC64]]);
+// CPP: int64_t [[BYTE_ADDR:v[0-9]+]] = {{.*}}[[ADDR2]]{{.*}}[[IDX2]]{{.*}}[[ELEM_BYTES]]
+// CPP: [[DST64]][[[ZERO]]] = [[A]];
+// CPP: [[DSTADDR]][[[ZERO]]] = [[BYTE_ADDR]];

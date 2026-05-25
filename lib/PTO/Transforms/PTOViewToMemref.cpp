@@ -818,6 +818,127 @@ static void markForceDynamicValidShape(Operation *op, bool force,
   return success();
 }
 
+static Value castIndexToI64(IRRewriter &rewriter, Location loc, Value value) {
+  Type i64Ty = rewriter.getI64Type();
+  if (value.getType() == i64Ty)
+    return value;
+  return rewriter.create<arith::IndexCastOp>(loc, i64Ty, value).getResult();
+}
+
+static FailureOr<Value>
+materializePtrToIntAddPtrAddress(IRRewriter &rewriter, Location loc,
+                                 mlir::pto::PtrToIntOp anchor, Value source) {
+  SmallVector<mlir::pto::AddPtrOp, 4> addPtrChain;
+  Value base = source;
+  while (auto add = base.getDefiningOp<mlir::pto::AddPtrOp>()) {
+    addPtrChain.push_back(add);
+    base = add.getOperand(0);
+  }
+
+  if (addPtrChain.empty())
+    return failure();
+
+  auto baseMemTy = dyn_cast<MemRefType>(base.getType());
+  if (!baseMemTy) {
+    anchor.emitOpError(
+        "pto.addptr source base could not be lowered to a GM memref");
+    return failure();
+  }
+
+  Value byteAddress = rewriter.create<mlir::pto::PtrToIntOp>(
+      loc, rewriter.getI64Type(), base);
+  for (auto add : addPtrChain) {
+    auto addPtrTy = dyn_cast<mlir::pto::PtrType>(add.getResult().getType());
+    if (!addPtrTy) {
+      anchor.emitOpError("requires pto.addptr source to have !pto.ptr result "
+                         "type before byte-address lowering");
+      return failure();
+    }
+
+    unsigned elemBytes =
+        mlir::pto::getPTOStorageElemByteSize(addPtrTy.getElementType());
+    if (elemBytes == 0) {
+      anchor.emitOpError("cannot lower pto.addptr source with unknown element "
+                         "byte size to a byte address");
+      return failure();
+    }
+
+    Value byteOffset = castIndexToI64(rewriter, loc, add.getOffset());
+    if (elemBytes != 1) {
+      Value elemBytesValue =
+          rewriter.create<arith::ConstantIntOp>(loc, elemBytes, 64);
+      byteOffset =
+          rewriter.create<arith::MulIOp>(loc, byteOffset, elemBytesValue)
+              .getResult();
+    }
+    byteAddress =
+        rewriter.create<arith::AddIOp>(loc, byteAddress, byteOffset).getResult();
+  }
+
+  return byteAddress;
+}
+
+static LogicalResult lowerIntToPtrOps(func::FuncOp func, MLIRContext *ctx) {
+  DefaultInlineVector<mlir::pto::IntToPtrOp> intToPtrs;
+  func.walk([&](mlir::pto::IntToPtrOp op) { intToPtrs.push_back(op); });
+
+  for (auto op : intToPtrs) {
+    if (!isa<mlir::pto::PtrType>(op.getResult().getType()))
+      continue;
+
+    auto targetTy =
+        dyn_cast<MemRefType>(convertPTOTypeToMemRef(op.getResult().getType()));
+    if (!targetTy) {
+      op.emitError("failed to convert inttoptr result to memref type");
+      return failure();
+    }
+
+    IRRewriter rewriter(ctx);
+    rewriter.setInsertionPoint(op);
+    auto lowered =
+        rewriter.create<mlir::pto::IntToPtrOp>(op.getLoc(), targetTy,
+                                               op.getAddr());
+    lowered->setAttrs(op->getAttrs());
+    rewriter.replaceOp(op, lowered.getResult());
+  }
+
+  return success();
+}
+
+static LogicalResult lowerPtrToIntOps(func::FuncOp func, MLIRContext *ctx) {
+  DefaultInlineVector<mlir::pto::PtrToIntOp> ptrToInts;
+  func.walk([&](mlir::pto::PtrToIntOp op) { ptrToInts.push_back(op); });
+
+  for (auto op : ptrToInts) {
+    Value source = op.getPtr();
+    if (source.getDefiningOp<mlir::pto::AddPtrOp>()) {
+      IRRewriter rewriter(ctx);
+      rewriter.setInsertionPoint(op);
+      FailureOr<Value> byteAddress =
+          materializePtrToIntAddPtrAddress(rewriter, op.getLoc(), op, source);
+      if (failed(byteAddress))
+        return failure();
+      rewriter.replaceOp(op, *byteAddress);
+      continue;
+    }
+
+    if (isa<mlir::pto::PtrType>(source.getType()))
+      continue;
+  }
+
+  DefaultInlineVector<mlir::pto::PtrToIntOp> remaining;
+  func.walk([&](mlir::pto::PtrToIntOp op) {
+    if (isa<mlir::pto::PtrType>(op.getPtr().getType()))
+      remaining.push_back(op);
+  });
+  for (auto op : remaining) {
+    op.emitError("ptrtoint source could not be lowered to a GM memref");
+    return failure();
+  }
+
+  return success();
+}
+
 [[maybe_unused]] static LogicalResult lowerMakeTensorViewOps(func::FuncOp func, MLIRContext *ctx) {
   DefaultInlineVector<mlir::pto::MakeTensorViewOp> makeViews;
   func.walk([&](mlir::pto::MakeTensorViewOp op) { makeViews.push_back(op); });
@@ -1248,11 +1369,19 @@ struct PTOViewToMemrefPass
     for (auto func : mod.getOps<func::FuncOp>()) {
       if (func.isExternal()) continue;
 
+      // ------------------------------------------------------------------
+      // Stage 0: ensure inttoptr values remain scalar-load/store only.
+      // ------------------------------------------------------------------
+      if (failed(validateIntToPtrUses(func))) {
+        signalPassFailure();
+        return;
+      }
+
       Block &entry = func.front();
       auto fnTy = func.getFunctionType();
 
       // ------------------------------------------------------------------
-      // Stage 0: Rewrite Function Signature
+      // Stage 0.10: Rewrite Function Signature
       // ------------------------------------------------------------------
       SmallVector<Type> newInputs;
       for (Type t : fnTy.getInputs()) newInputs.push_back(convertPTOTypeToMemRef(t));
@@ -1269,6 +1398,22 @@ struct PTOViewToMemrefPass
 
       // Update function type
       func.setFunctionType(FunctionType::get(ctx, newInputs, newResults));
+
+      // ------------------------------------------------------------------
+      // Stage 0.20: lower pto.inttoptr result types to GM memrefs.
+      // ------------------------------------------------------------------
+      if (failed(lowerIntToPtrOps(func, ctx))) {
+        signalPassFailure();
+        return;
+      }
+
+      // ------------------------------------------------------------------
+      // Stage 0.30: materialize pto.ptrtoint(addptr ...) byte offsets.
+      // ------------------------------------------------------------------
+      if (failed(lowerPtrToIntOps(func, ctx))) {
+        signalPassFailure();
+        return;
+      }
 
       // ------------------------------------------------------------------
       // Stage 0.5: lower pto.alloc_tile -> memref.alloc + pto.bind_tile

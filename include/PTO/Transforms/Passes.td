@@ -298,6 +298,22 @@ def PTOViewToMemref : Pass<"pto-view-to-memref", "ModuleOp"> {
   ];
 }
 
+def PTOValidateIntToPtrUses : Pass<"pto-validate-inttoptr-uses", "func::FuncOp"> {
+  let summary = "Validate restricted uses of PTO inttoptr results";
+  let description = [{
+    Verifies that `pto.inttoptr` results do not escape into general pointer IR.
+    The result may only be used directly as the pointer operand of
+    `pto.load_scalar` or `pto.store_scalar`.
+  }];
+
+  let constructor = "mlir::pto::createPTOValidateIntToPtrUsesPass()";
+
+  let dependentDialects = [
+    "mlir::pto::PTODialect",
+    "mlir::func::FuncDialect"
+  ];
+}
+
 def PTOMaterializeTileHandles : Pass<"pto-materialize-tile-handles", "ModuleOp"> {
   let summary = "Materialize tile_buf handles from planned memrefs before EmitC";
   let description = [{

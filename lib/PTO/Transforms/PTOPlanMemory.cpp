@@ -11,6 +11,8 @@
 
 #include "PTOPlanMemory.h"
 
+#include "PTO/IR/PTOTypeUtils.h"
+
 #include "mlir/Dialect/Arith/IR/Arith.h"
 #include "mlir/Dialect/GPU/IR/GPUDialect.h"
 #include "mlir/Dialect/LLVMIR/LLVMDialect.h"
@@ -425,6 +427,12 @@ void MemLivenessAnalysis::RecursionIR(Region *region, Liveness live) {
       // alias/result buffer.
       UpdateOpGenInfo(curOpInfo, ValueRange{op->getOperand(0)});
       OpKillHandle(curOpInfo, live, op->getBlock());
+    } else if (auto getValidShapeOp = dyn_cast<pto::GetValidShapeOp>(op)) {
+      (void)getValidShapeOp;
+      // Metadata-only read from an existing tile handle. It touches the source
+      // buffer for liveness, but the scalar row/col results are not buffers.
+      UpdateOpGenInfo(curOpInfo, ValueRange{op->getOperand(0)});
+      OpKillHandle(curOpInfo, live, op->getBlock());
     } else if (auto storeOp = dyn_cast<memref::StoreOp>(op)) {
       UpdateStoreOpInfo(curOpInfo, storeOp.getMemRef(), live);
     } else if (auto ptoDpsOp = dyn_cast<pto::PTO_DpsInitOpInterface>(op)) {
@@ -461,6 +469,7 @@ void MemLivenessAnalysis::RecursionIR(Region *region, Liveness live) {
                    pto::BuildAsyncSessionOp,
                    pto::TPutAsyncOp, pto::TGetAsyncOp, pto::TPutOp,
                    pto::TGetOp, pto::TNotifyOp, pto::TWaitOp, pto::TTestOp,
+                   pto::SyncAllOp,
                    pto::TBroadcastOp, pto::CommTGatherOp,
                    pto::CommTScatterOp, pto::TReduceOp>(op)) {
       UpdateOpGenInfo(curOpInfo, llvm::to_vector(op->getOperands()));
@@ -833,9 +842,12 @@ BufferInfo MemLivenessAnalysis::GetBufferInfo(Operation *op, Value operand,
       getStaticTotalSize(memRefType.getShape());
   if (!totalStaticSize.has_value())
     llvm::report_fatal_error("failed to obtain buffer static shape size");
+  unsigned elemBytes = getPTOStorageElemByteSize(memRefType.getElementType());
+  if (elemBytes == 0)
+    llvm::report_fatal_error("failed to obtain buffer element byte size");
   bufferInfo.constBits =
       totalStaticSize.value() *
-      static_cast<int64_t>(memRefType.getElementTypeBitWidth());
+      static_cast<int64_t>(elemBytes * kBitsPerByte);
   return bufferInfo;
 }
 
