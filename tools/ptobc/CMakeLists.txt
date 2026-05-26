@@ -23,6 +23,7 @@ add_library(ptobc_lib STATIC
   src/mlir_encode.cpp
   src/canonical_printer.cpp
   src/ptobc_decode_print.cpp
+  generated/ptobc_opcodes_v0.cpp
 )
 
 target_include_directories(ptobc_lib PUBLIC

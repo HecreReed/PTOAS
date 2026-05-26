@@ -50,6 +50,7 @@ add_mlir_dialect_library(PTOTransforms
   GraphSyncSolver/GraphSolver.cpp
   GraphSyncSolver/EventIdSolver.cpp
   GraphSyncSolver/SyncSolver.cpp
+  GraphSyncSolver/SyncSolverMerge.cpp
   GraphSyncSolver/SyncSolverCodeGen.cpp
   LoweringSyncToPipe.cpp
   PTOVerifyTFreePass.cpp
