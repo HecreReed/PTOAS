@@ -1432,6 +1432,7 @@ void populatePTOToEmitCTilePatterns(RewritePatternSet &patterns,
   patterns.add<PTOColMaxToEmitC>(typeConverter, ctx);
   patterns.add<PTOColArgMinToEmitC>(typeConverter, ctx);
   patterns.add<PTOMinToEmitC>(typeConverter, ctx);
+  patterns.add<PTOMinsToEmitC>(typeConverter, ctx);
   populatePTOToEmitCTileExtraPatterns(patterns, typeConverter, ctx);
 }
 

@@ -9,6 +9,9 @@
 #ifndef MLIR_DIALECT_PTO_TRANSFORMS_PTOTOEMITCINTERNAL_H
 #define MLIR_DIALECT_PTO_TRANSFORMS_PTOTOEMITCINTERNAL_H
 
+#pragma GCC diagnostic ignored "-Woverloaded-virtual"
+// GCC warns on MLIR OpConversionPattern helper overloads hiding RewritePattern::rewrite.
+
 #include "PTO/IR/PTO.h"
 
 #include "mlir/IR/MLIRContext.h"
