@@ -20,6 +20,16 @@ add_mlir_dialect_library(PTOTransforms
   PTOValidateIntToPtrUses.cpp
   PTOToEmitC.cpp
   PTOToEmitCArith.cpp
+  PTOToEmitCTilePatterns.cpp
+  PTOToEmitCTilePatternsExtra.cpp
+  PTOToEmitCTileMaterialization.cpp
+  PTOToEmitCSync.cpp
+  PTOToEmitCComm.cpp
+  PTOToEmitCKernelOps.cpp
+  PTOToEmitCControlFlow.cpp
+  PTOToEmitCSimpleOps.cpp
+  PTOToEmitCRuntimeOps.cpp
+  PTOToEmitCMemoryOps.cpp
   Utils.cpp
   OptMemPlanForPipeline.cpp
   AllocToPointerCast.cpp
