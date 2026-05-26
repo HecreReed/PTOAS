@@ -178,8 +178,38 @@ struct PTOHistogramToEmitC : public OpConversionPattern<pto::THistogramOp> {
     Value idx = peelUnrealized(adaptor.getIdx());
     Value dst = peelUnrealized(adaptor.getDst());
 
-    auto templateArgs = rewriter.getArrayAttr({emitc::OpaqueAttr::get(
-        ctx, op.getIsMSB() ? "HistByte::BYTE_1" : "HistByte::BYTE_0")});
+    StringRef histByte = "HistByte::BYTE_1";
+    int64_t byte = 1;
+    auto byteAttr = op.getByteAttr();
+    if (byteAttr)
+      byte = byteAttr.getInt();
+    if (auto legacyIsMSB = op->getAttrOfType<BoolAttr>("isMSB")) {
+      int64_t legacyByte = legacyIsMSB.getValue() ? 1 : 0;
+      if (byteAttr && byte != legacyByte)
+        return rewriter.notifyMatchFailure(
+            op, "conflicting 'byte' and legacy 'isMSB' attributes");
+      byte = legacyByte;
+    }
+    switch (byte) {
+    case 0:
+      histByte = "HistByte::BYTE_0";
+      break;
+    case 1:
+      histByte = "HistByte::BYTE_1";
+      break;
+    case 2:
+      histByte = "HistByte::BYTE_2";
+      break;
+    case 3:
+      histByte = "HistByte::BYTE_3";
+      break;
+    default:
+      return rewriter.notifyMatchFailure(op,
+                                         "expected byte to be in range [0, 3]");
+    }
+
+    auto templateArgs = rewriter.getArrayAttr(
+        {emitc::OpaqueAttr::get(ctx, histByte)});
     rewriter.create<emitc::CallOpaqueOp>(
         loc, TypeRange{}, "THISTOGRAM",
         /*args=*/ArrayAttr{}, /*templateArgs=*/templateArgs,
