@@ -67,6 +67,55 @@ ensure_hardening_cache() {
   fi
 }
 
+has_rpath() {
+  local path="$1"
+  if command -v patchelf >/dev/null 2>&1; then
+    local rpath_value
+    rpath_value="$(patchelf --print-rpath "$path" 2>/dev/null || true)"
+    [[ -n "$rpath_value" ]]
+    return
+  fi
+  readelf -d "$path" 2>/dev/null | grep -Eq '(RPATH|RUNPATH)'
+}
+
+remove_rpath() {
+  local path="$1"
+  if ! has_rpath "$path"; then
+    return
+  fi
+  if command -v patchelf >/dev/null 2>&1; then
+    patchelf --remove-rpath "$path" || true
+  fi
+  if has_rpath "$path" && command -v chrpath >/dev/null 2>&1; then
+    chrpath -d "$path" || true
+  fi
+}
+
+strip_binary() {
+  local path="$1"
+  if ! command -v strip >/dev/null 2>&1; then
+    return
+  fi
+  strip --strip-unneeded "$path" 2>/dev/null || strip "$path" 2>/dev/null || true
+}
+
+harden_package_artifacts() {
+  local ptoas_bin="${PTO_SOURCE_DIR}/build/tools/ptoas/ptoas"
+  local llvm_lib_dir="${LLVM_BUILD_DIR}/lib"
+
+  if [ -f "${ptoas_bin}" ]; then
+    remove_rpath "${ptoas_bin}"
+    strip_binary "${ptoas_bin}"
+  fi
+
+  if [ -d "${llvm_lib_dir}" ]; then
+    while IFS= read -r so_path; do
+      remove_rpath "${so_path}"
+      strip_binary "${so_path}"
+    done < <(find "${llvm_lib_dir}" -maxdepth 1 -type f -name '*.so*' | sort)
+  fi
+}
+
 clone_llvm_source() {
   local target_dir="$1"
   local attempt=1
@@ -212,6 +261,7 @@ build_only() {
 
   ninja -C build
   ninja -C build install
+  harden_package_artifacts
 
   export MLIR_PYTHON_ROOT=$LLVM_BUILD_DIR/tools/mlir/python_packages/mlir_core
   export PTO_PYTHON_ROOT=$PTO_INSTALL_DIR/
@@ -274,6 +324,7 @@ package() {
 
   ninja -C build
   ninja -C build install
+  harden_package_artifacts
   cd $BUILD_PATH
   ninja package
 }
