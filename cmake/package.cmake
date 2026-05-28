@@ -7,142 +7,130 @@
 # INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
 # See LICENSE in the root of the software repository for the full text of the License.
 # ----------------------------------------------------------------------------
-#### CPACK to package run #####
 
-# download makeself package
-include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/third_party/makeself-fetch.cmake)
+message(STATUS "CMAKE_INSTALL_PREFIX = ${CMAKE_INSTALL_PREFIX}")
 
-function(pack_built_in)
-  #### built-in package ####
-  message(STATUS "System processor: ${CMAKE_SYSTEM_PROCESSOR}")
-  if (CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64")
-      message(STATUS "Detected architecture: x86_64")
-      set(ARCH x86_64)
-  elseif (CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64|arm64|arm")
-      message(STATUS "Detected architecture: ARM64")
-      set(ARCH aarch64)
-  else ()
-      message(WARNING "Unknown architecture: ${CMAKE_SYSTEM_PROCESSOR}")
-  endif ()
+set(PTOAS_ROOT_DIR "${CMAKE_SOURCE_DIR}")
 
-  set(script_prefix ${CMAKE_SOURCE_DIR}/scripts/package/pto_as/scripts)
-  install(DIRECTORY ${script_prefix}/
-      DESTINATION share/info/pto_as/script
-      FILE_PERMISSIONS
-      OWNER_READ OWNER_WRITE OWNER_EXECUTE  # 文件权限
-      GROUP_READ GROUP_EXECUTE
-      WORLD_READ WORLD_EXECUTE
-      DIRECTORY_PERMISSIONS
-      OWNER_READ OWNER_WRITE OWNER_EXECUTE  # 目录权限
-      GROUP_READ GROUP_EXECUTE
-      WORLD_READ WORLD_EXECUTE
-  )
+set(SCRIPTS_FILES
+    ${CANN_CMAKE_DIR}/scripts/install/check_version_required.awk
+    ${CANN_CMAKE_DIR}/scripts/install/common_func.inc
+    ${CANN_CMAKE_DIR}/scripts/install/common_interface.sh
+    ${CANN_CMAKE_DIR}/scripts/install/common_interface.csh
+    ${CANN_CMAKE_DIR}/scripts/install/common_interface.fish
+    ${CANN_CMAKE_DIR}/scripts/install/version_compatiable.inc
+    ${PTOAS_ROOT_DIR}/scripts/package/pto_as/scripts/cleanup.sh
+    ${PTOAS_ROOT_DIR}/scripts/package/pto_as/scripts/help.info
+    ${PTOAS_ROOT_DIR}/scripts/package/pto_as/scripts/install.sh
+    ${PTOAS_ROOT_DIR}/scripts/package/pto_as/scripts/pto_common.sh
+    ${PTOAS_ROOT_DIR}/scripts/package/pto_as/scripts/pto_custom_install.sh
+    ${PTOAS_ROOT_DIR}/scripts/package/pto_as/scripts/pto_custom_uninstall.sh
+    ${PTOAS_ROOT_DIR}/scripts/package/pto_as/scripts/pto_install.sh
+    ${PTOAS_ROOT_DIR}/scripts/package/pto_as/scripts/pto_uninstall.sh
+    ${PTOAS_ROOT_DIR}/scripts/package/pto_as/scripts/uninstall.sh
+    ${PTOAS_ROOT_DIR}/scripts/package/pto_as/scripts/ver_check.sh
+)
 
-  set(SCRIPTS_FILES
-      ${CMAKE_SOURCE_DIR}/scripts/package/common/sh/check_version_required.awk
-      ${CMAKE_SOURCE_DIR}/scripts/package/common/sh/common_func.inc
-      ${CMAKE_SOURCE_DIR}/scripts/package/common/sh/common_interface.bash
-      ${CMAKE_SOURCE_DIR}/scripts/package/common/sh/common_interface.csh
-      ${CMAKE_SOURCE_DIR}/scripts/package/common/sh/common_interface.fish
-      ${CMAKE_SOURCE_DIR}/scripts/package/common/sh/version_compatiable.inc
-      ${CMAKE_SOURCE_DIR}/scripts/package/common/py/merge_binary_info_config.py
-  )
+install(FILES ${SCRIPTS_FILES}
+    DESTINATION share/info/pto_as/script
+    ${INSTALL_OPTIONAL}
+    COMPONENT pto-as
+    PERMISSIONS
+    OWNER_READ OWNER_WRITE OWNER_EXECUTE
+    GROUP_READ GROUP_EXECUTE
+    WORLD_READ WORLD_EXECUTE
+)
 
-  install(FILES ${SCRIPTS_FILES}
-      DESTINATION share/info/pto_as/script
-      PERMISSIONS
-      OWNER_READ OWNER_WRITE OWNER_EXECUTE  # 文件权限
-      GROUP_READ GROUP_EXECUTE
-      WORLD_READ WORLD_EXECUTE
-  )
-  set(COMMON_FILES
-      ${CMAKE_SOURCE_DIR}/scripts/package/common/sh/install_common_parser.sh
-      ${CMAKE_SOURCE_DIR}/scripts/package/common/sh/common_func_v2.inc
-      ${CMAKE_SOURCE_DIR}/scripts/package/common/sh/common_installer.inc
-      ${CMAKE_SOURCE_DIR}/scripts/package/common/sh/script_operator.inc
-      ${CMAKE_SOURCE_DIR}/scripts/package/common/sh/version_cfg.inc
-  )
+set(COMMON_FILES
+    ${CANN_CMAKE_DIR}/scripts/install/install_common_parser.sh
+    ${CANN_CMAKE_DIR}/scripts/install/common_func_v2.inc
+    ${CANN_CMAKE_DIR}/scripts/install/common_installer.inc
+    ${CANN_CMAKE_DIR}/scripts/install/script_operator.inc
+    ${CANN_CMAKE_DIR}/scripts/install/version_cfg.inc
+)
 
-  set(PACKAGE_FILES
-      ${COMMON_FILES}
-      ${CMAKE_SOURCE_DIR}/scripts/package/common/sh/multi_version.inc
-  )
-  set(LATEST_MANGER_FILES
-      ${COMMON_FILES}
-      ${CMAKE_SOURCE_DIR}/scripts/package/common/sh/common_func.inc
-      ${CMAKE_SOURCE_DIR}/scripts/package/common/sh/version_compatiable.inc
-      ${CMAKE_SOURCE_DIR}/scripts/package/common/sh/check_version_required.awk
-  )
-  set(CONF_FILES
-      ${CMAKE_SOURCE_DIR}/scripts/package/common/cfg/path.cfg
-  )
-  install(FILES ${CMAKE_BINARY_DIR}/version.pto-as.info
-      DESTINATION share/info/pto_as
-      RENAME version.info
-  )
-  install(FILES ${CONF_FILES}
-      DESTINATION ${CMAKE_SYSTEM_PROCESSOR}-linux/conf
-  )
-  install(FILES ${PACKAGE_FILES}
-      DESTINATION share/info/pto_as/script
-  )
+set(PACKAGE_FILES
+    ${COMMON_FILES}
+    ${CANN_CMAKE_DIR}/scripts/install/multi_version.inc
+)
 
-  set(pto_source ${CMAKE_SOURCE_DIR}/include)
-  install(DIRECTORY ${pto_source}/
-          DESTINATION ${CMAKE_SYSTEM_PROCESSOR}-linux/include
-          FILE_PERMISSIONS
-          OWNER_READ OWNER_WRITE
-          GROUP_READ GROUP_EXECUTE
-          PATTERN "CMakeLists.txt" EXCLUDE
-          PATTERN "pto-c" EXCLUDE
-          PATTERN "PTO" EXCLUDE)
-  install(FILES ${CMAKE_BINARY_DIR}/tools/ptoas/ptoas
-       DESTINATION tools/ptoas/bin
-       PERMISSIONS OWNER_READ OWNER_EXECUTE GROUP_READ GROUP_EXECUTE
-  )
-  set(pto_lib ${CMAKE_BINARY_DIR}/llvm-project/build-shared/lib)
-  install(DIRECTORY ${pto_lib}/
-          DESTINATION tools/ptoas/lib
-          FILE_PERMISSIONS
-          OWNER_READ OWNER_WRITE
-          GROUP_READ GROUP_EXECUTE
-          FILES_MATCHING
-          PATTERN "*.so*"
-  )
+set(CONF_FILES
+    ${CANN_CMAKE_DIR}/scripts/package/cfg/path.cfg
+)
 
-  string(FIND "${ASCEND_COMPUTE_UNIT}" ";" SEMICOLON_INDEX)
-  if (SEMICOLON_INDEX GREATER -1)
-      # 截取分号前的字串
-      math(EXPR SUBSTRING_LENGTH "${SEMICOLON_INDEX}")
-      string(SUBSTRING "${ASCEND_COMPUTE_UNIT}" 0 "${SUBSTRING_LENGTH}" compute_unit)
-  else()
-      # 没有分号取全部内容
-      set(compute_unit "${ASCEND_COMPUTE_UNIT}")
-  endif()
+install(FILES ${CMAKE_BINARY_DIR}/version.pto-as.info
+    DESTINATION share/info/pto_as
+    RENAME version.info
+    ${INSTALL_OPTIONAL}
+    COMPONENT pto-as
+)
 
-  message(STATUS "current compute_unit is: ${compute_unit}")
+install(FILES ${CONF_FILES}
+    DESTINATION ${CMAKE_SYSTEM_PROCESSOR}-linux/conf
+    ${INSTALL_OPTIONAL}
+    COMPONENT pto-as
+)
 
-  # ============= CPack =============
-  set(CPACK_PACKAGE_NAME "${PROJECT_NAME}")
-  set(CPACK_PACKAGE_VERSION "${PROJECT_VERSION}")
-  set(CPACK_PACKAGE_FILE_NAME "${CPACK_PACKAGE_NAME}-${CPACK_PACKAGE_VERSION}-${CMAKE_SYSTEM_NAME}")
+install(FILES ${PACKAGE_FILES}
+    DESTINATION share/info/pto_as/script
+    ${INSTALL_OPTIONAL}
+    COMPONENT pto-as
+)
 
-  set(CMAKE_INSTALL_PREFIX ${CMAKE_SOURCE_DIR}/build_out)
+install(DIRECTORY ${PTOAS_ROOT_DIR}/include/
+    DESTINATION ${CMAKE_SYSTEM_PROCESSOR}-linux/include
+    ${INSTALL_OPTIONAL}
+    COMPONENT pto-as
+    FILE_PERMISSIONS OWNER_READ OWNER_WRITE GROUP_READ GROUP_EXECUTE
+    PATTERN CMakeLists.txt EXCLUDE
+    PATTERN pto-c EXCLUDE
+    PATTERN PTO EXCLUDE
+)
 
-  set(CPACK_CMAKE_SOURCE_DIR "${CMAKE_SOURCE_DIR}")
-  set(CPACK_CMAKE_BINARY_DIR "${CMAKE_BINARY_DIR}")
-  set(CPACK_CMAKE_INSTALL_PREFIX "${CMAKE_INSTALL_PREFIX}")
-  set(CPACK_CMAKE_CURRENT_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}")
-  set(CPACK_MAKESELF_PATH "${MAKESELF_PATH}")
-  # set(CPACK_COMPONENTS_ALL runtime documentation)
-  set(CPACK_SOC "${compute_unit}")
-  set(CPACK_ARCH "${ARCH}")
-  set(CPACK_SET_DESTDIR ON)
-  set(CPACK_GENERATOR External)
-  set(CPACK_EXTERNAL_PACKAGE_SCRIPT "${CMAKE_SOURCE_DIR}/cmake/makeself_built_in.cmake")
-  set(CPACK_EXTERNAL_ENABLE_STAGING true)
-  set(CPACK_PACKAGE_DIRECTORY "${CMAKE_INSTALL_PREFIX}")
 
-  message(STATUS "CMAKE_INSTALL_PREFIX = ${CMAKE_INSTALL_PREFIX}")
-  include(CPack)
-endfunction()
+install(FILES
+    ${CMAKE_BINARY_DIR}/lib/PTO/IR/libPTOIR.a
+    ${CMAKE_BINARY_DIR}/lib/PTO/Transforms/libPTOTransforms.a
+    ${CMAKE_BINARY_DIR}/lib/CAPI/Dialect/libPTOCAPI.a
+    DESTINATION lib
+    ${INSTALL_OPTIONAL}
+    COMPONENT pto-as
+)
+
+install(FILES ${CMAKE_BINARY_DIR}/lib/CAPI/Dialect/CMakeFiles/obj.PTOCAPI.dir/PTO.cpp.o
+    DESTINATION lib/objects/obj.PTOCAPI
+    ${INSTALL_OPTIONAL}
+    COMPONENT pto-as
+)
+
+install(FILES
+    ${CMAKE_INSTALL_PREFIX}/lib/cmake/PTOAS/PTOASTargets.cmake
+    ${CMAKE_INSTALL_PREFIX}/lib/cmake/PTOAS/PTOASTargets-noconfig.cmake
+    ${CMAKE_INSTALL_PREFIX}/lib/cmake/PTOAS/PTOASConfig.cmake
+    DESTINATION lib/cmake/PTOAS
+    ${INSTALL_OPTIONAL}
+    COMPONENT pto-as
+)
+
+install(FILES
+    ${PTOAS_ROOT_DIR}/python/pto/dialects/pto.py
+    ${CMAKE_BINARY_DIR}/lib/Bindings/Python/_pto_ops_gen.py
+    DESTINATION mlir/dialects
+    ${INSTALL_OPTIONAL}
+    COMPONENT pto-as
+)
+
+install(FILES ${CMAKE_BINARY_DIR}/tools/ptoas/ptoas
+    DESTINATION tools/ptoas/bin
+    ${INSTALL_OPTIONAL}
+    COMPONENT pto-as
+    PERMISSIONS OWNER_READ OWNER_EXECUTE GROUP_READ GROUP_EXECUTE
+)
+
+install(DIRECTORY ${CMAKE_BINARY_DIR}/llvm-project/build-shared/lib/
+    DESTINATION tools/ptoas/lib
+    ${INSTALL_OPTIONAL}
+    COMPONENT pto-as
+    FILE_PERMISSIONS OWNER_READ OWNER_WRITE GROUP_READ GROUP_EXECUTE
+    FILES_MATCHING PATTERN "*.so*"
+)

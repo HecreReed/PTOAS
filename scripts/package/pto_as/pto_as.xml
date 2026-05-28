@@ -3,9 +3,10 @@
     <package_info>
         <product_name>cann</product_name>
         <func_name>pto-as</func_name>
+        <share_info_name>pto_as</share_info_name>
         <suffix>run</suffix>
-        <install_script>share/info/pto_as/scripts/install.sh</install_script>
-        <help>share/info/pto_as/scripts/help.info</help>
+        <install_script>share/info/pto_as/script/install.sh</install_script>
+        <help>share/info/pto_as/script/help.info</help>
         <version>package/pto_as/version.xml</version>
         <cleanup>share/info/pto_as/script/cleanup.sh</cleanup>
         <parallel>true</parallel>

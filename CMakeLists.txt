@@ -7,7 +7,10 @@
 # See LICENSE in the root of the software repository for the full text of the License.
 
 cmake_minimum_required(VERSION 3.20.0)
+include(cmake/fetch_cann_cmake.cmake)
 project(ptoas VERSION 0.24)
+init_cann_project()
+add_cann_target_options()
 
 set(PTOAS_RELEASE_VERSION_OVERRIDE ""
     CACHE STRING "Override the version printed by ptoas --version")
@@ -40,13 +43,6 @@ if(PTOAS_RELEASE_VERSION_OVERRIDE)
   set(PTOAS_CLI_VERSION_SOURCE "release override")
 endif()
 message(STATUS "PTOAS CLI version: ${PTOAS_CLI_VERSION} (${PTOAS_CLI_VERSION_SOURCE})")
-
-# =========================================================
-# [新增] 强制设置 C++17 标准 (LLVM 19 必需)
-# =========================================================
-set(CMAKE_CXX_STANDARD 17)
-set(CMAKE_CXX_STANDARD_REQUIRED ON)
-set(CMAKE_CXX_EXTENSIONS OFF)
 
 # =========================================================
 # 1. 显式寻找 LLVM (这是解决 tablegen 报错的关键)
@@ -169,6 +165,7 @@ if(ENABLE_PACKAGE)
   include(cmake/package.cmake)
   include(cmake/func.cmake)
   include(version.cmake)
-  add_version_info_targets()
-  pack_built_in()
+  add_cann_version_info_targets()
+  set(ENABLE_DEVICE FALSE)
+  set_cann_cpack_config(pto-as ENABLE_DEVICE ${ENABLE_DEVICE} SHARE_INFO_NAME pto_as OUTPUT ${CMAKE_SOURCE_DIR}/build_out)
 endif()
