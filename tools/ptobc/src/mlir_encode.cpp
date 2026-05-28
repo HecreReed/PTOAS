@@ -19,7 +19,9 @@
 #include <mlir/Dialect/Func/IR/FuncOps.h>
 
 #include <PTO/IR/PTO.h>
+#include <mlir/IR/BuiltinAttributes.h>
 #include <mlir/IR/BuiltinOps.h>
+#include <mlir/IR/BuiltinTypes.h>
 #include <mlir/IR/Location.h>
 #include <mlir/IR/Operation.h>
 #include <mlir/Parser/Parser.h>
@@ -144,6 +146,17 @@ static void appendAPIntBytesLE(Buffer &buffer, const llvm::APInt &bits) {
   writeULEB128(byteLen, buffer.bytes);
 
   WordVector words = copyAPIntWords(bits);
+  for (unsigned i = 0; i < byteLen; ++i) {
+    unsigned word = i / 8;
+    unsigned off = (i % 8) * 8;
+    uint8_t byte = uint8_t((words[word] >> off) & 0xFFu);
+    buffer.bytes.push_back(byte);
+  }
+}
+
+static void appendRawAPIntBytesLE(Buffer &buffer, const llvm::APInt &bits) {
+  const unsigned byteLen = (bits.getBitWidth() + 7) / 8;
+  llvm::SmallVector<uint64_t, 4> words = copyAPIntWords(bits);
   for (unsigned i = 0; i < byteLen; ++i) {
     unsigned word = i / 8;
     unsigned off = (i % 8) * 8;
@@ -293,6 +306,30 @@ struct Encoder {
     return internConstBits(/*tag=*/0x02, dtypeId, bits);
   }
 
+  uint64_t internConstDenseBits(uint64_t typeId,
+                                mlir::DenseElementsAttr denseAttr) {
+    auto shapedType = llvm::dyn_cast<mlir::ShapedType>(denseAttr.getType());
+    if (!shapedType || !shapedType.hasStaticShape())
+      throw std::runtime_error(
+          "dense arith.constant for compact v0 requires static shaped type");
+
+    mlir::Type elementType = shapedType.getElementType();
+    Buffer p;
+    writeULEB128(typeId, p.bytes);
+    if (llvm::isa<mlir::IntegerType>(elementType)) {
+      for (const llvm::APInt &value : denseAttr.getValues<llvm::APInt>())
+        appendRawAPIntBytesLE(p, value);
+      return internConst(/*tag=*/0x05, p.bytes);
+    }
+    if (llvm::isa<mlir::FloatType>(elementType)) {
+      for (const llvm::APFloat &value : denseAttr.getValues<llvm::APFloat>())
+        appendRawAPIntBytesLE(p, value.bitcastToAPInt());
+      return internConst(/*tag=*/0x05, p.bytes);
+    }
+    throw std::runtime_error(
+        "unsupported dense arith.constant element type for compact v0");
+  }
+
   void resetForFunction(uint64_t fid) {
     funcId = fid;
     nextOpId = 0;
@@ -412,6 +449,9 @@ void Encoder::encodeKnownOpImmediates(
       uint64_t typeId = internType(file, cst.getType());
       constId = internConstFloatBits(typeId,
                                      floatAttr.getValue().bitcastToAPInt());
+    } else if (auto denseAttr = llvm::dyn_cast<mlir::DenseElementsAttr>(attr)) {
+      uint64_t typeId = internType(file, cst.getType());
+      constId = internConstDenseBits(typeId, denseAttr);
     } else {
       throw std::runtime_error(
           "unsupported arith.constant attribute kind for compact v0");

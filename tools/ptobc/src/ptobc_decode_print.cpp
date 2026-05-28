@@ -20,7 +20,9 @@
 #include <mlir/Dialect/SCF/IR/SCF.h>
 
 #include <PTO/IR/PTO.h>
+#include <mlir/IR/BuiltinAttributes.h>
 #include <mlir/IR/BuiltinOps.h>
+#include <mlir/IR/BuiltinTypes.h>
 #include <mlir/IR/Location.h>
 #include <mlir/IR/Operation.h>
 #include <mlir/IR/OpImplementation.h>
@@ -127,6 +129,8 @@ struct ConstEntryParsed {
   std::vector<uint8_t> floatBytes;
   // tag=0x04 wide int bits: type_id + bytes
   std::vector<uint8_t> intBytes;
+  // tag=0x05 dense elements bits: type_id + packed element bytes
+  std::vector<uint8_t> denseBytes;
 };
 
 struct DbgFileEntry { uint64_t pathSid; uint8_t hashKind; std::vector<uint8_t> hashBytes; };
@@ -236,7 +240,34 @@ static void parseAttrsSection(const std::vector<uint8_t>& data,
   if (r.p != r.end) throw std::runtime_error("trailing bytes in ATTRS");
 }
 
+static std::vector<uint8_t>
+readDenseElementBytes(Reader &r, mlir::MLIRContext &ctx,
+                      const std::vector<TypeEntry> &types, uint64_t tid) {
+  if (tid >= types.size())
+    throw std::runtime_error("bad type_id in dense const");
+
+  mlir::Type type = parseType(ctx, types[tid].asmStr);
+  auto shapedType = mlir::dyn_cast<mlir::ShapedType>(type);
+  if (!shapedType || !shapedType.hasStaticShape())
+    throw std::runtime_error("dense const requires static shaped type");
+
+  mlir::Type elementType = shapedType.getElementType();
+  unsigned bitWidth = 0;
+  if (auto intType = mlir::dyn_cast<mlir::IntegerType>(elementType))
+    bitWidth = intType.getWidth();
+  else if (auto floatType = mlir::dyn_cast<mlir::FloatType>(elementType))
+    bitWidth = floatType.getWidth();
+  else
+    throw std::runtime_error("dense const requires integer or float element type");
+
+  uint64_t numElements = shapedType.getNumElements();
+  uint64_t byteLen = (bitWidth + 7) / 8;
+  return r.readBytes(size_t(numElements * byteLen));
+}
+
 static void parseConstPoolSection(const std::vector<uint8_t>& data,
+                                 mlir::MLIRContext &ctx,
+                                 const std::vector<TypeEntry> &types,
                                  std::vector<ConstEntryParsed>& consts) {
   Reader r{data.data(), data.data() + data.size()};
   uint64_t cnt = r.readULEB();
@@ -278,6 +309,14 @@ static void parseConstPoolSection(const std::vector<uint8_t>& data,
       e.tag = tag;
       e.typeId = tid;
       e.intBytes = std::move(bytes);
+      consts.push_back(std::move(e));
+    } else if (tag == 0x05) {
+      uint64_t tid = r.readULEB();
+      auto bytes = readDenseElementBytes(r, ctx, types, tid);
+      ConstEntryParsed e;
+      e.tag = tag;
+      e.typeId = tid;
+      e.denseBytes = std::move(bytes);
       consts.push_back(std::move(e));
     } else {
       throw std::runtime_error("unknown ConstEntry tag");
@@ -360,6 +399,56 @@ static mlir::Attribute buildIntegerConstAttr(BuildCtx &bc,
   return mlir::IntegerAttr::get(intType, bits);
 }
 
+static mlir::Attribute buildDenseConstAttr(BuildCtx &bc,
+                                           const ConstEntryParsed &entry) {
+  auto type = getType(bc, entry.typeId);
+  auto shapedType = mlir::dyn_cast<mlir::ShapedType>(type);
+  if (!shapedType || !shapedType.hasStaticShape())
+    throw std::runtime_error("ConstDenseBits type is not static shaped type");
+
+  mlir::Type elementType = shapedType.getElementType();
+  uint64_t numElements = shapedType.getNumElements();
+  if (auto intType = mlir::dyn_cast<mlir::IntegerType>(elementType)) {
+    unsigned bitWidth = intType.getWidth();
+    unsigned byteLen = (bitWidth + 7) / 8;
+    if (entry.denseBytes.size() != size_t(numElements) * byteLen)
+      throw std::runtime_error("ConstDenseBits integer byte_len mismatch");
+
+    llvm::SmallVector<llvm::APInt, 8> values;
+    values.reserve(numElements);
+    for (uint64_t i = 0; i < numElements; ++i) {
+      size_t offset = size_t(i) * byteLen;
+      values.push_back(rebuildAPIntFromBytes(
+          llvm::ArrayRef<uint8_t>(entry.denseBytes.data() + offset, byteLen),
+          bitWidth));
+    }
+    return mlir::DenseElementsAttr::get(shapedType,
+                                        llvm::ArrayRef<llvm::APInt>(values));
+  }
+
+  if (auto floatType = mlir::dyn_cast<mlir::FloatType>(elementType)) {
+    unsigned bitWidth = floatType.getWidth();
+    unsigned byteLen = (bitWidth + 7) / 8;
+    if (entry.denseBytes.size() != size_t(numElements) * byteLen)
+      throw std::runtime_error("ConstDenseBits float byte_len mismatch");
+
+    llvm::SmallVector<llvm::APFloat, 8> values;
+    values.reserve(numElements);
+    for (uint64_t i = 0; i < numElements; ++i) {
+      size_t offset = size_t(i) * byteLen;
+      llvm::APInt bits = rebuildAPIntFromBytes(
+          llvm::ArrayRef<uint8_t>(entry.denseBytes.data() + offset, byteLen),
+          bitWidth);
+      values.emplace_back(floatType.getFloatSemantics(), bits);
+    }
+    return mlir::DenseElementsAttr::get(shapedType,
+                                        llvm::ArrayRef<llvm::APFloat>(values));
+  }
+
+  throw std::runtime_error(
+      "ConstDenseBits element type is not integer or float");
+}
+
 static mlir::Attribute buildConstAttr(BuildCtx &bc, uint64_t constId) {
   if (!bc.consts) throw std::runtime_error("constpool not available");
   if (constId >= bc.consts->size()) throw std::runtime_error("const_id out of range");
@@ -380,6 +469,9 @@ static mlir::Attribute buildConstAttr(BuildCtx &bc, uint64_t constId) {
 
   if (e.tag == 0x04)
     return buildIntegerConstAttr(bc, e);
+
+  if (e.tag == 0x05)
+    return buildDenseConstAttr(bc, e);
 
   throw std::runtime_error("unsupported const tag");
 }
@@ -775,7 +867,7 @@ static mlir::ModuleOp decodeToModule(mlir::MLIRContext& ctx,
 
   Reader r{moduleBytes.data(), moduleBytes.data() + moduleBytes.size()};
   std::vector<ConstEntryParsed> consts;
-  parseConstPoolSection(constPool, consts);
+  parseConstPoolSection(constPool, ctx, types, consts);
   BuildCtx bc{&ctx, &strings, &types, &attrs, &consts, {}, nullptr, nullptr};
   uint64_t moduleAttrId = readModuleHeader(r, dbg);
   std::vector<FuncDecl> decls = readFunctionDecls(bc, r, dbg);

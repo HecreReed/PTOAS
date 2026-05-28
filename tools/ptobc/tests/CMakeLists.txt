@@ -71,6 +71,13 @@ add_test(NAME ptobc_recent_ops_v0_encode
     ${CMAKE_CURRENT_LIST_DIR}/recent_ops_v0_encode.sh
 )
 
+add_test(NAME ptobc_mrgsort_dense_const_v0_encode
+  COMMAND ${CMAKE_COMMAND} -E env
+    PTOBC_BIN=$<TARGET_FILE:ptobc>
+    TESTDATA_DIR=${PTObc_TESTDATA_DIR}
+    ${CMAKE_CURRENT_LIST_DIR}/mrgsort_dense_const_v0_encode.sh
+)
+
 add_test(NAME ptobc_frontend_pipe_v0_encode
   COMMAND ${CMAKE_COMMAND} -E env
     PTOBC_BIN=$<TARGET_FILE:ptobc>
