@@ -28,6 +28,7 @@ export BUILD_OUT_PATH="${BASE_PATH}/build_out"
 CANN_3RD_LIB_PATH="${BASE_PATH}/third_party"
 CMAKE_ARGS=""
 HARDENING_CACHE_FILE="${BASE_PATH}/cmake/LinuxHardeningCache.cmake"
+RUNTIME_DEPS_COLLECTOR="${BASE_PATH}/scripts/package/collect_ptoas_runtime_deps.sh"
 LLVM_GIT_URL="https://gitcode.com/GitHub_Trending/ll/llvm-project.git"
 LLVM_GIT_REF="llvmorg-19.1.7"
 LLVM_CLONE_RETRY_COUNT=3
@@ -67,53 +68,30 @@ ensure_hardening_cache() {
   fi
 }
 
-has_rpath() {
-  local path="$1"
-  if command -v patchelf >/dev/null 2>&1; then
-    local rpath_value
-    rpath_value="$(patchelf --print-rpath "$path" 2>/dev/null || true)"
-    [[ -n "$rpath_value" ]]
-    return
-  fi
-  readelf -d "$path" 2>/dev/null | grep -Eq '(RPATH|RUNPATH)'
-}
-
-remove_rpath() {
-  local path="$1"
-  if ! has_rpath "$path"; then
-    return
-  fi
-  if command -v patchelf >/dev/null 2>&1; then
-    patchelf --remove-rpath "$path" || true
-  fi
-  if has_rpath "$path" && command -v chrpath >/dev/null 2>&1; then
-    chrpath -d "$path" || true
-  fi
-}
-
-strip_binary() {
-  local path="$1"
-  if ! command -v strip >/dev/null 2>&1; then
-    return
-  fi
-  strip --strip-unneeded "$path" 2>/dev/null || strip "$path" 2>/dev/null || true
-}
-
 harden_package_artifacts() {
-  local ptoas_bin="${PTO_SOURCE_DIR}/build/tools/ptoas/ptoas"
-  local llvm_lib_dir="${LLVM_BUILD_DIR}/lib"
+  local build_root="${PTO_SOURCE_DIR}/build"
+  local ptoas_bin="${build_root}/tools/ptoas/ptoas"
+  local runtime_stage_root="${build_root}/package_runtime/tools/ptoas"
+  local staged_bin="${runtime_stage_root}/bin/ptoas"
+  local staged_lib_dir="${runtime_stage_root}/lib"
 
-  if [ -f "${ptoas_bin}" ]; then
-    remove_rpath "${ptoas_bin}"
-    strip_binary "${ptoas_bin}"
+  if [ ! -x "${RUNTIME_DEPS_COLLECTOR}" ]; then
+    chmod +x "${RUNTIME_DEPS_COLLECTOR}"
   fi
 
-  if [ -d "${llvm_lib_dir}" ]; then
-    while IFS= read -r so_path; do
-      remove_rpath "${so_path}"
-      strip_binary "${so_path}"
-    done < <(find "${llvm_lib_dir}" -maxdepth 1 -type f -name '*.so*' | sort)
+  if [ ! -f "${ptoas_bin}" ]; then
+    print_error "missing ptoas binary for package staging: ${ptoas_bin}"
+    exit 1
   fi
+
+  rm -rf "${build_root}/package_runtime"
+  mkdir -p "${runtime_stage_root}/bin" "${staged_lib_dir}"
+
+  bash "${RUNTIME_DEPS_COLLECTOR}" \
+    "${build_root}" \
+    "${ptoas_bin}" \
+    "${staged_bin}" \
+    "${staged_lib_dir}"
 }
 
 clone_llvm_source() {
@@ -261,7 +239,6 @@ build_only() {
 
   ninja -C build
   ninja -C build install
-  harden_package_artifacts
 
   export MLIR_PYTHON_ROOT=$LLVM_BUILD_DIR/tools/mlir/python_packages/mlir_core
   export PTO_PYTHON_ROOT=$PTO_INSTALL_DIR/
@@ -315,6 +292,7 @@ package() {
 
   cd $PTO_SOURCE_DIR
   export PYBIND11_CMAKE_DIR=$(python3 -m pybind11 --cmakedir)
+  mkdir -p "${BUILD_PATH}/package_runtime/tools/ptoas/bin" "${BUILD_PATH}/package_runtime/tools/ptoas/lib"
 
   if [ -d "$CANN_3RD_LIB_PATH/llvm-19" ]; then
     configure_ptoas_build ${CMAKE_ARGS}
@@ -323,8 +301,8 @@ package() {
   fi
 
   ninja -C build
-  ninja -C build install
   harden_package_artifacts
+  ninja -C build install
   cd $BUILD_PATH
   ninja package
 }

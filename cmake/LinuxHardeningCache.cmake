@@ -14,7 +14,11 @@ foreach(_flag_var CMAKE_C_FLAGS CMAKE_CXX_FLAGS)
   set(_flag_value "${${_flag_var}}")
   foreach(_hardening_flag
       -D_FORTIFY_SOURCE=2
-      -fstack-protector-strong
+      # `-fstack-protector-strong` does not instrument small interface/helper
+      # shared libraries consistently, which leaves BinScope reporting SP=NO
+      # for some packaged MLIR runtime libraries. Use `-all` to force canaries
+      # across the delivered closure.
+      -fstack-protector-all
       -ftrapv)
     if(NOT " ${_flag_value} " MATCHES "(^| )${_hardening_flag}( |$)")
       string(APPEND _flag_value " ${_hardening_flag}")

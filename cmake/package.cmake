@@ -120,14 +120,17 @@ install(FILES
     COMPONENT pto-as
 )
 
-install(FILES ${CMAKE_BINARY_DIR}/tools/ptoas/ptoas
+set(PTOAS_PACKAGE_STAGE_DIR
+    ${CMAKE_BINARY_DIR}/package_runtime/tools/ptoas)
+
+install(FILES ${PTOAS_PACKAGE_STAGE_DIR}/bin/ptoas
     DESTINATION tools/ptoas/bin
     ${INSTALL_OPTIONAL}
     COMPONENT pto-as
     PERMISSIONS OWNER_READ OWNER_EXECUTE GROUP_READ GROUP_EXECUTE
 )
 
-install(DIRECTORY ${CMAKE_BINARY_DIR}/llvm-project/build-shared/lib/
+install(DIRECTORY ${PTOAS_PACKAGE_STAGE_DIR}/lib/
     DESTINATION tools/ptoas/lib
     ${INSTALL_OPTIONAL}
     COMPONENT pto-as
