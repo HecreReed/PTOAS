@@ -19,6 +19,8 @@ add_mlir_dialect_library(PTOIR
   PTOTypeDefs.cpp
   PTOTypeUtils.cpp
 
+  PARTIAL_SOURCES_INTENDED
+
   ADDITIONAL_HEADER_DIRS
   ${PROJECT_SOURCE_DIR}/include/PTO
 

@@ -398,11 +398,70 @@ protected:
                       CorePipeInfo corePipeDst, int64_t eventId,
                       bool shouldBeUsedAtleastOnce = true);
 
+  bool checkMergeableConditionScopes(Condition *conditionOp,
+                                     CorePipeInfo corePipeSrc,
+                                     CorePipeInfo corePipeDst, int64_t eventId);
+
+  bool checkMergeableLoopScopes(Loop *loopOp, CorePipeInfo corePipeSrc,
+                                CorePipeInfo corePipeDst, int64_t eventId);
+
+  bool checkMergeableScopeBody(
+      Scope *scopeOp, const std::set<std::pair<int64_t, SetWaitOp *>> &index,
+      CorePipeInfo corePipeSrc, CorePipeInfo corePipeDst, int64_t eventId);
+
   void mergeBackwardSyncEventIds(OperationBase *op);
+
+  bool shouldSkipBackwardSyncMerge(OperationBase *op);
+
+  void collectMergeableBackwardSyncEvents(
+      Scope *scopeOp,
+      llvm::DenseSet<std::tuple<CorePipeInfo, CorePipeInfo, int64_t>>
+          &toBeErased);
+
+  void collectMergeableBackwardSyncEventsForEventId(
+      Scope *scopeOp, ArrayRef<pto::TCoreType> coreTypes, int64_t eventId,
+      llvm::DenseSet<std::tuple<CorePipeInfo, CorePipeInfo, int64_t>>
+          &toBeErased);
+
+  void collectMergeableBackwardSyncEventsForCorePair(
+      Scope *scopeOp, pto::TCoreType coreSrc, pto::TCoreType coreDst,
+      int64_t eventId,
+      llvm::DenseSet<std::tuple<CorePipeInfo, CorePipeInfo, int64_t>>
+          &toBeErased);
+
+  bool tryCollectMergeableBackwardSyncEvent(
+      Scope *scopeOp, CorePipeInfo corePipeSrc, CorePipeInfo corePipeDst,
+      int64_t eventId,
+      llvm::DenseSet<std::tuple<CorePipeInfo, CorePipeInfo, int64_t>>
+          &toBeErased);
+
+  void eraseMergedBackwardSyncEventsFromChildScope(
+      Scope *childScopeOp,
+      const llvm::DenseSet<std::tuple<CorePipeInfo, CorePipeInfo, int64_t>>
+          &toBeErased);
+
+  void eraseMergedBackwardSyncEventsFromNestedScopes(
+      Scope *scopeOp,
+      const llvm::DenseSet<std::tuple<CorePipeInfo, CorePipeInfo, int64_t>>
+          &toBeErased);
 
   void mergeBackwardSyncPairs(SyncMap &syncMapBefore, SyncMap &syncMapAfter);
 
+  void appendSyncOpsForConflictPair(ConflictPair *conflictPair,
+                                    SyncMap &syncMapBefore,
+                                    SyncMap &syncMapAfter);
+
+  void appendMergedBackwardSyncScopeOps(SyncMap &syncMapBefore,
+                                        SyncMap &syncMapAfter);
+
   void insertMergedBackwardSyncPairs();
+
+  bool pruneStaleMergedBackwardSyncPairs();
+
+  SmallVector<OperationBase *> collectDeepestUnmergedBackwardSyncScopes();
+
+  bool insertOuterBackwardSyncPairs(
+      const SmallVectorImpl<OperationBase *> &chosenOps);
 
   llvm::LogicalResult considerOuterBackwardSyncPairs();
 

@@ -243,7 +243,6 @@ namespace mlir::pto::syncsolver {
 
 // Check if two integer ranges intersect (half-open semantics: [l, r) )
 bool checkRangesIntersect(int l1, int r1, int l2, int r2) {
-  // return !(r1 <= l2 || r2 <= l1);
   return r1 > l2 && r2 > l1;
 }
 

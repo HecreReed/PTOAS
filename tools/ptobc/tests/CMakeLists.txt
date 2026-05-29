@@ -33,7 +33,7 @@ add_test(NAME ptobc_opcode_coverage_check
   COMMAND ${Python3_EXECUTABLE}
     ${CMAKE_CURRENT_LIST_DIR}/opcode_coverage_check.py
     ${CMAKE_SOURCE_DIR}/include/PTO/IR/PTOOps.td
-    ${CMAKE_SOURCE_DIR}/tools/ptobc/generated/ptobc_opcodes_v0.h
+    ${CMAKE_SOURCE_DIR}/tools/ptobc/generated/ptobc_opcodes_v0.cpp
 )
 
 add_test(NAME ptobc_trowexpandsub_v0_encode

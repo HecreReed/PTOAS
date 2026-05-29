@@ -16,8 +16,21 @@ add_mlir_dialect_library(PTOTransforms
   PTOInjectBarrierAllSync.cpp
   InsertSync/InsertSyncDebug.cpp
   PTOViewToMemref.cpp
+  PTOViewToMemrefCompute.cpp
   PTOValidateIntToPtrUses.cpp
   PTOToEmitC.cpp
+  PTOToEmitCSubview.cpp
+  PTOToEmitCArith.cpp
+  PTOToEmitCTilePatterns.cpp
+  PTOToEmitCTilePatternsExtra.cpp
+  PTOToEmitCTileMaterialization.cpp
+  PTOToEmitCSync.cpp
+  PTOToEmitCComm.cpp
+  PTOToEmitCKernelOps.cpp
+  PTOToEmitCControlFlow.cpp
+  PTOToEmitCSimpleOps.cpp
+  PTOToEmitCRuntimeOps.cpp
+  PTOToEmitCMemoryOps.cpp
   Utils.cpp
   OptMemPlanForPipeline.cpp
   AllocToPointerCast.cpp
@@ -50,6 +63,7 @@ add_mlir_dialect_library(PTOTransforms
   GraphSyncSolver/GraphSolver.cpp
   GraphSyncSolver/EventIdSolver.cpp
   GraphSyncSolver/SyncSolver.cpp
+  GraphSyncSolver/SyncSolverMerge.cpp
   GraphSyncSolver/SyncSolverCodeGen.cpp
   LoweringSyncToPipe.cpp
   PTOVerifyTFreePass.cpp
