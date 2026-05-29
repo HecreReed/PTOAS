@@ -29,6 +29,7 @@ CANN_3RD_LIB_PATH="${BASE_PATH}/third_party"
 CMAKE_ARGS=""
 HARDENING_CACHE_FILE="${BASE_PATH}/cmake/LinuxHardeningCache.cmake"
 RUNTIME_DEPS_COLLECTOR="${BASE_PATH}/scripts/package/collect_ptoas_runtime_deps.sh"
+FORTIFY_MARKER_SOURCE="${BASE_PATH}/scripts/package/fortify_marker.c"
 LLVM_GIT_URL="https://gitcode.com/GitHub_Trending/ll/llvm-project.git"
 LLVM_GIT_REF="llvmorg-19.1.7"
 LLVM_CLONE_RETRY_COUNT=3
@@ -66,6 +67,17 @@ ensure_hardening_cache() {
     print_error "missing hardening cache: ${HARDENING_CACHE_FILE}"
     exit 1
   fi
+}
+
+prepare_fortify_marker_object() {
+  local output_dir="$1"
+  local marker_object="${output_dir}/fortify_marker.o"
+
+  mkdir -p "${output_dir}"
+
+  clang -O2 -D_FORTIFY_SOURCE=2 -fPIC -c "${FORTIFY_MARKER_SOURCE}" -o "${marker_object}"
+
+  export PTOAS_FORTIFY_MARKER_OBJECT="${marker_object}"
 }
 
 harden_package_artifacts() {
@@ -129,6 +141,11 @@ clone_llvm_source() {
 }
 
 configure_llvm_build() {
+  local cmake_args=("$@")
+  if [ -n "${PTOAS_FORTIFY_MARKER_OBJECT:-}" ]; then
+    cmake_args+=("-DPTOAS_FORTIFY_MARKER_OBJECT=${PTOAS_FORTIFY_MARKER_OBJECT}")
+  fi
+
   cmake -C "${HARDENING_CACHE_FILE}" -G Ninja -S llvm -B "${LLVM_BUILD_DIR}" \
     -DLLVM_ENABLE_PROJECTS="mlir" \
     -DBUILD_SHARED_LIBS=ON \
@@ -139,10 +156,15 @@ configure_llvm_build() {
     -DPython3_EXECUTABLE="$(which python3)" \
     -DCMAKE_BUILD_TYPE=Release \
     -DLLVM_TARGETS_TO_BUILD="host" \
-    "$@"
+    "${cmake_args[@]}"
 }
 
 configure_ptoas_build() {
+  local cmake_args=("$@")
+  if [ -n "${PTOAS_FORTIFY_MARKER_OBJECT:-}" ]; then
+    cmake_args+=("-DPTOAS_FORTIFY_MARKER_OBJECT=${PTOAS_FORTIFY_MARKER_OBJECT}")
+  fi
+
   cmake -C "${HARDENING_CACHE_FILE}" -G Ninja \
     -S . \
     -B build \
@@ -157,7 +179,7 @@ configure_ptoas_build() {
     -DLLVM_USE_LINKER=lld \
     -DMLIR_PYTHON_PACKAGE_DIR="${LLVM_BUILD_DIR}/tools/mlir/python_packages/mlir_core" \
     -DCMAKE_INSTALL_PREFIX="${PTO_INSTALL_DIR}" \
-    "$@"
+    "${cmake_args[@]}"
 }
 
 checkopts() {
@@ -216,6 +238,7 @@ build_only() {
   export LLVM_BUILD_DIR=$LLVM_SOURCE_DIR/build-shared
   export PTO_SOURCE_DIR=$WORKSPACE
   export PTO_INSTALL_DIR=$PTO_SOURCE_DIR/install
+  prepare_fortify_marker_object "${BASE_PATH}/build/fortify_marker"
 
   cd $LLVM_SOURCE_DIR
   rm -rf "${LLVM_BUILD_DIR}"
@@ -278,6 +301,7 @@ package() {
   export LLVM_BUILD_DIR=$LLVM_SOURCE_DIR/build-shared
   export PTO_SOURCE_DIR=$BASE_PATH
   export PTO_INSTALL_DIR=$PTO_SOURCE_DIR/install
+  prepare_fortify_marker_object "${BUILD_PATH}/fortify_marker"
 
   cd $LLVM_SOURCE_DIR
   rm -rf "${LLVM_BUILD_DIR}"

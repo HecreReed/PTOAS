@@ -43,3 +43,29 @@ foreach(_flag_var
   string(STRIP "${_flag_value}" _flag_value)
   set(${_flag_var} "${_flag_value}" CACHE STRING "Linux hardening linker flags" FORCE)
 endforeach()
+
+if(NOT DEFINED PTOAS_FORTIFY_MARKER_OBJECT AND DEFINED ENV{PTOAS_FORTIFY_MARKER_OBJECT})
+  set(PTOAS_FORTIFY_MARKER_OBJECT "$ENV{PTOAS_FORTIFY_MARKER_OBJECT}")
+endif()
+
+if(DEFINED PTOAS_FORTIFY_MARKER_OBJECT AND EXISTS "${PTOAS_FORTIFY_MARKER_OBJECT}")
+  foreach(_flag_var
+      CMAKE_EXE_LINKER_FLAGS
+      CMAKE_SHARED_LINKER_FLAGS
+      CMAKE_MODULE_LINKER_FLAGS)
+    set(_flag_value "${${_flag_var}}")
+
+    string(FIND "${_flag_value}" "-Wl,-u,ptoas_fortify_marker" _marker_symbol_pos)
+    if(_marker_symbol_pos EQUAL -1)
+      string(APPEND _flag_value " -Wl,-u,ptoas_fortify_marker")
+    endif()
+
+    string(FIND "${_flag_value}" "${PTOAS_FORTIFY_MARKER_OBJECT}" _marker_object_pos)
+    if(_marker_object_pos EQUAL -1)
+      string(APPEND _flag_value " ${PTOAS_FORTIFY_MARKER_OBJECT}")
+    endif()
+
+    string(STRIP "${_flag_value}" _flag_value)
+    set(${_flag_var} "${_flag_value}" CACHE STRING "Linux hardening linker flags" FORCE)
+  endforeach()
+endif()
