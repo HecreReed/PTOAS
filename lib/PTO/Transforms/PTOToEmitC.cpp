@@ -70,6 +70,22 @@ namespace mlir {
 using namespace mlir;
 using namespace mlir::pto;
 
+namespace {
+constexpr unsigned kInlineCapacity2 = 2;
+constexpr unsigned kInlineCapacity3 = 3;
+constexpr unsigned kInlineCapacity4 = 4;
+constexpr unsigned kInlineCapacity5 = 5;
+
+template <typename T>
+using SmallVec2 = SmallVector<T, kInlineCapacity2>;
+template <typename T>
+using SmallVec3 = SmallVector<T, kInlineCapacity3>;
+template <typename T>
+using SmallVec4 = SmallVector<T, kInlineCapacity4>;
+template <typename T>
+using SmallVec5 = SmallVector<T, kInlineCapacity5>;
+} // namespace
+
 static bool getStaticMemrefLayout(MemRefType mrTy,
                                   SmallVectorImpl<int64_t> &strides,
                                   int64_t &offset);
@@ -81,7 +97,7 @@ static emitc::OpaqueType getGlobalTensorOpaqueTypeFromShape(
     MLIRContext *ctx, Type elemTy, ArrayRef<int64_t> shape,
     StringRef layoutEnum = "pto::Layout::ND");
 
-const char *mlir::pto::addrSpaceQualifier(pto::AddressSpace as) {
+llvm::StringRef mlir::pto::addrSpaceQualifier(pto::AddressSpace as) {
   switch (as) {
   case pto::AddressSpace::Zero:
     return "__gm__";
@@ -137,7 +153,7 @@ static bool isKnownUnitExtentForMGather(int64_t value) {
 }
 
 struct GatherScatterShapeLayoutInfo {
-  SmallVector<int64_t, 2> shape;
+  SmallVec2<int64_t> shape;
   bool rowMajor = false;
   bool colMajor = false;
 };
@@ -161,7 +177,7 @@ getGatherScatterShapeLayoutInfo(Type ty) {
   if (!memRefTy || memRefTy.getRank() != 2)
     return std::nullopt;
 
-  SmallVector<int64_t, 4> strides;
+  SmallVec4<int64_t> strides;
   int64_t offset = ShapedType::kDynamic;
   if (failed(getStridesAndOffset(memRefTy, strides, offset)) ||
       strides.size() != 2)
@@ -459,7 +475,6 @@ std::optional<std::string> mlir::pto::getEmitCTileTypeString(pto::TileBufType ty
   int32_t fractal = 512;
   if (auto frAttr = dyn_cast<IntegerAttr>(configAttr.getSFractalSize()))
     fractal = frAttr.getInt();
-
   return std::string("Tile<") + getTileRoleToken(type.getMemorySpace()) + ", " +
          getEmitCScalarTypeToken(elemTy) + ", " +
          std::to_string(render(rows, 0)) + ", " +
@@ -831,7 +846,6 @@ FailureOr<std::string> mlir::pto::buildEmitCOpaqueConstantLiteral(
   auto opaqueTy = dyn_cast<emitc::OpaqueType>(targetType);
   if (!opaqueTy)
     return failure();
-
   if (opaqueTy.getValue() == "pto::MrgSortExecutedNumList") {
     auto dense = dyn_cast_or_null<DenseIntElementsAttr>(valueAttr);
     if (!dense)
@@ -909,7 +923,7 @@ struct PTOMGatherToMGATHER : public OpConversionPattern<pto::MGatherOp> {
       llvm_unreachable("unknown GatherOOB");
     };
 
-    SmallVector<Attribute, 2> templateArgVec;
+    SmallVec2<Attribute> templateArgVec;
     const bool rowCoalesce =
         isRowCoalescedMGatherIndexType(op.getDst().getType(), op.getIdx().getType());
     templateArgVec.push_back(emitc::OpaqueAttr::get(
@@ -924,7 +938,6 @@ struct PTOMGatherToMGATHER : public OpConversionPattern<pto::MGatherOp> {
         op.getLoc(), TypeRange{}, "MGATHER",
         ArrayAttr{}, templateArgs,
         ValueRange{dst, memArg, idx});
-
     if (op->getNumResults() == 0) {
       rewriter.eraseOp(op);
     } else {
@@ -989,7 +1002,6 @@ struct FuncToEmitC : public OpConversionPattern<func::FuncOp> {
     TypeConverter::SignatureConversion entryConv(op.getNumArguments());
     for (unsigned i = 0; i < op.getNumArguments(); ++i)
       entryConv.addInputs(i, funcType.getInput(i));
-
     return rewriter.convertRegionTypes(&emitcFunc.getBody(), typeConverter,
                                        &entryConv);
   }
@@ -1041,7 +1053,6 @@ struct FuncToEmitC : public OpConversionPattern<func::FuncOp> {
     auto emitcFunc =
         rewriter.create<emitc::FuncOp>(op.getLoc(), op.getName(), funcType);
     copyFunctionAttrs(op, emitcFunc);
-
     if (op.isDeclaration()) {
       emitcFunc.setSpecifiersAttr(rewriter.getStrArrayAttr({"extern"}));
       rewriter.eraseOp(op);
@@ -1170,8 +1181,8 @@ static std::string getGlobalTensorTypeStringFromShape(Type elemTy,
 std::string mlir::pto::getGlobalTensorTypeStringFromShapeAndStrides(
     Type elemTy, ArrayRef<int64_t> shape, ArrayRef<int64_t> strides,
     StringRef layoutEnum) {
-  SmallVector<int64_t, 5> shape5D;
-  SmallVector<int64_t, 5> stride5D;
+  SmallVec5<int64_t> shape5D;
+  SmallVec5<int64_t> stride5D;
   buildGlobalTensorShapeAndStride(shape, strides, shape5D, stride5D);
 
   std::string elemTypeStr = getElemTypeStringForGT(elemTy);
@@ -1207,7 +1218,6 @@ static std::string inferFallbackGlobalTensorLayout(ArrayRef<int64_t> shape5D,
   bool isColMajor = stride5D[0] == 1;
   for (int i = 0; i < 4 && isColMajor; ++i)
     isColMajor = stride5D[i + 1] == multiplyOrDynamic(stride5D[i], shape5D[i]);
-
   if (isColMajor)
     return "pto::Layout::DN";
   return isRowMajor ? "pto::Layout::ND" : "pto::Layout::ND";
@@ -1298,8 +1308,8 @@ Value mlir::pto::buildGlobalTensorFromMemref(ConversionPatternRewriter &rewriter
   Value ptr = applyStaticMemrefOffset(rewriter, loc, basePtr, offset);
   GlobalTensorTypeNames names = getGlobalTensorTypeNames(anchor);
   std::string elemTypeStr = getElemTypeStringForGT(mrTy.getElementType());
-  SmallVector<int64_t, 5> shape5D;
-  SmallVector<int64_t, 5> stride5D;
+  SmallVec5<int64_t> shape5D;
+  SmallVec5<int64_t> stride5D;
   buildGlobalTensorShapeAndStride(shape, strides, shape5D, stride5D);
 
   std::string layoutEnum = resolveGlobalTensorLayout(
@@ -1312,7 +1322,6 @@ Value mlir::pto::buildGlobalTensorFromMemref(ConversionPatternRewriter &rewriter
   auto gtInst = rewriter.create<emitc::CallOpaqueOp>(
       loc, gtType, names.tensorTypeName, ArrayAttr{}, ArrayAttr{},
       ValueRange(gtArgs));
-
   return gtInst.getResult(0);
 }
 
@@ -1331,7 +1340,6 @@ static Value maybeWrapGlobalMemrefAsGlobalTensor(
   }
   if (!isGlobal)
     return loweredValue;
-
   if (Value gt =
           buildGlobalTensorFromMemref(rewriter, loc, loweredValue, mrTy, anchor))
     return gt;
@@ -1558,7 +1566,7 @@ static StringRef scatterOobTok(pto::ScatterOOB mode) {
 static ArrayAttr buildScatterTemplateArgs(ConversionPatternRewriter &rewriter,
                                           MLIRContext *ctx,
                                           pto::MScatterOp op) {
-  SmallVector<Attribute, 3> templateArgVec;
+  SmallVec3<Attribute> templateArgVec;
   const bool rowCoalesce =
       isRowCoalescedMGatherIndexType(op.getSrc().getType(), op.getIdx().getType());
   templateArgVec.push_back(emitc::OpaqueAttr::get(
@@ -1625,13 +1633,13 @@ static void populatePTOToEmitCPatterns(RewritePatternSet &patterns,
 //===----------------------------------------------------------------------===//
 
 namespace {
-static constexpr const char *kCommIncludePreamble = R"cpp(
+static constexpr llvm::StringLiteral kCommIncludePreamble = R"cpp(
 #ifndef PIPE_FIX
 #define PIPE_FIX PIPE_M
 #endif
 )cpp";
 
-static constexpr const char *kGlobalTensorDataHelper = R"cpp(
+static constexpr llvm::StringLiteral kGlobalTensorDataHelper = R"cpp(
 template <typename Tensor>
 static AICORE inline auto PTOAS__GLOBAL_TENSOR_DATA(Tensor &tensor)
     -> decltype(tensor.data()) {
@@ -1639,7 +1647,7 @@ static AICORE inline auto PTOAS__GLOBAL_TENSOR_DATA(Tensor &tensor)
 }
 )cpp";
 
-static constexpr const char *kEventIdArrayHelper = R"cpp(
+static constexpr llvm::StringLiteral kEventIdArrayHelper = R"cpp(
 template <int N>
 struct PTOAS_EventIdArray {
   static_assert(N > 0, "PTOAS_EventIdArray requires a positive static size");
@@ -1650,7 +1658,7 @@ struct PTOAS_EventIdArray {
 };
 )cpp";
 
-static constexpr const char *kTRandomHelper = R"cpp(
+static constexpr llvm::StringLiteral kTRandomHelper = R"cpp(
 template <uint16_t Rounds, typename DstTile>
 static AICORE inline void PTOAS__TRANDOM(
     DstTile &dst, uint32_t key0, uint32_t key1, uint32_t counter0,
@@ -1661,7 +1669,7 @@ static AICORE inline void PTOAS__TRANDOM(
 }
 )cpp";
 
-static constexpr const char *kAutoSyncTailHelper = R"cpp(
+static constexpr llvm::StringLiteral kAutoSyncTailHelper = R"cpp(
 enum class PTOAutoSyncTailMode : int {
   kBarrierAll = 0,
   kSetWaitMte3ToSEvent0 = 1,
@@ -1682,7 +1690,7 @@ static AICORE inline void ptoas_auto_sync_tail(
 }
 )cpp";
 
-static constexpr const char *kBitcastHelper = R"cpp(
+static constexpr llvm::StringLiteral kBitcastHelper = R"cpp(
 template <typename To, typename From>
 static inline To ptoas_bitcast(From from) {
   static_assert(sizeof(To) == sizeof(From), "ptoas_bitcast: size mismatch");
@@ -1882,7 +1890,6 @@ struct EmitPTOManualPass
     Value output = cast.getResult(0);
     Type inTy = input.getType();
     Type outTy = output.getType();
-
     if (output.use_empty()) {
       castsToErase.push_back(cast);
       return success();
@@ -2000,17 +2007,14 @@ struct EmitPTOManualPass
     LLVM_DEBUG(llvm::dbgs() << "DEBUG: Start PTOToEmitC Pass\n");
     MLIRContext *ctx = &getContext();
     ModuleOp mop = getOperation();
-
     if (failed(pto::validatePTOEntryFunctions(mop)))
       return signalPassFailure();
     pto::annotatePTOEntryFunctions(mop);
-
     if (failed(validateA3SyncRequirements(mop)))
       return signalPassFailure();
 
     ModuleHelperNeeds helperNeeds = analyzeModuleHelperNeeds(mop);
     insertModulePreamble(mop, ctx, helperNeeds);
-
     if (failed(runPTOToEmitCSCFPreLowering(mop, ctx)))
       return signalPassFailure();
 

@@ -160,7 +160,6 @@ struct PTOBindTileToEmitC : public OpConversionPattern<pto::BindTileOp> {
     bool colIsConst = vCol && getIndexConst(vCol, cCol);
     bool rowIsDynamic = false;
     bool colIsDynamic = false;
-
     if (forceDynamicValid) {
       result.vrowTok = "-1";
       result.vcolTok = "-1";
@@ -176,7 +175,6 @@ struct PTOBindTileToEmitC : public OpConversionPattern<pto::BindTileOp> {
                              vRow, rowIsConst, cRow, rows, elemTy, blayout, 0);
     configureRegularValidDim(result.vcolTok, colIsDynamic, result.useConstructor,
                              vCol, colIsConst, cCol, cols, elemTy, blayout, 1);
-
     if (result.useConstructor) {
       appendRegularDynamicValidArg(result, rewriter, loc, elemTy, blayout,
                                    vRowEmitC, 0, rowIsDynamic);
@@ -330,7 +328,6 @@ struct PTOBindTileToEmitC : public OpConversionPattern<pto::BindTileOp> {
     FailureOr<TileBuildSpec> tileSpec = buildTileSpec(op, adaptor, rewriter);
     if (failed(tileSpec))
       return failure();
-
     if (op.getSource().getDefiningOp<pto::DeclareTileMemRefOp>())
       return rewriteDeclaredTile(op, *tileSpec, rewriter);
 
@@ -344,7 +341,7 @@ struct PTOBindTileToEmitC : public OpConversionPattern<pto::BindTileOp> {
         isEmitCTileLikeValue(tileCandidate))
       return rewriteReshapeTile(op, tileCandidate, *tileSpec, rewriter);
 
-    // Subview origins are kept distinct from generic tile rebinding:
+    // Subview origins are kept distinct from generic tile rebinding
     // even when source/destination C++ tile types match, subview may carry
     // shifted base address semantics and should materialize a fresh handle.
     if (isSubView)
@@ -438,7 +435,6 @@ createEmitCTileVariable(ConversionPatternRewriter &rewriter, Location loc,
   Type convertedTy = typeConverter->convertType(tileTy);
   if (!convertedTy)
     convertedTy = emitc::OpaqueType::get(rewriter.getContext(), *tileTypeString);
-
   return rewriter
       .create<emitc::VariableOp>(
           loc, convertedTy, emitc::OpaqueAttr::get(rewriter.getContext(), ""))
@@ -522,7 +518,6 @@ struct PTOMaterializeTileToEmitC
                                     dimIdx),
           fallbackDim(dimIdx)));
     };
-
     if (forceDynamicValid) {
       appendCtorDim(adaptor.getValidRow(), 0);
       appendCtorDim(adaptor.getValidCol(), 1);
@@ -591,7 +586,6 @@ struct PTOMaterializeTileToEmitC
     bool isSubview = viewSemantics && viewSemantics.getValue() == "subview";
     bool sourceIsDeclaredTile =
         op.getSource().getDefiningOp<pto::DeclareTileMemRefOp>();
-
     if (canReuseSourceTile(source, *tileTypeString, isSubview, forceDynamicValid)) {
       rewriter.replaceOp(op, source);
       return success();

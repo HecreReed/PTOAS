@@ -35,12 +35,20 @@ namespace {
 
 static constexpr llvm::StringLiteral kAutoSyncTailPendingModeAttr =
     "__pto.auto_sync_tail_mode";
+constexpr unsigned kInlineCapacity2 = 2;
+constexpr unsigned kInlineCapacity4 = 4;
+
+template <typename T>
+using SmallVec2 = SmallVector<T, kInlineCapacity2>;
+template <typename T>
+using SmallVec4 = SmallVector<T, kInlineCapacity4>;
+
 static inline std::string pipeTokFromPipeAttr(mlir::pto::PipeAttr a);
 
 struct InterCoreSyncCallDesc {
-  const char *callee = nullptr;
+  llvm::StringRef callee;
   ArrayAttr args;
-  SmallVector<Value, 2> operands;
+  SmallVec2<Value> operands;
 };
 
 static Value castInterCoreEventIdToI32(ConversionPatternRewriter &rewriter,
@@ -98,7 +106,6 @@ static InterCoreSyncCallDesc buildInterCoreSyncSetCall(
     pto::PipeAttr pipeAttr, IntegerAttr eventIdAttr, int64_t fftsMode) {
   auto *ctx = rewriter.getContext();
   std::string pipeTok = pipeTokFromPipeAttr(pipeAttr);
-
   if (targetArch == PTOArch::A3) {
     auto i32Ty = emitc::OpaqueType::get(ctx, "int32_t");
     Value eventVal =
@@ -119,7 +126,6 @@ static InterCoreSyncCallDesc buildInterCoreSyncSetCallDyn(
     pto::PipeAttr pipeAttr, Value eventIdVal, int64_t fftsMode) {
   std::string pipeTok = pipeTokFromPipeAttr(pipeAttr);
   Value eventI32 = castInterCoreEventIdToI32(rewriter, loc, eventIdVal);
-
   if (targetArch == PTOArch::A3) {
     Value msgVal = createFFTSMsg(rewriter, loc, eventI32, fftsMode);
     return buildA3InterCoreSyncSetCallDesc(rewriter, pipeTok, msgVal);
@@ -206,7 +212,6 @@ static LogicalResult emitA5SyncSetCall(ConversionPatternRewriter &rewriter,
                                          /*templateArgs=*/ArrayAttr{},
                                          /*operands=*/ValueRange{});
   };
-
   if (eventIdAttr) {
     emitSet(Value{}, eventIdAttr, /*isDynamic=*/false);
     if (needsMirrorPlus16) {
@@ -244,8 +249,8 @@ buildSyncAllWorkspaceEmitType(ConversionPatternRewriter &rewriter,
 
   int64_t rows = rawShape.size() == 1 ? 1 : rawShape[0];
   int64_t cols = rawShape.size() == 1 ? rawShape[0] : rawShape[1];
-  SmallVector<int64_t, 2> shape{rows, cols};
-  SmallVector<int64_t, 2> validShape{rows, cols};
+  SmallVec2<int64_t> shape{rows, cols};
+  SmallVec2<int64_t> validShape{rows, cols};
 
   auto *ctx = rewriter.getContext();
   pto::TileBufConfigAttr configAttr = pto::TileBufConfigAttr::getDefault(ctx);
@@ -422,7 +427,6 @@ static std::string getAutoSyncTailModeToken(Operation *op) {
   auto hintAttr = func->getAttrOfType<StringAttr>(kAutoSyncTailHintAttr);
   if (!hintAttr)
     return kAutoSyncTailModeBarrierAllToken.str();
-
   if (hintAttr.getValue() == kAutoSyncTailPolicyBarrierAll)
     return kAutoSyncTailModeBarrierAllToken.str();
   if (hintAttr.getValue() == kAutoSyncTailPolicyMte3ToSEvent0)
@@ -490,7 +494,6 @@ struct PTOBarrierToEmitC : public OpConversionPattern<pto::BarrierOp> {
         ArrayAttr{},        // template args
         ValueRange{}        // operands
     );
-
     return success();
   }
 };
@@ -570,7 +573,7 @@ static bool tryExtractSyncTokensFromArrayAttr(Operation *op, StringRef attrName,
 static bool tryExtractFallbackSyncTokens(Operation *op, std::string &srcTok,
                                          std::string &dstTok,
                                          std::string &evtTok) {
-  SmallVector<std::string, 2> pipes;
+  SmallVec2<std::string> pipes;
   std::string event;
   for (NamedAttribute namedAttr : op->getAttrs()) {
     std::string token;
@@ -672,16 +675,12 @@ static LogicalResult extractSyncTokens(SyncOpT op,
     auto s = op.getSrcPipe();
     auto d = op.getDstPipe();
     auto e = op.getEventId();
-
     if constexpr (std::is_same<decltype(s), mlir::pto::PIPE>::value) srcTok = pipeTokFromPipeEnum(s);
     else srcTok = pipeTokFromPipeAttr(s);
-
     if constexpr (std::is_same<decltype(d), mlir::pto::PIPE>::value) dstTok = pipeTokFromPipeEnum(d);
     else dstTok = pipeTokFromPipeAttr(d);
-
     if constexpr (std::is_same<decltype(e), mlir::pto::EVENT>::value) evtTok = evtTokFromEventEnum(e);
     else evtTok = evtTokFromEventAttr(e);
-
     return success();
   }
 
@@ -753,7 +752,7 @@ struct PTOSyncToEmitC : public OpConversionPattern<mlir::pto::TSyncOp> {
 
   LogicalResult matchAndRewrite(mlir::pto::TSyncOp op, OpAdaptor adaptor,
                                 ConversionPatternRewriter &rewriter) const override {
-    SmallVector<Value, 4> operands;
+    SmallVec4<Value> operands;
     operands.reserve(adaptor.getEvents().size());
     for (Value event : adaptor.getEvents())
       operands.push_back(peelUnrealized(event));
@@ -787,7 +786,6 @@ struct PTOSyncAllToEmitC : public OpConversionPattern<mlir::pto::SyncAllOp> {
                                 ConversionPatternRewriter &rewriter) const override {
     auto mode = op.getMode().getValue();
     auto coreType = op.getCoreType().getValue();
-
     if (mode == pto::SyncAllMode::Hard) {
       std::string callee = "SYNCALL<" + coreTypeTok(coreType).str() + ">";
       rewriter.create<emitc::CallOpaqueOp>(op.getLoc(), TypeRange{}, callee,
@@ -806,7 +804,7 @@ struct PTOSyncAllToEmitC : public OpConversionPattern<mlir::pto::SyncAllOp> {
     std::string callee =
         "SYNCALL<SyncAllMode::Soft, " + coreTypeTok(coreType).str() + ">";
 
-    SmallVector<Value, 4> operands{*gmWorkspace};
+    SmallVec4<Value> operands{*gmWorkspace};
     if (failed(appendSyncAllWorkspaceOperands(rewriter, op, adaptor, coreType,
                                               operands)))
       return failure();
@@ -932,7 +930,6 @@ struct PTOSetFFTsToEmitC : public OpConversionPattern<mlir::pto::SetFFTsOp> {
 
     Value fftsAddr = peelUnrealized(adaptor.getFfts());
     auto u64Ty = emitc::OpaqueType::get(ctx, "uint64_t");
-
     if (isSetFFTsPointerLikeType(fftsAddr.getType())) {
       auto castTyAttr =
           rewriter.getArrayAttr({emitc::OpaqueAttr::get(ctx, "uint64_t")});
@@ -972,7 +969,6 @@ struct PTOSyncSetToEmitC : public OpConversionPattern<mlir::pto::SyncSetOp> {
     int64_t fftsMode = 2;
     if (IntegerAttr fftsModeAttr = op.getFftsModeAttr())
       fftsMode = fftsModeAttr.getInt();
-
     if ((eventIdAttr != nullptr) == static_cast<bool>(eventIdDyn))
       return rewriter.notifyMatchFailure(
           op, "expects exactly one of static event_id attr or dynamic event_id operand");
@@ -1019,7 +1015,6 @@ struct PTOSyncWaitToEmitC : public OpConversionPattern<mlir::pto::SyncWaitOp> {
     auto loc = op->getLoc();
     IntegerAttr eventIdAttr = op.getEventIdAttr();
     Value eventIdDyn = adaptor.getEventIdDyn();
-
     if ((eventIdAttr != nullptr) == static_cast<bool>(eventIdDyn))
       return rewriter.notifyMatchFailure(
           op, "expects exactly one of static event_id attr or dynamic event_id operand");

@@ -38,10 +38,14 @@ namespace {
 
 static constexpr uint64_t kVectorRegisterSizeInBytes = 256U;
 static constexpr unsigned kPipeVPruneMinRepeat = 16U;
+constexpr unsigned kInlineCapacity2 = 2;
+
+template <typename T>
+using SmallVec2 = SmallVector<T, kInlineCapacity2>;
 
 struct RepeatAccessShape {
-  SmallVector<int64_t, 2> fullShape;
-  SmallVector<int64_t, 2> validShape;
+  SmallVec2<int64_t> fullShape;
+  SmallVec2<int64_t> validShape;
   Type elementType;
 };
 
@@ -56,8 +60,8 @@ static std::optional<RepeatAccessShape> getKnownRepeatAccessShapeFromType(Type t
     if (validShape[0] > fullShape[0] || validShape[1] > fullShape[1])
       return std::nullopt;
     return RepeatAccessShape{
-        SmallVector<int64_t, 2>{fullShape[0], fullShape[1]},
-        SmallVector<int64_t, 2>{validShape[0], validShape[1]},
+        SmallVec2<int64_t>{fullShape[0], fullShape[1]},
+        SmallVec2<int64_t>{validShape[0], validShape[1]},
         tileTy.getElementType()};
   }
 
@@ -65,8 +69,8 @@ static std::optional<RepeatAccessShape> getKnownRepeatAccessShapeFromType(Type t
     if (!memRefTy.hasStaticShape() || memRefTy.getRank() != 2)
       return std::nullopt;
     auto shape = memRefTy.getShape();
-    return RepeatAccessShape{SmallVector<int64_t, 2>{shape[0], shape[1]},
-                             SmallVector<int64_t, 2>{shape[0], shape[1]},
+    return RepeatAccessShape{SmallVec2<int64_t>{shape[0], shape[1]},
+                             SmallVec2<int64_t>{shape[0], shape[1]},
                              memRefTy.getElementType()};
   }
 
@@ -84,7 +88,6 @@ static std::optional<RepeatAccessShape> getKnownRepeatAccessShape(Value access) 
   if (!access) return std::nullopt;
   auto shape = getKnownRepeatAccessShapeFromType(access.getType());
   if (!shape) return std::nullopt;
-
   if (auto bind = access.getDefiningOp<BindTileOp>()) {
     auto row = getConstantIndex(bind.getValidRow());
     auto col = getConstantIndex(bind.getValidCol());
@@ -92,7 +95,7 @@ static std::optional<RepeatAccessShape> getKnownRepeatAccessShape(Value access) 
       if (*row < 0 || *col < 0 || *row > shape->fullShape[0] ||
           *col > shape->fullShape[1])
         return std::nullopt;
-      shape->validShape = SmallVector<int64_t, 2>{*row, *col};
+      shape->validShape = SmallVec2<int64_t>{*row, *col};
     } else if (bind.getValidRow() || bind.getValidCol()) {
       return std::nullopt;
     }
@@ -134,7 +137,6 @@ static bool isProvenContiguousAccess(Value access,
   int64_t fullCol = shape.fullShape[1];
   int64_t validRow = shape.validShape[0];
   int64_t validCol = shape.validShape[1];
-
   if (*layout == BLayout::RowMajor)
     return validCol == fullCol || validRow == 1;
   if (*layout == BLayout::ColMajor)
@@ -288,7 +290,6 @@ bool InsertSyncAnalysis::IsNoNeedToInsertSync(
     const CompoundInstanceElement *frontCompound, bool isBackwardDep) const {
   const PipelineType frontPipe = frontCompound->kPipeValue;
   const PipelineType nowPipe = nowCompound->kPipeValue;
-
   if (frontPipe == nowPipe && frontPipe == PipelineType::PIPE_S) {
     return true;
   }
@@ -322,7 +323,6 @@ void InsertSyncAnalysis::InsertSeqSync(
     unsigned frontIndex = frontPtr->GetIndex();
     assert(frontIndex < syncIR_.size());
     assert(syncIR_[frontIndex] != nullptr);
-
     if (auto *frontCompound =
             dyn_cast<CompoundInstanceElement>(frontPtr.get())) {
       UpdateAlreadySync(syncIR_[frontIndex]->pipeAfter, syncRecordList,
@@ -388,7 +388,6 @@ unsigned InsertSyncAnalysis::InsertBranchSync(
 
     InsertSeqSync(nowCompound, syncElement, static_cast<int>(branchIf),
                   static_cast<int>(branchElse), syncRecordIfList, forEndIndex);
-
     if (branchElement->branchId != branchElement->endId) {
       SyncRecordList syncRecordElseList = syncRecordList;
       InsertSeqSync(nowCompound, syncElement, static_cast<int>(branchElse),
@@ -518,10 +517,9 @@ bool InsertSyncAnalysis::CanPrunePipeVBarrier(
   // a vector-pipe barrier once the producer repeat is large enough. Keep the
   // check conservative: all dependency pairs for this candidate must describe
   // the exact same access.
-  SmallVector<const BaseMemInfo *, 2> producerAccesses;
+  SmallVec2<const BaseMemInfo *> producerAccesses;
   for (const auto &pair : depBaseMemInfosVec) {
     if (!isSameExactAccess(pair.first, pair.second)) return false;
-
     if (containsExactAccess(nowCompound->useVec, pair.first) &&
         containsExactAccess(frontCompound->defVec, pair.second)) {
       if (!llvm::is_contained(producerAccesses, pair.second))
@@ -549,7 +547,6 @@ void InsertSyncAnalysis::InsertSyncOperation(
     const std::optional<unsigned> &forEndIndex) {
   PipelineType nowPipe = nowCompound->kPipeValue;
   PipelineType frontPipe = frontCompound->kPipeValue;
-
   if (nowPipe == frontPipe) {
     unsigned insertBarrierId = nowCompound->GetIndex();
     auto barrierOp = std::make_unique<SyncOperation>(
@@ -656,7 +653,6 @@ void InsertSyncAnalysis::UpdateSyncRecord(const SyncOperation *sync,
       recordAlready[static_cast<unsigned>(waitPipeValue)] ||
       (nowPipeValue == waitPipeValue);
   if (!canTransitivelyEliminate) return;
-
   if (recordFinder[sync->GetSyncIndex()] &&
       (sync->GetType() == SyncOperation::TYPE::SET_EVENT ||
        sync->GetType() == SyncOperation::TYPE::SYNC_BLOCK_SET)) {
@@ -767,7 +763,6 @@ bool InsertSyncAnalysis::IsGMHazard(
 
   bool nowWritesGM = hasGM(nowCompound->defVec);
   bool nowReadsGM = hasGM(nowCompound->useVec);
-
   if (frontWritesGM && nowReadsGM) return true;  // RAW
   if (frontReadsGM && nowWritesGM) return true;  // WAR
   if (frontWritesGM && nowWritesGM) return true; // WAW

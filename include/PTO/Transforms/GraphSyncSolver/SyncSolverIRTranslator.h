@@ -101,6 +101,13 @@ private:
   std::optional<int64_t> getLoopMultibufferUnrollNum(Loop *loopOp);
   std::optional<int64_t> getScopePreloadNum(Scope *scopeOp);
   std::optional<int64_t> getScopeMaxPreloadNum(Scope *scopeOp);
+  Scope *prepareBlockScope(std::unique_ptr<Scope> &scopeOp, Block &block,
+                           bool isFunctionRegion);
+  void appendBlockBoundaries(Scope *parScope, Block &block);
+  bool handleIfLikeOp(Operation &op, Scope *parScope, bool skipEmptyScopes);
+  bool handleLoopLikeOp(Operation &op, Scope *parScope, bool skipEmptyScopes);
+  bool handleBranchAliasOp(Operation &op);
+  void appendRWOpFromOperation(Operation &op, Scope *parScope);
 };
 
 } // namespace mlir::pto::syncsolver

@@ -27,16 +27,16 @@
 #include <pthread.h>
 #include <string>
 
-#define INTRA_CORE_EVENT_ID_NUM (int64_t)8
-#define CROSS_CORE_EVENT_ID_NUM (int64_t)16
-#define TEST_INTRA_CORE_EVENT_ID_NUM (int64_t)8
-#define TEST_CROSS_CORE_EVENT_ID_NUM (int64_t)999
-
 namespace mlir::pto::syncsolver {
+constexpr int64_t kIntraCoreEventIdNum = 8;
+constexpr int64_t kCrossCoreEventIdNum = 16;
+constexpr int64_t kTestIntraCoreEventIdNum = 8;
+constexpr int64_t kTestCrossCoreEventIdNum = 999;
 const int64_t blockAllIntraSyncFlagId1 = 15;
 const int64_t blockAllIntraSyncFlagId2 = 14;
 const int64_t reservedCrossCoreEventIdNum = 2;
 const int64_t reservedIntraCoreEventIdNum = 0;
+constexpr int kConflictPairIndentWidth = 2;
 } // namespace mlir::pto::syncsolver
 
 using SyncMap = llvm::MapVector<
@@ -112,8 +112,7 @@ template <> struct DenseMapInfo<mlir::pto::syncsolver::CorePipeInfo> {
 } // namespace llvm
 
 namespace mlir::pto::syncsolver {
-
-enum SyncMode {
+enum class SyncMode {
   INTRA_CORE_SYNC,
   CROSS_CORE_SYNC,
   TEST_INTRA_CORE_MODE,
@@ -212,7 +211,7 @@ public:
   explicit UnitFlagInfo(const UnitFlagInfoBase &other)
       : UnitFlagInfoBase(other) {}
 
-  void reset() {
+  void reset() override {
     UnitFlagInfoBase::reset();
     linkedElementAsSet = nullptr;
     linkedElementAsWait = nullptr;
@@ -291,7 +290,6 @@ struct Occurrence {
 struct EventIdNode;
 
 struct ConflictPair {
-
   static int globalIdCounter;
 
   const int id;
@@ -431,8 +429,9 @@ public:
     ret += "]\n";
     if (printConflictPairs) {
       for (auto [conflictPair, frq] : conflictPairs) {
-        assert(frq > 0);
-        ret += std::string(2, ' ') + conflictPair->str() + "\n";
+        ASSERT(frq > 0);
+        ret += std::string(kConflictPairIndentWidth, ' ') +
+               conflictPair->str() + "\n";
       }
     }
     ret.pop_back();
@@ -516,7 +515,7 @@ llvm::FailureOr<std::pair<OpTy, OpTy>> getFirstLastOp(Operation *parentOp) {
     lastOp = op;
     return WalkResult::interrupt();
   });
-  assert(lastOp != nullptr);
+  ASSERT(lastOp != nullptr);
   return std::make_pair(firstOp, lastOp);
 }
 

@@ -60,12 +60,12 @@ bool Solver::tryCollectMergeableBackwardSyncEvent(
 
 void Solver::calcAllEventIds() {
   for (auto &[pipes, eventIdSolver] : eventIdSolver) {
-    assert(eventIdSolver != nullptr);
+    ASSERT(eventIdSolver != nullptr);
 
     [[maybe_unused]] auto result =
         eventIdSolver->shrinkEventIdMaxToEventIdNum();
-    assert(llvm::succeeded(result));
-    assert(eventIdSolver->isColorable());
+    ASSERT(llvm::succeeded(result));
+    ASSERT(eventIdSolver->isColorable());
   }
 }
 
@@ -107,12 +107,12 @@ Solver::getSetWaitOpsIndexRef(pto::PIPE pipeSrc, pto::PIPE pipeDst,
 void Solver::collectSetWaitOpsIndexes(OperationBase *op,
                                       const SyncMap &syncMapBefore,
                                       const SyncMap &syncMapAfter) {
-  assert(op != nullptr);
+  ASSERT(op != nullptr);
   auto collectSyncOpIndexesForMap = [&](const SyncMap &syncMap) {
     if (!syncMap.count(op))
       return;
     auto *it = syncMap.find(op);
-    assert(it != syncMap.end());
+    ASSERT(it != syncMap.end());
     for (auto &syncOp : it->second) {
       if (auto *setWaitOp = llvm::dyn_cast<SetWaitOp>(syncOp.get())) {
         for (auto eventId : setWaitOp->eventIds) {
@@ -305,7 +305,7 @@ void Solver::mergeBackwardSyncPairs(SyncMap &syncMapBefore,
   if (options.isIntraCoreMode()) {
     resetAndBuildSetWaitOpIndex(syncMapBefore, syncMapAfter);
     auto *scopeOp = llvm::dyn_cast<Scope>(funcIr.get());
-    assert(scopeOp != nullptr && scopeOp->body.front() != nullptr);
+    ASSERT(scopeOp != nullptr && scopeOp->body.front() != nullptr);
     mergeBackwardSyncEventIds(scopeOp->body.front().get());
   }
 }
@@ -415,7 +415,7 @@ void Solver::appendSyncOpsForConflictPair(ConflictPair *conflictPair,
                                           SyncMap &syncMapAfter) {
   if (conflictPair->isUseless || conflictPair->replacedWithUnitFlag)
     return;
-  assert(conflictPair->setOp != nullptr && conflictPair->waitOp != nullptr);
+  ASSERT(conflictPair->setOp != nullptr && conflictPair->waitOp != nullptr);
   if (conflictPair->isBarrier()) {
     auto barrierOp = std::make_unique<BarrierOp>(conflictPair->waitOp->op,
                                                  conflictPair->waitOp->parentOp,
@@ -425,7 +425,7 @@ void Solver::appendSyncOpsForConflictPair(ConflictPair *conflictPair,
     return;
   }
 
-  assert(conflictPair->eventIdNode != nullptr);
+  ASSERT(conflictPair->eventIdNode != nullptr);
   auto setOp = std::make_unique<SetFlagOp>(
       conflictPair->setOp->op, conflictPair->setOp->parentOp,
       conflictPair->eventIdNode->getEventIds(), conflictPair->setCorePipeInfo.pipe,
@@ -456,7 +456,7 @@ void Solver::appendMergedBackwardSyncScopeOps(SyncMap &syncMapBefore,
     if (mp.empty())
       continue;
     auto *scopeOp = llvm::dyn_cast<Scope>(op);
-    assert(scopeOp != nullptr);
+    ASSERT(scopeOp != nullptr);
     for (auto [setWaitCorePipes, eventIdsMp] : mp) {
       if (eventIdsMp.empty())
         continue;
@@ -503,10 +503,10 @@ void Solver::processConflict(Occurrence *occ1, Occurrence *occ2,
 // discover and record conflicts.
 void Solver::processOrders() {
   for (auto &[occ1, occ2, rwOp1, rwOp2, isUseless] : processingOrders) {
-    assert(occ1 != occ2);
-    assert(occ1->syncIrIndex < occ2->syncIrIndex);
+    ASSERT(occ1 != occ2);
+    ASSERT(occ1->syncIrIndex < occ2->syncIrIndex);
     if (checkVisited(occ1, occ2)) {
-      assert(false && "expected to not check a pair more than once.");
+      ASSERT(false && "expected to not check a pair more than once.");
       continue;
     }
     if (checkImpossibleOccPair(occ1, occ2) || checkAlreadySynced(occ1, occ2) ||
@@ -535,7 +535,7 @@ void Solver::insertMergedBackwardSyncPairs() {
       auto [corePipeSrc, corePipeDst] = corePipeInfoPair;
       for (auto *scopeOcc : opAllOccurrences[scopeOp]) {
         auto *parentScopeOcc = scopeOcc->parentOcc;
-        assert(parentScopeOcc != nullptr);
+        ASSERT(parentScopeOcc != nullptr);
         Occurrence *setOcc = nullptr;
         Occurrence *waitOcc = nullptr;
         auto startIndex = scopeOcc->startIndex;
@@ -549,7 +549,7 @@ void Solver::insertMergedBackwardSyncPairs() {
         auto conflictPair = std::make_unique<ConflictPair>(
             nullptr, nullptr, nullptr, nullptr, setOcc, waitOcc, corePipeSrc,
             corePipeDst, startIndex, endIndex);
-        assert(conflictPair->startIndex <= conflictPair->endIndex);
+        ASSERT(conflictPair->startIndex <= conflictPair->endIndex);
         conflictPair->isUseless = true;
         conflictPair->dontReuse = true;
         conflictPair->dontCheckForConflict = true;
@@ -621,7 +621,7 @@ bool Solver::insertOuterBackwardSyncPairs(
   bool newPairIsInserted = false;
   for (auto *chosenOp : chosenOps) {
     for (auto &[corePipeInfoPair, eventIdsMp] : backwardSyncEvents[chosenOp]) {
-      assert(!eventIdsMp.empty());
+      ASSERT(!eventIdsMp.empty());
       if (eventIdsMp.empty())
         continue;
       auto [it, isInserted] =

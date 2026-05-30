@@ -52,6 +52,19 @@ namespace {
 
 static constexpr llvm::StringLiteral kForceDynamicValidShapeAttrName =
     "__pto.force_dynamic_valid_shape";
+constexpr unsigned kTileHandleAttrInlineCapacity = 2;
+constexpr unsigned kLoopOpInlineCapacity = 8;
+constexpr unsigned kAnchorInlineCapacity = 32;
+constexpr unsigned kDeadBindInlineCapacity = 16;
+
+template <typename T>
+using SmallVec2 = SmallVector<T, kTileHandleAttrInlineCapacity>;
+template <typename T>
+using SmallVec8 = SmallVector<T, kLoopOpInlineCapacity>;
+template <typename T>
+using SmallVec16 = SmallVector<T, kDeadBindInlineCapacity>;
+template <typename T>
+using SmallVec32 = SmallVector<T, kAnchorInlineCapacity>;
 
 struct TileHandleMetadata {
   Value source;
@@ -59,7 +72,7 @@ struct TileHandleMetadata {
   Value validCol;
   TileBufConfigAttr config;
   bool explicitConfig = false;
-  SmallVector<NamedAttribute, 2> attrs;
+  SmallVec2<NamedAttribute> attrs;
 };
 
 static bool isLocalTileMemRef(Type type) {
@@ -162,7 +175,6 @@ static bool isA5Target(Operation *op) {
   auto module = op->getParentOfType<ModuleOp>();
   if (!module)
     return false;
-
   if (auto arch = module->getAttrOfType<StringAttr>("pto.target_arch")) {
     if (arch.getValue().equals_insensitive("a5"))
       return true;
@@ -197,7 +209,6 @@ static void inferConfigForMaterializedUse(Operation *owner, unsigned operandNo,
   auto rowCol = [&]() {
     return makeTileConfig(ctx, BLayout::RowMajor, SLayout::ColMajor);
   };
-
   if (isa<TMatmulOp>(owner)) {
     if (!isA5Target(owner))
       return;
@@ -234,7 +245,6 @@ static TileHandleMetadata getTileHandleMetadata(Value value,
   TileHandleMetadata meta;
   meta.source = value;
   meta.config = TileBufConfigAttr::getDefault(ctx);
-
   if (auto bind = value.getDefiningOp<BindTileOp>()) {
     meta.source = bind.getSource();
     meta.validRow = bind.getValidRow();
@@ -259,74 +269,60 @@ static TileHandleMetadata getTileHandleMetadata(Value value,
   return meta;
 }
 
-static bool getTilePointerStrides(TileBufConfigAttr configAttr, Type elemTy,
-                                  int64_t rows, int64_t cols,
-                                  int64_t &rowStride, int64_t &colStride) {
-  if (rows == ShapedType::kDynamic || cols == ShapedType::kDynamic)
-    return false;
+static int32_t getConfigI32Value(Attribute attr) {
+  if (auto enumAttr = dyn_cast<IntegerAttr>(attr))
+    return static_cast<int32_t>(enumAttr.getInt());
+  if (auto blAttr = dyn_cast<BLayoutAttr>(attr))
+    return static_cast<int32_t>(blAttr.getValue());
+  if (auto slAttr = dyn_cast<SLayoutAttr>(attr))
+    return static_cast<int32_t>(slAttr.getValue());
+  return 0;
+}
 
-  int32_t blVal = 0;
-  if (auto blAttr = dyn_cast<BLayoutAttr>(configAttr.getBLayout()))
-    blVal = static_cast<int32_t>(blAttr.getValue());
-  else if (auto intAttr = dyn_cast<IntegerAttr>(configAttr.getBLayout()))
-    blVal = static_cast<int32_t>(intAttr.getInt());
+static FailureOr<std::pair<int64_t, int64_t>>
+getBoxedTileInnerShape(TileBufConfigAttr configAttr, Type elemTy, int32_t slVal) {
+  int32_t fractal = 512;
+  if (auto frAttr = dyn_cast<IntegerAttr>(configAttr.getSFractalSize()))
+    fractal = static_cast<int32_t>(frAttr.getInt());
 
-  int32_t slVal = 0;
-  if (auto slAttr = dyn_cast<SLayoutAttr>(configAttr.getSLayout()))
-    slVal = static_cast<int32_t>(slAttr.getValue());
-  else if (auto intAttr = dyn_cast<IntegerAttr>(configAttr.getSLayout()))
-    slVal = static_cast<int32_t>(intAttr.getInt());
+  unsigned elemBytes = pto::getPTOStorageElemByteSize(elemTy);
+  if (elemBytes == 0)
+    return failure();
 
-  bool boxed = slVal != 0;
-  int64_t innerRows = 1;
-  int64_t innerCols = 1;
-  if (boxed) {
-    int32_t fractal = 512;
-    if (auto frAttr = dyn_cast<IntegerAttr>(configAttr.getSFractalSize()))
-      fractal = static_cast<int32_t>(frAttr.getInt());
-
-    unsigned elemBytes = pto::getPTOStorageElemByteSize(elemTy);
-    if (elemBytes == 0)
-      return false;
-
-    switch (fractal) {
-    case 1024:
-      innerRows = 16;
-      innerCols = 16;
-      break;
-    case 32:
-      innerRows = 16;
-      innerCols = 2;
-      break;
-    case 512:
-      if (slVal == 1) {
-        innerRows = 16;
-        innerCols = 32 / elemBytes;
-      } else if (slVal == 2) {
-        innerRows = 32 / elemBytes;
-        innerCols = 16;
-      } else {
-        return false;
-      }
-      break;
-    default:
-      return false;
-    }
-    if (innerRows <= 0 || innerCols <= 0)
-      return false;
+  switch (fractal) {
+  case 1024:
+    return std::make_pair<int64_t, int64_t>(16, 16);
+  case 32:
+    return std::make_pair<int64_t, int64_t>(16, 2);
+  case 512:
+    if (slVal == 1)
+      return std::make_pair<int64_t, int64_t>(16, 32 / elemBytes);
+    if (slVal == 2)
+      return std::make_pair<int64_t, int64_t>(32 / elemBytes, 16);
+    return failure();
+  default:
+    return failure();
   }
+}
 
-  if (!boxed) {
-    if (blVal == 1) {
-      rowStride = 1;
-      colStride = rows;
-    } else {
-      rowStride = cols;
-      colStride = 1;
-    }
-    return true;
+static bool setDenseTilePointerStrides(int32_t blVal, int64_t rows,
+                                       int64_t cols, int64_t &rowStride,
+                                       int64_t &colStride) {
+  if (blVal == 1) {
+    rowStride = 1;
+    colStride = rows;
+  } else {
+    rowStride = cols;
+    colStride = 1;
   }
+  return true;
+}
 
+static bool setBoxedTilePointerStrides(int32_t blVal, int32_t slVal,
+                                       int64_t rows, int64_t cols,
+                                       int64_t innerRows, int64_t innerCols,
+                                       int64_t &rowStride,
+                                       int64_t &colStride) {
   if (blVal == 1) {
     if (slVal != 1)
       return false;
@@ -334,16 +330,34 @@ static bool getTilePointerStrides(TileBufConfigAttr configAttr, Type elemTy,
     colStride = rows;
     return true;
   }
-
   rowStride = cols;
   colStride = innerRows;
   return true;
 }
 
-static SmallVector<int64_t, 2>
+static bool getTilePointerStrides(TileBufConfigAttr configAttr, Type elemTy,
+                                  int64_t rows, int64_t cols,
+                                  int64_t &rowStride, int64_t &colStride) {
+  if (rows == ShapedType::kDynamic || cols == ShapedType::kDynamic)
+    return false;
+
+  int32_t blVal = getConfigI32Value(configAttr.getBLayout());
+  int32_t slVal = getConfigI32Value(configAttr.getSLayout());
+  bool boxed = slVal != 0;
+  if (!boxed)
+    return setDenseTilePointerStrides(blVal, rows, cols, rowStride,
+                                      colStride);
+  auto innerShape = getBoxedTileInnerShape(configAttr, elemTy, slVal);
+  if (failed(innerShape) || innerShape->first <= 0 || innerShape->second <= 0)
+    return false;
+  return setBoxedTilePointerStrides(blVal, slVal, rows, cols,
+                                    innerShape->first, innerShape->second,
+                                    rowStride, colStride);
+}
+
+static SmallVec2<int64_t>
 getMaterializedTileShape(MemRefType memTy, const TileHandleMetadata &meta) {
-  SmallVector<int64_t, 2> shape(memTy.getShape().begin(),
-                                memTy.getShape().end());
+  SmallVec2<int64_t> shape(memTy.getShape().begin(), memTy.getShape().end());
   if (!hasStringAttr(meta.attrs, "pto.view_semantics", "subview"))
     return shape;
 
@@ -370,7 +384,6 @@ getMaterializedTileShape(MemRefType memTy, const TileHandleMetadata &meta) {
   if (!getTilePointerStrides(meta.config, sourceMrTy.getElementType(), subRows,
                              subCols, childRowStride, childColStride))
     return shape;
-
   if (inheritedStrides[0] == childRowStride &&
       inheritedStrides[1] == childColStride) {
     shape[0] = subRows;
@@ -383,8 +396,8 @@ getMaterializedTileShape(MemRefType memTy, const TileHandleMetadata &meta) {
 static TileBufType buildTileTypeFromMemRef(MemRefType memTy,
                                            const TileHandleMetadata &meta,
                                            MLIRContext *ctx) {
-  SmallVector<int64_t, 2> shape = getMaterializedTileShape(memTy, meta);
-  SmallVector<int64_t, 2> validShape(shape.begin(), shape.end());
+  SmallVec2<int64_t> shape = getMaterializedTileShape(memTy, meta);
+  SmallVec2<int64_t> validShape(shape.begin(), shape.end());
   bool forceDynamic = hasAttr(meta.attrs, kForceDynamicValidShapeAttrName);
   if (forceDynamic) {
     validShape[0] = ShapedType::kDynamic;
@@ -504,7 +517,6 @@ static Value computeExplicitAddress(Value value, OpBuilder &builder,
                                     Location loc) {
   if (auto bind = value.getDefiningOp<BindTileOp>())
     return computeExplicitAddress(bind.getSource(), builder, loc);
-
   if (auto cast = value.getDefiningOp<PointerCastOp>()) {
     if (cast.getAddrs().empty())
       return Value();
@@ -513,10 +525,8 @@ static Value computeExplicitAddress(Value value, OpBuilder &builder,
 
   if (auto subview = value.getDefiningOp<memref::SubViewOp>())
     return computeSubviewAddress(subview, builder, loc);
-
   if (auto cast = value.getDefiningOp<memref::CastOp>())
     return computeExplicitAddress(cast.getSource(), builder, loc);
-
   return Value();
 }
 
@@ -558,10 +568,8 @@ static bool isFunctionEntryBlockArgument(BlockArgument arg) {
 
 static bool isUnsupportedControlFlowAddress(Value value) {
   value = peelAddressSource(value);
-
   if (auto arg = dyn_cast<BlockArgument>(value))
     return !isFunctionEntryBlockArgument(arg);
-
   return isControlFlowAddressProducer(value.getDefiningOp());
 }
 
@@ -570,7 +578,6 @@ static void emitMissingExplicitAddressError(Operation *owner, Value value) {
   auto diag = owner->emitOpError()
               << "cannot materialize tile handle for local memref because its "
                  "explicit byte address cannot be recovered";
-
   if (isa<BlockArgument>(value)) {
     diag << "; region block arguments and loop-carried memref values are "
             "unsupported here";
@@ -607,7 +614,7 @@ static FailureOr<bool>
 materializeSCFIfResults(ModuleOp module, DenseMap<Value, Value> &tileHandles) {
   bool changed = false;
 
-  SmallVector<scf::IfOp, 8> ifOps;
+  SmallVec8<scf::IfOp> ifOps;
   module.walk([&](scf::IfOp ifOp) { ifOps.push_back(ifOp); });
 
   for (scf::IfOp ifOp : llvm::reverse(ifOps)) {
@@ -629,7 +636,6 @@ materializeSCFIfResults(ModuleOp module, DenseMap<Value, Value> &tileHandles) {
           lookupMaterializedTileHandle(elseYield.getOperand(idx), tileHandles);
       if (!thenTile || !elseTile)
         continue;
-
       if (thenTile.getType() != elseTile.getType()) {
         ifOp.emitOpError()
             << "cannot materialize tile result #" << idx
@@ -654,7 +660,7 @@ static FailureOr<bool>
 materializeSCFForResults(ModuleOp module, DenseMap<Value, Value> &tileHandles) {
   bool changed = false;
 
-  SmallVector<scf::ForOp, 8> forOps;
+  SmallVec8<scf::ForOp> forOps;
   module.walk([&](scf::ForOp forOp) { forOps.push_back(forOp); });
 
   for (scf::ForOp forOp : llvm::reverse(forOps)) {
@@ -725,7 +731,6 @@ materializeControlFlowTileResults(ModuleOp module,
       return failure();
     changed |= *forChanged;
   } while (changed);
-
   return success();
 }
 
@@ -772,6 +777,64 @@ static bool isTileViewSemantics(StringAttr viewSemantics) {
                            viewSemantics.getValue() == "bitcast");
 }
 
+static SmallVector<OpOperand *> collectMaterializedTileUses(Value anchoredValue) {
+  SmallVector<OpOperand *> usesToRewrite;
+  for (OpOperand &use : anchoredValue.getUses()) {
+    if (shouldMaterializeOperand(use.getOwner()) ||
+        shouldMaterializeYieldOperand(use.getOwner())) {
+      usesToRewrite.push_back(&use);
+    }
+  }
+  return usesToRewrite;
+}
+
+static Value createMaterializedTileFromSource(
+    Operation *anchor, Type tileTy, StringAttr viewSemantics, Value sourceTile,
+    OpBuilder &builder) {
+  if (!(sourceTile && viewSemantics))
+    return Value();
+  if (viewSemantics.getValue() == "treshape") {
+    return builder.create<TReshapeOp>(anchor->getLoc(), tileTy, sourceTile)
+        .getResult();
+  }
+  if (viewSemantics.getValue() == "bitcast") {
+    return builder.create<BitcastOp>(anchor->getLoc(), tileTy, sourceTile)
+        .getResult();
+  }
+  return Value();
+}
+
+static Value createMaterializedAllocTile(Operation *anchor, Value anchoredValue,
+                                         Type tileTy,
+                                         const TileHandleMetadata &meta,
+                                         OpBuilder &builder,
+                                         bool &failedMaterialization) {
+  Value addr = computeExplicitAddress(anchoredValue, builder, anchor->getLoc());
+  if (!addr && isUnsupportedControlFlowAddress(anchoredValue)) {
+    emitMissingExplicitAddressError(anchor, anchoredValue);
+    failedMaterialization = true;
+    return Value();
+  }
+  auto alloc = builder.create<AllocTileOp>(
+      anchor->getLoc(), tileTy, addr ? addr : Value(),
+      getAllocValidOperand(cast<TileBufType>(tileTy), meta.validRow, 0, builder,
+                           anchor->getLoc()),
+      getAllocValidOperand(cast<TileBufType>(tileTy), meta.validCol, 1, builder,
+                           anchor->getLoc()));
+  copyMaterializedTileAttrs(meta.attrs, alloc);
+  return alloc.getResult();
+}
+
+static void rewriteMaterializedTileUses(ArrayRef<OpOperand *> usesToRewrite,
+                                        Value materialized, Type tileTy) {
+  for (OpOperand *use : usesToRewrite) {
+    Operation *owner = use->getOwner();
+    unsigned operandNo = use->getOperandNumber();
+    use->set(materialized);
+    updateResultTypesAfterMaterializingOperand(owner, operandNo, tileTy);
+  }
+}
+
 static Value materializeAnchorResult(Operation *anchor, Value anchoredValue,
                                      OpBuilder &builder, MLIRContext *ctx,
                                      DenseMap<Value, Value> &tileHandles,
@@ -781,13 +844,8 @@ static Value materializeAnchorResult(Operation *anchor, Value anchoredValue,
   if (!memTy || !isLocalTileMemRef(memTy))
     return Value();
 
-  SmallVector<OpOperand *> usesToRewrite;
-  for (OpOperand &use : anchoredValue.getUses()) {
-    if (shouldMaterializeOperand(use.getOwner()) ||
-        shouldMaterializeYieldOperand(use.getOwner()))
-      usesToRewrite.push_back(&use);
-  }
-
+  SmallVector<OpOperand *> usesToRewrite =
+      collectMaterializedTileUses(anchoredValue);
   TileHandleMetadata meta = getTileHandleMetadata(anchoredValue, ctx);
   auto viewSemantics = dyn_cast_or_null<StringAttr>(
       getAttr(meta.attrs, "pto.view_semantics"));
@@ -802,44 +860,120 @@ static Value materializeAnchorResult(Operation *anchor, Value anchoredValue,
   auto tileTy = buildTileTypeFromMemRef(memTy, meta, ctx);
 
   builder.setInsertionPointAfter(anchor);
-  Value materialized;
   Value sourceTile = meta.source ? tileHandles.lookup(meta.source) : Value();
-  if (sourceTile && viewSemantics &&
-      viewSemantics.getValue() == "treshape") {
-    materialized =
-        builder.create<TReshapeOp>(anchor->getLoc(), tileTy, sourceTile)
-            .getResult();
-  } else if (sourceTile && viewSemantics &&
-             viewSemantics.getValue() == "bitcast") {
-    materialized =
-        builder.create<BitcastOp>(anchor->getLoc(), tileTy, sourceTile)
-            .getResult();
-  } else {
-    Value addr = computeExplicitAddress(anchoredValue, builder, anchor->getLoc());
-    if (!addr && isUnsupportedControlFlowAddress(anchoredValue)) {
-      emitMissingExplicitAddressError(anchor, anchoredValue);
-      failedMaterialization = true;
+  Value materialized = createMaterializedTileFromSource(
+      anchor, tileTy, viewSemantics, sourceTile, builder);
+  if (!materialized) {
+    materialized = createMaterializedAllocTile(anchor, anchoredValue, tileTy,
+                                               meta, builder,
+                                               failedMaterialization);
+    if (!materialized)
       return Value();
-    }
-    auto alloc = builder.create<AllocTileOp>(
-        anchor->getLoc(), tileTy, addr ? addr : Value(),
-        getAllocValidOperand(tileTy, meta.validRow, 0, builder,
-                             anchor->getLoc()),
-        getAllocValidOperand(tileTy, meta.validCol, 1, builder,
-                             anchor->getLoc()));
-    copyMaterializedTileAttrs(meta.attrs, alloc);
-    materialized = alloc.getResult();
   }
-
-  for (OpOperand *use : usesToRewrite) {
-    Operation *owner = use->getOwner();
-    unsigned operandNo = use->getOperandNumber();
-    use->set(materialized);
-    updateResultTypesAfterMaterializingOperand(owner, operandNo, tileTy);
-  }
+  rewriteMaterializedTileUses(usesToRewrite, materialized, tileTy);
 
   tileHandles[anchoredValue] = materialized;
   return materialized;
+}
+
+static SmallVec32<Operation *> collectMaterializedTileAnchors(ModuleOp module) {
+  SmallVec32<Operation *> anchors;
+  module.walk([&](Operation *op) {
+    if (isMaterializedTileAnchor(op))
+      anchors.push_back(op);
+  });
+  return anchors;
+}
+
+static DenseSet<Value> collectMustMaterializeSources(ArrayRef<Operation *> anchors,
+                                                     MLIRContext *ctx) {
+  DenseSet<Value> mustMaterialize;
+  for (Operation *anchor : anchors) {
+    if (anchor->getNumResults() != 1)
+      continue;
+    Value anchoredValue = anchor->getResult(0);
+    if (!isLocalTileMemRef(anchoredValue.getType()))
+      continue;
+    TileHandleMetadata meta = getTileHandleMetadata(anchoredValue, ctx);
+    auto viewSemantics = dyn_cast_or_null<StringAttr>(
+        getAttr(meta.attrs, "pto.view_semantics"));
+    if (isTileViewSemantics(viewSemantics) && meta.source)
+      mustMaterialize.insert(meta.source);
+  }
+  return mustMaterialize;
+}
+
+static SmallVec32<std::pair<Operation *, unsigned>>
+collectTileOperandsToRewrite(ModuleOp module) {
+  SmallVec32<std::pair<Operation *, unsigned>> operandsToRewrite;
+  module.walk([&](Operation *op) {
+    if (!shouldMaterializeOperand(op))
+      return;
+    for (OpOperand &operand : op->getOpOperands()) {
+      if (isLocalTileMemRef(operand.get().getType()))
+        operandsToRewrite.push_back({op, operand.getOperandNumber()});
+    }
+  });
+  return operandsToRewrite;
+}
+
+static void eraseDeadBindTiles(ModuleOp module) {
+  bool erasedBind = true;
+  while (erasedBind) {
+    erasedBind = false;
+    SmallVec16<Operation *> deadBinds;
+    module.walk([&](BindTileOp op) {
+      if (op.getResult().use_empty())
+        deadBinds.push_back(op);
+    });
+    for (Operation *op : deadBinds) {
+      op->erase();
+      erasedBind = true;
+    }
+  }
+}
+
+static bool rewriteMaterializedTileOperand(
+    Operation *op, unsigned operandNo, OpBuilder &builder, MLIRContext *ctx,
+    DenseMap<Value, Value> &tileHandles, bool &failedMaterialization) {
+  Value oldValue = op->getOperand(operandNo);
+  if (!isa<MemRefType>(oldValue.getType()))
+    return true;
+  if (op->getName().getStringRef() == "pto.tassign" && operandNo == 0)
+    return true;
+
+  auto memTy = cast<MemRefType>(oldValue.getType());
+  TileHandleMetadata meta = getTileHandleMetadata(oldValue, ctx);
+  inferConfigForMaterializedUse(op, operandNo, oldValue.getType(), meta, ctx);
+  auto tileTy = buildTileTypeFromMemRef(memTy, meta, ctx);
+
+  builder.setInsertionPoint(op);
+  Value addr = computeExplicitAddress(oldValue, builder, op->getLoc());
+  if (!addr && isUnsupportedControlFlowAddress(oldValue)) {
+    emitMissingExplicitAddressError(op, oldValue);
+    failedMaterialization = true;
+    return false;
+  }
+  auto alloc = builder.create<AllocTileOp>(
+      op->getLoc(), tileTy, addr ? addr : Value(),
+      getAllocValidOperand(tileTy, meta.validRow, 0, builder, op->getLoc()),
+      getAllocValidOperand(tileTy, meta.validCol, 1, builder, op->getLoc()));
+  copyMaterializedTileAttrs(meta.attrs, alloc);
+  tileHandles[oldValue] = alloc.getResult();
+  op->setOperand(operandNo, alloc.getResult());
+  updateResultTypesAfterMaterializingOperand(op, operandNo, tileTy);
+  return true;
+}
+
+static void materializeTileOperands(
+    ModuleOp module, OpBuilder &builder, MLIRContext *ctx,
+    DenseMap<Value, Value> &tileHandles, bool &failedMaterialization) {
+  for (auto [op, operandNo] : collectTileOperandsToRewrite(module)) {
+    if (!rewriteMaterializedTileOperand(op, operandNo, builder, ctx,
+                                        tileHandles, failedMaterialization)) {
+      continue;
+    }
+  }
 }
 
 struct PTOMaterializeTileHandlesPass
@@ -851,27 +985,9 @@ struct PTOMaterializeTileHandlesPass
 
     OpBuilder builder(ctx);
     DenseMap<Value, Value> tileHandles;
-    DenseSet<Value> mustMaterialize;
     bool failedMaterialization = false;
-
-    SmallVector<Operation *, 32> anchors;
-    module.walk([&](Operation *op) {
-      if (!isMaterializedTileAnchor(op))
-        return;
-      anchors.push_back(op);
-    });
-    for (Operation *anchor : anchors) {
-      if (anchor->getNumResults() != 1)
-        continue;
-      Value anchoredValue = anchor->getResult(0);
-      if (!isLocalTileMemRef(anchoredValue.getType()))
-        continue;
-      TileHandleMetadata meta = getTileHandleMetadata(anchoredValue, ctx);
-      auto viewSemantics = dyn_cast_or_null<StringAttr>(
-          getAttr(meta.attrs, "pto.view_semantics"));
-      if (isTileViewSemantics(viewSemantics) && meta.source)
-        mustMaterialize.insert(meta.source);
-    }
+    SmallVec32<Operation *> anchors = collectMaterializedTileAnchors(module);
+    DenseSet<Value> mustMaterialize = collectMustMaterializeSources(anchors, ctx);
 
     for (Operation *anchor : anchors) {
       if (anchor->getNumResults() != 1)
@@ -890,69 +1006,13 @@ struct PTOMaterializeTileHandlesPass
       signalPassFailure();
       return;
     }
-
-    SmallVector<std::pair<Operation *, unsigned>, 32> operandsToRewrite;
-    module.walk([&](Operation *op) {
-      if (!shouldMaterializeOperand(op))
-        return;
-      for (OpOperand &operand : op->getOpOperands()) {
-        if (isLocalTileMemRef(operand.get().getType()))
-          operandsToRewrite.push_back({op, operand.getOperandNumber()});
-      }
-    });
-
-    for (auto [op, operandNo] : operandsToRewrite) {
-      Value oldValue = op->getOperand(operandNo);
-      if (!isa<MemRefType>(oldValue.getType()))
-        continue;
-      if (op->getName().getStringRef() == "pto.tassign" && operandNo == 0)
-        continue;
-      auto memTy = cast<MemRefType>(oldValue.getType());
-      TileHandleMetadata meta = getTileHandleMetadata(oldValue, ctx);
-      inferConfigForMaterializedUse(op, operandNo, oldValue.getType(), meta,
-                                    ctx);
-      auto tileTy = buildTileTypeFromMemRef(memTy, meta, ctx);
-
-      builder.setInsertionPoint(op);
-      Value materialized;
-      Value addr = computeExplicitAddress(oldValue, builder, op->getLoc());
-      if (!addr && isUnsupportedControlFlowAddress(oldValue)) {
-        emitMissingExplicitAddressError(op, oldValue);
-        failedMaterialization = true;
-        continue;
-      }
-      auto alloc = builder.create<AllocTileOp>(
-          op->getLoc(), tileTy, addr ? addr : Value(),
-          getAllocValidOperand(tileTy, meta.validRow, 0, builder,
-                               op->getLoc()),
-          getAllocValidOperand(tileTy, meta.validCol, 1, builder,
-                               op->getLoc()));
-      copyMaterializedTileAttrs(meta.attrs, alloc);
-      materialized = alloc.getResult();
-      tileHandles[oldValue] = materialized;
-      op->setOperand(operandNo, materialized);
-      updateResultTypesAfterMaterializingOperand(op, operandNo, tileTy);
-    }
-
+    materializeTileOperands(module, builder, ctx, tileHandles,
+                            failedMaterialization);
     if (failedMaterialization) {
       signalPassFailure();
       return;
     }
-
-    bool erasedBind = true;
-    while (erasedBind) {
-      erasedBind = false;
-      SmallVector<Operation *, 16> deadBinds;
-      module.walk([&](BindTileOp op) {
-        if (op.getResult().use_empty())
-          deadBinds.push_back(op);
-      });
-      for (Operation *op : deadBinds) {
-        op->erase();
-        erasedBind = true;
-      }
-    }
-
+    eraseDeadBindTiles(module);
   }
 };
 

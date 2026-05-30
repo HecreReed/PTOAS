@@ -51,14 +51,6 @@ constexpr size_t kFirstOptionArgumentIndex = 3;
 constexpr size_t kNextArgumentOffset = 1;
 constexpr int kUsageExitCode = 2;
 
-static std::vector<std::string> collectArguments(int argc, char *argv[]) {
-  std::vector<std::string> args;
-  args.reserve(static_cast<size_t>(argc));
-  for (int i = 0; i < argc; ++i)
-    args.emplace_back(argv[i]);
-  return args;
-}
-
 } // namespace
 
 static std::optional<CommandLineOptions>
@@ -118,7 +110,10 @@ static int runDecode(const CommandLineOptions &options) {
 }
 
 int main(int argc, char **argv) {
-  auto args = collectArguments(argc, argv);
+  std::vector<std::string> args;
+  args.reserve(static_cast<size_t>(argc));
+  for (int i = 0; i < argc; ++i)
+    args.emplace_back(argv[i]);
   auto options = parseCommandLine(args);
   if (!options) {
     usage();

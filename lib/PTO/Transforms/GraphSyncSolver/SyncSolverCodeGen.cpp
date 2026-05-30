@@ -111,9 +111,9 @@ void CodeGenerator::emitSyncOp(IRRewriter &rewriter, SyncOp *syncOp) {
   // solver, which is currently force-disabled by SyncSolverOptions ctor.
   // If anyone re-enables it, codegen needs a matching update before this
   // assert can be relaxed.
-  assert(!setWait->checkFirstIter &&
+  ASSERT(!setWait->checkFirstIter &&
          "checkFirstIter wrapping not implemented in codegen");
-  assert(!setWait->checkLastIter &&
+  ASSERT(!setWait->checkLastIter &&
          "checkLastIter wrapping not implemented in codegen");
 
   // One set/wait op per assigned event id. The current solver only assigns

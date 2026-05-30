@@ -322,7 +322,7 @@ struct SCFIndexSwitchToCF : public OpRewritePattern<scf::IndexSwitchOp> {
     return rewriter.splitBlock(op->getBlock(), std::next(switchIt));
   }
 
-  static void addContinuationArguments(PatternRewriter &rewriter,
+  static void addContinuationArguments(PatternRewriter &,
                                        scf::IndexSwitchOp op, Location loc,
                                        Block *continueBlock) {
     SmallVector<BlockArgument> contArgs;

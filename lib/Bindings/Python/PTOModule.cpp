@@ -63,28 +63,48 @@ static py::list shapeToPyList(const int64_t *data, intptr_t n) {
   return lst;
 }
 
+static std::vector<int64_t> resolveTileBufValidShape(
+    const std::vector<int64_t> &shape, py::object validShapeObj) {
+  std::vector<int64_t> validShape = shape;
+  if (validShapeObj.is_none())
+    return validShape;
+  py::list lst = validShapeObj.cast<py::list>();
+  if (static_cast<size_t>(lst.size()) != shape.size())
+    throw std::runtime_error("valid_shape rank must match shape rank");
+  validShape.resize(lst.size());
+  for (py::ssize_t i = 0; i < static_cast<py::ssize_t>(lst.size()); ++i) {
+    py::object e = lst[i];
+    validShape[i] = e.is_none() ? -1 : e.cast<int64_t>();
+  }
+  return validShape;
+}
+
+static MlirType createTileBufTypeValue(const std::vector<int64_t> &shape,
+                                       MlirType elementType,
+                                       MlirAttribute memorySpace,
+                                       py::object validShapeObj,
+                                       py::object configObj, MlirContext ctx) {
+  std::vector<int64_t> validShape =
+      resolveTileBufValidShape(shape, validShapeObj);
+  if (!configObj.is_none()) {
+    MlirAttribute cfg = configObj.cast<MlirAttribute>();
+    return mlirPTOTileBufTypeGetWithValidShapeAndConfig(
+        ctx, static_cast<intptr_t>(shape.size()), shape.data(), elementType,
+        memorySpace, static_cast<intptr_t>(validShape.size()),
+        validShape.data(), cfg);
+  }
+  return mlirPTOTileBufTypeGetWithValidShape(
+      ctx, static_cast<intptr_t>(shape.size()), shape.data(), elementType,
+      memorySpace, static_cast<intptr_t>(validShape.size()),
+      validShape.data());
+}
+
 void populatePTODialectSubmodule(pybind11::module &m);
 void populatePTODialectSubmodule(pybind11::module &m) {
   (void)m;
 }
 
-static void bindPTOModule(pybind11::module &m) {
-    m.doc() = "PTO dialect Python bindings (pybind11).";
-
-    // --------------------------------------------------------------------------
-    // Dialect registration helper
-    // --------------------------------------------------------------------------
-    m.def(
-        "register_dialect",
-        [](MlirContext context, bool load) {
-            MlirDialectHandle handle = mlirGetDialectHandle__pto__();
-            mlirDialectHandleRegisterDialect(handle, context);
-            if (load)
-            mlirDialectHandleLoadDialect(handle, context);
-        },
-        py::arg("context"), py::arg("load") = true);
-
-    // [保留 HEAD]: AddressSpace 枚举定义
+static void bindPTOEnumsPart1(pybind11::module &m) {
     py::enum_<mlir::pto::AddressSpace>(m, "AddressSpace")
     .value("Zero", mlir::pto::AddressSpace::Zero)
     .value("GM",   mlir::pto::AddressSpace::GM)
@@ -111,6 +131,9 @@ static void bindPTOModule(pybind11::module &m) {
     .value("Max", mlir::pto::PadValue::Max)
     .value("Min", mlir::pto::PadValue::Min);
 
+}
+
+static void bindPTOEnumsPart2(pybind11::module &m) {
     py::enum_<mlir::pto::CompactMode>(m, "CompactMode")
     .value("Null", mlir::pto::CompactMode::Null)
     .value("Normal", mlir::pto::CompactMode::Normal)
@@ -139,6 +162,9 @@ static void bindPTOModule(pybind11::module &m) {
       .value("GE", MlirPTOCmpMode_GE)
       .export_values();
 
+}
+
+static void bindPTOEnumsPart3(pybind11::module &m) {
     py::enum_<mlir::pto::PIPE>(m, "PIPE")
       .value("PIPE_S", mlir::pto::PIPE::PIPE_S)
       .value("PIPE_V", mlir::pto::PIPE::PIPE_V)
@@ -173,6 +199,9 @@ static void bindPTOModule(pybind11::module &m) {
       .value("NormalRelu", mlir::pto::ReluPreMode::NormalRelu)
       .export_values();
 
+}
+
+static void bindPTOEnumsPart4(pybind11::module &m) {
     py::enum_<mlir::pto::AtomicType>(m, "AtomicType")
       .value("AtomicNone", mlir::pto::AtomicType::AtomicNone)
       .value("AtomicAdd", mlir::pto::AtomicType::AtomicAdd)
@@ -198,6 +227,9 @@ static void bindPTOModule(pybind11::module &m) {
       .value("Min", mlir::pto::ReduceOp::Min)
       .export_values();
 
+}
+
+static void bindPTOEnumsPart5(pybind11::module &m) {
     py::enum_<mlir::pto::SyncOpType>(m, "SyncOpType")
       .value("TLOAD", mlir::pto::SyncOpType::TLOAD)
       .value("TSTORE_ACC", mlir::pto::SyncOpType::TSTORE_ACC)
@@ -232,8 +264,20 @@ static void bindPTOModule(pybind11::module &m) {
       .value("P1000", mlir::pto::MaskPattern::P1000)
       .value("P1111", mlir::pto::MaskPattern::P1111)
       .export_values();
-    py::object maskPatternEnumType = m.attr("MaskPattern");
 
+}
+
+static void bindPTOEnums(pybind11::module &m) {
+    // [保留 HEAD]: AddressSpace 枚举定义
+  bindPTOEnumsPart1(m);
+  bindPTOEnumsPart2(m);
+  bindPTOEnumsPart3(m);
+  bindPTOEnumsPart4(m);
+  bindPTOEnumsPart5(m);
+}
+
+
+static void bindPTOPrimaryAttrsPart1(pybind11::module &m) {
     mlir_attribute_subclass(m, "BLayoutAttr",
                         [](MlirAttribute a) -> bool {
                           return mlirPTOAttrIsABLayoutAttr(a);
@@ -260,6 +304,9 @@ static void bindPTOModule(pybind11::module &m) {
             },
             py::arg("cls"), py::arg("value"), py::arg("context") = py::none());
 
+}
+
+static void bindPTOPrimaryAttrsPart2(pybind11::module &m) {
     mlir_attribute_subclass(m, "PadValueAttr",
                             [](MlirAttribute a) -> bool {
                             return mlirPTOAttrIsAPadValueAttr(a);
@@ -286,6 +333,9 @@ static void bindPTOModule(pybind11::module &m) {
             },
             py::arg("cls"), py::arg("value"), py::arg("context") = py::none());
 
+}
+
+static void bindPTOPrimaryAttrsPart3(pybind11::module &m) {
     mlir_attribute_subclass(m, "AccToVecModeAttr",
                             [](MlirAttribute a) -> bool {
                             return mlirPTOAttrIsAAccToVecModeAttr(a);
@@ -312,6 +362,9 @@ static void bindPTOModule(pybind11::module &m) {
             },
             py::arg("cls"), py::arg("value"), py::arg("context") = py::none());
 
+}
+
+static void bindPTOPrimaryAttrsPart4(pybind11::module &m) {
     mlir_attribute_subclass(m, "AtomicTypeAttr",
                             [](MlirAttribute a) -> bool {
                             return mlirPTOAttrIsAAtomicTypeAttr(a);
@@ -338,6 +391,9 @@ static void bindPTOModule(pybind11::module &m) {
             },
             py::arg("cls"), py::arg("value"), py::arg("context") = py::none());
 
+}
+
+static void bindPTOPrimaryAttrsPart5(pybind11::module &m) {
     mlir_attribute_subclass(m, "WaitCmpAttr",
                             [](MlirAttribute a) -> bool {
                             return mlirPTOAttrIsAWaitCmpAttr(a);
@@ -364,6 +420,9 @@ static void bindPTOModule(pybind11::module &m) {
             },
             py::arg("cls"), py::arg("value"), py::arg("context") = py::none());
     // [保留 HEAD]: AddressSpaceAttr 定义
+}
+
+static void bindPTOPrimaryAttrsPart6(pybind11::module &m) {
     mlir_attribute_subclass(
         m, "AddressSpaceAttr",
         [](MlirAttribute a) { return mlirPTOAttrIsAAddressSpaceAttr(a); })
@@ -416,6 +475,9 @@ static void bindPTOModule(pybind11::module &m) {
         return mlirPTORoundModeAttrGetValue(self);
         });
 
+}
+
+static void bindPTOPrimaryAttrsPart7(pybind11::module &m) {
     mlir_attribute_subclass(
         m, "SaturationModeAttr",
         [](MlirAttribute a) { return mlirPTOAttrIsASaturationModeAttr(a); })
@@ -442,7 +504,9 @@ static void bindPTOModule(pybind11::module &m) {
         [](MlirAttribute self) -> int32_t {
         return mlirPTOSaturationModeAttrGetValue(self);
         });
+}
 
+static void bindPTOPrimaryAttrsPart7Extra(pybind11::module &m) {
     mlir_attribute_subclass(
         m, "PipeAttr",
         [](MlirAttribute a) { return mlirPTOAttrIsAPipeAttr(a); })
@@ -468,7 +532,9 @@ static void bindPTOModule(pybind11::module &m) {
           [](MlirAttribute self) -> int32_t {
             return mlirPTOPipeAttrGetValue(self);
           });
+}
 
+static void bindPTOPrimaryAttrsPart8(pybind11::module &m) {
     mlir_attribute_subclass(
         m, "LayoutAttr",
         [](MlirAttribute a) { return mlirPTOAttrIsALayoutAttr(a); })
@@ -508,6 +574,9 @@ static void bindPTOModule(pybind11::module &m) {
             return mlirPTOCmpModeAttrGetValue(self);
           });
 
+}
+
+static void bindPTOPrimaryAttrsPart9(pybind11::module &m) {
     mlir_attribute_subclass(
         m, "SyncOpTypeAttr",
         [](MlirAttribute a) { return mlirPTOAttrIsASyncOpTypeAttr(a); })
@@ -557,7 +626,23 @@ static void bindPTOModule(pybind11::module &m) {
           [](MlirAttribute self) -> int32_t {
             return mlirPTOEventAttrGetValue(self);
           });
+}
 
+static void bindPTOPrimaryAttrs(pybind11::module &m) {
+  bindPTOPrimaryAttrsPart1(m);
+  bindPTOPrimaryAttrsPart2(m);
+  bindPTOPrimaryAttrsPart3(m);
+  bindPTOPrimaryAttrsPart4(m);
+  bindPTOPrimaryAttrsPart5(m);
+  bindPTOPrimaryAttrsPart6(m);
+  bindPTOPrimaryAttrsPart7(m);
+  bindPTOPrimaryAttrsPart7Extra(m);
+  bindPTOPrimaryAttrsPart8(m);
+  bindPTOPrimaryAttrsPart9(m);
+}
+
+
+static void bindPTOExtraAttrsPart1(pybind11::module &m) {
     py::enum_<mlir::pto::QuantType>(m, "QuantType")
       .value("INT8_SYM",  mlir::pto::QuantType::INT8_SYM)
       .value("INT8_ASYM", mlir::pto::QuantType::INT8_ASYM)
@@ -588,6 +673,10 @@ static void bindPTOModule(pybind11::module &m) {
             return mlirPTOQuantTypeAttrGetValue(self);
           });
 
+}
+
+static void bindPTOExtraAttrsPart2(pybind11::module &m) {
+  py::object maskPatternEnumType = m.attr("MaskPattern");
     mlir_attribute_subclass(
         m, "MaskPatternAttr",
         [](MlirAttribute a) { return mlirPTOAttrIsAMaskPatternAttr(a); })
@@ -635,10 +724,15 @@ static void bindPTOModule(pybind11::module &m) {
           [](MlirAttribute self) -> int32_t {
             return mlirPTOMaskPatternAttrGetValue(self);
           });
+}
 
-    // --------------------------------------------------------------------------
-    // !pto.ptr<elem>
-    // --------------------------------------------------------------------------
+static void bindPTOExtraAttrs(pybind11::module &m) {
+  bindPTOExtraAttrsPart1(m);
+  bindPTOExtraAttrsPart2(m);
+}
+
+
+static void bindPTOTypesPart1(pybind11::module &m) {
     mlir_type_subclass(
         m, "PtrType",
         [](MlirType type) -> bool { return mlirPTOTypeIsAPtrType(type); })
@@ -671,6 +765,9 @@ static void bindPTOModule(pybind11::module &m) {
             },
             py::arg("cls"), py::arg("context") = py::none());
 
+}
+
+static void bindPTOTypesPart2(pybind11::module &m) {
     mlir_type_subclass(
         m, "AsyncEventType",
         [](MlirType type) -> bool { return mlirPTOTypeIsAAsyncEventType(type); })
@@ -695,6 +792,9 @@ static void bindPTOModule(pybind11::module &m) {
             },
             py::arg("cls"), py::arg("context") = py::none());
 
+}
+
+static void bindPTOTypesPart3(pybind11::module &m) {
     mlir_type_subclass(
         m, "HiF8Type",
         [](MlirType type) -> bool { return mlirPTOTypeIsAHiF8Type(type); })
@@ -717,6 +817,9 @@ static void bindPTOModule(pybind11::module &m) {
             },
             py::arg("cls"), py::arg("context") = py::none());
 
+}
+
+static void bindPTOTypesPart4(pybind11::module &m) {
     mlir_type_subclass(
         m, "F4E2M1x2Type",
         [](MlirType type) -> bool { return mlirPTOTypeIsAF4E2M1x2Type(type); })
@@ -740,7 +843,8 @@ static void bindPTOModule(pybind11::module &m) {
                 std::vector<int64_t> shp = toShapeVectorOrDynamicRank(shape_or_rank);
                 context = inferContextFromElementType(context, elementType);
                 MlirType t = mlirPTOTensorViewTypeGet(
-                    context, (intptr_t)shp.size(), shp.data(), elementType);
+                    context, static_cast<intptr_t>(shp.size()), shp.data(),
+                    elementType);
                 return cls.attr("__call__")(t);
             },
             py::arg("cls"), py::arg("shape_or_rank"), py::arg("element_type"),
@@ -763,6 +867,9 @@ static void bindPTOModule(pybind11::module &m) {
         // --------------------------------------------------------------------------
     // !pto.tile_view<shape x elem>
     // --------------------------------------------------------------------------
+}
+
+static void bindPartitionTensorViewType(pybind11::module &m) {
     mlir_type_subclass(
         m, "PartitionTensorViewType",
         [](MlirType t) -> bool { return mlirPTOTypeIsAPartitionTensorViewType(t); })
@@ -772,7 +879,7 @@ static void bindPTOModule(pybind11::module &m) {
         std::vector<int64_t> shp = toShapeVectorOrDynamicRank(shape_or_rank);
         context = inferContextFromElementType(context, elementType);
         MlirType t = mlirPTOPartitionTensorViewTypeGet(context,
-                                            (intptr_t)shp.size(),
+                                            static_cast<intptr_t>(shp.size()),
                                             shp.data(),
                                             elementType);
         return cls.attr("__call__")(t);
@@ -792,10 +899,9 @@ static void bindPTOModule(pybind11::module &m) {
         const int64_t *data = mlirPTOPartitionTensorViewTypeGetShape(self, &n);
         return shapeToPyList(data, n);
         });
+}
 
-    // --------------------------------------------------------------------------
-    // !pto.tile<shape x elem>
-    // --------------------------------------------------------------------------
+static void bindTileType(pybind11::module &m) {
     mlir_type_subclass(
         m, "TileType",
         [](MlirType t) -> bool { return mlirPTOTypeIsATileType(t); })
@@ -804,7 +910,7 @@ static void bindPTOModule(pybind11::module &m) {
         [](py::object cls, py::sequence shape, MlirType elementType, MlirContext context) -> py::object {
         auto shp = toInt64Vector(shape);
         MlirType t = mlirPTOTileTypeGet(context,
-                                        (intptr_t)shp.size(),
+                                        static_cast<intptr_t>(shp.size()),
                                         shp.data(),
                                         elementType);
         return cls.attr("__call__")(t);
@@ -824,8 +930,34 @@ static void bindPTOModule(pybind11::module &m) {
         const int64_t *data = mlirPTOTileTypeGetShape(self, &n);
         return shapeToPyList(data, n);
         });
+}
 
-    // ---- TileBufConfigAttr ----
+static void bindPTOTypesPart5(pybind11::module &m) {
+    // --------------------------------------------------------------------------
+    // !pto.tile_view<shape x elem>
+    // --------------------------------------------------------------------------
+  bindPartitionTensorViewType(m);
+
+    // --------------------------------------------------------------------------
+    // !pto.tile<shape x elem>
+    // --------------------------------------------------------------------------
+  bindTileType(m);
+}
+
+static void bindPTOTypes(pybind11::module &m) {
+
+    // --------------------------------------------------------------------------
+    // !pto.ptr<elem>
+    // --------------------------------------------------------------------------
+  bindPTOTypesPart1(m);
+  bindPTOTypesPart2(m);
+  bindPTOTypesPart3(m);
+  bindPTOTypesPart4(m);
+  bindPTOTypesPart5(m);
+}
+
+
+static void bindPTOTileBindingsPart1(pybind11::module &m) {
     mlir_attribute_subclass(m, "TileBufConfigAttr",
                             [](MlirAttribute a) -> bool {
                                 return mlirPTOAttrIsATileBufConfigAttr(a);
@@ -876,11 +1008,11 @@ static void bindPTOModule(pybind11::module &m) {
             py::arg("compact_mode") = py::none());
 
     // ---- TileBufType ----
-    mlir_type_subclass(m, "TileBufType",
-                        [](MlirType t) -> bool {
-                        return mlirPTOTypeIsATileBufType(t);
-                        })
-        .def_classmethod(
+}
+
+template <typename PyClassTy>
+static void addPTOTileBufTypeGet(PyClassTy &cls) {
+    cls.def_classmethod(
         "get",
         [](py::object cls,
             std::vector<int64_t> shape,
@@ -889,44 +1021,8 @@ static void bindPTOModule(pybind11::module &m) {
             py::object validShapeObj,
             py::object configObj,
             MlirContext ctx) -> py::object {
-            // 1) 计算 validShape（默认=shape）
-            std::vector<int64_t> validShape = shape;
-
-            if (!validShapeObj.is_none()) {
-            // 支持 valid_shape 为 list[int] 或 list[Optional[int]]
-            py::list lst = validShapeObj.cast<py::list>();
-            if ((size_t)lst.size() != shape.size()) {
-                throw std::runtime_error("valid_shape rank must match shape rank");
-            }
-            validShape.resize(lst.size());
-            for (py::ssize_t i = 0; i < static_cast<py::ssize_t>(lst.size()); ++i) {
-                py::object e = lst[i];
-                if (e.is_none()) {
-                validShape[i] = -1;  // None -> dynamic
-                } else {
-                validShape[i] = e.cast<int64_t>();
-                }
-            }
-            }
-
-            // 2) 调 CAPI
-            MlirType ty;
-            if (!configObj.is_none()) {
-            MlirAttribute cfg = configObj.cast<MlirAttribute>();
-            ty = mlirPTOTileBufTypeGetWithValidShapeAndConfig(
-                ctx,
-                (intptr_t)shape.size(), shape.data(),
-                elementType, memorySpace,
-                (intptr_t)validShape.size(), validShape.data(),
-                cfg);
-            } else {
-            ty = mlirPTOTileBufTypeGetWithValidShape(
-                ctx,
-                (intptr_t)shape.size(), shape.data(),
-                elementType, memorySpace,
-                (intptr_t)validShape.size(), validShape.data());
-            }
-
+            MlirType ty = createTileBufTypeValue(shape, elementType, memorySpace,
+                                                 validShapeObj, configObj, ctx);
             if (mlirTypeIsNull(ty)) return py::none();
             return cls(ty);
         },
@@ -936,17 +1032,59 @@ static void bindPTOModule(pybind11::module &m) {
         py::arg("memory_space"),
         py::arg("valid_shape") = py::none(),
         py::arg("config") = py::none(),
-        py::arg("context") = py::none())
-        .def_classmethod(
+        py::arg("context") = py::none());
+}
+
+template <typename PyClassTy>
+static void addPTOTileBufTypeUtilities(PyClassTy &cls) {
+    cls.def_classmethod(
             "upcast_type",
             [](py::object cls, MlirType t) -> py::object {
                 if (mlirPTOTypeIsATileBufType(t)) return cls(t);
                 return py::none();
             },
             py::arg("cls"), py::arg("type"));
-	
-	populatePTODialectSubmodule(m);
 }
+
+static void bindPTOTileBindingsPart2(pybind11::module &m) {
+  auto tileBufType = mlir_type_subclass(m, "TileBufType",
+                        [](MlirType t) -> bool {
+                        return mlirPTOTypeIsATileBufType(t);
+                        });
+  addPTOTileBufTypeGet(tileBufType);
+  addPTOTileBufTypeUtilities(tileBufType);
+}
+
+static void bindPTOTileBindings(pybind11::module &m) {
+  bindPTOTileBindingsPart1(m);
+  bindPTOTileBindingsPart2(m);
+}
+
+
+static void bindPTOModule(pybind11::module &m) {
+    m.doc() = "PTO dialect Python bindings (pybind11).";
+
+    // --------------------------------------------------------------------------
+    // Dialect registration helper
+    // --------------------------------------------------------------------------
+    m.def(
+        "register_dialect",
+        [](MlirContext context, bool load) {
+            MlirDialectHandle handle = mlirGetDialectHandle__pto__();
+            mlirDialectHandleRegisterDialect(handle, context);
+            if (load)
+            mlirDialectHandleLoadDialect(handle, context);
+        },
+        py::arg("context"), py::arg("load") = true);
+
+    bindPTOEnums(m);
+    bindPTOPrimaryAttrs(m);
+    bindPTOExtraAttrs(m);
+    bindPTOTypes(m);
+    bindPTOTileBindings(m);
+    populatePTODialectSubmodule(m);
+}
+
 
 PYBIND11_MODULE(_pto, m) {
   bindPTOModule(m);

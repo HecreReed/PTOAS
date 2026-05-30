@@ -27,8 +27,8 @@ int ConflictPair::globalIdCounter = 0;
 int EventIdNode::globalIdCounter = 0;
 
 bool Occurrence::sameScope(Occurrence *occ1, Occurrence *occ2) {
-  assert(occ1 != nullptr && occ1->parentOcc != nullptr);
-  assert(occ2 != nullptr && occ2->parentOcc != nullptr);
+  ASSERT(occ1 != nullptr && occ1->parentOcc != nullptr);
+  ASSERT(occ2 != nullptr && occ2->parentOcc != nullptr);
   return occ1->parentOcc == occ2->parentOcc;
 }
 
@@ -42,7 +42,7 @@ int Occurrence::getDepth(Occurrence *occ) {
 }
 
 Occurrence *Occurrence::getParentWithOp(OperationBase *op, bool assertExists) {
-  assert(op != nullptr);
+  ASSERT(op != nullptr);
   Occurrence *occ = this;
   while (occ != nullptr) {
     if (occ->op == op) {
@@ -50,12 +50,12 @@ Occurrence *Occurrence::getParentWithOp(OperationBase *op, bool assertExists) {
     }
     occ = occ->parentOcc;
   }
-  assert(!assertExists);
+  ASSERT(!assertExists);
   return nullptr;
 }
 
 Occurrence *Occurrence::getParentWithOp(Operation *op, bool assertExists) {
-  assert(op != nullptr);
+  ASSERT(op != nullptr);
   Occurrence *occ = this;
   while (occ != nullptr) {
     if (occ->op != nullptr && occ->op->op == op) {
@@ -63,23 +63,23 @@ Occurrence *Occurrence::getParentWithOp(Operation *op, bool assertExists) {
     }
     occ = occ->parentOcc;
   }
-  assert(!assertExists);
+  ASSERT(!assertExists);
   return nullptr;
 }
 
 Occurrence *Occurrence::getNthParent(int dist) {
   Occurrence *occ = this;
   while (dist--) {
-    assert(occ != nullptr);
+    ASSERT(occ != nullptr);
     occ = occ->parentOcc;
   }
-  assert(occ != nullptr);
+  ASSERT(occ != nullptr);
   return occ;
 }
 
 std::pair<Occurrence *, Occurrence *> Occurrence::getLCAPair(Occurrence *occ1,
                                                              Occurrence *occ2) {
-  assert(occ1 != nullptr && occ2 != nullptr);
+  ASSERT(occ1 != nullptr && occ2 != nullptr);
   int depth1 = getDepth(occ1);
   int depth2 = getDepth(occ2);
   if (depth1 < depth2) {
@@ -91,12 +91,12 @@ std::pair<Occurrence *, Occurrence *> Occurrence::getLCAPair(Occurrence *occ1,
     occ1 = occ1->parentOcc;
     occ2 = occ2->parentOcc;
   }
-  assert(occ1 != occ2);
+  ASSERT(occ1 != occ2);
   return std::make_pair(occ1, occ2);
 }
 
 Occurrence *Occurrence::getParentloop(Occurrence *occ) {
-  assert(occ != nullptr);
+  ASSERT(occ != nullptr);
   Occurrence *cur = occ->parentOcc;
   while (cur != nullptr && !isa<Loop>(cur->op)) {
     cur = cur->parentOcc;
@@ -105,7 +105,7 @@ Occurrence *Occurrence::getParentloop(Occurrence *occ) {
 }
 
 Occurrence *Occurrence::getParentCondition(Occurrence *occ) {
-  assert(occ != nullptr);
+  ASSERT(occ != nullptr);
   Occurrence *cur = occ->parentOcc;
   while (cur != nullptr && !isa<Condition>(cur->op)) {
     cur = cur->parentOcc;
@@ -114,7 +114,7 @@ Occurrence *Occurrence::getParentCondition(Occurrence *occ) {
 }
 
 Occurrence *Occurrence::getUnlikelyParentCondition(Occurrence *occ) {
-  assert(occ != nullptr && occ->op != nullptr);
+  ASSERT(occ != nullptr && occ->op != nullptr);
   if (auto *parentConditionOp =
           OperationBase::getUnlikelyParentCondition(occ->op)) {
     return occ->getParentWithOp(parentConditionOp, /*assertExists=*/true);
@@ -123,7 +123,7 @@ Occurrence *Occurrence::getUnlikelyParentCondition(Occurrence *occ) {
 }
 
 bool Occurrence::isProperAncestor(Occurrence *occ) {
-  assert(occ != nullptr);
+  ASSERT(occ != nullptr);
   int depth1 = getDepth(this);
   int depth2 = getDepth(occ);
   if (depth1 >= depth2) {
@@ -153,8 +153,8 @@ llvm::SmallVector<OperationBase *> OperationBase::getAllParents() {
 }
 
 bool OperationBase::sameScope(OperationBase *op1, OperationBase *op2) {
-  assert(op1->parentOp != nullptr);
-  assert(op2->parentOp != nullptr);
+  ASSERT(op1->parentOp != nullptr);
+  ASSERT(op2->parentOp != nullptr);
   return op1->parentOp == op2->parentOp;
 }
 
@@ -171,7 +171,7 @@ int OperationBase::getDepth() const {
 OperationBase *OperationBase::getNthParent(int dist) {
   OperationBase *op = this;
   while (dist--) {
-    assert(op != nullptr);
+    ASSERT(op != nullptr);
     op = op->parentOp;
   }
   return op;
@@ -179,7 +179,7 @@ OperationBase *OperationBase::getNthParent(int dist) {
 
 std::pair<OperationBase *, OperationBase *>
 OperationBase::getLCAPair(OperationBase *op1, OperationBase *op2) {
-  assert(op1 != nullptr && op2 != nullptr);
+  ASSERT(op1 != nullptr && op2 != nullptr);
   int depth1 = op1->getDepth();
   int depth2 = op2->getDepth();
   if (depth1 < depth2) {
@@ -191,13 +191,13 @@ OperationBase::getLCAPair(OperationBase *op1, OperationBase *op2) {
     op1 = op1->parentOp;
     op2 = op2->parentOp;
   }
-  assert(op1 != nullptr && op2 != nullptr);
-  assert(op1->parentOp == op2->parentOp);
+  ASSERT(op1 != nullptr && op2 != nullptr);
+  ASSERT(op1->parentOp == op2->parentOp);
   return std::make_pair(op1, op2);
 }
 
 OperationBase *OperationBase::getParentloop(OperationBase *op) {
-  assert(op != nullptr);
+  ASSERT(op != nullptr);
   OperationBase *cur = op->parentOp;
   while (cur != nullptr && !isa<Loop>(cur)) {
     cur = cur->parentOp;
@@ -206,7 +206,7 @@ OperationBase *OperationBase::getParentloop(OperationBase *op) {
 }
 
 OperationBase *OperationBase::getParentCondition(OperationBase *op) {
-  assert(op != nullptr);
+  ASSERT(op != nullptr);
   OperationBase *cur = op->parentOp;
   while (cur != nullptr && !isa<Condition>(cur)) {
     cur = cur->parentOp;
@@ -215,7 +215,7 @@ OperationBase *OperationBase::getParentCondition(OperationBase *op) {
 }
 
 bool OperationBase::isProperAncestor(OperationBase *op) {
-  assert(op != nullptr);
+  ASSERT(op != nullptr);
   int depth1 = this->getDepth();
   int depth2 = op->getDepth();
   if (depth1 >= depth2) {
@@ -225,11 +225,11 @@ bool OperationBase::isProperAncestor(OperationBase *op) {
 }
 
 OperationBase *OperationBase::getUnlikelyParentCondition(OperationBase *op) {
-  assert(op != nullptr);
+  ASSERT(op != nullptr);
   auto *cur = OperationBase::getParentCondition(op);
   while (cur != nullptr) {
     auto *conditionOp = dyn_cast<Condition>(cur);
-    assert(conditionOp != nullptr);
+    ASSERT(conditionOp != nullptr);
     if (conditionOp->isUnlikely &&
         conditionOp->getTrueScope()->isProperAncestor(op)) {
       return cur;
@@ -248,7 +248,7 @@ bool checkRangesIntersect(int l1, int r1, int l2, int r2) {
 
 // Return explicit integer ranges covered by a conflict pair (barrier -> empty).
 std::vector<std::pair<int, int>> getRanges(ConflictPair *conflictPair) {
-  assert(conflictPair != nullptr);
+  ASSERT(conflictPair != nullptr);
   if (conflictPair->isBarrier()) {
     return {};
   }
@@ -269,7 +269,7 @@ int64_t getHWAvailableEventIdNum(SyncMode syncMode, pto::PIPE setPipe,
         {{pto::PIPE::PIPE_M, pto::PIPE::PIPE_FIX}, 1},
         {{pto::PIPE::PIPE_FIX, pto::PIPE::PIPE_M}, 1},
     };
-    int64_t eventIdNum = INTRA_CORE_EVENT_ID_NUM;
+    int64_t eventIdNum = kIntraCoreEventIdNum;
     eventIdNum -= reservedIntraCoreEventIdNum;
     auto it = reservedEventIdNum.find({setPipe, waitPipe});
     if (it != reservedEventIdNum.end()) {
@@ -277,14 +277,14 @@ int64_t getHWAvailableEventIdNum(SyncMode syncMode, pto::PIPE setPipe,
     }
     return eventIdNum;
   } else if (syncMode == SyncMode::CROSS_CORE_SYNC) {
-    int64_t eventIdNum = CROSS_CORE_EVENT_ID_NUM;
+    int64_t eventIdNum = kCrossCoreEventIdNum;
     eventIdNum -= reservedCrossCoreEventIdNum;
     return eventIdNum;
   } else if (syncMode == SyncMode::TEST_INTRA_CORE_MODE) {
-    int64_t eventIdNum = TEST_INTRA_CORE_EVENT_ID_NUM;
+    int64_t eventIdNum = kTestIntraCoreEventIdNum;
     return eventIdNum;
   } else if (syncMode == SyncMode::TEST_CROSS_CORE_MODE) {
-    int64_t eventIdNum = TEST_CROSS_CORE_EVENT_ID_NUM;
+    int64_t eventIdNum = kTestCrossCoreEventIdNum;
     return eventIdNum;
   }
   llvm_unreachable("getHWAvailableEventIdNum: unhandled SyncMode");
@@ -300,7 +300,7 @@ SmallVector<int64_t> getHWAvailableEventIds(SyncMode syncMode,
         {{pto::PIPE::PIPE_M, pto::PIPE::PIPE_FIX}, 1},
         {{pto::PIPE::PIPE_FIX, pto::PIPE::PIPE_M}, 1},
     };
-    int64_t eventIdNum = INTRA_CORE_EVENT_ID_NUM;
+    int64_t eventIdNum = kIntraCoreEventIdNum;
     eventIdNum -= reservedIntraCoreEventIdNum;
     auto it = reservedEventIdNum.find({setPipe, waitPipe});
     if (it != reservedEventIdNum.end()) {
@@ -311,20 +311,20 @@ SmallVector<int64_t> getHWAvailableEventIds(SyncMode syncMode,
               static_cast<int64_t>(0));
     return hwAvailableEventIds;
   } else if (syncMode == SyncMode::CROSS_CORE_SYNC) {
-    int64_t eventIdNum = CROSS_CORE_EVENT_ID_NUM;
+    int64_t eventIdNum = kCrossCoreEventIdNum;
     eventIdNum -= reservedCrossCoreEventIdNum;
     SmallVector<int64_t> hwAvailableEventIds(eventIdNum);
     std::iota(hwAvailableEventIds.begin(), hwAvailableEventIds.end(),
               static_cast<int64_t>(0));
     return hwAvailableEventIds;
   } else if (syncMode == SyncMode::TEST_INTRA_CORE_MODE) {
-    int64_t eventIdNum = TEST_INTRA_CORE_EVENT_ID_NUM;
+    int64_t eventIdNum = kTestIntraCoreEventIdNum;
     SmallVector<int64_t> availableEventIds(eventIdNum);
     std::iota(availableEventIds.begin(), availableEventIds.end(),
               static_cast<int64_t>(0));
     return availableEventIds;
   } else if (syncMode == SyncMode::TEST_CROSS_CORE_MODE) {
-    int64_t eventIdNum = TEST_CROSS_CORE_EVENT_ID_NUM;
+    int64_t eventIdNum = kTestCrossCoreEventIdNum;
     SmallVector<int64_t> availableEventIds(eventIdNum);
     std::iota(availableEventIds.begin(), availableEventIds.end(),
               static_cast<int64_t>(0));
@@ -391,7 +391,7 @@ bool checkAllParentLoopsAreForLoops(Operation *op) {
 }
 
 Value getValueOrCreateCastToI64(IRRewriter &rewriter, Location loc, Value val) {
-  assert(isa<OpResult>(val));
+  ASSERT(isa<OpResult>(val));
   OpBuilder::InsertionGuard guard(rewriter);
   rewriter.setInsertionPointAfterValue(val);
   if (!val.getType().isInteger(64)) {

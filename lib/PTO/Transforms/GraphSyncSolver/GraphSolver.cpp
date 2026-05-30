@@ -23,11 +23,65 @@
 using namespace mlir;
 using namespace pto::syncsolver;
 
+using UnitDistKey = std::tuple<int, int, CorePipeInfo>;
+using UnitDistMap = llvm::DenseMap<UnitDistKey, int>;
+using UnitQueueItem = std::pair<int, UnitDistKey>;
+using UnitPriorityQueue =
+    std::priority_queue<UnitQueueItem, std::vector<UnitQueueItem>,
+                        std::greater<UnitQueueItem>>;
+
+static bool hasBetterDistance(const UnitDistMap &distance,
+                              const UnitDistKey &distKey, int curIndex) {
+  return distance.count(distKey) && distance.lookup(distKey) < curIndex;
+}
+
+static bool exceededSearchBound(const UnitDistMap &distance,
+                                const UnitDistKey &distKey, int endIndex) {
+  return distance.count(distKey) && distance.lookup(distKey) > endIndex;
+}
+
+static bool reachedUnitFlagDestination(CorePipeInfo curCorePipe,
+                                       pto::TCoreType coreDst, int startIndex,
+                                       int curIndex) {
+  auto [curCore, curPipe] = curCorePipe;
+  return curCore == coreDst &&
+         ((curIndex != startIndex && curPipe == pto::PIPE::PIPE_S) ||
+          curPipe == pto::PIPE::PIPE_ALL);
+}
+
+static void relaxUnitFlagEdge(const GraphSolver::Edge &edge,
+                              const Occurrence *occ2, UnitDistMap &distance,
+                              UnitPriorityQueue &que) {
+  ASSERT(edge.conflictPair != nullptr);
+  UnitDistKey nxtKey(edge.isUnitFlag, edge.conflictPair->waitOcc == occ2,
+                     edge.corePipeDst);
+  auto it = distance.find(nxtKey);
+  if (it == distance.end() || it->second > edge.endIndex) {
+    distance[nxtKey] = edge.endIndex;
+    que.emplace(edge.endIndex, nxtKey);
+  }
+}
+
+static std::optional<int> collectUnitFlagResult(const UnitDistMap &distance,
+                                                CorePipeInfo corePipeDst) {
+  std::optional<int> retDist;
+  for (const UnitDistKey &key :
+       {UnitDistKey(false, false, corePipeDst), UnitDistKey(false, true, corePipeDst),
+        UnitDistKey(true, true, corePipeDst)}) {
+    auto it = distance.find(key);
+    if (it == distance.end())
+      continue;
+    retDist = retDist.has_value() ? std::min(retDist.value(), it->second)
+                                  : it->second;
+  }
+  return retDist;
+}
+
 // Compare edges (used for ordered sets). Edges must share endpoints when
 // compared.
 bool GraphSolver::Edge::operator<(const Edge &other) const {
-  assert(corePipeSrc == other.corePipeSrc);
-  assert(corePipeDst == other.corePipeDst);
+  ASSERT(corePipeSrc == other.corePipeSrc);
+  ASSERT(corePipeDst == other.corePipeDst);
   if (startIndex != other.startIndex) {
     return startIndex < other.startIndex;
   }
@@ -46,7 +100,7 @@ void GraphSolver::addPair(ConflictPair *conflictPair, CorePipeInfo corePipeSrc,
 // Convert a ConflictPair into adjacency edges (handles PIPE_ALL
 // special-casing).
 void GraphSolver::addConflictPair(ConflictPair *conflictPair) {
-  assert(conflictPair != nullptr);
+  ASSERT(conflictPair != nullptr);
   DEBUG_WITH_TYPE("gss-graph-solver-add-conflict-pair", {
     llvm::dbgs() << "add-conflict-pair:\n";
     llvm::dbgs() << conflictPair->str() << '\n';
@@ -69,7 +123,7 @@ void GraphSolver::addConflictPair(ConflictPair *conflictPair) {
         auto waitPipe = pto::PIPE::PIPE_ALL;
         int startIndex = conflictPair->startIndex;
         int endIndex = conflictPair->endIndex;
-        assert(startIndex == endIndex);
+        ASSERT(startIndex == endIndex);
         addPair(conflictPair, CorePipeInfo(srcCore, setPipe),
                 CorePipeInfo(dstCore, waitPipe), startIndex, endIndex);
       }
@@ -171,17 +225,11 @@ std::optional<int> GraphSolver::runDijkstra(CorePipeInfo corePipeSrc,
 }
 
 std::optional<int> GraphSolver::runDijkstraUnitFlagEnabled(
-    Occurrence *occ1, Occurrence *occ2, CorePipeInfo corePipeSrc,
+    const Occurrence *occ1, const Occurrence *occ2, CorePipeInfo corePipeSrc,
     CorePipeInfo corePipeDst, int startIndex, int endIndex) {
-  // (is-unit-flag, last-node-is-occ-dst, core-pipe-info)
-  using DistKey = std::tuple<int, int, CorePipeInfo>;
-
-  llvm::DenseMap<DistKey, int> distance;
-  std::priority_queue<std::pair<int, DistKey>,
-                      std::vector<std::pair<int, DistKey>>,
-                      std::greater<std::pair<int, DistKey>>>
-      que;
-  que.emplace(startIndex, DistKey(false, false, corePipeSrc));
+  UnitDistMap distance;
+  UnitPriorityQueue que;
+  que.emplace(startIndex, UnitDistKey(false, false, corePipeSrc));
   auto [coreDst, pipeDst] = corePipeDst;
   LLVM_DEBUG(llvm::dbgs() << "dij-start-end-indices: " << startIndex << ' '
                           << endIndex << '\n');
@@ -189,63 +237,33 @@ std::optional<int> GraphSolver::runDijkstraUnitFlagEnabled(
   while (!que.empty()) {
     auto [curIndex, curDistKey] = que.top();
     auto [curIsUnitFlag, curIsOccDst, curCorePipe] = curDistKey;
-    auto [curCore, curPipe] = curCorePipe;
     que.pop();
 
-    LLVM_DEBUG(llvm::dbgs() << "dij-step: " << curCore << ' ' << curPipe << ' '
-                            << curIsUnitFlag << ' ' << curIsOccDst << ' '
-                            << curIndex << '\n');
-
-    if (distance.count(curDistKey) && distance[curDistKey] < curIndex) {
+    auto [curCore, curPipe] = curCorePipe;
+    LLVM_DEBUG(llvm::dbgs() << "dij-step: " << curCore << ' ' << curPipe
+                            << ' ' << curIsUnitFlag << ' ' << curIsOccDst
+                            << ' ' << curIndex << '\n');
+    if (hasBetterDistance(distance, curDistKey, curIndex))
       continue;
-    }
-
-    if (distance.count(curDistKey) && distance[curDistKey] > endIndex) {
+    if (exceededSearchBound(distance, curDistKey, endIndex))
+      break;
+    if (reachedUnitFlagDestination(curCorePipe, coreDst, startIndex,
+                                   curIndex)) {
+      distance[UnitDistKey(false, false, corePipeDst)] = curIndex;
       break;
     }
-
-    if (curCore == coreDst &&
-        ((curIndex != startIndex && curPipe == pto::PIPE::PIPE_S) ||
-         curPipe == pto::PIPE::PIPE_ALL)) {
-      distance[DistKey(false, false, corePipeDst)] = curIndex;
-      break;
-    }
-
     for (auto &[endCorePipe, edges] : adjacencyList[curCorePipe]) {
       auto it = edges.lower_bound(Edge(curCorePipe, endCorePipe, curIndex, -1));
-      for (; it != edges.end(); it++) {
-        auto &edge = *it;
-        if (edge.isUnitFlag) {
-          if (curIndex == startIndex && edge.startIndex != startIndex) {
-            continue;
-          }
-        }
-        assert(edge.conflictPair != nullptr);
-        DistKey nxtKey(edge.isUnitFlag, (edge.conflictPair->waitOcc == occ2),
-                       endCorePipe);
-        if (!distance.count(nxtKey) || (distance[nxtKey] > edge.endIndex)) {
-          distance[nxtKey] = edge.endIndex;
-          que.emplace(edge.endIndex, nxtKey);
-        }
+      for (; it != edges.end(); ++it) {
+        const auto &edge = *it;
+        if (edge.isUnitFlag &&
+            curIndex == startIndex && edge.startIndex != startIndex)
+          continue;
+        relaxUnitFlagEdge(edge, occ2, distance, que);
       }
     }
   }
-
-  std::optional<int> retDist;
-  if (auto it = distance.find(DistKey(false, false, corePipeDst));
-      it != distance.end()) {
-    retDist = retDist.has_value() ? std::min(retDist.value(), it->second)
-                                  : it->second;
-  }
-  if (auto it = distance.find(DistKey(false, true, corePipeDst));
-      it != distance.end()) {
-    retDist = retDist.has_value() ? std::min(retDist.value(), it->second)
-                                  : it->second;
-  }
-  if (auto it = distance.find(DistKey(true, true, corePipeDst));
-      it != distance.end()) {
-    retDist = retDist.has_value() ? std::min(retDist.value(), it->second)
-                                  : it->second;
-  }
-  return retDist;
+  (void)occ1;
+  (void)pipeDst;
+  return collectUnitFlagResult(distance, corePipeDst);
 }

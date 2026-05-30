@@ -33,6 +33,10 @@ namespace mlir::pto {
 namespace {
 
 enum class Role { A, B, C, Unknown };
+constexpr unsigned kInlineCapacity5 = 5;
+
+template <typename T>
+using SmallVec5 = SmallVector<T, kInlineCapacity5>;
 
 template <typename MatmulLikeOp>
 static std::optional<Role> inferMatmulLikeSubviewRole(MatmulLikeOp op,
@@ -94,10 +98,10 @@ struct SubviewToEmitCPattern : public OpConversionPattern<memref::SubViewOp> {
   };
 
   struct SubviewStrideShapeInfo {
-    SmallVector<int64_t, 5> finalShape;
-    SmallVector<int64_t, 5> finalStride;
-    SmallVector<Value, 5> finalShapeValues;
-    SmallVector<Value, 5> finalStrideValues;
+    SmallVec5<int64_t> finalShape;
+    SmallVec5<int64_t> finalStride;
+    SmallVec5<Value> finalShapeValues;
+    SmallVec5<Value> finalStrideValues;
   };
 
   struct SubviewTemplateStrideInfo {

@@ -23,7 +23,6 @@
 
 namespace mlir {
 namespace pto {
-
 // Value comparator for std::map
 inline bool isLessValue(const Value &a, const Value &b) {
   return a.getImpl() < b.getImpl();
@@ -38,13 +37,13 @@ struct ValueComparator {
 using StableValueOrderMap = DenseMap<Value, uint32_t>;
 
 /// Various states when collecting gen-kill.
-enum BufferStatus { UNDEFFINED = 0, DEFFINED, GENED, KILLED };
+enum class BufferStatus { UNDEFFINED = 0, DEFFINED, GENED, KILLED };
 
 /// Pair of inplace Value.
 using ValuePair = std::pair<Value, Value>;
 
 /// Result status after plan memory.
-enum PlanStatus {
+enum class PlanStatus {
   PLAN_SUCCESS = 0,
   RESTART_NEW_PLAN,
   CONTINUE_PLAN,
@@ -74,9 +73,9 @@ struct BufferInfo {
   /// The type of element in the buffer.
   Type bufferType;
   /// Alias buffer does not participate in inplace.
-  /// e.g :
+  /// e.g
   ///  alloc A
-  ///  for(arg = A) :
+  ///  for(arg = A)
   ///    alloc B
   ///    ...
   ///    alloc C
@@ -296,6 +295,30 @@ public:
 
 private:
   void RecursionIR(Region *region, Liveness live);
+
+  std::optional<WalkResult> HandleRecursiveControlFlow(Operation *op,
+                                                       Liveness live);
+
+  bool HandleAliasOnlyOp(Operation *op);
+
+  bool HandleMetadataOnlyOp(Operation *op, OpInfo *curOpInfo, Liveness live);
+
+  bool HandleGenericStoreOp(Operation *op, OpInfo *curOpInfo, Liveness live);
+
+  bool HandleGenericPtoDpsInitOp(Operation *op, OpInfo *curOpInfo,
+                                 Liveness live);
+
+  bool HandleGenericDestinationStyleOp(Operation *op, OpInfo *curOpInfo,
+                                       Liveness live);
+
+  bool HandleGenericAliasOrCallOp(Operation *op, OpInfo *curOpInfo,
+                                  Liveness live);
+
+  bool HandleKnownBufferTouchingGroup(Operation *op, OpInfo *curOpInfo,
+                                      Liveness live);
+
+  bool HandleGenericBufferTouchingOp(Operation *op, OpInfo *curOpInfo,
+                                     Liveness live);
 
   /// Get the buffer used within the loop and defined outside the loop.
   SmallVector<Value> GetLiveBuffersInLoop(scf::ForOp forOp, Liveness live);
@@ -578,8 +601,8 @@ private:
                                 const SpecInfo &si) const;
 
   /// spec_level == SPEC_LEVEL_0, life time reuse.
-  inline bool VerifyConflictStage0(StorageEntry *e,
-                                   const std::shared_ptr<MemoryBound> &last);
+  bool VerifyConflictStage0(StorageEntry *e,
+                            const std::shared_ptr<MemoryBound> &last);
 
   /// Update the outline information and record history
   void UpdateOutline(MemBoundList &outline, PlanRecHis &his, StorageEntry *e,
@@ -779,7 +802,6 @@ private:
 
   /// The device's SCALING storage size
   int scalingSpaceSize{0};
-
 };
 } // namespace pto
 } // namespace mlir

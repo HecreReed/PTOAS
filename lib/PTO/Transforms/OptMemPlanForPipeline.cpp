@@ -61,7 +61,7 @@ bool OptMemPlanForDma::BufferPipeConflict(const Value buf1,
   }
 
   if (IsDmaBuffer(buf1) || IsDmaBuffer(buf2)) {
-    // Process the operation of ForOp as follows:
+    // Process the operation of ForOp as follows
     // scf.for %arg4 = %c0 to %c1024 step %c128 ->
     //   alloca %allocA
     //   gm2ub(allocA, gm)

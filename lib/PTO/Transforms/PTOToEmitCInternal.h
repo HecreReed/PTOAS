@@ -83,7 +83,7 @@ std::string getTileBufCompactToken(pto::TileBufConfigAttr configAttr);
 Value castAddressToU64(ConversionPatternRewriter &rewriter, Location loc,
                        Value value);
 
-const char *addrSpaceQualifier(pto::AddressSpace as);
+llvm::StringRef addrSpaceQualifier(pto::AddressSpace as);
 
 bool tileDataReturnsIntegralAddress(pto::AddressSpace as);
 

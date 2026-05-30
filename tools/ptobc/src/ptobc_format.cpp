@@ -6,14 +6,13 @@
 // INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
 // See LICENSE in the root of the software repository for the full text of the License.
 
-// Please refer to the License for details. You may not use this file except in compliance with the License.
-// THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
-// INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
-// See LICENSE in the root of the software repository for the full text of the License.
-
 #include "ptobc/ptobc_format.h"
 
 #include "ptobc/leb128.h"
+
+#include "llvm/ADT/SmallString.h"
+#include "llvm/Support/FileSystem.h"
+#include "llvm/Support/Path.h"
 
 #include <cstring>
 #include <fstream>
@@ -29,10 +28,19 @@ constexpr unsigned kU32ThirdByteShift = 2 * kBitsPerByte;
 constexpr unsigned kU32FourthByteShift = 3 * kBitsPerByte;
 constexpr char kPTOBCMagic[] = {'P', 'T', 'O', 'B', 'C', '\0'};
 constexpr size_t kPTOBCMagicSize = sizeof(kPTOBCMagic);
+
+std::string normalizeFilePath(const std::string &path) {
+  llvm::SmallString<256> normalizedPath(path);
+  if (std::error_code ec = llvm::sys::fs::make_absolute(normalizedPath)) {
+    throw std::runtime_error("Failed to normalize path: " + path);
+  }
+  llvm::sys::path::remove_dots(normalizedPath, /*remove_dot_dot=*/true);
+  return std::string(normalizedPath.str());
+}
 } // namespace
 
 void Buffer::append(const void* p, size_t n) {
-  const uint8_t* b = reinterpret_cast<const uint8_t*>(p);
+  const uint8_t* b = static_cast<const uint8_t*>(p);
   bytes.insert(bytes.end(), b, b + n);
 }
 
@@ -196,16 +204,22 @@ std::vector<uint8_t> PTOBCFile::serialize() const {
 }
 
 std::vector<uint8_t> readFile(const std::string& path) {
-  std::ifstream ifs(path, std::ios::binary);
-  if (!ifs) throw std::runtime_error("Failed to open: " + path);
+  std::string normalized = normalizeFilePath(path);
+  std::ifstream ifs(normalized, std::ios::binary);
+  if (!ifs)
+    throw std::runtime_error("Failed to open: " + normalized);
   std::vector<uint8_t> buf((std::istreambuf_iterator<char>(ifs)), std::istreambuf_iterator<char>());
   return buf;
 }
 
 void writeFile(const std::string& path, const std::vector<uint8_t>& data) {
-  std::ofstream ofs(path, std::ios::binary);
-  if (!ofs) throw std::runtime_error("Failed to write: " + path);
-  ofs.write(reinterpret_cast<const char*>(data.data()), data.size());
+  std::string normalized = normalizeFilePath(path);
+  std::ofstream ofs(normalized, std::ios::binary);
+  if (!ofs)
+    throw std::runtime_error("Failed to write: " + normalized);
+  const void *rawData = static_cast<const void *>(data.data());
+  ofs.write(static_cast<const char *>(rawData),
+            static_cast<std::streamsize>(data.size()));
 }
 
 } // namespace ptobc

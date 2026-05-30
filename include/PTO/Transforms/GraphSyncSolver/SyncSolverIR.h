@@ -22,7 +22,6 @@
 #include <utility>
 
 namespace mlir::pto::syncsolver {
-
 #ifndef ASSERT
 #ifndef NDEBUG
 #define ASSERT(condition) assert(condition)
@@ -37,7 +36,7 @@ namespace mlir::pto::syncsolver {
 class UnitFlagInfoBase {
 public:
   virtual ~UnitFlagInfoBase() = default;
-  void reset() {}
+  virtual void reset() {}
   void merge(const UnitFlagInfoBase &, bool = true, bool = true) {}
   bool disabledAsSet() const { return true; }
   bool disabledAsWait() const { return true; }
@@ -59,8 +58,8 @@ using Body = std::vector<std::unique_ptr<OperationBase>>;
 
 // Currently gss-code-gen will handle offsetting induction variables for
 // multibuffer-enabled sync pairs, which can be done by create-preload.
-// TODO: move create-preload pass after gss in the PTO compilation pipeline and
-// let it handle preload-offset values.
+// A later pipeline cleanup can move create-preload after gss in the PTO
+// compilation pipeline and let it handle preload-offset values.
 struct EventIdInfo {
   int64_t eventIdNum{0};
   int64_t eventIdRepeatNum{1};
@@ -102,7 +101,6 @@ enum struct OpType {
 std::string getOpTypeStr(OpType opType);
 
 class OperationBase {
-
 public:
   int id{-1};
   const OpType opType;
@@ -183,7 +181,6 @@ public:
 };
 
 class Scope : public OperationBase {
-
 public:
   Body body;
   std::optional<int64_t> preloadNum;
@@ -220,7 +217,6 @@ public:
 };
 
 class Loop : public Scope {
-
 private:
 public:
   bool isParallel{false};
@@ -249,7 +245,6 @@ public:
 };
 
 class Condition : public Scope {
-
 private:
 public:
   Scope *trueScope{nullptr};
@@ -452,7 +447,6 @@ public:
 };
 
 class SetFlagOp : public SetWaitOp {
-
 private:
 public:
   SetFlagOp(Operation *op, OperationBase *parentOp,
@@ -474,7 +468,6 @@ public:
 };
 
 class WaitFlagOp : public SetWaitOp {
-
 private:
 public:
   WaitFlagOp(Operation *op, OperationBase *parentOp,
@@ -496,7 +489,6 @@ public:
 };
 
 class BarrierOp : public SyncOp {
-
 public:
   pto::PIPE pipe{pto::PIPE::PIPE_UNASSIGNED};
 

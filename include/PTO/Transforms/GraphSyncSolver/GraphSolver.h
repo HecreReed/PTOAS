@@ -69,8 +69,8 @@ public:
                                  CorePipeInfo corePipeDst, int startIndex,
                                  int endIndex);
 
-  std::optional<int> runDijkstraUnitFlagEnabled(Occurrence *occ1,
-                                                Occurrence *occ2,
+  std::optional<int> runDijkstraUnitFlagEnabled(const Occurrence *occ1,
+                                                const Occurrence *occ2,
                                                 CorePipeInfo corePipeSrc,
                                                 CorePipeInfo corePipeDst,
                                                 int startIndex, int endIndex);
