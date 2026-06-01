@@ -141,7 +141,7 @@ static LogicalResult verifyTRowExpandAddSrc1Shape(Operation *op, Type src1Ty,
 }
 
 mlir::LogicalResult mlir::pto::TRowExpandDivOp::verify() {
-  auto verifyByArch = [&](PTOArch targetArch) -> LogicalResult {
+  auto verifyByArch = [this](PTOArch targetArch) -> LogicalResult {
     return verifyTRowExpandBinaryLikeOp(
         *this, getSrc0().getType(), getSrc1().getType(), getDst().getType(),
         getTmp() ? getTmp().getType() : Type{}, static_cast<bool>(getTmp()),
@@ -149,14 +149,14 @@ mlir::LogicalResult mlir::pto::TRowExpandDivOp::verify() {
         "expects element type to be f16 or f32",
         "expects A5 trowexpanddiv element type to be i8/i16/i32/f16/f32");
   };
-  auto verifyA2A3 = [&]() -> LogicalResult { return verifyByArch(PTOArch::A3); };
-  auto verifyA5 = [&]() -> LogicalResult { return verifyByArch(PTOArch::A5); };
+  auto verifyA2A3 = [&verifyByArch]() -> LogicalResult { return verifyByArch(PTOArch::A3); };
+  auto verifyA5 = [&verifyByArch]() -> LogicalResult { return verifyByArch(PTOArch::A5); };
   return dispatchVerifierByArch(getOperation(), verifyA2A3, verifyA5);
 }
 
 
 mlir::LogicalResult mlir::pto::TRowExpandMulOp::verify() {
-  auto verifyByArch = [&](PTOArch targetArch) -> LogicalResult {
+  auto verifyByArch = [this](PTOArch targetArch) -> LogicalResult {
     return verifyTRowExpandBinaryLikeOp(
         *this, getSrc0().getType(), getSrc1().getType(), getDst().getType(),
         getTmp() ? getTmp().getType() : Type{}, static_cast<bool>(getTmp()),
@@ -164,14 +164,14 @@ mlir::LogicalResult mlir::pto::TRowExpandMulOp::verify() {
         "expects A2/A3 trowexpandmul element type to be i16/i32/f16/f32",
         "expects A5 trowexpandmul element type to be i8/i16/i32/f16/f32");
   };
-  auto verifyA2A3 = [&]() -> LogicalResult { return verifyByArch(PTOArch::A3); };
-  auto verifyA5 = [&]() -> LogicalResult { return verifyByArch(PTOArch::A5); };
+  auto verifyA2A3 = [&verifyByArch]() -> LogicalResult { return verifyByArch(PTOArch::A3); };
+  auto verifyA5 = [&verifyByArch]() -> LogicalResult { return verifyByArch(PTOArch::A5); };
   return dispatchVerifierByArch(getOperation(), verifyA2A3, verifyA5);
 }
 
 
 mlir::LogicalResult mlir::pto::TRowExpandSubOp::verify() {
-  auto verifyByArch = [&](PTOArch targetArch) -> LogicalResult {
+  auto verifyByArch = [this](PTOArch targetArch) -> LogicalResult {
     return verifyTRowExpandBinaryLikeOp(
         *this, getSrc0().getType(), getSrc1().getType(), getDst().getType(),
         getTmp() ? getTmp().getType() : Type{}, static_cast<bool>(getTmp()),
@@ -179,13 +179,13 @@ mlir::LogicalResult mlir::pto::TRowExpandSubOp::verify() {
         "expects A2/A3 trowexpandsub element type to be i16/i32/f16/f32",
         "expects A5 trowexpandsub element type to be i8/i16/i32/f16/f32");
   };
-  auto verifyA2A3 = [&]() -> LogicalResult { return verifyByArch(PTOArch::A3); };
-  auto verifyA5 = [&]() -> LogicalResult { return verifyByArch(PTOArch::A5); };
+  auto verifyA2A3 = [&verifyByArch]() -> LogicalResult { return verifyByArch(PTOArch::A3); };
+  auto verifyA5 = [&verifyByArch]() -> LogicalResult { return verifyByArch(PTOArch::A5); };
   return dispatchVerifierByArch(getOperation(), verifyA2A3, verifyA5);
 }
 
 mlir::LogicalResult mlir::pto::TRowExpandAddOp::verify() {
-  auto verifyByArch = [&](PTOArch targetArch) -> LogicalResult {
+  auto verifyByArch = [this](PTOArch targetArch) -> LogicalResult {
     Type src0Ty = getSrc0().getType();
     Type src1Ty = getSrc1().getType();
     Type dstTy = getDst().getType();
@@ -204,8 +204,8 @@ mlir::LogicalResult mlir::pto::TRowExpandAddOp::verify() {
       return failure();
     return verifyTRowExpandAddSrc1Shape(*this, src1Ty, dstTy, *elemOr);
   };
-  auto verifyA2A3 = [&]() -> LogicalResult { return verifyByArch(PTOArch::A3); };
-  auto verifyA5 = [&]() -> LogicalResult { return verifyByArch(PTOArch::A5); };
+  auto verifyA2A3 = [&verifyByArch]() -> LogicalResult { return verifyByArch(PTOArch::A3); };
+  auto verifyA5 = [&verifyByArch]() -> LogicalResult { return verifyByArch(PTOArch::A5); };
   return dispatchVerifierByArch(getOperation(), verifyA2A3, verifyA5);
 }
 
@@ -225,4 +225,3 @@ static LogicalResult verifyTRowExpandReduceTypes(Operation *op, Type src0Ty,
            << "expects tmp and dst to have the same element type";
   return success();
 }
-

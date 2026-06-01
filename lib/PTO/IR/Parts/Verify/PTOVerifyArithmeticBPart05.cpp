@@ -123,13 +123,13 @@ void mlir::pto::TColSumOp::print(OpAsmPrinter &p) {
 }
 
 LogicalResult pto::TColSumOp::verify() {
-  auto verifyA2A3 = [&]() -> LogicalResult {
+  auto verifyA2A3 = [this]() -> LogicalResult {
     return verifyTColSumCommon(*this, /*requireNonZeroSrc=*/false,
                                /*allowInt8=*/false, /*allowBf16=*/false,
                                "expects A2/A3 tcolsum element type to be "
                                "f16/f32/i16/i32");
   };
-  auto verifyA5 = [&]() -> LogicalResult {
+  auto verifyA5 = [this]() -> LogicalResult {
     return verifyTColSumCommon(*this, /*requireNonZeroSrc=*/true,
                                /*allowInt8=*/true, /*allowBf16=*/true,
                                "expects A5 tcolsum element type to be "
@@ -163,12 +163,12 @@ llvm::LogicalResult mlir::pto::TCvtOp::verify() {
     return failure();
   Type srcElem = getElemTy(srcTy);
   Type dstElem = getElemTy(dstTy);
-  auto verifyA2A3 = [&]() -> LogicalResult {
+  auto verifyA2A3 = [this, srcElem, dstElem]() -> LogicalResult {
     if (isPTOLowPrecisionType(srcElem) || isPTOLowPrecisionType(dstElem))
       return emitOpError("expects A2/A3 tcvt low-precision element types to be unsupported");
     return success();
   };
-  auto verifyA5 = [&]() -> LogicalResult {
+  auto verifyA5 = [this, srcElem, dstElem]() -> LogicalResult {
     if (!isA5SupportedTCvtPair(srcElem, dstElem))
       return emitOpError("expects A5 tcvt low-precision type pairs to match PTO-ISA support");
     return success();
@@ -177,10 +177,10 @@ llvm::LogicalResult mlir::pto::TCvtOp::verify() {
 }
 
 llvm::LogicalResult mlir::pto::TRandomOp::verify() {
-  auto verifyA2A3 = [&]() -> LogicalResult {
+  auto verifyA2A3 = [this]() -> LogicalResult {
     return emitOpError("trandom is only supported for A5 targets");
   };
-  auto verifyA5 = [&]() -> LogicalResult {
+  auto verifyA5 = [this]() -> LogicalResult {
     if (shouldBypassDecodedMemrefVerifier(getOperation()))
       return success();
 
@@ -194,7 +194,7 @@ llvm::LogicalResult mlir::pto::TRandomOp::verify() {
     if (!elemTy.isInteger(32))
       return emitOpError("expects dst element type to be i32 or ui32");
 
-    auto checkWord = [&](Value v, StringRef name) -> LogicalResult {
+    auto checkWord = [this](Value v, StringRef name) -> LogicalResult {
       auto ty = dyn_cast<IntegerType>(v.getType());
       if (!ty || ty.getWidth() != 32)
         return emitOpError() << "expects " << name << " to be i32/ui32";

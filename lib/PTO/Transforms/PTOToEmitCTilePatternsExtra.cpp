@@ -36,7 +36,7 @@ namespace {
 template <typename RowExpandOp, typename AdaptorT>
 static LogicalResult lowerRowExpandBinaryLikeOp(RowExpandOp op, AdaptorT adaptor,
                                                 StringRef callee,
-                                                ConversionPatternRewriter &rewriter) {
+                                                ConversionPatternRewriter *rewriter) {
   Value src0 = peelUnrealized(adaptor.getSrc0());
   Value src1 = peelUnrealized(adaptor.getSrc1());
   Value dst = peelUnrealized(adaptor.getDst());
@@ -48,27 +48,27 @@ static LogicalResult lowerRowExpandBinaryLikeOp(RowExpandOp op, AdaptorT adaptor
   else
     operands.assign({dst, src0, src1});
 
-  rewriter.create<emitc::CallOpaqueOp>(op.getLoc(), TypeRange{}, callee,
-                                       /*args=*/ArrayAttr{},
-                                       /*templateArgs=*/ArrayAttr{},
-                                       /*operands=*/operands);
-  rewriter.eraseOp(op);
+  rewriter->create<emitc::CallOpaqueOp>(op.getLoc(), TypeRange{}, callee,
+                                        /*args=*/ArrayAttr{},
+                                        /*templateArgs=*/ArrayAttr{},
+                                        /*operands=*/operands);
+  rewriter->eraseOp(op);
   return success();
 }
 
 template <typename RowExpandOp, typename AdaptorT>
 static LogicalResult lowerRowExpandBinaryNoTmpOp(
     RowExpandOp op, AdaptorT adaptor, StringRef callee,
-    ConversionPatternRewriter &rewriter) {
+    ConversionPatternRewriter *rewriter) {
   Value src0 = peelUnrealized(adaptor.getSrc0());
   Value src1 = peelUnrealized(adaptor.getSrc1());
   Value dst = peelUnrealized(adaptor.getDst());
   SmallVec3<Value> operands{dst, src0, src1};
-  rewriter.create<emitc::CallOpaqueOp>(op.getLoc(), TypeRange{}, callee,
-                                       /*args=*/ArrayAttr{},
-                                       /*templateArgs=*/ArrayAttr{},
-                                       /*operands=*/operands);
-  rewriter.eraseOp(op);
+  rewriter->create<emitc::CallOpaqueOp>(op.getLoc(), TypeRange{}, callee,
+                                        /*args=*/ArrayAttr{},
+                                        /*templateArgs=*/ArrayAttr{},
+                                        /*operands=*/operands);
+  rewriter->eraseOp(op);
   return success();
 }
 
@@ -773,7 +773,8 @@ struct PTORowExpandAddToEmitC : public OpConversionPattern<pto::TRowExpandAddOp>
 
   LogicalResult matchAndRewrite(pto::TRowExpandAddOp op, OpAdaptor adaptor,
                                 ConversionPatternRewriter &rewriter) const override {
-    return lowerRowExpandBinaryNoTmpOp(op, adaptor, "TROWEXPANDADD", rewriter);
+    return lowerRowExpandBinaryNoTmpOp(op, adaptor, "TROWEXPANDADD",
+                                       &rewriter);
   }
 };
 
@@ -783,7 +784,8 @@ struct PTORowExpandExpdifToEmitC
 
   LogicalResult matchAndRewrite(pto::TRowExpandExpdifOp op, OpAdaptor adaptor,
                                 ConversionPatternRewriter &rewriter) const override {
-    return lowerRowExpandBinaryLikeOp(op, adaptor, "TROWEXPANDEXPDIF", rewriter);
+    return lowerRowExpandBinaryLikeOp(op, adaptor, "TROWEXPANDEXPDIF",
+                                      &rewriter);
   }
 };
 
@@ -982,7 +984,7 @@ struct PTORowExpandDivToEmitC : public OpConversionPattern<pto::TRowExpandDivOp>
 
   LogicalResult matchAndRewrite(pto::TRowExpandDivOp op, OpAdaptor adaptor,
                                 ConversionPatternRewriter &rewriter) const override {
-    return lowerRowExpandBinaryLikeOp(op, adaptor, "TROWEXPANDDIV", rewriter);
+    return lowerRowExpandBinaryLikeOp(op, adaptor, "TROWEXPANDDIV", &rewriter);
   }
 };
 //===----------------------------------------------------------------------===//
@@ -994,7 +996,7 @@ struct PTORowExpandMulToEmitC : public OpConversionPattern<pto::TRowExpandMulOp>
 
   LogicalResult matchAndRewrite(pto::TRowExpandMulOp op, OpAdaptor adaptor,
                                 ConversionPatternRewriter &rewriter) const override {
-    return lowerRowExpandBinaryLikeOp(op, adaptor, "TROWEXPANDMUL", rewriter);
+    return lowerRowExpandBinaryLikeOp(op, adaptor, "TROWEXPANDMUL", &rewriter);
   }
 };
 
@@ -1007,7 +1009,7 @@ struct PTORowExpandSubToEmitC : public OpConversionPattern<pto::TRowExpandSubOp>
 
   LogicalResult matchAndRewrite(pto::TRowExpandSubOp op, OpAdaptor adaptor,
                                 ConversionPatternRewriter &rewriter) const override {
-    return lowerRowExpandBinaryLikeOp(op, adaptor, "TROWEXPANDSUB", rewriter);
+    return lowerRowExpandBinaryLikeOp(op, adaptor, "TROWEXPANDSUB", &rewriter);
   }
 };
 
@@ -1016,7 +1018,7 @@ struct PTORowExpandMaxToEmitC : public OpConversionPattern<pto::TRowExpandMaxOp>
 
   LogicalResult matchAndRewrite(pto::TRowExpandMaxOp op, OpAdaptor adaptor,
                                 ConversionPatternRewriter &rewriter) const override {
-    return lowerRowExpandBinaryLikeOp(op, adaptor, "TROWEXPANDMAX", rewriter);
+    return lowerRowExpandBinaryLikeOp(op, adaptor, "TROWEXPANDMAX", &rewriter);
   }
 };
 
@@ -1025,7 +1027,7 @@ struct PTORowExpandMinToEmitC : public OpConversionPattern<pto::TRowExpandMinOp>
 
   LogicalResult matchAndRewrite(pto::TRowExpandMinOp op, OpAdaptor adaptor,
                                 ConversionPatternRewriter &rewriter) const override {
-    return lowerRowExpandBinaryLikeOp(op, adaptor, "TROWEXPANDMIN", rewriter);
+    return lowerRowExpandBinaryLikeOp(op, adaptor, "TROWEXPANDMIN", &rewriter);
   }
 };
 

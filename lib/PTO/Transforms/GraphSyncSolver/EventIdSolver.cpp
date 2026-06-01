@@ -65,7 +65,7 @@ void EventIdSolver::addNode(std::unique_ptr<EventIdNode> node) {
 
 void EventIdSolver::removeNode(EventIdNode *node) {
   ASSERT(adjList[node].empty());
-  ASSERT(!sumAdjListSizes[node]);
+  ASSERT(sumAdjListSizes[node] == 0);
   adjList.erase(node);
   sumAdjListSizes.erase(node);
   ASSERT(nodes.back().get() == node);
@@ -98,12 +98,16 @@ void EventIdSolver::addEdge(EventIdNode *node1, EventIdNode *node2) {
     return;
   }
   actionsStack.push(std::make_unique<ActionAddEdge>(node1, node2));
-  if (!adjList[node1][node2]++) {
+  int64_t &node1ToNode2Count = adjList[node1][node2];
+  if (node1ToNode2Count == 0) {
     sumAdjListSizes[node1] += node2->eventIdNum;
   }
-  if (!adjList[node2][node1]++) {
+  node1ToNode2Count += 1;
+  int64_t &node2ToNode1Count = adjList[node2][node1];
+  if (node2ToNode1Count == 0) {
     sumAdjListSizes[node2] += node1->eventIdNum;
   }
+  node2ToNode1Count += 1;
   if (!needRecalculateEventIds) {
     if ((sumAdjListSizes[node1] + node1->eventIdNum > eventIdsNumMax) ||
         (sumAdjListSizes[node2] + node2->eventIdNum > eventIdsNumMax)) {
@@ -114,11 +118,15 @@ void EventIdSolver::addEdge(EventIdNode *node1, EventIdNode *node2) {
 
 void EventIdSolver::removeEdge(EventIdNode *node1, EventIdNode *node2) {
   ASSERT(node1 != nullptr && node2 != nullptr);
-  if (!(adjList[node1][node2] -= 1)) {
+  int64_t &node1ToNode2Count = adjList[node1][node2];
+  node1ToNode2Count -= 1;
+  if (node1ToNode2Count == 0) {
     adjList[node1].erase(node2);
     sumAdjListSizes[node1] -= node2->eventIdNum;
   }
-  if (!(adjList[node2][node1] -= 1)) {
+  int64_t &node2ToNode1Count = adjList[node2][node1];
+  node2ToNode1Count -= 1;
+  if (node2ToNode1Count == 0) {
     adjList[node2].erase(node1);
     sumAdjListSizes[node2] -= node1->eventIdNum;
   }
@@ -214,9 +222,11 @@ void EventIdSolver::addConflicts(
 }
 
 llvm::SmallVector<int64_t>
-EventIdSolver::getAdjNodesUsedEventIds(EventIdNode *node) {
+EventIdSolver::getAdjNodesUsedEventIds(const EventIdNode *node) {
   llvm::SmallDenseSet<int64_t> usedEventIds;
-  for (auto [otherNode, frq] : adjList[node]) {
+  auto adjIt = adjList.find(const_cast<EventIdNode *>(node));
+  ASSERT(adjIt != adjList.end());
+  for (auto [otherNode, frq] : adjIt->second) {
     ASSERT(frq > 0);
     auto &otherEventIds = otherNode->getEventIds();
     usedEventIds.insert(otherEventIds.begin(), otherEventIds.end());
@@ -303,7 +313,7 @@ void EventIdSolver::calcEventIds() {
       return a.first < b.first;
     }
     if (a.second->reversePriority != b.second->reversePriority) {
-      return a.second->reversePriority < b.second->reversePriority;
+      return !a.second->reversePriority && b.second->reversePriority;
     }
     return a.second->id < b.second->id;
   };
@@ -379,7 +389,7 @@ void EventIdSolver::undoActions() {
         .Case([this](ActionAssignNeedRecalc *action) {
           assignNeedRecalc(action->oldValue, /*pushAction=*/false);
         })
-        .Default([](Action *action) {
+        .Default([](Action *) {
           llvm_unreachable("EventIdSolver: unhandled action_type.");
         });
   }

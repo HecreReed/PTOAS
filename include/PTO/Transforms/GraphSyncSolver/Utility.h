@@ -20,11 +20,9 @@
 #include "llvm/ADT/MapVector.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/Support/raw_ostream.h"
-#include <climits>
 #include <deque>
 #include <memory>
 #include <optional>
-#include <pthread.h>
 #include <string>
 
 namespace mlir::pto::syncsolver {
@@ -248,23 +246,25 @@ struct Occurrence {
         endIndex(endIdx) {}
 
   // Return true if occ1 and occ2 have the same immediate parent occurrence.
-  static bool sameScope(Occurrence *occ1, Occurrence *occ2);
+  static bool sameScope(const Occurrence *occ1, const Occurrence *occ2);
 
   // Return depth (number of ancestors + 1) for the given occurrence.
   static int getDepth(Occurrence *occ);
 
   // Walk up parents to find the first ancestor occurrence associated with 'op'.
-  Occurrence *getParentWithOp(Operation *op, bool assertExists = true);
-  Occurrence *getParentWithOp(OperationBase *op, bool assertExists = true);
+  Occurrence *getParentWithOp(const Operation *op,
+                              bool assertExists = true) const;
+  Occurrence *getParentWithOp(const OperationBase *op,
+                              bool assertExists = true) const;
 
   // Return the ancestor that is `dist` levels above this occurrence.
-  Occurrence *getNthParent(int dist);
+  Occurrence *getNthParent(int dist) const;
 
   // Compute/return the pair of sibling occurrences just below their LCA.
   static std::pair<Occurrence *, Occurrence *> getLCAPair(Occurrence *occ1,
                                                           Occurrence *occ2);
 
-  template <typename OpTy> Occurrence *getParentOfType() {
+  template <typename OpTy> Occurrence *getParentOfType() const {
     Occurrence *cur = this->parentOcc;
     while (cur != nullptr && !isa_and_present<OpTy>(cur->op)) {
       cur = cur->parentOcc;
@@ -279,10 +279,10 @@ struct Occurrence {
   static Occurrence *getParentCondition(Occurrence *occ);
 
   // Return true if this occurrence is a strict ancestor of `occ`.
-  bool isProperAncestor(Occurrence *occ);
+  bool isProperAncestor(Occurrence *occ) const;
 
   // Collect and return all occurrence parents (in upward order).
-  llvm::SmallVector<Occurrence *> getAllParents();
+  llvm::SmallVector<Occurrence *> getAllParents() const;
 
   static Occurrence *getUnlikelyParentCondition(Occurrence *occ);
 };
@@ -381,7 +381,7 @@ public:
 private:
   static int globalIdCounter;
   llvm::SmallVector<int64_t> eventIds;
-  llvm::DenseMap<ConflictPair *, int64_t> conflictPairs;
+  llvm::DenseMap<const ConflictPair *, int64_t> conflictPairs;
 
 public:
   EventIdNode(ConflictPair *conflictPair, int64_t eventIdNum,
@@ -399,12 +399,14 @@ public:
     return clonedNode;
   }
 
-  void insertConflictPair(ConflictPair *conflictPair) {
+  void insertConflictPair(const ConflictPair *conflictPair) {
     conflictPairs[conflictPair] += 1;
   }
 
-  void eraseConflictPair(ConflictPair *conflictPair) {
-    if (!(conflictPairs[conflictPair] -= 1)) {
+  void eraseConflictPair(const ConflictPair *conflictPair) {
+    int64_t &conflictPairCount = conflictPairs[conflictPair];
+    conflictPairCount -= 1;
+    if (conflictPairCount == 0) {
       conflictPairs.erase(conflictPair);
     }
   }
@@ -519,7 +521,7 @@ llvm::FailureOr<std::pair<OpTy, OpTy>> getFirstLastOp(Operation *parentOp) {
   return std::make_pair(firstOp, lastOp);
 }
 
-bool isEmptyScope(Scope *scope);
+bool isEmptyScope(const Scope *scope);
 
 } // namespace mlir::pto::syncsolver
 

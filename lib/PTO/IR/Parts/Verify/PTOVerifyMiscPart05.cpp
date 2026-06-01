@@ -64,7 +64,7 @@ mlir::LogicalResult mlir::pto::TShlSOp::verify() {
 }
 
 mlir::LogicalResult mlir::pto::TShrSOp::verify() {
-  auto verifyCommon = [&]() -> FailureOr<Type> {
+  auto verifyCommon = [this]() -> FailureOr<Type> {
     Type srcTy = getSrc().getType();
     Type dstTy = getDst().getType();
     if (failed(verifyVecTileCommon(*this, srcTy, "src")) ||
@@ -86,7 +86,7 @@ mlir::LogicalResult mlir::pto::TShrSOp::verify() {
     return srcElem;
   };
 
-  auto verifyA2A3 = [&]() -> LogicalResult {
+  auto verifyA2A3 = [this, &verifyCommon]() -> LogicalResult {
     FailureOr<Type> elemOr = verifyCommon();
     if (failed(elemOr))
       return failure();
@@ -97,7 +97,7 @@ mlir::LogicalResult mlir::pto::TShrSOp::verify() {
     return success();
   };
 
-  auto verifyA5 = [&]() -> LogicalResult {
+  auto verifyA5 = [this, &verifyCommon]() -> LogicalResult {
     FailureOr<Type> elemOr = verifyCommon();
     if (failed(elemOr))
       return failure();
@@ -162,14 +162,14 @@ static LogicalResult verifyTNegA5(TNegOp op) {
 }
 
 mlir::LogicalResult mlir::pto::TNegOp::verify() {
-  auto verifyA2A3 = [&]() -> LogicalResult { return verifyTNegA2A3(*this); };
-  auto verifyA5 = [&]() -> LogicalResult { return verifyTNegA5(*this); };
+  auto verifyA2A3 = [this]() -> LogicalResult { return verifyTNegA2A3(*this); };
+  auto verifyA5 = [this]() -> LogicalResult { return verifyTNegA5(*this); };
 
   return dispatchVerifierByArch(getOperation(), verifyA2A3, verifyA5);
 }
 
 mlir::LogicalResult mlir::pto::TNotOp::verify() {
-  auto verifyCommon = [&]() -> FailureOr<Type> {
+  auto verifyCommon = [this]() -> FailureOr<Type> {
     Type srcTy = getSrc().getType();
     Type dstTy = getDst().getType();
     if (failed(verifyVecTileCommon(*this, srcTy, "src")) ||
@@ -184,7 +184,7 @@ mlir::LogicalResult mlir::pto::TNotOp::verify() {
     }
     return elemTy;
   };
-  auto verifyA2A3 = [&]() -> LogicalResult {
+  auto verifyA2A3 = [this, &verifyCommon]() -> LogicalResult {
     FailureOr<Type> elemTy = verifyCommon();
     if (failed(elemTy))
       return failure();
@@ -192,7 +192,7 @@ mlir::LogicalResult mlir::pto::TNotOp::verify() {
       return emitOpError() << "expects A2/A3 tnot element type to be i16";
     return success();
   };
-  auto verifyA5 = [&]() -> LogicalResult {
+  auto verifyA5 = [this, &verifyCommon]() -> LogicalResult {
     FailureOr<Type> elemTy = verifyCommon();
     if (failed(elemTy))
       return failure();
@@ -211,4 +211,3 @@ mlir::LogicalResult mlir::pto::TOrOp::verify() {
       "expects A2/A3 tor src0, src1, and dst element type to be i8/i16",
       "expects A5 tor src0, src1, and dst element type to be i8/i16/i32");
 }
-

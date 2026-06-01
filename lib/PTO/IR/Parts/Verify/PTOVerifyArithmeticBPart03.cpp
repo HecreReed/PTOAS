@@ -16,7 +16,7 @@ LogicalResult pto::TConcatidxOp::verify() {
   auto elemOr = verifyTConcatidxCommon(*this);
   if (failed(elemOr))
     return failure();
-  auto verifyA2A3 = [&]() -> LogicalResult {
+  auto verifyA2A3 = [this, &elemOr]() -> LogicalResult {
     if (failed(verifyLocVecType(getOperation(), getSrc0().getType(), "src0")) ||
         failed(verifyLocVecType(getOperation(), getSrc1().getType(), "src1")) ||
         failed(verifyLocVecType(getOperation(), getSrc0Idx().getType(), "src0Idx")) ||
@@ -27,7 +27,7 @@ LogicalResult pto::TConcatidxOp::verify() {
     return verifyConcatidxElementTypes(getOperation(), elemOr->first,
                                        elemOr->second);
   };
-  auto verifyA5 = [&]() -> LogicalResult {
+  auto verifyA5 = [this, &elemOr]() -> LogicalResult {
     if (failed(verifyLocVecType(getOperation(), getSrc0().getType(), "src0")) ||
         failed(verifyLocVecType(getOperation(), getSrc1().getType(), "src1")) ||
         failed(verifyLocVecType(getOperation(), getSrc0Idx().getType(), "src0Idx")) ||
@@ -104,14 +104,14 @@ LogicalResult pto::TTriOp::verify() {
   Type elemTy = getElemTy(dstTy);
   return dispatchVerifierByArch(
       getOperation(),
-      [&]() -> LogicalResult {
+      [this, elemTy]() -> LogicalResult {
         if (!isSupportedVecElemType(elemTy, /*allowBf16=*/false,
                                     /*allowInt8=*/false))
           return emitOpError()
                  << "expects A2/A3 dst element type to be f16/f32/i16/i32/u16/u32";
         return success();
       },
-      [&]() -> LogicalResult {
+      [this, elemTy]() -> LogicalResult {
         if (!isSupportedVecElemType(elemTy, /*allowBf16=*/true,
                                     /*allowInt8=*/true))
           return emitOpError()
@@ -188,8 +188,10 @@ static LogicalResult verifyTCmpA5(TCmpOp op) {
 }
 
 LogicalResult pto::TCmpOp::verify() {
-  auto verifyA2A3 = [&]() -> LogicalResult { return verifyTCmpA2A3(*this); };
-  auto verifyA5 = [&]() -> LogicalResult { return verifyTCmpA5(*this); };
+  auto verifyA2A3 = [this]() -> LogicalResult {
+    return verifyTCmpA2A3(*this);
+  };
+  auto verifyA5 = [this]() -> LogicalResult { return verifyTCmpA5(*this); };
   return dispatchVerifierByArch(getOperation(), verifyA2A3, verifyA5);
 }
 
@@ -214,4 +216,3 @@ static LogicalResult verifyTCmpSCommon(TCmpSOp op) {
   }
   return success();
 }
-

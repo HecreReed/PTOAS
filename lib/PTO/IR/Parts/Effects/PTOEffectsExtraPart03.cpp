@@ -55,6 +55,7 @@ ParseResult AicInitializePipeOp::parse(OpAsmParser &parser,
   return parseFrontendInitializePipeOp(parser, result);
 }
 
+// NOLINTNEXTLINE(readability-make-member-function-const): generated op printer signature is non-const.
 void AicInitializePipeOp::print(OpAsmPrinter &p) {
   printFrontendInitializePipeOp(*this, p);
 }
@@ -64,6 +65,7 @@ ParseResult AivInitializePipeOp::parse(OpAsmParser &parser,
   return parseFrontendInitializePipeOp(parser, result);
 }
 
+// NOLINTNEXTLINE(readability-make-member-function-const): generated op printer signature is non-const.
 void AivInitializePipeOp::print(OpAsmPrinter &p) {
   printFrontendInitializePipeOp(*this, p);
 }

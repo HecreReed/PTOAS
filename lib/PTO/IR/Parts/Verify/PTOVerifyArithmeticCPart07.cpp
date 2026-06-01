@@ -144,7 +144,7 @@ static LogicalResult verifyTMovLayouts(TMovOp op, const TMovCommonInfo &info,
 }
 
 mlir::LogicalResult mlir::pto::TMovOp::verify() {
-  auto verifyImpl = [&](bool isA5) -> LogicalResult {
+  auto verifyImpl = [this](bool isA5) -> LogicalResult {
     auto common = verifyTMovCommon(*this);
     if (failed(common))
       return failure();
@@ -157,8 +157,12 @@ mlir::LogicalResult mlir::pto::TMovOp::verify() {
     }
     return success();
   };
-  auto verifyA2A3 = [&]() -> LogicalResult { return verifyImpl(/*isA5=*/false); };
-  auto verifyA5 = [&]() -> LogicalResult { return verifyImpl(/*isA5=*/true); };
+  auto verifyA2A3 = [&verifyImpl]() -> LogicalResult {
+    return verifyImpl(/*isA5=*/false);
+  };
+  auto verifyA5 = [&verifyImpl]() -> LogicalResult {
+    return verifyImpl(/*isA5=*/true);
+  };
   return dispatchVerifierByArch(getOperation(), verifyA2A3, verifyA5);
 }
 
@@ -203,4 +207,3 @@ static LogicalResult verifyTMovFpA2A3(const TMovFpCommonInfo &info,
     return op.emitOpError("expects dst to use fractal size 512");
   return success();
 }
-

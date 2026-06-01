@@ -10,7 +10,6 @@
 #include "PTO/Transforms/InsertSync/InsertSyncDebug.h"
 #include "mlir/Interfaces/ViewLikeInterface.h"
 #include "mlir/Dialect/MemRef/IR/MemRef.h"
-#include "llvm/Support/Debug.h"
  
 #define DEBUG_TYPE "pto-inject-sync"
  
@@ -133,8 +132,8 @@ bool MemoryDependentAnalyzer::MemAlias(const BaseMemInfo *a,
     llvm::errs() << "  [MemAlias Check]\n";
     printValueDebug("    Root A", a->rootBuffer);
     printValueDebug("    Root B", b->rootBuffer);
-    llvm::errs() << "    Scope A: " << (int)as << ", Scope B: " << (int)bs
-                 << "\n";
+    llvm::errs() << "    Scope A: " << static_cast<int>(as)
+                 << ", Scope B: " << static_cast<int>(bs) << "\n";
   }
  
   if (as != bs) {
@@ -218,7 +217,7 @@ bool MemoryDependentAnalyzer::isBufferAddressRangeOverlap(
  
 bool MemoryDependentAnalyzer::isBufferOverlap(const BaseMemInfo *a,
                                               const BaseMemInfo *b, int aIndex,
-                                              int bIndex) {
+                                              int bIndex) const {
   uint64_t aStart = a->baseAddresses[aIndex];
   uint64_t bStart = b->baseAddresses[bIndex];
   uint64_t aEnd = aStart + a->allocateSize;

@@ -107,7 +107,7 @@ struct SectionToEmitC : public OpConversionPattern<SectionOpTy> {
   }
 
   LogicalResult
-  matchAndRewrite(SectionOpTy op, typename SectionOpTy::Adaptor adaptor,
+  matchAndRewrite(SectionOpTy op, typename SectionOpTy::Adaptor,
                   ConversionPatternRewriter &rewriter) const override {
     Location loc = op.getLoc();
     bool needsNoSplitGuard = needsA5NoSplitVectorGuard(op.getOperation());
@@ -404,7 +404,7 @@ struct SCFIndexSwitchToCF : public OpRewritePattern<scf::IndexSwitchOp> {
       return rewriter.notifyMatchFailure(op, "expected scf.yield terminator");
 
     // Replace the original switch op with a branch into the check chain.
-    Block *entryDest = numCases ? checkBlocks[0] : defaultBlock;
+    Block *entryDest = (numCases != 0) ? checkBlocks[0] : defaultBlock;
     rewriter.setInsertionPointAfter(op);
     rewriter.create<cf::BranchOp>(loc, entryDest, ValueRange{});
     rewriter.eraseOp(op);
@@ -437,7 +437,7 @@ struct SCFWhileToCF : public OpRewritePattern<scf::WhileOp> {
     return rewriter.splitBlock(op->getBlock(), std::next(whileIt));
   }
 
-  static void addWhileExitArguments(PatternRewriter &rewriter, scf::WhileOp op,
+  static void addWhileExitArguments(PatternRewriter &, scf::WhileOp op,
                                     Location loc, Block *afterWhileBlock) {
     SmallVector<Value> exitArgs;
     exitArgs.reserve(op.getNumResults());

@@ -42,10 +42,12 @@ LogicalResult TReduceOp::verify() {
   return success();
 }
 
+// NOLINTNEXTLINE(readability-make-member-function-const): generated op verifier signature is non-const.
 LogicalResult AicInitializePipeOp::verify() {
   return verifyFrontendInitCommon(*this, FunctionKernelKind::Cube, "cube");
 }
 
+// NOLINTNEXTLINE(readability-make-member-function-const): generated op verifier signature is non-const.
 LogicalResult AivInitializePipeOp::verify() {
   return verifyFrontendInitCommon(*this, FunctionKernelKind::Vector, "vector");
 }
@@ -94,11 +96,13 @@ LogicalResult TPushToAicOp::verify() {
                                               getTile().getType());
 }
 
+// NOLINTNEXTLINE(readability-make-member-function-const): generated op verifier signature is non-const.
 LogicalResult TPopFromAicOp::verify() {
   return verifyFrontendPopOp(*this, FunctionKernelKind::Vector, "vector",
                              /*expectC2V=*/true);
 }
 
+// NOLINTNEXTLINE(readability-make-member-function-const): generated op verifier signature is non-const.
 LogicalResult TPopFromAivOp::verify() {
   return verifyFrontendPopOp(*this, FunctionKernelKind::Cube, "cube",
                              /*expectC2V=*/false);
@@ -221,4 +225,3 @@ LogicalResult TFreeOp::verify() {
     return failure();
   return verifySplitAttr(getOperation(), getSplit());
 }
-

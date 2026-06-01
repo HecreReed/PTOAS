@@ -37,7 +37,7 @@ class UnitFlagInfoBase {
 public:
   virtual ~UnitFlagInfoBase() = default;
   virtual void reset() {}
-  void merge(const UnitFlagInfoBase &, bool = true, bool = true) {}
+  void merge(const UnitFlagInfoBase &, bool = true, bool = true) const {}
   bool disabledAsSet() const { return true; }
   bool disabledAsWait() const { return true; }
   llvm::SmallVector<int64_t> getUnitFlagModesAsSet(bool = true) const {
@@ -122,20 +122,20 @@ public:
   virtual ~OperationBase() = default;
 
   // Return true when op1 and op2 share the same immediate parent operation.
-  static bool sameScope(OperationBase *op1, OperationBase *op2);
+  static bool sameScope(const OperationBase *op1, const OperationBase *op2);
 
   // Compute the depth (levels up to root) of the provided operation.
   int getDepth() const;
 
   // Return the ancestor `dist` levels above this operation.
-  OperationBase *getNthParent(int dist);
+  OperationBase *getNthParent(int dist) const;
 
   // Given two operations, return the pair of operations directly below their
   // LCA.
   static std::pair<OperationBase *, OperationBase *>
   getLCAPair(OperationBase *op1, OperationBase *op2);
 
-  template <typename TyOp> TyOp *getParentOfType() {
+  template <typename TyOp> TyOp *getParentOfType() const {
     OperationBase *cur = this->parentOp;
     while (cur != nullptr && !isa<TyOp>(cur)) {
       cur = cur->parentOp;
@@ -150,10 +150,10 @@ public:
   static OperationBase *getParentCondition(OperationBase *op);
 
   // Return true if this operation is a strict ancestor of `op`.
-  bool isProperAncestor(OperationBase *op);
+  bool isProperAncestor(OperationBase *op) const;
 
   // Collect and return all parent operations (walking upwards).
-  llvm::SmallVector<OperationBase *> getAllParents();
+  llvm::SmallVector<OperationBase *> getAllParents() const;
 
   // Human-readable string representation (override in derived classes).
   virtual std::string str(int indent = 0, bool recursive = false) const = 0;

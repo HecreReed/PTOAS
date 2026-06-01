@@ -13,7 +13,7 @@ using namespace mlir;
 using namespace mlir::pto;
 
 mlir::LogicalResult mlir::pto::TReluOp::verify() {
-  auto verifyByArch = [&](StringRef errorMessage) -> LogicalResult {
+  auto verifyByArch = [this](StringRef errorMessage) -> LogicalResult {
     Type srcTy = getSrc().getType();
     Type dstTy = getDst().getType();
     if (failed(verifyVecTileCommon(*this, srcTy, "src")) ||
@@ -27,10 +27,10 @@ mlir::LogicalResult mlir::pto::TReluOp::verify() {
       return emitOpError() << errorMessage;
     return success();
   };
-  auto verifyA2A3 = [&]() -> LogicalResult {
+  auto verifyA2A3 = [&verifyByArch]() -> LogicalResult {
     return verifyByArch("expects A2/A3 trelu element type to be i32/f16/f32");
   };
-  auto verifyA5 = [&]() -> LogicalResult {
+  auto verifyA5 = [&verifyByArch]() -> LogicalResult {
     return verifyByArch("expects A5 trelu element type to be i32/f16/f32");
   };
   return dispatchVerifierByArch(getOperation(), verifyA2A3, verifyA5);
@@ -96,12 +96,12 @@ mlir::LogicalResult mlir::pto::TRemOp::verify() {
   if (failed(elemOr))
     return failure();
   Type elem = *elemOr;
-  auto verifyA2A3 = [&]() -> LogicalResult {
+  auto verifyA2A3 = [this, elem]() -> LogicalResult {
     if (!(elem.isInteger(32) || elem.isF32()))
       return emitOpError("expects A2/A3 trem element type to be i32/f32");
     return success();
   };
-  auto verifyA5 = [&]() -> LogicalResult {
+  auto verifyA5 = [this, elem]() -> LogicalResult {
     if (!(elem.isInteger(32) || elem.isInteger(16) || elem.isF16() || elem.isF32()))
       return emitOpError("expects A5 trem element type to be i32/i16/f16/f32");
     return success();
@@ -162,12 +162,12 @@ mlir::LogicalResult mlir::pto::TRemSOp::verify() {
   if (failed(elemOr))
     return failure();
   Type elem = *elemOr;
-  auto verifyA2A3 = [&]() -> LogicalResult {
+  auto verifyA2A3 = [this, elem]() -> LogicalResult {
     if (!(elem.isInteger(32) || elem.isF32()))
       return emitOpError("expects A2/A3 trems element type to be i32/f32");
     return success();
   };
-  auto verifyA5 = [&]() -> LogicalResult {
+  auto verifyA5 = [this, elem]() -> LogicalResult {
     if (!(elem.isInteger(32) || elem.isInteger(16) || elem.isF16() || elem.isF32()))
       return emitOpError("expects A5 trems element type to be i32/i16/f16/f32");
     return success();
@@ -195,17 +195,15 @@ mlir::LogicalResult mlir::pto::TFModSOp::verify() {
   if (scalarTy != elem)
     return emitOpError("expects scalar type to match the tile element type");
 
-  auto verifyA2A3 = [&]() -> LogicalResult {
+  auto verifyA2A3 = [this, elem]() -> LogicalResult {
     if (!(elem.isInteger(32) || elem.isInteger(16) || elem.isF16() || elem.isF32()))
       return emitOpError("expects A2/A3 tfmods element type to be i32/i16/f16/f32");
     return success();
   };
-  auto verifyA5 = [&]() -> LogicalResult {
+  auto verifyA5 = [this, elem]() -> LogicalResult {
     if (!(elem.isInteger(32) || elem.isInteger(16) || elem.isF16() || elem.isF32()))
       return emitOpError("expects A5 tfmods element type to be i32/i16/f16/f32");
     return success();
   };
   return dispatchVerifierByArch(getOperation(), verifyA2A3, verifyA5);
 }
-
-

@@ -34,12 +34,16 @@ static LogicalResult verifyTGatherForArch(TGatherOp op, bool allowA5Forms) {
 }
 
 llvm::LogicalResult mlir::pto::TGatherOp::verify() {
-  auto verifyA2A3 = [&]() -> LogicalResult { return verifyTGatherForArch(*this, false); };
-  auto verifyA5 = [&]() -> LogicalResult { return verifyTGatherForArch(*this, true); };
+  auto verifyA2A3 = [this]() -> LogicalResult {
+    return verifyTGatherForArch(*this, false);
+  };
+  auto verifyA5 = [this]() -> LogicalResult {
+    return verifyTGatherForArch(*this, true);
+  };
   return dispatchVerifierByArch(getOperation(), verifyA2A3, verifyA5);
 }
 mlir::LogicalResult mlir::pto::TGatherBOp::verify() {
-  auto verifyCommon = [&]() -> FailureOr<std::pair<Type, Type>> {
+  auto verifyCommon = [this]() -> FailureOr<std::pair<Type, Type>> {
     Type srcTy = getSrc().getType();
     Type offTy = getOffsets().getType();
     Type dstTy = getDst().getType();
@@ -61,7 +65,7 @@ mlir::LogicalResult mlir::pto::TGatherBOp::verify() {
     return elemBytes;
   };
 
-  auto verifyA2A3 = [&]() -> LogicalResult {
+  auto verifyA2A3 = [this, &getElemBytes, &verifyCommon]() -> LogicalResult {
     FailureOr<std::pair<Type, Type>> elems = verifyCommon();
     if (failed(elems))
       return failure();
@@ -75,7 +79,7 @@ mlir::LogicalResult mlir::pto::TGatherBOp::verify() {
     return mlir::success();
   };
 
-  auto verifyA5 = [&]() -> LogicalResult {
+  auto verifyA5 = [this, &getElemBytes, &verifyCommon]() -> LogicalResult {
     FailureOr<std::pair<Type, Type>> elems = verifyCommon();
     if (failed(elems))
       return failure();
@@ -108,7 +112,7 @@ mlir::LogicalResult mlir::pto::TLogOp::verify() {
 mlir::LogicalResult mlir::pto::TLReluOp::verify() {
   Type srcTy = getSrc().getType();
   Type dstTy = getDst().getType();
-  auto verifyA2A3 = [&]() -> LogicalResult {
+  auto verifyA2A3 = [this, srcTy, dstTy]() -> LogicalResult {
     if (failed(verifyVecTileStorage(*this, srcTy, "src")) ||
         failed(verifyVecTileStorage(*this, dstTy, "dst")))
       return failure();
@@ -127,7 +131,7 @@ mlir::LogicalResult mlir::pto::TLReluOp::verify() {
       return emitOpError() << "expects A2/A3 tlrelu element type to be f16 or f32";
     return success();
   };
-  auto verifyA5 = [&]() -> LogicalResult {
+  auto verifyA5 = [this, srcTy, dstTy]() -> LogicalResult {
     if (failed(verifyVecTileStorage(*this, srcTy, "src")) ||
         failed(verifyVecTileStorage(*this, dstTy, "dst")))
       return failure();
@@ -208,4 +212,3 @@ struct TMovFpCommonInfo {
   std::optional<pto::AddressSpace> fpSpace;
   std::optional<pto::AddressSpace> dstSpace;
 };
-

@@ -20,12 +20,12 @@ mlir::LogicalResult mlir::pto::TScatterOp::verify() {
         "expects exactly one of indexes operand or maskPattern attribute");
   }
 
-  auto verifyA2A3 = [&]() -> LogicalResult {
+  auto verifyA2A3 = [this, hasMaskPattern]() -> LogicalResult {
     if (hasMaskPattern)
       return verifyTScatterMaskForm(*this);
     return verifyTScatterIndexedForm(*this);
   };
-  auto verifyA5 = [&]() -> LogicalResult {
+  auto verifyA5 = [this, hasMaskPattern]() -> LogicalResult {
     if (hasMaskPattern)
       return emitOpError("mask-pattern tscatter is not supported on A5 yet");
     return verifyTScatterIndexedForm(*this);
@@ -79,7 +79,7 @@ static FailureOr<Type> verifyTSelCommon(TSelOp op) {
 
 
 mlir::LogicalResult mlir::pto::TSelOp::verify() {
-  auto verifyA2A3 = [&]() -> LogicalResult {
+  auto verifyA2A3 = [this]() -> LogicalResult {
     FailureOr<Type> elemOr = verifyTSelCommon(*this);
     if (failed(elemOr))
       return failure();
@@ -89,7 +89,7 @@ mlir::LogicalResult mlir::pto::TSelOp::verify() {
         "expects A5 tsel src0, src1, and dst element type to be i8/i16/i32/f16/bf16/f32");
   };
 
-  auto verifyA5 = [&]() -> LogicalResult {
+  auto verifyA5 = [this]() -> LogicalResult {
     FailureOr<Type> elemOr = verifyTSelCommon(*this);
     if (failed(elemOr))
       return failure();
@@ -138,7 +138,7 @@ mlir::LogicalResult mlir::pto::TSelSOp::verify() {
   // Constraints & Verification per PTO_IR_manual.md pto.tsels
   // - src and dst same element type; A2A3: i16/i32/f16/f32; A5: i8/i16/i32/f16/f32
   // - src and dst row-major; src and dst same valid region
-  auto verifyA2A3 = [&]() -> LogicalResult {
+  auto verifyA2A3 = [this]() -> LogicalResult {
     FailureOr<Type> elemOr = verifyTSelSCommon(*this);
     if (failed(elemOr))
       return failure();
@@ -148,7 +148,7 @@ mlir::LogicalResult mlir::pto::TSelSOp::verify() {
         "expects A5 tsels src and dst element type to be i8, i16, i32, f16, or f32");
   };
 
-  auto verifyA5 = [&]() -> LogicalResult {
+  auto verifyA5 = [this]() -> LogicalResult {
     FailureOr<Type> elemOr = verifyTSelSCommon(*this);
     if (failed(elemOr))
       return failure();
@@ -162,7 +162,7 @@ mlir::LogicalResult mlir::pto::TSelSOp::verify() {
 
 
 mlir::LogicalResult mlir::pto::TShlOp::verify() {
-  auto verify = [&]() -> LogicalResult {
+  auto verify = [this]() -> LogicalResult {
     FailureOr<Type> elemOr = verifyShiftLikeBinaryTileOpCommon(
         *this, getSrc0().getType(), getSrc1().getType(), getDst().getType());
     if (failed(elemOr))
@@ -179,7 +179,7 @@ mlir::LogicalResult mlir::pto::TShlOp::verify() {
 
 
 mlir::LogicalResult mlir::pto::TShrOp::verify() {
-  auto verify = [&]() -> LogicalResult {
+  auto verify = [this]() -> LogicalResult {
     FailureOr<Type> elemOr = verifyShiftLikeBinaryTileOpCommon(
         *this, getSrc0().getType(), getSrc1().getType(), getDst().getType());
     if (failed(elemOr))
@@ -222,5 +222,3 @@ mlir::LogicalResult mlir::pto::TSort32Op::verify() {
     return emitOpError() << "expects idx element type to be i32/u32";
   return mlir::success();
 }
-
-

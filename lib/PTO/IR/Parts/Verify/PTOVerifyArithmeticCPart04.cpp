@@ -13,7 +13,7 @@ using namespace mlir;
 using namespace mlir::pto;
 
 mlir::LogicalResult mlir::pto::TExtractFPOp::verify() {
-  auto verifyA2A3 = [&]() -> LogicalResult {
+  auto verifyA2A3 = [this]() -> LogicalResult {
     return verifyVectorPreQuantTransferOp(
         getOperation(), getSrc(), getFp(), getDst(), getIndexRow(),
         getIndexCol(),
@@ -22,7 +22,7 @@ mlir::LogicalResult mlir::pto::TExtractFPOp::verify() {
         "expects A2/A3 textract_fp element types to be (src=f32,dst=i8) "
         "or (src=i32,dst=i8/f16/i16)");
   };
-  auto verifyA5 = [&]() -> LogicalResult {
+  auto verifyA5 = [this]() -> LogicalResult {
     return verifyVectorPreQuantTransferOp(
         getOperation(), getSrc(), getFp(), getDst(), getIndexRow(),
         getIndexCol(),
@@ -35,7 +35,7 @@ mlir::LogicalResult mlir::pto::TExtractFPOp::verify() {
 }
 
 mlir::LogicalResult mlir::pto::TInsertFPOp::verify() {
-  auto verifyA2A3 = [&]() -> LogicalResult {
+  auto verifyA2A3 = [this]() -> LogicalResult {
     return verifyVectorPreQuantTransferOp(
         getOperation(), getSrc(), getFp(), getDst(), getIndexRow(),
         getIndexCol(),
@@ -44,7 +44,7 @@ mlir::LogicalResult mlir::pto::TInsertFPOp::verify() {
         "expects A2/A3 tinsert_fp element types to be (src=f32,dst=i8) "
         "or (src=i32,dst=i8/f16/i16)");
   };
-  auto verifyA5 = [&]() -> LogicalResult {
+  auto verifyA5 = [this]() -> LogicalResult {
     return verifyVectorPreQuantTransferOp(
         getOperation(), getSrc(), getFp(), getDst(), getIndexRow(),
         getIndexCol(),
@@ -212,4 +212,3 @@ static bool isSupportedGatherElemTypeA5Index(Type ty) {
     return it.getWidth() == 8 || it.getWidth() == 16 || it.getWidth() == 32;
   return false;
 }
-

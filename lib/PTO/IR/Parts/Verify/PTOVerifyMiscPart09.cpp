@@ -118,8 +118,8 @@ mlir::LogicalResult mlir::pto::SetValidShapeOp::verify() {
     return emitOpError("expects tile_buf source (or lowered memref source)");
   }
 
-  auto checkDim = [&](Value operand, unsigned dimIdx,
-                      StringRef dimName) -> LogicalResult {
+  auto checkDim = [this, &shape](Value operand, unsigned dimIdx,
+                                 StringRef dimName) -> LogicalResult {
     int64_t maxStatic = shape[dimIdx];
 
     auto constVal = getConstIndexLike(operand);
@@ -245,5 +245,4 @@ mlir::LogicalResult mlir::pto::BitcastOp::verify() {
 
   return success();
 }
-
 

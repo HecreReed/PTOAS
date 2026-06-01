@@ -26,7 +26,7 @@ using namespace pto::syncsolver;
 int ConflictPair::globalIdCounter = 0;
 int EventIdNode::globalIdCounter = 0;
 
-bool Occurrence::sameScope(Occurrence *occ1, Occurrence *occ2) {
+bool Occurrence::sameScope(const Occurrence *occ1, const Occurrence *occ2) {
   ASSERT(occ1 != nullptr && occ1->parentOcc != nullptr);
   ASSERT(occ2 != nullptr && occ2->parentOcc != nullptr);
   return occ1->parentOcc == occ2->parentOcc;
@@ -41,9 +41,10 @@ int Occurrence::getDepth(Occurrence *occ) {
   return ret;
 }
 
-Occurrence *Occurrence::getParentWithOp(OperationBase *op, bool assertExists) {
+Occurrence *Occurrence::getParentWithOp(const OperationBase *op,
+                                        bool assertExists) const {
   ASSERT(op != nullptr);
-  Occurrence *occ = this;
+  Occurrence *occ = const_cast<Occurrence *>(this);
   while (occ != nullptr) {
     if (occ->op == op) {
       return occ;
@@ -54,9 +55,10 @@ Occurrence *Occurrence::getParentWithOp(OperationBase *op, bool assertExists) {
   return nullptr;
 }
 
-Occurrence *Occurrence::getParentWithOp(Operation *op, bool assertExists) {
+Occurrence *Occurrence::getParentWithOp(const Operation *op,
+                                        bool assertExists) const {
   ASSERT(op != nullptr);
-  Occurrence *occ = this;
+  Occurrence *occ = const_cast<Occurrence *>(this);
   while (occ != nullptr) {
     if (occ->op != nullptr && occ->op->op == op) {
       return occ;
@@ -67,11 +69,12 @@ Occurrence *Occurrence::getParentWithOp(Operation *op, bool assertExists) {
   return nullptr;
 }
 
-Occurrence *Occurrence::getNthParent(int dist) {
-  Occurrence *occ = this;
-  while (dist--) {
+Occurrence *Occurrence::getNthParent(int dist) const {
+  Occurrence *occ = const_cast<Occurrence *>(this);
+  while (dist > 0) {
     ASSERT(occ != nullptr);
     occ = occ->parentOcc;
+    --dist;
   }
   ASSERT(occ != nullptr);
   return occ;
@@ -122,9 +125,9 @@ Occurrence *Occurrence::getUnlikelyParentCondition(Occurrence *occ) {
   return nullptr;
 }
 
-bool Occurrence::isProperAncestor(Occurrence *occ) {
+bool Occurrence::isProperAncestor(Occurrence *occ) const {
   ASSERT(occ != nullptr);
-  int depth1 = getDepth(this);
+  int depth1 = getDepth(const_cast<Occurrence *>(this));
   int depth2 = getDepth(occ);
   if (depth1 >= depth2) {
     return false;
@@ -132,7 +135,7 @@ bool Occurrence::isProperAncestor(Occurrence *occ) {
   return occ->getNthParent(depth2 - depth1) == this;
 }
 
-llvm::SmallVector<Occurrence *> Occurrence::getAllParents() {
+llvm::SmallVector<Occurrence *> Occurrence::getAllParents() const {
   llvm::SmallVector<Occurrence *> collectedParents;
   Occurrence *occ = this->parentOcc;
   while (occ != nullptr) {
@@ -142,7 +145,7 @@ llvm::SmallVector<Occurrence *> Occurrence::getAllParents() {
   return collectedParents;
 }
 
-llvm::SmallVector<OperationBase *> OperationBase::getAllParents() {
+llvm::SmallVector<OperationBase *> OperationBase::getAllParents() const {
   llvm::SmallVector<OperationBase *> collectedParents;
   OperationBase *op = this->parentOp;
   while (op != nullptr) {
@@ -152,7 +155,8 @@ llvm::SmallVector<OperationBase *> OperationBase::getAllParents() {
   return collectedParents;
 }
 
-bool OperationBase::sameScope(OperationBase *op1, OperationBase *op2) {
+bool OperationBase::sameScope(const OperationBase *op1,
+                              const OperationBase *op2) {
   ASSERT(op1->parentOp != nullptr);
   ASSERT(op2->parentOp != nullptr);
   return op1->parentOp == op2->parentOp;
@@ -168,11 +172,12 @@ int OperationBase::getDepth() const {
   return ret;
 }
 
-OperationBase *OperationBase::getNthParent(int dist) {
-  OperationBase *op = this;
-  while (dist--) {
+OperationBase *OperationBase::getNthParent(int dist) const {
+  OperationBase *op = const_cast<OperationBase *>(this);
+  while (dist > 0) {
     ASSERT(op != nullptr);
     op = op->parentOp;
+    --dist;
   }
   return op;
 }
@@ -214,7 +219,7 @@ OperationBase *OperationBase::getParentCondition(OperationBase *op) {
   return cur;
 }
 
-bool OperationBase::isProperAncestor(OperationBase *op) {
+bool OperationBase::isProperAncestor(OperationBase *op) const {
   ASSERT(op != nullptr);
   int depth1 = this->getDepth();
   int depth2 = op->getDepth();
@@ -422,7 +427,7 @@ pto::TCoreType getOppositeCoreType(pto::TCoreType coreType) {
   return pto::TCoreType::CUBE_OR_VECTOR;
 }
 
-bool isEmptyScope(Scope *scope) {
+bool isEmptyScope(const Scope *scope) {
   for (auto &childOp : scope->body) {
     if (isa<RWOperation>(childOp.get())) {
       return false;

@@ -13,19 +13,19 @@ using namespace mlir;
 using namespace mlir::pto;
 
 mlir::LogicalResult mlir::pto::TRowExpandMinOp::verify() {
-  auto verifyA2A3 = [&]() -> LogicalResult {
+  auto verifyA2A3 = [this]() -> LogicalResult {
     return verifyTRowExpandReduceLikeOp(getOperation(), getSrc0().getType(),
                                         getSrc1().getType(), getDst().getType(),
                                         getTmp() ? getTmp().getType() : Type{},
-                                        (bool)getTmp(), PTOArch::A3,
+                                        static_cast<bool>(getTmp()), PTOArch::A3,
                                         "trowexpandmin",
                                         /*allowIntegerTypes=*/true);
   };
-  auto verifyA5 = [&]() -> LogicalResult {
+  auto verifyA5 = [this]() -> LogicalResult {
     return verifyTRowExpandReduceLikeOp(getOperation(), getSrc0().getType(),
                                         getSrc1().getType(), getDst().getType(),
                                         getTmp() ? getTmp().getType() : Type{},
-                                        (bool)getTmp(), PTOArch::A5,
+                                        static_cast<bool>(getTmp()), PTOArch::A5,
                                         "trowexpandmin",
                                         /*allowIntegerTypes=*/true);
   };
@@ -34,7 +34,7 @@ mlir::LogicalResult mlir::pto::TRowExpandMinOp::verify() {
 
 
 mlir::LogicalResult mlir::pto::TRowMaxOp::verify() {
-  auto verifyByArch = [&]() -> LogicalResult {
+  auto verifyByArch = [this]() -> LogicalResult {
     return verifyTRowReductionNoTmpCommon(*this, getSrc().getType(),
                                           getDst().getType(),
                                           "expects element type to be i16/i32/f16/f32");
@@ -43,7 +43,7 @@ mlir::LogicalResult mlir::pto::TRowMaxOp::verify() {
 }
 
 mlir::LogicalResult mlir::pto::TRowArgMaxOp::verify() {
-  auto verifyByArch = [&]() -> LogicalResult {
+  auto verifyByArch = [this]() -> LogicalResult {
     return verifyTRowArgReductionCommon(*this, getSrc().getType(),
                                         getTmp().getType(), getDst().getType());
   };
@@ -53,7 +53,7 @@ mlir::LogicalResult mlir::pto::TRowArgMaxOp::verify() {
 
 
 mlir::LogicalResult mlir::pto::TRowMinOp::verify() {
-  auto verifyByArch = [&]() -> LogicalResult {
+  auto verifyByArch = [this]() -> LogicalResult {
     return verifyTRowReductionWithTmpCommon(
         *this, getSrc().getType(), getTmp().getType(), getDst().getType(),
         "expects element type to be i16/i32/f16/f32");
@@ -62,7 +62,7 @@ mlir::LogicalResult mlir::pto::TRowMinOp::verify() {
 }
 
 mlir::LogicalResult mlir::pto::TRowArgMinOp::verify() {
-  auto verifyByArch = [&]() -> LogicalResult {
+  auto verifyByArch = [this]() -> LogicalResult {
     return verifyTRowArgReductionCommon(*this, getSrc().getType(),
                                         getTmp().getType(), getDst().getType());
   };
@@ -72,7 +72,7 @@ mlir::LogicalResult mlir::pto::TRowArgMinOp::verify() {
 
 
 mlir::LogicalResult mlir::pto::TRowSumOp::verify() {
-  auto verifyByArch = [&]() -> LogicalResult {
+  auto verifyByArch = [this]() -> LogicalResult {
     return verifyTRowReductionNoTmpCommon(*this, getSrc().getType(),
                                           getDst().getType(),
                                           "expects element type to be i16/i32/f16/f32");
@@ -81,12 +81,12 @@ mlir::LogicalResult mlir::pto::TRowSumOp::verify() {
 }
 
 mlir::LogicalResult mlir::pto::TRowProdOp::verify() {
-  auto verifyA2A3 = [&]() -> LogicalResult {
+  auto verifyA2A3 = [this]() -> LogicalResult {
     return verifyTRowReductionWithTmpCommon(
         *this, getSrc().getType(), getTmp().getType(), getDst().getType(),
         "expects A2/A3 trowprod element type to be i16/i32/f16/f32");
   };
-  auto verifyA5 = [&]() -> LogicalResult {
+  auto verifyA5 = [this]() -> LogicalResult {
     return verifyTRowReductionWithTmpCommon(
         *this, getSrc().getType(), getTmp().getType(), getDst().getType(),
         "expects A5 trowprod element type to be i16/i32/f16/f32");
@@ -233,5 +233,3 @@ static LogicalResult verifyTScatterMaskForm(TScatterOp op) {
   }
   return success();
 }
-
-

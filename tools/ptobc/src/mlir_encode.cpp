@@ -471,7 +471,7 @@ void Encoder::encodeKnownOpOperands(
     mlir::Operation &op, Buffer &out, const ptobc::v0::OpInfo &info,
     const ptobc::v0::OpcodeAndVariant &variantInfo,
     llvm::ArrayRef<uint64_t> imms) {
-  auto emitOperands = [&](size_t count) {
+  auto emitOperands = [this, &op, &out](size_t count) {
     if (op.getNumOperands() != count) {
       throw std::runtime_error("operand count mismatch for op: " +
                                op.getName().getStringRef().str());
@@ -479,7 +479,8 @@ void Encoder::encodeKnownOpOperands(
     for (auto value : op.getOperands())
       writeULEB128(getValueId(value), out.bytes);
   };
-  auto emitLegacyIndexedTscatterOperands = [&]() {
+  auto emitLegacyIndexedTscatterOperands =
+      [this, &op, &out, &variantInfo]() {
     auto tscatter = llvm::dyn_cast<mlir::pto::TScatterOp>(&op);
     if (!tscatter || tscatter.getMaskPatternAttr() ||
         variantInfo.opcode != 0x1056) {
@@ -548,7 +549,7 @@ void Encoder::encodeKnownOp(mlir::Operation &op, Buffer &out,
   mlir::DictionaryAttr dict = op.getAttrDictionary();
   dict = stripKnownImmediateAttrs(op.getContext(), dict, info);
   writeULEB128(internAttr(file, dict), out.bytes);
-  if (info.has_variant_u8)
+  if (info.has_variant_u8 != 0)
     out.appendU8(variantInfo.variant);
 
   WordVector imms;

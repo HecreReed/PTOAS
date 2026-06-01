@@ -47,14 +47,14 @@ static LogicalResult verifyTTransA5MajorAlignment(TTransOp op, Type type,
 }
 
 mlir::LogicalResult mlir::pto::TTransOp::verify() {
-  auto verifyA2A3 = [&]() -> LogicalResult {
+  auto verifyA2A3 = [this]() -> LogicalResult {
     FailureOr<TTransVerifyState> stateOr =
         verifyTTransCommon(*this, "expects src and dst to have the same element type");
     if (failed(stateOr))
       return failure();
     return verifyTTransA2A3Constraints(*this, *stateOr);
   };
-  auto verifyA5 = [&]() -> LogicalResult {
+  auto verifyA5 = [this]() -> LogicalResult {
     FailureOr<TTransVerifyState> stateOr = verifyTTransCommon(
         *this, "expects src, tmp, and dst to have the same element type");
     if (failed(stateOr))
@@ -70,13 +70,13 @@ mlir::LogicalResult mlir::pto::TTransOp::verify() {
 }
 
 mlir::LogicalResult mlir::pto::TXorOp::verify() {
-  auto verifyBase = [&]() -> FailureOr<Type> {
+  auto verifyBase = [this]() -> FailureOr<Type> {
     return verifyMatchingRowMajorBinaryTileOpCommon(
         getOperation(), getSrc0().getType(), getSrc1().getType(),
         getDst().getType());
   };
 
-  auto verifyA2A3 = [&]() -> LogicalResult {
+  auto verifyA2A3 = [this, &verifyBase]() -> LogicalResult {
     FailureOr<Type> elemOr = verifyBase();
     if (failed(elemOr))
       return failure();
@@ -97,7 +97,7 @@ mlir::LogicalResult mlir::pto::TXorOp::verify() {
     return success();
   };
 
-  auto verifyA5 = [&]() -> LogicalResult {
+  auto verifyA5 = [this, &verifyBase]() -> LogicalResult {
     FailureOr<Type> elemOr = verifyBase();
     if (failed(elemOr))
       return failure();
@@ -114,7 +114,7 @@ mlir::LogicalResult mlir::pto::TXorOp::verify() {
 
 
 mlir::LogicalResult mlir::pto::TXorSOp::verify() {
-  auto verifyCommon = [&]() -> FailureOr<Type> {
+  auto verifyCommon = [this]() -> FailureOr<Type> {
     return verifyDistinctRowMajorUnaryTileOpCommon(getOperation(), getSrc(),
                                                    getDst(), "src", "dst");
   };
@@ -197,8 +197,8 @@ static LogicalResult verifyMatmulTileCommon(Operation *op, TileType lhsTile,
            << "expects lhs and rhs tiles to have the same element type, but got lhs="
            << lhsTile.getElementType() << " rhs=" << rhsTile.getElementType();
   }
-  if ((int64_t)lhsTile.getShape().size() != 2 ||
-      (int64_t)rhsTile.getShape().size() != 2) {
+  if (static_cast<int64_t>(lhsTile.getShape().size()) != 2 ||
+      static_cast<int64_t>(rhsTile.getShape().size()) != 2) {
     return op->emitOpError("expects lhs and rhs tiles to be 2D");
   }
   if (lhsTile.getShape()[1] != rhsTile.getShape()[0]) {
@@ -225,4 +225,3 @@ static LogicalResult verifyMatmulTileCommon(Operation *op, TileType lhsTile,
            << "expects result to have the same element type as lhs and rhs";
   return success();
 }
-

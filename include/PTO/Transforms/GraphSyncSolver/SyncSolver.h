@@ -72,7 +72,8 @@ protected:
 
   // Map op -> list of occurrences in syncIr (quick lookup for an op's
   // occurrences).
-  llvm::DenseMap<OperationBase *, std::vector<Occurrence *>> opAllOccurrences;
+  llvm::DenseMap<const OperationBase *, std::vector<Occurrence *>>
+      opAllOccurrences;
 
   // Bookkeeping map used to record that a pair (scopeOp, op1, op2, setPipe,
   // waitPipe) has already been synchronized and which ConflictPair performed
@@ -223,8 +224,7 @@ protected:
   // Determine how many event ids are needed for a particular occurrence pair.
   EventIdInfo getEventIdInfo(Occurrence *occ1, Occurrence *occ2,
                              RWOperation *rwOp1, RWOperation *rwOp2,
-                             CorePipeInfo corePipeSrc,
-                             CorePipeInfo corePipeDst);
+                             CorePipeInfo, CorePipeInfo);
 
   std::optional<EventIdInfo>
   checkCVMultiBufferUnrollEventIdInfo(RWOperation *rwOp1, RWOperation *rwOp2);
@@ -247,7 +247,7 @@ protected:
       GraphSolver &graphSolver, llvm::DenseSet<ConflictPair *> &visited,
       ConflictPair *conflictPair, EventIdInfo eventIdInfo, int startIndex,
       int endIndex,
-      const llvm::SmallVector<ConflictPair *> &ignoreConflictPairs);
+      const llvm::SmallVector<ConflictPair *> &ignoreConflictPairs) const;
   void addGraphConflictsFromScopes(
       Occurrence *occ, GraphSolver &graphSolver,
       llvm::DenseSet<ConflictPair *> &visited, EventIdInfo eventIdInfo,
@@ -284,17 +284,18 @@ protected:
       });
 
   // Feasibility checks and bookkeeping accessors used by the solver loop.
-  bool checkImpossibleOccPair(Occurrence *occ1, Occurrence *occ2);
+  bool checkImpossibleOccPair(Occurrence *occ1, Occurrence *occ2) const;
 
   bool checkSkipCrossCorePair(Occurrence *occ1, Occurrence *occ2);
 
   bool checkSkipParallelLoop(Occurrence *occ1, Occurrence *occ2);
 
-  bool checkAlreadySynced(Occurrence *occ1, Occurrence *occ2);
+  bool checkAlreadySynced(Occurrence *occ1, Occurrence *occ2) const;
 
-  bool checkAlreadySyncedWithUnitFlag(Occurrence *occ1, Occurrence *occ2);
+  bool checkAlreadySyncedWithUnitFlag(Occurrence *occ1,
+                                      const Occurrence *occ2);
 
-  bool skipMMad1DecomposedLoopOpt(Occurrence *occ1, Occurrence *occ2);
+  bool skipMMad1DecomposedLoopOpt(Occurrence *occ1, Occurrence *occ2) const;
 
   bool checkSyncOpsConflicts(ConflictPair *conflictPair1,
                              ConflictPair *conflictPair2);
@@ -331,8 +332,8 @@ protected:
   void forgetSyncedPair(ConflictPair *conflictPair);
 
   // Utilities to map an occurrence pair to their set/wait occurrences.
-  std::pair<Occurrence *, Occurrence *> getSetWaitLCAPairOcc(Occurrence *occ1,
-                                                             Occurrence *occ2);
+  std::pair<Occurrence *, Occurrence *>
+  getSetWaitLCAPairOcc(Occurrence *occ1, Occurrence *occ2) const;
   std::pair<Occurrence *, Occurrence *> getSetWaitOcc(Occurrence *occ1,
                                                       Occurrence *occ2);
   std::pair<Occurrence *, Occurrence *> getFixedSetWaitOcc(Occurrence *occ1,
@@ -363,11 +364,11 @@ protected:
   void insertBarrierAllBeforeOcc(Occurrence *occ, bool isUseless,
                                  bool isPersistent = false);
 
-  void insertBarrierAllBeforeOp(OperationBase *op, bool isUseless,
+  void insertBarrierAllBeforeOp(const OperationBase *op, bool isUseless,
                                 bool isPersistent);
 
   // Determine the direction (backward) of a synchronization candidate.
-  bool isBackwardSync(Occurrence *occ1, Occurrence *occ2);
+  bool isBackwardSync(Occurrence *occ1, Occurrence *occ2) const;
 
   bool reuseCmp(const ConflictPair *conflictPair1,
                 const ConflictPair *conflictPair2) const;
@@ -377,13 +378,13 @@ protected:
       ConflictPair *conflictPair,
       const llvm::DenseSet<ConflictPair *> &conflictPairsSet);
   ConflictPair *findOldReusedConflictPair(ConflictPair *conflictPair);
-  bool hasReusableConflictBudget(ConflictPair *conflictPair,
-                                 ConflictPair *oldReusedConflictPair);
+  bool hasReusableConflictBudget(const ConflictPair *conflictPair,
+                                 const ConflictPair *oldReusedConflictPair);
   ConflictPair *findBestReusableConflictPair(ConflictPair *conflictPair,
                                              Occurrence *scopeOcc1,
                                              Occurrence *scopeOcc2);
   void applyReusableConflictPair(ConflictPair *conflictPair,
-                                 ConflictPair *reusableConflictPair);
+                                 ConflictPair *reusableConflictPair) const;
 
   bool reuseConflictPair(ConflictPair *conflictPair, Occurrence *scopeOcc1,
                          Occurrence *scopeOcc2);
@@ -394,8 +395,9 @@ protected:
   bool checkReuseMultiBufferFlagId(ConflictPair *conflictPair);
 
   // Primary handler invoked to register/record a found conflict.
-  void handleConflict(Occurrence *occ1, Occurrence *occ2, RWOperation *rwOp1,
-                      RWOperation *rwOp2, CorePipeInfo corePipeSrc,
+  void handleConflict(Occurrence *occ1, Occurrence *occ2,
+                      const RWOperation *rwOp1, const RWOperation *rwOp2,
+                      CorePipeInfo corePipeSrc,
                       CorePipeInfo corePipeDst, EventIdInfo eventIdInfo,
                       bool isUseless);
 
@@ -424,7 +426,7 @@ protected:
   bool prepareSetWaitConflictPairWithEventSolver(
       EventIdSolver &curEventIdSolver, ConflictPair *conflictPair,
       Occurrence *occ1, Occurrence *occ2, Occurrence *normScopeOcc1,
-      Occurrence *normScopeOcc2, OperationBase *normScopeOp,
+      Occurrence *normScopeOcc2, const OperationBase *normScopeOp,
       OperationBase *barrierOp, CorePipeInfo corePipeSrc,
       CorePipeInfo corePipeDst);
   bool checkColorableOrConvertToBarrierAll(EventIdSolver &curEventIdSolver,
@@ -435,7 +437,7 @@ protected:
   void initializeConflictEventIdNode(ConflictPair *conflictPair,
                                      EventIdSolver &curEventIdSolver,
                                      Occurrence *occ1, Occurrence *occ2,
-                                     OperationBase *normScopeOp);
+                                     const OperationBase *normScopeOp);
   bool insertExtraConflictPair(
       EventIdSolver &curEventIdSolver, ConflictPair *conflictPair,
       Occurrence *setOcc, Occurrence *waitOcc, Occurrence *parentScope,
@@ -444,7 +446,8 @@ protected:
       bool couldNotRun = false);
   bool insertOuterBackwardConflictPairIfNeeded(
       EventIdSolver &curEventIdSolver, ConflictPair *conflictPair,
-      Occurrence *setOcc, Occurrence *waitOcc, Loop *parentLCALoopOp,
+      const Occurrence *setOcc, const Occurrence *waitOcc,
+      Loop *parentLCALoopOp,
       Occurrence *parentLCALoopOcc, Occurrence *parentLCALoopBeforePHOcc,
       Occurrence *parentLCALoopAfterPHOcc, OperationBase *barrierOp,
       CorePipeInfo corePipeSrc, CorePipeInfo corePipeDst,
@@ -486,8 +489,8 @@ protected:
                              Occurrence *parOcc2);
 
   // Unit-flag pattern checks used to transform sync into unit-flag modes.
-  std::optional<UnitFlagInfo> checkUnitFlagPatterns(Occurrence *occ1,
-                                                    Occurrence *occ2);
+  std::optional<UnitFlagInfo> checkUnitFlagPatterns(Occurrence *,
+                                                    Occurrence *) const;
 
   void pickAndInsertABarrierAll();
 
@@ -520,20 +523,21 @@ protected:
                       CorePipeInfo corePipeDst, int64_t eventId,
                       bool shouldBeUsedAtleastOnce = true);
 
-  bool checkMergeableConditionScopes(Condition *conditionOp,
+  bool checkMergeableConditionScopes(const Condition *conditionOp,
                                      CorePipeInfo corePipeSrc,
                                      CorePipeInfo corePipeDst, int64_t eventId);
 
-  bool checkMergeableLoopScopes(Loop *loopOp, CorePipeInfo corePipeSrc,
+  bool checkMergeableLoopScopes(const Loop *loopOp, CorePipeInfo corePipeSrc,
                                 CorePipeInfo corePipeDst, int64_t eventId);
 
   bool checkMergeableScopeBody(
-      Scope *scopeOp, const std::set<std::pair<int64_t, SetWaitOp *>> &index,
+      const Scope *scopeOp,
+      const std::set<std::pair<int64_t, SetWaitOp *>> &index,
       CorePipeInfo corePipeSrc, CorePipeInfo corePipeDst, int64_t eventId);
 
   void mergeBackwardSyncEventIds(OperationBase *op);
 
-  bool shouldSkipBackwardSyncMerge(OperationBase *op);
+  bool shouldSkipBackwardSyncMerge(OperationBase *op) const;
 
   void collectMergeableBackwardSyncEvents(
       Scope *scopeOp,

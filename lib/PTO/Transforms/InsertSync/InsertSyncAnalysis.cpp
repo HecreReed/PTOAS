@@ -410,7 +410,7 @@ unsigned InsertSyncAnalysis::InsertBranchSync(
 
 void InsertSyncAnalysis::MergeAlreadySync(
     SyncRecordList &syncRecordList, const SyncRecordList &syncRecordIfList,
-    const SyncRecordList &syncRecordElseList) {
+    const SyncRecordList &syncRecordElseList) const {
   for (size_t bufferIdx = 0; bufferIdx < syncRecordList.size(); bufferIdx++) {
     for (size_t pipeIdx = 0; pipeIdx < kPipeStateSize; pipeIdx++) {
       if (syncRecordIfList[bufferIdx].alreadySync[pipeIdx] &&
@@ -467,18 +467,20 @@ void InsertSyncAnalysis::MemAnalyze(
 }
 
 bool InsertSyncAnalysis::IsMemInfoHasDependency(
-    CompoundInstanceElement *nowCompound,
-    CompoundInstanceElement *frontCompound,
+    const CompoundInstanceElement *nowCompound,
+    const CompoundInstanceElement *frontCompound,
     DepBaseMemInfoPairVec &depBaseMemInfosVec) {
-  bool hasDependency = false;
-  hasDependency |= memAnalyzer_.DepBetween(nowCompound->useVec, frontCompound->defVec,
-                                          depBaseMemInfosVec);
-  hasDependency |= memAnalyzer_.DepBetween(nowCompound->defVec, frontCompound->useVec,
-                                          depBaseMemInfosVec);
+  const bool useDefDependency = memAnalyzer_.DepBetween(
+      nowCompound->useVec, frontCompound->defVec, depBaseMemInfosVec);
+  const bool defUseDependency = memAnalyzer_.DepBetween(
+      nowCompound->defVec, frontCompound->useVec, depBaseMemInfosVec);
+  bool defDefDependency = false;
   if (!isTLoadToTLoadWAWExempt(nowCompound, frontCompound)) {
-    hasDependency |= memAnalyzer_.DepBetween(nowCompound->defVec, frontCompound->defVec,
-                                            depBaseMemInfosVec);
+    defDefDependency = memAnalyzer_.DepBetween(
+        nowCompound->defVec, frontCompound->defVec, depBaseMemInfosVec);
   }
+  bool hasDependency =
+      useDefDependency || defUseDependency || defDefDependency;
 
   // Special hazard: ACC (L0C) read/read cross-pipe ordering.
   //
@@ -542,7 +544,8 @@ bool InsertSyncAnalysis::CanPrunePipeVBarrier(
 }
 
 void InsertSyncAnalysis::InsertSyncOperation(
-    CompoundInstanceElement *nowCompound, CompoundInstanceElement *frontCompound,
+    const CompoundInstanceElement *nowCompound,
+    const CompoundInstanceElement *frontCompound,
     DepBaseMemInfoPairVec &depBaseMemInfosVec,
     const std::optional<unsigned> &forEndIndex) {
   PipelineType nowPipe = nowCompound->kPipeValue;
@@ -597,8 +600,9 @@ void InsertSyncAnalysis::InsertSyncOperation(
 // ==============================================================================
 
 bool InsertSyncAnalysis::isAlreadySync(
-    CompoundInstanceElement *nowCompound, CompoundInstanceElement *frontCompound,
-    SyncRecordList &syncRecordList, unsigned recordListIndex) {
+    const CompoundInstanceElement *nowCompound,
+    const CompoundInstanceElement *frontCompound,
+    SyncRecordList &syncRecordList, unsigned recordListIndex) const {
   (void)nowCompound;
   const PipelineType frontPipe = frontCompound->kPipeValue;
   if (recordListIndex >= syncRecordList.size()) return false;
@@ -623,7 +627,7 @@ void InsertSyncAnalysis::UpdateAlreadySync(const SyncOps &syncVector,
 
 void InsertSyncAnalysis::UpdateSyncRecord(const SyncOperation *sync,
                                           SyncRecord &syncRecord,
-                                          PipelineType nowPipeValue) {
+                                          PipelineType nowPipeValue) const {
   PipelineType setPipeValue = sync->GetSrcPipe();
   PipelineType waitPipeValue = sync->GetDstPipe();
 
@@ -666,7 +670,8 @@ void InsertSyncAnalysis::UpdateSyncRecord(const SyncOperation *sync,
 }
 
 void InsertSyncAnalysis::UpdateSyncRecordInfo(
-    CompoundInstanceElement *frontCompound, SyncRecordList &syncRecordList) {
+    const CompoundInstanceElement *frontCompound,
+    SyncRecordList &syncRecordList) const {
   (void)frontCompound;
   assert(!syncOperations_.empty());
   auto &syncPair = syncOperations_.back();
@@ -717,7 +722,7 @@ bool InsertSyncAnalysis::IsMemAllocOp(Operation *op) const {
 }
 
 SmallVector<Value> InsertSyncAnalysis::GetMemInfoBuffers(
-    const DepBaseMemInfoPairVec &depBaseMemInfosVec) {
+    const DepBaseMemInfoPairVec &depBaseMemInfosVec) const {
   llvm::DenseSet<Value> touchedBuffer;
   SmallVector<Value> result;
   for (auto &pair : depBaseMemInfosVec) {
@@ -735,7 +740,7 @@ SmallVector<Value> InsertSyncAnalysis::GetMemInfoBuffers(
 }
 
 int InsertSyncAnalysis::GetEventIdNum(
-    const DepBaseMemInfoPairVec &depBaseMemInfosVec) {
+    const DepBaseMemInfoPairVec &depBaseMemInfosVec) const {
   for (const auto &pair : depBaseMemInfosVec) {
     bool isLocalA =
         pair.first && (pair.first->scope == pto::AddressSpace::MAT ||

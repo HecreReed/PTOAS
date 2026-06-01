@@ -41,14 +41,15 @@ static LogicalResult verifyTRowExpandCommon(TRowExpandOp op) {
       srcValid[0] != dstValid[0]) {
     return op.emitOpError("expects src and dst to have the same valid_shape[0]");
   }
-  auto checkNonZero = [&](ArrayRef<int64_t> valid, StringRef name)
+  Operation *opBase = op.getOperation();
+  auto checkNonZero = [opBase](ArrayRef<int64_t> valid, StringRef name)
       -> LogicalResult {
     if (valid[0] != ShapedType::kDynamic && valid[0] == 0)
-      return op.emitOpError() << "expects " << name
-                              << " valid_shape[0] to be non-zero";
+      return opBase->emitOpError()
+             << "expects " << name << " valid_shape[0] to be non-zero";
     if (valid[1] != ShapedType::kDynamic && valid[1] == 0)
-      return op.emitOpError() << "expects " << name
-                              << " valid_shape[1] to be non-zero";
+      return opBase->emitOpError()
+             << "expects " << name << " valid_shape[1] to be non-zero";
     return success();
   };
   if (failed(checkNonZero(srcValid, "src")) ||
@@ -58,7 +59,11 @@ static LogicalResult verifyTRowExpandCommon(TRowExpandOp op) {
 }
 
 mlir::LogicalResult mlir::pto::TRowExpandOp::verify() {
-  auto verifyA2A3 = [&]() -> LogicalResult { return verifyTRowExpandCommon(*this); };
-  auto verifyA5 = [&]() -> LogicalResult { return verifyTRowExpandCommon(*this); };
+  auto verifyA2A3 = [this]() -> LogicalResult {
+    return verifyTRowExpandCommon(*this);
+  };
+  auto verifyA5 = [this]() -> LogicalResult {
+    return verifyTRowExpandCommon(*this);
+  };
   return dispatchVerifierByArch(getOperation(), verifyA2A3, verifyA5);
 }

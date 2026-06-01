@@ -221,9 +221,9 @@ template <typename AsyncOp>
 struct PTOAsyncTransferToEmitC : public OpConversionPattern<AsyncOp> {
   using OpConversionPattern<AsyncOp>::OpConversionPattern;
 
-  explicit PTOAsyncTransferToEmitC(TypeConverter &typeConverter, MLIRContext *ctx,
+  explicit PTOAsyncTransferToEmitC(TypeConverter *typeConverter, MLIRContext *ctx,
                                    StringRef callee)
-      : OpConversionPattern<AsyncOp>(typeConverter, ctx), callee(callee.str()) {}
+      : OpConversionPattern<AsyncOp>(*typeConverter, ctx), callee(callee.str()) {}
 
   LogicalResult matchAndRewrite(AsyncOp op, typename AsyncOp::Adaptor adaptor,
                                 ConversionPatternRewriter &rewriter) const override {
@@ -267,11 +267,12 @@ struct PTOAsyncTransferToEmitC : public OpConversionPattern<AsyncOp> {
 
 template <typename AsyncEventOp>
 struct PTOAsyncEventToEmitC : public OpConversionPattern<AsyncEventOp> {
-  explicit PTOAsyncEventToEmitC(TypeConverter &typeConverter, MLIRContext *ctx,
+  explicit PTOAsyncEventToEmitC(TypeConverter *typeConverter, MLIRContext *ctx,
                                 StringRef callee)
-      : OpConversionPattern<AsyncEventOp>(typeConverter, ctx),
+      : OpConversionPattern<AsyncEventOp>(*typeConverter, ctx),
         callee(callee.str()) {}
 
+  // NOLINTNEXTLINE(readability-non-const-parameter): MLIR conversion pattern override requires a mutable rewriter reference.
   LogicalResult matchAndRewrite(AsyncEventOp op,
                                 typename AsyncEventOp::Adaptor adaptor,
                                 ConversionPatternRewriter &rewriter) const override {
@@ -427,9 +428,9 @@ struct PTOCommCollectiveToEmitC : public OpConversionPattern<CollectiveOp> {
     Value parallelGroup;
   };
 
-  explicit PTOCommCollectiveToEmitC(TypeConverter &typeConverter, MLIRContext *ctx,
+  explicit PTOCommCollectiveToEmitC(TypeConverter *typeConverter, MLIRContext *ctx,
                                     StringRef apiName)
-      : OpConversionPattern<CollectiveOp>(typeConverter, ctx),
+      : OpConversionPattern<CollectiveOp>(*typeConverter, ctx),
         apiName(apiName.str()) {}
 
   static FailureOr<Value> buildCollectivePongTile(
@@ -577,9 +578,9 @@ template <typename OpTy>
 struct PTOP2PCommToEmitC : public OpConversionPattern<OpTy> {
   using OpConversionPattern<OpTy>::OpConversionPattern;
 
-  explicit PTOP2PCommToEmitC(TypeConverter &typeConverter, MLIRContext *ctx,
+  explicit PTOP2PCommToEmitC(TypeConverter *typeConverter, MLIRContext *ctx,
                              StringRef callee)
-      : OpConversionPattern<OpTy>(typeConverter, ctx), callee(callee.str()) {}
+      : OpConversionPattern<OpTy>(*typeConverter, ctx), callee(callee.str()) {}
 
   LogicalResult matchAndRewrite(OpTy op, typename OpTy::Adaptor adaptor,
                                 ConversionPatternRewriter &rewriter) const override {
@@ -621,9 +622,9 @@ template <typename SignalOp>
 struct PTOSignalCommToEmitC : public OpConversionPattern<SignalOp> {
   using OpConversionPattern<SignalOp>::OpConversionPattern;
 
-  explicit PTOSignalCommToEmitC(TypeConverter &typeConverter, MLIRContext *ctx,
+  explicit PTOSignalCommToEmitC(TypeConverter *typeConverter, MLIRContext *ctx,
                                 StringRef callee)
-      : OpConversionPattern<SignalOp>(typeConverter, ctx),
+      : OpConversionPattern<SignalOp>(*typeConverter, ctx),
         callee(callee.str()) {}
 
   LogicalResult matchAndRewrite(SignalOp op, typename SignalOp::Adaptor adaptor,
@@ -874,33 +875,33 @@ void populatePTOToEmitCCommPatterns(RewritePatternSet &patterns,
   patterns.add<PTOInitializeL2LPipeToEmitC>(typeConverter, ctx, targetArch);
   patterns.add<PTOBuildAsyncSessionToEmitC>(typeConverter, ctx);
   patterns.add<PTOAsyncTransferToEmitC<pto::TPutAsyncOp>>(
-      typeConverter, ctx,
+      &typeConverter, ctx,
       "pto::comm::TPUT_ASYNC<pto::comm::DmaEngine::SDMA>");
   patterns.add<PTOAsyncTransferToEmitC<pto::TGetAsyncOp>>(
-      typeConverter, ctx,
+      &typeConverter, ctx,
       "pto::comm::TGET_ASYNC<pto::comm::DmaEngine::SDMA>");
-  patterns.add<PTOP2PCommToEmitC<pto::TPutOp>>(typeConverter, ctx,
+  patterns.add<PTOP2PCommToEmitC<pto::TPutOp>>(&typeConverter, ctx,
                                                "pto::comm::TPUT");
-  patterns.add<PTOP2PCommToEmitC<pto::TGetOp>>(typeConverter, ctx,
+  patterns.add<PTOP2PCommToEmitC<pto::TGetOp>>(&typeConverter, ctx,
                                                "pto::comm::TGET");
-  patterns.add<PTOSignalCommToEmitC<pto::TNotifyOp>>(typeConverter, ctx,
+  patterns.add<PTOSignalCommToEmitC<pto::TNotifyOp>>(&typeConverter, ctx,
                                                      "pto::comm::TNOTIFY");
-  patterns.add<PTOSignalCommToEmitC<pto::TWaitOp>>(typeConverter, ctx,
+  patterns.add<PTOSignalCommToEmitC<pto::TWaitOp>>(&typeConverter, ctx,
                                                    "pto::comm::TWAIT");
-  patterns.add<PTOSignalCommToEmitC<pto::TTestOp>>(typeConverter, ctx,
+  patterns.add<PTOSignalCommToEmitC<pto::TTestOp>>(&typeConverter, ctx,
                                                    "pto::comm::TTEST");
-  patterns.add<PTOCommCollectiveToEmitC<pto::TBroadcastOp>>(typeConverter, ctx,
+  patterns.add<PTOCommCollectiveToEmitC<pto::TBroadcastOp>>(&typeConverter, ctx,
                                                             "TBROADCAST");
-  patterns.add<PTOCommCollectiveToEmitC<pto::CommTGatherOp>>(typeConverter, ctx,
+  patterns.add<PTOCommCollectiveToEmitC<pto::CommTGatherOp>>(&typeConverter, ctx,
                                                              "TGATHER");
-  patterns.add<PTOCommCollectiveToEmitC<pto::CommTScatterOp>>(typeConverter, ctx,
+  patterns.add<PTOCommCollectiveToEmitC<pto::CommTScatterOp>>(&typeConverter, ctx,
                                                               "TSCATTER");
-  patterns.add<PTOCommCollectiveToEmitC<pto::TReduceOp>>(typeConverter, ctx,
+  patterns.add<PTOCommCollectiveToEmitC<pto::TReduceOp>>(&typeConverter, ctx,
                                                          "TREDUCE");
   patterns.add<PTOAsyncEventToEmitC<pto::WaitAsyncEventOp>>(
-      typeConverter, ctx, "PTOAS__ASYNC_EVENT_WAIT");
+      &typeConverter, ctx, "PTOAS__ASYNC_EVENT_WAIT");
   patterns.add<PTOAsyncEventToEmitC<pto::TestAsyncEventOp>>(
-      typeConverter, ctx, "PTOAS__ASYNC_EVENT_TEST");
+      &typeConverter, ctx, "PTOAS__ASYNC_EVENT_TEST");
   patterns.add<PTODeclareTileMemRefToEmitC>(typeConverter, ctx);
   patterns.add<PTODeclareGlobalToEmitC>(typeConverter, ctx);
   patterns.add<PTODeclareEventIdArrayToEmitC>(typeConverter, ctx);

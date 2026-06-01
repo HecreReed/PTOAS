@@ -392,13 +392,17 @@ llvm::TypeSize mlir::pto::HiF8Type::getTypeSizeInBits(
   return getOneByteTypeSize();
 }
 
-uint64_t mlir::pto::HiF8Type::getABIAlignment(const DataLayout &,
-                                              DataLayoutEntryListRef) const {
+uint64_t mlir::pto::HiF8Type::getABIAlignment(
+    const DataLayout &dataLayout, DataLayoutEntryListRef params) const {
+  (void)dataLayout;
+  (void)params;
   return 1;
 }
 
 uint64_t mlir::pto::HiF8Type::getPreferredAlignment(
-    const DataLayout &, DataLayoutEntryListRef) const {
+    const DataLayout &dataLayout, DataLayoutEntryListRef params) const {
+  (void)dataLayout;
+  (void)params;
   return 1;
 }
 
@@ -410,12 +414,16 @@ llvm::TypeSize mlir::pto::F4E1M2x2Type::getTypeSizeInBits(
 }
 
 uint64_t mlir::pto::F4E1M2x2Type::getABIAlignment(
-    const DataLayout &, DataLayoutEntryListRef) const {
+    const DataLayout &dataLayout, DataLayoutEntryListRef params) const {
+  (void)dataLayout;
+  (void)params;
   return 1;
 }
 
 uint64_t mlir::pto::F4E1M2x2Type::getPreferredAlignment(
-    const DataLayout &, DataLayoutEntryListRef) const {
+    const DataLayout &dataLayout, DataLayoutEntryListRef params) const {
+  (void)dataLayout;
+  (void)params;
   return 1;
 }
 
@@ -427,12 +435,16 @@ llvm::TypeSize mlir::pto::F4E2M1x2Type::getTypeSizeInBits(
 }
 
 uint64_t mlir::pto::F4E2M1x2Type::getABIAlignment(
-    const DataLayout &, DataLayoutEntryListRef) const {
+    const DataLayout &dataLayout, DataLayoutEntryListRef params) const {
+  (void)dataLayout;
+  (void)params;
   return 1;
 }
 
 uint64_t mlir::pto::F4E2M1x2Type::getPreferredAlignment(
-    const DataLayout &, DataLayoutEntryListRef) const {
+    const DataLayout &dataLayout, DataLayoutEntryListRef params) const {
+  (void)dataLayout;
+  (void)params;
   return 1;
 }
 
@@ -617,16 +629,17 @@ static Type parseKnownPTOTypeAllowNoBang(OpAsmParser &parser, StringRef head) {
   return parseKnownPTOTypeAllowNoBang(parser, head);
 }
 
-mlir::Type TensorViewType::parse(::mlir::AsmParser &parser) {
+mlir::Type TensorViewType::parse(::mlir::AsmParser &odsParser) {
   SmallVec4<int64_t> shape;
   Type elementType;
-  if (failed(parseShapeAndElem(parser, shape, elementType, /*allowDynamic=*/true)))
+  if (failed(
+          parseShapeAndElem(odsParser, shape, elementType, /*allowDynamic=*/true)))
     return Type();
-  return TensorViewType::get(parser.getContext(), shape, elementType);
+  return TensorViewType::get(odsParser.getContext(), shape, elementType);
 }
 
-void TensorViewType::print(::mlir::AsmPrinter &printer) const {
-  printShapeAndElem(printer, getShape(), getElementType());
+void TensorViewType::print(::mlir::AsmPrinter &odsPrinter) const {
+  printShapeAndElem(odsPrinter, getShape(), getElementType());
 }
 
 //===----------------------------------------------------------------------===//
@@ -1472,7 +1485,8 @@ ParseResult mlir::pto::MakeTensorViewOp::parse(OpAsmParser &parser,
     return failure();
 
   auto segAttr = parser.getBuilder().getDenseI32ArrayAttr(
-      {1, (int32_t)shapeOps.size(), (int32_t)strideOps.size()});
+      {1, static_cast<int32_t>(shapeOps.size()),
+       static_cast<int32_t>(strideOps.size())});
   result.addAttribute("operandSegmentSizes", segAttr);
   return success();
 }
@@ -1510,7 +1524,7 @@ inferPartitionViewResultTypeFromSizes(mlir::pto::TensorViewType sourceType,
                                       ValueRange sizes) {
   if (!sourceType)
     return failure();
-  if ((int64_t)sizes.size() != sourceType.getRank())
+  if (sizes.size() != static_cast<size_t>(sourceType.getRank()))
     return failure();
 
   SmallVec4<int64_t> shape;

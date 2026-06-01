@@ -14,7 +14,7 @@ using namespace mlir::pto;
 
 static LogicalResult verifyRowReductionDstLayout(Operation *op, Type ty,
                                                  StringRef name) {
-  auto verifyBaseLayout = [&]() -> LogicalResult {
+  auto verifyBaseLayout = [op, ty, name]() -> LogicalResult {
     if (failed(verifyTileBufCommon(op, ty, name)))
       return failure();
     auto as = getPTOMemorySpaceEnum(ty);
@@ -34,7 +34,7 @@ static LogicalResult verifyRowReductionDstLayout(Operation *op, Type ty,
     }
     return success();
   };
-  auto verifyTileLayout = [&](pto::TileBufType tb) -> LogicalResult {
+  auto verifyTileLayout = [op, ty, name](pto::TileBufType tb) -> LogicalResult {
     auto layout = getTileBufLogicalLayout(tb);
     if (!layout || *layout == pto::Layout::ND)
       return success();
@@ -213,4 +213,3 @@ static FailureOr<Type> verifyTPrefetchDstElemType(Operation *op, Type dstTy,
   op->emitOpError("expects dst to be !pto.tile_buf or memref");
   return failure();
 }
-

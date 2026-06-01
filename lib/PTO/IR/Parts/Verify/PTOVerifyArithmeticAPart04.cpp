@@ -199,7 +199,9 @@ static LogicalResult verifyArithmeticElemTypeForArch(
 static LogicalResult verifyArithmeticBinaryTileOpWithArchDispatch(
     Operation *op, Type src0Ty, Type src1Ty, Type dstTy, bool allowInt8OnA5,
     bool allowBf16OnA5, StringRef a2a3Error, StringRef a5Error) {
-  auto verifyByArch = [&](PTOArch targetArch) -> LogicalResult {
+  auto verifyByArch = [op, src0Ty, src1Ty, dstTy, allowInt8OnA5,
+                       allowBf16OnA5, a2a3Error,
+                       a5Error](PTOArch targetArch) -> LogicalResult {
     FailureOr<Type> elemOr =
         verifyMatchingRowMajorBinaryTileOpCommon(op, src0Ty, src1Ty, dstTy);
     if (failed(elemOr))
@@ -208,8 +210,11 @@ static LogicalResult verifyArithmeticBinaryTileOpWithArchDispatch(
                                            allowInt8OnA5, allowBf16OnA5,
                                            a2a3Error, a5Error);
   };
-  auto verifyA2A3 = [&]() -> LogicalResult { return verifyByArch(PTOArch::A3); };
-  auto verifyA5 = [&]() -> LogicalResult { return verifyByArch(PTOArch::A5); };
+  auto verifyA2A3 = [&verifyByArch]() -> LogicalResult {
+    return verifyByArch(PTOArch::A3);
+  };
+  auto verifyA5 = [&verifyByArch]() -> LogicalResult {
+    return verifyByArch(PTOArch::A5);
+  };
   return dispatchVerifierByArch(op, verifyA2A3, verifyA5);
 }
-

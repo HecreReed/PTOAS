@@ -230,7 +230,7 @@ std::string RWOperation::str(int indent, bool recursive) const {
   }
   ret += std::string(indent, ' ') + opStr + " " + coreTypeStr + " " + pipesStr +
          " " + unitFlag + "\n";
-  if (indent) {
+  if (indent != 0) {
     for (auto memInfo : this->readMemInfo) {
       ret += std::string(indent + 2, ' ') + "read: " + memInfo.str() + "\n";
     }

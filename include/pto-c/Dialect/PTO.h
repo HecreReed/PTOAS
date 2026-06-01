@@ -11,6 +11,7 @@
 
 #include "mlir-c/IR.h"
 #include "mlir-c/Support.h"
+#include <stdbool.h>
 #include <stdint.h>
 
 #ifdef __cplusplus

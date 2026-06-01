@@ -29,6 +29,8 @@ constexpr unsigned kU32FourthByteShift = 3 * kBitsPerByte;
 constexpr char kPTOBCMagic[] = {'P', 'T', 'O', 'B', 'C', '\0'};
 constexpr size_t kPTOBCMagicSize = sizeof(kPTOBCMagic);
 
+} // namespace
+
 std::string normalizeFilePath(const std::string &path) {
   llvm::SmallString<256> normalizedPath(path);
   if (std::error_code ec = llvm::sys::fs::make_absolute(normalizedPath)) {
@@ -37,7 +39,6 @@ std::string normalizeFilePath(const std::string &path) {
   llvm::sys::path::remove_dots(normalizedPath, /*remove_dot_dot=*/true);
   return std::string(normalizedPath.str());
 }
-} // namespace
 
 void Buffer::append(const void* p, size_t n) {
   const uint8_t* b = static_cast<const uint8_t*>(p);

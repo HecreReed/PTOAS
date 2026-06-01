@@ -162,7 +162,8 @@ LogicalResult mlir::pto::MakeTensorViewOp::verify() {
 
   int64_t rank = tvTy.getRank();
 
-  if ((int64_t)getShape().size() != rank || (int64_t)getStrides().size() != rank)
+  if (static_cast<int64_t>(getShape().size()) != rank ||
+      static_cast<int64_t>(getStrides().size()) != rank)
     return emitOpError() << "shape/strides operand counts must match tensor_view rank="
                          << rank;
 
@@ -243,4 +244,3 @@ static LogicalResult verifyPartitionViewDimension(
   }
   return success();
 }
-

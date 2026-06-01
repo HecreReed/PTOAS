@@ -469,7 +469,7 @@ static LogicalResult getStaticTensorViewStrides(
   int64_t rank = sourceType.getRank();
   strides.clear();
   if (auto makeView = source.getDefiningOp<pto::MakeTensorViewOp>()) {
-    if ((int64_t)makeView.getStrides().size() != rank)
+    if (static_cast<int64_t>(makeView.getStrides().size()) != rank)
       return failure();
     for (Value strideValue : makeView.getStrides()) {
       auto cst = getStaticIndexLikeValue(strideValue);
@@ -486,7 +486,7 @@ static LogicalResult getStaticTensorViewStrides(
     StringRef token = opaqueTy.getValue();
     if ((parseIntegerTemplateList(token, "pto::Stride<", stride5D) ||
          parseIntegerTemplateList(token, "Stride<", stride5D)) &&
-        (int64_t)stride5D.size() >= rank) {
+        static_cast<int64_t>(stride5D.size()) >= rank) {
       strides.append(stride5D.end() - rank, stride5D.end());
       return success();
     }

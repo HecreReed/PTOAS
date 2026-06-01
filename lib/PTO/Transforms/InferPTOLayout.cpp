@@ -343,7 +343,7 @@ struct LayoutPreference {
 
 static LayoutPreference collectPreferredLayoutFromConsumers(Value tensorView) {
   LayoutPreference result;
-  auto mergePref = [&](std::optional<Layout> candidate) {
+  auto mergePref = [&result](std::optional<Layout> candidate) {
     if (!candidate || (*candidate != Layout::ND && *candidate != Layout::DN))
       return;
     if (!result.preferred) {
@@ -356,7 +356,7 @@ static LayoutPreference collectPreferredLayoutFromConsumers(Value tensorView) {
     }
   };
 
-  auto walkUses = [&](auto &&self, Value v) -> void {
+  auto walkUses = [&mergePref](auto &&self, Value v) -> void {
     for (OpOperand &use : v.getUses()) {
       Operation *owner = use.getOwner();
       unsigned operandIndex = use.getOperandNumber();
@@ -575,10 +575,10 @@ static void inferSubviewLayoutAttr(memref::SubViewOp op) {
 template <typename SignalFailureFn>
 static void inferMakeTensorLayouts(func::FuncOp func,
                                    SignalFailureFn signalFailure) {
-  func.walk([&](MakeTensorViewOp op) {
+  func.walk([&signalFailure](MakeTensorViewOp op) {
     inferMakeTensorViewLayoutAttr(op, signalFailure);
   });
-  func.walk([&](memref::ReinterpretCastOp op) {
+  func.walk([&signalFailure](memref::ReinterpretCastOp op) {
     inferReinterpretCastLayoutAttr(op, signalFailure);
   });
 }
@@ -588,11 +588,11 @@ static void inferSubviewLayouts(func::FuncOp func) {
 }
 
 static void attachLoadStoreLayouts(func::FuncOp func) {
-  func.walk([&](pto::TLoadOp op) {
+  func.walk([](pto::TLoadOp op) {
     attachLoadStoreLayout(op, [](auto load) { return load.getSrc(); },
                           [](auto load) { return load.getDst(); });
   });
-  func.walk([&](pto::TStoreOp op) {
+  func.walk([](pto::TStoreOp op) {
     attachLoadStoreLayout(op, [](auto store) { return store.getDst(); },
                           [](auto store) { return store.getSrc(); });
   });

@@ -134,20 +134,20 @@ static LogicalResult verifyMatmulMxA5LikeOp(Operation *op, Type aTy, Type bTy,
 }
 
 LogicalResult TGemvBiasOp::verify() {
-  auto verifyA2A3 = [&]() -> LogicalResult {
+  auto verifyA2A3 = [this]() -> LogicalResult {
     return verifyMatmulBiasLikeOp(*this, getA().getType(), getB().getType(),
                                   getBias().getType(), getDst().getType(),
                                   /*useGemvOperands=*/true);
   };
-  auto verifyA5 = [&]() -> LogicalResult { return verifyA2A3(); };
+  auto verifyA5 = [&verifyA2A3]() -> LogicalResult { return verifyA2A3(); };
   return dispatchVerifierByArch(getOperation(), verifyA2A3, verifyA5);
 }
 
 LogicalResult TGemvMxOp::verify() {
-  auto verifyA2A3 = [&]() -> LogicalResult {
+  auto verifyA2A3 = [this]() -> LogicalResult {
     return emitOpError("tgemv.mx is only supported on A5 targets");
   };
-  auto verifyA5 = [&]() -> LogicalResult {
+  auto verifyA5 = [this]() -> LogicalResult {
     if (failed(verifyScaleTileMatchesOperand(*this, getAScale().getType(),
                                              getA().getType(), "a_scale", "a")) ||
         failed(verifyScaleTileMatchesOperand(*this, getBScale().getType(),
@@ -165,10 +165,10 @@ LogicalResult TGemvMxOp::verify() {
 }
 
 LogicalResult TGemvMxAccOp::verify() {
-  auto verifyA2A3 = [&]() -> LogicalResult {
+  auto verifyA2A3 = [this]() -> LogicalResult {
     return emitOpError("tgemv.mx.acc is only supported on A5 targets");
   };
-  auto verifyA5 = [&]() -> LogicalResult {
+  auto verifyA5 = [this]() -> LogicalResult {
     if (failed(verifyAccTileCommon(*this, getCIn().getType(), "c_in")) ||
         failed(verifyScaleTileMatchesOperand(*this, getAScale().getType(),
                                              getA().getType(), "a_scale", "a")) ||
@@ -192,10 +192,10 @@ LogicalResult TGemvMxAccOp::verify() {
 }
 
 LogicalResult TGemvMxBiasOp::verify() {
-  auto verifyA2A3 = [&]() -> LogicalResult {
+  auto verifyA2A3 = [this]() -> LogicalResult {
     return emitOpError("tgemv.mx.bias is only supported on A5 targets");
   };
-  auto verifyA5 = [&]() -> LogicalResult {
+  auto verifyA5 = [this]() -> LogicalResult {
     if (failed(verifyScaleTileMatchesOperand(*this, getAScale().getType(),
                                              getA().getType(), "a_scale", "a")) ||
         failed(verifyScaleTileMatchesOperand(*this, getBScale().getType(),
@@ -223,4 +223,3 @@ LogicalResult TGemvMxBiasOp::verify() {
   };
   return dispatchVerifierByArch(getOperation(), verifyA2A3, verifyA5);
 }
-

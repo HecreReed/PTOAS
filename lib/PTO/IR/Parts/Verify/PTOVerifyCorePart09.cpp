@@ -19,8 +19,8 @@ LogicalResult mlir::pto::SyncWaitOp::verify() {
     return emitOpError()
            << "expects exactly one event-id form: static attr or dynamic index operand";
 
-  auto verifyA2A3 = [&]() -> LogicalResult { return success(); };
-  auto verifyA5 = [&]() -> LogicalResult {
+  auto verifyA2A3 = []() -> LogicalResult { return success(); };
+  auto verifyA5 = [this]() -> LogicalResult {
     switch (getPipe().getPipe()) {
     case PIPE::PIPE_FIX:
     case PIPE::PIPE_MTE1:
@@ -41,7 +41,7 @@ LogicalResult TStoreOp::verify() {
   bool hasPreQuant = static_cast<bool>(getPreQuantScalar());
   auto reluMode = getReluPreMode();
 
-  auto verifyA2A3 = [&]() -> LogicalResult {
+  auto verifyA2A3 = [this, hasPreQuant, reluMode]() -> LogicalResult {
     auto common =
         verifyTStoreCommon(*this, getSrc(), getDst(), /*allowLowPrecision=*/false);
     if (failed(common))
@@ -49,7 +49,7 @@ LogicalResult TStoreOp::verify() {
     return verifyTStoreA2A3(*this, *common, hasPreQuant, reluMode);
   };
 
-  auto verifyA5 = [&]() -> LogicalResult {
+  auto verifyA5 = [this, hasPreQuant, reluMode]() -> LogicalResult {
     auto common =
         verifyTStoreCommon(*this, getSrc(), getDst(), /*allowLowPrecision=*/true);
     if (failed(common))

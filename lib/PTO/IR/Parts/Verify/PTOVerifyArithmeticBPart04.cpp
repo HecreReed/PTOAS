@@ -37,8 +37,8 @@ static LogicalResult verifyTCmpSA5(TCmpSOp op) {
 }
 
 LogicalResult pto::TCmpSOp::verify() {
-  auto verifyA2A3 = [&]() -> LogicalResult { return verifyTCmpSA2A3(*this); };
-  auto verifyA5 = [&]() -> LogicalResult { return verifyTCmpSA5(*this); };
+  auto verifyA2A3 = [this]() -> LogicalResult { return verifyTCmpSA2A3(*this); };
+  auto verifyA5 = [this]() -> LogicalResult { return verifyTCmpSA5(*this); };
   return dispatchVerifierByArch(getOperation(), verifyA2A3, verifyA5);
 }
 LogicalResult pto::TColExpandOp::verify() {
@@ -76,7 +76,7 @@ static LogicalResult verifyTColExpandBinaryLikeOp(Operation *op, Type t0, Type t
   if (!e0 || !e1 || !ed)
     return op->emitOpError("failed to get element type for src0/src1/dst");
 
-  auto isSupportedElem = [&](Type elemTy) {
+  auto isSupportedElem = [allowIntegerTypes, targetArch](Type elemTy) {
     if (elemTy.isF16() || elemTy.isF32())
       return true;
     if (!allowIntegerTypes)
@@ -116,15 +116,19 @@ LogicalResult pto::TColExpandAddOp::verify() {
                                       /*allowIntegerTypes=*/true);
 }
 LogicalResult pto::TColExpandDivOp::verify() {
-  auto verifyByArch = [&](PTOArch targetArch) -> LogicalResult {
+  auto verifyByArch = [this](PTOArch targetArch) -> LogicalResult {
     bool allowIntegerTypes = (targetArch == PTOArch::A5);
     return verifyTColExpandBinaryLikeOp(getOperation(), getSrc0().getType(),
                                         getSrc1().getType(), getDst().getType(),
                                         targetArch, "tcolexpanddiv",
                                         /*allowIntegerTypes=*/allowIntegerTypes);
   };
-  auto verifyA2A3 = [&]() -> LogicalResult { return verifyByArch(PTOArch::A3); };
-  auto verifyA5 = [&]() -> LogicalResult { return verifyByArch(PTOArch::A5); };
+  auto verifyA2A3 = [&verifyByArch]() -> LogicalResult {
+    return verifyByArch(PTOArch::A3);
+  };
+  auto verifyA5 = [&verifyByArch]() -> LogicalResult {
+    return verifyByArch(PTOArch::A5);
+  };
   return dispatchVerifierByArch(getOperation(), verifyA2A3, verifyA5);
 }
 LogicalResult pto::TColExpandSubOp::verify() {
@@ -165,7 +169,7 @@ LogicalResult pto::TColMaxOp::verify() {
 }
 
 LogicalResult pto::TColArgMaxOp::verify() {
-  auto verifyByArch = [&]() -> LogicalResult {
+  auto verifyByArch = [this]() -> LogicalResult {
     return verifyTColArgReductionOpCommon(*this, getSrc().getType(),
                                           getTmp().getType(), getDst().getType());
   };
@@ -183,7 +187,7 @@ LogicalResult pto::TColMinOp::verify() {
 }
 
 LogicalResult pto::TColArgMinOp::verify() {
-  auto verifyByArch = [&]() -> LogicalResult {
+  auto verifyByArch = [this]() -> LogicalResult {
     return verifyTColArgReductionOpCommon(*this, getSrc().getType(),
                                           getTmp().getType(), getDst().getType());
   };
@@ -207,4 +211,3 @@ static ParseResult parseTColSumFormatWithTmp(OpAsmParser &parser,
 static ParseResult parseTColSumFormatWithoutTmp(OpAsmParser &parser, Type &srcTy) {
   return parser.parseColonType(srcTy);
 }
-

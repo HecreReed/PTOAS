@@ -12,22 +12,22 @@
 using namespace mlir;
 using namespace mlir::pto;
 
-void mlir::pto::PartitionViewOp::print(OpAsmPrinter &printer) {
-  printer << " " << getSource() << ", offsets = [";
-  printer.printOperands(getOffsets());
-  printer << "], sizes = [";
-  printer.printOperands(getSizes());
-  printer << "]";
-  printer.printOptionalAttrDict((*this)->getAttrs(),
-                                /*elidedAttrs=*/{"operandSegmentSizes"});
-  printer << " : " << getSource().getType();
+void mlir::pto::PartitionViewOp::print(OpAsmPrinter &p) {
+  p << " " << getSource() << ", offsets = [";
+  p.printOperands(getOffsets());
+  p << "], sizes = [";
+  p.printOperands(getSizes());
+  p << "]";
+  p.printOptionalAttrDict((*this)->getAttrs(),
+                          /*elidedAttrs=*/{"operandSegmentSizes"});
+  p << " : " << getSource().getType();
 
   auto inferredResultType = inferPartitionViewResultTypeFromSizes(
       dyn_cast<mlir::pto::TensorViewType>(getSource().getType()), getSizes());
   if (succeeded(inferredResultType) && *inferredResultType == getResult().getType())
     return;
 
-  printer << " -> " << getResult().getType();
+  p << " -> " << getResult().getType();
 }
 
 static std::optional<int64_t> getConstantIntegerValueEx(
@@ -150,7 +150,8 @@ static LogicalResult verifyNoneBoxTileBufLayout(Operation *op, StringRef name,
                                                 int64_t rows, int64_t cols,
                                                 unsigned elemBytes) {
   constexpr int64_t kAlignedBytes = 32;
-  auto checkByteAlignment = [&](int64_t dim, StringRef layoutName,
+  auto checkByteAlignment = [op, name, elemBytes](
+                                int64_t dim, StringRef layoutName,
                                 StringRef byteExpr) -> LogicalResult {
     if (dim == ShapedType::kDynamic)
       return success();
@@ -210,4 +211,3 @@ static LogicalResult getBoxedTileInnerShape(Operation *op, StringRef name,
   return op->emitOpError() << "expects " << name
                            << " to use a supported boxed tile layout";
 }
-

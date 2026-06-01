@@ -19,7 +19,6 @@
 #include "PTO/IR/PTO.h"
 #include "mlir/IR/BuiltinOps.h"
 #include "mlir/Support/LLVM.h"
-#include "llvm/ADT/StringRef.h"
 #include "mlir/Pass/Pass.h"
 #include "PTO/IR/PTODialect.h"
 #include "mlir/Dialect/Func/IR/FuncOps.h"

@@ -213,7 +213,7 @@ mlir::Attribute TileBufType::getCompactModeAttr() const {
 
 // ✅ numeric getters（可选）
 int32_t TileBufType::getSFractalSizeI32() const {
-  return (int32_t)getConfigAttr().getSFractalSize().getInt();
+  return static_cast<int32_t>(getConfigAttr().getSFractalSize().getInt());
 }
 
 int32_t TileBufType::getBLayoutValueI32() const {
@@ -513,35 +513,36 @@ static Type buildTileBufType(AsmParser &parser,
 // ---- TileBufType custom asm ----
 // !pto.tile_buf<<loc=.., dtype=.., rows=.., cols=.., blayout=.., valid=..x..,
 //                slayout=.., fractal=.., pad=.., compact=..>>
-Type TileBufType::parse(AsmParser &parser) {
-  if (failed(parser.parseLess()))
+Type TileBufType::parse(AsmParser &odsParser) {
+  if (failed(odsParser.parseLess()))
     return Type();
 
   std::string firstToken;
-  if (failed(parser.parseKeywordOrString(&firstToken)))
+  if (failed(odsParser.parseKeywordOrString(&firstToken)))
     return Type();
 
   ParsedTileBufFields fields;
   const bool isLegacySyntax = firstToken == "loc";
   if (isLegacySyntax) {
-    if (failed(parseLegacyTileBufFields(parser, fields)))
+    if (failed(parseLegacyTileBufFields(odsParser, fields)))
       return Type();
   } else {
-    if (failed(parseCompactTileBufFields(parser, firstToken, fields)))
+    if (failed(parseCompactTileBufFields(odsParser, firstToken, fields)))
       return Type();
   }
 
-  if (isLegacySyntax && succeeded(parser.parseOptionalComma())) {
-    if (failed(parseTileBufKeyEq(parser, "compact")) ||
-        failed(parseTileBufUInt32Value(parser, "compact", fields.compactInt))) {
+  if (isLegacySyntax && succeeded(odsParser.parseOptionalComma())) {
+    if (failed(parseTileBufKeyEq(odsParser, "compact")) ||
+        failed(parseTileBufUInt32Value(odsParser, "compact",
+                                       fields.compactInt))) {
       return Type();
     }
   }
 
-  if (failed(parser.parseGreater()))
+  if (failed(odsParser.parseGreater()))
     return Type();
 
-  return buildTileBufType(parser, fields);
+  return buildTileBufType(odsParser, fields);
 }
 
 static llvm::StringRef stringifyLocFromMemorySpace(mlir::Attribute memorySpace) {
@@ -676,14 +677,14 @@ static void printOptionalTileBufFields(AsmPrinter &printer,
   }
 }
 
-void mlir::pto::TileBufType::print(mlir::AsmPrinter &printer) const {
+void mlir::pto::TileBufType::print(mlir::AsmPrinter &odsPrinter) const {
   TileBufPrintInfo info = buildTileBufPrintInfo(*this);
-  printer << "<" << info.locStr << ", ";
-  printTileBufDim(printer, info.rows);
-  printer << "x";
-  printTileBufDim(printer, info.cols);
-  printer << "x";
-  printer.printType(getElementType());
-  printOptionalTileBufFields(printer, info);
-  printer << ">";
+  odsPrinter << "<" << info.locStr << ", ";
+  printTileBufDim(odsPrinter, info.rows);
+  odsPrinter << "x";
+  printTileBufDim(odsPrinter, info.cols);
+  odsPrinter << "x";
+  odsPrinter.printType(getElementType());
+  printOptionalTileBufFields(odsPrinter, info);
+  odsPrinter << ">";
 }

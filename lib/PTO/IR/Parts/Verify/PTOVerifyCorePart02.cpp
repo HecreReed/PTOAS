@@ -123,7 +123,7 @@ inferLayout(ArrayRef<int64_t> shape, ArrayRef<int64_t> strides,
 
   // ND: row-major contiguous
   bool isRowMajor = true;
-  for (int i = 0, e = (int)shape.size() - 1; i < e; ++i) {
+  for (int i = 0, e = static_cast<int>(shape.size()) - 1; i < e; ++i) {
     if (strides[i] != strides[i + 1] * shape[i + 1]) {
       isRowMajor = false;
       break;
@@ -134,7 +134,7 @@ inferLayout(ArrayRef<int64_t> shape, ArrayRef<int64_t> strides,
 
   // DN: col-major
   bool isColMajor = true;
-  for (int i = 0, e = (int)shape.size() - 1; i < e; ++i) {
+  for (int i = 0, e = static_cast<int>(shape.size()) - 1; i < e; ++i) {
     if (strides[i + 1] != strides[i] * shape[i]) {
       isColMajor = false;
       break;
@@ -214,4 +214,3 @@ static LogicalResult verifyRowReductionSrcLayout(Operation *op, Type ty,
   }
   return success();
 }
-

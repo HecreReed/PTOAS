@@ -182,7 +182,8 @@ static LogicalResult verifyTileBufSameLogicalExtent(Operation *op, Type lhs,
 
   auto lhsExtent = getLogicalTileExtentVec(lhs, compareValidShape);
   auto rhsExtent = getLogicalTileExtentVec(rhs, compareValidShape);
-  auto emitMismatch = [&]() -> LogicalResult {
+  auto emitMismatch = [compareValidShape, lhsName, op,
+                       rhsName]() -> LogicalResult {
     if (compareValidShape)
       return op->emitOpError() << "expects " << lhsName << " and " << rhsName
                                << " to have the same valid_shape";
@@ -238,4 +239,3 @@ static LogicalResult verifyScaleTileMatchesOperand(Operation *op, Type scaleTy,
   }
   return success();
 }
-

@@ -150,7 +150,7 @@ static bool shouldEraseBarrierOp(Block *block, Block::iterator it,
   Attribute bPipe = barrierOp.getPipe();
   if (!isPipelineActiveFuture(block, std::next(it), bPipe))
     return true;
-  if (!intraPipeDirtySet.count(bPipe))
+  if (intraPipeDirtySet.count(bPipe) == 0)
     return true;
   auto nextIt = std::next(it);
   if (nextIt == block->end())
@@ -174,7 +174,7 @@ static bool shouldEraseSetOp(Block *block, Block::iterator it,
     return false;
   if (!isPipelineActiveFuture(block, std::next(it), setDst))
     return true;
-  return !intraPipeDirtySet.count(setSrc);
+  return intraPipeDirtySet.count(setSrc) == 0;
 }
 
 static void collectRedundantBarriersInBlock(

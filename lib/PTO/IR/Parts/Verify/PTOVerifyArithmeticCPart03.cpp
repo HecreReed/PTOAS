@@ -104,10 +104,10 @@ mlir::LogicalResult mlir::pto::TInsertOp::verify() {
   if (failed(common))
     return failure();
 
-  auto verifyA2A3 = [&]() -> LogicalResult {
+  auto verifyA2A3 = [this, &common]() -> LogicalResult {
     return verifyTInsertA2A3(*common, *this);
   };
-  auto verifyA5 = [&]() -> LogicalResult {
+  auto verifyA5 = [this, &common]() -> LogicalResult {
     return verifyTInsertA5(*common, *this);
   };
   return dispatchVerifierByArch(getOperation(), verifyA2A3, verifyA5);
@@ -235,4 +235,3 @@ static LogicalResult verifyVectorPreQuantTransferOp(
     return op->emitOpError(message);
   return success();
 }
-

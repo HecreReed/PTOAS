@@ -99,8 +99,8 @@ static MlirType createTileBufTypeValue(const std::vector<int64_t> &shape,
       validShape.data());
 }
 
-void populatePTODialectSubmodule(pybind11::module &m);
-void populatePTODialectSubmodule(pybind11::module &m) {
+static void populatePTODialectSubmodule(pybind11::module *m);
+static void populatePTODialectSubmodule(pybind11::module *m) {
   (void)m;
 }
 
@@ -1082,10 +1082,11 @@ static void bindPTOModule(pybind11::module &m) {
     bindPTOExtraAttrs(m);
     bindPTOTypes(m);
     bindPTOTileBindings(m);
-    populatePTODialectSubmodule(m);
+    populatePTODialectSubmodule(&m);
 }
 
 
+// NOLINTNEXTLINE(readability-inconsistent-declaration-parameter-name): pybind11 module macro requires a named parameter.
 PYBIND11_MODULE(_pto, m) {
   bindPTOModule(m);
 }

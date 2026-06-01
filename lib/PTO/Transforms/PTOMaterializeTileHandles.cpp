@@ -122,7 +122,7 @@ static bool shouldMaterializeYieldOperand(Operation *owner) {
 
 static bool hasStringAttr(ArrayRef<NamedAttribute> attrs, StringRef name,
                           StringRef value) {
-  return llvm::any_of(attrs, [&](NamedAttribute attr) {
+  return llvm::any_of(attrs, [name, value](NamedAttribute attr) {
     if (attr.getName().getValue() != name)
       return false;
     auto strAttr = dyn_cast<StringAttr>(attr.getValue());
@@ -131,7 +131,7 @@ static bool hasStringAttr(ArrayRef<NamedAttribute> attrs, StringRef name,
 }
 
 static bool hasAttr(ArrayRef<NamedAttribute> attrs, StringRef name) {
-  return llvm::any_of(attrs, [&](NamedAttribute attr) {
+  return llvm::any_of(attrs, [name](NamedAttribute attr) {
     return attr.getName().getValue() == name;
   });
 }
@@ -203,10 +203,10 @@ static void inferConfigForMaterializedUse(Operation *owner, unsigned operandNo,
   if (meta.explicitConfig)
     return;
 
-  auto colRow = [&]() {
+  auto colRow = [ctx]() {
     return makeTileConfig(ctx, BLayout::ColMajor, SLayout::RowMajor);
   };
-  auto rowCol = [&]() {
+  auto rowCol = [ctx]() {
     return makeTileConfig(ctx, BLayout::RowMajor, SLayout::ColMajor);
   };
   if (isa<TMatmulOp>(owner)) {
@@ -615,7 +615,7 @@ materializeSCFIfResults(ModuleOp module, DenseMap<Value, Value> &tileHandles) {
   bool changed = false;
 
   SmallVec8<scf::IfOp> ifOps;
-  module.walk([&](scf::IfOp ifOp) { ifOps.push_back(ifOp); });
+  module.walk([&ifOps](scf::IfOp ifOp) { ifOps.push_back(ifOp); });
 
   for (scf::IfOp ifOp : llvm::reverse(ifOps)) {
     if (ifOp.getNumResults() == 0)
@@ -661,7 +661,7 @@ materializeSCFForResults(ModuleOp module, DenseMap<Value, Value> &tileHandles) {
   bool changed = false;
 
   SmallVec8<scf::ForOp> forOps;
-  module.walk([&](scf::ForOp forOp) { forOps.push_back(forOp); });
+  module.walk([&forOps](scf::ForOp forOp) { forOps.push_back(forOp); });
 
   for (scf::ForOp forOp : llvm::reverse(forOps)) {
     if (forOp.getNumResults() == 0)
@@ -723,13 +723,13 @@ materializeControlFlowTileResults(ModuleOp module,
         materializeSCFIfResults(module, tileHandles);
     if (failed(ifChanged))
       return failure();
-    changed |= *ifChanged;
+    changed = changed || *ifChanged;
 
     FailureOr<bool> forChanged =
         materializeSCFForResults(module, tileHandles);
     if (failed(forChanged))
       return failure();
-    changed |= *forChanged;
+    changed = changed || *forChanged;
   } while (changed);
   return success();
 }
@@ -878,7 +878,7 @@ static Value materializeAnchorResult(Operation *anchor, Value anchoredValue,
 
 static SmallVec32<Operation *> collectMaterializedTileAnchors(ModuleOp module) {
   SmallVec32<Operation *> anchors;
-  module.walk([&](Operation *op) {
+  module.walk([&anchors](Operation *op) {
     if (isMaterializedTileAnchor(op))
       anchors.push_back(op);
   });
@@ -906,7 +906,7 @@ static DenseSet<Value> collectMustMaterializeSources(ArrayRef<Operation *> ancho
 static SmallVec32<std::pair<Operation *, unsigned>>
 collectTileOperandsToRewrite(ModuleOp module) {
   SmallVec32<std::pair<Operation *, unsigned>> operandsToRewrite;
-  module.walk([&](Operation *op) {
+  module.walk([&operandsToRewrite](Operation *op) {
     if (!shouldMaterializeOperand(op))
       return;
     for (OpOperand &operand : op->getOpOperands()) {
@@ -922,7 +922,7 @@ static void eraseDeadBindTiles(ModuleOp module) {
   while (erasedBind) {
     erasedBind = false;
     SmallVec16<Operation *> deadBinds;
-    module.walk([&](BindTileOp op) {
+    module.walk([&deadBinds](BindTileOp op) {
       if (op.getResult().use_empty())
         deadBinds.push_back(op);
     });

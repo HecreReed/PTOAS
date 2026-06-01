@@ -118,7 +118,7 @@ mlir::LogicalResult mlir::pto::TConcatOp::verify() {
   auto elemOr = verifyTConcatCommon(*this);
   if (failed(elemOr))
     return failure();
-  auto verifyA2A3 = [&]() -> LogicalResult {
+  auto verifyA2A3 = [this, &elemOr]() -> LogicalResult {
     if (failed(verifyLocVecType(getOperation(), getSrc0().getType(), "src0")) ||
         failed(verifyLocVecType(getOperation(), getSrc1().getType(), "src1")) ||
         failed(verifyLocVecType(getOperation(), getDst().getType(), "dst"))) {
@@ -126,7 +126,7 @@ mlir::LogicalResult mlir::pto::TConcatOp::verify() {
     }
     return verifyConcatElemType(getOperation(), *elemOr);
   };
-  auto verifyA5 = [&]() -> LogicalResult {
+  auto verifyA5 = [this, &elemOr]() -> LogicalResult {
     if (failed(verifyLocVecType(getOperation(), getSrc0().getType(), "src0")) ||
         failed(verifyLocVecType(getOperation(), getSrc1().getType(), "src1")) ||
         failed(verifyLocVecType(getOperation(), getDst().getType(), "dst"))) {
@@ -175,11 +175,12 @@ static LogicalResult verifyTConcatidxValidShapes(TConcatidxOp op) {
     return op.emitOpError("expects all operands to have rank-2 valid_shape");
   }
 
-  auto checkValidRow = [&](const auto &validShape,
-                           StringRef name) -> LogicalResult {
+  Operation *opBase = op.getOperation();
+  auto checkValidRow = [opBase, &dstValid](const auto &validShape,
+                                           StringRef name) -> LogicalResult {
     if (validShape[0] != ShapedType::kDynamic &&
         dstValid[0] != ShapedType::kDynamic && validShape[0] != dstValid[0]) {
-      op.emitOpError("expects ")
+      opBase->emitOpError("expects ")
           << name << " valid row to match dst valid row";
       return failure();
     }
@@ -240,4 +241,3 @@ static FailureOr<std::pair<Type, Type>> verifyTConcatidxCommon(TConcatidxOp op) 
     return failure();
   return std::make_pair(src0Elem, src0IdxElem);
 }
-

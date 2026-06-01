@@ -13,7 +13,7 @@ using namespace mlir;
 using namespace mlir::pto;
 
 LogicalResult mlir::pto::TDivOp::verify() {
-  auto verifyA2A3 = [&]() -> LogicalResult {
+  auto verifyA2A3 = [this]() -> LogicalResult {
     FailureOr<Type> elemOr = verifyMatchingRowMajorBinaryTileOpCommon(
         getOperation(), getSrc0().getType(), getSrc1().getType(),
         getDst().getType());
@@ -24,7 +24,7 @@ LogicalResult mlir::pto::TDivOp::verify() {
       return emitOpError("expects A2/A3 tdiv element type to be f16 or f32");
     return success();
   };
-  auto verifyA5 = [&]() -> LogicalResult {
+  auto verifyA5 = [this]() -> LogicalResult {
     FailureOr<Type> elemOr = verifyMatchingRowMajorBinaryTileOpCommon(
         getOperation(), getSrc0().getType(), getSrc1().getType(),
         getDst().getType());
@@ -47,7 +47,8 @@ mlir::LogicalResult mlir::pto::TDivSOp::verify() {
     return mlir::isa<IntegerType, FloatType>(ty);
   };
 
-  auto verifyByArch = [&](PTOArch targetArch) -> LogicalResult {
+  auto verifyByArch =
+      [this, &isTileLike, &isScalarLike](PTOArch targetArch) -> LogicalResult {
     Type srcTy = getSrc().getType();
     Type rhsTy = getScalar().getType();
     Type dstTy = getDst().getType();
@@ -80,13 +81,17 @@ mlir::LogicalResult mlir::pto::TDivSOp::verify() {
       return emitOpError("expects A5 tdivs element type to be i32/i16/i8/f16/f32");
     return success();
   };
-  auto verifyA2A3 = [&]() -> LogicalResult { return verifyByArch(PTOArch::A3); };
-  auto verifyA5 = [&]() -> LogicalResult { return verifyByArch(PTOArch::A5); };
+  auto verifyA2A3 = [&verifyByArch]() -> LogicalResult {
+    return verifyByArch(PTOArch::A3);
+  };
+  auto verifyA5 = [&verifyByArch]() -> LogicalResult {
+    return verifyByArch(PTOArch::A5);
+  };
   return dispatchVerifierByArch(getOperation(), verifyA2A3, verifyA5);
 }
 
 mlir::LogicalResult mlir::pto::TExpOp::verify() {
-  auto verifyA2A3 = [&]() -> LogicalResult {
+  auto verifyA2A3 = [this]() -> LogicalResult {
     Type srcTy = getSrc().getType();
     Type dstTy = getDst().getType();
     if (failed(verifyVecTileUnaryOp(*this, srcTy, dstTy, "src", "dst",
@@ -99,7 +104,7 @@ mlir::LogicalResult mlir::pto::TExpOp::verify() {
       return emitOpError("expects element type to be f16 or f32");
     return mlir::success();
   };
-  auto verifyA5 = [&]() -> LogicalResult { return verifyA2A3(); };
+  auto verifyA5 = [&verifyA2A3]() -> LogicalResult { return verifyA2A3(); };
   return dispatchVerifierByArch(getOperation(), verifyA2A3, verifyA5);
 }
 
@@ -133,7 +138,7 @@ static LogicalResult verifyTExpandsElemType(Operation *op, Type dstElem,
 }
 
 mlir::LogicalResult mlir::pto::TExpandsOp::verify() {
-  auto verifyA2A3 = [&]() -> LogicalResult {
+  auto verifyA2A3 = [this]() -> LogicalResult {
     auto common = verifyTExpandsCommon(*this);
     if (failed(common))
       return failure();
@@ -146,7 +151,7 @@ mlir::LogicalResult mlir::pto::TExpandsOp::verify() {
         "expects A2/A3 texpands dst element type to be i16/i32/f16/bf16/f32",
         /*allowI8=*/false);
   };
-  auto verifyA5 = [&]() -> LogicalResult {
+  auto verifyA5 = [this]() -> LogicalResult {
     auto common = verifyTExpandsCommon(*this);
     if (failed(common))
       return failure();
@@ -208,4 +213,3 @@ static bool isColMajorRowMajorNZTileBuf(pto::TileBufType ty) {
   return ty.getBLayoutValueI32() != static_cast<int32_t>(pto::BLayout::RowMajor) &&
          ty.getSLayoutValueI32() == static_cast<int32_t>(pto::SLayout::RowMajor);
 }
-

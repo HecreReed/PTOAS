@@ -108,8 +108,9 @@ void Solver::collectSetWaitOpsIndexes(OperationBase *op,
                                       const SyncMap &syncMapBefore,
                                       const SyncMap &syncMapAfter) {
   ASSERT(op != nullptr);
-  auto collectSyncOpIndexesForMap = [&](const SyncMap &syncMap) {
-    if (!syncMap.count(op))
+  auto collectSyncOpIndexesForMap =
+      [this, op](const SyncMap &syncMap) {
+    if (syncMap.count(op) == 0)
       return;
     auto *it = syncMap.find(op);
     ASSERT(it != syncMap.end());
@@ -222,7 +223,7 @@ bool Solver::checkMergeable(Scope *scopeOp, CorePipeInfo corePipeSrc,
                                  eventId);
 }
 
-bool Solver::checkMergeableConditionScopes(Condition *conditionOp,
+bool Solver::checkMergeableConditionScopes(const Condition *conditionOp,
                                            CorePipeInfo corePipeSrc,
                                            CorePipeInfo corePipeDst,
                                            int64_t eventId) {
@@ -234,7 +235,8 @@ bool Solver::checkMergeableConditionScopes(Condition *conditionOp,
                         eventId, true);
 }
 
-bool Solver::checkMergeableLoopScopes(Loop *loopOp, CorePipeInfo corePipeSrc,
+bool Solver::checkMergeableLoopScopes(const Loop *loopOp,
+                                      CorePipeInfo corePipeSrc,
                                       CorePipeInfo corePipeDst,
                                       int64_t eventId) {
   for (auto &childOp : loopOp->body) {
@@ -256,19 +258,20 @@ bool Solver::checkMergeableLoopScopes(Loop *loopOp, CorePipeInfo corePipeSrc,
 }
 
 bool Solver::checkMergeableScopeBody(
-    Scope *scopeOp, const std::set<std::pair<int64_t, SetWaitOp *>> &index,
+    const Scope *scopeOp,
+    const std::set<std::pair<int64_t, SetWaitOp *>> &index,
     CorePipeInfo corePipeSrc, CorePipeInfo corePipeDst, int64_t eventId) {
   for (auto &childOp : scopeOp->body) {
     if (!isBackwardSyncChildUsable(
             childOp.get(), index, setWaitStartIndexInclusive[childOp.get()],
             setWaitEndIndex[childOp.get()],
             setWaitEndIndexInclusive[childOp.get()],
-            [&](OperationBase *targetOp, CorePipeInfo src, CorePipeInfo dst,
-                int64_t targetEventId) {
+            [this](OperationBase *targetOp, CorePipeInfo src, CorePipeInfo dst,
+                   int64_t targetEventId) {
               return checkBackwardSyncEventsContains(targetOp, src, dst,
                                                     targetEventId);
             },
-            [&](OperationBase *targetOp, CorePipeInfo src, CorePipeInfo dst) {
+            [this](OperationBase *targetOp, CorePipeInfo src, CorePipeInfo dst) {
               return checkBackwardSyncEventsContainsAfterMerge(targetOp, src,
                                                                dst);
             },
@@ -310,7 +313,7 @@ void Solver::mergeBackwardSyncPairs(SyncMap &syncMapBefore,
   }
 }
 
-bool Solver::shouldSkipBackwardSyncMerge(OperationBase *op) {
+bool Solver::shouldSkipBackwardSyncMerge(OperationBase *op) const {
   if (llvm::isa_and_present<FunctionBlock>(op))
     return true;
   if (llvm::isa_and_present<Condition, Loop>(op->parentOp))
@@ -627,7 +630,7 @@ bool Solver::insertOuterBackwardSyncPairs(
       auto [it, isInserted] =
           backwardSyncEventsAfterMerge[chosenOp].insert(corePipeInfoPair);
       (void)it;
-      newPairIsInserted |= isInserted;
+      newPairIsInserted = newPairIsInserted || isInserted;
     }
   }
   return newPairIsInserted;
@@ -665,7 +668,7 @@ llvm::LogicalResult Solver::disableMultiEventIdForBarrierAllPairs() {
   bool newPairIsInserted = false;
   for (auto corePipeInfoPair : barrierAllPairs) {
     auto [it, isInserted] = disabledMultiEventIdPairs.insert(corePipeInfoPair);
-    newPairIsInserted |= isInserted;
+    newPairIsInserted = newPairIsInserted || isInserted;
   }
   LLVM_DEBUG({
     if (newPairIsInserted) {

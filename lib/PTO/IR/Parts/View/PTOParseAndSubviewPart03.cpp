@@ -167,19 +167,19 @@ static LogicalResult verifyTRowExpandReduceLikeOp(Operation *op, Type src0Ty,
 }
 
 mlir::LogicalResult mlir::pto::TRowExpandExpdifOp::verify() {
-  auto verifyA2A3 = [&]() -> LogicalResult {
+  auto verifyA2A3 = [this]() -> LogicalResult {
     return verifyTRowExpandReduceLikeOp(getOperation(), getSrc0().getType(),
                                         getSrc1().getType(), getDst().getType(),
                                         getTmp() ? getTmp().getType() : Type{},
-                                        (bool)getTmp(), PTOArch::A3,
+                                        static_cast<bool>(getTmp()), PTOArch::A3,
                                         "trowexpandexpdif",
                                         /*allowIntegerTypes=*/false);
   };
-  auto verifyA5 = [&]() -> LogicalResult {
+  auto verifyA5 = [this]() -> LogicalResult {
     return verifyTRowExpandReduceLikeOp(getOperation(), getSrc0().getType(),
                                         getSrc1().getType(), getDst().getType(),
                                         getTmp() ? getTmp().getType() : Type{},
-                                        (bool)getTmp(), PTOArch::A5,
+                                        static_cast<bool>(getTmp()), PTOArch::A5,
                                         "trowexpandexpdif",
                                         /*allowIntegerTypes=*/false);
   };
@@ -187,22 +187,21 @@ mlir::LogicalResult mlir::pto::TRowExpandExpdifOp::verify() {
 }
 
 mlir::LogicalResult mlir::pto::TRowExpandMaxOp::verify() {
-  auto verifyA2A3 = [&]() -> LogicalResult {
+  auto verifyA2A3 = [this]() -> LogicalResult {
     return verifyTRowExpandReduceLikeOp(getOperation(), getSrc0().getType(),
                                         getSrc1().getType(), getDst().getType(),
                                         getTmp() ? getTmp().getType() : Type{},
-                                        (bool)getTmp(), PTOArch::A3,
+                                        static_cast<bool>(getTmp()), PTOArch::A3,
                                         "trowexpandmax",
                                         /*allowIntegerTypes=*/true);
   };
-  auto verifyA5 = [&]() -> LogicalResult {
+  auto verifyA5 = [this]() -> LogicalResult {
     return verifyTRowExpandReduceLikeOp(getOperation(), getSrc0().getType(),
                                         getSrc1().getType(), getDst().getType(),
                                         getTmp() ? getTmp().getType() : Type{},
-                                        (bool)getTmp(), PTOArch::A5,
+                                        static_cast<bool>(getTmp()), PTOArch::A5,
                                         "trowexpandmax",
                                         /*allowIntegerTypes=*/true);
   };
   return dispatchVerifierByArch(getOperation(), verifyA2A3, verifyA5);
 }
-

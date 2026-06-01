@@ -92,8 +92,10 @@ mlir::LogicalResult mlir::pto::TPReluOp::verify() {
   auto common = verifyTPReluCommon(*this);
   if (failed(common))
     return failure();
-  auto verifyA2A3 = [&]() -> LogicalResult { return verifyTPReluA2A3(*this, *common); };
-  auto verifyA5 = [&]() -> LogicalResult { return success(); };
+  auto verifyA2A3 = [this, &common]() -> LogicalResult {
+    return verifyTPReluA2A3(*this, *common);
+  };
+  auto verifyA5 = []() -> LogicalResult { return success(); };
   return dispatchVerifierByArch(getOperation(), verifyA2A3, verifyA5);
 }
 
@@ -148,7 +150,7 @@ mlir::LogicalResult mlir::pto::TQuantOp::verify() {
     return failure();
   if (shouldBypassDecodedMemrefVerifier(getOperation()))
     return success();
-  auto verifyA2A3 = [&]() -> LogicalResult {
+  auto verifyA2A3 = [this]() -> LogicalResult {
     if (failed(verifyTQuantCommon(*this)))
       return failure();
     if (!isRowMajorTileBuf(getSrc().getType()) ||
@@ -157,13 +159,13 @@ mlir::LogicalResult mlir::pto::TQuantOp::verify() {
     }
     return success();
   };
-  auto verifyA5 = [&]() -> LogicalResult { return verifyTQuantCommon(*this); };
+  auto verifyA5 = [this]() -> LogicalResult { return verifyTQuantCommon(*this); };
   return dispatchVerifierByArch(getOperation(), verifyA2A3, verifyA5);
 }
 
 mlir::LogicalResult mlir::pto::TDequantOp::verify() {
   // Structural checks: src must be i8 or i16, dst/scale/offset must be f32.
-  auto verifyStructural = [&]() -> LogicalResult {
+  auto verifyStructural = [this]() -> LogicalResult {
     Type srcElemTy = getElemTy(getSrc().getType());
     auto srcIntTy = dyn_cast<IntegerType>(srcElemTy);
     if (!srcIntTy || !(srcIntTy.getWidth() == 8 || srcIntTy.getWidth() == 16))
@@ -184,7 +186,7 @@ mlir::LogicalResult mlir::pto::TDequantOp::verify() {
   if (shouldBypassDecodedMemrefVerifier(getOperation()))
     return success();
 
-  auto verifyCommon = [&]() -> LogicalResult {
+  auto verifyCommon = [this]() -> LogicalResult {
     if (failed(verifyTileBufCommon(*this, getSrc().getType(), "src")) ||
         failed(verifyTileBufCommon(*this, getScale().getType(), "scale")) ||
         failed(verifyTileBufCommon(*this, getOffset().getType(), "offset")) ||
@@ -193,7 +195,7 @@ mlir::LogicalResult mlir::pto::TDequantOp::verify() {
     return success();
   };
 
-  auto verifyA2A3 = [&]() -> LogicalResult {
+  auto verifyA2A3 = [this, &verifyCommon]() -> LogicalResult {
     if (failed(verifyCommon()))
       return failure();
     if (!isRowMajorTileBuf(getSrc().getType()) ||
@@ -203,7 +205,7 @@ mlir::LogicalResult mlir::pto::TDequantOp::verify() {
     return success();
   };
 
-  auto verifyA5 = [&]() -> LogicalResult { return verifyCommon(); };
+  auto verifyA5 = [&verifyCommon]() -> LogicalResult { return verifyCommon(); };
 
   return dispatchVerifierByArch(getOperation(), verifyA2A3, verifyA5);
 }
@@ -226,4 +228,3 @@ mlir::LogicalResult mlir::pto::TRecipOp::verify() {
     return emitOpError("expects A3 trecip src and dst to use different storage");
   return mlir::success();
 }
-

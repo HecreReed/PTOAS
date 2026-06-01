@@ -318,7 +318,7 @@ void PTOIRTranslator::UpdateKernelArgMemInfo() {
 // ============================================================================
 void PTOIRTranslator::RecursionIR(Region *region) {
   auto result = region->walk<WalkOrder::PreOrder>(
-      [&](Operation *op) { return TranslateOperation(op); });
+      [this](Operation *op) { return TranslateOperation(op); });
   if (result == WalkResult::interrupt()) {
     llvm_unreachable("PTO InjectSync Traverse IR Failed!");
   }
@@ -612,7 +612,7 @@ void PTOIRTranslator::UpdatePTOOpInfo(Operation *op) {
 // ============================================================================
 // 6. [P0 修改] 获取 Op 的 Pipeline 类型
 // ============================================================================
-pto::PipelineType PTOIRTranslator::getOpPipeline(Operation *op) {
+pto::PipelineType PTOIRTranslator::getOpPipeline(Operation *op) const {
   // 1. 优先尝试通过接口获取
   if (auto pipeOp = dyn_cast<pto::OpPipeInterface>(op)) {
     // 注意：假设 pto::Pipe (ODS Enum) 和 pto::PipelineType (C++ Enum) 的数值定义是一致的
@@ -849,7 +849,8 @@ void PTOIRTranslator::UpdateMemrefSubViewAliasBufferInfo(memref::SubViewOp op) {
     return;
   }
 
-  auto getSegmentSize = [&]() -> std::optional<uint64_t> {
+  auto getSegmentSize =
+      [&op, sourceType, elemBytes]() -> std::optional<uint64_t> {
     SmallVector<int64_t> strides;
     int64_t baseOffset = ShapedType::kDynamic;
     if (failed(mlir::getStridesAndOffset(sourceType, strides, baseOffset)) ||
@@ -990,7 +991,7 @@ void PTOIRTranslator::UpdateDefUseVec(ValueRange values, SmallVector<const BaseM
 // 9. 调试与打印支持
 // ============================================================================
 
-std::string PTOIRTranslator::getPipelineName(pto::PipelineType pipe) {
+std::string PTOIRTranslator::getPipelineName(pto::PipelineType pipe) const {
   switch (pipe) {
   case pto::PipelineType::PIPE_MTE1: return "MTE1";
   case pto::PipelineType::PIPE_MTE2: return "MTE2";
@@ -1005,7 +1006,7 @@ std::string PTOIRTranslator::getPipelineName(pto::PipelineType pipe) {
 
 void PTOIRTranslator::printMemInfoList(llvm::raw_ostream &os,
                                        const SmallVector<const BaseMemInfo *> &list,
-                                       AsmState &state) {
+                                       AsmState &state) const {
   os << "[";
   bool first = true;
   for (const auto *info : list) {

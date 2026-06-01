@@ -32,12 +32,14 @@ using UnitPriorityQueue =
 
 static bool hasBetterDistance(const UnitDistMap &distance,
                               const UnitDistKey &distKey, int curIndex) {
-  return distance.count(distKey) && distance.lookup(distKey) < curIndex;
+  return (distance.count(distKey) != 0) &&
+         distance.lookup(distKey) < curIndex;
 }
 
 static bool exceededSearchBound(const UnitDistMap &distance,
                                 const UnitDistKey &distKey, int endIndex) {
-  return distance.count(distKey) && distance.lookup(distKey) > endIndex;
+  return (distance.count(distKey) != 0) &&
+         distance.lookup(distKey) > endIndex;
 }
 
 static bool reachedUnitFlagDestination(CorePipeInfo curCorePipe,
@@ -189,15 +191,18 @@ std::optional<int> GraphSolver::runDijkstra(CorePipeInfo corePipeSrc,
     LLVM_DEBUG(llvm::dbgs() << "dij-step: " << curCore << ' ' << curPipe << ' '
                             << curIndex << '\n');
 
-    if (curCorePipe == corePipeDst && distance.count(corePipeDst)) {
+    if (curCorePipe == corePipeDst &&
+        (distance.count(corePipeDst) != 0)) {
       break;
     }
 
-    if (distance.count(curCorePipe) && distance[curCorePipe] < curIndex) {
+    if ((distance.count(curCorePipe) != 0) &&
+        distance[curCorePipe] < curIndex) {
       continue;
     }
 
-    if (distance.count(curCorePipe) && distance[curCorePipe] > endIndex) {
+    if ((distance.count(curCorePipe) != 0) &&
+        distance[curCorePipe] > endIndex) {
       break;
     }
 
@@ -211,7 +216,7 @@ std::optional<int> GraphSolver::runDijkstra(CorePipeInfo corePipeSrc,
     for (auto &[endCorePipe, edges] : adjacencyList[curCorePipe]) {
       auto it = edges.lower_bound(Edge(curCorePipe, endCorePipe, curIndex, -1));
       for (; it != edges.end(); it++) {
-        if (!distance.count(endCorePipe) ||
+        if (distance.count(endCorePipe) == 0 ||
             (distance[endCorePipe] > (it->endIndex))) {
           distance[endCorePipe] = it->endIndex;
           que.emplace(it->endIndex, endCorePipe);
@@ -220,8 +225,8 @@ std::optional<int> GraphSolver::runDijkstra(CorePipeInfo corePipeSrc,
     }
   }
 
-  return distance.count(corePipeDst) ? distance[corePipeDst]
-                                     : std::optional<int>();
+  return distance.count(corePipeDst) != 0 ? distance[corePipeDst]
+                                          : std::optional<int>();
 }
 
 std::optional<int> GraphSolver::runDijkstraUnitFlagEnabled(
@@ -239,10 +244,10 @@ std::optional<int> GraphSolver::runDijkstraUnitFlagEnabled(
     auto [curIsUnitFlag, curIsOccDst, curCorePipe] = curDistKey;
     que.pop();
 
-    auto [curCore, curPipe] = curCorePipe;
-    LLVM_DEBUG(llvm::dbgs() << "dij-step: " << curCore << ' ' << curPipe
-                            << ' ' << curIsUnitFlag << ' ' << curIsOccDst
-                            << ' ' << curIndex << '\n');
+    LLVM_DEBUG(llvm::dbgs()
+               << "dij-step: " << static_cast<int>(curCorePipe.coreType) << ' '
+               << static_cast<int>(curCorePipe.pipe) << ' ' << curIsUnitFlag
+               << ' ' << curIsOccDst << ' ' << curIndex << '\n');
     if (hasBetterDistance(distance, curDistKey, curIndex))
       continue;
     if (exceededSearchBound(distance, curDistKey, endIndex))

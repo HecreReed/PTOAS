@@ -184,7 +184,7 @@ static LogicalResult verifyAsyncFlatContiguous1DGMMemRef(Operation *op,
 
   bool packed = !strides.empty() && strides.back() == 1;
   for (int i = static_cast<int>(shape.size()) - 2; i >= 0 && packed; --i)
-    packed &= strides[i] == strides[i + 1] * shape[i + 1];
+    packed = packed && (strides[i] == strides[i + 1] * shape[i + 1]);
   if (!packed)
     return op->emitOpError()
            << "expects " << name
@@ -192,7 +192,7 @@ static LogicalResult verifyAsyncFlatContiguous1DGMMemRef(Operation *op,
 
   bool logical1D = true;
   for (int i = 0, e = static_cast<int>(shape.size()) - 1; i < e; ++i)
-    logical1D &= shape[i] == 1;
+    logical1D = logical1D && (shape[i] == 1);
   if (!logical1D)
     return op->emitOpError()
            << "expects " << name
@@ -221,11 +221,10 @@ static LogicalResult verifyAsyncFlatContiguous1DGMViewLike(Operation *op,
 
   bool logical1D = true;
   for (int i = 0, e = static_cast<int>(shape.size()) - 1; i < e; ++i)
-    logical1D &= shape[i] == 1;
+    logical1D = logical1D && (shape[i] == 1);
   if (!logical1D)
     return op->emitOpError()
            << "expects " << name
            << " to be a static flat contiguous logical 1D GM view";
   return success();
 }
-

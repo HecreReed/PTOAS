@@ -73,7 +73,7 @@ static LogicalResult rewriteI1RightShiftApprox(Operation *op, Location loc,
   return success();
 }
 
-static LogicalResult getScalarIntegerOpInfo(Operation *op, Type opTy,
+static LogicalResult getScalarIntegerOpInfo(Operation *, Type opTy,
                                             const TypeConverter *typeConverter,
                                             unsigned &bitWidth, Type &dstTy) {
   auto intTy = dyn_cast<IntegerType>(opTy);
@@ -129,7 +129,7 @@ static LogicalResult rewriteDirectCastOp(Operation *op, Value in, Type dstTy,
   return success();
 }
 
-static LogicalResult getScalarIntegerCastTypes(Operation *op, Type dstSrcTy,
+static LogicalResult getScalarIntegerCastTypes(Operation *, Type dstSrcTy,
                                                Type inSrcTy,
                                                const TypeConverter *typeConverter,
                                                Type &dstTy,
@@ -173,10 +173,17 @@ struct ArithSimpleBinaryToEmitC : public OpConversionPattern<ArithOp> {
   LogicalResult
   matchAndRewrite(ArithOp op, typename ArithOp::Adaptor adaptor,
                   ConversionPatternRewriter &rewriter) const override {
+    return rewriteSimpleBinary(op, adaptor, &rewriter);
+  }
+
+private:
+  LogicalResult rewriteSimpleBinary(ArithOp op,
+                                    typename ArithOp::Adaptor adaptor,
+                                    ConversionPatternRewriter *rewriter) const {
     Type dstTy = this->getTypeConverter()->convertType(op.getType());
     if (!dstTy)
       return failure();
-    rewriter.replaceOpWithNewOp<EmitCOp>(op, dstTy, adaptor.getOperands());
+    rewriter->replaceOpWithNewOp<EmitCOp>(op, dstTy, adaptor.getOperands());
     return success();
   }
 };
@@ -834,10 +841,12 @@ struct ArithMulExtendedToEmitC : public OpConversionPattern<ArithOp> {
     Type lowDstTy = newResultTypes[0];
     Type highDstTy = newResultTypes[1];
 
-    Type wideTy = isUnsigned ? (Type)getWiderUnsignedIntOpaqueType(rewriter.getContext(),
-                                                                   bitWidth)
-                             : (Type)getWiderSignedIntOpaqueType(rewriter.getContext(),
-                                                                 bitWidth);
+    Type wideTy =
+        isUnsigned
+            ? static_cast<Type>(
+                  getWiderUnsignedIntOpaqueType(rewriter.getContext(), bitWidth))
+            : static_cast<Type>(
+                  getWiderSignedIntOpaqueType(rewriter.getContext(), bitWidth));
 
     Value lhsWide;
     Value rhsWide;

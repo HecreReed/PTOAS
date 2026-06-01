@@ -459,10 +459,11 @@ static KnownOpImmediates readKnownOpImmediates(Reader &r,
 }
 
 static llvm::SmallVector<uint64_t, kValueIdInlineCapacity>
-readKnownOperandIds(BuildCtx &bc, Reader &r, uint16_t opcode, uint8_t variant,
+readKnownOperandIds(const BuildCtx &, Reader &r, uint16_t opcode,
+                    uint8_t variant,
                     const ptobc::v0::OpInfo &info,
                     const KnownOpImmediates &imms) {
-  auto reorderLegacyIndexedTscatter = [&](ValueIdVector ids) {
+  auto reorderLegacyIndexedTscatter = [opcode](ValueIdVector ids) {
     if (opcode != 0x1056 || ids.size() != 3)
       return ids;
     // Historical v0 indexed tscatter payload is (src, indexes, dst), while the
@@ -491,7 +492,6 @@ readKnownOperandIds(BuildCtx &bc, Reader &r, uint16_t opcode, uint8_t variant,
         readValueIds(r, (((imms.optMask & 0x1U) != 0U) ? 1U : 0U) +
                             (((imms.optMask & 0x2U) != 0U) ? 1U : 0U)));
   default:
-    (void)bc;
     throw std::runtime_error("unknown operand_mode");
   }
 }
@@ -607,7 +607,7 @@ static mlir::Operation *buildKnownOpFromReader(BuildCtx &bc, Reader &r,
   if (!info)
     throw std::runtime_error("missing opcode schema");
 
-  uint8_t variant = info->has_variant_u8 ? r.readU8() : 0;
+  uint8_t variant = (info->has_variant_u8 != 0) ? r.readU8() : 0;
   KnownOpImmediates imms = readKnownOpImmediates(r, *info);
   auto operandIds = readKnownOperandIds(bc, r, opcode, variant, *info, imms);
   auto operands = materializeOperands(bc, operandIds);
@@ -936,7 +936,10 @@ void decodeFileToPTO(const std::string& inPath, const std::string& outPath) {
 
   std::string out = printModuleCanonical(module.get(), opt);
   if (dbg) llvm::errs() << "[ptobc] writing output: " << outPath << "\n";
-  std::ofstream ofs(outPath);
+  std::string normalizedOutPath = normalizeFilePath(outPath);
+  std::ofstream ofs(normalizedOutPath);
+  if (!ofs)
+    throw std::runtime_error("Failed to write: " + normalizedOutPath);
   ofs << out;
   if (!out.empty() && out.back() != '\n') ofs << "\n";
 }

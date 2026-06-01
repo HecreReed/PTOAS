@@ -163,19 +163,19 @@ IRTranslator::getReadWriteMemoryOps(Operation *op) {
 
 template <typename OP>
 std::unique_ptr<OperationBase>
-IRTranslator::getLoadStoreOp(OP loadStoreOp, OperationBase *parentOp) {
+IRTranslator::getLoadStoreOp(OP op, OperationBase *parentOp) {
   auto pipe = pto::PIPE::PIPE_S;
   llvm::SmallVector<Value> reads;
   llvm::SmallVector<Value> writes;
   if constexpr (std::is_same_v<OP, memref::LoadOp> ||
                 std::is_same_v<OP, affine::AffineLoadOp>) {
-    reads = getMemoryOps({loadStoreOp.getMemRef()});
+    reads = getMemoryOps({op.getMemRef()});
   } else {
-    writes = getMemoryOps({loadStoreOp.getMemRef()});
+    writes = getMemoryOps({op.getMemRef()});
   }
   return std::make_unique<RWOperation>(
-      loadStoreOp.getOperation(), parentOp, TCoreType::CUBE_OR_VECTOR, pipe,
-      pipe, reads, writes);
+      op.getOperation(), parentOp, TCoreType::CUBE_OR_VECTOR, pipe, pipe, reads,
+      writes);
 }
 
 std::unique_ptr<OperationBase>
@@ -203,7 +203,8 @@ IRTranslator::getTensorExtractOp(tensor::ExtractOp extractOp,
 }
 
 std::unique_ptr<OperationBase>
-IRTranslator::getCallOp(func::CallOp callOp, OperationBase *parentOp) {
+IRTranslator::getCallOp(func::CallOp, OperationBase *parentOp) const {
+  (void)parentOp;
   return nullptr;
 }
 
@@ -215,32 +216,33 @@ void IRTranslator::updateBlockArgAliases(Block *block,
     blockArgAliases[arg].push_back(operand);
 }
 
-bool IRTranslator::isUnlikelyCondition(Condition *condOp) {
+bool IRTranslator::isUnlikelyCondition(Condition *condOp) const {
   return condOp && condOp->op &&
          condOp->op->hasAttrOfType<UnitAttr>("pto.unlikely_condition");
 }
 
-bool IRTranslator::isParallelLoop(Loop *loopOp) {
+bool IRTranslator::isParallelLoop(Loop *loopOp) const {
   return loopOp && loopOp->op &&
          loopOp->op->hasAttrOfType<UnitAttr>("pto.parallel_loop");
 }
 
 std::optional<int64_t>
-IRTranslator::getLoopMultibufferUnrollNum(Loop *loopOp) {
+IRTranslator::getLoopMultibufferUnrollNum(Loop *) const {
   return {};
 }
 
-std::optional<int64_t> IRTranslator::getScopePreloadNum(Scope *scopeOp) {
+std::optional<int64_t> IRTranslator::getScopePreloadNum(Scope *) const {
   return {};
 }
 
-std::optional<int64_t> IRTranslator::getScopeMaxPreloadNum(Scope *scopeOp) {
+std::optional<int64_t>
+IRTranslator::getScopeMaxPreloadNum(Scope *) const {
   return {};
 }
 
 Scope *IRTranslator::prepareBlockScope(std::unique_ptr<Scope> &scopeOp,
                                        Block &block,
-                                       bool isFunctionRegion) {
+                                       bool isFunctionRegion) const {
   Scope *parScope = scopeOp.get();
   if (isFunctionRegion) {
     auto blockOp = std::make_unique<FunctionBlock>();
@@ -255,7 +257,7 @@ Scope *IRTranslator::prepareBlockScope(std::unique_ptr<Scope> &scopeOp,
   return parScope;
 }
 
-void IRTranslator::appendBlockBoundaries(Scope *parScope, Block &block) {
+void IRTranslator::appendBlockBoundaries(Scope *parScope, Block &block) const {
   auto blockEnd = std::make_unique<PlaceHolder>(nullptr, parScope);
   blockEnd->scopeEnd = parScope;
   blockEnd->block = &block;
@@ -361,8 +363,9 @@ std::unique_ptr<Scope> IRTranslator::funcIrBuilder(Region &region,
   return scopeOp;
 }
 
-bool IRTranslator::skipLaterIterations(Occurrence *occ1, Occurrence *occ2) {
-  auto skip = [](Occurrence *occ, Occurrence *other) {
+bool IRTranslator::skipLaterIterations(Occurrence *occ1,
+                                       Occurrence *occ2) const {
+  auto skip = [](const Occurrence *occ, const Occurrence *other) {
     if (!occ->parentOcc || !isa<Loop>(occ->parentOcc->op))
       return false;
     int split = occ->parentOcc->loopSplitIndex;
@@ -406,13 +409,14 @@ void IRTranslator::generateProcessingOrders(
       generateProcessingOrders(occ1, occ2, isUseless);
 }
 
-void IRTranslator::generateProcessingOrders(Scope *scopeOp, Occurrence *occ,
+void IRTranslator::generateProcessingOrders(Scope *, Occurrence *occ,
                                             bool isUseless) {
   generateProcessingOrders(occ->childOccs, isUseless);
 }
 
 void IRTranslator::generateProcessingOrders(Loop *loopOp, Occurrence *occ,
                                             bool isUseless) {
+  (void)loopOp;
   int64_t childNum = static_cast<int64_t>(occ->childOccs.size());
   if (childNum == 0 || childNum % kBalancedOccurrenceSplitFactor != 0)
     return;

@@ -160,7 +160,7 @@ static Operation *findFirstEmitCFunctionAnchor(Block &body) {
 
 static void reorderEmitCFunctionBlock(
     Block &body, ArrayRef<emitc::FuncOp> desiredOrder, Operation *anchor) {
-  auto advanceAnchor = [&]() {
+  auto advanceAnchor = [&anchor]() {
     while (anchor) {
       anchor = anchor->getNextNode();
       if (!anchor || isa<emitc::FuncOp>(anchor))
@@ -482,9 +482,9 @@ static void rewriteMarkerCallsToMembers(
   while (changed) {
     changed = false;
     for (const MarkerRewriteSpec &rewrite : rewrites) {
-      changed |= rewriteMarkerCallToMember(cpp, rewrite.marker,
-                                           rewrite.memberName,
-                                           rewrite.expectedNumArgs);
+      const bool markerChanged = rewriteMarkerCallToMember(
+          cpp, rewrite.marker, rewrite.memberName, rewrite.expectedNumArgs);
+      changed = changed || markerChanged;
     }
   }
 }
@@ -629,9 +629,9 @@ static void rewriteMarkerCallsToSubscripts(
   while (changed) {
     changed = false;
     for (const MarkerSubscriptRewriteSpec &rewrite : rewrites) {
-      changed |= rewriteMarkerCallToSubscript(cpp, rewrite.marker,
-                                              rewrite.expectedNumArgs,
-                                              rewrite.isStore);
+      const bool markerChanged = rewriteMarkerCallToSubscript(
+          cpp, rewrite.marker, rewrite.expectedNumArgs, rewrite.isStore);
+      changed = changed || markerChanged;
     }
   }
 }
@@ -997,7 +997,8 @@ static void rewriteScalarConstantDecls(std::string &cpp) {
   OutputLineVector lines = splitLines(cpp);
 
   EraseLineVector eraseLine(lines.size(), false);
-  auto rewriteSegment = [&](size_t beginLine, size_t endLine) {
+  auto rewriteSegment = [&lines, &eraseLine](size_t beginLine,
+                                             size_t endLine) {
     llvm::StringMap<ConstantDeclCandidate> candidates;
     collectConstantDeclCandidates(lines, beginLine, endLine, candidates);
     rewriteConstantDeclCandidates(candidates, lines, eraseLine);
@@ -1108,8 +1109,7 @@ static int resolveEffectiveArch(llvm::StringRef buf, bool isPTOBC,
 
 static OwningOpRef<ModuleOp> decodePTOBCModule(llvm::StringRef buf,
                                                MLIRContext &context) {
-  llvm::ArrayRef<uint8_t> bytes(reinterpret_cast<const uint8_t *>(buf.data()),
-                                buf.size());
+  llvm::ArrayRef<uint8_t> bytes(buf.bytes_begin(), buf.bytes_end());
 #if defined(__cpp_exceptions) || defined(__EXCEPTIONS)
   try {
     return ptobc::decodePTOBCToModule(bytes, context);
@@ -1360,7 +1360,7 @@ int main(int argc, char **argv) {
   llvm::StringRef buf = inputBuffer->getBuffer();
   bool isPTOBC = buf.size() >= 6 && std::memcmp(buf.data(), "PTOBC\0", 6) == 0;
   std::string arch;
-  if (resolveEffectiveArch(buf, isPTOBC, cliArchSpecified, arch))
+  if (resolveEffectiveArch(buf, isPTOBC, cliArchSpecified, arch) != 0)
     return 1;
 
   OwningOpRef<ModuleOp> module =
@@ -1384,8 +1384,8 @@ int main(int argc, char **argv) {
   if (!normalizeAutoSyncTailHints(*module, context))
     return 1;
   bool hasTAssign = moduleHasTAssign(*module);
-  if (validateTAssignAndAutoSyncOptions(effectiveLevel, hasTAssign) ||
-      validateAllocTileAddrMode(*module, effectiveLevel)) {
+  if ((validateTAssignAndAutoSyncOptions(effectiveLevel, hasTAssign) != 0) ||
+      (validateAllocTileAddrMode(*module, effectiveLevel) != 0)) {
     return 1;
   }
 
@@ -1396,7 +1396,7 @@ int main(int argc, char **argv) {
   addAutoSyncPipeline(pm);
   std::unique_ptr<llvm::ToolOutputFile> outputFile;
   llvm::raw_ostream *outputOS = &llvm::outs();
-  if (openOutputStream(outputFile, outputOS))
+  if (openOutputStream(outputFile, outputOS) != 0)
     return 1;
   if (emitMlirIR)
     return runMlirPipeline(pm, *module, *outputOS, outputFile.get());
@@ -1405,7 +1405,7 @@ int main(int argc, char **argv) {
     llvm::errs() << "Error: Pass execution failed.\n";
     return 1;
   }
-  if (emitCppOutput(*module, *outputOS))
+  if (emitCppOutput(*module, *outputOS) != 0)
     return 1;
   if (outputFile)
     outputFile->keep();

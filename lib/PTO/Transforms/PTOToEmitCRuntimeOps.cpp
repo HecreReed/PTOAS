@@ -180,8 +180,7 @@ struct PTOTPushToEmitC : public OpConversionPattern<mlir::pto::TPushOp> {
 
   template <typename PipeTileOp, typename AdaptorT>
 static FailureOr<PipeTileRuntimeCall> buildPipeTileRuntimeCall(
-    PipeTileOp op, AdaptorT adaptor, PTOArch targetArch, StringRef calleeBase,
-    ConversionPatternRewriter &rewriter) {
+    PipeTileOp op, AdaptorT adaptor, PTOArch targetArch, StringRef calleeBase) {
     auto pipeTok = getTPipeTokenFromValue(op.getPipeHandle(), targetArch);
     if (failed(pipeTok))
       return failure();
@@ -211,8 +210,7 @@ static FailureOr<PipeTileRuntimeCall> buildPipeTileRuntimeCall(
 
   LogicalResult matchAndRewrite(mlir::pto::TPushOp op, OpAdaptor adaptor,
                                 ConversionPatternRewriter &rewriter) const override {
-    auto call = buildPipeTileRuntimeCall(op, adaptor, targetArch, "TPUSH",
-                                         rewriter);
+    auto call = buildPipeTileRuntimeCall(op, adaptor, targetArch, "TPUSH");
     if (failed(call))
       return rewriter.notifyMatchFailure(op, "failed to resolve pipe token");
     return lowerPipeTileRuntimeCall(op, *call, rewriter);
@@ -230,7 +228,7 @@ struct PTOTPopToEmitC : public OpConversionPattern<mlir::pto::TPopOp> {
   LogicalResult matchAndRewrite(mlir::pto::TPopOp op, OpAdaptor adaptor,
                                 ConversionPatternRewriter &rewriter) const override {
     auto call = PTOTPushToEmitC::buildPipeTileRuntimeCall(
-        op, adaptor, targetArch, "TPOP", rewriter);
+        op, adaptor, targetArch, "TPOP");
     if (failed(call))
       return rewriter.notifyMatchFailure(op, "failed to resolve pipe token");
     return PTOTPushToEmitC::lowerPipeTileRuntimeCall(op, *call, rewriter);

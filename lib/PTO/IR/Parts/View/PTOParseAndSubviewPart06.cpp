@@ -100,12 +100,12 @@ static LogicalResult verifyTStoreFPA2A3Constraints(TStoreFPOp op) {
 mlir::LogicalResult mlir::pto::TStoreFPOp::verify() {
   if (shouldBypassTStoreFPVerifier(*this))
     return success();
-  auto verifyA2A3 = [&]() -> LogicalResult {
+  auto verifyA2A3 = [this]() -> LogicalResult {
     if (failed(verifyTStoreFPTileOperands(*this)))
       return failure();
     return verifyTStoreFPA2A3Constraints(*this);
   };
-  auto verifyA5 = [&]() -> LogicalResult {
+  auto verifyA5 = [this]() -> LogicalResult {
     return verifyTStoreFPTileOperands(*this);
   };
   switch (getVerifierTargetArch(getOperation())) {
@@ -218,4 +218,3 @@ verifyTTransCommon(TTransOp op, StringRef mismatchMessage) {
   }
   return TTransVerifyState{srcTy, dstTy, elemBytes};
 }
-

@@ -24,10 +24,10 @@ LogicalResult mlir::pto::PartitionViewOp::verify() {
   }
 
   int64_t srcRank = srcTy.getRank();
-  if ((int64_t)getOffsets().size() != srcRank)
+  if (static_cast<int64_t>(getOffsets().size()) != srcRank)
     return emitOpError() << "offset count (" << getOffsets().size()
                          << ") must match source rank (" << srcRank << ")";
-  if ((int64_t)getSizes().size() != srcRank)
+  if (static_cast<int64_t>(getSizes().size()) != srcRank)
     return emitOpError() << "size count (" << getSizes().size()
                          << ") must match source rank (" << srcRank << ")";
 
@@ -238,4 +238,3 @@ LogicalResult mlir::pto::validatePTOEntryFunctions(ModuleOp module) {
   }
   return success();
 }
-

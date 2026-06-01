@@ -58,11 +58,11 @@ static LogicalResult requireFrontendGmSlotBuffer(InitOpT initOp) {
 
 template <typename InitOpT>
 static void propagateFrontendIdAttr(InitOpT initOp, Operation *pipeOp,
-                                    IRRewriter &rewriter) {
+                                    IRRewriter *rewriter) {
   if (!pipeOp)
     return;
   pipeOp->setAttr(kFrontendPipeIdAttrName,
-                  rewriter.getI32IntegerAttr(initOp.getId()));
+                  rewriter->getI32IntegerAttr(initOp.getId()));
 }
 
 static std::optional<int64_t> getStaticIndexLikeValue(Value value) {
@@ -129,7 +129,7 @@ static FailureOr<Value> createFrontendPipe(InitOpT initOp, IRRewriter &rewriter,
         loc, pipeTy, dirAttr, slotSizeAttr, slotNumAttr, IntegerAttr{},
         IntegerAttr{}, noSplitAttr, initOp.getGmSlotTensor(), Value{},
         Value{});
-    propagateFrontendIdAttr(initOp, pipe.getOperation(), rewriter);
+    propagateFrontendIdAttr(initOp, pipe.getOperation(), &rewriter);
     return pipe.getPipe();
   }
 
@@ -140,7 +140,7 @@ static FailureOr<Value> createFrontendPipe(InitOpT initOp, IRRewriter &rewriter,
     auto pipe = rewriter.create<InitializeL2LPipeOp>(
         loc, pipeTy, dirAttr, slotSizeAttr, slotNumAttr, IntegerAttr{},
         noSplitAttr, localAddr, peerLocalAddr);
-    propagateFrontendIdAttr(initOp, pipe.getOperation(), rewriter);
+    propagateFrontendIdAttr(initOp, pipe.getOperation(), &rewriter);
     return pipe.getPipe();
   }
 
@@ -157,7 +157,7 @@ static FailureOr<Value> createFrontendPipe(InitOpT initOp, IRRewriter &rewriter,
       loc, pipeTy, dirAttr, slotSizeAttr, slotNumAttr, localSlotNumAttr,
       IntegerAttr{}, noSplitAttr, initOp.getGmSlotBuffer(), localAddr,
       peerLocalAddr);
-  propagateFrontendIdAttr(initOp, pipe.getOperation(), rewriter);
+  propagateFrontendIdAttr(initOp, pipe.getOperation(), &rewriter);
   return pipe.getPipe();
 }
 
@@ -267,11 +267,11 @@ static FailureOr<FrontendPipeHandles> lowerAndEraseFrontendInit(InitOpT initOp,
 
 template <typename InitOpT>
 static void recordFrontendInitOp(InitOpT initOp,
-                                 SmallVectorImpl<Operation *> &frontendInitOps,
-                                 llvm::DenseMap<int32_t, Operation *> &initOpById,
+                                 SmallVectorImpl<Operation *> *frontendInitOps,
+                                 llvm::DenseMap<int32_t, Operation *> *initOpById,
                                  bool &hasDuplicateId) {
-  frontendInitOps.push_back(initOp.getOperation());
-  auto [it, inserted] = initOpById.try_emplace(initOp.getId(), initOp);
+  frontendInitOps->push_back(initOp.getOperation());
+  bool inserted = initOpById->try_emplace(initOp.getId(), initOp).second;
   if (inserted)
     return;
   initOp.emitOpError()
@@ -285,15 +285,16 @@ static LogicalResult collectFrontendInitOps(
     bool &hasAicInit, bool &hasAivInit) {
   llvm::DenseMap<int32_t, Operation *> initOpById;
   bool hasDuplicateId = false;
-  funcOp.walk([&](Operation *op) {
+  funcOp.walk([&frontendInitOps, &initOpById, &hasDuplicateId, &hasAicInit,
+               &hasAivInit](Operation *op) {
     if (auto init = dyn_cast<AicInitializePipeOp>(op)) {
       hasAicInit = true;
-      recordFrontendInitOp(init, frontendInitOps, initOpById, hasDuplicateId);
+      recordFrontendInitOp(init, &frontendInitOps, &initOpById, hasDuplicateId);
       return WalkResult::advance();
     }
     if (auto init = dyn_cast<AivInitializePipeOp>(op)) {
       hasAivInit = true;
-      recordFrontendInitOp(init, frontendInitOps, initOpById, hasDuplicateId);
+      recordFrontendInitOp(init, &frontendInitOps, &initOpById, hasDuplicateId);
     }
     return WalkResult::advance();
   });
@@ -343,7 +344,7 @@ static FailureOr<FrontendPipeHandleMap> lowerInitIfPresent(func::FuncOp funcOp,
 
 static bool hasFrontendPipeOps(func::FuncOp funcOp) {
   bool found = false;
-  funcOp.walk([&](Operation *op) {
+  funcOp.walk([&found](Operation *op) {
     if (isa<AicInitializePipeOp, AivInitializePipeOp, TAllocToAivOp,
             TAllocToAicOp, TPushToAivOp, TPushToAicOp, TPopFromAicOp,
             TPopFromAivOp, TFreeFromAicOp, TFreeFromAivOp>(op)) {
@@ -387,20 +388,20 @@ static LogicalResult requireFrontendPipe(OpT op, Value pipe,
 template <typename AllocOpT>
 static void lowerFrontendAllocOp(AllocOpT alloc, Value pipe,
                                  ArrayRef<int64_t> slotStrides,
-                                 IRRewriter &rewriter) {
+                                 IRRewriter *rewriter) {
   auto decl =
-      rewriter.create<DeclareGlobalOp>(alloc.getLoc(), alloc.getEntry().getType());
-  propagateGlobalTensorStrides(decl, slotStrides, rewriter);
-  rewriter.create<TAllocOp>(alloc.getLoc(), decl.getEntry(), pipe,
-                            alloc.getSplitAttr());
-  rewriter.replaceOp(alloc, decl.getEntry());
+      rewriter->create<DeclareGlobalOp>(alloc.getLoc(), alloc.getEntry().getType());
+  propagateGlobalTensorStrides(decl, slotStrides, *rewriter);
+  rewriter->create<TAllocOp>(alloc.getLoc(), decl.getEntry(), pipe,
+                             alloc.getSplitAttr());
+  rewriter->replaceOp(alloc, decl.getEntry());
 }
 
 template <typename PushOpT>
 static void lowerFrontendPushOp(PushOpT push, Value pipe,
-                                IRRewriter &rewriter) {
-  rewriter.replaceOpWithNewOp<TPushOp>(push, push.getTile(), pipe,
-                                       push.getSplitAttr());
+                                IRRewriter *rewriter) {
+  rewriter->replaceOpWithNewOp<TPushOp>(push, push.getTile(), pipe,
+                                        push.getSplitAttr());
 }
 
 template <typename PopOpT>
@@ -431,15 +432,15 @@ static void lowerFrontendPopOp(PopOpT pop, Value pipe,
 
 template <typename FreeOpT>
 static void lowerFrontendFreeOp(FreeOpT free, Value pipe,
-                                IRRewriter &rewriter) {
-  rewriter.replaceOpWithNewOp<TFreeOp>(free, free.getEntry(), pipe,
-                                       free.getSplitAttr());
+                                IRRewriter *rewriter) {
+  rewriter->replaceOpWithNewOp<TFreeOp>(free, free.getEntry(), pipe,
+                                        free.getSplitAttr());
 }
 
 static FailureOr<bool> tryLowerFrontendAllocDataOp(
     Operation *op, const FrontendPipeHandleMap &handlesById, DominanceInfo &dom,
     IRRewriter &rewriter) {
-  auto lowerWithHandles = [&](int32_t id)
+  auto lowerWithHandles = [op, &handlesById, &dom](int32_t id)
       -> FailureOr<const FrontendPipeHandles *> {
     return lookupFrontendHandles(op, id, handlesById, dom);
   };
@@ -450,7 +451,7 @@ static FailureOr<bool> tryLowerFrontendAllocDataOp(
         failed(requireFrontendPipe(alloc, (**handlesOr).c2vPipe, "C2V")))
       return failure();
     lowerFrontendAllocOp(alloc, (**handlesOr).c2vPipe,
-                         (**handlesOr).c2vSlotStrides, rewriter);
+                         (**handlesOr).c2vSlotStrides, &rewriter);
     return true;
   }
   if (auto alloc = dyn_cast<TAllocToAicOp>(op)) {
@@ -459,7 +460,7 @@ static FailureOr<bool> tryLowerFrontendAllocDataOp(
         failed(requireFrontendPipe(alloc, (**handlesOr).v2cPipe, "V2C")))
       return failure();
     lowerFrontendAllocOp(alloc, (**handlesOr).v2cPipe,
-                         (**handlesOr).v2cSlotStrides, rewriter);
+                         (**handlesOr).v2cSlotStrides, &rewriter);
     return true;
   }
   return false;
@@ -468,7 +469,7 @@ static FailureOr<bool> tryLowerFrontendAllocDataOp(
 static FailureOr<bool> tryLowerFrontendPushDataOp(
     Operation *op, const FrontendPipeHandleMap &handlesById, DominanceInfo &dom,
     IRRewriter &rewriter) {
-  auto lowerWithHandles = [&](int32_t id)
+  auto lowerWithHandles = [op, &handlesById, &dom](int32_t id)
       -> FailureOr<const FrontendPipeHandles *> {
     return lookupFrontendHandles(op, id, handlesById, dom);
   };
@@ -478,7 +479,7 @@ static FailureOr<bool> tryLowerFrontendPushDataOp(
     if (failed(handlesOr) ||
         failed(requireFrontendPipe(push, (**handlesOr).c2vPipe, "C2V")))
       return failure();
-    lowerFrontendPushOp(push, (**handlesOr).c2vPipe, rewriter);
+    lowerFrontendPushOp(push, (**handlesOr).c2vPipe, &rewriter);
     return true;
   }
   if (auto push = dyn_cast<TPushToAicOp>(op)) {
@@ -486,7 +487,7 @@ static FailureOr<bool> tryLowerFrontendPushDataOp(
     if (failed(handlesOr) ||
         failed(requireFrontendPipe(push, (**handlesOr).v2cPipe, "V2C")))
       return failure();
-    lowerFrontendPushOp(push, (**handlesOr).v2cPipe, rewriter);
+    lowerFrontendPushOp(push, (**handlesOr).v2cPipe, &rewriter);
     return true;
   }
   return false;
@@ -495,7 +496,7 @@ static FailureOr<bool> tryLowerFrontendPushDataOp(
 static FailureOr<bool> tryLowerFrontendPopDataOp(
     Operation *op, const FrontendPipeHandleMap &handlesById, DominanceInfo &dom,
     IRRewriter &rewriter) {
-  auto lowerWithHandles = [&](int32_t id)
+  auto lowerWithHandles = [op, &handlesById, &dom](int32_t id)
       -> FailureOr<const FrontendPipeHandles *> {
     return lookupFrontendHandles(op, id, handlesById, dom);
   };
@@ -542,7 +543,7 @@ static LogicalResult lowerOneFrontendDataOp(
   if (*popHandled)
     return success();
 
-  auto lowerWithHandles = [&](int32_t id)
+  auto lowerWithHandles = [op, &handlesById, &dom](int32_t id)
       -> FailureOr<const FrontendPipeHandles *> {
     return lookupFrontendHandles(op, id, handlesById, dom);
   };
@@ -551,7 +552,7 @@ static LogicalResult lowerOneFrontendDataOp(
     if (failed(handlesOr) ||
         failed(requireFrontendPipe(free, (**handlesOr).c2vPipe, "C2V")))
       return failure();
-    lowerFrontendFreeOp(free, (**handlesOr).c2vPipe, rewriter);
+    lowerFrontendFreeOp(free, (**handlesOr).c2vPipe, &rewriter);
     return success();
   }
   auto free = cast<TFreeFromAivOp>(op);
@@ -559,7 +560,7 @@ static LogicalResult lowerOneFrontendDataOp(
   if (failed(handlesOr) ||
       failed(requireFrontendPipe(free, (**handlesOr).v2cPipe, "V2C")))
     return failure();
-  lowerFrontendFreeOp(free, (**handlesOr).v2cPipe, rewriter);
+  lowerFrontendFreeOp(free, (**handlesOr).v2cPipe, &rewriter);
   return success();
 }
 
@@ -568,7 +569,7 @@ static LogicalResult lowerFrontendDataOps(func::FuncOp funcOp,
                                           IRRewriter &rewriter) {
   DominanceInfo dom(funcOp);
   SmallVector<Operation *> frontendOps;
-  funcOp.walk([&](Operation *op) {
+  funcOp.walk([&frontendOps](Operation *op) {
     if (isa<TAllocToAivOp, TAllocToAicOp, TPushToAivOp, TPushToAicOp,
             TPopFromAicOp, TPopFromAivOp, TFreeFromAicOp, TFreeFromAivOp>(op))
       frontendOps.push_back(op);

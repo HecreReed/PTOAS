@@ -81,7 +81,7 @@ static LogicalResult verifyTAxpyTypePair(Operation *op, Type srcElem,
 
 LogicalResult pto::TAxpyOp::verify() {
 
-  auto verifyA2A3 = [&]() -> LogicalResult {
+  auto verifyA2A3 = [this]() -> LogicalResult {
     auto common = verifyTAxpyCommon(*this);
     if (failed(common))
       return failure();
@@ -95,7 +95,7 @@ LogicalResult pto::TAxpyOp::verify() {
     return success();
   };
 
-  auto verifyA5 = [&]() -> LogicalResult {
+  auto verifyA5 = [this]() -> LogicalResult {
     auto common = verifyTAxpyCommon(*this);
     if (failed(common))
       return failure();
@@ -134,7 +134,8 @@ static LogicalResult verifyArchIntegerWidthOp(Operation *op,
                                               VerifyCommonFn verifyCommon,
                                               StringRef a2a3Message,
                                               StringRef a5Message) {
-  auto verifyA2A3 = [&]() -> LogicalResult {
+  auto verifyA2A3 =
+      [&verifyCommon, op, a2a3Message]() -> LogicalResult {
     FailureOr<Type> elemOr = verifyCommon();
     if (failed(elemOr))
       return failure();
@@ -144,7 +145,7 @@ static LogicalResult verifyArchIntegerWidthOp(Operation *op,
     return success();
   };
 
-  auto verifyA5 = [&]() -> LogicalResult {
+  auto verifyA5 = [&verifyCommon, op, a5Message]() -> LogicalResult {
     FailureOr<Type> elemOr = verifyCommon();
     if (failed(elemOr))
       return failure();
@@ -161,7 +162,7 @@ static LogicalResult verifyArchIntegerWidthOp(Operation *op,
 static LogicalResult verifyRowMajorBinaryIntWidthOp(
     Operation *op, Type src0Ty, Type src1Ty, Type dstTy,
     StringRef a2a3Message, StringRef a5Message) {
-  auto verifyCommon = [&]() -> FailureOr<Type> {
+  auto verifyCommon = [op, src0Ty, src1Ty, dstTy]() -> FailureOr<Type> {
     return verifyMatchingRowMajorBinaryTileOpCommon(op, src0Ty, src1Ty, dstTy);
   };
   return verifyArchIntegerWidthOp(op, verifyCommon, a2a3Message, a5Message);
@@ -170,7 +171,7 @@ static LogicalResult verifyRowMajorBinaryIntWidthOp(
 static LogicalResult verifyDistinctRowMajorUnaryIntWidthOp(
     Operation *op, Value src, Value dst, StringRef srcName, StringRef dstName,
     StringRef a2a3Message, StringRef a5Message) {
-  auto verifyCommon = [&]() -> FailureOr<Type> {
+  auto verifyCommon = [op, src, dst, srcName, dstName]() -> FailureOr<Type> {
     return verifyDistinctRowMajorUnaryTileOpCommon(op, src, dst, srcName,
                                                    dstName);
   };
@@ -222,4 +223,3 @@ static LogicalResult verifyTConcatValidRows(TConcatOp op,
   }
   return success();
 }
-

@@ -389,7 +389,7 @@ struct SubviewToEmitCPattern : public OpConversionPattern<memref::SubViewOp> {
   }
 
   SubviewStrideShapeInfo buildSubviewStrideShapeInfo(
-      memref::SubViewOp op, OpAdaptor adaptor, Type u32Ty,
+      memref::SubViewOp op, OpAdaptor, Type u32Ty,
       ArrayRef<OpFoldResult> sourceStrides,
       ConversionPatternRewriter &rewriter) const {
     auto loc = op.getLoc();
@@ -440,8 +440,8 @@ struct SubviewToEmitCPattern : public OpConversionPattern<memref::SubViewOp> {
       } else {
         bool isCol = finalStride[0] == 1;
         for (int i = 0; i < 4; ++i)
-          isCol &= (finalStride[i + 1] ==
-                    multiplyOrDynamic(finalStride[i], finalShape[i]));
+          isCol = isCol && (finalStride[i + 1] ==
+                            multiplyOrDynamic(finalStride[i], finalShape[i]));
         if (isCol)
           layoutTag = 1;
       }

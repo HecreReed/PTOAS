@@ -30,7 +30,8 @@ constexpr int kSingleBufferCount = 1;
 constexpr int kDoubleBufferCount = 2;
 } // namespace
 
-void MemPlan::ReportMemLifeDebugInfo(StorageEntry *rootStorageEntry) {
+void MemPlan::ReportMemLifeDebugInfo(
+    const StorageEntry *rootStorageEntry) const {
   LDBG("-------------------------- Buffer2Life --------------------------\n");
   MemLifeDebugInfo(rootStorageEntry);
   for (auto &StorageEntry : rootStorageEntry->mergedChildren) {
@@ -38,7 +39,7 @@ void MemPlan::ReportMemLifeDebugInfo(StorageEntry *rootStorageEntry) {
   }
 }
 
-void MemPlan::MemLifeDebugInfo(StorageEntry *storageEntry) {
+void MemPlan::MemLifeDebugInfo(const StorageEntry *storageEntry) const {
   for (auto &buffer : storageEntry->inplaceBuffers) {
     if (buffer.getDefiningOp()) {
       if (auto allocOp = dyn_cast<memref::AllocOp>(buffer.getDefiningOp())) {
@@ -55,7 +56,7 @@ void MemPlan::MemLifeDebugInfo(StorageEntry *storageEntry) {
   LDBG("\n");
 }
 
-void MemPlan::ReportCurEntryDebugInfo(const StorageEntry *curEntry) {
+void MemPlan::ReportCurEntryDebugInfo(const StorageEntry *curEntry) const {
   for (auto &buffer : curEntry->inplaceBuffers) {
     if (buffer.getDefiningOp()) {
       if (auto allocOp = dyn_cast<memref::AllocOp>(buffer.getDefiningOp())) {
@@ -119,7 +120,7 @@ MemPlan::GetReorderRootStorageEntry(StorageEntry *rootStorageEntry) {
 }
 
 void MemPlan::ReorderContinuousPingPongEntry(
-    SmallVector<StorageEntry *> &storageEntryVec) {
+    SmallVector<StorageEntry *> &storageEntryVec) const {
   SmallVector<StorageEntry *> reorderedStorageEntryVec;
   for (auto &storageEntry : storageEntryVec) {
     auto it = std::find(reorderedStorageEntryVec.begin(),
@@ -137,7 +138,7 @@ void MemPlan::ReorderContinuousPingPongEntry(
 }
 
 std::pair<size_t, size_t>
-MemPlan::GetBufferSpaceInfo(pto::AddressSpace &space) const {
+MemPlan::GetBufferSpaceInfo(const pto::AddressSpace &space) const {
   switch (space) {
   case pto::AddressSpace::VEC:
     return std::make_pair(ubAlignSize, ubSpaceSize);
@@ -233,7 +234,7 @@ LogicalResult MemPlan::SpecAlloc(MemBoundList &outline, PlanRecHis &his,
 }
 
 LoopLikeOpInterface
-MemPlan::GetBufferParentLoop(const SmallVector<Value> &buffers) {
+MemPlan::GetBufferParentLoop(const SmallVector<Value> &buffers) const {
   llvm::SmallSet<LoopLikeOpInterface, 1> parentLoopVec;
   for (auto buffer : buffers) {
     if (!buffer.getDefiningOp()) {
@@ -256,7 +257,7 @@ MemPlan::GetBufferParentLoop(const SmallVector<Value> &buffers) {
   return nullptr;
 }
 
-bool MemPlan::VerifyConflictStage1(MemBoundList &outline, PlanRecHis &his,
+bool MemPlan::VerifyConflictStage1(MemBoundList &, PlanRecHis &his,
                                    StorageEntry *e,
                                    const OutlineSectionInfo &outlineInfo,
                                    uint64_t &pongOffset) {

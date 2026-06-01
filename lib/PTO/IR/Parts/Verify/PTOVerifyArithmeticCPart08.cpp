@@ -21,13 +21,13 @@ static LogicalResult verifyTMovFpA5(const TMovFpCommonInfo &info,
 }
 
 mlir::LogicalResult mlir::pto::TMovFPOp::verify() {
-  auto verifyA2A3 = [&]() -> LogicalResult {
+  auto verifyA2A3 = [this]() -> LogicalResult {
     auto common = verifyTMovFpCommon(*this);
     if (failed(common))
       return failure();
     return verifyTMovFpA2A3(*common, *this);
   };
-  auto verifyA5 = [&]() -> LogicalResult {
+  auto verifyA5 = [this]() -> LogicalResult {
     auto common = verifyTMovFpCommon(*this);
     if (failed(common))
       return failure();

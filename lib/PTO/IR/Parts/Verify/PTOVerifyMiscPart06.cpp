@@ -46,7 +46,7 @@ static LogicalResult verifyTPartBinaryLikeOp(Operation *op, Type src0Ty,
                                              StringRef opName);
 
 mlir::LogicalResult mlir::pto::TPartAddOp::verify() {
-  auto verifyByArch = [&]() -> LogicalResult {
+  auto verifyByArch = [this]() -> LogicalResult {
     return verifyTPartBinaryLikeOp(getOperation(), getSrc0().getType(),
                                    getSrc1().getType(), getDst().getType(),
                                    "tpartadd");
@@ -55,7 +55,7 @@ mlir::LogicalResult mlir::pto::TPartAddOp::verify() {
 }
 
 mlir::LogicalResult mlir::pto::TPartMaxOp::verify() {
-  auto verifyByArch = [&]() -> LogicalResult {
+  auto verifyByArch = [this]() -> LogicalResult {
     return verifyTPartBinaryLikeOp(getOperation(), getSrc0().getType(),
                                    getSrc1().getType(), getDst().getType(),
                                    "tpartmax");
@@ -64,7 +64,7 @@ mlir::LogicalResult mlir::pto::TPartMaxOp::verify() {
 }
 
 mlir::LogicalResult mlir::pto::TPartMinOp::verify() {
-  auto verifyByArch = [&]() -> LogicalResult {
+  auto verifyByArch = [this]() -> LogicalResult {
     return verifyTPartBinaryLikeOp(getOperation(), getSrc0().getType(),
                                    getSrc1().getType(), getDst().getType(),
                                    "tpartmin");
@@ -176,7 +176,7 @@ static LogicalResult verifyTPartBinaryLikeOp(Operation *op, Type src0Ty,
 }
 
 mlir::LogicalResult mlir::pto::TPartArgMaxOp::verify() {
-  auto verifyByArch = [&]() -> LogicalResult {
+  auto verifyByArch = [this]() -> LogicalResult {
     return verifyTPartArgOpCommon(
         getOperation(), getSrc0().getType(), getSrc1().getType(),
         getSrc0Idx().getType(), getSrc1Idx().getType(), getDst().getType(),
@@ -186,7 +186,7 @@ mlir::LogicalResult mlir::pto::TPartArgMaxOp::verify() {
 }
 
 mlir::LogicalResult mlir::pto::TPartArgMinOp::verify() {
-  auto verifyByArch = [&]() -> LogicalResult {
+  auto verifyByArch = [this]() -> LogicalResult {
     return verifyTPartArgOpCommon(
         getOperation(), getSrc0().getType(), getSrc1().getType(),
         getSrc0Idx().getType(), getSrc1Idx().getType(), getDst().getType(),
@@ -196,7 +196,7 @@ mlir::LogicalResult mlir::pto::TPartArgMinOp::verify() {
 }
 
 mlir::LogicalResult mlir::pto::TPartMulOp::verify() {
-  auto verifyByArch = [&]() -> LogicalResult {
+  auto verifyByArch = [this]() -> LogicalResult {
     return verifyTPartBinaryLikeOp(getOperation(), getSrc0().getType(),
                                    getSrc1().getType(), getDst().getType(),
                                    "tpartmul");
@@ -210,4 +210,3 @@ struct TPReluCommonInfo {
   Type tmpTy;
   Type dstTy;
 };
-

@@ -508,10 +508,11 @@ struct PTOMaterializeTileToEmitC
     Type elemTy = tileTy.getElementType();
     auto shape = tileTy.getShape();
     auto validShape = tileTy.getValidShape();
-    auto fallbackDim = [&](int dimIdx) {
+    auto fallbackDim = [shape, elemTy, blayout](int dimIdx) {
       return renderTileTemplateDim(shape[dimIdx], elemTy, blayout, dimIdx);
     };
-    auto appendCtorDim = [&](Value emitted, int dimIdx) {
+    auto appendCtorDim = [&constructorArgs, &rewriter, loc, elemTy, blayout,
+                          &fallbackDim](Value emitted, int dimIdx) {
       constructorArgs.push_back(buildTileCtorDimValue(
           rewriter, loc,
           scalePackedTileDynamicDim(rewriter, loc, elemTy, blayout, emitted,

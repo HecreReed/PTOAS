@@ -188,7 +188,7 @@ LogicalResult TAssignOp::verify() {
 }
 
 LogicalResult TLoadOp::verify() {
-  auto verifyA2A3 = [&]() -> LogicalResult {
+  auto verifyA2A3 = [this]() -> LogicalResult {
     auto common =
         verifyTLoadCommon(*this, getSrc(), getDst(), /*allowLowPrecision=*/false);
     if (failed(common))
@@ -196,7 +196,7 @@ LogicalResult TLoadOp::verify() {
     return verifyTLoadA2A3(*this, *common);
   };
 
-  auto verifyA5 = [&]() -> LogicalResult {
+  auto verifyA5 = [this]() -> LogicalResult {
     auto common =
         verifyTLoadCommon(*this, getSrc(), getDst(), /*allowLowPrecision=*/true);
     if (failed(common))
@@ -208,7 +208,7 @@ LogicalResult TLoadOp::verify() {
 }
 
 LogicalResult TPrefetchOp::verify() {
-  auto verifyByArch = [&](bool allowLowPrecision) -> LogicalResult {
+  auto verifyByArch = [this](bool allowLowPrecision) -> LogicalResult {
     auto srcElem = verifyTPrefetchSrcElemType(*this, getSrc().getType());
     if (failed(srcElem))
       return failure();
@@ -221,8 +221,12 @@ LogicalResult TPrefetchOp::verify() {
   };
   return dispatchVerifierByArch(
       getOperation(),
-      [&]() { return verifyByArch(/*allowLowPrecision=*/false); },
-      [&]() { return verifyByArch(/*allowLowPrecision=*/true); });
+      [&verifyByArch]() {
+        return verifyByArch(/*allowLowPrecision=*/false);
+      },
+      [&verifyByArch]() {
+        return verifyByArch(/*allowLowPrecision=*/true);
+      });
 }
 
 LogicalResult MakePrefetchAsyncContextOp::verify() {
@@ -241,4 +245,3 @@ LogicalResult MakePrefetchAsyncContextOp::verify() {
     return emitOpError("expects workspace element type to be an 8-bit integer");
   return success();
 }
-

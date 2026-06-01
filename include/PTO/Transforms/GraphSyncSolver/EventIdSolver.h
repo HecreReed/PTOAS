@@ -219,7 +219,7 @@ private:
   void assignNeedRecalc(bool newValue, bool pushAction = true);
 
   // calc
-  llvm::SmallVector<int64_t> getAdjNodesUsedEventIds(EventIdNode *node);
+  llvm::SmallVector<int64_t> getAdjNodesUsedEventIds(const EventIdNode *node);
 
   llvm::SmallVector<int64_t> getChosenEventIds(EventIdNode *node,
                                                int64_t eventIdMax);

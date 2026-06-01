@@ -190,8 +190,9 @@ static LogicalResult emitA5SyncSetCall(ConversionPatternRewriter &rewriter,
   bool needsMirrorPlus16 = (pipe == pto::PIPE::PIPE_FIX);
   std::string pipeTok = pipeTokFromPipeAttr(op.getPipe());
 
-  auto emitSet = [&](Value eventOperand, IntegerAttr eventLiteral,
-                     bool isDynamic) {
+  auto emitSet = [&rewriter, ctx, loc, pipeTok](Value eventOperand,
+                                                IntegerAttr eventLiteral,
+                                                bool isDynamic) {
     if (isDynamic) {
       auto args = rewriter.getArrayAttr({
           emitc::OpaqueAttr::get(ctx, pipeTok),

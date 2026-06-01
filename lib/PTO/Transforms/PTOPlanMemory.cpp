@@ -754,7 +754,7 @@ void MemLivenessAnalysis::UpdateBufferAlias(Value buffer, Value aliasBuffer,
 }
 
 SetVector<Value> MemLivenessAnalysis::Union(SetVector<Value> set1,
-                                            SetVector<Value> set2) {
+                                            SetVector<Value> set2) const {
   SetVector<Value> unionSet;
   unionSet.insert(set1.begin(), set1.end());
   unionSet.insert(set2.begin(), set2.end());
@@ -807,12 +807,13 @@ void MemLivenessAnalysis::UpdateOpGenInfo(OpInfo *opInfo,
   }
 }
 
-void MemLivenessAnalysis::UpdateOperandGenInfo(OpInfo *opInfo, Value operand) {
+void MemLivenessAnalysis::UpdateOperandGenInfo(const OpInfo *opInfo,
+                                               Value operand) {
   auto iter_buffer = buffer2status.find(operand);
   if (iter_buffer == buffer2status.end())
     return;
   if (iter_buffer->second == BufferStatus::DEFFINED) {
-    genKillMap[opInfo].gen.push_back(operand);
+    genKillMap[const_cast<OpInfo *>(opInfo)].gen.push_back(operand);
     buffer2status[iter_buffer->first] = BufferStatus::GENED;
   } else if (iter_buffer->second == BufferStatus::KILLED) {
     llvm_unreachable("The buffer memory has been released and cannot be used "
@@ -899,7 +900,8 @@ BufferInfo MemLivenessAnalysis::GenerateBufferInfo(Operation *op,
 }
 
 BufferInfo MemLivenessAnalysis::GetBufferInfo(Operation *op, Value operand,
-                                              pto::AddressSpace bufferScope) {
+                                              pto::AddressSpace bufferScope)
+    const {
   BufferInfo bufferInfo;
   bufferInfo.operation = op;
   bufferInfo.bufferScope = bufferScope;
@@ -957,7 +959,7 @@ StorageEntry::GetBufferLifeByValue(const Value v) const {
   return nullptr;
 }
 
-bool MemPlan::IsReusePTOOp(Operation *op) const {
+bool MemPlan::IsReusePTOOp(const Operation *) const {
   if (restrictInplaceAsISA)
     return false;
 
@@ -1330,7 +1332,7 @@ PlanStatus MemPlan::PlanMemOffsetOfWholeWorkSpace() {
   return planStatus;
 }
 
-void MemPlan::GlobalWorkspaceNoReuse(StorageEntry *rootStorageEntry) {
+void MemPlan::GlobalWorkspaceNoReuse(StorageEntry *rootStorageEntry) const {
   rootStorageEntry->bitsOffset = 0;
   uint64_t offset = static_cast<uint64_t>(rootStorageEntry->bufInfo->constBits);
   for (StorageEntry *child : rootStorageEntry->mergedChildren) {
@@ -1372,7 +1374,7 @@ bool MemPlan::IsEnoughForBuffersNoReuse(StorageEntry *rootStorageEntry,
 }
 
 void MemPlan::PlanBuffersWithoutReuse(StorageEntry *rootStorageEntry,
-                                      size_t alignUnit) {
+                                      size_t alignUnit) const {
   uint offset = 0;
   rootStorageEntry->bitsOffset = offset;
   offset = AlignUp(rootStorageEntry->bufInfo->constBits, alignUnit);
@@ -1549,7 +1551,8 @@ bool MemPlan::IsSamePlanAsLastRollBack(uint64_t allocOffset, int curChildIdx,
 
 // spec_level == SPEC_LEVEL_0
 bool MemPlan::VerifyConflictStage0(StorageEntry *e,
-                                   const std::shared_ptr<MemoryBound> &last) {
+                                   const std::shared_ptr<MemoryBound> &last)
+    const {
   if (HasSemanticConflict(e, last->bufferLifeVec))
     return true;
   // level_0: offset = 0, offset means life distance

@@ -54,8 +54,8 @@ LogicalResult mlir::pto::SyncSetOp::verify() {
                            << fftsMode;
   }
 
-  auto verifyA2A3 = [&]() -> LogicalResult { return success(); };
-  auto verifyA5 = [&]() -> LogicalResult {
+  auto verifyA2A3 = []() -> LogicalResult { return success(); };
+  auto verifyA5 = [this]() -> LogicalResult {
     switch (getPipe().getPipe()) {
     case PIPE::PIPE_FIX:
     case PIPE::PIPE_MTE3:
@@ -214,12 +214,12 @@ void mlir::pto::SyncAllOp::print(OpAsmPrinter &p) {
   if (!operands.empty()) {
     p.printOperands(operands);
     p << " : ";
-    llvm::interleaveComma(operands, p,
-                          [&](Value operand) { p.printType(operand.getType()); });
+    llvm::interleaveComma(operands, p, [&p](Value operand) {
+      p.printType(operand.getType());
+    });
   }
   p << ") mode = " << getMode() << ", core_type = " << getCoreType();
   p.printOptionalAttrDict((*this)->getAttrs(),
                           /*elidedAttrs=*/{"operandSegmentSizes", "mode",
                                            "core_type"});
 }
-

@@ -12,17 +12,16 @@
 using namespace mlir;
 using namespace mlir::pto;
 
-void mlir::pto::SubViewOp::print(OpAsmPrinter &printer) {
-  printer << " " << getSource() << "[";
-  printer.printOperands(getOffsets());
-  printer << "] sizes " << getSizes();
+void mlir::pto::SubViewOp::print(OpAsmPrinter &p) {
+  p << " " << getSource() << "[";
+  p.printOperands(getOffsets());
+  p << "] sizes " << getSizes();
   if (getValidRow()) {
-    printer << " valid [" << getValidRow() << ", " << getValidCol() << "]";
+    p << " valid [" << getValidRow() << ", " << getValidCol() << "]";
   }
-  printer.printOptionalAttrDict((*this)->getAttrs(),
-                                /*elidedAttrs=*/{"operandSegmentSizes",
-                                                 "sizes"});
-  printer << " : " << getSource().getType() << " -> " << getResult().getType();
+  p.printOptionalAttrDict((*this)->getAttrs(),
+                          /*elidedAttrs=*/{"operandSegmentSizes", "sizes"});
+  p << " : " << getSource().getType() << " -> " << getResult().getType();
 }
 
 static std::optional<ArrayAttr> getSubViewSizeAttr(DictionaryAttr attributes,
@@ -110,6 +109,8 @@ LogicalResult SubViewOp::inferReturnTypes(
     MLIRContext *context, std::optional<Location> location, ValueRange operands,
     DictionaryAttr attributes, OpaqueProperties properties, RegionRange regions,
     SmallVectorImpl<Type> &inferredReturnTypes) {
+  (void)location;
+  (void)regions;
   if (operands.empty())
     return failure();
   auto sourceType = llvm::dyn_cast<TileBufType>(operands[0].getType());
@@ -212,4 +213,3 @@ static LogicalResult computeBoxedInnerShape(Type elemTy, int32_t fractalSize,
   }
   return failure();
 }
-

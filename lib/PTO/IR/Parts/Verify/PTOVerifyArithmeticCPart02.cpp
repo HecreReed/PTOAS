@@ -177,10 +177,10 @@ mlir::LogicalResult mlir::pto::TExtractOp::verify() {
   if (failed(common))
     return failure();
 
-  auto verifyA2A3 = [&]() -> LogicalResult {
+  auto verifyA2A3 = [this, &common]() -> LogicalResult {
     return verifyTExtractA2A3(*common, *this);
   };
-  auto verifyA5 = [&]() -> LogicalResult {
+  auto verifyA5 = [this, &common]() -> LogicalResult {
     return verifyTExtractA5(*common, *this);
   };
   return dispatchVerifierByArch(getOperation(), verifyA2A3, verifyA5);
@@ -219,4 +219,3 @@ static LogicalResult verifyTInsertA2A3(const IndexedTileTransferCommon &common,
   }
   return success();
 }
-

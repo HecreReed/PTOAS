@@ -13,23 +13,23 @@ using namespace mlir;
 using namespace mlir::pto;
 
 LogicalResult TMatmulBiasOp::verify() {
-  auto verifyA2A3 = [&]() -> LogicalResult {
+  auto verifyA2A3 = [this]() -> LogicalResult {
     return verifyMatmulBiasLikeOp(*this, getA().getType(), getB().getType(),
                                   getBias().getType(), getDst().getType(),
                                   /*useGemvOperands=*/false);
   };
-  auto verifyA5 = [&]() -> LogicalResult { return verifyA2A3(); };
+  auto verifyA5 = [&verifyA2A3]() -> LogicalResult { return verifyA2A3(); };
   return dispatchVerifierByArch(getOperation(), verifyA2A3, verifyA5);
 }
 
 LogicalResult TMatmulMxOp::verify() {
-  auto verifyA2A3 = [&]() -> LogicalResult {
+  auto verifyA2A3 = [this]() -> LogicalResult {
     return verifyMatmulMxA2A3LikeOp(
         *this, getAScale().getType(), getBScale().getType(), getA().getType(),
         getB().getType(), getDst().getType(),
         []() -> LogicalResult { return success(); });
   };
-  auto verifyA5 = [&]() -> LogicalResult {
+  auto verifyA5 = [this, &verifyA2A3]() -> LogicalResult {
     return verifyMatmulMxA5LikeOp(*this, getA().getType(), getB().getType(),
                                   getDst().getType(), verifyA2A3);
   };
@@ -37,14 +37,14 @@ LogicalResult TMatmulMxOp::verify() {
 }
 
 LogicalResult TMatmulMxAccOp::verify() {
-  auto verifyA2A3 = [&]() -> LogicalResult {
+  auto verifyA2A3 = [this]() -> LogicalResult {
     if (failed(verifyAccTileCommon(*this, getCIn().getType(), "c_in")) ||
         failed(verifyTileBufCommon(*this, getAScale().getType(), "a_scale")) ||
         failed(verifyTileBufCommon(*this, getBScale().getType(), "b_scale")))
       return failure();
     return success();
   };
-  auto verifyA5 = [&]() -> LogicalResult {
+  auto verifyA5 = [this, &verifyA2A3]() -> LogicalResult {
     if (failed(verifyA2A3()))
       return failure();
     if (failed(verifyA5MxTypeTriple(*this, getA().getType(), getB().getType(),
@@ -60,21 +60,20 @@ LogicalResult TMatmulMxAccOp::verify() {
   return dispatchVerifierByArch(getOperation(), verifyA2A3, verifyA5);
 }
 LogicalResult TMatmulMxBiasOp::verify() {
-  auto verifyA2A3 = [&]() -> LogicalResult {
+  auto verifyOperands = [this]() -> LogicalResult {
+    if (failed(verifyMatTileOperands(*this, getA().getType(),
+                                     getB().getType(), getDst().getType())) ||
+        failed(verifyMatBiasTile(*this, getBias().getType(), getDst().getType(),
+                                 /*requireFloatBias=*/true)))
+      return failure();
+    return success();
+  };
+  auto verifyA2A3 = [this, &verifyOperands]() -> LogicalResult {
     return verifyMatmulMxA2A3LikeOp(
         *this, getAScale().getType(), getBScale().getType(), getA().getType(),
-        getB().getType(), getDst().getType(), [&]() -> LogicalResult {
-          if (failed(verifyMatTileOperands(*this, getA().getType(),
-                                           getB().getType(),
-                                           getDst().getType())) ||
-              failed(verifyMatBiasTile(*this, getBias().getType(),
-                                       getDst().getType(),
-                                       /*requireFloatBias=*/true)))
-            return failure();
-          return success();
-        });
+        getB().getType(), getDst().getType(), verifyOperands);
   };
-  auto verifyA5 = [&]() -> LogicalResult {
+  auto verifyA5 = [this, &verifyA2A3]() -> LogicalResult {
     return verifyMatmulMxA5LikeOp(*this, getA().getType(), getB().getType(),
                                   getDst().getType(), verifyA2A3);
   };
@@ -198,18 +197,20 @@ static LogicalResult verifyTHistogramA5(THistogramOp op) {
 }
 
 LogicalResult THistogramOp::verify() {
-  auto verifyA2A3 = [&]() -> LogicalResult {
+  auto verifyA2A3 = [this]() -> LogicalResult {
     return emitOpError("thistogram is only supported on A5");
   };
-  auto verifyA5 = [&]() -> LogicalResult { return verifyTHistogramA5(*this); };
+  auto verifyA5 = [this]() -> LogicalResult {
+    return verifyTHistogramA5(*this);
+  };
   return dispatchVerifierByArch(getOperation(), verifyA2A3, verifyA5);
 }
 
 LogicalResult TGetScaleAddrOp::verify() {
-  auto verifyA2A3 = [&]() -> LogicalResult {
+  auto verifyA2A3 = [this]() -> LogicalResult {
     return emitOpError("tget_scale_addr is only supported on A5");
   };
-  auto verifyA5 = [&]() -> LogicalResult {
+  auto verifyA5 = [this]() -> LogicalResult {
     Type srcTy = getSrc().getType();
     Type dstTy = getDst().getType();
     if (failed(verifyTileBufCommon(*this, srcTy, "src")))

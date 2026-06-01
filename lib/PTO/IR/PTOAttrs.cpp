@@ -228,8 +228,8 @@ static ParseResult parseTileBufConfigAttrValue(
   return failure();
 }
 
-Attribute TileBufConfigAttr::parse(AsmParser &p, Type) {
-  MLIRContext *ctx = p.getContext();
+Attribute TileBufConfigAttr::parse(AsmParser &odsParser, Type) {
+  MLIRContext *ctx = odsParser.getContext();
   auto def = TileBufConfigAttr::getDefault(ctx);
   BLayoutAttr bl = def.getBLayout();
   SLayoutAttr sl = def.getSLayout();
@@ -237,34 +237,35 @@ Attribute TileBufConfigAttr::parse(AsmParser &p, Type) {
   PadValueAttr pv = def.getPad();
   CompactModeAttr compact = def.getCompactMode();
 
-  if (p.parseLess()) return {};
+  if (odsParser.parseLess()) return {};
 
-  if (succeeded(p.parseOptionalGreater()))
+  if (succeeded(odsParser.parseOptionalGreater()))
     return TileBufConfigAttr::get(ctx, bl, sl, sz, pv, compact);
 
   bool parsedGreater = false;
   while (!parsedGreater) {
     StringRef key;
-    if (p.parseKeyword(&key) || p.parseEqual() ||
-        failed(parseTileBufConfigAttrValue(p, ctx, key, bl, sl, sz, pv,
+    if (odsParser.parseKeyword(&key) || odsParser.parseEqual() ||
+        failed(parseTileBufConfigAttrValue(odsParser, ctx, key, bl, sl, sz, pv,
                                            compact)))
       return {};
 
-    parsedGreater = succeeded(p.parseOptionalGreater());
+    parsedGreater = succeeded(odsParser.parseOptionalGreater());
     if (parsedGreater)
       break;
-    if (p.parseComma()) return {};
+    if (odsParser.parseComma()) return {};
   }
 
   return TileBufConfigAttr::get(ctx, bl, sl, sz, pv, compact);
 }
 
-void TileBufConfigAttr::print(AsmPrinter &p) const {
-  p << "<";
-  p << "blayout=" << getBLayout();
-  p << ", slayout=" << getSLayout();
-  p << ", s_fractal_size=" << (int32_t)getSFractalSize().getInt();
-  p << ", pad=" << getPad();
-  p << ", compact=" << getCompactMode();
-  p << ">";
+void TileBufConfigAttr::print(AsmPrinter &odsPrinter) const {
+  odsPrinter << "<";
+  odsPrinter << "blayout=" << getBLayout();
+  odsPrinter << ", slayout=" << getSLayout();
+  odsPrinter << ", s_fractal_size="
+    << static_cast<int32_t>(getSFractalSize().getInt());
+  odsPrinter << ", pad=" << getPad();
+  odsPrinter << ", compact=" << getCompactMode();
+  odsPrinter << ">";
 }

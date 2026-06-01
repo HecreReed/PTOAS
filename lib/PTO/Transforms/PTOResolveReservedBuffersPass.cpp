@@ -16,6 +16,7 @@
 #include "mlir/Pass/Pass.h"
 
 #include "llvm/ADT/DenseMap.h"
+#include "llvm/ADT/Hashing.h"
 #include "llvm/ADT/SmallPtrSet.h"
 #include "llvm/ADT/StringRef.h"
 
@@ -114,7 +115,7 @@ static ReserveBufferOp findReserveBufferByName(func::FuncOp funcOp,
   // Reserve-buffer lookup is name-based because import_reserved_buffer only
   // stores the peer function symbol and the logical reserve name.
   ReserveBufferOp found;
-  funcOp.walk([&](ReserveBufferOp reserveOp) {
+  funcOp.walk([&found, name](ReserveBufferOp reserveOp) {
     if (reserveOp.getName() != name)
       return WalkResult::advance();
     found = reserveOp;
@@ -168,7 +169,8 @@ static PipePeerKey getGlobalTensorPipeKey(const PipeInitInfo &info) {
           info.op->getAttrOfType<IntegerAttr>(kFrontendPipeIdAttrName))
     id = std::to_string(idAttr.getInt());
   else
-    id = std::to_string(reinterpret_cast<uintptr_t>(info.op));
+    id = std::to_string(static_cast<size_t>(
+        llvm::hash_value(static_cast<const void *>(info.op))));
   return PipePeerKey{"__pto_globaltensor_pipe", "id_" + id, info.dirMask};
 }
 
@@ -183,7 +185,8 @@ static LogicalResult collectPeerAwareInit(InitOpT initOp,
     return success();
   }
 
-  auto recordAddr = [&](Value addr, int8_t effectiveDirMask) {
+  auto recordAddr = [&info, &keyedInits](Value addr,
+                                         int8_t effectiveDirMask) {
     if (!addr)
       return false;
     auto key = getPipePeerKey(addr, info.funcOp);
@@ -198,7 +201,8 @@ static LogicalResult collectPeerAwareInit(InitOpT initOp,
   if (info.dirMask == kBidirectionalDirMask) {
     Value peerAddr = initOp.getPeerLocalAddr();
     recorded = recordAddr(getLocalAddrOperand(initOp), kC2VDirMask);
-    recorded = (peerAddr && recordAddr(peerAddr, kV2CDirMask)) || recorded;
+    recorded = ((peerAddr != nullptr) && recordAddr(peerAddr, kV2CDirMask)) ||
+               recorded;
   } else {
     recorded = recordAddr(getLocalAddrOperand(initOp), info.dirMask);
   }
@@ -262,7 +266,6 @@ static void addPeerAwareAdjacency(
 static FailureOr<PipeComponent>
 buildPipeComponent(const PipeInitInfo &rootInfo,
                    llvm::DenseMap<Operation *, SmallVector<Operation *>> &adjacency,
-                   llvm::DenseMap<Operation *, const PipeInitInfo *> &infoByOp,
                    llvm::SmallPtrSet<Operation *, kVisitedInitReserveSize> &visited) {
   SmallVector<Operation *> stack{rootInfo.op};
   PipeComponent component;
@@ -284,10 +287,10 @@ buildPipeComponent(const PipeInitInfo &rootInfo,
 
 static LogicalResult verifyPipeComponentShape(
     PipeComponent &component,
-    llvm::DenseMap<Operation *, const PipeInitInfo *> &infoByOp) {
-  const PipeInitInfo &lhs = *infoByOp[component.ops[0]];
+    const llvm::DenseMap<Operation *, const PipeInitInfo *> &infoByOp) {
+  const PipeInitInfo &lhs = *infoByOp.lookup(component.ops[0]);
   for (Operation *op : ArrayRef<Operation *>(component.ops).drop_front()) {
-    const PipeInitInfo &rhs = *infoByOp[op];
+    const PipeInitInfo &rhs = *infoByOp.lookup(op);
     if (!samePipeInitSignature(lhs, rhs)) {
       return component.ops.front()->emitOpError(
           "requires peer pipe init ops to agree on direction and pipe shape");
@@ -306,9 +309,9 @@ static LogicalResult verifyPipeComponentShape(
 
 static LogicalResult collectPipeComponentParticipants(
     PipeComponent &component,
-    llvm::DenseMap<Operation *, const PipeInitInfo *> &infoByOp) {
+    const llvm::DenseMap<Operation *, const PipeInitInfo *> &infoByOp) {
   for (Operation *op : component.ops) {
-    const PipeInitInfo &info = *infoByOp[op];
+    const PipeInitInfo &info = *infoByOp.lookup(op);
     component.participants.insert(getFuncSymbol(info.funcOp));
     if (auto flagBaseAttr = getFlagBaseAttr(op)) {
       if (component.explicitFlagBase &&
@@ -349,7 +352,7 @@ buildPeerAwareComponents(const SmallVectorImpl<PipeInitInfo> &initInfos,
       continue;
 
     auto componentOr =
-        buildPipeComponent(rootInfo, adjacency, infoByOp, visited);
+        buildPipeComponent(rootInfo, adjacency, visited);
     if (failed(componentOr))
       return failure();
     PipeComponent component = std::move(*componentOr);
@@ -479,7 +482,7 @@ static LogicalResult materializeImportedReserveBufferBase(
 struct PTOResolveReservedBuffersPass
     : public mlir::pto::impl::PTOResolveReservedBuffersBase<
           PTOResolveReservedBuffersPass> {
-  LogicalResult assignPeerAwareFlagBases(ModuleOp moduleOp) {
+  LogicalResult assignPeerAwareFlagBases(ModuleOp moduleOp) const {
     // Build peer-connected pipe-init components, assign one consistent
     // flag_base per component, and reserve non-overlapping flag ranges per
     // function so multiple frontend pipes can coexist safely.
@@ -487,14 +490,18 @@ struct PTOResolveReservedBuffersPass
     PipeInitGroups keyedInits;
     LogicalResult status = success();
 
-    auto collectInit = [&](auto initOp) {
+    auto collectInit = [&initInfos, &keyedInits, &status](auto initOp) {
       if (failed(status))
         return;
       status = collectPeerAwareInit(initOp, initInfos, keyedInits);
     };
 
-    moduleOp.walk([&](InitializeL2LPipeOp initOp) { collectInit(initOp); });
-    moduleOp.walk([&](InitializeL2G2LPipeOp initOp) { collectInit(initOp); });
+    moduleOp.walk([&collectInit](InitializeL2LPipeOp initOp) {
+      collectInit(initOp);
+    });
+    moduleOp.walk([&collectInit](InitializeL2G2LPipeOp initOp) {
+      collectInit(initOp);
+    });
     if (failed(status))
       return failure();
 
@@ -516,7 +523,7 @@ struct PTOResolveReservedBuffersPass
     return success();
   }
 
-  LogicalResult materializeResolvedAddresses(ModuleOp moduleOp) {
+  LogicalResult materializeResolvedAddresses(ModuleOp moduleOp) const {
     // Resolve frontend reserve/import ops to plain constant local addresses so
     // downstream lowering only sees ordinary SSA values.
     SmallVector<Operation *> eraseOps;
@@ -525,15 +532,16 @@ struct PTOResolveReservedBuffersPass
       OpBuilder builder(funcOp.getContext());
 
       SmallVector<ReserveBufferOp> reserveOps;
-      funcOp.walk(
-          [&](ReserveBufferOp reserveOp) { reserveOps.push_back(reserveOp); });
+      funcOp.walk([&reserveOps](ReserveBufferOp reserveOp) {
+        reserveOps.push_back(reserveOp);
+      });
       for (ReserveBufferOp reserveOp : reserveOps) {
         if (failed(materializeReserveBufferBase(builder, reserveOp, eraseOps)))
           return failure();
       }
 
       SmallVector<ImportReservedBufferOp> importOps;
-      funcOp.walk([&](ImportReservedBufferOp importOp) {
+      funcOp.walk([&importOps](ImportReservedBufferOp importOp) {
         importOps.push_back(importOp);
       });
       for (ImportReservedBufferOp importOp : importOps) {

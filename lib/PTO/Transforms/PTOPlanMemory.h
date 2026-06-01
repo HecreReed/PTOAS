@@ -352,13 +352,13 @@ private:
 
   /// Obtain the buffer info of plan operation.
   BufferInfo GetBufferInfo(Operation *op, Value operand,
-                           pto::AddressSpace bufferScope);
+                           pto::AddressSpace bufferScope) const;
 
   /// Process gen buffer based on the result value of op.
   void UpdateOpGenInfo(OpInfo *opInfo, const ValueRange &results);
 
   /// Update normal operand gen information on buffer.
-  void UpdateOperandGenInfo(OpInfo *opInfo, Value operand);
+  void UpdateOperandGenInfo(const OpInfo *opInfo, Value operand);
 
   /// Update temp buffer for DestinationStyleOpInterface op.
   void UpdateOpTempGenInfo(OpInfo *opInfo);
@@ -368,7 +368,7 @@ private:
                          bool isIgnoreInplace = false);
 
   /// Return the union of set1 and set2.
-  SetVector<Value> Union(SetVector<Value> set1, SetVector<Value> set2);
+  SetVector<Value> Union(SetVector<Value> set1, SetVector<Value> set2) const;
 
   /// Get alias buffer information.
   SetVector<Value> GetAliasBuffers(Value aliasBuffer);
@@ -518,7 +518,7 @@ private:
   PlanStatus PlanMemOffsetOfWholeWorkSpace();
 
   /// Enable global workspace no reuse.
-  void GlobalWorkspaceNoReuse(StorageEntry *rootStorageEntry);
+  void GlobalWorkspaceNoReuse(StorageEntry *rootStorageEntry) const;
 
   /// Verify that constBits is legal.
   void ValidateParameters(std::unique_ptr<StorageEntry> &e) const;
@@ -556,10 +556,11 @@ private:
 
   /// Assign addresses without reuse.
   void PlanBuffersWithoutReuse(StorageEntry *rootStorageEntry,
-                               size_t alignUnit);
+                               size_t alignUnit) const;
 
   /// Obtain buffer space size and alignment information.
-  std::pair<size_t, size_t> GetBufferSpaceInfo(pto::AddressSpace &space) const;
+  std::pair<size_t, size_t>
+  GetBufferSpaceInfo(const pto::AddressSpace &space) const;
 
   /// Emit buffer applied failure message.
   void EmitPlanMemoryFailureInfo();
@@ -578,7 +579,7 @@ private:
                             const MemBoundList &outline);
 
   /// spec_level == SPEC_LEVEL_1, pure single can reuse with db.
-  bool VerifyConflictStage1(MemBoundList &outline, PlanRecHis &his,
+  bool VerifyConflictStage1(MemBoundList &, PlanRecHis &his,
                             StorageEntry *e,
                             const OutlineSectionInfo &outlineInfo,
                             uint64_t &pongOffset);
@@ -602,7 +603,7 @@ private:
 
   /// spec_level == SPEC_LEVEL_0, life time reuse.
   bool VerifyConflictStage0(StorageEntry *e,
-                            const std::shared_ptr<MemoryBound> &last);
+                            const std::shared_ptr<MemoryBound> &last) const;
 
   /// Update the outline information and record history
   void UpdateOutline(MemBoundList &outline, PlanRecHis &his, StorageEntry *e,
@@ -649,7 +650,7 @@ private:
   SmallVector<ValuePair> GenerateInplaceList();
 
   /// the ptoop that can reuse dst address and src address in limited situation
-  bool IsReusePTOOp(Operation *op) const;
+  bool IsReusePTOOp(const Operation *) const;
 
   /// Get overlap buffer life.
   DenseMap<ValuePair, BufferLife>
@@ -660,7 +661,8 @@ private:
 
   /// Reorder and make the storage entries of ping and pong continuous.
   void
-  ReorderContinuousPingPongEntry(SmallVector<StorageEntry *> &storageEntryVec);
+  ReorderContinuousPingPongEntry(
+      SmallVector<StorageEntry *> &storageEntryVec) const;
 
   /// Determine if the current buffer life of the Storage Entry conflicts with
   /// the memory that has already been allocated in history.
@@ -680,16 +682,17 @@ private:
   GetMultiRelationPongEntry(const StorageEntry *reuseBoundStorageEntry);
 
   /// Get the innermost for loop of buffer definition.
-  LoopLikeOpInterface GetBufferParentLoop(const SmallVector<Value> &buffers);
+  LoopLikeOpInterface
+  GetBufferParentLoop(const SmallVector<Value> &buffers) const;
 
   /// Report all tensors life time info.
-  void ReportMemLifeDebugInfo(StorageEntry *rootStorageEntry);
+  void ReportMemLifeDebugInfo(const StorageEntry *rootStorageEntry) const;
 
   /// Report tensor life time for debug.
-  void MemLifeDebugInfo(StorageEntry *storageEntry);
+  void MemLifeDebugInfo(const StorageEntry *storageEntry) const;
 
   /// Report tensor which is defined by memref allco.
-  void ReportCurEntryDebugInfo(const StorageEntry *curEntry);
+  void ReportCurEntryDebugInfo(const StorageEntry *curEntry) const;
 
   /// Report tensor allocate info.
   void ReportAllocatedEntryDebugInfo(StorageEntry *rootStorageEntry);
