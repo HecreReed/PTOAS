@@ -23,7 +23,7 @@ mlir::LogicalResult mlir::pto::TReluOp::verify() {
         failed(verifyTileBufSameValidShape(*this, srcTy, dstTy, "src", "dst")))
       return failure();
     Type elemTy = getElemTy(srcTy);
-    if (!(elemTy.isInteger(32) || elemTy.isF16() || elemTy.isF32()))
+    if (!(elemTy.isInteger(kPTOI32BitWidth) || elemTy.isF16() || elemTy.isF32()))
       return emitOpError() << errorMessage;
     return success();
   };
@@ -52,7 +52,7 @@ static LogicalResult verifyTRemTmpCoverage(Operation *op, Type tmpTy,
                                            Type dstTy) {
   auto dstValid = getValidShapeVec(dstTy);
   auto tmpValid = getValidShapeVec(tmpTy);
-  if (dstValid.size() != 2 || tmpValid.size() != 2)
+  if (dstValid.size() != kPTORowColRank || tmpValid.size() != kPTORowColRank)
     return op->emitOpError("expects tmp and dst to be rank-2 tiles");
   if (tmpValid[0] != ShapedType::kDynamic && tmpValid[0] < 1)
     return op->emitOpError("expects tmp to have at least 1 valid row");
@@ -97,12 +97,12 @@ mlir::LogicalResult mlir::pto::TRemOp::verify() {
     return failure();
   Type elem = *elemOr;
   auto verifyA2A3 = [this, elem]() -> LogicalResult {
-    if (!(elem.isInteger(32) || elem.isF32()))
+    if (!(elem.isInteger(kPTOI32BitWidth) || elem.isF32()))
       return emitOpError("expects A2/A3 trem element type to be i32/f32");
     return success();
   };
   auto verifyA5 = [this, elem]() -> LogicalResult {
-    if (!(elem.isInteger(32) || elem.isInteger(16) || elem.isF16() || elem.isF32()))
+    if (!(elem.isInteger(kPTOI32BitWidth) || elem.isInteger(kPTOI16BitWidth) || elem.isF16() || elem.isF32()))
       return emitOpError("expects A5 trem element type to be i32/i16/f16/f32");
     return success();
   };
@@ -141,7 +141,7 @@ static FailureOr<Type> verifyTRemScalarCommon(Operation *op, Type srcTy,
            failure();
   auto dstValid = getValidShapeVec(dstTy);
   auto tmpValid = getValidShapeVec(tmpTy);
-  if (dstValid.size() != 2 || tmpValid.size() != 2)
+  if (dstValid.size() != kPTORowColRank || tmpValid.size() != kPTORowColRank)
     return op->emitOpError("expects tmp and dst to be rank-2 tiles"), failure();
   if (tmpValid[0] != ShapedType::kDynamic && tmpValid[0] < 1)
     return op->emitOpError("expects tmp to have at least 1 valid row"), failure();
@@ -163,12 +163,12 @@ mlir::LogicalResult mlir::pto::TRemSOp::verify() {
     return failure();
   Type elem = *elemOr;
   auto verifyA2A3 = [this, elem]() -> LogicalResult {
-    if (!(elem.isInteger(32) || elem.isF32()))
+    if (!(elem.isInteger(kPTOI32BitWidth) || elem.isF32()))
       return emitOpError("expects A2/A3 trems element type to be i32/f32");
     return success();
   };
   auto verifyA5 = [this, elem]() -> LogicalResult {
-    if (!(elem.isInteger(32) || elem.isInteger(16) || elem.isF16() || elem.isF32()))
+    if (!(elem.isInteger(kPTOI32BitWidth) || elem.isInteger(kPTOI16BitWidth) || elem.isF16() || elem.isF32()))
       return emitOpError("expects A5 trems element type to be i32/i16/f16/f32");
     return success();
   };
@@ -196,12 +196,12 @@ mlir::LogicalResult mlir::pto::TFModSOp::verify() {
     return emitOpError("expects scalar type to match the tile element type");
 
   auto verifyA2A3 = [this, elem]() -> LogicalResult {
-    if (!(elem.isInteger(32) || elem.isInteger(16) || elem.isF16() || elem.isF32()))
+    if (!(elem.isInteger(kPTOI32BitWidth) || elem.isInteger(kPTOI16BitWidth) || elem.isF16() || elem.isF32()))
       return emitOpError("expects A2/A3 tfmods element type to be i32/i16/f16/f32");
     return success();
   };
   auto verifyA5 = [this, elem]() -> LogicalResult {
-    if (!(elem.isInteger(32) || elem.isInteger(16) || elem.isF16() || elem.isF32()))
+    if (!(elem.isInteger(kPTOI32BitWidth) || elem.isInteger(kPTOI16BitWidth) || elem.isF16() || elem.isF32()))
       return emitOpError("expects A5 tfmods element type to be i32/i16/f16/f32");
     return success();
   };

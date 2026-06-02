@@ -86,7 +86,7 @@ static LogicalResult verifyTPartArgIndexOperands(Operation *op, Type src0Ty,
         "expects src0Idx/src1Idx/dstIdx to have the same element type");
   }
   auto idxInt = dyn_cast<IntegerType>(idxElem);
-  if (!idxInt || idxInt.getWidth() != 32) {
+  if (!idxInt || idxInt.getWidth() != kPTOI32BitWidth) {
     return op->emitOpError(
         "expects src0Idx/src1Idx/dstIdx element type to be i32 or ui32");
   }
@@ -109,14 +109,14 @@ static LogicalResult verifyTPartArgElementType(Operation *op, Type elem,
                                                StringRef opName) {
   PTOArch arch = getTargetArch(op);
   if (arch == PTOArch::A5) {
-    if (!(elem.isInteger(32) || elem.isInteger(16) || elem.isInteger(8) ||
+    if (!(elem.isInteger(kPTOI32BitWidth) || elem.isInteger(kPTOI16BitWidth) || elem.isInteger(kPTOI8BitWidth) ||
           elem.isF16() || elem.isBF16() || elem.isF32())) {
       return op->emitOpError() << "expects A5 " << opName
                                << " element type to be i32/i16/i8/f16/bf16/f32";
     }
     return success();
   }
-  if (!(elem.isInteger(32) || elem.isInteger(16) || elem.isF16() ||
+  if (!(elem.isInteger(kPTOI32BitWidth) || elem.isInteger(kPTOI16BitWidth) || elem.isF16() ||
         elem.isF32())) {
     return op->emitOpError() << "expects A2/A3 " << opName
                              << " element type to be i32/i16/f16/f32";
@@ -151,7 +151,7 @@ static LogicalResult verifyTPartBinaryLikeOp(Operation *op, Type src0Ty,
   auto s0 = getShapeVec(src0Ty);
   auto s1 = getShapeVec(src1Ty);
   auto d = getShapeVec(dstTy);
-  if (s0.size() != 2 || s1.size() != 2 || d.size() != 2)
+  if (s0.size() != kNumber2 || s1.size() != kNumber2 || d.size() != kNumber2)
     return op->emitOpError()
            << "expects src0/src1/dst to be rank-2 (tile-shaped)";
   PTOArch arch = getTargetArch(op);
@@ -160,14 +160,14 @@ static LogicalResult verifyTPartBinaryLikeOp(Operation *op, Type src0Ty,
     return failure();
   Type elem = *elemOr;
   if (arch == PTOArch::A5) {
-    if (!(elem.isInteger(32) || elem.isInteger(16) || elem.isInteger(8) ||
+    if (!(elem.isInteger(kPTOI32BitWidth) || elem.isInteger(kPTOI16BitWidth) || elem.isInteger(kPTOI8BitWidth) ||
           elem.isF16() || elem.isBF16() || elem.isF32()))
       return op->emitOpError()
              << "expects A5 " << opName
              << " element type to be i32/i16/i8/f16/bf16/f32";
     return success();
   }
-  if (!(elem.isInteger(32) || elem.isInteger(16) || elem.isF16() ||
+  if (!(elem.isInteger(kPTOI32BitWidth) || elem.isInteger(kPTOI16BitWidth) || elem.isF16() ||
         elem.isF32()))
     return op->emitOpError()
            << "expects A2/A3 " << opName

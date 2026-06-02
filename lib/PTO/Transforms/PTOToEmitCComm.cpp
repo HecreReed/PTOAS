@@ -32,6 +32,9 @@ namespace {
 
 static constexpr llvm::StringLiteral kGlobalTensorStridesAttrName =
     "__pto.globaltensor_strides";
+static constexpr int8_t kPTOFrontendDirMaskC2V = 1;
+static constexpr int8_t kPTOFrontendDirMaskV2C = 2;
+static constexpr int8_t kPTOFrontendDirMaskBidirectional = 3;
 
 struct PTOInitializeL2G2LPipeToEmitC
     : public OpConversionPattern<mlir::pto::InitializeL2G2LPipeOp> {
@@ -61,11 +64,11 @@ struct PTOInitializeL2G2LPipeToEmitC
 
     Value c2vBuf = zero;
     Value v2cBuf = zero;
-    if (op.getDirMask() == 1)
+    if (op.getDirMask() == kPTOFrontendDirMaskC2V)
       c2vBuf = localAddr ? localAddr : zero;
-    else if (op.getDirMask() == 2)
+    else if (op.getDirMask() == kPTOFrontendDirMaskV2C)
       v2cBuf = localAddr ? localAddr : zero;
-    else if (op.getDirMask() == 3) {
+    else if (op.getDirMask() == kPTOFrontendDirMaskBidirectional) {
       if (localAddr) {
         if (!op.getPeerLocalAddr())
           return rewriter.notifyMatchFailure(
@@ -113,11 +116,11 @@ struct PTOInitializeL2LPipeToEmitC
 
     Value c2vBuf = zero;
     Value v2cBuf = zero;
-    if (op.getDirMask() == 1)
+    if (op.getDirMask() == kPTOFrontendDirMaskC2V)
       c2vBuf = localAddr;
-    else if (op.getDirMask() == 2)
+    else if (op.getDirMask() == kPTOFrontendDirMaskV2C)
       v2cBuf = localAddr;
-    else if (op.getDirMask() == 3) {
+    else if (op.getDirMask() == kPTOFrontendDirMaskBidirectional) {
       c2vBuf = localAddr;
       v2cBuf = peelUnrealized(adaptor.getPeerLocalAddr());
     } else

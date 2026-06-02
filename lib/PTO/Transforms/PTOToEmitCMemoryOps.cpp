@@ -35,6 +35,7 @@ static constexpr llvm::StringLiteral kForceDynamicValidShapeAttrName =
     "__pto.force_dynamic_valid_shape";
 constexpr unsigned kInlineCapacity5 = 5;
 constexpr unsigned kInlineCapacity8 = 8;
+constexpr unsigned kNumber10 = 10;
 
 template <typename T>
 using SmallVec5 = SmallVector<T, kInlineCapacity5>;
@@ -456,7 +457,7 @@ static bool parseIntegerTemplateList(StringRef token, StringRef marker,
   values.clear();
   for (StringRef part : parts) {
     int64_t value = 0;
-    if (part.trim().getAsInteger(10, value))
+    if (part.trim().getAsInteger(kNumber10, value))
       return false;
     values.push_back(value);
   }

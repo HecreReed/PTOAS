@@ -34,7 +34,6 @@ struct PTOGetBlockIdxToEmitC
   LogicalResult
   matchAndRewrite(mlir::pto::GetBlockIdxOp op, OpAdaptor adaptor,
                   ConversionPatternRewriter &rewriter) const override {
-
     rewriter.replaceOpWithNewOp<emitc::CallOpaqueOp>(
         op, op.getType(), "get_block_idx", ValueRange{}, ArrayAttr{},
         ArrayAttr{});
@@ -93,9 +92,6 @@ struct PTOGetSubBlockNumToEmitC
     return success();
   }
 };
-
-
-
 
 struct PTOSetValToSETVAL : public OpConversionPattern<pto::TSetValOp> {
   using OpConversionPattern<pto::TSetValOp>::OpConversionPattern;

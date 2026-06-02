@@ -43,10 +43,10 @@ static LogicalResult verifyArithmeticScalarTileOpWithArchDispatch(
 static LogicalResult verifyTColReductionElemTypeForArch(
     Operation *op, Type elemTy, PTOArch targetArch, bool allowInt8OnA5,
     bool allowBf16OnA5, StringRef a2a3Error, StringRef a5Error) {
-  bool ok = elemTy.isF16() || elemTy.isF32() || elemTy.isInteger(16) ||
-            elemTy.isInteger(32);
+  bool ok = elemTy.isF16() || elemTy.isF32() || elemTy.isInteger(kPTOI16BitWidth) ||
+            elemTy.isInteger(kPTOI32BitWidth);
   if (targetArch == PTOArch::A5)
-    ok = ok || (allowInt8OnA5 && elemTy.isInteger(8)) ||
+    ok = ok || (allowInt8OnA5 && elemTy.isInteger(kPTOI8BitWidth)) ||
          (allowBf16OnA5 && elemTy.isBF16());
   if (ok)
     return success();
@@ -98,11 +98,12 @@ static LogicalResult verifyTColArgReductionOpCommon(Operation *op, Type srcTy,
   Type srcElemTy = getElemTy(srcTy);
   unsigned srcElemBits = srcElemTy ? getPTOStorageElemBitWidth(srcElemTy) : 0;
   if (!(mlir::isa<IntegerType, FloatType>(srcElemTy) &&
-        (srcElemBits == 8 || srcElemBits == 16 || srcElemBits == 32)))
+        (srcElemBits == kPTOI8BitWidth || srcElemBits == kPTOI16BitWidth ||
+         srcElemBits == kPTOI32BitWidth)))
     return op->emitOpError(
         "expects src/tmp element type to be 1, 2, or 4 bytes wide");
   auto dstInt = dyn_cast<IntegerType>(getElemTy(dstTy));
-  if (!dstInt || dstInt.getWidth() != 32)
+  if (!dstInt || dstInt.getWidth() != kPTOI32BitWidth)
     return op->emitOpError("expects dst element type to be i32 or ui32");
   return success();
 }

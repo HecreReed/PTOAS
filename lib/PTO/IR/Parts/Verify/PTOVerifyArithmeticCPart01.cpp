@@ -31,7 +31,7 @@ LogicalResult mlir::pto::TDivOp::verify() {
     if (failed(elemOr))
       return failure();
     auto elem0 = *elemOr;
-    if (!(elem0.isF16() || elem0.isF32() || elem0.isInteger(16) || elem0.isInteger(32)))
+    if (!(elem0.isF16() || elem0.isF32() || elem0.isInteger(kPTOI16BitWidth) || elem0.isInteger(kPTOI32BitWidth)))
       return emitOpError("expects A5 tdiv element type to be i32/i16/f16/f32");
     return success();
   };
@@ -57,7 +57,6 @@ mlir::LogicalResult mlir::pto::TDivSOp::verify() {
     bool rhsTile = isTileLike(rhsTy);
     bool srcScalar = isScalarLike(srcTy);
     bool rhsScalar = isScalarLike(rhsTy);
-
     if (!(srcTile && rhsScalar) && !(srcScalar && rhsTile))
       return emitOpError("expects one tile-like operand and one scalar operand in ins(...)");
 
@@ -72,11 +71,11 @@ mlir::LogicalResult mlir::pto::TDivSOp::verify() {
       return emitOpError("scalar must be a scalar type (integer/float)");
     Type elem = getElemTy(tileTy);
     if (targetArch == PTOArch::A3 &&
-        !(elem.isInteger(32) || elem.isInteger(16) || elem.isF16() ||
+        !(elem.isInteger(kPTOI32BitWidth) || elem.isInteger(kPTOI16BitWidth) || elem.isF16() ||
           elem.isF32()))
       return emitOpError("expects A2/A3 tdivs element type to be i32/i16/f16/f32");
     if (targetArch == PTOArch::A5 &&
-        !(elem.isInteger(32) || elem.isInteger(16) || elem.isInteger(8) ||
+        !(elem.isInteger(kPTOI32BitWidth) || elem.isInteger(kPTOI16BitWidth) || elem.isInteger(kPTOI8BitWidth) ||
           elem.isF16() || elem.isF32()))
       return emitOpError("expects A5 tdivs element type to be i32/i16/i8/f16/f32");
     return success();
@@ -131,7 +130,8 @@ static LogicalResult verifyTExpandsElemType(Operation *op, Type dstElem,
     return success();
   if (auto it = mlir::dyn_cast<mlir::IntegerType>(dstElem)) {
     unsigned w = it.getWidth();
-    if (w == 16 || w == 32 || (allowI8 && w == 8))
+    if (w == kPTOI16BitWidth || w == kPTOI32BitWidth ||
+        (allowI8 && w == kPTOI8BitWidth))
       return success();
   }
   return op->emitOpError(error);

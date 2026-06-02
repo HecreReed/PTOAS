@@ -48,17 +48,17 @@ static FailureOr<SubViewVerifyInfo> verifySubviewOperandsAndSizes(SubViewOp op) 
   auto dstTy = llvm::dyn_cast<TileBufType>(op.getResult().getType());
   if (!srcTy || !dstTy)
     return op.emitOpError("expects tile_buf src and tile_buf result"), failure();
-  if (srcTy.getRank() != 2 || dstTy.getRank() != 2)
+  if (srcTy.getRank() != kPTORowColRank || dstTy.getRank() != kPTORowColRank)
     return op.emitOpError("expects rank-2 tilebuf for src/dst"), failure();
 
   auto sizesAttr = op.getSizes();
-  if (!sizesAttr || sizesAttr.size() != 2)
+  if (!sizesAttr || sizesAttr.size() != kPTORowColRank)
     return op.emitOpError("subview expects 2D sizes"), failure();
   int64_t sizeR = cast<IntegerAttr>(sizesAttr[0]).getInt();
   int64_t sizeC = cast<IntegerAttr>(sizesAttr[1]).getInt();
   if (sizeR <= 0 || sizeC <= 0)
     return op.emitOpError("subview sizes must be positive"), failure();
-  if (op.getOffsets().size() != 2)
+  if (op.getOffsets().size() != kPTORowColRank)
     return op.emitOpError("subview expects 2D offsets"), failure();
 
   SubViewVerifyInfo info{srcTy, dstTy, sizeR, sizeC};
@@ -101,9 +101,9 @@ static LogicalResult verifySubviewExplicitValids(SubViewOp op, int64_t sizeR,
 static LogicalResult verifySubviewResultType(SubViewOp op, const SubViewVerifyInfo &info) {
   auto dstShape = info.dstTy.getShape();
   auto srcShape = info.srcTy.getShape();
-  if (dstShape.size() != 2)
+  if (dstShape.size() != kPTORowColRank)
     return op.emitOpError("expects result to be rank-2");
-  if (srcShape.size() != 2)
+  if (srcShape.size() != kPTORowColRank)
     return op.emitOpError("expects source to be rank-2");
   if (dstShape[0] != info.sizeR || dstShape[1] != info.sizeC)
     return op.emitOpError("expects result shape to match subview sizes");
@@ -135,7 +135,7 @@ static int64_t getSubviewExpectedValidDim(Value explicitValid, int64_t defaultSi
 static LogicalResult verifySubviewResultValidShape(SubViewOp op,
                                                    const SubViewVerifyInfo &info) {
   auto dstValid = info.dstTy.getValidShape();
-  if (dstValid.size() != 2)
+  if (dstValid.size() != kPTORowColRank)
     return op.emitOpError("expects result to have rank-2 valid_shape");
   int64_t expectedVRow = getSubviewExpectedValidDim(op.getValidRow(), info.sizeR);
   int64_t expectedVCol = getSubviewExpectedValidDim(op.getValidCol(), info.sizeC);
@@ -149,7 +149,7 @@ static LogicalResult verifySubviewResultValidShape(SubViewOp op,
 }
 
 static bool hasStaticRank2Shape(ArrayRef<int64_t> shape) {
-  return shape.size() == 2 && shape[0] != ShapedType::kDynamic &&
+  return shape.size() == kPTORowColRank && shape[0] != ShapedType::kDynamic &&
          shape[1] != ShapedType::kDynamic;
 }
 

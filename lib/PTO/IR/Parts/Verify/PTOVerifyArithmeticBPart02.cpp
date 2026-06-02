@@ -16,7 +16,7 @@ static LogicalResult verifyTConcatDstCols(TConcatOp op, Type dstTy,
                                           ArrayRef<int64_t> src0Valid,
                                           ArrayRef<int64_t> src1Valid) {
   auto dstShape = getShapeVec(dstTy);
-  if (dstShape.size() == 2 && dstShape[1] != ShapedType::kDynamic &&
+  if (dstShape.size() == kPTORowColRank && dstShape[1] != ShapedType::kDynamic &&
       src0Valid[1] != ShapedType::kDynamic &&
       src1Valid[1] != ShapedType::kDynamic &&
       src0Valid[1] + src1Valid[1] > dstShape[1]) {
@@ -91,7 +91,7 @@ static LogicalResult verifyTColExpandSrc1ValidCols(Operation *op, Type t1,
                                                    Type td) {
   auto src1Valid = getValidShapeVec(t1);
   auto dstValid = getValidShapeVec(td);
-  if (src1Valid.size() == 2 && dstValid.size() == 2 &&
+  if (src1Valid.size() == kPTORowColRank && dstValid.size() == kPTORowColRank &&
       src1Valid[1] != ShapedType::kDynamic &&
       dstValid[1] != ShapedType::kDynamic &&
       src1Valid[1] != dstValid[1]) {
@@ -147,16 +147,16 @@ static LogicalResult verifyConcatidxElementTypes(Operation *op, Type dataElem,
   if (!dataElem.isF16() && !dataElem.isF32() && !dataElem.isBF16()) {
     auto dataInt = dyn_cast<IntegerType>(dataElem);
     if (!dataInt || !dataInt.isSignless() ||
-        (dataInt.getWidth() != 8 && dataInt.getWidth() != 16 &&
-         dataInt.getWidth() != 32)) {
+        (dataInt.getWidth() != kPTOI8BitWidth && dataInt.getWidth() != kPTOI16BitWidth &&
+         dataInt.getWidth() != kPTOI32BitWidth)) {
       return op->emitOpError(
           "expects data element type to be i8, i16, i32, f16, f32, or bf16");
     }
   }
   auto idxInt = dyn_cast<IntegerType>(idxElem);
   if (!idxInt || !idxInt.isSignless() ||
-      (idxInt.getWidth() != 8 && idxInt.getWidth() != 16 &&
-       idxInt.getWidth() != 32)) {
+      (idxInt.getWidth() != kPTOI8BitWidth && idxInt.getWidth() != kPTOI16BitWidth &&
+       idxInt.getWidth() != kPTOI32BitWidth)) {
     return op->emitOpError(
         "expects index element type to be i8, i16, or i32");
   }
@@ -169,9 +169,9 @@ static LogicalResult verifyTConcatidxValidShapes(TConcatidxOp op) {
   auto src0IdxValid = getValidShapeVec(op.getSrc0Idx());
   auto src1IdxValid = getValidShapeVec(op.getSrc1Idx());
   auto dstValid = getValidShapeVec(op.getDst());
-  if (src0Valid.size() != 2 || src1Valid.size() != 2 ||
-      src0IdxValid.size() != 2 || src1IdxValid.size() != 2 ||
-      dstValid.size() != 2) {
+  if (src0Valid.size() != kPTORowColRank || src1Valid.size() != kPTORowColRank ||
+      src0IdxValid.size() != kPTORowColRank || src1IdxValid.size() != kPTORowColRank ||
+      dstValid.size() != kPTORowColRank) {
     return op.emitOpError("expects all operands to have rank-2 valid_shape");
   }
 

@@ -31,6 +31,7 @@ namespace {
 
 static constexpr llvm::StringLiteral kForceDynamicValidShapeAttrName =
     "__pto.force_dynamic_valid_shape";
+constexpr size_t kTileRank2D = 2;
 
 static pto::AddressSpace getMemRefAddressSpace(MemRefType memRefTy) {
   if (auto asAttr =
@@ -43,7 +44,7 @@ static pto::AddressSpace getMemRefAddressSpace(MemRefType memRefTy) {
 static int32_t getTileFractalSize(pto::TileBufConfigAttr configAttr) {
   if (auto frAttr = dyn_cast<IntegerAttr>(configAttr.getSFractalSize()))
     return frAttr.getInt();
-  return 512;
+  return kFractalSize512;
 }
 
 static Value createEmitCTileValue(Location loc, Type convertedTy,
@@ -187,7 +188,7 @@ struct PTOBindTileToEmitC : public OpConversionPattern<pto::BindTileOp> {
   FailureOr<TileBuildSpec> buildTileSpec(pto::BindTileOp op, OpAdaptor adaptor,
                                          ConversionPatternRewriter &rewriter) const {
     auto resMrTy = dyn_cast<MemRefType>(op.getType());
-    if (!resMrTy || resMrTy.getRank() < 2)
+    if (!resMrTy || resMrTy.getRank() < static_cast<int64_t>(kTileRank2D))
       return failure();
     int64_t rows = resMrTy.getDimSize(0);
     int64_t cols = resMrTy.getDimSize(1);

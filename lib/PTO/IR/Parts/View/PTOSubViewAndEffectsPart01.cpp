@@ -57,7 +57,7 @@ static void decodeSubviewExplicitValidOperandsFromSegments(
   if (!segAttr)
     return;
   ArrayRef<int32_t> segs = segAttr.asArrayRef();
-  if (segs.size() != 4)
+  if (segs.size() != kNumber4)
     return;
   int32_t srcSeg = segs[0];
   int32_t offSeg = segs[1];
@@ -78,9 +78,9 @@ static SubViewExplicitValidOperands decodeSubviewExplicitValidOperands(
   SubViewExplicitValidOperands explicitValids;
   decodeSubviewExplicitValidOperandsFromSegments(explicitValids, operands,
                                                  attributes);
-  if (!explicitValids.row && !explicitValids.col && rank == 2) {
+  if (!explicitValids.row && !explicitValids.col && rank == kPTORowColRank) {
     size_t expectedWithoutValid = static_cast<size_t>(1 + rank);
-    if (operands.size() >= expectedWithoutValid + 2) {
+    if (operands.size() >= expectedWithoutValid + kNumber2) {
       explicitValids.row = operands[expectedWithoutValid];
       explicitValids.col = operands[expectedWithoutValid + 1];
     }
@@ -191,24 +191,26 @@ static LogicalResult computeBoxedInnerShape(Type elemTy, int32_t fractalSize,
   int64_t elemBytes = static_cast<int64_t>(getElemByteSize(elemTy));
   if (elemBytes <= 0)
     return failure();
-  if (fractalSize == 1024) {
-    innerRows = 16;
-    innerCols = 16;
+  if (fractalSize == kFractalSize1024) {
+    innerRows = kFractalSize16;
+    innerCols = kFractalSize16;
     return success();
   }
-  if (fractalSize == 32) {
-    innerRows = 16;
-    innerCols = 2;
+  if (fractalSize == kFractalSize32) {
+    innerRows = kFractalSize16;
+    innerCols = kFractalSize32 / kFractalSize16;
     return success();
   }
-  if (fractalSize == 512 && slayout == 1) {
-    innerRows = 16;
-    innerCols = 32 / elemBytes;
+  if (fractalSize == kFractalSize512 &&
+      slayout == static_cast<int32_t>(SLayout::RowMajor)) {
+    innerRows = kFractalSize16;
+    innerCols = kFractalSize32 / elemBytes;
     return success();
   }
-  if (fractalSize == 512 && slayout == 2) {
-    innerRows = 32 / elemBytes;
-    innerCols = 16;
+  if (fractalSize == kFractalSize512 &&
+      slayout == static_cast<int32_t>(SLayout::ColMajor)) {
+    innerRows = kFractalSize32 / elemBytes;
+    innerCols = kFractalSize16;
     return success();
   }
   return failure();

@@ -131,7 +131,8 @@ getStaticElementCount(ArrayRef<int64_t> shape) {
 }
 
 static bool isSameOrHalfSlotByteSize(uint64_t tensorBytes, uint64_t slotBytes) {
-  return tensorBytes == slotBytes || tensorBytes * 2 == slotBytes;
+  return tensorBytes == slotBytes ||
+         tensorBytes * kPTOFrontendHalfSlotByteMultiplier == slotBytes;
 }
 
 static LogicalResult verifyFrontendGlobalSlotTensor(Operation *op, Value tensor,
@@ -218,7 +219,9 @@ static LogicalResult verifyFrontendInitLocalPipeForm(
     int32_t localSlotNum = localSlotNumAttr.getInt();
     if (localSlotNum <= 0)
       return op.emitOpError("expects 'local_slot_num' to be greater than 0");
-    int32_t loweredSlotNum = dirMask == 3 ? 4 : 8;
+    int32_t loweredSlotNum = dirMask == kPTOFrontendDirMaskBidirectional
+                                 ? kPTOFrontendBidirectionalLoweredSlotNum
+                                 : kPTOFrontendUnidirectionalLoweredSlotNum;
     if (localSlotNum > loweredSlotNum) {
       return op.emitOpError()
              << "expects 'local_slot_num' to be less than or equal to "

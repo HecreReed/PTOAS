@@ -63,6 +63,7 @@ constexpr size_t kMarkerCallReserveExtra = 16;
 constexpr size_t kRewriteOutputReserveExtra = 64;
 constexpr size_t kMarkerRewriteMinArgCount = 2;
 constexpr size_t kMarkerRewriteTernaryArgCount = 3;
+constexpr size_t kNumber3 = 3;
 
 using StringRefVector =
     llvm::SmallVector<llvm::StringRef, kStringRefInlineCapacity>;
@@ -1078,7 +1079,7 @@ static std::optional<std::string> detectTextualModuleArch(llvm::StringRef text) 
   StringRefVector matches;
   llvm::Regex archRegex(
       R"ptoarch("?(pto\.target_arch)"?[[:space:]]*=[[:space:]]*"([[:alpha:][:digit:]_]+)")ptoarch");
-  if (!archRegex.match(text, &matches) || matches.size() < 3)
+  if (!archRegex.match(text, &matches) || matches.size() < kNumber3)
     return std::nullopt;
   return normalizeArchValue(matches[2]);
 }

@@ -13,6 +13,7 @@
 #include "PTOToEmitCTilePatternCommon.h"
 
 #include "PTO/IR/PTO.h"
+#include "PTO/IR/PTOTypeUtils.h"
 
 #include "mlir/Dialect/EmitC/IR/EmitC.h"
 #include "mlir/IR/BuiltinAttributes.h"
@@ -27,6 +28,8 @@ using namespace mlir::pto;
 
 namespace mlir::pto {
 namespace {
+
+constexpr size_t kNumber2 = 2;
 
 static LogicalResult lowerTDivSLikeOp(pto::TDivSOp op,
                                       pto::TDivSOp::Adaptor adaptor,
@@ -134,7 +137,7 @@ struct PTOTCIToEmitC : public OpConversionPattern<pto::TCIOp> {
     std::string scalarTok = "int32_t";
     if (auto it = dyn_cast<IntegerType>(op->getOperand(0).getType())) {
       bool isUnsigned = it.isUnsigned();
-      if (it.getWidth() == 16)
+      if (it.getWidth() == kPTOI16BitWidth)
         scalarTok = isUnsigned ? "uint16_t" : "int16_t";
       else
         scalarTok = isUnsigned ? "uint32_t" : "int32_t";
@@ -964,7 +967,6 @@ struct PTOFillPadExpandToEmitC
 //===----------------------------------------------------------------------===//
 
 [[maybe_unused]] static std::string maskPatternTok(mlir::pto::MaskPatternAttr a) {
-
   auto v = a.getValue(); // enum
   return (std::string("pto::MaskPattern::") + mlir::pto::stringifyMaskPattern(v).str());
 }
@@ -1133,8 +1135,6 @@ struct PTOLogToEmitC : public OpConversionPattern<pto::TLogOp> {
     return success();
   }
 };
-
-
 
 //===----------------------------------------------------------------------===//
 // TLRELU lowering to EmitC (PTOConvert.cpp)
@@ -1377,7 +1377,7 @@ struct PTOMovToEmitC : public OpConversionPattern<pto::TMovOp> {
           emitc::OpaqueAttr::get(ctx, reluTok(op.getReluPreMode())));
     }
 
-    if (templateArgVec.size() == 2 && !hasFp && !hasPreQuant && !hasMode &&
+    if (templateArgVec.size() == kNumber2 && !hasFp && !hasPreQuant && !hasMode &&
         !reluNonDefault)
       return ArrayAttr{};
     return rewriter.getArrayAttr(templateArgVec);

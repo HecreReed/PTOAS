@@ -23,7 +23,7 @@ LogicalResult mlir::pto::SetFFTsOp::verify() {
   auto mr = llvm::dyn_cast<mlir::MemRefType>(getFfts().getType());
   if (!mr)
     return emitOpError("expects a memref operand");
-  if (!mr.getElementType().isInteger(64) && !mr.getElementType().isInteger(8))
+  if (!mr.getElementType().isInteger(kPTOI64BitWidth) && !mr.getElementType().isInteger(kPTOI8BitWidth))
     return emitOpError("expects element type i64 (or i8)");
   return mlir::success();
 }
@@ -48,8 +48,10 @@ LogicalResult mlir::pto::SyncSetOp::verify() {
     return emitOpError()
            << "expects exactly one event-id form: static attr or dynamic index operand";
   if (IntegerAttr fftsModeAttr = getFftsModeAttr()) {
+    static constexpr int64_t kPTOFftsModeMin = 0;
+    static constexpr int64_t kPTOFftsModeMax = 2;
     int64_t fftsMode = fftsModeAttr.getInt();
-    if (fftsMode < 0 || fftsMode > 2)
+    if (fftsMode < kPTOFftsModeMin || fftsMode > kPTOFftsModeMax)
       return emitOpError() << "requires ffts_mode in range [0, 2], but got "
                            << fftsMode;
   }
@@ -174,21 +176,21 @@ ParseResult mlir::pto::SyncAllOp::parse(OpAsmParser &parser,
 
   switch (coreType.getValue()) {
   case pto::SyncCoreType::AIVOnly:
-    if (operands.size() != 2 && operands.size() != 3)
+    if (operands.size() != kNumber2 && operands.size() != kNumber3)
       return parser.emitError(parser.getCurrentLocation())
              << "expects soft AIV-only syncall to have gm_workspace, "
                 "ub_workspace, and optional used_cores";
     return resolveSyncAllSoftOperands(parser, result, operands, operandTypes, 1,
                                       1, 0);
   case pto::SyncCoreType::AICOnly:
-    if (operands.size() != 2 && operands.size() != 3)
+    if (operands.size() != kNumber2 && operands.size() != kNumber3)
       return parser.emitError(parser.getCurrentLocation())
              << "expects soft AIC-only syncall to have gm_workspace, "
                 "l1_workspace, and optional used_cores";
     return resolveSyncAllSoftOperands(parser, result, operands, operandTypes, 1,
                                       0, 1);
   case pto::SyncCoreType::Mix:
-    if (operands.size() != 3 && operands.size() != 4)
+    if (operands.size() != kNumber3 && operands.size() != kNumber4)
       return parser.emitError(parser.getCurrentLocation())
              << "expects soft mixed syncall to have gm_workspace, "
                 "ub_workspace, l1_workspace, and optional used_cores";

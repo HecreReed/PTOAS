@@ -116,6 +116,21 @@ constexpr unsigned kSmallVectorInlineCapacity5 = 5;
 constexpr unsigned kSmallVectorInlineCapacity8 = 8;
 constexpr unsigned kSmallVectorInlineCapacity16 = 16;
 constexpr unsigned kSmallVectorInlineCapacity32 = 32;
+constexpr unsigned kPTORowColRank = 2;
+constexpr size_t kTGatherTmpOperandCount = 2;
+constexpr size_t kTGatherMaxExtraInsOperands = 3;
+constexpr size_t kCommFixedOperandCount = 2;
+constexpr int64_t kPTOMatmulDimMin = 1;
+constexpr int64_t kPTOMatmulDimMax = 4095;
+constexpr unsigned kPTOColumnDim = 1;
+constexpr int64_t kPTOMinGatherDstColumns = 256;
+constexpr int64_t kPTOFloat4PackedExpansion = 2;
+constexpr size_t kNumber2 = 2;
+constexpr size_t kNumber3 = 3;
+constexpr size_t kNumber4 = 4;
+constexpr size_t kNumber5 = 5;
+constexpr int64_t kNumber32 = 32;
+constexpr int64_t kNumber64 = 64;
 
 template <typename T>
 using SmallVec0 = SmallVector<T, kSmallVectorInlineCapacity0>;
@@ -382,7 +397,7 @@ bool mlir::pto::isTargetArchA5(Operation *op) {
 }
 
 static llvm::TypeSize getOneByteTypeSize() {
-  return llvm::TypeSize::getFixed(8);
+  return llvm::TypeSize::getFixed(mlir::pto::kPTOByteBitWidth);
 }
 
 llvm::TypeSize mlir::pto::HiF8Type::getTypeSizeInBits(
@@ -392,18 +407,14 @@ llvm::TypeSize mlir::pto::HiF8Type::getTypeSizeInBits(
   return getOneByteTypeSize();
 }
 
-uint64_t mlir::pto::HiF8Type::getABIAlignment(
-    const DataLayout &dataLayout, DataLayoutEntryListRef params) const {
-  (void)dataLayout;
-  (void)params;
-  return 1;
+uint64_t mlir::pto::HiF8Type::getABIAlignment(const DataLayout &,
+                                              DataLayoutEntryListRef) const {
+  return kPTOByteSize;
 }
 
 uint64_t mlir::pto::HiF8Type::getPreferredAlignment(
-    const DataLayout &dataLayout, DataLayoutEntryListRef params) const {
-  (void)dataLayout;
-  (void)params;
-  return 1;
+    const DataLayout &, DataLayoutEntryListRef) const {
+  return kPTOByteSize;
 }
 
 llvm::TypeSize mlir::pto::F4E1M2x2Type::getTypeSizeInBits(
@@ -414,17 +425,13 @@ llvm::TypeSize mlir::pto::F4E1M2x2Type::getTypeSizeInBits(
 }
 
 uint64_t mlir::pto::F4E1M2x2Type::getABIAlignment(
-    const DataLayout &dataLayout, DataLayoutEntryListRef params) const {
-  (void)dataLayout;
-  (void)params;
-  return 1;
+    const DataLayout &, DataLayoutEntryListRef) const {
+  return kPTOByteSize;
 }
 
 uint64_t mlir::pto::F4E1M2x2Type::getPreferredAlignment(
-    const DataLayout &dataLayout, DataLayoutEntryListRef params) const {
-  (void)dataLayout;
-  (void)params;
-  return 1;
+    const DataLayout &, DataLayoutEntryListRef) const {
+  return kPTOByteSize;
 }
 
 llvm::TypeSize mlir::pto::F4E2M1x2Type::getTypeSizeInBits(
@@ -435,17 +442,13 @@ llvm::TypeSize mlir::pto::F4E2M1x2Type::getTypeSizeInBits(
 }
 
 uint64_t mlir::pto::F4E2M1x2Type::getABIAlignment(
-    const DataLayout &dataLayout, DataLayoutEntryListRef params) const {
-  (void)dataLayout;
-  (void)params;
-  return 1;
+    const DataLayout &, DataLayoutEntryListRef) const {
+  return kPTOByteSize;
 }
 
 uint64_t mlir::pto::F4E2M1x2Type::getPreferredAlignment(
-    const DataLayout &dataLayout, DataLayoutEntryListRef params) const {
-  (void)dataLayout;
-  (void)params;
-  return 1;
+    const DataLayout &, DataLayoutEntryListRef) const {
+  return kPTOByteSize;
 }
 
 static VerifierTargetArch getVerifierTargetArch(Operation *op) {
@@ -782,7 +785,7 @@ static ParseResult parseTGatherExtraInsClause(OpAsmParser &parser,
     return failure();
   state.insOps.push_back(extra);
   while (succeeded(parser.parseOptionalComma())) {
-    if (state.insOps.size() == 3) {
+    if (state.insOps.size() == kTGatherMaxExtraInsOperands) {
       return parser.emitError(parser.getCurrentLocation(),
                               "expected at most 3 extra operands in tgather ins(...)");
     }
@@ -880,14 +883,14 @@ static ParseResult validateTGatherCompareForm(OpAsmParser &parser,
                             "compare-form tgather expects a scalar kValue operand");
   }
   state.hasKValue = true;
-  if (state.insOps.size() >= 2) {
+  if (state.insOps.size() >= kTGatherTmpOperandCount) {
     if (!isTileLikeType(state.insTypes[1])) {
       return parser.emitError(parser.getCurrentLocation(),
                               "compare-form tgather tmp must be tile-like");
     }
     state.hasTmp = true;
   }
-  if (state.insOps.size() == 3) {
+  if (state.insOps.size() == kTGatherMaxExtraInsOperands) {
     return parser.emitError(parser.getCurrentLocation(),
                             "compare-form tgather expects at most src, kValue, tmp in ins(...)");
   }
@@ -904,14 +907,14 @@ static ParseResult validateTGatherIndexForm(OpAsmParser &parser,
   if (state.insOps.empty())
     return success();
   state.hasIndices = true;
-  if (state.insOps.size() >= 2) {
+  if (state.insOps.size() >= kTGatherTmpOperandCount) {
     if (!isTileLikeType(state.insTypes[1])) {
       return parser.emitError(parser.getCurrentLocation(),
                               "index-form tgather tmp must be tile-like");
     }
     state.hasTmp = true;
   }
-  if (state.insOps.size() == 3) {
+  if (state.insOps.size() == kTGatherMaxExtraInsOperands) {
     return parser.emitError(parser.getCurrentLocation(),
                             "index-form tgather expects at most src, indices, tmp in ins(...)");
   }
@@ -1405,7 +1408,7 @@ ParseResult mlir::pto::TReduceOp::parse(OpAsmParser &parser,
     return failure();
 
   SmallVec2<OpAsmParser::UnresolvedOperand> fixedOperands{dst, acc};
-  SmallVec2<Type> fixedTypes(2);
+  SmallVec2<Type> fixedTypes(kCommFixedOperandCount);
   if (failed(parseCommCollectiveTail(
           parser, result, fixedOperands, fixedTypes, recvClause, groupOps,
           groupTypes, {1, 1, 1, recvClause.pong ? 1 : 0},
@@ -1472,7 +1475,6 @@ ParseResult mlir::pto::MakeTensorViewOp::parse(OpAsmParser &parser,
   Type elemTy = tvTy.getElementType();
 
   Type ptrTy = mlir::pto::PtrType::get(parser.getContext(), elemTy);
-
   // resolve %ptr
   if (parser.resolveOperand(ptr, ptrTy, result.operands))
     return failure();

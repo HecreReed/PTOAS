@@ -44,7 +44,8 @@ static LogicalResult verifyRowReductionDstLayout(Operation *op, Type ty,
              << " to use a DN-style column vector tile or legacy ND-style tile";
     }
     auto shape = getShapeVec(ty);
-    if (shape.size() == 2 && shape[1] != ShapedType::kDynamic && shape[1] != 1) {
+    if (shape.size() == kPTORowColRank && shape[1] != ShapedType::kDynamic &&
+        shape[1] != 1) {
       return op->emitOpError()
              << "expects DN-style " << name << " to have shape[1] == 1";
     }
@@ -112,8 +113,8 @@ static FailureOr<TLoadVerifyInfo> verifyTLoadCommon(Operation *op, Value src,
 }
 
 static bool isA2A3TLoadDstElemType(Type elem) {
-  return elem.isInteger(8) || elem.isInteger(16) || elem.isInteger(32) ||
-         elem.isInteger(64) || elem.isF16() || elem.isBF16() || elem.isF32();
+  return elem.isInteger(kPTOI8BitWidth) || elem.isInteger(kPTOI16BitWidth) || elem.isInteger(kPTOI32BitWidth) ||
+         elem.isInteger(kPTOI64BitWidth) || elem.isF16() || elem.isBF16() || elem.isF32();
 }
 
 static LogicalResult verifyTLoadA2A3(Operation *op, const TLoadVerifyInfo &info) {
@@ -144,7 +145,8 @@ static LogicalResult verifyTLoadA5(Operation *op, const TLoadVerifyInfo &info) {
     return op->emitOpError(
         "expects src and dst element types to have the same element size");
   }
-  if (!(dstBytes == 1 || dstBytes == 2 || dstBytes == 4 || dstBytes == 8)) {
+  if (!(dstBytes == kPTOByteSize || dstBytes == kPTOHalfWordBytes ||
+        dstBytes == kPTOWordBytes || dstBytes == kPTODoubleWordBytes)) {
     return op->emitOpError(
         "expects A5 tload dst element size to be 1, 2, 4, or 8 bytes");
   }
@@ -156,7 +158,7 @@ static LogicalResult verifyTLoadA5(Operation *op, const TLoadVerifyInfo &info) {
     return op->emitOpError(
         "expects A5 tload dst element type to be i8/i16/i32/i64/f16/bf16/f32/f8/hif8/fp4");
   }
-  if (info.dstElem.isInteger(64)) {
+  if (info.dstElem.isInteger(kPTOI64BitWidth)) {
     auto pad = info.dstTile.getPadValueI32();
     if (pad != static_cast<int32_t>(pto::PadValue::Null) &&
         pad != static_cast<int32_t>(pto::PadValue::Zero)) {

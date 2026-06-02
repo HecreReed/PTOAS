@@ -27,6 +27,10 @@ using namespace mlir::pto;
 namespace mlir::pto {
 namespace {
 
+constexpr size_t kNumber1 = 1;
+constexpr size_t kNumber2 = 2;
+constexpr size_t kNumber4 = 4;
+
 [[maybe_unused]] static std::string maskPatternTok(mlir::pto::MaskPatternAttr a) {
   auto value = a.getValue();
   return (std::string("pto::MaskPattern::") +
@@ -242,11 +246,11 @@ struct PTOMrgSortToEmitC : public OpConversionPattern<pto::TMrgSortOp> {
 
       auto dstOT = mlir::dyn_cast<emitc::OpaqueType>(dst.getType());
       auto tmpOT = mlir::dyn_cast<emitc::OpaqueType>(tmp.getType());
-      if (!dstOT || !tmpOT || srcs.size() < 2 || srcs.size() > 4)
+      if (!dstOT || !tmpOT || srcs.size() < kNumber2 || srcs.size() > kNumber4)
         return op.emitOpError("format2 expects dst/tmp tilebufs and 2 to 4 srcs");
 
       SmallVec8<Attribute> targs;
-      targs.reserve(2 + srcs.size() + 1);
+      targs.reserve(kNumber2 + srcs.size() + kNumber1);
       targs.push_back(emitc::OpaqueAttr::get(ctx, dstOT.getValue().str()));
       targs.push_back(emitc::OpaqueAttr::get(ctx, tmpOT.getValue().str()));
       for (Value v : srcs) {

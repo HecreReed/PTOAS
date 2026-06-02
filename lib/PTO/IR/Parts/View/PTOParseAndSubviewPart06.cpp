@@ -76,26 +76,24 @@ static LogicalResult verifyTStoreFPA2A3Constraints(TStoreFPOp op) {
   Type srcTy = op.getSrc().getType();
   auto srcElemTy = getElemTy(srcTy);
   auto srcIntTy = dyn_cast<IntegerType>(srcElemTy);
-  if (!(srcElemTy.isF32() || (srcIntTy && srcIntTy.getWidth() == 32)))
+  if (!(srcElemTy.isF32() || (srcIntTy && srcIntTy.getWidth() == kPTOI32BitWidth)))
     return op.emitOpError() << "expects src to have element type f32, i32";
   auto srcShape = getShapeVec(srcTy);
-  if (srcShape.size() != 2)
+  if (srcShape.size() != kPTORowColRank)
     return op.emitOpError() << "expects src to have rank 2";
-  if (srcShape[1] != ShapedType::kDynamic &&
-      (srcShape[1] < 1 || srcShape[1] > 4095))
+  if (srcShape[kPTOColumnDim] != ShapedType::kDynamic &&
+      (srcShape[kPTOColumnDim] < kPTOMatmulDimMin || srcShape[kPTOColumnDim] > kPTOMatmulDimMax))
     return op.emitOpError() << "expects src.cols to be in the range [1, 4095]";
   auto srcValid = getValidShapeVec(srcTy);
-  if (srcValid.size() != 2)
+  if (srcValid.size() != kPTORowColRank)
     return op.emitOpError() << "expects src to have a rank-2 valid_shape";
-  if (srcValid[1] != ShapedType::kDynamic &&
-      (srcValid[1] < 1 || srcValid[1] > 4095)) {
+  if (srcValid[kPTOColumnDim] != ShapedType::kDynamic &&
+      (srcValid[kPTOColumnDim] < kPTOMatmulDimMin || srcValid[kPTOColumnDim] > kPTOMatmulDimMax)) {
     return op.emitOpError()
            << "expects src.valid_shape[1] to be in the range [1, 4095]";
   }
   return success();
 }
-
-
 
 mlir::LogicalResult mlir::pto::TStoreFPOp::verify() {
   if (shouldBypassTStoreFPVerifier(*this))
@@ -177,11 +175,11 @@ struct TTransVerifyState {
 };
 
 static bool isSupportedTransposeElemType(Type type, unsigned elemBytes) {
-  if (elemBytes == 4)
-    return type.isInteger(32) || type.isF32();
-  if (elemBytes == 2)
-    return type.isInteger(16) || type.isF16() || type.isBF16();
-  return type.isInteger(8);
+  if (elemBytes == kPTOWordBytes)
+    return type.isInteger(kPTOI32BitWidth) || type.isF32();
+  if (elemBytes == kPTOHalfWordBytes)
+    return type.isInteger(kPTOI16BitWidth) || type.isF16() || type.isBF16();
+  return type.isInteger(kPTOI8BitWidth);
 }
 
 static FailureOr<TTransVerifyState>
@@ -206,7 +204,8 @@ verifyTTransCommon(TTransOp op, StringRef mismatchMessage) {
     op.emitOpError() << "failed to get transpose element size";
     return failure();
   }
-  if (elemBytes != 1 && elemBytes != 2 && elemBytes != 4) {
+  if (elemBytes != kPTOByteSize && elemBytes != kPTOHalfWordBytes &&
+      elemBytes != kPTOWordBytes) {
     op.emitOpError()
         << "expects transpose element size to be 1, 2, or 4 bytes";
     return failure();

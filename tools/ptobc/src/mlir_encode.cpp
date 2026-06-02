@@ -48,6 +48,7 @@ constexpr unsigned kFunctionInlineCapacity = 8;
 constexpr unsigned kHexadecimalRadix = 16;
 constexpr unsigned kDecimalRadix = 10;
 constexpr uint8_t kDefaultModuleIndexWidth = 64;
+constexpr unsigned kMaxInlineIntegerImmediateBits = 64;
 constexpr size_t kSegmentedOperandImmediateCount = 3;
 constexpr uint8_t kCmpPredicateEqEncoding = 0;
 constexpr uint8_t kCmpPredicateNeEncoding = 1;
@@ -369,7 +370,7 @@ uint64_t Encoder::encodeConstantOpImmediate(mlir::arith::ConstantOp cst) {
   uint64_t typeId = internType(file, cst.getType());
   if (auto intAttr = llvm::dyn_cast<mlir::IntegerAttr>(attr)) {
     const llvm::APInt &value = intAttr.getValue();
-    return value.getBitWidth() <= 64
+    return value.getBitWidth() <= kMaxInlineIntegerImmediateBits
                ? internConstInt64(typeId, value.getSExtValue())
                : internConstIntBits(typeId, value);
   }

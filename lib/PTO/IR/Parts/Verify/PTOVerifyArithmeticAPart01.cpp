@@ -82,7 +82,7 @@ static int64_t getLogicalTileDim(int64_t rawDim, Type elemTy,
     return rawDim;
   pto::BLayout layout = blayout.value_or(pto::BLayout::RowMajor);
   unsigned packedDim = layout == pto::BLayout::ColMajor ? 0 : 1;
-  return dimIdx == packedDim ? rawDim * 2 : rawDim;
+  return dimIdx == packedDim ? rawDim * kPTOFloat4PackedExpansion : rawDim;
 }
 
 static std::optional<pto::BLayout> getTileBufBLayout(Type ty) {
@@ -95,7 +95,7 @@ static SmallVec4<int64_t> getLogicalTileExtentVec(Type ty,
                                                        bool useValidShape) {
   SmallVec4<int64_t> dims =
       useValidShape ? getValidShapeVec(ty) : getShapeVec(ty);
-  if (!isTileLikeType(ty) || dims.size() != 2)
+  if (!isTileLikeType(ty) || dims.size() != kPTORowColRank)
     return dims;
 
   Type elemTy = getElemTy(ty);
@@ -122,7 +122,7 @@ static SmallVec4<int64_t> getValidShapeVec(Value value) {
   if (auto bind = value.getDefiningOp<pto::BindTileOp>()) {
     if (valid.size() >= 1 && bind.getValidRow())
       valid[0] = getConstantIndexOrDynamic(bind.getValidRow());
-    if (valid.size() >= 2 && bind.getValidCol())
+    if (valid.size() >= kPTORowColRank && bind.getValidCol())
       valid[1] = getConstantIndexOrDynamic(bind.getValidCol());
   }
   return valid;
@@ -143,7 +143,7 @@ static SmallVec4<int64_t> getMatmulLogicalShapeVec(Type ty) {
 
 static bool isByteIntegerType(Type ty) {
   auto intTy = dyn_cast<IntegerType>(ty);
-  return intTy && intTy.getWidth() == 8;
+  return intTy && intTy.getWidth() == kPTOI8BitWidth;
 }
 
 static LogicalResult verifyAsyncFlatContiguous1DGMMemRef(Operation *op,

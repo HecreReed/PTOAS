@@ -35,7 +35,7 @@ static LogicalResult verifyTRowExpandCommon(TRowExpandOp op) {
   }
   auto srcValid = getValidShapeVec(op.getSrc());
   auto dstValid = getValidShapeVec(op.getDst());
-  if (srcValid.size() != 2 || dstValid.size() != 2)
+  if (srcValid.size() != kPTORowColRank || dstValid.size() != kPTORowColRank)
     return op.emitOpError("expects src and dst to have rank-2 valid_shape");
   if (srcValid[0] != ShapedType::kDynamic && dstValid[0] != ShapedType::kDynamic &&
       srcValid[0] != dstValid[0]) {

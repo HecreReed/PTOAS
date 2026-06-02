@@ -69,8 +69,10 @@ static LogicalResult verifyBufSyncOp(Operation *op, Attribute opTypeAttr,
 
   if (!bufIdAttr)
     return op->emitOpError("expects 'buf_id' attribute");
+  static constexpr int64_t kPTOSyncMinBufferId = 0;
+  static constexpr int64_t kPTOSyncMaxBufferId = 31;
   int64_t bufId = bufIdAttr.getInt();
-  if (bufId < 0 || bufId > 31)
+  if (bufId < kPTOSyncMinBufferId || bufId > kPTOSyncMaxBufferId)
     return op->emitOpError("expects 'buf_id' in range [0, 31]");
 
   if (modeAttr) {
@@ -210,7 +212,8 @@ LogicalResult TGemvMxBiasOp::verify() {
       return failure();
     auto biasShape = getShapeVec(getBias().getType());
     auto dstShape = getShapeVec(getDst().getType());
-    if (biasShape.size() != 2 || dstShape.size() != 2)
+    if (biasShape.size() != kPTORowColRank ||
+        dstShape.size() != kPTORowColRank)
       return emitOpError("expects bias and dst to be rank-2 for tgemv.mx.bias");
     if (biasShape[1] != ShapedType::kDynamic && dstShape[1] != ShapedType::kDynamic &&
         biasShape[1] != dstShape[1])

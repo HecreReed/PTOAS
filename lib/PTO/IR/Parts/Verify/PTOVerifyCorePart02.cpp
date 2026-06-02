@@ -25,7 +25,7 @@ static LogicalResult verifyBoxedTileBufLayout(Operation *op, pto::TileBufType tb
 
   auto loc = getPTOMemorySpaceEnum(tb);
   bool allowUnalignedRows =
-      (loc && *loc == pto::AddressSpace::VEC) || fractal == 32 || rows == 1;
+      (loc && *loc == pto::AddressSpace::VEC) || fractal == kFractalSize32 || rows == 1;
   if (!allowUnalignedRows && rows != ShapedType::kDynamic &&
       rows % innerRows != 0) {
     return op->emitOpError()
@@ -78,7 +78,8 @@ static LogicalResult verifyTileBufLayoutConstraints(Operation *op,
     return true;
   if (auto it = dyn_cast<IntegerType>(ty)) {
     unsigned width = it.getWidth();
-    return width == 8 || width == 16 || width == 32 || width == 64;
+    return width == kPTOI8BitWidth || width == kPTOI16BitWidth ||
+           width == kPTOI32BitWidth || width == kPTOI64BitWidth;
   }
   return false;
 }
@@ -88,7 +89,7 @@ static bool isSupportedGatherElemTypeA2A3(Type ty) {
     return true;
   if (auto it = dyn_cast<IntegerType>(ty)) {
     unsigned width = it.getWidth();
-    return width == 16 || width == 32;
+    return width == kPTOI16BitWidth || width == kPTOI32BitWidth;
   }
   return false;
 }
@@ -98,10 +99,10 @@ static bool isSupportedGatherElemTypeA5(Type ty) {
     return true;
   if (auto ft = dyn_cast<FloatType>(ty)) {
     unsigned width = ft.getWidth();
-    return width == 8;
+    return width == kPTOI8BitWidth;
   }
   if (auto it = dyn_cast<IntegerType>(ty))
-    return it.getWidth() == 8 || it.getWidth() == 16 || it.getWidth() == 32;
+    return it.getWidth() == kPTOI8BitWidth || it.getWidth() == kPTOI16BitWidth || it.getWidth() == kPTOI32BitWidth;
   return false;
 }
 
@@ -115,7 +116,7 @@ inferLayout(ArrayRef<int64_t> shape, ArrayRef<int64_t> strides,
   if (shape.size() >= 5) {
     int64_t sh3 = shape[2], sh4 = shape[3], sh5 = shape[4];
     int64_t st4 = strides[3], st5 = strides[4];
-    bool alignMatch = (sh3 == 16) && (sh3 * sh4 * elemBytes == 512);
+    bool alignMatch = (sh3 == 16) && (sh3 * sh4 * elemBytes == kFractalSize512);
     bool strideMatch = (st5 == 1) && (st4 == sh5);
     if (alignMatch && strideMatch)
       return mlir::pto::Layout::NZ;

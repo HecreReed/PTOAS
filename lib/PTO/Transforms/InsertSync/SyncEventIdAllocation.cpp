@@ -714,7 +714,6 @@ SyncEventIdAllocation::FindWidenSync(const SyncOperation *setSync,
         bool canForwardReuse =
             (setSync->GetSyncIRIndex() > setSame->GetSyncIRIndex() &&
              setSync->GetSyncIRIndex() <= waitSame->GetSyncIRIndex());
-
         // ... Backward reuse logic ...
 
         if (canForwardReuse /* || canBackwardReuse */) {

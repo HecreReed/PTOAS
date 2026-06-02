@@ -177,8 +177,8 @@ static bool parseStaticMemrefSubViewWindow(memref::SubViewOp op,
   ArrayRef<int64_t> staticOffsets = op.getStaticOffsets();
   ArrayRef<int64_t> staticSizes = op.getStaticSizes();
   ArrayRef<int64_t> staticSubViewStrides = op.getStaticStrides();
-  if (staticOffsets.size() != 2 || staticSizes.size() != 2 ||
-      staticSubViewStrides.size() != 2)
+  if (staticOffsets.size() != kTileRank2D || staticSizes.size() != kTileRank2D ||
+      staticSubViewStrides.size() != kTileRank2D)
     return false;
   if (llvm::is_contained(staticOffsets, ShapedType::kDynamic) ||
       llvm::is_contained(staticSizes, ShapedType::kDynamic) ||
@@ -196,13 +196,13 @@ static bool parseStaticMemrefSubViewWindow(memref::SubViewOp op,
 static std::optional<SmallVector<uint64_t>>
 getMemrefSubViewBaseAddresses(memref::SubViewOp op, MemRefType sourceType,
                               int64_t elemBytes) {
-  if (!sourceType.hasStaticShape() || sourceType.getRank() != kTileRank2D)
+  if (!sourceType.hasStaticShape() || sourceType.getRank() != static_cast<int64_t>(kTileRank2D))
     return std::nullopt;
 
   SmallVector<int64_t> strides;
   int64_t baseOffset = ShapedType::kDynamic;
   if (failed(mlir::getStridesAndOffset(sourceType, strides, baseOffset)) ||
-      strides.size() != 2 ||
+      strides.size() != kTileRank2D ||
       llvm::is_contained(strides, ShapedType::kDynamic))
     return std::nullopt;
 
@@ -246,7 +246,6 @@ static std::pair<int64_t, int64_t> getStaticOffsetAndSize(Operation *op, Value s
 
     int64_t totalOffset = 0;
     auto staticOffsets = subView.getStaticOffsets();
-
     if (staticOffsets.empty()) return {-1, -1};
     if (staticOffsets.size() > strides.size()) return {-1, -1};
 
@@ -296,7 +295,6 @@ void PTOIRTranslator::UpdateKernelArgMemInfo() {
   for (size_t i = 0; i < funcParamSize; i++) {
     Value funcArg = func_.getArgument(i);
     Type argType = funcArg.getType();
-
     if (!isa<pto::PtrType>(argType) && !isa<MemRefType>(argType)) {
       continue;
     }
@@ -562,7 +560,6 @@ PTOIRTranslator::UpdateDeclareTileMemRefOpMemInfo(pto::DeclareTileMemRefOp op) {
 void PTOIRTranslator::UpdatePTOOpInfo(Operation *op) {
   // 1. 获取流水线类型 (现在通过 Interface)
   pto::PipelineType pipe = getOpPipeline(op);
-
   // 如果 Op 不属于任何关心的流水线，直接跳过，不建立 Sync 节点
   if (pipe == pto::PipelineType::PIPE_UNASSIGNED) return;
 
@@ -776,7 +773,6 @@ void PTOIRTranslator::UpdateAliasBufferInfo(Value result, Value source) {
 
   for (auto &parentInfo : buffer2MemInfoMap_[source]) {
     auto newInfo = parentInfo->clone(result);
-
     if (!newInfo->baseAddresses.empty()) {
         newInfo->baseAddresses[0] += deltaOffset;
     } else {
@@ -854,7 +850,7 @@ void PTOIRTranslator::UpdateMemrefSubViewAliasBufferInfo(memref::SubViewOp op) {
     SmallVector<int64_t> strides;
     int64_t baseOffset = ShapedType::kDynamic;
     if (failed(mlir::getStridesAndOffset(sourceType, strides, baseOffset)) ||
-        strides.size() != 2) {
+        strides.size() != kTileRank2D) {
       return std::nullopt;
     }
     ArrayRef<int64_t> staticSizes = op.getStaticSizes();

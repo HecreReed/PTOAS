@@ -92,8 +92,6 @@ struct CallToEmitC : public OpConversionPattern<func::CallOp> {
   }
 };
 
-
-
 template <typename SectionOpTy>
 struct SectionToEmitC : public OpConversionPattern<SectionOpTy> {
   using OpConversionPattern<SectionOpTy>::OpConversionPattern;

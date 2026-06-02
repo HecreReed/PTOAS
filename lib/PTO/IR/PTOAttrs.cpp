@@ -8,6 +8,7 @@
 
 //===- PTOAttrs.cpp ------------------------------------------------*- C++ -*-===//
 #include "PTO/IR/PTO.h"
+#include "PTO/IR/PTOTypeUtils.h"
 #include "mlir/IR/Builders.h"
 #include "mlir/IR/DialectImplementation.h"
 #include "mlir/Parser/Parser.h"          // parseAttribute
@@ -22,10 +23,6 @@ using namespace mlir::pto;
 namespace {
 
 constexpr unsigned kI32BitWidth = 32;
-constexpr int32_t kFractalSize16 = 16;
-constexpr int32_t kFractalSize32 = 32;
-constexpr int32_t kFractalSize512 = 512;
-constexpr int32_t kFractalSize1024 = 1024;
 constexpr int32_t kBLayoutRowMajor = static_cast<int32_t>(BLayout::RowMajor);
 constexpr int32_t kBLayoutColMajor = static_cast<int32_t>(BLayout::ColMajor);
 constexpr int32_t kSLayoutNoneBox = static_cast<int32_t>(SLayout::NoneBox);

@@ -120,7 +120,7 @@ mlir::LogicalResult mlir::pto::TLReluOp::verify() {
         failed(verifyTileBufSameValidShape(*this, srcTy, dstTy, "src", "dst")))
       return failure();
     auto valid = getValidShapeVec(srcTy);
-    if (valid.size() != 2)
+    if (valid.size() != kPTORowColRank)
       return emitOpError("expects src to have rank-2 valid_shape");
     if (valid[0] != ShapedType::kDynamic && valid[0] <= 0)
       return emitOpError("expects src valid_shape[0] to be positive");

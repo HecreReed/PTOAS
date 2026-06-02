@@ -118,7 +118,7 @@ mlir::LogicalResult mlir::pto::TRsqrtOp::verify() {
     auto tmpNumel = getStaticNumElements(getShapeVec(tt));
     if (!tmpElemBytes.has_value() || !tmpNumel.has_value())
       return emitOpError("expects tmp to have a static, byte-addressable tile type");
-    if (tmpElemBytes.value() * tmpNumel.value() < 32)
+    if (tmpElemBytes.value() * tmpNumel.value() < kNumber32)
       return emitOpError("expects tmp to be at least 32 bytes when provided");
   }
   return mlir::success();
@@ -128,14 +128,14 @@ static bool isScatterAllowedDataElem(Type type) {
   if (type.isF16() || type.isF32() || type.isBF16())
     return true;
   if (auto intTy = dyn_cast<IntegerType>(type))
-    return intTy.getWidth() == 8 || intTy.getWidth() == 16 ||
-           intTy.getWidth() == 32;
+    return intTy.getWidth() == kPTOI8BitWidth || intTy.getWidth() == kPTOI16BitWidth ||
+           intTy.getWidth() == kPTOI32BitWidth;
   return false;
 }
 
 static bool isScatterAllowedIndexElem(Type type) {
   if (auto intTy = dyn_cast<IntegerType>(type))
-    return intTy.getWidth() == 16 || intTy.getWidth() == 32;
+    return intTy.getWidth() == kPTOI16BitWidth || intTy.getWidth() == kPTOI32BitWidth;
   return false;
 }
 
@@ -145,9 +145,9 @@ static unsigned getMaskScatterTimes(MaskPatternAttr pattern) {
     return 1;
   case MaskPattern::P0101:
   case MaskPattern::P1010:
-    return 2;
+    return kNumber2;
   default:
-    return 4;
+    return kNumber4;
   }
 }
 
@@ -175,12 +175,13 @@ static LogicalResult verifyTScatterIndexedForm(TScatterOp op) {
 
   auto dataWidth = getPTOStorageElemBitWidth(srcElem);
   auto indexWidth = getPTOStorageElemBitWidth(indexElem);
-  if (dataWidth != 8 && dataWidth != 16 && dataWidth != 32)
+  if (dataWidth != kPTOI8BitWidth && dataWidth != kPTOI16BitWidth &&
+      dataWidth != kPTOI32BitWidth)
     return op.emitOpError("unexpected src/dst element bitwidth");
 
-  unsigned dataBytes = dataWidth / 8;
+  unsigned dataBytes = dataWidth / kPTOByteBitWidth;
   unsigned expectedIndexBytes = dataBytes == 1 ? 2 : dataBytes;
-  if (indexWidth / 8 != expectedIndexBytes) {
+  if (indexWidth / kPTOByteBitWidth != expectedIndexBytes) {
     return op.emitOpError(
         "expects indexes element size to match the documented scatter rule");
   }
@@ -206,7 +207,7 @@ static LogicalResult verifyTScatterMaskForm(TScatterOp op) {
 
   auto srcValid = getValidShapeVec(srcTy);
   auto dstValid = getValidShapeVec(dstTy);
-  if (srcValid.size() != 2 || dstValid.size() != 2)
+  if (srcValid.size() != kPTORowColRank || dstValid.size() != kPTORowColRank)
     return op.emitOpError("expects src and dst to have rank-2 valid_shape");
 
   auto pattern = op.getMaskPatternAttr();

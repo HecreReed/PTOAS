@@ -160,9 +160,9 @@ LogicalResult InitializeL2G2LPipeOp::verify() {
           "expects 'local_slot_num' to be less than or equal to slot_num");
   }
 
-  if (getDirMask() == 3 && !getPeerLocalAddr())
+  if (getDirMask() == kPTOFrontendDirMaskBidirectional && !getPeerLocalAddr())
     return emitOpError("expects 'peer_local_addr' when dir_mask is 3");
-  if (getDirMask() != 3 && getPeerLocalAddr())
+  if (getDirMask() != kPTOFrontendDirMaskBidirectional && getPeerLocalAddr())
     return emitOpError("'peer_local_addr' is only allowed when dir_mask is 3");
   return success();
 }
@@ -175,9 +175,9 @@ LogicalResult InitializeL2LPipeOp::verify() {
                                   : std::nullopt)))
     return failure();
 
-  if (getDirMask() == 3 && !getPeerLocalAddr())
+  if (getDirMask() == kPTOFrontendDirMaskBidirectional && !getPeerLocalAddr())
     return emitOpError("expects 'peer_local_addr' when dir_mask is 3");
-  if (getDirMask() != 3 && getPeerLocalAddr())
+  if (getDirMask() != kPTOFrontendDirMaskBidirectional && getPeerLocalAddr())
     return emitOpError("'peer_local_addr' is only allowed when dir_mask is 3");
   return success();
 }

@@ -11,6 +11,7 @@
 
 #include "PTO/Transforms/GraphSyncSolver/Utility.h"
 #include "PTO/IR/PTO.h"
+#include "PTO/IR/PTOTypeUtils.h"
 #include "PTO/Transforms/GraphSyncSolver/SyncSolverIR.h"
 #include "mlir/IR/Value.h"
 #include "llvm/Support/ErrorHandling.h"
@@ -399,12 +400,12 @@ Value getValueOrCreateCastToI64(IRRewriter &rewriter, Location loc, Value val) {
   ASSERT(isa<OpResult>(val));
   OpBuilder::InsertionGuard guard(rewriter);
   rewriter.setInsertionPointAfterValue(val);
-  if (!val.getType().isInteger(64)) {
+  if (!val.getType().isInteger(kPTOI64BitWidth)) {
     if (val.getType().isIndex()) {
       val = rewriter.create<arith::IndexCastOp>(
-          loc, rewriter.getIntegerType(64), val);
+          loc, rewriter.getIntegerType(kPTOI64BitWidth), val);
     } else if (val.getType().isInteger()) {
-      val = rewriter.create<arith::ExtSIOp>(loc, rewriter.getIntegerType(64),
+      val = rewriter.create<arith::ExtSIOp>(loc, rewriter.getIntegerType(kPTOI64BitWidth),
                                             val);
     } else {
       llvm_unreachable("unhandled casting type");

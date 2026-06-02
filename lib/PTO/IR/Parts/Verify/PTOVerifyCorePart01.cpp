@@ -70,7 +70,7 @@ static LogicalResult verifyExtractStaticBoundsCommon(
       getConstantIntegerValueEx(indexCol, includeIndexAndIntOpsInConstFold);
   auto srcShape = getShapeVec(srcTy);
   auto dstShape = getShapeVec(dstTy);
-  if (srcShape.size() != 2 || dstShape.size() != 2)
+  if (srcShape.size() != kPTORowColRank || dstShape.size() != kPTORowColRank)
     return op.emitOpError("expects src and dst to be rank-2 tile_buf");
   if (row && srcShape[0] != ShapedType::kDynamic &&
       dstShape[0] != ShapedType::kDynamic &&
@@ -92,7 +92,7 @@ static LogicalResult verifyInsertStaticBoundsCommon(
       getConstantIntegerValueEx(indexCol, includeIndexAndIntOpsInConstFold);
   auto srcShape = getValidShapeVec(srcTy);
   auto dstShape = getShapeVec(dstTy);
-  if (srcShape.size() != 2 || dstShape.size() != 2)
+  if (srcShape.size() != kPTORowColRank || dstShape.size() != kPTORowColRank)
     return op.emitOpError("expects src and dst to be rank-2 tile_buf");
   if (row && srcShape[0] != ShapedType::kDynamic &&
       dstShape[0] != ShapedType::kDynamic &&
@@ -136,7 +136,7 @@ static bool readSLayoutValue(Attribute attr, int32_t &out) {
 static LogicalResult verifyTileBufPositiveShape(Operation *op,
                                                 ArrayRef<int64_t> shape,
                                                 StringRef name) {
-  if (shape.size() != 2)
+  if (shape.size() != kPTORowColRank)
     return op->emitOpError() << "expects " << name << " to be rank-2";
   if (shape[0] != ShapedType::kDynamic && shape[0] <= 0)
     return op->emitOpError() << "expects " << name << " rows to be positive";
@@ -180,28 +180,28 @@ static LogicalResult getBoxedTileInnerShape(Operation *op, StringRef name,
     return op->emitOpError() << "expects " << name
                              << " to have a non-zero element byte size";
   switch (fractal) {
-  case 1024:
-    innerRows = 16;
-    innerCols = 16;
+  case kFractalSize1024:
+    innerRows = kFractalSize16;
+    innerCols = kFractalSize16;
     return success();
-  case 32:
-    innerRows = 16;
-    innerCols = 2;
+  case kFractalSize32:
+    innerRows = kFractalSize16;
+    innerCols = kFractalSize32 / kFractalSize16;
     return success();
-  case 512:
+  case kFractalSize512:
     if (kAlignedBytes % elemBytes != 0) {
       return op->emitOpError() << "expects " << name
                                << " element byte size to divide 32 for boxed "
                                   "fractal-512 tile layout";
     }
     if (slayout == static_cast<int32_t>(SLayout::RowMajor)) {
-      innerRows = 16;
+      innerRows = kFractalSize16;
       innerCols = kAlignedBytes / static_cast<int64_t>(elemBytes);
       return success();
     }
     if (slayout == static_cast<int32_t>(SLayout::ColMajor)) {
       innerRows = kAlignedBytes / static_cast<int64_t>(elemBytes);
-      innerCols = 16;
+      innerCols = kFractalSize16;
       return success();
     }
     break;

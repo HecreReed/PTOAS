@@ -78,9 +78,9 @@ static bool isTRowExpandBinaryElemSupported(Type elem, PTOArch targetArch,
   if (elem.isF16() || elem.isF32())
     return true;
   if (targetArch == PTOArch::A5)
-    return elem.isInteger(8) || elem.isInteger(16) || elem.isInteger(32);
+    return elem.isInteger(kPTOI8BitWidth) || elem.isInteger(kPTOI16BitWidth) || elem.isInteger(kPTOI32BitWidth);
   return allowA2A3IntegerTypes &&
-         (elem.isInteger(16) || elem.isInteger(32));
+         (elem.isInteger(kPTOI16BitWidth) || elem.isInteger(kPTOI32BitWidth));
 }
 
 static LogicalResult verifyTRowExpandBinaryElemType(Operation *op, Type elem,
@@ -116,7 +116,7 @@ static LogicalResult verifyTRowExpandAddSrc1Shape(Operation *op, Type src1Ty,
                                                   Type dstTy, Type elem) {
   auto src1Valid = getValidShapeVec(src1Ty);
   auto dstValid = getValidShapeVec(dstTy);
-  if (src1Valid.size() != 2 || dstValid.size() != 2)
+  if (src1Valid.size() != kPTORowColRank || dstValid.size() != kPTORowColRank)
     return op->emitOpError(
         "expects src1 and dst to have rank-2 valid_shape");
   if (src1Valid[0] != ShapedType::kDynamic &&
@@ -125,8 +125,8 @@ static LogicalResult verifyTRowExpandAddSrc1Shape(Operation *op, Type src1Ty,
         "expects src1 valid_shape[0] to equal dst valid_shape[0]");
   bool src1IsRowMajor = isRowMajorTileBuf(src1Ty);
   int64_t expectedCol =
-      elem.isInteger(8) ? 32
-                        : ((elem.isF16() || elem.isInteger(16)) ? 16 : 8);
+      elem.isInteger(kPTOI8BitWidth) ? 32
+                        : ((elem.isF16() || elem.isInteger(kPTOI16BitWidth)) ? 16 : 8);
   int64_t src1Col = src1Valid[1];
   if (src1IsRowMajor) {
     if (src1Col != ShapedType::kDynamic && src1Col != expectedCol)

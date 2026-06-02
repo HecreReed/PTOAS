@@ -102,7 +102,6 @@ void mlir::pto::annotatePTOEntryFunctions(ModuleOp module) {
 
 LogicalResult AllocTileOp::verify() {
   auto ty = getResult().getType(); // TileBufType
-
   if (failed(verifyTileBufLayoutConstraints(*this, ty, "result")))
     return failure();
 
@@ -112,7 +111,7 @@ LogicalResult AllocTileOp::verify() {
 
   // type 上的 validShape
   auto vs = ty.getValidShape();
-  if (vs.size() != 2)
+  if (vs.size() != kPTORowColRank)
     return emitOpError("result tile_buf must have rank-2 validShape");
 
   // TileBuf valid dims use a negative sentinel (e.g. '?' / -1). Be robust to
@@ -141,9 +140,9 @@ LogicalResult MaterializeTileOp::verify() {
   auto sourceTy = cast<MemRefType>(getSource().getType());
   auto resultTy = cast<TileBufType>(getResult().getType());
 
-  if (sourceTy.getRank() != 2)
+  if (sourceTy.getRank() != kPTORowColRank)
     return emitOpError("source memref must be rank-2 to materialize a tile handle");
-  if (resultTy.getRank() != 2)
+  if (resultTy.getRank() != kPTORowColRank)
     return emitOpError("result tile_buf must be rank-2");
   if (failed(verifyTileBufLayoutConstraints(*this, resultTy, "result")))
     return failure();
@@ -167,9 +166,9 @@ LogicalResult MaterializeTileOp::verify() {
 
   auto shape = resultTy.getShape();
   auto validShape = resultTy.getValidShape();
-  if (validShape.size() != 2)
+  if (validShape.size() != kPTORowColRank)
     return emitOpError("result tile_buf must have rank-2 validShape");
-  for (unsigned i = 0; i < 2; ++i) {
+  for (unsigned i = 0; i < kPTORowColRank; ++i) {
     if (shape[i] != ShapedType::kDynamic &&
         validShape[i] != ShapedType::kDynamic && validShape[i] > shape[i]) {
       return emitOpError() << "valid_shape[" << i << "] must be <= shape["

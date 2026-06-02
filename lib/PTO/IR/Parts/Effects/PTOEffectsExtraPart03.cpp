@@ -34,7 +34,9 @@ static LogicalResult verifyFrontendInitCommon(InitOpT op,
   }
 
   int8_t dirMask = op.getDirMask();
-  if (dirMask != 1 && dirMask != 2 && dirMask != 3)
+  if (dirMask != kPTOFrontendDirMaskC2V &&
+      dirMask != kPTOFrontendDirMaskV2C &&
+      dirMask != kPTOFrontendDirMaskBidirectional)
     return op.emitOpError("expects 'dir_mask' to be 1, 2, or 3");
   if (op.getSlotSize() <= 0)
     return op.emitOpError("expects 'slot_size' to be greater than 0");
@@ -209,12 +211,14 @@ static LogicalResult verifyFrontendDataOpDirection(Operation *op, int32_t id,
     return failure();
 
   int8_t dirMask = *dirMaskOr;
-  if (expectC2V && dirMask != 1 && dirMask != 3) {
+  if (expectC2V && dirMask != kPTOFrontendDirMaskC2V &&
+      dirMask != kPTOFrontendDirMaskBidirectional) {
     return op->emitOpError()
            << "expects 'id' = " << id
            << " to reference initialize_pipe with dir_mask = 1 or 3";
   }
-  if (!expectC2V && dirMask != 2 && dirMask != 3) {
+  if (!expectC2V && dirMask != kPTOFrontendDirMaskV2C &&
+      dirMask != kPTOFrontendDirMaskBidirectional) {
     return op->emitOpError()
            << "expects 'id' = " << id
            << " to reference initialize_pipe with dir_mask = 2 or 3";

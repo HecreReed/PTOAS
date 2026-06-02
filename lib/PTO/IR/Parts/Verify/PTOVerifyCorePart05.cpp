@@ -16,7 +16,7 @@ static LogicalResult verifyRowReductionValidRegion(Operation *op, Type srcTy,
                                                    Type dstTy) {
   auto srcValid = getValidShapeVec(srcTy);
   auto dstValid = getValidShapeVec(dstTy);
-  if (srcValid.size() != 2 || dstValid.size() != 2)
+  if (srcValid.size() != kPTORowColRank || dstValid.size() != kPTORowColRank)
     return op->emitOpError("expects src and dst to have rank-2 valid_shape");
   if (srcValid[0] != ShapedType::kDynamic && srcValid[0] == 0)
     return op->emitOpError("expects src valid_shape[0] to be non-zero");
@@ -31,7 +31,7 @@ static LogicalResult verifyRowReductionValidRegion(Operation *op, Type srcTy,
 }
 
 static bool isSupportedRowReductionElemType(Type elem) {
-  return elem.isInteger(16) || elem.isInteger(32) || elem.isF16() ||
+  return elem.isInteger(kPTOI16BitWidth) || elem.isInteger(kPTOI32BitWidth) || elem.isF16() ||
          elem.isF32();
 }
 
@@ -84,7 +84,7 @@ static LogicalResult verifyTRowArgReductionCommon(Operation *op, Type srcTy,
   if (!isSupportedRowReductionElemType(srcElem))
     return op->emitOpError("expects src element type to be i16/i32/f16/f32");
   auto dstInt = dyn_cast<IntegerType>(getElemTy(dstTy));
-  if (!dstInt || dstInt.getWidth() != 32)
+  if (!dstInt || dstInt.getWidth() != kPTOI32BitWidth)
     return op->emitOpError("expects dst element type to be i32 or ui32");
   return success();
 }
@@ -109,7 +109,7 @@ static LogicalResult verifyColReductionValidRegion(Operation *op, Type srcTy,
                                                    bool requireNonZeroSrc) {
   auto srcValid = getValidShapeVec(srcTy);
   auto dstValid = getValidShapeVec(dstTy);
-  if (srcValid.size() != 2 || dstValid.size() != 2)
+  if (srcValid.size() != kPTORowColRank || dstValid.size() != kPTORowColRank)
     return op->emitOpError("expects src and dst to have rank-2 valid_shape");
   if (requireNonZeroSrc) {
     if (srcValid[0] != ShapedType::kDynamic && srcValid[0] == 0)
@@ -128,7 +128,7 @@ static LogicalResult verifyColArgReductionDstLayout(Operation *op, Type ty,
   if (failed(verifyNDStyleVecTile(op, ty, name)))
     return failure();
   auto valid = getValidShapeVec(ty);
-  if (valid.size() != 2)
+  if (valid.size() != kPTORowColRank)
     return op->emitOpError() << "expects " << name
                              << " to have rank-2 valid_shape";
   if (valid[0] != ShapedType::kDynamic && valid[0] != 1)
@@ -161,7 +161,6 @@ LogicalResult mlir::pto::MakeTensorViewOp::verify() {
                          << pty.getElementType() << " view=" << tvTy.getElementType();
 
   int64_t rank = tvTy.getRank();
-
   if (static_cast<int64_t>(getShape().size()) != rank ||
       static_cast<int64_t>(getStrides().size()) != rank)
     return emitOpError() << "shape/strides operand counts must match tensor_view rank="

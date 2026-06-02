@@ -130,7 +130,6 @@ static void bindPTOEnumsPart1(pybind11::module &m) {
     .value("Zero", mlir::pto::PadValue::Zero)
     .value("Max", mlir::pto::PadValue::Max)
     .value("Min", mlir::pto::PadValue::Min);
-
 }
 
 static void bindPTOEnumsPart2(pybind11::module &m) {
@@ -161,7 +160,6 @@ static void bindPTOEnumsPart2(pybind11::module &m) {
       .value("GT", MlirPTOCmpMode_GT)
       .value("GE", MlirPTOCmpMode_GE)
       .export_values();
-
 }
 
 static void bindPTOEnumsPart3(pybind11::module &m) {
@@ -198,7 +196,6 @@ static void bindPTOEnumsPart3(pybind11::module &m) {
       .value("NoRelu", mlir::pto::ReluPreMode::NoRelu)
       .value("NormalRelu", mlir::pto::ReluPreMode::NormalRelu)
       .export_values();
-
 }
 
 static void bindPTOEnumsPart4(pybind11::module &m) {
@@ -226,7 +223,6 @@ static void bindPTOEnumsPart4(pybind11::module &m) {
       .value("Max", mlir::pto::ReduceOp::Max)
       .value("Min", mlir::pto::ReduceOp::Min)
       .export_values();
-
 }
 
 static void bindPTOEnumsPart5(pybind11::module &m) {
@@ -264,7 +260,6 @@ static void bindPTOEnumsPart5(pybind11::module &m) {
       .value("P1000", mlir::pto::MaskPattern::P1000)
       .value("P1111", mlir::pto::MaskPattern::P1111)
       .export_values();
-
 }
 
 static void bindPTOEnums(pybind11::module &m) {
@@ -303,7 +298,6 @@ static void bindPTOPrimaryAttrsPart1(pybind11::module &m) {
             return cls(a);
             },
             py::arg("cls"), py::arg("value"), py::arg("context") = py::none());
-
 }
 
 static void bindPTOPrimaryAttrsPart2(pybind11::module &m) {
@@ -332,7 +326,6 @@ static void bindPTOPrimaryAttrsPart2(pybind11::module &m) {
             return cls(a);
             },
             py::arg("cls"), py::arg("value"), py::arg("context") = py::none());
-
 }
 
 static void bindPTOPrimaryAttrsPart3(pybind11::module &m) {
@@ -361,7 +354,6 @@ static void bindPTOPrimaryAttrsPart3(pybind11::module &m) {
             return cls(a);
             },
             py::arg("cls"), py::arg("value"), py::arg("context") = py::none());
-
 }
 
 static void bindPTOPrimaryAttrsPart4(pybind11::module &m) {
@@ -390,7 +382,6 @@ static void bindPTOPrimaryAttrsPart4(pybind11::module &m) {
             return cls(a);
             },
             py::arg("cls"), py::arg("value"), py::arg("context") = py::none());
-
 }
 
 static void bindPTOPrimaryAttrsPart5(pybind11::module &m) {
@@ -474,7 +465,6 @@ static void bindPTOPrimaryAttrsPart6(pybind11::module &m) {
         [](MlirAttribute self) -> int32_t {
         return mlirPTORoundModeAttrGetValue(self);
         });
-
 }
 
 static void bindPTOPrimaryAttrsPart7(pybind11::module &m) {
@@ -573,7 +563,6 @@ static void bindPTOPrimaryAttrsPart8(pybind11::module &m) {
           [](MlirAttribute self) {
             return mlirPTOCmpModeAttrGetValue(self);
           });
-
 }
 
 static void bindPTOPrimaryAttrsPart9(pybind11::module &m) {
@@ -672,7 +661,6 @@ static void bindPTOExtraAttrsPart1(pybind11::module &m) {
           [](MlirAttribute self) -> int32_t {
             return mlirPTOQuantTypeAttrGetValue(self);
           });
-
 }
 
 static void bindPTOExtraAttrsPart2(pybind11::module &m) {
@@ -764,7 +752,6 @@ static void bindPTOTypesPart1(pybind11::module &m) {
                 return cls.attr("__call__")(t);
             },
             py::arg("cls"), py::arg("context") = py::none());
-
 }
 
 static void bindPTOTypesPart2(pybind11::module &m) {
@@ -791,7 +778,6 @@ static void bindPTOTypesPart2(pybind11::module &m) {
                 return cls.attr("__call__")(t);
             },
             py::arg("cls"), py::arg("context") = py::none());
-
 }
 
 static void bindPTOTypesPart3(pybind11::module &m) {
@@ -816,7 +802,6 @@ static void bindPTOTypesPart3(pybind11::module &m) {
                 return cls.attr("__call__")(t);
             },
             py::arg("cls"), py::arg("context") = py::none());
-
 }
 
 static void bindPTOTypesPart4(pybind11::module &m) {
@@ -945,7 +930,6 @@ static void bindPTOTypesPart5(pybind11::module &m) {
 }
 
 static void bindPTOTypes(pybind11::module &m) {
-
     // --------------------------------------------------------------------------
     // !pto.ptr<elem>
     // --------------------------------------------------------------------------

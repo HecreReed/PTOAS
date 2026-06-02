@@ -35,6 +35,10 @@ namespace {
 
 static constexpr llvm::StringLiteral kAutoSyncTailPendingModeAttr =
     "__pto.auto_sync_tail_mode";
+static constexpr int64_t kPTOFftsModeSymbolic = 2;
+constexpr size_t kTileRank2D = 2;
+constexpr size_t kNumber2 = 2;
+constexpr size_t kNumber3 = 3;
 constexpr unsigned kInlineCapacity2 = 2;
 constexpr unsigned kInlineCapacity4 = 4;
 
@@ -62,7 +66,7 @@ static Value castInterCoreEventIdToI32(ConversionPatternRewriter &rewriter,
 static Attribute getFFTSModeCodegenArg(ConversionPatternRewriter &rewriter,
                                        int64_t fftsMode) {
   auto *ctx = rewriter.getContext();
-  if (fftsMode == 2)
+  if (fftsMode == kPTOFftsModeSymbolic)
     return emitc::OpaqueAttr::get(ctx, "FFTS_MODE_VAL");
   return emitc::OpaqueAttr::get(ctx, std::to_string(fftsMode));
 }
@@ -235,8 +239,6 @@ static LogicalResult emitA5SyncSetCall(ConversionPatternRewriter &rewriter,
   return success();
 }
 
-
-
 static FailureOr<emitc::OpaqueType>
 buildSyncAllWorkspaceEmitType(ConversionPatternRewriter &rewriter,
                               Value originalWorkspace) {
@@ -245,7 +247,7 @@ buildSyncAllWorkspaceEmitType(ConversionPatternRewriter &rewriter,
     return failure();
 
   ArrayRef<int64_t> rawShape = memTy.getShape();
-  if (rawShape.empty() || rawShape.size() > 2)
+  if (rawShape.empty() || rawShape.size() > kTileRank2D)
     return failure();
 
   int64_t rows = rawShape.size() == 1 ? 1 : rawShape[0];
@@ -565,7 +567,7 @@ static bool tryExtractSyncTokensFromArrayAttr(Operation *op, StringRef attrName,
                                               std::string &dstTok,
                                               std::string &evtTok) {
   auto arrayAttr = op->getAttrOfType<ArrayAttr>(attrName);
-  if (!arrayAttr || arrayAttr.size() < 3)
+  if (!arrayAttr || arrayAttr.size() < kNumber3)
     return false;
   return tryAssignSyncTokens(arrayAttr[0], arrayAttr[1], arrayAttr[2], srcTok,
                              dstTok, evtTok);
@@ -587,7 +589,7 @@ static bool tryExtractFallbackSyncTokens(Operation *op, std::string &srcTok,
       event = std::move(token);
     }
   }
-  if (pipes.size() < 2 || event.empty())
+  if (pipes.size() < kNumber2 || event.empty())
     return false;
   srcTok = pipes[0];
   dstTok = pipes[1];

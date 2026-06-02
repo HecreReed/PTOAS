@@ -64,7 +64,7 @@ static LogicalResult verifyAsyncSessionScratch(Operation *op, Type scratchTy) {
     return op->emitOpError("expects scratch to be in vec address space");
 
   auto scratchShape = getShapeVec(scratchTy);
-  if (scratchShape.empty() || scratchShape.size() > 2)
+  if (scratchShape.empty() || scratchShape.size() > kPTORowColRank)
     return op->emitOpError("expects scratch to be rank-1 or rank-2");
   for (int64_t dim : scratchShape) {
     if (dim == ShapedType::kDynamic)
@@ -96,9 +96,12 @@ static LogicalResult verifyAsyncSessionWorkspace(Operation *op, Type workspaceTy
 }
 
 static LogicalResult verifyAsyncSessionAttrs(BuildAsyncSessionOp op) {
+  static constexpr int64_t kPTOAsyncSessionMinSyncId = 0;
+  static constexpr int64_t kPTOAsyncSessionMaxSyncId = 7;
   if (auto syncIdAttr = op.getSyncIdAttr()) {
     int64_t syncId = syncIdAttr.getInt();
-    if (syncId < 0 || syncId > 7)
+    if (syncId < kPTOAsyncSessionMinSyncId ||
+        syncId > kPTOAsyncSessionMaxSyncId)
       return op.emitOpError("expects sync_id in range [0, 7]");
   }
   if (auto blockBytesAttr = op.getBlockBytesAttr()) {
@@ -212,4 +215,3 @@ LogicalResult TPutAsyncOp::verify() {
 LogicalResult TGetAsyncOp::verify() {
   return verifyAsyncTransferOp(getOperation(), getDst(), getSrc());
 }
-

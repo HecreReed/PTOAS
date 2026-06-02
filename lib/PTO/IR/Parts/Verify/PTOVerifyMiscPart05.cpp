@@ -91,7 +91,7 @@ mlir::LogicalResult mlir::pto::TShrSOp::verify() {
     if (failed(elemOr))
       return failure();
     auto it = mlir::dyn_cast<IntegerType>(*elemOr);
-    if (!it || (it.getWidth() != 16 && it.getWidth() != 32))
+    if (!it || (it.getWidth() != kPTOI16BitWidth && it.getWidth() != kPTOI32BitWidth))
       return emitOpError(
           "expects A2/A3 tshrs src and dst element type to be i16/i32");
     return success();
@@ -102,8 +102,8 @@ mlir::LogicalResult mlir::pto::TShrSOp::verify() {
     if (failed(elemOr))
       return failure();
     auto it = mlir::dyn_cast<IntegerType>(*elemOr);
-    if (!it || (it.getWidth() != 8 && it.getWidth() != 16 &&
-                it.getWidth() != 32))
+    if (!it || (it.getWidth() != kPTOI8BitWidth && it.getWidth() != kPTOI16BitWidth &&
+                it.getWidth() != kPTOI32BitWidth))
       return emitOpError(
           "expects A5 tshrs src and dst element type to be i8/i16/i32");
     return success();
@@ -129,7 +129,7 @@ static LogicalResult verifyTNegA2A3(TNegOp op) {
       failed(verifyTileBufSameValidShape(op, srcTy, dstTy, "src", "dst")))
     return failure();
   Type elemTy = *elemOr;
-  if (!(elemTy.isInteger(16) || elemTy.isInteger(32) || elemTy.isF16() ||
+  if (!(elemTy.isInteger(kPTOI16BitWidth) || elemTy.isInteger(kPTOI32BitWidth) || elemTy.isF16() ||
         elemTy.isF32())) {
     return op.emitOpError()
            << "expects A2/A3 tneg element type to be i16/i32/f16/f32";
@@ -145,7 +145,7 @@ static LogicalResult verifyTNegA5(TNegOp op) {
     return failure();
   auto srcValid = getValidShapeVec(srcTy);
   auto dstValid = getValidShapeVec(dstTy);
-  if (srcValid.size() != 2 || dstValid.size() != 2)
+  if (srcValid.size() != kPTORowColRank || dstValid.size() != kPTORowColRank)
     return op.emitOpError() << "expects src and dst to have rank-2 valid_shape";
   if (srcValid[1] != ShapedType::kDynamic && dstValid[1] != ShapedType::kDynamic &&
       srcValid[1] != dstValid[1]) {
@@ -153,7 +153,7 @@ static LogicalResult verifyTNegA5(TNegOp op) {
            << "expects src and dst to have the same valid_shape[1]";
   }
   Type elemTy = *elemOr;
-  if (!(elemTy.isInteger(8) || elemTy.isInteger(16) || elemTy.isInteger(32) ||
+  if (!(elemTy.isInteger(kPTOI8BitWidth) || elemTy.isInteger(kPTOI16BitWidth) || elemTy.isInteger(kPTOI32BitWidth) ||
         elemTy.isF16() || elemTy.isF32() || elemTy.isBF16())) {
     return op.emitOpError()
            << "expects A5 tneg element type to be i8/i16/i32/f16/f32/bf16";
@@ -188,7 +188,7 @@ mlir::LogicalResult mlir::pto::TNotOp::verify() {
     FailureOr<Type> elemTy = verifyCommon();
     if (failed(elemTy))
       return failure();
-    if (!(*elemTy).isInteger(16))
+    if (!(*elemTy).isInteger(kPTOI16BitWidth))
       return emitOpError() << "expects A2/A3 tnot element type to be i16";
     return success();
   };
@@ -196,8 +196,8 @@ mlir::LogicalResult mlir::pto::TNotOp::verify() {
     FailureOr<Type> elemTy = verifyCommon();
     if (failed(elemTy))
       return failure();
-    if (!((*elemTy).isInteger(8) || (*elemTy).isInteger(16) ||
-          (*elemTy).isInteger(32)))
+    if (!((*elemTy).isInteger(kPTOI8BitWidth) || (*elemTy).isInteger(kPTOI16BitWidth) ||
+          (*elemTy).isInteger(kPTOI32BitWidth)))
       return emitOpError() << "expects A5 tnot element type to be i8/i16/i32";
     return success();
   };

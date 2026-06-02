@@ -49,7 +49,6 @@ void RemoveRedundantSync::Run() {
          auto *syncOp2 = syncPair2.first;
          bool hasLoop1 = syncOp1->GetForEndIndex().has_value();
          bool hasLoop2 = syncOp2->GetForEndIndex().has_value();
-
          if (hasLoop1 && hasLoop2) {
            if (syncOp1->GetForEndIndex().value() != syncOp2->GetForEndIndex().value()) {
              return syncOp1->GetForEndIndex().value() > syncOp2->GetForEndIndex().value();
@@ -201,7 +200,6 @@ bool RemoveRedundantSync::CheckBranchBetween(
   if (hasElseBranch) {
     bool coveredInThen = CheckRepeatSync(branchElement->beginId, branchElement->branchId, syncFinder, setFlag);
     bool coveredInElse = CheckRepeatSync(branchElement->branchId, branchElement->endId, syncFinder, setFlag);
-
     if (coveredInThen && coveredInElse) {
       return true;
     }

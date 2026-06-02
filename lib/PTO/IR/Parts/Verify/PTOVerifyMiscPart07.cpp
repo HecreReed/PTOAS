@@ -70,7 +70,7 @@ static LogicalResult verifyTPReluA2A3(TPReluOp op,
                                       const TPReluCommonInfo &common) {
   Type tmpElem = getElemTy(common.tmpTy);
   auto tmpIntTy = dyn_cast<IntegerType>(tmpElem);
-  if (!tmpIntTy || tmpIntTy.getWidth() != 8)
+  if (!tmpIntTy || tmpIntTy.getWidth() != kPTOI8BitWidth)
     return op.emitOpError("expects A2/A3 tmp element type to be u8");
   if (!isRowMajorTileBuf(common.tmpTy))
     return op.emitOpError("expects tmp to use row-major layout");
@@ -103,7 +103,7 @@ static LogicalResult verifyTQuantStructural(TQuantOp op) {
   Type dstElemTy = getElemTy(op.getDst().getType());
   auto dstIntTy = dyn_cast<IntegerType>(dstElemTy);
   if (op.getQuantType() == mlir::pto::QuantType::INT8_SYM) {
-    if (!dstIntTy || dstIntTy.getWidth() != 8) {
+    if (!dstIntTy || dstIntTy.getWidth() != kPTOI8BitWidth) {
       return op.emitOpError(
           "expects dst element type i8/ui8 for INT8_SYM quantization");
     }
@@ -114,7 +114,7 @@ static LogicalResult verifyTQuantStructural(TQuantOp op) {
     return success();
   }
 
-  if (!dstIntTy || dstIntTy.getWidth() != 8) {
+  if (!dstIntTy || dstIntTy.getWidth() != kPTOI8BitWidth) {
     return op.emitOpError(
         "expects dst element type i8/ui8 for INT8_ASYM quantization");
   }
@@ -168,7 +168,7 @@ mlir::LogicalResult mlir::pto::TDequantOp::verify() {
   auto verifyStructural = [this]() -> LogicalResult {
     Type srcElemTy = getElemTy(getSrc().getType());
     auto srcIntTy = dyn_cast<IntegerType>(srcElemTy);
-    if (!srcIntTy || !(srcIntTy.getWidth() == 8 || srcIntTy.getWidth() == 16))
+    if (!srcIntTy || !(srcIntTy.getWidth() == kPTOI8BitWidth || srcIntTy.getWidth() == kPTOI16BitWidth))
       return emitOpError()
              << "expects src element type i8 or i16";
     if (!getElemTy(getDst().getType()).isF32())
@@ -179,7 +179,6 @@ mlir::LogicalResult mlir::pto::TDequantOp::verify() {
       return emitOpError() << "expects offset element type f32";
     return success();
   };
-
   if (failed(verifyStructural()))
     return failure();
 

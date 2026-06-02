@@ -71,8 +71,8 @@ static LogicalResult verifyTColSumCommon(TColSumOp op, bool requireNonZeroSrc,
     return failure();
   Type elem = getElemTy(srcTy);
   if (!(elem.isF16() || elem.isF32() || (allowBf16 && elem.isBF16()) ||
-        elem.isInteger(16) || elem.isInteger(32) ||
-        (allowInt8 && elem.isInteger(8))))
+        elem.isInteger(kPTOI16BitWidth) || elem.isInteger(kPTOI32BitWidth) ||
+        (allowInt8 && elem.isInteger(kPTOI8BitWidth))))
     return op.emitOpError(errorMessage);
   return success();
 }
@@ -191,12 +191,12 @@ llvm::LogicalResult mlir::pto::TRandomOp::verify() {
       return emitOpError("expects dst to use row-major layout");
 
     Type elemTy = getElemTy(dstTy);
-    if (!elemTy.isInteger(32))
+    if (!elemTy.isInteger(kPTOI32BitWidth))
       return emitOpError("expects dst element type to be i32 or ui32");
 
     auto checkWord = [this](Value v, StringRef name) -> LogicalResult {
       auto ty = dyn_cast<IntegerType>(v.getType());
-      if (!ty || ty.getWidth() != 32)
+      if (!ty || ty.getWidth() != kPTOI32BitWidth)
         return emitOpError() << "expects " << name << " to be i32/ui32";
       return success();
     };

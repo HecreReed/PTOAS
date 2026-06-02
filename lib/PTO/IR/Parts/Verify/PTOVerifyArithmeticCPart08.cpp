@@ -48,7 +48,6 @@ static LogicalResult verifyMatmulLike(Operation *op, Type aTy, Type bTy, Type ds
   bool aValid = isa<ShapedType, pto::TileBufType, pto::PartitionTensorViewType>(aTy);
   bool bValid = isa<ShapedType, pto::TileBufType, pto::PartitionTensorViewType>(bTy);
   bool dValid = isa<ShapedType, pto::TileBufType, pto::PartitionTensorViewType>(dstTy);
-
   if (!aValid || !bValid || !dValid)
     return op->emitOpError("expects inputs/outputs to be shaped types or PTO tile types");
 

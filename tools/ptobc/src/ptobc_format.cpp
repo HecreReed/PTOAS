@@ -28,11 +28,12 @@ constexpr unsigned kU32ThirdByteShift = 2 * kBitsPerByte;
 constexpr unsigned kU32FourthByteShift = 3 * kBitsPerByte;
 constexpr char kPTOBCMagic[] = {'P', 'T', 'O', 'B', 'C', '\0'};
 constexpr size_t kPTOBCMagicSize = sizeof(kPTOBCMagic);
+constexpr unsigned kNumber256 = 256;
 
 } // namespace
 
 std::string normalizeFilePath(const std::string &path) {
-  llvm::SmallString<256> normalizedPath(path);
+  llvm::SmallString<kNumber256> normalizedPath(path);
   if (std::error_code ec = llvm::sys::fs::make_absolute(normalizedPath)) {
     throw std::runtime_error("Failed to normalize path: " + path);
   }

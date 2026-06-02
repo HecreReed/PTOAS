@@ -12,6 +12,15 @@
 using namespace mlir;
 using namespace mlir::pto;
 
+static constexpr int64_t kPTOFrontendSplitMin = 0;
+static constexpr int64_t kPTOFrontendSplitMax = 2;
+static constexpr int8_t kPTOFrontendDirMaskC2V = 1;
+static constexpr int8_t kPTOFrontendDirMaskV2C = 2;
+static constexpr int8_t kPTOFrontendDirMaskBidirectional = 3;
+static constexpr uint64_t kPTOFrontendHalfSlotByteMultiplier = 2;
+static constexpr int32_t kPTOFrontendBidirectionalLoweredSlotNum = 4;
+static constexpr int32_t kPTOFrontendUnidirectionalLoweredSlotNum = 8;
+
 void TMatmulMxBiasOp::getEffects(SmallVectorImpl<SideEffects::EffectInstance<MemoryEffects::Effect>> &effects) {
   addEffect(effects, &getAMutable(), MemoryEffects::Read::get());
   addEffect(effects, &getAScaleMutable(), MemoryEffects::Read::get());
@@ -51,7 +60,7 @@ static bool isInsideSectionOrAttributedKernel(Operation *op) {
 }
 
 static LogicalResult verifySplitAttr(Operation *op, int64_t split) {
-  if (split < 0 || split > 2)
+  if (split < kPTOFrontendSplitMin || split > kPTOFrontendSplitMax)
     return op->emitOpError("expects 'split' to be 0, 1, or 2");
   return success();
 }
@@ -228,4 +237,3 @@ static ParseResult parseFrontendInitializePipeOperandClause(
   return parser.emitError(parser.getCurrentLocation())
          << "unexpected initialize_pipe operand '" << keyword << "'";
 }
-

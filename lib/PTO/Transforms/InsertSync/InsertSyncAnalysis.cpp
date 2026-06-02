@@ -38,6 +38,8 @@ namespace {
 
 static constexpr uint64_t kVectorRegisterSizeInBytes = 256U;
 static constexpr unsigned kPipeVPruneMinRepeat = 16U;
+constexpr size_t kTileRank2D = 2;
+constexpr size_t kNumber2 = 2;
 constexpr unsigned kInlineCapacity2 = 2;
 
 template <typename T>
@@ -53,7 +55,7 @@ static std::optional<RepeatAccessShape> getKnownRepeatAccessShapeFromType(Type t
   if (auto tileTy = dyn_cast<TileBufType>(ty)) {
     ArrayRef<int64_t> fullShape = tileTy.getShape();
     ArrayRef<int64_t> validShape = tileTy.getValidShape();
-    if (fullShape.size() != 2 || validShape.size() != 2) return std::nullopt;
+    if (fullShape.size() != kTileRank2D || validShape.size() != kTileRank2D) return std::nullopt;
     if (fullShape[0] < 0 || fullShape[1] < 0 || validShape[0] < 0 ||
         validShape[1] < 0)
       return std::nullopt;
@@ -66,7 +68,7 @@ static std::optional<RepeatAccessShape> getKnownRepeatAccessShapeFromType(Type t
   }
 
   if (auto memRefTy = dyn_cast<MemRefType>(ty)) {
-    if (!memRefTy.hasStaticShape() || memRefTy.getRank() != 2)
+    if (!memRefTy.hasStaticShape() || memRefTy.getRank() != static_cast<int64_t>(kTileRank2D))
       return std::nullopt;
     auto shape = memRefTy.getShape();
     return RepeatAccessShape{SmallVec2<int64_t>{shape[0], shape[1]},
@@ -117,7 +119,7 @@ static std::optional<BLayout> getKnownBLayout(Type ty) {
     SmallVector<int64_t> strides;
     int64_t offset = 0;
     if (failed(getStridesAndOffset(memRefTy, strides, offset)) ||
-        strides.size() != 2) {
+        strides.size() != kTileRank2D) {
       return std::nullopt;
     }
     ArrayRef<int64_t> shape = memRefTy.getShape();
@@ -748,7 +750,7 @@ int InsertSyncAnalysis::GetEventIdNum(
     bool isLocalB =
         pair.second && (pair.second->scope == pto::AddressSpace::MAT ||
                         pair.second->scope == pto::AddressSpace::VEC);
-    if (isLocalA || isLocalB) return 2;
+    if (isLocalA || isLocalB) return kNumber2;
   }
   return 1;
 }

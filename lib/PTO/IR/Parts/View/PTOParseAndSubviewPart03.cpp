@@ -24,8 +24,8 @@ static LogicalResult verifyTRowExpandReduceElementType(Operation *op, Type src0T
         "expects src0, src1, and dst to have the same element type");
   bool supported = elem.isF16() || elem.isF32() ||
                    (allowIntegerTypes &&
-                    (elem.isInteger(16) || elem.isInteger(32) ||
-                     (targetArch == PTOArch::A5 && elem.isInteger(8))));
+                    (elem.isInteger(kPTOI16BitWidth) || elem.isInteger(kPTOI32BitWidth) ||
+                     (targetArch == PTOArch::A5 && elem.isInteger(kPTOI8BitWidth))));
   if (supported)
     return success();
   if (!allowIntegerTypes)
@@ -51,7 +51,7 @@ static bool validShapeMatches(ArrayRef<int64_t> lhs, ArrayRef<int64_t> rhs) {
 static LogicalResult verifyNonZeroRank2ValidShape(Operation *op,
                                                   ArrayRef<int64_t> valid,
                                                   StringRef name) {
-  if (valid.size() != 2)
+  if (valid.size() != kPTORowColRank)
     return op->emitOpError() << "expects " << name
                              << " to have rank-2 valid_shape";
   if (valid[0] != ShapedType::kDynamic && valid[0] == 0)
@@ -73,7 +73,7 @@ static LogicalResult verifyTRowExpandBroadcastOperand(
                              << " valid_shape[0] to equal dst valid_shape[0]";
   }
   int64_t expectedCol =
-      elem.isInteger(8) ? 32 : ((elem.isF16() || elem.isInteger(16)) ? 16 : 8);
+      elem.isInteger(kPTOI8BitWidth) ? 32 : ((elem.isF16() || elem.isInteger(kPTOI16BitWidth)) ? 16 : 8);
   int64_t operandCol = operandValid[1];
   bool operandIsRowMajor = isRowMajorTileBuf(operandTy);
   if (requireNonRowMajor && operandIsRowMajor) {
@@ -137,7 +137,7 @@ static LogicalResult verifyTRowExpandReduceLikeOp(Operation *op, Type src0Ty,
   auto src0Valid = getValidShapeVec(src0Ty);
   auto src1Valid = getValidShapeVec(src1Ty);
   auto dstValid = getValidShapeVec(dstTy);
-  if (src0Valid.size() != 2 || src1Valid.size() != 2 || dstValid.size() != 2)
+  if (src0Valid.size() != kPTORowColRank || src1Valid.size() != kPTORowColRank || dstValid.size() != kPTORowColRank)
     return op->emitOpError(
         "expects src0, src1, and dst to have rank-2 valid_shape");
   if (failed(verifyNonZeroRank2ValidShape(op, dstValid, "dst")))

@@ -24,7 +24,7 @@ static LogicalResult verifyTInsertA5AccToMat(const IndexedTileTransferCommon &co
       (common.srcElem.isF32() &&
        (common.dstElem.isF16() || common.dstElem.isBF16() ||
         common.dstElem.isF32())) ||
-      (common.srcElem.isInteger(32) && common.dstElem.isInteger(32));
+      (common.srcElem.isInteger(kPTOI32BitWidth) && common.dstElem.isInteger(kPTOI32BitWidth));
   if (!okTypes) {
     return op.emitOpError(
         "expects A5 acc->mat tinsert element types to be "
@@ -115,15 +115,15 @@ mlir::LogicalResult mlir::pto::TInsertOp::verify() {
 
 static bool isA2A3VectorPreQuantTypePair(Type srcElem, Type dstElem) {
   if (srcElem.isF32())
-    return dstElem.isInteger(8);
-  if (srcElem.isInteger(32))
-    return dstElem.isInteger(8) || dstElem.isF16() || dstElem.isInteger(16);
+    return dstElem.isInteger(kPTOI8BitWidth);
+  if (srcElem.isInteger(kPTOI32BitWidth))
+    return dstElem.isInteger(kPTOI8BitWidth) || dstElem.isF16() || dstElem.isInteger(kPTOI16BitWidth);
   return false;
 }
 
 static bool isA5Fp8LikeType(Type ty) {
   if (auto ft = dyn_cast<FloatType>(ty))
-    return ft.getWidth() == 8;
+    return ft.getWidth() == kPTOI8BitWidth;
   return false;
 }
 
@@ -152,10 +152,10 @@ static LogicalResult verifyA5MxTypeTriple(Operation *op, Type lhsTy, Type rhsTy,
 
 static bool isA5VectorPreQuantTypePair(Type srcElem, Type dstElem) {
   if (srcElem.isF32())
-    return dstElem.isInteger(8) || isA5Fp8LikeType(dstElem) || dstElem.isF16() ||
+    return dstElem.isInteger(kPTOI8BitWidth) || isA5Fp8LikeType(dstElem) || dstElem.isF16() ||
            dstElem.isBF16() || dstElem.isF32();
-  if (srcElem.isInteger(32))
-    return dstElem.isInteger(8) || dstElem.isF16() || dstElem.isBF16();
+  if (srcElem.isInteger(kPTOI32BitWidth))
+    return dstElem.isInteger(kPTOI8BitWidth) || dstElem.isF16() || dstElem.isBF16();
   return false;
 }
 
@@ -227,7 +227,7 @@ static LogicalResult verifyVectorPreQuantTransferOp(
   (void)srcSpace;
   (void)fpSpace;
   (void)dstSpace;
-  if (requireDstFractal512 && dstTb.getSFractalSizeI32() != 512)
+  if (requireDstFractal512 && dstTb.getSFractalSizeI32() != kFractalSize512)
     return op->emitOpError("expects dst fractal size to be 512");
   Type srcElem = getElemTy(srcTy);
   Type dstElem = getElemTy(dstTy);

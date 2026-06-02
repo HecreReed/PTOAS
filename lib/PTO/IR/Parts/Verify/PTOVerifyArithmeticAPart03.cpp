@@ -17,7 +17,7 @@ static LogicalResult verifyMGatherMScatterTileShape(Operation *op, Type dataTy,
                                                     StringRef dataName) {
   auto dataValid = getValidShapeVec(dataTy);
   auto idxValid = getValidShapeVec(idxTy);
-  if (dataValid.size() != 2 || idxValid.size() != 2)
+  if (dataValid.size() != kPTORowColRank || idxValid.size() != kPTORowColRank)
     return op->emitOpError() << "expects " << dataName
                              << " and idx to have rank-2 valid_shape";
 
@@ -41,7 +41,6 @@ static LogicalResult verifyMGatherMScatterTileShape(Operation *op, Type dataTy,
   const bool elemCoalesce =
       hasCompatibleKnownExtent(idxValid[0], dataValid[0]) &&
       hasCompatibleKnownExtent(idxValid[1], dataValid[1]);
-
   if (!(rowCoalesce1xR || rowCoalesceRx1 || elemCoalesce))
     return op->emitOpError()
            << "expects idx valid_shape to be [1, " << dataName
@@ -74,17 +73,17 @@ static LogicalResult verifyMGatherMScatterIdxTile(Operation *op, Type ty,
 }
 
 static bool isA5TLoadStoreTransferElemType(Type ty) {
-  return ty.isInteger(8) || ty.isInteger(16) || ty.isInteger(32) ||
-         ty.isInteger(64) || ty.isF16() || ty.isBF16() || ty.isF32() ||
+  return ty.isInteger(kPTOI8BitWidth) || ty.isInteger(kPTOI16BitWidth) || ty.isInteger(kPTOI32BitWidth) ||
+         ty.isInteger(kPTOI64BitWidth) || ty.isF16() || ty.isBF16() || ty.isF32() ||
          isPTOLowPrecisionType(ty);
 }
 
 static bool isA5AccStorePreQuantDstType(Type srcElem, Type dstElem) {
-  if (srcElem.isInteger(32))
-    return dstElem.isInteger(8) || dstElem.isF16() || dstElem.isBF16();
+  if (srcElem.isInteger(kPTOI32BitWidth))
+    return dstElem.isInteger(kPTOI8BitWidth) || dstElem.isF16() || dstElem.isBF16();
   if (!srcElem.isF32())
     return false;
-  return dstElem.isInteger(8) || dstElem.isF16() || dstElem.isBF16() ||
+  return dstElem.isInteger(kPTOI8BitWidth) || dstElem.isF16() || dstElem.isBF16() ||
          dstElem.isF32() || isPTOHiFloat8Type(dstElem) ||
          dstElem.isFloat8E4M3() || dstElem.isFloat8E4M3FN() ||
          dstElem.isFloat8E4M3FNUZ() || dstElem.isFloat8E4M3B11FNUZ();
@@ -114,14 +113,14 @@ static LogicalResult verifyTileBufCommon(Operation *op, Type ty, StringRef name,
                                          bool allowLowPrecision) {
   auto tb = dyn_cast<pto::TileBufType>(ty);
   if (tb) {
-    if (tb.getRank() != 2)
+    if (tb.getRank() != kPTORowColRank)
       return op->emitOpError() << "expects " << name << " to be a rank-2 tile_buf";
     Type elemTy = tb.getElementType();
     if (!allowLowPrecision && isPTOLowPrecisionType(elemTy))
       return op->emitOpError() << name << ": dtype " << elemTy
                                << " is not supported by this op yet";
   } else if (auto mr = dyn_cast<MemRefType>(ty)) {
-    if (mr.getRank() != 2)
+    if (mr.getRank() != kPTORowColRank)
       return op->emitOpError() << "expects " << name << " to be a rank-2 memref";
     if (!allowLowPrecision && isPTOLowPrecisionType(mr.getElementType()))
       return op->emitOpError() << name << ": dtype " << mr.getElementType()
@@ -131,10 +130,10 @@ static LogicalResult verifyTileBufCommon(Operation *op, Type ty, StringRef name,
   }
 
   auto validShape = getValidShapeVec(ty);
-  if (validShape.size() != 2)
+  if (validShape.size() != kPTORowColRank)
     return op->emitOpError() << "expects " << name << " to have a rank-2 valid_shape";
   auto shape = getShapeVec(ty);
-  for (unsigned i = 0; i < 2; ++i) {
+  for (unsigned i = 0; i < kPTORowColRank; ++i) {
     if (shape[i] != ShapedType::kDynamic && validShape[i] != ShapedType::kDynamic &&
         validShape[i] > shape[i])
       return op->emitOpError() << "expects " << name << " to satisfy valid_shape[" << i

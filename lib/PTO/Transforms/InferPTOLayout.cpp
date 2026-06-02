@@ -44,12 +44,10 @@ namespace {
 static constexpr llvm::StringLiteral kLayoutAttrName = "layout";
 static constexpr llvm::StringLiteral kInferredLayoutAttrName =
     "pto.inferred_layout";
-static constexpr unsigned kPaddedLayoutRank = 5;
 static constexpr int64_t kUnitExtent = 1;
 static constexpr int64_t kNZInnerRows = 16;
-static constexpr int64_t kNZFractalBytes = 512;
 
-using LayoutRankVector = SmallVector<int64_t, kPaddedLayoutRank>;
+using LayoutRankVector = SmallVector<int64_t, kPTOPaddedTensorRank5D>;
 
 static std::optional<int64_t> getConstInt(Value v) {
   if (auto c = v.getDefiningOp<arith::ConstantIndexOp>())
@@ -99,15 +97,15 @@ static std::optional<ShapeStride5D> rightAlignTo5D(ArrayRef<int64_t> shape,
                                                    ArrayRef<int64_t> stride) {
   if (shape.size() != stride.size())
     return std::nullopt;
-  if (shape.size() > kPaddedLayoutRank)
+  if (shape.size() > kPTOPaddedTensorRank5D)
     return std::nullopt;
 
   ShapeStride5D out;
-  out.shape.assign(kPaddedLayoutRank, kUnitExtent);
-  out.stride.assign(kPaddedLayoutRank, kUnitExtent);
+  out.shape.assign(kPTOPaddedTensorRank5D, kUnitExtent);
+  out.stride.assign(kPTOPaddedTensorRank5D, kUnitExtent);
 
   const int rank = static_cast<int>(shape.size());
-  const int shift = static_cast<int>(kPaddedLayoutRank) - rank;
+  const int shift = static_cast<int>(kPTOPaddedTensorRank5D) - rank;
   for (int i = 0; i < rank; ++i) {
     out.shape[shift + i] = shape[i];
     out.stride[shift + i] = stride[i];
@@ -167,7 +165,7 @@ static std::optional<Layout> inferNZLayout(ArrayRef<int64_t> shape,
   int64_t st5 = stride[4];
   bool alignMatch =
       (sh3 == kNZInnerRows) &&
-      (sh3 * sh4 * static_cast<int64_t>(elemBytes) == kNZFractalBytes);
+      (sh3 * sh4 * static_cast<int64_t>(elemBytes) == kFractalSize512);
   bool strideMatch = (st5 == kUnitExtent) && (st4 == sh5);
   if (alignMatch && strideMatch)
     return Layout::NZ;
@@ -269,7 +267,7 @@ static void verifyOrSetLayoutAttr(Operation *op,
 
 static std::optional<Layout> inferFromStaticMemRefTy(MemRefType mrTy) {
   if (!mrTy.hasStaticShape() || mrTy.getRank() == 0 ||
-      mrTy.getRank() > kPaddedLayoutRank)
+      mrTy.getRank() > kPTOPaddedTensorRank5D)
     return std::nullopt;
   SmallVector<int64_t> strideInts;
   int64_t offset = ShapedType::kDynamic;
@@ -418,7 +416,7 @@ static bool getStaticShapeAndStride(MakeTensorViewOp op,
     return false;
 
   const size_t rank = op.getShape().size();
-  if (rank == 0 || rank > kPaddedLayoutRank)
+  if (rank == 0 || rank > kPTOPaddedTensorRank5D)
     return false;
 
   shape.clear();
@@ -511,7 +509,7 @@ static void inferReinterpretCastLayoutAttr(memref::ReinterpretCastOp op,
     return;
 
   const size_t rank = op.getMixedSizes().size();
-  if (rank == 0 || rank > kPaddedLayoutRank) {
+  if (rank == 0 || rank > kPTOPaddedTensorRank5D) {
     verifyOrSetLayoutAttr(op.getOperation(), std::nullopt, signalFailure);
     return;
   }

@@ -38,6 +38,9 @@
 #define DEBUG_TYPE "PTO-gss-solver"
 
 namespace {
+constexpr int kCrossCoreParentDepthOffset = 2;
+constexpr size_t kConditionScopeParentPairSize = 2;
+
 [[noreturn]] void reportSyncSolverInvariantFailure(const char *expr,
                                                   const char *func,
                                                   int line) {
@@ -1084,8 +1087,10 @@ void Solver::adjustSetWaitForCrossCoreLoops(Occurrence *occ1, Occurrence *occ2,
   }
   PTO_SYNC_SOLVER_CHECK(forOp1->multibufferUnrollNum ==
                         forOp2->multibufferUnrollNum);
-  setOcc = occ1->getNthParent(occ1->depth - setOcc->depth - 2);
-  waitOcc = occ2->getNthParent(occ2->depth - waitOcc->depth - 2);
+  setOcc = occ1->getNthParent(occ1->depth - setOcc->depth -
+                              kCrossCoreParentDepthOffset);
+  waitOcc = occ2->getNthParent(occ2->depth - waitOcc->depth -
+                               kCrossCoreParentDepthOffset);
 }
 
 void Solver::adjustSetWaitForCrossCoreScopes(Occurrence *occ1,
@@ -1102,8 +1107,10 @@ void Solver::adjustSetWaitForCrossCoreScopes(Occurrence *occ1,
     return;
   }
   PTO_SYNC_SOLVER_CHECK(scopeOp1->maxPreloadNum == scopeOp2->maxPreloadNum);
-  setOcc = occ1->getNthParent(occ1->depth - setOcc->depth - 2);
-  waitOcc = occ2->getNthParent(occ2->depth - waitOcc->depth - 2);
+  setOcc = occ1->getNthParent(occ1->depth - setOcc->depth -
+                              kCrossCoreParentDepthOffset);
+  waitOcc = occ2->getNthParent(occ2->depth - waitOcc->depth -
+                               kCrossCoreParentDepthOffset);
 }
 
 void Solver::adjustSetWaitForLoopPlaceholders(Occurrence *&setOcc,
@@ -1188,7 +1195,7 @@ Occurrence *Solver::getBarrierWaitOcc(Occurrence *occ1, Occurrence *occ2) {
   while (!allParents.empty() && allParents.back()->isProperAncestor(waitOcc)) {
     allParents.pop_back();
   }
-  while (allParents.size() >= 2 &&
+  while (allParents.size() >= kConditionScopeParentPairSize &&
          llvm::isa_and_present<Condition>(allParents.back()->op)) {
     allParents.pop_back();
     PTO_SYNC_SOLVER_CHECK(llvm::isa_and_present<Scope>(allParents.back()->op));

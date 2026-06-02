@@ -16,7 +16,7 @@ static LogicalResult verifyTileValidWidthMatchesCols(Operation *op, Type ty,
                                                      StringRef operandName) {
   auto validShape = getValidShapeVec(ty);
   auto shape = getShapeVec(ty);
-  if (validShape.size() == 2 && shape.size() == 2 &&
+  if (validShape.size() == kPTORowColRank && shape.size() == kPTORowColRank &&
       validShape[1] != ShapedType::kDynamic &&
       shape[1] != ShapedType::kDynamic && validShape[1] != shape[1]) {
     return op->emitOpError() << "expects " << operandName
@@ -67,7 +67,9 @@ static LogicalResult verifyGatherMaskForm(TGatherOp op,
   }
 
   if (allowA5MaskTypes) {
-    if (!(srcElemBytes == 1 || srcElemBytes == 2 || srcElemBytes == 4)) {
+    if (!(srcElemBytes == kPTOByteSize ||
+          srcElemBytes == kPTOHalfWordBytes ||
+          srcElemBytes == kPTOWordBytes)) {
       return op.emitOpError(
           "expects A5 mask-pattern gather element size to be 1, 2, or 4 bytes");
     }
@@ -79,7 +81,7 @@ static LogicalResult verifyGatherMaskForm(TGatherOp op,
     return success();
   }
 
-  if (!(srcElemBytes == 2 || srcElemBytes == 4)) {
+  if (!(srcElemBytes == kPTOHalfWordBytes || srcElemBytes == kPTOWordBytes)) {
     return op.emitOpError(
         "expects A2/A3 mask-pattern gather element size to be 2 or 4 bytes");
   }
@@ -124,7 +126,8 @@ static LogicalResult verifyGatherIndexForm(TGatherOp op,
   }
 
   unsigned width = common->idxElem.getWidth();
-  if (!(width == 32 || (allow16BitIndices && width == 16))) {
+  if (!(width == kPTOI32BitWidth ||
+        (allow16BitIndices && width == kPTOI16BitWidth))) {
     return op.emitOpError() << "expects indices element type to be i32"
                             << (allow16BitIndices ? " or i16" : "");
   }
@@ -161,7 +164,7 @@ static FailureOr<GatherCompareCommon> verifyGatherCompareCommon(TGatherOp op) {
     return op.emitOpError("failed to get element type for src/dst/cdst"),
            failure();
   auto dstInt = dyn_cast<IntegerType>(base->dstElem);
-  if (!dstInt || dstInt.getWidth() != 32)
+  if (!dstInt || dstInt.getWidth() != kPTOI32BitWidth)
     return op.emitOpError("expects dst element type to be i32"), failure();
   if (cdstElem != base->dstElem)
     return op.emitOpError("expects cdst to have the same element type as dst"),
@@ -188,13 +191,13 @@ static LogicalResult verifyGatherCompareForm(TGatherOp op,
     return failure();
   if (allowA5SrcTypes) {
     if (!(common->base.srcElem.isF16() || common->base.srcElem.isF32() ||
-          common->base.srcElem.isInteger(16) ||
-          common->base.srcElem.isInteger(32))) {
+          common->base.srcElem.isInteger(kPTOI16BitWidth) ||
+          common->base.srcElem.isInteger(kPTOI32BitWidth))) {
       return op.emitOpError(
           "expects A5 compare-form tgather src element type to be i16/i32/f16/f32");
     }
   } else if (!(common->base.srcElem.isF16() || common->base.srcElem.isF32() ||
-               (common->base.srcElem.isInteger(32) &&
+               (common->base.srcElem.isInteger(kPTOI32BitWidth) &&
                 common->cmpMode == pto::CmpMode::EQ))) {
     return op.emitOpError(
         "expects A2/A3 compare-form tgather src element type to be f16/f32, or i32 when cmpMode=eq");
@@ -208,4 +211,3 @@ static LogicalResult verifyGatherCompareForm(TGatherOp op,
   }
   return success();
 }
-

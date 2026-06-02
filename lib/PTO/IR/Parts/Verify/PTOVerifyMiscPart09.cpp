@@ -29,18 +29,18 @@ static std::optional<int64_t> getElemBytes(Type elemTy) {
     return std::nullopt;
   if (auto ft = dyn_cast<FloatType>(elemTy)) {
     if (ft.isF16() || ft.isBF16())
-      return 2;
+      return kPTOHalfWordBytes;
     if (ft.isF32())
-      return 4;
+      return kPTOWordBytes;
     if (ft.isF64())
-      return 8;
+      return kPTODoubleWordBytes;
     return std::nullopt;
   }
   if (auto it = dyn_cast<IntegerType>(elemTy)) {
     int64_t bits = it.getWidth();
     if (bits <= 0)
       return std::nullopt;
-    return std::max<int64_t>(1, bits / 8);
+    return std::max<int64_t>(kPTOByteSize, bits / kPTOByteBitWidth);
   }
   return std::nullopt;
 }
@@ -92,11 +92,11 @@ static std::optional<int64_t> getConstIndexLike(Value v) {
 mlir::LogicalResult mlir::pto::SetValidShapeOp::verify() {
   SmallVector<int64_t> shape;
   if (auto srcTy = llvm::dyn_cast<TileBufType>(getSource().getType())) {
-    if (srcTy.getRank() != 2)
+    if (srcTy.getRank() != kPTORowColRank)
       return emitOpError("expects rank-2 tile_buf source");
 
     ArrayRef<int64_t> validShape = srcTy.getValidShape();
-    if (validShape.size() != 2)
+    if (validShape.size() != kPTORowColRank)
       return emitOpError("expects source validShape to be rank-2");
     if (!srcTy.hasDynamicValid())
       return emitOpError("expects source tile_buf to have dynamic validShape (?, ?)");
@@ -111,7 +111,7 @@ mlir::LogicalResult mlir::pto::SetValidShapeOp::verify() {
     if (!(*this)->hasAttr(kLoweredSetValidShapeAttrName))
       return emitOpError(
           "expects tile_buf source; memref source is only valid for the internal lowered form");
-    if (srcTy.getRank() != 2)
+    if (srcTy.getRank() != kPTORowColRank)
       return emitOpError("expects rank-2 memref source after tile lowering");
     shape.assign(srcTy.getShape().begin(), srcTy.getShape().end());
   } else {
@@ -133,7 +133,6 @@ mlir::LogicalResult mlir::pto::SetValidShapeOp::verify() {
                            << maxStatic << ")";
     return success();
   };
-
   if (failed(checkDim(getValidRow(), /*dimIdx=*/0, "row")))
     return failure();
   if (failed(checkDim(getValidCol(), /*dimIdx=*/1, "col")))
@@ -144,14 +143,14 @@ mlir::LogicalResult mlir::pto::SetValidShapeOp::verify() {
 
 mlir::LogicalResult mlir::pto::GetValidShapeOp::verify() {
   if (auto srcTy = llvm::dyn_cast<TileBufType>(getSource().getType())) {
-    if (srcTy.getRank() != 2)
+    if (srcTy.getRank() != kPTORowColRank)
       return emitOpError("expects rank-2 tile_buf source");
-    if (srcTy.getValidShape().size() != 2)
+    if (srcTy.getValidShape().size() != kPTORowColRank)
       return emitOpError("expects source validShape to be rank-2");
     return success();
   }
   if (auto srcTy = llvm::dyn_cast<MemRefType>(getSource().getType())) {
-    if (srcTy.getRank() != 2)
+    if (srcTy.getRank() != kPTORowColRank)
       return emitOpError("expects rank-2 memref source after tile lowering");
     return success();
   }
@@ -245,4 +244,3 @@ mlir::LogicalResult mlir::pto::BitcastOp::verify() {
 
   return success();
 }
-

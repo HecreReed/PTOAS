@@ -22,7 +22,6 @@ LogicalResult MScatterOp::verify() {
   Type srcTy = getSrc().getType();
   Type idxTy = getIdx().getType();
   Type memTy = getMem().getType();
-
   if (getPTOTypeRank(srcTy) == -1 || getPTOTypeRank(idxTy) == -1 ||
       getPTOTypeRank(memTy) == -1)
     return emitOpError("expects src, idx, and mem to use supported PTO shapes");
@@ -77,7 +76,6 @@ LogicalResult MGatherOp::verify() {
   Type memTy = getMem().getType();
   Type idxTy = getIdx().getType();
   Type dstTy = getDst().getType();
-
   if (getPTOTypeRank(memTy) == -1 || getPTOTypeRank(idxTy) == -1 ||
       getPTOTypeRank(dstTy) == -1)
     return emitOpError("expects mem, idx, and dst to use supported PTO shapes");
@@ -213,7 +211,7 @@ static ParseResult parseTMrgSortFormat2Sources(
       return failure();
     srcs.push_back(next);
   }
-  if (srcs.size() < 3 || srcs.size() > 5) {
+  if (srcs.size() < kNumber3 || srcs.size() > kNumber5) {
     return parser.emitError(
         parser.getCurrentLocation(),
         "tmrgsort format2 expects 2 to 4 src operands plus one tmp operand");

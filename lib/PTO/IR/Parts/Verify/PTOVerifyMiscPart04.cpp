@@ -119,7 +119,7 @@ static LogicalResult verifyTMrgSortFormat1(TMrgSortOp op) {
     return op.emitOpError() << "expects element type to be f16 or f32";
   auto ss = getShapeVec(srcTy);
   auto ds = getShapeVec(dstTy);
-  if (ss.size() != 2 || ds.size() != 2)
+  if (ss.size() != kNumber2 || ds.size() != kNumber2)
     return op.emitOpError() << "expects src/dst to be rank-2 tile-shaped";
   if (ss[0] != mlir::ShapedType::kDynamic && ss[0] != 1)
     return op.emitOpError() << "expects src rows == 1";
@@ -131,7 +131,7 @@ static LogicalResult verifyTMrgSortFormat1(TMrgSortOp op) {
   if (auto cstOp = op.getBlockLen().getDefiningOp<arith::ConstantOp>()) {
     if (auto intAttr = mlir::dyn_cast<mlir::IntegerAttr>(cstOp.getValue())) {
       int64_t v = intAttr.getValue().getSExtValue();
-      if (v <= 0 || (v % 64) != 0)
+      if (v <= 0 || (v % kNumber64) != 0)
         return op.emitOpError()
                << "expects blockLen > 0 and multiple of 64";
     }
@@ -142,7 +142,7 @@ static LogicalResult verifyTMrgSortFormat1(TMrgSortOp op) {
 static LogicalResult verifyTMrgSortSingleRowTile(Operation *op, Type ty,
                                                  StringRef name) {
   auto shape = getShapeVec(ty);
-  if (shape.size() != 2)
+  if (shape.size() != kPTORowColRank)
     return op->emitOpError() << "format2 expects " << name
                              << " to be rank-2 tile-shaped";
   if (shape[0] != mlir::ShapedType::kDynamic && shape[0] != 1)
@@ -154,8 +154,8 @@ static LogicalResult verifyTMrgSortFormat2Executed(Operation *op,
                                                    Value excuted) {
   auto excutedTy = mlir::dyn_cast<mlir::VectorType>(excuted.getType());
   if (!excutedTy || excutedTy.getRank() != 1 ||
-      excutedTy.getNumElements() != 4 ||
-      !excutedTy.getElementType().isInteger(16))
+      excutedTy.getNumElements() != kNumber4 ||
+      !excutedTy.getElementType().isInteger(kPTOI16BitWidth))
     return op->emitOpError() << "format2 excuted must be vector<4xi16>";
   return success();
 }

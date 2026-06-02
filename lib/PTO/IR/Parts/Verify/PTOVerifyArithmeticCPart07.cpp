@@ -102,7 +102,7 @@ static LogicalResult verifyTMovDerivedForms(TMovOp op,
     return op.emitOpError("expects fp to be in the scaling address space");
   auto srcElemTy = getElemTy(info.srcTy);
   auto srcIntTy = dyn_cast<IntegerType>(srcElemTy);
-  if (!(srcElemTy.isF32() || (srcIntTy && srcIntTy.getWidth() == 32))) {
+  if (!(srcElemTy.isF32() || (srcIntTy && srcIntTy.getWidth() == kPTOI32BitWidth))) {
     return op.emitOpError("expects fp form src to have element type f32, i32");
   }
   if (!(info.isAccToMat || info.isAccToVec))
@@ -136,7 +136,7 @@ static LogicalResult verifyTMovLayouts(TMovOp op, const TMovCommonInfo &info,
         "expects acc-source fp/relu tmov src to use blayout=col_major and slayout=row_major");
   }
   if (info.srcTb && info.dstTb && info.isAccToMat && !isA5 &&
-      info.dstTb.getSFractalSizeI32() != 512) {
+      info.dstTb.getSFractalSizeI32() != kFractalSize512) {
     return op.emitOpError(
         "expects A2/A3 acc-to-mat tmov destination fractal to be 512");
   }
@@ -177,7 +177,7 @@ static FailureOr<TMovFpCommonInfo> verifyTMovFpCommon(TMovFPOp op) {
   }
   Type srcElemTy = getElemTy(srcTy);
   auto srcIntTy = dyn_cast<IntegerType>(srcElemTy);
-  if (!(srcElemTy.isF32() || (srcIntTy && srcIntTy.getWidth() == 32))) {
+  if (!(srcElemTy.isF32() || (srcIntTy && srcIntTy.getWidth() == kPTOI32BitWidth))) {
     return op.emitOpError("expects src to have element type f32, i32"),
            failure();
   }
@@ -203,7 +203,7 @@ static LogicalResult verifyTMovFpA2A3(const TMovFpCommonInfo &info,
   if (info.dstTb && !isColMajorRowMajorNZTileBuf(info.dstTb))
     return op.emitOpError(
         "expects dst to use blayout=col_major and slayout=row_major");
-  if (info.dstTb && info.dstTb.getSFractalSizeI32() != 512)
+  if (info.dstTb && info.dstTb.getSFractalSizeI32() != kFractalSize512)
     return op.emitOpError("expects dst to use fractal size 512");
   return success();
 }

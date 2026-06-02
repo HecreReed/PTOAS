@@ -27,7 +27,6 @@ LogicalResult pto::TAddCOp::verify() {
   Type t1 = getSrc1().getType();
   Type t2 = getSrc2().getType();
   Type td = getDst().getType();
-
   if (!isPTOShapedLike(t0) || !isPTOShapedLike(t1) ||
       !isPTOShapedLike(t2) || !isPTOShapedLike(td))
     return emitOpError("expects src0/src1/src2/dst to be memref/tile_buf types");
@@ -80,7 +79,6 @@ static LogicalResult verifyTAxpyTypePair(Operation *op, Type srcElem,
 }
 
 LogicalResult pto::TAxpyOp::verify() {
-
   auto verifyA2A3 = [this]() -> LogicalResult {
     auto common = verifyTAxpyCommon(*this);
     if (failed(common))
@@ -140,7 +138,7 @@ static LogicalResult verifyArchIntegerWidthOp(Operation *op,
     if (failed(elemOr))
       return failure();
     auto it = mlir::dyn_cast<IntegerType>(*elemOr);
-    if (!it || (it.getWidth() != 8 && it.getWidth() != 16))
+    if (!it || (it.getWidth() != kPTOI8BitWidth && it.getWidth() != kPTOI16BitWidth))
       return op->emitOpError(a2a3Message);
     return success();
   };
@@ -150,8 +148,8 @@ static LogicalResult verifyArchIntegerWidthOp(Operation *op,
     if (failed(elemOr))
       return failure();
     auto it = mlir::dyn_cast<IntegerType>(*elemOr);
-    if (!it || (it.getWidth() != 8 && it.getWidth() != 16 &&
-                it.getWidth() != 32))
+    if (!it || (it.getWidth() != kPTOI8BitWidth && it.getWidth() != kPTOI16BitWidth &&
+                it.getWidth() != kPTOI32BitWidth))
       return op->emitOpError(a5Message);
     return success();
   };
@@ -197,8 +195,8 @@ static LogicalResult verifyConcatElemType(Operation *op, Type elem) {
   if (elem.isF16() || elem.isF32() || elem.isBF16())
     return success();
   auto it = dyn_cast<IntegerType>(elem);
-  if (!it || (it.getWidth() != 8 && it.getWidth() != 16 &&
-              it.getWidth() != 32)) {
+  if (!it || (it.getWidth() != kPTOI8BitWidth && it.getWidth() != kPTOI16BitWidth &&
+              it.getWidth() != kPTOI32BitWidth)) {
     return op->emitOpError(
         "expects element type to be i8, i16, i32, f16, f32, or bf16");
   }
@@ -209,7 +207,7 @@ static LogicalResult verifyTConcatValidRows(TConcatOp op,
                                             ArrayRef<int64_t> src0Valid,
                                             ArrayRef<int64_t> src1Valid,
                                             ArrayRef<int64_t> dstValid) {
-  if (src0Valid.size() != 2 || src1Valid.size() != 2 || dstValid.size() != 2) {
+  if (src0Valid.size() != kPTORowColRank || src1Valid.size() != kPTORowColRank || dstValid.size() != kPTORowColRank) {
     return op.emitOpError(
         "expects src0, src1, and dst to have rank-2 valid_shape");
   }

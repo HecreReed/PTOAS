@@ -40,8 +40,8 @@ static LogicalResult verifySelectElementType(Operation *op, Type elem,
                                              StringRef a5Message) {
   bool ok = elem.isF16() || elem.isF32() || (allowBf16 && elem.isBF16());
   if (auto intTy = dyn_cast<IntegerType>(elem))
-    ok = intTy.getWidth() == 16 || intTy.getWidth() == 32 ||
-         (targetArch == PTOArch::A5 && intTy.getWidth() == 8);
+    ok = intTy.getWidth() == kPTOI16BitWidth || intTy.getWidth() == kPTOI32BitWidth ||
+         (targetArch == PTOArch::A5 && intTy.getWidth() == kPTOI8BitWidth);
   if (ok)
     return success();
   if (targetArch == PTOArch::A5)
@@ -168,8 +168,8 @@ mlir::LogicalResult mlir::pto::TShlOp::verify() {
     if (failed(elemOr))
       return failure();
     auto it = mlir::dyn_cast<IntegerType>(*elemOr);
-    if (!it || (it.getWidth() != 8 && it.getWidth() != 16 &&
-                it.getWidth() != 32))
+    if (!it || (it.getWidth() != kPTOI8BitWidth && it.getWidth() != kPTOI16BitWidth &&
+                it.getWidth() != kPTOI32BitWidth))
       return emitOpError(
           "expects tshl src0 and src1 element type to be i8/i16/i32");
     return success();
@@ -185,8 +185,8 @@ mlir::LogicalResult mlir::pto::TShrOp::verify() {
     if (failed(elemOr))
       return failure();
     auto it = mlir::dyn_cast<IntegerType>(*elemOr);
-    if (!it || (it.getWidth() != 8 && it.getWidth() != 16 &&
-                it.getWidth() != 32))
+    if (!it || (it.getWidth() != kPTOI8BitWidth && it.getWidth() != kPTOI16BitWidth &&
+                it.getWidth() != kPTOI32BitWidth))
       return emitOpError(
           "expects tshr src0 and src1 element type to be i8/i16/i32");
     return success();
@@ -218,7 +218,7 @@ mlir::LogicalResult mlir::pto::TSort32Op::verify() {
 
   auto idxElem = getElemTy(idxTy);
   auto idxInt = dyn_cast<IntegerType>(idxElem);
-  if (!idxInt || idxInt.getWidth() != 32)
+  if (!idxInt || idxInt.getWidth() != kPTOI32BitWidth)
     return emitOpError() << "expects idx element type to be i32/u32";
   return mlir::success();
 }

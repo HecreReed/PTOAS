@@ -32,13 +32,13 @@ static LogicalResult verifyTTransA5MajorAlignment(TTransOp op, Type type,
   if (!tile)
     return success();
   auto shape = getShapeVec(type);
-  if (shape.size() != 2)
+  if (shape.size() != kPTORowColRank)
     return success();
   bool rowMajor =
       tile.getBLayoutValueI32() == static_cast<int32_t>(pto::BLayout::RowMajor);
   int64_t major = rowMajor ? shape[1] : shape[0];
   if (major != ShapedType::kDynamic &&
-      (major * static_cast<int64_t>(elemBytes)) % 32 != 0) {
+      (major * static_cast<int64_t>(elemBytes)) % kNumber32 != 0) {
     return op.emitOpError()
            << "expects " << name
            << " major dimension times element size to be 32-byte aligned on A5";
@@ -91,7 +91,7 @@ mlir::LogicalResult mlir::pto::TXorOp::verify() {
     if (failed(verifyTileBufSameValidShape(*this, tmpTy, getDst().getType(), "tmp", "dst")))
       return failure();
     auto it = mlir::dyn_cast<IntegerType>(elem);
-    if (!it || (it.getWidth() != 8 && it.getWidth() != 16))
+    if (!it || (it.getWidth() != kPTOI8BitWidth && it.getWidth() != kPTOI16BitWidth))
       return emitOpError(
           "expects A2/A3 txor src0, src1, tmp, and dst element type to be i8/i16");
     return success();
@@ -102,8 +102,8 @@ mlir::LogicalResult mlir::pto::TXorOp::verify() {
     if (failed(elemOr))
       return failure();
     auto it = mlir::dyn_cast<IntegerType>(*elemOr);
-    if (!it || (it.getWidth() != 8 && it.getWidth() != 16 &&
-                it.getWidth() != 32))
+    if (!it || (it.getWidth() != kPTOI8BitWidth && it.getWidth() != kPTOI16BitWidth &&
+                it.getWidth() != kPTOI32BitWidth))
       return emitOpError(
           "expects A5 txor src0, src1, and dst element type to be i8/i16/i32");
     return success();
@@ -130,7 +130,7 @@ mlir::LogicalResult mlir::pto::TPrintOp::verify() {
   if (auto tb = mlir::dyn_cast<mlir::pto::TileBufType>(srcType)) {
     auto elem = tb.getElementType();
     if (!(elem.isF16() || elem.isF32() ||
-          elem.isInteger(8) || elem.isInteger(16) || elem.isInteger(32)))
+          elem.isInteger(kPTOI8BitWidth) || elem.isInteger(kPTOI16BitWidth) || elem.isInteger(kPTOI32BitWidth)))
       return emitOpError() << "expects printable tile element type";
     auto space = getPTOMemorySpaceEnum(srcType);
     if (!space || *space != pto::AddressSpace::VEC)
@@ -142,8 +142,6 @@ mlir::LogicalResult mlir::pto::TPrintOp::verify() {
     return mlir::success();
   return emitOpError() << "expects tile_buf, memref, or partition_tensor_view for src";
 }
-
-
 
 static LogicalResult verifyMatmulShapedCommon(Operation *op, ShapedType lhsTy,
                                               Value rhs, Value biasOpt,
@@ -197,8 +195,8 @@ static LogicalResult verifyMatmulTileCommon(Operation *op, TileType lhsTile,
            << "expects lhs and rhs tiles to have the same element type, but got lhs="
            << lhsTile.getElementType() << " rhs=" << rhsTile.getElementType();
   }
-  if (static_cast<int64_t>(lhsTile.getShape().size()) != 2 ||
-      static_cast<int64_t>(rhsTile.getShape().size()) != 2) {
+  if (static_cast<int64_t>(lhsTile.getShape().size()) != kPTORowColRank ||
+      static_cast<int64_t>(rhsTile.getShape().size()) != kPTORowColRank) {
     return op->emitOpError("expects lhs and rhs tiles to be 2D");
   }
   if (lhsTile.getShape()[1] != rhsTile.getShape()[0]) {

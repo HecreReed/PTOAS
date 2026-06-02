@@ -67,7 +67,7 @@ LogicalResult pto::TCIOp::verify() {
     return emitOpError("expects dst element type to be integer");
 
   unsigned bw = elemTy.getWidth();
-  if (bw != 16 && bw != 32)
+  if (bw != kPTOI16BitWidth && bw != kPTOI32BitWidth)
     return emitOpError("expects dst element type to be i16/i32");
 
   auto sTy = mlir::dyn_cast<IntegerType>(getOperand(0).getType());
@@ -77,7 +77,7 @@ LogicalResult pto::TCIOp::verify() {
   if (sTy != elemTy)
     return emitOpError("expects S and dst element type to be exactly the same type");
   auto shape = getShapeVec(dstTy);
-  if (shape.size() != 2)
+  if (shape.size() != kPTORowColRank)
     return emitOpError("expects dst to be rank-2");
   if (shape[1] != ShapedType::kDynamic && shape[1] == 1)
     return emitOpError("expects dst cols to be different from 1");
@@ -136,17 +136,17 @@ static LogicalResult verifyTCmpA2A3(TCmpOp op) {
     return op.emitOpError("failed to get element type for src0/src1/dst");
   if (src0Elem != src1Elem)
     return op.emitOpError("expects src0 and src1 to have the same element type");
-  if (!(src0Elem.isInteger(32) || src0Elem.isF16() || src0Elem.isF32())) {
+  if (!(src0Elem.isInteger(kPTOI32BitWidth) || src0Elem.isF16() || src0Elem.isF32())) {
     return op.emitOpError(
         "expects A2/A3 tcmp input element type to be i32/f16/f32");
   }
-  if (!dstElem.isInteger(8))
+  if (!dstElem.isInteger(kPTOI8BitWidth))
     return op.emitOpError("expects dst element type to be i8");
 
   auto src0Valid = getValidShapeVec(src0Ty);
   auto src1Valid = getValidShapeVec(src1Ty);
   auto dstValid = getValidShapeVec(dstTy);
-  if (src0Valid.size() != 2 || src1Valid.size() != 2 || dstValid.size() != 2) {
+  if (src0Valid.size() != kPTORowColRank || src1Valid.size() != kPTORowColRank || dstValid.size() != kPTORowColRank) {
     return op.emitOpError(
         "expects src0, src1, and dst to have rank-2 valid_shape");
   }
@@ -172,13 +172,13 @@ static LogicalResult verifyTCmpA5(TCmpOp op) {
   if (info.src0Elem != info.src1Elem)
     return op.emitOpError("expects src0 and src1 to have the same element type");
   if (!(info.src0Elem.isF16() || info.src0Elem.isF32() ||
-        info.src0Elem.isBF16() || info.src0Elem.isInteger(8) ||
-        info.src0Elem.isInteger(16) || info.src0Elem.isInteger(32))) {
+        info.src0Elem.isBF16() || info.src0Elem.isInteger(kPTOI8BitWidth) ||
+        info.src0Elem.isInteger(kPTOI16BitWidth) || info.src0Elem.isInteger(kPTOI32BitWidth))) {
     return op.emitOpError(
         "expects A5 tcmp input element type to be i8/i16/i32/f16/bf16/f32");
   }
   auto dstInt = dyn_cast<IntegerType>(info.dstElem);
-  if (!dstInt || dstInt.getWidth() != 8)
+  if (!dstInt || dstInt.getWidth() != kPTOI8BitWidth)
     return op.emitOpError("expects dst element type to be i8");
   if (getShapeVec(info.src0Ty) != getShapeVec(info.src1Ty) ||
       getShapeVec(info.src0Ty) != getShapeVec(info.dstTy)) {
@@ -207,7 +207,7 @@ static LogicalResult verifyTCmpSCommon(TCmpSOp op) {
     return op.emitOpError("expects scalar to be integer, index, or float");
   auto srcValid = getValidShapeVec(srcTy);
   auto dstValid = getValidShapeVec(dstTy);
-  if (srcValid.size() != 2 || dstValid.size() != 2) {
+  if (srcValid.size() != kPTORowColRank || dstValid.size() != kPTORowColRank) {
     return op.emitOpError("expects src and dst to have rank-2 valid_shape");
   }
   if (srcValid[0] != ShapedType::kDynamic &&

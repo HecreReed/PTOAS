@@ -28,7 +28,7 @@ LogicalResult TNotifyOp::verify() {
   if (failed(verifyCommSignalLike(*this, getSignal(), "signal")))
     return failure();
   auto valueTy = dyn_cast<IntegerType>(getValue().getType());
-  if (!valueTy || valueTy.getWidth() != 32)
+  if (!valueTy || valueTy.getWidth() != kPTOI32BitWidth)
     return emitOpError("expects value to be i32");
   return success();
 }
@@ -39,7 +39,7 @@ LogicalResult TWaitOp::verify() {
   if (failed(verifyCommSignalLike(*this, getSignal(), "signal")))
     return failure();
   auto cmpTy = dyn_cast<IntegerType>(getCmpValue().getType());
-  if (!cmpTy || cmpTy.getWidth() != 32)
+  if (!cmpTy || cmpTy.getWidth() != kPTOI32BitWidth)
     return emitOpError("expects cmp_value to be i32");
   return success();
 }
@@ -50,7 +50,7 @@ LogicalResult TTestOp::verify() {
   if (failed(verifyCommSignalLike(*this, getSignal(), "signal")))
     return failure();
   auto cmpTy = dyn_cast<IntegerType>(getCmpValue().getType());
-  if (!cmpTy || cmpTy.getWidth() != 32)
+  if (!cmpTy || cmpTy.getWidth() != kPTOI32BitWidth)
     return emitOpError("expects cmp_value to be i32");
   return success();
 }
@@ -70,7 +70,7 @@ static LogicalResult verifySyncAllGmWorkspace(Operation *op, Value workspace,
   }
 
   auto elemTy = dyn_cast<IntegerType>(getElemTy(ty));
-  if (!elemTy || elemTy.getWidth() != 32)
+  if (!elemTy || elemTy.getWidth() != kPTOI32BitWidth)
     return op->emitOpError() << "expects " << name
                              << " element type to be i32";
 
@@ -105,12 +105,12 @@ static LogicalResult verifySyncAllTileWorkspace(Operation *op, Value workspace,
 
   Type elemTy = getElemTy(ty);
   auto intTy = dyn_cast_or_null<IntegerType>(elemTy);
-  if (!intTy || intTy.getWidth() != 32)
+  if (!intTy || intTy.getWidth() != kPTOI32BitWidth)
     return op->emitOpError() << "expects " << name
                              << " element type to be i32";
 
   auto shape = getShapeVec(ty);
-  if (shape.empty() || shape.size() > 2)
+  if (shape.empty() || shape.size() > kPTORowColRank)
     return op->emitOpError() << "expects " << name
                              << " to be rank-1 or rank-2";
   for (int64_t dim : shape) {
@@ -133,7 +133,7 @@ static LogicalResult verifySyncAllHardMode(SyncAllOp op, bool hasGm, bool hasUb,
 static LogicalResult verifySyncAllUsedCores(SyncAllOp op) {
   if (auto used = op.getUsedCores()) {
     auto intTy = dyn_cast<IntegerType>(used.getType());
-    if (!intTy || intTy.getWidth() != 32)
+    if (!intTy || intTy.getWidth() != kPTOI32BitWidth)
       return op.emitOpError("expects used_cores to be i32");
   }
   return success();
@@ -214,4 +214,3 @@ LogicalResult CommTGatherOp::verify() {
     return emitOpError("expects staging tile element type to match dst");
   return success();
 }
-

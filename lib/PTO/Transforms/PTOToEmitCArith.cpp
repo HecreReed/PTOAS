@@ -31,6 +31,8 @@ namespace mlir::pto {
 namespace {
 
 static constexpr unsigned kPTOIndexBitWidth = 32;
+static constexpr size_t kNumber2 = 2;
+static constexpr unsigned kNumber32 = 32;
 
 struct SignedDivAdjustOperands {
   Value q0;
@@ -775,7 +777,7 @@ struct ArithAddUIExtendedToEmitC
     if (failed(getTypeConverter()->convertTypes(op->getResultTypes(),
                                                 newResultTypes)))
       return failure();
-    if (newResultTypes.size() != 2)
+    if (newResultTypes.size() != kNumber2)
       return failure();
 
     Type sumDstTy = newResultTypes[0];
@@ -835,7 +837,7 @@ struct ArithMulExtendedToEmitC : public OpConversionPattern<ArithOp> {
     if (failed(this->getTypeConverter()->convertTypes(op->getResultTypes(),
                                                       newResultTypes)))
       return failure();
-    if (newResultTypes.size() != 2)
+    if (newResultTypes.size() != kNumber2)
       return failure();
 
     Type lowDstTy = newResultTypes[0];
@@ -1323,7 +1325,7 @@ struct ArithConstantToEmitC : public OpConversionPattern<arith::ConstantOp> {
     }
 
     if (auto floatAttr = dyn_cast_or_null<FloatAttr>(valueAttr)) {
-      SmallString<32> valStr;
+      SmallString<kNumber32> valStr;
       floatAttr.getValue().toString(valStr);
       llvm::StringRef s(valStr);
       // Ensure the literal parses as a floating-point constant in C/C++.

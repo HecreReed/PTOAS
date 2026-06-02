@@ -76,6 +76,10 @@ constexpr unsigned kInlineCapacity2 = 2;
 constexpr unsigned kInlineCapacity3 = 3;
 constexpr unsigned kInlineCapacity4 = 4;
 constexpr unsigned kInlineCapacity5 = 5;
+constexpr size_t kTileRank2D = 2;
+constexpr unsigned kNumber1 = 1;
+constexpr unsigned kNumber2 = 2;
+constexpr unsigned kNumber4 = 4;
 
 template <typename T>
 using SmallVec2 = SmallVector<T, kInlineCapacity2>;
@@ -163,7 +167,7 @@ static std::optional<GatherScatterShapeLayoutInfo>
 getGatherScatterShapeLayoutInfo(Type ty) {
   if (auto tileTy = dyn_cast<pto::TileBufType>(ty)) {
     ArrayRef<int64_t> validShape = tileTy.getValidShape();
-    if (validShape.size() != 2)
+    if (validShape.size() != kTileRank2D)
       return std::nullopt;
 
     GatherScatterShapeLayoutInfo info;
@@ -175,13 +179,13 @@ getGatherScatterShapeLayoutInfo(Type ty) {
   }
 
   auto memRefTy = dyn_cast<MemRefType>(ty);
-  if (!memRefTy || memRefTy.getRank() != 2)
+  if (!memRefTy || memRefTy.getRank() != static_cast<int64_t>(kTileRank2D))
     return std::nullopt;
 
   SmallVec4<int64_t> strides;
   int64_t offset = ShapedType::kDynamic;
   if (failed(getStridesAndOffset(memRefTy, strides, offset)) ||
-      strides.size() != 2)
+      strides.size() != kTileRank2D)
     return std::nullopt;
 
   GatherScatterShapeLayoutInfo info;
@@ -304,13 +308,13 @@ static std::optional<std::string> getEmitCIntegerTypeToken(Type elemTy) {
     return std::nullopt;
   const bool isSigned = intTy.isSignless() || intTy.isSigned();
   switch (intTy.getWidth()) {
-  case 8:
+  case kPTOI8BitWidth:
     return isSigned ? "int8_t" : "uint8_t";
-  case 16:
+  case kPTOI16BitWidth:
     return isSigned ? "int16_t" : "uint16_t";
-  case 32:
+  case kPTOI32BitWidth:
     return isSigned ? "int32_t" : "uint32_t";
-  case 64:
+  case kPTOI64BitWidth:
     return intTy.isUnsigned() ? "uint64_t" : "int64_t";
   default:
     return std::nullopt;
@@ -347,15 +351,15 @@ static bool isEmitCPointerLikeType(Type ty) {
 }
 
 int64_t mlir::pto::getEmitCScalarByteWidth(Type elemTy) {
-  if (pto::getPTOStorageElemByteSize(elemTy) == 1)
-    return 1;
-  if (elemTy.isF16() || elemTy.isBF16() || elemTy.isInteger(16))
-    return 2;
-  if (elemTy.isF32() || elemTy.isInteger(32))
-    return 4;
-  if (elemTy.isF64() || elemTy.isInteger(64))
-    return 8;
-  return 4;
+  if (pto::getPTOStorageElemByteSize(elemTy) == kPTOByteSize)
+    return kPTOByteSize;
+  if (elemTy.isF16() || elemTy.isBF16() || elemTy.isInteger(kPTOI16BitWidth))
+    return kPTOHalfWordBytes;
+  if (elemTy.isF32() || elemTy.isInteger(kPTOI32BitWidth))
+    return kPTOWordBytes;
+  if (elemTy.isF64() || elemTy.isInteger(kPTOI64BitWidth))
+    return kPTODoubleWordBytes;
+  return kPTOWordBytes;
 }
 
 Value mlir::pto::peelEmitCCasts(Value v) {
@@ -429,7 +433,7 @@ std::string mlir::pto::getTileBufCompactToken(pto::TileBufConfigAttr configAttr)
     case 1:
       compactTok = "CompactMode::Normal";
       break;
-    case 2:
+    case kNumber2:
       compactTok = "CompactMode::RowPlusOne";
       break;
     default:
@@ -440,10 +444,10 @@ std::string mlir::pto::getTileBufCompactToken(pto::TileBufConfigAttr configAttr)
 }
 
 std::optional<std::string> mlir::pto::getEmitCTileTypeString(pto::TileBufType type) {
-  if (type.getRank() != 2)
+  if (type.getRank() != static_cast<int64_t>(kTileRank2D))
     return std::nullopt;
   auto validShape = type.getValidShape();
-  if (validShape.size() != 2)
+  if (validShape.size() != kTileRank2D)
     return std::nullopt;
 
   Type elemTy = type.getElementType();
@@ -466,7 +470,7 @@ std::optional<std::string> mlir::pto::getEmitCTileTypeString(pto::TileBufType ty
           ? "-1"
           : std::to_string(render(validShape[1], 1));
 
-  int32_t fractal = 512;
+  int32_t fractal = kFractalSize512;
   if (auto frAttr = dyn_cast<IntegerAttr>(configAttr.getSFractalSize()))
     fractal = frAttr.getInt();
   return std::string("Tile<") + getTileRoleToken(type.getMemorySpace()) + ", " +
@@ -521,8 +525,8 @@ private:
     });
 
     addConversion([Ctx](VectorType type) -> Type {
-      if (type.getRank() == 1 && type.getNumElements() == 4 &&
-          type.getElementType().isInteger(16)) {
+      if (type.getRank() == kNumber1 && type.getNumElements() == kNumber4 &&
+          type.getElementType().isInteger(kPTOI16BitWidth)) {
         return emitc::OpaqueType::get(Ctx, "pto::MrgSortExecutedNumList");
       }
       return Type{};
@@ -731,7 +735,6 @@ static bool hasSetFFTsOp(func::FuncOp func) {
 //===----------------------------------------------------------------------===//
 // EmitC scalar helpers
 //===----------------------------------------------------------------------===//
-
 Value mlir::pto::makeEmitCOpaqueConstant(ConversionPatternRewriter &rewriter,
                                      Location loc, Type type,
                                      llvm::StringRef literal) {
@@ -743,7 +746,6 @@ Value mlir::pto::makeEmitCIntConstant(ConversionPatternRewriter &rewriter,
                                   Location loc, Type type, int64_t value) {
   return makeEmitCOpaqueConstant(rewriter, loc, type, std::to_string(value));
 }
-
 Value mlir::pto::emitCCast(ConversionPatternRewriter &rewriter, Location loc,
                        Type dstType, Value src) {
   if (src.getType() == dstType)
@@ -1005,11 +1007,13 @@ void mlir::pto::buildGlobalTensorShapeAndStride(ArrayRef<int64_t> shape,
                                             ArrayRef<int64_t> strides,
                                             SmallVectorImpl<int64_t> &shape5D,
                                             SmallVectorImpl<int64_t> &stride5D) {
-  shape5D.assign(5, 1);
-  stride5D.assign(5, 1);
+  shape5D.assign(kPTOPaddedTensorRank5D, 1);
+  stride5D.assign(kPTOPaddedTensorRank5D, 1);
   int rank = static_cast<int>(shape.size());
-  int shift = 5 - rank;
-  for (int i = 0; i < rank && i < 5; ++i) {
+  int shift = static_cast<int>(kPTOPaddedTensorRank5D) - rank;
+  for (int i = 0; i < rank &&
+                  i < static_cast<int>(kPTOPaddedTensorRank5D);
+       ++i) {
     shape5D[shift + i] = shape[i];
     stride5D[shift + i] = strides[i];
   }
@@ -1076,7 +1080,7 @@ static std::string inferFallbackGlobalTensorLayout(ArrayRef<int64_t> shape5D,
   int elemBytes = getGlobalTensorElementBytes(elemTy);
   if (elemBytes == 0)
     return "pto::Layout::ND";
-  if (shape5D[2] == 16 && multiplyOrDynamic(shape5D[2], shape5D[3]) * elemBytes == 512 &&
+  if (shape5D[2] == 16 && multiplyOrDynamic(shape5D[2], shape5D[3]) * elemBytes == kFractalSize512 &&
       stride5D[4] == 1 && stride5D[3] == shape5D[4]) {
     return "pto::Layout::NZ";
   }
@@ -1086,7 +1090,7 @@ static std::string inferFallbackGlobalTensorLayout(ArrayRef<int64_t> shape5D,
     isRowMajor = stride5D[i] == multiplyOrDynamic(stride5D[i + 1], shape5D[i + 1]);
 
   bool isColMajor = stride5D[0] == 1;
-  for (int i = 0; i < 4 && isColMajor; ++i)
+  for (int i = 0; i < static_cast<int>(kNumber4) && isColMajor; ++i)
     isColMajor = stride5D[i + 1] == multiplyOrDynamic(stride5D[i], shape5D[i]);
   if (isColMajor)
     return "pto::Layout::DN";
@@ -1255,7 +1259,6 @@ Value mlir::pto::materializeTensorViewDataPointer(
                                    ArrayAttr{}, ArrayAttr{}, ValueRange{value})
       .getResult(0);
 }
-
 static pto::TileBufConfigAttr getScratchTileConfigAttr(Value originalScratch,
                                                        MLIRContext *ctx) {
   pto::TileBufConfigAttr configAttr = pto::TileBufConfigAttr::getDefault(ctx);
@@ -1271,7 +1274,7 @@ static pto::TileBufConfigAttr getScratchTileConfigAttr(Value originalScratch,
 static std::string buildScratchTileTypeString(Type elemTy, int64_t rows,
                                               int64_t cols,
                                               pto::TileBufConfigAttr configAttr) {
-  int32_t fractal = 512;
+  int32_t fractal = kFractalSize512;
   if (auto frAttr = dyn_cast<IntegerAttr>(configAttr.getSFractalSize()))
     fractal = frAttr.getInt();
   pto::BLayout blayout = getTileBufBLayoutValue(configAttr);
@@ -1320,7 +1323,7 @@ FailureOr<Value> mlir::pto::buildAsyncScratchTileValue(
     return failure();
 
   ArrayRef<int64_t> shape = memTy.getShape();
-  if (!memTy.hasStaticShape() || shape.empty() || shape.size() > 2)
+  if (!memTy.hasStaticShape() || shape.empty() || shape.size() > kTileRank2D)
     return failure();
 
   int64_t rows = shape.size() == 1 ? 1 : shape[0];

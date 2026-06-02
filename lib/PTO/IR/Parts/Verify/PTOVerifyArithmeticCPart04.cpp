@@ -83,7 +83,7 @@ static LogicalResult verifyTFillPadMatHomogeneousConstraint(Operation *op,
   SmallVec4<std::string> mismatchFields;
   auto srcValid = getValidShapeVec(srcTy);
   auto dstValid = getValidShapeVec(dstTy);
-  if (srcValid.size() == 2 && dstValid.size() == 2) {
+  if (srcValid.size() == kPTORowColRank && dstValid.size() == kPTORowColRank) {
     if (srcValid[0] != dstValid[0])
       mismatchFields.push_back("v_row (" + dimToStr(srcValid[0]) + " vs " +
                                dimToStr(dstValid[0]) + ")");
@@ -148,7 +148,7 @@ static mlir::LogicalResult verifyTFillPadLike(Operation *op, Type srcTy, Type ds
 
   auto srcShape = getShapeVec(srcTy);
   auto dstShape = getShapeVec(dstTy);
-  if (srcShape.size() != 2 || dstShape.size() != 2)
+  if (srcShape.size() != kPTORowColRank || dstShape.size() != kPTORowColRank)
     return op->emitError("expects rank-2 shaped types for src/dst");
 
   int64_t srcB = getFillPadElemBytes(getElemTy(srcTy));
@@ -157,7 +157,9 @@ static mlir::LogicalResult verifyTFillPadLike(Operation *op, Type srcTy, Type ds
     return op->emitError("unsupported element type (expects int/float element types)");
   if (srcB != dstB)
     return op->emitError("expects sizeof(src element) == sizeof(dst element)");
-  if (!(srcB == 1 || srcB == 2 || srcB == 4))
+  if (!(srcB == static_cast<int64_t>(kPTOByteSize) ||
+        srcB == static_cast<int64_t>(kPTOHalfWordBytes) ||
+        srcB == static_cast<int64_t>(kPTOWordBytes)))
     return op->emitError("expects element size to be 1, 2, or 4 bytes");
   if (failed(verifyTFillPadMatHomogeneousConstraint(op, srcTy, dstTy, opName)) ||
       failed(verifyTFillPadDstPad(op, dstTy, opName)) ||
@@ -209,6 +211,6 @@ static bool isSupportedGatherElemTypeA5Index(Type ty) {
   if (ty.isF16() || ty.isF32())
     return true;
   if (auto it = dyn_cast<IntegerType>(ty))
-    return it.getWidth() == 8 || it.getWidth() == 16 || it.getWidth() == 32;
+    return it.getWidth() == kPTOI8BitWidth || it.getWidth() == kPTOI16BitWidth || it.getWidth() == kPTOI32BitWidth;
   return false;
 }

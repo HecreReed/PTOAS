@@ -16,14 +16,14 @@ static LogicalResult verifyMatTileValidSizes(Operation *op, Type lhsTy,
                                              Type rhsTy) {
   auto lhsValid = getValidShapeVec(lhsTy);
   auto rhsValid = getValidShapeVec(rhsTy);
-  if (lhsValid.size() != 2 || rhsValid.size() != 2)
+  if (lhsValid.size() != kPTORowColRank || rhsValid.size() != kPTORowColRank)
     return success();
   int64_t m = lhsValid[0];
   int64_t k = lhsValid[1];
   int64_t n = rhsValid[1];
-  if ((m != ShapedType::kDynamic && (m < 1 || m > 4095)) ||
-      (k != ShapedType::kDynamic && (k < 1 || k > 4095)) ||
-      (n != ShapedType::kDynamic && (n < 1 || n > 4095))) {
+  if ((m != ShapedType::kDynamic && (m < kPTOMatmulDimMin || m > kPTOMatmulDimMax)) ||
+      (k != ShapedType::kDynamic && (k < kPTOMatmulDimMin || k > kPTOMatmulDimMax)) ||
+      (n != ShapedType::kDynamic && (n < kPTOMatmulDimMin || n > kPTOMatmulDimMax))) {
     return op->emitOpError("expects m, k, and n valid sizes to be in [1, 4095]");
   }
   return success();
@@ -179,9 +179,9 @@ static LogicalResult verifyMatmulTypeTriple(Operation *op, Type lhsElemTy,
                                             Type rhsElemTy, Type dstElemTy) {
   bool isA5 = getVerifierTargetArch(op) == VerifierTargetArch::A5;
   auto isInt8 = [](Type ty) {
-    return ty.isInteger(8);
+    return ty.isInteger(kPTOI8BitWidth);
   };
-  if (dstElemTy.isInteger(32) && isInt8(lhsElemTy) && isInt8(rhsElemTy))
+  if (dstElemTy.isInteger(kPTOI32BitWidth) && isInt8(lhsElemTy) && isInt8(rhsElemTy))
     return success();
 
   auto isSupportedFpInput = [](Type ty) {
@@ -193,7 +193,8 @@ static LogicalResult verifyMatmulTypeTriple(Operation *op, Type lhsElemTy,
   if (isA5 && dstElemTy.isF32() && lhsElemTy == rhsElemTy) {
     if (auto ft = mlir::dyn_cast<FloatType>(lhsElemTy)) {
       unsigned width = ft.getWidth();
-      if (width == 8 || width == 16 || width == 32)
+      if (width == kPTOI8BitWidth || width == kPTOI16BitWidth ||
+          width == kPTOI32BitWidth)
         return success();
     }
   }

@@ -84,7 +84,7 @@ LogicalResult mlir::pto::TGemvAccOp::verify() {
 // inferReturnTypes() for matmul ops (keep your existing code)
 //===----------------------------------------------------------------------===
 [[maybe_unused]] static mlir::Type inferMatmulTileResult2DFromAB(MLIRContext *context, ValueRange operands) {
-  if (operands.size() < 2)
+  if (operands.size() < kNumber2)
     return mlir::Type();
 
   auto lhsTile = dyn_cast<mlir::pto::TileType>(operands[0].getType());
@@ -93,7 +93,7 @@ LogicalResult mlir::pto::TGemvAccOp::verify() {
     return mlir::Type();
 
   Type elemTy = lhsTile.getElementType();
-  if (operands.size() >= 3) {
+  if (operands.size() >= kNumber3) {
     if (auto biasTile = dyn_cast<mlir::pto::TileType>(operands[2].getType())) {
       return mlir::pto::TileType::get(context, biasTile.getShape(), elemTy);
     }
@@ -101,7 +101,8 @@ LogicalResult mlir::pto::TGemvAccOp::verify() {
 
   auto lhsShape = lhsTile.getShape();
   auto rhsShape = rhsTile.getShape();
-  if (lhsShape.size() >= 2 && rhsShape.size() >= 2) {
+  if (lhsShape.size() >= kPTORowColRank &&
+      rhsShape.size() >= kPTORowColRank) {
     int64_t M = lhsShape[0];
     int64_t N = rhsShape[1];
     SmallVec2<int64_t> outShape = {M, N};
@@ -112,7 +113,7 @@ LogicalResult mlir::pto::TGemvAccOp::verify() {
 }
 
 [[maybe_unused]] static RankedTensorType inferMatmulResult2DFromAB(ValueRange operands) {
-  if (operands.size() < 2)
+  if (operands.size() < kNumber2)
     return RankedTensorType();
 
   auto lhsTy = dyn_cast<ShapedType>(operands[0].getType());
@@ -121,7 +122,7 @@ LogicalResult mlir::pto::TGemvAccOp::verify() {
     return RankedTensorType();
 
   Type elemTy = lhsTy.getElementType();
-  if (operands.size() >= 3) {
+  if (operands.size() >= kNumber3) {
     if (auto biasRT = dyn_cast<RankedTensorType>(operands[2].getType()))
       return RankedTensorType::get(biasRT.getShape(), elemTy);
     if (auto biasMR = dyn_cast<MemRefType>(operands[2].getType())) {
@@ -130,7 +131,8 @@ LogicalResult mlir::pto::TGemvAccOp::verify() {
     }
   }
 
-  if (lhsTy.getRank() >= 2 && rhsTy.getRank() >= 2) {
+  if (lhsTy.getRank() >= kPTORowColRank &&
+      rhsTy.getRank() >= kPTORowColRank) {
     int64_t M = lhsTy.getDimSize(0);
     int64_t N = rhsTy.getDimSize(1);
     return RankedTensorType::get({M, N}, elemTy);

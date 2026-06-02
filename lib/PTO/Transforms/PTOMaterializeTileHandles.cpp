@@ -56,6 +56,11 @@ constexpr unsigned kTileHandleAttrInlineCapacity = 2;
 constexpr unsigned kLoopOpInlineCapacity = 8;
 constexpr unsigned kAnchorInlineCapacity = 32;
 constexpr unsigned kDeadBindInlineCapacity = 16;
+constexpr size_t kTileRank2D = 2;
+constexpr unsigned kFirstOperandIndex = 0;
+constexpr unsigned kSecondOperandIndex = 1;
+constexpr unsigned kThirdOperandIndex = 2;
+constexpr unsigned kFourthOperandIndex = 3;
 
 template <typename T>
 using SmallVec2 = SmallVector<T, kTileHandleAttrInlineCapacity>;
@@ -77,7 +82,7 @@ struct TileHandleMetadata {
 
 static bool isLocalTileMemRef(Type type) {
   auto memTy = dyn_cast<MemRefType>(type);
-  if (!memTy || memTy.getRank() != 2)
+  if (!memTy || memTy.getRank() != static_cast<int64_t>(kTileRank2D))
     return false;
 
   auto asAttr = dyn_cast_or_null<AddressSpaceAttr>(memTy.getMemorySpace());
@@ -192,7 +197,8 @@ static TileBufConfigAttr makeTileConfig(MLIRContext *ctx, BLayout bl,
   Builder builder(ctx);
   return TileBufConfigAttr::get(
       ctx, BLayoutAttr::get(ctx, bl), SLayoutAttr::get(ctx, sl),
-      builder.getI32IntegerAttr(512), PadValueAttr::get(ctx, PadValue::Null),
+      builder.getI32IntegerAttr(kFractalSize512),
+      PadValueAttr::get(ctx, PadValue::Null),
       CompactModeAttr::get(ctx, CompactMode::Null));
 }
 
@@ -212,9 +218,9 @@ static void inferConfigForMaterializedUse(Operation *owner, unsigned operandNo,
   if (isa<TMatmulOp>(owner)) {
     if (!isA5Target(owner))
       return;
-    if (operandNo == 0 || operandNo == 2)
+    if (operandNo == kFirstOperandIndex || operandNo == kThirdOperandIndex)
       meta.config = colRow();
-    else if (operandNo == 1)
+    else if (operandNo == kSecondOperandIndex)
       meta.config = rowCol();
     return;
   }
@@ -222,15 +228,16 @@ static void inferConfigForMaterializedUse(Operation *owner, unsigned operandNo,
   if (isa<TMatmulAccOp>(owner)) {
     if (!isA5Target(owner))
       return;
-    if (operandNo == 0 || operandNo == 1 || operandNo == 3)
+    if (operandNo == kFirstOperandIndex || operandNo == kSecondOperandIndex ||
+        operandNo == kFourthOperandIndex)
       meta.config = colRow();
-    else if (operandNo == 2)
+    else if (operandNo == kThirdOperandIndex)
       meta.config = rowCol();
     return;
   }
 
   if (isa<TInsertOp>(owner)) {
-    if (operandNo != 0 && operandNo != 3)
+    if (operandNo != kFirstOperandIndex && operandNo != kFourthOperandIndex)
       return;
     auto as = getAddressSpace(operandType);
     if (!as)
@@ -281,7 +288,7 @@ static int32_t getConfigI32Value(Attribute attr) {
 
 static FailureOr<std::pair<int64_t, int64_t>>
 getBoxedTileInnerShape(TileBufConfigAttr configAttr, Type elemTy, int32_t slVal) {
-  int32_t fractal = 512;
+  int32_t fractal = kFractalSize512;
   if (auto frAttr = dyn_cast<IntegerAttr>(configAttr.getSFractalSize()))
     fractal = static_cast<int32_t>(frAttr.getInt());
 
@@ -290,15 +297,18 @@ getBoxedTileInnerShape(TileBufConfigAttr configAttr, Type elemTy, int32_t slVal)
     return failure();
 
   switch (fractal) {
-  case 1024:
-    return std::make_pair<int64_t, int64_t>(16, 16);
-  case 32:
-    return std::make_pair<int64_t, int64_t>(16, 2);
-  case 512:
-    if (slVal == 1)
-      return std::make_pair<int64_t, int64_t>(16, 32 / elemBytes);
-    if (slVal == 2)
-      return std::make_pair<int64_t, int64_t>(32 / elemBytes, 16);
+  case kFractalSize1024:
+    return std::make_pair<int64_t, int64_t>(kFractalSize16, kFractalSize16);
+  case kFractalSize32:
+    return std::make_pair<int64_t, int64_t>(kFractalSize16,
+                                            kFractalSize32 / kFractalSize16);
+  case kFractalSize512:
+    if (slVal == static_cast<int32_t>(SLayout::RowMajor))
+      return std::make_pair<int64_t, int64_t>(kFractalSize16,
+                                              kFractalSize32 / elemBytes);
+    if (slVal == static_cast<int32_t>(SLayout::ColMajor))
+      return std::make_pair<int64_t, int64_t>(kFractalSize32 / elemBytes,
+                                              kFractalSize16);
     return failure();
   default:
     return failure();
@@ -362,7 +372,7 @@ getMaterializedTileShape(MemRefType memTy, const TileHandleMetadata &meta) {
     return shape;
 
   auto sourceMrTy = dyn_cast_or_null<MemRefType>(meta.source.getType());
-  if (!sourceMrTy || sourceMrTy.getRank() < 2 ||
+  if (!sourceMrTy || sourceMrTy.getRank() < static_cast<int64_t>(kTileRank2D) ||
       !meta.source.getDefiningOp<memref::SubViewOp>())
     return shape;
 
@@ -376,7 +386,7 @@ getMaterializedTileShape(MemRefType memTy, const TileHandleMetadata &meta) {
   int64_t inheritedOffset = ShapedType::kDynamic;
   if (failed(getStridesAndOffset(sourceMrTy, inheritedStrides,
                                  inheritedOffset)) ||
-      inheritedStrides.size() < 2)
+      inheritedStrides.size() < kTileRank2D)
     return shape;
 
   int64_t childRowStride = 0;
@@ -418,7 +428,7 @@ static bool isMaterializedTileAnchor(Operation *op) {
 }
 
 static Value makeI64Constant(OpBuilder &builder, Location loc, int64_t value) {
-  return builder.create<arith::ConstantIntOp>(loc, value, 64);
+  return builder.create<arith::ConstantIntOp>(loc, value, kPTOI64BitWidth);
 }
 
 static Value ensureI64(Value value, OpBuilder &builder, Location loc) {
@@ -431,9 +441,9 @@ static Value ensureI64(Value value, OpBuilder &builder, Location loc) {
   if (isa<IndexType>(value.getType()))
     return builder.create<arith::IndexCastOp>(loc, i64Ty, value);
   if (auto intTy = dyn_cast<IntegerType>(value.getType())) {
-    if (intTy.getWidth() == 64)
+    if (intTy.getWidth() == kPTOI64BitWidth)
       return value;
-    if (intTy.getWidth() < 64)
+    if (intTy.getWidth() < kPTOI64BitWidth)
       return builder.create<arith::ExtSIOp>(loc, i64Ty, value);
     return builder.create<arith::TruncIOp>(loc, i64Ty, value);
   }

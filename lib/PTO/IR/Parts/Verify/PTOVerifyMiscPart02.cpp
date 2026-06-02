@@ -131,8 +131,8 @@ static LogicalResult verifyTHistogramShapes(THistogramOp op, Type srcTy,
   auto srcValid = getValidShapeVec(srcTy);
   auto idxValid = getValidShapeVec(idxTy);
   auto dstValid = getValidShapeVec(dstTy);
-  if (srcShape.size() != 2 || idxShape.size() != 2 || dstShape.size() != 2 ||
-      srcValid.size() != 2 || idxValid.size() != 2 || dstValid.size() != 2) {
+  if (srcShape.size() != kPTORowColRank || idxShape.size() != kPTORowColRank || dstShape.size() != kPTORowColRank ||
+      srcValid.size() != kPTORowColRank || idxValid.size() != kPTORowColRank || dstValid.size() != kPTORowColRank) {
     return op.emitOpError(
         "expects src, idx, and dst to have rank-2 shape and valid_shape");
   }
@@ -144,11 +144,11 @@ static LogicalResult verifyTHistogramShapes(THistogramOp op, Type srcTy,
       !hasCompatibleKnownExtent(srcValid[0], dstValid[0])) {
     return op.emitOpError("expects dst rows and valid rows to match src");
   }
-  if (!isKnownUnitExtent(idxShape[1]) || !isKnownUnitExtent(idxValid[1]))
+  if (!isKnownUnitExtent(idxShape[kPTOColumnDim]) || !isKnownUnitExtent(idxValid[kPTOColumnDim]))
     return op.emitOpError("expects idx to have exactly one column");
-  if (dstShape[1] != ShapedType::kDynamic && dstShape[1] < 256)
+  if (dstShape[kPTOColumnDim] != ShapedType::kDynamic && dstShape[kPTOColumnDim] < kPTOMinGatherDstColumns)
     return op.emitOpError("expects dst shape[1] to be at least 256");
-  if (dstValid[1] != ShapedType::kDynamic && dstValid[1] < 256)
+  if (dstValid[kPTOColumnDim] != ShapedType::kDynamic && dstValid[kPTOColumnDim] < kPTOMinGatherDstColumns)
     return op.emitOpError("expects dst valid_shape[1] to be at least 256");
   return success();
 }
@@ -187,11 +187,11 @@ static LogicalResult verifyTHistogramA5(THistogramOp op) {
         "expects idx to use DN layout (col_major + none_box)");
   }
 
-  if (!isIntegerTypeWidth(getElemTy(srcTy), 16))
+  if (!isIntegerTypeWidth(getElemTy(srcTy), kPTOI16BitWidth))
     return op.emitOpError("expects src element type to be ui16");
-  if (!isIntegerTypeWidth(getElemTy(idxTy), 8))
+  if (!isIntegerTypeWidth(getElemTy(idxTy), kPTOI8BitWidth))
     return op.emitOpError("expects idx element type to be ui8");
-  if (!isIntegerTypeWidth(getElemTy(dstTy), 32))
+  if (!isIntegerTypeWidth(getElemTy(dstTy), kPTOI32BitWidth))
     return op.emitOpError("expects dst element type to be ui32");
   return verifyTHistogramShapes(op, srcTy, idxTy, dstTy);
 }

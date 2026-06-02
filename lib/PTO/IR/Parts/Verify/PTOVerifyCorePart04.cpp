@@ -82,11 +82,11 @@ static FailureOr<TStoreVerifyInfo> verifyTStoreCommon(Operation *op, Value src,
 }
 
 static bool isLoadStoreElemType(Type ty) {
-  return ty.isInteger(8) || ty.isInteger(16) || ty.isInteger(32) ||
-         ty.isInteger(64) || ty.isF16() || ty.isBF16() || ty.isF32();
+  return ty.isInteger(kPTOI8BitWidth) || ty.isInteger(kPTOI16BitWidth) || ty.isInteger(kPTOI32BitWidth) ||
+         ty.isInteger(kPTOI64BitWidth) || ty.isF16() || ty.isBF16() || ty.isF32();
 }
 
-static bool isI8Like(Type ty) { return ty.isInteger(8); }
+static bool isI8Like(Type ty) { return ty.isInteger(kPTOI8BitWidth); }
 
 static LogicalResult verifyTStoreModeSource(Operation *op,
                                             pto::AddressSpace srcSpace,
@@ -103,7 +103,7 @@ static LogicalResult verifyTStoreModeSource(Operation *op,
 static LogicalResult verifyTStoreA2A3AccDstType(Operation *op, Type srcElem,
                                                 Type dstElem, bool hasPreQuant) {
   if (hasPreQuant) {
-    if (srcElem.isInteger(32)) {
+    if (srcElem.isInteger(kPTOI32BitWidth)) {
       if (!(isI8Like(dstElem) || dstElem.isF16())) {
         return op->emitOpError(
             "expects A2/A3 acc preQuantScalar tstore dst type to be i8/ui8/f16");
@@ -114,7 +114,7 @@ static LogicalResult verifyTStoreA2A3AccDstType(Operation *op, Type srcElem,
     }
     return success();
   }
-  if (!(dstElem.isInteger(32) || dstElem.isF32() || dstElem.isF16() ||
+  if (!(dstElem.isInteger(kPTOI32BitWidth) || dstElem.isF32() || dstElem.isF16() ||
         dstElem.isBF16())) {
     return op->emitOpError(
         "expects A2/A3 acc tstore dst element type to be i32/f32/f16/bf16");
@@ -153,7 +153,7 @@ static LogicalResult verifyTStoreA2A3(TStoreOp op, const TStoreVerifyInfo &info,
     return success();
   }
 
-  if (!(info.srcElem.isInteger(32) || info.srcElem.isF32()))
+  if (!(info.srcElem.isInteger(kPTOI32BitWidth) || info.srcElem.isF32()))
     return op.emitOpError("expects A2/A3 acc tstore src element type to be i32 or f32");
   if (failed(verifyTStoreA2A3AccDstType(op.getOperation(), info.srcElem,
                                         info.dstElem, hasPreQuant))) {
@@ -161,13 +161,13 @@ static LogicalResult verifyTStoreA2A3(TStoreOp op, const TStoreVerifyInfo &info,
   }
 
   auto srcShape = info.srcTile.getShape();
-  if (srcShape[1] != ShapedType::kDynamic &&
-      (srcShape[1] < 1 || srcShape[1] > 4095)) {
+  if (srcShape[kPTOColumnDim] != ShapedType::kDynamic &&
+      (srcShape[kPTOColumnDim] < kPTOMatmulDimMin || srcShape[kPTOColumnDim] > kPTOMatmulDimMax)) {
     return op.emitOpError("expects A2/A3 acc tstore src cols to be in [1, 4095]");
   }
   auto srcValid = info.srcTile.getValidShape();
-  if (srcValid[1] != ShapedType::kDynamic &&
-      (srcValid[1] < 1 || srcValid[1] > 4095)) {
+  if (srcValid[kPTOColumnDim] != ShapedType::kDynamic &&
+      (srcValid[kPTOColumnDim] < kPTOMatmulDimMin || srcValid[kPTOColumnDim] > kPTOMatmulDimMax)) {
     return op.emitOpError(
         "expects A2/A3 acc tstore src valid_shape[1] to be in [1, 4095]");
   }
@@ -183,7 +183,7 @@ static LogicalResult verifyTStoreA5AccDstType(Operation *op, Type srcElem,
     }
     return success();
   }
-  if (!(dstElem.isInteger(32) || dstElem.isF32() || dstElem.isF16() ||
+  if (!(dstElem.isInteger(kPTOI32BitWidth) || dstElem.isF32() || dstElem.isF16() ||
         dstElem.isBF16())) {
     return op->emitOpError(
         "expects A5 acc tstore dst element type to be i32/f32/f16/bf16");
@@ -216,7 +216,7 @@ static LogicalResult verifyTStoreA5(TStoreOp op, const TStoreVerifyInfo &info,
     return success();
   }
 
-  if (!(info.srcElem.isInteger(32) || info.srcElem.isF32()))
+  if (!(info.srcElem.isInteger(kPTOI32BitWidth) || info.srcElem.isF32()))
     return op.emitOpError("expects A5 acc tstore src element type to be i32 or f32");
   return verifyTStoreA5AccDstType(op.getOperation(), info.srcElem, info.dstElem,
                                   hasPreQuant);

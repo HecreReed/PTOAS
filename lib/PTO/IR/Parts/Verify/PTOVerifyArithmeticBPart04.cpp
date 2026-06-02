@@ -16,7 +16,7 @@ static LogicalResult verifyTCmpSA2A3(TCmpSOp op) {
   if (failed(verifyTCmpSCommon(op)))
     return failure();
   Type elemTy = getElemTy(op.getSrc().getType());
-  if (!(elemTy.isInteger(16) || elemTy.isInteger(32) || elemTy.isF16() ||
+  if (!(elemTy.isInteger(kPTOI16BitWidth) || elemTy.isInteger(kPTOI32BitWidth) || elemTy.isF16() ||
         elemTy.isF32())) {
     return op.emitOpError(
         "expects A2/A3 tcmps input element type to be i16/i32/f16/f32");
@@ -28,7 +28,7 @@ static LogicalResult verifyTCmpSA5(TCmpSOp op) {
   if (failed(verifyTCmpSCommon(op)))
     return failure();
   Type elemTy = getElemTy(op.getSrc().getType());
-  if (!(elemTy.isInteger(8) || elemTy.isInteger(16) || elemTy.isInteger(32) ||
+  if (!(elemTy.isInteger(kPTOI8BitWidth) || elemTy.isInteger(kPTOI16BitWidth) || elemTy.isInteger(kPTOI32BitWidth) ||
         elemTy.isF16() || elemTy.isF32())) {
     return op.emitOpError(
         "expects A5 tcmps input element type to be i8/i16/i32/f16/f32");
@@ -56,7 +56,7 @@ LogicalResult pto::TColExpandOp::verify() {
     return emitOpError("expects tcolexpand element type to be supported");
   auto srcValid = getValidShapeVec(getSrc());
   auto dstValid = getValidShapeVec(getDst());
-  if (srcValid.size() != 2 || dstValid.size() != 2)
+  if (srcValid.size() != kPTORowColRank || dstValid.size() != kPTORowColRank)
     return emitOpError("expects src and dst to have rank-2 valid_shape");
   if (srcValid[1] != ShapedType::kDynamic && dstValid[1] != ShapedType::kDynamic &&
       srcValid[1] != dstValid[1])
@@ -81,9 +81,9 @@ static LogicalResult verifyTColExpandBinaryLikeOp(Operation *op, Type t0, Type t
       return true;
     if (!allowIntegerTypes)
       return false;
-    if (elemTy.isInteger(16) || elemTy.isInteger(32))
+    if (elemTy.isInteger(kPTOI16BitWidth) || elemTy.isInteger(kPTOI32BitWidth))
       return true;
-    return targetArch == PTOArch::A5 && elemTy.isInteger(8);
+    return targetArch == PTOArch::A5 && elemTy.isInteger(kPTOI8BitWidth);
   };
   if (!isSupportedElem(e0) || !isSupportedElem(e1) || !isSupportedElem(ed)) {
     if (!allowIntegerTypes)
@@ -194,8 +194,6 @@ LogicalResult pto::TColArgMinOp::verify() {
 
   return dispatchVerifierByArch(getOperation(), verifyByArch, verifyByArch);
 }
-
-
 
 static ParseResult parseTColSumFormatWithTmp(OpAsmParser &parser,
                                              OperationState &result,

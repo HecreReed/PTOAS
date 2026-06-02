@@ -13,26 +13,26 @@ using namespace mlir;
 using namespace mlir::pto;
 
 static bool isA2A3ExtractElemType(Type ty) {
-  return ty.isInteger(8) || ty.isF16() || ty.isBF16() || ty.isF32();
+  return ty.isInteger(kPTOI8BitWidth) || ty.isF16() || ty.isBF16() || ty.isF32();
 }
 
 static bool isA5ExtractElemType(Type ty) {
   if (auto it = dyn_cast<IntegerType>(ty))
-    return it.getWidth() == 8;
+    return it.getWidth() == kPTOI8BitWidth;
   if (auto ft = dyn_cast<FloatType>(ty))
-    return ft.getWidth() == 8 || ft.isF16() || ft.isBF16() || ft.isF32();
+    return ft.getWidth() == kPTOI8BitWidth || ft.isF16() || ft.isBF16() || ft.isF32();
   return false;
 }
 
 static bool isA2A3VecInsertElemType(Type ty) {
-  return ty.isInteger(8) || ty.isF16() || ty.isBF16() || ty.isF32();
+  return ty.isInteger(kPTOI8BitWidth) || ty.isF16() || ty.isBF16() || ty.isF32();
 }
 
 static bool isA5SupportedVecInsertElemType(Type ty) {
   if (auto it = dyn_cast<IntegerType>(ty))
-    return it.getWidth() == 8 || it.getWidth() == 32;
+    return it.getWidth() == kPTOI8BitWidth || it.getWidth() == kPTOI32BitWidth;
   if (auto ft = dyn_cast<FloatType>(ty))
-    return ft.getWidth() == 8 || ft.isF16() || ft.isBF16() || ft.isF32();
+    return ft.getWidth() == kPTOI8BitWidth || ft.isF16() || ft.isBF16() || ft.isF32();
   return false;
 }
 
@@ -210,7 +210,7 @@ static LogicalResult verifyTInsertA2A3(const IndexedTileTransferCommon &common,
   if (!isColMajorRowMajorNZTileBuf(common.dstTb))
     return op.emitOpError(
         "expects A2/A3 tinsert dst to use blayout=col_major and slayout=row_major");
-  if (common.dstTb.getSFractalSizeI32() != 512)
+  if (common.dstTb.getSFractalSizeI32() != kFractalSize512)
     return op.emitOpError("expects A2/A3 tinsert dst fractal size to be 512");
   if (!(common.srcElem.isF32() &&
         (common.dstElem.isF16() || common.dstElem.isBF16()))) {

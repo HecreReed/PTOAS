@@ -17,7 +17,7 @@ static LogicalResult verifyPartialValidPattern(Operation *op, Type src0Ty,
   auto src0Valid = getValidShapeVec(src0Ty);
   auto src1Valid = getValidShapeVec(src1Ty);
   auto dstValid = getValidShapeVec(dstTy);
-  if (src0Valid.size() != 2 || src1Valid.size() != 2 || dstValid.size() != 2)
+  if (src0Valid.size() != kPTORowColRank || src1Valid.size() != kPTORowColRank || dstValid.size() != kPTORowColRank)
     return op->emitOpError("expects src0, src1, and dst to have rank-2 valid_shape");
 
   auto lessEqualKnown = [](int64_t lhs, int64_t rhs) {
@@ -31,7 +31,7 @@ static LogicalResult verifyPartialValidPattern(Operation *op, Type src0Ty,
     return true;
   };
 
-  for (unsigned i = 0; i < 2; ++i) {
+  for (unsigned i = 0; i < kPTORowColRank; ++i) {
     if (!lessEqualKnown(src0Valid[i], dstValid[i]) ||
         !lessEqualKnown(src1Valid[i], dstValid[i]))
       return op->emitOpError(
@@ -45,7 +45,7 @@ static LogicalResult verifyPartialValidPattern(Operation *op, Type src0Ty,
 
 [[maybe_unused]] static bool hasKnownZeroValidRegion(Type ty) {
   auto valid = getValidShapeVec(ty);
-  if (valid.size() != 2)
+  if (valid.size() != kPTORowColRank)
     return false;
   return valid[0] == 0 || valid[1] == 0;
 }
@@ -70,7 +70,7 @@ static LogicalResult verifyScalarTileOp(Operation *op, Type srcTy, Type dstTy,
 
   auto srcValid = getValidShapeVec(srcTy);
   auto dstValid = getValidShapeVec(dstTy);
-  if (srcValid.size() != 2 || dstValid.size() != 2)
+  if (srcValid.size() != kPTORowColRank || dstValid.size() != kPTORowColRank)
     return op->emitOpError()
            << "expects " << srcName << " and " << dstName
            << " to have rank-2 valid_shape";
@@ -186,10 +186,10 @@ static FailureOr<Type> verifyDistinctRowMajorUnaryTileOpCommon(
 static LogicalResult verifyArithmeticElemTypeForArch(
     Operation *op, Type elemTy, PTOArch targetArch, bool allowInt8OnA5,
     bool allowBf16OnA5, StringRef a2a3Error, StringRef a5Error) {
-  bool supported = elemTy.isInteger(32) || elemTy.isInteger(16) ||
+  bool supported = elemTy.isInteger(kPTOI32BitWidth) || elemTy.isInteger(kPTOI16BitWidth) ||
                    elemTy.isF16() || elemTy.isF32();
   if (targetArch == PTOArch::A5)
-    supported = supported || (allowInt8OnA5 && elemTy.isInteger(8)) ||
+    supported = supported || (allowInt8OnA5 && elemTy.isInteger(kPTOI8BitWidth)) ||
                 (allowBf16OnA5 && elemTy.isBF16());
   if (supported)
     return success();

@@ -95,8 +95,8 @@ static bool isEmitCSupportedScalarType(Type type) {
   if (type.isF16() || type.isBF16() || type.isF32() || type.isF64())
     return true;
   if (auto intTy = dyn_cast<IntegerType>(type))
-    return intTy.getWidth() == 8 || intTy.getWidth() == 16 ||
-           intTy.getWidth() == 32 || intTy.getWidth() == 64;
+    return intTy.getWidth() == kPTOI8BitWidth || intTy.getWidth() == kPTOI16BitWidth ||
+           intTy.getWidth() == kPTOI32BitWidth || intTy.getWidth() == kPTOI64BitWidth;
   if (mlir::pto::isPTOFloat8Type(type))
     return true;
   if (isa<mlir::pto::HiF8Type, mlir::pto::F4E1M2x2Type,
@@ -108,7 +108,7 @@ static bool isEmitCSupportedScalarType(Type type) {
 LogicalResult mlir::pto::PtrToIntOp::verify() {
   Type resultTy = getResult().getType();
   auto intTy = dyn_cast<IntegerType>(resultTy);
-  if (!intTy || intTy.getWidth() != 64)
+  if (!intTy || intTy.getWidth() != kPTOI64BitWidth)
     return emitOpError("result must be i64");
 
   return verifyPtrLikeForAddressCast(getOperation(), getPtr().getType(),
@@ -117,7 +117,7 @@ LogicalResult mlir::pto::PtrToIntOp::verify() {
 
 LogicalResult mlir::pto::IntToPtrOp::verify() {
   auto addrTy = dyn_cast<IntegerType>(getAddr().getType());
-  if (!addrTy || addrTy.getWidth() != 64)
+  if (!addrTy || addrTy.getWidth() != kPTOI64BitWidth)
     return emitOpError("address operand must be i64");
 
   if (failed(verifyPtrLikeForAddressCast(getOperation(), getResult().getType(),

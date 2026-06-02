@@ -102,16 +102,25 @@ static LogicalResult verifyPipeShape(Operation *op, int8_t dirMask, int32_t slot
                                      int32_t slotNum,
                                      std::optional<int32_t> flagBase) {
   constexpr int32_t kMaxHardwareFlagIds = 16;
-  if (dirMask != 1 && dirMask != 2 && dirMask != 3)
+  static constexpr int32_t kPTOFrontendMinSlotNum = 4;
+  static constexpr int32_t kPTOFrontendMaxSlotNum = 8;
+  static constexpr int32_t kPTOFrontendUnidirectionalFlagWidth = 2;
+  static constexpr int32_t kPTOFrontendBidirectionalFlagWidth = 4;
+  if (dirMask != kPTOFrontendDirMaskC2V &&
+      dirMask != kPTOFrontendDirMaskV2C &&
+      dirMask != kPTOFrontendDirMaskBidirectional)
     return op->emitOpError("expects 'dir_mask' to be 1, 2, or 3");
   if (slotSize <= 0)
     return op->emitOpError("expects 'slot_size' to be greater than 0");
-  if (slotNum != 4 && slotNum != 8)
+  if (slotNum != kPTOFrontendMinSlotNum &&
+      slotNum != kPTOFrontendMaxSlotNum)
     return op->emitOpError("expects 'slot_num' to be 4 or 8");
   if (flagBase && *flagBase < 0)
     return op->emitOpError("expects 'flag_base' to be non-negative when present");
   if (flagBase) {
-    int32_t flagWidth = dirMask == 3 ? 4 : 2;
+    int32_t flagWidth = dirMask == kPTOFrontendDirMaskBidirectional
+                            ? kPTOFrontendBidirectionalFlagWidth
+                            : kPTOFrontendUnidirectionalFlagWidth;
     if (*flagBase + flagWidth > kMaxHardwareFlagIds) {
       return op->emitOpError()
              << "requires 'flag_base' and dir_mask to fit within "
@@ -214,4 +223,3 @@ static int8_t getTensorEntrySplit(Operation *op) {
     return free.getSplit();
   return 0;
 }
-

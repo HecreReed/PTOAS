@@ -85,10 +85,6 @@ constexpr int64_t kInnerExtent8 = 8;
 constexpr int64_t kInnerExtent16 = 16;
 constexpr int64_t kInnerExtent32 = 32;
 
-constexpr int32_t kFractalSize32 = 32;
-constexpr int32_t kFractalSize512 = 512;
-constexpr int32_t kFractalSize1024 = 1024;
-
 constexpr int32_t kBLayoutColMajor =
     static_cast<int32_t>(BLayout::ColMajor);
 constexpr int32_t kSLayoutNoneBox =
@@ -748,9 +744,10 @@ materializePtrToIntAddPtrAddress(IRRewriter &rewriter, Location loc,
     }
 
     Value byteOffset = castIndexToI64(rewriter, loc, add.getOffset());
-    if (elemBytes != 1) {
+    if (elemBytes != kPTOByteSize) {
       Value elemBytesValue =
-          rewriter.create<arith::ConstantIntOp>(loc, elemBytes, 64);
+          rewriter.create<arith::ConstantIntOp>(loc, elemBytes,
+                                                kPTOI64BitWidth);
       byteOffset =
           rewriter.create<arith::MulIOp>(loc, byteOffset, elemBytesValue)
               .getResult();
@@ -1136,7 +1133,7 @@ static LogicalResult validateBoxedSubViewOp(mlir::pto::SubViewOp op,
   int32_t bl = 0;
   (void)readBLayoutI32(configAttr.getBLayout(), bl);
   auto srcShape = srcMrTy.getShape();
-  if (srcShape.size() != 2)
+  if (srcShape.size() != kTileRank2D)
     return success();
   if (bl == 0)
     return validateBoxedSubViewRowMajor(op, staticSizes, srcShape, off1Const, off1);

@@ -45,7 +45,7 @@ static LogicalResult verifyCommSignalLike(Operation *op, Value value,
   if (failed(verifyCommGlobalLike(op, value, name)))
     return failure();
   Type elemTy = getElemTy(value.getType());
-  if (!elemTy || !elemTy.isSignlessInteger(32))
+  if (!elemTy || !elemTy.isSignlessInteger(kPTOI32BitWidth))
     return op->emitOpError() << "expects " << name
                              << " element type to be i32";
   return success();
@@ -132,7 +132,7 @@ static std::optional<pto::AddressSpace> getPTOMemorySpaceEnum(Type ty) {
 
 [[maybe_unused]] static bool isRank2TileBuf(Type ty) {
   auto tb = dyn_cast<pto::TileBufType>(ty);
-  return tb && tb.getRank() == 2 && tb.getValidShape().size() == 2;
+  return tb && tb.getRank() == kPTORowColRank && tb.getValidShape().size() == kPTORowColRank;
 }
 
 static bool isSupportedVecElemType(Type ty, bool allowBf16,
@@ -143,10 +143,10 @@ static bool isSupportedVecElemType(Type ty, bool allowBf16,
     return true;
   if (auto it = dyn_cast<IntegerType>(ty)) {
     switch (it.getWidth()) {
-    case 32:
-    case 16:
+    case kPTOI32BitWidth:
+    case kPTOI16BitWidth:
       return true;
-    case 8:
+    case kPTOI8BitWidth:
       return allowInt8;
     default:
       return false;
@@ -157,7 +157,7 @@ static bool isSupportedVecElemType(Type ty, bool allowBf16,
 
 static bool isSupportedMGatherMScatterIndexElemType(Type ty) {
   auto it = dyn_cast<IntegerType>(ty);
-  if (!it || it.getWidth() != 32)
+  if (!it || it.getWidth() != kPTOI32BitWidth)
     return false;
   return true;
 }
@@ -179,11 +179,11 @@ static bool isSupportedMScatterAtomicPayloadElemType(Type ty,
     return true;
   case pto::ScatterAtomicOp::Add:
     return ty.isF16() || ty.isF32() ||
-           (intTy && intTy.getWidth() == 32);
+           (intTy && intTy.getWidth() == kPTOI32BitWidth);
   case pto::ScatterAtomicOp::Max:
   case pto::ScatterAtomicOp::Min:
     return ty.isF32() ||
-           (intTy && intTy.getWidth() == 32);
+           (intTy && intTy.getWidth() == kPTOI32BitWidth);
   }
   llvm_unreachable("Unknown ScatterAtomicOp");
 }
@@ -213,7 +213,7 @@ static LogicalResult verifyMGatherMScatterMemOperand(Operation *op,
                  *as != pto::AddressSpace::Zero))
       return op->emitOpError(
           "expects mem memref to use GM or zero address space");
-    if (mr.getRank() == 5) {
+    if (mr.getRank() == kPTOPaddedTensorRank5D) {
       auto shape = mr.getShape();
       bool allStatic = true;
       for (int64_t d : shape)
@@ -233,4 +233,3 @@ static LogicalResult verifyMGatherMScatterMemOperand(Operation *op,
 
 static bool hasCompatibleKnownExtent(int64_t lhs, int64_t rhs);
 static bool isKnownUnitExtent(int64_t value);
-

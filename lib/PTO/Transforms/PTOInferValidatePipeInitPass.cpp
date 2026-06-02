@@ -336,7 +336,6 @@ struct PTOInferValidatePipeInitPass
         continue;
       SmallVector<PipeInitInfo *> component =
           collectPipeComponent(rootInfo, adjacency, infoByOp, visited);
-
       if (failed(resolveNoSplitComponent(component, builder))) {
         signalPassFailure();
         return;
