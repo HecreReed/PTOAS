@@ -64,7 +64,9 @@ description: Evaluate PTOAS repository usability by the 30 touch points from the
 10. 若文档描述与实际运行冲突，以实际命令结果为准，并指出冲突位置。
 11. 默认给两个总分：`总分（支撑）` 和 `总分（实测）`。如果用户只要分项，不强制输出总分。
 12. 如果用户要结构化 JSON，输出必须是**触点优先**：
-    - 用 `touchpoint_scores` / `category_scores` / `layer` / `summary`
+    - 优先对齐 `scripts/generate_evaluation_json.py` 里的 `14` 个顶层字段
+    - 用 `summary` / `dimension_tables` / `documentation_retrieval` / `functional_testing` 承接触点评分结果
+    - `dimension_tables` 固定用 `7` 个维度，且每个维度保留 `3~4` 个子维度整数分
     - 不要再设计 `scene_scores`、`scenes`、旧场景权重这类字段
 
 ## 计量规则
@@ -94,3 +96,14 @@ description: Evaluate PTOAS repository usability by the 30 touch points from the
 10. `建议动作`
 
 如果用户只要简版结论，也要至少保留：评估层级、已选触点、总评、最低分项、证据路径。
+
+## 结构化 JSON
+
+- 用户要 agent 侧结构化结果时，直接使用 `scripts/generate_evaluation_json.py`。
+- 该脚本会：
+  - 生成固定 `14` 个顶层字段
+  - 对齐 `summary` 的 `9` 个子字段
+  - 固定 `dimension_tables` 的 `7` 个维度
+  - 自动执行 `_postprocess_evaluation_json()` 风格的修正
+  - 自动执行 `_validate_evaluation_json()` 风格的校验
+- 默认模板输出会带一组 PTOAS 代表性 case 清单；当前 repo 里默认选择几十个典型样例，作为批量评估的 starter pack。

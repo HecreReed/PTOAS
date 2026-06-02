@@ -171,3 +171,23 @@
 - `Touch-Point028-030` 只纳入了真实日志样本
 - `Touch-Point021-022` 因缺 baseline 记 `未实测`
 ```
+
+## 10. 结构化 JSON 对齐
+
+如果结果要喂给 agent 侧的结构化评估链路，固定按下面口径输出：
+
+- 顶层字段固定为 `14` 个
+- `summary` 固定 `9` 个子字段
+- `dimension_tables` 固定 `7` 个维度：
+  - `discoverability`
+  - `consistency`
+  - `accuracy`
+  - `completeness`
+  - `learnability`
+  - `practicability`
+  - `debuggability`
+- `test_results.pass_rate` 必须由 `passed_count / total_count` 自动回算
+- `documentation_retrieval.effectiveness_rate` 必须由 `effective_searches / total_searches` 自动回算
+- 取值越界时先 clamp，再校验
+
+具体模板与校验逻辑见 `scripts/generate_evaluation_json.py`。

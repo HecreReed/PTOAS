@@ -20,6 +20,11 @@
 - `未实测/N/A` 不进入总分分母
 - 默认输出 `总分（支撑）` 和 `总分（实测）`
 
+当前附带的结构化输出：
+- `scripts/generate_evaluation_json.py`：生成 `14` 顶层字段的结构化评估 JSON
+- `assets/ptoas_touchpoint_evaluation_template.json`：默认模板输出
+- 模板内预置 `32` 个 PTOAS 代表性 sample 目录，作为 starter pack
+
 当前评估逻辑：
 - 先以 `references/ptoas-usability-scorecard-10pt.csv` 作为分项定义与打分规则的唯一基线
 - 再按 `触点类别`、证据可得性、环境层级选择本次要评的 `Touch-Point`
