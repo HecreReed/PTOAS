@@ -1,154 +1,85 @@
 # PTOAS Touch-Point 选型
 
-本文件把用户提供的总触点池裁剪成适合 `hw-native-sys/PTOAS` 的 repo 级评估子集。
+本文件把 `ptoas-usability-scorecard-10pt.csv` 的 `30` 个 `Touch-Point`，映射成适合 `hw-native-sys/PTOAS` 的 repo 级评估子集。
 
 ## 1. 选型原则
 
-- PTOAS 是**编译器 / 工具链 / 样例仓库**，不是完整 CANN 产品矩阵，也不是官方镜像分发平台。
-- 默认优先评估这些触点：
-  - `资料/文档`
-  - `API/接口` 中与 `CLI / Python 绑定 / PTO IR 手册` 直接相关的子项
-  - `源码 & 示例类`
-  - `工具`
-  - `版本` 中 repo 内可自证的子项
-  - `运行反馈`
-- 对需要**产品级生态、仓外对标、跨硬件矩阵、发布渠道运营**的数据，默认不要硬打 repo 分，记 `N/A` 或只做差距说明。
+- `ptoas-usability-scorecard-10pt.csv` 是分项定义与打分规则的唯一基线。
+- PTOAS 是**编译器 / 工具链 / 样例仓库**，默认优先评估仓库内可自证的文档、接口、样例、工具、版本与运行反馈。
+- 触点是否纳入，要同时满足两件事：
+  - 该 `Touch-Point` 与当前场景直接相关
+  - 当前任务能拿到仓库内证据，或者用户补充了前后对照物 / benchmark / 真实运行结果
+- 没有证据的项记 `未实测`；超出 PTOAS 仓库边界的项记 `N/A`，不要硬打分。
 
-## 2. 默认纳入的 Core Touch-Points
+## 2. 30 个 Touch-Point 的分组
 
-这些触点默认进入 PTOAS repo 级评分。
+### 2.1 资料 / 文档
 
-### 2.1 资料/文档
-
-- `TP001` 检索命中成功率
-- `TP002` 文档跳转次数
-- `TP003` 多入口可达率
-- `TP004` 单次任务文档跳转浏览率
-- `TP005` 知识渐进式发布
-- `TP008` 文档结构风格一致率
-- `TP009` 概念跨文档冲突数
-- `TP011` 文档、版本时效一致性
-- `TP012` 内/外链有效率
-- `TP013` 文档错误点位密度
-- `TP016` 资料交付件完备率
-- `TP017` 文档场景/内容覆盖缺失率
-- `TP018` quick_start / sample 一次跑通率
+- `Touch-Point001` 检索命中成功率
+- `Touch-Point002` 文档跳转次数
+- `Touch-Point003` 多入口可达率
+- `Touch-Point004` 单次任务文档跳转浏览率
+- `Touch-Point005` 知识渐进式发布
+- `Touch-Point006` 文档结构风格一致率
+- `Touch-Point007` 概念跨文档冲突数
+- `Touch-Point008` 文档错误点位密度
+- `Touch-Point009` 文档场景 / 内容覆盖缺失率
+- `Touch-Point010` 版本配套关系准确性
+- `Touch-Point011` 资料交付件完备率
 
 ### 2.2 API / 接口
 
-这里只看 PTOAS repo 自己暴露的接口层：
-- `CLI`: `ptoas`, `ptobc`
-- `Python bindings`
-- `PTO IR` 公开手册/Op 语义
-
-默认纳入：
-- `TP019` 目标接口平均查找检索轮次
-- `TP020` 渐进式复杂披露覆盖度
-- `TP028` 平均入参数 / 参数复杂度
-- `TP032` 接口自解释读懂率
+- `Touch-Point012` 目标接口平均查找检索轮次
+- `Touch-Point013` 渐进式复杂披露覆盖度
 
 ### 2.3 源码 & 示例类
 
-- `TP034` 示例代码无修改一键编译运行成功率
-- `TP035` 示例检索命中成功率
-- `TP036` 样例覆盖度
-- `TP037` 最小功能实现 Demo 覆盖率
-- `TP038` 命令示例覆盖度
-- `TP039` API 调用样例覆盖率
-- `TP042` 样例代码编译语法错误检出率
-- `TP043` 样例使用废弃 / 过期 API 占比
-- `TP044` 业务代码直接复用改编比例
-- `TP045` 编程模型标准对齐率
-- `TP046` 关键链路显性化率
-- `TP047` 认知理解步数
+- `Touch-Point014` 示例代码一键编译运行成功率
+- `Touch-Point015` quick_start / sample 一次跑通率
+- `Touch-Point016` 样例覆盖度
+- `Touch-Point017` 最小功能实现 Demo 覆盖率
+- `Touch-Point018` 命令示例覆盖度
+- `Touch-Point019` API 调用样例覆盖率
+- `Touch-Point020` 样例代码编译错误检出与修复效率
+- `Touch-Point021` 业务代码直接复用改编比例
+- `Touch-Point022` 关键链路显性化率
+- `Touch-Point023` 认知理解步数
 
-### 2.4 工具
+### 2.4 工具 / 版本 / 运行反馈
 
-- `TP049` 首次安装部署一次性成功率
-- `TP051` 标准任务平均操作步骤数
-- `TP052` 功能 / 场景覆盖率
+- `Touch-Point024` 首次安装部署一次性成功率
+- `Touch-Point025` 标准任务平均操作步骤数
+- `Touch-Point026` 功能 / 场景覆盖率
+- `Touch-Point027` 版本检索命中成功率
+- `Touch-Point028` 报错携带环境 / 版本 / 上下文信息完整率
+- `Touch-Point029` 报错自带排障建议比例
+- `Touch-Point030` 无效冗余信息占比
 
-### 2.5 版本
-
-只纳入 repo 内可通过 `README / CI / tag / branch / issue template` 自证的部分：
-- `TP053` 版本检索命中成功率
-- `TP058` 版本配套关系准确性
-
-### 2.6 运行反馈
-
-- `TP062` 报错携带环境 / 版本 / 上下文信息完整率
-- `TP063` 报错自带排障建议比例
-- `TP064` 无效冗余信息占比
-
-## 3. 条件纳入的 Conditional Touch-Points
-
-这些触点只有在用户明确要求，或者当前任务确实提供了对应证据时才纳入。
-
-### 3.1 文档 / API 条件项
-
-- `TP006` FAQ 命中率
-- `TP010` 接口文档模板一致率
-- `TP014` API 文档覆盖率
-- `TP015` 错误码文档化率
-- `TP033` N+2 小版本破坏性接口变更频次
-
-### 3.2 示例 / 性能高级项
-
-- `TP040` E2E 实战案例覆盖率
-- `TP041` 行业深度调优案例覆盖率
-
-### 3.3 版本 / 部署高级项
-
-- `TP054` 版本信息完备率
-- `TP057` 版本号规范准确率
-- `TP059` 版本部署命令数
-- `TP060` 开箱部署成功率
-- `TP061` 版本兼容性率
-
-说明：
-- `TP061` 在 PTOAS 里通常要到 `L4`，并且需要 A3/A5/不同硬件的实测证据。
-- `TP040/TP041` 在 PTOAS 里只有当 `FlashAttention/GQA/FFN` 这类样例被当作准业务案例使用时才适合纳入。
-
-## 4. 默认排除的 Excluded Touch-Points
-
-这些触点默认**不进入** PTOAS repo 级总分，除非用户明确要求做生态级差距研究。
-
-### 4.1 产品生态 / 友商对标类
-
-- `TP021` API 业务场景覆盖率
-- `TP022` 主流 AI 应用框架 API 支持覆盖率
-- `TP023` 主流 AI 框架 API 支持覆盖率
-- `TP024` API 主流生态调用一致性
-- `TP025` 原子 API 与标杆 API 数量对比一致性
-- `TP026` 迁移修改代码（CUDA -> AscendC）
-- `TP027` 原子 API 与标杆 API 行为对比一致性
-
-原因：这些指标要求的是**全产品生态**、**仓外框架集成**、**与 CUDA/CANN 大盘对比**，不是 PTOAS 仓库单独可证的事实。
-
-### 4.2 不适合 PTOAS repo 形态的项
-
-- `TP029` 错误返回一致率
-- `TP030` 最小可用代码行数
-- `TP055` 主流镜像仓支持下载覆盖度
-- `TP056` 典型部署模式支持覆盖度
-
-原因：
-- PTOAS 不是以统一 runtime C API 为主的库产品，`TP029/TP030` 不适合直接套。
-- PTOAS repo 不是镜像/安装包分发平台，`TP055/TP056` 默认不打 repo 分。
-
-## 5. 场景到 Touch-Point 的默认映射
+## 3. 场景到 Touch-Point 的默认映射
 
 | 场景 | 默认 Core Touch-Points | 条件 Touch-Points |
 | --- | --- | --- |
-| `01 算子复现部署` | `TP001-005, TP008-018, TP034-035, TP038, TP042, TP044, TP049, TP051-053, TP058, TP062-064` | `TP006, TP054, TP057, TP059-061` |
-| `02 算子迁移部署` | `TP001-005, TP008-009, TP011, TP013, TP017, TP019-020, TP032, TP035-037, TP039, TP044, TP046-047, TP051-052, TP062-064` | `TP040-041, TP033, TP061` |
-| `04 算子基本功能实现` | `TP001-005, TP008-009, TP011, TP013, TP017-020, TP028, TP032, TP034-039, TP042-047, TP049, TP051-052, TP062-064` | `TP006, TP010, TP014-015, TP033` |
-| `05 特定 shape 性能优化` | `TP001-005, TP017, TP019-020, TP035-036, TP039, TP044, TP046, TP049, TP051-052, TP062-064` | `TP040-041, TP054, TP061` |
-| `06 泛化 shape 性能优化` | `TP001-005, TP017, TP019-020, TP035-036, TP039, TP044, TP046-047, TP049, TP051-052, TP062-064` | `TP040-041, TP054, TP061` |
+| `01 算子复现部署` | `Touch-Point001-011`, `Touch-Point014-016`, `Touch-Point018`, `Touch-Point020`, `Touch-Point024-030` | `Touch-Point017`, `Touch-Point021-023` |
+| `02 算子迁移部署` | `Touch-Point001-013`, `Touch-Point017-021`, `Touch-Point025-030` | `Touch-Point014-016`, `Touch-Point022-024` |
+| `04 算子基本功能实现` | `Touch-Point001-013`, `Touch-Point014-020`, `Touch-Point023-026`, `Touch-Point028-030` | `Touch-Point021-022`, `Touch-Point027` |
+| `05 特定 shape 性能优化` | `Touch-Point001-013`, `Touch-Point018-023`, `Touch-Point025-030` | `Touch-Point014-017`, `Touch-Point024` |
+| `06 泛化 shape 性能优化` | `Touch-Point001-013`, `Touch-Point018-023`, `Touch-Point025-030` | `Touch-Point014-017`, `Touch-Point024` |
+
+## 4. 条件纳入规则
+
+- `Touch-Point017` 需要迁移前后对照物；没有对照物时记 `未实测`。
+- `Touch-Point020` 需要真实编译 / validation 过程；只读文档时记 `未实测`。
+- `Touch-Point021` 需要 PR diff、迁移前后 case，或业务侧复用记录；没有材料时记 `未实测`。
+- `Touch-Point022` 主要用于 `05/06`；如果当前任务没有性能 / 精度关键链路，不强行纳入。
+- `Touch-Point028-030` 需要真实日志；只看 README 时不能给“实测分”。
+
+## 5. 默认排除项
+
+本 Skill 只覆盖 `ptoas-usability-scorecard-10pt.csv` 这 `30` 个 `Touch-Point`。任何不在这张表里的生态级、友商对标级、产品矩阵级指标，默认都不纳入 PTOAS repo 级总分。
 
 ## 6. 使用要求
 
 - 每次正式评估前，先在输出里给出 `触点选择`。
 - 默认只打 `Core Touch-Points`。
 - `Conditional Touch-Points` 只有在证据存在时才纳入，并明确说明为什么本次纳入。
-- `Excluded Touch-Points` 不进入总分；如果用户追问，可以单独给差距分析，但不要混入 repo 级总分。
+- 任何没有证据的项，必须明确标成 `未实测` 或 `N/A`，不能为了凑总分而补猜。

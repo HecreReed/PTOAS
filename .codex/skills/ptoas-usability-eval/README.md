@@ -15,15 +15,17 @@
 - `05 特定 shape 性能优化` 的 PTOAS 支撑子集
 - `06 泛化 shape 性能优化` 的 PTOAS 支撑子集
 
-当前附带的汇总规则：
-- 原始指标保留 `10 分制 / 100 分制`
-- 汇总时统一归一到 `100` 分制
-- 默认输出 `总分（支撑）` 和 `总分（实测）`
+当前附带的评分基线：
+- `references/ptoas-usability-scorecard-10pt.csv` 直接对齐 `PTOAS-易用性评估指标.xlsx`
+- 全表共 `30` 个 `Touch-Point`
+- 单项、场景分、总分统一使用 `10 分制`
 - `未实测/N/A` 不进入总分分母
+- 默认输出 `总分（支撑）` 和 `总分（实测）`
+- 默认权重仍为 `01:40%`，`02/04/05/06:15%`
 
 当前评估逻辑：
-- 先按 `touch-point` 体系选取适用于 PTOAS 的触点
-- 再按 `01/02/04/05/06` 场景评分
+- 先以 `references/ptoas-usability-scorecard-10pt.csv` 作为分项定义与打分规则的唯一基线
+- 再按 `01/02/04/05/06` 场景选择适用的 `Core / Conditional Touch-Points`
 - 默认只把适用的 `Core Touch-Points` 放进 repo 级总分
 
 约定：

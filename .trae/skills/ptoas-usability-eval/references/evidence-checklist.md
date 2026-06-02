@@ -4,23 +4,23 @@
 
 | 路径 | 主要用途 | 对应场景 | 层级 | 主要触点 |
 | --- | --- | --- | --- | --- |
-| `README.md` | 官方构建、环境变量、CLI、Python 绑定、sample 运行、compile-only/上板验证主入口 | `01`, `02`, `04`, `05`, `06` | `L1-L4` | `TP001-005, TP016-020, TP038, TP049, TP053, TP058` |
-| `docs/no_npu_compile_only_guide_zh.md` | 无卡 compile-only 流程、批量验证流程、`pto-isa`/CANN 依赖说明 | `01`, `02`, `04`, `05`, `06` | `L1`, `L3` | `TP005, TP017-018, TP049, TP051-052, TP058-060, TP062-064` |
-| `docs/PTO_IR_manual.md` | IR 层级、tile/view/valid-shape、layout、dynamic shape、Level-2/3 语义 | `02`, `04`, `05`, `06` | `L1-L4` | `TP019-020, TP028, TP032, TP039, TP045-047` |
-| `test/samples/runop.sh` | 批量样例生成、`ptoas`/`ptobc` 运行、A3/A5 默认参数策略 | `01`, `02`, `04`, `05`, `06` | `L1-L4` | `TP018, TP034-039, TP049, TP051-052, TP062-064` |
-| `test/npu_validation/scripts/generate_testcase.py` | 从 `*-pto.cpp` 生成验证工程，观察 golden/compare/兼容层处理 | `01`, `02`, `04`, `05`, `06` | `L1`, `L3`, `L4` | `TP037-039, TP045-047, TP049, TP052` |
-| `test/npu_validation/scripts/run_remote_npu_validation.sh` | compile-only / sim / npu 运行链路、日志格式、设备与 `pto-isa` 检查 | `01`, `02`, `04`, `05`, `06` | `L1`, `L3`, `L4` | `TP049, TP051-052, TP058-060, TP062-064` |
-| `test/samples/PyPTOIRParser/README.md` | 来自 pypto `ir_parser` 的 vendored `.pto` 快照说明 | `02` | `L1` | `TP035-037, TP039, TP044, TP046-047` |
-| `test/samples/MatMul/` | README 直接引用的基准样例，适合作为 `01` 默认复现模板 | `01`, `04`, `05` | `L1-L4` | `TP018, TP034-039, TP042-047` |
-| `test/samples/FlashAttention/` | 特定 shape 性能样例 | `05` | `L1-L4` | `TP035-041, TP044, TP046` |
-| `test/samples/GQA/` | 特定 shape / attention 相关样例 | `05` | `L1-L4` | `TP035-041, TP044, TP046` |
-| `test/samples/FFN/` | 特定 shape / 算子组合样例 | `05` | `L1-L4` | `TP035-041, TP044, TP046` |
-| `test/samples/SetValidShape/` | dynamic/valid-shape 相关样例 | `06` | `L1-L4` | `TP035-039, TP044, TP046-047` |
-| `test/samples/LayoutInference/` | layout 推断相关样例 | `06` | `L1-L4` | `TP019-020, TP035-039, TP046-047` |
-| `test/samples/Partition5D/` | 多维 partition / shape 泛化相关样例 | `02`, `06` | `L1-L4` | `TP035-039, TP044, TP046-047, TP061` |
-| `test/samples/planmemory/` | alias/planmemory/shape 相关样例 | `06` | `L1-L4` | `TP035-039, TP044, TP046-047` |
-| `.github/workflows/ci.yml` | CI 中的 LLVM/PTOAS 构建、lit、sample test、remote validation 参考配置 | `01`, `02`, `04`, `05`, `06` | `L1`, `L3`, `L4` | `TP003, TP011, TP049, TP052-053, TP058, TP060-064` |
-| `.github/ISSUE_TEMPLATE/performance_issue.yml` | 性能问题受理模板，可用来评估性能数据/复现要求的完备性 | `05`, `06` | `L1` | `TP005, TP017, TP040-041, TP062-063` |
+| `README.md` | 官方构建、环境变量、CLI、Python 绑定、sample 运行、compile-only/上板验证主入口 | `01`, `02`, `04`, `05`, `06` | `L1-L4` | `Touch-Point001-005`, `Touch-Point008-011`, `Touch-Point014-015`, `Touch-Point018`, `Touch-Point024-027` |
+| `docs/no_npu_compile_only_guide_zh.md` | 无卡 compile-only 流程、批量验证流程、`pto-isa`/CANN 依赖说明 | `01`, `02`, `04`, `05`, `06` | `L1`, `L3` | `Touch-Point005`, `Touch-Point008-010`, `Touch-Point018`, `Touch-Point024-026`, `Touch-Point028-030` |
+| `docs/PTO_IR_manual.md` | IR 层级、tile/view/valid-shape、layout、dynamic shape、Level-2/3 语义 | `02`, `04`, `05`, `06` | `L1-L4` | `Touch-Point007`, `Touch-Point012-013`, `Touch-Point017`, `Touch-Point019`, `Touch-Point021-023` |
+| `test/samples/runop.sh` | 批量样例生成、`ptoas`/`ptobc` 运行、A3/A5 默认参数策略 | `01`, `02`, `04`, `05`, `06` | `L1-L4` | `Touch-Point014-020`, `Touch-Point023`, `Touch-Point025-026`, `Touch-Point028-030` |
+| `test/npu_validation/scripts/generate_testcase.py` | 从 `*-pto.cpp` 生成验证工程，观察 golden/compare/兼容层处理 | `01`, `02`, `04`, `05`, `06` | `L1`, `L3`, `L4` | `Touch-Point016`, `Touch-Point018-020`, `Touch-Point022-023`, `Touch-Point026`, `Touch-Point028-030` |
+| `test/npu_validation/scripts/run_remote_npu_validation.sh` | compile-only / sim / npu 运行链路、日志格式、设备与 `pto-isa` 检查 | `01`, `02`, `04`, `05`, `06` | `L1`, `L3`, `L4` | `Touch-Point024-030` |
+| `test/samples/PyPTOIRParser/README.md` | 来自 pypto `ir_parser` 的 vendored `.pto` 快照说明 | `02` | `L1` | `Touch-Point001`, `Touch-Point003`, `Touch-Point012-013`, `Touch-Point017`, `Touch-Point019`, `Touch-Point021` |
+| `test/samples/MatMul/` | README 直接引用的基准样例，适合作为 `01` 默认复现模板 | `01`, `04`, `05` | `L1-L4` | `Touch-Point014-016`, `Touch-Point018-021`, `Touch-Point023` |
+| `test/samples/FlashAttention/` | 特定 shape 性能样例 | `05` | `L1-L4` | `Touch-Point019`, `Touch-Point021-023`, `Touch-Point026`, `Touch-Point028-030` |
+| `test/samples/GQA/` | 特定 shape / attention 相关样例 | `05` | `L1-L4` | `Touch-Point019`, `Touch-Point021-023`, `Touch-Point026`, `Touch-Point028-030` |
+| `test/samples/FFN/` | 特定 shape / 算子组合样例 | `05` | `L1-L4` | `Touch-Point019`, `Touch-Point021-023`, `Touch-Point026`, `Touch-Point028-030` |
+| `test/samples/SetValidShape/` | dynamic/valid-shape 相关样例 | `06` | `L1-L4` | `Touch-Point019`, `Touch-Point021-023`, `Touch-Point026`, `Touch-Point028-030` |
+| `test/samples/LayoutInference/` | layout 推断相关样例 | `06` | `L1-L4` | `Touch-Point012-013`, `Touch-Point019`, `Touch-Point021-023`, `Touch-Point026`, `Touch-Point028-030` |
+| `test/samples/Partition5D/` | 多维 partition / shape 泛化相关样例 | `02`, `06` | `L1-L4` | `Touch-Point017`, `Touch-Point019`, `Touch-Point021-023`, `Touch-Point026`, `Touch-Point028-030` |
+| `test/samples/planmemory/` | alias/planmemory/shape 相关样例 | `06` | `L1-L4` | `Touch-Point019`, `Touch-Point021-023`, `Touch-Point026`, `Touch-Point028-030` |
+| `.github/workflows/ci.yml` | CI 中的 LLVM/PTOAS 构建、lit、sample test、remote validation 参考配置 | `01`, `02`, `04`, `05`, `06` | `L1`, `L3`, `L4` | `Touch-Point003`, `Touch-Point008-010`, `Touch-Point024-027`, `Touch-Point028-030` |
+| `.github/ISSUE_TEMPLATE/performance_issue.yml` | 性能问题受理模板，可用来评估性能数据/复现要求的完备性 | `05`, `06` | `L1` | `Touch-Point003`, `Touch-Point022`, `Touch-Point026`, `Touch-Point029` |
 
 说明：
 - 不要把当前分支不存在的样例 README 当成固定证据源。

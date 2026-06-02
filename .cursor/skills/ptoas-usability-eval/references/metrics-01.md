@@ -1,17 +1,21 @@
-# `01 算子复现部署` 指标
+# `01 算子复现部署` 指标子集
+
+`01` 是 PTOAS 的主评估场景。分项定义、量化指标、打分规则统一来自 `ptoas-usability-scorecard-10pt.csv`；本文件只负责说明在 `01` 里默认选哪些 `Touch-Point`。
 
 ## 本场景默认选用触点
 
-- `资料/文档`: `TP001-005, TP008-018`
-- `源码 & 示例类`: `TP034-035, TP038, TP042, TP044`
-- `工具`: `TP049, TP051-052`
-- `版本`: `TP053, TP058`
-- `运行反馈`: `TP062-064`
-- `Conditional`: `TP006, TP054, TP057, TP059-061`
+### Core Touch-Points
 
-默认把 PTOAS 看作“从样例或 `.pto` 输入出发，完成构建、编译、compile-only 或上板验证”的工具链仓库。
+- `资料/文档`：`Touch-Point001-011`
+- `源码 & 示例类`：`Touch-Point014-016`, `Touch-Point018`, `Touch-Point020`
+- `工具`：`Touch-Point024-026`
+- `版本`：`Touch-Point027`
+- `运行反馈`：`Touch-Point028-030`
 
-说明：保留用户原始口径，`10 分制` 与 `100 分制` 混用，不强行归一。
+### Conditional Touch-Points
+
+- `Touch-Point017`：只有用户给了“复现前后对照样例 / 迁移目标”时才纳入
+- `Touch-Point021-023`：只有当前任务需要衡量复用比例、关键链路显性化或认知理解步数时才纳入
 
 ## 先声明层级
 
@@ -42,78 +46,27 @@ python3 test/npu_validation/scripts/generate_testcase.py \
   --soc-version Ascend910
 ```
 
-## 易学习
+## 重点看什么
 
-### 文档获取
+- `Touch-Point001-005`：能不能快速找到 README、sample、compile-only、上板验证入口
+- `Touch-Point008-011`：文档是否准确、版本关系是否清楚、交付件是否完整
+- `Touch-Point014-016`：样例能否直接跑，sample 链路是否完整
+- `Touch-Point018`：`ptoas` / `ptobc` / validation 命令是否给出了足够示例
+- `Touch-Point020`：sample 或 validation 编译报错后，修复轮次是否可控
+- `Touch-Point024-027`：从 `git clone` 到 `ptoas --version` 的安装与版本定位是否顺畅
+- `Touch-Point028-030`：一旦失败，日志有没有足够上下文与排障建议
 
-| 指标 | 在 PTOAS 中怎么测 | 主要证据 | 可评分层级 | 打分规则 |
-| --- | --- | --- | --- | --- |
-| 检索命中成功率 | 统计找到“构建 + sample 运行 + compile-only/上板验证”入口所需检索轮次 | `README.md`, `docs/no_npu_compile_only_guide_zh.md` | `L1-L4` | 1 次 `10`；2 次 `8`；3 次 `6`；4-5 次 `4`；>5 次 `2` |
-| 文档检索耗时 | 从开始找文档到定位到正确路径的时间 | 同上 | `L1-L4` | `2 分钟=10`；之后每增加 `1` 分钟扣 `1` 分 |
-| 文档获取成功率 | 目标文档是否都能在仓库内找到 | 同上 | `L1-L4` | `100%=10`，按比例计算 |
+## 推荐证据
 
-### 文档学习
-
-| 指标 | 在 PTOAS 中怎么测 | 主要证据 | 可评分层级 | 打分规则 |
-| --- | --- | --- | --- | --- |
-| 文档错误点位密度 | 按文档执行时，检查命令、路径、版本、链接、说明是否错误 | `README.md`, `docs/no_npu_compile_only_guide_zh.md`, `.github/workflows/ci.yml` | `L1-L4` | 零错误 `100`；少量小错 `80`；一般错误 `60`；明显错误 `40`；严重不可用 `20` |
-| 文档跳转次数 | 从首个命中文档到凑齐完整执行路径，跨文档跳转的次数 | `README.md -> docs/... -> test/samples/...` | `L1-L4` | 1 次 `100`；2 次 `80`；3 次 `60`；4-5 次 `40`；>5 次 `20` |
-| 内容覆盖缺失率 | 是否清楚区分本地运行、Linux compile-only、带卡上板等层级前置条件 | `README.md`, `docs/...`, `.github/workflows/ci.yml` | `L1-L4` | 无缺失 `100`；`<=5%` `80`；`5%-15%` `60`；`15%-30%` `40`；`>30%` `20` |
-| 文档学习耗时 | 从开始读到能给出执行方案的时间 | 同上 | `L1-L4` | `5 分钟=10`；之后每增加 `1` 分钟扣 `1` 分 |
-| 通过文档学习检索成功率 | 需要通过文档解决的问题里，有多少真正被文档回答 | 同上 | `L1-L4` | `100%=10`，按比例计算 |
-
-## 易部署
-
-### 环境下载
-
-| 指标 | 在 PTOAS 中怎么测 | 主要证据 | 可评分层级 | 打分规则 |
-| --- | --- | --- | --- | --- |
-| 环境获取场景覆盖率 | 看仓库是否说明源码构建、无卡 compile-only、上板验证所需环境 | `README.md`, `docs/no_npu_compile_only_guide_zh.md` | `L1-L4` | `100%=10`；`80%-99%=8`；`60%-79%=6`；`40%-59%=4`；`<40%=2` |
-| 环境下载耗时 | 真实下载 LLVM/CANN/Python 依赖/`pto-isa` 的时间 | 真实执行记录 | `L3-L4` | `<=5 分钟=10`；`5-7=8`；`7-9=6`；`9-11=4`；`>11=2` |
-| 环境下载成功率 | 下载步骤是否一次完成 | 真实执行记录 | `L3-L4` | `100%=10`，按比例计算 |
-
-说明：如果当前任务没有真的在 Linux/CANN 环境里下载依赖，后两项写 `未实测`。
-
-### 环境安装
-
-| 指标 | 在 PTOAS 中怎么测 | 主要证据 | 可评分层级 | 打分规则 |
-| --- | --- | --- | --- | --- |
-| 软硬件配套兼容率 | 检查仓库是否明确 LLVM 版本、Python 包版本、CANN / `pto-isa` 依赖关系 | `README.md`, `docs/no_npu_compile_only_guide_zh.md`, `ci.yml` | `L1-L4` | `100%=10`；`80%-99%=8`；`60%-79%=6`；`40%-59%=4`；`<40%=2` |
-| 部署时长 | 从开始执行安装到可运行 `ptoas`/Python 绑定的时间 | 真实执行记录 | `L2-L4` | `<=5 分钟=10`；`5-7=8`；`7-9=6`；`9-11=4`；`>11=2` |
-| 操作步骤数 | 完成安装所需命令/步骤数量 | `README.md` 构建步骤 | `L1-L4` | `<=8 步=10`；`9-10=8`；`11-12=6`；`13-14=4`；`>14=2` |
-| 环境安装成功率 | 是否能完成 LLVM + PTOAS 构建与安装 | 真实执行记录 | `L2-L4` | `100%=10`，按比例计算 |
-
-### 环境校验
-
-| 指标 | 在 PTOAS 中怎么测 | 主要证据 | 可评分层级 | 打分规则 |
-| --- | --- | --- | --- | --- |
-| 环境安装后校验成功率 | 是否有明确校验动作，例如 `ptoas --version`、Python import、sample compile | `README.md`, `ci.yml` | `L2-L4` | `100%=10`，按比例计算 |
-
-推荐最小校验命令：
-
-```bash
-./build/tools/ptoas/ptoas --version
-python3 -c "from mlir.dialects import pto; print('ok')"
-```
-
-## 易开发、易演进
-
-### 获取示例代码
-
-| 指标 | 在 PTOAS 中怎么测 | 主要证据 | 可评分层级 | 打分规则 |
-| --- | --- | --- | --- | --- |
-| 检索命中成功率 | 统计定位到默认样例目录所需轮次 | `test/samples/MatMul/`, `test/samples/Addc/`, `README.md` | `L1-L4` | 1 次 `10`；2 次 `8`；3 次 `6`；4-5 次 `4`；>5 次 `2` |
-
-### 运行示例代码
-
-| 指标 | 在 PTOAS 中怎么测 | 主要证据 | 可评分层级 | 打分规则 |
-| --- | --- | --- | --- | --- |
-| 示例代码运行耗时 | 从运行 sample 到拿到 `.pto` / `.cpp` / compile-only 结果的时间 | `README.md`, `test/samples/MatMul/` | `L2-L4` | `<=2 分钟=10`；`2-4=8`；`4-6=6`；`6-8=4`；`>8=2` |
-| 示例代码运行成功率 | `py -> .pto -> .cpp` 或 compile-only / validation 是否成功 | 同上 | `L2-L4` | `100%=10`，按比例计算 |
+- `README.md`
+- `docs/no_npu_compile_only_guide_zh.md`
+- `test/samples/MatMul/`
+- `test/samples/runop.sh`
+- `test/npu_validation/scripts/generate_testcase.py`
+- `test/npu_validation/scripts/run_remote_npu_validation.sh`
+- `.github/workflows/ci.yml`
 
 ## 何时记 `未实测` / `N/A`
 
-- `未实测`：当前任务没有进入对应环境层级，例如在本地 Mac 上没有 Linux/CANN/bisheng，却要评价 compile-only。
-- `N/A`：该项超出 PTOAS 能力边界，或本次任务明确不纳入该项。
-
-不要把二者混用。
+- `未实测`：当前任务没有进入对应环境层级，例如本地没有 Linux/CANN/bisheng，却要评价 compile-only 或上板
+- `N/A`：该项超出 PTOAS 仓库边界，或用户本次明确不纳入

@@ -1,6 +1,6 @@
 ---
 name: ptoas-usability-eval
-description: Evaluate PTOAS repository usability across scene 01 as the primary template plus the PTOAS-supported subsets of scenes 02, 04, 05, and 06. Always classify the evaluation by environment layer first, use only repo-native docs/scripts/samples/CI as primary evidence, keep the user's mixed 10-point and 100-point scoring rules, compute normalized support and measured totals, and mark unsupported or untested dimensions as 未实测 or N/A.
+description: Evaluate PTOAS repository usability across scene 01 as the primary template plus the PTOAS-supported subsets of scenes 02, 04, 05, and 06. Always classify the evaluation by environment layer first, use only repo-native docs/scripts/samples/CI as primary evidence, use the 30-touch-point 10-point scorecard as the source of truth, and mark unsupported or untested dimensions as 未实测 or N/A.
 ---
 
 # PTOAS Usability Eval
@@ -54,14 +54,14 @@ description: Evaluate PTOAS repository usability across scene 01 as the primary 
 
 1. 先判断用户要的是 `01`、`02`、`04`、`05`、`06` 中哪些场景；未说明时默认 `01`。
 2. 再判断本次覆盖层级：`L1/L2/L3/L4`。输出中必须显式写出来。
-3. 先读 [references/touchpoint-selection.md](references/touchpoint-selection.md)，按场景选定本次的 `Core / Conditional / Excluded` 触点。
+3. 先读 [references/touchpoint-selection.md](references/touchpoint-selection.md)，按场景选定本次的 `Core / Conditional` 触点。
 4. 从仓库内收集证据，记录每次检索轮次、文档跳转次数、执行命令、耗时、成功/失败结果。
 5. `01` 场景读 [references/metrics-01.md](references/metrics-01.md)。
 6. `02` 场景读 [references/metrics-02.md](references/metrics-02.md)。
 7. `04` 场景读 [references/metrics-04.md](references/metrics-04.md)。
 8. `05` 场景读 [references/metrics-05.md](references/metrics-05.md)。
 9. `06` 场景读 [references/metrics-06.md](references/metrics-06.md)。
-10. 需要汇总总分时，读 [references/scoring.md](references/scoring.md)。
+10. 先读 [references/ptoas-usability-scorecard-10pt.csv](references/ptoas-usability-scorecard-10pt.csv) 取得分项定义、量化指标、打分规则与 VOD 备注；需要汇总总分时，再读 [references/scoring.md](references/scoring.md)。
 11. 对每个指标都输出：原始观测值、评分、证据路径、说明。没有实测的数据不要猜，记为 `未实测` 或 `N/A`。
 12. 明确区分：
     - PTOAS 仓库已提供的能力
@@ -71,8 +71,8 @@ description: Evaluate PTOAS repository usability across scene 01 as the primary 
 
 ## 计量规则
 
-- 保留用户原始口径，不强行覆盖各指标的原始分制。
-- 但做总分汇总时，必须按 [references/scoring.md](references/scoring.md) 做归一化。
+- 单项、场景分、总分统一使用 `10 分制`。
+- 分项字段定义、适用层级、量化指标、打分规则、VOD 备注，以 [references/ptoas-usability-scorecard-10pt.csv](references/ptoas-usability-scorecard-10pt.csv) 为准。
 - `检索轮次`：每次新的定向搜索或定位尝试算 1 轮。
 - `文档跳转次数`：命中首个目标文档后，每跨一个文档/README/脚本入口算 1 次。
 - `耗时`：尽量记录真实墙钟时间；拿不到就写 `未实测`，不要臆测。
