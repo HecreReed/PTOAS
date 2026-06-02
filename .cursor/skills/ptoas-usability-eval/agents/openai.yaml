@@ -1,4 +1,4 @@
 interface:
   display_name: "PTOAS Usability Eval"
-  short_description: "评估 PTOAS 在 01/02/04/05/06 场景下的易用性"
-  default_prompt: "Use $ptoas-usability-eval to evaluate this PTOAS repo for scene 01 operator reproduction/deployment and the PTOAS-supported subsets of scenes 02, 04, 05, and 06."
+  short_description: "按 30 个触点评估 PTOAS 易用性"
+  default_prompt: "Use $ptoas-usability-eval to evaluate this PTOAS repo by the 30 touch points from the PTOAS usability scorecard, classify the result by environment layer first, and output touchpoint-first findings."

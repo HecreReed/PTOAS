@@ -1,17 +1,51 @@
-# PTOAS 评估范围映射
+# PTOAS 评估边界
 
-## 六大场景映射
+本文件定义 PTOAS repo 级易用性评估的边界，避免把仓内支撑能力和仓外业务能力混在一起。
 
-| 场景 | 结论 | 处理方式 | PTOAS 中可量化的部分 | 默认不直接量化的部分 |
-| --- | --- | --- | --- | --- |
-| `01 算子复现部署` | 主评估场景 | 正常评分 | 构建、CLI、Python 绑定、sample、compile-only、board-validation | 无 |
-| `02 算子迁移部署` | 有限纳入 | 评“迁移支撑能力” | PTO IR 入口、样例/PyPTO 快照、compile-only/validation、迁移前后对照样例 | 业务框架集成、完整模型接线、仓外工程改造 |
-| `03 builtin 算子定制修改` | 默认不纳入 | 标 `N/A`，必要时只做差距说明 | 无固定模板 | builtin/业务算子定制主流程 |
-| `04 算子基本功能实现` | 次级支撑 | 只评 PTOAS 直接支撑的工程子链路 | 文档、样例、编译配置、工程编译、运行反馈、验证 | 完整需求分析、完整方案设计、通用算子研发全过程 |
-| `05 特定 shape 性能优化` | 条件纳入 | 评“特定 shape 性能优化支撑能力” | 性能文档、固定 shape 样例、性能数据获取入口、编译验证、精度/性能验证 | 没有 baseline 时的性能提升幅度、仓外友商对标 |
-| `06 泛化 shape 性能优化` | 条件纳入 | 评“多 shape / dynamic shape 支撑能力” | `valid_shape`/dynamic shape 文档、泛化样例、多 shape 验证链路 | 没有多 shape 基线矩阵时的平均/最大收益结论 |
+## 1. Repo 级可自证范围
 
-## 评估层级
+PTOAS 默认只评这些仓内可直接取证的内容：
+
+- 文档与 README
+- IR / API / CLI 入口与说明
+- sample、golden、validation、脚本
+- compile-only / remote validation 工作流
+- CI 配置、版本引用、报错日志格式
+
+这些内容可直接支撑：
+
+- `Touch-Point001-013`
+- `Touch-Point018-020`
+- `Touch-Point023`
+- `Touch-Point025-030`
+
+## 2. 需要额外证据的范围
+
+以下触点虽然可以评，但不是只读仓库就能稳定量化：
+
+- `Touch-Point014-015`：需要真实运行样例
+- `Touch-Point017`：需要功能集合或前后对照物
+- `Touch-Point021`：需要复用前后材料、PR diff 或迁移对照
+- `Touch-Point022`：需要关键链路入口、脚本或流程证据
+- `Touch-Point024`：需要真实安装部署记录
+- `Touch-Point028-030`：需要真实错误日志样本
+
+没有这些证据时，统一记 `未实测`。
+
+## 3. 明确超出边界的部分
+
+下面这些默认不作为 PTOAS repo 级量化对象：
+
+- 完整业务工程接线与联调
+- builtin 算子定制全流程
+- 仓外框架适配质量
+- 没有 baseline 时的真实性能提升幅度
+- 友商对标结论
+- 与 PTOAS 仓库无直接证据链的生态级能力
+
+这类项默认记 `N/A`，除非用户额外提供材料并明确要求纳入。
+
+## 4. 评估层级
 
 任何量化前都先声明层级：
 
@@ -20,110 +54,28 @@
 - `L3 Linux compile-only 层`：Linux + CANN/bisheng + `PTO_ISA_ROOT`，不要求带卡。
 - `L4 NPU 上板层`：带卡 Linux、驱动、ACL、设备节点和用户权限齐全。
 
-评分规则：
+规则：
+
 - 某层未覆盖，只能标 `未实测`。
-- 不得因为本机不是 Linux / 没有 `bisheng` / 没有 NPU 就对 PTOAS 本身扣分。
+- 不得因为当前机器不是 Linux、没有 `bisheng`、没有 NPU 就给 PTOAS 本身扣分。
 - 文档是否清楚说明这些前置条件，才属于可评分项。
 
-## `02` 的适用边界
-
-PTOAS 可以支撑 `02`，但只能评“迁移支撑能力”，不能假装它已经覆盖完整业务迁移平台。
-
-可以评分的证据：
-- `docs/PTO_IR_manual.md`：IR 层级、tile/view/valid-shape 语义、Level-2/Level-3 入口
-- `test/samples/PyPTOIRParser/README.md`：来自 pypto `ir_parser` 的 vendored `.pto` 快照
-- `test/samples/*`：迁移后 PTO case、样例目录、`golden.py`/`compare.py`
-- `docs/no_npu_compile_only_guide_zh.md`、`runop.sh`、remote validation 脚本：迁移后 compile/validate 链路
-
-`02` 里这些指标只有在“有前后对照”时才能量化：
-- `tiling 迁移完备度`
-- `kernel 迁移完备度`
-- `tiling/kernel 代码修改率`
-- `功能失败率`
-- `性能劣化率`
-
-如果当前任务没有“迁移前/迁移后”对照 case：
-- 记 `未实测`，不要臆造百分比。
-- 若该项本质依赖仓外业务工程，且用户没有给材料，可记 `N/A` 并说明原因。
-
-## `04` 的适用边界
-
-`04` 只纳入这些与 PTOAS 仓库直接对应的子项：
-- 文档获取
-- 文档学习
-- 获取示例代码
-- 学习/理解示例代码
-- 运行示例代码
-- 编译配置
-- 算子工程编译
-- 功能调试
-- 精度调试中 repo 已有 compare/golden/validation 的部分
-
-默认排除：
-- 算子设计-需求分析
-- 算子设计-方案实现
-- 通用算子代码开发全过程
-- 脱离 PTOAS 仓库的业务工程联调
-
-## `05` 的适用边界
-
-PTOAS 可以支撑 `05`，但重点是“特定 shape 性能优化的仓内支撑能力”。
-
-可直接使用的仓内证据：
-- `docs/PTO_IR_manual.md`：Level-2/Level-3、layout、partition、reshape、valid-shape 等语义
-- `.github/ISSUE_TEMPLATE/performance_issue.yml`：性能问题收集模板
-- `test/samples/FlashAttention/`, `test/samples/GQA/`, `test/samples/FFN/`, `test/samples/MatMul/`：固定 shape 样例
-- `runop.sh`、compile-only 文档、remote validation 脚本：生成、编译、上板验证链路
-
-`05` 里这些项通常至少要到 `L4` 才能量化：
-- 性能数据采集耗时
-- 性能报告完备度
-- 优化迭代次数/耗时/成功率
-- 性能提升幅度
-- 精度一致性验证
-
-如果只有文档和样例，没有真实 benchmark/baseline：
-- 文档和入口可评分
-- 真实性能数字、友商对标、提升幅度一律 `未实测` 或 `N/A`
-
-## `06` 的适用边界
-
-PTOAS 可以支撑 `06`，但重点是“多 shape / dynamic shape / valid-shape 的泛化支撑能力”。
-
-可直接使用的仓内证据：
-- `docs/PTO_IR_manual.md`
-- `test/samples/SetValidShape/`
-- `test/samples/LayoutInference/`
-- `test/samples/Partition5D/`
-- `test/samples/planmemory/`
-- 其他带动态 shape / layout / partition / subview / reshape 的样例
-
-`06` 里这些项没有多 shape 基线矩阵时不能硬算：
-- 平均优化迭代次数
-- 平均优化耗时
-- 平均性能提升幅度
-- 最大性能提升幅度
-- 多 shape 精度保持率
-
-如果当前任务只看到 IR 设计与样例，没有多 shape 实测：
-- 文档、样例覆盖度可评分
-- 多 shape 性能/精度结果记 `未实测`
-
-## `未实测` 与 `N/A` 的使用规则
+## 5. `未实测` 与 `N/A` 的使用规则
 
 记 `未实测`：
-- 仓库里有入口，但当前会话没有进入对应层级
-- 缺 Linux/CANN/NPU/baseline，导致只能停在文档或最小运行层
-- 缺迁移前后对照物，无法给出完成度/收益率
+
+- 仓库里有入口，但当前会话没进入对应层级
+- 缺 Linux / CANN / NPU / baseline，导致只能停在静态审阅层
+- 缺真实日志样本、安装记录、对照物，导致无法量化高条件触点
 
 记 `N/A`：
-- 指标本身超出 PTOAS 仓库边界
-- 用户要求的是仓外业务工程能力，当前仓库没有独立证据链
-- 友商对标、完整业务迁移、完整 builtin 定制等不是本 Skill 的默认量化对象
 
-## 使用原则
+- 指标本身超出 PTOAS repo 边界
+- 用户关注的是仓外业务工程能力，而当前仓库没有独立证据链
+- 需要生态级或产品级材料才能成立的结论
 
-- 如果用户没有特别说明，直接按 `01` 做主评估。
-- 如果用户要求顺带看 `02/04/05/06`，按本文件的边界补相应子集。
-- 可以做“支持度评分”，但不要把仓内文档/样例的存在，夸大成业务侧已经打通。
+## 6. 使用原则
+
+- 默认先做 repo 级触点评估，不再先拆旧场景编号。
 - 能量化就量化；不能量化就明确说明为什么是 `未实测` 或 `N/A`。
+- 可以给“支撑度”评分，但不能把仓内文档、样例、脚本的存在夸大成业务侧已经打通。

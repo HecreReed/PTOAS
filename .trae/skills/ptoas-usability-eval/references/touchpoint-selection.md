@@ -1,15 +1,13 @@
 # PTOAS Touch-Point 选型
 
-本文件把 `ptoas-usability-scorecard-10pt.csv` 的 `30` 个 `Touch-Point`，映射成适合 `hw-native-sys/PTOAS` 的 repo 级评估子集。
+本文件定义 `30` 个 `Touch-Point` 在 PTOAS repo 里的默认选法。原则是 **先按触点类别与证据可得性选型，再按层级决定哪些项能实测**，不再按旧场景编号拆分。
 
 ## 1. 选型原则
 
 - `ptoas-usability-scorecard-10pt.csv` 是分项定义与打分规则的唯一基线。
-- PTOAS 是**编译器 / 工具链 / 样例仓库**，默认优先评估仓库内可自证的文档、接口、样例、工具、版本与运行反馈。
-- 触点是否纳入，要同时满足两件事：
-  - 该 `Touch-Point` 与当前场景直接相关
-  - 当前任务能拿到仓库内证据，或者用户补充了前后对照物 / benchmark / 真实运行结果
-- 没有证据的项记 `未实测`；超出 PTOAS 仓库边界的项记 `N/A`，不要硬打分。
+- 默认做 repo 级评估，不按场景切分主流程。
+- 每次评估都要先声明层级，再声明本次纳入哪些触点。
+- 没有证据的项记 `未实测`；超出 PTOAS repo 边界的项记 `N/A`。
 
 ## 2. 30 个 Touch-Point 的分组
 
@@ -55,31 +53,68 @@
 - `Touch-Point029` 报错自带排障建议比例
 - `Touch-Point030` 无效冗余信息占比
 
-## 3. 场景到 Touch-Point 的默认映射
+## 3. 默认选型包
 
-| 场景 | 默认 Core Touch-Points | 条件 Touch-Points |
-| --- | --- | --- |
-| `01 算子复现部署` | `Touch-Point001-011`, `Touch-Point014-016`, `Touch-Point018`, `Touch-Point020`, `Touch-Point024-030` | `Touch-Point017`, `Touch-Point021-023` |
-| `02 算子迁移部署` | `Touch-Point001-013`, `Touch-Point017-021`, `Touch-Point025-030` | `Touch-Point014-016`, `Touch-Point022-024` |
-| `04 算子基本功能实现` | `Touch-Point001-013`, `Touch-Point014-020`, `Touch-Point023-026`, `Touch-Point028-030` | `Touch-Point021-022`, `Touch-Point027` |
-| `05 特定 shape 性能优化` | `Touch-Point001-013`, `Touch-Point018-023`, `Touch-Point025-030` | `Touch-Point014-017`, `Touch-Point024` |
-| `06 泛化 shape 性能优化` | `Touch-Point001-013`, `Touch-Point018-023`, `Touch-Point025-030` | `Touch-Point014-017`, `Touch-Point024` |
+### 3.1 `Full Pack`
 
-## 4. 条件纳入规则
+适用：用户要完整 repo 级总评。
 
-- `Touch-Point017` 需要迁移前后对照物；没有对照物时记 `未实测`。
-- `Touch-Point020` 需要真实编译 / validation 过程；只读文档时记 `未实测`。
-- `Touch-Point021` 需要 PR diff、迁移前后 case，或业务侧复用记录；没有材料时记 `未实测`。
-- `Touch-Point022` 主要用于 `05/06`；如果当前任务没有性能 / 精度关键链路，不强行纳入。
-- `Touch-Point028-030` 需要真实日志；只看 README 时不能给“实测分”。
+- 默认纳入 `Touch-Point001-030`
+- 其中高条件项如果缺证据，保留在清单里但记 `未实测`
+
+### 3.2 `Doc-First Pack`
+
+适用：只做文档和仓内静态证据审阅。
+
+- `Touch-Point001-013`
+- `Touch-Point018-019`
+- `Touch-Point023`
+- `Touch-Point025-027`
+
+默认不实测：
+
+- `Touch-Point014-017`
+- `Touch-Point020-022`
+- `Touch-Point024`
+- `Touch-Point028-030`
+
+### 3.3 `Build/Run Pack`
+
+适用：用户关心 sample、compile-only、validation、日志反馈。
+
+- `Touch-Point014-020`
+- `Touch-Point024-030`
+- 视需要补 `Touch-Point001-005` 与 `Touch-Point010`
+
+### 3.4 `High-Condition Pack`
+
+适用：用户明确要看迁移复用、关键链路、安装成功率、日志质量这类高条件触点。
+
+- `Touch-Point017`
+- `Touch-Point020`
+- `Touch-Point021`
+- `Touch-Point022`
+- `Touch-Point024`
+- `Touch-Point028-030`
+
+前提：必须先说明证据来源，不然直接记 `未实测`。
+
+## 4. 高条件触点的纳入规则
+
+- `Touch-Point017`：需要对照样例、baseline、功能清单或可验证的目标功能集合。
+- `Touch-Point020`：需要真实编译或 validation 过程，不能只看 README。
+- `Touch-Point021`：需要 PR diff、迁移前后 case，或明确的复用前后材料。
+- `Touch-Point022`：需要关键链路入口、脚本或流程证据，常见于 PyPTO、性能、验证链路。
+- `Touch-Point024`：需要真实从零安装部署记录。
+- `Touch-Point028-030`：需要真实错误日志样本，不能只凭“脚本看起来写得不错”打高分。
 
 ## 5. 默认排除项
 
-本 Skill 只覆盖 `ptoas-usability-scorecard-10pt.csv` 这 `30` 个 `Touch-Point`。任何不在这张表里的生态级、友商对标级、产品矩阵级指标，默认都不纳入 PTOAS repo 级总分。
+本 Skill 只覆盖 `ptoas-usability-scorecard-10pt.csv` 这 `30` 个 `Touch-Point`。任何不在这张表里的生态级、产品矩阵级、友商对标级指标，默认都不纳入。
 
 ## 6. 使用要求
 
-- 每次正式评估前，先在输出里给出 `触点选择`。
-- 默认只打 `Core Touch-Points`。
-- `Conditional Touch-Points` 只有在证据存在时才纳入，并明确说明为什么本次纳入。
-- 任何没有证据的项，必须明确标成 `未实测` 或 `N/A`，不能为了凑总分而补猜。
+- 每次正式评估前，先在输出里给出 `评估层级` 和 `触点选择`。
+- 如果用户没指定，就默认用 `Full Pack`。
+- 如果证据明显不足，降级到 `Doc-First Pack` 或 `Build/Run Pack`，不要硬开全量实测。
+- 同一个触点只能按当前层级与当前证据给分，不能拿其他会话经验补分。
