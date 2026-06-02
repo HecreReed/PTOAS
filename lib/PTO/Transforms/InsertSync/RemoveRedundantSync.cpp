@@ -212,8 +212,9 @@ bool RemoveRedundantSync::CheckBranchBetween(
 }
 
 bool RemoveRedundantSync::CheckLoopBetween(LoopInstanceElement *loopElement,
-                                           const SyncOperation *,
+                                           const SyncOperation *setFlag,
                                            unsigned &i) const {
+  (void)setFlag;
   // 对于循环，保守起见暂时不深入检查内部是否覆盖外部。
   // 因为循环可能执行 0 次，如果循环内有同步，但循环不执行，外部依赖就没法满足。
   // 除非通过 Range Analysis 证明循环至少执行一次，否则这里返回 false 是安全的。

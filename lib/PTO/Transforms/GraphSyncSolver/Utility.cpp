@@ -33,7 +33,7 @@ bool Occurrence::sameScope(const Occurrence *occ1, const Occurrence *occ2) {
   return occ1->parentOcc == occ2->parentOcc;
 }
 
-int Occurrence::getDepth(Occurrence *occ) {
+int Occurrence::getDepth(const Occurrence *occ) {
   int ret = 0;
   while (occ != nullptr) {
     occ = occ->parentOcc;
@@ -43,9 +43,9 @@ int Occurrence::getDepth(Occurrence *occ) {
 }
 
 Occurrence *Occurrence::getParentWithOp(const OperationBase *op,
-                                        bool assertExists) const {
+                                        bool assertExists) {
   ASSERT(op != nullptr);
-  Occurrence *occ = const_cast<Occurrence *>(this);
+  Occurrence *occ = this;
   while (occ != nullptr) {
     if (occ->op == op) {
       return occ;
@@ -57,9 +57,9 @@ Occurrence *Occurrence::getParentWithOp(const OperationBase *op,
 }
 
 Occurrence *Occurrence::getParentWithOp(const Operation *op,
-                                        bool assertExists) const {
+                                        bool assertExists) {
   ASSERT(op != nullptr);
-  Occurrence *occ = const_cast<Occurrence *>(this);
+  Occurrence *occ = this;
   while (occ != nullptr) {
     if (occ->op != nullptr && occ->op->op == op) {
       return occ;
@@ -70,8 +70,8 @@ Occurrence *Occurrence::getParentWithOp(const Operation *op,
   return nullptr;
 }
 
-Occurrence *Occurrence::getNthParent(int dist) const {
-  Occurrence *occ = const_cast<Occurrence *>(this);
+Occurrence *Occurrence::getNthParent(int dist) {
+  Occurrence *occ = this;
   while (dist > 0) {
     ASSERT(occ != nullptr);
     occ = occ->parentOcc;
@@ -126,14 +126,19 @@ Occurrence *Occurrence::getUnlikelyParentCondition(Occurrence *occ) {
   return nullptr;
 }
 
-bool Occurrence::isProperAncestor(Occurrence *occ) const {
+bool Occurrence::isProperAncestor(const Occurrence *occ) const {
   ASSERT(occ != nullptr);
-  int depth1 = getDepth(const_cast<Occurrence *>(this));
+  int depth1 = getDepth(this);
   int depth2 = getDepth(occ);
   if (depth1 >= depth2) {
     return false;
   }
-  return occ->getNthParent(depth2 - depth1) == this;
+  const Occurrence *cursor = occ;
+  for (int dist = depth2 - depth1; dist > 0; --dist) {
+    ASSERT(cursor != nullptr);
+    cursor = cursor->parentOcc;
+  }
+  return cursor == this;
 }
 
 llvm::SmallVector<Occurrence *> Occurrence::getAllParents() const {
@@ -173,8 +178,8 @@ int OperationBase::getDepth() const {
   return ret;
 }
 
-OperationBase *OperationBase::getNthParent(int dist) const {
-  OperationBase *op = const_cast<OperationBase *>(this);
+OperationBase *OperationBase::getNthParent(int dist) {
+  OperationBase *op = this;
   while (dist > 0) {
     ASSERT(op != nullptr);
     op = op->parentOp;
@@ -220,14 +225,19 @@ OperationBase *OperationBase::getParentCondition(OperationBase *op) {
   return cur;
 }
 
-bool OperationBase::isProperAncestor(OperationBase *op) const {
+bool OperationBase::isProperAncestor(const OperationBase *op) const {
   ASSERT(op != nullptr);
   int depth1 = this->getDepth();
   int depth2 = op->getDepth();
   if (depth1 >= depth2) {
     return false;
   }
-  return op->getNthParent(depth2 - depth1) == this;
+  const OperationBase *cursor = op;
+  for (int dist = depth2 - depth1; dist > 0; --dist) {
+    ASSERT(cursor != nullptr);
+    cursor = cursor->parentOp;
+  }
+  return cursor == this;
 }
 
 OperationBase *OperationBase::getUnlikelyParentCondition(OperationBase *op) {

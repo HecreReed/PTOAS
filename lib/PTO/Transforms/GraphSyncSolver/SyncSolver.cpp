@@ -143,7 +143,7 @@ bool Solver::checkSkipCrossCorePair(Occurrence *occ1, Occurrence *occ2) {
   return false;
 }
 
-bool Solver::checkSkipParallelLoop(Occurrence *occ1, Occurrence *occ2) {
+bool Solver::checkSkipParallelLoop(Occurrence *occ1, Occurrence *occ2) const {
   if (!isBackwardSync(occ1, occ2)) {
     return false;
   }
@@ -1060,7 +1060,7 @@ void Solver::adjustSetWaitForLoopBoundary(Occurrence *occ1, Occurrence *&setOcc,
 void Solver::adjustSetWaitForBackwardCondition(Occurrence *occ1,
                                                Occurrence *occ2,
                                                Occurrence *&setOcc,
-                                               Occurrence *&waitOcc) {
+                                               Occurrence *&waitOcc) const {
   if (!isBackwardSync(occ1, occ2))
     return;
   if (setOcc->parentOcc &&
@@ -1662,7 +1662,7 @@ bool Solver::insertOuterBackwardConflictPairIfNeeded(
     EventIdSolver &curEventIdSolver, ConflictPair *conflictPair,
     const Occurrence *setOcc, const Occurrence *waitOcc,
     Loop *parentLCALoopOp,
-    Occurrence *parentLCALoopOcc, Occurrence *parentLCALoopBeforePHOcc,
+    const Occurrence *parentLCALoopOcc, Occurrence *parentLCALoopBeforePHOcc,
     Occurrence *parentLCALoopAfterPHOcc, OperationBase *barrierOp,
     CorePipeInfo corePipeSrc, CorePipeInfo corePipeDst,
     ExtraConflictPairs &extraConflictPairs) {
@@ -1744,7 +1744,7 @@ bool Solver::collectBackwardConflictExtras(
 void Solver::recordChosenConflictPair(ConflictPair *conflictPair,
                                       Occurrence *normScopeOcc1,
                                       Occurrence *normScopeOcc2,
-                                      Occurrence *parentLCALoopOcc) {
+                                      const Occurrence *parentLCALoopOcc) {
   bool dontInsert = false;
   if (conflictPair->isInnerBackward && normScopeOcc1 != normScopeOcc2) {
     auto *parCond = OperationBase::getParentCondition(conflictPair->setOp);

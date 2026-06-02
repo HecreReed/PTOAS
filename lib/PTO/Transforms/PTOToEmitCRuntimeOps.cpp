@@ -327,11 +327,10 @@ static std::string buildReinterpretCastTileTypeString(MemRefType resMrTy,
 }
 
 static Value buildReinterpretCastBaseAddr(ConversionPatternRewriter &rewriter,
-                                          Location loc, MLIRContext *ctx,
-                                          Value source, pto::AddressSpace as,
+                                          Location loc, Value source,
+                                          pto::AddressSpace as,
                                           StringRef elemTok) {
   Value rawPtr = source;
-  (void)ctx;
   if (isEmitCTileLikeValue(source))
     rawPtr = materializeTileDataValue(rewriter, loc, source, as, elemTok);
   return castAddressToU64(rewriter, loc, rawPtr);
@@ -407,7 +406,7 @@ struct ReinterpretCastToEmitC : public OpConversionPattern<memref::ReinterpretCa
 
     auto u64Ty = emitc::OpaqueType::get(ctx, "uint64_t");
     Value baseAddr =
-        buildReinterpretCastBaseAddr(rewriter, loc, ctx, source, as, elemTok);
+        buildReinterpretCastBaseAddr(rewriter, loc, source, as, elemTok);
     Value addr = baseAddr;
     if (offsetVal) {
       Value offU64 = offsetVal;

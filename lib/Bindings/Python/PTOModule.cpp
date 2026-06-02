@@ -99,10 +99,8 @@ static MlirType createTileBufTypeValue(const std::vector<int64_t> &shape,
       validShape.data());
 }
 
-static void populatePTODialectSubmodule(pybind11::module *m);
-static void populatePTODialectSubmodule(pybind11::module *m) {
-  (void)m;
-}
+static void populatePTODialectSubmodule(const pybind11::module *m);
+static void populatePTODialectSubmodule(const pybind11::module *m) { (void)m; }
 
 static void bindPTOEnumsPart1(pybind11::module &m) {
     py::enum_<mlir::pto::AddressSpace>(m, "AddressSpace")

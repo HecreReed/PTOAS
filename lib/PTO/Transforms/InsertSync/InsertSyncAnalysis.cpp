@@ -615,7 +615,7 @@ bool InsertSyncAnalysis::isAlreadySync(
 
 void InsertSyncAnalysis::UpdateAlreadySync(const SyncOps &syncVector,
                                            SyncRecordList &syncRecordList,
-                                           const PipelineType nowPipeValue) {
+                                           const PipelineType nowPipeValue) const {
   for (auto *sync : syncVector) {
     for (size_t bufferIdx = 0; bufferIdx < syncRecordList.size(); bufferIdx++) {
       if (bufferIdx == 0 && sync->eventIdNum > 1 &&

@@ -34,6 +34,7 @@
 // PTO Dialect
 //===----------------------------------------------------------------------===//
 
+// NOLINTNEXTLINE(misc-include-cleaner): generated PTO *.inc files require PTODialect.
 #include "PTO/IR/PTODialect.h"
 
 //===----------------------------------------------------------------------===//

@@ -149,7 +149,7 @@ private:
   /// 更新 SyncRecord (当插入新同步后)
   void UpdateAlreadySync(const SyncOps &syncVector,
                          SyncRecordList &syncRecordList,
-                         const PipelineType nowPipeValue);
+                         const PipelineType nowPipeValue) const;
                             
   void UpdateSyncRecordInfo(const CompoundInstanceElement *frontCompound,
                             SyncRecordList &syncRecordList) const;

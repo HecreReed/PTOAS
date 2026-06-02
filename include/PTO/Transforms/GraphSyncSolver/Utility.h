@@ -249,16 +249,16 @@ struct Occurrence {
   static bool sameScope(const Occurrence *occ1, const Occurrence *occ2);
 
   // Return depth (number of ancestors + 1) for the given occurrence.
-  static int getDepth(Occurrence *occ);
+  static int getDepth(const Occurrence *occ);
 
   // Walk up parents to find the first ancestor occurrence associated with 'op'.
   Occurrence *getParentWithOp(const Operation *op,
-                              bool assertExists = true) const;
+                              bool assertExists = true);
   Occurrence *getParentWithOp(const OperationBase *op,
-                              bool assertExists = true) const;
+                              bool assertExists = true);
 
   // Return the ancestor that is `dist` levels above this occurrence.
-  Occurrence *getNthParent(int dist) const;
+  Occurrence *getNthParent(int dist);
 
   // Compute/return the pair of sibling occurrences just below their LCA.
   static std::pair<Occurrence *, Occurrence *> getLCAPair(Occurrence *occ1,
@@ -279,7 +279,7 @@ struct Occurrence {
   static Occurrence *getParentCondition(Occurrence *occ);
 
   // Return true if this occurrence is a strict ancestor of `occ`.
-  bool isProperAncestor(Occurrence *occ) const;
+  bool isProperAncestor(const Occurrence *occ) const;
 
   // Collect and return all occurrence parents (in upward order).
   llvm::SmallVector<Occurrence *> getAllParents() const;

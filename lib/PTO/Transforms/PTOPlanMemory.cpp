@@ -807,13 +807,12 @@ void MemLivenessAnalysis::UpdateOpGenInfo(OpInfo *opInfo,
   }
 }
 
-void MemLivenessAnalysis::UpdateOperandGenInfo(const OpInfo *opInfo,
-                                               Value operand) {
+void MemLivenessAnalysis::UpdateOperandGenInfo(OpInfo *opInfo, Value operand) {
   auto iter_buffer = buffer2status.find(operand);
   if (iter_buffer == buffer2status.end())
     return;
   if (iter_buffer->second == BufferStatus::DEFFINED) {
-    genKillMap[const_cast<OpInfo *>(opInfo)].gen.push_back(operand);
+    genKillMap[opInfo].gen.push_back(operand);
     buffer2status[iter_buffer->first] = BufferStatus::GENED;
   } else if (iter_buffer->second == BufferStatus::KILLED) {
     llvm_unreachable("The buffer memory has been released and cannot be used "
@@ -888,7 +887,7 @@ void MemLivenessAnalysis::RecordSemanticConflict(Value lhs, Value rhs) {
 }
 
 BufferInfo MemLivenessAnalysis::GenerateBufferInfo(Operation *op,
-                                                   Value operand) {
+                                                   Value operand) const {
   auto memorySpaceAttr = GetBufferSpaceAttr(operand);
   if (isLocalMemPlan() && isLocalBuffer(memorySpaceAttr)) {
     if (!memorySpaceAttr.has_value())

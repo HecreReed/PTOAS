@@ -222,9 +222,9 @@ void EventIdSolver::addConflicts(
 }
 
 llvm::SmallVector<int64_t>
-EventIdSolver::getAdjNodesUsedEventIds(const EventIdNode *node) {
+EventIdSolver::getAdjNodesUsedEventIds(EventIdNode *node) {
   llvm::SmallDenseSet<int64_t> usedEventIds;
-  auto adjIt = adjList.find(const_cast<EventIdNode *>(node));
+  auto adjIt = adjList.find(node);
   ASSERT(adjIt != adjList.end());
   for (auto [otherNode, frq] : adjIt->second) {
     ASSERT(frq > 0);

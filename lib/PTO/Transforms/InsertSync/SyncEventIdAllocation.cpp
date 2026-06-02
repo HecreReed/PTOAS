@@ -187,8 +187,8 @@ SmallVector<int> SyncEventIdAllocation::UpdateBlockAvailableEventId(
 }
 
 SmallVector<int> SyncEventIdAllocation::GetAvailableEventId(
-    SyncOperation *sync, SmallVector<bool> eventIdLifetimeAvailableStatus,
-    SmallVector<bool> eventIdIdleStatus, size_t eventIdNum) {
+    const SyncOperation *sync, SmallVector<bool> eventIdLifetimeAvailableStatus,
+    SmallVector<bool> eventIdIdleStatus, size_t eventIdNum) const {
   SmallVector<int> canAllocaEventId;
   size_t idSize = static_cast<size_t>(sync->eventIdNum);
   if (sync->GetType() == SyncOperation::TYPE::SYNC_BLOCK_SET ||

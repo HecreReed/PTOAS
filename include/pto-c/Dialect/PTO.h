@@ -9,7 +9,7 @@
 #ifndef MLIR_C_DIALECT_PTO_H
 #define MLIR_C_DIALECT_PTO_H
 
-#include "mlir-c/IR.h"
+#include "mlir-c/IR.h" // NOLINT(misc-include-cleaner): provides MLIR_DECLARE_CAPI_DIALECT_REGISTRATION.
 #include "mlir-c/Support.h"
 #include <stdbool.h>
 #include <stdint.h>

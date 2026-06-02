@@ -128,7 +128,7 @@ public:
   int getDepth() const;
 
   // Return the ancestor `dist` levels above this operation.
-  OperationBase *getNthParent(int dist) const;
+  OperationBase *getNthParent(int dist);
 
   // Given two operations, return the pair of operations directly below their
   // LCA.
@@ -150,7 +150,7 @@ public:
   static OperationBase *getParentCondition(OperationBase *op);
 
   // Return true if this operation is a strict ancestor of `op`.
-  bool isProperAncestor(OperationBase *op) const;
+  bool isProperAncestor(const OperationBase *op) const;
 
   // Collect and return all parent operations (walking upwards).
   llvm::SmallVector<OperationBase *> getAllParents() const;

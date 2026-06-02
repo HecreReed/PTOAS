@@ -288,7 +288,7 @@ protected:
 
   bool checkSkipCrossCorePair(Occurrence *occ1, Occurrence *occ2);
 
-  bool checkSkipParallelLoop(Occurrence *occ1, Occurrence *occ2);
+  bool checkSkipParallelLoop(Occurrence *occ1, Occurrence *occ2) const;
 
   bool checkAlreadySynced(Occurrence *occ1, Occurrence *occ2) const;
 
@@ -342,7 +342,7 @@ protected:
                                     Occurrence *&waitOcc);
   void adjustSetWaitForBackwardCondition(Occurrence *occ1, Occurrence *occ2,
                                          Occurrence *&setOcc,
-                                         Occurrence *&waitOcc);
+                                         Occurrence *&waitOcc) const;
   void adjustSetWaitForCrossCoreLoops(Occurrence *occ1, Occurrence *occ2,
                                       Occurrence *&setOcc,
                                       Occurrence *&waitOcc);
@@ -448,7 +448,7 @@ protected:
       EventIdSolver &curEventIdSolver, ConflictPair *conflictPair,
       const Occurrence *setOcc, const Occurrence *waitOcc,
       Loop *parentLCALoopOp,
-      Occurrence *parentLCALoopOcc, Occurrence *parentLCALoopBeforePHOcc,
+      const Occurrence *parentLCALoopOcc, Occurrence *parentLCALoopBeforePHOcc,
       Occurrence *parentLCALoopAfterPHOcc, OperationBase *barrierOp,
       CorePipeInfo corePipeSrc, CorePipeInfo corePipeDst,
       ExtraConflictPairs &extraConflictPairs);
@@ -471,7 +471,7 @@ protected:
   void recordChosenConflictPair(ConflictPair *conflictPair,
                                 Occurrence *normScopeOcc1,
                                 Occurrence *normScopeOcc2,
-                                Occurrence *parentLCALoopOcc);
+                                const Occurrence *parentLCALoopOcc);
   void appendExtraConflictPairs(ExtraConflictPairs &extraConflictPairs);
 
   void handleUnitFlagConflict(Occurrence *occ1, Occurrence *occ2,

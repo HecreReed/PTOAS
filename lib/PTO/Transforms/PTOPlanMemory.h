@@ -348,7 +348,7 @@ private:
   void UpdateOpBufferInfo(Operation *op, const ValueRange &results);
 
   /// Generate buffer info.
-  BufferInfo GenerateBufferInfo(Operation *op, Value operand);
+  BufferInfo GenerateBufferInfo(Operation *op, Value operand) const;
 
   /// Obtain the buffer info of plan operation.
   BufferInfo GetBufferInfo(Operation *op, Value operand,
@@ -358,7 +358,7 @@ private:
   void UpdateOpGenInfo(OpInfo *opInfo, const ValueRange &results);
 
   /// Update normal operand gen information on buffer.
-  void UpdateOperandGenInfo(const OpInfo *opInfo, Value operand);
+  void UpdateOperandGenInfo(OpInfo *opInfo, Value operand);
 
   /// Update temp buffer for DestinationStyleOpInterface op.
   void UpdateOpTempGenInfo(OpInfo *opInfo);
