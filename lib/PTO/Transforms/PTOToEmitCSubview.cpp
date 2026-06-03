@@ -446,8 +446,8 @@ struct SubviewToEmitCPattern : public OpConversionPattern<memref::SubViewOp> {
       } else {
         bool isCol = finalStride[0] == 1;
         for (int i = 0; i < static_cast<int>(kNumber4); ++i)
-          isCol &= (finalStride[i + 1] ==
-                    multiplyOrDynamic(finalStride[i], finalShape[i]));
+          isCol = isCol && (finalStride[i + 1] ==
+                            multiplyOrDynamic(finalStride[i], finalShape[i]));
         if (isCol)
           layoutTag = 1;
       }

@@ -86,6 +86,8 @@ struct CorePipeInfo {
 } // namespace mlir::pto::syncsolver
 
 namespace llvm {
+// NOLINTBEGIN
+// llvm::DenseMap requires key traits to be specialized in namespace llvm.
 template <> struct DenseMapInfo<mlir::pto::syncsolver::CorePipeInfo> {
   using CorePipePairTy = std::pair<mlir::pto::TCoreType, mlir::pto::PIPE>;
   static inline mlir::pto::syncsolver::CorePipeInfo getEmptyKey() {
@@ -107,6 +109,7 @@ template <> struct DenseMapInfo<mlir::pto::syncsolver::CorePipeInfo> {
     return lhs == rhs;
   }
 };
+// NOLINTEND
 } // namespace llvm
 
 namespace mlir::pto::syncsolver {

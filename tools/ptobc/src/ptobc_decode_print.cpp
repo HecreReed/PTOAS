@@ -27,12 +27,12 @@
 #include <mlir/IR/Value.h>
 #include <mlir/Parser/Parser.h>
 
+#include <llvm/Support/FileSystem.h>
 #include <llvm/Support/raw_ostream.h>
 
 #include <climits>
 #include <cstdlib>
 #include <cstring>
-#include <fstream>
 #include <memory>
 #include <optional>
 #include <stdexcept>
@@ -936,10 +936,11 @@ void decodeFileToPTO(const std::string& inPath, const std::string& outPath) {
 
   std::string out = printModuleCanonical(module.get(), opt);
   if (dbg) llvm::errs() << "[ptobc] writing output: " << outPath << "\n";
-  std::string normalizedOutPath = normalizeFilePath(outPath);
-  std::ofstream ofs(normalizedOutPath);
-  if (!ofs)
-    throw std::runtime_error("Failed to write: " + normalizedOutPath);
+  std::string canonicalOutPath = canonicalizeFilePath(outPath);
+  std::error_code ec;
+  llvm::raw_fd_ostream ofs(canonicalOutPath, ec, llvm::sys::fs::OF_None);
+  if (ec)
+    throw std::runtime_error("Failed to write: " + canonicalOutPath);
   ofs << out;
   if (!out.empty() && out.back() != '\n') ofs << "\n";
 }

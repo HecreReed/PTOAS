@@ -249,7 +249,7 @@ protected:
       int endIndex,
       const llvm::SmallVector<ConflictPair *> &ignoreConflictPairs) const;
   void addGraphConflictsFromScopes(
-      Occurrence *occ, GraphSolver &graphSolver,
+      const Occurrence *occ, GraphSolver &graphSolver,
       llvm::DenseSet<ConflictPair *> &visited, EventIdInfo eventIdInfo,
       int startIndex, int endIndex,
       const llvm::SmallVector<ConflictPair *> &ignoreConflictPairs,
@@ -355,7 +355,7 @@ protected:
   Occurrence *getBarrierWaitOcc(Occurrence *occ1, Occurrence *occ2);
 
   std::optional<std::pair<Occurrence *, Occurrence *>>
-  getFunctionBlockSetWaitOcc(Occurrence *occ1, Occurrence *occ2);
+  getFunctionBlockSetWaitOcc(const Occurrence *occ1, Occurrence *occ2);
 
   std::optional<std::pair<Occurrence *, Occurrence *>>
   getUnlikelyCondSetWaitOcc(Occurrence *occ1, Occurrence *occ2);
@@ -447,7 +447,7 @@ protected:
   bool insertOuterBackwardConflictPairIfNeeded(
       EventIdSolver &curEventIdSolver, ConflictPair *conflictPair,
       const Occurrence *setOcc, const Occurrence *waitOcc,
-      Loop *parentLCALoopOp,
+      const Loop *parentLCALoopOp,
       const Occurrence *parentLCALoopOcc, Occurrence *parentLCALoopBeforePHOcc,
       Occurrence *parentLCALoopAfterPHOcc, OperationBase *barrierOp,
       CorePipeInfo corePipeSrc, CorePipeInfo corePipeDst,

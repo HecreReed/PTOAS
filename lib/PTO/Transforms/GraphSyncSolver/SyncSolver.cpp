@@ -234,9 +234,11 @@ bool Solver::checkAlreadySyncedWithUnitFlag(Occurrence *occ1,
   return false;
 }
 
-bool Solver::ignoreMemoryConflict(RWOperation *, RWOperation *,
+bool Solver::ignoreMemoryConflict(RWOperation *rwOp1, RWOperation *rwOp2,
                                   const MemInfo &memInfo1,
                                   const MemInfo &memInfo2) {
+  (void)rwOp1;
+  (void)rwOp2;
   if (options.isIntraCoreMode()) {
     if (memInfo1.isWorkSpace && memInfo2.isWorkSpace) {
       if (options.intraCoreIgnoreWorkSpaceFunctionArguments) {
@@ -656,7 +658,7 @@ void Solver::addGraphConflictPair(
 }
 
 void Solver::addGraphConflictsFromScopes(
-    Occurrence *occ, GraphSolver &graphSolver,
+    const Occurrence *occ, GraphSolver &graphSolver,
     llvm::DenseSet<ConflictPair *> &visited, EventIdInfo eventIdInfo,
     int startIndex, int endIndex,
     const llvm::SmallVector<ConflictPair *> &ignoreConflictPairs,
@@ -1133,7 +1135,7 @@ Solver::getFixedSetWaitOcc(Occurrence *occ1, Occurrence *occ2) {
 }
 
 std::optional<std::pair<Occurrence *, Occurrence *>>
-Solver::getFunctionBlockSetWaitOcc(Occurrence *occ1, Occurrence *occ2) {
+Solver::getFunctionBlockSetWaitOcc(const Occurrence *occ1, Occurrence *occ2) {
   PTO_SYNC_SOLVER_CHECK(occ1 != nullptr && occ2 != nullptr);
   auto *parFunctionBlock1 = occ1->getParentOfType<FunctionBlock>();
   auto *parFunctionBlock2 = occ2->getParentOfType<FunctionBlock>();
@@ -1661,7 +1663,7 @@ bool Solver::insertExtraConflictPair(
 bool Solver::insertOuterBackwardConflictPairIfNeeded(
     EventIdSolver &curEventIdSolver, ConflictPair *conflictPair,
     const Occurrence *setOcc, const Occurrence *waitOcc,
-    Loop *parentLCALoopOp,
+    const Loop *parentLCALoopOp,
     const Occurrence *parentLCALoopOcc, Occurrence *parentLCALoopBeforePHOcc,
     Occurrence *parentLCALoopAfterPHOcc, OperationBase *barrierOp,
     CorePipeInfo corePipeSrc, CorePipeInfo corePipeDst,

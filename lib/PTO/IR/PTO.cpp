@@ -407,13 +407,17 @@ llvm::TypeSize mlir::pto::HiF8Type::getTypeSizeInBits(
   return getOneByteTypeSize();
 }
 
-uint64_t mlir::pto::HiF8Type::getABIAlignment(const DataLayout &,
-                                              DataLayoutEntryListRef) const {
+uint64_t mlir::pto::HiF8Type::getABIAlignment(
+    const DataLayout &dataLayout, DataLayoutEntryListRef params) const {
+  (void)dataLayout;
+  (void)params;
   return kPTOByteSize;
 }
 
 uint64_t mlir::pto::HiF8Type::getPreferredAlignment(
-    const DataLayout &, DataLayoutEntryListRef) const {
+    const DataLayout &dataLayout, DataLayoutEntryListRef params) const {
+  (void)dataLayout;
+  (void)params;
   return kPTOByteSize;
 }
 
@@ -425,12 +429,16 @@ llvm::TypeSize mlir::pto::F4E1M2x2Type::getTypeSizeInBits(
 }
 
 uint64_t mlir::pto::F4E1M2x2Type::getABIAlignment(
-    const DataLayout &, DataLayoutEntryListRef) const {
+    const DataLayout &dataLayout, DataLayoutEntryListRef params) const {
+  (void)dataLayout;
+  (void)params;
   return kPTOByteSize;
 }
 
 uint64_t mlir::pto::F4E1M2x2Type::getPreferredAlignment(
-    const DataLayout &, DataLayoutEntryListRef) const {
+    const DataLayout &dataLayout, DataLayoutEntryListRef params) const {
+  (void)dataLayout;
+  (void)params;
   return kPTOByteSize;
 }
 
@@ -442,12 +450,16 @@ llvm::TypeSize mlir::pto::F4E2M1x2Type::getTypeSizeInBits(
 }
 
 uint64_t mlir::pto::F4E2M1x2Type::getABIAlignment(
-    const DataLayout &, DataLayoutEntryListRef) const {
+    const DataLayout &dataLayout, DataLayoutEntryListRef params) const {
+  (void)dataLayout;
+  (void)params;
   return kPTOByteSize;
 }
 
 uint64_t mlir::pto::F4E2M1x2Type::getPreferredAlignment(
-    const DataLayout &, DataLayoutEntryListRef) const {
+    const DataLayout &dataLayout, DataLayoutEntryListRef params) const {
+  (void)dataLayout;
+  (void)params;
   return kPTOByteSize;
 }
 

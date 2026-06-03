@@ -273,7 +273,7 @@ public:
   DenseMap<Value, std::shared_ptr<BufferLife>> buffer2Life;
 
   /// map from operation to its gen and kill buffer.
-  DenseMap<OpInfo *, GenKillEntry> genKillMap;
+  DenseMap<const OpInfo *, GenKillEntry> genKillMap;
 
   /// record the map from the buffer to its number of buffer if it does
   /// multibuffer optimization.
@@ -358,7 +358,7 @@ private:
   void UpdateOpGenInfo(OpInfo *opInfo, const ValueRange &results);
 
   /// Update normal operand gen information on buffer.
-  void UpdateOperandGenInfo(OpInfo *opInfo, Value operand);
+  void UpdateOperandGenInfo(const OpInfo *opInfo, Value operand);
 
   /// Update temp buffer for DestinationStyleOpInterface op.
   void UpdateOpTempGenInfo(OpInfo *opInfo);
@@ -458,7 +458,7 @@ public:
     buffer2Life = buf2Life;
   }
 
-  inline void SetGenKillMap(DenseMap<OpInfo *, GenKillEntry> gkMap) {
+  inline void SetGenKillMap(DenseMap<const OpInfo *, GenKillEntry> gkMap) {
     genKillMap = gkMap;
   }
 
@@ -714,7 +714,7 @@ private:
   DenseMap<Value, uint32_t> buffer2MultiNum;
 
   /// map from operation to its gen and kill buffer.
-  DenseMap<OpInfo *, GenKillEntry> genKillMap;
+  DenseMap<const OpInfo *, GenKillEntry> genKillMap;
 
   /// record all storage entry to be plan address.
   SmallVector<std::unique_ptr<StorageEntry>> StorageEntryVec;

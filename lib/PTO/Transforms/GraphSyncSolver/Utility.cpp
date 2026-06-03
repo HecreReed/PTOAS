@@ -42,6 +42,7 @@ int Occurrence::getDepth(const Occurrence *occ) {
   return ret;
 }
 
+// NOLINTNEXTLINE(readability-make-member-function-const): solver callers need mutable ancestor occurrences.
 Occurrence *Occurrence::getParentWithOp(const OperationBase *op,
                                         bool assertExists) {
   ASSERT(op != nullptr);
@@ -56,6 +57,7 @@ Occurrence *Occurrence::getParentWithOp(const OperationBase *op,
   return nullptr;
 }
 
+// NOLINTNEXTLINE(readability-make-member-function-const): solver callers need mutable ancestor occurrences.
 Occurrence *Occurrence::getParentWithOp(const Operation *op,
                                         bool assertExists) {
   ASSERT(op != nullptr);
@@ -70,6 +72,7 @@ Occurrence *Occurrence::getParentWithOp(const Operation *op,
   return nullptr;
 }
 
+// NOLINTNEXTLINE(readability-make-member-function-const): solver callers need mutable ancestor occurrences.
 Occurrence *Occurrence::getNthParent(int dist) {
   Occurrence *occ = this;
   while (dist > 0) {
@@ -178,6 +181,7 @@ int OperationBase::getDepth() const {
   return ret;
 }
 
+// NOLINTNEXTLINE(readability-make-member-function-const): solver callers need mutable ancestor operations.
 OperationBase *OperationBase::getNthParent(int dist) {
   OperationBase *op = this;
   while (dist > 0) {

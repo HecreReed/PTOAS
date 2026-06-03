@@ -203,7 +203,7 @@ IRTranslator::getTensorExtractOp(tensor::ExtractOp extractOp,
 }
 
 std::unique_ptr<OperationBase>
-IRTranslator::getCallOp(func::CallOp, OperationBase *parentOp) const {
+IRTranslator::getCallOp(func::CallOp, const OperationBase *parentOp) const {
   (void)parentOp;
   return nullptr;
 }
@@ -216,12 +216,12 @@ void IRTranslator::updateBlockArgAliases(Block *block,
     blockArgAliases[arg].push_back(operand);
 }
 
-bool IRTranslator::isUnlikelyCondition(Condition *condOp) const {
+bool IRTranslator::isUnlikelyCondition(const Condition *condOp) const {
   return condOp && condOp->op &&
          condOp->op->hasAttrOfType<UnitAttr>("pto.unlikely_condition");
 }
 
-bool IRTranslator::isParallelLoop(Loop *loopOp) const {
+bool IRTranslator::isParallelLoop(const Loop *loopOp) const {
   return loopOp && loopOp->op &&
          loopOp->op->hasAttrOfType<UnitAttr>("pto.parallel_loop");
 }
@@ -409,12 +409,13 @@ void IRTranslator::generateProcessingOrders(
       generateProcessingOrders(occ1, occ2, isUseless);
 }
 
-void IRTranslator::generateProcessingOrders(Scope *, Occurrence *occ,
+void IRTranslator::generateProcessingOrders(const Scope *scopeOp, Occurrence *occ,
                                             bool isUseless) {
+  (void)scopeOp;
   generateProcessingOrders(occ->childOccs, isUseless);
 }
 
-void IRTranslator::generateProcessingOrders(Loop *loopOp, Occurrence *occ,
+void IRTranslator::generateProcessingOrders(const Loop *loopOp, Occurrence *occ,
                                             bool isUseless) {
   (void)loopOp;
   int64_t childNum = static_cast<int64_t>(occ->childOccs.size());

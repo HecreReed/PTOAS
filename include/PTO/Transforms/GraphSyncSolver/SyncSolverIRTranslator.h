@@ -60,8 +60,10 @@ private:
 
   void generateProcessingOrders(Occurrence *occ1, Occurrence *occ2,
                                 bool isUseless);
-  void generateProcessingOrders(Loop *, Occurrence *occ, bool isUseless);
-  void generateProcessingOrders(Scope *, Occurrence *occ, bool isUseless);
+  void generateProcessingOrders(const Loop *loopOp, Occurrence *occ,
+                                bool isUseless);
+  void generateProcessingOrders(const Scope *scopeOp, Occurrence *occ,
+                                bool isUseless);
   void generateProcessingOrders(const llvm::SmallVector<Occurrence *> &occs,
                                 bool isUseless);
   void generateProcessingOrders(const llvm::SmallVector<Occurrence *> &occs1,
@@ -93,11 +95,11 @@ private:
                                                     OperationBase *parentOp);
 
   std::unique_ptr<OperationBase> getCallOp(func::CallOp,
-                                           OperationBase *parentOp) const;
+                                           const OperationBase *parentOp) const;
 
   void updateBlockArgAliases(Block *block, OperandRange destOperands);
-  bool isUnlikelyCondition(Condition *condOp) const;
-  bool isParallelLoop(Loop *loopOp) const;
+  bool isUnlikelyCondition(const Condition *condOp) const;
+  bool isParallelLoop(const Loop *loopOp) const;
   std::optional<int64_t> getLoopMultibufferUnrollNum(Loop *) const;
   std::optional<int64_t> getScopePreloadNum(Scope *) const;
   std::optional<int64_t> getScopeMaxPreloadNum(Scope *) const;

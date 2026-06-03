@@ -27,10 +27,10 @@ static EventAttr makeEvent(MLIRContext *ctx, int64_t eventId) {
   return EventAttr::get(ctx, static_cast<EVENT>(eventId));
 }
 
-Operation *CodeGenerator::resolveSyncAnchor(OperationBase *opBase) {
+Operation *CodeGenerator::resolveSyncAnchor(const OperationBase *opBase) const {
   if (!opBase)
     return nullptr;
-  if (auto *ph = dyn_cast<PlaceHolder>(opBase)) {
+  if (const auto *ph = dyn_cast<PlaceHolder>(opBase)) {
     if (ph->beforeOp)
       return ph->beforeOp->op;
     if (ph->afterOp)

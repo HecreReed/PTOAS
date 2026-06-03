@@ -182,7 +182,7 @@ bool MemoryDependentAnalyzer::MemAlias(const BaseMemInfo *a,
 }
  
 bool MemoryDependentAnalyzer::isGMBufferOverlap(const BaseMemInfo *a,
-                                                const BaseMemInfo *b) {
+                                                const BaseMemInfo *b) const {
   if (a->rootBuffer != b->rootBuffer) {
     Value realRootA = GetRealRoot(a->rootBuffer);
     Value realRootB = GetRealRoot(b->rootBuffer);

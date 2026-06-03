@@ -807,7 +807,8 @@ void MemLivenessAnalysis::UpdateOpGenInfo(OpInfo *opInfo,
   }
 }
 
-void MemLivenessAnalysis::UpdateOperandGenInfo(OpInfo *opInfo, Value operand) {
+void MemLivenessAnalysis::UpdateOperandGenInfo(const OpInfo *opInfo,
+                                               Value operand) {
   auto iter_buffer = buffer2status.find(operand);
   if (iter_buffer == buffer2status.end())
     return;
