@@ -6733,17 +6733,21 @@ pto.tshrs ins(%a, %s : !pto.tile_buf<loc=vec, dtype=i32, rows=16, cols=16,
 
 #### MaskPattern
 
-Predefined mask patterns for gather operations.
+Predefined mask patterns for mask-form gather and scatter operations.
 
-| Value | Int | Pattern |
-|-------|-----|---------|
-| `P0101` | 1 | Alternating 0-1-0-1 |
-| `P1010` | 2 | Alternating 1-0-1-0 |
-| `P0001` | 3 | 0-0-0-1 |
-| `P0010` | 4 | 0-0-1-0 |
-| `P0100` | 5 | 0-1-0-0 |
-| `P1000` | 6 | 1-0-0-0 |
-| `P1111` | 7 | All ones |
+For each pattern, `P` is the expansion factor of one logical source position,
+`pos_p` is the slot selected by the `1` bit inside each `P`-wide group, and
+`zero_p` is the complement slot set.
+
+| Value | Int | Pattern | `P` | `pos_p` | `zero_p` |
+|-------|-----|---------|-----|---------|----------|
+| `P0101` | 1 | Alternating 0-1-0-1 | 2 | `0` | `1` |
+| `P1010` | 2 | Alternating 1-0-1-0 | 2 | `1` | `0` |
+| `P0001` | 3 | 0-0-0-1 | 4 | `0` | `1,2,3` |
+| `P0010` | 4 | 0-0-1-0 | 4 | `1` | `0,2,3` |
+| `P0100` | 5 | 0-1-0-0 | 4 | `2` | `0,1,3` |
+| `P1000` | 6 | 1-0-0-0 | 4 | `3` | `0,1,2` |
+| `P1111` | 7 | All ones | 1 | `0` | `—` |
 
 ---
 
@@ -7021,69 +7025,112 @@ pto.tgatherb ins(%src, %offs : !pto.tile_buf<...>, !pto.tile_buf<...>)
 
 ---
 
-##### `pto.tscatter` - Scatter Rows
+##### `pto.tscatter` - Scatter
 
-**Summary:** Scatters rows from a source tile into a destination tile using per-row indices.
+**Summary:** Scatters a source VEC tile into a destination VEC tile either by
+explicit row indices or by a compile-time mask-pattern expansion.
+
+Supported forms:
+
+- index scatter: `src + indexes -> dst`
+- mask-pattern scatter: `src + maskPattern -> dst`
 
 **Semantics:**
 
-```
-dst[row_index[i], j] = src[i, j]
+```text
+Index form:
+    dst[indexes[i, j], j] = src[i, j]
+
+Mask form (current PTO IR subset):
+    let P     = expansion factor selected by maskPattern
+    let pos_p = selected position inside each P-wide group
+    let zero_p = complement positions inside that group
+
+    dst is conceptually zero-initialized before scattering
+    dst[i, P * j + pos_p] = src[i, j]
+    dst[i, P * j + z]     = 0    for each z in zero_p
 ```
 
-**Arguments:**
+For `maskPattern`, the `(P, pos_p, zero_p)` mapping is:
+
+| Pattern | `P` | `pos_p` | `zero_p` |
+|---------|-----|---------|----------|
+| `P0101` | 2 | `0` | `1` |
+| `P1010` | 2 | `1` | `0` |
+| `P0001` | 4 | `0` | `1,2,3` |
+| `P0010` | 4 | `1` | `0,2,3` |
+| `P0100` | 4 | `2` | `0,1,3` |
+| `P1000` | 4 | `3` | `0,1,2` |
+| `P1111` | 1 | `0` | `—` |
+
+`P1111` therefore degenerates to a full copy with no inserted zero lanes.
+
+**Arguments / Attributes:**
 
 | Name | Type | Description |
 |------|------|-------------|
 | `src` | `pto.tile_buf` | Source tile |
-| `indexes` | `pto.tile_buf` | Row index tile |
 | `dst` | `pto.tile_buf` | Destination tile |
+| `indexes` | `Optional<pto.tile_buf>` | Row-index tile used only by index form |
+| `maskPattern` | `Optional<MaskPatternAttr>` | Compile-time mask pattern used only by mask form |
 
 **Results:** None. Writes into `dst` via DPS pattern.
 
+**Assembly Format:**
+
+```mlir
+// index scatter
+pto.tscatter ins(%src, %idx : !pto.tile_buf<...>, !pto.tile_buf<...>)
+            outs(%dst : !pto.tile_buf<...>)
+
+// mask-pattern scatter
+pto.tscatter ins(%src, {maskPattern = #pto.mask_pattern<P0101>} : !pto.tile_buf<...>)
+            outs(%dst : !pto.tile_buf<...>)
+```
+
 **Constraints & Verification:**
 
-- **Implementation checks (A2A3)**
-  - `dst`, `src`, and `indexes` must all use `loc=vec`.
-  - `dst`/`src` element type must be one of: `i32`, `i16`, `i8`, `f16`, `f32`, `bf16`.
-  - `indexes` element type must be one of: `i16`, `i32`.
+- Exactly one of `indexes` or `maskPattern` must be provided.
+- **Index scatter: implementation checks (A2/A3 and A5)**
+  - `src`, `dst`, and `indexes` must all use `loc=vec`.
+  - `src` and `dst` element types must match and be one of `i8/i16/i32/f16/bf16/f32`.
+  - `indexes` element type must be `i16` or `i32`.
   - No bounds checks are enforced on `indexes` values.
-  - Valid bounds: `dst.valid_shape[i] <= dst.shape[i]`, `src.valid_shape[i] <= src.shape[i]`, and `indexes.valid_shape[i] <= indexes.shape[i]` for each dimension `i`.
-  - `dst` and `src` must have the same element type.
-  - When `dst` element size is 4 bytes, `indexes` element size must also be 4 bytes.
-  - When `dst` element size is 2 bytes, `indexes` element size must also be 2 bytes.
-  - When `dst` element size is 1 byte, `indexes` element size must be 2 bytes.
-- **Implementation checks (A5)**
-  - `dst`, `src`, and `indexes` must all use `loc=vec`.
-  - `dst`/`src` element type must be one of: `i32`, `i16`, `i8`, `f16`, `f32`, `bf16`.
-  - `indexes` element type must be one of: `i16`, `i32`.
-  - No bounds checks are enforced on `indexes` values.
-  - Valid bounds: `dst.valid_shape[i] <= dst.shape[i]`, `src.valid_shape[i] <= src.shape[i]`, and `indexes.valid_shape[i] <= indexes.shape[i]` for each dimension `i`.
-  - `dst` and `src` must have the same element type.
-  - When `dst` element size is 4 bytes, `indexes` element size must also be 4 bytes.
-  - When `dst` element size is 2 bytes, `indexes` element size must also be 2 bytes.
-  - When `dst` element size is 1 byte, `indexes` element size must be 2 bytes.
+  - `src.valid_shape[i]`, `dst.valid_shape[i]`, and `indexes.valid_shape[i]` must not exceed the corresponding static shape for each dimension `i`.
+  - Index element size must follow the scatter rule: `4B data -> 4B index`, `2B data -> 2B index`, `1B data -> 2B index`.
+- **Mask-pattern scatter: implementation checks (A2/A3 and A5)**
+  - `src` and `dst` must both be `pto.tile_buf`, use `loc=vec`, and use `blayout=row_major`.
+  - `src` and `dst` element types must match and be one of `i8/i16/i32/f16/bf16/f32`.
+  - `src` and `dst` must have rank-2 `valid_shape`.
+  - `src.valid_row` must equal `dst.valid_row`.
+  - `dst.valid_col` must equal `src.valid_col * P`, where `P` is the expansion factor of the selected `maskPattern`.
+  - PTO IR currently exposes only the row-scatter specialization; there is no PTO IR attribute for `ScatterAxis::SCATTER_COL`.
 
 **Hardware Mapping:**
 
 - Executes on the **Vector pipeline** (`PIPE_V`)
 
-**Basic Example:**
+**Backend Mapping:**
+
+- Index form lowers to the indexed `pto-isa` `TSCATTER(dst, src, indexes)` overload.
+- Mask form lowers to the row-scatter specialization of the `pto-isa` template overload:
+
+```cpp
+TSCATTER<MaskPattern::Pxxxx, ScatterAxis::SCATTER_ROW>(dst, src)
+```
+
+**Basic Examples:**
 
 ```mlir
+// index scatter
 pto.tscatter ins(%src, %idx : !pto.tile_buf<...>, !pto.tile_buf<...>)
             outs(%dst : !pto.tile_buf<...>)
+
+// P0101 inserts one zero lane after every source lane:
+// src shape 1x32 -> dst shape 1x64
+pto.tscatter ins(%src, {maskPattern = #pto.mask_pattern<P0101>} : !pto.tile_buf<loc=vec, dtype=f16, rows=1, cols=32, v_row=1, v_col=32, blayout=row_major, slayout=none_box, fractal=512, pad=0>)
+            outs(%dst : !pto.tile_buf<loc=vec, dtype=f16, rows=1, cols=64, v_row=1, v_col=64, blayout=row_major, slayout=none_box, fractal=512, pad=0>)
 ```
-
-Mask form:
-
-```mlir
-pto.tscatter ins(%src, {maskPattern = #pto.mask_pattern<P0101>} : !pto.tile_buf<...>)
-            outs(%dst : !pto.tile_buf<...>)
-```
-
-`maskPattern` form lowers to the `pto-isa` `TSCATTER<MaskPattern, ScatterType>` overload on
-backends that provide it, including A2/A3 and A5.
 
 ---
 

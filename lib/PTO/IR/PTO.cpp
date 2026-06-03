@@ -9768,8 +9768,8 @@ mlir::LogicalResult mlir::pto::TScatterOp::verify() {
         srcValid[0] != dstValid[0])
       return emitOpError("expects src and dst to have the same valid rows");
     if (srcValid[1] != ShapedType::kDynamic && dstValid[1] != ShapedType::kDynamic &&
-        srcValid[1] != static_cast<int64_t>(dstValid[1] * times))
-      return emitOpError("expects src valid cols to equal dst valid cols times the mask expansion factor");
+        dstValid[1] != static_cast<int64_t>(srcValid[1] * times))
+      return emitOpError("expects dst valid cols to equal src valid cols times the mask expansion factor");
 
     if (srcTB.getBLayoutValueI32() != static_cast<int32_t>(pto::BLayout::RowMajor) ||
         dstTB.getBLayoutValueI32() != static_cast<int32_t>(pto::BLayout::RowMajor))
