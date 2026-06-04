@@ -7313,17 +7313,27 @@ dst[i + indexRow, j + indexCol] = src[i, j]
 | `src` | `pto.tile_buf` | Source tile |
 | `indexRow` | `Index` | Destination row offset |
 | `indexCol` | `Index` | Destination column offset |
+| `preQuantScalar` | `i64` (optional) | Scalar pre-quant parameter for `acc -> mat` quantized insert |
 | `dst` | `pto.tile_buf` | Destination tile |
+| `reluPreMode` | `#pto<relu_pre_mode ...>` (attribute, optional) | ReLU mode for `acc -> mat` insert |
 
 **Results:** None. Writes into `dst` via DPS pattern.
 
 **Constraints & Verification:**
 
-- The operation has a custom verifier
+- **Implementation checks (A2A3)**
+  - `Vec -> Vec` insertion is supported for matching `i8/f16/bf16/f32` element types.
+  - `Acc -> Mat` insertion is supported. Base/relu forms require `(src=f32, dst=f16/bf16)`; `preQuantScalar` form requires `(src=f32, dst=i8)` or `(src=i32, dst=i8/f16/i16)`.
+  - `Acc -> Mat` requires `src`/`dst` to use `blayout=col_major, slayout=row_major`; `dst` must use fractal size `512`.
+- **Implementation checks (A5)**
+  - `Acc -> Mat` insertion is supported. Base/relu forms require `(src=f32, dst=f16/bf16/f32)` or `(src=i32, dst=i32)`.
+  - `Acc -> Mat` `preQuantScalar` form requires `(src=f32, dst=i8/fp8/f16/bf16/f32)` or `(src=i32, dst=i8/f16/bf16)`.
+  - `Vec -> Mat` requires `dst` to use `blayout=col_major, slayout=row_major`, and `src` to use either `ND(row_major/none_box)` or `NZ(col_major/row_major)` layout.
+  - `Vec -> Vec` requires both `src` and `dst` to use `ND(row_major/none_box)` layout.
 
 **Hardware Mapping:**
 
-- Lowers to **`TINSERT(dst, src, indexRow, indexCol)`**
+- Lowers to **`TINSERT(dst, src, indexRow, indexCol)`**, **`TINSERT(dst, src, preQuantScalar, indexRow, indexCol)`**, or **`TINSERT_FP(dst, src, fp, indexRow, indexCol)`**
 - Uses the target data-movement pipeline: `Vec -> Vec` uses `PIPE_V`, A5
   `Vec -> Mat` uses `PIPE_MTE3`, and regular `Acc -> Mat` uses `PIPE_FIX`.
 

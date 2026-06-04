@@ -4243,7 +4243,9 @@ def TInsertOp : PTO_TOp<"tinsert", [
     PTODpsType:$src,
     Index:$indexRow,
     Index:$indexCol,
-    PTODpsType:$dst
+    Optional<I64>:$preQuantScalar,
+    PTODpsType:$dst,
+    DefaultValuedAttr<PTO_ReluPreModeAttr, "::mlir::pto::ReluPreMode::NoRelu">:$reluPreMode
   );
 
   let results = (outs);
@@ -4251,7 +4253,7 @@ def TInsertOp : PTO_TOp<"tinsert", [
   let hasVerifier = 1;
 
   let assemblyFormat = [{
-    `ins` `(` $src `,` $indexRow `,` $indexCol `:` qualified(type($src)) `,` type($indexRow) `,` type($indexCol) `)`
+    `ins` `(` $src `,` $indexRow `,` $indexCol (`,` $preQuantScalar^)? `:` qualified(type($src)) `,` type($indexRow) `,` type($indexCol) (`,` type($preQuantScalar)^)? `)`
     `outs` `(` $dst `:` qualified(type($dst) ) `)`
     attr-dict
   }];
@@ -4330,7 +4332,8 @@ def TInsertFPOp : PTO_TOp<"tinsert_fp", [
     PTODpsType:$fp,
     Index:$indexRow,
     Index:$indexCol,
-    PTODpsType:$dst
+    PTODpsType:$dst,
+    DefaultValuedAttr<PTO_ReluPreModeAttr, "::mlir::pto::ReluPreMode::NoRelu">:$reluPreMode
   );
 
   let results = (outs);
