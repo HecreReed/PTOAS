@@ -7352,7 +7352,9 @@ dst[i, j] = src[i + indexRow, j + indexCol]
 | `src` | `pto.tile_buf` | Source tile |
 | `indexRow` | `Index` | Starting row |
 | `indexCol` | `Index` | Starting column |
+| `preQuantScalar` | `i64` (optional) | Scalar pre-quant parameter for `acc -> mat` quantized extract |
 | `dst` | `pto.tile_buf` | Destination tile |
+| `reluPreMode` | `#pto<relu_pre_mode ...>` (attribute, optional) | ReLU mode for `acc -> mat` extract |
 
 **Results:** None. Writes into `dst` via DPS pattern.
 
@@ -7361,19 +7363,25 @@ dst[i, j] = src[i + indexRow, j + indexCol]
 - **Implementation checks (A2A3)**
   - `dst` element type must match `src` element type and must be one of: `i8`, `f16`, `bf16`, `f32`.
   - `Vec -> Vec` extraction is supported for matching element types.
+  - `Acc -> Mat` extraction is supported. Base/relu forms require `(src=f32, dst=f16/bf16)`; `preQuantScalar` form requires `(src=f32, dst=i8)` or `(src=i32, dst=i8/f16/i16)`.
   - Source layout/fractal must satisfy one of the target-supported combinations: `slayout=col_major` with `blayout=row_major`, or `slayout=row_major`.
   - Runtime bounds checks:
     - `indexRow + dst.rows <= src.rows`
     - `indexCol + dst.cols <= src.cols`
-  - `dst` must use `loc=left` or `loc=right` with a target-supported fractal configuration.
+  - `Mat -> Left/Right` requires `dst` to use `loc=left` or `loc=right` with a target-supported fractal configuration.
+  - `Acc -> Mat` requires `src`/`dst` to use `blayout=col_major, slayout=row_major`; `dst` must use fractal size `512`.
 - **Implementation checks (A5)**
   - `dst` element type must match `src` element type and must be one of the target-supported fp8/fp16/bf16/f32 families listed here.
   - Source layout/fractal must satisfy the target-supported combinations for `left`/`right`/scaling destinations; in PTO IR terms this is expressed through the `blayout`/`slayout`/`fractal` tuple.
-  - Destination supports `Mat -> Left/Right/Scale` and also supports `Vec -> Mat` for specific tile locations.
+  - Destination supports `Mat -> Left/Right/Scale`, `Vec -> Mat/Vec`, and `Acc -> Mat`.
+  - `Acc -> Mat` base/relu forms require `(src=f32, dst=f16/bf16/f32)` or `(src=i32, dst=i32)`.
+  - `Acc -> Mat` `preQuantScalar` form requires `(src=f32, dst=i8/fp8/f16/bf16/f32)` or `(src=i32, dst=i8/f16/bf16)`.
 
 **Hardware Mapping:**
 
-- Executes on the **Vector pipeline** (`PIPE_V`)
+- `Mat -> Left/Right/Scale` uses **MTE1** (`PIPE_MTE1`)
+- `Vec -> Mat` and `Acc -> Mat` use **FIX** (`PIPE_FIX`)
+- `Vec -> Vec` uses **Vector pipeline** (`PIPE_V`)
 
 **Basic Example:**
 

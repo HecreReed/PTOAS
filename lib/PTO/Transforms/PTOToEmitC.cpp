@@ -8525,16 +8525,62 @@ struct PTOExtractToEmitC : public OpConversionPattern<pto::TExtractOp> {
   LogicalResult matchAndRewrite(pto::TExtractOp op, OpAdaptor adaptor,
                                 ConversionPatternRewriter &rewriter) const override {
     auto loc = op.getLoc();
+    auto *ctx = rewriter.getContext();
 
     Value src = peelUnrealized(adaptor.getSrc());
     Value dst = peelUnrealized(adaptor.getDst());
     Value r0  = peelUnrealized(adaptor.getIndexRow());
     Value c0  = peelUnrealized(adaptor.getIndexCol());
+    Value preQuantScalar;
+    if (op.getPreQuantScalar())
+      preQuantScalar = peelUnrealized(adaptor.getPreQuantScalar());
+
+    auto reluTok = [&](pto::ReluPreMode mode) -> StringRef {
+      switch (mode) {
+      case pto::ReluPreMode::NoRelu:
+        return "ReluPreMode::NoRelu";
+      case pto::ReluPreMode::NormalRelu:
+        return "ReluPreMode::NormalRelu";
+      case pto::ReluPreMode::ScalarRelu:
+        return "ReluPreMode::ScalarRelu";
+      case pto::ReluPreMode::VectorRelu:
+        return "ReluPreMode::VectorRelu";
+      case pto::ReluPreMode::Pwl:
+        return "ReluPreMode::Pwl";
+      }
+      llvm_unreachable("unknown ReluPreMode");
+    };
+
+    const bool hasPreQuantScalar = static_cast<bool>(preQuantScalar);
+    const bool reluNonDefault =
+        op.getReluPreMode() != pto::ReluPreMode::NoRelu;
+
+    SmallVector<Value, 5> operands{dst, src};
+    if (hasPreQuantScalar)
+      operands.push_back(preQuantScalar);
+    operands.push_back(r0);
+    operands.push_back(c0);
+
+    ArrayAttr templateArgs;
+    if (reluNonDefault) {
+      auto dstOT = mlir::dyn_cast<emitc::OpaqueType>(dst.getType());
+      auto srcOT = mlir::dyn_cast<emitc::OpaqueType>(src.getType());
+      if (!dstOT || !srcOT)
+        return rewriter.notifyMatchFailure(
+            op, "textract relu lowering expects opaque dst/src types");
+
+      SmallVector<Attribute, 3> templateArgVec{
+          emitc::OpaqueAttr::get(ctx, dstOT.getValue().str()),
+          emitc::OpaqueAttr::get(ctx, srcOT.getValue().str()),
+          emitc::OpaqueAttr::get(ctx, reluTok(op.getReluPreMode())),
+      };
+      templateArgs = rewriter.getArrayAttr(templateArgVec);
+    }
 
     rewriter.create<emitc::CallOpaqueOp>(
         loc, TypeRange{}, "TEXTRACT",
-        /*args=*/ArrayAttr{}, /*templateArgs=*/ArrayAttr{},
-        /*operands=*/ValueRange{dst, src, r0, c0});
+        /*args=*/ArrayAttr{}, /*templateArgs=*/templateArgs,
+        /*operands=*/operands);
 
     rewriter.eraseOp(op);
     return success();
@@ -8550,6 +8596,7 @@ struct PTOExtractFPToEmitC : public OpConversionPattern<pto::TExtractFPOp> {
   LogicalResult matchAndRewrite(pto::TExtractFPOp op, OpAdaptor adaptor,
                                 ConversionPatternRewriter &rewriter) const override {
     auto loc = op.getLoc();
+    auto *ctx = rewriter.getContext();
 
     Value src = peelUnrealized(adaptor.getSrc());
     Value fp = peelUnrealized(adaptor.getFp());
@@ -8557,9 +8604,43 @@ struct PTOExtractFPToEmitC : public OpConversionPattern<pto::TExtractFPOp> {
     Value r0 = peelUnrealized(adaptor.getIndexRow());
     Value c0 = peelUnrealized(adaptor.getIndexCol());
 
+    auto reluTok = [&](pto::ReluPreMode mode) -> StringRef {
+      switch (mode) {
+      case pto::ReluPreMode::NoRelu:
+        return "ReluPreMode::NoRelu";
+      case pto::ReluPreMode::NormalRelu:
+        return "ReluPreMode::NormalRelu";
+      case pto::ReluPreMode::ScalarRelu:
+        return "ReluPreMode::ScalarRelu";
+      case pto::ReluPreMode::VectorRelu:
+        return "ReluPreMode::VectorRelu";
+      case pto::ReluPreMode::Pwl:
+        return "ReluPreMode::Pwl";
+      }
+      llvm_unreachable("unknown ReluPreMode");
+    };
+
+    ArrayAttr templateArgs;
+    if (op.getReluPreMode() != pto::ReluPreMode::NoRelu) {
+      auto dstOT = mlir::dyn_cast<emitc::OpaqueType>(dst.getType());
+      auto srcOT = mlir::dyn_cast<emitc::OpaqueType>(src.getType());
+      auto fpOT = mlir::dyn_cast<emitc::OpaqueType>(fp.getType());
+      if (!dstOT || !srcOT || !fpOT)
+        return rewriter.notifyMatchFailure(
+            op, "textract_fp relu lowering expects opaque dst/src/fp types");
+
+      SmallVector<Attribute, 4> templateArgVec{
+          emitc::OpaqueAttr::get(ctx, dstOT.getValue().str()),
+          emitc::OpaqueAttr::get(ctx, srcOT.getValue().str()),
+          emitc::OpaqueAttr::get(ctx, fpOT.getValue().str()),
+          emitc::OpaqueAttr::get(ctx, reluTok(op.getReluPreMode())),
+      };
+      templateArgs = rewriter.getArrayAttr(templateArgVec);
+    }
+
     rewriter.create<emitc::CallOpaqueOp>(
         loc, TypeRange{}, "TEXTRACT_FP",
-        /*args=*/ArrayAttr{}, /*templateArgs=*/ArrayAttr{},
+        /*args=*/ArrayAttr{}, /*templateArgs=*/templateArgs,
         /*operands=*/ValueRange{dst, src, fp, r0, c0});
 
     rewriter.eraseOp(op);

@@ -2887,6 +2887,7 @@ struct PTOViewToMemrefPass
         Value src = op.getSrc();
         Value indexRow = op.getIndexRow();
         Value indexCol = op.getIndexCol();
+        Value preQuantScalar = op.getPreQuantScalar();
         Value dst = op.getDst();
 
         auto srcTy = dyn_cast<MemRefType>(src.getType());
@@ -2905,7 +2906,9 @@ struct PTOViewToMemrefPass
             src,
             indexRow,
             indexCol,
-            dst);
+            preQuantScalar,
+            dst,
+            op.getReluPreMode());
       }
 
       DefaultInlineVector<mlir::pto::TFillPadOp> fillpadops;

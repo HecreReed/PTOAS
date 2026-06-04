@@ -5647,6 +5647,33 @@ mlir::LogicalResult mlir::pto::TExpandsOp::verify() {
 }
 
 mlir::LogicalResult mlir::pto::TExtractOp::verify() {
+  auto isA2A3AccCastExtractTypePair = [&](Type srcElem, Type dstElem) -> bool {
+    return srcElem.isF32() && (dstElem.isF16() || dstElem.isBF16());
+  };
+  auto isA2A3AccQuantExtractTypePair = [&](Type srcElem, Type dstElem) -> bool {
+    if (srcElem.isF32())
+      return dstElem.isInteger(8);
+    if (srcElem.isInteger(32))
+      return dstElem.isInteger(8) || dstElem.isF16() || dstElem.isInteger(16);
+    return false;
+  };
+  auto isA5AccCastExtractTypePair = [&](Type srcElem, Type dstElem) -> bool {
+    if (srcElem.isF32())
+      return dstElem.isF16() || dstElem.isBF16() || dstElem.isF32();
+    if (srcElem.isInteger(32))
+      return dstElem.isInteger(32);
+    return false;
+  };
+  auto isA5AccQuantExtractTypePair = [&](Type srcElem, Type dstElem) -> bool {
+    if (srcElem.isF32())
+      return dstElem.isInteger(8) || dstElem.isF16() || dstElem.isBF16() ||
+             dstElem.isF32() ||
+             (llvm::isa<FloatType>(dstElem) &&
+              llvm::cast<FloatType>(dstElem).getWidth() == 8);
+    if (srcElem.isInteger(32))
+      return dstElem.isInteger(8) || dstElem.isF16() || dstElem.isBF16();
+    return false;
+  };
   auto hasMatExtractSourceLayoutA2A3 = [&](pto::TileBufType srcTy) -> bool {
     int32_t bl = srcTy.getBLayoutValueI32();
     int32_t sl = srcTy.getSLayoutValueI32();
@@ -5684,6 +5711,10 @@ mlir::LogicalResult mlir::pto::TExtractOp::verify() {
     return ty.getBLayoutValueI32() == static_cast<int32_t>(pto::BLayout::RowMajor) &&
            ty.getSLayoutValueI32() == static_cast<int32_t>(pto::SLayout::NoneBox);
   };
+  Value preQuantScalar = getPreQuantScalar();
+  auto reluMode = getReluPreMode();
+  const bool hasPreQuantScalar = static_cast<bool>(preQuantScalar);
+  const bool hasRelu = reluMode != pto::ReluPreMode::NoRelu;
   auto verifyCommon = [&]() -> FailureOr<std::tuple<Type, Type, pto::TileBufType,
                                                     pto::TileBufType, Type, Type,
                                                     std::optional<pto::AddressSpace>,
@@ -5703,12 +5734,14 @@ mlir::LogicalResult mlir::pto::TExtractOp::verify() {
             *getOperation(), getIndexRow(), getIndexCol(), srcTy, dstTy,
             /*includeIndexAndIntOpsInConstFold=*/false)))
       return failure();
-    Type srcElem = getElemTy(srcTy);
-    Type dstElem = getElemTy(dstTy);
-    if (!srcElem || !dstElem || srcElem != dstElem)
-      return emitOpError("expects src and dst to have the same element type");
     auto srcSpace = getPTOMemorySpaceEnum(srcTy);
     auto dstSpace = getPTOMemorySpaceEnum(dstTy);
+    Type srcElem = getElemTy(srcTy);
+    Type dstElem = getElemTy(dstTy);
+    if (!srcElem || !dstElem)
+      return emitOpError("expects src and dst to have element types");
+    if ((!srcSpace || *srcSpace != pto::AddressSpace::ACC) && srcElem != dstElem)
+      return emitOpError("expects src and dst to have the same element type");
     return std::make_tuple(srcTy, dstTy, srcTb, dstTb, srcElem, dstElem,
                            srcSpace, dstSpace);
   };
@@ -5718,19 +5751,47 @@ mlir::LogicalResult mlir::pto::TExtractOp::verify() {
       return failure();
     auto [srcTy, dstTy, srcTb, dstTb, srcElem, dstElem, srcSpace, dstSpace] =
         *common;
-    (void)srcTy;
-    (void)dstTy;
-    (void)srcElem;
     if (!isA2A3ExtractElemType(dstElem))
       return emitOpError("expects A2/A3 textract element type to be i8/f16/bf16/f32");
+    if (hasPreQuantScalar && (!srcSpace || *srcSpace != pto::AddressSpace::ACC))
+      return emitOpError("expects preQuantScalar form to use loc=acc src");
+    if (hasRelu && (!srcSpace || *srcSpace != pto::AddressSpace::ACC))
+      return emitOpError("expects reluPreMode form to use loc=acc src");
     if (srcSpace && dstSpace && *srcSpace == pto::AddressSpace::VEC &&
-        *dstSpace == pto::AddressSpace::VEC)
+        *dstSpace == pto::AddressSpace::VEC) {
+      if (hasPreQuantScalar || hasRelu)
+        return emitOpError("expects vec->vec textract to use the base form without preQuantScalar or reluPreMode");
       return mlir::success();
-    if (!srcSpace || *srcSpace != pto::AddressSpace::MAT)
-      return emitOpError("expects A2/A3 textract src to use loc=mat or vec");
-    if (!dstSpace || (*dstSpace != pto::AddressSpace::LEFT &&
-                      *dstSpace != pto::AddressSpace::RIGHT))
-      return emitOpError("expects A2/A3 textract dst to use loc=left, loc=right, or loc=vec");
+    }
+    if (!srcSpace || !dstSpace)
+      return emitOpError("expects src and dst to have explicit loc");
+    if (*srcSpace == pto::AddressSpace::ACC) {
+      if (*dstSpace != pto::AddressSpace::MAT)
+        return emitOpError("expects A2/A3 acc-source textract dst to use loc=mat");
+      if (srcTb.getBLayoutValueI32() != static_cast<int32_t>(pto::BLayout::ColMajor) ||
+          srcTb.getSLayoutValueI32() != static_cast<int32_t>(pto::SLayout::RowMajor))
+        return emitOpError("expects A2/A3 acc-source textract src to use blayout=col_major and slayout=row_major");
+      if (dstTb.getBLayoutValueI32() != static_cast<int32_t>(pto::BLayout::ColMajor) ||
+          dstTb.getSLayoutValueI32() != static_cast<int32_t>(pto::SLayout::RowMajor))
+        return emitOpError("expects A2/A3 acc-source textract dst to use blayout=col_major and slayout=row_major");
+      if (dstTb.getSFractalSizeI32() != 512)
+        return emitOpError("expects A2/A3 acc-source textract dst fractal size to be 512");
+      if (hasPreQuantScalar) {
+        if (!isA2A3AccQuantExtractTypePair(srcElem, dstElem))
+          return emitOpError(
+              "expects A2/A3 acc preQuantScalar textract element types to be "
+              "(src=f32,dst=i8) or (src=i32,dst=i8/f16/i16)");
+      } else if (!isA2A3AccCastExtractTypePair(srcElem, dstElem)) {
+        return emitOpError(
+            "expects A2/A3 acc textract element types to be src=f32, dst=f16/bf16");
+      }
+      return mlir::success();
+    }
+    if (*srcSpace != pto::AddressSpace::MAT)
+      return emitOpError("expects A2/A3 textract src to use loc=mat, loc=acc, or loc=vec");
+    if (*dstSpace != pto::AddressSpace::LEFT &&
+        *dstSpace != pto::AddressSpace::RIGHT)
+      return emitOpError("expects A2/A3 textract dst to use loc=left, loc=right, loc=mat, or loc=vec");
     if (!hasMatExtractSourceLayoutA2A3(srcTb))
       return emitOpError("expects A2/A3 textract src to use a supported mat blayout/slayout combination");
     if (*dstSpace == pto::AddressSpace::LEFT) {
@@ -5750,11 +5811,12 @@ mlir::LogicalResult mlir::pto::TExtractOp::verify() {
       return failure();
     auto [srcTy, dstTy, srcTb, dstTb, srcElem, dstElem, srcSpace, dstSpace] =
         *common;
-    (void)srcTy;
-    (void)dstTy;
-    (void)srcElem;
     if (!isA5ExtractElemType(dstElem))
       return emitOpError("expects A5 textract element type to be an fp8/f16/bf16/f32 or int8 family type");
+    if (hasPreQuantScalar && (!srcSpace || *srcSpace != pto::AddressSpace::ACC))
+      return emitOpError("expects preQuantScalar form to use loc=acc src");
+    if (hasRelu && (!srcSpace || *srcSpace != pto::AddressSpace::ACC))
+      return emitOpError("expects reluPreMode form to use loc=acc src");
     if (!srcSpace || !dstSpace)
       return emitOpError("expects src and dst to have explicit loc");
     bool okPair =
@@ -5764,10 +5826,14 @@ mlir::LogicalResult mlir::pto::TExtractOp::verify() {
           *dstSpace == pto::AddressSpace::SCALING)) ||
         (*srcSpace == pto::AddressSpace::VEC &&
          (*dstSpace == pto::AddressSpace::MAT ||
-          *dstSpace == pto::AddressSpace::VEC));
+          *dstSpace == pto::AddressSpace::VEC)) ||
+        (*srcSpace == pto::AddressSpace::ACC &&
+         *dstSpace == pto::AddressSpace::MAT);
     if (!okPair)
       return emitOpError("expects A5 textract to use a supported src/dst loc pair");
     if (*srcSpace == pto::AddressSpace::MAT) {
+      if (hasPreQuantScalar || hasRelu)
+        return emitOpError("expects mat-source textract to use the base form without preQuantScalar or reluPreMode");
       if (!hasMatExtractSourceLayoutA5(srcTb, *dstSpace))
         return emitOpError("expects A5 textract src to use a supported mat blayout/slayout combination");
       if (*dstSpace == pto::AddressSpace::LEFT) {
@@ -5781,10 +5847,29 @@ mlir::LogicalResult mlir::pto::TExtractOp::verify() {
       }
     } else if (*srcSpace == pto::AddressSpace::VEC &&
                *dstSpace == pto::AddressSpace::VEC) {
+      if (hasPreQuantScalar || hasRelu)
+        return emitOpError("expects vec-source textract to use the base form without preQuantScalar or reluPreMode");
       if (!isRowMajorNoneBoxND(srcTb) || !isRowMajorNoneBoxND(dstTb))
         return emitOpError(
             "expects A5 vec->vec textract src/dst to use ND layout "
             "(blayout=row_major, slayout=none_box)");
+    } else if (*srcSpace == pto::AddressSpace::ACC) {
+      if (srcTb.getBLayoutValueI32() != static_cast<int32_t>(pto::BLayout::ColMajor) ||
+          srcTb.getSLayoutValueI32() != static_cast<int32_t>(pto::SLayout::RowMajor))
+        return emitOpError("expects A5 acc-source textract src to use blayout=col_major and slayout=row_major");
+      if (dstTb.getBLayoutValueI32() != static_cast<int32_t>(pto::BLayout::ColMajor) ||
+          dstTb.getSLayoutValueI32() != static_cast<int32_t>(pto::SLayout::RowMajor))
+        return emitOpError("expects A5 acc-source textract dst to use blayout=col_major and slayout=row_major");
+      if (hasPreQuantScalar) {
+        if (!isA5AccQuantExtractTypePair(srcElem, dstElem))
+          return emitOpError(
+              "expects A5 acc preQuantScalar textract element types to be "
+              "(src=f32,dst=i8/fp8/f16/bf16/f32) or (src=i32,dst=i8/f16/bf16)");
+      } else if (!isA5AccCastExtractTypePair(srcElem, dstElem)) {
+        return emitOpError(
+            "expects A5 acc textract element types to be "
+            "(src=f32,dst=f16/bf16/f32) or (src=i32,dst=i32)");
+      }
     }
     return success();
   };
