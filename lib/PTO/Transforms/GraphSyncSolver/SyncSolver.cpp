@@ -97,7 +97,8 @@ Occurrence *Solver::getFirstIterOcc(Occurrence *occ, Occurrence *parOcc) {
   PTO_SYNC_SOLVER_CHECK(occ != nullptr && parOcc != nullptr);
   if (parOcc->depth + 1 < occ->depth) {
     auto *newParOcc = getFirstIterOcc(
-        occ->getNthParent(occ->depth - parOcc->depth - 1), parOcc);
+        Occurrence::getNthParent(occ, occ->depth - parOcc->depth - 1),
+        parOcc);
     return getFirstIterOcc(occ, newParOcc);
   }
   auto *it =
@@ -113,7 +114,8 @@ Occurrence *Solver::getLastIterOcc(Occurrence *occ, Occurrence *parOcc) {
   PTO_SYNC_SOLVER_CHECK(occ != nullptr && parOcc != nullptr);
   if (parOcc->depth + 1 < occ->depth) {
     auto *newParOcc = getLastIterOcc(
-        occ->getNthParent(occ->depth - parOcc->depth - 1), parOcc);
+        Occurrence::getNthParent(occ, occ->depth - parOcc->depth - 1),
+        parOcc);
     return getLastIterOcc(occ, newParOcc);
   }
   auto it =
@@ -234,7 +236,8 @@ bool Solver::checkAlreadySyncedWithUnitFlag(Occurrence *occ1,
   return false;
 }
 
-bool Solver::ignoreMemoryConflict(RWOperation *rwOp1, RWOperation *rwOp2,
+bool Solver::ignoreMemoryConflict(const RWOperation *rwOp1,
+                                  const RWOperation *rwOp2,
                                   const MemInfo &memInfo1,
                                   const MemInfo &memInfo2) {
   (void)rwOp1;
@@ -297,24 +300,30 @@ Solver::checkMemoryConflicts(RWOperation *rwOp1, RWOperation *rwOp2) {
     PTO_SYNC_SOLVER_CHECK(coreDst == pto::TCoreType::VECTOR ||
            coreDst == pto::TCoreType::CUBE);
   }
-  llvm::SetVector<std::tuple<CorePipeInfo, CorePipeInfo>> collectedConflictsSet;
+  CorePipePairDenseSet collectedConflictsSet;
+  llvm::SmallVector<CorePipePairKey> collectedConflicts;
+  auto addCollectedConflict = [&collectedConflictsSet, &collectedConflicts](
+                                  CorePipeInfo src, CorePipeInfo dst) {
+    CorePipePairKey key{src, dst};
+    if (collectedConflictsSet.insert(key).second) {
+      collectedConflicts.push_back(key);
+    }
+  };
   if (checkMemInfoConflict(rwOp1, rwOp2, rwOp1->readMemInfo,
                            rwOp2->writeMemInfo)) {
-    collectedConflictsSet.insert({CorePipeInfo(coreSrc, rwOp1->pipeRead),
-                                  CorePipeInfo(coreDst, rwOp2->pipeWrite)});
+    addCollectedConflict(CorePipeInfo(coreSrc, rwOp1->pipeRead),
+                         CorePipeInfo(coreDst, rwOp2->pipeWrite));
   }
   if (checkMemInfoConflict(rwOp1, rwOp2, rwOp1->writeMemInfo,
                            rwOp2->readMemInfo)) {
-    collectedConflictsSet.insert({CorePipeInfo(coreSrc, rwOp1->pipeWrite),
-                                  CorePipeInfo(coreDst, rwOp2->pipeRead)});
+    addCollectedConflict(CorePipeInfo(coreSrc, rwOp1->pipeWrite),
+                         CorePipeInfo(coreDst, rwOp2->pipeRead));
   }
   if (checkMemInfoConflict(rwOp1, rwOp2, rwOp1->writeMemInfo,
                            rwOp2->writeMemInfo)) {
-    collectedConflictsSet.insert({CorePipeInfo(coreSrc, rwOp1->pipeWrite),
-                                  CorePipeInfo(coreDst, rwOp2->pipeWrite)});
+    addCollectedConflict(CorePipeInfo(coreSrc, rwOp1->pipeWrite),
+                         CorePipeInfo(coreDst, rwOp2->pipeWrite));
   }
-  llvm::SmallVector<std::tuple<CorePipeInfo, CorePipeInfo>> collectedConflicts(
-      collectedConflictsSet.begin(), collectedConflictsSet.end());
   return it->second = collectedConflicts;
 }
 
@@ -423,8 +432,10 @@ bool Solver::validateMultiBufferScope(Occurrence *occ1, Occurrence *occ2,
     return false;
   multibufferLoop = multibufferLoopOpt.value();
   PTO_SYNC_SOLVER_CHECK(multibufferLoop != nullptr);
-  return setOcc->getParentWithOp(multibufferLoop, /*assertExists=*/false) &&
-         waitOcc->getParentWithOp(multibufferLoop, /*assertExists=*/false);
+  return Occurrence::getParentWithOp(setOcc, multibufferLoop,
+                                     /*assertExists=*/false) &&
+         Occurrence::getParentWithOp(waitOcc, multibufferLoop,
+                                     /*assertExists=*/false);
 }
 
 void Solver::updateMultiBufferConflictStats(
@@ -1028,13 +1039,15 @@ Solver::getSetWaitLCAPairOcc(Occurrence *occ1, Occurrence *occ2) const {
   PTO_SYNC_SOLVER_CHECK(parOp1->parentOp != nullptr && parOp2->parentOp != nullptr);
   PTO_SYNC_SOLVER_CHECK(parOp1->parentOp == parOp2->parentOp);
 
-  auto *parOcc1 = occ1->getParentWithOp(parOp1->parentOp);
-  auto *parOcc2 = occ2->getParentWithOp(parOp2->parentOp);
+  auto *parOcc1 = Occurrence::getParentWithOp(occ1, parOp1->parentOp);
+  auto *parOcc2 = Occurrence::getParentWithOp(occ2, parOp2->parentOp);
   PTO_SYNC_SOLVER_CHECK(parOcc1 != nullptr && parOcc2 != nullptr);
   PTO_SYNC_SOLVER_CHECK(parOcc1 != occ1 && parOcc2 != occ2);
 
-  auto *setOcc = occ1->getNthParent(occ1->depth - parOcc1->depth - 1);
-  auto *waitOcc = occ2->getNthParent(occ2->depth - parOcc2->depth - 1);
+  auto *setOcc =
+      Occurrence::getNthParent(occ1, occ1->depth - parOcc1->depth - 1);
+  auto *waitOcc =
+      Occurrence::getNthParent(occ2, occ2->depth - parOcc2->depth - 1);
   PTO_SYNC_SOLVER_CHECK(setOcc != nullptr && waitOcc != nullptr);
   PTO_SYNC_SOLVER_CHECK(parOcc1->isProperAncestor(setOcc));
   PTO_SYNC_SOLVER_CHECK(parOcc2->isProperAncestor(waitOcc));
@@ -1089,10 +1102,10 @@ void Solver::adjustSetWaitForCrossCoreLoops(Occurrence *occ1, Occurrence *occ2,
   }
   PTO_SYNC_SOLVER_CHECK(forOp1->multibufferUnrollNum ==
                         forOp2->multibufferUnrollNum);
-  setOcc = occ1->getNthParent(occ1->depth - setOcc->depth -
-                              kCrossCoreParentDepthOffset);
-  waitOcc = occ2->getNthParent(occ2->depth - waitOcc->depth -
-                               kCrossCoreParentDepthOffset);
+  setOcc = Occurrence::getNthParent(
+      occ1, occ1->depth - setOcc->depth - kCrossCoreParentDepthOffset);
+  waitOcc = Occurrence::getNthParent(
+      occ2, occ2->depth - waitOcc->depth - kCrossCoreParentDepthOffset);
 }
 
 void Solver::adjustSetWaitForCrossCoreScopes(Occurrence *occ1,
@@ -1109,10 +1122,10 @@ void Solver::adjustSetWaitForCrossCoreScopes(Occurrence *occ1,
     return;
   }
   PTO_SYNC_SOLVER_CHECK(scopeOp1->maxPreloadNum == scopeOp2->maxPreloadNum);
-  setOcc = occ1->getNthParent(occ1->depth - setOcc->depth -
-                              kCrossCoreParentDepthOffset);
-  waitOcc = occ2->getNthParent(occ2->depth - waitOcc->depth -
-                               kCrossCoreParentDepthOffset);
+  setOcc = Occurrence::getNthParent(
+      occ1, occ1->depth - setOcc->depth - kCrossCoreParentDepthOffset);
+  waitOcc = Occurrence::getNthParent(
+      occ2, occ2->depth - waitOcc->depth - kCrossCoreParentDepthOffset);
 }
 
 void Solver::adjustSetWaitForLoopPlaceholders(Occurrence *&setOcc,
@@ -1158,7 +1171,8 @@ Solver::getUnlikelyCondSetWaitOcc(Occurrence *occ1, Occurrence *occ2) {
       auto *parentLoopOcc = Occurrence::getParentloop(unlikelyParCondOcc1);
       if (parentLoopOcc == nullptr || parentLoopOcc->isProperAncestor(occ2)) {
         auto *placeHolderOcc = getScopeEndPlaceHolderOcc(
-            occ1->getNthParent(occ1->depth - unlikelyParCondOcc1->depth - 1));
+            Occurrence::getNthParent(
+                occ1, occ1->depth - unlikelyParCondOcc1->depth - 1));
         return std::make_pair(occ1, placeHolderOcc);
       }
     }
@@ -1169,7 +1183,8 @@ Solver::getUnlikelyCondSetWaitOcc(Occurrence *occ1, Occurrence *occ2) {
       auto *parentLoopOcc = Occurrence::getParentloop(unlikelyParCondOcc2);
       if (parentLoopOcc == nullptr || parentLoopOcc->isProperAncestor(occ1)) {
         auto *placeHolderOcc = getScopeBeginPlaceHolderOcc(
-            occ2->getNthParent(occ2->depth - unlikelyParCondOcc2->depth - 1));
+            Occurrence::getNthParent(
+                occ2, occ2->depth - unlikelyParCondOcc2->depth - 1));
         return std::make_pair(placeHolderOcc, occ2);
       }
     }
@@ -1513,8 +1528,8 @@ std::unique_ptr<ConflictPair> Solver::createSetWaitConflictPair(
     Occurrence *&parentLCALoopAfterPHOcc) {
   std::tie(setOcc, waitOcc) = getSetWaitOcc(occ1, occ2);
   auto [lcaSetOp, lcaWaitOp] = OperationBase::getLCAPair(setOcc->op, waitOcc->op);
-  normScopeOcc1 = setOcc->getParentWithOp(lcaSetOp->parentOp);
-  normScopeOcc2 = waitOcc->getParentWithOp(lcaWaitOp->parentOp);
+  normScopeOcc1 = Occurrence::getParentWithOp(setOcc, lcaSetOp->parentOp);
+  normScopeOcc2 = Occurrence::getParentWithOp(waitOcc, lcaWaitOp->parentOp);
   PTO_SYNC_SOLVER_CHECK(normScopeOcc1->op == normScopeOcc2->op);
   normScopeOp = normScopeOcc1->op;
   PTO_SYNC_SOLVER_CHECK(normScopeOp != nullptr && normScopeOp->parentOp != nullptr);

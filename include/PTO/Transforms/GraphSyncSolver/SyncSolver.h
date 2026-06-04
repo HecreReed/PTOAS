@@ -78,15 +78,9 @@ protected:
   // Bookkeeping map used to record that a pair (scopeOp, op1, op2, setPipe,
   // waitPipe) has already been synchronized and which ConflictPair performed
   // it.
-  llvm::DenseMap<std::tuple<OperationBase *, OperationBase *, OperationBase *,
-                            CorePipeInfo, CorePipeInfo>,
-                 llvm::DenseSet<ConflictPair *>>
-      syncedPairs;
+  SyncScopePairDenseMap<llvm::DenseSet<ConflictPair *>> syncedPairs;
 
-  llvm::DenseMap<std::tuple<OperationBase *, OperationBase *, OperationBase *,
-                            CorePipeInfo, CorePipeInfo>,
-                 ConflictPair *>
-      replacedWithReusableSyncedPairs;
+  SyncScopePairDenseMap<ConflictPair *> replacedWithReusableSyncedPairs;
 
   // Chosen conflicts keyed by occurrence (scope occurrence) to allow retrieving
   // conflicts that affect a particular occurrence subtree.
@@ -114,12 +108,10 @@ protected:
   // inner map key is (setPipe, waitPipe) and value is the set of event ids
   // used.
   llvm::MapVector<OperationBase *,
-                  llvm::DenseMap<std::tuple<CorePipeInfo, CorePipeInfo>,
-                                 llvm::DenseMap<int64_t, int64_t>>>
+                  CorePipePairDenseMap<llvm::DenseMap<int64_t, int64_t>>>
       backwardSyncEvents;
 
-  llvm::MapVector<OperationBase *,
-                  llvm::DenseSet<std::tuple<CorePipeInfo, CorePipeInfo>>>
+  llvm::MapVector<OperationBase *, CorePipePairDenseSet>
       backwardSyncEventsAfterMerge;
 
   // Memoization of memory-conflict discovery between specific RWOperation
@@ -130,15 +122,13 @@ protected:
       checkMemoryConflictsMem;
 
   // Set of pipe pairs that were forced to barrier-all (no event ids available).
-  llvm::DenseSet<std::tuple<CorePipeInfo, CorePipeInfo>> barrierAllPairs;
+  CorePipePairDenseSet barrierAllPairs;
 
   // Set of pipe pairs for which multi-event-id usage is disabled.
-  llvm::DenseSet<std::tuple<CorePipeInfo, CorePipeInfo>>
-      disabledMultiEventIdPairs;
+  CorePipePairDenseSet disabledMultiEventIdPairs;
 
   // Count-per-pipe-pair used to limit reuse of conflict pairs (reuse budget).
-  llvm::DenseMap<std::tuple<CorePipeInfo, CorePipeInfo>, int> reusePairs,
-      reusedPairs;
+  CorePipePairDenseMap<int> reusePairs, reusedPairs;
 
   // Tracks inserted barrier-all markers before occurrences: op -> set of (occ,
   // isUseless).
@@ -260,7 +250,7 @@ protected:
       int startIndex, int endIndex,
       const llvm::SmallVector<ConflictPair *> &ignoreConflictPairs);
 
-  bool ignoreMemoryConflict(RWOperation *rwOp1, RWOperation *rwOp2,
+  bool ignoreMemoryConflict(const RWOperation *rwOp1, const RWOperation *rwOp2,
                             const MemInfo &memInfo1, const MemInfo &memInfo2);
 
   bool checkMemInfoConflict(RWOperation *rwOp1, RWOperation *rwOp2,
@@ -541,35 +531,25 @@ protected:
 
   void collectMergeableBackwardSyncEvents(
       Scope *scopeOp,
-      llvm::DenseSet<std::tuple<CorePipeInfo, CorePipeInfo, int64_t>>
-          &toBeErased);
+      CorePipeEventDenseSet &toBeErased);
 
   void collectMergeableBackwardSyncEventsForEventId(
       Scope *scopeOp, ArrayRef<pto::TCoreType> coreTypes, int64_t eventId,
-      llvm::DenseSet<std::tuple<CorePipeInfo, CorePipeInfo, int64_t>>
-          &toBeErased);
+      CorePipeEventDenseSet &toBeErased);
 
   void collectMergeableBackwardSyncEventsForCorePair(
       Scope *scopeOp, pto::TCoreType coreSrc, pto::TCoreType coreDst,
-      int64_t eventId,
-      llvm::DenseSet<std::tuple<CorePipeInfo, CorePipeInfo, int64_t>>
-          &toBeErased);
+      int64_t eventId, CorePipeEventDenseSet &toBeErased);
 
   bool tryCollectMergeableBackwardSyncEvent(
       Scope *scopeOp, CorePipeInfo corePipeSrc, CorePipeInfo corePipeDst,
-      int64_t eventId,
-      llvm::DenseSet<std::tuple<CorePipeInfo, CorePipeInfo, int64_t>>
-          &toBeErased);
+      int64_t eventId, CorePipeEventDenseSet &toBeErased);
 
   void eraseMergedBackwardSyncEventsFromChildScope(
-      Scope *childScopeOp,
-      const llvm::DenseSet<std::tuple<CorePipeInfo, CorePipeInfo, int64_t>>
-          &toBeErased);
+      Scope *childScopeOp, const CorePipeEventDenseSet &toBeErased);
 
   void eraseMergedBackwardSyncEventsFromNestedScopes(
-      Scope *scopeOp,
-      const llvm::DenseSet<std::tuple<CorePipeInfo, CorePipeInfo, int64_t>>
-          &toBeErased);
+      Scope *scopeOp, const CorePipeEventDenseSet &toBeErased);
 
   void mergeBackwardSyncPairs(SyncMap &syncMapBefore, SyncMap &syncMapAfter);
 

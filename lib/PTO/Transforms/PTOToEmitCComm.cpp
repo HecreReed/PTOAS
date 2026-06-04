@@ -224,14 +224,13 @@ template <typename AsyncOp>
 struct PTOAsyncTransferToEmitC : public OpConversionPattern<AsyncOp> {
   using OpConversionPattern<AsyncOp>::OpConversionPattern;
 
-  // NOLINTNEXTLINE(readability-non-const-parameter): MLIR pattern constructor requires a mutable type converter.
-  explicit PTOAsyncTransferToEmitC(TypeConverter &typeConverter, MLIRContext *ctx,
+  explicit PTOAsyncTransferToEmitC(const TypeConverter &typeConverter,
+                                   MLIRContext *ctx,
                                    StringRef callee)
       : OpConversionPattern<AsyncOp>(typeConverter, ctx), callee(callee.str()) {}
 
   LogicalResult matchAndRewrite(AsyncOp op, typename AsyncOp::Adaptor adaptor,
-                                // NOLINTNEXTLINE(readability-non-const-parameter): MLIR conversion pattern override requires a mutable rewriter reference.
-                                ConversionPatternRewriter &rewriter) const override {
+                                ConversionPatternRewriter &rewriter) const override { // NOLINT(readability-non-const-parameter)
     Value dst = peelUnrealized(adaptor.getDst());
     Value src = peelUnrealized(adaptor.getSrc());
     Value dstGT = dst;
@@ -272,16 +271,15 @@ struct PTOAsyncTransferToEmitC : public OpConversionPattern<AsyncOp> {
 
 template <typename AsyncEventOp>
 struct PTOAsyncEventToEmitC : public OpConversionPattern<AsyncEventOp> {
-  // NOLINTNEXTLINE(readability-non-const-parameter): MLIR pattern constructor requires a mutable type converter.
-  explicit PTOAsyncEventToEmitC(TypeConverter &typeConverter, MLIRContext *ctx,
+  explicit PTOAsyncEventToEmitC(const TypeConverter &typeConverter,
+                                MLIRContext *ctx,
                                 StringRef callee)
       : OpConversionPattern<AsyncEventOp>(typeConverter, ctx),
         callee(callee.str()) {}
 
   LogicalResult matchAndRewrite(AsyncEventOp op,
                                 typename AsyncEventOp::Adaptor adaptor,
-                                // NOLINTNEXTLINE(readability-non-const-parameter): MLIR conversion pattern override requires a mutable rewriter reference.
-                                ConversionPatternRewriter &rewriter) const override {
+                                ConversionPatternRewriter &rewriter) const override { // NOLINT(readability-non-const-parameter)
     Type resultTy =
         this->getTypeConverter()->convertType(op.getCompleted().getType());
     if (!resultTy)
@@ -434,8 +432,8 @@ struct PTOCommCollectiveToEmitC : public OpConversionPattern<CollectiveOp> {
     Value parallelGroup;
   };
 
-  // NOLINTNEXTLINE(readability-non-const-parameter): MLIR pattern constructor requires a mutable type converter.
-  explicit PTOCommCollectiveToEmitC(TypeConverter &typeConverter, MLIRContext *ctx,
+  explicit PTOCommCollectiveToEmitC(const TypeConverter &typeConverter,
+                                    MLIRContext *ctx,
                                     StringRef apiName)
       : OpConversionPattern<CollectiveOp>(typeConverter, ctx),
         apiName(apiName.str()) {}
@@ -560,8 +558,7 @@ struct PTOCommCollectiveToEmitC : public OpConversionPattern<CollectiveOp> {
   }
 
   LogicalResult matchAndRewrite(CollectiveOp op, typename CollectiveOp::Adaptor adaptor,
-                                // NOLINTNEXTLINE(readability-non-const-parameter): MLIR conversion pattern override requires a mutable rewriter reference.
-                                ConversionPatternRewriter &rewriter) const override {
+                                ConversionPatternRewriter &rewriter) const override { // NOLINT(readability-non-const-parameter)
     if constexpr (std::is_same_v<CollectiveOp, pto::TBroadcastOp>) {
       if (failed(emitBroadcast(op, adaptor, rewriter)))
         return failure();
@@ -586,14 +583,13 @@ template <typename OpTy>
 struct PTOP2PCommToEmitC : public OpConversionPattern<OpTy> {
   using OpConversionPattern<OpTy>::OpConversionPattern;
 
-  // NOLINTNEXTLINE(readability-non-const-parameter): MLIR pattern constructor requires a mutable type converter.
-  explicit PTOP2PCommToEmitC(TypeConverter &typeConverter, MLIRContext *ctx,
+  explicit PTOP2PCommToEmitC(const TypeConverter &typeConverter,
+                             MLIRContext *ctx,
                              StringRef callee)
       : OpConversionPattern<OpTy>(typeConverter, ctx), callee(callee.str()) {}
 
   LogicalResult matchAndRewrite(OpTy op, typename OpTy::Adaptor adaptor,
-                                // NOLINTNEXTLINE(readability-non-const-parameter): MLIR conversion pattern override requires a mutable rewriter reference.
-                                ConversionPatternRewriter &rewriter) const override {
+                                ConversionPatternRewriter &rewriter) const override { // NOLINT(readability-non-const-parameter)
     FailureOr<Value> dstGT =
         buildCommGlobalTensorValue(rewriter, op.getLoc(), op.getDst(), adaptor.getDst(),
                                    op.getOperation());
@@ -632,15 +628,14 @@ template <typename SignalOp>
 struct PTOSignalCommToEmitC : public OpConversionPattern<SignalOp> {
   using OpConversionPattern<SignalOp>::OpConversionPattern;
 
-  // NOLINTNEXTLINE(readability-non-const-parameter): MLIR pattern constructor requires a mutable type converter.
-  explicit PTOSignalCommToEmitC(TypeConverter &typeConverter, MLIRContext *ctx,
+  explicit PTOSignalCommToEmitC(const TypeConverter &typeConverter,
+                                MLIRContext *ctx,
                                 StringRef callee)
       : OpConversionPattern<SignalOp>(typeConverter, ctx),
         callee(callee.str()) {}
 
   LogicalResult matchAndRewrite(SignalOp op, typename SignalOp::Adaptor adaptor,
-                                // NOLINTNEXTLINE(readability-non-const-parameter): MLIR conversion pattern override requires a mutable rewriter reference.
-                                ConversionPatternRewriter &rewriter) const override {
+                                ConversionPatternRewriter &rewriter) const override { // NOLINT(readability-non-const-parameter)
     FailureOr<Value> signalGT = buildCommGlobalTensorValue(
         rewriter, op.getLoc(), op.getSignal(), adaptor.getSignal(), op.getOperation());
     if (failed(signalGT))

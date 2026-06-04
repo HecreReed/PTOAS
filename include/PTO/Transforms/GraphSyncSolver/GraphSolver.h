@@ -47,8 +47,7 @@ public:
   // (startIndex,endIndex) lifetime. Used by runDijkstra to compute minimum
   // distance paths between two pipe ids taking ordering constraints into
   // account.
-  llvm::DenseMap<CorePipeInfo, llvm::DenseMap<CorePipeInfo, std::set<Edge>>>
-      adjacencyList;
+  CorePipeDenseMap<CorePipeDenseMap<std::set<Edge>>> adjacencyList;
 
   GraphSolver(const SyncSolverOptions &options) : options(options) {}
 

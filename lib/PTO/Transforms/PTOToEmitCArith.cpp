@@ -483,8 +483,7 @@ template <typename CastOp>
 struct ArithCastToEmitC : public OpConversionPattern<CastOp> {
   using OpConversionPattern<CastOp>::OpConversionPattern;
   LogicalResult matchAndRewrite(CastOp op, typename CastOp::Adaptor adaptor,
-                                // NOLINTNEXTLINE(readability-non-const-parameter): MLIR conversion pattern override requires a mutable rewriter reference.
-                                ConversionPatternRewriter &rewriter) const override {
+                                ConversionPatternRewriter &rewriter) const override { // NOLINT(readability-non-const-parameter)
     Type dstTy = this->getTypeConverter()->convertType(op.getType());
     if (!dstTy)
       return failure();

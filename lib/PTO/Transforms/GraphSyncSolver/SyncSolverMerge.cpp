@@ -36,7 +36,7 @@
 using namespace mlir;
 using namespace pto::syncsolver;
 
-using BackwardSyncEventKey = std::tuple<CorePipeInfo, CorePipeInfo, int64_t>;
+using BackwardSyncEventKey = CorePipeEventKey;
 
 static llvm::SmallVector<pto::TCoreType> getBackwardSyncCoreTypes(
     const SyncSolverOptions &options) {
@@ -48,7 +48,7 @@ static llvm::SmallVector<pto::TCoreType> getBackwardSyncCoreTypes(
 
 bool Solver::tryCollectMergeableBackwardSyncEvent(
     Scope *scopeOp, CorePipeInfo corePipeSrc, CorePipeInfo corePipeDst,
-    int64_t eventId, llvm::DenseSet<BackwardSyncEventKey> &toBeErased) {
+    int64_t eventId, CorePipeEventDenseSet &toBeErased) {
   if (checkBackwardSyncEventsContains(scopeOp, corePipeSrc, corePipeDst, eventId))
     return false;
   if (!checkMergeable(scopeOp, corePipeSrc, corePipeDst, eventId))
@@ -295,7 +295,7 @@ void Solver::mergeBackwardSyncEventIds(OperationBase *op) {
   if (shouldSkipBackwardSyncMerge(op)) {
     return;
   }
-  llvm::DenseSet<BackwardSyncEventKey> toBeErased;
+  CorePipeEventDenseSet toBeErased;
   collectMergeableBackwardSyncEvents(scopeOp, toBeErased);
   eraseMergedBackwardSyncEventsFromNestedScopes(scopeOp, toBeErased);
 }
@@ -323,7 +323,7 @@ bool Solver::shouldSkipBackwardSyncMerge(OperationBase *op) const {
 }
 
 void Solver::collectMergeableBackwardSyncEvents(
-    Scope *scopeOp, llvm::DenseSet<BackwardSyncEventKey> &toBeErased) {
+    Scope *scopeOp, CorePipeEventDenseSet &toBeErased) {
   llvm::SmallVector<pto::TCoreType> coreTypes =
       getBackwardSyncCoreTypes(options);
   int64_t eventIdMax = getHWAvailableEventIdNum(options.syncMode);
@@ -335,7 +335,7 @@ void Solver::collectMergeableBackwardSyncEvents(
 
 void Solver::collectMergeableBackwardSyncEventsForEventId(
     Scope *scopeOp, ArrayRef<pto::TCoreType> coreTypes, int64_t eventId,
-    llvm::DenseSet<BackwardSyncEventKey> &toBeErased) {
+    CorePipeEventDenseSet &toBeErased) {
   for (auto coreSrc : coreTypes) {
     for (auto coreDst : coreTypes) {
       collectMergeableBackwardSyncEventsForCorePair(scopeOp, coreSrc, coreDst,
@@ -346,7 +346,7 @@ void Solver::collectMergeableBackwardSyncEventsForEventId(
 
 void Solver::collectMergeableBackwardSyncEventsForCorePair(
     Scope *scopeOp, pto::TCoreType coreSrc, pto::TCoreType coreDst,
-    int64_t eventId, llvm::DenseSet<BackwardSyncEventKey> &toBeErased) {
+    int64_t eventId, CorePipeEventDenseSet &toBeErased) {
   size_t pipeNumMax = static_cast<size_t>(pto::PIPE::PIPE_NUM);
   for (size_t pipeSrcInt = 0; pipeSrcInt < pipeNumMax; ++pipeSrcInt) {
     for (size_t pipeDstInt = 0; pipeDstInt < pipeNumMax; ++pipeDstInt) {
@@ -359,7 +359,7 @@ void Solver::collectMergeableBackwardSyncEventsForCorePair(
 }
 
 void Solver::eraseMergedBackwardSyncEventsFromChildScope(
-    Scope *childScopeOp, const llvm::DenseSet<BackwardSyncEventKey> &toBeErased) {
+    Scope *childScopeOp, const CorePipeEventDenseSet &toBeErased) {
   for (auto [corePipeSrc, corePipeDst, eventId] : toBeErased) {
     if (!checkBackwardSyncEventsContains(childScopeOp, corePipeSrc, corePipeDst,
                                          eventId)) {
@@ -373,7 +373,7 @@ void Solver::eraseMergedBackwardSyncEventsFromChildScope(
 }
 
 void Solver::eraseMergedBackwardSyncEventsFromNestedScopes(
-    Scope *scopeOp, const llvm::DenseSet<BackwardSyncEventKey> &toBeErased) {
+    Scope *scopeOp, const CorePipeEventDenseSet &toBeErased) {
   if (isa<Condition, Loop>(scopeOp)) {
     for (auto &op : scopeOp->body) {
       auto *block = llvm::dyn_cast<Scope>(op.get());
@@ -585,7 +585,7 @@ llvm::LogicalResult Solver::considerOuterBackwardSyncPairs() {
 bool Solver::pruneStaleMergedBackwardSyncPairs() {
   bool backwardPairsPositionChanged = false;
   for (auto &[scopeOp, st] : backwardSyncEventsAfterMerge) {
-    SmallVector<std::tuple<CorePipeInfo, CorePipeInfo>> toBeErased;
+    SmallVector<CorePipePairKey> toBeErased;
     for (auto &corePipeInfoPair : st) {
       if (!backwardSyncEvents.contains(scopeOp) ||
           !backwardSyncEvents[scopeOp].contains(corePipeInfoPair)) {

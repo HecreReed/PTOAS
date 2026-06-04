@@ -17,9 +17,12 @@
 #include "mlir/Dialect/SCF/IR/SCF.h"
 #include "mlir/IR/Iterators.h"
 #include "mlir/IR/Location.h"
+#include "llvm/ADT/DenseMap.h"
+#include "llvm/ADT/DenseSet.h"
 #include "llvm/ADT/MapVector.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/Support/raw_ostream.h"
+#include <cstdint>
 #include <deque>
 #include <memory>
 #include <optional>
@@ -83,36 +86,148 @@ struct CorePipeInfo {
     return std::tie(coreType, pipe) < std::tie(other.coreType, other.pipe);
   }
 };
-} // namespace mlir::pto::syncsolver
 
-namespace llvm {
-// NOLINTBEGIN
-// llvm::DenseMap requires key traits to be specialized in namespace llvm.
-template <> struct DenseMapInfo<mlir::pto::syncsolver::CorePipeInfo> {
-  using CorePipePairTy = std::pair<mlir::pto::TCoreType, mlir::pto::PIPE>;
-  static inline mlir::pto::syncsolver::CorePipeInfo getEmptyKey() {
-    // Use sentinel values that are guaranteed never to appear as valid keys
-    return DenseMapInfo<CorePipePairTy>::getEmptyKey();
+struct CorePipeInfoKeyInfo {
+  using CorePipePairTy = std::pair<pto::TCoreType, pto::PIPE>;
+
+  static inline CorePipeInfo getEmptyKey() {
+    return CorePipeInfo(llvm::DenseMapInfo<CorePipePairTy>::getEmptyKey());
   }
-  static inline mlir::pto::syncsolver::CorePipeInfo getTombstoneKey() {
-    // Use a different set of sentinel values
-    return DenseMapInfo<CorePipePairTy>::getTombstoneKey();
+
+  static inline CorePipeInfo getTombstoneKey() {
+    return CorePipeInfo(llvm::DenseMapInfo<CorePipePairTy>::getTombstoneKey());
   }
-  static unsigned
-  getHashValue(const mlir::pto::syncsolver::CorePipeInfo &val) {
-    // Combine hashes of members
-    return DenseMapInfo<CorePipePairTy>::getHashValue({val.coreType, val.pipe});
+
+  static unsigned getHashValue(const CorePipeInfo &val) {
+    return llvm::DenseMapInfo<CorePipePairTy>::getHashValue(
+        {val.coreType, val.pipe});
   }
-  static bool isEqual(const mlir::pto::syncsolver::CorePipeInfo &lhs,
-                      const mlir::pto::syncsolver::CorePipeInfo &rhs) {
-    // Use the defined operator==
+
+  static bool isEqual(const CorePipeInfo &lhs, const CorePipeInfo &rhs) {
     return lhs == rhs;
   }
 };
-// NOLINTEND
-} // namespace llvm
 
-namespace mlir::pto::syncsolver {
+using CorePipePairKey = std::tuple<CorePipeInfo, CorePipeInfo>;
+using CorePipeEventKey = std::tuple<CorePipeInfo, CorePipeInfo, int64_t>;
+using SyncScopePairKey =
+    std::tuple<OperationBase *, OperationBase *, OperationBase *, CorePipeInfo,
+               CorePipeInfo>;
+
+static inline unsigned combineDenseHash(unsigned lhs, unsigned rhs) {
+  return (lhs * 37U) ^ rhs;
+}
+
+struct CorePipePairKeyInfo {
+  static inline CorePipePairKey getEmptyKey() {
+    return {CorePipeInfoKeyInfo::getEmptyKey(),
+            CorePipeInfoKeyInfo::getEmptyKey()};
+  }
+
+  static inline CorePipePairKey getTombstoneKey() {
+    return {CorePipeInfoKeyInfo::getTombstoneKey(),
+            CorePipeInfoKeyInfo::getTombstoneKey()};
+  }
+
+  static unsigned getHashValue(const CorePipePairKey &val) {
+    return combineDenseHash(CorePipeInfoKeyInfo::getHashValue(std::get<0>(val)),
+                            CorePipeInfoKeyInfo::getHashValue(std::get<1>(val)));
+  }
+
+  static bool isEqual(const CorePipePairKey &lhs,
+                      const CorePipePairKey &rhs) {
+    return CorePipeInfoKeyInfo::isEqual(std::get<0>(lhs), std::get<0>(rhs)) &&
+           CorePipeInfoKeyInfo::isEqual(std::get<1>(lhs), std::get<1>(rhs));
+  }
+};
+
+struct CorePipeEventKeyInfo {
+  static inline CorePipeEventKey getEmptyKey() {
+    return {CorePipeInfoKeyInfo::getEmptyKey(),
+            CorePipeInfoKeyInfo::getEmptyKey(),
+            llvm::DenseMapInfo<int64_t>::getEmptyKey()};
+  }
+
+  static inline CorePipeEventKey getTombstoneKey() {
+    return {CorePipeInfoKeyInfo::getTombstoneKey(),
+            CorePipeInfoKeyInfo::getTombstoneKey(),
+            llvm::DenseMapInfo<int64_t>::getTombstoneKey()};
+  }
+
+  static unsigned getHashValue(const CorePipeEventKey &val) {
+    unsigned hash = CorePipePairKeyInfo::getHashValue(
+        {std::get<0>(val), std::get<1>(val)});
+    return combineDenseHash(hash,
+                            llvm::DenseMapInfo<int64_t>::getHashValue(
+                                std::get<2>(val)));
+  }
+
+  static bool isEqual(const CorePipeEventKey &lhs,
+                      const CorePipeEventKey &rhs) {
+    return CorePipePairKeyInfo::isEqual({std::get<0>(lhs), std::get<1>(lhs)},
+                                        {std::get<0>(rhs), std::get<1>(rhs)}) &&
+           llvm::DenseMapInfo<int64_t>::isEqual(std::get<2>(lhs),
+                                                std::get<2>(rhs));
+  }
+};
+
+struct SyncScopePairKeyInfo {
+  static inline SyncScopePairKey getEmptyKey() {
+    return {llvm::DenseMapInfo<OperationBase *>::getEmptyKey(),
+            llvm::DenseMapInfo<OperationBase *>::getEmptyKey(),
+            llvm::DenseMapInfo<OperationBase *>::getEmptyKey(),
+            CorePipeInfoKeyInfo::getEmptyKey(),
+            CorePipeInfoKeyInfo::getEmptyKey()};
+  }
+
+  static inline SyncScopePairKey getTombstoneKey() {
+    return {llvm::DenseMapInfo<OperationBase *>::getTombstoneKey(),
+            llvm::DenseMapInfo<OperationBase *>::getTombstoneKey(),
+            llvm::DenseMapInfo<OperationBase *>::getTombstoneKey(),
+            CorePipeInfoKeyInfo::getTombstoneKey(),
+            CorePipeInfoKeyInfo::getTombstoneKey()};
+  }
+
+  static unsigned getHashValue(const SyncScopePairKey &val) {
+    unsigned hash =
+        llvm::DenseMapInfo<OperationBase *>::getHashValue(std::get<0>(val));
+    hash = combineDenseHash(
+        hash, llvm::DenseMapInfo<OperationBase *>::getHashValue(std::get<1>(val)));
+    hash = combineDenseHash(
+        hash, llvm::DenseMapInfo<OperationBase *>::getHashValue(std::get<2>(val)));
+    hash =
+        combineDenseHash(hash, CorePipeInfoKeyInfo::getHashValue(std::get<3>(val)));
+    return combineDenseHash(hash,
+                            CorePipeInfoKeyInfo::getHashValue(std::get<4>(val)));
+  }
+
+  static bool isEqual(const SyncScopePairKey &lhs,
+                      const SyncScopePairKey &rhs) {
+    return llvm::DenseMapInfo<OperationBase *>::isEqual(std::get<0>(lhs),
+                                                        std::get<0>(rhs)) &&
+           llvm::DenseMapInfo<OperationBase *>::isEqual(std::get<1>(lhs),
+                                                        std::get<1>(rhs)) &&
+           llvm::DenseMapInfo<OperationBase *>::isEqual(std::get<2>(lhs),
+                                                        std::get<2>(rhs)) &&
+           CorePipeInfoKeyInfo::isEqual(std::get<3>(lhs), std::get<3>(rhs)) &&
+           CorePipeInfoKeyInfo::isEqual(std::get<4>(lhs), std::get<4>(rhs));
+  }
+};
+
+template <typename ValueT>
+using CorePipeDenseMap =
+    llvm::DenseMap<CorePipeInfo, ValueT, CorePipeInfoKeyInfo>;
+template <typename ValueT>
+using CorePipePairDenseMap =
+    llvm::DenseMap<CorePipePairKey, ValueT, CorePipePairKeyInfo>;
+using CorePipePairDenseSet =
+    llvm::DenseSet<CorePipePairKey, CorePipePairKeyInfo>;
+using CorePipeEventDenseSet =
+    llvm::DenseSet<CorePipeEventKey, CorePipeEventKeyInfo>;
+template <typename ValueT>
+using SyncScopePairDenseMap =
+    llvm::DenseMap<SyncScopePairKey, ValueT, SyncScopePairKeyInfo>;
+
 enum class SyncMode {
   INTRA_CORE_SYNC,
   CROSS_CORE_SYNC,
@@ -255,13 +370,13 @@ struct Occurrence {
   static int getDepth(const Occurrence *occ);
 
   // Walk up parents to find the first ancestor occurrence associated with 'op'.
-  Occurrence *getParentWithOp(const Operation *op,
-                              bool assertExists = true);
-  Occurrence *getParentWithOp(const OperationBase *op,
-                              bool assertExists = true);
+  static Occurrence *getParentWithOp(Occurrence *occ, const Operation *op,
+                                     bool assertExists = true);
+  static Occurrence *getParentWithOp(Occurrence *occ, const OperationBase *op,
+                                     bool assertExists = true);
 
   // Return the ancestor that is `dist` levels above this occurrence.
-  Occurrence *getNthParent(int dist);
+  static Occurrence *getNthParent(Occurrence *occ, int dist);
 
   // Compute/return the pair of sibling occurrences just below their LCA.
   static std::pair<Occurrence *, Occurrence *> getLCAPair(Occurrence *occ1,

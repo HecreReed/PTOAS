@@ -42,11 +42,9 @@ int Occurrence::getDepth(const Occurrence *occ) {
   return ret;
 }
 
-// NOLINTNEXTLINE(readability-make-member-function-const): solver callers need mutable ancestor occurrences.
-Occurrence *Occurrence::getParentWithOp(const OperationBase *op,
+Occurrence *Occurrence::getParentWithOp(Occurrence *occ, const OperationBase *op,
                                         bool assertExists) {
   ASSERT(op != nullptr);
-  Occurrence *occ = this;
   while (occ != nullptr) {
     if (occ->op == op) {
       return occ;
@@ -57,11 +55,9 @@ Occurrence *Occurrence::getParentWithOp(const OperationBase *op,
   return nullptr;
 }
 
-// NOLINTNEXTLINE(readability-make-member-function-const): solver callers need mutable ancestor occurrences.
-Occurrence *Occurrence::getParentWithOp(const Operation *op,
+Occurrence *Occurrence::getParentWithOp(Occurrence *occ, const Operation *op,
                                         bool assertExists) {
   ASSERT(op != nullptr);
-  Occurrence *occ = this;
   while (occ != nullptr) {
     if (occ->op != nullptr && occ->op->op == op) {
       return occ;
@@ -72,9 +68,7 @@ Occurrence *Occurrence::getParentWithOp(const Operation *op,
   return nullptr;
 }
 
-// NOLINTNEXTLINE(readability-make-member-function-const): solver callers need mutable ancestor occurrences.
-Occurrence *Occurrence::getNthParent(int dist) {
-  Occurrence *occ = this;
+Occurrence *Occurrence::getNthParent(Occurrence *occ, int dist) {
   while (dist > 0) {
     ASSERT(occ != nullptr);
     occ = occ->parentOcc;
@@ -90,9 +84,9 @@ std::pair<Occurrence *, Occurrence *> Occurrence::getLCAPair(Occurrence *occ1,
   int depth1 = getDepth(occ1);
   int depth2 = getDepth(occ2);
   if (depth1 < depth2) {
-    occ2 = occ2->getNthParent(depth2 - depth1);
+    occ2 = getNthParent(occ2, depth2 - depth1);
   } else if (depth1 > depth2) {
-    occ1 = occ1->getNthParent(depth1 - depth2);
+    occ1 = getNthParent(occ1, depth1 - depth2);
   }
   while (occ1->parentOcc != occ2->parentOcc) {
     occ1 = occ1->parentOcc;
@@ -124,7 +118,7 @@ Occurrence *Occurrence::getUnlikelyParentCondition(Occurrence *occ) {
   ASSERT(occ != nullptr && occ->op != nullptr);
   if (auto *parentConditionOp =
           OperationBase::getUnlikelyParentCondition(occ->op)) {
-    return occ->getParentWithOp(parentConditionOp, /*assertExists=*/true);
+    return getParentWithOp(occ, parentConditionOp, /*assertExists=*/true);
   }
   return nullptr;
 }
@@ -181,9 +175,7 @@ int OperationBase::getDepth() const {
   return ret;
 }
 
-// NOLINTNEXTLINE(readability-make-member-function-const): solver callers need mutable ancestor operations.
-OperationBase *OperationBase::getNthParent(int dist) {
-  OperationBase *op = this;
+OperationBase *OperationBase::getNthParent(OperationBase *op, int dist) {
   while (dist > 0) {
     ASSERT(op != nullptr);
     op = op->parentOp;
@@ -198,9 +190,9 @@ OperationBase::getLCAPair(OperationBase *op1, OperationBase *op2) {
   int depth1 = op1->getDepth();
   int depth2 = op2->getDepth();
   if (depth1 < depth2) {
-    op2 = op2->getNthParent(depth2 - depth1);
+    op2 = getNthParent(op2, depth2 - depth1);
   } else if (depth1 > depth2) {
-    op1 = op1->getNthParent(depth1 - depth2);
+    op1 = getNthParent(op1, depth1 - depth2);
   }
   while (op1->parentOp != op2->parentOp) {
     op1 = op1->parentOp;

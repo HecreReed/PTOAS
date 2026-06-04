@@ -34,8 +34,7 @@
 // PTO Dialect
 //===----------------------------------------------------------------------===//
 
-// NOLINTNEXTLINE(misc-include-cleaner): generated PTO *.inc files require PTODialect.
-#include "PTO/IR/PTODialect.h"
+#include "PTO/IR/PTODialect.h" // NOLINT(misc-include-cleaner): generated PTO *.inc files require PTODialect.
 
 //===----------------------------------------------------------------------===//
 // PTO Enums

@@ -1068,7 +1068,6 @@ static void bindPTOModule(pybind11::module &m) {
 }
 
 
-// NOLINTNEXTLINE(readability-inconsistent-declaration-parameter-name): pybind11 module macro requires a named parameter.
-PYBIND11_MODULE(_pto, m) {
+PYBIND11_MODULE(_pto, m) { // NOLINT(readability-inconsistent-declaration-parameter-name)
   bindPTOModule(m);
 }

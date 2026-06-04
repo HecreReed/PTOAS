@@ -24,7 +24,37 @@ using namespace mlir;
 using namespace pto::syncsolver;
 
 using UnitDistKey = std::tuple<int, int, CorePipeInfo>;
-using UnitDistMap = llvm::DenseMap<UnitDistKey, int>;
+struct UnitDistKeyInfo {
+  static inline UnitDistKey getEmptyKey() {
+    return {llvm::DenseMapInfo<int>::getEmptyKey(),
+            llvm::DenseMapInfo<int>::getEmptyKey(),
+            CorePipeInfoKeyInfo::getEmptyKey()};
+  }
+
+  static inline UnitDistKey getTombstoneKey() {
+    return {llvm::DenseMapInfo<int>::getTombstoneKey(),
+            llvm::DenseMapInfo<int>::getTombstoneKey(),
+            CorePipeInfoKeyInfo::getTombstoneKey()};
+  }
+
+  static unsigned getHashValue(const UnitDistKey &val) {
+    unsigned hash = llvm::DenseMapInfo<int>::getHashValue(std::get<0>(val));
+    hash = combineDenseHash(
+        hash, llvm::DenseMapInfo<int>::getHashValue(std::get<1>(val)));
+    return combineDenseHash(hash,
+                            CorePipeInfoKeyInfo::getHashValue(std::get<2>(val)));
+  }
+
+  static bool isEqual(const UnitDistKey &lhs, const UnitDistKey &rhs) {
+    return llvm::DenseMapInfo<int>::isEqual(std::get<0>(lhs),
+                                            std::get<0>(rhs)) &&
+           llvm::DenseMapInfo<int>::isEqual(std::get<1>(lhs),
+                                            std::get<1>(rhs)) &&
+           CorePipeInfoKeyInfo::isEqual(std::get<2>(lhs), std::get<2>(rhs));
+  }
+};
+
+using UnitDistMap = llvm::DenseMap<UnitDistKey, int, UnitDistKeyInfo>;
 using UnitQueueItem = std::pair<int, UnitDistKey>;
 using UnitPriorityQueue =
     std::priority_queue<UnitQueueItem, std::vector<UnitQueueItem>,
@@ -172,7 +202,7 @@ void GraphSolver::optimizeAdjacencyList() {
 std::optional<int> GraphSolver::runDijkstra(CorePipeInfo corePipeSrc,
                                             CorePipeInfo corePipeDst,
                                             int startIndex, int endIndex) {
-  llvm::DenseMap<CorePipeInfo, int> distance;
+  CorePipeDenseMap<int> distance;
   std::priority_queue<std::pair<int, CorePipeInfo>,
                       std::vector<std::pair<int, CorePipeInfo>>,
                       std::greater<std::pair<int, CorePipeInfo>>>

@@ -128,7 +128,7 @@ public:
   int getDepth() const;
 
   // Return the ancestor `dist` levels above this operation.
-  OperationBase *getNthParent(int dist);
+  static OperationBase *getNthParent(OperationBase *op, int dist);
 
   // Given two operations, return the pair of operations directly below their
   // LCA.
