@@ -3340,20 +3340,42 @@ struct PTOViewToMemrefPass
         rewriter.setInsertionPoint(op);
 
         Value src = op.getSrc();
-        Value fp = op.getFp();
         Value offset = op.getOffset();
+        Value fp = op.getFp();
+        Value exp = op.getExp();
+        Value max = op.getMax();
+        Value scaling = op.getScaling();
         Value dst = op.getDst();
 
         auto srcTy = dyn_cast<MemRefType>(src.getType());
-        auto fpTy = dyn_cast<MemRefType>(fp.getType());
         auto dstTy = dyn_cast<MemRefType>(dst.getType());
-        if (!srcTy || !fpTy || !dstTy) {
+        if (!srcTy || !dstTy) {
           op.emitError("ins/outs are not memref yet");
+          signalPassFailure();
+          return;
+        }
+        if (fp && !dyn_cast<MemRefType>(fp.getType())) {
+          op.emitError("fp is not memref yet");
           signalPassFailure();
           return;
         }
         if (offset && !dyn_cast<MemRefType>(offset.getType())) {
           op.emitError("offset is not memref yet");
+          signalPassFailure();
+          return;
+        }
+        if (exp && !dyn_cast<MemRefType>(exp.getType())) {
+          op.emitError("exp is not memref yet");
+          signalPassFailure();
+          return;
+        }
+        if (max && !dyn_cast<MemRefType>(max.getType())) {
+          op.emitError("max is not memref yet");
+          signalPassFailure();
+          return;
+        }
+        if (scaling && !dyn_cast<MemRefType>(scaling.getType())) {
+          op.emitError("scaling is not memref yet");
           signalPassFailure();
           return;
         }
@@ -3364,6 +3386,9 @@ struct PTOViewToMemrefPass
             src,
             fp,
             offset,
+            exp,
+            max,
+            scaling,
             dst,
             op.getQuantTypeAttr());
       }
@@ -3627,6 +3652,7 @@ struct PTOViewToMemrefPass
             mem,
             idx,
             dst,
+            op.getCoalesceAttr(),
             op.getGatherOobAttr());
       }
 
@@ -3656,8 +3682,10 @@ struct PTOViewToMemrefPass
             src,
             idx,
             mem,
+            op.getCoalesceAttr(),
             op.getScatterAtomicOpAttr(),
-            op.getScatterOobAttr());
+            op.getScatterOobAttr(),
+            op.getScatterConflictAttr());
       }
       DefaultInlineVector<mlir::pto::TPrintOp> printops;
       func.walk([&](mlir::pto::TPrintOp op) { printops.push_back(op); });
@@ -3667,9 +3695,11 @@ struct PTOViewToMemrefPass
         rewriter.setInsertionPoint(op);
 
         Value src = op.getSrc();
+        Value tmp = op.getTmp();
 
         auto srcTy = dyn_cast<MemRefType>(src.getType());
-        if (!srcTy) {
+        auto tmpTy = tmp ? dyn_cast<MemRefType>(tmp.getType()) : MemRefType();
+        if (!srcTy || (tmp && !tmpTy)) {
           op.emitError("ins/outs are not memref yet");
           signalPassFailure();
           return;
@@ -3678,7 +3708,9 @@ struct PTOViewToMemrefPass
         rewriter.replaceOpWithNewOp<pto::TPrintOp>(
             op,
             TypeRange{},
-            src);
+            src,
+            tmp,
+            op.getPrintFormatAttr());
       }
 
       // ------------------------------------------------------------------

@@ -22,7 +22,10 @@ using namespace mlir::pto;
 namespace {
 
 constexpr unsigned kI32BitWidth = 32;
+[[maybe_unused]] constexpr int32_t kFractalSize16 = 16;
+[[maybe_unused]] constexpr int32_t kFractalSize32 = 32;
 constexpr int32_t kFractalSize512 = 512;
+[[maybe_unused]] constexpr int32_t kFractalSize1024 = 1024;
 constexpr int32_t kBLayoutRowMajor = static_cast<int32_t>(BLayout::RowMajor);
 constexpr int32_t kBLayoutColMajor = static_cast<int32_t>(BLayout::ColMajor);
 constexpr int32_t kSLayoutNoneBox = static_cast<int32_t>(SLayout::NoneBox);

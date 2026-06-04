@@ -3603,7 +3603,8 @@ static bool hasCompatibleKnownExtentOrZero(int64_t lhs, int64_t rhs);
 
 static LogicalResult verifyMGatherMScatterTileShape(Operation *op, Type dataTy,
                                                     Type idxTy,
-                                                    StringRef dataName) {
+                                                    StringRef dataName,
+                                                    pto::Coalesce coalesce) {
   auto dataValid = getValidShapeVec(dataTy);
   auto idxValid = getValidShapeVec(idxTy);
   if (dataValid.size() != 2 || idxValid.size() != 2)
@@ -3631,13 +3632,20 @@ static LogicalResult verifyMGatherMScatterTileShape(Operation *op, Type dataTy,
       hasCompatibleKnownExtent(idxValid[0], dataValid[0]) &&
       hasCompatibleKnownExtent(idxValid[1], dataValid[1]);
 
-  if (!(rowCoalesce1xR || rowCoalesceRx1 || elemCoalesce))
-    return op->emitOpError()
-           << "expects idx valid_shape to be [0|1, " << dataName
-           << ".valid_row], [" << dataName
-           << ".valid_row, 0|1], or match " << dataName << " valid_shape";
+  if (coalesce == pto::Coalesce::Row && (rowCoalesce1xR || rowCoalesceRx1))
+    return success();
 
-  return success();
+  if (coalesce == pto::Coalesce::Elem && elemCoalesce)
+    return success();
+
+  if (coalesce == pto::Coalesce::Row)
+    return op->emitOpError()
+           << "expects row-coalesce idx valid_shape to be [0|1, " << dataName
+           << ".valid_row] or [" << dataName << ".valid_row, 0|1]";
+
+  return op->emitOpError()
+         << "expects elem-coalesce idx valid_shape to match " << dataName
+         << " valid_shape";
 }
 
 static LogicalResult verifyMGatherMScatterIdxTile(Operation *op, Type ty,
@@ -7548,6 +7556,10 @@ LogicalResult MScatterOp::verify() {
                                              "src")))
     return failure();
 
+  if (failed(verifyMGatherMScatterTileShape(getOperation(), srcTy, idxTy, "src",
+                                            getCoalesce())))
+    return failure();
+
   if (getScatterAtomicOp() != pto::ScatterAtomicOp::None ||
       getScatterOob() != pto::ScatterOOB::Undefined) {
     if (!isTargetArchA5(getOperation()))
@@ -7555,13 +7567,16 @@ LogicalResult MScatterOp::verify() {
           "expects non-default scatterAtomicOp/scatterOob only on A5 targets");
   }
 
+  if (auto conflictAttr = getScatterConflictAttr()) {
+    if (!isTargetArchA5(getOperation()))
+      return emitOpError(
+          "expects scatterConflict only on A5 targets");
+  }
+
   if (!isSupportedMScatterAtomicPayloadElemType(srcElem, getScatterAtomicOp()))
     return emitOpError(
         "expects scatterAtomicOp-compatible src element type: add supports "
         "i32/ui32/f16/f32, max/min support signless i32/f32");
-
-  if (failed(verifyMGatherMScatterTileShape(getOperation(), srcTy, idxTy, "src")))
-    return failure();
 
   return success();
 }
@@ -7603,13 +7618,14 @@ LogicalResult MGatherOp::verify() {
                                              "dst")))
     return failure();
 
+  if (failed(verifyMGatherMScatterTileShape(getOperation(), dstTy, idxTy, "dst",
+                                            getCoalesce())))
+    return failure();
+
   if (getGatherOob() != pto::GatherOOB::Undefined &&
       !isTargetArchA5(getOperation()))
     return emitOpError(
         "expects non-default gatherOob only on A5 targets");
-
-  if (failed(verifyMGatherMScatterTileShape(getOperation(), dstTy, idxTy, "dst")))
-    return failure();
 
   return success();
 }
@@ -8424,29 +8440,183 @@ mlir::LogicalResult mlir::pto::TPReluOp::verify() {
   return dispatchVerifierByArch(getOperation(), verifyA2A3, verifyA5);
 }
 
+ParseResult mlir::pto::TQuantOp::parse(OpAsmParser &parser,
+                                       OperationState &result) {
+  SmallVector<OpAsmParser::UnresolvedOperand, 4> insOperands;
+  SmallVector<Type, 4> insTypes;
+  OpAsmParser::UnresolvedOperand dst;
+  Type dstTy;
+
+  if (parser.parseKeyword("ins") || parser.parseLParen())
+    return failure();
+
+  do {
+    OpAsmParser::UnresolvedOperand operand;
+    if (parser.parseOperand(operand))
+      return failure();
+    insOperands.push_back(operand);
+  } while (succeeded(parser.parseOptionalComma()));
+
+  if (parser.parseColon())
+    return failure();
+
+  do {
+    Type type;
+    if (parser.parseType(type))
+      return failure();
+    insTypes.push_back(type);
+  } while (succeeded(parser.parseOptionalComma()));
+
+  if (parser.parseRParen())
+    return failure();
+
+  if (insOperands.size() != insTypes.size())
+    return parser.emitError(parser.getCurrentLocation(),
+                            "expects the number of ins operands to match the number of ins types");
+  if (insOperands.size() != 2 && insOperands.size() != 3 && insOperands.size() != 4)
+    return parser.emitError(parser.getCurrentLocation(),
+                            "expects 2, 3, or 4 operands in ins(...)");
+
+  if (parser.parseKeyword("outs") || parser.parseLParen() ||
+      parser.parseOperand(dst) || parser.parseColonType(dstTy) ||
+      parser.parseRParen())
+    return failure();
+
+  if (parser.parseOptionalAttrDict(result.attributes))
+    return failure();
+
+  SmallVector<int32_t, 7> segmentSizes{1, 0, 0, 0, 0, 0, 1};
+  switch (insOperands.size()) {
+  case 2:
+    segmentSizes[1] = 1;
+    break;
+  case 3:
+    segmentSizes[1] = 1;
+    segmentSizes[2] = 1;
+    break;
+  case 4:
+    segmentSizes[3] = 1;
+    segmentSizes[4] = 1;
+    segmentSizes[5] = 1;
+    break;
+  default:
+    llvm_unreachable("unexpected ins operand count");
+  }
+  result.addAttribute("operandSegmentSizes",
+                      parser.getBuilder().getDenseI32ArrayAttr(segmentSizes));
+
+  if (parser.resolveOperand(insOperands[0], insTypes[0], result.operands))
+    return failure();
+
+  switch (insOperands.size()) {
+  case 2:
+    if (parser.resolveOperand(insOperands[1], insTypes[1], result.operands))
+      return failure();
+    break;
+  case 3:
+    if (parser.resolveOperand(insOperands[1], insTypes[1], result.operands) ||
+        parser.resolveOperand(insOperands[2], insTypes[2], result.operands))
+      return failure();
+    break;
+  case 4:
+    if (parser.resolveOperand(insOperands[1], insTypes[1], result.operands) ||
+        parser.resolveOperand(insOperands[2], insTypes[2], result.operands) ||
+        parser.resolveOperand(insOperands[3], insTypes[3], result.operands))
+      return failure();
+    break;
+  default:
+    llvm_unreachable("unexpected ins operand count");
+  }
+
+  if (parser.resolveOperand(dst, dstTy, result.operands))
+    return failure();
+
+  return success();
+}
+
+void mlir::pto::TQuantOp::print(OpAsmPrinter &p) {
+  p << " ins(" << getSrc();
+  if (auto exp = getExp()) {
+    p << ", " << exp << ", " << getMax() << ", " << getScaling() << " : "
+      << getSrc().getType() << ", " << exp.getType() << ", "
+      << getMax().getType() << ", " << getScaling().getType();
+  } else if (auto offset = getOffset()) {
+    p << ", " << getFp() << ", " << offset << " : "
+      << getSrc().getType() << ", " << getFp().getType() << ", "
+      << offset.getType();
+  } else {
+    p << ", " << getFp() << " : " << getSrc().getType() << ", "
+      << getFp().getType();
+  }
+  p << ")";
+  p << " outs(" << getDst() << " : " << getDst().getType() << ")";
+  p.printOptionalAttrDict((*this)->getAttrs(), {"operandSegmentSizes"});
+}
+
 mlir::LogicalResult mlir::pto::TQuantOp::verify() {
-  // Structural checks: always run regardless of operand representation
-  // (applies both before and after PTOViewToMemref lowering).
   auto verifyStructural = [&]() -> LogicalResult {
-    // dst elem type and offset presence must be consistent with quant_type.
+    Type srcTy = getSrc().getType();
     Type dstTy = getDst().getType();
+    Type srcElemTy = getElemTy(srcTy);
     Type dstElemTy = getElemTy(dstTy);
     auto dstIntTy = dyn_cast<IntegerType>(dstElemTy);
-    if (getQuantType() == mlir::pto::QuantType::INT8_SYM) {
-      if (!dstIntTy || dstIntTy.getWidth() != 8)
+
+    auto rejectMxfp8AuxOnInt8 = [&]() -> LogicalResult {
+      if (getExp() || getMax() || getScaling())
         return emitOpError()
-               << "expects dst element type i8/ui8 for INT8_SYM quantization";
+               << "INT8 quantization must not use exp/max/scaling operands";
+      return success();
+    };
+
+    switch (getQuantType()) {
+    case mlir::pto::QuantType::INT8_SYM:
+      if (!getFp())
+        return emitOpError()
+               << "INT8_SYM quantization requires an fp operand";
       if (getOffset())
         return emitOpError()
                << "INT8_SYM quantization must not have an offset operand";
-    } else {
-      // INT8_ASYM
+      if (failed(rejectMxfp8AuxOnInt8()))
+        return failure();
       if (!dstIntTy || dstIntTy.getWidth() != 8)
         return emitOpError()
-               << "expects dst element type i8/ui8 for INT8_ASYM quantization";
+               << "expects dst element type i8/ui8 for INT8_SYM quantization";
+      break;
+    case mlir::pto::QuantType::INT8_ASYM:
+      if (!getFp())
+        return emitOpError()
+               << "INT8_ASYM quantization requires an fp operand";
       if (!getOffset())
         return emitOpError()
                << "INT8_ASYM quantization requires an offset operand";
+      if (failed(rejectMxfp8AuxOnInt8()))
+        return failure();
+      if (!dstIntTy || dstIntTy.getWidth() != 8)
+        return emitOpError()
+               << "expects dst element type i8/ui8 for INT8_ASYM quantization";
+      break;
+    case mlir::pto::QuantType::MXFP8: {
+      if (getFp() || getOffset())
+        return emitOpError()
+               << "MXFP8 quantization must not use fp/offset operands";
+      if (!getExp() || !getMax() || !getScaling())
+        return emitOpError()
+               << "MXFP8 quantization requires exp, max, and scaling operands";
+      if (!srcElemTy.isF32())
+        return emitOpError() << "expects src to have element type f32";
+      if (!dstIntTy || dstIntTy.getWidth() != 8)
+        return emitOpError()
+               << "expects dst element type i8/ui8 for MXFP8 quantization";
+      auto expIntTy = dyn_cast<IntegerType>(getElemTy(getExp().getType()));
+      if (!expIntTy || expIntTy.getWidth() != 8)
+        return emitOpError()
+               << "expects exp element type i8/ui8 for MXFP8 quantization";
+      if (!getElemTy(getMax().getType()).isF32())
+        return emitOpError() << "expects max to have element type f32";
+      if (!getElemTy(getScaling().getType()).isF32())
+        return emitOpError() << "expects scaling to have element type f32";
+      break;
+    }
     }
     return success();
   };
@@ -8454,23 +8624,20 @@ mlir::LogicalResult mlir::pto::TQuantOp::verify() {
   if (failed(verifyStructural()))
     return failure();
 
-  // Layout/tile-buffer checks: only meaningful for pre-lowering tile types.
-  // Skip when operands are already plain MemRefs (post PTOViewToMemref).
   if (shouldBypassDecodedMemrefVerifier(getOperation()))
     return success();
 
-  auto verifyCommon = [&]() -> LogicalResult {
+  auto verifyInt8Common = [&]() -> LogicalResult {
     Type srcTy = getSrc().getType();
-    Type fpTy  = getFp().getType();
+    Type fpTy = getFp().getType();
     Type dstTy = getDst().getType();
     if (failed(verifyTileBufCommon(*this, srcTy, "src")) ||
         failed(verifyTileBufCommon(*this, fpTy, "fp")) ||
         failed(verifyTileBufCommon(*this, dstTy, "dst")))
       return failure();
-    // src must be f32 (ISA static_assert)
     if (!getElemTy(srcTy).isF32())
       return emitOpError() << "expects src to have element type f32";
-    if (getOffset()) {
+    if (getQuantType() == mlir::pto::QuantType::INT8_ASYM) {
       Type offsetTy = getOffset().getType();
       if (failed(verifyTileBufCommon(*this, offsetTy, "offset")))
         return failure();
@@ -8480,18 +8647,45 @@ mlir::LogicalResult mlir::pto::TQuantOp::verify() {
     return success();
   };
 
+  auto verifyMxfp8A5 = [&]() -> LogicalResult {
+    Type srcTy = getSrc().getType();
+    Type expTy = getExp().getType();
+    Type maxTy = getMax().getType();
+    Type scalingTy = getScaling().getType();
+    Type dstTy = getDst().getType();
+    if (failed(verifyVecTileCommon(*this, srcTy, "src")) ||
+        failed(verifyVecTileCommon(*this, expTy, "exp")) ||
+        failed(verifyVecTileCommon(*this, maxTy, "max")) ||
+        failed(verifyVecTileCommon(*this, scalingTy, "scaling")) ||
+        failed(verifyVecTileCommon(*this, dstTy, "dst")))
+      return failure();
+    if (failed(verifyTileBufSameValidShape(*this, srcTy, scalingTy, "src",
+                                           "scaling")) ||
+        failed(verifyTileBufSameValidShape(*this, expTy, maxTy, "exp",
+                                           "max")))
+      return failure();
+    if (!getElemTy(srcTy).isF32())
+      return emitOpError() << "expects src to have element type f32";
+    return success();
+  };
+
   auto verifyA2A3 = [&]() -> LogicalResult {
-    if (failed(verifyCommon()))
+    if (getQuantType() == mlir::pto::QuantType::MXFP8)
+      return emitOpError() << "MXFP8 quantization is only supported on A5 targets";
+    if (failed(verifyInt8Common()))
       return failure();
     Type srcTy = getSrc().getType();
     Type dstTy = getDst().getType();
     if (!isRowMajorTileBuf(srcTy) || !isRowMajorTileBuf(dstTy))
-      return emitOpError() << "expects A2/A3 src and dst to use row-major layout";
+      return emitOpError()
+             << "expects A2/A3 src and dst to use row-major layout";
     return success();
   };
 
   auto verifyA5 = [&]() -> LogicalResult {
-    return verifyCommon();
+    if (getQuantType() == mlir::pto::QuantType::MXFP8)
+      return verifyMxfp8A5();
+    return verifyInt8Common();
   };
 
   return dispatchVerifierByArch(getOperation(), verifyA2A3, verifyA5);
@@ -10335,6 +10529,52 @@ mlir::LogicalResult mlir::pto::TXorSOp::verify() {
 
   return dispatchVerifierByArch(getOperation(), verifyA2A3, verifyA5);
 }
+
+ParseResult mlir::pto::TPrintOp::parse(OpAsmParser &parser,
+                                       OperationState &result) {
+  OpAsmParser::UnresolvedOperand src;
+  OpAsmParser::UnresolvedOperand tmp;
+  Type srcTy, tmpTy;
+  bool hasTmp = false;
+
+  if (parser.parseKeyword("ins") || parser.parseLParen() ||
+      parser.parseOperand(src))
+    return failure();
+
+  if (succeeded(parser.parseOptionalComma())) {
+    if (parser.parseOperand(tmp))
+      return failure();
+    hasTmp = true;
+  }
+
+  if (parser.parseColonType(srcTy))
+    return failure();
+  if (hasTmp && (parser.parseComma() || parser.parseType(tmpTy)))
+    return failure();
+  if (parser.parseRParen())
+    return failure();
+  if (parser.parseOptionalAttrDict(result.attributes))
+    return failure();
+
+  if (parser.resolveOperand(src, srcTy, result.operands))
+    return failure();
+  if (hasTmp && parser.resolveOperand(tmp, tmpTy, result.operands))
+    return failure();
+  return success();
+}
+
+void mlir::pto::TPrintOp::print(OpAsmPrinter &p) {
+  p << " ins(" << getSrc();
+  if (auto tmp = getTmp()) {
+    p << ", " << tmp << " : " << getSrc().getType() << ", "
+      << tmp.getType();
+  } else {
+    p << " : " << getSrc().getType();
+  }
+  p << ")";
+  p.printOptionalAttrDict((*this)->getAttrs());
+}
+
 mlir::LogicalResult mlir::pto::TPrintOp::verify() {
   if (shouldBypassDecodedMemrefVerifier(getOperation()))
     return success();
@@ -10345,10 +10585,25 @@ mlir::LogicalResult mlir::pto::TPrintOp::verify() {
           elem.isInteger(8) || elem.isInteger(16) || elem.isInteger(32)))
       return emitOpError() << "expects printable tile element type";
     auto space = getPTOMemorySpaceEnum(srcType);
-    if (!space || *space != pto::AddressSpace::VEC)
-      return emitOpError() << "expects printable tile_buf to be in vec address space";
+    if (!getTmp()) {
+      if (!space || *space != pto::AddressSpace::VEC)
+        return emitOpError() << "expects printable tile_buf without tmp to be in vec address space";
+      return success();
+    }
+
+    if (!space)
+      return emitOpError() << "expects printable tile_buf with tmp to use a supported address space";
+    if (*space == pto::AddressSpace::MAT && isTargetArchA5(getOperation()))
+      return emitOpError() << "expects mat tile printing with tmp only on A2/A3 targets";
+    if (*space != pto::AddressSpace::VEC && *space != pto::AddressSpace::MAT &&
+        *space != pto::AddressSpace::ACC)
+      return emitOpError() << "expects printable tile_buf with tmp to be in vec/mat/acc address space";
+    if (failed(verifyMGatherMScatterMemOperand(getOperation(), getTmp(), elem, "tmp")))
+      return failure();
     return success();
   }
+  if (getTmp())
+    return emitOpError() << "expects tmp only when src is a tile_buf";
   if (mlir::dyn_cast<MemRefType>(srcType) ||
       mlir::dyn_cast<mlir::pto::PartitionTensorViewType>(srcType))
     return mlir::success();
@@ -11860,10 +12115,21 @@ void TPReluOp::getEffects(
 void TQuantOp::getEffects(
     SmallVectorImpl<SideEffects::EffectInstance<MemoryEffects::Effect>> &effects) {
   PTO_ADD_READ(getSrcMutable());
-  PTO_ADD_READ(getFpMutable());
+  auto fpRange = getFpMutable();
+  if (!fpRange.empty())
+    PTO_ADD_READ(fpRange[0]);
   auto offsetRange = getOffsetMutable();
   if (!offsetRange.empty())
     PTO_ADD_READ(offsetRange[0]);
+  auto expRange = getExpMutable();
+  if (!expRange.empty())
+    PTO_ADD_WRITE(expRange[0]);
+  auto maxRange = getMaxMutable();
+  if (!maxRange.empty())
+    PTO_ADD_WRITE(maxRange[0]);
+  auto scalingRange = getScalingMutable();
+  if (!scalingRange.empty())
+    PTO_ADD_WRITE(scalingRange[0]);
   PTO_ADD_WRITE(getDstMutable());
 }
 PTO_DEFINE_TERNARY_EFFECTS(TDequantOp, getSrcMutable(), getScaleMutable(),

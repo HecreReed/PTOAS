@@ -372,69 +372,6 @@ static Value maybeWrapGlobalMemrefAsGlobalTensor(
     ConversionPatternRewriter &rewriter, Location loc, Value loweredValue,
     Type originalType, Operation *anchor);
 
-static bool hasCompatibleKnownExtentForMGather(int64_t lhs, int64_t rhs) {
-  return lhs == ShapedType::kDynamic || rhs == ShapedType::kDynamic ||
-         lhs == rhs;
-}
-
-static bool isKnownUnitExtentForMGather(int64_t value) {
-  return value == ShapedType::kDynamic || value == 1;
-}
-
-struct GatherScatterShapeLayoutInfo {
-  SmallVector<int64_t, 2> shape;
-  bool rowMajor = false;
-  bool colMajor = false;
-};
-
-static std::optional<GatherScatterShapeLayoutInfo>
-getGatherScatterShapeLayoutInfo(Type ty) {
-  if (auto tileTy = dyn_cast<pto::TileBufType>(ty)) {
-    ArrayRef<int64_t> validShape = tileTy.getValidShape();
-    if (validShape.size() != 2)
-      return std::nullopt;
-
-    GatherScatterShapeLayoutInfo info;
-    info.shape.assign(validShape.begin(), validShape.end());
-    int32_t blayout = tileTy.getBLayoutValueI32();
-    info.rowMajor = blayout == static_cast<int32_t>(pto::BLayout::RowMajor);
-    info.colMajor = blayout == static_cast<int32_t>(pto::BLayout::ColMajor);
-    return info;
-  }
-
-  auto memRefTy = dyn_cast<MemRefType>(ty);
-  if (!memRefTy || memRefTy.getRank() != 2)
-    return std::nullopt;
-
-  SmallVector<int64_t, 4> strides;
-  int64_t offset = ShapedType::kDynamic;
-  if (failed(getStridesAndOffset(memRefTy, strides, offset)) ||
-      strides.size() != 2)
-    return std::nullopt;
-
-  GatherScatterShapeLayoutInfo info;
-  info.shape.assign(memRefTy.getShape().begin(), memRefTy.getShape().end());
-  info.rowMajor = strides[1] == 1;
-  info.colMajor = strides[0] == 1;
-  return info;
-}
-
-static bool isRowCoalescedMGatherIndexType(Type dataTy, Type idxTy) {
-  auto dataInfo = getGatherScatterShapeLayoutInfo(dataTy);
-  auto idxInfo = getGatherScatterShapeLayoutInfo(idxTy);
-  if (!dataInfo || !idxInfo)
-    return false;
-
-  const bool rowCoalesce1xR =
-      idxInfo->rowMajor && isKnownUnitExtentForMGather(idxInfo->shape[0]) &&
-      hasCompatibleKnownExtentForMGather(idxInfo->shape[1], dataInfo->shape[0]);
-  const bool rowCoalesceRx1 =
-      idxInfo->colMajor &&
-      hasCompatibleKnownExtentForMGather(idxInfo->shape[0], dataInfo->shape[0]) &&
-      isKnownUnitExtentForMGather(idxInfo->shape[1]);
-  return rowCoalesce1xR || rowCoalesceRx1;
-}
-
 static std::optional<mlir::pto::Layout> getLayoutAttrFromOp(Operation *op) {
   if (!op)
     return std::nullopt;
@@ -2902,12 +2839,19 @@ struct PTOMGatherToMGATHER : public OpConversionPattern<pto::MGatherOp> {
       }
       llvm_unreachable("unknown GatherOOB");
     };
+    auto coalesceTok = [&](pto::Coalesce mode) -> StringRef {
+      switch (mode) {
+      case pto::Coalesce::Row:
+        return "pto::Coalesce::Row";
+      case pto::Coalesce::Elem:
+        return "pto::Coalesce::Elem";
+      }
+      llvm_unreachable("unknown Coalesce");
+    };
 
     SmallVector<Attribute, 2> templateArgVec;
-    const bool rowCoalesce =
-        isRowCoalescedMGatherIndexType(op.getDst().getType(), op.getIdx().getType());
-    templateArgVec.push_back(emitc::OpaqueAttr::get(
-        ctx, rowCoalesce ? "pto::Coalesce::Row" : "pto::Coalesce::Elem"));
+    templateArgVec.push_back(
+        emitc::OpaqueAttr::get(ctx, coalesceTok(op.getCoalesce())));
     if (op.getGatherOob() != pto::GatherOOB::Undefined) {
       templateArgVec.push_back(
           emitc::OpaqueAttr::get(ctx, gatherOobTok(op.getGatherOob())));
@@ -5844,14 +5788,37 @@ struct PTOMScatterToMSCATTER : public OpConversionPattern<pto::MScatterOp> {
       }
       llvm_unreachable("unknown ScatterOOB");
     };
+    auto scatterConflictTok = [&](pto::ScatterConflict mode) -> StringRef {
+      switch (mode) {
+      case pto::ScatterConflict::Last:
+        return "pto::ScatterConflict::Last";
+      case pto::ScatterConflict::Default:
+        return "pto::ScatterConflict::Default";
+      }
+      llvm_unreachable("unknown ScatterConflict");
+    };
+    auto coalesceTok = [&](pto::Coalesce mode) -> StringRef {
+      switch (mode) {
+      case pto::Coalesce::Row:
+        return "pto::Coalesce::Row";
+      case pto::Coalesce::Elem:
+        return "pto::Coalesce::Elem";
+      }
+      llvm_unreachable("unknown Coalesce");
+    };
 
-    SmallVector<Attribute, 3> templateArgVec;
-    const bool rowCoalesce =
-        isRowCoalescedMGatherIndexType(op.getSrc().getType(), op.getIdx().getType());
-    templateArgVec.push_back(emitc::OpaqueAttr::get(
-        ctx, rowCoalesce ? "pto::Coalesce::Row" : "pto::Coalesce::Elem"));
-    if (op.getScatterAtomicOp() != pto::ScatterAtomicOp::None ||
-        op.getScatterOob() != pto::ScatterOOB::Undefined) {
+    SmallVector<Attribute, 4> templateArgVec;
+    templateArgVec.push_back(
+        emitc::OpaqueAttr::get(ctx, coalesceTok(op.getCoalesce())));
+    if (auto conflictAttr = op.getScatterConflictAttr()) {
+      templateArgVec.push_back(emitc::OpaqueAttr::get(
+          ctx, scatterAtomicTok(op.getScatterAtomicOp())));
+      templateArgVec.push_back(
+          emitc::OpaqueAttr::get(ctx, scatterOobTok(op.getScatterOob())));
+      templateArgVec.push_back(emitc::OpaqueAttr::get(
+          ctx, scatterConflictTok(conflictAttr.getValue())));
+    } else if (op.getScatterAtomicOp() != pto::ScatterAtomicOp::None ||
+               op.getScatterOob() != pto::ScatterOOB::Undefined) {
       templateArgVec.push_back(emitc::OpaqueAttr::get(
           ctx, scatterAtomicTok(op.getScatterAtomicOp())));
       if (op.getScatterOob() != pto::ScatterOOB::Undefined)
@@ -9190,44 +9157,74 @@ struct PTOQuantToEmitC : public OpConversionPattern<pto::TQuantOp> {
 
     Value dst = peelUnrealized(adaptor.getDst());
     Value src = peelUnrealized(adaptor.getSrc());
-    Value fp  = peelUnrealized(adaptor.getFp());
 
-    // Optional offset (INT8_ASYM only): passed as pointer (&offset)
-    Value offsetPtr;
-    if (op.getOffset()) {
-      Value offset = peelUnrealized(adaptor.getOffset());
-      auto offsetOT = mlir::dyn_cast<emitc::OpaqueType>(offset.getType());
-      if (offsetOT) {
-        offsetPtr = rewriter
-                        .create<emitc::ApplyOp>(
-                            loc, emitc::PointerType::get(offsetOT), "&", offset)
-                        .getResult();
+    auto makeOpaquePtr = [&](Value value) -> Value {
+      auto opaqueTy = mlir::dyn_cast<emitc::OpaqueType>(value.getType());
+      if (!opaqueTy)
+        return {};
+      return rewriter
+          .create<emitc::ApplyOp>(loc, emitc::PointerType::get(opaqueTy), "&",
+                                  value)
+          .getResult();
+    };
+
+    auto quantTypeTok = [&]() -> StringRef {
+      switch (op.getQuantType()) {
+      case pto::QuantType::INT8_SYM:
+        return "pto::QuantType::INT8_SYM";
+      case pto::QuantType::INT8_ASYM:
+        return "pto::QuantType::INT8_ASYM";
+      case pto::QuantType::MXFP8:
+        return "pto::QuantType::MXFP8";
       }
-    }
+      llvm_unreachable("unknown QuantType");
+    };
 
-    // TQUANT<QuantType, DstTile, SrcTile, FpTile>(dst, src, fp[, &offset])
-    std::string quantTypeStr =
-        op.getQuantType() == pto::QuantType::INT8_SYM
-            ? "pto::QuantType::INT8_SYM"
-            : "pto::QuantType::INT8_ASYM";
     ArrayAttr templateArgs;
+    SmallVector<Value> operands;
     auto dstOT = mlir::dyn_cast<emitc::OpaqueType>(dst.getType());
     auto srcOT = mlir::dyn_cast<emitc::OpaqueType>(src.getType());
-    auto fpOT  = mlir::dyn_cast<emitc::OpaqueType>(fp.getType());
-    if (dstOT && srcOT && fpOT) {
-      templateArgs = rewriter.getArrayAttr({
-          emitc::OpaqueAttr::get(ctx, quantTypeStr),
-          emitc::OpaqueAttr::get(ctx, dstOT.getValue().str()),
-          emitc::OpaqueAttr::get(ctx, srcOT.getValue().str()),
-          emitc::OpaqueAttr::get(ctx, fpOT.getValue().str()),
-      });
+    if (op.getQuantType() == pto::QuantType::MXFP8) {
+      Value exp = peelUnrealized(adaptor.getExp());
+      Value max = peelUnrealized(adaptor.getMax());
+      Value scaling = peelUnrealized(adaptor.getScaling());
+      auto expOT = mlir::dyn_cast<emitc::OpaqueType>(exp.getType());
+      auto maxOT = mlir::dyn_cast<emitc::OpaqueType>(max.getType());
+      if (dstOT && srcOT && expOT && maxOT) {
+        templateArgs = rewriter.getArrayAttr({
+            emitc::OpaqueAttr::get(ctx, quantTypeTok()),
+            emitc::OpaqueAttr::get(ctx, dstOT.getValue().str()),
+            emitc::OpaqueAttr::get(ctx, srcOT.getValue().str()),
+            emitc::OpaqueAttr::get(ctx, expOT.getValue().str()),
+            emitc::OpaqueAttr::get(ctx, maxOT.getValue().str()),
+        });
+      } else {
+        templateArgs = ArrayAttr{};
+      }
+      operands = {dst, src, makeOpaquePtr(exp), makeOpaquePtr(max),
+                  makeOpaquePtr(scaling)};
     } else {
-      templateArgs = ArrayAttr{};
+      Value fp = peelUnrealized(adaptor.getFp());
+      Value offsetPtr;
+      if (op.getOffset()) {
+        Value offset = peelUnrealized(adaptor.getOffset());
+        offsetPtr = makeOpaquePtr(offset);
+      }
+      auto fpOT = mlir::dyn_cast<emitc::OpaqueType>(fp.getType());
+      if (dstOT && srcOT && fpOT) {
+        templateArgs = rewriter.getArrayAttr({
+            emitc::OpaqueAttr::get(ctx, quantTypeTok()),
+            emitc::OpaqueAttr::get(ctx, dstOT.getValue().str()),
+            emitc::OpaqueAttr::get(ctx, srcOT.getValue().str()),
+            emitc::OpaqueAttr::get(ctx, fpOT.getValue().str()),
+        });
+      } else {
+        templateArgs = ArrayAttr{};
+      }
+      operands = {dst, src, fp};
+      if (offsetPtr)
+        operands.push_back(offsetPtr);
     }
-
-    SmallVector<Value> operands{dst, src, fp};
-    if (offsetPtr)
-      operands.push_back(offsetPtr);
 
     rewriter.create<emitc::CallOpaqueOp>(
         loc, TypeRange{}, "TQUANT",
@@ -10888,19 +10885,52 @@ struct PTOXORSToEmitC : public OpConversionPattern<pto::TXorSOp> {
     return success();
   }
 };
-  struct PTOPrintToTPRINT : public OpConversionPattern<pto::TPrintOp> {
+struct PTOPrintToTPRINT : public OpConversionPattern<pto::TPrintOp> {
   using OpConversionPattern<pto::TPrintOp>::OpConversionPattern;
 
   LogicalResult matchAndRewrite(pto::TPrintOp op, OpAdaptor adaptor,
                                 ConversionPatternRewriter &rewriter) const override {
     auto loc = op.getLoc();
+    auto printFormatTok = [&](pto::PrintFormat format) -> StringRef {
+      switch (format) {
+      case pto::PrintFormat::Width8_Precision4:
+        return "pto::PrintFormat::Width8_Precision4";
+      case pto::PrintFormat::Width8_Precision2:
+        return "pto::PrintFormat::Width8_Precision2";
+      case pto::PrintFormat::Width10_Precision6:
+        return "pto::PrintFormat::Width10_Precision6";
+      }
+      llvm_unreachable("unknown PrintFormat");
+    };
 
     Value src = peelUnrealized(adaptor.getSrc());
+    if (isa<MemRefType>(op.getSrc().getType()) ||
+        isa<mlir::pto::PartitionTensorViewType>(op.getSrc().getType())) {
+      src = maybeWrapGlobalMemrefAsGlobalTensor(
+          rewriter, loc, src, op.getSrc().getType(), op.getOperation());
+    }
 
     SmallVector<Value, 4> operands{src};
+    if (auto tmp = op.getTmp()) {
+      Value tmpValue = peelUnrealized(adaptor.getTmp());
+      if (isa<MemRefType>(tmp.getType()) ||
+          isa<mlir::pto::PartitionTensorViewType>(tmp.getType())) {
+        tmpValue = maybeWrapGlobalMemrefAsGlobalTensor(
+            rewriter, loc, tmpValue, tmp.getType(), op.getOperation());
+      }
+      operands.push_back(tmpValue);
+    }
+
+    SmallVector<Attribute, 1> templateArgVec;
+    if (auto formatAttr = op.getPrintFormatAttr()) {
+      templateArgVec.push_back(emitc::OpaqueAttr::get(
+          rewriter.getContext(), printFormatTok(formatAttr.getValue())));
+    }
+    ArrayAttr templateArgs =
+        templateArgVec.empty() ? ArrayAttr{} : rewriter.getArrayAttr(templateArgVec);
     rewriter.create<emitc::CallOpaqueOp>(
         loc, TypeRange{}, "TPRINT",
-        /*args=*/ArrayAttr{}, /*templateArgs=*/ArrayAttr{},
+        /*args=*/ArrayAttr{}, /*templateArgs=*/templateArgs,
         /*operands=*/operands);
 
     rewriter.eraseOp(op);

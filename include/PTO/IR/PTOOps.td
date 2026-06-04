@@ -2799,6 +2799,7 @@ def MGatherOp : PTO_TOp<"mgather", [
     PTODpsType:$mem,
     PTODpsType:$idx,
     PTODpsType:$dst,
+    PTO_CoalesceAttr:$coalesce,
     DefaultValuedAttr<PTO_GatherOOBAttr, "::mlir::pto::GatherOOB::Undefined">:$gatherOob);
 
   let results = (outs);
@@ -2977,8 +2978,10 @@ def MScatterOp : PTO_TOp<"mscatter", [
     PTODpsType:$src,
     PTODpsType:$idx,
     PTODpsType:$mem,               // outs target
+    PTO_CoalesceAttr:$coalesce,
     DefaultValuedAttr<PTO_ScatterAtomicOpAttr, "::mlir::pto::ScatterAtomicOp::None">:$scatterAtomicOp,
-    DefaultValuedAttr<PTO_ScatterOOBAttr, "::mlir::pto::ScatterOOB::Undefined">:$scatterOob
+    DefaultValuedAttr<PTO_ScatterOOBAttr, "::mlir::pto::ScatterOOB::Undefined">:$scatterOob,
+    OptionalAttr<PTO_ScatterConflictAttr>:$scatterConflict
   );
 
   let results = (outs);
@@ -5161,17 +5164,18 @@ def TPReluOp: PTO_TOp<"tprelu", [
 //===----------------------------------------------------------------------===//
 
 def TQuantOp : PTO_TOp<"tquant", [
+  AttrSizedOperandSegments,
   PTO_DpsInitOpInterface,
   OpPipeInterface,
   DeclareOpInterfaceMethods<MemoryEffectsOpInterface>
 ]> {
-  let summary = "TQUANT: Quantize a tile using a scaling (fp) tile.";
+  let summary = "TQUANT: Quantize a tile using either INT8 scale parameters or A5 MXFP8 auxiliary tiles.";
 
   let description = [{
-    Converts src tile elements to a lower-precision format using the scaling
-    parameters held in the fp tile, writing results into dst.
+    Converts src tile elements to a lower-precision format and writes the
+    quantized result into dst.
 
-    For INT8_ASYM an additional offset tile must be supplied in ins.
+    INT8 forms use a scaling tile (`fp`) and optionally an offset tile:
 
     DPS form (INT8_SYM):
       pto.tquant ins(%src, %fp : <src_type>, <fp_type>)
@@ -5179,12 +5183,23 @@ def TQuantOp : PTO_TOp<"tquant", [
     DPS form (INT8_ASYM):
       pto.tquant ins(%src, %fp, %offset : <src_type>, <fp_type>, <offset_type>)
                  outs(%dst : <dst_type>) {quant_type = #pto<quant_type INT8_ASYM>}
+
+    A5 additionally supports the MXFP8 overload that produces exponent/max
+    side outputs and a scaling scratch/result tile:
+
+    DPS form (MXFP8):
+      pto.tquant ins(%src, %exp, %max, %scaling :
+                       <src_type>, <exp_type>, <max_type>, <scaling_type>)
+                 outs(%dst : <dst_type>) {quant_type = #pto<quant_type MXFP8>}
   }];
 
   let arguments = (ins
     PTODpsType:$src,
-    PTODpsType:$fp,
+    Optional<PTODpsType>:$fp,
     Optional<PTODpsType>:$offset,
+    Optional<PTODpsType>:$exp,
+    Optional<PTODpsType>:$max,
+    Optional<PTODpsType>:$scaling,
     PTODpsType:$dst,
     PTO_QuantTypeAttr:$quant_type
   );
@@ -5192,12 +5207,7 @@ def TQuantOp : PTO_TOp<"tquant", [
   let results = (outs);
 
   let hasVerifier = 1;
-
-  let assemblyFormat = [{
-    `ins` `(` $src `,` $fp (`,` $offset^)? `:` qualified(type($src)) `,` qualified(type($fp)) (`,` qualified(type($offset))^)? `)`
-    `outs` `(` $dst `:` qualified(type($dst)) `)`
-    attr-dict
-  }];
+  let hasCustomAssemblyFormat = 1;
 
   let extraClassDeclaration = [{
     ::mlir::pto::PIPE getPipe() { return ::mlir::pto::PIPE::PIPE_V; }
@@ -6431,20 +6441,24 @@ def TPrintOp: PTO_TOp<"tprint", [
   OpPipeInterface,
   DeclareOpInterfaceMethods<MemoryEffectsOpInterface>
 ]> {
-  let summary = "TPRINT: Print the contents of a Tile or GlobalTensor for debugging purposes directly from device code..";
+  let summary = "TPRINT: Print the contents of a Tile or GlobalTensor for debugging purposes directly from device code.";
+  let description = [{
+    pto-isa overloads support `TPRINT(src)` and `TPRINT<Format>(src, tmp)`.
+    The optional tmp operand is used when printing Mat/Acc tiles through a
+    scratch GlobalTensor, while Vec tiles and GlobalTensors can be printed
+    without tmp.
+  }];
 
   let arguments = (ins
-    PTODpsType:$src
+    PTODpsType:$src,
+    Optional<PTODpsType>:$tmp,
+    OptionalAttr<PTO_PrintFormatAttr>:$printFormat
   );
 
   let results = (outs);
 
   let hasVerifier = 1;
-
-  let assemblyFormat = [{
-    `ins` `(` $src `:` qualified(type($src)) `)`
-    attr-dict
-  }];
+  let hasCustomAssemblyFormat = 1;
 
   let extraClassDeclaration = [{
     ::mlir::pto::PIPE getPipe() { return ::mlir::pto::PIPE::PIPE_V; }

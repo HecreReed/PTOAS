@@ -28,6 +28,7 @@ def build():
             bl = pto.BLayoutAttr.get(pto.BLayout.RowMajor, ctx)
             sl = pto.SLayoutAttr.get(pto.SLayout.NoneBox, ctx)
             pd = pto.PadValueAttr.get(pto.PadValue.Null, ctx)
+            coalesce = pto.CoalesceAttr.get(pto.Coalesce.Row, ctx)
 
             fractal_ab_size = pto.TileConfig.fractalABSize
             cfg = pto.TileBufConfigAttr.get(bl, sl, fractal_ab_size, pd, ctx)
@@ -58,7 +59,7 @@ def build():
                 tb2 = pto.AllocTileOp(tile_buf_data_i32).result
 
                 pto.TLoadOp(None, sv1, tb1)
-                pto.MGatherOp(sv0, tb1, tb2)
+                pto.MGatherOp(sv0, tb1, tb2, coalesce=coalesce)
 
                 sv2 = pto.PartitionViewOp(tile_view_32, tv2, offsets=[c0, c0], sizes=[c32, c32]).result
                 pto.TStoreOp(None, tb2, sv2)

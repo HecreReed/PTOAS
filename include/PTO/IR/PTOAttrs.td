@@ -978,6 +978,16 @@ def PTO_GatherOOBAttr : EnumAttr<PTO_Dialect, PTO_GatherOOBEnum, "gather_oob"> {
   let summary = "MGATHER out-of-bounds handling mode";
 }
 
+def PTO_CoalesceEnum : PTO_I32Enum<
+  "Coalesce", "PTO MGATHER/MSCATTER coalesce mode", [
+    I32EnumAttrCase<"Row", 0, "row">,
+    I32EnumAttrCase<"Elem", 1, "elem">
+  ]>;
+
+def PTO_CoalesceAttr : EnumAttr<PTO_Dialect, PTO_CoalesceEnum, "coalesce"> {
+  let summary = "MGATHER/MSCATTER coalesce mode";
+}
+
 def PTO_ScatterAtomicOpEnum : PTO_I32Enum<
   "ScatterAtomicOp", "PTO MSCATTER atomic mode", [
     I32EnumAttrCase<"None", 0, "none">,
@@ -1000,6 +1010,27 @@ def PTO_ScatterOOBEnum : PTO_I32Enum<
 
 def PTO_ScatterOOBAttr : EnumAttr<PTO_Dialect, PTO_ScatterOOBEnum, "scatter_oob"> {
   let summary = "MSCATTER out-of-bounds handling mode";
+}
+
+def PTO_ScatterConflictEnum : PTO_I32Enum<
+  "ScatterConflict", "PTO MSCATTER conflict mode", [
+    I32EnumAttrCase<"Last", 0, "last">,
+    I32EnumAttrCase<"Default", 1, "default">
+  ]>;
+
+def PTO_ScatterConflictAttr : EnumAttr<PTO_Dialect, PTO_ScatterConflictEnum, "scatter_conflict"> {
+  let summary = "MSCATTER conflict handling mode";
+}
+
+def PTO_PrintFormatEnum : PTO_I32Enum<
+  "PrintFormat", "PTO TPRINT format mode", [
+    I32EnumAttrCase<"Width8_Precision4", 0, "width8_precision4">,
+    I32EnumAttrCase<"Width8_Precision2", 1, "width8_precision2">,
+    I32EnumAttrCase<"Width10_Precision6", 2, "width10_precision6">
+  ]>;
+
+def PTO_PrintFormatAttr : EnumAttr<PTO_Dialect, PTO_PrintFormatEnum, "print_format"> {
+  let summary = "TPRINT output format mode";
 }
 
 def PTO_AccToVecMode_Enum : PTO_I32Enum<"AccToVecMode", "TMOV acc-to-vec mode", [
@@ -1123,7 +1154,8 @@ def TileBufConfigAttr : AttrDef<PTO_Dialect, "TileBufConfig"> {
 def PTO_QuantTypeEnum : PTO_I32Enum<
   "QuantType", "PTO quantization type", [
     I32EnumAttrCase<"INT8_SYM",  0>,
-    I32EnumAttrCase<"INT8_ASYM", 1>
+    I32EnumAttrCase<"INT8_ASYM", 1>,
+    I32EnumAttrCase<"MXFP8",     2>
   ]>;
 
 def PTO_QuantTypeAttr : EnumAttr<PTO_Dialect, PTO_QuantTypeEnum, "quant_type"> {

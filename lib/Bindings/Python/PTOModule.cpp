@@ -671,6 +671,7 @@ static void bindPTOModule(pybind11::module &m) {
     py::enum_<mlir::pto::QuantType>(m, "QuantType")
       .value("INT8_SYM",  mlir::pto::QuantType::INT8_SYM)
       .value("INT8_ASYM", mlir::pto::QuantType::INT8_ASYM)
+      .value("MXFP8",     mlir::pto::QuantType::MXFP8)
       .export_values();
 
     mlir_attribute_subclass(

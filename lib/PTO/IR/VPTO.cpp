@@ -1803,6 +1803,15 @@ static LogicalResult verifyCubeBridgeLoadLikeOp(BridgeLoadOp op,
   return success();
 }
 
+[[maybe_unused]] static bool hasAll(Value first, Value second, Value third) {
+  return static_cast<bool>(first) && static_cast<bool>(second) &&
+         static_cast<bool>(third);
+}
+
+[[maybe_unused]] static bool hasAny(Value first, Value second, Value third) {
+  return static_cast<bool>(first) || static_cast<bool>(second) ||
+         static_cast<bool>(third);
+}
 static ParseResult parseRequiredOperandWithComma(
     OpAsmParser &parser, OpAsmParser::UnresolvedOperand &operand) {
   if (parser.parseOperand(operand))
