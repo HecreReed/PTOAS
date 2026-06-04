@@ -55,7 +55,6 @@ static LogicalResult verifyMatmulLike(Operation *op, Type aTy, Type bTy, Type ds
     int64_t aRank = getRankHelper(aTy);
     int64_t bRank = getRankHelper(bTy);
     int64_t dRank = getRankHelper(dstTy);
-
     // 检查 Rank 一致性
     if (aRank != -1 && dRank != -1 && aRank != dRank)
       return op->emitOpError("expects a and dst to have the same rank");

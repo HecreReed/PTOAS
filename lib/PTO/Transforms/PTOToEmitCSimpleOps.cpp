@@ -50,7 +50,6 @@ struct PTOGetBlockNumToEmitC
   LogicalResult
   matchAndRewrite(mlir::pto::GetBlockNumOp op, OpAdaptor adaptor,
                   ConversionPatternRewriter &rewriter) const override {
-
     rewriter.replaceOpWithNewOp<emitc::CallOpaqueOp>(
         op, op.getType(), "get_block_num", ValueRange{}, ArrayAttr{},
         ArrayAttr{});
@@ -389,8 +388,6 @@ struct PTOStoreScalarToEmitC : public OpConversionPattern<pto::StoreScalarOp> {
 //===----------------------------------------------------------------------===//
 // pto.tabs lowering -> TABS(dst, src)
 //===----------------------------------------------------------------------===//
-
-
 
 struct PTOTAbsToTABS : public OpConversionPattern<pto::TAbsOp> {
   using OpConversionPattern<pto::TAbsOp>::OpConversionPattern;

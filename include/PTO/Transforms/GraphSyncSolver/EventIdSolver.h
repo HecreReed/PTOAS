@@ -68,7 +68,8 @@ public:
   EventIdNode *const node2;
   ActionAddEdge(EventIdNode *node1, EventIdNode *node2)
       : Action(ACTION_TYPE::ADD_EDGE), node1(node1), node2(node2) {
-    ASSERT(node1 != nullptr && node2 != nullptr);
+    ASSERT(node1 != nullptr);
+    ASSERT(node2 != nullptr);
   }
   static bool classof(const Action *e) {
     return e->actionType == ACTION_TYPE::ADD_EDGE;
@@ -86,7 +87,8 @@ public:
   ActionInsertConflictPair(EventIdNode *node, ConflictPair *conflictPair)
       : Action(ACTION_TYPE::INSERT_CONFLICT_PAIR), node(node),
         conflictPair(conflictPair) {
-    ASSERT(node != nullptr && conflictPair != nullptr);
+    ASSERT(node != nullptr);
+    ASSERT(conflictPair != nullptr);
   }
   static bool classof(const Action *e) {
     return e->actionType == ACTION_TYPE::INSERT_CONFLICT_PAIR;

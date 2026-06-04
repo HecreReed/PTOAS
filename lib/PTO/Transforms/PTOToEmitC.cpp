@@ -81,6 +81,11 @@ constexpr unsigned kNumber1 = 1;
 constexpr unsigned kNumber2 = 2;
 constexpr unsigned kNumber4 = 4;
 
+constexpr size_t kPaddedShapeInnerRowDim2 = 2;
+constexpr size_t kPaddedShapeInnerColDim3 = 3;
+constexpr size_t kPaddedShapeInnermostDim4 = 4;
+constexpr int64_t kPaddedShapeUnitStride1 = 1;
+
 template <typename T>
 using SmallVec2 = SmallVector<T, kInlineCapacity2>;
 template <typename T>
@@ -1080,16 +1085,22 @@ static std::string inferFallbackGlobalTensorLayout(ArrayRef<int64_t> shape5D,
   int elemBytes = getGlobalTensorElementBytes(elemTy);
   if (elemBytes == 0)
     return "pto::Layout::ND";
-  if (shape5D[2] == 16 && multiplyOrDynamic(shape5D[2], shape5D[3]) * elemBytes == kFractalSize512 &&
-      stride5D[4] == 1 && stride5D[3] == shape5D[4]) {
+  if (shape5D[kPaddedShapeInnerRowDim2] == kFractalSize16 &&
+      multiplyOrDynamic(shape5D[kPaddedShapeInnerRowDim2],
+                        shape5D[kPaddedShapeInnerColDim3]) *
+              elemBytes ==
+          kFractalSize512 &&
+      stride5D[kPaddedShapeInnermostDim4] == kPaddedShapeUnitStride1 &&
+      stride5D[kPaddedShapeInnerColDim3] ==
+          shape5D[kPaddedShapeInnermostDim4]) {
     return "pto::Layout::NZ";
   }
 
-  bool isRowMajor = stride5D[4] == 1;
-  for (int i = 3; i >= 0 && isRowMajor; --i)
+  bool isRowMajor = stride5D[kPaddedShapeInnermostDim4] == kPaddedShapeUnitStride1;
+  for (int i = static_cast<int>(kPaddedShapeInnerColDim3); i >= 0 && isRowMajor; --i)
     isRowMajor = stride5D[i] == multiplyOrDynamic(stride5D[i + 1], shape5D[i + 1]);
 
-  bool isColMajor = stride5D[0] == 1;
+  bool isColMajor = stride5D[0] == kPaddedShapeUnitStride1;
   for (int i = 0; i < static_cast<int>(kNumber4) && isColMajor; ++i)
     isColMajor = stride5D[i + 1] == multiplyOrDynamic(stride5D[i], shape5D[i]);
   if (isColMajor)

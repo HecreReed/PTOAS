@@ -367,7 +367,6 @@ struct PTOTStoreToTSTORE : public OpConversionPattern<pto::TStoreOp> {
 //===----------------------------------------------------------------------===//
 // pto.matmul_dps lowering (Simplified: No internal copy/sync)
 //===----------------------------------------------------------------------===//
-//
 // Render `pto.tmatmul` as one of three forms depending on the optional
 // `acc_phase` attribute value.
 //   * absent / Unspecified  -> `TMATMUL(dst, lhs, rhs)`

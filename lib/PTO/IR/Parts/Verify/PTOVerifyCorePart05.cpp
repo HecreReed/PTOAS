@@ -175,7 +175,6 @@ LogicalResult mlir::pto::MakeTensorViewOp::verify() {
   });
 
   auto layoutAttr = getLayoutAttr();
-
   // 1) Dynamic shape/stride without explicit layout: warn and keep going.
   if ((hasDynamicShape || hasDynamicStride) && !layoutAttr) {
     return success();

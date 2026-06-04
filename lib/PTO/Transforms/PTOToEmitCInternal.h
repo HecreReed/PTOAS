@@ -43,20 +43,32 @@ Value castSignlessIntToUnsignedSameWidth(ConversionPatternRewriter &rewriter,
                                          Location loc, Value v,
                                          unsigned bitWidth);
 
+inline constexpr int64_t kMrgSortExecutedNumRank = 1;
+inline constexpr int64_t kMrgSortExecutedNumCount = 4;
+
+inline constexpr int32_t kSLayout1 = 1;
+inline constexpr int32_t kSLayout2 = 2;
+inline constexpr int32_t kPadValue1 = 1;
+inline constexpr int32_t kPadValue2 = 2;
+inline constexpr int32_t kPadValue3 = 3;
+
+inline constexpr int kTileTemplateRank2D = 2;
+inline constexpr int64_t kFloat4PackedDimExpansion2 = 2;
+
 inline emitc::OpaqueType getSignedIntOpaqueType(MLIRContext *ctx,
                                                 unsigned bitWidth) {
   switch (bitWidth) {
   case 1:
     return emitc::OpaqueType::get(ctx, "int8_t");
-  case 8:
+  case kPTOI8BitWidth:
     return emitc::OpaqueType::get(ctx, "int8_t");
-  case 16:
+  case kPTOI16BitWidth:
     return emitc::OpaqueType::get(ctx, "int16_t");
-  case 32:
+  case kPTOI32BitWidth:
     return emitc::OpaqueType::get(ctx, "int32_t");
-  case 64:
+  case kPTOI64BitWidth:
     return emitc::OpaqueType::get(ctx, "int64_t");
-  case 128:
+  case kPTOI128BitWidth:
     return emitc::OpaqueType::get(ctx, "__int128");
   default:
     llvm::errs() << "[Debug] Unsupported signed integer bitwidth: " << bitWidth
@@ -70,15 +82,15 @@ inline emitc::OpaqueType getUnsignedIntOpaqueType(MLIRContext *ctx,
   switch (bitWidth) {
   case 1:
     return emitc::OpaqueType::get(ctx, "uint8_t");
-  case 8:
+  case kPTOI8BitWidth:
     return emitc::OpaqueType::get(ctx, "uint8_t");
-  case 16:
+  case kPTOI16BitWidth:
     return emitc::OpaqueType::get(ctx, "uint16_t");
-  case 32:
+  case kPTOI32BitWidth:
     return emitc::OpaqueType::get(ctx, "uint32_t");
-  case 64:
+  case kPTOI64BitWidth:
     return emitc::OpaqueType::get(ctx, "uint64_t");
-  case 128:
+  case kPTOI128BitWidth:
     return emitc::OpaqueType::get(ctx, "unsigned __int128");
   default:
     llvm::errs() << "[Debug] Unsupported unsigned integer bitwidth: "
@@ -91,16 +103,16 @@ inline emitc::OpaqueType getWiderSignedIntOpaqueType(MLIRContext *ctx,
                                                      unsigned bitWidth) {
   switch (bitWidth) {
   case 1:
-  case 8:
-    return getSignedIntOpaqueType(ctx, 16);
-  case 16:
-    return getSignedIntOpaqueType(ctx, 32);
-  case 32:
-    return getSignedIntOpaqueType(ctx, 64);
-  case 64:
-    return getSignedIntOpaqueType(ctx, 128);
+  case kPTOI8BitWidth:
+    return getSignedIntOpaqueType(ctx, kPTOI16BitWidth);
+  case kPTOI16BitWidth:
+    return getSignedIntOpaqueType(ctx, kPTOI32BitWidth);
+  case kPTOI32BitWidth:
+    return getSignedIntOpaqueType(ctx, kPTOI64BitWidth);
+  case kPTOI64BitWidth:
+    return getSignedIntOpaqueType(ctx, kPTOI128BitWidth);
   default:
-    return getSignedIntOpaqueType(ctx, 128);
+    return getSignedIntOpaqueType(ctx, kPTOI128BitWidth);
   }
 }
 
@@ -108,16 +120,16 @@ inline emitc::OpaqueType getWiderUnsignedIntOpaqueType(MLIRContext *ctx,
                                                        unsigned bitWidth) {
   switch (bitWidth) {
   case 1:
-  case 8:
-    return getUnsignedIntOpaqueType(ctx, 16);
-  case 16:
-    return getUnsignedIntOpaqueType(ctx, 32);
-  case 32:
-    return getUnsignedIntOpaqueType(ctx, 64);
-  case 64:
-    return getUnsignedIntOpaqueType(ctx, 128);
+  case kPTOI8BitWidth:
+    return getUnsignedIntOpaqueType(ctx, kPTOI16BitWidth);
+  case kPTOI16BitWidth:
+    return getUnsignedIntOpaqueType(ctx, kPTOI32BitWidth);
+  case kPTOI32BitWidth:
+    return getUnsignedIntOpaqueType(ctx, kPTOI64BitWidth);
+  case kPTOI64BitWidth:
+    return getUnsignedIntOpaqueType(ctx, kPTOI128BitWidth);
   default:
-    return getUnsignedIntOpaqueType(ctx, 128);
+    return getUnsignedIntOpaqueType(ctx, kPTOI128BitWidth);
   }
 }
 
@@ -132,8 +144,9 @@ buildEmitCOpaqueConstantLiteral(Type targetType, Attribute valueAttr) {
       return failure();
 
     auto vecTy = dyn_cast<VectorType>(dense.getType());
-    if (!vecTy || vecTy.getRank() != 1 || vecTy.getNumElements() != 4 ||
-        !vecTy.getElementType().isInteger(16))
+    if (!vecTy || vecTy.getRank() != kMrgSortExecutedNumRank ||
+        vecTy.getNumElements() != kMrgSortExecutedNumCount ||
+        !vecTy.getElementType().isInteger(kPTOI16BitWidth))
       return failure();
 
     std::string literal;
@@ -187,9 +200,10 @@ getTileBufSLayoutToken(pto::TileBufConfigAttr configAttr) {
   std::string slTok = "SLayout::NoneBox";
   if (auto slAttr = dyn_cast<SLayoutAttr>(configAttr.getSLayout())) {
     int32_t slVal = static_cast<int32_t>(slAttr.getValue());
-    slTok = (slVal == 1) ? "SLayout::RowMajor"
-                         : (slVal == 2) ? "SLayout::ColMajor"
-                                        : "SLayout::NoneBox";
+    if (slVal == kSLayout1)
+      slTok = "SLayout::RowMajor";
+    else if (slVal == kSLayout2)
+      slTok = "SLayout::ColMajor";
   }
   return slTok;
 }
@@ -199,13 +213,13 @@ getTileBufPadToken(pto::TileBufConfigAttr configAttr) {
   std::string padTok = "PadValue::Null";
   if (auto padAttr = dyn_cast<PadValueAttr>(configAttr.getPad())) {
     switch (static_cast<int32_t>(padAttr.getValue())) {
-    case 1:
+    case kPadValue1:
       padTok = "PadValue::Zero";
       break;
-    case 2:
+    case kPadValue2:
       padTok = "PadValue::Max";
       break;
-    case 3:
+    case kPadValue3:
       padTok = "PadValue::Min";
       break;
     default:
@@ -236,7 +250,7 @@ inline pto::BLayout getTileBufBLayoutValue(
 
 inline int64_t renderTileTemplateDim(int64_t rawDim, Type elemTy,
                                      pto::BLayout blayout, int dimIdx) {
-  if (!(dimIdx >= 0 && dimIdx < 2)) {
+  if (!(dimIdx >= 0 && dimIdx < kTileTemplateRank2D)) {
     llvm::report_fatal_error(
         "renderTileTemplateDim expects a rank-2 rows/cols dimension index");
   }
@@ -245,7 +259,7 @@ inline int64_t renderTileTemplateDim(int64_t rawDim, Type elemTy,
   if (!pto::isPTOFloat4PackedType(elemTy))
     return rawDim;
   int packedDim = blayout == pto::BLayout::ColMajor ? 0 : 1;
-  return dimIdx == packedDim ? rawDim * 2 : rawDim;
+  return dimIdx == packedDim ? rawDim * kFloat4PackedDimExpansion2 : rawDim;
 }
 
 std::optional<std::string> getEmitCTileTypeString(pto::TileBufType type);

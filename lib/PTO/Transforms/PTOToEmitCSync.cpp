@@ -394,8 +394,6 @@ static LogicalResult appendSyncAllWorkspaceOperands(
   llvm_unreachable("unhandled SyncCoreType");
 }
 
-
-
 //===----------------------------------------------------------------------===//
 // Sync lowering
 //===----------------------------------------------------------------------===
