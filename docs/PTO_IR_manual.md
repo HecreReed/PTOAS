@@ -5672,6 +5672,7 @@ For each element (i, j):
 |------|------|-------------|
 | `src0` | `pto.tile_buf` | Source tile buffer |
 | `src1` | `pto.tile_buf` | Per-row scalar vector |
+| `tmp` | `pto.tile_buf` | Optional scratch tile kept for A2/A3/A5 API alignment |
 | `dst` | `pto.tile_buf` | Destination tile buffer |
 
 **Results:** None. Writes into `dst` via DPS pattern.
@@ -5681,12 +5682,16 @@ For each element (i, j):
 ```
 pto.trowexpandadd ins(<src0>, <src1> : <src0_type>, <src1_type>)
                   outs(<dst> : <dst_type>)
+
+pto.trowexpandadd ins(<src0>, <src1>, <tmp> : <src0_type>, <src1_type>, <tmp_type>)
+                  outs(<dst> : <dst_type>)
 ```
 
 **Constraints & Verification:**
 
 - **Implementation checks**:
   - `dst`, `src0`, and `src1` must have the same element type.
+  - If present, `tmp` must be a valid `pto.tile_buf` scratch operand.
   - Element type:
     - A2/A3: `i16`, `i32`, `f16`, `f32`
     - A5: `i8`, `i16`, `i32`, `f16`, `f32`
@@ -5709,6 +5714,19 @@ pto.trowexpandadd ins(%src0, %src1 : !pto.tile_buf<loc=vec, dtype=f32, rows=16, 
                       fractal=512, pad=0>,
                       !pto.tile_buf<loc=vec, dtype=f32, rows=16, cols=1,
                       v_row=16, v_col=1, blayout=col_major, slayout=none_box,
+                      fractal=512, pad=0>)
+                  outs(%dst : !pto.tile_buf<loc=vec, dtype=f32, rows=16, cols=16,
+                      v_row=16, v_col=16, blayout=row_major, slayout=none_box,
+                      fractal=512, pad=0>)
+
+pto.trowexpandadd ins(%src0, %src1, %tmp : !pto.tile_buf<loc=vec, dtype=f32, rows=16, cols=16,
+                      v_row=16, v_col=16, blayout=row_major, slayout=none_box,
+                      fractal=512, pad=0>,
+                      !pto.tile_buf<loc=vec, dtype=f32, rows=16, cols=1,
+                      v_row=16, v_col=1, blayout=col_major, slayout=none_box,
+                      fractal=512, pad=0>,
+                      !pto.tile_buf<loc=vec, dtype=f32, rows=16, cols=16,
+                      v_row=16, v_col=16, blayout=row_major, slayout=none_box,
                       fractal=512, pad=0>)
                   outs(%dst : !pto.tile_buf<loc=vec, dtype=f32, rows=16, cols=16,
                       v_row=16, v_col=16, blayout=row_major, slayout=none_box,

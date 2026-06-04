@@ -9206,6 +9206,16 @@ void mlir::pto::TRowExpandSubOp::print(OpAsmPrinter &p) {
                               getDst());
 }
 
+ParseResult mlir::pto::TRowExpandAddOp::parse(OpAsmParser &parser,
+                                              OperationState &result) {
+  return parseTRowExpandBinaryLikeOp(parser, result);
+}
+
+void mlir::pto::TRowExpandAddOp::print(OpAsmPrinter &p) {
+  printTRowExpandBinaryLikeOp(p, getOperation(), getSrc0(), getSrc1(), getTmp(),
+                              getDst());
+}
+
 ParseResult mlir::pto::TRowExpandExpdifOp::parse(OpAsmParser &parser,
                                                  OperationState &result) {
   return parseTRowExpandBinaryLikeOp(parser, result);
@@ -9351,21 +9361,16 @@ mlir::LogicalResult mlir::pto::TRowExpandAddOp::verify() {
     Type src0Ty = getSrc0().getType();
     Type src1Ty = getSrc1().getType();
     Type dstTy = getDst().getType();
-    if (failed(verifyTileBufCommon(*this, src0Ty, "src0")) ||
-        failed(verifyTileBufCommon(*this, src1Ty, "src1")) ||
-        failed(verifyTileBufCommon(*this, dstTy, "dst")))
-      return failure();
-    if (failed(verifyTileBufSameElemType(*this, src0Ty, dstTy, "src0", "dst")))
+    FailureOr<Type> elemOr = verifyTRowExpandBinaryCore(
+        *this, src0Ty, src1Ty, dstTy, getTmp() ? getTmp().getType() : Type{},
+        static_cast<bool>(getTmp()));
+    if (failed(elemOr))
       return failure();
     if (failed(verifyTileBufSameValidShape(*this, src0Ty, dstTy, "src0", "dst")))
       return failure();
-    if (getElemTy(src0Ty) != getElemTy(src1Ty))
-      return emitOpError("expects src0 and src1 to have the same element type");
     if (!isRowMajorTileBuf(src0Ty))
       return emitOpError("expects src0 to use row-major layout");
-    if (!isRowMajorTileBuf(dstTy))
-      return emitOpError("expects dst to use row-major layout");
-    Type elem = getElemTy(src0Ty);
+    Type elem = *elemOr;
     bool supported = elem.isF16() || elem.isF32() || elem.isInteger(16) ||
                      elem.isInteger(32) ||
                      (targetArch == PTOArch::A5 && elem.isInteger(8));

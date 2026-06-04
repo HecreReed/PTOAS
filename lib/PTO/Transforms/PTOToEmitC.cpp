@@ -9882,9 +9882,14 @@ struct PTORowExpandAddToEmitC : public OpConversionPattern<pto::TRowExpandAddOp>
 
     Value src0 = peelUnrealized(adaptor.getSrc0());
     Value src1 = peelUnrealized(adaptor.getSrc1());
+    Value tmp = op.getTmp() ? peelUnrealized(adaptor.getTmp()) : Value();
     Value dst = peelUnrealized(adaptor.getDst());
 
-    SmallVector<Value, 3> operands{dst, src0, src1};
+    SmallVector<Value, 4> operands;
+    if (tmp)
+      operands.assign({dst, src0, src1, tmp});
+    else
+      operands.assign({dst, src0, src1});
     rewriter.create<emitc::CallOpaqueOp>(
         loc, TypeRange{}, "TROWEXPANDADD",
         /*args=*/ArrayAttr{}, /*templateArgs=*/ArrayAttr{},
