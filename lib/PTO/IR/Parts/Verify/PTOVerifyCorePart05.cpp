@@ -195,7 +195,6 @@ LogicalResult mlir::pto::MakeTensorViewOp::verify() {
 
   bool allStaticShape =
       llvm::none_of(tvTy.getShape(), [](int64_t v) { return v == ShapedType::kDynamic; });
-
   if (layoutAttr && allStaticShape && allStaticStride) {
     SmallVector<int64_t> shapeInts(tvTy.getShape().begin(), tvTy.getShape().end());
     if (auto inferred = inferLayout(shapeInts, strideInts,

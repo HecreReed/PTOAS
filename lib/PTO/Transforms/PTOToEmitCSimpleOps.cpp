@@ -66,7 +66,6 @@ struct PTOGetSubBlockIdxToEmitC
   LogicalResult
   matchAndRewrite(mlir::pto::GetSubBlockIdxOp op, OpAdaptor adaptor,
                   ConversionPatternRewriter &rewriter) const override {
-
     rewriter.replaceOpWithNewOp<emitc::CallOpaqueOp>(
         op, op.getType(), "get_subblockid", ValueRange{}, ArrayAttr{},
         ArrayAttr{});

@@ -14,6 +14,7 @@
 #include "PTO/IR/PTO.h"
 #include "PTO/Transforms/GraphSyncSolver/Utility.h"
 #include "llvm/Support/Debug.h"
+#include <cstddef>
 #include <optional>
 #include <queue>
 #include <utility>
@@ -24,6 +25,10 @@ using namespace mlir;
 using namespace pto::syncsolver;
 
 using UnitDistKey = std::tuple<int, int, CorePipeInfo>;
+constexpr size_t kUnitDistSourceIndex = 0;
+constexpr size_t kUnitDistTargetIndex = 1;
+constexpr size_t kUnitDistPipeIndex = 2;
+
 struct UnitDistKeyInfo {
   static inline UnitDistKey getEmptyKey() {
     return {llvm::DenseMapInfo<int>::getEmptyKey(),
@@ -38,19 +43,25 @@ struct UnitDistKeyInfo {
   }
 
   static unsigned getHashValue(const UnitDistKey &val) {
-    unsigned hash = llvm::DenseMapInfo<int>::getHashValue(std::get<0>(val));
+    unsigned hash = llvm::DenseMapInfo<int>::getHashValue(
+        std::get<kUnitDistSourceIndex>(val));
     hash = combineDenseHash(
-        hash, llvm::DenseMapInfo<int>::getHashValue(std::get<1>(val)));
-    return combineDenseHash(hash,
-                            CorePipeInfoKeyInfo::getHashValue(std::get<2>(val)));
+        hash, llvm::DenseMapInfo<int>::getHashValue(
+                  std::get<kUnitDistTargetIndex>(val)));
+    return combineDenseHash(
+        hash,
+        CorePipeInfoKeyInfo::getHashValue(std::get<kUnitDistPipeIndex>(val)));
   }
 
   static bool isEqual(const UnitDistKey &lhs, const UnitDistKey &rhs) {
-    return llvm::DenseMapInfo<int>::isEqual(std::get<0>(lhs),
-                                            std::get<0>(rhs)) &&
-           llvm::DenseMapInfo<int>::isEqual(std::get<1>(lhs),
-                                            std::get<1>(rhs)) &&
-           CorePipeInfoKeyInfo::isEqual(std::get<2>(lhs), std::get<2>(rhs));
+    return llvm::DenseMapInfo<int>::isEqual(
+               std::get<kUnitDistSourceIndex>(lhs),
+               std::get<kUnitDistSourceIndex>(rhs)) &&
+           llvm::DenseMapInfo<int>::isEqual(
+               std::get<kUnitDistTargetIndex>(lhs),
+               std::get<kUnitDistTargetIndex>(rhs)) &&
+           CorePipeInfoKeyInfo::isEqual(std::get<kUnitDistPipeIndex>(lhs),
+                                        std::get<kUnitDistPipeIndex>(rhs));
   }
 };
 
