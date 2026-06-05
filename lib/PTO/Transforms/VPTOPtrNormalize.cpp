@@ -46,14 +46,6 @@ static pto::AddressSpaceAttr getPointerMemorySpace(Attribute memorySpace,
   return {};
 }
 
-static Value buildIndexValue(OpBuilder &builder, Location loc,
-                             OpFoldResult ofr) {
-  if (auto value = dyn_cast<Value>(ofr))
-    return value;
-  auto attr = cast<IntegerAttr>(cast<Attribute>(ofr));
-  return builder.create<arith::ConstantIndexOp>(loc, attr.getInt());
-}
-
 static bool needsSubviewPtrConversion(memref::SubViewOp op) {
   auto resultType = dyn_cast<MemRefType>(op.getType());
   if (!resultType)
@@ -127,18 +119,26 @@ static LogicalResult computeSubviewElementOffset(memref::SubViewOp op,
 
   Location loc = op.getLoc();
   Value total = rewriter.create<arith::ConstantIndexOp>(loc, baseOffset);
-  SmallVector<OpFoldResult> mixedOffsets(op.getMixedOffsets().begin(),
-                                         op.getMixedOffsets().end());
-  if (mixedOffsets.size() != strides.size())
+  ArrayRef<int64_t> staticOffsets = op.getStaticOffsets();
+  ValueRange dynamicOffsets = op.getOffsets();
+  if (staticOffsets.size() != strides.size())
     return failure();
 
-  for (auto [ofr, stride] : llvm::zip(mixedOffsets, strides)) {
+  unsigned dynamicIndex = 0;
+  for (auto [staticOffset, stride] : llvm::zip(staticOffsets, strides)) {
     if (stride == 0)
       continue;
     if (stride == ShapedType::kDynamic)
       return failure();
 
-    Value idx = buildIndexValue(rewriter, loc, ofr);
+    Value idx;
+    if (ShapedType::isDynamic(staticOffset)) {
+      if (dynamicIndex >= dynamicOffsets.size())
+        return failure();
+      idx = dynamicOffsets[dynamicIndex++];
+    } else {
+      idx = rewriter.create<arith::ConstantIndexOp>(loc, staticOffset);
+    }
     if (!idx.getType().isIndex())
       return failure();
 
@@ -149,6 +149,8 @@ static LogicalResult computeSubviewElementOffset(memref::SubViewOp op,
     }
     total = rewriter.create<arith::AddIOp>(loc, total, idx);
   }
+  if (dynamicIndex != dynamicOffsets.size())
+    return failure();
 
   offset = total;
   return success();
@@ -747,6 +749,38 @@ struct ConvertPtrNormalizeUnrealizedCastOp final
   }
 };
 
+struct ConvertPtrNormalizeMemRefCastOp final
+    : public OpConversionPattern<memref::CastOp> {
+  using OpConversionPattern::OpConversionPattern;
+
+  LogicalResult
+  matchAndRewrite(memref::CastOp op, OpAdaptor adaptor,
+                  ConversionPatternRewriter &rewriter) const override {
+    if (!hasPtrNormalizeConvertibleType(op.getSource().getType()) &&
+        !hasPtrNormalizeConvertibleType(op.getType()))
+      return failure();
+
+    Type convertedResultType = getTypeConverter()->convertType(op.getType());
+    if (!convertedResultType)
+      return failure();
+
+    Value source = adaptor.getSource();
+    if (source.getType() == convertedResultType) {
+      rewriter.replaceOp(op, source);
+      return success();
+    }
+
+    if (!isa<pto::PtrType, IntegerType>(source.getType()) ||
+        !isa<pto::PtrType, IntegerType>(convertedResultType))
+      return rewriter.notifyMatchFailure(
+          op, "expected ptr/int memref.cast after ptr normalization");
+
+    rewriter.replaceOpWithNewOp<pto::CastPtrOp>(op, convertedResultType,
+                                                source);
+    return success();
+  }
+};
+
 struct VPTOPtrNormalizePass
     : public pto::impl::VPTOPtrNormalizeBase<VPTOPtrNormalizePass> {
   using pto::impl::VPTOPtrNormalizeBase<
@@ -785,6 +819,10 @@ struct VPTOPtrNormalizePass
           return !hasPtrNormalizeConvertibleType(op->getOperandTypes()) &&
                  !hasPtrNormalizeConvertibleType(op->getResultTypes());
         });
+    target.addDynamicallyLegalOp<memref::CastOp>([&](memref::CastOp op) {
+      return !hasPtrNormalizeConvertibleType(op.getSource().getType()) &&
+             !hasPtrNormalizeConvertibleType(op.getType());
+    });
     target.addDynamicallyLegalOp<pto::TileBufAddrOp>([&](pto::TileBufAddrOp op) {
       return op.getDst().getType() ==
              typeConverter.convertType(op.getDst().getType());
@@ -910,7 +948,8 @@ struct VPTOPtrNormalizePass
                  ConvertAccStoreUbOperandPattern,
                  ConvertLoadOperandToPtrPattern,
                  ConvertStoreOperandToPtrPattern,
-                 ConvertPtrNormalizeUnrealizedCastOp>(
+                 ConvertPtrNormalizeUnrealizedCastOp,
+                 ConvertPtrNormalizeMemRefCastOp>(
         typeConverter, context);
 
     if (failed(applyPartialConversion(module, target, std::move(patterns))))
