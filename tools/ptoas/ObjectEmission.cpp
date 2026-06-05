@@ -772,10 +772,13 @@ llvm::StringRef mlir::pto::CANNToolchain::vptoPublicABISuffix(
     ObjectEmissionDeviceTarget target) const {
   switch (target) {
   case ObjectEmissionDeviceTarget::Vector:
-    return vptoVectorPublicABISuffix.empty() ? ".vector"
-                                             : vptoVectorPublicABISuffix;
+    if (vptoVectorPublicABISuffix.empty())
+      return llvm::StringRef(".vector");
+    return llvm::StringRef(vptoVectorPublicABISuffix);
   case ObjectEmissionDeviceTarget::Cube:
-    return vptoCubePublicABISuffix.empty() ? ".cube" : vptoCubePublicABISuffix;
+    if (vptoCubePublicABISuffix.empty())
+      return llvm::StringRef(".cube");
+    return llvm::StringRef(vptoCubePublicABISuffix);
   }
   llvm_unreachable("unknown object emission device target");
 }

@@ -2819,9 +2819,9 @@ struct PTOMGatherToMGATHER : public OpConversionPattern<pto::MGatherOp> {
   LogicalResult matchAndRewrite(pto::MGatherOp op, OpAdaptor adaptor,
                                 ConversionPatternRewriter &rewriter) const override {
     auto *ctx = rewriter.getContext();
-    Value mem = peelUnrealized(adaptor.getMem());
-    Value idx = peelUnrealized(adaptor.getIdx());
-    Value dst = peelUnrealized(adaptor.getDst());
+    Value mem = adaptor.getMem();
+    Value idx = adaptor.getIdx();
+    Value dst = adaptor.getDst();
 
     Value memArg = maybeWrapGlobalMemrefAsGlobalTensor(
         rewriter, op.getLoc(), mem, op.getMem().getType(), op.getOperation());
@@ -5755,9 +5755,9 @@ struct PTOMScatterToMSCATTER : public OpConversionPattern<pto::MScatterOp> {
   LogicalResult matchAndRewrite(pto::MScatterOp op, OpAdaptor adaptor,
                                 ConversionPatternRewriter &rewriter) const override {
     auto *ctx = rewriter.getContext();
-    Value src = peelUnrealized(adaptor.getSrc());
-    Value idx = peelUnrealized(adaptor.getIdx());
-    Value mem = peelUnrealized(adaptor.getMem());
+    Value src = adaptor.getSrc();
+    Value idx = adaptor.getIdx();
+    Value mem = adaptor.getMem();
 
     Value memArg = maybeWrapGlobalMemrefAsGlobalTensor(
         rewriter, op.getLoc(), mem, op.getMem().getType(), op.getOperation());
@@ -11065,7 +11065,7 @@ struct PTOPrintToTPRINT : public OpConversionPattern<pto::TPrintOp> {
       llvm_unreachable("unknown PrintFormat");
     };
 
-    Value src = peelUnrealized(adaptor.getSrc());
+    Value src = adaptor.getSrc();
     if (isa<MemRefType>(op.getSrc().getType()) ||
         isa<mlir::pto::PartitionTensorViewType>(op.getSrc().getType())) {
       src = maybeWrapGlobalMemrefAsGlobalTensor(
@@ -11074,7 +11074,7 @@ struct PTOPrintToTPRINT : public OpConversionPattern<pto::TPrintOp> {
 
     SmallVector<Value, 4> operands{src};
     if (auto tmp = op.getTmp()) {
-      Value tmpValue = peelUnrealized(adaptor.getTmp());
+      Value tmpValue = adaptor.getTmp();
       if (isa<MemRefType>(tmp.getType()) ||
           isa<mlir::pto::PartitionTensorViewType>(tmp.getType())) {
         tmpValue = maybeWrapGlobalMemrefAsGlobalTensor(
