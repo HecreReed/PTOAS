@@ -202,10 +202,25 @@ jobs:
             llvm-project/llvm/build-assert
           key: llvm-${{ runner.os }}-${{ env.LLVM_SOURCE_SHA }}-${{ env.LLVM_CACHE_FLAVOR }}
 
+      - name: Resolve VPTO clang toolchain
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -x "${LLVM_DIR}/bin/clang"
+          test -x "${LLVM_DIR}/bin/clang++"
+          echo "PTOAS_CC=${LLVM_DIR}/bin/clang" >> "${GITHUB_ENV}"
+          echo "PTOAS_CXX=${LLVM_DIR}/bin/clang++" >> "${GITHUB_ENV}"
+          "${LLVM_DIR}/bin/clang" --version | head -n 1
+          "${LLVM_DIR}/bin/clang++" --version | head -n 1
+
       - name: Build PTOAS
         run: |
+          rm -rf "${PTO_BUILD_DIR}"
           rm -rf "${PTO_INSTALL_DIR}"
-          # LLVM_BUILD_DIR is the env var read by the build backend (_ptoas_build_backend.py).
+          # Build PTOAS with the clang that ships in the cached VPTO LLVM tree so
+          # -Werror diagnostics follow the exact LLVM fork consumed by the build.
+          CC="${PTOAS_CC}" \
+          CXX="${PTOAS_CXX}" \
           LLVM_BUILD_DIR="${LLVM_DIR}" \
             PTO_INSTALL_DIR="${PTO_INSTALL_DIR}" \
             python3 -m pip install . --no-build-isolation --no-deps --ignore-installed --prefix "${PTO_INSTALL_DIR}"
@@ -409,12 +424,25 @@ jobs:
 
           ninja -C llvm/build-shared
 
+      - name: Resolve VPTO clang toolchain
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -x "${LLVM_DIR}/bin/clang"
+          test -x "${LLVM_DIR}/bin/clang++"
+          echo "PTOAS_CC=${LLVM_DIR}/bin/clang" >> "${GITHUB_ENV}"
+          echo "PTOAS_CXX=${LLVM_DIR}/bin/clang++" >> "${GITHUB_ENV}"
+          "${LLVM_DIR}/bin/clang" --version | head -n 1
+          "${LLVM_DIR}/bin/clang++" --version | head -n 1
+
       - name: Build PTOAS
         shell: bash
         run: |
           set -euo pipefail
+          rm -rf "${GITHUB_WORKSPACE}/build"
           rm -rf "${PTO_INSTALL_DIR}"
-          # LLVM_BUILD_DIR is the env var read by the build backend (_ptoas_build_backend.py).
+          CC="${PTOAS_CC}" \
+          CXX="${PTOAS_CXX}" \
           LLVM_BUILD_DIR="${LLVM_DIR}" \
             PTO_INSTALL_DIR="${PTO_INSTALL_DIR}" \
             python3 -m pip install . --no-build-isolation --no-deps --ignore-installed --prefix "${PTO_INSTALL_DIR}"

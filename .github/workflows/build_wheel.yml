@@ -156,9 +156,21 @@ jobs:
           path: /llvm-workspace/llvm-project/build-release
           key: llvm-${{ steps.llvm-source.outputs.sha }}-manylinux_2_34-${{ matrix.arch }}-${{ matrix.python }}-${{ env.LLVM_CACHE_FLAVOR }}
 
+      - name: Resolve VPTO clang toolchain
+        run: |
+          test -x "${LLVM_BUILD_DIR}/bin/clang"
+          test -x "${LLVM_BUILD_DIR}/bin/clang++"
+          echo "PTOAS_CC=${LLVM_BUILD_DIR}/bin/clang" >> "$GITHUB_ENV"
+          echo "PTOAS_CXX=${LLVM_BUILD_DIR}/bin/clang++" >> "$GITHUB_ENV"
+          "${LLVM_BUILD_DIR}/bin/clang" --version | head -n 1
+          "${LLVM_BUILD_DIR}/bin/clang++" --version | head -n 1
+
       - name: Build PTOAS
         run: |
           export PATH="${PY_PATH}/bin:$PATH"
+          rm -rf "${PTO_BUILD_DIR}" "${PTO_INSTALL_DIR}"
+          CC="${PTOAS_CC}" \
+          CXX="${PTOAS_CXX}" \
           PTOAS_RELEASE_VERSION_OVERRIDE="${PTOAS_VERSION}" \
           pip install . --no-build-isolation
 
