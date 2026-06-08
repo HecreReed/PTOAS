@@ -20,6 +20,7 @@
 #include <mlir/Dialect/SCF/IR/SCF.h>
 
 #include <PTO/IR/PTO.h>
+#include <PTO/IR/PTODialect.h>
 #include <mlir/IR/BuiltinOps.h>
 #include <mlir/IR/Location.h>
 #include <mlir/IR/Operation.h>

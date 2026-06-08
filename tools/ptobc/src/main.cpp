@@ -17,6 +17,7 @@
 #include <mlir/IR/MLIRContext.h>
 
 #include <PTO/IR/PTO.h>
+#include <PTO/IR/PTODialect.h>
 
 #include <iostream>
 #include <optional>

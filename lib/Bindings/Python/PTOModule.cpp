@@ -1067,7 +1067,22 @@ static void bindPTOModule(pybind11::module &m) {
     populatePTODialectSubmodule(&m);
 }
 
+extern "C" PYBIND11_MAYBE_UNUSED PYBIND11_EXPORT PyObject *PyInit__pto();
 
-PYBIND11_MODULE(_pto, m) { // NOLINT(readability-inconsistent-declaration-parameter-name)
-  bindPTOModule(m);
+extern "C" PYBIND11_EXPORT PyObject *PyInit__pto() {
+  PYBIND11_CHECK_PYTHON_VERSION
+  PYBIND11_ENSURE_INTERNALS_READY
+  try {
+    static PyModuleDef moduleDef;
+    auto module = py::module_::create_extension_module("_pto", nullptr,
+                                                       &moduleDef);
+    bindPTOModule(module);
+    return module.release().ptr();
+  } catch (py::error_already_set &e) {
+    py::raise_from(e, PyExc_ImportError, "initialization failed");
+    return nullptr;
+  } catch (const std::exception &e) {
+    PyErr_SetString(PyExc_ImportError, e.what());
+    return nullptr;
+  }
 }

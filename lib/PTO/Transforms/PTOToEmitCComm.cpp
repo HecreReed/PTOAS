@@ -30,6 +30,8 @@ using namespace mlir::pto;
 namespace mlir::pto {
 namespace {
 
+#define PTO_CONVERSION_REWRITER_PARAM ConversionPatternRewriter &rewriter
+
 static constexpr llvm::StringLiteral kGlobalTensorStridesAttrName =
     "__pto.globaltensor_strides";
 static constexpr int8_t kPTOFrontendDirMaskC2V = 1;
@@ -279,7 +281,7 @@ struct PTOAsyncEventToEmitC : public OpConversionPattern<AsyncEventOp> {
 
   LogicalResult matchAndRewrite(AsyncEventOp op,
                                 typename AsyncEventOp::Adaptor adaptor,
-                                ConversionPatternRewriter &rewriter) const override { // NOLINT(readability-non-const-parameter)
+                                PTO_CONVERSION_REWRITER_PARAM) const override {
     Type resultTy =
         this->getTypeConverter()->convertType(op.getCompleted().getType());
     if (!resultTy)
@@ -872,6 +874,7 @@ struct PTOLocalArraySetToEmitC
   }
 };
 
+#undef PTO_CONVERSION_REWRITER_PARAM
 
 } // namespace
 

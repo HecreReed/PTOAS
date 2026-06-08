@@ -30,6 +30,8 @@ using namespace mlir;
 namespace mlir::pto {
 namespace {
 
+#define PTO_CONVERSION_REWRITER_PARAM ConversionPatternRewriter &rewriter
+
 static constexpr unsigned kPTOIndexBitWidth = 32;
 static constexpr size_t kNumber2 = 2;
 static constexpr unsigned kNumber32 = 32;
@@ -483,7 +485,7 @@ template <typename CastOp>
 struct ArithCastToEmitC : public OpConversionPattern<CastOp> {
   using OpConversionPattern<CastOp>::OpConversionPattern;
   LogicalResult matchAndRewrite(CastOp op, typename CastOp::Adaptor adaptor,
-                                ConversionPatternRewriter &rewriter) const override { // NOLINT(readability-non-const-parameter)
+                                PTO_CONVERSION_REWRITER_PARAM) const override {
     Type dstTy = this->getTypeConverter()->convertType(op.getType());
     if (!dstTy)
       return failure();
@@ -491,6 +493,8 @@ struct ArithCastToEmitC : public OpConversionPattern<CastOp> {
     return success();
   }
 };
+
+#undef PTO_CONVERSION_REWRITER_PARAM
 
 struct ArithIndexCastUIToEmitC : public OpConversionPattern<arith::IndexCastUIOp> {
   using OpConversionPattern::OpConversionPattern;

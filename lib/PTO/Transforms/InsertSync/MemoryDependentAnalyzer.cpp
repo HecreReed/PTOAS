@@ -102,7 +102,7 @@ static Value GetRealRoot(Value v) {
 bool MemoryDependentAnalyzer::DepBetween(
     const SmallVector<const BaseMemInfo *> &a,
     const SmallVector<const BaseMemInfo *> &b,
-    DepBaseMemInfoPairVec &depBaseMemInfosVec) {
+    DepBaseMemInfoPairVec &depBaseMemInfosVec) const {
   // [Debug Log] 关键入口信息
   if (isTraceEnabled()) {
     llvm::errs() << "\n[DepBetween] Checking dependency...\n";

@@ -17,6 +17,7 @@
 #define MLIR_DIALECT_PTO_TRANSFORMS_PASSES_H
 
 #include "PTO/IR/PTO.h"
+#include "PTO/IR/PTODialect.h"
 #include "mlir/IR/BuiltinOps.h"
 #include "mlir/Pass/Pass.h"
 #include "mlir/Support/LLVM.h"

@@ -11,6 +11,7 @@
 
 #include "PTO/Transforms/BufferizableOpInterfaceImpl.h"
 #include "PTO/IR/PTO.h"
+#include "PTO/IR/PTODialect.h"
 #include "mlir/Dialect/Bufferization/IR/BufferizableOpInterface.h"
 #include "mlir/Dialect/Bufferization/IR/DstBufferizableOpInterfaceImpl.h"
 #include "mlir/Dialect/MemRef/IR/MemRef.h"

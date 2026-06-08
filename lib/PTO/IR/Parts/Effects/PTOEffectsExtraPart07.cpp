@@ -12,6 +12,8 @@
 using namespace mlir;
 using namespace mlir::pto;
 
+#define PTO_DEFINE_OP_VERIFY(OpName) LogicalResult OpName::verify()
+
 LogicalResult CommTScatterOp::verify() {
   if (failed(verifyRootedCommTileTransfer(getOperation(), getSrc(), getGroup(),
                                           getRoot(), getPing(), getPong())))
@@ -42,11 +44,11 @@ LogicalResult TReduceOp::verify() {
   return success();
 }
 
-LogicalResult AicInitializePipeOp::verify() { // NOLINT(readability-make-member-function-const)
+PTO_DEFINE_OP_VERIFY(AicInitializePipeOp) {
   return verifyFrontendInitCommon(*this, FunctionKernelKind::Cube, "cube");
 }
 
-LogicalResult AivInitializePipeOp::verify() { // NOLINT(readability-make-member-function-const)
+PTO_DEFINE_OP_VERIFY(AivInitializePipeOp) {
   return verifyFrontendInitCommon(*this, FunctionKernelKind::Vector, "vector");
 }
 
@@ -94,15 +96,17 @@ LogicalResult TPushToAicOp::verify() {
                                               getTile().getType());
 }
 
-LogicalResult TPopFromAicOp::verify() { // NOLINT(readability-make-member-function-const)
+PTO_DEFINE_OP_VERIFY(TPopFromAicOp) {
   return verifyFrontendPopOp(*this, FunctionKernelKind::Vector, "vector",
                              /*expectC2V=*/true);
 }
 
-LogicalResult TPopFromAivOp::verify() { // NOLINT(readability-make-member-function-const)
+PTO_DEFINE_OP_VERIFY(TPopFromAivOp) {
   return verifyFrontendPopOp(*this, FunctionKernelKind::Cube, "cube",
                              /*expectC2V=*/false);
 }
+
+#undef PTO_DEFINE_OP_VERIFY
 
 LogicalResult TFreeFromAicOp::verify() {
   if (failed(verifyFrontendSplitOp(getOperation(), FunctionKernelKind::Vector,
