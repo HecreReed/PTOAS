@@ -436,7 +436,6 @@ struct AffineApplyMulConstToEmitC
   LogicalResult matchAndRewrite(affine::AffineApplyOp op, OpAdaptor adaptor,
                                 ConversionPatternRewriter &rewriter) const override {
     auto map = op.getAffineMap();
-
     if (map.getNumDims() != 0 || map.getNumSymbols() != 1)
       return failure();
 
