@@ -93,6 +93,59 @@ jobs:
             --head-sha "${{ github.event.pull_request.head.sha || github.sha }}" \
             --github-token "${GITHUB_TOKEN}"
 
+  detect-vpto-sim-changes:
+    runs-on: ubuntu-22.04
+    outputs:
+      should_run: ${{ steps.decide.outputs.should_run }}
+    steps:
+      - name: Detect PR changes relevant to VPTO SIM validation
+        if: ${{ github.event_name == 'pull_request' }}
+        id: filter
+        uses: dorny/paths-filter@v3
+        with:
+          token: ${{ github.token }}
+          filters: |
+            relevant:
+              - '.github/workflows/ci.yml'
+              - 'scripts/sim_dsl.sh'
+              - 'test/vpto/**'
+              - 'test/tilelang_st/**'
+              - 'test/dsl-st/**'
+              - 'tilelang-dsl/**'
+              - 'ptodsl/**'
+              - 'tools/ptoas/**'
+              - 'lib/TileOps/**'
+              - 'include/PTO/IR/VPTO*.td'
+              - 'lib/PTO/IR/VPTO.cpp'
+              - 'include/PTO/Transforms/Passes.h'
+              - 'include/PTO/Transforms/Passes.td'
+              - 'include/PTO/Transforms/*VPTO*'
+              - 'include/PTO/Transforms/**/*VPTO*'
+              - 'lib/PTO/Transforms/CMakeLists.txt'
+              - 'lib/PTO/Transforms/ExpandTileOp.cpp'
+              - 'lib/PTO/Transforms/FoldTileBufIntrinsics.cpp'
+              - 'lib/PTO/Transforms/*VPTO*'
+              - 'lib/PTO/Transforms/**/*VPTO*'
+
+      - name: Decide whether to run VPTO SIM validation
+        id: decide
+        shell: bash
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          PR_RELEVANT: ${{ steps.filter.outputs.relevant || 'false' }}
+        run: |
+          set -euo pipefail
+          if [[ "${EVENT_NAME}" != "pull_request" ]]; then
+            echo "should_run=true" >> "${GITHUB_OUTPUT}"
+            echo "Running vpto-sim-validation on ${EVENT_NAME}"
+          elif [[ "${PR_RELEVANT}" == "true" ]]; then
+            echo "should_run=true" >> "${GITHUB_OUTPUT}"
+            echo "Running vpto-sim-validation because the PR touched VPTO-related paths"
+          else
+            echo "should_run=false" >> "${GITHUB_OUTPUT}"
+            echo "Skipping vpto-sim-validation because the PR did not touch VPTO-related paths"
+          fi
+
   build-and-test:
     runs-on: ubuntu-22.04
     env:
@@ -292,6 +345,7 @@ jobs:
           if-no-files-found: error
 
   vpto-sim-validation:
+    needs: detect-vpto-sim-changes
     runs-on: [self-hosted, Linux, X64, label-1]
     timeout-minutes: 120
     concurrency:
@@ -299,9 +353,7 @@ jobs:
       cancel-in-progress: true
     if: >-
       ${{
-        github.event_name == 'workflow_dispatch' ||
-        github.event_name == 'schedule' ||
-        github.event_name == 'pull_request'
+        needs.detect-vpto-sim-changes.outputs.should_run == 'true'
       }}
     env:
       LLVM_REPO: https://github.com/vpto-dev/llvm-project.git
