@@ -110,7 +110,7 @@ pto.wait_event [<src_op>, <dst_op>, <event_id>]
 | ---- | ---- | ----------- |
 | `src_op` | `#pto.sync_op_type<...>` | 与 `pto.record_event` 中一致的源事件类型 |
 | `dst_op` | `#pto.sync_op_type<...>` | 与 `pto.record_event` 中一致的目标事件类型 |
-| `event_id` | `EventAttr` | 事件 ID |
+| `event_id` | `#pto.event<...>` | 事件 ID |
 
 **返回值：** 无。
 

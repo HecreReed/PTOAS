@@ -2,7 +2,7 @@
 
 本节描述了 PTO ISA 中的复杂操作，包括连续整数序列生成、聚集/散射数据重排、部分有效区域逐元素运算、排序和填充等操作。
 
-通用装配形式：
+通用汇编形式（generic assembly form）：
 
 ```
 pto.op ins(<src>, ... : <src_type>, ...) outs(<dst> : <dst_type>)
@@ -166,9 +166,41 @@ pto.tgather ins(<src>, {maskPattern = #pto.mask_pattern<<pattern>>} : <src_type>
     cdst 存储每行选中的元素个数
 
 掩码形式：
-    For each element (i, j):
-        dst[i, j] = src[...] 按掩码模式选取
+    将 src 的有效区域按行主序扫描，只保留列位置满足 maskPattern 的元素，
+    并将这些元素按顺序连续写入 dst。
+
+    设 src 的有效区域为 R x C，dst 从线性位置 0 开始顺序写入，
+    若第 r 行第 c 列被 maskPattern 选中，则：
+        dst[linear_out] = src[r, c]
+        linear_out = linear_out + 1
 ```
+
+对单行输入，或仅观察每一行内被选中的列位置时，默认掩码形式可写为：
+
+```
+P1111:
+    dst[r, k] = src[r, k]
+
+P0101:
+    dst[r, k] = src[r, 2*k]
+
+P1010:
+    dst[r, k] = src[r, 2*k + 1]
+
+P0001:
+    dst[r, k] = src[r, 4*k]
+
+P0010:
+    dst[r, k] = src[r, 4*k + 1]
+
+P0100:
+    dst[r, k] = src[r, 4*k + 2]
+
+P1000:
+    dst[r, k] = src[r, 4*k + 3]
+```
+
+其中 `k` 取到右侧索引仍小于 `src` 的有效列数为止。`dst` 的写入结果是连续压紧的，因此当 `src` 有多行时，上一行选出的尾部元素和下一行选出的首部元素在 `dst` 中也是连续存放的。
 
 **参数:**
 
@@ -186,13 +218,13 @@ pto.tgather ins(<src>, {maskPattern = #pto.mask_pattern<<pattern>>} : <src_type>
 **属性:**
 
 - `maskPattern` — 掩码模式，仅用于掩码形式。
-  - `#pto.mask_pattern<P0101>` — 按 0101 模式选取
-  - `#pto.mask_pattern<P1010>` — 按 1010 模式选取
-  - `#pto.mask_pattern<P0001>` — 按 0001 模式选取
-  - `#pto.mask_pattern<P0010>` — 按 0010 模式选取
-  - `#pto.mask_pattern<P0100>` — 按 0100 模式选取
-  - `#pto.mask_pattern<P1000>` — 按 1000 模式选取
-  - `#pto.mask_pattern<P1111>` — 按 1111 模式选取（全选）
+  - `#pto.mask_pattern<P0101>` — 每 2 个元素取第 1 个，即选中列 `0, 2, 4, ...`
+  - `#pto.mask_pattern<P1010>` — 每 2 个元素取第 2 个，即选中列 `1, 3, 5, ...`
+  - `#pto.mask_pattern<P0001>` — 每 4 个元素取第 1 个，即选中列 `0, 4, 8, ...`
+  - `#pto.mask_pattern<P0010>` — 每 4 个元素取第 2 个，即选中列 `1, 5, 9, ...`
+  - `#pto.mask_pattern<P0100>` — 每 4 个元素取第 3 个，即选中列 `2, 6, 10, ...`
+  - `#pto.mask_pattern<P1000>` — 每 4 个元素取第 4 个，即选中列 `3, 7, 11, ...`
+  - `#pto.mask_pattern<P1111>` — 选中全部列（不筛选）
 
 - `cmpMode` — 比较模式，仅用于比较形式。默认值为 `eq`。
   - `#pto<cmp eq>` — 相等比较
@@ -271,7 +303,7 @@ format2：
 | `tmp` | `pto.tile_buf` | format2 中的临时 tile（仅 format2） |
 | `excuted` | `vector<4xi16>` | format2 中输出的每路消耗计数向量（仅 format2） |
 
-**返回值:** 无。以 DPS 的形式写入 `dst`。
+**返回值:** 无 SSA 返回。以 DPS 的形式写入 `dst`；format2 还会写入 `excuted`。
 
 **属性:**
 
@@ -554,7 +586,61 @@ pto.tscatter ins(<src>, {maskPattern = #pto.mask_pattern<<pattern>>} : <src_type
         dst[indexes[i], j] = src[i, j]
 
 掩码形式：
-    按掩码模式将 src 元素分散写入 dst
+    将 src 中按行主序连续存放的元素，按 maskPattern 指定的位置散射回 dst；
+    未被 maskPattern 命中的位置补 0。
+```
+
+默认掩码形式可视为 `pto.tgather` 掩码形式的反向展开。设 `src` 的有效区域为 `R x Csrc`，`dst` 的有效区域为 `R x Cdst`，并满足：
+
+- `P0101` / `P1010`：`Cdst = 2 * Csrc`
+- `P0001` / `P0010` / `P0100` / `P1000`：`Cdst = 4 * Csrc`
+- `P1111`：`Cdst = Csrc`
+
+则有：
+
+```
+P1111:
+    dst[r, k] = src[r, k]
+
+P0101:
+    dst[r, 2*k]     = src[r, k]
+    dst[r, 2*k + 1] = 0
+
+P1010:
+    dst[r, 2*k]     = 0
+    dst[r, 2*k + 1] = src[r, k]
+
+P0001:
+    dst[r, 4*k]     = src[r, k]
+    dst[r, 4*k + 1] = 0
+    dst[r, 4*k + 2] = 0
+    dst[r, 4*k + 3] = 0
+
+P0010:
+    dst[r, 4*k]     = 0
+    dst[r, 4*k + 1] = src[r, k]
+    dst[r, 4*k + 2] = 0
+    dst[r, 4*k + 3] = 0
+
+P0100:
+    dst[r, 4*k]     = 0
+    dst[r, 4*k + 1] = 0
+    dst[r, 4*k + 2] = src[r, k]
+    dst[r, 4*k + 3] = 0
+
+P1000:
+    dst[r, 4*k]     = 0
+    dst[r, 4*k + 1] = 0
+    dst[r, 4*k + 2] = 0
+    dst[r, 4*k + 3] = src[r, k]
+```
+
+例如当一行源数据为 `[a, b, c, d]` 时：
+
+```
+P0101 -> [a, 0, b, 0, c, 0, d, 0]
+P1010 -> [0, a, 0, b, 0, c, 0, d]
+P0010 -> [0, a, 0, 0, 0, b, 0, 0, 0, c, 0, 0, 0, d, 0, 0]
 ```
 
 **参数:**
@@ -570,19 +656,19 @@ pto.tscatter ins(<src>, {maskPattern = #pto.mask_pattern<<pattern>>} : <src_type
 **属性:**
 
 - `maskPattern` — 掩码模式，仅用于掩码形式。
-  - `#pto.mask_pattern<P0101>` — 按 0101 模式散射（扩展因子 2）
-  - `#pto.mask_pattern<P1010>` — 按 1010 模式散射（扩展因子 2）
-  - `#pto.mask_pattern<P0001>` — 按 0001 模式散射（扩展因子 4）
-  - `#pto.mask_pattern<P0010>` — 按 0010 模式散射（扩展因子 4）
-  - `#pto.mask_pattern<P0100>` — 按 0100 模式散射（扩展因子 4）
-  - `#pto.mask_pattern<P1000>` — 按 1000 模式散射（扩展因子 4）
-  - `#pto.mask_pattern<P1111>` — 按 1111 模式散射（扩展因子 1，即全量复制）
+  - `#pto.mask_pattern<P0101>` — 每 2 列中的第 1 列写入 `src`，其余列补 0
+  - `#pto.mask_pattern<P1010>` — 每 2 列中的第 2 列写入 `src`，其余列补 0
+  - `#pto.mask_pattern<P0001>` — 每 4 列中的第 1 列写入 `src`，其余列补 0
+  - `#pto.mask_pattern<P0010>` — 每 4 列中的第 2 列写入 `src`，其余列补 0
+  - `#pto.mask_pattern<P0100>` — 每 4 列中的第 3 列写入 `src`，其余列补 0
+  - `#pto.mask_pattern<P1000>` — 每 4 列中的第 4 列写入 `src`，其余列补 0
+  - `#pto.mask_pattern<P1111>` — 全量复制，不插入 0
 
 **约束：**
 
 - **实现检查 (A2A3)**
   - 索引形式：`src`、`dst` 和 `indexes` 必须为 `loc=vec`。`src`/`dst` 元素类型必须一致，且为 `i8`、`i16`、`i32`、`f16`、`bf16` 或 `f32` 之一。`indexes` 元素类型必须为 `i16` 或 `i32`。当 `dst` 元素大小为 4 字节时，`indexes` 元素大小也必须为 4 字节；2 字节时也必须为 2 字节；1 字节时 `indexes` 必须为 2 字节。不对 `indexes` 中的值进行越界检查。索引形式在 A2/A3 上降低到标量 UB 循环（`PIPE_S`）。
-  - 掩码形式：`src` 和 `dst` 必须为 `loc=vec` 且 `blayout=row_major`。`src` 和 `dst` 元素类型必须一致，且为 `i8`、`i16`、`i32`、`f16`、`bf16` 或 `f32` 之一。`src` 和 `dst` 的有效行数必须一致。`src` 的有效列数必须等于 `dst` 有效列数乘以掩码扩展因子。
+  - 掩码形式：`src` 和 `dst` 必须为 `loc=vec` 且 `blayout=row_major`。`src` 和 `dst` 元素类型必须一致，且为 `i8`、`i16`、`i32`、`f16`、`bf16` 或 `f32` 之一。`src` 和 `dst` 的有效行数必须一致。`dst` 的有效列数必须等于 `src` 有效列数乘以掩码扩展因子。
 
 - **实现检查 (A5)**
   - 索引形式：约束与 A2A3 索引形式相同。索引形式在 A5 上使用向量散射（`PIPE_V`）。
@@ -593,11 +679,11 @@ pto.tscatter ins(<src>, {maskPattern = #pto.mask_pattern<<pattern>>} : <src_type
 ```mlir
 // 掩码形式（A2A3）
 pto.tscatter ins(%src, {maskPattern = #pto.mask_pattern<P0101>} :
-                 !pto.tile_buf<loc=vec, dtype=f16, rows=1, cols=64,
-                     v_row=1, v_col=64, blayout=row_major, slayout=none_box,
-                     fractal=512, pad=0>)
-             outs(%dst : !pto.tile_buf<loc=vec, dtype=f16, rows=1, cols=32,
+                 !pto.tile_buf<loc=vec, dtype=f16, rows=1, cols=32,
                      v_row=1, v_col=32, blayout=row_major, slayout=none_box,
+                     fractal=512, pad=0>)
+             outs(%dst : !pto.tile_buf<loc=vec, dtype=f16, rows=1, cols=64,
+                     v_row=1, v_col=64, blayout=row_major, slayout=none_box,
                      fractal=512, pad=0>)
 ```
 
@@ -933,16 +1019,16 @@ pto.ttri ins(<diagonal> : <integer_type>)
 ```
 For each element (i, j):
     if upperOrLower == 0:  // lower triangular
-        dst[i, j] = (j <= i + diagonal) ? max_value : 0
+        dst[i, j] = (j <= i + diagonal) ? 1 : 0
     else:                  // upper triangular
-        dst[i, j] = (j >= i + diagonal) ? max_value : 0
+        dst[i, j] = (j >= i + diagonal) ? 1 : 0
 ```
 
 **参数:**
 
 | Name | Type | Description |
 | ---- | ---- | ----------- |
-| `diagonal` | 整数类型（`i32`） | 对角线偏移 |
+| `diagonal` | 整数类型 | 对角线偏移 |
 | `dst` | `pto.tile_buf` | 目标掩码 tile |
 
 **返回值:** 无。以 DPS 的形式写入 `dst`。

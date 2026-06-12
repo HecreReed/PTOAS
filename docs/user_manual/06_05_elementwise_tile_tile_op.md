@@ -927,7 +927,7 @@ pto.tprelu ins(%a, %slopes, %tmp :
                !pto.tile_buf<loc=vec, dtype=f16, rows=16, cols=16,
                v_row=16, v_col=16, blayout=row_major, slayout=none_box,
                fractal=512, pad=0>,
-               !pto.tile_buf<loc=vec, dtype=f16, rows=16, cols=16,
+               !pto.tile_buf<loc=vec, dtype=u8, rows=16, cols=16,
                v_row=16, v_col=16, blayout=row_major, slayout=none_box,
                fractal=512, pad=0>)
            outs(%c : !pto.tile_buf<loc=vec, dtype=f16, rows=16, cols=16,

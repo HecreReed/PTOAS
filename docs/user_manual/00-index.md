@@ -26,11 +26,11 @@
 
 ## 4. 类型系统
 
-- [4.1 PTO ISA 类型系统总览](./04_01_pto_isa_type_system_reference.md)
-- [4.2 元素类型](./04_02_element_types.md)
-- [4.3 指针类型](./04_03_pointer_types.md)
-- [4.4 Tensor View 类型](./04_04_tensor_view_types.md)
-- [4.5 Tile Buffer 类型](./04_05_tile_buffer_types.md)
+- [4.1 PTO ISA 类型系统总览](./04_00_pto_isa_type_system_reference.md)
+- [4.2 元素类型](./04_01_element_types.md)
+- [4.3 指针类型](./04_02_pointer_types.md)
+- [4.4 Tensor View 类型](./04_03_tensor_view_types.md)
+- [4.5 Tile Buffer 类型](./04_04_tile_buffer_types.md)
 
 ## 5. 内存模型
 
@@ -46,7 +46,7 @@
 - [6.2 指针与视图操作](./06_02_pointer_and_view_ops.md)
 - [6.3 数据搬运操作](./06_03_data_movement_ops.md)
 - [6.4 矩阵计算操作](./06_04_matrix_compute_ops.md)
-- [6.5 逐元素操作（Tile-Tile）](./06_05_elementwise_tilt_tile_op.md)
+- [6.5 逐元素操作（Tile-Tile）](./06_05_elementwise_tile_tile_op.md)
 - [6.6 Tile-标量/Tile-立即数操作](./06_06_tile_scalar_immediate_ops.md)
 - [6.7 轴规约与广播操作](./06_07_reduction_and_broadcast_ops.md)
 - [6.8 重排与转换操作](./06_08_relayout_and_convert_ops.md)
@@ -58,10 +58,10 @@
 ## 7. 编译选项指南
 
 - [7.1 编译选项总览](./07_01_pipeline_overview.md)
-- [7.2 目标架构选项](./07_02_layout_inference.md)
-- [7.3 PTO 层级选项](./07_03_memory_planning.md)
-- [7.4 布局相关选项](./07_04_auto_sync.md)
-- [7.5 自动内存规划](./07_05_codegen_notes.md)
+- [7.2 目标架构选项](./07_02_target_arch_options.md)
+- [7.3 PTO 层级选项](./07_03_pto_level_options.md)
+- [7.4 布局相关选项](./07_04_layout_options.md)
+- [7.5 自动内存规划](./07_05_memory_planning.md)
 - [7.6 自动同步选项](./07_06_auto_sync_options.md)
 - [7.7 调试与排查](./07_07_debugging_and_inspection.md)
 

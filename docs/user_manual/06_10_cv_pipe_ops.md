@@ -49,7 +49,7 @@ pto.aic_initialize_pipe {id = <id>, dir_mask = <dir>, slot_size = <size>,
 
 **语义：**
 
-在 Cube 核中初始化 Pipe 通道，为双向或单向数据交换建立共享的 FIFO 缓冲区。该操作不产生返回值，仅完成初始化配置。对于本地缓冲区条目，Pipe 管理由运行时处理；对于全局内存条目，初始化绑定 GM FIFO 插槽描述符。
+在 Cube 核中初始化 Pipe 通道，为双向或单向数据交换建立共享的 FIFO 缓冲区。该操作不产生返回值，仅完成初始化配置。对于本地缓冲区条目，Pipe 管理由运行时处理；对于全局内存条目，初始化绑定 GM FIFO 槽位描述符。
 
 **属性:**
 
@@ -163,7 +163,7 @@ pto.tpush_to_aiv(<pipe_entry> : <pipe_entry_type>)
 
 **语义：**
 
-从 Cube 核中推送一个 C2V Pipe 条目到 FIFO。对于 tile buffer 条目，执行 tile 传输；对于全局内存条目，提交 GM FIFO 插槽并推进生产者指针。该操作不产生返回值。
+从 Cube 核中推送一个 C2V Pipe 条目到 FIFO。对于 tile buffer 条目，执行 tile 传输；对于全局内存条目，提交 GM FIFO 槽位并推进生产者指针。该操作不产生返回值。
 
 **参数:**
 

@@ -52,8 +52,8 @@ For each element (i, j) in tile valid region:
 
 | Name | Type | Description |
 | ---- | ---- | ----------- |
-| `src` | `!pto.partition_tensor_view<...>` | 源全局内存分区视图 |
-| `dst` | `!pto.tile_buf` | 目标本地 tile buffer |
+| `src` | `pto.partition_tensor_view<...>` | 源全局内存分区视图 |
+| `dst` | `pto.tile_buf` | 目标本地 tile buffer |
 
 **返回值:** 无。以 DPS 的形式写入 `dst`。
 
@@ -102,8 +102,8 @@ For each element (i, j) in tile valid region:
 
 | Name | Type | Description |
 | ---- | ---- | ----------- |
-| `src` | `!pto.partition_tensor_view<...>` | 源全局内存视图 |
-| `dst` | `!pto.tile_buf` | 目标本地缓冲区 |
+| `src` | `pto.partition_tensor_view<...>` | 源全局内存视图 |
+| `dst` | `pto.tile_buf` | 目标本地缓冲区 |
 
 **返回值:** 无。以 DPS 的形式写入 `dst`。
 
@@ -146,8 +146,8 @@ pto.tprefetch ins(%pv : !pto.partition_tensor_view<16x16xf16>)
 
 | Name | Type | Description |
 | ---- | ---- | ----------- |
-| `src` | `!pto.tensor_view` / `!pto.partition_tensor_view` | 源全局内存视图，必须是平坦的连续逻辑 1D 视图 |
-| `ctx` | `!pto.prefetch_async_context` | 预取异步上下文，必须有效 |
+| `src` | `pto.tensor_view` / `pto.partition_tensor_view` | 源全局内存视图，必须是平坦的连续逻辑 1D 视图 |
+| `ctx` | `pto.prefetch_async_context` | 预取异步上下文，必须有效 |
 
 **返回值:** `!pto.async_event` — 用于同步异步操作的事件句柄。
 
@@ -195,8 +195,8 @@ For each element (i, j) in tile valid region:
 
 | Name | Type | Description |
 | ---- | ---- | ----------- |
-| `src` | `!pto.tile_buf` | 源 tile buffer，位置为 `vec`、`mat` 或 `acc` |
-| `dst` | `!pto.partition_tensor_view<...>` | 目标全局内存分区视图 |
+| `src` | `pto.tile_buf` | 源 tile buffer，位置为 `vec`、`mat` 或 `acc` |
+| `dst` | `pto.partition_tensor_view<...>` | 目标全局内存分区视图 |
 | `preQuantScalar` | `i64` （可选） | 量化前的标量值（仅在特定类型组合下使用） |
 
 **返回值:** 无。以 DPS 的形式写入 `dst`。
@@ -291,9 +291,9 @@ For each element (i, j):
 
 | Name | Type | Description |
 | ---- | ---- | ----------- |
-| `src` | `!pto.tile_buf<...>` | 源累加器 tile |
-| `fp` | `!pto.tile_buf<...>` | 缩放因子 tile，用于配置缩放/FPC 状态 |
-| `dst` | `!pto.partition_tensor_view<...>` | 目标全局内存 |
+| `src` | `pto.tile_buf<...>` | 源累加器 tile |
+| `fp` | `pto.tile_buf<...>` | 缩放因子 tile，用于配置缩放/FPC 状态 |
+| `dst` | `pto.partition_tensor_view<...>` | 目标全局内存 |
 
 **返回值:** 无。以 DPS 的形式写入 `dst`。
 
@@ -357,9 +357,9 @@ Element mode:
 
 | Name | Type | Description |
 | ---- | ---- | ----------- |
-| `mem` | `!pto.partition_tensor_view<...>` | 全局源数据表 |
-| `idx` | `!pto.tile_buf<...>` | 索引 tile |
-| `dst` | `!pto.tile_buf<...>` | 目标 VEC tile |
+| `mem` | `pto.partition_tensor_view<...>` | 全局源数据表 |
+| `idx` | `pto.tile_buf<...>` | 索引 tile |
+| `dst` | `pto.tile_buf<...>` | 目标 VEC tile |
 
 **返回值:** 无。以 DPS 的形式写入 `dst`。
 
@@ -453,9 +453,9 @@ Element mode:
 
 | Name | Type | Description |
 | ---- | ---- | ----------- |
-| `src` | `!pto.tile_buf<...>` | 源 VEC tile |
-| `idx` | `!pto.tile_buf<...>` | 索引 tile |
-| `mem` | `!pto.partition_tensor_view<...>` | 全局目标数据表 |
+| `src` | `pto.tile_buf<...>` | 源 VEC tile |
+| `idx` | `pto.tile_buf<...>` | 索引 tile |
+| `mem` | `pto.partition_tensor_view<...>` | 全局目标数据表 |
 
 **返回值:** 无。以 DPS 的形式写入 `mem`。
 
@@ -558,7 +558,7 @@ value = ptr[offset]
 
 | Name | Type | Description |
 | ---- | ---- | ----------- |
-| `ptr` | `!pto.ptr<...>` | 指向目标元素的指针 |
+| `ptr` | `pto.ptr<...>` | 指向目标元素的指针 |
 | `offset` | `index` | 相对于指针的字节偏移量 |
 
 **返回值:** AnyType — 与指针元素类型相同的标量值。
@@ -595,7 +595,7 @@ ptr[offset] = value
 | Name | Type | Description |
 | ---- | ---- | ----------- |
 | `value` | AnyType | 要存储的标量值 |
-| `ptr` | `!pto.ptr<...>` | 指向目标位置的指针 |
+| `ptr` | `pto.ptr<...>` | 指向目标位置的指针 |
 | `offset` | `index` | 相对于指针的字节偏移量 |
 
 **返回值:** 无。
@@ -646,9 +646,9 @@ For each element (i, j):
 
 | Name | Type | Description |
 | ---- | ---- | ----------- |
-| `src` | `!pto.tile_buf` | 源 tile buffer，位置为 `mat`、`vec` 或 `acc` |
-| `dst` | `!pto.tile_buf` | 目标 tile buffer，位置为 `left`、`right`、`bias`、`scaling` 等 |
-| `fp` | `!pto.tile_buf<loc=scaling>` （可选） | 浮点精度缓冲区，仅在特定转换中使用 |
+| `src` | `pto.tile_buf` | 源 tile buffer，位置为 `mat`、`vec` 或 `acc` |
+| `dst` | `pto.tile_buf` | 目标 tile buffer，位置为 `left`、`right`、`bias`、`scaling` 等 |
+| `fp` | `pto.tile_buf<loc=scaling>` （可选） | 浮点精度缓冲区，仅在特定转换中使用 |
 | `preQuantScalar` | `i64` （可选） | 量化前的标量值 |
 
 **返回值:** 无。以 DPS 的形式写入 `dst`。
@@ -733,9 +733,9 @@ For each element (i, j):
 
 | Name | Type | Description |
 | ---- | ---- | ----------- |
-| `src` | `!pto.tile_buf` | 源 tile buffer，必须使用 `blayout=row_major` |
-| `tmp` | `!pto.tile_buf` | 临时工作缓冲区 |
-| `dst` | `!pto.tile_buf` | 目标 tile buffer |
+| `src` | `pto.tile_buf` | 源 tile buffer，必须使用 `blayout=row_major` |
+| `tmp` | `pto.tile_buf` | 临时工作缓冲区 |
+| `dst` | `pto.tile_buf` | 目标 tile buffer |
 
 **返回值:** 无。以 DPS 的形式写入 `dst`。
 

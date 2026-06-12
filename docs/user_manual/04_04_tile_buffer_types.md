@@ -1,4 +1,4 @@
-# 4.5 Tile Buffer 类型
+# 4.4 Tile Buffer 类型
 
 ## 1. 概述
 

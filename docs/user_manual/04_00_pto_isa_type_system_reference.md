@@ -1,4 +1,4 @@
-# 4.1 PTO ISA 类型系统总览
+# 4.0 PTO ISA 类型系统总览
 
 ## 1. 范围
 
@@ -14,11 +14,10 @@
 
 ## 2. 文档索引
 
-- [4.2 元素类型](./04_02_element_types.md)
-- [4.3 指针类型](./04_03_pointer_types.md)
-- [4.4 Tensor View 类型](./04_04_tensor_view_types.md)
-- [4.5 Tile Buffer 类型](./04_05_tile_buffer_types.md)
-- 4.6 Pipe 与 Event 类型
+- [4.1 元素类型](./04_01_element_types.md)
+- [4.2 指针类型](./04_02_pointer_types.md)
+- [4.3 Tensor View 类型](./04_03_tensor_view_types.md)
+- [4.4 Tile Buffer 类型](./04_04_tile_buffer_types.md)
 
 ## 3. 类型系统组成
 
@@ -48,13 +47,13 @@ PTO ISA 的类型系统由两部分组成：
 - `!pto.f4E1M2x2`
 - `!pto.f4E2M1x2`
 
-详见：[4.2 元素类型](./04_02_element_types.md)
+详见：[4.1 元素类型](./04_01_element_types.md)
 
 ### 4.2 指针类型
 
 `!pto.ptr<T>` 表示全局内存入口，是很多 PTO 程序的外部输入边界。
 
-详见：[4.3 指针类型](./04_03_pointer_types.md)
+详见：[4.2 指针类型](./04_02_pointer_types.md)
 
 ### 4.3 视图类型
 
@@ -63,7 +62,7 @@ PTO ISA 的类型系统由两部分组成：
 - `!pto.tensor_view<...>` 表示全局张量视图
 - `!pto.partition_tensor_view<...>` 表示分区视图
 
-详见：[4.4 Tensor View 类型](./04_04_tensor_view_types.md)
+详见：[4.3 Tensor View 类型](./04_03_tensor_view_types.md)
 
 ### 4.4 Tile 与 Tile Buffer 类型
 
@@ -72,16 +71,7 @@ PTO ISA 的类型系统由两部分组成：
 
 其中 `tile_buf` 直接编码位置、布局、物理尺寸、有效尺寸和 padding 等信息。
 
-详见：[4.5 Tile Buffer 类型](./04_05_tile_buffer_types.md)
-
-### 4.5 Pipe / Event 句柄类型
-
-这组类型用于表达同步、流水线和事件相关对象，例如：
-
-- `!pto.pipe`
-- `!pto.eventid_array<N>`
-
-详见：4.6 Pipe 与 Event 类型。
+详见：[4.4 Tile Buffer 类型](./04_04_tile_buffer_types.md)
 
 ## 5. 常见构造路径
 

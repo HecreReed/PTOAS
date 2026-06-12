@@ -11,14 +11,14 @@
 - [`pto.inttoptr` — 整数转指针](#ptointtoptr--整数转指针)
 - [`pto.make_tensor_view` — 构造张量视图](#ptomake_tensor_view--构造张量视图)
 - [`pto.get_tensor_view_dim` — 获取张量视图维度](#ptoget_tensor_view_dim--获取张量视图维度)
-- [`pto.partition_view` — 分割视图](#ptopartition_view--分割视图)
+- [`pto.partition_view` — 分割视图](#pto.partition_view--分割视图)
 - [`pto.subview` — 创建平铺子视图](#ptosubview--创建平铺子视图)
 - [`pto.bitcast` — Tile 元素类型重解释](#ptobitcast--tile-元素类型重解释)
-- [`pto.get_validshape` — 读取运行时有效维度](#ptoget_validshape--读取运行时有效维度)
+- [`pto.get_validshape` — 读取运行时有效维度](#pto.get_validshape--读取运行时有效维度)
 - [`pto.set_validshape` — 设置运行时有效维度](#ptoset_validshape--设置运行时有效维度)
-- [`pto.get_buf` — 获取缓冲区同步令牌](#ptoget_buf--获取缓冲区同步令牌)
-- [`pto.rls_buf` — 释放缓冲区同步令牌](#ptorls_buf--释放缓冲区同步令牌)
-- [`pto.tget_scale_addr` — 绑定缩放 Tile 视图](#ptotget_scale_addr--绑定缩放-tile-视图)
+- [`pto.get_buf` — 获取缓冲区同步令牌](#pto.get_buf--获取缓冲区同步令牌)
+- [`pto.rls_buf` — 释放缓冲区同步令牌](#pto.rls_buf--释放缓冲区同步令牌)
+- [`pto.tget_scale_addr` — 绑定缩放 Tile 视图](#pto.tget_scale_addr--绑定缩放-tile-视图)
 
 ---
 
@@ -104,7 +104,7 @@ pto.inttoptr <addr> : i64 -> !pto.ptr<resultElementType>
 **语义：**
 
 ```
-result = reinterpret_cast<result-element-type *>(addr)
+result = reinterpret_cast<resultElementType *>(addr)
 ```
 
 **参数:**

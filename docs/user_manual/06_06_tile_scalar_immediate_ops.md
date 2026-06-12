@@ -123,6 +123,8 @@ For each element (i, j):
 **约束：**
 
 - **实现检查 (A2A3/A5)**
+  - `src0`、`src1` 和 `dst` 必须为 PTO shaped-like 类型。
+  - `src0`、`src1` 和 `dst` 必须具有相同的 shape。
   - 实现使用 `dst valid row` / `dst valid column` 作为迭代域。
 
 **示例:**
@@ -235,7 +237,7 @@ For each element (i, j):
   - 有效区域边界：`src valid row <= src.rows` 且 `src valid column <= src.cols`。
   - `src` 和 `dst` 必须具有相同的 valid row。
 
-- **实��检查 (A5)**
+- **实现检查 (A5)**
   - 输入 tile 元素类型必须为以下之一：`i32`、`f16`、`f32`、`i16`、`i8`。
   - `src` 和 `dst` 必须使用 `loc=vec`。
   - 有效区域边界：`src valid row <= src.rows`、`src valid column <= src.cols`、`dst valid row <= dst.rows`、`dst valid column <= dst.cols`。
@@ -457,10 +459,10 @@ For each element (i, j):
   - tile 元素类型必须为以下之一：`i32`、`i16`、`f16`、`f32`。
   - tile 必须使用 `loc=vec`。
   - 有效区域边界：`valid row <= rows` 且 `valid column <= cols`。
-  - `src valid column == dst valid column`。
+  - `src` 和 `dst` 必须具有相同的有效区域：`src valid row == dst valid row` 且 `src valid column == dst valid column`。
 
 - **实现检查 (A5)**
-  - tile 元素类型必须为以下之一：`i8`、`i16`、`i32`、`f16`、`f32`。
+  - tile 元素类型必须为以下之一：`i8`、`i16`、`i32`、`f16`、`bf16`、`f32`。
   - tile 必须使用 `loc=vec`。
   - 有效区域边界：`valid row <= rows` 且 `valid column <= cols`。
   - `src` 和 `dst` 必须具有相同的有效区域：`src valid row == dst valid row` 且 `src valid column == dst valid column`。
@@ -938,6 +940,8 @@ For each element (i, j):
 **约束：**
 
 - **实现检查 (A2A3/A5)**
+  - `src0`、`src1` 和 `dst` 必须为 PTO shaped-like 类型。
+  - `src0`、`src1` 和 `dst` 必须具有相同的 rank。
   - 实现使用 `dst valid row` / `dst valid column` 作为迭代域。
 
 **示例:**

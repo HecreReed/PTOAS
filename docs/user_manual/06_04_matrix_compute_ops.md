@@ -239,10 +239,15 @@ pto.tmatmul.mx ins(<lhs>, <lhs_scale>, <rhs>, <rhs_scale> :
 **语义：**
 
 ```
+k_group = floor(k / 32)
+
 For each (i, j):
-    dst[i, j] = sum_k (lhs[i, k] * lhs_scale[i, k]) * (rhs[k, j] * rhs_scale[k, j])
-// 缩放 tile 配置目标定义的量化行为
+    dst[i, j] =
+        sum_k (lhs[i, k] * lhs_scale[i, k_group]) *
+              (rhs[k, j] * rhs_scale[k_group, j])
 ```
+
+`lhs_scale` 和 `rhs_scale` 是 MX 缩放因子 tile。K 维是矩阵乘法的归约维，即 `lhs` 的列维和 `rhs` 的行维；上式中的 `sum_k` 就沿这个维度累加。缩放沿 K 维分组，每 32 个连续 K 元素共享一个缩放因子：`lhs_scale[i, g]` 缩放 `lhs[i, 32*g .. 32*g+31]`，`rhs_scale[g, j]` 缩放 `rhs[32*g .. 32*g+31, j]`。
 
 **参数:**
 

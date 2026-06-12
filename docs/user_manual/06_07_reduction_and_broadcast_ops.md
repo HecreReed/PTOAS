@@ -690,7 +690,7 @@ For each column j:
   - `src` 和 `dst` 必须使用 `loc=vec`
   - 所有 tile 使用 ND-style 布局（`blayout=row_major`, `slayout=none_box`）
   - 数据类型：`f16`、`f32`、`i16`、`i32`
-  - 元素类��一致：`dst_type == src_type`
+  - 元素类型一致：`dst_type == src_type`
   - `src valid column == dst valid column`
 
 - **实现检查 (A5)**
@@ -875,7 +875,7 @@ pto.trowexpandmul ins(%src0, %src1, %tmp : !pto.tile_buf<loc=vec, dtype=f32, row
 
 ---
 
-### `pto.trowexpanddiv` — 行广播���法
+### `pto.trowexpanddiv` — 行广播除法
 
 ```
 // 默认精度
@@ -933,7 +933,7 @@ pto.trowexpanddiv ins(%src0, %src1 : !pto.tile_buf<loc=vec, dtype=f32, rows=16, 
                       v_row=16, v_col=16, blayout=row_major, slayout=none_box,
                       fractal=512, pad=0>)
 
-// 高精���
+// 高精度
 pto.trowexpanddiv ins(%src0, %src1, %tmp : !pto.tile_buf<loc=vec, dtype=f32, rows=16, cols=16,
                       v_row=16, v_col=16, blayout=row_major, slayout=none_box,
                       fractal=512, pad=0>,

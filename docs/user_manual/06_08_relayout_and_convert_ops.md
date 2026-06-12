@@ -168,7 +168,7 @@ For each element (i, j):
   - dst 必须使用 `loc=left` 或 `loc=right`
 
 - **实现检查 (A5)**
-  - dst 的元素类型必须与 src 相同（fp8/fp16/bf16/f32 family）
+  - dst 的元素类型必须与 src 相同（int8/fp8/fp16/bf16/f32 family）
   - 支持 Mat->Left/Right/Scale 和 Vec->Mat 转换
   - 运行时约束：`indexRow + dst.rows <= src.rows` 且 `indexCol + dst.cols <= src.cols`
 

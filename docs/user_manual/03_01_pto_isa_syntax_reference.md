@@ -62,7 +62,7 @@ module {
 - PTO 自定义类型直接写在函数签名、SSA 值、`ins(...)` / `outs(...)` 和结果类型标注中
 - `!pto.ptr<...>`、`!pto.tensor_view<...>`、`!pto.partition_tensor_view<...>`、`!pto.tile_buf<...>` 是最常见的文本类型
 
-详见：[3.4 类型语法](./03_04_type_syntax.md) 和 [PTO ISA 类型系统总览](./04_01_pto_isa_type_system_reference.md)
+详见：[3.4 类型语法](./03_04_type_syntax.md) 和 [PTO ISA 类型系统总览](./04_00_pto_isa_type_system_reference.md)
 
 ### 3.4 属性
 
