@@ -14709,6 +14709,168 @@ LogicalResult InitializeL2LPipeOp::verify() {
   return success();
 }
 
+// Whether the given accumulator-store quantization mode is a *vector*
+// (per-channel) dequantization rather than a single scalar. Used by the
+// fixpipe TPUSH path to decide between SET_QUANT_SCALAR and SET_QUANT_VECTOR.
+static bool isVectorAccStoreQuantPreMode(pto::AccStoreQuantPreMode mode) {
+  switch (mode) {
+  case pto::AccStoreQuantPreMode::QF322HIF8PreVec:
+  case pto::AccStoreQuantPreMode::QF322HIF8PreHybridVec:
+  case pto::AccStoreQuantPreMode::DEQS32IntVec:
+  case pto::AccStoreQuantPreMode::REQ8Vec:
+  case pto::AccStoreQuantPreMode::DEQF16Vec:
+  case pto::AccStoreQuantPreMode::QF322FP8PreVec:
+  case pto::AccStoreQuantPreMode::QF322F32PreVec:
+  case pto::AccStoreQuantPreMode::QF162B8PreVec:
+  case pto::AccStoreQuantPreMode::QF162S4PreVec:
+  case pto::AccStoreQuantPreMode::REQ4Vec:
+  case pto::AccStoreQuantPreMode::QF322B8PreVec:
+  case pto::AccStoreQuantPreMode::QF322S4PreVec:
+  case pto::AccStoreQuantPreMode::DEQS16Vec:
+  case pto::AccStoreQuantPreMode::QF162S16PreVec:
+  case pto::AccStoreQuantPreMode::QF322F16PreVec:
+  case pto::AccStoreQuantPreMode::QF322BF16PreVec:
+  case pto::AccStoreQuantPreMode::QS322BF16PreVec:
+    return true;
+  default:
+    return false;
+  }
+}
+
+ParseResult TPushOp::parse(OpAsmParser &parser,
+                            OperationState &result) {
+  OpAsmParser::UnresolvedOperand tile, pipe;
+  Type tileTy, pipeTy;
+  if (parser.parseLParen() || parser.parseOperand(tile) || parser.parseComma() ||
+      parser.parseOperand(pipe) || parser.parseColon() ||
+      parser.parseType(tileTy) || parser.parseComma() ||
+      parser.parseType(pipeTy) || parser.parseRParen())
+    return failure();
+  if (parser.resolveOperands({tile, pipe}, {tileTy, pipeTy},
+                             parser.getNameLoc(), result.operands))
+    return failure();
+
+  // Optional attribute group. We parse it manually so that the legacy untyped
+  // form `split = 0` keeps working (a generic attr-dict would require
+  // `split = 0 : i8`). Other optional fixpipe attributes are parsed with the
+  // standard typed attribute parser.
+  if (succeeded(parser.parseOptionalLBrace())) {
+    while (failed(parser.parseOptionalRBrace())) {
+      std::string keyword;
+      if (parser.parseKeywordOrString(&keyword) || parser.parseEqual())
+        return failure();
+      if (keyword == "split") {
+        int64_t splitVal = 0;
+        if (parser.parseInteger(splitVal))
+          return failure();
+        result.attributes.append(
+            "split", parser.getBuilder().getI8IntegerAttr(
+                         static_cast<int8_t>(splitVal)));
+      } else {
+        Attribute attrVal;
+        if (parser.parseAttribute(attrVal))
+          return failure();
+        result.attributes.append(keyword, attrVal);
+      }
+      (void)parser.parseOptionalComma();
+    }
+  }
+  return success();
+}
+
+void TPushOp::print(OpAsmPrinter &p) {
+  p << '(' << getTile() << ", " << getPipeHandle() << " : "
+    << getTile().getType() << ", " << getPipeHandle().getType() << ')';
+  // Print all attributes in a single group so the printed form round-trips
+  // through parse(): `split` is printed without a type (legacy form), the
+  // remaining fixpipe attributes use the standard typed attribute spelling.
+  p << " {split = " << static_cast<int>(getSplit());
+  llvm::SmallVector<StringRef, 4> skip = {"split"};
+  for (auto &kv : (*this)->getAttrs()) {
+    if (kv.getName() == "split")
+      continue;
+    p << ", " << kv.getName() << " = " << kv.getValue();
+    skip.push_back(kv.getName());
+  }
+  p << '}';
+}
+
+// Whether the quant mode is a scalar mode supported by the fixpipe TPUSH
+// lowering for an f32 accumulator source. This is a *subset* of the modes
+// accepted by verifyStructuredAccStoreLike (VPTO.cpp) for acc_store: only the
+// scalar modes that getQuantModeToken() (PTOToEmitC.cpp) actually maps to a
+// pto-isa QuantMode_t are admitted here, so the verifier never lets through a
+// mode that lowering would reject. Vector modes are excluded (see below).
+static bool isFixpipeF32SourceQuantPreMode(pto::AccStoreQuantPreMode mode) {
+  switch (mode) {
+  case pto::AccStoreQuantPreMode::F32F16:
+  case pto::AccStoreQuantPreMode::F32BF16:
+  case pto::AccStoreQuantPreMode::QF322F16PreScalar:
+  case pto::AccStoreQuantPreMode::QF322BF16PreScalar:
+  case pto::AccStoreQuantPreMode::QS322BF16PreScalar:
+  case pto::AccStoreQuantPreMode::QF322B8PreScalar:
+  case pto::AccStoreQuantPreMode::QF322HIF8PreScalar:
+  case pto::AccStoreQuantPreMode::QF322HIF8PreHybridScalar:
+  case pto::AccStoreQuantPreMode::QF322FP8PreScalar:
+  case pto::AccStoreQuantPreMode::QF322F32PreScalar:
+    return true;
+  default:
+    return false;
+  }
+}
+
+// Whether the quant mode is a scalar mode supported by the fixpipe TPUSH
+// lowering for an i32 accumulator source. See isFixpipeF32SourceQuantPreMode
+// for the subset rationale.
+static bool isFixpipeI32SourceQuantPreMode(pto::AccStoreQuantPreMode mode) {
+  switch (mode) {
+  case pto::AccStoreQuantPreMode::DEQF16Scalar:
+  case pto::AccStoreQuantPreMode::DEQS16Scalar:
+  case pto::AccStoreQuantPreMode::DEQS32IntScalar:
+  case pto::AccStoreQuantPreMode::REQ8Scalar:
+  case pto::AccStoreQuantPreMode::REQ4Scalar:
+    return true;
+  default:
+    return false;
+  }
+}
+
+// Extract the buffer element type from a pipe-entry operand (TileBuf /
+// memref / ptr), mirroring verifyStructuredAccStoreLike's helper.
+static Type getPipeEntryElementType(Type ty) {
+  if (auto tb = dyn_cast<pto::TileBufType>(ty))
+    return tb.getElementType();
+  if (auto ptr = dyn_cast<pto::PtrType>(ty))
+    return ptr.getElementType();
+  if (auto mr = dyn_cast<BaseMemRefType>(ty))
+    return mr.getElementType();
+  return Type();
+}
+
+// Whether the lowering has a known C output type (OutT) for this scalar
+// quant mode, i.e. getQuantOutTypeToken() (PTOToEmitC.cpp) would succeed.
+// This must agree with the OutT mapping so that a mode admitted with
+// pre_quant_scale does not fail later at SET_QUANT_SCALAR<OutT> lowering.
+static bool hasFixpipeQuantOutType(pto::AccStoreQuantPreMode mode) {
+  switch (mode) {
+  case pto::AccStoreQuantPreMode::F32F16:
+  case pto::AccStoreQuantPreMode::QF322F16PreScalar:
+  case pto::AccStoreQuantPreMode::DEQF16Scalar:
+  case pto::AccStoreQuantPreMode::F32BF16:
+  case pto::AccStoreQuantPreMode::QF322BF16PreScalar:
+  case pto::AccStoreQuantPreMode::QS322BF16PreScalar:
+  case pto::AccStoreQuantPreMode::QF322HIF8PreScalar:
+  case pto::AccStoreQuantPreMode::QF322HIF8PreHybridScalar:
+  case pto::AccStoreQuantPreMode::QF322FP8PreScalar:
+  case pto::AccStoreQuantPreMode::REQ8Scalar:
+  case pto::AccStoreQuantPreMode::QF322B8PreScalar:
+  case pto::AccStoreQuantPreMode::QF162B8PreScalar:
+    return true;
+  default:
+    return false;
+  }
+}
+
 LogicalResult TPushOp::verify() {
   if (!isInsideSectionOrAttributedKernel(getOperation()))
     return emitOpError("must be inside pto.section.cube/vector or a kernel_kind function");
@@ -14722,6 +14884,64 @@ LogicalResult TPushOp::verify() {
   if (!isa<TensorViewType>(getTile().getType()) &&
       getPipe() == pto::PIPE::PIPE_UNASSIGNED)
     return emitOpError("tile type must map to a supported producer pipe");
+
+  // Fixpipe-configured variant. The quant mode selects the fixpipe TPUSH
+  // overload; pre_quant_scale lowers to a preceding SET_QUANT_SCALAR.
+  bool hasFixpipeConfig = getQuantPreMode().has_value() ||
+                         getAccStoreMode().has_value() ||
+                         getPreQuantScale().has_value();
+  if (hasFixpipeConfig) {
+    // Fixpipe TPUSH only moves accumulator output from the cube core, so the
+    // producer tile must reside in ACC address space.
+    if (getPipe() != pto::PIPE::PIPE_FIX)
+      return emitOpError(
+          "fixpipe TPUSH requires an accumulator (ACC) producer tile");
+    // pre_quant_scale lowers to SET_QUANT_SCALAR<OutT>(scalar); it requires
+    // quant_pre_mode to infer OutT, and the mode must have a known OutT
+    // mapping (see hasFixpipeQuantOutType) so lowering does not fail later.
+    if (getPreQuantScale().has_value()) {
+      if (!getQuantPreMode().has_value())
+        return emitOpError(
+            "pre_quant_scale requires quant_pre_mode to be specified");
+      if (!hasFixpipeQuantOutType(*getQuantPreMode()))
+        return emitOpError() << "pre_quant_scale is not supported for "
+                                 "quant_pre_mode "
+                             << stringifyAccStoreQuantPreMode(
+                                    *getQuantPreMode());
+    }
+    // The fixpipe TPUSH lowering currently only supports scalar quant modes:
+    // vector (per-channel) modes would require SET_QUANT_VECTOR with a runtime
+    // Scaling-tile operand, which is not yet wired through this op. Reject
+    // them at verification so users do not get silently wrong results.
+    if (getQuantPreMode().has_value() &&
+        isVectorAccStoreQuantPreMode(*getQuantPreMode()))
+      return emitOpError("vector quant_pre_mode is not supported by fixpipe "
+                         "TPUSH yet (SET_QUANT_VECTOR operand not wired)");
+    // The quant mode must be compatible with the accumulator element type and
+    // be supported by the lowering. Only the scalar modes that
+    // getQuantModeToken() maps are admitted, so verifier and lowering agree.
+    if (getQuantPreMode()) {
+      Type srcElemTy = getPipeEntryElementType(getTile().getType());
+      if (isa<Float32Type>(srcElemTy)) {
+        if (!isFixpipeF32SourceQuantPreMode(*getQuantPreMode()))
+          return emitOpError()
+                 << "quant_pre_mode " << stringifyAccStoreQuantPreMode(
+                                          *getQuantPreMode())
+                 << " is incompatible with f32 accumulator source";
+      } else if (srcElemTy.isSignlessInteger(32)) {
+        if (!isFixpipeI32SourceQuantPreMode(*getQuantPreMode()))
+          return emitOpError()
+                 << "quant_pre_mode " << stringifyAccStoreQuantPreMode(
+                                          *getQuantPreMode())
+                 << " is incompatible with i32 accumulator source";
+      } else {
+        return emitOpError()
+               << "fixpipe quant_pre_mode requires accumulator source element "
+                  "type to be f32 or i32, got "
+               << srcElemTy;
+      }
+    }
+  }
   return success();
 }
 

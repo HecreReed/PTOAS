@@ -7795,6 +7795,113 @@ struct PTOTAllocToEmitC : public OpConversionPattern<mlir::pto::TAllocOp> {
   PTOArch targetArch;
 };
 
+// Map an accumulator-store quantization mode to the pto-isa QuantMode_t
+// enumerator name used in a FixpipeParams template argument. Mirrors the
+// QuantMode_t enum in pto-isa/include/pto/costmodel/.../cce_costmodel_core.hpp.
+static FailureOr<std::string>
+getQuantModeToken(pto::AccStoreQuantPreMode mode) {
+  switch (mode) {
+  // Pure cast modes (no quantization scale; f32 -> f16/bf16).
+  case pto::AccStoreQuantPreMode::F32F16:
+    return std::string("QuantMode_t::F322F16");
+  case pto::AccStoreQuantPreMode::F32BF16:
+    return std::string("QuantMode_t::F322BF16");
+  // Scalar pre-quantization (f32 src -> low-precision dst, with scale).
+  case pto::AccStoreQuantPreMode::QF322F16PreScalar:
+    return std::string("QuantMode_t::QF322F16_PRE");
+  case pto::AccStoreQuantPreMode::QF322BF16PreScalar:
+    return std::string("QuantMode_t::QF322BF16_PRE");
+  case pto::AccStoreQuantPreMode::QS322BF16PreScalar:
+    return std::string("QuantMode_t::QS322BF16_PRE");
+  case pto::AccStoreQuantPreMode::QF322B8PreScalar:
+    return std::string("QuantMode_t::QF322B8_PRE");
+  case pto::AccStoreQuantPreMode::QF322HIF8PreScalar:
+  case pto::AccStoreQuantPreMode::QF322HIF8PreHybridScalar:
+    return std::string("QuantMode_t::QF322HIF8_PRE");
+  case pto::AccStoreQuantPreMode::QF322FP8PreScalar:
+    return std::string("QuantMode_t::QF322FP8_PRE");
+  case pto::AccStoreQuantPreMode::QF322F32PreScalar:
+    return std::string("QuantMode_t::QF322F32_PRE");
+  // Scalar dequantization (int32 accumulator -> half/bf16/int8/int16).
+  case pto::AccStoreQuantPreMode::DEQF16Scalar:
+    return std::string("QuantMode_t::DEQF16");
+  case pto::AccStoreQuantPreMode::DEQS16Scalar:
+  case pto::AccStoreQuantPreMode::DEQS32IntScalar:
+    return std::string("QuantMode_t::SHIFTS322S16");
+  case pto::AccStoreQuantPreMode::REQ8Scalar:
+    return std::string("QuantMode_t::REQ8");
+  case pto::AccStoreQuantPreMode::REQ4Scalar:
+    return std::string("QuantMode_t::QF322S4_PRE");
+  // Vector (per-channel) pre-quantization.
+  case pto::AccStoreQuantPreMode::QF322F16PreVec:
+    return std::string("QuantMode_t::VQF322F16_PRE");
+  case pto::AccStoreQuantPreMode::QF322BF16PreVec:
+    return std::string("QuantMode_t::VQF322BF16_PRE");
+  case pto::AccStoreQuantPreMode::QS322BF16PreVec:
+    return std::string("QuantMode_t::VQS322BF16_PRE");
+  case pto::AccStoreQuantPreMode::QF322B8PreVec:
+    return std::string("QuantMode_t::VQF322B8_PRE");
+  case pto::AccStoreQuantPreMode::QF322HIF8PreVec:
+  case pto::AccStoreQuantPreMode::QF322HIF8PreHybridVec:
+    return std::string("QuantMode_t::VQF322HIF8_PRE");
+  case pto::AccStoreQuantPreMode::QF322FP8PreVec:
+    return std::string("QuantMode_t::VQF322FP8_PRE");
+  case pto::AccStoreQuantPreMode::QF322F32PreVec:
+    return std::string("QuantMode_t::VQF322F32_PRE");
+  case pto::AccStoreQuantPreMode::DEQF16Vec:
+    return std::string("QuantMode_t::VDEQF16");
+  case pto::AccStoreQuantPreMode::DEQS16Vec:
+  case pto::AccStoreQuantPreMode::DEQS32IntVec:
+    return std::string("QuantMode_t::VSHIFTS322S16");
+  case pto::AccStoreQuantPreMode::REQ8Vec:
+    return std::string("QuantMode_t::VREQ8");
+  case pto::AccStoreQuantPreMode::REQ4Vec:
+    return std::string("QuantMode_t::VQF322S4_PRE");
+  case pto::AccStoreQuantPreMode::NoConvert:
+    return std::string("QuantMode_t::NoQuant");
+  default:
+    return failure();
+  }
+}
+
+// Infer the C output element type (the OutT template arg of SET_QUANT_SCALAR
+// and the FixpipeConsDType) from the quantization mode, mirroring pto-isa's
+// FixpipeConsDType<quantPre, SrcType>::type in fixpipe.hpp.
+static FailureOr<std::string>
+getQuantOutTypeToken(pto::AccStoreQuantPreMode mode) {
+  switch (mode) {
+  case pto::AccStoreQuantPreMode::F32F16:
+  case pto::AccStoreQuantPreMode::QF322F16PreScalar:
+  case pto::AccStoreQuantPreMode::QF322F16PreVec:
+  case pto::AccStoreQuantPreMode::DEQF16Scalar:
+  case pto::AccStoreQuantPreMode::DEQF16Vec:
+    return std::string("half");
+  case pto::AccStoreQuantPreMode::F32BF16:
+  case pto::AccStoreQuantPreMode::QF322BF16PreScalar:
+  case pto::AccStoreQuantPreMode::QF322BF16PreVec:
+  case pto::AccStoreQuantPreMode::QS322BF16PreScalar:
+  case pto::AccStoreQuantPreMode::QS322BF16PreVec:
+    return std::string("bfloat16_t");
+  case pto::AccStoreQuantPreMode::QF322HIF8PreScalar:
+  case pto::AccStoreQuantPreMode::QF322HIF8PreHybridScalar:
+  case pto::AccStoreQuantPreMode::QF322HIF8PreVec:
+  case pto::AccStoreQuantPreMode::QF322HIF8PreHybridVec:
+    return std::string("hifloat8_t");
+  case pto::AccStoreQuantPreMode::QF322FP8PreScalar:
+  case pto::AccStoreQuantPreMode::QF322FP8PreVec:
+    return std::string("float8_e4m3_t");
+  case pto::AccStoreQuantPreMode::REQ8Scalar:
+  case pto::AccStoreQuantPreMode::REQ8Vec:
+  case pto::AccStoreQuantPreMode::QF322B8PreScalar:
+  case pto::AccStoreQuantPreMode::QF322B8PreVec:
+  case pto::AccStoreQuantPreMode::QF162B8PreScalar:
+  case pto::AccStoreQuantPreMode::QF162B8PreVec:
+    return std::string("int8_t");
+  default:
+    return failure();
+  }
+}
+
 struct PTOTPushToEmitC : public OpConversionPattern<mlir::pto::TPushOp> {
   PTOTPushToEmitC(TypeConverter &typeConverter, MLIRContext *ctx,
                   PTOArch targetArch)
@@ -7812,6 +7919,78 @@ struct PTOTPushToEmitC : public OpConversionPattern<mlir::pto::TPushOp> {
     auto tileTok = getPipeDataTypeToken(convertedTile);
     if (failed(tileTok))
       return rewriter.notifyMatchFailure(op, "failed to resolve tile token");
+
+    Location loc = op.getLoc();
+
+    // Fixpipe-configured variant:
+    //   SET_QUANT_SCALAR<OutT>(scalar)   // scalar quant, if pre_quant_scale
+    //   TPUSH<Pipe, Tile, FixpipeConfig>(pipe, tile)
+    // Vector quant modes (DEQF16Vec etc.) select the matching FixpipeParams
+    // specialization (VDEQF16).
+    if (op.getQuantPreMode() || op.getAccStoreMode()) {
+      auto mode = op.getQuantPreMode().value_or(pto::AccStoreQuantPreMode::NoConvert);
+      auto quantTok = getQuantModeToken(mode);
+      if (failed(quantTok))
+        return rewriter.notifyMatchFailure(op, "unsupported fixpipe quant mode");
+
+      // LayoutMode_t: defaults to NZ2ND; honor acc_store_mode if set.
+      std::string layoutTok = "LayoutMode_t::NZ2ND";
+      if (op.getAccStoreMode()) {
+        switch (*op.getAccStoreMode()) {
+        case pto::AccStoreMode::Nz2nd:
+          layoutTok = "LayoutMode_t::NZ2ND";
+          break;
+        case pto::AccStoreMode::Nz2dn:
+          layoutTok = "LayoutMode_t::NZ2DN";
+          break;
+        case pto::AccStoreMode::Nz2nz:
+          layoutTok = "LayoutMode_t::NZ2NZ";
+          break;
+        }
+      }
+
+      // Emit a SET_QUANT_SCALAR intrinsic before the TPUSH when a compile-time
+      // scalar quantization value is supplied (scalar quant modes only).
+      if (op.getPreQuantScale()) {
+        auto outTok = getQuantOutTypeToken(mode);
+        if (failed(outTok))
+          return rewriter.notifyMatchFailure(op,
+                                             "unsupported scalar quant out type");
+        // Render the float scale as a C float literal (e.g. "2.0f").
+        const APFloat val = *op.getPreQuantScale();
+        SmallString<32> valStr;
+        if (val.isNaN()) {
+          valStr = "NAN";
+        } else if (val.isInfinity()) {
+          valStr = val.isNegative() ? "-INFINITY" : "INFINITY";
+        } else {
+          val.toString(valStr);
+          StringRef s(valStr);
+          const bool hasFloatMarker =
+              s.contains('.') || s.contains('e') || s.contains('E') ||
+              s.contains('p') || s.contains('P') || s.starts_with("0x");
+          if (!hasFloatMarker)
+            valStr.append(".0");
+          valStr.append("f");
+        }
+        auto scaleTy = emitc::OpaqueType::get(rewriter.getContext(), "float");
+        Value scaleConst =
+            makeEmitCOpaqueConstant(rewriter, loc, scaleTy, valStr);
+        std::string setCallee = "SET_QUANT_SCALAR<" + *outTok + ">";
+        rewriter.create<emitc::CallOpaqueOp>(loc, TypeRange{}, setCallee,
+                                             ArrayAttr{}, ArrayAttr{},
+                                             ValueRange{scaleConst});
+      }
+
+      std::string callee = "TPUSH<" + *pipeTok + ", " + *tileTok +
+                            ", FixpipeParams<" + layoutTok + ", " + *quantTok +
+                            ">>";
+      rewriter.replaceOpWithNewOp<emitc::CallOpaqueOp>(
+          op, TypeRange{}, callee, ArrayAttr{}, ArrayAttr{},
+          ValueRange{peelUnrealized(adaptor.getPipeHandle()), convertedTile});
+      return success();
+    }
+
     auto splitTok = getTileSplitToken(op.getSplit());
     if (failed(splitTok))
       return rewriter.notifyMatchFailure(op, "failed to resolve split token");

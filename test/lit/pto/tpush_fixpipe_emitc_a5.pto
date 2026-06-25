@@ -1,0 +1,73 @@
+// Copyright (c) 2026 Huawei Technologies Co., Ltd.
+// This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+// CANN Open Software License Agreement Version 2.0 (the "License").
+// Please refer to the License for details. You may not use this file except in compliance with the License.
+// THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+// INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+// See LICENSE in the root of the software repository for the full text of the License.
+
+// RUN: ptoas --pto-arch=a5 %s 2>&1 | FileCheck %s --check-prefix=A5
+
+// Verifies the fixpipe-configured TPUSH lowering:
+//   - i32 accumulator, scalar DEQF16  -> SET_QUANT_SCALAR<half> + DEQF16
+//   - f32 accumulator, cast F322F16   -> F322F16 (no SET_QUANT_SCALAR)
+//   - f32 accumulator, no fixpipe     -> legacy TileSplitAxis form
+// Vector (per-channel) quant modes are rejected by the verifier until
+// SET_QUANT_VECTOR is wired (see tpush_fixpipe_vector_rejected_a5.pto).
+
+module {
+  func.func @cube_fixpipe_deqf16_scalar(%gm_slot_buffer: memref<256xf32, #pto.address_space<gm>>,
+                                        %c2v_consumer_buf: i32) attributes {pto.kernel_kind = #pto.kernel_kind<cube>} {
+    %pipe = pto.initialize_l2g2l_pipe {
+      dir_mask = 1,
+      slot_size = 1024,
+      slot_num = 8,
+      local_slot_num = 8,
+      flag_base = 0
+    }(%gm_slot_buffer : memref<256xf32, #pto.address_space<gm>>, %c2v_consumer_buf : i32) -> !pto.pipe
+    %acc_tile = pto.alloc_tile : !pto.tile_buf<loc=acc, dtype=i32, rows=16, cols=16, v_row=16, v_col=16, blayout=col_major, slayout=row_major, fractal=1024, pad=0>
+    pto.tpush(%acc_tile, %pipe : !pto.tile_buf<loc=acc, dtype=i32, rows=16, cols=16, v_row=16, v_col=16, blayout=col_major, slayout=row_major, fractal=1024, pad=0>, !pto.pipe) {split = 0, pre_quant_scale = 2.000000e+00 : f32, quant_pre_mode = #pto<quant_pre_mode deqf16_scalar>}
+    return
+  }
+
+  func.func @cube_fixpipe_f322f16(%gm_slot_buffer: memref<256xf32, #pto.address_space<gm>>,
+                                  %c2v_consumer_buf: i32) attributes {pto.kernel_kind = #pto.kernel_kind<cube>} {
+    %pipe = pto.initialize_l2g2l_pipe {
+      dir_mask = 1,
+      slot_size = 1024,
+      slot_num = 8,
+      local_slot_num = 8,
+      flag_base = 0
+    }(%gm_slot_buffer : memref<256xf32, #pto.address_space<gm>>, %c2v_consumer_buf : i32) -> !pto.pipe
+    %acc_tile = pto.alloc_tile : !pto.tile_buf<loc=acc, dtype=f32, rows=16, cols=16, v_row=16, v_col=16, blayout=col_major, slayout=row_major, fractal=1024, pad=0>
+    pto.tpush(%acc_tile, %pipe : !pto.tile_buf<loc=acc, dtype=f32, rows=16, cols=16, v_row=16, v_col=16, blayout=col_major, slayout=row_major, fractal=1024, pad=0>, !pto.pipe) {split = 0, quant_pre_mode = #pto<quant_pre_mode f32_f16>}
+    return
+  }
+
+  func.func @cube_plain(%gm_slot_buffer: memref<256xf32, #pto.address_space<gm>>,
+                        %c2v_consumer_buf: i32) attributes {pto.kernel_kind = #pto.kernel_kind<cube>} {
+    %pipe = pto.initialize_l2g2l_pipe {
+      dir_mask = 1,
+      slot_size = 1024,
+      slot_num = 8,
+      local_slot_num = 8,
+      flag_base = 0
+    }(%gm_slot_buffer : memref<256xf32, #pto.address_space<gm>>, %c2v_consumer_buf : i32) -> !pto.pipe
+    %acc_tile = pto.alloc_tile : !pto.tile_buf<loc=acc, dtype=f32, rows=16, cols=16, v_row=16, v_col=16, blayout=col_major, slayout=row_major, fractal=1024, pad=0>
+    pto.tpush(%acc_tile, %pipe : !pto.tile_buf<loc=acc, dtype=f32, rows=16, cols=16, v_row=16, v_col=16, blayout=col_major, slayout=row_major, fractal=1024, pad=0>, !pto.pipe) {split = 0}
+    return
+  }
+}
+
+// A5-LABEL: AICORE void cube_fixpipe_deqf16_scalar
+// A5: SET_QUANT_SCALAR<half>(
+// A5: TPUSH<TPipe<{{.*}}>, Tile<TileType::Acc, int{{.*}}, {{.*}}>, FixpipeParams<LayoutMode_t::NZ2ND, QuantMode_t::DEQF16>>(
+
+// A5-LABEL: AICORE void cube_fixpipe_f322f16
+// A5-NOT: SET_QUANT_SCALAR
+// A5: TPUSH<TPipe<{{.*}}>, Tile<TileType::Acc, float, {{.*}}>, FixpipeParams<LayoutMode_t::NZ2ND, QuantMode_t::F322F16>>(
+
+// A5-LABEL: AICORE void cube_plain
+// A5-NOT: SET_QUANT_SCALAR
+// A5-NOT: FixpipeParams
+// A5: TPUSH<TPipe<{{.*}}>, Tile<TileType::Acc, float, {{.*}}>, TileSplitAxis::TILE_NO_SPLIT>(

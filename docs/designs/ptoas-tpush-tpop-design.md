@@ -1164,3 +1164,65 @@ InsertSync 只依赖：
 - 跳过规划的编译流程中，不运行 plan memory；`reserve_buffer.base` 必须已由前端给定
 - 地址传播 pass 负责 `import_reserved_buffer` 常量替换与 peer pipe 的 `flag_base` 对齐
 - EmitC 只负责将内部 `initialize_l2l_pipe` / `initialize_l2g2l_pipe` / `talloc` / `tpush` / `tpop` / `tfree` 及其属性透传到底层
+
+## 12. Fixpipe 量化推送
+
+### 12.1 动机
+
+既有 `pto.mte_l0c_*` 系列（acc_store 路径）已能完成 L0C→UB/GM/L1 的量化存储，
+但量化与跨核推送是**分离的两步**：先在 cube 核内把累加结果量化存到 UB，
+再经 `tpush` 推送到 vec 核。这要求额外的 UB 中转与一次额外搬运。
+
+当 cube 核直接通过 C2V 管道把 L0C 累加结果推送给 vec 核时，底层 `TPUSH`
+支持一条带量化配置的重载 `TPUSH<Pipe, Tile, FixpipeConfig>(pipe, tile)`，
+可在推送过程中一并完成 cast / 标量 dequant / 向量 dequant，省去 UB 中转。
+本章定义 PTOAS 如何在 `pto.tpush` 上表达并 lowering 这条路径。
+
+### 12.2 接口
+
+在核心 `pto.tpush` 上新增一组**可选、默认缺省**的 fixpipe 属性。
+缺省时 op 行为与既有 `TPUSH<Pipe, Tile, TileSplitAxis>` 路径完全一致，
+不影响已有 tpush/tpop 流水线。
+
+| 属性 | 类型 | 作用 |
+|------|------|------|
+| `pre_quant_scale` | `f32` | 编译期标量量化值，lower 为 `SET_QUANT_SCALAR<OutT>(scalar)` |
+| `quant_pre_mode` | `AccStoreQuantPreMode` | 选择 `FixpipeParams` 的 `QuantMode_t` 特化（如 `DEQF16` / `VDEQF16`） |
+| `acc_store_mode` | `AccStoreMode` | 选择 `FixpipeParams` 的 `LayoutMode_t`（`NZ2ND` / `NZ2DN` / `NZ2NZ`） |
+| `relu_pre_mode` | `ReluPreMode` | 预留（暂未 emit） |
+
+`quant_pre_mode` / `acc_store_mode` 任一存在即激活 fixpipe 路径，此时 `split`
+不再使用（fixpipe 重载无 split 轴）。
+
+### 12.3 EmitC 映射
+
+fixpipe 路径下，EmitC 先按需 emit 一个 `SET_QUANT_SCALAR` 配置 intrinsic，
+再 emit 带 `FixpipeParams` 的 `TPUSH`：
+
+```c++
+SET_QUANT_SCALAR<half>(2.0f);                 // 仅当 pre_quant_scale 存在
+TPUSH<Pipe, Tile, FixpipeParams<LayoutMode_t::NZ2ND, QuantMode_t::DEQF16>>(pipe, tile);
+```
+
+- `QuantMode_t` 枚举名由 `quant_pre_mode` 映射：标量模式映射到 `DEQF16` /
+  `REQ8` / `QF322B8_PRE` …。向量模式当前被 verifier 拒绝（见 12.4）。
+- `OutT`（`SET_QUANT_SCALAR` 模板参数）由 quant 模式推断，与底层
+  `FixpipeConsDType::type` 的 dtype 推断规则一致（`DEQF16`→`half`、
+  `F322BF16`→`bfloat16_t` …）。
+- `LayoutMode_t` 由 `acc_store_mode` 映射，缺省为 `NZ2ND`。
+
+### 12.4 约束
+
+- fixpipe `TPUSH` 只搬运 cube 核累加输出，producer tile 必须位于 ACC 地址空间，
+  否则 verify 报错。
+- `pre_quant_scale` 仅对有已知输出类型（`OutT`）映射的标量量化模式合法；
+  缺 `quant_pre_mode` 或 mode 无 `OutT` 映射时 verify 报错。
+- 向量（per-channel）量化模式当前被 verify 直接拒绝——`SET_QUANT_VECTOR`
+  的运行时 Scaling-tile operand 尚未接入 `pto.tpush`，放行会产生错误结果。
+
+### 12.5 范围与后续
+
+- 标量量化（`SET_QUANT_SCALAR`）已端到端打通，由 `pre_quant_scale` 触发。
+- 向量量化（`SET_QUANT_VECTOR`）待接入运行时 Scaling-tile operand 后再放开
+  verifier 对向量模式的限制。
+

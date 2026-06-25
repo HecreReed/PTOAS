@@ -2171,20 +2171,36 @@ def TPushOp : PTO_TOp<"tpush", [
     DeclareOpInterfaceMethods<MemoryEffectsOpInterface>
 ]> {
   let summary = "Push tile data through a unified pipe handle";
+  let description = [{
+    Pushes a producer tile into a unified pipe handle. By default this lowers
+    to the `TPUSH<Pipe, Tile, TileSplitAxis>` form governed by `split`.
+
+    When `quant_pre_mode` and/or `acc_store_mode` are present, the op instead
+    lowers to the fixpipe form `TPUSH<Pipe, Tile, FixpipeConfig>(pipe, tile)`,
+    which quantizes (cast / scalar dequant / vector dequant) the accumulator
+    tile while pushing it from the cube core to the vector core, optionally
+    preceded by a `SET_QUANT_SCALAR<OutT>(scalar)` intrinsic.
+
+    `pre_quant_scale` carries the compile-time scalar quantization value
+    and lowers to a preceding `SET_QUANT_SCALAR<OutT>(scalar)` intrinsic.
+    Vector (per-channel) quant modes select the `VDEQF16` / `VREQ8` ...
+    `FixpipeParams` specialization. In fixpipe mode `split` is ignored (the
+    fixpipe `TPUSH` overload has no split axis).
+  }];
 
   let arguments = (ins
       PTOPipeEntryType:$tile,
       PipeType:$pipe_handle,
-      I8Attr:$split
+      I8Attr:$split,
+      OptionalAttr<F32Attr>:$pre_quant_scale,
+      OptionalAttr<PTO_AccStoreQuantPreModeAttr>:$quant_pre_mode,
+      OptionalAttr<PTO_AccStoreModeAttr>:$acc_store_mode,
+      OptionalAttr<PTO_ReluPreModeAttr>:$relu_pre_mode
   );
 
   let results = (outs);
   let hasVerifier = 1;
-
-  let assemblyFormat = [{
-    `(` $tile `,` $pipe_handle `:` qualified(type($tile)) `,` qualified(type($pipe_handle)) `)`
-    `{` `split` `=` $split `}` attr-dict
-  }];
+  let hasCustomAssemblyFormat = 1;
 
   let extraClassDeclaration = [{
     ::mlir::pto::PIPE getPipe() {

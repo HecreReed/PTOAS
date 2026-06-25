@@ -98,3 +98,4 @@ test/samples/**/npu_validation/*
 .planning/
 .work/
 .local/
+build-local/

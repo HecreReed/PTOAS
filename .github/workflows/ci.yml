@@ -49,7 +49,7 @@ on:
         description: "pto-isa ref (commit/tag/branch; empty = repo-pinned weekly commit)"
         type: string
         # NOTE: Pin a known-good GitCode commit for deterministic runs.
-        default: 66c931430f08af80e598863fec68f55c39cbeb52
+        default: 48efa652944695afc3b73c8ab9c33f5e78eda895
       remote_host:
         description: "SSH host/IP for the NPU machine"
         type: string
@@ -340,7 +340,7 @@ jobs:
           SKIP_CASES: ${{ github.event.inputs.skip_cases || '' }}
           RUN_ONLY_CASES: ${{ github.event.inputs.run_only_cases || '' }}
           PTO_ISA_REPO: ${{ github.event.inputs.pto_isa_repo || 'https://gitcode.com/cann/pto-isa.git' }}
-          PTO_ISA_COMMIT: ${{ github.event.inputs.pto_isa_commit || '66c931430f08af80e598863fec68f55c39cbeb52' }}
+          PTO_ISA_COMMIT: ${{ github.event.inputs.pto_isa_commit || '48efa652944695afc3b73c8ab9c33f5e78eda895' }}
           REMOTE_HOST: ${{ github.event.inputs.remote_host || '101.245.68.6' }}
           REMOTE_USER: ${{ github.event.inputs.remote_user || 'zhongxuan' }}
           REMOTE_PORT: ${{ github.event.inputs.remote_port || '22' }}

@@ -450,8 +450,12 @@ static LogicalResult lowerFrontendDataOps(func::FuncOp funcOp,
                           << ") to enable C2V";
         return failure();
       }
-      rewriter.replaceOpWithNewOp<TPushOp>(push, push.getTile(), handles.c2vPipe,
-                                           push.getSplitAttr());
+      rewriter.replaceOpWithNewOp<TPushOp>(
+          push, push.getTile(), handles.c2vPipe, push.getSplitAttr(),
+          /*pre_quant_scale=*/mlir::FloatAttr(),
+          /*quant_pre_mode=*/mlir::pto::AccStoreQuantPreModeAttr(),
+          /*acc_store_mode=*/mlir::pto::AccStoreModeAttr(),
+          /*relu_pre_mode=*/mlir::pto::ReluPreModeAttr());
       continue;
     }
 
@@ -465,8 +469,12 @@ static LogicalResult lowerFrontendDataOps(func::FuncOp funcOp,
                           << ") to enable V2C";
         return failure();
       }
-      rewriter.replaceOpWithNewOp<TPushOp>(push, push.getTile(), handles.v2cPipe,
-                                           push.getSplitAttr());
+      rewriter.replaceOpWithNewOp<TPushOp>(
+          push, push.getTile(), handles.v2cPipe, push.getSplitAttr(),
+          /*pre_quant_scale=*/mlir::FloatAttr(),
+          /*quant_pre_mode=*/mlir::pto::AccStoreQuantPreModeAttr(),
+          /*acc_store_mode=*/mlir::pto::AccStoreModeAttr(),
+          /*relu_pre_mode=*/mlir::pto::ReluPreModeAttr());
       continue;
     }
 
