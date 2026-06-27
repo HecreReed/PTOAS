@@ -183,10 +183,15 @@ Constraint callables bind by parameter name.
 When a constraint argument name matches a kernel parameter name, the callable receives a lightweight proxy object rather than raw Python data.
 
 - For `TensorView` parameters, the proxy exposes `rank`, `shape`, `strides`, `dtype`, and `memory_space`.
+- For `TensorView` and `PartitionTensorView` parameters, the proxy also exposes `config.layout` as view metadata when the query carries explicit layout information.
 - For `Tile` parameters, the proxy exposes `rank`, `shape`, `valid_shape`, `dtype`, `memory_space`, and `config`.
 - For scalar parameters, the proxy exposes `dtype` and `value`. `value` is "unknown" when the operand is not a compile-time constant.
 - `shape`, `strides`, and `valid_shape` support index access such as `src.shape[0]` or `dst.valid_shape[1]`.
 - Missing or not-yet-known metadata evaluates as "unknown", so comparisons conservatively pass rather than failing early.
+- View layout metadata follows a separate `ViewConfig` surface:
+  - `src.config.layout == pto.ViewLayout.ND`
+  - `part.config.layout == pto.ViewLayout.NZ`
+  - if no explicit layout metadata is available, `view.config.layout is None`
 
 Example:
 
@@ -214,6 +219,33 @@ def template_tload(src: pto.TensorView, dst: pto.Tile):
 ```
 
 This is the recommended constraint style for current TileLang DSL head.
+
+Layout-sensitive matching example:
+
+```python
+@pto.vkernel(
+    target="a5",
+    op="pto.tload",
+    dtypes=[(pto.f32, pto.f32)],
+    constraints=[lambda src: src.config.layout == pto.ViewLayout.ND],
+    priority=10,
+)
+def template_tload_nd(src: pto.TensorView, dst: pto.Tile):
+    return None
+
+@pto.vkernel(
+    target="a5",
+    op="pto.tload",
+    dtypes=[(pto.f32, pto.f32)],
+    constraints=[lambda src: src.config.layout == pto.ViewLayout.DN],
+    priority=20,
+)
+def template_tload_dn(src: pto.TensorView, dst: pto.Tile):
+    return None
+```
+
+Use this style when two templates share dtype compatibility but require
+different GM view layouts.
 
 ##### Builtin Vector Parameters
 

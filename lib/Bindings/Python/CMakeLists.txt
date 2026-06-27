@@ -126,5 +126,10 @@ add_custom_command(TARGET _pto POST_BUILD
 add_custom_command(TARGET _pto POST_BUILD
   COMMAND ${CMAKE_COMMAND} -E make_directory
           "${CMAKE_BINARY_DIR}/python/mlir/_mlir_libs"
+  COMMAND ${CMAKE_COMMAND} -E make_directory
+          "${MLIR_PYTHON_PACKAGE_DIR}/mlir/_mlir_libs"
+  COMMAND ${CMAKE_COMMAND} -E copy_if_different
+          "$<TARGET_FILE:_pto>"
+          "${MLIR_PYTHON_PACKAGE_DIR}/mlir/_mlir_libs/$<TARGET_FILE_NAME:_pto>"
   VERBATIM
 )

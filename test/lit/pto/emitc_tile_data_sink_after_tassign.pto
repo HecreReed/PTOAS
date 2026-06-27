@@ -1,0 +1,35 @@
+// Copyright (c) 2026 Huawei Technologies Co., Ltd.
+// This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+// CANN Open Software License Agreement Version 2.0 (the "License").
+// Please refer to the License for details. You may not use this file except in compliance with the License.
+// THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+// INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+// See LICENSE in the root of the software repository for the full text of the License.
+
+// Guards the EmitC fixup that sinks tile.data() reads past TASSIGN for
+// tile-like values bridged through a second tile assignment. This alloc_tile
+// addr form requires level3 lowering; check the final emitted C++ directly.
+// RUN: ptoas --cann-output-version=9.0.0 --pto-arch=a5 --pto-level=level3 %s -o - 2>&1 | FileCheck %s
+
+module attributes {pto.target_arch = "a5", pto.kernel_kind = #pto.kernel_kind<vector>} {
+  func.func @kernel(%arg0: i64) {
+    %0 = pto.alloc_tile addr = %arg0 : !pto.tile_buf<vec, 1x16xf32>
+    %1 = pto.tile_buf_addr %0 : !pto.tile_buf<vec, 1x16xf32> -> !pto.ptr<f32, ub>
+    func.call @sink_ptr(%1) : (!pto.ptr<f32, ub>) -> ()
+    return
+  }
+
+  func.func private @sink_ptr(%arg0: !pto.ptr<f32, ub>) {
+    return
+  }
+}
+
+// CHECK-LABEL: AICORE void kernel(int64_t
+// CHECK: Tile<TileType::Vec, float, 1, 16
+// CHECK-NEXT: TASSIGN(v2, v1);
+// CHECK: Tile<TileType::Vec, float, 32, 32
+// CHECK: __ubuf__ float* v4 = v2.data();
+// CHECK: uint64_t v5 = reinterpret_cast<uint64_t>(v4);
+// CHECK: TASSIGN(v3, v5);
+// CHECK: __ubuf__ float* v6 = v3.data();
+// CHECK: sink_ptr(v6);

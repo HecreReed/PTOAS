@@ -36,9 +36,11 @@ y = pto.ui16(7)
 z: pto.i32 = 1024
 ```
 
-### Low-precision types (storage only)
+### Low-precision types
 
-The following types are **storage-only**: they may only appear as element types when constructing `Tile`, `TensorView`, and `PartitionTensorView` values for storage and data movement. They **cannot** be used to construct scalars, vectors, pointers, or `tensor_spec(...)` ABI contracts. Use them to reduce memory bandwidth; convert to a compute-capable type before arithmetic.
+The following low-precision types may appear as element types for device storage and vector memory movement: `Tile`, `TensorView`, `PartitionTensorView`, `pto.ptr(...)`, and `pto.vreg_type(...)`. Use them to reduce memory bandwidth; convert to a compute-capable type before arithmetic unless the operation explicitly supports that low-precision format.
+
+Low-precision `VRegType` values are valid intermediate payloads, but they are not generic vector-arithmetic types. In practice, use them on explicit memory/conversion paths such as `vlds`, `vsts`, `vcvt`, `vmulscvt`, and `vpack`, then convert to a compute-capable type before feeding the value to generic vector compute ops.
 
 | DSL Type | Description |
 |----------|-------------|
@@ -48,15 +50,17 @@ The following types are **storage-only**: they may only appear as element types 
 | `pto.f8e4m3` | 8-bit float (E4M3) |
 | `pto.f8e5m2` | 8-bit float (E5M2) |
 
-These types can be used when constructing on-chip tiles and view descriptors:
+These types can be used when constructing on-chip tiles, view descriptors, UB pointers, and vector register types:
 
 <!-- ptodsl-doc-test: {"mode":"compile_fragment","fixture":"type_system.low_precision_types","symbol":"type_system_low_precision_types_probe","compile":{}} -->
 ```python
 lp_tile = pto.alloc_tile(shape=[128, 64], dtype=pto.f8e4m3)
 fp4_tile = pto.alloc_tile(shape=[64, 32], dtype=pto.f4e2m1x2)
+lp_ptr = pto.castptr(pto.const(0, dtype=pto.ui64), pto.ptr(pto.f8e4m3, "ub"))
+lp_vreg_ty = pto.vreg_type(256, pto.f8e4m3)
 ```
 
-Constructing a scalar, vector, pointer, or host tensor ABI contract with a low-precision type is **not supported** — `pto.f8e4m3(1.0)`, `pto.vreg_type(64, pto.f8e4m3)`, `pto.ptr(pto.f8e4m3)`, and `pto.tensor_spec(rank=2, dtype=pto.f8e4m3)` will raise an error. Load data as the storage type, then convert to a compute-capable type before arithmetic.
+Constructing scalar eager values or host tensor ABI contracts with a low-precision type is **not supported** — `pto.f8e4m3(1.0)` and `pto.tensor_spec(rank=2, dtype=pto.f8e4m3)` will raise an error.
 
 ### Integer literal guidance
 

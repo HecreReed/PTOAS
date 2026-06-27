@@ -292,6 +292,9 @@ class VectorCubeSurfaceTest(unittest.TestCase):
         rhs = object()
         dst = object()
         bias = object()
+        lhs_scale = object()
+        rhs_scale = object()
+        acc_in = object()
 
         cube_cases = [
             ("mad_acc", "MadAccOp", (lhs, rhs, dst, 1, 2, 3), (lhs, rhs, dst, "i64:1", "i64:2", "i64:3")),
@@ -304,6 +307,23 @@ class VectorCubeSurfaceTest(unittest.TestCase):
         with patch.object(_ops, "unwrap_surface_value", side_effect=_identity), \
              patch.object(_ops, "_coerce_i64", side_effect=lambda value, *, context: f"i64:{value}"):
             for func_name, op_name, args, expected_call in cube_cases:
+                with self.subTest(func=func_name):
+                    op_ctor = MagicMock()
+                    with patch.object(_ops._pto, op_name, op_ctor):
+                        getattr(_ops, func_name)(*args)
+                    self.assertEqual(op_ctor.call_args.args, expected_call)
+
+        mx_tileop_cases = [
+            ("tmatmul_mx", "TMatmulMxOp", (lhs, lhs_scale, rhs, rhs_scale, dst), (None, lhs, lhs_scale, rhs, rhs_scale, dst)),
+            ("tmatmul_mx_acc", "TMatmulMxAccOp", (acc_in, lhs, lhs_scale, rhs, rhs_scale, dst), (None, acc_in, lhs, lhs_scale, rhs, rhs_scale, dst)),
+            ("tmatmul_mx_bias", "TMatmulMxBiasOp", (lhs, lhs_scale, rhs, rhs_scale, bias, dst), (None, lhs, lhs_scale, rhs, rhs_scale, bias, dst)),
+            ("tgemv_mx", "TGemvMxOp", (lhs, lhs_scale, rhs, rhs_scale, dst), (None, lhs, lhs_scale, rhs, rhs_scale, dst)),
+            ("tgemv_mx_acc", "TGemvMxAccOp", (acc_in, lhs, lhs_scale, rhs, rhs_scale, dst), (None, acc_in, lhs, lhs_scale, rhs, rhs_scale, dst)),
+            ("tgemv_mx_bias", "TGemvMxBiasOp", (lhs, lhs_scale, rhs, rhs_scale, bias, dst), (None, lhs, lhs_scale, rhs, rhs_scale, bias, dst)),
+        ]
+
+        with patch.object(_ops, "unwrap_surface_value", side_effect=_identity):
+            for func_name, op_name, args, expected_call in mx_tileop_cases:
                 with self.subTest(func=func_name):
                     op_ctor = MagicMock()
                     with patch.object(_ops._pto, op_name, op_ctor):

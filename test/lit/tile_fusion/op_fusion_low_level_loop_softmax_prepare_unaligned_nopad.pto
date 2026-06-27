@@ -1,0 +1,95 @@
+// Copyright (c) 2026 Huawei Technologies Co., Ltd.
+// This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+// CANN Open Software License Agreement Version 2.0 (the "License").
+// Please refer to the License for details. You may not use this file except in compliance with the License.
+// THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+// INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+// See LICENSE in the root of the software repository for the full text of the License.
+
+// Regression test (dynamic valid-shape, no padding): a real softmax-prepare
+// tile sequence
+//   tmuls -> trowmax -> trowexpandsub -> texp
+// with a runtime valid_col (%arg5) and a row reduction (trowmax) in the middle.
+// The whole chain must be lowered into a single pto.fusion_region under the
+// low-level loop fusion pass, exercising the ShapeConstraintSolver across the
+// dynamic dimension shared by all four ops, the reduce-op shape rule, and the
+// epilogue fusion of two adjacent elementwise ops (trowexpandsub + texp) into
+// one inner col loop.
+//
+// Key structural assertions:
+//  * one fusion_region with group_id = 0 carrying both the row-max and the
+//    exp tiles out via pto.yield;
+//  * three inner col loops inside the region, distinguished by their iter_args
+//    arity:
+//      - (i32)              -> tmuls            (pure elementwise, mask only)
+//      - (i32, vreg<64xf32>)-> trowmax          (reduce accumulator across cols)
+//      - (i32, i32)         -> trowexpandsub+texp (fused epilogue, two masks)
+//  * the low-level ops vmuls/vcmax/vdup/vsub/vexp all live inside the region.
+//
+// RUN: ptoas --pto-backend=vpto --pto-arch=a5 --pto-level=level3 --enable-op-fusion --enable-shape-inference --emit-vpto %s --mlir-print-ir-after=pto-low-level-loop-fusion -o /dev/null 2>&1 | FileCheck %s
+
+module attributes { pto.kernel_kind = #pto.kernel_kind<vector>,pto.target_arch = "a5"} {
+  func.func @kernel_softmax_prepare_unaligned(%arg0: !pto.ptr<f32>, %arg1: !pto.ptr<bf16>, %arg2: !pto.ptr<f32>, %arg3: !pto.ptr<f32>, %arg4: f32, %arg5: index, %arg6: index) attributes {pto.kernel_kind = #pto.kernel_kind<vector>} {
+  %c4160_i64 = arith.constant 4160 : i64
+  %c12352_i64 = arith.constant 12352 : i64
+  %c20544_i64 = arith.constant 20544 : i64
+  %c0_i64 = arith.constant 0 : i64
+  %c4096_i64 = arith.constant 4096 : i64
+  %c16_index = arith.constant 16 : index
+  %c128_index = arith.constant 128 : index
+  %c1_index = arith.constant 1 : index
+  %c0_index = arith.constant 0 : index
+  %sij__ssa_v0_view = pto.make_tensor_view %arg0, shape = [%c16_index, %c128_index], strides = [%c128_index, %c1_index] {layout = #pto.layout<nd>}: !pto.tensor_view<?x?xf32>
+  %out_pij__ssa_v0_view = pto.make_tensor_view %arg1, shape = [%c16_index, %c128_index], strides = [%c128_index, %c1_index] {layout = #pto.layout<nd>}: !pto.tensor_view<?x?xbf16>
+  %out_mi__ssa_v0_view = pto.make_tensor_view %arg2, shape = [%c16_index, %c1_index], strides = [%c1_index, %c16_index] {layout = #pto.layout<dn>}: !pto.tensor_view<?x?xf32>
+  %out_li__ssa_v0_view = pto.make_tensor_view %arg3, shape = [%c16_index, %c1_index], strides = [%c1_index, %c16_index] {layout = #pto.layout<dn>}: !pto.tensor_view<?x?xf32>
+  %s_tile__ssa_v0 = pto.alloc_tile addr = %c4160_i64 valid_row = %c16_index valid_col = %arg5 : !pto.tile_buf<loc=vec, dtype=f32, rows=16, cols=128, v_row=?, v_col=?, blayout=row_major, slayout=none_box, fractal=512, pad=0>
+  %sij__ssa_v0_pview = pto.partition_view %sij__ssa_v0_view, offsets = [%c0_index, %c0_index], sizes = [%c16_index, %arg5] : !pto.tensor_view<?x?xf32> -> !pto.partition_tensor_view<16x?xf32>
+  pto.tload ins(%sij__ssa_v0_pview : !pto.partition_tensor_view<16x?xf32>) outs(%s_tile__ssa_v0 : !pto.tile_buf<loc=vec, dtype=f32, rows=16, cols=128, v_row=?, v_col=?, blayout=row_major, slayout=none_box, fractal=512, pad=0>)
+  %scaled__ssa_v0 = pto.alloc_tile addr = %c4160_i64 valid_row = %c16_index valid_col = %arg6 : !pto.tile_buf<loc=vec, dtype=f32, rows=16, cols=128, v_row=?, v_col=?, blayout=row_major, slayout=none_box, fractal=512, pad=0>
+  pto.tmuls ins(%s_tile__ssa_v0, %arg4 : !pto.tile_buf<loc=vec, dtype=f32, rows=16, cols=128, v_row=?, v_col=?, blayout=row_major, slayout=none_box, fractal=512, pad=0>, f32) outs(%scaled__ssa_v0 : !pto.tile_buf<loc=vec, dtype=f32, rows=16, cols=128, v_row=?, v_col=?, blayout=row_major, slayout=none_box, fractal=512, pad=0>)
+  %tmp_tile__ssa_v0 = pto.alloc_tile addr = %c12352_i64 valid_row = %c16_index valid_col = %arg6 : !pto.tile_buf<loc=vec, dtype=f32, rows=16, cols=128, v_row=?, v_col=?, blayout=row_major, slayout=none_box, fractal=512, pad=0>
+  %mi_tile__ssa_v0 = pto.alloc_tile addr = %c20544_i64 valid_row = %c16_index valid_col = %c1_index : !pto.tile_buf<loc=vec, dtype=f32, rows=16, cols=1, v_row=?, v_col=?, blayout=col_major, slayout=none_box, fractal=512, pad=0>
+  pto.trowmax ins(%scaled__ssa_v0, %tmp_tile__ssa_v0 : !pto.tile_buf<loc=vec, dtype=f32, rows=16, cols=128, v_row=?, v_col=?, blayout=row_major, slayout=none_box, fractal=512, pad=0>, !pto.tile_buf<loc=vec, dtype=f32, rows=16, cols=128, v_row=?, v_col=?, blayout=row_major, slayout=none_box, fractal=512, pad=0>) outs(%mi_tile__ssa_v0 : !pto.tile_buf<loc=vec, dtype=f32, rows=16, cols=1, v_row=?, v_col=?, blayout=col_major, slayout=none_box, fractal=512, pad=0>)
+  %sij_centered__ssa_v0 = pto.alloc_tile addr = %c4160_i64 valid_row = %c16_index valid_col = %arg5 : !pto.tile_buf<loc=vec, dtype=f32, rows=16, cols=128, v_row=?, v_col=?, blayout=row_major, slayout=none_box, fractal=512, pad=0>
+  pto.trowexpandsub ins(%scaled__ssa_v0, %mi_tile__ssa_v0 : !pto.tile_buf<loc=vec, dtype=f32, rows=16, cols=128, v_row=?, v_col=?, blayout=row_major, slayout=none_box, fractal=512, pad=0>, !pto.tile_buf<loc=vec, dtype=f32, rows=16, cols=1, v_row=?, v_col=?, blayout=col_major, slayout=none_box, fractal=512, pad=0>) outs(%sij_centered__ssa_v0 : !pto.tile_buf<loc=vec, dtype=f32, rows=16, cols=128, v_row=?, v_col=?, blayout=row_major, slayout=none_box, fractal=512, pad=0>)
+  %exp_tile__ssa_v0 = pto.alloc_tile addr = %c4160_i64 valid_row = %c16_index valid_col = %arg5 : !pto.tile_buf<loc=vec, dtype=f32, rows=16, cols=128, v_row=?, v_col=?, blayout=row_major, slayout=none_box, fractal=512, pad=0>
+  pto.texp ins(%sij_centered__ssa_v0 : !pto.tile_buf<loc=vec, dtype=f32, rows=16, cols=128, v_row=?, v_col=?, blayout=row_major, slayout=none_box, fractal=512, pad=0>) outs(%exp_tile__ssa_v0 : !pto.tile_buf<loc=vec, dtype=f32, rows=16, cols=128, v_row=?, v_col=?, blayout=row_major, slayout=none_box, fractal=512, pad=0>)
+  %pij_tile_bf16__ssa_v0 = pto.alloc_tile addr = %c0_i64 valid_row = %c16_index valid_col = %arg5 : !pto.tile_buf<loc=vec, dtype=bf16, rows=16, cols=128, v_row=?, v_col=?, blayout=row_major, slayout=none_box, fractal=512, pad=0>
+  pto.tcvt ins(%exp_tile__ssa_v0 {rmode = #pto<round_mode ROUND>} : !pto.tile_buf<loc=vec, dtype=f32, rows=16, cols=128, v_row=?, v_col=?, blayout=row_major, slayout=none_box, fractal=512, pad=0>) outs(%pij_tile_bf16__ssa_v0 : !pto.tile_buf<loc=vec, dtype=bf16, rows=16, cols=128, v_row=?, v_col=?, blayout=row_major, slayout=none_box, fractal=512, pad=0>)
+  %pij_tile__ssa_v0 = pto.alloc_tile addr = %c4160_i64 valid_row = %c16_index valid_col = %arg5 : !pto.tile_buf<loc=vec, dtype=f32, rows=16, cols=128, v_row=?, v_col=?, blayout=row_major, slayout=none_box, fractal=512, pad=0>
+  pto.tcvt ins(%pij_tile_bf16__ssa_v0 {rmode = #pto<round_mode ROUND>} : !pto.tile_buf<loc=vec, dtype=bf16, rows=16, cols=128, v_row=?, v_col=?, blayout=row_major, slayout=none_box, fractal=512, pad=0>) outs(%pij_tile__ssa_v0 : !pto.tile_buf<loc=vec, dtype=f32, rows=16, cols=128, v_row=?, v_col=?, blayout=row_major, slayout=none_box, fractal=512, pad=0>)
+  %li_tile__ssa_v0 = pto.alloc_tile addr = %c4096_i64 valid_row = %c16_index valid_col = %c1_index : !pto.tile_buf<loc=vec, dtype=f32, rows=16, cols=1, v_row=?, v_col=?, blayout=col_major, slayout=none_box, fractal=512, pad=0>
+  pto.trowsum ins(%pij_tile__ssa_v0, %tmp_tile__ssa_v0 : !pto.tile_buf<loc=vec, dtype=f32, rows=16, cols=128, v_row=?, v_col=?, blayout=row_major, slayout=none_box, fractal=512, pad=0>, !pto.tile_buf<loc=vec, dtype=f32, rows=16, cols=128, v_row=?, v_col=?, blayout=row_major, slayout=none_box, fractal=512, pad=0>) outs(%li_tile__ssa_v0 : !pto.tile_buf<loc=vec, dtype=f32, rows=16, cols=1, v_row=?, v_col=?, blayout=col_major, slayout=none_box, fractal=512, pad=0>)
+  %out_pij__ssa_v0_pview = pto.partition_view %out_pij__ssa_v0_view, offsets = [%c0_index, %c0_index], sizes = [%c16_index, %arg5] : !pto.tensor_view<?x?xbf16> -> !pto.partition_tensor_view<16x?xbf16>
+  pto.tstore ins(%pij_tile_bf16__ssa_v0 : !pto.tile_buf<loc=vec, dtype=bf16, rows=16, cols=128, v_row=?, v_col=?, blayout=row_major, slayout=none_box, fractal=512, pad=0>) outs(%out_pij__ssa_v0_pview : !pto.partition_tensor_view<16x?xbf16>)
+  %out_mi__ssa_v0_pview = pto.partition_view %out_mi__ssa_v0_view, offsets = [%c0_index, %c0_index], sizes = [%c16_index, %c1_index] : !pto.tensor_view<?x?xf32> -> !pto.partition_tensor_view<16x1xf32>
+  pto.tstore ins(%mi_tile__ssa_v0 : !pto.tile_buf<loc=vec, dtype=f32, rows=16, cols=1, v_row=?, v_col=?, blayout=col_major, slayout=none_box, fractal=512, pad=0>) outs(%out_mi__ssa_v0_pview : !pto.partition_tensor_view<16x1xf32>)
+  %out_li__ssa_v0_pview = pto.partition_view %out_li__ssa_v0_view, offsets = [%c0_index, %c0_index], sizes = [%c16_index, %c1_index] : !pto.tensor_view<?x?xf32> -> !pto.partition_tensor_view<16x1xf32>
+  pto.tstore ins(%li_tile__ssa_v0 : !pto.tile_buf<loc=vec, dtype=f32, rows=16, cols=1, v_row=?, v_col=?, blayout=col_major, slayout=none_box, fractal=512, pad=0>) outs(%out_li__ssa_v0_pview : !pto.partition_tensor_view<16x1xf32>)
+  return
+  }
+}
+
+// CHECK-LABEL: func.func @kernel_softmax_prepare_unaligned(
+// The whole tmuls->trowmax->trowexpandsub->texp chain must land in one region.
+// CHECK: pto.fusion_region {
+// Elementwise tmuls col loop: mask-only accumulator.
+// CHECK: scf.for {{.*}} iter_args({{.*}}) -> (i32) {
+// CHECK: pto.vmuls
+// CHECK: }
+// Row-reduce trowmax col loop: carries the reduction vreg across col segments.
+// CHECK: scf.for {{.*}} iter_args({{.*}}, {{.*}}) -> (i32, !pto.vreg<64xf32>) {
+// CHECK: pto.vcmax
+// CHECK: pto.vmax
+// CHECK: scf.yield {{.*}} : i32, !pto.vreg<64xf32>
+// CHECK: }
+// Fused epilogue: trowexpandsub + texp share one col loop (two mask accumulators).
+// CHECK: scf.for {{.*}} iter_args({{.*}}, {{.*}}) -> (i32, i32) {
+// CHECK: pto.vdup
+// CHECK: pto.vsub
+// CHECK: pto.vexp
+// CHECK: }
+// Region exits, yielding both the row-max and the exp tiles, tagged group 0.
+// CHECK: pto.yield
+// CHECK: } {pto.fusion.group_id = 0

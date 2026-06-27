@@ -1,0 +1,32 @@
+// Copyright (c) 2026 Huawei Technologies Co., Ltd.
+// This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+// CANN Open Software License Agreement Version 2.0 (the "License").
+// Please refer to the License for details. You may not use this file except in compliance with the License.
+// THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+// INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+// See LICENSE in the root of the software repository for the full text of the License.
+
+// RUN: ptoas --pto-arch=a3 %s -emit-pto-ir 2>&1 | FileCheck %s
+
+module {
+  func.func @tquant_dynamic_tmp_valid_a3(%valid_row: index, %valid_col: index)
+      attributes {pto.kernel_kind = #pto.kernel_kind<vector>} {
+    %src = pto.alloc_tile valid_row = %valid_row valid_col = %valid_col : !pto.tile_buf<loc=vec, dtype=f32, rows=32, cols=32, v_row=?, v_col=?, blayout=row_major, slayout=none_box, fractal=512, pad=0>
+    %fp = pto.alloc_tile : !pto.tile_buf<loc=vec, dtype=f32, rows=32, cols=1, v_row=32, v_col=1, blayout=col_major, slayout=none_box, fractal=512, pad=0>
+    %dst = pto.alloc_tile valid_row = %valid_row valid_col = %valid_col : !pto.tile_buf<loc=vec, dtype=i8, rows=32, cols=32, v_row=?, v_col=?, blayout=row_major, slayout=none_box, fractal=512, pad=0>
+
+    // CHECK-LABEL: func.func @tquant_dynamic_tmp_valid_a3
+    // CHECK-SAME: (%[[ROW:arg[0-9]+]]: index, %[[COL:arg[0-9]+]]: index)
+    // CHECK: pto.bind_tile %{{.*}}, %[[ROW]], %[[COL]] {{.*}} : memref<32x32xf32
+    // CHECK: pto.bind_tile %{{.*}} : memref<32x1xf32
+    // CHECK: pto.bind_tile %{{.*}}, %[[ROW]], %[[COL]] {{.*}} : memref<32x32xi8
+    // CHECK: %[[TMP:.*]] = pto.bind_tile %{{.*}}, %[[ROW]], %[[COL]] {{.*}} : memref<32x32xf32
+    // CHECK: pto.tquant
+    // CHECK-SAME: outs(%{{[^,]+}}, %[[TMP]] :
+    pto.tquant ins(%src, %fp : !pto.tile_buf<loc=vec, dtype=f32, rows=32, cols=32, v_row=?, v_col=?, blayout=row_major, slayout=none_box, fractal=512, pad=0>,
+                               !pto.tile_buf<loc=vec, dtype=f32, rows=32, cols=1, v_row=32, v_col=1, blayout=col_major, slayout=none_box, fractal=512, pad=0>)
+               outs(%dst : !pto.tile_buf<loc=vec, dtype=i8, rows=32, cols=32, v_row=?, v_col=?, blayout=row_major, slayout=none_box, fractal=512, pad=0>)
+               {quant_type = #pto<quant_type INT8_SYM>}
+    return
+  }
+}

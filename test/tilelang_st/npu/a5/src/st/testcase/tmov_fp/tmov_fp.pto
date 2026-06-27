@@ -1,0 +1,211 @@
+// Copyright (c) 2026 Huawei Technologies Co., Ltd.
+// This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+// CANN Open Software License Agreement Version 2.0 (the "License").
+// Please refer to the License for details. You can not use this file except in compliance with the License.
+// THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+// INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+// See LICENSE in the root of the software repository for the full text of the License.
+
+// TileLang ST kernel for cube tmov_fp (Acc+Scaling->Mat fixpipe quantization).
+// Tests the template_tmov_fp_f32_f16 template that performs:
+//   Acc (f32) + Scaling buffer -> Mat (f16) via fixpipe quantization.
+//
+// Pipeline:
+//   1. GM -> L1 Mat (A, B, scale)
+//   2. TMOV Mat->Left/Right: L1 -> L0A/L0B
+//   3. TMOV Mat->Scaling: L1 Mat -> Scaling buffer (mte_l1_fb)
+//   4. tmatmul: L0A x L0B -> Acc (L0C, f32)
+//   5. TMOV_FP: Acc + scaling -> Mat (f16) via mte_l0c_l1 with pre_quant
+//   6. Readback: Mat -> L0A, identity -> L0B, tmatmul -> Acc2 -> GM (f32)
+//
+// Note: Fixpipe requires 16x16 scaling tile format, where each row contains
+// the same per-column scale values (broadcasted from 1xN to MxN).
+//
+// Compiled by ptoas --enable-insert-sync --enable-tile-op-expand --pto-backend=vpto --pto-level=level3
+
+module attributes {pto.target_arch = "a5", pto.kernel_kind = #pto.kernel_kind<cube>} {
+  func.func @TMOV_FP_f16_16x16x16(%a_gm: !pto.ptr<f16, gm>, %b_gm: !pto.ptr<f16, gm>, %scale_gm: !pto.ptr<f32, gm>, %id_gm: !pto.ptr<f16, gm>, %c_gm: !pto.ptr<f32, gm>) attributes {pto.aicore} {
+    %c0_i64 = arith.constant 0 : i64
+    %c1_i64 = arith.constant 1 : i64
+    %c16_i64 = arith.constant 16 : i64
+    %c32_i64 = arith.constant 32 : i64
+    %c64_i64 = arith.constant 64 : i64
+    %c512_i64 = arith.constant 512 : i64
+    %c1024_i64 = arith.constant 1024 : i64
+    %c2048_i64 = arith.constant 2048 : i64
+    %c3072_i64 = arith.constant 3072 : i64
+    %false = arith.constant false
+
+    // L1 Mat tiles
+    %l1_a_tile = pto.alloc_tile addr = %c0_i64
+      : !pto.tile_buf<mat, 16x16xf16, blayout=col_major, slayout=row_major>
+    %l1_b_tile = pto.alloc_tile addr = %c512_i64
+      : !pto.tile_buf<mat, 16x16xf16, blayout=col_major, slayout=row_major>
+    %l1_scale_tile = pto.alloc_tile addr = %c1024_i64
+      : !pto.tile_buf<mat, 16x16xf32, blayout=col_major, slayout=row_major>
+    %l1_id_tile = pto.alloc_tile addr = %c2048_i64
+      : !pto.tile_buf<mat, 16x16xf16, blayout=col_major, slayout=row_major>
+
+    // L0A/L0B tiles
+    %l0a_tile = pto.alloc_tile addr = %c0_i64
+      : !pto.tile_buf<left, 16x16xf16, blayout=col_major, slayout=row_major>
+    %l0b_tile = pto.alloc_tile addr = %c0_i64
+      : !pto.tile_buf<right, 16x16xf16, blayout=row_major, slayout=col_major>
+
+    // Scaling tile (FB) - for fixpipe quantization (16x16 format required)
+    %scale_tile = pto.alloc_tile addr = %c0_i64
+      : !pto.tile_buf<scaling, 16x16xf32, blayout=col_major, slayout=row_major, fractal=1024>
+
+    // Acc tile
+    %l0c_tile = pto.alloc_tile addr = %c0_i64
+      : !pto.tile_buf<acc, 16x16xf32, blayout=col_major, slayout=row_major, fractal=1024>
+
+    // Output Mat tile (f16 quantized output from fixpipe)
+    %dst_mat_tile = pto.alloc_tile addr = %c0_i64
+      : !pto.tile_buf<mat, 16x16xf16, blayout=col_major, slayout=row_major>
+
+    // Get addresses
+    %l1_a = pto.tile_buf_addr %l1_a_tile
+      : !pto.tile_buf<mat, 16x16xf16, blayout=col_major, slayout=row_major>
+     -> !pto.ptr<f16, l1>
+    %l1_b = pto.tile_buf_addr %l1_b_tile
+      : !pto.tile_buf<mat, 16x16xf16, blayout=col_major, slayout=row_major>
+     -> !pto.ptr<f16, l1>
+    %l1_scale = pto.tile_buf_addr %l1_scale_tile
+      : !pto.tile_buf<mat, 16x16xf32, blayout=col_major, slayout=row_major>
+     -> !pto.ptr<f32, l1>
+    %l1_id = pto.tile_buf_addr %l1_id_tile
+      : !pto.tile_buf<mat, 16x16xf16, blayout=col_major, slayout=row_major>
+     -> !pto.ptr<f16, l1>
+    %l0a = pto.tile_buf_addr %l0a_tile
+      : !pto.tile_buf<left, 16x16xf16, blayout=col_major, slayout=row_major>
+     -> !pto.ptr<f16, l0a>
+    %l0b = pto.tile_buf_addr %l0b_tile
+      : !pto.tile_buf<right, 16x16xf16, blayout=row_major, slayout=col_major>
+     -> !pto.ptr<f16, l0b>
+    %l0c = pto.tile_buf_addr %l0c_tile
+      : !pto.tile_buf<acc, 16x16xf32, blayout=col_major, slayout=row_major, fractal=1024>
+     -> !pto.ptr<f32, l0c>
+    %dst_mat = pto.tile_buf_addr %dst_mat_tile
+      : !pto.tile_buf<mat, 16x16xf16, blayout=col_major, slayout=row_major>
+     -> !pto.ptr<f16, l1>
+
+    // === Phase 1: Compute Acc = A x B ===
+
+    // TLOAD A: GM -> L1 Mat
+    pto.mte_gm_l1_frac %a_gm, %l1_a, nd2nz,
+      shape(%c16_i64, %c16_i64),
+      src_layout(%c32_i64),
+      dst_group(%c1_i64, %c1_i64, %c16_i64, %c0_i64),
+      ctrl(%c0_i64, %false)
+      : !pto.ptr<f16, gm>, !pto.ptr<f16, l1>, nd2nz,
+        shape i64, i64, src_layout(i64),
+        dst_group i64, i64, i64, i64, ctrl i64, i1
+
+    // TLOAD B: GM -> L1 Mat
+    pto.mte_gm_l1_frac %b_gm, %l1_b, nd2nz,
+      shape(%c16_i64, %c16_i64),
+      src_layout(%c32_i64),
+      dst_group(%c1_i64, %c1_i64, %c16_i64, %c0_i64),
+      ctrl(%c0_i64, %false)
+      : !pto.ptr<f16, gm>, !pto.ptr<f16, l1>, nd2nz,
+        shape i64, i64, src_layout(i64),
+        dst_group i64, i64, i64, i64, ctrl i64, i1
+
+    pto.set_flag["PIPE_MTE2", "PIPE_MTE1", "EVENT_ID0"]
+    pto.wait_flag["PIPE_MTE2", "PIPE_MTE1", "EVENT_ID0"]
+
+    // TMOV Mat->Left: L1 Mat -> L0A Left
+    pto.tmov ins(%l1_a_tile : !pto.tile_buf<mat, 16x16xf16, blayout=col_major, slayout=row_major>)
+             outs(%l0a_tile : !pto.tile_buf<left, 16x16xf16, blayout=col_major, slayout=row_major>)
+
+    // TMOV Mat->Right: L1 Mat -> L0B Right
+    pto.tmov ins(%l1_b_tile : !pto.tile_buf<mat, 16x16xf16, blayout=col_major, slayout=row_major>)
+             outs(%l0b_tile : !pto.tile_buf<right, 16x16xf16, blayout=row_major, slayout=col_major>)
+
+    pto.set_flag["PIPE_MTE1", "PIPE_M", "EVENT_ID0"]
+    pto.wait_flag["PIPE_MTE1", "PIPE_M", "EVENT_ID0"]
+
+    // TMATMUL: compute Acc = Left x Right
+    pto.tmatmul ins(%l0a_tile, %l0b_tile : !pto.tile_buf<left, 16x16xf16, blayout=col_major, slayout=row_major>,
+                                         !pto.tile_buf<right, 16x16xf16, blayout=row_major, slayout=col_major>)
+                outs(%l0c_tile : !pto.tile_buf<acc, 16x16xf32, blayout=col_major, slayout=row_major, fractal=1024>)
+
+    // === Phase 2: Load scale and perform fixpipe quantization ===
+
+    pto.set_flag["PIPE_M", "PIPE_FIX", "EVENT_ID0"]
+    pto.wait_flag["PIPE_M", "PIPE_FIX", "EVENT_ID0"]
+
+    // TLOAD Scale: GM -> L1 Mat (16x16 f32 = 1024 bytes, fractal format)
+    // Each row contains the same per-column scale values
+    pto.mte_gm_l1_frac %scale_gm, %l1_scale, nd2nz,
+      shape(%c16_i64, %c16_i64),
+      src_layout(%c64_i64),
+      dst_group(%c1_i64, %c1_i64, %c16_i64, %c0_i64),
+      ctrl(%c0_i64, %false)
+      : !pto.ptr<f32, gm>, !pto.ptr<f32, l1>, nd2nz,
+        shape i64, i64, src_layout(i64),
+        dst_group i64, i64, i64, i64, ctrl i64, i1
+
+    pto.set_flag["PIPE_MTE2", "PIPE_FIX", "EVENT_ID1"]
+    pto.wait_flag["PIPE_MTE2", "PIPE_FIX", "EVENT_ID1"]
+
+    // TMOV Mat->Scaling: L1 Mat -> Scaling buffer (mte_l1_fb)
+    // This tests the template_tmov_m2s template
+    pto.tmov ins(%l1_scale_tile : !pto.tile_buf<mat, 16x16xf32, blayout=col_major, slayout=row_major>)
+             outs(%scale_tile : !pto.tile_buf<scaling, 16x16xf32, blayout=col_major, slayout=row_major, fractal=1024>)
+
+    // TMOV_FP: Acc(f32) + scaling -> Mat(f16) via fixpipe quantization
+    // This is the actual fixpipe quantization path being tested
+    // Tests template_tmov_fp_f32_f16: mte_l0c_l1 with pre_quant="qf322f16_pre_vec"
+    pto.tmov ins(%l0c_tile : !pto.tile_buf<acc, 16x16xf32, blayout=col_major, slayout=row_major, fractal=1024>,
+                 %scale_tile : !pto.tile_buf<scaling, 16x16xf32, blayout=col_major, slayout=row_major, fractal=1024>)
+             outs(%dst_mat_tile : !pto.tile_buf<mat, 16x16xf16, blayout=col_major, slayout=row_major>)
+
+    // === Phase 3: Readback quantized result to GM ===
+    // Readback: dst_mat x identity -> acc2 -> GM (f32)
+    // This validates the fixpipe quantization result
+
+    pto.set_flag["PIPE_FIX", "PIPE_MTE1", "EVENT_ID0"]
+    pto.wait_flag["PIPE_FIX", "PIPE_MTE1", "EVENT_ID0"]
+
+    // TLOAD Identity: GM -> L1 Mat
+    pto.mte_gm_l1_frac %id_gm, %l1_id, nd2nz,
+      shape(%c16_i64, %c16_i64),
+      src_layout(%c32_i64),
+      dst_group(%c1_i64, %c1_i64, %c16_i64, %c0_i64),
+      ctrl(%c0_i64, %false)
+      : !pto.ptr<f16, gm>, !pto.ptr<f16, l1>, nd2nz,
+        shape i64, i64, src_layout(i64),
+        dst_group i64, i64, i64, i64, ctrl i64, i1
+
+    pto.set_flag["PIPE_MTE2", "PIPE_MTE1", "EVENT_ID1"]
+    pto.wait_flag["PIPE_MTE2", "PIPE_MTE1", "EVENT_ID1"]
+
+    // TMOV dst_mat -> L0A
+    pto.tmov ins(%dst_mat_tile : !pto.tile_buf<mat, 16x16xf16, blayout=col_major, slayout=row_major>)
+             outs(%l0a_tile : !pto.tile_buf<left, 16x16xf16, blayout=col_major, slayout=row_major>)
+
+    // TMOV identity -> L0B
+    pto.tmov ins(%l1_id_tile : !pto.tile_buf<mat, 16x16xf16, blayout=col_major, slayout=row_major>)
+             outs(%l0b_tile : !pto.tile_buf<right, 16x16xf16, blayout=row_major, slayout=col_major>)
+
+    pto.set_flag["PIPE_MTE1", "PIPE_M", "EVENT_ID0"]
+    pto.wait_flag["PIPE_MTE1", "PIPE_M", "EVENT_ID0"]
+
+    // Readback tmatmul: dst_mat x identity -> Acc
+    pto.tmatmul ins(%l0a_tile, %l0b_tile : !pto.tile_buf<left, 16x16xf16, blayout=col_major, slayout=row_major>,
+                                         !pto.tile_buf<right, 16x16xf16, blayout=row_major, slayout=col_major>)
+                outs(%l0c_tile : !pto.tile_buf<acc, 16x16xf32, blayout=col_major, slayout=row_major, fractal=1024>)
+
+    // Acc -> GM (f32 output for comparison)
+    pto.set_flag["PIPE_M", "PIPE_FIX", "EVENT_ID1"]
+    pto.wait_flag["PIPE_M", "PIPE_FIX", "EVENT_ID1"]
+    pto.mte_l0c_gm %l0c, %c_gm, %c16_i64, %c16_i64, %c16_i64, %c16_i64, %c0_i64, %c0_i64,
+      nz2nd
+      : !pto.ptr<f32, l0c>, !pto.ptr<f32, gm>, i64, i64, i64, i64, i64, i64
+
+    pto.barrier #pto.pipe<PIPE_ALL>
+    return
+  }
+}

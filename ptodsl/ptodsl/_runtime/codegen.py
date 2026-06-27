@@ -12,7 +12,7 @@ from __future__ import annotations
 from .._bootstrap import make_context
 from mlir.ir import BF16Type, F16Type, F32Type, IndexType, IntegerType
 
-from .._kernel_signature import DeviceParameterSpec, RuntimeScalarParameterSpec, TensorSpecParameterSpec
+from .._kernel_signature import DeviceParameterSpec, RuntimeScalarParameterSpec
 from .._types import _PtrDescriptor, _resolve
 
 
@@ -92,15 +92,6 @@ def _runtime_scalar_cpp_type(annotation) -> str:
 def launch_symbol_name(ir_function_name: str) -> str:
     return f"ptodsl_launch_{ir_function_name}"
 
-
-def _legacy_tensor_entry_abi_error(name: str) -> TypeError:
-    return TypeError(
-        f"legacy host-tensor launch parameter '{name}' is no longer supported by the public @pto.jit "
-        'runtime ABI. Use an explicit GM pointer such as pto.ptr(pto.f32, "gm") plus runtime '
-        "shape/stride scalars instead."
-    )
-
-
 def generate_launch_cpp(*, ir_function_name: str, kernel_signature) -> str:
     """Return C++ source for one extern-C launch entry point."""
     gm_params = []
@@ -120,8 +111,6 @@ def generate_launch_cpp(*, ir_function_name: str, kernel_signature) -> str:
             host_params.append(f"{cpp_type} {param.name}")
             kernel_args.append(param.name)
             continue
-        if isinstance(param, TensorSpecParameterSpec):
-            raise _legacy_tensor_entry_abi_error(param.name)
         raise TypeError(f"unsupported launch parameter spec: {param!r}")
 
     gm_sig = ", ".join(gm_params)

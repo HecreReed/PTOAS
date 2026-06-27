@@ -147,7 +147,7 @@ Literal support currently includes:
 - `shape`
 - `strides`
 - `element_type`
-- `valid_shape`
+- `config.layout`
 
 The following documented attributes are not implemented:
 
@@ -159,6 +159,7 @@ full guide:
 
 - `shape` / `valid_shape` exposure follows the 5D descriptor
 - `strides` lower through hidden stride parameters carried alongside TensorView shape
+- optional `config.layout` is available for matcher constraint evaluation only
 - fewer written slice axes are right-aligned onto the trailing physical axes
 - DMA-oriented slicing/lowering still only accepts rank-2 TensorView slices
 
@@ -191,6 +192,18 @@ tile type is effectively fixed to a hard-coded baseline:
 - `pad=0`
 
 So this is currently metadata storage rather than full behavioral support.
+
+### View Layout Metadata Is Constraint-Time Only
+
+`TensorView.config.layout` and `PartitionTensorView.config.layout` are current
+selection-time metadata used by matcher constraints. They are not a general
+runtime data model for arbitrary DSL computation inside kernel bodies.
+
+Current contract:
+- use `view.config.layout` in `constraints=[...]` or matcher-driven template
+  selection
+- absence of layout metadata yields `None`
+- unknown layout must not be treated as implicit `ND`
 
 ### TensorView Slicing
 

@@ -1,0 +1,122 @@
+// Copyright (c) 2026 Huawei Technologies Co., Ltd.
+// This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+// CANN Open Software License Agreement Version 2.0 (the "License").
+// Please refer to the License for details. You may not use this file in compliance with the License.
+// THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+// INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+// See LICENSE in the root of the software repository for the full text of the License.
+
+// TileLang ST kernel for cube tmov (Acc->Vec): IR generation verification test.
+// Uses pto.tmov OP which will be expanded via --enable-tile-op-expand.
+// The template_tmov_a2v template should be selected when src memory_space is "acc" and dst is "ub".
+//
+// === IMPORTANT: IR Generation Verification Only ===
+// This test verifies that the VPTO IR correctly generates mte_l0c_ub for Acc->Vec transfer.
+// Due to VPTO lowering limitations with castptr in cube section for tile-based vec operations,
+// the vec_tile content cannot be directly stored to GM (mte_ub_gm requires vector section).
+//
+// The golden/output validation is for the matmul result (%l0c -> GM), NOT the TMOV Acc->Vec result.
+// This is intentional - this test validates IR generation, not runtime correctness of vec_tile data.
+//
+// For full runtime validation of Acc->Vec flow with GM output, a separate vector section kernel
+// or alternative test approach would be required.
+//
+// Compiled by ptoas --enable-insert-sync --enable-tile-op-expand --pto-backend=vpto --pto-level=level3
+
+module attributes {pto.target_arch = "a5", pto.kernel_kind = #pto.kernel_kind<cube>} {
+  func.func @TMOV2VEC_f16_f32_16x16x16(%a_gm: !pto.ptr<f16, gm>, %b_gm: !pto.ptr<f16, gm>, %c_gm: !pto.ptr<f32, gm>) attributes {pto.aicore} {
+    %c0_i64 = arith.constant 0 : i64
+    %c1_i64 = arith.constant 1 : i64
+    %c16_i64 = arith.constant 16 : i64
+    %c32_i64 = arith.constant 32 : i64
+    %c256_i64 = arith.constant 256 : i64
+    %c512_i64 = arith.constant 512 : i64
+    %c768_i64 = arith.constant 768 : i64
+    %false = arith.constant false
+
+    // L1 Mat tiles
+    %l1_a_tile = pto.alloc_tile addr = %c0_i64
+      : !pto.tile_buf<mat, 16x16xf16, blayout=col_major, slayout=row_major>
+    %l1_b_tile = pto.alloc_tile addr = %c512_i64
+      : !pto.tile_buf<mat, 16x16xf16, blayout=col_major, slayout=row_major>
+
+    // Vec tile - destination for TMOV Acc->Vec
+    %vec_tile = pto.alloc_tile addr = %c768_i64
+      : !pto.tile_buf<vec, 16x16xf32>
+
+    // L0A/L0B tiles
+    %l0a_tile = pto.alloc_tile addr = %c0_i64
+      : !pto.tile_buf<left, 16x16xf16, blayout=col_major, slayout=row_major>
+    %l0b_tile = pto.alloc_tile addr = %c0_i64
+      : !pto.tile_buf<right, 16x16xf16, blayout=row_major, slayout=col_major>
+
+    // Acc tile (source for TMOV Acc->Vec)
+    %l0c_tile = pto.alloc_tile addr = %c0_i64
+      : !pto.tile_buf<acc, 16x16xf32, blayout=col_major, slayout=row_major, fractal=1024>
+
+    // Get addresses
+    %l1_a = pto.tile_buf_addr %l1_a_tile : !pto.tile_buf<mat, 16x16xf16, blayout=col_major, slayout=row_major> -> !pto.ptr<f16, l1>
+    %l1_b = pto.tile_buf_addr %l1_b_tile : !pto.tile_buf<mat, 16x16xf16, blayout=col_major, slayout=row_major> -> !pto.ptr<f16, l1>
+    %l0c = pto.tile_buf_addr %l0c_tile : !pto.tile_buf<acc, 16x16xf32, blayout=col_major, slayout=row_major, fractal=1024> -> !pto.ptr<f32, l0c>
+
+    // TLOAD: GM -> L1 Mat
+    pto.mte_gm_l1_frac %a_gm, %l1_a, nd2nz,
+      shape(%c16_i64, %c16_i64),
+      src_layout(%c32_i64),
+      dst_group(%c1_i64, %c1_i64, %c16_i64, %c0_i64),
+      ctrl(%c0_i64, %false)
+      : !pto.ptr<f16, gm>, !pto.ptr<f16, l1>, nd2nz,
+        shape i64, i64, src_layout(i64),
+        dst_group i64, i64, i64, i64, ctrl i64, i1
+
+    pto.set_flag["PIPE_MTE2", "PIPE_MTE1", "EVENT_ID0"]
+    pto.wait_flag["PIPE_MTE2", "PIPE_MTE1", "EVENT_ID0"]
+
+    // TMOV Mat->Left: L1 Mat -> L0A Left (using pto.tmov for template expansion)
+    pto.tmov ins(%l1_a_tile : !pto.tile_buf<mat, 16x16xf16, blayout=col_major, slayout=row_major>)
+             outs(%l0a_tile : !pto.tile_buf<left, 16x16xf16, blayout=col_major, slayout=row_major>)
+
+    // TLOAD B: GM -> L1 Mat
+    pto.mte_gm_l1_frac %b_gm, %l1_b, nd2nz,
+      shape(%c16_i64, %c16_i64),
+      src_layout(%c32_i64),
+      dst_group(%c1_i64, %c1_i64, %c16_i64, %c0_i64),
+      ctrl(%c0_i64, %false)
+      : !pto.ptr<f16, gm>, !pto.ptr<f16, l1>, nd2nz,
+        shape i64, i64, src_layout(i64),
+        dst_group i64, i64, i64, i64, ctrl i64, i1
+
+    pto.set_flag["PIPE_MTE2", "PIPE_MTE1", "EVENT_ID1"]
+    pto.wait_flag["PIPE_MTE2", "PIPE_MTE1", "EVENT_ID1"]
+
+    // TMOV Mat->Right: L1 Mat -> L0B Right (using pto.tmov for template expansion)
+    pto.tmov ins(%l1_b_tile : !pto.tile_buf<mat, 16x16xf16, blayout=col_major, slayout=row_major>)
+             outs(%l0b_tile : !pto.tile_buf<right, 16x16xf16, blayout=row_major, slayout=col_major>)
+
+    pto.set_flag["PIPE_MTE1", "PIPE_M", "EVENT_ID0"]
+    pto.wait_flag["PIPE_MTE1", "PIPE_M", "EVENT_ID0"]
+
+    // TMATMUL: compute
+    pto.tmatmul ins(%l0a_tile, %l0b_tile : !pto.tile_buf<left, 16x16xf16, blayout=col_major, slayout=row_major>,
+                                         !pto.tile_buf<right, 16x16xf16, blayout=row_major, slayout=col_major>)
+                outs(%l0c_tile : !pto.tile_buf<acc, 16x16xf32, blayout=col_major, slayout=row_major, fractal=1024>)
+
+    pto.set_flag["PIPE_M", "PIPE_FIX", "EVENT_ID1"]
+    pto.wait_flag["PIPE_M", "PIPE_FIX", "EVENT_ID1"]
+
+    // TMOV Acc->Vec: Acc -> Vec (using pto.tmov for template expansion)
+    // This tests the template_tmov_a2v template with constraint src.memory_space == ACC and dst.memory_space == VEC
+    pto.tmov ins(%l0c_tile : !pto.tile_buf<acc, 16x16xf32, blayout=col_major, slayout=row_major, fractal=1024>)
+             outs(%vec_tile : !pto.tile_buf<vec, 16x16xf32>)
+
+    // TSTORE: Acc -> GM (validate matmul result)
+    // Note: vec_tile content is validated via VPTO IR generation, not direct GM output.
+    // The TMOV Acc->Vec operation generates mte_l0c_ub which is validated in the IR.
+    pto.mte_l0c_gm %l0c, %c_gm, %c16_i64, %c16_i64, %c16_i64, %c16_i64, %c0_i64, %c0_i64,
+      nz2nd
+      : !pto.ptr<f32, l0c>, !pto.ptr<f32, gm>, i64, i64, i64, i64, i64, i64
+
+    pto.barrier #pto.pipe<PIPE_ALL>
+    return
+  }
+}

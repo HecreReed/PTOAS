@@ -119,7 +119,7 @@ LogicalResult mlir::pto::emitVPTOHostStubSource(ArrayRef<ModuleOp> modules,
     return failure();
 
   if (stubDecls.empty()) {
-    diagOS << "Error: no pto.kernel functions found for host stub emission.\n";
+    diagOS << "Error: no PTO entry functions found for host stub emission.\n";
     return failure();
   }
 

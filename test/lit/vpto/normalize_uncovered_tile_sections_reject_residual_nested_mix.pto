@@ -1,0 +1,39 @@
+// Copyright (c) 2026 Huawei Technologies Co., Ltd.
+// This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+// CANN Open Software License Agreement Version 2.0 (the "License").
+// Please refer to the License for details. You may not use this file except in compliance with the License.
+// THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+// INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+// See LICENSE in the root of the software repository for the full text of the License.
+
+// Guard: normalize must reject a top-level segment that still mixes a nested
+// explicit section with sibling uncovered TileOps after inferred wrapping.
+// RUN: not ptoas --pto-arch=a5 --pto-backend=vpto --emit-pto-ir %s -o - 2>&1 | FileCheck %s
+
+module attributes {pto.target_arch = "a5"} {
+  func.func @reject_nested_section_with_sibling_uncovered_tiles(
+      %src: memref<16x16xf32, #pto.address_space<gm>>,
+      %dst: memref<16x16xf32, #pto.address_space<gm>>) attributes {pto.kernel} {
+    %c0 = arith.constant 0 : index
+    %c1 = arith.constant 1 : index
+    %tile0 = memref.alloc() : memref<16x16xf32, #pto.address_space<vec>>
+    %tile1 = memref.alloc() : memref<16x16xf32, #pto.address_space<vec>>
+    %scalar = arith.constant 1.0 : f32
+
+    scf.for %i = %c0 to %c1 step %c1 {
+      pto.section.vector {
+        pto.tload ins(%src : memref<16x16xf32, #pto.address_space<gm>>)
+                 outs(%tile0 : memref<16x16xf32, #pto.address_space<vec>>)
+      }
+      pto.tadds ins(%tile0, %scalar : memref<16x16xf32, #pto.address_space<vec>>, f32)
+                outs(%tile1 : memref<16x16xf32, #pto.address_space<vec>>)
+      pto.tstore ins(%tile1 : memref<16x16xf32, #pto.address_space<vec>>)
+                outs(%dst : memref<16x16xf32, #pto.address_space<gm>>)
+    }
+    return
+  }
+}
+
+// CHECK: still contains an uncovered top-level TileOp segment after section normalization
+// CHECK: mixes nested explicit pto.section.* with sibling TileOps outside those sections
+// CHECK: starts at 'scf.for'

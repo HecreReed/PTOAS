@@ -58,6 +58,12 @@ class _TileNamespace:
     insert = staticmethod(_ops.tinsert)
     matmul = staticmethod(_ops.tmatmul)
     matmul_acc = staticmethod(_ops.tmatmul_acc)
+    matmul_mx = staticmethod(_ops.tmatmul_mx)
+    matmul_mx_acc = staticmethod(_ops.tmatmul_mx_acc)
+    matmul_mx_bias = staticmethod(_ops.tmatmul_mx_bias)
+    gemv_mx = staticmethod(_ops.tgemv_mx)
+    gemv_mx_acc = staticmethod(_ops.tgemv_mx_acc)
+    gemv_mx_bias = staticmethod(_ops.tgemv_mx_bias)
 
     @staticmethod
     def load(src, tile, *, offsets=None, sizes=None):

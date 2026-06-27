@@ -548,6 +548,14 @@ class FractalMode(str, Enum):
     NZ2NZ = "nz2nz"
 
 
+class ViewLayout(str, Enum):
+    ND = "nd"
+    DN = "dn"
+    NZ = "nz"
+    MX_A_ZZ = "mx_a_zz"
+    MX_B_NN = "mx_b_nn"
+
+
 @dataclass(frozen=True)
 class TileConfig:
     fields: tuple[tuple[str, Any], ...] = ()
@@ -743,6 +751,58 @@ class TileConfig:
 
 
 @dataclass(frozen=True)
+class ViewConfig:
+    fields: tuple[tuple[str, Any], ...] = ()
+
+    @classmethod
+    def from_mapping(cls, mapping: Mapping[str, Any]) -> "ViewConfig":
+        if not isinstance(mapping, Mapping):
+            raise TypeError("ViewConfig.from_mapping expects a mapping")
+        normalized: dict[str, Any] = {}
+        for key, value in mapping.items():
+            canonical_key = cls._canonical_key(key)
+            if canonical_key in normalized:
+                raise ValueError(f"duplicate ViewConfig field '{canonical_key}'")
+            normalized[canonical_key] = cls._normalize_field_value(canonical_key, value)
+        return cls(tuple(sorted(normalized.items())))
+
+    @staticmethod
+    def _canonical_key(key: Any) -> str:
+        if not isinstance(key, str):
+            raise TypeError("ViewConfig field names must be strings")
+        aliases = {
+            "layout": "layout",
+            "view_layout": "layout",
+        }
+        return aliases.get(key, key)
+
+    @staticmethod
+    def _normalize_field_value(key: str, value: Any) -> Any:
+        if key == "layout":
+            return ViewConfig._normalize_layout(value)
+        return value
+
+    @staticmethod
+    def _normalize_layout(value: Any) -> ViewLayout | None:
+        if value is None:
+            return None
+        if isinstance(value, ViewLayout):
+            return value
+        if isinstance(value, str):
+            normalized = value.strip().upper().replace("-", "_")
+            try:
+                return ViewLayout[normalized]
+            except KeyError as exc:
+                raise ValueError(f"unsupported ViewConfig layout value {value!r}") from exc
+        raise ValueError(f"unsupported ViewConfig layout value {value!r}")
+
+    @property
+    def layout(self) -> ViewLayout | None:
+        value = dict(self.fields).get("layout")
+        return self._normalize_layout(value)
+
+
+@dataclass(frozen=True)
 class TileSpecialization:
     shape: tuple[int, ...]
     memory_space: MemorySpace
@@ -918,6 +978,7 @@ __all__ = [
     "PadMode",
     "BLayout",
     "SLayout",
+    "ViewLayout",
     "CompactMode",
     "PadValue",
     "DeinterleaveDist",
@@ -926,6 +987,7 @@ __all__ = [
     "OrderMode",
     "PostUpdateMode",
     "TileConfig",
+    "ViewConfig",
     "TileSpecialization",
     "i1",
     "i8",

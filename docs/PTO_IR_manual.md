@@ -8337,16 +8337,18 @@ pto.tmov.fp ins(%acc, %fp : !pto.tile_buf<...>, !pto.tile_buf<...>)
 dst[i, j] = Quantize(src[i, j]; fp, quant_type)
 ```
 
-- `INT8_SYM`: symmetric quantization; `dst` element type must be `i8`.
-- `INT8_ASYM`: asymmetric quantization; `dst` element type must be `ui8`.
+- `INT8_SYM`: symmetric quantization; `dst` element type must be `i8`; no `offset` operand is allowed.
+- `INT8_ASYM`: asymmetric quantization; `dst` element type must be `ui8`; an `offset` operand is required.
 
 **Arguments:**
 
 | Name | Type | Description |
 |------|------|-------------|
 | `src` | `pto.tile_buf` | Source tile (`f32`) |
-| `fp` | `pto.tile_buf` | Scaling parameter tile |
+| `fp` | `pto.tile_buf` | Scaling parameter tile (`f32`) |
+| `offset` | `pto.tile_buf` | Optional asymmetric offset tile (`f32`, required for `INT8_ASYM`) |
 | `dst` | `pto.tile_buf` | Destination tile (`i8` for SYM, `ui8` for ASYM) |
+| `tmp` | `pto.tile_buf` | Optional scratch tile. A2/A3 uses it for row-broadcast and fp32-to-s32 conversion scratch; PTOAS auto-synthesizes it when omitted. A5 accepts it as a placeholder but does not require it. |
 
 **Attributes:**
 
@@ -8359,9 +8361,12 @@ dst[i, j] = Quantize(src[i, j]; fp, quant_type)
 **Constraints & Verification:**
 
 - `src` element type must be `f32`.
+- `src` and `dst` must have the same valid shape.
 - `dst` element type must be `i8` (`INT8_SYM`) or `ui8` (`INT8_ASYM`).
 - `pto.tquant` only models the plain INT8 quantization forms. MX quantization uses `pto.tquant.mx`.
-- A2/A3: `src` and `dst` must use row-major layout.
+- A2/A3: `src`, `dst`, and explicit `tmp` must use row-major layout.
+- A2/A3: `fp` and `offset` must be per-row broadcast tiles: non-row-major layout, `valid_shape[0] == dst.valid_shape[0]`, and `valid_shape[1] == 1`.
+- A2/A3: explicit `tmp` must have the same element type, shape, and valid shape as `src`.
 
 **Hardware Mapping:**
 
@@ -8373,6 +8378,10 @@ dst[i, j] = Quantize(src[i, j]; fp, quant_type)
 pto.tquant ins(%src, %fp : !pto.tile_buf<...>, !pto.tile_buf<...>)
            outs(%dst : !pto.tile_buf<...>)
            {quant_type = #pto<quant_type INT8_SYM>}
+
+pto.tquant ins(%src, %fp, %offset : !pto.tile_buf<...>, !pto.tile_buf<...>, !pto.tile_buf<...>)
+           outs(%dst, %tmp : !pto.tile_buf<...>, !pto.tile_buf<...>)
+           {quant_type = #pto<quant_type INT8_ASYM>}
 ```
 
 ---

@@ -90,7 +90,7 @@ class _PtrDescriptor(_DType):
         self._space = space
 
     def resolve(self) -> Type:
-        elem = _ensure_non_storage_only_dtype(self._elem, context="pto.ptr(...)")
+        elem = _ensure_tensor_storage_dtype(self._elem, context="pto.ptr(...)")
         space_enum = _normalize_address_space(self._space)
         if space_enum is None:
             raise ValueError(
@@ -122,7 +122,7 @@ class _VRegDescriptor(_DType):
         self._elem = elem
 
     def resolve(self) -> Type:
-        elem = _ensure_non_storage_only_dtype(self._elem, context="pto.vreg_type(...)")
+        elem = _ensure_tensor_storage_dtype(self._elem, context="pto.vreg_type(...)")
         vreg_type_cls = getattr(_pto, "VRegType", None)
         if vreg_type_cls is None:
             raise TypeError(

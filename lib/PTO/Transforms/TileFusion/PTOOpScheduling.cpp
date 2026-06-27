@@ -6,6 +6,7 @@
 // INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
 // See LICENSE in the root of the software repository for the full text of the License.
 
+#include "PTO/Transforms/TileFusion/FusionAnalysis.h"
 #include "PTO/Transforms/TileFusion/FusionOpSemantics.h"
 
 #include "PTO/IR/PTO.h"
@@ -81,6 +82,8 @@ static SchedulingBarrierKind classifySchedulingBarrier(Operation *op) {
     return SchedulingBarrierKind::HardBoundary;
   if (isa<CallOpInterface>(op))
     return SchedulingBarrierKind::HardBoundary;
+  if (isa<pto::AllocTileOp>(op))
+    return SchedulingBarrierKind::Movable;
 
   FailureOr<pto::FusionOpSemantics> semanticsOr = pto::getFusionOpSemantics(op);
   if (succeeded(semanticsOr)) {
@@ -99,6 +102,11 @@ static SchedulingBarrierKind classifySchedulingBarrier(Operation *op) {
 }
 
 static bool hasTileDependency(Operation *opA, Operation *opB) {
+  // alloc_tile is a pure buffer allocation with no tile-level data dependency
+  // on any compute op — it does not consume or produce tile data.
+  if (isa<pto::AllocTileOp>(opA) || isa<pto::AllocTileOp>(opB))
+    return false;
+
   FailureOr<pto::FusionOpSemantics> aSemOr = pto::getFusionOpSemantics(opA);
   FailureOr<pto::FusionOpSemantics> bSemOr = pto::getFusionOpSemantics(opB);
   if (failed(aSemOr) || failed(bSemOr))
@@ -315,6 +323,11 @@ struct OpSchedulingPass
 
     if (failed(scheduleRegion(func.getRegion())))
       signalPassFailure();
+
+    // OpScheduling only reorders ops *within* a block (it never moves an op
+    // across block boundaries), so the pre-fusion dataflow graph (block
+    // ownership, op->node mapping, write-instance producers) is preserved.
+    markAnalysesPreserved<pto::PreFusionAnalysis>();
   }
 };
 

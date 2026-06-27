@@ -352,7 +352,7 @@ Same pattern as row-expand arithmetic, but `src1` is a per-column coefficient ti
 
 #### `pto.tile.cvt(src: Tile, dst: Tile, *, rmode: RoundMode = RoundMode.NONE) -> None`
 
-**Description**: Element-wise type conversion. The destination tile's `dtype` determines the target type.
+**Description**: Element-wise type conversion. The destination tile's `dtype` determines the target type. Low-precision tile conversion follows the TileOps backend support, including `f32 -> f8e4m3/f8e5m2/hif8`, `f16 -> hif8`, and `bf16 -> f4e1m2x2/f4e2m1x2`.
 
 **Parameters**:
 
@@ -363,6 +363,15 @@ Same pattern as row-expand arithmetic, but `src1` is a per-column coefficient ti
 | `rmode` | `RoundMode` | Rounding mode: `NONE`, `RINT`, `ROUND`, `FLOOR`, `CEIL`, `TRUNC`, `ODD`, `CAST_RINT` |
 
 **Returns**: None.
+
+**Example**:
+
+<!-- ptodsl-doc-test: {"mode":"compile_fragment","fixture":"compute_ops.tile_low_precision_cvt","symbol":"compute_ops_tile_low_precision_cvt_probe","compile":{}} -->
+```python
+src = pto.alloc_tile(shape=[128, 64], dtype=pto.f32)
+dst = pto.alloc_tile(shape=[128, 64], dtype=pto.f8e4m3)
+pto.tile.cvt(src, dst, rmode=pto.RoundMode.RINT)
+```
 
 ---
 
@@ -733,6 +742,492 @@ pto.tile.matmul_acc(acc_prev, lhs_l0a, rhs_l0b, acc_next)
 
 ---
 
+#### `pto.tile.matmul_mx(lhs: Tile, lhs_scale: Tile, rhs: Tile, rhs_scale: Tile, dst: Tile) -> None`
+
+**Description**: Tile-level MX matrix multiplication. Computes the product `lhs @ rhs` on the matrix pipeline and writes the result into `dst`. This variant keeps the tile-op abstraction while making the microscaling payload explicit through `lhs_scale` and `rhs_scale`.
+
+Conceptually:
+
+```text
+dst[m, n] = sum_k lhs[m, k] * rhs[k, n]
+```
+
+**Parameters**:
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `lhs` | `Tile` | Left operand tile, typically in `MemorySpace.LEFT` |
+| `lhs_scale` | `Tile` | Left microscaling tile, typically in `MemorySpace.SCALING` |
+| `rhs` | `Tile` | Right operand tile, typically in `MemorySpace.RIGHT` |
+| `rhs_scale` | `Tile` | Right microscaling tile, typically in `MemorySpace.SCALING` |
+| `dst` | `Tile` | Destination accumulator tile, typically in `MemorySpace.ACC` |
+
+**Returns**: None.
+
+**Constraints**:
+- `lhs`, `rhs`, and `dst` must satisfy the same shape and memory-space relationship as `pto.tile.matmul`.
+- `lhs_scale` and `rhs_scale` must be `MemorySpace.SCALING` tiles.
+- On A5, `lhs` should use `blayout="ColMajor", slayout="RowMajor"`; `rhs` should use `blayout="RowMajor", slayout="ColMajor"`; `dst` should use `blayout="ColMajor", slayout="RowMajor"`.
+- On A5, `lhs_scale` should use `blayout="RowMajor"`, `slayout="RowMajor"`, `fractal_size=32`; `rhs_scale` should use `blayout="ColMajor"`, `slayout="ColMajor"`, `fractal_size=32`.
+- Supported operand dtype pairs include mixed low-precision MX combinations such as `f8e4m3/f8e5m2` and `f4e1m2x2/f4e2m1x2`.
+
+**Example** — compute one MX cube tile product:
+
+<!-- ptodsl-doc-test: {"mode":"compile_fragment","fixture":"compute_ops.tile_mx_compute","symbol":"compute_ops_tile_mx_compute_probe","compile":{}} -->
+```python
+lhs_l0a_mx = pto.alloc_tile(
+    shape=[16, 64],
+    dtype=pto.f8e4m3,
+    memory_space=pto.MemorySpace.LEFT,
+    valid_shape=[16, 64],
+    blayout="ColMajor",
+    slayout="RowMajor",
+)
+lhs_scale = pto.alloc_tile(
+    shape=[16, 2],
+    dtype=pto.f16,
+    memory_space=pto.MemorySpace.SCALING,
+    valid_shape=[16, 2],
+    blayout="RowMajor",
+    slayout="RowMajor",
+    fractal_size=32,
+)
+rhs_l0b_mx = pto.alloc_tile(
+    shape=[64, 16],
+    dtype=pto.f8e5m2,
+    memory_space=pto.MemorySpace.RIGHT,
+    valid_shape=[64, 16],
+    blayout="RowMajor",
+    slayout="ColMajor",
+)
+rhs_scale = pto.alloc_tile(
+    shape=[2, 16],
+    dtype=pto.f16,
+    memory_space=pto.MemorySpace.SCALING,
+    valid_shape=[2, 16],
+    blayout="ColMajor",
+    slayout="ColMajor",
+    fractal_size=32,
+)
+acc_l0c = pto.alloc_tile(
+    shape=[16, 16],
+    dtype=pto.f32,
+    memory_space=pto.MemorySpace.ACC,
+    valid_shape=[16, 16],
+    blayout="ColMajor",
+    slayout="RowMajor",
+)
+pto.tile.matmul_mx(lhs_l0a_mx, lhs_scale, rhs_l0b_mx, rhs_scale, acc_l0c)
+```
+
+---
+
+#### `pto.tile.matmul_mx_acc(acc_in: Tile, lhs: Tile, lhs_scale: Tile, rhs: Tile, rhs_scale: Tile, dst: Tile) -> None`
+
+**Description**: Accumulating tile-level MX matrix multiplication. Adds the product `lhs @ rhs` to `acc_in` and writes the accumulated result into `dst`.
+
+Conceptually:
+
+```text
+dst[m, n] = acc_in[m, n] + sum_k lhs[m, k] * rhs[k, n]
+```
+
+**Parameters**:
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `acc_in` | `Tile` | Existing accumulator tile used as the accumulation input |
+| `lhs` | `Tile` | Left operand tile, typically in `MemorySpace.LEFT` |
+| `lhs_scale` | `Tile` | Left microscaling tile, typically in `MemorySpace.SCALING` |
+| `rhs` | `Tile` | Right operand tile, typically in `MemorySpace.RIGHT` |
+| `rhs_scale` | `Tile` | Right microscaling tile, typically in `MemorySpace.SCALING` |
+| `dst` | `Tile` | Destination accumulator tile |
+
+**Returns**: None.
+
+**Constraints**:
+- `lhs`, `rhs`, `lhs_scale`, `rhs_scale`, and `dst` must satisfy the same constraints as `pto.tile.matmul_mx`.
+- `acc_in` must be an ACC tile, typically with the same shape and dtype as `dst`.
+
+**Example** — accumulate a second MX K-slice into an ACC tile:
+
+<!-- ptodsl-doc-test: {"mode":"compile_fragment","fixture":"compute_ops.tile_mx_compute","symbol":"compute_ops_tile_mx_compute_probe","compile":{}} -->
+```python
+acc_prev = pto.alloc_tile(
+    shape=[16, 16],
+    dtype=pto.f32,
+    memory_space=pto.MemorySpace.ACC,
+    valid_shape=[16, 16],
+    blayout="ColMajor",
+    slayout="RowMajor",
+)
+lhs_l0a_mx = pto.alloc_tile(
+    shape=[16, 64],
+    dtype=pto.f8e4m3,
+    memory_space=pto.MemorySpace.LEFT,
+    valid_shape=[16, 64],
+    blayout="ColMajor",
+    slayout="RowMajor",
+)
+lhs_scale = pto.alloc_tile(
+    shape=[16, 2],
+    dtype=pto.f16,
+    memory_space=pto.MemorySpace.SCALING,
+    valid_shape=[16, 2],
+    blayout="RowMajor",
+    slayout="RowMajor",
+    fractal_size=32,
+)
+rhs_l0b_mx = pto.alloc_tile(
+    shape=[64, 16],
+    dtype=pto.f8e5m2,
+    memory_space=pto.MemorySpace.RIGHT,
+    valid_shape=[64, 16],
+    blayout="RowMajor",
+    slayout="ColMajor",
+)
+rhs_scale = pto.alloc_tile(
+    shape=[2, 16],
+    dtype=pto.f16,
+    memory_space=pto.MemorySpace.SCALING,
+    valid_shape=[2, 16],
+    blayout="ColMajor",
+    slayout="ColMajor",
+    fractal_size=32,
+)
+acc_next = pto.alloc_tile(
+    shape=[16, 16],
+    dtype=pto.f32,
+    memory_space=pto.MemorySpace.ACC,
+    valid_shape=[16, 16],
+    blayout="ColMajor",
+    slayout="RowMajor",
+)
+pto.tile.matmul_mx_acc(acc_prev, lhs_l0a_mx, lhs_scale, rhs_l0b_mx, rhs_scale, acc_next)
+```
+
+---
+
+#### `pto.tile.matmul_mx_bias(lhs: Tile, lhs_scale: Tile, rhs: Tile, rhs_scale: Tile, bias: Tile, dst: Tile) -> None`
+
+**Description**: Bias-enabled tile-level MX matrix multiplication. Computes the MX product `lhs @ rhs`, adds the bias input carried by `bias`, and writes the result into `dst`.
+
+**Parameters**:
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `lhs` | `Tile` | Left operand tile, typically in `MemorySpace.LEFT` |
+| `lhs_scale` | `Tile` | Left microscaling tile, typically in `MemorySpace.SCALING` |
+| `rhs` | `Tile` | Right operand tile, typically in `MemorySpace.RIGHT` |
+| `rhs_scale` | `Tile` | Right microscaling tile, typically in `MemorySpace.SCALING` |
+| `bias` | `Tile` | Bias tile, typically in `MemorySpace.BIAS` |
+| `dst` | `Tile` | Destination accumulator tile |
+
+**Returns**: None.
+
+**Constraints**:
+- `lhs`, `rhs`, `lhs_scale`, `rhs_scale`, and `dst` must satisfy the same constraints as `pto.tile.matmul_mx`.
+- `bias` must satisfy the target architecture's cube bias layout and shape requirements. A common A5 case is a `[1, N]` tile in `MemorySpace.BIAS`.
+
+**Example** — add a bias tile on the MX cube path:
+
+<!-- ptodsl-doc-test: {"mode":"compile_fragment","fixture":"compute_ops.tile_mx_compute","symbol":"compute_ops_tile_mx_compute_probe","compile":{}} -->
+```python
+lhs_l0a_mx = pto.alloc_tile(
+    shape=[16, 64],
+    dtype=pto.f8e4m3,
+    memory_space=pto.MemorySpace.LEFT,
+    valid_shape=[16, 64],
+    blayout="ColMajor",
+    slayout="RowMajor",
+)
+lhs_scale = pto.alloc_tile(
+    shape=[16, 2],
+    dtype=pto.f16,
+    memory_space=pto.MemorySpace.SCALING,
+    valid_shape=[16, 2],
+    blayout="RowMajor",
+    slayout="RowMajor",
+    fractal_size=32,
+)
+rhs_l0b_mx = pto.alloc_tile(
+    shape=[64, 16],
+    dtype=pto.f8e5m2,
+    memory_space=pto.MemorySpace.RIGHT,
+    valid_shape=[64, 16],
+    blayout="RowMajor",
+    slayout="ColMajor",
+)
+rhs_scale = pto.alloc_tile(
+    shape=[2, 16],
+    dtype=pto.f16,
+    memory_space=pto.MemorySpace.SCALING,
+    valid_shape=[2, 16],
+    blayout="ColMajor",
+    slayout="ColMajor",
+    fractal_size=32,
+)
+bias_tile = pto.alloc_tile(
+    shape=[1, 16],
+    dtype=pto.f32,
+    memory_space=pto.MemorySpace.BIAS,
+    valid_shape=[1, 16],
+)
+acc_l0c = pto.alloc_tile(
+    shape=[16, 16],
+    dtype=pto.f32,
+    memory_space=pto.MemorySpace.ACC,
+    valid_shape=[16, 16],
+    blayout="ColMajor",
+    slayout="RowMajor",
+)
+pto.tile.matmul_mx_bias(lhs_l0a_mx, lhs_scale, rhs_l0b_mx, rhs_scale, bias_tile, acc_l0c)
+```
+
+---
+
+#### `pto.tile.gemv_mx(lhs: Tile, lhs_scale: Tile, rhs: Tile, rhs_scale: Tile, dst: Tile) -> None`
+
+**Description**: Tile-level MX GEMV. Computes the product `lhs @ rhs` on the matrix pipeline and writes the result into `dst`. This surface lowers to `pto.tgemv.mx` and is the tile-level counterpart to MX GEMV execution.
+
+Conceptually:
+
+```text
+dst[m, n] = sum_k lhs[m, k] * rhs[k, n]
+```
+
+**Parameters**:
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `lhs` | `Tile` | Left operand tile, typically in `MemorySpace.LEFT` |
+| `lhs_scale` | `Tile` | Left microscaling tile, typically in `MemorySpace.SCALING` |
+| `rhs` | `Tile` | Right operand tile, typically in `MemorySpace.RIGHT` |
+| `rhs_scale` | `Tile` | Right microscaling tile, typically in `MemorySpace.SCALING` |
+| `dst` | `Tile` | Destination accumulator tile, typically in `MemorySpace.ACC` |
+
+**Returns**: None.
+
+**Constraints**:
+- `lhs_scale` and `rhs_scale` follow the same A5 layout and `fractal_size=32` requirements as `pto.tile.matmul_mx`.
+- On A5, GEMV commonly uses a single logical row on the left-hand side and destination tile.
+- Prefer this dedicated GEMV surface instead of relying on `mad_mx(..., disable_gemv=False)` when you are staying in tile world.
+
+**Example** — compute one MX GEMV tile product:
+
+<!-- ptodsl-doc-test: {"mode":"compile_fragment","fixture":"compute_ops.tile_mx_compute","symbol":"compute_ops_tile_mx_compute_probe","compile":{}} -->
+```python
+lhs_l0a_mx = pto.alloc_tile(
+    shape=[1, 64],
+    dtype=pto.f8e4m3,
+    memory_space=pto.MemorySpace.LEFT,
+    valid_shape=[1, 64],
+    blayout="ColMajor",
+    slayout="RowMajor",
+)
+lhs_scale = pto.alloc_tile(
+    shape=[1, 2],
+    dtype=pto.f16,
+    memory_space=pto.MemorySpace.SCALING,
+    valid_shape=[1, 2],
+    blayout="RowMajor",
+    slayout="RowMajor",
+    fractal_size=32,
+)
+rhs_l0b_mx = pto.alloc_tile(
+    shape=[64, 16],
+    dtype=pto.f8e5m2,
+    memory_space=pto.MemorySpace.RIGHT,
+    valid_shape=[64, 16],
+    blayout="RowMajor",
+    slayout="ColMajor",
+)
+rhs_scale = pto.alloc_tile(
+    shape=[2, 16],
+    dtype=pto.f16,
+    memory_space=pto.MemorySpace.SCALING,
+    valid_shape=[2, 16],
+    blayout="ColMajor",
+    slayout="ColMajor",
+    fractal_size=32,
+)
+acc_l0c = pto.alloc_tile(
+    shape=[1, 16],
+    dtype=pto.f32,
+    memory_space=pto.MemorySpace.ACC,
+    valid_shape=[1, 16],
+    blayout="ColMajor",
+    slayout="RowMajor",
+)
+pto.tile.gemv_mx(lhs_l0a_mx, lhs_scale, rhs_l0b_mx, rhs_scale, acc_l0c)
+```
+
+---
+
+#### `pto.tile.gemv_mx_acc(acc_in: Tile, lhs: Tile, lhs_scale: Tile, rhs: Tile, rhs_scale: Tile, dst: Tile) -> None`
+
+**Description**: Accumulating tile-level MX GEMV. Adds the product `lhs @ rhs` to `acc_in` and writes the accumulated result into `dst`.
+
+Conceptually:
+
+```text
+dst[m, n] = acc_in[m, n] + sum_k lhs[m, k] * rhs[k, n]
+```
+
+**Parameters**:
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `acc_in` | `Tile` | Existing accumulator tile used as the accumulation input |
+| `lhs` | `Tile` | Left operand tile, typically in `MemorySpace.LEFT` |
+| `lhs_scale` | `Tile` | Left microscaling tile, typically in `MemorySpace.SCALING` |
+| `rhs` | `Tile` | Right operand tile, typically in `MemorySpace.RIGHT` |
+| `rhs_scale` | `Tile` | Right microscaling tile, typically in `MemorySpace.SCALING` |
+| `dst` | `Tile` | Destination accumulator tile |
+
+**Returns**: None.
+
+**Constraints**:
+- `lhs`, `rhs`, `lhs_scale`, `rhs_scale`, and `dst` must satisfy the same constraints as `pto.tile.gemv_mx`.
+- `acc_in` must be an ACC tile, typically with the same shape and dtype as `dst`.
+
+**Example** — accumulate a second MX GEMV K-slice into an ACC tile:
+
+<!-- ptodsl-doc-test: {"mode":"compile_fragment","fixture":"compute_ops.tile_mx_compute","symbol":"compute_ops_tile_mx_compute_probe","compile":{}} -->
+```python
+acc_prev = pto.alloc_tile(
+    shape=[1, 16],
+    dtype=pto.f32,
+    memory_space=pto.MemorySpace.ACC,
+    valid_shape=[1, 16],
+    blayout="ColMajor",
+    slayout="RowMajor",
+)
+lhs_l0a_mx = pto.alloc_tile(
+    shape=[1, 64],
+    dtype=pto.f8e4m3,
+    memory_space=pto.MemorySpace.LEFT,
+    valid_shape=[1, 64],
+    blayout="ColMajor",
+    slayout="RowMajor",
+)
+lhs_scale = pto.alloc_tile(
+    shape=[1, 2],
+    dtype=pto.f16,
+    memory_space=pto.MemorySpace.SCALING,
+    valid_shape=[1, 2],
+    blayout="RowMajor",
+    slayout="RowMajor",
+    fractal_size=32,
+)
+rhs_l0b_mx = pto.alloc_tile(
+    shape=[64, 16],
+    dtype=pto.f8e5m2,
+    memory_space=pto.MemorySpace.RIGHT,
+    valid_shape=[64, 16],
+    blayout="RowMajor",
+    slayout="ColMajor",
+)
+rhs_scale = pto.alloc_tile(
+    shape=[2, 16],
+    dtype=pto.f16,
+    memory_space=pto.MemorySpace.SCALING,
+    valid_shape=[2, 16],
+    blayout="ColMajor",
+    slayout="ColMajor",
+    fractal_size=32,
+)
+acc_next = pto.alloc_tile(
+    shape=[1, 16],
+    dtype=pto.f32,
+    memory_space=pto.MemorySpace.ACC,
+    valid_shape=[1, 16],
+    blayout="ColMajor",
+    slayout="RowMajor",
+)
+pto.tile.gemv_mx_acc(acc_prev, lhs_l0a_mx, lhs_scale, rhs_l0b_mx, rhs_scale, acc_next)
+```
+
+---
+
+#### `pto.tile.gemv_mx_bias(lhs: Tile, lhs_scale: Tile, rhs: Tile, rhs_scale: Tile, bias: Tile, dst: Tile) -> None`
+
+**Description**: Bias-enabled tile-level MX GEMV. Computes the MX product `lhs @ rhs`, adds the bias input carried by `bias`, and writes the result into `dst`.
+
+**Parameters**:
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `lhs` | `Tile` | Left operand tile, typically in `MemorySpace.LEFT` |
+| `lhs_scale` | `Tile` | Left microscaling tile, typically in `MemorySpace.SCALING` |
+| `rhs` | `Tile` | Right operand tile, typically in `MemorySpace.RIGHT` |
+| `rhs_scale` | `Tile` | Right microscaling tile, typically in `MemorySpace.SCALING` |
+| `bias` | `Tile` | Bias tile, typically in `MemorySpace.BIAS` |
+| `dst` | `Tile` | Destination accumulator tile |
+
+**Returns**: None.
+
+**Constraints**:
+- `lhs`, `rhs`, `lhs_scale`, `rhs_scale`, and `dst` must satisfy the same constraints as `pto.tile.gemv_mx`.
+- `bias` must satisfy the target architecture's cube bias layout and shape requirements. A common A5 case is a `[1, N]` tile in `MemorySpace.BIAS`.
+
+**Example** — add a bias tile on the MX GEMV path:
+
+<!-- ptodsl-doc-test: {"mode":"compile_fragment","fixture":"compute_ops.tile_mx_compute","symbol":"compute_ops_tile_mx_compute_probe","compile":{}} -->
+```python
+lhs_l0a_mx = pto.alloc_tile(
+    shape=[1, 64],
+    dtype=pto.f8e4m3,
+    memory_space=pto.MemorySpace.LEFT,
+    valid_shape=[1, 64],
+    blayout="ColMajor",
+    slayout="RowMajor",
+)
+lhs_scale = pto.alloc_tile(
+    shape=[1, 2],
+    dtype=pto.f16,
+    memory_space=pto.MemorySpace.SCALING,
+    valid_shape=[1, 2],
+    blayout="RowMajor",
+    slayout="RowMajor",
+    fractal_size=32,
+)
+rhs_l0b_mx = pto.alloc_tile(
+    shape=[64, 16],
+    dtype=pto.f8e5m2,
+    memory_space=pto.MemorySpace.RIGHT,
+    valid_shape=[64, 16],
+    blayout="RowMajor",
+    slayout="ColMajor",
+)
+rhs_scale = pto.alloc_tile(
+    shape=[2, 16],
+    dtype=pto.f16,
+    memory_space=pto.MemorySpace.SCALING,
+    valid_shape=[2, 16],
+    blayout="ColMajor",
+    slayout="ColMajor",
+    fractal_size=32,
+)
+bias_tile = pto.alloc_tile(
+    shape=[1, 16],
+    dtype=pto.f32,
+    memory_space=pto.MemorySpace.BIAS,
+    valid_shape=[1, 16],
+)
+acc_l0c = pto.alloc_tile(
+    shape=[1, 16],
+    dtype=pto.f32,
+    memory_space=pto.MemorySpace.ACC,
+    valid_shape=[1, 16],
+    blayout="ColMajor",
+    slayout="RowMajor",
+)
+pto.tile.gemv_mx_bias(lhs_l0a_mx, lhs_scale, rhs_l0b_mx, rhs_scale, bias_tile, acc_l0c)
+```
+
+---
+
 ### 8.1.14 Tile compute quick reference
 
 | Category | Operations |
@@ -754,7 +1249,8 @@ pto.tile.matmul_acc(acc_prev, lhs_l0a, rhs_l0b, acc_next)
 | Fill/padding | `tile.fillpad`, `tile.fillpad_expand`, `tile.fillpad_inplace` |
 | Windowing | `tile.extract`, `tile.insert` |
 | Tile movement | `tile.mov` |
-| Tile matmul | `tile.matmul`, `tile.matmul_acc` |
+| Tile matmul | `tile.matmul`, `tile.matmul_acc`, `tile.matmul_mx`, `tile.matmul_mx_acc`, `tile.matmul_mx_bias` |
+| Tile gemv | `tile.gemv_mx`, `tile.gemv_mx_acc`, `tile.gemv_mx_bias` |
 
 ---
 
@@ -763,6 +1259,8 @@ pto.tile.matmul_acc(acc_prev, lhs_l0a, rhs_l0b, acc_next)
 Vector compute ops operate on `VRegType` values inside `@pto.simd` sub-kernels. Every vector op takes a `MaskType` predicate that gates which lanes participate; masked-off lanes produce an unspecified result (use the result only where the mask is true, or feed it to a masked store).
 
 All vector ops in this section follow the pattern established in Section 7.3 for tile-index and pointer-form addressing. The signatures below use the vector-register form — tile-index forms load into `vreg` first, then compute.
+
+Unless a section explicitly says otherwise, the generic vector compute ops below expect compute-capable vector element types. Low-precision `vreg` payloads are intended for explicit memory/conversion paths such as `vlds`, `vsts`, `vcvt`, `vmulscvt`, and `vpack`; convert them to `f16`, `bf16`, `f32`, or another supported compute type before using generic vector arithmetic, reduction, or select ops.
 
 ### 8.2.1 Unary vector ops
 
@@ -1132,6 +1630,12 @@ These ops change the element type or layout of vector registers. They are distin
 
 **Constraints**:
 - Source and result dtype pair must be a legal hardware conversion. Illegal pairs (e.g., unsupported narrowing/widening combinations) are rejected at frontend time.
+- `f32 -> f8e4m3/f8e5m2` requires `rnd=R`, `sat`, and `part=P0/P1/P2/P3`.
+- `f32 -> hif8` requires `rnd=A/H`, `sat`, and `part=P0/P1/P2/P3`.
+- `f16/bf16 -> f8e4m3/f8e5m2` requires `rnd=R/A/F/Z/C`, `sat`, and `part=EVEN/ODD`.
+- `f16 -> hif8` requires `rnd=A/H`, `sat`, and `part=EVEN/ODD`.
+- `bf16 -> f4e1m2x2/f4e2m1x2` requires `rnd=R/A/F/Z/C` and `part=P0/P1/P2/P3`; it does not take `sat`.
+- `f8e4m3/f8e5m2/hif8 -> f32` and `f4e1m2x2/f4e2m1x2 -> bf16` require `part=P0/P1/P2/P3`; they do not take `rnd` or `sat`.
 
 **Example**:
 
@@ -1145,6 +1649,21 @@ vec_f16 = pto.vcvt(
     sat=pto.VcvtSatMode.SAT,
     part=pto.VcvtPartMode.EVEN,
 )
+```
+
+Low-precision packed conversion:
+
+<!-- ptodsl-doc-test: {"mode":"compile_fragment","fixture":"compute_ops.vector_compute","symbol":"compute_ops_vector_probe","compile":{"BLOCK":128}} -->
+```python
+vec_f8 = pto.vcvt(
+    vec_f32,
+    pto.f8e4m3,
+    mask32_full,
+    rnd=pto.VcvtRoundMode.R,
+    sat=pto.VcvtSatMode.NOSAT,
+    part=pto.VcvtPartMode.P0,
+)
+vec_f32_roundtrip = pto.vcvt(vec_f8, pto.f32, pto.pset_b8(pto.MaskPattern.ALL), part=pto.VcvtPartMode.P0)
 ```
 
 ---
@@ -1245,7 +1764,7 @@ The Cube unit performs matrix multiplication. Its operands are typed pointers in
 
 #### `pto.mad_mx(lhs: PtrType, rhs: PtrType, dst: PtrType, m: int, n: int, k: int, *, unit_flag: pto.MadUnitFlagMode | None = None, disable_gemv: bool = False, sat: pto.SatMode | None = None, n_dir: bool = False) -> None`
 
-**Description**: MX-format zero-initialized matrix multiply. This variant is intended for MX-enabled operand formats such as f8 payloads with their associated scale data already staged into cube-local buffers.
+**Description**: MX-format zero-initialized matrix multiply. This variant is intended for MX-enabled operand formats with their associated scale data already staged into cube-local buffers by `pto.mte_l1_l0a_mx` / `pto.mte_l1_l0b_mx`.
 
 ---
 
@@ -1260,6 +1779,12 @@ The Cube unit performs matrix multiplication. Its operands are typed pointers in
 **Description**: MX-format bias-initialized matrix multiply: `dst[M×N] = lhs[M×K] * rhs[K×N] + bias[M×N]`.
 
 MX variants intentionally do not expose `tf32_mode`; that clause is only valid for f32/f32/f32 non-MX `mad`, `mad_acc`, and `mad_bias`.
+
+**MX low-precision notes**:
+- MX cube paths are A5-only.
+- Supported MX operand pairs include mixed `f8e4m3`/`f8e5m2` and mixed `f4e1m2x2`/`f4e2m1x2` combinations.
+- `sat` is valid on the MX surfaces and lowers to the same `sat` / `nosat` clause family as non-MX `mad*`.
+- The scale payload is not passed directly to `mad_mx*`; it is carried by the staged L0A/L0B MX buffers and must satisfy the scale-tile layout requirements documented for `pto.tile.matmul_mx*`.
 
 ---
 
@@ -1300,7 +1825,14 @@ A full cube matmul follows a three-stage pattern: stage operands into L0A/L0B, c
 <!-- ptodsl-doc-test: {"mode":"compile_fragment","fixture":"data_movement.cube_helper","symbol":"data_movement_cube_helper_probe","compile":{"BLOCK_M":16,"BLOCK_K":16,"BLOCK_N":16}} -->
 ```python
 @pto.cube
-def qk_matmul(q_tile, k_tile, q_l0a, k_l0b, s_acc, s_tile):
+def qk_matmul(
+    q_tile: pto.Tile,
+    k_tile: pto.Tile,
+    q_l0a: pto.Tile,
+    k_l0b: pto.Tile,
+    s_acc: pto.Tile,
+    s_tile: pto.Tile,
+):
     m = q_tile.valid_shape[0]
     k = q_tile.valid_shape[1]
     n = k_tile.valid_shape[1]

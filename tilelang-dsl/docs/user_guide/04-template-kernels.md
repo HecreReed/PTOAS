@@ -301,6 +301,41 @@ else:
 - Use `constraints=[...]` and `pto.select_kernel(...)` when specialization requires selecting an entirely different kernel descriptor.
 - Use `pto.constexpr` when the kernel remains the same but internal regions require specialization based on compile-time parameters.
 
+#### Layout-Sensitive Template Selection
+
+When different template bodies should match the same op and dtype signature but
+different GM view layouts, prefer matcher constraints over ad-hoc stride
+inspection.
+
+```python
+@pto.vkernel(
+    target="a5",
+    op="pto.tload",
+    dtypes=[(pto.f32, pto.f32)],
+    constraints=[lambda src: src.config.layout == pto.ViewLayout.ND],
+)
+def template_tload_nd(src: pto.TensorView, dst: pto.Tile):
+    return None
+
+@pto.vkernel(
+    target="a5",
+    op="pto.tload",
+    dtypes=[(pto.f32, pto.f32)],
+    constraints=[lambda src: src.config.layout == pto.ViewLayout.DN],
+    priority=10,
+)
+def template_tload_dn(src: pto.TensorView, dst: pto.Tile):
+    return None
+```
+
+Rules:
+- `src.config` is a `ViewConfig`, not a `TileConfig`
+- `layout` may be `None` when the query carries no explicit view layout
+  metadata
+- unknown layout must not be treated as implicit `ND`
+- prefer `view.config.layout` over re-deriving layout from canonicalized
+  `shape` / `strides` when the template decision is fundamentally layout-based
+
 **Example**:
 ```python
 @pto.vkernel(target="a5", op="pto.trowsum")

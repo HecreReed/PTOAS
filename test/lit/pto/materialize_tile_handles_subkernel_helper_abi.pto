@@ -1,0 +1,48 @@
+// Copyright (c) 2026 Huawei Technologies Co., Ltd.
+// This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+// CANN Open Software License Agreement Version 2.0 (the "License").
+// Please refer to the License for details. You may not use this file except in compliance with the License.
+// THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+// INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+// See LICENSE in the root of the software repository for the full text of the License.
+
+// Guards PTODSL subkernel helper arguments restored to tile_buf ABI.
+// RUN: ptoas --pto-arch=a5 --pto-level=level3 --mlir-print-ir-after=pto-materialize-tile-handles %s -o /dev/null 2>&1 | FileCheck %s --check-prefix=IR
+
+module {
+  func.func @ptodsl_subkernel_helper_tile_abi(
+      %arg0: !pto.tile_buf<vec, 16x16xf16>,
+      %arg1: !pto.tile_buf<vec, 16x1xf32, blayout=col_major>,
+      %arg2: f32) attributes {
+        pto.ptodsl.subkernel_helper = "simd"
+      } {
+    pto.section.vector {
+      %0 = pto.tile_buf_addr %arg0
+        : !pto.tile_buf<vec, 16x16xf16>
+        -> memref<16x16xf16, #pto.address_space<vec>>
+      %1 = pto.tile_buf_addr %arg1
+        : !pto.tile_buf<vec, 16x1xf32, blayout=col_major>
+        -> memref<16x1xf32, #pto.address_space<vec>>
+      func.call @ptodsl_subkernel_helper_tile_abi_sink(%0, %1, %arg2)
+        : (memref<16x16xf16, #pto.address_space<vec>>,
+           memref<16x1xf32, #pto.address_space<vec>>, f32) -> ()
+    }
+    return
+  }
+
+  func.func private @ptodsl_subkernel_helper_tile_abi_sink(
+      memref<16x16xf16, #pto.address_space<vec>>,
+      memref<16x1xf32, #pto.address_space<vec>>,
+      f32)
+}
+
+// IR: IR Dump After PTOMaterializeTileHandles
+// IR-LABEL: func.func private @ptodsl_subkernel_helper_tile_abi(
+// IR-SAME: %{{.*}}: !pto.tile_buf<vec, 16x16xf16>
+// IR-SAME: %{{.*}}: !pto.tile_buf<vec, 16x1xf32, blayout=col_major>
+// IR-SAME: %{{.*}}: f32
+// IR-SAME: attributes
+// IR: builtin.unrealized_conversion_cast %{{.*}} : !pto.tile_buf<vec, 16x1xf32, blayout=col_major> to memref<16x1xf32, strided<[1, 16], offset: ?>, #pto.address_space<vec>>
+// IR: builtin.unrealized_conversion_cast %{{.*}} : !pto.tile_buf<vec, 16x16xf16> to memref<16x16xf16, strided<[16, 1], offset: ?>, #pto.address_space<vec>>
+// IR: pto.tile_buf_addr %{{.*}} : !pto.tile_buf<vec, 16x16xf16>
+// IR: pto.tile_buf_addr %{{.*}} : !pto.tile_buf<vec, 16x1xf32, blayout=col_major>

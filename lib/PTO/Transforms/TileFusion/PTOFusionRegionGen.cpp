@@ -431,15 +431,21 @@ struct PTOFusionRegionGenPass
     if (func.isExternal())
       return;
 
-    FailureOr<pto::PreFusionAnalysisResult> analysisOr =
-        pto::buildPreFusionAnalysis(func);
-    if (failed(analysisOr)) {
+    // Reuse the shared pre-fusion dataflow graph cached by the analysis
+    // manager (built once, by FusionPlan or lazily here).  FusionRegionGen
+    // consumes only compute-node ids and write-instance pointers, never the
+    // iteration-domain classes, so it does not need the --enable-shape-inference
+    // option and can use the cached DFG directly.
+    const pto::PreFusionAnalysis &sharedAnalysis =
+        getAnalysis<pto::PreFusionAnalysis>();
+    if (!sharedAnalysis.isValid()) {
       signalPassFailure();
       return;
     }
+    const pto::PreFusionAnalysisResult &analysis = sharedAnalysis.getResult();
 
     PreFusionAnalysisIndex analysisIndex;
-    for (const pto::FusionBlockAnalysis &blockAnalysis : analysisOr->blocks) {
+    for (const pto::FusionBlockAnalysis &blockAnalysis : analysis.blocks) {
       FusionBlockAnalysisIndex &index = analysisIndex.blocks[blockAnalysis.block];
       for (const pto::FusionComputeNode &node : blockAnalysis.computeNodes)
         index.nodeIdByOp.try_emplace(node.op, node.id);

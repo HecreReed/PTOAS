@@ -23,6 +23,7 @@
 
 namespace mlir {
 namespace pto {
+#define GEN_PASS_DEF_PTOINLINEBACKENDHELPERS
 #define GEN_PASS_DEF_PTOINLINELIBCALL
 #include "PTO/Transforms/Passes.h.inc"
 } // namespace pto
@@ -48,13 +49,22 @@ static bool isTilelangInlineProcFunc(func::FuncOp fn) {
   return fn->hasAttr("pto.tilelang.inline_proc");
 }
 
+static bool isPTODSLSubkernelHelperFunc(func::FuncOp fn) {
+  return fn->hasAttr("pto.ptodsl.subkernel_helper");
+}
+
 static bool isTilelangTemplateFunc(func::FuncOp fn) {
   return fn->hasAttr("pto.tilelang.instance") && fn.isPrivate();
 }
 
+static bool isInlineableBackendHelperFunc(func::FuncOp fn) {
+  return isPTODSLSubkernelHelperFunc(fn);
+}
+
 static bool isInlineableLibFunc(func::FuncOp fn) {
-  // Keep OP-Lib behavior unchanged while force-inlining TileLang helpers
-  // (inline_proc + private template helper).
+  // Keep OP-Lib behavior unchanged while TileLang private template helpers are
+  // still handled on the VPTO tile-op expansion path, together with
+  // TileLang inline_proc helpers that only become meaningful after ExpandTileOp.
   if (isInstanceFunc(fn) || isTilelangInlineProcFunc(fn))
     return true;
   return isTilelangTemplateFunc(fn);
@@ -177,18 +187,68 @@ static LogicalResult inlineCall(func::CallOp call, func::FuncOp callee) {
   return success();
 }
 
-struct PTOInlineLibCallPass
-    : public pto::impl::PTOInlineLibCallBase<PTOInlineLibCallPass> {
-  using pto::impl::PTOInlineLibCallBase<
-      PTOInlineLibCallPass>::PTOInlineLibCallBase;
+static void emitMissingInstanceBodyError(func::CallOp call, func::FuncOp callee) {
+  call.emitError() << kErrInstanceBodyMissing
+                   << ": OP-Lib instance body is missing for @"
+                   << callee.getSymName();
+  if (auto variant =
+          callee->getAttrOfType<StringAttr>(kOpLibAttrInstVariantId)) {
+    call.emitRemark() << "variant_id=" << variant.getValue();
+  }
+  if (auto op = callee->getAttrOfType<StringAttr>(kOpLibAttrInstOp)) {
+    call.emitRemark() << "op=" << op.getValue();
+  }
+  if (auto dtype = callee->getAttrOfType<StringAttr>(kOpLibAttrInstDType)) {
+    call.emitRemark() << "dtype=" << dtype.getValue();
+  }
+}
 
-  void runOnOperation() override {
-    ModuleOp module = getOperation();
+static SmallVector<ModuleOp, 4> collectFuncModules(ModuleOp root) {
+  SmallVector<ModuleOp, 4> modules;
+  modules.push_back(root);
+  root.walk([&](ModuleOp nested) {
+    if (nested != root)
+      modules.push_back(nested);
+  });
+  return modules;
+}
 
-    int inlinedCalls = 0;
-    int touchedFuncs = 0;
+template <typename InlinePredicate>
+static LogicalResult validateInlineableCalleesHaveBodies(
+    ModuleOp module, InlinePredicate &&shouldInline) {
+  for (ModuleOp funcModule : collectFuncModules(module)) {
+    for (func::FuncOp func : funcModule.getOps<func::FuncOp>()) {
+      if (func.isExternal() || func.empty())
+        continue;
 
-    for (func::FuncOp func : module.getOps<func::FuncOp>()) {
+      bool failed = false;
+      func.walk([&](func::CallOp call) {
+        auto calleeAttr = call.getCalleeAttr();
+        if (!calleeAttr)
+          return;
+
+        func::FuncOp callee =
+            funcModule.lookupSymbol<func::FuncOp>(calleeAttr.getValue());
+        if (!callee || !shouldInline(callee) || !callee.isExternal())
+          return;
+
+        emitMissingInstanceBodyError(call, callee);
+        failed = true;
+      });
+      if (failed)
+        return failure();
+    }
+  }
+
+  return success();
+}
+
+template <typename InlinePredicate>
+static LogicalResult inlineMatchingCalls(
+    ModuleOp module, InlinePredicate &&shouldInline, bool debug,
+    llvm::StringRef debugTag, int &inlinedCalls, int &touchedFuncs) {
+  for (ModuleOp funcModule : collectFuncModules(module)) {
+    for (func::FuncOp func : funcModule.getOps<func::FuncOp>()) {
       if (func.isExternal())
         continue;
       if (isInstanceFunc(func))
@@ -213,34 +273,21 @@ struct PTOInlineLibCallPass
             continue;
 
           func::FuncOp callee =
-              module.lookupSymbol<func::FuncOp>(calleeAttr.getValue());
-          if (!callee || !isInlineableLibFunc(callee))
+              funcModule.lookupSymbol<func::FuncOp>(calleeAttr.getValue());
+          if (!callee || !shouldInline(callee))
             continue;
 
           if (callee.isExternal()) {
-            oldCall.emitError() << kErrInstanceBodyMissing
-                                << ": OP-Lib instance body is missing for @"
-                                << callee.getSymName();
-            if (auto variant =
-                    callee->getAttrOfType<StringAttr>(kOpLibAttrInstVariantId)) {
-              oldCall.emitRemark() << "variant_id=" << variant.getValue();
-            }
-            if (auto op = callee->getAttrOfType<StringAttr>(kOpLibAttrInstOp)) {
-              oldCall.emitRemark() << "op=" << op.getValue();
-            }
-            if (auto dtype =
-                    callee->getAttrOfType<StringAttr>(kOpLibAttrInstDType)) {
-              oldCall.emitRemark() << "dtype=" << dtype.getValue();
-            }
-            signalPassFailure();
-            return;
+            oldCall.emitOpError("callee must have a body before inlining");
+            return failure();
           }
 
           func::CallOp call = oldCall;
           SmallVector<Value, 4> concreteOperands;
           concreteOperands.reserve(call.getNumOperands());
-          for (auto [operand, expectedTy] : llvm::zip(
-                   call.getOperands(), callee.getFunctionType().getInputs())) {
+          for (auto [operand, expectedTy] :
+               llvm::zip(call.getOperands(),
+                         callee.getFunctionType().getInputs())) {
             concreteOperands.push_back(
                 maybeUnwrapCastToExpected(operand, expectedTy));
           }
@@ -250,26 +297,22 @@ struct PTOInlineLibCallPass
                                                       concreteOperands);
           if (call.getNumResults() != newCall.getNumResults()) {
             call.emitOpError("call result arity mismatch during inline staging");
-            signalPassFailure();
-            return;
+            return failure();
           }
           for (auto [oldResult, newResult] :
                llvm::zip(call.getResults(), newCall.getResults()))
             oldResult.replaceAllUsesWith(newResult);
           call.erase();
 
-          if (failed(inlineCall(newCall, callee))) {
-            signalPassFailure();
-            return;
-          }
+          if (failed(inlineCall(newCall, callee)))
+            return failure();
 
           ++inlinedCalls;
           changedThisFunc = true;
           madeProgress = true;
           if (debug) {
-            llvm::errs() << "[op-fusion] inline-libcall: inlined @"
-                         << callee.getSymName() << " into @" << func.getSymName()
-                         << "\n";
+            llvm::errs() << debugTag << ": inlined @" << callee.getSymName()
+                         << " into @" << func.getSymName() << "\n";
           }
         }
       }
@@ -278,6 +321,80 @@ struct PTOInlineLibCallPass
         eraseDeadBridgeCasts(func);
         ++touchedFuncs;
       }
+    }
+  }
+
+  return success();
+}
+
+template <typename FuncPredicate>
+static void eraseDeadMatchingPrivateFuncs(ModuleOp module,
+                                          FuncPredicate &&predicate) {
+  for (ModuleOp funcModule : collectFuncModules(module)) {
+    SymbolTable symbolTable(funcModule);
+    SmallVector<func::FuncOp, 8> deadFuncs;
+    for (func::FuncOp func : funcModule.getOps<func::FuncOp>()) {
+      if (!predicate(func))
+        continue;
+      if (func.isPublic())
+        continue;
+      auto uses = symbolTable.getSymbolUses(func, funcModule);
+      if (uses && uses->empty())
+        deadFuncs.push_back(func);
+    }
+    for (func::FuncOp func : deadFuncs)
+      func.erase();
+  }
+}
+
+struct PTOInlineBackendHelpersPass
+    : public pto::impl::PTOInlineBackendHelpersBase<
+          PTOInlineBackendHelpersPass> {
+  using pto::impl::PTOInlineBackendHelpersBase<
+      PTOInlineBackendHelpersPass>::PTOInlineBackendHelpersBase;
+
+  void runOnOperation() override {
+    ModuleOp module = getOperation();
+
+    int inlinedCalls = 0;
+    int touchedFuncs = 0;
+    if (failed(inlineMatchingCalls(module, isInlineableBackendHelperFunc, debug,
+                                   "[op-fusion] inline-backend-helpers",
+                                   inlinedCalls, touchedFuncs))) {
+      signalPassFailure();
+      return;
+    }
+
+    if (debug) {
+      llvm::errs() << "[op-fusion] inline-backend-helpers touched "
+                   << touchedFuncs << " function(s), inlined " << inlinedCalls
+                   << " call(s)\n";
+    }
+
+    eraseDeadMatchingPrivateFuncs(module, isInlineableBackendHelperFunc);
+  }
+};
+
+struct PTOInlineLibCallPass
+    : public pto::impl::PTOInlineLibCallBase<PTOInlineLibCallPass> {
+  using pto::impl::PTOInlineLibCallBase<
+      PTOInlineLibCallPass>::PTOInlineLibCallBase;
+
+  void runOnOperation() override {
+    ModuleOp module = getOperation();
+
+    int inlinedCalls = 0;
+    int touchedFuncs = 0;
+    if (failed(validateInlineableCalleesHaveBodies(module, isInlineableLibFunc))) {
+      signalPassFailure();
+      return;
+    }
+
+    if (failed(inlineMatchingCalls(module, isInlineableLibFunc, debug,
+                                   "[op-fusion] inline-libcall", inlinedCalls,
+                                   touchedFuncs))) {
+      signalPassFailure();
+      return;
     }
 
     if (debug) {
@@ -289,19 +406,7 @@ struct PTOInlineLibCallPass
     // backends never see leftover template/instance bodies.  This is needed
     // for TileLang templates whose tile_buf-typed parameters cannot be
     // legalized once their callers have been inlined.
-    SymbolTable symbolTable(module);
-    SmallVector<func::FuncOp, 8> deadFuncs;
-    for (func::FuncOp func : module.getOps<func::FuncOp>()) {
-      if (!isInlineableLibFunc(func))
-        continue;
-      if (func.isPublic())
-        continue;
-      auto uses = symbolTable.getSymbolUses(func, module);
-      if (uses && uses->empty())
-        deadFuncs.push_back(func);
-    }
-    for (func::FuncOp func : deadFuncs)
-      func.erase();
+    eraseDeadMatchingPrivateFuncs(module, isInlineableLibFunc);
   }
 };
 
@@ -310,4 +415,9 @@ struct PTOInlineLibCallPass
 std::unique_ptr<Pass>
 mlir::pto::createPTOInlineLibCallPass(const PTOInlineLibCallOptions &options) {
   return std::make_unique<PTOInlineLibCallPass>(options);
+}
+
+std::unique_ptr<Pass> mlir::pto::createPTOInlineBackendHelpersPass(
+    const PTOInlineBackendHelpersOptions &options) {
+  return std::make_unique<PTOInlineBackendHelpersPass>(options);
 }

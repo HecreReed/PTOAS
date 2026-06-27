@@ -115,6 +115,9 @@ endfunction()
 # --------------------------------------------------------------------------
 set(ALL_TESTCASES
     tadd
+    tinsert
+    tinsert_acc2vec
+    tinsert_vec
     tsub
     tmul
     tdiv
@@ -209,6 +212,14 @@ set(ALL_TESTCASES
     textract_fp
     textract_v2v
     fp8_load_test
+    tmov2left
+    tmov2right
+    tmov2bias
+    tmov2scale
+    tmov2vec
+    tmov_fp
+    tstore_acc2gm
+    tload_mat
 )
 
 if((TEST_CASE IN_LIST ALL_TESTCASES) OR (TEST_CASE STREQUAL "all"))

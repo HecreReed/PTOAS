@@ -39,6 +39,7 @@
 #include "llvm/ADT/ScopeExit.h"
 #include "llvm/ADT/SmallString.h"
 #include "llvm/ADT/StringMap.h"
+#include "llvm/ADT/StringSet.h"
 #include "llvm/Analysis/LoopInfo.h"
 #include "llvm/IR/BasicBlock.h"
 #include "llvm/IR/CFG.h"
@@ -545,7 +546,14 @@ void attachHIVMKernelAnnotations(llvm::Module &llvmModule,
   llvm::Constant *one = llvm::ConstantInt::get(i32Ty, 1);
 
   llvm::StringMap<std::pair<uint32_t, uint32_t>> simtConfigByName;
-  sourceModule.walk([&](func::FuncOp funcOp) {
+  llvm::StringSet<llvm::MallocAllocator> ptoEntryFunctions;
+
+  sourceModule.walk([&](LLVM::LLVMFuncOp funcOp) {
+    StringRef symName = funcOp.getSymName();
+    if (pto::isPTOEntryFunction(funcOp)) {
+      ptoEntryFunctions.insert(symName);
+    }
+
     if (!funcOp->hasAttr(pto::kPTOSimtEntryAttrName))
       return;
 
@@ -558,20 +566,8 @@ void attachHIVMKernelAnnotations(llvm::Module &llvmModule,
             pto::kPTOSimtMaxRegistersAttrName))
       maxRegisters = static_cast<uint32_t>(attr.getInt());
 
-    simtConfigByName[funcOp.getSymName()] = {maxThreads, maxRegisters};
+    simtConfigByName[symName] = {maxThreads, maxRegisters};
   });
-
-  auto hasInModuleCaller = [](llvm::Function &function) {
-    for (llvm::User *user : function.users()) {
-      auto *call = llvm::dyn_cast<llvm::CallBase>(user);
-      if (!call)
-        continue;
-      if (call->getCalledFunction() != &function)
-        continue;
-      return true;
-    }
-    return false;
-  };
 
   auto callsSimtEntry = [](llvm::Function &function) {
     for (llvm::BasicBlock &block : function) {
@@ -633,9 +629,9 @@ void attachHIVMKernelAnnotations(llvm::Module &llvmModule,
       continue;
 
     llvm::StringRef name = function.getName();
-    if (name.contains(".extracted") || name.contains(".vector.thread"))
+    if (!ptoEntryFunctions.contains(name))
       continue;
-    if (hasInModuleCaller(function))
+    if (name.contains(".extracted") || name.contains(".vector.thread"))
       continue;
 
     addAnnotation(function, "kernel");

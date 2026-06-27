@@ -69,19 +69,22 @@ FRAGMENT_FIXTURES = {
             BLOCK: pto.const_expr = 128,
         ):
             {SNIPPET_PLACEHOLDER}
+            _ = lp_ptr
+            _ = lp_vreg_ty
         """
     ),
     "type_system.tensor_view": _fixture(
         f"""
         @pto.jit(target="a5")
         def type_system_tensor_view_probe(
-            A: pto.tensor_spec(rank=2, dtype=pto.f32),
+            A_ptr: pto.ptr(pto.f32, "gm"),
+            rows: pto.i32,
+            cols: pto.i32,
             *,
             BLOCK: pto.const_expr = 128,
         ):
-            rows = A.shape[0]
-            cols = A.shape[1]
             N = rows
+            A = pto.make_tensor_view(A_ptr, shape=[rows, cols], strides=[cols, 1])
             {SNIPPET_PLACEHOLDER}
         """
     ),
@@ -190,7 +193,9 @@ FRAGMENT_FIXTURES = {
         f"""
         @pto.jit(target="a5")
         def quick_start_make_tensor_view_probe(
-            A: pto.tensor_spec(rank=2, dtype=pto.f32),
+            A_ptr: pto.ptr(pto.f32, "gm"),
+            rows: pto.i32,
+            cols: pto.i32,
         ):
             {SNIPPET_PLACEHOLDER}
         """
@@ -209,11 +214,11 @@ FRAGMENT_FIXTURES = {
         f"""
         @pto.jit(target="a5")
         def quick_start_partition_view_probe(
-            A: pto.tensor_spec(rank=2, dtype=pto.f32),
+            A_ptr: pto.ptr(pto.f32, "gm"),
+            rows: pto.i32,
+            cols: pto.i32,
         ):
-            rows = A.shape[0]
-            cols = A.shape[1]
-            a_view = pto.make_tensor_view(A, shape=A.shape, strides=A.strides)
+            a_view = pto.make_tensor_view(A_ptr, shape=[rows, cols], strides=[cols, 1])
             {SNIPPET_PLACEHOLDER}
         """
     ),
@@ -621,13 +626,13 @@ FRAGMENT_FIXTURES = {
         f"""
         @pto.jit(target="a5", mode="explicit")
         def kernel_entry_inline_explicit_scope_probe(
-            A: pto.tensor_spec(rank=2, dtype=pto.f32),
-            O: pto.tensor_spec(rank=2, dtype=pto.f32),
+            A_ptr: pto.ptr(pto.f32, "gm"),
+            O_ptr: pto.ptr(pto.f32, "gm"),
             *,
             BLOCK: pto.const_expr = 16,
         ):
-            a_view = pto.make_tensor_view(A, shape=A.shape, strides=A.strides)
-            o_view = pto.make_tensor_view(O, shape=O.shape, strides=O.strides)
+            a_view = pto.make_tensor_view(A_ptr, shape=[1, BLOCK], strides=[BLOCK, 1])
+            o_view = pto.make_tensor_view(O_ptr, shape=[1, BLOCK], strides=[BLOCK, 1])
             part = pto.partition_view(a_view, offsets=[0, 0], sizes=[1, BLOCK])
             out_part = pto.partition_view(o_view, offsets=[0, 0], sizes=[1, BLOCK])
             tile = pto.alloc_tile(shape=[1, BLOCK], dtype=pto.f32, valid_shape=[1, BLOCK])
@@ -1070,6 +1075,17 @@ FRAGMENT_FIXTURES = {
             {SNIPPET_PLACEHOLDER}
         """
     ),
+    "data_movement.low_precision_vector_memory": _fixture(
+        f"""
+        @pto.jit(target="a5", mode="explicit")
+        def data_movement_low_precision_vector_memory_probe():
+            f8_src = pto.castptr(pto.ui64(0), pto.ptr(pto.f8e4m3, "ub"))
+            f8_dst = pto.castptr(pto.ui64(0), pto.ptr(pto.f8e4m3, "ub"))
+            fp4_src = pto.castptr(pto.ui64(0), pto.ptr(pto.f4e1m2x2, "ub"))
+            fp4_dst = pto.castptr(pto.ui64(0), pto.ptr(pto.f4e1m2x2, "ub"))
+            {SNIPPET_PLACEHOLDER}
+        """
+    ),
     "data_movement.tile_slice_2d": _fixture(
         f"""
         @pto.jit(target="a5")
@@ -1151,6 +1167,13 @@ FRAGMENT_FIXTURES = {
                 compute_ops_vector_helper(inp_tile, out_tile, row)
         """
     ),
+    "compute_ops.tile_low_precision_cvt": _fixture(
+        f"""
+        @pto.jit(target="a5")
+        def compute_ops_tile_low_precision_cvt_probe():
+            {SNIPPET_PLACEHOLDER}
+        """
+    ),
     "compute_ops.tile_window_matmul": _fixture(
         f"""
         @pto.jit(target="a5")
@@ -1198,6 +1221,13 @@ FRAGMENT_FIXTURES = {
                 blayout="ColMajor",
                 slayout="RowMajor",
             )
+            {SNIPPET_PLACEHOLDER}
+        """
+    ),
+    "compute_ops.tile_mx_compute": _fixture(
+        f"""
+        @pto.jit(target="a5")
+        def compute_ops_tile_mx_compute_probe():
             {SNIPPET_PLACEHOLDER}
         """
     ),
@@ -1518,7 +1548,11 @@ FRAGMENT_FIXTURES = {
 
 
         @pto.simt
-        def materialize_tile_bounds(meta_ptr, valid_rows: pto.i32, valid_cols: pto.i32):
+        def materialize_tile_bounds(
+            meta_ptr: pto.ptr(pto.i32, pto.MemorySpace.UB),
+            valid_rows: pto.i32,
+            valid_cols: pto.i32,
+        ):
             scalar.store(0, meta_ptr + 0)
             scalar.store(valid_rows, meta_ptr + 1)
             scalar.store(valid_cols, meta_ptr + 2)

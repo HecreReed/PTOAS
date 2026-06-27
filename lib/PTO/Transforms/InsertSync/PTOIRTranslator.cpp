@@ -22,6 +22,7 @@
 #include "llvm/Support/FormatVariadic.h"
 #include "mlir/Dialect/MemRef/IR/MemRef.h"
 #include "mlir/IR/Matchers.h"
+#include "llvm/ADT/StringSwitch.h"
 // [P0 新增] 引入副作用接口和 PTO 接口
 #include "mlir/Interfaces/SideEffectInterfaces.h"
 
@@ -199,6 +200,47 @@ getMemrefSubViewBaseAddresses(memref::SubViewOp op, MemRefType sourceType,
   return addresses;
 }
 
+namespace {
+
+static func::FuncOp lookupPTODSLSubkernelHelper(func::CallOp callOp) {
+  auto module = callOp->getParentOfType<ModuleOp>();
+  if (!module || callOp.getCallee().empty())
+    return {};
+  auto callee = module.lookupSymbol<func::FuncOp>(callOp.getCallee());
+  if (!callee)
+    return {};
+  if (!callee->hasAttr("pto.ptodsl.subkernel_helper"))
+    return {};
+  return callee;
+}
+
+static std::optional<pto::PipelineType>
+getPTODSLSubkernelHelperPipe(func::FuncOp callee) {
+  auto roleAttr =
+      callee->getAttrOfType<mlir::StringAttr>("pto.ptodsl.subkernel_helper");
+  if (!roleAttr)
+    return std::nullopt;
+
+  return llvm::StringSwitch<std::optional<pto::PipelineType>>(
+             roleAttr.getValue())
+      .Case("cube", pto::PipelineType::PIPE_M)
+      .Case("simd", pto::PipelineType::PIPE_V)
+      .Default(std::nullopt);
+}
+
+static bool isPTODSLSubkernelMemoryOperand(Type type) {
+  return isa<MemRefType, pto::PtrType, pto::TileBufType, pto::TensorViewType,
+             pto::PartitionTensorViewType>(type);
+}
+
+static pto::TCoreType getPTODSLSubkernelHelperCoreType(
+    pto::PipelineType pipe) {
+  return pipe == pto::PipelineType::PIPE_M ? pto::TCoreType::CUBE
+                                           : pto::TCoreType::VECTOR;
+}
+
+} // namespace
+
 // [辅助函数] 尝试从 Operation 中计算相对于 Source 的字节偏移量和新大小
 // 返回值: pair<offsetInBytes, sizeInBytes>
 // 如果无法计算静态值，返回 {-1, -1} 表示这是动态的
@@ -368,6 +410,8 @@ void PTOIRTranslator::RecursionIR(Region *region) {
       UpdateYieldOpInfo(yieldOp);
     } else if (getSyncMacroModel(op)) {
       UpdateMacroOpInfo(op);
+    } else if (auto callOp = dyn_cast<func::CallOp>(op)) {
+      UpdatePTODSLSubkernelCallInfo(callOp);
     } else if (isa<pto::OpPipeInterface>(op)) {
       // --- Case D: 带有 OpPipeInterface 的计算/搬运指令 ---
       UpdatePTOOpInfo(op);
@@ -649,6 +693,41 @@ void PTOIRTranslator::UpdateMacroOpInfo(Operation *op) {
   }
 }
 
+void PTOIRTranslator::UpdatePTODSLSubkernelCallInfo(func::CallOp callOp) {
+  func::FuncOp callee = lookupPTODSLSubkernelHelper(callOp);
+  if (!callee)
+    return;
+
+  std::optional<pto::PipelineType> pipe = getPTODSLSubkernelHelperPipe(callee);
+  if (!pipe || *pipe == pto::PipelineType::PIPE_UNASSIGNED)
+    return;
+
+  SmallVector<const BaseMemInfo *> defVec;
+  SmallVector<const BaseMemInfo *> useVec;
+  for (Value operand : callOp.getOperands()) {
+    if (!isPTODSLSubkernelMemoryOperand(operand.getType()))
+      continue;
+
+    // PTODSL subkernel boundaries communicate through caller-visible local
+    // memory objects. Model helper calls conservatively as both reading and
+    // writing those operands so auto-sync can bridge TLOAD/TSTORE hazards
+    // across the call boundary before helper inlining runs later.
+    UpdateDefUseVec({operand}, useVec);
+    UpdateDefUseVec({operand}, defVec);
+  }
+
+  if (defVec.empty() && useVec.empty())
+    return;
+
+  auto compoundElement = std::make_unique<CompoundInstanceElement>(
+      index, defVec, useVec, *pipe, callOp->getName());
+  compoundElement->elementOp = callOp;
+  compoundElement->compoundCoreType =
+      getPTODSLSubkernelHelperCoreType(*pipe);
+  syncIR_.emplace_back(std::move(compoundElement));
+  index++;
+}
+ 
 // ============================================================================
 // 6. [P0 修改] 获取 Op 的 Pipeline 类型
 // ============================================================================

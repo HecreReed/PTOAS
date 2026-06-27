@@ -21,6 +21,7 @@ import tilelang_dsl as pto
 import tilelang_dsl.daemon_core as daemon_core
 import tilelang_dsl.expand_helper as expand_helper
 import tilelang_dsl.kernel as kernel_impl
+from tilelang_dsl.stable_key import compute_stable_key
 from tilelang_dsl.support_matrix import (
     ADVANCED_CUBE_MTE_SURFACES,
     ADVANCED_EXPLICIT_VECSCOPE_SURFACES,
@@ -747,6 +748,45 @@ def kernel(src: pto.Tile, dst: pto.Tile):
 
         self.assertEqual(len(operand_specs), 1)
         self.assertEqual(operand_specs[0]["memory_space"], pto.MemorySpace.SCALING)
+
+    def test_expand_helper_parse_operand_specs_preserves_view_layout_config(self) -> None:
+        operand_specs = expand_helper._parse_operand_specs(
+            """
+[
+  {
+    "kind": "view",
+    "dtype": "f32",
+    "shape": [1, 1, 1, 16, 64],
+    "strides": [1024, 1024, 1024, 64, 1],
+    "memory_space": "gm",
+    "config": {
+      "layout": "dn"
+    }
+  }
+]
+"""
+        )
+
+        self.assertEqual(len(operand_specs), 1)
+        self.assertEqual(operand_specs[0]["config"].layout, pto.ViewLayout.DN)
+
+    def test_expand_helper_parse_operand_specs_rejects_unknown_view_layout(self) -> None:
+        with self.assertRaisesRegex(ValueError, "invalid view config"):
+            expand_helper._parse_operand_specs(
+                """
+[
+  {
+    "kind": "view",
+    "dtype": "f32",
+    "shape": [1, 1, 1, 16, 64],
+    "memory_space": "gm",
+    "config": {
+      "layout": "weird_layout"
+    }
+  }
+]
+"""
+            )
 
     def test_select_descriptor_uses_positional_context_for_named_constraints(self) -> None:
         source = """
@@ -1983,6 +2023,90 @@ class TileLangDSLMatcherEntryTests(unittest.TestCase):
 
         self.assertEqual(selected.name, "template_nd")
 
+    def test_select_kernel_supports_view_layout_constraints_via_positional_context_attrs(self) -> None:
+        @pto.vkernel(
+            op="matcher_view_layout_context_unique",
+            dtypes=[(pto.f32, pto.f32)],
+            constraints=[lambda src: src.config.layout == pto.ViewLayout.ND],
+        )
+        def template_nd(src: pto.TensorView, dst: pto.Tile):
+            return None
+
+        @pto.vkernel(
+            op="matcher_view_layout_context_unique",
+            dtypes=[(pto.f32, pto.f32)],
+            constraints=[lambda inp: inp.config.layout == pto.ViewLayout.DN],
+            priority=9,
+        )
+        def template_dn(inp: pto.TensorView, out: pto.Tile):
+            return None
+
+        registry = pto.KernelRegistry((template_nd, template_dn))
+        nd_operand_specs = expand_helper._parse_operand_specs(
+            """
+[
+  {
+    "kind": "view",
+    "dtype": "f32",
+    "shape": [1, 1, 1, 16, 64],
+    "strides": [1024, 1024, 1024, 64, 1],
+    "memory_space": "gm",
+    "config": {
+      "layout": "nd"
+    }
+  },
+  {
+    "kind": "tile",
+    "dtype": "f32",
+    "shape": [16, 64],
+    "valid_shape": [16, 64],
+    "memory_space": "ub"
+  }
+]
+"""
+        )
+        dn_operand_specs = expand_helper._parse_operand_specs(
+            """
+[
+  {
+    "kind": "view",
+    "dtype": "f32",
+    "shape": [1, 1, 1, 16, 64],
+    "strides": [1024, 1024, 1024, 64, 1],
+    "memory_space": "gm",
+    "config": {
+      "layout": "dn"
+    }
+  },
+  {
+    "kind": "tile",
+    "dtype": "f32",
+    "shape": [16, 64],
+    "valid_shape": [16, 64],
+    "memory_space": "ub"
+  }
+]
+"""
+        )
+
+        nd_selected = pto.select_kernel(
+            "a5",
+            "matcher_view_layout_context_unique",
+            (pto.f32, pto.f32),
+            context_attrs=expand_helper._build_positional_context_attrs(nd_operand_specs),
+            registry=registry,
+        )
+        dn_selected = pto.select_kernel(
+            "a5",
+            "matcher_view_layout_context_unique",
+            (pto.f32, pto.f32),
+            context_attrs=expand_helper._build_positional_context_attrs(dn_operand_specs),
+            registry=registry,
+        )
+
+        self.assertEqual(nd_selected.name, "template_nd")
+        self.assertEqual(dn_selected.name, "template_dn")
+
     def test_constraints_can_read_dtype_from_positional_context_attrs_before_dtype_binding(self) -> None:
         @pto.vkernel(
             op="matcher_positional_dtype_context_unique",
@@ -2042,6 +2166,96 @@ class TileLangDSLMatcherEntryTests(unittest.TestCase):
 
         self.assertIs(context_attrs["arg0_dtype"], pto.f32)
         self.assertIs(context_attrs["arg1_dtype"], pto.f32)
+
+    def test_daemon_context_attrs_expose_view_layout_config(self) -> None:
+        operand_specs = [
+            {
+                "kind": "view",
+                "dtype": "f32",
+                "shape": [1, 1, 1, 16, 64],
+                "strides": [1024, 1024, 1024, 64, 1],
+                "memory_space": "gm",
+                "config": {"layout": "mx_a_zz"},
+            },
+            {
+                "kind": "tile",
+                "dtype": "f32",
+                "shape": [16, 64],
+                "valid_shape": [16, 64],
+                "memory_space": "ub",
+            },
+        ]
+
+        context_attrs = daemon_core._build_positional_context_attrs(operand_specs)
+
+        self.assertIsInstance(context_attrs["arg0_config"], pto.ViewConfig)
+        self.assertEqual(context_attrs["arg0_config"].layout, pto.ViewLayout.MX_A_ZZ)
+
+    def test_stable_key_distinguishes_view_layout_variants(self) -> None:
+        nd_key = compute_stable_key(
+            "a5",
+            "pto.matcher_view_layout_key_unique",
+            [
+                {
+                    "kind": "view",
+                    "dtype": "f32",
+                    "shape": [1, 1, 1, 16, 64],
+                    "strides": [1024, 1024, 1024, 64, 1],
+                    "memory_space": "gm",
+                    "config": {"layout": "nd"},
+                }
+            ],
+        )
+        dn_key = compute_stable_key(
+            "a5",
+            "pto.matcher_view_layout_key_unique",
+            [
+                {
+                    "kind": "view",
+                    "dtype": "f32",
+                    "shape": [1, 1, 1, 16, 64],
+                    "strides": [1024, 1024, 1024, 64, 1],
+                    "memory_space": "gm",
+                    "config": {"layout": "dn"},
+                }
+            ],
+        )
+        unknown_key = compute_stable_key(
+            "a5",
+            "pto.matcher_view_layout_key_unique",
+            [
+                {
+                    "kind": "view",
+                    "dtype": "f32",
+                    "shape": [1, 1, 1, 16, 64],
+                    "strides": [1024, 1024, 1024, 64, 1],
+                    "memory_space": "gm",
+                }
+            ],
+        )
+
+        self.assertNotEqual(nd_key, dn_key)
+        self.assertNotEqual(nd_key, unknown_key)
+        self.assertNotEqual(dn_key, unknown_key)
+
+    def test_constraint_view_returns_empty_view_config_when_layout_unknown(self) -> None:
+        @pto.vkernel(
+            op="matcher_view_unknown_layout_unique",
+            dtypes=[(pto.f32,)],
+            constraints=[lambda src: src.config.layout is None],
+        )
+        def kernel(src: pto.TensorView):
+            return None
+
+        selected = pto.select_kernel(
+            "a5",
+            "matcher_view_unknown_layout_unique",
+            (pto.f32,),
+            context_attrs={"arg0_kind": "view", "arg0_dtype": pto.f32},
+            registry=pto.KernelRegistry((kernel,)),
+        )
+
+        self.assertEqual(selected.name, "kernel")
 
     def test_select_kernel_constraints_can_read_scalar_parameter_values(self) -> None:
         @pto.vkernel(

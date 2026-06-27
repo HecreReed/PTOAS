@@ -26,4 +26,34 @@ LogicalResult lowerVPTOModuleToLLVMModules(
                                            vectorModule, diagOS);
 }
 
+LogicalResult lowerVPTOModuleToLLVMIRText(
+    ModuleOp module, const VPTOEmissionOptions &options, std::string &output,
+    llvm::raw_ostream &diagOS) {
+  output.clear();
+
+  EmittedLLVMModule cubeModule;
+  EmittedLLVMModule vectorModule;
+  if (failed(
+          lowerVPTOModuleToLLVMModules(module, options, cubeModule, vectorModule,
+                                       diagOS)))
+    return failure();
+
+  llvm::raw_string_ostream os(output);
+  bool printedAny = false;
+  if (vectorModule.module) {
+    vectorModule.module->print(os, nullptr);
+    os << "\n";
+    printedAny = true;
+  }
+  if (cubeModule.module) {
+    if (printedAny)
+      os << "\n";
+    cubeModule.module->print(os, nullptr);
+    os << "\n";
+  }
+  os.flush();
+  return success();
+}
+
+
 } // namespace mlir::pto

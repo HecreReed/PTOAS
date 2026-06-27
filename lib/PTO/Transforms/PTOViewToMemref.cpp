@@ -163,6 +163,11 @@ static mlir::pto::TileBufConfigAttr lookupConfig(Value v) {
 // Helper: Valid dims backtracking (v_row / v_col)
 // =============================================================================
 static void lookupValidDims(Value v, Value &vRow, Value &vCol) {
+  if (auto alloc = v.getDefiningOp<mlir::pto::AllocTileOp>()) {
+    vRow = alloc.getValidRow();
+    vCol = alloc.getValidCol();
+    return;
+  }
   if (auto bind = v.getDefiningOp<mlir::pto::BindTileOp>()) {
     vRow = bind.getValidRow();
     vCol = bind.getValidCol();
@@ -242,6 +247,58 @@ static Value resolveTileBufViewLikeSource(Value src) {
   }
 
   return Value();
+}
+
+static LogicalResult synthesizeMissingTQuantTmpOps(func::FuncOp func,
+                                                   MLIRContext *ctx) {
+  if (mlir::pto::getTargetArch(func.getOperation()) == mlir::pto::PTOArch::A5)
+    return success();
+
+  DefaultInlineVector<mlir::pto::TQuantOp> quantOps;
+  func.walk([&](mlir::pto::TQuantOp op) { quantOps.push_back(op); });
+
+  for (auto op : quantOps) {
+    if (op.getTmp())
+      continue;
+
+    auto srcTy = dyn_cast<mlir::pto::TileBufType>(op.getSrc().getType());
+    if (!srcTy)
+      continue;
+
+    if (srcTy.getRank() != static_cast<int64_t>(kTileRank2D)) {
+      op.emitError("expects rank-2 src tile to synthesize tquant tmp");
+      return failure();
+    }
+
+    IRRewriter rewriter(ctx);
+    rewriter.setInsertionPoint(op);
+    Location loc = op.getLoc();
+
+    SmallInlineVector<int64_t> shape(srcTy.getShape().begin(),
+                                     srcTy.getShape().end());
+    SmallInlineVector<int64_t> validShape(srcTy.getValidShape().begin(),
+                                          srcTy.getValidShape().end());
+    if (validShape.empty())
+      validShape.assign(shape.begin(), shape.end());
+
+    auto tmpTy = mlir::pto::TileBufType::get(
+        ctx, shape, srcTy.getElementType(), srcTy.getMemorySpace(), validShape,
+        mlir::pto::TileBufConfigAttr::getDefault(ctx));
+    Value validRow;
+    Value validCol;
+    lookupValidDims(op.getSrc(), validRow, validCol);
+    Value tmp = rewriter
+                    .create<mlir::pto::AllocTileOp>(loc, tmpTy, Value(),
+                                                    validRow, validCol)
+                    .getResult();
+
+    rewriter.create<mlir::pto::TQuantOp>(
+        loc, TypeRange{}, op.getSrc(), op.getFp(), op.getOffset(), tmp,
+        op.getDst(), op.getQuantTypeAttr());
+    rewriter.eraseOp(op);
+  }
+
+  return success();
 }
 
 // =============================================================================
@@ -509,6 +566,36 @@ static Value makeIndexConstant(IRRewriter &rewriter, Location loc,
                                int64_t value) {
   return rewriter.create<arith::ConstantOp>(loc, rewriter.getIndexType(),
                                             rewriter.getIndexAttr(value));
+}
+
+static Value buildFlattenedPtrLikeMemRefView(IRRewriter &rewriter, Location loc,
+                                             Value sourceMemref,
+                                             MemRefType targetType,
+                                             Operation *anchorOp) {
+  auto sourceType = dyn_cast<BaseMemRefType>(sourceMemref.getType());
+  if (!sourceType) {
+    anchorOp->emitError(
+        "tile_buf_addr ptr-like lowering expects the source to be memref-backed");
+    return Value();
+  }
+
+  Value totalElems = makeIndexConstant(rewriter, loc, 1);
+  for (int64_t dim = 0; dim < sourceType.getRank(); ++dim) {
+    Value extent;
+    if (sourceType.isDynamicDim(dim))
+      extent = rewriter.create<memref::DimOp>(loc, sourceMemref, dim);
+    else
+      extent = makeIndexConstant(rewriter, loc, sourceType.getDimSize(dim));
+    totalElems = rewriter.create<arith::MulIOp>(loc, totalElems, extent);
+  }
+
+  SmallVector<OpFoldResult, 1> sizes{totalElems};
+  SmallVector<OpFoldResult, 1> strides{rewriter.getIndexAttr(1)};
+  return rewriter
+      .create<memref::ReinterpretCastOp>(loc, targetType, sourceMemref,
+                                         rewriter.getIndexAttr(0), sizes,
+                                         strides)
+      .getResult();
 }
 
 static SmallVector<int64_t> computeCompactStrides(ArrayRef<int64_t> shape) {
@@ -1117,6 +1204,38 @@ static LogicalResult lowerPtrToIntOps(func::FuncOp func, MLIRContext *ctx) {
   return success();
 }
 
+static LogicalResult lowerPtrLikeTileBufAddrOps(func::FuncOp func,
+                                                MLIRContext *ctx) {
+  SmallVector<mlir::pto::TileBufAddrOp, 8> addrOps;
+  func.walk([&](mlir::pto::TileBufAddrOp op) { addrOps.push_back(op); });
+
+  for (auto op : addrOps) {
+    if (!isa<mlir::pto::PtrType>(op.getDst().getType()))
+      continue;
+
+    auto targetType =
+        dyn_cast<MemRefType>(convertPTOTypeToMemRef(op.getDst().getType()));
+    if (!targetType) {
+      op.emitError("failed to convert tile_buf_addr pointer result to memref");
+      return failure();
+    }
+
+    Value source = op.getSrc();
+    if (!isa<BaseMemRefType>(source.getType()))
+      continue;
+
+    IRRewriter rewriter(ctx);
+    rewriter.setInsertionPoint(op);
+    Value replacement =
+        buildFlattenedPtrLikeMemRefView(rewriter, op.getLoc(), source,
+                                        targetType, op.getOperation());
+    if (!replacement)
+      return failure();
+    rewriter.replaceOp(op, replacement);
+  }
+  return success();
+}
+
 [[maybe_unused]] static LogicalResult lowerTensorViewDimOps(func::FuncOp func, MLIRContext *ctx) {
   DefaultInlineVector<mlir::pto::GetTensorViewDimOp> tvDims;
   func.walk([&](mlir::pto::GetTensorViewDimOp op) { tvDims.push_back(op); });
@@ -1479,6 +1598,12 @@ struct PTOViewToMemrefPass
         return;
       }
 
+      if (!func.isExternal() &&
+          failed(synthesizeMissingTQuantTmpOps(func, ctx))) {
+        signalPassFailure();
+        return;
+      }
+
       auto fnTy = func.getFunctionType();
 
       // ------------------------------------------------------------------
@@ -1706,6 +1831,17 @@ struct PTOViewToMemrefPass
             rewriter.create<pto::TAssignOp>(op.getLoc(), targetTy, op.getTile(),
                                             op.getAddr());
         rewriter.replaceOp(op, normalized.getResult());
+      }
+
+      // ------------------------------------------------------------------
+      // Stage 0.9: Lower ptr-like pto.tile_buf_addr -> memref<?xT>.
+      // The original authoring surface is pointer-like, so shape information
+      // is intentionally discarded here and only the linear address view is
+      // preserved for later memref-based rewriting.
+      // ------------------------------------------------------------------
+      if (failed(lowerPtrLikeTileBufAddrOps(func, ctx))) {
+        signalPassFailure();
+        return;
       }
 
       // ------------------------------------------------------------------
@@ -3449,6 +3585,7 @@ struct PTOViewToMemrefPass
         Value src = op.getSrc();
         Value fp = op.getFp();
         Value offset = op.getOffset();
+        Value tmp = op.getTmp();
         Value dst = op.getDst();
 
         auto srcTy = dyn_cast<MemRefType>(src.getType());
@@ -3464,6 +3601,21 @@ struct PTOViewToMemrefPass
           signalPassFailure();
           return;
         }
+        if (!tmp &&
+            mlir::pto::getTargetArch(op.getOperation()) !=
+                mlir::pto::PTOArch::A5) {
+          if (!srcTy.hasStaticShape()) {
+            op.emitError("cannot synthesize tquant tmp for dynamic memref src");
+            signalPassFailure();
+            return;
+          }
+          tmp = rewriter.create<memref::AllocOp>(op.getLoc(), srcTy).getResult();
+        }
+        if (tmp && !dyn_cast<MemRefType>(tmp.getType())) {
+          op.emitError("tmp is not memref yet");
+          signalPassFailure();
+          return;
+        }
 
         rewriter.replaceOpWithNewOp<pto::TQuantOp>(
             op,
@@ -3471,6 +3623,7 @@ struct PTOViewToMemrefPass
             src,
             fp,
             offset,
+            tmp,
             dst,
             op.getQuantTypeAttr());
       }

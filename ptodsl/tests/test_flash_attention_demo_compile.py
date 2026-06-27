@@ -64,7 +64,13 @@ def main() -> None:
     wrapper_text = demo.emit_flash_attention_mlir(head_dim=128, causal=False, block_q=128, block_kv=128)
     expect_parse_roundtrip_and_verify(wrapper_text, "flash attention wrapper-emitted MLIR")
     expect("func.func @flash_attention_kernel" in wrapper_text, "wrapper compile should emit the flash_attention_kernel entry")
-    expect('pto.mode = "explicit"' in wrapper_text, "flash attention wrapper compile should carry explicit mode metadata")
+    expect(wrapper_text.count("module") >= 2, "wrapper compile should emit an outer container plus child modules")
+    expect(
+        'pto.backend = "vpto"' in wrapper_text
+        and 'pto.target_arch = "a5"' in wrapper_text
+        and 'pto.kernel_kind = #pto.kernel_kind<vector>' in wrapper_text,
+        "flash attention wrapper compile should encode the VPTO backend directly on the child module",
+    )
     expect("func.func @materialize_tile_bounds" in wrapper_text, "wrapper compile should emit the SIMT helper function")
     expect("pto.store_vfsimt_info" in wrapper_text, "wrapper compile should materialize SIMT caller metadata setup")
     expect("pto.barrier <PIPE_ALL>" in wrapper_text, "demo phase boundaries should lower to pipe_barrier(Pipe.ALL)")
@@ -91,7 +97,13 @@ def main() -> None:
     specialized_text = compiled.mlir_text()
     expect_parse_roundtrip_and_verify(specialized_text, "flash attention specialized MLIR")
     expect("func.func @flash_attention_kernel" in specialized_text, "direct compile should emit the flash_attention_kernel entry")
-    expect('pto.mode = "explicit"' in specialized_text, "direct compile should carry explicit mode metadata")
+    expect(specialized_text.count("module") >= 2, "direct compile should keep the backend-partitioned container shape")
+    expect(
+        'pto.backend = "vpto"' in specialized_text
+        and 'pto.target_arch = "a5"' in specialized_text
+        and 'pto.kernel_kind = #pto.kernel_kind<vector>' in specialized_text,
+        "direct compile should encode the VPTO backend directly on the child module",
+    )
     expect("!pto.tile_buf<mat, 64x128xf32" in specialized_text, "BLOCK_Q=64 specialization should change the physical Q tile shape")
     expect("func.call @materialize_tile_bounds" in specialized_text, "direct compile should still route SIMT helpers through func.call")
 

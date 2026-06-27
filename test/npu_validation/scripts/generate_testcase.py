@@ -1039,7 +1039,10 @@ def _find_custom_case_asset(sample_root: Path, testcase: str, filename: str) -> 
 def _use_custom_golden_for_case(testcase: str, soc_version: str) -> bool:
     testcase_lc = testcase.lower()
     soc_lc = (soc_version or "").lower()
-    is_a3 = "910b" in soc_lc or os.environ.get("PTOAS_BOARD_IS_A3") == "1"
+    is_a3 = (
+        any(token in soc_lc for token in ("910a", "910proa", "910b"))
+        or os.environ.get("PTOAS_BOARD_IS_A3") == "1"
+    )
     if is_a3 and testcase_lc in UNSTABLE_A3_CUSTOM_GOLDEN_CASES:
         return False
     return True
@@ -1959,8 +1962,10 @@ def generate_testcase(
         param_decls_lines.append("    pto::comm::sdma::SdmaWorkspaceManager sdmaMgr;")
         param_decls_lines.append("    bool sdmaWorkspaceOk = false;")
         param_decls_lines.append('    const char *sdmaSocVersion = std::getenv("SOC_VERSION");')
+        param_decls_lines.append('    const char *ptoasBoardIsA3 = std::getenv("PTOAS_BOARD_IS_A3");')
         param_decls_lines.append(
             '    const bool skipSdmaWorkspaceInit = (std::getenv("PTO_DISABLE_SDMA_WORKSPACE_INIT") != nullptr) || '
+            '(ptoasBoardIsA3 != nullptr && std::strcmp(ptoasBoardIsA3, "1") == 0) || '
             '(sdmaSocVersion != nullptr && (std::strstr(sdmaSocVersion, "950") != nullptr || '
             'std::strstr(sdmaSocVersion, "A5") != nullptr || std::strstr(sdmaSocVersion, "a5") != nullptr));'
         )

@@ -12,7 +12,7 @@ from __future__ import annotations
 import ctypes
 from typing import TYPE_CHECKING
 
-from .._kernel_signature import DeviceParameterSpec, RuntimeScalarParameterSpec, TensorSpecParameterSpec
+from .._kernel_signature import DeviceParameterSpec, RuntimeScalarParameterSpec
 from .._types import _resolve
 from .native_build import build_native_library
 
@@ -20,15 +20,6 @@ from mlir.ir import BF16Type, Context, F16Type, F32Type, IndexType, IntegerType
 
 if TYPE_CHECKING:
     from .._kernel_compilation import CompiledKernelHandle
-
-
-def _legacy_tensor_entry_abi_error(name: str) -> TypeError:
-    return TypeError(
-        f"legacy host-tensor launch parameter '{name}' is no longer supported by the public @pto.jit "
-        'runtime ABI. Use an explicit GM pointer such as pto.ptr(pto.f32, "gm") plus runtime '
-        "shape/stride scalars instead."
-    )
-
 
 def _normalize_stream_ptr(stream):
     if stream is None:
@@ -113,8 +104,6 @@ def _marshal_launch_args(kernel_signature, args):
         if isinstance(param, RuntimeScalarParameterSpec):
             marshaled.append(_marshal_runtime_scalar(param.annotation, value))
             continue
-        if isinstance(param, TensorSpecParameterSpec):
-            raise _legacy_tensor_entry_abi_error(param.name)
         raise TypeError(f"unsupported launch parameter spec: {param!r}")
     return marshaled
 
@@ -168,8 +157,6 @@ def _launch_argtypes(kernel_signature):
         if isinstance(param, RuntimeScalarParameterSpec):
             argtypes.append(_ctype_for_runtime_scalar(param.annotation))
             continue
-        if isinstance(param, TensorSpecParameterSpec):
-            raise _legacy_tensor_entry_abi_error(param.name)
         raise TypeError(f"unsupported launch parameter spec: {param!r}")
     return argtypes
 

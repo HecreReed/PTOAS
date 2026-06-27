@@ -15,6 +15,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "ptodsl"))
 
 from ptodsl import pto, scalar
 from ptodsl._ast_rewrite import PTODSLAstRewriteError
+from ptodsl._host_tensors import TensorSpec
 from ptodsl._host_tensors import inspect_host_tensor_metadata
 
 
@@ -211,9 +212,9 @@ def define_ub_ptr_entry_annotation_probe():
     return bad_probe
 
 
-def define_legacy_tensor_spec_entry_probe():
-    @pto.jit(target="a5")
-    def bad_probe(A: pto.tensor_spec(rank=2, dtype=pto.f32)):
+def define_emitc_ub_ptr_entry_annotation_probe():
+    @pto.jit(target="a5", backend="emitc")
+    def bad_probe(A: pto.ptr(pto.f32, "ub")):
         pto.pipe_barrier(pto.Pipe.ALL)
 
     return bad_probe
@@ -238,6 +239,38 @@ def define_frontend_options_scalar_rewrite_probe():
 def define_frontend_options_dump_source_probe():
     @pto.jit(target="a5", frontend_options={"dump_rewritten_source": True})
     def bad_probe():
+        pto.pipe_barrier(pto.Pipe.ALL)
+
+    return bad_probe
+
+
+def define_legacy_tensor_spec_entry_probe():
+    @pto.jit(target="a5")
+    def bad_probe(A: TensorSpec(rank=2, dtype=pto.f32)):
+        pto.pipe_barrier(pto.Pipe.ALL)
+
+    return bad_probe
+
+
+def define_tile_entry_annotation_probe():
+    @pto.jit(target="a5")
+    def bad_probe(tile: pto.Tile):
+        pto.pipe_barrier(pto.Pipe.ALL)
+
+    return bad_probe
+
+
+def define_view_entry_annotation_probe():
+    @pto.jit(target="a5")
+    def bad_probe(view: pto.TensorView):
+        pto.pipe_barrier(pto.Pipe.ALL)
+
+    return bad_probe
+
+
+def define_partition_view_entry_annotation_probe():
+    @pto.jit(target="a5")
+    def bad_probe(view: pto.PartitionTensorView):
         pto.pipe_barrier(pto.Pipe.ALL)
 
     return bad_probe
@@ -321,6 +354,64 @@ def define_ast_for_loop_target_live_after_probe():
         _ = i
 
     return bad_probe
+
+
+def define_helper_missing_annotation_probe():
+    @pto.jit(target="a5", entry=False)
+    def bad_probe(tile):
+        pto.pipe_barrier(pto.Pipe.ALL)
+
+    return bad_probe
+
+
+def define_helper_constexpr_probe():
+    @pto.jit(target="a5", entry=False)
+    def bad_probe(*, BLOCK: pto.const_expr = 8):
+        pto.pipe_barrier(pto.Pipe.ALL)
+
+    return bad_probe
+
+
+def define_helper_legacy_tensor_spec_probe():
+    @pto.jit(target="a5", entry=False)
+    def bad_probe(A: TensorSpec(rank=2, dtype=pto.f32)):
+        pto.pipe_barrier(pto.Pipe.ALL)
+
+    return bad_probe
+
+
+def define_helper_vreg_probe():
+    @pto.jit(target="a5", entry=False)
+    def bad_probe(vec: pto.vreg_type(64, pto.f32)):
+        pto.pipe_barrier(pto.Pipe.ALL)
+
+    return bad_probe
+
+
+def define_helper_mask_probe():
+    @pto.jit(target="a5", entry=False)
+    def bad_probe(mask: pto.mask_b32):
+        pto.pipe_barrier(pto.Pipe.ALL)
+
+    return bad_probe
+
+
+def define_kernel_module_return_value_probe():
+    @pto.jit(target="a5", entry=False)
+    def bad_probe(ptr: pto.ptr(pto.f32, "gm"), rows: pto.i32):
+        return rows
+
+    return bad_probe
+
+
+@pto.jit(target="a5")
+def regular_entry_probe(rows: pto.i32):
+    _ = rows
+
+
+@pto.jit(target="a5")
+def entry_calling_entry_probe(rows: pto.i32):
+    regular_entry_probe(rows)
 
 
 @pto.jit(target="a5")
@@ -568,6 +659,13 @@ def main() -> None:
         "only accepts explicit GM pointers",
     )
     expect_raises(
+        define_emitc_ub_ptr_entry_annotation_probe,
+        TypeError,
+        "@pto.jit positional parameter 'A' uses non-GM pointer entry annotation",
+        'pto.ptr(pto.f32, "gm")',
+        "only accepts explicit GM pointers",
+    )
+    expect_raises(
         define_legacy_tensor_spec_entry_probe,
         TypeError,
         "@pto.jit positional parameter 'A' still uses legacy host-tensor entry annotation",
@@ -633,6 +731,81 @@ def main() -> None:
         PTODSLAstRewriteError,
         "cannot expose the loop induction variable outside the loop yet",
         "i",
+    )
+    expect_raises(
+        define_tile_entry_annotation_probe,
+        TypeError,
+        "@pto.jit positional parameter 'tile' uses unsupported entry annotation",
+        "Tile",
+        "do not belong at the host/kernel entry",
+    )
+    expect_raises(
+        define_view_entry_annotation_probe,
+        TypeError,
+        "@pto.jit positional parameter 'view' uses unsupported entry annotation",
+        "TensorView",
+        "do not belong at the host/kernel entry",
+    )
+    expect_raises(
+        define_partition_view_entry_annotation_probe,
+        TypeError,
+        "@pto.jit positional parameter 'view' uses unsupported entry annotation",
+        "PartitionTensorView",
+        "do not belong at the host/kernel entry",
+    )
+    expect_raises(
+        define_helper_missing_annotation_probe,
+        TypeError,
+        "@pto.jit(entry=False) parameter 'tile' does not declare a kernel-module ABI annotation",
+        "pto.Tile",
+        "typed pto.ptr(...)",
+    )
+    expect_raises(
+        define_helper_constexpr_probe,
+        TypeError,
+        "@pto.jit(entry=False) keyword-only parameter 'BLOCK' uses unsupported kernel-module compile-time annotation",
+        "pto.const_expr",
+        "does not support keyword-only constexpr specialization parameters",
+    )
+    expect_raises(
+        define_helper_legacy_tensor_spec_probe,
+        TypeError,
+        "@pto.jit(entry=False) parameter 'A' still uses legacy host-tensor annotation",
+        "does not accept pto.tensor_spec(...)",
+        "Tile / TensorView / PartitionTensorView",
+    )
+    expect_raises(
+        define_helper_vreg_probe,
+        TypeError,
+        "@pto.jit(entry=False) parameter 'vec' uses unsupported kernel-module annotation",
+        "VReg",
+        "do not belong at this kernel-module boundary",
+    )
+    expect_raises(
+        define_helper_mask_probe,
+        TypeError,
+        "@pto.jit(entry=False) parameter 'mask' uses unsupported kernel-module annotation",
+        "mask",
+        "do not belong at this kernel-module boundary",
+    )
+    kernel_module_return_value_probe = define_kernel_module_return_value_probe()
+    expect_raises(
+        kernel_module_return_value_probe.compile,
+        RuntimeError,
+        "@pto.jit(entry=False) kernel module 'bad_probe' is not directly compilable from Python",
+        "Compile an entry kernel that calls this module instead",
+    )
+    expect_raises(
+        lambda: kernel_module_return_value_probe[1, None],
+        RuntimeError,
+        "@pto.jit(entry=False) kernel module 'bad_probe' is not launchable from Python",
+        "Only @pto.jit(entry=True) kernels support compiled[grid, stream](...)",
+    )
+    expect_raises(
+        entry_calling_entry_probe.compile,
+        TypeError,
+        "@pto.jit entry kernel 'regular_entry_probe' is not callable from traced PTODSL bodies",
+        "only @pto.jit(entry=False) kernel modules may be called there",
     )
     expect_raises(
         make_tensor_view_missing_metadata_probe.compile,

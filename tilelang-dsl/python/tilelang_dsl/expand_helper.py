@@ -38,7 +38,7 @@ from .kernel import (
     _match_descriptor_dtype_signature,
     select_kernel,
 )
-from .types import MemorySpace, ScalarType, TileConfig, TileSpecialization
+from .types import MemorySpace, ScalarType, TileConfig, TileSpecialization, ViewConfig
 
 
 _DTYPE_MAP: dict[str, ScalarType] = {}
@@ -275,6 +275,16 @@ def _parse_operand_specs(spec_text: str) -> list[dict]:
                 ),
                 "memory_space": memory_space,
             }
+            config_raw = raw.get("config")
+            if config_raw is not None:
+                if not isinstance(config_raw, dict):
+                    raise ValueError(f"operand-specs[{index}] view config must be an object")
+                try:
+                    view_spec["config"] = ViewConfig.from_mapping(config_raw)
+                except (TypeError, ValueError) as exc:
+                    raise ValueError(
+                        f"operand-specs[{index}] has invalid view config: {exc}"
+                    ) from exc
             raw_strides = raw.get("strides")
             if isinstance(raw_strides, list) and raw_strides:
                 # null entries represent dynamic strides -- keep as None.
@@ -369,6 +379,9 @@ def _build_positional_context_attrs(operand_specs: list[dict]) -> dict[str, obje
             if operand_spec.get("config") is not None:
                 attrs[f"{prefix}_config"] = operand_spec["config"]
             continue
+        if operand_spec["kind"] == "view":
+            if operand_spec.get("config") is not None:
+                attrs[f"{prefix}_config"] = operand_spec["config"]
         if "strides" in operand_spec:
             attrs[f"{prefix}_strides"] = tuple(operand_spec["strides"])
     return attrs

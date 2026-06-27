@@ -10342,6 +10342,21 @@ struct LowerVPTOOpsPass final
 
   void runOnOperation() override {
     materializeVecScopeCarrierLoops(getOperation());
+    // Remove dead pto.alloc_tile ops before lowering. These can appear when
+    // the original kernel's tile_buf intrinsics have already been folded away
+    // by FoldTileBufIntrinsics, but a subsequent pass (e.g. AIC-scope cloning)
+    // re-introduces alloc_tile copies whose results have no users. The lowering
+    // patterns do not cover AllocTileOp, so leaving them in the IR causes
+    // translateModuleToLLVMIR to fail.
+    {
+      SmallVector<pto::AllocTileOp> deadAllocs;
+      getOperation().walk([&](pto::AllocTileOp alloc) {
+        if (alloc.use_empty())
+          deadAllocs.push_back(alloc);
+      });
+      for (pto::AllocTileOp alloc : llvm::reverse(deadAllocs))
+        alloc.erase();
+    }
     if (failed(lowerVPTOOps(getOperation(), llvm::errs())))
       signalPassFailure();
   }
@@ -10389,6 +10404,28 @@ collectSimtEntryFunctionNames(ModuleOp module) {
       simtEntries.insert(funcOp.getSymName());
   });
   return simtEntries;
+}
+
+static void applyArtifactVisibilityLinkage(ModuleOp sourceModule,
+                                           llvm::Module &llvmModule) {
+  llvm::StringMap<bool> externalByName;
+  sourceModule.walk([&](func::FuncOp funcOp) {
+    if (funcOp.isDeclaration())
+      return;
+    externalByName[funcOp.getSymName()] =
+        pto::hasExternalArtifactVisibility(funcOp);
+  });
+
+  for (llvm::Function &function : llvmModule) {
+    auto it = externalByName.find(function.getName());
+    if (it == externalByName.end())
+      continue;
+    if (it->second) {
+      function.setLinkage(llvm::GlobalValue::ExternalLinkage);
+      continue;
+    }
+    function.setLinkage(llvm::GlobalValue::InternalLinkage);
+  }
 }
 
 static void applySimtEntryCallingConvention(
@@ -10445,6 +10482,7 @@ emitDeviceLLVMModule(ModuleOp deviceModule, StringRef kernelKind,
     return failure();
   }
 
+  applyArtifactVisibilityLinkage(deviceModule, *llvmModule);
   applySimtEntryCallingConvention(*llvmModule, simtEntryNames);
   if (failed(attachAIVectorScopeMetadata(*llvmModule, diagOS)))
     return failure();
@@ -10544,5 +10582,6 @@ LogicalResult lowerVPTOModuleToLLVMModulesBeta1(
     return success();
                      });
 }
+
 
 } // namespace mlir::pto

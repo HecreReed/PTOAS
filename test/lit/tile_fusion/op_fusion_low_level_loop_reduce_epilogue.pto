@@ -1,0 +1,65 @@
+// Copyright (c) 2026 Huawei Technologies Co., Ltd.
+// This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+// CANN Open Software License Agreement Version 2.0 (the "License").
+// Please refer to the License for details. You may not use this file except in compliance with the License.
+// THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+// INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+// See LICENSE in the root of the software repository for the full text of the License.
+
+// Regression test: verifies that elementwise ops + reduce ops (trowsum) with
+// row-result stores (epilogue ops) get fused into a single fusion_region.
+// The key structural property is that the reduce accumulator (vcadd/vadd)
+// sits inside the inner col loop alongside the elementwise ops, while the
+// reduce result store (vsts) appears as an epilogue after the inner loop in
+// the outer row loop — all within one pto.fusion_region.
+//
+// RUN: ptoas --pto-backend=vpto --pto-arch=a5 --pto-level=level3 --enable-op-fusion --enable-shape-inference --emit-vpto %s --mlir-print-ir-after=pto-low-level-loop-fusion -o /dev/null 2>&1 | FileCheck %s
+
+module attributes {pto.target_arch = "a5", pto.kernel_kind = #pto.kernel_kind<vector>} {
+  // tadd -> trowsum: simple elementwise+reduce chain.
+  func.func @fusion_reduce_epilogue_tadd_trowsum(
+      %vrow: index,
+      %vcol: index) {
+    %c32 = arith.constant 32 : index
+    %row0 = arith.minsi %vrow, %c32 : index
+    %col0 = arith.minsi %vcol, %c32 : index
+    %row1 = arith.minsi %vrow, %c32 : index
+    %col1 = arith.minsi %vcol, %c32 : index
+    %c0_i64 = arith.constant 0 : i64
+    %c4096_i64 = arith.constant 4096 : i64
+    %c12288_i64 = arith.constant 12288 : i64
+    %c20480_i64 = arith.constant 20480 : i64
+    %c24576_i64 = arith.constant 24576 : i64
+
+    %lhs = pto.alloc_tile addr = %c0_i64 valid_row = %row0 valid_col = %col0 : !pto.tile_buf<vec, 32x32xf32, valid=?x?>
+    %rhs = pto.alloc_tile addr = %c4096_i64 valid_row = %row0 valid_col = %col0 : !pto.tile_buf<vec, 32x32xf32, valid=?x?>
+    %add = pto.alloc_tile addr = %c12288_i64 valid_row = %row0 valid_col = %col0 : !pto.tile_buf<vec, 32x32xf32, valid=?x?>
+    %reduce_tmp = pto.alloc_tile addr = %c20480_i64 valid_row = %row1 valid_col = %col1 : !pto.tile_buf<vec, 32x32xf32, valid=?x?>
+    %reduce = pto.alloc_tile addr = %c24576_i64 valid_row = %row1 : !pto.tile_buf<vec, 32x8xf32, valid=?x1>
+
+    pto.tadd ins(%lhs, %rhs : !pto.tile_buf<vec, 32x32xf32, valid=?x?>, !pto.tile_buf<vec, 32x32xf32, valid=?x?>) outs(%add : !pto.tile_buf<vec, 32x32xf32, valid=?x?>)
+    pto.trowsum ins(%add, %reduce_tmp : !pto.tile_buf<vec, 32x32xf32, valid=?x?>, !pto.tile_buf<vec, 32x32xf32, valid=?x?>) outs(%reduce : !pto.tile_buf<vec, 32x8xf32, valid=?x1>)
+    return
+  }
+}
+
+// CHECK-LABEL: func.func @fusion_reduce_epilogue_tadd_trowsum(
+// CHECK: pto.fusion_region {
+// Fused row loop with iter_args for the reduce mask accumulator.
+// CHECK: scf.for {{.*}} iter_args
+// Inner col loop carries reduce accumulator (vreg) alongside elementwise ops.
+// CHECK: %{{.*}}:3 = scf.for {{.*}} iter_args({{.*}}, {{.*}}, {{.*}}) -> (i32, i32, !pto.vreg<64xf32>) {
+// Elementwise op (vadd) inside the inner col loop.
+// CHECK: %{{.*}} = pto.vadd
+// CHECK: pto.vsts %{{.*}}, %{{.*}}
+// Reduce computation inside the same col loop (vcadd + vadd accumulator).
+// CHECK: %{{.*}} = pto.vcadd
+// CHECK: %{{.*}} = pto.vadd
+// CHECK: scf.yield {{.*}} : i32, i32, !pto.vreg<64xf32>
+// CHECK: }
+// Epilogue: reduce row-result store appears after the inner col loop.
+// CHECK: %{{.*}} = memref.subview
+// CHECK: pto.vsts %{{.*}}, %{{.*}}
+// CHECK: scf.yield {{.*}} : i32
+// CHECK: }
+// CHECK: pto.yield

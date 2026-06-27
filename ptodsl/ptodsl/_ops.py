@@ -27,6 +27,7 @@ from functools import wraps
 from ._bootstrap import make_context  # noqa: F401 – ensure MLIR on sys.path
 from ._diagnostics import (
     explicit_mode_required_with_context_error,
+    make_tensor_view_invalid_layout_error,
     make_tensor_view_missing_metadata_error,
     tile_row_alignment_error,
 )
@@ -151,9 +152,10 @@ def _require_explicit_mode(surface: str):
         session = None
     if session is None:
         return
-    current_mode = getattr(session.module_spec, "mode", None)
+    current_module_spec = getattr(session, "current_function_module_spec", session.module_spec)
+    current_mode = getattr(current_module_spec, "mode", None)
     if current_mode != "explicit":
-        raise explicit_mode_required_with_context_error(surface, session.module_spec)
+        raise explicit_mode_required_with_context_error(surface, current_module_spec)
 
 
 def _explicit_mode_only(surface: str):
@@ -404,7 +406,7 @@ def _normalize_vcvt_round_mode(mode, *, context: str):
         if "." in token:
             token = token.rsplit(".", 1)[-1]
     normalized = token.strip().upper()
-    allowed = {"R", "A", "F", "C", "Z", "O"}
+    allowed = {"R", "A", "F", "C", "Z", "O", "H"}
     if normalized not in allowed:
         expected = ", ".join(sorted(allowed))
         raise ValueError(f"{context} does not support rnd {mode!r}; expected one of {expected}")
@@ -439,6 +441,19 @@ def _normalize_vcvt_part_mode(mode, *, context: str):
     return normalized
 
 
+def _normalize_enum_attr(value, *, enum_cls, attr_cls, context: str):
+    if value is None or isinstance(value, Attribute):
+        return value
+    if isinstance(value, str):
+        token = value.strip().upper()
+        try:
+            value = getattr(enum_cls, token)
+        except AttributeError as exc:
+            allowed = ", ".join(name for name in dir(enum_cls) if name.isupper())
+            raise ValueError(f"{context} does not support {value!r}; expected one of {allowed}") from exc
+    return attr_cls.get(value)
+
+
 def _normalize_vpack_part(part, *, context: str):
     token = part
     if not isinstance(token, str):
@@ -454,6 +469,16 @@ def _normalize_vpack_part(part, *, context: str):
 
 
 def _classify_vcvt_elem_kind(elem_type):
+    if Float8E4M3FNType.isinstance(elem_type):
+        return "f8e4m3"
+    if Float8E5M2Type.isinstance(elem_type):
+        return "f8e5m2"
+    if _isinstance_pto_type(elem_type, "HiF8Type"):
+        return "hif8"
+    if _isinstance_pto_type(elem_type, "F4E1M2x2Type"):
+        return "f4e1m2x2"
+    if _isinstance_pto_type(elem_type, "F4E2M1x2Type"):
+        return "f4e2m1x2"
     if F16Type.isinstance(elem_type):
         return "f16"
     if BF16Type.isinstance(elem_type):
@@ -474,47 +499,151 @@ def _classify_vcvt_elem_kind(elem_type):
     return None
 
 
+def _vcvt_contract(requires_rnd, requires_sat, requires_part, *, part_family=None, allowed_rnd=None):
+    return {
+        "requires_rnd": requires_rnd,
+        "requires_sat": requires_sat,
+        "requires_part": requires_part,
+        "part_family": part_family,
+        "allowed_rnd": set(allowed_rnd) if allowed_rnd is not None else None,
+    }
+
+
 _VCVT_CONTRACTS = {
-    ("f32", "f16"): (True, True, True),
-    ("f32", "bf16"): (True, True, True),
-    ("f32", "s16"): (True, True, True),
-    ("f32", "s64"): (True, True, True),
-    ("f32", "s32"): (True, True, False),
-    ("f16", "f32"): (False, False, True),
-    ("f16", "s32"): (True, False, True),
-    ("f16", "s16"): (True, True, False),
-    ("f16", "s8"): (True, True, True),
-    ("f16", "u8"): (True, True, True),
-    ("bf16", "f16"): (True, True, False),
-    ("bf16", "f32"): (False, False, True),
-    ("bf16", "s32"): (True, True, True),
-    ("u8", "f16"): (False, False, True),
-    ("u8", "u16"): (False, False, True),
-    ("u8", "u32"): (False, False, True),
-    ("s8", "f16"): (False, False, True),
-    ("s8", "s16"): (False, False, True),
-    ("s8", "s32"): (False, False, True),
-    ("u16", "u8"): (False, True, True),
-    ("u16", "u32"): (False, False, True),
-    ("s16", "f16"): (True, False, False),
-    ("s16", "f32"): (False, False, True),
-    ("s16", "u32"): (False, False, True),
-    ("s16", "s32"): (False, False, True),
-    ("s16", "u8"): (False, True, True),
-    ("u32", "u8"): (False, True, True),
-    ("u32", "u16"): (False, True, True),
-    ("u32", "s16"): (False, True, True),
-    ("s32", "f32"): (True, False, False),
-    ("s32", "u8"): (False, True, True),
-    ("s32", "u16"): (False, True, True),
-    ("s32", "s16"): (False, True, True),
-    ("s32", "s64"): (False, False, True),
-    ("s64", "f32"): (True, False, True),
-    ("s64", "s32"): (False, True, True),
+    ("f32", "f8e4m3"): _vcvt_contract(True, True, True, part_family="packed4", allowed_rnd="R"),
+    ("f32", "f8e5m2"): _vcvt_contract(True, True, True, part_family="packed4", allowed_rnd="R"),
+    ("f32", "hif8"): _vcvt_contract(True, True, True, part_family="packed4", allowed_rnd="AH"),
+    ("f32", "f16"): _vcvt_contract(True, True, True),
+    ("f32", "bf16"): _vcvt_contract(True, True, True),
+    ("f32", "s16"): _vcvt_contract(True, True, True),
+    ("f32", "s64"): _vcvt_contract(True, True, True),
+    ("f32", "s32"): _vcvt_contract(True, True, False),
+    ("f16", "f8e4m3"): _vcvt_contract(True, True, True, allowed_rnd="RAFZC"),
+    ("f16", "f8e5m2"): _vcvt_contract(True, True, True, allowed_rnd="RAFZC"),
+    ("f16", "hif8"): _vcvt_contract(True, True, True, allowed_rnd="AH"),
+    ("f16", "f32"): _vcvt_contract(False, False, True),
+    ("f16", "s32"): _vcvt_contract(True, False, True),
+    ("f16", "s16"): _vcvt_contract(True, True, False),
+    ("f16", "s8"): _vcvt_contract(True, True, True),
+    ("f16", "u8"): _vcvt_contract(True, True, True),
+    ("bf16", "f8e4m3"): _vcvt_contract(True, True, True, allowed_rnd="RAFZC"),
+    ("bf16", "f8e5m2"): _vcvt_contract(True, True, True, allowed_rnd="RAFZC"),
+    ("bf16", "f4e1m2x2"): _vcvt_contract(True, False, True, part_family="packed4", allowed_rnd="RAFZC"),
+    ("bf16", "f4e2m1x2"): _vcvt_contract(True, False, True, part_family="packed4", allowed_rnd="RAFZC"),
+    ("bf16", "f16"): _vcvt_contract(True, True, False),
+    ("bf16", "f32"): _vcvt_contract(False, False, True),
+    ("bf16", "s32"): _vcvt_contract(True, True, True),
+    ("u8", "f16"): _vcvt_contract(False, False, True),
+    ("u8", "u16"): _vcvt_contract(False, False, True),
+    ("u8", "u32"): _vcvt_contract(False, False, True),
+    ("s8", "f16"): _vcvt_contract(False, False, True),
+    ("s8", "s16"): _vcvt_contract(False, False, True),
+    ("s8", "s32"): _vcvt_contract(False, False, True),
+    ("u16", "u8"): _vcvt_contract(False, True, True),
+    ("u16", "u32"): _vcvt_contract(False, False, True),
+    ("s16", "f16"): _vcvt_contract(True, False, False),
+    ("s16", "f32"): _vcvt_contract(False, False, True),
+    ("s16", "u32"): _vcvt_contract(False, False, True),
+    ("s16", "s32"): _vcvt_contract(False, False, True),
+    ("s16", "u8"): _vcvt_contract(False, True, True),
+    ("u32", "u8"): _vcvt_contract(False, True, True),
+    ("u32", "u16"): _vcvt_contract(False, True, True),
+    ("u32", "s16"): _vcvt_contract(False, True, True),
+    ("s32", "f32"): _vcvt_contract(True, False, False),
+    ("s32", "u8"): _vcvt_contract(False, True, True),
+    ("s32", "u16"): _vcvt_contract(False, True, True),
+    ("s32", "s16"): _vcvt_contract(False, True, True),
+    ("s32", "s64"): _vcvt_contract(False, False, True),
+    ("s64", "f32"): _vcvt_contract(True, False, True),
+    ("s64", "s32"): _vcvt_contract(False, True, True),
+    ("f8e4m3", "f32"): _vcvt_contract(False, False, True, part_family="packed4"),
+    ("f8e5m2", "f32"): _vcvt_contract(False, False, True, part_family="packed4"),
+    ("hif8", "f32"): _vcvt_contract(False, False, True, part_family="packed4"),
+    ("f4e1m2x2", "bf16"): _vcvt_contract(False, False, True, part_family="packed4"),
+    ("f4e2m1x2", "bf16"): _vcvt_contract(False, False, True, part_family="packed4"),
 }
 
 
-def _validate_vcvt_dtype_pair(src, result_dtype, *, context: str):
+_VCVT_ELEM_BITS = {
+    "f4e1m2x2": 8,
+    "f4e2m1x2": 8,
+    "f8e4m3": 8,
+    "f8e5m2": 8,
+    "hif8": 8,
+    "u8": 8,
+    "s8": 8,
+    "f16": 16,
+    "bf16": 16,
+    "u16": 16,
+    "s16": 16,
+    "f32": 32,
+    "u32": 32,
+    "s32": 32,
+    "s64": 64,
+}
+
+
+def _infer_vcvt_part_family(src_kind, result_kind):
+    src_bits = _VCVT_ELEM_BITS.get(src_kind)
+    result_bits = _VCVT_ELEM_BITS.get(result_kind)
+    if src_bits is None or result_bits is None:
+        return None
+    larger = max(src_bits, result_bits)
+    smaller = min(src_bits, result_bits)
+    if larger == smaller * 2:
+        return "even_odd"
+    if larger == smaller * 4:
+        return "packed4"
+    return None
+
+
+def _validate_vcvt_attrs(src_kind, result_kind, contract, *, rnd, sat, part, context: str):
+    if rnd is None:
+        if contract["requires_rnd"]:
+            raise ValueError(f"{context} requires rnd for dtype pair {src_kind} -> {result_kind}")
+    elif not contract["requires_rnd"]:
+        raise ValueError(f"{context} does not support rnd for dtype pair {src_kind} -> {result_kind}")
+
+    if sat is None:
+        if contract["requires_sat"]:
+            raise ValueError(f"{context} requires sat for dtype pair {src_kind} -> {result_kind}")
+    elif not contract["requires_sat"]:
+        raise ValueError(f"{context} does not support sat for dtype pair {src_kind} -> {result_kind}")
+
+    if part is None:
+        if contract["requires_part"]:
+            raise ValueError(f"{context} requires part for dtype pair {src_kind} -> {result_kind}")
+    elif not contract["requires_part"]:
+        raise ValueError(f"{context} does not support part for dtype pair {src_kind} -> {result_kind}")
+
+    allowed_rnd = contract["allowed_rnd"]
+    if rnd is not None and allowed_rnd is not None and rnd not in allowed_rnd:
+        expected = ", ".join(sorted(allowed_rnd))
+        raise ValueError(
+            f"{context} does not support rnd {rnd!r} for dtype pair "
+            f"{src_kind} -> {result_kind}; expected one of {expected}"
+        )
+
+    if part is None:
+        return
+    part_family = contract["part_family"] or _infer_vcvt_part_family(src_kind, result_kind)
+    if part_family == "even_odd":
+        if part not in {"EVEN", "ODD"}:
+            raise ValueError(
+                f"{context} part must be EVEN or ODD for dtype pair "
+                f"{src_kind} -> {result_kind}"
+            )
+    elif part_family == "packed4":
+        if part not in {"P0", "P1", "P2", "P3"}:
+            raise ValueError(
+                f"{context} part must be P0, P1, P2, or P3 for dtype pair "
+                f"{src_kind} -> {result_kind}"
+            )
+    elif part_family is None:
+        raise ValueError(f"{context} part is not supported for dtype pair {src_kind} -> {result_kind}")
+
+
+def _validate_vcvt_dtype_pair(src, result_dtype, *, rnd=None, sat=None, part=None, context: str):
     _, src_elem_type = _infer_vreg_metadata(src)
     resolved_result_dtype = _resolve(result_dtype)
     src_kind = _classify_vcvt_elem_kind(src_elem_type)
@@ -524,16 +653,25 @@ def _validate_vcvt_dtype_pair(src, result_dtype, *, context: str):
             f"{context} does not support source/result element types "
             f"{src_elem_type} -> {resolved_result_dtype}"
         )
-    if (src_kind, result_kind) not in _VCVT_CONTRACTS:
+    contract = _VCVT_CONTRACTS.get((src_kind, result_kind))
+    if contract is None:
         raise TypeError(
             f"{context} currently does not support the dtype pair "
             f"{src_kind} -> {result_kind}"
         )
+    _validate_vcvt_attrs(src_kind, result_kind, contract, rnd=rnd, sat=sat, part=part, context=context)
     return resolved_result_dtype
 
 
-def _infer_result_vreg_type_for_element_dtype(src, result_dtype, *, context: str):
-    resolved_type = _validate_vcvt_dtype_pair(src, result_dtype, context=context)
+def _infer_result_vreg_type_for_element_dtype(src, result_dtype, *, rnd=None, sat=None, part=None, context: str):
+    resolved_type = _validate_vcvt_dtype_pair(
+        src,
+        result_dtype,
+        rnd=rnd,
+        sat=sat,
+        part=part,
+        context=context,
+    )
     try:
         _pto.VRegType(resolved_type)
         return resolved_type
@@ -597,7 +735,14 @@ def vcvt(src, to_dtype, mask, *, rnd=None, sat=None, part=None):
         kwargs["part"] = _normalize_vcvt_part_mode(part, context="vcvt(..., part=...)")
     return wrap_surface_value(
         _pto.VcvtOp(
-            _infer_result_vreg_type_for_element_dtype(src, to_dtype, context="vcvt(src, to_dtype, mask)"),
+            _infer_result_vreg_type_for_element_dtype(
+                src,
+                to_dtype,
+                rnd=kwargs.get("rnd"),
+                sat=kwargs.get("sat"),
+                part=kwargs.get("part"),
+                context="vcvt(src, to_dtype, mask)",
+            ),
             unwrap_surface_value(src),
             unwrap_surface_value(mask),
             **kwargs,
@@ -1478,6 +1623,7 @@ def vbr(value):
 
 
 def _emit_unary_vec_op(op_ctor, inp, mask):
+    _reject_low_precision_vreg_operands(inp, context=f"pto.{_surface_name_for_op_ctor(op_ctor)}(...)")
     return wrap_surface_value(
         op_ctor(
             unwrap_surface_value(inp).type,
@@ -1488,6 +1634,11 @@ def _emit_unary_vec_op(op_ctor, inp, mask):
 
 
 def _emit_binary_vec_op(op_ctor, lhs, rhs, mask):
+    _reject_low_precision_vreg_operands(
+        lhs,
+        rhs,
+        context=f"pto.{_surface_name_for_op_ctor(op_ctor)}(...)",
+    )
     return wrap_surface_value(
         op_ctor(
             unwrap_surface_value(lhs).type,
@@ -1499,6 +1650,7 @@ def _emit_binary_vec_op(op_ctor, lhs, rhs, mask):
 
 
 def _emit_vec_scalar_masked_op(op_ctor, inp, scalar, mask, *, context: str):
+    _reject_low_precision_vreg_operands(inp, context=f"pto.{context}(...)")
     scalar_value = _coerce_scalar_like_vector_element(inp, scalar, context=context)
     return wrap_surface_value(
         op_ctor(
@@ -1512,6 +1664,7 @@ def _emit_vec_scalar_masked_op(op_ctor, inp, scalar, mask, *, context: str):
 
 def vadd(lhs, rhs, mask, result_type=None):
     """``pto.vadd`` – element-wise add."""
+    _reject_low_precision_vreg_operands(lhs, rhs, context="pto.vadd(...)")
     rt = result_type if result_type is not None else lhs.type
     return wrap_surface_value(
         _pto.VaddOp(
@@ -1681,6 +1834,7 @@ def vdup(input_value, mask, position=None):
     raw_input = unwrap_surface_value(input_value)
     try:
         _pto.VRegType(raw_input.type)
+        _reject_low_precision_vreg_operands(input_value, context="pto.vdup(vec, mask, position=...)")
         result_type = raw_input.type
         normalized_position = (
             _normalize_vdup_position_mode(position, context="vdup(vec, mask, position=...)")
@@ -1735,6 +1889,7 @@ def vnot(inp, mask):
 
 def vexpdif(inp, ref, mask, part: str = "ODD"):
     """``pto.vexpdif`` – ``exp(inp - ref)`` selecting ODD or EVEN lanes."""
+    _reject_low_precision_vreg_operands(inp, ref, context="pto.vexpdif(...)")
     return wrap_surface_value(
         _pto.VexpdifOp(
             unwrap_surface_value(inp).type,
@@ -1766,6 +1921,7 @@ def vrsqrt(inp, mask):
 
 def vcgmax(v, mask):
     """``pto.vcgmax`` – group maximum reduction, surfaced as the lowest-lane scalar."""
+    _reject_low_precision_vreg_operands(v, context="pto.vcgmax(...)")
     reduced = _pto.VcgmaxOp(
         unwrap_surface_value(v).type,
         unwrap_surface_value(v),
@@ -1776,6 +1932,7 @@ def vcgmax(v, mask):
 
 def vcgadd(v, mask):
     """``pto.vcgadd`` – group sum reduction, surfaced as the lowest-lane scalar."""
+    _reject_low_precision_vreg_operands(v, context="pto.vcgadd(...)")
     reduced = _pto.VcgaddOp(
         unwrap_surface_value(v).type,
         unwrap_surface_value(v),
@@ -1786,6 +1943,7 @@ def vcgadd(v, mask):
 
 def vcgmin(v, mask):
     """``pto.vcgmin`` – group minimum reduction, surfaced as the lowest-lane scalar."""
+    _reject_low_precision_vreg_operands(v, context="pto.vcgmin(...)")
     reduced = _pto.VcgminOp(
         unwrap_surface_value(v).type,
         unwrap_surface_value(v),
@@ -1850,6 +2008,7 @@ def vsubrelu(lhs, rhs, mask):
 
 def vaxpy(alpha, x, y, mask):
     """``pto.vaxpy`` – fused ``alpha * x + y``."""
+    _reject_low_precision_vreg_operands(x, y, context="pto.vaxpy(...)")
     alpha_value = _coerce_scalar_like_vector_element(x, alpha, context="vaxpy")
     return wrap_surface_value(
         _pto.VaxpyOp(
@@ -1864,6 +2023,7 @@ def vaxpy(alpha, x, y, mask):
 
 def vsel(true_v, false_v, mask):
     """``pto.vsel`` – element-wise select under a predicate mask."""
+    _reject_low_precision_vreg_operands(true_v, false_v, context="pto.vsel(...)")
     return wrap_surface_value(
         _pto.VselOp(
             unwrap_surface_value(true_v).type,
@@ -1876,7 +2036,23 @@ def vsel(true_v, false_v, mask):
 
 # ── Tile-domain operations ────────────────────────────────────────────────────
 
-def make_tensor_view(ptr, *, shape=None, strides=None):
+def _coerce_tensor_view_layout_attr(layout):
+    if layout is None:
+        return None
+    if isinstance(layout, str):
+        canonical = layout.upper()
+        if canonical not in {"ND", "DN", "NZ"}:
+            raise make_tensor_view_invalid_layout_error(layout)
+        return _pto.LayoutAttr.get(getattr(_pto.Layout, canonical))
+    if isinstance(layout, Attribute):
+        return layout
+    try:
+        return _pto.LayoutAttr.get(layout)
+    except Exception as exc:  # pragma: no cover - defensive pybind fallback
+        raise make_tensor_view_invalid_layout_error(layout) from exc
+
+
+def make_tensor_view(ptr, *, shape=None, strides=None, layout=None):
     """
     ``pto.make_tensor_view`` – wrap a pointer as a tensor view.
 
@@ -1902,11 +2078,13 @@ def make_tensor_view(ptr, *, shape=None, strides=None):
         if static_dims is not None
         else tensor_view_type(rank, elem)
     )
+    layout_attr = _coerce_tensor_view_layout_attr(layout)
     value = _pto.MakeTensorViewOp(
         tv_type,
         raw_ptr,
         _unwrap_sequence(normalized_shape),
         _unwrap_sequence(normalized_strides),
+        layout=layout_attr,
     ).result
     return TensorViewValue(value, shape=tuple(shape), strides=tuple(strides))
 
@@ -2311,6 +2489,86 @@ def tmatmul_acc(acc_in, lhs, rhs, dst):
         unwrap_surface_value(acc_in),
         unwrap_surface_value(lhs),
         unwrap_surface_value(rhs),
+        unwrap_surface_value(dst),
+    )
+
+
+def tmatmul_mx(lhs, lhs_scale, rhs, rhs_scale, dst, *, acc_phase=None):
+    """``pto.tmatmul.mx ins(lhs, lhs_scale, rhs, rhs_scale) outs(dst)``."""
+    _pto.TMatmulMxOp(
+        None,
+        unwrap_surface_value(lhs),
+        unwrap_surface_value(lhs_scale),
+        unwrap_surface_value(rhs),
+        unwrap_surface_value(rhs_scale),
+        unwrap_surface_value(dst),
+        accPhase=acc_phase,
+    )
+
+
+def tmatmul_mx_acc(acc_in, lhs, lhs_scale, rhs, rhs_scale, dst, *, acc_phase=None):
+    """``pto.tmatmul.mx.acc ins(acc_in, lhs, lhs_scale, rhs, rhs_scale) outs(dst)``."""
+    _pto.TMatmulMxAccOp(
+        None,
+        unwrap_surface_value(acc_in),
+        unwrap_surface_value(lhs),
+        unwrap_surface_value(lhs_scale),
+        unwrap_surface_value(rhs),
+        unwrap_surface_value(rhs_scale),
+        unwrap_surface_value(dst),
+        accPhase=acc_phase,
+    )
+
+
+def tmatmul_mx_bias(lhs, lhs_scale, rhs, rhs_scale, bias, dst):
+    """``pto.tmatmul.mx.bias ins(lhs, lhs_scale, rhs, rhs_scale, bias) outs(dst)``."""
+    _pto.TMatmulMxBiasOp(
+        None,
+        unwrap_surface_value(lhs),
+        unwrap_surface_value(lhs_scale),
+        unwrap_surface_value(rhs),
+        unwrap_surface_value(rhs_scale),
+        unwrap_surface_value(bias),
+        unwrap_surface_value(dst),
+    )
+
+
+def tgemv_mx(lhs, lhs_scale, rhs, rhs_scale, dst, *, acc_phase=None):
+    """``pto.tgemv.mx ins(lhs, lhs_scale, rhs, rhs_scale) outs(dst)``."""
+    _pto.TGemvMxOp(
+        None,
+        unwrap_surface_value(lhs),
+        unwrap_surface_value(lhs_scale),
+        unwrap_surface_value(rhs),
+        unwrap_surface_value(rhs_scale),
+        unwrap_surface_value(dst),
+        accPhase=acc_phase,
+    )
+
+
+def tgemv_mx_acc(acc_in, lhs, lhs_scale, rhs, rhs_scale, dst, *, acc_phase=None):
+    """``pto.tgemv.mx.acc ins(acc_in, lhs, lhs_scale, rhs, rhs_scale) outs(dst)``."""
+    _pto.TGemvMxAccOp(
+        None,
+        unwrap_surface_value(acc_in),
+        unwrap_surface_value(lhs),
+        unwrap_surface_value(lhs_scale),
+        unwrap_surface_value(rhs),
+        unwrap_surface_value(rhs_scale),
+        unwrap_surface_value(dst),
+        accPhase=acc_phase,
+    )
+
+
+def tgemv_mx_bias(lhs, lhs_scale, rhs, rhs_scale, bias, dst):
+    """``pto.tgemv.mx.bias ins(lhs, lhs_scale, rhs, rhs_scale, bias) outs(dst)``."""
+    _pto.TGemvMxBiasOp(
+        None,
+        unwrap_surface_value(lhs),
+        unwrap_surface_value(lhs_scale),
+        unwrap_surface_value(rhs),
+        unwrap_surface_value(rhs_scale),
+        unwrap_surface_value(bias),
         unwrap_surface_value(dst),
     )
 
@@ -2958,13 +3216,28 @@ def tsels(mask, src, scalar, dst, *, tmp=None):
 
 
 def tcvt(src, dst, *, tmp=None, rmode=None, sat_mode=None):
-    """``pto.tcvt ins(src, tmp?) outs(dst)``."""
+    """``pto.tcvt ins(src) outs(dst)``.
+
+    The ``tmp`` parameter is retained for backward compatibility but is not
+    supported by the current PTO backend; passing a non-None value raises.
+    """
+    if tmp is not None:
+        raise TypeError("pto.tile.cvt(..., tmp=...) is not supported by the current PTO Python bindings")
     _pto.tcvt(
         unwrap_surface_value(src),
         unwrap_surface_value(dst),
-        tmp=None if tmp is None else unwrap_surface_value(tmp),
-        rmode=rmode,
-        sat_mode=sat_mode,
+        rmode=_normalize_enum_attr(
+            rmode,
+            enum_cls=_pto.RoundMode,
+            attr_cls=_pto.RoundModeAttr,
+            context="tile.cvt(..., rmode=...)",
+        ),
+        sat_mode=_normalize_enum_attr(
+            sat_mode,
+            enum_cls=_pto.SaturationMode,
+            attr_cls=_pto.SaturationModeAttr,
+            context="tile.cvt(..., sat_mode=...)",
+        ),
     )
 
 
@@ -3223,6 +3496,41 @@ def _infer_vreg_metadata(vector_value):
         body = text[len("!pto.vreg<"):-1]
         lanes_text, elem_text = body.split("x", 1)
         return int(lanes_text), Type.parse(elem_text)
+
+
+def _surface_name_for_op_ctor(op_ctor) -> str:
+    name = getattr(op_ctor, "__name__", "")
+    if name.startswith("V") and name.endswith("Op"):
+        return name[1:-2].lower()
+    return name or "vector_op"
+
+
+def _is_low_precision_elem_type(elem_type) -> bool:
+    if Float8E4M3FNType.isinstance(elem_type) or Float8E5M2Type.isinstance(elem_type):
+        return True
+    return any(
+        _isinstance_pto_type(elem_type, name)
+        for name in ("HiF8Type", "F4E1M2x2Type", "F4E2M1x2Type")
+    )
+
+
+def _reject_low_precision_vreg(value, *, context: str) -> None:
+    raw_value = unwrap_surface_value(value)
+    try:
+        _, elem_type = _infer_vreg_metadata(raw_value)
+    except TypeError:
+        return
+    if _is_low_precision_elem_type(elem_type):
+        raise TypeError(
+            f"{context} does not support low-precision vreg elements yet; "
+            "low-precision vregs are currently only supported on explicit memory/conversion paths such as "
+            "vlds/vsts/vcvt/vmulscvt/vpack"
+        )
+
+
+def _reject_low_precision_vreg_operands(*values, context: str) -> None:
+    for value in values:
+        _reject_low_precision_vreg(value, context=context)
 
 
 def _extract_lowest_lane_scalar(vector_value, mask):
@@ -5158,6 +5466,8 @@ __all__ = [
     "make_tensor_view", "partition_view",
     "alloc_tile",
     "tload", "tstore", "tmov", "tinsert",
+    "tmatmul", "tmatmul_acc", "tmatmul_mx", "tmatmul_mx_acc", "tmatmul_mx_bias",
+    "tgemv_mx", "tgemv_mx_acc", "tgemv_mx_bias",
     "tadd", "tsub", "tmul", "tdiv", "tmax", "tmin",
     "tadds", "tsubs", "tmuls", "tdivs", "tmaxs", "tmins",
     "texp", "tlog", "tsqrt", "trsqrt", "trecip", "tabs", "tneg",

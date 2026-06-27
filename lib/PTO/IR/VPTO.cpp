@@ -79,6 +79,20 @@ static LogicalResult verifyMaskTypeLike(Operation *op, Type type,
   return success();
 }
 
+static LogicalResult verifyNonLowPrecisionVRegElementTypeLike(
+    Operation *op, Type type, StringRef roleDescription) {
+  auto vecType = dyn_cast<VRegType>(type);
+  if (!vecType)
+    return success();
+  if (pto::isPTOLowPrecisionType(vecType.getElementType()))
+    return op->emitOpError()
+           << roleDescription
+           << " must not use low-precision vector element type; "
+              "low-precision vreg elements are currently only supported on "
+              "explicit memory/conversion ops such as vlds/vsts/vcvt/vmulscvt/vpack";
+  return success();
+}
+
 static LogicalResult verifyMaskTypeWithGranularityLike(Operation *op, Type type,
                                                        StringRef roleDescription,
                                                        StringRef granularity) {
@@ -1893,7 +1907,8 @@ static ParseResult parseRequiredOperandWithComma(
     OpAsmParser &parser, OpAsmParser::UnresolvedOperand &operand) {
   if (parser.parseOperand(operand))
     return failure();
-  return parser.parseComma();
+  (void)parser.parseOptionalComma();
+  return success();
 }
 
 static ParseResult parseDmaTripleGroup(
@@ -2703,10 +2718,11 @@ static ParseResult parseStructuredAccStoreClauses(
         return success();
     }
     StringRef keyword;
-    if (parser.parseKeyword(&keyword)) {
+    OptionalParseResult optParseResult = parser.parseOptionalKeyword(&keyword);
+    if (!optParseResult.has_value() || failed(*optParseResult)) {
       if (!seenClause)
         return success();
-      return failure();
+      return parser.emitError(parser.getCurrentLocation(), "expected valid keyword");
     }
     seenClause = true;
 
@@ -5145,6 +5161,9 @@ static LogicalResult verifyVecScalarMaskedOpLike(OpTy op) {
     return failure();
   if (failed(verifyMaskTypeLike(op, op.getMask().getType(), "mask type")))
     return failure();
+  if (failed(verifyNonLowPrecisionVRegElementTypeLike(
+          op.getOperation(), op.getInput().getType(), "input type")))
+    return failure();
   return success();
 }
 
@@ -5236,6 +5255,9 @@ static LogicalResult verifyUnaryVecOp(UnaryOp op) {
     return failure();
   if (failed(verifyVRegTypeLike(op, op.getResult().getType(), "result type")))
     return failure();
+  if (failed(verifyNonLowPrecisionVRegElementTypeLike(
+          op.getOperation(), op.getInput().getType(), "operand type")))
+    return failure();
   if (op.getInput().getType() != op.getResult().getType())
     return op.emitOpError("requires matching register vector shape");
   return success();
@@ -5270,6 +5292,9 @@ static LogicalResult verifyBinaryVecOp(BinaryOp op) {
   if (failed(verifyMaskTypeLike(op, op.getMask().getType(), "mask type")))
     return failure();
   if (failed(verifyVRegTypeLike(op, op.getResult().getType(), "result type")))
+    return failure();
+  if (failed(verifyNonLowPrecisionVRegElementTypeLike(
+          op.getOperation(), op.getLhs().getType(), "lhs type")))
     return failure();
   if (op.getLhs().getType() != op.getRhs().getType() ||
       op.getLhs().getType() != op.getResult().getType())
@@ -5478,6 +5503,9 @@ LogicalResult VselOp::verify() {
       failed(verifyVRegTypeLike(*this, getSrc1().getType(), "src1 type")) ||
       failed(verifyMaskTypeLike(*this, getMask().getType(), "mask type")) ||
       failed(verifyVRegTypeLike(*this, getResult().getType(), "result type")))
+    return failure();
+  if (failed(verifyNonLowPrecisionVRegElementTypeLike(
+          getOperation(), getSrc0().getType(), "src0 type")))
     return failure();
   if (getSrc0().getType() != getSrc1().getType() ||
       getSrc0().getType() != getResult().getType())

@@ -187,20 +187,59 @@ inline constexpr llvm::StringLiteral kPTOSimtMaxThreadsAttrName =
     "pto.simt_max_threads";
 inline constexpr llvm::StringLiteral kPTOSimtMaxRegistersAttrName =
     "pto.simt_max_regs";
+inline constexpr llvm::StringLiteral kPTOVisibilityAttrName = "pto.visibility";
+inline constexpr llvm::StringLiteral kPTOVisibilityInternalValue = "internal";
+inline constexpr llvm::StringLiteral kPTOVisibilityExternalValue = "external";
+inline constexpr llvm::StringLiteral kPTODSLLogicalNameAttrName =
+    "pto.ptodsl.logical_name";
+
+/// Return the PTODSL logical function name when present, otherwise fall back to
+/// the current symbol name. PTODSL uses this to mark ABI-specialized helper and
+/// kernel-module symbols without relying on symbol-name parsing.
+inline StringRef getPTODSLLogicalNameOrSymbolName(func::FuncOp func) {
+  if (!func)
+    return {};
+  if (auto attr = func->getAttrOfType<StringAttr>(kPTODSLLogicalNameAttrName))
+    return attr.getValue();
+  return func.getSymName();
+}
 
 /// Return true if the function carries an explicit entry marker. PTO accepts
 /// both the EmitC naming (`pto.entry`) and VPTO naming (`pto.kernel`) as entry
 /// aliases; `hacc.entry` and `pto.aicore` are legacy aliases.
 bool hasExplicitPTOEntryAttr(func::FuncOp func);
+bool hasExplicitPTOEntryAttr(LLVM::LLVMFuncOp func);
 
 /// Return true if the function should be emitted as an AICORE entry.
 bool isPTOEntryFunction(func::FuncOp func);
+bool isPTOEntryFunction(LLVM::LLVMFuncOp func);
+
+/// Return true if the function should remain externally visible in backend
+/// artifacts. PTO entries are always treated as externally visible. Non-entry
+/// functions default to internal visibility unless they carry
+/// `pto.visibility = "external"`.
+bool hasExternalArtifactVisibility(func::FuncOp func);
+
+/// Set explicit artifact visibility on one function definition.
+void setExternalArtifactVisibility(func::FuncOp func, bool isExternal);
 
 /// Validate module-level PTO entry configuration before EmitC lowering.
 LogicalResult validatePTOEntryFunctions(ModuleOp module);
 
-/// Clear internal PTO entry selection markers from function attributes.
+/// Compatibility hook kept for existing pass pipelines. This is now a no-op
+/// because PTO entry state is expressed directly through explicit entry attrs
+/// such as ``pto.entry``.
 void annotatePTOEntryFunctions(ModuleOp module);
+
+/// Look up a peer function for import_reserved_buffer-style cross-kernel links.
+/// This first honors ordinary nearest symbol lookup, then falls back to the
+/// outer backend-partitioned container and PTODSL ABI-specialized public
+/// helper symbols when needed.
+func::FuncOp lookupPeerFuncAcrossContainer(Operation *op,
+                                           FlatSymbolRefAttr peerAttr);
+
+/// Find one reserve_buffer by logical name inside a function.
+ReserveBufferOp findReserveBufferByName(func::FuncOp funcOp, StringRef name);
 
 } // namespace pto
 } // namespace mlir

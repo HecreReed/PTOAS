@@ -79,6 +79,35 @@ tail-DMA semantics.
 Although the descriptor rank is 5D, the current DMA-oriented slicing/lowering
 path still only supports rank-2 TensorView slices.
 
+## Matcher Metadata For View Operands
+
+When TileLang templates are selected from PTO IR operand metadata, view-like
+operands currently carry these selection-time fields:
+- `shape`
+- `strides`
+- `memory_space`
+- optional `config.layout`
+
+`config.layout` is the public way for layout-sensitive templates to distinguish
+different GM view organizations without re-deriving layout from the raw shape
+or stride profile.
+
+Current public layout strings are:
+- `nd`
+- `dn`
+- `nz`
+- `mx_a_zz`
+- `mx_b_nn`
+
+Rules:
+- `config.layout` is present only when the source query provides explicit view
+  layout metadata
+- absent layout metadata remains absent; it is not normalized to `nd`
+- `TensorView` and `PartitionTensorView` constraints read this value through
+  `view.config.layout`
+- layout-sensitive template selection may choose different descriptors even
+  when element dtype is identical
+
 ## Examples
 
 Examples aligned with the implemented surface:

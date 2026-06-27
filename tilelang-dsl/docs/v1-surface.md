@@ -49,16 +49,20 @@ import tilelang_dsl as pto
 
 The package currently exports:
 - `vkernel`
+- `ckernel`
 - `VKernelDescriptor`
 - `BoundKernelParameter`
 - `MaterializedMLIRModule`
+- `KernelRegistry`
+- `select_kernel`
 - `TileLangFrontendError`
 - `TensorView`
+- `PartitionTensorView`
 - `Tile`
 - `VRegType`
 - `MaskType`
 - scalar dtypes such as `f16`, `bf16`, `f32`, `i8`, `i16`, `i32`, `i64`
-- type helpers such as `vreg(...)`, `ptr(...)`, `mask_b8`, `mask_b16`, `mask_b32`, `MemorySpace`, `TileConfig`, `TileSpecialization`
+- type helpers such as `vreg(...)`, `ptr(...)`, `mask_b8`, `mask_b16`, `mask_b32`, `MemorySpace`, `TileConfig`, `TileSpecialization`, `ViewConfig`, `ViewLayout`
 
 The package does not expose a DSL-level `pto.memref(...)` constructor. MemRef
 only appears in generated/lowered IR, not in the public authoring type surface.
@@ -92,6 +96,12 @@ The descriptor keeps these metadata fields:
 - `dtypes`
 - `name`
 - `verify`
+
+In current package head, descriptor selection also supports:
+- `ops=[...]` multi-op matcher groups
+- `constraints=[...]` callable selection predicates
+- `priority`
+- `templates={...}` slot substitution metadata
 
 ## Parameter Typing
 
@@ -151,6 +161,42 @@ Current v1 Tile profile rules:
 - Tile rank must be 1D or 2D
 - Tile memory space must be `MemorySpace.UB`
 - `config` may be omitted, provided as `TileConfig`, or built from a dict
+
+## View Config Surface
+
+`TensorView` and `PartitionTensorView` expose a view-only config object during
+matcher constraint evaluation.
+
+Current query surface:
+- `view.config.layout`
+
+Current layout enum values:
+- `pto.ViewLayout.ND`
+- `pto.ViewLayout.DN`
+- `pto.ViewLayout.NZ`
+- `pto.ViewLayout.MX_A_ZZ`
+- `pto.ViewLayout.MX_B_NN`
+
+Rules:
+- `view.config` is a `ViewConfig`, not a `TileConfig`
+- `layout` is optional; when the source query has no explicit layout metadata,
+  `view.config.layout` is `None`
+- unknown or absent layout metadata must not be treated as implicit `ND`
+- this surface is intended for descriptor selection constraints, especially
+  when different templates should match different GM view layouts
+
+Example:
+
+```python
+@pto.vkernel(
+    target="a5",
+    op="pto.tload",
+    dtypes=[(pto.f32, pto.f32)],
+    constraints=[lambda src: src.config.layout == pto.ViewLayout.DN],
+)
+def template_tload_dn(src: pto.TensorView, dst: pto.Tile):
+    return None
+```
 
 Before all bare `Tile` parameters are specialized, the descriptor must reject:
 - `mlir_text()`

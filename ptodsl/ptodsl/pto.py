@@ -35,8 +35,6 @@ from ._types import (           # noqa: F401
 )
 from ._surface_types import (   # noqa: F401
     const_expr,
-    tensor_spec,
-    TensorSpec,
     BarrierType,
     Pipe,
     MemorySpace,
@@ -61,6 +59,7 @@ from ._surface_types import (   # noqa: F401
     VcvtSatMode,
     VcvtPartMode,
     AlignType,
+    RoundMode,
     DivPrecision,
     ExpPrecision,
     LogPrecision,
@@ -167,6 +166,6 @@ mask_b32 = mask_type("b32")
 
 
 def __getattr__(name):
-    if name in {"ukernel", "tile_buf_type", "vecscope", "as_ptr", "vbrc_load", "vsts_1pt", "constexpr"}:
+    if name in {"ukernel", "tile_buf_type", "vecscope", "as_ptr", "vbrc_load", "vsts_1pt", "constexpr", "tensor_spec", "TensorSpec"}:
         raise unsupported_public_surface_error(name)
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

@@ -32,6 +32,7 @@ from .types import (
     Tile,
     TileConfig,
     TileSpecialization,
+    ViewConfig,
     TypeVariable,
     VectorType,
     WildcardType,
@@ -968,17 +969,23 @@ class _ConstraintParamView:
         return MemorySpace(memory_space)
 
     @property
-    def config(self) -> TileConfig | None:
+    def config(self) -> TileConfig | ViewConfig | None:
         config = self._attrs.get("config")
         if config is None:
             if self._attrs.get("kind") == "tile":
                 return TileConfig()
+            if self._attrs.get("kind") == "view":
+                return ViewConfig()
             return None
         if isinstance(config, TileConfig):
             return config
+        if isinstance(config, ViewConfig):
+            return config
         if isinstance(config, Mapping):
+            if self._attrs.get("kind") == "view":
+                return ViewConfig.from_mapping(config)
             return TileConfig.from_mapping(config)
-        raise TypeError(f"unsupported Tile config payload {config!r} in constraint view")
+        raise TypeError(f"unsupported config payload {config!r} in constraint view")
 
     def __repr__(self) -> str:
         return f"{self._name}<{self._attrs!r}>"
@@ -1311,8 +1318,10 @@ class VKernelDescriptor:
                 # TensorView authoring form is normalized to 5D in the current DSL spec.
                 param_attrs.setdefault("rank", 5)
                 param_attrs.setdefault("memory_space", "gm")
+                param_attrs.setdefault("config", ViewConfig())
                 attrs.setdefault(f"{spec.name}_rank", 5)
                 attrs.setdefault(f"{spec.name}_memory_space", "gm")
+                attrs.setdefault(f"{spec.name}_config", param_attrs["config"])
             attrs[spec.name] = param_attrs
 
         if self._parameters is not None:

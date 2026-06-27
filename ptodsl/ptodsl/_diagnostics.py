@@ -56,6 +56,16 @@ def jit_missing_annotation_error(name: str) -> TypeError:
     )
 
 
+def jit_helper_missing_annotation_error(name: str) -> TypeError:
+    """Return one diagnostic for missing ``@pto.jit(entry=False)`` module annotations."""
+    return TypeError(
+        f"@pto.jit(entry=False) parameter '{name}' does not declare a kernel-module ABI annotation. "
+        "Use kernel-module value types such as pto.Tile / pto.TensorView / "
+        "pto.PartitionTensorView, a typed pto.ptr(...) in any memory space, or "
+        "a PTO scalar annotation such as pto.i32/pto.f32/pto.i1."
+    )
+
+
 def jit_illegal_formal_annotation_error(name: str, annotation: object) -> TypeError:
     """Return one diagnostic for unsupported ``@pto.jit`` positional annotations."""
     return TypeError(
@@ -66,6 +76,18 @@ def jit_illegal_formal_annotation_error(name: str, annotation: object) -> TypeEr
         "Legacy host tensor annotations such as pto.tensor_spec(...), and low-level PTODSL "
         "types such as Tile, PartitionTensorView, VReg, or non-entry pointer forms do not "
         "belong at the host/kernel entry."
+    )
+
+
+def jit_helper_illegal_formal_annotation_error(name: str, annotation: object) -> TypeError:
+    """Return one diagnostic for unsupported ``@pto.jit(entry=False)`` module annotations."""
+    return TypeError(
+        f"@pto.jit(entry=False) parameter '{name}' uses unsupported kernel-module annotation {annotation!r}. "
+        "The kernel-module ABI accepts pto.Tile / pto.TensorView / "
+        "pto.PartitionTensorView, typed pto.ptr(...) values in any memory space, "
+        "and PTO scalar annotations such as pto.i32/pto.f32/pto.i1. "
+        "Legacy host tensor annotations, VReg, and mask values do not belong at "
+        "this kernel-module boundary."
     )
 
 
@@ -80,6 +102,16 @@ def jit_legacy_tensor_spec_entry_error(name: str, annotation: object) -> TypeErr
     )
 
 
+def jit_legacy_tensor_spec_helper_error(name: str, annotation: object) -> TypeError:
+    """Return one diagnostic for legacy ``pto.tensor_spec(...)`` kernel-module annotations."""
+    return TypeError(
+        f"@pto.jit(entry=False) parameter '{name}' still uses legacy host-tensor annotation "
+        f"{annotation!r}. Kernel-module ABI does not accept pto.tensor_spec(...); "
+        "pass Tile / TensorView / PartitionTensorView / typed ptr / PTO scalar values "
+        "across the kernel-module boundary instead."
+    )
+
+
 def jit_non_gm_ptr_entry_error(name: str, annotation: object) -> TypeError:
     """Return one diagnostic for non-GM pointer entry annotations."""
     return TypeError(
@@ -87,6 +119,48 @@ def jit_non_gm_ptr_entry_error(name: str, annotation: object) -> TypeError:
         'The host-visible @pto.jit boundary only accepts explicit GM pointers such as pto.ptr(pto.f32, "gm"). '
         "This boundary contract does not change the global pto.ptr(...) defaults; "
         'spell out "gm" explicitly at the @pto.jit entry.'
+    )
+
+
+def jit_helper_standalone_type_inference_error(name: str, annotation: object) -> RuntimeError:
+    """Return one diagnostic for kernel-module params that need caller-provided concrete types."""
+    return RuntimeError(
+        f"@pto.jit(entry=False) parameter '{name}' annotated as {annotation!r} uses an "
+        "abstract kernel-module marker type. Standalone kernel-module compilation cannot infer a "
+        "concrete MLIR argument type for this boundary yet; compile the module through a "
+        "caller that supplies concrete Tile/TensorView values."
+    )
+
+
+def kernel_module_return_value_error(result) -> RuntimeError:
+    """Return one diagnostic for illegal ``@pto.jit(entry=False)`` return values."""
+    return RuntimeError(
+        "@pto.jit(entry=False) kernel modules must return None. "
+        f"Got {type(result).__name__!r} instead; pass data across the module "
+        "boundary through Tile / TensorView / PartitionTensorView / ptr / scalar "
+        "arguments, not Python return values."
+    )
+
+
+def kernel_module_compile_error(function_name: str | None = None) -> RuntimeError:
+    """Return one diagnostic for direct Python-side kernel-module compilation."""
+    target = "@pto.jit(entry=False) kernel module"
+    if function_name:
+        target = f"@pto.jit(entry=False) kernel module {function_name!r}"
+    return RuntimeError(
+        f"{target} is not directly compilable from Python. Compile an entry kernel "
+        "that calls this module instead."
+    )
+
+
+def kernel_module_launch_error(function_name: str | None = None) -> RuntimeError:
+    """Return one diagnostic for Python launch on ``@pto.jit(entry=False)``."""
+    target = "@pto.jit(entry=False) kernel module"
+    if function_name:
+        target = f"@pto.jit(entry=False) kernel module {function_name!r}"
+    return RuntimeError(
+        f"{target} is not launchable from Python. Only @pto.jit(entry=True) "
+        "kernels support compiled[grid, stream](...)."
     )
 
 
@@ -117,6 +191,14 @@ def make_tensor_view_missing_metadata_error(ptr: object) -> TypeError:
     )
 
 
+def make_tensor_view_invalid_layout_error(layout: object) -> TypeError:
+    """Return one diagnostic for unsupported ``make_tensor_view(layout=...)`` spellings."""
+    return TypeError(
+        "make_tensor_view(..., layout=...) expects one of the public layout spellings "
+        f"'ND', 'DN', or 'NZ' (case-insensitive), or a raw PTO Layout enum/attr. Got {layout!r}."
+    )
+
+
 def subkernel_host_tensor_boundary_error(role: str, name: str) -> TypeError:
     """Return one diagnostic for host-tensor usage outside the JIT boundary."""
     return TypeError(
@@ -131,6 +213,41 @@ def subkernel_signature_boundary_error(role: str, name: str) -> TypeError:
     return TypeError(
         f"@pto.{role} parameter '{name}' cannot be annotated with pto.tensor_spec(...). "
         "Host tensors are only valid as @pto.jit positional parameters."
+    )
+
+
+def subkernel_missing_annotation_error(role: str, name: str) -> TypeError:
+    """Return one diagnostic for missing subkernel ABI annotations."""
+    return TypeError(
+        f"@pto.{role} parameter '{name}' does not declare a subkernel ABI annotation. "
+        "Subkernel interfaces are explicit: use the role-specific PTODSL boundary types "
+        "instead of relying on implicit inference."
+    )
+
+
+def subkernel_illegal_parameter_kind_error(role: str, name: str, kind) -> TypeError:
+    """Return one diagnostic for unsupported subkernel parameter kinds."""
+    return TypeError(
+        f"@pto.{role} parameter '{name}' uses unsupported parameter kind {kind!r}. "
+        "Subkernel interfaces only accept positional parameters in this PTODSL surface."
+    )
+
+
+def subkernel_illegal_annotation_error(role: str, name: str, annotation: object, expected: str) -> TypeError:
+    """Return one diagnostic for unsupported subkernel ABI annotations."""
+    return TypeError(
+        f"@pto.{role} parameter '{name}' uses unsupported subkernel annotation {annotation!r}. "
+        f"Legal @pto.{role} interfaces are restricted to {expected}. If you need a different ABI, "
+        "use @pto.jit(entry=False) instead of a subkernel decorator."
+    )
+
+
+def subkernel_argument_type_error(role: str, name: str, expected: str, observed: object) -> TypeError:
+    """Return one diagnostic for runtime/callsite subkernel ABI mismatches."""
+    return TypeError(
+        f"@pto.{role} argument '{name}' violates the declared subkernel interface. "
+        f"Expected {expected}, got {observed!r}. Subkernel ABI checks are unconditional; "
+        "either pass a legal PTODSL boundary value or remove the subkernel decorator."
     )
 
 
@@ -152,6 +269,15 @@ def illegal_inline_subkernel_placement_error(role: str, outer_role: str | None) 
     return RuntimeError(
         f"inline pto.{role}() may only be used from the top-level @pto.jit body; "
         f"nested use inside @pto.{outer_role} is not part of the PTODSL layer contract."
+    )
+
+
+def inline_subkernel_value_escape_error(role: str, type_text: str) -> RuntimeError:
+    """Return one diagnostic for outlined inline-scope values escaping their helper boundary."""
+    return RuntimeError(
+        f"inline pto.{role}() cannot let values defined inside the outlined subkernel "
+        f"escape the scope boundary (got {type_text}). Write through a Tile/UB buffer "
+        "or keep the consumer inside the same inline subkernel."
     )
 
 
@@ -215,6 +341,20 @@ def invalid_jit_mode_error(
     )
 
 
+def invalid_jit_backend_error(
+    backend: str,
+    *,
+    function_name: str | None = None,
+    source_file: str | None = None,
+    source_line: int | None = None,
+) -> ValueError:
+    """Return one diagnostic for unsupported ``@pto.jit(backend=...)`` values."""
+    context = _format_source_context(function_name, source_file, source_line)
+    return ValueError(
+        f"unsupported PTODSL jit backend {backend!r}{context}; expected 'vpto' or 'emitc'"
+    )
+
+
 def unsupported_public_surface_error(name: str) -> AttributeError:
     """Return one diagnostic for unsupported names on the public ``pto`` surface."""
     hints = {
@@ -242,6 +382,15 @@ def unsupported_public_surface_error(name: str) -> AttributeError:
         "constexpr": (
             "Use pto.const_expr for compile-time @pto.jit parameters and trace-time control-flow guards."
         ),
+        "tensor_spec": (
+            "Host tensor ABI hints were removed from the PTODSL public surface. Use explicit "
+            'GM pointers such as pto.ptr(pto.f32, "gm"), pass runtime shape/stride scalars, '
+            "and reconstruct TensorView descriptors in-kernel with pto.make_tensor_view(...)."
+        ),
+        "TensorSpec": (
+            "TensorSpec was removed from the PTODSL public surface together with pto.tensor_spec(...). "
+            "Use explicit GM pointers plus runtime shape/stride scalars instead."
+        ),
     }
     suffix = hints.get(name, "Use the documented PTODSL public surface instead.")
     return AttributeError(
@@ -260,13 +409,26 @@ __all__ = [
     "jit_legacy_tensor_spec_entry_error",
     "jit_missing_annotation_error",
     "jit_non_gm_ptr_entry_error",
+    "inline_subkernel_value_escape_error",
     "make_tensor_view_missing_metadata_error",
     "illegal_inline_subkernel_placement_error",
     "illegal_subkernel_placement_error",
+    "jit_helper_illegal_formal_annotation_error",
+    "jit_helper_missing_annotation_error",
+    "jit_helper_standalone_type_inference_error",
+    "kernel_module_compile_error",
+    "kernel_module_launch_error",
+    "kernel_module_return_value_error",
     "invalid_jit_mode_error",
+    "invalid_jit_backend_error",
+    "jit_legacy_tensor_spec_helper_error",
     "native_python_control_flow_error",
     "simd_value_escape_error",
+    "subkernel_argument_type_error",
     "subkernel_host_tensor_boundary_error",
+    "subkernel_illegal_annotation_error",
+    "subkernel_illegal_parameter_kind_error",
+    "subkernel_missing_annotation_error",
     "subkernel_signature_boundary_error",
     "tile_row_alignment_error",
     "unsupported_public_surface_error",

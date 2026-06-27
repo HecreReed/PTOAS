@@ -82,6 +82,7 @@ class OperandStableKey:
     view_shape: tuple[int | None, ...] | None = None
     view_strides: tuple[int | None, ...] | None = None
     view_memory_space: str | None = None
+    view_layout: str | None = None
 
     def to_hash_input(self) -> str:
         """Generate hash input string for this operand."""
@@ -104,7 +105,10 @@ class OperandStableKey:
             st_str = ",".join(
                 "?" if st is None else str(st) for st in self.view_strides
             ) if self.view_strides else ""
-            return f"view:{self.dtype}:{s_str}:{st_str}:{self.view_memory_space}"
+            return (
+                f"view:{self.dtype}:{s_str}:{st_str}:"
+                f"{self.view_memory_space}:{self.view_layout}"
+            )
         else:  # scalar
             return f"scalar:{self.dtype}"
 
@@ -217,8 +221,22 @@ def normalize_memory_space(ms: Any) -> str:
     # Handle MemorySpace enum from types.py
     if hasattr(ms, "value"):
         return ms.value.lower()
-    
+
     return str(ms).lower()
+
+
+def normalize_view_layout(layout: Any) -> str | None:
+    """Normalize view layout to string while keeping unknown as None."""
+    if layout is None:
+        return None
+    if isinstance(layout, str):
+        return layout.lower()
+    if hasattr(layout, "value"):
+        value = layout.value
+        if value is None:
+            return None
+        return str(value).lower()
+    return str(layout).lower()
 
 
 def compute_stable_key(
@@ -326,6 +344,10 @@ def compute_stable_key(
             ) if view_strides_raw else None
             
             view_memory_space = normalize_memory_space(spec.get("memory_space", "gm"))
+            config = spec.get("config") or {}
+            if hasattr(config, "fields"):
+                config = dict(config.fields)
+            view_layout = normalize_view_layout(config.get("layout"))
             
             operand_keys.append(OperandStableKey(
                 kind="view",
@@ -333,6 +355,7 @@ def compute_stable_key(
                 view_shape=view_shape,
                 view_strides=view_strides,
                 view_memory_space=view_memory_space,
+                view_layout=view_layout,
             ))
         
         else:  # scalar

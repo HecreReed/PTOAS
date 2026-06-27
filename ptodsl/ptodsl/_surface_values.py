@@ -24,9 +24,23 @@ from mlir.dialects import pto as _pto
 from mlir.ir import IndexType, IntegerAttr, MemRefType, ShapedType, StridedLayoutAttr, Type
 
 
+def _validate_surface_value_access(value):
+    try:
+        from ._tracing.active import current_session
+
+        session = current_session()
+    except Exception:
+        session = None
+    if session is not None and hasattr(session, "validate_surface_value_access"):
+        session.validate_surface_value_access(value)
+    return value
+
+
 def unwrap_surface_value(value):
     """Return the underlying MLIR SSA value for a surface wrapper."""
-    return value.value if isinstance(value, _SurfaceValue) else value
+    if isinstance(value, _SurfaceValue):
+        return value.value
+    return _validate_surface_value_access(value)
 
 
 def _is_python_index_literal(value) -> bool:
@@ -169,7 +183,7 @@ class _SurfaceValue:
 
     @property
     def value(self):
-        return self._value
+        return _validate_surface_value_access(self._value)
 
     @property
     def type(self):
@@ -533,7 +547,14 @@ def wrap_like_surface_value(template, value):
     if isinstance(template, TensorViewValue):
         return TensorViewValue(value, shape=template.shape, strides=template.strides)
     if isinstance(template, TileValue):
-        return TileValue(value, **template.surface_metadata)
+        metadata = dict(template.surface_metadata)
+        valid_shape = metadata.get("valid_shape")
+        if valid_shape is not None:
+            metadata["valid_shape"] = tuple(
+                dim if isinstance(dim, int) or dim is None else None
+                for dim in valid_shape
+            )
+        return TileValue(value, **metadata)
     if isinstance(template, AddressValue):
         return AddressValue(value)
     return wrap_surface_value(value)

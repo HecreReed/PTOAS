@@ -24,6 +24,11 @@
 
 namespace mlir {
 namespace pto {
+// Passes.h (included above) pulls in the global GEN_PASS_DECL block, which
+// defines GEN_PASS_DECL_FUSIONPLAN and leaves it set.  Undef it before
+// re-including the .inc for GEN_PASS_DEF so the options struct is not defined
+// twice.
+#undef GEN_PASS_DECL_FUSIONPLAN
 #define GEN_PASS_DEF_FUSIONPLAN
 #include "PTO/Transforms/Passes.h.inc"
 } // namespace pto
@@ -69,7 +74,9 @@ static bool isCurrentlyPlannableOp(StringRef opName) {
       .Cases("tmuls", "tdivs", "tadds", "tsubs", "tmaxs", "tmins", true)
       .Case("texp", true)
       .Case("texpands", true)
-      .Cases("trowexpandmul", "trowexpanddiv", true)
+      .Cases("trowexpandsub", "trowexpandmul", "trowexpanddiv", true)
+      .Cases("trowsum", "trowmax", "trowmin", true)
+      .Cases("tcolsum", "tcolmax", "tcolmin", true)
       .Default(false);
 }
 
@@ -520,6 +527,11 @@ static void clearPlanningAttrs(func::FuncOp func) {
 struct FusionPlanPass : public pto::impl::FusionPlanBase<FusionPlanPass> {
   using pto::impl::FusionPlanBase<FusionPlanPass>::FusionPlanBase;
 
+  FusionPlanPass() = default;
+  FusionPlanPass(const pto::FusionPlanOptions &options) {
+    enableShapeInference = options.enableShapeInference;
+  }
+
   void runOnOperation() override {
     func::FuncOp func = getOperation();
     if (func.isExternal())
@@ -527,8 +539,21 @@ struct FusionPlanPass : public pto::impl::FusionPlanBase<FusionPlanPass> {
 
     clearPlanningAttrs(func);
 
-    const auto &analysis = getAnalysis<pto::PreFusionAnalysis>();
-    if (!analysis.isValid()) {
+    // Reuse the shared (analysis-manager-cached) pre-fusion dataflow graph
+    // rather than rebuilding it from scratch.  The DFG — compute nodes, edges,
+    // liveness, write instances — is identical regardless of whether shape
+    // inference is enabled, so it is built once by PreFusionAnalysis and shared
+    // with FusionRegionGen via the analysis manager.  Only iteration-domain
+    // inference depends on the --enable-shape-inference option, so we run that
+    // separable step ourselves on a local copy of the cached graph.
+    const pto::PreFusionAnalysis &sharedAnalysis =
+        getAnalysis<pto::PreFusionAnalysis>();
+    if (!sharedAnalysis.isValid()) {
+      signalPassFailure();
+      return;
+    }
+    pto::PreFusionAnalysisResult analysis = sharedAnalysis.getResult();
+    if (failed(pto::inferIterationDomainClasses(analysis, enableShapeInference))) {
       signalPassFailure();
       return;
     }
@@ -538,13 +563,19 @@ struct FusionPlanPass : public pto::impl::FusionPlanBase<FusionPlanPass> {
     ConservativeDAGGreedyCostModel costModel;
     ConservativeDAGGreedyStrategyEngine strategyEngine;
 
-    for (const pto::FusionBlockAnalysis &blockAnalysis :
-         analysis.getResult().blocks) {
+    for (const pto::FusionBlockAnalysis &blockAnalysis : analysis.blocks) {
       PlanningContext planningCtx{blockAnalysis};
       SmallVector<PlannedFusionGroup, 8> groups =
           strategyEngine.planBlock(planningCtx, costModel);
       assignStableGroupMetadata(groups, ctx, nextGroupId);
     }
+
+    // The fusion metadata we annotate (group_id/order) is a planning *output*;
+    // it does not alter tile semantics, operand types, aliasing or liveness,
+    // so it cannot invalidate the shared PreFusionAnalysis DFG.  Preserve it so
+    // the downstream FusionRegionGen pass reuses the cached graph instead of
+    // rebuilding it.
+    markAnalysesPreserved<pto::PreFusionAnalysis>();
   }
 };
 
@@ -552,4 +583,9 @@ struct FusionPlanPass : public pto::impl::FusionPlanBase<FusionPlanPass> {
 
 std::unique_ptr<Pass> mlir::pto::createFusionPlanPass() {
   return std::make_unique<FusionPlanPass>();
+}
+
+std::unique_ptr<Pass>
+mlir::pto::createFusionPlanPass(const pto::FusionPlanOptions &options) {
+  return std::make_unique<FusionPlanPass>(options);
 }

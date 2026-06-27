@@ -38,6 +38,7 @@ namespace {
 struct LoopLevelInfo {
   scf::ForOp loop;
   SmallVector<Operation *, 4> preludeOps;
+  SmallVector<Operation *, 4> epilogueOps;
 };
 
 struct StageInfo {
@@ -239,35 +240,64 @@ static bool containsEquivalentRoot(ArrayRef<Value> roots, Value candidate) {
   });
 }
 
-static bool canMovePreludeAcrossPriorStages(Operation *preludeOp,
-                                            ArrayRef<StageInfo> priorStages,
-                                            llvm::raw_ostream *debugOS) {
-  SmallVector<Value, 4> preludeRoots;
-  if (failed(collectAliasRelevantRoots(preludeOp, preludeRoots))) {
+/// Check that \p movableOp has no aliasing conflict with the memory ops in
+/// \p crossStages.  \p crossStages are stages whose leaf and epilogue ops the
+/// movableOp would be reordered across in the fused loop.
+static bool canMoveAcrossStages(Operation *movableOp,
+                                ArrayRef<StageInfo> crossStages,
+                                llvm::raw_ostream *debugOS) {
+  SmallVector<Value, 4> movableRoots;
+  if (failed(collectAliasRelevantRoots(movableOp, movableRoots))) {
     if (debugOS)
-      *debugOS << "[op-fusion] reject prelude op " << preludeOp->getName()
-               << " at " << preludeOp->getLoc()
+      *debugOS << "[op-fusion] reject movable op " << movableOp->getName()
+               << " at " << movableOp->getLoc()
                << ": touched roots are not alias-analyzable\n";
     return false;
   }
-  for (const StageInfo &priorStage : priorStages) {
-    for (Operation *leafOp : priorStage.leafOps) {
-      SmallVector<Value, 4> leafRoots;
-      if (failed(collectAliasRelevantRoots(leafOp, leafRoots))) {
+  for (const StageInfo &crossStage : crossStages) {
+    for (Operation *op : crossStage.leafOps) {
+      SmallVector<Value, 4> opRoots;
+      if (failed(collectAliasRelevantRoots(op, opRoots))) {
         if (debugOS)
-          *debugOS << "[op-fusion] reject prelude op " << preludeOp->getName()
-                   << " at " << preludeOp->getLoc()
-                   << ": crossed effects of " << leafOp->getName()
+          *debugOS << "[op-fusion] reject movable op " << movableOp->getName()
+                   << " at " << movableOp->getLoc()
+                   << ": crossed effects of " << op->getName()
                    << " are not alias-analyzable\n";
         return false;
       }
-      for (Value preludeRoot : preludeRoots) {
-        if (containsEquivalentRoot(leafRoots, preludeRoot)) {
+      for (Value movableRoot : movableRoots) {
+        if (containsEquivalentRoot(opRoots, movableRoot)) {
           if (debugOS)
-            *debugOS << "[op-fusion] reject prelude op "
-                     << preludeOp->getName() << " at " << preludeOp->getLoc()
-                     << ": touched root may alias a prior stage memory op\n";
+            *debugOS << "[op-fusion] reject movable op "
+                     << movableOp->getName() << " at " << movableOp->getLoc()
+                     << ": touched root may alias a crossed stage memory op\n";
           return false;
+        }
+      }
+    }
+    // Check all nesting levels' epilogueOps, not just the outermost.
+    // buildFusedLoopNestAtLevel clones epilogueOps at every level, so
+    // a movableOp that is reordered across a prior stage must be checked
+    // against epilogueOps at every nesting depth.
+    for (const LoopLevelInfo &level : crossStage.levels) {
+      for (Operation *op : level.epilogueOps) {
+        SmallVector<Value, 4> opRoots;
+        if (failed(collectAliasRelevantRoots(op, opRoots))) {
+          if (debugOS)
+            *debugOS << "[op-fusion] reject movable op " << movableOp->getName()
+                     << " at " << movableOp->getLoc()
+                     << ": crossed effects of " << op->getName()
+                     << " are not alias-analyzable\n";
+          return false;
+        }
+        for (Value movableRoot : movableRoots) {
+          if (containsEquivalentRoot(opRoots, movableRoot)) {
+            if (debugOS)
+              *debugOS << "[op-fusion] reject movable op "
+                       << movableOp->getName() << " at " << movableOp->getLoc()
+                       << ": touched root may alias a crossed stage epilogue op\n";
+            return false;
+          }
         }
       }
     }
@@ -280,10 +310,27 @@ static bool arePreludeReordersLegal(ArrayRef<StageInfo> stages,
                                     llvm::raw_ostream *debugOS) {
   for (size_t stageIndex = 1; stageIndex < stages.size(); ++stageIndex) {
     ArrayRef<StageInfo> priorStages(stages.data(), stageIndex);
+
+    // Prelude ops of the current stage are moved before all prior-stage
+    // leaf and epilogue ops in the fused loop.  Check they don't alias.
     for (const LoopLevelInfo &level : stages[stageIndex].levels) {
       for (Operation *op : level.preludeOps) {
-        if (!canMovePreludeAcrossPriorStages(op, priorStages, debugOS))
+        if (!canMoveAcrossStages(op, priorStages, debugOS))
           return false;
+      }
+    }
+
+    // Epilogue ops of prior stages are reordered to execute after the
+    // current stage's leaf ops in the fused loop.  Check that each prior
+    // stage's epilogue ops don't alias the current stage's leaf ops.
+    for (const StageInfo &priorStage : priorStages) {
+      for (const LoopLevelInfo &priorLevel : priorStage.levels) {
+        for (Operation *epilogueOp : priorLevel.epilogueOps) {
+          if (!canMoveAcrossStages(epilogueOp,
+                                   ArrayRef<StageInfo>(&stages[stageIndex], 1),
+                                   debugOS))
+            return false;
+        }
       }
     }
   }
@@ -293,7 +340,7 @@ static bool arePreludeReordersLegal(ArrayRef<StageInfo> stages,
 static LogicalResult analyzeStage(scf::ForOp outerLoop, StageInfo &stage) {
   scf::ForOp currentLoop = outerLoop;
   while (currentLoop) {
-    stage.levels.push_back(LoopLevelInfo{currentLoop, {}});
+    stage.levels.push_back(LoopLevelInfo{currentLoop, {}, {}});
     LoopLevelInfo &currentLevel = stage.levels.back();
 
     SmallVector<Operation *, 8> bodyOps;
@@ -322,9 +369,20 @@ static LogicalResult analyzeStage(scf::ForOp outerLoop, StageInfo &stage) {
         seenChildLoop = true;
         continue;
       }
-      if (seenChildLoop || !isSupportedPreludeOp(op))
-        return failure();
-      currentLevel.preludeOps.push_back(op);
+      if (!seenChildLoop) {
+        // Ops before the child loop are prelude ops.
+        if (!isSupportedPreludeOp(op))
+          return failure();
+        currentLevel.preludeOps.push_back(op);
+      } else {
+        // Ops after the child loop are epilogue ops (e.g. row-reduction
+        // result stores in trowmax/trowsum).  They must be supported
+        // leaf-like ops (no regions) so we can clone them into the fused
+        // loop after all inner body ops.
+        if (!isSupportedPreludeOp(op))
+          return failure();
+        currentLevel.epilogueOps.push_back(op);
+      }
     }
 
     currentLoop = childLoop;
@@ -439,6 +497,13 @@ static scf::ForOp buildFusedLoopNestAtLevel(OpBuilder &builder,
       for (Operation *op : stage.leafOps)
         cloneOpAndMapResults(bodyBuilder, op, mappings[stageIndex]);
   }
+
+  // Clone epilogue ops after the inner loop / leaf ops for each stage.
+  // Epilogue ops appear after the child loop in the original stage and
+  // must come after all inner-level body ops in the fused loop too.
+  for (auto [stageIndex, stage] : llvm::enumerate(stages))
+    for (Operation *op : stage.levels[levelIndex].epilogueOps)
+      cloneOpAndMapResults(bodyBuilder, op, mappings[stageIndex]);
 
   SmallVector<Value, 8> fusedYieldOperands;
   for (auto [stageIndex, stage] : llvm::enumerate(stages)) {

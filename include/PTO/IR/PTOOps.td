@@ -4404,6 +4404,7 @@ def TExtractFPOp : PTO_TOp<"textract_fp", [
 }
 
 def TInsertOp : PTO_TOp<"tinsert", [
+  AttrSizedOperandSegments,
   PTO_DpsInitOpInterface,
   OpPipeInterface,
   DeclareOpInterfaceMethods<MemoryEffectsOpInterface>
@@ -4414,7 +4415,12 @@ def TInsertOp : PTO_TOp<"tinsert", [
     PTODpsType:$src,
     Index:$indexRow,
     Index:$indexCol,
-    PTODpsType:$dst
+    PTODpsType:$dst,
+    Optional<PTODpsType>:$fp,
+    Optional<I64>:$preQuantScalar,
+    OptionalAttr<PTO_AccToVecModeAttr>:$accToVecMode,
+    DefaultValuedAttr<PTO_ReluPreModeAttr, "::mlir::pto::ReluPreMode::NoRelu">:$reluPreMode,
+    OptionalAttr<PTO_TInsertModeAttr>:$tinsertMode
   );
 
   let results = (outs);
@@ -4422,7 +4428,10 @@ def TInsertOp : PTO_TOp<"tinsert", [
   let hasVerifier = 1;
 
   let assemblyFormat = [{
-    `ins` `(` $src `,` $indexRow `,` $indexCol `:` qualified(type($src)) `,` type($indexRow) `,` type($indexCol) `)`
+    `ins` `(` $src `,` $indexRow `,` $indexCol `:` qualified(type($src)) `,` type($indexRow) `,` type($indexCol)
+    (`,` $fp^ `:` qualified(type($fp)))?
+    (`,` $preQuantScalar^ `:` type($preQuantScalar))?
+    `)`
     `outs` `(` $dst `:` qualified(type($dst) ) `)`
     attr-dict
   }];
@@ -4431,7 +4440,7 @@ def TInsertOp : PTO_TOp<"tinsert", [
     // TINSERT runs on different pipes depending on target/path:
     // - Vec(UB)->Vec(UB): PIPE_V.
     // - A5 Vec(UB)->Mat(L1): PIPE_MTE3 (custom UB->L1 copy path).
-    // - Acc->Mat (A2/A3/A5 regular path): PIPE_FIX.
+    // - Acc->Mat / Acc->Vec (A2/A3/A5 regular path): PIPE_FIX.
     ::mlir::pto::PIPE getPipe() {
       auto isA5Target = [&]() -> bool {
         auto moduleOp = getOperation()->getParentOfType<::mlir::ModuleOp>();
@@ -4501,7 +4510,9 @@ def TInsertFPOp : PTO_TOp<"tinsert_fp", [
     PTODpsType:$fp,
     Index:$indexRow,
     Index:$indexCol,
-    PTODpsType:$dst
+    PTODpsType:$dst,
+    OptionalAttr<PTO_AccToVecModeAttr>:$accToVecMode,
+    DefaultValuedAttr<PTO_ReluPreModeAttr, "::mlir::pto::ReluPreMode::NoRelu">:$reluPreMode
   );
 
   let results = (outs);
@@ -5365,6 +5376,7 @@ def TPReluOp: PTO_TOp<"tprelu", [
 //===----------------------------------------------------------------------===//
 
 def TQuantOp : PTO_TOp<"tquant", [
+  AttrSizedOperandSegments,
   PTO_DpsInitOpInterface,
   OpPipeInterface,
   DeclareOpInterfaceMethods<MemoryEffectsOpInterface>
@@ -5377,18 +5389,33 @@ def TQuantOp : PTO_TOp<"tquant", [
 
     For INT8_ASYM an additional offset tile must be supplied in ins.
 
+    The optional tmp tile is the scratch buffer used by the A2/A3
+    TQUANT_IMPL row-wise broadcast (the fp->s32 conversion reuses it). On
+    pto-isa builds where the 4-arg TQUANT overload routes through the fixed
+    TMP_UB_OFFSET scratch area, supplying tmp selects the tmp-aware 5-arg
+    overload and avoids the fixed-address collision. PTOAS auto-synthesizes
+    this scratch tile for A2/A3 only. On A5 the tmp operand is accepted as a
+    placeholder and does not add extra shape or memory-planning constraints.
+
     DPS form (INT8_SYM):
       pto.tquant ins(%src, %fp : <src_type>, <fp_type>)
                  outs(%dst : <dst_type>) {quant_type = #pto<quant_type INT8_SYM>}
+    DPS form (INT8_SYM, with tmp):
+      pto.tquant ins(%src, %fp : <src_type>, <fp_type>)
+                 outs(%dst, %tmp : <dst_type>, <tmp_type>) {quant_type = #pto<quant_type INT8_SYM>}
     DPS form (INT8_ASYM):
       pto.tquant ins(%src, %fp, %offset : <src_type>, <fp_type>, <offset_type>)
                  outs(%dst : <dst_type>) {quant_type = #pto<quant_type INT8_ASYM>}
+    DPS form (INT8_ASYM, with tmp):
+      pto.tquant ins(%src, %fp, %offset : <src_type>, <fp_type>, <offset_type>)
+                 outs(%dst, %tmp : <dst_type>, <tmp_type>) {quant_type = #pto<quant_type INT8_ASYM>}
   }];
 
   let arguments = (ins
     PTODpsType:$src,
     PTODpsType:$fp,
     Optional<PTODpsType>:$offset,
+    Optional<PTODpsType>:$tmp,
     PTODpsType:$dst,
     PTO_QuantTypeAttr:$quant_type
   );
@@ -5397,11 +5424,7 @@ def TQuantOp : PTO_TOp<"tquant", [
 
   let hasVerifier = 1;
 
-  let assemblyFormat = [{
-    `ins` `(` $src `,` $fp (`,` $offset^)? `:` qualified(type($src)) `,` qualified(type($fp)) (`,` qualified(type($offset))^)? `)`
-    `outs` `(` $dst `:` qualified(type($dst)) `)`
-    attr-dict
-  }];
+  let hasCustomAssemblyFormat = 1;
 
   let extraClassDeclaration = [{
     ::mlir::pto::PIPE getPipe() { return ::mlir::pto::PIPE::PIPE_V; }
@@ -6438,6 +6461,7 @@ def TSqrtOp: PTO_TOp<"tsqrt", [
 
 def TStoreFPOp: PTO_TOp<"tstore_fp", [
   PTO_DpsInitOpInterface,
+  OpPipeInterface,
 ]> {
   let summary = "TSTORE_FP: Store an accumulator tile into global memory using a scaling (fp) tile for vector quantization parameters.";
 
@@ -6457,6 +6481,9 @@ def TStoreFPOp: PTO_TOp<"tstore_fp", [
     attr-dict
   }];
   let extraClassDeclaration = [{
+    // TStoreFPOp always transfers ACC data to GM through the FIXPIPE
+    // write-back path (same pipe used by other ACC-store variants).
+    ::mlir::pto::PIPE getPipe() { return ::mlir::pto::PIPE::PIPE_FIX; }
     ::mlir::MutableOperandRange getDpsInitsMutable() { return getDstMutable(); }
   }];
 }

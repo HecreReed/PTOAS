@@ -351,6 +351,17 @@ The compiler automatically computes the byte offset from the tile's shape, eleme
 | `vec` | `VRegType` | Loaded vector register (when `post_update=OFF`) |
 | `(vec, updated_buf)` | `(VRegType, PtrType)` | Loaded vector and advanced pointer (when `post_update=ON`, pointer form only) |
 
+Low-precision element types use the same pointer/tile forms. Use `b8` masks for 8-bit storage formats, including packed FP4 storage types:
+
+<!-- ptodsl-doc-test: {"mode":"compile_fragment","fixture":"data_movement.low_precision_vector_memory","symbol":"data_movement_low_precision_vector_memory_probe","compile":{}} -->
+```python
+mask_b8 = pto.pset_b8(pto.MaskPattern.ALL)
+vec_f8 = pto.vlds(f8_src, pto.const(0))
+pto.vsts(vec_f8, f8_dst, pto.const(0), mask_b8)
+low, high = pto.vldsx2(fp4_src, pto.const(0), pto.DeinterleaveDist.DINTLV_B8)
+pto.vstsx2(low, high, fp4_dst, pto.const(0), pto.InterleaveDist.INTLV_B8, mask_b8)
+```
+
 
 #### `pto.vldsx2(tile[row, col:], dist: DeinterleaveDist) -> (VRegType, VRegType)`
 #### `pto.vldsx2(tile[start:], dist: DeinterleaveDist) -> (VRegType, VRegType)`
@@ -1059,7 +1070,14 @@ A full cube matmul (`@pto.cube`) follows this dataflow pattern:
 <!-- ptodsl-doc-test: {"mode":"compile_fragment","fixture":"data_movement.cube_helper","symbol":"data_movement_cube_helper_probe","compile":{"BLOCK_M":16,"BLOCK_K":16,"BLOCK_N":16}} -->
 ```python
 @pto.cube
-def qk_matmul(q_tile, k_tile, q_l0a, k_l0b, s_acc, s_tile):
+def qk_matmul(
+    q_tile: pto.Tile,
+    k_tile: pto.Tile,
+    q_l0a: pto.Tile,
+    k_l0b: pto.Tile,
+    s_acc: pto.Tile,
+    s_tile: pto.Tile,
+):
     m = q_tile.valid_shape[0]
     k = q_tile.valid_shape[1]
     n = k_tile.valid_shape[0]
@@ -1209,7 +1227,7 @@ Cube (producer) side:
 <!-- ptodsl-doc-test: {"mode":"compile_fragment","fixture":"pipe_communication.c2v_global_producer","symbol":"pipe_communication_c2v_global_producer_probe","compile":{}} -->
 ```python
 @pto.cube
-def producer(src_tile):
+def producer(src_tile: pto.Tile):
     c2v.init_cube()
     entry = c2v.alloc(split=0)
     entry_part = pto.partition_view(entry, offsets=[0, 0], sizes=[16, 16])
@@ -1222,7 +1240,7 @@ Vector (consumer) side:
 <!-- ptodsl-doc-test: {"mode":"compile_fragment","fixture":"pipe_communication.c2v_global_consumer","symbol":"pipe_communication_c2v_global_consumer_probe","compile":{}} -->
 ```python
 @pto.simd
-def consumer(dst_tile):
+def consumer(dst_tile: pto.Tile):
     c2v.init_simd()
     entry = c2v.pop(split=0)
     entry_part = pto.partition_view(entry, offsets=[0, 0], sizes=[16, 16])
@@ -1253,7 +1271,7 @@ Vector (producer) side:
 <!-- ptodsl-doc-test: {"mode":"compile_fragment","fixture":"pipe_communication.v2c_global_producer","symbol":"pipe_communication_v2c_global_producer_probe","compile":{}} -->
 ```python
 @pto.simd
-def producer(src_tile):
+def producer(src_tile: pto.Tile):
     v2c.init_simd()
     entry = v2c.alloc(split=0)
     pto.tile.store(src_tile, pto.partition_view(entry, offsets=[0, 0], sizes=[16, 16]))
@@ -1265,7 +1283,7 @@ Cube (consumer) side:
 <!-- ptodsl-doc-test: {"mode":"compile_fragment","fixture":"pipe_communication.v2c_global_consumer","symbol":"pipe_communication_v2c_global_consumer_probe","compile":{}} -->
 ```python
 @pto.cube
-def consumer(dst_tile):
+def consumer(dst_tile: pto.Tile):
     v2c.init_cube()
     entry = v2c.pop(split=0)
     pto.tile.load(pto.partition_view(entry, offsets=[0, 0], sizes=[16, 16]), dst_tile)
@@ -1303,7 +1321,7 @@ Cube (producer) transaction:
 <!-- ptodsl-doc-test: {"mode":"compile_fragment","fixture":"pipe_communication.c2v_local_producer","symbol":"pipe_communication_c2v_local_producer_probe","compile":{}} -->
 ```python
 @pto.cube
-def producer(src_tile):
+def producer(src_tile: pto.Tile):
     c2v_peer.init_cube()
     c2v_peer.push(src_tile, split=0)
 ```
@@ -1313,17 +1331,17 @@ Vector (consumer) transaction:
 <!-- ptodsl-doc-test: {"mode":"compile_fragment","fixture":"pipe_communication.c2v_local_consumer","symbol":"pipe_communication_c2v_local_consumer_probe","compile":{}} -->
 ```python
 @pto.simd
-def consumer(dst_part):
+def consumer(dst_tile: pto.Tile):
     c2v.init_simd()
     tile = c2v.pop(result_type=dst_tile, split=0)
-    pto.tile.store(tile, dst_part)
+    pto.tile.load(tile, dst_tile)
     c2v.free(split=0)
 ```
 
 The local form is the A5-facing form used when Cube and Vector exchange UB/MAT
 tiles through a local FIFO. `push(tile)` emits a tile-entry `tpush`; `pop()`
-emits a tile-entry `tpop`; `free()` can omit the entry because no GM FIFO slot
-descriptor was allocated by the frontend.
+emits a tile-entry `tpop` into the vector-side local tile; `free()` can omit
+the entry because no GM FIFO slot descriptor was allocated by the frontend.
 
 ### 7.6.6 Bidirectional Local Pipe
 
@@ -1367,16 +1385,13 @@ def cube_producer(
         offsets=[0, 0], sizes=[16, 16])
     a_tile = pto.alloc_tile(shape=[16, 16], dtype=pto.f32)
 
-    @pto.cube
-    def cube_kernel():
+    with pto.cube():
         pto.tile.load(a_part, a_tile)
         c2v.init_cube()
         entry = c2v.alloc(split=0)
         entry_part = pto.partition_view(entry, offsets=[0, 0], sizes=[16, 16])
         pto.tile.store(a_tile, entry_part)
         c2v.push(entry, split=0)
-
-    cube_kernel()
 
 @pto.jit(target="a3")
 def vector_consumer(
@@ -1397,14 +1412,11 @@ def vector_consumer(
         pto.make_tensor_view(dst, shape=[16, 16], strides=[16, 1]),
         offsets=[0, 0], sizes=[16, 16])
 
-    @pto.simd
-    def vector_kernel():
+    with pto.simd():
         c2v.init_simd()
         entry = c2v.pop(split=0)
         entry_part = pto.partition_view(entry, offsets=[0, 0], sizes=[16, 16])
         pto.tile.load(entry_part, b_tile)
         c2v.free(entry, split=0)
         pto.tile.store(b_tile, b_part)
-
-    vector_kernel()
 ```

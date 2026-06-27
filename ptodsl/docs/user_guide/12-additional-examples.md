@@ -53,7 +53,7 @@ def mat_add(
   they adapt to the runtime shapes `M` and `N_`.
 - Tile shape `[BLOCK_M, BLOCK_N]` is 2D; all three tiles use the same shape so `tile.add` is elementwise.
 - `partition_view` takes 2D offsets and sizes.
-- `BLOCK_M` and `BLOCK_N` are `constexpr` — the compiler specializes the kernel per tile shape.
+- `BLOCK_M` and `BLOCK_N` are `const_expr` — the compiler specializes the kernel per tile shape.
 
 The Python wrapper follows the same pattern as Chapter 2:
 

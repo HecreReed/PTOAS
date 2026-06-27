@@ -10,7 +10,6 @@
 from enum import Enum
 
 from ._bootstrap import make_context  # noqa: F401
-from ._host_tensors import TensorSpec, tensor_spec
 
 from mlir.dialects import pto as _pto
 
@@ -243,6 +242,7 @@ class VcvtRoundMode:
     C = "C"
     Z = "Z"
     O = "O"
+    H = "H"
 
 
 class VcvtSatMode:
@@ -266,6 +266,7 @@ class VcvtPartMode:
 
 
 AlignType = _pto.AlignType
+RoundMode = _pto.RoundMode
 DivPrecision = _pto.DivPrecision
 ExpPrecision = _pto.ExpPrecision
 LogPrecision = _pto.LogPrecision
@@ -288,7 +289,6 @@ class Tile:
 
 __all__ = [
     "const_expr",
-    "TensorSpec",
     "MemorySpace",
     "BarrierType",
     "Pipe",
@@ -313,6 +313,7 @@ __all__ = [
     "VcvtSatMode",
     "VcvtPartMode",
     "AlignType",
+    "RoundMode",
     "DivPrecision",
     "ExpPrecision",
     "LogPrecision",
@@ -322,5 +323,4 @@ __all__ = [
     "TensorView",
     "PartitionTensorView",
     "Tile",
-    "tensor_spec",
 ]

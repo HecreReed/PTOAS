@@ -1,0 +1,69 @@
+// Copyright (c) 2026 Huawei Technologies Co., Ltd.
+// This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+// CANN Open Software License Agreement Version 2.0 (the "License").
+// Please refer to the License for details. You may not use this file except in compliance with the License.
+// THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+// INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY OR FITNESS FOR A PARTICULAR PURPOSE.
+// See LICENSE in the root of the software repository for the full text of the License.
+
+// Guards the --enable-shape-inference switch for tile fusion.
+//
+// Two tiles whose valid-shape are *dynamic* (valid=?x?) and bound to the same
+// SSA value for valid_row/valid_col cannot be proven to share an iteration
+// domain by the static/direct-bound path: that path only handles compile-time
+// constants, so each dynamic-shape op becomes its own domain class and the ops
+// are NOT fused.  Only the ShapeConstraintSolver (enabled by
+// --enable-shape-inference) can prove the two SSA values are equivalent, so the
+// ops fuse into a single pto.fusion_region.
+//
+// Before:  --enable-op-fusion (shape inference off, default)
+//          -> ops NOT fused: no pto.fusion.group_id, no pto.fusion_region.
+// Expected: --enable-op-fusion --enable-shape-inference
+//          -> ops fused: pto.fusion.group_id = 0, wrapped in pto.fusion_region.
+//
+// RUN: ptoas --pto-backend=vpto --pto-arch=a5 --pto-level=level2 --enable-op-fusion --emit-pto-ir %s --mlir-print-ir-after=pto-fusion-plan -o /dev/null 2>&1 | FileCheck --check-prefix=NOFUSE %s
+// RUN: ptoas --pto-backend=vpto --pto-arch=a5 --pto-level=level2 --enable-op-fusion --enable-shape-inference --emit-pto-ir %s --mlir-print-ir-after=pto-fusion-plan -o /dev/null 2>&1 | FileCheck --check-prefix=FUSE %s
+// RUN: ptoas --pto-backend=vpto --pto-arch=a5 --pto-level=level2 --enable-op-fusion --enable-shape-inference --emit-pto-ir %s --mlir-print-ir-after=pto-fusion-region-gen -o /dev/null 2>&1 | FileCheck --check-prefix=REGION %s
+
+module {
+  func.func @dynamic_shape_same_ssa(
+      %arg0: !pto.tile_buf<vec, 64x32xf32, valid=?x?>,
+      %vrow: index,
+      %vcol: index) {
+    %tmp0 = pto.alloc_tile valid_row = %vrow valid_col = %vcol : !pto.tile_buf<vec, 64x32xf32, valid=?x?>
+    %tmp1 = pto.alloc_tile valid_row = %vrow valid_col = %vcol : !pto.tile_buf<vec, 64x32xf32, valid=?x?>
+
+    pto.tadd ins(%arg0, %arg0 : !pto.tile_buf<vec, 64x32xf32, valid=?x?>, !pto.tile_buf<vec, 64x32xf32, valid=?x?>) outs(%tmp0 : !pto.tile_buf<vec, 64x32xf32, valid=?x?>)
+    pto.tmul ins(%tmp0, %arg0 : !pto.tile_buf<vec, 64x32xf32, valid=?x?>, !pto.tile_buf<vec, 64x32xf32, valid=?x?>) outs(%tmp1 : !pto.tile_buf<vec, 64x32xf32, valid=?x?>)
+    return
+  }
+}
+
+// With shape inference OFF, the ops are not fused: neither op carries
+// pto.fusion.group_id/order.
+// NOFUSE-LABEL: func.func @dynamic_shape_same_ssa(
+// NOFUSE: pto.tadd ins(%arg0, %arg0
+// NOFUSE-NOT: pto.fusion.group_id
+// NOFUSE: pto.tmul ins(%{{.*}}, %arg0
+// NOFUSE-NOT: pto.fusion.group_id
+// NOFUSE: return
+
+// With shape inference ON, both ops belong to fusion group 0.
+// FUSE-LABEL: func.func @dynamic_shape_same_ssa(
+// FUSE: pto.tadd ins(%arg0, %arg0
+// FUSE-SAME: pto.fusion.group_id = 0 : i64
+// FUSE-SAME: pto.fusion.order = 0 : i64
+// FUSE: pto.tmul ins(%{{.*}}, %arg0
+// FUSE-SAME: pto.fusion.group_id = 0 : i64
+// FUSE-SAME: pto.fusion.order = 1 : i64
+// FUSE: return
+
+// With shape inference ON, the fused span is wrapped into one region.
+// REGION-LABEL: func.func @dynamic_shape_same_ssa(
+// REGION: pto.fusion_region {
+// REGION-NEXT: pto.alloc_tile
+// REGION: pto.tadd
+// REGION-NEXT: pto.tmul
+// REGION-NEXT: pto.yield({{.*}}) : {{.*}} -> ()
+// REGION: } {pto.fusion.group_id = 0 : i64}
+// REGION: return

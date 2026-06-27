@@ -360,6 +360,30 @@ TileLang uses three public buffer-facing type names in kernel signatures:
 | `pto.PartitionTensorView` | Logical GM partition (slice) descriptor, corresponding to `!pto.partition_tensor_view<...>` |
 | `pto.Tile` | Tile buffer value for hardware-resident staged compute/storage buffers |
 
+### View Layout Metadata
+
+TileLang DSL exposes a view-only config/query surface for matcher constraints:
+
+- `pto.ViewLayout`
+- `pto.ViewConfig`
+- `view.config.layout`
+
+Supported `ViewLayout` values:
+
+| Enum Value | Meaning |
+|------------|---------|
+| `pto.ViewLayout.ND` | ND-style view layout |
+| `pto.ViewLayout.DN` | DN-style view layout |
+| `pto.ViewLayout.NZ` | NZ-style view layout |
+| `pto.ViewLayout.MX_A_ZZ` | MX A-side scale layout |
+| `pto.ViewLayout.MX_B_NN` | MX B-side scale layout |
+
+Notes:
+- This is a view-only config surface; it is separate from `TileConfig`.
+- `layout` is optional. If the query carries no explicit layout metadata, then
+  `view.config.layout` is `None`.
+- This surface is primarily intended for template selection constraints.
+
 ### TensorView Types
 
 TensorView types represent multi-dimensional (up to 5D) views into tensors residing in Global Memory (GM). They are used as kernel parameters for describing GM data and support slicing operations to create logical partitions for DMA load/store operations.
@@ -397,7 +421,26 @@ Important notes:
 | `shape` | `tuple[int, ...]` | Tensor dimensions (supports up to 5 dimensions, right-aligned to 5D in PTO ISA) |
 | `element_type` | `Type` | Element data type (for example `pto.f32`, `pto.f16`) |
 | `strides` | `tuple[int, ...]` | Stride in elements for each dimension |
-| `offset` | `pto.i64` | Byte offset from base pointer (internal) |
+| `config` | `ViewConfig` | Optional view metadata surface used by matcher constraints |
+
+Current constraint-time `TensorView.config` query:
+
+```python
+@pto.vkernel(
+    target="a5",
+    op="pto.tload",
+    dtypes=[(pto.f32, pto.f32)],
+    constraints=[lambda src: src.config.layout == pto.ViewLayout.NZ],
+)
+def template_tload_nz(src: pto.TensorView, dst: pto.Tile):
+    return None
+```
+
+Rules:
+- `TensorView.config.layout` may be `None`
+- absent layout metadata must not be treated as implicit `ND`
+- use this surface for constraint-time layout selection and matcher dispatch,
+  not as a general runtime layout-computation API inside arbitrary kernel code
 
 #### Padding Mode Enum
 
@@ -482,7 +525,10 @@ Important notes:
 | `shape` | `tuple[int, ...]` | Partition dimensions |
 | `element_type` | `Type` | Element data type inherited from source tensor view |
 | `strides` | `tuple[int, ...]` | Stride in elements for each dimension |
-| `offset` | `pto.i64` | Byte offset from the base tensor pointer (internal) |
+| `config` | `ViewConfig` | Optional view metadata surface used by matcher constraints |
+
+`PartitionTensorView.config.layout` follows the same contract as
+`TensorView.config.layout`, including the same constraint-time usage model.
 
 ### Tile Types
 

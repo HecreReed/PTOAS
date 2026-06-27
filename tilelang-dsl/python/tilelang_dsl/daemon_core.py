@@ -35,6 +35,7 @@ from .types import (
     ScalarType,
     TileSpecialization,
     TileConfig,
+    ViewConfig,
     WildcardType,
     is_integer_dtype,
 )
@@ -342,10 +343,18 @@ def _build_positional_context_attrs(operand_specs: list[dict]) -> dict[str, Any]
                 attrs[f"{prefix}_valid_shape"] = tuple(valid_shape)
             config = spec.get("config")
             if config is not None:
+                if not isinstance(config, TileConfig):
+                    config = TileConfig.from_mapping(config)
                 attrs[f"{prefix}_config"] = config
 
-        if spec.get("kind") == "view" and "strides" in spec:
-            attrs[f"{prefix}_strides"] = tuple(spec["strides"])
+        if spec.get("kind") == "view":
+            config = spec.get("config")
+            if config is not None:
+                if not isinstance(config, ViewConfig):
+                    config = ViewConfig.from_mapping(config)
+                attrs[f"{prefix}_config"] = config
+            if "strides" in spec:
+                attrs[f"{prefix}_strides"] = tuple(spec["strides"])
 
     return attrs
 

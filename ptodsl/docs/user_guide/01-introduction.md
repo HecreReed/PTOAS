@@ -52,17 +52,21 @@ surfaces around them, without abstracting away the hardware boundaries.
 
 ## 1.2 Authoring model
 
-PTODSL's public kernel model is **one entry point, two modes**:
+PTODSL's public kernel model is **one decorator, two roles, two backends**:
 
 ```
 Python Wrapper              L0  user-facing wrapper (NumPy, torch-npu, pure Python)
-  └─ @pto.jit(mode="auto")         tile-first authoring, compiler-managed staging
-  └─ @pto.jit(mode="explicit")     micro-instruction authoring, user-managed staging
-       ├─ Tile Ops                 tile.load, tile.store, tile.add, ...
-       ├─ MTE Ops                  mte_load / mte_store / mte_gm_ub / ...
-       ├─ @pto.cube                matrix products (mad, mte_l1_l0a, mte_l0c_ub, ...)
-       ├─ @pto.simd                row-wise vector math (vlds, vadd, vexp, vsts, ...)
-       └─ @pto.simt                scalar-like compute (lds, sts, pointwise blends, ...)
+  └─ @pto.jit(entry=True)         host-launchable kernel entry
+  │    ├─ backend="vpto"          VPTO backend (default), mode="auto" or "explicit"
+  │    └─ backend="emitc"         EmitC backend, mode="auto" only
+  ├─ @pto.jit(entry=False)        kernel module, callable from entries and other modules
+  │    ├─ backend="vpto"          VPTO backend, mode="auto" or "explicit"
+  │    └─ backend="emitc"         EmitC backend, mode="auto" only
+  ├─ Tile Ops                     tile.load, tile.store, tile.add, ...
+  ├─ MTE Ops                      mte_load / mte_store / mte_gm_ub / ...
+  ├─ @pto.cube                    matrix products (mad, mte_l1_l0a, mte_l0c_ub, ...)
+  ├─ @pto.simd                    row-wise vector math (vlds, vadd, vexp, vsts, ...)
+  └─ @pto.simt                    scalar-like compute (lds, sts, pointwise blends, ...)
 ```
 
 ### Python wrapper
@@ -93,15 +97,30 @@ def flash_attention(Q, K, V, *, O=None, causal=False):
     return O
 ```
 
-### `@pto.jit` — the kernel entry
+### `@pto.jit` — kernel entries and kernel modules
 
-Decorating a function with `@pto.jit` marks it as a launchable PTO kernel. This decoration means:
+Decorating a function with `@pto.jit` marks it as a PTO kernel. The decorator
+has two roles controlled by `entry`:
 
-- **Compilation**: the function body is traced once to record all PTO instructions, then lowered through the PTOAS compiler pipeline into an optimized NPU executable.
-- **Caching**: compiled kernels are cached by specialization key (function identity + entry annotation signature + constexpr parameter values), so repeated calls with the same configuration skip recompilation.
-- **Launch binding**: the compiled kernel can be invoked with a grid and stream — `compiled[grid, stream](args...)` — which launches the executable on the NPU with the given SPMD grid.
+- **`entry=True`** (the default): a host-launchable kernel entry. The function
+  is traced, compiled, and can be invoked with `compiled[grid, stream](args...)`.
+- **`entry=False`**: a kernel module — a device-side function that entries and
+  other modules can call from their traced bodies. Modules are not
+  host-launchable — calling `.compile()` or `[grid, stream]` on them raises an
+  error. They are compiled and linked together with their callers automatically.
 
-The public `@pto.jit` entry contract is pointer-first. Device buffers are explicit GM pointers (`pto.ptr(..., "gm")`), launch-varying shape/stride metadata travels as runtime scalars, and the kernel body materializes `TensorView` descriptors with `make_tensor_view(ptr, shape=..., strides=...)`. Compile-time constants remain keyword-only `pto.const_expr` parameters:
+In both roles, compilation, caching, and tracing work the same way: the body is
+traced once, lowered through the PTOAS compiler pipeline, and cached by
+specialization key (function identity + entry annotation signature + const_expr
+parameter values).
+
+#### `entry=True` — host-launchable kernel
+
+The host-entry contract is pointer-first. Device buffers are explicit GM
+pointers (`pto.ptr(..., "gm")`), launch-varying shape/stride metadata travels as
+runtime scalars, and the kernel body materializes `TensorView` descriptors with
+`make_tensor_view(ptr, shape=..., strides=...)`. Compile-time constants remain
+keyword-only `pto.const_expr` parameters:
 
 <!-- ptodsl-doc-test: {"mode":"compile","symbol":"flash_attention_kernel","compile":{"BLOCK_Q":128,"BLOCK_KV":128,"CAUSAL":false}} -->
 ```python
@@ -133,32 +152,98 @@ def flash_attention_kernel(
     return
 ```
 
-`@pto.jit` is the only host-visible kernel entry. Its `mode` selects the
-programming model:
+`@pto.jit(entry=True)` is the host-visible kernel entry. The SPMD launch
+contract is also owned here: the runtime grid (e.g., `batch * heads` blocks) is
+declared at the call site, and block/subblock indices are queried via
+`pto.get_block_idx()` and friends.
 
-- `mode="auto"` (the default) is **tile-centric**. You allocate tiles, partition
-  GM views, use Tile Ops (`tile.load`, `tile.store`, `tile.add`, ...), and call
-  compute sub-kernels. The compiler manages staging and scheduling around the
-  tile abstraction.
-- `mode="explicit"` is **tile + micro-instruction**. You keep the same tile
-  surface from `auto`, but also gain access to the full micro-instruction
-  set — MTE ops (`mte_load`, `mte_store`, ...), explicit synchronization,
-  and direct pointer manipulation — so you can reach below the tile abstraction
-  and control individual instructions when needed.
+#### `entry=False` — kernel modules
+
+A kernel module is a device-side function that entries and other modules call
+directly from their traced bodies. You cannot call `.compile()` on a module or
+invoke it with `[grid, stream]`. Instead, the module is compiled and linked
+together with its callers automatically.
+
+The module uses a **C ABI** — only `pto.ptr(...)` and PTO scalars can cross
+the function boundary. `Tile`, `TensorView`, and `PartitionTensorView` stay
+inside the caller; the module receives raw pointers and scalar metadata.
+
+```python
+@pto.jit(entry=False)
+def process_tile(
+    a_ptr: pto.ptr(pto.f32, pto.MemorySpace.UB),
+    b_ptr: pto.ptr(pto.f32, pto.MemorySpace.UB),
+    o_ptr: pto.ptr(pto.f32, pto.MemorySpace.UB),
+    rows: pto.i32,
+    cols: pto.i32,
+):
+    # ... SIMD/SIMT/Cube operations on the local tiles ...
+    return
+
+@pto.jit(target="a5", entry=True)
+def my_kernel(
+    A_ptr: pto.ptr(pto.f32, "gm"),
+    O_ptr: pto.ptr(pto.f32, "gm"),
+    rows: pto.i32,
+    cols: pto.i32,
+    *,
+    BLOCK: pto.const_expr = 128,
+):
+    # ... allocate tiles, load data ...
+    process_tile(a_tile.as_ptr(), b_tile.as_ptr(), o_tile.as_ptr(), 1, cols)
+    # ... store results ...
+```
+
+#### `mode`: auto vs explicit
+
+`mode` chooses how you write the kernel body:
+
+- `mode="auto"` (the default) keeps you at **tile level**. You write
+  `tile.load`, `tile.store`, `tile.add` — the compiler handles everything
+  below the tile abstraction: staging, instruction ordering, and
+  synchronization. This is the right choice for most kernels.
+- `mode="explicit"` gives you **micro-instruction control** on top of
+  everything `auto` offers. You keep tiles and Tile Ops, but you can also
+  write MTE DMA instructions (`mte_load`, `mte_store`), place synchronization
+  barriers by hand, and work with raw pointers — useful when you need to
+  hand-tune instruction schedules or overlap DMA with compute.
+
+`mode` only affects what you can write inside the function body. It doesn't
+change how you compile or launch the kernel.
+
+#### `backend`: VPTO vs EmitC
+
+`backend` chooses which compiler pipeline builds your kernel:
+
+- `backend="vpto"` (the default) is the native VPTO path. It works with both
+  `mode="auto"` and `mode="explicit"`. Use this unless you specifically need
+  C++ codegen.
+- `backend="emitc"` generates C++ through the EmitC pipeline. It only works
+  with `mode="auto"` — if you try `mode="explicit"` with it, PTODSL raises
+  an error at decoration time.
+
+You can freely mix backends across modules: an `emitc` entry can call a
+`vpto` module, and vice versa. The compiler handles the linking automatically.
+
+#### How kernels and modules are compiled together
+
+When you compile an `entry=True` kernel that calls modules, PTODSL bundles
+everything into a single compilation unit. Each `@pto.jit` function is
+compiled independently with its own `backend` and `mode`, then linked
+together. You don't need to manage this yourself — calling a module from a
+traced body is all it takes. If you need to combine kernels that were
+compiled separately, use `pto.merge_jit_modules()`.
+
+This means you can decompose a large kernel into modules without worrying
+about how they'll be wired up. A pure VPTO kernel calling VPTO modules, an
+EmitC entry calling VPTO modules, a VPTO entry with EmitC modules — all of
+these work through the same mechanism.
 
 In both modes, `@pto.jit` is where you allocate tiles (`alloc_tile`) and use
 Tile Ops. The difference is that `explicit` additionally opens up the
 micro-instruction surface — MTE ops, explicit sync, and pointer-level
 control — so you can mix tile operations with hand-authored instructions in
 the same kernel.
-
-The SPMD launch contract is also owned here: the runtime grid (e.g., `batch * heads` blocks) is declared at the call site, and block/subblock indices are queried via `pto.get_block_idx()` and friends.
-
-PTODSL does not expose a second public "module" decorator alongside
-`@pto.jit`. For ordinary code organization, write plain Python helper
-functions that are called from the entry body. Use `@pto.cube`,
-`@pto.simd`, and `@pto.simt` only when the helper must execute on a
-specific hardware unit.
 
 ### Sub-kernels — `@pto.cube` / `@pto.simd` / `@pto.simt`
 
@@ -200,12 +285,13 @@ Chapter 5 (Control Flow) and Chapter 6 (Scalar & Pointer Operations) cover this 
 
 The flash attention kernel from Section 1.2 is not just an architectural diagram — it is a complete, runnable design sketch distributed with PTODSL (`examples/flash_attention_sketch.py`). Here is how the layers map to actual code:
 
-**Top-level `@pto.jit` schedule** allocates tiles for the Q block, KV block,
-online-softmax state (m/l/o ping-pong tiles), and cube-local scratch. It loops
-over Q blocks (outer `pto.for_`) and KV blocks (inner `pto.for_` with carry
-state), and uses `tile.load`/`tile.store` at the GM boundary.
+**Top-level `@pto.jit(entry=True, mode="explicit")` schedule** allocates tiles
+for the Q block, KV block, online-softmax state (m/l/o ping-pong tiles), and
+cube-local scratch. It loops over Q blocks (outer `pto.for_`) and KV blocks
+(inner `pto.for_` with carry state), and uses `tile.load`/`tile.store` at the
+GM boundary.
 
-**`mode="explicit"` orchestration path** stages the current K and V blocks with
+**Explicit orchestration path** stages the current K and V blocks with
 `mte_load`, issues `pipe_barrier(Pipe.ALL)` at phase boundaries, then
 sequences four sub-kernel calls: `qk_matmul` (cube),
 `online_softmax_rows` (simd), `pv_matmul` (cube), `blend_output_rows` (simt).
@@ -226,7 +312,7 @@ Chapter 11 walks through this example in full detail.
 
 | If you are... | Start with... |
 |---------------|---------------|
-| New to PTODSL | Chapter 2 (Quick Start), then Chapter 3 (Kernel Entries) |
+| New to PTODSL | Chapter 2 (Quick Start), then Chapter 3 (Kernel Entries & Modules) |
 | Writing your first kernel | Chapter 2 → Chapter 4 (Type System) → Chapter 5 (Control Flow) |
 | Looking up a specific operation | Chapters 6–10 and Chapter 13 (organized by topic) |
 | Understanding the flash attention reference | Chapter 11 |
@@ -237,7 +323,7 @@ Chapter 11 walks through this example in full detail.
 |---------|-------|
 | 1 | Introduction (this chapter) |
 | 2 | Quick Start — a minimal working kernel |
-| 3 | Kernel entry and sub-kernels: `@pto.jit(mode=...)`, `@pto.cube`, `@pto.simd`, `@pto.simt` |
+| 3 | Kernel entries, kernel modules, and sub-kernels: `@pto.jit(entry=True/False, backend=...)`, `@pto.cube`, `@pto.simd`, `@pto.simt` |
 | 4 | Type system and buffer management: scalars, tiles, views, allocation |
 | 5 | Control flow: trace-time Python vs device-side `pto.for_` / `pto.if_` |
 | 6 | Scalar and pointer operations |

@@ -1,38 +1,48 @@
+// Copyright (c) 2026 Huawei Technologies Co., Ltd.
+// This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+// CANN Open Software License Agreement Version 2.0 (the "License").
+// Please refer to the License for details. You may not use this file except in compliance with the License.
+// THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+// INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+// See LICENSE in the root of the software repository for the full text of the License.
+
+// Guards that pto-inline-libcall only inlines TileLang template helpers
+// introduced by ExpandTileOp, while leaving unrelated private helpers alone.
 // RUN: ptoas --pto-arch=a5 --pto-backend=vpto --emit-vpto --mlir-print-ir-after=pto-inline-libcall %s -o /dev/null 2>&1 | FileCheck %s
 
-module attributes {pto.target_arch = "a5", pto.kernel_kind = #pto.kernel_kind<vector>} {
+module attributes {pto.kernel_kind = #pto.kernel_kind<vector>} {
   func.func @kernel(%arg0: i32) {
-    %v0 = func.call @__tl_inline_add1_i32(%arg0) : (i32) -> i32
-    %v1 = func.call @__tilelang_template_passthrough_i32(%v0) : (i32) -> i32
-    %v2 = func.call @__regular_passthrough_i32(%v1) : (i32) -> i32
+    %a = pto.alloc_tile
+      : !pto.tile_buf<loc=vec, dtype=f32, rows=16, cols=64, v_row=16, v_col=64,
+                      blayout=row_major, slayout=none_box, fractal=512, pad=0>
+    %b = pto.alloc_tile
+      : !pto.tile_buf<loc=vec, dtype=f32, rows=16, cols=64, v_row=16, v_col=64,
+                      blayout=row_major, slayout=none_box, fractal=512, pad=0>
+    %out = pto.alloc_tile
+      : !pto.tile_buf<loc=vec, dtype=f32, rows=16, cols=64, v_row=16, v_col=64,
+                      blayout=row_major, slayout=none_box, fractal=512, pad=0>
+
+    pto.tadd ins(%a, %b : !pto.tile_buf<loc=vec, dtype=f32, rows=16, cols=64, v_row=16, v_col=64,
+                              blayout=row_major, slayout=none_box, fractal=512, pad=0>,
+                          !pto.tile_buf<loc=vec, dtype=f32, rows=16, cols=64, v_row=16, v_col=64,
+                              blayout=row_major, slayout=none_box, fractal=512, pad=0>)
+             outs(%out : !pto.tile_buf<loc=vec, dtype=f32, rows=16, cols=64, v_row=16, v_col=64,
+                               blayout=row_major, slayout=none_box, fractal=512, pad=0>)
+
+    %0 = func.call @regular_passthrough_i32(%arg0) : (i32) -> i32
     return
   }
 
-  func.func private @__tl_inline_add1_i32(%x: i32) -> i32 attributes { pto.tilelang.inline_proc } {
-    %c1 = arith.constant 1 : i32
-    %y = arith.addi %x, %c1 : i32
-    return %y : i32
-  }
-
-  // This is intentionally NOT an inline_proc helper. The inline pass should
-  // still inline it because template helper inlining is enabled in VPTO
-  // mainline regardless of --enable-tile-op-expand.
-  func.func private @__tilelang_template_passthrough_i32(%x: i32) -> i32 attributes { pto.tilelang.instance } {
-    return %x : i32
-  }
-
-  // Regular private helper without TileLang/OP-Lib attrs must not be inlined
-  // by pto-inline-libcall.
-  func.func private @__regular_passthrough_i32(%x: i32) -> i32 {
+  func.func private @regular_passthrough_i32(%x: i32) -> i32 {
     return %x : i32
   }
 }
 
 // CHECK-LABEL: func.func @kernel
-// CHECK: arith.constant 1 : i32
-// CHECK-NOT: func.call @__tl_inline_add1_i32
-// CHECK-NOT: call @__tilelang_template_passthrough_i32
-// CHECK: call @__regular_passthrough_i32
-// CHECK-NOT: func.func private @__tilelang_template_passthrough_i32
-// CHECK: func.func private @__regular_passthrough_i32
-// CHECK-NOT: func.func private @__tl_inline_add1_i32
+// CHECK: pto.tile_buf_addr
+// CHECK: pto.vadd
+// CHECK: call @regular_passthrough_i32
+// CHECK-NOT: call @template_tadd
+// CHECK-NOT: func.call @template_tadd
+// CHECK: func.func private @regular_passthrough_i32
+// CHECK-NOT: func.func private @template_tadd

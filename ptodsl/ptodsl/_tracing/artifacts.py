@@ -23,13 +23,20 @@ class ModuleArtifact:
         self._py_name = py_name
         self._cached_module = module
         self._module_factory = module_factory
+        self._build_metadata = {}
 
     def build(self):
         """Return the cached ``mlir.ir.Module``."""
         if self._cached_module is None:
             if self._module_factory is None:
                 raise RuntimeError(f"{self._py_name} has no module factory")
-            self._cached_module = self._module_factory()
+            built = self._module_factory()
+            if isinstance(built, tuple):
+                self._cached_module, metadata = built
+                self._build_metadata = dict(metadata or {})
+            else:
+                self._cached_module = built
+                self._build_metadata = {}
         return self._cached_module
 
     def mlir_module(self):
@@ -48,11 +55,20 @@ class ModuleArtifact:
         """Write the textual MLIR form to *path*."""
         Path(path).write_text(self.mlir_text(), encoding="utf-8")
 
+    def build_metadata(self):
+        """Return a shallow copy of artifact metadata produced during build()."""
+        self.build()
+        return dict(self._build_metadata)
+
+    def __ptodsl_cache_signature__(self):
+        """Return one stable, side-effect-free cache signature for this artifact."""
+        return (type(self).__name__, self._py_name)
+
     def __str__(self):
         return self.mlir_text()
 
     def __repr__(self):
-        return self.mlir_text()
+        return f"<{type(self).__name__} {self._py_name!r}>"
 
 
 __all__ = ["ModuleArtifact"]

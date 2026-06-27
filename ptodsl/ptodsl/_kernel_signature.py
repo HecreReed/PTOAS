@@ -14,16 +14,31 @@ from dataclasses import dataclass
 
 from ._diagnostics import (
     jit_constexpr_missing_default_error,
+    jit_helper_illegal_formal_annotation_error,
+    jit_helper_missing_annotation_error,
+    jit_helper_standalone_type_inference_error,
     jit_illegal_formal_annotation_error,
     jit_keyword_only_non_constexpr_error,
     jit_legacy_tensor_spec_entry_error,
+    jit_legacy_tensor_spec_helper_error,
     jit_missing_annotation_error,
     jit_non_gm_ptr_entry_error,
 )
 from ._host_tensors import TensorSpec
+from ._surface_types import (
+    PartitionTensorView,
+    TensorView,
+    Tile,
+    const_expr as _const_expr_marker,
+)
 from ._surface_values import wrap_surface_value
-from ._surface_types import const_expr as _const_expr_marker
-from ._types import _DType, _MaskDescriptor, _PtrDescriptor, _VRegDescriptor, _resolve
+from ._types import (
+    _DType,
+    _MaskDescriptor,
+    _PtrDescriptor,
+    _VRegDescriptor,
+    _resolve,
+)
 
 
 @dataclass(frozen=True)
@@ -68,21 +83,20 @@ class RuntimeScalarParameterSpec:
 
 
 @dataclass(frozen=True)
-class TensorSpecParameterSpec:
+class HelperMarkerParameterSpec:
     name: str
-    tensor_spec: object
-
-    def _raise_legacy_entry_error(self):
-        raise jit_legacy_tensor_spec_entry_error(self.name, self.tensor_spec)
+    annotation: object
 
     def entry_arg_types(self):
-        self._raise_legacy_entry_error()
+        raise jit_helper_standalone_type_inference_error(self.name, self.annotation)
 
     def bind_entry_arguments(self, entry_arguments):
-        self._raise_legacy_entry_error()
+        if not entry_arguments:
+            raise RuntimeError(f"kernel-module ABI for parameter '{self.name}' is incomplete")
+        return wrap_surface_value(entry_arguments[0]), entry_arguments[1:]
 
     def abi_signature(self):
-        self._raise_legacy_entry_error()
+        return ("helper-marker", self.name, getattr(self.annotation, "__name__", repr(self.annotation)))
 
 
 @dataclass(frozen=True)
@@ -122,6 +136,10 @@ def _is_explicit_gm_ptr_annotation(annotation) -> bool:
         isinstance(annotation, _PtrDescriptor)
         and str(getattr(annotation, "_space", "")).lower() == "gm"
     )
+
+
+def _is_helper_marker_annotation(annotation) -> bool:
+    return annotation in {Tile, TensorView, PartitionTensorView}
 
 
 @dataclass(frozen=True)
@@ -176,8 +194,8 @@ class KernelSignature:
         )
 
 
-def parse_jit_kernel_signature(py_fn) -> KernelSignature:
-    """Parse one authored ``@pto.jit`` function signature."""
+def _parse_entry_jit_kernel_signature(py_fn) -> KernelSignature:
+    """Parse one authored launch-entry ``@pto.jit(entry=True)`` signature."""
     sig = inspect.signature(py_fn)
     positional_parameters = []
     constexpr_parameters = []
@@ -224,12 +242,61 @@ def parse_jit_kernel_signature(py_fn) -> KernelSignature:
     )
 
 
+def _parse_helper_jit_kernel_signature(py_fn) -> KernelSignature:
+    """Parse one authored kernel-module ``@pto.jit(entry=False)`` signature."""
+    sig = inspect.signature(py_fn)
+    positional_parameters = []
+
+    for param in sig.parameters.values():
+        if param.kind not in {
+            inspect.Parameter.POSITIONAL_ONLY,
+            inspect.Parameter.POSITIONAL_OR_KEYWORD,
+        }:
+            if param.kind is inspect.Parameter.KEYWORD_ONLY and param.annotation is _const_expr_marker:
+                raise TypeError(
+                    f"@pto.jit(entry=False) keyword-only parameter '{param.name}' uses unsupported kernel-module "
+                    "compile-time annotation pto.const_expr. Kernel-module ABI does not support "
+                    "keyword-only constexpr specialization parameters."
+                )
+            raise TypeError(
+                f"@pto.jit(entry=False) parameter '{param.name}' uses unsupported parameter kind "
+                f"{param.kind!r}"
+            )
+
+        if param.annotation is inspect.Parameter.empty:
+            raise jit_helper_missing_annotation_error(param.name)
+        if isinstance(param.annotation, TensorSpec):
+            raise jit_legacy_tensor_spec_helper_error(param.name, param.annotation)
+        if isinstance(param.annotation, _PtrDescriptor):
+            positional_parameters.append(DeviceParameterSpec(param.name, param.annotation))
+            continue
+        if _is_supported_runtime_scalar_annotation(param.annotation):
+            positional_parameters.append(RuntimeScalarParameterSpec(param.name, param.annotation))
+            continue
+        if _is_helper_marker_annotation(param.annotation):
+            positional_parameters.append(HelperMarkerParameterSpec(param.name, param.annotation))
+            continue
+        raise jit_helper_illegal_formal_annotation_error(param.name, param.annotation)
+
+    return KernelSignature(
+        positional_parameters=tuple(positional_parameters),
+        constexpr_parameters=(),
+    )
+
+
+def parse_jit_kernel_signature(py_fn, *, entry: bool = True) -> KernelSignature:
+    """Parse one authored ``@pto.jit`` function signature."""
+    if entry:
+        return _parse_entry_jit_kernel_signature(py_fn)
+    return _parse_helper_jit_kernel_signature(py_fn)
+
+
 __all__ = [
     "ConstexprParameterSpec",
     "DeviceParameterSpec",
+    "HelperMarkerParameterSpec",
     "KernelSpecializationKey",
     "KernelSignature",
     "RuntimeScalarParameterSpec",
-    "TensorSpecParameterSpec",
     "parse_jit_kernel_signature",
 ]

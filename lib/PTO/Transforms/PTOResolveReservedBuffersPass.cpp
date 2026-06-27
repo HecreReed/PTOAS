@@ -111,20 +111,6 @@ static void setFlagBaseAttr(InitOpT op, IntegerAttr attr) {
   op->setAttr("flag_base", attr);
 }
 
-static ReserveBufferOp findReserveBufferByName(func::FuncOp funcOp,
-                                               StringRef name) {
-  // Reserve-buffer lookup is name-based because import_reserved_buffer only
-  // stores the peer function symbol and the logical reserve name.
-  ReserveBufferOp found;
-  funcOp.walk([&](ReserveBufferOp reserveOp) {
-    if (reserveOp.getName() != name)
-      return WalkResult::advance();
-    found = reserveOp;
-    return WalkResult::interrupt();
-  });
-  return found;
-}
-
 static std::string getFuncSymbol(func::FuncOp funcOp) {
   return funcOp.getSymName().str();
 }
@@ -141,8 +127,12 @@ static std::optional<PipePeerKey> getPipePeerKey(Value localAddr,
   }
 
   if (auto importOp = localAddr.getDefiningOp<ImportReservedBufferOp>()) {
-    return PipePeerKey{importOp.getPeerFuncAttr().getValue().str(),
-                       importOp.getName().str(), 0};
+    auto peerFunc =
+        lookupPeerFuncAcrossContainer(importOp.getOperation(),
+                                      importOp.getPeerFuncAttr());
+    if (!peerFunc)
+      return std::nullopt;
+    return PipePeerKey{getFuncSymbol(peerFunc), importOp.getName().str(), 0};
   }
 
   return std::nullopt;
@@ -497,8 +487,9 @@ struct PTOResolveReservedBuffersPass
         importOps.push_back(importOp);
       });
       for (ImportReservedBufferOp importOp : importOps) {
-        auto peerFunc = SymbolTable::lookupNearestSymbolFrom<func::FuncOp>(
-            importOp.getOperation(), importOp.getPeerFuncAttr());
+        auto peerFunc =
+            lookupPeerFuncAcrossContainer(importOp.getOperation(),
+                                          importOp.getPeerFuncAttr());
         if (!peerFunc) {
           return importOp.emitOpError(
               "expects 'peer_func' to reference an existing func.func");

@@ -827,6 +827,356 @@ static bool isTileViewSemantics(StringAttr viewSemantics) {
                            viewSemantics.getValue() == "bitcast");
 }
 
+static bool isPTODSLSubkernelHelper(func::FuncOp func) {
+  return func->hasAttr("pto.ptodsl.subkernel_helper");
+}
+
+static std::optional<SmallVector<Type>>
+inferSubkernelHelperTileSignature(func::FuncOp func, MLIRContext *ctx) {
+  if (func.isExternal() || func.empty() || !isPTODSLSubkernelHelper(func))
+    return std::nullopt;
+
+  Block &entry = func.front();
+  SmallVector<Type> inputTypes(func.getFunctionType().getInputs().begin(),
+                               func.getFunctionType().getInputs().end());
+  bool changed = false;
+
+  for (BlockArgument arg : entry.getArguments()) {
+    if (!isLocalTileMemRef(arg.getType()))
+      continue;
+
+    BindTileOp bind;
+    for (Operation *user : arg.getUsers()) {
+      auto candidate = dyn_cast<BindTileOp>(user);
+      if (!candidate || candidate.getSource() != arg)
+        continue;
+      bind = candidate;
+      break;
+    }
+    if (!bind)
+      continue;
+
+    auto memTy = dyn_cast<MemRefType>(arg.getType());
+    if (!memTy)
+      continue;
+
+    TileHandleMetadata meta = getTileHandleMetadata(bind.getResult(), ctx);
+    inputTypes[arg.getArgNumber()] = buildTileTypeFromMemRef(memTy, meta, ctx);
+    changed = true;
+  }
+
+  if (!changed)
+    return std::nullopt;
+  return inputTypes;
+}
+
+static BindTileOp findEntryArgBindTile(BlockArgument arg) {
+  for (Operation *user : arg.getUsers()) {
+    auto bind = dyn_cast<BindTileOp>(user);
+    if (bind && bind.getSource() == arg)
+      return bind;
+  }
+  return {};
+}
+
+static Operation *findMaterializedTileAnchorForValue(Value value) {
+  if (Operation *def = value.getDefiningOp()) {
+    if (isMaterializedTileAnchor(def))
+      return def;
+  }
+  return nullptr;
+}
+
+static Value materializeValueForSubkernelCall(
+    func::CallOp call, unsigned operandNo, Type tileTy, OpBuilder &builder,
+    MLIRContext *ctx, DenseMap<Value, Value> &tileHandles,
+    bool &failedMaterialization) {
+  Value oldValue = call.getOperand(operandNo);
+  if (oldValue.getType() == tileTy)
+    return oldValue;
+
+  if (Value materialized = lookupMaterializedTileHandle(oldValue, tileHandles)) {
+    if (materialized.getType() == tileTy)
+      return materialized;
+  }
+
+  auto memTy = dyn_cast<MemRefType>(oldValue.getType());
+  if (!memTy || !isLocalTileMemRef(memTy))
+    return Value();
+
+  TileHandleMetadata meta = getTileHandleMetadata(oldValue, ctx);
+  auto expectedTileTy = dyn_cast<TileBufType>(tileTy);
+  if (expectedTileTy)
+    meta.config = expectedTileTy.getConfigAttr();
+  Type materializedTy =
+      expectedTileTy ? tileTy : Type(buildTileTypeFromMemRef(memTy, meta, ctx));
+
+  Operation *anchor = findMaterializedTileAnchorForValue(oldValue);
+  Location loc = anchor ? anchor->getLoc() : call.getLoc();
+  if (anchor)
+    builder.setInsertionPointAfter(anchor);
+  else
+    builder.setInsertionPoint(call);
+  Value addr = computeExplicitAddress(oldValue, builder, loc);
+  if (!addr && isUnsupportedControlFlowAddress(oldValue)) {
+    emitMissingExplicitAddressError(call, oldValue);
+    failedMaterialization = true;
+    return Value();
+  }
+
+  auto alloc = builder.create<AllocTileOp>(
+      loc, materializedTy, addr ? addr : Value(),
+      getAllocValidOperand(cast<TileBufType>(materializedTy), meta.validRow, 0,
+                           builder, loc),
+      getAllocValidOperand(cast<TileBufType>(materializedTy), meta.validCol, 1,
+                           builder, loc));
+  copyMaterializedTileAttrs(meta.attrs, alloc);
+  Value materialized = alloc.getResult();
+  tileHandles[oldValue] = materialized;
+  return materialized;
+}
+
+static LogicalResult restorePTODSLSubkernelHelperTileABI(
+    ModuleOp module, OpBuilder &builder, MLIRContext *ctx,
+    DenseMap<Value, Value> &tileHandles, bool &failedMaterialization) {
+  DenseMap<StringRef, SmallVector<Type>> helperInputTypes;
+
+  for (func::FuncOp func : module.getOps<func::FuncOp>()) {
+    std::optional<SmallVector<Type>> maybeInputs =
+        inferSubkernelHelperTileSignature(func, ctx);
+    if (!maybeInputs)
+      continue;
+
+    FunctionType fnTy = func.getFunctionType();
+    if (maybeInputs->size() != fnTy.getNumInputs()) {
+      func.emitOpError("cannot restore PTODSL subkernel helper tile ABI: "
+                       "inferred input arity does not match function type");
+      return failure();
+    }
+
+    Block &entry = func.front();
+    for (auto [arg, newTy] : llvm::zip(entry.getArguments(), *maybeInputs)) {
+      if (arg.getType() == newTy)
+        continue;
+
+      BindTileOp bind = findEntryArgBindTile(arg);
+      Type oldTy = arg.getType();
+      builder.setInsertionPointToStart(&entry);
+      auto backCast = builder.create<UnrealizedConversionCastOp>(
+          func.getLoc(), oldTy, arg);
+      arg.setType(newTy);
+      arg.replaceAllUsesWith(backCast.getResult(0));
+      backCast.getInputsMutable().assign(ValueRange{arg});
+      if (bind)
+        tileHandles[bind.getResult()] = arg;
+    }
+    func.setFunctionType(
+        FunctionType::get(ctx, *maybeInputs, fnTy.getResults()));
+    func.setPrivate();
+    helperInputTypes[func.getSymName()] = *maybeInputs;
+  }
+
+  if (helperInputTypes.empty())
+    return success();
+
+  SmallVector<func::CallOp, 16> calls;
+  module.walk([&](func::CallOp call) {
+    if (helperInputTypes.contains(call.getCallee()))
+      calls.push_back(call);
+  });
+
+  for (func::CallOp call : calls) {
+    auto it = helperInputTypes.find(call.getCallee());
+    if (it == helperInputTypes.end())
+      continue;
+    ArrayRef<Type> inputTypes = it->second;
+    if (inputTypes.size() != call.getNumOperands()) {
+      call.emitOpError("cannot restore PTODSL subkernel helper tile ABI: "
+                       "call operand arity does not match callee");
+      return failure();
+    }
+
+    for (auto [idx, inputTy] : llvm::enumerate(inputTypes)) {
+      if (!isa<TileBufType>(inputTy))
+        continue;
+
+      Value materialized = materializeValueForSubkernelCall(
+          call, idx, inputTy, builder, ctx, tileHandles, failedMaterialization);
+      if (!materialized) {
+        call.emitOpError("cannot restore PTODSL subkernel helper tile ABI for "
+                         "operand #")
+            << idx << ": expected " << inputTy << " but found "
+            << call.getOperand(idx).getType();
+        return failure();
+      }
+      call->setOperand(idx, materialized);
+    }
+  }
+
+  return success();
+}
+
+static bool isFlattenedTileBufAddrView(memref::ReinterpretCastOp cast) {
+  auto resultTy = dyn_cast<MemRefType>(cast.getResult().getType());
+  if (!resultTy || resultTy.getRank() != 1)
+    return false;
+
+  auto sourceTy = dyn_cast<MemRefType>(cast.getSource().getType());
+  if (!sourceTy || !isLocalTileMemRef(sourceTy))
+    return false;
+
+  auto offset = cast.getMixedOffsets();
+  if (offset.size() != 1)
+    return false;
+  if (auto attr = offset.front().dyn_cast<Attribute>()) {
+    auto intAttr = dyn_cast<IntegerAttr>(attr);
+    if (!intAttr || intAttr.getInt() != 0)
+      return false;
+  }
+
+  auto strides = cast.getMixedStrides();
+  if (strides.size() != 1)
+    return false;
+  if (auto attr = strides.front().dyn_cast<Attribute>()) {
+    auto intAttr = dyn_cast<IntegerAttr>(attr);
+    if (!intAttr || intAttr.getInt() != 1)
+      return false;
+  }
+
+  return true;
+}
+
+static bool canRetypeCalleeOperand(ModuleOp module, func::CallOp call,
+                                   unsigned operandNo, Type newTy) {
+  func::FuncOp callee = module.lookupSymbol<func::FuncOp>(call.getCallee());
+  if (!callee)
+    return false;
+  FunctionType fnTy = callee.getFunctionType();
+  if (operandNo >= fnTy.getNumInputs())
+    return false;
+  if (fnTy.getInput(operandNo) == newTy)
+    return true;
+  return callee.isExternal();
+}
+
+static bool canRetypeTileBufAddrDirectUse(Operation *owner, unsigned operandNo) {
+  if (auto vlds = dyn_cast<VldsOp>(owner))
+    return operandNo == vlds.getSourceMutable().getOperandNumber();
+  if (auto vsts = dyn_cast<VstsOp>(owner))
+    return operandNo == vsts.getDestinationMutable().getOperandNumber();
+  if (auto vsstb = dyn_cast<VsstbOp>(owner))
+    return operandNo == vsstb.getDestinationMutable().getOperandNumber();
+  return false;
+}
+
+static void updateDirectUseResultTypesAfterPtrRetype(Operation *owner,
+                                                     unsigned operandNo,
+                                                     Type newTy) {
+  if (auto vlds = dyn_cast<VldsOp>(owner)) {
+    if (operandNo == vlds.getSourceMutable().getOperandNumber() &&
+        vlds.getUpdatedBase())
+      vlds.getUpdatedBase().setType(newTy);
+    return;
+  }
+
+  if (auto vsts = dyn_cast<VstsOp>(owner)) {
+    if (operandNo == vsts.getDestinationMutable().getOperandNumber() &&
+        vsts.getUpdatedBase())
+      vsts.getUpdatedBase().setType(newTy);
+    return;
+  }
+
+  if (auto vsstb = dyn_cast<VsstbOp>(owner)) {
+    if (operandNo == vsstb.getDestinationMutable().getOperandNumber() &&
+        vsstb.getUpdatedBase())
+      vsstb.getUpdatedBase().setType(newTy);
+  }
+}
+
+static void retypeCalleeOperand(ModuleOp module, func::CallOp call,
+                                unsigned operandNo, Type newTy,
+                                MLIRContext *ctx) {
+  func::FuncOp callee = module.lookupSymbol<func::FuncOp>(call.getCallee());
+  if (!callee)
+    return;
+
+  FunctionType fnTy = callee.getFunctionType();
+  if (operandNo >= fnTy.getNumInputs() || fnTy.getInput(operandNo) == newTy)
+    return;
+
+  SmallVector<Type> inputs(fnTy.getInputs().begin(), fnTy.getInputs().end());
+  inputs[operandNo] = newTy;
+  callee.setFunctionType(FunctionType::get(ctx, inputs, fnTy.getResults()));
+}
+
+static void restoreMaterializedTileBufAddrOps(
+    ModuleOp module, OpBuilder &builder, MLIRContext *ctx,
+    DenseMap<Value, Value> &tileHandles) {
+  SmallVector<memref::ReinterpretCastOp, 16> flattenedViews;
+  module.walk([&](memref::ReinterpretCastOp cast) {
+    if (isFlattenedTileBufAddrView(cast))
+      flattenedViews.push_back(cast);
+  });
+
+  for (memref::ReinterpretCastOp view : flattenedViews) {
+    Value tile = lookupMaterializedTileHandle(view.getSource(), tileHandles);
+    auto tileTy = tile ? dyn_cast<TileBufType>(tile.getType()) : TileBufType();
+    if (!tileTy)
+      continue;
+
+    auto resultTy = cast<MemRefType>(view.getResult().getType());
+    if (resultTy.getElementType() != tileTy.getElementType())
+      continue;
+
+    auto tileSpace =
+        dyn_cast_or_null<AddressSpaceAttr>(tileTy.getMemorySpace());
+    if (!tileSpace)
+      continue;
+
+    auto ptrTy =
+        PtrType::get(ctx, resultTy.getElementType(), tileSpace);
+
+    SmallVector<std::pair<func::CallOp, unsigned>, 4> callUses;
+    SmallVector<std::pair<Operation *, unsigned>, 4> directUses;
+    for (OpOperand &use : view.getResult().getUses()) {
+      auto call = dyn_cast<func::CallOp>(use.getOwner());
+      if (call) {
+        unsigned operandNo = use.getOperandNumber();
+        if (!canRetypeCalleeOperand(module, call, operandNo, ptrTy))
+          continue;
+        callUses.push_back({call, operandNo});
+        continue;
+      }
+
+      Operation *owner = use.getOwner();
+      unsigned operandNo = use.getOperandNumber();
+      if (!canRetypeTileBufAddrDirectUse(owner, operandNo))
+        continue;
+      directUses.push_back({owner, operandNo});
+    }
+
+    if (callUses.empty() && directUses.empty())
+      continue;
+
+    builder.setInsertionPoint(view);
+    auto addr =
+        builder.create<TileBufAddrOp>(view.getLoc(), ptrTy, tile);
+
+    for (auto [call, operandNo] : callUses) {
+      call->setOperand(operandNo, addr.getDst());
+      retypeCalleeOperand(module, call, operandNo, ptrTy, ctx);
+    }
+
+    for (auto [owner, operandNo] : directUses) {
+      owner->setOperand(operandNo, addr.getDst());
+      updateDirectUseResultTypesAfterPtrRetype(owner, operandNo, ptrTy);
+    }
+
+    if (view.use_empty())
+      view.erase();
+  }
+}
+
 static Value materializeAnchorResult(Operation *anchor, Value anchoredValue,
                                      OpBuilder &builder, MLIRContext *ctx,
                                      DenseMap<Value, Value> &tileHandles,
@@ -850,6 +1200,17 @@ static Value materializeAnchorResult(Operation *anchor, Value anchoredValue,
   if (usesToRewrite.empty() && !isTileView &&
       !mustMaterialize.contains(anchoredValue))
     return Value();
+
+  if (Value existing = tileHandles.lookup(anchoredValue)) {
+    for (OpOperand *use : usesToRewrite) {
+      Operation *owner = use->getOwner();
+      unsigned operandNo = use->getOperandNumber();
+      use->set(existing);
+      updateResultTypesAfterMaterializingOperand(owner, operandNo,
+                                                 existing.getType());
+    }
+    return existing;
+  }
 
   for (OpOperand *use : usesToRewrite)
     inferConfigForMaterializedUse(use->getOwner(), use->getOperandNumber(),
@@ -928,6 +1289,17 @@ struct PTOMaterializeTileHandlesPass
         mustMaterialize.insert(meta.source);
     }
 
+    if (failed(restorePTODSLSubkernelHelperTileABI(
+            module, builder, ctx, tileHandles, failedMaterialization))) {
+      signalPassFailure();
+      return;
+    }
+
+    if (failedMaterialization) {
+      signalPassFailure();
+      return;
+    }
+
     for (Operation *anchor : anchors) {
       if (anchor->getNumResults() != 1)
         continue;
@@ -940,6 +1312,8 @@ struct PTOMaterializeTileHandlesPass
       signalPassFailure();
       return;
     }
+
+    restoreMaterializedTileBufAddrOps(module, builder, ctx, tileHandles);
 
     if (failed(materializeControlFlowTileResults(module, tileHandles))) {
       signalPassFailure();
@@ -962,6 +1336,14 @@ struct PTOMaterializeTileHandlesPass
         continue;
       if (op->getName().getStringRef() == "pto.tassign" && operandNo == 0)
         continue;
+
+      if (Value existing = tileHandles.lookup(oldValue)) {
+        op->setOperand(operandNo, existing);
+        updateResultTypesAfterMaterializingOperand(op, operandNo,
+                                                   existing.getType());
+        continue;
+      }
+
       auto memTy = cast<MemRefType>(oldValue.getType());
       TileHandleMetadata meta = getTileHandleMetadata(oldValue, ctx);
       inferConfigForMaterializedUse(op, operandNo, oldValue.getType(), meta,
@@ -990,6 +1372,11 @@ struct PTOMaterializeTileHandlesPass
     }
 
     if (failedMaterialization) {
+      signalPassFailure();
+      return;
+    }
+
+    if (failed(materializeControlFlowTileResults(module, tileHandles))) {
       signalPassFailure();
       return;
     }

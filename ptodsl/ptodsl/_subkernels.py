@@ -18,13 +18,47 @@ from ._diagnostics import (
     illegal_inline_subkernel_placement_error,
     illegal_subkernel_placement_error,
     simd_value_escape_error,
+    subkernel_argument_type_error,
     subkernel_host_tensor_boundary_error,
+    subkernel_illegal_annotation_error,
+    subkernel_illegal_parameter_kind_error,
+    subkernel_missing_annotation_error,
     subkernel_signature_boundary_error,
 )
 from ._ast_rewrite import rewrite_jit_function
 from ._host_tensors import TensorSpec, looks_like_host_tensor
+from ._surface_types import Tile
 from ._surface_values import unwrap_surface_value
 from ._tracing import current_runtime, current_session
+from ._types import (
+    _DType,
+    _MaskDescriptor,
+    _PtrDescriptor,
+    _VRegDescriptor,
+    bf16,
+    f4e1m2x2,
+    f4e2m1x2,
+    f8e4m3,
+    f8e5m2,
+    float16,
+    float32,
+    hif8,
+    index,
+    int1,
+    int8,
+    int16,
+    int32,
+    int64,
+    ptr,
+    si8,
+    si16,
+    si32,
+    si64,
+    ui8,
+    ui16,
+    ui32,
+    ui64,
+)
 
 
 class KernelRole(str, Enum):
@@ -73,7 +107,10 @@ class SubkernelTemplate:
                 f"@pto.{self.spec.role.value} kernels may only be called while tracing "
                 "a compatible PTODSL kernel"
             )
-        self._validate_invocation(*args, **kwargs)
+        if self.spec.role == KernelRole.SIMT:
+            self._validate_invocation(*args, **kwargs)
+        else:
+            args, kwargs = self._normalize_invocation(*args, **kwargs)
         return runtime.dispatch_subkernel_call(self, *args, **kwargs)
 
     def __getitem__(self, dims):
@@ -89,9 +126,56 @@ class SubkernelTemplate:
         return _SimtLaunchTemplate(self, dims)
 
     def _validate_definition(self) -> None:
+        if self.spec.role == KernelRole.SIMT:
+            for param in self.signature.parameters.values():
+                if isinstance(param.annotation, TensorSpec):
+                    raise subkernel_signature_boundary_error(self.spec.role.value, param.name)
+            return
+
         for param in self.signature.parameters.values():
-            if isinstance(param.annotation, TensorSpec):
+            if param.kind == inspect.Parameter.KEYWORD_ONLY:
+                if self.spec.role == KernelRole.SIMT:
+                    continue
+                raise subkernel_illegal_parameter_kind_error(self.spec.role.value, param.name, param.kind)
+            if param.kind not in {
+                inspect.Parameter.POSITIONAL_ONLY,
+                inspect.Parameter.POSITIONAL_OR_KEYWORD,
+            }:
+                raise subkernel_illegal_parameter_kind_error(self.spec.role.value, param.name, param.kind)
+            if param.annotation is inspect.Parameter.empty:
+                raise subkernel_missing_annotation_error(self.spec.role.value, param.name)
+            annotation = _normalize_subkernel_annotation(param.annotation)
+            if isinstance(annotation, TensorSpec):
                 raise subkernel_signature_boundary_error(self.spec.role.value, param.name)
+            if not _is_supported_subkernel_annotation(self.spec.role, annotation):
+                raise subkernel_illegal_annotation_error(
+                    self.spec.role.value,
+                    param.name,
+                    param.annotation,
+                    _expected_subkernel_annotation_summary(self.spec.role),
+                )
+
+    def _normalize_invocation(self, *args, **kwargs):
+        session = current_session()
+        outer = session.current_subkernel if session is not None else None
+        _validate_subkernel_placement(self.spec.role, outer)
+
+        bound = self.signature.bind(*args, **kwargs)
+        bound.apply_defaults()
+        for name, value in bound.arguments.items():
+            param = self.signature.parameters[name]
+            if param.kind == inspect.Parameter.KEYWORD_ONLY:
+                continue
+            if looks_like_host_tensor(value):
+                raise subkernel_host_tensor_boundary_error(self.spec.role.value, name)
+            annotation = _normalize_subkernel_annotation(param.annotation)
+            bound.arguments[name] = _normalize_subkernel_argument(
+                self.spec.role,
+                name,
+                annotation,
+                value,
+            )
+        return tuple(bound.args), dict(bound.kwargs)
 
     def _validate_invocation(self, *args, **kwargs) -> None:
         session = current_session()
@@ -147,6 +231,158 @@ def _find_transient_simd_escape(value):
     if type_text.startswith("!pto.vreg<") or type_text.startswith("!pto.mask<"):
         return type_text
     return None
+
+
+def _is_supported_runtime_scalar_annotation(annotation) -> bool:
+    return (
+        isinstance(annotation, _DType)
+        and not isinstance(annotation, (_PtrDescriptor, _VRegDescriptor, _MaskDescriptor))
+    )
+
+
+_POSTPONED_DTYPE_ANNOTATIONS = {
+    "pto.f32": float32,
+    "pto.float32": float32,
+    "pto.f16": float16,
+    "pto.float16": float16,
+    "pto.bf16": bf16,
+    "pto.f8e4m3": f8e4m3,
+    "pto.f8e5m2": f8e5m2,
+    "pto.hif8": hif8,
+    "pto.f4e1m2x2": f4e1m2x2,
+    "pto.f4e2m1x2": f4e2m1x2,
+    "pto.i1": int1,
+    "pto.int1": int1,
+    "pto.i8": int8,
+    "pto.int8": int8,
+    "pto.i16": int16,
+    "pto.int16": int16,
+    "pto.i32": int32,
+    "pto.int32": int32,
+    "pto.i64": int64,
+    "pto.int64": int64,
+    "pto.si8": si8,
+    "pto.si16": si16,
+    "pto.si32": si32,
+    "pto.si64": si64,
+    "pto.ui8": ui8,
+    "pto.ui16": ui16,
+    "pto.ui32": ui32,
+    "pto.ui64": ui64,
+    "pto.index": index,
+}
+
+
+_POSTPONED_MEMORY_SPACES = {
+    "pto.MemorySpace.GM": "gm",
+    "pto.MemorySpace.UB": "ub",
+    "pto.MemorySpace.VEC": "vec",
+    "pto.MemorySpace.MAT": "mat",
+    "pto.MemorySpace.LEFT": "left",
+    "pto.MemorySpace.RIGHT": "right",
+    "pto.MemorySpace.ACC": "acc",
+    "pto.MemorySpace.BIAS": "bias",
+    "pto.MemorySpace.SCALING": "scaling",
+}
+
+
+def _normalize_subkernel_annotation(annotation):
+    if not isinstance(annotation, str):
+        return annotation
+    text = annotation.strip()
+    if text in {"Tile", "pto.Tile"}:
+        return Tile
+    if text in _POSTPONED_DTYPE_ANNOTATIONS:
+        return _POSTPONED_DTYPE_ANNOTATIONS[text]
+    if text.startswith("pto.ptr(") and text.endswith(")"):
+        args = [part.strip() for part in text[len("pto.ptr("):-1].split(",")]
+        if len(args) == 2 and args[0] in _POSTPONED_DTYPE_ANNOTATIONS and args[1] in _POSTPONED_MEMORY_SPACES:
+            return ptr(_POSTPONED_DTYPE_ANNOTATIONS[args[0]], _POSTPONED_MEMORY_SPACES[args[1]])
+    return annotation
+
+
+def _is_supported_subkernel_annotation(role: KernelRole, annotation) -> bool:
+    if annotation is Tile:
+        return True
+    if role == KernelRole.CUBE:
+        return False
+    if _is_supported_runtime_scalar_annotation(annotation):
+        return True
+    if role == KernelRole.SIMT and isinstance(annotation, _PtrDescriptor):
+        return True
+    return False
+
+
+def _expected_subkernel_annotation_summary(role: KernelRole) -> str:
+    if role == KernelRole.CUBE:
+        return "pto.Tile parameters only"
+    if role == KernelRole.SIMD:
+        return "pto.Tile parameters plus PTO scalar annotations such as pto.i32/pto.f32"
+    return "pto.Tile parameters, typed pto.ptr(...) values, and PTO scalar annotations"
+
+
+def _is_pto_ptr_like(value) -> bool:
+    raw_value = unwrap_surface_value(value)
+    type_obj = getattr(raw_value, "type", None)
+    if type_obj is None:
+        return False
+    type_text = str(type_obj)
+    return type_text.startswith("!pto.ptr<") or type_text.startswith("memref<")
+
+
+def _is_runtime_scalar_value(value) -> bool:
+    raw_value = unwrap_surface_value(value)
+    type_obj = getattr(raw_value, "type", None)
+    if type_obj is None:
+        return False
+    type_text = str(type_obj)
+    return not (
+        type_text.startswith("!pto.tile_buf<")
+        or type_text.startswith("!pto.ptr<")
+        or type_text.startswith("memref<")
+        or type_text.startswith("!pto.tensor_view<")
+        or type_text.startswith("!pto.partition_tensor_view<")
+        or type_text.startswith("!pto.vreg<")
+        or type_text.startswith("!pto.mask<")
+    )
+
+
+def _normalize_subkernel_argument(role: KernelRole, name: str, annotation, value):
+    if annotation is Tile:
+        if isinstance(value, Tile):
+            return value
+        raise subkernel_argument_type_error(role.value, name, "a pto.Tile value", type(value).__name__)
+
+    if _is_supported_runtime_scalar_annotation(annotation):
+        if isinstance(value, (bool, int, float)):
+            from ._ops import const
+
+            return const(value, dtype=annotation)
+        if _is_runtime_scalar_value(value):
+            return value
+        raise subkernel_argument_type_error(
+            role.value,
+            name,
+            f"one PTO scalar value compatible with {annotation!r}",
+            type(value).__name__,
+        )
+
+    if role == KernelRole.SIMT and isinstance(annotation, _PtrDescriptor):
+        if _is_pto_ptr_like(value):
+            return value
+        raise subkernel_argument_type_error(
+            role.value,
+            name,
+            f"one typed pointer compatible with {annotation!r}",
+            type(value).__name__,
+        )
+
+    raise subkernel_illegal_annotation_error(
+        role.value,
+        name,
+        annotation,
+        _expected_subkernel_annotation_summary(role),
+    )
 
 
 def _validate_subkernel_placement(role: KernelRole, outer_frame, *, inline: bool = False) -> None:

@@ -108,12 +108,46 @@ struct PreFusionAnalysisResult {
   SmallVector<FusionBlockAnalysis, 8> blocks;
 };
 
-FailureOr<PreFusionAnalysisResult> buildPreFusionAnalysis(func::FuncOp func);
+/// Build the *shared* pre-fusion analysis: the tile dataflow graph
+/// (compute nodes, DFG edges, value liveness, write instances) for every block
+/// of \p func, WITHOUT inferring iteration-domain classes.  This is the
+/// expensive part that walks the whole IR and builds the alias/liveness
+/// structures, and it is identical regardless of whether shape inference is
+/// enabled.  Iteration-domain inference (see inferIterationDomainClasses) is a
+/// cheap, separable follow-up step that only the FusionPlan pass needs.
+///
+/// This function is intentionally option-free so it can be cached by the MLIR
+/// analysis manager (PreFusionAnalysis) and shared by every pass that only
+/// consumes the dataflow structures (e.g. FusionRegionGen).
+FailureOr<PreFusionAnalysisResult>
+buildPreFusionAnalysisDFG(func::FuncOp func);
 
+/// Infer iteration-domain classes for every block of \p result.  When
+/// \p enableShapeInference is false, uses the conservative static/direct-bound
+/// inference; when true, uses the ShapeConstraintSolver.  This is the separable
+/// domain step that runs on top of the shared dataflow graph built by
+/// buildPreFusionAnalysisDFG.
+LogicalResult inferIterationDomainClasses(PreFusionAnalysisResult &result,
+                                         bool enableShapeInference);
+
+/// Convenience: build the shared DFG and infer iteration-domain classes in one
+/// step.  Prefer calling buildPreFusionAnalysisDFG + inferIterationDomainClasses
+/// separately when the DFG can be shared across passes via the analysis
+/// manager.
+FailureOr<PreFusionAnalysisResult>
+buildPreFusionAnalysis(func::FuncOp func, bool enableShapeInference = false);
+
+/// Analysis-manager-cached pre-fusion analysis.  Holds only the shared
+/// dataflow graph (no iteration-domain classes): iteration-domain inference
+/// depends on the per-pass --enable-shape-inference option and cannot be cached
+/// here, so it is run separately by FusionPlan via inferIterationDomainClasses.
+/// FusionRegionGen consumes only the dataflow structures and never consults the
+/// domain classes, so it can use the cached graph directly.
 class PreFusionAnalysis {
 public:
   explicit PreFusionAnalysis(func::FuncOp func) {
-    FailureOr<PreFusionAnalysisResult> resultOr = buildPreFusionAnalysis(func);
+    FailureOr<PreFusionAnalysisResult> resultOr =
+        buildPreFusionAnalysisDFG(func);
     if (succeeded(resultOr))
       result = std::move(*resultOr);
   }

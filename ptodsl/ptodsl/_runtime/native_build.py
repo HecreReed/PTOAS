@@ -9,6 +9,7 @@
 
 from __future__ import annotations
 
+import os
 import subprocess
 from pathlib import Path
 
@@ -23,6 +24,7 @@ from .codegen import generate_launch_cpp, launch_symbol_name
 from .toolchain import (
     aicore_arch_for_kernel_kind,
     common_include_flags,
+    runtime_library_flags,
     resolve_bisheng,
     resolve_ptoas_binary,
 )
@@ -42,19 +44,14 @@ def _run_ptoas(
     kernel_object: Path,
     *,
     target_arch: str,
-    mode: str,
-    insert_sync: bool | None,
+    insert_sync: bool | None = None,
 ) -> None:
     ptoas = resolve_ptoas_binary()
     cmd = [
         str(ptoas),
         f"--pto-arch={target_arch}",
-        "--pto-backend=vpto",
     ]
-    effective_insert_sync = (mode != "explicit") if insert_sync is None else insert_sync
-    if mode == "explicit":
-        cmd.append("--pto-level=level3")
-    if effective_insert_sync:
+    if insert_sync is True:
         cmd.append("--enable-insert-sync")
     cmd.extend([
         "--enable-tile-op-expand",
@@ -65,6 +62,12 @@ def _run_ptoas(
     _run(
         cmd
     )
+
+
+def _effective_insert_sync(*, mode: str, insert_sync: bool | None) -> bool:
+    if insert_sync is not None:
+        return insert_sync
+    return mode != "explicit"
 
 
 def _host_compile_flags() -> list[str]:
@@ -139,17 +142,20 @@ def _link_shared_library(
 ) -> None:
     bisheng = resolve_bisheng()
     soname = shared_library.name
+    sim_mode = bool(os.environ.get("MSPROF_SIMULATOR_MODE"))
     _run(
         [
             bisheng,
             "-fPIC",
             "-shared",
             "--cce-fatobj-link",
+            "-Wl,--no-undefined",
             f"-Wl,-soname,{soname}",
             "-o",
             str(shared_library),
             str(launch_object),
             str(kernel_object),
+            *runtime_library_flags(sim_mode=sim_mode),
         ]
     )
 
@@ -170,11 +176,14 @@ def build_native_library(
         ir_function_name=ir_function_name,
         kernel_signature=kernel_signature,
     )
+    sim_mode = bool(os.environ.get("MSPROF_SIMULATOR_MODE"))
+    link_config_text = "\n".join(runtime_library_flags(sim_mode=sim_mode))
 
     if is_native_build_current(
         artifacts,
         mlir_text=mlir_text,
         launch_cpp_text=launch_cpp_text,
+        link_config_text=link_config_text,
     ):
         return artifacts.shared_library, launch_symbol
 
@@ -186,8 +195,10 @@ def build_native_library(
         artifacts.mlir_path,
         artifacts.kernel_object,
         target_arch=module_spec.target_arch,
-        mode=module_spec.mode,
-        insert_sync=module_spec.insert_sync,
+        insert_sync=_effective_insert_sync(
+            mode=module_spec.mode,
+            insert_sync=module_spec.insert_sync,
+        ),
     )
 
     launch_object = artifacts.cache_dir / "launch.o"
@@ -210,6 +221,7 @@ def build_native_library(
         launch_symbol=launch_symbol,
         mlir_digest=_content_digest(mlir_text),
         launch_cpp_digest=_content_digest(launch_cpp_text),
+        link_config_digest=_content_digest(link_config_text),
     )
     return artifacts.shared_library, launch_symbol
 

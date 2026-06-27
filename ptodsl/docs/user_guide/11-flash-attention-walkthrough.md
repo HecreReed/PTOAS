@@ -8,7 +8,7 @@ The sketch computes **online-softmax flash attention** for one `(batch, head)` s
 
 ```
 flash_attention(...)           L0  user-facing wrapper
-  └─ @pto.jit(mode="explicit") flash_attention_kernel
+  └─ @pto.jit(entry=True, mode="explicit") flash_attention_kernel
        ├─ Tile Ops                 tile.load / tile.store at the GM↔UB boundary
        ├─ explicit orchestration   mte_load / pipe_barrier / pointer sequencing
        ├─ @pto.cube               qk_matmul / pv_matmul
@@ -59,11 +59,11 @@ This is plain Python — no PTO types, no IR. It handles ergonomic runtime conce
 
 The wrapper knows nothing about tiles, UB, or pipelines. It is the boundary between the user's tensor world and the PTO device world.
 
-## 11.3 Top-level `@pto.jit(mode="explicit")` kernel entry
+## 11.3 Top-level `@pto.jit(entry=True, mode="explicit")` kernel entry
 
 <!-- ptodsl-doc-test: {"mode":"compile","symbol":"flash_attention_kernel","compile":{"BLOCK_Q":128,"BLOCK_KV":128,"CAUSAL":false,"NUM_STAGES":2}} -->
 ```python
-@pto.jit(target="a5", mode="explicit")
+@pto.jit(target="a5", entry=True, mode="explicit")
 def flash_attention_kernel(
     Q_ptr: pto.ptr(pto.f32, "gm"),
     K_ptr: pto.ptr(pto.f32, "gm"),
@@ -84,7 +84,7 @@ def flash_attention_kernel(
     return
 ```
 
-The `@pto.jit(mode="explicit")` decorator marks the compile + launch boundary. Inputs and outputs arrive as explicit GM pointers plus runtime shape metadata; keyword-only `constexpr` parameters (`BLOCK_Q`, `BLOCK_KV`, `CAUSAL`) are baked at compile time.
+The `@pto.jit(entry=True, mode="explicit")` decorator marks the compile + launch boundary. Inputs and outputs arrive as explicit GM pointers plus runtime shape metadata; keyword-only `const_expr` parameters (`BLOCK_Q`, `BLOCK_KV`, `CAUSAL`) are baked at compile time.
 
 ### 11.3.1 TensorView construction
 
@@ -445,7 +445,14 @@ Each `pipe_barrier(Pipe.ALL)` between phases is explicit in the orchestration bo
 <!-- ptodsl-doc-test: {"mode":"compile_fragment","fixture":"flash_attention.qk_cube_helper","symbol":"flash_attention_qk_cube_helper_probe","compile":{"BLOCK_Q":16,"BLOCK_KV":16}} -->
 ```python
 @pto.cube
-def qk_matmul(q_mat, k_mat, q_l0a, k_l0b, s_acc, s_tile):
+def qk_matmul(
+    q_mat: pto.Tile,
+    k_mat: pto.Tile,
+    q_l0a: pto.Tile,
+    k_l0b: pto.Tile,
+    s_acc: pto.Tile,
+    s_tile: pto.Tile,
+):
     m = q_mat.valid_shape[0]
     k = q_mat.valid_shape[1]
     n = k_mat.valid_shape[0]
@@ -470,7 +477,14 @@ The cube kernel does not allocate scratch — the caller (top-level kernel) owns
 <!-- ptodsl-doc-test: {"mode":"compile_fragment","fixture":"flash_attention.pv_cube_helper","symbol":"flash_attention_pv_cube_helper_probe","compile":{"BLOCK_Q":16,"BLOCK_KV":16}} -->
 ```python
 @pto.cube
-def pv_matmul(p_mat, v_mat, p_l0a, v_l0b, pv_acc, pv_tile):
+def pv_matmul(
+    p_mat: pto.Tile,
+    v_mat: pto.Tile,
+    p_l0a: pto.Tile,
+    v_l0b: pto.Tile,
+    pv_acc: pto.Tile,
+    pv_tile: pto.Tile,
+):
     m = p_mat.valid_shape[0]
     k = p_mat.valid_shape[1]
     n = v_mat.valid_shape[1]
@@ -488,11 +502,17 @@ Structurally identical to `qk_matmul`, but without transposition and with differ
 ```python
 @pto.simd
 def online_softmax_rows(
-    s_tile, p_tile,
-    m_prev_tile, l_prev_tile,
-    m_next_tile, l_next_tile,
-    alpha_tile, beta_tile,
-    row_start, row_stop, valid_cols,
+    s_tile: pto.Tile,
+    p_tile: pto.Tile,
+    m_prev_tile: pto.Tile,
+    l_prev_tile: pto.Tile,
+    m_next_tile: pto.Tile,
+    l_next_tile: pto.Tile,
+    alpha_tile: pto.Tile,
+    beta_tile: pto.Tile,
+    row_start: pto.i32,
+    row_stop: pto.i32,
+    valid_cols: pto.i32,
 ):
 ```
 
@@ -563,7 +583,11 @@ This implements the online-softmax update from the Flash Attention paper:
 <!-- ptodsl-doc-test: {"mode":"compile_fragment","fixture":"flash_attention.simt_materialize","symbol":"flash_attention_simt_materialize_probe","compile":{}} -->
 ```python
 @pto.simt
-def materialize_tile_bounds(meta_ptr, valid_rows, valid_cols):
+def materialize_tile_bounds(
+    meta_ptr: pto.ptr(pto.i32, pto.MemorySpace.UB),
+    valid_rows: pto.i32,
+    valid_cols: pto.i32,
+):
     scalar.store(0, meta_ptr + 0)
     scalar.store(valid_rows, meta_ptr + 1)
     scalar.store(valid_cols, meta_ptr + 2)
@@ -576,8 +600,16 @@ Three scalar stores write the loop bounds into the metadata buffer. `meta_ptr` i
 <!-- ptodsl-doc-test: {"mode":"compile_fragment","fixture":"flash_attention.simt_blend","symbol":"flash_attention_simt_blend_probe","compile":{"BLOCK":8}} -->
 ```python
 @pto.simt
-def blend_output_rows(o_prev_tile, pv_tile, alpha_tile, beta_tile,
-                      o_next_tile, row_start, row_stop, valid_dim):
+def blend_output_rows(
+    o_prev_tile: pto.Tile,
+    pv_tile: pto.Tile,
+    alpha_tile: pto.Tile,
+    beta_tile: pto.Tile,
+    o_next_tile: pto.Tile,
+    row_start: pto.i32,
+    row_stop: pto.i32,
+    valid_dim: pto.i32,
+):
     for row in range(row_start, row_stop, 1):
         alpha = scalar.load(alpha_tile[row, 0])
         beta  = scalar.load(beta_tile[row, 0])
@@ -652,4 +684,4 @@ After all KV blocks: the top-level kernel issues `tile.store(o_final_tile, o_par
 
 **No vreg across sub-kernel boundaries**: vector registers are local to each `@pto.simd` kernel. Data crosses sub-kernel boundaries through UB tiles — the boundary contract is enforced by the type system.
 
-**Invocation flexibility**: This sketch uses the explicit `@pto.jit(mode="explicit")` path for full micro-instruction control. The same named sub-kernels can also be reused from `@pto.jit(mode="auto")` when the body stays within the auto-mode contract, or written inline as context managers (`with pto.simd():`, etc.). See Chapter 3 for details.
+**Invocation flexibility**: This sketch uses the explicit `@pto.jit(entry=True, mode="explicit")` path for full micro-instruction control. The same named sub-kernels can also be reused from `@pto.jit(mode="auto")` when the body stays within the auto-mode contract, or written inline as context managers (`with pto.simd():`, etc.). The orchestration logic could be extracted into `@pto.jit(entry=False)` kernel modules for reuse across multiple entry kernels. See Chapter 3 for details.

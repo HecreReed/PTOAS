@@ -81,11 +81,10 @@ namespace {
 // Four kinds of operands:
 //   Tile   — from TileBufType.  dtype + shape + memorySpace + config
 //            all participate in the specialization key (SpecKey).
-//   View   — from MemRefType (lowered PartitionTensorViewType). Only dtype
-//            participates in SpecKey — the template is fully dynamic so
-//            shape/strides/memorySpace don't affect code generation. They are
-//            carried here solely for JSON serialization to the Python DSL for
-//            constraint checking.
+//   View   — from MemRefType (lowered PartitionTensorViewType). The element
+//            dtype and optional explicit layout participate in SpecKey;
+//            shape/strides/memorySpace remain JSON-only metadata for Python
+//            constraint checking and must not perturb C++ codegen caching.
 //   Vector — from builtin VectorType. The element dtype and vector shape
 //            participate in SpecKey so helper-side schema filtering can
 //            distinguish auxiliary vector operands such as tmrgsort's
@@ -111,6 +110,7 @@ struct OperandTypeInfo {
   SmallVector<int64_t> viewShape;
   SmallVector<int64_t> viewStrides;
   std::string viewMemorySpace; // "gm" or "ub"
+  std::optional<pto::Layout> viewLayout;
 
   // --- Vector-only (builtin VectorType) ---
   SmallVector<int64_t> vectorShape;
@@ -132,8 +132,8 @@ struct OperandTypeInfo {
       return vectorShape == rhs.vectorShape;
     if (kind == OperandKind::Scalar)
       return scalarValue == rhs.scalarValue;
-    // View: dtype alone is sufficient for template caching.
-    return true;
+    // View: dtype + explicit layout are sufficient for template caching.
+    return viewLayout == rhs.viewLayout;
   }
 };
 
@@ -176,7 +176,11 @@ struct SpecKeyInfo : public llvm::DenseMapInfo<SpecKey> {
         if (op.scalarValue)
           h = llvm::hash_combine(h, *op.scalarValue);
       }
-      // View: only kind + dtype contribute to hash.
+      if (op.kind == OperandKind::View) {
+        h = llvm::hash_combine(h, op.viewLayout.has_value());
+        if (op.viewLayout)
+          h = llvm::hash_combine(h, static_cast<int>(*op.viewLayout));
+      }
     }
     for (const auto &[attrName, attrValue] : key.contextAttrs)
       h = llvm::hash_combine(h, attrName, attrValue);
@@ -286,6 +290,50 @@ static std::string getSLayoutString(int32_t slayout) {
   if (slayout == static_cast<int32_t>(pto::SLayout::ColMajor))
     return "col_major";
   return "none_box";
+}
+
+static constexpr llvm::StringLiteral kLayoutAttrName = "layout";
+
+static std::optional<pto::Layout> getLayoutAttrFromOp(Operation *op) {
+  if (!op)
+    return std::nullopt;
+  if (auto attr = op->getAttrOfType<pto::LayoutAttr>(kLayoutAttrName))
+    return attr.getLayout();
+  return std::nullopt;
+}
+
+static std::optional<pto::Layout> resolveViewLayout(Value value) {
+  if (!value)
+    return std::nullopt;
+
+  Operation *def = value.getDefiningOp();
+  while (def) {
+    if (auto layout = getLayoutAttrFromOp(def))
+      return layout;
+    if (auto subview = dyn_cast<memref::SubViewOp>(def)) {
+      value = subview.getSource();
+      def = value.getDefiningOp();
+      continue;
+    }
+    if (auto cast = dyn_cast<memref::CastOp>(def)) {
+      value = cast.getSource();
+      def = value.getDefiningOp();
+      continue;
+    }
+    if (auto reinterpret = dyn_cast<memref::ReinterpretCastOp>(def)) {
+      value = reinterpret.getSource();
+      def = value.getDefiningOp();
+      continue;
+    }
+    break;
+  }
+  return std::nullopt;
+}
+
+static std::optional<std::string> getViewLayoutString(std::optional<pto::Layout> layout) {
+  if (!layout)
+    return std::nullopt;
+  return stringifyLayout(*layout).str();
 }
 
 static std::optional<std::string> getTCvtRoundModeString(pto::TCvtOp op) {
@@ -590,6 +638,7 @@ static std::optional<OperandTypeInfo> buildOperandTypeInfo(Value value) {
     if (info.dtype.empty())
       return std::nullopt;
     info.viewMemorySpace = getMemorySpaceString(mrTy);
+    info.viewLayout = resolveViewLayout(value);
     populateViewShapeAndStrides(value, info.viewShape, info.viewStrides);
     if (info.viewShape.empty())
       info.viewShape.assign(mrTy.getShape().begin(), mrTy.getShape().end());
@@ -743,7 +792,13 @@ static std::string buildOperandSpecsJson(const SpecKey &key) {
         }
         json += "]";
       }
-      json += ",\"memory_space\":\"" + op.viewMemorySpace + "\"}";
+      json += ",\"memory_space\":\"" + op.viewMemorySpace + "\"";
+      if (auto layout = getViewLayoutString(op.viewLayout)) {
+        json += ",\"config\":{\"layout\":\"";
+        json += *layout;
+        json += "\"}";
+      }
+      json += "}";
       continue;
     }
 
@@ -764,6 +819,38 @@ static std::string buildOperandSpecsJson(const SpecKey &key) {
   }
   json += "]";
   return json;
+}
+
+static std::string buildUniqueFunctionBaseName(const SpecKey &key) {
+  std::string uniqueName = "__pto_tilelang_" + key.targetArch + "_" + key.opName;
+  for (const auto &op : key.operands) {
+    uniqueName += op.kind == OperandKind::Tile   ? "_tile"
+                 : op.kind == OperandKind::View ? "_view"
+                 : op.kind == OperandKind::Vector ? "_vector"
+                                                  : "_scalar";
+    uniqueName += "_" + op.dtype;
+    if (op.kind == OperandKind::Tile) {
+      for (int64_t d : op.tileShape)
+        uniqueName += "_" + std::to_string(d);
+      for (int64_t d : op.tileValidShape)
+        uniqueName += "_v" + std::to_string(d);
+      uniqueName += "_bl" + std::to_string(op.blayout);
+      uniqueName += "_sl" + std::to_string(op.slayout);
+      uniqueName += "_fr" + std::to_string(op.fractal);
+      uniqueName += "_pd" + llvm::utohexstr(op.pad, /*LowerCase=*/false);
+    } else if (op.kind == OperandKind::View) {
+      if (op.viewLayout)
+        uniqueName += "_vl_" + stringifyLayout(*op.viewLayout).str();
+    } else if (op.kind == OperandKind::Vector) {
+      for (int64_t d : op.vectorShape)
+        uniqueName += "_" + std::to_string(d);
+    } else if (op.kind == OperandKind::Scalar && op.scalarValue) {
+      uniqueName += "_sv" + std::to_string(*op.scalarValue);
+    }
+  }
+  for (const auto &[attrName, attrValue] : key.contextAttrs)
+    uniqueName += "_ctx_" + attrName + "_" + attrValue;
+  return uniqueName;
 }
 
 static std::string buildContextAttrsJson(const SpecKey &key) {
@@ -903,22 +990,20 @@ func::FuncOp ExpandState::invokeTilelangDaemon(const SpecKey &key,
   SmallVector<func::FuncOp, 4> clonedFuncs;
   std::vector<std::string> newNameStorage;
 
+  std::string uniqueName = buildUniqueFunctionBaseName(key);
   SymbolTable targetSymTable(mod);
-  for (func::FuncOp fn : parsedFuncs) {
+  if (auto existingFunc = targetSymTable.lookup(uniqueName))
+    return cast<func::FuncOp>(existingFunc);
+
+  for (auto [index, fn] : llvm::enumerate(parsedFuncs)) {
     // Use builder.clone() to insert into module body
     IRMapping mapping;
     auto cloned = cast<func::FuncOp>(builder.clone(*fn, mapping));
-    StringRef baseName = fn.getSymName();
-    std::string newName = std::string(baseName);
-
-    // Ensure uniqueness in the target module.
-    if (targetSymTable.lookup(newName)) {
-      unsigned counter = 0;
-      std::string uniqueName;
-      do {
-        uniqueName = baseName.str() + "__" + std::to_string(counter++);
-      } while (targetSymTable.lookup(uniqueName));
-      newName = uniqueName;  // Fixed: just use uniqueName, not double concatenation
+    std::string newName;
+    if (index == 0) {
+      newName = uniqueName;
+    } else {
+      newName = uniqueName + "__" + std::string(fn.getSymName());
     }
     newNameStorage.push_back(newName);
     renamedSymbols[fn.getSymName()] = newNameStorage.back();
@@ -1102,32 +1187,7 @@ func::FuncOp ExpandState::invokeTilelangDSL(const SpecKey &key,
   SmallVector<func::FuncOp, 4> clonedFuncs;
   llvm::StringMap<std::string> renamedSymbols;
 
-  // Build a unique name from the spec-key-relevant operand fields.
-  std::string uniqueName = "__pto_tilelang_" + key.targetArch + "_" + key.opName;
-  for (const auto &op : key.operands) {
-    uniqueName += op.kind == OperandKind::Tile   ? "_tile"
-                 : op.kind == OperandKind::View ? "_view"
-                 : op.kind == OperandKind::Vector ? "_vector"
-                                                  : "_scalar";
-    uniqueName += "_" + op.dtype;
-    if (op.kind == OperandKind::Tile) {
-      for (int64_t d : op.tileShape)
-        uniqueName += "_" + std::to_string(d);
-      for (int64_t d : op.tileValidShape)
-        uniqueName += "_v" + std::to_string(d);
-      uniqueName += "_bl" + std::to_string(op.blayout);
-      uniqueName += "_sl" + std::to_string(op.slayout);
-      uniqueName += "_fr" + std::to_string(op.fractal);
-      uniqueName += "_pd" + llvm::utohexstr(op.pad, /*LowerCase=*/false);
-    } else if (op.kind == OperandKind::Vector) {
-      for (int64_t d : op.vectorShape)
-        uniqueName += "_" + std::to_string(d);
-    } else if (op.kind == OperandKind::Scalar && op.scalarValue) {
-      uniqueName += "_sv" + std::to_string(*op.scalarValue);
-    }
-  }
-  for (const auto &[attrName, attrValue] : key.contextAttrs)
-    uniqueName += "_ctx_" + attrName + "_" + attrValue;
+  std::string uniqueName = buildUniqueFunctionBaseName(key);
 
   // Check if function already exists in module (deduplication)
   SymbolTable targetSymTable(mod);

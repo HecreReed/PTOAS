@@ -52,7 +52,7 @@ def tile_copy(
 ):
 ```
 
-`@pto.jit` marks this function as a launchable PTO kernel. The positional parameters `A_ptr` and `O_ptr` are explicit GM pointers, while `rows` and `cols` are runtime scalar metadata passed at launch time. The keyword-only argument `BLOCK` is a compile-time constant declared with `pto.const_expr`; the compiler specializes the kernel for each tile width.
+`@pto.jit` marks this function as a launchable PTO kernel. By default `entry=True`, which means it uses the host-visible pointer-first ABI: explicit GM pointers, runtime scalars, and keyword-only `pto.const_expr` compile-time constants. The default compilation backend is `backend="vpto"`. The positional parameters `A_ptr` and `O_ptr` are explicit GM pointers, while `rows` and `cols` are runtime scalar metadata passed at launch time. The keyword-only argument `BLOCK` is a compile-time constant declared with `pto.const_expr`; the compiler specializes the kernel for each tile width.
 
 ### Describing GM tensors
 
@@ -135,7 +135,7 @@ def blocked_copy(
         pto.tile.store(tile, o_part)
 ```
 
-Here `rows` and `cols` are dynamic launch-time scalars. The loop bound depends on `rows`, so the default AST rewrite records a structured loop in the IR rather than unrolling at trace time. The `BLOCK` parameter stays `constexpr` because it is a tuning knob, not data-dependent. Chapter 5 covers this distinction in detail.
+Here `rows` and `cols` are dynamic launch-time scalars. The loop bound depends on `rows`, so the default AST rewrite records a structured loop in the IR rather than unrolling at trace time. The `BLOCK` parameter stays `const_expr` because it is a tuning knob, not data-dependent. Chapter 5 covers this distinction in detail.
 
 ## 2.3 Compile and launch
 
@@ -267,3 +267,18 @@ The same pattern also has an `auto` counterpart: keep `@pto.jit` in its
 default mode and replace the explicit `mte_*` sequence with `tile.load` /
 `tile.store`. Chapter 3 covers the full entry model; Chapters 7–10 cover each
 operation family in detail.
+
+## 2.6 Next steps
+
+You now have a complete mental model of a PTODSL kernel: entry points, tile
+allocation, data movement with `tile.load` / `tile.store`, compile, and
+launch. From here:
+
+- **Chapter 3** covers the full kernel entry and module system: `auto` vs
+  `explicit` modes, `vpto` vs `emitc` backends, sub-kernels for custom tile
+  ops, and kernel modules (`@pto.jit(entry=False)`) for decomposing large
+  kernels across independent compilation boundaries.
+- **Chapter 4** details the type system: scalars, tiles, tensor views, and
+  buffer management.
+- **Chapter 5** explains control flow: device-side loops and conditionals,
+  trace-time unrolling, and the AST rewrite model.

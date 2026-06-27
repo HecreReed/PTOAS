@@ -35,7 +35,7 @@ def unrolled_kernel(A, O, *, N: pto.const_expr):
 ```
 
 This works when the loop bound is a compile-time constant, such as a
-`constexpr` parameter. For dynamic bounds, use native `range(...)` in the
+`const_expr` parameter. For dynamic bounds, use native `range(...)` in the
 default AST rewrite mode or use explicit `pto.for_`.
 
 ## 5.2 `pto.for_` — device-side loops

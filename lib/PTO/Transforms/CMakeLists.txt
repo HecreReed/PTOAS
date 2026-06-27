@@ -65,6 +65,7 @@ add_mlir_dialect_library(PTOTransforms
   PTOInferValidatePipeInitPass.cpp
   PTOResolveReservedBuffersPass.cpp
   PTOWrapFunctionsInSectionsPass.cpp
+  PTONormalizeUncoveredTileSections.cpp
   VPTONormalizeContainer.cpp
   VPTOSplitCVModule.cpp
   InsertSync/PTOIRTranslator.cpp
@@ -91,6 +92,7 @@ add_mlir_dialect_library(PTOTransforms
   GraphSyncSolver/SyncSolverCodeGen.cpp
   LoweringSyncToPipe.cpp
   PTOVerifyTFreePass.cpp
+  PTOVerifySubkernelPipeContractPass.cpp
 
   ADDITIONAL_HEADER_DIRS
   ${PROJECT_SOURCE_DIR}/include/PTO

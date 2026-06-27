@@ -17,7 +17,7 @@ module {
   }
 }
 
-// CHECK-DAG: static AICORE int32_t helper(
+// CHECK-DAG: AICORE int32_t helper(
 // CHECK-DAG: __global__ AICORE void kernel(
 // CHECK-DAG: __global__ AICORE void legacy_kernel(
 // CHECK: helper(

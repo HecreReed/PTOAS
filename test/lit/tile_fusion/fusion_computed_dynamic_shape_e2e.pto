@@ -1,0 +1,107 @@
+// Copyright (c) 2026 Huawei Technologies Co., Ltd.
+// This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+// CANN Open Software License Agreement Version 2.0 (the "License").
+// Please refer to the License for details. You may not use this License.
+// THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+// INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+// See LICENSE in the root of the software repository for the full text of the License.
+
+// End-to-end verification that the ShapeConstraintSolver can prove structurally
+// equivalent computed dynamic shapes belong to the same iteration domain, so
+// that the fusion pipeline (FusionPlan -> FusionRegionGen -> LowLevelLoopFusion)
+// successfully fuses ops that use different SSA values for the same computed
+// expression.  Without canonicalizeValue, %row0 and %row1 (both = mins(vrow,
+// c32)) would get different solver dims and the pipeline would refuse to fuse.
+//
+// RUN: ptoas --pto-backend=vpto --pto-arch=a5 --pto-level=level3 --enable-op-fusion --enable-shape-inference --emit-vpto %s --mlir-print-ir-after=pto-fusion-plan -o /dev/null 2>&1 | FileCheck --check-prefix=PLAN %s
+// RUN: ptoas --pto-backend=vpto --pto-arch=a5 --pto-level=level3 --enable-op-fusion --enable-shape-inference --emit-vpto %s --mlir-print-ir-after=pto-fusion-region-gen -o /dev/null 2>&1 | FileCheck --check-prefix=REGION %s
+// RUN: ptoas --pto-backend=vpto --pto-arch=a5 --pto-level=level3 --enable-op-fusion --enable-shape-inference --emit-vpto %s --mlir-print-ir-after=pto-low-level-loop-fusion -o /dev/null 2>&1 | FileCheck --check-prefix=LOOP %s
+
+module attributes {pto.target_arch = "a5", pto.kernel_kind = #pto.kernel_kind<vector>} {
+  // Three tadd stages where each alloc_tile uses a separately computed but
+  // structurally equivalent mins(vrow,c32)/mins(vcol,c32) expression as
+  // valid_row/valid_col.  Stage 0 uses %row0/%col0, stage 1 uses %row1/%col1,
+  // and stage 2 uses %row2/%col2.  These are distinct SSA values that the
+  // solver must prove equivalent via canonicalizeValue.
+  func.func @computed_shape_e2e(
+      %dst_ptr: !pto.ptr<f32>,
+      %vrow: index,
+      %vcol: index) {
+    %c0 = arith.constant 0 : index
+    %c1 = arith.constant 1 : index
+    %c32 = arith.constant 32 : index
+    %c1024 = arith.constant 1024 : index
+    %row0 = arith.minsi %vrow, %c32 : index
+    %col0 = arith.minsi %vcol, %c32 : index
+    %row1 = arith.minsi %vrow, %c32 : index
+    %col1 = arith.minsi %vcol, %c32 : index
+    %row2 = arith.minsi %vrow, %c32 : index
+    %col2 = arith.minsi %vcol, %c32 : index
+
+    %dst_view = pto.make_tensor_view %dst_ptr,
+      shape = [%c1, %c1, %c1, %c32, %c32],
+      strides = [%c1024, %c1024, %c1024, %c32, %c1]
+      : !pto.tensor_view<1x1x1x32x32xf32>
+    %dst_part = pto.partition_view %dst_view,
+      offsets = [%c0, %c0, %c0, %c0, %c0],
+      sizes = [%c1, %c1, %c1, %c32, %c32]
+      : !pto.tensor_view<1x1x1x32x32xf32> -> !pto.partition_tensor_view<1x1x1x32x32xf32>
+
+    %c0_i64 = arith.constant 0 : i64
+    %c4096_i64 = arith.constant 4096 : i64
+    %c8192_i64 = arith.constant 8192 : i64
+    %c12288_i64 = arith.constant 12288 : i64
+    %c16384_i64 = arith.constant 16384 : i64
+    %c20480_i64 = arith.constant 20480 : i64
+    %c24576_i64 = arith.constant 24576 : i64
+
+    // Stage 0: inputs and output use %row0/%col0.
+    %a = pto.alloc_tile addr = %c0_i64 valid_row = %row0 valid_col = %col0 : !pto.tile_buf<vec, 32x32xf32, valid=?x?>
+    %b = pto.alloc_tile addr = %c4096_i64 valid_row = %row0 valid_col = %col0 : !pto.tile_buf<vec, 32x32xf32, valid=?x?>
+    %tmp0 = pto.alloc_tile addr = %c16384_i64 valid_row = %row0 valid_col = %col0 : !pto.tile_buf<vec, 32x32xf32, valid=?x?>
+
+    // Stage 1: inputs and output use %row1/%col1 (different SSA, same expression).
+    %c = pto.alloc_tile addr = %c8192_i64 valid_row = %row1 valid_col = %col1 : !pto.tile_buf<vec, 32x32xf32, valid=?x?>
+    %d = pto.alloc_tile addr = %c12288_i64 valid_row = %row1 valid_col = %col1 : !pto.tile_buf<vec, 32x32xf32, valid=?x?>
+    %tmp1 = pto.alloc_tile addr = %c20480_i64 valid_row = %row1 valid_col = %col1 : !pto.tile_buf<vec, 32x32xf32, valid=?x?>
+
+    // Stage 2: output uses %row2/%col2 (different SSA, same expression).
+    %out = pto.alloc_tile addr = %c24576_i64 valid_row = %row2 valid_col = %col2 : !pto.tile_buf<vec, 32x32xf32, valid=?x?>
+
+    pto.tadd ins(%a, %b : !pto.tile_buf<vec, 32x32xf32, valid=?x?>, !pto.tile_buf<vec, 32x32xf32, valid=?x?>) outs(%tmp0 : !pto.tile_buf<vec, 32x32xf32, valid=?x?>)
+    pto.tadd ins(%c, %d : !pto.tile_buf<vec, 32x32xf32, valid=?x?>, !pto.tile_buf<vec, 32x32xf32, valid=?x?>) outs(%tmp1 : !pto.tile_buf<vec, 32x32xf32, valid=?x?>)
+    pto.tadd ins(%tmp0, %tmp1 : !pto.tile_buf<vec, 32x32xf32, valid=?x?>, !pto.tile_buf<vec, 32x32xf32, valid=?x?>) outs(%out : !pto.tile_buf<vec, 32x32xf32, valid=?x?>)
+    pto.tstore ins(%out : !pto.tile_buf<vec, 32x32xf32, valid=?x?>)
+               outs(%dst_part : !pto.partition_tensor_view<1x1x1x32x32xf32>)
+    return
+  }
+}
+
+// PLAN checks: all three tadd ops share group_id=0
+// PLAN-LABEL: func.func @computed_shape_e2e(
+// PLAN: pto.tadd {{.*}} {pto.fusion.group_id = 0 : i64, pto.fusion.order = 0 : i64}
+// PLAN: pto.tadd {{.*}} {pto.fusion.group_id = 0 : i64, pto.fusion.order = 1 : i64}
+// PLAN: pto.tadd {{.*}} {pto.fusion.group_id = 0 : i64, pto.fusion.order = 2 : i64}
+
+// REGION checks: all three tadd ops inside one fusion_region
+// REGION-LABEL: func.func @computed_shape_e2e(
+// REGION: pto.fusion_region {
+// REGION: pto.tadd
+// REGION: pto.tadd
+// REGION: pto.tadd
+// REGION: pto.yield({{.*}}) : {{.*}} -> ()
+// REGION: } {pto.fusion.group_id = 0 : i64}
+
+// LOOP checks: three vadd ops inside a single fused scf.for nest
+// LOOP-LABEL: func.func @computed_shape_e2e(
+// LOOP: %[[ROW_BOUND:.*]] = arith.minsi %{{.*}}, %{{.*}} : index
+// LOOP: %[[COL_BOUND:.*]] = arith.minsi %{{.*}}, %{{.*}} : index
+// LOOP: pto.fusion_region {
+// LOOP: scf.for {{.*}} to %[[ROW_BOUND]] step
+// LOOP: scf.for {{.*}} to %[[COL_BOUND]] step
+// LOOP: pto.vadd
+// LOOP: pto.vadd
+// LOOP: pto.vadd
+// LOOP: }
+// LOOP: pto.yield
+// LOOP: pto.copy_ubuf_to_gm

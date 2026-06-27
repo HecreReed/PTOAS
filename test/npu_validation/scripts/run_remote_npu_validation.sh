@@ -359,19 +359,29 @@ if [[ "${SIM_SOC_VERSION}" == "Ascend910" ]]; then
   fi
 fi
 
-# Detect A3 (Ascend910B) target for golden-script gating.
+# Detect A3 (Ascend910A/910B) target for golden-script gating.
 # This is separate from SOC_VERSION/SIM_SOC_VERSION used for compilation
 # to avoid changing the compiler arch (dav-c220 vs dav-c310). Simulator runs
-# must key off the selected SIM target, not the mere presence of 910B sim libs.
+# must key off the selected SIM target, not the mere presence of 910 sim libs.
 export PTOAS_BOARD_IS_A3=0
 if [[ "${RUN_MODE}" == "sim" ]]; then
-  if [[ "$(printf '%s' "${SIM_SOC_VERSION}" | tr '[:upper:]' '[:lower:]')" == *910b* ]]; then
+  sim_soc_lc="$(printf '%s' "${SIM_SOC_VERSION}" | tr '[:upper:]' '[:lower:]')"
+  if [[ "${sim_soc_lc}" == *910a* || "${sim_soc_lc}" == *910proa* || "${sim_soc_lc}" == *910b* ]]; then
     export PTOAS_BOARD_IS_A3=1
     log "Detected A3 target from SIM_SOC_VERSION=${SIM_SOC_VERSION}"
   fi
-elif [[ "$(printf '%s' "${_board_chip}" | tr '[:upper:]' '[:lower:]')" == *910b* ]]; then
-  export PTOAS_BOARD_IS_A3=1
-  log "Detected A3 board from npu-smi chip name: ${_board_chip}"
+else
+  board_chip_lc="$(printf '%s' "${_board_chip}" | tr '[:upper:]' '[:lower:]')"
+  if [[ "${board_chip_lc}" == *910a* || "${board_chip_lc}" == *910proa* || "${board_chip_lc}" == *910b* ]]; then
+    export PTOAS_BOARD_IS_A3=1
+    log "Detected A3 board from npu-smi chip name: ${_board_chip}"
+  elif [[ -z "${_board_chip}" ]]; then
+    sim_soc_lc="$(printf '%s' "${SIM_SOC_VERSION}" | tr '[:upper:]' '[:lower:]')"
+    if [[ "${sim_soc_lc}" == *910a* || "${sim_soc_lc}" == *910proa* || "${sim_soc_lc}" == *910b* ]]; then
+      export PTOAS_BOARD_IS_A3=1
+      log "Detected A3 board from SIM_SOC_VERSION=${SIM_SOC_VERSION}"
+    fi
+  fi
 fi
 log "SIM_SOC_VERSION=${SIM_SOC_VERSION}"
 log "PTOAS_BOARD_IS_A3=${PTOAS_BOARD_IS_A3}"
@@ -382,12 +392,13 @@ log "PTOAS_BOARD_IS_A3=${PTOAS_BOARD_IS_A3}"
 # getenv() unless exported here.
 export RUN_MODE
 export SOC_VERSION="${SIM_SOC_VERSION}"
-if [[ "${PTOAS_BOARD_IS_A3}" != "1" ]]; then
-  board_chip_lc="$(printf '%s' "${_board_chip}" | tr '[:upper:]' '[:lower:]')"
-  if [[ "${board_chip_lc}" == *950* || "${board_chip_lc}" == *a5* || "${SOC_VERSION,,}" == *950* || "${SOC_VERSION,,}" == *a5* ]]; then
-    export PTO_DISABLE_SDMA_WORKSPACE_INIT=1
-    log "Export PTO_DISABLE_SDMA_WORKSPACE_INIT=1 for A5 TPREFETCH_ASYNC runtime fallback"
-  fi
+board_chip_lc="$(printf '%s' "${_board_chip}" | tr '[:upper:]' '[:lower:]')"
+if [[ "${PTOAS_BOARD_IS_A3}" == "1" ]]; then
+  export PTO_DISABLE_SDMA_WORKSPACE_INIT=1
+  log "Export PTO_DISABLE_SDMA_WORKSPACE_INIT=1 for A3 TPREFETCH_ASYNC runtime fallback"
+elif [[ "${board_chip_lc}" == *950* || "${board_chip_lc}" == *a5* || "${SOC_VERSION,,}" == *950* || "${SOC_VERSION,,}" == *a5* ]]; then
+  export PTO_DISABLE_SDMA_WORKSPACE_INIT=1
+  log "Export PTO_DISABLE_SDMA_WORKSPACE_INIT=1 for A5 TPREFETCH_ASYNC runtime fallback"
 fi
 
 LD_LIBRARY_PATH_NPU="${LD_LIBRARY_PATH}"
