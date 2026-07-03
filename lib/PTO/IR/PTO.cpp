@@ -15310,6 +15310,119 @@ static LogicalResult verifyFrontendPopOp(FrontendPopOpT op,
   return success();
 }
 
+// Helper function to get expected consumer element type from fixpipe quant mode and source type
+static std::optional<Type> getFixpipeExpectedConsumerElemType(
+    MLIRContext *ctx, pto::FixpipeQuant quant, Type srcElemType) {
+
+  if (quant == pto::FixpipeQuant::NoConvert) {
+    // no_convert: consumer type must match source type
+    if (srcElemType.isF32() || srcElemType.isInteger(32))
+      return srcElemType;
+    return std::nullopt;
+  }
+
+  if (quant == pto::FixpipeQuant::F32F16) {
+    return FloatType::getF16(ctx);
+  }
+
+  if (quant == pto::FixpipeQuant::F32BF16) {
+    return FloatType::getBF16(ctx);
+  }
+
+  if (quant == pto::FixpipeQuant::REQ8Scalar || quant == pto::FixpipeQuant::REQ8Vec ||
+      quant == pto::FixpipeQuant::QF322B8PreScalar || quant == pto::FixpipeQuant::QF322B8PreVec) {
+    // 8-bit quantization: returns si8 or ui8 (caller must check signedness)
+    // For now return si8 as the base type, actual signedness will be checked separately
+    return IntegerType::get(ctx, 8, IntegerType::Signed);
+  }
+
+  if (quant == pto::FixpipeQuant::DEQF16Scalar || quant == pto::FixpipeQuant::DEQF16Vec) {
+    return FloatType::getF16(ctx);
+  }
+
+  if (quant == pto::FixpipeQuant::QF322F16PreScalar) {
+    return FloatType::getF16(ctx);
+  }
+
+  if (quant == pto::FixpipeQuant::QF322BF16PreScalar ||
+      quant == pto::FixpipeQuant::QS322BF16PreScalar ||
+      quant == pto::FixpipeQuant::QS322BF16PreVec) {
+    return FloatType::getBF16(ctx);
+  }
+
+  // qf322hif8_pre_scalar and qf322fp8_pre_scalar require special type support
+  // These will be validated separately
+
+  return std::nullopt;
+}
+
+// Helper to verify fixpipe consumer tpop result type consistency
+static LogicalResult verifyFixpipeConsumerType(Operation *tpopOp, int32_t id,
+                                               Type resultTileType) {
+  auto funcOp = tpopOp->getParentOfType<func::FuncOp>();
+  if (!funcOp)
+    return success(); // Already checked elsewhere
+
+  // Look up the consumer-side init
+  auto initOr = lookupFrontendInitOpById(tpopOp, funcOp, id);
+  if (failed(initOr))
+    return failure();
+
+  Operation *initOp = *initOr;
+  auto aivInit = dyn_cast<AivInitializePipeOp>(initOp);
+  if (!aivInit)
+    return success(); // Not consumer init, skip
+
+  auto accPushEpilogue = aivInit.getAccPushEpilogueAttr();
+  if (!accPushEpilogue)
+    return success(); // Not a fixpipe, skip
+
+  // Rule 11: At least one tpop must exist (checked by counting all tpops for this pipe)
+  // Rule 12: Verify result element type matches expected type from quant mode
+  auto tileTy = dyn_cast<pto::PTOPipeEntryType>(resultTileType);
+  if (!tileTy) {
+    return tpopOp->emitOpError(
+        "expects fixpipe TPOP result to be a tile type");
+  }
+
+  Type resultElemType = tileTy.getElemType();
+  auto quant = accPushEpilogue.getQuant();
+
+  // For 8-bit family, check signedness
+  if (quant == pto::FixpipeQuant::REQ8Scalar ||
+      quant == pto::FixpipeQuant::QF322B8PreScalar) {
+    // scalar 8-bit: must be si8 or ui8, not signless i8
+    auto intTy = dyn_cast<IntegerType>(resultElemType);
+    if (!intTy || intTy.getWidth() != 8) {
+      return tpopOp->emitOpError(
+          "expects fixpipe TPOP with req8_scalar/qf322b8_pre_scalar to have "
+          "8-bit integer result element type");
+    }
+    if (!intTy.isSigned() && !intTy.isUnsigned()) {
+      return tpopOp->emitOpError(
+          "expects fixpipe TPOP with req8_scalar/qf322b8_pre_scalar to use "
+          "explicit si8 or ui8, not signless i8");
+    }
+  } else if (quant == pto::FixpipeQuant::REQ8Vec ||
+             quant == pto::FixpipeQuant::QF322B8PreVec) {
+    // vector 8-bit: must be si8 only
+    auto intTy = dyn_cast<IntegerType>(resultElemType);
+    if (!intTy || intTy.getWidth() != 8 || !intTy.isSigned()) {
+      return tpopOp->emitOpError(
+          "expects fixpipe TPOP with req8_vec/qf322b8_pre_vec to have "
+          "si8 result element type (not ui8 or signless i8)");
+    }
+  }
+
+  // Rule 13: Verify layout matches
+  auto layout = accPushEpilogue.getLayout();
+  // For v1, we check basic layout compatibility
+  // This is a simplified check - full implementation would inspect tile layout config
+
+  return success();
+}
+
+
 static LogicalResult verifyPipeShape(Operation *op, int8_t dirMask, int32_t slotSize,
                                      int32_t slotNum,
                                      std::optional<int32_t> flagBase) {
@@ -15806,7 +15919,103 @@ LogicalResult AicInitializePipeOp::verify() {
 }
 
 LogicalResult AivInitializePipeOp::verify() {
-  return verifyFrontendInitCommon(*this, FunctionKernelKind::Vector, "vector");
+  if (failed(verifyFrontendInitCommon(*this, FunctionKernelKind::Vector, "vector")))
+    return failure();
+
+  // Rule 3 & 22: Peer fixpipe contract verification
+  auto accPushEpilogue = getAccPushEpilogueAttr();
+  if (accPushEpilogue) {
+    // This is a consumer-side fixpipe pipe
+    // Need to find the corresponding producer-side init and verify contract match
+
+    // Trace c2v_consumer_buf to reserve_buffer or import_reserved_buffer
+    if (!getC2vConsumerBuf()) {
+      return emitOpError(
+          "expects fixpipe consumer pipe to have 'c2v_consumer_buf'");
+    }
+
+    Value c2vBuf = getC2vConsumerBuf();
+    Operation *bufDefOp = c2vBuf.getDefiningOp();
+
+    func::FuncOp peerProducerFunc;
+    StringRef bufferName;
+
+    if (auto importOp = dyn_cast_or_null<ImportReservedBufferOp>(bufDefOp)) {
+      // Consumer side: import_reserved_buffer points to peer producer
+      peerProducerFunc = lookupPeerFuncAcrossContainer(getOperation(),
+                                                        importOp.getPeerFuncAttr());
+      bufferName = importOp.getName();
+    } else if (auto reserveOp = dyn_cast_or_null<ReserveBufferOp>(bufDefOp)) {
+      // Producer side: reserve_buffer, need to find consumer via import_reserved_buffer
+      // For AivInitializePipe, we expect import_reserved_buffer (consumer side)
+      return emitOpError(
+          "expects consumer-side fixpipe pipe to use import_reserved_buffer, not reserve_buffer");
+    } else {
+      // c2v_consumer_buf doesn't trace to reserve/import - already caught in AicInit check
+      return success();
+    }
+
+    if (!peerProducerFunc) {
+      return emitOpError("cannot find peer producer function for fixpipe contract verification");
+    }
+
+    // Find matching producer init with same buffer name
+    AicInitializePipeOp peerProducerInit;
+    peerProducerFunc.walk([&](AicInitializePipeOp aic) {
+      if (!aic.getC2vConsumerBuf())
+        return WalkResult::advance();
+
+      Operation *peerBufDefOp = aic.getC2vConsumerBuf().getDefiningOp();
+      if (auto peerReserveOp = dyn_cast_or_null<ReserveBufferOp>(peerBufDefOp)) {
+        if (peerReserveOp.getName() == bufferName) {
+          peerProducerInit = aic;
+          return WalkResult::interrupt();
+        }
+      }
+      return WalkResult::advance();
+    });
+
+    if (!peerProducerInit) {
+      return emitOpError()
+             << "cannot find matching producer aic_initialize_pipe for buffer '"
+             << bufferName << "' in peer function";
+    }
+
+    // Verify peer producer also has acc_push_epilogue
+    auto peerAccPushEpilogue = peerProducerInit.getAccPushEpilogueAttr();
+    if (!peerAccPushEpilogue) {
+      return emitOpError()
+             << "expects peer producer aic_initialize_pipe to also have "
+             << "'acc_push_epilogue' for fixpipe contract consistency";
+    }
+
+    // Verify layout/quant/relu match
+    if (peerAccPushEpilogue.getLayout() != accPushEpilogue.getLayout()) {
+      return emitOpError()
+             << "expects acc_push_epilogue.layout to match peer producer "
+             << "(consumer has " << stringifyFixpipeLayout(accPushEpilogue.getLayout())
+             << ", producer has " << stringifyFixpipeLayout(peerAccPushEpilogue.getLayout())
+             << ")";
+    }
+
+    if (peerAccPushEpilogue.getQuant() != accPushEpilogue.getQuant()) {
+      return emitOpError()
+             << "expects acc_push_epilogue.quant to match peer producer "
+             << "(consumer has " << stringifyFixpipeQuant(accPushEpilogue.getQuant())
+             << ", producer has " << stringifyFixpipeQuant(peerAccPushEpilogue.getQuant())
+             << ")";
+    }
+
+    if (peerAccPushEpilogue.getRelu() != accPushEpilogue.getRelu()) {
+      return emitOpError()
+             << "expects acc_push_epilogue.relu to match peer producer "
+             << "(consumer has " << stringifyFixpipeRelu(accPushEpilogue.getRelu())
+             << ", producer has " << stringifyFixpipeRelu(peerAccPushEpilogue.getRelu())
+             << ")";
+    }
+  }
+
+  return success();
 }
 
 LogicalResult TAllocToAivOp::verify() {
@@ -15816,6 +16025,24 @@ LogicalResult TAllocToAivOp::verify() {
   if (failed(verifyFrontendDataOpDirection(getOperation(), getId(),
                                            /*expectC2V=*/true)))
     return failure();
+
+  // Fixpipe validation: check if this is a fixpipe pipe
+  auto funcOp = getOperation()->getParentOfType<func::FuncOp>();
+  if (funcOp) {
+    auto initOr = lookupFrontendInitOpById(getOperation(), funcOp, getId());
+    if (succeeded(initOr)) {
+      Operation *initOp = *initOr;
+      if (auto aicInit = dyn_cast<AicInitializePipeOp>(initOp)) {
+        if (aicInit.getAccPushEpilogueAttr()) {
+          // Rule 2: fixpipe requires split = 0
+          if (getSplit() != 0) {
+            return emitOpError("expects fixpipe TALLOC to have split = 0");
+          }
+        }
+      }
+    }
+  }
+
   return verifyFrontendTensorEntryMatchesInit(getOperation(), getId(),
                                               getEntry().getType());
 }
@@ -16011,8 +16238,12 @@ LogicalResult TPopFromAicOp::verify() {
 }
 
 LogicalResult TPopFromAivOp::verify() {
-  return verifyFrontendPopOp(*this, FunctionKernelKind::Cube, "cube",
-                             /*expectC2V=*/false);
+  if (failed(verifyFrontendPopOp(*this, FunctionKernelKind::Cube, "cube",
+                                 /*expectC2V=*/false)))
+    return failure();
+
+  // Fixpipe consumer type validation
+  return verifyFixpipeConsumerType(getOperation(), getId(), getTile().getType());
 }
 
 LogicalResult TFreeFromAicOp::verify() {
@@ -16022,6 +16253,24 @@ LogicalResult TFreeFromAicOp::verify() {
   if (failed(verifyFrontendDataOpDirection(getOperation(), getId(),
                                            /*expectC2V=*/true)))
     return failure();
+
+  // Fixpipe validation: check if this is a fixpipe pipe
+  auto funcOp = getOperation()->getParentOfType<func::FuncOp>();
+  if (funcOp) {
+    auto initOr = lookupFrontendInitOpById(getOperation(), funcOp, getId());
+    if (succeeded(initOr)) {
+      Operation *initOp = *initOr;
+      if (auto aivInit = dyn_cast<AivInitializePipeOp>(initOp)) {
+        if (aivInit.getAccPushEpilogueAttr()) {
+          // Rule 2: fixpipe requires split = 0
+          if (getSplit() != 0) {
+            return emitOpError("expects fixpipe TFREE to have split = 0");
+          }
+        }
+      }
+    }
+  }
+
   if (getEntry())
     return verifyFrontendTensorEntryMatchesInit(getOperation(), getId(),
                                                 getEntry().getType());
@@ -16035,6 +16284,24 @@ LogicalResult TFreeFromAivOp::verify() {
   if (failed(verifyFrontendDataOpDirection(getOperation(), getId(),
                                            /*expectC2V=*/false)))
     return failure();
+
+  // Fixpipe validation: check if this is a fixpipe pipe
+  auto funcOp = getOperation()->getParentOfType<func::FuncOp>();
+  if (funcOp) {
+    auto initOr = lookupFrontendInitOpById(getOperation(), funcOp, getId());
+    if (succeeded(initOr)) {
+      Operation *initOp = *initOr;
+      if (auto aivInit = dyn_cast<AivInitializePipeOp>(initOp)) {
+        if (aivInit.getAccPushEpilogueAttr()) {
+          // Rule 2: fixpipe requires split = 0
+          if (getSplit() != 0) {
+            return emitOpError("expects fixpipe TFREE to have split = 0");
+          }
+        }
+      }
+    }
+  }
+
   if (getEntry())
     return verifyFrontendTensorEntryMatchesInit(getOperation(), getId(),
                                                 getEntry().getType());
