@@ -1,0 +1,60 @@
+// RUN: ptoas --pto-arch=a5 --pto-level=3 %s | FileCheck %s
+
+// Test: DEQF16 scalar + NZ2ND + NormalRelu fixpipe basic case
+// This validates Rule 1-3, 7-10, 12-13, 16
+
+module {
+  func.func @cube_producer(%c2v_buf: i32) attributes {kernel_kind = #pto.kernel_kind<cube>} {
+    pto.aic_initialize_pipe {
+      id = 0,
+      dir_mask = 1,
+      slot_size = 1024,
+      slot_num = 8,
+      nosplit = true,
+      acc_push_epilogue = #pto.acc_push_epilogue<
+        layout = nz2nd,
+        quant = deqf16_scalar,
+        relu = normal_relu
+      >
+    } (c2v_consumer_buf = %c2v_buf : i32)
+
+    %acc_tile = pto.tcreatev_acc<f32, [16, 16], row_major> {id = 0} : !pto.tile<acc, f32, [16, 16], row_major>
+
+    // Set scalar quantization parameter
+    %scale = arith.constant 0.5 : f32
+    pto.set_quant_scalar {id = 0} (%scale : f32)
+
+    // Push with fixpipe
+    pto.tpush_to_aiv {id = 0, split = 0} (%acc_tile : !pto.tile<acc, f32, [16, 16], row_major>)
+
+    pto.tfree_from_aic {id = 0, split = 0} (%acc_tile : !pto.tile<acc, f32, [16, 16], row_major>)
+    return
+  }
+
+  func.func @vector_consumer(%c2v_buf: i32) attributes {kernel_kind = #pto.kernel_kind<vector>} {
+    pto.aiv_initialize_pipe {
+      id = 0,
+      dir_mask = 1,
+      slot_size = 1024,
+      slot_num = 8,
+      nosplit = true,
+      acc_push_epilogue = #pto.acc_push_epilogue<
+        layout = nz2nd,
+        quant = deqf16_scalar,
+        relu = normal_relu
+      >
+    } (c2v_consumer_buf = %c2v_buf : i32)
+
+    // Consumer expects f16 result from deqf16_scalar
+    %vec_tile = pto.tpop_from_aiv {id = 0, split = 0} : !pto.tile<vec, f16, [16, 16], row_major>
+
+    pto.tfree_from_aiv {id = 0, split = 0} (%vec_tile : !pto.tile<vec, f16, [16, 16], row_major>)
+    return
+  }
+}
+
+// CHECK: func.func @cube_producer
+// CHECK: pto.aic_initialize_pipe
+// CHECK: acc_push_epilogue = #pto.acc_push_epilogue<layout = nz2nd, quant = deqf16_scalar, relu = normal_relu>
+// CHECK: pto.set_quant_scalar
+// CHECK: pto.tpush_to_aiv
