@@ -15044,6 +15044,34 @@ static LogicalResult verifyFrontendInitCommon(InitOpT op,
             "expects 'qs322bf16_pre_*' quantization modes to be used only on A5 target");
       }
     }
+
+    // Rule 14-15: Validate slot_size for fixpipe pipes
+    // For fixpipe pipes, slot_size must be interpreted as post-fixpipe consumer entry size
+    // We need to verify: slot_size >= physical_size(consumer_shape, consumer_elem_type, consumer_layout)
+    // This is a simplified check - full implementation would need to:
+    // 1. Trace to find actual consumer tpop to get shape
+    // 2. Calculate physical size based on resolved consumer elem type from quant mode
+    // 3. Account for layout transformation overhead
+    // 4. Apply target-specific alignment constraints
+    //
+    // For v1, we perform a basic sanity check:
+    // - Get the expected consumer element type from quant mode
+    // - Verify slot_size is reasonable (non-zero and matches expected type size order)
+    auto consumerElemType = getFixpipeExpectedConsumerElemType(
+        op.getContext(), quant, /*srcElemType=*/Type());
+    if (consumerElemType) {
+      unsigned elemBits = consumerElemType->getIntOrFloatBitWidth();
+      // Basic sanity: slot_size should be at least a few elements worth
+      // Full validation requires knowing consumer tile shape, which needs cross-op analysis
+      if (slotSize == 0) {
+        return op.emitOpError(
+            "expects fixpipe pipe to have non-zero 'slot_size' "
+            "(must accommodate post-fixpipe consumer entry)");
+      }
+      // Note: More precise validation of slot_size against actual consumer tile dimensions
+      // would require walking to find consumer tpop ops and analyzing their tile shapes.
+      // That's deferred to a more comprehensive pass or lowering-time check.
+    }
   }
 
   return success();
@@ -15415,9 +15443,43 @@ static LogicalResult verifyFixpipeConsumerType(Operation *tpopOp, int32_t id,
   }
 
   // Rule 13: Verify layout matches
+  // acc_push_epilogue.layout must match consumer result tile layout:
+  // - nz2nd -> vec row_major
+  // - nz2dn -> vec col_major
+  // - nz2nz -> vec col_major + s_layout = row_major
   auto layout = accPushEpilogue.getLayout();
-  // For v1, we check basic layout compatibility
-  // This is a simplified check - full implementation would inspect tile layout config
+
+  // Check tile location is vector
+  if (tileTy.getLoc() != pto::TileLoc::VEC) {
+    return tpopOp->emitOpError(
+        "expects fixpipe TPOP result tile to have loc=vec");
+  }
+
+  // Check layout compatibility based on tile layout config
+  // This is a basic v1 check - full implementation would parse layout params
+  auto layoutCfg = tileTy.getLayoutCfg();
+  if (layoutCfg) {
+    bool isRowMajor = layoutCfg.getValue().contains("row_major");
+    bool isColMajor = layoutCfg.getValue().contains("col_major");
+
+    if (layout == pto::FixpipeLayout::NZ2ND) {
+      if (!isRowMajor) {
+        return tpopOp->emitOpError(
+            "expects fixpipe TPOP with layout=nz2nd to have vec row_major result tile");
+      }
+    } else if (layout == pto::FixpipeLayout::NZ2DN) {
+      if (!isColMajor) {
+        return tpopOp->emitOpError(
+            "expects fixpipe TPOP with layout=nz2dn to have vec col_major result tile");
+      }
+    } else if (layout == pto::FixpipeLayout::NZ2NZ) {
+      if (!isColMajor) {
+        return tpopOp->emitOpError(
+            "expects fixpipe TPOP with layout=nz2nz to have vec col_major result tile");
+      }
+      // Note: nz2nz also requires s_layout = row_major, which would need deeper layout parsing
+    }
+  }
 
   return success();
 }
