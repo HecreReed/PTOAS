@@ -1752,6 +1752,7 @@ def AicInitializePipeOp : PTO_Op<"aic_initialize_pipe",
       OptionalAttr<I32Attr>:$slot_num,
       OptionalAttr<I32Attr>:$local_slot_num,
       OptionalAttr<BoolAttr>:$nosplit,
+      OptionalAttr<PTO_AccPushEpilogueAttr>:$acc_push_epilogue,
       Optional<PtrType>:$gm_slot_buffer,
       Optional<TensorViewType>:$gm_slot_tensor,
       Optional<I32>:$c2v_consumer_buf,
@@ -1774,6 +1775,7 @@ def AivInitializePipeOp : PTO_Op<"aiv_initialize_pipe",
       OptionalAttr<I32Attr>:$slot_num,
       OptionalAttr<I32Attr>:$local_slot_num,
       OptionalAttr<BoolAttr>:$nosplit,
+      OptionalAttr<PTO_AccPushEpilogueAttr>:$acc_push_epilogue,
       Optional<PtrType>:$gm_slot_buffer,
       Optional<TensorViewType>:$gm_slot_tensor,
       Optional<I32>:$c2v_consumer_buf,
@@ -1926,6 +1928,61 @@ def TFreeFromAivOp : PTO_TOp<"tfree_from_aiv"> {
   let assemblyFormat = [{
     (`(` $entry^ `:` qualified(type($entry)) `)`)?
     `{` (`id` `=` $id^ `,`)? `split` `=` $split `}` attr-dict
+  }];
+}
+
+//===----------------------------------------------------------------------===//
+// Fixpipe Quant Config Ops
+//===----------------------------------------------------------------------===//
+
+def SetQuantScalarOp : PTO_Op<"set_quant_scalar"> {
+  let summary = "Set scalar quantization parameters for fixpipe producer";
+
+  let description = [{
+    Producer-side scalar quantization configuration for fixpipe TPUSH.
+    Binds a scalar quant payload (typically f32 scale) to a logical pipe id.
+    This binding persists until overwritten by another set_quant_scalar with
+    the same id. Used by scalar quant modes: deqf16_scalar, req8_scalar,
+    qf322b8_pre_scalar, qf322f16_pre_scalar, qf322bf16_pre_scalar,
+    qs322bf16_pre_scalar, qf322hif8_pre_scalar, qf322fp8_pre_scalar.
+  }];
+
+  let arguments = (ins
+      AnyFloat:$scale,
+      DefaultValuedOptionalAttr<I32Attr, "0">:$id
+  );
+
+  let results = (outs);
+  let hasVerifier = 1;
+
+  let assemblyFormat = [{
+    `(` $scale `:` type($scale) `)` `{` `id` `=` $id `}` attr-dict
+  }];
+}
+
+def SetQuantVectorOp : PTO_Op<"set_quant_vector"> {
+  let summary = "Set vector quantization parameters for fixpipe producer";
+
+  let description = [{
+    Producer-side vector quantization configuration for fixpipe TPUSH.
+    Binds a vector quant payload (scaling tile) to a logical pipe id.
+    The input tile must have loc=scaling. This binding persists until
+    overwritten by another set_quant_vector with the same id.
+    Used by vector quant modes: deqf16_vec, req8_vec, qf322b8_pre_vec,
+    qs322bf16_pre_vec.
+  }];
+
+  let arguments = (ins
+      PTOPipeEntryType:$scaling_tile,
+      DefaultValuedOptionalAttr<I32Attr, "0">:$id
+  );
+
+  let results = (outs);
+  let hasVerifier = 1;
+
+  let assemblyFormat = [{
+    `(` $scaling_tile `:` qualified(type($scaling_tile)) `)`
+    `{` `id` `=` $id `}` attr-dict
   }];
 }
 

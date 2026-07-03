@@ -14967,6 +14967,85 @@ static LogicalResult verifyFrontendInitCommon(InitOpT op,
     }
   }
 
+  // Fixpipe validation
+  if (auto accPushEpilogue = op.getAccPushEpilogueAttr()) {
+    // Rule 1: fixpipe must be C2V only (dir_mask == 1)
+    if (dirMask != 1) {
+      return op.emitOpError(
+          "expects fixpipe pipe (with 'acc_push_epilogue') to have dir_mask = 1 (C2V only)");
+    }
+
+    // Rule 2: fixpipe must have nosplit = true
+    if (!op.getNosplit()) {
+      return op.emitOpError(
+          "expects fixpipe pipe (with 'acc_push_epilogue') to have nosplit = true");
+    }
+
+    // Rule 5: C2V consumer buf must be traceable to reserve_buffer
+    if (hasC2vConsumerBuf) {
+      // Check if c2v_consumer_buf traces to reserve_buffer or import_reserved_buffer
+      // This is a simplified check - full implementation would walk def chain
+      Value c2vBuf = op.getC2vConsumerBuf();
+      Operation *defOp = c2vBuf.getDefiningOp();
+      bool foundReserve = false;
+      if (defOp) {
+        if (isa<ReserveBufferOp>(defOp) || isa<ImportReservedBufferOp>(defOp)) {
+          foundReserve = true;
+        }
+      }
+      if (!foundReserve) {
+        return op.emitOpError(
+            "expects fixpipe pipe 'c2v_consumer_buf' to trace to reserve_buffer or "
+            "import_reserved_buffer for peer contract verification");
+      }
+    }
+
+    // Rule 7: relu must be no_relu or normal_relu in v1
+    auto relu = accPushEpilogue.getRelu();
+    if (relu != pto::FixpipeRelu::NoRelu && relu != pto::FixpipeRelu::NormalRelu) {
+      return op.emitOpError(
+          "expects 'acc_push_epilogue.relu' to be 'no_relu' or 'normal_relu' in v1");
+    }
+
+    // Rule 8: quant must be in v1 allowed set
+    auto quant = accPushEpilogue.getQuant();
+    bool validQuant = false;
+    switch (quant) {
+      case pto::FixpipeQuant::NoConvert:
+      case pto::FixpipeQuant::F32F16:
+      case pto::FixpipeQuant::F32BF16:
+      case pto::FixpipeQuant::REQ8Scalar:
+      case pto::FixpipeQuant::REQ8Vec:
+      case pto::FixpipeQuant::DEQF16Scalar:
+      case pto::FixpipeQuant::DEQF16Vec:
+      case pto::FixpipeQuant::QF322B8PreScalar:
+      case pto::FixpipeQuant::QF322B8PreVec:
+      case pto::FixpipeQuant::QF322F16PreScalar:
+      case pto::FixpipeQuant::QF322BF16PreScalar:
+      case pto::FixpipeQuant::QS322BF16PreScalar:
+      case pto::FixpipeQuant::QS322BF16PreVec:
+      case pto::FixpipeQuant::QF322HIF8PreScalar:
+      case pto::FixpipeQuant::QF322FP8PreScalar:
+        validQuant = true;
+        break;
+      default:
+        break;
+    }
+    if (!validQuant) {
+      return op.emitOpError(
+          "expects 'acc_push_epilogue.quant' to be one of the v1 allowed quantization modes");
+    }
+
+    // Rule 10: Check A5-only modes
+    if (quant == pto::FixpipeQuant::QS322BF16PreScalar ||
+        quant == pto::FixpipeQuant::QS322BF16PreVec) {
+      if (arch != PTOArch::A5) {
+        return op.emitOpError(
+            "expects 'qs322bf16_pre_*' quantization modes to be used only on A5 target");
+      }
+    }
+  }
+
   return success();
 }
 
@@ -15759,8 +15838,160 @@ LogicalResult TPushToAivOp::verify() {
   if (failed(verifyFrontendDataOpDirection(getOperation(), getId(),
                                            /*expectC2V=*/true)))
     return failure();
-  return verifyFrontendTensorEntryMatchesInit(getOperation(), getId(),
-                                              getTile().getType());
+  if (failed(verifyFrontendTensorEntryMatchesInit(getOperation(), getId(),
+                                              getTile().getType())))
+    return failure();
+
+  // Fixpipe validation
+  auto funcOp = getOperation()->getParentOfType<func::FuncOp>();
+  if (!funcOp)
+    return emitOpError("must be nested under a func.func");
+
+  auto initOr = lookupFrontendInitOpById(getOperation(), funcOp, getId());
+  if (failed(initOr))
+    return failure();
+
+  Operation *initOp = *initOr;
+  auto aicInit = dyn_cast<AicInitializePipeOp>(initOp);
+  if (!aicInit)
+    return success(); // Not an AIC init, no fixpipe check needed
+
+  auto accPushEpilogue = aicInit.getAccPushEpilogueAttr();
+  if (!accPushEpilogue)
+    return success(); // No fixpipe config, normal pipe
+
+  // Rule 9: Source tile must be acc tile
+  auto tileTy = dyn_cast<pto::PTOPipeEntryType>(getTile().getType());
+  if (!tileTy || tileTy.getLoc() != pto::TileLoc::ACC) {
+    return emitOpError(
+        "expects fixpipe TPUSH source tile to have loc=acc");
+  }
+
+  // Rule 2: split must be 0 for fixpipe
+  if (getSplit() != 0) {
+    return emitOpError(
+        "expects fixpipe TPUSH to have split = 0");
+  }
+
+  // Rule 10: Check source element type matches quant mode
+  Type elemTy = tileTy.getElemType();
+  auto quant = accPushEpilogue.getQuant();
+
+  bool srcTypeValid = true;
+  if (quant == pto::FixpipeQuant::NoConvert) {
+    // no_convert requires f32 or i32, and consumer type must match
+    if (!elemTy.isF32() && !elemTy.isInteger(32)) {
+      srcTypeValid = false;
+    }
+  } else if (quant == pto::FixpipeQuant::F32F16 ||
+             quant == pto::FixpipeQuant::F32BF16 ||
+             quant == pto::FixpipeQuant::QF322B8PreScalar ||
+             quant == pto::FixpipeQuant::QF322B8PreVec ||
+             quant == pto::FixpipeQuant::QF322F16PreScalar ||
+             quant == pto::FixpipeQuant::QF322BF16PreScalar ||
+             quant == pto::FixpipeQuant::QF322HIF8PreScalar ||
+             quant == pto::FixpipeQuant::QF322FP8PreScalar) {
+    // f32-based quant modes
+    if (!elemTy.isF32()) {
+      srcTypeValid = false;
+    }
+  } else if (quant == pto::FixpipeQuant::REQ8Scalar ||
+             quant == pto::FixpipeQuant::REQ8Vec ||
+             quant == pto::FixpipeQuant::DEQF16Scalar ||
+             quant == pto::FixpipeQuant::DEQF16Vec ||
+             quant == pto::FixpipeQuant::QS322BF16PreScalar ||
+             quant == pto::FixpipeQuant::QS322BF16PreVec) {
+    // i32-based quant modes
+    if (!elemTy.isInteger(32)) {
+      srcTypeValid = false;
+    }
+  }
+
+  if (!srcTypeValid) {
+    return emitOpError()
+           << "expects fixpipe TPUSH source element type to match "
+           << "acc_push_epilogue.quant mode requirements";
+  }
+
+  // Rule 16-17: Check for required set_quant_scalar/vector ops
+  bool isScalarQuant = (quant == pto::FixpipeQuant::DEQF16Scalar ||
+                        quant == pto::FixpipeQuant::REQ8Scalar ||
+                        quant == pto::FixpipeQuant::QF322B8PreScalar ||
+                        quant == pto::FixpipeQuant::QF322F16PreScalar ||
+                        quant == pto::FixpipeQuant::QF322BF16PreScalar ||
+                        quant == pto::FixpipeQuant::QS322BF16PreScalar ||
+                        quant == pto::FixpipeQuant::QF322HIF8PreScalar ||
+                        quant == pto::FixpipeQuant::QF322FP8PreScalar);
+
+  bool isVectorQuant = (quant == pto::FixpipeQuant::DEQF16Vec ||
+                        quant == pto::FixpipeQuant::REQ8Vec ||
+                        quant == pto::FixpipeQuant::QF322B8PreVec ||
+                        quant == pto::FixpipeQuant::QS322BF16PreVec);
+
+  if (isScalarQuant || isVectorQuant) {
+    // Rule 18: set_quant_* and TPUSH must be in same basic block
+    Block *tpushBlock = getOperation()->getBlock();
+    bool foundQuantConfig = false;
+
+    // Walk backward in the same block to find matching set_quant_* op
+    for (Operation &op : llvm::reverse(tpushBlock->getOperations())) {
+      if (&op == getOperation())
+        continue; // Skip self
+
+      if (isScalarQuant) {
+        if (auto setQuant = dyn_cast<SetQuantScalarOp>(&op)) {
+          if (setQuant.getId() == getId()) {
+            foundQuantConfig = true;
+            break;
+          }
+        }
+      } else if (isVectorQuant) {
+        if (auto setQuant = dyn_cast<SetQuantVectorOp>(&op)) {
+          if (setQuant.getId() == getId()) {
+            foundQuantConfig = true;
+            break;
+          }
+        }
+      }
+
+      // If we reach this TPUSH while walking backward, stop
+      if (&op == getOperation())
+        break;
+    }
+
+    // Actually walk forward from start to this op
+    foundQuantConfig = false;
+    for (Operation &op : tpushBlock->getOperations()) {
+      if (&op == getOperation())
+        break; // Reached TPUSH, stop search
+
+      if (isScalarQuant) {
+        if (auto setQuant = dyn_cast<SetQuantScalarOp>(&op)) {
+          if (setQuant.getId() == getId()) {
+            foundQuantConfig = true;
+            // Don't break - continue to see if TPUSH comes before any set_quant
+          }
+        }
+      } else if (isVectorQuant) {
+        if (auto setQuant = dyn_cast<SetQuantVectorOp>(&op)) {
+          if (setQuant.getId() == getId()) {
+            foundQuantConfig = true;
+          }
+        }
+      }
+    }
+
+    if (!foundQuantConfig) {
+      return emitOpError()
+             << "expects fixpipe TPUSH with "
+             << (isScalarQuant ? "scalar" : "vector")
+             << " quantization mode to have a matching pto.set_quant_"
+             << (isScalarQuant ? "scalar" : "vector")
+             << " {id = " << getId() << "} in the same basic block before this TPUSH";
+    }
+  }
+
+  return success();
 }
 
 LogicalResult TPushToAicOp::verify() {
@@ -15807,6 +16038,106 @@ LogicalResult TFreeFromAivOp::verify() {
   if (getEntry())
     return verifyFrontendTensorEntryMatchesInit(getOperation(), getId(),
                                                 getEntry().getType());
+  return success();
+}
+
+LogicalResult SetQuantScalarOp::verify() {
+  auto funcOp = getOperation()->getParentOfType<func::FuncOp>();
+  if (!funcOp)
+    return emitOpError("must be nested under a func.func");
+
+  // Look up the referenced pipe
+  auto initOr = lookupFrontendInitOpById(getOperation(), funcOp, getId());
+  if (failed(initOr))
+    return failure();
+
+  Operation *initOp = *initOr;
+  auto aicInit = dyn_cast<AicInitializePipeOp>(initOp);
+  if (!aicInit) {
+    return emitOpError()
+           << "expects 'id' = " << getId()
+           << " to reference an aic_initialize_pipe (producer side)";
+  }
+
+  auto accPushEpilogue = aicInit.getAccPushEpilogueAttr();
+  if (!accPushEpilogue) {
+    return emitOpError()
+           << "expects 'id' = " << getId()
+           << " to reference a fixpipe pipe (with acc_push_epilogue)";
+  }
+
+  // Check that quant mode is scalar
+  auto quant = accPushEpilogue.getQuant();
+  bool isScalarQuant = (quant == pto::FixpipeQuant::DEQF16Scalar ||
+                        quant == pto::FixpipeQuant::REQ8Scalar ||
+                        quant == pto::FixpipeQuant::QF322B8PreScalar ||
+                        quant == pto::FixpipeQuant::QF322F16PreScalar ||
+                        quant == pto::FixpipeQuant::QF322BF16PreScalar ||
+                        quant == pto::FixpipeQuant::QS322BF16PreScalar ||
+                        quant == pto::FixpipeQuant::QF322HIF8PreScalar ||
+                        quant == pto::FixpipeQuant::QF322FP8PreScalar);
+
+  if (!isScalarQuant) {
+    return emitOpError()
+           << "expects 'id' = " << getId()
+           << " to reference a pipe with scalar quantization mode, but found non-scalar mode";
+  }
+
+  // Verify scale operand is float type
+  if (!isa<FloatType>(getScale().getType())) {
+    return emitOpError("expects 'scale' to be a floating-point type");
+  }
+
+  return success();
+}
+
+LogicalResult SetQuantVectorOp::verify() {
+  auto funcOp = getOperation()->getParentOfType<func::FuncOp>();
+  if (!funcOp)
+    return emitOpError("must be nested under a func.func");
+
+  // Look up the referenced pipe
+  auto initOr = lookupFrontendInitOpById(getOperation(), funcOp, getId());
+  if (failed(initOr))
+    return failure();
+
+  Operation *initOp = *initOr;
+  auto aicInit = dyn_cast<AicInitializePipeOp>(initOp);
+  if (!aicInit) {
+    return emitOpError()
+           << "expects 'id' = " << getId()
+           << " to reference an aic_initialize_pipe (producer side)";
+  }
+
+  auto accPushEpilogue = aicInit.getAccPushEpilogueAttr();
+  if (!accPushEpilogue) {
+    return emitOpError()
+           << "expects 'id' = " << getId()
+           << " to reference a fixpipe pipe (with acc_push_epilogue)";
+  }
+
+  // Check that quant mode is vector
+  auto quant = accPushEpilogue.getQuant();
+  bool isVectorQuant = (quant == pto::FixpipeQuant::DEQF16Vec ||
+                        quant == pto::FixpipeQuant::REQ8Vec ||
+                        quant == pto::FixpipeQuant::QF322B8PreVec ||
+                        quant == pto::FixpipeQuant::QS322BF16PreVec);
+
+  if (!isVectorQuant) {
+    return emitOpError()
+           << "expects 'id' = " << getId()
+           << " to reference a pipe with vector quantization mode, but found non-vector mode";
+  }
+
+  // Rule 24: Verify scaling_tile has loc=scaling
+  auto scalingTileTy = dyn_cast<pto::PTOPipeEntryType>(getScalingTile().getType());
+  if (!scalingTileTy || scalingTileTy.getLoc() != pto::TileLoc::SCALING) {
+    return emitOpError("expects 'scaling_tile' to have loc=scaling");
+  }
+
+  // Additional arch-specific payload validation can be added here
+  // For v1, we only check loc=scaling as per Rule 25
+
   return success();
 }
 
