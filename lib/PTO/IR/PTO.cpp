@@ -14614,6 +14614,7 @@ static ParseResult parseFrontendInitializePipeOp(OpAsmParser &parser,
   bool sawSlotNum = false;
   bool sawLocalSlotNum = false;
   bool sawNoSplit = false;
+  bool sawAccPushEpilogue = false;
 
   if (parser.parseLBrace())
     return failure();
@@ -14676,6 +14677,15 @@ static ParseResult parseFrontendInitializePipeOp(OpAsmParser &parser,
       if (parser.parseAttribute(noSplitAttr, "nosplit", attrs))
         return failure();
       sawNoSplit = true;
+    } else if (keyword == "acc_push_epilogue") {
+      if (sawAccPushEpilogue)
+        return parser.emitError(parser.getCurrentLocation(),
+                                "duplicate 'acc_push_epilogue' clause");
+      AccPushEpilogueAttr accPushEpilogueAttr;
+      if (parser.parseAttribute(accPushEpilogueAttr, "acc_push_epilogue",
+                                attrs))
+        return failure();
+      sawAccPushEpilogue = true;
     } else {
       return parser.emitError(parser.getCurrentLocation())
              << "unexpected keyword '" << keyword << "'";
@@ -14801,6 +14811,8 @@ static void printFrontendInitializePipeOp(InitOpT op, OpAsmPrinter &p) {
     printClause("local_slot_num", localSlotNumAttr.getInt());
   if (auto noSplitAttr = op.getNosplitAttr())
     printClause("nosplit", noSplitAttr.getValue() ? "true" : "false");
+  if (auto accPushEpilogueAttr = op.getAccPushEpilogueAttr())
+    printClause("acc_push_epilogue", accPushEpilogueAttr);
   p << "}";
 
   p << "(";
@@ -14824,7 +14836,7 @@ static void printFrontendInitializePipeOp(InitOpT op, OpAsmPrinter &p) {
   p.printOptionalAttrDict(
       op->getAttrs(),
       /*elidedAttrs=*/{"id", "dir_mask", "slot_size", "slot_num",
-                       "local_slot_num",
+                       "local_slot_num", "acc_push_epilogue",
                        "nosplit", "operandSegmentSizes"});
 }
 
@@ -15042,6 +15054,13 @@ static LogicalResult verifyFrontendInitCommon(InitOpT op,
             "expects 'qs322bf16_pre_*' quantization modes to be used only on A5 target");
       }
     }
+    if (quant == pto::FixpipeQuant::QF322HIF8PreScalar ||
+        quant == pto::FixpipeQuant::QF322FP8PreScalar) {
+      if (arch != PTOArch::A5) {
+        return op.emitOpError(
+            "expects 'qf322hif8_pre_scalar'/'qf322fp8_pre_scalar' to be used only on A5 target");
+      }
+    }
 
     // Rule 14-15: Validate slot_size for fixpipe pipes
     // For fixpipe pipes, slot_size must be interpreted as post-fixpipe consumer entry size
@@ -15140,6 +15159,8 @@ LogicalResult ImportReservedBufferOp::verify() {
   return success();
 }
 
+constexpr llvm::StringLiteral kFrontendPipeIdAttrName = "__pto.frontend_id";
+
 static FailureOr<Operation *> lookupFrontendInitOpById(Operation *op,
                                                        func::FuncOp funcOp,
                                                        int32_t id) {
@@ -15171,6 +15192,63 @@ static FailureOr<Operation *> lookupFrontendInitOpById(Operation *op,
   if (matchedInitCount > 1) {
     op->emitOpError() << "expects 'id' = " << id
                       << " to match exactly one frontend initialize_pipe op in the same function";
+    return failure();
+  }
+  return matchedInit;
+}
+
+static FailureOr<Operation *> lookupFrontendOrLoweredInitOpById(
+    Operation *op, func::FuncOp funcOp, int32_t id) {
+  Operation *matchedFrontendInit = nullptr;
+  unsigned matchedFrontendInitCount = 0;
+  funcOp.walk([&](Operation *candidate) {
+    if (auto aic = dyn_cast<AicInitializePipeOp>(candidate)) {
+      if (aic.getId() == static_cast<uint32_t>(id)) {
+        matchedFrontendInit = candidate;
+        ++matchedFrontendInitCount;
+      }
+      return WalkResult::advance();
+    }
+    if (auto aiv = dyn_cast<AivInitializePipeOp>(candidate)) {
+      if (aiv.getId() == static_cast<uint32_t>(id)) {
+        matchedFrontendInit = candidate;
+        ++matchedFrontendInitCount;
+      }
+      return WalkResult::advance();
+    }
+    return WalkResult::advance();
+  });
+
+  if (matchedFrontendInitCount == 1)
+    return matchedFrontendInit;
+  if (matchedFrontendInitCount > 1) {
+    op->emitOpError() << "expects 'id' = " << id
+                      << " to match exactly one frontend initialize_pipe op in the same function";
+    return failure();
+  }
+
+  Operation *matchedInit = nullptr;
+  unsigned matchedInitCount = 0;
+  funcOp.walk([&](Operation *candidate) {
+    if (!isa<InitializeL2LPipeOp, InitializeL2G2LPipeOp>(candidate))
+      return WalkResult::advance();
+    auto frontendIdAttr =
+        candidate->getAttrOfType<IntegerAttr>(kFrontendPipeIdAttrName);
+    if (!frontendIdAttr || frontendIdAttr.getInt() != id)
+      return WalkResult::advance();
+    matchedInit = candidate;
+    ++matchedInitCount;
+    return WalkResult::advance();
+  });
+
+  if (matchedInitCount == 0) {
+    op->emitOpError() << "expects 'id' = " << id
+                      << " to match a frontend or lowered initialize_pipe op in the same function";
+    return failure();
+  }
+  if (matchedInitCount > 1) {
+    op->emitOpError() << "expects 'id' = " << id
+                      << " to match exactly one frontend or lowered initialize_pipe op in the same function";
     return failure();
   }
   return matchedInit;
@@ -15315,6 +15393,90 @@ static LogicalResult verifyFrontendPopOp(FrontendPopOpT op,
   return success();
 }
 
+static bool isScalarFixpipeQuant(FixpipeQuant quant) {
+  switch (quant) {
+  case FixpipeQuant::DEQF16Scalar:
+  case FixpipeQuant::REQ8Scalar:
+  case FixpipeQuant::QF322B8PreScalar:
+  case FixpipeQuant::QF322F16PreScalar:
+  case FixpipeQuant::QF322BF16PreScalar:
+  case FixpipeQuant::QS322BF16PreScalar:
+  case FixpipeQuant::QF322HIF8PreScalar:
+  case FixpipeQuant::QF322FP8PreScalar:
+    return true;
+  default:
+    return false;
+  }
+}
+
+static bool isVectorFixpipeQuant(FixpipeQuant quant) {
+  switch (quant) {
+  case FixpipeQuant::DEQF16Vec:
+  case FixpipeQuant::REQ8Vec:
+  case FixpipeQuant::QF322B8PreVec:
+  case FixpipeQuant::QS322BF16PreVec:
+    return true;
+  default:
+    return false;
+  }
+}
+
+static bool matchesFixpipeConsumerLayout(FixpipeLayout layout,
+                                         TileBufType tileTy) {
+  auto memorySpace = dyn_cast_or_null<AddressSpaceAttr>(tileTy.getMemorySpace());
+  if (!memorySpace || memorySpace.getAddressSpace() != AddressSpace::VEC)
+    return false;
+
+  int32_t bLayout = tileTy.getBLayoutValueI32();
+  int32_t sLayout = tileTy.getSLayoutValueI32();
+  switch (layout) {
+  case FixpipeLayout::NZ2ND:
+    return bLayout == static_cast<int32_t>(BLayout::RowMajor) &&
+           sLayout == static_cast<int32_t>(SLayout::NoneBox);
+  case FixpipeLayout::NZ2DN:
+    return bLayout == static_cast<int32_t>(BLayout::ColMajor) &&
+           sLayout == static_cast<int32_t>(SLayout::NoneBox);
+  case FixpipeLayout::NZ2NZ:
+    return bLayout == static_cast<int32_t>(BLayout::ColMajor) &&
+           sLayout == static_cast<int32_t>(SLayout::RowMajor);
+  }
+  llvm_unreachable("unhandled FixpipeLayout");
+}
+
+static bool matchesFixpipeConsumerElementType(FixpipeQuant quant,
+                                              Type resultElemType) {
+  switch (quant) {
+  case FixpipeQuant::NoConvert:
+    return true;
+  case FixpipeQuant::F32F16:
+  case FixpipeQuant::DEQF16Scalar:
+  case FixpipeQuant::DEQF16Vec:
+  case FixpipeQuant::QF322F16PreScalar:
+    return resultElemType.isF16();
+  case FixpipeQuant::F32BF16:
+  case FixpipeQuant::QF322BF16PreScalar:
+  case FixpipeQuant::QS322BF16PreScalar:
+  case FixpipeQuant::QS322BF16PreVec:
+    return resultElemType.isBF16();
+  case FixpipeQuant::REQ8Scalar:
+  case FixpipeQuant::QF322B8PreScalar:
+    if (auto intTy = dyn_cast<IntegerType>(resultElemType))
+      return intTy.getWidth() == 8 &&
+             (intTy.isSigned() || intTy.isUnsigned());
+    return false;
+  case FixpipeQuant::REQ8Vec:
+  case FixpipeQuant::QF322B8PreVec:
+    if (auto intTy = dyn_cast<IntegerType>(resultElemType))
+      return intTy.isSignedInteger(8);
+    return false;
+  case FixpipeQuant::QF322HIF8PreScalar:
+    return isa<HiF8Type>(resultElemType);
+  case FixpipeQuant::QF322FP8PreScalar:
+    return isPTOFloat8E4M3LikeType(resultElemType);
+  }
+  llvm_unreachable("unhandled FixpipeQuant");
+}
+
 // Helper to verify fixpipe consumer tpop result type consistency
 static LogicalResult verifyFixpipeConsumerType(Operation *tpopOp, int32_t id,
                                                Type resultTileType) {
@@ -15346,48 +15508,33 @@ static LogicalResult verifyFixpipeConsumerType(Operation *tpopOp, int32_t id,
 
   Type resultElemType = tileTy.getElementType();
   auto quant = accPushEpilogue.getQuant();
+  bool mismatchedPeerType = false;
+  funcOp.walk([&](TPopFromAicOp otherPop) {
+    if (otherPop.getOperation() == tpopOp ||
+        otherPop.getId() != static_cast<uint32_t>(id))
+      return WalkResult::advance();
+    if (otherPop.getTile().getType() != resultTileType) {
+      mismatchedPeerType = true;
+      tpopOp->emitOpError()
+          << "expects all tpop_from_aic results for fixpipe pipe id = " << id
+          << " to use the same tile type";
+      return WalkResult::interrupt();
+    }
+    return WalkResult::advance();
+  });
+  if (mismatchedPeerType)
+    return failure();
 
-  // For 8-bit family, check signedness
-  if (quant == pto::FixpipeQuant::REQ8Scalar ||
-      quant == pto::FixpipeQuant::QF322B8PreScalar) {
-    // scalar 8-bit: must be si8 or ui8, not signless i8
-    auto intTy = dyn_cast<IntegerType>(resultElemType);
-    if (!intTy || intTy.getWidth() != 8) {
-      return tpopOp->emitOpError(
-          "expects fixpipe TPOP with req8_scalar/qf322b8_pre_scalar to have "
-          "8-bit integer result element type");
-    }
-    if (!intTy.isSigned() && !intTy.isUnsigned()) {
-      return tpopOp->emitOpError(
-          "expects fixpipe TPOP with req8_scalar/qf322b8_pre_scalar to use "
-          "explicit si8 or ui8, not signless i8");
-    }
-  } else if (quant == pto::FixpipeQuant::REQ8Vec ||
-             quant == pto::FixpipeQuant::QF322B8PreVec) {
-    // vector 8-bit: must be si8 only
-    auto intTy = dyn_cast<IntegerType>(resultElemType);
-    if (!intTy || intTy.getWidth() != 8 || !intTy.isSigned()) {
-      return tpopOp->emitOpError(
-          "expects fixpipe TPOP with req8_vec/qf322b8_pre_vec to have "
-          "si8 result element type (not ui8 or signless i8)");
-    }
+  if (!matchesFixpipeConsumerElementType(quant, resultElemType)) {
+    return tpopOp->emitOpError()
+           << "expects consumer element type to match acc_push_epilogue.quant "
+           << stringifyFixpipeQuant(quant);
   }
 
-  // Rule 13: Verify layout matches
-  // acc_push_epilogue.layout must match consumer result tile layout:
-  // - nz2nd -> vec row_major
-  // - nz2dn -> vec col_major
-  // - nz2nz -> vec col_major + s_layout = row_major
-  // Note: Detailed layout verification deferred to lowering passes
-  (void)accPushEpilogue.getLayout(); // Silence unused variable warning
-
-  // Check layout compatibility based on tile layout config
-  // This is a basic v1 check - full implementation would parse layout params
-  auto layoutCfg = tileTy.getConfig();
-  if (layoutCfg) {
-    // Note: Full layout verification requires checking tile buffer config attributes
-    // which may have changed in LLVM21. Deferring detailed layout checks to
-    // lowering passes that have full context.
+  if (!matchesFixpipeConsumerLayout(accPushEpilogue.getLayout(), tileTy)) {
+    return tpopOp->emitOpError()
+           << "expects consumer tile layout to match acc_push_epilogue.layout "
+           << stringifyFixpipeLayout(accPushEpilogue.getLayout());
   }
 
   return success();
@@ -15909,18 +16056,48 @@ LogicalResult AivInitializePipeOp::verify() {
     Operation *bufDefOp = c2vBuf.getDefiningOp();
 
     func::FuncOp peerProducerFunc;
+    auto currentConsumerFunc = getOperation()->getParentOfType<func::FuncOp>();
+    if (!currentConsumerFunc)
+      return emitOpError("must be nested under a func.func");
     StringRef bufferName;
 
     if (auto importOp = dyn_cast_or_null<ImportReservedBufferOp>(bufDefOp)) {
-      // Consumer side: import_reserved_buffer points to peer producer
-      peerProducerFunc = lookupPeerFuncAcrossContainer(getOperation(),
-                                                        importOp.getPeerFuncAttr());
-      bufferName = importOp.getName();
-    } else if (auto reserveOp = dyn_cast_or_null<ReserveBufferOp>(bufDefOp)) {
-      // Producer side: reserve_buffer, need to find consumer via import_reserved_buffer
-      // For AivInitializePipe, we expect import_reserved_buffer (consumer side)
       return emitOpError(
-          "expects consumer-side fixpipe pipe to use import_reserved_buffer, not reserve_buffer");
+          "expects consumer-side fixpipe pipe to use reserve_buffer, not import_reserved_buffer");
+    } else if (auto reserveOp = dyn_cast_or_null<ReserveBufferOp>(bufDefOp)) {
+      bufferName = reserveOp.getName();
+
+      ModuleOp moduleOp = currentConsumerFunc->getParentOfType<ModuleOp>();
+      if (!moduleOp)
+        return emitOpError("must be nested under a module for fixpipe contract verification");
+
+      ImportReservedBufferOp matchedImport;
+      unsigned matchedImportCount = 0;
+      moduleOp.walk([&](ImportReservedBufferOp candidateImport) {
+        if (candidateImport.getName() != bufferName)
+          return WalkResult::advance();
+        auto peerConsumerFunc =
+            lookupPeerFuncAcrossContainer(candidateImport.getOperation(),
+                                          candidateImport.getPeerFuncAttr());
+        if (peerConsumerFunc != currentConsumerFunc)
+          return WalkResult::advance();
+        matchedImport = candidateImport;
+        ++matchedImportCount;
+        return WalkResult::advance();
+      });
+
+      if (matchedImportCount == 0) {
+        return emitOpError()
+               << "cannot find peer import_reserved_buffer for consumer buffer '"
+               << bufferName << "'";
+      }
+      if (matchedImportCount > 1) {
+        return emitOpError()
+               << "finds multiple peer import_reserved_buffer ops for consumer buffer '"
+               << bufferName << "'";
+      }
+
+      peerProducerFunc = matchedImport->getParentOfType<func::FuncOp>();
     } else {
       // c2v_consumer_buf doesn't trace to reserve/import - already caught in AicInit check
       return success();
@@ -15930,23 +16107,36 @@ LogicalResult AivInitializePipeOp::verify() {
       return emitOpError("cannot find peer producer function for fixpipe contract verification");
     }
 
-    // Find matching producer init with same buffer name
-    AicInitializePipeOp peerProducerInit;
-    peerProducerFunc.walk([&](AicInitializePipeOp aic) {
-      if (!aic.getC2vConsumerBuf())
-        return WalkResult::advance();
+    auto peerProducerInitOr =
+        lookupFrontendInitOpById(getOperation(), peerProducerFunc, getId());
+    if (failed(peerProducerInitOr))
+      return failure();
 
-      Operation *peerBufDefOp = aic.getC2vConsumerBuf().getDefiningOp();
-      if (auto peerReserveOp = dyn_cast_or_null<ReserveBufferOp>(peerBufDefOp)) {
-        if (peerReserveOp.getName() == bufferName) {
-          peerProducerInit = aic;
-          return WalkResult::interrupt();
-        }
-      }
-      return WalkResult::advance();
-    });
-
+    auto peerProducerInit = dyn_cast<AicInitializePipeOp>(*peerProducerInitOr);
     if (!peerProducerInit) {
+      return emitOpError()
+             << "expects peer function to contain a matching aic_initialize_pipe with id = "
+             << getId();
+    }
+
+    if (!peerProducerInit.getC2vConsumerBuf()) {
+      return emitOpError()
+             << "expects peer producer aic_initialize_pipe to have 'c2v_consumer_buf'";
+    }
+
+    Operation *peerBufDefOp = peerProducerInit.getC2vConsumerBuf().getDefiningOp();
+    auto peerImportOp = dyn_cast_or_null<ImportReservedBufferOp>(peerBufDefOp);
+    if (!peerImportOp) {
+      return emitOpError()
+             << "expects peer producer aic_initialize_pipe to use import_reserved_buffer "
+             << "for c2v_consumer_buf";
+    }
+
+    auto peerConsumerFunc =
+        lookupPeerFuncAcrossContainer(peerImportOp.getOperation(),
+                                      peerImportOp.getPeerFuncAttr());
+    if (peerImportOp.getName() != bufferName ||
+        peerConsumerFunc != currentConsumerFunc) {
       return emitOpError()
              << "cannot find matching producer aic_initialize_pipe for buffer '"
              << bufferName << "' in peer function";
@@ -16064,10 +16254,10 @@ LogicalResult TPushToAivOp::verify() {
     return emitOpError(
         "expects fixpipe TPUSH source tile to be a tile type");
   }
-
-  // Note: In the original implementation, we checked if tile location is ACC.
-  // After rebase to LLVM21, tile location checking may use different attributes.
-  // Deferring detailed location checks to lowering passes.
+  auto tileSpace = getPTOMemorySpaceEnum(tileTy);
+  if (!tileSpace || *tileSpace != pto::AddressSpace::ACC) {
+    return emitOpError("expects fixpipe TPUSH source tile to use loc=acc");
+  }
 
   // Rule 2: split must be 0 for fixpipe
   if (getSplit() != 0) {
@@ -16116,80 +16306,38 @@ LogicalResult TPushToAivOp::verify() {
   }
 
   // Rule 16-17: Check for required set_quant_scalar/vector ops
-  bool isScalarQuant = (quant == pto::FixpipeQuant::DEQF16Scalar ||
-                        quant == pto::FixpipeQuant::REQ8Scalar ||
-                        quant == pto::FixpipeQuant::QF322B8PreScalar ||
-                        quant == pto::FixpipeQuant::QF322F16PreScalar ||
-                        quant == pto::FixpipeQuant::QF322BF16PreScalar ||
-                        quant == pto::FixpipeQuant::QS322BF16PreScalar ||
-                        quant == pto::FixpipeQuant::QF322HIF8PreScalar ||
-                        quant == pto::FixpipeQuant::QF322FP8PreScalar);
-
-  bool isVectorQuant = (quant == pto::FixpipeQuant::DEQF16Vec ||
-                        quant == pto::FixpipeQuant::REQ8Vec ||
-                        quant == pto::FixpipeQuant::QF322B8PreVec ||
-                        quant == pto::FixpipeQuant::QS322BF16PreVec);
+  bool isScalarQuant = isScalarFixpipeQuant(quant);
+  bool isVectorQuant = isVectorFixpipeQuant(quant);
 
   if (isScalarQuant || isVectorQuant) {
-    // Rule 18: set_quant_* and TPUSH must be in same basic block
     Block *tpushBlock = getOperation()->getBlock();
     bool foundQuantConfig = false;
-
-    // Walk backward in the same block to find matching set_quant_* op
-    for (Operation &op : llvm::reverse(tpushBlock->getOperations())) {
-      if (&op == getOperation())
-        continue; // Skip self
-
-      if (isScalarQuant) {
-        if (auto setQuant = dyn_cast<SetQuantScalarOp>(&op)) {
-          if (setQuant.getId() == getId()) {
-            foundQuantConfig = true;
-            break;
-          }
-        }
-      } else if (isVectorQuant) {
-        if (auto setQuant = dyn_cast<SetQuantVectorOp>(&op)) {
-          if (setQuant.getId() == getId()) {
-            foundQuantConfig = true;
-            break;
-          }
-        }
-      }
-
-      // If we reach this TPUSH while walking backward, stop
-      if (&op == getOperation())
-        break;
-    }
-
-    // Actually walk forward from start to this op
-    foundQuantConfig = false;
     for (Operation &op : tpushBlock->getOperations()) {
       if (&op == getOperation())
-        break; // Reached TPUSH, stop search
+        break;
 
       if (isScalarQuant) {
         if (auto setQuant = dyn_cast<SetQuantScalarOp>(&op)) {
-          if (setQuant.getId() == getId()) {
+          if (setQuant.getId() == getId())
             foundQuantConfig = true;
-            // Don't break - continue to see if TPUSH comes before any set_quant
-          }
         }
       } else if (isVectorQuant) {
         if (auto setQuant = dyn_cast<SetQuantVectorOp>(&op)) {
-          if (setQuant.getId() == getId()) {
+          if (setQuant.getId() == getId())
             foundQuantConfig = true;
-          }
         }
       }
     }
 
     if (!foundQuantConfig) {
+      if (isScalarQuant) {
+        return emitOpError()
+               << "expects a preceding pto.set_quant_scalar with id = "
+               << getId() << " in the same block";
+      }
       return emitOpError()
-             << "expects fixpipe TPUSH with "
-             << (isScalarQuant ? "scalar" : "vector")
-             << " quantization mode to have a matching pto.set_quant_"
-             << (isScalarQuant ? "scalar" : "vector")
-             << " {id = " << getId() << "} in the same basic block before this TPUSH";
+             << "expects a preceding pto.set_quant_vector with id = "
+             << getId() << " in the same block";
     }
   }
 
@@ -16208,17 +16356,15 @@ LogicalResult TPushToAicOp::verify() {
 }
 
 LogicalResult TPopFromAicOp::verify() {
-  return verifyFrontendPopOp(*this, FunctionKernelKind::Vector, "vector",
-                             /*expectC2V=*/true);
+  if (failed(verifyFrontendPopOp(*this, FunctionKernelKind::Vector, "vector",
+                                 /*expectC2V=*/true)))
+    return failure();
+  return verifyFixpipeConsumerType(getOperation(), getId(), getTile().getType());
 }
 
 LogicalResult TPopFromAivOp::verify() {
-  if (failed(verifyFrontendPopOp(*this, FunctionKernelKind::Cube, "cube",
-                                 /*expectC2V=*/false)))
-    return failure();
-
-  // Fixpipe consumer type validation
-  return verifyFixpipeConsumerType(getOperation(), getId(), getTile().getType());
+  return verifyFrontendPopOp(*this, FunctionKernelKind::Cube, "cube",
+                             /*expectC2V=*/false);
 }
 
 LogicalResult TFreeFromAicOp::verify() {
@@ -16289,19 +16435,25 @@ LogicalResult SetQuantScalarOp::verify() {
     return emitOpError("must be nested under a func.func");
 
   // Look up the referenced pipe
-  auto initOr = lookupFrontendInitOpById(getOperation(), funcOp, getId());
+  auto initOr =
+      lookupFrontendOrLoweredInitOpById(getOperation(), funcOp, getId());
   if (failed(initOr))
     return failure();
 
   Operation *initOp = *initOr;
-  auto aicInit = dyn_cast<AicInitializePipeOp>(initOp);
-  if (!aicInit) {
+  pto::AccPushEpilogueAttr accPushEpilogue;
+  if (auto aicInit = dyn_cast<AicInitializePipeOp>(initOp)) {
+    accPushEpilogue = aicInit.getAccPushEpilogueAttr();
+  } else if (auto l2lInit = dyn_cast<InitializeL2LPipeOp>(initOp)) {
+    accPushEpilogue = l2lInit.getAccPushEpilogueAttr();
+  } else if (auto l2g2lInit = dyn_cast<InitializeL2G2LPipeOp>(initOp)) {
+    accPushEpilogue = l2g2lInit.getAccPushEpilogueAttr();
+  } else {
     return emitOpError()
            << "expects 'id' = " << getId()
-           << " to reference an aic_initialize_pipe (producer side)";
+           << " to reference an aic_initialize_pipe or lowered producer pipe";
   }
 
-  auto accPushEpilogue = aicInit.getAccPushEpilogueAttr();
   if (!accPushEpilogue) {
     return emitOpError()
            << "expects 'id' = " << getId()
@@ -16310,14 +16462,7 @@ LogicalResult SetQuantScalarOp::verify() {
 
   // Check that quant mode is scalar
   auto quant = accPushEpilogue.getQuant();
-  bool isScalarQuant = (quant == pto::FixpipeQuant::DEQF16Scalar ||
-                        quant == pto::FixpipeQuant::REQ8Scalar ||
-                        quant == pto::FixpipeQuant::QF322B8PreScalar ||
-                        quant == pto::FixpipeQuant::QF322F16PreScalar ||
-                        quant == pto::FixpipeQuant::QF322BF16PreScalar ||
-                        quant == pto::FixpipeQuant::QS322BF16PreScalar ||
-                        quant == pto::FixpipeQuant::QF322HIF8PreScalar ||
-                        quant == pto::FixpipeQuant::QF322FP8PreScalar);
+  bool isScalarQuant = isScalarFixpipeQuant(quant);
 
   if (!isScalarQuant) {
     return emitOpError()
@@ -16339,19 +16484,25 @@ LogicalResult SetQuantVectorOp::verify() {
     return emitOpError("must be nested under a func.func");
 
   // Look up the referenced pipe
-  auto initOr = lookupFrontendInitOpById(getOperation(), funcOp, getId());
+  auto initOr =
+      lookupFrontendOrLoweredInitOpById(getOperation(), funcOp, getId());
   if (failed(initOr))
     return failure();
 
   Operation *initOp = *initOr;
-  auto aicInit = dyn_cast<AicInitializePipeOp>(initOp);
-  if (!aicInit) {
+  pto::AccPushEpilogueAttr accPushEpilogue;
+  if (auto aicInit = dyn_cast<AicInitializePipeOp>(initOp)) {
+    accPushEpilogue = aicInit.getAccPushEpilogueAttr();
+  } else if (auto l2lInit = dyn_cast<InitializeL2LPipeOp>(initOp)) {
+    accPushEpilogue = l2lInit.getAccPushEpilogueAttr();
+  } else if (auto l2g2lInit = dyn_cast<InitializeL2G2LPipeOp>(initOp)) {
+    accPushEpilogue = l2g2lInit.getAccPushEpilogueAttr();
+  } else {
     return emitOpError()
            << "expects 'id' = " << getId()
-           << " to reference an aic_initialize_pipe (producer side)";
+           << " to reference an aic_initialize_pipe or lowered producer pipe";
   }
 
-  auto accPushEpilogue = aicInit.getAccPushEpilogueAttr();
   if (!accPushEpilogue) {
     return emitOpError()
            << "expects 'id' = " << getId()
@@ -16360,10 +16511,7 @@ LogicalResult SetQuantVectorOp::verify() {
 
   // Check that quant mode is vector
   auto quant = accPushEpilogue.getQuant();
-  bool isVectorQuant = (quant == pto::FixpipeQuant::DEQF16Vec ||
-                        quant == pto::FixpipeQuant::REQ8Vec ||
-                        quant == pto::FixpipeQuant::QF322B8PreVec ||
-                        quant == pto::FixpipeQuant::QS322BF16PreVec);
+  bool isVectorQuant = isVectorFixpipeQuant(quant);
 
   if (!isVectorQuant) {
     return emitOpError()
@@ -16371,17 +16519,13 @@ LogicalResult SetQuantVectorOp::verify() {
            << " to reference a pipe with vector quantization mode, but found non-vector mode";
   }
 
-  // Rule 24: Verify scaling_tile has loc=scaling
   auto scalingTileTy = dyn_cast<pto::TileBufType>(getScalingTile().getType());
   if (!scalingTileTy) {
     return emitOpError("expects 'scaling_tile' to be a tile type");
   }
-
-  // Note: Original implementation checked if tile location is SCALING.
-  // After rebase to LLVM21, tile location checking may use different attributes.
-  // Deferring detailed location checks to arch-specific validation.
-  // Additional arch-specific payload validation can be added here
-  // For v1, we only check basic tile type as per Rule 25
+  auto scalingSpace = getPTOMemorySpaceEnum(scalingTileTy);
+  if (!scalingSpace || *scalingSpace != pto::AddressSpace::SCALING)
+    return emitOpError("expects 'scaling_tile' to use loc=scaling");
 
   return success();
 }
@@ -17003,6 +17147,10 @@ void TPushOp::getEffects(
   addEffect(effects, &getTileMutable(), MemoryEffects::Read::get());
   addEffect(effects, &getPipeHandleMutable(), MemoryEffects::Read::get());
   addEffect(effects, &getPipeHandleMutable(), MemoryEffects::Write::get());
+  effects.emplace_back(MemoryEffects::Read::get(),
+                       SideEffects::DefaultResource::get());
+  effects.emplace_back(MemoryEffects::Write::get(),
+                       SideEffects::DefaultResource::get());
 }
 
 void TAllocOp::getEffects(
@@ -17029,6 +17177,22 @@ void TFreeOp::getEffects(
     addEffect(effects, &*entry.begin(), MemoryEffects::Read::get());
   addEffect(effects, &getPipeHandleMutable(), MemoryEffects::Read::get());
   addEffect(effects, &getPipeHandleMutable(), MemoryEffects::Write::get());
+}
+
+void SetQuantScalarOp::getEffects(
+    SmallVectorImpl<SideEffects::EffectInstance<MemoryEffects::Effect>>
+        &effects) {
+  addEffect(effects, &getScaleMutable(), MemoryEffects::Read::get());
+  effects.emplace_back(MemoryEffects::Write::get(),
+                       SideEffects::DefaultResource::get());
+}
+
+void SetQuantVectorOp::getEffects(
+    SmallVectorImpl<SideEffects::EffectInstance<MemoryEffects::Effect>>
+        &effects) {
+  addEffect(effects, &getScalingTileMutable(), MemoryEffects::Read::get());
+  effects.emplace_back(MemoryEffects::Write::get(),
+                       SideEffects::DefaultResource::get());
 }
 
 static constexpr const char kConvertRoundingKeywords[] = "r/a/f/c/z/o/h";

@@ -128,10 +128,11 @@ static FailureOr<Value> createFrontendGlobalTensorPipe(InitOpT initOp,
   auto slotSizeAttr = rewriter.getI32IntegerAttr(initOp.getSlotSize());
   auto slotNumAttr = rewriter.getI32IntegerAttr(slotNum);
   auto noSplitAttr = initOp.getNosplitAttr();
+  auto accPushEpilogueAttr = initOp.getAccPushEpilogueAttr();
   auto pipe = rewriter.create<InitializeL2G2LPipeOp>(
       loc, pipeTy, dirAttr, slotSizeAttr, slotNumAttr, IntegerAttr{},
-      IntegerAttr{}, noSplitAttr, initOp.getGmSlotTensor(), Value{},
-      Value{});
+      IntegerAttr{}, noSplitAttr, accPushEpilogueAttr, initOp.getGmSlotTensor(),
+      Value{}, Value{});
   propagateFrontendIdAttr(initOp, pipe.getOperation(), rewriter);
   return pipe.getPipe();
 }
@@ -149,6 +150,7 @@ static FailureOr<Value> createFrontendLocalPipe(InitOpT initOp,
   auto slotSizeAttr = rewriter.getI32IntegerAttr(initOp.getSlotSize());
   auto slotNumAttr = rewriter.getI32IntegerAttr(slotNum);
   auto noSplitAttr = initOp.getNosplitAttr();
+  auto accPushEpilogueAttr = initOp.getAccPushEpilogueAttr();
 
   if (arch == PTOArch::A5) {
     if (!localAddr)
@@ -156,7 +158,7 @@ static FailureOr<Value> createFrontendLocalPipe(InitOpT initOp,
           "requires local consumer buffer operands when lowering to a5");
     auto pipe = rewriter.create<InitializeL2LPipeOp>(
         loc, pipeTy, dirAttr, slotSizeAttr, slotNumAttr, IntegerAttr{},
-        noSplitAttr, localAddr, peerLocalAddr);
+        noSplitAttr, accPushEpilogueAttr, localAddr, peerLocalAddr);
     propagateFrontendIdAttr(initOp, pipe.getOperation(), rewriter);
     return pipe.getPipe();
   }
@@ -172,8 +174,8 @@ static FailureOr<Value> createFrontendLocalPipe(InitOpT initOp,
     localSlotNumAttr = rewriter.getI32IntegerAttr(slotNum);
   auto pipe = rewriter.create<InitializeL2G2LPipeOp>(
       loc, pipeTy, dirAttr, slotSizeAttr, slotNumAttr, localSlotNumAttr,
-      IntegerAttr{}, noSplitAttr, initOp.getGmSlotBuffer(), localAddr,
-      peerLocalAddr);
+      IntegerAttr{}, noSplitAttr, accPushEpilogueAttr, initOp.getGmSlotBuffer(),
+      localAddr, peerLocalAddr);
   propagateFrontendIdAttr(initOp, pipe.getOperation(), rewriter);
   return pipe.getPipe();
 }

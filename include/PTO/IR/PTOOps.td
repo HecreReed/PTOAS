@@ -1935,7 +1935,9 @@ def TFreeFromAivOp : PTO_TOp<"tfree_from_aiv"> {
 // Fixpipe Quant Config Ops
 //===----------------------------------------------------------------------===//
 
-def SetQuantScalarOp : PTO_Op<"set_quant_scalar"> {
+def SetQuantScalarOp : PTO_Op<"set_quant_scalar", [
+    DeclareOpInterfaceMethods<MemoryEffectsOpInterface>
+]> {
   let summary = "Set scalar quantization parameters for fixpipe producer";
 
   let description = [{
@@ -1960,7 +1962,9 @@ def SetQuantScalarOp : PTO_Op<"set_quant_scalar"> {
   }];
 }
 
-def SetQuantVectorOp : PTO_Op<"set_quant_vector"> {
+def SetQuantVectorOp : PTO_Op<"set_quant_vector", [
+    DeclareOpInterfaceMethods<MemoryEffectsOpInterface>
+]> {
   let summary = "Set vector quantization parameters for fixpipe producer";
 
   let description = [{
@@ -2309,6 +2313,7 @@ def InitializeL2G2LPipeOp : PTO_Op<"initialize_l2g2l_pipe", [
       OptionalAttr<I32Attr>:$local_slot_num,
       OptionalAttr<I32Attr>:$flag_base,
       OptionalAttr<BoolAttr>:$nosplit,
+      OptionalAttr<PTO_AccPushEpilogueAttr>:$acc_push_epilogue,
       AnyType:$gm_addr,
       Optional<AnyType>:$local_addr,
       Optional<AnyType>:$peer_local_addr
@@ -2343,6 +2348,7 @@ def InitializeL2LPipeOp : PTO_Op<"initialize_l2l_pipe", [
       I32Attr:$slot_num,
       OptionalAttr<I32Attr>:$flag_base,
       OptionalAttr<BoolAttr>:$nosplit,
+      OptionalAttr<PTO_AccPushEpilogueAttr>:$acc_push_epilogue,
       AnyType:$local_addr,
       Optional<AnyType>:$peer_local_addr
   );
