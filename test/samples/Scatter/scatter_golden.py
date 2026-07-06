@@ -26,11 +26,8 @@ def main():
             break
     rows = n_src // cols
     src = float_values(generator, n_src, style='signed').astype(src_dtype, copy=False)
-    src_2d = src.reshape(rows, cols)
-    row_dest = (np.arange(rows, dtype=np.int64) * 17) % rows
-    idx = np.repeat(row_dest[:, None], cols, axis=1)
-    out = np.zeros((rows, cols), dtype=src_dtype)
-    out[row_dest, :] = src_2d
+    idx = np.arange(n_idx, dtype=np.int64).reshape(rows, cols)
+    out = src.reshape(rows, cols)
     buffers = default_buffers(meta)
     buffers[src_name] = src
     buffers[idx_name] = idx.astype(meta.np_types[idx_name], copy=False).reshape(-1)[:n_idx]

@@ -18,9 +18,13 @@ def build():
             m = Module.create()
 
             f32 = F32Type.get(ctx)
+            u8 = IntegerType.get_unsigned(8, ctx)
+            ptr_u8 = pto.PtrType.get(u8, ctx)
             ptr_f32 = pto.PtrType.get(f32, ctx)
 
+            tv2_u8 = pto.TensorViewType.get(2, u8, ctx)
             tv2_f32 = pto.TensorViewType.get(2, f32, ctx)
+            tile_view_mask = pto.PartitionTensorViewType.get([32, 32], u8, ctx)
             tile_view_32 = pto.PartitionTensorViewType.get([32, 32], f32, ctx)
             vec = pto.AddressSpaceAttr.get(pto.AddressSpace.VEC, ctx)
             bl = pto.BLayoutAttr.get(pto.BLayout.RowMajor, ctx)
@@ -29,9 +33,10 @@ def build():
 
             fractal_ab_size = pto.TileConfig.fractalABSize
             cfg = pto.TileBufConfigAttr.get(bl, sl, fractal_ab_size, pd, ctx)
+            tile_buf_mask = pto.TileBufType.get([32, 32], u8, vec, [32, 32], cfg, ctx)
             tile_buf_32 = pto.TileBufType.get([32, 32], f32, vec, [32, 32], cfg, ctx)
 
-            fn_ty = func.FunctionType.get([ptr_f32, ptr_f32, ptr_f32], [])
+            fn_ty = func.FunctionType.get([ptr_u8, ptr_f32, ptr_f32], [])
             with InsertionPoint(m.body):
                 fn = func.FuncOp("sels_kernel_2d", fn_ty)
                 fn.operation.attributes["pto.entry"] = UnitAttr.get(ctx)
@@ -42,37 +47,30 @@ def build():
                 c0 = arith.ConstantOp(IndexType.get(ctx), 0).result
                 c1 = arith.ConstantOp(IndexType.get(ctx), 1).result
                 c32 = arith.ConstantOp(IndexType.get(ctx), 32).result
-                i32 = IntegerType.get_signless(32, ctx)
-                c64 = arith.ConstantOp(i32, 64).result
+                c64 = arith.ConstantOp(f32, 64.0).result
 
-                arg0, arg1, arg2 = entry.arguments
+                mask_arg, src_arg, dst_arg = entry.arguments
 
-                # %0/%1/%2 = pto.make_tensor_view %arg?, shape=[%c32,%c32] strides=[%c32,%c1]
-                tv0 = pto.MakeTensorViewOp(tv2_f32, arg0, [c32, c32], [c32, c1]).result
-                tv1 = pto.MakeTensorViewOp(tv2_f32, arg1, [c32, c32], [c32, c1]).result
-                tv2 = pto.MakeTensorViewOp(tv2_f32, arg2, [c32, c32], [c32, c1]).result
+                tv0 = pto.MakeTensorViewOp(tv2_u8, mask_arg, [c32, c32], [c32, c1]).result
+                tv1 = pto.MakeTensorViewOp(tv2_f32, src_arg, [c32, c32], [c32, c1]).result
+                tv2 = pto.MakeTensorViewOp(tv2_f32, dst_arg, [c32, c32], [c32, c1]).result
 
-                # Replace offsets and sizes with constants
-                # %3/%4/%8 = pto.subview %tv, offsets=[%c0,%c0], sizes=[%c32,%c32]
-                sv0 = pto.PartitionViewOp(tile_view_32, tv0, offsets=[c0, c0], sizes=[c32, c32]).result
+                sv0 = pto.PartitionViewOp(tile_view_mask, tv0, offsets=[c0, c0], sizes=[c32, c32]).result
                 sv1 = pto.PartitionViewOp(tile_view_32, tv1, offsets=[c0, c0], sizes=[c32, c32]).result
 
-                # %5/%6/%7 = pto.alloc_tile : <32x32xf32>
-                tb0 = pto.AllocTileOp(tile_buf_32).result
+                tb0 = pto.AllocTileOp(tile_buf_mask).result
                 tb1 = pto.AllocTileOp(tile_buf_32).result
                 tb2 = pto.AllocTileOp(tile_buf_32).result
+                tb3 = pto.AllocTileOp(tile_buf_32).result
 
                 pto.TLoadOp(None, sv0, tb0)  # result=None
                 pto.TLoadOp(None, sv1, tb1)  # result=None
 
-                # TSELS(mask=tb0, src=tb1, tmp=tb2, scalar=c64)
-                pto.TSelSOp(tb0, tb1, tb2, c64, tb2)
+                pto.TSelSOp(tb0, tb1, tb2, c64, tb3)
 
-                # %8 = subview on output tensor_view
                 sv2 = pto.PartitionViewOp(tile_view_32, tv2, offsets=[c0, c0], sizes=[c32, c32]).result
 
-                # pto.store_dps_tb ins(%tb2) outs(%sv2)
-                pto.TStoreOp(None, tb2, sv2)
+                pto.TStoreOp(None, tb3, sv2)
 
                 func.ReturnOp([])
 

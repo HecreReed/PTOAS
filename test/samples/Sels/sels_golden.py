@@ -8,21 +8,39 @@ for search_root in (Path(__file__).resolve().parent, Path(__file__).resolve().pa
         sys.path.insert(0, str(search_root))
         break
 
-from validation_runtime import default_buffers, float_values, load_case_meta, rng, single_output, write_buffers, write_golden
+from validation_runtime import (
+    COLS,
+    ROWS,
+    default_buffers,
+    float_values,
+    load_case_meta,
+    matrix32,
+    pack_predicate_mask_for_buffer,
+    rng,
+    single_output,
+    write_buffers,
+    write_golden,
+)
 
 
 def main():
     meta = load_case_meta()
-    src0_name, src1_name = meta.inputs
+    mask_name, src_name = meta.inputs
     generator = rng()
-    src0 = float_values(generator, meta.elem_counts[src0_name], style='signed')
-    src1 = float_values(generator, meta.elem_counts[src1_name], style='signed')
+    mask_bits = generator.integers(0, 2, size=(ROWS, COLS), dtype=np.uint8).astype(np.bool_)
+    mask = pack_predicate_mask_for_buffer(
+        mask_bits,
+        elem_count=meta.elem_counts[mask_name],
+        dtype=meta.np_types[mask_name],
+        rows=ROWS,
+    )
+    src = float_values(generator, meta.elem_counts[src_name], style='signed')
     buffers = default_buffers(meta)
-    buffers[src0_name] = src0
-    buffers[src1_name] = src1
+    buffers[mask_name] = mask
+    buffers[src_name] = src
     write_buffers(meta, buffers)
-    out = src0 if 64 == 1 else src1
-    write_golden(meta, {single_output(meta): np.asarray(out, dtype=np.float32)})
+    out = np.where(mask_bits, matrix32(src), np.float32(64.0))
+    write_golden(meta, {single_output(meta): out.astype(np.float32).reshape(-1)})
 
 
 if __name__ == '__main__':
