@@ -21,8 +21,8 @@ SOURCE_BINARY="$2"
 STAGED_BINARY="$3"
 STAGED_LIB_DIR="$4"
 STAGED_REAL_BINARY="${STAGED_BINARY}.real"
-LLVM_STRIP_BIN="${BUILD_ROOT}/llvm-project/build-shared/bin/llvm-strip"
-LLVM_RUNTIME_LIB_DIR="${BUILD_ROOT}/llvm-project/build-shared/lib"
+LLVM_STRIP_BIN="${LLVM_STRIP_BIN:-${BUILD_ROOT}/llvm-project/build-shared/bin/llvm-strip}"
+LLVM_RUNTIME_LIB_DIR="${LLVM_RUNTIME_LIB_DIR:-${BUILD_ROOT}/llvm-project/build-shared/lib}"
 declare -a ALLOWED_ROOTS=("${BUILD_ROOT}")
 
 [[ -f "${SOURCE_BINARY}" ]] || {
@@ -54,8 +54,9 @@ if [ -n "${PTO_INSTALL_DIR:-}" ] && [ -d "${PTO_INSTALL_DIR}" ]; then
   ALLOWED_ROOTS+=("$(canonicalize_path "${PTO_INSTALL_DIR}")")
 fi
 
-if [ -d "${LLVM_RUNTIME_LIB_DIR}" ]; then
+if [ -n "${LLVM_RUNTIME_LIB_DIR:-}" ] && [ -d "${LLVM_RUNTIME_LIB_DIR}" ]; then
   export LD_LIBRARY_PATH="${LLVM_RUNTIME_LIB_DIR}:${LD_LIBRARY_PATH:-}"
+  ALLOWED_ROOTS+=("$(canonicalize_path "${LLVM_RUNTIME_LIB_DIR}")")
 fi
 if [ -n "${PTO_INSTALL_DIR:-}" ] && [ -d "${PTO_INSTALL_DIR}/lib" ]; then
   export LD_LIBRARY_PATH="${PTO_INSTALL_DIR}/lib:${LD_LIBRARY_PATH:-}"

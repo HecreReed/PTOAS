@@ -10,6 +10,34 @@
 set -uo pipefail   # 注意：去掉 -e，避免失败直接退出整个脚本
 
 BASE_DIR="$(cd -- "$(dirname -- "$0")" && pwd)"
+REPO_ROOT="$(cd -- "${BASE_DIR}/../.." && pwd)"
+
+prepend_path_var() {
+  local var_name="$1"
+  local path_value="$2"
+  [[ -d "${path_value}" ]] || return 0
+  case ":${!var_name:-}:" in
+    *":${path_value}:"*) ;;
+    *) export "${var_name}=${path_value}${!var_name:+:${!var_name}}" ;;
+  esac
+}
+
+setup_source_tree_test_env() {
+  local env_file="${REPO_ROOT}/build/ptoas-test-env.sh"
+  if [[ -f "${env_file}" ]]; then
+    # shellcheck disable=SC1090
+    source "${env_file}"
+    return 0
+  fi
+
+  local llvm_build_dir="${LLVM_BUILD_DIR:-${REPO_ROOT}/third_party/lib_cache/llvm_19.1.7/build-shared}"
+  prepend_path_var PYTHONPATH "${llvm_build_dir}/tools/mlir/python_packages/mlir_core"
+  prepend_path_var PYTHONPATH "${PTO_PYTHON_ROOT:-${REPO_ROOT}/install}"
+  prepend_path_var LD_LIBRARY_PATH "${llvm_build_dir}/lib"
+  prepend_path_var LD_LIBRARY_PATH "${PTO_INSTALL_DIR:-${REPO_ROOT}/install}/lib"
+}
+
+setup_source_tree_test_env
 
 # Allow overriding tool/python explicitly:
 #   PTOAS_BIN=/path/to/ptoas PYTHON_BIN=/path/to/python ./runop.sh all

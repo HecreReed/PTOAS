@@ -25,15 +25,19 @@ export INCLUDE_PATH="${ASCEND_HOME_PATH}/include"
 export ASCEND_ENV_PATH="${ASCEND_HOME_PATH}/bin"
 export BUILD_PATH="${BASE_PATH}/build"
 export BUILD_OUT_PATH="${BASE_PATH}/build_out"
-CANN_3RD_LIB_PATH="${BASE_PATH}/third_party"
-CMAKE_ARGS=""
+export SUPERBUILD_PATH="${BASE_PATH}/build_super"
+# Prefer ASCEND_3RD_LIB_PATH when it points to a valid LLVM source cache
+# (CI images set this to /home/jenkins/opensource). Fall back to the
+# in-tree third_party directory for local builds where it is unset.
+if [ -n "${ASCEND_3RD_LIB_PATH}" ] && [ -d "${ASCEND_3RD_LIB_PATH}/llvm-19" ]; then
+    CANN_3RD_LIB_PATH="${ASCEND_3RD_LIB_PATH}"
+else
+    CANN_3RD_LIB_PATH="${BASE_PATH}/third_party"
+fi
 HARDENING_CACHE_FILE="${BASE_PATH}/cmake/LinuxHardeningCache.cmake"
-RUNTIME_DEPS_COLLECTOR="${BASE_PATH}/scripts/package/collect_ptoas_runtime_deps.sh"
 FORTIFY_MARKER_SOURCE="${BASE_PATH}/scripts/package/fortify_marker.c"
-LLVM_GIT_URL="https://gitcode.com/GitHub_Trending/ll/llvm-project.git"
-LLVM_GIT_REF="llvmorg-19.1.7"
-LLVM_CLONE_RETRY_COUNT=3
-LLVM_CLONE_RETRY_INTERVAL=5
+CANN_CMAKE_SOURCE_DIR=""
+LLVM_PROJECT_URL="https://gitcode.com/cann-src-third-party/llvm/releases/download/19.1.7/llvm-project-llvmorg-19.1.7.tar.gz"
 DEVTOOLSET_TOOLCHAIN_FLAGS="--sysroot=/opt/rh/devtoolset-7/root --gcc-toolchain=/opt/rh/devtoolset-7/root/usr"
 
 #print usage message
@@ -41,6 +45,7 @@ usage() {
   echo "Usage:"
   echo ""
   echo "    -h, --help  Print usage"
+  echo "    --build Build and run validation"
   echo "    --pkg Build run package"
   echo ""
 }
@@ -81,126 +86,16 @@ prepare_fortify_marker_object() {
   export PTOAS_FORTIFY_MARKER_OBJECT="${marker_object}"
 }
 
-compose_runtime_compiler_flags() {
-  local existing_flags="$1"
-  local merged_flags="${existing_flags:+${existing_flags} }${DEVTOOLSET_TOOLCHAIN_FLAGS}"
+prepare_llvm_cache_layout() {
+  mkdir -p "${CANN_3RD_LIB_PATH}"
+  mkdir -p "${CANN_3RD_LIB_PATH}/lib_cache/llvm_19.1.7"
 
-  # Do not add -D_FORTIFY_SOURCE=2 here: with the CentOS7 devtoolset
-  # sysroot, LLVM's Expected-returning file read helpers can be miscompiled
-  # into a busy loop. The package still links a dedicated fortify marker.
-  for hardening_flag in -fstack-protector-all; do
-    if [[ " ${merged_flags} " != *" ${hardening_flag} "* ]]; then
-      merged_flags="${merged_flags} ${hardening_flag}"
-    fi
-  done
-
-  echo "${merged_flags}"
-}
-
-harden_package_artifacts() {
-  local build_root="${PTO_SOURCE_DIR}/build"
-  local ptoas_bin="${build_root}/tools/ptoas/ptoas"
-  local runtime_stage_root="${build_root}/package_runtime/tools/ptoas"
-  local staged_bin="${runtime_stage_root}/bin/ptoas"
-  local staged_lib_dir="${runtime_stage_root}/lib"
-
-  if [ ! -x "${RUNTIME_DEPS_COLLECTOR}" ]; then
-    chmod +x "${RUNTIME_DEPS_COLLECTOR}"
-  fi
-
-  if [ ! -f "${ptoas_bin}" ]; then
-    print_error "missing ptoas binary for package staging: ${ptoas_bin}"
-    exit 1
-  fi
-
-  if [ -n "${build_root}" ] && [ -d "${build_root}/package_runtime" ]; then
-    rm -rf -- "${build_root}/package_runtime"
-  fi
-  mkdir -p "${runtime_stage_root}/bin" "${staged_lib_dir}"
-
-  bash "${RUNTIME_DEPS_COLLECTOR}"     "${build_root}"     "${ptoas_bin}"     "${staged_bin}"     "${staged_lib_dir}"
-}
-
-clone_llvm_source() {
-  local target_dir="$1"
-  local attempt=1
-
-  if [ -n "${target_dir}" ] && [ -e "${target_dir}" ]; then
-    rm -rf -- "${target_dir}"
-  fi
-
-  if [ -d "${CANN_3RD_LIB_PATH}/llvm-19" ]; then
-    cp -r "${CANN_3RD_LIB_PATH}/llvm-19" "${target_dir}"
-    return 0
-  fi
-
-  while [ "${attempt}" -le "${LLVM_CLONE_RETRY_COUNT}" ]; do
-    if git -c http.version=HTTP/1.1 clone       --depth 1       --single-branch       --branch "${LLVM_GIT_REF}"       "${LLVM_GIT_URL}"       "${target_dir}"; then
-      return 0
-    fi
-
-    if [ -n "${target_dir}" ] && [ -e "${target_dir}" ]; then
-      rm -rf -- "${target_dir}"
-    fi
-
-    if [ "${attempt}" -lt "${LLVM_CLONE_RETRY_COUNT}" ]; then
-      sleep "${LLVM_CLONE_RETRY_INTERVAL}"
-    fi
-
-    attempt=$((attempt + 1))
-  done
-
-  print_error "failed to prepare llvm-project source"
-  exit 1
-}
-
-configure_llvm_host_tools_build() {
-  local cmake_args=("$@")
-  cmake_args+=("-DLLVM_ENABLE_ZSTD=OFF")
-
-  cmake -G Ninja -S llvm -B "${LLVM_NATIVE_BUILD_DIR}"     -DLLVM_ENABLE_PROJECTS="mlir"     -DBUILD_SHARED_LIBS=OFF     -DCMAKE_C_COMPILER=clang     -DCMAKE_CXX_COMPILER=clang++     -DLLVM_USE_LINKER=lld     -DMLIR_ENABLE_BINDINGS_PYTHON=OFF     -DPython3_EXECUTABLE="$(which python3)"     -DCMAKE_BUILD_TYPE=Release     -DLLVM_TARGETS_TO_BUILD="host"     -DLLVM_INCLUDE_TESTS=OFF     -DLLVM_INCLUDE_BENCHMARKS=OFF     -DLLVM_INCLUDE_EXAMPLES=OFF     "${cmake_args[@]}"
-}
-
-build_llvm_host_tools() {
-  configure_llvm_host_tools_build
-  ninja -C "${LLVM_NATIVE_BUILD_DIR}" llvm-min-tblgen llvm-tblgen mlir-tblgen
-}
-
-configure_llvm_runtime_build() {
-  local cmake_args=("$@")
-  local cmake_c_flags
-  local cmake_cxx_flags
-  cmake_c_flags="$(compose_runtime_compiler_flags "${CFLAGS:-}")"
-  cmake_cxx_flags="$(compose_runtime_compiler_flags "${CXXFLAGS:-}")"
-  cmake_args+=(
-    "-DLLVM_ENABLE_ZSTD=OFF"
-    "-DHAVE_LIBRT=ON"
-    "-DLLVM_NATIVE_TOOL_DIR=${LLVM_NATIVE_BUILD_DIR}/bin"
-    "-DLLVM_TABLEGEN=${LLVM_NATIVE_BUILD_DIR}/bin/llvm-tblgen"
-    "-DMLIR_TABLEGEN_EXE=${LLVM_NATIVE_BUILD_DIR}/bin/mlir-tblgen"
-  )
-  if [ -n "${PTOAS_FORTIFY_MARKER_OBJECT:-}" ]; then
-    cmake_args+=("-DPTOAS_FORTIFY_MARKER_OBJECT=${PTOAS_FORTIFY_MARKER_OBJECT}")
-  fi
-
-  cmake -C "${HARDENING_CACHE_FILE}" -G Ninja -S llvm -B "${LLVM_BUILD_DIR}"     -DLLVM_ENABLE_PROJECTS="mlir"     -DBUILD_SHARED_LIBS=ON     -DCMAKE_C_COMPILER=clang     -DCMAKE_CXX_COMPILER=clang++     -DCMAKE_C_FLAGS="${cmake_c_flags}"     -DCMAKE_CXX_FLAGS="${cmake_cxx_flags}"     -DLLVM_USE_LINKER=lld     -DMLIR_ENABLE_BINDINGS_PYTHON=ON     -DPython3_EXECUTABLE="$(which python3)"     -DCMAKE_BUILD_TYPE=Release     -DLLVM_TARGETS_TO_BUILD="host"     -DLLVM_INCLUDE_TESTS=OFF     -DLLVM_INCLUDE_BENCHMARKS=OFF     -DLLVM_INCLUDE_EXAMPLES=OFF     "${cmake_args[@]}"
-}
-
-configure_ptoas_build() {
-  local cmake_args=("$@")
-  local cmake_c_flags
-  local cmake_cxx_flags
-  cmake_c_flags="$(compose_runtime_compiler_flags "${CFLAGS:-}")"
-  cmake_cxx_flags="$(compose_runtime_compiler_flags "${CXXFLAGS:-}")"
-  if [ -n "${PTOAS_FORTIFY_MARKER_OBJECT:-}" ]; then
-    cmake_args+=("-DPTOAS_FORTIFY_MARKER_OBJECT=${PTOAS_FORTIFY_MARKER_OBJECT}")
-  fi
-
-  cmake -C "${HARDENING_CACHE_FILE}" -G Ninja     -S .     -B build     -DLLVM_DIR="${LLVM_BUILD_DIR}/lib/cmake/llvm"     -DMLIR_DIR="${LLVM_BUILD_DIR}/lib/cmake/mlir"     -DPython3_EXECUTABLE="$(which python3)"     -DPython3_FIND_STRATEGY=LOCATION     -Dpybind11_DIR="${PYBIND11_CMAKE_DIR}"     -DMLIR_ENABLE_BINDINGS_PYTHON=ON     -DCMAKE_BUILD_TYPE=Release     -DCMAKE_C_COMPILER=clang     -DCMAKE_CXX_COMPILER=clang++     -DCMAKE_C_FLAGS="${cmake_c_flags}"     -DCMAKE_CXX_FLAGS="${cmake_cxx_flags}"     -DLLVM_USE_LINKER=lld     -DMLIR_PYTHON_PACKAGE_DIR="${LLVM_BUILD_DIR}/tools/mlir/python_packages/mlir_core"     -DCMAKE_INSTALL_PREFIX="${PTO_INSTALL_DIR}"     "${cmake_args[@]}"
+  export LLVM_SOURCE_DIR="${CANN_3RD_LIB_PATH}/llvm-19"
+  export LLVM_NATIVE_BUILD_DIR="${CANN_3RD_LIB_PATH}/lib_cache/llvm_19.1.7/build-native-tools"
+  export LLVM_BUILD_DIR="${CANN_3RD_LIB_PATH}/lib_cache/llvm_19.1.7/build-shared"
 }
 
 checkopts() {
-  ENABLE_BUILD_ALL=FALSE
   ENABLE_BUILD_ONLY=FALSE
   ENABLE_PACKAGE=FALSE
 
@@ -240,46 +135,55 @@ checkopts() {
         ;;
     esac
   done
-  if [[ "$ENABLE_PACKAGE" == "TRUE" ]]; then
-    CMAKE_ARGS="$CMAKE_ARGS -DENABLE_PACKAGE=TRUE"
-  fi
-  CMAKE_ARGS="$CMAKE_ARGS -DCANN_3RD_LIB_PATH=${CANN_3RD_LIB_PATH}"
+}
+
+write_ptoas_test_env() {
+  local env_file="${BUILD_PATH}/ptoas-test-env.sh"
+
+  mkdir -p "${BUILD_PATH}"
+  cat > "${env_file}" <<EOF
+# Generated by build.sh. Source this file before running PTO-AS source-tree tests.
+export LLVM_BUILD_DIR="${LLVM_BUILD_DIR}"
+export MLIR_PYTHON_ROOT="${LLVM_BUILD_DIR}/tools/mlir/python_packages/mlir_core"
+export PTO_INSTALL_DIR="${PTO_INSTALL_DIR}"
+export PTO_PYTHON_ROOT="${PTO_INSTALL_DIR}"
+export PYTHONPATH="\${MLIR_PYTHON_ROOT}:\${PTO_PYTHON_ROOT}:\${PYTHONPATH:-}"
+export LD_LIBRARY_PATH="\${LLVM_BUILD_DIR}/lib:\${PTO_INSTALL_DIR}/lib:\${LD_LIBRARY_PATH:-}"
+EOF
+}
+
+configure_superbuild() {
+  export PTO_SOURCE_DIR=$BASE_PATH
+  export PTO_INSTALL_DIR=$PTO_SOURCE_DIR/install
+  prepare_llvm_cache_layout
+  write_ptoas_test_env
+  prepare_fortify_marker_object "${BUILD_PATH}/fortify_marker"
+
+  cd $PTO_SOURCE_DIR
+  export PYBIND11_CMAKE_DIR=$(python3 -m pybind11 --cmakedir)
+  cmake -S "${PTO_SOURCE_DIR}/cmake/superbuild" -B "${SUPERBUILD_PATH}" \
+    -DPTOAS_SOURCE_DIR="${PTO_SOURCE_DIR}" \
+    -DPTOAS_BUILD_DIR="${BUILD_PATH}" \
+    -DPTOAS_INSTALL_DIR="${PTO_INSTALL_DIR}" \
+    -DCANN_3RD_LIB_PATH="${CANN_3RD_LIB_PATH}" \
+    -DCANN_CMAKE_SOURCE_DIR="${CANN_CMAKE_SOURCE_DIR}" \
+    -DLLVM_PROJECT_URL="${LLVM_PROJECT_URL}" \
+    -DLLVM_SOURCE_DIR="${LLVM_SOURCE_DIR}" \
+    -DLLVM_NATIVE_BUILD_DIR="${LLVM_NATIVE_BUILD_DIR}" \
+    -DLLVM_BUILD_DIR="${LLVM_BUILD_DIR}" \
+    -DPython3_EXECUTABLE="$(which python3)" \
+    -DPYBIND11_CMAKE_DIR="${PYBIND11_CMAKE_DIR}" \
+    -DHARDENING_CACHE_FILE="${HARDENING_CACHE_FILE}" \
+    -DPTOAS_FORTIFY_MARKER_OBJECT="${PTOAS_FORTIFY_MARKER_OBJECT}" \
+    -DDEVTOOLSET_TOOLCHAIN_FLAGS="${DEVTOOLSET_TOOLCHAIN_FLAGS}"
 }
 
 build_only() {
   echo $dotted_line
   echo "build only"
   ensure_hardening_cache
-  export LLVM_SOURCE_DIR=$WORKSPACE/llvm-project
-  clone_llvm_source "${LLVM_SOURCE_DIR}"
-  export LLVM_NATIVE_BUILD_DIR=$LLVM_SOURCE_DIR/build-native-tools
-  export LLVM_BUILD_DIR=$LLVM_SOURCE_DIR/build-shared
-  export PTO_SOURCE_DIR=$WORKSPACE
-  export PTO_INSTALL_DIR=$PTO_SOURCE_DIR/install
-  prepare_fortify_marker_object "${BASE_PATH}/build/fortify_marker"
-
-  cd $LLVM_SOURCE_DIR
-  for llvm_build_dir in "${LLVM_NATIVE_BUILD_DIR}" "${LLVM_BUILD_DIR}"; do
-    if [ -n "${llvm_build_dir}" ] && [ -e "${llvm_build_dir}" ]; then
-      rm -rf -- "${llvm_build_dir}"
-    fi
-  done
-
-  build_llvm_host_tools
-  configure_llvm_runtime_build
-  ninja -C $LLVM_BUILD_DIR
-
-  cd $PTO_SOURCE_DIR
-  export PYBIND11_CMAKE_DIR=$(python3 -m pybind11 --cmakedir)
-
-  if [ -d "$CANN_3RD_LIB_PATH/llvm-19" ]; then
-    configure_ptoas_build
-  else
-    configure_ptoas_build
-  fi
-
-  ninja -C build
-  ninja -C build install
+  configure_superbuild
+  cmake --build "${SUPERBUILD_PATH}" --target ptoas_install
 
   export MLIR_PYTHON_ROOT=$LLVM_BUILD_DIR/tools/mlir/python_packages/mlir_core
   export PTO_PYTHON_ROOT=$PTO_INSTALL_DIR/
@@ -291,14 +195,6 @@ build_only() {
   STAGE="${STAGE:-run}" RUN_MODE='npu' SOC_VERSION='Ascend910' SKIP_CASES='mix_kernel,vadd_validshape,vadd_validshape_dynamic,print' bash test/npu_validation/scripts/run_remote_npu_validation.sh
 
   echo "execute samples success"
-}
-
-clean_build() {
-  if [ -d "${BUILD_PATH}" ]; then
-    if [ -n "${BUILD_PATH}" ]; then
-      rm -rf -- "${BUILD_PATH}"
-    fi
-  fi
 }
 
 clean_build_out() {
@@ -314,44 +210,9 @@ package() {
   echo "package start"
   ensure_hardening_cache
   clean_build_out
-  clean_build
-  mkdir $BUILD_PATH
-  mkdir $BUILD_OUT_PATH
-  cd $BUILD_PATH
-  export LLVM_SOURCE_DIR=$BUILD_PATH/llvm-project
-  clone_llvm_source "${LLVM_SOURCE_DIR}"
-  export LLVM_NATIVE_BUILD_DIR=$LLVM_SOURCE_DIR/build-native-tools
-  export LLVM_BUILD_DIR=$LLVM_SOURCE_DIR/build-shared
-  export PTO_SOURCE_DIR=$BASE_PATH
-  export PTO_INSTALL_DIR=$PTO_SOURCE_DIR/install
-  prepare_fortify_marker_object "${BUILD_PATH}/fortify_marker"
-
-  cd $LLVM_SOURCE_DIR
-  for llvm_build_dir in "${LLVM_NATIVE_BUILD_DIR}" "${LLVM_BUILD_DIR}"; do
-    if [ -n "${llvm_build_dir}" ] && [ -e "${llvm_build_dir}" ]; then
-      rm -rf -- "${llvm_build_dir}"
-    fi
-  done
-
-  build_llvm_host_tools
-  configure_llvm_runtime_build
-  ninja -C $LLVM_BUILD_DIR
-
-  cd $PTO_SOURCE_DIR
-  export PYBIND11_CMAKE_DIR=$(python3 -m pybind11 --cmakedir)
-  mkdir -p "${BUILD_PATH}/package_runtime/tools/ptoas/bin" "${BUILD_PATH}/package_runtime/tools/ptoas/lib"
-
-  if [ -d "$CANN_3RD_LIB_PATH/llvm-19" ]; then
-    configure_ptoas_build ${CMAKE_ARGS}
-  else
-    configure_ptoas_build ${CMAKE_ARGS}
-  fi
-
-  ninja -C build
-  harden_package_artifacts
-  ninja -C build install
-  cd $BUILD_PATH
-  ninja package
+  mkdir -p "${BUILD_OUT_PATH}"
+  configure_superbuild
+  cmake --build "${SUPERBUILD_PATH}" --target ptoas_package
 }
 
 main() {

@@ -15,6 +15,12 @@ foreach(_flag_var
     CMAKE_SHARED_LINKER_FLAGS
     CMAKE_MODULE_LINKER_FLAGS)
   set(_flag_value "${${_flag_var}}")
+  # Strip any stale fortify_marker flags left over from a cached CMakeCache.txt
+  # that was created on a different CI image (different build base path).
+  # The correct fortify_marker path is re-added below from the current
+  # PTOAS_FORTIFY_MARKER_OBJECT.
+  string(REGEX REPLACE "(^| )-Wl,-u,ptoas_fortify_marker( |$)" " " _flag_value "${_flag_value}")
+  string(REGEX REPLACE "(^| )[^ ]*fortify_marker[.]o( |$)" " " _flag_value "${_flag_value}")
   foreach(_hardening_flag
       -Wl,-z,relro
       -Wl,-z,now)
@@ -26,7 +32,10 @@ foreach(_flag_var
   set(${_flag_var} "${_flag_value}" CACHE STRING "Linux hardening linker flags" FORCE)
 endforeach()
 
-if(NOT DEFINED PTOAS_FORTIFY_MARKER_OBJECT AND DEFINED ENV{PTOAS_FORTIFY_MARKER_OBJECT})
+# Prefer the environment variable so a stale PTOAS_FORTIFY_MARKER_OBJECT
+# cached from a different CI image (pointing at a non-existent path) is
+# replaced by the current build's marker object.
+if(DEFINED ENV{PTOAS_FORTIFY_MARKER_OBJECT})
   set(PTOAS_FORTIFY_MARKER_OBJECT "$ENV{PTOAS_FORTIFY_MARKER_OBJECT}")
 endif()
 

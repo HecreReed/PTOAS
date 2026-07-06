@@ -2,20 +2,51 @@ if(NOT PROJECT_SOURCE_DIR)
     if(CANN_3RD_LIB_PATH AND IS_DIRECTORY "${CANN_3RD_LIB_PATH}/cann-cmake")
         include("${CANN_3RD_LIB_PATH}/cann-cmake/function/prepare.cmake")
     else()
+        set(CANN_CMAKE_GIT_URL "$ENV{CANN_CMAKE_GIT_URL}" CACHE STRING "CANN cmake repository URL")
+        set(CANN_CMAKE_GIT_REF "$ENV{CANN_CMAKE_GIT_REF}" CACHE STRING "CANN cmake repository ref")
+        if(NOT CANN_CMAKE_GIT_URL)
+            set(CANN_CMAKE_GIT_URL "https://gitcode.com/cann/cmake.git")
+        endif()
+        if(NOT CANN_CMAKE_GIT_REF)
+            set(CANN_CMAKE_GIT_REF "master-035")
+        endif()
+        if(CMAKE_SCRIPT_MODE_FILE)
+            if(NOT CANN_3RD_LIB_PATH)
+                message(FATAL_ERROR "CANN_3RD_LIB_PATH is required to fetch CANN cmake")
+            endif()
+
+            file(REMOVE_RECURSE "${CANN_3RD_LIB_PATH}/cann-cmake")
+            execute_process(
+                COMMAND git -c http.version=HTTP/1.1 clone
+                        --depth 1
+                        --single-branch
+                        --branch ${CANN_CMAKE_GIT_REF}
+                        ${CANN_CMAKE_GIT_URL}
+                        "${CANN_3RD_LIB_PATH}/cann-cmake"
+                RESULT_VARIABLE CANN_CMAKE_CLONE_RESULT
+            )
+            if(NOT CANN_CMAKE_CLONE_RESULT EQUAL 0)
+                message(FATAL_ERROR "failed to fetch CANN cmake from ${CANN_CMAKE_GIT_URL} ${CANN_CMAKE_GIT_REF}")
+            endif()
+            return()
+        endif()
+
         include(FetchContent)
 
-        set(CANN_CMAKE_TAG "master-017")
+        set(CANN_CMAKE_TAG "master-035")
         if(CANN_3RD_LIB_PATH AND EXISTS "${CANN_3RD_LIB_PATH}/cmake-${CANN_CMAKE_TAG}.tar.gz")
             FetchContent_Declare(
                 cann-cmake
                 URL "${CANN_3RD_LIB_PATH}/cmake-${CANN_CMAKE_TAG}.tar.gz"
+                SOURCE_DIR "${CANN_3RD_LIB_PATH}/cann-cmake"
             )
         else()
             FetchContent_Declare(
                 cann-cmake
-                GIT_REPOSITORY https://gitcode.com/cann/cmake.git
-                GIT_TAG        ${CANN_CMAKE_TAG}
+                GIT_REPOSITORY ${CANN_CMAKE_GIT_URL}
+                GIT_TAG        ${CANN_CMAKE_GIT_REF}
                 GIT_SHALLOW    TRUE
+                SOURCE_DIR "${CANN_3RD_LIB_PATH}/cann-cmake"
             )
         endif()
         FetchContent_GetProperties(cann-cmake)
