@@ -22,7 +22,7 @@ def main():
     buffers[rhs_name] = rhs
     write_buffers(meta, buffers)
     out = np.minimum(lhs, rhs)
-    write_golden(meta, {single_output(meta): np.asarray(out, dtype=np.float16)})
+    write_golden(meta, {single_output(meta): np.asarray(out, dtype=np.float32)})
 
 
 if __name__ == '__main__':

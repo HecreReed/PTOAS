@@ -284,21 +284,12 @@ def pack_predicate_mask_dense(bits: np.ndarray) -> np.ndarray:
 def pack_predicate_mask_for_buffer(bits: np.ndarray, *, elem_count: int, dtype, rows: int = ROWS) -> np.ndarray:
     dtype = np.dtype(dtype)
     expected_bytes = packed_mask_storage_bytes(elem_count, dtype)
-    if is_a5_soc():
-        packed_bytes = np.zeros(expected_bytes, dtype=np.uint8)
-        dense_bytes = pack_predicate_mask_dense(bits)
-        if dense_bytes.nbytes > expected_bytes:
-            raise ValueError(
-                f'packed mask byte size mismatch: expected <= {expected_bytes}, got {dense_bytes.nbytes}'
-            )
-        packed_bytes[:dense_bytes.size] = dense_bytes
-    else:
-        storage_cols = packed_mask_storage_cols(elem_count=elem_count, dtype=dtype, rows=rows)
-        packed_bytes = pack_predicate_mask(bits, storage_cols=storage_cols)
-        if packed_bytes.nbytes != expected_bytes:
-            raise ValueError(
-                f'packed mask byte size mismatch: expected {expected_bytes}, got {packed_bytes.nbytes}'
-            )
+    storage_cols = packed_mask_storage_cols(elem_count=elem_count, dtype=dtype, rows=rows)
+    packed_bytes = pack_predicate_mask(bits, storage_cols=storage_cols)
+    if packed_bytes.nbytes != expected_bytes:
+        raise ValueError(
+            f'packed mask byte size mismatch: expected {expected_bytes}, got {packed_bytes.nbytes}'
+        )
     return np.frombuffer(packed_bytes.tobytes(), dtype=dtype).copy()
 
 
@@ -355,25 +346,17 @@ def compare_packed_mask_file(golden_path: str, output_path: str, *, rows: int = 
         return False
     golden = np.fromfile(golden_path, dtype=np.uint8)
     output = np.fromfile(output_path, dtype=np.uint8)
-    if is_a5_soc():
-        used_bytes = packed_mask_payload_bytes(rows=rows, cols=cols)
-        if golden.size < used_bytes or output.size < used_bytes:
-            print(f'[ERROR] Packed mask storage is too small: need {used_bytes} bytes')
-            return False
-        golden_view = golden[:used_bytes]
-        output_view = output[:used_bytes]
-    else:
-        if golden.size % rows != 0 or output.size % rows != 0:
-            print(f'[ERROR] Packed mask buffer size is not divisible by rows={rows}')
-            return False
-        golden_cols = golden.size // rows
-        output_cols = output.size // rows
-        used_cols = packed_row_bytes(cols)
-        if golden_cols < used_cols or output_cols < used_cols:
-            print(f'[ERROR] Packed mask storage is too small: need {used_cols} bytes per row')
-            return False
-        golden_view = golden.reshape(rows, golden_cols)[:, :used_cols].reshape(-1)
-        output_view = output.reshape(rows, output_cols)[:, :used_cols].reshape(-1)
+    if golden.size % rows != 0 or output.size % rows != 0:
+        print(f'[ERROR] Packed mask buffer size is not divisible by rows={rows}')
+        return False
+    golden_cols = golden.size // rows
+    output_cols = output.size // rows
+    used_cols = packed_row_bytes(cols)
+    if golden_cols < used_cols or output_cols < used_cols:
+        print(f'[ERROR] Packed mask storage is too small: need {used_cols} bytes per row')
+        return False
+    golden_view = golden.reshape(rows, golden_cols)[:, :used_cols].reshape(-1)
+    output_view = output.reshape(rows, output_cols)[:, :used_cols].reshape(-1)
     if not np.array_equal(golden_view, output_view):
         diff = np.nonzero(golden_view != output_view)[0]
         index = int(diff[0]) if diff.size else 0
