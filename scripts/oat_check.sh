@@ -1,10 +1,10 @@
 #!/bin/sh
 # -----------------------------------------------------------------------------------------------------------
 # Copyright (c) 2026 Huawei Technologies Co., Ltd.
-# This program is free software, you can redistribute it and/or modify it under the terms and conditions of 
+# This program is free software, you can redistribute it and/or modify it under the terms and conditions of
 # CANN Open Software License Agreement Version 2.0 (the "License").
 # Please refer to the License for details. You may not use this file except in compliance with the License.
-# THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED, 
+# THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
 # INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
 # See LICENSE in the root of the software repository for the full text of the License.
 # -----------------------------------------------------------------------------------------------------------
@@ -69,6 +69,10 @@ fi
 REPO_ROOT=$(git rev-parse --show-toplevel 2>/dev/null || pwd)
 REPO_NAME=$(basename "$REPO_ROOT")
 OAT_REPORT_DIR="$REPO_ROOT/oat_reports"
+# Unique temp dir per process so concurrent pre-commit invocations (one per
+# file-type group) don't clobber each other's PlainReport_${REPO_NAME}.txt.
+OAT_TMP_DIR="$REPO_ROOT/oat_reports_$$_tmp"
+mkdir -p "$OAT_TMP_DIR"
 
 echo "[OAT] Running OAT scan (Python Edition) — INCREMENTAL MODE"
 echo "[OAT] Project: $REPO_NAME"
@@ -138,7 +142,7 @@ done
 # ---------------------------------------------------------------------------
 # 5. Build oat command — use OAT.xml if present in repo root
 # ---------------------------------------------------------------------------
-_OAT_CMD="$_PYTHON -m oat -mode s -s $REPO_ROOT -r $OAT_REPORT_DIR -n $REPO_NAME -w 1 -f $FILE_LIST"
+_OAT_CMD="$_PYTHON -m oat -mode s -s $REPO_ROOT -r $OAT_TMP_DIR -n $REPO_NAME -w 1 -f $FILE_LIST"
 
 _OAT_XML="$REPO_ROOT/OAT.xml"
 if [ -f "$_OAT_XML" ]; then
@@ -169,7 +173,7 @@ fi
 # 7. Parse report and write result.txt
 #    Only: Invalid File Type + License Header Invalid (no copyright)
 # ---------------------------------------------------------------------------
-REPORT_FILE="$OAT_REPORT_DIR/PlainReport_${REPO_NAME}.txt"
+REPORT_FILE="$OAT_TMP_DIR/PlainReport_${REPO_NAME}.txt"
 RESULT_FILE="$OAT_REPORT_DIR/result.txt"
 
 # Section headers used as stop-boundaries when extracting sections
@@ -240,8 +244,8 @@ _SECTION_LIC=$(_extract_section "$REPORT_FILE" "License Header Invalid Total Cou
     echo "==================================="
 } > "$RESULT_FILE"
 
-# Clean up full plain report (keep only result.txt)
-rm -f "$REPORT_FILE"
+# Clean up temp report dir (keep only result.txt in oat_reports/)
+rm -rf "$OAT_TMP_DIR"
 
 # ---------------------------------------------------------------------------
 # 8. Block commit if issues found

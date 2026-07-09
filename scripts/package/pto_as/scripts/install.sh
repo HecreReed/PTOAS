@@ -1,3 +1,12 @@
+# Copyright (c) 2026 Huawei Technologies Co., Ltd.
+# This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+# CANN Open Software License Agreement Version 2.0 (the "License").
+# Please refer to the License for details. You may not use this file except in compliance with the License.
+# THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+# INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+# See LICENSE in the root of the software repository for the full text of the License.
+# ============================================================================
+
 #!/bin/bash
 # --------------------------------------------------------------------------------
 # Copyright (c) 2025 Huawei Technologies Co., Ltd.
@@ -50,7 +59,7 @@ PTO_COMMON_FILE="${CURR_PATH}/pto_common.sh"
 
 ARCH_INFO=$(grep -e "arch" "$RUN_PKG_INFO_FILE" | cut --only-delimited -d"=" -f2-)
 
-# defaluts info determinated by user's inputs
+# defaluts info determined by user's inputs
 ASCEND_INSTALL_INFO="ascend_install.info"
 TARGET_INSTALL_PATH="${DEFAULT_INSTALL_PATH}" #--input-path
 TARGET_USERNAME="${CURR_OPERATE_USER}"
@@ -527,7 +536,7 @@ get_opts() {
         ;;
       -*)
         echo "[PTO] [ERROR]: ERR_NO:${PARAM_INVALID};ERR_DES:Unsupported parameters [$1],\
- operation execute failed. Please use [--help] to see the useage."
+ operation execute failed. Please use [--help] to see the usage."
         exitlog
         exit 1
         ;;

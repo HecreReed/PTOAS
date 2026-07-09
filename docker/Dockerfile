@@ -1,3 +1,12 @@
+# Copyright (c) 2026 Huawei Technologies Co., Ltd.
+# This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+# CANN Open Software License Agreement Version 2.0 (the "License").
+# Please refer to the License for details. You may not use this file except in compliance with the License.
+# THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+# INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+# See LICENSE in the root of the software repository for the full text of the License.
+# ============================================================================
+
 ARG ARCH=x86_64
 # ARCH options: x86_64, aarch64
 
@@ -6,7 +15,7 @@ ARG ARCH=x86_64
 # -----------------------------------------------------------------------------
 FROM quay.io/pypa/manylinux_2_34_${ARCH} AS builder
 ARG ARCH
-# need to re-declare ARG after FROM
+# need to redeclare ARG after FROM
 
 # NOTE: change $PY_VER for different Python versions (3.8 - 3.14 available)
 ARG PY_VER=cp311-cp311
@@ -170,7 +179,7 @@ RUN (echo '#if __CCE_AICORE__ == 220 && defined(__DAV_C220_CUBE__)'; cat tmatmul
     > tmatmulk.cpp.tmp && mv tmatmulk.cpp.tmp tmatmulk.cpp
 RUN bisheng $BISHENG_OPTS ./tmatmulk.cpp -o ./matmul_kernel.so
 
-# add torch_npu to faciliate on-device testing during `docker run` (not used at build stage)
+# add torch_npu to facilitate on-device testing during `docker run` (not used at build stage)
 # for available versions see https://pypi.org/project/torch-npu/#history
 RUN pip install --no-cache-dir torch==2.9.0 --index-url https://download.pytorch.org/whl/cpu \
     && pip install --no-cache-dir torch-npu==2.9.0 \
