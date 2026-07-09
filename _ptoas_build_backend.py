@@ -19,6 +19,11 @@ Environment variables (all optional):
   PTO_INSTALL_DIR              Install prefix (default: <repo>/install)
   CMAKE_C_COMPILER             Optional C compiler passed through to CMake
   CMAKE_CXX_COMPILER           Optional C++ compiler passed through to CMake
+  CMAKE_C_COMPILER_LAUNCHER    Optional C compiler launcher (ccache/sccache)
+  CMAKE_CXX_COMPILER_LAUNCHER  Optional C++ compiler launcher (ccache/sccache)
+  PTOAS_ENABLE_LINUX_HARDENING Apply cmake/LinuxHardeningCache.cmake on Linux
+                               (default: 1). Set to 0 for faster local rebuilds.
+  PTOAS_USE_COMPILER_CACHE     Auto-detect ccache/sccache in CMake (default: ON)
   PTOAS_PYTHON_PACKAGE_VERSION Wheel version override
 """
 from __future__ import annotations
@@ -120,8 +125,20 @@ def build_sdist(sdist_directory, config_settings=None):
     )
 
 
+def _env_flag(name: str, default: bool) -> bool:
+    raw = os.environ.get(name)
+    if raw is None:
+        return default
+    return raw.strip().lower() in {"1", "true", "yes", "on"}
+
+
 def _should_use_linux_hardening_cache() -> bool:
-    return sys.platform.startswith("linux")
+    # Release/wheel builds keep hardening on by default. Local iteration after
+    # the LLVM21 upgrade can set PTOAS_ENABLE_LINUX_HARDENING=0 to skip
+    # -ftrapv / fortify costs that dominate giant TUs such as PTOToEmitC.cpp.
+    return sys.platform.startswith("linux") and _env_flag(
+        "PTOAS_ENABLE_LINUX_HARDENING", True
+    )
 
 
 def _cmake_configure_and_build():
@@ -146,10 +163,18 @@ def _cmake_configure_and_build():
         f"-DCMAKE_INSTALL_PREFIX={_PTO_INSTALL_DIR}",
     ]
 
-    for compiler_var in ("CMAKE_C_COMPILER", "CMAKE_CXX_COMPILER"):
-        compiler = os.environ.get(compiler_var, "").strip()
-        if compiler:
-            cmake_cmd.append(f"-D{compiler_var}={compiler}")
+    for cmake_var in (
+        "CMAKE_C_COMPILER",
+        "CMAKE_CXX_COMPILER",
+        "CMAKE_C_COMPILER_LAUNCHER",
+        "CMAKE_CXX_COMPILER_LAUNCHER",
+    ):
+        value = os.environ.get(cmake_var, "").strip()
+        if value:
+            cmake_cmd.append(f"-D{cmake_var}={value}")
+
+    if not _env_flag("PTOAS_USE_COMPILER_CACHE", True):
+        cmake_cmd.append("-DPTOAS_USE_COMPILER_CACHE=OFF")
 
     release_version = os.environ.get("PTOAS_RELEASE_VERSION_OVERRIDE", "")
     if release_version:
@@ -158,14 +183,23 @@ def _cmake_configure_and_build():
     hardening_cache = _REPO / "cmake" / "LinuxHardeningCache.cmake"
     if _should_use_linux_hardening_cache() and hardening_cache.exists():
         cmake_cmd.insert(1, f"-C{hardening_cache}")
+    elif sys.platform.startswith("linux"):
+        print(
+            "ptoas build: Linux hardening cache disabled "
+            "(PTOAS_ENABLE_LINUX_HARDENING=0)",
+            file=sys.stderr,
+        )
 
     subprocess.check_call(cmake_cmd)
-    subprocess.check_call(["cmake", "--build", str(_BUILD_DIR)])
+    build_cmd = ["cmake", "--build", str(_BUILD_DIR)]
+    parallel = os.environ.get("CMAKE_BUILD_PARALLEL_LEVEL", "").strip()
+    if parallel:
+        build_cmd.extend(["--parallel", parallel])
+    subprocess.check_call(build_cmd)
     subprocess.check_call(
         ["cmake", "--build", str(_BUILD_DIR), "--target", "install"]
     )
     _assert_installed_ptodsl_payload()
-
 
 def build_wheel(wheel_directory, config_settings=None, metadata_directory=None):
     _cmake_configure_and_build()

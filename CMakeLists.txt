@@ -202,6 +202,10 @@ include(AddMLIR)
 # =========================================================
 # 3. 配置构建环境
 # =========================================================
+# Prefer ccache/sccache for incremental rebuilds (especially after LLVM21,
+# where large TUs such as PTO.cpp / PTOToEmitC.cpp dominate wall time).
+include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/CompilerCache.cmake)
+
 # Keep warning policy in CMake so CI, wheel, and external build entrypoints
 # all enforce the same diagnostics contract.
 option(PTOAS_ENABLE_WERROR "Treat PTOAS warnings as errors" ON)

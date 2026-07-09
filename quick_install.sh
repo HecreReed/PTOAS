@@ -7,13 +7,17 @@
 # INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
 # See LICENSE in the root of the software repository for the full text of the License.
 
-# For quick development, build and install ptoas and its python bindings 
+# For quick development, build and install ptoas and its python bindings
 # on top of Docker image https://github.com/learning-chip/agent_docker_npu/pull/8
-# assume MLIR is already installed to save time, takes <3min to finish the build of pto extension
+# assume MLIR is already installed to save time.
 #
 # Optional env:
-#   LLVM_BUILD_DIR   - default: ${LLVM_SOURCE_DIR:-/llvm-workspace/llvm-project}/build-shared
-#   PTO_INSTALL_DIR  - default: <repo>/install
+#   LLVM_BUILD_DIR                 default: ${LLVM_SOURCE_DIR:-/llvm-workspace/llvm-project}/build-shared
+#   PTO_INSTALL_DIR                default: <repo>/install
+#   PTOAS_ENABLE_LINUX_HARDENING   default: 0 for this quick path (set 1 for release-like flags)
+#   PTOAS_USE_COMPILER_CACHE       default: ON (auto-detect ccache/sccache)
+#   CMAKE_CXX_COMPILER_LAUNCHER    force a launcher (ccache/sccache)
+#   CMAKE_BUILD_PARALLEL_LEVEL     ninja/cmake --build parallelism
 
 set -euo pipefail
 
@@ -22,6 +26,7 @@ PTO_INSTALL_DIR="${PTO_INSTALL_DIR:-${PTO_SOURCE_DIR}/install}"
 
 LLVM_SOURCE_DIR="${LLVM_SOURCE_DIR:-/llvm-workspace/llvm-project}"
 LLVM_BUILD_DIR="${LLVM_BUILD_DIR:-${LLVM_SOURCE_DIR}/build-shared}"
+PTOAS_ENABLE_LINUX_HARDENING="${PTOAS_ENABLE_LINUX_HARDENING:-0}"
 
 PY_ROOT="$(python -c 'import sys; print(sys.prefix)')"
 
@@ -37,20 +42,41 @@ PTOAS_VERSION="${PTOAS_VERSION:-$(python "${PTO_SOURCE_DIR}/.github/scripts/comp
 
 cd "$PTO_SOURCE_DIR"
 
-cmake -C "${PTO_SOURCE_DIR}/cmake/LinuxHardeningCache.cmake" -G Ninja \
-  -S . \
-  -B build \
-  -DLLVM_DIR="${LLVM_BUILD_DIR}/lib/cmake/llvm" \
-  -DMLIR_DIR="${LLVM_BUILD_DIR}/lib/cmake/mlir" \
-  -DPython3_ROOT_DIR="${PY_ROOT}" \
-  -DPython3_EXECUTABLE=python \
-  -DPython3_FIND_STRATEGY=LOCATION \
-  -Dpybind11_DIR="${PYBIND11_DIR}" \
-  -DMLIR_PYTHON_PACKAGE_DIR="${MLIR_PY_PKG}" \
-  -DPTOAS_RELEASE_VERSION_OVERRIDE="${PTOAS_VERSION}" \
+CMAKE_ARGS=(
+  -G Ninja
+  -S .
+  -B build
+  -DCMAKE_BUILD_TYPE=Release
+  -DLLVM_DIR="${LLVM_BUILD_DIR}/lib/cmake/llvm"
+  -DMLIR_DIR="${LLVM_BUILD_DIR}/lib/cmake/mlir"
+  -DPython3_ROOT_DIR="${PY_ROOT}"
+  -DPython3_EXECUTABLE=python
+  -DPython3_FIND_STRATEGY=LOCATION
+  -Dpybind11_DIR="${PYBIND11_DIR}"
+  -DMLIR_PYTHON_PACKAGE_DIR="${MLIR_PY_PKG}"
+  -DPTOAS_RELEASE_VERSION_OVERRIDE="${PTOAS_VERSION}"
   -DCMAKE_INSTALL_PREFIX="${PTO_INSTALL_DIR}"
+)
 
-ninja -C build
+if [[ "${PTOAS_ENABLE_LINUX_HARDENING}" == "1" || "${PTOAS_ENABLE_LINUX_HARDENING}" == "true" ]]; then
+  CMAKE_ARGS=(-C "${PTO_SOURCE_DIR}/cmake/LinuxHardeningCache.cmake" "${CMAKE_ARGS[@]}")
+  echo "quick_install.sh: Linux hardening enabled"
+else
+  echo "quick_install.sh: Linux hardening disabled (set PTOAS_ENABLE_LINUX_HARDENING=1 for release-like flags)"
+fi
+
+if [[ -n "${CMAKE_CXX_COMPILER_LAUNCHER:-}" ]]; then
+  CMAKE_ARGS+=(-DCMAKE_CXX_COMPILER_LAUNCHER="${CMAKE_CXX_COMPILER_LAUNCHER}")
+  CMAKE_ARGS+=(-DCMAKE_C_COMPILER_LAUNCHER="${CMAKE_C_COMPILER_LAUNCHER:-${CMAKE_CXX_COMPILER_LAUNCHER}}")
+fi
+
+cmake "${CMAKE_ARGS[@]}"
+
+BUILD_ARGS=(-C build)
+if [[ -n "${CMAKE_BUILD_PARALLEL_LEVEL:-}" ]]; then
+  BUILD_ARGS+=(-j "${CMAKE_BUILD_PARALLEL_LEVEL}")
+fi
+ninja "${BUILD_ARGS[@]}"
 ninja -C build install
 
 export PTO_SOURCE_DIR PTO_INSTALL_DIR LLVM_BUILD_DIR

@@ -143,7 +143,19 @@ cmake -G Ninja \
 ninja -C build-llvm21
 ninja -C build-llvm21 install
 
-# 5. 检查构建产物
+# 5. （推荐）开发机加速：安装 ccache 后二次编译会显著变快
+#    CMake 默认开启 PTOAS_USE_COMPILER_CACHE=ON，会自动探测 ccache/sccache。
+#    也可显式指定：
+#      export CMAKE_CXX_COMPILER_LAUNCHER=ccache
+#      export CMAKE_C_COMPILER_LAUNCHER=ccache
+#
+#    日常开发（非发布）可关闭 Linux hardening（含 -ftrapv）：
+#      export PTOAS_ENABLE_LINUX_HARDENING=0
+#      ./quick_install.sh
+#    或：
+#      PTOAS_ENABLE_LINUX_HARDENING=0 pip install . --no-build-isolation
+
+# 6. 检查构建产物
 # build 输出（便于本地开发/调试）
 $PTO_SOURCE_DIR/build-llvm21/python/
 ├── mlir
