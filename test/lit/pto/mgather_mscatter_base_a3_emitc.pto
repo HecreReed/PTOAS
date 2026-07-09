@@ -63,11 +63,13 @@ module attributes {pto.target_arch = "a3"} {
 }
 
 // CHECK-LABEL: AICORE void mgather_emitc_base(
-// CHECK: __ubuf__ int32_t* [[MGATHER_IDX:[_A-Za-z][_A-Za-z0-9]*]] = {{[_A-Za-z][_A-Za-z0-9]*}}.data();
-// CHECK: __ubuf__ float* [[MGATHER_DST:[_A-Za-z][_A-Za-z0-9]*]] = {{[_A-Za-z][_A-Za-z0-9]*}}.data();
-// CHECK: MGATHER<pto::Coalesce::Row>([[MGATHER_DST]], {{[_A-Za-z][_A-Za-z0-9]*}}, [[MGATHER_IDX]]);
+// CHECK-DAG: GlobalTensor<float, {{.*}}> [[MGATHER_MEM:[_A-Za-z][_A-Za-z0-9]*]] = GlobalTensor<float,
+// CHECK-DAG: Tile<TileType::Vec, int32_t, {{.*}}> [[MGATHER_IDX:[_A-Za-z][_A-Za-z0-9]*]] = {{[_A-Za-z][_A-Za-z0-9]*}};
+// CHECK-DAG: Tile<TileType::Vec, float, {{.*}}> [[MGATHER_DST:[_A-Za-z][_A-Za-z0-9]*]] = {{[_A-Za-z][_A-Za-z0-9]*}};
+// CHECK: MGATHER<pto::Coalesce::Row>([[MGATHER_DST]], [[MGATHER_MEM]], [[MGATHER_IDX]]);
 
 // CHECK-LABEL: AICORE void mscatter_emitc_base(
-// CHECK: __ubuf__ float* [[MSCATTER_SRC:[_A-Za-z][_A-Za-z0-9]*]] = {{[_A-Za-z][_A-Za-z0-9]*}}.data();
-// CHECK: __ubuf__ int32_t* [[MSCATTER_IDX:[_A-Za-z][_A-Za-z0-9]*]] = {{[_A-Za-z][_A-Za-z0-9]*}}.data();
-// CHECK: MSCATTER({{[_A-Za-z][_A-Za-z0-9]*}}, [[MSCATTER_SRC]], [[MSCATTER_IDX]]);
+// CHECK-DAG: GlobalTensor<float, pto::Shape<1, 1, 1, 1, 256>, {{.*}}> [[MSCATTER_MEM:[_A-Za-z][_A-Za-z0-9]*]] = GlobalTensor<float,
+// CHECK-DAG: Tile<TileType::Vec, float, {{.*}}> [[MSCATTER_SRC:[_A-Za-z][_A-Za-z0-9]*]] = {{[_A-Za-z][_A-Za-z0-9]*}};
+// CHECK-DAG: Tile<TileType::Vec, int32_t, 8, 32, BLayout::RowMajor, 8, 1, {{.*}}> [[MSCATTER_IDX:[_A-Za-z][_A-Za-z0-9]*]] = {{[_A-Za-z][_A-Za-z0-9]*}};
+// CHECK: MSCATTER([[MSCATTER_MEM]], [[MSCATTER_SRC]], [[MSCATTER_IDX]]);

@@ -3434,9 +3434,9 @@ struct PTOMGatherToMGATHER : public OpConversionPattern<pto::MGatherOp> {
   LogicalResult matchAndRewrite(pto::MGatherOp op, OpAdaptor adaptor,
                                 ConversionPatternRewriter &rewriter) const override {
     auto *ctx = rewriter.getContext();
-    Value mem = adaptor.getMem();
-    Value idx = adaptor.getIdx();
-    Value dst = adaptor.getDst();
+    Value mem = peelUnrealized(adaptor.getMem());
+    Value idx = peelUnrealized(adaptor.getIdx());
+    Value dst = peelUnrealized(adaptor.getDst());
 
     Value memArg = maybeWrapGlobalMemrefAsGlobalTensor(
         rewriter, op.getLoc(), mem, op.getMem().getType(), op.getOperation());
@@ -4486,6 +4486,10 @@ static Value buildGlobalTensorFromMemref(ConversionPatternRewriter &rewriter,
 static Value maybeWrapGlobalMemrefAsGlobalTensor(
     ConversionPatternRewriter &rewriter, Location loc, Value loweredValue,
     Type originalType, Operation *anchor, StringRef tag) {
+  loweredValue = peelUnrealized(loweredValue);
+  if (isEmitCGlobalTensorLikeType(loweredValue.getType()))
+    return loweredValue;
+
   auto mrTy = dyn_cast<MemRefType>(originalType);
   if (!mrTy)
     return loweredValue;
@@ -6491,9 +6495,9 @@ struct PTOMScatterToMSCATTER : public OpConversionPattern<pto::MScatterOp> {
   LogicalResult matchAndRewrite(pto::MScatterOp op, OpAdaptor adaptor,
                                 ConversionPatternRewriter &rewriter) const override {
     auto *ctx = rewriter.getContext();
-    Value src = adaptor.getSrc();
-    Value idx = adaptor.getIdx();
-    Value mem = adaptor.getMem();
+    Value src = peelUnrealized(adaptor.getSrc());
+    Value idx = peelUnrealized(adaptor.getIdx());
+    Value mem = peelUnrealized(adaptor.getMem());
     auto coalesceAttr =
         dyn_cast_or_null<pto::CoalesceAttr>(op.getProperties().coalesce);
     auto scatterAtomicAttr =
