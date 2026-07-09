@@ -119,6 +119,10 @@ jobs:
       PYPTO_RUN_WORKSPACE: ${{ github.workspace }}/.work/pypto-run-ci
       PTO_ISA_COMMIT: 016396b57e2c17093f1194e6acd89bb112b0ab24
       PTO_ISA_ROOT: ${{ github.workspace }}/.work/pto-isa-ci
+      # Some self-hosted runners have torch_npu installed globally. Keep
+      # CPU-only simulator setup from auto-loading that backend when importing
+      # torch; steps that need torch_npu import it explicitly below.
+      TORCH_DEVICE_BACKEND_AUTOLOAD: "0"
     steps:
       - name: Checkout
         uses: actions/checkout@v4
