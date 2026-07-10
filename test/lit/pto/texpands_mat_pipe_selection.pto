@@ -1,0 +1,39 @@
+// Copyright (c) 2026 Huawei Technologies Co., Ltd.
+// This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+// CANN Open Software License Agreement Version 2.0 (the "License").
+// Please refer to the License for details. You may not use this file except in compliance with the License.
+// THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+// INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+// See LICENSE in the root of the software repository for the full text of the License.
+
+// RUN: ptoas --pto-arch a5 --enable-insert-sync %s | FileCheck %s
+// RUN: ptoas --pto-arch a5 --enable-graph-sync-solver --graph-sync-solver-event-id-max=64 %s | FileCheck %s
+
+module attributes {"pto.target_arch" = "a5"} {
+  // MAT TEXPANDS runs on MTE2. The following MAT->RIGHT TMOV runs on MTE1,
+  // so sync insertion must order TEXPANDS before TMOV across those pipes.
+  func.func @texpands_mat_sync(%scalar: f16)
+      attributes {pto.kernel_kind = #pto.kernel_kind<cube>} {
+    %src = pto.alloc_tile
+      : !pto.tile_buf<loc=mat, dtype=f16, rows=32, cols=32, v_row=32, v_col=32,
+                      blayout=col_major, slayout=row_major, fractal=512, pad=0>
+    %dst = pto.alloc_tile
+      : !pto.tile_buf<loc=right, dtype=f16, rows=32, cols=32, v_row=32, v_col=32,
+                      blayout=row_major, slayout=col_major, fractal=512, pad=0>
+
+    pto.texpands ins(%scalar : f16)
+                 outs(%src : !pto.tile_buf<loc=mat, dtype=f16, rows=32, cols=32, v_row=32, v_col=32,
+                                           blayout=col_major, slayout=row_major, fractal=512, pad=0>)
+    pto.tmov ins(%src : !pto.tile_buf<loc=mat, dtype=f16, rows=32, cols=32, v_row=32, v_col=32,
+                                      blayout=col_major, slayout=row_major, fractal=512, pad=0>)
+             outs(%dst : !pto.tile_buf<loc=right, dtype=f16, rows=32, cols=32, v_row=32, v_col=32,
+                                       blayout=row_major, slayout=col_major, fractal=512, pad=0>)
+    return
+  }
+}
+
+// CHECK-LABEL: AICORE void texpands_mat_sync(
+// CHECK: TEXPANDS(
+// CHECK: set_flag(PIPE_MTE2, PIPE_MTE1, EVENT_ID{{[0-9]+}});
+// CHECK: wait_flag(PIPE_MTE2, PIPE_MTE1, EVENT_ID{{[0-9]+}});
+// CHECK: TMOV(
