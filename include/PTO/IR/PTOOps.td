@@ -1465,11 +1465,19 @@ def TMovOp  : PTO_TOp<"tmov", [
         return ::mlir::pto::PIPE::PIPE_V;
       }
 
-      // MAT -> L0 (Left/Right/Bias/Scaling) are MTE1 moves.
+      // MAT -> L0A/L0B/Bias follow TMOV_M2L/M2R/M2B and run on MTE1.
       if ((s == ::mlir::pto::AddressSpace::MAT &&
            (d == ::mlir::pto::AddressSpace::LEFT || d == ::mlir::pto::AddressSpace::RIGHT ||
-            d == ::mlir::pto::AddressSpace::BIAS || d == ::mlir::pto::AddressSpace::SCALING))) {
+            d == ::mlir::pto::AddressSpace::BIAS))) {
         return ::mlir::pto::PIPE::PIPE_MTE1;
+      }
+
+      // MAT -> Scaling is TMOV_M2S / copy_cbuf_to_fbuf and must use PIPE_FIX.
+      // Classifying it as MTE1 drops the MTE2->FIX wait before FBUF is ready
+      // and races with later FIX consumers (SET_QUANT_VECTOR + fixpipe TPUSH).
+      if (s == ::mlir::pto::AddressSpace::MAT &&
+          d == ::mlir::pto::AddressSpace::SCALING) {
+        return ::mlir::pto::PIPE::PIPE_FIX;
       }
 
       // ACC -> MAT / VEC use FIX in PTO-ISA sync mapping (TMOV_A2M/TMOV_A2V).

@@ -1,0 +1,36 @@
+// Copyright (c) 2026 Huawei Technologies Co., Ltd.
+// This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+// CANN Open Software License Agreement Version 2.0 (the "License").
+// Please refer to the License for details. You may not use this file except in compliance with the License.
+// THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+// INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+// See LICENSE in the root of the software repository for the full text of the License.
+//
+// RUN: ptoas --pto-arch a3 --enable-graph-sync-solver --graph-sync-solver-event-id-max=64 %s | FileCheck %s --check-prefix=A3
+// RUN: ptoas --pto-arch a5 --enable-graph-sync-solver --graph-sync-solver-event-id-max=64 %s | FileCheck %s --check-prefix=A5
+
+module {
+  // GraphSyncSolver path: mat->scaling must still be PIPE_FIX / TMOV_M2S.
+  func.func @tmov_mat_scaling_sync(%in: memref<1x16xui64, #pto.address_space<gm>>) {
+    %src = pto.alloc_tile : !pto.tile_buf<loc=mat, dtype=ui64, rows=1, cols=16, v_row=1, v_col=16, blayout=row_major, slayout=none_box, fractal=512, pad=0>
+    %dst = pto.alloc_tile : !pto.tile_buf<loc=scaling, dtype=ui64, rows=1, cols=16, v_row=1, v_col=16, blayout=row_major, slayout=none_box, fractal=512, pad=0>
+
+    pto.tload ins(%in : memref<1x16xui64, #pto.address_space<gm>>)
+              outs(%src : !pto.tile_buf<loc=mat, dtype=ui64, rows=1, cols=16, v_row=1, v_col=16, blayout=row_major, slayout=none_box, fractal=512, pad=0>)
+    pto.tmov ins(%src : !pto.tile_buf<loc=mat, dtype=ui64, rows=1, cols=16, v_row=1, v_col=16, blayout=row_major, slayout=none_box, fractal=512, pad=0>)
+             outs(%dst : !pto.tile_buf<loc=scaling, dtype=ui64, rows=1, cols=16, v_row=1, v_col=16, blayout=row_major, slayout=none_box, fractal=512, pad=0>)
+    return
+  }
+}
+
+// A3-LABEL: AICORE void tmov_mat_scaling_sync(
+// A3: set_flag(PIPE_MTE2, PIPE_FIX,
+// A3: wait_flag(PIPE_MTE2, PIPE_FIX,
+// A3-NOT: set_flag(PIPE_MTE2, PIPE_MTE1,
+// A3: TMOV(
+
+// A5-LABEL: AICORE void tmov_mat_scaling_sync(
+// A5: set_flag(PIPE_MTE2, PIPE_FIX,
+// A5: wait_flag(PIPE_MTE2, PIPE_FIX,
+// A5-NOT: set_flag(PIPE_MTE2, PIPE_MTE1,
+// A5: TMOV(
