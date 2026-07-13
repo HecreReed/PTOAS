@@ -12,27 +12,22 @@
 #include "mlir/IR/OpDefinition.h"
 
 namespace mlir::pto::detail {
-LogicalResult verifyFrontendInitPipeTrait(Operation *op);
-LogicalResult verifyFrontendPopTrait(Operation *op);
+LogicalResult verifyFrontendInitPipeTrait(Operation* op);
+LogicalResult verifyFrontendPopTrait(Operation* op);
 } // namespace mlir::pto::detail
 
 namespace mlir::OpTrait::pto {
 
 template <typename ConcreteType>
-class FrontendInitPipeVerify
-    : public TraitBase<ConcreteType, FrontendInitPipeVerify> {
+class FrontendInitPipeVerify : public TraitBase<ConcreteType, FrontendInitPipeVerify> {
 public:
-  static LogicalResult verifyTrait(Operation *op) {
-    return ::mlir::pto::detail::verifyFrontendInitPipeTrait(op);
-  }
+    static LogicalResult verifyTrait(Operation* op) { return ::mlir::pto::detail::verifyFrontendInitPipeTrait(op); }
 };
 
 template <typename ConcreteType>
 class FrontendPopVerify : public TraitBase<ConcreteType, FrontendPopVerify> {
 public:
-  static LogicalResult verifyTrait(Operation *op) {
-    return ::mlir::pto::detail::verifyFrontendPopTrait(op);
-  }
+    static LogicalResult verifyTrait(Operation* op) { return ::mlir::pto::detail::verifyFrontendPopTrait(op); }
 };
 
 } // namespace mlir::OpTrait::pto

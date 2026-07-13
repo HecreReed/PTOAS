@@ -12,40 +12,45 @@
 #include <fstream>
 
 namespace {
-void ReadBinaryFile(const char *path, void *buffer, size_t size) {
+void ReadBinaryFile(const char* path, void* buffer, size_t size)
+{
     std::ifstream ifs(path, std::ios::binary);
-    ifs.read(static_cast<char *>(buffer), static_cast<std::streamsize>(size));
+    ifs.read(static_cast<char*>(buffer), static_cast<std::streamsize>(size));
 }
 
-void WriteBinaryFile(const char *path, const void *buffer, size_t size) {
+void WriteBinaryFile(const char* path, const void* buffer, size_t size)
+{
     std::ofstream ofs(path, std::ios::binary);
-    ofs.write(static_cast<const char *>(buffer), static_cast<std::streamsize>(size));
+    ofs.write(static_cast<const char*>(buffer), static_cast<std::streamsize>(size));
 }
-}  // namespace
+} // namespace
 
-void LaunchSoftmax_block(float *scores, float *groupScale, float *softmax, void *stream);
+void LaunchSoftmax_block(float* scores, float* groupScale, float* softmax, void* stream);
 
 namespace {
-bool CheckAcl(const char *name, aclError status) {
+bool CheckAcl(const char* name, aclError status)
+{
     if (status != ACL_ERROR_NONE) {
         std::fprintf(stderr, "%s failed: %d\n", name, static_cast<int>(status));
         return false;
     }
     return true;
 }
-}
+} // namespace
 
-int main() {
+int main()
+{
     const size_t fileSize = 32 * 32 * sizeof(float);
 
-    float *hostOut = nullptr;
-    float *hostScores = nullptr;
-    float *hostGroupScale = nullptr;
-    float *devOut = nullptr;
-    float *devScores = nullptr;
-    float *devGroupScale = nullptr;
+    float* hostOut = nullptr;
+    float* hostScores = nullptr;
+    float* hostGroupScale = nullptr;
+    float* devOut = nullptr;
+    float* devScores = nullptr;
+    float* devGroupScale = nullptr;
 
-    if (!CheckAcl("aclInit", aclInit(nullptr))) return 1;
+    if (!CheckAcl("aclInit", aclInit(nullptr)))
+        return 1;
     if (!CheckAcl("aclrtSetDevice", aclrtSetDevice(0))) {
         aclFinalize();
         return 1;
@@ -57,12 +62,12 @@ int main() {
         return 1;
     }
 
-    aclrtMallocHost((void **)(&hostOut), fileSize);
-    aclrtMallocHost((void **)(&hostScores), fileSize);
-    aclrtMallocHost((void **)(&hostGroupScale), fileSize);
-    aclrtMalloc((void **)&devOut, fileSize, ACL_MEM_MALLOC_HUGE_FIRST);
-    aclrtMalloc((void **)&devScores, fileSize, ACL_MEM_MALLOC_HUGE_FIRST);
-    aclrtMalloc((void **)&devGroupScale, fileSize, ACL_MEM_MALLOC_HUGE_FIRST);
+    aclrtMallocHost((void**)(&hostOut), fileSize);
+    aclrtMallocHost((void**)(&hostScores), fileSize);
+    aclrtMallocHost((void**)(&hostGroupScale), fileSize);
+    aclrtMalloc((void**)&devOut, fileSize, ACL_MEM_MALLOC_HUGE_FIRST);
+    aclrtMalloc((void**)&devScores, fileSize, ACL_MEM_MALLOC_HUGE_FIRST);
+    aclrtMalloc((void**)&devGroupScale, fileSize, ACL_MEM_MALLOC_HUGE_FIRST);
 
     ReadBinaryFile("./v1.bin", hostScores, fileSize);
     ReadBinaryFile("./v2.bin", hostGroupScale, fileSize);

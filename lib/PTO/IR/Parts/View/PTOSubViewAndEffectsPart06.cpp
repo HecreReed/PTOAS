@@ -12,61 +12,67 @@
 using namespace mlir;
 using namespace mlir::pto;
 
-void TGemvBiasOp::getEffects(SmallVectorImpl<SideEffects::EffectInstance<MemoryEffects::Effect>> &effects) {
-  addEffect(effects, &getAMutable(), MemoryEffects::Read::get());
-  addEffect(effects, &getBMutable(), MemoryEffects::Read::get());
-  addEffect(effects, &getBiasMutable(), MemoryEffects::Read::get());
-  addEffect(effects, &getDstMutable(), MemoryEffects::Write::get());
+void TGemvBiasOp::getEffects(SmallVectorImpl<SideEffects::EffectInstance<MemoryEffects::Effect>>& effects)
+{
+    addEffect(effects, &getAMutable(), MemoryEffects::Read::get());
+    addEffect(effects, &getBMutable(), MemoryEffects::Read::get());
+    addEffect(effects, &getBiasMutable(), MemoryEffects::Read::get());
+    addEffect(effects, &getDstMutable(), MemoryEffects::Write::get());
 }
 
 // === TGemvMxOp ===
 // Read: a, a_scale, b, b_scale, Write: dst
-void TGemvMxOp::getEffects(SmallVectorImpl<SideEffects::EffectInstance<MemoryEffects::Effect>> &effects) {
-  addEffect(effects, &getAMutable(), MemoryEffects::Read::get());
-  addEffect(effects, &getAScaleMutable(), MemoryEffects::Read::get());
-  addEffect(effects, &getBMutable(), MemoryEffects::Read::get());
-  addEffect(effects, &getBScaleMutable(), MemoryEffects::Read::get());
-  addEffect(effects, &getDstMutable(), MemoryEffects::Write::get());
+void TGemvMxOp::getEffects(SmallVectorImpl<SideEffects::EffectInstance<MemoryEffects::Effect>>& effects)
+{
+    addEffect(effects, &getAMutable(), MemoryEffects::Read::get());
+    addEffect(effects, &getAScaleMutable(), MemoryEffects::Read::get());
+    addEffect(effects, &getBMutable(), MemoryEffects::Read::get());
+    addEffect(effects, &getBScaleMutable(), MemoryEffects::Read::get());
+    addEffect(effects, &getDstMutable(), MemoryEffects::Write::get());
 }
 
 // === TGemvMxAccOp ===
 // Read: c_in, a, a_scale, b, b_scale, Write: dst
-void TGemvMxAccOp::getEffects(SmallVectorImpl<SideEffects::EffectInstance<MemoryEffects::Effect>> &effects) {
-  addEffect(effects, &getCInMutable(), MemoryEffects::Read::get());
-  addEffect(effects, &getAMutable(), MemoryEffects::Read::get());
-  addEffect(effects, &getAScaleMutable(), MemoryEffects::Read::get());
-  addEffect(effects, &getBMutable(), MemoryEffects::Read::get());
-  addEffect(effects, &getBScaleMutable(), MemoryEffects::Read::get());
-  addEffect(effects, &getDstMutable(), MemoryEffects::Write::get());
+void TGemvMxAccOp::getEffects(SmallVectorImpl<SideEffects::EffectInstance<MemoryEffects::Effect>>& effects)
+{
+    addEffect(effects, &getCInMutable(), MemoryEffects::Read::get());
+    addEffect(effects, &getAMutable(), MemoryEffects::Read::get());
+    addEffect(effects, &getAScaleMutable(), MemoryEffects::Read::get());
+    addEffect(effects, &getBMutable(), MemoryEffects::Read::get());
+    addEffect(effects, &getBScaleMutable(), MemoryEffects::Read::get());
+    addEffect(effects, &getDstMutable(), MemoryEffects::Write::get());
 }
 
 // === TGemvMxBiasOp ===
 // Read: a, a_scale, b, b_scale, bias, Write: dst
-void TGemvMxBiasOp::getEffects(SmallVectorImpl<SideEffects::EffectInstance<MemoryEffects::Effect>> &effects) {
-  addEffect(effects, &getAMutable(), MemoryEffects::Read::get());
-  addEffect(effects, &getAScaleMutable(), MemoryEffects::Read::get());
-  addEffect(effects, &getBMutable(), MemoryEffects::Read::get());
-  addEffect(effects, &getBScaleMutable(), MemoryEffects::Read::get());
-  addEffect(effects, &getBiasMutable(), MemoryEffects::Read::get());
-  addEffect(effects, &getDstMutable(), MemoryEffects::Write::get());
+void TGemvMxBiasOp::getEffects(SmallVectorImpl<SideEffects::EffectInstance<MemoryEffects::Effect>>& effects)
+{
+    addEffect(effects, &getAMutable(), MemoryEffects::Read::get());
+    addEffect(effects, &getAScaleMutable(), MemoryEffects::Read::get());
+    addEffect(effects, &getBMutable(), MemoryEffects::Read::get());
+    addEffect(effects, &getBScaleMutable(), MemoryEffects::Read::get());
+    addEffect(effects, &getBiasMutable(), MemoryEffects::Read::get());
+    addEffect(effects, &getDstMutable(), MemoryEffects::Write::get());
 }
 
 // === TMatmulOp ===
-void TMatmulMxOp::getEffects(SmallVectorImpl<SideEffects::EffectInstance<MemoryEffects::Effect>> &effects) {
-  addEffect(effects, &getAMutable(), MemoryEffects::Read::get());
-  addEffect(effects, &getAScaleMutable(), MemoryEffects::Read::get());
-  addEffect(effects, &getBMutable(), MemoryEffects::Read::get());
-  addEffect(effects, &getBScaleMutable(), MemoryEffects::Read::get());
-  addEffect(effects, &getDstMutable(), MemoryEffects::Write::get());
+void TMatmulMxOp::getEffects(SmallVectorImpl<SideEffects::EffectInstance<MemoryEffects::Effect>>& effects)
+{
+    addEffect(effects, &getAMutable(), MemoryEffects::Read::get());
+    addEffect(effects, &getAScaleMutable(), MemoryEffects::Read::get());
+    addEffect(effects, &getBMutable(), MemoryEffects::Read::get());
+    addEffect(effects, &getBScaleMutable(), MemoryEffects::Read::get());
+    addEffect(effects, &getDstMutable(), MemoryEffects::Write::get());
 }
 
 // === TMatmulAccMxOp ===
 // Read: acc_in, lhs, rhs, Write: dst
-void TMatmulMxAccOp::getEffects(SmallVectorImpl<SideEffects::EffectInstance<MemoryEffects::Effect>> &effects) {
-  addEffect(effects, &getCInMutable(), MemoryEffects::Read::get());
-  addEffect(effects, &getAMutable(), MemoryEffects::Read::get());
-  addEffect(effects, &getAScaleMutable(), MemoryEffects::Read::get());
-  addEffect(effects, &getBMutable(), MemoryEffects::Read::get());
-  addEffect(effects, &getBScaleMutable(), MemoryEffects::Read::get());
-  addEffect(effects, &getDstMutable(), MemoryEffects::Write::get());
+void TMatmulMxAccOp::getEffects(SmallVectorImpl<SideEffects::EffectInstance<MemoryEffects::Effect>>& effects)
+{
+    addEffect(effects, &getCInMutable(), MemoryEffects::Read::get());
+    addEffect(effects, &getAMutable(), MemoryEffects::Read::get());
+    addEffect(effects, &getAScaleMutable(), MemoryEffects::Read::get());
+    addEffect(effects, &getBMutable(), MemoryEffects::Read::get());
+    addEffect(effects, &getBScaleMutable(), MemoryEffects::Read::get());
+    addEffect(effects, &getDstMutable(), MemoryEffects::Write::get());
 }

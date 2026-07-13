@@ -42,27 +42,31 @@ inline constexpr int kTmatmulMxAccOperandCount = 6;
 inline constexpr int kTmatmulMxBiasOperandCount = 6;
 
 struct OpInfo {
-  uint16_t opcode;
-  const char *name;
-  uint8_t has_variant_u8;
-  uint8_t result_type_mode;
-  uint8_t operand_mode;
-  uint16_t num_operands;
-  uint16_t num_results;
-  uint16_t num_regions;
-  uint8_t imm_kind;
+    uint16_t opcode;
+    const char* name;
+    uint8_t has_variant_u8;
+    uint8_t result_type_mode;
+    uint8_t operand_mode;
+    uint16_t num_operands;
+    uint16_t num_results;
+    uint16_t num_regions;
+    uint8_t imm_kind;
 };
 
 extern const OpInfo kOpTable[];
 
-const OpInfo *lookupByOpcode(uint16_t opcode);
+const OpInfo* lookupByOpcode(uint16_t opcode);
 std::optional<uint16_t> lookupOpcodeByName(llvm::StringRef name);
-const OpInfo *lookupByName(llvm::StringRef name);
+const OpInfo* lookupByName(llvm::StringRef name);
 
-struct OpcodeAndVariant { uint16_t opcode; uint8_t hasVariant; uint8_t variant; };
+struct OpcodeAndVariant {
+    uint16_t opcode;
+    uint8_t hasVariant;
+    uint8_t variant;
+};
 
 std::optional<OpcodeAndVariant> lookupOpcodeAndVariantByFullName(llvm::StringRef fullName);
-const char *fullNameFromOpcodeVariant(uint16_t opcode, uint8_t variant);
+const char* fullNameFromOpcodeVariant(uint16_t opcode, uint8_t variant);
 std::optional<int> lookupOperandsByVariant(uint16_t opcode, uint8_t variant);
 
 } // namespace ptobc::v0

@@ -16,8 +16,7 @@
 
 #include "mlir/IR/Dialect.h"
 
-static_assert(sizeof(::mlir::Dialect) > 0,
-              "PTODialect.h.inc requires a complete mlir::Dialect definition");
+static_assert(sizeof(::mlir::Dialect) > 0, "PTODialect.h.inc requires a complete mlir::Dialect definition");
 
 #include "PTO/IR/PTODialect.h.inc"
 

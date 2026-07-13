@@ -12,30 +12,25 @@
 using namespace mlir;
 using namespace mlir::pto;
 
-ParseResult mlir::pto::SubViewOp::parse(OpAsmParser &parser,
-                                        OperationState &result) {
-  OpAsmParser::UnresolvedOperand source;
-  SmallVec4<OpAsmParser::UnresolvedOperand> offsets;
-  SmallVec2<OpAsmParser::UnresolvedOperand> valids;
-  Type sourceTy;
-  Type resultTy;
-  bool hasExplicitResultTy = false;
-  if (failed(parseSubViewSourceOffsetsAndSizes(parser, result, source, offsets)))
-    return failure();
-  if (failed(parseSubViewValids(parser, valids)))
-    return failure();
-  if (parser.parseOptionalAttrDict(result.attributes) ||
-      parser.parseColonType(sourceTy))
-    return failure();
-  if (failed(resolveSubViewSourceAndIndices(parser, result, source, sourceTy,
-                                            resultTy, hasExplicitResultTy,
-                                            offsets, valids)))
-    return failure();
+ParseResult mlir::pto::SubViewOp::parse(OpAsmParser& parser, OperationState& result)
+{
+    OpAsmParser::UnresolvedOperand source;
+    SmallVec4<OpAsmParser::UnresolvedOperand> offsets;
+    SmallVec2<OpAsmParser::UnresolvedOperand> valids;
+    Type sourceTy;
+    Type resultTy;
+    bool hasExplicitResultTy = false;
+    if (failed(parseSubViewSourceOffsetsAndSizes(parser, result, source, offsets)))
+        return failure();
+    if (failed(parseSubViewValids(parser, valids)))
+        return failure();
+    if (parser.parseOptionalAttrDict(result.attributes) || parser.parseColonType(sourceTy))
+        return failure();
+    if (failed(resolveSubViewSourceAndIndices(
+            parser, result, source, sourceTy, resultTy, hasExplicitResultTy, offsets, valids)))
+        return failure();
 
-  int32_t hasValid = valids.empty() ? 0 : 1;
-  addOperandSegmentSizesAttr(parser, result,
-                             {1, static_cast<int32_t>(offsets.size()), hasValid,
-                              hasValid});
-  return finalizeSubViewResultTypes(parser, result, resultTy,
-                                    hasExplicitResultTy);
+    int32_t hasValid = valids.empty() ? 0 : 1;
+    addOperandSegmentSizesAttr(parser, result, {1, static_cast<int32_t>(offsets.size()), hasValid, hasValid});
+    return finalizeSubViewResultTypes(parser, result, resultTy, hasExplicitResultTy);
 }

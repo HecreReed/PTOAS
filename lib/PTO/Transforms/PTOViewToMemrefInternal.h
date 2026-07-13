@@ -18,7 +18,7 @@ class FuncOp;
 
 namespace mlir::pto {
 
-LogicalResult lowerViewToMemrefComputeOps(func::FuncOp func, MLIRContext *ctx);
+LogicalResult lowerViewToMemrefComputeOps(func::FuncOp func, MLIRContext* ctx);
 
 } // namespace mlir::pto
 

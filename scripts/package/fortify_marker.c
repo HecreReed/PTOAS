@@ -10,13 +10,11 @@
 
 #include <stdio.h>
 
-static volatile const char *gPtoasFortifyMarkerSrc = "ptoas";
+static volatile const char* gPtoasFortifyMarkerSrc = "ptoas";
 static volatile int gPtoasFortifyMarkerSink = 0;
 
-__attribute__((used, visibility("hidden")))
-void ptoas_fortify_marker(void)
+__attribute__((used, visibility("hidden"))) void ptoas_fortify_marker(void)
 {
     char buffer[16];
-    gPtoasFortifyMarkerSink =
-        snprintf(buffer, sizeof(buffer), "%s", (const char *)gPtoasFortifyMarkerSrc);
+    gPtoasFortifyMarkerSink = snprintf(buffer, sizeof(buffer), "%s", (const char*)gPtoasFortifyMarkerSrc);
 }

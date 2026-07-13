@@ -12,30 +12,34 @@
 #include <fstream>
 
 namespace {
-void ReadBinaryFile(const char *path, void *buffer, size_t size) {
+void ReadBinaryFile(const char* path, void* buffer, size_t size)
+{
     std::ifstream ifs(path, std::ios::binary);
-    ifs.read(static_cast<char *>(buffer), static_cast<std::streamsize>(size));
+    ifs.read(static_cast<char*>(buffer), static_cast<std::streamsize>(size));
 }
 
-void WriteBinaryFile(const char *path, const void *buffer, size_t size) {
+void WriteBinaryFile(const char* path, const void* buffer, size_t size)
+{
     std::ofstream ofs(path, std::ios::binary);
-    ofs.write(static_cast<const char *>(buffer), static_cast<std::streamsize>(size));
+    ofs.write(static_cast<const char*>(buffer), static_cast<std::streamsize>(size));
 }
-}  // namespace
+} // namespace
 
-void LaunchMatmul_block(float *a, float *b, float *out, void *stream);
+void LaunchMatmul_block(float* a, float* b, float* out, void* stream);
 
 namespace {
-bool CheckAcl(const char *name, aclError status) {
+bool CheckAcl(const char* name, aclError status)
+{
     if (status != ACL_ERROR_NONE) {
         std::fprintf(stderr, "%s failed: %d\n", name, static_cast<int>(status));
         return false;
     }
     return true;
 }
-}
+} // namespace
 
-int main() {
+int main()
+{
     constexpr size_t kM = 32;
     constexpr size_t kK = 32;
     constexpr size_t kN = 32;
@@ -43,14 +47,15 @@ int main() {
     const size_t bSize = kK * kN * sizeof(float);
     const size_t outSize = kM * kN * sizeof(float);
 
-    float *hostOut = nullptr;
-    float *hostA = nullptr;
-    float *hostB = nullptr;
-    float *devOut = nullptr;
-    float *devA = nullptr;
-    float *devB = nullptr;
+    float* hostOut = nullptr;
+    float* hostA = nullptr;
+    float* hostB = nullptr;
+    float* devOut = nullptr;
+    float* devA = nullptr;
+    float* devB = nullptr;
 
-    if (!CheckAcl("aclInit", aclInit(nullptr))) return 1;
+    if (!CheckAcl("aclInit", aclInit(nullptr)))
+        return 1;
     if (!CheckAcl("aclrtSetDevice", aclrtSetDevice(0))) {
         aclFinalize();
         return 1;
@@ -62,12 +67,12 @@ int main() {
         return 1;
     }
 
-    aclrtMallocHost((void **)(&hostOut), outSize);
-    aclrtMallocHost((void **)(&hostA), aSize);
-    aclrtMallocHost((void **)(&hostB), bSize);
-    aclrtMalloc((void **)&devOut, outSize, ACL_MEM_MALLOC_HUGE_FIRST);
-    aclrtMalloc((void **)&devA, aSize, ACL_MEM_MALLOC_HUGE_FIRST);
-    aclrtMalloc((void **)&devB, bSize, ACL_MEM_MALLOC_HUGE_FIRST);
+    aclrtMallocHost((void**)(&hostOut), outSize);
+    aclrtMallocHost((void**)(&hostA), aSize);
+    aclrtMallocHost((void**)(&hostB), bSize);
+    aclrtMalloc((void**)&devOut, outSize, ACL_MEM_MALLOC_HUGE_FIRST);
+    aclrtMalloc((void**)&devA, aSize, ACL_MEM_MALLOC_HUGE_FIRST);
+    aclrtMalloc((void**)&devB, bSize, ACL_MEM_MALLOC_HUGE_FIRST);
 
     ReadBinaryFile("./v1.bin", hostA, aSize);
     ReadBinaryFile("./v2.bin", hostB, bSize);

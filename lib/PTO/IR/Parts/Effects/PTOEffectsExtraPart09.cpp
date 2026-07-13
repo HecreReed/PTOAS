@@ -12,36 +12,32 @@
 using namespace mlir;
 using namespace mlir::pto;
 
-void TPushOp::getEffects(
-    SmallVectorImpl<SideEffects::EffectInstance<MemoryEffects::Effect>>
-        &effects) {
-  addEffect(effects, &getTileMutable(), MemoryEffects::Read::get());
-  addEffect(effects, &getPipeHandleMutable(), MemoryEffects::Read::get());
-  addEffect(effects, &getPipeHandleMutable(), MemoryEffects::Write::get());
+void TPushOp::getEffects(SmallVectorImpl<SideEffects::EffectInstance<MemoryEffects::Effect>>& effects)
+{
+    addEffect(effects, &getTileMutable(), MemoryEffects::Read::get());
+    addEffect(effects, &getPipeHandleMutable(), MemoryEffects::Read::get());
+    addEffect(effects, &getPipeHandleMutable(), MemoryEffects::Write::get());
 }
 
-void TAllocOp::getEffects(
-    SmallVectorImpl<SideEffects::EffectInstance<MemoryEffects::Effect>>
-        &effects) {
-  addEffect(effects, &getEntryMutable(), MemoryEffects::Write::get());
-  addEffect(effects, &getPipeHandleMutable(), MemoryEffects::Read::get());
-  addEffect(effects, &getPipeHandleMutable(), MemoryEffects::Write::get());
+void TAllocOp::getEffects(SmallVectorImpl<SideEffects::EffectInstance<MemoryEffects::Effect>>& effects)
+{
+    addEffect(effects, &getEntryMutable(), MemoryEffects::Write::get());
+    addEffect(effects, &getPipeHandleMutable(), MemoryEffects::Read::get());
+    addEffect(effects, &getPipeHandleMutable(), MemoryEffects::Write::get());
 }
 
-void TPopOp::getEffects(
-    SmallVectorImpl<SideEffects::EffectInstance<MemoryEffects::Effect>>
-        &effects) {
-  addEffect(effects, &getPipeHandleMutable(), MemoryEffects::Read::get());
-  addEffect(effects, &getPipeHandleMutable(), MemoryEffects::Write::get());
-  addEffect(effects, &getTileMutable(), MemoryEffects::Write::get());
+void TPopOp::getEffects(SmallVectorImpl<SideEffects::EffectInstance<MemoryEffects::Effect>>& effects)
+{
+    addEffect(effects, &getPipeHandleMutable(), MemoryEffects::Read::get());
+    addEffect(effects, &getPipeHandleMutable(), MemoryEffects::Write::get());
+    addEffect(effects, &getTileMutable(), MemoryEffects::Write::get());
 }
 
-void TFreeOp::getEffects(
-    SmallVectorImpl<SideEffects::EffectInstance<MemoryEffects::Effect>>
-        &effects) {
-  auto entry = getEntryMutable();
-  if (!entry.empty())
-    addEffect(effects, &*entry.begin(), MemoryEffects::Read::get());
-  addEffect(effects, &getPipeHandleMutable(), MemoryEffects::Read::get());
-  addEffect(effects, &getPipeHandleMutable(), MemoryEffects::Write::get());
+void TFreeOp::getEffects(SmallVectorImpl<SideEffects::EffectInstance<MemoryEffects::Effect>>& effects)
+{
+    auto entry = getEntryMutable();
+    if (!entry.empty())
+        addEffect(effects, &*entry.begin(), MemoryEffects::Read::get());
+    addEffect(effects, &getPipeHandleMutable(), MemoryEffects::Read::get());
+    addEffect(effects, &getPipeHandleMutable(), MemoryEffects::Write::get());
 }

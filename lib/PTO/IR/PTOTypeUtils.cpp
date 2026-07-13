@@ -17,32 +17,34 @@ namespace {
 constexpr unsigned kBitsPerByte = 8;
 } // namespace
 
-bool mlir::pto::isPTOFloat8Type(Type t) {
-  return t.isFloat8E4M3() || t.isFloat8E4M3FN() || t.isFloat8E4M3FNUZ() ||
-         t.isFloat8E4M3B11FNUZ() || t.isFloat8E5M2() || t.isFloat8E5M2FNUZ();
+bool mlir::pto::isPTOFloat8Type(Type t)
+{
+    return t.isFloat8E4M3() || t.isFloat8E4M3FN() || t.isFloat8E4M3FNUZ() || t.isFloat8E4M3B11FNUZ() ||
+           t.isFloat8E5M2() || t.isFloat8E5M2FNUZ();
 }
 
 bool mlir::pto::isPTOHiFloat8Type(Type t) { return isa<HiF8Type>(t); }
 
-bool mlir::pto::isPTOFloat4PackedType(Type t) {
-  return isa<F4E1M2x2Type, F4E2M1x2Type>(t);
+bool mlir::pto::isPTOFloat4PackedType(Type t) { return isa<F4E1M2x2Type, F4E2M1x2Type>(t); }
+
+bool mlir::pto::isPTOLowPrecisionType(Type t)
+{
+    return isPTOFloat8Type(t) || isPTOHiFloat8Type(t) || isPTOFloat4PackedType(t);
 }
 
-bool mlir::pto::isPTOLowPrecisionType(Type t) {
-  return isPTOFloat8Type(t) || isPTOHiFloat8Type(t) || isPTOFloat4PackedType(t);
+unsigned mlir::pto::getPTOStorageElemBitWidth(Type t)
+{
+    if (isPTOLowPrecisionType(t))
+        return kBitsPerByte;
+    if (auto floatTy = dyn_cast<FloatType>(t))
+        return floatTy.getWidth();
+    if (auto intTy = dyn_cast<IntegerType>(t))
+        return intTy.getWidth();
+    return 0;
 }
 
-unsigned mlir::pto::getPTOStorageElemBitWidth(Type t) {
-  if (isPTOLowPrecisionType(t))
-    return kBitsPerByte;
-  if (auto floatTy = dyn_cast<FloatType>(t))
-    return floatTy.getWidth();
-  if (auto intTy = dyn_cast<IntegerType>(t))
-    return intTy.getWidth();
-  return 0;
-}
-
-unsigned mlir::pto::getPTOStorageElemByteSize(Type t) {
-  unsigned bitWidth = getPTOStorageElemBitWidth(t);
-  return bitWidth == 0 ? 0 : bitWidth / kBitsPerByte;
+unsigned mlir::pto::getPTOStorageElemByteSize(Type t)
+{
+    unsigned bitWidth = getPTOStorageElemBitWidth(t);
+    return bitWidth == 0 ? 0 : bitWidth / kBitsPerByte;
 }

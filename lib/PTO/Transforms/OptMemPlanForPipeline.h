@@ -21,36 +21,34 @@ namespace pto {
 
 class OptMemPlanForDma {
 public:
-  OptMemPlanForDma(){};
+    OptMemPlanForDma() {};
 
-  /// Main interface for OptMemPlanForDma.
-  void build(func::FuncOp func);
+    /// Main interface for OptMemPlanForDma.
+    void build(func::FuncOp func);
 
-  /// Check if buf1 and buf2 is dma and scalar pipe conflict.
-  bool BufferPipeConflict(const Value buf1, const Value buf2) const;
+    /// Check if buf1 and buf2 is dma and scalar pipe conflict.
+    bool BufferPipeConflict(const Value buf1, const Value buf2) const;
 
-  /// Is the current buffer used by DMA instructions.
-  bool IsDmaBuffer(const Value buf) const;
+    /// Is the current buffer used by DMA instructions.
+    bool IsDmaBuffer(const Value buf) const;
 
-  bool IsScalarBuffer(const Value buf) const;
+    bool IsScalarBuffer(const Value buf) const;
 
 private:
-  /// Update the buffers for MTE2 and MTE3.
-  void UpdateDmaBuffers(SmallVector<Value> dpsOperand);
+    /// Update the buffers for MTE2 and MTE3.
+    void UpdateDmaBuffers(SmallVector<Value> dpsOperand);
 
-  template <typename OP>
-  typename std::enable_if<std::is_same_v<OP, memref::LoadOp> ||
-                              std::is_same_v<OP, memref::StoreOp>,
-                          void>::type
-  UpdateScalarBuffers(OP op);
+    template <typename OP>
+    typename std::enable_if<std::is_same_v<OP, memref::LoadOp> || std::is_same_v<OP, memref::StoreOp>, void>::type
+    UpdateScalarBuffers(OP op);
 
-  void UpdateScalarBuffersForLowerToLoops(Operation *operands);
+    void UpdateScalarBuffersForLowerToLoops(Operation* operands);
 
-  /// Buffer in MTE2 and MTE3.
-  DenseSet<Value> DmaBuffers;
+    /// Buffer in MTE2 and MTE3.
+    DenseSet<Value> DmaBuffers;
 
-  /// Buffer in Scalar.
-  DenseSet<Value> ScalarBuffers;
+    /// Buffer in Scalar.
+    DenseSet<Value> ScalarBuffers;
 };
 } // namespace pto
 } // namespace mlir

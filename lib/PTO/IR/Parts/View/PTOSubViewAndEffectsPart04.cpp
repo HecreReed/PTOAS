@@ -12,101 +12,101 @@
 using namespace mlir;
 using namespace mlir::pto;
 
-void TColArgMaxOp::getEffects(
-    SmallVectorImpl<SideEffects::EffectInstance<MemoryEffects::Effect>> &effects) {
-  PTO_ADD_READ(effects, getSrcMutable());
-  PTO_ADD_WRITE(effects, getTmpMutable());
-  PTO_ADD_WRITE(effects, getDstMutable());
+void TColArgMaxOp::getEffects(SmallVectorImpl<SideEffects::EffectInstance<MemoryEffects::Effect>>& effects)
+{
+    PTO_ADD_READ(effects, getSrcMutable());
+    PTO_ADD_WRITE(effects, getTmpMutable());
+    PTO_ADD_WRITE(effects, getDstMutable());
 }
 
-void TColArgMinOp::getEffects(
-    SmallVectorImpl<SideEffects::EffectInstance<MemoryEffects::Effect>> &effects) {
-  PTO_ADD_READ(effects, getSrcMutable());
-  PTO_ADD_WRITE(effects, getTmpMutable());
-  PTO_ADD_WRITE(effects, getDstMutable());
+void TColArgMinOp::getEffects(SmallVectorImpl<SideEffects::EffectInstance<MemoryEffects::Effect>>& effects)
+{
+    PTO_ADD_READ(effects, getSrcMutable());
+    PTO_ADD_WRITE(effects, getTmpMutable());
+    PTO_ADD_WRITE(effects, getDstMutable());
 }
 
-void TColSumOp::getEffects(
-    SmallVectorImpl<SideEffects::EffectInstance<MemoryEffects::Effect>> &effects) {
-  PTO_ADD_READ(effects, getSrcMutable());
-  auto tmp = getTmpMutable();
-  if (!tmp.empty()) {
-    PTO_ADD_WRITE(effects, tmp[0]);
-  }
-  PTO_ADD_WRITE(effects, getDstMutable());
+void TColSumOp::getEffects(SmallVectorImpl<SideEffects::EffectInstance<MemoryEffects::Effect>>& effects)
+{
+    PTO_ADD_READ(effects, getSrcMutable());
+    auto tmp = getTmpMutable();
+    if (!tmp.empty()) {
+        PTO_ADD_WRITE(effects, tmp[0]);
+    }
+    PTO_ADD_WRITE(effects, getDstMutable());
 }
 
-void TCvtOp::getEffects(
-    SmallVectorImpl<SideEffects::EffectInstance<MemoryEffects::Effect>> &effects) {
-  PTO_ADD_READ(effects, getSrcMutable());
-  PTO_ADD_WRITE(effects, getDstMutable());
+void TCvtOp::getEffects(SmallVectorImpl<SideEffects::EffectInstance<MemoryEffects::Effect>>& effects)
+{
+    PTO_ADD_READ(effects, getSrcMutable());
+    PTO_ADD_WRITE(effects, getDstMutable());
 }
-void TRandomOp::getEffects(
-    SmallVectorImpl<SideEffects::EffectInstance<MemoryEffects::Effect>> &effects) {
-  PTO_ADD_WRITE(effects, getDstMutable());
+void TRandomOp::getEffects(SmallVectorImpl<SideEffects::EffectInstance<MemoryEffects::Effect>>& effects)
+{
+    PTO_ADD_WRITE(effects, getDstMutable());
 }
 PTO_DEFINE_BINARY_EFFECTS(TDivOp, getSrc0Mutable(), getSrc1Mutable(), getDstMutable())
 
 // TDIVS has custom assembly format; conservatively treat first 2 operands as reads.
-void TDivSOp::getEffects(
-    SmallVectorImpl<SideEffects::EffectInstance<MemoryEffects::Effect>> &effects) {
-  PTO_ADD_READ(effects, getSrcMutable());
-  PTO_ADD_READ(effects, getScalarMutable());
-  PTO_ADD_WRITE(effects, getDstMutable());
+void TDivSOp::getEffects(SmallVectorImpl<SideEffects::EffectInstance<MemoryEffects::Effect>>& effects)
+{
+    PTO_ADD_READ(effects, getSrcMutable());
+    PTO_ADD_READ(effects, getScalarMutable());
+    PTO_ADD_WRITE(effects, getDstMutable());
 }
 
 PTO_DEFINE_UNARY_EFFECTS(TExpOp, getSrcMutable(), getDstMutable())
 
 // TEXPANDS: Write(dst) (broadcast scalar)
-void TExpandsOp::getEffects(
-    SmallVectorImpl<SideEffects::EffectInstance<MemoryEffects::Effect>> &effects) {
-  PTO_ADD_WRITE(effects, getDstMutable());
+void TExpandsOp::getEffects(SmallVectorImpl<SideEffects::EffectInstance<MemoryEffects::Effect>>& effects)
+{
+    PTO_ADD_WRITE(effects, getDstMutable());
 }
 
 // TEXTRACT: Read(src) -> Write(dst)
-void TExtractOp::getEffects(
-    SmallVectorImpl<SideEffects::EffectInstance<MemoryEffects::Effect>> &effects) {
-  PTO_ADD_READ(effects, getSrcMutable());
-  PTO_ADD_WRITE(effects, getDstMutable());
+void TExtractOp::getEffects(SmallVectorImpl<SideEffects::EffectInstance<MemoryEffects::Effect>>& effects)
+{
+    PTO_ADD_READ(effects, getSrcMutable());
+    PTO_ADD_WRITE(effects, getDstMutable());
 }
 
 // TINSERT: Read(src) -> Write(dst)
-void TInsertOp::getEffects(
-    SmallVectorImpl<SideEffects::EffectInstance<MemoryEffects::Effect>> &effects) {
-  PTO_ADD_READ(effects, getSrcMutable());
-  PTO_ADD_WRITE(effects, getDstMutable());
+void TInsertOp::getEffects(SmallVectorImpl<SideEffects::EffectInstance<MemoryEffects::Effect>>& effects)
+{
+    PTO_ADD_READ(effects, getSrcMutable());
+    PTO_ADD_WRITE(effects, getDstMutable());
 }
 
 // TEXTRACT_FP: Read(src), Read(fp) -> Write(dst)
-void TExtractFPOp::getEffects(
-    SmallVectorImpl<SideEffects::EffectInstance<MemoryEffects::Effect>> &effects) {
-  PTO_ADD_READ(effects, getSrcMutable());
-  PTO_ADD_READ(effects, getFpMutable());
-  PTO_ADD_WRITE(effects, getDstMutable());
+void TExtractFPOp::getEffects(SmallVectorImpl<SideEffects::EffectInstance<MemoryEffects::Effect>>& effects)
+{
+    PTO_ADD_READ(effects, getSrcMutable());
+    PTO_ADD_READ(effects, getFpMutable());
+    PTO_ADD_WRITE(effects, getDstMutable());
 }
 
 // TINSERT_FP: Read(src), Read(fp) -> Write(dst)
-void TInsertFPOp::getEffects(
-    SmallVectorImpl<SideEffects::EffectInstance<MemoryEffects::Effect>> &effects) {
-  PTO_ADD_READ(effects, getSrcMutable());
-  PTO_ADD_READ(effects, getFpMutable());
-  PTO_ADD_WRITE(effects, getDstMutable());
+void TInsertFPOp::getEffects(SmallVectorImpl<SideEffects::EffectInstance<MemoryEffects::Effect>>& effects)
+{
+    PTO_ADD_READ(effects, getSrcMutable());
+    PTO_ADD_READ(effects, getFpMutable());
+    PTO_ADD_WRITE(effects, getDstMutable());
 }
 
 PTO_DEFINE_UNARY_EFFECTS(TFillPadOp, getSrcMutable(), getDstMutable())
 PTO_DEFINE_UNARY_EFFECTS(TFillPadExpandOp, getSrcMutable(), getDstMutable())
 PTO_DEFINE_UNARY_EFFECTS(TFillPadInplaceOp, getSrcMutable(), getDstMutable())
 
-void TGatherOp::getEffects(
-    SmallVectorImpl<SideEffects::EffectInstance<MemoryEffects::Effect>> &effects) {
-  PTO_ADD_READ(effects, getSrcMutable());
-  if (auto cdst = getCdstMutable(); !cdst.empty())
-    PTO_ADD_WRITE(effects, cdst[0]);
-  if (auto indices = getIndicesMutable(); !indices.empty())
-    PTO_ADD_READ(effects, indices[0]);
-  if (auto tmp = getTmpMutable(); !tmp.empty())
-    PTO_ADD_READ(effects, tmp[0]);
-  PTO_ADD_WRITE(effects, getDstMutable());
+void TGatherOp::getEffects(SmallVectorImpl<SideEffects::EffectInstance<MemoryEffects::Effect>>& effects)
+{
+    PTO_ADD_READ(effects, getSrcMutable());
+    if (auto cdst = getCdstMutable(); !cdst.empty())
+        PTO_ADD_WRITE(effects, cdst[0]);
+    if (auto indices = getIndicesMutable(); !indices.empty())
+        PTO_ADD_READ(effects, indices[0]);
+    if (auto tmp = getTmpMutable(); !tmp.empty())
+        PTO_ADD_READ(effects, tmp[0]);
+    PTO_ADD_WRITE(effects, getDstMutable());
 }
 
 PTO_DEFINE_BINARY_EFFECTS(TGatherBOp, getSrcMutable(), getOffsetsMutable(), getDstMutable())
@@ -120,21 +120,21 @@ PTO_DEFINE_UNARY_EFFECTS(TMinSOp, getSrcMutable(), getDstMutable())
 
 PTO_DEFINE_BINARY_EFFECTS(TMovFPOp, getSrcMutable(), getFpMutable(), getDstMutable())
 
-void TMrgSortOp::getEffects(
-    SmallVectorImpl<SideEffects::EffectInstance<MemoryEffects::Effect>> &effects) {
-  for (auto &opnd : getSrcsMutable()) {
-    PTO_ADD_READ(effects, opnd);
-  }
-  auto tmp = getTmpMutable();
-  if (!tmp.empty())
-    PTO_ADD_WRITE(effects, tmp[0]);
-  for (auto &opnd : getDstsMutable()) {
-    PTO_ADD_WRITE(effects, opnd);
-  }
-  auto executed = getExcutedMutable();
-  if (!executed.empty()) {
-    PTO_ADD_WRITE(effects, executed[0]);
-  }
+void TMrgSortOp::getEffects(SmallVectorImpl<SideEffects::EffectInstance<MemoryEffects::Effect>>& effects)
+{
+    for (auto& opnd : getSrcsMutable()) {
+        PTO_ADD_READ(effects, opnd);
+    }
+    auto tmp = getTmpMutable();
+    if (!tmp.empty())
+        PTO_ADD_WRITE(effects, tmp[0]);
+    for (auto& opnd : getDstsMutable()) {
+        PTO_ADD_WRITE(effects, opnd);
+    }
+    auto executed = getExcutedMutable();
+    if (!executed.empty()) {
+        PTO_ADD_WRITE(effects, executed[0]);
+    }
 }
 
 PTO_DEFINE_BINARY_EFFECTS(TMulOp, getSrc0Mutable(), getSrc1Mutable(), getDstMutable())
@@ -147,86 +147,84 @@ PTO_DEFINE_UNARY_EFFECTS(TOrSOp, getSrcMutable(), getDstMutable())
 PTO_DEFINE_BINARY_EFFECTS(TPartAddOp, getSrc0Mutable(), getSrc1Mutable(), getDstMutable())
 PTO_DEFINE_BINARY_EFFECTS(TPartMaxOp, getSrc0Mutable(), getSrc1Mutable(), getDstMutable())
 PTO_DEFINE_BINARY_EFFECTS(TPartMinOp, getSrc0Mutable(), getSrc1Mutable(), getDstMutable())
-void TPartArgMaxOp::getEffects(
-    SmallVectorImpl<SideEffects::EffectInstance<MemoryEffects::Effect>> &effects) {
-  PTO_ADD_READ(effects, getSrc0Mutable());
-  PTO_ADD_READ(effects, getSrc1Mutable());
-  PTO_ADD_READ(effects, getSrc0IdxMutable());
-  PTO_ADD_READ(effects, getSrc1IdxMutable());
-  PTO_ADD_WRITE(effects, getDstMutable());
-  PTO_ADD_WRITE(effects, getDstIdxMutable());
+void TPartArgMaxOp::getEffects(SmallVectorImpl<SideEffects::EffectInstance<MemoryEffects::Effect>>& effects)
+{
+    PTO_ADD_READ(effects, getSrc0Mutable());
+    PTO_ADD_READ(effects, getSrc1Mutable());
+    PTO_ADD_READ(effects, getSrc0IdxMutable());
+    PTO_ADD_READ(effects, getSrc1IdxMutable());
+    PTO_ADD_WRITE(effects, getDstMutable());
+    PTO_ADD_WRITE(effects, getDstIdxMutable());
 }
-void TPartArgMinOp::getEffects(
-    SmallVectorImpl<SideEffects::EffectInstance<MemoryEffects::Effect>> &effects) {
-  PTO_ADD_READ(effects, getSrc0Mutable());
-  PTO_ADD_READ(effects, getSrc1Mutable());
-  PTO_ADD_READ(effects, getSrc0IdxMutable());
-  PTO_ADD_READ(effects, getSrc1IdxMutable());
-  PTO_ADD_WRITE(effects, getDstMutable());
-  PTO_ADD_WRITE(effects, getDstIdxMutable());
+void TPartArgMinOp::getEffects(SmallVectorImpl<SideEffects::EffectInstance<MemoryEffects::Effect>>& effects)
+{
+    PTO_ADD_READ(effects, getSrc0Mutable());
+    PTO_ADD_READ(effects, getSrc1Mutable());
+    PTO_ADD_READ(effects, getSrc0IdxMutable());
+    PTO_ADD_READ(effects, getSrc1IdxMutable());
+    PTO_ADD_WRITE(effects, getDstMutable());
+    PTO_ADD_WRITE(effects, getDstIdxMutable());
 }
 PTO_DEFINE_BINARY_EFFECTS(TPartMulOp, getSrc0Mutable(), getSrc1Mutable(), getDstMutable())
 // TPRELU: Read(src0, src1) -> Write(tmp, dst)
-void TPReluOp::getEffects(
-    SmallVectorImpl<SideEffects::EffectInstance<MemoryEffects::Effect>> &effects) {
-  PTO_ADD_READ(effects, getSrc0Mutable());
-  PTO_ADD_READ(effects, getSrc1Mutable());
-  // A5 pto-isa TPRELU implementation does not consume tmp; modeling tmp as a
-  // write-only scratch on A5 incorrectly inflates local-memory planning and
-  // can trigger false vec-overflow diagnostics.
-  if (getTargetArch(getOperation()) != PTOArch::A5)
-    PTO_ADD_WRITE(effects, getTmpMutable());
-  PTO_ADD_WRITE(effects, getDstMutable());
+void TPReluOp::getEffects(SmallVectorImpl<SideEffects::EffectInstance<MemoryEffects::Effect>>& effects)
+{
+    PTO_ADD_READ(effects, getSrc0Mutable());
+    PTO_ADD_READ(effects, getSrc1Mutable());
+    // A5 pto-isa TPRELU implementation does not consume tmp; modeling tmp as a
+    // write-only scratch on A5 incorrectly inflates local-memory planning and
+    // can trigger false vec-overflow diagnostics.
+    if (getTargetArch(getOperation()) != PTOArch::A5)
+        PTO_ADD_WRITE(effects, getTmpMutable());
+    PTO_ADD_WRITE(effects, getDstMutable());
 }
 
-void TQuantOp::getEffects(
-    SmallVectorImpl<SideEffects::EffectInstance<MemoryEffects::Effect>> &effects) {
-  PTO_ADD_READ(effects, getSrcMutable());
-  PTO_ADD_READ(effects, getFpMutable());
-  auto offsetRange = getOffsetMutable();
-  if (!offsetRange.empty())
-    PTO_ADD_READ(effects, offsetRange[0]);
-  PTO_ADD_WRITE(effects, getDstMutable());
+void TQuantOp::getEffects(SmallVectorImpl<SideEffects::EffectInstance<MemoryEffects::Effect>>& effects)
+{
+    PTO_ADD_READ(effects, getSrcMutable());
+    PTO_ADD_READ(effects, getFpMutable());
+    auto offsetRange = getOffsetMutable();
+    if (!offsetRange.empty())
+        PTO_ADD_READ(effects, offsetRange[0]);
+    PTO_ADD_WRITE(effects, getDstMutable());
 }
-PTO_DEFINE_TERNARY_EFFECTS(TDequantOp, getSrcMutable(), getScaleMutable(),
-                           getOffsetMutable(), getDstMutable())
+PTO_DEFINE_TERNARY_EFFECTS(TDequantOp, getSrcMutable(), getScaleMutable(), getOffsetMutable(), getDstMutable())
 PTO_DEFINE_UNARY_EFFECTS(TRecipOp, getSrcMutable(), getDstMutable())
 PTO_DEFINE_UNARY_EFFECTS(TReluOp, getSrcMutable(), getDstMutable())
 PTO_DEFINE_BINARY_EFFECTS(TFModOp, getSrc0Mutable(), getSrc1Mutable(), getDstMutable())
 PTO_DEFINE_UNARY_EFFECTS(TFModSOp, getSrcMutable(), getDstMutable())
-void TRemOp::getEffects(
-    SmallVectorImpl<SideEffects::EffectInstance<MemoryEffects::Effect>> &effects) {
-  PTO_ADD_READ(effects, getSrc0Mutable());
-  PTO_ADD_READ(effects, getSrc1Mutable());
-  PTO_ADD_WRITE(effects, getTmpMutable());
-  PTO_ADD_WRITE(effects, getDstMutable());
+void TRemOp::getEffects(SmallVectorImpl<SideEffects::EffectInstance<MemoryEffects::Effect>>& effects)
+{
+    PTO_ADD_READ(effects, getSrc0Mutable());
+    PTO_ADD_READ(effects, getSrc1Mutable());
+    PTO_ADD_WRITE(effects, getTmpMutable());
+    PTO_ADD_WRITE(effects, getDstMutable());
 }
 
-void TRemSOp::getEffects(
-    SmallVectorImpl<SideEffects::EffectInstance<MemoryEffects::Effect>> &effects) {
-  PTO_ADD_READ(effects, getSrcMutable());
-  PTO_ADD_WRITE(effects, getTmpMutable());
-  PTO_ADD_WRITE(effects, getDstMutable());
+void TRemSOp::getEffects(SmallVectorImpl<SideEffects::EffectInstance<MemoryEffects::Effect>>& effects)
+{
+    PTO_ADD_READ(effects, getSrcMutable());
+    PTO_ADD_WRITE(effects, getTmpMutable());
+    PTO_ADD_WRITE(effects, getDstMutable());
 }
 PTO_DEFINE_UNARY_EFFECTS(TRowExpandOp, getSrcMutable(), getDstMutable())
 
-void TRowExpandDivOp::getEffects(
-    SmallVectorImpl<SideEffects::EffectInstance<MemoryEffects::Effect>> &effects) {
-  PTO_ADD_READ(effects, getSrc0Mutable());
-  PTO_ADD_READ(effects, getSrc1Mutable());
-  auto tmp = getTmpMutable();
-  if (!tmp.empty())
-    PTO_ADD_WRITE(effects, tmp[0]);
-  PTO_ADD_WRITE(effects, getDstMutable());
+void TRowExpandDivOp::getEffects(SmallVectorImpl<SideEffects::EffectInstance<MemoryEffects::Effect>>& effects)
+{
+    PTO_ADD_READ(effects, getSrc0Mutable());
+    PTO_ADD_READ(effects, getSrc1Mutable());
+    auto tmp = getTmpMutable();
+    if (!tmp.empty())
+        PTO_ADD_WRITE(effects, tmp[0]);
+    PTO_ADD_WRITE(effects, getDstMutable());
 }
 
-void TRowExpandMulOp::getEffects(
-    SmallVectorImpl<SideEffects::EffectInstance<MemoryEffects::Effect>> &effects) {
-  PTO_ADD_READ(effects, getSrc0Mutable());
-  PTO_ADD_READ(effects, getSrc1Mutable());
-  auto tmp = getTmpMutable();
-  if (!tmp.empty())
-    PTO_ADD_WRITE(effects, tmp[0]);
-  PTO_ADD_WRITE(effects, getDstMutable());
+void TRowExpandMulOp::getEffects(SmallVectorImpl<SideEffects::EffectInstance<MemoryEffects::Effect>>& effects)
+{
+    PTO_ADD_READ(effects, getSrc0Mutable());
+    PTO_ADD_READ(effects, getSrc1Mutable());
+    auto tmp = getTmpMutable();
+    if (!tmp.empty())
+        PTO_ADD_WRITE(effects, tmp[0]);
+    PTO_ADD_WRITE(effects, getDstMutable());
 }
-

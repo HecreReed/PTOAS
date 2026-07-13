@@ -12,50 +12,49 @@
 using namespace mlir;
 using namespace mlir::pto;
 
-LogicalResult mlir::pto::SyncWaitOp::verify() {
-  bool hasStatic = getEventIdAttr() != nullptr;
-  bool hasDynamic = static_cast<bool>(getEventIdDyn());
-  if (hasStatic == hasDynamic)
-    return emitOpError()
-           << "expects exactly one event-id form: static attr or dynamic index operand";
+LogicalResult mlir::pto::SyncWaitOp::verify()
+{
+    bool hasStatic = getEventIdAttr() != nullptr;
+    bool hasDynamic = static_cast<bool>(getEventIdDyn());
+    if (hasStatic == hasDynamic)
+        return emitOpError() << "expects exactly one event-id form: static attr or dynamic index operand";
 
-  auto verifyA2A3 = []() -> LogicalResult { return success(); };
-  auto verifyA5 = [this]() -> LogicalResult {
-    switch (getPipe().getPipe()) {
-    case PIPE::PIPE_FIX:
-    case PIPE::PIPE_MTE1:
-    case PIPE::PIPE_MTE2:
-    case PIPE::PIPE_MTE3:
-    case PIPE::PIPE_V:
-      return success();
-    default:
-      return emitOpError() << "A5 sync.wait expects pipe to be one of "
-                              "<PIPE_FIX>, <PIPE_MTE1>, <PIPE_MTE2>, "
-                              "<PIPE_MTE3>, <PIPE_V>";
-    }
-  };
-  return dispatchVerifierByArch(getOperation(), verifyA2A3, verifyA5);
+    auto verifyA2A3 = []() -> LogicalResult { return success(); };
+    auto verifyA5 = [this]() -> LogicalResult {
+        switch (getPipe().getPipe()) {
+            case PIPE::PIPE_FIX:
+            case PIPE::PIPE_MTE1:
+            case PIPE::PIPE_MTE2:
+            case PIPE::PIPE_MTE3:
+            case PIPE::PIPE_V:
+                return success();
+            default:
+                return emitOpError() << "A5 sync.wait expects pipe to be one of "
+                                        "<PIPE_FIX>, <PIPE_MTE1>, <PIPE_MTE2>, "
+                                        "<PIPE_MTE3>, <PIPE_V>";
+        }
+    };
+    return dispatchVerifierByArch(getOperation(), verifyA2A3, verifyA5);
 }
 
-LogicalResult TStoreOp::verify() {
-  bool hasPreQuant = static_cast<bool>(getPreQuantScalar());
-  auto reluMode = getReluPreMode();
+LogicalResult TStoreOp::verify()
+{
+    bool hasPreQuant = static_cast<bool>(getPreQuantScalar());
+    auto reluMode = getReluPreMode();
 
-  auto verifyA2A3 = [this, hasPreQuant, reluMode]() -> LogicalResult {
-    auto common =
-        verifyTStoreCommon(*this, getSrc(), getDst(), /*allowLowPrecision=*/false);
-    if (failed(common))
-      return failure();
-    return verifyTStoreA2A3(*this, *common, hasPreQuant, reluMode);
-  };
+    auto verifyA2A3 = [this, hasPreQuant, reluMode]() -> LogicalResult {
+        auto common = verifyTStoreCommon(*this, getSrc(), getDst(), /*allowLowPrecision=*/false);
+        if (failed(common))
+            return failure();
+        return verifyTStoreA2A3(*this, *common, hasPreQuant, reluMode);
+    };
 
-  auto verifyA5 = [this, hasPreQuant, reluMode]() -> LogicalResult {
-    auto common =
-        verifyTStoreCommon(*this, getSrc(), getDst(), /*allowLowPrecision=*/true);
-    if (failed(common))
-      return failure();
-    return verifyTStoreA5(*this, *common, hasPreQuant, reluMode);
-  };
+    auto verifyA5 = [this, hasPreQuant, reluMode]() -> LogicalResult {
+        auto common = verifyTStoreCommon(*this, getSrc(), getDst(), /*allowLowPrecision=*/true);
+        if (failed(common))
+            return failure();
+        return verifyTStoreA5(*this, *common, hasPreQuant, reluMode);
+    };
 
-  return dispatchVerifierByArch(getOperation(), verifyA2A3, verifyA5);
+    return dispatchVerifierByArch(getOperation(), verifyA2A3, verifyA5);
 }

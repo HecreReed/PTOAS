@@ -28,7 +28,6 @@ namespace ptobc {
 /// into an MLIR module.
 ///
 /// Throws std::runtime_error on malformed input.
-mlir::OwningOpRef<mlir::ModuleOp>
-decodePTOBCToModule(llvm::ArrayRef<uint8_t> fileBytes, mlir::MLIRContext &ctx);
+mlir::OwningOpRef<mlir::ModuleOp> decodePTOBCToModule(llvm::ArrayRef<uint8_t> fileBytes, mlir::MLIRContext& ctx);
 
 } // namespace ptobc

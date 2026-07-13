@@ -57,663 +57,671 @@ constexpr uint8_t kCmpPredicateSleEncoding = 3;
 constexpr uint8_t kCmpPredicateSgtEncoding = 4;
 constexpr uint8_t kCmpPredicateSgeEncoding = 5;
 
-using NamedAttributeVector =
-    llvm::SmallVector<mlir::NamedAttribute, kNamedAttributeInlineCapacity>;
+using NamedAttributeVector = llvm::SmallVector<mlir::NamedAttribute, kNamedAttributeInlineCapacity>;
 using DigitBuffer = llvm::SmallVector<char, kDigitInlineCapacity>;
 using WordVector = llvm::SmallVector<uint64_t, kWordInlineCapacity>;
-using FunctionVector = llvm::SmallVector<mlir::func::FuncOp,
-                                         kFunctionInlineCapacity>;
+using FunctionVector = llvm::SmallVector<mlir::func::FuncOp, kFunctionInlineCapacity>;
 
 } // namespace
 
-static uint64_t internType(PTOBCFile& f, mlir::Type t) {
-  std::string s = printType(t);
-  f.strings.intern(s);
-  // type ids are 1-based
-  for (size_t i = 0; i < f.typeAsm.size(); ++i) {
-    if (f.typeAsm[i] == s) return i + 1;
-  }
-  f.typeAsm.push_back(s);
-  return f.typeAsm.size();
+static uint64_t internType(PTOBCFile& f, mlir::Type t)
+{
+    std::string s = printType(t);
+    f.strings.intern(s);
+    // type ids are 1-based
+    for (size_t i = 0; i < f.typeAsm.size(); ++i) {
+        if (f.typeAsm[i] == s)
+            return i + 1;
+    }
+    f.typeAsm.push_back(s);
+    return f.typeAsm.size();
 }
 
-static mlir::DictionaryAttr stripAttrs(mlir::MLIRContext *ctx,
-                                       mlir::DictionaryAttr dict,
-                                       llvm::ArrayRef<llvm::StringRef> keys) {
-  if (!dict || dict.empty() || keys.empty())
-    return dict;
+static mlir::DictionaryAttr stripAttrs(
+    mlir::MLIRContext* ctx, mlir::DictionaryAttr dict, llvm::ArrayRef<llvm::StringRef> keys)
+{
+    if (!dict || dict.empty() || keys.empty())
+        return dict;
 
-  NamedAttributeVector keep;
-  keep.reserve(dict.size());
-  for (auto na : dict) {
-    if (llvm::is_contained(keys, na.getName().getValue()))
-      continue;
-    keep.push_back(na);
-  }
-  if (keep.size() == dict.size())
-    return dict;
-  return mlir::DictionaryAttr::get(ctx, keep);
+    NamedAttributeVector keep;
+    keep.reserve(dict.size());
+    for (auto na : dict) {
+        if (llvm::is_contained(keys, na.getName().getValue()))
+            continue;
+        keep.push_back(na);
+    }
+    if (keep.size() == dict.size())
+        return dict;
+    return mlir::DictionaryAttr::get(ctx, keep);
 }
 
 static mlir::DictionaryAttr stripKnownImmediateAttrs(
-    mlir::MLIRContext *ctx, mlir::DictionaryAttr dict,
-    const ptobc::v0::OpInfo &info) {
-  switch (info.imm_kind) {
-  case 0x01:
-    return stripAttrs(ctx, dict, {"predicate"});
-  case 0x02:
-    return stripAttrs(ctx, dict, {"src_op", "dst_op", "event_id"});
-  case 0x05:
-    return stripAttrs(ctx, dict, {"value"});
-  default:
-    return dict;
-  }
+    mlir::MLIRContext* ctx, mlir::DictionaryAttr dict, const ptobc::v0::OpInfo& info)
+{
+    switch (info.imm_kind) {
+        case 0x01:
+            return stripAttrs(ctx, dict, {"predicate"});
+        case 0x02:
+            return stripAttrs(ctx, dict, {"src_op", "dst_op", "event_id"});
+        case 0x05:
+            return stripAttrs(ctx, dict, {"value"});
+        default:
+            return dict;
+    }
 }
 
-static uint64_t internAttr(PTOBCFile& f, mlir::DictionaryAttr dict) {
-  if (!dict || dict.empty()) return 0;
-  std::string s = printAttrDict(dict);
-  f.strings.intern(s);
-  for (size_t i = 0; i < f.attrAsm.size(); ++i) {
-    if (f.attrAsm[i] == s) return i + 1;
-  }
-  f.attrAsm.push_back(s);
-  return f.attrAsm.size();
+static uint64_t internAttr(PTOBCFile& f, mlir::DictionaryAttr dict)
+{
+    if (!dict || dict.empty())
+        return 0;
+    std::string s = printAttrDict(dict);
+    f.strings.intern(s);
+    for (size_t i = 0; i < f.attrAsm.size(); ++i) {
+        if (f.attrAsm[i] == s)
+            return i + 1;
+    }
+    f.attrAsm.push_back(s);
+    return f.attrAsm.size();
 }
 
-static std::string hexFloatLiteral(mlir::FloatAttr a) {
-  DigitBuffer digits;
-  llvm::APInt bits = a.getValue().bitcastToAPInt();
-  bits.toString(digits, /*Radix=*/kHexadecimalRadix, /*Signed=*/false,
-                /*formatAsCLiteral=*/true);
-  return std::string(digits.data(), digits.size());
+static std::string hexFloatLiteral(mlir::FloatAttr a)
+{
+    DigitBuffer digits;
+    llvm::APInt bits = a.getValue().bitcastToAPInt();
+    bits.toString(
+        digits, /*Radix=*/kHexadecimalRadix, /*Signed=*/false,
+        /*formatAsCLiteral=*/true);
+    return std::string(digits.data(), digits.size());
 }
 
-static std::string apIntToSignedDecimal(const llvm::APInt &v) {
-  DigitBuffer digits;
-  v.toString(digits, /*Radix=*/kDecimalRadix, /*Signed=*/true,
-             /*formatAsCLiteral=*/false);
-  return std::string(digits.data(), digits.size());
+static std::string apIntToSignedDecimal(const llvm::APInt& v)
+{
+    DigitBuffer digits;
+    v.toString(
+        digits, /*Radix=*/kDecimalRadix, /*Signed=*/true,
+        /*formatAsCLiteral=*/false);
+    return std::string(digits.data(), digits.size());
 }
 
-static WordVector copyAPIntWords(const llvm::APInt &bits) {
-  return WordVector(bits.getRawData(), bits.getRawData() + bits.getNumWords());
+static WordVector copyAPIntWords(const llvm::APInt& bits)
+{
+    return WordVector(bits.getRawData(), bits.getRawData() + bits.getNumWords());
 }
 
-static void appendAPIntBytesLE(Buffer &buffer, const llvm::APInt &bits) {
-  const unsigned byteLen = (bits.getBitWidth() + 7) / 8;
-  writeULEB128(byteLen, buffer.bytes);
+static void appendAPIntBytesLE(Buffer& buffer, const llvm::APInt& bits)
+{
+    const unsigned byteLen = (bits.getBitWidth() + 7) / 8;
+    writeULEB128(byteLen, buffer.bytes);
 
-  WordVector words = copyAPIntWords(bits);
-  for (unsigned i = 0; i < byteLen; ++i) {
-    unsigned word = i / 8;
-    unsigned off = (i % 8) * 8;
-    uint8_t byte = uint8_t((words[word] >> off) & 0xFFu);
-    buffer.bytes.push_back(byte);
-  }
+    WordVector words = copyAPIntWords(bits);
+    for (unsigned i = 0; i < byteLen; ++i) {
+        unsigned word = i / 8;
+        unsigned off = (i % 8) * 8;
+        uint8_t byte = uint8_t((words[word] >> off) & 0xFFu);
+        buffer.bytes.push_back(byte);
+    }
 }
 
-static std::optional<std::string>
-buildScalarConstantDebugName(mlir::Value value,
-                             std::unordered_map<std::string, int> &constCounts) {
-  auto cst = llvm::dyn_cast_or_null<mlir::arith::ConstantOp>(
-      value.getDefiningOp());
-  if (!cst)
-    return std::nullopt;
+static std::optional<std::string> buildScalarConstantDebugName(
+    mlir::Value value, std::unordered_map<std::string, int>& constCounts)
+{
+    auto cst = llvm::dyn_cast_or_null<mlir::arith::ConstantOp>(value.getDefiningOp());
+    if (!cst)
+        return std::nullopt;
 
-  mlir::Attribute attr = cst.getValue();
-  std::string typeName = printType(value.getType());
-  std::string baseName;
-  if (auto floatAttr = llvm::dyn_cast<mlir::FloatAttr>(attr)) {
-    baseName = "c" + hexFloatLiteral(floatAttr) + "_" + typeName;
-  } else if (auto intAttr = llvm::dyn_cast<mlir::IntegerAttr>(attr)) {
-    baseName = "c" + apIntToSignedDecimal(intAttr.getValue());
-    if (typeName != "index")
-      baseName += "_" + typeName;
-  } else {
-    return std::nullopt;
-  }
+    mlir::Attribute attr = cst.getValue();
+    std::string typeName = printType(value.getType());
+    std::string baseName;
+    if (auto floatAttr = llvm::dyn_cast<mlir::FloatAttr>(attr)) {
+        baseName = "c" + hexFloatLiteral(floatAttr) + "_" + typeName;
+    } else if (auto intAttr = llvm::dyn_cast<mlir::IntegerAttr>(attr)) {
+        baseName = "c" + apIntToSignedDecimal(intAttr.getValue());
+        if (typeName != "index")
+            baseName += "_" + typeName;
+    } else {
+        return std::nullopt;
+    }
 
-  int &count = constCounts[baseName];
-  std::string name = baseName;
-  if (count > 0)
-    name += "_" + std::to_string(count);
-  ++count;
-  return name;
+    int& count = constCounts[baseName];
+    std::string name = baseName;
+    if (count > 0)
+        name += "_" + std::to_string(count);
+    ++count;
+    return name;
 }
 
 struct Encoder {
-  PTOBCFile file;
+    PTOBCFile file;
 
-  bool emitDebugInfo = false;
-  bool allowGeneric = false;
+    bool emitDebugInfo = false;
+    bool allowGeneric = false;
 
-  // constpool dedup: key is raw bytes: tag + payload
-  std::unordered_map<std::string, uint64_t> constIdByKey;
+    // constpool dedup: key is raw bytes: tag + payload
+    std::unordered_map<std::string, uint64_t> constIdByKey;
 
-  // Per-function numbering state.
-  uint64_t funcId = 0;
-  uint64_t nextOpId = 0;
-  llvm::DenseMap<mlir::Value, uint64_t> valueId;
-  std::vector<mlir::Value> valueById;
+    // Per-function numbering state.
+    uint64_t funcId = 0;
+    uint64_t nextOpId = 0;
+    llvm::DenseMap<mlir::Value, uint64_t> valueId;
+    std::vector<mlir::Value> valueById;
 
-  // Module-wide debug file table state.
-  std::unordered_map<std::string, uint64_t> dbgFileIdByPath;
+    // Module-wide debug file table state.
+    std::unordered_map<std::string, uint64_t> dbgFileIdByPath;
 
-  uint64_t getValueId(mlir::Value v) {
-    auto it = valueId.find(v);
-    if (it == valueId.end()) {
-      throw std::runtime_error("operand references undefined value");
+    uint64_t getValueId(mlir::Value v)
+    {
+        auto it = valueId.find(v);
+        if (it == valueId.end()) {
+            throw std::runtime_error("operand references undefined value");
+        }
+        return it->second;
     }
-    return it->second;
-  }
 
-  uint64_t allocValueId(mlir::Value v) {
-    uint64_t id = valueId.size();
-    auto [it, inserted] = valueId.try_emplace(v, id);
-    if (!inserted) throw std::runtime_error("value already has an id");
-    valueById.push_back(v);
-    return it->second;
-  }
-
-  uint64_t internDbgFile(llvm::StringRef path) {
-    auto p = path.str();
-    auto it = dbgFileIdByPath.find(p);
-    if (it != dbgFileIdByPath.end()) return it->second;
-
-    uint64_t sid = file.strings.intern(p);
-    uint64_t fileId = file.dbgFiles.size();
-    file.dbgFiles.push_back(DebugFileEntry{sid, /*hashKind=*/0, {}});
-    dbgFileIdByPath.emplace(std::move(p), fileId);
-    return fileId;
-  }
-
-  void recordOpLocation(uint64_t opId, mlir::Operation &op) {
-    if (!emitDebugInfo) return;
-    auto loc = op.getLoc();
-    auto flc = llvm::dyn_cast<mlir::FileLineColLoc>(loc);
-    if (!flc) return;
-
-    uint64_t fileId = internDbgFile(flc.getFilename().getValue());
-    uint64_t sl = flc.getLine();
-    uint64_t sc = flc.getColumn();
-    uint64_t el = sl;
-    uint64_t ec = sc + 1; // point-range
-
-    file.dbgLocations.push_back(DebugLocationEntry{funcId, opId, fileId, sl, sc, el, ec});
-  }
-
-  void finalizeValueNamesForFunction() {
-    if (!emitDebugInfo) return;
-    // Deterministic value names for DebugInfo.
-    std::unordered_map<std::string, int> constCounts;
-
-    for (uint64_t vid = 0; vid < valueById.size(); ++vid) {
-      uint64_t nameSid = file.strings.intern(
-          buildScalarConstantDebugName(valueById[vid], constCounts)
-              .value_or(std::to_string(vid)));
-      file.dbgValueNames.push_back(DebugValueNameEntry{funcId, vid, nameSid});
+    uint64_t allocValueId(mlir::Value v)
+    {
+        uint64_t id = valueId.size();
+        auto [it, inserted] = valueId.try_emplace(v, id);
+        if (!inserted)
+            throw std::runtime_error("value already has an id");
+        valueById.push_back(v);
+        return it->second;
     }
-  }
 
-  uint64_t internConst(uint8_t tag, const std::vector<uint8_t> &payload) {
-    std::string key;
-    key.resize(1 + payload.size());
-    key[0] = char(tag);
-    if (!payload.empty()) {
-      std::copy(payload.begin(), payload.end(), key.begin() + 1);
+    uint64_t internDbgFile(llvm::StringRef path)
+    {
+        auto p = path.str();
+        auto it = dbgFileIdByPath.find(p);
+        if (it != dbgFileIdByPath.end())
+            return it->second;
+
+        uint64_t sid = file.strings.intern(p);
+        uint64_t fileId = file.dbgFiles.size();
+        file.dbgFiles.push_back(DebugFileEntry{sid, /*hashKind=*/0, {}});
+        dbgFileIdByPath.emplace(std::move(p), fileId);
+        return fileId;
     }
-    auto it = constIdByKey.find(key);
-    if (it != constIdByKey.end()) return it->second;
-    uint64_t id = file.consts.size();
-    file.consts.push_back(ConstEntry{tag, payload});
-    constIdByKey.emplace(std::move(key), id);
-    return id;
-  }
 
-  uint64_t internConstInt64(uint64_t typeId, int64_t value) {
-    Buffer p;
-    writeULEB128(typeId, p.bytes);
-    writeSLEB128(value, p.bytes);
-    return internConst(/*tag=*/0x01, p.bytes);
-  }
+    void recordOpLocation(uint64_t opId, mlir::Operation& op)
+    {
+        if (!emitDebugInfo)
+            return;
+        auto loc = op.getLoc();
+        auto flc = llvm::dyn_cast<mlir::FileLineColLoc>(loc);
+        if (!flc)
+            return;
 
-  uint64_t internConstBits(uint8_t tag, uint64_t typeId,
-                           const llvm::APInt &bits) {
-    Buffer p;
-    writeULEB128(typeId, p.bytes);
-    appendAPIntBytesLE(p, bits);
-    return internConst(tag, p.bytes);
-  }
+        uint64_t fileId = internDbgFile(flc.getFilename().getValue());
+        uint64_t sl = flc.getLine();
+        uint64_t sc = flc.getColumn();
+        uint64_t el = sl;
+        uint64_t ec = sc + 1; // point-range
 
-  uint64_t internConstIntBits(uint64_t typeId, const llvm::APInt &bits) {
-    return internConstBits(/*tag=*/0x04, typeId, bits);
-  }
+        file.dbgLocations.push_back(DebugLocationEntry{funcId, opId, fileId, sl, sc, el, ec});
+    }
 
-  uint64_t internConstFloatBits(uint64_t dtypeId, const llvm::APInt &bits) {
-    return internConstBits(/*tag=*/0x02, dtypeId, bits);
-  }
+    void finalizeValueNamesForFunction()
+    {
+        if (!emitDebugInfo)
+            return;
+        // Deterministic value names for DebugInfo.
+        std::unordered_map<std::string, int> constCounts;
 
-  uint64_t encodeConstantOpImmediate(mlir::arith::ConstantOp cst);
+        for (uint64_t vid = 0; vid < valueById.size(); ++vid) {
+            uint64_t nameSid = file.strings.intern(
+                buildScalarConstantDebugName(valueById[vid], constCounts).value_or(std::to_string(vid)));
+            file.dbgValueNames.push_back(DebugValueNameEntry{funcId, vid, nameSid});
+        }
+    }
 
-  void resetForFunction(uint64_t fid) {
-    funcId = fid;
-    nextOpId = 0;
-    valueId.clear();
-    valueById.clear();
-  }
+    uint64_t internConst(uint8_t tag, const std::vector<uint8_t>& payload)
+    {
+        std::string key;
+        key.resize(1 + payload.size());
+        key[0] = char(tag);
+        if (!payload.empty()) {
+            std::copy(payload.begin(), payload.end(), key.begin() + 1);
+        }
+        auto it = constIdByKey.find(key);
+        if (it != constIdByKey.end())
+            return it->second;
+        uint64_t id = file.consts.size();
+        file.consts.push_back(ConstEntry{tag, payload});
+        constIdByKey.emplace(std::move(key), id);
+        return id;
+    }
 
-  void encodeKnownOpImmediates(mlir::Operation &op, Buffer &out,
-                               const ptobc::v0::OpInfo &info,
-                               const ptobc::v0::OpcodeAndVariant &variantInfo,
-                               llvm::SmallVectorImpl<uint64_t> &imms);
-  void encodeKnownOpOperands(mlir::Operation &op, Buffer &out,
-                             const ptobc::v0::OpInfo &info,
-                             const ptobc::v0::OpcodeAndVariant &variantInfo,
-                             llvm::ArrayRef<uint64_t> imms);
-  void encodeKnownOp(mlir::Operation &op, Buffer &out,
-                     const ptobc::v0::OpInfo &info,
-                     const ptobc::v0::OpcodeAndVariant &variantInfo);
-  void encodeGenericOp(mlir::Operation &op, Buffer &out);
-  void encodeRegion(mlir::Region& region, Buffer& out);
-  void encodeBlock(mlir::Block& block, Buffer& out);
-  void encodeOp(mlir::Operation& op, Buffer& out);
+    uint64_t internConstInt64(uint64_t typeId, int64_t value)
+    {
+        Buffer p;
+        writeULEB128(typeId, p.bytes);
+        writeSLEB128(value, p.bytes);
+        return internConst(/*tag=*/0x01, p.bytes);
+    }
+
+    uint64_t internConstBits(uint8_t tag, uint64_t typeId, const llvm::APInt& bits)
+    {
+        Buffer p;
+        writeULEB128(typeId, p.bytes);
+        appendAPIntBytesLE(p, bits);
+        return internConst(tag, p.bytes);
+    }
+
+    uint64_t internConstIntBits(uint64_t typeId, const llvm::APInt& bits)
+    {
+        return internConstBits(/*tag=*/0x04, typeId, bits);
+    }
+
+    uint64_t internConstFloatBits(uint64_t dtypeId, const llvm::APInt& bits)
+    {
+        return internConstBits(/*tag=*/0x02, dtypeId, bits);
+    }
+
+    uint64_t encodeConstantOpImmediate(mlir::arith::ConstantOp cst);
+
+    void resetForFunction(uint64_t fid)
+    {
+        funcId = fid;
+        nextOpId = 0;
+        valueId.clear();
+        valueById.clear();
+    }
+
+    void encodeKnownOpImmediates(
+        mlir::Operation& op, Buffer& out, const ptobc::v0::OpInfo& info, const ptobc::v0::OpcodeAndVariant& variantInfo,
+        llvm::SmallVectorImpl<uint64_t>& imms);
+    void encodeKnownOpOperands(
+        mlir::Operation& op, Buffer& out, const ptobc::v0::OpInfo& info, const ptobc::v0::OpcodeAndVariant& variantInfo,
+        llvm::ArrayRef<uint64_t> imms);
+    void encodeKnownOp(
+        mlir::Operation& op, Buffer& out, const ptobc::v0::OpInfo& info,
+        const ptobc::v0::OpcodeAndVariant& variantInfo);
+    void encodeGenericOp(mlir::Operation& op, Buffer& out);
+    void encodeRegion(mlir::Region& region, Buffer& out);
+    void encodeBlock(mlir::Block& block, Buffer& out);
+    void encodeOp(mlir::Operation& op, Buffer& out);
 };
 
-void Encoder::encodeRegion(mlir::Region& region, Buffer& out) {
-  writeULEB128(region.getBlocks().size(), out.bytes);
-  for (auto& block : region.getBlocks()) {
-    encodeBlock(block, out);
-  }
+void Encoder::encodeRegion(mlir::Region& region, Buffer& out)
+{
+    writeULEB128(region.getBlocks().size(), out.bytes);
+    for (auto& block : region.getBlocks()) {
+        encodeBlock(block, out);
+    }
 }
 
-void Encoder::encodeBlock(mlir::Block& block, Buffer& out) {
-  // block args
-  writeULEB128(block.getNumArguments(), out.bytes);
-  for (auto arg : block.getArguments()) {
-    writeULEB128(internType(file, arg.getType()), out.bytes);
-    allocValueId(arg);
-  }
+void Encoder::encodeBlock(mlir::Block& block, Buffer& out)
+{
+    // block args
+    writeULEB128(block.getNumArguments(), out.bytes);
+    for (auto arg : block.getArguments()) {
+        writeULEB128(internType(file, arg.getType()), out.bytes);
+        allocValueId(arg);
+    }
 
-  // ops count
-  size_t opCount = 0;
-  for (auto& op : block.getOperations()) (void)op, ++opCount;
-  writeULEB128(opCount, out.bytes);
+    // ops count
+    size_t opCount = 0;
+    for (auto& op : block.getOperations())
+        (void)op, ++opCount;
+    writeULEB128(opCount, out.bytes);
 
-  for (auto& op : block.getOperations()) {
-    encodeOp(op, out);
-  }
+    for (auto& op : block.getOperations()) {
+        encodeOp(op, out);
+    }
 }
 
-static uint8_t encodeCmpIPredicate(mlir::arith::CmpIPredicate predicate) {
-  switch (predicate) {
-  case mlir::arith::CmpIPredicate::eq:
-    return kCmpPredicateEqEncoding;
-  case mlir::arith::CmpIPredicate::ne:
-    return kCmpPredicateNeEncoding;
-  case mlir::arith::CmpIPredicate::slt:
-    return kCmpPredicateSltEncoding;
-  case mlir::arith::CmpIPredicate::sle:
-    return kCmpPredicateSleEncoding;
-  case mlir::arith::CmpIPredicate::sgt:
-    return kCmpPredicateSgtEncoding;
-  case mlir::arith::CmpIPredicate::sge:
-    return kCmpPredicateSgeEncoding;
-  default:
-    throw std::runtime_error(
-        "unsupported arith.cmpi predicate (v0 supports only eq/ne/slt/sle/sgt/sge)");
-  }
+static uint8_t encodeCmpIPredicate(mlir::arith::CmpIPredicate predicate)
+{
+    switch (predicate) {
+        case mlir::arith::CmpIPredicate::eq:
+            return kCmpPredicateEqEncoding;
+        case mlir::arith::CmpIPredicate::ne:
+            return kCmpPredicateNeEncoding;
+        case mlir::arith::CmpIPredicate::slt:
+            return kCmpPredicateSltEncoding;
+        case mlir::arith::CmpIPredicate::sle:
+            return kCmpPredicateSleEncoding;
+        case mlir::arith::CmpIPredicate::sgt:
+            return kCmpPredicateSgtEncoding;
+        case mlir::arith::CmpIPredicate::sge:
+            return kCmpPredicateSgeEncoding;
+        default:
+            throw std::runtime_error("unsupported arith.cmpi predicate (v0 supports only eq/ne/slt/sle/sgt/sge)");
+    }
 }
 
-uint64_t Encoder::encodeConstantOpImmediate(mlir::arith::ConstantOp cst) {
-  mlir::Attribute attr = cst.getValue();
-  uint64_t typeId = internType(file, cst.getType());
-  if (auto intAttr = llvm::dyn_cast<mlir::IntegerAttr>(attr)) {
-    const llvm::APInt &value = intAttr.getValue();
-    return value.getBitWidth() <= kMaxInlineIntegerImmediateBits
-               ? internConstInt64(typeId, value.getSExtValue())
-               : internConstIntBits(typeId, value);
-  }
-  if (auto floatAttr = llvm::dyn_cast<mlir::FloatAttr>(attr)) {
-    return internConstFloatBits(typeId, floatAttr.getValue().bitcastToAPInt());
-  }
-  throw std::runtime_error(
-      "unsupported arith.constant attribute kind for compact v0");
+uint64_t Encoder::encodeConstantOpImmediate(mlir::arith::ConstantOp cst)
+{
+    mlir::Attribute attr = cst.getValue();
+    uint64_t typeId = internType(file, cst.getType());
+    if (auto intAttr = llvm::dyn_cast<mlir::IntegerAttr>(attr)) {
+        const llvm::APInt& value = intAttr.getValue();
+        return value.getBitWidth() <= kMaxInlineIntegerImmediateBits ? internConstInt64(typeId, value.getSExtValue()) :
+                                                                       internConstIntBits(typeId, value);
+    }
+    if (auto floatAttr = llvm::dyn_cast<mlir::FloatAttr>(attr)) {
+        return internConstFloatBits(typeId, floatAttr.getValue().bitcastToAPInt());
+    }
+    throw std::runtime_error("unsupported arith.constant attribute kind for compact v0");
 }
 
-static void appendListModeAndSizes(Buffer &out, llvm::SmallVectorImpl<uint64_t> &imms,
-                                   size_t firstSize, size_t secondSize) {
-  uint8_t listMode = 0;
-  out.appendU8(listMode);
-  writeULEB128(firstSize, out.bytes);
-  writeULEB128(secondSize, out.bytes);
-  imms.append({listMode, uint64_t(firstSize), uint64_t(secondSize)});
+static void appendListModeAndSizes(
+    Buffer& out, llvm::SmallVectorImpl<uint64_t>& imms, size_t firstSize, size_t secondSize)
+{
+    uint8_t listMode = 0;
+    out.appendU8(listMode);
+    writeULEB128(firstSize, out.bytes);
+    writeULEB128(secondSize, out.bytes);
+    imms.append({listMode, uint64_t(firstSize), uint64_t(secondSize)});
 }
 
 void Encoder::encodeKnownOpImmediates(
-    mlir::Operation &op, Buffer &out, const ptobc::v0::OpInfo &info,
-    const ptobc::v0::OpcodeAndVariant &variantInfo,
-    llvm::SmallVectorImpl<uint64_t> &imms) {
-  switch (info.imm_kind) {
-  case 0x00:
-    return;
-  case 0x01: {
-    auto cmp = llvm::dyn_cast<mlir::arith::CmpIOp>(&op);
-    if (!cmp)
-      throw std::runtime_error("imm_kind=cmpi_pred but op is not arith.cmpi");
-    uint8_t predicate = encodeCmpIPredicate(cmp.getPredicate());
-    out.appendU8(predicate);
-    imms.push_back(predicate);
-    return;
-  }
-  case 0x02: {
-    auto src = op.getAttrOfType<mlir::pto::SyncOpTypeAttr>("src_op");
-    auto dst = op.getAttrOfType<mlir::pto::SyncOpTypeAttr>("dst_op");
-    auto event = op.getAttrOfType<mlir::pto::EventAttr>("event_id");
-    if (!src || !dst || !event)
-      throw std::runtime_error("event op missing src_op/dst_op/event_id attrs");
-    uint8_t srcValue = uint8_t(src.getOpType());
-    uint8_t dstValue = uint8_t(dst.getOpType());
-    uint8_t eventValue = uint8_t(event.getEvent());
-    out.appendU8(srcValue);
-    out.appendU8(dstValue);
-    out.appendU8(eventValue);
-    imms.append({srcValue, dstValue, eventValue});
-    return;
-  }
-  case 0x05: {
-    auto cst = llvm::dyn_cast<mlir::arith::ConstantOp>(&op);
-    if (!cst)
-      throw std::runtime_error("imm_kind=const_id but op is not arith.constant");
-    uint64_t constId = encodeConstantOpImmediate(cst);
-    writeULEB128(constId, out.bytes);
-    imms.push_back(constId);
-    return;
-  }
-  case 0x06: {
-    auto mtv = llvm::dyn_cast<mlir::pto::MakeTensorViewOp>(&op);
-    if (!mtv)
-      throw std::runtime_error(
-          "imm_kind=make_tensor_view but op is not pto.make_tensor_view");
-    appendListModeAndSizes(out, imms, mtv.getShape().size(),
-                           mtv.getStrides().size());
-    return;
-  }
-  case 0x07: {
-    auto pv = llvm::dyn_cast<mlir::pto::PartitionViewOp>(&op);
-    if (!pv)
-      throw std::runtime_error(
-          "imm_kind=partition_view but op is not pto.partition_view");
-    appendListModeAndSizes(out, imms, pv.getOffsets().size(),
-                           pv.getSizes().size());
-    return;
-  }
-  case 0x08: {
-    auto at = llvm::dyn_cast<mlir::pto::AllocTileOp>(&op);
-    if (!at)
-      throw std::runtime_error(
-          "imm_kind=alloc_tile but op is not pto.alloc_tile");
-    uint8_t mask = 0;
-    if (at.getValidRow())
-      mask |= 0x1;
-    if (at.getValidCol())
-      mask |= 0x2;
-    out.appendU8(mask);
-    imms.push_back(mask);
-    return;
-  }
-  default:
-    (void)variantInfo;
-    throw std::runtime_error("unknown imm_kind in v0 schema");
-  }
+    mlir::Operation& op, Buffer& out, const ptobc::v0::OpInfo& info, const ptobc::v0::OpcodeAndVariant& variantInfo,
+    llvm::SmallVectorImpl<uint64_t>& imms)
+{
+    switch (info.imm_kind) {
+        case 0x00:
+            return;
+        case 0x01: {
+            auto cmp = llvm::dyn_cast<mlir::arith::CmpIOp>(&op);
+            if (!cmp)
+                throw std::runtime_error("imm_kind=cmpi_pred but op is not arith.cmpi");
+            uint8_t predicate = encodeCmpIPredicate(cmp.getPredicate());
+            out.appendU8(predicate);
+            imms.push_back(predicate);
+            return;
+        }
+        case 0x02: {
+            auto src = op.getAttrOfType<mlir::pto::SyncOpTypeAttr>("src_op");
+            auto dst = op.getAttrOfType<mlir::pto::SyncOpTypeAttr>("dst_op");
+            auto event = op.getAttrOfType<mlir::pto::EventAttr>("event_id");
+            if (!src || !dst || !event)
+                throw std::runtime_error("event op missing src_op/dst_op/event_id attrs");
+            uint8_t srcValue = uint8_t(src.getOpType());
+            uint8_t dstValue = uint8_t(dst.getOpType());
+            uint8_t eventValue = uint8_t(event.getEvent());
+            out.appendU8(srcValue);
+            out.appendU8(dstValue);
+            out.appendU8(eventValue);
+            imms.append({srcValue, dstValue, eventValue});
+            return;
+        }
+        case 0x05: {
+            auto cst = llvm::dyn_cast<mlir::arith::ConstantOp>(&op);
+            if (!cst)
+                throw std::runtime_error("imm_kind=const_id but op is not arith.constant");
+            uint64_t constId = encodeConstantOpImmediate(cst);
+            writeULEB128(constId, out.bytes);
+            imms.push_back(constId);
+            return;
+        }
+        case 0x06: {
+            auto mtv = llvm::dyn_cast<mlir::pto::MakeTensorViewOp>(&op);
+            if (!mtv)
+                throw std::runtime_error("imm_kind=make_tensor_view but op is not pto.make_tensor_view");
+            appendListModeAndSizes(out, imms, mtv.getShape().size(), mtv.getStrides().size());
+            return;
+        }
+        case 0x07: {
+            auto pv = llvm::dyn_cast<mlir::pto::PartitionViewOp>(&op);
+            if (!pv)
+                throw std::runtime_error("imm_kind=partition_view but op is not pto.partition_view");
+            appendListModeAndSizes(out, imms, pv.getOffsets().size(), pv.getSizes().size());
+            return;
+        }
+        case 0x08: {
+            auto at = llvm::dyn_cast<mlir::pto::AllocTileOp>(&op);
+            if (!at)
+                throw std::runtime_error("imm_kind=alloc_tile but op is not pto.alloc_tile");
+            uint8_t mask = 0;
+            if (at.getValidRow())
+                mask |= 0x1;
+            if (at.getValidCol())
+                mask |= 0x2;
+            out.appendU8(mask);
+            imms.push_back(mask);
+            return;
+        }
+        default:
+            (void)variantInfo;
+            throw std::runtime_error("unknown imm_kind in v0 schema");
+    }
 }
 
 void Encoder::encodeKnownOpOperands(
-    mlir::Operation &op, Buffer &out, const ptobc::v0::OpInfo &info,
-    const ptobc::v0::OpcodeAndVariant &variantInfo,
-    llvm::ArrayRef<uint64_t> imms) {
-  auto emitOperands = [this, &op, &out](size_t count) {
-    if (op.getNumOperands() != count) {
-      throw std::runtime_error("operand count mismatch for op: " +
-                               op.getName().getStringRef().str());
-    }
-    for (auto value : op.getOperands())
-      writeULEB128(getValueId(value), out.bytes);
-  };
-  auto emitLegacyIndexedTscatterOperands =
-      [this, &op, &out, &variantInfo]() {
-    auto tscatter = llvm::dyn_cast<mlir::pto::TScatterOp>(&op);
-    if (!tscatter || tscatter.getMaskPatternAttr() ||
-        variantInfo.opcode != 0x1056) {
-      return false;
-    }
-    if (op.getNumOperands() != 3) {
-      throw std::runtime_error("operand count mismatch for op: " +
-                               op.getName().getStringRef().str());
-    }
-    // Preserve the historical v0 wire layout for indexed tscatter
-    //   (src, indexes, dst)
-    writeULEB128(getValueId(tscatter.getSrc()), out.bytes);
-    writeULEB128(getValueId(tscatter.getIndexes()), out.bytes);
-    writeULEB128(getValueId(tscatter.getDst()), out.bytes);
-    return true;
-  };
+    mlir::Operation& op, Buffer& out, const ptobc::v0::OpInfo& info, const ptobc::v0::OpcodeAndVariant& variantInfo,
+    llvm::ArrayRef<uint64_t> imms)
+{
+    auto emitOperands = [this, &op, &out](size_t count) {
+        if (op.getNumOperands() != count) {
+            throw std::runtime_error("operand count mismatch for op: " + op.getName().getStringRef().str());
+        }
+        for (auto value : op.getOperands())
+            writeULEB128(getValueId(value), out.bytes);
+    };
+    auto emitLegacyIndexedTscatterOperands = [this, &op, &out, &variantInfo]() {
+        auto tscatter = llvm::dyn_cast<mlir::pto::TScatterOp>(&op);
+        if (!tscatter || tscatter.getMaskPatternAttr() || variantInfo.opcode != 0x1056) {
+            return false;
+        }
+        if (op.getNumOperands() != 3) {
+            throw std::runtime_error("operand count mismatch for op: " + op.getName().getStringRef().str());
+        }
+        // Preserve the historical v0 wire layout for indexed tscatter
+        //   (src, indexes, dst)
+        writeULEB128(getValueId(tscatter.getSrc()), out.bytes);
+        writeULEB128(getValueId(tscatter.getIndexes()), out.bytes);
+        writeULEB128(getValueId(tscatter.getDst()), out.bytes);
+        return true;
+    };
 
-  switch (info.operand_mode) {
-  case 0x00:
-    if (emitLegacyIndexedTscatterOperands())
-      return;
-    emitOperands(info.num_operands);
-    return;
-  case 0x01: {
-    auto count =
-        ptobc::v0::lookupOperandsByVariant(variantInfo.opcode, variantInfo.variant);
-    if (!count)
-      throw std::runtime_error("missing by-variant operand count");
-    emitOperands(*count);
-    return;
-  }
-  case 0x02:
-    writeULEB128(op.getNumOperands(), out.bytes);
-    for (auto value : op.getOperands())
-      writeULEB128(getValueId(value), out.bytes);
-    return;
-  case 0x03: {
-    if (imms.size() < kSegmentedOperandImmediateCount)
-      throw std::runtime_error("segmented operands missing immediates");
-    if (imms[0] != 0)
-      throw std::runtime_error(
-          "list_mode=1 not implemented in ptobc encoder yet");
-    emitOperands(size_t(info.num_operands) + size_t(imms[1]) + size_t(imms[2]));
-    return;
-  }
-  case 0x04: {
-    if (imms.empty())
-      throw std::runtime_error("optmask operands missing immediate");
-    uint8_t mask = uint8_t(imms.front());
-    emitOperands((((mask & 0x1U) != 0U) ? 1U : 0U) +
-                 (((mask & 0x2U) != 0U) ? 1U : 0U));
-    return;
-  }
-  default:
-    throw std::runtime_error("unknown operand_mode in v0 schema");
-  }
+    switch (info.operand_mode) {
+        case 0x00:
+            if (emitLegacyIndexedTscatterOperands())
+                return;
+            emitOperands(info.num_operands);
+            return;
+        case 0x01: {
+            auto count = ptobc::v0::lookupOperandsByVariant(variantInfo.opcode, variantInfo.variant);
+            if (!count)
+                throw std::runtime_error("missing by-variant operand count");
+            emitOperands(*count);
+            return;
+        }
+        case 0x02:
+            writeULEB128(op.getNumOperands(), out.bytes);
+            for (auto value : op.getOperands())
+                writeULEB128(getValueId(value), out.bytes);
+            return;
+        case 0x03: {
+            if (imms.size() < kSegmentedOperandImmediateCount)
+                throw std::runtime_error("segmented operands missing immediates");
+            if (imms[0] != 0)
+                throw std::runtime_error("list_mode=1 not implemented in ptobc encoder yet");
+            emitOperands(size_t(info.num_operands) + size_t(imms[1]) + size_t(imms[2]));
+            return;
+        }
+        case 0x04: {
+            if (imms.empty())
+                throw std::runtime_error("optmask operands missing immediate");
+            uint8_t mask = uint8_t(imms.front());
+            emitOperands((((mask & 0x1U) != 0U) ? 1U : 0U) + (((mask & 0x2U) != 0U) ? 1U : 0U));
+            return;
+        }
+        default:
+            throw std::runtime_error("unknown operand_mode in v0 schema");
+    }
 }
 
-void Encoder::encodeKnownOp(mlir::Operation &op, Buffer &out,
-                            const ptobc::v0::OpInfo &info,
-                            const ptobc::v0::OpcodeAndVariant &variantInfo) {
-  for (auto result : op.getResults())
-    allocValueId(result);
-
-  out.appendU16LE(variantInfo.opcode);
-  mlir::DictionaryAttr dict = op.getAttrDictionary();
-  dict = stripKnownImmediateAttrs(op.getContext(), dict, info);
-  writeULEB128(internAttr(file, dict), out.bytes);
-  if (info.has_variant_u8 != 0)
-    out.appendU8(variantInfo.variant);
-
-  WordVector imms;
-  encodeKnownOpImmediates(op, out, info, variantInfo, imms);
-  encodeKnownOpOperands(op, out, info, variantInfo, imms);
-  if (info.result_type_mode == 0x01) {
-    if (op.getNumResults() != info.num_results) {
-      throw std::runtime_error("result count mismatch for op: " +
-                               op.getName().getStringRef().str());
-    }
+void Encoder::encodeKnownOp(
+    mlir::Operation& op, Buffer& out, const ptobc::v0::OpInfo& info, const ptobc::v0::OpcodeAndVariant& variantInfo)
+{
     for (auto result : op.getResults())
-      writeULEB128(internType(file, result.getType()), out.bytes);
-  } else if (info.result_type_mode == 0x02) {
+        allocValueId(result);
+
+    out.appendU16LE(variantInfo.opcode);
+    mlir::DictionaryAttr dict = op.getAttrDictionary();
+    dict = stripKnownImmediateAttrs(op.getContext(), dict, info);
+    writeULEB128(internAttr(file, dict), out.bytes);
+    if (info.has_variant_u8 != 0)
+        out.appendU8(variantInfo.variant);
+
+    WordVector imms;
+    encodeKnownOpImmediates(op, out, info, variantInfo, imms);
+    encodeKnownOpOperands(op, out, info, variantInfo, imms);
+    if (info.result_type_mode == 0x01) {
+        if (op.getNumResults() != info.num_results) {
+            throw std::runtime_error("result count mismatch for op: " + op.getName().getStringRef().str());
+        }
+        for (auto result : op.getResults())
+            writeULEB128(internType(file, result.getType()), out.bytes);
+    } else if (info.result_type_mode == 0x02) {
+        writeULEB128(op.getNumResults(), out.bytes);
+        for (auto result : op.getResults())
+            writeULEB128(internType(file, result.getType()), out.bytes);
+    } else if (info.result_type_mode != 0x00) {
+        throw std::runtime_error("unknown result_type_mode in v0 schema");
+    }
+
+    if (op.getNumRegions() != info.num_regions) {
+        throw std::runtime_error("region count mismatch for op: " + op.getName().getStringRef().str());
+    }
+    for (auto& region : op.getRegions())
+        encodeRegion(region, out);
+}
+
+void Encoder::encodeGenericOp(mlir::Operation& op, Buffer& out)
+{
+    out.appendU16LE(kOpcodeGeneric);
+    writeULEB128(internAttr(file, op.getAttrDictionary()), out.bytes);
+
+    auto opNameSid = file.strings.intern(op.getName().getStringRef().str());
+    writeULEB128(opNameSid, out.bytes);
+
     writeULEB128(op.getNumResults(), out.bytes);
-    for (auto result : op.getResults())
-      writeULEB128(internType(file, result.getType()), out.bytes);
-  } else if (info.result_type_mode != 0x00) {
-    throw std::runtime_error("unknown result_type_mode in v0 schema");
-  }
+    for (auto result : op.getResults()) {
+        allocValueId(result);
+        writeULEB128(internType(file, result.getType()), out.bytes);
+    }
 
-  if (op.getNumRegions() != info.num_regions) {
-    throw std::runtime_error("region count mismatch for op: " +
-                             op.getName().getStringRef().str());
-  }
-  for (auto &region : op.getRegions())
-    encodeRegion(region, out);
+    writeULEB128(op.getNumOperands(), out.bytes);
+    for (auto operand : op.getOperands())
+        writeULEB128(getValueId(operand), out.bytes);
+
+    writeULEB128(op.getNumRegions(), out.bytes);
+    for (auto& region : op.getRegions())
+        encodeRegion(region, out);
 }
 
-void Encoder::encodeGenericOp(mlir::Operation &op, Buffer &out) {
-  out.appendU16LE(kOpcodeGeneric);
-  writeULEB128(internAttr(file, op.getAttrDictionary()), out.bytes);
+void Encoder::encodeOp(mlir::Operation& op, Buffer& out)
+{
+    if (emitDebugInfo) {
+        uint64_t opId = nextOpId++;
+        recordOpLocation(opId, op);
+    }
 
-  auto opNameSid = file.strings.intern(op.getName().getStringRef().str());
-  writeULEB128(opNameSid, out.bytes);
+    auto fullName = op.getName().getStringRef();
+    if (auto tscatter = llvm::dyn_cast<mlir::pto::TScatterOp>(&op)) {
+        uint16_t opcode = tscatter.getMaskPatternAttr() ? ptobc::v0::kTscatterMaskOpcode : uint16_t(0x1056);
+        auto variantInfo = ptobc::v0::OpcodeAndVariant{opcode, /*hasVariant=*/0, /*variant=*/0};
+        const auto* info = ptobc::v0::lookupByOpcode(opcode);
+        if (!info)
+            throw std::runtime_error("missing v0 opcode schema for op: " + fullName.str());
+        encodeKnownOp(op, out, *info, variantInfo);
+        return;
+    }
 
-  writeULEB128(op.getNumResults(), out.bytes);
-  for (auto result : op.getResults()) {
-    allocValueId(result);
-    writeULEB128(internType(file, result.getType()), out.bytes);
-  }
+    auto variantInfo = ptobc::v0::lookupOpcodeAndVariantByFullName(fullName);
+    if (variantInfo) {
+        const auto* info = ptobc::v0::lookupByOpcode(variantInfo->opcode);
+        if (!info)
+            throw std::runtime_error("missing v0 opcode schema for op: " + fullName.str());
+        encodeKnownOp(op, out, *info, *variantInfo);
+        return;
+    }
 
-  writeULEB128(op.getNumOperands(), out.bytes);
-  for (auto operand : op.getOperands())
-    writeULEB128(getValueId(operand), out.bytes);
-
-  writeULEB128(op.getNumRegions(), out.bytes);
-  for (auto &region : op.getRegions())
-    encodeRegion(region, out);
+    if (!allowGeneric) {
+        throw std::runtime_error(
+            "op is not in v0 opcode table (and PTOBC_ALLOW_GENERIC is not set): " + fullName.str());
+    }
+    encodeGenericOp(op, out);
 }
 
-void Encoder::encodeOp(mlir::Operation& op, Buffer& out) {
-  if (emitDebugInfo) {
-    uint64_t opId = nextOpId++;
-    recordOpLocation(opId, op);
-  }
+PTOBCFile encodeFromMLIRModule(mlir::ModuleOp module)
+{
+    Encoder enc;
+    enc.emitDebugInfo = (std::getenv("PTOBC_EMIT_DEBUGINFO") != nullptr);
+    enc.allowGeneric = (std::getenv("PTOBC_ALLOW_GENERIC") != nullptr);
 
-  auto fullName = op.getName().getStringRef();
-  if (auto tscatter = llvm::dyn_cast<mlir::pto::TScatterOp>(&op)) {
-    uint16_t opcode = tscatter.getMaskPatternAttr()
-                          ? ptobc::v0::kTscatterMaskOpcode
-                          : uint16_t(0x1056);
-    auto variantInfo =
-        ptobc::v0::OpcodeAndVariant{opcode, /*hasVariant=*/0, /*variant=*/0};
-    const auto *info = ptobc::v0::lookupByOpcode(opcode);
-    if (!info)
-      throw std::runtime_error("missing v0 opcode schema for op: " +
-                               fullName.str());
-    encodeKnownOp(op, out, *info, variantInfo);
-    return;
-  }
+    // Pre-intern a few common strings to stabilize ids.
+    enc.file.strings.intern("func.func");
+    enc.file.strings.intern("func.return");
 
-  auto variantInfo = ptobc::v0::lookupOpcodeAndVariantByFullName(fullName);
-  if (variantInfo) {
-    const auto *info = ptobc::v0::lookupByOpcode(variantInfo->opcode);
-    if (!info)
-      throw std::runtime_error("missing v0 opcode schema for op: " +
-                               fullName.str());
-    encodeKnownOp(op, out, *info, *variantInfo);
-    return;
-  }
+    // MODULE encoding
+    Buffer m;
+    // profile_id=0 (unspecified), index_width=64
+    m.appendU8(0);
+    m.appendU8(kDefaultModuleIndexWidth);
 
-  if (!allowGeneric) {
-    throw std::runtime_error(
-        "op is not in v0 opcode table (and PTOBC_ALLOW_GENERIC is not set): " +
-        fullName.str());
-  }
-  encodeGenericOp(op, out);
+    // module_attr_id
+    uint64_t modAttrId = internAttr(enc.file, module->getAttrDictionary());
+    writeULEB128(modAttrId, m.bytes);
+
+    // globals count
+    writeULEB128(0, m.bytes);
+
+    // function decls (top-level order)
+    FunctionVector funcs;
+    for (auto f : module.getOps<mlir::func::FuncOp>()) {
+        funcs.push_back(f);
+    }
+
+    writeULEB128(funcs.size(), m.bytes);
+
+    // encode decls
+    for (auto f : funcs) {
+        auto nameSid = enc.file.strings.intern(f.getName().str());
+        // func type as opaque asm in type table
+        auto funcTypeId = internType(enc.file, f.getFunctionType());
+        // flags: bit0 import? (0)
+        uint8_t flags = 0;
+        auto funcAttrId = internAttr(enc.file, f->getAttrDictionary());
+
+        writeULEB128(nameSid, m.bytes);
+        writeULEB128(funcTypeId, m.bytes);
+        m.appendU8(flags);
+        writeULEB128(funcAttrId, m.bytes);
+    }
+
+    // bodies: for each function, encode its body region
+    for (size_t i = 0; i < funcs.size(); ++i) {
+        auto f = funcs[i];
+        enc.resetForFunction(i);
+
+        // function body is region #0
+        enc.encodeRegion(f.getBody(), m);
+
+        // DebugInfo: deterministic value names for this function.
+        enc.finalizeValueNamesForFunction();
+    }
+
+    enc.file.moduleBytes = std::move(m.bytes);
+    return enc.file;
 }
 
-PTOBCFile encodeFromMLIRModule(mlir::ModuleOp module) {
-  Encoder enc;
-  enc.emitDebugInfo = (std::getenv("PTOBC_EMIT_DEBUGINFO") != nullptr);
-  enc.allowGeneric = (std::getenv("PTOBC_ALLOW_GENERIC") != nullptr);
-
-  // Pre-intern a few common strings to stabilize ids.
-  enc.file.strings.intern("func.func");
-  enc.file.strings.intern("func.return");
-
-  // MODULE encoding
-  Buffer m;
-  // profile_id=0 (unspecified), index_width=64
-  m.appendU8(0);
-  m.appendU8(kDefaultModuleIndexWidth);
-
-  // module_attr_id
-  uint64_t modAttrId = internAttr(enc.file, module->getAttrDictionary());
-  writeULEB128(modAttrId, m.bytes);
-
-  // globals count
-  writeULEB128(0, m.bytes);
-
-  // function decls (top-level order)
-  FunctionVector funcs;
-  for (auto f : module.getOps<mlir::func::FuncOp>()) {
-    funcs.push_back(f);
-  }
-
-  writeULEB128(funcs.size(), m.bytes);
-
-  // encode decls
-  for (auto f : funcs) {
-    auto nameSid = enc.file.strings.intern(f.getName().str());
-    // func type as opaque asm in type table
-    auto funcTypeId = internType(enc.file, f.getFunctionType());
-    // flags: bit0 import? (0)
-    uint8_t flags = 0;
-    auto funcAttrId = internAttr(enc.file, f->getAttrDictionary());
-
-    writeULEB128(nameSid, m.bytes);
-    writeULEB128(funcTypeId, m.bytes);
-    m.appendU8(flags);
-    writeULEB128(funcAttrId, m.bytes);
-  }
-
-  // bodies: for each function, encode its body region
-  for (size_t i = 0; i < funcs.size(); ++i) {
-    auto f = funcs[i];
-    enc.resetForFunction(i);
-
-    // function body is region #0
-    enc.encodeRegion(f.getBody(), m);
-
-    // DebugInfo: deterministic value names for this function.
-    enc.finalizeValueNamesForFunction();
-  }
-
-  enc.file.moduleBytes = std::move(m.bytes);
-  return enc.file;
-}
-
-mlir::OwningOpRef<mlir::ModuleOp> parsePTOFile(mlir::MLIRContext& ctx, const std::string& path) {
-  llvm::SourceMgr sm;
-  std::string err;
-  auto file = mlir::openInputFile(path, &err);
-  if (!file) {
-    throw std::runtime_error("failed to open input: " + path + (err.empty() ? "" : (": " + err)));
-  }
-  sm.AddNewSourceBuffer(std::move(file), llvm::SMLoc());
-  auto module = mlir::parseSourceFile<mlir::ModuleOp>(sm, &ctx);
-  if (!module) {
-    throw std::runtime_error("failed to parse MLIR file: " + path);
-  }
-  return module;
+mlir::OwningOpRef<mlir::ModuleOp> parsePTOFile(mlir::MLIRContext& ctx, const std::string& path)
+{
+    llvm::SourceMgr sm;
+    std::string err;
+    auto file = mlir::openInputFile(path, &err);
+    if (!file) {
+        throw std::runtime_error("failed to open input: " + path + (err.empty() ? "" : (": " + err)));
+    }
+    sm.AddNewSourceBuffer(std::move(file), llvm::SMLoc());
+    auto module = mlir::parseSourceFile<mlir::ModuleOp>(sm, &ctx);
+    if (!module) {
+        throw std::runtime_error("failed to parse MLIR file: " + path);
+    }
+    return module;
 }
 
 } // namespace ptobc

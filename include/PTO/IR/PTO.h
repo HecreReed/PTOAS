@@ -45,7 +45,7 @@
 //===----------------------------------------------------------------------===//
 // PTO Interfaces
 //===----------------------------------------------------------------------===//
- 
+
 #include "PTO/IR/PTOInterfaces.h.inc"
 
 //===----------------------------------------------------------------------===//
@@ -84,38 +84,36 @@ AddressSpaceAttr getPTOAddressSpaceAttr(Type type);
 bool isScalarPtrOrMemRef(Type type);
 
 enum class PTOArch {
-  A3,
-  A5,
+    A3,
+    A5,
 };
 
 /// Resolve the effective PTO target architecture from module-level IR state.
 PTOArch getTargetArch(ModuleOp module);
-PTOArch getTargetArch(Operation *op);
+PTOArch getTargetArch(Operation* op);
 bool isTargetArchA3(ModuleOp module);
 bool isTargetArchA5(ModuleOp module);
-bool isTargetArchA3(Operation *op);
-bool isTargetArchA5(Operation *op);
+bool isTargetArchA3(Operation* op);
+bool isTargetArchA5(Operation* op);
 
 enum class PTOParserTargetArch {
-  Unspecified,
-  A3,
-  A5,
+    Unspecified,
+    A3,
+    A5,
 };
 
-void setPTOParserTargetArch(MLIRContext *context, PTOParserTargetArch arch);
-PTOParserTargetArch getPTOParserTargetArch(MLIRContext *context);
+void setPTOParserTargetArch(MLIRContext* context, PTOParserTargetArch arch);
+PTOParserTargetArch getPTOParserTargetArch(MLIRContext* context);
 
 class ScopedPTOParserTargetArch {
 public:
-  explicit ScopedPTOParserTargetArch(MLIRContext *context,
-                                     PTOParserTargetArch arch);
-  ~ScopedPTOParserTargetArch();
+    explicit ScopedPTOParserTargetArch(MLIRContext* context, PTOParserTargetArch arch);
+    ~ScopedPTOParserTargetArch();
 
 private:
-  MLIRContext *context;
-  PTOParserTargetArch previousArch;
+    MLIRContext* context;
+    PTOParserTargetArch previousArch;
 };
-
 
 /// Function attribute that marks an explicit PTO kernel entry.
 inline constexpr llvm::StringLiteral kPTOEntryAttrName = "pto.entry";
