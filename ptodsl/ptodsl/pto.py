@@ -112,7 +112,7 @@ from ._ops import (             # noqa: F401
     vci, vaddc, vaddcs, vmull, vbitsort, vmrgsort4,
     copy_ubuf_to_ubuf, load_scalar, store_scalar,
     vadds, vsubs, vmuls, vmaxs, vmins, vlrelu,
-    vaxpy, vaddrelu, vsubrelu,
+    vaxpy, vmula, vaddrelu, vsubrelu,
     vsel,
     make_tensor_view, partition_view,
     alloc_buffer, alloc_tile,
