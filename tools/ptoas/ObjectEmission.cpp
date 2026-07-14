@@ -524,6 +524,17 @@ static bool compileCppDeviceSourceToFatobj(
                               "C++ fatobj compilation");
 }
 
+static std::string resolveHostTargetCPU() {
+  if (const char *envCPU = std::getenv("PTOAS_HOST_TARGET_CPU")) {
+    if (envCPU[0] != '\0')
+      return std::string(envCPU);
+  }
+  std::string hostCPU = llvm::sys::getHostCPUName().str();
+  if (hostCPU == "znver4" || hostCPU == "znver5")
+    return "znver3";
+  return hostCPU;
+}
+
 static bool compileHostStubToObject(llvm::StringRef stubPath,
                                     llvm::StringRef outObjPath,
                                     llvm::StringRef moduleId,
@@ -535,6 +546,7 @@ static bool compileHostStubToObject(llvm::StringRef stubPath,
   std::string coverageDir = ".";
   std::string debugDir = ".";
   std::string hostTriple = llvm::sys::getProcessTriple();
+  std::string hostTargetCPU = resolveHostTargetCPU();
 
   llvm::SmallVector<std::string, 32> args = {
       toolchain.bishengCc1Path,
@@ -542,7 +554,7 @@ static bool compileHostStubToObject(llvm::StringRef stubPath,
       "-triple",
       hostTriple,
       "-target-cpu",
-      llvm::sys::getHostCPUName().str(),
+      hostTargetCPU,
       "-fcce-aicpu-legacy-launch",
       "-fcce-is-host",
       "-cce-enable-mix",
