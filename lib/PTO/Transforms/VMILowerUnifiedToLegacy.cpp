@@ -414,13 +414,9 @@ static LogicalResult lowerVCvt(VMICvtOp op, OpBuilder &builder) {
   if (direction == "widen_fp") {
     result = builder.create<VMIExtFOp>(loc, resultType, source).getResult();
   } else if (direction == "narrow_fp") {
-    // Do not forward VMI rounding (A/H/Z) onto TruncF for fp8 destinations:
-    // VPTO pto.vcvt for f32→f8e4m3 expects rnd="R". Leaving rounding null lets
-    // getTruncFRoundModeForResult select the legal token. Saturate is not on
-    // TruncF; VPTO patterns commonly emit SAT for fp8.
+    StringAttr roundingAttr = op.getRoundingAttr();
     result =
-        builder.create<VMITruncFOp>(loc, resultType, source,
-                                    /*rounding=*/StringAttr())
+        builder.create<VMITruncFOp>(loc, resultType, source, roundingAttr)
             .getResult();
   } else if (direction == "fptosi") {
     result =

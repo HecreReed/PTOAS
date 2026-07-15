@@ -6352,7 +6352,7 @@ struct PTOSyncSetToEmitC : public OpConversionPattern<mlir::pto::SyncSetOp> {
     return success();
   }
 
-  PTOArch targetArch; // local build: GCC rejects [[maybe_unused]] on members under -Werror
+  [[maybe_unused]] PTOArch targetArch;
 };
 
 struct PTOSyncWaitToEmitC : public OpConversionPattern<mlir::pto::SyncWaitOp> {
@@ -6387,7 +6387,7 @@ struct PTOSyncWaitToEmitC : public OpConversionPattern<mlir::pto::SyncWaitOp> {
     return success();
   }
 
-  PTOArch targetArch; // local build: GCC rejects [[maybe_unused]] on members under -Werror
+  [[maybe_unused]] PTOArch targetArch;
 };
 
 // GetBlockIdxOp Lowering (pto.get_block_idx -> get_block_idx())
