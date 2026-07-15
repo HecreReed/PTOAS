@@ -179,6 +179,16 @@ dimension counts FP4 pairs stored per byte, not logical scalar FP4 elements.
 !pto.tile_buf<loc=vec, dtype=f16, rows=16, cols=16, v_row=?, v_col=?, blayout=row_major, slayout=none_box, fractal=512, pad=0>
 ```
 
+#### Target-Specific `tmp` Buffer Sizing
+
+Operations that expose a `tmp` tile do not share one universal shape rule.
+Some A2/A3 implementations consume a shape- or mode-dependent workspace while
+the corresponding A5 interface keeps the operand only for compatibility;
+other operations, such as the non-aligned four-operand `TSORT32` form and
+binary `TCOLSUM`, still consume `tmp` on A5. See
+[PTO-ISA `tmp` Buffer Requirements by Target](pto_isa_tmp_buffer_requirements.md)
+for the A2/A3 and A5 allocation formulas and fixed-size requirements.
+
 ---
 
 ### 2.6 `!pto.multi_tile_buf<slotType, count=N>`
@@ -3041,7 +3051,7 @@ pto.tprelu ins(<src0>, <src1>, <tmp> : <src0_type>, <src1_type>, <tmp_type>)
   - `src0` and `src1` must have the same `validRow/validCol` as `dst`.
   - `tmp.shape[0] >= dst.validRow + 1`. The A2/A3 `TPRELU` implementation uses one extra physical tmp row as scratch when materializing row cmp-mask addresses for `TSEL`.
   - `tmp.validCol >= ceil(dst.validCol / 8)`. The tmp valid region stores one packed predicate bit per destination element.
-  - `tmp.validRow` does not need to cover the extra scratch row. PTO IR follows the official A2/A3 runtime contract: the extra row is a physical workspace row addressed through `TSUBVIEW`, not part of the tmp valid region.
+  - The PTO IR verifier only checks the physical extra row, but the current PTO-ISA A2/A3 runtime also checks `tmp.GetValidRow() > dst.GetValidRow()`. Set `tmp.validRow >= dst.validRow + 1` when constructing a runtime tile.
   - On A3, `src0`, `src1`, `tmp`, and `dst` must use different storage ranges without overlap.
 - **Implementation checks (A5)**
   - `dst/src0/src1` element types must be identical and must be one of: `f16`, `f32`.
