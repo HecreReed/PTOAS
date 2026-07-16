@@ -209,9 +209,12 @@ arity is:
 | 256 | 4 | 4 |
 
 Lowering still obtains this arity from `getVMIPhysicalArity` rather than
-hard-coding the table in the conversion pattern. Corresponding parts of all
-five logical values must have the same arity and type. Restricting
-`block_elems` closes the initial support set explicitly; for example,
+hard-coding the table in the conversion pattern. All five logical values must
+have the same physical arity. Corresponding parts of the four data values
+`%a`, `%b`, `%low`, and `%high` must have the same `!pto.vreg<64xi32/ui32>`
+type, while each mask part must be the corresponding `!pto.mask<b32>`.
+Restricting `block_elems` closes the initial support set explicitly; for
+example,
 `256xi32` with `block_elems = 65` is rejected instead of silently producing
 the otherwise computable factor-2 arity 5 or factor-4 arity 7.
 
