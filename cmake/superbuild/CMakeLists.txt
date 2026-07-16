@@ -62,8 +62,15 @@ if(NOT PTOAS_FORTIFY_MARKER_OBJECT)
     message(FATAL_ERROR "PTOAS_FORTIFY_MARKER_OBJECT is required")
 endif()
 
-if(NOT DEVTOOLSET_TOOLCHAIN_FLAGS)
-    set(DEVTOOLSET_TOOLCHAIN_FLAGS "--sysroot=/opt/rh/devtoolset-7/root --gcc-toolchain=/opt/rh/devtoolset-7/root/usr")
+# Only default to the CentOS7 devtoolset-7 sysroot + gcc-toolchain when the
+# toolchain is actually present. Use NOT DEFINED so an explicit empty value
+# passed from build.sh is respected instead of being treated as "unset".
+if(NOT DEFINED DEVTOOLSET_TOOLCHAIN_FLAGS)
+    if(EXISTS "/opt/rh/devtoolset-7/root")
+        set(DEVTOOLSET_TOOLCHAIN_FLAGS "--sysroot=/opt/rh/devtoolset-7/root --gcc-toolchain=/opt/rh/devtoolset-7/root/usr")
+    else()
+        set(DEVTOOLSET_TOOLCHAIN_FLAGS "")
+    endif()
 endif()
 
 set(PTOAS_RUNTIME_C_FLAGS "${DEVTOOLSET_TOOLCHAIN_FLAGS} -fstack-protector-all")

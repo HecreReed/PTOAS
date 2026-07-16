@@ -38,7 +38,15 @@ HARDENING_CACHE_FILE="${BASE_PATH}/cmake/LinuxHardeningCache.cmake"
 FORTIFY_MARKER_SOURCE="${BASE_PATH}/scripts/package/fortify_marker.c"
 CANN_CMAKE_SOURCE_DIR=""
 LLVM_PROJECT_URL="https://gitcode.com/cann-src-third-party/llvm/releases/download/19.1.7/llvm-project-llvmorg-19.1.7.tar.gz"
-DEVTOOLSET_TOOLCHAIN_FLAGS="--sysroot=/opt/rh/devtoolset-7/root --gcc-toolchain=/opt/rh/devtoolset-7/root/usr"
+# Only enable the CentOS7 devtoolset-7 sysroot + gcc-toolchain when the
+# toolchain is actually present. Manylinux 2.34 and other non-CentOS7
+# images do not ship /opt/rh/devtoolset-7, and forcing these flags there
+# breaks the build because clang cannot find the sysroot.
+if [ -d "/opt/rh/devtoolset-7/root" ]; then
+  DEVTOOLSET_TOOLCHAIN_FLAGS="--sysroot=/opt/rh/devtoolset-7/root --gcc-toolchain=/opt/rh/devtoolset-7/root/usr"
+else
+  DEVTOOLSET_TOOLCHAIN_FLAGS=""
+fi
 
 #print usage message
 usage() {

@@ -93,11 +93,16 @@ else()
     set(PTOAS_TARGETS_CONFIG_SUFFIX "noconfig")
 endif()
 
+# Reuse PTOAS_CMAKE_INSTALL_DIR (set in CMakeLists.txt as
+# ${CMAKE_INSTALL_LIBDIR}/cmake/PTOAS) so the source paths and destination
+# stay aligned with install(EXPORT PTOASTargets). On x86_64 CentOS7
+# CMAKE_INSTALL_LIBDIR resolves to lib64, while hardcoding "lib" made the
+# install step fail with "file INSTALL cannot find ...PTOASTargets.cmake".
 install(FILES
-    ${CMAKE_INSTALL_PREFIX}/lib/cmake/PTOAS/PTOASTargets.cmake
-    ${CMAKE_INSTALL_PREFIX}/lib/cmake/PTOAS/PTOASTargets-${PTOAS_TARGETS_CONFIG_SUFFIX}.cmake
-    ${CMAKE_INSTALL_PREFIX}/lib/cmake/PTOAS/PTOASConfig.cmake
-    DESTINATION lib/cmake/PTOAS
+    ${CMAKE_INSTALL_PREFIX}/${PTOAS_CMAKE_INSTALL_DIR}/PTOASTargets.cmake
+    ${CMAKE_INSTALL_PREFIX}/${PTOAS_CMAKE_INSTALL_DIR}/PTOASTargets-${PTOAS_TARGETS_CONFIG_SUFFIX}.cmake
+    ${CMAKE_INSTALL_PREFIX}/${PTOAS_CMAKE_INSTALL_DIR}/PTOASConfig.cmake
+    DESTINATION ${PTOAS_CMAKE_INSTALL_DIR}
     ${INSTALL_OPTIONAL}
     COMPONENT pto-as
 )
