@@ -790,32 +790,39 @@ stable softmax numerator.
 
 ---
 
-### `pto.vmi.vmull(a, b, mask, *, result_type) -> VRegType`
+### `pto.vmi.vmull(a, b, mask, *, result_types=None) -> (VRegType, VRegType)`
 
-**Description**: Widening multiply: computes the product of two narrower
-vectors and produces a result with the widened element type. The result
-element type must be exactly one width larger than the operand element type
-(e.g., `i32 * i32` → `i64`, `f16 * f16` → `f32`).
+**Description**: Widening 32-bit integer multiply. For each active lane, the
+operation returns the low and high 32-bit halves of the 64-bit product. Both
+results have the same type as the inputs; inactive lanes are zero. The inputs
+must be matching `i32` or `ui32` vectors with 64, 128, or 256 lanes.
 
 **Parameters**:
 
 | Parameter | Type | Description |
 |-----------|------|-------------|
-| `a` | `VRegType` | First operand vector (narrow type) |
-| `b` | `VRegType` | Second operand vector (narrow type) |
+| `a` | `VRegType` | First `i32` or `ui32` operand vector |
+| `b` | `VRegType` | Matching second operand vector |
 | `mask` | VMI mask | **Required.** Predicate mask |
-| `result_type` | VMI vreg type | **Required.** The widened result type |
+| `result_types` | two VMI vreg types or `None` | Optional explicit `(low, high)` types; inferred from `a` and `b` when omitted |
 
 **Returns**:
 
 | Return Value | Type | Description |
 |--------------|------|-------------|
-| `result` | `VRegType` | Widened product |
+| `(low, high)` | `(VRegType, VRegType)` | Low and high 32-bit product halves |
 
 **Example**:
 
 ```python
-mul64 = pto.vmi.vmull(a32, b32, mask, result_type=pto.vmi.vreg(64, pto.i64))
+low, high = pto.vmi.vmull(a32, b32, mask)
+
+low, high = pto.vmi.vmull(
+    a32,
+    b32,
+    mask,
+    result_types=(pto.vmi.vreg(64, pto.i32), pto.vmi.vreg(64, pto.i32)),
+)
 ```
 
 ---
@@ -1123,6 +1130,8 @@ When inference is not possible, the instruction requires an explicit
 - `vstore`: no result — side-effect only.
 - `vscatter`: no result — side-effect only.
 - `vintlv` / `vdintlv`: inferred from the input vector types.
+- `vmull`: both low/high result types are inferred from the two matching input
+  vector types.
 
 **Ops that always require explicit `result_type`**:
 
@@ -1131,7 +1140,6 @@ When inference is not possible, the instruction requires an explicit
 - `vselr` — result shape cannot be inferred from the index vector alone.
 - `vcadd`, `vcmax`, `vcmin` — reduction changes the lane count.
 - `vinterpret_cast` — reinterpretation target type must be explicit.
-- `vmull` — widening product requires explicit widened result type.
 - `vchist`, `vdhist` — bin count must be explicit.
 - `vgather`, `vgatherb` — result shape is independent of the source pointer.
 

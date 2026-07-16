@@ -630,10 +630,12 @@ class _VMINamespace:
         )
 
     @staticmethod
-    def vmull(a, b, mask, *, result_type=None, pmode=None, loc=None, ip=None):
+    def vmull(a, b, mask, *, result_types=None, pmode=None, loc=None, ip=None):
+        low, high = _two_result_types(result_types, a, b)
         return _call_value(
             "vmull",
-            _require_result_type(result_type, context="pto.vmi.vmull(...)"),
+            low,
+            high,
             _raw(a),
             _raw(b),
             _required_mask(mask, context="pto.vmi.vmull(...)"),
