@@ -52,7 +52,8 @@ while retaining VMI's logical lane count.
 - Lower a contiguous 64/128/256-lane operation to exactly 1/2/4 physical
   `pto.vmull` operations.
 - Support same-layout contiguous and deinterleaved factor-2/factor-4 dense
-  values with `lane_stride = 1`.
+  values with `lane_stride = 1`; the initial deinterleaved contract requires
+  `block_elems = 1`.
 - Preserve one common layout relation across both inputs, the mask, and both
   results.
 - Preserve the low-result and high-result grouping expected by MLIR 1:N type
@@ -68,6 +69,7 @@ while retaining VMI's logical lane count.
 - Adding a new VPTO op or changing the existing VPTO emitter.
 - Supporting merge predication without explicit low/high passthrough values.
 - Adding partial-register or tail-specific VMULL behavior.
+- Supporting deinterleaved VMULL layouts with `block_elems != 1`.
 - Implementing the code in the design-only pull request.
 
 ## 3. Proposed VMI operation contract
@@ -112,6 +114,12 @@ and layout and uses `b32` granularity.
 
 Mixed signedness is not legal. In particular, `i32` inputs cannot return
 `ui32` results, and `ui32` inputs cannot return `i32` results.
+
+Here `i32` means MLIR's signless 32-bit integer type and `ui32` means its
+unsigned 32-bit integer type. Explicitly signed `si32` is not an alias for
+`i32` in this contract, and `si32`/`si64` must be rejected. The verifier must
+test `isSignless()` or `isUnsigned()` explicitly; treating every type for
+which `isUnsigned()` is false as signed would incorrectly admit `si32`.
 
 The old single `Lxi64` result form is removed rather than supported as a second
 assembly form. Repository search shows no active VMI VMULL tests or kernel
@@ -172,14 +180,16 @@ The assigned layout relation is:
 layout(a) == layout(b) == layout(mask) == layout(low) == layout(high)
 ```
 
-The initial implementation supports dense layouts with `lane_stride = 1`:
+The initial implementation supports exactly these dense layouts:
 
-- contiguous;
-- deinterleaved layouts already representable by the VMI type converter.
+- contiguous with `lane_stride = 1`;
+- deinterleaved factor 2 with `block_elems = 1` and `lane_stride = 1`;
+- deinterleaved factor 4 with `block_elems = 1` and `lane_stride = 1`.
 
-Group-slot layouts and dense lane-stride layouts greater than one are not part
-of the initial contract. They may change the physical footprint or physical
-element type in ways that do not match `pto.vmull`'s `64xi32` inputs.
+Group-slot layouts, dense lane strides greater than one, and deinterleaved
+layouts with any other positive `block_elems` are not part of the initial
+contract. `VMILayoutAttr` may represent those layouts for other operations,
+but VMULL preflight must reject them with an actionable diagnostic.
 
 Contiguous is the default layout and gives the required canonical expansion:
 
@@ -189,10 +199,21 @@ Contiguous is the default layout and gives the required canonical expansion:
 | `128xi32` | 2 | 2 | 2 low + 2 high |
 | `256xi32` | 4 | 4 | 4 low + 4 high |
 
-For another supported dense layout, lowering uses the physical arity computed
-by `getVMIPhysicalArity`. Corresponding parts of all five logical values must
-have the same arity and type. This keeps the conversion correct for a legal
-deinterleaved value without hard-coding contiguous part order into the pattern.
+For the supported `block_elems = 1` deinterleaved layouts, the exact physical
+arity is:
+
+| Logical lanes | factor 2 | factor 4 |
+|---:|---:|---:|
+| 64 | 2 | 4 |
+| 128 | 2 | 4 |
+| 256 | 4 | 4 |
+
+Lowering still obtains this arity from `getVMIPhysicalArity` rather than
+hard-coding the table in the conversion pattern. Corresponding parts of all
+five logical values must have the same arity and type. Restricting
+`block_elems` closes the initial support set explicitly; for example,
+`256xi32` with `block_elems = 65` is rejected instead of silently producing
+the otherwise computable factor-2 arity 5 or factor-4 arity 7.
 
 ### 4.1 Assignment and propagation integration
 
@@ -279,11 +300,13 @@ segment belongs to `%high`.
 conversion. The check requires:
 
 - assigned, equal, supported dense layouts on all ports;
-- `lane_stride = 1`;
+- contiguous, or deinterleaved factor 2/4 with `block_elems = 1`;
+- `lane_stride = 1` on every port;
 - `b32` mask granularity;
-- legal 32-bit signedness and lane count;
+- element type exactly signless `i32` or unsigned `ui32`, and a legal lane
+  count;
 - matching, computable physical arity for inputs, mask, and both results;
-- physical arity in the supported set produced by the legal logical shapes.
+- physical part types compatible with `pto.vmull`.
 
 This gives an actionable `VMI-UNSUPPORTED` diagnostic instead of a final
 `VMI-RESIDUAL-OP` failure.
@@ -295,7 +318,7 @@ The complete implementation crosses the following layers:
 | Layer | File | Required change |
 |---|---|---|
 | ODS | `include/PTO/IR/VMIOps.td` | Change one `Lxi64` result to `(low, high)` `Lxi32` results and update syntax/description |
-| Verifier | `lib/PTO/IR/VMI.cpp` | Enforce legal lane counts, types, pair equality, mask shape, and zero-only pmode |
+| Verifier | `lib/PTO/IR/VMI.cpp` | Enforce legal lane counts, exact signless/unsigned types, pair equality, mask shape, and zero-only pmode |
 | Mask assignment | `lib/PTO/Transforms/VMIMaskGranularityAssignment.cpp` | Request `b32` for the mask use |
 | Layout assignment | `lib/PTO/Transforms/VMILayoutAssignment.cpp` | Use ordinary elementwise `unite()` bookkeeping for both inputs and both results; do not use `uniteDataEquivalent` |
 | Layout propagation | `lib/PTO/Transforms/VMILayoutPropagation.cpp` | Register VMULL as a same-layout relation |
@@ -346,7 +369,9 @@ Add positive parse/verify coverage for:
 Add negative coverage for:
 
 - lane count outside `{64, 128, 256}`;
-- input element type other than `i32/ui32`;
+- input element type other than `i32/ui32`, with explicit `si32` and `si64`
+  cases so the current width-only/`isUnsigned()` behavior cannot pass;
+- `si32` low/high result types even when both inputs use `si32`;
 - input type or signedness mismatch;
 - low/high type, signedness, or lane-count mismatch;
 - mask lane-count mismatch;
@@ -359,10 +384,14 @@ Add negative coverage for:
 - Verify that `%a`, `%b`, `%mask`, `%low`, and `%high` receive the same layout.
 - Verify that a conflicting consumer layout inserts an explicit
   materialization rather than silently changing one VMULL port.
-- Cover deinterleaved factor-2 and factor-4 same-layout cases. Both are
-  mandatory first-version tests and must check physical arity, corresponding
-  `%a`/`%b`/`%mask` part alignment, low/high result grouping, and inactive or
-  padding-lane mask alignment.
+- Cover deinterleaved factor-2 and factor-4 same-layout cases with
+  `block_elems = 1`. Both are mandatory first-version tests and must check the
+  exact arities above, corresponding `%a`/`%b`/`%mask` part alignment,
+  low/high result grouping, and inactive or padding-lane mask alignment.
+- Add preflight rejection tests for deinterleaved `block_elems != 1`, including
+  `256xi32` factor-2/factor-4 with `block_elems = 65`. These cases would have
+  arity 5/7 and ensure the implementation does not accept arbitrary layouts
+  merely because `getVMIPhysicalArity` can compute them.
 
 ### 8.3 VMI-to-VPTO tests
 
@@ -436,8 +465,16 @@ The numerical suite must also include:
   128, and 255 when present;
 - inactive input lanes containing non-zero sentinel values, with both output
   halves checked to be zero;
-- deinterleaved factor-2 and factor-4 cases, including logical lanes that map
-  to different physical parts.
+- deinterleaved factor-2 and factor-4 `block_elems = 1` cases, including
+  logical lanes that map to different physical parts.
+
+Inactive lanes must remain observable. The test kernel uses a sparse mask for
+VMULL, but writes `%low` and `%high` to their output buffers with either an
+unmasked store or a separate all-true store mask. It must not reuse the sparse
+VMULL mask for either store. The output buffers are initialized with non-zero
+sentinels, every logical lane is written and read back, and inactive lanes are
+compared with zero. Otherwise a masked store could hide incorrect non-zero
+VMULL results in precisely the lanes this test is intended to validate.
 
 These checks detect signed high-half errors, low/high swaps, incorrect flat
 result grouping, physical part reordering, and failure to zero inactive lanes.
@@ -466,17 +503,19 @@ recommended.
 The implementation is complete when:
 
 1. The only accepted VMI VMULL surface is pair-result `Lxi32/ui32`, with
-   `L in {64, 128, 256}`.
+   `L in {64, 128, 256}`; explicit `si32` and `si64` forms are rejected.
 2. Mask granularity and all five layouts are assigned consistently.
 3. Contiguous 64/128/256-lane inputs produce exactly 1/2/4 physical
    `pto.vmull` operations.
 4. Low and high result parts are associated with the correct logical result.
 5. Signed and unsigned forms select their existing physical backend forms.
 6. Merge predication is rejected before physical conversion.
-7. Deinterleaved factor-2 and factor-4 lowering passes mandatory arity,
-   part-alignment, result-grouping, and mask-alignment tests.
+7. Deinterleaved factor-2 and factor-4 with `block_elems = 1` pass mandatory
+   arity, part-alignment, result-grouping, and mask-alignment tests, while
+   non-1 `block_elems` receives a preflight diagnostic.
 8. CPU simulator or A5 numerical validation confirms signed/unsigned high and
-   low halves and zeroing for sparse inactive lanes.
+   low halves and zeroing for sparse inactive lanes observed through full-lane
+   output stores.
 9. The full pipeline contains no residual VMI op or VMI type.
 10. ODS, verifier, lowering, PTODSL, user documentation, and tests land
    together in the follow-up implementation pull request.
