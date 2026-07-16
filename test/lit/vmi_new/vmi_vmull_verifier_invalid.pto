@@ -123,6 +123,22 @@ module {
 // -----
 
 module {
+  func.func @vmull_result_lane_count_mismatch_invalid(
+      %a: !pto.vmi.vreg<64xi32>, %b: !pto.vmi.vreg<64xi32>,
+      %mask: !pto.vmi.mask<64xpred>) {
+    %low, %high = pto.vmi.vmull %a, %b, %mask
+        : !pto.vmi.vreg<64xi32>, !pto.vmi.vreg<64xi32>,
+          !pto.vmi.mask<64xpred>
+        -> !pto.vmi.vreg<64xi32>, !pto.vmi.vreg<128xi32>
+    return
+  }
+}
+
+// CHECK: 'pto.vmi.vmull' op requires a, b, low, and high to have identical VMI vreg types
+
+// -----
+
+module {
   func.func @vmull_mask_lane_mismatch_invalid(
       %a: !pto.vmi.vreg<64xi32>, %b: !pto.vmi.vreg<64xi32>,
       %mask: !pto.vmi.mask<128xpred>) {
