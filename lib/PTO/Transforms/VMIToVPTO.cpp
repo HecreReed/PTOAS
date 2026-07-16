@@ -7902,9 +7902,9 @@ struct OneToNVMIVmullOpPattern : OpConversionPattern<VMIVmullOp> {
         return rewriter.notifyMatchFailure(
             op, "vmull requires a corresponding b32 mask part");
 
-      auto vmull = rewriter.create<VmullOp>(
-          op.getLoc(), lowType, highType, aParts[index], bParts[index],
-          maskParts[index]);
+      auto vmull = rewriter.create<VmullOp>(op.getLoc(), lowType, highType,
+                                            aParts[index], bParts[index],
+                                            maskParts[index]);
       lows.push_back(vmull.getLow());
       highs.push_back(vmull.getHigh());
     }
@@ -11015,8 +11015,7 @@ void populateVMIConversionPatterns(
       OneToNVMIBinaryOpPattern<VMISubIOp, VsubOp>,
       OneToNVMIBinaryOpPattern<VMIMulFOp, VmulOp>,
       OneToNVMIBinaryOpPattern<VMIMulIOp, VmulOp>, OneToNVMIVmullOpPattern,
-      OneToNVMIFmaOpPattern,
-      OneToNVMIBinaryOpPattern<VMIDivFOp, VdivOp>,
+      OneToNVMIFmaOpPattern, OneToNVMIBinaryOpPattern<VMIDivFOp, VdivOp>,
       OneToNVMIBinaryOpPattern<VMIMinFOp, VminOp>,
       OneToNVMIBinaryOpPattern<VMIMaxFOp, VmaxOp>,
       OneToNVMIUnaryOpPattern<VMINegFOp, VnegOp>,
@@ -11597,8 +11596,8 @@ LogicalResult checkSupportedVchistShape(VMIVchistOp op,
   return failure();
 }
 
-LogicalResult
-checkSupportedVmullShape(VMIVmullOp op, std::string *reason = nullptr) {
+LogicalResult checkSupportedVmullShape(VMIVmullOp op,
+                                       std::string *reason = nullptr) {
   auto fail = [&](const Twine &message) -> LogicalResult {
     if (reason)
       *reason = message.str();
@@ -11647,13 +11646,12 @@ checkSupportedVmullShape(VMIVmullOp op, std::string *reason = nullptr) {
   if (failed(aArity) || failed(bArity) || failed(lowArity) ||
       failed(highArity) || failed(maskArity) || *aArity < 1)
     return fail("requires computable non-empty physical arity on every port");
-  if (*aArity != *bArity || *aArity != *lowArity ||
-      *aArity != *highArity || *aArity != *maskArity)
+  if (*aArity != *bArity || *aArity != *lowArity || *aArity != *highArity ||
+      *aArity != *maskArity)
     return fail("requires matching physical arity on a, b, mask, low, and "
                 "high");
 
-  FailureOr<int64_t> lanesPerPart =
-      getDataLanesPerPart(aType.getElementType());
+  FailureOr<int64_t> lanesPerPart = getDataLanesPerPart(aType.getElementType());
   FailureOr<Type> physicalElementType = getVMIVRegPhysicalElementType(aType);
   FailureOr<StringRef> physicalMaskGranularity =
       getVMIMaskPhysicalGranularity(maskType);

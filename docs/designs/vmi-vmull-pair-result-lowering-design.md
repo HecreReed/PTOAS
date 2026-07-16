@@ -343,14 +343,13 @@ low, high = pto.vmi.vmull(
     a,
     b,
     mask,
-    result_types=None,
     pmode=None,
 )
 ```
 
-When `result_types` is omitted, both result types are inferred from `a` and
-`b`. If provided, it must be a two-item sequence; the IR verifier still
-requires both types to equal the input type.
+Both result types are inferred from the matching input type. The Python
+surface does not accept explicit result types; the IR verifier requires both
+result types to equal the input type.
 
 The old required `result_type=` keyword is removed atomically with the ODS
 change. Because there are no in-repository PTODSL VMULL call sites, a temporary
@@ -416,8 +415,8 @@ every emitted physical operation.
 ### 8.4 PTODSL and end-to-end tests
 
 - Verify `pto.vmi.vmull` returns a two-item tuple.
-- Verify inferred and explicit `result_types` forms.
-- Verify invalid explicit result types fail with a clear diagnostic.
+- Verify both result types are inferred for signed and unsigned inputs.
+- Verify invalid input types fail with a clear IR verifier diagnostic.
 - Compile at least one VMI-authored kernel through the complete VPTO pipeline
   and confirm no VMI op or type remains.
 
