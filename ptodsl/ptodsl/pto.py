@@ -110,9 +110,9 @@ from ._ops import (             # noqa: F401
     vcgmax, vcgadd, vcgmin, vcpadd,
     vtrc, vprelu, vintlv, vdintlv, vselr,
     vci, vaddc, vaddcs, vmull, vbitsort, vmrgsort4,
-    copy_ubuf_to_ubuf, load_scalar, store_scalar,
-    vadds, vsubs, vmuls, vmaxs, vmins, vlrelu,
-    vaxpy, vaddrelu, vsubrelu,
+    load_scalar, store_scalar,
+    vadds, vsubs, vmuls, vmaxs, vmins, vlrelu, vands, vors, vxors,
+    vaxpy, vmula, vaddrelu, vsubrelu,
     vsel,
     make_tensor_view, partition_view,
     alloc_buffer, alloc_tile,
@@ -182,6 +182,6 @@ PAT = MaskPattern
 
 
 def __getattr__(name):
-    if name in {"ukernel", "tile_buf_type", "vecscope", "as_ptr", "vbrc_load", "vsts_1pt", "constexpr", "tensor_spec", "TensorSpec"}:
+    if name in {"ukernel", "tile_buf_type", "vecscope", "as_ptr", "vbrc_load", "vsts_1pt", "constexpr", "copy_ubuf_to_ubuf", "tensor_spec", "TensorSpec"}:
         raise unsupported_public_surface_error(name)
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

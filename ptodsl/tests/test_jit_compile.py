@@ -2362,10 +2362,14 @@ def vmi_wrapper_dispatch_probe():
     src_tile = pto.alloc_tile(shape=[1, 64], dtype=pto.f32)
     other_tile = pto.alloc_tile(shape=[1, 64], dtype=pto.f32)
     dst_tile = pto.alloc_tile(shape=[1, 64], dtype=pto.f32)
+    hist_acc_tile = pto.alloc_tile(shape=[1, 256], dtype=pto.ui16)
+    hist_src_tile = pto.alloc_tile(shape=[1, 256], dtype=pto.ui8)
 
     src_ptr = src_tile.as_ptr()
     other_ptr = other_tile.as_ptr()
     dst_ptr = dst_tile.as_ptr()
+    hist_acc_ptr = hist_acc_tile.as_ptr()
+    hist_src_ptr = hist_src_tile.as_ptr()
 
     offset = pto.const(0, dtype=pto.index)
     active_lanes = pto.const(64, dtype=pto.index)
@@ -2375,41 +2379,52 @@ def vmi_wrapper_dispatch_probe():
         active_lanes,
         size=64,
     )
-    group_mask = pto.vmi.create_group_mask(
+    group_mask = pto.vmi.create_mask(
         active_per_group,
-        size=128,
+        size=64,
         num_groups=8,
-        group_size=16,
+        group_size=8,
     )
     lhs = pto.vmi.vload(src_ptr, offset, size=64)
     rhs = pto.vmi.vload(other_ptr, offset, size=64)
-    idx = pto.vmi.vci(0, result_type=pto.vmi.vreg(64, pto.i32), order="ASC")
+    compact = pto.vmi.vload(src_ptr, offset, size=8)
+    idx = pto.vmi.vci(pto.i32(0), size=64, order="ASC")
+    bias = pto.vmi.vbrc(pto.f32(0.0), size=64)
+    expanded = pto.vmi.vbrc(compact, size=64, group=8)
+    hist_acc = pto.vmi.vload(hist_acc_ptr, offset, size=256)
+    hist_src = pto.vmi.vload(hist_src_ptr, offset, size=256)
+    hist_mask = pto.vmi.create_mask(pto.const(256, dtype=pto.index), size=256)
     added = pto.vmi.vadd(lhs, rhs, mask)
     relu = pto.vmi.vrelu(added, mask)
-    scaled = pto.vmi.vmuls(relu, 2.0, mask)
+    scaled = pto.vmi.vadd(pto.vmi.vmuls(relu, 2.0, mask), bias, mask)
     pred = pto.vmi.vcmp(scaled, lhs, mask, "ogt")
-    selected = pto.vmi.vsel(pred, scaled, rhs)
-    shuffled = pto.vmi.vselr(
-        selected,
-        idx,
-        result_type=pto.vmi.vreg(64, pto.f32),
-    )
-    total = pto.vmi.vcadd(
-        shuffled,
-        mask,
-        result_type=pto.vmi.vreg(1, pto.f32),
-        reassoc=True,
-    )
+    selected = pto.vmi.vsel(pred, scaled, expanded)
+    shuffled = pto.vmi.vselr(selected, idx)
+    total = pto.vmi.vcadd(shuffled, mask, reassoc=True)
+    peak = pto.vmi.vcmax(shuffled, mask)
+    floor = pto.vmi.vcmin(shuffled, mask)
+    group_peak = pto.vmi.vcmax(shuffled, group_mask, group=8)
+    gather = pto.vmi.vgather(src_ptr, idx, mask)
+    gatherb = pto.vmi.vgatherb(src_ptr, idx, mask)
+    hist = pto.vmi.vdhist(hist_acc, hist_src, hist_mask)
+    cumul = pto.vmi.vchist(hist_acc, hist_src, hist_mask)
     casted = pto.vmi.vcvt(shuffled, pto.f16)
     recast = pto.vmi.vinterpret_cast(
         lhs,
-        result_type=pto.vmi.vreg(64, pto.i32),
+        pto.i32,
     )
     lo, hi = pto.vmi.vintlv(selected, shuffled, mask)
     pto.vmi.vstore(lo, dst_ptr, offset, mask)
 
     _ = group_mask
     _ = total
+    _ = peak
+    _ = floor
+    _ = group_peak
+    _ = gather
+    _ = gatherb
+    _ = hist
+    _ = cumul
     _ = casted
     _ = recast
     _ = hi
@@ -2447,6 +2462,21 @@ def vmi_masked_vcvt_probe():
 
 @pto.jit(target="a5", backend="vpto", mode="explicit")
 def vmi_invalid_rounding_vcvt_probe():
+    src_tile = pto.alloc_tile(shape=[1, 64], dtype=pto.f32)
+    src_ptr = src_tile.as_ptr()
+    offset = pto.const(0, dtype=pto.index)
+
+    src = pto.vmi.vload(src_ptr, offset, size=64)
+    _ = pto.vmi.vcvt(
+        src,
+        pto.f8e4m3,
+        rounding=pto.VcvtRoundMode.F,
+        saturate=pto.VcvtSatMode.SAT,
+    )
+
+
+@pto.jit(target="a5", backend="vpto", mode="explicit")
+def vmi_round_r_vcvt_probe():
     src_tile = pto.alloc_tile(shape=[1, 64], dtype=pto.f32)
     src_ptr = src_tile.as_ptr()
     offset = pto.const(0, dtype=pto.index)
@@ -3325,6 +3355,7 @@ def main() -> None:
     expect(not hasattr(pto, "vbrc_load"), "pto.vbrc_load should not remain on the public pto namespace")
     expect(not hasattr(pto, "vsts_1pt"), "pto.vsts_1pt should not remain on the public pto namespace")
     expect(not hasattr(pto, "constexpr"), "pto.const_expr should not remain on the public pto namespace")
+    expect(not hasattr(pto, "copy_ubuf_to_ubuf"), "pto.copy_ubuf_to_ubuf should not remain on the public pto namespace")
     expect(not hasattr(pto, "vmi_vreg_type"), "pto.vmi_vreg_type should not remain on the public pto namespace")
     expect(not hasattr(pto, "vmi_mask_type"), "pto.vmi_mask_type should not remain on the public pto namespace")
     expect(not hasattr(scalar, "sts"), "scalar.sts should not remain in the public scalar namespace")
@@ -3360,6 +3391,12 @@ def main() -> None:
         "pto.constexpr is not a supported PTODSL public interface" in str(removed_constexpr)
         and "Use pto.const_expr" in str(removed_constexpr),
         "removed pto.constexpr should diagnose pto.const_expr as the replacement",
+    )
+    removed_copy_ubuf_to_ubuf = expect_raises(AttributeError, lambda: getattr(pto, "copy_ubuf_to_ubuf"))
+    expect(
+        "pto.copy_ubuf_to_ubuf is not a supported PTODSL public interface" in str(removed_copy_ubuf_to_ubuf)
+        and "Use pto.mte_ub_ub" in str(removed_copy_ubuf_to_ubuf),
+        "removed pto.copy_ubuf_to_ubuf should diagnose pto.mte_ub_ub as the replacement",
     )
     for name in ("max", "min", "exp", "log", "sqrt", "abs"):
         expect(hasattr(scalar, name), f"scalar.{name} should be exported from the public scalar namespace")
@@ -5742,8 +5779,14 @@ def main() -> None:
         "rounding",
     )
     expect(
-        "expected one of A, H, Z" in str(invalid_rounding_vcvt_error),
-        "pto.vmi.vcvt should reject low-level-only rounding tokens before IR verification",
+        "expected one of A, H, R, Z" in str(invalid_rounding_vcvt_error),
+        "pto.vmi.vcvt should reject unsupported VMI rounding tokens before IR verification",
+    )
+    vmi_round_r_vcvt_text = vmi_round_r_vcvt_probe.compile().mlir_text()
+    expect_parse_roundtrip_and_verify(vmi_round_r_vcvt_text, "VMI R-rounding vcvt specialization")
+    expect(
+        'rounding = "R"' in vmi_round_r_vcvt_text,
+        "pto.vmi.vcvt should preserve the authored R rounding token for fp32->fp8",
     )
     unpack_missing_dtype_error = expect_raises(
         TypeError,
@@ -5767,6 +5810,11 @@ def main() -> None:
         "pto.vmi.vsel",
         "pto.vmi.vselr",
         "pto.vmi.vcadd",
+        "pto.vmi.vcmax",
+        "pto.vmi.vcmin",
+        "pto.vmi.vdhist",
+        "pto.vmi.vchist",
+        "pto.vmi.vgather",
         "pto.vmi.vcvt",
         "pto.vmi.vinterpret_cast",
         "pto.vmi.vintlv",
@@ -5778,8 +5826,8 @@ def main() -> None:
             f"representative {op_name} wrapper dispatch should emit the matching generated VMI op",
         )
     expect(
-        vmi_wrapper_dispatch_text.count("pto.vmi.vload") == 2,
-        "vmi wrapper dispatch probe should lower two explicit VMI loads",
+        vmi_wrapper_dispatch_text.count("pto.vmi.vload") == 5,
+        "vmi wrapper dispatch probe should lower five explicit VMI loads",
     )
     expect(
         "pto.backend = \"vpto\"" in vmi_wrapper_dispatch_text,
@@ -5806,7 +5854,7 @@ def main() -> None:
         "PTODSL VMI compare and prefix mask probes should materialize logical VMI mask types in MLIR",
     )
     expect(
-        "!pto.vmi.mask<128xpred>" in vmi_wrapper_dispatch_text,
+        "!pto.vmi.mask<64xpred>" in vmi_wrapper_dispatch_text,
         "PTODSL grouped mask probes should materialize grouped logical VMI mask types in MLIR",
     )
     expect(

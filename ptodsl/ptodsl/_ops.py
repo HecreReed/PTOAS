@@ -244,9 +244,13 @@ def addptr(base_ptr, index_offset):
 _VLOAD_DIST_TOKENS = {
     "NORM",
     "UNPK_B8", "UNPK_B16", "UNPK_B32",
-    "BRC_B8", "BRC_B16", "BRC_B32",
+    "BRC_B8", "BRC_B16", "BRC_B32", "BRC_BLK",
     "US_B8", "US_B16",
     "DS_B8", "DS_B16",
+    # Extra load distributions already supported by the backend lowering.
+    "E2B_B16", "E2B_B32",
+    "UNPK4",
+    "SPLT4CHN",
 }
 
 
@@ -1797,32 +1801,6 @@ def vshr(lhs, rhs, mask):
     return _emit_binary_vec_op(_pto.VshrOp, lhs, rhs, mask)
 
 
-def vshls(inp, scalar, mask):
-    """``pto.vshls`` – vector shift-left by scalar under mask."""
-    _reject_low_precision_vreg_operands(inp, context="pto.vshls(...)")
-    return wrap_surface_value(
-        _pto.VshlsOp(
-            unwrap_surface_value(inp).type,
-            unwrap_surface_value(inp),
-            _coerce_i16(scalar, context="vshls"),
-            unwrap_surface_value(mask),
-        ).result
-    )
-
-
-def vshrs(inp, scalar, mask):
-    """``pto.vshrs`` – vector shift-right by scalar under mask."""
-    _reject_low_precision_vreg_operands(inp, context="pto.vshrs(...)")
-    return wrap_surface_value(
-        _pto.VshrsOp(
-            unwrap_surface_value(inp).type,
-            unwrap_surface_value(inp),
-            _coerce_i16(scalar, context="vshrs"),
-            unwrap_surface_value(mask),
-        ).result
-    )
-
-
 def vcmax(v, mask):
     """``pto.vcmax`` – cross-lane maximum reduction."""
     return _emit_unary_vec_op(_pto.VcmaxOp, v, mask)
@@ -2126,23 +2104,6 @@ def vselr(src0, src1):
     )
 
 
-def vci(index, order=None):
-    """``pto.vci`` – vector consecutive index generator."""
-    raw_index = unwrap_surface_value(index)
-    if not hasattr(raw_index, "type"):
-        raw_index = _coerce_i32(raw_index, context="vci(index)")
-    result_type = _resolve(vreg_type(_elements_per_vreg(raw_index.type), raw_index.type))
-    kwargs = {}
-    if order is not None:
-        token = getattr(order, "value", order)
-        if not isinstance(token, str):
-            token = str(token)
-            if "." in token:
-                token = token.rsplit(".", 1)[-1]
-        kwargs["order"] = token.strip().upper()
-    return wrap_surface_value(_pto.VciOp(result_type, raw_index, **kwargs).result)
-
-
 def vaddc(lhs, rhs, mask):
     """``pto.vaddc`` – vector add with carry-out predicate."""
     _reject_low_precision_vreg_operands(lhs, rhs, context="pto.vaddc(...)")
@@ -2208,19 +2169,6 @@ def vmrgsort4(destination, source0, source1, source2, source3, count, config):
     )
 
 
-def copy_ubuf_to_ubuf(source, destination, sid, n_burst, len_burst, src_stride, dst_stride):
-    """``pto.copy_ubuf_to_ubuf`` – raw UB-to-UB DMA primitive."""
-    _pto.CopyUbufToUbufOp(
-        unwrap_surface_value(source),
-        unwrap_surface_value(destination),
-        _coerce_i64(sid, context="copy_ubuf_to_ubuf(sid)"),
-        _coerce_i64(n_burst, context="copy_ubuf_to_ubuf(n_burst)"),
-        _coerce_i64(len_burst, context="copy_ubuf_to_ubuf(len_burst)"),
-        _coerce_i64(src_stride, context="copy_ubuf_to_ubuf(src_stride)"),
-        _coerce_i64(dst_stride, context="copy_ubuf_to_ubuf(dst_stride)"),
-    )
-
-
 def load_scalar(ptr_value, offset=0, result_type=None):
     """``pto.load_scalar`` – load one scalar from a pointer-like value."""
     if result_type is None:
@@ -2282,6 +2230,71 @@ def vlrelu(inp, alpha, mask):
     return _emit_vec_scalar_masked_op(_pto.VlreluOp, inp, alpha, mask, context="vlrelu")
 
 
+def vshrs(inp, scalar, mask):
+    """``pto.vshrs`` – vector shift-right by a uniform ``i16`` amount."""
+    _reject_low_precision_vreg_operands(inp, context="pto.vshrs(...)")
+    i16 = IntegerType.get_signless(16)
+    raw = unwrap_surface_value(scalar)
+    if hasattr(raw, "type"):
+        scalar_value = coerce_scalar_to_type(raw, i16, context="vshrs")
+    else:
+        scalar_value = materialize_scalar_literal(int(raw), i16, context="vshrs")
+    return wrap_surface_value(
+        _pto.VshrsOp(
+            unwrap_surface_value(inp).type,
+            unwrap_surface_value(inp),
+            unwrap_surface_value(scalar_value),
+            unwrap_surface_value(mask),
+        ).result
+    )
+
+
+def vshls(inp, scalar, mask):
+    """``pto.vshls`` – vector shift-left by a uniform ``i16`` amount."""
+    _reject_low_precision_vreg_operands(inp, context="pto.vshls(...)")
+    i16 = IntegerType.get_signless(16)
+    raw = unwrap_surface_value(scalar)
+    if hasattr(raw, "type"):
+        scalar_value = coerce_scalar_to_type(raw, i16, context="vshls")
+    else:
+        scalar_value = materialize_scalar_literal(int(raw), i16, context="vshls")
+    return wrap_surface_value(
+        _pto.VshlsOp(
+            unwrap_surface_value(inp).type,
+            unwrap_surface_value(inp),
+            unwrap_surface_value(scalar_value),
+            unwrap_surface_value(mask),
+        ).result
+    )
+
+
+def vands(inp, scalar, mask):
+    """``pto.vands`` – vector AND scalar (emulated via ``vand`` + ``vbr``)."""
+    return vand(
+        inp,
+        vbr(_coerce_scalar_like_vector_element(inp, scalar, context="vands")),
+        mask,
+    )
+
+
+def vors(inp, scalar, mask):
+    """``pto.vors`` – vector OR scalar (emulated via ``vor`` + ``vbr``)."""
+    return vor(
+        inp,
+        vbr(_coerce_scalar_like_vector_element(inp, scalar, context="vors")),
+        mask,
+    )
+
+
+def vxors(inp, scalar, mask):
+    """``pto.vxors`` – vector XOR scalar (emulated via ``vxor`` + ``vbr``)."""
+    return vxor(
+        inp,
+        vbr(_coerce_scalar_like_vector_element(inp, scalar, context="vxors")),
+        mask,
+    )
+
+
 def vaddrelu(lhs, rhs, mask):
     """``pto.vaddrelu`` – add, then apply ReLU."""
     return vrelu(vadd(lhs, rhs, mask), mask)
@@ -2305,6 +2318,39 @@ def vaxpy(alpha, x, y, mask):
             unwrap_surface_value(mask),
         ).result
     )
+
+
+def vmula(acc, lhs, rhs, mask):
+    """``pto.vmula`` – fused ``acc + lhs * rhs`` under mask."""
+    _reject_low_precision_vreg_operands(acc, lhs, rhs, context="pto.vmula(...)")
+    return wrap_surface_value(
+        _pto.VmulaOp(
+            unwrap_surface_value(acc).type,
+            unwrap_surface_value(acc),
+            unwrap_surface_value(lhs),
+            unwrap_surface_value(rhs),
+            unwrap_surface_value(mask),
+        ).result
+    )
+
+
+def vci(base, order=None):
+    """``pto.vci`` – generate lane indices from a scalar base."""
+    raw_base = unwrap_surface_value(base)
+    if hasattr(raw_base, "type"):
+        scalar_value = raw_base
+        elem_type = raw_base.type
+    elif isinstance(raw_base, int):
+        elem_type = IntegerType.get_signless(32)
+        scalar_value = materialize_scalar_literal(raw_base, elem_type, context="vci(base)")
+    else:
+        raise TypeError("vci(base) expects a runtime scalar or Python int")
+
+    result_type = _resolve(vreg_type(_elements_per_vreg(elem_type), elem_type))
+    kwargs = {}
+    if order is not None:
+        kwargs["order"] = order
+    return wrap_surface_value(_pto.VciOp(result_type, scalar_value, **kwargs).result)
 
 
 def vsel(true_v, false_v, mask):
@@ -5855,8 +5901,8 @@ __all__ = [
     "vcmax", "vcadd", "vcmin", "vdup", "vexpdif",
     "vexp", "vln", "vsqrt", "vabs", "vneg", "vrec", "vrsqrt", "vrelu", "vnot",
     "vcgmax", "vcgadd", "vcgmin", "vcpadd",
-    "vadds", "vsubs", "vmuls", "vmaxs", "vmins", "vlrelu",
-    "vaxpy", "vaddrelu", "vsubrelu",
+    "vadds", "vsubs", "vmuls", "vmaxs", "vmins", "vlrelu", "vshrs", "vshls", "vands", "vors", "vxors",
+    "vaxpy", "vmula", "vci", "vaddrelu", "vsubrelu",
     "vsel",
     "make_tensor_view", "partition_view",
     "alloc_buffer", "alloc_tile",
