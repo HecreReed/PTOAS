@@ -51,6 +51,8 @@ while retaining VMI's logical lane count.
   the inputs.
 - Lower a contiguous 64/128/256-lane operation to exactly 1/2/4 physical
   `pto.vmull` operations.
+- Support same-layout contiguous and deinterleaved factor-2/factor-4 dense
+  values with `lane_stride = 1`.
 - Preserve one common layout relation across both inputs, the mask, and both
   results.
 - Preserve the low-result and high-result grouping expected by MLIR 1:N type
@@ -199,12 +201,19 @@ passes must establish its mask and layout contract:
 
 1. `VMIMaskGranularityAssignment` requests `b32` for the VMULL mask because
    the data element type is 32-bit.
-2. `VMILayoutAssignment` unifies `%a`, `%b`, `%low`, and `%high` as one data
-   layout equivalence class.
+2. `VMILayoutAssignment` follows the ordinary elementwise `unite()` path for
+   `%a`, `%b`, `%low`, and `%high`. This registers the values with the layout
+   solver without placing them in a hard data-layout DSU equivalence class.
 3. `VMILayoutPropagation` treats `VMIVmullOp` as a same-layout operation so a
    layout fact on any input, mask, or result propagates to the other ports.
 4. Conflicting consumer layouts are handled through the existing explicit
    `ensure_layout` or `ensure_mask_layout` materialization mechanism.
+
+`uniteDataEquivalent` must not be used for VMULL. It is reserved for values
+that are genuinely the same SSA value across control-flow, call, and function
+boundaries. Using it for an elementwise producer would turn compatible layout
+requests into hard natural/preferred-layout conflicts and prevent use-site
+materialization.
 
 No VMULL-specific layout transform is needed. The relation is identity across
 all ports, unlike `vintlv`/`vdintlv`, whose input and result layouts may differ.
@@ -288,7 +297,7 @@ The complete implementation crosses the following layers:
 | ODS | `include/PTO/IR/VMIOps.td` | Change one `Lxi64` result to `(low, high)` `Lxi32` results and update syntax/description |
 | Verifier | `lib/PTO/IR/VMI.cpp` | Enforce legal lane counts, types, pair equality, mask shape, and zero-only pmode |
 | Mask assignment | `lib/PTO/Transforms/VMIMaskGranularityAssignment.cpp` | Request `b32` for the mask use |
-| Layout assignment | `lib/PTO/Transforms/VMILayoutAssignment.cpp` | Unite both inputs and both results |
+| Layout assignment | `lib/PTO/Transforms/VMILayoutAssignment.cpp` | Use ordinary elementwise `unite()` bookkeeping for both inputs and both results; do not use `uniteDataEquivalent` |
 | Layout propagation | `lib/PTO/Transforms/VMILayoutPropagation.cpp` | Register VMULL as a same-layout relation |
 | Unified bridge | `lib/PTO/Transforms/VMILowerUnifiedToLegacy.cpp` | Keep VMULL on the direct-to-VPTO path; update comments only if needed |
 | Physicalization | `lib/PTO/Transforms/VMIToVPTO.cpp` | Add preflight validation, pair-result 1:N pattern, and pattern registration |
@@ -350,8 +359,10 @@ Add negative coverage for:
 - Verify that `%a`, `%b`, `%mask`, `%low`, and `%high` receive the same layout.
 - Verify that a conflicting consumer layout inserts an explicit
   materialization rather than silently changing one VMULL port.
-- Cover at least one supported deinterleaved same-layout case if that support
-  is enabled in the implementation patch.
+- Cover deinterleaved factor-2 and factor-4 same-layout cases. Both are
+  mandatory first-version tests and must check physical arity, corresponding
+  `%a`/`%b`/`%mask` part alignment, low/high result grouping, and inactive or
+  padding-lane mask alignment.
 
 ### 8.3 VMI-to-VPTO tests
 
@@ -377,6 +388,59 @@ every emitted physical operation.
 - Verify invalid explicit result types fail with a clear diagnostic.
 - Compile at least one VMI-authored kernel through the complete VPTO pipeline
   and confirm no VMI op or type remains.
+
+### 8.5 Numerical semantics tests
+
+Compile-only coverage is not sufficient for VMULL. At least one executable
+numerical backend must compare both result vectors against a scalar reference
+oracle. The PTO ISA CPU simulator is preferred; if it does not support the
+required VMULL form, equivalent A5 execution is mandatory for completion.
+
+The reference oracle computes each lane independently:
+
+```text
+if mask[i]:
+  if T == i32:
+    product = signed_64(signed_32(a[i])) * signed_64(signed_32(b[i]))
+  else:
+    product = unsigned_64(unsigned_32(a[i])) *
+              unsigned_64(unsigned_32(b[i]))
+  expected_low[i]  = unsigned_32(product)
+  expected_high[i] = unsigned_32(product >> 32)
+else:
+  expected_low[i]  = 0
+  expected_high[i] = 0
+```
+
+Required signed boundary cases include:
+
+```text
+(-1) * 2                    -> low=0xfffffffe, high=0xffffffff
+INT32_MIN * (-1)            -> low=0x80000000, high=0x00000000
+INT32_MIN * 2               -> low=0x00000000, high=0xffffffff
+INT32_MAX * INT32_MAX       -> low=0x00000001, high=0x3fffffff
+```
+
+Required unsigned boundary cases include:
+
+```text
+0xffffffff * 0xffffffff     -> low=0x00000001, high=0xfffffffe
+0x80000000 * 2              -> low=0x00000000, high=0x00000001
+```
+
+The numerical suite must also include:
+
+- logical sizes 64, 128, and 256;
+- distinct per-chunk values so a chunk-ordering error is observable;
+- sparse masks spanning chunk boundaries, including lanes 0, 63, 64, 127,
+  128, and 255 when present;
+- inactive input lanes containing non-zero sentinel values, with both output
+  halves checked to be zero;
+- deinterleaved factor-2 and factor-4 cases, including logical lanes that map
+  to different physical parts.
+
+These checks detect signed high-half errors, low/high swaps, incorrect flat
+result grouping, physical part reordering, and failure to zero inactive lanes.
 
 ## 9. Compatibility and rollout
 
@@ -409,8 +473,12 @@ The implementation is complete when:
 4. Low and high result parts are associated with the correct logical result.
 5. Signed and unsigned forms select their existing physical backend forms.
 6. Merge predication is rejected before physical conversion.
-7. The full pipeline contains no residual VMI op or VMI type.
-8. ODS, verifier, lowering, PTODSL, user documentation, and tests land
+7. Deinterleaved factor-2 and factor-4 lowering passes mandatory arity,
+   part-alignment, result-grouping, and mask-alignment tests.
+8. CPU simulator or A5 numerical validation confirms signed/unsigned high and
+   low halves and zeroing for sparse inactive lanes.
+9. The full pipeline contains no residual VMI op or VMI type.
+10. ODS, verifier, lowering, PTODSL, user documentation, and tests land
    together in the follow-up implementation pull request.
 
 ## 11. Decisions requested from review
