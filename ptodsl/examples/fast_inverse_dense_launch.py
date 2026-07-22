@@ -94,35 +94,34 @@ def fast_inverse_dense_f32(
     pto.set_flag("MTE2", "V", event_id=0)
     pto.wait_flag("MTE2", "V", event_id=0)
 
-    with pto.simd():
-        active, _ = pto.make_mask(pto.f32, batch_i32)
-        d00 = pto.vlds(in_tile[0, 0:])
-        d01 = pto.vlds(in_tile[1, 0:])
-        d10 = pto.vlds(in_tile[2, 0:])
-        d11 = pto.vlds(in_tile[3, 0:])
-        one = pto.vbr(1.0)
-        zero = pto.vsub(d00, d00, active)
+    active, _ = pto.make_mask(pto.f32, batch_i32)
+    d00 = pto.vlds(in_tile[0, 0:])
+    d01 = pto.vlds(in_tile[1, 0:])
+    d10 = pto.vlds(in_tile[2, 0:])
+    d11 = pto.vlds(in_tile[3, 0:])
+    one = pto.vbr(1.0)
+    zero = pto.vsub(d00, d00, active)
 
-        m00 = pto.vadd(one, d00, active)
-        m01 = d01
-        m10 = d10
-        m11 = pto.vadd(one, d11, active)
+    m00 = pto.vadd(one, d00, active)
+    m01 = d01
+    m10 = d10
+    m11 = pto.vadd(one, d11, active)
 
-        diag_prod = pto.vmul(m00, m11, active)
-        off_prod = pto.vmul(m01, m10, active)
-        det = pto.vsub(diag_prod, off_prod, active)
+    diag_prod = pto.vmul(m00, m11, active)
+    off_prod = pto.vmul(m01, m10, active)
+    det = pto.vsub(diag_prod, off_prod, active)
 
-        inv00 = pto.vdiv(m11, det, active)
-        neg_m01 = pto.vsub(zero, m01, active)
-        inv01 = pto.vdiv(neg_m01, det, active)
-        neg_m10 = pto.vsub(zero, m10, active)
-        inv10 = pto.vdiv(neg_m10, det, active)
-        inv11 = pto.vdiv(m00, det, active)
+    inv00 = pto.vdiv(m11, det, active)
+    neg_m01 = pto.vsub(zero, m01, active)
+    inv01 = pto.vdiv(neg_m01, det, active)
+    neg_m10 = pto.vsub(zero, m10, active)
+    inv10 = pto.vdiv(neg_m10, det, active)
+    inv11 = pto.vdiv(m00, det, active)
 
-        pto.vsts(inv00, out_tile[0, 0:], active)
-        pto.vsts(inv01, out_tile[1, 0:], active)
-        pto.vsts(inv10, out_tile[2, 0:], active)
-        pto.vsts(inv11, out_tile[3, 0:], active)
+    pto.vsts(inv00, out_tile[0, 0:], active)
+    pto.vsts(inv01, out_tile[1, 0:], active)
+    pto.vsts(inv10, out_tile[2, 0:], active)
+    pto.vsts(inv11, out_tile[3, 0:], active)
 
     pto.set_flag("V", "MTE3", event_id=0)
     pto.wait_flag("V", "MTE3", event_id=0)

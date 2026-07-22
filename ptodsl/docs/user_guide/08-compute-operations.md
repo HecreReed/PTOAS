@@ -15,8 +15,12 @@ Element-wise operations between two tiles of the same shape.
 #### `pto.tile.mul(src0: Tile, src1: Tile, dst: Tile) -> None`
 #### `pto.tile.max(src0: Tile, src1: Tile, dst: Tile) -> None`
 #### `pto.tile.min(src0: Tile, src1: Tile, dst: Tile) -> None`
+#### `pto.tile.addrelu(src0: Tile, src1: Tile, dst: Tile) -> None`
 
 **Description**: Element-wise `dst[i,j] = src0[i,j] <op> src1[i,j]`.
+For `addrelu`, `dst[i,j] = max(0, src0[i,j] + src1[i,j])`.
+`addrelu` maps to the fused C220 `VADDRELU` path and is supported only for
+A2/A3 VPTO kernels with `f32`, `f16`, or `i16` tile elements.
 
 **Parameters**:
 
@@ -91,7 +95,7 @@ Element-wise operations between a tile and a scalar.
 **Description**: Moves data between compatible tile domains without going
 through GM. This is the tile-domain transfer surface used when a workflow needs
 to stage data from one tile contract into another, for example UB → MAT before
-a cube sub-kernel consumes the result.
+a Cube-kind TileOp consumes the result.
 
 **Parameters**:
 
@@ -244,8 +248,38 @@ pto.tile.gather(tmp_sort_tile, top_scores, mask_pattern="P0101")
 pto.tile.gather(tmp_sort_tile, top_indices, mask_pattern="P1010")
 ```
 
-The low-level aliases `pto.tsort32`, `pto.tmrgsort`, and `pto.tgather` are also
-available when a kernel needs to bypass the `pto.tile` namespace.
+#### `pto.tile.gatherb(src: Tile, offsets: Tile, dst: Tile) -> None`
+
+**Description**: Gathers elements from a source tile into a destination tile
+using byte offsets. Each element of `offsets` is a byte address into the flat
+byte representation of `src`; the element (or block of elements starting at that
+byte position) is written into the corresponding position of `dst`.
+
+**Parameters**:
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `src` | `Tile` | Source tile containing the data to gather from |
+| `offsets` | `Tile` | Byte offset tile (`ui32` dtype) specifying byte positions in `src` |
+| `dst` | `Tile` | Destination tile (must use row-major layout; element size 1, 2, or 4 bytes) |
+
+**Returns**: None
+
+**Constraints**:
+
+- `offsets` must have `ui32` dtype.
+- `dst` must use row-major layout.
+- `dst` element size must be 1, 2, or 4 bytes.
+
+**Example**:
+
+```python
+pto.tile.gatherb(src_tile, offset_tile, dst_tile)
+```
+
+The low-level aliases `pto.tsort32`, `pto.tmrgsort`, `pto.tgather`, and
+`pto.tgatherb` are also available when a kernel needs to bypass the `pto.tile`
+namespace.
 
 ---
 
@@ -1232,7 +1266,7 @@ pto.tile.gemv_mx_bias(lhs_l0a_mx, lhs_scale, rhs_l0b_mx, rhs_scale, bias_tile, a
 
 | Category | Operations |
 |----------|------------|
-| Binary tile-tile | `tile.add`, `tile.sub`, `tile.mul`, `tile.div`, `tile.max`, `tile.min` |
+| Binary tile-tile | `tile.add`, `tile.sub`, `tile.mul`, `tile.div`, `tile.max`, `tile.min`, `tile.addrelu` |
 | Tile-scalar | `tile.adds`, `tile.subs`, `tile.muls`, `tile.divs`, `tile.maxs`, `tile.mins` |
 | Unary math | `tile.exp`, `tile.log`, `tile.sqrt`, `tile.rsqrt`, `tile.recip`, `tile.abs`, `tile.neg` |
 | Activation | `tile.relu`, `tile.lrelu` |
@@ -1254,9 +1288,9 @@ pto.tile.gemv_mx_bias(lhs_l0a_mx, lhs_scale, rhs_l0b_mx, rhs_scale, bias_tile, a
 
 ---
 
-## 8.2 Vector compute (L3 — `@pto.simd`)
+## 8.2 Vector compute (L3 — `@pto.tileop`)
 
-Vector compute ops operate on `VRegType` values inside `@pto.simd` sub-kernels. Every vector op takes a `MaskType` predicate that gates which lanes participate; masked-off lanes produce an unspecified result (use the result only where the mask is true, or feed it to a masked store).
+Vector compute ops operate on `VRegType` values inside `@pto.tileop` sub-kernels. Every vector op takes a `MaskType` predicate that gates which lanes participate; masked-off lanes produce an unspecified result (use the result only where the mask is true, or feed it to a masked store).
 
 All vector ops in this section follow the pattern established in Section 7.3 for tile-index and pointer-form addressing. The signatures below use the vector-register form — tile-index forms load into `vreg` first, then compute.
 
@@ -1457,11 +1491,11 @@ dup_highest = pto.vdup(vec, mask32, pto.PositionMode.HIGHEST)
 
 These reduce within each hardware vector lane group (typically 8 groups per vector). Useful when a vector register holds multiple independent sub-vectors that need separate reductions.
 
-#### `pto.vcgadd(vec: VRegType, mask: MaskType) -> ScalarType`
-#### `pto.vcgmax(vec: VRegType, mask: MaskType) -> ScalarType`
-#### `pto.vcgmin(vec: VRegType, mask: MaskType) -> ScalarType`
+#### `pto.vcgadd(vec: VRegType, mask: MaskType) -> VRegType`
+#### `pto.vcgmax(vec: VRegType, mask: MaskType) -> VRegType`
+#### `pto.vcgmin(vec: VRegType, mask: MaskType) -> VRegType`
 
-**Description**: Per-group sum, max, or min. The underlying vector reduction places each group's result in the first lane of that group; the ptodsl surface extracts lane 0 and returns it as a runtime scalar.
+**Description**: Per-group sum, max, or min. Each group's result remains in the first lane of that group and the remaining lanes are zero. The result stays in a vector register; use `pto.vdup(..., position="LOWEST")` only when the lowest group result must be broadcast.
 
 **Parameters**:
 
@@ -1474,14 +1508,14 @@ These reduce within each hardware vector lane group (typically 8 groups per vect
 
 | Return Value | Type | Description |
 |--------------|------|-------------|
-| `result` | `ScalarType` | Lane-0 scalar extracted from the grouped reduction result |
+| `result` | `VRegType` | Per-group reduction results in the first lane of each group |
 
-**Example** — row max and row sum from online softmax:
+**Example** — retain per-group max and sum results:
 
 <!-- ptodsl-doc-test: {"mode":"compile_fragment","fixture":"compute_ops.vector_compute","symbol":"compute_ops_vector_probe","compile":{"BLOCK":128}} -->
 ```python
-row_max = pto.vcgmax(s_row, col_mask)   # grouped reduction, surfaced as a runtime scalar
-row_sum = pto.vcgadd(p_row, col_mask)   # grouped reduction, surfaced as a runtime scalar
+group_max = pto.vcgmax(s_row, col_mask)
+group_sum = pto.vcgadd(p_row, col_mask)
 ```
 
 ---
@@ -1505,6 +1539,18 @@ These combine an arithmetic operation with a math function or activation in a si
 #### `pto.vaxpy(alpha: ScalarType, x: VRegType, y: VRegType, mask: MaskType) -> VRegType`
 
 **Description**: Fused multiply-add: `alpha * x[i] + y[i]`.
+
+---
+
+#### `pto.vmula(acc: VRegType, lhs: VRegType, rhs: VRegType, mask: MaskType) -> VRegType`
+
+**Description**: Fused multiply-add: `acc[i] + lhs[i] * rhs[i]` (single rounding).
+
+---
+
+#### `pto.vmadd(acc: VRegType, lhs: VRegType, rhs: VRegType, mask: MaskType) -> VRegType`
+
+**Description**: Fused multiply-add: `acc[i] * lhs[i] + rhs[i]` (single rounding).
 
 ---
 
@@ -1605,7 +1651,7 @@ exp_f16_odd  = pto.vmulscvt(exp_f32_odd, 1.0, mask, rnd=pto.VcvtRoundMode.A, par
 
 ### 8.2.7 Vector type conversion and packing
 
-These ops change the element type or layout of vector registers. They are distinct from the tile-level `tile.cvt` — they operate on `VRegType` values inside `@pto.simd` and are the explicit micro-op counterparts to higher-level conversion helpers.
+These ops change the element type or layout of vector registers. They are distinct from the tile-level `tile.cvt` — they operate on `VRegType` values inside `@pto.tileop` and are the explicit micro-op counterparts to higher-level conversion helpers.
 
 #### `pto.vcvt(src: VRegType, to_dtype: DType, mask: MaskType, *, rnd: VcvtRoundMode | None = None, sat: VcvtSatMode | None = None, part: VcvtPartMode | None = None) -> VRegType`
 
@@ -1714,13 +1760,13 @@ packed_high = pto.vpack(vec_i32, pto.VPackPart.HIGHER)  # upper 64 lanes -> 128�
 | Full reduction | `vcadd`, `vcmax`, `vcmin` |
 | Group reduction | `vcgadd`, `vcgmax`, `vcgmin` |
 | Scan | `vcpadd` |
-| Fused | `vexpdif`, `vaxpy`, `vaddrelu`, `vsubrelu`, `vmulscvt` |
+| Fused | `vexpdif`, `vaxpy`, `vmula`, `vmadd`, `vaddrelu`, `vsubrelu`, `vmulscvt` |
 | Compare/select | `vcmp`, `vcmps`, `vsel` |
 | Conversion | `vcvt`, `vpack`, `vbitcast`, `pbitcast` |
 
 ---
 
-## 8.3 Cube compute (L3 — `@pto.cube`)
+## 8.3 Cube compute (L3 — `@pto.tileop`)
 
 The Cube unit performs matrix multiplication. Its operands are typed pointers into cube-local buffers — L0A (left operand), L0B (right operand), L0C (accumulator), and BIAS. Cube data movement (`mte_l1_l0a`, `mte_l1_l0b`, `mte_l0c_ub`, etc.) was covered in Section 7.5; this section covers the compute instruction itself.
 
@@ -1824,31 +1870,14 @@ A full cube matmul follows a three-stage pattern: stage operands into L0A/L0B, c
 
 <!-- ptodsl-doc-test: {"mode":"compile_fragment","fixture":"data_movement.cube_helper","symbol":"data_movement_cube_helper_probe","compile":{"BLOCK_M":16,"BLOCK_K":16,"BLOCK_N":16}} -->
 ```python
-@pto.cube
-def qk_matmul(
-    q_tile: pto.Tile,
-    k_tile: pto.Tile,
-    q_l0a: pto.Tile,
-    k_l0b: pto.Tile,
-    s_acc: pto.Tile,
-    s_tile: pto.Tile,
-):
-    m = q_tile.valid_shape[0]
-    k = q_tile.valid_shape[1]
-    n = k_tile.valid_shape[1]
-
-    # Stage: source tiles → L0A / L0B
-    pto.mte_l1_l0a(q_tile.as_ptr(), q_l0a.as_ptr(), m, k)
-    pto.mte_l1_l0b(k_tile.as_ptr(), k_l0b.as_ptr(), k, n, transpose=True)
-
-    # Compute: L0A × L0B → L0C
+@pto.tileop
+def qk_matmul(q_l0a: pto.Tile, k_l0b: pto.Tile, s_acc: pto.Tile,
+              m: pto.index, n: pto.index, k: pto.index):
     pto.mad(q_l0a.as_ptr(), k_l0b.as_ptr(), s_acc.as_ptr(), m, n, k)
-
-    # Writeback: L0C → UB
-    pto.mte_l0c_ub(s_acc.as_ptr(), s_tile.as_ptr(), m, n, n, n, 0)
 ```
 
-The `mte_l1_l0a`/`mte_l1_l0b` stage operands from the authored source tiles into cube-local buffers. `mad` performs the matrix multiply into L0C. `mte_l0c_ub` writes the result back to a UB tile for downstream processing. At this micro-op layer, the operands are explicit pointer views obtained with `.as_ptr()`.
+The caller stages operands into L0A/L0B before invoking the helper and writes
+L0C back afterward. The TileOp contains only the matrix multiply into ACC.
 
 ---
 

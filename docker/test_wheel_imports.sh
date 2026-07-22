@@ -16,9 +16,13 @@
 #   - mlir.dialects.pto
 #   - ptodsl
 #   - from ptodsl import pto, scalar
+#   - ptoas CLI entry
 # and that a minimal PTODSL compile-only probe succeeds.
 
 set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 
 if [[ -n "${PYTHON:-}" ]]; then
   PYTHON_BIN="${PYTHON}"
@@ -28,7 +32,37 @@ else
   PYTHON_BIN="python"
 fi
 
+WHEEL_GLOB="${PTO_TEST_WHEEL_PATH:-}"
+if [[ -z "${WHEEL_GLOB}" && -n "${PTO_WHEEL_DIST_DIR:-}" ]]; then
+  WHEEL_GLOB="${PTO_WHEEL_DIST_DIR}/ptoas-*.whl"
+fi
+if [[ -z "${WHEEL_GLOB}" && -d "${REPO_ROOT}/build/wheel-dist" ]]; then
+  WHEEL_GLOB="${REPO_ROOT}/build/wheel-dist/ptoas-*.whl"
+fi
+
+TEST_TMPDIR=""
+cleanup() {
+  if [[ -n "${TEST_TMPDIR}" && -d "${TEST_TMPDIR}" ]]; then
+    rm -rf "${TEST_TMPDIR}"
+  fi
+}
+trap cleanup EXIT
+
 echo "Testing wheel imports..."
+
+if [[ -n "${WHEEL_GLOB}" ]] && compgen -G "${WHEEL_GLOB}" >/dev/null 2>&1; then
+  TEST_WHEEL="$(compgen -G "${WHEEL_GLOB}" | sort | tail -n 1)"
+  TEST_TMPDIR="$(mktemp -d /tmp/ptoas-wheel-test.XXXXXX)"
+  echo "Installing wheel into isolated venv: ${TEST_WHEEL}"
+  "${PYTHON_BIN}" -m venv "${TEST_TMPDIR}/venv"
+  source "${TEST_TMPDIR}/venv/bin/activate"
+  python -m pip install --no-deps --force-reinstall "${TEST_WHEEL}"
+  PYTHON_BIN="python"
+else
+  echo "No wheel artifact supplied; testing the currently installed environment."
+fi
+
+unset PYTHONPATH
 
 # Test in a clean directory to avoid local imports
 cd /tmp
@@ -44,6 +78,19 @@ echo "Testing ptodsl import..."
 
 echo "Testing ptodsl public imports..."
 "$PYTHON_BIN" -c "from ptodsl import pto, scalar; print('ptodsl public imports imported successfully')"
+
+echo "Testing installed ptoas console entry..."
+PTOAS_VERSION_OUTPUT="$(ptoas --version | tr -d '\r')"
+echo "${PTOAS_VERSION_OUTPUT}"
+if [[ -n "${PTOAS_VERSION:-}" ]]; then
+  EXPECTED_VERSION_OUTPUT="ptoas ${PTOAS_VERSION}"
+  if [[ "${PTOAS_VERSION_OUTPUT}" != "${EXPECTED_VERSION_OUTPUT}" ]]; then
+    echo "Error: expected '${EXPECTED_VERSION_OUTPUT}', got '${PTOAS_VERSION_OUTPUT}'" >&2
+    exit 1
+  fi
+else
+  echo "${PTOAS_VERSION_OUTPUT}" | grep -Eq '^ptoas [0-9]+\.[0-9]+$'
+fi
 
 echo "Testing PTODSL compile-only probe..."
 "$PYTHON_BIN" - <<'PY'

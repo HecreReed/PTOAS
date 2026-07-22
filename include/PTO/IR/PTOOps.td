@@ -62,7 +62,8 @@ def ScalarType :
 // Op Class
 //===----------------------------------------------------------------------===//
 class PTO_TOp<string mnemonic, list<Trait> traits = []>
-    : Op<PTO_Dialect, mnemonic, !listconcat(traits, [ ])>;
+    : Op<PTO_Dialect, mnemonic,
+         !listconcat(traits, [TileOpInterface])>;
 
 class PTO_DpsOp<string mnemonic, list<Trait> traits = []>
     : Op<PTO_Dialect, mnemonic, traits # [DestinationStyleOpInterface]> {
@@ -77,6 +78,7 @@ class PTO_Op<string mnemonic, list<Trait> traits = []>
     : Op<PTO_Dialect, mnemonic, !listconcat(traits, [ ])>;
 
 include "PTO/IR/VPTOOps.td"
+include "PTO/IR/VPTOUbOps.td"
 
 //===----------------------------------------------------------------------===//
 // Pointer/View Ops (for your front-end IR)
@@ -1465,11 +1467,28 @@ def TMovOp  : PTO_TOp<"tmov", [
         return ::mlir::pto::PIPE::PIPE_V;
       }
 
-      // MAT -> L0 (Left/Right/Bias/Scaling) are MTE1 moves.
+      // MAT -> L0A/L0B/Bias moves run on MTE1.
       if ((s == ::mlir::pto::AddressSpace::MAT &&
            (d == ::mlir::pto::AddressSpace::LEFT || d == ::mlir::pto::AddressSpace::RIGHT ||
-            d == ::mlir::pto::AddressSpace::BIAS || d == ::mlir::pto::AddressSpace::SCALING))) {
+            d == ::mlir::pto::AddressSpace::BIAS))) {
         return ::mlir::pto::PIPE::PIPE_MTE1;
+      }
+
+      if (s == ::mlir::pto::AddressSpace::MAT &&
+          d == ::mlir::pto::AddressSpace::SCALING) {
+        // PTOAS uses SCALING for two distinct PTO-ISA destinations. A5 MX
+        // scale tiles are ScaleLeft/ScaleRight loads into L0A/L0B and run on
+        // MTE1. Regular Scaling tiles are FBUF loads (TMOV_M2S) and run on
+        // FIX. PTOViewToMemref preserves the element type but erases the tile
+        // role before sync insertion, so distinguish the MX-only f8E8M0 type.
+        Type dstElemTy;
+        if (auto tb = llvm::dyn_cast<::mlir::pto::TileBufType>(getDst().getType()))
+          dstElemTy = tb.getElementType();
+        else if (auto mr = llvm::dyn_cast<::mlir::MemRefType>(getDst().getType()))
+          dstElemTy = mr.getElementType();
+        if (dstElemTy && llvm::isa<::mlir::pto::F8E8M0Type>(dstElemTy))
+          return ::mlir::pto::PIPE::PIPE_MTE1;
+        return ::mlir::pto::PIPE::PIPE_FIX;
       }
 
       // ACC -> MAT / VEC use FIX in PTO-ISA sync mapping (TMOV_A2M/TMOV_A2V).
@@ -1571,7 +1590,11 @@ def SlotMarkerOp : PTO_Op<"slot_marker", [
 // System/Runtime Query Ops
 // =============================================================================
 
-def GetBlockIdxOp : PTO_Op<"get_block_idx", [Pure]> {
+def GetBlockIdxOp : PTO_Op<"get_block_idx", [
+    Pure,
+    MicroOpInterface,
+    SimtOpInterface
+  ]> {
   let summary = "Get the current block index (core ID).";
   let description = [{
     Returns the linear index of the current compute unit (CUBE Core) within the task.
@@ -1584,7 +1607,11 @@ def GetBlockIdxOp : PTO_Op<"get_block_idx", [Pure]> {
   let assemblyFormat = "attr-dict";
 }
 
-def GetSubBlockIdxOp : PTO_Op<"get_subblock_idx", [Pure]> {
+def GetSubBlockIdxOp : PTO_Op<"get_subblock_idx", [
+    Pure,
+    MicroOpInterface,
+    SimtOpInterface
+  ]> {
   let summary = "Get the current vector core ID.";
   let description = [{
     Returns the ID of the current compute unit (Vector Core).
@@ -1597,7 +1624,11 @@ def GetSubBlockIdxOp : PTO_Op<"get_subblock_idx", [Pure]> {
   let assemblyFormat = "attr-dict";
 }
 
-def GetBlockNumOp : PTO_Op<"get_block_num", [Pure]> {
+def GetBlockNumOp : PTO_Op<"get_block_num", [
+    Pure,
+    MicroOpInterface,
+    SimtOpInterface
+  ]> {
   let summary = "Get the total number of blocks (cores).";
   let description = [{
     Returns the total number of compute units (Blocks) configured for the current task.
@@ -1609,7 +1640,11 @@ def GetBlockNumOp : PTO_Op<"get_block_num", [Pure]> {
   let assemblyFormat = "attr-dict";
 }
 
-def GetSubBlockNumOp : PTO_Op<"get_subblock_num", [Pure]> {
+def GetSubBlockNumOp : PTO_Op<"get_subblock_num", [
+    Pure,
+    MicroOpInterface,
+    SimtOpInterface
+  ]> {
   let summary = "Get the number of vector cores.";
   let description = [{
     Returns the total number of vector compute units.
@@ -1697,6 +1732,26 @@ class PTO_SectionOp<string mnemonic>
 
 def SectionCubeOp : PTO_SectionOp<"section.cube">;
 def SectionVectorOp : PTO_SectionOp<"section.vector">;
+
+def SectionSimtOp : PTO_Op<"section.simt", [SingleBlock, NoTerminator]> {
+  let summary = "Container for inline SIMT code";
+  let description = [{
+    `pto.section.simt` keeps an inline SIMT body in the enclosing kernel
+    function until downstream PTOAS lowering consumes it.  It is a
+    source-level carrier for transformations that need to observe the lexical
+    relationship between surrounding code and SIMT regions.
+
+    Launch dimensions are explicit static i32 attributes.  The textual launch
+    dimension order matches `pto.simt_launch`:
+    `<<<dimX, dimY, dimZ>>>`.
+  }];
+  let arguments = (ins I32Attr:$dimX, I32Attr:$dimY, I32Attr:$dimZ);
+  let regions = (region SizedRegion<1>:$body);
+  let assemblyFormat = [{
+    `<` `<` `<` $dimX `,` $dimY `,` $dimZ `>` `>` `>` $body attr-dict
+  }];
+  let hasVerifier = 1;
+}
 
 //===----------------------------------------------------------------------===//
 // Tile Fusion Region Ops
@@ -2479,7 +2534,9 @@ def TAllocOp : PTO_TOp<"talloc", [
   }];
 }
 
-def TAssignOp : PTO_Op<"tassign", [Pure]> {
+def TAssignOp : PTO_Op<"tassign", [
+    Pure
+  ]> {
   let summary = "Rebind a declared tile handle to a runtime address";
   let description = [{
     Rebinds an existing tile handle to a new address. This op is intended for
@@ -2613,6 +2670,104 @@ def LocalArraySetOp : PTO_Op<"local_array_set"> {
   let assemblyFormat = [{
     $array `[` $indices `]` `,` $value attr-dict
       `:` qualified(type($array)) `,` type($value)
+  }];
+}
+
+//===----------------------------------------------------------------------===//
+// Stack-local heterogeneous aggregate (struct)
+//===----------------------------------------------------------------------===//
+//
+// Mirrors the `local_array` triad (declare / get / set) for a generic
+// heterogeneous scalar-unit aggregate. The struct's address is decided by the
+// host C++ compiler at codegen time, never by PTO memory planning or
+// `pto.pointer_cast`. Field positions are constant (struct semantics), so
+// `get` / `set` carry a constant `path` of field indices that may descend
+// through nested structs. The path always ends at a scalar; a nested struct is
+// traversed by a longer path, never handed back as a value.
+
+def DeclareStructOp : PTO_Op<"declare_struct"> {
+  let summary = "Declare a stack-local heterogeneous aggregate";
+  let description = [{
+    Lowers to a plain C++ stack variable like `PtoStruct_X s;`. Field types are
+    restricted to scalars (integers of width 8/16/32/64, f16/bf16/f32/f64) or a
+    nested `!pto.struct`.
+
+    This op does not participate in PTO memory planning. The resulting struct's
+    address is determined by the host C++ compiler.
+
+    The struct is stack storage owned by the scope that declares it, and a
+    `!pto.struct` value lowers to a pointer to that storage. Handing the value
+    to a terminator would publish the address outside the owning scope, so it is
+    rejected: returning it would leave the caller holding a pointer to a dead
+    frame. Module-level provenance validation also rejects function results and
+    derived operation results of this type, so aliases cannot launder that
+    address past the direct-use check. Struct storage originates from this op
+    or is received through a function argument.
+    Since `pto.struct_set` mutates in place, a struct never needs to be returned
+    or yielded — declare it in the outer scope and pass it down as a function
+    argument instead.
+  }];
+
+  let results = (outs StructType:$s);
+
+  let hasVerifier = 1;
+
+  let assemblyFormat = [{
+    attr-dict `->` qualified(type($s))
+  }];
+}
+
+def StructGetOp : PTO_Op<"struct_get"> {
+  let summary = "Read a field from a stack-local struct by constant path";
+  let description = [{
+    Reads the field reached by following the constant `path` of field indices
+    from the struct, descending through nested structs. Lowers to `s.fA.fB...`
+    member access, read into a fresh variable so the SSA value keeps its value
+    if the struct is mutated later (mirrors `pto.local_array_get`).
+
+    The path must end at a scalar field, and the result type must equal that
+    field's type. A path stopping on a nested `!pto.struct` is rejected —
+    extend it to reach a scalar inside.
+  }];
+
+  let arguments = (ins
+    StructType:$s,
+    DenseI64ArrayAttr:$path
+  );
+  let results = (outs AnyType:$value);
+
+  let hasVerifier = 1;
+
+  let assemblyFormat = [{
+    $s custom<StructPath>($path) attr-dict
+      `:` qualified(type($s)) `->` type($value)
+  }];
+}
+
+def StructSetOp : PTO_Op<"struct_set"> {
+  let summary = "Write a field into a stack-local struct by constant path";
+  let description = [{
+    Writes `value` into the field reached by following the constant `path` of
+    field indices, descending through nested structs. Lowers to
+    `s.fA.fB... = value;`.
+
+    The path must end at a scalar field, and the value type must equal that
+    field's type. A path stopping on a nested `!pto.struct` is rejected —
+    extend it to reach a scalar inside.
+  }];
+
+  let arguments = (ins
+    StructType:$s,
+    DenseI64ArrayAttr:$path,
+    AnyType:$value
+  );
+  let results = (outs);
+
+  let hasVerifier = 1;
+
+  let assemblyFormat = [{
+    $s custom<StructPath>($path) `,` $value attr-dict
+      `:` qualified(type($s)) `,` type($value)
   }];
 }
 
@@ -2827,6 +2982,27 @@ def GetBufOp : PTO_Op<"get_buf"> {
   }];
 }
 
+def GetBufDynOp : PTO_Op<"get_buf_dyn"> {
+  let summary = "Acquire a buffer-id token (dynamic buf-id)";
+  let description = [{
+    Dynamic variant of `pto.get_buf` where the buffer-id is provided as an
+    SSA value (index) instead of a static integer attribute. This enables
+    runtime-computed buf_id patterns such as SIMT ping-pong buffering
+    (e.g. `iter & 1`).
+  }];
+
+  let arguments = (ins
+    PTO_PipeLikeAttr:$op_type,
+    Index:$buf_id,
+    DefaultValuedAttr<I32Attr, "0">:$mode
+  );
+
+  let results = (outs);
+
+  let hasVerifier = 1;
+  let hasCustomAssemblyFormat = 1;
+}
+
 def RlsBufOp : PTO_Op<"rls_buf"> {
   let summary = "Release a buffer-id token for a sync op type (A5)";
   let description = [{
@@ -2851,6 +3027,25 @@ def RlsBufOp : PTO_Op<"rls_buf"> {
     static ::mlir::ParseResult parse(::mlir::OpAsmParser &parser,
                                      ::mlir::OperationState &result);
   }];
+}
+
+def RlsBufDynOp : PTO_Op<"rls_buf_dyn"> {
+  let summary = "Release a buffer-id token (dynamic buf-id)";
+  let description = [{
+    Dynamic variant of `pto.rls_buf` where the buffer-id is provided as an
+    SSA value (index) instead of a static integer attribute.
+  }];
+
+  let arguments = (ins
+    PTO_PipeLikeAttr:$op_type,
+    Index:$buf_id,
+    DefaultValuedAttr<I32Attr, "0">:$mode
+  );
+
+  let results = (outs);
+
+  let hasVerifier = 1;
+  let hasCustomAssemblyFormat = 1;
 }
 
 def SyncSetOp : PTO_Op<"sync.set"> {
@@ -2894,6 +3089,48 @@ def BarrierOp : PTO_Op<"barrier"> {
   let summary = "Intra-pipeline memory barrier";
   let arguments = (ins PTO_PipeAttr:$pipe);
   let assemblyFormat = "$pipe attr-dict";
+}
+
+def CmoCacheInvalidOp : PTO_Op<"cmo.cacheinvalid"> {
+  let summary = "Perform cache maintenance for a memory space";
+  let description = [{
+    Cache maintenance operation for the specified memory space.
+
+    The whole-cache form lowers to PTO-ISA's two-argument
+    `dcci((__gm__ void*)0, cache_line_t::ENTIRE_DATA_CACHE)`.
+
+    The single-cache-line form carries the GM payload address selected by the
+    producer DSL/user and lowers to
+    `dcci(addr, cache_line_t::SINGLE_CACHE_LINE)`.
+
+    This op is an explicit CMO boundary. PTOAS no longer runs the historical
+    MemoryConsistency analysis pass that consumed marker-only CMO ops or inferred
+    signal/payload pipe drains, so precise placement and coverage are the
+    producer DSL/user's responsibility.
+  }];
+
+  let arguments = (ins
+    Optional<AnyType>:$addr,
+    PTO_AddressSpaceAttr:$space
+  );
+
+  let hasVerifier = 1;
+  let hasCustomAssemblyFormat = 1;
+}
+
+def FenceBarrierAllOp : PTO_Op<"fence.barrier_all"> {
+  let summary = "All-direction memory fence for a visibility scope";
+  let description = [{
+    Memory fence for a visibility scope. Around signal/payload communication it
+    can be used as the producer-side publish barrier or the consumer-side
+    acquire barrier depending on placement. In EmitC, `scope = gm` and
+    `scope = all` conservatively drain MTE2, MTE3, and FIX before lowering to
+    `dsb(DSB_DDR)`, so users do not need to separately model those producer
+    pipe classes before a GM visibility fence.
+  }];
+
+  let arguments = (ins PTO_FenceScopeAttr:$scope);
+  let assemblyFormat = "$scope attr-dict";
 }
 
 def TSyncOp : PTO_TOp<"tsync"> {
@@ -3037,7 +3274,7 @@ def PrintOp : PTO_Op<"print", [MemoryEffects<[MemRead, MemWrite]>]> {
   }];
 }
 
-def TrapOp : PTO_Op<"trap"> {
+def TrapOp : PTO_Op<"trap", [MicroOpInterface, SimtOpInterface]> {
   let summary = "Trap: abort execution (no operands).";
   let description = [{
     Inserts a trap to stop execution. No arguments, no results.
@@ -3053,6 +3290,7 @@ def TrapOp : PTO_Op<"trap"> {
 def MGatherOp : PTO_TOp<"mgather", [
   PTO_DpsInitOpInterface,
   OpPipeInterface,
+  MteOpInterface,
   DeclareOpInterfaceMethods<MemoryEffectsOpInterface>
 ]> {
   let summary = "Gather-load elements from memory into a tile using per-element indices (tile world, ins/outs).";
@@ -3272,6 +3510,7 @@ def TGetScaleAddrOp : PTO_TOp<"tget_scale_addr", [
 def MScatterOp : PTO_TOp<"mscatter", [
   PTO_DpsInitOpInterface,
   OpPipeInterface,
+  MteOpInterface,
   DeclareOpInterfaceMethods<MemoryEffectsOpInterface>
 ]> {
   let summary = "Scatter-store elements from a tile into memory using per-element indices (tile world, ins/outs).";
@@ -3366,6 +3605,44 @@ def TAddOp : PTO_TOp<"tadd", [
   let summary = "Elementwise add of two tiles ";
   let description = [{
     For each element (i, j): dst[i,j] = src0[i,j] + src1[i,j].
+  }];
+
+  let arguments = (ins
+    PTODpsType:$src0,
+    PTODpsType:$src1,
+    PTODpsType:$dst
+  );
+
+  let results = (outs);
+
+  let assemblyFormat = [{
+    `ins` `(` $src0 `,` $src1 `:` qualified(type($src0)) `,` qualified(type($src1)) `)`
+    `outs` `(` $dst `:` qualified(type($dst) ) `)`
+    attr-dict
+  }];
+
+  let hasVerifier = 1;
+
+  let extraClassDeclaration = [{
+    ::mlir::pto::PIPE getPipe() {
+      return ::mlir::pto::PIPE::PIPE_V;
+    }
+
+    ::mlir::MutableOperandRange getDpsInitsMutable() {
+        return getDstMutable();
+    }
+  }];
+}
+
+def TAddReluOp : PTO_TOp<"taddrelu", [
+  PTO_DpsInitOpInterface,
+  OpPipeInterface,
+  DeclareOpInterfaceMethods<MemoryEffectsOpInterface>
+]> {
+  let summary = "Fused elementwise add + ReLU of two tiles";
+  let description = [{
+    For each element (i, j): dst[i,j] = max(0, src0[i,j] + src1[i,j]).
+    Maps to the fused VADDRELU intrinsic on C220.
   }];
 
   let arguments = (ins

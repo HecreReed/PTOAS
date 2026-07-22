@@ -1,0 +1,60 @@
+// Copyright (c) 2026 Huawei Technologies Co., Ltd.
+// This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+// CANN Open Software License Agreement Version 2.0 (the "License").
+// Please refer to the License for details. You may not use this file except in compliance with the License.
+// THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+// INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+// See LICENSE in the root of the software repository for the full text of the License.
+
+// RUN: ptoas --pto-arch=a3 --pto-backend=vpto --emit-vpto-llvm-ir %s -o %t --mlir-print-ir-after=expand-strided-metadata 2>&1 | FileCheck %s --check-prefix=LOAD
+// RUN: ptoas --pto-arch=a3 --pto-backend=vpto --emit-vpto-llvm-ir %s -o %t --mlir-print-ir-after=expand-strided-metadata 2>&1 | FileCheck %s --check-prefix=STORE
+
+module attributes {pto.target_arch = "a3", pto.kernel_kind = #pto.kernel_kind<vector>} {
+  // LOAD-LABEL: func.func @tload_subview_offset
+  func.func @tload_subview_offset(%src: !pto.ptr<f32, gm>) attributes {pto.aicore} {
+    %c0 = arith.constant 0 : index
+    %c1 = arith.constant 1 : index
+    %c16 = arith.constant 16 : index
+    %c17 = arith.constant 17 : index
+    %c32 = arith.constant 32 : index
+    %c40 = arith.constant 40 : index
+    %view = pto.make_tensor_view %src, shape = [%c17, %c32], strides = [%c40, %c1]
+      : !pto.tensor_view<?x?xf32>
+    %part = pto.partition_view %view, offsets = [%c1, %c0], sizes = [%c16, %c32]
+      : !pto.tensor_view<?x?xf32> -> !pto.partition_tensor_view<16x32xf32>
+    %tile = pto.alloc_tile
+      : !pto.tile_buf<loc=vec, dtype=f32, rows=16, cols=32, v_row=16, v_col=32, blayout=row_major, slayout=none_box, fractal=512, pad=0>
+    pto.tload ins(%part : !pto.partition_tensor_view<16x32xf32>)
+      outs(%tile : !pto.tile_buf<loc=vec, dtype=f32, rows=16, cols=32, v_row=16, v_col=32, blayout=row_major, slayout=none_box, fractal=512, pad=0>)
+    // LOAD: %[[ROW_STRIDE:.*]] = arith.constant 160 : i64
+    // LOAD: %[[OFFSET:.*]] = arith.constant 160 : index
+    // LOAD: pto.addptr {{.*}}, %[[OFFSET]]
+    // LOAD: pto.mte_gm_ub {{.*}}nburst({{.*}}, %[[ROW_STRIDE]],
+    // LOAD-NOT: pto.tload
+    return
+  }
+
+  // STORE-LABEL: func.func @tstore_subview_offset
+  func.func @tstore_subview_offset(%dst: !pto.ptr<f32, gm>) attributes {pto.aicore} {
+    %c0 = arith.constant 0 : index
+    %c1 = arith.constant 1 : index
+    %c16 = arith.constant 16 : index
+    %c17 = arith.constant 17 : index
+    %c32 = arith.constant 32 : index
+    %c40 = arith.constant 40 : index
+    %view = pto.make_tensor_view %dst, shape = [%c17, %c32], strides = [%c40, %c1]
+      : !pto.tensor_view<?x?xf32>
+    %part = pto.partition_view %view, offsets = [%c1, %c0], sizes = [%c16, %c32]
+      : !pto.tensor_view<?x?xf32> -> !pto.partition_tensor_view<16x32xf32>
+    %tile = pto.alloc_tile
+      : !pto.tile_buf<loc=vec, dtype=f32, rows=16, cols=32, v_row=16, v_col=32, blayout=row_major, slayout=none_box, fractal=512, pad=0>
+    pto.tstore ins(%tile : !pto.tile_buf<loc=vec, dtype=f32, rows=16, cols=32, v_row=16, v_col=32, blayout=row_major, slayout=none_box, fractal=512, pad=0>)
+      outs(%part : !pto.partition_tensor_view<16x32xf32>)
+    // STORE: %[[STORE_ROW_STRIDE:.*]] = arith.constant 160 : i64
+    // STORE: %[[STORE_OFFSET:.*]] = arith.constant 160 : index
+    // STORE: pto.addptr {{.*}}, %[[STORE_OFFSET]]
+    // STORE: pto.mte_ub_gm {{.*}}nburst({{.*}}, {{.*}}, %[[STORE_ROW_STRIDE]])
+    // STORE-NOT: pto.tstore
+    return
+  }
+}

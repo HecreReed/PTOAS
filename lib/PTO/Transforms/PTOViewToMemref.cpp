@@ -1604,7 +1604,32 @@ struct PTOViewToMemrefPass
     ModuleOp mod = getOperation();
     MLIRContext *ctx = &getContext();
 
-    for (auto func : mod.getOps<func::FuncOp>()) {
+    // PTODSL TileOp input is a container module whose executable functions
+    // live in a kernel-kind child module. Process only child modules that
+    // actually contain a TileOp helper: legacy child modules can retain
+    // frontend pipe ops whose TensorView ABI must not be lowered here.
+    SmallVector<func::FuncOp> funcs;
+    for (func::FuncOp func : mod.getOps<func::FuncOp>())
+      funcs.push_back(func);
+    mod.walk([&](ModuleOp childModule) {
+      if (childModule == mod)
+        return;
+
+      bool hasTileOpHelper = false;
+      for (func::FuncOp func : childModule.getOps<func::FuncOp>()) {
+        if (func->hasAttr("pto.tileop.helper")) {
+          hasTileOpHelper = true;
+          break;
+        }
+      }
+      if (!hasTileOpHelper)
+        return;
+
+      for (func::FuncOp func : childModule.getOps<func::FuncOp>())
+        funcs.push_back(func);
+    });
+
+    for (func::FuncOp func : funcs) {
       // ------------------------------------------------------------------
       // Stage 0: ensure inttoptr values remain scalar-load/store only.
       // ------------------------------------------------------------------
@@ -2512,8 +2537,8 @@ struct PTOViewToMemrefPass
         Value rhs = op->getOperand(1);
         Value dst = op->getOperand(kThirdOperandIndex);
 
-        rewriter.replaceOpWithNewOp<pto::TMatmulOp>(
-            op, TypeRange{}, lhs, rhs, dst, op.getAccPhaseAttr());
+        replaceOpWithClonedAttrs<pto::TMatmulOp>(
+            rewriter, op, TypeRange{}, lhs, rhs, dst, op.getAccPhaseAttr());
       }
 
       // --- TMatmulAccOp [Acc, Lhs, Rhs, Dst] ---
@@ -2522,8 +2547,8 @@ struct PTOViewToMemrefPass
       for (auto op : matmulAccs) {
         IRRewriter rewriter(ctx);
         rewriter.setInsertionPoint(op);
-        rewriter.replaceOpWithNewOp<pto::TMatmulAccOp>(
-          op, TypeRange{}, 
+        replaceOpWithClonedAttrs<pto::TMatmulAccOp>(
+          rewriter, op, TypeRange{},
           op->getOperand(0), op->getOperand(1),
           op->getOperand(kThirdOperandIndex),
           op->getOperand(kFourthOperandIndex), op.getAccPhaseAttr());
@@ -2535,8 +2560,8 @@ struct PTOViewToMemrefPass
       for (auto op : matmulBiass) {
         IRRewriter rewriter(ctx);
         rewriter.setInsertionPoint(op);
-        rewriter.replaceOpWithNewOp<pto::TMatmulBiasOp>(
-          op, TypeRange{}, 
+        replaceOpWithClonedAttrs<pto::TMatmulBiasOp>(
+          rewriter, op, TypeRange{},
           op->getOperand(0), op->getOperand(1),
           op->getOperand(kThirdOperandIndex),
           op->getOperand(kFourthOperandIndex), op.getAccPhaseAttr());
@@ -2548,8 +2573,8 @@ struct PTOViewToMemrefPass
       for (auto op : matmulMxs) {
         IRRewriter rewriter(ctx);
         rewriter.setInsertionPoint(op);
-        rewriter.replaceOpWithNewOp<pto::TMatmulMxOp>(
-          op, TypeRange{}, 
+        replaceOpWithClonedAttrs<pto::TMatmulMxOp>(
+          rewriter, op, TypeRange{},
           op->getOperand(0), op->getOperand(1),
           op->getOperand(kThirdOperandIndex),
           op->getOperand(kFourthOperandIndex),
@@ -2562,8 +2587,8 @@ struct PTOViewToMemrefPass
       for (auto op : matmulMxAccs) {
         IRRewriter rewriter(ctx);
         rewriter.setInsertionPoint(op);
-        rewriter.replaceOpWithNewOp<pto::TMatmulMxAccOp>(
-          op, TypeRange{}, 
+        replaceOpWithClonedAttrs<pto::TMatmulMxAccOp>(
+          rewriter, op, TypeRange{},
           op->getOperand(0), op->getOperand(1),
           op->getOperand(kThirdOperandIndex),
           op->getOperand(kFourthOperandIndex),
@@ -2577,8 +2602,8 @@ struct PTOViewToMemrefPass
       for (auto op : matmulMxBiass) {
         IRRewriter rewriter(ctx);
         rewriter.setInsertionPoint(op);
-        rewriter.replaceOpWithNewOp<pto::TMatmulMxBiasOp>(
-          op, TypeRange{}, 
+        replaceOpWithClonedAttrs<pto::TMatmulMxBiasOp>(
+          rewriter, op, TypeRange{},
           op->getOperand(0), op->getOperand(1),
           op->getOperand(kThirdOperandIndex),
           op->getOperand(kFourthOperandIndex),
@@ -2597,8 +2622,8 @@ struct PTOViewToMemrefPass
         Value rhs = op->getOperand(1);
         Value dst = op->getOperand(kThirdOperandIndex);
 
-        rewriter.replaceOpWithNewOp<pto::TGemvOp>(
-          op, TypeRange{}, lhs, rhs, dst, op.getAccPhaseAttr());
+        replaceOpWithClonedAttrs<pto::TGemvOp>(
+          rewriter, op, TypeRange{}, lhs, rhs, dst, op.getAccPhaseAttr());
       }
 
       // --- TGemvAccOp [Acc, Lhs, Rhs, Dst] ---
@@ -2607,8 +2632,8 @@ struct PTOViewToMemrefPass
       for (auto op : gemvAccs) {
         IRRewriter rewriter(ctx);
         rewriter.setInsertionPoint(op);
-        rewriter.replaceOpWithNewOp<pto::TGemvAccOp>(
-          op, TypeRange{}, 
+        replaceOpWithClonedAttrs<pto::TGemvAccOp>(
+          rewriter, op, TypeRange{},
           op->getOperand(0), op->getOperand(1),
           op->getOperand(kThirdOperandIndex),
           op->getOperand(kFourthOperandIndex), op.getAccPhaseAttr());
@@ -2620,8 +2645,8 @@ struct PTOViewToMemrefPass
       for (auto op : gemvBiass) {
         IRRewriter rewriter(ctx);
         rewriter.setInsertionPoint(op);
-        rewriter.replaceOpWithNewOp<pto::TGemvBiasOp>(
-          op, TypeRange{}, 
+        replaceOpWithClonedAttrs<pto::TGemvBiasOp>(
+          rewriter, op, TypeRange{},
           op->getOperand(0), op->getOperand(1),
           op->getOperand(kThirdOperandIndex),
           op->getOperand(kFourthOperandIndex), op.getAccPhaseAttr());
@@ -2633,8 +2658,8 @@ struct PTOViewToMemrefPass
       for (auto op : gemvMxs) {
         IRRewriter rewriter(ctx);
         rewriter.setInsertionPoint(op);
-        rewriter.replaceOpWithNewOp<pto::TGemvMxOp>(
-          op, TypeRange{},
+        replaceOpWithClonedAttrs<pto::TGemvMxOp>(
+          rewriter, op, TypeRange{},
           op->getOperand(0), op->getOperand(1),
           op->getOperand(kThirdOperandIndex),
           op->getOperand(kFourthOperandIndex),
@@ -2647,8 +2672,8 @@ struct PTOViewToMemrefPass
       for (auto op : gemvMxAccs) {
         IRRewriter rewriter(ctx);
         rewriter.setInsertionPoint(op);
-        rewriter.replaceOpWithNewOp<pto::TGemvMxAccOp>(
-          op, TypeRange{},
+        replaceOpWithClonedAttrs<pto::TGemvMxAccOp>(
+          rewriter, op, TypeRange{},
           op->getOperand(0), op->getOperand(1),
           op->getOperand(kThirdOperandIndex),
           op->getOperand(kFourthOperandIndex),
@@ -2662,8 +2687,8 @@ struct PTOViewToMemrefPass
       for (auto op : gemvMxBiass) {
         IRRewriter rewriter(ctx);
         rewriter.setInsertionPoint(op);
-        rewriter.replaceOpWithNewOp<pto::TGemvMxBiasOp>(
-          op, TypeRange{},
+        replaceOpWithClonedAttrs<pto::TGemvMxBiasOp>(
+          rewriter, op, TypeRange{},
           op->getOperand(0), op->getOperand(1),
           op->getOperand(kThirdOperandIndex),
           op->getOperand(kFourthOperandIndex),
@@ -2677,8 +2702,8 @@ struct PTOViewToMemrefPass
       for (auto op : movs) {
         IRRewriter rewriter(ctx);
         rewriter.setInsertionPoint(op);
-        rewriter.replaceOpWithNewOp<pto::TMovOp>(
-            op, TypeRange{}, op.getSrc(), op.getDst(), op.getFp(),
+        replaceOpWithClonedAttrs<pto::TMovOp>(
+            rewriter, op, TypeRange{}, op.getSrc(), op.getDst(), op.getFp(),
             op.getPreQuantScalar(), op.getAccToVecModeAttr(),
             op.getReluPreModeAttr());
       }
@@ -2701,7 +2726,8 @@ struct PTOViewToMemrefPass
           return;
         }
 
-        rewriter.replaceOpWithNewOp<pto::TAbsOp>(
+        replaceOpWithClonedAttrs<pto::TAbsOp>(
+            rewriter,
             op,
             TypeRange{},
             src,
@@ -2812,7 +2838,8 @@ struct PTOViewToMemrefPass
           return;
         }
 
-        rewriter.replaceOpWithNewOp<pto::TAndOp>(
+        replaceOpWithClonedAttrs<pto::TAndOp>(
+            rewriter,
             op,
             TypeRange{},
             src0,
@@ -2901,7 +2928,8 @@ struct PTOViewToMemrefPass
           return;
         }
 
-        rewriter.replaceOpWithNewOp<pto::TAndSOp>(
+        replaceOpWithClonedAttrs<pto::TAndSOp>(
+            rewriter,
             op,
             TypeRange{},
             src,
@@ -2959,17 +2987,13 @@ struct PTOViewToMemrefPass
           return;
         }
 
-         auto newOp = rewriter.create<pto::TCmpOp>(
-            op.getLoc(),
+        replaceOpWithClonedAttrs<pto::TCmpOp>(
+            rewriter,
+            op,
             TypeRange{},
             src0,
             src1,
             dst);
-         
-          if (auto a = op.getCmpModeAttr())
-            newOp->setAttr("cmpMode", a);
-
-        rewriter.replaceOp(op, newOp->getResults()); // 0 results -> OK
       }
 
       DefaultInlineVector<mlir::pto::TCmpSOp> cmpsops;
@@ -3000,15 +3024,14 @@ struct PTOViewToMemrefPass
         }
 
         auto cmpMode = op.getCmpModeAttr();
-        auto newOp = rewriter.create<pto::TCmpSOp>(
-            op.getLoc(),
+        replaceOpWithClonedAttrs<pto::TCmpSOp>(
+            rewriter,
+            op,
             TypeRange{},
             src,
             scalar,
             cmpMode,
             dst);
-
-        rewriter.replaceOp(op, newOp->getResults()); // 0 results -> OK
       }
 
       DefaultInlineVector<mlir::pto::TColExpandOp> colexpand;
@@ -3029,7 +3052,8 @@ struct PTOViewToMemrefPass
           return;
         }
 
-        rewriter.replaceOpWithNewOp<pto::TColExpandOp>(
+        replaceOpWithClonedAttrs<pto::TColExpandOp>(
+            rewriter,
             op,
             TypeRange{},
             src,
@@ -3054,7 +3078,8 @@ struct PTOViewToMemrefPass
           return;
         }
 
-        rewriter.replaceOpWithNewOp<pto::TColMaxOp>(
+        replaceOpWithClonedAttrs<pto::TColMaxOp>(
+            rewriter,
             op,
             TypeRange{},
             src,
@@ -3079,7 +3104,8 @@ struct PTOViewToMemrefPass
           return;
         }
 
-        rewriter.replaceOpWithNewOp<pto::TColMinOp>(
+        replaceOpWithClonedAttrs<pto::TColMinOp>(
+            rewriter,
             op,
             TypeRange{},
             src,
@@ -3108,7 +3134,8 @@ struct PTOViewToMemrefPass
           return;
         }
 
-        rewriter.replaceOpWithNewOp<pto::TColExpandMulOp>(
+        replaceOpWithClonedAttrs<pto::TColExpandMulOp>(
+            rewriter,
             op,
             TypeRange{},
             src0,
@@ -3138,7 +3165,8 @@ struct PTOViewToMemrefPass
           return;
         }
 
-        rewriter.replaceOpWithNewOp<pto::TColExpandMaxOp>(
+        replaceOpWithClonedAttrs<pto::TColExpandMaxOp>(
+            rewriter,
             op,
             TypeRange{},
             src0,
@@ -3168,7 +3196,8 @@ struct PTOViewToMemrefPass
           return;
         }
 
-        rewriter.replaceOpWithNewOp<pto::TColExpandMinOp>(
+        replaceOpWithClonedAttrs<pto::TColExpandMinOp>(
+            rewriter,
             op,
             TypeRange{},
             src0,
@@ -3257,15 +3286,14 @@ struct PTOViewToMemrefPass
         auto rmodeAttr = op.getRmodeAttr(); // PTO_RoundModeAttr
         auto satModeAttr = op.getSatModeAttr();
 
-        auto newOp = rewriter.create<pto::TCvtOp>(
-            op.getLoc(),
+        replaceOpWithClonedAttrs<pto::TCvtOp>(
+            rewriter,
+            op,
             TypeRange{},
             src,
             dst,
             rmodeAttr,
             satModeAttr);
-
-        rewriter.replaceOp(op, newOp->getResults());
       }
 
       DefaultInlineVector<mlir::pto::TDivOp> divops;
@@ -3504,7 +3532,8 @@ struct PTOViewToMemrefPass
           return;
         }
 
-        rewriter.replaceOpWithNewOp<pto::TFillPadOp>(
+        replaceOpWithClonedAttrs<pto::TFillPadOp>(
+            rewriter,
             op,
             TypeRange{},
             src,
@@ -3531,7 +3560,8 @@ struct PTOViewToMemrefPass
           return;
         }
 
-        rewriter.replaceOpWithNewOp<pto::TFillPadInplaceOp>(
+        replaceOpWithClonedAttrs<pto::TFillPadInplaceOp>(
+            rewriter,
             op,
             TypeRange{},
             src,
@@ -3709,12 +3739,8 @@ struct PTOViewToMemrefPass
           return;
         }
 
-        rewriter.replaceOpWithNewOp<pto::TGatherBOp>(
-            op,
-            TypeRange{},
-            src,
-            offsets,
-            dst);
+        replaceOpWithClonedAttrs<pto::TGatherBOp>(
+            rewriter, op, TypeRange{}, src, offsets, dst);
       }
 
       DefaultInlineVector<mlir::pto::TLogOp> logops;
@@ -3735,12 +3761,14 @@ struct PTOViewToMemrefPass
           return;
         }
 
-        rewriter.replaceOpWithNewOp<pto::TLogOp>(
+        auto attrs = op->getAttrs();
+        auto newOp = rewriter.replaceOpWithNewOp<pto::TLogOp>(
             op,
             TypeRange{},
             src,
             dst,
             op.getPrecisionTypeAttr());
+        newOp->setAttrs(attrs);
       }
 
       DefaultInlineVector<mlir::pto::TLReluOp> lreluops;
@@ -3763,7 +3791,8 @@ struct PTOViewToMemrefPass
           return;
         }
 
-        rewriter.replaceOpWithNewOp<pto::TLReluOp>(
+        replaceOpWithClonedAttrs<pto::TLReluOp>(
+            rewriter,
             op,
             TypeRange{},
             src,
@@ -3960,6 +3989,7 @@ struct PTOViewToMemrefPass
       for (auto op : mrgsortops) {
         IRRewriter rewriter(ctx);
         rewriter.setInsertionPoint(op);
+        auto attrs = op->getAttrs();
 
         if (op.isFormat1()) {
           Value src = op.getSrc();
@@ -3974,7 +4004,7 @@ struct PTOViewToMemrefPass
             return;
           }
 
-          rewriter.replaceOpWithNewOp<pto::TMrgSortOp>(
+          auto newOp = rewriter.replaceOpWithNewOp<pto::TMrgSortOp>(
               op,
               TypeRange{},
               ValueRange{src},
@@ -3983,6 +4013,7 @@ struct PTOViewToMemrefPass
               Value() /*tmp*/,
               Value() /*excuted*/,
               op.getExhaustedAttr());
+          newOp->setAttrs(attrs);
         } else if (op.isFormat2()) {
           bool allMemRef = true;
           for (Value v : op.getSrcs())
@@ -4012,7 +4043,7 @@ struct PTOViewToMemrefPass
             return;
           }
 
-          rewriter.replaceOpWithNewOp<pto::TMrgSortOp>(
+          auto newOp = rewriter.replaceOpWithNewOp<pto::TMrgSortOp>(
               op,
               TypeRange{},
               op.getSrcs(),
@@ -4021,6 +4052,7 @@ struct PTOViewToMemrefPass
               tmp,
               excuted,
               op.getExhaustedAttr());
+          newOp->setAttrs(attrs);
         } else {
           op.emitError("tmrgsort must be format1 or format2");
           signalPassFailure();
@@ -4046,7 +4078,8 @@ struct PTOViewToMemrefPass
           return;
         }
 
-        rewriter.replaceOpWithNewOp<pto::TNegOp>(
+        replaceOpWithClonedAttrs<pto::TNegOp>(
+            rewriter,
             op,
             TypeRange{},
             src,
@@ -4071,7 +4104,8 @@ struct PTOViewToMemrefPass
           return;
         }
 
-        rewriter.replaceOpWithNewOp<pto::TNotOp>(
+        replaceOpWithClonedAttrs<pto::TNotOp>(
+            rewriter,
             op,
             TypeRange{},
             src,
@@ -4098,8 +4132,10 @@ struct PTOViewToMemrefPass
           return;
         }
 
-        rewriter.replaceOpWithNewOp<pto::TOrOp>(
+        replaceOpWithClonedAttrs<pto::TOrOp>(
+            rewriter,
             op,
+            TypeRange{},
             src0,
             src1,
             dst);
@@ -4125,7 +4161,8 @@ struct PTOViewToMemrefPass
           return;
         }
 
-        rewriter.replaceOpWithNewOp<pto::TOrSOp>(
+        replaceOpWithClonedAttrs<pto::TOrSOp>(
+            rewriter,
             op,
             TypeRange{},
             src,
@@ -4153,11 +4190,13 @@ struct PTOViewToMemrefPass
           return;
         }
 
-        rewriter.replaceOpWithNewOp<pto::TPartAddOp>(
+        auto attrs = op->getAttrs();
+        auto newOp = rewriter.replaceOpWithNewOp<pto::TPartAddOp>(
             op,
             src0,
             src1,
             dst);
+        newOp->setAttrs(attrs);
       }
 
       DefaultInlineVector<mlir::pto::TPartMulOp> partmulops;
@@ -4180,11 +4219,13 @@ struct PTOViewToMemrefPass
           return;
         }
 
-        rewriter.replaceOpWithNewOp<pto::TPartMulOp>(
+        auto attrs = op->getAttrs();
+        auto newOp = rewriter.replaceOpWithNewOp<pto::TPartMulOp>(
             op,
             src0,
             src1,
             dst);
+        newOp->setAttrs(attrs);
       }
 
       DefaultInlineVector<mlir::pto::MGatherOp> mgatherops;

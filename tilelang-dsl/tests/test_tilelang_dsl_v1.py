@@ -3164,6 +3164,54 @@ class TileLangDSLDescriptorTests(unittest.TestCase):
             r"%acc_ptr_\d+ = pto\.tile_buf_addr %arg5 : !pto\.tile_buf<loc=acc, dtype=f32, rows=16, cols=16, v_row=16, v_col=16, blayout=row_major, slayout=none_box, fractal=512, pad=0> -> !pto\.ptr<f32, l0c>",
         )
 
+    def test_ckernel_mte_ub_gm_lowers_l2_cache_ctl_operand(self) -> None:
+        @pto.vkernel(op="mte_ub_gm_l2_default_unique", dtypes=[(pto.f16,)], advanced=True)
+        def default_kernel(out: pto.TensorView):
+            ub = pto.Tile((1, 64), pto.f16, pto.MemorySpace.UB)
+            pto.mte_ub_gm(ub.as_ptr(), out.as_ptr(), 128, nburst=(1, 128, 128))
+            return None
+
+        default_text = pto.select_kernel(
+            "a5",
+            "mte_ub_gm_l2_default_unique",
+            (pto.f16,),
+        ).mlir_text()
+        self.assertRegex(
+            default_text,
+            r"pto\.mte_ub_gm %[A-Za-z0-9_]+, %[A-Za-z0-9_]+, %[A-Za-z0-9_]+ nburst"
+            r"\([^)]+\) l2_cache_ctl\(%c0_i64\)",
+        )
+        self.assertRegex(
+            default_text,
+            r"pto\.mte_ub_gm [^\n]+ : !pto\.ptr<f16, ub>, !pto\.ptr<f16, gm>, i64, i64, i64, i64, i64",
+        )
+
+        @pto.vkernel(op="mte_ub_gm_l2_explicit_unique", dtypes=[(pto.f16,)], advanced=True)
+        def explicit_kernel(out: pto.TensorView):
+            ub = pto.Tile((1, 64), pto.f16, pto.MemorySpace.UB)
+            pto.mte_ub_gm(ub.as_ptr(), out.as_ptr(), 128, nburst=(1, 128, 128), l2_cache="nared")
+            return None
+
+        explicit_text = pto.select_kernel(
+            "a5",
+            "mte_ub_gm_l2_explicit_unique",
+            (pto.f16,),
+        ).mlir_text()
+        self.assertRegex(
+            explicit_text,
+            r"pto\.mte_ub_gm %[A-Za-z0-9_]+, %[A-Za-z0-9_]+, %[A-Za-z0-9_]+ nburst"
+            r"\([^)]+\) l2_cache_ctl\(%c7_i64\)",
+        )
+
+        @pto.vkernel(op="mte_ub_gm_l2_invalid_unique", dtypes=[(pto.f16,)], advanced=True)
+        def invalid_kernel(out: pto.TensorView):
+            ub = pto.Tile((1, 64), pto.f16, pto.MemorySpace.UB)
+            pto.mte_ub_gm(ub.as_ptr(), out.as_ptr(), 128, nburst=(1, 128, 128), l2_cache="invalid")
+            return None
+
+        with self.assertRaisesRegex(ValueError, "l2_cache does not support 'invalid'"):
+            pto.select_kernel("a5", "mte_ub_gm_l2_invalid_unique", (pto.f16,)).mlir_text()
+
     def test_ckernel_full_pipeline_bridge_ops_lower_one_to_one_in_authoring_form(self) -> None:
         @pto.ckernel(op="cube_bridge_pipeline_query_unique", dtypes=[(pto.f16,)], name="cube_bridge_pipeline_unique")
         def kernel(inp: pto.TensorView):

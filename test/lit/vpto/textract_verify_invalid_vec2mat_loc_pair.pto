@@ -9,7 +9,7 @@
 
 
 
-// CHECK: found no registered kernel
+// CHECK: NoMatchingTemplate: no legal template for op='pto.textract' target='a5'
 
 
 

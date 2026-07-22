@@ -13,6 +13,7 @@
 #include "mlir/IR/BuiltinOps.h"
 #include "mlir/IR/SymbolTable.h"
 #include "mlir/Pass/Pass.h"
+#include "llvm/ADT/STLExtras.h"
 
 namespace mlir {
 namespace pto {
@@ -125,6 +126,51 @@ static LogicalResult verifyNoNestedSections(ModuleOp module) {
   return status;
 }
 
+static void eraseUnusedSimtEntries(ModuleOp module) {
+  SmallVector<ModuleOp> symbolTables{module};
+  module.walk([&](ModuleOp nested) {
+    if (nested != module)
+      symbolTables.push_back(nested);
+  });
+
+  for (ModuleOp symbolTableModule : symbolTables) {
+    SymbolTable symbolTable(symbolTableModule);
+    SmallVector<func::FuncOp> deadEntries;
+    for (func::FuncOp funcOp : symbolTableModule.getOps<func::FuncOp>()) {
+      if (!funcOp->hasAttr(kPTOSimtEntryAttrName))
+        continue;
+      auto uses = symbolTable.getSymbolUses(funcOp, symbolTableModule);
+      if (uses && uses->empty())
+        deadEntries.push_back(funcOp);
+    }
+    for (func::FuncOp funcOp : deadEntries)
+      funcOp.erase();
+  }
+}
+
+static LogicalResult verifyExplicitKernelKindMatchesSections(ModuleOp module) {
+  auto kindAttr = module->getAttrOfType<FunctionKernelKindAttr>(
+      FunctionKernelKindAttr::name);
+  if (!kindAttr)
+    return success();
+  bool expectsCube = kindAttr.getKernelKind() == FunctionKernelKind::Cube;
+  LogicalResult status = success();
+  module.walk([&](Operation *op) {
+    if (failed(status))
+      return WalkResult::interrupt();
+    bool isCube = isa<SectionCubeOp>(op);
+    bool isVector = isa<SectionVectorOp>(op);
+    if (!isCube && !isVector)
+      return WalkResult::advance();
+    if (isCube != expectsCube) {
+      status = op->emitError("conflicts with explicit pto.kernel_kind on its module");
+      return WalkResult::interrupt();
+    }
+    return WalkResult::advance();
+  });
+  return status;
+}
+
 static LogicalResult verifySectionSplitCandidatesUseSections(ModuleOp module) {
   LogicalResult status = success();
   module.walk([&](func::FuncOp funcOp) {
@@ -134,32 +180,6 @@ static LogicalResult verifySectionSplitCandidatesUseSections(ModuleOp module) {
       status = funcOp.emitOpError(
           "must contain pto.section.cube or pto.section.vector in section "
           "input split by vpto-split-cv-module");
-      return WalkResult::interrupt();
-    }
-    return WalkResult::advance();
-  });
-  return status;
-}
-
-static LogicalResult verifyUniqueSectionKindsPerFunction(ModuleOp module) {
-  LogicalResult status = success();
-  module.walk([&](func::FuncOp funcOp) {
-    if (failed(status) || !isSectionSplitCandidate(funcOp))
-      return WalkResult::advance();
-    unsigned cubeCount = 0;
-    unsigned vectorCount = 0;
-    funcOp.walk([&](Operation *op) {
-      if (isa<SectionCubeOp>(op))
-        ++cubeCount;
-      if (isa<SectionVectorOp>(op))
-        ++vectorCount;
-    });
-    if (cubeCount > 1) {
-      status = funcOp.emitOpError("contains more than one pto.section.cube");
-      return WalkResult::interrupt();
-    }
-    if (vectorCount > 1) {
-      status = funcOp.emitOpError("contains more than one pto.section.vector");
       return WalkResult::interrupt();
     }
     return WalkResult::advance();
@@ -209,6 +229,8 @@ static void rewriteSectionsForKind(ModuleOp module, FunctionKernelKind kind) {
     op->erase();
   for (Operation *op : inlineSections)
     replaceSectionWithBody(op);
+  if (!eraseSections.empty() || !inlineSections.empty())
+    eraseUnusedSimtEntries(module);
 }
 
 static ModuleOp cloneModuleForKind(ModuleOp source, FunctionKernelKind kind,
@@ -222,18 +244,36 @@ static ModuleOp cloneModuleForKind(ModuleOp source, FunctionKernelKind kind,
   return cloned;
 }
 
-static LogicalResult splitCVModule(ModuleOp module) {
-  if (hasKernelKind(module) || hasKernelKindChildModule(module))
+static LogicalResult materializeExplicitKernelKindSections(ModuleOp module) {
+  auto kindAttr = module->getAttrOfType<FunctionKernelKindAttr>(
+      FunctionKernelKindAttr::name);
+  if (!kindAttr)
     return success();
+  if (failed(verifyNoNestedSections(module)) ||
+      failed(verifyExplicitKernelKindMatchesSections(module)))
+    return failure();
+  rewriteSectionsForKind(module, kindAttr.getKernelKind());
+  return success();
+}
+
+static LogicalResult splitCVModule(ModuleOp module) {
+  if (hasKernelKind(module))
+    return materializeExplicitKernelKindSections(module);
+  if (hasKernelKindChildModule(module)) {
+    for (ModuleOp child : module.getOps<ModuleOp>()) {
+      if (!hasKernelKind(child))
+        continue;
+      if (failed(materializeExplicitKernelKindSections(child)))
+        return failure();
+    }
+    return success();
+  }
   if (!hasCVSections(module))
     return success();
   if (failed(verifyNoNestedSections(module)))
     return failure();
   if (failed(verifySectionSplitCandidatesUseSections(module)))
     return failure();
-  if (failed(verifyUniqueSectionKindsPerFunction(module)))
-    return failure();
-
   bool needVector = hasSectionKind(module, FunctionKernelKind::Vector);
   bool needCube = hasSectionKind(module, FunctionKernelKind::Cube);
   if (!needVector && !needCube)

@@ -33,14 +33,32 @@ extern "C" __global__ [aicore] void vgather2_deep_merged_kernel(
     __gm__ float * arg2,
     __gm__ float * arg3,
     __gm__ int32_t * arg4,
-    __gm__ float * arg5);
+    __gm__ float * arg5,
+    __gm__ half * arg6,
+    __gm__ uint16_t * arg7,
+    __gm__ half * arg8,
+    __gm__ uint8_t * arg9,
+    __gm__ uint16_t * arg10,
+    __gm__ int8_t * arg11,
+    __gm__ int16_t * arg12);
 
-void LaunchVgather2DeepMerged(float * p0, int * p1, float * p2, void *stream) {
+void LaunchVgather2DeepMerged(float * p0, int * p1, float * p2,
+                              uint16_t * p3, uint16_t * p4, uint16_t * p5,
+                              uint8_t * p6, uint16_t * p7,
+                              int8_t * p8, int16_t * p9,
+                              void *stream) {
   vgather2_deep_merged_kernel<<<1, nullptr, stream>>>(
       (__gm__ float *)p0,
       (__gm__ int32_t *)p0,
       (__gm__ float *)p0,
       (__gm__ float *)p0,
       (__gm__ int32_t *)p1,
-      (__gm__ float *)p2);
+      (__gm__ float *)p2,
+      (__gm__ half *)p3,
+      (__gm__ uint16_t *)p4,
+      (__gm__ half *)p5,
+      (__gm__ uint8_t *)p6,
+      (__gm__ uint16_t *)p7,
+      (__gm__ int8_t *)p8,
+      (__gm__ int16_t *)p9);
 }

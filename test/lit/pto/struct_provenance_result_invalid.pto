@@ -1,0 +1,34 @@
+// Copyright (c) 2026 Huawei Technologies Co., Ltd.
+// This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+// CANN Open Software License Agreement Version 2.0 (the "License").
+// Please refer to the License for details. You may not use this file except in compliance with the License.
+// THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+// INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+// See LICENSE in the root of the software repository for the full text of the License.
+
+// RUN: not ptoas %s 2>&1 | FileCheck %s
+
+// An intermediate select hides each declaration from the direct terminator-use
+// check. Without module-level provenance validation, scf.if then returns a
+// pointer to branch-local stack storage after that storage's lifetime ends.
+
+module {
+  func.func @region_alias(%c : i1, %pick : i1, %v : f32) {
+    %r = scf.if %c -> (!pto.struct<f32, i8>) {
+      %a = pto.declare_struct -> !pto.struct<f32, i8>
+      %a_alt = pto.declare_struct -> !pto.struct<f32, i8>
+      pto.struct_set %a[0], %v : !pto.struct<f32, i8>, f32
+      %a_alias = arith.select %pick, %a, %a_alt : !pto.struct<f32, i8>
+      scf.yield %a_alias : !pto.struct<f32, i8>
+    } else {
+      %b = pto.declare_struct -> !pto.struct<f32, i8>
+      %b_alt = pto.declare_struct -> !pto.struct<f32, i8>
+      %b_alias = arith.select %pick, %b, %b_alt : !pto.struct<f32, i8>
+      scf.yield %b_alias : !pto.struct<f32, i8>
+    }
+    %g = pto.struct_get %r[0] : !pto.struct<f32, i8> -> f32
+    return
+  }
+}
+
+// CHECK: only 'pto.declare_struct' may produce a !pto.struct result

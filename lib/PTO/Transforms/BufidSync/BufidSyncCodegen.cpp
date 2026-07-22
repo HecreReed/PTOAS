@@ -106,7 +106,7 @@ LogicalResult BufidSyncCodegen::run() {
       } else {
         rewriter.setInsertionPointAfter(op);
       }
-      auto opTypeAttr = getOpTypeAttr(rewriter, *syncOpType);
+      Attribute opTypeAttr = getOpTypeAttr(rewriter, *syncOpType);
       rewriter.create<pto::RlsBufOp>(op->getLoc(), opTypeAttr,
                                      static_cast<uint32_t>(physicalId), 0);
     }

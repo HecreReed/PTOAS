@@ -13,10 +13,21 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 import hashlib
 
-from .._diagnostics import inline_subkernel_value_escape_error, subkernel_kernel_kind_mismatch_error
+from .._diagnostics import (
+    inline_subkernel_value_escape_error,
+    inline_tileop_capture_type_error,
+    subkernel_kernel_kind_mismatch_error,
+)
 from .._kernel_signature import RuntimeScalarParameterSpec
 from .._ops import const
-from .._surface_values import unwrap_surface_value, wrap_like_surface_value
+from .._surface_values import (
+    AddressOffsetValue,
+    AllocatedBufferValue,
+    is_runtime_scalar_ir_type,
+    is_tile_ir_type,
+    unwrap_surface_value,
+    wrap_like_surface_value,
+)
 from .control_flow import (
     build_carry_loop_frame,
     finish_carry_loop_frame,
@@ -239,7 +250,18 @@ class TraceSession:
             return _pto.SectionCubeOp()
         return None
 
-    def _create_inline_subkernel_wrapper(self, role: str):
+    def _create_inline_subkernel_wrapper(
+        self,
+        role: str,
+        *,
+        simt_launch_dims: tuple | None = None,
+    ):
+        if role == "simt":
+            dim_x, dim_y, dim_z = _coerce_simt_section_dims(simt_launch_dims)
+            wrapper_op = _pto.SectionSimtOp(dim_x, dim_y, dim_z)
+            body_block = wrapper_op.body.blocks.append()
+            return wrapper_op, body_block
+
         wrapper_op = None
         if self._subkernel_section_policy(role) != "function_kind":
             wrapper_op = self._create_subkernel_section_op(role)
@@ -273,19 +295,10 @@ class TraceSession:
 
     def _subkernel_helper_attributes(self, role: str) -> tuple[tuple[str, object], ...]:
         attrs: list[tuple[str, object]] = []
-        if role in {"simd", "cube"}:
-            attrs.append(("pto.ptodsl.subkernel_helper", StringAttr.get(role)))
-            if self._subkernel_section_policy(role) == "function_kind":
-                attrs.append(
-                    (
-                        "pto.kernel_kind",
-                        Attribute.parse(
-                            f"#pto.kernel_kind<{self._subkernel_role_kernel_kind(role)}>"
-                        ),
-                    )
-                )
         if role == "simt":
             attrs.append(("pto.simt_entry", UnitAttr.get()))
+        if role == "tileop":
+            attrs.append(("pto.tileop.helper", UnitAttr.get()))
         return tuple(attrs)
 
     def _emit_simt_helper_launch_metadata(self) -> None:
@@ -342,7 +355,10 @@ class TraceSession:
             symbol_name=symbol_name,
             target=target,
         )
-        wrapper_op, body_block = self._create_inline_subkernel_wrapper(role)
+        wrapper_op, body_block = self._create_inline_subkernel_wrapper(
+            role,
+            simt_launch_dims=simt_launch_dims,
+        )
         outline_frame = InlineSubkernelOutlineFrame(
             trace_frame=frame,
             helper_symbol_name=self._next_inline_subkernel_symbol(symbol_name),
@@ -359,7 +375,13 @@ class TraceSession:
             self._erase_attached_op(wrapper_op)
             raise
         else:
-            self._outline_inline_subkernel(outline_frame)
+            if role == "simt":
+                self._note_escaped_inline_values(
+                    self._collect_defined_values((wrapper_op,)),
+                    role=role,
+                )
+            else:
+                self._outline_inline_subkernel(outline_frame)
         finally:
             popped = self._subkernel_stack.pop()
             if popped is not frame:
@@ -436,6 +458,12 @@ class TraceSession:
                 if replacement is not None:
                     operands[operand_index] = replacement
 
+    def _validate_inline_tileop_captures(self, captures) -> None:
+        for position, value in enumerate(captures, start=1):
+            if is_tile_ir_type(value.type) or is_runtime_scalar_ir_type(value.type):
+                continue
+            raise inline_tileop_capture_type_error(position, str(value.type))
+
     def _outline_inline_subkernel(self, outline_frame: InlineSubkernelOutlineFrame) -> None:
         role = outline_frame.trace_frame.role
         section_policy = self._subkernel_section_policy(role)
@@ -446,6 +474,8 @@ class TraceSession:
 
         defined_values = self._collect_defined_values(root_ops)
         captures = self._collect_capture_values(root_ops)
+        if role == "tileop":
+            self._validate_inline_tileop_captures(captures)
         helper_spec = HelperFunctionSpec(
             symbol_name=outline_frame.helper_symbol_name,
             arg_types=tuple(value.type for value in captures),
@@ -526,6 +556,7 @@ class TraceSession:
                 func.ReturnOp([])
 
         func.CallOp(helper_fn, [unwrap_surface_value(arg) for arg in arg_templates])
+        return None
 
     def begin_carry_loop(self, start, stop, step, state_items):
         """Materialize one authored ``pto.for_(...).carry(...)`` loop body."""
@@ -573,6 +604,7 @@ class TraceSession:
             raise RuntimeError("@pto.simt helper lowering does not support nested SIMT helper calls")
 
         arg_templates = tuple(args)
+        _reject_simt_helper_alloc_buffer_args(arg_templates)
         arg_types = tuple(unwrap_surface_value(arg).type for arg in arg_templates)
         static_kwargs = _simt_static_kwargs_signature(kwargs)
         owner_symbol_name = self.current_function_owner_symbol_name
@@ -594,13 +626,6 @@ class TraceSession:
                 (
                     "pto.simt_max_threads",
                     IntegerAttr.get(i32_attr_type, subkernel.spec.simt_max_threads),
-                )
-            )
-        if subkernel.spec.simt_max_regs is not None:
-            helper_attributes.append(
-                (
-                    "pto.simt_max_regs",
-                    IntegerAttr.get(i32_attr_type, subkernel.spec.simt_max_regs),
                 )
             )
         helper_fn = self._create_named_helper_function(
@@ -684,6 +709,13 @@ class TraceSession:
 
     def lower_kernel_module_call(self, kernel_handle, *args, **kwargs):
         """Lower one ``@pto.jit(entry=False)`` kernel-module call in the active trace."""
+        outer_frame = self.current_subkernel
+        if outer_frame is not None and outer_frame.role == "tileop":
+            raise RuntimeError(
+                "@pto.tileop helpers cannot call @pto.jit(entry=False) kernel modules. "
+                "Keep orchestration in the enclosing @pto.jit kernel; a tileop may only "
+                "launch explicit @pto.simt helpers."
+            )
         if kwargs:
             raise TypeError("@pto.jit(entry=False) kernel module calls do not support keyword arguments yet")
 
@@ -776,6 +808,8 @@ class TraceSession:
             self._attach_ptodsl_logical_name_attr(helper, spec.symbol_name)
             for attr_name, attr_value in spec.attributes:
                 helper.attributes[attr_name] = attr_value
+            if any(attr_name == "pto.tileop.helper" for attr_name, _ in spec.attributes):
+                helper.attributes["sym_visibility"] = StringAttr.get("private")
         self._helpers[cache_key] = helper
         return helper, True
 
@@ -900,6 +934,17 @@ def _coerce_simt_launch_dims(dims):
     )
 
 
+def _coerce_simt_section_dims(dims):
+    if dims is None:
+        dims = (1, 1, 1)
+    if not isinstance(dims, (tuple, list)) or len(dims) != 3:
+        raise TypeError("pto.simt(...) expects exactly three launch dimensions: dim_x, dim_y, dim_z")
+    return tuple(
+        _coerce_i32_dim_attr(dim, context=f"pto.simt(..., dim[{index}])")
+        for index, dim in enumerate(dims)
+    )
+
+
 def _coerce_i32_dim(value, *, context: str):
     raw_value = unwrap_surface_value(value)
     i32 = IntegerType.get_signless(32)
@@ -917,6 +962,36 @@ def _coerce_i32_dim(value, *, context: str):
             raise TypeError(f"{context} expects i32 launch dimension, got {raw_value.type}")
         return _strip_integer_signedness(raw_value)
     raise TypeError(f"{context} expects i32 launch dimension, got {raw_value.type}")
+
+
+def _coerce_i32_dim_attr(value, *, context: str):
+    raw_value = unwrap_surface_value(value)
+    i32 = IntegerType.get_signless(32)
+    if isinstance(raw_value, bool):
+        raise TypeError(f"{context} does not accept bool values")
+    if isinstance(raw_value, int):
+        if raw_value < 0:
+            raise ValueError(f"{context} expects a non-negative i32 launch dimension, got {raw_value}")
+        if raw_value > 0x7FFFFFFF:
+            raise ValueError(f"{context} expects a signed i32 launch dimension, got {raw_value}")
+        return IntegerAttr.get(i32, raw_value)
+    raise TypeError(f"{context} expects a static Python int launch dimension, got {type(value).__name__}")
+
+
+def _is_alloc_buffer_arg(value) -> bool:
+    if isinstance(value, AllocatedBufferValue):
+        return True
+    return isinstance(value, AddressOffsetValue) and isinstance(value.base, AllocatedBufferValue)
+
+
+def _reject_simt_helper_alloc_buffer_args(args):
+    for index, arg in enumerate(args):
+        if _is_alloc_buffer_arg(arg):
+            raise TypeError(
+                "@pto.simt helpers do not accept pto.alloc_buffer persistent buffers; "
+                "use an inline pto.simt(...) scope or pass an explicitly authored typed pointer"
+                f" (argument {index})"
+            )
 
 
 def _symbol_name(ir_fn) -> str:

@@ -1,0 +1,35 @@
+// Copyright (c) 2026 Huawei Technologies Co., Ltd.
+// This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+// CANN Open Software License Agreement Version 2.0 (the "License").
+// Please refer to the License for details. You may not use this file except in compliance with the License.
+// THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+// INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+// See LICENSE in the root of the software repository for the full text of the License.
+
+// RUN: not ptoas %s 2>&1 | FileCheck %s
+
+// Indirect escape. @passthrough merely hands its argument back, but that is
+// enough to launder provenance: %r is no longer a pto.declare_struct result, so
+// the per-op escape check cannot see that `return %r` is publishing @leak's own
+// local. Without the function-result ban this emitted, at exit code 0,
+//   AICORE PtoStruct_f32_i8* leak(float v1) {
+//     PtoStruct_f32_i8 v2; ... return passthrough(&v2);
+//   }
+// i.e. the address of a dead frame, with no diagnostic.
+
+module {
+  func.func private @passthrough(%s : !pto.struct<f32, i8>)
+      -> !pto.struct<f32, i8> {
+    return %s : !pto.struct<f32, i8>
+  }
+
+  func.func @leak(%v : f32) -> !pto.struct<f32, i8> {
+    %s = pto.declare_struct -> !pto.struct<f32, i8>
+    pto.struct_set %s[0], %v : !pto.struct<f32, i8>, f32
+    %r = func.call @passthrough(%s)
+       : (!pto.struct<f32, i8>) -> !pto.struct<f32, i8>
+    return %r : !pto.struct<f32, i8>
+  }
+}
+
+// CHECK: a stack-local struct must not be returned

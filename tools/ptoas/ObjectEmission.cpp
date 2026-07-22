@@ -258,6 +258,18 @@ getTargetCPU(mlir::pto::ObjectEmissionDeviceTarget target) {
   llvm_unreachable("unknown object emission device target");
 }
 
+static std::string resolveTargetCPU(llvm::Module &module,
+                                    mlir::pto::ObjectEmissionDeviceTarget fallback) {
+  for (llvm::Function &f : module) {
+    if (f.hasFnAttribute("target-cpu")) {
+      std::string cpu = f.getFnAttribute("target-cpu").getValueAsString().str();
+      if (!cpu.empty())
+        return cpu;
+    }
+  }
+  return getTargetCPU(fallback).str();
+}
+
 class VPTOFatobjArtifacts {
 public:
   explicit VPTOFatobjArtifacts(mlir::pto::TempFileRegistry &tempFiles)
@@ -523,6 +535,19 @@ static bool compileCppDeviceSourceToFatobj(
                               "C++ fatobj compilation");
 }
 
+static std::string resolveHostTargetCPU() {
+  if (const char *envCPU = std::getenv("PTOAS_HOST_TARGET_CPU")) {
+    if (envCPU[0] != '\0')
+      return std::string(envCPU);
+  }
+  std::string hostCPU = llvm::sys::getHostCPUName().str();
+  if (hostCPU == "cortex-x925")
+    return "tsv200m";
+  if (hostCPU == "znver4" || hostCPU == "znver5")
+    return "znver3";
+  return hostCPU;
+}
+
 static bool compileHostStubToObject(llvm::StringRef stubPath,
                                     llvm::StringRef outObjPath,
                                     llvm::StringRef moduleId,
@@ -534,6 +559,7 @@ static bool compileHostStubToObject(llvm::StringRef stubPath,
   std::string coverageDir = ".";
   std::string debugDir = ".";
   std::string hostTriple = llvm::sys::getProcessTriple();
+  std::string hostTargetCPU = resolveHostTargetCPU();
 
   llvm::SmallVector<std::string, 32> args = {
       toolchain.bishengCc1Path,
@@ -541,7 +567,7 @@ static bool compileHostStubToObject(llvm::StringRef stubPath,
       "-triple",
       hostTriple,
       "-target-cpu",
-      llvm::sys::getHostCPUName().str(),
+      hostTargetCPU,
       "-fcce-aicpu-legacy-launch",
       "-fcce-is-host",
       "-cce-enable-mix",
@@ -914,9 +940,12 @@ mlir::LogicalResult mlir::pto::emitVPTOVectorDeviceObject(
     return failure();
   if (failed(writeLLVMModule(module, llPath, diagOS)))
     return failure();
-  return compileLLVMToDeviceObject(llPath, outObjPath,
-                                   ObjectEmissionDeviceTarget::Vector,
-                                   toolchain, stderrPath, diagOS);
+  return compileDeviceLLVMToObject(llPath, outObjPath,
+                                   resolveTargetCPU(module,
+                                                    ObjectEmissionDeviceTarget::Vector),
+                                   toolchain.bishengPath, stderrPath, diagOS)
+             ? success()
+             : failure();
 }
 
 mlir::LogicalResult mlir::pto::emitVPTOCubeDeviceObject(
@@ -930,9 +959,12 @@ mlir::LogicalResult mlir::pto::emitVPTOCubeDeviceObject(
     return failure();
   if (failed(writeLLVMModule(module, llPath, diagOS)))
     return failure();
-  return compileLLVMToDeviceObject(llPath, outObjPath,
-                                   ObjectEmissionDeviceTarget::Cube,
-                                   toolchain, stderrPath, diagOS);
+  return compileDeviceLLVMToObject(llPath, outObjPath,
+                                   resolveTargetCPU(module,
+                                                    ObjectEmissionDeviceTarget::Cube),
+                                   toolchain.bishengPath, stderrPath, diagOS)
+             ? success()
+             : failure();
 }
 
 mlir::LogicalResult mlir::pto::emitFatobjLLVM(

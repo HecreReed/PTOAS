@@ -9,7 +9,7 @@
 
 # Minimal PTODSL cube/tmatmul pilot for A5.
 # Goal: validate plain cube tile.matmul lowering/runtime first, without mixing
-# MX-specific scale/bias handling or @pto.cube helper boundaries.
+# MX-specific scale/bias handling or reusable helper boundaries.
 
 from pathlib import Path
 import sys
@@ -37,36 +37,6 @@ L0C_ADDR = 0
 # This case keeps explicit L1/L0 addresses because the current GM->L1 fractal
 # path passes raw MAT pointers into mte_gm_l1_frac. Vector tile cases in this
 # directory use automatic tile address allocation.
-
-
-@pto.cube
-def cube_matmul_tile(
-    a_mat: pto.Tile,
-    b_mat: pto.Tile,
-    o_tile: pto.Tile,
-    a_l0a: pto.Tile,
-    b_l0b: pto.Tile,
-    c_acc: pto.Tile,
-):
-    m = a_mat.valid_shape[0]
-    k = a_mat.valid_shape[1]
-    n = b_mat.valid_shape[1]
-
-    pto.mte_l1_l0a(a_mat.as_ptr(), a_l0a.as_ptr(), m, k)
-    pto.mte_l1_l0b(b_mat.as_ptr(), b_l0b.as_ptr(), k, n, transpose=True)
-    pto.set_flag(pto.Pipe.MTE1, pto.Pipe.M, event_id=1)
-    pto.wait_flag(pto.Pipe.MTE1, pto.Pipe.M, event_id=1)
-    pto.tile.matmul(a_l0a, b_l0b, c_acc)
-    pto.set_flag(pto.Pipe.M, pto.Pipe.FIX, event_id=2)
-    pto.wait_flag(pto.Pipe.M, pto.Pipe.FIX, event_id=2)
-    pto.mte_l0c_ub(
-        c_acc.as_ptr(),
-        o_tile.as_ptr(),
-        m,
-        n,
-        n,
-        n,
-    )
 
 
 @pto.jit(

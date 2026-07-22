@@ -78,7 +78,7 @@ endfunction()
 
 ptoas_preseed_compilers_from_llvm_cache()
 
-project(ptoas VERSION 0.50)
+project(ptoas VERSION 0.51)
 
 option(PTOAS_VALIDATE_CMAKE4_FETCHCONTENT_COMPAT
        "Validate CMake 4 compatibility for legacy FetchContent users" OFF)
@@ -293,6 +293,15 @@ if(BUILD_TESTING)
     )
     set_tests_properties(tilelang_dsl_unittest PROPERTIES
       LABELS "PTODSL"
+      ENVIRONMENT "${_pto_python_test_env}"
+    )
+    add_test(
+      NAME pto_memory_consistency_bindings
+      COMMAND "${Python3_EXECUTABLE}"
+              "${CMAKE_CURRENT_SOURCE_DIR}/test/python/memory_consistency_bindings.py"
+    )
+    set_tests_properties(pto_memory_consistency_bindings PROPERTIES
+      LABELS "PTO"
       ENVIRONMENT "${_pto_python_test_env}"
     )
   endif()

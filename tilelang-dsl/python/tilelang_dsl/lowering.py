@@ -2536,16 +2536,19 @@ class _AuthoringRenderer:
         source = self._lower_expr(expr.args[0], env, indent=indent, into=into)
         destination = self._lower_expr(expr.args[1], env, indent=indent, into=into)
         len_burst = self._lower_to_i64(expr.args[2], env, indent=indent, into=into)
-        nburst = self._lower_cube_i64_tuple(expr.args[3], env, indent=indent, into=into, expected_len=3)
-        loop_groups = self._lower_cube_loop_groups(expr.args[4], env, indent=indent, into=into)
+        l2_cache_ctl = self._lower_to_i64(expr.args[3], env, indent=indent, into=into)
+        nburst = self._lower_cube_i64_tuple(expr.args[4], env, indent=indent, into=into, expected_len=3)
+        loop_groups = self._lower_cube_loop_groups(expr.args[5], env, indent=indent, into=into)
         op_text = (
             f"pto.{expr.name} {source.name}, {destination.name}, {len_burst.name}"
             f" nburst({nburst[0].name}, {nburst[1].name}, {nburst[2].name})"
+            f" l2_cache_ctl({l2_cache_ctl.name})"
         )
         type_text = (
             f"{self._render_type(source.type)}, {self._render_type(destination.type)}, "
-            f"{self._render_type(len_burst.type)}, {self._render_type(nburst[0].type)}, "
-            f"{self._render_type(nburst[1].type)}, {self._render_type(nburst[2].type)}"
+            f"{self._render_type(len_burst.type)}, "
+            f"{self._render_type(nburst[0].type)}, {self._render_type(nburst[1].type)}, "
+            f"{self._render_type(nburst[2].type)}, {self._render_type(l2_cache_ctl.type)}"
         )
         for count, src_stride, dst_stride in loop_groups:
             op_text += f" loop({count.name}, {src_stride.name}, {dst_stride.name})"

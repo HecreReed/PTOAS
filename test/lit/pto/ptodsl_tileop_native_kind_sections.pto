@@ -1,0 +1,79 @@
+// Copyright (c) 2026 Huawei Technologies Co., Ltd.
+// This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+// CANN Open Software License Agreement Version 2.0 (the "License").
+// Please refer to the License for details. You may not use this file except in compliance with the License.
+// THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+// INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+// See LICENSE in the root of the software repository for the full text of the License.
+
+// RUN: ptoas --pto-arch=a5 --emit-pto-ir %s -o - | FileCheck %s
+
+// CHECK-LABEL: func.func private @vector_tileop
+// CHECK-SAME: pto.tileop.effects = ["read", "write", "none", "none"]
+// CHECK-SAME: pto.tileop.helper
+// CHECK-SAME: pto.tileop.kind = "vector"
+// CHECK: pto.section.vector
+// CHECK: pto.pset_b32
+// CHECK: pto.vlds
+// CHECK: pto.vsts
+// CHECK-LABEL: func.func private @cube_tileop()
+// CHECK: pto.tileop.kind = "cube"
+// CHECK: pto.section.cube
+// CHECK: pto.mad
+
+module attributes {pto.target_arch = "a5"} {
+  func.func @kernel(%rows: index, %cols: index) {
+    %src = pto.alloc_tile valid_row = %rows valid_col = %cols
+      : !pto.tile_buf<vec, 1x16xf32, valid=?x?>
+    %dst = pto.alloc_tile valid_row = %rows valid_col = %cols
+      : !pto.tile_buf<vec, 1x16xf32, valid=?x?>
+    func.call @forward_vector_tileop(%src, %dst)
+      : (!pto.tile_buf<vec, 1x16xf32, valid=?x?>,
+         !pto.tile_buf<vec, 1x16xf32, valid=?x?>) -> ()
+    return
+  }
+
+  func.func private @forward_vector_tileop(
+      %src: !pto.tile_buf<vec, 1x16xf32, valid=?x?>,
+      %dst: !pto.tile_buf<vec, 1x16xf32, valid=?x?>) {
+    func.call @vector_tileop(%src, %dst)
+      : (!pto.tile_buf<vec, 1x16xf32, valid=?x?>,
+         !pto.tile_buf<vec, 1x16xf32, valid=?x?>) -> ()
+    return
+  }
+
+  func.func private @vector_tileop(
+      %src: !pto.tile_buf<vec, 1x16xf32, valid=?x?>,
+      %dst: !pto.tile_buf<vec, 1x16xf32, valid=?x?>) attributes {pto.tileop.helper} {
+    // Raw VPTO vector micro-ops do not implement OpPipeInterface; their
+    // VectorMicroOpInterface provides TileOp kind evidence.
+    %rows = pto.tile_valid_rows %src
+      : !pto.tile_buf<vec, 1x16xf32, valid=?x?> -> index
+    %cols = pto.tile_valid_cols %src
+      : !pto.tile_buf<vec, 1x16xf32, valid=?x?> -> index
+    %offset = arith.constant 0 : index
+    %dynamic_offset = arith.addi %rows, %cols : index
+    %src_ptr = pto.tile_buf_addr %src
+      : !pto.tile_buf<vec, 1x16xf32, valid=?x?> -> !pto.ptr<f32, ub>
+    %dst_ptr = pto.tile_buf_addr %dst
+      : !pto.tile_buf<vec, 1x16xf32, valid=?x?> -> !pto.ptr<f32, ub>
+    %mask = pto.pset_b32 "PAT_ALL" : !pto.mask<b32>
+    %vector = pto.vlds %src_ptr[%dynamic_offset]
+      : !pto.ptr<f32, ub> -> !pto.vreg<64xf32>
+    pto.vsts %vector, %dst_ptr[%offset], %mask
+      : !pto.vreg<64xf32>, !pto.ptr<f32, ub>, !pto.mask<b32>
+    return
+  }
+
+  func.func private @cube_tileop() attributes {pto.tileop.helper} {
+    // MAD-family operations carry CubeMicroOpInterface rather than a PIPE.
+    %zero = arith.constant 0 : i64
+    %m = arith.constant 16 : i64
+    %lhs = pto.castptr %zero : i64 -> !pto.ptr<f16, l0a>
+    %rhs = pto.castptr %zero : i64 -> !pto.ptr<f16, l0b>
+    %dst = pto.castptr %zero : i64 -> !pto.ptr<f32, l0c>
+    pto.mad %lhs, %rhs, %dst, %m, %m, %m
+      : !pto.ptr<f16, l0a>, !pto.ptr<f16, l0b>, !pto.ptr<f32, l0c>, i64, i64, i64
+    return
+  }
+}

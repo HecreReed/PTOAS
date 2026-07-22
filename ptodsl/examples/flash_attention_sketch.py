@@ -16,8 +16,8 @@ layering explicit and keep the semantic contracts clean:
       └─ flash_attention_kernel   (@pto.jit, mode="explicit")
            ├─ Tile Ops                 tile.load / tile.store at the GM↔UB boundary
            ├─ explicit orchestration   mte_load / pipe_barrier / pointer sequencing
-           ├─ @pto.cube               matrix products (QK^T and P@V)
-           ├─ @pto.simd               row-wise online softmax
+           ├─ @pto.tileop               matrix products (QK^T and P@V)
+           ├─ @pto.tileop               row-wise online softmax
            └─ @pto.simt               scalar metadata and output blending
 
 Design rules illustrated here:
@@ -365,14 +365,14 @@ def flash_attention_kernel(
 # - No implicit global-memory access happens inside these kernels.
 
 
-@pto.cube
+@pto.tileop
 def qk_matmul(
-    q_mat: pto.Tile,       # MAT, [Br, dim]
-    k_mat: pto.Tile,       # MAT, [Bc, dim]
     q_l0a: pto.Tile,       # LEFT scratch
     k_l0b: pto.Tile,       # RIGHT scratch
     s_acc: pto.Tile,       # ACC scratch
-    s_tile: pto.Tile,      # UB, [Br, Bc] output
+    m: pto.index,
+    n: pto.index,
+    k: pto.i32,
 ):
     """
     Compute ``S = Q @ K^T`` for one attention block.
@@ -381,25 +381,17 @@ def qk_matmul(
     explicit cube-local scratch, rather than pretending a logical scheduling tile can also stand
     in for LEFT/RIGHT/ACC state.
     """
-    m = q_mat.valid_shape[0]
-    k = q_mat.valid_shape[1]
-    n = k_mat.valid_shape[0]
-
-    # Caller owns scratch lifetime.  The cube kernel only expresses dataflow.
-    pto.mte_l1_l0a(q_mat.as_ptr(), q_l0a.as_ptr(), m, k)
-    pto.mte_l1_l0b(k_mat.as_ptr(), k_l0b.as_ptr(), k, n, transpose=True)
     pto.mad(q_l0a.as_ptr(), k_l0b.as_ptr(), s_acc.as_ptr(), m, n, k)
-    pto.mte_l0c_ub(s_acc.as_ptr(), s_tile.as_ptr(), m, n, n, n, 0)
 
 
-@pto.cube
+@pto.tileop
 def pv_matmul(
-    p_mat: pto.Tile,       # MAT, [Br, Bc]
-    v_mat: pto.Tile,       # MAT, [Bc, dim]
     p_l0a: pto.Tile,       # LEFT scratch (reused)
     v_l0b: pto.Tile,       # RIGHT scratch (reused)
     pv_acc: pto.Tile,      # ACC scratch (reused)
-    pv_tile: pto.Tile,     # UB, [Br, dim] output
+    m: pto.index,
+    n: pto.i32,
+    k: pto.index,
 ):
     """
     Compute ``PV = P @ V`` for the current block.
@@ -407,17 +399,10 @@ def pv_matmul(
     This keeps the second matrix product on the cube path as well, instead of
     accidentally collapsing it into an elementwise vector expression.
     """
-    m = p_mat.valid_shape[0]
-    k = p_mat.valid_shape[1]
-    n = v_mat.valid_shape[1]
-
-    pto.mte_l1_l0a(p_mat.as_ptr(), p_l0a.as_ptr(), m, k)
-    pto.mte_l1_l0b(v_mat.as_ptr(), v_l0b.as_ptr(), k, n)
     pto.mad(p_l0a.as_ptr(), v_l0b.as_ptr(), pv_acc.as_ptr(), m, n, k)
-    pto.mte_l0c_ub(pv_acc.as_ptr(), pv_tile.as_ptr(), m, n, n, n, 0)
 
 
-@pto.simd
+@pto.tileop
 def online_softmax_rows(
     s_tile: pto.Tile,          # UB, [Br, Bc]
     p_tile: pto.Tile,          # UB, [Br, Bc], output
@@ -449,27 +434,28 @@ def online_softmax_rows(
         col_mask = pto.make_mask(pto.f32, valid_cols)
 
         s_row = pto.vlds(s_tile[row, 0:])
-        m_prev = scalar.load(m_prev_tile[row, 0])
-        l_prev = scalar.load(l_prev_tile[row, 0])
+        m_prev = pto.vlds(m_prev_tile.as_ptr(), row, dist="BRC_B32")
+        l_prev = pto.vlds(l_prev_tile.as_ptr(), row, dist="BRC_B32")
 
-        row_max = pto.vcgmax(s_row, col_mask)
-        m_next = scalar.max(m_prev, row_max)
+        row_max = pto.vdup(pto.vcmax(s_row, col_mask), col_mask)
+        m_next = pto.vmax(m_prev, row_max, col_mask)
 
-        s_shifted = pto.vsubs(s_row, m_next, col_mask)
+        s_shifted = pto.vsub(s_row, m_next, col_mask)
         p_row = pto.vexp(s_shifted, col_mask)
 
-        row_sum = pto.vcgadd(p_row, col_mask)
-        l_scaled = l_prev * scalar.exp(m_prev - m_next)
-        l_next = l_scaled + row_sum
+        row_sum = pto.vdup(pto.vcadd(p_row, col_mask), col_mask)
+        exp_scale = pto.vexp(pto.vsub(m_prev, m_next, col_mask), col_mask)
+        l_scaled = pto.vmul(l_prev, exp_scale, col_mask)
+        l_next = pto.vadd(l_scaled, row_sum, col_mask)
 
-        alpha = l_scaled / l_next
-        beta = 1.0 / l_next
+        alpha = pto.vdiv(l_scaled, l_next, col_mask)
+        beta = pto.vrec(l_next, col_mask)
 
         pto.vsts(p_row, p_tile[row, 0:], col_mask)
-        scalar.store(m_next, m_next_tile[row, 0])
-        scalar.store(l_next, l_next_tile[row, 0])
-        scalar.store(alpha, alpha_tile[row, 0])
-        scalar.store(beta, beta_tile[row, 0])
+        pto.vsts(m_next, m_next_tile.as_ptr(), row, col_mask, dist="1PT_B32")
+        pto.vsts(l_next, l_next_tile.as_ptr(), row, col_mask, dist="1PT_B32")
+        pto.vsts(alpha, alpha_tile.as_ptr(), row, col_mask, dist="1PT_B32")
+        pto.vsts(beta, beta_tile.as_ptr(), row, col_mask, dist="1PT_B32")
 
 
 @pto.simt
@@ -594,7 +580,13 @@ def kv_block_process(
     valid_cols = scalar.load(meta_ptr + 2)
 
     # 1. S = Q @ K^T
-    qk_matmul(q_mat, k_mat, q_l0a, rhs_l0b, qk_acc_tile, s_tile)
+    qk_m = q_mat.valid_shape[0]
+    qk_k = q_mat.valid_shape[1]
+    qk_n = k_mat.valid_shape[0]
+    pto.mte_l1_l0a(q_mat.as_ptr(), q_l0a.as_ptr(), qk_m, qk_k)
+    pto.mte_l1_l0b(k_mat.as_ptr(), rhs_l0b.as_ptr(), qk_k, qk_n, transpose=True)
+    qk_matmul(q_l0a, rhs_l0b, qk_acc_tile, qk_m, qk_n, qk_k)
+    pto.mte_l0c_ub(qk_acc_tile.as_ptr(), s_tile.as_ptr(), qk_m, qk_n, qk_n, qk_n, 0)
     pto.pipe_barrier(pto.Pipe.ALL)
 
     # 2. Row-wise online softmax over S
@@ -618,7 +610,13 @@ def kv_block_process(
     pto.pipe_barrier(pto.Pipe.ALL)
 
     # 3. PV = P @ V
-    pv_matmul(p_mat, v_mat, p_l0a, rhs_l0b, pv_acc_tile, pv_tile)
+    pv_m = p_mat.valid_shape[0]
+    pv_k = p_mat.valid_shape[1]
+    pv_n = v_mat.valid_shape[1]
+    pto.mte_l1_l0a(p_mat.as_ptr(), p_l0a.as_ptr(), pv_m, pv_k)
+    pto.mte_l1_l0b(v_mat.as_ptr(), rhs_l0b.as_ptr(), pv_k, pv_n)
+    pv_matmul(p_l0a, rhs_l0b, pv_acc_tile, pv_m, pv_n, pv_k)
+    pto.mte_l0c_ub(pv_acc_tile.as_ptr(), pv_tile.as_ptr(), pv_m, pv_n, pv_n, pv_n, 0)
     pto.pipe_barrier(pto.Pipe.ALL)
 
     # 4. O_next = alpha * O_prev + beta * PV
@@ -663,7 +661,7 @@ def kv_block_process(
 # │                                                                            │
 # │   Key idea: one place owns the "how this block runs on hardware" story.   │
 # ├──────────────────────────────────────────────────────────────────────────┤
-# │ @pto.cube           Matrix-product kernels                                 │
+# │ @pto.tileop           Matrix-product kernels                                 │
 # │                                                                            │
 # │   qk_matmul: Q @ K^T                                                       │
 # │   pv_matmul: P @ V                                                         │
@@ -671,7 +669,7 @@ def kv_block_process(
 # │                                                                            │
 # │   Key idea: UB tiles are inputs/outputs; cube-local state is explicit.    │
 # ├──────────────────────────────────────────────────────────────────────────┤
-# │ @pto.simd           Row-wise vector math                                   │
+# │ @pto.tileop           Row-wise vector math                                   │
 # │                                                                            │
 # │   online_softmax_rows                                                      │
 # │   vreg stays local; persistent state is written back to UB tiles           │

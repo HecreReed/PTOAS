@@ -356,6 +356,38 @@ def PTONormalizeUncoveredTileSections
   ];
 }
 
+def PTOMaterializeTileOpSections
+    : Pass<"pto-materialize-tileop-sections", "ModuleOp"> {
+  let summary = "Verify PTODSL tileop helpers and materialize their single compute section";
+  let description = [{
+    Verifies functions marked with `pto.tileop.helper` have Tile/scalar ABI and
+    a pure single-core body. The pass infers one Vector or Cube compute kind,
+    rejects MTE, pipe synchronization, direct SIMT operations, high-level
+    TileOps, and mixed Vector/Cube evidence, then wraps the complete helper
+    body in exactly one `pto.section.vector` or `pto.section.cube`.
+
+    Dynamic `pto.tile_valid_rows` / `pto.tile_valid_cols` metadata reads remain
+    legal structural operations. When either value is dynamic, the pass
+    appends internal index arguments to the helper and its call chain before
+    TileBuf parameters are converted to memrefs. The pass records one
+    read/write effect entry per helper argument for synchronization analysis;
+    internal metadata arguments have no memory effect.
+
+    TileOp helpers are void; their authored Tile/scalar arguments remain
+    implicitly visible inside the original operand-free section container,
+    and results are written through mutable Tile parameters.
+  }];
+
+  let constructor = "mlir::pto::createPTOMaterializeTileOpSectionsPass()";
+
+  let dependentDialects = [
+    "mlir::pto::PTODialect",
+    "mlir::func::FuncDialect",
+    "mlir::arith::ArithDialect",
+    "mlir::scf::SCFDialect"
+  ];
+}
+
 def VPTOSplitCVModule : Pass<"vpto-split-cv-module", "ModuleOp"> {
   let summary = "Split a VPTO module with cube/vector sections into kernel modules";
   let description = [{
@@ -364,9 +396,11 @@ def VPTOSplitCVModule : Pass<"vpto-split-cv-module", "ModuleOp"> {
     normalized fatobj input form with one child module per kernel kind.
 
     The pass clones the original module for each target kind, removes the
-    opposite section kind, and inlines the target section body. It does not
-    analyze cross-section SSA dependencies; normal MLIR verification catches
-    illegal uses after the non-target section is removed.
+    opposite section kind, and inlines the target section body. Section regions
+    have no results, so MLIR SSA scoping prevents direct scalar values from
+    escaping one section into another; cross-core handoff must use caller-owned
+    Tile, MTE, and synchronization. After section removal, unreferenced
+    `pto.simt_entry` helpers are removed from the clone.
   }];
 
   let constructor = "mlir::pto::createVPTOSplitCVModulePass()";
@@ -473,13 +507,44 @@ def PTOResolveReservedBuffers : Pass<"pto-resolve-reserved-buffers", "ModuleOp">
   ];
 }
 
+def InsertTemplateAttributes
+    : Pass<"pto-insert-template-attributes", "ModuleOp"> {
+  let summary = "Attach legal PTODSL template candidates to tile operations";
+  let description = [{
+    Queries the PTODSL TileLib daemon for legal template candidates and stores
+    the compact candidate list on each tile operation as the `candidates`
+    attribute. Each candidate contains only id, name, loop_depth, postupdate,
+    and tail metadata.
+  }];
+  let constructor = "mlir::pto::createInsertTemplateAttributesPass()";
+  let dependentDialects = [
+    "mlir::pto::PTODialect",
+    "mlir::func::FuncDialect"
+  ];
+  let options = [
+    Option<"pythonExe", "python-exe", "std::string",
+           /*default=*/"\"python3\"",
+           "Python executable for TileLib metadata invocation">,
+    Option<"daemonSocketPath", "daemon-socket-path", "std::string",
+           /*default=*/"\"\"",
+           "Path to the PTODSL TileLib daemon Unix socket">,
+    Option<"tileLibPkgPath", "tile-lib-pkg-path", "std::string",
+           /*default=*/"\"\"",
+           "PYTHONPATH root for PTODSL">,
+    Option<"daemonHelperModule", "daemon-helper-module", "std::string",
+           /*default=*/"\"ptodsl.tilelib.serving.helper\"",
+           "Python module used for daemon metadata RPC calls">
+  ];
+}
+
 def ExpandTileOp : Pass<"pto-expand-tile-op", "ModuleOp"> {
-  let summary = "Expand tile ops into calls to TileLang DSL template functions";
+  let summary = "Expand tile ops into calls to TileLib template functions";
   let description = [{
     Expands tile-level operations (pto.tadd, pto.tsub, etc.) by invoking the
-    TileLang Python DSL to instantiate template libraries. The generated
-    template functions use tile_buf parameters and contain vector-level
-    implementations (pto.vecscope, pto.vlds, pto.vadd, pto.vsts, etc.).
+    selected Python TileLib backend to instantiate template libraries. The
+    generated template functions use tile_buf parameters and contain
+    vector-level implementations (pto.vecscope, pto.vlds, pto.vadd,
+    pto.vsts, etc.).
 
     Each tile op is replaced by a func.call to the generated template function,
     with tile_buf operands passed directly (no type bridging).
@@ -506,10 +571,19 @@ def ExpandTileOp : Pass<"pto-expand-tile-op", "ModuleOp"> {
            "PYTHONPATH for tilelang_dsl package (added to env)">,
     Option<"pythonExe", "python-exe", "std::string",
            /*default=*/"\"python3\"",
-           "Python executable for tilelang DSL invocation">,
+           "Python executable for TileLib invocation">,
     Option<"daemonSocketPath", "daemon-socket-path", "std::string",
            /*default=*/"\"\"",
-           "Path to Unix domain socket for daemon RPC (if empty, uses subprocess)">
+           "Path to Unix domain socket for daemon RPC">,
+    Option<"tileLibBackend", "tile-lib-backend", "std::string",
+           /*default=*/"\"ptodsl\"",
+           "TileLib backend: ptodsl or tilelang">,
+    Option<"tileLibPkgPath", "tile-lib-pkg-path", "std::string",
+           /*default=*/"\"\"",
+           "PYTHONPATH root for the selected TileLib backend">,
+    Option<"daemonHelperModule", "daemon-helper-module", "std::string",
+           /*default=*/"\"ptodsl.tilelib.serving.helper\"",
+           "Python module used for daemon helper RPC calls">
   ];
 }
 
@@ -578,6 +652,27 @@ def PTOCanonicalizeIR : Pass<"pto-canonicalize-ir", "func::FuncOp"> {
   ];
 }
 
+def LowerPTOToUBufOps : Pass<"pto-lower-to-ubuf-ops", "mlir::func::FuncOp"> {
+  let summary = "Lower eligible pto.tadd/tsub/tmul/tdiv to pto.ub.vadd/vsub/vmul/vdiv on a2a3 targets";
+  let description = [{
+    Converts pto.tadd/tsub/tmul/tdiv on UB tiles to pto.ub.vadd/vsub/vmul/vdiv
+    when targeting a3 (dav-c220-vec).  Computes repeat count and repeat strides
+    from the tile shape metadata and emits tile_buf_addr ops to extract UB
+    pointers.  pto.ub.* binary ops are later lowered to llvm.hivm.VADD/VSUB/VMUL/VDIV.*
+    by the VPTOLLVMEmitter.
+
+    Ops that do not meet the eligibility criteria (wrong arch, non-UB space,
+    dynamic shapes, unaligned repeats) pass through to the existing ExpandTileOp
+    TileLang path unchanged.
+  }];
+  let constructor = "mlir::pto::createLowerPTOToUBufOpsPass()";
+  let dependentDialects = [
+    "mlir::pto::PTODialect",
+    "mlir::func::FuncDialect",
+    "mlir::arith::ArithDialect"
+  ];
+}
+
 def PTOInlineLibCall : Pass<"pto-inline-libcall", "ModuleOp"> {
   let summary = "Materialize OP-Lib instance bodies and inline OP-Lib calls";
   let description = [{
@@ -602,7 +697,7 @@ def PTOInlineBackendHelpers
   let description = [{
     Force-inlines backend helper functions that should not survive to backend-
     specific lowering:
-    - PTODSL subkernel helpers marked with `pto.ptodsl.subkernel_helper`
+    - PTODSL TileOp helpers marked with `pto.tileop.helper`
 
     This pass runs on the shared mainline before backend-specific pipelines so
     both VPTO and EmitC consume the same helper-inlined IR.
@@ -630,32 +725,6 @@ def PTOVerifyTFree : Pass<"pto-verify-tfree", "func::FuncOp"> {
   let constructor = "mlir::pto::createPTOVerifyTFreePass()";
 
   let dependentDialects = [
-    "mlir::pto::PTODialect"
-  ];
-}
-
-def PTOVerifySubkernelPipeContract
-    : Pass<"pto-verify-subkernel-pipe-contract", "func::FuncOp"> {
-  let summary = "Verify PTODSL subkernel helpers stay within one InsertSync pipe contract";
-  let description = [{
-    Verifies PTODSL subkernel helpers marked with `pto.ptodsl.subkernel_helper`
-    and their same-module local call closure stay within one role-consistent PTO
-    compute contract before InsertSync models the call boundary as one compound
-    node.
-
-    Current contract:
-    - `simd` helpers may only contain PTO ops on `PIPE_V`
-    - `cube` helpers may only contain PTO ops on `PIPE_M`
-    - both reject role-mismatched PTO pipe ops (including MTE/FIX/S) and
-      nested PTODSL subkernel calls
-    - local helper `func.call` is allowed only when the transitive callee closure
-      satisfies the same contract
-  }];
-
-  let constructor = "mlir::pto::createPTOVerifySubkernelPipeContractPass()";
-
-  let dependentDialects = [
-    "mlir::func::FuncDialect",
     "mlir::pto::PTODialect"
   ];
 }

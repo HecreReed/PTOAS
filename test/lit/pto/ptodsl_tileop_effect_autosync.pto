@@ -1,0 +1,59 @@
+// Copyright (c) 2026 Huawei Technologies Co., Ltd.
+// This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+// CANN Open Software License Agreement Version 2.0 (the "License").
+// Please refer to the License for details. You may not use this file except in compliance with the License.
+// THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+// INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+// See LICENSE in the root of the software repository for the full text of the License.
+
+// RUN: ptoas --pto-arch=a5 --emit-pto-ir --enable-insert-sync --pto-insert-sync-debug=2 %s -o - 2>&1 | FileCheck %s
+
+module attributes {pto.target_arch = "a5"} {
+  func.func @tileop_effect_autosync(%src_ptr: !pto.ptr<f32>,
+                                    %dst_ptr: !pto.ptr<f32>) {
+    pto.section.vector {
+      %c0 = arith.constant 0 : index
+      %c1 = arith.constant 1 : index
+      %c16 = arith.constant 16 : index
+      %src = pto.make_tensor_view %src_ptr, shape = [%c16, %c16], strides = [%c16, %c1]
+        : !pto.tensor_view<16x16xf32>
+      %dst = pto.make_tensor_view %dst_ptr, shape = [%c16, %c16], strides = [%c16, %c1]
+        : !pto.tensor_view<16x16xf32>
+      %input = pto.alloc_tile : !pto.tile_buf<vec, 16x16xf32>
+      %output = pto.alloc_tile : !pto.tile_buf<vec, 16x16xf32>
+      %src_part = pto.partition_view %src, offsets = [%c0, %c0], sizes = [%c16, %c16]
+        : !pto.tensor_view<16x16xf32> -> !pto.partition_tensor_view<16x16xf32>
+      pto.tload ins(%src_part : !pto.partition_tensor_view<16x16xf32>)
+        outs(%input : !pto.tile_buf<vec, 16x16xf32>)
+      func.call @copy_tileop(%input, %output)
+        : (!pto.tile_buf<vec, 16x16xf32>, !pto.tile_buf<vec, 16x16xf32>) -> ()
+      %dst_part = pto.partition_view %dst, offsets = [%c0, %c0], sizes = [%c16, %c16]
+        : !pto.tensor_view<16x16xf32> -> !pto.partition_tensor_view<16x16xf32>
+      pto.tstore ins(%output : !pto.tile_buf<vec, 16x16xf32>)
+        outs(%dst_part : !pto.partition_tensor_view<16x16xf32>)
+    }
+    return
+  }
+
+  func.func private @copy_tileop(%input: !pto.tile_buf<vec, 16x16xf32>,
+                                 %output: !pto.tile_buf<vec, 16x16xf32>)
+      attributes {pto.tileop.helper} {
+    %c0 = arith.constant 0 : index
+    %input_ptr = pto.tile_buf_addr %input
+      : !pto.tile_buf<vec, 16x16xf32> -> !pto.ptr<f32, ub>
+    %output_ptr = pto.tile_buf_addr %output
+      : !pto.tile_buf<vec, 16x16xf32> -> !pto.ptr<f32, ub>
+    %mask = pto.pset_b32 "PAT_ALL" : !pto.mask<b32>
+    %value = pto.vlds %input_ptr[%c0]
+      : !pto.ptr<f32, ub> -> !pto.vreg<64xf32>
+    pto.vsts %value, %output_ptr[%c0], %mask
+      : !pto.vreg<64xf32>, !pto.ptr<f32, ub>, !pto.mask<b32>
+    return
+  }
+}
+
+// CHECK: POST: set_flag <PIPE_MTE2 -> PIPE_V>
+// CHECK: PRE : wait_flag <PIPE_MTE2 -> PIPE_V>
+// CHECK: POST: set_flag <PIPE_V -> PIPE_MTE3>
+// CHECK: PRE : wait_flag <PIPE_V -> PIPE_MTE3>
+// CHECK: pto.tileop.effects = ["read", "write"]

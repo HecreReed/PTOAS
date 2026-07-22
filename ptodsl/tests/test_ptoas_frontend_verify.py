@@ -243,21 +243,20 @@ def process_row_ptr_kernel_module(
     dst_gm: pto.ptr(pto.f32, "gm"),
     row: pto.i32,
 ):
-    with pto.simd():
-        c0_i64 = pto.const(0, dtype=pto.i64)
-        row_offset = row * 16
-        src_row = pto.addptr(src_gm, row_offset)
-        dst_row = pto.addptr(dst_gm, row_offset)
-        ub_ptr = pto.castptr(c0_i64, pto.ptr(pto.f32, "ub"))
+    c0_i64 = pto.const(0, dtype=pto.i64)
+    row_offset = row * 16
+    src_row = pto.addptr(src_gm, row_offset)
+    dst_row = pto.addptr(dst_gm, row_offset)
+    ub_ptr = pto.castptr(c0_i64, pto.ptr(pto.f32, "ub"))
 
-        pto.get_buf(pto.Pipe.MTE2, 0)
-        pto.mte_gm_ub(src_row, ub_ptr, 0, 64, nburst=(1, 64, 64))
-        pto.rls_buf(pto.Pipe.MTE2, 0)
+    pto.get_buf(pto.Pipe.MTE2, 0)
+    pto.mte_gm_ub(src_row, ub_ptr, 0, 64, nburst=(1, 64, 64))
+    pto.rls_buf(pto.Pipe.MTE2, 0)
 
-        pto.get_buf(pto.Pipe.MTE3, 0)
-        pto.mte_ub_gm(ub_ptr, dst_row, 64, nburst=(1, 64, 64))
-        pto.rls_buf(pto.Pipe.MTE3, 0)
-        pto.pipe_barrier(pto.Pipe.ALL)
+    pto.get_buf(pto.Pipe.MTE3, 0)
+    pto.mte_ub_gm(ub_ptr, dst_row, 64, nburst=(1, 64, 64))
+    pto.rls_buf(pto.Pipe.MTE3, 0)
+    pto.pipe_barrier(pto.Pipe.ALL)
 
 
 @pto.jit(target="a5", backend="emitc")
@@ -311,6 +310,29 @@ def low_precision_vcvt_frontend():
     )
     roundtrip = pto.vcvt(vec_f8, pto.f32, mask_b8, part=pto.VcvtPartMode.P0)
     pto.vsts(roundtrip, dst_ptr, pto.const(0), mask_b32)
+
+
+@pto.simt
+def vec_value_arith_simt_body(
+    A_ptr: pto.ptr(pto.f32, "gm"),
+    O_ptr: pto.ptr(pto.f32, "gm"),
+):
+    tid = pto.get_tid_x()
+    base = tid * 4
+    x4 = scalar.load(A_ptr, base, contiguous=4)
+    y4 = scalar.load(A_ptr, 32 + base, contiguous=4)
+    scalar.store(x4 + y4, O_ptr, base)
+    scalar.store(x4 - y4, O_ptr, 32 + base)
+    scalar.store(x4 * y4, O_ptr, 64 + base)
+
+
+@pto.jit(target="a5", mode="explicit")
+def vec_value_arith_frontend(
+    A_ptr: pto.ptr(pto.f32, "gm"),
+    O_ptr: pto.ptr(pto.f32, "gm"),
+):
+    vec_value_arith_simt_body[8, 1, 1](A_ptr, O_ptr)
+    pto.pipe_barrier(pto.Pipe.ALL)
 
 
 def main() -> None:
@@ -472,8 +494,11 @@ def main() -> None:
     expect(
         "func.func public @scale_row_kernel_module__ptodsl_" in example_vpto_child
         and 'pto.visibility = "external"' in example_vpto_child
-        and "pto.section.vector {" in example_vpto_child,
-        "mixed_backend_kernel_module.py VPTO child should expose a public helper definition with explicit vector authoring, matching the vector-helper side of mixed-external-vadd",
+        and "pto.kernel_kind = #pto.kernel_kind<vector>" in example_vpto_child
+        and "pto.section.vector {" not in example_vpto_child
+        and "pto.mte_gm_ub" in example_vpto_child
+        and "pto.vmuls" in example_vpto_child,
+        "mixed_backend_kernel_module.py VPTO child should expose one explicit vector kernel-module definition without a legacy inline section",
     )
 
     example_frontend_texts = run_ptoas_frontend_verify(
@@ -593,6 +618,34 @@ module attributes {pto.target_arch = "a5", pto.kernel_kind = #pto.kernel_kind<ve
         "'pto.vcvt' op unsupported vcvt source/result element type pair" in invalid_lowp_stderr,
         "invalid low-precision vcvt artifact should fail specifically on vcvt pair verification",
     )
+
+    vec_arith_text = vec_value_arith_frontend.compile().mlir_text()
+    expect("vector<4xf32>" in vec_arith_text, "vec_value_arith_frontend source MLIR should contain vector<4xf32> values")
+    expect(
+        "pto.simt_launch" in vec_arith_text,
+        "vec_value_arith_frontend source MLIR should lower through a SIMT launch",
+    )
+    expect(
+        "arith.addf" in vec_arith_text
+        and "arith.subf" in vec_arith_text
+        and "arith.mulf" in vec_arith_text,
+        "vec_value_arith_frontend source MLIR should contain all three VecValue arithmetic ops before frontend verification",
+    )
+    vec_arith_frontend_texts = run_ptoas_frontend_verify(
+        ptoas_bin,
+        vec_arith_text,
+        "vec_value_arith_frontend PTODSL artifact",
+    )
+    expect(
+        len(vec_arith_frontend_texts) == 1,
+        "vec_value_arith_frontend PTODSL artifact should lower to exactly one backend child module",
+    )
+    vec_arith_frontend_text = vec_arith_frontend_texts[0]
+    expect(
+        vec_arith_frontend_text == "",
+        "vec_value_arith_frontend should compile through the VPTO fallback object path when --emit-pto-ir is unavailable",
+    )
+
     print("ptodsl_ptoas_frontend_verify: PASS")
 
 

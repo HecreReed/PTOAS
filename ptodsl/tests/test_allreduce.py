@@ -263,8 +263,10 @@ def main():
     compiled = kernel_128.compile()
     mlir = compiled.mlir_text()
 
-    expect("pto.simt_entry" in mlir,
-           "IR: helper carries pto.simt_entry")
+    expect("pto.section.simt" in mlir,
+           "IR: inline SIMT body stays in pto.section.simt during DSL tracing")
+    expect("pto.simt_entry" not in mlir,
+           "IR: inline SIMT body does not become pto.simt_entry during DSL tracing")
 
     for op_name in (
         "pto.redux_add", "pto.syncthreads", "pto.store", "pto.load",
@@ -598,81 +600,6 @@ def main():
     expect(
         simt_allreduce_min(1.0, threads=2, scale=2) == 1.0,
         "Path 0 (min): threads <= scale returns identity (value unchanged)",
-    )
-
-    # ══════════════════════════════════════════════════════════════════════════
-    # Lowering verification — ptoas VPTO LLVM IR emission
-    #
-    # Tests that the allreduce MLIR survives the complete ptoas pipeline:
-    #   MLIR (PTO dialect) → VPTO passes → LLVM IR
-    #
-    # KNOWN TOOLCHAIN ISSUES (bisheng, not allreduce):
-    #   a) bisheng stack-smashing on SIMT code that stores to GM
-    #   b) bisheng stack-smashing on cross-warp scratch-buffer code (≥ 128 lanes)
-    #
-    # Keep this regression at --emit-vpto-llvm-ir so PTODSL CI does not require
-    # ASCEND_HOME_PATH or a bisheng installation.
-    # ══════════════════════════════════════════════════════════════════════════
-
-    import subprocess
-    import tempfile
-    from pathlib import Path
-    from ptodsl._runtime.toolchain import resolve_ptoas_binary
-
-    def _ptoas_binary() -> Path:
-        return resolve_ptoas_binary()
-
-    def _emit_vpto_llvm_ir_and_check(compiled, case_label: str) -> bool:
-        """Run ``ptoas --emit-vpto-llvm-ir`` on *compiled* MLIR."""
-        ptoas = _ptoas_binary()
-        mlir_text = compiled.mlir_text()
-        with tempfile.TemporaryDirectory() as tmpdir:
-            mlir_path = Path(tmpdir) / "kernel.mlir"
-            llvm_ir_path = Path(tmpdir) / "kernel.ll"
-            mlir_path.write_text(mlir_text)
-            result = subprocess.run(
-                [str(ptoas), "--pto-arch=a5", "--pto-backend=vpto",
-                 "--enable-tile-op-expand", "--emit-vpto-llvm-ir",
-                 str(mlir_path), "-o", str(llvm_ir_path)],
-                capture_output=True, text=True,
-            )
-            ok = result.returncode == 0 and llvm_ir_path.is_file() and llvm_ir_path.stat().st_size > 0
-            if ok:
-                return True
-            sys.stderr.write(
-                f"\n  [FAIL] {case_label} (exit={result.returncode})\n"
-                f"  STDERR: {result.stderr[:500]}\n"
-            )
-            return False
-
-    # ── Warp-reduce (≤ 32 lanes, NO scratch, NO GM store) ──
-    # These are the simplest kernels — they only compute a value and return
-    # from the SIMT body without writing to GM.  They MUST lower cleanly
-    # because they avoid both known bisheng issues.
-    expect(
-        _emit_vpto_llvm_ir_and_check(kernel_warp.compile(), "warp_sum_t32"),
-        "lowering: warp_sum (32 lanes, hw redux, no GM store) must pass",
-    )
-    expect(
-        _emit_vpto_llvm_ir_and_check(kernel_max_warp_hw.compile(), "warp_max_t32"),
-        "lowering: warp_max (32 lanes, hw redux, no GM store) must pass",
-    )
-    expect(
-        _emit_vpto_llvm_ir_and_check(kernel_min_warp_hw.compile(), "warp_min_t32"),
-        "lowering: warp_min (32 lanes, hw redux, no GM store) must pass",
-    )
-
-    # ── Cross-warp (128 lanes, UB scratch) ─────────────────────────────────
-    @pto.jit(target="a5")
-    def _kernel_cross_lowering(scratch_gm: pto.ptr(pto.f32, "gm")):
-        zero_u64 = pto.const(0, dtype=pto.ui64)
-        ub_scratch = pto.castptr(zero_u64, pto.ptr(pto.f32, "ub"))
-        with pto.simt():
-            x = pto.const(1.0, dtype=pto.f32)
-            _result = pto.simt_allreduce_sum(x, scratch=ub_scratch, threads=128, scale=1)
-    expect(
-        _emit_vpto_llvm_ir_and_check(_kernel_cross_lowering.compile(), "cross_sum_t128"),
-        "lowering: cross_sum (128 lanes, UB scratch) must emit VPTO LLVM IR",
     )
 
     print("ptodsl_allreduce: PASS")

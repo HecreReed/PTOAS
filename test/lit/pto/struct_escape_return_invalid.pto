@@ -1,0 +1,24 @@
+// Copyright (c) 2026 Huawei Technologies Co., Ltd.
+// This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+// CANN Open Software License Agreement Version 2.0 (the "License").
+// Please refer to the License for details. You may not use this file except in compliance with the License.
+// THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+// INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+// See LICENSE in the root of the software repository for the full text of the License.
+
+// RUN: not ptoas %s 2>&1 | FileCheck %s
+
+// A !pto.struct is stack storage and lowers to a pointer to that storage, so
+// returning a locally declared one would hand the caller a pointer into a dead
+// frame. Without this check the emitted C++ is `PtoStruct_f32_i8 v2; ... return
+// &v2;` — it compiles clean and is undefined at run time.
+
+module {
+  func.func private @make(%v : f32) -> !pto.struct<f32, i8> {
+    %s = pto.declare_struct -> !pto.struct<f32, i8>
+    pto.struct_set %s[0], %v : !pto.struct<f32, i8>, f32
+    return %s : !pto.struct<f32, i8>
+  }
+}
+
+// CHECK: stack-local struct must not escape the scope that declares it

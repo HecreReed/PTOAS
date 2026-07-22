@@ -217,46 +217,76 @@ entry 关系做 verifier 检查。
 
 ### 10.1 LLVM 承载方式
 
-VPTO 语义层保持 `pto.keep` / `pto.resume` 不变。LLVM 层不引入可长期持有的 `simt_state` 值，也不新增 intrinsic；`keep/resume` 只是在 lowering 时映射成 `llvm.inlineasm` 形式的 sideeffect call，由后端识别其 asm 指令。
+VPTO 语义层保持 `pto.keep` / `pto.resume` 不变。LLVM 层不引入可长期持有的 `simt_state` 值，也不新增 intrinsic。`keep/resume` 在 lowering 时映射成空 `llvm.inlineasm` sideeffect call，通过固定 TPER output constraint 表达物理寄存器绑定。
 
-当前实现把 `slot` 直接映射到固定 SIMT 物理寄存器：
+lowering 把 `slot` 直接映射到固定 SIMT 物理寄存器。32-bit 及以下
+payload 使用 32-bit TPER 名称：
 
-- `slot = 0` -> `R4`
-- `slot = 1` -> `R5`
+- `slot = 0` -> `TPER4`
+- `slot = 1` -> `TPER5`
 - ...
-- `slot = 122` -> `R126`
+- `slot = 122` -> `TPER126`
 
-64-bit 整数值占用一对连续槽位，且起始 slot 必须为偶数。slot 是用户
-显式分配的，不会按 keep/resume 组内出现顺序重新 packed；因此 consumer
-只恢复部分 slot 时，剩余 slot 的物理位置仍然稳定。
+64-bit 整数值使用 64-bit 寄存器对名称 `TPERL<n>`。设
+`base_reg = 4 + slot`，其 constraint 名称为
+`TPERL<base_reg / 2>`，并对应 `TPER<base_reg>` 和
+`TPER<base_reg + 1>`。例如：
 
-对应 lowering：
+- `slot = 0` -> `TPERL2` -> `TPER4/TPER5` -> `R4:R5`
+- `slot = 2` -> `TPERL3` -> `TPER6/TPER7` -> `R6:R7`
+- `slot = 8` -> `TPERL6` -> `TPER12/TPER13` -> `R12:R13`
+- `slot = 120` -> `TPERL62` -> `TPER124/TPER125` -> `R124:R125`
 
-- `pto.keep %x {slot = N} : i32`
-  - `call void asm sideeffect "MOV R{4+N}, $0", "R"(i32 %x)`
-- `%y = pto.resume {slot = N} : i32`
-  - `%y = call i32 asm sideeffect "MOV $0, R{4+N}", "=R"()`
-- `pto.keep %x {slot = N} : i64`
-  - `call void asm sideeffect "IMAD.WIDE.u32 R{4+N}, RZ, RZ, $0", "R"(i64 %x)`
-- `%y = pto.resume {slot = N} : i64`
-  - `%y = call i64 asm sideeffect "IMAD.WIDE.u32 $0, RZ, RZ, R{4+N}", "=R"()`
+因此 64-bit 起始 slot 必须为偶数。slot 是用户显式分配的，不会按
+keep/resume 组内出现顺序重新 packed；consumer 只恢复部分 slot 时，
+剩余 slot 的物理位置仍然稳定。
+
+两个连续 i32 keep 的 lowering 形态为：
+
+```llvm
+%keep = call { i32, i32 } asm sideeffect "",
+  "={TPER4},={TPER5},0,1"(i32 %a, i32 %b)
+```
+
+对应 resume 的 lowering 形态为：
+
+```llvm
+%resume = call { i32, i32 } asm sideeffect "",
+  "={TPER4},={TPER5}"()
+```
+
+keep 的数字 input constraint 与前面的 fixed output 绑定，使 LLVM 负责将 payload 物化到目标 TPER。resume 直接把 fixed output 物化为新的 SSA 值。asm body 为空，不生成 keep/resume 专用 `MOV` 或 `IMAD.WIDE`。
+
+64-bit 值必须使用 i64 fixed register-pair output。例如 `slot = 8` 的
+keep/resume 分别生成：
+
+```llvm
+%keep = call i64 asm sideeffect "", "={TPERL6},0"(i64 %value)
+%resume = call i64 asm sideeffect "", "={TPERL6}"()
+```
+
+`TPER12` 只表示 32-bit `R12`；`TPERL6` 才表示 64-bit
+`R12:R13`。两种名称不能仅根据 LLVM operand type 自动互换。
 
 约束：
 
-- `keep` 必须带 `sideeffect`，不能被当成纯函数删除。
+- `keep` 和 `resume` 必须带 `sideeffect`，不能被当成纯函数删除。
 - `resume` 必须产生与 `keep` payload 完全一致的结果类型。
 - 不能把它做成普通 return token，也不能让它看起来像可无限期持有的 state 值。
-- asm 指令名使用 `MOV dst, src` 这一类可被后端识别的指令名，不使用随意拼接的业务字符串。
-- `slot` 必须能映射到 `R4~R126`，超出范围直接在 verifier 中拒绝；
-  64-bit 整数值还要求偶数 slot，且第二个槽不能超出范围。
-- asm 字符串要足够稳定，后端能无歧义识别固定 `R` 寄存器名和 `MOV` 形态。
+- 不使用 generic `R` / `=R` output，也不使用 `~{R}` / `~{TPER}` clobber 表达 persistent 数据流。
+- 32-bit 及以下 payload 必须能映射到 `TPER4~TPER126`，超出范围直接
+  在 verifier 中拒绝。
+- 64-bit 整数值要求偶数 slot，且必须能映射到 `TPERL2~TPERL62`；
+  第二个 32-bit 槽不能超出范围。
+- lowering 必须根据 packed payload 宽度选择 `TPER<n>` 或
+  `TPERL<n>`，不能只依赖 LLVM operand type 推导寄存器宽度。
 
 ### 10.2 执行顺序
 
 1. 在 authoring IR 中保留 `keep/resume`。
 2. 在 VPTO verifier 中收紧 slot、payload、边界和插入点约束。
 3. 在 `VPTOLLVMEmitter` 中 lower 成 inline asm sideeffect call。
-4. 由更底层后端识别该 asm 标记并展开为实际硬件语义。
+4. 目标后端根据 fixed TPER constraint 完成物理寄存器绑定，空 asm body 不生成额外指令。
 
 ### 10.3 一个具体 case
 
@@ -302,15 +332,16 @@ module attributes {pto.target_arch = "a5"} {
 对应到 LLVM lowering 后，`keep/resume` 仍然留在各自函数内部，只是变成内联汇编承载的 sideeffect 操作：
 
 - `simt_stage0` 内的 `pto.keep %tid {slot = 0} : i32`
-  - `call void asm sideeffect "MOV R4, $0", "R"(i32 %tid)`
+  - `%keep = call i32 asm sideeffect "", "={TPER4},0"(i32 %tid)`
 - `simt_stage1` 内的 `pto.resume {slot = 0} : i32`
-  - `%tid2 = call i32 asm sideeffect "MOV $0, R4", "=R"()`
+  - `%tid2 = call i32 asm sideeffect "", "={TPER4}"()`
 
 这里固定的不只是数据流关系，也包括最终 asm 形态：
 
 - `keep/resume` 都必须留在对应 `simt_entry` 内。
 - `slot = 0` 只在这两个函数之间建立关联。
-- `slot` 在 lowering 时必须能映射到 `R4~R126`。
+- `slot` 在 lowering 时必须按 payload 宽度映射到对应的
+  `TPER4~TPER126` 或 `TPERL2~TPERL62`。
 
 ---
 

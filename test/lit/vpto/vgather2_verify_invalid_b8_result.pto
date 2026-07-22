@@ -1,0 +1,22 @@
+// Copyright (c) 2026 Huawei Technologies Co., Ltd.
+// This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+// CANN Open Software License Agreement Version 2.0 (the "License").
+// Please refer to the License for details. You may not use this file except in compliance with the License.
+// THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+// INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+// See LICENSE in the root of the software repository for the full text of the License.
+
+// RUN: not ptoas --pto-arch=a5 --pto-backend=vpto %s -o - 2>&1 | FileCheck %s
+
+module attributes {pto.target_arch = "a5", pto.kernel_kind = #pto.kernel_kind<vector>} {
+  func.func @vgather2_invalid_b8_result(%source: !pto.ptr<ui8, ub>, %offsets: !pto.vreg<128xui16>) attributes {pto.kernel} {
+    pto.vecscope {
+      %mask = pto.pset_b16 "PAT_ALL" : !pto.mask<b16>
+      %result = pto.vgather2 %source, %offsets, %mask
+          : !pto.ptr<ui8, ub>, !pto.vreg<128xui16>, !pto.mask<b16> -> !pto.vreg<128xi16>
+    }
+    return
+  }
+}
+
+// CHECK: error: 'pto.vgather2' op 8-bit gather requires i8/ui8 source and matching i16/ui16 result

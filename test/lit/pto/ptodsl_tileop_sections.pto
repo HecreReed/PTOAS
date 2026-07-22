@@ -1,0 +1,50 @@
+// Copyright (c) 2026 Huawei Technologies Co., Ltd.
+// This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+// CANN Open Software License Agreement Version 2.0 (the "License").
+// Please refer to the License for details. You may not use this file except in compliance with the License.
+// THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+// INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+// See LICENSE in the root of the software repository for the full text of the License.
+
+// RUN: ptoas --pto-arch=a5 --emit-pto-ir %s | FileCheck %s --check-prefix=SECTION
+
+// SECTION-LABEL: func.func private @vector_tileop()
+// SECTION: pto.tileop.helper
+// SECTION: pto.tileop.kind = "vector"
+// SECTION: pto.section.vector {
+// SECTION: pto.simt_launch @simt_body<<<
+// SECTION: return
+// SECTION-LABEL: func.func private @loop_tileop
+// SECTION: pto.section.vector {
+// SECTION: scf.for %[[IV:[A-Za-z0-9_]+]] =
+// SECTION: arith.index_cast %[[IV]] : index to i32
+// SECTION: return
+
+module attributes {pto.target_arch = "a5"} {
+  func.func @kernel() {
+    func.call @vector_tileop() : () -> ()
+    return
+  }
+
+  func.func private @simt_body() attributes {pto.simt_entry} {
+    return
+  }
+
+  func.func private @vector_tileop() attributes {pto.tileop.helper} {
+    %one = arith.constant 1 : i32
+    pto.simt_launch @simt_body<<<%one, %one, %one>>>() : () -> ()
+    return
+  }
+
+  func.func private @loop_tileop(%limit: index) attributes {pto.tileop.helper} {
+    %zero = arith.constant 0 : index
+    %one = arith.constant 1 : index
+    %one_i32 = arith.constant 1 : i32
+    scf.for %i = %zero to %limit step %one {
+      %iv = arith.index_cast %i : index to i32
+      pto.simt_launch @simt_body<<<%iv, %one_i32, %one_i32>>>() : () -> ()
+      scf.yield
+    }
+    return
+  }
+}

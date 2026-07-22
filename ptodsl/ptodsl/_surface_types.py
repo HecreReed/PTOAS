@@ -41,6 +41,21 @@ class MemorySpace:
     SCALING = _pto.AddressSpace.SCALING
 
 
+class BLayout(str, Enum):
+    """Public tile block-layout aliases used by TileLib constraints."""
+
+    ROW_MAJOR = "row_major"
+    COL_MAJOR = "col_major"
+
+
+class SLayout(str, Enum):
+    """Public tile storage-layout aliases used by TileLib constraints."""
+
+    NONE_BOX = "none_box"
+    ROW_MAJOR = "row_major"
+    COL_MAJOR = "col_major"
+
+
 class BarrierType:
     """Public PTODSL memory-barrier kind aliases."""
 
@@ -290,6 +305,8 @@ class Tile:
 __all__ = [
     "const_expr",
     "MemorySpace",
+    "BLayout",
+    "SLayout",
     "BarrierType",
     "Pipe",
     "MaskPattern",

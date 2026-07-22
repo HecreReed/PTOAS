@@ -58,12 +58,12 @@ pipe_barrier(pipe);
 
 ```mlir
 // Both stores target the same GM address — order matters!
-pto.mte_ub_gm %ub_partial_0, %gm_result, ...
+pto.mte_ub_gm %ub_partial_0, %gm_result, %len_burst ...
 // Without pipe_barrier, MTE3 could execute the second copy before the first
 // completes, producing a non-deterministic result at %gm_result.
 pto.pipe_barrier "PIPE_MTE3"
 // After barrier: first copy is guaranteed complete. Second copy overwrites deterministically.
-pto.mte_ub_gm %ub_partial_1, %gm_result, ...
+pto.mte_ub_gm %ub_partial_1, %gm_result, %len_burst ...
 ```
 
 ---
@@ -110,6 +110,32 @@ The `mode` parameter controls how `get_buf` and `rls_buf` interact with pipeline
 - This mode emulates `set_flag`/`wait_flag` behavior and is provided for backward compatibility with existing code patterns.
 
 > **Note:** A5 supports both `set_flag`/`wait_flag` and `get_buf`/`rls_buf` mechanisms. Mode 1 is rarely needed since mode 0 provides a more programmer-friendly approach for buffer-based synchronization.
+
+---
+
+### `pto.get_buf_dyn` / `pto.rls_buf_dyn`
+
+Dynamic variants of `get_buf`/`rls_buf` where `buf_id` is provided as an SSA value instead of a static integer attribute. This enables runtime-computed buf_id patterns such as SIMT ping-pong buffering.
+
+- **syntax:**
+  - String shorthand: `pto.get_buf_dyn "PIPE_MTE2", %buf_id, 0`
+  - Bracket form: `pto.get_buf_dyn [TLOAD, %buf_id, 0]`
+- **semantics:** Same as `get_buf`/`rls_buf`, but the buffer-id is an `index`-typed SSA value resolved at runtime.
+- **inputs:**
+  - `op_type`: same pipe-like attribute as the static form
+  - `buf_id`: an SSA value of `index` type (e.g. `iter & 1` for ping-pong)
+  - `mode`: same mode parameter (default `0`)
+- **constraints and limitations:** The BufidSync auto-insertion pass only uses the static form (`get_buf`/`rls_buf`). Use the dynamic form (`get_buf_dyn`/`rls_buf_dyn`) when buf_id must be computed at runtime.
+
+Example (SIMT double-buffering with `iter & 1`):
+
+```mlir
+  %c1 = arith.constant 1 : index
+  %buf_id = arith.andi %iter, %c1 : index
+  pto.get_buf_dyn [TLOAD, %buf_id, 0]
+  // ... tload to ubuf slot %buf_id ...
+  pto.rls_buf_dyn [TLOAD, %buf_id, 0]
+```
 
 ---
 
@@ -341,7 +367,7 @@ pto.set_flag["PIPE_V", "PIPE_MTE3", "EVENT_ID0"]
 // MTE3 waits until Vector's signal arrives
 pto.wait_flag["PIPE_V", "PIPE_MTE3", "EVENT_ID0"]
 
-pto.mte_ub_gm %ub_out, %gm_out, ...
+pto.mte_ub_gm %ub_out, %gm_out, %len_burst ...
 ```
 
 **Key property:** Every cross-pipeline edge is an explicit `(set_flag, wait_flag)` pair. Simple for straight-line code, but gets verbose in loops (see Example 3).
@@ -381,7 +407,7 @@ pto.rls_buf "PIPE_V", %bufid_ub_out, %c0 : i64, i64
 // ─── Stage 3: MTE3 stores result to GM ───
 // MTE3 acquires ub_out — blocks until Vector releases it (RAW: V write → MTE3 read)
 pto.get_buf "PIPE_MTE3", %bufid_ub_out, %c0 : i64, i64
-pto.mte_ub_gm %ub_out, %gm_out, ...
+pto.mte_ub_gm %ub_out, %gm_out, %len_burst ...
 // MTE3 done reading ub_out — release so Vector can reuse it in next iteration
 pto.rls_buf "PIPE_MTE3", %bufid_ub_out, %c0 : i64, i64
 ```
@@ -457,7 +483,7 @@ scf.for %i = %c0 to %N step %c1 {
   // ── MTE3: store result from buf_out[i%2] to GM ──
   // RAW: wait for Vector to finish writing buf_out[i%2]
   pto.wait_flag["PIPE_V", "PIPE_MTE3", "EVT_OUT_FWD_{pp}"]
-  pto.mte_ub_gm %ub_out[%pp], %gm_out[%i], ...
+  pto.mte_ub_gm %ub_out[%pp], %gm_out[%i], %len_burst ...
   // WAR: tell Vector "done reading buf_out[i%2]"
   pto.set_flag["PIPE_MTE3", "PIPE_V", "EVT_OUT_REV_{pp}"]
 }
@@ -508,7 +534,7 @@ scf.for %i = %c0 to %N step %c1 {
   // ── MTE3: store result ──
   // Acquires out[i%2] — blocks until Vector releases it (RAW: automatic)
   pto.get_buf "PIPE_MTE3", %bufid_out[%pp], %c0 : i64, i64
-  pto.mte_ub_gm %ub_out[%pp], %gm_out[%i], ...
+  pto.mte_ub_gm %ub_out[%pp], %gm_out[%i], %len_burst ...
   pto.rls_buf "PIPE_MTE3", %bufid_out[%pp], %c0 : i64, i64
 }
 // No post-loop drain needed — last rls_buf completes the pipeline.

@@ -88,7 +88,7 @@ def make_explicit_tadd_kernel():
         c64_i32 = pto.const(64, dtype=pto.int32)
         c64 = pto.const(64)
 
-        with pto.simd():
+        with pto.tileop():
             ptr_f32_ub = pto.ptr(pto.float32, "ub")
             vf32 = pto.vreg_type(64, pto.float32)
             ptr_src = pto.castptr(c4096_i64, ptr_f32_ub)
@@ -155,44 +155,44 @@ def make_explicit_softmax_kernel(name: str, *, rows: int, seq: int):
                 pto.set_flag("MTE2", "V", event_id=0)
                 pto.wait_flag("MTE2", "V", event_id=0)
 
-                with pto.simd():
-                    row_loop = pto.for_(0, runtime_rows, step=packed_rows).carry(remained=runtime_rows)
-                    with row_loop:
-                        row_base = row_loop.iv
-                        remaining_rows = row_loop.remained
-                        active_rows, remaining_after_pack = pto.make_mask(pto.f32, remaining_rows)
-                        running_max = pto.vlds(scores_tile[0, row_base:])
-                        running_sum = pto.vbr(1.0)
+                # Explicit-mode examples intentionally keep pure compute inline.
+                row_loop = pto.for_(0, runtime_rows, step=packed_rows).carry(remained=runtime_rows)
+                with row_loop:
+                    row_base = row_loop.iv
+                    remaining_rows = row_loop.remained
+                    active_rows, remaining_after_pack = pto.make_mask(pto.f32, remaining_rows)
+                    running_max = pto.vlds(scores_tile[0, row_base:])
+                    running_sum = pto.vbr(1.0)
 
-                        softmax_loop = pto.for_(1, runtime_seq, step=1).carry(
-                            running_max=running_max,
-                            running_sum=running_sum,
-                        )
-                        with softmax_loop:
-                            col = softmax_loop.iv
-                            running_max = softmax_loop.running_max
-                            running_sum = softmax_loop.running_sum
-                            col_vec = pto.vlds(scores_tile[col, row_base:])
-                            merged_max = pto.vmax(running_max, col_vec, active_rows)
-                            running_delta = pto.vsub(running_max, merged_max, active_rows)
-                            scaled_running = pto.vexp(running_delta, active_rows)
-                            running_sum_scaled = pto.vmul(scaled_running, running_sum, active_rows)
-                            col_delta = pto.vsub(col_vec, merged_max, active_rows)
-                            col_exp = pto.vexp(col_delta, active_rows)
-                            merged_sum = pto.vadd(running_sum_scaled, col_exp, active_rows)
-                            softmax_loop.update(running_max=merged_max, running_sum=merged_sum)
+                    softmax_loop = pto.for_(1, runtime_seq, step=1).carry(
+                        running_max=running_max,
+                        running_sum=running_sum,
+                    )
+                    with softmax_loop:
+                        col = softmax_loop.iv
+                        running_max = softmax_loop.running_max
+                        running_sum = softmax_loop.running_sum
+                        col_vec = pto.vlds(scores_tile[col, row_base:])
+                        merged_max = pto.vmax(running_max, col_vec, active_rows)
+                        running_delta = pto.vsub(running_max, merged_max, active_rows)
+                        scaled_running = pto.vexp(running_delta, active_rows)
+                        running_sum_scaled = pto.vmul(scaled_running, running_sum, active_rows)
+                        col_delta = pto.vsub(col_vec, merged_max, active_rows)
+                        col_exp = pto.vexp(col_delta, active_rows)
+                        merged_sum = pto.vadd(running_sum_scaled, col_exp, active_rows)
+                        softmax_loop.update(running_max=merged_max, running_sum=merged_sum)
 
-                        final_max = softmax_loop.final("running_max")
-                        final_sum = softmax_loop.final("running_sum")
+                    final_max = softmax_loop.final("running_max")
+                    final_sum = softmax_loop.final("running_sum")
 
-                        with pto.for_(0, runtime_seq, step=1) as col:
-                            col_vec = pto.vlds(scores_tile[col, row_base:])
-                            out_delta = pto.vsub(col_vec, final_max, active_rows)
-                            exp_vec = pto.vexp(out_delta, active_rows)
-                            out_vec = pto.vdiv(exp_vec, final_sum, active_rows)
-                            pto.vsts(out_vec, out_tile[col, row_base:], active_rows)
+                    with pto.for_(0, runtime_seq, step=1) as col:
+                        col_vec = pto.vlds(scores_tile[col, row_base:])
+                        out_delta = pto.vsub(col_vec, final_max, active_rows)
+                        exp_vec = pto.vexp(out_delta, active_rows)
+                        out_vec = pto.vdiv(exp_vec, final_sum, active_rows)
+                        pto.vsts(out_vec, out_tile[col, row_base:], active_rows)
 
-                        row_loop.update(remained=remaining_after_pack)
+                    row_loop.update(remained=remaining_after_pack)
 
                 pto.set_flag("V", "MTE3", event_id=0)
                 pto.wait_flag("V", "MTE3", event_id=0)
@@ -263,44 +263,44 @@ def make_explicit_launch_softmax_kernel(name: str, *, rows: int, seq: int):
         pto.set_flag("MTE2", "V", event_id=0)
         pto.wait_flag("MTE2", "V", event_id=0)
 
-        with pto.simd():
-            row_loop = pto.for_(0, runtime_rows, step=lane_num).carry(remained=runtime_rows)
-            with row_loop:
-                row_base = row_loop.iv
-                remaining_rows = row_loop.remained
-                active_rows, remaining_after_pack = pto.make_mask(pto.f32, remaining_rows)
-                running_max = pto.vlds(scores_tile[0, row_base:])
-                running_sum = pto.vbr(1.0)
+        # Explicit-mode examples intentionally keep pure compute inline.
+        row_loop = pto.for_(0, runtime_rows, step=lane_num).carry(remained=runtime_rows)
+        with row_loop:
+            row_base = row_loop.iv
+            remaining_rows = row_loop.remained
+            active_rows, remaining_after_pack = pto.make_mask(pto.f32, remaining_rows)
+            running_max = pto.vlds(scores_tile[0, row_base:])
+            running_sum = pto.vbr(1.0)
 
-                softmax_loop = pto.for_(1, runtime_seq, step=1).carry(
-                    running_max=running_max,
-                    running_sum=running_sum,
-                )
-                with softmax_loop:
-                    col = softmax_loop.iv
-                    running_max = softmax_loop.running_max
-                    running_sum = softmax_loop.running_sum
-                    col_vec = pto.vlds(scores_tile[col, row_base:])
-                    merged_max = pto.vmax(running_max, col_vec, active_rows)
-                    running_delta = pto.vsub(running_max, merged_max, active_rows)
-                    scaled_running = pto.vexp(running_delta, active_rows)
-                    running_sum_scaled = pto.vmul(scaled_running, running_sum, active_rows)
-                    col_delta = pto.vsub(col_vec, merged_max, active_rows)
-                    col_exp = pto.vexp(col_delta, active_rows)
-                    merged_sum = pto.vadd(running_sum_scaled, col_exp, active_rows)
-                    softmax_loop.update(running_max=merged_max, running_sum=merged_sum)
+            softmax_loop = pto.for_(1, runtime_seq, step=1).carry(
+                running_max=running_max,
+                running_sum=running_sum,
+            )
+            with softmax_loop:
+                col = softmax_loop.iv
+                running_max = softmax_loop.running_max
+                running_sum = softmax_loop.running_sum
+                col_vec = pto.vlds(scores_tile[col, row_base:])
+                merged_max = pto.vmax(running_max, col_vec, active_rows)
+                running_delta = pto.vsub(running_max, merged_max, active_rows)
+                scaled_running = pto.vexp(running_delta, active_rows)
+                running_sum_scaled = pto.vmul(scaled_running, running_sum, active_rows)
+                col_delta = pto.vsub(col_vec, merged_max, active_rows)
+                col_exp = pto.vexp(col_delta, active_rows)
+                merged_sum = pto.vadd(running_sum_scaled, col_exp, active_rows)
+                softmax_loop.update(running_max=merged_max, running_sum=merged_sum)
 
-                final_max = softmax_loop.final("running_max")
-                final_sum = softmax_loop.final("running_sum")
+            final_max = softmax_loop.final("running_max")
+            final_sum = softmax_loop.final("running_sum")
 
-                with pto.for_(0, runtime_seq, step=1) as col:
-                    col_vec = pto.vlds(scores_tile[col, row_base:])
-                    out_delta = pto.vsub(col_vec, final_max, active_rows)
-                    exp_vec = pto.vexp(out_delta, active_rows)
-                    out_vec = pto.vdiv(exp_vec, final_sum, active_rows)
-                    pto.vsts(out_vec, out_tile[col, row_base:], active_rows)
+            with pto.for_(0, runtime_seq, step=1) as col:
+                col_vec = pto.vlds(scores_tile[col, row_base:])
+                out_delta = pto.vsub(col_vec, final_max, active_rows)
+                exp_vec = pto.vexp(out_delta, active_rows)
+                out_vec = pto.vdiv(exp_vec, final_sum, active_rows)
+                pto.vsts(out_vec, out_tile[col, row_base:], active_rows)
 
-                row_loop.update(remained=remaining_after_pack)
+            row_loop.update(remained=remaining_after_pack)
 
         pto.set_flag("V", "MTE3", event_id=0)
         pto.wait_flag("V", "MTE3", event_id=0)

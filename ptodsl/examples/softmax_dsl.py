@@ -71,33 +71,32 @@ def _make_softmax_kernel(name: str, *, rows: int, seq: int):
             pto.set_flag("MTE2", "V", event_id=0)
             pto.wait_flag("MTE2", "V", event_id=0)
 
-            with pto.simd():
-                remaining_rows = runtime_rows
-                for row_base in range(0, runtime_rows, packed_rows):
-                    active_rows, remaining_rows = pto.make_mask(pto.f32, remaining_rows)
-                    running_max = pto.vlds(scores_tile[0, row_base:])
-                    running_sum = pto.vbr(1.0)
+            remaining_rows = runtime_rows
+            for row_base in range(0, runtime_rows, packed_rows):
+                active_rows, remaining_rows = pto.make_mask(pto.f32, remaining_rows)
+                running_max = pto.vlds(scores_tile[0, row_base:])
+                running_sum = pto.vbr(1.0)
 
-                    for col in range(1, runtime_seq, 1):
-                        col_vec = pto.vlds(scores_tile[col, row_base:])
-                        merged_max = pto.vmax(running_max, col_vec, active_rows)
-                        running_delta = pto.vsub(running_max, merged_max, active_rows)
-                        scaled_running = pto.vexp(running_delta, active_rows)
-                        running_sum_scaled = pto.vmul(scaled_running, running_sum, active_rows)
-                        col_delta = pto.vsub(col_vec, merged_max, active_rows)
-                        col_exp = pto.vexp(col_delta, active_rows)
-                        running_sum = pto.vadd(running_sum_scaled, col_exp, active_rows)
-                        running_max = merged_max
+                for col in range(1, runtime_seq, 1):
+                    col_vec = pto.vlds(scores_tile[col, row_base:])
+                    merged_max = pto.vmax(running_max, col_vec, active_rows)
+                    running_delta = pto.vsub(running_max, merged_max, active_rows)
+                    scaled_running = pto.vexp(running_delta, active_rows)
+                    running_sum_scaled = pto.vmul(scaled_running, running_sum, active_rows)
+                    col_delta = pto.vsub(col_vec, merged_max, active_rows)
+                    col_exp = pto.vexp(col_delta, active_rows)
+                    running_sum = pto.vadd(running_sum_scaled, col_exp, active_rows)
+                    running_max = merged_max
 
-                    final_max = running_max
-                    final_sum = running_sum
+                final_max = running_max
+                final_sum = running_sum
 
-                    for col in range(0, runtime_seq, 1):
-                        col_vec = pto.vlds(scores_tile[col, row_base:])
-                        out_delta = pto.vsub(col_vec, final_max, active_rows)
-                        exp_vec = pto.vexp(out_delta, active_rows)
-                        out_vec = pto.vdiv(exp_vec, final_sum, active_rows)
-                        pto.vsts(out_vec, out_tile[col, row_base:], active_rows)
+                for col in range(0, runtime_seq, 1):
+                    col_vec = pto.vlds(scores_tile[col, row_base:])
+                    out_delta = pto.vsub(col_vec, final_max, active_rows)
+                    exp_vec = pto.vexp(out_delta, active_rows)
+                    out_vec = pto.vdiv(exp_vec, final_sum, active_rows)
+                    pto.vsts(out_vec, out_tile[col, row_base:], active_rows)
 
             pto.set_flag("V", "MTE3", event_id=0)
             pto.wait_flag("V", "MTE3", event_id=0)

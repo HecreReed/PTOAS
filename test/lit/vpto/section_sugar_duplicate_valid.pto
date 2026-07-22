@@ -1,0 +1,16 @@
+// RUN: ptoas --pto-arch=a5 --emit-pto-ir %s -o - | FileCheck %s
+
+module attributes {pto.target_arch = "a5"} {
+  func.func @duplicate_section_kernel() attributes {pto.kernel} {
+    pto.section.vector {
+    }
+    pto.section.vector {
+    }
+    return
+  }
+}
+
+// Multiple same-kind sections are legal after tileop materialization.
+// CHECK-LABEL: func.func @duplicate_section_kernel
+// CHECK: pto.section.vector {
+// CHECK: pto.section.vector {

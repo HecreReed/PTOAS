@@ -1574,8 +1574,8 @@ packCopyUbToGmConfig0(Operation *anchor, ValueRange operands) {
   Value sid = getI64Operand(2);
   Value nBurst = getI64Operand(3);
   Value lenBurst = getI64Operand(4);
-  Value reserved = getI64Operand(5);
-  if (!sid || !nBurst || !lenBurst || !reserved)
+  Value l2CacheCtl = getI64Operand(5);
+  if (!sid || !nBurst || !lenBurst || !l2CacheCtl)
     return failure();
 
   auto shl = [&](Value value, uint64_t amount) -> Value {
@@ -1589,7 +1589,7 @@ packCopyUbToGmConfig0(Operation *anchor, ValueRange operands) {
   Value config = sid;
   config = bitOr(config, shl(nBurst, 4));
   config = bitOr(config, shl(lenBurst, 25));
-  config = bitOr(config, shl(reserved, 60));
+  config = bitOr(config, shl(l2CacheCtl, 60));
   return config;
 }
 
@@ -1602,12 +1602,12 @@ packCopyUbToGmConfig1(Operation *anchor, ValueRange operands) {
 
 [[maybe_unused]] static FailureOr<Value>
 packCopyUbToGmConfig0(Operation *anchor, Value sid, Value nBurst,
-                      Value lenBurst, Value reserved) {
+                      Value lenBurst, Value l2CacheCtl) {
   SmallVector<Value, 8> operands(8);
   operands[2] = sid;
   operands[3] = nBurst;
   operands[4] = lenBurst;
-  operands[5] = reserved;
+  operands[5] = l2CacheCtl;
   return packCopyUbToGmConfig0(anchor, operands);
 }
 
@@ -2685,6 +2685,14 @@ static FailureOr<StringRef> buildL1CacheLoadCallee(MLIRContext *context,
   } else if (pto::isPTOFloat8Type(resultType) ||
              pto::isPTOHiFloat8Type(resultType)) {
     elem = "s8";
+  } else if (pto::isPTOPackedLdgStgVectorType(resultType)) {
+    unsigned totalBits = pto::getPTOPackedLdgStgTotalBits(resultType);
+    if (totalBits == 16)
+      elem = "s16";
+    else if (totalBits == 32)
+      elem = "s32";
+    else if (totalBits == 64)
+      elem = "s64";
   }
   if (elem.empty())
     return failure();
@@ -2717,6 +2725,14 @@ static FailureOr<StringRef> buildL1CacheStoreCallee(MLIRContext *context,
   } else if (pto::isPTOFloat8Type(valueType) ||
              pto::isPTOHiFloat8Type(valueType)) {
     elem = "b8";
+  } else if (pto::isPTOPackedLdgStgVectorType(valueType)) {
+    unsigned totalBits = pto::getPTOPackedLdgStgTotalBits(valueType);
+    if (totalBits == 16)
+      elem = "b16";
+    else if (totalBits == 32)
+      elem = "b32";
+    else if (totalBits == 64)
+      elem = "b64";
   }
   if (elem.empty())
     return failure();
@@ -3673,16 +3689,74 @@ static StringRef buildVsstbPostCallee(MLIRContext *context) {
   return StringAttr::get(context, "llvm.hivm.vsstb.post").getValue();
 }
 
+static Type getVgather2SourceElementType(Type sourceType) {
+  if (auto ptrType = dyn_cast<pto::PtrType>(sourceType))
+    return ptrType.getElementType();
+  if (auto memrefType = dyn_cast<BaseMemRefType>(sourceType))
+    return memrefType.getElementType();
+  return {};
+}
+
 static FailureOr<StringRef> buildVgather2Callee(MLIRContext *context,
+                                                Type sourceType,
                                                 Type resultType) {
-  std::string vec =
-      getElementTypeFragment(getElementTypeFromVectorLike(resultType));
+  Type sourceElemType = getVgather2SourceElementType(sourceType);
+  Type resultElemType = getElementTypeFromVectorLike(resultType);
   auto lanes = getElementCountFromVectorLike(resultType);
-  if (vec.empty() || !lanes)
+  if (!sourceElemType || !resultElemType || !lanes)
     return failure();
+
+  std::string vec;
+  int64_t intrinsicLanes = *lanes;
+  if (pto::getPTOStorageElemBitWidth(sourceElemType) == 8) {
+    vec = getElementTypeFragment(sourceElemType);
+    intrinsicLanes *= 2;
+  } else {
+    vec = getElementTypeFragment(resultElemType);
+  }
+  if (vec.empty())
+    return failure();
+
   return StringAttr::get(context, "llvm.hivm.vgather2.v300.v" +
-                                      std::to_string(*lanes) + vec)
+                                      std::to_string(intrinsicLanes) + vec)
       .getValue();
+}
+
+static std::optional<uint64_t> getFixedVectorBitWidth(Type type) {
+  auto vectorType = dyn_cast<VectorType>(type);
+  if (!vectorType || vectorType.getRank() != 1 || vectorType.isScalable())
+    return std::nullopt;
+  int64_t lanes = vectorType.getDimSize(0);
+  if (lanes <= 0)
+    return std::nullopt;
+  auto elementType = dyn_cast<IntegerType>(vectorType.getElementType());
+  if (!elementType)
+    return std::nullopt;
+  return static_cast<uint64_t>(lanes) * elementType.getWidth();
+}
+
+static FailureOr<Type> getVgather2OffsetsCarrierType(PatternRewriter &rewriter,
+                                                     Type sourceType,
+                                                     Type resultType,
+                                                     Type offsetsType) {
+  Type sourceElemType = getVgather2SourceElementType(sourceType);
+  Type elementType = getElementTypeFromVectorLike(resultType);
+  auto lanes = getElementCountFromVectorLike(resultType);
+  if (!sourceElemType || !elementType || !lanes || *lanes <= 0)
+    return failure();
+
+  Type carrierType = offsetsType;
+  if (pto::getPTOStorageElemBitWidth(elementType) == 16) {
+    if (*lanes % 2 != 0)
+      return failure();
+    carrierType = VectorType::get({*lanes / 2}, rewriter.getI32Type());
+  }
+
+  std::optional<uint64_t> offsetsBits = getFixedVectorBitWidth(offsetsType);
+  std::optional<uint64_t> carrierBits = getFixedVectorBitWidth(carrierType);
+  if (!offsetsBits || !carrierBits || *offsetsBits != *carrierBits)
+    return failure();
+  return carrierType;
 }
 
 static FailureOr<StringRef> buildVgather2BcCallee(MLIRContext *context,
@@ -4108,6 +4182,13 @@ StringRef buildSyncCallee<pto::RlsBufOp>(MLIRContext *context) {
   return StringAttr::get(context, "llvm.hivm.RLS.BUFI.mode").getValue();
 }
 
+static StringRef buildBufDynSyncCallee(MLIRContext *context, bool isGetBuf) {
+  return StringAttr::get(context,
+                         isGetBuf ? "llvm.hivm.GET.BUF.mode"
+                                  : "llvm.hivm.RLS.BUF.mode")
+      .getValue();
+}
+
 template <typename QueryOp>
 static StringRef buildRuntimeQueryCallee(MLIRContext *context);
 
@@ -4129,6 +4210,21 @@ StringRef buildRuntimeQueryCallee<pto::GetBlockNumOp>(MLIRContext *context) {
 template <>
 StringRef buildRuntimeQueryCallee<pto::GetSubBlockNumOp>(MLIRContext *context) {
   return StringAttr::get(context, "llvm.hivm.GET.SUBBLOCKDIM").getValue();
+}
+
+template <typename QueryOp>
+static StringRef buildSimtBlockQueryCallee(MLIRContext *context);
+
+template <>
+StringRef
+buildSimtBlockQueryCallee<pto::GetBlockIdxOp>(MLIRContext *context) {
+  return StringAttr::get(context, "llvm.hivm.tpe.get.BLOCK.IDX").getValue();
+}
+
+template <>
+StringRef
+buildSimtBlockQueryCallee<pto::GetBlockNumOp>(MLIRContext *context) {
+  return StringAttr::get(context, "llvm.hivm.tpe.get.BLOCK.NUM").getValue();
 }
 
 static LogicalResult
@@ -7288,17 +7384,28 @@ public:
       return rewriter.notifyMatchFailure(op, "failed to convert vgather2 result type");
 
     FailureOr<StringRef> calleeName =
-        buildVgather2Callee(op.getContext(), op.getResult().getType());
+        buildVgather2Callee(op.getContext(), op.getSource().getType(),
+                            op.getResult().getType());
     if (failed(calleeName))
       return rewriter.notifyMatchFailure(op, "unsupported vgather2 signature");
 
+    Value offsets = adaptor.getOffsets();
+    FailureOr<Type> offsetsCarrierType = getVgather2OffsetsCarrierType(
+        rewriter, op.getSource().getType(), op.getResult().getType(),
+        offsets.getType());
+    if (failed(offsetsCarrierType))
+      return rewriter.notifyMatchFailure(op, "unsupported vgather2 offsets carrier");
+    if (offsets.getType() != *offsetsCarrierType)
+      offsets = rewriter.create<LLVM::BitcastOp>(op.getLoc(), *offsetsCarrierType,
+                                                 offsets);
+
     auto funcType = rewriter.getFunctionType(
-        TypeRange{adaptor.getSource().getType(), adaptor.getOffsets().getType(),
+        TypeRange{adaptor.getSource().getType(), *offsetsCarrierType,
                   adaptor.getMask().getType()},
         TypeRange{resultType});
     auto call = rewriter.create<func::CallOp>(
         op.getLoc(), *calleeName, TypeRange{resultType},
-        ValueRange{adaptor.getSource(), adaptor.getOffsets(), adaptor.getMask()});
+        ValueRange{adaptor.getSource(), offsets, adaptor.getMask()});
     state.plannedDecls.push_back(PlannedDecl{calleeName->str(), funcType});
     rewriter.replaceOp(op, call.getResults());
     return success();
@@ -8162,27 +8269,29 @@ private:
   LoweringState &state;
 };
 
-static std::string buildRepeatedInlineAsmConstraints(StringRef constraint,
-                                                     size_t count) {
+struct SimtKeepResumePhysicalRegister {
+  int64_t baseRegister;
+  unsigned registerCount;
+};
+
+// TPERn names one 32-bit register, while TPERLn names the 64-bit pair whose
+// base register is R(2n). Keep uses tied inputs so the compiler models the
+// value captured by each fixed output without inline assembly instructions.
+static std::string buildSimtKeepResumeConstraints(
+    ArrayRef<SimtKeepResumePhysicalRegister> physicalRegs, bool tieInputs) {
   std::string result;
   llvm::raw_string_ostream os(result);
-  for (size_t i = 0; i < count; ++i) {
-    if (i != 0)
+  for (auto [index, physicalReg] : llvm::enumerate(physicalRegs)) {
+    if (index != 0)
       os << ",";
-    os << constraint;
+    if (physicalReg.registerCount == 2)
+      os << "={TPERL" << physicalReg.baseRegister / 2 << "}";
+    else
+      os << "={TPER" << physicalReg.baseRegister << "}";
   }
-  return os.str();
-}
-
-static std::string appendSimtKeepResumeClobbers(std::string constraints,
-                                                ArrayRef<std::pair<int64_t, unsigned>> physicalRegs) {
-  llvm::raw_string_ostream os(constraints);
-  // The asm body names fixed SIMT R registers directly. Model those registers
-  // as clobbers so LLVM does not allocate a different operand/result into a
-  // slot that another keep/resume line reads or overwrites in the same asm.
-  for (auto [reg, registerCount] : physicalRegs) {
-    for (unsigned offset = 0; offset < registerCount; ++offset)
-      os << ",~{R" << (reg + offset) << "}";
+  if (tieInputs) {
+    for (size_t index = 0; index < physicalRegs.size(); ++index)
+      os << "," << index;
   }
   return os.str();
 }
@@ -8264,11 +8373,12 @@ static unsigned getSimtKeepResumeRegisterCount(Type type) {
   return width && *width > 32 ? 2 : 1;
 }
 
-static FailureOr<SmallVector<int64_t, 4>> computeSimtKeepResumePhysicalRegs(
+static FailureOr<SmallVector<SimtKeepResumePhysicalRegister, 4>>
+computeSimtKeepResumePhysicalRegs(
     ArrayRef<std::pair<int64_t, unsigned>> logicalSlots) {
-  SmallVector<int64_t, 4> physicalRegs(logicalSlots.size(), -1);
-  for (auto [index, logicalSlot] : llvm::enumerate(logicalSlots)) {
-    auto [slot, registerCount] = logicalSlot;
+  SmallVector<SimtKeepResumePhysicalRegister, 4> physicalRegs;
+  physicalRegs.reserve(logicalSlots.size());
+  for (auto [slot, registerCount] : logicalSlots) {
     if (slot < 0 || slot >= 123)
       return failure();
     if (registerCount == 2 && ((slot % 2) != 0 || slot + 1 >= 123))
@@ -8276,10 +8386,10 @@ static FailureOr<SmallVector<int64_t, 4>> computeSimtKeepResumePhysicalRegs(
     // Slots are user-assigned storage words, not dense ordinals in the current
     // keep/resume group. This keeps a consumer that resumes only a subset of
     // slots from changing where the remaining slots are read from.
-    int64_t reg = 4 + slot;
-    if (reg + static_cast<int64_t>(registerCount) - 1 > 126)
+    int64_t baseRegister = 4 + slot;
+    if (baseRegister + static_cast<int64_t>(registerCount) - 1 > 126)
       return failure();
-    physicalRegs[index] = reg;
+    physicalRegs.push_back({baseRegister, registerCount});
   }
   return physicalRegs;
 }
@@ -8294,8 +8404,8 @@ static bool isValidSimtKeepResumeSlot(int64_t slot, unsigned registerCount) {
 
 class LowerKeepOpPattern final : public OpConversionPattern<pto::KeepOp> {
 public:
-  explicit LowerKeepOpPattern(TypeConverter &typeConverter, MLIRContext *context,
-                              LoweringState &)
+  explicit LowerKeepOpPattern(TypeConverter &typeConverter,
+                              MLIRContext *context, LoweringState &)
       : OpConversionPattern<pto::KeepOp>(typeConverter, context) {}
 
   LogicalResult
@@ -8308,9 +8418,8 @@ public:
 
     SmallVector<pto::KeepOp, 4> keepOps = collectConsecutiveOps(op);
     SmallVector<Value, 4> payloads;
+    SmallVector<Type, 4> asmResultTypes;
     SmallVector<std::pair<int64_t, unsigned>, 4> logicalSlots;
-    std::string asmString;
-    llvm::raw_string_ostream asmOS(asmString);
     for (pto::KeepOp keep : keepOps) {
       Value payload = rewriter.getRemappedValue(keep.getPayload());
       if (!payload)
@@ -8320,40 +8429,31 @@ public:
         return rewriter.notifyMatchFailure(
             keep, "expected integer scalar up to 64 bits or f16/bf16/f32");
       int64_t slot = keep.getSlot();
-      unsigned registerCount = getSimtKeepResumeRegisterCount(payload.getType());
+      unsigned registerCount =
+          getSimtKeepResumeRegisterCount(payload.getType());
       if (!isValidSimtKeepResumeSlot(slot, registerCount))
-        return rewriter.notifyMatchFailure(keep,
-                                           "slot must be in range [0, 122] and 64-bit slots must be even");
+        return rewriter.notifyMatchFailure(
+            keep,
+            "slot must be in range [0, 122] and 64-bit slots must be even");
       logicalSlots.push_back({slot, registerCount});
       payloads.push_back(payload);
+      asmResultTypes.push_back(payload.getType());
     }
-    FailureOr<SmallVector<int64_t, 4>> physicalRegs =
+    FailureOr<SmallVector<SimtKeepResumePhysicalRegister, 4>> physicalRegs =
         computeSimtKeepResumePhysicalRegs(logicalSlots);
     if (failed(physicalRegs))
       return rewriter.notifyMatchFailure(
           op, "keep slots must map to valid non-overlapping SIMT registers");
 
-    SmallVector<std::pair<int64_t, unsigned>, 4> clobbers;
-    for (auto [index, keep] : llvm::enumerate(keepOps)) {
-      (void)keep;
-      if (index != 0)
-        asmOS << "\n";
-      if (logicalSlots[index].second == 2)
-        asmOS << "IMAD.WIDE.u32 R" << (*physicalRegs)[index]
-              << ", RZ, RZ, $" << index << " wait:0b0000000 stall:1";
-      else
-        asmOS << "MOV R" << (*physicalRegs)[index] << ", $" << index
-              << " wait:0b0000000 stall:1";
-      clobbers.push_back({(*physicalRegs)[index], logicalSlots[index].second});
-    }
-    asmOS.flush();
-
+    Type asmResultType = asmResultTypes.front();
+    if (asmResultTypes.size() > 1)
+      asmResultType =
+          LLVM::LLVMStructType::getLiteral(op.getContext(), asmResultTypes);
     rewriter.setInsertionPoint(op);
     rewriter.create<LLVM::InlineAsmOp>(
-        op.getLoc(), TypeRange{}, payloads, asmString,
-        appendSimtKeepResumeClobbers(
-            buildRepeatedInlineAsmConstraints("R", payloads.size()), clobbers),
-        true, false, LLVM::tailcallkind::TailCallKind::None,
+        op.getLoc(), TypeRange{asmResultType}, payloads, "",
+        buildSimtKeepResumeConstraints(*physicalRegs, true), true, false,
+        LLVM::tailcallkind::TailCallKind::None,
         LLVM::AsmDialectAttr::get(op.getContext(), LLVM::AsmDialect::AD_ATT),
         ArrayAttr{});
     for (pto::KeepOp keep : llvm::reverse(keepOps))
@@ -8379,8 +8479,6 @@ public:
     SmallVector<pto::ResumeOp, 4> resumeOps = collectConsecutiveOps(op);
     SmallVector<std::pair<int64_t, unsigned>, 4> logicalSlots;
     SmallVector<Type, 4> asmResultTypes;
-    std::string asmString;
-    llvm::raw_string_ostream asmOS(asmString);
     for (pto::ResumeOp resume : resumeOps) {
       Type resultType = getTypeConverter()->convertType(resume.getType());
       if (!resultType || !getSimtKeepResumeBitWidth(resultType))
@@ -8389,32 +8487,18 @@ public:
       int64_t slot = resume.getSlot();
       unsigned registerCount = getSimtKeepResumeRegisterCount(resultType);
       if (!isValidSimtKeepResumeSlot(slot, registerCount))
-        return rewriter.notifyMatchFailure(resume,
-                                           "slot must be in range [0, 122] and 64-bit slots must be even");
+        return rewriter.notifyMatchFailure(
+            resume,
+            "slot must be in range [0, 122] and 64-bit slots must be even");
       logicalSlots.push_back({slot, registerCount});
       asmResultTypes.push_back(rewriter.getIntegerType(
           *getSimtKeepResumeBitWidth(resultType) > 32 ? 64 : 32));
     }
-    FailureOr<SmallVector<int64_t, 4>> physicalRegs =
+    FailureOr<SmallVector<SimtKeepResumePhysicalRegister, 4>> physicalRegs =
         computeSimtKeepResumePhysicalRegs(logicalSlots);
     if (failed(physicalRegs))
       return rewriter.notifyMatchFailure(
           op, "resume slots must map to valid non-overlapping SIMT registers");
-
-    SmallVector<std::pair<int64_t, unsigned>, 4> clobbers;
-    for (auto [index, resume] : llvm::enumerate(resumeOps)) {
-      (void)resume;
-      if (index != 0)
-        asmOS << "\n";
-      if (logicalSlots[index].second == 2)
-        asmOS << "IMAD.WIDE.u32 $" << index << ", RZ, RZ, R"
-              << (*physicalRegs)[index] << " wait:0b0000000 stall:1";
-      else
-        asmOS << "MOV $" << index << ", R" << (*physicalRegs)[index]
-              << " wait:0b0000000 stall:1";
-      clobbers.push_back({(*physicalRegs)[index], logicalSlots[index].second});
-    }
-    asmOS.flush();
 
     Type asmResultType = asmResultTypes.front();
     if (asmResultTypes.size() > 1) {
@@ -8423,10 +8507,9 @@ public:
     }
     rewriter.setInsertionPoint(op);
     auto asmOp = rewriter.create<LLVM::InlineAsmOp>(
-        op.getLoc(), TypeRange{asmResultType}, ValueRange{}, asmString,
-        appendSimtKeepResumeClobbers(
-            buildRepeatedInlineAsmConstraints("=R", resumeOps.size()), clobbers),
-        true, false, LLVM::tailcallkind::TailCallKind::None,
+        op.getLoc(), TypeRange{asmResultType}, ValueRange{}, "",
+        buildSimtKeepResumeConstraints(*physicalRegs, false), true, false,
+        LLVM::tailcallkind::TailCallKind::None,
         LLVM::AsmDialectAttr::get(op.getContext(), LLVM::AsmDialect::AD_ATT),
         ArrayAttr{});
 
@@ -8447,9 +8530,8 @@ public:
           resume.getLoc(), asmOp.getRes(),
           ArrayRef<int64_t>{static_cast<int64_t>(index)});
       Type resultType = getTypeConverter()->convertType(resume.getType());
-      Value result = unpackSimtKeepResumePayload(resume.getLoc(),
-                                                 extract.getRes(), resultType,
-                                                 rewriter);
+      Value result = unpackSimtKeepResumePayload(
+          resume.getLoc(), extract.getRes(), resultType, rewriter);
       if (!result)
         return rewriter.notifyMatchFailure(resume, "failed to unpack result");
       results.push_back(result);
@@ -8690,6 +8772,31 @@ private:
   LoweringState &state;
 };
 
+template <typename MemoryConsistencyOp>
+class LowerUnsupportedMemoryConsistencyOpPattern final
+    : public OpConversionPattern<MemoryConsistencyOp> {
+public:
+  explicit LowerUnsupportedMemoryConsistencyOpPattern(
+      TypeConverter &typeConverter, MLIRContext *context,
+      LoweringState &state)
+      : OpConversionPattern<MemoryConsistencyOp>(typeConverter, context) {
+    (void)state;
+  }
+
+  LogicalResult
+  matchAndRewrite(MemoryConsistencyOp op,
+                  typename MemoryConsistencyOp::Adaptor adaptor,
+                  ConversionPatternRewriter &rewriter) const override {
+    (void)adaptor;
+    (void)rewriter;
+    op.emitOpError()
+        << "is not supported by the VPTO backend yet; PTOAS validates the "
+           "memory-consistency contract, but high-level CMO/fence ops must be "
+           "lowered to `pto.dcci` or `pto.dsb` before VPTO LLVM lowering";
+    return failure();
+  }
+};
+
 class LowerDsbOpPattern final : public OpConversionPattern<pto::DsbOp> {
 public:
   explicit LowerDsbOpPattern(TypeConverter &typeConverter, MLIRContext *context,
@@ -8808,6 +8915,67 @@ private:
   LoweringState &state;
 };
 
+template <typename BufDynSyncOp>
+class LowerBufDynSyncOpPattern final
+    : public OpConversionPattern<BufDynSyncOp> {
+public:
+  explicit LowerBufDynSyncOpPattern(TypeConverter &typeConverter,
+                                    MLIRContext *context, LoweringState &state)
+      : OpConversionPattern<BufDynSyncOp>(typeConverter, context),
+        state(state) {}
+
+  LogicalResult
+  matchAndRewrite(BufDynSyncOp op, typename BufDynSyncOp::Adaptor adaptor,
+                  ConversionPatternRewriter &rewriter) const override {
+    PIPE pipe = PIPE::PIPE_UNASSIGNED;
+    if (auto pipeAttr = dyn_cast<PipeAttr>(op.getOpTypeAttr())) {
+      pipe = pipeAttr.getPipe();
+    } else {
+      auto opTypeOr = parseSyncOpTypeLikeAttr(op.getOpTypeAttr());
+      if (failed(opTypeOr))
+        return rewriter.notifyMatchFailure(
+            op, "buffer sync expects pipe/sync_op_type/pipe_event_type attr");
+      pipe = mapSyncOpTypeToPipe(*opTypeOr);
+    }
+    if (!isConcreteSyncPipe(pipe))
+      return rewriter.notifyMatchFailure(
+          op, "buffer sync op_type cannot map to concrete pipe");
+
+    auto pipeImm = parsePipeImmediate(stringifyPIPE(pipe));
+    if (!pipeImm)
+      return rewriter.notifyMatchFailure(op, "unsupported buffer sync pipe");
+
+    Value pipeValue = getI64Constant(rewriter, op.getLoc(), *pipeImm);
+    Value bufIdDyn = adaptor.getBufId();
+    if (!bufIdDyn)
+      return rewriter.notifyMatchFailure(
+          op, "expected dynamic buf-id operand");
+    Value bufIdValue = castIntegerLikeTo(op, bufIdDyn, rewriter.getI64Type());
+    if (!bufIdValue)
+      return rewriter.notifyMatchFailure(
+          op, "failed to cast dynamic buf-id to i64");
+
+    bool isGetBuf =
+        std::is_same_v<BufDynSyncOp, pto::GetBufDynOp>;
+    StringRef calleeName =
+        buildBufDynSyncCallee(op.getContext(), isGetBuf);
+    Value modeValue =
+        getI64Constant(rewriter, op.getLoc(), op.getModeAttr().getInt());
+    auto funcType = rewriter.getFunctionType(
+        TypeRange{rewriter.getI64Type(), rewriter.getI64Type(),
+                  rewriter.getI64Type()},
+        TypeRange{});
+    rewriter.create<func::CallOp>(op.getLoc(), calleeName, TypeRange{},
+                                  ValueRange{pipeValue, bufIdValue, modeValue});
+    state.plannedDecls.push_back(PlannedDecl{calleeName.str(), funcType});
+    rewriter.eraseOp(op);
+    return success();
+  }
+
+private:
+  LoweringState &state;
+};
+
 template <typename QueryOp>
 class LowerRuntimeQueryOpPattern final : public OpConversionPattern<QueryOp> {
 public:
@@ -8831,6 +8999,53 @@ public:
                                               TypeRange{resultType}, ValueRange{});
     state.plannedDecls.push_back(PlannedDecl{calleeName.str(), funcType});
     rewriter.replaceOp(op, call.getResults());
+    return success();
+  }
+
+private:
+  LoweringState &state;
+};
+
+template <typename QueryOp>
+class LowerBlockRuntimeQueryOpPattern final
+    : public OpConversionPattern<QueryOp> {
+public:
+  explicit LowerBlockRuntimeQueryOpPattern(TypeConverter &typeConverter,
+                                           MLIRContext *context,
+                                           LoweringState &state)
+      : OpConversionPattern<QueryOp>(typeConverter, context), state(state) {}
+
+  LogicalResult
+  matchAndRewrite(QueryOp op, typename QueryOp::Adaptor adaptor,
+                  ConversionPatternRewriter &rewriter) const override {
+    (void)adaptor;
+    Type resultType =
+        this->getTypeConverter()->convertType(op.getResult().getType());
+    if (!resultType)
+      return rewriter.notifyMatchFailure(
+          op, "failed to convert block runtime-query result type");
+
+    auto funcOp = op->template getParentOfType<func::FuncOp>();
+    bool isSimtEntry =
+        funcOp && funcOp->hasAttr(pto::kPTOSimtEntryAttrName);
+    if (isSimtEntry && !resultType.isInteger(64))
+      return rewriter.notifyMatchFailure(
+          op, "SIMT block runtime-query expects an i64 PTO result");
+
+    StringRef calleeName =
+        isSimtEntry ? buildSimtBlockQueryCallee<QueryOp>(op.getContext())
+                    : buildRuntimeQueryCallee<QueryOp>(op.getContext());
+    Type callResultType = isSimtEntry ? rewriter.getI32Type() : resultType;
+    auto funcType =
+        rewriter.getFunctionType(TypeRange{}, TypeRange{callResultType});
+    auto call = rewriter.create<func::CallOp>(
+        op.getLoc(), calleeName, TypeRange{callResultType}, ValueRange{});
+    state.plannedDecls.push_back(PlannedDecl{calleeName.str(), funcType});
+
+    Value result = call.getResult(0);
+    if (isSimtEntry)
+      result = rewriter.create<arith::ExtUIOp>(op.getLoc(), resultType, result);
+    rewriter.replaceOp(op, result);
     return success();
   }
 
@@ -9733,6 +9948,15 @@ static Type getLdgCallResultType(Type valueType, Type convertedValueType,
     return rewriter.getI64Type();
   if (pto::isPTOFloat8Type(valueType) || pto::isPTOHiFloat8Type(valueType))
     return rewriter.getI32Type();
+  if (pto::isPTOPackedLdgStgVectorType(valueType)) {
+    unsigned totalBits = pto::getPTOPackedLdgStgTotalBits(valueType);
+    if (totalBits == 16)
+      return rewriter.getI32Type();
+    if (totalBits == 32)
+      return rewriter.getI32Type();
+    if (totalBits == 64)
+      return rewriter.getI64Type();
+  }
   return convertedValueType;
 }
 
@@ -9759,6 +9983,16 @@ static Value convertLdgCallResult(Location loc, Type valueType,
     Value payload =
         rewriter.create<arith::TruncIOp>(loc, rewriter.getI8Type(), callResult);
     return rewriter.create<LLVM::BitcastOp>(loc, convertedValueType, payload);
+  }
+  if (pto::isPTOPackedLdgStgVectorType(valueType)) {
+    unsigned totalBits = pto::getPTOPackedLdgStgTotalBits(valueType);
+    if (totalBits == 16) {
+      Value trunc = rewriter.create<arith::TruncIOp>(
+          loc, rewriter.getI16Type(), callResult);
+      return rewriter.create<LLVM::BitcastOp>(loc, convertedValueType, trunc);
+    }
+    return rewriter.create<LLVM::BitcastOp>(loc, convertedValueType,
+                                            callResult);
   }
   return callResult;
 }
@@ -9890,6 +10124,18 @@ static Value convertStgValue(Location loc, Type valueType, Value value,
     return rewriter.create<LLVM::BitcastOp>(loc, rewriter.getI32Type(), value);
   if (valueType.isF64())
     return rewriter.create<LLVM::BitcastOp>(loc, rewriter.getI64Type(), value);
+  if (pto::isPTOPackedLdgStgVectorType(valueType)) {
+    unsigned totalBits = pto::getPTOPackedLdgStgTotalBits(valueType);
+    if (totalBits == 16)
+      return rewriter.create<LLVM::BitcastOp>(loc, rewriter.getF16Type(),
+                                              value);
+    if (totalBits == 32)
+      return rewriter.create<LLVM::BitcastOp>(loc, rewriter.getI32Type(),
+                                              value);
+    if (totalBits == 64)
+      return rewriter.create<LLVM::BitcastOp>(loc, rewriter.getI64Type(),
+                                              value);
+  }
   return value;
 }
 
@@ -10157,13 +10403,18 @@ static void populateVPTOOpLoweringPatterns(VPTOTypeConverter &typeConverter,
                LowerPipeEventSyncOpPattern<pto::WaitFlagOp>,
                LowerPipeEventDynSyncOpPattern<pto::SetFlagDynOp>,
                LowerPipeEventDynSyncOpPattern<pto::WaitFlagDynOp>,
-               LowerBarrierOpPattern, LowerMemBarOpPattern, LowerDsbOpPattern,
+               LowerBarrierOpPattern, LowerMemBarOpPattern,
+               LowerUnsupportedMemoryConsistencyOpPattern<pto::CmoCacheInvalidOp>,
+               LowerUnsupportedMemoryConsistencyOpPattern<pto::FenceBarrierAllOp>,
+               LowerDsbOpPattern,
                LowerDcciOpPattern,
                LowerBufSyncOpPattern<pto::GetBufOp>,
                LowerBufSyncOpPattern<pto::RlsBufOp>,
-               LowerRuntimeQueryOpPattern<pto::GetBlockIdxOp>,
+               LowerBufDynSyncOpPattern<pto::GetBufDynOp>,
+               LowerBufDynSyncOpPattern<pto::RlsBufDynOp>,
+               LowerBlockRuntimeQueryOpPattern<pto::GetBlockIdxOp>,
                LowerRuntimeQueryOpPattern<pto::GetSubBlockIdxOp>,
-               LowerRuntimeQueryOpPattern<pto::GetBlockNumOp>,
+               LowerBlockRuntimeQueryOpPattern<pto::GetBlockNumOp>,
                LowerRuntimeQueryOpPattern<pto::GetSubBlockNumOp>,
                LowerVldsOpPattern, LowerVldsx2OpPattern, LowerVsldbOpPattern,
                LowerVldasOpPattern, LowerInitAlignOpPattern,
@@ -10220,8 +10471,10 @@ static void configureVPTOOpLoweringTarget(ConversionTarget &target,
   target.addLegalOp<UnrealizedConversionCastOp>();
   target.addIllegalOp<pto::SetFlagOp, pto::WaitFlagOp, pto::SetFlagDynOp, pto::WaitFlagDynOp, pto::SyncSetOp,
                       pto::SyncWaitOp, pto::BarrierOp, pto::MemBarOp,
+                      pto::CmoCacheInvalidOp, pto::FenceBarrierAllOp,
                       pto::DsbOp, pto::DcciOp,
-                      pto::GetBufOp, pto::RlsBufOp>();
+                      pto::GetBufOp, pto::RlsBufOp,
+                      pto::GetBufDynOp, pto::RlsBufDynOp>();
   target.addIllegalOp<pto::GetBlockIdxOp, pto::GetSubBlockIdxOp,
                       pto::GetBlockNumOp, pto::GetSubBlockNumOp,
                       pto::GetCtrlOp, pto::GetVms4SrOp, pto::GetTidXOp,

@@ -34,7 +34,7 @@ math, conversion, sync, and state preservation.
 Current PTO-DSL already has a narrow SIMT surface:
 
 - `@pto.simt` decorator and `with pto.simt():` inline scope.
-- `@pto.simt(max_threads=..., max_regs=...)` optional entry resource
+- `@pto.simt(max_threads=...)` optional entry resource
   attributes.
 - `pto.store_vfsimt_info(dim_z, dim_y, dim_x)`.
 - `pto.get_tid_x()`, `pto.get_tid_y()`, `pto.get_tid_z()`.
@@ -284,15 +284,14 @@ explicit peer function symbol.
 
 ### 5.6 `@pto.simt` Decorator Attributes
 
-SIMT entry functions may carry optional VPTO attributes:
+SIMT entry functions may carry an optional VPTO attribute:
 
 - `pto.simt_max_threads`
-- `pto.simt_max_regs`
 
-PTO-DSL exposes them through `@pto.simt`:
+PTO-DSL exposes it through `@pto.simt`:
 
 ```python
-@pto.simt(max_threads=256, max_regs=48)
+@pto.simt(max_threads=256)
 def body(...):
     ...
 ```
@@ -302,14 +301,13 @@ Lowering:
 ```mlir
 func.func @body(...) attributes {
   pto.simt_entry,
-  pto.simt_max_threads = 256 : i32,
-  pto.simt_max_regs = 48 : i32
+  pto.simt_max_threads = 256 : i32
 }
 ```
 
-Lowering attaches these attributes to the generated specialized helper function,
-not to the authored Python symbol. Omitting either argument emits no explicit
-attribute and lets backend defaults apply.
+Lowering attaches the attribute to the generated specialized helper function,
+not to the authored Python symbol. Omitting the argument emits no explicit
+attribute and lets the backend default (1024) apply.
 
 Validation:
 
@@ -432,8 +430,10 @@ Minimum Python/frontend tests:
    produces distinct helper functions and distinct traced bodies.
 8. `pto.simt_launch` callee attributes reference the actual generated helper
    symbols.
-9. `@pto.simt(max_threads=..., max_regs=...)` emits `pto.simt_max_threads` and
-   `pto.simt_max_regs` on the generated helper function.
+9. `@pto.simt(max_threads=...)` emits `pto.simt_max_threads` on the generated
+   helper function. The register budget (`simt-max-registers`) is automatically
+   derived from `max_threads` by the backend according to the hardware resource
+   partition and is no longer a configurable attribute.
 
 Suggested lit/frontend assertions:
 

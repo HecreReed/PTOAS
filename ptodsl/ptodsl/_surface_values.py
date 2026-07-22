@@ -47,6 +47,26 @@ def unwrap_surface_value(value):
     return _validate_surface_value_access(value)
 
 
+def is_tile_ir_type(type_obj) -> bool:
+    """Return whether *type_obj* is a TileOp-compatible Tile boundary type."""
+    return _maybe_cast_tile_buf_type(type_obj) is not None
+
+
+def is_runtime_scalar_ir_type(type_obj) -> bool:
+    """Return whether *type_obj* is a TileOp-compatible PTO scalar type."""
+    type_text = str(type_obj)
+    return not (
+        is_tile_ir_type(type_obj)
+        or VectorType.isinstance(type_obj)
+        or type_text.startswith("!pto.ptr<")
+        or type_text.startswith("memref<")
+        or type_text.startswith("!pto.tensor_view<")
+        or type_text.startswith("!pto.partition_tensor_view<")
+        or type_text.startswith("!pto.vreg<")
+        or type_text.startswith("!pto.mask<")
+    )
+
+
 def _is_python_index_literal(value) -> bool:
     return isinstance(value, int) and not isinstance(value, bool)
 
@@ -303,6 +323,18 @@ class VecValue(_SurfaceValue):
             raise TypeError(f"PTODSL builtin vectors must be rank-1, got {value.type}")
         self.size = int(vec_type.shape[0])
         self.element_type = vec_type.element_type
+
+    def __add__(self, other):
+        return _emit_vec_binary_op("add", self, other)
+
+    def __radd__(self, other):
+        return _emit_vec_binary_op("add", other, self)
+
+    def __sub__(self, other):
+        return _emit_vec_binary_op("sub", self, other)
+
+    def __rsub__(self, other):
+        return _emit_vec_binary_op("sub", other, self)
 
     def __mul__(self, other):
         return _emit_vec_binary_op("mul", self, other)
@@ -623,6 +655,8 @@ def wrap_like_surface_value(template, value):
                 for dim in valid_shape
             )
         return TileValue(value, **metadata)
+    if isinstance(template, AllocatedBufferValue):
+        return AllocatedBufferValue(value, **template.surface_metadata)
     if isinstance(template, AddressValue):
         return AddressValue(value)
     return wrap_surface_value(value)
@@ -676,6 +710,21 @@ def infer_ptr_type_from_surface_value(surface_value):
     part_type = _maybe_cast_partition_tensor_view_type(value_type)
     if part_type is not None:
         return _resolve(ptr(part_type.element_type, "gm"))
+
+    try:
+        memref_type = MemRefType(value_type)
+    except Exception:
+        memref_type = None
+    if memref_type is not None:
+        space_attr = memref_type.memory_space
+        space_enum = "gm"
+        if space_attr is not None:
+            space_value = getattr(space_attr, "value", None)
+            if space_value is not None:
+                space_enum = _ADDRESS_SPACE_VALUE_TO_KEYWORD.get(space_value, "gm")
+            else:
+                space_enum = str(space_attr).split("<")[-1].rstrip(">")
+        return _resolve(ptr(memref_type.element_type, space_enum))
 
     tile_type = _maybe_cast_tile_buf_type(value_type)
     if tile_type is None:
@@ -731,7 +780,11 @@ def emit_as_ptr(surface_value):
 
 
 _TILE_TYPE_RE = re.compile(
-    r"!pto\.tile_buf<(?P<space>[^,]+),\s*(?P<shape>.+?)x(?P<elem>[^,x>]+),\s*valid=(?P<valid>[^,>]+)(?:,.*)?>"
+    r"!pto\.tile_buf<(?P<space>[^,]+),\s*"
+    r"(?P<shape>(?:\?|[0-9]+)(?:x(?:\?|[0-9]+))*)x"
+    r"(?P<elem>[^,>]+),\s*"
+    r"valid=(?P<valid>(?:\?|[0-9]+)(?:x(?:\?|[0-9]+))*)"
+    r"(?:,.*)?>"
 )
 
 

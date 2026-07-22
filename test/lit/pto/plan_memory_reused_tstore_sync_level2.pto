@@ -1,0 +1,88 @@
+// Copyright (c) 2026 Huawei Technologies Co., Ltd.
+// This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+// CANN Open Software License Agreement Version 2.0 (the "License").
+// Please refer to the License for details. You may not use this file except in compliance with the License.
+// THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+// INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+// See LICENSE in the root of the software repository for the full text of the License.
+
+// End-to-end level2 coverage for PlanMemory reuse followed by InsertSync. The
+// source uses logical alloc_tile operations without explicit addresses, so the
+// physical pointer_cast addresses checked below are produced by PlanMemory.
+// `stored` occupies [8192, 16384), while `reused` occupies [8448, 16640).
+//
+// RUN: ptoas --pto-arch=a3 --pto-level=level2 --enable-insert-sync --emit-pto-ir --mlir-print-ir-after=pto-plan-memory %s -o /dev/null 2>&1 | FileCheck %s --check-prefix=PLAN
+// RUN: ptoas --pto-arch=a3 --pto-level=level2 --enable-insert-sync %s -o - 2>&1 | FileCheck %s --check-prefix=SYNC
+
+module attributes {pto.target_arch = "a2a3"} {
+  func.func @plan_memory_reused_tstore_sync_level2(
+      %pressure_src: memref<1x45056xf32, #pto.address_space<gm>>,
+      %pressure_dst: memref<1x45056xf32, #pto.address_space<gm>>,
+      %src0: memref<16x128xf32, #pto.address_space<gm>>,
+      %src1: memref<16x128xf32, #pto.address_space<gm>>,
+      %dst: memref<16x128xf32, #pto.address_space<gm>>,
+      %blocker_rows: index,
+      %blocker_cols: index)
+      attributes {pto.kernel_kind = #pto.kernel_kind<vector>} {
+    %one = arith.constant 1.000000e+00 : f32
+
+    // Force PlanMemory's reuse path: 180224 bytes here plus the target tiles
+    // and the 256-byte blocker exceed the default 196608-byte UB capacity,
+    // while their actual live ranges remain non-overlapping enough to fit.
+    %pressure = pto.alloc_tile : !pto.tile_buf<vec, 1x45056xf32>
+    pto.tload ins(%pressure_src : memref<1x45056xf32, #pto.address_space<gm>>)
+              outs(%pressure : !pto.tile_buf<vec, 1x45056xf32>)
+    pto.tstore ins(%pressure : !pto.tile_buf<vec, 1x45056xf32>)
+               outs(%pressure_dst : memref<1x45056xf32, #pto.address_space<gm>>)
+
+    %input = pto.alloc_tile :
+      !pto.tile_buf<loc=vec, dtype=f32, rows=16, cols=128, v_row=16, v_col=128, blayout=row_major, slayout=none_box, fractal=512, pad=0>
+    %stored = pto.alloc_tile :
+      !pto.tile_buf<loc=vec, dtype=f32, rows=16, cols=128, v_row=16, v_col=128, blayout=row_major, slayout=none_box, fractal=512, pad=0>
+    pto.tload ins(%src0 : memref<16x128xf32, #pto.address_space<gm>>)
+              outs(%input : !pto.tile_buf<loc=vec, dtype=f32, rows=16, cols=128, v_row=16, v_col=128, blayout=row_major, slayout=none_box, fractal=512, pad=0>)
+    pto.tload ins(%src1 : memref<16x128xf32, #pto.address_space<gm>>)
+              outs(%stored : !pto.tile_buf<loc=vec, dtype=f32, rows=16, cols=128, v_row=16, v_col=128, blayout=row_major, slayout=none_box, fractal=512, pad=0>)
+    pto.tmuls ins(%input, %one : !pto.tile_buf<loc=vec, dtype=f32, rows=16, cols=128, v_row=16, v_col=128, blayout=row_major, slayout=none_box, fractal=512, pad=0>, f32)
+              outs(%stored : !pto.tile_buf<loc=vec, dtype=f32, rows=16, cols=128, v_row=16, v_col=128, blayout=row_major, slayout=none_box, fractal=512, pad=0>)
+    pto.tstore ins(%stored : !pto.tile_buf<loc=vec, dtype=f32, rows=16, cols=128, v_row=16, v_col=128, blayout=row_major, slayout=none_box, fractal=512, pad=0>)
+               outs(%dst : memref<16x128xf32, #pto.address_space<gm>>)
+    %blocker = pto.alloc_tile valid_row = %blocker_rows valid_col = %blocker_cols :
+      !pto.tile_buf<loc=vec, dtype=f32, rows=1, cols=64, v_row=?, v_col=?, blayout=row_major, slayout=none_box, fractal=512, pad=0>
+    %reused = pto.alloc_tile :
+      !pto.tile_buf<loc=vec, dtype=f32, rows=16, cols=128, v_row=16, v_col=128, blayout=row_major, slayout=none_box, fractal=512, pad=0>
+    %blocker_row0, %blocker_col0 = pto.get_validshape %blocker :
+      !pto.tile_buf<loc=vec, dtype=f32, rows=1, cols=64, v_row=?, v_col=?, blayout=row_major, slayout=none_box, fractal=512, pad=0>
+    %blocker_extent0 = arith.addi %blocker_row0, %blocker_col0 : index
+    %blocker_extent0_i64 = arith.index_cast %blocker_extent0 : index to i64
+    %blocker_scale0 = arith.sitofp %blocker_extent0_i64 : i64 to f32
+    pto.tmuls ins(%input, %blocker_scale0 : !pto.tile_buf<loc=vec, dtype=f32, rows=16, cols=128, v_row=16, v_col=128, blayout=row_major, slayout=none_box, fractal=512, pad=0>, f32)
+              outs(%reused : !pto.tile_buf<loc=vec, dtype=f32, rows=16, cols=128, v_row=16, v_col=128, blayout=row_major, slayout=none_box, fractal=512, pad=0>)
+    %blocker_row1, %blocker_col1 = pto.get_validshape %blocker :
+      !pto.tile_buf<loc=vec, dtype=f32, rows=1, cols=64, v_row=?, v_col=?, blayout=row_major, slayout=none_box, fractal=512, pad=0>
+    %blocker_extent1 = arith.addi %blocker_row1, %blocker_col1 : index
+    %blocker_extent1_i64 = arith.index_cast %blocker_extent1 : index to i64
+    %blocker_scale1 = arith.sitofp %blocker_extent1_i64 : i64 to f32
+    pto.tmuls ins(%reused, %blocker_scale1 : !pto.tile_buf<loc=vec, dtype=f32, rows=16, cols=128, v_row=16, v_col=128, blayout=row_major, slayout=none_box, fractal=512, pad=0>, f32)
+              outs(%reused : !pto.tile_buf<loc=vec, dtype=f32, rows=16, cols=128, v_row=16, v_col=128, blayout=row_major, slayout=none_box, fractal=512, pad=0>)
+    return
+  }
+}
+
+// PLAN-LABEL: func.func @plan_memory_reused_tstore_sync_level2(
+// PLAN-DAG:   %[[STORED_ADDR:[A-Za-z0-9_]+]] = arith.constant 8192 : i64
+// PLAN-DAG:   %[[REUSED_ADDR:[A-Za-z0-9_]+]] = arith.constant 8448 : i64
+// PLAN:       %[[STORED_CAST:[0-9]+]] = pto.pointer_cast(%[[STORED_ADDR]]){{.*}} : memref<16x128xf32
+// PLAN-NEXT:  %[[STORED:[0-9]+]] = pto.bind_tile %[[STORED_CAST]]
+// PLAN:       pto.tstore ins(%[[STORED]]
+// PLAN:       %[[REUSED_CAST:[0-9]+]] = pto.pointer_cast(%[[REUSED_ADDR]]){{.*}} : memref<16x128xf32
+// PLAN-NEXT:  %[[REUSED:[0-9]+]] = pto.bind_tile %[[REUSED_CAST]]
+// PLAN:       pto.tmuls {{.*}} outs(%[[REUSED]]
+
+// SYNC-LABEL: AICORE void plan_memory_reused_tstore_sync_level2(
+// SYNC:      // pto: %stored
+// SYNC:      TSTORE(
+// SYNC-NEXT: set_flag(PIPE_MTE3, PIPE_V, EVENT_ID[[MTE3_TO_V:[0-9]+]]);
+// SYNC-NOT:  TMULS(
+// SYNC:      wait_flag(PIPE_MTE3, PIPE_V, EVENT_ID[[MTE3_TO_V]]);
+// SYNC-NEXT: TMULS(

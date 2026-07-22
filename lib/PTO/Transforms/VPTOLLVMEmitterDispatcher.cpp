@@ -11,15 +11,18 @@
 
 namespace mlir::pto {
 
-static bool usesCANN900Lowering(const CANNVersion &cannVersion) {
-  return cannVersion >= CANNVersion::release(9, 0, 0);
+static bool usesCANN900Lowering(const VPTOEmissionOptions &options) {
+  const bool isC220 = options.march == "dav-c220-vec" ||
+                      options.march == "dav-c220-cube";
+  return !isC220 &&
+         options.cannVersion >= CANNVersion::release(9, 0, 0);
 }
 
 LogicalResult lowerVPTOModuleToLLVMModules(
     ModuleOp module, const VPTOEmissionOptions &options,
     EmittedLLVMModule &cubeModule, EmittedLLVMModule &vectorModule,
     llvm::raw_ostream &diagOS) {
-  if (usesCANN900Lowering(options.cannVersion))
+  if (usesCANN900Lowering(options))
     return lowerVPTOModuleToLLVMModulesCANN900(module, options, cubeModule,
                                                vectorModule, diagOS);
   return lowerVPTOModuleToLLVMModulesBeta1(module, options, cubeModule,

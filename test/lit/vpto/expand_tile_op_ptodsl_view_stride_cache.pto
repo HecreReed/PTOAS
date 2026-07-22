@@ -1,0 +1,67 @@
+// Copyright (c) 2026 Huawei Technologies Co., Ltd.
+// This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+// CANN Open Software License Agreement Version 2.0 (the "License").
+// Please refer to the License for details. You may not use this file except in compliance with the License.
+// THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+// INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+// See LICENSE in the root of the software repository for the full text of the License.
+
+// PTODSL helpers bake ViewSpec shape/stride metadata into generated helper
+// bodies. Two tstores with the same tile type but different destination view
+// strides must therefore not share one cached helper specialization.
+//
+// RUN: ptoas --pto-arch=a5 --pto-backend=vpto --emit-vpto --tile-lib-backend=ptodsl %s -o - 2>/dev/null | FileCheck %s
+
+// CHECK-LABEL: func.func @STORE_COMPACT
+// CHECK: %[[COMPACT_GM:.*]] = arith.constant 4 : i64
+// CHECK: pto.copy_ubuf_to_gm
+// CHECK-SAME: %[[COMPACT_GM]]
+
+// CHECK-LABEL: func.func @STORE_STRIDED
+// CHECK-DAG: %[[C3:.*]] = arith.constant 3 : i64
+// CHECK-DAG: %[[C4:.*]] = arith.constant 4 : i64
+// CHECK-DAG: %[[C32:.*]] = arith.constant 32 : i64
+// CHECK: pto.copy_ubuf_to_gm
+// CHECK-SAME: %[[C3]], %[[C4]], {{%.*}}, %[[C32]], %[[C32]]
+
+module attributes {pto.kernel_kind = #pto.kernel_kind<vector>} {
+  func.func @STORE_COMPACT(%dst_ptr: !pto.ptr<ui32>) attributes {pto.kernel} {
+    %c0 = arith.constant 0 : index
+    %c1 = arith.constant 1 : index
+    %c3 = arith.constant 3 : index
+    %dst_view = pto.make_tensor_view %dst_ptr,
+      shape = [%c1, %c1, %c1, %c3, %c1],
+      strides = [%c3, %c3, %c3, %c1, %c1]
+      : !pto.tensor_view<1x1x1x3x1xui32>
+    %dst_part = pto.partition_view %dst_view,
+      offsets = [%c0, %c0, %c0, %c0, %c0],
+      sizes = [%c1, %c1, %c1, %c3, %c1]
+      : !pto.tensor_view<1x1x1x3x1xui32> -> !pto.partition_tensor_view<1x1x1x3x1xui32>
+    %tile = pto.alloc_tile
+      : !pto.tile_buf<vec, 3x8xui32, valid=3x1>
+    pto.tstore ins(%tile : !pto.tile_buf<vec, 3x8xui32, valid=3x1>)
+                outs(%dst_part : !pto.partition_tensor_view<1x1x1x3x1xui32>)
+    return
+  }
+
+  func.func @STORE_STRIDED(%dst_ptr: !pto.ptr<ui32>) attributes {pto.kernel} {
+    %c0 = arith.constant 0 : index
+    %c1 = arith.constant 1 : index
+    %c3 = arith.constant 3 : index
+    %c8 = arith.constant 8 : index
+    %c24 = arith.constant 24 : index
+    %dst_view = pto.make_tensor_view %dst_ptr,
+      shape = [%c1, %c1, %c1, %c3, %c8],
+      strides = [%c24, %c24, %c24, %c8, %c1]
+      : !pto.tensor_view<1x1x1x3x8xui32>
+    %dst_part = pto.partition_view %dst_view,
+      offsets = [%c0, %c0, %c0, %c0, %c0],
+      sizes = [%c1, %c1, %c1, %c3, %c1]
+      : !pto.tensor_view<1x1x1x3x8xui32> -> !pto.partition_tensor_view<1x1x1x3x1xui32>
+    %tile = pto.alloc_tile
+      : !pto.tile_buf<vec, 3x8xui32, valid=3x1>
+    pto.tstore ins(%tile : !pto.tile_buf<vec, 3x8xui32, valid=3x1>)
+                outs(%dst_part : !pto.partition_tensor_view<1x1x1x3x1xui32>)
+    return
+  }
+}

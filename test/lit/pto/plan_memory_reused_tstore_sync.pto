@@ -1,0 +1,53 @@
+// Copyright (c) 2026 Huawei Technologies Co., Ltd.
+// This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+// CANN Open Software License Agreement Version 2.0 (the "License").
+// Please refer to the License for details. You may not use this file except in compliance with the License.
+// THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+// INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+// See LICENSE in the root of the software repository for the full text of the License.
+
+// PlanMemory lowers local allocations to pointer_casts before InsertSync. This
+// test models the lowered level2 form directly: `stored` occupies
+// [1280, 9472) and `reused` occupies [8192, 16384). `stored` dies at tstore,
+// but MTE3 still reads its physical range asynchronously, so the later vector
+// write needs an MTE3 -> V handshake.
+//
+// RUN: ptoas --pto-arch=a3 --pto-level=level3 --enable-insert-sync %s -o - 2>&1 | FileCheck %s
+
+module attributes {pto.target_arch = "a2a3"} {
+  func.func @plan_memory_reused_tstore_sync(
+      %src0: memref<16x128xf32, #pto.address_space<gm>>,
+      %src1: memref<16x128xf32, #pto.address_space<gm>>,
+      %dst: memref<16x128xf32, #pto.address_space<gm>>)
+      attributes {pto.kernel_kind = #pto.kernel_kind<vector>} {
+    %c1280_i64 = arith.constant 1280 : i64
+    %c8192_i64 = arith.constant 8192 : i64
+    %c16384_i64 = arith.constant 16384 : i64
+    %one = arith.constant 1.000000e+00 : f32
+
+    %input = pto.pointer_cast(%c16384_i64)
+      : memref<16x128xf32, #pto.address_space<vec>>
+    %stored = pto.pointer_cast(%c1280_i64)
+      : memref<16x128xf32, #pto.address_space<vec>>
+    %reused = pto.pointer_cast(%c8192_i64)
+      : memref<16x128xf32, #pto.address_space<vec>>
+
+    pto.tload ins(%src0 : memref<16x128xf32, #pto.address_space<gm>>)
+              outs(%input : memref<16x128xf32, #pto.address_space<vec>>)
+    pto.tload ins(%src1 : memref<16x128xf32, #pto.address_space<gm>>)
+              outs(%stored : memref<16x128xf32, #pto.address_space<vec>>)
+    pto.tmuls ins(%input, %one : memref<16x128xf32, #pto.address_space<vec>>, f32)
+              outs(%stored : memref<16x128xf32, #pto.address_space<vec>>)
+    pto.tstore ins(%stored : memref<16x128xf32, #pto.address_space<vec>>)
+               outs(%dst : memref<16x128xf32, #pto.address_space<gm>>)
+    pto.tmuls ins(%input, %one : memref<16x128xf32, #pto.address_space<vec>>, f32)
+              outs(%reused : memref<16x128xf32, #pto.address_space<vec>>)
+    return
+  }
+}
+
+// CHECK-LABEL: AICORE void plan_memory_reused_tstore_sync(
+// CHECK:      TSTORE(
+// CHECK-NEXT: set_flag(PIPE_MTE3, PIPE_V, EVENT_ID[[MTE3_TO_V:[0-9]+]]);
+// CHECK-NEXT: wait_flag(PIPE_MTE3, PIPE_V, EVENT_ID[[MTE3_TO_V]]);
+// CHECK-NEXT: TMULS(

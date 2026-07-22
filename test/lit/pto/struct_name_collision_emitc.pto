@@ -1,0 +1,35 @@
+// Copyright (c) 2026 Huawei Technologies Co., Ltd.
+// This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+// CANN Open Software License Agreement Version 2.0 (the "License").
+// Please refer to the License for details. You may not use this file except in compliance with the License.
+// THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+// INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+// See LICENSE in the root of the software repository for the full text of the License.
+
+// RUN: ptoas %s 2>&1 | FileCheck %s
+
+// Struct type names are mangled from the MLIR type spelling, not from the C++
+// scalar token. The C++ token is many-to-one (i32 and si32 both render as
+// `int32_t`), so mangling from it would emit two `struct` definitions sharing
+// one name and the generated C++ would fail to compile with a redefinition.
+// Three structs that differ only in field signedness must therefore produce
+// three distinctly-named definitions.
+
+module {
+  func.func @struct_signedness() {
+    %s0 = pto.declare_struct -> !pto.struct<i32>
+    %s1 = pto.declare_struct -> !pto.struct<si32>
+    %s2 = pto.declare_struct -> !pto.struct<ui32>
+    return
+  }
+}
+
+// CHECK: struct PtoStruct_i32 {
+// CHECK:   int32_t f0;
+// CHECK: };
+// CHECK: struct PtoStruct_si32 {
+// CHECK:   int32_t f0;
+// CHECK: };
+// CHECK: struct PtoStruct_ui32 {
+// CHECK:   uint32_t f0;
+// CHECK: };

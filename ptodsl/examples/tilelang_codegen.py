@@ -63,36 +63,35 @@ def _tilelang_generated_body(
         pto.set_flag("MTE2", "V", event_id=iter % 2)
         pto.wait_flag("MTE2", "V", event_id=iter % 2)
         pto.wait_flag("MTE3", "V", event_id=iter % 2)
-        with pto.simd():
-            mask_cnt = 8192
-            with pto.for_(0, 128, step=1) as i:
-                mask = pto.pset_b32("PAT_ALL")
-                r0 = pto.vlds(
-                    pto.addptr(
-                        pto.castptr(buf_dyn_shmem, pto.ptr(pto.float32, "ub")),
-                        ((iter % 2) * 8192) + (i * 64),
-                    ),
-                    pto.const(0),
-                    pto.vreg_type(64, pto.float32),
-                )
-                r1 = pto.vlds(
-                    pto.addptr(
-                        pto.castptr(buf_dyn_shmem, pto.ptr(pto.float32, "ub")),
-                        (((iter % 2) * 8192) + (i * 64)) + 16384,
-                    ),
-                    pto.const(0),
-                    pto.vreg_type(64, pto.float32),
-                )
-                r0 = pto.vadd(r0, r1, mask)
-                pto.vsts(
-                    r0,
-                    pto.addptr(
-                        pto.castptr(buf_dyn_shmem, pto.ptr(pto.float32, "ub")),
-                        (((iter % 2) * 8192) + (i * 64)) + 32768,
-                    ),
-                    pto.const(0),
-                    mask,
-                )
+        mask_cnt = 8192
+        with pto.for_(0, 128, step=1) as i:
+            mask = pto.pset_b32("PAT_ALL")
+            r0 = pto.vlds(
+                pto.addptr(
+                    pto.castptr(buf_dyn_shmem, pto.ptr(pto.float32, "ub")),
+                    ((iter % 2) * 8192) + (i * 64),
+                ),
+                pto.const(0),
+                pto.vreg_type(64, pto.float32),
+            )
+            r1 = pto.vlds(
+                pto.addptr(
+                    pto.castptr(buf_dyn_shmem, pto.ptr(pto.float32, "ub")),
+                    (((iter % 2) * 8192) + (i * 64)) + 16384,
+                ),
+                pto.const(0),
+                pto.vreg_type(64, pto.float32),
+            )
+            r0 = pto.vadd(r0, r1, mask)
+            pto.vsts(
+                r0,
+                pto.addptr(
+                    pto.castptr(buf_dyn_shmem, pto.ptr(pto.float32, "ub")),
+                    (((iter % 2) * 8192) + (i * 64)) + 32768,
+                ),
+                pto.const(0),
+                mask,
+            )
         pto.set_flag("V", "MTE3", event_id=iter % 2)
         pto.set_flag("V", "MTE2", event_id=iter % 2)
         pto.wait_flag("V", "MTE3", event_id=iter % 2)
@@ -157,35 +156,34 @@ def _tilelang_generated_body_small(A, B, C):
         pto.set_flag("MTE2", "V", event_id=iter % 2)
         pto.wait_flag("MTE2", "V", event_id=iter % 2)
         pto.wait_flag("MTE3", "V", event_id=iter % 2)
-        with pto.simd():
-            with pto.for_(0, 2, step=1) as i:
-                mask = pto.pset_b32("PAT_ALL")
-                r0 = pto.vlds(
-                    pto.addptr(
-                        pto.castptr(buf_dyn_shmem, pto.ptr(pto.float32, "ub")),
-                        ((iter % 2) * 128) + (i * 64),
-                    ),
-                    pto.const(0),
-                    pto.vreg_type(64, pto.float32),
-                )
-                r1 = pto.vlds(
-                    pto.addptr(
-                        pto.castptr(buf_dyn_shmem, pto.ptr(pto.float32, "ub")),
-                        (((iter % 2) * 128) + (i * 64)) + 256,
-                    ),
-                    pto.const(0),
-                    pto.vreg_type(64, pto.float32),
-                )
-                r0 = pto.vadd(r0, r1, mask)
-                pto.vsts(
-                    r0,
-                    pto.addptr(
-                        pto.castptr(buf_dyn_shmem, pto.ptr(pto.float32, "ub")),
-                        (((iter % 2) * 128) + (i * 64)) + 512,
-                    ),
-                    pto.const(0),
-                    mask,
-                )
+        with pto.for_(0, 2, step=1) as i:
+            mask = pto.pset_b32("PAT_ALL")
+            r0 = pto.vlds(
+                pto.addptr(
+                    pto.castptr(buf_dyn_shmem, pto.ptr(pto.float32, "ub")),
+                    ((iter % 2) * 128) + (i * 64),
+                ),
+                pto.const(0),
+                pto.vreg_type(64, pto.float32),
+            )
+            r1 = pto.vlds(
+                pto.addptr(
+                    pto.castptr(buf_dyn_shmem, pto.ptr(pto.float32, "ub")),
+                    (((iter % 2) * 128) + (i * 64)) + 256,
+                ),
+                pto.const(0),
+                pto.vreg_type(64, pto.float32),
+            )
+            r0 = pto.vadd(r0, r1, mask)
+            pto.vsts(
+                r0,
+                pto.addptr(
+                    pto.castptr(buf_dyn_shmem, pto.ptr(pto.float32, "ub")),
+                    (((iter % 2) * 128) + (i * 64)) + 512,
+                ),
+                pto.const(0),
+                mask,
+            )
         pto.set_flag("V", "MTE3", event_id=iter % 2)
         pto.set_flag("V", "MTE2", event_id=iter % 2)
         pto.wait_flag("V", "MTE3", event_id=iter % 2)

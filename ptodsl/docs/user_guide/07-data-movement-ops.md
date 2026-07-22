@@ -166,7 +166,7 @@ pto.mte_gm_ub(gm_src, ub_dst, 0, 256,
 
 ### 7.2.2 UB → GM: `pto.mte_ub_gm`
 
-#### `pto.mte_ub_gm(ub_src: PtrType, gm_dst: PtrType, len_burst: int, *, nburst: tuple[int, int, int], loops: list[tuple[int, int, int]] | None = None) -> None`
+#### `pto.mte_ub_gm(ub_src: PtrType, gm_dst: PtrType, len_burst: int, *, nburst: tuple[int, int, int], loops: list[tuple[int, int, int]] | None = None, l2_cache: str = "nmfv") -> None`
 
 **Description**: Grouped DMA transfer from Unified Buffer to Global Memory. The MTE reads `len_burst` bytes from each UB row (skipping any padding), writing only valid data to GM.
 
@@ -179,6 +179,7 @@ pto.mte_gm_ub(gm_src, ub_dst, 0, 256,
 | `len_burst` | `int` | Contiguous bytes transferred per burst row |
 | `nburst` | `tuple[int, int, int]` | `(n_burst, src_stride, dst_stride)` — innermost burst group (required) |
 | `loops` | `list[tuple[int, int, int]]` or `None` | Optional outer loop groups, ordered inner to outer |
+| `l2_cache` | `str` | Store-side L2 cache policy token. Defaults to `"nmfv"` (raw control `0`); supported tokens are `"nmfv"`, `"nmlv"`, `"nmprs"`, `"nmred"`, `"naci"`, `"napw"`, `"napi"`, `"nared"`, `"wbhfv"`, `"wbhlv"`, `"wbhprs"`, `"wbhred"`, `"wtsfv"`, `"wtslv"`, `"wtsprs"`, and `"wtsred"` |
 
 **Returns**: None (side-effect operation).
 
@@ -195,7 +196,8 @@ pto.mte_ub_gm(ub_src_f32, gm_dst_f32, 128,
 <!-- ptodsl-doc-test: {"mode":"compile_fragment","fixture":"data_movement.grouped_dma_ptrs","symbol":"data_movement_grouped_dma_ptrs_probe","compile":{}} -->
 ```python
 pto.mte_ub_gm(ub_src, gm_dst, 256,
-              nburst=(64, 256, 1024))
+              nburst=(64, 256, 1024),
+              l2_cache="nmfv")
 # UB: contiguous rows (256-byte stride).
 # GM: rows spaced at 1024-byte intervals (full matrix width).
 ```
@@ -307,7 +309,7 @@ def process_block(k_part, v_part, k_tile, v_tile, o_tile, o_part,
 
 ## 7.3 Vector loads (simd)
 
-Inside `@pto.simd`, data moves between UB tiles and vector registers (`vreg`). Vector loads read a contiguous chunk of a tile row into a `vreg`; the chunk size equals the hardware vector width for the element type (e.g., 64 elements for `f32`, 128 for `f16`).
+Inside `@pto.tileop`, data moves between UB tiles and vector registers (`vreg`). Vector loads read a contiguous chunk of a tile row into a `vreg`; the chunk size equals the hardware vector width for the element type (e.g., 64 elements for `f32`, 128 for `f16`).
 
 ### Tile-index syntax
 
@@ -824,7 +826,9 @@ pto.vstas(align, ub_dst_f32, pto.const(64))
 
 ## 7.5 Cube data movement (cube)
 
-Inside `@pto.cube`, data flows through a hierarchy of private buffers: GM → L1 (cbuf) → L0A/L0B (operand buffers) → L0C (accumulator) → UB or back to GM.
+Across the complete Cube path, caller-owned MTE operations move data through
+GM, L1, L0A/L0B, L0C, and UB. The `@pto.tileop` helper covers only the prepared
+Cube compute step; it does not issue those transfers itself.
 
 ### Staging: GM → L1 and L1 → UB
 
@@ -1046,6 +1050,55 @@ pto.mte_l0c_ub(acc, ub, 16, 32, 16, 32, split=pto.SplitMode.N)   # split N
 
 ---
 
+#### `pre_quant` modes and destination types
+
+`pre_quant=(payload, mode)` applies a conversion or quantization step before
+`pre_relu`, `clip`, saturation, and the final store. The selected mode must
+match both the accumulator source element type and the destination element
+type.
+
+Payload rules:
+
+- `_vec` modes require a scaling pointer payload with `f16`, `bf16`, or `f32`
+  elements.
+- `_scalar` modes require an `f16`, `bf16`, or `f32` scalar payload.
+- `f32_f16` and `f32_bf16` also require an `f16`, `bf16`, or `f32` scalar
+  payload; the payload is required by the public syntax but does not select
+  per-channel scaling.
+
+Legal mode families:
+
+| Mode family | Accumulator source dtype | Legal destination dtype |
+|-------------|--------------------------|--------------------------|
+| `f32_f16`, `qf322f16_pre_*`, `deqf16_*` | `f32` for `f32_f16` / `qf322f16_pre_*`; `i32` for `deqf16_*` | `f16` |
+| `f32_bf16`, `qf322bf16_pre_*`, `qs322bf16_pre_*` | `f32` for `f32_bf16` / `qf322bf16_pre_*`; `i32` for `qs322bf16_pre_*` | `bf16` |
+| `qf322f32_pre_*` | `f32` | `f32` |
+| `qf322hif8_pre_*`, `qf322fp8_pre_*` | `f32` | PTO FP8 / HiFloat8 family |
+| `deqs32_int_*` | `i32` | 32-bit integer |
+| `qf162s16_pre_*`, `deqs16_*` | `i32` | signed or signless 16-bit integer |
+| `qf162b8_pre_*`, `req8_*`, `qf322b8_pre_*` | `f32` for `qf162b8_pre_*` / `qf322b8_pre_*`; `i32` for `req8_*` | 8-bit integer |
+| `qf162s4_pre_*`, `req4_*`, `qf322s4_pre_*` | `f32` for `qf162s4_pre_*` / `qf322s4_pre_*`; `i32` for `req4_*` | signed or signless 4-bit integer |
+
+Examples:
+
+```python
+# Legal: f32 accumulator values are converted to bf16 on writeback.
+pto.mte_l0c_gm(
+    acc_f32, dst_bf16, 16, 16, 16, 16, 0, 0,
+    pre_quant=(pto.bf16(1.0), "f32_bf16"),
+    layout="nz2nd",
+)
+
+# Illegal: "f32_bf16" requires a bf16 destination, not f16.
+pto.mte_l0c_gm(
+    acc_f32, dst_f16, 16, 16, 16, 16, 0, 0,
+    pre_quant=(pto.bf16(1.0), "f32_bf16"),
+    layout="nz2nd",
+)
+```
+
+---
+
 ### Cube data movement quick reference
 
 | Data Flow | Operation | Src Space | Dst Space |
@@ -1065,30 +1118,18 @@ pto.mte_l0c_ub(acc, ub, 16, 32, 16, 32, split=pto.SplitMode.N)   # split N
 
 ### Typical cube dataflow in a matmul
 
-A full cube matmul (`@pto.cube`) follows this dataflow pattern:
+A full cube matmul (`@pto.tileop`) follows this dataflow pattern:
 
 <!-- ptodsl-doc-test: {"mode":"compile_fragment","fixture":"data_movement.cube_helper","symbol":"data_movement_cube_helper_probe","compile":{"BLOCK_M":16,"BLOCK_K":16,"BLOCK_N":16}} -->
 ```python
-@pto.cube
-def qk_matmul(
-    q_tile: pto.Tile,
-    k_tile: pto.Tile,
-    q_l0a: pto.Tile,
-    k_l0b: pto.Tile,
-    s_acc: pto.Tile,
-    s_tile: pto.Tile,
-):
-    m = q_tile.valid_shape[0]
-    k = q_tile.valid_shape[1]
-    n = k_tile.valid_shape[0]
-
-    pto.mte_l1_l0a(q_tile.as_ptr(), q_l0a.as_ptr(), m, k)          # L1 tile → L0A
-    pto.mte_l1_l0b(k_tile.as_ptr(), k_l0b.as_ptr(), k, n, transpose=True)  # L1 tile → L0B
-    pto.mad(q_l0a.as_ptr(), k_l0b.as_ptr(), s_acc.as_ptr(), m, n, k)        # L0A × L0B → L0C
-    pto.mte_l0c_ub(s_acc.as_ptr(), s_tile.as_ptr(), m, n, n, n, 0)          # L0C → UB tile
+@pto.tileop
+def qk_matmul(q_l0a: pto.Tile, k_l0b: pto.Tile, s_acc: pto.Tile,
+              m: pto.index, n: pto.index, k: pto.index):
+    pto.mad(q_l0a.as_ptr(), k_l0b.as_ptr(), s_acc.as_ptr(), m, n, k)
 ```
 
-At the cube micro-op boundary, PTODSL currently uses explicit typed pointers. `tile.as_ptr()` materializes the pointer view for UB and cube-local scratch buffers, while the surrounding sub-kernel surface still uses `Tile` values for metadata such as `valid_shape`.
+The surrounding kernel performs L1-to-L0 staging before the call and L0C
+writeback afterward. The TileOp itself only consumes prepared cube-local Tiles.
 
 ## 7.6 Pipe Communication (Cube ↔ Vector FIFO)
 
@@ -1226,26 +1267,22 @@ Cube (producer) side:
 
 <!-- ptodsl-doc-test: {"mode":"compile_fragment","fixture":"pipe_communication.c2v_global_producer","symbol":"pipe_communication_c2v_global_producer_probe","compile":{}} -->
 ```python
-@pto.cube
-def producer(src_tile: pto.Tile):
-    c2v.init_cube()
-    entry = c2v.alloc(split=0)
-    entry_part = pto.partition_view(entry, offsets=[0, 0], sizes=[16, 16])
-    pto.tile.store(src_tile, entry_part)
-    c2v.push(entry, split=0)
+c2v.init_cube()
+entry = c2v.alloc(split=0)
+entry_part = pto.partition_view(entry, offsets=[0, 0], sizes=[16, 16])
+pto.tile.store(src_tile, entry_part)
+c2v.push(entry, split=0)
 ```
 
 Vector (consumer) side:
 
 <!-- ptodsl-doc-test: {"mode":"compile_fragment","fixture":"pipe_communication.c2v_global_consumer","symbol":"pipe_communication_c2v_global_consumer_probe","compile":{}} -->
 ```python
-@pto.simd
-def consumer(dst_tile: pto.Tile):
-    c2v.init_simd()
-    entry = c2v.pop(split=0)
-    entry_part = pto.partition_view(entry, offsets=[0, 0], sizes=[16, 16])
-    pto.tile.load(entry_part, dst_tile)
-    c2v.free(entry, split=0)
+c2v.init_simd()
+entry = c2v.pop(split=0)
+entry_part = pto.partition_view(entry, offsets=[0, 0], sizes=[16, 16])
+pto.tile.load(entry_part, dst_tile)
+c2v.free(entry, split=0)
 ```
 
 The Cube side initialises the pipe, allocates a GM FIFO slot, stores the tile
@@ -1270,24 +1307,20 @@ Vector (producer) side:
 
 <!-- ptodsl-doc-test: {"mode":"compile_fragment","fixture":"pipe_communication.v2c_global_producer","symbol":"pipe_communication_v2c_global_producer_probe","compile":{}} -->
 ```python
-@pto.simd
-def producer(src_tile: pto.Tile):
-    v2c.init_simd()
-    entry = v2c.alloc(split=0)
-    pto.tile.store(src_tile, pto.partition_view(entry, offsets=[0, 0], sizes=[16, 16]))
-    v2c.push(entry, split=0)
+v2c.init_simd()
+entry = v2c.alloc(split=0)
+pto.tile.store(src_tile, pto.partition_view(entry, offsets=[0, 0], sizes=[16, 16]))
+v2c.push(entry, split=0)
 ```
 
 Cube (consumer) side:
 
 <!-- ptodsl-doc-test: {"mode":"compile_fragment","fixture":"pipe_communication.v2c_global_consumer","symbol":"pipe_communication_v2c_global_consumer_probe","compile":{}} -->
 ```python
-@pto.cube
-def consumer(dst_tile: pto.Tile):
-    v2c.init_cube()
-    entry = v2c.pop(split=0)
-    pto.tile.load(pto.partition_view(entry, offsets=[0, 0], sizes=[16, 16]), dst_tile)
-    v2c.free(entry, split=0)
+v2c.init_cube()
+entry = v2c.pop(split=0)
+pto.tile.load(pto.partition_view(entry, offsets=[0, 0], sizes=[16, 16]), dst_tile)
+v2c.free(entry, split=0)
 ```
 
 ### 7.6.5 Local FIFO C2V Pipe
@@ -1320,27 +1353,22 @@ Cube (producer) transaction:
 
 <!-- ptodsl-doc-test: {"mode":"compile_fragment","fixture":"pipe_communication.c2v_local_producer","symbol":"pipe_communication_c2v_local_producer_probe","compile":{}} -->
 ```python
-@pto.cube
-def producer(src_tile: pto.Tile):
-    c2v_peer.init_cube()
-    c2v_peer.push(src_tile, split=0)
+c2v_peer.init_cube()
+c2v_peer.push(src_tile, split=0)
 ```
 
 Vector (consumer) transaction:
 
 <!-- ptodsl-doc-test: {"mode":"compile_fragment","fixture":"pipe_communication.c2v_local_consumer","symbol":"pipe_communication_c2v_local_consumer_probe","compile":{}} -->
 ```python
-@pto.simd
-def consumer(dst_tile: pto.Tile):
-    c2v.init_simd()
-    tile = c2v.pop(result_type=dst_tile, split=0)
-    pto.tile.load(tile, dst_tile)
-    c2v.free(split=0)
+c2v.init_simd()
+dst_tile = c2v.pop(result_type=dst_tile, split=0)
+c2v.free(split=0)
 ```
 
 The local form is the A5-facing form used when Cube and Vector exchange UB/MAT
-tiles through a local FIFO. `push(tile)` emits a tile-entry `tpush`; `pop()`
-emits a tile-entry `tpop` into the vector-side local tile; `free()` can omit
+tiles through a local FIFO. `push(tile)` sends a tile entry; `pop()` returns the
+vector-side local Tile directly; `free()` can omit
 the entry because no GM FIFO slot descriptor was allocated by the frontend.
 
 ### 7.6.6 Bidirectional Local Pipe
@@ -1366,7 +1394,7 @@ and `gm_slots` expressed via `pto.make_tensor_view`:
 
 <!-- ptodsl-doc-test: {"mode":"compile_fragment","fixture":"pipe_communication.c2v_global","symbol":"pipe_communication_c2v_global_probe","compile":{"BLOCK":128}} -->
 ```python
-@pto.jit(target="a3")
+@pto.jit(target="a3", mode="explicit", kernel_kind="cube")
 def cube_producer(
     gm_slot_buffer: pto.gm_ptr(pto.f32),
     src: pto.gm_ptr(pto.f32),
@@ -1385,15 +1413,14 @@ def cube_producer(
         offsets=[0, 0], sizes=[16, 16])
     a_tile = pto.alloc_tile(shape=[16, 16], dtype=pto.f32)
 
-    with pto.cube():
-        pto.tile.load(a_part, a_tile)
-        c2v.init_cube()
-        entry = c2v.alloc(split=0)
-        entry_part = pto.partition_view(entry, offsets=[0, 0], sizes=[16, 16])
-        pto.tile.store(a_tile, entry_part)
-        c2v.push(entry, split=0)
+    pto.tile.load(a_part, a_tile)
+    c2v.init_cube()
+    entry = c2v.alloc(split=0)
+    entry_part = pto.partition_view(entry, offsets=[0, 0], sizes=[16, 16])
+    pto.tile.store(a_tile, entry_part)
+    c2v.push(entry, split=0)
 
-@pto.jit(target="a3")
+@pto.jit(target="a3", mode="explicit", kernel_kind="vector")
 def vector_consumer(
     gm_slot_buffer: pto.gm_ptr(pto.f32),
     dst: pto.gm_ptr(pto.f32),
@@ -1412,11 +1439,10 @@ def vector_consumer(
         pto.make_tensor_view(dst, shape=[16, 16], strides=[16, 1]),
         offsets=[0, 0], sizes=[16, 16])
 
-    with pto.simd():
-        c2v.init_simd()
-        entry = c2v.pop(split=0)
-        entry_part = pto.partition_view(entry, offsets=[0, 0], sizes=[16, 16])
-        pto.tile.load(entry_part, b_tile)
-        c2v.free(entry, split=0)
-        pto.tile.store(b_tile, b_part)
+    c2v.init_simd()
+    entry = c2v.pop(split=0)
+    entry_part = pto.partition_view(entry, offsets=[0, 0], sizes=[16, 16])
+    pto.tile.load(entry_part, b_tile)
+    c2v.free(entry, split=0)
+    pto.tile.store(b_tile, b_part)
 ```

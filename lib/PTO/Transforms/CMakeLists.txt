@@ -43,8 +43,10 @@ add_mlir_dialect_library(PTOTransforms
   PTOViewToMemref.cpp
   PTORematerializeFixpipeVectorQuant.cpp
   PTOValidateIntToPtrUses.cpp
+  InsertTemplateAttributes.cpp
   ExpandTileOp.cpp
   FoldTileBufIntrinsics.cpp
+  LowerPTOToUBufOps.cpp
   PTOLowerToOpLibCalls.cpp
   PTOInstantiateAndInlineOpLib.cpp
   PTOToEmitC.cpp
@@ -70,6 +72,7 @@ add_mlir_dialect_library(PTOTransforms
   SlotAffineAnalysis.cpp
   PTOWrapFunctionsInSectionsPass.cpp
   PTONormalizeUncoveredTileSections.cpp
+  PTOMaterializeTileOpSections.cpp
   VPTONormalizeContainer.cpp
   VPTOSplitCVModule.cpp
   InsertSync/PTOIRTranslator.cpp
@@ -96,7 +99,6 @@ add_mlir_dialect_library(PTOTransforms
   GraphSyncSolver/SyncSolverCodeGen.cpp
   LoweringSyncToPipe.cpp
   PTOVerifyTFreePass.cpp
-  PTOVerifySubkernelPipeContractPass.cpp
 
   ADDITIONAL_HEADER_DIRS
   ${PROJECT_SOURCE_DIR}/include/PTO

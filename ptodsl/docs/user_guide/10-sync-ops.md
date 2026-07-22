@@ -194,6 +194,10 @@ def gemm_block(
 
 Double-buffering is a common optimization in NPU kernels: while one buffer is being computed on, the other is being loaded with the next block of data. The `get_buf` / `rls_buf` pair coordinates buffer ownership between pipelines.
 
+`buf_id` accepts both a **static integer** (0–31) and a **runtime index-like PTO scalar** (e.g., `iter & 1` for ping-pong buffering). The DSL automatically selects the appropriate IR form (`pto.get_buf` for static, `pto.get_buf_dyn` for dynamic).
+
+The `pipe` and `mode` parameters are identical regardless of whether `buf_id` is static or dynamic.
+
 ### `pto.get_buf(pipe, buf_id, mode=0)`
 
 **Description**: Acquire a buffer slot for inter-pipeline double-buffering coordination. The calling pipeline claims ownership of the buffer, blocking if the buffer is still in use by another pipeline.
@@ -203,8 +207,8 @@ Double-buffering is a common optimization in NPU kernels: while one buffer is be
 | Parameter | Type | Description |
 |-----------|------|-------------|
 | `pipe` | `Pipe` | Pipeline identifier of the acquiring pipeline |
-| `buf_id` | `pto.i64` | Buffer identifier (0-based index into the buffer pool) |
-| `mode` | `pto.i64` | Acquisition mode (default 0) |
+| `buf_id` | `int` or index-like PTO scalar | Buffer identifier — static integer (0–31) or runtime-computed index (e.g., `iter & 1`) |
+| `mode` | `int` | Acquisition mode (default 0) |
 
 **Returns**: None (side-effect operation).
 
@@ -217,12 +221,12 @@ Double-buffering is a common optimization in NPU kernels: while one buffer is be
 | Parameter | Type | Description |
 |-----------|------|-------------|
 | `pipe` | `Pipe` | Pipeline identifier of the releasing pipeline |
-| `buf_id` | `pto.i64` | Buffer identifier matching the corresponding `get_buf` |
-| `mode` | `pto.i64` | Release mode (default 0) |
+| `buf_id` | `int` or index-like PTO scalar | Buffer identifier matching the corresponding `get_buf` |
+| `mode` | `int` | Release mode (default 0) |
 
 **Returns**: None (side-effect operation).
 
-### Double-buffering example
+### Static double-buffering example
 
 <!-- ptodsl-doc-test: {"mode":"compile_fragment","fixture":"sync_ops.basic","symbol":"sync_ops_basic_probe","compile":{}} -->
 ```python
@@ -240,6 +244,22 @@ pto.get_buf(pto.Pipe.MTE2, 0, 0)
 # ... DMA loads next block into buffer 0 ...
 
 pto.rls_buf(pto.Pipe.MTE2, 0, 0)
+```
+
+### Dynamic double-buffering (ping-pong) example
+
+When the buffer-id toggles between 0 and 1 per loop iteration, compute the
+buf-id from the loop variable. Pass the index value directly — the DSL
+dispatches to the dynamic IR form automatically:
+
+<!-- ptodsl-doc-test: {"mode":"compile_fragment","fixture":"sync_ops.basic","symbol":"sync_ops_basic_probe","compile":{}} -->
+```python
+# Ping-pong: acquire buffer (iter & 1) each iteration
+with pto.for_(0, 4, step=1) as iter:
+    buf_id = iter & 1
+    pto.get_buf(pto.Pipe.MTE2, buf_id)
+    # ... DMA load into buf_id ...
+    pto.rls_buf(pto.Pipe.MTE2, buf_id)
 ```
 
 ---
@@ -437,7 +457,7 @@ Where do sync operations belong in PTODSL's public entry model?
 |---------|---------------------|
 | `@pto.jit(mode="auto")` | Users can write sync explicitly when needed. PTOAS also provides an `--enable-insert-sync` option that auto-inserts `set_flag`/`wait_flag` pairs based on op-to-pipe mapping. |
 | `@pto.jit(mode="explicit")` | The compiler does not insert sync — the user is fully responsible. Place `set_flag`/`wait_flag` between MTE and compute, `mem_bar` between compute phases, `pipe_barrier` at phase boundaries. |
-| Shared `@pto.cube` / `@pto.simd` / `@pto.simt` helpers | Cross-pipeline ordering is provided by the surrounding `@pto.jit` schedule. Helpers may still use `mem_bar` for intra-pipeline ordering when UB addresses alias. |
+| Shared `@pto.tileop` / `@pto.simt` helpers | Cross-pipeline ordering is provided by the surrounding `@pto.jit` schedule. TileOps may still use `mem_bar` for intra-pipeline ordering when UB addresses alias. |
 
 **Rule of thumb**: in `mode="auto"`, think in tiles and let the compiler handle
 orchestration. In `mode="explicit"`, think in micro-instructions and place the

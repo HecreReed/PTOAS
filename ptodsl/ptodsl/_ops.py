@@ -63,6 +63,7 @@ from ._types import (
     _materialize_integer_literal,
     _normalize_address_space,
     _resolve,
+    _strip_integer_signedness,
     mask_type,
     part_tensor_view_type,
     part_tensor_view_type_from_dims,
@@ -87,6 +88,7 @@ from mlir.ir import (
     Operation,
     Type,
     TypeAttr,
+    UnitAttr,
 )
 
 # Pipe name shorthands → canonical PIPE_* names
@@ -139,6 +141,13 @@ def _validate_static_event_id(event_id, *, context: str):
         raise ValueError(f"{context} expects static event_id in [0, 7], got {event_id}")
 
 
+def _validate_static_buf_id(buf_id, *, context: str):
+    if isinstance(buf_id, bool):
+        raise TypeError(f"{context} does not accept bool values")
+    if isinstance(buf_id, int) and not 0 <= buf_id <= 31:
+        raise ValueError(f"{context} expects static buf_id in [0, 31], got {buf_id}")
+
+
 def _validate_sync_pipe(pipe, *, context: str, allowed: tuple[str, ...]):
     canonical = _canonical_pipe_token(pipe)
     if canonical is None:
@@ -160,6 +169,28 @@ def _require_explicit_mode(surface: str):
     current_mode = getattr(current_module_spec, "mode", None)
     if current_mode != "explicit":
         raise explicit_mode_required_with_context_error(surface, current_module_spec)
+
+
+def _current_target_arch():
+    try:
+        from ._tracing.active import current_session
+        session = current_session()
+    except Exception:
+        return None
+    if session is None:
+        return None
+    current_module_spec = getattr(session, "current_function_module_spec", session.module_spec)
+    return getattr(current_module_spec, "target_arch", None)
+
+
+def _require_target_arch(surface: str, allowed: set[str]):
+    target = _current_target_arch()
+    if target is None:
+        return
+    normalized = str(target).lower()
+    if normalized not in allowed:
+        expected = ", ".join(f"target='{name}'" for name in sorted(allowed))
+        raise ValueError(f"{surface} is only supported for {expected}; got target={target!r}")
 
 
 def _require_simt_subkernel(surface: str):
@@ -206,6 +237,17 @@ def const(value: int, *, dtype=None):
     if IntegerType.isinstance(mlir_type):
         return wrap_surface_value(_materialize_integer_literal(mlir_type, value))
     return wrap_surface_value(arith.ConstantOp(mlir_type, value).result)
+
+
+def get_op_attr(name: str, default=None):
+    """Return a TileLib render-time op attribute supplied by the C++ bridge."""
+    from ._tracing.active import current_runtime
+
+    runtime = current_runtime()
+    attrs = getattr(runtime, "context_attrs", None)
+    if not attrs:
+        return default
+    return attrs.get(name, default)
 
 
 # ── Pointer ops ───────────────────────────────────────────────────────────────
@@ -1736,6 +1778,19 @@ def vdiv(lhs, rhs, mask):
     return _emit_binary_vec_op(_pto.VdivOp, lhs, rhs, mask)
 
 
+def vtrc(inp, mask, *, rnd="Z"):
+    """``pto.vtrc`` – truncate/round vector lanes according to *rnd*."""
+    _reject_low_precision_vreg_operands(inp, context="pto.vtrc(...)")
+    return wrap_surface_value(
+        _pto.VtrcOp(
+            unwrap_surface_value(inp).type,
+            unwrap_surface_value(inp),
+            unwrap_surface_value(mask),
+            _normalize_vcvt_round_mode(rnd, context="vtrc(..., rnd=...)"),
+        ).result
+    )
+
+
 def vshl(lhs, rhs, mask):
     """``pto.vshl`` – element-wise shift left."""
     return _emit_binary_vec_op(_pto.VshlOp, lhs, rhs, mask)
@@ -1746,6 +1801,32 @@ def vshr(lhs, rhs, mask):
     return _emit_binary_vec_op(_pto.VshrOp, lhs, rhs, mask)
 
 
+def vshls(inp, scalar, mask):
+    """``pto.vshls`` – vector shift-left by scalar under mask."""
+    _reject_low_precision_vreg_operands(inp, context="pto.vshls(...)")
+    return wrap_surface_value(
+        _pto.VshlsOp(
+            unwrap_surface_value(inp).type,
+            unwrap_surface_value(inp),
+            _coerce_i16(scalar, context="vshls"),
+            unwrap_surface_value(mask),
+        ).result
+    )
+
+
+def vshrs(inp, scalar, mask):
+    """``pto.vshrs`` – vector shift-right by scalar under mask."""
+    _reject_low_precision_vreg_operands(inp, context="pto.vshrs(...)")
+    return wrap_surface_value(
+        _pto.VshrsOp(
+            unwrap_surface_value(inp).type,
+            unwrap_surface_value(inp),
+            _coerce_i16(scalar, context="vshrs"),
+            unwrap_surface_value(mask),
+        ).result
+    )
+
+
 def vcmax(v, mask):
     """``pto.vcmax`` – cross-lane maximum reduction."""
     return _emit_unary_vec_op(_pto.VcmaxOp, v, mask)
@@ -1753,7 +1834,38 @@ def vcmax(v, mask):
 
 def vcadd(v, mask):
     """``pto.vcadd`` – cross-lane add (sum reduction)."""
-    return _emit_unary_vec_op(_pto.VcaddOp, v, mask)
+    _reject_low_precision_vreg_operands(v, context="pto.vcadd(...)")
+    raw_v = unwrap_surface_value(v)
+    input_type = _pto.VRegType(raw_v.type)
+    elem_type = input_type.element_type
+    result_elem_type = elem_type
+    result_lanes = input_type.element_count
+    if IntegerType.isinstance(elem_type):
+        int_type = IntegerType(elem_type)
+        if int_type.width == 8:
+            if int_type.is_unsigned:
+                result_elem_type = IntegerType.get_unsigned(16)
+            elif int_type.is_signed:
+                result_elem_type = IntegerType.get_signed(16)
+            else:
+                result_elem_type = IntegerType.get_signless(16)
+            result_lanes = input_type.element_count // 2
+        elif int_type.width == 16:
+            if int_type.is_unsigned:
+                result_elem_type = IntegerType.get_unsigned(32)
+            elif int_type.is_signed:
+                result_elem_type = IntegerType.get_signed(32)
+            else:
+                result_elem_type = IntegerType.get_signless(32)
+            result_lanes = input_type.element_count // 2
+    result_type = _resolve(vreg_type(result_lanes, result_elem_type))
+    return wrap_surface_value(
+        _pto.VcaddOp(
+            result_type,
+            raw_v,
+            unwrap_surface_value(mask),
+        ).result
+    )
 
 
 def vcmin(v, mask):
@@ -1940,41 +2052,202 @@ def vrsqrt(inp, mask):
 
 
 def vcgmax(v, mask):
-    """``pto.vcgmax`` – group maximum reduction, surfaced as the lowest-lane scalar."""
+    """``pto.vcgmax`` – group maximum reduction."""
     _reject_low_precision_vreg_operands(v, context="pto.vcgmax(...)")
-    reduced = _pto.VcgmaxOp(
-        unwrap_surface_value(v).type,
-        unwrap_surface_value(v),
-        unwrap_surface_value(mask),
-    ).result
-    return _extract_lowest_lane_scalar(reduced, mask)
+    return wrap_surface_value(
+        _pto.VcgmaxOp(
+            unwrap_surface_value(v).type,
+            unwrap_surface_value(v),
+            unwrap_surface_value(mask),
+        ).result
+    )
 
 
 def vcgadd(v, mask):
-    """``pto.vcgadd`` – group sum reduction, surfaced as the lowest-lane scalar."""
+    """``pto.vcgadd`` – group sum reduction."""
     _reject_low_precision_vreg_operands(v, context="pto.vcgadd(...)")
-    reduced = _pto.VcgaddOp(
-        unwrap_surface_value(v).type,
-        unwrap_surface_value(v),
-        unwrap_surface_value(mask),
-    ).result
-    return _extract_lowest_lane_scalar(reduced, mask)
+    return wrap_surface_value(
+        _pto.VcgaddOp(
+            unwrap_surface_value(v).type,
+            unwrap_surface_value(v),
+            unwrap_surface_value(mask),
+        ).result
+    )
 
 
 def vcgmin(v, mask):
-    """``pto.vcgmin`` – group minimum reduction, surfaced as the lowest-lane scalar."""
+    """``pto.vcgmin`` – group minimum reduction."""
     _reject_low_precision_vreg_operands(v, context="pto.vcgmin(...)")
-    reduced = _pto.VcgminOp(
-        unwrap_surface_value(v).type,
-        unwrap_surface_value(v),
-        unwrap_surface_value(mask),
-    ).result
-    return _extract_lowest_lane_scalar(reduced, mask)
+    return wrap_surface_value(
+        _pto.VcgminOp(
+            unwrap_surface_value(v).type,
+            unwrap_surface_value(v),
+            unwrap_surface_value(mask),
+        ).result
+    )
 
 
 def vcpadd(v, mask):
     """``pto.vcpadd`` – inclusive prefix sum."""
     return _emit_unary_vec_op(_pto.VcpaddOp, v, mask)
+
+
+def vprelu(lhs, rhs, mask):
+    """``pto.vprelu`` – vector parametric ReLU."""
+    return _emit_binary_vec_op(_pto.VpreluOp, lhs, rhs, mask)
+
+
+def vintlv(lhs, rhs):
+    """``pto.vintlv`` – interleave two vectors and return the low/high pair."""
+    _reject_low_precision_vreg_operands(lhs, rhs, context="pto.vintlv(...)")
+    low, high = _pto.VintlvOp(
+        unwrap_surface_value(lhs).type,
+        unwrap_surface_value(rhs).type,
+        unwrap_surface_value(lhs),
+        unwrap_surface_value(rhs),
+    ).results
+    return wrap_surface_value(low), wrap_surface_value(high)
+
+
+def vdintlv(lhs, rhs):
+    """``pto.vdintlv`` – deinterleave two vectors and return the low/high pair."""
+    _reject_low_precision_vreg_operands(lhs, rhs, context="pto.vdintlv(...)")
+    low, high = _pto.VdintlvOp(
+        unwrap_surface_value(lhs).type,
+        unwrap_surface_value(rhs).type,
+        unwrap_surface_value(lhs),
+        unwrap_surface_value(rhs),
+    ).results
+    return wrap_surface_value(low), wrap_surface_value(high)
+
+
+def vselr(src0, src1):
+    """``pto.vselr`` – vector select/reorder helper."""
+    _reject_low_precision_vreg_operands(src0, src1, context="pto.vselr(...)")
+    return wrap_surface_value(
+        _pto.VselrOp(
+            unwrap_surface_value(src0).type,
+            unwrap_surface_value(src0),
+            unwrap_surface_value(src1),
+        ).result
+    )
+
+
+def vci(index, order=None):
+    """``pto.vci`` – vector consecutive index generator."""
+    raw_index = unwrap_surface_value(index)
+    if not hasattr(raw_index, "type"):
+        raw_index = _coerce_i32(raw_index, context="vci(index)")
+    result_type = _resolve(vreg_type(_elements_per_vreg(raw_index.type), raw_index.type))
+    kwargs = {}
+    if order is not None:
+        token = getattr(order, "value", order)
+        if not isinstance(token, str):
+            token = str(token)
+            if "." in token:
+                token = token.rsplit(".", 1)[-1]
+        kwargs["order"] = token.strip().upper()
+    return wrap_surface_value(_pto.VciOp(result_type, raw_index, **kwargs).result)
+
+
+def vaddc(lhs, rhs, mask):
+    """``pto.vaddc`` – vector add with carry-out predicate."""
+    _reject_low_precision_vreg_operands(lhs, rhs, context="pto.vaddc(...)")
+    carry_type = unwrap_surface_value(mask).type
+    result, carry = _pto.VaddcOp(
+        unwrap_surface_value(lhs).type,
+        carry_type,
+        unwrap_surface_value(lhs),
+        unwrap_surface_value(rhs),
+        unwrap_surface_value(mask),
+    ).results
+    return wrap_surface_value(result), wrap_surface_value(carry)
+
+
+def vaddcs(lhs, rhs, carry_in, mask):
+    """``pto.vaddcs`` – vector add with carry-in and carry-out."""
+    _reject_low_precision_vreg_operands(lhs, rhs, context="pto.vaddcs(...)")
+    carry_type = unwrap_surface_value(carry_in).type
+    result, carry = _pto.VaddcsOp(
+        unwrap_surface_value(lhs).type,
+        carry_type,
+        unwrap_surface_value(lhs),
+        unwrap_surface_value(rhs),
+        unwrap_surface_value(carry_in),
+        unwrap_surface_value(mask),
+    ).results
+    return wrap_surface_value(result), wrap_surface_value(carry)
+
+
+def vmull(lhs, rhs, mask):
+    """``pto.vmull`` – widening vector multiply returning low/high vectors."""
+    _reject_low_precision_vreg_operands(lhs, rhs, context="pto.vmull(...)")
+    low, high = _pto.VmullOp(
+        unwrap_surface_value(lhs).type,
+        unwrap_surface_value(rhs).type,
+        unwrap_surface_value(lhs),
+        unwrap_surface_value(rhs),
+        unwrap_surface_value(mask),
+    ).results
+    return wrap_surface_value(low), wrap_surface_value(high)
+
+
+def vbitsort(destination, source, indices, repeat_times):
+    """``pto.vbitsort`` – bitonic-sort vector tile primitive."""
+    _pto.VbitsortOp(
+        unwrap_surface_value(destination),
+        unwrap_surface_value(source),
+        unwrap_surface_value(indices),
+        _coerce_index(repeat_times, context="vbitsort(repeat_times)"),
+    )
+
+
+def vmrgsort4(destination, source0, source1, source2, source3, count, config):
+    """``pto.vmrgsort4`` – four-way merge-sort primitive."""
+    _pto.Vmrgsort4Op(
+        unwrap_surface_value(destination),
+        unwrap_surface_value(source0),
+        unwrap_surface_value(source1),
+        unwrap_surface_value(source2),
+        unwrap_surface_value(source3),
+        _coerce_i64(count, context="vmrgsort4(count)"),
+        _coerce_i64(config, context="vmrgsort4(config)"),
+    )
+
+
+def copy_ubuf_to_ubuf(source, destination, sid, n_burst, len_burst, src_stride, dst_stride):
+    """``pto.copy_ubuf_to_ubuf`` – raw UB-to-UB DMA primitive."""
+    _pto.CopyUbufToUbufOp(
+        unwrap_surface_value(source),
+        unwrap_surface_value(destination),
+        _coerce_i64(sid, context="copy_ubuf_to_ubuf(sid)"),
+        _coerce_i64(n_burst, context="copy_ubuf_to_ubuf(n_burst)"),
+        _coerce_i64(len_burst, context="copy_ubuf_to_ubuf(len_burst)"),
+        _coerce_i64(src_stride, context="copy_ubuf_to_ubuf(src_stride)"),
+        _coerce_i64(dst_stride, context="copy_ubuf_to_ubuf(dst_stride)"),
+    )
+
+
+def load_scalar(ptr_value, offset=0, result_type=None):
+    """``pto.load_scalar`` – load one scalar from a pointer-like value."""
+    if result_type is None:
+        result_type = _pointer_element_type(ptr_value, context="load_scalar(ptr)")
+    return wrap_surface_value(
+        _pto.LoadScalarOp(
+            _resolve(result_type),
+            unwrap_surface_value(ptr_value),
+            _coerce_index(offset, context="load_scalar(offset)"),
+        ).value
+    )
+
+
+def store_scalar(ptr_value, offset, value):
+    """``pto.store_scalar`` – store one scalar to a pointer-like value."""
+    _pto.StoreScalarOp(
+        unwrap_surface_value(ptr_value),
+        _coerce_index(offset, context="store_scalar(offset)"),
+        unwrap_surface_value(value),
+    )
 
 
 def vadds(inp, scalar, mask):
@@ -2036,6 +2309,34 @@ def vaxpy(alpha, x, y, mask):
             unwrap_surface_value(x),
             unwrap_surface_value(y),
             unwrap_surface_value(alpha_value),
+            unwrap_surface_value(mask),
+        ).result
+    )
+
+
+def vmula(acc, lhs, rhs, mask):
+    """``pto.vmula`` – fused multiply-add: ``acc + lhs * rhs`` (single rounding)."""
+    _reject_low_precision_vreg_operands(acc, lhs, rhs, context="pto.vmula(...)")
+    return wrap_surface_value(
+        _pto.VmulaOp(
+            unwrap_surface_value(acc).type,
+            unwrap_surface_value(acc),
+            unwrap_surface_value(lhs),
+            unwrap_surface_value(rhs),
+            unwrap_surface_value(mask),
+        ).result
+    )
+
+
+def vmadd(acc, lhs, rhs, mask):
+    """``pto.vmadd`` – fused multiply-add: ``acc * lhs + rhs`` (single rounding)."""
+    _reject_low_precision_vreg_operands(acc, lhs, rhs, context="pto.vmadd(...)")
+    return wrap_surface_value(
+        _pto.VmaddOp(
+            unwrap_surface_value(acc).type,
+            unwrap_surface_value(acc),
+            unwrap_surface_value(lhs),
+            unwrap_surface_value(rhs),
             unwrap_surface_value(mask),
         ).result
     )
@@ -2337,21 +2638,20 @@ def _tile_transfer_partition(tv, tile, *, offsets=None, sizes=None, context: str
 
 def alloc_buffer(shape, dtype, **kwargs):
     """
-    Allocate SIMT lane-local scratch storage and return an address-like value.
+    Allocate explicit-body scratch storage and return an address-like value.
 
-    The allocation emits an LLVM stack allocation in the surrounding SIMT
-    helper. UB scratch uses explicit ``pto.castptr`` / ``pto.addptr`` pointer
-    authoring and an appropriate host launch wrapper.
+    The allocation emits an LLVM stack allocation in the surrounding explicit
+    kernel or helper body. UB scratch uses explicit ``pto.castptr`` /
+    ``pto.addptr`` pointer authoring and an appropriate host launch wrapper.
     """
     if kwargs:
         unexpected = ", ".join(sorted(kwargs))
         raise TypeError(
             f"pto.alloc_buffer(...) does not accept keyword argument(s): {unexpected}. "
-            "It only allocates SIMT local buffers; author UB scratch explicitly with "
+            "It only allocates explicit-body local buffers; author UB scratch explicitly with "
             "pto.castptr/pto.addptr and pass the dynamic UB byte count at launch."
         )
     _require_explicit_mode("pto.alloc_buffer(...)")
-    _require_simt_subkernel("pto.alloc_buffer(...)")
     element_type = _resolve(dtype)
     element_count = _static_alloc_buffer_element_count(shape)
     elem_bytes = _element_bytewidth(element_type)
@@ -2395,13 +2695,16 @@ def _alloc_local_buffer(shape, dtype, element_type, element_count, byte_size):
     i32 = IntegerType.get_signless(32)
     count = _materialize_integer_literal(i32, element_count)
     llvm_ptr_type = Type.parse("!llvm.ptr")
+    attributes = {
+        "elem_type": TypeAttr.get(element_type),
+    }
+    if _is_persistent_alloc_buffer_candidate():
+        attributes["pto.persistent"] = UnitAttr.get()
     alloca = Operation.create(
         "llvm.alloca",
         results=[llvm_ptr_type],
         operands=[count],
-        attributes={
-            "elem_type": TypeAttr.get(element_type),
-        },
+        attributes=attributes,
     ).results[0]
     return AllocatedBufferValue(
         alloca,
@@ -2411,6 +2714,21 @@ def _alloc_local_buffer(shape, dtype, element_type, element_count, byte_size):
         element_count=element_count,
         byte_size=byte_size,
     )
+
+
+def _is_persistent_alloc_buffer_candidate() -> bool:
+    try:
+        from ._tracing.active import current_session
+        session = current_session()
+    except Exception:
+        session = None
+    if session is None:
+        return False
+    if getattr(session.module_spec, "entry", False) is not True:
+        return False
+    if session.current_function is not session.entry_function:
+        return False
+    return session.current_subkernel is None
 
 
 def _normalize_alloc_buffer_shape_metadata(shape):
@@ -2684,6 +3002,16 @@ def _coerce_tile_scalar_operand(tile, scalar, *, context: str):
 def tadd(src0, src1, dst):
     """``pto.tadd ins(src0, src1) outs(dst)``."""
     _pto.tadd(
+        unwrap_surface_value(src0),
+        unwrap_surface_value(src1),
+        unwrap_surface_value(dst),
+    )
+
+
+def taddrelu(src0, src1, dst):
+    """``pto.taddrelu ins(src0, src1) outs(dst)``."""
+    _require_target_arch("pto.tile.addrelu", {"a2", "a3"})
+    _pto.taddrelu(
         unwrap_surface_value(src0),
         unwrap_surface_value(src1),
         unwrap_surface_value(dst),
@@ -3295,6 +3623,15 @@ def tgather(
     )
 
 
+def tgatherb(src, offsets, dst):
+    """``pto.tgatherb`` – tile gather using byte offsets (DPS)."""
+    _pto.tgatherb(
+        unwrap_surface_value(src),
+        unwrap_surface_value(offsets),
+        unwrap_surface_value(dst),
+    )
+
+
 def tsel(mask, src0, src1, dst, *, tmp=None):
     """``pto.tsel ins(mask, src0, src1, tmp) outs(dst)`` with synthesized scratch when omitted."""
     resolved_tmp = tmp if tmp is not None else _resolve_selection_tmp(dst, tmp, context="tsel")
@@ -3637,14 +3974,6 @@ def _reject_low_precision_vreg_operands(*values, context: str) -> None:
         _reject_low_precision_vreg(value, context=context)
 
 
-def _extract_lowest_lane_scalar(vector_value, mask):
-    lanes, elem_type = _infer_vreg_metadata(vector_value)
-    tmp_tile = alloc_tile(shape=[1, lanes], dtype=elem_type, valid_shape=[1, 1])
-    vsts(vector_value, tmp_tile.as_ptr(), _index_zero(), mask, dist="1PT_B32")
-    from . import scalar as _scalar
-    return _scalar.load(tmp_tile[0, 0])
-
-
 def _element_bytewidth(elem_type):
     if F32Type.isinstance(elem_type):
         return 4
@@ -3820,6 +4149,82 @@ def _acc_store_unit_flag_attr(unit_flag):
         context="acc store unit_flag",
     )
 
+_ACC_STORE_PRE_QUANT_MODES = frozenset({
+    "no_convert",
+    "f32_f16",
+    "qf322hif8_pre_vec",
+    "qf322hif8_pre_scalar",
+    "qf322hif8_pre_hybrid_vec",
+    "qf322hif8_pre_hybrid_scalar",
+    "deqs32_int_vec",
+    "deqs32_int_scalar",
+    "req8_vec",
+    "req8_scalar",
+    "deqf16_vec",
+    "deqf16_scalar",
+    "qf322fp8_pre_vec",
+    "qf322fp8_pre_scalar",
+    "qf322f32_pre_vec",
+    "qf322f32_pre_scalar",
+    "f32_bf16",
+    "qf162b8_pre_vec",
+    "qf162b8_pre_scalar",
+    "qf162s4_pre_vec",
+    "qf162s4_pre_scalar",
+    "req4_vec",
+    "req4_scalar",
+    "qf322b8_pre_vec",
+    "qf322b8_pre_scalar",
+    "qf322s4_pre_vec",
+    "qf322s4_pre_scalar",
+    "deqs16_vec",
+    "deqs16_scalar",
+    "qf162s16_pre_vec",
+    "qf162s16_pre_scalar",
+    "qf322f16_pre_vec",
+    "qf322f16_pre_scalar",
+    "qf322bf16_pre_vec",
+    "qf322bf16_pre_scalar",
+    "qs322bf16_pre_vec",
+    "qs322bf16_pre_scalar",
+})
+
+_ACC_STORE_PRE_QUANT_SKIP_PAYLOAD_KIND_CHECK = frozenset({
+    "no_convert",
+})
+
+_ACC_STORE_VECTOR_PRE_QUANT_MODES = frozenset({
+    mode for mode in _ACC_STORE_PRE_QUANT_MODES if mode.endswith("_vec")
+})
+
+
+def _is_acc_store_float_scalar_payload(value) -> bool:
+    raw_value = unwrap_surface_value(value)
+    return hasattr(raw_value, "type") and any(
+        cls.isinstance(raw_value.type) for cls in (F16Type, BF16Type, F32Type)
+    )
+
+
+def _is_acc_store_scaling_pointer_payload(value) -> bool:
+    raw_value = unwrap_surface_value(value)
+    if not hasattr(raw_value, "type"):
+        return False
+    try:
+        ptr_type = _pto.PtrType(raw_value.type)
+    except Exception:
+        return False
+    scaling_attr = _pto.AddressSpaceAttr.get(_pto.AddressSpace.SCALING)
+    memory_space = getattr(ptr_type, "memory_space", None)
+    if (
+        memory_space != scaling_attr
+        and getattr(memory_space, "value", None) != _pto.AddressSpace.SCALING
+    ):
+        return False
+    return any(
+        cls.isinstance(ptr_type.element_type)
+        for cls in (F16Type, BF16Type, F32Type)
+    )
+
 
 def _acc_store_pre_quant(pre_quant):
     if pre_quant is None:
@@ -3827,9 +4232,25 @@ def _acc_store_pre_quant(pre_quant):
     if not isinstance(pre_quant, tuple) or len(pre_quant) != 2:
         raise TypeError("acc store pre_quant expects (payload, mode)")
     payload, mode = pre_quant
+    normalized_mode = _normalize_token(mode, context="acc store pre_quant mode")
+    if normalized_mode not in _ACC_STORE_PRE_QUANT_MODES:
+        raise ValueError(f"unsupported acc store pre_quant mode: {normalized_mode}")
+    if normalized_mode in _ACC_STORE_PRE_QUANT_SKIP_PAYLOAD_KIND_CHECK:
+        pass
+    elif normalized_mode in _ACC_STORE_VECTOR_PRE_QUANT_MODES:
+        if not _is_acc_store_scaling_pointer_payload(payload):
+            raise TypeError(
+                "acc store vector pre_quant payload must be a scaling pointer "
+                "with f16, bf16, or f32 elements"
+            )
+    else:
+        if not _is_acc_store_float_scalar_payload(payload):
+            raise TypeError(
+                "acc store scalar pre_quant payload must be an f16, bf16, or f32 scalar"
+            )
     return (
         unwrap_surface_value(payload),
-        Attribute.parse(f"#pto<quant_pre_mode {_normalize_token(mode, context='acc store pre_quant mode')}>"),
+        Attribute.parse(f"#pto<quant_pre_mode {normalized_mode}>"),
     )
 
 
@@ -4193,7 +4614,15 @@ def mte_load(source, destination, l2_cache_ctl, len_burst, *, nburst, loops=None
 
 
 @_explicit_mode_only("pto.mte_store(...)")
-def mte_store(source, destination, len_burst, *, nburst, loops=None):
+def mte_store(
+    source,
+    destination,
+    len_burst,
+    *,
+    nburst,
+    loops=None,
+    l2_cache="nmfv",
+):
     """Ptr-based UB->GM DMA wrapper aligned with the underlying ``pto.dma_store`` surface."""
     n_burst, nburst_src_stride, nburst_dst_stride = _normalize_dma_group(
         "nburst",
@@ -4214,6 +4643,10 @@ def mte_store(source, destination, len_burst, *, nburst, loops=None):
         loop_counts,
         loop_src_strides,
         loop_dst_strides,
+        l2_cache_ctl=_coerce_i64(
+            _normalize_mte_store_l2_cache(l2_cache, context="mte_store(...) l2_cache"),
+            context="mte_store l2 cache control",
+        ),
     )
 
 
@@ -4303,7 +4736,15 @@ def mte_gm_ub(source, destination, l2_cache_ctl, len_burst, *, nburst, loops=Non
 
 
 @_explicit_mode_only("pto.mte_ub_gm(...)")
-def mte_ub_gm(source, destination, len_burst, *, nburst, loops=None):
+def mte_ub_gm(
+    source,
+    destination,
+    len_burst,
+    *,
+    nburst,
+    loops=None,
+    l2_cache="nmfv",
+):
     """``pto.mte_ub_gm`` – grouped UB-to-GM DMA surface."""
     n_burst, nburst_src_stride, nburst_dst_stride = _normalize_dma_group(
         "nburst",
@@ -4324,6 +4765,10 @@ def mte_ub_gm(source, destination, len_burst, *, nburst, loops=None):
         loop_counts,
         loop_src_strides,
         loop_dst_strides,
+        l2_cache_ctl=_coerce_i64(
+            _normalize_mte_store_l2_cache(l2_cache, context="mte_ub_gm(...) l2_cache"),
+            context="mte_ub_gm l2 cache control",
+        ),
     )
 
 
@@ -4844,7 +5289,7 @@ def simt_launch(body, *args, dims=(1, 1, 1), **kwargs):
     if role_value != "simt":
         raise TypeError("pto.simt_launch(body, ...) expects body to be a @pto.simt-decorated function")
 
-    body._validate_invocation(*args, **kwargs)
+    body._validate_simt_launch_invocation(*args, **kwargs)
 
     from ._tracing.active import require_active_session
     session = require_active_session("pto.simt_launch")
@@ -4985,6 +5430,24 @@ _ST_L2_CACHE_TOKENS = {
     "wbhfv", "wbhlv", "wbhprs", "wbhred",
     "wtsfv", "wtslv", "wtsprs", "wtsred",
 }
+_ST_L2_CACHE_CONTROL_VALUES = {
+    "nmfv": 0,
+    "nmlv": 1,
+    "nmprs": 2,
+    "nmred": 3,
+    "naci": 4,
+    "napw": 5,
+    "napi": 6,
+    "nared": 7,
+    "wbhfv": 8,
+    "wbhlv": 9,
+    "wbhprs": 10,
+    "wbhred": 11,
+    "wtsfv": 12,
+    "wtslv": 13,
+    "wtsprs": 14,
+    "wtsred": 15,
+}
 _ROUNDING_TOKENS = {"r", "a", "f", "c", "z", "o", "h"}
 _SATURATION_TOKENS = {"sat", "nosat"}
 
@@ -5011,6 +5474,14 @@ def _ld_l2_cache_attr(value, *, context: str):
 
 def _st_l2_cache_attr(value, *, context: str):
     return _simt_enum_attr("st_l2cache", value, supported=_ST_L2_CACHE_TOKENS, context=context)
+
+
+def _normalize_mte_store_l2_cache(l2_cache, *, context: str):
+    token = _normalize_token(l2_cache, context=context)
+    if token not in _ST_L2_CACHE_CONTROL_VALUES:
+        expected = ", ".join(sorted(_ST_L2_CACHE_CONTROL_VALUES))
+        raise ValueError(f"{context} does not support {l2_cache!r}; expected one of {expected}")
+    return _ST_L2_CACHE_CONTROL_VALUES[token]
 
 
 def _rounding_attr(value, *, context: str):
@@ -5416,21 +5887,48 @@ def pipe_barrier(pipe):
 
 
 def get_buf(pipe, buf_id, mode=0):
-    """``pto.get_buf(pipe, buf_id, mode=0)`` – acquire a buffer token."""
-    _pto.GetBufOp(
-        _pipe_attr(pipe),
+    """``pto.get_buf(pipe, buf_id, mode=0)`` – acquire a buffer token.
+
+    ``buf_id`` accepts a static integer (0–31) or a runtime index-like PTO scalar.
+    """
+    buf_id_op, is_static = _buf_id_operand(
         buf_id,
+        context="get_buf(..., buf_id=...)",
+    )
+    if is_static:
+        _pto.GetBufOp(_pipe_attr(pipe), buf_id_op, mode=mode)
+        return
+    _pto.GetBufDynOp(
+        _pipe_attr(pipe),
         mode=mode,
+        buf_id=buf_id_op,
     )
 
 
 def rls_buf(pipe, buf_id, mode=0):
-    """``pto.rls_buf(pipe, buf_id, mode=0)`` – release a buffer token."""
-    _pto.RlsBufOp(
-        _pipe_attr(pipe),
+    """``pto.rls_buf(pipe, buf_id, mode=0)`` – release a buffer token.
+
+    ``buf_id`` accepts a static integer (0–31) or a runtime index-like PTO scalar.
+    """
+    buf_id_op, is_static = _buf_id_operand(
         buf_id,
-        mode=mode,
+        context="rls_buf(..., buf_id=...)",
     )
+    if is_static:
+        _pto.RlsBufOp(_pipe_attr(pipe), buf_id_op, mode=mode)
+        return
+    _pto.RlsBufDynOp(
+        _pipe_attr(pipe),
+        mode=mode,
+        buf_id=buf_id_op,
+    )
+
+
+def _buf_id_operand(buf_id, *, context: str):
+    if isinstance(buf_id, int):
+        _validate_static_buf_id(buf_id, context=context)
+        return buf_id, True
+    return _coerce_index(buf_id, context=context), False
 
 
 def _sync_event_id_operand(event_id, *, context: str):
@@ -5572,7 +6070,7 @@ __all__ = [
     "tload", "tstore", "tmov", "tinsert",
     "tmatmul", "tmatmul_acc", "tmatmul_mx", "tmatmul_mx_acc", "tmatmul_mx_bias",
     "tgemv_mx", "tgemv_mx_acc", "tgemv_mx_bias",
-    "tadd", "tsub", "tmul", "tdiv", "tmax", "tmin",
+    "tadd", "taddrelu", "tsub", "tmul", "tdiv", "tmax", "tmin",
     "tadds", "tsubs", "tmuls", "tdivs", "tmaxs", "tmins",
     "texp", "tlog", "tsqrt", "trsqrt", "trecip", "tabs", "tneg",
     "trelu", "tlrelu",

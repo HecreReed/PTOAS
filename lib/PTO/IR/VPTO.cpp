@@ -272,9 +272,10 @@ static bool isVector2F16OrBF16Type(Type type) {
   });
 }
 
-static bool isInsideSimtEntry(Operation *op) {
+static bool isInsideSimtExecutionScope(Operation *op) {
   auto funcOp = op->getParentOfType<func::FuncOp>();
-  return funcOp && funcOp->hasAttr(pto::kPTOSimtEntryAttrName);
+  return (funcOp && funcOp->hasAttr(pto::kPTOSimtEntryAttrName)) ||
+         op->getParentOfType<pto::SectionSimtOp>();
 }
 
 static bool isSupportedConvertType(Type type) {
@@ -505,10 +506,10 @@ static LogicalResult verifyAtomicCommon(Operation *op, Value ptr, Type valueType
     return op->emitOpError()
            << "does not accept signedness for floating-point atomics";
   if (isVector2F16OrBF16Type(valueType)) {
-    if (!isInsideSimtEntry(op))
+    if (!isInsideSimtExecutionScope(op))
       return op->emitOpError()
              << "requires packed atomics to be inside a pto.simt_entry "
-                "function on beta.1";
+                "function or pto.section.simt on beta.1";
     if (!op->getResult(0).use_empty())
       return op->emitOpError()
              << "does not support using the old value result for packed "
@@ -535,10 +536,14 @@ static LogicalResult verifyLdgStgAccess(Operation *op, Type ptrType,
     return success();
   if (pto::isPTOFloat8Type(valueType) || pto::isPTOHiFloat8Type(valueType))
     return success();
+  if (pto::isPTOPackedLdgStgVectorType(valueType))
+    return success();
 
   return op->emitOpError()
-         << "currently supports 8/16/32/64-bit integer and "
-            "f16/bf16/f32/f64/fp8/hif8 value type";
+         << "currently supports 8/16/32/64-bit integer, "
+            "f16/bf16/f32/f64/fp8/hif8, "
+            "and packed vector<2xT> (T = "
+            "f16/bf16/f32/fp8/i8/i16/i32) and !pto.hif8x2 value type";
 }
 
 LogicalResult PTOLoadOp::verify() {
@@ -1859,6 +1864,14 @@ static int64_t getBufferElementByteSize(Type type) {
   return getPTOStorageElemByteSize(elementType);
 }
 
+static Type getBufferElementType(Type type) {
+  if (auto ptrType = dyn_cast<pto::PtrType>(type))
+    return ptrType.getElementType();
+  if (auto memrefType = dyn_cast<BaseMemRefType>(type))
+    return memrefType.getElementType();
+  return {};
+}
+
 static std::optional<AddressSpace> getBufferAddressSpace(Type type) {
   if (auto ptrType = dyn_cast<pto::PtrType>(type))
     return ptrType.getMemorySpace().getAddressSpace();
@@ -2566,6 +2579,105 @@ static bool isStructuredAccStoreInt32PreQuantMode(AccStoreQuantPreMode mode) {
   }
 }
 
+enum class StructuredAccStoreDestinationFamily {
+  Any,
+  F32,
+  F16,
+  BF16,
+  I32,
+  I16,
+  I8,
+  I4,
+  FP8
+};
+
+static StructuredAccStoreDestinationFamily
+getStructuredAccStorePreQuantDestinationFamily(AccStoreQuantPreMode mode) {
+  switch (mode) {
+  case AccStoreQuantPreMode::F32F16:
+  case AccStoreQuantPreMode::QF322F16PreVec:
+  case AccStoreQuantPreMode::QF322F16PreScalar:
+  case AccStoreQuantPreMode::DEQF16Vec:
+  case AccStoreQuantPreMode::DEQF16Scalar:
+    return StructuredAccStoreDestinationFamily::F16;
+  case AccStoreQuantPreMode::F32BF16:
+  case AccStoreQuantPreMode::QF322BF16PreVec:
+  case AccStoreQuantPreMode::QF322BF16PreScalar:
+  case AccStoreQuantPreMode::QS322BF16PreVec:
+  case AccStoreQuantPreMode::QS322BF16PreScalar:
+    return StructuredAccStoreDestinationFamily::BF16;
+  case AccStoreQuantPreMode::QF322F32PreVec:
+  case AccStoreQuantPreMode::QF322F32PreScalar:
+    return StructuredAccStoreDestinationFamily::F32;
+  case AccStoreQuantPreMode::QF322HIF8PreVec:
+  case AccStoreQuantPreMode::QF322HIF8PreScalar:
+  case AccStoreQuantPreMode::QF322HIF8PreHybridVec:
+  case AccStoreQuantPreMode::QF322HIF8PreHybridScalar:
+  case AccStoreQuantPreMode::QF322FP8PreVec:
+  case AccStoreQuantPreMode::QF322FP8PreScalar:
+    return StructuredAccStoreDestinationFamily::FP8;
+  case AccStoreQuantPreMode::DEQS32IntVec:
+  case AccStoreQuantPreMode::DEQS32IntScalar:
+    return StructuredAccStoreDestinationFamily::I32;
+  case AccStoreQuantPreMode::QF162S16PreVec:
+  case AccStoreQuantPreMode::QF162S16PreScalar:
+  case AccStoreQuantPreMode::DEQS16Vec:
+  case AccStoreQuantPreMode::DEQS16Scalar:
+    return StructuredAccStoreDestinationFamily::I16;
+  case AccStoreQuantPreMode::QF162B8PreVec:
+  case AccStoreQuantPreMode::QF162B8PreScalar:
+  case AccStoreQuantPreMode::REQ8Vec:
+  case AccStoreQuantPreMode::REQ8Scalar:
+  case AccStoreQuantPreMode::QF322B8PreVec:
+  case AccStoreQuantPreMode::QF322B8PreScalar:
+    return StructuredAccStoreDestinationFamily::I8;
+  case AccStoreQuantPreMode::QF162S4PreVec:
+  case AccStoreQuantPreMode::QF162S4PreScalar:
+  case AccStoreQuantPreMode::REQ4Vec:
+  case AccStoreQuantPreMode::REQ4Scalar:
+  case AccStoreQuantPreMode::QF322S4PreVec:
+  case AccStoreQuantPreMode::QF322S4PreScalar:
+    return StructuredAccStoreDestinationFamily::I4;
+  case AccStoreQuantPreMode::NoConvert:
+    return StructuredAccStoreDestinationFamily::Any;
+  }
+  llvm_unreachable("unknown acc-store pre_quant mode");
+}
+
+static bool isStructuredAccStoreDestinationFamily(
+    Type type, StructuredAccStoreDestinationFamily family) {
+  switch (family) {
+  case StructuredAccStoreDestinationFamily::Any:
+    return true;
+  case StructuredAccStoreDestinationFamily::F32:
+    return type.isF32();
+  case StructuredAccStoreDestinationFamily::F16:
+    return type.isF16();
+  case StructuredAccStoreDestinationFamily::BF16:
+    return type.isBF16();
+  case StructuredAccStoreDestinationFamily::I32:
+    if (auto intType = dyn_cast<IntegerType>(type))
+      return intType.getWidth() == 32;
+    return false;
+  case StructuredAccStoreDestinationFamily::I16:
+    if (auto intType = dyn_cast<IntegerType>(type))
+      return intType.getWidth() == 16 && !intType.isUnsigned();
+    return false;
+  case StructuredAccStoreDestinationFamily::I8:
+    if (auto intType = dyn_cast<IntegerType>(type))
+      return intType.getWidth() == 8;
+    return false;
+  case StructuredAccStoreDestinationFamily::I4:
+    if (auto intType = dyn_cast<IntegerType>(type))
+      return intType.getWidth() == 4 && !intType.isUnsigned();
+    return false;
+  case StructuredAccStoreDestinationFamily::FP8:
+    return pto::isPTOFloat8Type(type) || pto::isPTOHiFloat8Type(type) ||
+           pto::isPTOHiFloat8x2Type(type);
+  }
+  llvm_unreachable("unknown acc-store destination family");
+}
+
 static ParseResult parseStructuredAccStoreUnitFlag(OpAsmParser &parser,
                                                    StructuredAccStoreAsmState &state) {
   if (state.unitFlag)
@@ -2826,7 +2938,11 @@ static LogicalResult verifyStructuredAccStoreLike(
   if (static_cast<bool>(preQuant) != static_cast<bool>(preQuantMode))
     return op->emitOpError("pre_quant requires payload and mode together");
   if (preQuantMode) {
-    if (isStructuredAccStoreVectorQuantMode(*preQuantMode)) {
+    if (*preQuantMode == AccStoreQuantPreMode::NoConvert) {
+      // The no_convert keyword carries no quantization parameters; the
+      // syntactic payload operand is ignored for compatibility with the
+      // structured pre_quant clause form.
+    } else if (isStructuredAccStoreVectorQuantMode(*preQuantMode)) {
       if (!isStructuredAccStoreScalingPayload(preQuant))
         return op->emitOpError("vector pre_quant mode requires scaling pointer payload");
       if (!isStructuredAccStoreFloatScalarPayloadType(
@@ -2845,16 +2961,24 @@ static LogicalResult verifyStructuredAccStoreLike(
              << " and destination element type " << destinationElementType;
     };
 
-    if (isa<Float32Type>(sourceElementType)) {
-      if (!isStructuredAccStoreFloatPreQuantMode(*preQuantMode))
+    if (*preQuantMode != AccStoreQuantPreMode::NoConvert) {
+      if (isa<Float32Type>(sourceElementType)) {
+        if (!isStructuredAccStoreFloatPreQuantMode(*preQuantMode))
+          return emitIncompatibleQuantModeError();
+      } else if (sourceElementType.isSignlessInteger(32)) {
+        if (!isStructuredAccStoreInt32PreQuantMode(*preQuantMode))
+          return emitIncompatibleQuantModeError();
+      } else {
+        return op->emitOpError()
+               << "pre_quant requires source element type to be f32 or i32, got "
+               << sourceElementType;
+      }
+
+      StructuredAccStoreDestinationFamily destinationFamily =
+          getStructuredAccStorePreQuantDestinationFamily(*preQuantMode);
+      if (!isStructuredAccStoreDestinationFamily(destinationElementType,
+                                                destinationFamily))
         return emitIncompatibleQuantModeError();
-    } else if (sourceElementType.isSignlessInteger(32)) {
-      if (!isStructuredAccStoreInt32PreQuantMode(*preQuantMode))
-        return emitIncompatibleQuantModeError();
-    } else {
-      return op->emitOpError()
-             << "pre_quant requires source element type to be f32 or i32, got "
-             << sourceElementType;
     }
   }
 
@@ -4378,6 +4502,31 @@ void Vgather2Op::getEffects(
   effects.emplace_back(MemoryEffects::Read::get(), &getSourceMutable());
 }
 
+static bool isUnsignedOrSignlessIntegerOfWidth(Type type, unsigned width) {
+  auto intType = dyn_cast<IntegerType>(type);
+  return intType && intType.getWidth() == width && !intType.isSigned();
+}
+
+static bool isSameVgather2IntegerSemantics(IntegerType sourceType,
+                                           IntegerType resultType) {
+  if (!sourceType || !resultType ||
+      sourceType.getWidth() != resultType.getWidth())
+    return false;
+  if (sourceType.isUnsigned())
+    return resultType.isUnsigned();
+  return !resultType.isUnsigned();
+}
+
+static bool isVgather2B8ResultType(IntegerType sourceType,
+                                   IntegerType resultType) {
+  if (!sourceType || !resultType || sourceType.getWidth() != 8 ||
+      resultType.getWidth() != 16)
+    return false;
+  if (sourceType.isUnsigned())
+    return resultType.isUnsigned();
+  return !resultType.isUnsigned();
+}
+
 LogicalResult Vgather2Op::verify() {
   if (!isBufferLike(getSource().getType()))
     return emitOpError("requires a pointer-like source");
@@ -4389,11 +4538,72 @@ LogicalResult Vgather2Op::verify() {
   auto resultType = dyn_cast<VRegType>(getResult().getType());
   if (!offsetsType || !resultType)
     return emitOpError("offsets and result must be !pto.vreg<...>");
-  if (!isa<IntegerType>(offsetsType.getElementType()))
+
+  auto offsetsElemType = dyn_cast<IntegerType>(offsetsType.getElementType());
+  if (!offsetsElemType)
     return emitOpError("offset vector must use integer element type");
   if (offsetsType.getElementCount() != resultType.getElementCount())
     return emitOpError("offset and result vectors must have the same element count");
-  if (failed(verifyMaskTypeLike(*this, getMask().getType(), "mask type")))
+
+  Type sourceElemType = getBufferElementType(getSource().getType());
+  Type resultElemType = resultType.getElementType();
+  unsigned sourceElemWidth = getPTOStorageElemBitWidth(sourceElemType);
+  unsigned resultElemWidth = getPTOStorageElemBitWidth(resultElemType);
+  unsigned expectedOffsetWidth = 0;
+  StringRef expectedMaskGranularity;
+  int64_t expectedLanes = 0;
+
+  if (sourceElemWidth == 8 && isa<IntegerType>(sourceElemType)) {
+    if (!isVgather2B8ResultType(cast<IntegerType>(sourceElemType),
+                                dyn_cast<IntegerType>(resultElemType)))
+      return emitOpError(
+          "8-bit gather requires i8/ui8 source and matching i16/ui16 result");
+    expectedOffsetWidth = 16;
+    expectedMaskGranularity = "b16";
+    expectedLanes = 128;
+  } else if (sourceElemWidth == 16) {
+    if (auto sourceInt = dyn_cast<IntegerType>(sourceElemType)) {
+      if (!isSameVgather2IntegerSemantics(
+              sourceInt, dyn_cast<IntegerType>(resultElemType)))
+        return emitOpError(
+            "16-bit integer gather requires matching i16/ui16 result");
+    } else if (!(sourceElemType.isF16() || sourceElemType.isBF16()) ||
+               sourceElemType != resultElemType) {
+      return emitOpError(
+          "16-bit gather requires i16/ui16/f16/bf16 source and matching result");
+    }
+    expectedOffsetWidth = 16;
+    expectedMaskGranularity = "b16";
+    expectedLanes = 128;
+  } else if (sourceElemWidth == 32) {
+    if (auto sourceInt = dyn_cast<IntegerType>(sourceElemType)) {
+      if (!isSameVgather2IntegerSemantics(
+              sourceInt, dyn_cast<IntegerType>(resultElemType)))
+        return emitOpError(
+            "32-bit integer gather requires matching i32/ui32 result");
+    } else if (!sourceElemType.isF32() || sourceElemType != resultElemType) {
+      return emitOpError(
+          "32-bit gather requires i32/ui32/f32 source and matching result");
+    }
+    expectedOffsetWidth = 32;
+    expectedMaskGranularity = "b32";
+    expectedLanes = 64;
+  } else {
+    return emitOpError(
+        "requires source element type i8/ui8/i16/ui16/i32/ui32/f16/bf16/f32");
+  }
+
+  if (resultElemWidth != 16 && resultElemWidth != 32)
+    return emitOpError("result element type must be 16-bit or 32-bit");
+  if (resultType.getElementCount() != expectedLanes)
+    return emitOpError() << "expects result type "
+                         << formatVRegType(expectedLanes, resultElemType);
+  if (!isUnsignedOrSignlessIntegerOfWidth(offsetsElemType, expectedOffsetWidth))
+    return emitOpError() << "requires ui" << expectedOffsetWidth << "/i"
+                         << expectedOffsetWidth << " offset vector elements";
+  if (failed(verifyMaskTypeWithGranularityLike(
+          getOperation(), getMask().getType(), "mask type",
+          expectedMaskGranularity)))
     return failure();
   return success();
 }
@@ -4492,8 +4702,13 @@ LogicalResult VgatherbOp::verify() {
     return emitOpError("offset vector must use integer element type");
   if (offsetsElemType.getWidth() != 32)
     return emitOpError("currently requires 32-bit offset vector elements");
-  if (offsetsType.getElementCount() != resultType.getElementCount())
-    return emitOpError("offset and result vectors must have the same element count");
+  // vgatherb is a 32-byte block gather: each offset addresses one 32-byte block.
+  // The offset vector holds VL/32 block addresses (always ui32), while the
+  // result vector holds VL/sizeof(T) elements of the data type.  These counts
+  // only coincide when sizeof(T)==4 (e.g. f32/i32/ui32).  For smaller types
+  // the result has more elements than the offset, which is correct because the
+  // hardware interprets the low VL/32 bytes of the offset register as block
+  // addresses and gathers VL bytes of data per invocation.
   return success();
 }
 
@@ -6494,10 +6709,13 @@ LogicalResult CopyUbufToGmOp::verify() {
 }
 
 void MteUbGmOp::build(OpBuilder &builder, OperationState &state, Value source,
-                       Value destination, Value lenBurst, pto::DmaLoopConfig nburst,
+                       Value destination, Value lenBurst,
+                       pto::DmaLoopConfig nburst, Value l2CacheCtl,
                        llvm::ArrayRef<pto::DmaLoopConfig> loops) {
   state.addOperands({source, destination, lenBurst, nburst.count,
                      nburst.srcStride, nburst.dstStride});
+  if (l2CacheCtl)
+    state.addOperands(l2CacheCtl);
   for (const pto::DmaLoopConfig &loop : loops)
     state.addOperands(loop.count);
   for (const pto::DmaLoopConfig &loop : loops)
@@ -6508,14 +6726,15 @@ void MteUbGmOp::build(OpBuilder &builder, OperationState &state, Value source,
   state.addAttribute(
       getOperandSegmentSizeAttr(),
       builder.getDenseI32ArrayAttr(
-          {1, 1, 1, 1, 1, 1,
+          {1, 1, 1, 1, 1, 1, l2CacheCtl ? 1 : 0,
            static_cast<int32_t>(loops.size()),
            static_cast<int32_t>(loops.size()),
            static_cast<int32_t>(loops.size())}));
 }
 
 void MteUbGmOp::build(OpBuilder &builder, OperationState &state, Value source,
-                       Value destination, Value lenBurst, pto::DmaLoopConfig nburst,
+                       Value destination, Value lenBurst,
+                       pto::DmaLoopConfig nburst, Value l2CacheCtl,
                        std::optional<pto::DmaLoopConfig> loop1,
                        std::optional<pto::DmaLoopConfig> loop2) {
   SmallVector<pto::DmaLoopConfig> loops;
@@ -6523,11 +6742,13 @@ void MteUbGmOp::build(OpBuilder &builder, OperationState &state, Value source,
     loops.push_back(*loop1);
   if (loop2)
     loops.push_back(*loop2);
-  build(builder, state, source, destination, lenBurst, nburst, loops);
+  build(builder, state, source, destination, lenBurst, nburst, l2CacheCtl,
+        loops);
 }
 
 ParseResult MteUbGmOp::parse(OpAsmParser &parser, OperationState &result) {
-  OpAsmParser::UnresolvedOperand source, destination, lenBurst;
+  OpAsmParser::UnresolvedOperand source, destination, lenBurst, l2CacheCtl;
+  bool hasL2CacheCtl = false;
   SmallVector<OpAsmParser::UnresolvedOperand> nburstOperands;
   SmallVector<OpAsmParser::UnresolvedOperand> loopCountOperands;
   SmallVector<OpAsmParser::UnresolvedOperand> loopSrcStrideOperands;
@@ -6537,6 +6758,12 @@ ParseResult MteUbGmOp::parse(OpAsmParser &parser, OperationState &result) {
       parser.parseOperand(lenBurst) ||
       parseDmaTripleGroup(parser, "nburst", nburstOperands))
     return failure();
+  if (succeeded(parser.parseOptionalKeyword("l2_cache_ctl"))) {
+    hasL2CacheCtl = true;
+    if (parser.parseLParen() || parser.parseOperand(l2CacheCtl) ||
+        parser.parseRParen())
+      return failure();
+  }
   while (true) {
     StringRef parsedKeyword;
     SmallVector<OpAsmParser::UnresolvedOperand, 3> loopGroupOperands;
@@ -6553,7 +6780,7 @@ ParseResult MteUbGmOp::parse(OpAsmParser &parser, OperationState &result) {
   if (parser.parseOptionalAttrDict(result.attributes) || parser.parseColon())
     return failure();
 
-  Type sourceType, destinationType, lenBurstType;
+  Type sourceType, destinationType, lenBurstType, l2CacheCtlType;
   SmallVector<Type> nburstTypes, loopCountTypes, loopSrcStrideTypes,
       loopDstStrideTypes;
   if (parser.parseType(sourceType) || parser.parseComma() ||
@@ -6561,6 +6788,10 @@ ParseResult MteUbGmOp::parse(OpAsmParser &parser, OperationState &result) {
       parser.parseType(lenBurstType) || parser.parseComma() ||
       parseDmaTripleTypes(parser, nburstTypes))
     return failure();
+  if (hasL2CacheCtl) {
+    if (parser.parseComma() || parser.parseType(l2CacheCtlType))
+      return failure();
+  }
   while (succeeded(parser.parseOptionalComma())) {
     StringRef keyword;
     if (parser.parseKeyword(&keyword))
@@ -6592,6 +6823,7 @@ ParseResult MteUbGmOp::parse(OpAsmParser &parser, OperationState &result) {
   auto &segments =
       result.getOrAddProperties<MteUbGmOp::Properties>().operandSegmentSizes;
   llvm::copy(ArrayRef<int32_t>{1, 1, 1, 1, 1, 1,
+                               hasL2CacheCtl ? 1 : 0,
                                loopGroupCount, loopGroupCount, loopGroupCount},
              segments.begin());
 
@@ -6599,8 +6831,12 @@ ParseResult MteUbGmOp::parse(OpAsmParser &parser, OperationState &result) {
       parser.resolveOperand(destination, destinationType, result.operands) ||
       parser.resolveOperand(lenBurst, lenBurstType, result.operands) ||
       parser.resolveOperands(nburstOperands, nburstTypes, parser.getCurrentLocation(),
-                             result.operands) ||
-      parser.resolveOperands(loopCountOperands, loopCountTypes,
+                             result.operands))
+    return failure();
+  if (hasL2CacheCtl &&
+      parser.resolveOperand(l2CacheCtl, l2CacheCtlType, result.operands))
+    return failure();
+  if (parser.resolveOperands(loopCountOperands, loopCountTypes,
                              parser.getCurrentLocation(), result.operands) ||
       parser.resolveOperands(loopSrcStrideOperands, loopSrcStrideTypes,
                              parser.getCurrentLocation(), result.operands) ||
@@ -6616,6 +6852,8 @@ void MteUbGmOp::print(OpAsmPrinter &printer) {
           << getLenBurst();
   printDmaTripleGroup(printer, "nburst", getNBurst(), getNburstSrcStride(),
                       getNburstDstStride());
+  if (Value l2CacheCtl = getL2CacheCtl())
+    printer << " l2_cache_ctl(" << l2CacheCtl << ")";
   for (auto [count, srcStride, dstStride] :
        llvm::zip(getLoopCounts(), getLoopSrcStrides(), getLoopDstStrides()))
     printDmaTripleGroup(printer, "loop", count, srcStride, dstStride);
@@ -6625,6 +6863,8 @@ void MteUbGmOp::print(OpAsmPrinter &printer) {
           << ", " << getNburstSrcStride().getType()
           << ", "
           << getNburstDstStride().getType();
+  if (Value l2CacheCtl = getL2CacheCtl())
+    printer << ", " << l2CacheCtl.getType();
   for (auto [count, srcStride, dstStride] :
        llvm::zip(getLoopCounts(), getLoopSrcStrides(), getLoopDstStrides()))
     printDmaTripleTypes(printer, "loop", count.getType(), srcStride.getType(),
@@ -6655,6 +6895,13 @@ LogicalResult MteUbGmOp::verify() {
   if (sourceElemBytes != destinationElemBytes)
     return emitOpError(
         "requires source and destination element byte widths to match");
+  if (Value l2CacheCtlValue = getL2CacheCtl()) {
+    APInt l2CacheCtl;
+    if (matchPattern(l2CacheCtlValue, m_ConstantInt(&l2CacheCtl)) &&
+        (l2CacheCtl.isNegative() || l2CacheCtl.ugt(15)))
+      return emitOpError(
+          "requires constant l2_cache_ctl to fit in range [0, 15]");
+  }
   return verifyDmaLoadStoreLoopGroups(
       getOperation(), getLoopCounts(), getLoopSrcStrides(),
       getLoopDstStrides());
@@ -7829,4 +8076,370 @@ void MteL0cUbOp::getEffects(
         &effects) {
   effects.emplace_back(MemoryEffects::Read::get(), &getSourceMutable());
   effects.emplace_back(MemoryEffects::Write::get(), &getDestinationMutable());
+}
+
+//===----------------------------------------------------------------------===//
+// UBVaddOp
+//===----------------------------------------------------------------------===//
+
+void UBVaddOp::getEffects(
+    SmallVectorImpl<SideEffects::EffectInstance<MemoryEffects::Effect>>
+        &effects) {
+  effects.emplace_back(MemoryEffects::Read::get(), &getSrc0Mutable());
+  effects.emplace_back(MemoryEffects::Read::get(), &getSrc1Mutable());
+  effects.emplace_back(MemoryEffects::Write::get(), &getDstMutable());
+}
+
+LogicalResult UBVaddOp::verify() {
+  if (!isBufferLike(getDst().getType()) || !isBufferLike(getSrc0().getType()) ||
+      !isBufferLike(getSrc1().getType()))
+    return emitOpError("requires pointer-like operands");
+  if (classifyMemoryRole(getDst().getType()) != MemoryRole::UB ||
+      classifyMemoryRole(getSrc0().getType()) != MemoryRole::UB ||
+      classifyMemoryRole(getSrc1().getType()) != MemoryRole::UB)
+    return emitOpError("requires UB-backed operands");
+  return success();
+}
+
+//===----------------------------------------------------------------------===//
+// UBVsubOp
+//===----------------------------------------------------------------------===//
+
+void UBVsubOp::getEffects(
+    SmallVectorImpl<SideEffects::EffectInstance<MemoryEffects::Effect>>
+        &effects) {
+  effects.emplace_back(MemoryEffects::Read::get(), &getSrc0Mutable());
+  effects.emplace_back(MemoryEffects::Read::get(), &getSrc1Mutable());
+  effects.emplace_back(MemoryEffects::Write::get(), &getDstMutable());
+}
+
+LogicalResult UBVsubOp::verify() {
+  if (!isBufferLike(getDst().getType()) || !isBufferLike(getSrc0().getType()) ||
+      !isBufferLike(getSrc1().getType()))
+    return emitOpError("requires pointer-like operands");
+  if (classifyMemoryRole(getDst().getType()) != MemoryRole::UB ||
+      classifyMemoryRole(getSrc0().getType()) != MemoryRole::UB ||
+      classifyMemoryRole(getSrc1().getType()) != MemoryRole::UB)
+    return emitOpError("requires UB-backed operands");
+  return success();
+}
+
+//===----------------------------------------------------------------------===//
+// UBVmulOp
+//===----------------------------------------------------------------------===//
+
+void UBVmulOp::getEffects(
+    SmallVectorImpl<SideEffects::EffectInstance<MemoryEffects::Effect>>
+        &effects) {
+  effects.emplace_back(MemoryEffects::Read::get(), &getSrc0Mutable());
+  effects.emplace_back(MemoryEffects::Read::get(), &getSrc1Mutable());
+  effects.emplace_back(MemoryEffects::Write::get(), &getDstMutable());
+}
+
+LogicalResult UBVmulOp::verify() {
+  if (!isBufferLike(getDst().getType()) || !isBufferLike(getSrc0().getType()) ||
+      !isBufferLike(getSrc1().getType()))
+    return emitOpError("requires pointer-like operands");
+  if (classifyMemoryRole(getDst().getType()) != MemoryRole::UB ||
+      classifyMemoryRole(getSrc0().getType()) != MemoryRole::UB ||
+      classifyMemoryRole(getSrc1().getType()) != MemoryRole::UB)
+    return emitOpError("requires UB-backed operands");
+  return success();
+}
+
+//===----------------------------------------------------------------------===//
+// UBVdivOp
+//===----------------------------------------------------------------------===//
+
+void UBVdivOp::getEffects(
+    SmallVectorImpl<SideEffects::EffectInstance<MemoryEffects::Effect>>
+        &effects) {
+  effects.emplace_back(MemoryEffects::Read::get(), &getSrc0Mutable());
+  effects.emplace_back(MemoryEffects::Read::get(), &getSrc1Mutable());
+  effects.emplace_back(MemoryEffects::Write::get(), &getDstMutable());
+}
+
+LogicalResult UBVdivOp::verify() {
+  if (!isBufferLike(getDst().getType()) || !isBufferLike(getSrc0().getType()) ||
+      !isBufferLike(getSrc1().getType()))
+    return emitOpError("requires pointer-like operands");
+  if (classifyMemoryRole(getDst().getType()) != MemoryRole::UB ||
+      classifyMemoryRole(getSrc0().getType()) != MemoryRole::UB ||
+      classifyMemoryRole(getSrc1().getType()) != MemoryRole::UB)
+    return emitOpError("requires UB-backed operands");
+  return success();
+}
+
+//===----------------------------------------------------------------------===//
+// UBVmaxOp
+//===----------------------------------------------------------------------===//
+
+void UBVmaxOp::getEffects(
+    SmallVectorImpl<SideEffects::EffectInstance<MemoryEffects::Effect>>
+        &effects) {
+  effects.emplace_back(MemoryEffects::Read::get(), &getSrc0Mutable());
+  effects.emplace_back(MemoryEffects::Read::get(), &getSrc1Mutable());
+  effects.emplace_back(MemoryEffects::Write::get(), &getDstMutable());
+}
+
+LogicalResult UBVmaxOp::verify() {
+  if (!isBufferLike(getDst().getType()) || !isBufferLike(getSrc0().getType()) ||
+      !isBufferLike(getSrc1().getType()))
+    return emitOpError("requires pointer-like operands");
+  if (classifyMemoryRole(getDst().getType()) != MemoryRole::UB ||
+      classifyMemoryRole(getSrc0().getType()) != MemoryRole::UB ||
+      classifyMemoryRole(getSrc1().getType()) != MemoryRole::UB)
+    return emitOpError("requires UB-backed operands");
+  return success();
+}
+
+//===----------------------------------------------------------------------===//
+// UBVminOp
+//===----------------------------------------------------------------------===//
+
+void UBVminOp::getEffects(
+    SmallVectorImpl<SideEffects::EffectInstance<MemoryEffects::Effect>>
+        &effects) {
+  effects.emplace_back(MemoryEffects::Read::get(), &getSrc0Mutable());
+  effects.emplace_back(MemoryEffects::Read::get(), &getSrc1Mutable());
+  effects.emplace_back(MemoryEffects::Write::get(), &getDstMutable());
+}
+
+LogicalResult UBVminOp::verify() {
+  if (!isBufferLike(getDst().getType()) || !isBufferLike(getSrc0().getType()) ||
+      !isBufferLike(getSrc1().getType()))
+    return emitOpError("requires pointer-like operands");
+  if (classifyMemoryRole(getDst().getType()) != MemoryRole::UB ||
+      classifyMemoryRole(getSrc0().getType()) != MemoryRole::UB ||
+      classifyMemoryRole(getSrc1().getType()) != MemoryRole::UB)
+    return emitOpError("requires UB-backed operands");
+  return success();
+}
+
+//===----------------------------------------------------------------------===//
+// UBVandOp
+//===----------------------------------------------------------------------===//
+
+void UBVandOp::getEffects(
+    SmallVectorImpl<SideEffects::EffectInstance<MemoryEffects::Effect>>
+        &effects) {
+  effects.emplace_back(MemoryEffects::Read::get(), &getSrc0Mutable());
+  effects.emplace_back(MemoryEffects::Read::get(), &getSrc1Mutable());
+  effects.emplace_back(MemoryEffects::Write::get(), &getDstMutable());
+}
+
+LogicalResult UBVandOp::verify() {
+  if (!isBufferLike(getDst().getType()) || !isBufferLike(getSrc0().getType()) ||
+      !isBufferLike(getSrc1().getType()))
+    return emitOpError("requires pointer-like operands");
+  if (classifyMemoryRole(getDst().getType()) != MemoryRole::UB ||
+      classifyMemoryRole(getSrc0().getType()) != MemoryRole::UB ||
+      classifyMemoryRole(getSrc1().getType()) != MemoryRole::UB)
+    return emitOpError("requires UB-backed operands");
+  return success();
+}
+
+//===----------------------------------------------------------------------===//
+// UBVorOp
+//===----------------------------------------------------------------------===//
+
+void UBVorOp::getEffects(
+    SmallVectorImpl<SideEffects::EffectInstance<MemoryEffects::Effect>>
+        &effects) {
+  effects.emplace_back(MemoryEffects::Read::get(), &getSrc0Mutable());
+  effects.emplace_back(MemoryEffects::Read::get(), &getSrc1Mutable());
+  effects.emplace_back(MemoryEffects::Write::get(), &getDstMutable());
+}
+
+LogicalResult UBVorOp::verify() {
+  if (!isBufferLike(getDst().getType()) || !isBufferLike(getSrc0().getType()) ||
+      !isBufferLike(getSrc1().getType()))
+    return emitOpError("requires pointer-like operands");
+  if (classifyMemoryRole(getDst().getType()) != MemoryRole::UB ||
+      classifyMemoryRole(getSrc0().getType()) != MemoryRole::UB ||
+      classifyMemoryRole(getSrc1().getType()) != MemoryRole::UB)
+    return emitOpError("requires UB-backed operands");
+  return success();
+}
+
+#define PTO_DEFINE_UB_BINARY_VERIFY_AND_EFFECTS(OpName)                       \
+  void OpName::getEffects(                                                    \
+      SmallVectorImpl<SideEffects::EffectInstance<MemoryEffects::Effect>>     \
+          &effects) {                                                         \
+    effects.emplace_back(MemoryEffects::Read::get(), &getSrc0Mutable());      \
+    effects.emplace_back(MemoryEffects::Read::get(), &getSrc1Mutable());      \
+    effects.emplace_back(MemoryEffects::Write::get(), &getDstMutable());      \
+  }                                                                           \
+  LogicalResult OpName::verify() {                                            \
+    if (!isBufferLike(getDst().getType()) ||                                  \
+        !isBufferLike(getSrc0().getType()) ||                                 \
+        !isBufferLike(getSrc1().getType()))                                   \
+      return emitOpError("requires pointer-like operands");                   \
+    if (classifyMemoryRole(getDst().getType()) != MemoryRole::UB ||           \
+        classifyMemoryRole(getSrc0().getType()) != MemoryRole::UB ||          \
+        classifyMemoryRole(getSrc1().getType()) != MemoryRole::UB)            \
+      return emitOpError("requires UB-backed operands");                      \
+    return success();                                                         \
+  }
+
+PTO_DEFINE_UB_BINARY_VERIFY_AND_EFFECTS(UBVaddReluOp)
+
+//===----------------------------------------------------------------------===//
+// UBVnotOp
+//===----------------------------------------------------------------------===//
+
+void UBVnotOp::getEffects(
+    SmallVectorImpl<SideEffects::EffectInstance<MemoryEffects::Effect>>
+        &effects) {
+  effects.emplace_back(MemoryEffects::Read::get(), &getSrcMutable());
+  effects.emplace_back(MemoryEffects::Write::get(), &getDstMutable());
+}
+
+LogicalResult UBVnotOp::verify() {
+  if (!isBufferLike(getDst().getType()) || !isBufferLike(getSrc().getType()))
+    return emitOpError("requires pointer-like operands");
+  if (classifyMemoryRole(getDst().getType()) != MemoryRole::UB ||
+      classifyMemoryRole(getSrc().getType()) != MemoryRole::UB)
+    return emitOpError("requires UB-backed operands");
+  return success();
+}
+
+//===----------------------------------------------------------------------===//
+// UBVabsOp
+//===----------------------------------------------------------------------===//
+
+void UBVabsOp::getEffects(
+    SmallVectorImpl<SideEffects::EffectInstance<MemoryEffects::Effect>>
+        &effects) {
+  effects.emplace_back(MemoryEffects::Read::get(), &getSrcMutable());
+  effects.emplace_back(MemoryEffects::Write::get(), &getDstMutable());
+}
+
+LogicalResult UBVabsOp::verify() {
+  if (!isBufferLike(getDst().getType()) || !isBufferLike(getSrc().getType()))
+    return emitOpError("requires pointer-like operands");
+  if (classifyMemoryRole(getDst().getType()) != MemoryRole::UB ||
+      classifyMemoryRole(getSrc().getType()) != MemoryRole::UB)
+    return emitOpError("requires UB-backed operands");
+  return success();
+}
+
+//===----------------------------------------------------------------------===//
+// UBVreluOp
+//===----------------------------------------------------------------------===//
+
+void UBVreluOp::getEffects(
+    SmallVectorImpl<SideEffects::EffectInstance<MemoryEffects::Effect>>
+        &effects) {
+  effects.emplace_back(MemoryEffects::Read::get(), &getSrcMutable());
+  effects.emplace_back(MemoryEffects::Write::get(), &getDstMutable());
+}
+
+LogicalResult UBVreluOp::verify() {
+  if (!isBufferLike(getDst().getType()) || !isBufferLike(getSrc().getType()))
+    return emitOpError("requires pointer-like operands");
+  if (classifyMemoryRole(getDst().getType()) != MemoryRole::UB ||
+      classifyMemoryRole(getSrc().getType()) != MemoryRole::UB)
+    return emitOpError("requires UB-backed operands");
+  return success();
+}
+
+#define PTO_DEFINE_UB_UNARY_VERIFY_AND_EFFECTS(OpName)                        \
+  void OpName::getEffects(                                                    \
+      SmallVectorImpl<SideEffects::EffectInstance<MemoryEffects::Effect>>     \
+          &effects) {                                                         \
+    effects.emplace_back(MemoryEffects::Read::get(), &getSrcMutable());       \
+    effects.emplace_back(MemoryEffects::Write::get(), &getDstMutable());      \
+  }                                                                           \
+  LogicalResult OpName::verify() {                                            \
+    if (!isBufferLike(getDst().getType()) ||                                  \
+        !isBufferLike(getSrc().getType()))                                    \
+      return emitOpError("requires pointer-like operands");                   \
+    if (classifyMemoryRole(getDst().getType()) != MemoryRole::UB ||           \
+        classifyMemoryRole(getSrc().getType()) != MemoryRole::UB)             \
+      return emitOpError("requires UB-backed operands");                      \
+    return success();                                                         \
+  }
+
+PTO_DEFINE_UB_UNARY_VERIFY_AND_EFFECTS(UBVexpOp)
+PTO_DEFINE_UB_UNARY_VERIFY_AND_EFFECTS(UBVlnOp)
+PTO_DEFINE_UB_UNARY_VERIFY_AND_EFFECTS(UBVsqrtOp)
+PTO_DEFINE_UB_UNARY_VERIFY_AND_EFFECTS(UBVrsqrtOp)
+
+PTO_DEFINE_UB_UNARY_VERIFY_AND_EFFECTS(UBVaddSOp)
+PTO_DEFINE_UB_UNARY_VERIFY_AND_EFFECTS(UBVmaxSOp)
+PTO_DEFINE_UB_UNARY_VERIFY_AND_EFFECTS(UBVminSOp)
+
+void UBVdupOp::getEffects(
+    SmallVectorImpl<SideEffects::EffectInstance<MemoryEffects::Effect>>
+        &effects) {
+  effects.emplace_back(MemoryEffects::Write::get(), &getDstMutable());
+}
+
+LogicalResult UBVdupOp::verify() {
+  if (!isBufferLike(getDst().getType()))
+    return emitOpError("requires pointer-like dst operand");
+  if (classifyMemoryRole(getDst().getType()) != MemoryRole::UB)
+    return emitOpError("requires UB-backed dst operand");
+  return success();
+}
+
+//===----------------------------------------------------------------------===//
+// UBVshlOp
+//===----------------------------------------------------------------------===//
+
+void UBVshlOp::getEffects(
+    SmallVectorImpl<SideEffects::EffectInstance<MemoryEffects::Effect>>
+        &effects) {
+  effects.emplace_back(MemoryEffects::Read::get(), &getSrcMutable());
+  effects.emplace_back(MemoryEffects::Write::get(), &getDstMutable());
+}
+
+LogicalResult UBVshlOp::verify() {
+  if (!isBufferLike(getDst().getType()) || !isBufferLike(getSrc().getType()))
+    return emitOpError("requires pointer-like operands");
+  if (classifyMemoryRole(getDst().getType()) != MemoryRole::UB ||
+      classifyMemoryRole(getSrc().getType()) != MemoryRole::UB)
+    return emitOpError("requires UB-backed operands");
+  return success();
+}
+
+//===----------------------------------------------------------------------===//
+// UBVshrOp
+//===----------------------------------------------------------------------===//
+
+void UBVshrOp::getEffects(
+    SmallVectorImpl<SideEffects::EffectInstance<MemoryEffects::Effect>>
+        &effects) {
+  effects.emplace_back(MemoryEffects::Read::get(), &getSrcMutable());
+  effects.emplace_back(MemoryEffects::Write::get(), &getDstMutable());
+}
+
+LogicalResult UBVshrOp::verify() {
+  if (!isBufferLike(getDst().getType()) || !isBufferLike(getSrc().getType()))
+    return emitOpError("requires pointer-like operands");
+  if (classifyMemoryRole(getDst().getType()) != MemoryRole::UB ||
+      classifyMemoryRole(getSrc().getType()) != MemoryRole::UB)
+    return emitOpError("requires UB-backed operands");
+  return success();
+}
+
+//===----------------------------------------------------------------------===//
+// UBVmulSOp
+//===----------------------------------------------------------------------===//
+
+void UBVmulSOp::getEffects(
+    SmallVectorImpl<SideEffects::EffectInstance<MemoryEffects::Effect>>
+        &effects) {
+  effects.emplace_back(MemoryEffects::Read::get(), &getSrcMutable());
+  effects.emplace_back(MemoryEffects::Write::get(), &getDstMutable());
+}
+
+LogicalResult UBVmulSOp::verify() {
+  if (!isBufferLike(getDst().getType()) || !isBufferLike(getSrc().getType()))
+    return emitOpError("requires pointer-like operands");
+  if (classifyMemoryRole(getDst().getType()) != MemoryRole::UB ||
+      classifyMemoryRole(getSrc().getType()) != MemoryRole::UB)
+    return emitOpError("requires UB-backed operands");
+  return success();
 }

@@ -976,13 +976,13 @@ static bool isTileViewSemantics(StringAttr viewSemantics) {
                            viewSemantics.getValue() == "bitcast");
 }
 
-static bool isPTODSLSubkernelHelper(func::FuncOp func) {
-  return func->hasAttr("pto.ptodsl.subkernel_helper");
+static bool isTileOpHelper(func::FuncOp func) {
+  return func->hasAttr("pto.tileop.helper");
 }
 
 static std::optional<SmallVector<Type>>
 inferSubkernelHelperTileSignature(func::FuncOp func, MLIRContext *ctx) {
-  if (func.isExternal() || func.empty() || !isPTODSLSubkernelHelper(func))
+  if (func.isExternal() || func.empty() || !isTileOpHelper(func))
     return std::nullopt;
 
   Block &entry = func.front();
@@ -1085,7 +1085,7 @@ static Value materializeValueForSubkernelCall(
   return materialized;
 }
 
-static LogicalResult restorePTODSLSubkernelHelperTileABI(
+static LogicalResult restoreTileOpHelperTileABI(
     ModuleOp module, OpBuilder &builder, MLIRContext *ctx,
     DenseMap<Value, Value> &tileHandles, bool &failedMaterialization) {
   DenseMap<StringRef, SmallVector<Type>> helperInputTypes;
@@ -1438,7 +1438,7 @@ struct PTOMaterializeTileHandlesPass
         mustMaterialize.insert(meta.source);
     }
 
-    if (failed(restorePTODSLSubkernelHelperTileABI(
+    if (failed(restoreTileOpHelperTileABI(
             module, builder, ctx, tileHandles, failedMaterialization))) {
       signalPassFailure();
       return;

@@ -264,6 +264,125 @@ The number of indices on `get` / `set` must equal the array's rank
 
 ---
 
+### 2.8 `!pto.struct<T0, T1, ..., Tn-1>`
+
+A **C++ stack-local heterogeneous aggregate** — the heterogeneous dual of
+`!pto.local_array`. Lowers to a plain `struct PtoStruct_X { ... };` definition
+plus a stack variable. The struct's address is decided by the host C++
+compiler, never by PTO memory planning or `pto.pointer_cast`. Fields are
+positionally numbered `f0, f1, ...`, matching an LLVM literal struct.
+
+| Parameter | Type | Constraints |
+|-----------|------|-------------|
+| `fieldTypes` (`T0..Tn-1`) | `i8`/`i16`/`i32`/`i64` (signed, unsigned or signless), `f16`/`bf16`/`f32`/`f64`, or a nested `!pto.struct` | At least one field; recursively scalar-storable |
+
+**Constraints (enforced by the type verifier):**
+
+- At least one field
+- Each field is *scalar-storable*: an integer of width 8/16/32/64, one of
+  `f16`/`bf16`/`f32`/`f64`, or a nested `!pto.struct`
+
+A scalar field must map onto a C++ scalar the backend can name exactly. Integer
+widths with no C++ spelling (`i1`, `i24`, ...) and the packed low-precision
+vec/cube formats (`f8`/`f4` variants) are therefore **rejected**: emitting them
+would silently widen or narrow the field in the generated C++.
+
+**`!pto.local_array` is not a valid field type.** A field is reached with
+`emitc.member`, whose result must be an `!emitc.lvalue`, and `!emitc.lvalue`
+cannot wrap the `!emitc.array` that an array field lowers to. There is no way to
+spell the access, so the type verifier rejects it rather than letting the
+backend fail later. Use a nested `!pto.struct` of scalars, or keep the array as
+a separate `!pto.declare_local_array` value alongside the struct.
+
+**Disjoint from tile-buf world.** Vec/cube types (`tile_buf`, `tensor_view`,
+partition view) and other handle types are **rejected** as fields. This keeps
+the scalar struct world separate from the fractal/layout world, exactly like
+`!pto.local_array`.
+
+**Syntax:**
+```mlir
+!pto.struct<f16, i8>                          // { half f0; int8_t f1; };
+!pto.struct<!pto.struct<f32, i8>, i16>
+  // { PtoStruct_f32_i8 f0; int16_t f1; };
+```
+
+**Passing a struct to a function.** A `!pto.struct` value lowers to a **pointer**
+to its storage, so it can be passed to a helper `func.func` and mutated there:
+
+```mlir
+func.func private @helper(%s : !pto.struct<f32, i8>, %v : f32) {
+  pto.struct_set %s[0], %v : !pto.struct<f32, i8>, f32   // emits `p->f0 = v;`
+  return
+}
+```
+
+The callee reaches fields through `->`; the caller declares real storage, passes
+its address, and still uses `.` on its own copy. Carrying the struct by value
+would make the callee's writes land in a copy, and an `!emitc.lvalue` is
+rejected outright as a function argument type by both `emitc.func` and the C++
+emitter — the pointer is what makes helper functions expressible at all.
+
+**A struct must not escape the scope that declares it.** Because the value is a
+pointer to stack storage, passing it to a terminator would publish that address
+outside the scope that owns it, so `pto.declare_struct` rejects it:
+
+```mlir
+// Rejected: hands the caller a pointer into a dead frame.
+func.func @make() -> !pto.struct<f32, i8> {
+  %s = pto.declare_struct -> !pto.struct<f32, i8>
+  return %s : !pto.struct<f32, i8>
+}
+
+// Rejected: carries the address out of the region that owns the storage.
+%r = scf.if %c -> (!pto.struct<f32, i8>) {
+  %a = pto.declare_struct -> !pto.struct<f32, i8>
+  scf.yield %a : !pto.struct<f32, i8>
+} else { ... }
+```
+
+**A function may not return a `!pto.struct` either**, even one that just passes
+an argument back:
+
+```mlir
+// Rejected: laundering. %r is no longer a pto.declare_struct result, so the
+// per-op check above cannot see that `return %r` publishes the caller's local.
+func.func private @passthrough(%s : !pto.struct<f32, i8>) -> !pto.struct<f32, i8> {
+  return %s : !pto.struct<f32, i8>
+}
+```
+
+Operation and region results can launder provenance in the same way. Therefore,
+struct storage must originate from `pto.declare_struct` or a function argument.
+Other operation results of this type are rejected; this includes aliases
+produced by `arith.select`, `scf.if`, calls, casts, and loop-carried values.
+
+This costs nothing in expressiveness: `pto.struct_set` mutates in place, so a
+struct never needs to be returned or yielded. Declare it in the outer scope and
+pass it **down** as a function argument — the callee writes through the pointer
+and the caller sees the result.
+
+**Generated type name.** The C++ name is derived from the MLIR type spelling of
+the fields (`!pto.struct<f16, i8>` → `PtoStruct_f16_i8`), not from their C++
+spellings. That mapping is injective, so two distinct `!pto.struct` types never
+collide on one name — mangling from the C++ token instead would give `i32` and
+`si32` (both `int32_t`) the same name and emit a duplicate `struct` definition.
+
+**Associated ops** (see Section 4 — mirrors the `local_array` triad):
+- `pto.declare_struct` — declare
+- `pto.struct_get`     — `s.fA.fB...` field read by constant path
+- `pto.struct_set`     — `s.fA.fB... = v;`
+
+Field positions in `get` / `set` are a constant `path` of indices that may
+descend through nested structs (like LLVM `extractvalue` / `insertvalue`).
+
+The path must **end at a scalar**. A path that stops on a nested `!pto.struct`
+is rejected: the member chain lowers to `emitc.member`, which yields an lvalue,
+and returning a whole aggregate as an SSA value would copy it out of the parent
+struct — so a field inside a nested struct is reached with a longer path
+(`%s[0, 1]`) rather than by first getting the inner struct.
+
+---
+
 ## 3. Enums & Attributes
 
 ### 3.1 AddressSpace
@@ -10405,6 +10524,124 @@ pto.local_array_set %m[%i, %j], %v
 
 ---
 
+#### Struct Ops (`pto.declare_struct` / `pto.struct_get` / `pto.struct_set`)
+
+C++ stack-local heterogeneous aggregate ops. Disjoint from the tile-buf /
+scratch memory world: the struct's address is decided by the host C++
+compiler. Naming and asm style mirror the `local_array` triad.
+
+Operates on the [`!pto.struct<...>`](#28-ptostructt0-t1--tn-1) type. See
+Section 2.8 for type-level constraints.
+
+##### `pto.declare_struct` - Declare a Stack-Local Struct
+
+**Summary:** Declare a heterogeneous aggregate on the C++ stack.
+
+**Semantics:** `PtoStruct_X s;`
+
+**Arguments:** None.
+
+**Results:** `!pto.struct<T0, ..., Tn-1>`
+
+**Constraints & Verification:**
+
+- The result must not be passed to a terminator (`func.return`, `scf.yield`,
+  ...). The value is a pointer to stack storage owned by the declaring scope, so
+  letting it out would expose the address of storage that is about to die.
+- Relatedly, no function may **return** a `!pto.struct` (checked module-wide),
+  which is what stops a pass-through helper from laundering that address past
+  the per-op check.
+- No other operation may produce a `!pto.struct` result. This prevents
+  `arith.select`, `scf.if`, calls, casts, or loop-carried values from hiding the
+  storage origin.
+
+  See [Section 2.8](#28-ptostructt0-t1--tn-1); mutation is in place, so declare
+  the struct in the outer scope and pass it down instead.
+
+**Basic Example:**
+
+```mlir
+%s = pto.declare_struct -> !pto.struct<f16, i8>   // PtoStruct_f16_i8 s;
+```
+
+---
+
+##### `pto.struct_get` - Read a Field by Constant Path
+
+**Summary:** Read the field reached by a constant `path` of field indices,
+descending through nested structs.
+
+**Semantics:** `s.fA.fB...`, read into a fresh variable so the SSA value keeps
+its value if the struct is mutated later (value semantics, like
+`pto.local_array_get`).
+
+**Arguments:**
+
+| Name | Type | Description |
+|------|------|-------------|
+| `s` | `!pto.struct<...>` | The struct |
+| `path` | `DenseI64ArrayAttr` | Constant field indices, e.g. `[0, 2]` |
+
+**Results:** `value` — the scalar field type at the end of `path`.
+
+**Constraints & Verification:**
+
+- `path` is non-empty; every index is in range at its level.
+- An intermediate index may only descend into a nested struct.
+- `path` must **end at a scalar field**. A path stopping on a nested
+  `!pto.struct` is rejected — returning the aggregate would copy it out of the
+  parent struct; extend the path to reach a scalar inside it.
+- Result type must equal the field type at the end of `path`.
+
+**Basic Example:**
+
+```mlir
+%r = pto.struct_get %s[0]    : !pto.struct<f16, i8> -> f16      // r = s.f0;
+%v = pto.struct_get %s[0, 1]                                    // v = s.f0.f1;
+   : !pto.struct<!pto.struct<f32, i8>, i16> -> i8
+```
+
+---
+
+##### `pto.struct_set` - Write a Field by Constant Path
+
+**Summary:** Write a value into the field reached by a constant `path` of field
+indices, descending through nested structs.
+
+**Semantics:** `s.fA.fB... = value;`
+
+**Arguments:**
+
+| Name | Type | Description |
+|------|------|-------------|
+| `s` | `!pto.struct<...>` | The struct |
+| `path` | `DenseI64ArrayAttr` | Constant field indices, e.g. `[0, 2]` |
+| `value` | `AnyType` | Value to write (must match the field type) |
+
+**Results:** None.
+
+**Constraints & Verification:**
+
+- `path` is non-empty; every index is in range at its level.
+- An intermediate index may only descend into a nested struct.
+- `path` must **end at a scalar field**, same as `pto.struct_get`. A path
+  stopping on a nested `!pto.struct` is rejected — extend it to reach a scalar.
+- Value type must equal the field type at the end of `path`.
+
+**Basic Example:**
+
+```mlir
+pto.struct_set %s[1], %v : !pto.struct<f16, i8>, i8            // s.f1 = v;
+pto.struct_set %s[0, 0], %v                                    // s.f0.f0 = v;
+   : !pto.struct<!pto.struct<f32, i8>, i16>, f32
+```
+
+When the struct is a function argument the same op emits `s->f0 = v;` — see
+[Section 2.8](#28-ptostructt0-t1--tn-1) for why a struct is carried as a
+pointer.
+
+---
+
 ## 5. Operation Summary Table
 
 | Category | Count | Pipeline |
@@ -10428,5 +10665,6 @@ pto.local_array_set %m[%i, %j], %v
 | Runtime Intrinsics | 4 | - (Pure) |
 | Debug | 3 | - |
 | Stack-Local Array | 3 | - (Scalar / Host) |
+| Stack-Local Struct | 3 | - (Scalar / Host) |
 
-**Total: 110 operations**
+**Total: 113 operations**

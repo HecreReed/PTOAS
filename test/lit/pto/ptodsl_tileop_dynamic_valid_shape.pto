@@ -1,0 +1,83 @@
+// Copyright (c) 2026 Huawei Technologies Co., Ltd.
+// This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+// CANN Open Software License Agreement Version 2.0 (the "License").
+// Please refer to the License for details. You may not use this file except in compliance with the License.
+// THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+// INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+// See LICENSE in the root of the software repository for the full text of the License.
+
+// RUN: ptoas --pto-arch=a5 --emit-pto-ir %s | FileCheck %s
+
+// CHECK-LABEL: func.func @sequential_valid_shape
+// CHECK: pto.set_validshape %[[SEQ_TILE:.*]], %{{.*}}, %{{.*}}
+// CHECK: pto.set_validshape %[[SEQ_TILE]], %{{.*}}, %{{.*}}
+// CHECK: %[[SEQ_ROWS:.*]], %[[SEQ_COLS:.*]] = pto.get_validshape %[[SEQ_TILE]]
+// CHECK-NEXT: call @dynamic_shape_tileop(%[[SEQ_TILE]], %[[SEQ_ROWS]], %[[SEQ_COLS]])
+
+// CHECK-LABEL: func.func @branch_valid_shape
+// CHECK: scf.if %{{.*}} {
+// CHECK: pto.set_validshape %[[BRANCH_TILE:.*]], %{{.*}}, %{{.*}}
+// CHECK: } else {
+// CHECK: pto.set_validshape %[[BRANCH_TILE]], %{{.*}}, %{{.*}}
+// CHECK: }
+// CHECK: %[[BRANCH_ROWS:.*]], %[[BRANCH_COLS:.*]] = pto.get_validshape %[[BRANCH_TILE]]
+// CHECK-NEXT: call @dynamic_shape_tileop(%[[BRANCH_TILE]], %[[BRANCH_ROWS]], %[[BRANCH_COLS]])
+
+// CHECK-LABEL: func.func private @dynamic_shape_tileop(
+// CHECK-SAME: memref<16x16xf32
+// CHECK-SAME: %{{.*}}: index, %{{.*}}: index)
+
+module attributes {pto.target_arch = "a5"} {
+  func.func @sequential_valid_shape() {
+    %c16 = arith.constant 16 : index
+    %r1 = arith.constant 8 : index
+    %c1 = arith.constant 12 : index
+    %r2 = arith.constant 4 : index
+    %c2 = arith.constant 6 : index
+    %tile = pto.alloc_tile valid_row = %c16 valid_col = %c16
+      : !pto.tile_buf<loc=vec, dtype=f32, rows=16, cols=16, v_row=?, v_col=?,
+                      blayout=row_major, slayout=none_box, fractal=512, pad=0>
+    pto.set_validshape %tile, %r1, %c1
+      : !pto.tile_buf<loc=vec, dtype=f32, rows=16, cols=16, v_row=?, v_col=?,
+                      blayout=row_major, slayout=none_box, fractal=512, pad=0>
+    pto.set_validshape %tile, %r2, %c2
+      : !pto.tile_buf<loc=vec, dtype=f32, rows=16, cols=16, v_row=?, v_col=?,
+                      blayout=row_major, slayout=none_box, fractal=512, pad=0>
+    func.call @dynamic_shape_tileop(%tile) : (!pto.tile_buf<loc=vec, dtype=f32, rows=16, cols=16, v_row=?, v_col=?, blayout=row_major, slayout=none_box, fractal=512, pad=0>) -> ()
+    return
+  }
+
+  func.func @branch_valid_shape(%cond: i1) {
+    %c16 = arith.constant 16 : index
+    %r1 = arith.constant 8 : index
+    %c1 = arith.constant 12 : index
+    %r2 = arith.constant 4 : index
+    %c2 = arith.constant 6 : index
+    %tile = pto.alloc_tile valid_row = %c16 valid_col = %c16
+      : !pto.tile_buf<loc=vec, dtype=f32, rows=16, cols=16, v_row=?, v_col=?,
+                      blayout=row_major, slayout=none_box, fractal=512, pad=0>
+    scf.if %cond {
+      pto.set_validshape %tile, %r1, %c1
+        : !pto.tile_buf<loc=vec, dtype=f32, rows=16, cols=16, v_row=?, v_col=?,
+                        blayout=row_major, slayout=none_box, fractal=512, pad=0>
+    } else {
+      pto.set_validshape %tile, %r2, %c2
+        : !pto.tile_buf<loc=vec, dtype=f32, rows=16, cols=16, v_row=?, v_col=?,
+                        blayout=row_major, slayout=none_box, fractal=512, pad=0>
+    }
+    func.call @dynamic_shape_tileop(%tile) : (!pto.tile_buf<loc=vec, dtype=f32, rows=16, cols=16, v_row=?, v_col=?, blayout=row_major, slayout=none_box, fractal=512, pad=0>) -> ()
+    return
+  }
+
+  func.func private @simt_body() attributes {pto.simt_entry} {
+    return
+  }
+
+  func.func private @dynamic_shape_tileop(%tile: !pto.tile_buf<loc=vec, dtype=f32, rows=16, cols=16, v_row=?, v_col=?, blayout=row_major, slayout=none_box, fractal=512, pad=0>) attributes {pto.tileop.helper} {
+    %rows = pto.tile_valid_rows %tile : !pto.tile_buf<loc=vec, dtype=f32, rows=16, cols=16, v_row=?, v_col=?, blayout=row_major, slayout=none_box, fractal=512, pad=0> -> index
+    %cols = pto.tile_valid_cols %tile : !pto.tile_buf<loc=vec, dtype=f32, rows=16, cols=16, v_row=?, v_col=?, blayout=row_major, slayout=none_box, fractal=512, pad=0> -> index
+    %one = arith.constant 1 : i32
+    pto.simt_launch @simt_body<<<%one, %one, %one>>>() : () -> ()
+    return
+  }
+}

@@ -61,6 +61,9 @@ enum class FoldIntrinsicMode {
   AddrOnly,
 };
 
+constexpr llvm::StringLiteral kTileOpValidShapeReadAttr =
+    "__pto.tileop_valid_shape_abi";
+
 static FailureOr<FoldIntrinsicMode> parseFoldIntrinsicMode(StringRef mode) {
   if (mode.empty() || mode == "all")
     return FoldIntrinsicMode::All;
@@ -299,6 +302,16 @@ static std::optional<ViewChain> traceViewChain(Value tensorView,
     }
   }
 
+  if (auto memrefCastOp =
+          memrefVal.getDefiningOp<UnrealizedConversionCastOp>()) {
+    if (memrefCastOp.getNumOperands() == 1 && memrefCastOp.getNumResults() == 1 &&
+        isa<MemRefType>(memrefCastOp.getOperand(0).getType()) &&
+        isa<MemRefType>(memrefCastOp.getResult(0).getType())) {
+      castOp = memrefCastOp;
+      memrefVal = memrefCastOp.getOperand(0);
+    }
+  }
+
   auto subviewOp = memrefVal.getDefiningOp<memref::SubViewOp>();
   if (!subviewOp) {
     user->emitError("FoldTileBufIntrinsics: expected memref to be defined by "
@@ -480,6 +493,8 @@ struct FoldTileBufIntrinsicsPass
       // resolveTileHandle observe the overridden valid shape carried by a
       // treshape + set_validshape pair.
       for (auto gvsOp : getValidShapeOps) {
+        if (gvsOp->hasAttr(kTileOpValidShapeReadAttr))
+          continue;
         if (!isa<pto::TileBufType>(gvsOp.getSource().getType()))
           continue;
 
@@ -787,14 +802,52 @@ struct FoldTileBufIntrinsicsPass
       }
     }
 
-    // Erase pto.set_validshape ops. Every valid-shape reader
-    // (get_validshape / tile_valid_{rows,cols} / tile_buf_addr) has been
-    // folded above, so the runtime metadata writes have no remaining
-    // observer and have no LLVM lowering.
+    // Clean up dead unrealized_conversion_cast ops that bridged
+    // memref -> partition_tensor_view / tile_buf and are now unused
+    // after folding.
+    SmallVector<UnrealizedConversionCastOp, 8> deadCasts;
+    func.walk([&](UnrealizedConversionCastOp castOp) {
+      if (castOp.use_empty() && castOp.getNumOperands() == 1 &&
+          isa<MemRefType>(castOp.getOperand(0).getType()) &&
+          isa<MemRefType, pto::PartitionTensorViewType, pto::TileBufType>(
+              castOp.getResult(0).getType()))
+        deadCasts.push_back(castOp);
+    });
+    for (auto castOp : llvm::reverse(deadCasts))
+      castOp.erase();
+
+    while (true) {
+      SmallVector<Operation *, 8> deadMemrefOps;
+      func.walk([&](Operation *op) {
+        if ((isa<memref::SubViewOp>(op) ||
+             isa<memref::ReinterpretCastOp>(op)) &&
+            op->use_empty())
+          deadMemrefOps.push_back(op);
+      });
+      if (deadMemrefOps.empty())
+        break;
+      for (auto *op : llvm::reverse(deadMemrefOps))
+        op->erase();
+    }
+
+    // Erase metadata writes only after every reader has been folded. TileOp
+    // helper ABI reads marked above must remain runtime reads, so their
+    // set_validshape updates are still observable by later lowering.
     SmallVector<pto::SetValidShapeOp, 8> setValidShapeOps;
     func.walk([&](pto::SetValidShapeOp op) { setValidShapeOps.push_back(op); });
-    for (auto op : llvm::reverse(setValidShapeOps))
-      op.erase();
+    for (auto op : llvm::reverse(setValidShapeOps)) {
+      bool hasRuntimeReader = false;
+      func.walk([&](pto::GetValidShapeOp reader) {
+        if (reader.getSource() == op.getSource() &&
+            reader->hasAttr(kTileOpValidShapeReadAttr)) {
+          hasRuntimeReader = true;
+          return WalkResult::interrupt();
+        }
+        return WalkResult::advance();
+      });
+      if (!hasRuntimeReader)
+        op.erase();
+    }
 
     // DCE tile-handle view / alloc ops left behind after valid-shape
     // folding (treshape / materialize_tile / alloc_tile / bridging casts).

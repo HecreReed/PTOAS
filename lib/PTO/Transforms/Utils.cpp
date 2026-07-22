@@ -26,6 +26,25 @@ namespace pto {
 static constexpr llvm::StringLiteral kFrontendPipeIdAttrName =
     "__pto.frontend_id";
 
+std::optional<PhysicalSectionKind>
+inferPhysicalSectionKindFromPipe(Operation *op) {
+  auto pipeOp = dyn_cast_or_null<OpPipeInterface>(op);
+  if (!pipeOp)
+    return std::nullopt;
+
+  switch (pipeOp.getPipe()) {
+  case PIPE::PIPE_M:
+  case PIPE::PIPE_MTE1:
+    return PhysicalSectionKind::Cube;
+  case PIPE::PIPE_V:
+  case PIPE::PIPE_V2:
+  case PIPE::PIPE_S:
+    return PhysicalSectionKind::Vector;
+  default:
+    return std::nullopt;
+  }
+}
+
 func::ReturnOp getAssumedUniqueReturnOp(func::FuncOp funcOp) {
   func::ReturnOp returnOp;
   for (Block &b : funcOp.getBody()) {

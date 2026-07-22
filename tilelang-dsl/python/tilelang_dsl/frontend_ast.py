@@ -809,7 +809,7 @@ _BOOL_OP_NAMES = {
 _DMA_CALL_KEYWORDS: dict[str, frozenset[str]] = {
     "Tile": frozenset({"valid_shape", "blayout", "slayout", "fractal_size", "pad_value", "compact_mode", "addr"}),
     "mte_gm_ub": frozenset({"nburst", "loops", "pad"}),
-    "mte_ub_gm": frozenset({"nburst", "loops"}),
+    "mte_ub_gm": frozenset({"nburst", "loops", "l2_cache"}),
     "mte_ub_ub": frozenset({"nburst"}),
     "mte_ub_l1": frozenset({"nburst"}),
     "set_mov_pad_val": frozenset({"pad_value"}),

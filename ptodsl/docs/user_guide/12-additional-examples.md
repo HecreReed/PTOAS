@@ -76,11 +76,11 @@ When a data dimension is not evenly divisible by the tile size or the hardware v
 
 ### 12.2.1 Tail handling in a SIMD kernel
 
-Below is a self-contained `@pto.simd` kernel that adds two tiles row by row, handling column tails with `make_mask`:
+Below is a self-contained `@pto.tileop` kernel that adds two tiles row by row, handling column tails with `make_mask`:
 
 <!-- ptodsl-doc-test: {"mode":"compile_fragment","fixture":"tail.simd_helper","symbol":"tail_simd_helper_probe","compile":{"BLOCK":128}} -->
 ```python
-@pto.simd
+@pto.tileop
 def add_rows_with_tail(a_tile: pto.Tile, b_tile: pto.Tile, o_tile: pto.Tile,
                        rows: pto.i32, cols: pto.i32):
     VEC = pto.elements_per_vreg(pto.f32)          # 64 for f32
@@ -160,26 +160,20 @@ def vec_add_with_tail(
 
 ## 12.3 GEMM: matrix multiplication on the Cube unit
 
-This example demonstrates a complete GEMM kernel: `C = A @ B` where A is `[M, K]` and B is `[K, N]`. It uses `@pto.jit` for tile allocation and loop scheduling, and `@pto.cube` for the actual matrix multiply.
+This example demonstrates a complete GEMM kernel: `C = A @ B` where A is `[M, K]` and B is `[K, N]`. It uses `@pto.jit` for tile allocation and loop scheduling, and `@pto.tileop` for the actual matrix multiply.
 
-### 12.3.1 Cube sub-kernel
+### 12.3.1 Cube TileOp
 
 <!-- ptodsl-doc-test: {"mode":"compile_fragment","fixture":"gemm.cube_helper","symbol":"gemm_tile_probe","compile":{"BLOCK_M":64,"BLOCK_K":64,"BLOCK_N":64}} -->
 ```python
-@pto.cube
-def gemm_tile(a_mat: pto.Tile, b_mat: pto.Tile, o_tile: pto.Tile,
-              a_l0a: pto.Tile, b_l0b: pto.Tile, o_acc: pto.Tile):
-    m = a_mat.valid_shape[0]
-    k = a_mat.valid_shape[1]
-    n = b_mat.valid_shape[1]
-
-    pto.mte_l1_l0a(a_mat.as_ptr(), a_l0a.as_ptr(), m, k)
-    pto.mte_l1_l0b(b_mat.as_ptr(), b_l0b.as_ptr(), k, n)
+@pto.tileop
+def gemm_tile(a_l0a: pto.Tile, b_l0b: pto.Tile, o_acc: pto.Tile,
+              m: pto.index, n: pto.index, k: pto.index):
     pto.mad(a_l0a.as_ptr(), b_l0b.as_ptr(), o_acc.as_ptr(), m, n, k)
-    pto.mte_l0c_ub(o_acc.as_ptr(), o_tile.as_ptr(), m, n, n, n, 0)
 ```
 
-The cube sub-kernel consumes MAT staging tiles plus cube-local scratch buffers. The four-step sequence — stage left operand, stage right operand, multiply, writeback — is the canonical cube compute pattern.
+The TileOp consumes prepared cube-local scratch and contains only Cube compute.
+The caller owns operand staging and accumulator writeback.
 
 ### 12.3.2 Tile orchestration
 
@@ -239,7 +233,13 @@ def gemm(
                 pto.tile.load(a_part, a_mat)
                 pto.tile.load(b_part, b_mat)
 
-                gemm_tile(a_mat, b_mat, o_tile, a_l0a, b_l0b, o_acc)
+                m = a_mat.valid_shape[0]
+                k = a_mat.valid_shape[1]
+                n = b_mat.valid_shape[1]
+                pto.mte_l1_l0a(a_mat.as_ptr(), a_l0a.as_ptr(), m, k)
+                pto.mte_l1_l0b(b_mat.as_ptr(), b_l0b.as_ptr(), k, n)
+                gemm_tile(a_l0a, b_l0b, o_acc, m, n, k)
+                pto.mte_l0c_ub(o_acc.as_ptr(), o_tile.as_ptr(), m, n, n, n, 0)
 
             pto.tile.store(o_tile, o_part)
 ```
@@ -249,8 +249,8 @@ def gemm(
 - **Triply nested loops**: M, N, and K dimensions are all blocked. The K loop accumulates partial results into `o_tile`.
 - **Accumulation**: `o_tile.fill(0.0)` resets the accumulator before the K loop. Each K-block calls `gemm_tile` which writes its partial product back to `o_tile`. The Cube unit accumulates implicitly via `mad` — each K-block's partial result is added to the running total in `o_acc`.
 - **MAT staging + cube-local scratch**: `a_mat` and `b_mat` are explicit MAT tiles that satisfy the `mte_l1_l0a` / `mte_l1_l0b` source contract. `a_l0a`, `b_l0b`, and `o_acc` are cube-local scratch (`LEFT`, `RIGHT`, `ACC`).
-- **Direct sub-kernel call**: `gemm_tile` is called directly from `@pto.jit` — no separate orchestration layer needed. The compiler handles sync between `tile.load` and the Cube sub-kernel.
-- **Cube sub-kernel reuse**: the same `gemm_tile` function is called for every K-block — the named decorator form enables reuse.
+- **Direct TileOp call**: `gemm_tile` is called directly from `@pto.jit`; the caller keeps MTE and scheduling around the compute helper.
+- **Cube TileOp reuse**: the same `gemm_tile` function is called for every K-block.
 
 ### 12.3.3 Python wrapper
 
@@ -380,10 +380,10 @@ def online_layernorm(
 |------|-----|
 | Whole-kernel orchestration, GM↔UB boundary | `@pto.jit` |
 | Tile-level data movement | `tile.load` / `tile.store` |
-| Custom row-wise vector math | `@pto.simd` |
+| Custom row-wise vector math | `@pto.tileop` |
 | Custom per-element logic | `@pto.simt` |
-| Matrix multiply | `@pto.cube` |
+| Matrix multiply | `@pto.tileop` |
 | Micro-instruction-level control | `mode="explicit"` |
-| Inline compute for quick prototyping | `with pto.simd():` etc. |
+| Inline compute for quick prototyping | `with pto.tileop():` |
 
-**Respect boundary contracts.** Vregs don't cross `@pto.simd` boundaries. Cube-local state doesn't leak into UB. Tile Ops and MTE Ops belong to different programming models — use Tile Ops in `mode="auto"`, and micro-instructions in `mode="explicit"`.
+**Respect boundary contracts.** Vregs don't cross `@pto.tileop` boundaries. Cube-local state doesn't leak into UB. Tile Ops and MTE Ops belong to different programming models — use Tile Ops in `mode="auto"`, and micro-instructions in `mode="explicit"`.

@@ -18,6 +18,7 @@
 #include "PTO/IR/PTO.h"
 #include "PTO/IR/PTOTypeUtils.h"
 #include "PTO/IR/PTOSyncUtils.h"
+#include "PTO/Transforms/MemoryConsistencyAttrs.h"
 #include "PTO/Transforms/Passes.h"
 #include "Utils.h"
 
@@ -43,6 +44,7 @@
 #include "mlir/Target/Cpp/CppEmitter.h"
 #include "mlir/Transforms/DialectConversion.h"
 #include "mlir/Transforms/GreedyPatternRewriteDriver.h"
+#include "llvm/ADT/SetVector.h"
 #include "llvm/ADT/StringRef.h"
 #include "llvm/Support/raw_ostream.h"
 #include "mlir/Dialect/Func/Transforms/FuncConversions.h"
@@ -207,10 +209,6 @@ static constexpr llvm::StringLiteral kForceDynamicValidShapeAttrName =
     "__pto.force_dynamic_valid_shape";
 static constexpr llvm::StringLiteral kGlobalTensorStridesAttrName =
     "__pto.globaltensor_strides";
-static constexpr llvm::StringLiteral kTNotifyDrainMte2AttrName =
-    "__pto.emitc.tnotify_drain_mte2";
-static constexpr llvm::StringLiteral kTNotifyDrainMte3AttrName =
-    "__pto.emitc.tnotify_drain_mte3";
 static constexpr llvm::StringLiteral kPipePeerOwnerFuncAttrName =
     "__pto.peer_owner_func";
 static constexpr llvm::StringLiteral kPipePeerReserveNameAttrName =
@@ -219,11 +217,6 @@ static constexpr llvm::StringLiteral kPipePeerDirMaskAttrName =
     "__pto.peer_dir_mask";
 static constexpr llvm::StringLiteral kEmitCScalarOutTypeAttrName =
     "__pto.emitc_scalar_out_type";
-
-enum TNotifyMteDrainMask : unsigned {
-  kDrainMte2 = 1U << 0,
-  kDrainMte3 = 1U << 1,
-};
 static constexpr llvm::StringLiteral kLastUseAttrName = "pto.last_use";
 static constexpr llvm::StringLiteral kLastUseMarkerPrefix = "PTOAS__LAST_USE__";
 
@@ -347,117 +340,17 @@ static StringRef getLastUseAwareCallee(Operation *op, StringRef callee,
   return storage;
 }
 
-static void createLastUseAwareOpaqueCall(ConversionPatternRewriter &rewriter,
-                                         Operation *op, TypeRange resultTypes,
-                                         StringRef callee,
-                                         ValueRange operands,
-                                         ArrayAttr args = ArrayAttr{},
-                                         ArrayAttr templateArgs = ArrayAttr{},
-                                         ArrayRef<unsigned> tileSlotOrder = {}) {
+static void createLastUseAwareOpaqueCall(
+    ConversionPatternRewriter &rewriter, Operation *op, TypeRange resultTypes,
+    StringRef callee, ValueRange operands, ArrayAttr args = ArrayAttr{},
+    ArrayAttr templateArgs = ArrayAttr{},
+    ArrayRef<unsigned> tileSlotOrder = {}) {
   std::string calleeStorage;
   StringRef effectiveCallee =
       getLastUseAwareCallee(op, callee, calleeStorage, tileSlotOrder);
   rewriter.create<emitc::CallOpaqueOp>(op->getLoc(), resultTypes,
                                        effectiveCallee, args, templateArgs,
                                        operands);
-}
-
-static unsigned getMteDrainMaskForPipe(pto::PIPE pipe) {
-  switch (pipe) {
-  case pto::PIPE::PIPE_MTE2:
-    return kDrainMte2;
-  case pto::PIPE::PIPE_MTE3:
-    return kDrainMte3;
-  case pto::PIPE::PIPE_ALL:
-    return kDrainMte2 | kDrainMte3;
-  default:
-    return 0;
-  }
-}
-
-static unsigned getDirectMteDrainMask(Operation *op) {
-  if (auto pipeOp = dyn_cast<pto::OpPipeInterface>(op))
-    return getMteDrainMaskForPipe(pipeOp.getPipe());
-  return 0;
-}
-
-static unsigned collectMteDrainMask(Operation *op) {
-  unsigned mask = getDirectMteDrainMask(op);
-  for (Region &region : op->getRegions())
-    for (Block &block : region)
-      for (Operation &nested : block)
-        mask |= collectMteDrainMask(&nested);
-  return mask;
-}
-
-static bool isLoopLikeOp(Operation *op) {
-  return isa<scf::ForOp, scf::WhileOp, scf::ParallelOp, scf::ForallOp>(op);
-}
-
-static void setTNotifyDrainAttrs(pto::TNotifyOp op, unsigned mask) {
-  op->removeAttr(kTNotifyDrainMte2AttrName);
-  op->removeAttr(kTNotifyDrainMte3AttrName);
-  if (mask & kDrainMte2)
-    op->setAttr(kTNotifyDrainMte2AttrName, UnitAttr::get(op.getContext()));
-  if (mask & kDrainMte3)
-    op->setAttr(kTNotifyDrainMte3AttrName, UnitAttr::get(op.getContext()));
-}
-
-static void markNestedTNotifyWithMask(Operation *op, unsigned mask) {
-  op->walk([&](pto::TNotifyOp notify) { setTNotifyDrainAttrs(notify, mask); });
-}
-
-static unsigned annotateTNotifyMteDrainForBlock(Block &block,
-                                                unsigned entryPendingMask,
-                                                unsigned loopCarriedMask) {
-  unsigned pendingMask = entryPendingMask;
-  for (Operation &op : block) {
-    if (auto notify = dyn_cast<pto::TNotifyOp>(op)) {
-      setTNotifyDrainAttrs(notify, pendingMask | loopCarriedMask);
-      pendingMask = 0;
-    }
-
-    pendingMask |= getDirectMteDrainMask(&op);
-
-    unsigned regionEntryMask = pendingMask;
-    unsigned combinedRegionExitMask = 0;
-    for (Region &region : op.getRegions()) {
-      unsigned nestedLoopCarriedMask = loopCarriedMask;
-      if (isLoopLikeOp(&op))
-        nestedLoopCarriedMask |= collectMteDrainMask(&op);
-
-      if (region.hasOneBlock()) {
-        combinedRegionExitMask |= annotateTNotifyMteDrainForBlock(
-            region.front(), regionEntryMask, nestedLoopCarriedMask);
-      } else {
-        unsigned regionMask = collectMteDrainMask(&op);
-        markNestedTNotifyWithMask(&op, regionEntryMask | nestedLoopCarriedMask |
-                                           regionMask);
-        combinedRegionExitMask |= regionEntryMask | regionMask;
-      }
-    }
-    pendingMask |= combinedRegionExitMask;
-
-    if (auto barrier = dyn_cast<pto::BarrierOp>(op))
-      pendingMask &= ~getMteDrainMaskForPipe(barrier.getPipe().getPipe());
-  }
-  return pendingMask;
-}
-
-static void annotateTNotifyMteDrain(ModuleOp module) {
-  for (auto func : module.getOps<func::FuncOp>()) {
-    if (func.getBody().hasOneBlock()) {
-      (void)annotateTNotifyMteDrainForBlock(func.getBody().front(),
-                                            /*entryPendingMask=*/0,
-                                            /*loopCarriedMask=*/0);
-      continue;
-    }
-
-    // Be conservative for pre-existing CFG: without a path-sensitive CFG data
-    // flow here, every TNotify may observe any MTE work in the function.
-    unsigned funcMask = collectMteDrainMask(func.getOperation());
-    markNestedTNotifyWithMask(func.getOperation(), funcMask);
-  }
 }
 
 static Value buildGlobalTensorFromMemref(ConversionPatternRewriter &rewriter,
@@ -603,6 +496,86 @@ static int64_t getEmitCScalarByteWidth(Type elemTy) {
   if (elemTy.isF64() || elemTy.isInteger(64))
     return 8;
   return 4;
+}
+
+// ---------------------------------------------------------------------------
+// !pto.struct support: a deterministic C++ type name + file-scope definition.
+// ---------------------------------------------------------------------------
+
+// Replace any character that is not a C++ identifier character with '_'. The
+// scalar tokens below are already identifier-safe; this is defensive.
+static std::string sanitizeIdentifier(std::string s) {
+  for (char &c : s) {
+    bool ok = (c >= '0' && c <= '9') || (c >= 'a' && c <= 'z') ||
+              (c >= 'A' && c <= 'Z') || c == '_';
+    if (!ok)
+      c = '_';
+  }
+  return s;
+}
+
+// Mangle a scalar-storable field type into a C++-identifier-safe token. The
+// encoding is injective, so distinct struct types never collide on a name:
+//   - scalar:        the MLIR type spelling (f16, bf16, i8, si32, ui32, ...)
+//   - nested struct: S_<f0>_<f1>_..._E  (S/E delimiters disambiguate nesting)
+//
+// Scalars are mangled from the MLIR spelling rather than from
+// getEmitCScalarTypeToken(): that token is many-to-one (i32 and si32 both give
+// "int32_t"), which would emit two `struct` definitions under one name and
+// break the generated C++ with a redefinition. MLIR type printing is injective,
+// and the struct verifier restricts fields to types whose spellings are already
+// pure identifier characters, so this mangling is collision-free by
+// construction.
+static std::string mangleStructFieldType(Type t) {
+  if (auto st = dyn_cast<pto::StructType>(t)) {
+    std::string s = "S";
+    for (Type f : st.getFieldTypes())
+      s += "_" + mangleStructFieldType(f);
+    return s + "_E";
+  }
+  std::string spelling;
+  llvm::raw_string_ostream os(spelling);
+  t.print(os);
+  return sanitizeIdentifier(os.str());
+}
+
+// Stable, content-derived C++ type name for a !pto.struct, e.g.
+// !pto.struct<f16, i8> -> "PtoStruct_f16_i8". A pure function of the type, so
+// the type converter and the file-scope definition emitter agree without any
+// shared state.
+static std::string getStructTypeName(pto::StructType st) {
+  std::string s = "PtoStruct";
+  for (Type f : st.getFieldTypes())
+    s += "_" + mangleStructFieldType(f);
+  return s;
+}
+
+// Render a single struct field declaration `<cppType> <name>;`.
+static std::string renderStructFieldDecl(Type fieldTy,
+                                         const std::string &name) {
+  if (auto st = dyn_cast<pto::StructType>(fieldTy))
+    return getStructTypeName(st) + " " + name + ";";
+  return getEmitCScalarTypeToken(fieldTy) + " " + name + ";";
+}
+
+// Render the full C++ definition of a !pto.struct as file-scope text.
+static std::string renderStructDef(pto::StructType st) {
+  std::string s = "struct " + getStructTypeName(st) + " {\n";
+  for (auto [i, f] : llvm::enumerate(st.getFieldTypes()))
+    s += "  " + renderStructFieldDecl(f, "f" + std::to_string(i)) + "\n";
+  return s + "};";
+}
+
+// Collect every !pto.struct reachable from `t` into `out` in definition order:
+// a nested struct is inserted before the struct that embeds it, so emitting in
+// `out` order produces valid C++ (no use-before-definition).
+static void collectStructTypes(Type t, llvm::SetVector<pto::StructType> &out) {
+  auto st = dyn_cast<pto::StructType>(t);
+  if (!st || out.contains(st))
+    return;
+  for (Type f : st.getFieldTypes())
+    collectStructTypes(f, out);
+  out.insert(st);
 }
 
 static std::string tileBufBLayoutToken(pto::TileBufConfigAttr configAttr);
@@ -994,6 +967,20 @@ public:
       if (!convertedElem)
         return std::nullopt;
       return emitc::ArrayType::get(type.getShape(), convertedElem);
+    });
+
+    // !pto.struct<...> -> !emitc.opaque<"PtoStruct_...">. The matching C++
+    // `struct PtoStruct_... { ... };` definition is emitted at file scope by
+    // the pass (see runOnOperation), keyed on the same content-derived name.
+    // A struct is carried as a pointer to its storage. It cannot be carried by
+    // value (emitc.member needs an lvalue, so every field write would land in a
+    // copy), and it cannot be carried as an lvalue either: emitc.func rejects
+    // an lvalue argument outright, and the C++ emitter refuses one on func.func
+    // too, which would make a struct impossible to pass to a helper function.
+    // A pointer is legal in a signature and still names the caller's storage.
+    addConversion([Ctx](pto::StructType type) -> Type {
+      return emitc::PointerType::get(
+          emitc::OpaqueType::get(Ctx, getStructTypeName(type)));
     });
 
     addConversion([Ctx](pto::AsyncSessionType type) -> Type {
@@ -5721,6 +5708,28 @@ static std::string getAutoSyncTailModeToken(Operation *op) {
 //===----------------------------------------------------------------------===//
 // pto.barrier lowering -> pipe_barrier(...)
 //===----------------------------------------------------------------------===//
+static void emitDsbDdr(ConversionPatternRewriter &rewriter, Location loc) {
+  auto *ctx = rewriter.getContext();
+  auto args = rewriter.getArrayAttr({emitc::OpaqueAttr::get(ctx, "DSB_DDR")});
+  rewriter.create<emitc::CallOpaqueOp>(loc, TypeRange{}, "dsb", args,
+                                       ArrayAttr{}, ValueRange{});
+}
+
+static void emitPipeBarrier(ConversionPatternRewriter &rewriter, Location loc,
+                            StringRef pipeTok) {
+  auto *ctx = rewriter.getContext();
+  auto args = rewriter.getArrayAttr({emitc::OpaqueAttr::get(ctx, pipeTok)});
+  rewriter.create<emitc::CallOpaqueOp>(loc, TypeRange{}, "pipe_barrier", args,
+                                       ArrayAttr{}, ValueRange{});
+}
+
+static void emitConservativeGmFencePipeDrains(
+    ConversionPatternRewriter &rewriter, Location loc) {
+  emitPipeBarrier(rewriter, loc, "PIPE_MTE2");
+  emitPipeBarrier(rewriter, loc, "PIPE_MTE3");
+  emitPipeBarrier(rewriter, loc, "PIPE_FIX");
+}
+
 struct PTOBarrierToEmitC : public OpConversionPattern<pto::BarrierOp> {
   using OpConversionPattern<pto::BarrierOp>::OpConversionPattern;
 
@@ -5758,6 +5767,24 @@ struct PTOBarrierToEmitC : public OpConversionPattern<pto::BarrierOp> {
         ValueRange{}        // operands
     );
 
+    return success();
+  }
+};
+
+template <typename FenceOp>
+struct PTOFenceToEmitC : public OpConversionPattern<FenceOp> {
+  using OpConversionPattern<FenceOp>::OpConversionPattern;
+
+  LogicalResult matchAndRewrite(FenceOp op, typename FenceOp::Adaptor adaptor,
+                                ConversionPatternRewriter &rewriter) const override {
+    (void)adaptor;
+    if (op.getScope().getScope() != pto::FenceScope::GM &&
+        op.getScope().getScope() != pto::FenceScope::All)
+      return rewriter.notifyMatchFailure(op, "unsupported fence scope");
+
+    emitConservativeGmFencePipeDrains(rewriter, op.getLoc());
+    emitDsbDdr(rewriter, op.getLoc());
+    rewriter.eraseOp(op);
     return success();
   }
 };
@@ -6226,6 +6253,35 @@ struct PTOGetBufToEmitC : public OpConversionPattern<mlir::pto::GetBufOp> {
   }
 };
 
+struct PTOGetBufDynToEmitC : public OpConversionPattern<mlir::pto::GetBufDynOp> {
+  using OpConversionPattern<mlir::pto::GetBufDynOp>::OpConversionPattern;
+
+  LogicalResult matchAndRewrite(mlir::pto::GetBufDynOp op, OpAdaptor adaptor,
+                                ConversionPatternRewriter &rewriter) const override {
+    auto *ctx = rewriter.getContext();
+
+    auto opTypeOr = parseSyncOpTypeLikeAttr(op.getOpTypeAttr());
+    if (failed(opTypeOr))
+      return rewriter.notifyMatchFailure(op, "get_buf_dyn expects pipe_event_type/sync_op_type attr");
+    auto pipe = mapSyncOpTypeToPipe(*opTypeOr);
+    if (!isConcreteSyncPipe(pipe))
+      return rewriter.notifyMatchFailure(op, "get_buf_dyn op_type cannot map to a concrete pipe");
+    std::string pipeTok = pipeTokFromPipeEnum(pipe);
+    auto argsAttr = rewriter.getArrayAttr({
+        emitc::OpaqueAttr::get(ctx, pipeTok),
+        IntegerAttr::get(IndexType::get(ctx), 0),
+        op.getModeAttr(),
+    });
+
+    rewriter.replaceOpWithNewOp<emitc::CallOpaqueOp>(
+        op, TypeRange{}, "get_buf",
+        /*args=*/argsAttr,
+        /*templateArgs=*/ArrayAttr{},
+        /*operands=*/ValueRange{adaptor.getBufId()});
+    return success();
+  }
+};
+
 struct PTORlsBufToEmitC : public OpConversionPattern<mlir::pto::RlsBufOp> {
   using OpConversionPattern<mlir::pto::RlsBufOp>::OpConversionPattern;
 
@@ -6252,6 +6308,35 @@ struct PTORlsBufToEmitC : public OpConversionPattern<mlir::pto::RlsBufOp> {
         /*args=*/argsAttr,
         /*templateArgs=*/ArrayAttr{},
         /*operands=*/ValueRange{});
+    return success();
+  }
+};
+
+struct PTORlsBufDynToEmitC : public OpConversionPattern<mlir::pto::RlsBufDynOp> {
+  using OpConversionPattern<mlir::pto::RlsBufDynOp>::OpConversionPattern;
+
+  LogicalResult matchAndRewrite(mlir::pto::RlsBufDynOp op, OpAdaptor adaptor,
+                                ConversionPatternRewriter &rewriter) const override {
+    auto *ctx = rewriter.getContext();
+
+    auto opTypeOr = parseSyncOpTypeLikeAttr(op.getOpTypeAttr());
+    if (failed(opTypeOr))
+      return rewriter.notifyMatchFailure(op, "rls_buf_dyn expects pipe_event_type/sync_op_type attr");
+    auto pipe = mapSyncOpTypeToPipe(*opTypeOr);
+    if (!isConcreteSyncPipe(pipe))
+      return rewriter.notifyMatchFailure(op, "rls_buf_dyn op_type cannot map to a concrete pipe");
+    std::string pipeTok = pipeTokFromPipeEnum(pipe);
+    auto argsAttr = rewriter.getArrayAttr({
+        emitc::OpaqueAttr::get(ctx, pipeTok),
+        IntegerAttr::get(IndexType::get(ctx), 0),
+        op.getModeAttr(),
+    });
+
+    rewriter.replaceOpWithNewOp<emitc::CallOpaqueOp>(
+        op, TypeRange{}, "rls_buf",
+        /*args=*/argsAttr,
+        /*templateArgs=*/ArrayAttr{},
+        /*operands=*/ValueRange{adaptor.getBufId()});
     return success();
   }
 };
@@ -6920,6 +7005,51 @@ struct PTOTAssignToEmitC : public OpConversionPattern<pto::TAssignOp> {
 // pto.load_scalar / pto.store_scalar lowering -> ptr[offset]
 //===----------------------------------------------------------------------===//
 
+static void emitInvalidateGmCacheAll(ConversionPatternRewriter &rewriter,
+                                     Location loc) {
+  auto *ctx = rewriter.getContext();
+  auto args = rewriter.getArrayAttr({
+      emitc::OpaqueAttr::get(ctx, "(__gm__ void*)0"),
+      emitc::OpaqueAttr::get(ctx, "cache_line_t::ENTIRE_DATA_CACHE"),
+  });
+  rewriter.create<emitc::CallOpaqueOp>(loc, TypeRange{}, "dcci", args,
+                                       ArrayAttr{}, ValueRange{});
+}
+
+static void emitInvalidateGmCacheSingleLine(ConversionPatternRewriter &rewriter,
+                                            Location loc, Value addr) {
+  rewriter.create<emitc::CallOpaqueOp>(
+      loc, TypeRange{}, "PTOAS__DCCI_SINGLE_CACHE_LINE",
+      ArrayAttr{}, ArrayAttr{}, ValueRange{addr});
+}
+
+static bool isGmCmoSpace(pto::AddressSpace space) {
+  return space == pto::AddressSpace::GM || space == pto::AddressSpace::Zero;
+}
+
+struct PTOCmoCacheInvalidToEmitC
+    : public OpConversionPattern<pto::CmoCacheInvalidOp> {
+  using OpConversionPattern<pto::CmoCacheInvalidOp>::OpConversionPattern;
+
+  LogicalResult matchAndRewrite(pto::CmoCacheInvalidOp op, OpAdaptor adaptor,
+                                ConversionPatternRewriter &rewriter) const override {
+    if (op->hasAttr(kCmoCacheInvalidSkipLoweringAttrName)) {
+      rewriter.eraseOp(op);
+      return success();
+    }
+    if (!isGmCmoSpace(op.getSpace().getAddressSpace()))
+      return rewriter.notifyMatchFailure(op, "unsupported CMO invalidate space");
+    if (op.getAddr()) {
+      Value addr = peelUnrealized(adaptor.getAddr());
+      emitInvalidateGmCacheSingleLine(rewriter, op.getLoc(), addr);
+    } else {
+      emitInvalidateGmCacheAll(rewriter, op.getLoc());
+    }
+    rewriter.eraseOp(op);
+    return success();
+  }
+};
+
 static Type getPointerLikeElementType(Type type) {
   if (auto ptrTy = dyn_cast<pto::PtrType>(type))
     return ptrTy.getElementType();
@@ -7410,36 +7540,17 @@ static std::string notifyOpTok(pto::NotifyOp op) {
   return "pto::comm::NotifyOp::Set";
 }
 
-static void emitPipeBarrier(ConversionPatternRewriter &rewriter, Location loc,
-                            StringRef pipeTok) {
-  auto *ctx = rewriter.getContext();
-  auto args = rewriter.getArrayAttr({emitc::OpaqueAttr::get(ctx, pipeTok)});
-  rewriter.create<emitc::CallOpaqueOp>(loc, TypeRange{}, "pipe_barrier", args,
-                                       ArrayAttr{}, ValueRange{});
-}
-
-static void emitDsbDdr(ConversionPatternRewriter &rewriter, Location loc) {
-  auto *ctx = rewriter.getContext();
-  auto args = rewriter.getArrayAttr({emitc::OpaqueAttr::get(ctx, "DSB_DDR")});
-  rewriter.create<emitc::CallOpaqueOp>(loc, TypeRange{}, "dsb", args,
-                                       ArrayAttr{}, ValueRange{});
-}
-
-// Issue #711: TNOTIFY writes its signal on the scalar pipe, and
-// TNOTIFY_IMPL's trailing pipe_barrier(PIPE_ALL) runs *after* that store.
-// If prior pto.tload / pto.tstore work is still in flight on an MTE pipe when
-// the signal lands, the receiver's matching TWAIT can return before the data
-// is visible. Emit only the MTE pipe drains that the pre-lowering analysis
-// proved may be needed before this TNotify. Issue #744: prior MTE3 stores also
-// need a DDR-domain release fence before publishing the notification signal.
-static void emitTNotifyMteDrain(ConversionPatternRewriter &rewriter,
-                                Location loc, unsigned mask) {
-  if (mask & kDrainMte2)
+// Historical hook for pre-annotated TNotify release drains. The automatic
+// MemoryConsistency analysis pass that used to produce these attrs has been
+// removed from the default pipeline; keeping the lowering hook is harmless for
+// hand-authored or legacy IR that already carries the internal attrs.
+static void emitTNotifyReleaseActions(ConversionPatternRewriter &rewriter,
+                                      Location loc, bool drainMte2,
+                                      bool drainMte3) {
+  if (drainMte2)
     emitPipeBarrier(rewriter, loc, "PIPE_MTE2");
-  if (mask & kDrainMte3) {
+  if (drainMte3)
     emitPipeBarrier(rewriter, loc, "PIPE_MTE3");
-    emitDsbDdr(rewriter, loc);
-  }
 }
 
 static std::string waitCmpTok(pto::WaitCmp cmp) {
@@ -7696,14 +7807,11 @@ struct PTOSignalCommToEmitC : public OpConversionPattern<SignalOp> {
           rewriter, op.getLoc(), notifyTy, notifyOpTok(op.getNotifyOp()));
       SmallVector<Value> operands{*signalGT, peelUnrealized(adaptor.getValue()),
                                   notifyOp};
-      // See emitTNotifyMteDrain comment: drain in-flight MTE work before the
+      // See emitTNotifyReleaseActions comment: drain in-flight MTE work before the
       // scalar-pipe signal store so the notify/wait handshake is honored.
-      unsigned drainMask = 0;
-      if (op->hasAttr(kTNotifyDrainMte2AttrName))
-        drainMask |= kDrainMte2;
-      if (op->hasAttr(kTNotifyDrainMte3AttrName))
-        drainMask |= kDrainMte3;
-      emitTNotifyMteDrain(rewriter, op.getLoc(), drainMask);
+      bool drainMte2 = op->hasAttr(kTNotifyDrainMte2AttrName);
+      bool drainMte3 = op->hasAttr(kTNotifyDrainMte3AttrName);
+      emitTNotifyReleaseActions(rewriter, op.getLoc(), drainMte2, drainMte3);
       rewriter.create<emitc::CallOpaqueOp>(op.getLoc(), TypeRange{}, callee,
                                            ArrayAttr{}, ArrayAttr{}, operands);
       rewriter.eraseOp(op);
@@ -7934,6 +8042,155 @@ struct PTOLocalArraySetToEmitC
                          adaptor.getArray(), adaptor.getIndices())
                      .getResult();
     rewriter.create<emitc::AssignOp>(op.getLoc(), slot, value);
+    rewriter.eraseOp(op);
+    return success();
+  }
+};
+
+// pto.declare_struct -> emitc.variable of !emitc.opaque<"PtoStruct_...">.
+// Renders as `PtoStruct_X s;` in the emitted C++.
+struct PTODeclareStructToEmitC
+    : public OpConversionPattern<mlir::pto::DeclareStructOp> {
+  using OpConversionPattern<mlir::pto::DeclareStructOp>::OpConversionPattern;
+
+  LogicalResult matchAndRewrite(mlir::pto::DeclareStructOp op, OpAdaptor adaptor,
+                                ConversionPatternRewriter &rewriter) const override {
+    (void)adaptor;
+    Type structTy = getTypeConverter()->convertType(op.getS().getType());
+    if (!structTy)
+      return rewriter.notifyMatchFailure(op, "failed to map !pto.struct type");
+
+    // The struct converts to a pointer, so declare the storage as a local
+    // variable and hand out its address. buildStructMemberChain recognises the
+    // address-of and walks that variable directly, so a struct that never
+    // leaves the function still prints as `s.f0` rather than `p->f0`.
+    auto ptrTy = dyn_cast<emitc::PointerType>(structTy);
+    if (!ptrTy)
+      return rewriter.notifyMatchFailure(op,
+                                         "!pto.struct did not map to a pointer");
+
+    Value storage = rewriter
+                        .create<emitc::VariableOp>(
+                            op.getLoc(),
+                            emitc::LValueType::get(ptrTy.getPointee()),
+                            emitc::OpaqueAttr::get(rewriter.getContext(), ""))
+                        .getResult();
+    rewriter.replaceOpWithNewOp<emitc::ApplyOp>(op, ptrTy, "&", storage);
+    return success();
+  }
+};
+
+// The EmitC *value* type of a struct field, i.e. the type an lvalue to that
+// field wraps. A nested struct is spelled directly here rather than going
+// through the converter, which would hand back the pointer form used for
+// passing whole structs around — a field lives inside its parent's storage and
+// is reached with `.`, not through another pointer.
+static Type getStructFieldValueType(const TypeConverter *tc, Type fieldPtoTy) {
+  if (auto st = dyn_cast<pto::StructType>(fieldPtoTy))
+    return emitc::OpaqueType::get(st.getContext(), getStructTypeName(st));
+  return tc->convertType(fieldPtoTy);
+}
+
+// Build the `s.fA.fB...` member-access chain for a constant struct path and
+// return the final lvalue. `rootPtoTy` is the PTO struct type, walked in
+// parallel to look up field types per step.
+//
+// Every step is an `emitc.member`, which requires an lvalue operand and yields
+// an lvalue result, so the chain stays in lvalue form throughout — that is what
+// makes a write land in the struct rather than in a copy of it.
+//
+// `root` is the converted struct, i.e. a pointer. Two shapes reach here:
+//   - a local declared by pto.declare_struct, whose pointer is an address-of;
+//     that is unwrapped back to the variable so the access prints as `s.f0`.
+//   - any other pointer, notably a function argument. `emitc.member_of_ptr`
+//     needs an lvalue *holding* the pointer rather than the raw pointer, so it
+//     is parked in a variable first and the access prints as `p->f0`.
+static FailureOr<Value> buildStructMemberChain(
+    ConversionPatternRewriter &rewriter, Location loc, const TypeConverter *tc,
+    Value root, mlir::pto::StructType rootPtoTy, llvm::ArrayRef<int64_t> path) {
+  Value ptr = peelUnrealized(root);
+
+  // lvalue of the struct itself when we can name it; otherwise an lvalue
+  // holding the pointer, consumed by the first member_of_ptr step.
+  Value structLValue;
+  Value ptrSlot;
+  auto applyOp = ptr.getDefiningOp<emitc::ApplyOp>();
+  if (applyOp && applyOp.getApplicableOperator() == "&") {
+    structLValue = applyOp.getOperand();
+  } else {
+    if (!isa<emitc::PointerType>(ptr.getType()))
+      return failure();
+    ptrSlot = rewriter
+                  .create<emitc::VariableOp>(
+                      loc, emitc::LValueType::get(ptr.getType()),
+                      emitc::OpaqueAttr::get(rewriter.getContext(), ""))
+                  .getResult();
+    rewriter.create<emitc::AssignOp>(loc, ptrSlot, ptr);
+  }
+
+  Type curPtoTy = rootPtoTy;
+  for (int64_t idx : path) {
+    auto st = cast<mlir::pto::StructType>(curPtoTy);
+    Type fieldPtoTy = st.getFieldType(static_cast<unsigned>(idx));
+    Type fieldTy = getStructFieldValueType(tc, fieldPtoTy);
+    if (!fieldTy)
+      return failure();
+    Type resultTy = emitc::LValueType::get(fieldTy);
+    auto name = rewriter.getStringAttr("f" + std::to_string(idx));
+    // Only the first step off a bare pointer uses `->`; from there on the
+    // chain is walking storage we can name, so it is all `.`.
+    structLValue =
+        structLValue
+            ? rewriter.create<emitc::MemberOp>(loc, resultTy, name, structLValue)
+                  .getResult()
+            : rewriter
+                  .create<emitc::MemberOfPtrOp>(loc, resultTy, name, ptrSlot)
+                  .getResult();
+    curPtoTy = fieldPtoTy;
+  }
+  return structLValue;
+}
+
+// pto.struct_get %s[i, j, ...] -> `s.fi.fj...`. The verifier guarantees the path
+// ends on a scalar, so the member lvalue is read with emitc.load. That load is
+// materialized into its own C++ variable, which is what gives the SSA result
+// value semantics: it keeps its value even if a later pto.struct_set writes the
+// same field (mirrors pto.local_array_get).
+struct PTOStructGetToEmitC
+    : public OpConversionPattern<mlir::pto::StructGetOp> {
+  using OpConversionPattern<mlir::pto::StructGetOp>::OpConversionPattern;
+
+  LogicalResult matchAndRewrite(mlir::pto::StructGetOp op, OpAdaptor adaptor,
+                                ConversionPatternRewriter &rewriter) const override {
+    Type resultTy = getTypeConverter()->convertType(op.getValue().getType());
+    if (!resultTy)
+      return rewriter.notifyMatchFailure(op, "failed to map struct field type");
+
+    FailureOr<Value> member = buildStructMemberChain(
+        rewriter, op.getLoc(), getTypeConverter(), adaptor.getS(),
+        op.getS().getType(), op.getPath());
+    if (failed(member))
+      return rewriter.notifyMatchFailure(op, "failed to map struct field type");
+
+    rewriter.replaceOpWithNewOp<emitc::LoadOp>(op, resultTy, *member);
+    return success();
+  }
+};
+
+// pto.struct_set %s[i, j, ...], %v -> `s.fi.fj... = v;`.
+struct PTOStructSetToEmitC
+    : public OpConversionPattern<mlir::pto::StructSetOp> {
+  using OpConversionPattern<mlir::pto::StructSetOp>::OpConversionPattern;
+
+  LogicalResult matchAndRewrite(mlir::pto::StructSetOp op, OpAdaptor adaptor,
+                                ConversionPatternRewriter &rewriter) const override {
+    FailureOr<Value> member = buildStructMemberChain(
+        rewriter, op.getLoc(), getTypeConverter(), adaptor.getS(),
+        op.getS().getType(), op.getPath());
+    if (failed(member))
+      return rewriter.notifyMatchFailure(op, "failed to map struct field type");
+
+    rewriter.create<emitc::AssignOp>(op.getLoc(), *member, adaptor.getValue());
     rewriter.eraseOp(op);
     return success();
   }
@@ -14042,7 +14299,9 @@ static void populatePTOToEmitCPatterns(RewritePatternSet &patterns,
   patterns.add<PTOSyncToEmitC>(typeConverter, ctx);
   patterns.add<PTOSyncAllToEmitC>(typeConverter, ctx);
   patterns.add<PTOGetBufToEmitC>(typeConverter, ctx);
+  patterns.add<PTOGetBufDynToEmitC>(typeConverter, ctx);
   patterns.add<PTORlsBufToEmitC>(typeConverter, ctx);
+  patterns.add<PTORlsBufDynToEmitC>(typeConverter, ctx);
   patterns.add<PTOSetFFTsToEmitC>(typeConverter, ctx);
   patterns.add<PTOXORSToEmitC>(typeConverter, ctx);
   patterns.add<PTOSubSToEmitC>(typeConverter, ctx);
@@ -14262,6 +14521,9 @@ static void populatePTOToEmitCPatterns(RewritePatternSet &patterns,
   patterns.add<PTODeclareLocalArrayToEmitC>(typeConverter, ctx);
   patterns.add<PTOLocalArrayGetToEmitC>(typeConverter, ctx);
   patterns.add<PTOLocalArraySetToEmitC>(typeConverter, ctx);
+  patterns.add<PTODeclareStructToEmitC>(typeConverter, ctx);
+  patterns.add<PTOStructGetToEmitC>(typeConverter, ctx);
+  patterns.add<PTOStructSetToEmitC>(typeConverter, ctx);
   patterns.add<PTOTReshapeToEmitC>(typeConverter, ctx);
   patterns.add<PTOBitcastToEmitC>(typeConverter, ctx);
   patterns.add<PTOSetQuantScalarToEmitC, PTOSetQuantVectorToEmitC>(
@@ -14294,7 +14556,9 @@ static void populatePTOToEmitCPatterns(RewritePatternSet &patterns,
     PTOTGemvMXToTGEMV_MX,
     PTOTGemvMXAccToTGEMV_MX,
     PTOTGemvMXBiasToTGEMV_MX,
-    PTOBarrierToEmitC
+    PTOBarrierToEmitC,
+    PTOFenceToEmitC<pto::FenceBarrierAllOp>,
+    PTOCmoCacheInvalidToEmitC
   >(typeConverter, ctx);
 
   patterns.add<CallToEmitC, ReturnToEmitC>(typeConverter, ctx);
@@ -14332,6 +14596,8 @@ struct EmitPTOManualPass
     ModuleOp mop = getOperation();
 
     if (failed(pto::validatePTOEntryFunctions(mop)))
+      return signalPassFailure();
+    if (failed(pto::validateStructProvenance(mop)))
       return signalPassFailure();
     pto::annotatePTOEntryFunctions(mop);
 
@@ -14392,6 +14658,30 @@ struct EmitPTOManualPass
         }
 	    builder.create<emitc::VerbatimOp>(
 	        loc, builder.getStringAttr("using namespace pto;"));
+
+        // Emit a C++ definition for every !pto.struct used in the module, in
+        // dependency order (nested structs first) so there is no
+        // use-before-definition. The names match the type converter's
+        // content-derived !emitc.opaque tokens.
+        {
+          llvm::SetVector<pto::StructType> structDefs;
+          mop.walk([&](Operation *op) {
+            for (Type t : op->getResultTypes())
+              collectStructTypes(t, structDefs);
+            for (Value v : op->getOperands())
+              collectStructTypes(v.getType(), structDefs);
+            if (auto func = dyn_cast<func::FuncOp>(op)) {
+              for (Type t : func.getArgumentTypes())
+                collectStructTypes(t, structDefs);
+              for (Type t : func.getResultTypes())
+                collectStructTypes(t, structDefs);
+            }
+          });
+          for (pto::StructType st : structDefs)
+            builder.create<emitc::VerbatimOp>(
+                loc, builder.getStringAttr(renderStructDef(st)));
+        }
+
         if (needsGlobalTensorDataHelper) {
 	      builder.create<emitc::VerbatimOp>(
 	          loc, builder.getStringAttr(R"cpp(
@@ -14447,6 +14737,11 @@ static AICORE inline void ptoas_auto_sync_tail(
     pipe_barrier(PIPE_ALL);
     break;
   }
+}
+
+template <typename Ptr>
+static AICORE inline void PTOAS__DCCI_SINGLE_CACHE_LINE(Ptr ptr) {
+  dcci((__gm__ void*)ptr, cache_line_t::SINGLE_CACHE_LINE);
 }
 )cpp"));
 	    // Only inject the bitcast helper when we actually lower ops that need it
@@ -14555,7 +14850,6 @@ static AICORE inline void ptoas_auto_sync_tail(
       }
     }
 
-    annotateTNotifyMteDrain(mop);
     if (failed(rematerializeFixpipeQuantBindings(mop))) {
       mop.emitError("failed to rematerialize fixpipe quant bindings");
       return signalPassFailure();

@@ -302,14 +302,46 @@ for (int blk = 0; blk < 8; ++blk) {
 - **syntax:** `%result = pto.vgather2 %source, %offsets, %mask : !pto.ptr<T, ub>, !pto.vreg<NxI>, !pto.mask<G> -> !pto.vreg<NxT>`
 - **semantics:** Indexed gather from UB.
 - **inputs:**
-  `%source` is the UB base pointer, `%offsets` provides per-lane element
-  offsets, and `%mask` selects the active requests.
+  `%source` is the UB base pointer, `%offsets` provides one unsigned element
+  index for each logical gather lane, and `%mask` selects those logical
+  index/result lanes.
 - **outputs:**
   `%result` is the gathered vector.
+- **addressing:**
+  Each active lane computes its UB byte address from the source element width:
+
+  ```text
+  addr[i] = byte_address(%source) + unsigned(%offsets[i]) * sizeof(source element)
+  ```
+
+  For `i8/ui8` sources, `sizeof(source element) == 1`; for 16-bit sources it is
+  `2`; for 32-bit sources it is `4`. The computed address must be aligned for
+  the source element type. For `i8/ui8` sources, each loaded 8-bit payload is
+  zero-extended into a 16-bit result lane.
+- **semantic pseudocode:**
+
+  ```text
+  for i in lanes:
+    if mask[i]:
+      value = UB_load(source_element_type, addr[i])
+      if source_element_type is i8 or ui8:
+        result[i] = zero_extend_to_16_bits(value)
+      else:
+        result[i] = value
+    else:
+      result[i] = 0
+  ```
 - **constraints and limitations:**
   Only masked-on indices participate. The index element width
   and interpretation MUST match the selected gather form, and each effective
   address must satisfy that form's alignment rules.
+  Supported forms are:
+  `i8/ui8 -> i16/ui16` with `!pto.vreg<128xui16>` offsets and
+  `!pto.mask<b16>`; `i16/ui16/f16/bf16 -> same type` with
+  `!pto.vreg<128xui16>` offsets and `!pto.mask<b16>`; and
+  `i32/ui32/f32 -> same type` with `!pto.vreg<64xui32>` offsets and
+  `!pto.mask<b32>`. Signless integer offsets are accepted as storage-compatible
+  aliases for the unsigned offset register payload.
 - **Latency:** **27–28** cycles per `RV_VGATHER2`; throughput much lower than contiguous `RV_VLD` (see **Latency and throughput (A5)** at the start of this chapter).
 
 ```c

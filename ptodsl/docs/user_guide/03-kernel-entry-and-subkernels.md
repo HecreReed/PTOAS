@@ -2,8 +2,8 @@
 
 PTODSL provides one kernel decorator (`@pto.jit`) with two roles
 (`entry=True` / `entry=False`), two compilation backends (`vpto` / `emitc`),
-and three compute-unit sub-kernel decorators (`@pto.cube`, `@pto.simd`,
-`@pto.simt`), plus matching context managers for inline use. This chapter covers
+and two reusable compute helper decorators (`@pto.tileop` and `@pto.simt`),
+plus inline unit-specific context managers. This chapter covers
 the `@pto.jit` entry and module contracts, the two programming models, the two
 compilation backends, sub-kernel reference, parameter contracts, and boundary
 constraints.
@@ -21,9 +21,8 @@ Decorator overview:
   mode="auto"               tile-first authoring, compiler-managed staging (default)
   mode="explicit"           micro-instruction authoring, user-managed staging
 
-@pto.cube                   Cube-unit matrix sub-kernel
-@pto.simd                   SIMD-unit vector sub-kernel
-@pto.simt                   SIMT-unit scalar sub-kernel
+@pto.tileop                 Single-core Tile/scalar compute helper with inferred Vector/Cube kind
+@pto.simt                   Explicitly launched SIMT helper with pointer/scalar ABI
 ```
 
 ### Role
@@ -56,9 +55,9 @@ build level and enables sync insertion by default, while `mode="explicit"` uses
 manual-address, user-managed staging contract of explicit kernels.
 
 `@pto.jit` owns compilation (tracing + lowering), caching, and — for
-`entry=True` — runtime launch binding. The compute-unit decorators
-(`@pto.cube`, `@pto.simd`, `@pto.simt`) define sub-kernels that are called from
-within `@pto.jit` bodies.
+`entry=True` — runtime launch binding. The compute helper decorators
+(`@pto.tileop` and `@pto.simt`) define sub-kernels that
+are called from within `@pto.jit` bodies.
 
 
 ## 3.2 `entry=True` — host-launchable kernel entry
@@ -433,9 +432,11 @@ Module bodies follow the same AST rewrite rules as `@pto.jit(entry=True)`
 (see Chapter 5). In the default `mode="auto"`, Python `for` / `if` are
 rewritten to device-side control flow, and the compiler handles hardware
 section placement automatically — you can write `vlds` / `vadd` / `vsts`
-directly in the module body without an explicit `with pto.simd():`. In
-`mode="explicit"`, you must manage hardware sections yourself with
-`with pto.simd():`, `with pto.cube():`, or `with pto.simt():`.
+directly in the module body. In `mode="explicit"`, keep MTE, synchronization,
+and Vector/Cube compute in the module body so the authored schedule remains
+visible. `@pto.tileop` and `with pto.tileop():` remain legal helper boundaries
+in either mode when the kernel needs one; use `with pto.simt(...):` for SIMT
+code.
 
 ### Interface protocol
 
@@ -572,9 +573,10 @@ there are two kinds of helpers:
 - **Plain Python helpers** for code organization, repeated index math,
   partition construction, and orchestration that should stay in the caller's
   context.
-- **Sub-kernels** (`@pto.cube`, `@pto.simd`, `@pto.simt`) when the helper must
-  run on a specific hardware unit or use unit-local value categories such as
-  `vreg` or cube-local scratch.
+- **Sub-kernels** (`@pto.tileop` and `@pto.simt`) when
+  the helper must run on a compute unit or use unit-local value categories such
+  as `vreg` or cube-local scratch. `@pto.tileop` infers one Vector or Cube kind
+  from its body instead of selecting the unit in the decorator.
 
 Use a plain helper when the code should not introduce a new hardware-unit
 boundary. Plain helpers do not define a separate ABI, target, mode, or
@@ -588,21 +590,18 @@ work on SIMT. Sub-kernels are the only public way to express that boundary.
 Named sub-kernels and plain nested helpers both use the same default AST
 rewrite behavior when they are traced from a compiled specialization.
 
-Sub-kernels are the mechanism for custom compute in PTODSL — when Tile Ops
-cover your needs, you don't need one; when they don't, a sub-kernel gives you
-direct access to the hardware unit. In auto mode, a sub-kernel's parameters
-are restricted to `Tile` and PTO scalar types — the compiler owns staging and
-sync. In explicit mode, sub-kernels may also accept `PartitionTensorView` and
-`pto.ptr` parameters, matching the richer type surface available there.
-This richer pointer surface belongs to the **in-kernel orchestration and
-sub-kernel boundary**, not to the public `@pto.jit` host entry ABI.
+Sub-kernels are the mechanism for custom compute in PTODSL. `@pto.tileop`
+always accepts only `Tile` and PTO scalar parameters, regardless of the
+caller's mode. `@pto.simt` has its own pointer/scalar launch ABI. Data movement,
+allocation, and pipe synchronization remain in `@pto.jit` orchestration.
 Section 3.3 covers each sub-kernel decorator in detail.
 
 ### Module vs sub-kernel
 
 **Module or sub-kernel?** A simple rule:
-- Logic that **must run on a specific hardware unit** (Cube, SIMD, or SIMT)
-  and operates on tiles → use a sub-kernel (`@pto.cube`, `@pto.simd`, `@pto.simt`).
+- Reusable single-core Tile/scalar compute whose Vector or Cube kind is
+  inferred from its micro-ops → use `@pto.tileop`.
+- Explicitly launched scalar-parallel compute → use `@pto.simt`.
 - General device-side code organisation — allocating tiles, partitioning GM
   views, calling sub-kernels, mixing backends → use a kernel module
   (`@pto.jit(entry=False)`).
@@ -611,16 +610,16 @@ Modules **can** call sub-kernels (they are callable from both entries and
 modules). Sub-kernels **cannot** call modules — data crosses the sub-kernel
 boundary only through UB tiles, not through nested function calls.
 
-| | `@pto.jit(entry=False)` module | `@pto.simd` / `@pto.simt` / `@pto.cube` |
+| | `@pto.jit(entry=False)` module | `@pto.tileop` / `@pto.simt` |
 |---|---|---|
 | Positioning | General device-side function | **Custom tile op** — hardware-bound compute primitive |
 | Scope | Orchestration, tile allocation, data movement, sub-kernel dispatch | Single-hardware-unit compute logic |
-| ABI | **C ABI: ptr + PTO scalars only**. Tile/TensorView/PartitionTensorView cannot cross the function boundary. Caller passes `tile.as_ptr()`; module constructs local tiles internally | **Tile + PTO scalars**. In/out via mutable Tile parameters. `@pto.simt` additionally accepts typed UB pointers |
+| ABI | **C ABI: ptr + PTO scalars only**. Tile/TensorView/PartitionTensorView cannot cross the function boundary. Caller passes `tile.as_ptr()`; module constructs local tiles internally | **Tile + PTO scalars**. `@pto.simt` additionally accepts typed pointers. `@pto.tileop` never accepts pointers and is void |
 | Backend | VPTO or EmitC | Always VPTO |
 | Compilation | Compiled as a separate child module, linked automatically | Outlined as a helper function inside the owning caller/module |
 | Callable from | Entries and other modules | Entries and modules |
 | Can call modules | Yes | No (data crosses boundary only through UB tiles) |
-| Can call sub-kernels | Yes | No (sub-kernels cannot nest) |
+| Can call sub-kernels | Yes | Only `@pto.tileop` may explicitly launch a defined `@pto.simt` helper |
 
 
 ## 3.4 Programming models: auto vs explicit
@@ -701,8 +700,8 @@ def process_block(q_tile, k_part, v_part, k_tile, v_tile,
                   nburst=(rows, ub_row_stride, gm_row_stride))
 ```
 
-Sub-kernel calls and inline sub-kernel scopes (`with pto.simd():`, etc.) work
-identically in both modes.
+Sub-kernel calls and supported inline sub-kernel scopes (`with pto.tileop():`
+and `with pto.simt(...):`) work identically in both modes.
 
 ### Choosing between modes
 
@@ -821,13 +820,13 @@ in PTODSL. While the built-in Tile Ops (`tile.load`, `tile.store`,
 write operations that map directly to a specific NPU compute unit when the
 built-in ops don't cover your needs.
 
-**Sub-kernels are custom tile ops.** Their contract is strict:
+**Sub-kernels have strict public ABIs:**
 
 - **Inputs**: `Tile` references and PTO scalars (`pto.i32`, `pto.f32`, ...).
   Data arrives from UB via tile handles; the sub-kernel does not own GM
   addressing or DMA orchestration.
-- **Outputs**: written back to UB tiles. Sub-kernels have no return values —
-  results are communicated by writing to mutable `Tile` parameters.
+- **Outputs**: mutable Tile parameters carry data. Both `@pto.tileop` and
+  `@pto.simt` are void.
 - **No cross-boundary vreg**: vector registers (`vreg`) and cube-local state
   (LEFT, RIGHT, ACC) are private to the sub-kernel body and never escape.
 
@@ -838,33 +837,29 @@ When to use a sub-kernel vs a kernel module:
   views, or mix backends → use an `@pto.jit(entry=False)` kernel module
   instead. Modules can call sub-kernels, but sub-kernels cannot call modules.
 
-Sub-kernels are decorated with `@pto.cube`, `@pto.simd`, or `@pto.simt`.
-PTODSL lowers both surface forms to real helper `func.func` bodies instead of
-flattening them directly into the surrounding caller. They can be authored in
-two ways:
+Named sub-kernels are decorated with `@pto.tileop` or `@pto.simt`. PTODSL
+lowers them to reusable helper functions instead of flattening them directly
+into the surrounding caller.
 
-1. **As decorated functions** — reusable, named sub-kernels called from
-   `@pto.jit` entries and modules.
-2. **As context managers** (`with pto.cube():`, `with pto.simd():`,
-   `with pto.simt():`, and `with pto.simt(dim_x, dim_y, dim_z):`) — inline
-   blocks for one-off snippets (see Section 3.8).
+Inline unit scopes (`with pto.tileop():` and `with pto.simt(...):`) are
+separate one-off helper forms described in Section 3.8; they are not named
+subkernel decorators.
 
 Named sub-kernel decorators use the same default AST rewrite model as
 `@pto.jit`: supported Python `if` and `for range(...)` statements lower to
 device-side control flow.
 
-### 3.7.1 `@pto.cube` — Cube unit (matrix operations)
+### 3.7.1 Cube-kind `@pto.tileop`
 
-**Role**: `@pto.cube` is the custom tile op for matrix multiplication on the
-Cube unit. It consumes UB-resident tiles and explicit cube-local scratch
-buffers. All parameters are `Tile` references — the caller owns tile
-allocation, and the sub-kernel only expresses the compute dataflow.
+**Role**: `@pto.tileop` is the custom tile op for matrix multiplication on the
+Cube unit. It consumes prepared cube-local Tiles and optional PTO scalars. The
+caller owns allocation, staging, writeback, and synchronization.
 
-**Signature**: `@pto.cube(fn=None, *, name=None, target="a5")`
+**Signature**: `@pto.tileop(fn=None, *, name=None, target="a5")`
 
 <!-- ptodsl-doc-test: {"mode":"compile_fragment","fixture":"kernel_entry.cube_signature","symbol":"kernel_entry_cube_signature_probe","compile":{"BLOCK_M":16,"BLOCK_K":16,"BLOCK_N":16}} -->
 ```python
-@pto.cube
+@pto.tileop
 def my_cube_kernel(
     input_tile: pto.Tile,            # UB tile (source data)
     output_tile: pto.Tile,           # UB tile (destination)
@@ -875,59 +870,47 @@ def my_cube_kernel(
     return
 ```
 
-All parameters are `Tile` references. Tiles marked as cube-local must be
-allocated with the appropriate `memory_space` (e.g., `pto.MemorySpace.LEFT`,
-`pto.MemorySpace.ACC`).
+Tile parameters marked as cube-local must use the appropriate `memory_space`
+(for example `pto.MemorySpace.LEFT` or `pto.MemorySpace.ACC`).
 
 **Typical body**:
 
 <!-- ptodsl-doc-test: {"mode":"compile_fragment","fixture":"data_movement.cube_helper","symbol":"data_movement_cube_helper_probe","compile":{"BLOCK_M":16,"BLOCK_K":16,"BLOCK_N":16}} -->
 ```python
-@pto.cube
+@pto.tileop
 def qk_matmul(
-    q_tile: pto.Tile,
-    k_tile: pto.Tile,
     q_l0a: pto.Tile,
     k_l0b: pto.Tile,
     s_acc: pto.Tile,
-    s_tile: pto.Tile,
+    m: pto.index,
+    n: pto.index,
+    k: pto.index,
 ):
-    m = q_tile.valid_shape[0]
-    k = q_tile.valid_shape[1]
-    n = k_tile.valid_shape[1]
-
-    pto.mte_l1_l0a(q_tile.as_ptr(), q_l0a.as_ptr(), m, k)
-    pto.mte_l1_l0b(k_tile.as_ptr(), k_l0b.as_ptr(), k, n, transpose=True)
     pto.mad(q_l0a.as_ptr(), k_l0b.as_ptr(), s_acc.as_ptr(), m, n, k)
-    pto.mte_l0c_ub(s_acc.as_ptr(), s_tile.as_ptr(), m, n, n, n, 0)
 ```
 
-Cube-local state (LEFT, RIGHT, ACC, BIAS) never leaks into UB — it is the
-caller's responsibility to allocate scratch buffers and pass them in
-explicitly.
+The caller allocates the cube-local buffers, stages operands into LEFT/RIGHT,
+and writes ACC back after the TileOp returns. The TileOp contains only the Cube
+compute operation.
 
-**Lowering model**: a decorated `@pto.cube` function becomes one reusable
-helper function inside the owning PTODSL child module. Each callsite lowers to
-`func.call` of that helper; the helper body itself contains the `pto.section.cube`
-region.
+**Lowering model**: a decorated `@pto.tileop` function becomes one reusable
+helper function inside the owning PTODSL child module. PTOAS infers its Cube
+execution kind from the helper body.
 
-**Invocation modes**: can be called from `@pto.jit` in either mode, or authored
-as an anonymous inline helper with `with pto.cube():` (Section 3.8).
+### 3.7.2 Vector-kind `@pto.tileop`
 
-### 3.7.2 `@pto.simd` — SIMD unit (vector operations)
-
-**Role**: `@pto.simd` is the custom tile op for row-wise vector compute on
+**Role**: `@pto.tileop` is the custom tile op for row-wise vector compute on
 the SIMD unit. It operates on vector registers (`vreg`) loaded from UB tiles
 and stores results back to UB tiles. Parameters are `Tile` references and PTO
 scalars — the sub-kernel reads tile data, computes on vector hardware, and
 writes results back through mutable tile parameters. Vector registers are
 local to the function and never cross its boundary.
 
-**Signature**: `@pto.simd(fn=None, *, name=None, target="a5")`
+**Signature**: `@pto.tileop(fn=None, *, name=None, target="a5")`
 
 <!-- ptodsl-doc-test: {"mode":"compile_fragment","fixture":"kernel_entry.simd_signature","symbol":"kernel_entry_simd_signature_probe","compile":{"BLOCK":128}} -->
 ```python
-@pto.simd
+@pto.tileop
 def my_simd_kernel(
     input_tile: pto.Tile,            # UB tile
     output_tile: pto.Tile,           # UB tile
@@ -941,7 +924,7 @@ Parameters are UB `Tile` references and PTO scalar values (`pto.i32`,
 `pto.f32`, etc.). Scalar parameters may come from `lds` reads or compile-time
 constants.
 
-This interface contract is enforced unconditionally. A decorated `@pto.simd`
+This interface contract is enforced unconditionally. A decorated `@pto.tileop`
 function does not gain extra pointer-style ABI forms in explicit mode; if you
 need a broader boundary, use `@pto.jit(entry=False)` instead.
 
@@ -949,9 +932,9 @@ need a broader boundary, use `@pto.jit(entry=False)` instead.
 
 <!-- ptodsl-doc-test: {"mode":"compile_fragment","fixture":"kernel_entry.simd_body","symbol":"kernel_entry_simd_body_probe","compile":{"BLOCK":128}} -->
 ```python
-@pto.simd
+@pto.tileop
 def add_rows(a_tile: pto.Tile, b_tile: pto.Tile, o_tile: pto.Tile,
-             rows: pto.i32, cols: pto.i32):
+             rows: pto.index, cols: pto.index):
     VEC = pto.elements_per_vreg(pto.f32)
     for r in range(0, rows, 1):
         remained = cols
@@ -964,16 +947,11 @@ def add_rows(a_tile: pto.Tile, b_tile: pto.Tile, o_tile: pto.Tile,
 ```
 
 The boundary contract: `vreg` values (`a_vec`, `b_vec`, `o_vec`) are local to
-the function. The only way to persist data across a `@pto.simd` call is to
+the function. The only way to persist data across a `@pto.tileop` call is to
 write it back to a UB tile via `vsts` (or `psts`, etc.).
 
-**Lowering model**: a decorated `@pto.simd` function becomes one reusable
-helper function inside the owning PTODSL child module. Each callsite lowers to
-`func.call` of that helper; the helper body itself contains the `pto.section.vector`
-region.
-
-**Invocation modes**: can be called from `@pto.jit` in either mode, or authored
-as an anonymous inline helper with `with pto.simd():` (Section 3.8).
+**Kind inference**: the SIMD operations make this helper Vector-kind. PTOAS
+materializes the corresponding section after tracing.
 
 ### 3.7.3 `@pto.simt` — SIMT unit (scalar-parallel operations)
 
@@ -986,7 +964,7 @@ Parameters are `Tile` references, typed UB pointers, and PTO scalars. The
 sub-kernel reads and writes individual elements through tile handles; results
 flow back to the caller via mutable tile parameters.
 
-**Signature**: `@pto.simt(fn=None, *, name=None, target="a5", max_threads=None, max_regs=None)`
+**Signature**: `@pto.simt(fn=None, *, name=None, target="a5", max_threads=None)`
 
 <!-- ptodsl-doc-test: {"mode":"compile_fragment","fixture":"kernel_entry.simt_signature","symbol":"kernel_entry_simt_signature_probe","compile":{"BLOCK":8}} -->
 ```python
@@ -1026,28 +1004,31 @@ in parallel, making it efficient for per-element operations.
 
 #### SIMT resource attributes
 
-Optional `max_threads` and `max_regs` arguments attach VPTO resource attributes
+An optional `max_threads` argument attaches a VPTO resource attribute
 to the generated `pto.simt_entry` helper.
 
-**Signature**: `@pto.simt(fn=None, *, name=None, target="a5", max_threads=None, max_regs=None)`
+**Signature**: `@pto.simt(fn=None, *, name=None, target="a5", max_threads=None)`
 
 **Parameters**:
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
 | `max_threads` | positive Python `int` | backend default `1024` | Compile-time launch envelope for this SIMT helper |
-| `max_regs` | positive Python `int` | backend default `32` | Scalar register budget per work-item |
 
 `max_threads` is not the launch size. The actual work-item count comes from the
-SIMT launch dimensions. Both arguments must be Python integers known at trace
-time, greater than zero, and fit in signless `i32`. They are only valid on
+SIMT launch dimensions. The argument must be a Python integer known at trace
+time, greater than zero, and fit in signless `i32`. It is only valid on
 decorated SIMT helper functions, not inline `with pto.simt():` scopes.
+
+The per-workitem register budget (`simt-max-registers`) is automatically
+derived from `max_threads` by the VPTO backend according to the hardware
+resource partition.
 
 **Example**:
 
 <!-- ptodsl-doc-test: {"mode":"compile","symbol":"kernel_entry_simt_resource_probe","compile":{}} -->
 ```python
-@pto.simt(max_threads=256, max_regs=48)
+@pto.simt(max_threads=256)
 def write_tid(dst: pto.ptr(pto.i32, "gm")):
     tid = pto.get_tid_x()
     idx = scalar.index_cast(tid)
@@ -1107,19 +1088,23 @@ Specific SIMT micro-op APIs are documented in Chapter 13.
 
 ## 3.8 Inline context manager syntax
 
-In addition to the decorator form, each sub-kernel unit provides an inline
-context manager form: `with pto.cube():`, `with pto.simd():`,
+TileOp and SIMT provide inline context manager forms: `with pto.tileop():`,
 `with pto.simt():`, and `with pto.simt(dim_x, dim_y, dim_z):`. These open
 one-off anonymous sub-kernel bodies without requiring a separate named Python
 function. Inline scopes are supported in top-level `@pto.jit` bodies. The
-dimensioned SIMT form uses the same inline body style while making the caller
-emit an explicit `pto.simt_launch`.
+dimensioned SIMT form remains in `pto.section.simt` with the authored static
+launch dimensions. The dimensions must be Python integers known at trace time.
+
+The examples below use `mode="auto"`. Inline TileOps use the same boundary
+contract in explicit callers, but explicit examples normally keep compute in
+the kernel body unless an anonymous helper boundary is intentional.
 
 ### Syntax
 
 <!-- ptodsl-doc-test: {"mode":"compile_fragment","fixture":"kernel_entry.inline_simd_scope","symbol":"kernel_entry_inline_simd_scope_probe","compile":{"BLOCK":128}} -->
 ```python
-with pto.simd():
+with pto.tileop():
+    mask, _ = pto.make_mask(pto.f32, pto.const(16, dtype=pto.i32))
     a_vec = pto.vlds(a_tile[r, c:])
     b_vec = pto.vlds(b_tile[r, c:])
     o_vec = pto.vadd(a_vec, b_vec, mask)
@@ -1143,31 +1128,35 @@ with pto.simt(128, 1, 1):
 
 <!-- ptodsl-doc-test: {"mode":"compile_fragment","fixture":"kernel_entry.inline_cube_scope","symbol":"kernel_entry_inline_cube_scope_probe","compile":{"BLOCK_M":16,"BLOCK_K":16,"BLOCK_N":16}} -->
 ```python
-with pto.cube():
-    pto.mte_l1_l0a(q_tile.as_ptr(), q_l0a.as_ptr(), m, k)
-    pto.mte_l1_l0b(k_tile.as_ptr(), k_l0b.as_ptr(), k, n, transpose=True)
+with pto.tileop():
     pto.mad(q_l0a.as_ptr(), k_l0b.as_ptr(), s_acc.as_ptr(), m, n, k)
-    pto.mte_l0c_ub(s_acc.as_ptr(), s_tile.as_ptr(), m, n, n, n, 0)
 ```
 
 ### Semantics
 
-- Inside the `with` block, instructions execute on the corresponding hardware
-  unit.
+- `with pto.tileop():` infers Vector or Cube ownership from the compute
+  instructions in its body, just like `@pto.tileop`.
 - On block exit, PTODSL outlines the block into one anonymous helper
   `func.func` and replaces the original region with a `func.call`.
-- `with pto.simd():` and `with pto.cube():` preserve their `pto.section.vector`
-  / `pto.section.cube` bodies inside the outlined helper.
-- `with pto.simt():` preserves its scalar body inside one outlined
-  `pto.simt_entry` helper, and the caller emits `pto.store_vfsimt_info`.
-- `with pto.simt(dim_x, dim_y, dim_z):` uses the same inline outlining and
-  automatic capture rules, but emits a caller-side explicit SIMT launch with
-  the authored dimensions.
-- Values defined inside the inline sub-kernel cannot escape the block directly.
-  Use Tiles, typed pointers, or other mutable references to communicate results
-  back to the caller.
-- Cube-local scratch (`l0a`, `l0b`, `acc`) must be allocated by the caller
-  before entering the block.
+- `with pto.tileop():` marks the outlined helper with `pto.tileop.helper` so
+  PTOAS can infer and materialize its physical section.
+- Named and inline TileOps are legal from both `mode="auto"` and
+  `mode="explicit"`. Explicit examples normally keep pure compute directly in
+  the kernel body; use an inline scope when an anonymous helper boundary is
+  intentional.
+- `with pto.simt():` remains in the enclosing kernel as `pto.section.simt`
+  with default launch dimensions `(1, 1, 1)`.
+- `with pto.simt(dim_x, dim_y, dim_z):` remains in the enclosing kernel as
+  `pto.section.simt` with the authored launch dimensions. The dimensions must
+  be Python integers known at trace time.
+- Inline TileOp captures obey the same ABI as `@pto.tileop`: only `pto.Tile`
+  and PTO scalar values may cross into the helper. Pointer, TensorView, memref,
+  vreg, and mask captures are rejected.
+- Inline TileOps return no values. Values defined inside the block cannot
+  escape; write results through mutable Tile captures.
+- Tile allocation, MTE, pipe synchronization, and other orchestration remain
+  in the calling `@pto.jit` body. Cube-local scratch (`l0a`, `l0b`, `acc`) must
+  be allocated by the caller before entering the block.
 
 ### Comparison
 
@@ -1177,17 +1166,63 @@ with pto.cube():
 | Readability | Good for complex, multi-step logic | Good for short (3-10 line) snippets |
 | Lowering | Reusable helper `func.func` | Anonymous helper `func.func` created on block exit |
 | Testing | Can be unit-tested independently | Tested only through the enclosing kernel |
-| Cube-local args | Explicit parameters | Captured from enclosing scope |
+| Boundary values | Explicit Tile/Scalar parameters | Captured Tile/Scalar values |
 
 The two forms can be freely mixed in the same `@pto.jit` body.
 
 
 ## 3.9 Boundary contracts
 
+### `@pto.tileop`
+
+`@pto.tileop` defines a reusable single-core UB compute helper. Its parameters
+are `pto.Tile` values and PTO scalars. It returns `None`; results are written
+through mutable Tile parameters. The caller owns Tile allocation, data
+movement, lifetime, and all cross-pipe synchronization.
+
+**Signature**: `@pto.tileop(fn=None, *, name=None, target="a5", ast_rewrite=True)`
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `name` | `str` or `None` | Python function name | Logical helper symbol name |
+| `target` | `str` | `"a5"` | PTO target used while tracing the helper |
+| `ast_rewrite` | `bool` | `True` | Apply PTODSL control-flow rewriting to the helper body |
+
+Tile parameters may be inputs, outputs, or scratch storage. Scalar parameters
+use explicit PTO dtype annotations such as `pto.i32` or `pto.f32`. Pointer,
+TensorView, memref, vreg, mask, pipe-handle, and host-tensor values cannot cross
+the TileOp public boundary.
+
+```python
+@pto.simt(max_threads=256)
+def simt_epilogue(dst: pto.ptr(pto.f32, "ub"), cols: pto.i32):
+    pass
+
+@pto.tileop
+def vector_epilogue(dst: pto.Tile, cols: pto.i32):
+    simt_epilogue[256, 1, 1](dst.as_ptr(), cols)
+```
+
+A tileop contains exactly one compute domain, inferred from its body: Vector
+(including an explicit `@pto.simt` launch) or Cube. It may use scalar/control
+flow operations, address derivation, and `pto.mem_bar`, but it cannot issue
+MTE operations, pipe synchronization, Tile allocation, high-level TileOps,
+direct SIMT instructions, or calls to another tileop. Vector and Cube
+instructions cannot be mixed, including in distinct branches or loops.
+
+`@pto.simt` remains a separate ptr/scalar ABI. A Vector tileop may derive a
+pointer from its own Tile and launch a defined SIMT helper with explicit
+`[dim_x, dim_y, dim_z]` dimensions. `max_threads` remains explicit on the
+SIMT helper; VPTO derives the register budget from it according to the hardware
+resource partition. A direct `simt_epilogue(...)` call is invalid inside a
+TileOp; use `simt_epilogue[x, y, z](...)` or
+`pto.simt_launch(simt_epilogue, ..., dims=(x, y, z))`.
+
 **Sub-kernels are custom tile ops.** Their I/O contract is strict: data enters
-via `Tile` handles and PTO scalars; results exit by writing to mutable `Tile`
-parameters. `TensorView` and `PartitionTensorView` belong to the orchestration
-layer and are NOT accepted by sub-kernels.
+via `Tile` handles and PTO scalars, and results are written through mutable Tile
+parameters. `@pto.tileop` returns `None`. `TensorView` and
+`PartitionTensorView` belong to the orchestration layer and are NOT accepted by
+TileOp helpers.
 
 **Modules use the C ABI.** Module boundaries (`entry=False`) are real function
 calls — only `pto.ptr` and PTO scalars can cross. `Tile`, `TensorView`, and
@@ -1199,11 +1234,13 @@ calls — only `pto.ptr` and PTO scalars can cross. `Tile`, `TensorView`, and
 | Entry / module → `@pto.jit(entry=False)` module | **`pto.ptr` + PTO scalars only** (C ABI). Caller passes `tile.as_ptr()`; module constructs local tiles internally |
 | Entry / module → sub-kernel (`auto` mode) | **`Tile` + PTO scalars only**. Compiler handles staging + sync |
 | Entry / module → sub-kernel (`explicit` mode) | `Tile`, `PartitionTensorView`, `pto.ptr`, PTO scalars |
+| Entry / module → `@pto.tileop` | **`Tile` + PTO scalars only**; no return value |
+| `@pto.tileop` → `@pto.simt` | Explicit `helper[x, y, z](...)` or `pto.simt_launch(...)` only |
 | `@pto.jit` → `with pto.{cube,simd,simt}:` | Captured `Tile` / ptr / scalar values from enclosing scope |
-| Sub-kernel → sub-kernel | Not allowed (go through UB tiles via the caller) |
+| Sub-kernel → sub-kernel | Not allowed, except the explicit TileOp → SIMT launch above |
 | Sub-kernel → module | Not allowed (sub-kernels cannot call out) |
 | Inline sub-kernel → caller | No direct SSA return path; write through Tile / ptr / mutable references |
-| `@pto.simd` → caller | Only via `vsts`/`psts` to UB tiles; `vreg` cannot escape |
+| `@pto.tileop` → caller | Only via `vsts`/`psts` to UB tiles; `vreg` cannot escape |
 | Cube-local → UB | Only via `mte_l0c_ub`; LEFT/RIGHT/ACC/BIAS are private |
 | `entry=False` module → caller | No return values; data crosses only via mutable references |
 

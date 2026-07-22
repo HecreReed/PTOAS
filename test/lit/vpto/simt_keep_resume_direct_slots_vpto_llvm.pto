@@ -6,7 +6,8 @@
 // INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
 // See LICENSE in the root of the software repository for the full text of the License.
 
-// RUN: ( mkdir -p %T && ptoas --pto-arch=a5 --pto-backend=vpto %s -o %t --mlir-print-ir-after=convert-func-to-llvm 2>&1 || true ) | FileCheck %s
+// RUN: ( mkdir -p %T && ptoas --pto-arch=a5 --pto-backend=vpto --cann-output-version=9.0.0-beta.1 %s -o %t.beta1 --mlir-print-ir-after=convert-func-to-llvm 2>&1 || true ) | FileCheck %s
+// RUN: ( mkdir -p %T && ptoas --pto-arch=a5 --pto-backend=vpto --cann-output-version=9.0.0 %s -o %t.cann900 --mlir-print-ir-after=convert-func-to-llvm 2>&1 || true ) | FileCheck %s
 
 module attributes {pto.target_arch = "a5", pto.kernel_kind = #pto.kernel_kind<vector>} {
   func.func @kernel(%dst: !pto.ptr<i32, ub>) attributes {pto.aicore} {
@@ -16,30 +17,62 @@ module attributes {pto.target_arch = "a5", pto.kernel_kind = #pto.kernel_kind<ve
     pto.store_vfsimt_info %dim_z, %dim_y, %dim_x : i32, i32, i32
     func.call @stage0(%dst) : (!pto.ptr<i32, ub>) -> ()
     func.call @stage1(%dst) : (!pto.ptr<i32, ub>) -> ()
+    func.call @stage2(%dst) : (!pto.ptr<i32, ub>) -> ()
     return
   }
 
   func.func @stage0(%dst: !pto.ptr<i32, ub>) attributes {pto.simt_entry} {
     %tid = pto.get_tid_x : i32
     %wide = arith.extui %tid : i32 to i64
+    %f16 = arith.constant 1.000000e+00 : f16
+    %bf16 = arith.constant 1.000000e+00 : bf16
     pto.keep %tid {slot = 0 : i64} : i32
+    pto.keep %f16 {slot = 5 : i64} : f16
+    pto.keep %bf16 {slot = 6 : i64} : bf16
     pto.keep %wide {slot = 8 : i64} : i64
     return
   }
 
   func.func @stage1(%dst: !pto.ptr<i32, ub>) attributes {pto.simt_entry} {
+    %f16 = pto.resume {slot = 5 : i64} : f16
+    %bf16 = pto.resume {slot = 6 : i64} : bf16
     %wide = pto.resume {slot = 8 : i64} : i64
     %tid = pto.get_tid_x : i32
     %idx = arith.index_castui %tid : i32 to index
     %value = arith.trunci %wide : i64 to i32
     pto.store %value, %dst[%idx] : !pto.ptr<i32, ub>, i32
+    pto.keep %f16 {slot = 5 : i64} : f16
+    pto.keep %bf16 {slot = 6 : i64} : bf16
+    pto.keep %wide {slot = 8 : i64} : i64
+    return
+  }
+
+  func.func @stage2(%dst: !pto.ptr<i32, ub>) attributes {pto.simt_entry} {
+    %wide = pto.resume {slot = 8 : i64} : i64
+    pto.keep %wide {slot = 8 : i64} : i64
     return
   }
 }
 
-// CHECK: llvm.func @stage0
-// CHECK: MOV R4, $0
-// CHECK-SAME: IMAD.WIDE.u32 R12, RZ, RZ, $1
-// CHECK: llvm.func @stage1
-// CHECK: IMAD.WIDE.u32 $0, RZ, RZ, R12
-// CHECK-NOT: IMAD.WIDE.u32 $0, RZ, RZ, R4
+// CHECK-LABEL: llvm.func @stage0
+// CHECK: llvm.inline_asm has_side_effects asm_dialect = att "", "={TPER4},={TPER9},={TPER10},={TPERL6},0,1,2,3"
+// CHECK-SAME: (i32, i32, i32, i64) -> !llvm.struct<(i32, i32, i32, i64)>
+// CHECK-NOT: MOV
+// CHECK-NOT: IMAD.WIDE
+// CHECK-LABEL: llvm.func @stage1
+// CHECK: llvm.inline_asm has_side_effects asm_dialect = att "", "={TPER9},={TPER10},={TPERL6}"
+// CHECK-SAME: () -> !llvm.struct<(i32, i32, i64)>
+// CHECK: llvm.trunc %{{.*}} : i32 to i16
+// CHECK: llvm.bitcast %{{.*}} : i16 to f16
+// CHECK: llvm.trunc %{{.*}} : i32 to i16
+// CHECK: llvm.bitcast %{{.*}} : i16 to bf16
+// CHECK: llvm.inline_asm has_side_effects asm_dialect = att "", "={TPER9},={TPER10},={TPERL6},0,1,2"
+// CHECK-SAME: (i32, i32, i64) -> !llvm.struct<(i32, i32, i64)>
+// CHECK-NOT: MOV
+// CHECK-NOT: IMAD.WIDE
+// CHECK-LABEL: llvm.func @stage2
+// CHECK: llvm.inline_asm has_side_effects asm_dialect = att "", "={TPERL6}" : () -> i64
+// CHECK: llvm.inline_asm has_side_effects asm_dialect = att "", "={TPERL6},0"
+// CHECK-SAME: (i64) -> i64
+// CHECK-NOT: MOV
+// CHECK-NOT: IMAD.WIDE

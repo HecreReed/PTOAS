@@ -1,0 +1,51 @@
+// Copyright (c) 2026 Huawei Technologies Co., Ltd.
+// This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+// CANN Open Software License Agreement Version 2.0 (the "License").
+// Please refer to the License for details. You may not use this file except in compliance with the License.
+// THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+// INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+// See LICENSE in the root of the software repository for the full text of the License.
+
+// Explicit local alloc_tile addresses are physical UB addresses. Distinct SSA
+// roots whose ranges overlap must synchronize an asynchronous MTE3 read before
+// a later V-pipe write reuses the range.
+//
+// RUN: ptoas --pto-arch=a3 --pto-level=level3 --enable-insert-sync %s -o - 2>&1 | FileCheck %s
+
+module attributes {pto.target_arch = "a2a3"} {
+  func.func @alloc_tile_physical_overlap_sync(
+      %src0: memref<16x128xf32, #pto.address_space<gm>>,
+      %src1: memref<16x128xf32, #pto.address_space<gm>>,
+      %dst: memref<16x128xf32, #pto.address_space<gm>>)
+      attributes {pto.kernel_kind = #pto.kernel_kind<vector>} {
+    %c1280_i64 = arith.constant 1280 : i64
+    %c8192_i64 = arith.constant 8192 : i64
+    %c16384_i64 = arith.constant 16384 : i64
+    %one = arith.constant 1.000000e+00 : f32
+
+    %input = pto.alloc_tile addr = %c16384_i64 :
+      !pto.tile_buf<loc=vec, dtype=f32, rows=16, cols=128, v_row=16, v_col=128, blayout=row_major, slayout=none_box, fractal=512, pad=0>
+    %stored = pto.alloc_tile addr = %c1280_i64 :
+      !pto.tile_buf<loc=vec, dtype=f32, rows=16, cols=128, v_row=16, v_col=128, blayout=row_major, slayout=none_box, fractal=512, pad=0>
+    %reused = pto.alloc_tile addr = %c8192_i64 :
+      !pto.tile_buf<loc=vec, dtype=f32, rows=16, cols=128, v_row=16, v_col=128, blayout=row_major, slayout=none_box, fractal=512, pad=0>
+
+    pto.tload ins(%src0 : memref<16x128xf32, #pto.address_space<gm>>)
+              outs(%input : !pto.tile_buf<loc=vec, dtype=f32, rows=16, cols=128, v_row=16, v_col=128, blayout=row_major, slayout=none_box, fractal=512, pad=0>)
+    pto.tload ins(%src1 : memref<16x128xf32, #pto.address_space<gm>>)
+              outs(%stored : !pto.tile_buf<loc=vec, dtype=f32, rows=16, cols=128, v_row=16, v_col=128, blayout=row_major, slayout=none_box, fractal=512, pad=0>)
+    pto.tmuls ins(%input, %one : !pto.tile_buf<loc=vec, dtype=f32, rows=16, cols=128, v_row=16, v_col=128, blayout=row_major, slayout=none_box, fractal=512, pad=0>, f32)
+              outs(%stored : !pto.tile_buf<loc=vec, dtype=f32, rows=16, cols=128, v_row=16, v_col=128, blayout=row_major, slayout=none_box, fractal=512, pad=0>)
+    pto.tstore ins(%stored : !pto.tile_buf<loc=vec, dtype=f32, rows=16, cols=128, v_row=16, v_col=128, blayout=row_major, slayout=none_box, fractal=512, pad=0>)
+               outs(%dst : memref<16x128xf32, #pto.address_space<gm>>)
+    pto.tmuls ins(%input, %one : !pto.tile_buf<loc=vec, dtype=f32, rows=16, cols=128, v_row=16, v_col=128, blayout=row_major, slayout=none_box, fractal=512, pad=0>, f32)
+              outs(%reused : !pto.tile_buf<loc=vec, dtype=f32, rows=16, cols=128, v_row=16, v_col=128, blayout=row_major, slayout=none_box, fractal=512, pad=0>)
+    return
+  }
+}
+
+// CHECK-LABEL: AICORE void alloc_tile_physical_overlap_sync(
+// CHECK:      TSTORE(
+// CHECK-NEXT: set_flag(PIPE_MTE3, PIPE_V, EVENT_ID[[MTE3_TO_V:[0-9]+]]);
+// CHECK-NEXT: wait_flag(PIPE_MTE3, PIPE_V, EVENT_ID[[MTE3_TO_V]]);
+// CHECK-NEXT: TMULS(

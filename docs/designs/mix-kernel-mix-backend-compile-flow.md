@@ -133,8 +133,7 @@ For example:
 ```python
 @pto.jit(target="a5", entry=False, backend="vpto", mode="explicit")
 def scale_row(base_gm: pto.ptr(pto.f32, "gm"), row: pto.i32):
-    with pto.simd():
-        ...
+    ...
 
 @pto.jit(target="a5", backend="emitc")
 def entry(x_ptr: pto.ptr(pto.f32, "gm"), o_ptr: pto.ptr(pto.f32, "gm"), rows: pto.i32):
@@ -168,10 +167,9 @@ kernel. The Vector/Cube execution ownership is a PTOAS responsibility:
   the VPTO backend.
 
 This keeps the PTODSL programming model independent of the physical sectioning
-rules. PTODSL can still expose helper abstractions such as `@pto.simd`,
-`@pto.cube`, `with pto.simd():`, and `with pto.cube():`, but the design does
-not require users or the frontend to manually partition every operation into a
-final section.
+rules. PTODSL exposes named `@pto.tileop` / `@pto.simt` helpers and inline
+`with pto.tileop():` / `with pto.simt(...):` scopes, but does not require users
+or the frontend to manually partition every operation into a final section.
 
 ### PTODSL IR Codegen Shape
 
@@ -233,12 +231,17 @@ Python-only structure. This lowering records PTODSL helper structure and call
 boundaries; it does not make PTODSL responsible for the final Vector/Cube
 section partition.
 
-For `@pto.simd` / `@pto.cube` and inline `with pto.simd():` / `with pto.cube():`
-scopes, PTODSL:
+For `@pto.tileop` / `@pto.simt` and inline `with pto.tileop():` /
+`with pto.simt(...):` scopes, PTODSL:
 
 - outlines the subkernel body into a helper `func.func` when needed
-- marks the helper with `pto.ptodsl.subkernel_helper`
-- emits a helper call from the caller body
+- marks TileOp helpers with `pto.tileop.helper` and SIMT helpers with
+  `pto.simt_entry`
+- emits a helper call or explicit SIMT launch from the caller body
+
+Inline TileOp captures use the same Tile/Scalar-only, void ABI as decorated
+TileOps. Legacy `@pto.simd` / `@pto.cube` and `with pto.simd():` /
+`with pto.cube():` uses are rejected with the same migration diagnostic.
 
 This is the PTODSL-side expression of a logical mixed kernel: the entry or
 owning helper remains one logical function, while PTOAS later infers,
@@ -526,4 +529,4 @@ Use this order when debugging mixed compilation:
 | `pto.aicore` | `func.func` | Legacy entry marker accepted for compatibility. |
 | `pto.internal.non_entry` | `func.func` | Frontend/helper metadata; not used for current entry inference. |
 | `pto.ptodsl.logical_name` | `func.func` | Source-level logical name used when assembling wrappers and peer references. |
-| `pto.ptodsl.subkernel_helper` | `func.func` | Frontend helper classification: `simd`, `cube`, or `simt`. |
+| `pto.tileop.helper` | `func.func` | PTODSL pure single-core TileOp helper; PTOAS infers its Vector or Cube kind. |

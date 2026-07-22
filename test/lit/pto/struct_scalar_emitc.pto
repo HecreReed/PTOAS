@@ -1,0 +1,37 @@
+// Copyright (c) 2026 Huawei Technologies Co., Ltd.
+// This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+// CANN Open Software License Agreement Version 2.0 (the "License").
+// Please refer to the License for details. You may not use this file except in compliance with the License.
+// THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+// INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+// See LICENSE in the root of the software repository for the full text of the License.
+
+// RUN: ptoas %s 2>&1 | FileCheck %s
+
+// Heterogeneous stack-local struct: declare, set two scalar fields, get a
+// scalar field (snapshotted before the read-back set reuses it, mirroring
+// local_array_get value semantics).
+
+module {
+  func.func @struct_scalar(%vf : f16, %vi : i8) {
+    %s = pto.declare_struct -> !pto.struct<f16, i8>
+    pto.struct_set %s[0], %vf : !pto.struct<f16, i8>, f16
+    pto.struct_set %s[1], %vi : !pto.struct<f16, i8>, i8
+    %r = pto.struct_get %s[0] : !pto.struct<f16, i8> -> f16
+    pto.struct_set %s[0], %r : !pto.struct<f16, i8>, f16
+    return
+  }
+}
+
+// The struct definition is emitted at file scope.
+// CHECK: struct PtoStruct_f16_i8 {
+// CHECK:   half f0;
+// CHECK:   int8_t f1;
+// CHECK: };
+
+// CHECK-LABEL: struct_scalar
+// CHECK: PtoStruct_f16_i8 [[S:v[0-9]+]];
+// CHECK: [[S]].f0 = {{v[0-9]+}};
+// CHECK: [[S]].f1 = {{v[0-9]+}};
+// CHECK: half [[R:v[0-9]+]] = [[S]].f0;
+// CHECK: [[S]].f0 = [[R]];

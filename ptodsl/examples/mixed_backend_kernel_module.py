@@ -44,26 +44,25 @@ def scale_row_kernel_module(
     base_gm: pto.ptr(pto.f32, "gm"),
     row: pto.i32,
 ):
-    with pto.simd():
-        c0_i64 = pto.const(0, dtype=pto.i64)
-        row_offset = row * _ROW_ELEMS
-        row_gm = pto.addptr(base_gm, row_offset)
-        ub_row = pto.castptr(c0_i64, pto.ptr(pto.f32, "ub"))
-        vec_offset = pto.const(0)
+    c0_i64 = pto.const(0, dtype=pto.i64)
+    row_offset = row * _ROW_ELEMS
+    row_gm = pto.addptr(base_gm, row_offset)
+    ub_row = pto.castptr(c0_i64, pto.ptr(pto.f32, "ub"))
+    vec_offset = pto.const(0)
 
-        pto.get_buf(pto.Pipe.MTE2, 0)
-        pto.mte_gm_ub(row_gm, ub_row, 0, _ROW_BYTES, nburst=(1, _ROW_BYTES, _ROW_BYTES))
-        pto.rls_buf(pto.Pipe.MTE2, 0)
+    pto.get_buf(pto.Pipe.MTE2, 0)
+    pto.mte_gm_ub(row_gm, ub_row, 0, _ROW_BYTES, nburst=(1, _ROW_BYTES, _ROW_BYTES))
+    pto.rls_buf(pto.Pipe.MTE2, 0)
 
-        full_mask = pto.make_mask(pto.f32, pto.const(_ROW_ELEMS, dtype=pto.i32))
-        row_vec = pto.vlds(ub_row, vec_offset)
-        row_vec = pto.vmuls(row_vec, _HELPER_SCALE, full_mask)
-        pto.vsts(row_vec, ub_row, vec_offset, full_mask)
+    full_mask = pto.make_mask(pto.f32, pto.const(_ROW_ELEMS, dtype=pto.i32))
+    row_vec = pto.vlds(ub_row, vec_offset)
+    row_vec = pto.vmuls(row_vec, _HELPER_SCALE, full_mask)
+    pto.vsts(row_vec, ub_row, vec_offset, full_mask)
 
-        pto.get_buf(pto.Pipe.MTE3, 0)
-        pto.mte_ub_gm(ub_row, row_gm, _ROW_BYTES, nburst=(1, _ROW_BYTES, _ROW_BYTES))
-        pto.rls_buf(pto.Pipe.MTE3, 0)
-        pto.pipe_barrier(pto.Pipe.ALL)
+    pto.get_buf(pto.Pipe.MTE3, 0)
+    pto.mte_ub_gm(ub_row, row_gm, _ROW_BYTES, nburst=(1, _ROW_BYTES, _ROW_BYTES))
+    pto.rls_buf(pto.Pipe.MTE3, 0)
+    pto.pipe_barrier(pto.Pipe.ALL)
 
 
 @pto.jit(target="a5", backend="emitc")

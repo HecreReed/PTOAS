@@ -189,6 +189,31 @@ static SmallVector<Value> getScratchBuffersFromEffects(Operation *op,
   return scratchBuffers;
 }
 
+static SmallVector<Value>
+getMemoryEffectBufferOperands(Operation *op,
+                              const StableValueOrderMap &stableValueOrder) {
+  SmallVector<Value> buffers;
+  auto memEffect = dyn_cast<MemoryEffectOpInterface>(op);
+  if (!memEffect)
+    return buffers;
+
+  SmallVector<SideEffects::EffectInstance<MemoryEffects::Effect>,
+              kMemoryEffectReserveSize>
+      effects;
+  memEffect.getEffects(effects);
+  for (const auto &effect : effects) {
+    if (!isa<MemoryEffects::Read, MemoryEffects::Write>(effect.getEffect()))
+      continue;
+    Value value = effect.getValue();
+    if (!value || !GetBufferSpaceAttr(value))
+      continue;
+    if (!llvm::is_contained(buffers, value))
+      buffers.push_back(value);
+  }
+  sortValuesByStableOrder(buffers, stableValueOrder);
+  return buffers;
+}
+
 static SmallVector<ValuePair>
 getScratchConflictPairsFromEffects(Operation *op, ValueRange dpsInits,
                                    const StableValueOrderMap &stableValueOrder) {
@@ -399,6 +424,21 @@ void MemLivenessAnalysis::RecursionIR(Region *region, Liveness live) {
     } else if (auto fusionRegion = dyn_cast<pto::FusionRegionOp>(op)) {
       RecursiveFusionRegionOp(fusionRegion, live);
       return WalkResult::skip();
+    } else if (auto section = dyn_cast<pto::SectionCubeOp>(op)) {
+      // Sections are transparent containers. Analyze tileop-local cube work
+      // in place so it contributes to liveness.
+      UpdateLinearOperation(section.getOperation());
+      RecursionIR(&section.getBody(), live);
+      auto sectionEnd = UpdateLinearOperation(section.getOperation());
+      OpKillHandle(sectionEnd, live, section->getBlock());
+      return WalkResult::skip();
+    } else if (auto section = dyn_cast<pto::SectionVectorOp>(op)) {
+      // Keep vector sections transparent for the same reason as cube sections.
+      UpdateLinearOperation(section.getOperation());
+      RecursionIR(&section.getBody(), live);
+      auto sectionEnd = UpdateLinearOperation(section.getOperation());
+      OpKillHandle(sectionEnd, live, section->getBlock());
+      return WalkResult::skip();
     }
 
     // process operation
@@ -502,6 +542,12 @@ void MemLivenessAnalysis::RecursionIR(Region *region, Liveness live) {
     } else if (auto callOp = dyn_cast<func::CallOp>(op)) {
       UpdateOpGenInfo(curOpInfo, llvm::to_vector(callOp->getOperands()));
       OpKillHandle(curOpInfo, live, op->getBlock());
+    } else if (auto simtLaunch = dyn_cast<pto::SimtLaunchOp>(op)) {
+      // A launched SIMT helper reads its explicit argument list. Treat it as
+      // a call for liveness so tile-derived local memrefs remain live through
+      // the launch.
+      UpdateOpGenInfo(curOpInfo, llvm::to_vector(simtLaunch->getOperands()));
+      OpKillHandle(curOpInfo, live, op->getBlock());
     } else if (isa<pto::TAllocOp, pto::TPushOp, pto::TFreeOp,
                    pto::SetQuantScalarOp, pto::SetQuantVectorOp,
                    pto::InitializeL2LPipeOp, pto::InitializeL2G2LPipeOp,
@@ -515,6 +561,14 @@ void MemLivenessAnalysis::RecursionIR(Region *region, Liveness live) {
       OpKillHandle(curOpInfo, live, op->getBlock());
     } else if (auto gpuLaunchOp = dyn_cast<gpu::LaunchFuncOp>(op)) {
       UpdateOpGenInfo(curOpInfo, llvm::to_vector(gpuLaunchOp->getOperands()));
+      OpKillHandle(curOpInfo, live, op->getBlock());
+    } else if (isa<MemoryEffectOpInterface>(op)) {
+      // Vector/Cube micro-ops such as vlds/vsts are not destination-style
+      // ops, but their explicit memory effects identify the local buffers
+      // that must remain live through the instruction.
+      SmallVector<Value> buffers =
+          getMemoryEffectBufferOperands(op, stableValueOrder);
+      UpdateOpGenInfo(curOpInfo, buffers);
       OpKillHandle(curOpInfo, live, op->getBlock());
     } else if (failed(CheckIfUnknownOpTouchBuffer(op))) {
       return WalkResult::interrupt();
@@ -2444,7 +2498,32 @@ private:
 
 void PlanMemoryPass::runOnOperation() {
   ModuleOp moduleOp = getOperation();
-  for (auto funcOp : moduleOp.getOps<func::FuncOp>()) {
+  // PTODSL TileOp input is a container module whose executable functions live
+  // in a kernel-kind child module. Keep legacy child modules out of this pass:
+  // their frontend pipe ABI is intentionally handled by the existing split
+  // path rather than TileOp memory planning.
+  SmallVector<func::FuncOp> funcs;
+  for (func::FuncOp funcOp : moduleOp.getOps<func::FuncOp>())
+    funcs.push_back(funcOp);
+  moduleOp.walk([&](ModuleOp childModule) {
+    if (childModule == moduleOp)
+      return;
+
+    bool hasTileOpHelper = false;
+    for (func::FuncOp funcOp : childModule.getOps<func::FuncOp>()) {
+      if (funcOp->hasAttr("pto.tileop.helper")) {
+        hasTileOpHelper = true;
+        break;
+      }
+    }
+    if (!hasTileOpHelper)
+      return;
+
+    for (func::FuncOp funcOp : childModule.getOps<func::FuncOp>())
+      funcs.push_back(funcOp);
+  });
+
+  for (func::FuncOp funcOp : funcs) {
     ReserveBufferPlans reservePlans;
     if (this->memMode == MemPlanMode::LOCAL_MEM_PLAN &&
         failed(analyzeReserveBufferPlans(funcOp, reservePlans))) {

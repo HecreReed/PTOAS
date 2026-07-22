@@ -1,0 +1,36 @@
+// Copyright (c) 2026 Huawei Technologies Co., Ltd.
+// This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+// CANN Open Software License Agreement Version 2.0 (the "License").
+// Please refer to the License for details. You may not use this file except in compliance with the License.
+// THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+// INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+// See LICENSE in the root of the software repository for the full text of the License.
+
+// RUN: ptoas --pto-arch=a5 --pto-backend=vpto --emit-vpto --mlir-print-ir-before=vpto-expand-wrapper-ops %s -o /dev/null 2>&1 | FileCheck %s --check-prefix=ROUNDTRIP
+// RUN: ptoas --pto-arch=a5 --pto-backend=vpto --emit-vpto --mlir-print-ir-after=vpto-expand-wrapper-ops %s -o /dev/null 2>&1 | FileCheck %s --check-prefix=EXPAND
+
+module attributes {"pto.target_arch" = "a5", pto.kernel_kind = #pto.kernel_kind<cube>} {
+  func.func @acc_store_gm_f32_bf16(%src: !pto.ptr<f32, l0c>,
+                                   %dst: !pto.ptr<bf16, gm>) {
+    %c0_i64 = arith.constant 0 : i64
+    %c16_i64 = arith.constant 16 : i64
+    %c32_i64 = arith.constant 32 : i64
+    %c1_bf16 = arith.constant 1.000000e+00 : bf16
+
+    pto.mte_l0c_gm %src, %dst, %c16_i64, %c16_i64, %c16_i64, %c32_i64,
+      %c0_i64, %c0_i64,
+      pre_quant(%c1_bf16, mode = f32_bf16),
+      nz2nd
+      : !pto.ptr<f32, l0c>, !pto.ptr<bf16, gm>, i64, i64, i64, i64, i64, i64,
+        bf16
+
+    return
+  }
+}
+
+// ROUNDTRIP-LABEL: func.func @acc_store_gm_f32_bf16(
+// ROUNDTRIP: pto.mte_l0c_gm %{{.*}}, %{{.*}}, %{{.*}}, %{{.*}}, %{{.*}}, %{{.*}}, %{{.*}}, %{{.*}}, pre_quant(%{{.*}}, mode = f32_bf16), nz2nd
+
+// EXPAND-LABEL: func.func @acc_store_gm_f32_bf16(
+// EXPAND: pto.set_quant_pre
+// EXPAND: pto.copy_matrix_cc_to_gm

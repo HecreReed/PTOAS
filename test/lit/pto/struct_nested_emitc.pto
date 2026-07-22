@@ -1,0 +1,45 @@
+// Copyright (c) 2026 Huawei Technologies Co., Ltd.
+// This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+// CANN Open Software License Agreement Version 2.0 (the "License").
+// Please refer to the License for details. You may not use this file except in compliance with the License.
+// THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+// INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+// See LICENSE in the root of the software repository for the full text of the License.
+
+// RUN: ptoas %s 2>&1 | FileCheck %s
+
+// Nested aggregate: a struct whose first field is itself a struct. A field
+// inside the nested struct is reached with a 2-level path, which lowers to a
+// chained `s.f0.f0` member access rather than to a copy of the inner struct.
+
+module {
+  func.func @struct_nested(%vf : f32, %vi : i16) {
+    %s = pto.declare_struct -> !pto.struct<!pto.struct<f32, i8>, i16>
+    pto.struct_set %s[0, 0], %vf
+      : !pto.struct<!pto.struct<f32, i8>, i16>, f32
+    pto.struct_set %s[1], %vi
+      : !pto.struct<!pto.struct<f32, i8>, i16>, i16
+    %g = pto.struct_get %s[0, 0]
+      : !pto.struct<!pto.struct<f32, i8>, i16> -> f32
+    pto.struct_set %s[0, 0], %g
+      : !pto.struct<!pto.struct<f32, i8>, i16>, f32
+    return
+  }
+}
+
+// Nested struct is defined before the struct that embeds it.
+// CHECK: struct PtoStruct_f32_i8 {
+// CHECK:   float f0;
+// CHECK:   int8_t f1;
+// CHECK: };
+// CHECK: struct PtoStruct_S_f32_i8_E_i16 {
+// CHECK:   PtoStruct_f32_i8 f0;
+// CHECK:   int16_t f1;
+// CHECK: };
+
+// CHECK-LABEL: struct_nested
+// CHECK: PtoStruct_S_f32_i8_E_i16 [[S:v[0-9]+]];
+// CHECK: [[S]].f0.f0 = {{v[0-9]+}};
+// CHECK: [[S]].f1 = {{v[0-9]+}};
+// CHECK: float [[G:v[0-9]+]] = [[S]].f0.f0;
+// CHECK: [[S]].f0.f0 = [[G]];

@@ -11,8 +11,8 @@ flash_attention(...)           L0  user-facing wrapper
   └─ @pto.jit(entry=True, mode="explicit") flash_attention_kernel
        ├─ Tile Ops                 tile.load / tile.store at the GM↔UB boundary
        ├─ explicit orchestration   mte_load / pipe_barrier / pointer sequencing
-       ├─ @pto.cube               qk_matmul / pv_matmul
-       ├─ @pto.simd               online_softmax_rows
+       ├─ @pto.tileop               qk_matmul / pv_matmul
+       ├─ @pto.tileop               online_softmax_rows
        └─ @pto.simt               materialize_tile_bounds / blend_output_rows
 ```
 
@@ -212,7 +212,7 @@ alpha_tile = pto.alloc_tile(shape=[Br, 1], dtype=pto.f32, valid_shape=[full_br, 
 beta_tile = pto.alloc_tile(shape=[Br, 1], dtype=pto.f32, valid_shape=[full_br, one], blayout="ColMajor")
 ```
 
-The walkthrough keeps Q/K/V/P on the MAT path so the cube sub-kernels consume the same tile objects that the top-level kernel owns. Runtime tails still live in `valid_shape`; the physical tile shapes stay static.
+The walkthrough keeps Q/K/V/P on the MAT path so Cube-kind TileOps consume the same tile objects that the top-level kernel owns. Runtime tails still live in `valid_shape`; the physical tile shapes stay static.
 
 **UB-resident state and scratch tiles** — among the allocations above, the
 online-softmax state lives in `o_prev_tile` / `o_next_tile`, `m_prev_tile` /
@@ -389,7 +389,7 @@ qk_matmul(q_mat, k_mat, q_l0a, rhs_l0b, qk_acc_tile, s_tile)
 pto.pipe_barrier(pto.Pipe.ALL)
 ```
 
-Dispatches the cube sub-kernel. `pipe_barrier(Pipe.ALL)` separates the matrix multiply from the subsequent softmax.
+Dispatches the Cube-kind TileOp. `pipe_barrier(Pipe.ALL)` separates the matrix multiply from the subsequent softmax.
 
 ### Phase 2 — Online softmax
 
@@ -405,7 +405,7 @@ online_softmax_rows(
 pto.pipe_barrier(pto.Pipe.ALL)
 ```
 
-The simd sub-kernel computes per-row softmax on `S`, updates the running `m`/`l` state, and writes `P`, `alpha`, and `beta`.
+The Vector-kind TileOp computes per-row softmax on `S`, updates the running `m`/`l` state, and writes `P`, `alpha`, and `beta`.
 
 ### Phase 3 — `PV = P @ V`
 
@@ -438,69 +438,51 @@ The simt sub-kernel blends the old output accumulator with the new PV contributi
 
 Each `pipe_barrier(Pipe.ALL)` between phases is explicit in the orchestration body. This is intentional: at the orchestration boundary, the user controls pipeline ordering. Auto mode may still use synchronization primitives where needed, but it does so around compiler-managed tile staging rather than user-authored instruction scheduling.
 
-## 11.5 Cube sub-kernel — `@pto.cube`
+## 11.5 Cube-kind TileOps
 
 ### `qk_matmul` — `S = Q @ K^T`
 
 <!-- ptodsl-doc-test: {"mode":"compile_fragment","fixture":"flash_attention.qk_cube_helper","symbol":"flash_attention_qk_cube_helper_probe","compile":{"BLOCK_Q":16,"BLOCK_KV":16}} -->
 ```python
-@pto.cube
+@pto.tileop
 def qk_matmul(
-    q_mat: pto.Tile,
-    k_mat: pto.Tile,
     q_l0a: pto.Tile,
     k_l0b: pto.Tile,
     s_acc: pto.Tile,
-    s_tile: pto.Tile,
+    m: pto.index,
+    n: pto.index,
+    k: pto.index,
 ):
-    m = q_mat.valid_shape[0]
-    k = q_mat.valid_shape[1]
-    n = k_mat.valid_shape[0]
-
-    pto.mte_l1_l0a(q_mat.as_ptr(), q_l0a.as_ptr(), m, k)
-    pto.mte_l1_l0b(k_mat.as_ptr(), k_l0b.as_ptr(), k, n, transpose=True)
     pto.mad(q_l0a.as_ptr(), k_l0b.as_ptr(), s_acc.as_ptr(), m, n, k)
-    pto.mte_l0c_ub(s_acc.as_ptr(), s_tile.as_ptr(), m, n, n, n, 0)
 ```
 
-Four cube ops:
-
-1. **`mte_l1_l0a`**: load Q tile from UB into LEFT scratch (`q_l0a`).
-2. **`mte_l1_l0b`**: load K tile from UB into RIGHT scratch (`k_l0b`), with `transpose=True` for K^T.
-3. **`mad`**: matrix multiply-accumulate — `s_acc = q_l0a @ k_l0b`.
-4. **`mte_l0c_ub`**: write the accumulator result to the UB output tile `s_tile`.
-
-The cube kernel does not allocate scratch — the caller (top-level kernel) owns scratch lifetime. The cube kernel only expresses dataflow.
+The caller stages Q and K into LEFT/RIGHT, invokes this helper for `mad`, and
+writes ACC back to the score Tile. Scratch allocation and all MTE operations
+remain in the orchestration kernel.
 
 ### `pv_matmul` — `PV = P @ V`
 
 <!-- ptodsl-doc-test: {"mode":"compile_fragment","fixture":"flash_attention.pv_cube_helper","symbol":"flash_attention_pv_cube_helper_probe","compile":{"BLOCK_Q":16,"BLOCK_KV":16}} -->
 ```python
-@pto.cube
+@pto.tileop
 def pv_matmul(
-    p_mat: pto.Tile,
-    v_mat: pto.Tile,
     p_l0a: pto.Tile,
     v_l0b: pto.Tile,
     pv_acc: pto.Tile,
-    pv_tile: pto.Tile,
+    m: pto.index,
+    n: pto.index,
+    k: pto.index,
 ):
-    m = p_mat.valid_shape[0]
-    k = p_mat.valid_shape[1]
-    n = v_mat.valid_shape[1]
-
-    pto.mte_l1_l0a(p_mat.as_ptr(), p_l0a.as_ptr(), m, k)
-    pto.mte_l1_l0b(v_mat.as_ptr(), v_l0b.as_ptr(), k, n)
     pto.mad(p_l0a.as_ptr(), v_l0b.as_ptr(), pv_acc.as_ptr(), m, n, k)
-    pto.mte_l0c_ub(pv_acc.as_ptr(), pv_tile.as_ptr(), m, n, n, n, 0)
 ```
 
-Structurally identical to `qk_matmul`, but without transposition and with different input/output tiles. The scratch tiles `p_l0a`, `v_l0b`, and `pv_acc` are reused across KV blocks — the caller (top-level kernel) allocates them once.
+Structurally identical to `qk_matmul`. The caller stages P and V, reuses the
+scratch Tiles across KV blocks, and performs writeback after the helper call.
 
-## 11.6 SIMD sub-kernel — online softmax
+## 11.6 Vector-kind TileOp — online softmax
 
 ```python
-@pto.simd
+@pto.tileop
 def online_softmax_rows(
     s_tile: pto.Tile,
     p_tile: pto.Tile,
@@ -523,40 +505,41 @@ The simd kernel iterates over rows with Python `for range(...)`, and AST rewrite
 for row in range(row_start, row_stop, 1):
     col_mask = pto.make_mask(pto.f32, valid_cols)
 
-    s_row   = pto.vlds(s_tile[row, 0:])
-    m_prev  = scalar.load(m_prev_tile[row, 0])
-    l_prev  = scalar.load(l_prev_tile[row, 0])
+    s_row  = pto.vlds(s_tile[row, 0:])
+    m_prev = pto.vlds(m_prev_tile.as_ptr(), row, dist="BRC_B32")
+    l_prev = pto.vlds(l_prev_tile.as_ptr(), row, dist="BRC_B32")
 ```
 
 - **Mask creation**: `make_mask(pto.f32, valid_cols)` generates a tail mask for the column dimension. On the last KV block, `valid_cols` may be less than the full block width.
 - **Vector load**: `vlds(s_tile[row, 0:])` loads one entire row of `S` from UB into a vector register. The slice syntax `[row, 0:]` selects the full row.
-- **Scalar load**: `lds` reads per-row scalars (`m_prev`, `l_prev`) from the state tiles.
+- **Broadcast load**: `vlds(..., dist="BRC_B32")` reads each per-row state value and broadcasts it across the vector lanes.
 
 ### Softmax computation
 
 <!-- ptodsl-doc-test: {"mode":"compile_fragment","fixture":"flash_attention.online_softmax_compute","symbol":"flash_attention_online_softmax_compute_probe","compile":{"BLOCK":16}} -->
 ```python
-    row_max   = pto.vcgmax(s_row, col_mask)
-    m_next    = scalar.max(m_prev, row_max)
+    row_max = pto.vdup(pto.vcmax(s_row, col_mask), col_mask)
+    m_next  = pto.vmax(m_prev, row_max, col_mask)
 
-    s_shifted = pto.vsubs(s_row, m_next, col_mask)
+    s_shifted = pto.vsub(s_row, m_next, col_mask)
     p_row     = pto.vexp(s_shifted, col_mask)
 
-    row_sum   = pto.vcgadd(p_row, col_mask)
-    l_scaled  = l_prev * scalar.exp(m_prev - m_next)
-    l_next    = l_scaled + row_sum
+    row_sum  = pto.vdup(pto.vcadd(p_row, col_mask), col_mask)
+    exp_scale = pto.vexp(pto.vsub(m_prev, m_next, col_mask), col_mask)
+    l_scaled = pto.vmul(l_prev, exp_scale, col_mask)
+    l_next   = pto.vadd(l_scaled, row_sum, col_mask)
 
-    alpha = l_scaled / l_next
-    beta  = 1.0 / l_next
+    alpha = pto.vdiv(l_scaled, l_next, col_mask)
+    beta  = pto.vrec(l_next, col_mask)
 ```
 
 This implements the online-softmax update from the Flash Attention paper:
 
-- `vcgmax` (cross-lane max reduction) finds the row maximum.
-- `max(m_prev, m_next)` combines with the running maximum.
-- `vsubs` subtracts the scalar `m_next` from every lane (stabilized softmax).
+- `vcmax` finds the row maximum and `vdup` broadcasts lane 0.
+- `vmax` combines the broadcast row maximum with the running maximum.
+- `vsub` subtracts the broadcast `m_next` from every lane.
 - `vexp` computes `exp(s_shifted)` element-wise.
-- `vcgadd` (cross-lane sum reduction) computes the row sum.
+- `vcadd` computes the row sum and `vdup` broadcasts lane 0.
 - `l_scaled` rescales the previous sum with the running-max correction factor.
 - `alpha` and `beta` are the blending coefficients for the output update.
 
@@ -565,10 +548,10 @@ This implements the online-softmax update from the Flash Attention paper:
 <!-- ptodsl-doc-test: {"mode":"compile_fragment","fixture":"flash_attention.online_softmax_store","symbol":"flash_attention_online_softmax_store_probe","compile":{"BLOCK":16}} -->
 ```python
     pto.vsts(p_row, p_tile[row, 0:], col_mask)
-    scalar.store(m_next, m_next_tile[row, 0])
-    scalar.store(l_next, l_next_tile[row, 0])
-    scalar.store(alpha, alpha_tile[row, 0])
-    scalar.store(beta, beta_tile[row, 0])
+    pto.vsts(m_next, m_next_tile.as_ptr(), row, col_mask, dist="1PT_B32")
+    pto.vsts(l_next, l_next_tile.as_ptr(), row, col_mask, dist="1PT_B32")
+    pto.vsts(alpha, alpha_tile.as_ptr(), row, col_mask, dist="1PT_B32")
+    pto.vsts(beta, beta_tile.as_ptr(), row, col_mask, dist="1PT_B32")
 ```
 
 - `vsts` stores the vector `p_row` back to UB under the column mask.
@@ -663,7 +646,7 @@ For one KV block, the full execution sequence is:
 | 5 | simt | `materialize_tile_bounds` | SIMT |
 | 6 | cube | `qk_matmul` (mte_l1_l0a, mte_l1_l0b, mad, mte_l0c_ub) | Cube |
 | 7 | explicit | `pipe_barrier(Pipe.ALL)` | — |
-| 8 | simd | `online_softmax_rows` (vlds, vcgmax, vexp, vcgadd, vsts, ...) | SIMD |
+| 8 | tileop | `online_softmax_rows` (vlds, vcmax, vexp, vcadd, vsts, ...) | Vector |
 | 9 | explicit | `pipe_barrier(Pipe.ALL)` | — |
 | 10 | explicit | `tile.mov(p_tile, p_mat)` | Tile copy |
 | 11 | explicit | `pipe_barrier(Pipe.ALL)` | — |
@@ -678,10 +661,10 @@ After all KV blocks: the top-level kernel issues `tile.store(o_final_tile, o_par
 
 **Ping-pong state for online accumulators**: `m_prev`/`m_next`, `l_prev`/`l_next`, `o_prev`/`o_next` make the state transition explicit. After each KV block, the caller swaps the ping-pong pair by assigning the `_next` tiles to the loop-carried Python variables rather than aliasing in place.
 
-**Scratch reuse**: `rhs_l0b` serves both `K` (in `qk_matmul`) and `V` (in `pv_matmul`). `pv_acc_tile` reuses the accumulator from QK^T. The caller (top-level kernel) allocates once; the explicit-mode body passes them to both cube sub-kernels.
+**Scratch reuse**: `rhs_l0b` serves both `K` (in `qk_matmul`) and `V` (in `pv_matmul`). `pv_acc_tile` reuses the accumulator from QK^T. The caller allocates once and passes the scratch Tiles to both Cube-kind TileOps.
 
 **Tile-level boundary vs micro-instruction boundary**: `tile.load`/`tile.store` are the tile-atomic surface used in auto mode and at the top-level tile boundary of this sketch. `mte_load` appears in explicit orchestration, authored as individual pointer-based instructions. The abstraction split is auto mode as tile-centric authoring, explicit mode as user-ordered orchestration.
 
-**No vreg across sub-kernel boundaries**: vector registers are local to each `@pto.simd` kernel. Data crosses sub-kernel boundaries through UB tiles — the boundary contract is enforced by the type system.
+**No vreg across sub-kernel boundaries**: vector registers are local to each `@pto.tileop` kernel. Data crosses sub-kernel boundaries through UB tiles — the boundary contract is enforced by the type system.
 
-**Invocation flexibility**: This sketch uses the explicit `@pto.jit(entry=True, mode="explicit")` path for full micro-instruction control. The same named sub-kernels can also be reused from `@pto.jit(mode="auto")` when the body stays within the auto-mode contract, or written inline as context managers (`with pto.simd():`, etc.). The orchestration logic could be extracted into `@pto.jit(entry=False)` kernel modules for reuse across multiple entry kernels. See Chapter 3 for details.
+**Invocation flexibility**: This sketch uses the explicit `@pto.jit(entry=True, mode="explicit")` path for full micro-instruction control and keeps its Vector compute directly in the kernel body. The same named sub-kernels can also be reused from `@pto.jit(mode="auto")` when the body stays within the auto-mode contract. The orchestration logic could be extracted into `@pto.jit(entry=False)` kernel modules for reuse across multiple entry kernels. See Chapter 3 for details.

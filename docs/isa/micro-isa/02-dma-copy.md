@@ -73,12 +73,13 @@ pto.mte_gm_ub %gm_in, %ub_out, %cache, %len_burst
 - **syntax:**
 ```mlir
 pto.mte_ub_gm %ub_src, %gm_dst, %len_burst
-  nburst(%n_burst, %src_stride, %dst_stride)
+  nburst(%n_burst, %src_stride, %dst_stride) l2_cache_ctl(%l2_cache_ctl)
   [loop(%loop_count, %loop_src_stride, %loop_dst_stride)]*
-  : !pto.ptr<T, ub>, !pto.ptr<T, gm>, i64, i64, i64, i64,
+  : !pto.ptr<T, ub>, !pto.ptr<T, gm>, i64, i64, i64, i64, i64,
     [loop i64, i64, i64,]*
 ```
 - **semantics:** Grouped UB→GM DMA transfer. `nburst(...)` defines the innermost repeated burst transfer, and optional `loop(...)` groups add outer repetition levels.
+  The `l2_cache_ctl(...)` group is optional in textual VPTO IR; when omitted, lowering uses `0`.
 
 **Parameter Table:**
 
@@ -88,6 +89,7 @@ pto.mte_ub_gm %ub_src, %gm_dst, %len_burst
 | `%gm_dst` | ptr | GM destination pointer (`!pto.ptr<T, gm>`) |
 | `%len_burst` | 16 bits | Contiguous bytes transferred per burst row |
 | `nburst(%n_burst, %src_stride, %dst_stride)` | 16 bits / 21 bits / 40 bits | Required innermost burst group: count, UB source stride, GM destination stride |
+| `l2_cache_ctl(%l2_cache_ctl)` | 4 bits | Optional GM store-side L2 cache control; omitted means `0` |
 | `loop(%loop_count, %loop_src_stride, %loop_dst_stride)` | 21 bits / 21 bits / 40 bits | Optional outer repetition group: count, UB source stride, GM destination stride |
 
 **Constraints:**
@@ -103,10 +105,10 @@ pto.mte_ub_gm %ub_src, %gm_dst, %len_burst
 
 ```mlir
 pto.mte_ub_gm %ub_in, %gm_out, %len_burst
-  nburst(%rows, %ub_row_stride, %gm_row_stride)
+  nburst(%rows, %ub_row_stride, %gm_row_stride) l2_cache_ctl(%l2_cache_ctl)
   loop(%tiles, %ub_tile_stride, %gm_tile_stride)
   loop(%batches, %ub_batch_stride, %gm_batch_stride)
-  : !pto.ptr<f16, ub>, !pto.ptr<f16, gm>, i64, i64, i64, i64,
+  : !pto.ptr<f16, ub>, !pto.ptr<f16, gm>, i64, i64, i64, i64, i64,
     loop i64, i64, i64, loop i64, i64, i64
 ```
 
@@ -336,6 +338,7 @@ For a form
 ```mlir
 pto.mte_ub_gm %ub_src, %dst, %len_burst
   nburst(%n_burst, %src_stride, %dst_stride)
+  l2_cache_ctl(%l2_cache_ctl)
   loop(%c0, %s0, %d0)
   loop(%c1, %s1, %d1)
   ...
@@ -507,8 +510,8 @@ GM (dest, 32 × 32 f32):
 
 ```mlir
 pto.mte_ub_gm %ub_out, %arg1, %c128_i64
-  nburst(%c32_i64, %c128_i64, %c128_i64)
-  : !pto.ptr<f32, ub>, !pto.ptr<f32, gm>, i64, i64, i64, i64
+  nburst(%c32_i64, %c128_i64, %c128_i64) l2_cache_ctl(%c0_i64)
+  : !pto.ptr<f32, ub>, !pto.ptr<f32, gm>, i64, i64, i64, i64, i64
 ```
 
 ---
@@ -545,8 +548,8 @@ GM (dest, into 1024 × 512 matrix):
 
 ```mlir
 pto.mte_ub_gm %ub_ptr, %gm_ptr, %c256_i64
-  nburst(%c64_i64, %c256_i64, %c1024_i64)
-  : !pto.ptr<f16, ub>, !pto.ptr<f16, gm>, i64, i64, i64, i64
+  nburst(%c64_i64, %c256_i64, %c1024_i64) l2_cache_ctl(%c0_i64)
+  : !pto.ptr<f16, ub>, !pto.ptr<f16, gm>, i64, i64, i64, i64, i64
 ```
 
 ---

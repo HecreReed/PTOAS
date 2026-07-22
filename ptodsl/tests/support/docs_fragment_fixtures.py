@@ -607,12 +607,12 @@ FRAGMENT_FIXTURES = {
     ),
     "kernel_entry.explicit_body": _fixture(
         f"""
-        @pto.cube
+        @pto.tileop
         def qk_matmul(q_tile: pto.Tile, k_tile: pto.Tile, s_tile: pto.Tile):
             return
 
 
-        @pto.simd
+        @pto.tileop
         def online_softmax(s_tile: pto.Tile, o_tile: pto.Tile, rows: pto.i32, cols: pto.i32):
             return
 
@@ -736,11 +736,10 @@ FRAGMENT_FIXTURES = {
         ):
             for r in range(0, 1, 1):
                 c = pto.const(0, dtype=pto.index)
-                mask, _ = pto.make_mask(pto.f32, pto.const(16, dtype=pto.i32))
                 {SNIPPET_PLACEHOLDER}
 
 
-        @pto.jit(target="a5")
+        @pto.jit(target="a5", mode="auto")
         def kernel_entry_inline_simd_scope_probe(*, BLOCK: pto.const_expr = 128):
             a_tile = pto.alloc_tile(shape=[1, BLOCK], dtype=pto.f32)
             b_tile = pto.alloc_tile(shape=[1, BLOCK], dtype=pto.f32)
@@ -777,7 +776,7 @@ FRAGMENT_FIXTURES = {
     ),
     "kernel_entry.inline_cube_scope": _fixture(
         f"""
-        @pto.jit(target="a5", mode="explicit")
+        @pto.jit(target="a5", mode="auto")
         def kernel_entry_inline_cube_scope_probe(
             *,
             BLOCK_M: pto.const_expr = 16,
@@ -972,12 +971,12 @@ FRAGMENT_FIXTURES = {
     ),
     "sync_ops.flag_pattern_explicit": _fixture(
         f"""
-        @pto.cube
+        @pto.tileop
         def qk_matmul(q_tile: pto.Tile, k_tile: pto.Tile, p_tile: pto.Tile):
             return
 
 
-        @pto.cube
+        @pto.tileop
         def pv_matmul(p_tile: pto.Tile, v_tile: pto.Tile, o_tile: pto.Tile):
             return
 
@@ -1021,17 +1020,17 @@ FRAGMENT_FIXTURES = {
     ),
     "sync_ops.phase_barrier_explicit": _fixture(
         f"""
-        @pto.cube
+        @pto.tileop
         def qk_matmul(q_tile: pto.Tile, k_tile: pto.Tile, s_tile: pto.Tile):
             return
 
 
-        @pto.simd
+        @pto.tileop
         def online_softmax(s_tile: pto.Tile, p_tile: pto.Tile, rows: pto.i32, cols: pto.i32):
             return
 
 
-        @pto.cube
+        @pto.tileop
         def pv_matmul(p_tile: pto.Tile, v_tile: pto.Tile, pv_tile: pto.Tile):
             return
 
@@ -1134,14 +1133,14 @@ FRAGMENT_FIXTURES = {
     ),
     "data_movement.cube_helper": _fixture(
         f"""
-        @pto.cube
+        @pto.tileop
         def qk_matmul(
-            q_tile: pto.Tile,
-            k_tile: pto.Tile,
             q_l0a: pto.Tile,
             k_l0b: pto.Tile,
             s_acc: pto.Tile,
-            s_tile: pto.Tile,
+            m: pto.index,
+            n: pto.index,
+            k: pto.index,
         ):
             {SNIPPET_PLACEHOLDER}
 
@@ -1159,19 +1158,24 @@ FRAGMENT_FIXTURES = {
             q_l0a = pto.alloc_tile(shape=[BLOCK_M, BLOCK_K], dtype=pto.f16, memory_space=pto.MemorySpace.LEFT, valid_shape=[BLOCK_M, BLOCK_K])
             k_l0b = pto.alloc_tile(shape=[BLOCK_K, BLOCK_N], dtype=pto.f16, memory_space=pto.MemorySpace.RIGHT, valid_shape=[BLOCK_K, BLOCK_N])
             s_acc = pto.alloc_tile(shape=[BLOCK_M, BLOCK_N], dtype=pto.f32, memory_space=pto.MemorySpace.ACC, valid_shape=[BLOCK_M, BLOCK_N])
-            qk_matmul(q_tile, k_tile, q_l0a, k_l0b, s_acc, s_tile)
+            m = q_tile.valid_shape[0]
+            k = q_tile.valid_shape[1]
+            n = k_tile.valid_shape[1]
+            pto.mte_l1_l0a(q_tile.as_ptr(), q_l0a.as_ptr(), m, k)
+            pto.mte_l1_l0b(k_tile.as_ptr(), k_l0b.as_ptr(), k, n)
+            qk_matmul(q_l0a, k_l0b, s_acc, m, n, k)
+            pto.mte_l0c_ub(s_acc.as_ptr(), s_tile.as_ptr(), m, n, n, n, 0)
         """
     ),
     "compute_ops.vector_compute": _fixture(
         f"""
-        @pto.simd
-        def compute_ops_vector_helper(inp_tile: pto.Tile, out_tile: pto.Tile, row: pto.index):
+        @pto.tileop
+        def compute_ops_vector_helper(inp_tile: pto.Tile, out_tile: pto.Tile, int_tile: pto.Tile, row: pto.index):
             col_mask = pto.make_mask(pto.f32, pto.const(16, dtype=pto.i32))
             s_row = pto.vlds(inp_tile[row, 0:])
             p_row = pto.vexp(s_row, col_mask)
-            m_next = pto.vcgmax(s_row, col_mask)
+            m_next = pto.const(1.0, dtype=pto.f32)
             mask32_full = pto.pset_b32(pto.MaskPattern.ALL)
-            int_tile = pto.alloc_tile(shape=[1, 64], dtype=pto.i32, valid_shape=[1, 64])
             vec_f32 = pto.vlds(inp_tile[row, 0:])
             vec_i32 = pto.vlds(int_tile.as_ptr(), pto.const(0))
             exp_f32_even = vec_f32
@@ -1184,8 +1188,9 @@ FRAGMENT_FIXTURES = {
         def compute_ops_vector_probe(*, BLOCK: pto.const_expr = 128):
             inp_tile = pto.alloc_tile(shape=[2, BLOCK], dtype=pto.f32)
             out_tile = pto.alloc_tile(shape=[2, BLOCK], dtype=pto.f32)
+            int_tile = pto.alloc_tile(shape=[1, 64], dtype=pto.i32, valid_shape=[1, 64])
             for row in range(0, 1, 1):
-                compute_ops_vector_helper(inp_tile, out_tile, row)
+                compute_ops_vector_helper(inp_tile, out_tile, int_tile, row)
         """
     ),
     "compute_ops.tile_low_precision_cvt": _fixture(
@@ -1513,7 +1518,7 @@ FRAGMENT_FIXTURES = {
     ),
     "flash_attention.explicit_phase": _fixture(
         f"""
-        @pto.cube
+        @pto.tileop
         def qk_matmul(
             q_mat: pto.Tile,
             k_mat: pto.Tile,
@@ -1525,7 +1530,7 @@ FRAGMENT_FIXTURES = {
             return
 
 
-        @pto.simd
+        @pto.tileop
         def online_softmax_rows(
             s_tile: pto.Tile,
             p_tile: pto.Tile,
@@ -1542,7 +1547,7 @@ FRAGMENT_FIXTURES = {
             return
 
 
-        @pto.cube
+        @pto.tileop
         def pv_matmul(
             p_mat: pto.Tile,
             v_mat: pto.Tile,
@@ -1677,7 +1682,13 @@ FRAGMENT_FIXTURES = {
             rhs_l0b = pto.alloc_tile(shape=[Bc, D], dtype=pto.f32, memory_space=pto.MemorySpace.RIGHT, valid_shape=[Bc, D])
             qk_acc_tile = pto.alloc_tile(shape=[Br, Bc], dtype=pto.f32, memory_space=pto.MemorySpace.ACC, valid_shape=[Br, Bc])
             s_tile = pto.alloc_tile(shape=[Br, Bc], dtype=pto.f32, valid_shape=[Br, Bc])
-            qk_matmul(q_mat, k_mat, q_l0a, rhs_l0b, qk_acc_tile, s_tile)
+            m = q_mat.valid_shape[0]
+            k = q_mat.valid_shape[1]
+            n = k_mat.valid_shape[0]
+            pto.mte_l1_l0a(q_mat.as_ptr(), q_l0a.as_ptr(), m, k)
+            pto.mte_l1_l0b(k_mat.as_ptr(), rhs_l0b.as_ptr(), k, n, transpose=True)
+            qk_matmul(q_l0a, rhs_l0b, qk_acc_tile, m, n, k)
+            pto.mte_l0c_ub(qk_acc_tile.as_ptr(), s_tile.as_ptr(), m, n, n, n, 0)
         """
     ),
     "flash_attention.pv_cube_helper": _fixture(
@@ -1696,7 +1707,13 @@ FRAGMENT_FIXTURES = {
             rhs_l0b = pto.alloc_tile(shape=[Bc, D], dtype=pto.f32, memory_space=pto.MemorySpace.RIGHT, valid_shape=[Bc, D])
             pv_acc_tile = pto.alloc_tile(shape=[Br, D], dtype=pto.f32, memory_space=pto.MemorySpace.ACC, valid_shape=[Br, D])
             pv_tile = pto.alloc_tile(shape=[Br, D], dtype=pto.f32, valid_shape=[Br, D])
-            pv_matmul(p_mat, v_mat, p_l0a, rhs_l0b, pv_acc_tile, pv_tile)
+            m = p_mat.valid_shape[0]
+            k = p_mat.valid_shape[1]
+            n = v_mat.valid_shape[1]
+            pto.mte_l1_l0a(p_mat.as_ptr(), p_l0a.as_ptr(), m, k)
+            pto.mte_l1_l0b(v_mat.as_ptr(), rhs_l0b.as_ptr(), k, n)
+            pv_matmul(p_l0a, rhs_l0b, pv_acc_tile, m, n, k)
+            pto.mte_l0c_ub(pv_acc_tile.as_ptr(), pv_tile.as_ptr(), m, n, n, n, 0)
         """
     ),
     "flash_attention.inline_simt_scope": _fixture(
@@ -1722,7 +1739,7 @@ FRAGMENT_FIXTURES = {
     ),
     "flash_attention.online_softmax_loop": _fixture(
         f"""
-        @pto.simd
+        @pto.tileop
         def flash_attention_online_softmax_loop_helper(
             s_tile: pto.Tile,
             p_tile: pto.Tile,
@@ -1761,7 +1778,7 @@ FRAGMENT_FIXTURES = {
     ),
     "flash_attention.online_softmax_compute": _fixture(
         f"""
-        @pto.simd
+        @pto.tileop
         def flash_attention_online_softmax_compute_helper(
             s_tile: pto.Tile,
             p_tile: pto.Tile,
@@ -1778,8 +1795,8 @@ FRAGMENT_FIXTURES = {
             for row in range(row_start, row_stop, 1):
                 col_mask = pto.make_mask(pto.f32, valid_cols)
                 s_row = pto.vlds(s_tile[row, 0:])
-                m_prev = scalar.load(m_prev_tile[row, 0])
-                l_prev = scalar.load(l_prev_tile[row, 0])
+                m_prev = pto.vlds(m_prev_tile.as_ptr(), row, dist="BRC_B32")
+                l_prev = pto.vlds(l_prev_tile.as_ptr(), row, dist="BRC_B32")
             {SNIPPET_PLACEHOLDER}
 
 
@@ -1805,7 +1822,7 @@ FRAGMENT_FIXTURES = {
     ),
     "flash_attention.online_softmax_store": _fixture(
         f"""
-        @pto.simd
+        @pto.tileop
         def flash_attention_online_softmax_store_helper(
             s_tile: pto.Tile,
             p_tile: pto.Tile,
@@ -1822,10 +1839,10 @@ FRAGMENT_FIXTURES = {
             for row in range(row_start, row_stop, 1):
                 col_mask = pto.make_mask(pto.f32, valid_cols)
                 p_row = pto.vexp(pto.vlds(s_tile[row, 0:]), col_mask)
-                m_next = scalar.load(m_prev_tile[row, 0])
-                l_next = scalar.load(l_prev_tile[row, 0])
-                alpha = scalar.load(alpha_tile[row, 0])
-                beta = scalar.load(beta_tile[row, 0])
+                m_next = pto.vlds(m_prev_tile.as_ptr(), row, dist="BRC_B32")
+                l_next = pto.vlds(l_prev_tile.as_ptr(), row, dist="BRC_B32")
+                alpha = pto.vlds(alpha_tile.as_ptr(), row, dist="BRC_B32")
+                beta = pto.vlds(beta_tile.as_ptr(), row, dist="BRC_B32")
             {SNIPPET_PLACEHOLDER}
 
 
@@ -1890,14 +1907,14 @@ FRAGMENT_FIXTURES = {
     ),
     "gemm.cube_helper": _fixture(
         f"""
-        @pto.cube
+        @pto.tileop
         def gemm_tile(
-            a_mat: pto.Tile,
-            b_mat: pto.Tile,
-            o_tile: pto.Tile,
             a_l0a: pto.Tile,
             b_l0b: pto.Tile,
             o_acc: pto.Tile,
+            m: pto.index,
+            n: pto.index,
+            k: pto.index,
         ):
             {SNIPPET_PLACEHOLDER}
 
@@ -1910,27 +1927,27 @@ FRAGMENT_FIXTURES = {
             a_l0a = pto.alloc_tile(shape=[BLOCK_M, BLOCK_K], dtype=pto.f32, memory_space=pto.MemorySpace.LEFT, valid_shape=[BLOCK_M, BLOCK_K])
             b_l0b = pto.alloc_tile(shape=[BLOCK_K, BLOCK_N], dtype=pto.f32, memory_space=pto.MemorySpace.RIGHT, valid_shape=[BLOCK_K, BLOCK_N])
             o_acc = pto.alloc_tile(shape=[BLOCK_M, BLOCK_N], dtype=pto.f32, memory_space=pto.MemorySpace.ACC, valid_shape=[BLOCK_M, BLOCK_N])
-            gemm_tile(a_mat, b_mat, o_tile, a_l0a, b_l0b, o_acc)
-        """
-    ),
-    "gemm.jit_kernel": _fixture(
-        f"""
-        @pto.cube
-        def gemm_tile(
-            a_mat: pto.Tile,
-            b_mat: pto.Tile,
-            o_tile: pto.Tile,
-            a_l0a: pto.Tile,
-            b_l0b: pto.Tile,
-            o_acc: pto.Tile,
-        ):
             m = a_mat.valid_shape[0]
             k = a_mat.valid_shape[1]
             n = b_mat.valid_shape[1]
             pto.mte_l1_l0a(a_mat.as_ptr(), a_l0a.as_ptr(), m, k)
             pto.mte_l1_l0b(b_mat.as_ptr(), b_l0b.as_ptr(), k, n)
-            pto.mad(a_l0a.as_ptr(), b_l0b.as_ptr(), o_acc.as_ptr(), m, n, k)
+            gemm_tile(a_l0a, b_l0b, o_acc, m, n, k)
             pto.mte_l0c_ub(o_acc.as_ptr(), o_tile.as_ptr(), m, n, n, n, 0)
+        """
+    ),
+    "gemm.jit_kernel": _fixture(
+        f"""
+        @pto.tileop
+        def gemm_tile(
+            a_l0a: pto.Tile,
+            b_l0b: pto.Tile,
+            o_acc: pto.Tile,
+            m: pto.index,
+            n: pto.index,
+            k: pto.index,
+        ):
+            pto.mad(a_l0a.as_ptr(), b_l0b.as_ptr(), o_acc.as_ptr(), m, n, k)
 
 
         {SNIPPET_PLACEHOLDER}
@@ -1948,7 +1965,7 @@ FRAGMENT_FIXTURES = {
     ),
     "pipe_communication.c2v_global_producer": _fixture(
         f"""
-        @pto.jit(target="a3")
+        @pto.jit(target="a3", mode="explicit", kernel_kind="cube")
         def pipe_communication_c2v_global_producer_probe(
             gm_slot_buffer: pto.gm_ptr(pto.f32),
             src: pto.gm_ptr(pto.f32),
@@ -1964,13 +1981,14 @@ FRAGMENT_FIXTURES = {
                 pto.make_tensor_view(src, shape=[16, 16], strides=[16, 1]),
                 offsets=[0, 0], sizes=[16, 16])
             a_tile = pto.alloc_tile(shape=[16, 16], dtype=pto.f32)
+            src_tile = a_tile
 
             {SNIPPET_PLACEHOLDER}
         """
     ),
     "pipe_communication.c2v_global_consumer": _fixture(
         f"""
-        @pto.jit(target="a3")
+        @pto.jit(target="a3", mode="explicit", kernel_kind="vector")
         def pipe_communication_c2v_global_consumer_probe(
             gm_slot_buffer: pto.gm_ptr(pto.f32),
             dst: pto.gm_ptr(pto.f32),
@@ -1986,6 +2004,7 @@ FRAGMENT_FIXTURES = {
             b_part = pto.partition_view(
                 pto.make_tensor_view(dst, shape=[16, 16], strides=[16, 1]),
                 offsets=[0, 0], sizes=[16, 16])
+            dst_tile = b_tile
 
             {SNIPPET_PLACEHOLDER}
         """
@@ -2002,7 +2021,7 @@ FRAGMENT_FIXTURES = {
     ),
     "pipe_communication.v2c_global_producer": _fixture(
         f"""
-        @pto.jit(target="a3")
+        @pto.jit(target="a3", mode="explicit", kernel_kind="vector")
         def pipe_communication_v2c_global_producer_probe(
             gm_slot_buffer: pto.gm_ptr(pto.f32),
             src: pto.gm_ptr(pto.f32),
@@ -2021,7 +2040,7 @@ FRAGMENT_FIXTURES = {
     ),
     "pipe_communication.v2c_global_consumer": _fixture(
         f"""
-        @pto.jit(target="a3")
+        @pto.jit(target="a3", mode="explicit", kernel_kind="cube")
         def pipe_communication_v2c_global_consumer_probe(
             gm_slot_buffer: pto.gm_ptr(pto.f32),
             dst: pto.gm_ptr(pto.f32),
@@ -2087,7 +2106,7 @@ FRAGMENT_FIXTURES = {
                 func.ReturnOp([])
 
 
-        @pto.jit(target="a5")
+        @pto.jit(target="a5", mode="explicit", kernel_kind="cube")
         def pipe_communication_c2v_local_producer_probe(
             src: pto.gm_ptr(pto.f32),
         ):
@@ -2105,7 +2124,7 @@ FRAGMENT_FIXTURES = {
     ),
     "pipe_communication.c2v_local_consumer": _fixture(
         f"""
-        @pto.jit(target="a5")
+        @pto.jit(target="a5", mode="explicit", kernel_kind="vector")
         def pipe_communication_c2v_local_consumer_probe(
             dst: pto.gm_ptr(pto.f32),
         ):

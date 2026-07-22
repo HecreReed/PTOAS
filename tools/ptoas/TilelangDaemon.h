@@ -22,13 +22,14 @@ namespace ptoas {
 class DaemonManager {
 public:
   static std::string generateSocketPath();
-  
+
   static bool start(const std::string &socketPath,
-                    const std::string &templateDir,
-                    const std::string &pkgPath);
-  
+                    const std::string &daemonModule,
+                    const std::string &pkgPath,
+                    const std::string &templateDir = "");
+
   static void stop();
-  
+
   static bool isRunning();
 
 private:

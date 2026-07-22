@@ -154,7 +154,20 @@ bool MemoryDependentAnalyzer::MemAlias(const BaseMemInfo *a,
   }
  
   // 2. Local Memory (UB/L1)
-  
+  // PTOPlanMemory turns each allocation into a distinct pointer_cast. Once an
+  // async MTE3 store has consumed the source SSA, a later allocation can reuse
+  // the same physical range with a different pointer_cast root. Compare those
+  // ranges directly when both sides carry known physical local addresses.
+  if (a->hasKnownPhysicalAddresses && b->hasKnownPhysicalAddresses) {
+    if (isTraceEnabled())
+      llvm::errs() << "    -> Comparing known physical local ranges.\n";
+    if (a->baseAddresses.empty() || b->baseAddresses.empty())
+      return true;
+    if (a->allocateSize == 0 || b->allocateSize == 0)
+      return true;
+    return isBufferAddressRangeOverlap(a, b);
+  }
+
   if (a->rootBuffer == b->rootBuffer) {
     if (a->baseAddresses.empty() || b->baseAddresses.empty()) return true;
     if (a->allocateSize == 0 || b->allocateSize == 0) return true;

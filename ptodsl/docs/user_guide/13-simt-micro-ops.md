@@ -279,23 +279,28 @@ def simt_ops_collective_probe(dst: pto.ptr(pto.i32, "gm")):
 
 ## 13.4 Scalar GM memory and atomic ops
 
-#### `pto.ldg(ptr: PtrType, offset: Index = 0, *, l1cache: str = "cache", l2cache: str = "nmfv") -> ScalarType`
-#### `pto.stg(value: ScalarType, ptr: PtrType, offset: Index = 0, *, l1cache: str = "cache", l2cache: str = "nmfv") -> None`
+#### `pto.ldg(ptr: PtrType, offset: Index = 0, *, l1cache: str = "cache", l2cache: str = "nmfv") -> ScalarType | VectorType`
+#### `pto.stg(value: ScalarType | VectorType, ptr: PtrType, offset: Index = 0, *, l1cache: str = "cache", l2cache: str = "nmfv") -> None`
 
-**Description**: Loads or stores one scalar value through a typed pointer with
-cache controls.
+**Description**: Loads or stores one element through a typed pointer with
+cache controls.  Supports both scalar and packed vector types.
 
 **Parameters**:
 
 | Parameter | Type | Description |
 |-----------|------|-------------|
-| `ptr` | `pto.ptr(dtype, "gm")` | GM pointer |
-| `value` | PTO scalar | Store payload for `pto.stg` |
-| `offset` | index-like value | Element offset |
+| `ptr` | `pto.ptr(dtype, "gm")` | GM pointer (scalar or vector element type) |
+| `value` | PTO scalar or vector | Store payload for `pto.stg` |
+| `offset` | index-like value | Element offset (not byte offset) |
 | `l1cache` | `"cache"` or `"uncache"` | L1 cache policy |
 | `l2cache` | cache token string | L2 cache policy accepted by VPTO |
 
 **Returns**: `pto.ldg` returns the pointer element type. `pto.stg` returns None.
+
+**Offset contract**: The offset is an element-level ``index``, not a byte
+offset.  For ``pto.ptr(pto.f32x2, "gm")``, offset 1 advances by 8 bytes
+(2 × sizeof(f32)).  Dynamic ``i64`` offsets must be cast to ``index`` via
+``scalar.index_cast(value)``.
 
 **Example**:
 
@@ -315,6 +320,29 @@ def simt_ops_ldg_stg_probe(
     dst: pto.ptr(pto.i32, "gm"),
 ):
     ldg_stg_probe[32, 1, 1](src, dst)
+```
+
+**Vector example** (``f32x2`` with dynamic ``i64`` offset):
+
+```python
+@pto.simt
+def gm_vector_ldst(
+    src: pto.ptr(pto.f32x2, "gm"),
+    dst: pto.ptr(pto.f32x2, "gm"),
+    offset: pto.i64,
+):
+    idx = scalar.index_cast(offset)
+    value = pto.ldg(src, idx)
+    pto.stg(value, dst, idx)
+
+
+@pto.jit(target="a5")
+def gm_vector_ldst_entry(
+    src: pto.ptr(pto.f32x2, "gm"),
+    dst: pto.ptr(pto.f32x2, "gm"),
+    offset: pto.i64,
+):
+    gm_vector_ldst[32, 1, 1](src, dst, offset)
 ```
 
 ---

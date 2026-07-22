@@ -37,6 +37,14 @@
 
 namespace mlir {
 namespace pto {
+  enum class PhysicalSectionKind {
+    Vector,
+    Cube,
+  };
+
+  std::optional<PhysicalSectionKind>
+  inferPhysicalSectionKindFromPipe(Operation *op);
+
   const std::set<pto::AddressSpace> LocalBufferSpace{
     pto::AddressSpace::VEC, pto::AddressSpace::MAT, pto::AddressSpace::ACC, pto::AddressSpace::LEFT, pto::AddressSpace::RIGHT, pto::AddressSpace::BIAS, pto::AddressSpace::SCALING};
   constexpr const uint8_t kBitsToByte = 8;

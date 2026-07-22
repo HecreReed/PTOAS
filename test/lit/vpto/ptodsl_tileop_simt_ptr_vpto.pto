@@ -1,0 +1,44 @@
+// Copyright (c) 2026 Huawei Technologies Co., Ltd.
+// This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+// CANN Open Software License Agreement Version 2.0 (the "License").
+// Please refer to the License for details. You may not use this file except in compliance with the License.
+// THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+// INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+// See LICENSE in the root of the software repository for the full text of the License.
+
+// A PTODSL tileop receives a Tile, derives its local address, and launches a
+// separately-defined SIMT helper. The VPTO ptr normalization must remove the
+// temporary memref bridge before emission validation.
+// RUN: ptoas --pto-arch=a5 --pto-backend=vpto --emit-vpto %s -o - | FileCheck %s
+
+// CHECK-LABEL: func.func @tileop_entry()
+// CHECK: %[[PTR:.*]] = pto.castptr %{{.*}} : i64 -> !pto.ptr<f32, ub>
+// CHECK: pto.store_vfsimt_info {{.*}}, {{.*}}, {{.*}} : i32, i32, i32
+// CHECK: call @tileop_simt_body(%[[PTR]], %{{.*}}) : (!pto.ptr<f32, ub>, i32) -> ()
+// CHECK-NOT: call @tileop_simt_stage
+// CHECK-NOT: func.func private @tileop_simt_stage
+// CHECK-NOT: memref.reinterpret_cast
+
+module attributes {pto.target_arch = "a5"} {
+  module attributes {pto.backend = "vpto", pto.kernel_kind = #pto.kernel_kind<vector>, pto.target_arch = "a5"} {
+    func.func @tileop_entry() attributes {pto.entry} {
+      %tile = pto.alloc_tile : !pto.tile_buf<vec, 1x16xf32>
+      %columns = arith.constant 16 : i32
+      call @tileop_simt_stage(%tile, %columns) : (!pto.tile_buf<vec, 1x16xf32>, i32) -> ()
+      return
+    }
+
+    func.func private @tileop_simt_stage(%tile: !pto.tile_buf<vec, 1x16xf32>, %columns: i32) attributes {pto.tileop.helper} {
+      %ptr = pto.tile_buf_addr %tile : !pto.tile_buf<vec, 1x16xf32> -> !pto.ptr<f32, ub>
+      %dim_x = arith.constant 64 : i32
+      %dim_y = arith.constant 1 : i32
+      %dim_z = arith.constant 1 : i32
+      pto.simt_launch @tileop_simt_body<<<%dim_x, %dim_y, %dim_z>>>(%ptr, %columns) : (!pto.ptr<f32, ub>, i32) -> ()
+      return
+    }
+
+    func.func @tileop_simt_body(%dst: !pto.ptr<f32, ub>, %columns: i32) attributes {pto.simt_entry, pto.simt_max_threads = 64 : i32} {
+      return
+    }
+  }
+}

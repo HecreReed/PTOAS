@@ -48,24 +48,32 @@ The current PTO SIMT surface supports these operation families:
 | Conversion | `pto.convert` |
 | Entry synchronization and state | `pto.syncthreads`, `pto.threadfence`, `pto.threadfence_block`, `pto.keep`, `pto.resume` |
 
-Two optional function attributes may be attached to a `pto.simt_entry`
+One optional function attribute may be attached to a `pto.simt_entry`
 function:
 
 | Function attribute | Type | Default | Meaning |
 |--------------------|------|---------|---------|
 | `pto.simt_max_threads` | signless `i32` integer attribute | `1024` | Compile-time launch envelope. It should cover the largest `dim_x * dim_y * dim_z` launch count used for this entry. |
-| `pto.simt_max_regs` | signless `i32` integer attribute | `32` | Compile-time scalar register budget per workitem. Lower values constrain scalar live state; higher values permit more scalar live values with higher resource pressure. |
 
-Both attributes are optional. If present, they must be positive `i32`
-attributes and may only appear on functions that also carry `pto.simt_entry`.
-They do not launch work by themselves; the actual workitem count comes from
-`pto.store_vfsimt_info` or `pto.simt_launch`.
+`pto.simt_max_threads` may only appear on functions that also carry
+`pto.simt_entry`. It must be a positive `i32` value no greater than 2048. The
+thread envelope determines the emitted scalar register budget:
+
+| `pto.simt_max_threads` | Emitted `simt-max-registers` |
+|------------------------|------------------------------|
+| `1` to `256` | `128` |
+| `257` to `512` | `64` |
+| `513` to `1024` | `32` |
+| `1025` to `2048` | `16` |
+
+The register budget is derived automatically and is not independently
+configurable. `pto.simt_max_threads` does not launch work by itself; the actual
+workitem count comes from `pto.store_vfsimt_info` or `pto.simt_launch`.
 
 ```mlir
 func.func @body(%dst: !pto.ptr<i32, ub>)
     attributes {pto.simt_entry,
-                pto.simt_max_threads = 256 : i32,
-                pto.simt_max_regs = 48 : i32} {
+                pto.simt_max_threads = 256 : i32} {
   return
 }
 ```
@@ -493,18 +501,25 @@ memory[effective_element] = value
 %value = pto.ldg %gm[%offset] l1cache(uncache) l2cache(nmpref) : !pto.ptr<T, gm> -> T
 ```
 
-- **semantics:** Load one scalar element from GM at `%ptr + %offset` using the
+- **semantics:** Load one element from GM at `%ptr + %offset` using the
   selected cache controls.
 - **inputs:** `%ptr` is a `!pto.ptr<T, gm>`. `%offset` is an `index` element
-  offset, not a byte offset.
+  offset, not a byte offset.  For ``!pto.ptr<vector<2xf32>, gm>``, offset 1
+  advances by 8 bytes (2 × sizeof(f32)).
 - **attributes:** `l1cache` may be `l1cache(cache)` or `l1cache(uncache)` and
   defaults to `cache`. `l2cache(...)` uses the load L2 cache table and defaults
   to `nmfv`.
-- **outputs:** One scalar value of type `T`.
+- **outputs:** One value of type `T`.
 - **constraints and limitations:** `pto.ldg` supports 8/16/32/64-bit integer
-  values and `f16`, `bf16`, `f32`, and `f64` floating values. The floating
-  forms use the target's same-width GM load path and reinterpret the loaded
-  bits as the requested floating type.
+  values, `f16`, `bf16`, `f32`, `f64`, `fp8`, `hif8`, and packed vectors
+  `vector<2xf16>`, `vector<2xbf16>`, `vector<2xf32>`, `vector<2xf8E4M3FN>`,
+  `vector<2xf8E5M2>`, `vector<2xi8>`, `vector<2xi16>`, `vector<2xi32>`,
+  and `!pto.hif8x2`.  Vector loads from GM
+  use the same-width load path as scalars (e.g. ``vector<2xf32>`` uses a 64-bit
+  GM load) and reinterpret the loaded bits as the requested vector type.  The
+  effective address for ``vector<2xf32>`` must satisfy 8-byte alignment
+  (enforced by the call-site contract; the op does not carry an alignment
+  operand).
 
 ### `pto.stg`
 
@@ -522,17 +537,18 @@ pto.stg %value, %gm[%offset] l1cache(cache) : !pto.ptr<T, gm>, T
 pto.stg %value, %gm[%offset] l1cache(uncache) l2cache(wtsred) : !pto.ptr<T, gm>, T
 ```
 
-- **semantics:** Store one scalar element to GM at `%ptr + %offset` using the
+- **semantics:** Store one element to GM at `%ptr + %offset` using the
   selected cache controls.
-- **inputs:** `%value` is the scalar element to write. `%ptr` is a
-  `!pto.ptr<T, gm>`. `%offset` is an `index` element offset.
+- **inputs:** `%value` is the element to write. `%ptr` is a
+  `!pto.ptr<T, gm>`. `%offset` is an `index` element offset
+  (same element-level semantics as `pto.ldg`).
 - **attributes:** `l1cache` may be `l1cache(cache)` or `l1cache(uncache)` and
   defaults to `cache`. `l2cache(...)` uses the store/atomic L2 cache table and
   defaults to `nmfv`.
 - **outputs:** None.
 - **constraints and limitations:** `%value` type must match the pointer element
-  type. `pto.stg` supports 8/16/32/64-bit integer values and `f16`, `bf16`,
-  `f32`, and `f64` floating values.
+  type.  Supported types and alignment requirements are the same as `pto.ldg`
+  (see above).
 
 Example:
 
@@ -1063,8 +1079,8 @@ func.call @body(%ub_out) : (!pto.ptr<i32, ub>) -> ()
 pto.set_flag["PIPE_V", "PIPE_MTE3", "EVENT_ID0"]
 pto.wait_flag["PIPE_V", "PIPE_MTE3", "EVENT_ID0"]
 pto.mte_ub_gm %ub_out, %gm_out, %len
-  nburst(%n, %src_stride, %dst_stride)
-  : !pto.ptr<i32, ub>, !pto.ptr<i32, gm>, i64, i64, i64, i64
+  nburst(%n, %src_stride, %dst_stride) l2_cache_ctl(%l2_cache_ctl)
+  : !pto.ptr<i32, ub>, !pto.ptr<i32, gm>, i64, i64, i64, i64, i64
 ```
 
 For pipeline synchronization semantics, see
@@ -1095,8 +1111,8 @@ module attributes {pto.target_arch = "a5",
     pto.set_flag["PIPE_V", "PIPE_MTE3", "EVENT_ID0"]
     pto.wait_flag["PIPE_V", "PIPE_MTE3", "EVENT_ID0"]
     pto.mte_ub_gm %ub_out, %out, %c128_i64
-      nburst(%c32_i64, %c128_i64, %c128_i64)
-      : !pto.ptr<i32, ub>, !pto.ptr<i32, gm>, i64, i64, i64, i64
+      nburst(%c32_i64, %c128_i64, %c128_i64) l2_cache_ctl(%c0_i64)
+      : !pto.ptr<i32, ub>, !pto.ptr<i32, gm>, i64, i64, i64, i64, i64
     pto.barrier #pto.pipe<PIPE_ALL>
     return
   }

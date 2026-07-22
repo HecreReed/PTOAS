@@ -263,17 +263,14 @@ class VectorCubeSurfaceTest(unittest.TestCase):
         other = SimpleNamespace(type="vec_ty")
         mask = SimpleNamespace(type="mask_ty")
         reduced = object()
-        scalar = object()
         selected = object()
 
         with patch.object(_ops, "unwrap_surface_value", side_effect=_identity), \
              patch.object(_ops, "wrap_surface_value", side_effect=_identity), \
-             patch.object(_ops, "_extract_lowest_lane_scalar", return_value=scalar) as extract_scalar, \
              patch.object(_ops._pto, "VcgminOp", return_value=SimpleNamespace(result=reduced)) as vcgmin_op:
             output = _ops.vcgmin(vec, mask)
-        self.assertIs(output, scalar)
+        self.assertIs(output, reduced)
         self.assertEqual(vcgmin_op.call_args.args, ("vec_ty", vec, mask))
-        extract_scalar.assert_called_once_with(reduced, mask)
 
         with patch.object(_ops, "unwrap_surface_value", side_effect=_identity), \
              patch.object(_ops, "wrap_surface_value", side_effect=_identity), \
@@ -417,6 +414,15 @@ class VectorCubeSurfaceTest(unittest.TestCase):
             self.assertEqual(_ops._mad_sat_attr(pto.SatMode.ON), "#pto<mad_sat_mode sat>")
             self.assertEqual(_ops._mad_sat_attr(pto.SatMode.OFF), "#pto<mad_sat_mode nosat>")
             self.assertEqual(_ops._acc_store_sat_attr(pto.SatMode.PRESERVE_NAN), "#pto<acc_store_sat_mode sat_preserve_nan>")
+
+    def test_acc_store_no_convert_skips_payload_kind_check(self):
+        payload = object()
+        with patch.object(_ops, "Attribute") as attr:
+            attr.parse.side_effect = lambda text: text
+            value, mode = _ops._acc_store_pre_quant((payload, "no_convert"))
+
+        self.assertIs(value, payload)
+        self.assertEqual(mode, "#pto<quant_pre_mode no_convert>")
 
     def test_tile_selection_surface_exposes_optional_tmp(self):
         for func, expected in [

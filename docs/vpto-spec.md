@@ -379,8 +379,8 @@ pto.vecscope {
 pto.set_flag["PIPE_V", "PIPE_MTE3", "EVENT_ID0"]
 pto.wait_flag["PIPE_V", "PIPE_MTE3", "EVENT_ID0"]
 pto.mte_ub_gm %8, %14, %c128_i64
-  nburst(%c32_i64, %c128_i64, %c128_i64)
-  : !pto.ptr<f32, ub>, !pto.ptr<f32, gm>, i64, i64, i64, i64
+  nburst(%c32_i64, %c128_i64, %c128_i64) l2_cache_ctl(%c0_i64)
+  : !pto.ptr<f32, ub>, !pto.ptr<f32, gm>, i64, i64, i64, i64, i64
 ```
 
 ### Example: Strict VecScope

@@ -15,6 +15,7 @@
 #   export WORKSPACE_DIR=/path/to/workspace
 #   export LLVM_BUILD_DIR=/path/to/llvm-project/build-shared
 #   export PTO_SOURCE_DIR=/path/to/PTOAS
+#   export PTODSL_PYTHON_ROOT=/path/to/PTOAS/ptodsl
 #   export PTO_INSTALL_DIR=/path/to/PTOAS/install
 #   export PTO_PYTHON_BIN=/path/to/python3
 #   export PTOAS_ENV_SKIP_SMOKE_TEST=1  # skip legacy MatMul/Abs sample checks
@@ -55,6 +56,7 @@ fi
 export PTOAS_PYTHON_SITE
 export PTO_PYTHON_ROOT="${PTO_PYTHON_ROOT:-${PTO_INSTALL_DIR}}"
 export PTO_PYTHON_BUILD_ROOT="${PTO_PYTHON_BUILD_ROOT:-${PTO_SOURCE_DIR}/build/python}"
+export PTODSL_PYTHON_ROOT="${PTODSL_PYTHON_ROOT:-${PTO_SOURCE_DIR}/ptodsl}"
 export PYBIND11_CMAKE_DIR=$(python3 -m pybind11 --cmakedir)
 export PTOAS_FLAGS="${PTOAS_FLAGS:-}"
 export PTOAS_OUT_DIR="${PTOAS_OUT_DIR:-${PTO_SOURCE_DIR}/build/output}"
@@ -116,6 +118,7 @@ _ptoas_prepend_path PYTHONPATH "${PTO_PYTHON_ROOT}"
 _ptoas_prepend_path PYTHONPATH "${PTOAS_PYTHON_SITE}"
 _ptoas_prepend_path PYTHONPATH "${MLIR_PYTHON_ROOT}"
 _ptoas_prepend_path PYTHONPATH "${PTO_PYTHON_BUILD_ROOT}"
+_ptoas_prepend_path PYTHONPATH "${PTODSL_PYTHON_ROOT}"
 
 _ptoas_prepend_path LD_LIBRARY_PATH "${LLVM_BUILD_DIR}/lib"
 _ptoas_prepend_path LD_LIBRARY_PATH "${PTO_INSTALL_DIR}/lib"
@@ -132,7 +135,7 @@ echo "[ptoas_env] LLVM_BUILD_DIR=${LLVM_BUILD_DIR}"
 echo "[ptoas_env] PTO_INSTALL_DIR=${PTO_INSTALL_DIR}"
 echo "[ptoas_env] PTO_ISA_PATH=${PTO_ISA_PATH}"
 echo "[ptoas_env] ASCEND_HOME_PATH=${ASCEND_HOME_PATH}"
-echo "[ptoas_env] PATH/PYTHONPATH/LD_LIBRARY_PATH updated"
+echo "[ptoas_env] PATH/LD_LIBRARY_PATH updated"
 
 _ptoas_env_skip_smoke="${PTOAS_ENV_SKIP_SMOKE_TEST:-0}"
 if [[ -z "${PTOAS_ENV_SKIP_SMOKE_TEST:-}" &&

@@ -153,6 +153,7 @@ def build_manual_library(compiled, *, dyn_shared_bytes: int = _DYN_SHARED_BYTES)
         launch_cpp,
         launch_object,
         kernel_kind=module_spec.kernel_kind,
+        target_arch=module_spec.target_arch,
         export_macro=f"{ir_function_name}_EXPORTS",
     )
     _link_shared_library(

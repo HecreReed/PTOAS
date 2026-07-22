@@ -37,6 +37,55 @@ def OpPipeInterface : OpInterface<"OpPipeInterface"> {
   ];
 }
 
+// Instruction-class marker interfaces. These categories are independent from
+// OpPipeInterface: a pipe describes where an operation executes, while these
+// markers describe the operation's abstraction level and instruction family.
+def TileOpInterface : OpInterface<"TileOpInterface"> {
+  let description = [{
+    Marks a high-level PTO Tile operation with tile-granular semantics.
+  }];
+  let cppNamespace = "::mlir::pto";
+}
+
+def MicroOpInterface : OpInterface<"MicroOpInterface"> {
+  let description = [{
+    Marks a low-level PTO micro-instruction that directly models a hardware
+    instruction rather than a structural, view, or high-level Tile operation.
+  }];
+  let cppNamespace = "::mlir::pto";
+}
+
+def VectorMicroOpInterface : OpInterface<"VectorMicroOpInterface"> {
+  let description = [{
+    Marks a vector micro-instruction operating on vector registers, masks, or
+    vector memory state.
+  }];
+  let cppNamespace = "::mlir::pto";
+}
+
+def CubeMicroOpInterface : OpInterface<"CubeMicroOpInterface"> {
+  let description = [{
+    Marks a Cube micro-instruction operating on the matrix execution unit.
+  }];
+  let cppNamespace = "::mlir::pto";
+}
+
+def MteOpInterface : OpInterface<"MteOpInterface"> {
+  let description = [{
+    Marks an operation that performs MTE/DMA data movement. High-level Tile
+    operations and raw micro-instructions may both carry this marker.
+  }];
+  let cppNamespace = "::mlir::pto";
+}
+
+def SimtOpInterface : OpInterface<"SimtOpInterface"> {
+  let description = [{
+    Marks an instruction executed directly by a SIMT entry. This excludes the
+    pto.simt_launch boundary operation.
+  }];
+  let cppNamespace = "::mlir::pto";
+}
+
 // PTO destination-style ops: have "init" operands (e.g. $dst) for plan-memory.
 // No tensor/memref type requirement (unlike MLIR DestinationStyleOpInterface).
 // Each op implements getDpsInitsMutable(); this interface provides getDpsInits().

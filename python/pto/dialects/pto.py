@@ -11,6 +11,7 @@ import importlib.util
 import functools
 import os
 from pathlib import Path
+import sys
 from typing import Optional
 
 from mlir import ir as _ods_ir
@@ -24,7 +25,10 @@ from ._ods_common import (
 
 
 def _candidate_pto_ext_dirs():
-    candidates = []
+    # Prefer the extension shipped next to the active wrapper so installed
+    # wheels stay self-consistent even if the caller also exported a developer
+    # PTO_INSTALL_DIR / PTO_PYTHON_ROOT in the environment.
+    candidates = [Path(__file__).resolve().parent.parent / "_mlir_libs"]
     env_roots = (
         os.environ.get("PTO_PYTHON_BUILD_ROOT"),
         os.environ.get("PTO_PYTHON_ROOT"),
@@ -34,9 +38,6 @@ def _candidate_pto_ext_dirs():
         if not root:
             continue
         candidates.append(Path(root) / "mlir" / "_mlir_libs")
-
-    # Fallback to the sibling extension that ships with the current wrapper.
-    candidates.append(Path(__file__).resolve().parent.parent / "_mlir_libs")
 
     seen = set()
     ordered = []
@@ -51,6 +52,11 @@ def _candidate_pto_ext_dirs():
 
 
 def _load_local_pto_ext():
+    module_name = "mlir._mlir_libs._pto"
+    cached = sys.modules.get(module_name)
+    if cached is not None:
+        return cached
+
     candidates = []
     for lib_dir in _candidate_pto_ext_dirs():
         for suffix in ("*.so", "*.pyd", "*.dll", "*.dylib"):
@@ -62,11 +68,20 @@ def _load_local_pto_ext():
     for so_path in candidates:
         try:
             spec = importlib.util.spec_from_file_location(
-                "mlir._mlir_libs._pto", so_path
+                module_name, so_path
             )
             if spec and spec.loader:
                 mod = importlib.util.module_from_spec(spec)
-                spec.loader.exec_module(mod)
+                previous = sys.modules.get(module_name)
+                sys.modules[module_name] = mod
+                try:
+                    spec.loader.exec_module(mod)
+                except Exception:
+                    if previous is None:
+                        sys.modules.pop(module_name, None)
+                    else:
+                        sys.modules[module_name] = previous
+                    raise
                 return mod
         except ImportError as exc:
             if first_error is None:
@@ -117,6 +132,8 @@ TileType = _pto_mod.TileType
 TileBufType = _pto_mod.TileBufType
 AddressSpace = _pto_mod.AddressSpace
 AddressSpaceAttr = _pto_mod.AddressSpaceAttr
+FenceScope = _pto_mod.FenceScope
+FenceScopeAttr = _pto_mod.FenceScopeAttr
 TileBufConfigAttr = _pto_mod.TileBufConfigAttr
 BLayout = _pto_mod.BLayout
 BLayoutAttr = _pto_mod.BLayoutAttr
@@ -254,6 +271,24 @@ def _install_default_precision_type_compat():
 
 _install_default_precision_type_compat()
 
+
+def _install_enum_attr_builders():
+    def address_space_attr_builder(value, context=None):
+        return AddressSpaceAttr.get(value, context)
+
+    def fence_scope_attr_builder(value, context=None):
+        return FenceScopeAttr.get(value, context)
+
+    _ods_ir.AttrBuilder.insert(
+        "PTO_AddressSpaceAttr", address_space_attr_builder, replace=True
+    )
+    _ods_ir.AttrBuilder.insert(
+        "PTO_FenceScopeAttr", fence_scope_attr_builder, replace=True
+    )
+
+
+_install_enum_attr_builders()
+
 __all__ = [
     # Dialect utilities
     "register_dialect",
@@ -273,6 +308,8 @@ __all__ = [
     "TileBufType",
     "AddressSpace",
     "AddressSpaceAttr",
+    "FenceScope",
+    "FenceScopeAttr",
     "BLayout",
     "BLayoutAttr",
     "SLayout",

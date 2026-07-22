@@ -146,25 +146,23 @@ module attributes {pto.target_arch = "a5", pto.kernel_kind = #pto.kernel_kind<ve
 // CHECK-NEXT: %[[COL_BOUND:.*]] = arith.minsi %[[VCOL]],
 // CHECK: %[[REGION:.*]] = pto.fusion_region {
 // CHECK: scf.for {{.*}} to %[[ROW_BOUND]] step
-// CHECK-NEXT: %{{.*}} = arith.index_cast %[[COL_BOUND]] : index to i32
-// CHECK-NEXT: %{{.*}} = arith.index_cast %[[COL_BOUND]] : index to i32
-// CHECK-NEXT: %{{.*}} = arith.index_cast %[[COL_BOUND]] : index to i32
-// CHECK-NEXT: %{{.*}}:3 = scf.for {{.*}} to %[[COL_BOUND]] step {{.*}} -> (i32, i32, i32) {
+// CHECK: %{{.*}}:3 = scf.for {{.*}} to %[[COL_BOUND]] step {{.*}} iter_args
+// CHECK-SAME: -> (index, index, index) {
 // CHECK: %[[ADD0:.*]] = pto.vadd
-// CHECK-NEXT: %{{.*}} = arith.subi
-// CHECK-NEXT: %[[STORE0:.*]] = memref.subview
-// CHECK-NEXT: pto.vsts %[[ADD0]], %[[STORE0]]
+// CHECK: %{{.*}} = arith.subi
+// CHECK: %[[STORE0:.*]] = memref.subview
+// CHECK: pto.vsts %[[ADD0]], %[[STORE0]]
 // CHECK: %[[ADD1:.*]] = pto.vadd
-// CHECK-NEXT: %{{.*}} = arith.subi
-// CHECK-NEXT: %[[STORE1:.*]] = memref.subview
-// CHECK-NEXT: pto.vsts %[[ADD1]], %[[STORE1]]
+// CHECK: %{{.*}} = arith.subi
+// CHECK: %[[STORE1:.*]] = memref.subview
+// CHECK: pto.vsts %[[ADD1]], %[[STORE1]]
 // CHECK: %[[ADD2:.*]] = pto.vadd
-// CHECK-NEXT: %{{.*}} = arith.subi
-// CHECK-NEXT: %[[STORE2:.*]] = memref.subview
-// CHECK-NEXT: pto.vsts %[[ADD2]], %[[STORE2]]
+// CHECK: %{{.*}} = arith.subi
+// CHECK: %[[STORE2:.*]] = memref.subview
+// CHECK: pto.vsts %[[ADD2]], %[[STORE2]]
 // CHECK: }
 // CHECK: pto.yield(%{{.*}}) : (!pto.tile_buf<vec, 32x32xf32, valid=?x?>) -> ()
-// CHECK: pto.copy_ubuf_to_gm
+// CHECK: pto.mte_ub_gm
 
 // CHECK-LABEL: func.func @fusion_low_level_loop_computed_dynamic_shape(
 // CHECK-SAME: %[[VROW2:arg[0-9]+]]: index
@@ -175,20 +173,19 @@ module attributes {pto.target_arch = "a5", pto.kernel_kind = #pto.kernel_kind<ve
 // CHECK-NEXT: %[[TILE_COL:.*]] = arith.select %[[COL_CMP]], %[[VCOL2]],
 // CHECK: %[[REGION2:.*]] = pto.fusion_region {
 // CHECK: scf.for {{.*}} to %[[TILE_ROW]] step
-// CHECK-NEXT: %{{.*}} = arith.index_cast %[[TILE_COL]] : index to i32
-// CHECK-NEXT: %{{.*}} = arith.index_cast %[[TILE_COL]] : index to i32
-// CHECK-NEXT: %{{.*}}:2 = scf.for {{.*}} to %[[TILE_COL]] step {{.*}} -> (i32, i32) {
+// CHECK: %{{.*}}:2 = scf.for {{.*}} to %[[TILE_COL]] step {{.*}} iter_args
+// CHECK-SAME: -> (index, index) {
 // CHECK: %[[CADD0:.*]] = pto.vadd
-// CHECK-NEXT: %{{.*}} = arith.subi
-// CHECK-NEXT: %[[CSTORE0:.*]] = memref.subview
-// CHECK-NEXT: pto.vsts %[[CADD0]], %[[CSTORE0]]
+// CHECK: %{{.*}} = arith.subi
+// CHECK: %[[CSTORE0:.*]] = memref.subview
+// CHECK: pto.vsts %[[CADD0]], %[[CSTORE0]]
 // CHECK: %[[CADD1:.*]] = pto.vadd
-// CHECK-NEXT: %{{.*}} = arith.subi
-// CHECK-NEXT: %[[CSTORE1:.*]] = memref.subview
-// CHECK-NEXT: pto.vsts %[[CADD1]], %[[CSTORE1]]
+// CHECK: %{{.*}} = arith.subi
+// CHECK: %[[CSTORE1:.*]] = memref.subview
+// CHECK: pto.vsts %[[CADD1]], %[[CSTORE1]]
 // CHECK: }
 // CHECK: pto.yield(%{{.*}}) : (!pto.tile_buf<vec, 32x32xf32, valid=?x?>) -> ()
-// CHECK: pto.copy_ubuf_to_gm
+// CHECK: pto.mte_ub_gm
 
 // CHECK-LABEL: func.func @fusion_low_level_loop_dynamic_tadd_tmul_trowsum(
 // CHECK-SAME: %[[RROW:arg[0-9]+]]: index
@@ -197,25 +194,24 @@ module attributes {pto.target_arch = "a5", pto.kernel_kind = #pto.kernel_kind<ve
 // CHECK-NEXT: %[[RCOL_BOUND:.*]] = arith.minsi %[[RCOL]],
 // CHECK: pto.fusion_region {
 // Elementwise + reduce fused into one row loop with iter_args.
-// CHECK: scf.for {{.*}} to %[[RROW_BOUND]] step {{.*}} iter_args
+// CHECK: scf.for {{.*}} to %[[RROW_BOUND]] step
 // Inner col loop carries reduce accumulator (vreg).
-// CHECK: %{{.*}}:4 = scf.for {{.*}} to %[[RCOL_BOUND]] step {{.*}} iter_args({{.*}}, {{.*}}, {{.*}}, {{.*}}) -> (i32, i32, i32, !pto.vreg<64xf32>) {
+// CHECK: scf.for {{.*}} to %[[RCOL_BOUND]] step {{.*}} iter_args
 // CHECK: %[[RADD:.*]] = pto.vadd
-// CHECK-NEXT: %{{.*}} = arith.subi
-// CHECK-NEXT: %[[RADD_STORE:.*]] = memref.subview
-// CHECK-NEXT: pto.vsts %[[RADD]], %[[RADD_STORE]]
+// CHECK: %{{.*}} = arith.subi
+// CHECK: %[[RADD_STORE:.*]] = memref.subview
+// CHECK: pto.vsts %[[RADD]], %[[RADD_STORE]]
 // CHECK: %[[RMUL:.*]] = pto.vmul
-// CHECK-NEXT: %{{.*}} = arith.subi
-// CHECK-NEXT: %[[RMUL_STORE:.*]] = memref.subview
-// CHECK-NEXT: pto.vsts %[[RMUL]], %[[RMUL_STORE]]
+// CHECK: %{{.*}} = arith.subi
+// CHECK: %[[RMUL_STORE:.*]] = memref.subview
+// CHECK: pto.vsts %[[RMUL]], %[[RMUL_STORE]]
 // Reduce computation inside the same col loop.
 // CHECK: pto.vcadd
 // CHECK: %{{.*}} = pto.vadd
-// CHECK: scf.yield {{.*}} : i32, i32, i32, !pto.vreg<64xf32>
+// CHECK: scf.yield {{.*}} : index, index, !pto.vreg<64xf32>, index
 // CHECK: }
 // Epilogue: row-reduction result store after inner loop.
 // CHECK: pto.vsts
-// CHECK: scf.yield {{.*}} : i32
-// CHECK: }
 // CHECK: pto.yield() : () -> ()
+// CHECK: }
 // CHECK: return

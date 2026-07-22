@@ -198,7 +198,7 @@ from mlir.dialects import pto as mlir_pto
 ```
 
 > 说明：
-> - `ptoas` wheel 会同时安装 PTODSL。
+> - `ptoas` wheel 会同时安装 PTODSL，并提供可直接调用的 `ptoas` CLI。
 > - `ptoas-bin-*.tar.gz` 这类 compiler-only 二进制 tarball 只提供 CLI/toolchain，
 >   **不是** PTODSL-capable Python distribution；仅解压 tarball 不能保证
 >   `import ptodsl` 可用。
@@ -208,8 +208,8 @@ from mlir.dialects import pto as mlir_pto
 ## 4. 运行环境配置 (Runtime Environment)
 
 如果你已经通过 `pip install .`、`pip install -e .` 或 `pip install ptoas-*.whl`
-完成安装，那么 `import ptodsl` / `from mlir.dialects import pto` 不应再依赖手动
-设置 `PYTHONPATH`。
+完成安装，那么 `import ptodsl` / `from mlir.dialects import pto` / `ptoas`
+都不应再依赖手动设置 `PYTHONPATH`。
 
 下面这组环境变量主要用于**直接消费 build/install tree** 的场景，例如：
 

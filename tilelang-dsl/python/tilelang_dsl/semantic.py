@@ -112,6 +112,26 @@ from .types import (
 )
 
 
+_MTE_STORE_L2_CACHE_CONTROL_VALUES = {
+    "nmfv": 0,
+    "nmlv": 1,
+    "nmprs": 2,
+    "nmred": 3,
+    "naci": 4,
+    "napw": 5,
+    "napi": 6,
+    "nared": 7,
+    "wbhfv": 8,
+    "wbhlv": 9,
+    "wbhprs": 10,
+    "wbhred": 11,
+    "wtsfv": 12,
+    "wtslv": 13,
+    "wtsprs": 14,
+    "wtsred": 15,
+}
+
+
 _DTYPE_SYMBOLS = {
     "i1": i1,
     "i8": i8,
@@ -3891,6 +3911,19 @@ class _SemanticAnalyzer:
                     return
             raise TypeError(f"{context} requires source/destination pointer element dtypes to match")
 
+    def _require_matching_pointer_element_dtypes(
+        self,
+        lhs: SemanticExpr,
+        rhs: SemanticExpr,
+        context: str,
+    ) -> None:
+        lhs_dtype = lhs.type.element_dtype
+        rhs_dtype = rhs.type.element_dtype
+        if lhs_dtype is None or rhs_dtype is None:
+            return
+        if lhs_dtype != rhs_dtype:
+            raise TypeError(f"{context} requires source/destination pointer element dtypes to match")
+
     def _require_cube_i64_tuple(
         self,
         expr: SemanticExpr,
@@ -4218,19 +4251,33 @@ class _SemanticAnalyzer:
         dst = self._require_pointer_expr(args[1], "pto.mte_ub_gm destination", memory_space="gm")
         self._require_matching_pointer_element_dtypes(src, dst, "pto.mte_ub_gm")
         self._require_i64_like_expr(args[2], "pto.mte_ub_gm len_burst")
-        allowed_keywords = {"nburst", "loops"}
+        allowed_keywords = {"nburst", "loops", "l2_cache"}
         unsupported = sorted(set(keywords) - allowed_keywords)
         if unsupported:
             raise TypeError(
-                "pto.mte_ub_gm only accepts keyword(s) nburst, loops in TileLang DSL v1; "
+                "pto.mte_ub_gm only accepts keyword(s) nburst, loops, l2_cache in TileLang DSL v1; "
                 f"got unsupported keyword(s): {', '.join(unsupported)}"
             )
+        if "l2_cache" in keywords:
+            l2_cache = self._require_string_expr(keywords["l2_cache"], "pto.mte_ub_gm l2_cache").strip().lower()
+            if l2_cache not in _MTE_STORE_L2_CACHE_CONTROL_VALUES:
+                expected = ", ".join(sorted(_MTE_STORE_L2_CACHE_CONTROL_VALUES))
+                raise ValueError(
+                    f"pto.mte_ub_gm l2_cache does not support {l2_cache!r}; expected one of {expected}"
+                )
+            l2_cache_ctl = SemanticLiteralExpr(
+                value=_MTE_STORE_L2_CACHE_CONTROL_VALUES[l2_cache],
+                type=SemanticScalarType(dtype=ScalarType("i64")),
+            )
+        else:
+            l2_cache_ctl = SemanticLiteralExpr(value=0, type=SemanticScalarType(dtype=ScalarType("i64")))
+        self._require_i64_like_expr(l2_cache_ctl, "pto.mte_ub_gm l2_cache_ctl")
         nburst_expr = self._require_grouped_mte_nburst(keywords, "pto.mte_ub_gm")
         loops_expr = self._normalize_cube_loop_groups(keywords.get("loops"), "pto.mte_ub_gm loops")
         return SemanticCallExpr(
             namespace="pto",
             name="mte_ub_gm",
-            args=(args[0], args[1], args[2], nburst_expr, loops_expr),
+            args=(args[0], args[1], args[2], l2_cache_ctl, nburst_expr, loops_expr),
             type=None,
         )
 

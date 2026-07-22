@@ -18,8 +18,8 @@
 // pto.tcolargmin should be lowered to vector-style VPTO IR.
 // CHECK: func.func @TCOLARGMIN
 // CHECK-NOT: pto.tcolargmin ins
-// CHECK: pto.castptr
 // CHECK: pto.vecscope
+// CHECK: pto.castptr
 // CHECK: pto.vdup
 // CHECK: pto.vlds
 // CHECK: pto.vcmp

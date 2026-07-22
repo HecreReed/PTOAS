@@ -79,9 +79,12 @@ module attributes {pto.target_arch = "a5", pto.kernel_kind = #pto.kernel_kind<ve
 
 // PLAN checks: all three tadd ops share group_id=0
 // PLAN-LABEL: func.func @computed_shape_e2e(
-// PLAN: pto.tadd {{.*}} {pto.fusion.group_id = 0 : i64, pto.fusion.order = 0 : i64}
-// PLAN: pto.tadd {{.*}} {pto.fusion.group_id = 0 : i64, pto.fusion.order = 1 : i64}
-// PLAN: pto.tadd {{.*}} {pto.fusion.group_id = 0 : i64, pto.fusion.order = 2 : i64}
+// PLAN: pto.tadd
+// PLAN-SAME: pto.fusion.group_id = 0 : i64, pto.fusion.order = 0 : i64
+// PLAN: pto.tadd
+// PLAN-SAME: pto.fusion.group_id = 0 : i64, pto.fusion.order = 1 : i64
+// PLAN: pto.tadd
+// PLAN-SAME: pto.fusion.group_id = 0 : i64, pto.fusion.order = 2 : i64
 
 // REGION checks: all three tadd ops inside one fusion_region
 // REGION-LABEL: func.func @computed_shape_e2e(
@@ -104,4 +107,4 @@ module attributes {pto.target_arch = "a5", pto.kernel_kind = #pto.kernel_kind<ve
 // LOOP: pto.vadd
 // LOOP: }
 // LOOP: pto.yield
-// LOOP: pto.copy_ubuf_to_gm
+// LOOP: pto.mte_ub_gm

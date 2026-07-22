@@ -7,15 +7,16 @@
 // See LICENSE in the root of the software repository for the full text of the License.
 
 #include "TilelangDaemon.h"
-#include "llvm/Support/FileSystem.h"
-#include "llvm/Support/Program.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/StringRef.h"
+#include "llvm/Support/FileSystem.h"
+#include "llvm/Support/Program.h"
 #include <chrono>
 #include <cstdlib>
 #include <signal.h>
 #include <thread>
 #include <unistd.h>
+#include <vector>
 
 extern char **environ;
 
@@ -24,12 +25,13 @@ namespace ptoas {
 std::optional<std::pair<int, std::string>> DaemonManager::processInfo;
 
 std::string DaemonManager::generateSocketPath() {
-  return "/tmp/tilelang_daemon_" + std::to_string(::getpid()) + ".sock";
+  return "/tmp/tilelib_daemon_" + std::to_string(::getpid()) + ".sock";
 }
 
 bool DaemonManager::start(const std::string &socketPath,
-                          const std::string &templateDir,
-                          const std::string &pkgPath) {
+                          const std::string &daemonModule,
+                          const std::string &pkgPath,
+                          const std::string &templateDir) {
   auto pythonPath = llvm::sys::findProgramByName("python3");
   if (!pythonPath) {
     llvm::errs() << "Error: Cannot find python3 executable for daemon\n";
@@ -37,10 +39,12 @@ bool DaemonManager::start(const std::string &socketPath,
   }
 
   llvm::SmallVector<llvm::StringRef, 8> args = {
-      *pythonPath, "-m", "tilelang_dsl.daemon",
-      "--socket", socketPath,
-      "--template-dir", templateDir,
+      *pythonPath, "-m", daemonModule, "--socket", socketPath,
   };
+  if (!templateDir.empty()) {
+    args.push_back("--template-dir");
+    args.push_back(templateDir);
+  }
 
   llvm::SmallVector<llvm::StringRef> envp;
   std::string pythonPathEnv;
@@ -69,26 +73,41 @@ bool DaemonManager::start(const std::string &socketPath,
   
   llvm::sys::ProcessInfo procInfo = llvm::sys::ExecuteNoWait(
       *pythonPath, args,
-      !pkgPath.empty() ? std::optional<llvm::ArrayRef<llvm::StringRef>>(envp) : std::nullopt,
+      !pkgPath.empty()
+          ? std::optional<llvm::ArrayRef<llvm::StringRef>>(envp)
+          : std::nullopt,
       {}, 0, &errMsg, &executionFailed, nullptr, true);
 
   if (executionFailed || procInfo.Pid == llvm::sys::ProcessInfo::InvalidPid) {
-    llvm::errs() << "Error: Failed to start TileLang daemon: " << errMsg << "\n";
+    llvm::errs() << "Error: Failed to start TileLib daemon module '"
+                 << daemonModule << "': " << errMsg << "\n";
     return false;
   }
 
   processInfo = std::make_pair(procInfo.Pid, socketPath);
 
-  std::this_thread::sleep_for(std::chrono::milliseconds(1000));
+  // Python startup time depends on the selected TileLib frontend and its
+  // imports. Poll instead of relying on one fixed sleep.
+  bool socketReady = false;
+  for (int attempt = 0; attempt < 200; ++attempt) {
+    std::this_thread::sleep_for(std::chrono::milliseconds(50));
+    if (llvm::sys::fs::exists(socketPath)) {
+      socketReady = true;
+      break;
+    }
+  }
 
-  if (!llvm::sys::fs::exists(socketPath)) {
+  if (!socketReady) {
     llvm::errs() << "Error: Daemon socket not created at " << socketPath << "\n";
-    llvm::errs() << "Note: Daemon process started (pid=" << procInfo.Pid 
+    llvm::errs() << "Note: Daemon process started (pid=" << procInfo.Pid
                  << ") but socket not found. Check daemon logs.\n";
+    kill(procInfo.Pid, SIGTERM);
+    processInfo = std::nullopt;
     return false;
   }
 
-  llvm::errs() << "TileLang daemon started (pid=" << procInfo.Pid
+  llvm::errs() << "TileLib daemon '" << daemonModule << "' started (pid="
+               << procInfo.Pid
                << ", socket=" << socketPath << ")\n";
   return true;
 }
@@ -108,7 +127,7 @@ void DaemonManager::stop() {
     llvm::sys::fs::remove(socketPath);
   }
 
-  llvm::errs() << "TileLang daemon stopped (pid=" << pid << ")\n";
+  llvm::errs() << "TileLib daemon stopped (pid=" << pid << ")\n";
   processInfo = std::nullopt;
 }
 

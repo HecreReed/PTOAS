@@ -8,6 +8,7 @@
 
 #include "PTO/IR/PTO.h"
 #include "PTO/Transforms/Passes.h"
+#include "Utils.h"
 #include "mlir/Dialect/Func/IR/FuncOps.h"
 #include "mlir/IR/BuiltinOps.h"
 #include "mlir/IR/SymbolTable.h"
@@ -27,10 +28,7 @@ using namespace mlir::pto;
 
 namespace {
 
-enum class InferredSectionKind {
-  Vector,
-  Cube,
-};
+using InferredSectionKind = PhysicalSectionKind;
 
 struct UncoveredTopLevelSegment {
   Operation *firstOp = nullptr;
@@ -244,22 +242,7 @@ static std::optional<InferredSectionKind> classifyTileOpByName(Operation *op) {
 
 static std::optional<InferredSectionKind>
 classifyTileOpByPipe(Operation *op) {
-  auto pipeOp = dyn_cast<OpPipeInterface>(op);
-  if (!pipeOp)
-    return std::nullopt;
-
-  switch (pipeOp.getPipe()) {
-  case PIPE::PIPE_M:
-  case PIPE::PIPE_MTE1:
-    return InferredSectionKind::Cube;
-  case PIPE::PIPE_V:
-  case PIPE::PIPE_V2:
-  case PIPE::PIPE_S:
-    return InferredSectionKind::Vector;
-  default:
-    break;
-  }
-  return std::nullopt;
+  return inferPhysicalSectionKindFromPipe(op);
 }
 
 static std::optional<InferredSectionKind>

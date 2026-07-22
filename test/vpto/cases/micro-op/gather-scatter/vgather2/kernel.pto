@@ -1,5 +1,5 @@
 module attributes {pto.target_arch = "a5", pto.kernel_kind = #pto.kernel_kind<vector>} {
-    func.func @vgather2_deep_merged_kernel(%arg0: !pto.ptr<f32, gm>, %arg1: !pto.ptr<i32, gm>, %arg2: !pto.ptr<f32, gm>, %arg3: !pto.ptr<f32, gm>, %arg4: !pto.ptr<i32, gm>, %arg5: !pto.ptr<f32, gm>) attributes {pto.kernel} {
+    func.func @vgather2_deep_merged_kernel(%arg0: !pto.ptr<f32, gm>, %arg1: !pto.ptr<i32, gm>, %arg2: !pto.ptr<f32, gm>, %arg3: !pto.ptr<f32, gm>, %arg4: !pto.ptr<i32, gm>, %arg5: !pto.ptr<f32, gm>, %arg6: !pto.ptr<f16, gm>, %arg7: !pto.ptr<ui16, gm>, %arg8: !pto.ptr<f16, gm>, %arg9: !pto.ptr<ui8, gm>, %arg10: !pto.ptr<ui16, gm>, %arg11: !pto.ptr<i8, gm>, %arg12: !pto.ptr<i16, gm>) attributes {pto.kernel} {
     %__deep_merge_guard = arith.constant false
     // inactive merged from vgather2_duplicate_index_kernel_2d
     scf.if %__deep_merge_guard {
@@ -404,6 +404,76 @@ module attributes {pto.target_arch = "a5", pto.kernel_kind = #pto.kernel_kind<ve
             : !pto.ptr<f32, ub>, !pto.ptr<f32, gm>, i64, i64, i64, i64
           pto.barrier #pto.pipe<PIPE_ALL>
     }
+
+    // active coverage for f16 and ui8 gather with ui16 offset vectors. This
+    // locks the lowering paths for both 16-bit gathers and b8 gathers that
+    // widen the loaded byte values into 16-bit result lanes.
+    %c0_f16 = arith.constant 0 : index
+    %c128_f16 = arith.constant 128 : index
+    %c1024_f16 = arith.constant 1024 : index
+    %c0_i64_f16 = arith.constant 0 : i64
+    %c1_i64_f16 = arith.constant 1 : i64
+    %c16_i64_f16 = arith.constant 16 : i64
+    %c32_i64_f16 = arith.constant 32 : i64
+    %c64_i64_f16 = arith.constant 64 : i64
+    %c4096_i64_f16 = arith.constant 4096 : i64
+    %c8192_i64_f16 = arith.constant 8192 : i64
+    %c12288_i64_f16 = arith.constant 12288 : i64
+    %c14336_i64_f16 = arith.constant 14336 : i64
+    %c16384_i64_f16 = arith.constant 16384 : i64
+    %c18432_i64_f16 = arith.constant 18432 : i64
+    %c1024_i32_f16 = arith.constant 1024 : i32
+
+    %ub_in_f16 = pto.castptr %c0_i64_f16 : i64 -> !pto.ptr<f16, ub>
+    %ub_offsets_f16 = pto.castptr %c4096_i64_f16 : i64 -> !pto.ptr<ui16, ub>
+    %ub_out_f16 = pto.castptr %c8192_i64_f16 : i64 -> !pto.ptr<f16, ub>
+    %ub_in_u8 = pto.castptr %c12288_i64_f16 : i64 -> !pto.ptr<ui8, ub>
+    %ub_out_u8 = pto.castptr %c14336_i64_f16 : i64 -> !pto.ptr<ui16, ub>
+    %ub_in_i8 = pto.castptr %c16384_i64_f16 : i64 -> !pto.ptr<i8, ub>
+    %ub_out_i8 = pto.castptr %c18432_i64_f16 : i64 -> !pto.ptr<i16, ub>
+
+    pto.mte_gm_ub %arg6, %ub_in_f16, %c0_i64_f16, %c64_i64_f16
+      nburst(%c32_i64_f16, %c64_i64_f16, %c64_i64_f16)
+      : !pto.ptr<f16, gm>, !pto.ptr<f16, ub>, i64, i64, i64, i64, i64
+    pto.mte_gm_ub %arg7, %ub_offsets_f16, %c0_i64_f16, %c64_i64_f16
+      nburst(%c32_i64_f16, %c64_i64_f16, %c64_i64_f16)
+      : !pto.ptr<ui16, gm>, !pto.ptr<ui16, ub>, i64, i64, i64, i64, i64
+    pto.mte_gm_ub %arg9, %ub_in_u8, %c0_i64_f16, %c64_i64_f16
+      nburst(%c16_i64_f16, %c64_i64_f16, %c64_i64_f16)
+      : !pto.ptr<ui8, gm>, !pto.ptr<ui8, ub>, i64, i64, i64, i64, i64
+    pto.mte_gm_ub %arg11, %ub_in_i8, %c0_i64_f16, %c64_i64_f16
+      nburst(%c16_i64_f16, %c64_i64_f16, %c64_i64_f16)
+      : !pto.ptr<i8, gm>, !pto.ptr<i8, ub>, i64, i64, i64, i64, i64
+
+    pto.set_flag["PIPE_MTE2", "PIPE_V", "EVENT_ID0"]
+    pto.wait_flag["PIPE_MTE2", "PIPE_V", "EVENT_ID0"]
+
+    pto.vecscope {
+      %__f16:1 = scf.for %offset_f16 = %c0_f16 to %c1024_f16 step %c128_f16 iter_args(%remaining_f16 = %c1024_i32_f16) -> (i32) {
+        %mask_f16, %next_remaining_f16 = pto.plt_b16 %remaining_f16 : i32 -> !pto.mask<b16>, i32
+        %offsets_f16 = pto.vlds %ub_offsets_f16[%offset_f16] : !pto.ptr<ui16, ub> -> !pto.vreg<128xui16>
+        %out_f16 = pto.vgather2 %ub_in_f16, %offsets_f16, %mask_f16 : !pto.ptr<f16, ub>, !pto.vreg<128xui16>, !pto.mask<b16> -> !pto.vreg<128xf16>
+        %out_u8 = pto.vgather2 %ub_in_u8, %offsets_f16, %mask_f16 : !pto.ptr<ui8, ub>, !pto.vreg<128xui16>, !pto.mask<b16> -> !pto.vreg<128xui16>
+        %out_i8 = pto.vgather2 %ub_in_i8, %offsets_f16, %mask_f16 : !pto.ptr<i8, ub>, !pto.vreg<128xui16>, !pto.mask<b16> -> !pto.vreg<128xi16>
+        pto.vsts %out_f16, %ub_out_f16[%offset_f16], %mask_f16 : !pto.vreg<128xf16>, !pto.ptr<f16, ub>, !pto.mask<b16>
+        pto.vsts %out_u8, %ub_out_u8[%offset_f16], %mask_f16 : !pto.vreg<128xui16>, !pto.ptr<ui16, ub>, !pto.mask<b16>
+        pto.vsts %out_i8, %ub_out_i8[%offset_f16], %mask_f16 : !pto.vreg<128xi16>, !pto.ptr<i16, ub>, !pto.mask<b16>
+        scf.yield %next_remaining_f16 : i32
+      }
+    }
+
+    pto.set_flag["PIPE_V", "PIPE_MTE3", "EVENT_ID0"]
+    pto.wait_flag["PIPE_V", "PIPE_MTE3", "EVENT_ID0"]
+    pto.mte_ub_gm %ub_out_f16, %arg8, %c64_i64_f16
+      nburst(%c32_i64_f16, %c64_i64_f16, %c64_i64_f16)
+      : !pto.ptr<f16, ub>, !pto.ptr<f16, gm>, i64, i64, i64, i64
+    pto.mte_ub_gm %ub_out_u8, %arg10, %c64_i64_f16
+      nburst(%c32_i64_f16, %c64_i64_f16, %c64_i64_f16)
+      : !pto.ptr<ui16, ub>, !pto.ptr<ui16, gm>, i64, i64, i64, i64
+    pto.mte_ub_gm %ub_out_i8, %arg12, %c64_i64_f16
+      nburst(%c32_i64_f16, %c64_i64_f16, %c64_i64_f16)
+      : !pto.ptr<i16, ub>, !pto.ptr<i16, gm>, i64, i64, i64, i64
+    pto.barrier #pto.pipe<PIPE_ALL>
 
     return
   }

@@ -46,20 +46,20 @@ module attributes {pto.target_arch = "a5", pto.kernel_kind = #pto.kernel_kind<ve
 // CHECK-LABEL: func.func @fusion_reduce_epilogue_tadd_trowsum(
 // CHECK: pto.fusion_region {
 // Fused row loop with iter_args for the reduce mask accumulator.
-// CHECK: scf.for {{.*}} iter_args
+// CHECK: scf.for
 // Inner col loop carries reduce accumulator (vreg) alongside elementwise ops.
-// CHECK: %{{.*}}:3 = scf.for {{.*}} iter_args({{.*}}, {{.*}}, {{.*}}) -> (i32, i32, !pto.vreg<64xf32>) {
+// CHECK: %{{.*}}:3 = scf.for
+// CHECK-SAME: iter_args
+// CHECK-SAME: -> (index, !pto.vreg<64xf32>, index) {
 // Elementwise op (vadd) inside the inner col loop.
 // CHECK: %{{.*}} = pto.vadd
 // CHECK: pto.vsts %{{.*}}, %{{.*}}
 // Reduce computation inside the same col loop (vcadd + vadd accumulator).
 // CHECK: %{{.*}} = pto.vcadd
 // CHECK: %{{.*}} = pto.vadd
-// CHECK: scf.yield {{.*}} : i32, i32, !pto.vreg<64xf32>
+// CHECK: scf.yield {{.*}} : index, !pto.vreg<64xf32>, index
 // CHECK: }
 // Epilogue: reduce row-result store appears after the inner col loop.
-// CHECK: %{{.*}} = memref.subview
 // CHECK: pto.vsts %{{.*}}, %{{.*}}
-// CHECK: scf.yield {{.*}} : i32
 // CHECK: }
 // CHECK: pto.yield

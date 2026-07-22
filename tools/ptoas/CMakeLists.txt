@@ -31,12 +31,13 @@ add_llvm_executable(pto-opt
 set_target_properties(pto-opt PROPERTIES OUTPUT_NAME "ptoas")
 target_compile_definitions(pto-opt PRIVATE
   PTOAS_RELEASE_VERSION="${PTOAS_CLI_VERSION}"
-  # Source-tree defaults for TileLang DSL expansion. These let ptoas run
-  # directly from the build tree without passing --tilelang-path /
-  # --tilelang-pkg-path. Installed layouts that move these directories
-  # still need to override the flags explicitly.
+  # Source-tree defaults for TileLib expansion. These let ptoas run directly
+  # from the build tree without passing --tilelang-path /
+  # --tilelang-pkg-path / --ptodsl-pkg-path. Installed layouts that move
+  # these directories still need to override the flags explicitly.
   PTOAS_DEFAULT_TILELANG_PATH="${CMAKE_SOURCE_DIR}/lib/TileOps"
   PTOAS_DEFAULT_TILELANG_PKG_PATH="${CMAKE_SOURCE_DIR}/tilelang-dsl/python"
+  PTOAS_DEFAULT_PTODSL_PKG_PATH="${CMAKE_SOURCE_DIR}/ptodsl"
 )
 # [修改 2] 更新链接库名称
 # 原因：In-tree 时你的库叫 MLIRPTODialect，但现在 Out-of-tree 它们是你自己定义的
