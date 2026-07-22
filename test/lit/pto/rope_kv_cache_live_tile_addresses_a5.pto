@@ -1,0 +1,22 @@
+// Copyright (c) 2026 Huawei Technologies Co., Ltd.
+// This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+// CANN Open Software License Agreement Version 2.0 (the "License").
+// Please refer to the License for details. You may not use this file except in compliance with the License.
+// THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+// INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+// See LICENSE in the root of the software repository for the full text of the License.
+//
+// RUN: ptoas --pto-arch=a5 --pto-level=level3 --emit-pto-ir %S/../../samples/Qwen3DecodeA5/rope_kv_cache.pto 2>&1 | FileCheck %s
+
+// q_lo and q_hi remain live after their respective TEXTRACT operations. They
+// must not alias q_block or each other while the two rotary halves are formed.
+
+// CHECK-LABEL: func.func @rope_kv_cache(
+// CHECK: [[QBLOCK_PTR:%[0-9]+]] = pto.pointer_cast(%c2944_i64) %c8, %c128
+// CHECK-NEXT: [[QBLOCK:%[0-9]+]] = pto.bind_tile [[QBLOCK_PTR]]
+// CHECK: [[QLO_PTR:%[0-9]+]] = pto.pointer_cast(%c7040_i64) %c8, %c64
+// CHECK-NEXT: [[QLO:%[0-9]+]] = pto.bind_tile [[QLO_PTR]]
+// CHECK: [[QHI_PTR:%[0-9]+]] = pto.pointer_cast(%c9088_i64) %c8, %c64
+// CHECK-NEXT: [[QHI:%[0-9]+]] = pto.bind_tile [[QHI_PTR]]
+// CHECK: pto.textract ins([[QBLOCK]], {{.*}}) outs([[QLO]]
+// CHECK: pto.textract ins([[QBLOCK]], {{.*}}) outs([[QHI]]

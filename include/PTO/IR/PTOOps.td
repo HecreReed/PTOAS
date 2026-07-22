@@ -2027,6 +2027,7 @@ def SetQuantScalarOp : PTO_Op<"set_quant_scalar", [
 }
 
 def SetQuantVectorOp : PTO_Op<"set_quant_vector", [
+    OpPipeInterface,
     DeclareOpInterfaceMethods<MemoryEffectsOpInterface>
 ]> {
   let summary = "Set vector quantization parameters for fixpipe producer";
@@ -2053,6 +2054,10 @@ def SetQuantVectorOp : PTO_Op<"set_quant_vector", [
   let assemblyFormat = [{
     `(` $scaling_tile `:` qualified(type($scaling_tile)) `)`
     `{` `id` `=` $id `}` attr-dict
+  }];
+
+  let extraClassDeclaration = [{
+    ::mlir::pto::PIPE getPipe() { return ::mlir::pto::PIPE::PIPE_FIX; }
   }];
 }
 

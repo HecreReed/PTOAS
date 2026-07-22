@@ -106,6 +106,14 @@ CASE_INT_SCALAR_DEFAULTS = {
 
 CASE_BOOL_SCALAR_DEFAULTS = {}
 
+# A5's vector sqrt/reciprocal sequence can accumulate a few BF16 ULPs in RMS
+# normalization. Keep the default strict for every other testcase and only
+# relax the two kernels whose reduction chains are known to exhibit this.
+CASE_BF16_MAX_ULP = {
+    "rmsnorm": 4,
+    "post_rmsnorm": 4,
+}
+
 CASE_POINTER_COUNT_MINIMUMS = {
     "down_proj_residual": {
         "v1": 123648,
@@ -988,6 +996,17 @@ def _default_eps_for_cpp_type(cpp_type: str) -> float:
 
 def _default_bf16_max_ulp_for_cpp_type(cpp_type: str) -> int:
     return 1 if _is_bf16_cpp_type(cpp_type) else 0
+
+
+def _bf16_max_ulp_for_case(testcase: str, cpp_type: str, soc_version: str) -> int:
+    if not _is_bf16_cpp_type(cpp_type):
+        return 0
+    soc_lc = (soc_version or "").lower()
+    if "950" not in soc_lc and "a5" not in soc_lc:
+        return _default_bf16_max_ulp_for_cpp_type(cpp_type)
+    return CASE_BF16_MAX_ULP.get(
+        testcase, _default_bf16_max_ulp_for_cpp_type(cpp_type)
+    )
 
 
 def _integer_scalar_default_value(testcase: str, name: str, host_type: str) -> Optional[int]:
@@ -2539,7 +2558,9 @@ endif()
         name = p["name"]
         eps = _default_eps_for_cpp_type(p["cpp_type"])
         is_bf16_output = _is_bf16_cpp_type(p["cpp_type"])
-        bf16_max_ulp = _default_bf16_max_ulp_for_cpp_type(p["cpp_type"])
+        bf16_max_ulp = _bf16_max_ulp_for_case(
+            testcase, p["cpp_type"], soc_version
+        )
         if (kernel_has_tscatter or kernel_has_mscatter) and scatter_indices_input is not None:
             if is_bf16_output:
                 compare_lines.append(
