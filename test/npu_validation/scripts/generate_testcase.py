@@ -33,7 +33,13 @@ INCLUDE_REPLACEMENT = (
     "#define __VEC_SCOPE__\n"
     "#endif\n"
     "\n"
-    "#if defined(__CCE_AICORE__) && defined(__NPU_ARCH__) && (__NPU_ARCH__ == 2201)\n"
+    "// FP8/FP4 typedef fallbacks: only emit when the bisheng compiler\n"
+    "// itself doesn't already provide them. CANN 9.2.0+ bisheng unconditionally\n"
+    "// typedef's these names in its built-in <__clang_cce_types.h> header\n"
+    "// (pulled in automatically under -xcce), so emitting our own struct-based\n"
+    '// typedef here would collide ("typedef redefinition with different types",\n'
+    "// since the SDK side is e.g. `typedef __hif8 hifloat8_t;`).\n"
+    "#if defined(__CCE_AICORE__) && defined(__NPU_ARCH__) && (__NPU_ARCH__ == 2201) && !__has_include(<__clang_cce_types.h>)\n"
     "typedef struct { unsigned char v; } hifloat8_t;\n"
     "typedef struct { unsigned char v; } float8_e4m3_t;\n"
     "typedef struct { unsigned char v; } float8_e5m2_t;\n"
@@ -56,7 +62,13 @@ INCLUDE_REPLACEMENT = (
     "// path, but `bisheng -xcce` still performs a host-side parse pass.\n"
     "// Provide minimal fallbacks only when the corresponding header wasn't\n"
     "// pulled in by the selected arch implementation.\n"
-    "#if !defined(__CCE_AICORE__) && !defined(TMRGSORT_HPP)\n"
+    "//\n"
+    "// Note: gate on __has_include(<pto/common/type.hpp>) instead of the\n"
+    "// TMRGSORT_HPP macro. CANN 9.2.0+ moved pto::MrgSortExecutedNumList into\n"
+    "// pto/common/type.hpp, which does not #define TMRGSORT_HPP, so the old\n"
+    "// macro check leaked and produced a redefinition compile error whenever\n"
+    "// test_common.h (or any other TU) pulled in type.hpp.\n"
+    "#if !defined(__CCE_AICORE__) && !__has_include(<pto/common/type.hpp>)\n"
     "namespace pto {\n"
     "struct MrgSortExecutedNumList {\n"
     "    uint16_t mrgSortList0;\n"
@@ -67,34 +79,38 @@ INCLUDE_REPLACEMENT = (
     "} // namespace pto\n"
     "#endif\n"
     "#ifndef __CPU_SIM\n"
-    "#include \"acl/acl.h\"\n"
+    '#include "acl/acl.h"\n'
     "#endif\n"
 )
 
-UNSTABLE_A3_CUSTOM_GOLDEN_CASES = frozenset({
-    "abs",
-    "partmin",
-    "prelu",
-    "rope_kv_cache",
-    "rowexpanddiv",
-    "rowexpandmul",
-    "rowexpandsub",
-    "scatter",
-    "sel",
-    "sels",
-    "sub",
-    "xor",
-})
+UNSTABLE_A3_CUSTOM_GOLDEN_CASES = frozenset(
+    {
+        "abs",
+        "partmin",
+        "prelu",
+        "rope_kv_cache",
+        "rowexpanddiv",
+        "rowexpandmul",
+        "rowexpandsub",
+        "scatter",
+        "sel",
+        "sels",
+        "sub",
+        "xor",
+    }
+)
 
-DEEPSEEK_V4_DIRECT_CASES = frozenset({
-    "attention_csa_test_refresh_incore_81",
-    "attention_hca_test_incore_54",
-    "attention_swa_test_incore_40",
-    "decode_csa_test_incore_81",
-    "decode_hca_test_incore_54",
-    "decode_swa_test_incore_40",
-    "sparse_attn_test_incore_7",
-})
+DEEPSEEK_V4_DIRECT_CASES = frozenset(
+    {
+        "attention_csa_test_refresh_incore_81",
+        "attention_hca_test_incore_54",
+        "attention_swa_test_incore_40",
+        "decode_csa_test_incore_81",
+        "decode_hca_test_incore_54",
+        "decode_swa_test_incore_40",
+        "sparse_attn_test_incore_7",
+    }
+)
 
 CASE_INT_SCALAR_DEFAULTS = {
     testcase: {
@@ -202,12 +218,7 @@ def _split_top_level(text: str, sep: str) -> list[str]:
             bracket_depth += 1
         elif ch == "]":
             bracket_depth = max(bracket_depth - 1, 0)
-        elif (
-            ch == sep
-            and paren_depth == 0
-            and brace_depth == 0
-            and bracket_depth == 0
-        ):
+        elif ch == sep and paren_depth == 0 and brace_depth == 0 and bracket_depth == 0:
             parts.append(text[start:idx].strip())
             start = idx + 1
     parts.append(text[start:].strip())
@@ -221,7 +232,7 @@ def _extract_function_body(function_text: str) -> str:
     end_index = _find_matching_brace(function_text, brace_index)
     if end_index is None:
         return ""
-    body = function_text[brace_index + 1:end_index].strip()
+    body = function_text[brace_index + 1 : end_index].strip()
     body = re.sub(r"\breturn\s*;\s*$", "", body, flags=re.S).rstrip()
     return body
 
@@ -267,7 +278,13 @@ def _split_cpp_args(text: str):
             depth_bracket += 1
         elif ch == "]":
             depth_bracket = max(depth_bracket - 1, 0)
-        elif ch == "," and depth_angle == 0 and depth_paren == 0 and depth_brace == 0 and depth_bracket == 0:
+        elif (
+            ch == ","
+            and depth_angle == 0
+            and depth_paren == 0
+            and depth_brace == 0
+            and depth_bracket == 0
+        ):
             parts.append(text[start:idx].strip())
             start = idx + 1
     parts.append(text[start:].strip())
@@ -294,7 +311,7 @@ def _extract_aicore_functions(text: str):
                 "params_blob": params_blob,
                 "raw_params": _split_params_blob(params_blob),
                 "is_global": bool(match.group("global")),
-                "text": text[match.start():end_index + 1],
+                "text": text[match.start() : end_index + 1],
             }
         )
     return functions
@@ -378,7 +395,11 @@ def _append_mixed_kernel_wrapper(
         expr = init_text.strip()
         if "*" not in type_text:
             return expr
-        if expr.startswith("(") or expr.startswith("reinterpret_cast") or expr.startswith("static_cast"):
+        if (
+            expr.startswith("(")
+            or expr.startswith("reinterpret_cast")
+            or expr.startswith("static_cast")
+        ):
             return expr
         return f"({type_text}){expr}"
 
@@ -412,7 +433,7 @@ def _append_mixed_kernel_wrapper(
         decls = []
         for match in pipe_decl_pattern.finditer(body):
             ctor_args = _split_cpp_args(match.group("args"))
-            prefix = body[:match.start()]
+            prefix = body[: match.start()]
             resolved_args = []
             for arg in ctor_args:
                 resolved = _resolve_ctor_arg(arg, prefix)
@@ -432,7 +453,9 @@ def _append_mixed_kernel_wrapper(
 
     def _rewrite_body(body: str, replacements):
         rewritten = body
-        for replacement in sorted(replacements, key=lambda item: item["span"][0], reverse=True):
+        for replacement in sorted(
+            replacements, key=lambda item: item["span"][0], reverse=True
+        ):
             start, end = replacement["span"]
             rewritten = rewritten[:start] + rewritten[end:]
         for replacement in replacements:
@@ -498,7 +521,10 @@ def _append_mixed_kernel_wrapper(
         )
 
     wrapper_blocks = []
-    for body in (_rewrite_body(aic_body, aic_replacements), _rewrite_body(aiv_body, aiv_replacements)):
+    for body in (
+        _rewrite_body(aic_body, aic_replacements),
+        _rewrite_body(aiv_body, aiv_replacements),
+    ):
         if not body:
             continue
         wrapper_blocks.append("  {\n" + _indent_block(body) + "\n  }")
@@ -511,7 +537,11 @@ def _append_mixed_kernel_wrapper(
         f"__global__ AICORE void {kernel_name}({', '.join(raw_params)}) {{\n"
         + ("\n".join(shared_decls) + ("\n\n" if shared_decls else ""))
         + "\n".join(wrapper_blocks)
-        + ("\n  ptoas_auto_sync_tail(PTOAutoSyncTailMode::kBarrierAll);" if (aic_has_tail or aiv_has_tail) else "")
+        + (
+            "\n  ptoas_auto_sync_tail(PTOAutoSyncTailMode::kBarrierAll);"
+            if (aic_has_tail or aiv_has_tail)
+            else ""
+        )
         + "\n"
         "}\n"
     )
@@ -583,7 +613,11 @@ def _strip_simple_casts(expr: str) -> str:
     for _ in range(8):
         prev = cur
         cur = _strip_enclosing_parens(cur)
-        match = re.match(r"^(?:reinterpret_cast|static_cast|const_cast|dynamic_cast)\s*<[^>]+>\s*\((.*)\)$", cur, re.S)
+        match = re.match(
+            r"^(?:reinterpret_cast|static_cast|const_cast|dynamic_cast)\s*<[^>]+>\s*\((.*)\)$",
+            cur,
+            re.S,
+        )
         if match:
             cur = match.group(1).strip()
             continue
@@ -629,7 +663,9 @@ def _ordered_unique(items):
     return out
 
 
-def _resolve_pointer_param_from_expr(expr: str, pointer_param_names, ptr_to_param, ptr_to_base) -> Optional[str]:
+def _resolve_pointer_param_from_expr(
+    expr: str, pointer_param_names, ptr_to_param, ptr_to_base
+) -> Optional[str]:
     if not expr:
         return None
     cur = _strip_simple_casts(expr)
@@ -690,13 +726,17 @@ def _detect_output_pointer_params(text: str, pointer_param_names):
         text,
     ):
         ptr_to_param[match.group(1)] = match.group(2)
-    for match in re.finditer(r"\b(\w+)\s*=\s*\(__gm__\s+[\w:<>]+\s*\*\)\s*(\w+)\b", text):
+    for match in re.finditer(
+        r"\b(\w+)\s*=\s*\(__gm__\s+[\w:<>]+\s*\*\)\s*(\w+)\b", text
+    ):
         ptr_to_param.setdefault(match.group(1), match.group(2))
 
     outputs = []
     for gt in tstore_gts:
         expr = gt_to_expr.get(gt)
-        param = _resolve_pointer_param_from_expr(expr, pointer_param_names, ptr_to_param, ptr_to_base)
+        param = _resolve_pointer_param_from_expr(
+            expr, pointer_param_names, ptr_to_param, ptr_to_base
+        )
         if param:
             outputs.append(param)
     return _ordered_unique(outputs)
@@ -726,7 +766,11 @@ def _detect_set_ffts_pointer_params(text: str, pointer_param_names):
             while _is_fully_wrapped_by_parentheses(cur):
                 cur = cur[1:-1].strip()
 
-            m = re.match(r"^(?:reinterpret_cast|static_cast|const_cast|dynamic_cast)\s*<[^>]+>\s*\((.*)\)$", cur, re.S)
+            m = re.match(
+                r"^(?:reinterpret_cast|static_cast|const_cast|dynamic_cast)\s*<[^>]+>\s*\((.*)\)$",
+                cur,
+                re.S,
+            )
             if m:
                 cur = m.group(1).strip()
                 continue
@@ -850,11 +894,17 @@ def _default_bf16_max_ulp_for_cpp_type(cpp_type: str) -> int:
     return 1 if _is_bf16_cpp_type(cpp_type) else 0
 
 
-def _integer_scalar_default_value(testcase: str, name: str, host_type: str) -> Optional[int]:
+def _integer_scalar_default_value(
+    testcase: str, name: str, host_type: str
+) -> Optional[int]:
     override = CASE_INT_SCALAR_DEFAULTS.get(testcase, {}).get(name)
     if override is not None:
         return int(override)
-    if re.match(r"^(u?int)(8|16|32|64)_t$", host_type) or host_type in {"int", "unsigned", "size_t"}:
+    if re.match(r"^(u?int)(8|16|32|64)_t$", host_type) or host_type in {
+        "int",
+        "unsigned",
+        "size_t",
+    }:
         return 1
     return None
 
@@ -884,7 +934,9 @@ def _resolve_sample_root(input_cpp: Path) -> Path:
     return parent
 
 
-def _find_custom_case_asset(sample_root: Path, testcase: str, filename: str) -> Optional[Path]:
+def _find_custom_case_asset(
+    sample_root: Path, testcase: str, filename: str
+) -> Optional[Path]:
     candidates = (
         sample_root / f"{testcase}_{filename}",
         sample_root / "npu_validation" / testcase / filename,
@@ -917,8 +969,10 @@ def _copy_custom_golden_helpers(sample_root: Path, output_dir: Path):
 
 
 def _replace_includes(text: str) -> str:
-    if "#include \"common/pto_instr.hpp\"" in text:
-        return text.replace("#include \"common/pto_instr.hpp\"", INCLUDE_REPLACEMENT.rstrip())
+    if '#include "common/pto_instr.hpp"' in text:
+        return text.replace(
+            '#include "common/pto_instr.hpp"', INCLUDE_REPLACEMENT.rstrip()
+        )
     if "#include <pto/pto-inst.hpp>" in text:
         return text
     return INCLUDE_REPLACEMENT + "\n" + text
@@ -950,7 +1004,9 @@ def _inject_packed_pred_mask_preload(
         return kernel_text
 
     # Find a reasonable insertion point: before the first MTE2->V set_flag.
-    m = re.search(r"^(\s*)set_flag\s*\(\s*PIPE_MTE2\s*,\s*PIPE_V\s*,", kernel_text, re.M)
+    m = re.search(
+        r"^(\s*)set_flag\s*\(\s*PIPE_MTE2\s*,\s*PIPE_V\s*,", kernel_text, re.M
+    )
     if m:
         indent = m.group(1)
         insert_at = m.start()
@@ -988,7 +1044,9 @@ def _infer_aicore_arch(kernel_text: str, soc_version: str) -> str:
     #
     # IMPORTANT: the default arch depends on the Ascend SoC.
     has_mix_macros = "__DAV_CUBE__" in kernel_text and "__DAV_VEC__" in kernel_text
-    has_intra_block_sync = "set_intra_block(" in kernel_text or "wait_intra_block(" in kernel_text
+    has_intra_block_sync = (
+        "set_intra_block(" in kernel_text or "wait_intra_block(" in kernel_text
+    )
     has_mixed_section_sync = has_mix_macros and has_intra_block_sync
     cube_markers = (
         "TileType::Mat",
@@ -1057,7 +1115,9 @@ def _infer_mrgsort_block_len(kernel_text: str) -> Optional[int]:
         int32_t v3 = 64;
         TMRGSORT(v22, v21, v3);
     """
-    call = re.search(r"\bTMRGSORT\s*\(\s*\w+\s*,\s*\w+\s*,\s*([^)]+?)\s*\)", kernel_text)
+    call = re.search(
+        r"\bTMRGSORT\s*\(\s*\w+\s*,\s*\w+\s*,\s*([^)]+?)\s*\)", kernel_text
+    )
     if not call:
         return None
     arg = call.group(1).strip()
@@ -1071,7 +1131,10 @@ def _infer_mrgsort_block_len(kernel_text: str) -> Optional[int]:
     # Identifier that is defined as a constant earlier in the kernel.
     if not re.fullmatch(r"[A-Za-z_]\w*", arg):
         return None
-    match = re.search(rf"\b(?:int32_t|uint32_t|int|unsigned)\s+{re.escape(arg)}\s*=\s*(0x[0-9A-Fa-f]+|\d+)\s*;", kernel_text)
+    match = re.search(
+        rf"\b(?:int32_t|uint32_t|int|unsigned)\s+{re.escape(arg)}\s*=\s*(0x[0-9A-Fa-f]+|\d+)\s*;",
+        kernel_text,
+    )
     if not match:
         return None
     try:
@@ -1218,7 +1281,7 @@ def _infer_int_var_maxima(kernel_text: str, seed_env: Optional[dict] = None) -> 
         close_paren = _find_matching_paren(kernel_text, open_paren)
         if close_paren is None:
             continue
-        header = kernel_text[open_paren + 1:close_paren]
+        header = kernel_text[open_paren + 1 : close_paren]
         parts = _split_top_level(header, ";")
         if len(parts) != 3:
             continue
@@ -1234,11 +1297,17 @@ def _infer_int_var_maxima(kernel_text: str, seed_env: Optional[dict] = None) -> 
         step_m = re.match(rf"^\s*{re.escape(ind)}\s*\+=\s*(.+?)\s*$", step)
         if not cond_m or not step_m:
             continue
-        loops.append((ind, init_m.group(2).strip(), cond_m.group(1).strip(), step_m.group(1).strip()))
+        loops.append(
+            (
+                ind,
+                init_m.group(2).strip(),
+                cond_m.group(1).strip(),
+                step_m.group(1).strip(),
+            )
+        )
 
     maxima: dict[str, Optional[int]] = {
-        k: (None if v is None else int(v))
-        for k, v in (seed_env or {}).items()
+        k: (None if v is None else int(v)) for k, v in (seed_env or {}).items()
     }
 
     def set_max(name: str, value: int) -> bool:
@@ -1284,7 +1353,9 @@ def _infer_int_var_maxima(kernel_text: str, seed_env: Optional[dict] = None) -> 
     return {k: (0 if v is None else int(v)) for k, v in maxima.items()}
 
 
-def _infer_gm_pointer_elem_counts(kernel_text: str, pointer_param_names, seed_int_env: Optional[dict] = None):
+def _infer_gm_pointer_elem_counts(
+    kernel_text: str, pointer_param_names, seed_int_env: Optional[dict] = None
+):
     """
     Infer minimum element counts for each __gm__ pointer param from GlobalTensor
     shape/stride metadata found in PTOAS-generated kernels.
@@ -1330,7 +1401,9 @@ def _infer_gm_pointer_elem_counts(kernel_text: str, pointer_param_names, seed_in
     ):
         ptr_to_param[m.group(1)] = m.group(2)
 
-    for m in re.finditer(r"\b(\w+)\s*=\s*\(__gm__\s+[\w:<>]+\s*\*\)\s*(\w+)\b", kernel_text):
+    for m in re.finditer(
+        r"\b(\w+)\s*=\s*\(__gm__\s+[\w:<>]+\s*\*\)\s*(\w+)\b", kernel_text
+    ):
         lhs = m.group(1)
         rhs = m.group(2)
         if lhs not in pointer_like:
@@ -1450,7 +1523,9 @@ def _infer_gm_pointer_elem_counts(kernel_text: str, pointer_param_names, seed_in
         param, off = resolve_param_and_offset(base_ptr)
         if not param or off is None:
             continue
-        param_elem_counts[param] = max(param_elem_counts.get(param, 0), req + max(off, 0))
+        param_elem_counts[param] = max(
+            param_elem_counts.get(param, 0), req + max(off, 0)
+        )
 
     # Newer PTOAS EmitC output (especially with declareVariablesAtTop) may avoid
     # `using GTShape = ...; using GTStride = ...;` aliases and instead embeds
@@ -1468,7 +1543,9 @@ def _infer_gm_pointer_elem_counts(kernel_text: str, pointer_param_names, seed_in
         param, off = resolve_param_and_offset_expr(base_ptr_expr)
         if not param or off is None:
             continue
-        param_elem_counts[param] = max(param_elem_counts.get(param, 0), req + max(off, 0))
+        param_elem_counts[param] = max(
+            param_elem_counts.get(param, 0), req + max(off, 0)
+        )
 
     return param_elem_counts
 
@@ -1489,8 +1566,16 @@ def generate_testcase(
     output_dir.mkdir(parents=True, exist_ok=True)
 
     use_custom_golden = _use_custom_golden_for_case(testcase, soc_version)
-    custom_golden = _find_custom_case_asset(sample_root, testcase, "golden.py") if use_custom_golden else None
-    custom_compare = _find_custom_case_asset(sample_root, testcase, "compare.py") if use_custom_golden else None
+    custom_golden = (
+        _find_custom_case_asset(sample_root, testcase, "golden.py")
+        if use_custom_golden
+        else None
+    )
+    custom_compare = (
+        _find_custom_case_asset(sample_root, testcase, "compare.py")
+        if use_custom_golden
+        else None
+    )
     shared_validation_runtime = sample_root.parent / "validation_runtime.py"
 
     raw_kernel = input_cpp.read_text(encoding="utf-8")
@@ -1498,10 +1583,14 @@ def generate_testcase(
     kernel_info = _describe_kernel_source(raw_kernel_for_analysis)
     # pto.tcmp / pto.tcmps produce packed predicate masks and leave parts of the
     # logical u8 tile undefined. This can make byte-wise compares flaky.
-    has_packed_pred_mask = re.search(r"\bTCMPS?\s*\(", raw_kernel_for_analysis) is not None
+    has_packed_pred_mask = (
+        re.search(r"\bTCMPS?\s*\(", raw_kernel_for_analysis) is not None
+    )
     has_dav_cube = "__DAV_CUBE__" in raw_kernel
     has_dav_vec = "__DAV_VEC__" in raw_kernel
-    has_intra_block_sync = "set_intra_block(" in raw_kernel or "wait_intra_block(" in raw_kernel
+    has_intra_block_sync = (
+        "set_intra_block(" in raw_kernel or "wait_intra_block(" in raw_kernel
+    )
     has_mixed_section_sync = has_dav_cube and has_dav_vec and has_intra_block_sync
     has_cube_only_section = has_dav_cube and not has_dav_vec
     has_vec_only_section = has_dav_vec and not has_dav_cube
@@ -1572,9 +1661,15 @@ def generate_testcase(
     logical_elem_count = rows * cols
     kernel_name = kernel_info["kernel_name"]
     raw_params = kernel_info["raw_params"]
-    mrgsort_block_len = _infer_mrgsort_block_len(raw_kernel_for_analysis) if "TMRGSORT" in raw_kernel_for_analysis else None
+    mrgsort_block_len = (
+        _infer_mrgsort_block_len(raw_kernel_for_analysis)
+        if "TMRGSORT" in raw_kernel_for_analysis
+        else None
+    )
 
-    pointer_param_names = [_extract_cpp_name(p) for p in raw_params if _is_gm_pointer_param(p)]
+    pointer_param_names = [
+        _extract_cpp_name(p) for p in raw_params if _is_gm_pointer_param(p)
+    ]
     inferred_void_ptr_types = {}
     for raw in raw_params:
         if not _is_gm_pointer_param(raw):
@@ -1586,12 +1681,18 @@ def generate_testcase(
             if inferred:
                 inferred_void_ptr_types[name] = inferred
 
-    ffts_param_names = _detect_set_ffts_pointer_params(raw_kernel_for_analysis, pointer_param_names)
-    non_ffts_pointer_param_names = [n for n in pointer_param_names if n not in ffts_param_names]
+    ffts_param_names = _detect_set_ffts_pointer_params(
+        raw_kernel_for_analysis, pointer_param_names
+    )
+    non_ffts_pointer_param_names = [
+        n for n in pointer_param_names if n not in ffts_param_names
+    ]
 
     output_param_names = []
     for writer_text in kernel_info["writer_texts"]:
-        output_param_names.extend(_detect_output_pointer_params(writer_text, non_ffts_pointer_param_names))
+        output_param_names.extend(
+            _detect_output_pointer_params(writer_text, non_ffts_pointer_param_names)
+        )
     output_param_names = _ordered_unique(output_param_names)
     if not output_param_names and non_ffts_pointer_param_names:
         output_param_names = [
@@ -1648,12 +1749,16 @@ def generate_testcase(
         p["name"]: default_value
         for p in params
         if p["kind"] == "scalar"
-        for default_value in [_integer_scalar_default_value(testcase, p["name"], p["host_type"])]
+        for default_value in [
+            _integer_scalar_default_value(testcase, p["name"], p["host_type"])
+        ]
         if default_value is not None
     }
     inferred_counts = {}
     for analysis_text in kernel_info["analysis_texts"]:
-        partial_counts = _infer_gm_pointer_elem_counts(analysis_text, pointer_param_names, seed_int_env=scalar_int_defaults)
+        partial_counts = _infer_gm_pointer_elem_counts(
+            analysis_text, pointer_param_names, seed_int_env=scalar_int_defaults
+        )
         for name, count in partial_counts.items():
             inferred_counts[name] = max(inferred_counts.get(name, 0), count)
     for name, count in CASE_POINTER_COUNT_MINIMUMS.get(testcase, {}).items():
@@ -1661,7 +1766,9 @@ def generate_testcase(
     ptr_elem_counts = {}
     for p in data_ptrs:
         inferred = inferred_counts.get(p["name"])
-        ptr_elem_counts[p["name"]] = int(inferred) if inferred and int(inferred) > 0 else logical_elem_count
+        ptr_elem_counts[p["name"]] = (
+            int(inferred) if inferred and int(inferred) > 0 else logical_elem_count
+        )
     if testcase in {"rmsnorm_incore_0", "decode_projection_incore_0"}:
         # These repro kernels partition a [16, hidden] ND view with a row
         # offset. Board validation runs a single-block case, so keep bf16
@@ -1738,8 +1845,16 @@ def generate_testcase(
             continue
         if t == "bool":
             bool_override = _bool_scalar_default_value(testcase, p["name"])
-            value = "true" if bool_override is None else ("true" if bool_override else "false")
-        elif re.match(r"^(u?int)(8|16|32|64)_t$", t) or t in {"int", "unsigned", "size_t"}:
+            value = (
+                "true"
+                if bool_override is None
+                else ("true" if bool_override else "false")
+            )
+        elif re.match(r"^(u?int)(8|16|32|64)_t$", t) or t in {
+            "int",
+            "unsigned",
+            "size_t",
+        }:
             int_override = _integer_scalar_default_value(testcase, p["name"], t)
             value = "1" if int_override is None else str(int_override)
         elif t in {"float"}:
@@ -1754,12 +1869,18 @@ def generate_testcase(
         if p["kind"] != "ptr":
             continue
         if p["role"] == "ffts":
-            param_decls_lines.append(f"    {p['host_type']} *{p['name']}Device = nullptr;")
+            param_decls_lines.append(
+                f"    {p['host_type']} *{p['name']}Device = nullptr;"
+            )
             param_decls_lines.append(f"    uint64_t {p['name']}FftsAddr = 0;")
             param_decls_lines.append(f"    uint32_t {p['name']}FftsLen = 0;")
         else:
-            param_decls_lines.append(f"    {p['host_type']} *{p['name']}Host = nullptr;")
-            param_decls_lines.append(f"    {p['host_type']} *{p['name']}Device = nullptr;")
+            param_decls_lines.append(
+                f"    {p['host_type']} *{p['name']}Host = nullptr;"
+            )
+            param_decls_lines.append(
+                f"    {p['host_type']} *{p['name']}Device = nullptr;"
+            )
 
     alloc_host = []
     alloc_device = []
@@ -1781,7 +1902,7 @@ def generate_testcase(
             f"    if (const rtError_t _rt = rtGetC2cCtrlAddr(&{p['name']}FftsAddr, &{p['name']}FftsLen); _rt != RT_ERROR_NONE) {{"
         )
         init_runtime_ptrs.append(
-            f"        std::fprintf(stderr, \"[ERROR] rtGetC2cCtrlAddr failed for {p['name']}: %d (%s:%d)\\n\", (int)_rt, __FILE__, __LINE__);"
+            f'        std::fprintf(stderr, "[ERROR] rtGetC2cCtrlAddr failed for {p["name"]}: %d (%s:%d)\\n", (int)_rt, __FILE__, __LINE__);'
         )
         init_runtime_ptrs.append("        rc = 1;")
         init_runtime_ptrs.append("        goto cleanup;")
@@ -1795,7 +1916,7 @@ def generate_testcase(
     for p in init_ptrs:
         size_var = f"fileSize_{p['name']}"
         read_inputs.append(
-            f"    ReadFile(\"./{p['name']}.bin\", {size_var}, {p['name']}Host, {size_var});"
+            f'    ReadFile("./{p["name"]}.bin", {size_var}, {p["name"]}Host, {size_var});'
         )
         copy_inputs.append(
             f"    ACL_CHECK(aclrtMemcpy({p['name']}Device, {size_var}, {p['name']}Host, {size_var}, ACL_MEMCPY_HOST_TO_DEVICE));"
@@ -1809,7 +1930,7 @@ def generate_testcase(
             f"    ACL_CHECK(aclrtMemcpy({p['name']}Host, {size_var}, {p['name']}Device, {size_var}, ACL_MEMCPY_DEVICE_TO_HOST));"
         )
         output_write.append(
-            f"    WriteFile(\"./{p['name']}.bin\", {p['name']}Host, {size_var});"
+            f'    WriteFile("./{p["name"]}.bin", {p["name"]}Host, {size_var});'
         )
 
     runtime_rt_include = '#include "runtime/rt.h"' if ffts_ptrs else ""
@@ -1823,10 +1944,9 @@ def generate_testcase(
         # `rtGetC2cCtrlAddr` is provided by CANN runtime. Use ccelib runtime
         # header here instead of `runtime/rt.h` to avoid environment-specific
         # include path issues on some board images.
-        runtime_rt_include = '#include <stdint.h>\n#include <ccelib/common/runtime.h>'
+        runtime_rt_include = "#include <stdint.h>\n#include <ccelib/common/runtime.h>"
     main_cpp = (
-        template
-        .replace("@RUNTIME_RT_INCLUDE@", runtime_rt_include)
+        template.replace("@RUNTIME_RT_INCLUDE@", runtime_rt_include)
         .replace("@TEST_SUITE@", testcase.upper())
         .replace("@CASE_NAME@", case_name)
         .replace("@RUNTIME_RT_INCLUDE@", runtime_rt_include)
@@ -1851,7 +1971,9 @@ def generate_testcase(
     )
     (output_dir / "main.cpp").write_text(main_cpp, encoding="utf-8")
 
-    golden_template = (templates_root / "golden_template.py").read_text(encoding="utf-8")
+    golden_template = (templates_root / "golden_template.py").read_text(
+        encoding="utf-8"
+    )
     input_generate = []
     elem_count = logical_elem_count
     kernel_has_tscatter = "TSCATTER" in raw_kernel
@@ -1898,7 +2020,12 @@ def generate_testcase(
         size = ptr_elem_counts.get(name, elem_count)
         is_output = p.get("role") == "output"
         is_integer = np_dtype.startswith("np.int") or np_dtype.startswith("np.uint")
-        is_tscatter_indices = kernel_has_tscatter and p.get("role") == "input" and is_integer and size == elem_count
+        is_tscatter_indices = (
+            kernel_has_tscatter
+            and p.get("role") == "input"
+            and is_integer
+            and size == elem_count
+        )
         is_mscatter_indices = (
             kernel_has_mscatter
             and mscatter_indices_input is not None
@@ -1911,30 +2038,53 @@ def generate_testcase(
             and is_integer
             and name != mgather_table_input["name"]
         )
-        is_tgatherb_offset = kernel_has_tgatherb and p.get("role") == "input" and is_integer and size < elem_count
-        is_tgatherb_src = kernel_has_tgatherb and p.get("role") == "input" and not is_tgatherb_offset
+        is_tgatherb_offset = (
+            kernel_has_tgatherb
+            and p.get("role") == "input"
+            and is_integer
+            and size < elem_count
+        )
+        is_tgatherb_src = (
+            kernel_has_tgatherb and p.get("role") == "input" and not is_tgatherb_offset
+        )
         # If the kernel has both inputs and outputs, default to zero-init for
         # output buffers to match pto-isa ST conventions (and improve determinism).
         zero_init = is_output and len(init_ptrs) > 1
 
         if zero_init:
             input_generate.append(f"    {name} = np.zeros(({size},), dtype={np_dtype})")
-            input_generate.append(f"    {name}.tofile(\"{name}.bin\")")
-        elif mrgsort_packed and (not is_output) and np_dtype in ("np.float32", "np.float16"):
-            input_generate.append(f"    # TMRGSORT expects packed (value, index) structures (8 bytes each).")
-            input_generate.append(f"    # Generate per-block sorted inputs to match pto-isa ST data layout.")
+            input_generate.append(f'    {name}.tofile("{name}.bin")')
+        elif (
+            mrgsort_packed
+            and (not is_output)
+            and np_dtype in ("np.float32", "np.float16")
+        ):
+            input_generate.append(
+                "    # TMRGSORT expects packed (value, index) structures (8 bytes each)."
+            )
+            input_generate.append(
+                "    # Generate per-block sorted inputs to match pto-isa ST data layout."
+            )
             if np_dtype == "np.float32":
-                input_generate.append(f"    {name}__words_per_struct = 2  # float32(4B) + uint32(4B)")
-                input_generate.append(f"    {name}__struct_dtype = np.dtype([('v', np.float32), ('i', np.uint32)])")
+                input_generate.append(
+                    f"    {name}__words_per_struct = 2  # float32(4B) + uint32(4B)"
+                )
+                input_generate.append(
+                    f"    {name}__struct_dtype = np.dtype([('v', np.float32), ('i', np.uint32)])"
+                )
                 input_generate.append(f"    {name}__value_dtype = np.float32")
             else:
-                input_generate.append(f"    {name}__words_per_struct = 4  # float16(2B) + pad(2B) + uint32(4B)")
+                input_generate.append(
+                    f"    {name}__words_per_struct = 4  # float16(2B) + pad(2B) + uint32(4B)"
+                )
                 input_generate.append(
                     f"    {name}__struct_dtype = np.dtype([('v', np.float16), ('pad', np.uint16), ('i', np.uint32)])"
                 )
                 input_generate.append(f"    {name}__value_dtype = np.float16")
 
-            input_generate.append(f"    {name}__struct_count = {size} // {name}__words_per_struct")
+            input_generate.append(
+                f"    {name}__struct_count = {size} // {name}__words_per_struct"
+            )
             # Two modes:
             #   - Single-list format (TMRGSORT(dst, src, blockLen)): input is arranged in
             #     4 blocks and each block is sorted independently.
@@ -1943,24 +2093,38 @@ def generate_testcase(
             mrgsort_single = mrgsort_block_len is not None
             if mrgsort_single:
                 input_generate.append(f"    {name}__block_len = {mrgsort_block_len}")
-                input_generate.append(f"    {name}__structs_per_block = {name}__block_len // {name}__words_per_struct")
+                input_generate.append(
+                    f"    {name}__structs_per_block = {name}__block_len // {name}__words_per_struct"
+                )
             input_generate.append(
                 f"    {name}__values = np.random.uniform(low=0, high=1, size=({name}__struct_count,)).astype({name}__value_dtype)"
             )
-            input_generate.append(f"    {name}__idx = np.arange({name}__struct_count, dtype=np.uint32)")
+            input_generate.append(
+                f"    {name}__idx = np.arange({name}__struct_count, dtype=np.uint32)"
+            )
             if mrgsort_single:
-                input_generate.append(f"    if {name}__structs_per_block > 0 and {name}__struct_count > 0:")
-                input_generate.append(f"        pad = (-{name}__struct_count) % {name}__structs_per_block")
-                input_generate.append(f"        if pad:")
+                input_generate.append(
+                    f"    if {name}__structs_per_block > 0 and {name}__struct_count > 0:"
+                )
+                input_generate.append(
+                    f"        pad = (-{name}__struct_count) % {name}__structs_per_block"
+                )
+                input_generate.append("        if pad:")
                 input_generate.append(
                     f"            {name}__values = np.concatenate(({name}__values, np.zeros(pad, dtype={name}__values.dtype)))"
                 )
                 input_generate.append(
                     f"            {name}__idx = np.concatenate(({name}__idx, np.zeros(pad, dtype={name}__idx.dtype)))"
                 )
-                input_generate.append(f"        v = {name}__values.reshape(-1, {name}__structs_per_block)")
-                input_generate.append(f"        i = {name}__idx.reshape(-1, {name}__structs_per_block)")
-                input_generate.append(f"        order = np.argsort(-v, kind='stable', axis=1)")
+                input_generate.append(
+                    f"        v = {name}__values.reshape(-1, {name}__structs_per_block)"
+                )
+                input_generate.append(
+                    f"        i = {name}__idx.reshape(-1, {name}__structs_per_block)"
+                )
+                input_generate.append(
+                    "        order = np.argsort(-v, kind='stable', axis=1)"
+                )
                 input_generate.append(
                     f"        {name}__values = np.take_along_axis(v, order, axis=1).reshape(-1)[:{name}__struct_count]"
                 )
@@ -1969,22 +2133,30 @@ def generate_testcase(
                 )
             else:
                 input_generate.append(f"    if {name}__struct_count > 0:")
-                input_generate.append(f"        order = np.argsort(-{name}__values, kind='stable')")
+                input_generate.append(
+                    f"        order = np.argsort(-{name}__values, kind='stable')"
+                )
                 input_generate.append(f"        {name}__values = {name}__values[order]")
                 input_generate.append(f"        {name}__idx = {name}__idx[order]")
-            input_generate.append(f"    {name}__packed = np.empty(({name}__struct_count,), dtype={name}__struct_dtype)")
+            input_generate.append(
+                f"    {name}__packed = np.empty(({name}__struct_count,), dtype={name}__struct_dtype)"
+            )
             input_generate.append(f"    {name}__packed['v'] = {name}__values")
             if np_dtype == "np.float16":
                 input_generate.append(f"    {name}__packed['pad'] = np.uint16(0)")
             input_generate.append(f"    {name}__packed['i'] = {name}__idx")
-            input_generate.append(f"    {name}__packed.tofile(\"{name}.bin\")")
+            input_generate.append(f'    {name}__packed.tofile("{name}.bin")')
         elif is_tscatter_indices:
-            input_generate.append(f"    {name}__cols = np.arange({cols}, dtype=np.int64).reshape(1, {cols})")
-            input_generate.append(f"    {name}__row_perm = np.random.permutation({rows}).astype(np.int64).reshape({rows}, 1)")
+            input_generate.append(
+                f"    {name}__cols = np.arange({cols}, dtype=np.int64).reshape(1, {cols})"
+            )
+            input_generate.append(
+                f"    {name}__row_perm = np.random.permutation({rows}).astype(np.int64).reshape({rows}, 1)"
+            )
             input_generate.append(
                 f"    {name} = ({name}__row_perm * {cols} + {name}__cols).astype({np_dtype}).reshape(-1)"
             )
-            input_generate.append(f"    {name}.tofile(\"{name}.bin\")")
+            input_generate.append(f'    {name}.tofile("{name}.bin")')
         elif is_mscatter_indices:
             out_count = (
                 int(ptr_elem_counts.get(mscatter_output["name"], logical_elem_count))
@@ -1994,48 +2166,64 @@ def generate_testcase(
             input_generate.append(
                 f"    {name} = (np.arange({size}, dtype=np.int64) % {out_count}).astype({np_dtype}, copy=False)"
             )
-            input_generate.append(f"    {name}.tofile(\"{name}.bin\")")
+            input_generate.append(f'    {name}.tofile("{name}.bin")')
         elif is_mgather_indices:
             table_count = (
-                int(ptr_elem_counts.get(mgather_table_input['name'], logical_elem_count))
+                int(
+                    ptr_elem_counts.get(mgather_table_input["name"], logical_elem_count)
+                )
                 if mgather_table_input is not None
                 else max(size, 1)
             )
             input_generate.append(
                 f"    {name} = (np.arange({size}, dtype=np.int64) % {table_count}).astype({np_dtype}, copy=False)"
             )
-            input_generate.append(f"    {name}.tofile(\"{name}.bin\")")
+            input_generate.append(f'    {name}.tofile("{name}.bin")')
         elif is_tgatherb_offset:
-            input_generate.append(f"    {name} = (np.arange({size}, dtype=np.uint32) * 32).astype({np_dtype})")
-            input_generate.append(f"    {name}.tofile(\"{name}.bin\")")
+            input_generate.append(
+                f"    {name} = (np.arange({size}, dtype=np.uint32) * 32).astype({np_dtype})"
+            )
+            input_generate.append(f'    {name}.tofile("{name}.bin")')
         elif is_tgatherb_src:
             if is_integer:
-                input_generate.append(f"    {name} = np.arange({size}, dtype=np.int64).astype({np_dtype})")
+                input_generate.append(
+                    f"    {name} = np.arange({size}, dtype=np.int64).astype({np_dtype})"
+                )
             else:
-                input_generate.append(f"    {name} = np.arange({size}, dtype=np.float32).astype({np_dtype})")
-            input_generate.append(f"    {name}.tofile(\"{name}.bin\")")
+                input_generate.append(
+                    f"    {name} = np.arange({size}, dtype=np.float32).astype({np_dtype})"
+                )
+            input_generate.append(f'    {name}.tofile("{name}.bin")')
         elif is_integer:
             if index_mod is not None:
                 input_generate.append(
                     f"    {name} = (np.arange({size}, dtype=np.int64) % {index_mod}).astype({np_dtype})"
                 )
             else:
-                input_generate.append(f"    {name} = np.zeros(({size},), dtype={np_dtype})")
-            input_generate.append(f"    {name}.tofile(\"{name}.bin\")")
+                input_generate.append(
+                    f"    {name} = np.zeros(({size},), dtype={np_dtype})"
+                )
+            input_generate.append(f'    {name}.tofile("{name}.bin")')
         else:
-            input_generate.append(f"    {name} = np.random.random(size=({size},)).astype({np_dtype})")
-            input_generate.append(f"    {name}.tofile(\"{name}.bin\")")
+            input_generate.append(
+                f"    {name} = np.random.random(size=({size},)).astype({np_dtype})"
+            )
+            input_generate.append(f'    {name}.tofile("{name}.bin")')
 
     golden_dst = output_dir / "golden.py"
     if custom_golden is not None:
         _copy_asset_if_needed(custom_golden, golden_dst)
     else:
-        golden_py = golden_template.replace("@INPUT_GENERATE@", "\n".join(input_generate))
+        golden_py = golden_template.replace(
+            "@INPUT_GENERATE@", "\n".join(input_generate)
+        )
         golden_dst.write_text(golden_py, encoding="utf-8")
     if custom_golden is not None or custom_compare is not None:
         _copy_custom_golden_helpers(sample_root, output_dir)
         if shared_validation_runtime.is_file():
-            _copy_asset_if_needed(shared_validation_runtime, output_dir / "validation_runtime.py")
+            _copy_asset_if_needed(
+                shared_validation_runtime, output_dir / "validation_runtime.py"
+            )
 
     # Emit the kernel source, optionally injecting a packed-predicate preload to
     # make TCMP/TCMPS outputs deterministic for byte-wise compares.
@@ -2075,7 +2263,9 @@ def generate_testcase(
         if p["kind"] == "ptr":
             cast_ty = _strip_param_name(p["raw"], p["name"])
             kernel_call_args_device.append(f"({cast_ty}){p['name']}")
-            kernel_call_args_host.append(f"({_rewrite_host_unsupported_types(cast_ty)}){p['name']}")
+            kernel_call_args_host.append(
+                f"({_rewrite_host_unsupported_types(cast_ty)}){p['name']}"
+            )
         else:
             kernel_call_args_device.append(p["name"])
             kernel_call_args_host.append(p["name"])
@@ -2084,8 +2274,7 @@ def generate_testcase(
     raw_params_host = [_rewrite_host_unsupported_types(p) for p in raw_params]
     launch_block_count = _infer_launch_block_count(raw_kernel_for_analysis, testcase)
     launch_cpp = (
-        INCLUDE_REPLACEMENT
-        + "\n"
+        INCLUDE_REPLACEMENT + "\n"
         "#if defined(__CCE_AICORE__)\n"
         f"__global__ AICORE void {kernel_name}({', '.join(raw_params)});\n"
         "#else\n"
@@ -2110,7 +2299,9 @@ def generate_testcase(
 
     # CCE printing support is gated behind `--cce-enable-print` on some bisheng
     # toolchains. Only enable it when kernels emit printf.
-    needs_cce_print = bool(re.search(r"\b(?:bisheng::)?cce::printf\s*\(", raw_kernel_for_analysis))
+    needs_cce_print = bool(
+        re.search(r"\b(?:bisheng::)?cce::printf\s*\(", raw_kernel_for_analysis)
+    )
     cce_enable_print_opt = "    --cce-enable-print" if needs_cce_print else ""
     cce_print_define_opt = "    -DPTOAS_ENABLE_CCE_PRINT=1" if needs_cce_print else ""
 
@@ -2251,16 +2442,22 @@ if(ENABLE_SIM_GOLDEN)
     )
 endif()
 """
-    (output_dir / "CMakeLists.txt").write_text(cmake_content.strip() + "\n", encoding="utf-8")
+    (output_dir / "CMakeLists.txt").write_text(
+        cmake_content.strip() + "\n", encoding="utf-8"
+    )
 
-    compare_template = (templates_root / "compare_template.py").read_text(encoding="utf-8")
+    compare_template = (templates_root / "compare_template.py").read_text(
+        encoding="utf-8"
+    )
     compare_lines = ["    ok = True"]
     compare_prefix_counts = {}
     scatter_indices_input = None
     if kernel_has_tscatter:
         for p in init_ptrs:
             p_dtype = _np_dtype_for_cpp(p["cpp_type"])
-            if p.get("role") == "input" and (p_dtype.startswith("np.int") or p_dtype.startswith("np.uint")):
+            if p.get("role") == "input" and (
+                p_dtype.startswith("np.int") or p_dtype.startswith("np.uint")
+            ):
                 scatter_indices_input = p
                 break
     elif kernel_has_mscatter and mscatter_indices_input is not None:
@@ -2295,58 +2492,67 @@ endif()
         eps = _default_eps_for_cpp_type(p["cpp_type"])
         is_bf16_output = _is_bf16_cpp_type(p["cpp_type"])
         bf16_max_ulp = _default_bf16_max_ulp_for_cpp_type(p["cpp_type"])
-        if (kernel_has_tscatter or kernel_has_mscatter) and scatter_indices_input is not None:
+        if (
+            kernel_has_tscatter or kernel_has_mscatter
+        ) and scatter_indices_input is not None:
             if is_bf16_output:
                 compare_lines.append(
-                    f"    ok = compare_bf16_bin_at_indices(\"golden_{name}.bin\", \"{name}.bin\", {bf16_max_ulp}, "
-                    f"\"{scatter_indices_input['name']}.bin\", {_np_dtype_for_cpp(scatter_indices_input['cpp_type'])}) and ok"
+                    f'    ok = compare_bf16_bin_at_indices("golden_{name}.bin", "{name}.bin", {bf16_max_ulp}, '
+                    f'"{scatter_indices_input["name"]}.bin", {_np_dtype_for_cpp(scatter_indices_input["cpp_type"])}) and ok'
                 )
             else:
                 compare_lines.append(
-                    f"    ok = compare_bin_at_indices(\"golden_{name}.bin\", \"{name}.bin\", {np_dtype}, {eps}, "
-                    f"\"{scatter_indices_input['name']}.bin\", {_np_dtype_for_cpp(scatter_indices_input['cpp_type'])}) and ok"
+                    f'    ok = compare_bin_at_indices("golden_{name}.bin", "{name}.bin", {np_dtype}, {eps}, '
+                    f'"{scatter_indices_input["name"]}.bin", {_np_dtype_for_cpp(scatter_indices_input["cpp_type"])}) and ok'
                 )
         elif has_packed_pred_mask and p["cpp_type"] in {"uint8_t", "int8_t"}:
             compare_lines.append(
-                f"    ok = compare_packed_pred_mask(\"golden_{name}.bin\", \"{name}.bin\", {rows}, {cols}) and ok"
+                f'    ok = compare_packed_pred_mask("golden_{name}.bin", "{name}.bin", {rows}, {cols}) and ok'
             )
         else:
             prefix_cnt = compare_prefix_counts.get(name)
             if prefix_cnt is not None:
                 if is_bf16_output:
                     compare_lines.append(
-                        f"    ok = compare_bf16_bin_prefix(\"golden_{name}.bin\", \"{name}.bin\", {bf16_max_ulp}, {prefix_cnt}) and ok"
+                        f'    ok = compare_bf16_bin_prefix("golden_{name}.bin", "{name}.bin", {bf16_max_ulp}, {prefix_cnt}) and ok'
                     )
                 else:
                     compare_lines.append(
-                        f"    ok = compare_bin_prefix(\"golden_{name}.bin\", \"{name}.bin\", {np_dtype}, {eps}, {prefix_cnt}) and ok"
+                        f'    ok = compare_bin_prefix("golden_{name}.bin", "{name}.bin", {np_dtype}, {eps}, {prefix_cnt}) and ok'
                     )
             else:
                 if is_bf16_output:
                     compare_lines.append(
-                        f"    ok = compare_bf16_bin(\"golden_{name}.bin\", \"{name}.bin\", {bf16_max_ulp}) and ok"
+                        f'    ok = compare_bf16_bin("golden_{name}.bin", "{name}.bin", {bf16_max_ulp}) and ok'
                     )
                 else:
                     compare_lines.append(
-                        f"    ok = compare_bin(\"golden_{name}.bin\", \"{name}.bin\", {np_dtype}, {eps}) and ok"
+                        f'    ok = compare_bin("golden_{name}.bin", "{name}.bin", {np_dtype}, {eps}) and ok'
                     )
-    if testcase in {"test_intercore_sync_a5_functional", "test_intercore_sync_a5_ptoisa_vec"}:
+    if testcase in {
+        "test_intercore_sync_a5_functional",
+        "test_intercore_sync_a5_ptoisa_vec",
+    }:
         # Extra functional check (not just run-to-run determinism):
         # core0 writes 2.0 to output[0], core1 waits then mirrors to output[1].
         out_name = output_ptrs[0]["name"] if output_ptrs else "v1"
-        compare_lines.append(f"    __inter_out = np.fromfile(\"{out_name}.bin\", dtype=np.float32)")
+        compare_lines.append(
+            f'    __inter_out = np.fromfile("{out_name}.bin", dtype=np.float32)'
+        )
         compare_lines.append("    if __inter_out.size < 2:")
-        compare_lines.append("        print(f\"[ERROR] intercore check requires >=2 elements, got {__inter_out.size}\")")
+        compare_lines.append(
+            '        print(f"[ERROR] intercore check requires >=2 elements, got {__inter_out.size}")'
+        )
         compare_lines.append("        ok = False")
         compare_lines.append("    else:")
         compare_lines.append("        if abs(float(__inter_out[0]) - 2.0) > 1e-6:")
         compare_lines.append(
-            "            print(f\"[ERROR] intercore check failed: out[0]={float(__inter_out[0])}, expect 2.0\")"
+            '            print(f"[ERROR] intercore check failed: out[0]={float(__inter_out[0])}, expect 2.0")'
         )
         compare_lines.append("            ok = False")
         compare_lines.append("        if abs(float(__inter_out[1]) - 2.0) > 1e-6:")
         compare_lines.append(
-            "            print(f\"[ERROR] intercore check failed: out[1]={float(__inter_out[1])}, expect 2.0\")"
+            '            print(f"[ERROR] intercore check failed: out[1]={float(__inter_out[1])}, expect 2.0")'
         )
         compare_lines.append("            ok = False")
     compare_dst = output_dir / "compare.py"
@@ -2382,12 +2588,24 @@ endif()
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Generate NPU validation testcase from PTOAS kernel.")
+    parser = argparse.ArgumentParser(
+        description="Generate NPU validation testcase from PTOAS kernel."
+    )
     parser.add_argument("--input", required=True, help="Input PTOAS .cpp file")
-    parser.add_argument("--testcase", default=None, help="Testcase name (default: derived from input filename)")
-    parser.add_argument("--output-root", default=None, help="Output testcases root directory")
-    parser.add_argument("--run-mode", default="npu", choices=["sim", "npu"], help="Run mode for run.sh")
-    parser.add_argument("--soc-version", default="Ascend910", help="SOC version for run.sh")
+    parser.add_argument(
+        "--testcase",
+        default=None,
+        help="Testcase name (default: derived from input filename)",
+    )
+    parser.add_argument(
+        "--output-root", default=None, help="Output testcases root directory"
+    )
+    parser.add_argument(
+        "--run-mode", default="npu", choices=["sim", "npu"], help="Run mode for run.sh"
+    )
+    parser.add_argument(
+        "--soc-version", default="Ascend910", help="SOC version for run.sh"
+    )
     parser.add_argument(
         "--aicore-arch",
         default=None,

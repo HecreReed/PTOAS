@@ -10,7 +10,13 @@
 #define __VEC_SCOPE__
 #endif
 
-#if defined(__CCE_AICORE__) && defined(__NPU_ARCH__) && (__NPU_ARCH__ == 2201)
+// FP8/FP4 typedef fallbacks: only emit when the bisheng compiler itself
+// doesn't already provide them. CANN 9.2.0+ bisheng unconditionally
+// typedef's these names in its built-in <__clang_cce_types.h> header
+// (pulled in automatically under -xcce), so emitting our own struct-based
+// typedef here would collide ("typedef redefinition with different types",
+// since the SDK side is e.g. `typedef __hif8 hifloat8_t;`).
+#if defined(__CCE_AICORE__) && defined(__NPU_ARCH__) && (__NPU_ARCH__ == 2201) && !__has_include(<__clang_cce_types.h>)
 typedef struct { unsigned char v; } hifloat8_t;
 typedef struct { unsigned char v; } float8_e4m3_t;
 typedef struct { unsigned char v; } float8_e5m2_t;
@@ -26,7 +32,12 @@ typedef struct { unsigned char v; } float4_e2m1x2_t;
 #include <pto/pto-inst.hpp>
 #include <pto/common/constants.hpp>
 
-#if !defined(__CCE_AICORE__) && !defined(TMRGSORT_HPP)
+// Gate on __has_include(<pto/common/type.hpp>) instead of the TMRGSORT_HPP
+// macro: CANN 9.2.0+ moved pto::MrgSortExecutedNumList into
+// pto/common/type.hpp, which does not #define TMRGSORT_HPP, so the old
+// macro check leaked and produced a redefinition compile error whenever
+// type.hpp was pulled in.
+#if !defined(__CCE_AICORE__) && !__has_include(<pto/common/type.hpp>)
 namespace pto {
 struct MrgSortExecutedNumList {
     uint16_t mrgSortList0;

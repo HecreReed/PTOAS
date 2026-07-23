@@ -24,7 +24,12 @@ See LICENSE in the root of the software repository for the full text of the Lice
 
 using namespace PtoTestCommon;
 
-#ifndef TMRGSORT_HPP
+// Gate on __has_include(<pto/common/type.hpp>) instead of the TMRGSORT_HPP
+// macro: CANN 9.2.0+ moved pto::MrgSortExecutedNumList into
+// pto/common/type.hpp, which does not #define TMRGSORT_HPP, so the old
+// macro check leaked and produced a redefinition compile error whenever
+// test_common.h pulled in type.hpp.
+#if !__has_include(<pto/common/type.hpp>)
 namespace pto {
 struct MrgSortExecutedNumList {
     uint16_t mrgSortList0;
