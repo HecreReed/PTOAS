@@ -58,8 +58,8 @@ module {
     pto.aic_initialize_pipe {id = 0, dir_mask = 1, slot_size = 512, nosplit = true,
       acc_push_epilogue = #pto.acc_push_epilogue<layout = nz2nd, quant = deqf16_scalar, relu = no_relu>}
       (c2v_consumer_buf = %c2v_import : i32, v2c_consumer_buf = %c0_i32 : i32)
-    %fp = pto.alloc_tile : !pto.tile_buf<loc=scaling, dtype=f16, rows=1, cols=32, v_row=1, v_col=32, blayout=row_major, slayout=none_box, fractal=512, pad=0>
-    pto.set_quant_vector(%fp : !pto.tile_buf<loc=scaling, dtype=f16, rows=1, cols=32, v_row=1, v_col=32, blayout=row_major, slayout=none_box, fractal=512, pad=0>) {id = 0}
+    %fp = pto.alloc_tile : !pto.tile_buf<loc=scaling, dtype=ui64, rows=1, cols=32, v_row=1, v_col=32, blayout=row_major, slayout=none_box, fractal=512, pad=0>
+    pto.set_quant_vector(%fp : !pto.tile_buf<loc=scaling, dtype=ui64, rows=1, cols=32, v_row=1, v_col=32, blayout=row_major, slayout=none_box, fractal=512, pad=0>) {id = 0}
     return
   }
 
@@ -114,8 +114,8 @@ module {
     pto.aic_initialize_pipe {id = 0, dir_mask = 1, slot_size = 512, nosplit = true,
       acc_push_epilogue = #pto.acc_push_epilogue<layout = nz2nd, quant = deqf16_vec, relu = no_relu>}
       (c2v_consumer_buf = %c2v_import : i32, v2c_consumer_buf = %c0_i32 : i32)
-    %fp = pto.alloc_tile : !pto.tile_buf<loc=scaling, dtype=f16, rows=1, cols=32, v_row=1, v_col=32, blayout=row_major, slayout=none_box, fractal=512, pad=0>
-    pto.set_quant_vector(%fp : !pto.tile_buf<loc=scaling, dtype=f16, rows=1, cols=32, v_row=1, v_col=32, blayout=row_major, slayout=none_box, fractal=512, pad=0>) {id = 1}
+    %fp = pto.alloc_tile : !pto.tile_buf<loc=scaling, dtype=ui64, rows=1, cols=32, v_row=1, v_col=32, blayout=row_major, slayout=none_box, fractal=512, pad=0>
+    pto.set_quant_vector(%fp : !pto.tile_buf<loc=scaling, dtype=ui64, rows=1, cols=32, v_row=1, v_col=32, blayout=row_major, slayout=none_box, fractal=512, pad=0>) {id = 1}
     return
   }
 
@@ -142,8 +142,8 @@ module {
     pto.aic_initialize_pipe {id = 0, dir_mask = 1, slot_size = 512, nosplit = true,
       acc_push_epilogue = #pto.acc_push_epilogue<layout = nz2nd, quant = deqf16_vec, relu = no_relu>}
       (c2v_consumer_buf = %c2v_import : i32, v2c_consumer_buf = %c0_i32 : i32)
-    %fp = pto.alloc_tile : !pto.tile_buf<loc=vec, dtype=f16, rows=1, cols=32, v_row=1, v_col=32, blayout=row_major, slayout=none_box, fractal=512, pad=0>
-    pto.set_quant_vector(%fp : !pto.tile_buf<loc=vec, dtype=f16, rows=1, cols=32, v_row=1, v_col=32, blayout=row_major, slayout=none_box, fractal=512, pad=0>) {id = 0}
+    %fp = pto.alloc_tile : !pto.tile_buf<loc=vec, dtype=ui64, rows=1, cols=32, v_row=1, v_col=32, blayout=row_major, slayout=none_box, fractal=512, pad=0>
+    pto.set_quant_vector(%fp : !pto.tile_buf<loc=vec, dtype=ui64, rows=1, cols=32, v_row=1, v_col=32, blayout=row_major, slayout=none_box, fractal=512, pad=0>) {id = 0}
     return
   }
 

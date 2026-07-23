@@ -55,4 +55,4 @@ module {
   }
 }
 
-// CHECK: error: 'pto.set_quant_vector' op expects 'scaling_tile' element type to be packed i64/ui64 for deqf16_vec on A5
+// CHECK: error: 'pto.set_quant_vector' op expects 'scaling_tile' element type to be packed i64/ui64 for vector quantization on A5

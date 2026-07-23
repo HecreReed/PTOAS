@@ -6,7 +6,11 @@
 // INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
 // See LICENSE in the root of the software repository for the full text of the License.
 //
-// RUN: not ptoas --pto-arch=a5 %s 2>&1 | FileCheck %s
+// RUN: not ptoas --pto-arch=a5 %s -o /dev/null 2>&1 | FileCheck %s --check-prefix=REQ8
+// RUN: sed -e 's/req8_vec/qf322b8_pre_vec/g' -e 's/dtype=f32/dtype=f16/g' %s > %t.qf.pto
+// RUN: not ptoas --pto-arch=a5 %t.qf.pto -o /dev/null 2>&1 | FileCheck %s --check-prefix=QF322B8
+// RUN: sed -e 's/req8_vec/qs322bf16_pre_vec/g' -e 's/dtype=f32/dtype=bf16/g' %s > %t.qs.pto
+// RUN: not ptoas --pto-arch=a5 %t.qs.pto -o /dev/null 2>&1 | FileCheck %s --check-prefix=QS322BF16
 
 module {
   func.func @cube_kernel() attributes {pto.kernel_kind = #pto.kernel_kind<cube>} {
@@ -19,16 +23,16 @@ module {
     pto.aic_initialize_pipe {
       id = 0,
       dir_mask = 1,
-      slot_size = 512,
+      slot_size = 1024,
       nosplit = true,
       acc_push_epilogue =
-          #pto.acc_push_epilogue<layout = nz2nd, quant = deqf16_vec, relu = no_relu>
+          #pto.acc_push_epilogue<layout = nz2nd, quant = req8_vec, relu = no_relu>
     }
       (c2v_consumer_buf = %c2v_import : i32,
        v2c_consumer_buf = %c0_i32 : i32)
 
-    %fp = pto.alloc_tile : !pto.tile_buf<loc=scaling, dtype=i32, rows=1, cols=32, v_row=1, v_col=32, blayout=row_major, slayout=none_box, fractal=512, pad=0>
-    pto.set_quant_vector(%fp : !pto.tile_buf<loc=scaling, dtype=i32, rows=1, cols=32, v_row=1, v_col=32, blayout=row_major, slayout=none_box, fractal=512, pad=0>) {id = 0}
+    %fp = pto.alloc_tile : !pto.tile_buf<loc=scaling, dtype=f32, rows=1, cols=32, v_row=1, v_col=32, blayout=row_major, slayout=none_box, fractal=512, pad=0>
+    pto.set_quant_vector(%fp : !pto.tile_buf<loc=scaling, dtype=f32, rows=1, cols=32, v_row=1, v_col=32, blayout=row_major, slayout=none_box, fractal=512, pad=0>) {id = 0}
     return
   }
 
@@ -44,19 +48,17 @@ module {
     pto.aiv_initialize_pipe {
       id = 0,
       dir_mask = 1,
-      slot_size = 512,
+      slot_size = 1024,
       nosplit = true,
       acc_push_epilogue =
-          #pto.acc_push_epilogue<layout = nz2nd, quant = deqf16_vec, relu = no_relu>
+          #pto.acc_push_epilogue<layout = nz2nd, quant = req8_vec, relu = no_relu>
     }
       (c2v_consumer_buf = %c2v_local : i32,
        v2c_consumer_buf = %c0_i32 : i32)
-
-    %recv = pto.tpop_from_aic {id = 0, split = 0}
-      -> !pto.tile_buf<loc=vec, dtype=f16, rows=16, cols=16, v_row=16, v_col=16, blayout=row_major, slayout=none_box, fractal=512, pad=0>
-    pto.tfree_from_aic {id = 0, split = 0}
     return
   }
 }
 
-// CHECK: error: 'pto.set_quant_vector' op expects 'scaling_tile' element type to be packed i64/ui64 for vector quantization on A5
+// REQ8: error: 'pto.set_quant_vector' op expects 'scaling_tile' element type to be packed i64/ui64 for vector quantization on A5
+// QF322B8: error: 'pto.set_quant_vector' op expects 'scaling_tile' element type to be packed i64/ui64 for vector quantization on A5
+// QS322BF16: error: 'pto.set_quant_vector' op expects 'scaling_tile' element type to be packed i64/ui64 for vector quantization on A5

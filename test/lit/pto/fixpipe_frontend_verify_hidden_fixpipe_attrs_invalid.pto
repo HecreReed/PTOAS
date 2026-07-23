@@ -138,8 +138,8 @@ module {
 //--- set_quant_vector_channel_split.pto
 module {
   func.func @cube_kernel() attributes {pto.kernel_kind = #pto.kernel_kind<cube>} {
-    %fp = pto.alloc_tile : !pto.tile_buf<loc=scaling, dtype=f16, rows=1, cols=32, v_row=1, v_col=32, blayout=row_major, slayout=none_box, fractal=512, pad=0>
-    pto.set_quant_vector(%fp : !pto.tile_buf<loc=scaling, dtype=f16, rows=1, cols=32, v_row=1, v_col=32, blayout=row_major, slayout=none_box, fractal=512, pad=0>) {id = 0} {isChannelSplit = true}
+    %fp = pto.alloc_tile : !pto.tile_buf<loc=scaling, dtype=ui64, rows=1, cols=32, v_row=1, v_col=32, blayout=row_major, slayout=none_box, fractal=512, pad=0>
+    pto.set_quant_vector(%fp : !pto.tile_buf<loc=scaling, dtype=ui64, rows=1, cols=32, v_row=1, v_col=32, blayout=row_major, slayout=none_box, fractal=512, pad=0>) {id = 0} {isChannelSplit = true}
     return
   }
 }

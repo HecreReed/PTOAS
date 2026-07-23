@@ -505,13 +505,14 @@ PTOAS 中 `nosplit = false` 则对应 `TPipe<..., IsNoSplit = false>`。
 - 当前实现已经把 `vector quant payload` 的一部分公共下限约束前移到了
   `pto.set_quant_vector` 公共 verifier：
   - 输入必须是 `loc=scaling`
-  - element type 按目标平台和 quant mode 收紧：A5 的 `deqf16_vec` 为
-    pto-isa 使用的 packed 64-bit integer payload（`i64` / `ui64`），其他
-    vector quant mode 为 `f16` / `bf16` / `f32` family；A3 为 packed
-    64-bit integer payload
+  - element type 按当前 pto-isa vector quant contract 收紧：A3 / A5 所有
+    已公开 vector quant mode 都使用 packed 64-bit control-word payload
+    （`i64` / `ui64`），每列一个 entry
+  - `SET_QUANT_VECTOR` 只绑定 FBUF 地址，不会把 `f16` / `bf16` / `f32`
+    tile 自动转换为 packed control word
 - 但 `vector quant payload` 的精确 shape 与更细的 layout / 打包约束，仍不建议在
   当前阶段一次性写死成所有 target 共享的唯一公共 contract
-- 更稳妥的做法是：公共 verifier 负责上述 arch-and-quant-aware 下限约束，其余 payload
+- 更稳妥的做法是：公共 verifier 负责上述 target-aware 下限约束，其余 payload
   shape / layout 由 arch-specific verifier 根据目标平台现有 fixpipe / quant-vector
   约束继续细化
 
@@ -791,10 +792,10 @@ acc-store `pre_quant` payload surface。
 `SET_QUANT_VECTOR(fpTile)` 的输入下限收紧为：
 
 - `loc=scaling`
-- element type 按目标平台和 quant mode 收紧：A5 的 `deqf16_vec` 属于
-  packed 64-bit integer payload（`i64` / `ui64`），其他 vector quant
-  mode 属于 `f16` / `bf16` / `f32` family；A3 属于 packed 64-bit
-  integer payload
+- element type 按当前 pto-isa vector quant contract 收紧：A3 / A5 所有
+  已公开 vector quant mode 都属于 packed 64-bit control-word payload
+  （`i64` / `ui64`）
+- `SET_QUANT_VECTOR` 只绑定 FBUF 地址，不负责将浮点 tile 打包为 control word
 
 但它仍不需要像 scalar quant 那样额外暴露一份 `out_type`；更细的 payload
 shape / layout 约束仍可继续留给 arch-specific verifier 与 lowering 处理。
@@ -1489,13 +1490,13 @@ fixpipe 的生产语义由 producer `TPUSH` 和 pipe contract 保证，而不是
     `SubBlockId = 0`，即仅覆盖 `AccToVecMode::SingleModeVec0`。`SingleModeVec1`
     及更复杂的 dual-vector 目标选择不属于当前前端 contract。
 24. `pto.set_quant_vector` 的输入必须是 `loc=scaling` 的 tile；其 element type
-    按目标平台和 quant mode 收紧：A5 的 `deqf16_vec` 必须属于 packed
-    64-bit integer payload（`i64` / `ui64`），其他 vector quant mode
-    必须属于 `f16` / `bf16` / `f32` family；A3 必须属于 packed 64-bit
-    integer payload。其大小与更细的 layout 约束仍应满足目标平台 fixpipe
+    按当前 pto-isa vector quant contract 收紧：A3 / A5 所有已公开 vector
+    quant mode 都必须属于 packed 64-bit control-word payload（`i64` /
+    `ui64`），每列一个 entry。`SET_QUANT_VECTOR` 只绑定 FBUF 地址，不会把
+    浮点 tile 自动打包。其大小与更细的 layout 约束仍应满足目标平台 fixpipe
     vector quant payload 的参数布局要求。
 25. 对 `pto.set_quant_vector`，第一版公共 verifier 至少检查 `loc=scaling` 与
-    上述 arch-and-quant-aware element type family；其余 payload shape / layout 约束，
+    上述 target-aware element type family；其余 payload shape / layout 约束，
     可由 arch-specific verifier 按目标平台现有 fixpipe vector quant 规则继续收紧。
 26. 第一版 PTOIR 只允许显式出现 `acc_push_epilogue` 这一个前端公开复合 attr，
     其内部字段限定为 `layout`、`quant`、`relu`。
@@ -1620,6 +1621,10 @@ fixpipe 的生产语义由 producer `TPUSH` 和 pipe contract 保证，而不是
   case
 - `pto.set_quant_vector` 输入不是 `loc=scaling` tile 的 verifier 失败 case
 - `pto.set_quant_vector` 使用非法 payload element type 的 verifier 失败 case
+- A5 `deqf16_vec` / `req8_vec` / `qf322b8_pre_vec` 使用 `f16` / `bf16` /
+  `f32` payload 而不是 packed `i64` / `ui64` control word 的 verifier 失败 case
+- A5 `qs322bf16_pre_vec` 在 pto-isa 明确另一种 payload contract 前，同样使用
+  floating payload 的 verifier 失败 case
 - 不同 `acc_push_epilogue.quant` 与 consumer type 不匹配的 verifier 失败 case
 - fixpipe pipe 与 `split = 1/2` 混用的 verifier 失败 case
 - 用户尝试用一条 `dir_mask = 3` pipe 同时承载 `C2V fixpipe + V2C normal` 的
