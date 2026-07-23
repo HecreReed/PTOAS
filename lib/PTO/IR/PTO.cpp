@@ -16287,7 +16287,8 @@ static bool matchesFixpipeConsumerElementType(FixpipeQuant quant,
   llvm_unreachable("unhandled FixpipeQuant");
 }
 
-static bool isFixpipeQuantPayloadElemType(Type elemTy, PTOArch arch) {
+static bool isFixpipeQuantPayloadElemType(Type elemTy, PTOArch arch,
+                                          FixpipeQuant quant) {
   if (!elemTy)
     return false;
   bool isPackedI64 = elemTy.isUnsignedInteger(64) ||
@@ -16295,9 +16296,11 @@ static bool isFixpipeQuantPayloadElemType(Type elemTy, PTOArch arch) {
                      elemTy.isSignedInteger(64);
   if (arch == PTOArch::A3)
     return isPackedI64;
-  // A5 pto-isa uses packed uint64_t FBUF entries for VDEQF16, while other
-  // A5 vector-quant forms expose direct floating-point scaling payloads.
-  return isPackedI64 || elemTy.isF16() || elemTy.isBF16() || elemTy.isF32();
+  // A5 pto-isa VDEQF16 reads one packed uint64_t FBUF entry per column.
+  // Other A5 vector-quant modes use direct floating-point payloads.
+  if (quant == FixpipeQuant::DEQF16Vec)
+    return isPackedI64;
+  return elemTy.isF16() || elemTy.isBF16() || elemTy.isF32();
 }
 
 static bool matchesFixpipeProducerAndConsumerTypes(FixpipeQuant quant,
@@ -17618,12 +17621,15 @@ LogicalResult SetQuantVectorOp::verify() {
     return emitOpError("expects 'scaling_tile' to use loc=scaling");
   Type scalingElemTy = getElemTy(scalingTy);
   PTOArch arch = getTargetArch(getOperation());
-  if (!isFixpipeQuantPayloadElemType(scalingElemTy, arch)) {
+  if (!isFixpipeQuantPayloadElemType(scalingElemTy, arch, quant)) {
     if (arch == PTOArch::A3)
       return emitOpError(
           "expects 'scaling_tile' element type to be packed i64/ui64 on A3");
+    if (quant == FixpipeQuant::DEQF16Vec)
+      return emitOpError("expects 'scaling_tile' element type to be packed "
+                         "i64/ui64 for deqf16_vec on A5");
     return emitOpError("expects 'scaling_tile' element type to be f16, bf16, "
-                       "f32, or packed i64/ui64 on A5");
+                       "or f32 for this vector quantization mode on A5");
   }
 
   return success();

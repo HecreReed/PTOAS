@@ -27,7 +27,7 @@ module {
       slot_size = 1024,
       nosplit = true,
       acc_push_epilogue =
-          #pto.acc_push_epilogue<layout = nz2nd, quant = deqf16_vec, relu = no_relu>
+          #pto.acc_push_epilogue<layout = nz2nd, quant = qs322bf16_pre_vec, relu = no_relu>
     }
       (c2v_consumer_buf = %c2v_import0 : i32,
        v2c_consumer_buf = %c0_i32 : i32)
@@ -77,7 +77,7 @@ module {
       slot_size = 1024,
       nosplit = true,
       acc_push_epilogue =
-          #pto.acc_push_epilogue<layout = nz2nd, quant = deqf16_vec, relu = no_relu>
+          #pto.acc_push_epilogue<layout = nz2nd, quant = qs322bf16_pre_vec, relu = no_relu>
     }
       (c2v_consumer_buf = %c2v_local0 : i32,
        v2c_consumer_buf = %c0_i32 : i32)
@@ -93,7 +93,7 @@ module {
        v2c_consumer_buf = %c0_i32 : i32)
 
     %recv0 = pto.tpop_from_aic {id = 0, split = 0}
-      -> !pto.tile_buf<loc=vec, dtype=f16, rows=16, cols=32, v_row=16, v_col=32, blayout=row_major, slayout=none_box, fractal=512, pad=0>
+      -> !pto.tile_buf<loc=vec, dtype=bf16, rows=16, cols=32, v_row=16, v_col=32, blayout=row_major, slayout=none_box, fractal=512, pad=0>
     %recv1 = pto.tpop_from_aic {id = 1, split = 0}
       -> !pto.tile_buf<loc=vec, dtype=si8, rows=16, cols=32, v_row=16, v_col=32, blayout=row_major, slayout=none_box, fractal=512, pad=0>
     pto.tfree_from_aic {id = 0, split = 0}
@@ -103,7 +103,7 @@ module {
 }
 
 // A5-LABEL: AICORE void cube_kernel(
-// A5: using Pipe0FixpipeConfig = FixpipeParams<LayoutMode_t::NZ2ND, QuantMode_t::VDEQF16, ReluPreMode::NoRelu>;
+// A5: using Pipe0FixpipeConfig = FixpipeParams<LayoutMode_t::NZ2ND, QuantMode_t::VQS322BF16_PRE, ReluPreMode::NoRelu>;
 // A5: using Pipe1FixpipeConfig = FixpipeParams<LayoutMode_t::NZ2ND, QuantMode_t::VREQ8, ReluPreMode::NoRelu>;
 // A5: Tile<TileType::Scaling, bfloat16_t, 1, 32
 // A5: Tile<TileType::Scaling, float, 1, 32

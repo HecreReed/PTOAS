@@ -43,13 +43,13 @@ module {
       (c2v_consumer_buf = %c2v_import1 : i32,
        v2c_consumer_buf = %c0_i32 : i32)
 
-    %fp0 = pto.alloc_tile : !pto.tile_buf<loc=scaling, dtype=f16, rows=1, cols=32, v_row=1, v_col=32, blayout=row_major, slayout=none_box, fractal=512, pad=0>
+    %fp0 = pto.alloc_tile : !pto.tile_buf<loc=scaling, dtype=ui64, rows=1, cols=32, v_row=1, v_col=32, blayout=row_major, slayout=none_box, fractal=512, pad=0>
     %fp1 = pto.alloc_tile : !pto.tile_buf<loc=scaling, dtype=f16, rows=1, cols=32, v_row=1, v_col=32, blayout=row_major, slayout=none_box, fractal=512, pad=0>
     %acc0 = pto.alloc_tile : !pto.tile_buf<loc=acc, dtype=i32, rows=16, cols=32, v_row=16, v_col=32, blayout=col_major, slayout=row_major, fractal=1024, pad=0>
     %acc1 = pto.alloc_tile : !pto.tile_buf<loc=acc, dtype=i32, rows=16, cols=32, v_row=16, v_col=32, blayout=col_major, slayout=row_major, fractal=1024, pad=0>
     %acc2 = pto.alloc_tile : !pto.tile_buf<loc=acc, dtype=i32, rows=16, cols=32, v_row=16, v_col=32, blayout=col_major, slayout=row_major, fractal=1024, pad=0>
 
-    pto.set_quant_vector(%fp0 : !pto.tile_buf<loc=scaling, dtype=f16, rows=1, cols=32, v_row=1, v_col=32, blayout=row_major, slayout=none_box, fractal=512, pad=0>) {id = 0}
+    pto.set_quant_vector(%fp0 : !pto.tile_buf<loc=scaling, dtype=ui64, rows=1, cols=32, v_row=1, v_col=32, blayout=row_major, slayout=none_box, fractal=512, pad=0>) {id = 0}
     pto.tpush_to_aiv(%acc0 : !pto.tile_buf<loc=acc, dtype=i32, rows=16, cols=32, v_row=16, v_col=32, blayout=col_major, slayout=row_major, fractal=1024, pad=0>) {id = 0, split = 0}
 
     pto.set_quant_vector(%fp1 : !pto.tile_buf<loc=scaling, dtype=f16, rows=1, cols=32, v_row=1, v_col=32, blayout=row_major, slayout=none_box, fractal=512, pad=0>) {id = 1}
@@ -120,9 +120,9 @@ module {
 // A5-NEXT: TPUSH<{{.*}}, Pipe0FixpipeConfig>(
 
 // PLAN-LABEL: func.func @cube_kernel()
-// PLAN: pto.set_quant_vector(%{{.*}} : memref<1x32xf16{{.*}}#pto.address_space<scaling>>) {id = 0}
+// PLAN: pto.set_quant_vector(%{{.*}} : memref<1x32xui64{{.*}}#pto.address_space<scaling>>) {id = 0}
 // PLAN-NEXT: pto.tpush(
 // PLAN: pto.set_quant_vector(%{{.*}} : memref<1x32xf16{{.*}}#pto.address_space<scaling>>) {id = 1}
 // PLAN-NEXT: pto.tpush(
-// PLAN: pto.set_quant_vector(%{{.*}} : memref<1x32xf16{{.*}}#pto.address_space<scaling>>) {id = 0}
+// PLAN: pto.set_quant_vector(%{{.*}} : memref<1x32xui64{{.*}}#pto.address_space<scaling>>) {id = 0}
 // PLAN-NEXT: pto.tpush(
