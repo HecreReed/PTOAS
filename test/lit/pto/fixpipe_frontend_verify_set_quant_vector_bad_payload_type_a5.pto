@@ -27,8 +27,8 @@ module {
       (c2v_consumer_buf = %c2v_import : i32,
        v2c_consumer_buf = %c0_i32 : i32)
 
-    %fp = pto.alloc_tile : !pto.tile_buf<loc=scaling, dtype=ui64, rows=1, cols=32, v_row=1, v_col=32, blayout=row_major, slayout=none_box, fractal=512, pad=0>
-    pto.set_quant_vector(%fp : !pto.tile_buf<loc=scaling, dtype=ui64, rows=1, cols=32, v_row=1, v_col=32, blayout=row_major, slayout=none_box, fractal=512, pad=0>) {id = 0}
+    %fp = pto.alloc_tile : !pto.tile_buf<loc=scaling, dtype=i32, rows=1, cols=32, v_row=1, v_col=32, blayout=row_major, slayout=none_box, fractal=512, pad=0>
+    pto.set_quant_vector(%fp : !pto.tile_buf<loc=scaling, dtype=i32, rows=1, cols=32, v_row=1, v_col=32, blayout=row_major, slayout=none_box, fractal=512, pad=0>) {id = 0}
     return
   }
 
@@ -59,4 +59,4 @@ module {
   }
 }
 
-// CHECK: error: 'pto.set_quant_vector' op expects 'scaling_tile' element type to be f16, bf16, or f32 on A5
+// CHECK: error: 'pto.set_quant_vector' op expects 'scaling_tile' element type to be f16, bf16, f32, or packed i64/ui64 on A5

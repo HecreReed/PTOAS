@@ -8,9 +8,9 @@
 //
 // RUN: ptoas --pto-arch=a5 --enable-insert-sync %S/../../samples/Movfp/movfp_fixpipe_reuse-pto.pto 2>&1 | FileCheck %s
 
-// The scaling vectors are loaded through MTE2 and consumed by SET_QUANT_VECTOR
-// on FIX. Both loads need a cross-pipe event before the first corresponding
-// fixpipe use; otherwise TPUSH can observe uninitialized FBUF data.
+// The scaling vectors are loaded into MAT through MTE2, then copied to FBUF by
+// TMOV on FIX. Both loads need a cross-pipe event before the corresponding
+// copy; otherwise TPUSH can observe uninitialized scaling data.
 
 // CHECK-LABEL: AICORE void movfp_fixpipe_reuse_aic(
 // CHECK: TLOAD({{.*}}, {{.*}});
@@ -20,6 +20,10 @@
 // CHECK: TLOAD({{.*}}, {{.*}});
 // CHECK-NEXT: set_flag(PIPE_MTE2, PIPE_FIX, EVENT_ID[[FP1_READY:[0-9]+]]);
 // CHECK: wait_flag(PIPE_MTE2, PIPE_FIX, EVENT_ID[[FP0_READY]]);
-// CHECK: SET_QUANT_VECTOR({{.*}});
+// CHECK-NEXT: TMOV({{.*}}, {{.*}});
 // CHECK: wait_flag(PIPE_MTE2, PIPE_FIX, EVENT_ID[[FP1_READY]]);
-// CHECK-NEXT: SET_QUANT_VECTOR({{.*}});
+// CHECK-NEXT: TMOV({{.*}}, {{.*}});
+// CHECK: SET_QUANT_VECTOR({{.*}});
+// CHECK-NEXT: TPUSH{{.*}};
+// CHECK: SET_QUANT_VECTOR({{.*}});
+// CHECK-NEXT: TPUSH{{.*}};

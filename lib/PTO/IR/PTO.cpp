@@ -16290,10 +16290,14 @@ static bool matchesFixpipeConsumerElementType(FixpipeQuant quant,
 static bool isFixpipeQuantPayloadElemType(Type elemTy, PTOArch arch) {
   if (!elemTy)
     return false;
+  bool isPackedI64 = elemTy.isUnsignedInteger(64) ||
+                     elemTy.isSignlessInteger(64) ||
+                     elemTy.isSignedInteger(64);
   if (arch == PTOArch::A3)
-    return elemTy.isUnsignedInteger(64) || elemTy.isSignlessInteger(64) ||
-           elemTy.isSignedInteger(64);
-  return elemTy.isF16() || elemTy.isBF16() || elemTy.isF32();
+    return isPackedI64;
+  // A5 pto-isa uses packed uint64_t FBUF entries for VDEQF16, while other
+  // A5 vector-quant forms expose direct floating-point scaling payloads.
+  return isPackedI64 || elemTy.isF16() || elemTy.isBF16() || elemTy.isF32();
 }
 
 static bool matchesFixpipeProducerAndConsumerTypes(FixpipeQuant quant,
@@ -17618,8 +17622,8 @@ LogicalResult SetQuantVectorOp::verify() {
     if (arch == PTOArch::A3)
       return emitOpError(
           "expects 'scaling_tile' element type to be packed i64/ui64 on A3");
-    return emitOpError(
-        "expects 'scaling_tile' element type to be f16, bf16, or f32 on A5");
+    return emitOpError("expects 'scaling_tile' element type to be f16, bf16, "
+                       "f32, or packed i64/ui64 on A5");
   }
 
   return success();
