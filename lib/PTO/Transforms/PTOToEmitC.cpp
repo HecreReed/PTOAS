@@ -8521,9 +8521,16 @@ struct PTOSetQuantVectorToEmitC
 
   LogicalResult matchAndRewrite(mlir::pto::SetQuantVectorOp op, OpAdaptor adaptor,
                                 ConversionPatternRewriter &rewriter) const override {
-    rewriter.replaceOpWithNewOp<emitc::CallOpaqueOp>(
-        op, TypeRange{}, "SET_QUANT_VECTOR", ArrayAttr{}, ArrayAttr{},
+    rewriter.create<emitc::CallOpaqueOp>(
+        op.getLoc(), TypeRange{}, "SET_QUANT_VECTOR", ArrayAttr{}, ArrayAttr{},
         ValueRange{peelUnrealized(adaptor.getScalingTile())});
+    // A5's SET_QUANT_VECTOR updates the shared FPC configuration consumed by
+    // the asynchronous FIX pipeline. Drain FIX after the register update so
+    // the following TPUSH observes this payload and a later rematerialized
+    // binding cannot race the current push.
+    if (targetArch == PTOArch::A5)
+      emitPipeBarrier(rewriter, op.getLoc(), "PIPE_FIX");
+    rewriter.eraseOp(op);
     return success();
   }
 

@@ -108,4 +108,5 @@ module {
 // A5: SET_QUANT_SCALAR<bfloat16_t>(
 // A5-NEXT: TPUSH<{{.*}}, Pipe0FixpipeConfig>(
 // A5: SET_QUANT_VECTOR(
+// A5-NEXT: pipe_barrier(PIPE_FIX);
 // A5-NEXT: TPUSH<{{.*}}, Pipe1FixpipeConfig>(

@@ -108,6 +108,8 @@ module {
 // A5: Tile<TileType::Scaling, int64_t, 1, 32
 // A5: Tile<TileType::Scaling, uint64_t, 1, 32
 // A5: SET_QUANT_VECTOR(
+// A5-NEXT: pipe_barrier(PIPE_FIX);
 // A5-NEXT: TPUSH<{{.*}}, Pipe0FixpipeConfig>(
 // A5: SET_QUANT_VECTOR(
+// A5-NEXT: pipe_barrier(PIPE_FIX);
 // A5-NEXT: TPUSH<{{.*}}, Pipe1FixpipeConfig>(

@@ -65,6 +65,7 @@ module {
 // A5-LABEL: AICORE void cube_kernel(
 // A5: using Pipe0FixpipeConfig = FixpipeParams<LayoutMode_t::NZ2ND, QuantMode_t::VDEQF16, ReluPreMode::NoRelu>;
 // A5: SET_QUANT_VECTOR(
+// A5-NEXT: pipe_barrier(PIPE_FIX);
 // A5-NEXT: TPUSH<{{.*}}, Pipe0FixpipeConfig>(
 // A5-LABEL: AICORE void vector_kernel(
 // A5: #if defined(__DAV_VEC__)

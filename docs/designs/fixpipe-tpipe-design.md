@@ -750,6 +750,9 @@ pto.set_quant_vector(%fp : !pto.tile_buf<loc=scaling, ...>) {id = 0}
 - lowering / EmitC 可以保守地在每次命中的 quant `TPUSH` 前都重新发射一次
   `SET_QUANT_SCALAR` / `SET_QUANT_VECTOR`；至少在从其它 pipe 切回当前 `id = k`
   时必须重发，以反映底层全局 machine state 的重新配置
+- A5 的 vector quant lowering 在 `SET_QUANT_VECTOR` 后还必须 drain `PIPE_FIX`，
+  再发射对应的 `TPUSH`，避免共享 FPC 配置与异步 FIX 流水中的前后两次 push
+  发生状态竞争
 - 如果某条需要 scalar/vector quant 的 fixpipe `TPUSH` 在当前基本块内找不到同类、
   同 id、且程序顺序上先于它的 `pto.set_quant_*`，则该 IR 非法
 
