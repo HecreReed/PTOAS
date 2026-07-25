@@ -6,7 +6,7 @@
 # INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
 # See LICENSE in the root of the software repository for the full text of the License.
 
-from mlir.ir import Context, F32Type, IndexType, InsertionPoint, IntegerType, Location, Module, UnitAttr
+from mlir.ir import Attribute, Context, F32Type, IndexType, InsertionPoint, IntegerType, Location, Module, UnitAttr
 from mlir.dialects import arith, func, pto
 
 
@@ -41,6 +41,9 @@ def build():
             with InsertionPoint(module.body):
                 fn = func.FuncOp("comm_p2p_kernel", fn_ty)
                 fn.operation.attributes["pto.entry"] = UnitAttr.get(ctx)
+                fn.operation.attributes["pto.kernel_kind"] = Attribute.parse(
+                    "#pto.kernel_kind<vector>", ctx
+                )
                 entry = fn.add_entry_block()
 
             with InsertionPoint(entry):

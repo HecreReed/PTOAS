@@ -2,7 +2,8 @@
 // RUN: ptoas --pto-arch=a5 %s 2>&1 | FileCheck %s --check-prefix=A5
 
 module {
-  func.func @comm_p2p_basic(%dst_ptr: !pto.ptr<f32>, %src_ptr: !pto.ptr<f32>, %signal_ptr: !pto.ptr<i32>) {
+  func.func @comm_p2p_basic(%dst_ptr: !pto.ptr<f32>, %src_ptr: !pto.ptr<f32>, %signal_ptr: !pto.ptr<i32>)
+      attributes {pto.kernel_kind = #pto.kernel_kind<vector>} {
     %c0 = arith.constant 0 : index
     %c1 = arith.constant 1 : index
     %c128 = arith.constant 128 : index
@@ -38,6 +39,7 @@ module {
 // A3: pto::comm::TWAIT(
 // A3: pto::comm::TTEST(
 
+// A5: #if defined(__DAV_VEC__)
 // A5: pto::comm::TGET(
 // A5: pipe_barrier(PIPE_MTE2);
 // A5-NEXT: pipe_barrier(PIPE_MTE3);
