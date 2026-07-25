@@ -5724,10 +5724,19 @@ static void emitPipeBarrier(ConversionPatternRewriter &rewriter, Location loc,
 }
 
 static void emitConservativeGmFencePipeDrains(
-    ConversionPatternRewriter &rewriter, Location loc) {
+    ConversionPatternRewriter &rewriter, Location loc, PTOArch targetArch) {
   emitPipeBarrier(rewriter, loc, "PIPE_MTE2");
   emitPipeBarrier(rewriter, loc, "PIPE_MTE3");
-  emitPipeBarrier(rewriter, loc, "PIPE_FIX");
+  if (targetArch == PTOArch::A5) {
+    // A5 compiles the same source for separate cube/vector core kinds. PIPE_FIX
+    // is only a valid pipe-barrier operand on the cube side; the compatibility
+    // macro maps it to PIPE_M on the vector side, which bisheng rejects.
+    rewriter.create<emitc::VerbatimOp>(loc, "#if defined(__DAV_CUBE__)");
+    emitPipeBarrier(rewriter, loc, "PIPE_FIX");
+    rewriter.create<emitc::VerbatimOp>(loc, "#endif // __DAV_CUBE__");
+  } else {
+    emitPipeBarrier(rewriter, loc, "PIPE_FIX");
+  }
 }
 
 struct PTOBarrierToEmitC : public OpConversionPattern<pto::BarrierOp> {
@@ -5773,7 +5782,10 @@ struct PTOBarrierToEmitC : public OpConversionPattern<pto::BarrierOp> {
 
 template <typename FenceOp>
 struct PTOFenceToEmitC : public OpConversionPattern<FenceOp> {
-  using OpConversionPattern<FenceOp>::OpConversionPattern;
+  PTOFenceToEmitC(TypeConverter &typeConverter, MLIRContext *ctx,
+                  PTOArch targetArch)
+      : OpConversionPattern<FenceOp>(typeConverter, ctx),
+        targetArch(targetArch) {}
 
   LogicalResult matchAndRewrite(FenceOp op, typename FenceOp::Adaptor adaptor,
                                 ConversionPatternRewriter &rewriter) const override {
@@ -5782,11 +5794,13 @@ struct PTOFenceToEmitC : public OpConversionPattern<FenceOp> {
         op.getScope().getScope() != pto::FenceScope::All)
       return rewriter.notifyMatchFailure(op, "unsupported fence scope");
 
-    emitConservativeGmFencePipeDrains(rewriter, op.getLoc());
+    emitConservativeGmFencePipeDrains(rewriter, op.getLoc(), targetArch);
     emitDsbDdr(rewriter, op.getLoc());
     rewriter.eraseOp(op);
     return success();
   }
+
+  PTOArch targetArch;
 };
 
 //===----------------------------------------------------------------------===//
@@ -8506,13 +8520,15 @@ struct PTOSetQuantVectorToEmitC
 
   LogicalResult matchAndRewrite(mlir::pto::SetQuantVectorOp op, OpAdaptor adaptor,
                                 ConversionPatternRewriter &rewriter) const override {
+    // A5's SET_QUANT_VECTOR updates shared FPC state consumed by the
+    // asynchronous FIX pipeline. Drain an earlier TPUSH before changing that
+    // state, then drain again after the update so the following TPUSH observes
+    // the new payload.
+    if (targetArch == PTOArch::A5)
+      emitPipeBarrier(rewriter, op.getLoc(), "PIPE_FIX");
     rewriter.create<emitc::CallOpaqueOp>(
         op.getLoc(), TypeRange{}, "SET_QUANT_VECTOR", ArrayAttr{}, ArrayAttr{},
         ValueRange{peelUnrealized(adaptor.getScalingTile())});
-    // A5's SET_QUANT_VECTOR updates the shared FPC configuration consumed by
-    // the asynchronous FIX pipeline. Drain FIX after the register update so
-    // the following TPUSH observes this payload and a later rematerialized
-    // binding cannot race the current push.
     if (targetArch == PTOArch::A5)
       emitPipeBarrier(rewriter, op.getLoc(), "PIPE_FIX");
     rewriter.eraseOp(op);
@@ -14549,9 +14565,10 @@ static void populatePTOToEmitCPatterns(RewritePatternSet &patterns,
     PTOTGemvMXAccToTGEMV_MX,
     PTOTGemvMXBiasToTGEMV_MX,
     PTOBarrierToEmitC,
-    PTOFenceToEmitC<pto::FenceBarrierAllOp>,
     PTOCmoCacheInvalidToEmitC
   >(typeConverter, ctx);
+  patterns.add<PTOFenceToEmitC<pto::FenceBarrierAllOp>>(
+      typeConverter, ctx, targetArch);
 
   patterns.add<CallToEmitC, ReturnToEmitC>(typeConverter, ctx);
 

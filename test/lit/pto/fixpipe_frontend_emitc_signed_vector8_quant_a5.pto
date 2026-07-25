@@ -105,9 +105,11 @@ module {
 // A5-LABEL: AICORE void cube_kernel(
 // A5: using Pipe0FixpipeConfig = FixpipeParams<LayoutMode_t::NZ2ND, QuantMode_t::VREQ8, ReluPreMode::NoRelu>;
 // A5: using Pipe1FixpipeConfig = FixpipeParams<LayoutMode_t::NZ2ND, QuantMode_t::VQF322B8_PRE, ReluPreMode::NoRelu>;
-// A5: SET_QUANT_VECTOR(
+// A5: pipe_barrier(PIPE_FIX);
+// A5-NEXT: SET_QUANT_VECTOR(
 // A5-NEXT: pipe_barrier(PIPE_FIX);
 // A5-NEXT: TPUSH<{{.*}}, Pipe0FixpipeConfig>(
-// A5: SET_QUANT_VECTOR(
+// A5: pipe_barrier(PIPE_FIX);
+// A5-NEXT: SET_QUANT_VECTOR(
 // A5-NEXT: pipe_barrier(PIPE_FIX);
 // A5-NEXT: TPUSH<{{.*}}, Pipe1FixpipeConfig>(
