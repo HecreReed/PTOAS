@@ -43,8 +43,6 @@ module {
 // A5: pto::comm::TGET(
 // A5: pipe_barrier(PIPE_MTE2);
 // A5-NEXT: pipe_barrier(PIPE_MTE3);
-// A5-NEXT: #if defined(__DAV_CUBE__)
-// A5-NEXT: pipe_barrier(PIPE_FIX);
-// A5-NEXT: #endif // __DAV_CUBE__
 // A5-NEXT: dsb(DSB_DDR);
 // A5: pto::comm::TNOTIFY(
+// A5-NOT: pipe_barrier(PIPE_FIX);

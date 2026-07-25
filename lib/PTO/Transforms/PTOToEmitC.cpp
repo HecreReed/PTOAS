@@ -5723,20 +5723,30 @@ static void emitPipeBarrier(ConversionPatternRewriter &rewriter, Location loc,
                                        ArrayAttr{}, ValueRange{});
 }
 
+static bool isEnclosingVectorKernel(Operation *op) {
+  FunctionKernelKindAttr kernelKindAttr;
+  if (auto funcOp = op->getParentOfType<func::FuncOp>())
+    kernelKindAttr = funcOp->getAttrOfType<FunctionKernelKindAttr>(
+        FunctionKernelKindAttr::name);
+  else if (auto emitcFunc = op->getParentOfType<emitc::FuncOp>())
+    kernelKindAttr = emitcFunc->getAttrOfType<FunctionKernelKindAttr>(
+        FunctionKernelKindAttr::name);
+  return kernelKindAttr &&
+         kernelKindAttr.getKernelKind() == FunctionKernelKind::Vector;
+}
+
 static void emitConservativeGmFencePipeDrains(
-    ConversionPatternRewriter &rewriter, Location loc, PTOArch targetArch) {
+    ConversionPatternRewriter &rewriter, Operation *op, PTOArch targetArch) {
+  Location loc = op->getLoc();
   emitPipeBarrier(rewriter, loc, "PIPE_MTE2");
   emitPipeBarrier(rewriter, loc, "PIPE_MTE3");
-  if (targetArch == PTOArch::A5) {
-    // A5 compiles the same source for separate cube/vector core kinds. PIPE_FIX
-    // is only a valid pipe-barrier operand on the cube side; the compatibility
-    // macro maps it to PIPE_M on the vector side, which bisheng rejects.
-    rewriter.create<emitc::VerbatimOp>(loc, "#if defined(__DAV_CUBE__)");
+  // A5 maps PIPE_FIX to PIPE_M for vector kernels, but PIPE_M is not a legal
+  // pipe_barrier operand there. Use the semantic kernel-kind attribute instead
+  // of a preprocessor guard: the A5 compiler can expose __DAV_CUBE__ while
+  // compiling the vector side, so that guard does not reliably remove the
+  // invalid call.
+  if (targetArch != PTOArch::A5 || !isEnclosingVectorKernel(op))
     emitPipeBarrier(rewriter, loc, "PIPE_FIX");
-    rewriter.create<emitc::VerbatimOp>(loc, "#endif // __DAV_CUBE__");
-  } else {
-    emitPipeBarrier(rewriter, loc, "PIPE_FIX");
-  }
 }
 
 struct PTOBarrierToEmitC : public OpConversionPattern<pto::BarrierOp> {
@@ -5794,7 +5804,7 @@ struct PTOFenceToEmitC : public OpConversionPattern<FenceOp> {
         op.getScope().getScope() != pto::FenceScope::All)
       return rewriter.notifyMatchFailure(op, "unsupported fence scope");
 
-    emitConservativeGmFencePipeDrains(rewriter, op.getLoc(), targetArch);
+    emitConservativeGmFencePipeDrains(rewriter, op.getOperation(), targetArch);
     emitDsbDdr(rewriter, op.getLoc());
     rewriter.eraseOp(op);
     return success();

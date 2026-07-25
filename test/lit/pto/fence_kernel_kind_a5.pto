@@ -1,0 +1,33 @@
+// Copyright (c) 2026 Huawei Technologies Co., Ltd.
+// This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+// CANN Open Software License Agreement Version 2.0 (the "License").
+// Please refer to the License for details. You may not use this file except in compliance with the License.
+// THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+// INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+// See LICENSE in the root of the software repository for the full text of the License.
+//
+// RUN: ptoas --pto-arch=a5 %s 2>&1 | FileCheck %s
+
+module {
+  func.func @cube_fence() attributes {pto.kernel_kind = #pto.kernel_kind<cube>} {
+    pto.fence.barrier_all #pto.fence_scope<gm>
+    return
+  }
+
+  func.func @vector_fence() attributes {pto.kernel_kind = #pto.kernel_kind<vector>} {
+    pto.fence.barrier_all #pto.fence_scope<gm>
+    return
+  }
+}
+
+// CHECK-LABEL: AICORE void cube_fence()
+// CHECK: pipe_barrier(PIPE_MTE2);
+// CHECK-NEXT: pipe_barrier(PIPE_MTE3);
+// CHECK-NEXT: pipe_barrier(PIPE_FIX);
+// CHECK-NEXT: dsb(DSB_DDR);
+
+// CHECK-LABEL: AICORE void vector_fence()
+// CHECK: pipe_barrier(PIPE_MTE2);
+// CHECK-NEXT: pipe_barrier(PIPE_MTE3);
+// CHECK-NEXT: dsb(DSB_DDR);
+// CHECK-NOT: pipe_barrier(PIPE_FIX);
