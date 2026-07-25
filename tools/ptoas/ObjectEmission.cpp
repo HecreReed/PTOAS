@@ -15,6 +15,7 @@
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/StringRef.h"
 #include "llvm/IR/Module.h"
+#include "llvm/Support/CommandLine.h"
 #include "llvm/Support/Error.h"
 #include "llvm/Support/FileSystem.h"
 #include "llvm/Support/MemoryBuffer.h"
@@ -33,6 +34,33 @@
 namespace {
 
 using llvm::StringRef;
+
+enum class BishengVFAutoSyncMode {
+  Unspecified,
+  Off,
+  Fused,
+  Global,
+};
+
+static llvm::cl::opt<bool> enableBishengVecMISched(
+    "enable-bisheng-vec-misched",
+    llvm::cl::desc("Use Bisheng's default vector MI scheduler behavior for "
+                   "VPTO device compilation instead of explicitly disabling "
+                   "the scheduler"),
+    llvm::cl::init(false));
+
+static llvm::cl::opt<BishengVFAutoSyncMode> bishengVFAutoSyncMode(
+    "bisheng-vf-auto-sync",
+    llvm::cl::desc("Explicit Bisheng VF auto-sync mode for VPTO device "
+                   "compilation; omit to use the toolchain default"),
+    llvm::cl::value_desc("off|fused|global"),
+    llvm::cl::values(clEnumValN(BishengVFAutoSyncMode::Off, "off",
+                                "Disable Bisheng VF auto-sync"),
+                     clEnumValN(BishengVFAutoSyncMode::Fused, "fused",
+                                "Use Bisheng fused VF auto-sync"),
+                     clEnumValN(BishengVFAutoSyncMode::Global, "global",
+                                "Use Bisheng global VF auto-sync")),
+    llvm::cl::init(BishengVFAutoSyncMode::Unspecified));
 
 static bool runCommandWithStderr(llvm::StringRef program,
                                  llvm::ArrayRef<std::string> ownedArgs,
@@ -433,7 +461,7 @@ static bool compileDeviceLLVMToObject(llvm::StringRef llPath,
                                       llvm::StringRef bishengPath,
                                       llvm::StringRef stderrPath,
                                       llvm::raw_ostream &diagOS) {
-  llvm::SmallVector<std::string, 16> args = {
+  llvm::SmallVector<std::string, 24> args = {
       bishengPath.str(),
       std::string("--cce-aicore-arch=") + targetCPU.str(),
       "--cce-aicore-only",
@@ -442,17 +470,39 @@ static bool compileDeviceLLVMToObject(llvm::StringRef llPath,
       "-cce-bitcode-is-aicore",
       "-Wno-override-module",
       "-dc",
+      "--cce-long-scbz=true",
       "-mllvm",
       "-cce-dyn-kernel-stack-size=true",
-      "-mllvm",
-      "-cce-vf-auto-sync=global",
-      "-c",
-      "-x",
-      "ir",
-      "-",
-      "-o",
-      outObjPath.str(),
   };
+  switch (bishengVFAutoSyncMode) {
+  case BishengVFAutoSyncMode::Unspecified:
+    break;
+  case BishengVFAutoSyncMode::Off:
+    args.push_back("-mllvm");
+    args.push_back("-cce-vf-auto-sync=off");
+    break;
+  case BishengVFAutoSyncMode::Fused:
+    args.push_back("-mllvm");
+    args.push_back("-cce-vf-auto-sync=fused");
+    break;
+  case BishengVFAutoSyncMode::Global:
+    args.push_back("-mllvm");
+    args.push_back("-cce-vf-auto-sync=global");
+    break;
+  }
+  // Enabling vector MI scheduling deliberately omits this argument instead of
+  // passing `=1`, so Bisheng retains the default behavior of the selected
+  // toolchain version.
+  if (!enableBishengVecMISched) {
+    args.push_back("-mllvm");
+    args.push_back("--cce-aicore-vec-misched=0");
+  }
+  args.push_back("-c");
+  args.push_back("-x");
+  args.push_back("ir");
+  args.push_back("-");
+  args.push_back("-o");
+  args.push_back(outObjPath.str());
   return runCommandWithStderr(bishengPath, args, stderrPath, diagOS,
                               "device LLVM compilation", llPath);
 }

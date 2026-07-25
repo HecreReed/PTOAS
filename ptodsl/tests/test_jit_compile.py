@@ -20,6 +20,8 @@ from unittest import mock
 
 from ptodsl import pto, scalar
 from ptodsl import _types as pto_types
+import ptodsl._vmi_namespace as vmi_namespace
+from ptodsl._ast_rewrite import PTODSLAstRewriteError
 from ptodsl._bootstrap import make_context
 from ptodsl._kernel_signature import DeviceParameterSpec, HelperMarkerParameterSpec, RuntimeScalarParameterSpec
 from ptodsl._tracing.runtime import SignatureTracingRuntime
@@ -605,6 +607,15 @@ def tile_sort_gather_surface_probe():
     pto.tile.mrgsort(sort, tmp, pto.const(64, dtype=pto.i32))
     pto.tile.gather(tmp, gather_scores, mask_pattern="P0101")
     pto.tgather(tmp, gather_indices, mask_pattern="P1010")
+
+
+@pto.jit(target="a5")
+def tile_ci_surface_probe():
+    dst_i32 = pto.alloc_tile(shape=[1, 64], dtype=pto.i32, valid_shape=[1, 64])
+    pto.tile.ci(0, dst_i32)
+
+    dst_ui32 = pto.alloc_tile(shape=[1, 64], dtype=pto.ui32, valid_shape=[1, 64])
+    pto.tile.ci(pto.ui32(0), dst_ui32, descending=True)
 
 
 @pto.jit(target="a5")
@@ -1280,6 +1291,107 @@ def ast_runtime_for_branch_local_temp_probe(rows: pto.i32):
             tmp = zero
             out = tmp + zero
         _ = out
+
+
+@pto.jit(target="a5")
+def ast_runtime_ifexp_assign_probe(rows: pto.i32):
+    limit = pto.const(64, dtype=pto.index)
+    zero = pto.const(0, dtype=pto.index)
+
+    for row in range(rows):
+        cnt = row if row < limit else limit
+        out = cnt + zero
+        _ = out
+
+
+@pto.jit(target="a5")
+def ast_runtime_ifexp_python_literal_assign_probe(rows: pto.i32):
+    limit = pto.const(64, dtype=pto.index)
+    zero = pto.const(0, dtype=pto.index)
+
+    for row in range(rows):
+        cnt = row if row < limit else 64
+        out = cnt + zero
+        _ = out
+
+
+@pto.jit(target="a5")
+def ast_runtime_for_sibling_iv_reuse_probe(rows: pto.i32, cols: pto.i32):
+    stride = pto.const(64, dtype=pto.index)
+    one = pto.const(1, dtype=pto.index)
+    zero = pto.const(0, dtype=pto.index)
+
+    for t in range(rows):
+        for c in range(cols):
+            col = c * stride
+            sink = col + one
+            _ = sink
+
+        for stage in pto.static_range(2):
+            acc = zero
+            for c in range(cols):
+                col = c * stride
+                acc = acc + col
+            _ = acc
+            _ = stage
+        _ = t
+
+
+@pto.jit(target="a5")
+def ast_runtime_for_static_range_name_reuse_probe(cols: pto.i32):
+    zero = pto.const(0, dtype=pto.index)
+
+    for phase_a_chunk in range(cols):
+        d_heads = [phase_a_chunk + h for h in pto.static_range(4)]
+        acc = zero
+        for h in pto.static_range(4):
+            acc = acc + d_heads[h]
+        for mi in pto.static_range(2):
+            inner = zero
+            for h in pto.static_range(4):
+                inner = inner + d_heads[h]
+            acc = acc + inner
+            _ = mi
+        _ = acc
+
+
+@pto.jit(target="a5")
+def ast_runtime_for_static_slot_carry_probe(cols: pto.i32):
+    zero = pto.const(0, dtype=pto.index)
+    accs = [zero for _ in pto.static_range(4)]
+
+    for c in range(cols):
+        for h in pto.static_range(4):
+            accs[h] = accs[h] + c
+
+    total = zero
+    for h in pto.static_range(4):
+        total = total + accs[h]
+    _ = total
+
+
+@pto.jit(target="a5")
+def ast_runtime_for_dynamic_slot_store_error_probe(cols: pto.i32):
+    zero = pto.const(0, dtype=pto.index)
+    accs = [zero for _ in pto.static_range(4)]
+
+    for idx in range(cols):
+        accs[idx] = zero
+
+
+class _StaticSlotHolder:
+    pass
+
+
+@pto.jit(target="a5")
+def ast_runtime_for_complex_slot_store_error_probe(cols: pto.i32):
+    zero = pto.const(0, dtype=pto.index)
+    holder = _StaticSlotHolder()
+    holder.accs = [zero for _ in pto.static_range(4)]
+
+    for _ in range(cols):
+        for h in pto.static_range(4):
+            holder.accs[h] = zero
 
 
 @pto.jit(target="a5", ast_rewrite=False)
@@ -2372,6 +2484,254 @@ def public_surface_exports_probe(
     )
 
 
+@pto.jit(target="a5", backend="vpto", mode="explicit")
+def vmi_wrapper_dispatch_probe():
+    src_tile = pto.alloc_tile(shape=[1, 64], dtype=pto.f32)
+    other_tile = pto.alloc_tile(shape=[1, 64], dtype=pto.f32)
+    dst_tile = pto.alloc_tile(shape=[1, 64], dtype=pto.f32)
+    int_src_tile = pto.alloc_tile(shape=[1, 64], dtype=pto.i32)
+    int_other_tile = pto.alloc_tile(shape=[1, 64], dtype=pto.i32)
+    hist_acc_tile = pto.alloc_tile(shape=[1, 256], dtype=pto.ui16)
+    hist_src_tile = pto.alloc_tile(shape=[1, 256], dtype=pto.ui8)
+
+    src_ptr = src_tile.as_ptr()
+    other_ptr = other_tile.as_ptr()
+    dst_ptr = dst_tile.as_ptr()
+    int_src_ptr = int_src_tile.as_ptr()
+    int_other_ptr = int_other_tile.as_ptr()
+    hist_acc_ptr = hist_acc_tile.as_ptr()
+    hist_src_ptr = hist_src_tile.as_ptr()
+
+    offset = pto.const(0, dtype=pto.index)
+    active_lanes = pto.const(64, dtype=pto.index)
+    active_per_group = pto.const(8, dtype=pto.index)
+
+    mask = pto.vmi.create_mask(
+        active_lanes,
+        size=64,
+    )
+    group_mask = pto.vmi.create_mask(
+        active_per_group,
+        size=64,
+        group=8,
+    )
+    lhs = pto.vmi.vload(src_ptr, offset, size=64)
+    rhs = pto.vmi.vload(other_ptr, offset, size=64)
+    compact = pto.vmi.vload(src_ptr, offset, size=8)
+    idx = pto.vmi.vci(pto.i32(0), size=64, order="ASC")
+    bias = pto.vmi.vbrc(pto.f32(0.0), size=64)
+    expanded = pto.vmi.vbrc(compact, size=64, group=8)
+    hist_acc = pto.vmi.vload(hist_acc_ptr, offset, size=256)
+    hist_src = pto.vmi.vload(hist_src_ptr, offset, size=256)
+    hist_mask = pto.vmi.create_mask(pto.const(256, dtype=pto.index), size=256)
+    added = pto.vmi.vadd(lhs, rhs, mask)
+    relu = pto.vmi.vrelu(added, mask)
+    scaled = pto.vmi.vadd(pto.vmi.vmuls(relu, 2.0, mask), bias, mask)
+    pred = pto.vmi.vcmp(scaled, lhs, mask, "ogt")
+    selected = pto.vmi.vsel(pred, scaled, expanded)
+    shuffled = pto.vmi.vselr(selected, idx)
+    total = pto.vmi.vcadd(shuffled, mask, reassoc=True)
+    peak = pto.vmi.vcmax(shuffled, mask)
+    floor = pto.vmi.vcmin(shuffled, mask)
+    group_peak = pto.vmi.vcmax(shuffled, group_mask, group=8)
+    gather = pto.vmi.vgather(src_ptr, idx, mask)
+    gatherb = pto.vmi.vgatherb(src_ptr, idx, mask)
+    hist = pto.vmi.vdhist(hist_acc, hist_src, hist_mask)
+    cumul = pto.vmi.vchist(hist_acc, hist_src, hist_mask)
+    int_lhs = pto.vmi.vload(int_src_ptr, offset, size=64)
+    int_rhs = pto.vmi.vload(int_other_ptr, offset, size=64)
+    low, high = pto.vmi.vmull(int_lhs, int_rhs, mask)
+    widened = pto.vmi.vadd(low, high, mask)
+    casted = pto.vmi.vcvt(shuffled, pto.f16)
+    recast = pto.vmi.vinterpret_cast(
+        lhs,
+        pto.i32,
+    )
+    lo, hi = pto.vmi.vintlv(selected, shuffled, mask)
+    pto.vmi.vstore(lo, dst_ptr, offset, mask)
+
+    _ = group_mask
+    _ = total
+    _ = peak
+    _ = floor
+    _ = group_peak
+    _ = gather
+    _ = gatherb
+    _ = hist
+    _ = cumul
+    _ = widened
+    _ = casted
+    _ = recast
+    _ = hi
+
+
+@pto.jit(target="a5", backend="vpto", mode="explicit")
+def vmi_vhist_signless_source_probe():
+    # acc/result stay ui16 (DSL-enforced); source is signless i8 to exercise
+    # the VMI verifier's "signless == unsigned" relaxation for vdhist/vchist.
+    hist_acc_tile = pto.alloc_tile(shape=[1, 256], dtype=pto.ui16)
+    hist_src_tile = pto.alloc_tile(shape=[1, 256], dtype=pto.i8)
+    hist_acc_ptr = hist_acc_tile.as_ptr()
+    hist_src_ptr = hist_src_tile.as_ptr()
+    offset = pto.const(0, dtype=pto.index)
+    hist_acc = pto.vmi.vload(hist_acc_ptr, offset, size=256)
+    hist_src = pto.vmi.vload(hist_src_ptr, offset, size=256)
+    hist_mask = pto.vmi.create_mask(pto.const(256, dtype=pto.index), size=256)
+    _ = pto.vmi.vdhist(hist_acc, hist_src, hist_mask)
+    _ = pto.vmi.vchist(hist_acc, hist_src, hist_mask)
+
+
+@pto.jit(target="a5", backend="vpto", mode="explicit")
+def vmi_vhist_signless_acc_probe():
+    # acc is signless i16 - DSL should accept it (treated as ui16) and emit a
+    # ui16 result for both vdhist and vchist.
+    hist_acc_tile = pto.alloc_tile(shape=[1, 256], dtype=pto.i16)
+    hist_src_tile = pto.alloc_tile(shape=[1, 256], dtype=pto.ui8)
+    hist_acc_ptr = hist_acc_tile.as_ptr()
+    hist_src_ptr = hist_src_tile.as_ptr()
+    offset = pto.const(0, dtype=pto.index)
+    hist_acc = pto.vmi.vload(hist_acc_ptr, offset, size=256)
+    hist_src = pto.vmi.vload(hist_src_ptr, offset, size=256)
+    hist_mask = pto.vmi.create_mask(pto.const(256, dtype=pto.index), size=256)
+    _ = pto.vmi.vdhist(hist_acc, hist_src, hist_mask)
+    _ = pto.vmi.vchist(hist_acc, hist_src, hist_mask)
+
+
+@pto.jit(target="a5", backend="vpto", mode="explicit")
+def vmi_vhist_bad_acc_probe():
+    # acc is signed si16 - must be rejected by the PTODSL surface with a
+    # TypeError before the MLIR verifier runs.
+    hist_acc_tile = pto.alloc_tile(shape=[1, 256], dtype=pto.si16)
+    hist_src_tile = pto.alloc_tile(shape=[1, 256], dtype=pto.ui8)
+    hist_acc_ptr = hist_acc_tile.as_ptr()
+    hist_src_ptr = hist_src_tile.as_ptr()
+    offset = pto.const(0, dtype=pto.index)
+    hist_acc = pto.vmi.vload(hist_acc_ptr, offset, size=256)
+    hist_src = pto.vmi.vload(hist_src_ptr, offset, size=256)
+    hist_mask = pto.vmi.create_mask(pto.const(256, dtype=pto.index), size=256)
+    _ = pto.vmi.vdhist(hist_acc, hist_src, hist_mask)
+
+
+@pto.jit(target="a5", backend="vpto", mode="explicit")
+def vmi_missing_binding_probe():
+    src_tile = pto.alloc_tile(shape=[1, 64], dtype=pto.f32)
+    src_ptr = src_tile.as_ptr()
+    offset = pto.const(0, dtype=pto.index)
+    active_lanes = pto.const(64, dtype=pto.index)
+
+    src = pto.vmi.vload(src_ptr, offset, size=64)
+    mask = pto.vmi.create_mask(
+        active_lanes,
+        size=64,
+    )
+    _ = pto.vmi.vadd(src, src, mask)
+
+
+@pto.jit(target="a5", backend="vpto", mode="explicit")
+def vmi_masked_vcvt_probe():
+    src_tile = pto.alloc_tile(shape=[1, 64], dtype=pto.f32)
+    src_ptr = src_tile.as_ptr()
+    offset = pto.const(0, dtype=pto.index)
+    active_lanes = pto.const(64, dtype=pto.index)
+
+    src = pto.vmi.vload(src_ptr, offset, size=64)
+    mask = pto.vmi.create_mask(
+        active_lanes,
+        size=64,
+    )
+    _ = pto.vmi.vcvt(src, pto.f16, mask)
+
+
+@pto.jit(target="a5", backend="vpto", mode="explicit")
+def vmi_invalid_rounding_vcvt_probe():
+    src_tile = pto.alloc_tile(shape=[1, 64], dtype=pto.f32)
+    src_ptr = src_tile.as_ptr()
+    offset = pto.const(0, dtype=pto.index)
+
+    src = pto.vmi.vload(src_ptr, offset, size=64)
+    _ = pto.vmi.vcvt(
+        src,
+        pto.f8e4m3,
+        rounding=pto.VcvtRoundMode.F,
+        saturate=pto.VcvtSatMode.SAT,
+    )
+
+
+@pto.jit(target="a5", backend="vpto", mode="explicit")
+def vmi_round_r_vcvt_probe():
+    src_tile = pto.alloc_tile(shape=[1, 64], dtype=pto.f32)
+    src_ptr = src_tile.as_ptr()
+    offset = pto.const(0, dtype=pto.index)
+
+    src = pto.vmi.vload(src_ptr, offset, size=64)
+    _ = pto.vmi.vcvt(
+        src,
+        pto.f8e4m3,
+        rounding=pto.VcvtRoundMode.R,
+        saturate=pto.VcvtSatMode.SAT,
+    )
+
+
+@pto.jit(target="a5", backend="vpto", mode="explicit")
+def vmi_unpack_vload_probe():
+    src_tile = pto.alloc_tile(shape=[1, 128], dtype=pto.i8)
+    src_ptr = src_tile.as_ptr()
+    offset = pto.const(0, dtype=pto.index)
+
+    _ = pto.vmi.vload(
+        src_ptr,
+        offset,
+        size=128,
+        dist_mode="unpack",
+        to_dtype=pto.i16,
+    )
+
+
+@pto.jit(target="a5", backend="vpto", mode="explicit")
+def vmi_brc_vload_probe():
+    src_tile = pto.alloc_tile(shape=[1, 64], dtype=pto.f32)
+    src_ptr = src_tile.as_ptr()
+    offset = pto.const(0, dtype=pto.index)
+
+    _ = pto.vmi.vload(
+        src_ptr,
+        offset,
+        size=64,
+        dist_mode="brc",
+    )
+
+
+@pto.jit(target="a5", backend="vpto", mode="explicit")
+def vmi_group_brc_vload_probe():
+    src_tile = pto.alloc_tile(shape=[1, 64], dtype=pto.f32)
+    src_ptr = src_tile.as_ptr()
+    offset = pto.const(0, dtype=pto.index)
+    row_stride = pto.const(1, dtype=pto.index)
+
+    _ = pto.vmi.vload(
+        src_ptr,
+        offset,
+        size=64,
+        group=8,
+        stride=row_stride,
+        dist_mode="brc",
+    )
+
+
+@pto.jit(target="a5", backend="vpto", mode="explicit")
+def vmi_unpack_vload_missing_dtype_probe():
+    src_tile = pto.alloc_tile(shape=[1, 128], dtype=pto.i8)
+    src_ptr = src_tile.as_ptr()
+    offset = pto.const(0, dtype=pto.index)
+
+    _ = pto.vmi.vload(
+        src_ptr,
+        offset,
+        size=128,
+        dist_mode="unpack",
+    )
+
+
 @pto.jit(target="a5")
 def compile_time_query_probe():
     f32_bw = pto.bytewidth(pto.f32)
@@ -2587,8 +2947,10 @@ def public_sync_surface_probe():
     pto.wait_flag(pto.Pipe.V, pto.Pipe.MTE3, event_id=dynamic_event)
     pto.set_cross_flag(pto.Pipe.FIX, 0)
     pto.set_intra_flag(pto.Pipe.MTE3, dynamic_event)
+    pto.set_intra_flag(pto.Pipe.FIX, 4)
     pto.wait_cross_flag(pto.Pipe.FIX, 0)
     pto.wait_intra_flag(pto.Pipe.V, dynamic_event)
+    pto.wait_intra_flag(pto.Pipe.FIX, 20)
 
 
 @pto.jit(target="a5")
@@ -3221,9 +3583,14 @@ def main() -> None:
     expect(fake_empty.shape == fake_tensor.shape, "pto.empty_like(...) should preserve the logical tensor shape")
     expect(not hasattr(pto, "scalar"), "pto.scalar should not remain in the public pto namespace")
     expect(hasattr(pto, "tile"), "pto.tile should be exported from the public namespace")
+    expect(hasattr(pto, "vmi"), "pto.vmi should be exported from the public namespace")
     expect(hasattr(pto.tile, "load"), "pto.tile.load should be exported from the public tile namespace")
     expect(hasattr(pto.tile, "add"), "pto.tile.add should be exported from the public tile namespace")
     expect(hasattr(pto.tile, "cmps"), "pto.tile.cmps should be exported from the public tile namespace")
+    expect(hasattr(pto.vmi, "vreg"), "pto.vmi.vreg should be exported from the public VMI namespace")
+    expect(hasattr(pto.vmi, "mask"), "pto.vmi.mask should be exported from the public VMI namespace")
+    expect(hasattr(pto.vmi, "vadd"), "pto.vmi.vadd should be exported from the public VMI namespace")
+    expect(hasattr(pto.vmi, "create_mask"), "pto.vmi.create_mask should be exported from the public VMI namespace")
     expect(not hasattr(pto, "load_tile"), "pto.load_tile should not remain on the public pto namespace")
     expect(not hasattr(pto, "store_tile"), "pto.store_tile should not remain on the public pto namespace")
     expect(hasattr(pto.tile, "matmul"), "pto.tile.matmul should be exported from the public tile namespace")
@@ -3245,6 +3612,9 @@ def main() -> None:
     expect(not hasattr(pto, "vbrc_load"), "pto.vbrc_load should not remain on the public pto namespace")
     expect(not hasattr(pto, "vsts_1pt"), "pto.vsts_1pt should not remain on the public pto namespace")
     expect(not hasattr(pto, "constexpr"), "pto.const_expr should not remain on the public pto namespace")
+    expect(not hasattr(pto, "copy_ubuf_to_ubuf"), "pto.copy_ubuf_to_ubuf should not remain on the public pto namespace")
+    expect(not hasattr(pto, "vmi_vreg_type"), "pto.vmi_vreg_type should not remain on the public pto namespace")
+    expect(not hasattr(pto, "vmi_mask_type"), "pto.vmi_mask_type should not remain on the public pto namespace")
     expect(not hasattr(scalar, "sts"), "scalar.sts should not remain in the public scalar namespace")
     expect(not hasattr(scalar, "cmpi"), "scalar.cmpi should not remain in the public scalar namespace")
     expect(not hasattr(scalar, "cmpi_sgt"), "scalar.cmpi_sgt should not remain in the public scalar namespace")
@@ -3278,6 +3648,12 @@ def main() -> None:
         "pto.constexpr is not a supported PTODSL public interface" in str(removed_constexpr)
         and "Use pto.const_expr" in str(removed_constexpr),
         "removed pto.constexpr should diagnose pto.const_expr as the replacement",
+    )
+    removed_copy_ubuf_to_ubuf = expect_raises(AttributeError, lambda: getattr(pto, "copy_ubuf_to_ubuf"))
+    expect(
+        "pto.copy_ubuf_to_ubuf is not a supported PTODSL public interface" in str(removed_copy_ubuf_to_ubuf)
+        and "Use pto.mte_ub_ub" in str(removed_copy_ubuf_to_ubuf),
+        "removed pto.copy_ubuf_to_ubuf should diagnose pto.mte_ub_ub as the replacement",
     )
     for name in ("max", "min", "exp", "log", "sqrt", "abs"):
         expect(hasattr(scalar, name), f"scalar.{name} should be exported from the public scalar namespace")
@@ -3417,6 +3793,18 @@ def main() -> None:
         expect(
             str(pto.mask_b32.resolve()) == "!pto.mask<b32>",
             "pto.mask_b32 should resolve to the public 32-bit mask type",
+        )
+        expect(
+            str(pto.vmi.vreg(128, pto.f32).resolve()) == "!pto.vmi.vreg<128xf32>",
+            "pto.vmi.vreg(...) should resolve to the public logical VMI vector type",
+        )
+        expect(
+            str(pto.vmi.mask(128).resolve()) == "!pto.vmi.mask<128xpred>",
+            "pto.vmi.mask(...) should resolve to the public logical VMI mask type",
+        )
+        expect(
+            str(pto.vmi.vreg(128, pto.f8e4m3).resolve()) == "!pto.vmi.vreg<128xf8E4M3FN>",
+            "pto.vmi.vreg(...) should preserve low-precision authored element types",
         )
 
         lp_tile_ty = pto_types.tile_buf_type([16, 16], pto.hif8, [16, 16])
@@ -4306,6 +4694,21 @@ def main() -> None:
             "--enable-insert-sync" in explicit_ptoas_cmd,
             "source-backed native build should still pass explicit/effective insert-sync to ptoas",
         )
+        ptoas_cmds.clear()
+        vmi_mlir_text = vmi_wrapper_dispatch_probe.compile().mlir_text()
+        mlir_path.write_text(vmi_mlir_text, encoding="utf-8")
+        with mock.patch.object(native_build_runtime, "resolve_ptoas_binary", return_value=Path("/tmp/fake-ptoas")), mock.patch.object(
+            native_build_runtime, "_run", side_effect=fake_run_ptoas_cmd
+        ):
+            native_build_runtime._run_ptoas(
+                mlir_path,
+                kernel_object,
+                target_arch="a5",
+            )
+        expect(
+            len(ptoas_cmds) == 1,
+            "native build should issue exactly one ptoas command for PTODSL-generated VMI MLIR",
+        )
     expect("valid=?" not in default_text, "default alloc_tile() should keep full static valid-shape when valid_shape= is omitted")
     auto_mode_violation = expect_raises(
         RuntimeError,
@@ -4372,6 +4775,10 @@ def main() -> None:
     expect(tile_sort_gather_text.count("pto.tgather") == 2, "tile gather wrappers should lower to pto.tgather")
     expect("#pto.mask_pattern<P0101>" in tile_sort_gather_text, "pto.tile.gather should preserve P0101")
     expect("#pto.mask_pattern<P1010>" in tile_sort_gather_text, "pto.tgather should preserve P1010")
+    tile_ci_text = tile_ci_surface_probe.compile().mlir_text()
+    expect_parse_roundtrip_and_verify(tile_ci_text, "tile ci surface specialization")
+    expect(tile_ci_text.count("pto.tci") == 2, "pto.tile.ci should lower to pto.tci")
+    expect("descending = true" in tile_ci_text, "pto.tile.ci(descending=True) should preserve the descending attribute in MLIR")
     expect(
         re.search(
             r"pto\.alloc_tile valid_row = %[a-zA-Z0-9_]+ valid_col = %[a-zA-Z0-9_]+ : !pto\.tile_buf<vec, 1x128xf32, valid=\?x\?>",
@@ -5032,6 +5439,81 @@ def main() -> None:
         "branch-local temporaries should not be inferred as loop-carried state",
     )
 
+    ast_runtime_ifexp_assign_text = ast_runtime_ifexp_assign_probe.compile().mlir_text()
+    expect_parse_roundtrip_and_verify(
+        ast_runtime_ifexp_assign_text,
+        "AST-rewritten runtime IfExp assignment specialization",
+    )
+    expect(
+        ast_runtime_ifexp_assign_text.count("scf.for") == 1,
+        "assign-form Python conditional expressions inside runtime loops should preserve the runtime loop",
+    )
+    expect(
+        ast_runtime_ifexp_assign_text.count("scf.if") == 1,
+        "assign-form Python conditional expressions should normalize through the existing AST if rewrite",
+    )
+
+    ast_runtime_ifexp_python_literal_assign_text = (
+        ast_runtime_ifexp_python_literal_assign_probe.compile().mlir_text()
+    )
+    expect_parse_roundtrip_and_verify(
+        ast_runtime_ifexp_python_literal_assign_text,
+        "AST-rewritten runtime IfExp assignment should materialize opposite-branch Python literals",
+    )
+    expect(
+        ast_runtime_ifexp_python_literal_assign_text.count("scf.for") == 1,
+        "assign-form Python conditional expressions with opposite-branch literals should preserve the runtime loop",
+    )
+    expect(
+        ast_runtime_ifexp_python_literal_assign_text.count("scf.if") == 1,
+        "assign-form Python conditional expressions with opposite-branch literals should normalize through the existing AST if rewrite",
+    )
+
+    ast_runtime_for_sibling_iv_reuse_text = ast_runtime_for_sibling_iv_reuse_probe.compile().mlir_text()
+    expect_parse_roundtrip_and_verify(
+        ast_runtime_for_sibling_iv_reuse_text,
+        "AST-rewritten sibling runtime for IV reuse specialization",
+    )
+    expect(
+        ast_runtime_for_sibling_iv_reuse_text.count("scf.for") >= 3,
+        "reusing a sibling runtime loop IV name should not be misdiagnosed as loop-target live-out",
+    )
+
+    ast_runtime_for_static_range_name_reuse_text = ast_runtime_for_static_range_name_reuse_probe.compile().mlir_text()
+    expect_parse_roundtrip_and_verify(
+        ast_runtime_for_static_range_name_reuse_text,
+        "AST-rewritten runtime for static_range/list-comprehension name reuse specialization",
+    )
+    expect(
+        ast_runtime_for_static_range_name_reuse_text.count("scf.for") == 1,
+        "static_range and comprehension-local names should not be inferred as outer runtime loop carry state",
+    )
+
+    ast_runtime_for_static_slot_carry_text = ast_runtime_for_static_slot_carry_probe.compile().mlir_text()
+    expect_parse_roundtrip_and_verify(
+        ast_runtime_for_static_slot_carry_text,
+        "AST-rewritten runtime for static subscript slot carry specialization",
+    )
+    expect(
+        ast_runtime_for_static_slot_carry_text.count("scf.for") == 1,
+        "static subscript slot carry should preserve the authored runtime loop",
+    )
+    expect(
+        "iter_args(" in ast_runtime_for_static_slot_carry_text
+        and "scf.yield" in ast_runtime_for_static_slot_carry_text,
+        "static subscript slot carry should lower through scf.for iter_args",
+    )
+    expect_raises(
+        PTODSLAstRewriteError,
+        lambda: ast_runtime_for_dynamic_slot_store_error_probe.compile(),
+        "simple_name[static_int_or_static_range_iv]",
+    )
+    expect_raises(
+        PTODSLAstRewriteError,
+        lambda: ast_runtime_for_complex_slot_store_error_probe.compile(),
+        "simple_name[static_int_or_static_range_iv]",
+    )
+
     ast_rewrite_disabled_nested_helper_python_control_text = (
         ast_rewrite_disabled_nested_helper_python_control_probe.compile().mlir_text()
     )
@@ -5575,8 +6057,181 @@ def main() -> None:
     expect_parse_roundtrip_and_verify(vmadd_surface_text, "public vmadd surface specialization")
     vsstb_post_update_surface_text = vsstb_post_update_surface_probe.compile().mlir_text()
     expect_parse_roundtrip_and_verify(vsstb_post_update_surface_text, "vsstb post-update surface specialization")
+    vmi_wrapper_dispatch_text = vmi_wrapper_dispatch_probe.compile().mlir_text()
+    expect_parse_roundtrip_and_verify(vmi_wrapper_dispatch_text, "public VMI wrapper dispatch specialization")
+    vmi_vhist_signless_source_text = vmi_vhist_signless_source_probe.compile().mlir_text()
+    expect_parse_roundtrip_and_verify(
+        vmi_vhist_signless_source_text,
+        "public VMI vdhist/vchist signless-source specialization",
+    )
+    expect(
+        "pto.vmi.vdhist" in vmi_vhist_signless_source_text
+        and "pto.vmi.vchist" in vmi_vhist_signless_source_text,
+        "signless-source vdhist/vchist probe should still emit both histogram ops",
+    )
+    expect(
+        "!pto.vmi.vreg<256xi8" in vmi_vhist_signless_source_text,
+        "vdhist/vchist probe with dtype=pto.i8 source should surface signless i8 lanes in IR",
+    )
+    expect(
+        "!pto.vmi.vreg<256xui16" in vmi_vhist_signless_source_text,
+        "vdhist/vchist acc/result must remain ui16 in emitted IR",
+    )
+    vmi_vhist_signless_acc_text = vmi_vhist_signless_acc_probe.compile().mlir_text()
+    expect_parse_roundtrip_and_verify(
+        vmi_vhist_signless_acc_text,
+        "public VMI vdhist/vchist signless-acc specialization",
+    )
+    expect(
+        "pto.vmi.vdhist" in vmi_vhist_signless_acc_text
+        and "pto.vmi.vchist" in vmi_vhist_signless_acc_text,
+        "signless-acc vdhist/vchist probe should emit both histogram ops",
+    )
+    expect(
+        "!pto.vmi.vreg<256xi16" in vmi_vhist_signless_acc_text,
+        "vdhist/vchist probe with dtype=pto.i16 acc should surface signless i16 lanes in IR",
+    )
+    expect(
+        "!pto.vmi.vreg<256xui16" in vmi_vhist_signless_acc_text,
+        "vdhist/vchist result must always be ui16, even when acc is signless i16",
+    )
+    vmi_vhist_bad_acc_error = expect_raises(
+        TypeError,
+        vmi_vhist_bad_acc_probe.compile,
+        "requires acc element type to be ui16 or i16",
+    )
+    expect(
+        "pto.vmi.vdhist(...)" in str(vmi_vhist_bad_acc_error),
+        "vdhist bad-acc rejection should carry the pto.vmi.vdhist call-site context",
+    )
+    vmi_unpack_vload_text = vmi_unpack_vload_probe.compile().mlir_text()
+    expect_parse_roundtrip_and_verify(vmi_unpack_vload_text, "public VMI unpack vload specialization")
+    vmi_brc_vload_text = vmi_brc_vload_probe.compile().mlir_text()
+    expect_parse_roundtrip_and_verify(vmi_brc_vload_text, "public VMI brc vload specialization")
+    expect(
+        'dist_mode = "brc"' in vmi_brc_vload_text,
+        "pto.vmi.vload should preserve the authored brc dist_mode without requiring a stride operand",
+    )
+    vmi_group_brc_vload_text = vmi_group_brc_vload_probe.compile().mlir_text()
+    expect_parse_roundtrip_and_verify(vmi_group_brc_vload_text, "public VMI grouped brc vload specialization")
+    expect(
+        'dist_mode = "brc"' in vmi_group_brc_vload_text and "group = 8" in vmi_group_brc_vload_text,
+        "pto.vmi.vload should allow the grouped brc form exposed by the VMI IR contract",
+    )
     fixed_width_integer_text = fixed_width_integer_specialization_probe.compile().mlir_text()
     expect_parse_roundtrip_and_verify(fixed_width_integer_text, "fixed-width integer specialization")
+    with mock.patch.object(vmi_namespace._pto, "vmi_vadd", None):
+        missing_vmi_binding = expect_raises(
+            NotImplementedError,
+            vmi_missing_binding_probe.compile,
+            "pto.vmi.vadd",
+        )
+    expect(
+        "Rebuild PTO Python bindings" in str(missing_vmi_binding),
+        "missing generated VMI bindings should diagnose rebuild guidance",
+    )
+    masked_vcvt_error = expect_raises(
+        NotImplementedError,
+        vmi_masked_vcvt_probe.compile,
+        "pto.vmi.vcvt",
+    )
+    expect(
+        "masked form" in str(masked_vcvt_error),
+        "unsupported VMI backend/binding forms should diagnose the unavailable feature",
+    )
+    invalid_rounding_vcvt_error = expect_raises(
+        ValueError,
+        vmi_invalid_rounding_vcvt_probe.compile,
+        "rounding",
+    )
+    expect(
+        "expected one of A, H, R, Z" in str(invalid_rounding_vcvt_error),
+        "pto.vmi.vcvt should reject unsupported VMI rounding tokens before IR verification",
+    )
+    vmi_round_r_vcvt_text = vmi_round_r_vcvt_probe.compile().mlir_text()
+    expect_parse_roundtrip_and_verify(vmi_round_r_vcvt_text, "VMI R-rounding vcvt specialization")
+    expect(
+        'rounding = "R"' in vmi_round_r_vcvt_text,
+        "pto.vmi.vcvt should preserve the authored R rounding token for fp32->fp8",
+    )
+    unpack_missing_dtype_error = expect_raises(
+        TypeError,
+        vmi_unpack_vload_missing_dtype_probe.compile,
+        'to_dtype when dist_mode="unpack"',
+    )
+    expect(
+        'to_dtype when dist_mode="unpack"' in str(unpack_missing_dtype_error),
+        "unpack vload without to_dtype should diagnose the missing widened element type",
+    )
+
+    expected_vmi_ops = [
+        "pto.vmi.create_mask",
+        "pto.vmi.create_group_mask",
+        "pto.vmi.vload",
+        "pto.vmi.vci",
+        "pto.vmi.vadd",
+        "pto.vmi.vrelu",
+        "pto.vmi.vmuls",
+        "pto.vmi.vcmp",
+        "pto.vmi.vsel",
+        "pto.vmi.vselr",
+        "pto.vmi.vcadd",
+        "pto.vmi.vcmax",
+        "pto.vmi.vcmin",
+        "pto.vmi.vdhist",
+        "pto.vmi.vchist",
+        "pto.vmi.vmull",
+        "pto.vmi.vgather",
+        "pto.vmi.vcvt",
+        "pto.vmi.vinterpret_cast",
+        "pto.vmi.vintlv",
+        "pto.vmi.vstore",
+    ]
+    for op_name in expected_vmi_ops:
+        expect(
+            op_name in vmi_wrapper_dispatch_text,
+            f"representative {op_name} wrapper dispatch should emit the matching generated VMI op",
+        )
+    expect(
+        vmi_wrapper_dispatch_text.count("pto.vmi.vload") == 7,
+        "vmi wrapper dispatch probe should lower seven explicit VMI loads",
+    )
+    expect(
+        "pto.backend = \"vpto\"" in vmi_wrapper_dispatch_text,
+        "VMI public surface probe should compile through the VMI/VPTO backend partition",
+    )
+    expect(
+        "!pto.vmi.vreg<64xf32>" in vmi_wrapper_dispatch_text,
+        "PTODSL VMI compile probes should materialize logical VMI vector result types in MLIR",
+    )
+    expect(
+        "!pto.vmi.vreg<1xf32>" in vmi_wrapper_dispatch_text,
+        "PTODSL VMI reduction probes should materialize reduced logical VMI vector result types in MLIR",
+    )
+    expect(
+        "!pto.vmi.vreg<64xf16>" in vmi_wrapper_dispatch_text,
+        "PTODSL VMI conversion probes should materialize converted logical VMI vector result types in MLIR",
+    )
+    expect(
+        "!pto.vmi.vreg<64xi32>" in vmi_wrapper_dispatch_text,
+        "PTODSL VMI index/reinterpret probes should materialize integer logical VMI vector result types in MLIR",
+    )
+    expect(
+        "!pto.vmi.mask<64xpred>" in vmi_wrapper_dispatch_text,
+        "PTODSL VMI compare and prefix mask probes should materialize logical VMI mask types in MLIR",
+    )
+    expect(
+        "!pto.vmi.mask<64xpred>" in vmi_wrapper_dispatch_text,
+        "PTODSL grouped mask probes should materialize grouped logical VMI mask types in MLIR",
+    )
+    expect(
+        "reassoc" in vmi_wrapper_dispatch_text,
+        "PTODSL VMI vcadd should preserve the reassoc attr in MLIR",
+    )
+    expect(
+        "!pto.vmi.vreg<128xi16>" in vmi_unpack_vload_text,
+        "PTODSL VMI unpack vload should infer the widened logical VMI vector result type from to_dtype",
+    )
     expect("pto.mte_gm_ub" in public_surface_text, "mte_load(...) should lower to pto.mte_gm_ub")
     expect("pto.mte_ub_gm" in public_surface_text, "mte_store(...) should lower to pto.mte_ub_gm")
     expect(
@@ -5662,7 +6317,9 @@ def main() -> None:
     expect("pto.sync.set <PIPE_FIX>, 0" in sync_surface_text, "set_cross_flag(Pipe.FIX, 0) should lower to pto.sync.set")
     expect("pto.sync.wait <PIPE_FIX>, 0" in sync_surface_text, "wait_cross_flag(Pipe.FIX, 0) should lower to pto.sync.wait")
     expect("pto.sync.set <PIPE_MTE3>, %c3" in sync_surface_text, "set_intra_flag(Pipe.MTE3, dynamic_event) should lower dynamic event ids through pto.sync.set")
+    expect("pto.sync.set <PIPE_FIX>, 4" in sync_surface_text, "set_intra_flag(Pipe.FIX, 4) should lower physical event ids through pto.sync.set")
     expect("pto.sync.wait <PIPE_V>, %c3" in sync_surface_text, "wait_intra_flag(Pipe.V, dynamic_event) should lower dynamic event ids through pto.sync.wait")
+    expect("pto.sync.wait <PIPE_FIX>, 20" in sync_surface_text, "wait_intra_flag(Pipe.FIX, 20) should lower physical event ids through pto.sync.wait")
     expect(data_movement_surface_text.count("pto.mte_gm_ub") == 2, "public grouped GM->UB wrappers should lower to pto.mte_gm_ub")
     expect("pto.mte_ub_gm" in data_movement_surface_text, "public grouped UB->GM wrapper should lower to pto.mte_ub_gm")
     expect(

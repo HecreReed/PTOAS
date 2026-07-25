@@ -26,6 +26,7 @@ from .constraints import (
     check_type,
     require_contiguous,
     require_same_valid_shape,
+    require_valid_rows,
 )
 from .decorator import SpecializedTileTemplate, TileTemplate, tile_template
 from .metadata import (
@@ -85,6 +86,7 @@ __all__ = [
     "check_s_layout",
     "require_contiguous",
     "require_same_valid_shape",
+    "require_valid_rows",
     "f32",
     "f16",
     "bf16",

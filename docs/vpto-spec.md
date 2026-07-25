@@ -479,6 +479,11 @@ pipeline** commits the signal, ensuring the preceding operation on that pipeline
 before the signal is issued. The receiver specifies which **local pipeline** should stall until
 the signal arrives. This is the fundamental IPC primitive for Cube–Vector cooperation on A5.
 
+For the public `pto.sync.set` / `pto.sync.wait` surface on A5, event IDs are physical semaphore
+IDs in the `0-31` range. AIV subblock 0 uses event IDs `0-15`, and AIV subblock 1 uses event
+IDs `16-31`. Code that signals or waits for both AIV subblocks should explicitly emit both
+the base ID and `base_id + 16`.
+
 > **Note:** `pto.set_cross_core` / `pto.wait_cross_core` operate at **multi-cluster** scope and
 > are not used for intra-cluster communication.
 

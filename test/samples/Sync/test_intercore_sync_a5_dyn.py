@@ -29,6 +29,8 @@ def build():
             with InsertionPoint(entry):
                 c0 = arith.ConstantOp(idx, 0).result
                 c0_evt = arith.ConstantOp(idx, 0).result
+                c16_evt = arith.ConstantOp(idx, 16).result
+                c16_evt_pair = arith.AddIOp(c0_evt, c16_evt).result
                 two = arith.ConstantOp(f32, 2.0).result
                 out = entry.arguments[0]
                 pipe_fix = pto.PipeAttr.get(pto.PIPE.PIPE_FIX, ctx)
@@ -37,6 +39,7 @@ def build():
                 sec_cube = pto.SectionCubeOp()
                 with InsertionPoint(sec_cube.body.blocks.append()):
                     pto.sync_set(pipe_fix, c0_evt)
+                    pto.sync_set(pipe_fix, c16_evt_pair)
 
                 sec_vec = pto.SectionVectorOp()
                 with InsertionPoint(sec_vec.body.blocks.append()):

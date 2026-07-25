@@ -572,7 +572,52 @@ pto.tile.fillpad(partial_tile, padded_tile)
 
 ---
 
-### 8.1.13 Tile windowing and tile-level matmul
+### 8.1.13 Contiguous integer sequence
+
+#### `pto.tile.ci(start: ScalarType, dst: Tile, *, tmp: Tile | None = None, descending: bool = False) -> None`
+
+**Description**: Generates a contiguous integer sequence into a destination tile. The tile is filled with sequential integer values starting from `start`.
+
+Conceptually:
+
+```text
+ascending:  dst[0, j] = start + j   for j in 0..cols-1
+descending: dst[0, j] = start - j   for j in 0..cols-1
+```
+
+**Parameters**:
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `start` | `ScalarType` | Starting value of the sequence (must match `dst` element type) |
+| `dst` | `Tile` | Destination tile (must have `valid_shape[0] == 1`, i.e., single row) |
+| `tmp` | `Tile | None` | Optional scratch tile; when omitted, PTODSL uses the default backend path |
+| `descending` | `bool` | If `False` (default), generate ascending sequence; if `True`, generate descending sequence |
+
+**Returns**: None.
+
+**Constraints**:
+
+- `dst` must be a 1-row tile: `valid_shape[0] == 1`.
+- `dst` element type must be one of: `i16`, `ui16`, `i32`, `ui32`.
+- `start` must have the same element type as `dst`.
+- `dst` must use row-major layout in UB memory space.
+
+**Example** — generate ascending and descending index sequences:
+
+```python
+# Generate ascending indices: [5, 6, 7, ..., 36] (32 elements)
+idx_tile = pto.alloc_tile(shape=[1, 32], dtype=pto.i32)
+pto.tile.ci(5, idx_tile)
+
+# Generate descending indices: [100, 99, 98, ..., 69] (32 elements)
+desc_tile = pto.alloc_tile(shape=[1, 32], dtype=pto.i32)
+pto.tile.ci(100, desc_tile, descending=True)
+```
+
+---
+
+### 8.1.14 Tile windowing and tile-level matmul
 
 Tile windowing and tile-level matmul cover two common patterns in tiled matrix algorithms:
 
@@ -1262,7 +1307,143 @@ pto.tile.gemv_mx_bias(lhs_l0a_mx, lhs_scale, rhs_l0b_mx, rhs_scale, bias_tile, a
 
 ---
 
-### 8.1.14 Tile compute quick reference
+### 8.1.15 Triangular mask generation
+
+#### `pto.tile.tri(diagonal: IndexLike, dst: Tile, *, upper_or_lower: str | int = "lower") -> None`
+
+**Description**: Fills `dst` with a triangular mask pattern. When `upper_or_lower="lower"` (default), `dst[i,j] = 1` if `j <= i + diagonal`, else `0`. When `upper_or_lower="upper"`, `dst[i,j] = 1` if `j >= i + diagonal`, else `0`. The `diagonal` parameter shifts the diagonal boundary and may be negative.
+
+**Parameters**:
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `diagonal` | `IndexLike` | Diagonal offset (runtime integer; may be negative) |
+| `dst` | `Tile` | Destination tile (filled in-place) |
+| `upper_or_lower` | `str \| int` | `"lower"` (default, equivalent to `0`) or `"upper"` (equivalent to `1`). |
+
+> **Backward compatibility**: The DSL layer also accepts the legacy integer values `0` (`"lower"`) and `1` (`"upper"`). The internal IR uses `0`/`1` regardless of which form is passed at the DSL level.
+
+**Returns**: None (writes to `dst`).
+
+**Constraints**:
+- `upper_or_lower` must be `"lower"` or `"upper"` (or `0`/`1`).
+- `dst` must be in UB (`vec` address space) with `RowMajor` + `NoneBox` layout.
+- Supported element types: `f16`, `f32`, `bf16`, `i8`, `i16`, `i32`, `ui8`, `ui16`, `ui32`.
+- Runs on `PIPE_V` (vector pipe).
+
+**Example** — lower-triangular mask with diagonal offset:
+
+```python
+# 4×8 tile, valid region 4×4
+out_tile = pto.alloc_tile(shape=[4, 8], dtype=pto.f32, valid_shape=[4, 4])
+
+# Lower triangular, diagonal=0 → dst[i,j]=1 where j<=i
+pto.tile.tri(0, out_tile, upper_or_lower="lower")
+
+# Upper triangular, diagonal=2 → dst[i,j]=1 where j>=i+2
+pto.tile.tri(2, out_tile, upper_or_lower="upper")
+
+# Lower triangular, diagonal=-1 → skips first row (i=0 has no j<=-1)
+pto.tile.tri(-1, out_tile, upper_or_lower="lower")
+```
+
+---
+
+### 8.1.16 Row-wise histogram
+
+#### `pto.tile.histogram(src: Tile, idx: Tile, dst: Tile, *, byte: int | None = None) -> None`
+
+**Description**: Computes a per-row ascending cumulative 256-bin histogram and writes the result to `dst`. Each row of `src` is treated as a collection of multi-byte elements; one byte plane (selected by `byte`) is histogrammed, optionally filtered by index values from `idx`. The output `dst` has shape `(rows, 256)` with `ui32` element type, where each row stores the cumulative histogram of the selected byte plane.
+
+The `byte` parameter selects which byte of each source element to histogram, following MSB-first radix-sort ordering:
+
+**uint16 source** (`byte` ∈ {0, 1}):
+
+| `byte` | Byte selected | Filtering |
+|--------|---------------|-----------|
+| `1` (default) | MSB (bits 15–8) | None |
+| `0` | LSB (bits 7–0) | Only elements whose MSB equals `idx[row]` |
+
+**uint32 source** (`byte` ∈ {0, 1, 2, 3}):
+
+| `byte` | Byte selected | Filtering |
+|--------|---------------|-----------|
+| `3` | byte3 (bits 31–24, MSB) | None |
+| `2` | byte2 (bits 23–16) | byte3 == `idx[0]` |
+| `1` | byte1 (bits 15–8) | byte3 == `idx[0]` AND byte2 == `idx[1]` |
+| `0` | byte0 (bits 7–0, LSB) | byte3 == `idx[0]` AND byte2 == `idx[1]` AND byte1 == `idx[2]` |
+
+The `idx` tile stores filter byte values. For uint16 sources, `idx` has shape `(rows, 1)` with `ColMajor` layout (one filter byte per row). For uint32 sources, `idx` has shape `(3-byte, cols)` with `RowMajor` layout — each row broadcasts one filter byte across all columns. When `byte=3` (uint32 MSB, no filtering), `idx` is unused.
+
+**Parameters**:
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `src` | `Tile` | Source tile; element type `ui16` or `ui32`, `RowMajor` + `NoneBox` |
+| `idx` | `Tile` | Filter-index tile; element type `ui8`. Layout depends on source type (see above) |
+| `dst` | `Tile` | Destination tile; element type `ui32`, shape `(rows, 256)`, `RowMajor` + `NoneBox` |
+| `byte` | `int \| None` | Byte selector (0–3). Default is `1`. For uint16, only 0 or 1 are valid. |
+
+**Returns**: None (writes to `dst`).
+
+**Constraints**:
+- A5 target only.
+- `src` element type must be `ui16` or `ui32`; `idx` must be `ui8`; `dst` must be `ui32`.
+- `src`, `idx`, `dst` must be in UB (`vec` address space).
+- `dst` rows must match `src` rows (both physical and valid).
+- `dst` must have at least 256 physical columns.
+- For uint16: `byte` ∈ {0, 1}; `idx` uses `ColMajor` + `NoneBox` with exactly 1 column; `idx` rows must match `src` rows.
+- For uint32 with `byte` < 3: `idx` uses `RowMajor` + `NoneBox`; `idx` columns must match `src` columns; `idx` rows must equal `3 - byte`.
+- For uint32 with `byte` = 3: `idx` is unused (any shape accepted).
+- Runs on `PIPE_V` (vector pipe).
+
+**Example** — uint16 MSB histogram (no filtering):
+
+```python
+# Source: 2 rows × 128 cols of uint16
+src_tile = pto.alloc_tile(shape=[32, 128], dtype=pto.ui16, valid_shape=[2, 128])
+# idx: 32×1 uint8 (ColMajor, unused for byte=1 but must be present)
+idx_tile = pto.alloc_tile(shape=[32, 1], dtype=pto.ui8,
+                           valid_shape=[2, 1], blayout="ColMajor")
+# Output: 2 rows × 256 bins of uint32
+dst_tile = pto.alloc_tile(shape=[32, 256], dtype=pto.ui32, valid_shape=[2, 256])
+
+pto.tile.load(src_view, src_tile)
+pto.tile.histogram(src_tile, idx_tile, dst_tile, byte=1)
+pto.tile.store(dst_tile, out_view)
+```
+
+**Example** — uint32 byte3 (MSB) histogram:
+
+```python
+src_tile = pto.alloc_tile(shape=[32, 128], dtype=pto.ui32, valid_shape=[2, 128])
+# idx unused for byte=3; allocate a minimal tile
+idx_tile = pto.alloc_tile(shape=[1, 32], dtype=pto.ui8, valid_shape=[1, 1])
+dst_tile = pto.alloc_tile(shape=[32, 256], dtype=pto.ui32, valid_shape=[2, 256])
+
+pto.tile.load(src_view, src_tile)
+pto.tile.histogram(src_tile, idx_tile, dst_tile, byte=3)
+pto.tile.store(dst_tile, out_view)
+```
+
+**Example** — uint32 byte0 (LSB) histogram with full cascaded filtering:
+
+```python
+# Source: 2 rows × 128 cols of uint32
+src_tile = pto.alloc_tile(shape=[32, 128], dtype=pto.ui32, valid_shape=[2, 128])
+# idx: 3 rows × 128 cols of uint8 (3 filter bytes for byte=0)
+idx_tile = pto.alloc_tile(shape=[3, 128], dtype=pto.ui8, valid_shape=[3, 128])
+dst_tile = pto.alloc_tile(shape=[32, 256], dtype=pto.ui32, valid_shape=[2, 256])
+
+pto.tile.load(src_view, src_tile)
+pto.tile.load(idx_view, idx_tile)
+pto.tile.histogram(src_tile, idx_tile, dst_tile, byte=0)
+pto.tile.store(dst_tile, out_view)
+```
+
+---
+
+### 8.1.17 Tile compute quick reference
 
 | Category | Operations |
 |----------|------------|
@@ -1281,10 +1462,53 @@ pto.tile.gemv_mx_bias(lhs_l0a_mx, lhs_scale, rhs_l0b_mx, rhs_scale, bias_tile, a
 | Bitwise | `tile.bit_not`, `tile.bit_and`, `tile.bit_or`, `tile.bit_xor`, `tile.bit_shl`, `tile.bit_shr`, `tile.bit_ands`, `tile.bit_ors`, `tile.bit_xors`, `tile.bit_shls`, `tile.bit_shrs` |
 | Partial elementwise | `tile.partadd`, `tile.partmul`, `tile.partmax`, `tile.partmin` |
 | Fill/padding | `tile.fillpad`, `tile.fillpad_expand`, `tile.fillpad_inplace` |
+| Triangular mask | `tile.tri` |
+| Row-wise histogram | `tile.histogram` |
+| Contiguous integer sequence | `tile.ci` |
 | Windowing | `tile.extract`, `tile.insert` |
-| Tile movement | `tile.mov` |
+| Tile movement | `tile.mov`, `tile.concat` |
+| Dequantize | `tile.dequant` |
 | Tile matmul | `tile.matmul`, `tile.matmul_acc`, `tile.matmul_mx`, `tile.matmul_mx_acc`, `tile.matmul_mx_bias` |
 | Tile gemv | `tile.gemv_mx`, `tile.gemv_mx_acc`, `tile.gemv_mx_bias` |
+
+---
+
+### 8.1.18 Dequantize
+
+#### `pto.tile.dequant(src: Tile, scale: Tile, offset: Tile, dst: Tile) -> None`
+
+**Description**: Per-row dequantize: `dst[r, c] = (float(src[r, c]) - offset[r, 0]) * scale[r, 0]`.
+`src` is an integer tile (`i8` or `i16`); `scale`, `offset`, and `dst` are `f32`.
+`scale` and `offset` are per-row coefficient tiles (`[rows, 1]`) broadcast across the
+columns of `src`; `dst` has the same shape as `src`.
+
+**Parameters**:
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `src` | `Tile` | Integer source tile (`i8` or `i16`), `[rows, cols]` |
+| `scale` | `Tile` | Per-row f32 scale tile (`[rows, 1]`), broadcast across columns |
+| `offset` | `Tile` | Per-row f32 offset tile (`[rows, 1]`), broadcast across columns |
+| `dst` | `Tile` | f32 destination tile, same shape as `src` |
+
+**Returns**: None (side-effect: writes `dst`).
+
+**Hardware mapping**: Vector pipeline (`PIPE_V`). Source elements are converted to f32
+(`i16` via an even-part convert; `i8` via a sign-extending int8→int32→f32 sequence),
+then the broadcast offset is subtracted and the broadcast scale multiplied per vector chunk.
+
+**Constraints**:
+
+- `src` must be `i8` or `i16`; `scale`, `offset`, and `dst` must be `f32`.
+- `scale` and `offset` are per-row vectors (`[rows, 1]`); `scale.valid_rows == offset.valid_rows == dst.valid_rows`.
+- `dst.valid_shape == src.valid_shape`; all operands are row-major vector tiles (`loc=vec`).
+
+**Example**:
+
+```python
+# src: i16 [rows, cols]; scale/offset: f32 [rows, 1]; dst: f32 [rows, cols]
+pto.tile.dequant(src_tile, scale_tile, offset_tile, dst_tile)
+```
 
 ---
 
@@ -1407,6 +1631,19 @@ s_shifted = pto.vsubs(s_row, m_next, col_mask)
 #### `pto.vlrelu(vec: VRegType, alpha: ScalarType, mask: MaskType) -> VRegType`
 
 **Description**: Leaky ReLU — `vec[i] >= 0 ? vec[i] : alpha * vec[i]`.
+
+#### `pto.vshls(vec: VRegType, scalar: ScalarType, mask: MaskType) -> VRegType`
+#### `pto.vshrs(vec: VRegType, scalar: ScalarType, mask: MaskType) -> VRegType`
+
+**Description**: Uniform integer shift by a scalar amount. PTODSL coerces
+`scalar` to signless `i16`, matching the VPTO `vshls`/`vshrs` requirement.
+
+#### `pto.vands(vec: VRegType, scalar: ScalarType, mask: MaskType) -> VRegType`
+#### `pto.vors(vec: VRegType, scalar: ScalarType, mask: MaskType) -> VRegType`
+#### `pto.vxors(vec: VRegType, scalar: ScalarType, mask: MaskType) -> VRegType`
+
+**Description**: Vector/scalar bitwise ops. PTODSL lowers these surface helpers
+as `vbr(scalar)` followed by `vand(...)`, `vor(...)`, or `vxor(...)`.
 
 ---
 
@@ -1539,6 +1776,11 @@ These combine an arithmetic operation with a math function or activation in a si
 #### `pto.vaxpy(alpha: ScalarType, x: VRegType, y: VRegType, mask: MaskType) -> VRegType`
 
 **Description**: Fused multiply-add: `alpha * x[i] + y[i]`.
+
+#### `pto.vmula(acc: VRegType, lhs: VRegType, rhs: VRegType, mask: MaskType) -> VRegType`
+
+**Description**: Fused multiply-add with an explicit accumulator:
+`acc[i] + lhs[i] * rhs[i]`.
 
 ---
 
@@ -1676,7 +1918,7 @@ These ops change the element type or layout of vector registers. They are distin
 
 **Constraints**:
 - Source and result dtype pair must be a legal hardware conversion. Illegal pairs (e.g., unsupported narrowing/widening combinations) are rejected at frontend time.
-- `f32 -> f8e4m3/f8e5m2` requires `rnd=R`, `sat`, and `part=P0/P1/P2/P3`.
+- `f32 -> f8e4m3/f8e5m2` requires `rnd=R/A/H/Z`, `sat`, and `part=P0/P1/P2/P3`.
 - `f32 -> hif8` requires `rnd=A/H`, `sat`, and `part=P0/P1/P2/P3`.
 - `f16/bf16 -> f8e4m3/f8e5m2` requires `rnd=R/A/F/Z/C`, `sat`, and `part=EVEN/ODD`.
 - `f16 -> hif8` requires `rnd=A/H`, `sat`, and `part=EVEN/ODD`.
@@ -1749,13 +1991,112 @@ packed_high = pto.vpack(vec_i32, pto.VPackPart.HIGHER)  # upper 64 lanes -> 128�
 
 ---
 
-### 8.2.8 Vector compute quick reference
+### 8.2.7.1 Index generation
+
+#### `pto.vci(base: ScalarType | int, order: OrderMode | None = None) -> VRegType`
+
+**Description**: Generate a lane-index vector starting from `base`. When the
+base is a Python `int`, PTODSL defaults it to `i32`. To control the result
+dtype, materialize a typed scalar explicitly before calling `vci`.
+
+**Examples**:
+
+```python
+idx_i32 = pto.vci(0)
+idx_i8 = pto.vci(pto.i8(0), pto.OrderMode.ASC)
+typed_idx = pto.vci(pto.i32(16), order=pto.OrderMode.ASC)
+```
+
+---
+
+### 8.2.8 Vector rearrangement
+
+These ops rearrange data between vector registers without touching UB memory.
+They are useful for switching between interleaved layouts (`x0, y0, x1, y1,
+...`) and split layouts (`x...`, `y...`) inside `@pto.simd`.
+
+#### `pto.vintlv(lhs: VRegType, rhs: VRegType) -> tuple[VRegType, VRegType]`
+
+**Description**: Interleave two vectors lane-by-lane and return the result as a
+pair of vector registers. The first result contains the interleaved lower half
+of the logical output stream; the second result contains the upper half.
+
+For a vector with `N` lanes:
+
+- `low = [lhs[0], rhs[0], lhs[1], rhs[1], ..., lhs[N/2 - 1], rhs[N/2 - 1]]`
+- `high = [lhs[N/2], rhs[N/2], lhs[N/2 + 1], rhs[N/2 + 1], ..., lhs[N - 1], rhs[N - 1]]`
+
+**Parameters**:
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `lhs` | `VRegType` | First source vector |
+| `rhs` | `VRegType` | Second source vector |
+
+**Returns**:
+
+| Return Value | Type | Description |
+|--------------|------|-------------|
+| `low` | `VRegType` | Interleaved lower half |
+| `high` | `VRegType` | Interleaved upper half |
+
+**Constraints**:
+- `lhs` and `rhs` must have exactly the same `VRegType`.
+- The two returned vectors form one logical interleaved result pair; preserve
+  their ordering when passing them to later ops such as `vdintlv`.
+
+---
+
+#### `pto.vdintlv(lhs: VRegType, rhs: VRegType) -> tuple[VRegType, VRegType]`
+
+**Description**: Deinterleave a previously interleaved vector pair. This is the
+inverse of `vintlv`: it separates the even-position and odd-position lanes of
+the logical input stream into two output vectors.
+
+For a vector with `N` lanes:
+
+- `low = [lhs[0], lhs[2], lhs[4], ..., rhs[0], rhs[2], rhs[4], ...]`
+- `high = [lhs[1], lhs[3], lhs[5], ..., rhs[1], rhs[3], rhs[5], ...]`
+
+If `(packed_low, packed_high) = pto.vintlv(a, b)`, then
+`pto.vdintlv(packed_low, packed_high)` reconstructs `(a, b)`.
+
+**Parameters**:
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `lhs` | `VRegType` | Lower half of the interleaved input stream |
+| `rhs` | `VRegType` | Upper half of the interleaved input stream |
+
+**Returns**:
+
+| Return Value | Type | Description |
+|--------------|------|-------------|
+| `low` | `VRegType` | Lanes from even interleaved positions |
+| `high` | `VRegType` | Lanes from odd interleaved positions |
+
+**Constraints**:
+- `lhs` and `rhs` must have exactly the same `VRegType`.
+- `lhs` and `rhs` are interpreted as an ordered pair. Swapping them changes the
+  reconstructed lane order.
+
+**Example** — interleave two channels and recover them later:
+
+<!-- ptodsl-doc-test: {"mode":"compile_fragment","fixture":"compute_ops.vector_compute","symbol":"compute_ops_vector_probe","compile":{"BLOCK":128}} -->
+```python
+packed_low, packed_high = pto.vintlv(vec_f32, vec_f32)
+even_lanes, odd_lanes = pto.vdintlv(packed_low, packed_high)
+```
+
+---
+
+### 8.2.9 Vector compute quick reference
 
 | Category | Operations |
 |----------|------------|
 | Unary | `vexp`, `vln`, `vsqrt`, `vabs`, `vneg`, `vrec`, `vrsqrt`, `vrelu`, `vnot` |
 | Binary | `vadd`, `vsub`, `vmul`, `vdiv`, `vmax`, `vmin`, `vand`, `vor`, `vxor`, `vshl`, `vshr` |
-| Vector-scalar | `vadds`, `vsubs`, `vmuls`, `vmaxs`, `vmins`, `vlrelu` |
+| Vector-scalar | `vadds`, `vsubs`, `vmuls`, `vmaxs`, `vmins`, `vlrelu`, `vands`, `vors`, `vxors`, `vshls`, `vshrs` |
 | Broadcast | `vbr`, `vdup` |
 | Full reduction | `vcadd`, `vcmax`, `vcmin` |
 | Group reduction | `vcgadd`, `vcgmax`, `vcgmin` |
@@ -1763,6 +2104,8 @@ packed_high = pto.vpack(vec_i32, pto.VPackPart.HIGHER)  # upper 64 lanes -> 128�
 | Fused | `vexpdif`, `vaxpy`, `vmula`, `vmadd`, `vaddrelu`, `vsubrelu`, `vmulscvt` |
 | Compare/select | `vcmp`, `vcmps`, `vsel` |
 | Conversion | `vcvt`, `vpack`, `vbitcast`, `pbitcast` |
+| Index generation | `vci` |
+| Rearrangement | `vintlv`, `vdintlv` |
 
 ---
 

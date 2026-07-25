@@ -75,6 +75,41 @@ pto.tile.store(o_tile, o_view, offsets=[0, 0], sizes=[rows, cols])
 Both `tile.load` and `tile.store` operate at **tile granularity** — they are the idiomatic choice inside `@pto.jit` loops. When you need finer control over DMA scheduling, switch to
 `mode="explicit"` and use the DMA micro-instructions covered in the next section.
 
+#### `pto.tile.concat(src0: Tile, src1: Tile, dst: Tile) -> None`
+
+**Description**: Concatenates two tiles along the column dimension: `dst[:, 0:c0] = src0`
+and `dst[:, c0:c0+c1] = src1`, where `c0 = src0.valid_cols` and `c1 = src1.valid_cols`.
+All three tiles share the same element type and row-major layout;
+`src0.valid_rows == src1.valid_rows == dst.valid_rows` and `c0 + c1 == dst.valid_cols`.
+
+**Parameters**:
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `src0` | `Tile` | Left source tile (`[rows, c0]`) |
+| `src1` | `Tile` | Right source tile (`[rows, c1]`) |
+| `dst` | `Tile` | Destination tile (`[rows, c0 + c1]`) |
+
+**Returns**: None (side-effect: writes `dst`).
+
+**Hardware mapping**: Vector pipeline (`PIPE_V`) — a row-wise chunked copy of `src0`
+to the destination origin and `src1` to the `c0` column offset.
+
+**Constraints**:
+
+- `src0`, `src1`, and `dst` share the same element type and row-major layout.
+- `src0.valid_rows == src1.valid_rows == dst.valid_rows`.
+- `src0.valid_cols + src1.valid_cols == dst.valid_cols`.
+
+**Example**:
+
+```python
+# dst[:, 0:c0] = src0 ; dst[:, c0:c0+c1] = src1
+pto.tile.concat(src0_tile, src1_tile, dst_tile)
+```
+
+---
+
 ## 7.2 DMA micro-instructions (explicit mode)
 
 Inside explicit-mode orchestration, data movement between memory spaces is expressed with grouped DMA instructions on typed pointers. There are four operations covering the four data-movement directions:
@@ -343,7 +378,7 @@ The compiler automatically computes the byte offset from the tile's shape, eleme
 | `tile[start:]` | Tile index | 1D tile with starting element (vector-width range) |
 | `buf` | `PtrType` (UB) | Pointer to buffer in UB (pointer form) |
 | `offset` | `Index` | Element offset (pointer form) |
-| `dist` | `VLoadDist` or `None` | Optional load distribution: `NORM` (default), `UNPK_B8`/`UNPK_B16`/`UNPK_B32`, `BRC_B8`/`BRC_B16`/`BRC_B32` |
+| `dist` | `VLoadDist` or `None` | Optional load distribution: `NORM` (default), `UNPK_B8`/`UNPK_B16`/`UNPK_B32`, `BRC_B8`/`BRC_B16`/`BRC_B32`, `BRC_BLK`, `E2B_B16`/`E2B_B32`, `UNPK4`, `SPLT4CHN`, `US_B8`/`US_B16`, `DS_B8`/`DS_B16` |
 | `post_update` | `PostUpdate` | Pointer form only. `OFF` (default) — stateless load. `ON` — returns `(vec, updated_buf)` where `updated_buf` is the buffer pointer advanced past the loaded elements |
 
 **Returns**:
@@ -817,7 +852,7 @@ pto.vstas(align, ub_dst_f32, pto.const(64))
 
 | Enum | Values | Used with |
 |------|--------|-----------|
-| `VLoadDist` | `NORM`, `UNPK_B8`, `UNPK_B16`, `UNPK_B32`, `BRC_B8`, `BRC_B16`, `BRC_B32`, `US_B8`, `US_B16`, `DS_B8`, `DS_B16` | `vlds` |
+| `VLoadDist` | `NORM`, `UNPK_B8`, `UNPK_B16`, `UNPK_B32`, `BRC_B8`, `BRC_B16`, `BRC_B32`, `BRC_BLK`, `E2B_B16`, `E2B_B32`, `UNPK4`, `SPLT4CHN`, `US_B8`, `US_B16`, `DS_B8`, `DS_B16` | `vlds` |
 | `VStoreDist` | `NORM_B8`, `NORM_B16`, `NORM_B32`, `1PT_B8`, `1PT_B16`, `1PT_B32`, `PK_B16`, `PK_B32`, `PK_B64`, `PK4_B32`, `MRG4CHN_B8`, `MRG2CHN_B8`, `MRG2CHN_B16` | `vsts` |
 | `DeinterleaveDist` | `DINTLV_B8`, `DINTLV_B16`, `DINTLV_B32`, `BDINTLV` | `vldsx2` |
 | `InterleaveDist` | `INTLV_B8`, `INTLV_B16`, `INTLV_B32` | `vstsx2` |

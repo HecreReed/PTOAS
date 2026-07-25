@@ -290,7 +290,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          readarray -t ptoas_wheels < <(find "${PTO_WHEELHOUSE}" -maxdepth 1 -type f -name 'ptoas-*.whl' | sort)
+          readarray -t ptoas_wheels < <(find "${PTO_WHEELHOUSE}" -maxdepth 1 -type f -name 'ptoas*.whl' | sort)
           if [[ "${#ptoas_wheels[@]}" -ne 1 ]]; then
             echo "ERROR: expected exactly one PTOAS wheel in ${PTO_WHEELHOUSE}, found ${#ptoas_wheels[@]}" >&2
             printf '  %s\n' "${ptoas_wheels[@]}" >&2
@@ -325,7 +325,7 @@ jobs:
         env:
           CI_EVENT_NAME: ${{ github.event_name }}
           WORKFLOW_SOC_VERSION: ${{ github.event.inputs.soc_version || 'Ascend910' }}
-          PTOAS_BIN: ${{ env.PTO_BUILD_DIR }}/tools/ptoas/ptoas
+          PTOAS_BIN: ${{ env.PTO_INSTALL_DIR }}/bin/ptoas
           PTOBC_BIN: ${{ env.PTO_BUILD_DIR }}/tools/ptobc/ptobc
           PTO_BUILD_DIR: ${{ env.PTO_BUILD_DIR }}
           PYTHON_BIN: ${{ env.PTOAS_VENV }}/bin/python

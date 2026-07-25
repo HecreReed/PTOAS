@@ -30,11 +30,28 @@ add_mlir_dialect_library(PTOTransforms
   VPTOLLVMEmitterHelper.cpp
   VPTOPtrNormalize.cpp
   VPTOPtrCastCleanup.cpp
+  VPTONormalizeEquivalentVcvt.cpp
   VPTOExpandWrapperOps.cpp
+  VPTOSoftPostUpdate.cpp
   PTOVPTOPtrBoundary.cpp
   VPTOBufferMaterialization.cpp
   PTOValidateVPTOIR.cpp
+  PTONarrowVPTOLoopCounters.cpp
   PTOUnrollSIMTForPass.cpp
+  PTOValidateVMIIR.cpp
+  VMIPreAssignmentCombine.cpp
+  VMIControlFlowSupport.cpp
+  VMILegalizeArithSelect.cpp
+  VMIMaskGranularityAssignment.cpp
+  VMILowerUnifiedToLegacy.cpp
+  VMINormalizeSignlessIntToUnsigned.cpp
+  VMILayoutAssignment.cpp
+  VMILayoutFold.cpp
+  VMILayoutPropagation.cpp
+  VMILayoutSupport.cpp
+  VMILayoutRematerialize.cpp
+  VMILayoutSinkMaterialization.cpp
+  VMIToVPTO.cpp
   PTOInferVPTOVecScope.cpp
 
   InsertSync/PTOInsertSync.cpp

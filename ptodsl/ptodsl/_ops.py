@@ -148,6 +148,13 @@ def _validate_static_buf_id(buf_id, *, context: str):
         raise ValueError(f"{context} expects static buf_id in [0, 31], got {buf_id}")
 
 
+def _validate_static_event_id_range(event_id, *, context: str, lo: int, hi: int, meaning: str = "event_id"):
+    if isinstance(event_id, bool):
+        raise TypeError(f"{context} does not accept bool values")
+    if isinstance(event_id, int) and not lo <= event_id <= hi:
+        raise ValueError(f"{context} expects static {meaning} in [{lo}, {hi}], got {event_id}")
+
+
 def _validate_sync_pipe(pipe, *, context: str, allowed: tuple[str, ...]):
     canonical = _canonical_pipe_token(pipe)
     if canonical is None:
@@ -155,6 +162,7 @@ def _validate_sync_pipe(pipe, *, context: str, allowed: tuple[str, ...]):
     if canonical not in allowed:
         expected = ", ".join(f"<{name}>" for name in allowed)
         raise ValueError(f"{context} expects pipe to be one of {expected}, got <{canonical}>")
+    return canonical
 
 
 def _require_explicit_mode(surface: str):
@@ -274,9 +282,13 @@ def addptr(base_ptr, index_offset):
 _VLOAD_DIST_TOKENS = {
     "NORM",
     "UNPK_B8", "UNPK_B16", "UNPK_B32",
-    "BRC_B8", "BRC_B16", "BRC_B32",
+    "BRC_B8", "BRC_B16", "BRC_B32", "BRC_BLK",
     "US_B8", "US_B16",
     "DS_B8", "DS_B16",
+    # Extra load distributions already supported by the backend lowering.
+    "E2B_B16", "E2B_B32",
+    "UNPK4",
+    "SPLT4CHN",
 }
 
 
@@ -403,7 +415,7 @@ def _normalize_dist_token(dist, *, allowed: set[str], context: str):
     return normalized
 
 
-def vldsx2(source, offset_or_dist, dist=None):
+def vldsx2(source, offset_or_dist, dist=None, *, result_vreg_type=None):
     """``pto.vldsx2`` – dual vector load with deinterleave."""
     if isinstance(source, TileSliceValue):
         if dist is not None:
@@ -424,7 +436,10 @@ def vldsx2(source, offset_or_dist, dist=None):
 
     if dist is None:
         raise TypeError("vldsx2(ptr, offset, dist) requires an explicit offset and dist")
-    result_type = _infer_vreg_type_from_address_source(source)
+    if result_vreg_type is not None:
+        result_type = _resolve(result_vreg_type)
+    else:
+        result_type = _infer_vreg_type_from_address_source(source)
     op = _pto.Vldsx2Op(
         result_type,
         result_type,
@@ -572,8 +587,8 @@ def _vcvt_contract(requires_rnd, requires_sat, requires_part, *, part_family=Non
 
 
 _VCVT_CONTRACTS = {
-    ("f32", "f8e4m3"): _vcvt_contract(True, True, True, part_family="packed4", allowed_rnd="R"),
-    ("f32", "f8e5m2"): _vcvt_contract(True, True, True, part_family="packed4", allowed_rnd="R"),
+    ("f32", "f8e4m3"): _vcvt_contract(True, True, True, part_family="packed4", allowed_rnd="RAHZ"),
+    ("f32", "f8e5m2"): _vcvt_contract(True, True, True, part_family="packed4", allowed_rnd="RAHZ"),
     ("f32", "hif8"): _vcvt_contract(True, True, True, part_family="packed4", allowed_rnd="AH"),
     ("f32", "f16"): _vcvt_contract(True, True, True),
     ("f32", "bf16"): _vcvt_contract(True, True, True),
@@ -1801,32 +1816,6 @@ def vshr(lhs, rhs, mask):
     return _emit_binary_vec_op(_pto.VshrOp, lhs, rhs, mask)
 
 
-def vshls(inp, scalar, mask):
-    """``pto.vshls`` – vector shift-left by scalar under mask."""
-    _reject_low_precision_vreg_operands(inp, context="pto.vshls(...)")
-    return wrap_surface_value(
-        _pto.VshlsOp(
-            unwrap_surface_value(inp).type,
-            unwrap_surface_value(inp),
-            _coerce_i16(scalar, context="vshls"),
-            unwrap_surface_value(mask),
-        ).result
-    )
-
-
-def vshrs(inp, scalar, mask):
-    """``pto.vshrs`` – vector shift-right by scalar under mask."""
-    _reject_low_precision_vreg_operands(inp, context="pto.vshrs(...)")
-    return wrap_surface_value(
-        _pto.VshrsOp(
-            unwrap_surface_value(inp).type,
-            unwrap_surface_value(inp),
-            _coerce_i16(scalar, context="vshrs"),
-            unwrap_surface_value(mask),
-        ).result
-    )
-
-
 def vcmax(v, mask):
     """``pto.vcmax`` – cross-lane maximum reduction."""
     return _emit_unary_vec_op(_pto.VcmaxOp, v, mask)
@@ -2121,6 +2110,19 @@ def vdintlv(lhs, rhs):
     return wrap_surface_value(low), wrap_surface_value(high)
 
 
+def chistv2(acc, source, mask, bin_val):
+    """``pto.chistv2`` – accumulate 128-bin histogram from b8 source into b16 accumulator."""
+    return wrap_surface_value(
+        _pto.Chistv2Op(
+            unwrap_surface_value(acc).type,
+            unwrap_surface_value(acc),
+            unwrap_surface_value(source),
+            unwrap_surface_value(mask),
+            unwrap_surface_value(bin_val),
+        ).result
+    )
+
+
 def vselr(src0, src1):
     """``pto.vselr`` – vector select/reorder helper."""
     _reject_low_precision_vreg_operands(src0, src1, context="pto.vselr(...)")
@@ -2131,23 +2133,6 @@ def vselr(src0, src1):
             unwrap_surface_value(src1),
         ).result
     )
-
-
-def vci(index, order=None):
-    """``pto.vci`` – vector consecutive index generator."""
-    raw_index = unwrap_surface_value(index)
-    if not hasattr(raw_index, "type"):
-        raw_index = _coerce_i32(raw_index, context="vci(index)")
-    result_type = _resolve(vreg_type(_elements_per_vreg(raw_index.type), raw_index.type))
-    kwargs = {}
-    if order is not None:
-        token = getattr(order, "value", order)
-        if not isinstance(token, str):
-            token = str(token)
-            if "." in token:
-                token = token.rsplit(".", 1)[-1]
-        kwargs["order"] = token.strip().upper()
-    return wrap_surface_value(_pto.VciOp(result_type, raw_index, **kwargs).result)
 
 
 def vaddc(lhs, rhs, mask):
@@ -2215,19 +2200,6 @@ def vmrgsort4(destination, source0, source1, source2, source3, count, config):
     )
 
 
-def copy_ubuf_to_ubuf(source, destination, sid, n_burst, len_burst, src_stride, dst_stride):
-    """``pto.copy_ubuf_to_ubuf`` – raw UB-to-UB DMA primitive."""
-    _pto.CopyUbufToUbufOp(
-        unwrap_surface_value(source),
-        unwrap_surface_value(destination),
-        _coerce_i64(sid, context="copy_ubuf_to_ubuf(sid)"),
-        _coerce_i64(n_burst, context="copy_ubuf_to_ubuf(n_burst)"),
-        _coerce_i64(len_burst, context="copy_ubuf_to_ubuf(len_burst)"),
-        _coerce_i64(src_stride, context="copy_ubuf_to_ubuf(src_stride)"),
-        _coerce_i64(dst_stride, context="copy_ubuf_to_ubuf(dst_stride)"),
-    )
-
-
 def load_scalar(ptr_value, offset=0, result_type=None):
     """``pto.load_scalar`` – load one scalar from a pointer-like value."""
     if result_type is None:
@@ -2289,6 +2261,71 @@ def vlrelu(inp, alpha, mask):
     return _emit_vec_scalar_masked_op(_pto.VlreluOp, inp, alpha, mask, context="vlrelu")
 
 
+def vshrs(inp, scalar, mask):
+    """``pto.vshrs`` – vector shift-right by a uniform ``i16`` amount."""
+    _reject_low_precision_vreg_operands(inp, context="pto.vshrs(...)")
+    i16 = IntegerType.get_signless(16)
+    raw = unwrap_surface_value(scalar)
+    if hasattr(raw, "type"):
+        scalar_value = coerce_scalar_to_type(raw, i16, context="vshrs")
+    else:
+        scalar_value = materialize_scalar_literal(int(raw), i16, context="vshrs")
+    return wrap_surface_value(
+        _pto.VshrsOp(
+            unwrap_surface_value(inp).type,
+            unwrap_surface_value(inp),
+            unwrap_surface_value(scalar_value),
+            unwrap_surface_value(mask),
+        ).result
+    )
+
+
+def vshls(inp, scalar, mask):
+    """``pto.vshls`` – vector shift-left by a uniform ``i16`` amount."""
+    _reject_low_precision_vreg_operands(inp, context="pto.vshls(...)")
+    i16 = IntegerType.get_signless(16)
+    raw = unwrap_surface_value(scalar)
+    if hasattr(raw, "type"):
+        scalar_value = coerce_scalar_to_type(raw, i16, context="vshls")
+    else:
+        scalar_value = materialize_scalar_literal(int(raw), i16, context="vshls")
+    return wrap_surface_value(
+        _pto.VshlsOp(
+            unwrap_surface_value(inp).type,
+            unwrap_surface_value(inp),
+            unwrap_surface_value(scalar_value),
+            unwrap_surface_value(mask),
+        ).result
+    )
+
+
+def vands(inp, scalar, mask):
+    """``pto.vands`` – vector AND scalar (emulated via ``vand`` + ``vbr``)."""
+    return vand(
+        inp,
+        vbr(_coerce_scalar_like_vector_element(inp, scalar, context="vands")),
+        mask,
+    )
+
+
+def vors(inp, scalar, mask):
+    """``pto.vors`` – vector OR scalar (emulated via ``vor`` + ``vbr``)."""
+    return vor(
+        inp,
+        vbr(_coerce_scalar_like_vector_element(inp, scalar, context="vors")),
+        mask,
+    )
+
+
+def vxors(inp, scalar, mask):
+    """``pto.vxors`` – vector XOR scalar (emulated via ``vxor`` + ``vbr``)."""
+    return vxor(
+        inp,
+        vbr(_coerce_scalar_like_vector_element(inp, scalar, context="vxors")),
+        mask,
+    )
+
+
 def vaddrelu(lhs, rhs, mask):
     """``pto.vaddrelu`` – add, then apply ReLU."""
     return vrelu(vadd(lhs, rhs, mask), mask)
@@ -2315,7 +2352,7 @@ def vaxpy(alpha, x, y, mask):
 
 
 def vmula(acc, lhs, rhs, mask):
-    """``pto.vmula`` – fused multiply-add: ``acc + lhs * rhs`` (single rounding)."""
+    """``pto.vmula`` – fused ``acc + lhs * rhs`` under mask."""
     _reject_low_precision_vreg_operands(acc, lhs, rhs, context="pto.vmula(...)")
     return wrap_surface_value(
         _pto.VmulaOp(
@@ -2326,7 +2363,6 @@ def vmula(acc, lhs, rhs, mask):
             unwrap_surface_value(mask),
         ).result
     )
-
 
 def vmadd(acc, lhs, rhs, mask):
     """``pto.vmadd`` – fused multiply-add: ``acc * lhs + rhs`` (single rounding)."""
@@ -2340,6 +2376,24 @@ def vmadd(acc, lhs, rhs, mask):
             unwrap_surface_value(mask),
         ).result
     )
+
+def vci(base, order=None):
+    """``pto.vci`` – generate lane indices from a scalar base."""
+    raw_base = unwrap_surface_value(base)
+    if hasattr(raw_base, "type"):
+        scalar_value = raw_base
+        elem_type = raw_base.type
+    elif isinstance(raw_base, int):
+        elem_type = IntegerType.get_signless(32)
+        scalar_value = materialize_scalar_literal(raw_base, elem_type, context="vci(base)")
+    else:
+        raise TypeError("vci(base) expects a runtime scalar or Python int")
+
+    result_type = _resolve(vreg_type(_elements_per_vreg(elem_type), elem_type))
+    kwargs = {}
+    if order is not None:
+        kwargs["order"] = order
+    return wrap_surface_value(_pto.VciOp(result_type, scalar_value, **kwargs).result)
 
 
 def vsel(true_v, false_v, mask):
@@ -2874,6 +2928,15 @@ def tmov(src, dst, *, mode=None):
     _pto.TMovOp(None, unwrap_surface_value(src), unwrap_surface_value(dst), **kwargs)
 
 
+def ttrans(src, tmp, dst):
+    """``pto.ttrans ins(src, tmp) outs(dst)`` – tile transpose (DPS)."""
+    _pto.ttrans(
+        unwrap_surface_value(src),
+        unwrap_surface_value(tmp),
+        unwrap_surface_value(dst),
+    )
+
+
 def textract(src, dst, index_row, index_col):
     """``pto.textract ins(src, index_row, index_col) outs(dst)``."""
     _pto.TExtractOp(
@@ -2890,6 +2953,15 @@ def tinsert(src, dst, index_row, index_col):
         unwrap_surface_value(src),
         _coerce_index(index_row, context="tinsert(index_row)"),
         _coerce_index(index_col, context="tinsert(index_col)"),
+        unwrap_surface_value(dst),
+    )
+
+
+def tconcat(src0, src1, dst):
+    """``pto.tconcat ins(src0, src1) outs(dst)``."""
+    _pto.tconcat(
+        unwrap_surface_value(src0),
+        unwrap_surface_value(src1),
         unwrap_surface_value(dst),
     )
 
@@ -3177,6 +3249,16 @@ def tneg(src, dst):
     """``pto.tneg ins(src) outs(dst)``."""
     _pto.tneg(
         unwrap_surface_value(src),
+        unwrap_surface_value(dst),
+    )
+
+
+def tdequant(src, scale, offset, dst):
+    """``pto.tdequant ins(src, scale, offset) outs(dst)``."""
+    _pto.tdequant(
+        unwrap_surface_value(src),
+        unwrap_surface_value(scale),
+        unwrap_surface_value(offset),
         unwrap_surface_value(dst),
     )
 
@@ -3622,6 +3704,70 @@ def tgather(
         offset=offset,
     )
 
+def ttri(diagonal, dst, *, upper_or_lower="lower"):
+    """``pto.ttri ins(diagonal) outs(dst)``."""
+    if isinstance(upper_or_lower, str):
+        if upper_or_lower == "lower":
+            upper_or_lower = 0
+        elif upper_or_lower == "upper":
+            upper_or_lower = 1
+        else:
+            raise ValueError(
+                f"upper_or_lower must be 'lower' or 'upper', got {upper_or_lower!r}"
+            )
+    elif upper_or_lower not in (0, 1):
+        raise ValueError(f"upper_or_lower must be 0 (lower) or 1 (upper), got {upper_or_lower}")
+    if not isinstance(diagonal, int):
+        raise TypeError(
+            f"ttri(diagonal) expects an int, got {type(diagonal).__name__}"
+        )
+    dst_dtype = str(infer_tile_element_type(dst))
+    _TRI_ALLOWED_DTYPES = {
+        "i8", "i16", "i32", "ui8", "ui16", "ui32", "f16", "bf16", "f32",
+    }
+    if dst_dtype not in _TRI_ALLOWED_DTYPES:
+        raise ValueError(
+            f"ttri dst dtype must be one of {sorted(_TRI_ALLOWED_DTYPES)}, "
+            f"got {dst_dtype!r}"
+        )
+    _pto.ttri(
+        _coerce_i32(diagonal, context="ttri(diagonal)"),
+        unwrap_surface_value(dst),
+        upper_or_lower=upper_or_lower,
+    )
+
+def tthistogram(src, idx, dst, *, byte=None):
+    """``pto.thistogram ins(src, idx) outs(dst)``."""
+    if byte is not None:
+        if not isinstance(byte, int) or byte not in (0, 1, 2, 3):
+            raise ValueError(f"byte must be an int in [0, 3], got {byte!r}")
+    src_dtype = str(infer_tile_element_type(src))
+    idx_dtype = str(infer_tile_element_type(idx))
+    dst_dtype = str(infer_tile_element_type(dst))
+    if src_dtype not in ("ui16", "ui32"):
+        raise ValueError(
+            f"thistogram src dtype must be ui16 or ui32, got {src_dtype!r}"
+        )
+    if idx_dtype != "ui8":
+        raise ValueError(
+            f"thistogram idx dtype must be ui8, got {idx_dtype!r}"
+        )
+    if dst_dtype != "ui32":
+        raise ValueError(
+            f"thistogram dst dtype must be ui32, got {dst_dtype!r}"
+        )
+    effective_byte = 1 if byte is None else byte
+    if src_dtype == "ui16" and effective_byte not in (0, 1):
+        raise ValueError(
+            f"thistogram with ui16 src only supports byte 0 (LSB) or 1 (MSB), "
+            f"got byte={effective_byte}"
+        )
+    _pto.thistogram(
+        unwrap_surface_value(src),
+        unwrap_surface_value(idx),
+        unwrap_surface_value(dst),
+        byte=byte,
+    )
 
 def tgatherb(src, offsets, dst):
     """``pto.tgatherb`` – tile gather using byte offsets (DPS)."""
@@ -3629,6 +3775,16 @@ def tgatherb(src, offsets, dst):
         unwrap_surface_value(src),
         unwrap_surface_value(offsets),
         unwrap_surface_value(dst),
+    )
+
+
+def tci(start, dst, *, tmp=None, descending=False):
+    """``pto.tci`` – generate contiguous integer sequence into dst tile (DPS)."""
+    _pto.tci(
+        _unwrap_optional_integer(start),
+        unwrap_surface_value(dst),
+        tmp=None if tmp is None else unwrap_surface_value(tmp),
+        descending=descending,
     )
 
 
@@ -5936,6 +6092,11 @@ def _sync_event_id_operand(event_id, *, context: str):
     return event_id if isinstance(event_id, int) else unwrap_surface_value(event_id)
 
 
+def _sync_event_id_operand_in_range(event_id, *, context: str, lo: int, hi: int, meaning: str = "event_id"):
+    _validate_static_event_id_range(event_id, context=context, lo=lo, hi=hi, meaning=meaning)
+    return event_id if isinstance(event_id, int) else unwrap_surface_value(event_id)
+
+
 def _flag_event_id_operand(event_id, *, context: str):
     if isinstance(event_id, int):
         _validate_static_event_id(event_id, context=context)
@@ -5959,15 +6120,35 @@ def wait_cross_flag(pipe, event_id):
 
 def set_intra_flag(pipe, event_id):
     """``pto.set_intra_flag(pipe, event_id)`` – intra-block sync facade for ``pto.sync.set``."""
-    _validate_sync_pipe(pipe, context="set_intra_flag(pipe, event_id)", allowed=("PIPE_MTE3",))
-    event_operand = _sync_event_id_operand(event_id, context="set_intra_flag(..., event_id=...)")
+    _validate_sync_pipe(
+        pipe,
+        context="set_intra_flag(pipe, event_id)",
+        allowed=("PIPE_FIX", "PIPE_MTE3"),
+    )
+    event_operand = _sync_event_id_operand_in_range(
+        event_id,
+        context="set_intra_flag(..., event_id=...)",
+        lo=0,
+        hi=31,
+        meaning="physical event_id",
+    )
     _pto.sync_set(_pipe_attr(pipe), event_operand)
 
 
 def wait_intra_flag(pipe, event_id):
     """``pto.wait_intra_flag(pipe, event_id)`` – intra-block sync facade for ``pto.sync.wait``."""
-    _validate_sync_pipe(pipe, context="wait_intra_flag(pipe, event_id)", allowed=("PIPE_V",))
-    event_operand = _sync_event_id_operand(event_id, context="wait_intra_flag(..., event_id=...)")
+    _validate_sync_pipe(
+        pipe,
+        context="wait_intra_flag(pipe, event_id)",
+        allowed=("PIPE_FIX", "PIPE_V"),
+    )
+    event_operand = _sync_event_id_operand_in_range(
+        event_id,
+        context="wait_intra_flag(..., event_id=...)",
+        lo=0,
+        hi=31,
+        meaning="physical event_id",
+    )
     _pto.sync_wait(_pipe_attr(pipe), event_operand)
 
 
@@ -6052,6 +6233,7 @@ __all__ = [
     "pbitcast", "vcvt", "vpack", "vmulscvt", "ppack", "punpack",
     "pintlv_b8", "pintlv_b16", "pintlv_b32",
     "pdintlv_b8", "pdintlv_b16", "pdintlv_b32",
+    "vintlv", "vdintlv",
     "vgather2", "vgather2_bc", "vgatherb", "vscatter", "vsldb", "vsstb",
     "vcmp", "vcmps",
     "plds", "psts", "pstu", "vstar", "vstas", "vstur", "vstus",
@@ -6062,17 +6244,17 @@ __all__ = [
     "vcmax", "vcadd", "vcmin", "vdup", "vexpdif",
     "vexp", "vln", "vsqrt", "vabs", "vneg", "vrec", "vrsqrt", "vrelu", "vnot",
     "vcgmax", "vcgadd", "vcgmin", "vcpadd",
-    "vadds", "vsubs", "vmuls", "vmaxs", "vmins", "vlrelu",
-    "vaxpy", "vaddrelu", "vsubrelu",
+    "vadds", "vsubs", "vmuls", "vmaxs", "vmins", "vlrelu", "vshrs", "vshls", "vands", "vors", "vxors",
+    "vaxpy", "vmula", "vci", "vaddrelu", "vsubrelu",
     "vsel",
     "make_tensor_view", "partition_view",
     "alloc_buffer", "alloc_tile",
-    "tload", "tstore", "tmov", "tinsert",
+    "tload", "tstore", "tmov", "tinsert", "tconcat",
     "tmatmul", "tmatmul_acc", "tmatmul_mx", "tmatmul_mx_acc", "tmatmul_mx_bias",
     "tgemv_mx", "tgemv_mx_acc", "tgemv_mx_bias",
     "tadd", "taddrelu", "tsub", "tmul", "tdiv", "tmax", "tmin",
     "tadds", "tsubs", "tmuls", "tdivs", "tmaxs", "tmins",
-    "texp", "tlog", "tsqrt", "trsqrt", "trecip", "tabs", "tneg",
+    "texp", "tlog", "tsqrt", "trsqrt", "trecip", "tabs", "tneg", "tdequant",
     "trelu", "tlrelu",
     "trowsum", "trowmax", "trowmin", "trowprod", "trowargmax", "trowargmin",
     "tcolsum", "tcolmax", "tcolmin", "tcolprod", "tcolargmax", "tcolargmin",
@@ -6085,6 +6267,8 @@ __all__ = [
     "tnot", "tand", "tands", "tor", "tors", "txor", "txors", "tshl", "tshls", "tshr", "tshrs",
     "tpartadd", "tpartmul", "tpartmax", "tpartmin",
     "tfillpad", "tfillpad_expand", "tfillpad_inplace",
+    "ttri", "tthistogram",
+    "chistv2",
     "as_ptr",
     "mte_load", "mte_store", "mte_gm_ub", "mte_ub_gm", "mte_ub_ub", "mte_ub_l1",
     "mte_gm_l1", "mte_l1_ub", "mte_gm_l1_frac", "mte_l1_bt", "mte_l1_fb", "mem_bar",

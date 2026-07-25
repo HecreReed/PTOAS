@@ -8,6 +8,7 @@
 
 #include "PTO/IR/PTO.h"
 #include "PTO/IR/PTOTypeUtils.h"
+#include "PTO/Support/PythonExecutable.h"
 #include "PTO/Transforms/Passes.h"
 
 #include "mlir/Dialect/Arith/IR/Arith.h"
@@ -506,6 +507,15 @@ static void appendOpContextAttrs(
           stringifyMaskPattern(maskPatternAttr.getValue()).str());
     }
   }
+  if (auto ttri = dyn_cast<pto::TTriOp>(op)) {
+    attrs.emplace_back("upper_or_lower", std::to_string(ttri.getUpperOrLower()));
+  }
+  if (auto thistogram = dyn_cast<pto::THistogramOp>(op)) {
+    int byte = 1;
+    if (auto byteAttr = thistogram.getByteAttr())
+      byte = byteAttr.getInt();
+    attrs.emplace_back("byte", std::to_string(byte));
+  }
   (void)(tryAppendPrecisionType<pto::TExpOp>(op, attrs) ||
          tryAppendPrecisionType<pto::TLogOp>(op, attrs) ||
          tryAppendPrecisionType<pto::TSqrtOp>(op, attrs) ||
@@ -725,7 +735,7 @@ static std::optional<std::string>
 invokeMetadataHelper(Operation *operation, StringRef pythonExe,
                      StringRef daemonSocketPath, StringRef tileLibPkgPath,
                      StringRef daemonHelperModule) {
-  auto pythonPath = llvm::sys::findProgramByName(pythonExe);
+  auto pythonPath = pto::resolvePythonExecutable(pythonExe);
   if (!pythonPath) {
     operation->emitError("InsertTemplateAttributes cannot find Python '")
         << pythonExe << "'";

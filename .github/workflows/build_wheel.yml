@@ -17,6 +17,14 @@ on:
   schedule:
     - cron: "10 17 * * *"
   workflow_dispatch:
+    inputs:
+      release_kind:
+        description: Manual release flavor for dry-runs
+        type: choice
+        options:
+          - ptoas
+          - vmi
+        default: ptoas
   release:
     types: [prereleased, released]
 
@@ -30,6 +38,7 @@ env:
 
 jobs:
   build_wheel:
+    if: github.event_name != 'release' || startsWith(github.ref_name, 'v') || startsWith(github.ref_name, 'ptoas-v')
     # Non-release runs keep a single-Python matrix for faster gates;
     # release/nightly runs fan out to publish the full wheel set plus binary artifacts.
     name: Build ptoas-bin (${{ matrix.arch }}, py${{ matrix.python }})
@@ -37,7 +46,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        python: ${{ fromJson((github.event_name == 'release' || github.event_name == 'schedule') && '["3.10","3.11","3.12"]' || '["3.11"]') }}
+        python: ${{ fromJson((github.event_name == 'release' || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') && '["3.10","3.11","3.12"]' || '["3.11"]') }}
         arch: ["x86_64", "aarch64"]
 
     container:
@@ -62,17 +71,54 @@ jobs:
       - name: Compute PTOAS CLI version
         run: |
           if [ "${GITHUB_EVENT_NAME}" = "release" ]; then
-            EXPECTED_RELEASE_VERSION="$(${PY_PATH}/bin/python .github/scripts/compute_ptoas_version.py --mode release)"
-            PTOAS_VERSION="${GITHUB_REF_NAME#v}"
+            case "${GITHUB_REF_NAME}" in
+              vmi-v*)
+                EXPECTED_RELEASE_VERSION="$(${PY_PATH}/bin/python .github/scripts/compute_vmi_version.py \
+                  --check-tag "${GITHUB_REF_NAME}")"
+                PTOAS_VERSION="${GITHUB_REF_NAME#vmi-v}"
+                PTOAS_CLI_VERSION="vmi ${PTOAS_VERSION}"
+                PTOAS_PYTHON_PACKAGE_NAME="ptoas-vmi"
+                ;;
+              ptoas-v*)
+                EXPECTED_RELEASE_VERSION="$(${PY_PATH}/bin/python .github/scripts/compute_ptoas_version.py --mode release)"
+                PTOAS_VERSION="${GITHUB_REF_NAME#ptoas-v}"
+                PTOAS_CLI_VERSION="${PTOAS_VERSION}"
+                PTOAS_PYTHON_PACKAGE_NAME="ptoas"
+                ;;
+              v*)
+                EXPECTED_RELEASE_VERSION="$(${PY_PATH}/bin/python .github/scripts/compute_ptoas_version.py --mode release)"
+                PTOAS_VERSION="${GITHUB_REF_NAME#v}"
+                PTOAS_CLI_VERSION="${PTOAS_VERSION}"
+                PTOAS_PYTHON_PACKAGE_NAME="ptoas"
+                ;;
+              *)
+                echo "release tags for the wheel workflow must start with 'v', 'ptoas-v', or 'vmi-v'" >&2
+                exit 1
+                ;;
+            esac
             if [ "${PTOAS_VERSION}" != "${EXPECTED_RELEASE_VERSION}" ]; then
               echo "release tag '${GITHUB_REF_NAME}' does not match computed version '${EXPECTED_RELEASE_VERSION}'" >&2
               exit 1
             fi
+          elif [ "${GITHUB_EVENT_NAME}" = "workflow_dispatch" ] && [ "${{ inputs.release_kind }}" = "vmi" ]; then
+            PTOAS_VERSION="$(${PY_PATH}/bin/python .github/scripts/compute_vmi_version.py)"
+            PTOAS_CLI_VERSION="vmi ${PTOAS_VERSION}"
+            PTOAS_PYTHON_PACKAGE_NAME="ptoas-vmi"
+          elif [ "${GITHUB_EVENT_NAME}" = "workflow_dispatch" ]; then
+            PTOAS_VERSION="$(${PY_PATH}/bin/python .github/scripts/compute_ptoas_version.py --mode release)"
+            PTOAS_CLI_VERSION="${PTOAS_VERSION}"
+            PTOAS_PYTHON_PACKAGE_NAME="ptoas"
           else
             PTOAS_VERSION="$(${PY_PATH}/bin/python .github/scripts/compute_ptoas_version.py --mode dev)"
+            PTOAS_CLI_VERSION="${PTOAS_VERSION}"
+            PTOAS_PYTHON_PACKAGE_NAME="ptoas"
           fi
           echo "PTOAS_VERSION=${PTOAS_VERSION}" >> "$GITHUB_ENV"
-          echo "Using PTOAS CLI version: ${PTOAS_VERSION}"
+          echo "PTOAS_CLI_VERSION=${PTOAS_CLI_VERSION}" >> "$GITHUB_ENV"
+          echo "PTOAS_PYTHON_PACKAGE_NAME=${PTOAS_PYTHON_PACKAGE_NAME}" >> "$GITHUB_ENV"
+          echo "Using PTOAS CLI version: ${PTOAS_CLI_VERSION}"
+          echo "Using PTOAS wheel version: ${PTOAS_VERSION}"
+          echo "Using PTOAS Python package name: ${PTOAS_PYTHON_PACKAGE_NAME}"
 
       - name: Install system dependencies
         run: |
@@ -169,18 +215,25 @@ jobs:
           CMAKE_BUILD_PARALLEL_LEVEL: "2"
         run: |
           export PATH="${PY_PATH}/bin:$PATH"
-          PTOAS_RELEASE_VERSION_OVERRIDE="${PTOAS_VERSION}" \
+          PTOAS_RELEASE_VERSION_OVERRIDE="${PTOAS_CLI_VERSION}" \
           pip install . --no-build-isolation
 
       - name: Create Python wheel
-        if: github.event_name == 'release' || github.event_name == 'schedule'
+        if: github.event_name == 'release' || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
         run: |
           export PATH="${PY_PATH}/bin:$PATH"
+          export PTOAS_PYTHON_PACKAGE_NAME="${PTOAS_PYTHON_PACKAGE_NAME}"
           export PTOAS_PYTHON_PACKAGE_VERSION="${PTOAS_VERSION}"
           bash $PTO_SOURCE_DIR/docker/create_wheel.sh
 
+      - name: Validate wheel payload and launcher contract
+        if: github.event_name == 'release' || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+        run: |
+          export PATH="${PY_PATH}/bin:$PATH"
+          python "$PTO_SOURCE_DIR/docker/validate_wheel_payload.py" "$PTO_SOURCE_DIR/build/wheel-dist"
+
       - name: Repair wheel with auditwheel
-        if: github.event_name == 'release' || github.event_name == 'schedule'
+        if: github.event_name == 'release' || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
         run: |
           export PATH="${PY_PATH}/bin:$PATH"
           export PTO_WHEEL_DIST_DIR=$PTO_SOURCE_DIR/build/wheel-dist
@@ -190,7 +243,7 @@ jobs:
           auditwheel repair --plat manylinux_2_34_${{ matrix.arch }} "$PTO_WHEEL_DIST_DIR"/ptoas*.whl -w "$PTO_WHEELHOUSE"
 
       - name: Test wheel installation
-        if: github.event_name == 'release' || github.event_name == 'schedule'
+        if: github.event_name == 'release' || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
         run: |
           export PATH="${PY_PATH}/bin:$PATH"
           pip install $GITHUB_WORKSPACE/wheelhouse/ptoas*.whl
@@ -202,7 +255,7 @@ jobs:
           bash $PTO_SOURCE_DIR/docker/test_ptoas_cli.sh
 
       - name: Upload wheel artifact
-        if: github.event_name == 'release' || github.event_name == 'schedule'
+        if: github.event_name == 'release' || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
         uses: actions/upload-artifact@v4
         with:
           name: ptoas-wheel-py${{ matrix.python }}-${{ matrix.arch }}
@@ -216,7 +269,7 @@ jobs:
       - name: Archive ptoas binary artifact
         if: matrix.python == '3.11'
         run: |
-          chmod +x "$GITHUB_WORKSPACE/ptoas-dist/ptoas" "$GITHUB_WORKSPACE/ptoas-dist/bin/ptoas"
+          chmod +x "$GITHUB_WORKSPACE/ptoas-dist/bin/ptoas"
           tar -czf "$GITHUB_WORKSPACE/ptoas-bin-${{ matrix.arch }}.tar.gz" \
             -C "$GITHUB_WORKSPACE/ptoas-dist" .
 
@@ -229,7 +282,7 @@ jobs:
 
   upload_release_assets:
     name: Upload release assets
-    if: github.event_name == 'release' || github.event_name == 'schedule'
+    if: (github.event_name == 'release' && (startsWith(github.ref_name, 'v') || startsWith(github.ref_name, 'ptoas-v'))) || github.event_name == 'schedule'
     needs: build_wheel
     runs-on: ubuntu-latest
 
@@ -240,7 +293,11 @@ jobs:
             echo "RELEASE_TAG=${GITHUB_REF_NAME}" >> "$GITHUB_ENV"
             echo "RELEASE_NAME=${GITHUB_REF_NAME}" >> "$GITHUB_ENV"
             echo "RELEASE_PRERELEASE=false" >> "$GITHUB_ENV"
-            echo "RELEASE_MAKE_LATEST=true" >> "$GITHUB_ENV"
+            if [[ "${GITHUB_REF_NAME}" == vmi-v* ]]; then
+              echo "RELEASE_MAKE_LATEST=false" >> "$GITHUB_ENV"
+            else
+              echo "RELEASE_MAKE_LATEST=true" >> "$GITHUB_ENV"
+            fi
             {
               echo "RELEASE_BODY<<EOF"
               echo "Published release assets for ${GITHUB_REF_NAME}."
@@ -289,7 +346,7 @@ jobs:
           mv "release-artifacts/ptoas-bin-aarch64/ptoas-bin-aarch64.tar.gz" \
             "release-artifacts/ptoas-bin-aarch64.tar.gz"
 
-      - name: Upload assets to GitHub Release
+      - name: Upload wheel assets to GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ env.RELEASE_TAG }}
@@ -299,13 +356,23 @@ jobs:
           make_latest: ${{ env.RELEASE_MAKE_LATEST }}
           body: ${{ env.RELEASE_BODY }}
           overwrite_files: true
-          files: |
-            release-artifacts/*.whl
-            release-artifacts/*.tar.gz
+          files: release-artifacts/*.whl
+
+      - name: Upload binary assets to GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ env.RELEASE_TAG }}
+          name: ${{ env.RELEASE_NAME }}
+          target_commitish: ${{ github.sha }}
+          prerelease: ${{ env.RELEASE_PRERELEASE }}
+          make_latest: ${{ env.RELEASE_MAKE_LATEST }}
+          body: ${{ env.RELEASE_BODY }}
+          overwrite_files: true
+          files: release-artifacts/*.tar.gz
 
   bump_base_version:
     name: Bump base version after release
-    if: github.event_name == 'release' && github.event.action == 'released'
+    if: github.event_name == 'release' && github.event.action == 'released' && (startsWith(github.ref_name, 'ptoas-v') || (startsWith(github.ref_name, 'v') && !startsWith(github.ref_name, 'vmi-v')))
     needs: upload_release_assets
     runs-on: ubuntu-latest
 
@@ -334,4 +401,37 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add CMakeLists.txt
           git commit -m "chore(release): bump base version to v${{ steps.bump.outputs.next_base_version }}"
+          git push origin HEAD:${{ github.event.repository.default_branch }}
+
+  bump_vmi_version:
+    name: Bump VMI version after release
+    if: github.event_name == 'release' && github.event.action == 'released' && startsWith(github.ref_name, 'vmi-v')
+    needs: upload_release_assets
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout default branch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+
+      - name: Update VMI version
+        id: bump
+        run: |
+          next_vmi_version="$(python3 .github/scripts/update_vmi_version.py \
+            --version "${GITHUB_REF_NAME}" \
+            --next)"
+          echo "next_vmi_version=${next_vmi_version}" >> "$GITHUB_OUTPUT"
+
+      - name: Commit version bump
+        run: |
+          if git diff --quiet -- CMakeLists.txt; then
+            echo "CMakeLists.txt already matches the next VMI version."
+            exit 0
+          fi
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add CMakeLists.txt
+          git commit -m "chore(release): bump VMI version to v${{ steps.bump.outputs.next_vmi_version }}"
           git push origin HEAD:${{ github.event.repository.default_branch }}

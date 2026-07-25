@@ -838,17 +838,47 @@ def PTOUnrollSIMTFor : Pass<"pto-unroll-simt-for", "func::FuncOp"> {
   ];
 }
 
+def PTONarrowVPTOLoopCounters
+    : Pass<"pto-narrow-vpto-loop-counters", "func::FuncOp"> {
+  let summary =
+      "Narrow constant-bounded scf.for counters inside VPTO vecscope regions to i16";
+  let description = [{
+    Rewrites `scf.for` operations nested under `pto.vecscope` or
+    `pto.strict_vecscope` when the lower bound, upper bound, positive step, and
+    post-loop induction value are compile-time integer constants representable
+    as signed i16 values.
+
+    The rewritten loop uses i16 bounds and induction variable. The induction
+    variable is cast back to its original index or wider integer type at the
+    start of the body, preserving the authored body and result types while
+    exposing the narrow counter form expected by the A5 hardware-loop backend.
+
+    Loops with dynamic bounds, out-of-range constants, an overflowing final
+    increment, non-positive steps, counters already 16 bits or narrower, or
+    loops outside VPTO vecscope regions are left unchanged.
+  }];
+  let constructor =
+      "mlir::pto::createPTONarrowVPTOLoopCountersPass()";
+  let dependentDialects = [
+    "mlir::func::FuncDialect",
+    "mlir::scf::SCFDialect",
+    "mlir::arith::ArithDialect",
+    "mlir::pto::PTODialect"
+  ];
+}
+
 def PTOInferVPTOVecScope
     : Pass<"pto-infer-vpto-vecscope", "func::FuncOp"> {
   let summary =
       "Infer missing pto.vecscope regions for VPTO vector operation clusters";
   let description = [{
-    Runs near the VPTO emission boundary after inlining, canonicalization,
-    CSE, pointer normalization, and wrapper-op expansion have exposed the final
-    SSA shape. The pass greedily clusters contiguous VPTO vector operations
-    into `pto.vecscope` regions while preserving explicit vector-scope carriers
-    and treating DMA/copy/sync, unresolved calls, terminators, and forbidden
-    operations as boundaries.
+    Runs near the VPTO emission boundary after VMI physicalization and the
+    existing pre-emission canonicalization, pointer normalization, and
+    wrapper-op expansion, but before VMI LICM and final cleanup. The pass
+    greedily clusters contiguous VPTO vector operations into `pto.vecscope`
+    regions while preserving explicit vector-scope carriers and treating
+    DMA/copy/sync, unresolved calls, terminators, and forbidden operations as
+    boundaries.
 
     The inferred `pto.vecscope` form remains resultless. Values whose type is
     `!pto.vreg`, `!pto.mask`, or `!pto.align` must not escape the inferred
@@ -873,6 +903,240 @@ def PTOValidateVPTOIR : Pass<"pto-validate-vpto-ir", "ModuleOp"> {
   }];
   let constructor = "mlir::pto::createPTOValidateVPTOIRPass()";
   let dependentDialects = ["mlir::func::FuncDialect",
+                           "mlir::pto::PTODialect",
+                           "mlir::memref::MemRefDialect",
+                           "mlir::scf::SCFDialect"];
+}
+
+def PTOValidateVMIIR : Pass<"pto-validate-vmi-ir", "ModuleOp"> {
+  let summary = "Validate VMI producer-boundary semantic IR";
+  let description = [{
+    Checks that VMI producer-boundary IR uses only surface VMI data/mask types,
+    native pto.vmi semantic ops, and structural control-flow/function ops. This
+    pass runs before layout assignment, so layout-assigned VMI types, VMI helper
+    ops, and physical VPTO register types are rejected.
+  }];
+  let constructor = "mlir::pto::createPTOValidateVMIIRPass()";
+  let dependentDialects = ["mlir::cf::ControlFlowDialect",
+                           "mlir::func::FuncDialect",
+                           "mlir::pto::PTODialect",
+                           "mlir::memref::MemRefDialect",
+                           "mlir::scf::SCFDialect"];
+}
+
+def PTOValidateVMILayoutIR
+    : Pass<"pto-validate-vmi-layout-ir", "ModuleOp"> {
+  let summary = "Validate layout-assigned VMI IR";
+  let description = [{
+    Checks the post-layout-assignment VMI stage: every VMI data value must have
+    a concrete VMI layout, every VMI mask must have concrete b8/b16/b32
+    granularity and layout, physical VPTO register values must not appear yet,
+    and VMI typed values must stay inside VMI semantic/helper or structural ops.
+    vmi-to-vpto chooses deterministic lowerings from the current op's attrs,
+    operand/result types, layouts, and operand values. Non-local choices must
+    be represented as explicit attrs, helper ops, or diagnostics before this
+    stage. Later VMI layout optimization passes may replace helpers with
+    cloned/rematerialized producers, but the layout gate must not depend on
+    hidden producer/user context.
+  }];
+  let constructor = "mlir::pto::createPTOValidateVMILayoutIRPass()";
+  let dependentDialects = ["mlir::cf::ControlFlowDialect",
+                           "mlir::func::FuncDialect",
+                           "mlir::pto::PTODialect",
+                           "mlir::memref::MemRefDialect",
+                           "mlir::scf::SCFDialect"];
+}
+
+def VMIPreAssignmentCombine
+    : Pass<"vmi-pre-assignment-combine", "ModuleOp"> {
+  let summary = "Combine VMI operations before layout assignment";
+  let description = [{
+    Performs VMI-level structural combines before VMI layout assignment. This
+    keeps layout assignment focused on choosing and materializing layouts while
+    still exposing direct semantic operations to the later layout and lowering
+    passes.
+
+    The pass currently rewrites the semantic pattern
+    `group_broadcast(group_slot_load(...))` into the equivalent
+    `group_broadcast_load` operation.
+  }];
+  let constructor = "mlir::pto::createVMIPreAssignmentCombinePass()";
+  let dependentDialects = ["mlir::func::FuncDialect",
+                           "mlir::pto::PTODialect"];
+}
+
+def VMILayoutAssignment : Pass<"vmi-layout-assignment", "ModuleOp"> {
+  let summary = "Assign concrete VMI layouts";
+  let description = [{
+    Solves VMI layout constraints and materializes the chosen layout into VMI
+    types. Mask granularity is assigned by vmi-mask-granularity-assignment
+    before this pass, so this pass only propagates and materializes mask
+    layouts.
+  }];
+  let constructor = "mlir::pto::createVMILayoutAssignmentPass()";
+  let dependentDialects = ["mlir::cf::ControlFlowDialect",
+                           "mlir::func::FuncDialect",
+                           "mlir::pto::PTODialect",
+                           "mlir::memref::MemRefDialect",
+                           "mlir::scf::SCFDialect"];
+}
+
+def VMIMaskGranularityAssignment
+    : Pass<"vmi-mask-granularity-assignment", "ModuleOp"> {
+  let summary = "Assign concrete VMI mask granularities";
+  let description = [{
+    Assigns b8/b16/b32 granularity to VMI mask values before layout
+    assignment. This pass follows VMI semantic op contracts where mask
+    granularity is determined by the associated data element width. It does
+    not choose layouts; conflicting use granularities are represented by
+    rematerializing cheap mask producers when possible, otherwise with
+    pto.vmi.ensure_mask_granularity.
+  }];
+  let constructor = "mlir::pto::createVMIMaskGranularityAssignmentPass()";
+  let dependentDialects = ["mlir::cf::ControlFlowDialect",
+                           "mlir::func::FuncDialect",
+                           "mlir::pto::PTODialect",
+                           "mlir::memref::MemRefDialect",
+                           "mlir::scf::SCFDialect"];
+}
+
+def VMILayoutFold : Pass<"vmi-layout-fold", "ModuleOp"> {
+  let summary = "Fold VMI layout materializations";
+  let description = [{
+    Optimizes legal layout-assigned VMI IR by folding selected ensure_layout
+    helpers into layout-aware producers or consumers while preserving the same
+    logical effect. The pass does not choose layouts by inspecting arbitrary
+    producer/user context for vmi-to-vpto; it only rewrites explicit helper IR
+    into equivalent local forms.
+  }];
+  let constructor = "mlir::pto::createVMILayoutFoldPass()";
+  let dependentDialects = ["mlir::cf::ControlFlowDialect",
+                           "mlir::func::FuncDialect",
+                           "mlir::pto::PTODialect",
+                           "mlir::memref::MemRefDialect",
+                           "mlir::scf::SCFDialect"];
+}
+
+def VMILayoutRematerialize : Pass<"vmi-layout-rematerialize", "ModuleOp"> {
+  let summary = "Rematerialize cheap VMI producers at layout helpers";
+  let description = [{
+    Optimizes legal layout-assigned VMI IR by replacing selected ensure_layout,
+    ensure_mask_layout, and ensure_mask_granularity helpers with cloned
+    producers that directly create the requested result type. The pass covers
+    pure construction ops, selected layout-transparent data ops, and dense
+    widening ext relation rematerialization. Memory, control-flow, and mask-tail
+    proofs remain explicit in the IR.
+  }];
+  let constructor = "mlir::pto::createVMILayoutRematerializePass()";
+  let dependentDialects = ["mlir::cf::ControlFlowDialect",
+                           "mlir::func::FuncDialect",
+                           "mlir::pto::PTODialect",
+                           "mlir::memref::MemRefDialect",
+                           "mlir::scf::SCFDialect"];
+}
+
+def VMILayoutSinkMaterialization
+    : Pass<"vmi-layout-sink-materialization", "ModuleOp"> {
+  let summary = "Sink VMI layout materialization through transfer ops";
+  let description = [{
+    Optimizes legal layout-assigned VMI IR by moving matching operand
+    ensure_layout helpers across pure layout-transparent elementwise operations.
+    The rewritten IR keeps the layout conversion explicit as a result
+    ensure_layout, so vmi-to-vpto still lowers from local op information only.
+  }];
+  let constructor = "mlir::pto::createVMILayoutSinkMaterializationPass()";
+  let dependentDialects = ["mlir::cf::ControlFlowDialect",
+                           "mlir::func::FuncDialect",
+                           "mlir::pto::PTODialect",
+                           "mlir::memref::MemRefDialect",
+                           "mlir::scf::SCFDialect"];
+}
+
+def VMILegalizeArithSelect : Pass<"vmi-legalize-arith-select", "ModuleOp"> {
+  let summary = "Legalize canonical arith.select over VMI values";
+  let description = [{
+    Rewrites scalar-condition arith.select operations that produce VMI values
+    back to scf.if. MLIR canonicalization may fold simple scf.if regions into
+    arith.select, but VMI values must not cross non-VMI semantic ops before
+    vmi-to-vpto. This pass restores an explicit structural control-flow form
+    that the VMI converter already handles.
+  }];
+  let constructor = "mlir::pto::createVMILegalizeArithSelectPass()";
+  let dependentDialects = ["mlir::arith::ArithDialect",
+                           "mlir::cf::ControlFlowDialect",
+                           "mlir::func::FuncDialect",
+                           "mlir::pto::PTODialect",
+                           "mlir::memref::MemRefDialect",
+                           "mlir::scf::SCFDialect"];
+}
+
+def VMINormalizeSignlessIntToUnsigned :
+    Pass<"pto-vmi-normalize-signless-int-to-unsigned", "func::FuncOp"> {
+  let summary =
+      "Normalize signless integer element types on whitelisted VMI ops to "
+      "unsigned by wrapping their vreg operands/results in pto.vmi.bitcast";
+  let description = [{
+    Walks whitelisted VMI ops (currently pto.vmi.vdhist / pto.vmi.vchist)
+    and rewrites any VMIVReg operand or result whose element type is a
+    signless integer into the equivalent unsigned integer at the op's
+    boundary, using pto.vmi.bitcast to preserve the surrounding IR's type
+    contract. Downstream verifiers and lowerings therefore see only
+    unsigned-typed whitelisted ops, matching the "signless == unsigned"
+    convention at the VMI layer while leaving non-whitelisted IR untouched.
+  }];
+  let constructor = "pto::createVMINormalizeSignlessIntToUnsignedPass()";
+  let dependentDialects = ["pto::PTODialect"];
+}
+
+def VMILowerUnifiedToLegacy : Pass<"vmi-lower-unified-to-legacy", "ModuleOp"> {
+  let summary = "Lower unified VMI ops to legacy equivalents before layout assignment";
+  let description = [{
+    Expands most unified v-prefixed VMI ops into their legacy (mask-less)
+    equivalents so downstream layout and VMIToVPTO passes only see legacy ops.
+
+    Ops lowered (Category A–C6):
+      A:  vci, vinterpret_cast, vsel, vbrc  →  iota, bitcast, select, broadcast/group_broadcast
+      B:  vadd/vsub/vmul/vdiv/vmin/vmax/vand/vor/vxor/vshl/vshr (masked binary)
+          vneg/vabs/vsqrt/vexp/vln/vrelu/vnot (masked unary)
+          →  binary ops discard mask/pmode; unary ops preserve zero mode with select;
+             vshr selects shrui for explicit unsigned elements and shrsi otherwise
+      C1: vcmp/vcmps  →  legacy cmp + select
+      C2: vcvt        →  legacy extf/truncf/fptosi/sitofp/extsi/extui/trunci
+      C3: vload/vstore  →  legacy load/store variants
+      C4: pset/pge    →  create_mask/create_group_mask
+      C5: vadds/vmuls/vmaxs/vmins/vshls/vshrs
+          →  broadcast + legacy binary, discarding mask/pmode; vshrs selects
+             shrui for explicit unsigned elements and shrsi otherwise
+      C6: vcadd/vcmax/vcmin  →  legacy reduce variants
+
+    Ops NOT lowered (no legacy equivalent — require direct VMIToVPTO 1:N patterns):
+      plt, vhist, vintlv, vdintlv, vselr,
+      vgather, vgatherb, vscatter,
+      vexpdif, vaxpy, vlrelu, vprelu, vmull, vmula
+  }];
+  let constructor = "mlir::pto::createVMILowerUnifiedToLegacyPass()";
+  let dependentDialects = ["mlir::pto::PTODialect"];
+}
+
+def VMIToVPTO : Pass<"vmi-to-vpto", "ModuleOp"> {
+  let summary = "Convert layout-assigned VMI IR to physical VPTO IR";
+  let description = [{
+    Converts layout-assigned VMI aggregate data/mask types to ordered physical
+    VPTO register and mask value lists using MLIR native 1:N dialect conversion
+    APIs. This
+    pass is responsible for VMI 1:N type conversion, structural control-flow
+    and function/call signature conversion, and VMI semantic op physicalization.
+  }];
+  let constructor = "mlir::pto::createVMIToVPTOPass()";
+  let options = [
+    Option<"enableStableGatherMaskedLoad",
+           "enable-stable-gather-masked-load", "bool",
+           /*default=*/"false",
+           "Reserve the stable VGATHER-based lowering path for VMI masked "
+           "loads; currently emits a TODO diagnostic when used.">
+  ];
+  let dependentDialects = ["mlir::cf::ControlFlowDialect",
+                           "mlir::func::FuncDialect",
                            "mlir::pto::PTODialect",
                            "mlir::memref::MemRefDialect",
                            "mlir::scf::SCFDialect"];
@@ -910,6 +1174,23 @@ def VPTOExpandWrapperOps
                            "mlir::memref::MemRefDialect",
                            "mlir::LLVM::LLVMDialect",
                            "mlir::pto::PTODialect"];
+}
+
+def VPTOSoftPostUpdate
+    : Pass<"vpto-soft-postupdate", "ModuleOp"> {
+  let summary = "Convert fixed-stride VPTO memory ops to post-update form";
+  let description = [{
+    Identifies VPTO load/store operations (vlds, vsts, vsstb) inside scf.for
+    loops whose effective address advances by a loop-invariant stride per
+    iteration, and rewrites them to use the post-update (updated_base) result.
+    The base pointer is carried through scf.for iter_args, eliminating explicit
+    address arithmetic in the loop body.
+  }];
+  let constructor = "mlir::pto::createVPTOSoftPostUpdatePass()";
+  let dependentDialects = ["mlir::func::FuncDialect",
+                           "mlir::pto::PTODialect",
+                           "mlir::arith::ArithDialect",
+                           "mlir::scf::SCFDialect"];
 }
 
 def PTOVPTOPtrBoundary
@@ -1024,6 +1305,21 @@ def VPTOPtrCastCleanup
   let constructor = "mlir::pto::createVPTOPtrCastCleanupPass()";
   let dependentDialects = ["mlir::pto::PTODialect",
                            "mlir::memref::MemRefDialect"];
+}
+
+def VPTONormalizeEquivalentVcvt
+    : Pass<"vpto-normalize-equivalent-vcvt", "ModuleOp"> {
+  let summary = "Normalize equivalent VPTO vcvt part selections";
+  let description = [{
+    Rewrites `pto.vcvt` operations whose `EVEN` and `ODD` part selections are
+    provably equivalent into the canonical `EVEN` form. The pass currently
+    recognizes all-true masked narrow-to-wide conversions from VPTO values with
+    pair-wise equivalent input lanes, such as scalar/vector broadcasts and
+    selected broadcast load distributions. A following CSE pass can then merge
+    duplicate conversions.
+  }];
+  let constructor = "mlir::pto::createVPTONormalizeEquivalentVcvtPass()";
+  let dependentDialects = ["mlir::pto::PTODialect"];
 }
 
 #endif // MLIR_DIALECT_PTO_PASSES

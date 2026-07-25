@@ -19,8 +19,10 @@
 #
 # Output structure:
 #   <output_directory>/
-#     ptoas           - Wrapper script that sets up LD_LIBRARY_PATH
-#     bin/ptoas       - The actual ptoas binary
+#     bin/ptoas       - Python wrapper entrypoint
+#     ptoas/          - Launcher package used by the wrapper
+#     ptoas_wheel_bootstrap.py - Compatibility bootstrap module
+#     lib/ptoas.so    - Shared runtime loaded by the launcher
 #     lib/*.so*       - Required shared library dependencies
 #     share/ptoas/TileOps - TileLang template library
 #     tilelang_dsl/   - TileLang DSL Python package
@@ -49,20 +51,42 @@ export LD_LIBRARY_PATH="${LLVM_BUILD_DIR}/lib:${PTO_INSTALL_DIR}/lib:${LD_LIBRAR
 
 PTO_BUILD_DIR="${PTO_BUILD_DIR:-${PTO_SOURCE_DIR}/build}"
 PTOAS_BIN="${PTO_BUILD_DIR}/tools/ptoas/ptoas"
+PTOAS_SHARED_MODULE="${PTO_INSTALL_DIR}/lib/ptoas.so"
 PTOAS_DEPS_DIR="${PTOAS_DIST_DIR}/lib"
+PTOAS_SHARED_MODULE_DIST_PATH="${PTOAS_DEPS_DIR}/ptoas.so"
 PTOAS_TILEOPS_SRC_DIR="${PTO_INSTALL_DIR}/share/ptoas/TileOps"
 PTOAS_TILEOPS_DIST_DIR="${PTOAS_DIST_DIR}/share/ptoas/TileOps"
 PTOAS_TILELANG_DSL_SRC_DIR="${PTO_INSTALL_DIR}/tilelang_dsl"
 PTOAS_TILELANG_DSL_DIST_DIR="${PTOAS_DIST_DIR}/tilelang_dsl"
+PTOAS_WRAPPER_PKG_SRC_DIR="${PTO_INSTALL_DIR}/ptoas"
+PTOAS_WRAPPER_PKG_DIST_DIR="${PTOAS_DIST_DIR}/ptoas"
+PTOAS_WHEEL_BOOTSTRAP_SRC="${PTO_INSTALL_DIR}/ptoas_wheel_bootstrap.py"
+PTOAS_WHEEL_BOOTSTRAP_DIST_PATH="${PTOAS_DIST_DIR}/ptoas_wheel_bootstrap.py"
 
 if [ ! -f "$PTOAS_BIN" ]; then
-  echo "Error: ptoas binary not found at $PTOAS_BIN" >&2
+  echo "Error: ptoas wrapper not found at $PTOAS_BIN" >&2
+  exit 1
+fi
+if [ ! -f "$PTOAS_SHARED_MODULE" ]; then
+  echo "Error: shared launcher module not found at $PTOAS_SHARED_MODULE" >&2
+  exit 1
+fi
+if [ ! -d "$PTOAS_WRAPPER_PKG_SRC_DIR" ]; then
+  echo "Error: ptoas Python package not found at $PTOAS_WRAPPER_PKG_SRC_DIR" >&2
+  exit 1
+fi
+if [ ! -f "$PTOAS_WHEEL_BOOTSTRAP_SRC" ]; then
+  echo "Error: ptoas wheel bootstrap module not found at $PTOAS_WHEEL_BOOTSTRAP_SRC" >&2
   exit 1
 fi
 
 remove_rpath() {
   local path="$1"
   if ! has_rpath "$path"; then
+    return
+  fi
+  if ! can_scrub_rpath; then
+    echo "WARN: skipping RPATH/RUNPATH scrub for ${path}; install patchelf or chrpath to harden local dist artifacts" >&2
     return
   fi
   if command -v patchelf >/dev/null 2>&1; then
@@ -93,6 +117,10 @@ has_rpath() {
   readelf -d "$path" 2>/dev/null | grep -Eq '(RPATH|RUNPATH)'
 }
 
+can_scrub_rpath() {
+  command -v patchelf >/dev/null 2>&1 || command -v chrpath >/dev/null 2>&1
+}
+
 assert_relro() {
   local path="$1"
   if ! readelf -l "$path" 2>/dev/null | grep -q 'GNU_RELRO'; then
@@ -114,6 +142,9 @@ assert_no_symtab() {
 
 assert_no_rpath() {
   local path="$1"
+  if ! can_scrub_rpath; then
+    return
+  fi
   if has_rpath "$path"; then
     echo "Error: runtime search path still present in ${path}" >&2
     exit 1
@@ -134,14 +165,38 @@ mkdir -p \
   "${PTOAS_DIST_DIR}/bin" \
   "${PTOAS_DEPS_DIR}" \
   "$(dirname "${PTOAS_TILEOPS_DIST_DIR}")"
+rm -rf "${PTOAS_WRAPPER_PKG_DIST_DIR}" "${PTOAS_WHEEL_BOOTSTRAP_DIST_PATH}"
+cp -R "${PTOAS_WRAPPER_PKG_SRC_DIR}" "${PTOAS_WRAPPER_PKG_DIST_DIR}"
+cp "${PTOAS_WHEEL_BOOTSTRAP_SRC}" "${PTOAS_WHEEL_BOOTSTRAP_DIST_PATH}"
 
 # Copy ptoas binary
-echo "Copying ptoas binary..."
+echo "Copying ptoas wrapper..."
 cp "$PTOAS_BIN" "${PTOAS_DIST_DIR}/bin/"
-harden_elf "${PTOAS_DIST_DIR}/bin/ptoas"
+chmod +x "${PTOAS_DIST_DIR}/bin/ptoas"
 
-# Collect *.so dependencies (transitive closure under /llvm-workspace)
+echo "Copying ptoas shared runtime..."
+cp -fL "$PTOAS_SHARED_MODULE" "${PTOAS_SHARED_MODULE_DIST_PATH}"
+
+# Collect non-system *.so dependencies needed by the packaged shared runtime.
 echo "Collecting shared library dependencies..."
+linux_runtime_dep_paths() {
+  local path="$1"
+  ldd "$path" 2>/dev/null | awk '
+    /=> \// { print $3 }
+    /^\// { print $1 }
+  '
+}
+
+should_bundle_linux_dep() {
+  local path="$1"
+  case "$path" in
+    /lib/*|/lib64/*|/usr/lib/*|/usr/lib64/*)
+      return 1
+      ;;
+  esac
+  return 0
+}
+
 copy_so() {
   local f="$1"
   [[ -f "$f" ]] || return 0
@@ -151,17 +206,26 @@ copy_so() {
   cp -L -n "$f" "${PTOAS_DEPS_DIR}/" 2>/dev/null || true
   harden_elf "${PTOAS_DEPS_DIR}/${name}"
   while read -r res; do
+    [[ -n "$res" ]] || continue
+    should_bundle_linux_dep "$res" || continue
     copy_so "$res"
-  done < <(ldd "$f" 2>/dev/null | awk '/=> \/llvm-workspace\// {print $3}')
+  done < <(linux_runtime_dep_paths "$f")
 }
 
 while read -r res; do
+  [[ -n "$res" ]] || continue
+  should_bundle_linux_dep "$res" || continue
   copy_so "$res"
-done < <(ldd "$PTOAS_BIN" 2>/dev/null | awk '/=> \/llvm-workspace\// {print $3}')
+done < <(linux_runtime_dep_paths "$PTOAS_BIN")
+while read -r res; do
+  [[ -n "$res" ]] || continue
+  should_bundle_linux_dep "$res" || continue
+  copy_so "$res"
+done < <(linux_runtime_dep_paths "$PTOAS_SHARED_MODULE")
 
 while read -r packaged; do
   harden_elf "$packaged"
-done < <(find "${PTOAS_DIST_DIR}/bin" "${PTOAS_DEPS_DIR}" -type f | sort)
+done < <(find "${PTOAS_DEPS_DIR}" -type f | sort)
 
 echo "Copying TileLang runtime resources..."
 if [ ! -d "${PTOAS_TILEOPS_SRC_DIR}" ]; then
@@ -176,22 +240,13 @@ rm -rf "${PTOAS_TILEOPS_DIST_DIR}" "${PTOAS_TILELANG_DSL_DIST_DIR}"
 cp -R "${PTOAS_TILEOPS_SRC_DIR}" "${PTOAS_TILEOPS_DIST_DIR}"
 cp -R "${PTOAS_TILELANG_DSL_SRC_DIR}" "${PTOAS_TILELANG_DSL_DIST_DIR}"
 
-# Create wrapper script
-echo "Creating wrapper script..."
-cat > "${PTOAS_DIST_DIR}/ptoas" << 'WRAPPER_EOF'
-#!/bin/bash
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-export LD_LIBRARY_PATH="${SCRIPT_DIR}/lib:${LD_LIBRARY_PATH}"
-exec "${SCRIPT_DIR}/bin/ptoas" "$@"
-WRAPPER_EOF
-chmod +x "${PTOAS_DIST_DIR}/ptoas"
-
 echo "Smoke testing packaged ptoas dist..."
 VERSION_OUTPUT="$(env -u PYTHONPATH -u DYLD_LIBRARY_PATH -u LD_LIBRARY_PATH \
-  "${PTOAS_DIST_DIR}/ptoas" --version | tr -d '\r')"
+  "${PTOAS_DIST_DIR}/bin/ptoas" --version | tr -d '\r')"
 echo "$VERSION_OUTPUT"
-if [ -n "${PTOAS_VERSION:-}" ]; then
-  EXPECTED_VERSION_OUTPUT="ptoas ${PTOAS_VERSION}"
+EXPECTED_PTOAS_CLI_VERSION="${PTOAS_CLI_VERSION:-${PTOAS_VERSION:-}}"
+if [ -n "${EXPECTED_PTOAS_CLI_VERSION}" ]; then
+  EXPECTED_VERSION_OUTPUT="ptoas ${EXPECTED_PTOAS_CLI_VERSION}"
   if [ "${VERSION_OUTPUT}" != "${EXPECTED_VERSION_OUTPUT}" ]; then
     echo "Error: expected '${EXPECTED_VERSION_OUTPUT}', got '${VERSION_OUTPUT}'" >&2
     exit 1
@@ -202,6 +257,9 @@ fi
 
 test -d "${PTOAS_TILEOPS_DIST_DIR}"
 test -f "${PTOAS_TILELANG_DSL_DIST_DIR}/__init__.py"
+test -f "${PTOAS_SHARED_MODULE_DIST_PATH}"
+test -f "${PTOAS_WRAPPER_PKG_DIST_DIR}/_runtime_entry.py"
+test -f "${PTOAS_WHEEL_BOOTSTRAP_DIST_PATH}"
 if [ -e "${PTOAS_DIST_DIR}/ptodsl" ]; then
   echo "Error: compiler-oriented ptoas dist must not bundle PTODSL" >&2
   exit 1

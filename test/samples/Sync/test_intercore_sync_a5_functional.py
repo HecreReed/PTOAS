@@ -43,6 +43,7 @@ def build():
                 sec_cube = pto.SectionCubeOp()
                 with InsertionPoint(sec_cube.body.blocks.append()):
                     pto.sync_set(pipe_fix, evt)
+                    pto.sync_set(pipe_fix, evt + 16)
 
                 sec_vec = pto.SectionVectorOp()
                 with InsertionPoint(sec_vec.body.blocks.append()):

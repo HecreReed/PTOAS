@@ -13,6 +13,7 @@ from importlib import import_module
 
 _TEMPLATE_MODULES = {
     ("a5", "pto.tabs"): ".a5.tabs",
+    ("a5", "pto.tci"): ".a5.tci",
     ("a5", "pto.tadd"): ".a5.tadd",
     ("a5", "pto.tadds"): ".a5.tadds",
     ("a5", "pto.tand"): ".a5.tand",
@@ -22,6 +23,7 @@ _TEMPLATE_MODULES = {
     ("a5", "pto.tcolargmax"): ".a5.tcolargmax",
     ("a5", "pto.tcolargmin"): ".a5.tcolargmin",
     ("a5", "pto.tcolmax"): ".a5.tcolmax",
+    ("a5", "pto.tconcat"): ".a5.tconcat",
     ("a5", "pto.tcolexpand"): ".a5.tcolexpand",
     ("a5", "pto.tcolexpandadd"): ".a5.tcolexpandadd",
     ("a5", "pto.tcolexpanddiv"): ".a5.tcolexpanddiv",
@@ -36,6 +38,7 @@ _TEMPLATE_MODULES = {
     ("a5", "pto.tdiv"): ".a5.tdiv",
     ("a5", "pto.tdivs"): ".a5.tdivs",
     ("a5", "pto.tcvt"): ".a5.tcvt",
+    ("a5", "pto.tdequant"): ".a5.tdequant",
     ("a5", "pto.texp"): ".a5.texp",
     ("a5", "pto.texpands"): ".a5.texpand",
     ("a5", "pto.textract"): ".a5.textract",
@@ -116,11 +119,14 @@ _TEMPLATE_MODULES = {
     ("a5", "pto.tsort32"): ".a5.tsort32",
     ("a5", "pto.tstore"): ".a5.tstore",
     ("a5", "pto.tstore_fp"): ".a5.tstore",
+    ("a5", "pto.ttrans"): ".a5.ttrans",
     ("a5", "pto.tsub"): ".a5.tsub",
     ("a5", "pto.tsubs"): ".a5.tsubs",
     ("a5", "pto.tsqrt"): ".a5.tsqrt",
     ("a5", "pto.txor"): ".a5.txor",
     ("a5", "pto.txors"): ".a5.txors",
+    ("a5", "pto.ttri"): ".a5.ttri",
+    ("a5", "pto.thistogram"): ".a5.thistogram",
 }
 
 

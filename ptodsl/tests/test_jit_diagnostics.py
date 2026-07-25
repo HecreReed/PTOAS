@@ -83,6 +83,92 @@ def same_width_float_store_probe():
 
 
 @pto.jit(target="a5")
+def vmi_float_vcadd_missing_reassoc_probe():
+    src = pto.vmi.vbrc(pto.f32(0.0), size=64)
+    mask = pto.vmi.create_mask(64, size=64)
+    _ = pto.vmi.vcadd(src, mask)
+
+
+@pto.jit(target="a5")
+def vmi_float_vcadd_none_reassoc_probe():
+    src = pto.vmi.vbrc(pto.f32(0.0), size=64)
+    mask = pto.vmi.create_mask(64, size=64)
+    _ = pto.vmi.vcadd(src, mask, reassoc=None)
+
+
+@pto.jit(target="a5")
+def vmi_vbrc_untyped_scalar_probe():
+    _ = pto.vmi.vbrc(0.0, size=64)
+
+
+@pto.jit(target="a5")
+def vmi_vci_untyped_scalar_probe():
+    _ = pto.vmi.vci(0, size=64, order="ASC")
+
+@pto.jit(target="a5")
+def vmi_vinterpret_cast_missing_dtype_probe():
+    src = pto.vmi.vbrc(pto.f32(0.0), size=64)
+    _ = pto.vmi.vinterpret_cast(src)
+
+
+@pto.jit(target="a5")
+def vmi_vinterpret_cast_width_mismatch_probe():
+    src = pto.vmi.vbrc(pto.f32(0.0), size=64)
+    _ = pto.vmi.vinterpret_cast(src, to_dtype=pto.f16)
+
+
+@pto.jit(target="a5")
+def vmi_create_mask_group_mismatch_probe():
+    _ = pto.vmi.create_mask(
+        9,
+        size=64,
+        group=8,
+    )
+
+
+@pto.jit(target="a5")
+def vmi_vload_mixed_mode_probe():
+    tile = pto.alloc_tile(shape=[1, 64], dtype=pto.f32)
+    src = tile.as_ptr()
+    offset = pto.const(0, dtype=pto.index)
+    _ = pto.vmi.vload(src, offset, size=64, dist_mode="continuous", group=8, stride=8)
+
+
+@pto.jit(target="a5")
+def vmi_vload_brc_stride_without_group_probe():
+    tile = pto.alloc_tile(shape=[1, 64], dtype=pto.f32)
+    src = tile.as_ptr()
+    offset = pto.const(0, dtype=pto.index)
+    _ = pto.vmi.vload(src, offset, size=64, dist_mode="brc", stride=8)
+
+
+@pto.jit(target="a5")
+def vmi_vstore_group_mask_probe():
+    tile = pto.alloc_tile(shape=[1, 64], dtype=pto.f32)
+    src = tile.as_ptr()
+    offset = pto.const(0, dtype=pto.index)
+    vec = pto.vmi.vload(src, offset, size=64)
+    mask = pto.vmi.create_mask(64, size=64)
+    pto.vmi.vstore(vec, src, offset, mask, group=8, stride=8)
+
+
+@pto.jit(target="a5")
+def vmi_vbrc_group_lane_mismatch_probe():
+    tile = pto.alloc_tile(shape=[1, 16], dtype=pto.f32)
+    src = tile.as_ptr()
+    offset = pto.const(0, dtype=pto.index)
+    compact = pto.vmi.vload(src, offset, size=16)
+    _ = pto.vmi.vbrc(compact, size=64, group=8)
+
+@pto.jit(target="a5")
+def vmi_vload_missing_size_probe():
+    tile = pto.alloc_tile(shape=[1, 64], dtype=pto.f32)
+    src = tile.as_ptr()
+    offset = pto.const(0, dtype=pto.index)
+    _ = pto.vmi.vload(src, offset)
+
+
+@pto.jit(target="a5")
 def bool_loop_bound_probe():
     with pto.for_(0, True, step=1):
         pto.pipe_barrier(pto.Pipe.ALL)
@@ -502,6 +588,17 @@ def assign_type_mismatch_probe():
 
 
 @pto.jit(target="a5")
+def assign_untyped_literal_without_anchor_probe():
+    cond = pto.const(1, dtype=pto.i1)
+    with pto.if_(cond) as br:
+        with br.then_:
+            br.assign(val=1)
+        with br.else_:
+            br.assign(val=2)
+    _ = br.val
+
+
+@pto.jit(target="a5")
 def duplicate_assign_probe():
     lhs = pto.const(4, dtype=pto.i32)
     cond = lhs > pto.const(0, dtype=pto.i32)
@@ -587,6 +684,82 @@ def main() -> None:
         "cannot coerce between different floating-point types of the same width",
         "f16",
         "bf16",
+    )
+    expect_raises(
+        vmi_float_vcadd_missing_reassoc_probe.compile,
+        TypeError,
+        "pto.vmi.vcadd(...)",
+        "floating-point vectors",
+        "reassoc",
+        "reassoc=True or reassoc=False",
+    )
+    expect_raises(
+        vmi_float_vcadd_none_reassoc_probe.compile,
+        TypeError,
+        "pto.vmi.vcadd(...)",
+        "True or False",
+        "received None",
+    )
+    expect_raises(
+        vmi_vbrc_untyped_scalar_probe.compile,
+        TypeError,
+        "pto.vmi.vbrc(...)",
+        "typed scalar",
+        "plain Python scalars are ambiguous",
+    )
+    expect_raises(
+        vmi_vci_untyped_scalar_probe.compile,
+        TypeError,
+        "pto.vmi.vci(...)",
+        "typed scalar",
+        "plain Python scalars are ambiguous",
+    )
+    expect_raises(
+        vmi_vinterpret_cast_missing_dtype_probe.compile,
+        TypeError,
+        "pto.vmi.vinterpret_cast(...)",
+        "requires to_dtype",
+    )
+    expect_raises(
+        vmi_vinterpret_cast_width_mismatch_probe.compile,
+        TypeError,
+        "pto.vmi.vinterpret_cast(...)",
+        "element widths to match",
+    )
+    expect_raises(
+        vmi_create_mask_group_mismatch_probe.compile,
+        ValueError,
+        "pto.vmi.create_mask(...)",
+        "active_lanes to be <= the inferred group_size",
+    )
+    expect_raises(
+        vmi_vload_mixed_mode_probe.compile,
+        TypeError,
+        "pto.vmi.vload(...)",
+        "dist_mode together with group",
+    )
+    expect_raises(
+        vmi_vload_brc_stride_without_group_probe.compile,
+        TypeError,
+        "pto.vmi.vload(...)",
+        "accepts stride only when group is provided",
+    )
+    expect_raises(
+        vmi_vstore_group_mask_probe.compile,
+        TypeError,
+        "pto.vmi.vstore(...)",
+        "group mode does not take a mask operand",
+    )
+    expect_raises(
+        vmi_vbrc_group_lane_mismatch_probe.compile,
+        ValueError,
+        "pto.vmi.vbrc(...)",
+        "input lane count to match group",
+    )
+    expect_raises(
+        vmi_vload_missing_size_probe.compile,
+        TypeError,
+        "size",
     )
     expect_raises(
         bool_loop_bound_probe.compile,
@@ -1066,6 +1239,12 @@ def main() -> None:
         assign_type_mismatch_probe.compile,
         RuntimeError,
         "br.assign(...) type mismatch for 'val'",
+    )
+    expect_raises(
+        assign_untyped_literal_without_anchor_probe.compile,
+        TypeError,
+        "br.assign(...) cannot infer a PTO type",
+        "materialize one side explicitly with pto.const(...)",
     )
     expect_raises(
         duplicate_assign_probe.compile,

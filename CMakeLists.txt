@@ -78,7 +78,8 @@ endfunction()
 
 ptoas_preseed_compilers_from_llvm_cache()
 
-project(ptoas VERSION 0.51)
+project(ptoas VERSION 0.52)
+set(PTOAS_VMI_VERSION "0.1.4")
 
 option(PTOAS_VALIDATE_CMAKE4_FETCHCONTENT_COMPAT
        "Validate CMake 4 compatibility for legacy FetchContent users" OFF)
@@ -252,6 +253,11 @@ endif()
 # =========================================================
 # 4. 添加子目录
 # =========================================================
+if(BUILD_TESTING AND NOT TARGET ptoas_runtime_deps)
+  # Define this aggregate target before tools/ptoas runs so it can attach
+  # ptoas_runtime as a dependency during configure.
+  add_custom_target(ptoas_runtime_deps)
+endif()
 add_subdirectory(include)
 add_subdirectory(lib)
 add_subdirectory(tools)
@@ -263,6 +269,7 @@ if(BUILD_TESTING)
   enable_testing()
   if(PTO_ENABLE_PYTHON_BINDING)
     get_filename_component(_llvm_root "${LLVM_DIR}/../../.." ABSOLUTE)
+    get_filename_component(_pto_python_bin_dir "${Python3_EXECUTABLE}" DIRECTORY)
     set(_pto_python_test_pythonpath
       "${CMAKE_BINARY_DIR}/python:${MLIR_PYTHON_PACKAGE_DIR}:${CMAKE_INSTALL_PREFIX}:$ENV{PYTHONPATH}"
     )
@@ -272,7 +279,7 @@ if(BUILD_TESTING)
     set(_pto_python_test_env
       "PYTHONPATH=${_pto_python_test_pythonpath}"
       "LD_LIBRARY_PATH=${CMAKE_BINARY_DIR}/lib:${_llvm_root}/lib:${CMAKE_INSTALL_PREFIX}/lib:$ENV{LD_LIBRARY_PATH}"
-      "PATH=${CMAKE_BINARY_DIR}/tools/ptoas:${CMAKE_INSTALL_PREFIX}/bin:$ENV{PATH}"
+      "PATH=${CMAKE_BINARY_DIR}/tools/ptoas:${CMAKE_INSTALL_PREFIX}/bin:${_pto_python_bin_dir}:$ENV{PATH}"
     )
 
     add_subdirectory(ptodsl/tests)
@@ -315,7 +322,7 @@ if(BUILD_TESTING)
   add_subdirectory(test/lit)
 
   set(_pto_check_ctest_depends)
-  foreach(_target IN ITEMS PTOPythonModules pto-opt ptoas ptobc)
+  foreach(_target IN ITEMS PTOPythonModules ptoas_runtime_deps ptobc)
     if(TARGET ${_target})
       list(APPEND _pto_check_ctest_depends ${_target})
     endif()

@@ -9,6 +9,7 @@
 
 import tempfile
 import unittest
+import zipfile
 from pathlib import Path
 from unittest import mock
 
@@ -16,6 +17,24 @@ import _ptoas_build_backend as build_backend
 
 
 class PtoasBuildBackendTests(unittest.TestCase):
+    def test_prepare_metadata_honors_package_name_override(self):
+        with tempfile.TemporaryDirectory() as temp_dir, mock.patch.dict(
+            build_backend.os.environ,
+            {
+                "PTOAS_PYTHON_PACKAGE_NAME": "ptoas-vmi",
+                "PTOAS_PYTHON_PACKAGE_VERSION": "0.1.0",
+            },
+            clear=False,
+        ):
+            dist_info_name = build_backend.prepare_metadata_for_build_wheel(temp_dir)
+
+            dist_info = Path(temp_dir) / dist_info_name
+            metadata = (dist_info / "METADATA").read_text(encoding="utf-8")
+
+        self.assertEqual(dist_info_name, "ptoas_vmi-0.1.0.dist-info")
+        self.assertIn("Name: ptoas-vmi", metadata)
+        self.assertIn("Version: 0.1.0", metadata)
+
     def test_cmake_build_driver_is_used_for_build_and_install(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_root = Path(temp_dir)
@@ -24,6 +43,8 @@ class PtoasBuildBackendTests(unittest.TestCase):
             llvm_build = temp_root / "llvm-build"
             install_dir = temp_root / "install"
             (repo / "cmake").mkdir(parents=True)
+            (install_dir / "lib").mkdir(parents=True)
+            (install_dir / "lib" / "ptoas.so").write_bytes(b"fake shared module")
 
             check_call_args = []
 
@@ -62,6 +83,43 @@ class PtoasBuildBackendTests(unittest.TestCase):
             check_call_args[-1],
             ["cmake", "--build", str(build_dir), "--target", "install"],
         )
+
+    def test_installed_shared_module_must_be_non_empty(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            install_dir = Path(temp_dir) / "install"
+            shared_module = install_dir / "lib" / "ptoas.so"
+            shared_module.parent.mkdir(parents=True)
+            shared_module.write_bytes(b"")
+
+            with mock.patch.object(build_backend, "_PTO_INSTALL_DIR", install_dir):
+                with self.assertRaisesRegex(RuntimeError, "missing or empty"):
+                    build_backend._assert_installed_ptoas_shared_module()
+
+    def test_build_editable_routes_console_entry_through_wheel_bootstrap(self):
+        with tempfile.TemporaryDirectory() as temp_dir, mock.patch.dict(
+            build_backend.os.environ,
+            {
+                "PTOAS_PYTHON_PACKAGE_NAME": "ptoas",
+                "PTOAS_PYTHON_PACKAGE_VERSION": "0.1.0",
+            },
+            clear=False,
+        ), mock.patch.object(
+            build_backend,
+            "_cmake_configure_and_build",
+        ) as cmake_build:
+            wheel_dir = Path(temp_dir) / "wheel"
+            wheel_dir.mkdir(parents=True, exist_ok=True)
+
+            wheel_name = build_backend.build_editable(str(wheel_dir))
+            wheel_path = wheel_dir / wheel_name
+
+            with zipfile.ZipFile(wheel_path) as zf:
+                entry_points = zf.read("ptoas-0.1.0.dist-info/entry_points.txt").decode("utf-8")
+
+        cmake_build.assert_called_once_with(skip_install=True)
+
+        self.assertIn("ptoas=ptoas_wheel_bootstrap:main", entry_points)
+        self.assertNotIn("ptoas._launcher", entry_points)
 
 
 if __name__ == "__main__":

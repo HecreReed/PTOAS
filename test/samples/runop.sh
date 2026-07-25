@@ -67,10 +67,13 @@ resolve_ptoas_bin() {
   fi
 
   # Common locations:
+  # - installed wrapper in repo: PTOAS/install/bin/ptoas
   # - out-of-tree build in repo: PTOAS/build/tools/ptoas/ptoas
   # - legacy layout: build/bin/ptoas
   local cand
   if [[ -n "${PTO_BUILD_DIR}" ]]; then
+    cand="${PTO_BUILD_DIR%/build}/install/bin/ptoas"
+    [[ -x "$cand" ]] && { echo "$cand"; return 0; }
     cand="${PTO_BUILD_DIR}/tools/ptoas/ptoas"
     [[ -x "$cand" ]] && { echo "$cand"; return 0; }
     cand="${PTO_BUILD_DIR}/bin/ptoas"
@@ -642,7 +645,7 @@ process_one_dir() {
         continue
       fi
       if ! grep -Fq "set_intra_block(PIPE_FIX, 0)" "$cpp" || ! grep -Fq "set_intra_block(PIPE_FIX, 16)" "$cpp"; then
-        echo -e "${A}(${base}.py)\tFAIL\tmissing A5 cube-side mirrored set_intra_block(PIPE_FIX, id/id+16)"
+        echo -e "${A}(${base}.py)\tFAIL\tmissing A5 cube-side explicit set_intra_block(PIPE_FIX, id/id+16)"
         overall=1
         continue
       fi
@@ -664,7 +667,7 @@ process_one_dir() {
         continue
       fi
       if ! grep -Fq "set_intra_block(PIPE_FIX, 0)" "$cpp" || ! grep -Fq "set_intra_block(PIPE_FIX, 16)" "$cpp"; then
-        echo -e "${A}(${base}.py)\tFAIL\tmissing A5 cube-side mirrored set_intra_block(PIPE_FIX, id/id+16)"
+        echo -e "${A}(${base}.py)\tFAIL\tmissing A5 cube-side explicit set_intra_block(PIPE_FIX, id/id+16)"
         overall=1
         continue
       fi
@@ -686,7 +689,7 @@ process_one_dir() {
         continue
       fi
       if ! grep -Fq "set_intra_block(PIPE_FIX, 0)" "$cpp" || ! grep -Fq "set_intra_block(PIPE_FIX, 16)" "$cpp"; then
-        echo -e "${A}(${base}.py)\tFAIL\tmissing PTO-ISA-style cube-side mirrored set_intra_block(PIPE_FIX, id/id+16)"
+        echo -e "${A}(${base}.py)\tFAIL\tmissing PTO-ISA-style explicit set_intra_block(PIPE_FIX, id/id+16)"
         overall=1
         continue
       fi
@@ -753,7 +756,7 @@ process_one_dir() {
         continue
       fi
       if [[ "$set_count" -ne 2 ]]; then
-        echo -e "${A}(${base}.py)\tFAIL\tunexpected number of PIPE_FIX dynamic sync.set calls (expect 2: id and id+16)"
+        echo -e "${A}(${base}.py)\tFAIL\tunexpected number of PIPE_FIX dynamic sync.set calls (expect explicit id and id+16)"
         overall=1
         continue
       fi

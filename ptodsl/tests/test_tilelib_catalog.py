@@ -65,6 +65,10 @@ CATALOG = {
         "template_tdivs_tile_scalar",
     ),
     "pto.tcvt": ("template_tcvt_f32_to_i32", "pto.vcvt", ("src", "dst"), "f32"),
+    "pto.tconcat": ("template_tconcat", "pto.vsts", ("src0", "src1", "dst"), "f32"),
+    # tdequant has i16/i8 variants; this entry covers the i16 representative
+    # (the i8 path is exercised by test_tdequant_dtype_versions_render).
+    "pto.tdequant": ("template_tdequant_i16", "pto.vmul", ("src", "scale", "offset", "dst"), "i16"),
     "pto.texp": ("template_texp", "pto.vexp", ("src", "dst"), "f32"),
     "pto.tfmod": ("template_tfmod", "pto.vtrc", ("src0", "src1", "dst"), "f32"),
     "pto.tfmods": ("template_tfmods", "pto.vtrc", ("src", "scalar", "dst"), "f32"),
@@ -230,6 +234,10 @@ ROW_REDUCTIONS = {
 SPECIAL_VALID_SHAPES = {
     ("pto.tcolexpand", "src"): (1, 64),
     ("pto.trowexpand", "src"): (8, 1),
+    ("pto.tdequant", "scale"): (8, 1),
+    ("pto.tdequant", "offset"): (8, 1),
+    ("pto.tconcat", "src0"): (8, 32),
+    ("pto.tconcat", "src1"): (8, 32),
 }
 for _op in (
     "pto.trowexpandadd",
@@ -315,6 +323,9 @@ SPECIAL_OPERAND_DTYPES = {
     ("pto.tstore_fp", "dst"): "f16",
     ("pto.trowargmax", "dst"): "i32",
     ("pto.trowargmin", "dst"): "i32",
+    ("pto.tdequant", "scale"): "f32",
+    ("pto.tdequant", "offset"): "f32",
+    ("pto.tdequant", "dst"): "f32",
 }
 SPECIAL_VECTOR_OPERANDS = {
     ("pto.tmrgsort", "ex_vec"): ("i16", (4,)),
@@ -981,7 +992,7 @@ class TileLibCatalogTest(unittest.TestCase):
         selected = select("pto.tsort32", "a5", specs)
         self.assertEqual(selected.name, "template_tsort32_with_tmp")
         mlir = selected.specialize(**specs).mlir_text()
-        self.assertIn("pto.copy_ubuf_to_ubuf", mlir)
+        self.assertIn("pto.mte_ub_ub", mlir)
         self.assertIn("pto.vbitsort", mlir)
 
     def test_tsort32_unaligned_tmp_uses_valid_width(self):
@@ -994,7 +1005,7 @@ class TileLibCatalogTest(unittest.TestCase):
         selected = select("pto.tsort32", "a5", specs)
         self.assertEqual(selected.name, "template_tsort32_with_tmp")
         mlir = selected.specialize(**specs).mlir_text()
-        self.assertIn("pto.copy_ubuf_to_ubuf", mlir)
+        self.assertIn("pto.mte_ub_ub", mlir)
         self.assertIn("pto.vbitsort", mlir)
         self.assertIn("%c130", mlir)
 
@@ -1487,6 +1498,21 @@ class TileLibCatalogTest(unittest.TestCase):
                 mlir = selected.specialize(**specs).mlir_text()
                 self.assertEqual(selected.name, "template_trowprod")
                 self.assertEqual(mlir.count("pto.vintlv"), expected_stages)
+
+    def test_tdequant_dtype_versions_render(self):
+        # tdequant has one template per src dtype; the catalog entry only covers i16.
+        f32 = ScalarType("f32")
+        for src_dtype, expected_name in (("i16", "template_tdequant_i16"), ("i8", "template_tdequant_i8")):
+            with self.subTest(src_dtype=src_dtype):
+                specs = {
+                    "src": TileSpec(shape=(8, 64), dtype=ScalarType(src_dtype), memory_space="vec"),
+                    "scale": TileSpec(shape=(8, 64), dtype=f32, memory_space="vec", valid_shape=(8, 1)),
+                    "offset": TileSpec(shape=(8, 64), dtype=f32, memory_space="vec", valid_shape=(8, 1)),
+                    "dst": TileSpec(shape=(8, 64), dtype=f32, memory_space="vec"),
+                }
+                selected = select("pto.tdequant", "a5", specs)
+                self.assertEqual(selected.name, expected_name)
+                self.assertIn("pto.vmul", selected.specialize(**specs).mlir_text())
 
 
 if __name__ == "__main__":

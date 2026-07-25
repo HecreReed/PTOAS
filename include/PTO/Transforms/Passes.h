@@ -92,8 +92,10 @@ std::unique_ptr<Pass> createPTOFusionRegionGenPass();
 LogicalResult validateIntToPtrUses(func::FuncOp func);
 
 std::unique_ptr<Pass> createPTOUnrollSIMTForPass();
+std::unique_ptr<Pass> createPTONarrowVPTOLoopCountersPass();
 std::unique_ptr<Pass> createPTOInferVPTOVecScopePass();
 std::unique_ptr<Pass> createVPTOExpandWrapperOpsPass();
+std::unique_ptr<Pass> createVPTOSoftPostUpdatePass();
 std::unique_ptr<Pass> createPTOVPTOPtrBoundaryPass();
 std::unique_ptr<Pass>
 createPTOLowLevelLoopFusionPass(const PTOLowLevelLoopFusionOptions &options = {});
@@ -102,12 +104,30 @@ std::unique_ptr<Pass> createPTOFusionLoadStoreElisionPass();
 std::unique_ptr<Pass> createPTOFlattenFusionRegionPass();
 std::unique_ptr<Pass> createVPTOPtrNormalizePass();
 std::unique_ptr<Pass> createVPTOPtrCastCleanupPass();
+std::unique_ptr<Pass> createVPTONormalizeEquivalentVcvtPass();
 LogicalResult validateVPTOAuthoringIR(ModuleOp module,
                                       llvm::raw_ostream *diagOS = nullptr);
 LogicalResult validateVPTOEmissionIR(ModuleOp module,
                                      llvm::raw_ostream *diagOS = nullptr);
 std::unique_ptr<Pass> createPTOValidateVPTOIRPass();
 std::unique_ptr<Pass> createPTOValidateVPTOEmissionIRPass();
+LogicalResult validateVMIProducerBoundaryIR(ModuleOp module,
+                                            llvm::raw_ostream *diagOS = nullptr);
+LogicalResult validateVMILayoutAssignedIR(ModuleOp module,
+                                          llvm::raw_ostream *diagOS = nullptr,
+                                          bool verifyHelperSupport = true);
+std::unique_ptr<Pass> createPTOValidateVMIIRPass();
+std::unique_ptr<Pass> createPTOValidateVMILayoutIRPass();
+std::unique_ptr<Pass> createVMIPreAssignmentCombinePass();
+std::unique_ptr<Pass> createVMIMaskGranularityAssignmentPass();
+std::unique_ptr<Pass> createVMILayoutAssignmentPass();
+std::unique_ptr<Pass> createVMILayoutFoldPass();
+std::unique_ptr<Pass> createVMILayoutRematerializePass();
+std::unique_ptr<Pass> createVMILayoutSinkMaterializationPass();
+std::unique_ptr<Pass> createVMILegalizeArithSelectPass();
+std::unique_ptr<Pass> createVMILowerUnifiedToLegacyPass();
+std::unique_ptr<Pass> createVMINormalizeSignlessIntToUnsignedPass();
+std::unique_ptr<Pass> createVMIToVPTOPass();
 std::unique_ptr<Pass> createInsertTemplateAttributesPass();
 std::unique_ptr<Pass> createInsertTemplateAttributesPass(
     const InsertTemplateAttributesOptions &options);

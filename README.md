@@ -100,6 +100,7 @@ cmake -G Ninja -S llvm -B $LLVM_BUILD_DIR \
     -DLLVM_ENABLE_PROJECTS="mlir;clang" \
     -DBUILD_SHARED_LIBS=ON \
     -DMLIR_ENABLE_BINDINGS_PYTHON=ON \
+    -DLLVM_ENABLE_ASSERTIONS=ON \
     -DPython3_EXECUTABLE=$(which python3) \
     -DPython_EXECUTABLE=$(which python3) \
     -Dpybind11_DIR=$(python3 -m pybind11 --cmakedir) \
@@ -186,7 +187,7 @@ pip install -e . --no-build-isolation
 发布或 CI 产出的 `ptoas` wheel 也遵循同一合同：
 
 ```bash
-pip install /path/to/ptoas-*.whl
+pip install /path/to/ptoas*.whl
 ```
 
 安装完成后，以下导入应直接可用：
@@ -199,15 +200,21 @@ from mlir.dialects import pto as mlir_pto
 
 > 说明：
 > - `ptoas` wheel 会同时安装 PTODSL，并提供可直接调用的 `ptoas` CLI。
+> - VMI release 线仍然复用 `ptoas` CLI 名称；对应的 `ptoas --version` 会显示
+>   `ptoas vmi A.B.C`。
+> - `ptoas` 与 `ptoas-vmi` 两个 release wheel **互斥**：它们都会安装同名的顶层
+>   `ptoas` Python 包和 `ptoas` console script，**不要**在同一个 Python 环境里同时安装；
+>   混装会互相覆盖文件，卸载其中一个也可能破坏另一个。
 > - `ptoas-bin-*.tar.gz` 这类 compiler-only 二进制 tarball 只提供 CLI/toolchain，
 >   **不是** PTODSL-capable Python distribution；仅解压 tarball 不能保证
 >   `import ptodsl` 可用。
+> - release tag 约定：`ptoas-vX.Y` 发布主工具链，`vmi-vA.B.C` 发布 VMI 文档/规范。
 
 ---
 
 ## 4. 运行环境配置 (Runtime Environment)
 
-如果你已经通过 `pip install .`、`pip install -e .` 或 `pip install ptoas-*.whl`
+如果你已经通过 `pip install .`、`pip install -e .` 或 `pip install ptoas*.whl`
 完成安装，那么 `import ptodsl` / `from mlir.dialects import pto` / `ptoas`
 都不应再依赖手动设置 `PYTHONPATH`。
 
@@ -254,6 +261,10 @@ ptoas test/lit/pto/empty_func.pto --pto-arch=a5 -o outputfile.cpp
 
 # 指定构建 Level（level3 会禁用 PlanMemory/InsertSync）
 ptoas test/lit/pto/empty_func.pto --pto-level=level3 -o outputfile.cpp
+
+# VPTO backend 总是启用 VMI -> VPTO 语义 pipeline
+# public function signature 不能直接暴露 !pto.vmi.* 类型
+ptoas test/lit/vmi_new/vmi_ptoas_cli_pipeline.pto --pto-arch=a5 --pto-backend=vpto --emit-vpto -o -
 
 # 查看当前 ptoas release 版本号
 ptoas --version

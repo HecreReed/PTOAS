@@ -34,7 +34,8 @@ def build():
                 c2 = arith.ConstantOp(f32, 2.0).result
 
                 # PTO-ISA tmov_acc2vec/tmov_ub2l1 mix-kernel style:
-                # cube sets PIPE_FIX(syncId + syncId+16), vec waits PIPE_MTE3(syncId).
+                # cube explicitly sets PIPE_FIX(syncId) and PIPE_FIX(syncId+16);
+                # vec waits PIPE_MTE3(syncId).
                 sync_id = 0
                 pipe_fix = pto.PipeAttr.get(pto.PIPE.PIPE_FIX, ctx)
                 pipe_mte3 = pto.PipeAttr.get(pto.PIPE.PIPE_MTE3, ctx)
@@ -42,6 +43,7 @@ def build():
                 sec_cube = pto.SectionCubeOp()
                 with InsertionPoint(sec_cube.body.blocks.append()):
                     pto.sync_set(pipe_fix, sync_id)
+                    pto.sync_set(pipe_fix, sync_id + 16)
 
                 sec_vec = pto.SectionVectorOp()
                 with InsertionPoint(sec_vec.body.blocks.append()):

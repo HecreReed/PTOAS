@@ -78,6 +78,7 @@ from ._surface_types import (   # noqa: F401
 )
 from ._tensor_factories import empty_like  # noqa: F401
 from ._tile_namespace import tile  # noqa: F401
+from ._vmi_namespace import vmi  # noqa: F401
 
 # ── Operations ────────────────────────────────────────────────────────────────
 from ._ops import (             # noqa: F401
@@ -96,6 +97,7 @@ from ._ops import (             # noqa: F401
     ppack, punpack,
     pintlv_b8, pintlv_b16, pintlv_b32,
     pdintlv_b8, pdintlv_b16, pdintlv_b32,
+    vintlv, vdintlv,
     vgather2, vgather2_bc, vgatherb, vscatter, vsldb, vsstb,
     vcmp, vcmps,
     plds, psts, pstu, vstar, vstas, vstur, vstus,
@@ -107,9 +109,10 @@ from ._ops import (             # noqa: F401
     vexp, vln, vsqrt, vabs, vneg, vrec, vrsqrt, vrelu, vnot,
     vcgmax, vcgadd, vcgmin, vcpadd,
     vtrc, vprelu, vintlv, vdintlv, vselr,
+    chistv2,
     vci, vaddc, vaddcs, vmull, vbitsort, vmrgsort4,
-    copy_ubuf_to_ubuf, load_scalar, store_scalar,
-    vadds, vsubs, vmuls, vmaxs, vmins, vlrelu,
+    load_scalar, store_scalar,
+    vadds, vsubs, vmuls, vmaxs, vmins, vlrelu, vands, vors, vxors,
     vaxpy, vaddrelu, vsubrelu,
     vmula, vmadd,
     vsel,
@@ -181,6 +184,6 @@ PAT = MaskPattern
 
 
 def __getattr__(name):
-    if name in {"ukernel", "tile_buf_type", "vecscope", "as_ptr", "vbrc_load", "vsts_1pt", "constexpr", "tensor_spec", "TensorSpec"}:
+    if name in {"ukernel", "tile_buf_type", "vecscope", "as_ptr", "vbrc_load", "vsts_1pt", "constexpr", "copy_ubuf_to_ubuf", "tensor_spec", "TensorSpec"}:
         raise unsupported_public_surface_error(name)
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

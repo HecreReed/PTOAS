@@ -166,6 +166,7 @@ def run_cases(cases: list[dict], *, emit_mlir_fn=None, argv=None) -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--list", action="store_true", help="list discovered case names and exit")
     parser.add_argument("--emit-mlir", action="store_true", help="print merged MLIR module and exit")
+    parser.add_argument("--case", type=str, default=None, help="run only the specified case by name")
     args = parser.parse_args(argv)
 
     if args.list:
@@ -177,6 +178,12 @@ def run_cases(cases: list[dict], *, emit_mlir_fn=None, argv=None) -> int:
             raise RuntimeError("emit_mlir_fn is required when --emit-mlir is supported")
         print(emit_mlir_fn())
         return 0
+
+    if args.case:
+        filtered = [c for c in cases if c["name"] == args.case]
+        if not filtered:
+            raise RuntimeError(f"no case named {args.case!r}")
+        cases = filtered
 
     torch = init_runtime()
     for case in cases:
@@ -207,7 +214,6 @@ def run_cases(cases: list[dict], *, emit_mlir_fn=None, argv=None) -> int:
 
         case["check"](device_inputs, expected)
         print(f"PASS {name}  compile={compile_s:.3f}s launch={launch_s:.3f}s")
-
     print("All cases passed.")
     return 0
 

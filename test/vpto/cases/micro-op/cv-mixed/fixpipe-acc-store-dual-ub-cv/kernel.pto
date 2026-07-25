@@ -111,7 +111,7 @@ module attributes {pto.target_arch = "a5"} {
           : !pto.ptr<f32, ub>, !pto.ptr<f32, gm>, i64, i64, i64, i64
       }
       scf.if %is_subblock1 {
-        pto.sync.wait <PIPE_MTE3>, 1
+        pto.sync.wait <PIPE_MTE3>, 17
         pto.mte_ub_gm %ub_split_m, %out_split_m1_gm, %c256_i64
           nburst(%c20_i64, %c256_i64, %c256_i64)
           : !pto.ptr<f32, ub>, !pto.ptr<f32, gm>, i64, i64, i64, i64

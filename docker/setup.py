@@ -7,15 +7,34 @@
 # See LICENSE in the root of the software repository for the full text of the License.
 
 import os
+import pathlib
+import re
 
 from setuptools import setup, find_namespace_packages
 
 
+_PROJECT_VERSION_RE = re.compile(
+    r"project\s*\(\s*ptoas\s+VERSION\s+([0-9]+\.[0-9]+)\s*\)"
+)
+
+
+def read_package_name() -> str:
+    package_name = os.environ.get("PTOAS_PYTHON_PACKAGE_NAME", "").strip()
+    return package_name or "ptoas"
+
+
 def read_package_version() -> str:
-    return os.environ.get("PTOAS_PYTHON_PACKAGE_VERSION", "0.1.1")
+    version = os.environ.get("PTOAS_PYTHON_PACKAGE_VERSION", "").strip()
+    if version:
+        return version
+    cmake_file = pathlib.Path(__file__).resolve().parents[1] / "CMakeLists.txt"
+    match = _PROJECT_VERSION_RE.search(cmake_file.read_text(encoding="utf-8"))
+    if not match:
+        raise RuntimeError(f"could not find PTOAS version in {cmake_file}")
+    return match.group(1)
 
 setup(
-    name="ptoas",
+    name=read_package_name(),
     version=read_package_version(),
     description="PTO Assembler & Optimizer",
     # NOTE: find_namespace_packages detects folders even without __init__.py

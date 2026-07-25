@@ -293,6 +293,13 @@ def require_same_valid_shape(*operand_names):
     return _require_same_valid_shape
 
 
+def require_valid_rows(operand_name, rows):
+    def _require_valid_rows(**context):
+        shape = context.get(f"{operand_name}_valid_shape")
+        return shape is not None and shape[0] == rows
+    return _require_valid_rows
+
+
 def require_contiguous(required=True):
     def _require_contiguous(operand_rows, operand_cols, operand_valid_cols, **_):
         if not required:
@@ -347,4 +354,5 @@ __all__ = [
     "passes",
     "require_contiguous",
     "require_same_valid_shape",
+    "require_valid_rows",
 ]
