@@ -54,8 +54,20 @@ usage() {
   echo ""
   echo "    -h, --help  Print usage"
   echo "    --build Build and run validation"
-  echo "    --pkg Build run package"
+  echo "    --pkg Build package (type controlled by --pkg-type, default run)"
+  echo "    --pkg-type=<TYPE>  Specify package type (TYPE option: run/rpm/deb/all), Default: run"
   echo ""
+}
+
+# check value of pkg-type option
+# usage: check_pkg_type pkg-type
+check_pkg_type() {
+  arg_value="$1"
+  if [ "X$arg_value" != "Xrun" ] && [ "X$arg_value" != "Xrpm" ] && [ "X$arg_value" != "Xdeb" ] && [ "X$arg_value" != "Xall" ]; then
+    echo "Invalid value $arg_value for option --$2"
+    usage
+    exit 1
+  fi
 }
 
 print_success() {
@@ -106,8 +118,9 @@ prepare_llvm_cache_layout() {
 checkopts() {
   ENABLE_BUILD_ONLY=FALSE
   ENABLE_PACKAGE=FALSE
+  PACKAGE_TYPE="run"
 
-  parsed_args=$(getopt -a -o j:hvuO: -l help,pkg,build,cann_3rd_lib_path: -- "$@") || {
+  parsed_args=$(getopt -a -o j:hvuO: -l help,pkg,pkg-type:,build,cann_3rd_lib_path: -- "$@") || {
   usage
   exit 1
   }
@@ -132,6 +145,11 @@ checkopts() {
       --pkg)
         ENABLE_PACKAGE=TRUE
         shift
+        ;;
+      --pkg-type)
+        check_pkg_type "$2" pkg-type
+        PACKAGE_TYPE="$2"
+        shift 2
         ;;
       --)
         shift
@@ -183,7 +201,8 @@ configure_superbuild() {
     -DPYBIND11_CMAKE_DIR="${PYBIND11_CMAKE_DIR}" \
     -DHARDENING_CACHE_FILE="${HARDENING_CACHE_FILE}" \
     -DPTOAS_FORTIFY_MARKER_OBJECT="${PTOAS_FORTIFY_MARKER_OBJECT}" \
-    -DDEVTOOLSET_TOOLCHAIN_FLAGS="${DEVTOOLSET_TOOLCHAIN_FLAGS}"
+    -DDEVTOOLSET_TOOLCHAIN_FLAGS="${DEVTOOLSET_TOOLCHAIN_FLAGS}" \
+    -DPACKAGE_TYPE="${PACKAGE_TYPE}"
 }
 
 build_only() {

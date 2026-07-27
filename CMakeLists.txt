@@ -161,11 +161,18 @@ install(FILES
     DESTINATION ${PTOAS_CMAKE_INSTALL_DIR}
 )
 
+# Package type: run / rpm / deb. Default "run" keeps backward-compatible makeself run package.
+# Forwarded to set_cann_cpack_config(PACKAGE_TYPE ...) in cmake/package.cmake.
+if(NOT DEFINED PACKAGE_TYPE)
+    set(PACKAGE_TYPE "run" CACHE STRING "Package type: run/rpm/deb")
+endif()
+
+include(cmake/package.cmake)
+include(cmake/func.cmake)
+include(version.cmake)
+check_cann_pkg_build_deps("pto_as")
+
 if(ENABLE_PACKAGE)
-  include(cmake/package.cmake)
-  include(cmake/func.cmake)
-  include(version.cmake)
   add_cann_version_info_targets()
-  set(ENABLE_DEVICE FALSE)
-  set_cann_cpack_config(pto-as ENABLE_DEVICE ${ENABLE_DEVICE} SHARE_INFO_NAME pto_as OUTPUT ${CMAKE_SOURCE_DIR}/build_out)
+  pack_built_in()
 endif()

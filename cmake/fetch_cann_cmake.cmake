@@ -8,7 +8,7 @@ if(NOT PROJECT_SOURCE_DIR)
             set(CANN_CMAKE_GIT_URL "https://gitcode.com/cann/cmake.git")
         endif()
         if(NOT CANN_CMAKE_GIT_REF)
-            set(CANN_CMAKE_GIT_REF "master-035")
+            set(CANN_CMAKE_GIT_REF "master-042")
         endif()
         if(CMAKE_SCRIPT_MODE_FILE)
             if(NOT CANN_3RD_LIB_PATH)
@@ -33,7 +33,7 @@ if(NOT PROJECT_SOURCE_DIR)
 
         include(FetchContent)
 
-        set(CANN_CMAKE_TAG "master-035")
+        set(CANN_CMAKE_TAG "master-042")
         if(CANN_3RD_LIB_PATH AND EXISTS "${CANN_3RD_LIB_PATH}/cmake-${CANN_CMAKE_TAG}.tar.gz")
             FetchContent_Declare(
                 cann-cmake
