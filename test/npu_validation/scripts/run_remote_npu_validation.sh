@@ -595,20 +595,6 @@ while IFS= read -r -d '' cpp; do
     }
 
     run_npu_case() {
-      local run_rc
-      set +e
-      LD_LIBRARY_PATH="${LD_LIBRARY_PATH_NPU}" ./build/"${testcase}"
-      run_rc=$?
-      set -e
-      if [[ "${run_rc}" -ne 139 || "${PTOAS_BOARD_IS_A5:-0}" != "1" ]]; then
-        return "${run_rc}"
-      fi
-
-      # A5 CANN can occasionally segfault in UMMU/URMA teardown after the
-      # kernel has completed. Regenerate the inputs and retry that one narrow
-      # failure mode once; numerical mismatches and all other exits still fail.
-      log "WARN: ${testcase} exited 139 on A5; retrying once"
-      python3 ./golden.py
       LD_LIBRARY_PATH="${LD_LIBRARY_PATH_NPU}" ./build/"${testcase}"
     }
 
@@ -633,13 +619,6 @@ while IFS= read -r -d '' cpp; do
         run_npu_case
         if [[ "${CUSTOM_GOLDEN}" != "1" ]]; then
           copy_outputs_as_golden
-          python3 ./golden.py
-          run_npu_case
-        elif [[ "${PTOAS_BOARD_IS_A5:-0}" == "1" ]]; then
-          # Keep custom golden artifacts intact, but still use the first A5
-          # launch as a warm-up. Recycled device state on this board can
-          # otherwise make the first launch consume the preceding case's data.
-          log "INFO: completed custom-golden NPU warm-up: ${testcase}"
           python3 ./golden.py
           run_npu_case
         fi

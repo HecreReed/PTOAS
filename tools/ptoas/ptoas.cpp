@@ -728,7 +728,10 @@ static bool hasUnexpandedTileOps(ModuleOp module) {
   module.walk([&](Operation *op) {
     if (found)
       return;
-    if (isa<pto::OpPipeInterface>(op)) {
+    // OpPipeInterface alone also covers synchronization-relevant config ops.
+    // TileLib expansion is required only for high-level TileOps.
+    if (isa<pto::TileOpInterface>(op) &&
+        isa<pto::OpPipeInterface>(op)) {
       found = true;
       return;
     }

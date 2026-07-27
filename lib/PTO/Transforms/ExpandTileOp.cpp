@@ -1352,7 +1352,10 @@ LogicalResult ExpandState::expandTileOpsInFunction(func::FuncOp func,
   func.walk([&](Operation *op) {
     if (isa<pto::TReshapeOp>(op))
       return;
-    if (isa<pto::OpPipeInterface>(op))
+    // Execution-pipe metadata is also used by configuration operations for
+    // synchronization. Only high-level TileOps have TileLib templates.
+    if (isa<pto::TileOpInterface>(op) &&
+        isa<pto::OpPipeInterface>(op))
       tileOps.push_back(op);
   });
 

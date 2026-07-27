@@ -957,7 +957,10 @@ struct InsertTemplateAttributesPass
     module.walk([&](Operation *operation) {
       if (isa<pto::TReshapeOp>(operation))
         return;
-      if (isa<pto::OpPipeInterface>(operation))
+      // OpPipeInterface also marks non-Tile configuration operations, such as
+      // set_quant_vector, so it is not sufficient to identify TileLib work.
+      if (isa<pto::TileOpInterface>(operation) &&
+          isa<pto::OpPipeInterface>(operation))
         tileOperations.push_back(operation);
     });
 

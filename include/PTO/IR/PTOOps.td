@@ -2058,6 +2058,8 @@ def SetQuantVectorOp : PTO_Op<"set_quant_vector", [
     `{` `id` `=` $id `}` attr-dict
   }];
 
+  // This execution-pipe declaration is consumed by synchronization passes.
+  // The op remains a configuration op and deliberately has no TileOpInterface.
   let extraClassDeclaration = [{
     ::mlir::pto::PIPE getPipe() { return ::mlir::pto::PIPE::PIPE_FIX; }
   }];

@@ -743,6 +743,9 @@ pto.set_quant_vector(%fp : !pto.tile_buf<loc=scaling, ...>) {id = 0}
   shared resource 还是 ordering token，都不能只让 `pto.set_quant_*` 单方面带
   side-effect
 - 二者都属于 producer-side config op，而不是 pipe op
+- `pto.set_quant_vector` 可以通过 execution-pipe interface 向同步分析声明其在
+  `PIPE_FIX` 上执行，但它不因此成为 `TileOpInterface` op，也不得参与 TileLib
+  模板发现或展开
 - 二者都不返回 SSA result；它们建模的是“影响后续 producer-side fixpipe push 的
   machine state”
 - 二者都必须保持 side-effect / ordering 语义，不能作为 `Pure` 无结果 op 参与

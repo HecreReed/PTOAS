@@ -1,0 +1,32 @@
+// Copyright (c) 2026 Huawei Technologies Co., Ltd.
+// This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+// CANN Open Software License Agreement Version 2.0 (the "License").
+// Please refer to the License for details. You may not use this file except in compliance with the License.
+// THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+// INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+// See LICENSE in the root of the software repository for the full text of the License.
+//
+// RUN: FileCheck %s --check-prefix=RUNNER < %S/../../npu_validation/scripts/run_remote_npu_validation.sh
+
+// A testcase crash must propagate directly. In particular, there is no
+// A5-specific exit-139 retry that can convert the testcase to OK.
+// RUNNER-LABEL: run_npu_case() {
+// RUNNER-NEXT: LD_LIBRARY_PATH="${LD_LIBRARY_PATH_NPU}" ./build/"${testcase}"
+// RUNNER-NEXT: }
+// RUNNER-NOT: PTOAS_BOARD_IS_A5
+// RUNNER: case "${GOLDEN_MODE}" in
+
+// A custom NPU golden is compared against the first and only execution.
+// Non-custom cases retain their established two-run NPU-golden flow.
+// RUNNER: npu)
+// RUNNER: python3 ./golden.py
+// RUNNER-NEXT: run_npu_case
+// RUNNER-NEXT: if {{.*}}CUSTOM_GOLDEN{{.*}} then
+// RUNNER-NEXT: copy_outputs_as_golden
+// RUNNER-NEXT: python3 ./golden.py
+// RUNNER-NEXT: run_npu_case
+// RUNNER-NEXT: fi
+// RUNNER-NEXT: COMPARE_STRICT=1 python3 ./compare.py
+
+module {
+}
