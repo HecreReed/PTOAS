@@ -14758,6 +14758,13 @@ static AICORE inline void ptoas_auto_sync_tail(
   }
 }
 
+template <typename Element, typename Shape, typename Stride,
+          pto::Layout TensorLayout>
+static AICORE inline void PTOAS__DCCI_SINGLE_CACHE_LINE(
+    pto::GlobalTensor<Element, Shape, Stride, TensorLayout> &tensor) {
+  dcci((__gm__ void*)tensor.data(), cache_line_t::SINGLE_CACHE_LINE);
+}
+
 template <typename Ptr>
 static AICORE inline void PTOAS__DCCI_SINGLE_CACHE_LINE(Ptr ptr) {
   dcci((__gm__ void*)ptr, cache_line_t::SINGLE_CACHE_LINE);
