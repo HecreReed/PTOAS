@@ -52,12 +52,14 @@ module {
   }
 }
 
-// CHECK: template <typename Element, typename Shape, typename Stride,
+// CHECK: #if defined(__CCE_AICORE__) || defined(__CPU_SIM) || defined(__COSTMODEL)
+// CHECK-NEXT: template <typename Element, typename Shape, typename Stride,
 // CHECK-NEXT:           pto::Layout TensorLayout>
 // CHECK-NEXT: static AICORE inline void PTOAS__DCCI_SINGLE_CACHE_LINE(
 // CHECK-NEXT:     pto::GlobalTensor<Element, Shape, Stride, TensorLayout> &tensor) {
 // CHECK-NEXT:   dcci((__gm__ void*)tensor.data(), cache_line_t::SINGLE_CACHE_LINE);
 // CHECK-NEXT: }
+// CHECK-NEXT: #endif
 
 // CHECK-LABEL: AICORE void single_line_ptr(
 // CHECK: PTOAS__DCCI_SINGLE_CACHE_LINE({{[_A-Za-z][_A-Za-z0-9]*}});
