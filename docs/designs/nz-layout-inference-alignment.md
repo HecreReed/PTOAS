@@ -8,67 +8,73 @@ INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A
 See LICENSE in the root of the software repository for the full text of the License.
 -->
 
-# PTOAS `Layout::NZ` 推断与 pto-isa 标准五维形对齐设计
+# PTOAS `Layout::NZ` 推断与 pto-isa 标准五维形对齐
 
-关联 issue: [#527](https://github.com/hw-native-sys/PTOAS/issues/527) —— PTOAS 支持 pto-isa 中的 `Layout::NZ` 推断。
+关联 issue: [#527](https://github.com/hw-native-sys/PTOAS/issues/527)。
 
-本文只讨论 GM 侧 `GlobalTensor` 的 layout 推断（`tensor_view` / `partition_tensor_view` → `pto::Layout`），不涉及 tile 侧 `blayout/slayout`、也不涉及 fixpipe 的 `NZ2ND/NZ2DN/NZ2NZ` 转换。
+本文定义 PR #1027 的最终实现约束。设计、实现、测试和文档都在同一个 PR 中完成；
+PR 合入后关闭 #527。
 
----
+范围仅包含 GM 侧 `GlobalTensor` 的 layout 解析与传播
+（`tensor_view` / `partition_tensor_view` / memref view → `pto::Layout`），不改变 tile
+侧 `blayout/slayout`，也不改变 fixpipe 的 `NZ2ND/NZ2DN/NZ2NZ` 转换语义。
 
-## 1. 事实基准：pto-isa 的 NZ 五维标准形
+## 1. pto-isa 的 NZ 五维标准形
 
-pto-isa 侧二维逻辑 tensor 的 NZ 五维表示由 `TileShape2D` / `BaseShape2D` 定义
-（`include/pto/common/pto_tile.hpp`，常量见 `include/pto/common/constants.hpp`：
-`C0_SIZE_BYTE = 32`、`FRACTAL_NZ_ROW = 16`）：
+pto-isa 使用 `TileShape2D` / `BaseShape2D` 表示二维 NZ tensor。常量
+`C0_SIZE_BYTE = 32`、`FRACTAL_NZ_ROW = 16`，标准根视图为：
 
-```
+```text
 C0     = 32 / sizeof(T)
 shape  = [1, cols / C0, rows / 16, 16, C0]
 stride = [rows * cols, rows * C0, 16 * C0, C0, 1]
 ```
 
-即 5 个维度的语义固定为：
+五个维度的固定语义如下：
 
-| 维度 | 含义 | 取值 |
+| 维度 | 含义 | 标准根视图取值 |
 |---|---|---|
-| `d0` | batch（二维场景恒为 1） | `1` |
+| `d0` | 二维场景的占位维 | `1` |
 | `d1` | 列分块数 `n1` | `cols / C0` |
 | `d2` | 行分块数 `m1` | `rows / 16` |
-| `d3` | fractal 内行数 | `16`（`FRACTAL_NZ_ROW`） |
-| `d4` | fractal 内列数 `C0` | `32 / sizeof(T)` |
+| `d3` | fractal 内行数 | `16` |
+| `d4` | fractal 内列数 | `C0` |
 
-fp32 且 `(rows, cols) = (128, 64)`（`C0 = 8`）：
+例如 fp32 `(rows, cols) = (128, 64)` 时：
 
-```
+```text
 shape  = [1, 8, 8, 16, 8]
 stride = [8192, 1024, 128, 8, 1]
 ```
 
-**关键结构不变量**（后文规则全部由它推出）：
+标准根视图满足：
 
-```
+```text
 shape[3] == 16
-shape[4] == C0            <=> shape[4] * sizeof(T) == 32
-shape[3] * shape[4] * sizeof(T) == 512      // 一个 fractal = 512B
+shape[4] == C0
 stride[4] == 1
-stride[3] == C0           == shape[4]
-stride[2] == 16 * C0      == shape[3] * shape[4]
+stride[3] == C0
+stride[2] == 16 * C0
 stride[1] == shape[2] * stride[2]
 stride[0] == shape[1] * stride[1]
 ```
 
-## 2. PTOAS 现状
+这里的 element 指 PTOAS/pto-isa C++ 类型的存储元素。对于
+`float4_e1m2x2_t` / `float4_e2m1x2_t`，一个存储元素是一字节 packed pair，
+shape 的列数也按 packed pair 计数，因此 `sizeof(T) == 1`、`C0 == 32`。只有存储
+字节数为 0，或 32 不能被存储字节数整除时，才不能形成 NZ C0。
 
-### 2.1 同一条规则在三处重复实现
+## 2. 当前问题
 
-| 位置 | 函数 | 用途 |
-|---|---|---|
-| `lib/PTO/Transforms/InferPTOLayout.cpp:174` | `inferNZLayout()` | `pto-infer-layout` pass，给 `make_tensor_view` / `reinterpret_cast` / `subview` / `tload` / `tstore` 打 `layout` 属性 |
-| `lib/PTO/IR/PTO.cpp:1836` | `inferLayout()`（`getLogicalViewLayout` 调用） | verifier 侧判断逻辑 layout（如 mgather/mscatter 的 ND 约束，`lib/PTO/IR/PTO.cpp:4366`） |
-| `lib/PTO/Transforms/PTOToEmitC.cpp:4350` | `inferFallbackGlobalTensorLayout()` | EmitC 兜底：`layout` 属性缺失时重新推断 |
+PTOAS 当前在三处重复实现 layout 推断：
 
-三份实现的 NZ 判定条件完全一致（右对齐到 5 维后）：
+| 位置 | 用途 |
+|---|---|
+| `lib/PTO/Transforms/InferPTOLayout.cpp` | 给 view、memref view 和 load/store 附加 layout |
+| `lib/PTO/IR/PTO.cpp` | verifier 获取逻辑 layout |
+| `lib/PTO/Transforms/PTOToEmitC.cpp` | EmitC 缺少 layout 属性时兜底 |
+
+当前 NZ 条件为：
 
 ```cpp
 shape[2] == 16
@@ -77,287 +83,223 @@ stride[4] == 1
 stride[3] == shape[4]
 ```
 
-另有 `lib/PTO/Transforms/PTOCanonicalizeIR.cpp:88` 附近的 rank2 → rank5 规范化，
-与 `rightAlignTo5D()` / `buildGlobalTensorShapeAndStride()` 共用同一套 padding 规则，
-一并纳入"单一实现"的收敛范围。
+它相对 pto-isa 标准形错位一维，并且没有验证 `stride[2..0]`。结果是：
 
-### 2.2 现规则 = 标准形规则"错位一维"
+- canonical `[1,8,8,16,8]` fp32 被判成 ND；
+- `[4,1,16,8,16]` 这类连续 ND 形状被误判成 NZ；
+- 显式 `{layout = #pto.layout<nz>}` 仍会被错误的 pattern 推断否决。
 
-把现规则与第 1 节不变量并排看：
+## 3. 必须保留的语义边界
 
-| 条件 | 现规则 | pto-isa 标准形 | 结论 |
-|---|---|---|---|
-| fractal 行数 | `shape[2] == 16` | `shape[3] == 16` | **错位一维** |
-| fractal 字节 | `shape[2] * shape[3] * eb == 512` | `shape[3] * shape[4] * eb == 512` | **错位一维** |
-| 最内连续 | `stride[4] == 1` | `stride[4] == 1` | 一致 |
-| C0 连续 | `stride[3] == shape[4]` | `stride[3] == shape[4]` | 一致 |
-| fractal 跨度 | 未检查 | `stride[2] == shape[3] * shape[4]` | 缺失 |
-| 分块跨度 | 未检查 | `stride[1] == shape[2] * stride[2]` | 缺失 |
-| batch 跨度 | 未检查 | `stride[0] == shape[1] * stride[1]` | 缺失 |
+canonical NZ 根视图的数值 stride 同时满足连续五维 ND 的累积积关系。因此仅凭
+shape/stride 无法证明用户的逻辑语义一定是 NZ。
 
-两条 stride 条件本来就是对的，**只有两条 align 条件整体错了一维**，再叠加"外层
-stride 完全不校验"，于是同时产生了漏判（标准形判成 ND）和误判（连续 ND 判成 NZ）。
+本 PR 采用一条确定的解析顺序：
 
-### 2.3 复现（本地实测，非推演）
+1. **显式 layout 是权威来源。** 显式 `ND`、`DN`、`NZ` 都不会被 pattern 推断覆盖；
+2. **派生 view 继承已经解析的源 layout。** NZ 子视图需要额外通过 fractal 边界校验；
+3. **只有无显式属性、无源 layout 的根视图才走 pattern 推断；**
+4. pattern 推断把满足 canonical NZ 规则的非退化二维五维形约定为 NZ，其他情况继续
+   使用现有 ND/DN 推断。
 
-用不依赖 python binding 的等价 `.pto` 复现 issue 的两个用例：
+第 4 条是一项 PTOAS 输入约定，不声称它能从数值上区分所有连续 5D ND。用户需要表达
+同 shape/stride 的 ND 时，必须能够通过显式 `layout = nd` 覆盖该约定。
 
-```mlir
-// 用例①：pto-isa canonical 2D NZ 五维形
-%view = pto.make_tensor_view %dst,
-  shape = [%c1, %c8, %c8, %c16, %c8],
-  strides = [%c8192, %c1024, %c128, %c8, %c1]
-  : !pto.tensor_view<1x8x8x16x8xf32>
-%part = pto.partition_view %view,
-  offsets = [%c0, %c0, %c0, %c0, %c0], sizes = [%c1, %c8, %c8, %c16, %c8]
-  : !pto.tensor_view<1x8x8x16x8xf32> -> !pto.partition_tensor_view<1x8x8x16x8xf32>
-%tile = pto.alloc_tile : !pto.tile_buf<loc=vec, dtype=f32, rows=128, cols=64,
-    v_row=128, v_col=64, blayout=col_major, slayout=row_major, fractal=512, pad=0>
-pto.tstore ins(%tile : ...) outs(%part : !pto.partition_tensor_view<1x8x8x16x8xf32>)
-```
+## 4. 唯一实现
 
-`ptoas --pto-arch=a5` 实际输出：
+### 4.1 共享 layout 工具
 
-```cpp
-// ① canonical NZ 形 -> 被判成 ND（错）
-GlobalTensor<float, pto::Shape<1, 8, 8, 16, 8>, pto::Stride<8192, 1024, 128, 8, 1>,
-             pto::Layout::ND>
-
-// ② 迎合现规则的形状 -> 被判成 NZ（本身是连续 ND 数据）
-GlobalTensor<float, pto::Shape<4, 1, 16, 8, 16>, pto::Stride<2048, 2048, 128, 16, 1>,
-             pto::Layout::NZ>
-```
-
-**第三个症状（issue 未提，但更致命）**：用户显式标注也救不回来。给用例①的
-`make_tensor_view` 加上 `{layout = #pto.layout<nz>}`：
-
-```
-error: layout mismatch: user-specified layout=nz but inferred=nd
-```
-
-来源是 `lib/PTO/Transforms/InferPTOLayout.cpp:275` 的 `verifyOrSetLayoutAttr()`：
-推断结果被当作"真值"去否决用户显式声明。也就是说目前**既推不出 NZ，也没有逃生通道**。
-
-## 3. 一个必须先承认的约束
-
-把第 1 节的 stride 展开：
-
-```
-stride[2] = shape[3] * stride[3]
-stride[1] = shape[2] * stride[2]
-stride[0] = shape[1] * stride[1]
-```
-
-这正是五维**连续（行主序累积积）**的定义。结论：
-
-> **NZ 五维标准形，在 shape/stride 数值上与"同 shape 的连续 ND 五维视图"完全相同，
-> 无法区分。**
-
-差异只存在于"这 5 个维度分别代表什么"这个语义层面，不存在于内存 pattern 层面。
-由此推出两条设计原则：
-
-- **P1：layout 应该被"携带"，而不是被"猜"。** 显式 `layout` 属性必须是权威来源，
-  推断只是缺省兜底。
-- **P2：纯 pattern 推断必须带消歧门槛。** 否则任何"末两维恰好是 `(16, 32/sizeof(T))`
-  的连续视图"都会被升级成 NZ —— 包括最常见的 `16 x C0` 二维小 tile。
-
-P2 不是理论担忧，第 5 节有实测数据。
-
-## 4. 设计方案
-
-### 4.1 收敛为唯一实现
-
-新增 `include/PTO/IR/PTOLayoutUtils.h` + `lib/PTO/IR/PTOLayoutUtils.cpp`，导出：
+新增 `include/PTO/IR/PTOLayoutUtils.h` 和
+`lib/PTO/IR/PTOLayoutUtils.cpp`，集中实现：
 
 ```cpp
 namespace mlir::pto {
 
-// C0 = 32 / elemBytes；elemBytes 不能整除 32 时返回 nullopt（sub-byte / packed 类型）
-std::optional<int64_t> getNZC0Elems(unsigned elemBytes);
+std::optional<int64_t>
+getNZC0StorageElems(unsigned storageElemBytes);
 
-// 结构必要条件：shape/stride 是否是 pto-isa NZ 五维标准形
-bool isNZCompatible5D(ArrayRef<int64_t> shape5D, ArrayRef<int64_t> stride5D,
-                      unsigned elemBytes);
+bool hasNZInnerStructure5D(ArrayRef<int64_t> shape5D,
+                           ArrayRef<int64_t> stride5D,
+                           unsigned storageElemBytes);
 
-struct LayoutInferOptions {
-  bool allowNZFromPatternOnly = true;   // 无外部证据时是否允许纯 pattern 判 NZ
-  std::optional<Layout> preferredMinor2D;  // 现有 ND/DN 歧义消解入口
-};
+bool isNZViewCompatible5D(ArrayRef<int64_t> shape5D,
+                          ArrayRef<int64_t> stride5D,
+                          unsigned storageElemBytes);
 
-std::optional<Layout> inferLayout5D(ArrayRef<int64_t> shape5D,
-                                    ArrayRef<int64_t> stride5D,
-                                    unsigned elemBytes,
-                                    const LayoutInferOptions &opts,
-                                    bool *isMinor2DAmbiguous = nullptr);
+bool isCanonicalNZRoot5D(ArrayRef<int64_t> shape5D,
+                         ArrayRef<int64_t> stride5D,
+                         unsigned storageElemBytes);
+
+std::optional<Layout>
+inferLayout5D(ArrayRef<int64_t> shape5D,
+              ArrayRef<int64_t> stride5D,
+              unsigned storageElemBytes,
+              std::optional<Layout> preferredMinor2D = std::nullopt,
+              bool *isMinor2DAmbiguous = nullptr);
+
 } // namespace mlir::pto
 ```
 
-`InferPTOLayout.cpp` / `PTO.cpp` / `PTOToEmitC.cpp` 三处改为调用同一实现，
-删除各自的私有副本。这一步是纯重构（NFC），单独成 PR，便于回归定位。
+`InferPTOLayout.cpp`、`PTO.cpp`、`PTOToEmitC.cpp` 都调用这套实现，删除各自的私有
+NZ/ND/DN 判定副本。调用点必须先解析显式属性和源 view 属性，只有确实缺失 layout 时
+才调用 `inferLayout5D()`。
 
-### 4.2 `isNZCompatible5D`：结构必要条件
+### 4.2 根视图与子视图使用不同谓词
 
-```cpp
-bool isNZCompatible5D(shape, stride, elemBytes) {
-  auto c0 = getNZC0Elems(elemBytes);            // 32 % elemBytes != 0 -> false
-  if (!c0) return false;
-  return shape[3] == 16 && shape[4] == *c0
-      && stride[4] == 1
-      && stride[3] == *c0
-      && stride[2] == 16 * *c0
-      && stride[1] == shape[2] * stride[2]
-      && stride[0] == shape[1] * stride[1];
-}
-```
-
-用途有两个，且**两个用途门槛不同**（这是本设计的核心）：
-
-- 校验显式 `layout = nz` 是否自洽 —— 只看这个谓词；
-- 无显式 layout 时的推断 —— 还要过 4.3 的门槛。
-
-### 4.3 推断门槛：只认"不可能是二维 ND 视图"的形状
+`isCanonicalNZRoot5D()` 只用于无 layout 根视图的 pattern 推断，要求完整的紧密
+canonical stride：
 
 ```cpp
-bool inferNZFromPattern(shape, stride, elemBytes) {
-  return isNZCompatible5D(shape, stride, elemBytes)
-      && shape[0] == 1                        // 二维 NZ，batch 维恒为 1
-      && (shape[1] > 1 || shape[2] > 1);      // 至少有一个分块维非退化
-}
+hasNZInnerStructure5D(shape, stride, bytes)
+    && stride[1] == shape[2] * stride[2]
+    && stride[0] == shape[1] * stride[1]
 ```
 
-两个附加条件的理由：
+`hasNZInnerStructure5D()` 只描述不能被切开的内部 fractal：
 
-- `shape[0] == 1`：issue 要求的是**二维** NZ；`batch > 1` 的形状在 pto-isa 侧没有
-  对应的 `TileShape2D`，留给显式标注，避免把连续五维 ND 张量整片吃掉。
-- `shape[1] > 1 || shape[2] > 1`：`[1,1,1,16,C0]` 是 rank2 视图规范化后的标准产物
-  （`PTOCanonicalizeIR`），也是最常见的 `16 x C0` 向量 tile。此时 NZ 与 ND 的字节
-  排布**完全等价**（单 fractal），判成 NZ 没有任何收益，却会改变生成的 C++ 模板参数、
-  进而影响 pto-isa 侧的重载选择。实测这条门槛消除了 100% 的新增误判（第 5 节）。
-
-保留 `LayoutInferOptions::allowNZFromPatternOnly`，是为了给"上层已经有更强证据"的
-调用点（例如 mgather/mscatter 的 ND-only 校验路径）一个关掉 pattern 推断的开关。
-
-### 4.4 显式 layout 优先
-
-`verifyOrSetLayoutAttr()` 的语义调整为：
-
-| 显式属性 | 结构自洽性 | 现行为 | 新行为 |
-|---|---|---|---|
-| `nz` | `isNZCompatible5D == true` | **报错** | 接受，保留 `nz`，不打 `pto.inferred_layout` |
-| `nz` | `isNZCompatible5D == false` | 报错 | 报错，但错误信息升级为"哪一条不变量不满足" |
-| `nd`/`dn` | 与推断不同 | 现有 minor-2D 歧义豁免 | 不变 |
-
-这条直接解决 2.3 的第三个症状：即使 pattern 推断因门槛保守而不升级 NZ，用户/前端
-也永远有一条显式通道。诊断信息形如：
-
-```
-error: layout mismatch: user-specified layout=nz but shape/stride is not an NZ
-       5D form: expected shape[3]==16 (got 8), shape[4]==8 (C0 for f32, got 16)
+```cpp
+shape[3] == 16
+shape[4] == C0
+stride[4] == 1
+stride[3] == C0
+stride[2] == 16 * C0
 ```
 
-### 4.5 `partition_view` / `memref.subview` 的 NZ 传播
+`isNZViewCompatible5D()` 在内部结构之上验证当前 view 的外层跨度：
 
-现状：`InferPTOLayout.cpp` 的 subview 分支无条件继承源 layout。对 NZ 这是不安全的
-—— 在 fractal 内部切分后，结果已经不是合法 NZ。规则改为：
+```cpp
+hasNZInnerStructure5D(shape, stride, bytes)
+    && shape[0] == 1
+    && stride[1] >= shape[2] * stride[2]
+    && stride[1] % C0 == 0
+    && stride[0] >= shape[1] * stride[1]
+    && stride[0] % C0 == 0
+```
 
-1. 源为 NZ 时，只有当切分满足以下条件才继承 NZ：
-   - `d3`/`d4` 维保持完整（offset 为 0、size 等于源 size）；
-   - `d1`/`d2` 维的 size 可缩小，但 stride 保持不变；
-   - offset 在 `d1`/`d2` 上按整块对齐。
-2. 不满足时不 silently 退回 ND，而是发 `emitError`（"NZ view cannot be partitioned
-   inside a fractal"），避免生成静默错码。
+它允许 `stride[0]` / `stride[1]` 包含按 C0 对齐的外层 gap，但不允许负 gap、重叠
+或破坏 32B block 对齐。`isCanonicalNZRoot5D()` 等价于
+`isNZViewCompatible5D()` 再要求两个外层 stride 都等于当前 shape 的紧密跨度。
 
-issue 明确提到 `partition_tensor_view`，这条属于本次范围内。
+不能使用根视图的外层紧密 stride 等式验证 partition 结果。合法子视图缩小 `d1`
+或 `d2` 后会保留父 stride，此时 `stride[0]` 或 `stride[1]` 可以大于当前子视图的
+紧密跨度；pto-isa 的 NZ load/store 使用这个差值表示外层 gap。
 
-### 4.6 动态形状（阶段二）
+### 4.3 无属性根视图的 NZ 约定
 
-pto-isa 的 `TileShape2D`/`BaseShape2D` 允许 `rows`/`cols` 为 `DYNAMIC`，此时
-`shape[1]`、`shape[2]`、`stride[0]`、`stride[1]` 动态，而结构维
-（`shape[3]`、`shape[4]`、`stride[2..4]`）仍是静态常量。因此可以在
-"结构维静态 + 分块维动态"时仍判定 NZ。当前实现要求全部 const-fold，直接放弃推断
-（`getStaticShapeAndStride()` 返回 false），属于可独立推进的增强，放到阶段二。
+无显式 layout 且没有可继承源 layout 时，按以下唯一规则推断 NZ：
 
-### 4.7 与旧规则的兼容策略
+```cpp
+isCanonicalNZRoot5D(shape, stride, storageElemBytes)
+    && shape[0] == 1
+    && (shape[1] > 1 || shape[2] > 1)
+```
 
-| 方案 | 说明 | 评价 |
-|---|---|---|
-| A. 直接替换 | 只保留标准形规则 | **推荐**。旧规则命中的非标准形本质是误判，继续保留会持续生成错误的 `GlobalTensor` 模板参数 |
-| B. 并集（新规则 OR 旧规则） | 兼容一切现有行为 | 不推荐：把"连续 ND 判成 NZ"固化成契约 |
-| C. 替换 + 一个版本的过渡开关 | 加 `--pto-legacy-nz-infer`（默认关） | 若下游有存量依赖再启用；本次实测影响面极小（第 5 节），倾向不引入 |
+`[1,1,1,16,C0]` 单 fractal 不自动升级为 NZ，因为它是 rank2
+`[16,C0]` ND 视图规范化后的常见形状。用户确实需要单 fractal NZ 时使用显式
+`layout = nz`。
 
-推荐 A，若 review 中出现下游存量用例再降级到 C。
+显式 `layout = nd` 必须覆盖上述 pattern 约定。例如 fp32：
 
-## 5. 影响面实测
+```text
+shape  = [1, 2, 1, 16, 8]
+stride = [256, 128, 128, 8, 1]
+layout = nd
+```
 
-方法：用当前 `ptoas` 对 `test/lit/pto/*.pto`（476）+ `test/lit/tile_fusion/*.pto`（42）
-分别按 `--pto-arch=a5` 和 `--pto-arch=a3` 跑一遍，抽取全部生成的
-`GlobalTensor<elem, Shape<...>, Stride<...>, Layout::X>`（含 `using GTShape_*` 别名形式），
-再离线对同一批 shape/stride 分别套用旧规则、标准形规则、带门槛的标准形规则。
+该 shape/stride 同时符合 canonical NZ 数值形式和连续 5D ND，PTOAS 必须保留用户
+声明的 ND，不得报 layout mismatch。
 
-样本：242 个文件产生输出，共 **1558** 个 `GlobalTensor` 实例化点，
-**64** 组去重后的 `(elem, shape, stride)`。当前 layout 分布：ND 1007 / NZ 529 / DN 22。
+### 4.4 显式 layout 校验
 
-| 项 | 结果 |
-|---|---|
-| 当前判为 NZ 的去重形状 | 5 组 |
-| 其中符合 pto-isa 标准形（改后仍为 NZ） | 2 组：`half`/`bfloat16_t` `[1,1,16,16,16]` `stride=[4096,4096,256,16,1]` |
-| 其中由显式属性设置（不走推断，不受影响） | 1 组：`tinsert_a5_vec_mat_mode_lowering` 的 `half [1,1,1,32,32]` |
-| **改后会失去 NZ** | 2 组：`int8_t [1,1,16,32,16]`、`int64_t [1,1,16,4,1]` —— 全部只出现在 `test/lit/pto/globaltensor_layout_bytewidth_emitc.pto` |
-| 不带门槛时新增 NZ | 4 组 / 80 个点 / 38 个文件，**全部**是 `[1,1,1,16,C0]` 退化单 fractal（`float`/`half`/`float8_e4m3_t`/`hifloat8_t`） |
-| **带门槛（4.3）新增 NZ** | **0** |
+显式属性不再与 pattern 推断结果比较，而是按其自身语义校验：
 
-两点解读：
+- 显式 `NZ` 根视图必须满足 NZ 内部 fractal 结构；canonical 紧密 stride 和合法的
+  外层 block gap 都可接受，统一使用 `isNZViewCompatible5D()` 校验；
+- 显式 `ND` / `DN` 沿用现有各自的布局校验和 minor-2D 歧义处理；
+- 校验失败时报告具体的 shape/stride 不变量，不回退到其他 layout；
+- 显式属性不附加 `pto.inferred_layout`。
 
-1. 门槛条款把误判从 80 个点压到 0，验证了 P2 的必要性。
-2. 唯一需要改期望值的测试是 `globaltensor_layout_bytewidth_emitc.pto`
-   （`comm.tbroadcast` 的 i8/i64 用例）。这两组形状按 pto-isa 定义本来就不是 NZ
-   （i8 的 `C0 = 32`，标准形应为 `[1, cols/32, rows/16, 16, 32]`），当前期望值本身
-   固化了 2.2 的错位 bug。改测试前需确认 `comm.tbroadcast` 侧对 `Layout` 是否敏感。
+### 4.5 NZ partition/subview 传播
 
-另需交叉验证：`PTO.cpp:4366` 的 mgather/mscatter "mem partition view 必须是 ND"校验
-走的是同一套推断。规则收紧后，理论上存在"原本判 ND 的五维 mem view 变成 NZ 导致新
-报错"的可能；带门槛后本地 lit 语料未观察到，但需要在实现 PR 里补一条针对性用例。
+源 layout 为 NZ 时，`partition_view` 和 `memref.subview` 按源 view 校验：
 
-## 6. 实施拆分
+- `d3`、`d4` 必须完整保留：offset 为 0，size 等于源 size；
+- `d1`、`d2` 可以缩小，结果保留源 stride；
+- `d1`、`d2` 的一个坐标单位本身就是一个完整 block，因此任意合法整数 offset
+  都是 block 边界，不再增加含义不清的二次对齐条件；
+- 二维 NZ 的 `d0` 保持 `offset = 0`、`size = 1`；
+- 校验通过后直接继承 NZ，不再用 `isCanonicalNZRoot5D()` 重新推断；
+- 在 `d3`/`d4` 内部切分时发出错误，不静默改成 ND。
 
-| PR | 内容 | 风险 |
-|---|---|---|
-| P1 | 抽出 `PTOLayoutUtils`，三处调用点收敛，行为完全不变（NFC） | 低 |
-| P2 | 标准形规则 + 4.3 门槛 + 4.7 方案 A；更新 `globaltensor_layout_bytewidth_emitc.pto` | 中 |
-| P3 | 4.4 显式 layout 优先 + 诊断信息细化 | 低 |
-| P4 | 4.5 partition/subview NZ 传播校验 | 中 |
-| P5 | 4.6 动态形状支持（可选） | 中 |
+动态 `d1`/`d2` offset 和 size 不改变 fractal 内部结构，可以传播 NZ。`d3`/`d4`
+是否完整必须能够在编译期证明，否则报错。
 
-跨层同步检查（按 `.claude/rules/cross-layer-sync.md`）：本设计不改 ODS 算子签名，
-`PTO_LayoutAttr` 已存在 `nz`；需要同步的是 IR verifier（`PTO.cpp`）、pass
-（`InferPTOLayout.cpp`）、EmitC（`PTOToEmitC.cpp`）、以及 python 侧
-`make_tensor_view` 的 `layout` 传参样例与文档。
+### 4.6 动态 shape/stride
 
-## 7. 测试计划
+显式或继承的 layout 在动态 shape 下继续携带。校验所有编译期已知的结构维，不使用
+未知值否决显式 NZ。
 
-新增 `test/lit/pto/issue527_nz_canonical_view_infer.pto`（a5 + a3 双 RUN），覆盖：
+无属性根视图只有在 NZ 内部结构和非退化门槛都能在编译期证明时才自动推断 NZ；无法
+证明时不猜测，沿用 ND/DN fallback，调用方应提供显式 layout。
 
-1. **正例**：canonical `[1,8,8,16,8]` fp32 → `pto::Layout::NZ`；
-2. **正例**：`half` `[1,4,8,16,16]`、`int8_t` `[1,2,8,16,32]` → NZ（验证 C0 随 dtype 变化）；
-3. **负例**：issue 用例② `[4,1,16,8,16]` → `ND`（旧规则误判被修掉）；
-4. **负例**：`[1,1,1,16,8]` 单 fractal → 保持 `ND`（门槛条款，防回归 80 个点）；
-5. **负例**：stride 被打断（如 `stride[1]` 非 `shape[2]*stride[2]`）→ `ND`；
-6. **显式通道**：canonical 形 + `{layout = #pto.layout<nz>}` → 不再报
-   `layout mismatch`，且输出 NZ；
-7. **显式冲突**：`[4,1,16,8,16]` + `{layout = #pto.layout<nz>}` → 报错且信息指明
-   是哪条不变量不满足；
-8. **partition**：对 NZ 视图在 `d1` 上整块切分 → 继承 NZ；在 `d3` 内部切分 → 报错。
+### 4.7 旧规则处理
 
-E2E：`test/tilelang_st/npu/a5` 下补一条 NZ store 用例（若板卡资源允许），
-用 `nz_store_probe.py` 的逻辑做数据比对，确认生成的 C++ 与 pto-isa 语义一致。
+直接删除旧的错位 NZ 判定，只保留本设计定义的标准规则。不保留旧规则并集，不增加
+legacy 开关。旧规则命中的非标准形属于误判，继续兼容会固定错误的
+`GlobalTensor<..., Layout::NZ>` 模板参数。
 
-## 8. 待确认问题
+## 5. 影响面
 
-1. **是否接受 4.7 方案 A**（直接替换旧规则）？影响面只有一个 lit 测试的 2 组期望值。
-2. **`batch > 1` 的 NZ**（`shape[0] > 1`）是否需要推断？当前设计只在显式标注时接受。
-3. **sub-byte / packed 类型**（`int4`、`float4_e1m2x2`）：`32 % elemBytes` 语义如何定义？
-   当前设计直接不推断 NZ，需 pto-isa 侧确认是否存在这类 NZ 用法。
-4. `comm.tbroadcast` 路径对 `GlobalTensor` 的 `Layout` 模板参数是否敏感？
-   决定 `globaltensor_layout_bytewidth_emitc.pto` 的期望值怎么改。
-5. `mgather`/`mscatter` 的 "mem 必须 ND" 约束，在 mem 确实是 NZ 五维时是否应放开，
-   还是维持报错（本设计维持现状，仅补测试）。
+对 `test/lit/pto/*.pto` 和 `test/lit/tile_fusion/*.pto` 的现有样本扫描得到：
+
+- 242 个文件生成 1558 个 `GlobalTensor` 实例化点；
+- 当前 NZ 去重形状中，两组符合 pto-isa 标准形；
+- 两组只存在于 `globaltensor_layout_bytewidth_emitc.pto` 的旧错位形状将改回 ND；
+- 不加非退化门槛时，38 个文件中的 80 个单-fractal ND 视图会被升级成 NZ；
+- 加门槛后，当前语料没有新增 NZ。
+
+“当前语料没有新增 NZ”仅是回归影响数据，不代表 shape/stride 已经从理论上完成 ND/NZ
+消歧。因此实现仍必须保证所有显式 layout 优先，并增加“canonical 数值形式 +
+显式 ND”的反例测试。
+
+`mgather`/`mscatter` 的 ND-only 校验也必须使用同一解析顺序：显式/继承 layout
+优先，缺失时才 pattern 推断。真实 NZ 仍按现有约束报错；显式 ND 不得被 heuristic
+改成 NZ。
+
+## 6. 本 PR 的实现范围
+
+PR #1027 在现有设计提交之后继续完成以下内容：
+
+- 新增共享 `PTOLayoutUtils`；
+- 同步 IR verifier、layout pass 和 EmitC fallback；
+- 实现显式 layout 全优先；
+- 替换旧 NZ 规则；
+- 实现 NZ partition/subview 的 source-relative 校验和传播；
+- 补齐静态、动态、packed storage element 和跨调用点一致性测试；
+- 更新用户文档及 Python `make_tensor_view` 的显式 layout 示例。
+
+不再拆分成多个后续 PR。上述实现和验证全部完成后将 #1027 转为 ready；合入该 PR
+即关闭 #527。
+
+## 7. 测试要求
+
+新增 `test/lit/pto/issue527_nz_canonical_view_infer.pto`，至少覆盖：
+
+1. fp32 canonical `[1,8,8,16,8]` 自动推断 NZ；
+2. half `[1,4,8,16,16]`、int8 `[1,2,8,16,32]` 自动推断 NZ；
+3. 旧错位形状 `[4,1,16,8,16]` 推断 ND；
+4. 单 fractal `[1,1,1,16,C0]` 无属性时保持 ND；
+5. 单 fractal 显式 NZ 时保留 NZ；
+6. canonical 数值形式 `[1,2,1,16,8]` 显式 ND 时保留 ND；
+7. canonical NZ 显式 NZ 时不再出现 layout mismatch；
+8. 非法 NZ 内部 shape/stride 显式 NZ 时给出精确诊断；
+9. `d1`、`d2` 分别缩小的 partition 保留父 stride 并继承 NZ；
+10. `d3` 或 `d4` 内部切分时报错；
+11. 嵌套 partition 继续从已经解析的源 layout 传播；
+12. FP4 packed-pair 按一字节 storage element 计算 C0；
+13. verifier、pass 和 EmitC 对同一 view 得到一致 layout；
+14. mgather/mscatter 的 ND-only 路径不覆盖显式 ND。
+
+同时更新 `globaltensor_layout_bytewidth_emitc.pto` 中固化旧错位规则的期望值，并增加
+A3/A5 编译覆盖。具备板卡资源时运行一条 NZ load/store E2E 数据比对，确认生成的
+`GlobalTensor` shape、stride、layout 与 pto-isa 行为一致。
