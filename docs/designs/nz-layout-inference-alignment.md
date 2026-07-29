@@ -130,6 +130,21 @@ bool isCanonicalNZRoot5D(ArrayRef<int64_t> shape5D,
                          ArrayRef<int64_t> stride5D,
                          unsigned storageElemBytes);
 
+std::optional<std::string>
+getNZViewCompatibilityError(ArrayRef<int64_t> shape5D,
+                            ArrayRef<int64_t> stride5D,
+                            unsigned storageElemBytes);
+
+std::optional<std::string>
+getNZSubviewCompatibilityError(ArrayRef<int64_t> sourceShape5D,
+                               ArrayRef<int64_t> offsets5D,
+                               ArrayRef<int64_t> sizes5D);
+
+bool isLayoutCompatible5D(Layout layout,
+                          ArrayRef<int64_t> shape,
+                          ArrayRef<int64_t> stride,
+                          unsigned storageElemBytes);
+
 std::optional<Layout>
 inferLayout5D(ArrayRef<int64_t> shape5D,
               ArrayRef<int64_t> stride5D,
@@ -215,7 +230,9 @@ layout = nd
 
 - 显式 `NZ` 根视图必须满足 NZ 内部 fractal 结构；canonical 紧密 stride 和合法的
   外层 block gap 都可接受，统一使用 `isNZViewCompatible5D()` 校验；
-- 显式 `ND` / `DN` 沿用现有各自的布局校验和 minor-2D 歧义处理；
+- 显式 `ND` / `DN` 保持为逻辑布局的权威声明。它们不承诺当前 view 是紧密
+  minor-2D 存储，因此不使用 dense stride 递推拒绝已有的 interleaved/gapped
+  view；minor-2D 歧义处理只用于无显式 layout 的推断；
 - 校验失败时报告具体的 shape/stride 不变量，不回退到其他 layout；
 - 显式属性不附加 `pto.inferred_layout`。
 
@@ -229,6 +246,8 @@ layout = nd
   都是 block 边界，不再增加含义不清的二次对齐条件；
 - 二维 NZ 的 `d0` 保持 `offset = 0`、`size = 1`；
 - 校验通过后直接继承 NZ，不再用 `isCanonicalNZRoot5D()` 重新推断；
+- `partition_view` 可以继续以 `partition_tensor_view` 为源，嵌套切分逐级沿源链
+  继承同一个 layout；
 - 在 `d3`/`d4` 内部切分时发出错误，不静默改成 ND。
 
 动态 `d1`/`d2` offset 和 size 不改变 fractal 内部结构，可以传播 NZ。`d3`/`d4`
@@ -370,7 +389,8 @@ error: NZ view cannot be partitioned inside a fractal:
 
 - 242 个文件生成 1558 个 `GlobalTensor` 实例化点；
 - 当前 NZ 去重形状中，两组符合 pto-isa 标准形；
-- 两组只存在于 `globaltensor_layout_bytewidth_emitc.pto` 的旧错位形状将改回 ND；
+- 两组只存在于 `globaltensor_layout_bytewidth_emitc.pto` 的旧错位形状不再是 NZ：
+  int8 样例回到 ND，末维为 1 的 int64 样例按既有 minor-2D 规则回到 DN；
 - 不加非退化门槛时，38 个文件中的 80 个单-fractal ND 视图会被升级成 NZ；
 - 加门槛后，当前语料没有新增 NZ。
 

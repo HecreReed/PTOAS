@@ -1213,6 +1213,8 @@ static LogicalResult lowerPtrToIntOps(func::FuncOp func, MLIRContext *ctx) {
       rc->setAttr("pto.addptr_trace", rewriter.getUnitAttr());
     if (auto layoutAttr = op.getLayoutAttr())
       rc->setAttr("layout", layoutAttr);
+    if (auto inferredAttr = op->getAttrOfType<BoolAttr>("pto.inferred_layout"))
+      rc->setAttr("pto.inferred_layout", inferredAttr);
     rewriter.replaceOp(op, rc.getResult());
   }
   return success();
@@ -1380,6 +1382,9 @@ static LogicalResult lowerPartitionViewOps(func::FuncOp func, MLIRContext *ctx) 
     if (Operation *srcDef = src.getDefiningOp()) {
       if (auto layoutAttr = srcDef->getAttrOfType<pto::LayoutAttr>("layout"))
         sv->setAttr("layout", layoutAttr);
+      if (auto inferredAttr =
+              srcDef->getAttrOfType<BoolAttr>("pto.inferred_layout"))
+        sv->setAttr("pto.inferred_layout", inferredAttr);
     }
     rewriter.replaceOp(op, sv.getResult());
   }
@@ -2191,6 +2196,10 @@ struct PTOViewToMemrefPass
         }
         if (auto layoutAttr = op.getLayoutAttr()) {
           rc->setAttr("layout", layoutAttr);
+        }
+        if (auto inferredAttr =
+                op->getAttrOfType<BoolAttr>("pto.inferred_layout")) {
+          rc->setAttr("pto.inferred_layout", inferredAttr);
         }
 
         rewriter.replaceOp(op, rc.getResult());

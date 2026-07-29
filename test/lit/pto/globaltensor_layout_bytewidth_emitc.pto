@@ -7,6 +7,7 @@
 // See LICENSE in the root of the software repository for the full text of the License.
 
 // RUN: ptoas --pto-arch=a3 %s 2>&1 | FileCheck %s --check-prefix=A3
+// RUN: ptoas --pto-arch=a5 %s 2>&1 | FileCheck %s --check-prefix=A3
 
 module {
   func.func @comm_globaltensor_bf16_nz(
@@ -40,9 +41,9 @@ module {
 // A3: using [[BF16_GT:GT.*]] = GlobalTensor<bfloat16_t, [[BF16_SHAPE]], [[BF16_STRIDE]], [[BF16_LAYOUT]]>;
 // A3: using [[I8_SHAPE:GTShape.*]] = pto::Shape<1, 1, 16, 32, 16>;
 // A3: using [[I8_STRIDE:GTStride.*]] = pto::Stride<8192, 8192, 512, 16, 1>;
-// A3: constexpr pto::Layout [[I8_LAYOUT:GT.*_layout]] = pto::Layout::NZ;
+// A3: constexpr pto::Layout [[I8_LAYOUT:GT.*_layout]] = pto::Layout::ND;
 // A3: using [[I8_GT:GT.*]] = GlobalTensor<int8_t, [[I8_SHAPE]], [[I8_STRIDE]], [[I8_LAYOUT]]>;
 // A3: using [[I64_SHAPE:GTShape.*]] = pto::Shape<1, 1, 16, 4, 1>;
 // A3: using [[I64_STRIDE:GTStride.*]] = pto::Stride<64, 64, 4, 1, 1>;
-// A3: constexpr pto::Layout [[I64_LAYOUT:GT.*_layout]] = pto::Layout::NZ;
+// A3: constexpr pto::Layout [[I64_LAYOUT:GT.*_layout]] = pto::Layout::DN;
 // A3: using [[I64_GT:GT.*]] = GlobalTensor<int64_t, [[I64_SHAPE]], [[I64_STRIDE]], [[I64_LAYOUT]]>;

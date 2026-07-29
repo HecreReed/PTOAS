@@ -16,8 +16,9 @@
 #include <climits>
 
 #include "PTO/IR/PTO.h"
-#include "PTO/IR/PTOTypeUtils.h"
+#include "PTO/IR/PTOLayoutUtils.h"
 #include "PTO/IR/PTOSyncUtils.h"
+#include "PTO/IR/PTOTypeUtils.h"
 #include "PTO/Transforms/MemoryConsistencyAttrs.h"
 #include "PTO/Transforms/Passes.h"
 #include "Utils.h"
@@ -4350,25 +4351,9 @@ static emitc::OpaqueType getGlobalTensorOpaqueTypeFromShape(
 static std::string inferFallbackGlobalTensorLayout(ArrayRef<int64_t> shape5D,
                                                    ArrayRef<int64_t> stride5D,
                                                    Type elemTy) {
-  int elemBytes = getGlobalTensorElementBytes(elemTy);
-  if (elemBytes == 0)
-    return "pto::Layout::ND";
-  if (shape5D[2] == 16 && multiplyOrDynamic(shape5D[2], shape5D[3]) * elemBytes == 512 &&
-      stride5D[4] == 1 && stride5D[3] == shape5D[4]) {
-    return "pto::Layout::NZ";
-  }
-
-  bool isRowMajor = stride5D[4] == 1;
-  for (int i = 3; i >= 0 && isRowMajor; --i)
-    isRowMajor = stride5D[i] == multiplyOrDynamic(stride5D[i + 1], shape5D[i + 1]);
-
-  bool isColMajor = stride5D[0] == 1;
-  for (int i = 0; i < 4 && isColMajor; ++i)
-    isColMajor = stride5D[i + 1] == multiplyOrDynamic(stride5D[i], shape5D[i]);
-
-  if (isColMajor)
-    return "pto::Layout::DN";
-  return isRowMajor ? "pto::Layout::ND" : "pto::Layout::ND";
+  auto layout =
+      inferLayout5D(shape5D, stride5D, getGlobalTensorElementBytes(elemTy));
+  return layoutToEmitCString(layout.value_or(Layout::ND));
 }
 
 static std::string resolveGlobalTensorLayout(Operation *anchor, Value basePtr,

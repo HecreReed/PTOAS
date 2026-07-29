@@ -50,6 +50,10 @@ def PtrOrMemRef :
 def TileBufOrMemRef :
   AnyTypeOf<[TileBufType, AnyMemRef], "TileBuf or MemRef">;
 
+def TensorViewOrPartitionView :
+  AnyTypeOf<[TensorViewType, PartitionTensorViewType],
+            "TensorView or PartitionTensorView">;
+
 def ScalarPtrOrMemRef :
   TypeConstraint<
     CPred<"::mlir::pto::isScalarPtrOrMemRef($_self)">,
@@ -257,7 +261,7 @@ def PartitionViewOp : PTO_Op<"partition_view", [AttrSizedOperandSegments]> {
   }];
 
   let arguments = (ins
-    TensorViewType:$source,    // 输入: 物理大底座 (MakeTensorViewOp 的结果)
+    TensorViewOrPartitionView:$source,
     Variadic<Index>:$offsets,  // 动态 offsets
     Variadic<Index>:$sizes     // 动态 sizes
   );
