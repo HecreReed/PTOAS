@@ -3,14 +3,14 @@
 // CANN Open Software License Agreement Version 2.0 (the "License").
 // Please refer to the License for details. You may not use this file except in compliance with the License.
 // THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
-// INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+// INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY OR FITNESS FOR A PARTICULAR PURPOSE.
 // See LICENSE in the root of the software repository for the full text of the License.
 
 // Regression for issue #872 under the explicit memory-consistency contract:
 // pto.comm.tput/pto.comm.tbroadcast can issue MTE3 GM stores internally. A
 // following TNotify publishes a cross-rank signal, so the producer side must
 // execute a GM fence before the signal. In a vector kernel, the fence lowering
-// drains all vector pipes with PIPE_ALL before dsb(DSB_DDR).
+// drains all pipes with PIPE_ALL before dsb(DSB_DDR).
 
 // RUN: ptoas --pto-arch=a3 %s -o - 2>&1 | FileCheck %s
 

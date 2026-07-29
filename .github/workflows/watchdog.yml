@@ -14,11 +14,51 @@ on:
     types: [completed]
 
 permissions:
-  actions: write
+  actions: read
   contents: read
   pull-requests: read
 
 jobs:
+  warn-slow-ci-sim:
+    if: ${{ github.event.workflow_run.event == 'pull_request' }}
+    runs-on: ubuntu-22.04
+    continue-on-error: true
+    permissions:
+      actions: read
+      contents: read
+      issues: write
+      pull-requests: read
+    env:
+      SOFT_TIMEOUT_MINUTES: ${{ vars.CI_SIM_SOFT_TIMEOUT_MINUTES || '90' }}
+      PR_CONTEXT_DIR: pr-context
+    steps:
+      # workflow_run executes this workflow from the default branch, so this
+      # checkout never runs a script supplied by the pull request.
+      - name: Checkout trusted watchdog scripts
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ github.repository }}
+          ref: ${{ github.event.repository.default_branch }}
+          persist-credentials: false
+
+      - name: Download PR context
+        uses: actions/download-artifact@v4
+        continue-on-error: true
+        with:
+          name: pr-context
+          path: pr-context
+          run-id: ${{ github.event.workflow_run.id }}
+          github-token: ${{ github.token }}
+
+      - name: Update slow CI warning
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ github.token }}
+          retries: 3
+          script: |
+            const observeRun = require('./.github/scripts/ci_sim_duration_warning.js');
+            core.info(await observeRun({github, context}));
+
   rerun-self-hosted-git-failure:
     if: >-
       ${{
@@ -26,6 +66,10 @@ jobs:
         github.event.workflow_run.run_attempt <= 8
       }}
     runs-on: ubuntu-22.04
+    permissions:
+      actions: write
+      contents: read
+      pull-requests: read
     steps:
       - name: Download PR context
         uses: actions/download-artifact@v4

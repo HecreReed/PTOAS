@@ -3,13 +3,13 @@
 // CANN Open Software License Agreement Version 2.0 (the "License").
 // Please refer to the License for details. You may not use this file except in compliance with the License.
 // THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
-// INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+// INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY OR FITNESS FOR A PARTICULAR PURPOSE.
 // See LICENSE in the root of the software repository for the full text of the License.
 
 // Explicit signal/payload memory-consistency IR lowering. PTOAS no longer runs
 // the historical MemoryConsistency analysis pass, so this test only checks the
-// public CMO/fence ops. In a vector kernel, the GM fence lowering drains all
-// vector pipes with PIPE_ALL before dsb(DSB_DDR).
+// public CMO/fence ops. In vector kernels, the GM fence lowering drains all
+// pipes with PIPE_ALL before dsb(DSB_DDR).
 
 // RUN: ptoas --pto-arch=a3 %s -o - 2>&1 | FileCheck %s
 
