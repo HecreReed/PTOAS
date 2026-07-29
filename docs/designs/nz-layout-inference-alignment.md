@@ -248,7 +248,123 @@ layout = nd
 legacy 开关。旧规则命中的非标准形属于误判，继续兼容会固定错误的
 `GlobalTensor<..., Layout::NZ>` 模板参数。
 
-## 5. 影响面
+## 5. 示例
+
+以下示例省略 `arith.constant` 定义，常量名与数值一致。
+
+### 5.1 canonical NZ 自动推断
+
+输入是无显式 layout 的 fp32 canonical NZ 根视图：
+
+```mlir
+%view = pto.make_tensor_view %dst,
+  shape = [%c1, %c8, %c8, %c16, %c8],
+  strides = [%c8192, %c1024, %c128, %c8, %c1]
+  : !pto.tensor_view<1x8x8x16x8xf32>
+
+%part = pto.partition_view %view,
+  offsets = [%c0, %c0, %c0, %c0, %c0],
+  sizes = [%c1, %c8, %c8, %c16, %c8]
+  : !pto.tensor_view<1x8x8x16x8xf32>
+    -> !pto.partition_tensor_view<1x8x8x16x8xf32>
+```
+
+解析顺序中没有显式属性和源 layout，因此根视图进入 pattern 推断。它满足
+`isCanonicalNZRoot5D()` 和非退化门槛，预期生成：
+
+```cpp
+GlobalTensor<
+    float,
+    pto::Shape<1, 8, 8, 16, 8>,
+    pto::Stride<8192, 1024, 128, 8, 1>,
+    pto::Layout::NZ>
+```
+
+`make_tensor_view` 会得到 `layout = #pto.layout<nz>` 和
+`pto.inferred_layout = true`，full-size partition 继承 NZ。
+
+### 5.2 相同数值形式由显式 ND 覆盖
+
+下面的连续 5D ND 在 shape/stride 数值上也满足 canonical NZ pattern，但用户显式
+声明其逻辑语义为 ND：
+
+```mlir
+%view = pto.make_tensor_view %dst,
+  shape = [%c1, %c2, %c1, %c16, %c8],
+  strides = [%c256, %c128, %c128, %c8, %c1]
+  {layout = #pto.layout<nd>}
+  : !pto.tensor_view<1x2x1x16x8xf32>
+```
+
+显式属性在 pattern 推断之前解析，预期生成：
+
+```cpp
+GlobalTensor<
+    float,
+    pto::Shape<1, 2, 1, 16, 8>,
+    pto::Stride<256, 128, 128, 8, 1>,
+    pto::Layout::ND>
+```
+
+该 view 不附加 `pto.inferred_layout`，也不得出现
+`layout mismatch: user-specified layout=nd but inferred=nz`。
+
+### 5.3 NZ partition 的合法和非法切分
+
+以 5.1 的 `%view` 为源，在 `d1` 上从第 2 个列块开始取 4 个块：
+
+```mlir
+%d1_part = pto.partition_view %view,
+  offsets = [%c0, %c2, %c0, %c0, %c0],
+  sizes = [%c1, %c4, %c8, %c16, %c8]
+  : !pto.tensor_view<1x8x8x16x8xf32>
+    -> !pto.partition_tensor_view<1x4x8x16x8xf32>
+```
+
+结果基址前移 `2 * stride[1] = 2048` 个 fp32 storage element，保留父 stride：
+
+```cpp
+GlobalTensor<
+    float,
+    pto::Shape<1, 4, 8, 16, 8>,
+    pto::Stride<8192, 1024, 128, 8, 1>,
+    pto::Layout::NZ>
+```
+
+此时 `stride[0] != shape[1] * stride[1]`，但这是合法的外层 gap，不能用 canonical
+根视图等式把它拒绝或重新推断成 ND。
+
+同理，在 `d2` 上取 4 个行块也合法：
+
+```mlir
+%d2_part = pto.partition_view %view,
+  offsets = [%c0, %c0, %c2, %c0, %c0],
+  sizes = [%c1, %c8, %c4, %c16, %c8]
+  : !pto.tensor_view<1x8x8x16x8xf32>
+    -> !pto.partition_tensor_view<1x8x4x16x8xf32>
+```
+
+它的基址前移 `2 * stride[2] = 256` 个 storage element，stride 仍为
+`[8192,1024,128,8,1]`，layout 继续是 NZ。
+
+在 `d3` 或 `d4` 内切分会破坏一个完整 fractal。例如：
+
+```mlir
+%bad = pto.partition_view %view,
+  offsets = [%c0, %c0, %c0, %c1, %c0],
+  sizes = [%c1, %c8, %c8, %c15, %c8]
+  : !pto.tensor_view<1x8x8x16x8xf32>
+    -> !pto.partition_tensor_view<1x8x8x15x8xf32>
+```
+
+预期在 verifier/layout pass 阶段失败，不生成 ND fallback：
+
+```text
+error: NZ view cannot be partitioned inside a fractal:
+       d3 must keep offset=0 and size=16 (got offset=1, size=15)
+```
+
+## 6. 影响面
 
 对 `test/lit/pto/*.pto` 和 `test/lit/tile_fusion/*.pto` 的现有样本扫描得到：
 
@@ -266,7 +382,7 @@ legacy 开关。旧规则命中的非标准形属于误判，继续兼容会固�
 优先，缺失时才 pattern 推断。真实 NZ 仍按现有约束报错；显式 ND 不得被 heuristic
 改成 NZ。
 
-## 6. 本 PR 的实现范围
+## 7. 本 PR 的实现范围
 
 PR #1027 在现有设计提交之后继续完成以下内容：
 
@@ -281,7 +397,7 @@ PR #1027 在现有设计提交之后继续完成以下内容：
 不再拆分成多个后续 PR。上述实现和验证全部完成后将 #1027 转为 ready；合入该 PR
 即关闭 #527。
 
-## 7. 测试要求
+## 8. 测试要求
 
 新增 `test/lit/pto/issue527_nz_canonical_view_infer.pto`，至少覆盖：
 
