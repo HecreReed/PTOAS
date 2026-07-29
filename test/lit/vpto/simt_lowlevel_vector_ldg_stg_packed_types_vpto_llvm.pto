@@ -11,7 +11,11 @@
 module attributes {pto.target_arch = "a5", pto.kernel_kind = #pto.kernel_kind<vector>} {
   func.func @packed_vector_ldst_kernel(
       %gm_f8e4: !pto.ptr<vector<2xf8E4M3FN>, gm>,
+      %gm_f8e4x4: !pto.ptr<vector<4xf8E4M3FN>, gm>,
+      %gm_f8e4x8: !pto.ptr<vector<8xf8E4M3FN>, gm>,
       %gm_f8e5: !pto.ptr<vector<2xf8E5M2>, gm>,
+      %gm_f8e5x4: !pto.ptr<vector<4xf8E5M2>, gm>,
+      %gm_f8e5x8: !pto.ptr<vector<8xf8E5M2>, gm>,
       %gm_hif8x2: !pto.ptr<!pto.hif8x2, gm>,
       %gm_i8: !pto.ptr<vector<2xi8>, gm>,
       %gm_i16: !pto.ptr<vector<2xi16>, gm>,
@@ -35,10 +39,22 @@ module attributes {pto.target_arch = "a5", pto.kernel_kind = #pto.kernel_kind<ve
     pto.stg %v_i8, %gm_i8[%c1] : !pto.ptr<vector<2xi8>, gm>, vector<2xi8>
 
     // 32-bit total: load via s32, store via b32
+    %v_f8e4x4 = pto.ldg %gm_f8e4x4[%c0] : !pto.ptr<vector<4xf8E4M3FN>, gm> -> vector<4xf8E4M3FN>
+    pto.stg %v_f8e4x4, %gm_f8e4x4[%c1] : !pto.ptr<vector<4xf8E4M3FN>, gm>, vector<4xf8E4M3FN>
+
+    %v_f8e5x4 = pto.ldg %gm_f8e5x4[%c0] : !pto.ptr<vector<4xf8E5M2>, gm> -> vector<4xf8E5M2>
+    pto.stg %v_f8e5x4, %gm_f8e5x4[%c1] : !pto.ptr<vector<4xf8E5M2>, gm>, vector<4xf8E5M2>
+
     %v_i16 = pto.ldg %gm_i16[%c0] : !pto.ptr<vector<2xi16>, gm> -> vector<2xi16>
     pto.stg %v_i16, %gm_i16[%c1] : !pto.ptr<vector<2xi16>, gm>, vector<2xi16>
 
     // 64-bit total: load via s64, store via b64
+    %v_f8e4x8 = pto.ldg %gm_f8e4x8[%c0] : !pto.ptr<vector<8xf8E4M3FN>, gm> -> vector<8xf8E4M3FN>
+    pto.stg %v_f8e4x8, %gm_f8e4x8[%c1] : !pto.ptr<vector<8xf8E4M3FN>, gm>, vector<8xf8E4M3FN>
+
+    %v_f8e5x8 = pto.ldg %gm_f8e5x8[%c0] : !pto.ptr<vector<8xf8E5M2>, gm> -> vector<8xf8E5M2>
+    pto.stg %v_f8e5x8, %gm_f8e5x8[%c1] : !pto.ptr<vector<8xf8E5M2>, gm>, vector<8xf8E5M2>
+
     %v_i32 = pto.ldg %gm_i32[%c0] : !pto.ptr<vector<2xi32>, gm> -> vector<2xi32>
     pto.stg %v_i32, %gm_i32[%c1] : !pto.ptr<vector<2xi32>, gm>, vector<2xi32>
 
@@ -59,3 +75,8 @@ module attributes {pto.target_arch = "a5", pto.kernel_kind = #pto.kernel_kind<ve
 // CHECK-DAG: llvm.bitcast {{.*}} : i16 to vector<2xi8>
 // CHECK-DAG: llvm.bitcast {{.*}} : i32 to vector<2xi16>
 // CHECK-DAG: llvm.bitcast {{.*}} : i64 to vector<2xi32>
+// fp8 x4/x8 load bitcasts lock the lowered LLVM packed payload types.
+// CHECK-DAG: llvm.bitcast {{.*}} : i32 to vector<4x!llvm.float8e4m3>
+// CHECK-DAG: llvm.bitcast {{.*}} : i64 to vector<8x!llvm.float8e4m3>
+// CHECK-DAG: llvm.bitcast {{.*}} : i32 to vector<4x!llvm.float8e5m2>
+// CHECK-DAG: llvm.bitcast {{.*}} : i64 to vector<8x!llvm.float8e5m2>

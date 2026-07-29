@@ -542,8 +542,8 @@ static LogicalResult verifyLdgStgAccess(Operation *op, Type ptrType,
   return op->emitOpError()
          << "currently supports 8/16/32/64-bit integer, "
             "f16/bf16/f32/f64/fp8/hif8, "
-            "and packed vector<2xT> (T = "
-            "f16/bf16/f32/fp8/i8/i16/i32) and !pto.hif8x2 value type";
+            "packed vector<2xT> (T = f16/bf16/f32/i8/i16/i32), "
+            "packed vector<2/4/8xfp8>, and !pto.hif8x2 value type";
 }
 
 LogicalResult PTOLoadOp::verify() {

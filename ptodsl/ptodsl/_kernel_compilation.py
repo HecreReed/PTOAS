@@ -83,13 +83,21 @@ class KernelCompiler:
         self._callback = callback
         self._kernel_identity = id(callback)
         self._ast_rewrite = ast_rewrite
-        self._trace_callback = None
+        self._trace_callback_cache = {}
         self._compiled_cache = {}
 
-    def tracing_callback(self):
-        if self._trace_callback is None:
-            self._trace_callback = rewrite_jit_function(self._callback) if self._ast_rewrite else self._callback
-        return self._trace_callback
+    def tracing_callback(self, constexpr_bindings=None):
+        if not self._ast_rewrite:
+            return self._callback
+        cache_key = tuple(
+            (name, constexpr_bindings[name])
+            for name in sorted(constexpr_bindings or {})
+        )
+        cached = self._trace_callback_cache.get(cache_key)
+        if cached is None:
+            cached = rewrite_jit_function(self._callback, static_bindings=constexpr_bindings)
+            self._trace_callback_cache[cache_key] = cached
+        return cached
 
     def compile(self, **constexpr_bindings):
         if self._module_spec.entry is False:
@@ -112,7 +120,7 @@ class KernelCompiler:
         if cached is not None:
             return cached
 
-        callback = self.tracing_callback()
+        callback = self.tracing_callback(normalized_bindings)
         runtime = SignatureTracingRuntime(
             self._module_spec,
             self._kernel_signature,

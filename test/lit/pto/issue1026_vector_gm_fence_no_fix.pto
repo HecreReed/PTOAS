@@ -1,0 +1,60 @@
+// Copyright (c) 2026 Huawei Technologies Co., Ltd.
+// This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+// CANN Open Software License Agreement Version 2.0 (the "License").
+// Please refer to the License for details. You may not use this file except in compliance with the License.
+// THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+// INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+// See LICENSE in the root of the software repository for the full text of the License.
+
+// Regression for issue #1026: a vector GM fence after TPUT must not name
+// PIPE_FIX, which can hang a vector core after cross-rank communication.
+
+// RUN: ptoas --pto-arch=a3 %s -o - 2>&1 | FileCheck %s
+
+module {
+  func.func @vector_gm_fence_after_tput(
+      %dst_ptr: !pto.ptr<f32>,
+      %src_ptr: !pto.ptr<f32>)
+      attributes {pto.kernel_kind = #pto.kernel_kind<vector>} {
+    %c0 = arith.constant 0 : index
+    %c1 = arith.constant 1 : index
+    %c64 = arith.constant 64 : index
+
+    %dst_view = pto.make_tensor_view %dst_ptr,
+      shape = [%c1, %c64], strides = [%c64, %c1]
+      : !pto.tensor_view<?x?xf32>
+    %dst = pto.partition_view %dst_view,
+      offsets = [%c0, %c0], sizes = [%c1, %c64]
+      : !pto.tensor_view<?x?xf32>
+        -> !pto.partition_tensor_view<1x64xf32>
+
+    %src_view = pto.make_tensor_view %src_ptr,
+      shape = [%c1, %c64], strides = [%c64, %c1]
+      : !pto.tensor_view<?x?xf32>
+    %src = pto.partition_view %src_view,
+      offsets = [%c0, %c0], sizes = [%c1, %c64]
+      : !pto.tensor_view<?x?xf32>
+        -> !pto.partition_tensor_view<1x64xf32>
+
+    %stage = pto.alloc_tile :
+      !pto.tile_buf<loc=vec, dtype=f32, rows=1, cols=64, v_row=1, v_col=64, blayout=row_major, slayout=none_box, fractal=512, pad=0>
+
+    pto.comm.tput(
+      %dst, %src,
+      buf(%stage)
+      : !pto.partition_tensor_view<1x64xf32>,
+        !pto.partition_tensor_view<1x64xf32>,
+        !pto.tile_buf<loc=vec, dtype=f32, rows=1, cols=64, v_row=1, v_col=64, blayout=row_major, slayout=none_box, fractal=512, pad=0>)
+      {atomicType = #pto<atomic_type atomic_none>}
+    pto.fence.barrier_all #pto.fence_scope<gm>
+    return
+  }
+}
+
+// CHECK-LABEL: AICORE void vector_gm_fence_after_tput(
+// CHECK:      pto::comm::TPUT(
+// CHECK-NOT:  pipe_barrier(PIPE_FIX);
+// CHECK:      pipe_barrier(PIPE_ALL);
+// CHECK-NEXT: dsb(DSB_DDR);
+// CHECK-NOT:  pipe_barrier(PIPE_FIX);
+// CHECK:      #endif // __DAV_VEC__

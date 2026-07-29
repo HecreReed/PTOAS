@@ -20,7 +20,7 @@ class PTODSLAstRewriteError(SyntaxError):
     """Raised when AST rewrite sees unsupported Python control flow."""
 
 
-def rewrite_jit_function(fn):
+def rewrite_jit_function(fn, *, static_bindings=None):
     """Return a function whose Python if/for control flow lowers to PTODSL APIs."""
     try:
         source = inspect.getsource(fn)
@@ -42,6 +42,7 @@ def rewrite_jit_function(fn):
     closure_vars = inspect.getclosurevars(fn)
     static_env = dict(fn.__globals__)
     static_env.update(closure_vars.nonlocals)
+    static_env.update(static_bindings or {})
     _inject_closure_defaults(function_def, closure_vars.nonlocals)
     _sanitize_signature_for_exec(function_def)
     function_def = _ConditionalExpressionNormalizer().visit(function_def)
@@ -312,10 +313,10 @@ class _SlotInfoVisitor(ast.NodeVisitor):
 
     def visit_Subscript(self, node):
         if isinstance(node.ctx, ast.Load):
-            self.loads.update(_resolve_subscript_slots(node, self._static_iters, require_static=False))
+            self.loads.update(_resolve_subscript_slots(node, self._static_env, self._static_iters, require_static=False))
             return
         if isinstance(node.ctx, (ast.Store, ast.Del)):
-            slots = _resolve_subscript_slots(node, self._static_iters, require_static=True)
+            slots = _resolve_subscript_slots(node, self._static_env, self._static_iters, require_static=True)
             if slots:
                 self.stores.update(slots)
             else:
@@ -325,7 +326,7 @@ class _SlotInfoVisitor(ast.NodeVisitor):
 
     def visit_AugAssign(self, node):
         if isinstance(node.target, ast.Subscript):
-            slots = _resolve_subscript_slots(node.target, self._static_iters, require_static=True)
+            slots = _resolve_subscript_slots(node.target, self._static_env, self._static_iters, require_static=True)
             if slots:
                 self.loads.update(slots)
                 self.stores.update(slots)
@@ -337,7 +338,7 @@ class _SlotInfoVisitor(ast.NodeVisitor):
 
     def visit_For(self, node):
         if _is_pto_attr_call(node.iter, "static_range") and isinstance(node.target, ast.Name):
-            values = _try_eval_static_range(node.iter, self._static_env)
+            values = _try_eval_static_range(node.iter, self._static_env, self._static_iters)
             if values is None:
                 for stmt in node.body:
                     self.visit(stmt)
@@ -399,7 +400,7 @@ def _slot_live_before_stmt(stmt, live_after, static_env, static_iters) -> set[_S
         )
     if isinstance(stmt, ast.For):
         if _is_pto_attr_call(stmt.iter, "static_range") and isinstance(stmt.target, ast.Name):
-            values = _try_eval_static_range(stmt.iter, static_env)
+            values = _try_eval_static_range(stmt.iter, static_env, static_iters)
             if values is not None:
                 next_static_iters = dict(static_iters)
                 next_static_iters[stmt.target.id] = values
@@ -467,10 +468,10 @@ def _simple_name_targets(target) -> set[str]:
     return set()
 
 
-def _resolve_subscript_slots(node, static_iters, *, require_static) -> set[_SubscriptSlot]:
+def _resolve_subscript_slots(node, static_env, static_iters, *, require_static) -> set[_SubscriptSlot]:
     if not isinstance(node.value, ast.Name):
         return set()
-    index_values = _static_index_values(node.slice, static_iters)
+    index_values = _static_index_values(node.slice, static_env, static_iters)
     if index_values is None:
         return set()
     return {
@@ -479,16 +480,11 @@ def _resolve_subscript_slots(node, static_iters, *, require_static) -> set[_Subs
     }
 
 
-def _static_index_values(node, static_iters):
-    if isinstance(node, ast.Constant) and isinstance(node.value, int) and not isinstance(node.value, bool):
-        return (node.value,)
-    if isinstance(node, ast.UnaryOp) and isinstance(node.op, ast.USub):
-        values = _static_index_values(node.operand, static_iters)
-        if values is not None and len(values) == 1:
-            return (-values[0],)
-    if isinstance(node, ast.Name) and node.id in static_iters:
-        return tuple(static_iters[node.id])
-    return None
+def _static_index_values(node, static_env, static_iters):
+    try:
+        return _eval_static_int_values(node, static_env, static_iters)
+    except PTODSLAstRewriteError:
+        return None
 
 
 def _unsupported_subscript_store_message(node) -> str:
@@ -502,11 +498,11 @@ def _unsupported_subscript_store_message(node) -> str:
     )
 
 
-def _try_eval_static_range(call, static_env):
+def _try_eval_static_range(call, static_env, static_iters=None):
     if not _is_pto_attr_call(call, "static_range") or call.keywords:
         return None
     try:
-        values = [_eval_static_int(arg, static_env) for arg in call.args]
+        values = [_eval_static_int(arg, static_env, static_iters) for arg in call.args]
     except PTODSLAstRewriteError:
         return None
     if len(values) == 1:
@@ -518,31 +514,50 @@ def _try_eval_static_range(call, static_env):
     return None
 
 
-def _eval_static_int(node, static_env) -> int:
+def _eval_static_int(node, static_env, static_iters=None) -> int:
+    values = _eval_static_int_values(node, static_env, static_iters or {})
+    if len(values) != 1:
+        raise PTODSLAstRewriteError("static integer expression must resolve to one value")
+    return values[0]
+
+
+def _eval_static_int_values(node, static_env, static_iters) -> tuple[int, ...]:
     if isinstance(node, ast.Constant) and isinstance(node.value, int) and not isinstance(node.value, bool):
-        return node.value
+        return (node.value,)
     if isinstance(node, ast.Name):
+        if node.id in static_iters:
+            return tuple(static_iters[node.id])
         value = static_env.get(node.id, _MISSING_GLOBAL)
         if isinstance(value, int) and not isinstance(value, bool):
-            return value
+            return (value,)
         raise PTODSLAstRewriteError("static value is not an integer")
     if isinstance(node, ast.UnaryOp) and isinstance(node.op, ast.UAdd):
-        return +_eval_static_int(node.operand, static_env)
+        return tuple(+value for value in _eval_static_int_values(node.operand, static_env, static_iters))
     if isinstance(node, ast.UnaryOp) and isinstance(node.op, ast.USub):
-        return -_eval_static_int(node.operand, static_env)
+        return tuple(-value for value in _eval_static_int_values(node.operand, static_env, static_iters))
     if isinstance(node, ast.BinOp):
-        lhs = _eval_static_int(node.left, static_env)
-        rhs = _eval_static_int(node.right, static_env)
-        if isinstance(node.op, ast.Add):
-            return lhs + rhs
-        if isinstance(node.op, ast.Sub):
-            return lhs - rhs
-        if isinstance(node.op, ast.Mult):
-            return lhs * rhs
-        if isinstance(node.op, ast.FloorDiv):
-            return lhs // rhs
-        if isinstance(node.op, ast.Mod):
-            return lhs % rhs
+        lhs_values = _eval_static_int_values(node.left, static_env, static_iters)
+        rhs_values = _eval_static_int_values(node.right, static_env, static_iters)
+        values = []
+        seen = set()
+        for lhs in lhs_values:
+            for rhs in rhs_values:
+                if isinstance(node.op, ast.Add):
+                    value = lhs + rhs
+                elif isinstance(node.op, ast.Sub):
+                    value = lhs - rhs
+                elif isinstance(node.op, ast.Mult):
+                    value = lhs * rhs
+                elif isinstance(node.op, ast.FloorDiv):
+                    value = lhs // rhs
+                elif isinstance(node.op, ast.Mod):
+                    value = lhs % rhs
+                else:
+                    raise PTODSLAstRewriteError("unsupported static integer expression")
+                if value not in seen:
+                    seen.add(value)
+                    values.append(value)
+        return tuple(values)
     raise PTODSLAstRewriteError("unsupported static integer expression")
 
 
@@ -741,7 +756,7 @@ class _SlotCarryRewriter(ast.NodeTransformer):
 
     def visit_For(self, node):
         if _is_pto_attr_call(node.iter, "static_range") and isinstance(node.target, ast.Name):
-            values = _try_eval_static_range(node.iter, self._static_env)
+            values = _try_eval_static_range(node.iter, self._static_env, self._static_iters)
             old = self._static_iters.get(node.target.id)
             if values is not None:
                 self._static_iters[node.target.id] = values
@@ -758,7 +773,7 @@ class _SlotCarryRewriter(ast.NodeTransformer):
         return self.generic_visit(node)
 
     def visit_Subscript(self, node):
-        slots = _resolve_subscript_slots(node, self._static_iters, require_static=False)
+        slots = _resolve_subscript_slots(node, self._static_env, self._static_iters, require_static=False)
         if slots and len({slot.base for slot in slots}) == 1:
             base = next(iter(slots)).base
             if base in self._slot_maps and slots <= set(self._slot_maps[base]["slots"]):
@@ -1070,7 +1085,7 @@ class _ControlFlowRewriter:
         if _is_pto_attr_call(stmt.iter, "static_range"):
             next_static_iters = dict(static_iters)
             if isinstance(stmt.target, ast.Name):
-                values = _try_eval_static_range(stmt.iter, self._static_env)
+                values = _try_eval_static_range(stmt.iter, self._static_env, static_iters)
                 if values is not None:
                     next_static_iters[stmt.target.id] = values
             stmt.body = self.rewrite_block(

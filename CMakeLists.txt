@@ -78,7 +78,7 @@ endfunction()
 
 ptoas_preseed_compilers_from_llvm_cache()
 
-project(ptoas VERSION 0.54)
+project(ptoas VERSION 0.55)
 set(PTOAS_VMI_VERSION "0.1.4")
 
 option(PTOAS_VALIDATE_CMAKE4_FETCHCONTENT_COMPAT
@@ -237,6 +237,8 @@ include(CTest)
 
 # 开启 Python 绑定选项
 option(PTO_ENABLE_PYTHON_BINDING "Enable Python bindings" ON)
+
+include(cmake/VfSimulator.cmake)
 
 if(PTO_ENABLE_PYTHON_BINDING)
   find_package(Python3 COMPONENTS Interpreter Development.Module REQUIRED)

@@ -22,6 +22,7 @@ Public API
 """
 
 from ._bootstrap import make_context  # noqa: F401
+from ._diagnostics import explicit_mode_required_with_context_error
 from ._runtime_index_ops import coerce_runtime_index
 from ._scalar_coercion import coerce_scalar_to_type
 from ._surface_types import const_expr
@@ -34,10 +35,19 @@ from mlir.ir import InsertionPoint
 
 # ── vecscope ──────────────────────────────────────────────────────────────────
 
+def _require_explicit_mode(surface: str):
+    session = current_session()
+    if session is None:
+        return
+    current_module_spec = getattr(session, "current_function_module_spec", session.module_spec)
+    if getattr(current_module_spec, "mode", None) != "explicit":
+        raise explicit_mode_required_with_context_error(surface, current_module_spec)
+
 class _VecScopeCM:
     """Context manager for ``pto.vecscope { … }``."""
 
     def __enter__(self):
+        _require_explicit_mode("pto.vecscope()")
         self._op = _pto.VecScopeOp()
         self._block = self._op.body.blocks.append()
         self._ip = InsertionPoint(self._block)

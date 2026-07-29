@@ -74,18 +74,47 @@ def PTO_V2F8E4M3FNType : Type<
         "::llvm::cast<::mlir::VectorType>($_self).getDimSize(0) == 2 && "
         "::llvm::isa<::mlir::Float8E4M3FNType>(::llvm::cast<::mlir::VectorType>($_self).getElementType())">,
   "vector<2xf8E4M3FN>">;
+def PTO_V4F8E4M3FNType : Type<
+  CPred<"::llvm::isa<::mlir::VectorType>($_self) && "
+        "::llvm::cast<::mlir::VectorType>($_self).getRank() == 1 && "
+        "::llvm::cast<::mlir::VectorType>($_self).getDimSize(0) == 4 && "
+        "::llvm::isa<::mlir::Float8E4M3FNType>(::llvm::cast<::mlir::VectorType>($_self).getElementType())">,
+  "vector<4xf8E4M3FN>">;
+def PTO_V8F8E4M3FNType : Type<
+  CPred<"::llvm::isa<::mlir::VectorType>($_self) && "
+        "::llvm::cast<::mlir::VectorType>($_self).getRank() == 1 && "
+        "::llvm::cast<::mlir::VectorType>($_self).getDimSize(0) == 8 && "
+        "::llvm::isa<::mlir::Float8E4M3FNType>(::llvm::cast<::mlir::VectorType>($_self).getElementType())">,
+  "vector<8xf8E4M3FN>">;
 def PTO_V2F8E5M2Type : Type<
   CPred<"::llvm::isa<::mlir::VectorType>($_self) && "
         "::llvm::cast<::mlir::VectorType>($_self).getRank() == 1 && "
         "::llvm::cast<::mlir::VectorType>($_self).getDimSize(0) == 2 && "
         "::llvm::isa<::mlir::Float8E5M2Type>(::llvm::cast<::mlir::VectorType>($_self).getElementType())">,
   "vector<2xf8E5M2>">;
+def PTO_V4F8E5M2Type : Type<
+  CPred<"::llvm::isa<::mlir::VectorType>($_self) && "
+        "::llvm::cast<::mlir::VectorType>($_self).getRank() == 1 && "
+        "::llvm::cast<::mlir::VectorType>($_self).getDimSize(0) == 4 && "
+        "::llvm::isa<::mlir::Float8E5M2Type>(::llvm::cast<::mlir::VectorType>($_self).getElementType())">,
+  "vector<4xf8E5M2>">;
+def PTO_V8F8E5M2Type : Type<
+  CPred<"::llvm::isa<::mlir::VectorType>($_self) && "
+        "::llvm::cast<::mlir::VectorType>($_self).getRank() == 1 && "
+        "::llvm::cast<::mlir::VectorType>($_self).getDimSize(0) == 8 && "
+        "::llvm::isa<::mlir::Float8E5M2Type>(::llvm::cast<::mlir::VectorType>($_self).getElementType())">,
+  "vector<8xf8E5M2>">;
 def PTO_V2HiF8Type : Type<
   CPred<"::llvm::isa<::mlir::pto::HiF8x2Type>($_self)">,
   "!pto.hif8x2">;
-def PTO_LowPrecisionPackedType : AnyTypeOf<[PTO_V2F8E4M3FNType, PTO_V2F8E5M2Type,
+def PTO_LowPrecisionPackedType : AnyTypeOf<[PTO_V2F8E4M3FNType,
+                                            PTO_V4F8E4M3FNType,
+                                            PTO_V8F8E4M3FNType,
+                                            PTO_V2F8E5M2Type,
+                                            PTO_V4F8E5M2Type,
+                                            PTO_V8F8E5M2Type,
                                             PTO_V2HiF8Type],
-                                           "supported vector<2xFP8/HiF8> packed type">;
+                                           "supported FP8/HiF8 packed type">;
 def PTO_SimtF4ValueType : Type<
   CPred<"::llvm::isa<::mlir::pto::F4E1M2x2Type, ::mlir::pto::F4E2M1x2Type>($_self)">,
   "!pto.f4E1M2x2 or !pto.f4E2M1x2">;
@@ -173,7 +202,7 @@ def PTOLdgOp : PTO_SimtOp<"ldg", [
     Supported value types:
     - Scalar: i8/i16/i32/i64, f16/bf16/f32/f64, fp8/hif8
     - Packed: vector<2xf16>, vector<2xbf16>, vector<2xf32>,
-      vector<2xf8E4M3FN>, vector<2xf8E5M2>,
+      vector<2/4/8xf8E4M3FN>, vector<2/4/8xf8E5M2>,
       vector<2xi8>, vector<2xi16>, vector<2xi32>,
       and !pto.hif8x2
 

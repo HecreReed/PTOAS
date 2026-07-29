@@ -487,9 +487,6 @@ def unsupported_public_surface_error(name: str) -> AttributeError:
             "Use pto.alloc_tile(shape=..., dtype=..., memory_space=..., valid_shape=..., addr=...) "
             "to author tiles, and keep explicit tile-type construction inside internal implementation code only."
         ),
-        "vecscope": (
-            "Use @pto.tileop for named single-core helpers, or inline compute code with `with pto.tileop():`."
-        ),
         "as_ptr": (
             "Use tile.as_ptr(), view.as_ptr(), or partition.as_ptr() on the authored object itself "
             "instead of the removed pto.as_ptr(...) helper."

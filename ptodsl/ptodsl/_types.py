@@ -253,7 +253,7 @@ def _classify_storage_dtype(type_obj):
         vec_elem = VectorType(type_obj).element_type
         if _classify_scalar_type(vec_elem) is not None:
             return "compute"
-        # fp8 vector types (e.g. vector<2xf8E4M3FN>) are storage_only
+        # fp8 vector types (e.g. vector<2/4/8xf8E4M3FN>) are storage_only
         if Float8E4M3FNType.isinstance(vec_elem) or Float8E5M2Type.isinstance(vec_elem):
             return "storage_only"
     return "other"
@@ -461,7 +461,11 @@ f16x2  = _DType(lambda: VectorType.get([2], F16Type.get()))
 bf16x2 = _DType(lambda: VectorType.get([2], BF16Type.get()))
 f32x2  = _DType(lambda: VectorType.get([2], F32Type.get()))
 f8e4m3x2 = _DType(lambda: VectorType.get([2], Float8E4M3FNType.get()))
+f8e4m3x4 = _DType(lambda: VectorType.get([4], Float8E4M3FNType.get()))
+f8e4m3x8 = _DType(lambda: VectorType.get([8], Float8E4M3FNType.get()))
 f8e5m2x2 = _DType(lambda: VectorType.get([2], Float8E5M2Type.get()))
+f8e5m2x4 = _DType(lambda: VectorType.get([4], Float8E5M2Type.get()))
+f8e5m2x8 = _DType(lambda: VectorType.get([8], Float8E5M2Type.get()))
 hif8x2 = _DType(lambda: _pto.HiF8x2Type.get())
 i8x2   = _DType(lambda: VectorType.get([2], IntegerType.get_signless(8)))
 i16x2  = _DType(lambda: VectorType.get([2], IntegerType.get_signless(16)))
@@ -572,7 +576,8 @@ __all__ = [
     "_DType", "_resolve",
     "float32", "float16", "bf16",
     "f16x2", "bf16x2", "f32x2",
-    "f8e4m3x2", "f8e5m2x2", "hif8x2",
+    "f8e4m3x2", "f8e4m3x4", "f8e4m3x8",
+    "f8e5m2x2", "f8e5m2x4", "f8e5m2x8", "hif8x2",
     "i8x2", "i16x2", "i32x2",
     "f8e4m3", "f8e5m2", "hif8", "f4e1m2x2", "f4e2m1x2",
     "int1", "int8", "int16", "int32", "int64",

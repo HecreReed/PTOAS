@@ -9,7 +9,7 @@
 import unittest
 import inspect
 from types import SimpleNamespace
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock, call, patch
 
 import ptodsl._ops as _ops
 import ptodsl._pipe_namespace as _pipe_namespace
@@ -676,6 +676,7 @@ class VectorCubeSurfaceTest(unittest.TestCase):
             (_ops.set_intra_flag, (pto.Pipe.MTE3, 32), {}, "set_intra_flag(..., event_id=...)", "[0, 31]"),
             (_ops.wait_intra_flag, (pto.Pipe.V, -2), {}, "wait_intra_flag(..., event_id=...)", "[0, 31]"),
             (_ops.wait_intra_flag, (pto.Pipe.FIX, 32), {}, "wait_intra_flag(..., event_id=...)", "[0, 31]"),
+            (_ops.wait_intra_flag, (pto.Pipe.MTE3, 32), {}, "wait_intra_flag(..., event_id=...)", "[0, 31]"),
         ]
 
         with patch.object(_ops._pto, "set_flag") as set_flag_op, \
@@ -705,7 +706,7 @@ class VectorCubeSurfaceTest(unittest.TestCase):
             (_ops.set_cross_flag, (pto.Pipe.V, 0), "set_cross_flag(pipe, event_id)", "<PIPE_FIX>", "<PIPE_V>"),
             (_ops.wait_cross_flag, (pto.Pipe.MTE3, 0), "wait_cross_flag(pipe, event_id)", "<PIPE_FIX>", "<PIPE_MTE3>"),
             (_ops.set_intra_flag, (pto.Pipe.V, 0), "set_intra_flag(pipe, event_id)", "<PIPE_FIX>, <PIPE_MTE3>", "<PIPE_V>"),
-            (_ops.wait_intra_flag, (pto.Pipe.MTE3, 0), "wait_intra_flag(pipe, event_id)", "<PIPE_FIX>, <PIPE_V>", "<PIPE_MTE3>"),
+            (_ops.wait_intra_flag, (pto.Pipe.MTE2, 0), "wait_intra_flag(pipe, event_id)", "<PIPE_FIX>, <PIPE_MTE3>, <PIPE_V>", "<PIPE_MTE2>"),
         ]
 
         with patch.object(_ops._pto, "sync_set") as sync_set_op, \
@@ -723,17 +724,28 @@ class VectorCubeSurfaceTest(unittest.TestCase):
         sync_wait_op.assert_not_called()
 
     def test_intra_sync_mixed_writeback_event_ranges(self):
+        dynamic_event = object()
+        dynamic_event_operand = object()
         with patch.object(_ops, "_pipe_attr", side_effect=lambda pipe: f"pipe:{pipe}") as pipe_attr, \
+             patch.object(_ops, "unwrap_surface_value", return_value=dynamic_event_operand) as unwrap_surface_value, \
              patch.object(_ops._pto, "sync_set") as sync_set_op, \
              patch.object(_ops._pto, "sync_wait") as sync_wait_op:
             _ops.set_intra_flag(pto.Pipe.FIX, 31)
             _ops.set_intra_flag(pto.Pipe.MTE3, 31)
             _ops.wait_intra_flag(pto.Pipe.FIX, 16)
             _ops.wait_intra_flag(pto.Pipe.V, 31)
+            _ops.wait_intra_flag(pto.Pipe.MTE3, 31)
+            _ops.wait_intra_flag(pto.Pipe.MTE3, dynamic_event)
 
-        self.assertEqual(pipe_attr.call_count, 4)
+        self.assertEqual(pipe_attr.call_count, 6)
         self.assertEqual(sync_set_op.call_count, 2)
-        self.assertEqual(sync_wait_op.call_count, 2)
+        sync_wait_op.assert_has_calls([
+            call(f"pipe:{pto.Pipe.FIX}", 16),
+            call(f"pipe:{pto.Pipe.V}", 31),
+            call(f"pipe:{pto.Pipe.MTE3}", 31),
+            call(f"pipe:{pto.Pipe.MTE3}", dynamic_event_operand),
+        ])
+        unwrap_surface_value.assert_called_once_with(dynamic_event)
 
     def test_pipe_namespace_and_buffer_helpers_are_exposed(self):
         names = [

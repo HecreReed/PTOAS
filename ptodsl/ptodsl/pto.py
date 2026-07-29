@@ -27,7 +27,8 @@ from ._types import (           # noqa: F401
     float32, float16, bf16,
     f8e4m3, f8e5m2, hif8, f4e1m2x2, f4e2m1x2,
     f16x2, bf16x2, f32x2,
-    f8e4m3x2, f8e5m2x2, hif8x2,
+    f8e4m3x2, f8e4m3x4, f8e4m3x8,
+    f8e5m2x2, f8e5m2x4, f8e5m2x8, hif8x2,
     i8x2, i16x2, i32x2,
     int1, int8, int16, int32, int64,
     si8, si16, si32, si64,
@@ -152,6 +153,7 @@ from ._ops import (             # noqa: F401
 
 # ── Control flow ──────────────────────────────────────────────────────────────
 from ._control_flow import (    # noqa: F401
+    vecscope,
     for_, if_, yield_,
     static_range,
     LoopHandle, BranchHandle,
@@ -184,6 +186,6 @@ PAT = MaskPattern
 
 
 def __getattr__(name):
-    if name in {"ukernel", "tile_buf_type", "vecscope", "as_ptr", "vbrc_load", "vsts_1pt", "constexpr", "copy_ubuf_to_ubuf", "tensor_spec", "TensorSpec"}:
+    if name in {"ukernel", "tile_buf_type", "as_ptr", "vbrc_load", "vsts_1pt", "constexpr", "copy_ubuf_to_ubuf", "tensor_spec", "TensorSpec"}:
         raise unsupported_public_surface_error(name)
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

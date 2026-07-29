@@ -45,16 +45,22 @@ bool mlir::pto::isPTOPackedLdgStgVectorType(Type t) {
   if (isPTOHiFloat8x2Type(t))
     return true;
   auto vecType = dyn_cast<VectorType>(t);
-  if (!vecType || vecType.isScalable() || vecType.getRank() != 1 || vecType.getDimSize(0) != 2)
+  if (!vecType || vecType.isScalable() || vecType.getRank() != 1)
     return false;
+  int64_t lanes = vecType.getDimSize(0);
   Type elemType = vecType.getElementType();
-  bool validElem =
-      elemType.isF16() || elemType.isBF16() || elemType.isF32() ||
-      isPTOFloat8Type(elemType);
+  bool validElem = false;
+  if (isPTOFloat8Type(elemType)) {
+    validElem = lanes == 2 || lanes == 4 || lanes == 8;
+  } else {
+    validElem =
+        lanes == 2 &&
+        (elemType.isF16() || elemType.isBF16() || elemType.isF32());
+  }
   if (!validElem) {
     if (auto intTy = dyn_cast<IntegerType>(elemType)) {
       unsigned w = intTy.getWidth();
-      validElem = (w == 8 || w == 16 || w == 32);
+      validElem = lanes == 2 && (w == 8 || w == 16 || w == 32);
     }
   }
   if (!validElem)

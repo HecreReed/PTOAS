@@ -889,6 +889,7 @@ def simt_memory_atomic_probe(
     idx = scalar.index_cast(pto.get_tid_x())
     value = pto.ldg(gm, idx, l1cache="cache", l2cache="nmfv")
     pto.stg(value, gm, idx, l1cache="uncache", l2cache="wtsred")
+    pto.stg(1, gm, idx)
 
     old = pto.atomic_add(gm, value, l2cache="nmfv", signedness="signed")
     pto.atomic_exch(gm, value, signedness="signed")
@@ -903,6 +904,24 @@ def simt_memory_atomic_probe(
     pto.syncthreads()
     pto.threadfence()
     pto.threadfence_block()
+
+
+@pto.simt
+def simt_fp8_ext_ldg_stg_probe(
+    gm_f8e4x4: pto.ptr(pto.f8e4m3x4, "gm"),
+    gm_f8e4x8: pto.ptr(pto.f8e4m3x8, "gm"),
+    gm_f8e5x4: pto.ptr(pto.f8e5m2x4, "gm"),
+    gm_f8e5x8: pto.ptr(pto.f8e5m2x8, "gm"),
+):
+    idx = scalar.index_cast(pto.get_tid_x())
+    v_f8e4x4 = pto.ldg(gm_f8e4x4, idx)
+    v_f8e4x8 = pto.ldg(gm_f8e4x8, idx)
+    v_f8e5x4 = pto.ldg(gm_f8e5x4, idx)
+    v_f8e5x8 = pto.ldg(gm_f8e5x8, idx)
+    pto.stg(v_f8e4x4, gm_f8e4x4, idx)
+    pto.stg(v_f8e4x8, gm_f8e4x8, idx)
+    pto.stg(v_f8e5x4, gm_f8e5x4, idx)
+    pto.stg(v_f8e5x8, gm_f8e5x8, idx)
 
 
 @pto.simt
@@ -1073,11 +1092,23 @@ def simt_resource_attr_launch_probe(*, TRACE_TOKEN: pto.const_expr = 0):
 @pto.jit(target="a5")
 def simt_full_surface_probe(
     gm: pto.ptr(pto.i32, "gm"),
+    gm_f8e4x4: pto.ptr(pto.f8e4m3x4, "gm"),
+    gm_f8e4x8: pto.ptr(pto.f8e4m3x8, "gm"),
+    gm_f8e5x4: pto.ptr(pto.f8e5m2x4, "gm"),
+    gm_f8e5x8: pto.ptr(pto.f8e5m2x8, "gm"),
     *,
     TRACE_TOKEN: pto.const_expr = 0,
 ):
     pto.simt_launch(simt_collective_math_probe, dims=(32, 1, 1))
     pto.simt_launch(simt_memory_atomic_probe, gm, dims=(32, 1, 1))
+    pto.simt_launch(
+        simt_fp8_ext_ldg_stg_probe,
+        gm_f8e4x4,
+        gm_f8e4x8,
+        gm_f8e5x4,
+        gm_f8e5x8,
+        dims=(32, 1, 1),
+    )
     pto.simt_launch(simt_keep_stage, dims=(32, 1, 1))
     pto.simt_launch(simt_resume_stage, gm, dims=(32, 1, 1))
 
@@ -1363,6 +1394,52 @@ def ast_runtime_for_static_slot_carry_probe(cols: pto.i32):
     for c in range(cols):
         for h in pto.static_range(4):
             accs[h] = accs[h] + c
+
+    total = zero
+    for h in pto.static_range(4):
+        total = total + accs[h]
+    _ = total
+
+
+_STATIC_SLOT_GLOBAL_INDEX = 2
+
+
+@pto.jit(target="a5")
+def ast_runtime_for_static_slot_global_index_probe(cols: pto.i32):
+    zero = pto.const(0, dtype=pto.index)
+    accs = [zero for _ in pto.static_range(4)]
+
+    for c in range(cols):
+        accs[_STATIC_SLOT_GLOBAL_INDEX] = accs[_STATIC_SLOT_GLOBAL_INDEX] + c
+
+    total = zero
+    for h in pto.static_range(4):
+        total = total + accs[h]
+    _ = total
+
+
+@pto.jit(target="a5")
+def ast_runtime_for_static_slot_binop_index_probe(cols: pto.i32):
+    zero = pto.const(0, dtype=pto.index)
+    accs = [zero for _ in pto.static_range(5)]
+
+    for c in range(cols):
+        for h in pto.static_range(4):
+            accs[h + 1] = accs[h + 1] + c
+
+    total = zero
+    for h in pto.static_range(5):
+        total = total + accs[h]
+    _ = total
+
+
+@pto.jit(target="a5")
+def ast_runtime_for_static_slot_constexpr_index_probe(cols: pto.i32, *, SLOT: pto.const_expr = 2):
+    zero = pto.const(0, dtype=pto.index)
+    accs = [zero for _ in pto.static_range(4)]
+
+    for c in range(cols):
+        accs[SLOT] = accs[SLOT] + c
 
     total = zero
     for h in pto.static_range(4):
@@ -2951,6 +3028,8 @@ def public_sync_surface_probe():
     pto.wait_cross_flag(pto.Pipe.FIX, 0)
     pto.wait_intra_flag(pto.Pipe.V, dynamic_event)
     pto.wait_intra_flag(pto.Pipe.FIX, 20)
+    pto.wait_intra_flag(pto.Pipe.MTE3, dynamic_event)
+    pto.wait_intra_flag(pto.Pipe.MTE3, 31)
 
 
 @pto.jit(target="a5")
@@ -3258,6 +3337,17 @@ def vdup_surface_probe():
 
 
 @pto.jit(target="a5", mode="explicit")
+def vecscope_surface_probe():
+    zero_u64 = pto.const(0, dtype=pto.ui64)
+    ub_f32 = pto.castptr(zero_u64, pto.ptr(pto.f32, "ub"))
+    zero = pto.const(0)
+    with pto.vecscope():
+        mask32_full = pto.pset_b32(pto.MaskPattern.ALL)
+        vec_f32 = pto.vlds(ub_f32, zero)
+        pto.vsts(vec_f32, ub_f32, zero, mask32_full)
+
+
+@pto.jit(target="a5", mode="explicit")
 def vdup_surface_invalid_scalar_position_probe():
     mask32_full = pto.pset_b32(pto.MaskPattern.ALL)
     _ = pto.vdup(pto.f32(0), mask32_full, pto.PositionMode.HIGHEST)
@@ -3430,6 +3520,12 @@ def auto_mode_explicit_surface_violation_probe():
 
 
 @pto.jit(target="a5")
+def auto_mode_vecscope_violation_probe():
+    with pto.vecscope():
+        pass
+
+
+@pto.jit(target="a5")
 def dynamic_buf_invalid_type_probe():
     bad = pto.const(1.0, dtype=pto.f32)
     pto.get_buf(pto.Pipe.V, bad)
@@ -3452,8 +3548,15 @@ class _FakeTensor:
 def main() -> None:
     expected_public_exports = [
         "f8e4m3",
+        "f8e4m3x2",
+        "f8e4m3x4",
+        "f8e4m3x8",
         "f8e5m2",
+        "f8e5m2x2",
+        "f8e5m2x4",
+        "f8e5m2x8",
         "hif8",
+        "hif8x2",
         "f4e1m2x2",
         "f4e2m1x2",
         "si8",
@@ -3607,7 +3710,7 @@ def main() -> None:
     expect(not hasattr(pto, "get_buf_dyn"), "pto.get_buf_dyn should not remain on the public pto namespace")
     expect(not hasattr(pto, "rls_buf_dyn"), "pto.rls_buf_dyn should not remain on the public pto namespace")
     expect(not hasattr(pto, "tile_buf_type"), "pto.tile_buf_type should not remain on the public pto namespace")
-    expect(not hasattr(pto, "vecscope"), "pto.vecscope should not remain on the public pto namespace")
+    expect(hasattr(pto, "vecscope"), "pto.vecscope should be exported from the public pto namespace")
     expect(not hasattr(pto, "as_ptr"), "pto.as_ptr should not remain on the public pto namespace")
     expect(not hasattr(pto, "vbrc_load"), "pto.vbrc_load should not remain on the public pto namespace")
     expect(not hasattr(pto, "vsts_1pt"), "pto.vsts_1pt should not remain on the public pto namespace")
@@ -3623,10 +3726,9 @@ def main() -> None:
         "pto.tile_buf_type is not a supported PTODSL public interface" in str(removed_tile_buf_type),
         "removed pto.tile_buf_type should diagnose the authored alloc_tile replacement",
     )
-    removed_vecscope = expect_raises(AttributeError, lambda: getattr(pto, "vecscope"))
     expect(
-        "pto.vecscope is not a supported PTODSL public interface" in str(removed_vecscope),
-        "removed pto.vecscope should diagnose the public SIMD replacements",
+        callable(pto.vecscope),
+        "pto.vecscope should expose the public vecscope context manager",
     )
     removed_as_ptr = expect_raises(AttributeError, lambda: getattr(pto, "as_ptr"))
     expect(
@@ -3773,6 +3875,22 @@ def main() -> None:
         expect(
             str(pto.f8e4m3.resolve()) == "f8E4M3FN",
             "pto.f8e4m3 should resolve to the public E4M3 float8 type",
+        )
+        expect(
+            str(pto.f8e4m3x4.resolve()) == "vector<4xf8E4M3FN>",
+            "pto.f8e4m3x4 should resolve to vector<4xf8E4M3FN>",
+        )
+        expect(
+            str(pto.f8e4m3x8.resolve()) == "vector<8xf8E4M3FN>",
+            "pto.f8e4m3x8 should resolve to vector<8xf8E4M3FN>",
+        )
+        expect(
+            str(pto.f8e5m2x4.resolve()) == "vector<4xf8E5M2>",
+            "pto.f8e5m2x4 should resolve to vector<4xf8E5M2>",
+        )
+        expect(
+            str(pto.f8e5m2x8.resolve()) == "vector<8xf8E5M2>",
+            "pto.f8e5m2x8 should resolve to vector<8xf8E5M2>",
         )
         expect(
             "hif8" in str(pto.hif8.resolve()),
@@ -4727,6 +4845,23 @@ def main() -> None:
         __file__ in str(auto_mode_violation),
         "auto-mode DMA violation should preserve the authored source file",
     )
+    auto_mode_vecscope_violation = expect_raises(
+        RuntimeError,
+        auto_mode_vecscope_violation_probe.compile,
+        '@pto.jit(mode="explicit")',
+    )
+    expect(
+        "auto-mode contract violation" in str(auto_mode_vecscope_violation),
+        "auto-mode vecscope use should be diagnosed as an auto-mode contract violation",
+    )
+    expect(
+        "pto.vecscope()" in str(auto_mode_vecscope_violation),
+        "auto-mode vecscope violation should identify the explicit-only surface",
+    )
+    expect(
+        "auto_mode_vecscope_violation_probe" in str(auto_mode_vecscope_violation),
+        "auto-mode vecscope violation should identify the authored kernel name",
+    )
     merged_cross_mode_text = str(pto.merge_jit_modules(host_vec_copy.compile(), host_vec_copy_explicit.compile()))
     expect_parse_roundtrip_and_verify(merged_cross_mode_text, "merged cross-mode PTODSL container")
     expect(
@@ -5282,6 +5417,20 @@ def main() -> None:
         "pto.resume",
     ):
         expect(op_name in simt_full_text, f"full SIMT surface should contain {op_name}")
+    for fp8_vec in (
+        "vector<4xf8E4M3FN>",
+        "vector<8xf8E4M3FN>",
+        "vector<4xf8E5M2>",
+        "vector<8xf8E5M2>",
+    ):
+        expect(
+            f"!pto.ptr<{fp8_vec}, gm>" in simt_full_text,
+            f"SIMT FP8 extension should preserve !pto.ptr<{fp8_vec}, gm>",
+        )
+        expect(
+            f"!pto.ptr<{fp8_vec}, gm>, {fp8_vec}" in simt_full_text,
+            f"SIMT FP8 extension stg should accept exact {fp8_vec} payload",
+        )
 
     expect_raises(
         TypeError,
@@ -5502,6 +5651,35 @@ def main() -> None:
         "iter_args(" in ast_runtime_for_static_slot_carry_text
         and "scf.yield" in ast_runtime_for_static_slot_carry_text,
         "static subscript slot carry should lower through scf.for iter_args",
+    )
+    ast_runtime_for_static_slot_global_index_text = ast_runtime_for_static_slot_global_index_probe.compile().mlir_text()
+    expect_parse_roundtrip_and_verify(
+        ast_runtime_for_static_slot_global_index_text,
+        "AST-rewritten runtime for global static subscript slot carry specialization",
+    )
+    expect(
+        ast_runtime_for_static_slot_global_index_text.count("scf.for") == 1,
+        "module-global static slot indices should lower through the authored runtime loop",
+    )
+    ast_runtime_for_static_slot_binop_index_text = ast_runtime_for_static_slot_binop_index_probe.compile().mlir_text()
+    expect_parse_roundtrip_and_verify(
+        ast_runtime_for_static_slot_binop_index_text,
+        "AST-rewritten runtime for BinOp static subscript slot carry specialization",
+    )
+    expect(
+        ast_runtime_for_static_slot_binop_index_text.count("scf.for") == 1,
+        "BinOp static slot indices should lower through the authored runtime loop",
+    )
+    ast_runtime_for_static_slot_constexpr_index_text = (
+        ast_runtime_for_static_slot_constexpr_index_probe.compile(SLOT=2).mlir_text()
+    )
+    expect_parse_roundtrip_and_verify(
+        ast_runtime_for_static_slot_constexpr_index_text,
+        "AST-rewritten runtime for constexpr static subscript slot carry specialization",
+    )
+    expect(
+        ast_runtime_for_static_slot_constexpr_index_text.count("scf.for") == 1,
+        "constexpr static slot indices should lower through the authored runtime loop",
     )
     expect_raises(
         PTODSLAstRewriteError,
@@ -6049,6 +6227,8 @@ def main() -> None:
     expect_parse_roundtrip_and_verify(low_precision_vcvt_surface_text, "low-precision vcvt surface specialization")
     vdup_surface_text = vdup_surface_probe.compile().mlir_text()
     expect_parse_roundtrip_and_verify(vdup_surface_text, "public vdup surface specialization")
+    vecscope_surface_text = vecscope_surface_probe.compile().mlir_text()
+    expect_parse_roundtrip_and_verify(vecscope_surface_text, "public vecscope surface specialization")
     vmulscvt_surface_text = vmulscvt_surface_probe.compile().mlir_text()
     expect_parse_roundtrip_and_verify(vmulscvt_surface_text, "public vmulscvt surface specialization")
     vmula_surface_text = vmula_surface_probe.compile().mlir_text()
@@ -6320,6 +6500,8 @@ def main() -> None:
     expect("pto.sync.set <PIPE_FIX>, 4" in sync_surface_text, "set_intra_flag(Pipe.FIX, 4) should lower physical event ids through pto.sync.set")
     expect("pto.sync.wait <PIPE_V>, %c3" in sync_surface_text, "wait_intra_flag(Pipe.V, dynamic_event) should lower dynamic event ids through pto.sync.wait")
     expect("pto.sync.wait <PIPE_FIX>, 20" in sync_surface_text, "wait_intra_flag(Pipe.FIX, 20) should lower physical event ids through pto.sync.wait")
+    expect("pto.sync.wait <PIPE_MTE3>, %c3" in sync_surface_text, "wait_intra_flag(Pipe.MTE3, dynamic_event) should lower dynamic event ids through pto.sync.wait")
+    expect("pto.sync.wait <PIPE_MTE3>, 31" in sync_surface_text, "wait_intra_flag(Pipe.MTE3, 31) should lower the static physical event id through pto.sync.wait")
     expect(data_movement_surface_text.count("pto.mte_gm_ub") == 2, "public grouped GM->UB wrappers should lower to pto.mte_gm_ub")
     expect("pto.mte_ub_gm" in data_movement_surface_text, "public grouped UB->GM wrapper should lower to pto.mte_ub_gm")
     expect(
@@ -6386,6 +6568,9 @@ def main() -> None:
     expect("f32, !pto.mask<b32> -> !pto.vreg<64xf32>" in vdup_surface_text, "vdup(scalar_f32, mask_b32) should infer an f32 vector result type")
     expect(vdup_surface_text.count('position = "LOWEST"') >= 1, "vdup(vec, mask) should default position to LOWEST")
     expect('position = "HIGHEST"' in vdup_surface_text, "vdup(vec, mask, PositionMode.HIGHEST) should preserve the authored position")
+    expect(vecscope_surface_text.count("pto.vecscope") == 1, "pto.vecscope() should lower exactly one vecscope region")
+    expect("pto.vlds" in vecscope_surface_text, "public vecscope body should allow vector loads")
+    expect("pto.vsts" in vecscope_surface_text, "public vecscope body should allow vector stores")
     expect("pto.vmulscvt" in vmulscvt_surface_text, "vmulscvt(...) should lower to pto.vmulscvt")
     expect('\"A\"' in vmulscvt_surface_text, "vmulscvt(..., rnd=VcvtRoundMode.A) should preserve the authored round token")
     expect('\"EVEN\"' in vmulscvt_surface_text, "vmulscvt(..., part=PartMode.EVEN) should preserve the authored part token")

@@ -442,7 +442,7 @@ pto.set_intra_flag(pto.Pipe.MTE3, 0)
 
 | Parameter | Type | Description |
 |-----------|------|-------------|
-| `pipe` | `Pipe` | Waiting endpoint for the synchronization event. The public DSL accepts `Pipe.FIX` and `Pipe.V` here. |
+| `pipe` | `Pipe` | Waiting endpoint for the synchronization event. The public DSL accepts `Pipe.FIX`, `Pipe.MTE3`, and `Pipe.V` here. |
 | `event_id` | `int` or scalar expression | Physical event identifier to wait on (`0`–`31` for static IDs). |
 
 For A5 mixed C/V writeback code that must synchronize with both AIV subblocks, wait on both
@@ -454,8 +454,9 @@ the base event ID and `base_id + 16`.
 
 <!-- ptodsl-doc-test: {"mode":"compile_fragment","fixture":"sync_ops.basic","symbol":"sync_ops_basic_probe","compile":{}} -->
 ```python
-# Vector-side endpoint waits for event ID0
-pto.wait_intra_flag(pto.Pipe.V, 0)
+# MTE3 waits for the Cube-to-UB handoff for each AIV subblock.
+with pto.for_(0, 2, step=1) as sid:
+    pto.wait_intra_flag(pto.Pipe.MTE3, sid * 16 + 6)
 ```
 
 ## 10.6 Synchronization in the authoring model

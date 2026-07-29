@@ -3129,9 +3129,10 @@ def FenceBarrierAllOp : PTO_Op<"fence.barrier_all"> {
     Memory fence for a visibility scope. Around signal/payload communication it
     can be used as the producer-side publish barrier or the consumer-side
     acquire barrier depending on placement. In EmitC, `scope = gm` and
-    `scope = all` conservatively drain MTE2, MTE3, and FIX before lowering to
-    `dsb(DSB_DDR)`, so users do not need to separately model those producer
-    pipe classes before a GM visibility fence.
+    `scope = all` drain all vector-kernel pipes with `PIPE_ALL` before lowering
+    to `dsb(DSB_DDR)`. Other kernel kinds conservatively drain MTE2, MTE3, and
+    FIX before the DDR barrier. Users therefore do not need to separately model
+    producer pipe classes before a GM visibility fence.
   }];
 
   let arguments = (ins PTO_FenceScopeAttr:$scope);

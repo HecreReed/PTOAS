@@ -5728,6 +5728,17 @@ static void emitConservativeGmFencePipeDrains(
   emitPipeBarrier(rewriter, loc, "PIPE_FIX");
 }
 
+static bool isInVectorKernel(Operation *op) {
+  for (Operation *parent = op->getParentOp(); parent;
+       parent = parent->getParentOp()) {
+    auto kernelKindAttr = parent->getAttrOfType<FunctionKernelKindAttr>(
+        FunctionKernelKindAttr::name);
+    if (kernelKindAttr)
+      return kernelKindAttr.getKernelKind() == FunctionKernelKind::Vector;
+  }
+  return false;
+}
+
 struct PTOBarrierToEmitC : public OpConversionPattern<pto::BarrierOp> {
   using OpConversionPattern<pto::BarrierOp>::OpConversionPattern;
 
@@ -5780,7 +5791,10 @@ struct PTOFenceToEmitC : public OpConversionPattern<FenceOp> {
         op.getScope().getScope() != pto::FenceScope::All)
       return rewriter.notifyMatchFailure(op, "unsupported fence scope");
 
-    emitConservativeGmFencePipeDrains(rewriter, op.getLoc());
+    if (isInVectorKernel(op))
+      emitPipeBarrier(rewriter, op.getLoc(), "PIPE_ALL");
+    else
+      emitConservativeGmFencePipeDrains(rewriter, op.getLoc());
     emitDsbDdr(rewriter, op.getLoc());
     rewriter.eraseOp(op);
     return success();

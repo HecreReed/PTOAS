@@ -297,6 +297,11 @@ cache controls.  Supports both scalar and packed vector types.
 
 **Returns**: `pto.ldg` returns the pointer element type. `pto.stg` returns None.
 
+Packed vector pointer element descriptors include `pto.f32x2`, `pto.f16x2`,
+`pto.bf16x2`, `pto.f8e4m3x2`, `pto.f8e4m3x4`, `pto.f8e4m3x8`,
+`pto.f8e5m2x2`, `pto.f8e5m2x4`, `pto.f8e5m2x8`, `pto.hif8x2`,
+`pto.i8x2`, `pto.i16x2`, and `pto.i32x2`.
+
 **Offset contract**: The offset is an element-level ``index``, not a byte
 offset.  For ``pto.ptr(pto.f32x2, "gm")``, offset 1 advances by 8 bytes
 (2 × sizeof(f32)).  Dynamic ``i64`` offsets must be cast to ``index`` via

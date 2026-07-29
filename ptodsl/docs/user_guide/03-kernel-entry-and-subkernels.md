@@ -649,6 +649,8 @@ everything available in auto — tiles, Tile Ops, sub-kernels — and additional
 gain access to MTE ops, explicit synchronization, and pointer manipulation.
 When you need precise control over individual instructions and phase ordering,
 you can drop below the tile abstraction without leaving the `@pto.jit` entry.
+When you want to delineate an authored vector interval directly in the public
+PTODSL surface, use `with pto.vecscope():` inside an explicit-mode kernel body.
 
 The richer type surface also applies to sub-kernels: in auto mode, a
 sub-kernel's parameters are restricted to `Tile` and PTO scalar types; in

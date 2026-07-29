@@ -16,10 +16,14 @@
 
 #include "mlir/Dialect/Func/IR/FuncOps.h"
 #include "mlir/Dialect/SCF/IR/SCF.h"
+#include "mlir/IR/IRMapping.h"
 #include "mlir/IR/PatternMatch.h"
 #include "mlir/Interfaces/SideEffectInterfaces.h"
 #include "mlir/Pass/Pass.h"
 
+#include <optional>
+
+#include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/SmallPtrSet.h"
 
 namespace mlir {
@@ -56,7 +60,19 @@ struct ResultlessScopePlan {
   SmallVector<Operation *, 16> moveOps;
 };
 
+struct LogicalScopePlan {
+  size_t begin = 0;
+  size_t end = 0;
+  ResultlessScopePlan plan;
+};
+
+using SegmentRematCache =
+    llvm::DenseMap<Value, llvm::DenseMap<Operation *, Value>>;
+
 static VPTOInferenceOpClass classifyOperationForInference(Operation *op);
+static LogicalResult
+buildResultlessScopePlan(ArrayRef<Operation *> ops, ResultlessScopePlan &plan,
+                         EscapingMovedValue &escapingValue);
 static LogicalResult inferVecScopesInRegion(Region &region,
                                             MLIRContext *context);
 
@@ -74,12 +90,6 @@ static bool isExplicitVectorScopeCarrier(Operation *op) {
 
 static bool isForbiddenInsideInferredVectorScope(Operation *op) {
   return isa<pto::VbitsortOp, pto::Vmrgsort4Op>(op);
-}
-
-static bool isCloneableMaskProducer(Operation *op) {
-  return isa<pto::PsetB8Op, pto::PsetB16Op, pto::PsetB32Op, pto::PgeB8Op,
-             pto::PgeB16Op, pto::PgeB32Op, pto::PltB8Op, pto::PltB16Op,
-             pto::PltB32Op>(op);
 }
 
 static bool isVectorScopeBoundaryOperation(Operation *op) {
@@ -118,6 +128,16 @@ static bool isSafeScalarOperation(Operation *op) {
   if (isa<func::CallOp>(op))
     return false;
   if (isPTOOperation(op) && !isMemoryEffectFree(op))
+    return false;
+  return isMemoryEffectFree(op);
+}
+
+static bool isRematerializableVecScopeProducer(Operation *op) {
+  if (!op || op->getNumRegions() != 0)
+    return false;
+  if (op->hasTrait<OpTrait::IsTerminator>())
+    return false;
+  if (isa<func::CallOp>(op))
     return false;
   return isMemoryEffectFree(op);
 }
@@ -258,57 +278,204 @@ static Operation *getAncestorInBlock(Operation *op, Block &block) {
   return nullptr;
 }
 
-static bool isUseBeforeInBlock(OpOperand *lhs, OpOperand *rhs, Block &block) {
-  Operation *lhsAncestor = getAncestorInBlock(lhs->getOwner(), block);
-  Operation *rhsAncestor = getAncestorInBlock(rhs->getOwner(), block);
-  if (!lhsAncestor || !rhsAncestor || lhsAncestor == rhsAncestor)
-    return false;
-  return lhsAncestor->isBeforeInBlock(rhsAncestor);
-}
+static FailureOr<Operation *>
+cloneVecScopeProducerForUse(
+    Value value, Operation *user, Operation *logicalScopeAnchor,
+    SegmentRematCache &cache, MLIRContext *context,
+    llvm::DenseMap<Operation *, Operation *> &clones) {
+  auto result = dyn_cast<OpResult>(value);
+  if (!result)
+    return failure();
 
-static void keepEarliestUseFirst(SmallVectorImpl<OpOperand *> &uses,
-                                 Block &block) {
-  if (uses.size() < 2)
-    return;
-
-  unsigned earliest = 0;
-  for (unsigned i = 1, e = uses.size(); i < e; ++i) {
-    if (isUseBeforeInBlock(uses[i], uses[earliest], block))
-      earliest = i;
+  if (auto cacheIt = cache.find(value); cacheIt != cache.end()) {
+    auto anchorIt = cacheIt->second.find(logicalScopeAnchor);
+    if (anchorIt != cacheIt->second.end())
+      return anchorIt->second.getDefiningOp();
   }
-  if (earliest != 0)
-    std::swap(uses.front(), uses[earliest]);
-}
 
-static void cloneSharedMaskProducers(Block &block, MLIRContext *context) {
-  IRRewriter rewriter(context);
-  SmallVector<Operation *, 32> ops;
-  for (Operation &op : block)
-    ops.push_back(&op);
+  Operation *producer = result.getOwner();
+  auto existing = clones.find(producer);
+  if (existing != clones.end())
+    return existing->second;
 
-  for (Operation *op : ops) {
-    if (!isCloneableMaskProducer(op))
+  if (!isRematerializableVecScopeProducer(producer))
+    return failure();
+
+  IRMapping mapping;
+  for (Value operand : producer->getOperands()) {
+    if (!isVecScopeType(operand.getType()))
       continue;
 
-    for (OpResult result : op->getOpResults()) {
-      if (!isa<pto::MaskType>(result.getType()) || result.use_empty())
+    FailureOr<Operation *> clonedOperandProducer =
+        cloneVecScopeProducerForUse(operand, user, logicalScopeAnchor, cache,
+                                    context, clones);
+    if (failed(clonedOperandProducer))
+      return failure();
+
+    auto operandResult = cast<OpResult>(operand);
+    mapping.map(operand, (*clonedOperandProducer)
+                             ->getResult(operandResult.getResultNumber()));
+  }
+
+  IRRewriter rewriter(context);
+  rewriter.setInsertionPoint(user);
+  Operation *clone = rewriter.clone(*producer, mapping);
+  clones.try_emplace(producer, clone);
+  cache[value][logicalScopeAnchor] = clone->getResult(result.getResultNumber());
+  return clone;
+}
+
+static void collectGreedyLogicalScopePlans(
+    ArrayRef<Operation *> ops, SmallVectorImpl<LogicalScopePlan> &plans) {
+  plans.clear();
+
+  for (size_t begin = 0; begin < ops.size();) {
+    size_t bestEnd = begin;
+    ResultlessScopePlan bestPlan;
+
+    for (size_t end = ops.size(); end > begin; --end) {
+      ArrayRef<Operation *> candidate = ops.slice(begin, end - begin);
+      if (!hasVectorOperation(candidate))
         continue;
 
-      SmallVector<OpOperand *, 8> uses;
-      for (OpOperand &use : result.getUses())
-        uses.push_back(&use);
-      if (uses.size() < 2)
-        continue;
-
-      keepEarliestUseFirst(uses, block);
-      for (OpOperand *use : ArrayRef<OpOperand *>(uses).drop_front()) {
-        Operation *user = use->getOwner();
-        rewriter.setInsertionPoint(user);
-        Operation *clone = rewriter.clone(*op);
-        use->set(clone->getResult(result.getResultNumber()));
+      ResultlessScopePlan plan;
+      EscapingMovedValue candidateEscapingValue;
+      if (succeeded(
+              buildResultlessScopePlan(candidate, plan, candidateEscapingValue))) {
+        bestEnd = end;
+        bestPlan = std::move(plan);
+        break;
       }
     }
+
+    if (bestEnd == begin) {
+      ++begin;
+      continue;
+    }
+
+    plans.push_back(LogicalScopePlan{begin, bestEnd, std::move(bestPlan)});
+    begin = bestEnd;
   }
+}
+
+static void assignLogicalScopeAnchorsForCluster(
+    ArrayRef<Operation *> ops,
+    llvm::DenseMap<Operation *, Operation *> &logicalScopeAnchors) {
+  SmallVector<LogicalScopePlan, 8> plans;
+  collectGreedyLogicalScopePlans(ops, plans);
+
+  llvm::DenseMap<Operation *, Operation *> scopeAnchorByMovedOp;
+  for (const LogicalScopePlan &plan : plans) {
+    if (plan.plan.moveOps.empty())
+      continue;
+    Operation *scopeAnchor = plan.plan.moveOps.front();
+    for (Operation *movedOp : plan.plan.moveOps)
+      scopeAnchorByMovedOp[movedOp] = scopeAnchor;
+  }
+
+  Operation *currentNonScopeAnchor = nullptr;
+  for (Operation *op : ops) {
+    auto scopeIt = scopeAnchorByMovedOp.find(op);
+    if (scopeIt != scopeAnchorByMovedOp.end()) {
+      logicalScopeAnchors[op] = scopeIt->second;
+      currentNonScopeAnchor = nullptr;
+      continue;
+    }
+
+    if (!currentNonScopeAnchor)
+      currentNonScopeAnchor = op;
+    logicalScopeAnchors[op] = currentNonScopeAnchor;
+  }
+}
+
+static llvm::DenseMap<Operation *, Operation *>
+computeLogicalScopeAnchors(Block &block) {
+  llvm::DenseMap<Operation *, Operation *> logicalScopeAnchors;
+  SmallVector<Operation *, 32> pending;
+
+  auto flush = [&]() {
+    if (pending.empty())
+      return;
+    assignLogicalScopeAnchorsForCluster(pending, logicalScopeAnchors);
+    pending.clear();
+  };
+
+  for (Operation &op : block) {
+    switch (classifyOperationForInference(&op)) {
+    case VPTOInferenceOpClass::Vector:
+    case VPTOInferenceOpClass::SafeScalar:
+      pending.push_back(&op);
+      break;
+    case VPTOInferenceOpClass::Boundary:
+      flush();
+      break;
+    }
+  }
+  flush();
+  return logicalScopeAnchors;
+}
+
+static LogicalResult rematerializeEscapingValueForUserSegments(
+    Value value, const llvm::SmallPtrSetImpl<Operation *> &movedOps,
+    Block &block, SegmentRematCache &cache, MLIRContext *context) {
+  auto result = dyn_cast<OpResult>(value);
+  if (!result)
+    return failure();
+
+  llvm::DenseMap<Operation *, Operation *> logicalScopeAnchors =
+      computeLogicalScopeAnchors(block);
+  llvm::DenseMap<Operation *, SmallVector<OpOperand *, 4>> usesBySegment;
+
+  for (OpOperand &use : result.getUses()) {
+    Operation *user = use.getOwner();
+    if (isUserInsideCluster(user, movedOps))
+      continue;
+
+    Operation *ancestor = getAncestorInBlock(user, block);
+    if (!ancestor)
+      return failure();
+
+    auto anchorIt = logicalScopeAnchors.find(ancestor);
+    if (anchorIt == logicalScopeAnchors.end())
+      return failure();
+
+    usesBySegment[anchorIt->second].push_back(&use);
+  }
+
+  if (usesBySegment.empty())
+    return failure();
+
+  for (auto &entry : usesBySegment) {
+    Operation *logicalScopeAnchor = entry.first;
+    SmallVectorImpl<OpOperand *> &uses = entry.second;
+    Value replacement;
+    if (auto cacheIt = cache.find(value); cacheIt != cache.end()) {
+      auto anchorIt = cacheIt->second.find(logicalScopeAnchor);
+      if (anchorIt != cacheIt->second.end())
+        replacement = anchorIt->second;
+    }
+
+    if (!replacement) {
+      if (!logicalScopeAnchor)
+        return failure();
+
+      llvm::DenseMap<Operation *, Operation *> clones;
+      FailureOr<Operation *> clonedProducer =
+          cloneVecScopeProducerForUse(value, logicalScopeAnchor,
+                                      logicalScopeAnchor, cache, context,
+                                      clones);
+      if (failed(clonedProducer))
+        return failure();
+
+      replacement = (*clonedProducer)->getResult(result.getResultNumber());
+      cache[value][logicalScopeAnchor] = replacement;
+    }
+
+    for (OpOperand *use : uses)
+      use->set(replacement);
+  }
+
+  return success();
 }
 
 static bool findEscapingMovedResult(
@@ -490,8 +657,117 @@ static LogicalResult wrapGreedySubclusters(ArrayRef<Operation *> ops,
   return success();
 }
 
+static FailureOr<bool> fixOneEscapingSubcluster(ArrayRef<Operation *> ops,
+                                                SegmentRematCache &cache,
+                                                MLIRContext *context) {
+  for (size_t begin = 0; begin < ops.size();) {
+    size_t bestEnd = begin;
+    EscapingMovedValue escapingValue;
+    bool sawEscapingMovedResult = false;
+    size_t escapingCandidateBegin = begin;
+    size_t escapingCandidateEnd = begin;
+
+    for (size_t end = ops.size(); end > begin; --end) {
+      ArrayRef<Operation *> candidate = ops.slice(begin, end - begin);
+      if (!hasVectorOperation(candidate))
+        continue;
+
+      ResultlessScopePlan ignoredPlan;
+      EscapingMovedValue candidateEscapingValue;
+      if (succeeded(buildResultlessScopePlan(candidate, ignoredPlan,
+                                             candidateEscapingValue))) {
+        bestEnd = end;
+        break;
+      }
+
+      if (!sawEscapingMovedResult && candidateEscapingValue.producer) {
+        escapingValue = candidateEscapingValue;
+        sawEscapingMovedResult = true;
+        escapingCandidateBegin = begin;
+        escapingCandidateEnd = end;
+      }
+    }
+
+    if (bestEnd == begin) {
+      if (classifyOperationForInference(ops[begin]) ==
+              VPTOInferenceOpClass::Vector &&
+          sawEscapingMovedResult && escapingValue.requiresDiagnostic) {
+        ArrayRef<Operation *> escapingCandidate =
+            ops.slice(escapingCandidateBegin,
+                      escapingCandidateEnd - escapingCandidateBegin);
+        llvm::SmallPtrSet<Operation *, 16> movedOps =
+            computeMovedOpsForResultlessScope(escapingCandidate);
+        Block *block = ops.front()->getBlock();
+        if (!block)
+          return false;
+
+        if (succeeded(rematerializeEscapingValueForUserSegments(
+                escapingValue.value, movedOps, *block, cache, context)))
+          return true;
+        return false;
+      }
+      ++begin;
+      continue;
+    }
+
+    begin = bestEnd;
+  }
+
+  return false;
+}
+
+static LogicalResult repairEscapingSubclusters(Block &block,
+                                               MLIRContext *context) {
+  constexpr unsigned kMaxRepairIterations = 256;
+  SegmentRematCache cache;
+  for (unsigned iteration = 0; iteration < kMaxRepairIterations; ++iteration) {
+    bool changedInIteration = false;
+    SmallVector<Operation *, 32> pending;
+    SmallVector<Operation *, 32> ops;
+    for (Operation &op : block)
+      ops.push_back(&op);
+
+    auto flush = [&]() -> FailureOr<bool> {
+      FailureOr<bool> changed =
+          fixOneEscapingSubcluster(pending, cache, context);
+      pending.clear();
+      return changed;
+    };
+
+    for (Operation *op : ops) {
+      switch (classifyOperationForInference(op)) {
+      case VPTOInferenceOpClass::Vector:
+      case VPTOInferenceOpClass::SafeScalar:
+        pending.push_back(op);
+        break;
+      case VPTOInferenceOpClass::Boundary: {
+        FailureOr<bool> changed = flush();
+        if (failed(changed))
+          return failure();
+        changedInIteration |= *changed;
+        break;
+      }
+      }
+      if (changedInIteration)
+        break;
+    }
+
+    if (changedInIteration)
+      continue;
+
+    FailureOr<bool> changed = flush();
+    if (failed(changed))
+      return failure();
+    if (!*changed)
+      return success();
+  }
+
+  return failure();
+}
+
 static LogicalResult inferVecScopesInBlock(Block &block, MLIRContext *context) {
-  cloneSharedMaskProducers(block, context);
+  if (failed(repairEscapingSubclusters(block, context)))
+    return failure();
 
   SmallVector<Operation *, 16> pending;
 

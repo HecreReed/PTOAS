@@ -10,7 +10,7 @@
 // TNotify release requires the producer side to drain local producer pipes
 // before the GM fence and before pto.comm.tnotify. PTOAS no longer runs the
 // historical MemoryConsistency analysis pass, so the explicit GM fence lowering
-// conservatively drains MTE2, MTE3, and FIX before dsb(DSB_DDR).
+// drains all vector-kernel pipes before dsb(DSB_DDR).
 
 // RUN: ptoas --pto-arch=a3 %s -o - 2>&1 | FileCheck %s
 
@@ -57,8 +57,8 @@ module {
     return
   }
 
-  // acc tstore -> tnotify: ACC->GM stores use the FIX pipe, so the release
-  // fence must be preceded by a FIX pipe drain.
+  // acc tstore -> tnotify: the vector-kernel release fence uses PIPE_ALL, so
+  // it does not name the cube-side FIX pipe explicitly.
   func.func @tnotify_drain_after_acc_tstore(
       %dst_ptr: !pto.ptr<f32>,
       %signal_ptr: !pto.ptr<i32>)
@@ -159,8 +159,8 @@ module {
     return
   }
 
-  // The explicit barrier_all conservatively drains MTE2, MTE3 and FIX, then
-  // completes the publish sequence with a DDR fence.
+  // The explicit barrier_all drains all vector-kernel pipes, then completes
+  // the publish sequence with a DDR fence.
   func.func @tnotify_after_existing_mte3_barrier_and_release(
       %src_ptr: !pto.ptr<f32>,
       %dst_ptr: !pto.ptr<f32>,
@@ -280,17 +280,13 @@ module {
 // CHECK:      pto::comm::NotifyOp{{.*}}= pto::comm::NotifyOp::Set;
 // CHECK:      TLOAD(
 // CHECK:      TSTORE(
-// CHECK:      pipe_barrier(PIPE_MTE2);
-// CHECK-NEXT: pipe_barrier(PIPE_MTE3);
-// CHECK-NEXT: pipe_barrier(PIPE_FIX);
+// CHECK:      pipe_barrier(PIPE_ALL);
 // CHECK-NEXT: dsb(DSB_DDR);
 // CHECK:      pto::comm::TNOTIFY(
 
 // CHECK-LABEL: AICORE void tnotify_drain_after_acc_tstore(
 // CHECK:      TSTORE
-// CHECK:      pipe_barrier(PIPE_MTE2);
-// CHECK-NEXT: pipe_barrier(PIPE_MTE3);
-// CHECK-NEXT: pipe_barrier(PIPE_FIX);
+// CHECK:      pipe_barrier(PIPE_ALL);
 // CHECK-NEXT: dsb(DSB_DDR);
 // CHECK:      pto::comm::TNOTIFY(
 
@@ -309,17 +305,13 @@ module {
 
 // CHECK-LABEL: AICORE void tnotify_after_existing_mte3_barrier_and_release(
 // CHECK:      TSTORE(
-// CHECK:      pipe_barrier(PIPE_MTE2);
-// CHECK-NEXT: pipe_barrier(PIPE_MTE3);
-// CHECK-NEXT: pipe_barrier(PIPE_FIX);
+// CHECK:      pipe_barrier(PIPE_ALL);
 // CHECK-NEXT: dsb(DSB_DDR);
 // CHECK:      pto::comm::TNOTIFY(
 
 // CHECK-LABEL: AICORE void tnotify_after_existing_mte3_barrier_and_fence(
 // CHECK:      TSTORE(
-// CHECK:      pipe_barrier(PIPE_MTE2);
-// CHECK-NEXT: pipe_barrier(PIPE_MTE3);
-// CHECK-NEXT: pipe_barrier(PIPE_FIX);
+// CHECK:      pipe_barrier(PIPE_ALL);
 // CHECK-NEXT: dsb(DSB_DDR);
 // CHECK:      pto::comm::TNOTIFY(
 
