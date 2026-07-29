@@ -91,6 +91,9 @@ static std::string getGlobalTensorTypeStringFromShapeAndStrides(
 static emitc::OpaqueType getGlobalTensorOpaqueTypeFromShape(
     MLIRContext *ctx, Type elemTy, ArrayRef<int64_t> shape,
     StringRef layoutEnum = "pto::Layout::ND");
+static Value materializeGlobalTensorDataPointer(
+    ConversionPatternRewriter &rewriter, Location loc, Value value,
+    Type sourceType);
 
 static const char *addrSpaceQualifier(pto::AddressSpace as) {
   switch (as) {
@@ -3785,6 +3788,74 @@ struct SubviewToEmitCPattern : public OpConversionPattern<memref::SubViewOp> {
     return std::nullopt;
   }
 
+  LogicalResult
+  resolveSourceStrides(Value source, PatternRewriter &rewriter,
+                       SmallVectorImpl<OpFoldResult> &strides) const {
+    auto sourceType = dyn_cast<MemRefType>(source.getType());
+    if (!sourceType)
+      return failure();
+    int64_t rank = sourceType.getRank();
+
+    if (auto reinterpretCast =
+            source.getDefiningOp<memref::ReinterpretCastOp>()) {
+      auto mixedStrides = reinterpretCast.getMixedStrides();
+      if (mixedStrides.size() != static_cast<size_t>(rank))
+        return failure();
+      strides.assign(mixedStrides.begin(), mixedStrides.end());
+      return success();
+    }
+
+    if (auto subview = source.getDefiningOp<memref::SubViewOp>()) {
+      SmallVector<OpFoldResult> parentStrides;
+      if (failed(resolveSourceStrides(subview.getSource(), rewriter,
+                                      parentStrides)))
+        return failure();
+      auto steps = subview.getMixedStrides();
+      if (parentStrides.size() != static_cast<size_t>(rank) ||
+          steps.size() != static_cast<size_t>(rank))
+        return failure();
+
+      strides.reserve(rank);
+      for (auto [parentStride, step] :
+           llvm::zip_equal(parentStrides, steps)) {
+        auto parentStatic = extractStaticInt(parentStride);
+        auto stepStatic = extractStaticInt(step);
+        if (parentStatic && stepStatic) {
+          strides.push_back(
+              rewriter.getIndexAttr((*parentStatic) * (*stepStatic)));
+          continue;
+        }
+        if (stepStatic && *stepStatic == 1) {
+          strides.push_back(parentStride);
+          continue;
+        }
+        if (parentStatic && *parentStatic == 1) {
+          strides.push_back(step);
+          continue;
+        }
+        return failure();
+      }
+      return success();
+    }
+
+    if (auto cast = source.getDefiningOp<memref::CastOp>())
+      return resolveSourceStrides(cast.getSource(), rewriter, strides);
+
+    SmallVector<int64_t> typeStrides;
+    int64_t offset = ShapedType::kDynamic;
+    if (failed(mlir::pto::getPTOMemRefStridesAndOffset(
+            sourceType, typeStrides, offset)) ||
+        typeStrides.size() != static_cast<size_t>(rank) ||
+        llvm::any_of(typeStrides, [](int64_t stride) {
+          return stride == ShapedType::kDynamic;
+        }))
+      return failure();
+
+    for (int64_t stride : typeStrides)
+      strides.push_back(rewriter.getIndexAttr(stride));
+    return success();
+  }
+
   LogicalResult matchAndRewrite(memref::SubViewOp op, OpAdaptor adaptor,
                                 ConversionPatternRewriter &rewriter) const override {
     auto loc = op.getLoc();
@@ -3861,36 +3932,11 @@ struct SubviewToEmitCPattern : public OpConversionPattern<memref::SubViewOp> {
     // 1. 获取 Source 的 Strides (支持动态 Stride 收集)
     SmallVector<OpFoldResult> sourceStrides;
 
-    if (auto rc = op.getSource().getDefiningOp<memref::ReinterpretCastOp>()) {
-        sourceStrides = rc.getMixedStrides();
-    } else {
-        SmallVector<int64_t> strideInts;
-        int64_t offset = ShapedType::kDynamic;
-        bool useTypeStrides =
-            succeeded(mlir::pto::getPTOMemRefStridesAndOffset(
-                srcType, strideInts, offset));
-        (void)offset;
-        if (useTypeStrides) {
-          for (int64_t s : strideInts) {
-            if (s == ShapedType::kDynamic)
-              useTypeStrides = false;
-          }
-        }
-        if (useTypeStrides) {
-            for (int64_t s : strideInts) {
-                sourceStrides.push_back(rewriter.getIndexAttr(s));
-            }
-        } else {
-            // Fallback: Compact Layout
-            auto shape = srcType.getShape();
-            int64_t current = 1;
-            sourceStrides.resize(rank);
-            for (int i = rank - 1; i >= 0; --i) {
-                sourceStrides[i] = rewriter.getIndexAttr(current);
-                if (shape[i] != ShapedType::kDynamic) current *= shape[i];
-            }
-        }
-    }
+    if (failed(resolveSourceStrides(op.getSource(), rewriter,
+                                    sourceStrides)))
+      return rewriter.notifyMatchFailure(
+          op, "cannot resolve exact source strides; refusing to assume a "
+              "compact layout");
 
     // 2. 计算运行时 Offset
     auto staticOffsets = op.getStaticOffsets();
@@ -3924,7 +3970,12 @@ struct SubviewToEmitCPattern : public OpConversionPattern<memref::SubViewOp> {
     // NOTE: Some toolchains may materialize kernel pointer params as `void*` even
     // when the underlying element type is i16. Pointer arithmetic on `void*`
     // is ill-formed in C++, so we explicitly cast to a typed pointer for i16.
-    Value sourcePtr = adaptor.getSource();
+    Value convertedSource = adaptor.getSource();
+    if (auto cast =
+            convertedSource.getDefiningOp<UnrealizedConversionCastOp>())
+      convertedSource = cast.getOperand(0);
+    Value sourcePtr = materializeGlobalTensorDataPointer(
+        rewriter, loc, convertedSource, op.getSource().getType());
     Value tileCandidate = sourcePtr;
     if (auto castOp = sourcePtr.getDefiningOp<emitc::CastOp>()) {
       tileCandidate = castOp.getOperand();
@@ -4119,46 +4170,10 @@ struct SubviewToEmitCPattern : public OpConversionPattern<memref::SubViewOp> {
       layoutEnum = specialScaleSpec->layoutEnum;
     } else if (resolvedLayout) {
       layoutEnum = layoutToEmitCString(*resolvedLayout);
-    } else {
-      bool allStatic =
-          llvm::all_of(finalShape, [](int64_t value) { return value != -1; }) &&
-          llvm::all_of(finalStride, [](int64_t value) { return value != -1; });
-
-      int layoutTag = 0; // ND
-      auto elemBytes = 4; // default float
-      if (elemTypeStr.find("half") != std::string::npos ||
-          elemTypeStr.find("f16") != std::string::npos ||
-          elemTypeStr.find("bf16") != std::string::npos)
-        elemBytes = 2;
-      else if (elemTypeStr.find("double") != std::string::npos ||
-               elemTypeStr.find("f64") != std::string::npos)
-        elemBytes = 8;
-
-      if (allStatic) {
-        if (finalShape[2] == 16 &&
-            finalShape[2] * finalShape[3] * elemBytes == 512 &&
-            finalStride[4] == 1 && finalStride[3] == finalShape[4]) {
-          layoutTag = 2; // NZ
-        } else {
-          bool isRow = finalStride[4] == 1;
-          for (int i = 3; i >= 0; --i)
-            isRow &= (finalStride[i] ==
-                      multiplyOrDynamic(finalStride[i + 1], finalShape[i + 1]));
-          bool isCol = finalStride[0] == 1;
-          for (int i = 0; i < 4; ++i)
-            isCol &= (finalStride[i + 1] ==
-                      multiplyOrDynamic(finalStride[i], finalShape[i]));
-          if (isCol)
-            layoutTag = 1; // DN
-          else
-            layoutTag = isRow ? 0 : 0; // fallback ND
-        }
-      }
-
-      if (layoutTag == 1)
-        layoutEnum = "pto::Layout::DN";
-      else if (layoutTag == 2)
-        layoutEnum = "pto::Layout::NZ";
+    } else if (auto inferred = inferLayout5D(
+                   shapeParamsVec, strideTemplateVec,
+                   getPTOStorageElemByteSize(resTy.getElementType()))) {
+      layoutEnum = layoutToEmitCString(*inferred);
     }
     // GlobalTensor takes a Layout non-type template parameter; directly use the
     // enum constant.
@@ -4348,21 +4363,21 @@ static emitc::OpaqueType getGlobalTensorOpaqueTypeFromShape(
       ctx, getGlobalTensorTypeStringFromShape(elemTy, shape, layoutEnum));
 }
 
-static std::string inferFallbackGlobalTensorLayout(ArrayRef<int64_t> shape5D,
-                                                   ArrayRef<int64_t> stride5D,
+static std::string inferFallbackGlobalTensorLayout(ArrayRef<int64_t> shape,
+                                                   ArrayRef<int64_t> strides,
                                                    Type elemTy) {
   auto layout =
-      inferLayout5D(shape5D, stride5D, getGlobalTensorElementBytes(elemTy));
+      inferLayout5D(shape, strides, getGlobalTensorElementBytes(elemTy));
   return layoutToEmitCString(layout.value_or(Layout::ND));
 }
 
 static std::string resolveGlobalTensorLayout(Operation *anchor, Value basePtr,
-                                             ArrayRef<int64_t> shape5D,
-                                             ArrayRef<int64_t> stride5D,
+                                             ArrayRef<int64_t> shape,
+                                             ArrayRef<int64_t> strides,
                                              Type elemTy) {
   if (auto layout = resolveLayoutForGlobalTensor(anchor, basePtr))
     return layoutToEmitCString(*layout);
-  return inferFallbackGlobalTensorLayout(shape5D, stride5D, elemTy);
+  return inferFallbackGlobalTensorLayout(shape, strides, elemTy);
 }
 
 struct GlobalTensorTypeNames {
@@ -4424,7 +4439,7 @@ static Value buildGlobalTensorFromMemref(ConversionPatternRewriter &rewriter,
     rewriter.create<emitc::VerbatimOp>(
         loc, "using " + names.strideTypeName + " = pto::Stride<" +
                  joinIntTemplateParams(stride5D) + ">;");
-    layoutEnum = resolveGlobalTensorLayout(anchor, basePtr, shape5D, stride5D,
+    layoutEnum = resolveGlobalTensorLayout(anchor, basePtr, shape, strides,
                                            mrTy.getElementType());
   }
 
@@ -4473,6 +4488,12 @@ static Value maybeWrapGlobalMemrefAsGlobalTensor(
     isGlobal = (as == pto::AddressSpace::GM || as == pto::AddressSpace::Zero);
   }
   if (!isGlobal)
+    return loweredValue;
+
+  Type loweredType = loweredValue.getType();
+  if (auto lvalueTy = dyn_cast<emitc::LValueType>(loweredType))
+    loweredType = lvalueTy.getValueType();
+  if (isEmitCGlobalTensorLikeType(loweredType))
     return loweredValue;
 
   if (Value gt = buildGlobalTensorFromMemref(rewriter, loc, loweredValue, mrTy,
@@ -8285,9 +8306,8 @@ static bool parseIntegerTemplateList(StringRef token, StringRef marker,
 }
 
 static LogicalResult getStaticTensorViewStrides(
-    Value source, Value convertedSource, pto::TensorViewType sourceType,
+    Value source, Value convertedSource, int64_t rank,
     SmallVectorImpl<int64_t> &strides) {
-  int64_t rank = sourceType.getRank();
   strides.clear();
 
   if (auto makeView = source.getDefiningOp<pto::MakeTensorViewOp>()) {
@@ -8314,9 +8334,7 @@ static LogicalResult getStaticTensorViewStrides(
     }
   }
 
-  auto fallback = buildRowMajorStrides(sourceType.getShape());
-  strides.append(fallback.begin(), fallback.end());
-  return success();
+  return failure();
 }
 
 struct PTOPartitionViewToEmitC
@@ -8327,14 +8345,25 @@ struct PTOPartitionViewToEmitC
   LogicalResult matchAndRewrite(mlir::pto::PartitionViewOp op,
                                 OpAdaptor adaptor,
                                 ConversionPatternRewriter &rewriter) const override {
-    auto srcTy = dyn_cast<pto::TensorViewType>(op.getSource().getType());
     auto resTy = dyn_cast<pto::PartitionTensorViewType>(op.getResult().getType());
-    if (!srcTy || !resTy)
+    Type srcElemTy;
+    int64_t srcRank = 0;
+    if (auto srcTy = dyn_cast<pto::TensorViewType>(op.getSource().getType())) {
+      srcElemTy = srcTy.getElementType();
+      srcRank = srcTy.getRank();
+    } else if (auto srcTy =
+                   dyn_cast<pto::PartitionTensorViewType>(
+                       op.getSource().getType())) {
+      srcElemTy = srcTy.getElementType();
+      srcRank = srcTy.getRank();
+    }
+    if (!srcElemTy || !resTy)
       return rewriter.notifyMatchFailure(
-          op, "expected tensor_view source and partition_tensor_view result");
+          op, "expected tensor_view or partition_tensor_view source and "
+              "partition_tensor_view result");
 
-    if (op.getOffsets().size() != static_cast<size_t>(srcTy.getRank()) ||
-        op.getSizes().size() != static_cast<size_t>(srcTy.getRank()))
+    if (op.getOffsets().size() != static_cast<size_t>(srcRank) ||
+        op.getSizes().size() != static_cast<size_t>(srcRank))
       return rewriter.notifyMatchFailure(op, "rank mismatch");
 
     for (auto [idx, value] : llvm::enumerate(op.getSizes())) {
@@ -8350,9 +8379,10 @@ struct PTOPartitionViewToEmitC
 
     SmallVector<int64_t> srcStrides;
     if (failed(getStaticTensorViewStrides(op.getSource(), adaptor.getSource(),
-                                          srcTy, srcStrides)))
+                                          srcRank, srcStrides)))
       return rewriter.notifyMatchFailure(
-          op, "partition_view requires static source strides");
+          op, "cannot resolve exact partition source strides; refusing to "
+              "assume a compact layout");
     int64_t staticLinearOffset = 0;
     SmallVector<std::pair<Value, int64_t>> dynamicOffsetTerms;
     for (auto [idx, values] :
@@ -8373,15 +8403,14 @@ struct PTOPartitionViewToEmitC
     }
 
     auto *ctx = rewriter.getContext();
-    std::string elemTypeStr = getElemTypeStringForGT(srcTy.getElementType());
+    std::string elemTypeStr = getElemTypeStringForGT(srcElemTy);
     auto ptrTy = emitc::PointerType::get(
         emitc::OpaqueType::get(ctx, "__gm__ " + elemTypeStr));
     Value src = peelUnrealized(adaptor.getSource());
-    auto data = rewriter
-                    .create<emitc::CallOpaqueOp>(
-                        op.getLoc(), ptrTy, "PTOAS__GLOBAL_TENSOR_DATA",
-                        ArrayAttr{}, ArrayAttr{}, ValueRange{src})
-                    .getResult(0);
+    Value data = materializeGlobalTensorDataPointer(
+        rewriter, op.getLoc(), src, op.getSource().getType());
+    if (data.getType() != ptrTy)
+      data = rewriter.create<emitc::CastOp>(op.getLoc(), ptrTy, data);
     Value ptr = data;
     if (!dynamicOffsetTerms.empty()) {
       Type indexTy = emitc::OpaqueType::get(ctx, "int64_t");
@@ -8674,10 +8703,15 @@ struct ReinterpretCastToEmitC : public OpConversionPattern<memref::ReinterpretCa
     Value source = peelUnrealized(adaptor.getSource());
     auto offsets = adaptor.getOffsets();
     Value offsetVal = offsets.empty() ? Value() : offsets[0];
+    auto mixedOffsets = op.getMixedOffsets();
+    std::optional<int64_t> constantOffset =
+        mixedOffsets.empty() ? std::nullopt
+                             : getConstantIntValue(mixedOffsets.front());
+    const bool isZeroOffset = constantOffset && *constantOffset == 0;
 
     // GM: keep pointer arithmetic.
     if (isGm) {
-      if (!offsetVal) {
+      if (!offsetVal || (isZeroOffset && !emitAddPtrTrace)) {
         rewriter.replaceOp(op, source);
         return success();
       }
@@ -8800,7 +8834,7 @@ struct ReinterpretCastToEmitC : public OpConversionPattern<memref::ReinterpretCa
     }
 
     Value addr = baseAddr;
-    if (offsetVal) {
+    if (offsetVal && !isZeroOffset) {
       Value offU64 = offsetVal;
       if (offU64.getType() != u64Ty)
         offU64 = rewriter.create<emitc::CastOp>(loc, u64Ty, offU64).getResult();

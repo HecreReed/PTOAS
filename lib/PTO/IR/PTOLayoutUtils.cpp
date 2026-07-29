@@ -119,9 +119,10 @@ inferMinor2DLayout(int64_t rows, int64_t cols, int64_t rowStride,
     if (preferredMinor2D &&
         (*preferredMinor2D == Layout::ND || *preferredMinor2D == Layout::DN))
       return *preferredMinor2D;
-    return (!isDynamic(cols) && cols == 1 && (isDynamic(rows) || rows != 1))
-               ? Layout::DN
-               : Layout::ND;
+    // Both interpretations address the same elements when a minor extent is
+    // one. Keep the historical row-major default unless a consumer supplies
+    // an explicit preference.
+    return Layout::ND;
   }
   return dn ? Layout::DN : Layout::ND;
 }
@@ -135,25 +136,11 @@ static std::string expectedActual(StringRef name, int64_t expected,
 
 } // namespace
 
-std::optional<int64_t>
-mlir::pto::getNZC0StorageElems(unsigned storageElemBytes) {
+static std::optional<int64_t>
+getNZC0StorageElems(unsigned storageElemBytes) {
   if (storageElemBytes == 0 || kNZBlockBytes % storageElemBytes != 0)
     return std::nullopt;
   return kNZBlockBytes / storageElemBytes;
-}
-
-bool mlir::pto::hasNZInnerStructure5D(ArrayRef<int64_t> shape5D,
-                                      ArrayRef<int64_t> stride5D,
-                                      unsigned storageElemBytes) {
-  if (shape5D.size() != kPTOLayoutRank || stride5D.size() != kPTOLayoutRank)
-    return false;
-  auto c0 = getNZC0StorageElems(storageElemBytes);
-  if (!c0)
-    return false;
-  return matchesKnown(shape5D[3], kNZInnerRows) &&
-         matchesKnown(shape5D[4], *c0) && matchesKnown(stride5D[4], 1) &&
-         matchesKnown(stride5D[3], *c0) &&
-         matchesKnown(stride5D[2], kNZInnerRows * *c0);
 }
 
 std::optional<std::string>
@@ -214,9 +201,9 @@ mlir::pto::getNZViewCompatibilityError(ArrayRef<int64_t> shape5D,
   return std::nullopt;
 }
 
-bool mlir::pto::isNZViewCompatible5D(ArrayRef<int64_t> shape5D,
-                                     ArrayRef<int64_t> stride5D,
-                                     unsigned storageElemBytes) {
+static bool isNZViewCompatible5D(ArrayRef<int64_t> shape5D,
+                                 ArrayRef<int64_t> stride5D,
+                                 unsigned storageElemBytes) {
   return !getNZViewCompatibilityError(shape5D, stride5D, storageElemBytes);
 }
 
@@ -245,9 +232,9 @@ mlir::pto::getNZSubviewCompatibilityError(ArrayRef<int64_t> sourceShape5D,
   return std::nullopt;
 }
 
-bool mlir::pto::isCanonicalNZRoot5D(ArrayRef<int64_t> shape5D,
-                                    ArrayRef<int64_t> stride5D,
-                                    unsigned storageElemBytes) {
+static bool isCanonicalNZRoot5D(ArrayRef<int64_t> shape5D,
+                                ArrayRef<int64_t> stride5D,
+                                unsigned storageElemBytes) {
   if (!allStatic(shape5D) || !allStatic(stride5D) ||
       !isNZViewCompatible5D(shape5D, stride5D, storageElemBytes))
     return false;

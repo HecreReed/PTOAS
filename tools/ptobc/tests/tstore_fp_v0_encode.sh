@@ -32,4 +32,7 @@ ROUNDTRIP="${OUT_DIR}/tstore_fp_v0_roundtrip.roundtrip.pto"
 "${PTOBC_BIN}" decode "${BC}" -o "${ROUNDTRIP}"
 
 grep -F "pto.tstore_fp ins(" "${ROUNDTRIP}" >/dev/null
+grep -F "pto.partition_view" "${ROUNDTRIP}" |
+  grep -F ": !pto.partition_tensor_view<32x32xi8>" >/dev/null
+grep -F "!pto.partition_tensor_view<16x32xi8>" "${ROUNDTRIP}" >/dev/null
 grep -F "!pto.partition_tensor_view<32x32xi8>" "${ROUNDTRIP}" >/dev/null

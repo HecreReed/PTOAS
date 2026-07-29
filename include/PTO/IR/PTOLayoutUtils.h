@@ -19,18 +19,6 @@ namespace mlir::pto {
 
 inline constexpr unsigned kPTOLayoutRank = 5;
 
-std::optional<int64_t> getNZC0StorageElems(unsigned storageElemBytes);
-
-bool hasNZInnerStructure5D(ArrayRef<int64_t> shape5D,
-                           ArrayRef<int64_t> stride5D,
-                           unsigned storageElemBytes);
-
-bool isNZViewCompatible5D(ArrayRef<int64_t> shape5D, ArrayRef<int64_t> stride5D,
-                          unsigned storageElemBytes);
-
-bool isCanonicalNZRoot5D(ArrayRef<int64_t> shape5D, ArrayRef<int64_t> stride5D,
-                         unsigned storageElemBytes);
-
 std::optional<std::string>
 getNZViewCompatibilityError(ArrayRef<int64_t> shape5D,
                             ArrayRef<int64_t> stride5D,

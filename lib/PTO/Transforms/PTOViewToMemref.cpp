@@ -1167,7 +1167,8 @@ static LogicalResult lowerPtrToIntOps(func::FuncOp func, MLIRContext *ctx) {
     Location loc = op.getLoc();
 
     Value baseBuf = op.getOperand(0);
-    OpFoldResult off0 = rewriter.getIndexAttr(0);
+    OpFoldResult off0 =
+        rewriter.create<arith::ConstantIndexOp>(loc, 0).getResult();
     bool foldedAddPtr = false;
     {
       Value cur = baseBuf;
@@ -1193,11 +1194,16 @@ static LogicalResult lowerPtrToIntOps(func::FuncOp func, MLIRContext *ctx) {
 
     size_t rank = op.getShape().size();
     int64_t dyn = ShapedType::kDynamic;
-    SmallVector<int64_t> dynStrides(rank, dyn);
+    SmallVector<int64_t> resultShape(rank, dyn);
+    SmallVector<int64_t> resultStrides(rank, dyn);
+    for (auto [index, value] : llvm::enumerate(op.getStrides())) {
+      int64_t constant = 0;
+      if (getConstIndexValue(value, constant))
+        resultStrides[index] = constant;
+    }
     auto layout =
-        StridedLayoutAttr::get(ctx, /*offset=*/dyn, /*strides=*/dynStrides);
-    SmallVector<int64_t> dynShape(rank, dyn);
-    auto mrTy = MemRefType::get(dynShape, baseMr.getElementType(), layout,
+        StridedLayoutAttr::get(ctx, dyn, resultStrides);
+    auto mrTy = MemRefType::get(resultShape, baseMr.getElementType(), layout,
                                 baseMr.getMemorySpace());
 
     SmallInlineVector<OpFoldResult> sizes;
@@ -1205,7 +1211,7 @@ static LogicalResult lowerPtrToIntOps(func::FuncOp func, MLIRContext *ctx) {
       sizes.push_back(ensureIndex(rewriter, loc, value, op));
     SmallInlineVector<OpFoldResult> strides;
     for (Value value : op.getStrides())
-      strides.push_back(ensureIndex(rewriter, loc, value, op));
+      appendMixedIndex(rewriter, loc, value, op, strides);
 
     auto rc = rewriter.create<memref::ReinterpretCastOp>(loc, mrTy, baseBuf, off0,
                                                          sizes, strides);
@@ -1371,8 +1377,61 @@ static LogicalResult lowerPartitionViewOps(func::FuncOp func, MLIRContext *ctx) 
     }
 
     int64_t dyn = ShapedType::kDynamic;
-    SmallVector<int64_t> dynStrides(rank, dyn);
-    auto layout = StridedLayoutAttr::get(ctx, dyn, dynStrides);
+    SmallVector<int64_t> resultStrides(rank, dyn);
+    int64_t sourceOffset = dyn;
+    SmallVector<int64_t> sourceTypeStrides;
+    if (succeeded(getPTOMemRefStridesAndOffset(
+            srcMrTy, sourceTypeStrides, sourceOffset)) &&
+        sourceTypeStrides.size() == static_cast<size_t>(rank))
+      resultStrides.assign(sourceTypeStrides.begin(),
+                           sourceTypeStrides.end());
+    if (auto reinterpretCast =
+            src.getDefiningOp<memref::ReinterpretCastOp>()) {
+      auto mixedStrides = reinterpretCast.getMixedStrides();
+      if (mixedStrides.size() == static_cast<size_t>(rank)) {
+        for (auto [idx, stride] : llvm::enumerate(mixedStrides)) {
+          if (auto attr = dyn_cast<Attribute>(stride)) {
+            if (auto intAttr = dyn_cast<IntegerAttr>(attr)) {
+              resultStrides[idx] = intAttr.getInt();
+              continue;
+            }
+          }
+          if (auto value = dyn_cast<Value>(stride)) {
+            int64_t constant = 0;
+            if (getConstIndexValue(value, constant))
+              resultStrides[idx] = constant;
+          }
+        }
+      }
+    }
+    int64_t resultOffset = sourceOffset;
+    if (resultOffset != dyn) {
+      for (auto [offset, stride] :
+           llvm::zip_equal(mixedOffsets, resultStrides)) {
+        int64_t offsetValue = 0;
+        if (auto attr = dyn_cast<Attribute>(offset)) {
+          auto integerAttr = dyn_cast<IntegerAttr>(attr);
+          if (!integerAttr) {
+            resultOffset = dyn;
+            break;
+          }
+          offsetValue = integerAttr.getInt();
+        } else {
+          auto value = dyn_cast<Value>(offset);
+          if (!value || !getConstIndexValue(value, offsetValue)) {
+            resultOffset = dyn;
+            break;
+          }
+        }
+        if (stride == dyn) {
+          resultOffset = dyn;
+          break;
+        }
+        resultOffset += offsetValue * stride;
+      }
+    }
+    auto layout =
+        StridedLayoutAttr::get(ctx, resultOffset, resultStrides);
     auto resTy = MemRefType::get(staticSizes, srcMrTy.getElementType(), layout,
                                  srcMrTy.getMemorySpace());
 
@@ -2140,7 +2199,8 @@ struct PTOViewToMemrefPass
         Location loc = op.getLoc();
 
         Value baseBuf = op.getOperand(0);
-        OpFoldResult off0 = rewriter.getIndexAttr(0);
+        OpFoldResult off0 =
+            rewriter.create<arith::ConstantIndexOp>(loc, 0).getResult();
 
         // Fold pto.addptr chains into the view base to avoid nested reinterpret_cast.
         bool foldedAddPtr = false;
@@ -2170,24 +2230,29 @@ struct PTOViewToMemrefPass
         // [修复] 获取动态 Rank (根据 shape 输入的数量)
         size_t rank = op.getShape().size(); 
 
-        // Construct target type with dynamic offset/strides
+        // Preserve every static stride operand in the memref type. Keep shape
+        // and offset dynamic so the view's SSA metadata remains authoritative.
         Type elemTy = baseMr.getElementType();
         int64_t dyn = ShapedType::kDynamic;
-        
-        // [修复] 构建 N 维 Strided Layout
-        // strides 数组长度必须等于 rank
-        SmallVector<int64_t> dynStrides(rank, dyn);
-        auto layout = StridedLayoutAttr::get(ctx, /*offset=*/dyn, /*strides=*/dynStrides);
-        
-        // [修复] 构建 N 维 Shape
-        SmallVector<int64_t> dynShape(rank, dyn);
-        auto mrTy = MemRefType::get(dynShape, elemTy, layout, baseMr.getMemorySpace());
+        SmallVector<int64_t> resultShape(rank, dyn);
+        SmallVector<int64_t> resultStrides(rank, dyn);
+        for (auto [index, value] : llvm::enumerate(op.getStrides())) {
+          int64_t constant = 0;
+          if (getConstIndexValue(value, constant))
+            resultStrides[index] = constant;
+        }
+        auto layout =
+            StridedLayoutAttr::get(ctx, dyn, resultStrides);
+        auto mrTy = MemRefType::get(resultShape, elemTy, layout,
+                                    baseMr.getMemorySpace());
 
         SmallInlineVector<OpFoldResult> sizes;
-        for (Value v : op.getShape()) sizes.push_back(ensureIndex(rewriter, loc, v, op));
+        for (Value value : op.getShape())
+          sizes.push_back(ensureIndex(rewriter, loc, value, op));
 
         SmallInlineVector<OpFoldResult> strides;
-        for (Value v : op.getStrides()) strides.push_back(ensureIndex(rewriter, loc, v, op));
+        for (Value value : op.getStrides())
+          appendMixedIndex(rewriter, loc, value, op, strides);
 
         auto rc = rewriter.create<memref::ReinterpretCastOp>(
             loc, mrTy, baseBuf, off0, sizes, strides);

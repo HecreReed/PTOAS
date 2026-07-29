@@ -220,19 +220,29 @@ static LogicalResult rewriteMakeTensorView(MakeTensorViewOp op,
 
 static LogicalResult rewritePartitionView(PartitionViewOp op,
                                           IRRewriter &rewriter) {
-  auto sourceType = dyn_cast<TensorViewType>(op.getSource().getType());
   auto resultType = dyn_cast<PartitionTensorViewType>(op.getResult().getType());
-  if (!sourceType || !resultType)
+  if (!resultType)
     return success();
+  int64_t sourceRank = 0;
+  if (auto sourceType =
+          dyn_cast<TensorViewType>(op.getSource().getType())) {
+    sourceRank = sourceType.getRank();
+  } else if (auto sourceType =
+                 dyn_cast<PartitionTensorViewType>(
+                     op.getSource().getType())) {
+    sourceRank = sourceType.getRank();
+  } else {
+    return success();
+  }
 
   if (op.getOffsets().size() != kLogicalRank2 ||
       op.getSizes().size() != kLogicalRank2)
     return success();
 
-  if (sourceType.getRank() != kCanonicalRank5)
+  if (sourceRank != kCanonicalRank5)
     return op.emitOpError(
         "rank-2 partition_tensor_view normalization expects canonical rank-5 "
-        "source tensor_view");
+        "source view");
 
   rewriter.setInsertionPoint(op);
   Value zero = getOrCreateIndexConstant(rewriter, op.getLoc(), 0);

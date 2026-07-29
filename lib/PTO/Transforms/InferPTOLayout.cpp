@@ -172,7 +172,7 @@ static bool verifyExistingLayoutAttr(Operation *op, ArrayRef<int64_t> shape,
     return false;
   }
 
-  if (!op->getAttrOfType<BoolAttr>(kInferredLayoutAttrName))
+  if (op->getAttrOfType<BoolAttr>(kInferredLayoutAttrName))
     op->removeAttr(kInferredLayoutAttrName);
   return true;
 }
@@ -411,7 +411,7 @@ static bool getStaticShapeAndStride(MakeTensorViewOp op,
   return getShapeAndStride(op, shape, strides, allStatic) && allStatic;
 }
 
-static bool getFoldResults(ArrayRef<OpFoldResult> values,
+static void getFoldResults(ArrayRef<OpFoldResult> values,
                            SmallVectorImpl<int64_t> &result, bool &allStatic) {
   result.clear();
   result.reserve(values.size());
@@ -424,7 +424,6 @@ static bool getFoldResults(ArrayRef<OpFoldResult> values,
       allStatic = false;
     }
   }
-  return true;
 }
 
 static ResolvedLayoutInfo resolveLayoutFromViewValue(Value v) {
@@ -515,8 +514,11 @@ static bool getResolvedViewShape(Value value, SmallVectorImpl<int64_t> &shape) {
 
 static bool verifyNZPartitionView(PartitionViewOp op) {
   SmallVector<int64_t> sourceShape;
-  if (!getResolvedViewShape(op.getSource(), sourceShape))
+  if (!getResolvedViewShape(op.getSource(), sourceShape)) {
+    op.emitError(
+        "cannot resolve the source shape needed to validate NZ partition");
     return false;
+  }
   SmallVector<int64_t> offsets;
   SmallVector<int64_t> sizes;
   getValuesOrDynamic(op.getOffsets(), offsets);
@@ -588,8 +590,8 @@ static void inferReinterpretCastLayoutAttr(memref::ReinterpretCastOp op,
   SmallVector<int64_t> shape;
   SmallVector<int64_t> strides;
   bool allStatic = true;
-  (void)getFoldResults(op.getMixedSizes(), shape, allStatic);
-  (void)getFoldResults(op.getMixedStrides(), strides, allStatic);
+  getFoldResults(op.getMixedSizes(), shape, allStatic);
+  getFoldResults(op.getMixedStrides(), strides, allStatic);
 
   bool isMinor2DAmbiguous = false;
   std::optional<Layout> inferred;
@@ -675,9 +677,10 @@ struct InferPTOLayoutPass
 
       if (existing || sourceInfo.layout) {
         Layout layout = existing ? existing.getLayout() : *sourceInfo.layout;
+        auto existingInferred =
+            op->getAttrOfType<BoolAttr>(kInferredLayoutAttrName);
         bool inferred =
-            existing ? static_cast<bool>(
-                           op->getAttrOfType<BoolAttr>(kInferredLayoutAttrName))
+            existing ? (existingInferred && existingInferred.getValue())
                      : sourceInfo.inferred;
         if (layout == Layout::NZ && !verifyNZMemRefSubview(op)) {
           signalPassFailure();

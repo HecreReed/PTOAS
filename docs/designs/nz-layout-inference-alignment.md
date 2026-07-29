@@ -115,21 +115,6 @@ shape/stride 无法证明用户的逻辑语义一定是 NZ。
 ```cpp
 namespace mlir::pto {
 
-std::optional<int64_t>
-getNZC0StorageElems(unsigned storageElemBytes);
-
-bool hasNZInnerStructure5D(ArrayRef<int64_t> shape5D,
-                           ArrayRef<int64_t> stride5D,
-                           unsigned storageElemBytes);
-
-bool isNZViewCompatible5D(ArrayRef<int64_t> shape5D,
-                          ArrayRef<int64_t> stride5D,
-                          unsigned storageElemBytes);
-
-bool isCanonicalNZRoot5D(ArrayRef<int64_t> shape5D,
-                         ArrayRef<int64_t> stride5D,
-                         unsigned storageElemBytes);
-
 std::optional<std::string>
 getNZViewCompatibilityError(ArrayRef<int64_t> shape5D,
                             ArrayRef<int64_t> stride5D,
@@ -155,6 +140,9 @@ inferLayout5D(ArrayRef<int64_t> shape5D,
 } // namespace mlir::pto
 ```
 
+`getNZC0StorageElems()`、`isNZViewCompatible5D()` 和
+`isCanonicalNZRoot5D()` 仅是该实现文件内部的组合谓词，不作为跨 pass API 导出。
+
 `InferPTOLayout.cpp`、`PTO.cpp`、`PTOToEmitC.cpp` 都调用这套实现，删除各自的私有
 NZ/ND/DN 判定副本。调用点必须先解析显式属性和源 view 属性，只有确实缺失 layout 时
 才调用 `inferLayout5D()`。
@@ -165,12 +153,12 @@ NZ/ND/DN 判定副本。调用点必须先解析显式属性和源 view 属性�
 canonical stride：
 
 ```cpp
-hasNZInnerStructure5D(shape, stride, bytes)
+NZInnerStructure(shape, stride, bytes)
     && stride[1] == shape[2] * stride[2]
     && stride[0] == shape[1] * stride[1]
 ```
 
-`hasNZInnerStructure5D()` 只描述不能被切开的内部 fractal：
+其中 `NZInnerStructure` 是下列不能被切开的内部 fractal 条件的伪代码：
 
 ```cpp
 shape[3] == 16
@@ -183,7 +171,7 @@ stride[2] == 16 * C0
 `isNZViewCompatible5D()` 在内部结构之上验证当前 view 的外层跨度：
 
 ```cpp
-hasNZInnerStructure5D(shape, stride, bytes)
+NZInnerStructure(shape, stride, bytes)
     && shape[0] == 1
     && stride[1] >= shape[2] * stride[2]
     && stride[1] % C0 == 0
@@ -247,7 +235,9 @@ layout = nd
 - 二维 NZ 的 `d0` 保持 `offset = 0`、`size = 1`；
 - 校验通过后直接继承 NZ，不再用 `isCanonicalNZRoot5D()` 重新推断；
 - `partition_view` 可以继续以 `partition_tensor_view` 为源，嵌套切分逐级沿源链
-  继承同一个 layout；
+  继承同一个 layout；lowering 必须同时保留根 view 的真实 stride 和累计 offset；
+- EmitC 无法从源类型或源 view 链解析精确 stride 时必须报错，不能用连续
+  row-major stride 猜测；
 - 在 `d3`/`d4` 内部切分时发出错误，不静默改成 ND。
 
 动态 `d1`/`d2` offset 和 size 不改变 fractal 内部结构，可以传播 NZ。`d3`/`d4`
@@ -390,7 +380,8 @@ error: NZ view cannot be partitioned inside a fractal:
 - 242 个文件生成 1558 个 `GlobalTensor` 实例化点；
 - 当前 NZ 去重形状中，两组符合 pto-isa 标准形；
 - 两组只存在于 `globaltensor_layout_bytewidth_emitc.pto` 的旧错位形状不再是 NZ：
-  int8 样例回到 ND，末维为 1 的 int64 样例按既有 minor-2D 规则回到 DN；
+  int8 样例回到 ND；末维为 1 时 ND/DN 的寻址等价，未提供消费者偏好时保持
+  兼容默认 ND；
 - 不加非退化门槛时，38 个文件中的 80 个单-fractal ND 视图会被升级成 NZ；
 - 加门槛后，当前语料没有新增 NZ。
 
@@ -434,7 +425,8 @@ PR #1027 在现有设计提交之后继续完成以下内容：
 11. 嵌套 partition 继续从已经解析的源 layout 传播；
 12. FP4 packed-pair 按一字节 storage element 计算 C0；
 13. verifier、pass 和 EmitC 对同一 view 得到一致 layout；
-14. mgather/mscatter 的 ND-only 路径不覆盖显式 ND。
+14. mgather/mscatter 的 ND-only 路径不覆盖显式 ND；
+15. 带外层 gap 的根 view 经过嵌套 partition 后仍保留原 stride，并累计两级 offset。
 
 同时更新 `globaltensor_layout_bytewidth_emitc.pto` 中固化旧错位规则的期望值，并增加
 A3/A5 编译覆盖。具备板卡资源时运行一条 NZ load/store E2E 数据比对，确认生成的
