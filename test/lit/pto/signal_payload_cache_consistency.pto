@@ -3,13 +3,13 @@
 // CANN Open Software License Agreement Version 2.0 (the "License").
 // Please refer to the License for details. You may not use this file except in compliance with the License.
 // THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
-// INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY OR FITNESS FOR A PARTICULAR PURPOSE.
+// INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
 // See LICENSE in the root of the software repository for the full text of the License.
 
 // Explicit signal/payload memory-consistency IR lowering. PTOAS no longer runs
 // the historical MemoryConsistency analysis pass, so this test only checks the
-// public CMO/fence ops. The GM fence lowering conservatively drains MTE2,
-// MTE3, and FIX before dsb(DSB_DDR).
+// public CMO/fence ops. In a vector kernel, the GM fence lowering drains all
+// vector pipes with PIPE_ALL before dsb(DSB_DDR).
 
 // RUN: ptoas --pto-arch=a3 %s -o - 2>&1 | FileCheck %s
 
@@ -119,9 +119,7 @@ module {
 }
 
 // CHECK-LABEL: AICORE void explicit_gm_fence(
-// CHECK:      pipe_barrier(PIPE_MTE2);
-// CHECK-NEXT: pipe_barrier(PIPE_MTE3);
-// CHECK-NEXT: pipe_barrier(PIPE_FIX);
+// CHECK:      pipe_barrier(PIPE_ALL);
 // CHECK-NEXT: dsb(DSB_DDR);
 
 // CHECK-LABEL: AICORE void whole_cache_cmo(
@@ -133,9 +131,7 @@ module {
 // CHECK-LABEL: AICORE void scalar_release_sequence(
 // CHECK:      {{.*}}[{{.*}}] = {{.*}};
 // CHECK:      PTOAS__DCCI_SINGLE_CACHE_LINE({{.*}});
-// CHECK-NEXT: pipe_barrier(PIPE_MTE2);
-// CHECK-NEXT: pipe_barrier(PIPE_MTE3);
-// CHECK-NEXT: pipe_barrier(PIPE_FIX);
+// CHECK-NEXT: pipe_barrier(PIPE_ALL);
 // CHECK-NEXT: dsb(DSB_DDR);
 // CHECK:      pto::comm::TNOTIFY(
 
@@ -146,8 +142,6 @@ module {
 
 // CHECK-LABEL: AICORE void mte_release_sequence(
 // CHECK:      TSTORE(
-// CHECK:      pipe_barrier(PIPE_MTE2);
-// CHECK-NEXT: pipe_barrier(PIPE_MTE3);
-// CHECK-NEXT: pipe_barrier(PIPE_FIX);
+// CHECK:      pipe_barrier(PIPE_ALL);
 // CHECK-NEXT: dsb(DSB_DDR);
 // CHECK:      pto::comm::TNOTIFY(

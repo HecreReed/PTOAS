@@ -3,14 +3,14 @@
 // CANN Open Software License Agreement Version 2.0 (the "License").
 // Please refer to the License for details. You may not use this file except in compliance with the License.
 // THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
-// INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY OR FITNESS FOR A PARTICULAR PURPOSE.
+// INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
 // See LICENSE in the root of the software repository for the full text of the License.
 
 // Regression for issue #872 under the explicit memory-consistency contract:
 // pto.comm.tput/pto.comm.tbroadcast can issue MTE3 GM stores internally. A
 // following TNotify publishes a cross-rank signal, so the producer side must
-// execute a GM fence before the signal. The fence lowering conservatively
-// drains MTE2, MTE3, and FIX before dsb(DSB_DDR).
+// execute a GM fence before the signal. In a vector kernel, the fence lowering
+// drains all vector pipes with PIPE_ALL before dsb(DSB_DDR).
 
 // RUN: ptoas --pto-arch=a3 %s -o - 2>&1 | FileCheck %s
 
@@ -149,9 +149,7 @@ module {
 // CHECK-LABEL: AICORE void tput_tnotify_release(
 // CHECK:      pto::comm::TPUT(
 // CHECK-NOT:  PTOAS__DCCI_SINGLE_CACHE_LINE
-// CHECK:      pipe_barrier(PIPE_MTE2);
-// CHECK-NEXT: pipe_barrier(PIPE_MTE3);
-// CHECK-NEXT: pipe_barrier(PIPE_FIX);
+// CHECK:      pipe_barrier(PIPE_ALL);
 // CHECK-NEXT: dsb(DSB_DDR);
 // CHECK:      pto::comm::TNOTIFY(
 
@@ -159,17 +157,13 @@ module {
 // CHECK:      pto::comm::TPUT(
 // CHECK-NOT:  PTOAS__DCCI_SINGLE_CACHE_LINE
 // CHECK-NEXT: pipe_barrier(PIPE_ALL);
-// CHECK-NEXT: pipe_barrier(PIPE_MTE2);
-// CHECK-NEXT: pipe_barrier(PIPE_MTE3);
-// CHECK-NEXT: pipe_barrier(PIPE_FIX);
+// CHECK-NEXT: pipe_barrier(PIPE_ALL);
 // CHECK-NEXT: dsb(DSB_DDR);
 // CHECK:      pto::comm::TNOTIFY(
 
 // CHECK-LABEL: AICORE void tbroadcast_tnotify_release(
 // CHECK:      pto::comm::TBROADCAST(
 // CHECK-NOT:  PTOAS__DCCI_SINGLE_CACHE_LINE
-// CHECK:      pipe_barrier(PIPE_MTE2);
-// CHECK-NEXT: pipe_barrier(PIPE_MTE3);
-// CHECK-NEXT: pipe_barrier(PIPE_FIX);
+// CHECK:      pipe_barrier(PIPE_ALL);
 // CHECK-NEXT: dsb(DSB_DDR);
 // CHECK:      pto::comm::TNOTIFY(
