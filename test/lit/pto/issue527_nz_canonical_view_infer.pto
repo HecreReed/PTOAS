@@ -9,6 +9,7 @@
 // RUN: split-file %s %t
 // RUN: ptoas --pto-arch=a3 --emit-pto-ir --mlir-print-ir-after=pto-infer-layout %t/positive.pto -o /dev/null 2>&1 | FileCheck %s --check-prefix=INFER
 // RUN: ptoas --pto-arch=a5 --emit-pto-ir --mlir-print-ir-after=pto-infer-layout %t/positive.pto -o /dev/null 2>&1 | FileCheck %s --check-prefix=INFER
+// RUN: ptoas --pto-arch=a3 --emit-pto-ir --mlir-print-ir-after=pto-infer-layout %t/nd_fallback.pto -o /dev/null 2>&1 | FileCheck %s --check-prefix=ND-FALLBACK
 // RUN: ptoas --pto-arch=a5 --emit-pto-ir --mlir-print-ir-after=pto-view-to-memref %t/positive.pto -o /dev/null 2>&1 | FileCheck %s --check-prefix=LOWER
 // RUN: ptoas --pto-arch=a3 %t/emitc.pto 2>&1 | FileCheck %s --check-prefix=EMITC
 // RUN: ptoas --pto-arch=a5 %t/emitc.pto 2>&1 | FileCheck %s --check-prefix=EMITC
@@ -37,6 +38,8 @@
 // INFER-DAG: pto.mgather
 // INFER-DAG: pto.mscatter
 // INFER-DAG: memref.subview {{.*}} {layout = #pto.layout<nz>}
+
+// ND-FALLBACK: pto.make_tensor_view {{.*}} {layout = #pto.layout<nd>, pto.inferred_layout = true} : !pto.tensor_view<4x8x16xf32>
 
 // LOWER-DAG: memref.reinterpret_cast {{.*}} {layout = #pto.layout<nz>, pto.inferred_layout = true}
 // LOWER-DAG: memref.subview {{.*}} {layout = #pto.layout<nz>, pto.inferred_layout = true}
@@ -302,6 +305,22 @@ module {
     pto.tload
       ins(%part : !pto.partition_tensor_view<1x8x8x16x8xf32>)
       outs(%tile : !pto.tile_buf<loc=vec, dtype=f32, rows=128, cols=64, v_row=128, v_col=64, blayout=col_major, slayout=row_major, fractal=512, pad=0>)
+    return
+  }
+}
+
+//--- nd_fallback.pto
+module {
+  func.func @nd_fallback_for_unknown_stride(%ptr: !pto.ptr<f32>) {
+    %c-1 = arith.constant -1 : index
+    %c4 = arith.constant 4 : index
+    %c8 = arith.constant 8 : index
+    %c16 = arith.constant 16 : index
+    %c128 = arith.constant 128 : index
+    %view = pto.make_tensor_view %ptr,
+      shape = [%c4, %c8, %c16],
+      strides = [%c128, %c16, %c-1]
+      : !pto.tensor_view<4x8x16xf32>
     return
   }
 }

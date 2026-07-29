@@ -260,15 +260,7 @@ bool mlir::pto::isCanonicalNZRoot5D(ArrayRef<int64_t> shape5D,
 bool mlir::pto::isLayoutCompatible5D(Layout layout, ArrayRef<int64_t> shape,
                                      ArrayRef<int64_t> stride,
                                      unsigned storageElemBytes) {
-  auto padded = rightAlignTo5D(shape, stride);
-  if (!padded)
-    return false;
   switch (layout) {
-  case Layout::NZ:
-    if (shape.size() != kPTOLayoutRank)
-      return false;
-    return isNZViewCompatible5D(padded->shape, padded->stride,
-                                storageElemBytes);
   case Layout::ND:
   case Layout::DN:
     // ND/DN are logical GlobalTensor interpretations, not compactness
@@ -279,6 +271,13 @@ bool mlir::pto::isLayoutCompatible5D(Layout layout, ArrayRef<int64_t> shape,
   case Layout::MX_A_ZZ:
   case Layout::MX_B_NN:
     return true;
+  case Layout::NZ: {
+    auto padded = rightAlignTo5D(shape, stride);
+    if (!padded || shape.size() != kPTOLayoutRank)
+      return false;
+    return isNZViewCompatible5D(padded->shape, padded->stride,
+                                storageElemBytes);
+  }
   }
   return false;
 }
