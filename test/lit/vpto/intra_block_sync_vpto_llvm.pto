@@ -16,8 +16,31 @@ module attributes {pto.target_arch = "a5", pto.kernel_kind = #pto.kernel_kind<ve
     pto.sync.wait <PIPE_MTE3>, %event_id
     return
   }
+
+  func.func @intra_block_sync_mte_pipes() attributes {pto.kernel} {
+    pto.sync.set <PIPE_MTE1>, 17
+    pto.sync.wait <PIPE_MTE2>, 17
+    return
+  }
+
+  func.func @intra_block_sync_v_dynamic(%event_id: index) attributes {pto.kernel} {
+    pto.sync.set <PIPE_V>, %event_id
+    return
+  }
 }
 
 // CHECK-LABEL: llvm.func @intra_block_sync_static_dynamic_mix_aiv
 // CHECK: llvm.call @llvm.hivm.SET.INTRA.BLOCK.mode
 // CHECK: llvm.call @llvm.hivm.WAIT.INTRA.BLOCK.mode
+
+// CHECK-LABEL: llvm.func @intra_block_sync_mte_pipes_mix_aiv
+// CHECK: llvm.mlir.constant(3 : i64) : i64
+// CHECK: llvm.mlir.constant(17 : i64) : i64
+// CHECK: llvm.call @llvm.hivm.SET.INTRA.BLOCK.mode
+// CHECK: llvm.mlir.constant(4 : i64) : i64
+// CHECK: llvm.mlir.constant(17 : i64) : i64
+// CHECK: llvm.call @llvm.hivm.WAIT.INTRA.BLOCK.mode
+
+// CHECK-LABEL: llvm.func @intra_block_sync_v_dynamic_mix_aiv
+// CHECK: llvm.mlir.constant(1 : i64) : i64
+// CHECK: llvm.call @llvm.hivm.SET.INTRA.BLOCK.mode

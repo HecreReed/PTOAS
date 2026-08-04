@@ -266,9 +266,7 @@ def TensorViewAddrOp : PTO_Op<"tensor_view_addr", [Pure]> {
     typed PTO pointer, depending on the requested destination type.
 
     In authoring-form IR this op preserves the descriptor-style surface;
-    during view-to-memref lowering it collapses to the underlying memref value
-    or to a memref-derived pointer.
-
+    tile-native inputs remain unchanged through memory planning and sync.
     This op may also accept a memref operand after earlier view lowering, in
     which case it behaves as an identity marker and is removed by lowering.
   }];
@@ -294,8 +292,7 @@ def TileBufAddrOp : PTO_Op<"tile_buf_addr", [Pure]> {
 
     This op is emitted by TileLang DSL templates and resolved by the
     FoldTileBufIntrinsics pass after inlining. Hand-written `.pto` may also
-    use it directly on the memref result of `pto.bind_tile` / lowered
-    `pto.alloc_tile`.
+    use it directly on lowered memref/tile handles.
   }];
 
   let arguments = (ins AnyTypeOf<[TileBufType, AnyMemRef],
@@ -309,7 +306,8 @@ def TileBufAddrOp : PTO_Op<"tile_buf_addr", [Pure]> {
   }];
 }
 
-def VecScopeOp : PTO_Op<"vecscope", [SingleBlock, NoTerminator]> {
+def VecScopeOp : PTO_Op<"vecscope", [SingleBlock, NoTerminator,
+                                      VectorMicroOpInterface]> {
   let summary = "Structured region container for one VPTO vector scope";
   let description = [{
     `pto.vecscope` marks a structured vector-scope interval without overloading
@@ -324,7 +322,8 @@ def VecScopeOp : PTO_Op<"vecscope", [SingleBlock, NoTerminator]> {
 }
 
 def StrictVecScopeOp : PTO_Op<"strict_vecscope", [SingleBlock, NoTerminator,
-                                                  IsolatedFromAbove]> {
+                                                   IsolatedFromAbove,
+                                                   VectorMicroOpInterface]> {
   let summary = "Structured VPTO vector scope with explicit captures only";
   let description = [{
     `pto.strict_vecscope` is the strict form of `pto.vecscope`. Values used by
@@ -496,7 +495,13 @@ def PTO_SetLoop3ParaOp : PTO_BinaryI64ConfigOp<"set_loop3_para">;
 def PTO_SetChannelParaOp : PTO_BinaryI64ConfigOp<"set_channel_para">;
 def PTO_SetMte2NzParaOp : PTO_UnaryI64ConfigOp<"set_mte2_nz_para">;
 def PTO_SetPadValOutToL1Op : PTO_UnaryI64ConfigOp<"set_pad_val_outtol1">;
-def PTO_GetCtrlOp : PTO_NullaryI64PureOp<"get_ctrl">;
+// Reading CTRL is ordered with respect to set_ctrl. It must not be modeled as
+// Pure, otherwise CSE can reuse a value read before an intervening write.
+def PTO_GetCtrlOp : PTO_Op<"get_ctrl"> {
+  let arguments = (ins);
+  let results = (outs I64:$result);
+  let assemblyFormat = [{ attr-dict `:` type($result) }];
+}
 def PTO_GetVms4SrOp : PTO_Op<"get_vms4_sr", [Pure]> {
   let arguments = (ins);
   let results = (outs I16:$list0, I16:$list1, I16:$list2, I16:$list3);
@@ -506,6 +511,7 @@ def PTO_GetVms4SrOp : PTO_Op<"get_vms4_sr", [Pure]> {
   }];
 }
 def PTO_SetCtrlOp : PTO_UnaryI64ConfigOp<"set_ctrl">;
+def PTO_SetStoreAtomicCfgOp : PTO_UnaryI64ConfigOp<"set_store_atomic_cfg">;
 def PTO_StoreVfSimtInfoOp : PTO_SimtOp<"store_vfsimt_info"> {
   let summary = "Configure SIMT VF launch dimensions";
   let arguments = (ins I32:$dimZ, I32:$dimY, I32:$dimX);
@@ -542,7 +548,15 @@ def PTO_SetQuantPreOp : PTO_UnaryI64ConfigOp<"set_quant_pre">;
 def PTO_SetReluAlphaOp : PTO_UnaryI64ConfigOp<"set_relu_alpha">;
 def PTO_SetFixClipReluOp : PTO_UnaryI64ConfigOp<"set_fix_clip_relu">;
 def PTO_SetFpcOp : PTO_UnaryI64ConfigOp<"set_fpc">;
+def PTO_SetAtomicAddOp : PTO_NullaryConfigOp<"set_atomic_add">;
+def PTO_SetAtomicMaxOp : PTO_NullaryConfigOp<"set_atomic_max">;
+def PTO_SetAtomicMinOp : PTO_NullaryConfigOp<"set_atomic_min">;
+def PTO_SetAtomicNoneOp : PTO_NullaryConfigOp<"set_atomic_none">;
+def PTO_SetAtomicF32Op : PTO_NullaryConfigOp<"set_atomic_f32">;
+def PTO_SetAtomicF16Op : PTO_NullaryConfigOp<"set_atomic_f16">;
+def PTO_SetAtomicBF16Op : PTO_NullaryConfigOp<"set_atomic_bf16">;
 def PTO_SetAtomicS32Op : PTO_NullaryConfigOp<"set_atomic_s32">;
+def PTO_SetAtomicS16Op : PTO_NullaryConfigOp<"set_atomic_s16">;
 def PTO_SetAtomicS8Op : PTO_NullaryConfigOp<"set_atomic_s8">;
 def PTO_GetTidXOp : PTO_DirectSimtNullaryI32PureOp<"get_tid_x">;
 def PTO_GetTidYOp : PTO_DirectSimtNullaryI32PureOp<"get_tid_y">;
@@ -1065,6 +1079,7 @@ def PTO_CopyUbufToUbufOp : PTO_MteOp<"copy_ubuf_to_ubuf"> {
 }
 
 def PTO_CopyCbufToUbufOp : PTO_MteOp<"copy_cbuf_to_ubuf", [
+    CubeMicroOpInterface,
     DeclareOpInterfaceMethods<MemoryEffectsOpInterface>
   ]> {
   let arguments = (ins
@@ -1089,6 +1104,7 @@ def PTO_CopyCbufToUbufOp : PTO_MteOp<"copy_cbuf_to_ubuf", [
 }
 
 def PTO_CopyUbufToCbufOp : PTO_MteOp<"copy_ubuf_to_cbuf", [
+    CubeMicroOpInterface,
     DeclareOpInterfaceMethods<MemoryEffectsOpInterface>
   ]> {
   let arguments = (ins
@@ -1138,6 +1154,7 @@ def PTO_MteUbUbOp : PTO_MteOp<"mte_ub_ub", [
 }
 
 def PTO_MteUbL1Op : PTO_MteOp<"mte_ub_l1", [
+    CubeMicroOpInterface,
     DeclareOpInterfaceMethods<MemoryEffectsOpInterface>
   ]> {
   let arguments = (ins
@@ -2820,6 +2837,7 @@ def PTO_MteGmL1Op : PTO_MteOp<"mte_gm_l1", [
 }
 
 def PTO_MteL1UbOp : PTO_MteOp<"mte_l1_ub", [
+    CubeMicroOpInterface,
     AttrSizedOperandSegments,
     DeclareOpInterfaceMethods<MemoryEffectsOpInterface>
   ]> {

@@ -22,7 +22,7 @@ from ptodsl import pto, scalar
 from ptodsl import _types as pto_types
 import ptodsl._vmi_namespace as vmi_namespace
 from ptodsl._ast_rewrite import PTODSLAstRewriteError
-from ptodsl._bootstrap import make_context
+from ptodsl._context import make_context
 from ptodsl._kernel_signature import DeviceParameterSpec, HelperMarkerParameterSpec, RuntimeScalarParameterSpec
 from ptodsl._tracing.runtime import SignatureTracingRuntime
 from ptodsl._runtime import native_build as native_build_runtime
@@ -30,7 +30,7 @@ from ptodsl._runtime.cache import NativeBuildArtifacts, artifact_paths
 from ptodsl._runtime.codegen import generate_launch_cpp
 from ptodsl._runtime.launch import _marshal_launch_args
 from ptodsl._tracing import current_session
-from mlir.ir import InsertionPoint, Location, Module
+from ptoas.mlir.ir import InsertionPoint, Location, Module
 
 
 def expect(condition: bool, message: str) -> None:
@@ -2081,6 +2081,13 @@ def public_vector_surface_probe(inp_tile: pto.Tile, out_tile: pto.Tile, stats_ti
     s_shifted = pto.vsub(s_row, row_max_broadcast, col_mask)
     p_row = pto.vexp(s_shifted, col_mask)
     row_sum = pto.vcgadd(p_row, col_mask)
+    # Register-level probe: only assert that pto.vsqz emits the op. The
+    # compacted result is intentionally discarded here — a real compress_store
+    # would consume it via pto.init_align + pto.vstur(POST_UPDATE) + pto.vstar
+    # (see docs/user_guide/08-compute-operations.md). This probe deliberately
+    # does NOT chain a masked pto.vsts, because the original col_mask selects
+    # source lanes, not compacted positions, and would scatter the survivors.
+    _ = pto.vsqz(p_row, col_mask)
     pto.vsts(p_row, out_tile[row, 0:], col_mask)
     pto.vsts(row_max, stats_tile.as_ptr(), row, col_mask, dist="1PT_B32")
     pto.vsts(row_sum, stats_tile.as_ptr(), row + 1, col_mask, dist="1PT_B32")
@@ -3086,7 +3093,19 @@ def public_data_movement_surface_probe():
     pto.mte_gm_ub(gm_src, ub_dst, 0, 256, nburst=(8, 256, 256), loops=[(4, 2048, 2048)])
     pto.mte_gm_ub(gm_src, ub_dst, 0, 200, nburst=(64, 200, 256), pad=(0.0, 0, 0))
     pto.mte_ub_gm(ub_src, gm_dst, 256, nburst=(64, 256, 1024))
+    pto.set_store_atomic_cfg(4)
     pto.mte_ub_gm(ub_src, gm_dst, 128, nburst=(1, 128, 128), l2_cache="nared")
+    pto.set_store_atomic_cfg(0)
+    pto.set_atomic_s32()
+    pto.set_atomic_add()
+    pto.set_atomic_max()
+    pto.set_atomic_min()
+    pto.set_atomic_f32()
+    pto.set_atomic_f16()
+    pto.set_atomic_bf16()
+    pto.set_atomic_s16()
+    pto.set_atomic_s8()
+    pto.set_atomic_none()
     pto.mte_ub_gm(ub_src, gm_dst, 64, nburst=(1, 64, 64), l2_cache="wtsred")
     pto.mte_ub_ub(ub_src, ub_dst, 8, nburst=(16, 0, 4))
     pto.mte_ub_l1(ub_src, l1_dst, 8, nburst=(16, 0, 4))
@@ -4260,20 +4279,23 @@ def main() -> None:
     expect("!pto.tile_buf<vec, 1x64xf32>" in block64_text, "BLOCK=64 specialization MLIR missing specialized tile")
     expect("pto.entry" in default_text, "default @pto.jit entry child should carry the explicit entry marker")
     expect("pto.entry" in explicit_text, "explicit @pto.jit entry child should carry the explicit entry marker")
-    expect(default_text.count("module") >= 2, "default @pto.jit should emit an outer container plus one child module")
-    expect(block64_text.count("module") >= 2, "specialized @pto.jit should keep the outer-plus-child container shape")
-    expect('module attributes {pto.target_arch = "a5"}' in default_text, "outer container should carry only shared target-arch metadata")
+    expect(default_text.count("module") == 2, "default @pto.jit should wrap an unspecified-kind kernel in a backend child module")
+    expect(block64_text.count("module") == 2, "specialized @pto.jit should keep the backend child module shape")
+    expect(
+        'module attributes {pto.backend = "vpto", pto.target_arch = "a5"}' in default_text,
+        "unpartitioned VPTO module should carry backend and target metadata",
+    )
     expect('pto.mode = ' not in default_text, "generated PTODSL container IR should no longer expose public pto.mode")
     expect(
         'pto.backend = "vpto"' in default_text
         and 'pto.target_arch = "a5"' in default_text
-        and 'pto.kernel_kind = #pto.kernel_kind<vector>' in default_text,
+        and 'pto.kernel_kind' not in default_text,
         "primary VPTO child module should carry PTOAS-facing backend metadata directly on the child module",
     )
     expect(
         'pto.backend = "vpto"' in explicit_text
         and 'pto.target_arch = "a5"' in explicit_text
-        and 'pto.kernel_kind = #pto.kernel_kind<vector>' in explicit_text,
+        and 'pto.kernel_kind' not in explicit_text,
         "explicit specialization child module should keep the same VPTO child metadata shape",
     )
     expect(
@@ -4370,8 +4392,8 @@ def main() -> None:
         "@pto.jit(entry=False) handles should expose an explicit, stable cache-signature protocol",
     )
     expect(
-        helper_cache_signature[7] == "vector" and helper_cache_signature[8] is False,
-        "default @pto.jit handles should keep vector as the effective kernel kind while recording that it was not explicit",
+        helper_cache_signature[7] is None and helper_cache_signature[8] is False,
+        "default @pto.jit handles should leave the effective kernel kind unspecified",
     )
     expect_raises(
         RuntimeError,
@@ -4435,7 +4457,7 @@ def main() -> None:
     )
     expect(
         kernel_module_call_text.count('pto.backend = "vpto"') >= 2
-        and kernel_module_call_text.count('pto.kernel_kind = #pto.kernel_kind<vector>') >= 2,
+        and 'pto.kernel_kind' not in kernel_module_call_text,
         "entry-plus-helper specialization should materialize separate child modules for caller and callee",
     )
     ast_rewrite_kernel_module_text = entry_calls_ast_rewrite_kernel_module_probe.compile().mlir_text()
@@ -4480,7 +4502,7 @@ def main() -> None:
     expect(
         'pto.backend = "vpto"' in mixed_backend_text
         and 'pto.target_arch = "a5"' in mixed_backend_text
-        and 'pto.kernel_kind = #pto.kernel_kind<vector>' in mixed_backend_text,
+        and 'pto.kernel_kind' not in mixed_backend_text,
         "mixed-backend callee child should preserve the callee's VPTO backend through child pto.backend metadata",
     )
     expect(
@@ -4653,7 +4675,10 @@ def main() -> None:
             export_macro,
         ):
             expect(launch_cpp.is_file(), "native build should materialize launch.cpp before compiling it")
-            expect(kernel_kind in {"vector", "cube"}, "native build should forward the authored kernel kind")
+            expect(
+                kernel_kind in {None, "vector", "cube"},
+                "native build should forward the optional authored kernel kind",
+            )
             launch_target_arches.append(target_arch)
             expect(export_macro.endswith("_EXPORTS"), "native build should preserve launch export macro naming")
             launch_object.write_text("fake launch object\n", encoding="utf-8")
@@ -4661,7 +4686,10 @@ def main() -> None:
         def fake_link_shared_library(launch_object, kernel_object, shared_library, *, kernel_kind):
             expect(launch_object.is_file(), "native build should compile launch.cpp before linking")
             expect(kernel_object.is_file(), "native build should run ptoas before shared-library link")
-            expect(kernel_kind in {"vector", "cube"}, "native build should preserve kernel-kind-aware link flags")
+            expect(
+                kernel_kind in {None, "vector", "cube"},
+                "native build should preserve the optional kernel kind",
+            )
             shared_library.write_text("fake shared library\n", encoding="utf-8")
 
         with mock.patch.object(native_build_runtime, "artifact_paths", side_effect=fake_artifacts), mock.patch.object(
@@ -4726,9 +4754,10 @@ def main() -> None:
             f"{label} native build should hand the backend-partitioned container MLIR to ptoas unchanged",
         )
         if module_spec.jit_source is None:
+            expected_module_count = 2
             expect(
-                observation["mlir_text"].count("module") >= 2,
-                f"{label} native build should route the unified outer+child container through ptoas",
+                observation["mlir_text"].count("module") >= expected_module_count,
+                f"{label} native build should route the authored module shape through ptoas",
             )
     with TemporaryDirectory() as tmpdir:
         tmpdir_path = Path(tmpdir)
@@ -4873,7 +4902,7 @@ def main() -> None:
     expect_parse_roundtrip_and_verify(merged_same_mode_text, "merged same-mode PTODSL container")
     expect(
         merged_same_mode_text.count('func.func @host_vec_copy(') == 2,
-        "merge_jit_modules() should preserve both primary child modules in the merged container",
+        "merge_jit_modules() should preserve same-named specializations in independent backend child modules",
     )
 
     runtime_metadata_text = runtime_metadata_kernel.compile().mlir_text()
@@ -5989,21 +6018,20 @@ def main() -> None:
 
     tile_slice_text = tile_slice_surface_probe.compile(BLOCK=128).mlir_text()
     expect_parse_roundtrip_and_verify(tile_slice_text, "tile slice surface specialization")
-    expect("memref.subview" in tile_slice_text, "tile[row, col:] should lower through memref.subview")
-    expect("memref.collapse_shape" not in tile_slice_text, "2D tile[row, col:] should lower directly to a rank-reduced memref view")
-    expect("pto.tile_buf_addr" in tile_slice_text, "tile[row, col:] should materialize a memref tile address view")
+    expect("memref.subview" not in tile_slice_text, "tile[row, col:] should no longer lower through memref.subview")
+    expect("pto.tile_buf_addr" in tile_slice_text, "tile[row, col:] should materialize a tile address pointer")
     expect(
-        "pto.vlds" in tile_slice_text and "memref<128xf32, strided<[1], offset: ?>, #pto.address_space<vec>>" in tile_slice_text,
-        "vlds(tile[row, col:]) should lower against the memref slice view",
+        "pto.vlds" in tile_slice_text and "!pto.ptr<f32, ub>" in tile_slice_text,
+        "vlds(tile[row, col:]) should lower against the pointer slice view",
     )
     expect(
-        "pto.vsts" in tile_slice_text and "memref<128xf32, strided<[1], offset: ?>, #pto.address_space<vec>>" in tile_slice_text,
-        "vsts(vec, tile[row, col:], mask) should lower against the memref slice view",
+        "pto.vsts" in tile_slice_text and "!pto.ptr<f32, ub>" in tile_slice_text,
+        "vsts(vec, tile[row, col:], mask) should lower against the pointer slice view",
     )
 
     tile_slice_1d_text = tile_slice_1d_surface_probe.compile(BLOCK=128).mlir_text()
     expect_parse_roundtrip_and_verify(tile_slice_1d_text, "1D tile slice surface specialization")
-    expect("memref.subview" in tile_slice_1d_text, "tile[start:] should lower through memref.subview")
+    expect("memref.subview" not in tile_slice_1d_text, "tile[start:] should lower without memref.subview")
     expect("pto.vldas" in tile_slice_1d_text, "vldas(tile[start:]) should lower against the 1D slice view")
     expect("pto.vldus" in tile_slice_1d_text, "vldus(tile[start:], align) should lower against the 1D slice view")
     expect("pto.vsts" in tile_slice_1d_text, "vsts(vec, tile[start:], mask) should lower against the 1D slice view")
@@ -6423,6 +6451,7 @@ def main() -> None:
     expect("pto.vexp" in public_surface_text, "vexp(...) should lower to pto.vexp")
     expect("pto.vcgmax" in public_surface_text, "vcgmax(...) should lower to pto.vcgmax")
     expect("pto.vcgadd" in public_surface_text, "vcgadd(...) should lower to pto.vcgadd")
+    expect("pto.vsqz" in public_surface_text, "vsqz(...) should lower to pto.vsqz")
     expect("pto.vadds" in public_surface_text, "vsubs(...) should lower via scalar negation plus pto.vadds")
     expect("pto.mte_l1_l0a" in public_surface_text, "mte_l1_l0a(...) should lower to pto.mte_l1_l0a")
     expect("start(" not in public_surface_text, "mte_l1_l0a/l0b start_row/start_col should lower as operands")
@@ -6504,6 +6533,26 @@ def main() -> None:
     expect("pto.sync.wait <PIPE_MTE3>, 31" in sync_surface_text, "wait_intra_flag(Pipe.MTE3, 31) should lower the static physical event id through pto.sync.wait")
     expect(data_movement_surface_text.count("pto.mte_gm_ub") == 2, "public grouped GM->UB wrappers should lower to pto.mte_gm_ub")
     expect("pto.mte_ub_gm" in data_movement_surface_text, "public grouped UB->GM wrapper should lower to pto.mte_ub_gm")
+    expect(
+        data_movement_surface_text.count("pto.set_store_atomic_cfg") == 2,
+        "set_store_atomic_cfg should lower the requested config and reset",
+    )
+    for atomic_api in (
+        "set_atomic_s32",
+        "set_atomic_add",
+        "set_atomic_max",
+        "set_atomic_min",
+        "set_atomic_f32",
+        "set_atomic_f16",
+        "set_atomic_bf16",
+        "set_atomic_s16",
+        "set_atomic_s8",
+        "set_atomic_none",
+    ):
+        expect(
+            f"pto.{atomic_api}" in data_movement_surface_text,
+            f"{atomic_api} should lower through the explicit PTODSL surface",
+        )
     expect(
         re.search(r"pto\.mte_ub_gm [^\n]+ nburst\([^)]+\) l2_cache_ctl\(%c7[^)\n]*\)", data_movement_surface_text) is not None,
         "mte_ub_gm(..., l2_cache='nared') should map to the l2_cache_ctl group",

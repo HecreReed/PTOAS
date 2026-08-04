@@ -70,25 +70,25 @@ private:
   // --- 内存/Alias 分析 ---
   void UpdateKernelArgMemInfo();
   LogicalResult UpdateAllocTileOpMemInfo(pto::AllocTileOp op);
+  LogicalResult UpdateAllocMultiTileOpMemInfo(pto::AllocMultiTileOp op);
+  LogicalResult UpdateDeclareTileOpMemInfo(pto::DeclareTileOp op);
   LogicalResult UpdateDeclareGlobalOpMemInfo(pto::DeclareGlobalOp op);
-  LogicalResult UpdateDeclareTileMemRefOpMemInfo(pto::DeclareTileMemRefOp op);
-  LogicalResult UpdatePointerCastOpMemInfo(pto::PointerCastOp op);
-  LogicalResult UpdateMemrefAllocOpMemInfo(memref::AllocOp op);
   
   // 处理 View/Alias (MakeTensorView, Subview, Mov)
   void UpdateAliasBufferInfo(Value result, Value source);
   void UpdateConservativeAliasBufferInfo(Value result, Value source);
-  void UpdateMemrefSubViewAliasBufferInfo(memref::SubViewOp op);
   void UpdateTileSubViewAliasBufferInfo(pto::SubViewOp op);
-  void UpdateSlotMarkerAliasBufferInfo(pto::SlotMarkerOp op);
   LogicalResult UpdateIntToPtrOpMemInfo(pto::IntToPtrOp op);
+  void UpdateMultiTileGetAliasBufferInfo(pto::MultiTileGetOp op);
+  void UpdateSlotSelectedAliasBufferInfo(Value result, Value source,
+                                         Value slot);
  
   // --- 控制流处理 (SCF) ---
   void UpdateForOpInfo(scf::ForOp forOp);
   void UpdateWhileOpInfo(scf::WhileOp whileOp);
   void UpdateIfOpInfo(scf::IfOp ifOp);
   void UpdateYieldOpInfo(scf::YieldOp yieldOp);
- 
+
   // --- 核心：处理计算/搬运指令 (生成 Compound 节点) ---
   void UpdatePTOOpInfo(Operation *op);
   void UpdatePTOOpInfoWithPipeline(Operation *op, PipelineType pipe,
@@ -96,10 +96,10 @@ private:
   void UpdateMacroOpInfo(Operation *op);
   void MakeMacroCompound(Operation *op, PipelineType pipe, ValueRange defValues,
                          ValueRange useValues, int macroPhaseId);
-  void UpdateTileOpCallInfo(func::CallOp callOp);
- 
+  void UpdateHelperCallInfo(func::CallOp callOp);
+
   // --- 辅助函数 ---
-  
+
   // 获取 PTO Op 对应的硬件流水线类型
   PipelineType getOpPipeline(Operation *op);
  

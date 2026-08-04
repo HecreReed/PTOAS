@@ -13,10 +13,9 @@
 
 #include "PTO/IR/PTO.h"
 #include "../Utils.h"
-#include "mlir/Dialect/Affine/IR/AffineOps.h"
+#include "mlir/Dialect/Arith/IR/Arith.h"
 #include "mlir/Dialect/ControlFlow/IR/ControlFlowOps.h"
 #include "mlir/Dialect/Func/IR/FuncOps.h"
-#include "mlir/Dialect/MemRef/IR/MemRef.h"
 #include "mlir/Dialect/SCF/IR/SCF.h"
 #include "mlir/Dialect/Tensor/IR/Tensor.h"
 #include "mlir/Interfaces/DestinationStyleOpInterface.h"
@@ -76,24 +75,24 @@ llvm::SmallVector<Value> IRTranslator::tracebackMemValsStep(Value val) {
       out.push_back(whileOp.getYieldedValues()[resultNo]);
   }
 
-  // Stop the walk at `pto.slot_marker` so the multi-buffer slot index is
-  // preserved for `getMemInfo`. Without this special case, the generic
-  // `getOperationAliasInfo` path below would treat slot_marker as a
-  // transparent view and let the trace fall through to the underlying
-  // multi-address `pto.pointer_cast`, dropping the slot.
-  if (isa<pto::SlotMarkerOp>(defOp)) {
+  // Stop at `pto.multi_tile_get` so getMemInfo preserves the selected slot
+  // instead of tracing through the metadata-only view.
+  if (isa<pto::MultiTileGetOp>(defOp)) {
     return out;
   }
 
-  if (auto addPtr = dyn_cast<pto::AddPtrOp>(defOp)) {
+  if (auto select = dyn_cast<arith::SelectOp>(defOp)) {
+    out.push_back(select.getTrueValue());
+    out.push_back(select.getFalseValue());
+  } else if (auto addPtr = dyn_cast<pto::AddPtrOp>(defOp)) {
     out.push_back(addPtr.getPtr());
   } else if (auto intToPtr = dyn_cast<pto::IntToPtrOp>(defOp)) {
     if (auto ptrToInt = intToPtr.getAddr().getDefiningOp<pto::PtrToIntOp>())
       out.push_back(ptrToInt.getPtr());
   } else if (auto castPtr = dyn_cast<pto::CastPtrOp>(defOp);
              castPtr &&
-             isa<pto::PtrType, MemRefType>(castPtr.getInput().getType()) &&
-             isa<pto::PtrType, MemRefType>(castPtr.getResult().getType())) {
+             isa<pto::PtrType>(castPtr.getInput().getType()) &&
+             isa<pto::PtrType>(castPtr.getResult().getType())) {
     out.push_back(castPtr.getInput());
   } else if (auto alias = pto::getOperationAliasInfo(defOp)) {
     if (alias->first == result)
@@ -136,13 +135,10 @@ llvm::SmallVector<Value> IRTranslator::tracebackMemVals(Value val) {
     if (!result)
       continue;
     Operation *defOp = result.getDefiningOp();
-    // `pto.slot_marker` is a multi-buffer slot tag and stops traversal so
-    // `getMemInfo` can extract slot-narrowed addresses below. Without this
-    // stop, `getOperationAliasInfo` would let the walk slip past slot_marker
-    // and reach the underlying multi-address `pto.pointer_cast`, dropping
-    // the slot index.
-    if (isa<pto::PointerCastOp, pto::AllocTileOp, tensor::EmptyOp,
-            memref::AllocOp, pto::SlotMarkerOp>(defOp)) {
+    // `pto.multi_tile_get` stops traversal so getMemInfo can extract the
+    // slot-narrowed physical addresses.
+    if (isa<pto::AllocTileOp, pto::AllocMultiTileOp, tensor::EmptyOp,
+            pto::MultiTileGetOp>(defOp)) {
       leaves.insert(result);
       continue;
     }
@@ -187,23 +183,6 @@ IRTranslator::getReadWriteMemoryOps(Operation *op) {
     llvm::append_range(writes, getMemoryOps(dsi.getDpsInits()));
   }
   return {std::move(reads), std::move(writes)};
-}
-
-template <typename OP>
-std::unique_ptr<OperationBase>
-IRTranslator::getLoadStoreOp(OP loadStoreOp, OperationBase *parentOp) {
-  auto pipe = pto::PIPE::PIPE_S;
-  llvm::SmallVector<Value> reads;
-  llvm::SmallVector<Value> writes;
-  if constexpr (std::is_same_v<OP, memref::LoadOp> ||
-                std::is_same_v<OP, affine::AffineLoadOp>) {
-    reads = getMemoryOps({loadStoreOp.getMemRef()});
-  } else {
-    writes = getMemoryOps({loadStoreOp.getMemRef()});
-  }
-  return std::make_unique<RWOperation>(
-      loadStoreOp.getOperation(), parentOp, TCoreType::CUBE_OR_VECTOR, pipe,
-      pipe, reads, writes);
 }
 
 std::unique_ptr<OperationBase>
@@ -377,18 +356,6 @@ void IRTranslator::translateBlockIntoScope(Block &block, Scope *parScope,
         parScope->body.push_back(std::move(rw));
     } else if (isa<pto::LoadScalarOp, pto::StoreScalarOp>(op)) {
       if (auto rw = getScalarMemoryOp(&op, parScope))
-        parScope->body.push_back(std::move(rw));
-    } else if (auto storeOp = dyn_cast<memref::StoreOp>(op)) {
-      if (auto rw = getLoadStoreOp(storeOp, parScope))
-        parScope->body.push_back(std::move(rw));
-    } else if (auto loadOp = dyn_cast<memref::LoadOp>(op)) {
-      if (auto rw = getLoadStoreOp(loadOp, parScope))
-        parScope->body.push_back(std::move(rw));
-    } else if (auto storeOp = dyn_cast<affine::AffineStoreOp>(op)) {
-      if (auto rw = getLoadStoreOp(storeOp, parScope))
-        parScope->body.push_back(std::move(rw));
-    } else if (auto loadOp = dyn_cast<affine::AffineLoadOp>(op)) {
-      if (auto rw = getLoadStoreOp(loadOp, parScope))
         parScope->body.push_back(std::move(rw));
     } else if (auto extractOp = dyn_cast<tensor::ExtractOp>(op)) {
       if (auto rw = getTensorExtractOp(extractOp, parScope))

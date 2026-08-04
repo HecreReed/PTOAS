@@ -14,8 +14,8 @@
 
 module {
   func.func @unknown_slot_gss(
-      %gm : memref<16x16xf16, #pto.address_space<gm>>,
-      %dst : memref<16x16xf16, #pto.address_space<gm>>,
+      %gm : !pto.partition_tensor_view<16x16xf16>,
+      %dst : !pto.partition_tensor_view<16x16xf16>,
       %n : index) {
     %c0 = arith.constant 0 : index
     %c1 = arith.constant 1 : index
@@ -32,14 +32,14 @@ module {
       %prod = pto.multi_tile_get %mb[%prod_idx]
           : !pto.multi_tile_buf<vec, 16x16xf16, count=2>
          -> !pto.tile_buf<vec, 16x16xf16>
-      pto.tload ins(%gm : memref<16x16xf16, #pto.address_space<gm>>)
+      pto.tload ins(%gm : !pto.partition_tensor_view<16x16xf16>)
                 outs(%prod : !pto.tile_buf<vec, 16x16xf16>)
 
       %cons = pto.multi_tile_get %mb[%cons_idx]
           : !pto.multi_tile_buf<vec, 16x16xf16, count=2>
          -> !pto.tile_buf<vec, 16x16xf16>
       pto.tstore ins(%cons : !pto.tile_buf<vec, 16x16xf16>)
-                 outs(%dst : memref<16x16xf16, #pto.address_space<gm>>)
+                 outs(%dst : !pto.partition_tensor_view<16x16xf16>)
     }
     return
   }

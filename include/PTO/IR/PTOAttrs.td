@@ -603,19 +603,6 @@ def PTO_EventAttr : PTO_Attr<"Event", "event"> {
 }
 
 //===----------------------------------------------------------------------===//
-// Plan Memory Mode
-//===----------------------------------------------------------------------===//
-
-def PTO_LOCALMEMPLAN : I32EnumAttrCase<"LOCAL_MEM_PLAN", 0>;
-def PTO_GLOBALWORKSPACEPLAN : I32EnumAttrCase<"GLOBAL_WORKSPACE_PLAN", 1>;
-
-def PTO_MemPlanModeEnum : PTO_I32Enum<
-  "MemPlanMode", "Mem Plan Mode", [
-    PTO_LOCALMEMPLAN,
-    PTO_GLOBALWORKSPACEPLAN
-]>;
-
-//===----------------------------------------------------------------------===//
 // Pad Mode for LoadOp
 //===----------------------------------------------------------------------===//
 

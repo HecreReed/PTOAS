@@ -65,6 +65,12 @@ enum class VMICastLayoutPort {
   Result,
 };
 
+enum class VMICastLayoutPriority {
+  Normal,
+  High,
+  LaneStrideNarrowing,
+};
+
 enum class VMIInterleaveLayoutPort {
   Lhs,
   Rhs,
@@ -78,6 +84,7 @@ struct VMICastLayoutFact {
   VMILayoutAttr resultLayout;
   int64_t sourceBits = 0;
   int64_t resultBits = 0;
+  VMICastLayoutPriority priority = VMICastLayoutPriority::Normal;
 };
 
 struct VMIMaskGranularityCastLayoutFact {
@@ -433,6 +440,13 @@ public:
   FailureOr<VMIBitcastLayoutFact>
   getBitcastLayoutFact(VMIBitcastOp op,
                        std::string *reason = nullptr) const;
+
+  FailureOr<SmallVector<VMIBitcastLayoutFact, 4>>
+  getBitcastLayoutFactsForLayout(VMIVRegType sourceType,
+                                 VMIVRegType resultType,
+                                 VMICastLayoutPort port,
+                                 VMILayoutAttr layout,
+                                 std::string *reason = nullptr) const;
 
   LogicalResult getBitcastSupport(VMIBitcastOp op,
                                   std::string *reason = nullptr) const;

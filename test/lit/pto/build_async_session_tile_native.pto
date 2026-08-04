@@ -1,0 +1,35 @@
+// Copyright (c) 2026 Huawei Technologies Co., Ltd.
+// This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+// CANN Open Software License Agreement Version 2.0 (the "License").
+// Please refer to the License for details. You may not use this file except in compliance with the License.
+// THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+// INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+// See LICENSE in the root of the software repository for the full text of the License.
+
+// RUN: ptoas --pto-arch=a3 --pto-level=level3 \
+// RUN:   --mlir-print-ir-after=pto-resolve-reserved-buffers %s -o /dev/null 2>&1 \
+// RUN:   | FileCheck %s --check-prefix=NATIVE
+// RUN: ptoas --pto-arch=a3 --pto-level=level3 %s -o - 2>&1 \
+// RUN:   | FileCheck %s --check-prefix=EMITC
+
+module {
+  func.func @build_async_session_tile_native(
+      %scratch: !pto.tile_buf<vec, 1x256xi8>,
+      %workspace: !pto.ptr<i8, gm>) {
+    %session = pto.comm.build_async_session(
+        %scratch, %workspace : !pto.tile_buf<vec, 1x256xi8>,
+        !pto.ptr<i8, gm>) -> !pto.async_session
+    return
+  }
+}
+
+// NATIVE: IR Dump After PTOResolveReservedBuffers
+// NATIVE-LABEL: func.func @build_async_session_tile_native(
+// NATIVE-SAME: %[[SCRATCH:.*]]: !pto.tile_buf<vec, 1x256xi8>
+// NATIVE-SAME: %[[WORKSPACE:.*]]: !pto.ptr<i8, gm>
+// NATIVE: pto.comm.build_async_session(%[[SCRATCH]], %[[WORKSPACE]]
+// NATIVE-SAME: !pto.tile_buf<vec, 1x256xi8>, !pto.ptr<i8, gm>
+// NATIVE-NOT: memref<
+
+// EMITC-LABEL: AICORE void build_async_session_tile_native(
+// EMITC: pto::comm::BuildAsyncSession<pto::comm::DmaEngine::SDMA>(

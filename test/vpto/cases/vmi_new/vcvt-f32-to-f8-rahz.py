@@ -125,8 +125,9 @@ def _build_kernel(case):
         pto.get_buf(pto.Pipe.MTE2, 0)
         pto.mte_gm_ub(src, ub_src, 0, 256, nburst=(4, 256, 256))
         pto.rls_buf(pto.Pipe.MTE2, 0)
-        pto.set_flag(pto.Pipe.MTE2, pto.Pipe.V, event_id=0)
-        pto.wait_flag(pto.Pipe.MTE2, pto.Pipe.V, event_id=0)
+        with pto.section("vector"):
+            pto.set_flag(pto.Pipe.MTE2, pto.Pipe.V, event_id=0)
+            pto.wait_flag(pto.Pipe.MTE2, pto.Pipe.V, event_id=0)
 
         offset = pto.const(0, dtype=pto.index)
         mask = pto.vmi.create_mask(pto.const(256, dtype=pto.index), size=256)

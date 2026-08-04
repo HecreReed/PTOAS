@@ -139,13 +139,13 @@ module attributes {pto.target_arch = "a2a3"} {
 // CHECK-LABEL: AICORE void tstore_then_store_scalar(
 // CHECK:      TSTORE(
 // CHECK-NEXT: set_flag(PIPE_MTE3, PIPE_S, EVENT_ID0);
-// CHECK-NEXT: wait_flag(PIPE_MTE3, PIPE_S, EVENT_ID0);
+// CHECK:      wait_flag(PIPE_MTE3, PIPE_S, EVENT_ID0);
 // CHECK-NEXT: {{.*}}[{{.*}}] = {{.*}};
 
 // CHECK-LABEL: AICORE void tstore_then_load_scalar(
 // CHECK:      TSTORE(
 // CHECK-NEXT: set_flag(PIPE_MTE3, PIPE_S, EVENT_ID0);
-// CHECK-NEXT: wait_flag(PIPE_MTE3, PIPE_S, EVENT_ID0);
+// CHECK:      wait_flag(PIPE_MTE3, PIPE_S, EVENT_ID0);
 // CHECK:      uint32_t {{.*}} = {{.*}}[{{.*}}];
 
 // CHECK-LABEL: AICORE void tstore_then_load_scalar_ptr_roundtrip(

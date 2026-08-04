@@ -312,6 +312,133 @@ static LogicalResult scheduleRegion(Region &region) {
   return success();
 }
 
+// ---------------------------------------------------------------------------
+// Post-scheduling fusion metadata normalization.
+//
+// OpScheduling attempts to compact each planned fusion group into a single
+// contiguous span within its basic block. When an SSA producer chain or a hard
+// boundary makes that impossible, the group survives as two or more disjoint
+// physical runs sharing the same `group_id`. PTOFusionRegionGen then rejects
+// any `group_id` that appears in more than one span per block, which turns a
+// fusion-optimization failure into a hard compile error.
+//
+// The normalization stage below runs after *all* scheduling has completed. It
+// scans the final physical order of each block, identifies the actual
+// contiguous spans, drops the original `group_id`/`order`, and re-assigns
+// stable, function-unique ids to every surviving span of length >= 2.
+// Singleton spans (length 1) keep no metadata, so no single-op fusion region
+// is produced downstream. Group ids are re-numbered across the whole function
+// (not only the split ones) to avoid collisions with pre-existing groups.
+// ---------------------------------------------------------------------------
+
+struct FusionSpan {
+  int64_t originalGroupId = 0;
+  SmallVector<Operation *, 8> members;
+};
+
+// Collect the physically contiguous spans of fusion metadata in `block`, in
+// block order. A span ends when an op lacks complete metadata, has a different
+// `group_id`, or the block ends. The incomplete-metadata check here is
+// defensive validation for helper safety and consistent diagnostics; it is not
+// a normally reachable second validation path, since collectScheduledGroups
+// already rejects the same malformed input. `originalGroupId` is retained only
+// for physical-span boundary detection and degradation accounting; output IDs
+// are always newly allocated in normalizeBlockFusionMetadata.
+static LogicalResult
+collectPhysicalFusionSpans(Block &block,
+                           SmallVectorImpl<FusionSpan> &spans) {
+  FusionSpan current;
+  bool hasCurrent = false;
+
+  auto flush = [&]() {
+    if (!hasCurrent)
+      return;
+    spans.push_back(std::move(current));
+    current = FusionSpan{};
+    hasCurrent = false;
+  };
+
+  for (Operation &op : block) {
+    if (hasIncompleteFusionMetadata(&op)) {
+      op.emitError("expected pto.fusion.group_id and pto.fusion.order to "
+                   "either both exist or both be absent");
+      return failure();
+    }
+
+    std::optional<int64_t> groupId =
+        getRequiredI64Attr(&op, kFusionGroupIdAttr);
+    if (!groupId) {
+      flush();
+      continue;
+    }
+
+    if (!hasCurrent || current.originalGroupId != *groupId) {
+      flush();
+      current.originalGroupId = *groupId;
+      hasCurrent = true;
+    }
+
+    current.members.push_back(&op);
+  }
+
+  flush();
+  return success();
+}
+
+// Strip the old planning metadata from `block`, then re-annotate each
+// surviving span of length >= 2 with a fresh, function-unique `group_id` and
+// a 0-based `order` reflecting the final physical order. Singleton spans and
+// unannotated ops keep no fusion metadata. `nextGroupId` is shared across the
+// whole function so ids stay unique and dense.
+static LogicalResult
+normalizeBlockFusionMetadata(Block &block, MLIRContext *context,
+                            int64_t &nextGroupId) {
+  SmallVector<FusionSpan, 8> spans;
+  if (failed(collectPhysicalFusionSpans(block, spans)))
+    return failure();
+
+  // Remove all old metadata before assigning canonical groups, so that
+  // surviving span ids never collide with stale ids left on singleton or
+  // unrelated ops.
+  for (Operation &op : block) {
+    op.removeAttr(kFusionGroupIdAttr);
+    op.removeAttr(kFusionOrderAttr);
+  }
+
+  const IntegerType i64 = IntegerType::get(context, 64);
+  for (FusionSpan &span : spans) {
+    if (span.members.size() < 2)
+      continue;
+
+    const int64_t newGroupId = nextGroupId++;
+    for (auto [order, op] : llvm::enumerate(span.members)) {
+      op->setAttr(kFusionGroupIdAttr, IntegerAttr::get(i64, newGroupId));
+      op->setAttr(kFusionOrderAttr,
+                  IntegerAttr::get(i64, static_cast<int64_t>(order)));
+    }
+  }
+
+  return success();
+}
+
+static LogicalResult
+normalizeScheduledFusionMetadata(Region &region, MLIRContext *context,
+                                 int64_t &nextGroupId) {
+  for (Block &block : region.getBlocks()) {
+    if (failed(normalizeBlockFusionMetadata(block, context, nextGroupId)))
+      return failure();
+
+    // Recurse into nested regions in the same pre-order walk used by
+    // scheduleRegion, so the function-wide id counter stays deterministic.
+    for (Operation &op : block)
+      for (Region &nestedRegion : op.getRegions())
+        if (failed(normalizeScheduledFusionMetadata(nestedRegion, context,
+                                                    nextGroupId)))
+          return failure();
+  }
+  return success();
+}
+
 struct OpSchedulingPass
     : public pto::impl::OpSchedulingBase<OpSchedulingPass> {
   using pto::impl::OpSchedulingBase<OpSchedulingPass>::OpSchedulingBase;
@@ -321,8 +448,20 @@ struct OpSchedulingPass
     if (func.isExternal())
       return;
 
-    if (failed(scheduleRegion(func.getRegion())))
+    if (failed(scheduleRegion(func.getRegion()))) {
       signalPassFailure();
+      return;
+    }
+
+    // After scheduling, collapse any group that could not be compacted into a
+    // single contiguous span into independent per-span groups (and drop
+    // singleton spans), so PTOFusionRegionGen never sees a fragmented group_id.
+    int64_t nextGroupId = 0;
+    if (failed(normalizeScheduledFusionMetadata(func.getRegion(),
+                                                &getContext(), nextGroupId))) {
+      signalPassFailure();
+      return;
+    }
 
     // OpScheduling only reorders ops *within* a block (it never moves an op
     // across block boundaries), so the pre-fusion dataflow graph (block

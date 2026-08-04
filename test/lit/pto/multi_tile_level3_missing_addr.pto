@@ -8,13 +8,13 @@
 
 // RUN: not ptoas --pto-level=level3 --pto-arch=a5 %s 2>&1 | FileCheck %s
 
-// In level3 PTOPlanMemory is skipped, so multi-buffer slots have no physical
-// addresses unless the caller provides a base `addr`. Reject the op instead of
-// silently collapsing every slot onto one memref.
+// In level3 automatic address planning is unavailable, so multi-buffer slots
+// have no physical addresses unless the caller provides a base `addr`. Reject
+// the op instead of silently collapsing every slot onto one memref.
 
 module {
   func.func @l3_missing_addr(
-      %gm0 : memref<16x16xf16, #pto.address_space<gm>>) attributes {pto.entry} {
+      %gm0 : !pto.partition_tensor_view<16x16xf16>) attributes {pto.entry} {
     %c0 = arith.constant 0 : index
 
     %mb = pto.alloc_multi_tile
@@ -24,7 +24,7 @@ module {
         : !pto.multi_tile_buf<vec, 16x16xf16, count=2>
        -> !pto.tile_buf<vec, 16x16xf16>
 
-    pto.tload ins(%gm0 : memref<16x16xf16, #pto.address_space<gm>>)
+    pto.tload ins(%gm0 : !pto.partition_tensor_view<16x16xf16>)
               outs(%s0  : !pto.tile_buf<vec, 16x16xf16>)
     return
   }

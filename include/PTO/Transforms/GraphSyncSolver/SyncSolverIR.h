@@ -73,7 +73,7 @@ struct EventIdInfo {
   // (== rwOp1 / rwOp2 of the conflict). Captured from the actual hazard
   // MemInfo pair in `getMultiBufferEventIdInfo` so dyn-event-id codegen keys
   // the event lane off the buffer that drove the event-id allocation, not
-  // the op's first `slot_marker` memref (an op may touch several
+  // the op's first slot-bearing value (an op may touch several
   // multi-buffers at different slots/phases). Null when the slot is absent
   // or ambiguous (more than one distinct slot in this pair's conflicts),
   // which makes codegen fall back to the safe N-static `set_flag` /
@@ -451,7 +451,7 @@ public:
   bool checkLastIter{false};
   // Slot SSA at this access site. Populated when the sync corresponds to a
   // multi-buffer back-edge dep produced by `pto.multi_tile_get` / lowered
-  // `pto.slot_marker`. When non-null and `eventIds.size() > 1`, codegen
+  // `pto.multi_tile_get`. When non-null and `eventIds.size() > 1`, codegen
   // emits `pto.set_flag_dyn` / `pto.wait_flag_dyn` with a runtime event id
   // selected by `slotSSAExpr % eventIds.size()` instead of fanning out
   // into N static `set_flag` / `wait_flag` pairs per iteration.

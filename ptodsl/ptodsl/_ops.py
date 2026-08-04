@@ -24,7 +24,6 @@ Design rules:
 
 from functools import wraps
 
-from ._bootstrap import make_context  # noqa: F401 – ensure MLIR on sys.path
 from ._diagnostics import (
     explicit_mode_required_with_context_error,
     make_tensor_view_invalid_layout_error,
@@ -59,6 +58,7 @@ from ._surface_values import (
     wrap_surface_value,
 )
 from ._types import (
+    _is_struct_type,
     _isinstance_pto_type,
     _materialize_integer_literal,
     _normalize_address_space,
@@ -73,8 +73,8 @@ from ._types import (
     vreg_type,
 )
 
-from mlir.dialects import arith, pto as _pto
-from mlir.ir import (
+from ptoas.mlir.dialects import arith, pto as _pto
+from ptoas.mlir.ir import (
     Attribute,
     BF16Type,
     F16Type,
@@ -236,7 +236,7 @@ def const(value: int, *, dtype=None):
     """
     Emit an ``arith.constant``.
 
-    ``dtype`` is a ``_DType`` descriptor or a concrete ``mlir.ir.Type``.
+    ``dtype`` is a ``_DType`` descriptor or a concrete ``ptoas.mlir.ir.Type``.
     Defaults to ``index`` when omitted.
     """
     from ._types import index as _idx_dtype
@@ -246,6 +246,117 @@ def const(value: int, *, dtype=None):
     if IntegerType.isinstance(mlir_type):
         return wrap_surface_value(_materialize_integer_literal(mlir_type, value))
     return wrap_surface_value(arith.ConstantOp(mlir_type, value).result)
+
+
+# ── Stack-local structs ──────────────────────────────────────────
+
+def _normalize_struct_path(path, *, op_name: str) -> tuple[int, ...]:
+    if isinstance(path, bool):
+        raise TypeError(f"{op_name}: path must be a static int, tuple[int, ...], or list[int]")
+    if isinstance(path, int):
+        indices = (path,)
+    elif isinstance(path, (tuple, list)):
+        indices = tuple(path)
+    else:
+        raise TypeError(f"{op_name}: path must be a static int, tuple[int, ...], or list[int]")
+    if not indices:
+        raise ValueError(f"{op_name}: path must not be empty")
+    for depth, index in enumerate(indices):
+        if isinstance(index, bool) or not isinstance(index, int):
+            raise TypeError(
+                f"{op_name}: path[{depth}] must be a static Python int, got {index!r}"
+            )
+        if index < 0:
+            raise ValueError(f"{op_name}: path[{depth}] must be non-negative, got {index}")
+    return indices
+
+
+def _require_struct_value(struct, *, op_name: str):
+    raw_struct = unwrap_surface_value(struct)
+    struct_type = getattr(raw_struct, "type", None)
+    if not _is_struct_type(struct_type):
+        raise TypeError(
+            f"{op_name}: struct must be a value of !pto.struct<...>, got "
+            f"{getattr(raw_struct, 'type', type(raw_struct).__name__)}"
+        )
+    return raw_struct, _pto.StructType(struct_type)
+
+
+def _resolve_struct_path(struct_type, path: tuple[int, ...], *, op_name: str):
+    current_type = struct_type
+    for depth, index in enumerate(path):
+        fields = tuple(_pto.StructType(current_type).field_types)
+        if index >= len(fields):
+            raise ValueError(
+                f"{op_name}: path[{depth}] = {index} is out of range for "
+                f"a struct with {len(fields)} field(s)"
+            )
+        current_type = fields[index]
+        if depth + 1 < len(path) and not _is_struct_type(current_type):
+            raise TypeError(
+                f"{op_name}: path[{depth}] selects scalar field {current_type}; "
+                "cannot descend further"
+            )
+    if _is_struct_type(current_type):
+        raise TypeError(
+            f"{op_name}: path must end at a scalar field, but ends at {current_type}; "
+            "extend the path to reach a scalar field"
+        )
+    return current_type
+
+
+def _materialize_struct_value(value, field_type, *, op_name: str):
+    raw_value = unwrap_surface_value(value)
+    if isinstance(raw_value, bool):
+        raise TypeError(f"{op_name}: value does not accept bool literals")
+    if isinstance(raw_value, int):
+        return materialize_scalar_literal(raw_value, field_type, context=op_name)
+    if isinstance(raw_value, float):
+        if not any(cls.isinstance(field_type) for cls in (F16Type, BF16Type, F32Type)):
+            raise TypeError(
+                f"{op_name}: cannot materialize a floating-point literal for integer field type {field_type}"
+            )
+        return materialize_scalar_literal(raw_value, field_type, context=op_name)
+    if not hasattr(raw_value, "type"):
+        raise TypeError(
+            f"{op_name}: value must be a Python int/float literal or an SSA value, got {value!r}"
+        )
+    if raw_value.type != field_type:
+        raise TypeError(
+            f"{op_name}: SSA value type {raw_value.type} must exactly match struct field type {field_type}"
+        )
+    return raw_value
+
+
+def declare_struct(struct_type):
+    """Declare an uninitialized stack-local ``!pto.struct`` value."""
+    resolved_type = _resolve(struct_type)
+    if not _is_struct_type(resolved_type):
+        raise TypeError(
+            "pto.declare_struct(...): expected a pto.struct_type(...) descriptor or !pto.struct type, "
+            f"got {resolved_type}"
+        )
+    return wrap_surface_value(_pto.DeclareStructOp(resolved_type).s)
+
+
+def struct_get(struct, path):
+    """Read one scalar field from a stack-local struct at a static field path."""
+    raw_struct, struct_type = _require_struct_value(struct, op_name="pto.struct_get")
+    indices = _normalize_struct_path(path, op_name="pto.struct_get")
+    field_type = _resolve_struct_path(struct_type, indices, op_name="pto.struct_get")
+    return wrap_surface_value(_pto.StructGetOp(field_type, raw_struct, indices).value)
+
+
+def struct_set(struct, path, value):
+    """Write one scalar field of a stack-local struct at a static field path."""
+    raw_struct, struct_type = _require_struct_value(struct, op_name="pto.struct_set")
+    indices = _normalize_struct_path(path, op_name="pto.struct_set")
+    field_type = _resolve_struct_path(struct_type, indices, op_name="pto.struct_set")
+    _pto.StructSetOp(raw_struct, indices, _materialize_struct_value(
+        value,
+        field_type,
+        op_name="pto.struct_set",
+    ))
 
 
 def get_op_attr(name: str, default=None):
@@ -298,7 +409,7 @@ def vlds(src_ptr, offset=None, result_vreg_type=None, *, dist=None, post_update=
     post_mode = _normalize_post_update_mode(post_update, context="vlds(..., post_update=...)")
     if isinstance(src_ptr, TileSliceValue):
         if offset is not None or result_vreg_type is not None:
-            raise TypeError("vlds(tile[row, col:]) infers its memref slice and vreg type; do not pass offset/result_vreg_type")
+            raise TypeError("vlds(tile[row, col:]) infers its pointer slice and vreg type; do not pass offset/result_vreg_type")
         if post_mode != "NO_POST_UPDATE":
             raise TypeError("vlds(tile[...], post_update=...) only supports post_update=PostUpdate.OFF; use the pointer form for stateful loads")
         kwargs = {}
@@ -308,13 +419,14 @@ def vlds(src_ptr, offset=None, result_vreg_type=None, *, dist=None, post_update=
                 allowed=_VLOAD_DIST_TOKENS,
                 context="vlds(..., dist)",
             )
-        raw_source = unwrap_surface_value(src_ptr)
+        source, source_offset = _tile_slice_address(src_ptr)
+        raw_source = unwrap_surface_value(source)
         return wrap_surface_value(
             _pto.VldsOp(
                 _infer_vreg_type_from_tile_slice(src_ptr),
                 None,
                 raw_source,
-                _index_zero(),
+                source_offset,
                 **kwargs,
             ).result
         )
@@ -422,11 +534,12 @@ def vldsx2(source, offset_or_dist, dist=None, *, result_vreg_type=None):
         if dist is not None:
             raise TypeError("vldsx2(tile[row, col:], dist) does not accept a separate offset argument")
         result_type = _infer_vreg_type_from_tile_slice(source)
+        source, source_offset = _tile_slice_address(source)
         op = _pto.Vldsx2Op(
             result_type,
             result_type,
             unwrap_surface_value(source),
-            _index_zero(),
+            source_offset,
             _normalize_dist_token(
                 offset_or_dist,
                 allowed=_DEINTERLEAVE_DIST_TOKENS,
@@ -886,12 +999,13 @@ def vsts(val, dst_ptr, offset, mask=None, *, dist=None, post_update="OFF"):
                 allowed=_VSTORE_DIST_TOKENS,
                 context="vsts(..., dist)",
             )
-        raw_destination = unwrap_surface_value(dst_ptr)
+        destination, destination_offset = _tile_slice_address(dst_ptr)
+        raw_destination = unwrap_surface_value(destination)
         _pto.VstsOp(
             None,
             unwrap_surface_value(val),
             raw_destination,
-            _index_zero(),
+            destination_offset,
             unwrap_surface_value(offset),
             **kwargs,
         )
@@ -943,11 +1057,12 @@ def vstsx2(low, high, dst_ptr, offset_or_dist, dist_or_mask=None, mask=None):
     if isinstance(dst_ptr, TileSliceValue):
         if mask is not None:
             raise TypeError("vstsx2(low, high, tile[row, col:], dist, mask) does not accept a separate offset argument")
+        destination, destination_offset = _tile_slice_address(dst_ptr)
         _pto.Vstsx2Op(
             unwrap_surface_value(low),
             unwrap_surface_value(high),
-            unwrap_surface_value(dst_ptr),
-            _index_zero(),
+            unwrap_surface_value(destination),
+            destination_offset,
             _normalize_dist_token(
                 offset_or_dist,
                 allowed=_INTERLEAVE_DIST_TOKENS,
@@ -1013,7 +1128,12 @@ def vgatherb(buf, offsets, mask, result_vreg_type=None):
 
 
 def vscatter(value, destination, offsets, mask):
-    """``pto.vscatter`` – indexed scatter to UB."""
+    """Scatter b8/b16/b32 values to UB using width-matched integer offsets.
+
+    The b8 form consumes 128 offsets and stores the 128 even-numbered bytes of
+    its 256-lane value vector. The b16 and b32 forms consume one offset per
+    value lane.
+    """
     _pto.VscatterOp(
         unwrap_surface_value(value),
         unwrap_surface_value(destination),
@@ -1034,6 +1154,8 @@ def vsldb(source, block_stride, repeat_stride, mask):
         if isinstance(source, TileSliceValue)
         else _infer_vreg_type_from_address_source(source)
     )
+    if isinstance(source, TileSliceValue):
+        source = _tile_slice_ptr(source)
     return wrap_surface_value(
         _pto.VsldbOp(
             result_type,
@@ -2007,6 +2129,11 @@ def vrelu(inp, mask):
 def vnot(inp, mask):
     """``pto.vnot`` – element-wise bitwise/logical not."""
     return _emit_unary_vec_op(_pto.VnotOp, inp, mask)
+
+
+def vsqz(inp, mask):
+    """``pto.vsqz`` - compact active lanes to the front while preserving order."""
+    return _emit_unary_vec_op(_pto.VsqzOp, inp, mask)
 
 
 def vexpdif(inp, ref, mask, part: str = "ODD"):
@@ -3789,6 +3916,23 @@ def tci(start, dst, *, tmp=None, descending=False):
     )
 
 
+def tscatter(src, dst, *, indexes=None, axis=None, mask_pattern=None):
+    """``pto.tscatter`` tile scatter wrapper."""
+    if indexes is not None and (axis is not None or mask_pattern is not None):
+        raise ValueError("indexes and axis/mask_pattern cannot be provided together")
+    if indexes is None and (axis is None or mask_pattern is None):
+        raise ValueError(f"non indexes mode must provide both axis and mask_pattern")
+    if axis is not None and axis not in ("row", "col"):
+        raise ValueError(f"axis must be 'row' or 'col', got {axis!r}")
+    _pto.tscatter(
+        unwrap_surface_value(src),
+        unwrap_surface_value(dst),
+        indexes=None if indexes is None else unwrap_surface_value(indexes),
+        axis=None if axis is None else axis,
+        mask_pattern=None if mask_pattern is None else _tile_mask_pattern_attr(mask_pattern),
+    )
+
+
 def tsel(mask, src0, src1, dst, *, tmp=None):
     """``pto.tsel ins(mask, src0, src1, tmp) outs(dst)`` with synthesized scratch when omitted."""
     resolved_tmp = tmp if tmp is not None else _resolve_selection_tmp(dst, tmp, context="tsel")
@@ -4050,9 +4194,14 @@ def _tile_slice_ptr(tile_slice: TileSliceValue):
     return addptr(base_ptr, _coerce_index(linear_offset, context="tile slice pointer lowering"))
 
 
+def _tile_slice_address(tile_slice: TileSliceValue):
+    base_ptr = emit_as_ptr(tile_slice.tile)
+    linear_offset = _tile_slice_linear_offset(tile_slice)
+    return base_ptr, _coerce_index(linear_offset, context="tile slice pointer lowering")
+
+
 def _infer_vreg_type_from_tile_slice(tile_slice: TileSliceValue):
-    memref_type = MemRefType(tile_slice.type)
-    elem_type = memref_type.element_type
+    elem_type = infer_tile_element_type(tile_slice.tile)
     lanes = _elements_per_vreg(elem_type)
     return _resolve(vreg_type(lanes, elem_type))
 
@@ -4890,6 +5039,38 @@ def mte_gm_ub(source, destination, l2_cache_ctl, len_burst, *, nburst, loops=Non
         left_padding_count=left_padding_count,
         right_padding_count=right_padding_count,
     )
+
+
+@_explicit_mode_only("pto.set_store_atomic_cfg(...)")
+def set_store_atomic_cfg(config):
+    """Configure scalar ST atomic mode via ST_ATOMIC_CFG (SU path)."""
+    _pto.SetStoreAtomicCfgOp(
+        _coerce_i64(config, context="set_store_atomic_cfg config")
+    )
+
+
+def _nullary_atomic_config(op_cls, api_name):
+    @_explicit_mode_only(f"pto.{api_name}(...)")
+    def _impl():
+        op_cls()
+
+    _impl.__name__ = api_name
+    _impl.__doc__ = (
+        f"``pto.{api_name}`` – configure MTE/FIXP store-atomic CTRL state."
+    )
+    return _impl
+
+
+set_atomic_add = _nullary_atomic_config(_pto.SetAtomicAddOp, "set_atomic_add")
+set_atomic_max = _nullary_atomic_config(_pto.SetAtomicMaxOp, "set_atomic_max")
+set_atomic_min = _nullary_atomic_config(_pto.SetAtomicMinOp, "set_atomic_min")
+set_atomic_none = _nullary_atomic_config(_pto.SetAtomicNoneOp, "set_atomic_none")
+set_atomic_f32 = _nullary_atomic_config(_pto.SetAtomicF32Op, "set_atomic_f32")
+set_atomic_f16 = _nullary_atomic_config(_pto.SetAtomicF16Op, "set_atomic_f16")
+set_atomic_bf16 = _nullary_atomic_config(_pto.SetAtomicBF16Op, "set_atomic_bf16")
+set_atomic_s32 = _nullary_atomic_config(_pto.SetAtomicS32Op, "set_atomic_s32")
+set_atomic_s16 = _nullary_atomic_config(_pto.SetAtomicS16Op, "set_atomic_s16")
+set_atomic_s8 = _nullary_atomic_config(_pto.SetAtomicS8Op, "set_atomic_s8")
 
 
 @_explicit_mode_only("pto.mte_ub_gm(...)")
@@ -6136,7 +6317,7 @@ def set_intra_flag(pipe, event_id):
     _validate_sync_pipe(
         pipe,
         context="set_intra_flag(pipe, event_id)",
-        allowed=("PIPE_FIX", "PIPE_MTE3"),
+        allowed=("PIPE_FIX", "PIPE_MTE1", "PIPE_MTE2", "PIPE_MTE3", "PIPE_V"),
     )
     event_operand = _sync_event_id_operand_in_range(
         event_id,
@@ -6153,7 +6334,7 @@ def wait_intra_flag(pipe, event_id):
     _validate_sync_pipe(
         pipe,
         context="wait_intra_flag(pipe, event_id)",
-        allowed=("PIPE_FIX", "PIPE_MTE3", "PIPE_V"),
+        allowed=("PIPE_FIX", "PIPE_MTE1", "PIPE_MTE2", "PIPE_MTE3", "PIPE_V"),
     )
     event_operand = _sync_event_id_operand_in_range(
         event_id,
@@ -6235,6 +6416,7 @@ def import_reserved_buffer(name, *, peer_func):
 
 __all__ = [
     "const",
+    "declare_struct", "struct_get", "struct_set",
     "castptr", "addptr",
     "vlds", "vldas", "vldus", "vldsx2", "vsts", "vstsx2",
     "init_align",
@@ -6275,7 +6457,7 @@ __all__ = [
     "texpands", "treshape", "trowexpand", "tcolexpand",
     "trowexpandadd", "trowexpandsub", "trowexpandmul", "trowexpanddiv", "trowexpandmax", "trowexpandmin", "trowexpandexpdif",
     "tcolexpandadd", "tcolexpandsub", "tcolexpandmul", "tcolexpanddiv", "tcolexpandmax", "tcolexpandmin", "tcolexpandexpdif",
-    "tsort32", "tmrgsort", "tgather",
+    "tsort32", "tmrgsort", "tgather", "tscatter",
     "tsel", "tsels", "tcvt",
     "tnot", "tand", "tands", "tor", "tors", "txor", "txors", "tshl", "tshls", "tshr", "tshrs",
     "tpartadd", "tpartmul", "tpartmax", "tpartmin",
@@ -6285,6 +6467,10 @@ __all__ = [
     "as_ptr",
     "mte_load", "mte_store", "mte_gm_ub", "mte_ub_gm", "mte_ub_ub", "mte_ub_l1",
     "mte_gm_l1", "mte_l1_ub", "mte_gm_l1_frac", "mte_l1_bt", "mte_l1_fb", "mem_bar",
+    "set_store_atomic_cfg",
+    "set_atomic_add", "set_atomic_max", "set_atomic_min", "set_atomic_none",
+    "set_atomic_f32", "set_atomic_f16", "set_atomic_bf16",
+    "set_atomic_s32", "set_atomic_s16", "set_atomic_s8",
     "mte_l1_l0a", "mte_l1_l0b", "mte_l1_l0a_mx", "mte_l1_l0b_mx",
     "mte_l0c_l1", "mte_l0c_gm", "mte_l0c_ub",
     "mad", "mad_acc", "mad_bias", "mad_mx", "mad_mx_acc", "mad_mx_bias",

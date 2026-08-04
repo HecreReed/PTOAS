@@ -11,8 +11,8 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 
-from mlir.dialects import pto as _pto
-from mlir.ir import BF16Type, F16Type, F32Type, Float8E4M3FNType, Float8E5M2Type, IntegerType, MemRefType
+from ptoas.mlir.dialects import pto as _pto
+from ptoas.mlir.ir import BF16Type, F16Type, F32Type, Float8E4M3FNType, Float8E5M2Type, IntegerType, MemRefType
 
 from ._scalar_coercion import coerce_scalar_to_type
 from ._surface_values import _coerce_index_value, _try_get_constant_index, unwrap_surface_value, wrap_surface_value
@@ -205,13 +205,15 @@ def _derive_vinterpret_cast_result_type(source, to_dtype, *, context: str):
     target_elem_type = _ensure_tensor_storage_dtype(to_dtype, context=context)
     source_bits = _type_bit_width(source_elem_type, context=context)
     target_bits = _type_bit_width(target_elem_type, context=context)
-    if source_bits != target_bits:
+    total_bits = source_type.element_count * source_bits
+    if total_bits % target_bits != 0:
         raise TypeError(
-            f"{context} requires source and target element widths to match; got "
+            f"{context} requires the source bit count to be divisible by the "
+            f"target element width; got {source_type.element_count}x"
             f"{source_elem_type} -> {target_elem_type}"
         )
     return _pto.VMIVRegType.get(
-        source_type.element_count,
+        total_bits // target_bits,
         target_elem_type,
         layout=source_type.layout,
     )
@@ -460,11 +462,16 @@ def _emit_unary(op_name: str, source, mask=None, *, pmode=None, loc=None, ip=Non
 
 def _emit_vec_scalar(op_name: str, source, scalar, mask, *, pmode=None, loc=None, ip=None):
     context = f"pto.vmi.{op_name}(...)"
+    scalar_value = (
+        coerce_scalar_to_type(scalar, IntegerType.get_signless(16), context=context)
+        if op_name in {"vshls", "vshrs"}
+        else _coerce_scalar_like_vmi_element(source, scalar, context=context)
+    )
     return _call_value(
         op_name,
         _type_of(source),
         _raw(source),
-        _coerce_scalar_like_vmi_element(source, scalar, context=context),
+        scalar_value,
         _required_mask(mask, context=context),
         pmode=pmode,
         loc=loc,

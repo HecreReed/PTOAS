@@ -8,6 +8,7 @@
 
 // InsertTemplateAttributes records a compact, ordered candidate list before
 // fusion. ExpandTileOp renders the first candidate that remains.
+// Low-level pipe operations must not be mistaken for expandable TileOps.
 //
 // Running without --enable-op-fusion proves metadata insertion is not gated
 // by fusion. Printing before FusionPlan proves its position when fusion is on.
@@ -42,6 +43,9 @@
 
 module attributes {pto.kernel_kind = #pto.kernel_kind<vector>} {
   func.func @TADD() {
+    pto.set_flag[<PIPE_V>, <PIPE_MTE3>, <EVENT_ID0>]
+    pto.wait_flag[<PIPE_V>, <PIPE_MTE3>, <EVENT_ID0>]
+
     %a = pto.alloc_tile
       : !pto.tile_buf<loc=vec, dtype=f32, rows=16, cols=64, v_row=16, v_col=64,
                       blayout=row_major, slayout=none_box, fractal=512, pad=0>

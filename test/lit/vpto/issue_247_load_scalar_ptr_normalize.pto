@@ -22,5 +22,5 @@ module attributes {pto.target_arch = "a5", pto.kernel_kind = #pto.kernel_kind<ve
 // NORMALIZE-SAME: (vpto-ptr-normalize)
 // NORMALIZE-LABEL: func.func @load_scalar_ui32(%arg0: !pto.ptr<ui32, gm>) {
 // NORMALIZE: %[[C0:.*]] = arith.constant 0 : index
-// NORMALIZE: %[[VAL:.*]] = pto.load_scalar %arg0[%[[C0]]] : !pto.ptr<ui32, gm> -> ui32
-// NORMALIZE: pto.store_scalar %[[VAL]], %arg0[%[[C0]]] : !pto.ptr<ui32, gm>, ui32
+// NORMALIZE: %[[VAL:.*]] = pto.load_scalar %arg0[%[[C0]]] : <ui32, gm> -> ui32
+// NORMALIZE: pto.store_scalar %[[VAL]], %arg0[%[[C0]]] : <ui32, gm>, ui32

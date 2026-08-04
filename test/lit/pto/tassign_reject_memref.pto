@@ -1,0 +1,24 @@
+// Copyright (c) 2026 Huawei Technologies Co., Ltd.
+// This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+// CANN Open Software License Agreement Version 2.0 (the "License").
+// Please refer to the License for details. You may not use this file except in compliance with the License.
+// THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+// INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+// See LICENSE in the root of the software repository for the full text of the License.
+
+// RUN: not ptoas --pto-level=level3 --pto-arch=a5 %s -o /dev/null 2>&1 \
+// RUN:   | FileCheck %s
+
+module {
+  func.func private @tassign_reject_memref()
+      -> memref<16x16xf16, #pto.address_space<vec>> {
+    %addr = arith.constant 0 : i64
+    %tile = memref.alloc() : memref<16x16xf16, #pto.address_space<vec>>
+    // CHECK: error: 'pto.tassign' op operand #0 must be
+    // CHECK-SAME: but got 'memref<16x16xf16, #pto.address_space<vec>>'
+    %rebound = pto.tassign %tile, %addr
+      : memref<16x16xf16, #pto.address_space<vec>>
+        -> memref<16x16xf16, #pto.address_space<vec>>
+    return %rebound : memref<16x16xf16, #pto.address_space<vec>>
+  }
+}

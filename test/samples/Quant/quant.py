@@ -17,7 +17,7 @@ Note: int8 tiles require Cols*sizeof(T) to be a multiple of 32 bytes
 (the NPU aligned-size). At 1 byte/element that means Cols >= 32.
 """
 
-from mlir.ir import (
+from ptoas.mlir.ir import (
     Attribute,
     Context,
     Location,
@@ -28,7 +28,7 @@ from mlir.ir import (
     IntegerType,
     UnitAttr,
 )
-from mlir.dialects import func, arith, pto
+from ptoas.mlir.dialects import func, arith, pto
 
 
 # Tile shape used throughout the sample.
@@ -152,6 +152,7 @@ def build():
                 # Allocate on-chip tile buffers.
                 tb_src = pto.AllocTileOp(t.tb_f32).result
                 tb_scale = pto.AllocTileOp(t.tb_scale).result
+                tb_tmp = pto.AllocTileOp(t.tb_f32).result
                 tb_dst = pto.AllocTileOp(t.tb_i8).result
 
                 # Load src and per-row scale tiles from global memory.
@@ -159,7 +160,9 @@ def build():
                 pto.TLoadOp(None, sv_scale, tb_scale)
 
                 # INT8_SYM quantization (no offset operand).
-                pto.TQuantOp(tb_src, tb_scale, tb_dst, quant_type=t.quant_sym)
+                pto.TQuantOp(
+                    tb_src, tb_scale, tb_dst, tmp=tb_tmp, quant_type=t.quant_sym
+                )
 
                 # Store result back to global memory.
                 pto.TStoreOp(None, tb_dst, sv_dst)

@@ -10,6 +10,7 @@
 #define PTOAS_OBJECT_EMISSION_H
 
 #include "PTO/Support/CANNVersion.h"
+#include "VFSIMTSizePatcher.h"
 
 #include "llvm/ADT/ArrayRef.h"
 #include "llvm/ADT/SmallVector.h"
@@ -129,7 +130,8 @@ LogicalResult emitFatobjLLVM(
     llvm::Module *cubeModule, llvm::Module *vectorModule,
     llvm::StringRef stubSource, llvm::StringRef outputPath,
     llvm::StringRef moduleId, const CANNToolchain &toolchain,
-    TempFileRegistry &tempFiles, llvm::raw_ostream &diagOS);
+    TempFileRegistry &tempFiles, VFSIMTSizeFixMode vfsimtSizeFixMode,
+    llvm::raw_ostream &diagOS);
 
 LogicalResult mergeDeviceObjects(llvm::ArrayRef<std::string> deviceObjPaths,
                                  llvm::StringRef outObjPath,
@@ -153,6 +155,7 @@ LogicalResult emitFatobjLLVMWithRuntime(llvm::Module *cubeModule,
                                         llvm::Module *vectorModule,
                                         llvm::StringRef stubSource,
                                         llvm::ToolOutputFile &outputFile,
+                                        VFSIMTSizeFixMode vfsimtSizeFixMode,
                                         llvm::raw_ostream &diagOS);
 
 } // namespace mlir::pto

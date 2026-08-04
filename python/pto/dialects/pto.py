@@ -6,15 +6,10 @@
 # INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
 # See LICENSE in the root of the software repository for the full text of the License.
 
-import importlib
-import importlib.util
 import functools
-import os
-from pathlib import Path
-import sys
 from typing import Optional
 
-from mlir import ir as _ods_ir
+from ptoas.mlir import ir as _ods_ir
 
 from . import _pto_ops_gen as _pto_ops_gen
 from ._ods_common import (
@@ -22,77 +17,7 @@ from ._ods_common import (
     get_op_result_or_value as _get_op_result_or_value,
     get_op_results_or_values as _get_op_results_or_values,
 )
-
-
-def _candidate_pto_ext_dirs():
-    # Prefer the extension shipped next to the active wrapper so installed
-    # wheels stay self-consistent even if the caller also exported a developer
-    # PTO_INSTALL_DIR / PTO_PYTHON_ROOT in the environment.
-    candidates = [Path(__file__).resolve().parent.parent / "_mlir_libs"]
-    env_roots = (
-        os.environ.get("PTO_PYTHON_BUILD_ROOT"),
-        os.environ.get("PTO_PYTHON_ROOT"),
-        os.environ.get("PTO_INSTALL_DIR"),
-    )
-    for root in env_roots:
-        if not root:
-            continue
-        candidates.append(Path(root) / "mlir" / "_mlir_libs")
-
-    seen = set()
-    ordered = []
-    for candidate in candidates:
-        candidate = candidate.resolve()
-        candidate_text = str(candidate)
-        if candidate_text in seen:
-            continue
-        seen.add(candidate_text)
-        ordered.append(candidate)
-    return ordered
-
-
-def _load_local_pto_ext():
-    module_name = "mlir._mlir_libs._pto"
-    cached = sys.modules.get(module_name)
-    if cached is not None:
-        return cached
-
-    candidates = []
-    for lib_dir in _candidate_pto_ext_dirs():
-        for suffix in ("*.so", "*.pyd", "*.dll", "*.dylib"):
-            candidates.extend(lib_dir.glob(f"_pto{suffix}"))
-    if not candidates:
-        raise FileNotFoundError("cannot locate local _pto extension in candidate _mlir_libs directories")
-
-    first_error = None
-    for so_path in candidates:
-        try:
-            spec = importlib.util.spec_from_file_location(
-                module_name, so_path
-            )
-            if spec and spec.loader:
-                mod = importlib.util.module_from_spec(spec)
-                previous = sys.modules.get(module_name)
-                sys.modules[module_name] = mod
-                try:
-                    spec.loader.exec_module(mod)
-                except Exception:
-                    if previous is None:
-                        sys.modules.pop(module_name, None)
-                    else:
-                        sys.modules[module_name] = previous
-                    raise
-                return mod
-        except ImportError as exc:
-            if first_error is None:
-                first_error = exc
-    raise ImportError("failed to load local _pto extension from candidate _mlir_libs directories") from first_error
-
-
-try:
-    _pto_mod = _load_local_pto_ext()
-except FileNotFoundError:
-    _pto_mod = importlib.import_module(".._mlir_libs._pto", __package__)
+from ptoas import _core as _pto_mod
 
 
 def _export_generated_symbols():
@@ -122,10 +47,13 @@ MaskType = _pto_mod.MaskType
 VMIVRegType = _pto_mod.VMIVRegType
 VMIMaskType = _pto_mod.VMIMaskType
 AlignType = _pto_mod.AlignType
+StructType = _export_optional_cext_symbol("StructType")
 AsyncSessionType = _pto_mod.AsyncSessionType
 AsyncEventType = _pto_mod.AsyncEventType
 PrefetchAsyncContextType = _export_optional_cext_symbol("PrefetchAsyncContextType")
 HiF8Type = _pto_mod.HiF8Type
+HiF8x2Type = _pto_mod.HiF8x2Type
+F8E8M0Type = _pto_mod.F8E8M0Type
 F4E1M2x2Type = _pto_mod.F4E1M2x2Type
 F4E2M1x2Type = _pto_mod.F4E2M1x2Type
 TensorViewType = _pto_mod.TensorViewType
@@ -304,6 +232,8 @@ __all__ = [
     "AsyncSessionType",
     "AsyncEventType",
     "HiF8Type",
+    "HiF8x2Type",
+    "F8E8M0Type",
     "F4E1M2x2Type",
     "F4E2M1x2Type",
     "TensorViewType",
@@ -964,6 +894,7 @@ class TScatterOp(_GeneratedTScatterOp):
         dst=_TSCATTER_UNSET,
         indexes=_TSCATTER_UNSET,
         maskPattern=_TSCATTER_UNSET,
+        axis=None,
         loc=None,
         ip=None,
     ):
@@ -1035,6 +966,8 @@ class TScatterOp(_GeneratedTScatterOp):
             kwargs["indexes"] = indexes
         if maskPattern is not _TSCATTER_UNSET:
             kwargs["maskPattern"] = maskPattern
+        if axis is not None:
+            kwargs["axis"] = axis
         super().__init__(src, **kwargs, loc=loc, ip=ip)
 
 
@@ -1213,9 +1146,9 @@ def _project_result(group, index, ty):
 
 def _load_standard_dialects():
     try:
-        from mlir.dialects import arith as _mlir_arith  # noqa: F401
-        from mlir.dialects import func as _mlir_func  # noqa: F401
-        from mlir.dialects import scf as _mlir_scf  # noqa: F401
+        from ptoas.mlir.dialects import arith as _mlir_arith  # noqa: F401
+        from ptoas.mlir.dialects import func as _mlir_func  # noqa: F401
+        from ptoas.mlir.dialects import scf as _mlir_scf  # noqa: F401
     except ImportError as exc:
         raise RuntimeError("mlir standard dialect python bindings are required for vkernel parsing") from exc
 

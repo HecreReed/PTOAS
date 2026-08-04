@@ -67,15 +67,13 @@ std::unique_ptr<Pass> createConvertToPTOOpPass();
 /// PTO Ops.
 std::unique_ptr<Pass> createInferPTOMemScopePass();
 
-/// Create a pass to plan memory.
 std::unique_ptr<Pass>
-createPlanMemoryPass(const PlanMemoryOptions &planMemoryOption = {});
-
+createPlanMemoryPass(const PlanMemoryOptions &options = {});
+std::unique_ptr<Pass>
+createPlanMemoryModernPass(const PlanMemoryOptions &options);
 std::unique_ptr<Pass> createPTORemoveRedundantBarrierPass();
-std::unique_ptr<Pass> createPTOViewToMemrefPass();
 std::unique_ptr<Pass> createPTOValidateIntToPtrUsesPass();
 std::unique_ptr<Pass> createPTORematerializeFixpipeVectorQuantPass();
-std::unique_ptr<Pass> createPTOMaterializeTileHandlesPass();
 std::unique_ptr<Pass> createPTOResolveBufferSelectPass();
 std::unique_ptr<Pass> createInferPTOLayoutPass();
 std::unique_ptr<Pass> createPTOA5NormalizeTMovPass();
@@ -93,6 +91,9 @@ LogicalResult validateIntToPtrUses(func::FuncOp func);
 
 std::unique_ptr<Pass> createPTOUnrollSIMTForPass();
 std::unique_ptr<Pass> createPTONarrowVPTOLoopCountersPass();
+std::unique_ptr<Pass> createPTOAnalyzeSIMTPersistentFragmentPass();
+std::unique_ptr<Pass> createPTOMaterializeSIMTPersistentFragmentPass();
+std::unique_ptr<Pass> createPTOOutlineSIMTSectionsPass();
 std::unique_ptr<Pass> createPTOInferVPTOVecScopePass();
 std::unique_ptr<Pass> createVPTOExpandWrapperOpsPass();
 std::unique_ptr<Pass> createVPTOSoftPostUpdatePass();
@@ -105,7 +106,8 @@ std::unique_ptr<Pass> createPTOUnrollAfterLoopFusionPass();
 std::unique_ptr<Pass> createPTOFlattenFusionRegionPass();
 std::unique_ptr<Pass> createVPTOPtrNormalizePass();
 std::unique_ptr<Pass> createVPTOPtrCastCleanupPass();
-std::unique_ptr<Pass> createVPTONormalizeEquivalentVcvtPass();
+std::unique_ptr<Pass> createVPTOOptimizeVcvtPass();
+std::unique_ptr<Pass> createVPTOMaskSimplifyPass();
 LogicalResult validateVPTOAuthoringIR(ModuleOp module,
                                       llvm::raw_ostream *diagOS = nullptr);
 LogicalResult validateVPTOEmissionIR(ModuleOp module,
@@ -142,7 +144,6 @@ std::unique_ptr<Pass>
 createPTOInlineLibCallPass(const PTOInlineLibCallOptions &options = {});
 std::unique_ptr<Pass> createPTOInlineBackendHelpersPass(
     const PTOInlineBackendHelpersOptions &options = {});
-void registerPTOViewToMemrefPass();
 
 //===----------------------------------------------------------------------===//
 // Registration

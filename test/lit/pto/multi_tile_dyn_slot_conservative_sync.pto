@@ -9,17 +9,15 @@
 // RUN: ptoas --enable-insert-sync %s 2>/dev/null > /dev/null
 
 // Smoke test that the dynamic-slot path still compiles end-to-end through
-// PTOResolveBufferSelect (arith.select chain) + InsertSync. The
-// PTOIRTranslator now sees the arith.select on memref values and
-// conservatively aliases both branches via
-// `UpdateConservativeAliasBufferInfo`, ensuring sync analysis never
-// silently drops a real dependency just because the slot index is a
-// runtime SSA. We don't FileCheck specific flag patterns here -- only
-// that the pipeline runs to a clean exit code.
+// InsertSync and the later PTOResolveBufferSelect lowering. InsertSync runs
+// before PTOResolveBufferSelect, so it models the dynamic slot at
+// `pto.multi_tile_get` rather than seeing the lowering-time arith.select chain.
+// We don't FileCheck specific flag patterns here -- only that the pipeline runs
+// to a clean exit code.
 
 module {
   func.func @dyn_slot_compiles(
-      %gm : memref<16x16xf16, #pto.address_space<gm>>, %n : index) {
+      %gm : !pto.partition_tensor_view<16x16xf16>, %n : index) {
     %c0 = arith.constant 0 : index
     %c1 = arith.constant 1 : index
     %c2 = arith.constant 2 : index
@@ -32,7 +30,7 @@ module {
       %s = pto.multi_tile_get %mb[%idx]
           : !pto.multi_tile_buf<vec, 16x16xf16, count=2>
          -> !pto.tile_buf<vec, 16x16xf16>
-      pto.tload ins(%gm : memref<16x16xf16, #pto.address_space<gm>>)
+      pto.tload ins(%gm : !pto.partition_tensor_view<16x16xf16>)
                 outs(%s  : !pto.tile_buf<vec, 16x16xf16>)
     }
     return

@@ -10,6 +10,7 @@
 #include "PTO/IR/PTOTypeUtils.h"
 #include "PTO/Support/PythonExecutable.h"
 #include "PTO/Transforms/Passes.h"
+#include "PTO/Transforms/TileOpExpansionUtils.h"
 
 #include "mlir/Dialect/Arith/IR/Arith.h"
 #include "mlir/Dialect/Func/IR/FuncOps.h"
@@ -149,6 +150,10 @@ static std::string getMemorySpaceString(MemRefType memrefType) {
 
 static std::string getMemorySpaceString(pto::PartitionTensorViewType) {
   return "gm";
+}
+
+static std::string getMemorySpaceString(pto::PtrType ptrType) {
+  return stringifyMemorySpace(ptrType.getMemorySpace().getAddressSpace());
 }
 
 static StringRef getBLayoutString(pto::BLayout layout) {
@@ -516,6 +521,16 @@ static void appendOpContextAttrs(
       byte = byteAttr.getInt();
     attrs.emplace_back("byte", std::to_string(byte));
   }
+  if (auto tscatter = dyn_cast<pto::TScatterOp>(op)) {
+    if (auto maskPatternAttr = tscatter.getMaskPatternAttr()) {
+      attrs.emplace_back(
+          "mask_pattern",
+          stringifyMaskPattern(maskPatternAttr.getValue()).str());
+    }
+    if (auto axisAttr = tscatter.getAxisAttr()) {
+      attrs.emplace_back("axis_value", axisAttr.getValue().str());
+    }
+  }
   (void)(tryAppendPrecisionType<pto::TExpOp>(op, attrs) ||
          tryAppendPrecisionType<pto::TLogOp>(op, attrs) ||
          tryAppendPrecisionType<pto::TSqrtOp>(op, attrs) ||
@@ -649,6 +664,14 @@ static void appendScalarOperandSpecJson(std::string &json, Value operand) {
   json += "}";
 }
 
+static void appendPtrOperandSpecJson(std::string &json, pto::PtrType ptrType) {
+  json += "{\"kind\":\"pointer\",\"dtype\":\"";
+  json += getDtypeString(ptrType.getElementType());
+  json += "\",\"memory_space\":\"";
+  json += getMemorySpaceString(ptrType);
+  json += "\"}";
+}
+
 static std::optional<std::string>
 buildOperandSpecsJson(Operation *operation) {
   std::string json = "[";
@@ -684,6 +707,16 @@ buildOperandSpecsJson(Operation *operation) {
         return std::nullopt;
       }
       appendViewOperandSpecJson(json, operand, viewType);
+      continue;
+    }
+
+    if (auto ptrType = dyn_cast<pto::PtrType>(type)) {
+      if (getDtypeString(ptrType.getElementType()).empty()) {
+        operation->emitError(
+            "InsertTemplateAttributes encountered an unsupported pointer dtype");
+        return std::nullopt;
+      }
+      appendPtrOperandSpecJson(json, ptrType);
       continue;
     }
 
@@ -947,19 +980,19 @@ struct InsertTemplateAttributesPass
 
   void runOnOperation() override {
     ModuleOp module = getOperation();
+
+    SmallVector<Operation *> tileOperations;
+    module.walk([&](Operation *operation) {
+      if (pto::isTileLibExpandableOp(operation))
+        tileOperations.push_back(operation);
+    });
+    if (tileOperations.empty())
+      return;
     if (daemonSocketPath.empty()) {
       module.emitError(
           "InsertTemplateAttributes requires a PTODSL daemon socket");
       return signalPassFailure();
     }
-
-    SmallVector<Operation *> tileOperations;
-    module.walk([&](Operation *operation) {
-      if (isa<pto::TReshapeOp>(operation))
-        return;
-      if (isa<pto::OpPipeInterface>(operation))
-        tileOperations.push_back(operation);
-    });
 
     for (Operation *operation : tileOperations) {
       auto metadata = invokeMetadataHelper(

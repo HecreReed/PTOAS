@@ -14,9 +14,9 @@
 
 module attributes {pto.target_arch = "a2a3"} {
   func.func @alloc_tile_physical_overlap_sync(
-      %src0: memref<16x128xf32, #pto.address_space<gm>>,
-      %src1: memref<16x128xf32, #pto.address_space<gm>>,
-      %dst: memref<16x128xf32, #pto.address_space<gm>>)
+      %src0: !pto.partition_tensor_view<16x128xf32>,
+      %src1: !pto.partition_tensor_view<16x128xf32>,
+      %dst: !pto.partition_tensor_view<16x128xf32>)
       attributes {pto.kernel_kind = #pto.kernel_kind<vector>} {
     %c1280_i64 = arith.constant 1280 : i64
     %c8192_i64 = arith.constant 8192 : i64
@@ -30,14 +30,14 @@ module attributes {pto.target_arch = "a2a3"} {
     %reused = pto.alloc_tile addr = %c8192_i64 :
       !pto.tile_buf<loc=vec, dtype=f32, rows=16, cols=128, v_row=16, v_col=128, blayout=row_major, slayout=none_box, fractal=512, pad=0>
 
-    pto.tload ins(%src0 : memref<16x128xf32, #pto.address_space<gm>>)
+    pto.tload ins(%src0 : !pto.partition_tensor_view<16x128xf32>)
               outs(%input : !pto.tile_buf<loc=vec, dtype=f32, rows=16, cols=128, v_row=16, v_col=128, blayout=row_major, slayout=none_box, fractal=512, pad=0>)
-    pto.tload ins(%src1 : memref<16x128xf32, #pto.address_space<gm>>)
+    pto.tload ins(%src1 : !pto.partition_tensor_view<16x128xf32>)
               outs(%stored : !pto.tile_buf<loc=vec, dtype=f32, rows=16, cols=128, v_row=16, v_col=128, blayout=row_major, slayout=none_box, fractal=512, pad=0>)
     pto.tmuls ins(%input, %one : !pto.tile_buf<loc=vec, dtype=f32, rows=16, cols=128, v_row=16, v_col=128, blayout=row_major, slayout=none_box, fractal=512, pad=0>, f32)
               outs(%stored : !pto.tile_buf<loc=vec, dtype=f32, rows=16, cols=128, v_row=16, v_col=128, blayout=row_major, slayout=none_box, fractal=512, pad=0>)
     pto.tstore ins(%stored : !pto.tile_buf<loc=vec, dtype=f32, rows=16, cols=128, v_row=16, v_col=128, blayout=row_major, slayout=none_box, fractal=512, pad=0>)
-               outs(%dst : memref<16x128xf32, #pto.address_space<gm>>)
+               outs(%dst : !pto.partition_tensor_view<16x128xf32>)
     pto.tmuls ins(%input, %one : !pto.tile_buf<loc=vec, dtype=f32, rows=16, cols=128, v_row=16, v_col=128, blayout=row_major, slayout=none_box, fractal=512, pad=0>, f32)
               outs(%reused : !pto.tile_buf<loc=vec, dtype=f32, rows=16, cols=128, v_row=16, v_col=128, blayout=row_major, slayout=none_box, fractal=512, pad=0>)
     return

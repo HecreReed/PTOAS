@@ -183,9 +183,9 @@ module {
     return
   }
 
-  func.func @call_both(%ffts: memref<256xi64>, %gm0: !pto.ptr<f32>, %gm1: !pto.ptr<f32>, %gm2: !pto.ptr<f32>)
+  func.func @call_both(%ffts: !pto.ptr<i64>, %gm0: !pto.ptr<f32>, %gm1: !pto.ptr<f32>, %gm2: !pto.ptr<f32>)
       attributes {pto.entry} {
-    pto.set_ffts %ffts : memref<256xi64>
+    pto.set_ffts %ffts : !pto.ptr<i64>
     call @cube_kernel(%gm0, %gm1, %gm2) : (!pto.ptr<f32>, !pto.ptr<f32>, !pto.ptr<f32>) -> ()
     call @vector_kernel(%gm0, %gm1, %gm2) : (!pto.ptr<f32>, !pto.ptr<f32>, !pto.ptr<f32>) -> ()
     return

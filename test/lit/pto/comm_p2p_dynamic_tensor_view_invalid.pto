@@ -1,0 +1,21 @@
+// Copyright (c) 2026 Huawei Technologies Co., Ltd.
+// This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+// CANN Open Software License Agreement Version 2.0 (the "License").
+// Please refer to the License for details. You may not use this file except in compliance with the License.
+// THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+// INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+// See LICENSE in the root of the software repository for the full text of the License.
+
+// RUN: not ptoas --pto-arch=a3 --emit-pto-ir %s 2>&1 | FileCheck %s
+
+module {
+  func.func @direct_dynamic_tensor_view(
+      %dst: !pto.tensor_view<?x4096xi8>,
+      %src: !pto.tensor_view<?x4096xi8>,
+      %stage: !pto.tile_buf<loc=vec, dtype=i8, rows=1, cols=4096, v_row=1, v_col=4096, blayout=row_major, slayout=none_box, fractal=512, pad=0>) {
+    pto.comm.tget(%dst, %src, buf(%stage) : !pto.tensor_view<?x4096xi8>, !pto.tensor_view<?x4096xi8>, !pto.tile_buf<loc=vec, dtype=i8, rows=1, cols=4096, v_row=1, v_col=4096, blayout=row_major, slayout=none_box, fractal=512, pad=0>)
+    return
+  }
+}
+
+// CHECK: error: 'pto.comm.tget' op allows dynamic dimensions on dst only for partition_tensor_view

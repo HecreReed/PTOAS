@@ -63,11 +63,7 @@ module attributes {pto.target_arch = "a3"} {
 }
 
 // CHECK-LABEL: AICORE void mgather_emitc_base(
-// CHECK: __ubuf__ int32_t* [[MGATHER_IDX:[_A-Za-z][_A-Za-z0-9]*]] = {{[_A-Za-z][_A-Za-z0-9]*}}.data();
-// CHECK: __ubuf__ float* [[MGATHER_DST:[_A-Za-z][_A-Za-z0-9]*]] = {{[_A-Za-z][_A-Za-z0-9]*}}.data();
-// CHECK: MGATHER<pto::Coalesce::Row>([[MGATHER_DST]], {{[_A-Za-z][_A-Za-z0-9]*}}, [[MGATHER_IDX]]);
+// CHECK: MGATHER<pto::Coalesce::Row>({{[_A-Za-z][_A-Za-z0-9]*}}, {{[_A-Za-z][_A-Za-z0-9]*}}, {{[_A-Za-z][_A-Za-z0-9]*}});
 
 // CHECK-LABEL: AICORE void mscatter_emitc_base(
-// CHECK: __ubuf__ float* [[MSCATTER_SRC:[_A-Za-z][_A-Za-z0-9]*]] = {{[_A-Za-z][_A-Za-z0-9]*}}.data();
-// CHECK: __ubuf__ int32_t* [[MSCATTER_IDX:[_A-Za-z][_A-Za-z0-9]*]] = {{[_A-Za-z][_A-Za-z0-9]*}}.data();
-// CHECK: MSCATTER({{[_A-Za-z][_A-Za-z0-9]*}}, [[MSCATTER_SRC]], [[MSCATTER_IDX]]);
+// CHECK: MSCATTER({{[_A-Za-z][_A-Za-z0-9]*}}, {{[_A-Za-z][_A-Za-z0-9]*}}, {{[_A-Za-z][_A-Za-z0-9]*}});

@@ -1,0 +1,33 @@
+// Copyright (c) 2026 Huawei Technologies Co., Ltd.
+// This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+// CANN Open Software License Agreement Version 2.0 (the "License").
+// Please refer to the License for details. You may not use this file except in compliance with the License.
+// THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+// INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+// See LICENSE in the root of the software repository for the full text of the License.
+
+// RUN: ptoas --pto-level=level3 --pto-arch=a3 --mlir-print-ir-after=pto-resolve-reserved-buffers %s -o /dev/null 2>&1 | FileCheck %s --check-prefix=NATIVE
+
+module {
+  func.func private @push_arg(%gm: memref<256xf32, #pto.address_space<gm>>, %consumer: i32, %tile: !pto.tile_buf<loc=acc, dtype=f32, rows=16, cols=16, v_row=16, v_col=16, blayout=col_major, slayout=row_major, fractal=1024, pad=0>) attributes {pto.kernel_kind = #pto.kernel_kind<cube>} {
+    %pipe = pto.initialize_l2g2l_pipe {dir_mask = 1, slot_size = 1024, slot_num = 8, local_slot_num = 8, flag_base = 0}(%gm : memref<256xf32, #pto.address_space<gm>>, %consumer : i32) -> !pto.pipe
+    pto.tpush(%tile, %pipe : !pto.tile_buf<loc=acc, dtype=f32, rows=16, cols=16, v_row=16, v_col=16, blayout=col_major, slayout=row_major, fractal=1024, pad=0>, !pto.pipe) {split = 0}
+    return
+  }
+
+  func.func private @pop_free_arg(%gm: memref<256xf32, #pto.address_space<gm>>, %consumer: i32, %tile: !pto.tile_buf<loc=vec, dtype=f32, rows=8, cols=16, v_row=8, v_col=16, blayout=row_major, slayout=none_box, fractal=512, pad=0>) attributes {pto.kernel_kind = #pto.kernel_kind<vector>} {
+    %pipe = pto.initialize_l2g2l_pipe {dir_mask = 1, slot_size = 1024, slot_num = 8, local_slot_num = 8, flag_base = 0}(%gm : memref<256xf32, #pto.address_space<gm>>, %consumer : i32) -> !pto.pipe
+    pto.tpop(%tile, %pipe : !pto.tile_buf<loc=vec, dtype=f32, rows=8, cols=16, v_row=8, v_col=16, blayout=row_major, slayout=none_box, fractal=512, pad=0>, !pto.pipe) {split = 1}
+    pto.tfree(%tile, %pipe : !pto.tile_buf<loc=vec, dtype=f32, rows=8, cols=16, v_row=8, v_col=16, blayout=row_major, slayout=none_box, fractal=512, pad=0>, !pto.pipe) {split = 1}
+    return
+  }
+}
+
+// NATIVE-LABEL: @push_arg
+// NATIVE-SAME: !pto.tile_buf<acc
+// NATIVE: pto.tpush
+
+// NATIVE-LABEL: @pop_free_arg
+// NATIVE-SAME: !pto.tile_buf<vec
+// NATIVE: pto.tpop
+// NATIVE: pto.tfree

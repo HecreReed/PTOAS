@@ -8,7 +8,7 @@
 
 // End-to-end level2 coverage for PlanMemory reuse followed by InsertSync. The
 // source uses logical alloc_tile operations without explicit addresses, so the
-// physical pointer_cast addresses checked below are produced by PlanMemory.
+// physical alloc_tile addresses checked below are produced by PlanMemory.
 // `stored` occupies [8192, 16384), while `reused` occupies [8448, 16640).
 //
 // RUN: ptoas --pto-arch=a3 --pto-level=level2 --enable-insert-sync --emit-pto-ir --mlir-print-ir-after=pto-plan-memory %s -o /dev/null 2>&1 | FileCheck %s --check-prefix=PLAN
@@ -16,37 +16,75 @@
 
 module attributes {pto.target_arch = "a2a3"} {
   func.func @plan_memory_reused_tstore_sync_level2(
-      %pressure_src: memref<1x45056xf32, #pto.address_space<gm>>,
-      %pressure_dst: memref<1x45056xf32, #pto.address_space<gm>>,
-      %src0: memref<16x128xf32, #pto.address_space<gm>>,
-      %src1: memref<16x128xf32, #pto.address_space<gm>>,
-      %dst: memref<16x128xf32, #pto.address_space<gm>>,
+      %pressure_src: !pto.ptr<f32>, %pressure_dst: !pto.ptr<f32>,
+      %src0: !pto.ptr<f32>, %src1: !pto.ptr<f32>, %dst: !pto.ptr<f32>,
       %blocker_rows: index,
       %blocker_cols: index)
       attributes {pto.kernel_kind = #pto.kernel_kind<vector>} {
+    %c0 = arith.constant 0 : index
+    %c1 = arith.constant 1 : index
+    %c16 = arith.constant 16 : index
+    %c128 = arith.constant 128 : index
+    %c45056 = arith.constant 45056 : index
     %one = arith.constant 1.000000e+00 : f32
+
+    %pressure_src_view = pto.make_tensor_view %pressure_src,
+      shape = [%c1, %c1, %c1, %c1, %c45056],
+      strides = [%c45056, %c45056, %c45056, %c45056, %c1]
+      : !pto.tensor_view<1x1x1x1x45056xf32>
+    %pressure_dst_view = pto.make_tensor_view %pressure_dst,
+      shape = [%c1, %c1, %c1, %c1, %c45056],
+      strides = [%c45056, %c45056, %c45056, %c45056, %c1]
+      : !pto.tensor_view<1x1x1x1x45056xf32>
+    %src0_view = pto.make_tensor_view %src0,
+      shape = [%c1, %c1, %c1, %c16, %c128],
+      strides = [%c128, %c128, %c128, %c128, %c1]
+      : !pto.tensor_view<1x1x1x16x128xf32>
+    %src1_view = pto.make_tensor_view %src1,
+      shape = [%c1, %c1, %c1, %c16, %c128],
+      strides = [%c128, %c128, %c128, %c128, %c1]
+      : !pto.tensor_view<1x1x1x16x128xf32>
+    %dst_view = pto.make_tensor_view %dst,
+      shape = [%c1, %c1, %c1, %c16, %c128],
+      strides = [%c128, %c128, %c128, %c128, %c1]
+      : !pto.tensor_view<1x1x1x16x128xf32>
+    %pressure_src_part = pto.partition_view %pressure_src_view,
+      offsets = [%c0, %c0, %c0, %c0, %c0], sizes = [%c1, %c1, %c1, %c1, %c45056]
+      : !pto.tensor_view<1x1x1x1x45056xf32> -> !pto.partition_tensor_view<1x1x1x1x45056xf32>
+    %pressure_dst_part = pto.partition_view %pressure_dst_view,
+      offsets = [%c0, %c0, %c0, %c0, %c0], sizes = [%c1, %c1, %c1, %c1, %c45056]
+      : !pto.tensor_view<1x1x1x1x45056xf32> -> !pto.partition_tensor_view<1x1x1x1x45056xf32>
+    %src0_part = pto.partition_view %src0_view,
+      offsets = [%c0, %c0, %c0, %c0, %c0], sizes = [%c1, %c1, %c1, %c16, %c128]
+      : !pto.tensor_view<1x1x1x16x128xf32> -> !pto.partition_tensor_view<1x1x1x16x128xf32>
+    %src1_part = pto.partition_view %src1_view,
+      offsets = [%c0, %c0, %c0, %c0, %c0], sizes = [%c1, %c1, %c1, %c16, %c128]
+      : !pto.tensor_view<1x1x1x16x128xf32> -> !pto.partition_tensor_view<1x1x1x16x128xf32>
+    %dst_part = pto.partition_view %dst_view,
+      offsets = [%c0, %c0, %c0, %c0, %c0], sizes = [%c1, %c1, %c1, %c16, %c128]
+      : !pto.tensor_view<1x1x1x16x128xf32> -> !pto.partition_tensor_view<1x1x1x16x128xf32>
 
     // Force PlanMemory's reuse path: 180224 bytes here plus the target tiles
     // and the 256-byte blocker exceed the default 196608-byte UB capacity,
     // while their actual live ranges remain non-overlapping enough to fit.
     %pressure = pto.alloc_tile : !pto.tile_buf<vec, 1x45056xf32>
-    pto.tload ins(%pressure_src : memref<1x45056xf32, #pto.address_space<gm>>)
+    pto.tload ins(%pressure_src_part : !pto.partition_tensor_view<1x1x1x1x45056xf32>)
               outs(%pressure : !pto.tile_buf<vec, 1x45056xf32>)
     pto.tstore ins(%pressure : !pto.tile_buf<vec, 1x45056xf32>)
-               outs(%pressure_dst : memref<1x45056xf32, #pto.address_space<gm>>)
+               outs(%pressure_dst_part : !pto.partition_tensor_view<1x1x1x1x45056xf32>)
 
     %input = pto.alloc_tile :
       !pto.tile_buf<loc=vec, dtype=f32, rows=16, cols=128, v_row=16, v_col=128, blayout=row_major, slayout=none_box, fractal=512, pad=0>
     %stored = pto.alloc_tile :
       !pto.tile_buf<loc=vec, dtype=f32, rows=16, cols=128, v_row=16, v_col=128, blayout=row_major, slayout=none_box, fractal=512, pad=0>
-    pto.tload ins(%src0 : memref<16x128xf32, #pto.address_space<gm>>)
+    pto.tload ins(%src0_part : !pto.partition_tensor_view<1x1x1x16x128xf32>)
               outs(%input : !pto.tile_buf<loc=vec, dtype=f32, rows=16, cols=128, v_row=16, v_col=128, blayout=row_major, slayout=none_box, fractal=512, pad=0>)
-    pto.tload ins(%src1 : memref<16x128xf32, #pto.address_space<gm>>)
+    pto.tload ins(%src1_part : !pto.partition_tensor_view<1x1x1x16x128xf32>)
               outs(%stored : !pto.tile_buf<loc=vec, dtype=f32, rows=16, cols=128, v_row=16, v_col=128, blayout=row_major, slayout=none_box, fractal=512, pad=0>)
     pto.tmuls ins(%input, %one : !pto.tile_buf<loc=vec, dtype=f32, rows=16, cols=128, v_row=16, v_col=128, blayout=row_major, slayout=none_box, fractal=512, pad=0>, f32)
               outs(%stored : !pto.tile_buf<loc=vec, dtype=f32, rows=16, cols=128, v_row=16, v_col=128, blayout=row_major, slayout=none_box, fractal=512, pad=0>)
     pto.tstore ins(%stored : !pto.tile_buf<loc=vec, dtype=f32, rows=16, cols=128, v_row=16, v_col=128, blayout=row_major, slayout=none_box, fractal=512, pad=0>)
-               outs(%dst : memref<16x128xf32, #pto.address_space<gm>>)
+               outs(%dst_part : !pto.partition_tensor_view<1x1x1x16x128xf32>)
     %blocker = pto.alloc_tile valid_row = %blocker_rows valid_col = %blocker_cols :
       !pto.tile_buf<loc=vec, dtype=f32, rows=1, cols=64, v_row=?, v_col=?, blayout=row_major, slayout=none_box, fractal=512, pad=0>
     %reused = pto.alloc_tile :
@@ -70,13 +108,11 @@ module attributes {pto.target_arch = "a2a3"} {
 }
 
 // PLAN-LABEL: func.func @plan_memory_reused_tstore_sync_level2(
-// PLAN-DAG:   %[[STORED_ADDR:[A-Za-z0-9_]+]] = arith.constant 8192 : i64
 // PLAN-DAG:   %[[REUSED_ADDR:[A-Za-z0-9_]+]] = arith.constant 8448 : i64
-// PLAN:       %[[STORED_CAST:[0-9]+]] = pto.pointer_cast(%[[STORED_ADDR]]){{.*}} : memref<16x128xf32
-// PLAN-NEXT:  %[[STORED:[0-9]+]] = pto.bind_tile %[[STORED_CAST]]
+// PLAN-DAG:   %[[STORED_ADDR:[A-Za-z0-9_]+]] = arith.constant 8192 : i64
+// PLAN:       %[[STORED:[0-9]+]] = pto.alloc_tile addr = %[[STORED_ADDR]] : !pto.tile_buf<vec, 16x128xf32>
 // PLAN:       pto.tstore ins(%[[STORED]]
-// PLAN:       %[[REUSED_CAST:[0-9]+]] = pto.pointer_cast(%[[REUSED_ADDR]]){{.*}} : memref<16x128xf32
-// PLAN-NEXT:  %[[REUSED:[0-9]+]] = pto.bind_tile %[[REUSED_CAST]]
+// PLAN:       %[[REUSED:[0-9]+]] = pto.alloc_tile addr = %[[REUSED_ADDR]] : !pto.tile_buf<vec, 16x128xf32>
 // PLAN:       pto.tmuls {{.*}} outs(%[[REUSED]]
 
 // SYNC-LABEL: AICORE void plan_memory_reused_tstore_sync_level2(

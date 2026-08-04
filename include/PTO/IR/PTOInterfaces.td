@@ -76,6 +76,34 @@ def MteOpInterface : OpInterface<"MteOpInterface"> {
     operations and raw micro-instructions may both carry this marker.
   }];
   let cppNamespace = "::mlir::pto";
+  let methods = [
+    InterfaceMethod<"Return the source buffer.",
+      "::mlir::Value", "getSource", (ins), [{}],
+      /*defaultImplementation=*/[{
+        auto operation = $_op.getOperation();
+        if (auto dps = ::llvm::dyn_cast<::mlir::DestinationStyleOpInterface>(
+                operation)) {
+          auto inputs = dps.getDpsInputOperands();
+          if (!inputs.empty())
+            return inputs.front()->get();
+        }
+        return operation->getNumOperands() ? operation->getOperand(0)
+                                           : ::mlir::Value();
+      }]>,
+    InterfaceMethod<"Return the destination buffer.",
+      "::mlir::Value", "getDestination", (ins), [{}],
+      /*defaultImplementation=*/[{
+        auto operation = $_op.getOperation();
+        if (auto dps = ::llvm::dyn_cast<::mlir::DestinationStyleOpInterface>(
+                operation)) {
+          auto inits = dps.getDpsInitOperands();
+          if (!inits.empty())
+            return inits.front()->get();
+        }
+        return operation->getNumOperands() > 1 ? operation->getOperand(1)
+                                              : ::mlir::Value();
+      }]>
+  ];
 }
 
 def SimtOpInterface : OpInterface<"SimtOpInterface"> {

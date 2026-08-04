@@ -10,7 +10,7 @@
 // (including TXOR's tmp scratch tile) by PTOPlanMemory before LowerPTOToUBufOps.
 // The addresses should be compact (256-byte aligned, not 64 KiB spaced).
 
-// RUN: ptoas --pto-arch=a3 --pto-backend=vpto --emit-vpto-llvm-ir %s -o /dev/null --mlir-print-ir-after=pto-materialize-tile-handles 2>&1 | FileCheck %s
+// RUN: ptoas --pto-arch=a3 --pto-backend=vpto --emit-vpto-llvm-ir %s -o /dev/null --mlir-print-ir-after=pto-plan-memory 2>&1 | FileCheck %s
 
 module attributes {pto.target_arch = "a3", pto.kernel_kind = #pto.kernel_kind<vector>} {
   // CHECK-LABEL: func.func @txor_planned_addr()

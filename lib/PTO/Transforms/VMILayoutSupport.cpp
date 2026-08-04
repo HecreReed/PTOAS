@@ -168,6 +168,16 @@ static bool matchesElementCountPattern(ElementCountPattern pattern,
   return false;
 }
 
+static bool matchesPhysicalChunkCountPattern(
+    PhysicalChunkCountPattern pattern, int64_t chunkCount) {
+  if (chunkCount <= 0)
+    return false;
+  for (int64_t i = 0; i < pattern.count; ++i)
+    if (pattern.values[i] == chunkCount)
+      return true;
+  return false;
+}
+
 static bool matchesMaskGranularityPattern(MaskGranularityPattern pattern,
                                           StringRef granularity) {
   uint8_t mask = granularity == "b8"    ? 1u << 0
@@ -291,6 +301,11 @@ struct EnsureLayoutPattern {
 };
 
 static constexpr EnsureLayoutPattern kEnsureLayoutPatterns[] = {
+    // A one-element dense value and a one-group, one-slot value select the
+    // same sole physical carrier lane.
+    {bits<8, 16, 32, 64>(), N<1>(), c(), gs(1)},
+    {bits<8, 16, 32, 64>(), N<1>(), gs(1), c()},
+
     {bits<16>(), N<256>(), c(), d(2)},
     {bits<32>(), N<128, 256>(), c(), d(2)},
     {bits<64>(), N<64, 128, 256>(), c(), d(2)},
@@ -308,13 +323,10 @@ static constexpr EnsureLayoutPattern kEnsureLayoutPatterns[] = {
     {bits<32>(), N<256, 512>(), d(4), d(2)},
     {bits<64>(), N<128, 256>(), d(4), d(2)},
 
-    {bits<8>(), N<1, 2, 4, 8, 64, 128>(), c(), ls(2)},
-    {bits<16>(), N<1, 2, 4, 8, 64>(), c(), ls(2)},
-    {bits<8>(), N<1, 2, 4, 8, 64, 128>(), ls(2), c()},
-    {bits<16>(), N<1, 2, 4, 8, 64>(), ls(2), c()},
-
-    {bits<8>(), N<1, 2, 4, 8, 64>(), c(), ls(4)},
-    {bits<8>(), N<1, 2, 4, 8, 64>(), ls(4), c()},
+    {bits<8, 16>(), anyN(), c(), ls(2)},
+    {bits<8, 16>(), anyN(), ls(2), c()},
+    {bits<8>(), anyN(), c(), ls(4)},
+    {bits<8>(), anyN(), ls(4), c()},
 
     // Group-slot lane-stride materialization keeps num_groups and slots=8.
     // Each physical part carries at most eight row-local group values, so the
@@ -405,6 +417,15 @@ struct PreferredCastLayoutPattern {
   LayoutPattern resultLayout;
 };
 
+struct HighPriorityCastLayoutPattern {
+  ElementBitsPattern sourceBits;
+  ElementBitsPattern resultBits;
+  PhysicalChunkCountPattern sourceChunks;
+  PhysicalChunkCountPattern resultChunks;
+  LayoutPattern sourceLayout;
+  LayoutPattern resultLayout;
+};
+
 struct LegalCastLayoutPattern {
   ElementBitsPattern sourceBits;
   ElementBitsPattern resultBits;
@@ -455,6 +476,19 @@ static constexpr PreferredCastLayoutPattern
         {bits<32>(), bits<8>(), 0, c(), ls(4)},
 };
 
+static constexpr HighPriorityCastLayoutPattern
+    kHighPriorityCastLayoutPatterns[] = {
+        // One-chunk widening relations.
+        {bits<8>(), bits<16>(), chunk<1>(), chunk<1>(), ls(2), c()},
+        {bits<16>(), bits<32>(), chunk<1>(), chunk<1>(), ls(2), c()},
+        {bits<8>(), bits<32>(), chunk<1>(), chunk<1>(), ls(4), c()},
+
+        // One-chunk narrowing relations.
+        {bits<16>(), bits<8>(), chunk<1>(), chunk<1>(), c(), ls(2)},
+        {bits<32>(), bits<16>(), chunk<1>(), chunk<1>(), c(), ls(2)},
+        {bits<32>(), bits<8>(), chunk<1>(), chunk<1>(), c(), ls(4)},
+};
+
 static constexpr LegalCastLayoutPattern kLegalCastLayoutPatterns[] = {
     // 2x widening.
     {bits<8>(), bits<16>(), c(), d(2)},
@@ -489,8 +523,6 @@ static constexpr LegalCastLayoutPattern kLegalCastLayoutPatterns[] = {
     {bits<16>(), bits<32>(), gs(8, 2), gs(8)},
     {bits<8>(), bits<32>(), gs(1), gs(1)},
     {bits<8>(), bits<32>(), gs(8, 4), gs(8)},
-    {bits<16>(), bits<32>(), gs(8), gs(8)},
-    {bits<8>(), bits<32>(), gs(8), gs(8)},
     {bits<16>(), bits<8>(), gs(1), gs(1)},
     {bits<16>(), bits<8>(), gs(8), gs(8, 2)},
     {bits<32>(), bits<16>(), gs(1), gs(1)},
@@ -532,8 +564,6 @@ static constexpr LegalMaskGranularityCastLayoutPattern
         {mb16(), mb32(), gs(8, 2), gs(8)},
         {mb8(), mb32(), gs(1), gs(1)},
         {mb8(), mb32(), gs(8, 4), gs(8)},
-        {mb16(), mb32(), gs(8), gs(8)},
-        {mb8(), mb32(), gs(8), gs(8)},
         {mb16(), mb8(), gs(1), gs(1)},
         {mb16(), mb8(), gs(8), gs(8, 2)},
         {mb32(), mb16(), gs(1), gs(1)},
@@ -566,25 +596,6 @@ static constexpr InterleaveLayoutPattern kVintlvLayoutPatterns[] = {
     {bits<8, 16, 32, 64>(), chunk<1>(), 0, c(), c(), c(), c(), c()},
     {bits<8, 16>(), chunk<1>(), 1, ls(2), ls(2), ls(2), ls(2), ls(2)},
     {bits<8>(), chunk<1>(), 1, ls(4), ls(4), ls(4), ls(4), ls(4)},
-};
-
-struct SupplementalCastLayoutPattern {
-  ElementBitsPattern sourceBits;
-  ElementBitsPattern resultBits;
-  LayoutPattern sourceLayout;
-  LayoutPattern resultLayout;
-};
-
-static constexpr SupplementalCastLayoutPattern
-    kSupplementalIntegerExtLayoutPatterns[] = {
-    {bits<8>(), bits<32>(), gs(8), gs(8)},
-    {bits<16>(), bits<32>(), gs(8), gs(8)},
-};
-
-static constexpr SupplementalCastLayoutPattern
-    kSupplementalNarrowCastLayoutPatterns[] = {
-    {bits<32>(), bits<8>(), gs(8), gs(8)},
-    {bits<32>(), bits<16>(), gs(8), gs(8)},
 };
 
 struct DenseMemoryLayoutPattern {
@@ -759,6 +770,7 @@ static constexpr GroupBroadcastLayoutPattern kGroupBroadcastLayoutPatterns[] = {
     {gb(1, 4), gs(8), ls(4)},
     {gb(1, 2), gs(8), ls(2)},
     {gb(1), gs(8), c()},
+    {gb(1), gs(8), ls(2)},
     {gb(1), gs(8, 2), c()},
     {gb(1), gs(8, 4), c()},
     {gb(2), gs(8), c()},
@@ -767,6 +779,7 @@ static constexpr GroupBroadcastLayoutPattern kGroupBroadcastLayoutPatterns[] = {
     {gb(4), gs(8), c()},
     {gb(4), gs(8), d(4)},
     {gb(4), gs(8), bd(4)},
+    {gb(4), gs(1), c()},
     {gbFull(), gs(8), c()},
     {gbFull(), gs(1), c()},
     {gbFull(2), gs(1), d(2)},
@@ -910,12 +923,7 @@ struct InterleaveLayoutKey {
 
 static bool matchesPhysicalChunkCountPattern(
     PhysicalChunkCountPattern pattern, InterleaveLayoutKey key) {
-  if (key.physicalChunkCount <= 0)
-    return false;
-  for (int64_t i = 0; i < pattern.count; ++i)
-    if (pattern.values[i] == key.physicalChunkCount)
-      return true;
-  return false;
+  return matchesPhysicalChunkCountPattern(pattern, key.physicalChunkCount);
 }
 
 static bool matchesInterleaveLayoutPattern(
@@ -1435,13 +1443,68 @@ static std::pair<int64_t, int64_t> getCastElementBits(VMIVRegType sourceType,
 static VMICastLayoutFact makeCastLayoutFact(int64_t sourceBits,
                                             int64_t resultBits,
                                             VMILayoutAttr sourceLayout,
-                                            VMILayoutAttr resultLayout) {
+                                            VMILayoutAttr resultLayout,
+                                            VMICastLayoutPriority priority =
+                                                VMICastLayoutPriority::Normal) {
   VMICastLayoutFact fact;
   fact.sourceBits = sourceBits;
   fact.resultBits = resultBits;
   fact.sourceLayout = sourceLayout;
   fact.resultLayout = resultLayout;
+  fact.priority = priority;
   return fact;
+}
+
+static FailureOr<VMICastLayoutFact>
+getHighPriorityCastLayoutFactImpl(VMIVRegType sourceType,
+                                  VMIVRegType resultType,
+                                  bool allowLaneStrideNarrowing,
+                                  std::string *reason) {
+  auto [sourceBits, resultBits] = getCastElementBits(sourceType, resultType);
+  if (!allowLaneStrideNarrowing && sourceBits > resultBits)
+    return failure();
+
+  MLIRContext *ctx = sourceType.getContext();
+  std::optional<VMICastLayoutFact> selected;
+  for (const HighPriorityCastLayoutPattern &pattern :
+       kHighPriorityCastLayoutPatterns) {
+    if (!matchesElementBitsPattern(pattern.sourceBits, sourceBits) ||
+        !matchesElementBitsPattern(pattern.resultBits, resultBits))
+      continue;
+
+    VMILayoutAttr sourceLayout =
+        materializeLayoutPattern(ctx, pattern.sourceLayout);
+    VMILayoutAttr resultLayout =
+        materializeLayoutPattern(ctx, pattern.resultLayout);
+    auto assignedSourceType = VMIVRegType::get(
+        ctx, sourceType.getElementCount(), sourceType.getElementType(),
+        sourceLayout);
+    auto assignedResultType = VMIVRegType::get(
+        ctx, resultType.getElementCount(), resultType.getElementType(),
+        resultLayout);
+    FailureOr<int64_t> sourceArity = getVMIPhysicalArity(assignedSourceType);
+    FailureOr<int64_t> resultArity = getVMIPhysicalArity(assignedResultType);
+    if (failed(sourceArity) || failed(resultArity) ||
+        !matchesPhysicalChunkCountPattern(pattern.sourceChunks,
+                                          *sourceArity) ||
+        !matchesPhysicalChunkCountPattern(pattern.resultChunks,
+                                          *resultArity))
+      continue;
+    if (selected) {
+      if (reason)
+        *reason = "high-priority cast layout table has ambiguous matching rows";
+      return failure();
+    }
+    selected = makeCastLayoutFact(sourceBits, resultBits, sourceLayout,
+                                  resultLayout,
+                                  VMICastLayoutPriority::High);
+  }
+  if (!selected) {
+    if (reason)
+      *reason = "requires a matching high-priority cast layout table row";
+    return failure();
+  }
+  return *selected;
 }
 
 static int64_t getMaskGranularityBits(StringRef granularity) {
@@ -1468,7 +1531,8 @@ makeMaskGranularityCastLayoutFact(int64_t sourceBits, int64_t resultBits,
 
 static FailureOr<VMICastLayoutFact> getPreferredCastLayoutFactImpl(
     ArrayRef<PreferredCastLayoutPattern> patterns, VMIVRegType sourceType,
-    VMIVRegType resultType, StringRef tableName, std::string *reason) {
+    VMIVRegType resultType, StringRef tableName, std::string *reason,
+    VMICastLayoutPriority priority = VMICastLayoutPriority::Normal) {
   auto [sourceBits, resultBits] = getCastElementBits(sourceType, resultType);
 
   const PreferredCastLayoutPattern *selected = nullptr;
@@ -1505,7 +1569,8 @@ static FailureOr<VMICastLayoutFact> getPreferredCastLayoutFactImpl(
                             materializeLayoutPattern(ctx,
                                                      selected->sourceLayout),
                             materializeLayoutPattern(ctx,
-                                                     selected->resultLayout));
+                                                     selected->resultLayout),
+                            priority);
 }
 
 static FailureOr<VMICastLayoutFact>
@@ -1514,11 +1579,17 @@ getPreferredLaneStrideNarrowCastLayoutFactImpl(VMIVRegType sourceType,
                                                std::string *reason) {
   return getPreferredCastLayoutFactImpl(
       kPreferredLaneStrideNarrowCastLayoutPatterns, sourceType, resultType,
-      "preferred lane-stride narrow cast layout table", reason);
+      "preferred lane-stride narrow cast layout table", reason,
+      VMICastLayoutPriority::LaneStrideNarrowing);
 }
 
 FailureOr<VMICastLayoutFact> VMILayoutSupport::getPreferredCastLayoutFact(
     VMIVRegType sourceType, VMIVRegType resultType, std::string *reason) const {
+  FailureOr<VMICastLayoutFact> highPriorityFact =
+      getHighPriorityCastLayoutFactImpl(sourceType, resultType,
+                                        preferLaneStrideNarrowing, reason);
+  if (succeeded(highPriorityFact))
+    return highPriorityFact;
   if (preferLaneStrideNarrowing) {
     FailureOr<VMICastLayoutFact> laneStrideFact =
         getPreferredLaneStrideNarrowCastLayoutFactImpl(sourceType, resultType,
@@ -2678,53 +2749,12 @@ LogicalResult VMILayoutSupport::getGroupBroadcastSupport(
       sourceType, resultType, numGroups, reason)));
 }
 
-static LogicalResult matchSupplementalCastLayoutPattern(
-    VMIVRegType sourceType, VMIVRegType resultType,
-    ArrayRef<SupplementalCastLayoutPattern> patterns,
-    std::string *reason) {
-  auto fail = [&](const Twine &message) -> LogicalResult {
-    if (reason)
-      *reason = message.str();
-    return failure();
-  };
-
-  VMILayoutAttr sourceLayout = sourceType.getLayoutAttr();
-  VMILayoutAttr resultLayout = resultType.getLayoutAttr();
-  if (!sourceLayout || !resultLayout)
-    return fail("requires assigned source/result layouts");
-
-  auto [sourceBits, resultBits] = getCastElementBits(sourceType, resultType);
-  int64_t numGroups =
-      sourceLayout.isGroupSlots()
-          ? sourceLayout.getNumGroups()
-          : (resultLayout.isGroupSlots() ? resultLayout.getNumGroups() : 0);
-  MLIRContext *ctx = sourceType.getContext();
-  for (const SupplementalCastLayoutPattern &pattern : patterns) {
-    if (!matchesElementBitsPattern(pattern.sourceBits, sourceBits) ||
-        !matchesElementBitsPattern(pattern.resultBits, resultBits))
-      continue;
-    if (!matchesLayoutPattern(ctx, pattern.sourceLayout, sourceLayout,
-                              numGroups))
-      continue;
-    if (!matchesLayoutPattern(ctx, pattern.resultLayout, resultLayout,
-                              numGroups))
-      continue;
-    return success();
-  }
-
-  return fail("source/result layouts do not match a supplemental cast table row");
-}
-
 static LogicalResult getNarrowCastSupport(VMIVRegType sourceType,
                                           VMIVRegType resultType,
                                           std::string *reason) {
-  VMILayoutSupport support;
-  if (succeeded(support.getCastLayoutFactForLayouts(
-          sourceType, resultType, sourceType.getLayoutAttr(),
-          resultType.getLayoutAttr(), reason)))
-    return success();
-  return matchSupplementalCastLayoutPattern(
-      sourceType, resultType, kSupplementalNarrowCastLayoutPatterns, reason);
+  return success(succeeded(VMILayoutSupport().getCastLayoutFactForLayouts(
+      sourceType, resultType, sourceType.getLayoutAttr(),
+      resultType.getLayoutAttr(), reason)));
 }
 
 LogicalResult VMILayoutSupport::getTruncFSupport(VMITruncFOp op,
@@ -2747,16 +2777,9 @@ template <typename OpT>
 static LogicalResult getExtISupportImpl(OpT op, std::string *reason) {
   auto sourceType = cast<VMIVRegType>(op.getSource().getType());
   auto resultType = cast<VMIVRegType>(op.getResult().getType());
-
-  FailureOr<VMICastLayoutFact> fact =
-      VMILayoutSupport().getCastLayoutFactForLayouts(
-          sourceType, resultType, sourceType.getLayoutAttr(),
-          resultType.getLayoutAttr(), reason);
-  if (succeeded(fact))
-    return success();
-
-  return matchSupplementalCastLayoutPattern(
-      sourceType, resultType, kSupplementalIntegerExtLayoutPatterns, reason);
+  return success(succeeded(VMILayoutSupport().getCastLayoutFactForLayouts(
+      sourceType, resultType, sourceType.getLayoutAttr(),
+      resultType.getLayoutAttr(), reason)));
 }
 
 LogicalResult VMILayoutSupport::getExtSISupport(VMIExtSIOp op,
@@ -2822,6 +2845,57 @@ VMILayoutSupport::getBitcastLayoutFact(VMIBitcastOp op,
   }
 
   return VMIBitcastLayoutFact{sourceLayout, resultLayout};
+}
+
+FailureOr<SmallVector<VMIBitcastLayoutFact, 4>>
+VMILayoutSupport::getBitcastLayoutFactsForLayout(
+    VMIVRegType sourceType, VMIVRegType resultType, VMICastLayoutPort port,
+    VMILayoutAttr layout, std::string *reason) const {
+  auto fail = [&](const Twine &message)
+      -> FailureOr<SmallVector<VMIBitcastLayoutFact, 4>> {
+    if (reason)
+      *reason = message.str();
+    return failure();
+  };
+
+  if (!layout)
+    return fail("requires an assigned bitcast query layout");
+
+  unsigned sourceElementBits =
+      pto::getPTOStorageElemBitWidth(sourceType.getElementType());
+  unsigned resultElementBits =
+      pto::getPTOStorageElemBitWidth(resultType.getElementType());
+  if (sourceElementBits == 0 || resultElementBits == 0)
+    return fail("requires source and result with known storage element width");
+
+  if (sourceElementBits == resultElementBits)
+    return SmallVector<VMIBitcastLayoutFact, 4>{
+        VMIBitcastLayoutFact{layout, layout}};
+
+  int64_t numGroups = layout.isGroupSlots() ? layout.getNumGroups() : 0;
+  MLIRContext *ctx = sourceType.getContext();
+  SmallVector<VMIBitcastLayoutFact, 4> facts;
+  for (const WidthChangingBitcastLayoutPattern &pattern :
+       kWidthChangingBitcastLayoutPatterns) {
+    VMILayoutAttr candidate =
+        materializeLayoutPattern(ctx, pattern.layout, numGroups);
+    if (!candidate)
+      continue;
+    if (port == VMICastLayoutPort::Source && candidate != layout)
+      continue;
+    if (port == VMICastLayoutPort::Result && candidate != layout)
+      continue;
+    facts.push_back(VMIBitcastLayoutFact{candidate, candidate});
+  }
+
+  if (facts.empty()) {
+    if (port == VMICastLayoutPort::Source)
+      return fail(
+          "requires a legal width-changing bitcast source layout relation");
+    return fail(
+        "requires a legal width-changing bitcast result layout relation");
+  }
+  return facts;
 }
 
 LogicalResult VMILayoutSupport::getBitcastSupport(VMIBitcastOp op,

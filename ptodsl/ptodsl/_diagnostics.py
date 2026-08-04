@@ -79,6 +79,15 @@ def jit_illegal_formal_annotation_error(name: str, annotation: object) -> TypeEr
     )
 
 
+def jit_struct_annotation_error(name: str) -> TypeError:
+    """Return one diagnostic for an invalid stack-local struct ABI annotation."""
+    return TypeError(
+        f"@pto.jit parameter '{name}' cannot use pto.struct_type(...) as an ABI annotation. "
+        "Stack-local structs must be created inside the traced function with "
+        "pto.declare_struct(...)."
+    )
+
+
 def jit_helper_illegal_formal_annotation_error(name: str, annotation: object) -> TypeError:
     """Return one diagnostic for unsupported ``@pto.jit(entry=False)`` module annotations."""
     return TypeError(
@@ -526,6 +535,7 @@ __all__ = [
     "explicit_mode_required_with_context_error",
     "host_tensor_metadata_error",
     "jit_illegal_formal_annotation_error",
+    "jit_struct_annotation_error",
     "jit_constexpr_missing_default_error",
     "jit_keyword_only_non_constexpr_error",
     "jit_legacy_tensor_spec_entry_error",

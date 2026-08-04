@@ -1,21 +1,22 @@
 // RUN: ptoas --pto-arch=a3 --enable-insert-sync --pto-insert-sync-debug=2 %s -o - 2>&1 | FileCheck %s
 
 module {
-  func.func @tscatter_indexed_macro_model(%src_gm: memref<1x32xf16, #pto.address_space<gm>>,
-                                          %idx_gm: memref<1x32xi16, #pto.address_space<gm>>) {
-    %src = memref.alloc() : memref<1x32xf16, #pto.address_space<vec>>
-    %idx = memref.alloc() : memref<1x32xi16, #pto.address_space<vec>>
-    %dst = memref.alloc() : memref<1x32xf16, #pto.address_space<vec>>
-    %out = memref.alloc() : memref<1x32xf16, #pto.address_space<vec>>
+  func.func @tscatter_indexed_macro_model(
+      %src_gm: !pto.partition_tensor_view<1x32xf16>,
+      %idx_gm: !pto.partition_tensor_view<1x32xi16>) {
+    %src = pto.alloc_tile : !pto.tile_buf<vec, 1x32xf16>
+    %idx = pto.alloc_tile : !pto.tile_buf<vec, 1x32xi16>
+    %dst = pto.alloc_tile : !pto.tile_buf<vec, 1x32xf16>
+    %out = pto.alloc_tile : !pto.tile_buf<vec, 1x32xf16>
 
-    pto.tload ins(%src_gm : memref<1x32xf16, #pto.address_space<gm>>)
-              outs(%src : memref<1x32xf16, #pto.address_space<vec>>) {layout = #pto.layout<nd>}
-    pto.tload ins(%idx_gm : memref<1x32xi16, #pto.address_space<gm>>)
-              outs(%idx : memref<1x32xi16, #pto.address_space<vec>>) {layout = #pto.layout<nd>}
-    pto.tscatter ins(%src, %idx : memref<1x32xf16, #pto.address_space<vec>>, memref<1x32xi16, #pto.address_space<vec>>)
-                 outs(%dst : memref<1x32xf16, #pto.address_space<vec>>)
-    pto.tmov ins(%dst : memref<1x32xf16, #pto.address_space<vec>>)
-             outs(%out : memref<1x32xf16, #pto.address_space<vec>>)
+    pto.tload ins(%src_gm : !pto.partition_tensor_view<1x32xf16>)
+              outs(%src : !pto.tile_buf<vec, 1x32xf16>) {layout = #pto.layout<nd>}
+    pto.tload ins(%idx_gm : !pto.partition_tensor_view<1x32xi16>)
+              outs(%idx : !pto.tile_buf<vec, 1x32xi16>) {layout = #pto.layout<nd>}
+    pto.tscatter ins(%src, %idx : !pto.tile_buf<vec, 1x32xf16>, !pto.tile_buf<vec, 1x32xi16>)
+                 outs(%dst : !pto.tile_buf<vec, 1x32xf16>)
+    pto.tmov ins(%dst : !pto.tile_buf<vec, 1x32xf16>)
+             outs(%out : !pto.tile_buf<vec, 1x32xf16>)
     return
   }
 }

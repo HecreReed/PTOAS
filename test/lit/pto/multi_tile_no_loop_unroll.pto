@@ -6,18 +6,15 @@
 // INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
 // See LICENSE in the root of the software repository for the full text of the License.
 
-// RUN: ptoas --mlir-print-ir-after=pto-view-to-memref %s 2>&1 1>/dev/null | FileCheck %s
+// RUN: ptoas --mlir-print-ir-after=pto-resolve-reserved-buffers %s 2>&1 1>/dev/null | FileCheck %s
 
-// Verifies that multi-buffer expression and slot selection work WITHOUT an
-// enclosing `scf.for`. Two constant slots are tagged via `pto.slot_marker`
-// at the memref layer and live independently of any loop induction
-// variable. This is something the PR615 fully-automatic `iv mod N` path
-// could not express.
+// Verifies that tile-native multi-buffer selection works without an enclosing
+// `scf.for`; the two constant slots do not depend on a loop induction value.
 
 module {
   func.func @unroll_two_slots(
-      %gm0 : memref<16x16xf16, #pto.address_space<gm>>,
-      %gm1 : memref<16x16xf16, #pto.address_space<gm>>) {
+      %gm0 : !pto.partition_tensor_view<16x16xf16>,
+      %gm1 : !pto.partition_tensor_view<16x16xf16>) {
     %c0 = arith.constant 0 : index
     %c1 = arith.constant 1 : index
 
@@ -27,21 +24,22 @@ module {
     %s0 = pto.multi_tile_get %mb[%c0]
         : !pto.multi_tile_buf<vec, 16x16xf16, count=2>
        -> !pto.tile_buf<vec, 16x16xf16>
-    pto.tload ins(%gm0 : memref<16x16xf16, #pto.address_space<gm>>)
+    pto.tload ins(%gm0 : !pto.partition_tensor_view<16x16xf16>)
               outs(%s0  : !pto.tile_buf<vec, 16x16xf16>)
 
     %s1 = pto.multi_tile_get %mb[%c1]
         : !pto.multi_tile_buf<vec, 16x16xf16, count=2>
        -> !pto.tile_buf<vec, 16x16xf16>
-    pto.tload ins(%gm1 : memref<16x16xf16, #pto.address_space<gm>>)
+    pto.tload ins(%gm1 : !pto.partition_tensor_view<16x16xf16>)
               outs(%s1  : !pto.tile_buf<vec, 16x16xf16>)
     return
   }
 }
 
-// CHECK: IR Dump After PTOViewToMemref
+// CHECK: IR Dump After PTOResolveReservedBuffers
 // CHECK-LABEL: func.func @unroll_two_slots
 // CHECK-NOT: scf.for
-// CHECK: memref.alloc() {pto.multi_buffer = 2 : i32}
-// CHECK: pto.slot_marker %{{.*}}[%c0
-// CHECK: pto.slot_marker %{{.*}}[%c1
+// CHECK: %[[MULTI:.*]] = pto.alloc_multi_tile
+// CHECK: pto.multi_tile_get %[[MULTI]][%c0
+// CHECK: pto.multi_tile_get %[[MULTI]][%c1
+// CHECK-NOT: memref.alloc

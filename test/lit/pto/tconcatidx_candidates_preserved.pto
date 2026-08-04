@@ -6,14 +6,12 @@
 // INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
 // See LICENSE in the root of the software repository for the full text of the License.
 
-// Regression guard: PTOViewToMemref must preserve a `candidates` attribute on
-// pto.tconcatidx. The pass rebuilds the op with replaceOpWithClonedAttrs (not
-// replaceOpWithNewOp, which dropped `candidates` and broke ExpandTileOp template
-// selection). The tconcatidx path has no DSL/ST coverage (only pto.tconcat
-// does), so this is its direct guard: attach `candidates`, run the view->memref
-// pass, assert it survives on the rewritten op.
+// Regression guard: tile-native planning must preserve a `candidates` attribute
+// on pto.tconcatidx. The tconcatidx path has no DSL/ST coverage (only
+// pto.tconcat does), so this is its direct guard: attach `candidates`, run the
+// normal PTO IR pipeline, and assert it survives on the planned tile-native op.
 
-// RUN: ptoas --pto-arch=a5 --mlir-print-ir-after=pto-view-to-memref %s 2>&1 | FileCheck %s
+// RUN: ptoas --pto-arch=a5 --emit-pto-ir %s 2>&1 | FileCheck %s
 
 module {
   func.func @tconcatidx_candidates_preserved() {
@@ -50,10 +48,10 @@ module {
   }
 }
 
-// The rewritten op keeps the pto.tconcatidx form with memref operands (the
-// view->memref reconstruction ran) and still carries the `candidates` array.
+// The planned op keeps the pto.tconcatidx form with tile_buf operands and still
+// carries the `candidates` array.
 // CHECK: pto.tconcatidx ins(
-// CHECK-SAME: memref<8x64xf32
-// CHECK-SAME: memref<{{[0-9]+}}x{{[0-9]+}}xi32
+// CHECK-SAME: !pto.tile_buf<vec, 8x64xf32
+// CHECK-SAME: !pto.tile_buf<vec, 8x8xi32
 // CHECK-SAME: candidates = [
 // CHECK-SAME: name = "template_tconcatidx"

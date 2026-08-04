@@ -92,7 +92,7 @@ def rmsnorm_simt_token_body(
         scalar.store(y_vec, y_ub, y_offset)
 
 
-@pto.jit(target="a5", mode="explicit")
+@pto.jit(target="a5", mode="explicit", kernel_kind="vector")
 def rmsnorm_4096_alloc_buffer_simt_context_kernel(
     X: pto.ptr(pto.f32, "gm"),
     Y: pto.ptr(pto.f32, "gm"),

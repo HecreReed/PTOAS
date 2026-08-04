@@ -47,8 +47,12 @@ module {
 // ASSIGN-SAME: -> !pto.vmi.mask<64xb16, #pto.vmi.layout<contiguous, lane_stride = 2>>
 // ASSIGN: pto.vmi.masked_store %[[NARROW]]
 // ASSIGN-SAME: !pto.vmi.mask<64xb16, #pto.vmi.layout<contiguous, lane_stride = 2>>
-// ASSIGN: pto.vmi.reduce_addf %[[SUM]], {{.*}}, %[[MASK32]]
+// ASSIGN: %[[REDUCE:.*]] = pto.vmi.group_reduce_addf %[[SUM]], %[[MASK32]]
+// ASSIGN-SAME: {num_groups = 1 : i64, reassoc}
 // ASSIGN-SAME: !pto.vmi.mask<64xb32, #pto.vmi.layout<contiguous>>
+// ASSIGN-SAME: -> !pto.vmi.vreg<1xf32, #pto.vmi.layout<num_groups = 1, slots = 1>>
+// ASSIGN: pto.vmi.group_store %[[REDUCE]]
+// ASSIGN-SAME: {num_groups = 1 : i64}
 
 // LOWER-LABEL: func.func @vmi_to_vpto_reduce_addf_store(
 // LOWER-SAME: %[[SRC:[^,]+]]: !pto.vreg<64xf32>
@@ -56,15 +60,10 @@ module {
 // LOWER-SAME: %[[DST_BF16:[^,]+]]: !pto.ptr<bf16, ub>
 // LOWER-SAME: %[[DST:[^,]+]]: !pto.ptr<f32, ub>
 // LOWER-SAME: %[[OFF:[^)]+]]: index
-// LOWER: %[[REDUCE_MASK:.*]] = pto.pge_b32 "PAT_ALL"
-// LOWER: %[[STORE_MASK:.*]] = pto.pge_b32 "PAT_VL1"
+// LOWER: %[[REDUCE_MASK:.*]] = pto.pset_b32 "PAT_ALL"
+// LOWER: %[[STORE_MASK:.*]] = pto.pset_b32 "PAT_VL1"
 // LOWER: %[[ALL:.*]] = pto.pset_b32 "PAT_ALL"
 // LOWER: %[[SUM:.*]] = pto.vadd %[[SRC]], %[[RHS]], %[[ALL]]
 // LOWER: pto.vsts {{.*}}, %[[DST_BF16]][%[[OFF]]], {{.*}} {dist = "PK_B32"}
-// LOWER: %[[VL1:.*]] = pto.pge_b32 "PAT_VL1" : !pto.mask<b32>
 // LOWER: %[[REDUCED:.*]] = pto.vcadd %[[SUM]], %[[REDUCE_MASK]]
-// LOWER: %[[REDUCED_SUM:.*]] = pto.vadd %[[REDUCED]], {{.*}}, %[[VL1]]
-// LOWER: %[[ONE:.*]] = arith.constant 1 : i32
-// LOWER: %[[PREFIX:.*]], %{{.*}} = pto.plt_b32 %[[ONE]]
-// LOWER: %[[MASKED:.*]] = pto.pand %[[STORE_MASK]], %[[PREFIX]]
-// LOWER: pto.vsts %[[REDUCED_SUM]], %[[DST]][%[[OFF]]], %[[MASKED]]
+// LOWER: pto.vsts %[[REDUCED]], %[[DST]][%[[OFF]]], {{.*}} {dist = "1PT_B32"}

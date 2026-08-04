@@ -71,8 +71,6 @@ struct MemInfo {
 
 llvm::SmallVector<int64_t> getAddresses(const llvm::SmallVector<Value> &addrs);
 
-PointerLikeInfo getPointerLikeInfo(pto::PointerCastOp pointerCastOp);
-
 MemInfo getMemInfo(Value val);
 
 MemInfo getMemInfo(const llvm::SmallVector<int64_t> &addrs);

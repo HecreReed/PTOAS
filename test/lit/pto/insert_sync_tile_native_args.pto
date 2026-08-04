@@ -1,0 +1,73 @@
+// Copyright (c) 2026 Huawei Technologies Co., Ltd.
+// This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+// CANN Open Software License Agreement Version 2.0 (the "License").
+// Please refer to the License for details. You may not use this file except in compliance with the License.
+// THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+// INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+// See LICENSE in the root of the software repository for the full text of the License.
+
+// RUN: ptoas --pto-level=level3 --pto-arch=a5 --enable-insert-sync \
+// RUN:   --emit-pto-ir %s -o - | FileCheck %s
+
+module attributes {pto.target_arch = "a5"} {
+  func.func @view_arg_hazard(
+      %gm: !pto.partition_tensor_view<16x16xf32>) {
+    %src_addr = arith.constant 0 : i64
+    %dst_addr = arith.constant 1024 : i64
+    %src = pto.alloc_tile addr = %src_addr : !pto.tile_buf<vec, 16x16xf32>
+    %dst = pto.alloc_tile addr = %dst_addr : !pto.tile_buf<vec, 16x16xf32>
+
+    pto.tstore ins(%src : !pto.tile_buf<vec, 16x16xf32>)
+               outs(%gm : !pto.partition_tensor_view<16x16xf32>)
+    pto.tload ins(%gm : !pto.partition_tensor_view<16x16xf32>)
+              outs(%dst : !pto.tile_buf<vec, 16x16xf32>)
+    return
+  }
+
+  func.func @tile_arg_hazard(
+      %gm: !pto.partition_tensor_view<16x16xf32>,
+      %mid: !pto.tile_buf<vec, 16x16xf32>,
+      %out: !pto.tile_buf<vec, 16x16xf32>) {
+    pto.tload ins(%gm : !pto.partition_tensor_view<16x16xf32>)
+              outs(%mid : !pto.tile_buf<vec, 16x16xf32>)
+    pto.tabs ins(%mid : !pto.tile_buf<vec, 16x16xf32>)
+             outs(%out : !pto.tile_buf<vec, 16x16xf32>)
+    return
+  }
+
+  func.func @local_ptr_arg_hazard(%acc: !pto.ptr<f32, l0c>) {
+    func.call @read_acc_cube(%acc) : (!pto.ptr<f32, l0c>) -> ()
+    func.call @read_acc_simd(%acc) : (!pto.ptr<f32, l0c>) -> ()
+    return
+  }
+
+  func.func private @read_acc_cube(%acc: !pto.ptr<f32, l0c>)
+      attributes {pto.ptodsl.subkernel_helper = "cube",
+                  pto.tileop.effects = ["read"]} {
+    return
+  }
+
+  func.func private @read_acc_simd(%acc: !pto.ptr<f32, l0c>)
+      attributes {pto.ptodsl.subkernel_helper = "simd",
+                  pto.tileop.effects = ["read"]} {
+    return
+  }
+}
+
+// CHECK-LABEL: func.func @view_arg_hazard
+// CHECK: pto.tstore
+// CHECK: pto.set_flag[<PIPE_MTE3>, <PIPE_MTE2>, <EVENT_ID0>]
+// CHECK-NEXT: pto.wait_flag[<PIPE_MTE3>, <PIPE_MTE2>, <EVENT_ID0>]
+// CHECK-NEXT: pto.tload
+
+// CHECK-LABEL: func.func @tile_arg_hazard
+// CHECK: pto.tload
+// CHECK: pto.set_flag[<PIPE_MTE2>, <PIPE_V>, <EVENT_ID0>]
+// CHECK-NEXT: pto.wait_flag[<PIPE_MTE2>, <PIPE_V>, <EVENT_ID0>]
+// CHECK-NEXT: pto.tabs
+
+// CHECK-LABEL: func.func @local_ptr_arg_hazard
+// CHECK: call @read_acc_cube
+// CHECK: pto.set_flag[<PIPE_M>, <PIPE_V>, <EVENT_ID0>]
+// CHECK-NEXT: pto.wait_flag[<PIPE_M>, <PIPE_V>, <EVENT_ID0>]
+// CHECK-NEXT: call @read_acc_simd

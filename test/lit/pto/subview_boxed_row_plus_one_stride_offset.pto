@@ -1,0 +1,27 @@
+// Copyright (c) 2026 Huawei Technologies Co., Ltd.
+// This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+// CANN Open Software License Agreement Version 2.0 (the "License").
+// Please refer to the License for details. You may not use this file except in compliance with the License.
+// THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+// INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+// See LICENSE in the root of the software repository for the full text of the License.
+
+// RUN: ptoas --pto-arch=a3 --emit-pto-ir %s 2>&1 | FileCheck %s
+
+module {
+  func.func @boxed_row_plus_one_stride() {
+    %c0 = arith.constant 0 : index
+    %c8 = arith.constant 8 : index
+    %tile = pto.alloc_tile
+      : !pto.tile_buf<loc=vec, dtype=f32, rows=16, cols=16, v_row=16, v_col=16, blayout=col_major, slayout=row_major, fractal=512, pad=0, compact=2>
+    %sub = pto.subview %tile[%c0, %c8] sizes [16, 8]
+      : !pto.tile_buf<loc=vec, dtype=f32, rows=16, cols=16, v_row=16, v_col=16, blayout=col_major, slayout=row_major, fractal=512, pad=0, compact=2>
+     -> !pto.tile_buf<loc=vec, dtype=f32, rows=16, cols=8, v_row=16, v_col=8, blayout=col_major, slayout=row_major, fractal=512, pad=0, compact=2>
+    pto.tprint ins(%sub : !pto.tile_buf<loc=vec, dtype=f32, rows=16, cols=8, v_row=16, v_col=8, blayout=col_major, slayout=row_major, fractal=512, pad=0, compact=2>)
+    return
+  }
+}
+
+// The boxed col-major layout's major stride is rows + 1 = 17.
+// CHECK: %c17_i64 = arith.constant 17 : i64
+// CHECK: arith.muli %{{.*}}, %c17_i64 : i64

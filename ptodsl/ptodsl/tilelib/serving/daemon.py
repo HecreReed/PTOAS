@@ -28,7 +28,7 @@ import threading
 from .. import constraints as _constraints
 from .. import registry as _registry
 from ..metadata import ScalarSpec, ScalarType, TileSpec, VectorSpec, ViewSpec
-from ..templates import load_template
+from TileOps import load_template
 from .wire import recv_message, send_message
 
 

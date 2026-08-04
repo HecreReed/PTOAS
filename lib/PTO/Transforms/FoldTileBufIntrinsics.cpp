@@ -12,19 +12,18 @@
 // structured-view intrinsics that reference template parameters:
 //
 // tile_buf family:
-//   - pto.tile_buf_addr   → extract memref address from tile_buf
+//   - pto.tile_buf_addr   → extract pointer address from tile_buf
 //   - pto.tile_valid_rows → extract valid row count
 //   - pto.tile_valid_cols → extract valid column count
 //
 // tensor_view family:
-//   - pto.tensor_view_addr       → extract memref/ptr from tensor_view
+//   - pto.tensor_view_addr       → extract pointer from tensor_view
 //   - pto.get_tensor_view_dim    → extract dimension size
 //   - pto.get_tensor_view_stride → extract dimension stride
 //
 // This pass resolves them against the concrete values at the call site.
-// For tile_buf intrinsics, the active VPTO path folds against materialized tile
-// handles produced by the shared tile-handle bridge (`pto.alloc_tile` or
-// `pto.materialize_tile`).
+// For tile_buf intrinsics, the active VPTO path folds against addressed
+// `pto.alloc_tile` handles produced by the shared tile-handle bridge.
 // For tensor_view intrinsics, the pass traces through the full
 // unrealized_conversion_cast → memref.subview → memref.reinterpret_cast
 // chain to fold directly to constants or SSA operands from the
@@ -40,6 +39,7 @@
 
 #include "mlir/Dialect/Arith/IR/Arith.h"
 #include "mlir/Dialect/MemRef/IR/MemRef.h"
+#include "mlir/Dialect/SCF/IR/SCF.h"
 #include "mlir/IR/BuiltinTypes.h"
 #include "mlir/IR/PatternMatch.h"
 #include "mlir/Pass/Pass.h"
@@ -153,7 +153,6 @@ static void eraseDeadViewChains(func::FuncOp func) {
 }
 
 struct TileHandleInfo {
-  Value sourceMemref;
   Value addr;
   Value validRow;
   Value validCol;
@@ -199,6 +198,16 @@ static Value unwrapBridgingCasts(Value v) {
   return v;
 }
 
+static bool isSCFTileCarrier(Value value) {
+  if (auto result = dyn_cast<OpResult>(value)) {
+    return isa<scf::IfOp, scf::ForOp, arith::SelectOp>(result.getOwner());
+  }
+
+  auto blockArg = dyn_cast<BlockArgument>(value);
+  return blockArg &&
+         isa_and_nonnull<scf::ForOp>(blockArg.getOwner()->getParentOp());
+}
+
 static std::optional<TileHandleInfo> resolveTileHandle(Value tileBuf,
                                                        Operation *user) {
   if (auto regionResult = dyn_cast<OpResult>(tileBuf)) {
@@ -229,14 +238,8 @@ static std::optional<TileHandleInfo> resolveTileHandle(Value tileBuf,
           "FoldTileBufIntrinsics: pto.alloc_tile must produce !pto.tile_buf");
       return std::nullopt;
     }
-    return TileHandleInfo{Value(), alloc.getAddr(), alloc.getValidRow(),
+    return TileHandleInfo{alloc.getAddr(), alloc.getValidRow(),
                           alloc.getValidCol(), tileTy.getConfigAttr()};
-  }
-
-  if (auto materialize = tileBuf.getDefiningOp<pto::MaterializeTileOp>()) {
-    return TileHandleInfo{materialize.getSource(), Value(),
-                          materialize.getValidRow(), materialize.getValidCol(),
-                          materialize.getConfig()};
   }
 
   if (auto reshape = tileBuf.getDefiningOp<pto::TReshapeOp>()) {
@@ -252,8 +255,7 @@ static std::optional<TileHandleInfo> resolveTileHandle(Value tileBuf,
     }
 
     auto [validRow, validCol] = findSetValidShapeOverride(tileBuf);
-    return TileHandleInfo{sourceInfo->sourceMemref,
-                          sourceInfo->addr,
+    return TileHandleInfo{sourceInfo->addr,
                           validRow ? validRow : sourceInfo->validRow,
                           validCol ? validCol : sourceInfo->validCol,
                           tileTy.getConfigAttr()};
@@ -261,14 +263,9 @@ static std::optional<TileHandleInfo> resolveTileHandle(Value tileBuf,
 
   user->emitError("FoldTileBufIntrinsics: expected tile_buf to be defined by "
                   "the active materialized tile-handle bridge "
-                  "(pto.alloc_tile, pto.materialize_tile, or pto.treshape, "
+                  "(pto.alloc_tile or pto.treshape, "
                   "or a pto.fusion_region result that yields one of them)");
   return std::nullopt;
-}
-
-static MemRefType getCanonicalMemRefTypeForTileBuf(pto::TileBufType tileTy) {
-  return MemRefType::get(tileTy.getShape(), tileTy.getElementType(),
-                         AffineMap(), tileTy.getMemorySpace());
 }
 
 struct ViewChain {
@@ -435,6 +432,187 @@ static Value computeLinearOffset(OpBuilder &builder, Location loc,
   return rcPart ? rcPart : svPart;
 }
 
+static Value unwrapPTOViewBridge(Value value) {
+  while (auto cast = value.getDefiningOp<UnrealizedConversionCastOp>()) {
+    if (cast.getNumOperands() != 1 || cast.getNumResults() != 1)
+      break;
+    value = cast.getOperand(0);
+  }
+  return value;
+}
+
+enum class PTOViewProjectionKind { Dim, Stride, Address };
+
+static Value projectSCFIfViewResult(Value view, PTOViewProjectionKind kind,
+                                    int64_t dim, pto::PtrType resultPtrType,
+                                    OpBuilder &builder, Operation *user);
+
+static Value resolvePTOViewDim(Value view, int64_t dim, OpBuilder &builder,
+                               Operation *user) {
+  view = unwrapPTOViewBridge(view);
+  if (Value projected = projectSCFIfViewResult(
+          view, PTOViewProjectionKind::Dim, dim, {}, builder, user))
+    return projected;
+  if (auto partition = view.getDefiningOp<pto::PartitionViewOp>()) {
+    if (dim < 0 || dim >= static_cast<int64_t>(partition.getSizes().size()))
+      return {};
+    return partition.getSizes()[dim];
+  }
+  if (auto makeView = view.getDefiningOp<pto::MakeTensorViewOp>()) {
+    if (dim < 0 || dim >= static_cast<int64_t>(makeView.getShape().size()))
+      return {};
+    return makeView.getShape()[dim];
+  }
+  (void)builder;
+  (void)user;
+  return {};
+}
+
+static Value resolvePTOViewStride(Value view, int64_t dim, OpBuilder &builder,
+                                  Operation *user) {
+  view = unwrapPTOViewBridge(view);
+  if (Value projected = projectSCFIfViewResult(
+          view, PTOViewProjectionKind::Stride, dim, {}, builder, user))
+    return projected;
+  if (auto partition = view.getDefiningOp<pto::PartitionViewOp>())
+    return resolvePTOViewStride(partition.getSource(), dim, builder, user);
+  if (auto makeView = view.getDefiningOp<pto::MakeTensorViewOp>()) {
+    if (dim < 0 || dim >= static_cast<int64_t>(makeView.getStrides().size()))
+      return {};
+    return makeView.getStrides()[dim];
+  }
+  return {};
+}
+
+static Value resolvePTOViewAddress(Value view, pto::PtrType resultType,
+                                   OpBuilder &builder, Operation *user) {
+  view = unwrapPTOViewBridge(view);
+  if (Value projected = projectSCFIfViewResult(
+          view, PTOViewProjectionKind::Address, 0, resultType, builder, user))
+    return projected;
+  if (auto makeView = view.getDefiningOp<pto::MakeTensorViewOp>()) {
+    Value ptr = makeView.getPtr();
+    if (ptr.getType() == resultType)
+      return ptr;
+    return builder.create<pto::CastPtrOp>(user->getLoc(), resultType, ptr);
+  }
+  auto partition = view.getDefiningOp<pto::PartitionViewOp>();
+  if (!partition)
+    return {};
+
+  Value linearOffset;
+  for (unsigned index = 0; index < partition.getOffsets().size(); ++index) {
+    Value stride = resolvePTOViewStride(partition.getSource(), index, builder,
+                                        user);
+    if (!stride)
+      return {};
+    Value offset = partition.getOffsets()[index];
+    Value term = builder.create<arith::MulIOp>(user->getLoc(), offset, stride);
+    linearOffset = linearOffset
+                       ? builder.create<arith::AddIOp>(user->getLoc(),
+                                                       linearOffset, term)
+                       : term;
+  }
+  Value base =
+      resolvePTOViewAddress(partition.getSource(), resultType, builder, user);
+  if (!base)
+    return {};
+  if (!linearOffset)
+    return base;
+  return builder.create<pto::AddPtrOp>(user->getLoc(), resultType, base,
+                                       linearOffset);
+}
+
+static void cloneBlockWithoutTerminator(Block *source, Block *target,
+                                        IRMapping &mapping,
+                                        OpBuilder &builder) {
+  builder.setInsertionPointToStart(target);
+  for (Operation &op : source->without_terminator())
+    builder.clone(op, mapping);
+}
+
+static Value projectSCFIfViewResult(Value view, PTOViewProjectionKind kind,
+                                    int64_t dim, pto::PtrType resultPtrType,
+                                    OpBuilder &builder, Operation *user) {
+  auto result = dyn_cast<OpResult>(view);
+  auto ifOp = result ? dyn_cast<scf::IfOp>(result.getOwner()) : scf::IfOp();
+  if (!ifOp || ifOp.getNumRegions() != 2)
+    return {};
+  if (kind == PTOViewProjectionKind::Address && !resultPtrType)
+    return {};
+  auto thenYield = dyn_cast<scf::YieldOp>(ifOp.thenBlock()->getTerminator());
+  auto elseYield = dyn_cast<scf::YieldOp>(ifOp.elseBlock()->getTerminator());
+  unsigned resultIndex = result.getResultNumber();
+  if (!thenYield || !elseYield ||
+      resultIndex >= thenYield.getNumOperands() ||
+      resultIndex >= elseYield.getNumOperands())
+    return {};
+
+  Type projectionType = kind == PTOViewProjectionKind::Address
+                            ? Type(resultPtrType)
+                            : Type(builder.getIndexType());
+  if (!projectionType)
+    return {};
+  SmallVector<Type> resultTypes(ifOp.getResultTypes().begin(),
+                                ifOp.getResultTypes().end());
+  resultTypes.push_back(projectionType);
+
+  OpBuilder ifBuilder(ifOp);
+  auto newIf = ifBuilder.create<scf::IfOp>(
+      ifOp.getLoc(), resultTypes, ifOp.getCondition(),
+      /*addThenBlock=*/true, /*addElseBlock=*/true);
+  newIf->setAttrs(ifOp->getAttrs());
+
+  auto cloneBranch = [&](Block *source, Block *target, scf::YieldOp oldYield,
+                         bool &failed) {
+    IRMapping mapping;
+    cloneBlockWithoutTerminator(source, target, mapping, ifBuilder);
+    SmallVector<Value> yields;
+    yields.reserve(oldYield.getNumOperands() + 1);
+    for (Value operand : oldYield.getOperands())
+      yields.push_back(mapping.lookupOrDefault(operand));
+    Value yieldedView = yields[resultIndex];
+    ifBuilder.setInsertionPointToEnd(target);
+    Value projection;
+    switch (kind) {
+    case PTOViewProjectionKind::Dim:
+      projection =
+          resolvePTOViewDim(yieldedView, dim, ifBuilder, user);
+      break;
+    case PTOViewProjectionKind::Stride:
+      projection =
+          resolvePTOViewStride(yieldedView, dim, ifBuilder, user);
+      break;
+    case PTOViewProjectionKind::Address:
+      projection = resolvePTOViewAddress(yieldedView, resultPtrType, ifBuilder,
+                                         user);
+      break;
+    }
+    if (!projection) {
+      failed = true;
+      return;
+    }
+    yields.push_back(projection);
+    ifBuilder.create<scf::YieldOp>(oldYield.getLoc(), yields);
+  };
+
+  bool failed = false;
+  cloneBranch(ifOp.thenBlock(), newIf.thenBlock(), thenYield, failed);
+  cloneBranch(ifOp.elseBlock(), newIf.elseBlock(), elseYield, failed);
+  if (failed) {
+    newIf.erase();
+    return {};
+  }
+
+  for (auto [oldResult, newResult] :
+       llvm::zip_equal(ifOp.getResults(), newIf.getResults().take_front(
+                                               ifOp.getNumResults())))
+    oldResult.replaceAllUsesWith(newResult);
+  Value projection = newIf.getResult(newIf.getNumResults() - 1);
+  ifOp.erase();
+  return projection;
+}
+
 struct FoldTileBufIntrinsicsPass
     : public pto::impl::FoldTileBufIntrinsicsBase<FoldTileBufIntrinsicsPass> {
   using FoldTileBufIntrinsicsBase::FoldTileBufIntrinsicsBase;
@@ -498,23 +676,29 @@ struct FoldTileBufIntrinsicsPass
         if (!isa<pto::TileBufType>(gvsOp.getSource().getType()))
           continue;
 
-        auto handleInfo = resolveTileHandle(gvsOp.getSource(), gvsOp);
-        if (!handleInfo)
-          return signalPassFailure();
-
         builder.setInsertionPoint(gvsOp);
         auto tileTy = cast<pto::TileBufType>(gvsOp.getSource().getType());
         auto validShape = tileTy.getValidShape();
 
-        Value rowReplacement = handleInfo->validRow;
+        Value rowReplacement;
         if (!validShape.empty() && validShape[0] != ShapedType::kDynamic)
           rowReplacement =
               builder.create<arith::ConstantIndexOp>(gvsOp.getLoc(), validShape[0]);
 
-        Value colReplacement = handleInfo->validCol;
+        Value colReplacement;
         if (validShape.size() >= 2 && validShape[1] != ShapedType::kDynamic)
           colReplacement =
               builder.create<arith::ConstantIndexOp>(gvsOp.getLoc(), validShape[1]);
+
+        if (!rowReplacement || !colReplacement) {
+          auto handleInfo = resolveTileHandle(gvsOp.getSource(), gvsOp);
+          if (!handleInfo)
+            return signalPassFailure();
+          if (!rowReplacement)
+            rowReplacement = handleInfo->validRow;
+          if (!colReplacement)
+            colReplacement = handleInfo->validCol;
+        }
 
         if (!rowReplacement || !colReplacement) {
           gvsOp.emitError("FoldTileBufIntrinsics: pto.get_validshape could not "
@@ -529,11 +713,45 @@ struct FoldTileBufIntrinsicsPass
 
       // Fold pto.tile_buf_addr by recovering the active materialized tile
       // handle contract:
-      //   - pto.materialize_tile → use the source memref directly
-      //   - pto.alloc_tile       → rebuild a memref from the explicit addr
-      // When the requested result type is already !pto.ptr<...>, cast from the
-      // recovered memref instead of leaving tile_buf_addr in the IR.
+      //   - pto.alloc_tile → cast the explicit addr to the requested pointer.
+      // Memref sources are a legacy compatibility seam. They are already
+      // materialized buffers, so keep them as identity markers or cast the
+      // base memref to the requested pointer type without re-entering the
+      // tile_buf handle path.
       for (auto addrOp : addrOps) {
+        if (auto srcMemrefType =
+                dyn_cast<MemRefType>(addrOp.getSrc().getType())) {
+          if (auto resultMemrefType =
+                  dyn_cast<MemRefType>(addrOp.getDst().getType())) {
+            if (srcMemrefType != resultMemrefType)
+              addrOp.getDst().setType(srcMemrefType);
+            addrOp.getDst().replaceAllUsesWith(addrOp.getSrc());
+            addrOp.erase();
+            continue;
+          }
+
+          if (auto resultPtrType =
+                  dyn_cast<pto::PtrType>(addrOp.getDst().getType())) {
+            builder.setInsertionPoint(addrOp);
+            Value replacement = builder.create<pto::CastPtrOp>(
+                addrOp.getLoc(), resultPtrType, addrOp.getSrc());
+            addrOp.getDst().replaceAllUsesWith(replacement);
+            addrOp.erase();
+            continue;
+          }
+
+          addrOp.emitError("FoldTileBufIntrinsics: tile_buf_addr result must "
+                           "be memref or !pto.ptr");
+          return signalPassFailure();
+        }
+
+        // An SCF result/iter_arg is already a runtime-selected tile handle.
+        // Keep tile_buf_addr attached to that handle; VPTO pointer
+        // normalization converts it directly without choosing one branch's
+        // allocation address here.
+        if (isSCFTileCarrier(addrOp.getSrc()))
+          continue;
+
         auto handleInfo = resolveTileHandle(addrOp.getSrc(), addrOp);
         if (!handleInfo)
           return signalPassFailure();
@@ -545,79 +763,23 @@ struct FoldTileBufIntrinsicsPass
           return signalPassFailure();
         }
 
-        if (auto resultMemrefType =
-                dyn_cast<MemRefType>(addrOp.getDst().getType())) {
-          if (handleInfo->sourceMemref) {
-            Value srcMemref = handleInfo->sourceMemref;
-            if (!isa<MemRefType>(srcMemref.getType())) {
-              addrOp.emitError("FoldTileBufIntrinsics: pto.materialize_tile "
-                               "source is not a memref");
-              return signalPassFailure();
-            }
-
-            // The declared tile_buf_addr result type may differ from the actual
-            // materialized source layout (e.g. plain shape vs. strided layout).
-            if (srcMemref.getType() != resultMemrefType)
-              addrOp.getDst().setType(cast<MemRefType>(srcMemref.getType()));
-            addrOp.getDst().replaceAllUsesWith(srcMemref);
-            addrOp.erase();
-            continue;
-          }
-
-          if (!handleInfo->addr) {
-            addrOp.emitError("FoldTileBufIntrinsics: pto.alloc_tile used by "
-                             "tile_buf_addr must carry an addr operand on the "
-                             "VPTO path");
-            return signalPassFailure();
-          }
-
-          builder.setInsertionPoint(addrOp);
-          Value replacement = builder.create<pto::PointerCastOp>(
-              addrOp.getLoc(), resultMemrefType, ValueRange{handleInfo->addr},
-              handleInfo->validRow ? handleInfo->validRow : Value(),
-              handleInfo->validCol ? handleInfo->validCol : Value(),
-              handleInfo->config);
-          addrOp.getDst().replaceAllUsesWith(replacement);
-          addrOp.erase();
-          continue;
-        }
-
         auto resultPtrType = dyn_cast<pto::PtrType>(addrOp.getDst().getType());
         if (!resultPtrType) {
           addrOp.emitError("FoldTileBufIntrinsics: tile_buf_addr result must "
-                           "be memref or !pto.ptr");
+                           "be !pto.ptr");
           return signalPassFailure();
         }
 
-        Value memrefValue;
-        if (handleInfo->sourceMemref) {
-          memrefValue = handleInfo->sourceMemref;
-          if (!isa<MemRefType>(memrefValue.getType())) {
-            addrOp.emitError("FoldTileBufIntrinsics: pto.materialize_tile "
-                             "source is not a memref");
-            return signalPassFailure();
-          }
-        } else {
-          if (!handleInfo->addr) {
-            addrOp.emitError("FoldTileBufIntrinsics: pto.alloc_tile used by "
-                             "tile_buf_addr must carry an addr operand on the "
-                             "VPTO path");
-            return signalPassFailure();
-          }
-
-          builder.setInsertionPoint(addrOp);
-          auto canonicalMemrefType = getCanonicalMemRefTypeForTileBuf(tileTy);
-          memrefValue = builder.create<pto::PointerCastOp>(
-              addrOp.getLoc(), canonicalMemrefType, ValueRange{handleInfo->addr},
-              handleInfo->validRow ? handleInfo->validRow : Value(),
-              handleInfo->validCol ? handleInfo->validCol : Value(),
-              handleInfo->config);
+        if (!handleInfo->addr) {
+          addrOp.emitError("FoldTileBufIntrinsics: pto.alloc_tile used by "
+                           "tile_buf_addr must carry an addr operand on the "
+                           "VPTO path");
+          return signalPassFailure();
         }
 
         builder.setInsertionPoint(addrOp);
-        Value replacement =
-            builder.create<pto::CastPtrOp>(addrOp.getLoc(), resultPtrType,
-                                           memrefValue);
+        Value replacement = builder.create<pto::CastPtrOp>(
+            addrOp.getLoc(), resultPtrType, handleInfo->addr);
         addrOp.getDst().replaceAllUsesWith(replacement);
         addrOp.erase();
       }
@@ -691,10 +853,6 @@ struct FoldTileBufIntrinsicsPass
       }
 
       for (auto dimOp : tvDimOps) {
-        auto chain = traceViewChain(dimOp.getTensorView(), dimOp);
-        if (!chain)
-          return signalPassFailure();
-
         int64_t dimIdx = 0;
         if (!getConstIndexValue(dimOp.getDimIndex(), dimIdx)) {
           dimOp.emitError(
@@ -702,6 +860,18 @@ struct FoldTileBufIntrinsicsPass
               "dim index");
           return signalPassFailure();
         }
+
+        builder.setInsertionPoint(dimOp);
+        if (Value direct = resolvePTOViewDim(dimOp.getTensorView(), dimIdx,
+                                             builder, dimOp)) {
+          dimOp.getResult().replaceAllUsesWith(direct);
+          dimOp.erase();
+          continue;
+        }
+
+        auto chain = traceViewChain(dimOp.getTensorView(), dimOp);
+        if (!chain)
+          return signalPassFailure();
 
         auto svTy = cast<MemRefType>(chain->subview.getType());
         if (dimIdx < 0 || dimIdx >= svTy.getRank()) {
@@ -727,10 +897,6 @@ struct FoldTileBufIntrinsicsPass
       }
 
       for (auto strideOp : tvStrideOps) {
-        auto chain = traceViewChain(strideOp.getTensorView(), strideOp);
-        if (!chain)
-          return signalPassFailure();
-
         int64_t dimIdx = 0;
         if (!getConstIndexValue(strideOp.getDimIndex(), dimIdx)) {
           strideOp.emitError(
@@ -738,6 +904,18 @@ struct FoldTileBufIntrinsicsPass
               "constant dim index");
           return signalPassFailure();
         }
+
+        builder.setInsertionPoint(strideOp);
+        if (Value direct = resolvePTOViewStride(
+                strideOp.getTensorView(), dimIdx, builder, strideOp)) {
+          strideOp.getResult().replaceAllUsesWith(direct);
+          strideOp.erase();
+          continue;
+        }
+
+        auto chain = traceViewChain(strideOp.getTensorView(), strideOp);
+        if (!chain)
+          return signalPassFailure();
 
         auto svTy = cast<MemRefType>(chain->subview.getType());
         if (dimIdx < 0 || dimIdx >= svTy.getRank()) {
@@ -760,13 +938,22 @@ struct FoldTileBufIntrinsicsPass
 
     if (shouldFoldAddrFamily(*mode)) {
       for (auto addrOp : tvAddrOps) {
+        builder.setInsertionPoint(addrOp);
+
+        auto resultPtrType = dyn_cast<pto::PtrType>(addrOp.getDst().getType());
+        if (resultPtrType) {
+          if (Value direct = resolvePTOViewAddress(
+                  addrOp.getSrc(), resultPtrType, builder, addrOp)) {
+            addrOp.getDst().replaceAllUsesWith(direct);
+            addrOp.erase();
+            continue;
+          }
+        }
+
         auto chain = traceViewChain(addrOp.getSrc(), addrOp);
         if (!chain)
           return signalPassFailure();
 
-        builder.setInsertionPoint(addrOp);
-
-        auto resultPtrType = dyn_cast<pto::PtrType>(addrOp.getDst().getType());
         if (!resultPtrType) {
           if (auto resultMemrefType =
                   dyn_cast<MemRefType>(addrOp.getDst().getType())) {
@@ -778,8 +965,8 @@ struct FoldTileBufIntrinsicsPass
             continue;
           }
           addrOp.emitError(
-              "FoldTileBufIntrinsics: tensor_view_addr result must be memref or "
-              "!pto.ptr");
+              "FoldTileBufIntrinsics: tensor_view_addr result must be memref "
+              "or !pto.ptr");
           return signalPassFailure();
         }
 
@@ -850,7 +1037,7 @@ struct FoldTileBufIntrinsicsPass
     }
 
     // DCE tile-handle view / alloc ops left behind after valid-shape
-    // folding (treshape / materialize_tile / alloc_tile / bridging casts).
+    // folding (treshape / alloc_tile / bridging casts).
     bool tileDceChanged = true;
     while (tileDceChanged) {
       tileDceChanged = false;
@@ -858,7 +1045,7 @@ struct FoldTileBufIntrinsicsPass
       func.walk([&](Operation *op) {
         if (!op->use_empty())
           return;
-        if (isa<pto::TReshapeOp, pto::MaterializeTileOp, pto::AllocTileOp>(op))
+        if (isa<pto::TReshapeOp, pto::AllocTileOp>(op))
           deadTileOps.push_back(op);
         else if (auto castOp = dyn_cast<UnrealizedConversionCastOp>(op)) {
           if (castOp.getNumOperands() == 1 &&

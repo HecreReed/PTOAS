@@ -5038,7 +5038,8 @@ LogicalResult TensorViewAddrOp::verify() {
   } else if (auto memrefType = dyn_cast<BaseMemRefType>(srcType)) {
     elementType = memrefType.getElementType();
     expectedRank = memrefType.getRank();
-    auto srcSpace = dyn_cast_or_null<pto::AddressSpaceAttr>(memrefType.getMemorySpace());
+    auto srcSpace =
+        dyn_cast_or_null<pto::AddressSpaceAttr>(memrefType.getMemorySpace());
     if (srcSpace && srcSpace != gmSpace)
       return emitOpError("memref source must stay in gm memory space");
   } else {
@@ -5081,10 +5082,6 @@ LogicalResult TileBufAddrOp::verify() {
     srcMemorySpace = srcTileType.getMemorySpace();
     srcRank = static_cast<int64_t>(srcTileType.getShape().size());
   } else if (auto srcMemRefType = dyn_cast<BaseMemRefType>(getSrc().getType())) {
-    // PTOViewToMemref may lower tile_buf producers to memref + pto.bind_tile
-    // before the shared materialization bridge restores tile handles.
-    // Hand-written pto.tile_buf_addr may therefore temporarily see a tile-bound
-    // memref operand in that intermediate form.
     elementType = srcMemRefType.getElementType();
     srcMemorySpace = srcMemRefType.getMemorySpace();
     srcRank = srcMemRefType.getRank();
@@ -6494,12 +6491,32 @@ LogicalResult VscatterOp::verify() {
   auto offsetsElemType = dyn_cast<IntegerType>(offsetsType.getElementType());
   if (!offsetsElemType)
     return emitOpError("offset vector must use integer element type");
-  if (offsetsElemType.getWidth() != 32)
-    return emitOpError("currently requires 32-bit offset vector elements");
-  if (offsetsType.getElementCount() != valueType.getElementCount())
-    return emitOpError("offset and value vectors must have the same element count");
-  if (failed(verifyMaskTypeLike(*this, getMask().getType(), "mask type")))
+  unsigned valueElemWidth = getPTOStorageElemBitWidth(valueType.getElementType());
+  if (valueElemWidth != 8 && valueElemWidth != 16 && valueElemWidth != 32)
+    return emitOpError("requires 8-, 16-, or 32-bit value elements");
+
+  unsigned expectedOffsetWidth = valueElemWidth == 32 ? 32 : 16;
+  if (offsetsElemType.getWidth() != expectedOffsetWidth)
+    return emitOpError() << "requires " << expectedOffsetWidth
+                         << "-bit offset vector elements for "
+                         << valueElemWidth << "-bit values";
+
+  int64_t expectedOffsetCount = valueElemWidth == 8
+                                    ? valueType.getElementCount() / 2
+                                    : valueType.getElementCount();
+  if (offsetsType.getElementCount() != expectedOffsetCount)
+    return emitOpError() << "requires " << expectedOffsetCount
+                         << " offsets for " << valueType.getElementCount()
+                         << "x" << valueElemWidth << "-bit values";
+
+  if (failed(verifyMaskTypeWithGranularityLike(
+          *this, getMask().getType(), "mask type",
+          valueElemWidth == 32 ? "b32" : "b16")))
     return failure();
+  auto destinationType = cast<PtrType>(getDestination().getType());
+  if (destinationType.getElementType() != valueType.getElementType())
+    return emitOpError(
+        "requires destination element type to match value element type");
   MemoryRole destinationRole = classifyMemoryRole(getDestination().getType());
   if (destinationRole == MemoryRole::GM)
     return emitOpError("requires a UB-backed destination");

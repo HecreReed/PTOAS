@@ -35,6 +35,7 @@
 #include "mlir/Target/LLVMIR/Dialect/Builtin/BuiltinToLLVMIRTranslation.h"
 #include "mlir/Target/LLVMIR/Dialect/LLVMIR/LLVMToLLVMIRTranslation.h"
 #include "mlir/Target/LLVMIR/Export.h"
+#include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/StringSet.h"
 #include "llvm/Bitcode/BitcodeWriter.h"
@@ -146,6 +147,8 @@ static Type convertVPTOType(Type type, Builder &builder) {
     return VectorType::get({256}, builder.getI1Type());
   if (isa<pto::AlignType>(type))
     return VectorType::get({32}, builder.getI8Type());
+  if (isa<pto::StructType>(type))
+    return LLVM::LLVMPointerType::get(builder.getContext());
   if (auto ptrType = dyn_cast<pto::PtrType>(type)) {
     return LLVM::LLVMPointerType::get(
         builder.getContext(),
@@ -180,7 +183,8 @@ static unsigned getNaturalByteAlignment(Type type) {
 }
 
 static bool hasVPTOConvertibleType(Type type) {
-  return isa<pto::VRegType, pto::MaskType, pto::AlignType, pto::PtrType>(type);
+  return isa<pto::VRegType, pto::MaskType, pto::AlignType, pto::PtrType,
+             pto::StructType>(type);
 }
 
 static bool hasVPTOConvertibleType(TypeRange types) {
@@ -211,9 +215,76 @@ public:
   }
 };
 
+// Struct values carry the address of stack-local storage. Keep the pointee
+// type local to struct access lowering so the public type conversion remains
+// an opaque LLVM pointer, consistent with other pointer-like PTO handles.
+static LLVM::LLVMStructType getVPTOStructStorageType(pto::StructType structType,
+                                                      Builder &builder) {
+  struct Frame {
+    pto::StructType type;
+    bool materialize;
+  };
+
+  // PTO structs form an acyclic type tree. Build literal LLVM struct types in
+  // explicit post-order so deeply nested legal structs do not consume the C++
+  // call stack during lowering.
+  SmallVector<Frame> worklist{{structType, false}};
+  llvm::DenseMap<pto::StructType, LLVM::LLVMStructType> storageTypes;
+  while (!worklist.empty()) {
+    Frame frame = worklist.pop_back_val();
+    if (!frame.materialize) {
+      worklist.push_back({frame.type, true});
+      for (Type fieldType : frame.type.getFieldTypes()) {
+        if (auto nestedStruct = dyn_cast<pto::StructType>(fieldType))
+          worklist.push_back({nestedStruct, false});
+      }
+      continue;
+    }
+
+    SmallVector<Type> fieldTypes;
+    fieldTypes.reserve(frame.type.getNumFields());
+    for (Type fieldType : frame.type.getFieldTypes()) {
+      if (auto nestedStruct = dyn_cast<pto::StructType>(fieldType)) {
+        fieldTypes.push_back(storageTypes.find(nestedStruct)->second);
+        continue;
+      }
+      fieldTypes.push_back(convertVPTOType(fieldType, builder));
+    }
+    storageTypes[frame.type] =
+        LLVM::LLVMStructType::getLiteral(builder.getContext(), fieldTypes);
+  }
+  return storageTypes.find(structType)->second;
+}
+
+static FailureOr<Value>
+getVPTOStructFieldAddress(ConversionPatternRewriter &rewriter, Location loc,
+                          Value root, pto::StructType rootType,
+                          ArrayRef<int64_t> path) {
+  auto pointerType = LLVM::LLVMPointerType::get(rewriter.getContext());
+  Value address = root;
+  pto::StructType currentType = rootType;
+  for (auto [depth, index] : llvm::enumerate(path)) {
+    if (index < 0 || index >= static_cast<int64_t>(currentType.getNumFields()))
+      return failure();
+    Type storageType = getVPTOStructStorageType(currentType, rewriter);
+    address = rewriter.create<LLVM::GEPOp>(
+        loc, pointerType, storageType, address,
+        ArrayRef<LLVM::GEPArg>{0, static_cast<int32_t>(index)});
+    Type fieldType = currentType.getFieldType(static_cast<unsigned>(index));
+    if (depth + 1 == path.size())
+      continue;
+    auto nestedStruct = dyn_cast<pto::StructType>(fieldType);
+    if (!nestedStruct)
+      return failure();
+    currentType = nestedStruct;
+  }
+  return address;
+}
+
 struct PlannedDecl {
   std::string name;
   FunctionType type;
+  bool writeOnlyDestination = false;
 };
 
 struct LoweringState {
@@ -1419,6 +1490,17 @@ static std::optional<uint64_t> parseStoreDistImmediate(StringRef dist,
   if (dist == "MRG2CHN_B16")
     return std::optional<uint64_t>(15);
   return std::nullopt;
+}
+
+static bool isOnePointStoreDist(StringRef dist) {
+  return dist == "1PT_B8" || dist == "1PT_B16" || dist == "1PT_B32";
+}
+
+static bool isMaskOnlyUsedByOnePointStores(Value mask) {
+  return !mask.use_empty() && llvm::all_of(mask.getUsers(), [](Operation *user) {
+    auto store = dyn_cast<pto::VstsOp>(user);
+    return store && store.getDist() && isOnePointStoreDist(*store.getDist());
+  });
 }
 
 static std::optional<uint64_t> parseStoreX2DistImmediate(StringRef dist,
@@ -3798,6 +3880,10 @@ static FailureOr<StringRef> buildVscatterCallee(MLIRContext *context,
   return buildLaneTypedCallee(context, valueType, "vscatter", ".v300");
 }
 
+static FailureOr<Type> getVscatterOffsetsCarrierType(Type offsetsType) {
+  return offsetsType;
+}
+
 static FailureOr<StringRef> buildVaxpyCallee(MLIRContext *context,
                                              Type resultType) {
   return buildCANN900ModeTypedCallee(context, resultType, "vaxpy", "m");
@@ -4058,6 +4144,12 @@ StringRef buildUnaryConfigCallee<pto::SetPadValOutToL1Op>(
 template <>
 StringRef buildUnaryConfigCallee<pto::SetFpcOp>(MLIRContext *context) {
   return StringAttr::get(context, "llvm.hivm.SET.FPC").getValue();
+}
+
+template <>
+StringRef buildUnaryConfigCallee<pto::SetStoreAtomicCfgOp>(
+    MLIRContext *context) {
+  return StringAttr::get(context, "llvm.hivm.SET.ST.ATOMIC.CFG").getValue();
 }
 
 template <>
@@ -6596,6 +6688,12 @@ public:
     if (failed(this->getTypeConverter()->convertTypes(op->getResultTypes(), resultTypes)))
       return rewriter.notifyMatchFailure(op, "failed to convert pset result types");
 
+    if (isMaskOnlyUsedByOnePointStores(op.getResult())) {
+      auto undef = rewriter.create<LLVM::UndefOp>(op.getLoc(), resultTypes.front());
+      rewriter.replaceOp(op, undef.getResult());
+      return success();
+    }
+
     StringRef calleeName = buildPsetCallee<PsetOp>(op.getContext());
     Value patternValue = rewriter.create<arith::ConstantOp>(
         op.getLoc(), rewriter.getI32IntegerAttr(*pattern));
@@ -6630,6 +6728,12 @@ public:
     SmallVector<Type> resultTypes;
     if (failed(this->getTypeConverter()->convertTypes(op->getResultTypes(), resultTypes)))
       return rewriter.notifyMatchFailure(op, "failed to convert pge result types");
+
+    if (isMaskOnlyUsedByOnePointStores(op.getResult())) {
+      auto undef = rewriter.create<LLVM::UndefOp>(op.getLoc(), resultTypes.front());
+      rewriter.replaceOp(op, undef.getResult());
+      return success();
+    }
 
     StringRef calleeName = buildPgeCallee<PgeOp>(op.getContext());
     Value patternValue = rewriter.create<arith::ConstantOp>(
@@ -7055,12 +7159,19 @@ public:
                                                         usePostIntrinsic ? 1 : 0));
     Value value = castToPayloadABI(
         op.getLoc(), adaptor.getValue(), op.getValue().getType(), rewriter);
-    SmallVector<Value> args{value, adaptor.getDestination(),
-                            *offsetBytes, distValue, zero, adaptor.getMask()};
+    Value mask = adaptor.getMask();
+    // The 1PT store forms keep a mask operand in the LLVM ABI, but the
+    // hardware ignores it.  Do not materialize a pset/pge mask solely for
+    // this dead operand; an LLVM undef is sufficient at this boundary.
+    StringRef distToken = op.getDist().value_or("");
+    if (isOnePointStoreDist(distToken))
+      mask = rewriter.create<LLVM::UndefOp>(op.getLoc(), mask.getType());
+    SmallVector<Value> args{value, adaptor.getDestination(), *offsetBytes,
+                            distValue, zero, mask};
     auto funcType = rewriter.getFunctionType(
         TypeRange{value.getType(), adaptor.getDestination().getType(),
                   rewriter.getI32Type(), rewriter.getI32Type(),
-                  rewriter.getI32Type(), adaptor.getMask().getType()},
+                  rewriter.getI32Type(), mask.getType()},
         resultTypes);
     auto call = rewriter.create<func::CallOp>(op.getLoc(), *calleeName,
                                               resultTypes, args);
@@ -7542,15 +7653,21 @@ public:
     if (failed(calleeName))
       return rewriter.notifyMatchFailure(op, "unsupported vscatter signature");
 
+    FailureOr<Type> offsetsCarrierType = getVscatterOffsetsCarrierType(
+        adaptor.getOffsets().getType());
+    if (failed(offsetsCarrierType))
+      return rewriter.notifyMatchFailure(op, "unsupported vscatter offsets carrier");
+
     auto funcType = rewriter.getFunctionType(
         TypeRange{adaptor.getValue().getType(), adaptor.getDestination().getType(),
-                  adaptor.getOffsets().getType(), adaptor.getMask().getType()},
+                  *offsetsCarrierType, adaptor.getMask().getType()},
         TypeRange{});
     rewriter.create<func::CallOp>(
         op.getLoc(), *calleeName, TypeRange{},
         ValueRange{adaptor.getValue(), adaptor.getDestination(),
                    adaptor.getOffsets(), adaptor.getMask()});
-    state.plannedDecls.push_back(PlannedDecl{calleeName->str(), funcType});
+    state.plannedDecls.push_back(
+        PlannedDecl{calleeName->str(), funcType, true});
     rewriter.eraseOp(op);
     return success();
   }
@@ -9741,6 +9858,87 @@ public:
   }
 };
 
+class ConvertPtoDeclareStructOp final
+    : public OpConversionPattern<pto::DeclareStructOp> {
+public:
+  using OpConversionPattern::OpConversionPattern;
+
+  LogicalResult
+  matchAndRewrite(pto::DeclareStructOp op, OpAdaptor adaptor,
+                  ConversionPatternRewriter &rewriter) const override {
+    (void)adaptor;
+    auto resultType = dyn_cast<LLVM::LLVMPointerType>(
+        getTypeConverter()->convertType(op.getS().getType()));
+    if (!resultType)
+      return rewriter.notifyMatchFailure(op,
+                                         "expected LLVM pointer result type");
+    auto structType = cast<pto::StructType>(op.getS().getType());
+    Type storageType = getVPTOStructStorageType(structType, rewriter);
+    auto parentFunc = op->getParentOfType<func::FuncOp>();
+    if (!parentFunc)
+      return rewriter.notifyMatchFailure(
+          op, "expected struct declaration inside a function");
+
+    // A non-entry alloca is a dynamic stack allocation. Keep one stack slot per
+    // declaration per function invocation even when the declaration is nested
+    // in a loop or a region.
+    Value storage;
+    {
+      OpBuilder::InsertionGuard guard(rewriter);
+      Block &entryBlock = parentFunc.getBody().front();
+      rewriter.setInsertionPointToStart(&entryBlock);
+      Value one = rewriter.create<LLVM::ConstantOp>(
+          op.getLoc(), rewriter.getI64Type(), rewriter.getIndexAttr(1));
+      storage = rewriter.create<LLVM::AllocaOp>(
+          op.getLoc(), resultType, storageType, one, /*alignment=*/0);
+    }
+    rewriter.replaceOp(op, storage);
+    return success();
+  }
+};
+
+class ConvertPtoStructGetOp final
+    : public OpConversionPattern<pto::StructGetOp> {
+public:
+  using OpConversionPattern::OpConversionPattern;
+
+  LogicalResult
+  matchAndRewrite(pto::StructGetOp op, OpAdaptor adaptor,
+                  ConversionPatternRewriter &rewriter) const override {
+    Type resultType = getTypeConverter()->convertType(op.getValue().getType());
+    if (!resultType)
+      return rewriter.notifyMatchFailure(op, "could not convert result type");
+    FailureOr<Value> address = getVPTOStructFieldAddress(
+        rewriter, op.getLoc(), adaptor.getS(),
+        cast<pto::StructType>(op.getS().getType()), op.getPath());
+    if (failed(address))
+      return rewriter.notifyMatchFailure(op, "invalid struct field path");
+    rewriter.replaceOpWithNewOp<LLVM::LoadOp>(
+        op, resultType, *address, getNaturalByteAlignment(resultType));
+    return success();
+  }
+};
+
+class ConvertPtoStructSetOp final
+    : public OpConversionPattern<pto::StructSetOp> {
+public:
+  using OpConversionPattern::OpConversionPattern;
+
+  LogicalResult
+  matchAndRewrite(pto::StructSetOp op, OpAdaptor adaptor,
+                  ConversionPatternRewriter &rewriter) const override {
+    FailureOr<Value> address = getVPTOStructFieldAddress(
+        rewriter, op.getLoc(), adaptor.getS(),
+        cast<pto::StructType>(op.getS().getType()), op.getPath());
+    if (failed(address))
+      return rewriter.notifyMatchFailure(op, "invalid struct field path");
+    rewriter.replaceOpWithNewOp<LLVM::StoreOp>(
+        op, adaptor.getValue(), *address,
+        getNaturalByteAlignment(adaptor.getValue().getType()));
+    return success();
+  }
+};
+
 class ConvertArithSelectOp final : public OpConversionPattern<arith::SelectOp> {
 public:
   ConvertArithSelectOp(TypeConverter &typeConverter, MLIRContext *context)
@@ -10425,6 +10623,7 @@ static void populateVPTOOpLoweringPatterns(VPTOTypeConverter &typeConverter,
                LowerUnaryI64ConfigOpPattern<pto::SetMte2NzParaOp>,
                LowerUnaryI64ConfigOpPattern<pto::SetPadValOutToL1Op>,
                LowerUnaryI64ConfigOpPattern<pto::SetFpcOp>,
+               LowerUnaryI64ConfigOpPattern<pto::SetStoreAtomicCfgOp>,
                LowerNullaryConfigOpPattern<pto::SetAtomicS32Op>,
                LowerNullaryConfigOpPattern<pto::SetAtomicS8Op>,
                LowerPipeEventSyncOpPattern<pto::SetFlagOp>,
@@ -10538,6 +10737,7 @@ static void configureVPTOOpLoweringTarget(ConversionTarget &target,
                       pto::SetLoopSizeOutToL1Op, pto::SetMte2NzParaOp,
                       pto::SetPadValOutToL1Op, pto::SetReluAlphaOp,
                       pto::SetFixClipReluOp, pto::SetFpcOp,
+                      pto::SetStoreAtomicCfgOp,
                       pto::SetAtomicS32Op, pto::SetAtomicS8Op, pto::SetCtrlOp,
                       pto::StoreVfSimtInfoOp,
                       pto::SetMovPadValOp, pto::SetQuantPreOp>();
@@ -10674,7 +10874,8 @@ static LogicalResult lowerVPTOTypes(ModuleOp module, llvm::raw_ostream &diagOS) 
       });
   target.addIllegalOp<pto::AddPtrOp, pto::CastPtrOp, pto::LoadScalarOp,
                       pto::StoreScalarOp, pto::PTOLoadOp, pto::PTOStoreOp,
-                      pto::PTOLdgOp, pto::PTOStgOp>();
+                      pto::PTOLdgOp, pto::PTOStgOp, pto::DeclareStructOp,
+                      pto::StructGetOp, pto::StructSetOp>();
   target.addDynamicallyLegalOp<UnrealizedConversionCastOp>(
       [&](UnrealizedConversionCastOp op) {
         return !hasVPTOConvertibleType(op->getOperandTypes()) &&
@@ -10687,7 +10888,9 @@ static LogicalResult lowerVPTOTypes(ModuleOp module, llvm::raw_ostream &diagOS) 
 
   populateVPTOStructuralTypePatterns(typeConverter, patterns, target);
   patterns.add<ConvertPtoAddPtrOp, ConvertPtoCastPtrOp, ConvertPtoLoadScalarOp,
-               ConvertPtoStoreScalarOp>(typeConverter, context);
+               ConvertPtoStoreScalarOp, ConvertPtoDeclareStructOp,
+               ConvertPtoStructGetOp,
+               ConvertPtoStructSetOp>(typeConverter, context);
   patterns.add<ConvertPtoLoadOp, ConvertPtoStoreOp, ConvertPtoLdgOp,
                ConvertPtoStgOp>(
       typeConverter, context, state);
@@ -10983,6 +11186,16 @@ emitDeviceLLVMModule(ModuleOp deviceModule, StringRef kernelKind,
   }
 
   applyArtifactVisibilityLinkage(deviceModule, *llvmModule);
+  for (llvm::Function &func : *llvmModule) {
+    if (!func.getName().starts_with("llvm.hivm.vscatter."))
+      continue;
+    // Bisheng LLVM 15 verifies these intrinsic memory effects. Record them
+    // through the LLVM 21 API here; the dispatcher rewrites the new textual
+    // memory(...) spelling before handing the IR to Bisheng.
+    func.setOnlyAccessesArgMemory();
+    func.addFnAttr(llvm::Attribute::NoUnwind);
+    func.addFnAttr(llvm::Attribute::WriteOnly);
+  }
   applySimtEntryCallingConvention(*llvmModule, simtEntryNames);
   if (failed(attachAIVectorScopeMetadata(*llvmModule, diagOS)))
     return failure();

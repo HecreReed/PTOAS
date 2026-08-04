@@ -1,4 +1,4 @@
-// RUN: ptoas --mlir-print-ir-before=pto-view-to-memref %s 2>&1 | FileCheck %s
+// RUN: ptoas --mlir-print-ir-before=pto-resolve-reserved-buffers %s 2>&1 | FileCheck %s
 
 module {
   func.func @new_format_static(%src: !pto.ptr<f32>) {
@@ -19,7 +19,8 @@ module {
     return
   }
 
-  func.func @old_format_static(%src: !pto.ptr<f32>) {
+  func.func @old_format_static(%src: !pto.ptr<f32>)
+      -> !pto.partition_tensor_view<16x32xf32> {
     %c0 = arith.constant 0 : index
     %c1 = arith.constant 1 : index
     %c16 = arith.constant 16 : index
@@ -29,10 +30,11 @@ module {
           : !pto.tensor_view<?x?xf32>
     %sv = pto.partition_view %tv, offsets = [%c0, %c0], sizes = [%c16, %c32]
           : !pto.tensor_view<?x?xf32> -> !pto.partition_tensor_view<16x32xf32>
-    return
+    return %sv : !pto.partition_tensor_view<16x32xf32>
   }
 
-  func.func @old_format_dynamic(%src: !pto.ptr<f32>, %m: index, %n: index) {
+  func.func @old_format_dynamic(%src: !pto.ptr<f32>, %m: index, %n: index)
+      -> !pto.partition_tensor_view<?x?xf32> {
     %c0 = arith.constant 0 : index
     %c1 = arith.constant 1 : index
     %c64 = arith.constant 64 : index
@@ -41,7 +43,7 @@ module {
           : !pto.tensor_view<?x?xf32>
     %sv = pto.partition_view %tv, offsets = [%c0, %c0], sizes = [%m, %n]
           : !pto.tensor_view<?x?xf32> -> !pto.partition_tensor_view<?x?xf32>
-    return
+    return %sv : !pto.partition_tensor_view<?x?xf32>
   }
 }
 

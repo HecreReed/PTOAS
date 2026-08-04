@@ -8,7 +8,8 @@
 
 // Guard: VPTO cube lowering must accept MX fp4/f8 low-precision payloads and
 // select the expected GM/L1/L0 and MMAD.MX intrinsics.
-// RUN: ( mkdir -p %T && ptoas --pto-arch=a5 --pto-backend=vpto %s -o %t --mlir-print-ir-after=convert-func-to-llvm 2>&1 || true ) | FileCheck %s
+// RUN: ( mkdir -p %T && ptoas --pto-arch=a5 --pto-backend=vpto --cann-output-version=9.0.0-beta.1 %s -o %t.beta1 --mlir-print-ir-after=convert-func-to-llvm 2>&1 || true ) | FileCheck %s
+// RUN: ( mkdir -p %T && ptoas --pto-arch=a5 --pto-backend=vpto --cann-output-version=9.0.0 %s -o %t.cann900 --mlir-print-ir-after=convert-func-to-llvm 2>&1 || true ) | FileCheck %s
 
 module attributes {pto.target_arch = "a5", pto.kernel_kind = #pto.kernel_kind<cube>} {
   func.func @mad_mx_low_precision_vpto_llvm(
@@ -25,13 +26,14 @@ module attributes {pto.target_arch = "a5", pto.kernel_kind = #pto.kernel_kind<cu
     %c544_i64 = arith.constant 544 : i64
     %c576_i64 = arith.constant 576 : i64
     %c608_i64 = arith.constant 608 : i64
+    %c32768_i64 = arith.constant 32768 : i64
 
     %l1_a_data = pto.castptr %c0_i64 : i64 -> !pto.ptr<!pto.f4E1M2x2, l1>
     %l1_a_scale = pto.castptr %c512_i64 : i64 -> !pto.ptr<!pto.f4E1M2x2, l1>
     %l1_b_data = pto.castptr %c544_i64 : i64 -> !pto.ptr<!pto.f4E2M1x2, l1>
     %l1_b_scale = pto.castptr %c576_i64 : i64 -> !pto.ptr<!pto.f4E2M1x2, l1>
-    %l0a = pto.castptr %c0_i64 : i64 -> !pto.ptr<!pto.f4E1M2x2, l0a>
-    %l0b = pto.castptr %c0_i64 : i64 -> !pto.ptr<!pto.f4E2M1x2, l0b>
+    %l0a = pto.castptr %c32768_i64 : i64 -> !pto.ptr<!pto.f4E1M2x2, l0a>
+    %l0b = pto.castptr %c32768_i64 : i64 -> !pto.ptr<!pto.f4E2M1x2, l0b>
     %l0c = pto.castptr %c0_i64 : i64 -> !pto.ptr<f32, l0c>
 
     pto.mte_gm_l1 %a_gm, %l1_a_data, %c512_i64
@@ -66,9 +68,18 @@ module attributes {pto.target_arch = "a5", pto.kernel_kind = #pto.kernel_kind<cu
 }
 
 // CHECK-LABEL: llvm.func @mad_mx_low_precision_vpto_llvm_mix_aic
+// CHECK: %[[MX_SCALE_SHIFT:.*]] = llvm.mlir.constant(4 : i64) : i64
 // CHECK: llvm.call @llvm.hivm.MOV.OUT.TO.L1.ALIGN.V2.u8.DV
 // CHECK: llvm.call @llvm.hivm.LOAD.L1.TO.L0A.2Dv2.s4
 // CHECK: llvm.call @llvm.hivm.LOAD.L1.TO.L0B.2Dv2.s4
-// CHECK: llvm.call @llvm.hivm.LOAD.L1.TO.L0A.MX.2Dv2.v
-// CHECK: llvm.call @llvm.hivm.LOAD.L1.TO.L0B.MX.2Dv2.v
+// CHECK: %[[L0A_DATA_ADDR:.*]] = llvm.ptrtoint {{.*}} : !llvm.ptr<3> to i64
+// CHECK: %[[L0A_SCALE_ADDR:.*]] = llvm.lshr %[[L0A_DATA_ADDR]], %[[MX_SCALE_SHIFT]] : i64
+// CHECK: %[[L0A_SCALE_PTR:.*]] = llvm.inttoptr %[[L0A_SCALE_ADDR]] : i64 to !llvm.ptr<3>
+// CHECK: %[[L0A_INTRINSIC_ADDR:.*]] = llvm.ptrtoint %[[L0A_SCALE_PTR]] : !llvm.ptr<3> to i64
+// CHECK: llvm.call @llvm.hivm.LOAD.L1.TO.L0A.MX.2Dv2.v(%[[L0A_INTRINSIC_ADDR]],
+// CHECK: %[[L0B_DATA_ADDR:.*]] = llvm.ptrtoint {{.*}} : !llvm.ptr<4> to i64
+// CHECK: %[[L0B_SCALE_ADDR:.*]] = llvm.lshr %[[L0B_DATA_ADDR]], %[[MX_SCALE_SHIFT]] : i64
+// CHECK: %[[L0B_SCALE_PTR:.*]] = llvm.inttoptr %[[L0B_SCALE_ADDR]] : i64 to !llvm.ptr<4>
+// CHECK: %[[L0B_INTRINSIC_ADDR:.*]] = llvm.ptrtoint %[[L0B_SCALE_PTR]] : !llvm.ptr<4> to i64
+// CHECK: llvm.call @llvm.hivm.LOAD.L1.TO.L0B.MX.2Dv2.v(%[[L0B_INTRINSIC_ADDR]],
 // CHECK: llvm.call @llvm.hivm.MMAD.MX.e1m2x2e2m1x2

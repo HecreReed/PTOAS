@@ -1,9 +1,10 @@
 // RUN: ptoas --emit-pto-ir %s -o - | FileCheck %s
+// RUN: ptoas %s --mlir-print-ir-after=pto-resolve-reserved-buffers -o /dev/null 2>&1 | FileCheck %s --check-prefix=NATIVE
 
 module {
   func.func @subview_dynamic_offset_static_valid_regression(
       %arg0: index,
-      %dst: memref<1x64xf32, #pto.address_space<gm>>) {
+      %dst: !pto.partition_tensor_view<1x64xf32>) {
     %c0 = arith.constant 0 : index
     %c64 = arith.constant 64 : index
     %off = arith.muli %arg0, %c64 : index
@@ -18,11 +19,16 @@ module {
       -> !pto.tile_buf<loc=vec, dtype=f32, rows=1, cols=64, v_row=1, v_col=64, blayout=row_major, slayout=none_box, fractal=512, pad=0>
 
     pto.tstore ins(%sub : !pto.tile_buf<loc=vec, dtype=f32, rows=1, cols=64, v_row=1, v_col=64, blayout=row_major, slayout=none_box, fractal=512, pad=0>)
-              outs(%dst : memref<1x64xf32, #pto.address_space<gm>>)
+              outs(%dst : !pto.partition_tensor_view<1x64xf32>)
     return
   }
 }
 
 // CHECK: func.func @subview_dynamic_offset_static_valid_regression
-// CHECK: memref.subview %{{.*}}[0, %{{.*}}] [1, 64] [1, 1]
-// CHECK: pto.bind_tile %{{.*}}, %c1, %c64
+// CHECK: %[[BYTE_OFFSET:.*]] = arith.muli %{{.*}}, %c4_i64 : i64
+// CHECK: %[[ADDR:.*]] = arith.addi %c0_i64, %[[BYTE_OFFSET]] : i64
+// CHECK: pto.alloc_tile addr = %[[ADDR]] {pto.view_semantics = "subview"} : !pto.tile_buf<vec, 1x64xf32>
+
+// NATIVE: IR Dump After PTOResolveReservedBuffers
+// NATIVE: pto.subview %{{.*}}[%c0, %{{.*}}] sizes [1, 64] : !pto.tile_buf<vec, 8x64xf32> -> !pto.tile_buf<vec, 1x64xf32>
+// NATIVE-NOT: memref.subview

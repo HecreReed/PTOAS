@@ -1,0 +1,110 @@
+// Copyright (c) 2026 Huawei Technologies Co., Ltd.
+// This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+// CANN Open Software License Agreement Version 2.0 (the "License").
+// Please refer to the License for details. You may not use this file except in compliance with the License.
+// THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+// INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+// See LICENSE in the root of the software repository for the full text of the License.
+
+// RUN: ptoas --pto-level=level3 --pto-arch=a5 \
+// RUN:   --mlir-print-ir-after=pto-resolve-reserved-buffers %s -o /dev/null 2>&1 \
+// RUN:   | FileCheck %s --check-prefix=NATIVE
+// RUN: ptoas --pto-level=level3 --pto-arch=a3 --enable-insert-sync %s \
+// RUN:   | FileCheck %s --check-prefix=EMITC
+
+module {
+  func.func private @tcolexpand_arg(
+      %src: !pto.tile_buf<vec, 1x16xf32>,
+      %dst: !pto.tile_buf<vec, 8x16xf32>) {
+    pto.tcolexpand ins(%src : !pto.tile_buf<vec, 1x16xf32>)
+                   outs(%dst : !pto.tile_buf<vec, 8x16xf32>)
+    return
+  }
+
+  func.func private @tcolexpandmul_arg(
+      %src0: !pto.tile_buf<vec, 8x16xf32>,
+      %src1: !pto.tile_buf<vec, 1x16xf32>,
+      %dst: !pto.tile_buf<vec, 8x16xf32>) {
+    pto.tcolexpandmul ins(%src0, %src1 : !pto.tile_buf<vec, 8x16xf32>, !pto.tile_buf<vec, 1x16xf32>)
+                      outs(%dst : !pto.tile_buf<vec, 8x16xf32>)
+    return
+  }
+
+  func.func private @tcolexpandmax_arg(
+      %src0: !pto.tile_buf<vec, 8x16xf32>,
+      %src1: !pto.tile_buf<vec, 1x16xf32>,
+      %dst: !pto.tile_buf<vec, 8x16xf32>) {
+    pto.tcolexpandmax ins(%src0, %src1 : !pto.tile_buf<vec, 8x16xf32>, !pto.tile_buf<vec, 1x16xf32>)
+                      outs(%dst : !pto.tile_buf<vec, 8x16xf32>)
+    return
+  }
+
+  func.func private @tcolexpandmin_arg(
+      %src0: !pto.tile_buf<vec, 8x16xf32>,
+      %src1: !pto.tile_buf<vec, 1x16xf32>,
+      %dst: !pto.tile_buf<vec, 8x16xf32>) {
+    pto.tcolexpandmin ins(%src0, %src1 : !pto.tile_buf<vec, 8x16xf32>, !pto.tile_buf<vec, 1x16xf32>)
+                      outs(%dst : !pto.tile_buf<vec, 8x16xf32>)
+    return
+  }
+
+  func.func private @tcolexpandadd_arg(
+      %src0: !pto.tile_buf<vec, 8x16xf32>, %src1: !pto.tile_buf<vec, 1x16xf32>,
+      %dst: !pto.tile_buf<vec, 8x16xf32>) {
+    pto.tcolexpandadd ins(%src0, %src1 : !pto.tile_buf<vec, 8x16xf32>, !pto.tile_buf<vec, 1x16xf32>) outs(%dst : !pto.tile_buf<vec, 8x16xf32>)
+    return
+  }
+  func.func private @tcolexpandsub_arg(
+      %src0: !pto.tile_buf<vec, 8x16xf32>, %src1: !pto.tile_buf<vec, 1x16xf32>,
+      %dst: !pto.tile_buf<vec, 8x16xf32>) {
+    pto.tcolexpandsub ins(%src0, %src1 : !pto.tile_buf<vec, 8x16xf32>, !pto.tile_buf<vec, 1x16xf32>) outs(%dst : !pto.tile_buf<vec, 8x16xf32>)
+    return
+  }
+  func.func private @tcolexpanddiv_arg(
+      %src0: !pto.tile_buf<vec, 8x16xf32>, %src1: !pto.tile_buf<vec, 1x16xf32>,
+      %dst: !pto.tile_buf<vec, 8x16xf32>) {
+    pto.tcolexpanddiv ins(%src0, %src1 : !pto.tile_buf<vec, 8x16xf32>, !pto.tile_buf<vec, 1x16xf32>) outs(%dst : !pto.tile_buf<vec, 8x16xf32>)
+    return
+  }
+  func.func private @tcolexpandexpdif_arg(
+      %src0: !pto.tile_buf<vec, 8x16xf32>, %src1: !pto.tile_buf<vec, 1x16xf32>,
+      %dst: !pto.tile_buf<vec, 8x16xf32>) {
+    pto.tcolexpandexpdif ins(%src0, %src1 : !pto.tile_buf<vec, 8x16xf32>, !pto.tile_buf<vec, 1x16xf32>) outs(%dst : !pto.tile_buf<vec, 8x16xf32>)
+    return
+  }
+}
+
+// NATIVE-LABEL: func.func private @tcolexpand_arg(
+// NATIVE: pto.tcolexpand ins(%arg0 : !pto.tile_buf<vec, 1x16xf32>) outs(%arg1 : !pto.tile_buf<vec, 8x16xf32>)
+// NATIVE-LABEL: func.func private @tcolexpandmul_arg(
+// NATIVE: pto.tcolexpandmul ins(%arg0, %arg1 : !pto.tile_buf<vec, 8x16xf32>, !pto.tile_buf<vec, 1x16xf32>) outs(%arg2 : !pto.tile_buf<vec, 8x16xf32>)
+// NATIVE-LABEL: func.func private @tcolexpandmax_arg(
+// NATIVE: pto.tcolexpandmax ins(%arg0, %arg1 : !pto.tile_buf<vec, 8x16xf32>, !pto.tile_buf<vec, 1x16xf32>) outs(%arg2 : !pto.tile_buf<vec, 8x16xf32>)
+// NATIVE-LABEL: func.func private @tcolexpandmin_arg(
+// NATIVE: pto.tcolexpandmin ins(%arg0, %arg1 : !pto.tile_buf<vec, 8x16xf32>, !pto.tile_buf<vec, 1x16xf32>) outs(%arg2 : !pto.tile_buf<vec, 8x16xf32>)
+// NATIVE-LABEL: func.func private @tcolexpandadd_arg(
+// NATIVE: pto.tcolexpandadd
+// NATIVE-LABEL: func.func private @tcolexpandsub_arg(
+// NATIVE: pto.tcolexpandsub
+// NATIVE-LABEL: func.func private @tcolexpanddiv_arg(
+// NATIVE: pto.tcolexpanddiv
+// NATIVE-LABEL: func.func private @tcolexpandexpdif_arg(
+// NATIVE: pto.tcolexpandexpdif
+// NATIVE-NOT: memref<
+
+// EMITC-LABEL: tcolexpand_arg(
+// EMITC: TCOLEXPAND(
+// EMITC-LABEL: tcolexpandmul_arg(
+// EMITC: TCOLEXPANDMUL(
+// EMITC-LABEL: tcolexpandmax_arg(
+// EMITC: TCOLEXPANDMAX(
+// EMITC-LABEL: tcolexpandmin_arg(
+// EMITC: TCOLEXPANDMIN(
+// EMITC-LABEL: tcolexpandadd_arg(
+// EMITC: TCOLEXPANDADD(
+// EMITC-LABEL: tcolexpandsub_arg(
+// EMITC: TCOLEXPANDSUB(
+// EMITC-LABEL: tcolexpanddiv_arg(
+// EMITC: TCOLEXPANDDIV(
+// EMITC-LABEL: tcolexpandexpdif_arg(
+// EMITC: TCOLEXPANDEXPDIF(

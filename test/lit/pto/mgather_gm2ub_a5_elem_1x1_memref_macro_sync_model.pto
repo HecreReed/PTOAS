@@ -7,20 +7,18 @@
 // See LICENSE in the root of the software repository for the full text of the License.
 
 // A5 elem-coalesced 1x1 GM->UB mgather lowers to the scalar overload even when
-// InsertSync sees the dst after PTOViewToMemref lowering. The macro model must
-// recover the 1x1 shape from MemRefType instead of requiring TileBufType.
+// InsertSync sees the tile-native dst after PTOResolveReservedBuffers.
 //
 // RUN: ptoas --pto-arch=a5 --enable-insert-sync --pto-insert-sync-debug=2 %s -o - 2>&1 | FileCheck %s
 
 module attributes {pto.target_arch = "a5"} {
   func.func @mgather_elem_1x1_memref_model(
-      %mem: memref<1xf32, #pto.address_space<gm>>,
-      %idx: memref<1x1xi32, #pto.address_space<vec>>) {
-    %dst = memref.alloc() : memref<1x1xf32, #pto.address_space<vec>>
+      %mem: !pto.partition_tensor_view<1xf32>,
+      %idx: !pto.tile_buf<vec, 1x8xi32, valid=1x1>) {
+    %dst = pto.alloc_tile : !pto.tile_buf<vec, 1x8xf32, valid=1x1>
     pto.mgather ins(%mem, %idx
-        : memref<1xf32, #pto.address_space<gm>>,
-          memref<1x1xi32, #pto.address_space<vec>>)
-      outs(%dst : memref<1x1xf32, #pto.address_space<vec>>)
+        : !pto.partition_tensor_view<1xf32>, !pto.tile_buf<vec, 1x8xi32, valid=1x1>)
+      outs(%dst : !pto.tile_buf<vec, 1x8xf32, valid=1x1>)
       {coalesce = #pto<coalesce elem>}
     return
   }

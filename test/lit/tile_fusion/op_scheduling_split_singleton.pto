@@ -1,0 +1,45 @@
+// Copyright (c) 2026 Huawei Technologies Co., Ltd.
+// This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+// CANN Open Software License Agreement Version 2.0 (the "License").
+// Please refer to the License for details. You may not use this file except in compliance with the License.
+// THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+// INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+// See LICENSE in the root of the software repository for the full text of the License.
+
+// Guards that OpScheduling normalization clears fusion metadata from every
+// singleton span. A planned group 0 appears as two physical spans of length 1
+// each, separated by an unmovable producer-chain op X. No surviving span has
+// length >= 2, so all fusion metadata is removed and no fusion region is
+// produced downstream.
+//
+// RUN: pto-test-opt %s -pto-op-scheduling | FileCheck %s --check-prefix=SINGLE
+
+module {
+  func.func @op_scheduling_split_singleton(
+      %full0: !pto.tile_buf<vec, 32x32xf32>,
+      %full1: !pto.tile_buf<vec, 32x32xf32>,
+      %full2: !pto.tile_buf<vec, 32x32xf32>) {
+    %tmp0 = pto.alloc_tile : !pto.tile_buf<vec, 32x32xf32>
+    %tmp1 = pto.alloc_tile : !pto.tile_buf<vec, 32x32xf32>
+    %tmp2 = pto.alloc_tile : !pto.tile_buf<vec, 32x32xf32>
+
+    // A (group 0, order 0) writes %tmp0; X reads %tmp0.
+    pto.tadd ins(%full0, %full1 : !pto.tile_buf<vec, 32x32xf32>, !pto.tile_buf<vec, 32x32xf32>) outs(%tmp0 : !pto.tile_buf<vec, 32x32xf32>) {pto.fusion.group_id = 0 : i64, pto.fusion.order = 0 : i64}
+    // X writes %tmp1; B reads %tmp1. Neither A nor B can be moved across X.
+    pto.tadd ins(%tmp0, %full2 : !pto.tile_buf<vec, 32x32xf32>, !pto.tile_buf<vec, 32x32xf32>) outs(%tmp1 : !pto.tile_buf<vec, 32x32xf32>)
+    // B (group 0, order 1) reads %tmp1.
+    pto.tadd ins(%tmp1, %full0 : !pto.tile_buf<vec, 32x32xf32>, !pto.tile_buf<vec, 32x32xf32>) outs(%tmp2 : !pto.tile_buf<vec, 32x32xf32>) {pto.fusion.group_id = 0 : i64, pto.fusion.order = 1 : i64}
+    return
+  }
+}
+
+// SINGLE-LABEL: func.func @op_scheduling_split_singleton(
+// SINGLE: pto.tadd ins(%arg0, %arg1
+// SINGLE-NOT: pto.fusion.group_id
+// SINGLE-NOT: pto.fusion.order
+// SINGLE-NEXT: pto.tadd ins(%{{[0-9]+}}, %arg2
+// SINGLE-NOT: pto.fusion.group_id
+// SINGLE-NOT: pto.fusion.order
+// SINGLE-NEXT: pto.tadd ins(%{{[0-9]+}}, %arg0
+// SINGLE-NOT: pto.fusion.group_id
+// SINGLE-NOT: pto.fusion.order

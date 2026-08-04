@@ -10,55 +10,55 @@
 
 module attributes {"pto.device-spec" = "Ascend910B3"} {
   func.func @tquant_mxfp8() attributes {pto.kernel_kind = #pto.kernel_kind<vector>} {
-    %src = memref.alloc() : memref<32x32xf32, #pto.address_space<vec>>
-    %exp = memref.alloc() : memref<1x32xui8, #pto.address_space<vec>>
-    %max = memref.alloc() : memref<1x32xf32, #pto.address_space<vec>>
-    %scaling = memref.alloc() : memref<1x32xf32, #pto.address_space<vec>>
-    %dst = memref.alloc() : memref<32x32xui8, #pto.address_space<vec>>
+    %src = pto.alloc_tile : !pto.tile_buf<vec, 32x32xf32>
+    %exp = pto.alloc_tile : !pto.tile_buf<vec, 1x32xui8>
+    %max = pto.alloc_tile : !pto.tile_buf<vec, 1x32xf32>
+    %scaling = pto.alloc_tile : !pto.tile_buf<vec, 1x32xf32>
+    %dst = pto.alloc_tile : !pto.tile_buf<vec, 32x32xui8>
 
-    pto.tquant.mx ins(%src : memref<32x32xf32, #pto.address_space<vec>>)
+    pto.tquant.mx ins(%src : !pto.tile_buf<vec, 32x32xf32>)
                   outs(%dst, %exp, %max, %scaling :
-                       memref<32x32xui8, #pto.address_space<vec>>,
-                       memref<1x32xui8, #pto.address_space<vec>>,
-                       memref<1x32xf32, #pto.address_space<vec>>,
-                       memref<1x32xf32, #pto.address_space<vec>>)
+                       !pto.tile_buf<vec, 32x32xui8>,
+                       !pto.tile_buf<vec, 1x32xui8>,
+                       !pto.tile_buf<vec, 1x32xf32>,
+                       !pto.tile_buf<vec, 1x32xf32>)
                   {quant_type = #pto<quant_type MXFP8>}
     return
   }
 
   func.func @tquant_mxfp4_nv() attributes {pto.kernel_kind = #pto.kernel_kind<vector>} {
-    %src = memref.alloc() : memref<32x64xbf16, #pto.address_space<vec>>
-    %exp = memref.alloc() : memref<1x64xui8, #pto.address_space<vec>>
-    %max = memref.alloc() : memref<1x64xbf16, #pto.address_space<vec>>
-    %scaling = memref.alloc() : memref<1x64xbf16, #pto.address_space<vec>>
-    %dst = memref.alloc() : memref<32x32x!pto.f4E2M1x2, #pto.address_space<vec>>
+    %src = pto.alloc_tile : !pto.tile_buf<vec, 32x64xbf16>
+    %exp = pto.alloc_tile : !pto.tile_buf<vec, 1x64xui8>
+    %max = pto.alloc_tile : !pto.tile_buf<vec, 1x64xbf16>
+    %scaling = pto.alloc_tile : !pto.tile_buf<vec, 1x64xbf16>
+    %dst = pto.alloc_tile : !pto.tile_buf<vec, 32x32x!pto.f4E2M1x2>
 
-    pto.tquant.mx ins(%src : memref<32x64xbf16, #pto.address_space<vec>>)
+    pto.tquant.mx ins(%src : !pto.tile_buf<vec, 32x64xbf16>)
                   outs(%dst, %exp, %max, %scaling :
-                       memref<32x32x!pto.f4E2M1x2, #pto.address_space<vec>>,
-                       memref<1x64xui8, #pto.address_space<vec>>,
-                       memref<1x64xbf16, #pto.address_space<vec>>,
-                       memref<1x64xbf16, #pto.address_space<vec>>)
+                       !pto.tile_buf<vec, 32x32x!pto.f4E2M1x2>,
+                       !pto.tile_buf<vec, 1x64xui8>,
+                       !pto.tile_buf<vec, 1x64xbf16>,
+                       !pto.tile_buf<vec, 1x64xbf16>)
                   {quant_type = #pto<quant_type MXFP4_E2M1>,
                    quantScaleAlg = #pto<quant_scale_alg nv>}
     return
   }
 
   func.func @tquant_mxfp8_nz() attributes {pto.kernel_kind = #pto.kernel_kind<vector>} {
-    %src = memref.alloc() : memref<32x32xf32, #pto.address_space<vec>>
-    %exp = memref.alloc() : memref<1x32xui8, #pto.address_space<vec>>
-    %max = memref.alloc() : memref<1x32xf32, #pto.address_space<vec>>
-    %scaling = memref.alloc() : memref<1x32xf32, #pto.address_space<vec>>
-    %exp_zz = memref.alloc() : memref<1x32xui8, #pto.address_space<vec>>
-    %dst = memref.alloc() : memref<32x32xui8, #pto.address_space<vec>>
+    %src = pto.alloc_tile : !pto.tile_buf<vec, 32x32xf32>
+    %exp = pto.alloc_tile : !pto.tile_buf<vec, 1x32xui8>
+    %max = pto.alloc_tile : !pto.tile_buf<vec, 1x32xf32>
+    %scaling = pto.alloc_tile : !pto.tile_buf<vec, 1x32xf32>
+    %exp_zz = pto.alloc_tile : !pto.tile_buf<vec, 1x32xui8>
+    %dst = pto.alloc_tile : !pto.tile_buf<vec, 32x32xui8>
 
-    pto.tquant.mx ins(%src : memref<32x32xf32, #pto.address_space<vec>>)
+    pto.tquant.mx ins(%src : !pto.tile_buf<vec, 32x32xf32>)
                   outs(%dst, %exp, %max, %scaling, %exp_zz :
-                       memref<32x32xui8, #pto.address_space<vec>>,
-                       memref<1x32xui8, #pto.address_space<vec>>,
-                       memref<1x32xf32, #pto.address_space<vec>>,
-                       memref<1x32xf32, #pto.address_space<vec>>,
-                       memref<1x32xui8, #pto.address_space<vec>>)
+                       !pto.tile_buf<vec, 32x32xui8>,
+                       !pto.tile_buf<vec, 1x32xui8>,
+                       !pto.tile_buf<vec, 1x32xf32>,
+                       !pto.tile_buf<vec, 1x32xf32>,
+                       !pto.tile_buf<vec, 1x32xui8>)
                   {quant_type = #pto<quant_type MXFP8>,
                    storeMode = #pto<vec_store_mode nz>}
     return

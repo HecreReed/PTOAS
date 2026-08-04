@@ -1,7 +1,8 @@
-// RUN: ptoas --pto-arch=a3 --mlir-print-ir-after=pto-view-to-memref %s -o /dev/null 2>&1 | FileCheck %s --check-prefix=IR
+// RUN: ptoas --pto-arch=a3 --mlir-print-ir-after=pto-resolve-reserved-buffers %s -o /dev/null 2>&1 | FileCheck %s --check-prefix=IR
 // RUN: ptoas --pto-arch=a3 %s -o - 2>&1 | FileCheck %s --check-prefix=CPP
+// RUN: ptoas --pto-arch=a3 --pto-backend=vpto --emit-vpto %s -o - 2>&1 | FileCheck %s --check-prefix=VPTO
 
-module {
+module attributes {pto.kernel_kind = #pto.kernel_kind<vector>} {
   func.func @ptr_int_cast_kernel(%src64: !pto.ptr<ui64>, %dst32: !pto.ptr<ui32>, %idx: index) attributes {pto.kernel_kind = #pto.kernel_kind<vector>} {
     %c0 = arith.constant 0 : index
     %src64_off = pto.addptr %src64, %idx : !pto.ptr<ui64> -> !pto.ptr<ui64>
@@ -24,36 +25,37 @@ module {
 }
 
 // IR-LABEL: func.func @ptr_int_cast_kernel
-// IR: pto.ptrtoint {{.*}} : memref<?xui64, #pto.address_space<gm>> -> i64
-// IR: arith.index_cast {{.*}} : index to i64
-// IR: arith.constant 8 : i64
-// IR: arith.muli {{.*}} : i64
-// IR: arith.addi {{.*}} : i64
-// IR: pto.inttoptr {{.*}} : i64 -> memref<?xui32, #pto.address_space<gm>>
-// IR-NOT: !pto.ptr
+// IR-SAME: %[[SRC:[^,]+]]: !pto.ptr<ui64, gm>
+// IR: %[[OFF:.*]] = pto.addptr %[[SRC]], %{{.*}} : <ui64, gm> -> <ui64, gm>
+// IR: %[[ADDR:.*]] = pto.ptrtoint %[[OFF]] : <ui64, gm> -> i64
+// IR: %[[PTR:.*]] = pto.inttoptr %[[ADDR]] : i64 -> <ui32, gm>
+// IR-NOT: memref<
 
 // CPP-LABEL: AICORE void ptr_int_cast_kernel
 // CPP-SAME: (__gm__ uint64_t* [[SRC:[_A-Za-z][_A-Za-z0-9]*]], __gm__ uint32_t* [[DST:[_A-Za-z][_A-Za-z0-9]*]], int64_t [[IDX:[_A-Za-z][_A-Za-z0-9]*]])
-// CPP: int64_t [[ADDR:[_A-Za-z][_A-Za-z0-9]*]] = reinterpret_cast<int64_t>([[SRC]]);
-// CPP: __gm__ uint32_t* [[SRC32:[_A-Za-z][_A-Za-z0-9]*]] = reinterpret_cast<__gm__ uint32_t*>({{.*}}[[ADDR]]
-// CPP: uint32_t [[VAL:[_A-Za-z][_A-Za-z0-9]*]] = [[SRC32]][{{.*}}];
-// CPP: [[DST]][[[IDX]]] = [[VAL]];
+// CPP: int64_t [[ADDR:[_A-Za-z][_A-Za-z0-9]*]] = reinterpret_cast<int64_t>([[SRC]] + [[IDX]]);
+// CPP: __gm__ uint32_t* [[SRC32:[_A-Za-z][_A-Za-z0-9]*]] = reinterpret_cast<__gm__ uint32_t*>([[ADDR]]);
+// CPP: uint32_t [[VAL:[_A-Za-z][_A-Za-z0-9]*]] = {{[(]?}}[[SRC32]]{{[)]?}}[{{.*}}];
+// CPP: {{[(]?}}[[DST]]{{[)]?}}[[[IDX]]] = [[VAL]];
 
 // IR-LABEL: func.func @ptrtoint_addptr_multi_consumer
-// IR: pto.load_scalar {{.*}} : memref<?xui64, #pto.address_space<gm>> -> ui64
-// IR: pto.ptrtoint {{.*}} : memref<?xui64, #pto.address_space<gm>> -> i64
-// IR: arith.index_cast {{.*}} : index to i64
-// IR: arith.constant 8 : i64
-// IR: arith.muli {{.*}} : i64
-// IR: arith.addi {{.*}} : i64
-// IR-NOT: !pto.ptr
+// IR-SAME: %[[SRC64:[^,]+]]: !pto.ptr<ui64, gm>
+// IR: %[[OFF2:.*]] = pto.addptr %[[SRC64]], %{{.*}} : <ui64, gm> -> <ui64, gm>
+// IR: pto.load_scalar %[[OFF2]]{{.*}} : <ui64, gm> -> ui64
+// IR: pto.ptrtoint %[[OFF2]] : <ui64, gm> -> i64
+// IR-NOT: memref<
 
 // CPP-LABEL: AICORE void ptrtoint_addptr_multi_consumer
 // CPP-SAME: (__gm__ uint64_t* [[SRC64:[_A-Za-z][_A-Za-z0-9]*]], __gm__ uint64_t* [[DST64:[_A-Za-z][_A-Za-z0-9]*]], __gm__ int64_t* [[DSTADDR:[_A-Za-z][_A-Za-z0-9]*]], int64_t [[IDX2:[_A-Za-z][_A-Za-z0-9]*]])
 // CPP: const int64_t [[ZERO:[_A-Za-z][_A-Za-z0-9]*]] = 0;
-// CPP: const int64_t [[ELEM_BYTES:[_A-Za-z][_A-Za-z0-9]*]] = 8;
-// CPP: uint64_t [[A:[_A-Za-z][_A-Za-z0-9]*]] = [[SRC64]][[[IDX2]]];
-// CPP: int64_t [[ADDR2:[_A-Za-z][_A-Za-z0-9]*]] = reinterpret_cast<int64_t>([[SRC64]]);
-// CPP: int64_t [[BYTE_ADDR:[_A-Za-z][_A-Za-z0-9]*]] = {{.*}}[[ADDR2]]{{.*}}[[IDX2]]{{.*}}[[ELEM_BYTES]]
-// CPP: [[DST64]][[[ZERO]]] = [[A]];
-// CPP: [[DSTADDR]][[[ZERO]]] = [[BYTE_ADDR]];
+// CPP: __gm__ uint64_t* [[OFF3:[_A-Za-z][_A-Za-z0-9]*]] = [[SRC64]] + [[IDX2]];
+// CPP: uint64_t [[A:[_A-Za-z][_A-Za-z0-9]*]] = {{[(]?}}[[OFF3]]{{[)]?}}[[[ZERO]]];
+// CPP: int64_t [[BYTE_ADDR:[_A-Za-z][_A-Za-z0-9]*]] = reinterpret_cast<int64_t>([[OFF3]]);
+// CPP: {{[(]?}}[[DST64]]{{[)]?}}[[[ZERO]]] = [[A]];
+// CPP: {{[(]?}}[[DSTADDR]]{{[)]?}}[[[ZERO]]] = [[BYTE_ADDR]];
+
+// VPTO-LABEL: func.func @ptr_int_cast_kernel
+// VPTO: %[[VPTO_OFF:.*]] = pto.addptr
+// VPTO: %[[VPTO_ADDR:.*]] = pto.castptr %[[VPTO_OFF]] : !pto.ptr<ui64, gm> -> i64
+// VPTO: %{{.*}} = pto.castptr %[[VPTO_ADDR]] : i64 -> !pto.ptr<ui32, gm>
+// VPTO-NOT: memref

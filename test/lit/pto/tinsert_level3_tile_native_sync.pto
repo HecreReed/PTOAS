@@ -1,0 +1,38 @@
+// RUN: ptoas --pto-arch=a5 --pto-level=level3 --enable-insert-sync --emit-pto-ir %s | FileCheck %s
+
+module attributes {"pto.target_arch" = "a5"} {
+  func.func @tinsert_level3_tile_native_sync(
+      %x: !pto.partition_tensor_view<32x32xf32>,
+      %src: !pto.partition_tensor_view<32x16xf32>,
+      %out: !pto.partition_tensor_view<32x32xf32>) {
+    %c0 = arith.constant 0 : index
+    %addr0 = arith.constant 0 : i64
+    %addr1 = arith.constant 4096 : i64
+
+    %tile_x = pto.alloc_tile addr = %addr0 :
+      !pto.tile_buf<loc=vec, dtype=f32, rows=32, cols=32, v_row=32, v_col=32, blayout=row_major, slayout=none_box, fractal=512, pad=0>
+    %tile_src = pto.alloc_tile addr = %addr1 :
+      !pto.tile_buf<loc=vec, dtype=f32, rows=32, cols=16, v_row=32, v_col=16, blayout=row_major, slayout=none_box, fractal=512, pad=0>
+
+    pto.tload ins(%x : !pto.partition_tensor_view<32x32xf32>)
+              outs(%tile_x : !pto.tile_buf<loc=vec, dtype=f32, rows=32, cols=32, v_row=32, v_col=32, blayout=row_major, slayout=none_box, fractal=512, pad=0>)
+    pto.tload ins(%src : !pto.partition_tensor_view<32x16xf32>)
+              outs(%tile_src : !pto.tile_buf<loc=vec, dtype=f32, rows=32, cols=16, v_row=32, v_col=16, blayout=row_major, slayout=none_box, fractal=512, pad=0>)
+    pto.tinsert ins(%tile_src, %c0, %c0 :
+        !pto.tile_buf<loc=vec, dtype=f32, rows=32, cols=16, v_row=32, v_col=16, blayout=row_major, slayout=none_box, fractal=512, pad=0>, index, index)
+      outs(%tile_x : !pto.tile_buf<loc=vec, dtype=f32, rows=32, cols=32, v_row=32, v_col=32, blayout=row_major, slayout=none_box, fractal=512, pad=0>)
+    pto.tstore ins(%tile_x :
+        !pto.tile_buf<loc=vec, dtype=f32, rows=32, cols=32, v_row=32, v_col=32, blayout=row_major, slayout=none_box, fractal=512, pad=0>)
+      outs(%out : !pto.partition_tensor_view<32x32xf32>)
+    return
+  }
+}
+
+// CHECK-LABEL: func.func @tinsert_level3_tile_native_sync
+// CHECK: pto.tload
+// CHECK: pto.tload
+// CHECK: pto.set_flag[<PIPE_MTE2>, <PIPE_V>, <EVENT_ID0>]
+// CHECK: pto.wait_flag[<PIPE_MTE2>, <PIPE_V>, <EVENT_ID0>]
+// CHECK: pto.tinsert
+// CHECK: pto.set_flag[<PIPE_V>, <PIPE_MTE3>, <EVENT_ID0>]
+// CHECK: pto.wait_flag[<PIPE_V>, <PIPE_MTE3>, <EVENT_ID0>]

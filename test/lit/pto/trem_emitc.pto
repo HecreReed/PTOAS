@@ -1,4 +1,4 @@
-// RUN: ptoas --pto-arch=a3 --mlir-print-ir-after=pto-view-to-memref %s 2>&1 | FileCheck %s --check-prefix=A3
+// RUN: ptoas --pto-arch=a3 --mlir-print-ir-after=pto-resolve-reserved-buffers %s 2>&1 | FileCheck %s --check-prefix=A3
 
 module {
   func.func @trem_tmp_form() {
@@ -11,8 +11,8 @@ module {
   }
 }
 
-// A3: pto.trem ins([[SRC0:%[0-9]+]], [[SRC1:%[0-9]+]], [[TMP:%[0-9]+]] : memref<1x16xf32
-// A3-SAME: memref<1x16xf32
-// A3-SAME: memref<2x16xf32
-// A3: outs([[DST:%[0-9]+]] : memref<1x16xf32
+// A3: pto.trem ins([[SRC0:%[0-9]+]], [[SRC1:%[0-9]+]], [[TMP:%[0-9]+]] : !pto.tile_buf<vec, 1x16xf32
+// A3-SAME: !pto.tile_buf<vec, 1x16xf32
+// A3-SAME: !pto.tile_buf<vec, 2x16xf32
+// A3: outs([[DST:%[0-9]+]] : !pto.tile_buf<vec, 1x16xf32
 // A3: TREM([[VDST:[_A-Za-z][_A-Za-z0-9]*]], [[VSRC0:[_A-Za-z][_A-Za-z0-9]*]], [[VSRC1:[_A-Za-z][_A-Za-z0-9]*]], [[VTMP:[_A-Za-z][_A-Za-z0-9]*]]);

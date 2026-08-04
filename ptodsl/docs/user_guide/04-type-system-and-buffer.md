@@ -85,6 +85,33 @@ d = pto.f32("nan")
 f16_neg_inf = pto.f16("0xFC00")
 ```
 
+### Stack-local structs
+
+`pto.struct_type` describes a heterogeneous stack-local aggregate. Declare it inside a traced function, then access scalar fields with a static positional path:
+
+```text
+pto.struct_type(*field_types) -> StructTypeDescriptor
+pto.declare_struct(struct_type) -> Value
+pto.struct_get(struct, path) -> ScalarValue
+pto.struct_set(struct, path, value) -> None
+```
+
+Fields may be `i8` / `i16` / `i32` / `i64` (including signed and unsigned variants), `f16` / `bf16` / `f32`, or another `struct_type`. `path` is an `int`, `tuple[int, ...]`, or `list[int]`; it must be non-empty, static, and end at a scalar field. For example, `(1, 0)` selects field 1, a nested struct, then its field 0. Structs are local handles to stack storage: `struct_set` mutates in place and returns `None`.
+
+<!-- ptodsl-doc-test: {"mode":"compile_fragment","fixture":"type_system.struct","symbol":"type_system_struct_probe","compile":{}} -->
+```python
+state_ty = pto.struct_type(pto.i32, pto.struct_type(pto.f32, pto.i16))
+state = pto.declare_struct(state_ty)
+pto.struct_set(state, 0, 1)
+pto.struct_set(state, (1, 0), 3.5)
+count = pto.struct_get(state, [0])
+value = pto.struct_get(state, (1, 0))
+```
+
+Python `int` literals can initialize integer and floating-point fields; Python `float` literals only initialize floating-point fields and are rounded to the destination type. Existing SSA values must exactly match the destination field type, so `i32 -> i16`, `index -> i32`, and `f32 -> f16` do not insert implicit casts. `bool`, strings, dynamic path values, low-precision storage types, pointer/view/tile handles, and `i1` are rejected.
+
+Structs cannot be used as `@pto.jit`, `@pto.tileop`, or `@pto.simt` parameters, or as `pto.for_(...).carry(...)` state. A struct declared outside an ordinary `pto.for_` may be read and mutated inside that loop. Struct values also cannot be returned, yielded, or passed as function arguments from their declaring scope.
+
 ## 4.2 Vector register type
 
 Vector registers hold a fixed 256-byte payload. `pto.vreg(dtype)` infers the element count automatically:

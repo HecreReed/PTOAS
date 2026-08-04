@@ -16,7 +16,6 @@
 #include "PTO/IR/PTOTypeUtils.h"
 #include "PTO/Transforms/InsertSync/SyncCommon.h"
 #include "PTO/Transforms/SlotAffineAnalysis.h"
-#include "mlir/Dialect/MemRef/IR/MemRef.h"
 #include "mlir/Dialect/SCF/IR/SCF.h"
 #include "mlir/IR/BuiltinTypes.h"
 #include "mlir/IR/Matchers.h"
@@ -63,42 +62,13 @@ static std::optional<RepeatAccessShape> getKnownRepeatAccessShapeFromType(Type t
         tileTy.getElementType()};
   }
 
-  if (auto memRefTy = dyn_cast<MemRefType>(ty)) {
-    if (!memRefTy.hasStaticShape() || memRefTy.getRank() != 2)
-      return std::nullopt;
-    auto shape = memRefTy.getShape();
-    return RepeatAccessShape{SmallVector<int64_t, 2>{shape[0], shape[1]},
-                             SmallVector<int64_t, 2>{shape[0], shape[1]},
-                             memRefTy.getElementType()};
-  }
-
   return std::nullopt;
-}
-
-static std::optional<int64_t> getConstantIndex(Value value) {
-  if (!value) return std::nullopt;
-  APInt intValue;
-  if (!matchPattern(value, m_ConstantInt(&intValue))) return std::nullopt;
-  return intValue.getSExtValue();
 }
 
 static std::optional<RepeatAccessShape> getKnownRepeatAccessShape(Value access) {
   if (!access) return std::nullopt;
   auto shape = getKnownRepeatAccessShapeFromType(access.getType());
   if (!shape) return std::nullopt;
-
-  if (auto bind = access.getDefiningOp<BindTileOp>()) {
-    auto row = getConstantIndex(bind.getValidRow());
-    auto col = getConstantIndex(bind.getValidCol());
-    if (row && col) {
-      if (*row < 0 || *col < 0 || *row > shape->fullShape[0] ||
-          *col > shape->fullShape[1])
-        return std::nullopt;
-      shape->validShape = SmallVector<int64_t, 2>{*row, *col};
-    } else if (bind.getValidRow() || bind.getValidCol()) {
-      return std::nullopt;
-    }
-  }
 
   return shape;
 }
@@ -110,19 +80,6 @@ static std::optional<BLayout> getKnownBLayout(Type ty) {
       return BLayout::RowMajor;
     if (layout == static_cast<int32_t>(BLayout::ColMajor))
       return BLayout::ColMajor;
-  }
-
-  if (auto memRefTy = dyn_cast<MemRefType>(ty)) {
-    SmallVector<int64_t> strides;
-    int64_t offset = 0;
-    if (failed(mlir::pto::getPTOMemRefStridesAndOffset(memRefTy, strides,
-                                                       offset)) ||
-        strides.size() != 2) {
-      return std::nullopt;
-    }
-    ArrayRef<int64_t> shape = memRefTy.getShape();
-    if (strides[1] == 1 && strides[0] == shape[1]) return BLayout::RowMajor;
-    if (strides[0] == 1 && strides[1] == shape[0]) return BLayout::ColMajor;
   }
 
   return std::nullopt;
@@ -454,8 +411,8 @@ static bool isForwardDepDroppableBySlotAffine(const BaseMemInfo *a,
   size_t n = std::max(aN, bN);
   if (n < 2)
     return false;
-  Value slotA = findSlotMarkerExpr(a->baseBuffer);
-  Value slotB = findSlotMarkerExpr(b->baseBuffer);
+  Value slotA = findMultiTileSlotExpr(a->baseBuffer);
+  Value slotB = findMultiTileSlotExpr(b->baseBuffer);
   if (!slotA || !slotB)
     return false;
   return compareSlotSSA(slotA, slotB, static_cast<uint32_t>(n)) ==
@@ -629,17 +586,16 @@ void InsertSyncAnalysis::InsertSyncOperation(
         Value consumerSlot;
         for (auto &pair : depBaseMemInfosVec) {
           if (pair.second && pair.second->baseBuffer)
-            producerSlot = findSlotMarkerExpr(pair.second->baseBuffer);
+            producerSlot = findMultiTileSlotExpr(pair.second->baseBuffer);
           if (pair.first && pair.first->baseBuffer)
-            consumerSlot = findSlotMarkerExpr(pair.first->baseBuffer);
+            consumerSlot = findMultiTileSlotExpr(pair.first->baseBuffer);
           if (producerSlot && consumerSlot)
             break;
         }
         if (!producerSlot || !consumerSlot) {
           // No slot SSA threaded through -- fall back to single event id.
           // This keeps non-multi-buffer codepaths untouched even if their
-          // baseAddresses happen to have multiple entries for some other
-          // reason (e.g. memref subview).
+          // baseAddresses happen to have multiple entries for another reason.
           eventIdNum = 1;
         } else {
           setOp->slotSSAExpr = producerSlot;
@@ -786,10 +742,6 @@ void InsertSyncAnalysis::InsertLastPipeAll() {
 // 7. Helpers
 // ==============================================================================
 
-bool InsertSyncAnalysis::IsMemAllocOp(Operation *op) const {
-  return isa<memref::AllocOp>(op) || isa<pto::PointerCastOp>(op);
-}
-
 SmallVector<Value> InsertSyncAnalysis::GetMemInfoBuffers(
     const DepBaseMemInfoPairVec &depBaseMemInfosVec) {
   llvm::DenseSet<Value> touchedBuffer;
@@ -812,8 +764,8 @@ int InsertSyncAnalysis::GetEventIdNum(
     const DepBaseMemInfoPairVec &depBaseMemInfosVec) {
   // A back-edge dependency benefits from N dynamic event IDs whenever at
   // least one side is a multi-buffer access. We detect that from the
-  // BaseMemInfo's `baseAddresses` size, which `UpdateSlotMarkerAliasBufferInfo`
-  // populated:
+  // BaseMemInfo's `baseAddresses` size, which the translator and alias
+  // propagation keep aligned with the represented slot set:
   //   - kSingle / const-slot              : size == 1
   //   - dyn-slot (PTOIRTranslator default) : size == N (all slots, conservative)
   // For the alias to even reach this point both sides share a root, so the

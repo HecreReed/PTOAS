@@ -13,13 +13,13 @@
 
 #include "PTO/IR/PTOMultiBuffer.h"
 #include "PTO/IR/PTOTypeUtils.h"
+#include "Utils.h"
 
 #include "mlir/Dialect/Arith/IR/Arith.h"
 #include "mlir/Dialect/GPU/IR/GPUDialect.h"
 #include "mlir/Dialect/LLVMIR/LLVMDialect.h"
 #include "mlir/IR/AsmState.h"
 #include "mlir/Transforms/DialectConversion.h"
-#include "AllocToPointerCast.h"
 #include "mlir/Transforms/GreedyPatternRewriteDriver.h"
 
 #include "llvm/Support/Debug.h"
@@ -62,6 +62,33 @@ struct LocalMemSpec {
   int64_t alignBytes = 1;
 };
 
+static std::optional<int64_t> getTileBufferFootprintBytes(TileBufType type) {
+  ArrayRef<int64_t> shape = type.getShape();
+  unsigned elemBytes = getPTOStorageElemByteSize(type.getElementType());
+  if (elemBytes == 0)
+    return std::nullopt;
+
+  if (type.getCompactModeI32() !=
+      static_cast<int32_t>(pto::CompactMode::RowPlusOne)) {
+    std::optional<int64_t> totalStaticSize = getStaticTotalSize(shape);
+    if (!totalStaticSize.has_value())
+      return std::nullopt;
+    return totalStaticSize.value() * static_cast<int64_t>(elemBytes);
+  }
+
+  if (shape.size() != 2 || llvm::is_contained(shape, ShapedType::kDynamic))
+    return std::nullopt;
+
+  bool rowMajor =
+      type.getBLayoutValueI32() == static_cast<int32_t>(pto::BLayout::RowMajor);
+  int64_t major = rowMajor ? shape[0] : shape[1];
+  int64_t minor = rowMajor ? shape[1] : shape[0];
+  if (major == 0 || minor == 0)
+    return 0;
+  return ((major - 1) * (minor + 1) + minor) *
+         static_cast<int64_t>(elemBytes);
+}
+
 static int64_t ceilDivBitsToBytes(int64_t bits) {
   return (bits + kBitsPerByte - 1) / kBitsPerByte;
 }
@@ -91,6 +118,62 @@ static LocalMemSpec getLocalMemSpec(Operation *op, AddressSpace as) {
   default:
     return LocalMemSpec{};
   }
+}
+
+static bool isNameIn(StringRef name, ArrayRef<StringRef> names) {
+  return llvm::is_contained(names, name);
+}
+
+static bool isIgnoredA5TmpOperandUse(OpOperand &use) {
+  Operation *owner = use.getOwner();
+  unsigned operandNo = use.getOperandNumber();
+  StringRef name = owner->getName().getStringRef();
+
+  if (auto dpsOp = dyn_cast<pto::PTO_DpsInitOpInterface>(owner)) {
+    if (llvm::is_contained(dpsOp.getDpsInits(), use.get()))
+      return false;
+  } else if (auto dpsOp = dyn_cast<DestinationStyleOpInterface>(owner)) {
+    if (llvm::is_contained(dpsOp.getDpsInits(), use.get()))
+      return false;
+  }
+
+  if (isNameIn(name, {"pto.trowargmax", "pto.trowargmin", "pto.trowmax",
+                     "pto.trowmin", "pto.trowsum", "pto.trowprod"}))
+    return operandNo == 1;
+
+  if (name == "pto.txors")
+    return operandNo == 2;
+
+  if (isNameIn(name, {"pto.tprelu", "pto.txor", "pto.tsels",
+                     "pto.trowexpand", "pto.tcolexpand",
+                     "pto.trowexpandadd", "pto.trowexpanddiv",
+                     "pto.trowexpandexpdif", "pto.trowexpandmax",
+                     "pto.trowexpandmin", "pto.trowexpandmul",
+                     "pto.trowexpandsub", "pto.tcolexpandadd",
+                     "pto.tcolexpanddiv", "pto.tcolexpandexpdif",
+                     "pto.tcolexpandmax", "pto.tcolexpandmin",
+                     "pto.tcolexpandmul", "pto.tcolexpandsub"}))
+    return operandNo == 2;
+
+  if (name == "pto.tsel")
+    return operandNo == 3;
+
+  return false;
+}
+
+static bool isA5IgnoredTmpAlloc(pto::AllocTileOp allocTile) {
+  if (getTargetArch(allocTile.getOperation()) != PTOArch::A5)
+    return false;
+
+  Value value = allocTile.getResult();
+  if (value.use_empty())
+    return false;
+
+  for (OpOperand &use : value.getUses()) {
+    if (!isIgnoredA5TmpOperandUse(use))
+      return false;
+  }
+  return true;
 }
 
 static void collectStableValueOrder(Region &region,
@@ -447,52 +530,52 @@ void MemLivenessAnalysis::RecursionIR(Region *region, Liveness live) {
     if (mayAliasOp.has_value()) {
       auto aliasPair = mayAliasOp.value();
       UpdateBufferAlias(aliasPair.first, aliasPair.second);
-    } else if (isa<pto::DeclareTileMemRefOp>(op)) {
-      // Internal placeholder for a tile whose runtime address is assigned by
-      // pipe operations such as tpop. This op does not allocate local storage
-      // and should not participate in memory planning.
+    } else if (isa<pto::DeclareTileOp>(op)) {
+      // Runtime-bound tile handles do not allocate static local storage.
       return WalkResult::advance();
-    } else if (auto bindOp = dyn_cast<pto::BindTileOp>(op)) {
-      // BindTile result is only an alias of the source buffer. Treat every use
-      // of the result as a use of the source in liveness analysis.
-      UpdateBufferAlias(bindOp.getResult(), bindOp.getSource());
-      return WalkResult::advance();
-    } else if (auto slotOp = dyn_cast<pto::SlotMarkerOp>(op)) {
-      // SlotMarker is metadata-only: it tags which physical slot of a
-      // multi-buffer alloc this view refers to. From the planner's point of
-      // view its result aliases the source; the slot index travels with the
-      // op and is consumed later by PTOResolveBufferSelect / sync.
-      UpdateBufferAlias(slotOp.getResult(), slotOp.getSource());
-      return WalkResult::advance();
-    } else if (isLocalMemPlan() && dyn_cast<memref::AllocOp>(op)) {
-      auto allocOp = cast<memref::AllocOp>(op);
-      if (failed(CheckLocalBufferAllocOp(op))) {
+    } else if (isLocalMemPlan() && dyn_cast<pto::AllocTileOp>(op)) {
+      auto allocTileOp = cast<pto::AllocTileOp>(op);
+      if (allocTileOp.getAddr()) {
+        return WalkResult::advance();
+      }
+      if (isA5IgnoredTmpAlloc(allocTileOp))
+        return WalkResult::advance();
+      auto memorySpaceAttr = GetBufferSpaceAttr(allocTileOp.getResult());
+      if (!isLocalBuffer(memorySpaceAttr)) {
+        allocTileOp.emitError("Alloc tile buffer not at local space");
         return WalkResult::interrupt();
       }
-      // Pick up the multi-buffer slot count when present. Range checking
-      // mirrors the type-level verifier so a malformed memref alloc (e.g.
-      // from a hand-written test) still gets a clear diagnostic. The
-      // sibling expansion in `ExpandMultiBufferStorageEntry` supports any
-      // N in the legal range.
-      if (auto attr = allocOp->getAttrOfType<IntegerAttr>(
+      if (auto attr = allocTileOp->getAttrOfType<IntegerAttr>(
               mlir::pto::kPtoMultiBufferAttrName)) {
         uint64_t n = attr.getValue().getZExtValue();
         if (n < mlir::pto::kPtoMultiBufferMinNum ||
             n > mlir::pto::kPtoMultiBufferMaxNum) {
-          allocOp.emitError()
+          allocTileOp.emitError()
               << "pto.multi_buffer must be in ["
               << mlir::pto::kPtoMultiBufferMinNum << ", "
               << mlir::pto::kPtoMultiBufferMaxNum << "] (got " << n << ")";
           return WalkResult::interrupt();
         }
-        buffer2MultiNum[allocOp.getResult()] = static_cast<uint32_t>(n);
+        buffer2MultiNum[allocTileOp.getResult()] = static_cast<uint32_t>(n);
       }
       UpdateOpBufferInfo(op, op->getResults());
       return WalkResult::advance();
-    } else if (auto loadOp = dyn_cast<memref::LoadOp>(op)) {
-      OpKillHandle(curOpInfo, live, op->getBlock());
+    } else if (isLocalMemPlan() && dyn_cast<pto::AllocMultiTileOp>(op)) {
+      auto allocMultiOp = cast<pto::AllocMultiTileOp>(op);
+      if (allocMultiOp.getAddr())
+        return WalkResult::advance();
+      auto memorySpaceAttr = GetBufferSpaceAttr(allocMultiOp.getResult());
+      if (!isLocalBuffer(memorySpaceAttr)) {
+        allocMultiOp.emitError("Alloc multi tile buffer not at local space");
+        return WalkResult::interrupt();
+      }
+      uint32_t count = allocMultiOp.getResult().getType().getCount();
+      buffer2MultiNum[allocMultiOp.getResult()] = count;
+      UpdateOpBufferInfo(op, op->getResults());
+      return WalkResult::advance();
     } else if (auto tprintOp = dyn_cast<pto::TPrintOp>(op)) {
       // TPrintOp only reads from buffer, similar to LoadOp
+      UpdateOpGenInfo(curOpInfo, llvm::to_vector(op->getOperands()));
       OpKillHandle(curOpInfo, live, op->getBlock());
     } else if (auto tgetvalOp = dyn_cast<pto::TGetValOp>(op)) {
       (void)tgetvalOp;
@@ -511,12 +594,9 @@ void MemLivenessAnalysis::RecursionIR(Region *region, Liveness live) {
       // buffer for liveness, but the scalar row/col results are not buffers.
       UpdateOpGenInfo(curOpInfo, ValueRange{op->getOperand(0)});
       OpKillHandle(curOpInfo, live, op->getBlock());
-    } else if (auto storeOp = dyn_cast<memref::StoreOp>(op)) {
-      UpdateStoreOpInfo(curOpInfo, storeOp.getMemRef(), live);
     } else if (auto ptoDpsOp = dyn_cast<pto::PTO_DpsInitOpInterface>(op)) {
-      // PTO ops with destination (tile_buf, partition_view, etc.); no
-      // tensor/memref-only verification.
-      SmallVector<Value> genBuffers = llvm::to_vector(ptoDpsOp.getDpsInits());
+      // PTO ops with destination (tile_buf, partition_view, etc.).
+      SmallVector<Value> genBuffers = llvm::to_vector(op->getOperands());
       auto scratchBuffers = getScratchBuffersFromEffects(
           op, ptoDpsOp.getDpsInits(), stableValueOrder);
       genBuffers.append(scratchBuffers.begin(), scratchBuffers.end());
@@ -528,16 +608,16 @@ void MemLivenessAnalysis::RecursionIR(Region *region, Liveness live) {
       }
       OpKillHandle(curOpInfo, live, op->getBlock());
     } else if (auto dstStyleOp = dyn_cast<DestinationStyleOpInterface>(op)) {
-      // Process the operation of pto instructions as follows:
-      // pto.hir.copy ins(%0 : memref<16xf16, #pto.address_space<gm>>)
-      //              outs(%1 : memref<16xxf16, #pto.address_space<ub>>)
-      // need to handle kill buffer.
+      // Preserve generic destination-style aliasing for non-tile tensors.
       UpdateInitAndResAlias(dstStyleOp);
       UpdateOpGenInfo(curOpInfo, llvm::to_vector(dstStyleOp.getDpsInits()));
       OpKillHandle(curOpInfo, live, op->getBlock());
     } else if (auto selectOp = dyn_cast<arith::SelectOp>(op)) {
       UpdateBufferAlias(selectOp.getResult(), selectOp.getTrueValue(), true);
       UpdateBufferAlias(selectOp.getResult(), selectOp.getFalseValue(), true);
+      OpKillHandle(curOpInfo, live, op->getBlock());
+    } else if (auto tileBufAddrOp = dyn_cast<pto::TileBufAddrOp>(op)) {
+      UpdateOpGenInfo(curOpInfo, ValueRange{tileBufAddrOp.getSrc()});
       OpKillHandle(curOpInfo, live, op->getBlock());
     } else if (auto callOp = dyn_cast<func::CallOp>(op)) {
       UpdateOpGenInfo(curOpInfo, llvm::to_vector(callOp->getOperands()));
@@ -629,14 +709,7 @@ void MemLivenessAnalysis::UpdateForOpBufferAlias(scf::ForOp forOp) {
 }
 
 void MemLivenessAnalysis::RecursiveForOp(scf::ForOp forOp, Liveness live) {
-  // Process the operation of ForOp as follows:
-  // alloca %allocA
-  // %0 = scf.for %arg4 = %c0 to %c1024 step %c128 iter_args(%arg5 = %4)->
-  //      (memref<16x16x16xf16, #pto.address_space<ub>>):
-  //          def(allocA)
-  //          ...
-  //          scf.yield %alloc0 : memref<16xf16,#pto.address_space<ub>>
-  // need to handle kill buffer.
+  // Model loop-carried tile handles as aliases of the yielded roots.
   auto forBeginSeq = UpdateLinearOperation(forOp.getOperation());
   UpdateOpGenInfo(forBeginSeq, GetLiveBuffersInLoop(forOp, live));
   UpdateForOpInitArgsAlias(forOp);
@@ -672,11 +745,7 @@ void MemLivenessAnalysis::UpdateIfOpBufferAlias(scf::IfOp ifOp,
 }
 
 void MemLivenessAnalysis::RecursiveIfOp(scf::IfOp ifOp, Liveness live) {
-  // Process the operation of IfOp as follows:
-  // %0 = scf.if %cond -> (memref<16xf16, #pto.address_space<ub>>)
-  //        scf.yield %alloc0: memref<16xf16, #pto.address_space<ub>>
-  //      else:
-  //        scf.yield %alloc1 : memref<16xf16, #pto.address_space<ub>>
+  // Join the tile roots yielded by each branch into the if result.
   UpdateLinearOperation(ifOp.getOperation());
   RecursionIR(&ifOp.getThenRegion(), live);
   auto curIfElse = UpdateLinearOperation(ifOp.getOperation());
@@ -746,32 +815,11 @@ SmallVector<Value> MemLivenessAnalysis::GetLiveBuffersInLoop(scf::ForOp forOp,
   return allocBeforeLoopBuffers;
 }
 
-LogicalResult
-MemLivenessAnalysis::CheckLocalBufferAllocOp(Operation *op) const {
-  auto allocOp = dyn_cast<memref::AllocOp>(op);
-  if (!allocOp)
-    return op->emitError("must be alloc op"), failure();
-  auto memorySpaceAttr = GetBufferSpaceAttr(allocOp.getResult());
-  if (isLocalBuffer(memorySpaceAttr)) {
-    return success();
-  }
-  allocOp.getOperation()->emitError("Alloc buffer not at UB space! ");
-  return failure();
-}
-
 bool MemLivenessAnalysis::isSkippableOp(Operation *op) const {
   // Call-like ops are still modeled explicitly. Only pure terminators and
   // dim queries are skipped here.
   //
-  // `pto.slot_marker` is a metadata-only view added by PTOViewToMemref to
-  // thread multi-buffer slot selection through the memref layer. Until
-  // PlanMemory acquires first-class multi-buffer support (the design's
-  // §5.2 work), treat it as a passthrough so the rest of the pipeline can
-  // still be exercised. The N-way physical fan-out lives on the
-  // `pto.multi_buffer` attr of the underlying `memref.alloc` and is a
-  // follow-up.
-  return isa<func::ReturnOp, scf::YieldOp, pto::YieldOp, memref::DimOp,
-             mlir::pto::SlotMarkerOp>(op);
+  return isa<func::ReturnOp, scf::YieldOp, pto::YieldOp>(op);
 }
 
 LogicalResult
@@ -807,8 +855,7 @@ void MemLivenessAnalysis::UpdateBufferAlias(Value buffer, Value aliasBuffer,
     buffer2AliasVec[buf] = clonedAliasSet;
   }
 
-  // mark the alias buffer as ignoring Inplace if it is not generated by
-  // memref.alloc.
+  // Mark aliases that must not participate in inplace merging.
   auto it = bufferInfos.find(aliasBuffer);
   if (isIgnoreInplace && it != bufferInfos.end()) {
     it->second.ignoreInplace = true;
@@ -832,17 +879,6 @@ SetVector<Value> MemLivenessAnalysis::GetAliasBuffers(Value aliasBuffer) {
     return trueVar->second;
   }
   return {};
-}
-
-void MemLivenessAnalysis::UpdateStoreOpInfo(OpInfo *opInfo,
-                                            const Value storeValue,
-                                            Liveness live) {
-  // The src of memref store may also serve as a gen buffer.
-  SmallVector<Value, 1> storeValues;
-  storeValues.push_back(storeValue);
-  UpdateOpGenInfo(opInfo, storeValues);
-  // Collect kill buffers corresponding to operation.
-  OpKillHandle(opInfo, live, opInfo->operation->getBlock());
 }
 
 void MemLivenessAnalysis::UpdateOpBufferInfo(Operation *op,
@@ -968,19 +1004,23 @@ BufferInfo MemLivenessAnalysis::GetBufferInfo(Operation *op, Value operand,
   bufferInfo.operation = op;
   bufferInfo.bufferScope = bufferScope;
   // get buffer size, now for static shape
-  Value traceValue = tracebackMemRef(operand);
-  auto memRefType = cast<MemRefType>(traceValue.getType());
-  bufferInfo.bufferType = memRefType.getElementType();
-  std::optional<int64_t> totalStaticSize =
-      getStaticTotalSize(memRefType.getShape());
-  if (!totalStaticSize.has_value())
-    llvm::report_fatal_error("failed to obtain buffer static shape size");
-  unsigned elemBytes = getPTOStorageElemByteSize(memRefType.getElementType());
-  if (elemBytes == 0)
-    llvm::report_fatal_error("failed to obtain buffer element byte size");
-  bufferInfo.constBits =
-      totalStaticSize.value() *
-      static_cast<int64_t>(elemBytes * kBitsPerByte);
+  Type elementType;
+  std::optional<int64_t> footprintBytes;
+  if (auto tileType = dyn_cast<TileBufType>(operand.getType())) {
+    elementType = tileType.getElementType();
+    footprintBytes = getTileBufferFootprintBytes(tileType);
+  } else if (auto multiType = dyn_cast<MultiTileBufType>(operand.getType())) {
+    TileBufType slotType = multiType.getSlotType();
+    elementType = slotType.getElementType();
+    footprintBytes = getTileBufferFootprintBytes(slotType);
+  } else {
+    llvm_unreachable("local memory planner expects tile buffer roots");
+  }
+  bufferInfo.bufferType = elementType;
+  if (!footprintBytes.has_value())
+    llvm::report_fatal_error(
+        "failed to obtain buffer static physical footprint");
+  bufferInfo.constBits = footprintBytes.value() * kBitsPerByte;
   return bufferInfo;
 }
 
@@ -1643,11 +1683,8 @@ void MemPlan::ReportMemLifeDebugInfo(StorageEntry *rootStorageEntry) {
 
 void MemPlan::MemLifeDebugInfo(StorageEntry *storageEntry) {
   for (auto &buffer : storageEntry->inplaceBuffers) {
-    if (buffer.getDefiningOp()) {
-      if (auto allocOp = dyn_cast<memref::AllocOp>(buffer.getDefiningOp())) {
-        LDBG("Buffer : " << allocOp.getResult() << "\n");
-      }
-    }
+    (void)buffer;
+    LDBG("Buffer : " << buffer << "\n");
   }
   for (auto &bufferLife : storageEntry->bufferLifeVec) {
     (void)bufferLife;
@@ -1660,12 +1697,8 @@ void MemPlan::MemLifeDebugInfo(StorageEntry *storageEntry) {
 
 void MemPlan::ReportCurEntryDebugInfo(const StorageEntry *curEntry) {
   for (auto &buffer : curEntry->inplaceBuffers) {
-    if (buffer.getDefiningOp()) {
-      if (auto allocOp = dyn_cast<memref::AllocOp>(buffer.getDefiningOp())) {
-        LDBG("buffer : ");
-        LDBG(allocOp.getResult());
-      }
-    }
+    (void)buffer;
+    LDBG("buffer : " << buffer);
   }
 }
 
@@ -2477,8 +2510,105 @@ PlanRecord MemPlan::RollbackOutline(PlanRecHis &history,
 }
 
 namespace {
+
+class LegacyAllocTileOpAddPlannedAddressPattern
+    : public OpRewritePattern<pto::AllocTileOp> {
+public:
+  explicit LegacyAllocTileOpAddPlannedAddressPattern(
+      MLIRContext *context,
+      DenseMap<Value, SmallVector<uint64_t>> buffer2Offsets)
+      : OpRewritePattern<pto::AllocTileOp>(context),
+        buffer2Offsets(std::move(buffer2Offsets)) {}
+
+  LogicalResult matchAndRewrite(pto::AllocTileOp op,
+                                PatternRewriter &rewriter) const override {
+    if (op.getAddr())
+      return failure();
+
+    auto tileType = dyn_cast<TileBufType>(op.getResult().getType());
+    if (!tileType)
+      return failure();
+
+    auto it = buffer2Offsets.find(op.getResult());
+    if (it == buffer2Offsets.end() || it->second.empty())
+      return failure();
+
+    if (it->second.size() != 1) {
+      return rewriter.notifyMatchFailure(
+          op, "single alloc_tile root expects exactly one planned address");
+    }
+
+    Value addr = rewriter.create<arith::ConstantIntOp>(op.getLoc(),
+                                                       it->second.front(), 64);
+    auto planned = rewriter.create<pto::AllocTileOp>(
+        op.getLoc(), tileType, addr,
+        op.getValidRow() ? op.getValidRow() : Value(),
+        op.getValidCol() ? op.getValidCol() : Value());
+    for (NamedAttribute attr : op->getAttrs()) {
+      if (attr.getName().getValue() == "operandSegmentSizes")
+        continue;
+      planned->setAttr(attr.getName(), attr.getValue());
+    }
+
+    rewriter.replaceOp(op, planned.getResult());
+    return success();
+  }
+
+private:
+  DenseMap<Value, SmallVector<uint64_t>> buffer2Offsets;
+};
+
+class LegacyAllocMultiTileOpAddPlannedAddressesPattern
+    : public OpRewritePattern<pto::AllocMultiTileOp> {
+public:
+  explicit LegacyAllocMultiTileOpAddPlannedAddressesPattern(
+      MLIRContext *context,
+      DenseMap<Value, SmallVector<uint64_t>> buffer2Offsets)
+      : OpRewritePattern<pto::AllocMultiTileOp>(context),
+        buffer2Offsets(std::move(buffer2Offsets)) {}
+
+  LogicalResult matchAndRewrite(pto::AllocMultiTileOp op,
+                                PatternRewriter &rewriter) const override {
+    if (op.getAddr() || op->hasAttr(pto::kPtoMultiBufferAddrsAttrName))
+      return failure();
+    auto it = buffer2Offsets.find(op.getResult());
+    if (it == buffer2Offsets.end() || it->second.empty())
+      return failure();
+    if (it->second.size() != op.getResult().getType().getCount()) {
+      return rewriter.notifyMatchFailure(
+          op, "planned address count does not match multi_tile_buf count");
+    }
+
+    SmallVector<int64_t> addrs;
+    addrs.reserve(it->second.size());
+    for (uint64_t offset : it->second)
+      addrs.push_back(static_cast<int64_t>(offset));
+    rewriter.modifyOpInPlace(op, [&] {
+      op->setAttr(pto::kPtoMultiBufferAddrsAttrName,
+                  rewriter.getDenseI64ArrayAttr(addrs));
+    });
+    return success();
+  }
+
+private:
+  DenseMap<Value, SmallVector<uint64_t>> buffer2Offsets;
+};
+
+static FailureOr<MemPlanMode> parseLegacyMemPlanMode(func::FuncOp func,
+                                                     llvm::StringRef memMode) {
+  if (memMode.equals_insensitive("local") ||
+      memMode.equals_insensitive("local-mem-plan"))
+    return MemPlanMode::LOCAL_MEM_PLAN;
+  if (memMode.equals_insensitive("global-work-space-plan"))
+    return MemPlanMode::GLOBAL_WORKSPACE_PLAN;
+  func.emitError("unsupported mem-mode '")
+      << memMode << "'; only 'local' is supported by the PTOAS pipeline";
+  return failure();
+}
+
 struct PlanMemoryPass : public mlir::pto::impl::PlanMemoryBase<PlanMemoryPass> {
 public:
+  PlanMemoryPass() = default;
   explicit PlanMemoryPass(const mlir::pto::PlanMemoryOptions &planMemoryOption)
       : PlanMemoryBase(planMemoryOption) {}
 
@@ -2486,11 +2616,13 @@ public:
 
 private:
   void populateBufferAddressToAllocOp(
-      RewritePatternSet &patterns,
+      RewritePatternSet &patterns, MemPlanMode mode,
       DenseMap<Value, SmallVector<uint64_t>> buffer2Offsets) {
-    if (this->memMode == MemPlanMode::LOCAL_MEM_PLAN) {
-      patterns.add<MemrefAllocaOpToPointerCastOpPattern>(patterns.getContext(),
-                                                         buffer2Offsets);
+    if (mode == MemPlanMode::LOCAL_MEM_PLAN) {
+      patterns.add<LegacyAllocTileOpAddPlannedAddressPattern>(
+          patterns.getContext(), buffer2Offsets);
+      patterns.add<LegacyAllocMultiTileOpAddPlannedAddressesPattern>(
+          patterns.getContext(), buffer2Offsets);
     }
   }
 };
@@ -2498,38 +2630,26 @@ private:
 
 void PlanMemoryPass::runOnOperation() {
   ModuleOp moduleOp = getOperation();
-  // PTODSL TileOp input is a container module whose executable functions live
-  // in a kernel-kind child module. Keep legacy child modules out of this pass:
-  // their frontend pipe ABI is intentionally handled by the existing split
-  // path rather than TileOp memory planning.
   SmallVector<func::FuncOp> funcs;
-  for (func::FuncOp funcOp : moduleOp.getOps<func::FuncOp>())
-    funcs.push_back(funcOp);
-  moduleOp.walk([&](ModuleOp childModule) {
-    if (childModule == moduleOp)
-      return;
-
-    bool hasTileOpHelper = false;
-    for (func::FuncOp funcOp : childModule.getOps<func::FuncOp>()) {
-      if (funcOp->hasAttr("pto.tileop.helper")) {
-        hasTileOpHelper = true;
-        break;
-      }
-    }
-    if (!hasTileOpHelper)
-      return;
-
-    for (func::FuncOp funcOp : childModule.getOps<func::FuncOp>())
+  moduleOp.walk([&](func::FuncOp funcOp) {
+    // TileOp helpers only contain compute code and deliberately do not own
+    // alloc_tile/reserve_buffer lifetimes.  All other functions, including
+    // ordinary functions in backend child modules, must be planned.
+    if (!funcOp->hasAttr("pto.tileop.helper"))
       funcs.push_back(funcOp);
   });
 
   for (func::FuncOp funcOp : funcs) {
+    auto parsedMode = parseLegacyMemPlanMode(funcOp, this->memMode);
+    if (failed(parsedMode))
+      return signalPassFailure();
+    MemPlanMode mode = *parsedMode;
     ReserveBufferPlans reservePlans;
-    if (this->memMode == MemPlanMode::LOCAL_MEM_PLAN &&
+    if (mode == MemPlanMode::LOCAL_MEM_PLAN &&
         failed(analyzeReserveBufferPlans(funcOp, reservePlans))) {
       return signalPassFailure();
     }
-    if (this->memMode == MemPlanMode::LOCAL_MEM_PLAN) {
+    if (mode == MemPlanMode::LOCAL_MEM_PLAN) {
       for (ReserveBufferPlan &reservePlan : reservePlans) {
         if (reservePlan.mode != ReserveBufferMode::Manual)
           continue;
@@ -2540,12 +2660,14 @@ void PlanMemoryPass::runOnOperation() {
       }
     }
 
-    MemLivenessAnalysis memLiveness(funcOp, this->memMode);
+    MemLivenessAnalysis memLiveness(funcOp, mode);
     memLiveness.build();
 
-    MemPlan memPlan(this->memMode, this->enableGlobalReuse,
-                    this->enablePrintMemoryAllocatedSize,
-                    this->restrictInplaceAsISA, this->orderBySize);
+    constexpr bool enableGlobalReuse = false;
+    constexpr bool enablePrintMemoryAllocatedSize = false;
+    constexpr bool restrictInplaceAsISA = false;
+    MemPlan memPlan(mode, enableGlobalReuse, enablePrintMemoryAllocatedSize,
+                    restrictInplaceAsISA, this->orderBySize);
     if (failed(memPlan.InitMemSpecsFromModule(funcOp))) {
       return signalPassFailure();
     }
@@ -2564,21 +2686,36 @@ void PlanMemoryPass::runOnOperation() {
     // Keep reserve_buffer allocation outside the core MemPlan algorithm:
     // normal local buffers are planned first, then reserve_buffer claims one
     // aligned hole in its target address space.
-    if (this->memMode == MemPlanMode::LOCAL_MEM_PLAN &&
-        failed(assignAutoReserveBufferBases(reservePlans, memLiveness.bufferInfos,
-                                            memPlan.GetBuffer2Offsets()))) {
+    if (mode == MemPlanMode::LOCAL_MEM_PLAN &&
+        failed(assignAutoReserveBufferBases(
+            reservePlans, memLiveness.bufferInfos, memPlan.GetBuffer2Offsets()))) {
       return signalPassFailure();
     }
 
     RewritePatternSet patterns(&getContext());
-    populateBufferAddressToAllocOp(patterns, memPlan.GetBuffer2Offsets());
+    populateBufferAddressToAllocOp(patterns, mode, memPlan.GetBuffer2Offsets());
     if (failed(applyPatternsGreedily(funcOp, std::move(patterns)))) {
       return signalPassFailure();
     }
+
+    bool hasUnplannedAllocTile = false;
+    funcOp.walk([&](pto::AllocTileOp op) {
+      if (op.getAddr())
+        return;
+      if (op->use_empty())
+        return;
+      if (isA5IgnoredTmpAlloc(op))
+        return;
+      op.emitError(
+          "PTOPlanMemory failed to assign an address to pto.alloc_tile");
+      hasUnplannedAllocTile = true;
+    });
+    if (hasUnplannedAllocTile)
+      return signalPassFailure();
   }
 }
 
 std::unique_ptr<Pass>
-mlir::pto::createPlanMemoryPass(const PlanMemoryOptions &planMemoryOption) {
-  return std::make_unique<PlanMemoryPass>(planMemoryOption);
+mlir::pto::createPlanMemoryPass(const PlanMemoryOptions &options) {
+  return std::make_unique<PlanMemoryPass>(options);
 }

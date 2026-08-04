@@ -6,7 +6,7 @@
 // INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
 // See LICENSE in the root of the software repository for the full text of the License.
 
-// RUN: ptoas --mlir-print-ir-before=pto-view-to-memref %s 2>&1 1>/dev/null | FileCheck %s
+// RUN: ptoas --mlir-print-ir-before=pto-resolve-reserved-buffers %s 2>&1 1>/dev/null | FileCheck %s
 
 // Verifies that both the compact and verbose forms of `!pto.multi_tile_buf`
 // parse and round-trip through the printer. The compact form (preferred)

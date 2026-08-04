@@ -16,25 +16,23 @@
 # NOTE: Do NOT call cmake_minimum_required()/project() or find_package() here.
 # PTOAS top-level already configures LLVM/MLIR and exports PTOAS:: targets.
 
-add_library(ptobc_lib STATIC
+add_mlir_library(ptobc_lib
+  OBJECT
+  ENABLE_AGGREGATION
+  EXCLUDE_FROM_LIBMLIR
+  DISABLE_INSTALL
+
   src/leb128.cpp
   src/ptobc_format.cpp
   src/mlir_helpers.cpp
   src/mlir_encode.cpp
   src/canonical_printer.cpp
   src/ptobc_decode_print.cpp
-)
 
-target_include_directories(ptobc_lib PUBLIC
-  ${CMAKE_CURRENT_SOURCE_DIR}/include
-  ${CMAKE_CURRENT_SOURCE_DIR}/generated
-)
+  LINK_COMPONENTS
+  Support
 
-# MLIR/LLVM deps
-llvm_map_components_to_libnames(PTObc_LLVM_LIBS Support)
-
-target_link_libraries(ptobc_lib PUBLIC
-  ${PTObc_LLVM_LIBS}
+  LINK_LIBS PUBLIC
   PTOIR
   MLIRIR
   MLIRParser
@@ -43,6 +41,20 @@ target_link_libraries(ptobc_lib PUBLIC
   MLIRArithDialect
   MLIRSCFDialect
 )
+
+target_include_directories(ptobc_lib PUBLIC
+  ${CMAKE_CURRENT_SOURCE_DIR}/include
+  ${CMAKE_CURRENT_SOURCE_DIR}/generated
+)
+
+# ptobc reports malformed input through C++ exceptions. add_mlir_library
+# applies LLVM's default no-exceptions flags, so restore the existing ptobc
+# compilation contract on the object target used by the aggregate.
+if(MSVC)
+  target_compile_options(obj.ptobc_lib PRIVATE /EHsc)
+elseif(LLVM_COMPILER_IS_GCC_COMPATIBLE OR CLANG_CL)
+  target_compile_options(obj.ptobc_lib PRIVATE -fexceptions)
+endif()
 
 add_executable(ptobc
   src/main.cpp

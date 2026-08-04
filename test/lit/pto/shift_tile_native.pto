@@ -1,0 +1,52 @@
+// Copyright (c) 2026 Huawei Technologies Co., Ltd.
+// This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+// CANN Open Software License Agreement Version 2.0 (the "License").
+// Please refer to the License for details. You may not use this file except in compliance with the License.
+// THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+// INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+// See LICENSE in the root of the software repository for the full text of the License.
+
+// RUN: ptoas --pto-level=level3 --pto-arch=a5 --mlir-print-ir-after=pto-resolve-reserved-buffers %s -o /dev/null 2>&1 | FileCheck %s --check-prefix=NATIVE
+// RUN: ptoas --pto-level=level3 --pto-arch=a3 --enable-insert-sync %s | FileCheck %s --check-prefix=EMITC
+
+module {
+  func.func private @tshl_arg(%a: !pto.tile_buf<vec, 1x64xi16>, %b: !pto.tile_buf<vec, 1x64xi16>, %dst: !pto.tile_buf<vec, 1x64xi16>) {
+    pto.tshl ins(%a, %b : !pto.tile_buf<vec, 1x64xi16>, !pto.tile_buf<vec, 1x64xi16>) outs(%dst : !pto.tile_buf<vec, 1x64xi16>)
+    return
+  }
+  func.func private @tshr_arg(%a: !pto.tile_buf<vec, 1x64xi16>, %b: !pto.tile_buf<vec, 1x64xi16>, %dst: !pto.tile_buf<vec, 1x64xi16>) {
+    pto.tshr ins(%a, %b : !pto.tile_buf<vec, 1x64xi16>, !pto.tile_buf<vec, 1x64xi16>) outs(%dst : !pto.tile_buf<vec, 1x64xi16>)
+    return
+  }
+  func.func private @tshls_arg(%src: !pto.tile_buf<vec, 1x64xi16>, %dst: !pto.tile_buf<vec, 1x64xi16>, %shift: i16) {
+    pto.tshls ins(%src, %shift : !pto.tile_buf<vec, 1x64xi16>, i16) outs(%dst : !pto.tile_buf<vec, 1x64xi16>)
+    return
+  }
+  func.func private @tshrs_arg(%src: !pto.tile_buf<vec, 1x64xi16>, %dst: !pto.tile_buf<vec, 1x64xi16>, %shift: i16) {
+    pto.tshrs ins(%src, %shift : !pto.tile_buf<vec, 1x64xi16>, i16) outs(%dst : !pto.tile_buf<vec, 1x64xi16>)
+    return
+  }
+}
+
+// NATIVE-LABEL: @tshl_arg
+// NATIVE-SAME: !pto.tile_buf<vec, 1x64xi16>
+// NATIVE: pto.tshl
+// NATIVE-LABEL: @tshr_arg
+// NATIVE-SAME: !pto.tile_buf<vec, 1x64xi16>
+// NATIVE: pto.tshr
+// NATIVE-LABEL: @tshls_arg
+// NATIVE-SAME: !pto.tile_buf<vec, 1x64xi16>
+// NATIVE: pto.tshls
+// NATIVE-LABEL: @tshrs_arg
+// NATIVE-SAME: !pto.tile_buf<vec, 1x64xi16>
+// NATIVE: pto.tshrs
+// NATIVE-NOT: memref<
+
+// EMITC-LABEL: tshl_arg(
+// EMITC: TSHL(
+// EMITC-LABEL: tshr_arg(
+// EMITC: TSHR(
+// EMITC-LABEL: tshls_arg(
+// EMITC: TSHLS(
+// EMITC-LABEL: tshrs_arg(
+// EMITC: TSHRS(

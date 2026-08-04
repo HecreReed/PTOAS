@@ -13,9 +13,9 @@ from unittest.mock import MagicMock, call, patch
 
 import ptodsl._ops as _ops
 import ptodsl._pipe_namespace as _pipe_namespace
-from ptodsl._bootstrap import make_context
+from ptodsl._context import make_context
 from ptodsl import pto
-from mlir.ir import F32Type
+from ptoas.mlir.ir import F32Type
 def _identity(value):
     return value
 
@@ -86,6 +86,7 @@ class VectorCubeSurfaceTest(unittest.TestCase):
         names = [
             "vsub", "vmin", "vand", "vor", "vxor", "vshl", "vshr",
             "vln", "vsqrt", "vabs", "vneg", "vrec", "vrsqrt", "vrelu", "vnot",
+            "vsqz",
             "vcmin", "vcgmin", "vcpadd",
             "vadds", "vmuls", "vmaxs", "vmins", "vlrelu", "vshls", "vshrs", "vands", "vors", "vxors",
             "vaxpy", "vmula", "vci", "vaddrelu", "vsubrelu", "vsel",
@@ -257,6 +258,25 @@ class VectorCubeSurfaceTest(unittest.TestCase):
             self.assertIs(_ops.vsubrelu(vec, rhs, mask), relu_vec)
             vsub.assert_called_once_with(vec, rhs, mask)
             vrelu.assert_called_once_with(sub_vec, mask)
+
+    def test_vsqz_dispatches_to_generated_op_with_source_type(self):
+        inp = SimpleNamespace(type="vec_ty")
+        mask = SimpleNamespace(type="mask_ty")
+        result = object()
+
+        with patch.object(
+            _ops, "unwrap_surface_value", side_effect=_identity
+        ), patch.object(
+            _ops, "wrap_surface_value", side_effect=_identity
+        ), patch.object(
+            _ops._pto,
+            "VsqzOp",
+            return_value=SimpleNamespace(result=result),
+        ) as op_ctor:
+            output = _ops.vsqz(inp, mask)
+
+        self.assertIs(output, result)
+        op_ctor.assert_called_once_with("vec_ty", inp, mask)
 
     def test_vcgmin_and_vsel_dispatch_correctly(self):
         vec = SimpleNamespace(type="vec_ty")
@@ -705,8 +725,8 @@ class VectorCubeSurfaceTest(unittest.TestCase):
         cases = [
             (_ops.set_cross_flag, (pto.Pipe.V, 0), "set_cross_flag(pipe, event_id)", "<PIPE_FIX>", "<PIPE_V>"),
             (_ops.wait_cross_flag, (pto.Pipe.MTE3, 0), "wait_cross_flag(pipe, event_id)", "<PIPE_FIX>", "<PIPE_MTE3>"),
-            (_ops.set_intra_flag, (pto.Pipe.V, 0), "set_intra_flag(pipe, event_id)", "<PIPE_FIX>, <PIPE_MTE3>", "<PIPE_V>"),
-            (_ops.wait_intra_flag, (pto.Pipe.MTE2, 0), "wait_intra_flag(pipe, event_id)", "<PIPE_FIX>, <PIPE_MTE3>, <PIPE_V>", "<PIPE_MTE2>"),
+            (_ops.set_intra_flag, ("M", 0), "set_intra_flag(pipe, event_id)", "<PIPE_FIX>, <PIPE_MTE1>, <PIPE_MTE2>, <PIPE_MTE3>, <PIPE_V>", "<PIPE_M>"),
+            (_ops.wait_intra_flag, (pto.Pipe.M, 0), "wait_intra_flag(pipe, event_id)", "<PIPE_FIX>, <PIPE_MTE1>, <PIPE_MTE2>, <PIPE_MTE3>, <PIPE_V>", "<PIPE_M>"),
         ]
 
         with patch.object(_ops._pto, "sync_set") as sync_set_op, \

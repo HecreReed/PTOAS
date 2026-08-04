@@ -463,7 +463,9 @@ struct PTOResolveReservedBuffersPass
     // downstream lowering only sees ordinary SSA values.
     SmallVector<Operation *> eraseOps;
 
-    for (func::FuncOp funcOp : moduleOp.getOps<func::FuncOp>()) {
+    SmallVector<func::FuncOp> funcs;
+    moduleOp.walk([&](func::FuncOp funcOp) { funcs.push_back(funcOp); });
+    for (func::FuncOp funcOp : funcs) {
       OpBuilder builder(funcOp.getContext());
 
       SmallVector<ReserveBufferOp> reserveOps;

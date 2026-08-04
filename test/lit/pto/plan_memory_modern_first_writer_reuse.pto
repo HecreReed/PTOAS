@@ -1,0 +1,39 @@
+// Copyright (c) 2026 Huawei Technologies Co., Ltd.
+// This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+// CANN Open Software License Agreement Version 2.0 (the "License").
+// Please refer to the License for details. You may not use this file except in compliance with the License.
+// THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+// INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+// See LICENSE in the root of the software repository for the full text of the License.
+
+// RUN: ptoas --pto-level=level2 --pto-arch=a3 --plan-memory-impl=modern \
+// RUN:   --emit-pto-ir --mlir-print-ir-after=pto-plan-memory %s 2>&1 \
+// RUN:   | FileCheck %s
+
+module attributes {pto.target_arch = "a3"} {
+  func.func @first_writer_reuse(
+      %in0: !pto.partition_tensor_view<1x32768xf32>,
+      %out0: !pto.partition_tensor_view<1x32768xf32>,
+      %in1: !pto.partition_tensor_view<1x32768xf32>,
+      %out1: !pto.partition_tensor_view<1x32768xf32>) {
+    // Each tile occupies 128 KiB. A3 UB is 192 KiB, so this succeeds only if
+    // liveness starts at each tile's first writer rather than its early alloc.
+    %buf0 = pto.alloc_tile : !pto.tile_buf<vec, 1x32768xf32>
+    %buf1 = pto.alloc_tile : !pto.tile_buf<vec, 1x32768xf32>
+
+    pto.tload ins(%in0 : !pto.partition_tensor_view<1x32768xf32>)
+              outs(%buf0 : !pto.tile_buf<vec, 1x32768xf32>)
+    pto.tstore ins(%buf0 : !pto.tile_buf<vec, 1x32768xf32>)
+               outs(%out0 : !pto.partition_tensor_view<1x32768xf32>)
+    pto.tload ins(%in1 : !pto.partition_tensor_view<1x32768xf32>)
+              outs(%buf1 : !pto.tile_buf<vec, 1x32768xf32>)
+    pto.tstore ins(%buf1 : !pto.tile_buf<vec, 1x32768xf32>)
+               outs(%out1 : !pto.partition_tensor_view<1x32768xf32>)
+    return
+  }
+}
+
+// CHECK-LABEL: func.func @first_writer_reuse
+// CHECK-DAG: %[[ADDR:.*]] = arith.constant 0 : i64
+// CHECK: pto.alloc_tile addr = %[[ADDR]] : !pto.tile_buf<vec, 1x32768xf32>
+// CHECK: pto.alloc_tile addr = %[[ADDR]] : !pto.tile_buf<vec, 1x32768xf32>

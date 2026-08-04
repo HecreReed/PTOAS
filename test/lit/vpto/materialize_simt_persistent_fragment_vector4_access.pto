@@ -1,0 +1,58 @@
+// Copyright (c) 2026 Huawei Technologies Co., Ltd.
+// This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+// CANN Open Software License Agreement Version 2.0 (the "License").
+// Please refer to the License for details. You may not use this file except in compliance with the License.
+// THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+// INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+// See LICENSE in the root of the software repository for the full text of the License.
+
+// RUN: ptoas --pto-arch=a5 --pto-backend=vpto --emit-vpto --mlir-print-ir-after=pto-materialize-simt-persistent-fragment %s -o /dev/null 2>&1 | FileCheck %s --check-prefix=MATERIALIZE
+
+module attributes {pto.target_arch = "a5", pto.kernel_kind = #pto.kernel_kind<vector>} {
+  func.func @persistent_fragment_vector4_access(%dst: !pto.ptr<f32, ub>) attributes {pto.entry} {
+    %c4_i32 = arith.constant 4 : i32
+    %fragment = llvm.alloca %c4_i32 x f32 {pto.persistent} : (i32) -> !llvm.ptr
+    pto.section.simt<<<32, 1, 1>>> {
+      %value = arith.constant dense<[1.000000e+00, 2.000000e+00, 3.000000e+00, 4.000000e+00]> : vector<4xf32>
+      llvm.store %value, %fragment : vector<4xf32>, !llvm.ptr
+    }
+    pto.section.simt<<<32, 1, 1>>> {
+      %value = llvm.load %fragment : !llvm.ptr -> vector<4xf32>
+      %c3_i32 = arith.constant 3 : i32
+      %lane3 = llvm.extractelement %value[%c3_i32 : i32] : vector<4xf32>
+      %c0 = arith.constant 0 : index
+      pto.store %lane3, %dst[%c0] : !pto.ptr<f32, ub>, f32
+    }
+    return
+  }
+}
+
+// MATERIALIZE-LABEL: func.func @persistent_fragment_vector4_access
+// MATERIALIZE-NOT: llvm.alloca
+// MATERIALIZE: pto.section.simt<<<32, 1, 1>>> {
+// MATERIALIZE: %[[INIT0:.*]] = llvm.extractelement %{{.*}}[%{{.*}} : i32] : vector<4xf32>
+// MATERIALIZE: %[[INIT1:.*]] = llvm.extractelement %{{.*}}[%{{.*}} : i32] : vector<4xf32>
+// MATERIALIZE: %[[INIT2:.*]] = llvm.extractelement %{{.*}}[%{{.*}} : i32] : vector<4xf32>
+// MATERIALIZE: %[[INIT3:.*]] = llvm.extractelement %{{.*}}[%{{.*}} : i32] : vector<4xf32>
+// MATERIALIZE: pto.keep %[[INIT0]] {slot = 0 : i64} : f32
+// MATERIALIZE-NEXT: pto.keep %[[INIT1]] {slot = 1 : i64} : f32
+// MATERIALIZE-NEXT: pto.keep %[[INIT2]] {slot = 2 : i64} : f32
+// MATERIALIZE-NEXT: pto.keep %[[INIT3]] {slot = 3 : i64} : f32
+// MATERIALIZE: pto.section.simt<<<32, 1, 1>>> {
+// MATERIALIZE-NEXT: %[[RESUME0:.*]] = pto.resume {slot = 0 : i64} : f32
+// MATERIALIZE-NEXT: %[[RESUME1:.*]] = pto.resume {slot = 1 : i64} : f32
+// MATERIALIZE-NEXT: %[[RESUME2:.*]] = pto.resume {slot = 2 : i64} : f32
+// MATERIALIZE-NEXT: %[[RESUME3:.*]] = pto.resume {slot = 3 : i64} : f32
+// MATERIALIZE: %[[POISON:.*]] = llvm.mlir.poison : vector<4xf32>
+// MATERIALIZE: %[[VECTOR0:.*]] = llvm.insertelement %[[RESUME0]], %[[POISON]][%{{.*}} : i32] : vector<4xf32>
+// MATERIALIZE: %[[VECTOR1:.*]] = llvm.insertelement %[[RESUME1]], %[[VECTOR0]][%{{.*}} : i32] : vector<4xf32>
+// MATERIALIZE: %[[VECTOR2:.*]] = llvm.insertelement %[[RESUME2]], %[[VECTOR1]][%{{.*}} : i32] : vector<4xf32>
+// MATERIALIZE: %[[VECTOR3:.*]] = llvm.insertelement %[[RESUME3]], %[[VECTOR2]][%{{.*}} : i32] : vector<4xf32>
+// MATERIALIZE: %[[LANE3:.*]] = llvm.extractelement %[[VECTOR3]][%{{.*}} : i32] : vector<4xf32>
+// MATERIALIZE: pto.store %[[LANE3]],
+// MATERIALIZE: pto.keep %[[RESUME0]] {slot = 0 : i64} : f32
+// MATERIALIZE-NEXT: pto.keep %[[RESUME1]] {slot = 1 : i64} : f32
+// MATERIALIZE-NEXT: pto.keep %[[RESUME2]] {slot = 2 : i64} : f32
+// MATERIALIZE-NEXT: pto.keep %[[RESUME3]] {slot = 3 : i64} : f32
+// MATERIALIZE-NOT: llvm.load
+// MATERIALIZE-NOT: llvm.store

@@ -6,7 +6,7 @@
 // INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
 // See LICENSE in the root of the software repository for the full text of the License.
 
-// RUN: ptoas --pto-arch=a3 --mlir-print-ir-after=pto-view-to-memref %s 2>&1 | FileCheck %s --check-prefix=A3
+// RUN: ptoas --pto-arch=a3 --mlir-print-ir-after=pto-resolve-reserved-buffers %s 2>&1 | FileCheck %s --check-prefix=A3
 
 module {
   func.func @tpows_int_no_tmp() {
@@ -18,5 +18,5 @@ module {
   }
 }
 
-// A3: pto.tpows ins({{.*}}, {{.*}} : memref<1x16xi32
+// A3: pto.tpows ins({{.*}}, {{.*}} : !pto.tile_buf<vec, 1x16xi32
 // A3: TPOWS({{.*}}, {{.*}}, {{.*}});

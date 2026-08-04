@@ -1,0 +1,30 @@
+// Copyright (c) 2026 Huawei Technologies Co., Ltd.
+// This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+// CANN Open Software License Agreement Version 2.0 (the "License").
+// Please refer to the License for details. You may not use this file except in compliance with the License.
+// THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+// INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+// See LICENSE in the root of the software repository for the full text of the License.
+//
+// RUN: ptoas --emit-pto-ir %s 2>&1 | FileCheck %s
+
+module {
+  func.func @valid_workspaces(
+      %ptr: !pto.ptr<i32, gm>,
+      %multidim: !pto.partition_tensor_view<4x4xi32>,
+      %dynamic: !pto.tensor_view<?xi32>,
+      %overflowing_capacity: !pto.partition_tensor_view<4611686018427387904x4xi32>,
+      %tensor_view: !pto.tensor_view<16xi32>,
+      %partition_view: !pto.partition_tensor_view<16xi32>) {
+    pto.syncall(%ptr : !pto.ptr<i32, gm>) mode = #pto.sync_all_mode<soft>, core_type = #pto.sync_core_type<aiv_only>
+    pto.syncall(%multidim : !pto.partition_tensor_view<4x4xi32>) mode = #pto.sync_all_mode<soft>, core_type = #pto.sync_core_type<aic_only>
+    pto.syncall(%dynamic : !pto.tensor_view<?xi32>) mode = #pto.sync_all_mode<soft>, core_type = #pto.sync_core_type<mix>
+    pto.syncall(%overflowing_capacity : !pto.partition_tensor_view<4611686018427387904x4xi32>) mode = #pto.sync_all_mode<soft>, core_type = #pto.sync_core_type<mix>
+    pto.syncall(%tensor_view : !pto.tensor_view<16xi32>) mode = #pto.sync_all_mode<soft>, core_type = #pto.sync_core_type<aiv_only>
+    pto.syncall(%partition_view : !pto.partition_tensor_view<16xi32>) mode = #pto.sync_all_mode<soft>, core_type = #pto.sync_core_type<aic_only>
+    return
+  }
+}
+
+// CHECK-LABEL: func.func @valid_workspaces(
+// CHECK-COUNT-6: pto.syncall(

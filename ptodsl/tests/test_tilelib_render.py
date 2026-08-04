@@ -9,27 +9,26 @@
 
 Asserts the rendered MLIR is *on par* with the tilelang golden
 (fixtures/tadd_a5_8x64_f32.golden.mlir): same structured abstraction, not byte-identical
-(ptodsl differs in SSA naming, constant hoisting, index-vs-i32 carry, subview rank).
+(ptodsl differs in SSA naming, constant hoisting, index-vs-i32 carry, ptr typing).
 """
 
 import unittest
 from pathlib import Path
 
 from ptodsl.tilelib import TileSpec, f32
-from ptodsl.tilelib.templates.a5.tadd import template_tadd
+from TileOps.a5.tadd import template_tadd
 
 FIXTURE = Path(__file__).parent / "fixtures" / "tadd_a5_8x64_f32.golden.mlir"
 
 # The structured abstraction the migration must preserve (see golden fixture).
 REQUIRED_OPS = [
     "pto.tile_buf_addr",
-    "memref<8x64xf32, #pto.address_space<vec>>",
+    "!pto.ptr<f32, ub>",
     "pto.tile_valid_rows",
     "pto.tile_valid_cols",
     "scf.for",
     "iter_args",  # the inner loop carries `remained` (AST-rewrite .carry path)
     "pto.plt_b32",
-    "memref.subview",
     "pto.vlds",
     "pto.vadd",
     "pto.vsts",
@@ -63,7 +62,7 @@ class TileLibRenderTest(unittest.TestCase):
     def test_golden_fixture_uses_same_abstraction(self):
         self.assertTrue(FIXTURE.exists(), f"missing golden fixture {FIXTURE}")
         golden = FIXTURE.read_text(encoding="utf-8")
-        for op in ("pto.tile_buf_addr", "memref.subview", "pto.vlds", "pto.vadd", "pto.vsts", "pto.plt_b32"):
+        for op in ("pto.tile_buf_addr", "!pto.ptr<f32, ub>", "pto.vlds", "pto.vadd", "pto.vsts", "pto.plt_b32"):
             self.assertIn(op, golden)
 
 

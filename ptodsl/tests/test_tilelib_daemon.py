@@ -92,7 +92,7 @@ class TileLibDaemonTest(unittest.TestCase):
         self.assertIn(f"func.func @{TADD}", mlir)
         for operation in (
             "pto.tile_buf_addr",
-            "memref.subview",
+            "!pto.ptr<f32, ub>",
             "pto.vlds",
             "pto.vadd",
             "pto.vsts",

@@ -16,4 +16,4 @@ module {
   }
 }
 
-// CHECK: single_cache_line address expects a GM pointer, GM memref, or GM tensor view
+// CHECK: single_cache_line address expects a GM pointer or GM tensor view

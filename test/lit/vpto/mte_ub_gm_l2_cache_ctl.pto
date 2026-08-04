@@ -6,12 +6,10 @@
 // INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
 // See LICENSE in the root of the software repository for the full text of the License.
 
-// RUN: ptoas --pto-arch=a5 --pto-backend=vpto --emit-vpto --mlir-print-ir-before=vpto-expand-wrapper-ops %s -o /dev/null > %t.roundtrip 2>&1
-// RUN: FileCheck %s --input-file=%t.roundtrip --check-prefix=ROUNDTRIP-EXPLICIT
-// RUN: FileCheck %s --input-file=%t.roundtrip --check-prefix=ROUNDTRIP-DEFAULT
-// RUN: ptoas --pto-arch=a5 --pto-backend=vpto --emit-vpto --mlir-print-ir-after=vpto-expand-wrapper-ops %s -o /dev/null > %t.expand 2>&1
-// RUN: FileCheck %s --input-file=%t.expand --check-prefix=EXPAND-EXPLICIT
-// RUN: FileCheck %s --input-file=%t.expand --check-prefix=EXPAND-DEFAULT
+// RUN: ptoas --pto-arch=a5 --pto-backend=vpto --emit-vpto --mlir-print-ir-before=vpto-expand-wrapper-ops %s -o /dev/null 2>&1 | FileCheck %s --check-prefix=ROUNDTRIP-CTL
+// RUN: ptoas --pto-arch=a5 --pto-backend=vpto --emit-vpto --mlir-print-ir-before=vpto-expand-wrapper-ops %s -o /dev/null 2>&1 | FileCheck %s --check-prefix=ROUNDTRIP-DEFAULT
+// RUN: ptoas --pto-arch=a5 --pto-backend=vpto --emit-vpto --mlir-print-ir-after=vpto-expand-wrapper-ops %s -o /dev/null 2>&1 | FileCheck %s --check-prefix=EXPAND-CTL
+// RUN: ptoas --pto-arch=a5 --pto-backend=vpto --emit-vpto --mlir-print-ir-after=vpto-expand-wrapper-ops %s -o /dev/null 2>&1 | FileCheck %s --check-prefix=EXPAND-DEFAULT
 
 module attributes {pto.target_arch = "a5", pto.kernel_kind = #pto.kernel_kind<vector>} {
   func.func @mte_ub_gm_l2_cache_ctl(%out: !pto.ptr<f16, gm>) attributes {pto.aicore} {
@@ -40,18 +38,18 @@ module attributes {pto.target_arch = "a5", pto.kernel_kind = #pto.kernel_kind<ve
   }
 }
 
-// ROUNDTRIP-EXPLICIT-LABEL: func.func @mte_ub_gm_l2_cache_ctl(
-// ROUNDTRIP-EXPLICIT: %[[L2:.*]] = arith.constant 5 : i64
-// ROUNDTRIP-EXPLICIT: pto.mte_ub_gm %{{[^,]+}}, %arg0, %{{[^ ]+}} nburst(%{{[^,]+}}, %{{[^,]+}}, %{{[^)]+}}) l2_cache_ctl(%[[L2]])
-// ROUNDTRIP-EXPLICIT-SAME: : !pto.ptr<f16, ub>, !pto.ptr<f16, gm>, i64, i64, i64, i64, i64{{$}}
+// ROUNDTRIP-CTL-LABEL: func.func @mte_ub_gm_l2_cache_ctl(
+// ROUNDTRIP-CTL: %[[L2:.*]] = arith.constant 5 : i64
+// ROUNDTRIP-CTL: pto.mte_ub_gm %{{[^,]+}}, %arg0, %{{[^ ]+}} nburst(%{{[^,]+}}, %{{[^,]+}}, %{{[^)]+}}) l2_cache_ctl(%[[L2]])
+// ROUNDTRIP-CTL-SAME: : !pto.ptr<f16, ub>, !pto.ptr<f16, gm>, i64, i64, i64, i64, i64{{$}}
 // ROUNDTRIP-DEFAULT-LABEL: func.func @mte_ub_gm_l2_cache_ctl_default(
 // ROUNDTRIP-DEFAULT: pto.mte_ub_gm %{{[^,]+}}, %arg0, %{{[^ ]+}} nburst(%{{[^,]+}}, %{{[^,]+}}, %{{[^)]+}})
 // ROUNDTRIP-DEFAULT-SAME: : !pto.ptr<f16, ub>, !pto.ptr<f16, gm>, i64, i64, i64, i64{{$}}
 
-// EXPAND-EXPLICIT-LABEL: func.func @mte_ub_gm_l2_cache_ctl(
-// EXPAND-EXPLICIT: %[[L2:.*]] = arith.constant 5 : i64
-// EXPAND-EXPLICIT: pto.copy_ubuf_to_gm %{{[^,]+}}, %arg0, %{{[^,]+}}, %{{[^,]+}}, %{{[^,]+}}, %[[L2]], %{{[^,]+}}, %{{[^:]+}}
-// EXPAND-EXPLICIT-SAME: : !pto.ptr<f16, ub>, !pto.ptr<f16, gm>, i64, i64, i64, i64, i64, i64
+// EXPAND-CTL-LABEL: func.func @mte_ub_gm_l2_cache_ctl(
+// EXPAND-CTL: %[[L2:.*]] = arith.constant 5 : i64
+// EXPAND-CTL: pto.copy_ubuf_to_gm %{{[^,]+}}, %arg0, %{{[^,]+}}, %{{[^,]+}}, %{{[^,]+}}, %[[L2]], %{{[^,]+}}, %{{[^:]+}}
+// EXPAND-CTL-SAME: : !pto.ptr<f16, ub>, !pto.ptr<f16, gm>, i64, i64, i64, i64, i64, i64
 // EXPAND-DEFAULT-LABEL: func.func @mte_ub_gm_l2_cache_ctl_default(
 // EXPAND-DEFAULT: %[[ZERO:.*]] = arith.constant 0 : i64
 // EXPAND-DEFAULT: pto.copy_ubuf_to_gm %{{[^,]+}}, %arg0, %[[ZERO]], %{{[^,]+}}, %{{[^,]+}}, %[[ZERO]], %{{[^,]+}}, %{{[^:]+}}

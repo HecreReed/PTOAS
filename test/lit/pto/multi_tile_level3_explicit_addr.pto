@@ -6,22 +6,19 @@
 // INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
 // See LICENSE in the root of the software repository for the full text of the License.
 
-// RUN: ptoas --pto-level=level3 --pto-arch=a5 --mlir-print-ir-after=pto-view-to-memref %s 2>&1 1>/dev/null | FileCheck %s
+// RUN: ptoas --pto-level=level3 --pto-arch=a5 --mlir-print-ir-after=pto-resolve-reserved-buffers %s 2>&1 1>/dev/null | FileCheck %s
 // RUN: ptoas --pto-level=level3 --pto-arch=a5 --mlir-print-ir-after=pto-resolve-buffer-select %s 2>&1 1>/dev/null | FileCheck %s --check-prefix=SELECT
-// RUN: not ptoas --pto-level=level2 --pto-arch=a5 %s 2>&1 | FileCheck %s --check-prefix=LV2ERR
+// RUN: not ptoas --pto-level=level1 --pto-arch=a5 %s 2>&1 | FileCheck %s --check-prefix=LVERR
+// RUN: not ptoas --pto-level=level2 --pto-arch=a5 %s 2>&1 | FileCheck %s --check-prefix=LVERR
 
 // Under --pto-level=level3 the caller owns local memory, PTOPlanMemory does not
-// run, and `pto.alloc_multi_tile` carries an explicit base `addr`. The view
-// lowering must fan the base address out into the multi-address
-// `pto.pointer_cast` anchor PlanMemory would otherwise produce -- slot k at
-// `addr + k * slotBytes` (slotBytes = 16*16*2 = 512 here) -- so sync and
-// PTOResolveBufferSelect keep working. Without this the slots would all alias
-// the same memref (silent single-buffer downgrade).
+// run, and `pto.alloc_multi_tile` carries an explicit base `addr`. Slot k is
+// resolved as `addr + k * slotBytes` (slotBytes = 16*16*2 = 512 here).
 
 module {
   func.func @l3_two_buffers(
-      %gm0 : memref<16x16xf16, #pto.address_space<gm>>,
-      %gm1 : memref<16x16xf16, #pto.address_space<gm>>) attributes {pto.entry} {
+      %gm0 : !pto.partition_tensor_view<16x16xf16>,
+      %gm1 : !pto.partition_tensor_view<16x16xf16>) attributes {pto.entry} {
     %c0 = arith.constant 0 : index
     %c1 = arith.constant 1 : index
     %base = arith.constant 0 : i64
@@ -36,31 +33,32 @@ module {
         : !pto.multi_tile_buf<vec, 16x16xf16, count=2>
        -> !pto.tile_buf<vec, 16x16xf16>
 
-    pto.tload ins(%gm0 : memref<16x16xf16, #pto.address_space<gm>>)
+    pto.tload ins(%gm0 : !pto.partition_tensor_view<16x16xf16>)
               outs(%s0  : !pto.tile_buf<vec, 16x16xf16>)
-    pto.tload ins(%gm1 : memref<16x16xf16, #pto.address_space<gm>>)
+    pto.tload ins(%gm1 : !pto.partition_tensor_view<16x16xf16>)
               outs(%s1  : !pto.tile_buf<vec, 16x16xf16>)
     return
   }
 }
 
-// PTOViewToMemref: explicit base address fans out into a 2-address
-// pointer_cast; slot 1 = base + 512. No memref.alloc / multi_buffer attr.
-// CHECK: IR Dump After PTOViewToMemref
+// PTOResolveReservedBuffers preserves the tile-native allocation and selections.
+// CHECK: IR Dump After PTOResolveReservedBuffers
 // CHECK-LABEL: func.func @l3_two_buffers
-// CHECK-NOT: pto.multi_buffer
-// CHECK-DAG: %[[OFF1:.*]] = arith.constant 512 : i64
-// CHECK-DAG: %[[A1:.*]] = arith.addi %{{.*}}, %[[OFF1]] : i64
-// CHECK: pto.pointer_cast(%{{.*}}, %[[A1]])
-// CHECK: pto.slot_marker %{{.*}}[%c0
-// CHECK: pto.slot_marker %{{.*}}[%c1
+// CHECK: %[[BASE:.*]] = arith.constant 0 : i64
+// CHECK: %[[MULTI:.*]] = pto.alloc_multi_tile addr = %[[BASE]]
+// CHECK: pto.multi_tile_get %[[MULTI]][%c0
+// CHECK: pto.multi_tile_get %[[MULTI]][%c1
+// CHECK-NOT: pto.multi_buffer_addrs
+// CHECK-NOT: memref.alloc
 
-// ResolveBufferSelect: each slot_marker becomes a single-address pointer_cast;
-// the 2-address anchor is preserved.
+// ResolveBufferSelect materializes one addressed alloc_tile per selection.
 // SELECT: IR Dump After PTOResolveBufferSelect
 // SELECT-LABEL: func.func @l3_two_buffers
-// SELECT: pto.pointer_cast(%{{.*}}, %{{.*}})
-// SELECT-NOT: pto.slot_marker
+// SELECT-NOT: pto.alloc_multi_tile
+// SELECT-NOT: pto.multi_tile_get
+// SELECT: pto.alloc_tile addr = %{{.*}}
+// SELECT: arith.addi
+// SELECT: pto.alloc_tile addr = %{{.*}}
 
 // Outside level3 an explicit addr on alloc_multi_tile is rejected.
-// LV2ERR: unexpected 'addr' operand on pto.alloc_multi_tile: only supported when --pto-level=level3
+// LVERR: unexpected 'addr' operand on pto.alloc_multi_tile: only supported when --pto-level=level3

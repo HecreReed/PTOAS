@@ -1,7 +1,7 @@
 # PTODSL TileLib Template Authoring Guide
 
 This guide is for developers adding or changing PTODSL TileLib templates under
-`ptodsl/ptodsl/tilelib/templates`.
+`lib/TileOps`.
 
 For the compiler-side design, see
 `docs/designs/ptodsl-tilelib-template-selection-design.md`.

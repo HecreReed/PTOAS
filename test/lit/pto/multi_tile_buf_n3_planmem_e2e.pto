@@ -7,12 +7,13 @@
 // See LICENSE in the root of the software repository for the full text of the License.
 
 // RUN: ptoas --mlir-print-ir-after=pto-plan-memory %s 2>&1 1>/dev/null | FileCheck %s
+// RUN: ptoas --plan-memory-impl=modern --mlir-print-ir-after=pto-plan-memory %s 2>&1 1>/dev/null | FileCheck %s
 
 // Sanity for N == 3 to confirm `ExpandMultiBufferStorageEntry` produces 3
 // physical slots and `UpdateBuffer2Offsets` emits them in slot order.
 
 module {
-  func.func @n3_three_slots(%gm : memref<16x16xf16, #pto.address_space<gm>>) {
+  func.func @n3_three_slots(%gm : !pto.partition_tensor_view<16x16xf16>) {
     %mb = pto.alloc_multi_tile
         : !pto.multi_tile_buf<vec, 16x16xf16, count=3>
     %c0 = arith.constant 0 : index
@@ -27,11 +28,11 @@ module {
     %s2 = pto.multi_tile_get %mb[%c2]
         : !pto.multi_tile_buf<vec, 16x16xf16, count=3>
        -> !pto.tile_buf<vec, 16x16xf16>
-    pto.tload ins(%gm : memref<16x16xf16, #pto.address_space<gm>>)
+    pto.tload ins(%gm : !pto.partition_tensor_view<16x16xf16>)
               outs(%s0 : !pto.tile_buf<vec, 16x16xf16>)
-    pto.tload ins(%gm : memref<16x16xf16, #pto.address_space<gm>>)
+    pto.tload ins(%gm : !pto.partition_tensor_view<16x16xf16>)
               outs(%s1 : !pto.tile_buf<vec, 16x16xf16>)
-    pto.tload ins(%gm : memref<16x16xf16, #pto.address_space<gm>>)
+    pto.tload ins(%gm : !pto.partition_tensor_view<16x16xf16>)
               outs(%s2 : !pto.tile_buf<vec, 16x16xf16>)
     return
   }
@@ -39,4 +40,5 @@ module {
 
 // CHECK: IR Dump After PlanMemory
 // CHECK-LABEL: func.func @n3_three_slots
-// CHECK: pto.pointer_cast({{[^,]*}}, {{[^,]*}}, {{[^,]*}})
+// CHECK: pto.alloc_multi_tile {pto.multi_buffer_addrs = array<i64: 0, 512, 1024>}
+// CHECK: pto.multi_tile_get

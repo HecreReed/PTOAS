@@ -40,7 +40,8 @@ def PTO_PhysicalVMIPartTypeConstraint : AnyTypeOf<
   "PTO physical vector register or mask type">;
 
 class VMI_Op<string mnemonic, list<Trait> traits = []>
-    : PTO_Op<"vmi." # mnemonic, traits>;
+    : PTO_Op<"vmi." # mnemonic,
+             !listconcat(traits, [MicroOpInterface, VectorMicroOpInterface])>;
 
 //===--- Legacy (old) VMI ops ---===//
 
@@ -1161,7 +1162,8 @@ def VMIVcmpsOp : VMI_Op<"vcmps", [Pure]> {
   }];
 }
 
-class VMI_VecScalarOp<string mnemonic, string summaryText>
+class VMI_VecScalarOp<string mnemonic, string summaryText,
+                      Type scalarType = AnyType>
     : VMI_Op<mnemonic, [Pure]> {
   let summary = summaryText;
   let description = [{
@@ -1180,7 +1182,7 @@ class VMI_VecScalarOp<string mnemonic, string summaryText>
   }];
   let arguments = (ins
     VMI_VRegTypeConstraint:$src,
-    AnyType:$scalar,
+    scalarType:$scalar,
     VMI_MaskTypeConstraint:$mask,
     OptionalAttr<StrAttr>:$pmode
   );
@@ -1195,8 +1197,8 @@ def VMIAddSOp : VMI_VecScalarOp<"vadds", "VMI vector-scalar elementwise add">;
 def VMIMulSOp : VMI_VecScalarOp<"vmuls", "VMI vector-scalar elementwise multiply">;
 def VMIMaxSOp : VMI_VecScalarOp<"vmaxs", "VMI vector-scalar elementwise maximum">;
 def VMIMinSOp : VMI_VecScalarOp<"vmins", "VMI vector-scalar elementwise minimum">;
-def VMIShlSOp : VMI_VecScalarOp<"vshls", "VMI vector-scalar elementwise shift left">;
-def VMIShrSOp : VMI_VecScalarOp<"vshrs", "VMI vector-scalar elementwise shift right">;
+def VMIShlSOp : VMI_VecScalarOp<"vshls", "VMI vector-scalar elementwise shift left", I16>;
+def VMIShrSOp : VMI_VecScalarOp<"vshrs", "VMI vector-scalar elementwise shift right", I16>;
 
 def VMIvSelOp : VMI_Op<"vsel", [Pure]> {
   let summary = "VMI elementwise select";
@@ -1336,7 +1338,8 @@ def VMIvLoadOp : VMI_Op<"vload",
     Unified vector load.  dist-mode selects the memory-access pattern.
 
     dist-mode values:
-    - "continuous" (default): contiguous stride-1 load  → 1 result
+    - "continuous" (default): contiguous stride-1 load  → 1 result;
+      1/2/4/8-lane results alias group=1/2/4/8 with unit stride
     - "dintlv":             deinterleaved dual load      → 2 results (%lo, %hi)
     - "unpack":             widening unpack load         → 1 result
     - "brc":                broadcast load               → 1 result
@@ -1375,7 +1378,8 @@ def VMIvStoreOp : VMI_Op<"vstore",
     masked_store, stride_store, and group_store ops.
 
     dist-mode controls the memory access pattern:
-    - "continuous" (default): contiguous stride-1 store  → 1 value
+    - "continuous" (default): contiguous stride-1 store  → 1 value;
+      1/2/4/8-lane inputs alias group=1/2/4/8 with unit stride
     - "dintlv":             interleaved dual store        → 2 values (%lo, %hi)
 
     group mode (mutually exclusive with dist-mode):

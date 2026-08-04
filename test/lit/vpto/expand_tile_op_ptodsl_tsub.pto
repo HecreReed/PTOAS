@@ -15,7 +15,6 @@
 // CHECK-NOT: pto.tsub ins
 // CHECK: pto.vecscope
 // CHECK: pto.castptr
-// CHECK: pto.addptr
 // CHECK: pto.vlds
 // CHECK: pto.vsub
 // CHECK: pto.vsts

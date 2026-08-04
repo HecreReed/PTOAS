@@ -17,7 +17,6 @@
 #include "mlir/Dialect/SCF/IR/SCF.h"
 #include "mlir/Analysis/Liveness.h"
 #include "mlir/Dialect/Func/IR/FuncOps.h"
-#include "mlir/Dialect/MemRef/IR/MemRef.h"
 #include "llvm/ADT/SmallSet.h"
 #include <list>
 
@@ -42,6 +41,11 @@ enum BufferStatus { UNDEFFINED = 0, DEFFINED, GENED, KILLED };
 
 /// Pair of inplace Value.
 using ValuePair = std::pair<Value, Value>;
+
+enum class MemPlanMode {
+  LOCAL_MEM_PLAN,
+  GLOBAL_WORKSPACE_PLAN,
+};
 
 /// Result status after plan memory.
 enum PlanStatus {
@@ -378,13 +382,7 @@ private:
   /// Determine whether the current operation can be skipped.
   bool isSkippableOp(Operation *op) const;
 
-  /// Update store op information.
-  void UpdateStoreOpInfo(OpInfo *opInfo, const Value storeValue, Liveness live);
-
-  /// Check if it is local buffer with memory space
-  LogicalResult CheckLocalBufferAllocOp(Operation *op) const;
-
-  /// kill buffer handle.
+  /// Kill a buffer handle at the current operation.
   void OpKillHandle(OpInfo *opInfo, Liveness live, Block *block);
 
   /// Process kill buffer based on the result live of op.
@@ -401,8 +399,7 @@ private:
   void GenerateBufferLife();
 
   /// initialize the buffers that must be inplaced together
-  /// namely, the alias buffers of memref.alloc,
-  /// e.g. for iter arg and for yield.
+  /// namely, tile buffer aliases such as iter args and yields.
   void InitializeInplacePairList();
 
   /// Record semantic non-reuse pairs for buffers that may be used
@@ -506,10 +503,10 @@ private:
   /// Post-plan sanity check for local memory overflow.
   bool RecordOverflowIfAny();
 
-  /// Prepare the memref.alloc plan.
+  /// Prepare the local tile buffer plan.
   PlanStatus PlanLocalMemAddress();
 
-  /// Prepare the memrefExt.alloc_workspace plan.
+  /// Prepare the global workspace plan.
   PlanStatus PlanWorkSpaceMemAddress();
 
   /// merge all storage entry to the first storage entry for WorkSpaceArg.
@@ -694,7 +691,7 @@ private:
   /// Report tensor life time for debug.
   void MemLifeDebugInfo(StorageEntry *storageEntry);
 
-  /// Report tensor which is defined by memref allco.
+  /// Report the allocation root represented by this entry.
   void ReportCurEntryDebugInfo(const StorageEntry *curEntry);
 
   /// Report tensor allocate info.
@@ -728,7 +725,7 @@ private:
   /// Whether to adopt a split strategy.
   bool splitOutline{false};
 
-  /// map from memref buffer to plan memory address.
+  /// Map from local allocation root to planned addresses.
   DenseMap<Value, SmallVector<uint64_t>> buffer2Offsets;
 
   /// map from each scope to its root StorageEntry.

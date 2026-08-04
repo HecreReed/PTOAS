@@ -7,33 +7,33 @@
 // See LICENSE in the root of the software repository for the full text of the License.
 
 // Guard: normalize must reject a top-level segment that still mixes a nested
-// explicit section with sibling uncovered TileOps after inferred wrapping.
+// explicit section with sibling uncovered ops after inferred wrapping.
 // RUN: not ptoas --pto-arch=a5 --pto-backend=vpto --emit-pto-ir %s -o - 2>&1 | FileCheck %s
 
 module attributes {pto.target_arch = "a5"} {
   func.func @reject_nested_section_with_sibling_uncovered_tiles(
-      %src: memref<16x16xf32, #pto.address_space<gm>>,
-      %dst: memref<16x16xf32, #pto.address_space<gm>>) attributes {pto.kernel} {
+      %src: !pto.partition_tensor_view<16x16xf32>,
+      %dst: !pto.partition_tensor_view<16x16xf32>) attributes {pto.kernel} {
     %c0 = arith.constant 0 : index
     %c1 = arith.constant 1 : index
-    %tile0 = memref.alloc() : memref<16x16xf32, #pto.address_space<vec>>
-    %tile1 = memref.alloc() : memref<16x16xf32, #pto.address_space<vec>>
+    %tile0 = pto.alloc_tile : !pto.tile_buf<vec, 16x16xf32>
+    %tile1 = pto.alloc_tile : !pto.tile_buf<vec, 16x16xf32>
     %scalar = arith.constant 1.0 : f32
 
     scf.for %i = %c0 to %c1 step %c1 {
       pto.section.vector {
-        pto.tload ins(%src : memref<16x16xf32, #pto.address_space<gm>>)
-                 outs(%tile0 : memref<16x16xf32, #pto.address_space<vec>>)
+        pto.tload ins(%src : !pto.partition_tensor_view<16x16xf32>)
+                 outs(%tile0 : !pto.tile_buf<vec, 16x16xf32>)
       }
-      pto.tadds ins(%tile0, %scalar : memref<16x16xf32, #pto.address_space<vec>>, f32)
-                outs(%tile1 : memref<16x16xf32, #pto.address_space<vec>>)
-      pto.tstore ins(%tile1 : memref<16x16xf32, #pto.address_space<vec>>)
-                outs(%dst : memref<16x16xf32, #pto.address_space<gm>>)
+      pto.tadds ins(%tile0, %scalar : !pto.tile_buf<vec, 16x16xf32>, f32)
+                outs(%tile1 : !pto.tile_buf<vec, 16x16xf32>)
+      pto.tstore ins(%tile1 : !pto.tile_buf<vec, 16x16xf32>)
+                outs(%dst : !pto.partition_tensor_view<16x16xf32>)
     }
     return
   }
 }
 
-// CHECK: still contains an uncovered top-level TileOp segment after section normalization
-// CHECK: mixes nested explicit pto.section.* with sibling TileOps outside those sections
+// CHECK: still contains an uncovered top-level op segment after section normalization
+// CHECK: mixes nested explicit pto.section.* with sibling ops outside those sections
 // CHECK: starts at 'scf.for'

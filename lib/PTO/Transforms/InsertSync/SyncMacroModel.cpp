@@ -8,7 +8,6 @@
 
 #include "PTO/Transforms/InsertSync/SyncMacroModel.h"
 #include "PTO/IR/PTO.h"
-#include "mlir/Dialect/MemRef/IR/MemRef.h"
 #include "mlir/IR/Matchers.h"
 
 using namespace mlir;
@@ -195,22 +194,13 @@ std::optional<SyncMacroModel> getTGatherSyncMacroModel(pto::TGatherOp op) {
   return model;
 }
 
-// Resolve the PTO address space of an MGatherOp operand type. Mirrors the
-// getAddressSpace helper used by MGatherOp::getPipe() so the model matches the
-// post-PTOViewToMemref (memref<...,mat>) form that InsertSync actually sees.
+// Resolve the PTO address space of an MGatherOp tile operand type.
 static std::optional<pto::AddressSpace>
 getMGatherOperandAddressSpace(::mlir::Type ty) {
   if (auto tb = ::mlir::dyn_cast<::mlir::pto::TileBufType>(ty)) {
     if (auto as = ::mlir::dyn_cast_or_null<::mlir::pto::AddressSpaceAttr>(
             tb.getMemorySpace()))
       return as.getAddressSpace();
-    return std::nullopt;
-  }
-  if (auto mr = ::mlir::dyn_cast<::mlir::MemRefType>(ty)) {
-    if (auto ms = mr.getMemorySpace()) {
-      if (auto as = ::mlir::dyn_cast<::mlir::pto::AddressSpaceAttr>(ms))
-        return as.getAddressSpace();
-    }
     return std::nullopt;
   }
   return std::nullopt;
@@ -223,8 +213,6 @@ getMGatherOperandShapeFromType(::mlir::Type ty, bool useValidShape = true) {
         useValidShape ? tb.getValidShape() : tb.getShape();
     return SmallVector<int64_t>(shape.begin(), shape.end());
   }
-  if (auto mr = ::mlir::dyn_cast<::mlir::MemRefType>(ty))
-    return SmallVector<int64_t>(mr.getShape().begin(), mr.getShape().end());
   return std::nullopt;
 }
 
@@ -239,17 +227,6 @@ static std::optional<int64_t> getConstantIndex(Value value) {
 }
 
 static std::optional<SmallVector<Value, 2>> lookupMGatherValidDims(Value value) {
-  if (auto bind = value.getDefiningOp<pto::BindTileOp>())
-    return SmallVector<Value, 2>{bind.getValidRow(), bind.getValidCol()};
-  if (auto pc = value.getDefiningOp<pto::PointerCastOp>())
-    return SmallVector<Value, 2>{pc.getValidRow(), pc.getValidCol()};
-  if (auto subview = value.getDefiningOp<memref::SubViewOp>())
-    return lookupMGatherValidDims(subview.getSource());
-  if (auto cast = value.getDefiningOp<memref::ReinterpretCastOp>())
-    return lookupMGatherValidDims(cast.getSource());
-  if (auto cast = value.getDefiningOp<memref::CastOp>())
-    return lookupMGatherValidDims(cast.getSource());
-
   if (auto regionResult = dyn_cast<OpResult>(value)) {
     if (auto fusionRegion = dyn_cast<pto::FusionRegionOp>(regionResult.getOwner())) {
       auto yieldOp =

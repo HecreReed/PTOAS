@@ -11,11 +11,11 @@
 
 module {
   func.func @tmov_mx_scale_left_pipe_selection(
-      %input: memref<1x4x!pto.f8E8M0, #pto.address_space<gm>>) {
+      %input: !pto.partition_tensor_view<1x4x!pto.f8E8M0>) {
     %src = pto.alloc_tile : !pto.tile_buf<loc=mat, dtype=!pto.f8E8M0, rows=1, cols=4, v_row=1, v_col=4, blayout=row_major, slayout=row_major, fractal=32, pad=0>
     %dst = pto.alloc_tile : !pto.tile_buf<loc=scaling, dtype=!pto.f8E8M0, rows=1, cols=4, v_row=1, v_col=4, blayout=row_major, slayout=row_major, fractal=32, pad=0>
 
-    pto.tload ins(%input : memref<1x4x!pto.f8E8M0, #pto.address_space<gm>>)
+    pto.tload ins(%input : !pto.partition_tensor_view<1x4x!pto.f8E8M0>)
               outs(%src : !pto.tile_buf<loc=mat, dtype=!pto.f8E8M0, rows=1, cols=4, v_row=1, v_col=4, blayout=row_major, slayout=row_major, fractal=32, pad=0>)
     pto.tmov ins(%src : !pto.tile_buf<loc=mat, dtype=!pto.f8E8M0, rows=1, cols=4, v_row=1, v_col=4, blayout=row_major, slayout=row_major, fractal=32, pad=0>)
              outs(%dst : !pto.tile_buf<loc=scaling, dtype=!pto.f8E8M0, rows=1, cols=4, v_row=1, v_col=4, blayout=row_major, slayout=row_major, fractal=32, pad=0>)
@@ -23,11 +23,11 @@ module {
   }
 
   func.func @tmov_mx_scale_right_pipe_selection(
-      %input: memref<4x16x!pto.f8E8M0, #pto.address_space<gm>>) {
+      %input: !pto.partition_tensor_view<4x16x!pto.f8E8M0>) {
     %src = pto.alloc_tile : !pto.tile_buf<loc=mat, dtype=!pto.f8E8M0, rows=4, cols=32, v_row=4, v_col=16, blayout=col_major, slayout=col_major, fractal=32, pad=0>
     %dst = pto.alloc_tile : !pto.tile_buf<loc=scaling, dtype=!pto.f8E8M0, rows=4, cols=32, v_row=4, v_col=16, blayout=col_major, slayout=col_major, fractal=32, pad=0>
 
-    pto.tload ins(%input : memref<4x16x!pto.f8E8M0, #pto.address_space<gm>>)
+    pto.tload ins(%input : !pto.partition_tensor_view<4x16x!pto.f8E8M0>)
               outs(%src : !pto.tile_buf<loc=mat, dtype=!pto.f8E8M0, rows=4, cols=32, v_row=4, v_col=16, blayout=col_major, slayout=col_major, fractal=32, pad=0>)
     pto.tmov ins(%src : !pto.tile_buf<loc=mat, dtype=!pto.f8E8M0, rows=4, cols=32, v_row=4, v_col=16, blayout=col_major, slayout=col_major, fractal=32, pad=0>)
              outs(%dst : !pto.tile_buf<loc=scaling, dtype=!pto.f8E8M0, rows=4, cols=32, v_row=4, v_col=16, blayout=col_major, slayout=col_major, fractal=32, pad=0>)

@@ -12,6 +12,7 @@ set(LLVM_LINK_COMPONENTS
 
 add_llvm_executable(pto-test-opt
   pto-test-opt.cpp
+  PARTIAL_SOURCES_INTENDED
 )
 
 target_link_libraries(pto-test-opt PRIVATE
@@ -32,4 +33,21 @@ target_link_libraries(pto-test-opt PRIVATE
 add_dependencies(pto-test-opt
   PTOOpsIncGen
   PTOPassesIncGen
+)
+
+add_llvm_executable(pto-vfsimt-size-patcher-test
+  pto-vfsimt-size-patcher-test.cpp
+  PARTIAL_SOURCES_INTENDED
+)
+
+target_include_directories(pto-vfsimt-size-patcher-test PRIVATE
+  "${CMAKE_SOURCE_DIR}/tools/ptoas"
+)
+
+target_link_libraries(pto-vfsimt-size-patcher-test PRIVATE
+  PTOASVFSIMTSizePatcher
+  LLVMCore
+  LLVMIRReader
+  LLVMSupport
+  MLIRSupport
 )

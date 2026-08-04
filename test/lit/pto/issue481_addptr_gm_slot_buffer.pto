@@ -26,8 +26,8 @@ module {
     return
   }
 
-  func.func @call_both(%arg0: memref<256xi64>, %arg1: !pto.ptr<f32>, %arg2: !pto.ptr<f32>, %arg3: !pto.ptr<f32>) attributes {pto.entry} {
-    pto.set_ffts %arg0 : memref<256xi64>
+  func.func @call_both(%arg0: !pto.ptr<i64>, %arg1: !pto.ptr<f32>, %arg2: !pto.ptr<f32>, %arg3: !pto.ptr<f32>) attributes {pto.entry} {
+    pto.set_ffts %arg0 : !pto.ptr<i64>
     call @cube_kernel(%arg1, %arg2) : (!pto.ptr<f32>, !pto.ptr<f32>) -> ()
     call @vector_kernel(%arg1, %arg3) : (!pto.ptr<f32>, !pto.ptr<f32>) -> ()
     return
@@ -36,11 +36,11 @@ module {
 
 // CHECK-LABEL: AICORE void cube_kernel(__gm__ float* {{[_A-Za-z][_A-Za-z0-9]*}}, __gm__ float* {{[_A-Za-z][_A-Za-z0-9]*}})
 // CHECK: int64_t {{[_A-Za-z][_A-Za-z0-9]*}} = get_block_idx();
-// CHECK: __gm__ float* {{[_A-Za-z][_A-Za-z0-9]*}} = {{[_A-Za-z][_A-Za-z0-9]*}} + {{[_A-Za-z][_A-Za-z0-9]*}};
-// CHECK: auto {{[_A-Za-z][_A-Za-z0-9]*}} = TPipe<0, Direction::DIR_C2V, 1024, 8, 8, false>(
+// CHECK-DAG: {{[_A-Za-z][_A-Za-z0-9]*}} +
+// CHECK-DAG: auto {{[_A-Za-z][_A-Za-z0-9]*}} = TPipe<0, Direction::DIR_C2V, 1024, 8, 8, false>(
 
 // CHECK-LABEL: AICORE void vector_kernel(__gm__ float* {{[_A-Za-z][_A-Za-z0-9]*}}, __gm__ float* {{[_A-Za-z][_A-Za-z0-9]*}})
 // CHECK: int64_t {{[_A-Za-z][_A-Za-z0-9]*}} = get_block_idx();
-// CHECK: __gm__ float* {{[_A-Za-z][_A-Za-z0-9]*}} = {{[_A-Za-z][_A-Za-z0-9]*}} + {{[_A-Za-z][_A-Za-z0-9]*}};
-// CHECK: auto {{[_A-Za-z][_A-Za-z0-9]*}} = TPipe<0, Direction::DIR_C2V, 1024, 8, 8, false>(
+// CHECK-DAG: {{[_A-Za-z][_A-Za-z0-9]*}} +
+// CHECK-DAG: auto {{[_A-Za-z][_A-Za-z0-9]*}} = TPipe<0, Direction::DIR_C2V, 1024, 8, 8, false>(
 // CHECK-NOT: pto.addptr

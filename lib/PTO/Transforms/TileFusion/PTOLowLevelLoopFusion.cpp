@@ -81,10 +81,7 @@ static bool isInterstageSetupOp(Operation *op) {
   if (isPureNoRegionOp(op))
     return true;
 
-  // Tile-native buffers lower to backend memrefs through pto.pointer_cast
-  // between adjacent stage loops. Treat these address materializations as
-  // stage-boundary-transparent so loop-run collection can keep walking.
-  return isa<pto::PointerCastOp>(op);
+  return false;
 }
 
 static bool areEquivalentOperations(Operation *lhs, Operation *rhs) {
@@ -159,8 +156,6 @@ static Value traceAliasRootOneStep(Value value) {
     return cast.getSource();
   if (auto transpose = dyn_cast<memref::TransposeOp>(def))
     return transpose.getIn();
-  if (auto bind = dyn_cast<pto::BindTileOp>(def))
-    return bind.getSource();
   if (auto subview = dyn_cast<pto::SubViewOp>(def))
     return subview.getSource();
   if (auto bitcast = dyn_cast<pto::BitcastOp>(def))

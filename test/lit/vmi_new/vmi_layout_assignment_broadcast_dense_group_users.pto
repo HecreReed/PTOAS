@@ -52,7 +52,7 @@ module {
 // ASSIGN-SAME: -> !pto.vmi.vreg<256xf32, #pto.vmi.layout<deinterleaved = 4>>
 // ASSIGN-NOT: pto.vmi.ensure_layout %[[COPY]]
 // ASSIGN: pto.vmi.store %[[COPY]]
-// ASSIGN-SAME: !pto.vmi.vreg<256xf32, #pto.vmi.layout<deinterleaved = 4>>, !pto.ptr<f32, ub>
+// ASSIGN-SAME: !pto.vmi.vreg<256xf32, #pto.vmi.layout<deinterleaved = 4>>, {{(!pto\.ptr)?<f32, ub>}}
 // ASSIGN: %[[MASK0:.*]] = pto.vmi.create_group_mask
 // ASSIGN-SAME: -> !pto.vmi.mask<256xb32, #pto.vmi.layout<deinterleaved = 4>>
 // ASSIGN: %[[PROD:.*]] = pto.vmi.mulf %[[X]], %[[SCALE]]

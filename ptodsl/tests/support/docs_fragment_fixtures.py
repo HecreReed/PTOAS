@@ -61,6 +61,13 @@ FRAGMENT_FIXTURES = {
             {SNIPPET_PLACEHOLDER}
         """
     ),
+    "type_system.struct": _fixture(
+        f"""
+        @pto.jit(target="a5")
+        def type_system_struct_probe():
+            {SNIPPET_PLACEHOLDER}
+        """
+    ),
     "type_system.low_precision_types": _fixture(
         f"""
         @pto.jit(target="a5")
@@ -2111,8 +2118,8 @@ FRAGMENT_FIXTURES = {
     ),
     "pipe_communication.c2v_local_import": _fixture(
         f"""
-        from mlir.dialects import func
-        from mlir.ir import InsertionPoint
+        from ptoas.mlir.dialects import func
+        from ptoas.mlir.ir import InsertionPoint
         from ptodsl._tracing import current_session
 
 
@@ -2135,8 +2142,8 @@ FRAGMENT_FIXTURES = {
     ),
     "pipe_communication.c2v_local_producer": _fixture(
         f"""
-        from mlir.dialects import func
-        from mlir.ir import InsertionPoint
+        from ptoas.mlir.dialects import func
+        from ptoas.mlir.ir import InsertionPoint
         from ptodsl._tracing import current_session
 
 

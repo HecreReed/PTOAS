@@ -40,6 +40,8 @@
 //   vload  → dispatch by dist_mode/group/block_stride to
 //            load / deinterleave_load / group_broadcast_load{num_groups=1} / ...
 //   vstore → dispatch to store / masked_store / interleave_store / group_store / ...
+//   Continuous 1/2/4/8-lane values alias unit-stride
+//   group_slot_load/group_store operations.
 //   Skipped: dist_mode "unpack" (physical widening, no legacy equivalent).
 //
 // Category C4 — static mask creation (3 ops):
@@ -51,13 +53,6 @@
 //   pset → create_mask(all lanes)
 //   pge  → create_mask(N lanes)
 //   plt  → create_mask(min(rem, L))
-//
-// Category C5 — vector-scalar ops, one-step to legacy (5 ops):
-//   vadds/vmaxs/vmins/vshls/vshrs
-//     → broadcast scalar → legacy binary
-//   vshrs selects shrui for unsigned/signless elements and shrsi for
-//   explicitly signed elements.
-//   vmuls is kept unified for direct VMI-to-VPTO lowering.
 //
 // Category C3 — unified load/store (2 ops, dispatch by dist_mode/group):
 //   vload → load / deinterleave_load / group_load
@@ -82,8 +77,9 @@
 //   vprelu  → maxf + minf + mulf + addf
 //   Category C7/C8/C9 bypass mask/pmode synthesis here and skip pmode="merge".
 //
-// Category D — no legacy equivalent (explicitly skipped, 6 ops):
-//   vmuls vintlv vdintlv vselr vgatherb vmull
+// Category D — no legacy equivalent (explicitly skipped, 11 ops):
+//   vadds/vmuls/vmaxs/vmins/vshls/vshrs
+//   vintlv vdintlv vselr vgatherb vmull
 //
 //===----------------------------------------------------------------------===//
 
@@ -320,6 +316,10 @@ static bool isAllActiveSeed(Value seed) {
   return false;
 }
 
+static bool isCompactGroupCount(int64_t count) {
+  return count == 1 || count == 2 || count == 4 || count == 8;
+}
+
 /// Lower vcmp to cmpf/cmpi + mask_and.
 static LogicalResult lowerVCmp(VMIVcmpOp op, OpBuilder &builder) {
   if (hasMergePmode(op))
@@ -547,9 +547,18 @@ static LogicalResult lowerVLoad(VMIvLoadOp op, OpBuilder &builder) {
   Value offset = op.getOffset();
 
   if (distMode == "continuous") {
-    auto loadOp = builder.create<VMILoadOp>(
-        loc, op.getResults().front().getType(), source, offset);
-    op.getResults().front().replaceAllUsesWith(loadOp.getResult());
+    auto resultType = cast<VMIVRegType>(op.getResults().front().getType());
+    int64_t numGroups = resultType.getElementCount();
+    if (isCompactGroupCount(numGroups)) {
+      Value unitStride = builder.create<arith::ConstantIndexOp>(loc, 1);
+      auto loadOp = builder.create<VMIGroupSlotLoadOp>(
+          loc, resultType, source, offset, unitStride,
+          builder.getI64IntegerAttr(numGroups));
+      op.getResults().front().replaceAllUsesWith(loadOp.getResult());
+    } else {
+      auto loadOp = builder.create<VMILoadOp>(loc, resultType, source, offset);
+      op.getResults().front().replaceAllUsesWith(loadOp.getResult());
+    }
   } else if (distMode == "dintlv") {
     auto dloadOp = builder.create<VMIDeinterleaveLoadOp>(
         loc, op.getResults()[0].getType(), op.getResults()[1].getType(),
@@ -645,6 +654,22 @@ static LogicalResult lowerVStore(VMIvStoreOp op, OpBuilder &builder) {
     if (values.empty())
       return failure();
     Value mask = op.getMask().empty() ? Value() : op.getMask().front();
+    auto valueType = cast<VMIVRegType>(values[0].getType());
+    int64_t numGroups = valueType.getElementCount();
+
+    // A compact 1/2/4/8-lane value contains one scalar per logical group.
+    // Keep masked stores unchanged unless their mask is provably all-active:
+    // group_store currently has no dynamic predication operand.
+    bool allActive = !mask || isAllActiveSeed(mask);
+    bool compact = isCompactGroupCount(numGroups);
+
+    if (compact && allActive) {
+      Value unitStride = builder.create<arith::ConstantIndexOp>(loc, 1);
+      builder.create<VMIGroupStoreOp>(loc, values[0], dest, offset, unitStride,
+                                      builder.getI64IntegerAttr(numGroups));
+      op->erase();
+      return success();
+    }
     if (mask) {
       // Masked store path.
       builder.create<VMIMaskedStoreOp>(loc, values[0], dest, offset, mask);
@@ -738,32 +763,21 @@ static LogicalResult lowerPge(VMIPgeOp op, OpBuilder &builder) {
 }
 
 //===----------------------------------------------------------------------===//
-// Category C5 helpers: vector-scalar ops (one-step to legacy)
-//===----------------------------------------------------------------------===//
-
-/// Lower a unified vector-scalar op (vadds, vmaxs, ...) to a legacy chain:
-///   %brc  = vmi.broadcast %scalar
-///   %raw  = legacy.op %src, %brc
-template <typename VecScalarOp>
-static LogicalResult
-lowerVecScalar(VecScalarOp op, OpBuilder &builder,
-               function_ref<Value(Location, Type, Value, Value)> createLegacy) {
-  Location loc = op.getLoc();
-  Type srcVmiType = op.getSrc().getType();
-  Value src = op.getSrc();
-  Value scalar = op.getScalar();
-
-  Value brc = builder.create<VMIBroadcastOp>(loc, srcVmiType, scalar)
-                  .getResult();
-  Value raw = createLegacy(loc, srcVmiType, src, brc);
-  op.getResult().replaceAllUsesWith(raw);
-  op->erase();
-  return success();
-}
-
-//===----------------------------------------------------------------------===//
 // Category C6 helpers: vcadd / vcmax / vcmin
 //===----------------------------------------------------------------------===//
+
+template <typename ReductionOp>
+static std::optional<int64_t> getReductionNumGroups(ReductionOp op) {
+  if (auto groupAttr = op.getGroupAttr())
+    return groupAttr.getInt();
+
+  // A full reduction is one logical group. Keep the alias decision local to
+  // the reduction instead of relying on a downstream store to mutate it.
+  auto resultType = cast<VMIVRegType>(op.getResult().getType());
+  if (!resultType.getLayoutAttr())
+    return 1;
+  return std::nullopt;
+}
 
 /// Lower vcadd to legacy reduce_addf/reduce_addi or
 /// group_reduce_addf/group_reduce_addi.  Always succeeds for valid input
@@ -780,22 +794,21 @@ static LogicalResult lowerVCadd(VMIvcaddOp op, OpBuilder &builder) {
   Value source = op.getSource();
   Value mask = op.getMask();
 
-  if (auto groupAttr = op.getGroupAttr()) {
+  if (std::optional<int64_t> numGroups = getReductionNumGroups(op)) {
     // Group reduce path
-    int64_t C = groupAttr.getInt();
     Value result;
     if (isFloat)
       result =
           builder
               .create<VMIGroupReduceAddFOp>(loc, resultType, source, mask,
-                                            builder.getI64IntegerAttr(C),
+                                            builder.getI64IntegerAttr(*numGroups),
                                             op.getReassocAttr())
               .getResult();
     else
       result =
           builder
               .create<VMIGroupReduceAddIOp>(loc, resultType, source, mask,
-                                            builder.getI64IntegerAttr(C))
+                                            builder.getI64IntegerAttr(*numGroups))
               .getResult();
     op.getResult().replaceAllUsesWith(result);
   } else {
@@ -834,21 +847,20 @@ static LogicalResult lowerVcmax(VMIvcmaxOp op, OpBuilder &builder) {
   Value source = op.getSource();
   Value mask = op.getMask();
 
-  if (auto groupAttr = op.getGroupAttr()) {
+  if (std::optional<int64_t> numGroups = getReductionNumGroups(op)) {
     // Group reduce path
-    int64_t C = groupAttr.getInt();
     Value result;
     if (isFloat)
       result =
           builder
               .create<VMIGroupReduceMaxFOp>(loc, resultType, source, mask,
-                                            builder.getI64IntegerAttr(C))
+                                            builder.getI64IntegerAttr(*numGroups))
               .getResult();
     else
       result =
           builder
               .create<VMIGroupReduceMaxIOp>(loc, resultType, source, mask,
-                                            builder.getI64IntegerAttr(C))
+                                            builder.getI64IntegerAttr(*numGroups))
               .getResult();
     op.getResult().replaceAllUsesWith(result);
     op->erase();
@@ -885,20 +897,19 @@ static LogicalResult lowerVcmin(VMIvcminOp op, OpBuilder &builder) {
   Value source = op.getSource();
   Value mask = op.getMask();
 
-  if (auto groupAttr = op.getGroupAttr()) {
-    int64_t numGroups = groupAttr.getInt();
+  if (std::optional<int64_t> numGroups = getReductionNumGroups(op)) {
     Value result;
     if (isFloat)
       result = builder
                    .create<VMIGroupReduceMinFOp>(
                        loc, resultType, source, mask,
-                       builder.getI64IntegerAttr(numGroups))
+                       builder.getI64IntegerAttr(*numGroups))
                    .getResult();
     else
       result = builder
                    .create<VMIGroupReduceMinIOp>(
                        loc, resultType, source, mask,
-                       builder.getI64IntegerAttr(numGroups))
+                       builder.getI64IntegerAttr(*numGroups))
                    .getResult();
     op.getResult().replaceAllUsesWith(result);
     op->erase();
@@ -1165,8 +1176,6 @@ void VMILowerUnifiedToLegacyPass::runOnOperation() {
         isa<VMIvLoadOp, VMIvStoreOp>(op) ||
         // Category C4
         isa<VMIPsetOp, VMIPgeOp, VMIPltOp>(op) ||
-        // Category C5
-        isa<VMIAddSOp, VMIMaxSOp, VMIMinSOp, VMIShlSOp, VMIShrSOp>(op) ||
         // Category C6 — unified reduce (partial coverage)
         isa<VMIvcaddOp, VMIvcmaxOp, VMIvcminOp>(op) ||
         // Category C7 — fused multiply-add family → legacy fma
@@ -1178,16 +1187,18 @@ void VMILowerUnifiedToLegacyPass::runOnOperation() {
       worklist.push_back(op);
 
     // Category D — no legacy equivalent (require direct VMIToVPTO lowering):
-    //   plt, vmuls, vintlv, vdintlv, vselr, vgatherb, vmull
+    //   plt, vector-scalar ops, vintlv, vdintlv, vselr, vgatherb, vmull
     // These are intentionally NOT added to the worklist — they flow through
     // to VMIToVPTO which must provide direct 1:N lowering patterns.
-    if (isa<VMIMulSOp, VMIVintlvOp, VMIVdintlvOp, VMIVselrOp,
-            VMIVgatherbOp, VMIVmullOp>(op)) {
+    if (isa<VMIAddSOp, VMIMulSOp, VMIMaxSOp, VMIMinSOp, VMIShlSOp, VMIShrSOp,
+            VMIVintlvOp, VMIVdintlvOp, VMIVselrOp, VMIVgatherbOp, VMIVmullOp>(
+            op)) {
       op->emitRemark("VMI unified op has no legacy equivalent — "
                      "requires direct VMIToVPTO 1:N lowering");
     }
   });
 
+  // Process consumers before producers to avoid stale producer uses.
   for (Operation *op : llvm::reverse(worklist)) {
     if (!op->getBlock())
       continue;
@@ -1305,65 +1316,6 @@ void VMILowerUnifiedToLegacyPass::runOnOperation() {
 
     if (auto vop = dyn_cast<VMIvStoreOp>(op)) {
       (void)lowerVStore(vop, builder);
-      continue;
-    }
-
-    // ---- Category C5: vector-scalar ops ----
-
-    if (auto vop = dyn_cast<VMIAddSOp>(op)) {
-      Type elemType = getVMIElementType(vop.getSrc());
-      auto createLegacy = [&](Location loc, Type ty, Value lhs, Value rhs) -> Value {
-        if (isFloatType(elemType))
-          return builder.create<VMIAddFOp>(loc, ty, lhs, rhs).getResult();
-        return builder.create<VMIAddIOp>(loc, ty, lhs, rhs).getResult();
-      };
-      (void)lowerVecScalar(vop, builder, createLegacy);
-      continue;
-    }
-
-    if (auto vop = dyn_cast<VMIMaxSOp>(op)) {
-      Type elemType = getVMIElementType(vop.getSrc());
-      auto createLegacy = [&](Location loc, Type ty, Value lhs,
-                              Value rhs) -> Value {
-        if (isFloatType(elemType))
-          return builder.create<VMIMaxFOp>(loc, ty, lhs, rhs).getResult();
-        return builder.create<VMIMaxIOp>(loc, ty, lhs, rhs).getResult();
-      };
-      (void)lowerVecScalar(vop, builder, createLegacy);
-      continue;
-    }
-
-    if (auto vop = dyn_cast<VMIMinSOp>(op)) {
-      Type elemType = getVMIElementType(vop.getSrc());
-      auto createLegacy = [&](Location loc, Type ty, Value lhs,
-                              Value rhs) -> Value {
-        if (isFloatType(elemType))
-          return builder.create<VMIMinFOp>(loc, ty, lhs, rhs).getResult();
-        return builder.create<VMIMinIOp>(loc, ty, lhs, rhs).getResult();
-      };
-      (void)lowerVecScalar(vop, builder, createLegacy);
-      continue;
-    }
-
-    if (auto vop = dyn_cast<VMIShlSOp>(op)) {
-      auto createLegacy = [&](Location loc, Type ty, Value lhs,
-                              Value rhs) -> Value {
-        return builder.create<VMIShLIOp>(loc, ty, lhs, rhs).getResult();
-      };
-      (void)lowerVecScalar(vop, builder, createLegacy);
-      continue;
-    }
-
-    if (auto vop = dyn_cast<VMIShrSOp>(op)) {
-      Type elemType = getVMIElementType(vop.getSrc());
-      auto createLegacy = [&](Location loc, Type ty, Value lhs,
-                              Value rhs) -> Value {
-        auto intType = cast<IntegerType>(elemType);
-        if (!intType.isSigned())
-          return builder.create<VMIShRUIOp>(loc, ty, lhs, rhs).getResult();
-        return builder.create<VMIShRSIOp>(loc, ty, lhs, rhs).getResult();
-      };
-      (void)lowerVecScalar(vop, builder, createLegacy);
       continue;
     }
 

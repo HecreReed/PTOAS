@@ -62,15 +62,13 @@ module {
 // CHECK: PTOAS__DCCI_SINGLE_CACHE_LINE({{[_A-Za-z][_A-Za-z0-9]*}});
 
 // CHECK-LABEL: AICORE void single_line_partition_view(
-// CHECK: GlobalTensor<float, {{.*}}> [[PVIEW:[_A-Za-z][_A-Za-z0-9]*]] = GlobalTensor<float, {{.*}}>(
+// CHECK: GlobalTensor<float, {{.*1, 16, 16.*}}> [[PVIEW:[_A-Za-z][_A-Za-z0-9]*]] = GlobalTensor<float, {{.*1, 16, 16.*}}>(
 // CHECK: __gm__ float* [[PVIEW_DATA:[_A-Za-z][_A-Za-z0-9]*]] = PTOAS__GLOBAL_TENSOR_DATA([[PVIEW]]);
 // CHECK: PTOAS__DCCI_SINGLE_CACHE_LINE([[PVIEW_DATA]]);
 
 // CHECK-LABEL: AICORE void single_line_partition_view_nonzero_offset(
-// CHECK-DAG: const int64_t [[COL_OFFSET:[_A-Za-z][_A-Za-z0-9]*]] = 2;
-// CHECK-DAG: const int64_t [[ZERO:[_A-Za-z][_A-Za-z0-9]*]] = 0;
-// CHECK-DAG: const int64_t [[ROW_STRIDE:[_A-Za-z][_A-Za-z0-9]*]] = 32;
-// CHECK-DAG: const int64_t [[ONE:[_A-Za-z][_A-Za-z0-9]*]] = 1;
-// CHECK: GlobalTensor<float, {{.*}}> [[OFFSET_PVIEW:[_A-Za-z][_A-Za-z0-9]*]] = GlobalTensor<float, {{.*}}>({{[_A-Za-z][_A-Za-z0-9]*}} + (([[ZERO]] + [[ONE]] * [[ROW_STRIDE]]) + [[COL_OFFSET]] * [[ONE]]),
+// CHECK-DAG: unsigned [[OFFSET:[_A-Za-z][_A-Za-z0-9]*]] = 34;
+// CHECK: pto::Stride<512, 512, 512, 32, 1>
+// CHECK: GlobalTensor<float, {{.*1, 16, 16.*}}> [[OFFSET_PVIEW:[_A-Za-z][_A-Za-z0-9]*]] = GlobalTensor<float, {{.*1, 16, 16.*}}>({{[_A-Za-z][_A-Za-z0-9]*}} + [[OFFSET]],
 // CHECK: __gm__ float* [[OFFSET_DATA:[_A-Za-z][_A-Za-z0-9]*]] = PTOAS__GLOBAL_TENSOR_DATA([[OFFSET_PVIEW]]);
 // CHECK: PTOAS__DCCI_SINGLE_CACHE_LINE([[OFFSET_DATA]]);

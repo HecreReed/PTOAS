@@ -17,8 +17,8 @@ from ._types import (
     _strip_integer_signedness,
 )
 
-from mlir.dialects import arith
-from mlir.ir import BF16Type, F16Type, F32Type, FloatAttr, IndexType, IntegerType, VectorType
+from ptoas.mlir.dialects import arith
+from ptoas.mlir.ir import BF16Type, F16Type, F32Type, FloatAttr, IndexType, IntegerType, VectorType
 
 
 def classify_runtime_scalar_type(type_obj):
@@ -232,6 +232,14 @@ def _coerce_float_like(value, target_type):
     if value.type == target_type:
         return value
 
+    source_shape = _float_shape(value.type)
+    target_shape = _float_shape(target_type)
+    if source_shape != target_shape:
+        raise TypeError(
+            "cannot coerce floating-point values with different shapes: "
+            f"{value.type} and {target_type}"
+        )
+
     source_width = _float_bytewidth(value.type)
     target_width = _float_bytewidth(target_type)
     if source_width < target_width:
@@ -244,7 +252,15 @@ def _coerce_float_like(value, target_type):
     )
 
 
+def _float_shape(type_obj):
+    if VectorType.isinstance(type_obj):
+        return tuple(VectorType(type_obj).shape)
+    return ()
+
+
 def _float_bytewidth(type_obj):
+    if VectorType.isinstance(type_obj):
+        return _float_bytewidth(VectorType(type_obj).element_type)
     if BF16Type.isinstance(type_obj) or F16Type.isinstance(type_obj):
         return 2
     if F32Type.isinstance(type_obj):

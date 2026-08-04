@@ -22,7 +22,7 @@ ELEMENTWISE = {
 }
 
 # Structured abstraction every elementwise template must preserve.
-SHARED_OPS = ["pto.tile_buf_addr", "memref.subview", "scf.for", "iter_args",
+SHARED_OPS = ["pto.tile_buf_addr", "!pto.ptr<f32, ub>", "scf.for", "iter_args",
               "pto.plt_b32", "pto.vlds", "pto.vsts", "pto.tilelang.instance"]
 
 

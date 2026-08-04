@@ -20,7 +20,7 @@ PTOAS 编译器调试工作流。给定一个 `.pto` 文件，AI 自动生成配
 3. 全局替换：tadd→<op>, TADD→<OP>
 4. 按 cases.py 调整 shape/dtype/eps
 5. 修改 gen_data.py 的 golden 公式
-6. 运行: python3 test/tilelang_st/script/run_st.py -r sim -v a5 -t <op> -p build/tools/ptoas/ptoas
+6. 运行: python3 test/tilelang_st/script/run_st.py -r sim -v a5 -t <op>
 7. 如果比对失败 → 阶段 2 TPrint 调试
 ```
 
@@ -29,7 +29,8 @@ PTOAS 编译器调试工作流。给定一个 `.pto` 文件，AI 自动生成配
 ## 前置
 
 ```bash
-source scripts/ptoas_env.sh
+LLVM_BUILD_DIR=/path/to/llvm/build ./quick_install.sh
+source "${ASCEND_HOME_PATH}/bin/setenv.bash"
 ```
 
 所有命令从 repo root 执行。
@@ -45,14 +46,14 @@ source scripts/ptoas_env.sh
 | PTO IR 样本/测试 | `test/samples/<Op>/` |
 | ST testcase | `test/tilelang_st/npu/a5/src/st/testcase/` |
 | ST 运行脚本 | `test/tilelang_st/script/run_st.py` |
-| ptoas 二进制 | `build/tools/ptoas/ptoas` |
+| ptoas 命令 | 当前 Python 环境安装的 `ptoas`（可用 `PTOAS_BIN` 覆盖） |
 | ODS 定义 | `include/PTO/IR/PTOOps.td` |
 | VPTO ODS 定义 | `include/PTO/IR/VPTOOps.td` |
 | C++ IR/Verifier | `lib/PTO/IR/PTO.cpp` |
 | ExpandTileOp | `lib/PTO/Transforms/ExpandTileOp.cpp` |
 | VPTO→LLVM lowering | `lib/PTO/Transforms/VPTOLLVMEmitter.cpp` |
-| Python DSL 模板 | `lib/TileOps/` |
-| DSL daemon | `tilelang-dsl/python/tilelang_dsl/` |
+| PTODSL TileLib 模板 | `lib/TileOps/` |
+| PTODSL TileLib daemon | `ptodsl/ptodsl/tilelib/serving/` |
 | Tile Op ISA 参考 | `docs/isa/tile-op/` |
 | TPrint 格式/约束详参 | 本文档阶段 2.1 ~ 2.4 |
 
@@ -587,7 +588,7 @@ v30 对、output.bin 错 → TSTORE 路径
 什么阶段报错？
 ├─ ptoas crash/assert fail
 │   ├─ 加了 --enable-tile-op-expand → DSL 模板 bug 或 daemon 缓存过期
-│   │   → pkill -f daemon_server; 检查 lib/TileOps/<op>_template.py
+│   │   → pkill -f tilelib; 检查 lib/TileOps/a5/<op>.py
 │   └─ 没加 → VPTO lowering 或 pass pipeline bug
 │       → --vpto-print-ir 看 VPTO IR; 检查 VPTOLLVMEmitter.cpp
 │
@@ -661,29 +662,29 @@ TPrint 不匹配时，按以下顺序排查：
 | C++ IR/Verifier | `lib/PTO/IR/PTO.cpp` | `ninja -C build ptoas` + 清 build |
 | Expand/属性转发 | `lib/PTO/Transforms/ExpandTileOp.cpp` | `ninja -C build ptoas` + 清 build |
 | VPTO→LLVM lowering | `lib/PTO/Transforms/VPTOLLVMEmitter.cpp` | `ninja -C build ptoas` + 清 build |
-| DSL 模板 | `lib/TileOps/*_template.py` | 清 build + `pkill -f daemon_server` |
+| PTODSL TileLib 模板 | `lib/TileOps/a5/*.py` | 清 build + 重启 TileLib daemon |
 | `.pto` 文件 | `*.pto` | 仅重跑 ptoas |
 
 **清 build**：`rm -rf test/tilelang_st/npu/a5/src/st/build`
 
 **完整验证**：
 ```bash
-ninja -C build ptoas && \
+ninja -C build ptoas && pip install -e . --no-build-isolation && \
   rm -rf test/tilelang_st/npu/a5/src/st/build && \
-  python3 test/tilelang_st/script/run_st.py -r sim -v a5 -t <op> -p build/tools/ptoas/ptoas
+  python3 test/tilelang_st/script/run_st.py -r sim -v a5 -t <op>
 ```
 
 ### run_st.py 常用参数
 
 ```bash
 # 运行单个 op 的所有 case
-python3 test/tilelang_st/script/run_st.py -r sim -v a5 -t tadd -p build/tools/ptoas/ptoas
+python3 test/tilelang_st/script/run_st.py -r sim -v a5 -t tadd
 
 # 只运行特定 case
-python3 test/tilelang_st/script/run_st.py -r sim -v a5 -t tadd -c f32_16x64 -p build/tools/ptoas/ptoas
+python3 test/tilelang_st/script/run_st.py -r sim -v a5 -t tadd -c f32_16x64
 
 # 跳过构建（使用已有 build）
-python3 test/tilelang_st/script/run_st.py -r sim -v a5 -t tadd -p build/tools/ptoas/ptoas --without-build
+python3 test/tilelang_st/script/run_st.py -r sim -v a5 -t tadd --without-build
 ```
 
 ---

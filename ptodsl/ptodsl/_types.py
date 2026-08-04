@@ -9,7 +9,7 @@
 Lazy MLIR type descriptors and eager type constructors.
 
 Type descriptors (``_DType`` subclasses) can be created *before* any MLIR
-Context exists – they only resolve to concrete ``mlir.ir.Type`` objects when
+Context exists – they only resolve to concrete ``ptoas.mlir.ir.Type`` objects when
 ``_resolve()`` is called inside an active context.  This lets users write::
 
     def softmax(arg0: pto.ptr(pto.float32, "GM"), ...):
@@ -19,12 +19,10 @@ where the annotation is evaluated at *import* time (no active context), and
 the actual type is materialised later by the ``@pto.jit`` decorator.
 """
 
-from ._bootstrap import make_context  # ensure MLIR is on sys.path
-
-from mlir.dialects import pto as _pto
-from mlir.dialects import arith
-from mlir.dialects.builtin import UnrealizedConversionCastOp
-from mlir.ir import (
+from ptoas.mlir.dialects import pto as _pto
+from ptoas.mlir.dialects import arith
+from ptoas.mlir.dialects.builtin import UnrealizedConversionCastOp
+from ptoas.mlir.ir import (
     BF16Type,
     F16Type,
     F32Type,
@@ -152,6 +150,35 @@ class _MaskDescriptor(_DType):
     def __repr__(self):
         return f"<pto.mask {self._bits}>"
 
+
+class _StructDescriptor(_DType):
+    """Deferred ``!pto.struct<...>`` type assembled from scalar fields."""
+
+    def __init__(self, field_descriptors):
+        self._field_descriptors = tuple(field_descriptors)
+
+    @property
+    def field_descriptors(self):
+        return self._field_descriptors
+
+    def resolve(self) -> Type:
+        struct_type_cls = getattr(_pto, "StructType", None)
+        if struct_type_cls is None:
+            raise TypeError(
+                "The current PTO Python bindings do not expose StructType. "
+                "Rebuild the PTO Python extension before using pto.struct_type(...)."
+            )
+        field_types = [
+            _resolve_struct_field_type(field, context="pto.struct_type(...)")
+            for field in self._field_descriptors
+        ]
+        return struct_type_cls.get(field_types)
+
+    def __repr__(self):
+        fields = ", ".join(repr(field) for field in self._field_descriptors)
+        return f"<pto.struct {fields}>"
+
+
 class _VMIVRegDescriptor(_DType):
     def __init__(self, lanes: int, elem):
         self._lanes = lanes
@@ -218,10 +245,10 @@ def _validate_vec_size(size: int, *, context: str) -> int:
 
 
 def _resolve(dtype) -> Type:
-    """Coerce a ``_DType`` descriptor or a concrete ``mlir.ir.Type`` to a Type."""
+    """Coerce a ``_DType`` descriptor or a concrete ``ptoas.mlir.ir.Type`` to a Type."""
     if isinstance(dtype, _DType):
         return dtype.resolve()
-    return dtype  # already an mlir.ir.Type
+    return dtype  # already a ptoas.mlir.ir.Type
 
 
 def _classify_scalar_type(type_obj):
@@ -240,6 +267,39 @@ def _isinstance_pto_type(type_obj, type_name: str) -> bool:
         return cls.isinstance(type_obj)
     except Exception:
         return False
+
+
+def _is_struct_type(type_obj) -> bool:
+    """Return whether *type_obj* is a PTO struct type without requiring new bindings."""
+    return isinstance(type_obj, _StructDescriptor) or _isinstance_pto_type(type_obj, "StructType")
+
+
+def _resolve_struct_field_type(field, *, context: str) -> Type:
+    """Resolve one public PTODSL struct field to a scalar or nested struct type."""
+    if isinstance(field, _StructDescriptor):
+        return field.resolve()
+    if isinstance(field, _DType):
+        field_type = field.resolve()
+    elif isinstance(field, Type):
+        field_type = field
+    else:
+        raise TypeError(
+            f"{context} field must be a PTODSL scalar dtype, an MLIR scalar type, "
+            f"or another pto.struct_type(...); got {field!r}"
+        )
+
+    if _is_struct_type(field_type):
+        return field_type
+    if IntegerType.isinstance(field_type):
+        width = IntegerType(field_type).width
+        if width in (8, 16, 32, 64):
+            return field_type
+    if any(cls.isinstance(field_type) for cls in (F16Type, BF16Type, F32Type)):
+        return field_type
+    raise TypeError(
+        f"{context} field type {field_type} is not supported; expected i8/i16/i32/i64, "
+        "f16/bf16/f32, or a nested pto.struct_type(...)"
+    )
 
 
 def _classify_storage_dtype(type_obj):
@@ -494,6 +554,13 @@ def mask_type(bits: str = "b32") -> _MaskDescriptor:
     return _MaskDescriptor(bits)
 
 
+def struct_type(*field_types) -> _StructDescriptor:
+    """Return a lazy descriptor for ``!pto.struct<field_types...>``."""
+    if not field_types:
+        raise ValueError("pto.struct_type(...) requires at least one field")
+    return _StructDescriptor(field_types)
+
+
 def vmi_vreg_type(lanes: int, elem) -> _VMIVRegDescriptor:
     """Return a lazy descriptor for ``!pto.vmi.vreg<lanesxelem>``."""
     return _VMIVRegDescriptor(lanes, elem)
@@ -584,7 +651,7 @@ __all__ = [
     "si8", "si16", "si32", "si64",
     "ui8", "ui16", "ui32", "ui64",
     "index",
-    "ptr", "vreg_type", "vec_type", "mask_type",
+    "ptr", "vreg_type", "vec_type", "mask_type", "struct_type",
     "vmi_vreg_type", "vmi_mask_type",
     "tile_buf_type", "tensor_view_type", "tensor_view_type_from_dims",
     "part_tensor_view_type", "part_tensor_view_type_from_dims",

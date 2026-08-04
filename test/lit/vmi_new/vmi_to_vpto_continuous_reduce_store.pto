@@ -1,0 +1,120 @@
+// Copyright (c) 2026 Huawei Technologies Co., Ltd.
+// This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+// CANN Open Software License Agreement Version 2.0 (the "License").
+// Please refer to the License for details. You may not use this file except in compliance with the License.
+// THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+// INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+// See LICENSE in the root of the software repository for the full text of the License.
+
+// RUN: pto-test-opt %s -vmi-lower-unified-to-legacy -vmi-mask-granularity-assignment -vmi-layout-assignment | FileCheck %s --check-prefix=ASSIGN
+// RUN: pto-test-opt %s -vmi-lower-unified-to-legacy -vmi-mask-granularity-assignment -vmi-layout-assignment -vmi-to-vpto | FileCheck %s --check-prefix=LOWER
+
+module {
+  func.func @continuous_reduce_store_1(
+      %source: !pto.vmi.vreg<64xf32>,
+      %reduce_mask: !pto.vmi.mask<64xpred>,
+      %dst: !pto.ptr<f32, ub>, %off: index) {
+    %store_mask = pto.vmi.pset "PAT_ALL" : !pto.vmi.mask<1xpred>
+    %sum = pto.vmi.vcadd %source, %reduce_mask {reassoc}
+        : !pto.vmi.vreg<64xf32>, !pto.vmi.mask<64xpred>
+        -> !pto.vmi.vreg<1xf32>
+    pto.vmi.vstore %sum, %dst[%off], %store_mask
+        : !pto.vmi.vreg<1xf32>, !pto.ptr<f32, ub>, !pto.vmi.mask<1xpred>
+    return
+  }
+
+  func.func @continuous_reduce_store_2(
+      %source: !pto.vmi.vreg<128xf32>,
+      %mask: !pto.vmi.mask<128xpred>,
+      %dst: !pto.ptr<f32, ub>, %off: index) {
+    %max = pto.vmi.vcmax %source, %mask {group = 2}
+        : !pto.vmi.vreg<128xf32>, !pto.vmi.mask<128xpred>
+        -> !pto.vmi.vreg<2xf32>
+    pto.vmi.vstore %max, %dst[%off]
+        : !pto.vmi.vreg<2xf32>, !pto.ptr<f32, ub>
+    return
+  }
+
+  func.func @continuous_reduce_store_4(
+      %source: !pto.vmi.vreg<256xf32>,
+      %mask: !pto.vmi.mask<256xpred>,
+      %dst: !pto.ptr<f32, ub>, %off: index) {
+    %min = pto.vmi.vcmin %source, %mask {group = 4}
+        : !pto.vmi.vreg<256xf32>, !pto.vmi.mask<256xpred>
+        -> !pto.vmi.vreg<4xf32>
+    pto.vmi.vstore %min, %dst[%off]
+        : !pto.vmi.vreg<4xf32>, !pto.ptr<f32, ub>
+    return
+  }
+
+  func.func @continuous_reduce_store_8(
+      %source: !pto.vmi.vreg<512xf32>,
+      %mask: !pto.vmi.mask<512xpred>,
+      %dst: !pto.ptr<f32, ub>, %off: index) {
+    %sum = pto.vmi.vcadd %source, %mask {group = 8, reassoc}
+        : !pto.vmi.vreg<512xf32>, !pto.vmi.mask<512xpred>
+        -> !pto.vmi.vreg<8xf32>
+    pto.vmi.vstore %sum, %dst[%off]
+        : !pto.vmi.vreg<8xf32>, !pto.ptr<f32, ub>
+    return
+  }
+
+  func.func @dynamic_mask_keeps_masked_store(
+      %source: !pto.vmi.vreg<64xf32>,
+      %reduce_mask: !pto.vmi.mask<64xpred>,
+      %store_mask: !pto.vmi.mask<1xpred>,
+      %dst: !pto.ptr<f32, ub>, %off: index) {
+    %sum = pto.vmi.vcadd %source, %reduce_mask {reassoc}
+        : !pto.vmi.vreg<64xf32>, !pto.vmi.mask<64xpred>
+        -> !pto.vmi.vreg<1xf32>
+    pto.vmi.vstore %sum, %dst[%off], %store_mask
+        : !pto.vmi.vreg<1xf32>, !pto.ptr<f32, ub>, !pto.vmi.mask<1xpred>
+    return
+  }
+}
+
+// ASSIGN-LABEL: func.func @continuous_reduce_store_1(
+// ASSIGN: %[[SUM1:.*]] = pto.vmi.group_reduce_addf
+// ASSIGN-SAME: {num_groups = 1 : i64, reassoc}
+// ASSIGN-SAME: -> !pto.vmi.vreg<1xf32, #pto.vmi.layout<num_groups = 1, slots = 1>>
+// ASSIGN: pto.vmi.group_store %[[SUM1]]
+// ASSIGN-SAME: {num_groups = 1 : i64}
+
+// ASSIGN-LABEL: func.func @continuous_reduce_store_2(
+// ASSIGN: %[[MAX2:.*]] = pto.vmi.group_reduce_maxf
+// ASSIGN: pto.vmi.group_store %[[MAX2]]
+// ASSIGN-SAME: {num_groups = 2 : i64}
+
+// ASSIGN-LABEL: func.func @continuous_reduce_store_4(
+// ASSIGN: %[[MIN4:.*]] = pto.vmi.group_reduce_minf
+// ASSIGN: pto.vmi.group_store %[[MIN4]]
+// ASSIGN-SAME: {num_groups = 4 : i64}
+
+// ASSIGN-LABEL: func.func @continuous_reduce_store_8(
+// ASSIGN: %[[SUM8:.*]] = pto.vmi.group_reduce_addf
+// ASSIGN: pto.vmi.group_store %[[SUM8]]
+// ASSIGN-SAME: {num_groups = 8 : i64}
+
+// ASSIGN-LABEL: func.func @dynamic_mask_keeps_masked_store(
+// ASSIGN: %[[GROUP_SUM:.*]] = pto.vmi.group_reduce_addf
+// ASSIGN: %[[DENSE_SUM:.*]] = pto.vmi.ensure_layout %[[GROUP_SUM]]
+// ASSIGN: pto.vmi.masked_store %[[DENSE_SUM]]
+// ASSIGN-NOT: pto.vmi.group_store
+
+// LOWER-LABEL: func.func @continuous_reduce_store_1(
+// LOWER: pto.vcadd
+// LOWER: pto.vsts {{.*}} {dist = "1PT_B32"}
+
+// LOWER-LABEL: func.func @continuous_reduce_store_2(
+// LOWER: pto.vsts {{.*}} {dist = "1PT_B32"}
+// LOWER: pto.vsts {{.*}} {dist = "1PT_B32"}
+
+// LOWER-LABEL: func.func @continuous_reduce_store_4(
+// LOWER-COUNT-4: pto.vsts {{.*}} {dist = "1PT_B32"}
+
+// LOWER-LABEL: func.func @continuous_reduce_store_8(
+// LOWER-COUNT-8: pto.vsts {{.*}} {dist = "1PT_B32"}
+
+// LOWER-LABEL: func.func @dynamic_mask_keeps_masked_store(
+// LOWER: pto.vsts
+// LOWER-NOT: {dist = "1PT_B32"}

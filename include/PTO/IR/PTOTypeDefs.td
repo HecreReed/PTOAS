@@ -280,7 +280,7 @@ def EventIdArrayType : TypeDef<PTO_Dialect, "EventIdArray"> {
 // Statically-shaped C++ stack-local array. Lowers to a plain `T a[D1][D2]...;`
 // declaration in the emitted C++. Element type is restricted to scalars
 // (integer / float). This type does NOT participate in PTO memory planning
-// or pto.pointer_cast lowering — the underlying address is decided by the
+// lowering; the underlying address is decided by the
 // host C++ compiler, not by PTOAS.
 def LocalArrayType : TypeDef<PTO_Dialect, "LocalArray"> {
   let mnemonic = "local_array";
@@ -322,11 +322,10 @@ def LocalArrayType : TypeDef<PTO_Dialect, "LocalArray"> {
 //     result must be an !emitc.lvalue, and !emitc.lvalue cannot wrap the
 //     !emitc.array an array field lowers to.
 //
-// A value of this type lowers to a *pointer* to the struct's storage, so it can
-// be passed to a helper function and mutated there. To keep the pointed-to
-// lifetime visible, storage originates from pto.declare_struct or a function
-// argument, and other operations may not produce derived values of this type;
-// see PTOToEmitC.cpp.
+// A value of this type lowers to a *pointer* to the struct's storage. To keep
+// the pointed-to lifetime visible, storage originates only from
+// pto.declare_struct in the owning function; function arguments and other
+// operations may not produce values of this type; see PTO.cpp.
 def StructType : TypeDef<PTO_Dialect, "Struct"> {
   let mnemonic = "struct";
   let summary = "Scalar-unit heterogeneous aggregate (C++ struct / llvm.struct)";

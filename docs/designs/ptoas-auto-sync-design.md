@@ -84,7 +84,7 @@
 | 字段 | 类型 | 作用 |
 | --- | --- | --- |
 | `baseBuffer` | `Value` | 当前 op 直接看到的 SSA buffer（可能是 view/cast 链顶端） |
-| `rootBuffer` | `Value` | 静态可知的最根缓冲区（`alloc_tile` / kernel arg / `memref.alloc`） |
+| `rootBuffer` | `Value` | 静态可知的最根缓冲区（`alloc_tile` / `alloc_multi_tile` / kernel ptr arg） |
 | `scope` | `pto::AddressSpace` | 地址空间（GM/MAT/VEC/ACC/LEFT/RIGHT 等） |
 | `baseAddresses` | `SmallVector<uint64_t>` | 已知的偏移列表，配合 `allocateSize` 做精确区间重叠 |
 | `allocateSize` | `uint64_t` | 字节大小 |
@@ -199,8 +199,8 @@ MLIR op，最终生成 `pto::SetFlagOp` / `pto::WaitFlagOp` / `pto::BarrierOp`�
 - 主要逻辑：
   1. `UpdateKernelArgMemInfo()`：把 kernel 参数登记为 GM root buffer。
   2. `RecursionIR(&func.getBody())`：前序遍历 region：
-     - `pto::AllocTileOp` / `DeclareTileMemRefOp` / `PointerCastOp` /
-       `memref::AllocOp` 经 `Update*MemInfo` 写入 `buffer2MemInfoMap_`。
+     - `pto::AllocTileOp` / `pto::AllocMultiTileOp` / `pto::DeclareTileOp`
+       经 `Update*MemInfo` 写入 `buffer2MemInfoMap_`。
      - View / Subview / Cast / Mov 调 `UpdateAliasBufferInfo(result, source)`，
        把派生 buffer 的 `BaseMemInfo` 链回到原 root。
      - `scf::ForOp` / `WhileOp` / `IfOp` / `YieldOp` 经 `UpdateForOpInfo` /

@@ -1,0 +1,81 @@
+// Copyright (c) 2026 Huawei Technologies Co., Ltd.
+// This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+// CANN Open Software License Agreement Version 2.0 (the "License").
+// Please refer to the License for details. You may not use this file except in compliance with the License.
+// THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+// INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+// See LICENSE in the root of the software repository for the full text of the License.
+
+// RUN: ptoas --pto-level=level3 --pto-arch=a5 --mlir-print-ir-after=pto-resolve-reserved-buffers %s -o /dev/null 2>&1 | FileCheck %s --check-prefix=NATIVE
+// RUN: ptoas --pto-level=level3 --pto-arch=a3 --enable-insert-sync %s | FileCheck %s --check-prefix=EMITC
+
+module {
+  func.func private @trowexpand_arg(%src: !pto.tile_buf<loc=vec, dtype=f32, rows=8, cols=1, v_row=8, v_col=1, blayout=col_major, slayout=none_box, fractal=512, pad=0>, %dst: !pto.tile_buf<vec, 8x16xf32>) {
+    pto.trowexpand ins(%src : !pto.tile_buf<loc=vec, dtype=f32, rows=8, cols=1, v_row=8, v_col=1, blayout=col_major, slayout=none_box, fractal=512, pad=0>) outs(%dst : !pto.tile_buf<vec, 8x16xf32>)
+    return
+  }
+  func.func private @trowexpandadd_arg(%a: !pto.tile_buf<vec, 8x16xf32>, %b: !pto.tile_buf<loc=vec, dtype=f32, rows=8, cols=1, v_row=8, v_col=1, blayout=col_major, slayout=none_box, fractal=512, pad=0>, %dst: !pto.tile_buf<vec, 8x16xf32>) {
+    pto.trowexpandadd ins(%a, %b : !pto.tile_buf<vec, 8x16xf32>, !pto.tile_buf<loc=vec, dtype=f32, rows=8, cols=1, v_row=8, v_col=1, blayout=col_major, slayout=none_box, fractal=512, pad=0>) outs(%dst : !pto.tile_buf<vec, 8x16xf32>)
+    return
+  }
+  func.func private @trowexpandsub_arg(%a: !pto.tile_buf<vec, 8x16xf32>, %b: !pto.tile_buf<loc=vec, dtype=f32, rows=8, cols=1, v_row=8, v_col=1, blayout=col_major, slayout=none_box, fractal=512, pad=0>, %dst: !pto.tile_buf<vec, 8x16xf32>) {
+    pto.trowexpandsub ins(%a, %b : !pto.tile_buf<vec, 8x16xf32>, !pto.tile_buf<loc=vec, dtype=f32, rows=8, cols=1, v_row=8, v_col=1, blayout=col_major, slayout=none_box, fractal=512, pad=0>) outs(%dst : !pto.tile_buf<vec, 8x16xf32>)
+    return
+  }
+  func.func private @trowexpandmul_arg(%a: !pto.tile_buf<vec, 8x16xf32>, %b: !pto.tile_buf<loc=vec, dtype=f32, rows=8, cols=1, v_row=8, v_col=1, blayout=col_major, slayout=none_box, fractal=512, pad=0>, %dst: !pto.tile_buf<vec, 8x16xf32>) {
+    pto.trowexpandmul ins(%a, %b : !pto.tile_buf<vec, 8x16xf32>, !pto.tile_buf<loc=vec, dtype=f32, rows=8, cols=1, v_row=8, v_col=1, blayout=col_major, slayout=none_box, fractal=512, pad=0>) outs(%dst : !pto.tile_buf<vec, 8x16xf32>)
+    return
+  }
+  func.func private @trowexpanddiv_arg(%a: !pto.tile_buf<vec, 8x16xf32>, %b: !pto.tile_buf<loc=vec, dtype=f32, rows=8, cols=1, v_row=8, v_col=1, blayout=col_major, slayout=none_box, fractal=512, pad=0>, %dst: !pto.tile_buf<vec, 8x16xf32>) {
+    pto.trowexpanddiv ins(%a, %b : !pto.tile_buf<vec, 8x16xf32>, !pto.tile_buf<loc=vec, dtype=f32, rows=8, cols=1, v_row=8, v_col=1, blayout=col_major, slayout=none_box, fractal=512, pad=0>) outs(%dst : !pto.tile_buf<vec, 8x16xf32>)
+    return
+  }
+  func.func private @trowexpandmax_arg(%a: !pto.tile_buf<vec, 8x16xf32>, %b: !pto.tile_buf<loc=vec, dtype=f32, rows=8, cols=1, v_row=8, v_col=1, blayout=col_major, slayout=none_box, fractal=512, pad=0>, %dst: !pto.tile_buf<vec, 8x16xf32>) {
+    pto.trowexpandmax ins(%a, %b : !pto.tile_buf<vec, 8x16xf32>, !pto.tile_buf<loc=vec, dtype=f32, rows=8, cols=1, v_row=8, v_col=1, blayout=col_major, slayout=none_box, fractal=512, pad=0>) outs(%dst : !pto.tile_buf<vec, 8x16xf32>)
+    return
+  }
+  func.func private @trowexpandmin_arg(%a: !pto.tile_buf<vec, 8x16xf32>, %b: !pto.tile_buf<loc=vec, dtype=f32, rows=8, cols=1, v_row=8, v_col=1, blayout=col_major, slayout=none_box, fractal=512, pad=0>, %dst: !pto.tile_buf<vec, 8x16xf32>) {
+    pto.trowexpandmin ins(%a, %b : !pto.tile_buf<vec, 8x16xf32>, !pto.tile_buf<loc=vec, dtype=f32, rows=8, cols=1, v_row=8, v_col=1, blayout=col_major, slayout=none_box, fractal=512, pad=0>) outs(%dst : !pto.tile_buf<vec, 8x16xf32>)
+    return
+  }
+  func.func private @trowexpandexpdif_arg(%a: !pto.tile_buf<vec, 8x16xf32>, %b: !pto.tile_buf<loc=vec, dtype=f32, rows=8, cols=1, v_row=8, v_col=1, blayout=col_major, slayout=none_box, fractal=512, pad=0>, %dst: !pto.tile_buf<vec, 8x16xf32>) {
+    pto.trowexpandexpdif ins(%a, %b : !pto.tile_buf<vec, 8x16xf32>, !pto.tile_buf<loc=vec, dtype=f32, rows=8, cols=1, v_row=8, v_col=1, blayout=col_major, slayout=none_box, fractal=512, pad=0>) outs(%dst : !pto.tile_buf<vec, 8x16xf32>)
+    return
+  }
+}
+
+// NATIVE-LABEL: @trowexpand_arg
+// NATIVE-SAME: !pto.tile_buf<
+// NATIVE: pto.trowexpand
+// NATIVE-LABEL: @trowexpandadd_arg
+// NATIVE: pto.trowexpandadd
+// NATIVE-LABEL: @trowexpandsub_arg
+// NATIVE: pto.trowexpandsub
+// NATIVE-LABEL: @trowexpandmul_arg
+// NATIVE: pto.trowexpandmul
+// NATIVE-LABEL: @trowexpanddiv_arg
+// NATIVE: pto.trowexpanddiv
+// NATIVE-LABEL: @trowexpandmax_arg
+// NATIVE: pto.trowexpandmax
+// NATIVE-LABEL: @trowexpandmin_arg
+// NATIVE: pto.trowexpandmin
+// NATIVE-LABEL: @trowexpandexpdif_arg
+// NATIVE: pto.trowexpandexpdif
+// NATIVE-NOT: memref<
+
+// EMITC-LABEL: trowexpand_arg(
+// EMITC: TROWEXPAND(
+// EMITC-LABEL: trowexpandadd_arg(
+// EMITC: TROWEXPANDADD(
+// EMITC-LABEL: trowexpandsub_arg(
+// EMITC: TROWEXPANDSUB(
+// EMITC-LABEL: trowexpandmul_arg(
+// EMITC: TROWEXPANDMUL(
+// EMITC-LABEL: trowexpanddiv_arg(
+// EMITC: TROWEXPANDDIV(
+// EMITC-LABEL: trowexpandmax_arg(
+// EMITC: TROWEXPANDMAX(
+// EMITC-LABEL: trowexpandmin_arg(
+// EMITC: TROWEXPANDMIN(
+// EMITC-LABEL: trowexpandexpdif_arg(
+// EMITC: TROWEXPANDEXPDIF(

@@ -10,7 +10,7 @@
 
 module attributes {"pto.device-spec" = "Ascend910B3"} {
   func.func @issue708_zero_valid_subview_row(
-      %dst: memref<5x128xf32, #pto.address_space<gm>>)
+      %dst: !pto.partition_tensor_view<5x128xf32>)
       attributes {pto.kernel_kind = #pto.kernel_kind<vector>} {
     %c0 = arith.constant 0 : index
     %c128 = arith.constant 128 : index
@@ -22,12 +22,12 @@ module attributes {"pto.device-spec" = "Ascend910B3"} {
       -> !pto.tile_buf<loc=vec, dtype=f32, rows=5, cols=128, v_row=0, v_col=128, blayout=row_major, slayout=none_box, fractal=512, pad=0>
 
     pto.tstore ins(%tail : !pto.tile_buf<loc=vec, dtype=f32, rows=5, cols=128, v_row=0, v_col=128, blayout=row_major, slayout=none_box, fractal=512, pad=0>)
-               outs(%dst : memref<5x128xf32, #pto.address_space<gm>>)
+               outs(%dst : !pto.partition_tensor_view<5x128xf32>)
     return
   }
 
   func.func @issue708_zero_valid_subview_col(
-      %dst: memref<5x128xf32, #pto.address_space<gm>>)
+      %dst: !pto.partition_tensor_view<5x128xf32>)
       attributes {pto.kernel_kind = #pto.kernel_kind<vector>} {
     %c0 = arith.constant 0 : index
     %c5 = arith.constant 5 : index
@@ -40,17 +40,15 @@ module attributes {"pto.device-spec" = "Ascend910B3"} {
       -> !pto.tile_buf<loc=vec, dtype=f32, rows=5, cols=128, v_row=5, v_col=0, blayout=row_major, slayout=none_box, fractal=512, pad=0>
 
     pto.tstore ins(%tail : !pto.tile_buf<loc=vec, dtype=f32, rows=5, cols=128, v_row=5, v_col=0, blayout=row_major, slayout=none_box, fractal=512, pad=0>)
-               outs(%dst : memref<5x128xf32, #pto.address_space<gm>>)
+               outs(%dst : !pto.partition_tensor_view<5x128xf32>)
     return
   }
 }
 
 // CHECK-LABEL: func.func @issue708_zero_valid_subview_row
-// CHECK: %[[ROW:[0-9A-Za-z_]+]] = pto.bind_tile {{.*}}, %c0, %c128
-// CHECK-SAME: pto.view_semantics = "subview"
+// CHECK: %[[ROW:[0-9A-Za-z_]+]] = pto.alloc_tile addr = %{{.*}} {pto.view_semantics = "subview"} : !pto.tile_buf<vec, 5x128xf32, valid=0x128>
 // CHECK: pto.tstore ins(%[[ROW]]
 
 // CHECK-LABEL: func.func @issue708_zero_valid_subview_col
-// CHECK: %[[COL:[0-9A-Za-z_]+]] = pto.bind_tile {{.*}}, %c5, %c0
-// CHECK-SAME: pto.view_semantics = "subview"
+// CHECK: %[[COL:[0-9A-Za-z_]+]] = pto.alloc_tile addr = %{{.*}} {pto.view_semantics = "subview"} : !pto.tile_buf<vec, 5x128xf32, valid=5x0>
 // CHECK: pto.tstore ins(%[[COL]]

@@ -753,9 +753,10 @@ repeat-stride distance, enabling stateful store streams.
 
 ---
 
-#### `pto.vscatter(vec: VRegType, buf: PtrType, offsets: Index, mask: MaskType) -> None`
+#### `pto.vscatter(vec: VRegType, buf: PtrType, offsets: VRegType, mask: MaskType) -> None`
 
-**Description**: Indexed scatter to UB. Stores vector lanes to irregular locations using per-lane offsets.
+**Description**: Indexed scatter to UB. Stores vector elements to irregular
+locations using unsigned element offsets relative to `buf`.
 
 **Parameters**:
 
@@ -763,8 +764,21 @@ repeat-stride distance, enabling stateful store streams.
 |-----------|------|-------------|
 | `vec` | `VRegType` | Source vector to scatter |
 | `buf` | `PtrType` (UB) | Destination buffer |
-| `offsets` | `Index` | Per-lane element offsets (vector register) |
+| `offsets` | `VRegType` | Unsigned per-request element offsets |
 | `mask` | `MaskType` | Predicate mask gating lane participation |
+
+**Supported type combinations**:
+
+| Value and destination | Offsets | Mask | Requests |
+|-----------------------|---------|------|----------|
+| 256 lanes of b8 data | 128 lanes of `i16` or `ui16` | `b16` | 128 |
+| 128 lanes of b16 data | 128 lanes of `i16` or `ui16` | `b16` | 128 |
+| 64 lanes of b32 data | 64 lanes of `i32` or `ui32` | `b32` | 64 |
+
+For b8 data, request `i` stores `vec[2 * i]`; odd-numbered source bytes are
+ignored. The destination is `buf + unsigned(offsets[i])` in elements. If
+multiple active requests use the same offset, only one write is guaranteed and
+the winning request is implementation-defined.
 
 **Returns**: None (side-effect operation).
 

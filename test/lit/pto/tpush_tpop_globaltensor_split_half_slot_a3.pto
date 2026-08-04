@@ -12,9 +12,9 @@
 // RUN: ptoas --pto-arch=a3 %s 2>&1 | FileCheck %s
 
 module {
-  func.func @call_both(%ffts : memref<256xi64>, %fifo_mem : !pto.ptr<f32>)
+  func.func @call_both(%ffts : !pto.ptr<i64>, %fifo_mem : !pto.ptr<f32>)
       attributes {pto.entry} {
-    pto.set_ffts %ffts : memref<256xi64>
+    pto.set_ffts %ffts : !pto.ptr<i64>
     func.call @cube_kernel(%fifo_mem) : (!pto.ptr<f32>) -> ()
     func.call @vector_kernel(%fifo_mem) : (!pto.ptr<f32>) -> ()
     return

@@ -15,17 +15,7 @@ using namespace mlir::detail;
 using namespace mlir::pto;
 
 void OptMemPlanForDma::build(func::FuncOp func) {
-  auto result = func->walk<WalkOrder::PreOrder>([&](Operation *op) {
-    if (auto loadOp = dyn_cast<memref::LoadOp>(op)) {
-      UpdateScalarBuffers(loadOp);
-    } else if (auto storeOp = dyn_cast<memref::StoreOp>(op)) {
-      UpdateScalarBuffers(storeOp);
-    }
-    return WalkResult::advance();
-  });
-  if (result == WalkResult::interrupt()) {
-    llvm_unreachable("OptMemPlanForLoop Traverse IR Failed! ");
-  }
+  (void)func;
 }
 
 void OptMemPlanForDma::UpdateDmaBuffers(SmallVector<Value> dpsOperand) {
@@ -34,7 +24,7 @@ void OptMemPlanForDma::UpdateDmaBuffers(SmallVector<Value> dpsOperand) {
     if (!isLocalBuffer(memorySpaceAttr)) {
       continue;
     }
-    DmaBuffers.insert(tracebackMemRef(operand));
+    DmaBuffers.insert(operand);
   }
 }
 
@@ -75,18 +65,6 @@ bool OptMemPlanForDma::BufferPipeConflict(const Value buf1,
   return false;
 }
 
-template <typename OP>
-typename std::enable_if<std::is_same_v<OP, memref::LoadOp> ||
-                            std::is_same_v<OP, memref::StoreOp>,
-                        void>::type
-OptMemPlanForDma::UpdateScalarBuffers(OP op) {
-  auto memorySpaceAttr = GetBufferSpaceAttr(op.getMemRef());
-  if (!isLocalBuffer(memorySpaceAttr)) {
-    return;
-  }
-  ScalarBuffers.insert(tracebackMemRef(op.getMemRef()));
-}
-
 bool OptMemPlanForDma::IsScalarBuffer(const Value buf) const {
   if (ScalarBuffers.empty()) {
     return false;
@@ -105,6 +83,6 @@ void OptMemPlanForDma::UpdateScalarBuffersForLowerToLoops(Operation *op) {
     if (!isLocalBuffer(memorySpaceAttr)) {
       continue;
     }
-    ScalarBuffers.insert(tracebackMemRef(operand));
+    ScalarBuffers.insert(operand);
   }
 }

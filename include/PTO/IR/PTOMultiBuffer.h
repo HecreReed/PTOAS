@@ -9,9 +9,10 @@
 //===- PTOMultiBuffer.h - Shared constants for multi-buffer ----*- C++ -*-===//
 //
 // Shared constants for the multi-buffer expression scheme:
-//   - `kPtoMultiBufferAttrName` is the memref-level attribute name written by
-//     PTOViewToMemref when lowering an `alloc_multi_tile` op. PlanMemory and
-//     downstream passes read it to reserve N physical slots.
+//   - `kPtoMultiBufferAttrName` is the legacy memref-level slot-count
+//     attribute.
+//   - `kPtoMultiBufferAddrsAttrName` is the internal address list written
+//     directly on tile-native `pto.alloc_multi_tile` by PlanMemory.
 //   - `kPtoMultiBufferMaxNum` is the upper bound on the slot count N. It is
 //     kept in lock-step with the InsertSync `MAX_MULTI_BUFFER_NUM`.
 //
@@ -28,6 +29,10 @@ namespace pto {
 /// Attribute name for multi-buffer depth (integer slot count N>=2).
 inline constexpr llvm::StringLiteral kPtoMultiBufferAttrName =
     "pto.multi_buffer";
+
+/// Internal DenseI64ArrayAttr containing one byte address per physical slot.
+inline constexpr llvm::StringLiteral kPtoMultiBufferAddrsAttrName =
+    "pto.multi_buffer_addrs";
 
 /// Upper bound for N; must stay consistent with `MAX_MULTI_BUFFER_NUM` in
 /// insert-sync.

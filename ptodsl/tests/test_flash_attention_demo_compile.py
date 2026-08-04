@@ -11,8 +11,8 @@ from importlib.util import module_from_spec, spec_from_file_location
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-from ptodsl._bootstrap import make_context
-from mlir.ir import Module
+from ptodsl._context import make_context
+from ptoas.mlir.ir import Module
 
 
 def expect(condition: bool, message: str) -> None:
@@ -61,11 +61,11 @@ def main() -> None:
     wrapper_text = demo.emit_flash_attention_mlir(head_dim=128, causal=False, block_q=128, block_kv=128)
     expect_parse_roundtrip_and_verify(wrapper_text, "flash attention wrapper-emitted MLIR")
     expect("func.func @flash_attention_kernel" in wrapper_text, "wrapper compile should emit the flash_attention_kernel entry")
-    expect(wrapper_text.count("module") >= 2, "wrapper compile should emit an outer container plus child modules")
+    expect(wrapper_text.count("module") == 2, "wrapper compile should place mixed VPTO input in one backend child module")
     expect(
         'pto.backend = "vpto"' in wrapper_text
         and 'pto.target_arch = "a5"' in wrapper_text
-        and 'pto.kernel_kind = #pto.kernel_kind<vector>' in wrapper_text,
+        and 'pto.kernel_kind' not in wrapper_text,
         "flash attention wrapper compile should encode the VPTO backend directly on the child module",
     )
     expect("func.func @materialize_tile_bounds" in wrapper_text, "wrapper compile should emit the SIMT helper function")
@@ -94,11 +94,11 @@ def main() -> None:
     specialized_text = compiled.mlir_text()
     expect_parse_roundtrip_and_verify(specialized_text, "flash attention specialized MLIR")
     expect("func.func @flash_attention_kernel" in specialized_text, "direct compile should emit the flash_attention_kernel entry")
-    expect(specialized_text.count("module") >= 2, "direct compile should keep the backend-partitioned container shape")
+    expect(specialized_text.count("module") == 2, "direct compile should keep one backend child module")
     expect(
         'pto.backend = "vpto"' in specialized_text
         and 'pto.target_arch = "a5"' in specialized_text
-        and 'pto.kernel_kind = #pto.kernel_kind<vector>' in specialized_text,
+        and 'pto.kernel_kind' not in specialized_text,
         "direct compile should encode the VPTO backend directly on the child module",
     )
     expect("!pto.tile_buf<mat, 64x128xf32" in specialized_text, "BLOCK_Q=64 specialization should change the physical Q tile shape")

@@ -1,0 +1,59 @@
+// Copyright (c) 2026 Huawei Technologies Co., Ltd.
+// This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+// CANN Open Software License Agreement Version 2.0 (the "License").
+// Please refer to the License for details. You may not use this file except in compliance with the License.
+// THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+// INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+// See LICENSE in the root of the software repository for the full text of the License.
+
+// End-to-end guard that a planned fusion group which cannot be compacted into a
+// single contiguous span (because an unmovable SSA producer-chain op X sits
+// between members) still flows through OpScheduling normalization into
+// PTOFusionRegionGen without the "expected one contiguous span" error.
+//
+// Hand-authored metadata carries a single planned group 0 split by X into
+// [A] (singleton, dropped) and [B, C] (retained). OpScheduling normalization
+// rewrites the metadata so RegionGen only ever sees contiguous spans, and the
+// surviving [B, C] span is encapsulated into one pto.fusion_region while A
+// stays a plain op (no single-op region).
+//
+// RUN: pto-test-opt %s -pto-op-scheduling -pto-fusion-region-gen | FileCheck %s --check-prefix=E2E
+
+module {
+  func.func @op_scheduling_split_e2e_region_gen(
+      %full0: !pto.tile_buf<vec, 32x32xf32>,
+      %full1: !pto.tile_buf<vec, 32x32xf32>,
+      %full2: !pto.tile_buf<vec, 32x32xf32>,
+      %full3: !pto.tile_buf<vec, 32x32xf32>) {
+    %tmp0 = pto.alloc_tile : !pto.tile_buf<vec, 32x32xf32>
+    %tmp1 = pto.alloc_tile : !pto.tile_buf<vec, 32x32xf32>
+    %tmp2 = pto.alloc_tile : !pto.tile_buf<vec, 32x32xf32>
+    %tmp3 = pto.alloc_tile : !pto.tile_buf<vec, 32x32xf32>
+
+    // A (group 0, order 0) writes %tmp0; X reads %tmp0.
+    pto.tadd ins(%full0, %full1 : !pto.tile_buf<vec, 32x32xf32>, !pto.tile_buf<vec, 32x32xf32>) outs(%tmp0 : !pto.tile_buf<vec, 32x32xf32>) {pto.fusion.group_id = 0 : i64, pto.fusion.order = 0 : i64}
+    // X writes %tmp1; B reads %tmp1. Neither A nor B can be moved across X,
+    // so group 0 cannot be compacted into one span.
+    pto.tadd ins(%tmp0, %full2 : !pto.tile_buf<vec, 32x32xf32>, !pto.tile_buf<vec, 32x32xf32>) outs(%tmp1 : !pto.tile_buf<vec, 32x32xf32>)
+    // B (group 0, order 1) reads %tmp1, writes %tmp2.
+    pto.tadd ins(%tmp1, %full3 : !pto.tile_buf<vec, 32x32xf32>, !pto.tile_buf<vec, 32x32xf32>) outs(%tmp2 : !pto.tile_buf<vec, 32x32xf32>) {pto.fusion.group_id = 0 : i64, pto.fusion.order = 1 : i64}
+    // C (group 0, order 2) reads %tmp2.
+    pto.tadd ins(%tmp2, %full0 : !pto.tile_buf<vec, 32x32xf32>, !pto.tile_buf<vec, 32x32xf32>) outs(%tmp3 : !pto.tile_buf<vec, 32x32xf32>) {pto.fusion.group_id = 0 : i64, pto.fusion.order = 2 : i64}
+    return
+  }
+}
+
+// A (singleton span) stays a plain op with no fusion metadata and no region.
+// E2E-LABEL: func.func @op_scheduling_split_e2e_region_gen(
+// E2E: pto.tadd ins(%arg0, %arg1
+// E2E-NOT: pto.fusion_region
+// E2E-NOT: pto.fusion.group_id
+// E2E: pto.tadd ins(%{{[0-9]+}}, %arg2
+// E2E-NOT: pto.fusion_region
+// The surviving [B, C] span is encapsulated into one fusion region.
+// E2E: pto.fusion_region {
+// E2E-NEXT: pto.alloc_tile
+// E2E-NEXT: pto.alloc_tile
+// E2E: pto.tadd ins(%{{[0-9]+}}, %arg3
+// E2E: pto.tadd ins(%{{[0-9]+}}, %arg0
+// E2E: pto.yield

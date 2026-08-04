@@ -7,6 +7,8 @@
 # See LICENSE in the root of the software repository for the full text of the License.
 """Table-driven selection and render coverage for the PTODSL TileLib catalog."""
 
+import ast
+from pathlib import Path
 import unittest
 
 import ptodsl.tilelib as tilelib
@@ -261,7 +263,6 @@ for _op in (
     SPECIAL_VALID_SHAPES[(_op, "src1")] = (1, 64)
 SHARED_RENDERED_OPS = (
     "pto.tile_buf_addr",
-    "memref.subview",
     "scf.for",
     "pto.vsts",
     "pto.tilelang.instance",
@@ -273,12 +274,6 @@ OPS_WITHOUT_TILE_LOAD = OPS_WITHOUT_TILE_LOAD | CUBE_OPS
 OPS_WITHOUT_VECTOR_STORE = {"pto.tcmp", "pto.tcmps", "pto.tsort32"}
 OPS_WITHOUT_VECTOR_STORE = OPS_WITHOUT_VECTOR_STORE | {"pto.tload", "pto.tstore", "pto.tstore_fp", "pto.textract_fp"}
 OPS_WITHOUT_VECTOR_STORE = OPS_WITHOUT_VECTOR_STORE | CUBE_OPS
-OPS_WITHOUT_MEMREF_SUBVIEW = {"pto.tcmps", "pto.tsort32"}
-OPS_WITHOUT_MEMREF_SUBVIEW = OPS_WITHOUT_MEMREF_SUBVIEW | {"pto.texpands", "pto.tdivs", "pto.tfillpad_inplace"}
-OPS_WITHOUT_MEMREF_SUBVIEW = OPS_WITHOUT_MEMREF_SUBVIEW | {"pto.tload", "pto.tstore", "pto.tstore_fp", "pto.textract_fp"}
-OPS_WITHOUT_MEMREF_SUBVIEW = OPS_WITHOUT_MEMREF_SUBVIEW | ROW_REDUCTIONS
-OPS_WITHOUT_MEMREF_SUBVIEW = OPS_WITHOUT_MEMREF_SUBVIEW | ARG_COLUMN_REDUCTIONS
-OPS_WITHOUT_MEMREF_SUBVIEW = OPS_WITHOUT_MEMREF_SUBVIEW | CUBE_OPS
 OPS_WITHOUT_LOOP = {"pto.tmrgsort"}
 OPS_WITHOUT_LOOP = OPS_WITHOUT_LOOP | {"pto.tstore_fp", "pto.textract_fp"}
 OPS_WITHOUT_LOOP = OPS_WITHOUT_LOOP | CUBE_OPS
@@ -476,6 +471,29 @@ class TileLibCatalogTest(unittest.TestCase):
             with self.subTest(name=name):
                 self.assertFalse(hasattr(tilelib, name))
 
+    def test_declared_a5_template_ops_are_loadable(self):
+        import TileOps
+        import TileOps.a5 as tileops_a5
+
+        declared_ops = set()
+        for path in Path(tileops_a5.__file__).parent.glob("*.py"):
+            if path.name.startswith("_") or path.name == "__init__.py":
+                continue
+            tree = ast.parse(path.read_text(), filename=str(path))
+            for node in ast.walk(tree):
+                if not (
+                    isinstance(node, ast.Call)
+                    and isinstance(node.func, ast.Attribute)
+                    and node.func.attr == "tile_template"
+                ):
+                    continue
+                for keyword in node.keywords:
+                    if keyword.arg == "op" and isinstance(keyword.value, ast.Constant):
+                        declared_ops.add(keyword.value.value)
+
+        missing = sorted(op for op in declared_ops if not TileOps.load_template(op, "a5"))
+        self.assertEqual(missing, [])
+
     def test_each_catalog_entry_selects_and_renders(self):
         for op, entry in CATALOG.items():
             with self.subTest(op=op):
@@ -491,11 +509,6 @@ class TileLibCatalogTest(unittest.TestCase):
                     shared_ops = tuple(
                         shared_op for shared_op in shared_ops
                         if shared_op != "pto.vsts"
-                    )
-                if op in OPS_WITHOUT_MEMREF_SUBVIEW:
-                    shared_ops = tuple(
-                        shared_op for shared_op in shared_ops
-                        if shared_op != "memref.subview"
                     )
                 if op in OPS_WITHOUT_LOOP:
                     shared_ops = tuple(

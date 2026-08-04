@@ -35,6 +35,8 @@ namespace {
 
 enum class DmaArch { A2A3, A5 };
 
+constexpr uint64_t kMxScaleAddressShift = 4;
+
 static DmaArch getDmaArch(ModuleOp mod) {
   if (!mod)
     return DmaArch::A2A3;
@@ -275,6 +277,21 @@ static Value materializeAccStoreClipPayload(Value value, Type destinationElement
 static Value getI64Constant(Location loc, PatternRewriter &rewriter,
                             uint64_t value) {
   return rewriter.create<arith::ConstantIntOp>(loc, value, 64);
+}
+
+static Value deriveMxScaleDestination(Value dataDestination,
+                                      PatternRewriter &rewriter,
+                                      Location loc) {
+  auto ptrType = dyn_cast<pto::PtrType>(dataDestination.getType());
+  if (!ptrType)
+    return {};
+
+  Value dataAddress = rewriter.create<pto::CastPtrOp>(
+      loc, rewriter.getI64Type(), dataDestination);
+  Value scaleAddress = rewriter.create<arith::ShRUIOp>(
+      loc, dataAddress,
+      getI64Constant(loc, rewriter, kMxScaleAddressShift));
+  return rewriter.create<pto::CastPtrOp>(loc, ptrType, scaleAddress);
 }
 
 static Value buildAccStoreOptionalEnumValue(Location loc,
@@ -1548,6 +1565,10 @@ struct ExpandLeftLoadMxPattern : public OpRewritePattern<pto::MteL1L0aMxOp> {
       return rewriter.notifyMatchFailure(op, "expected typed L1 source");
     if (!destination)
       return rewriter.notifyMatchFailure(op, "expected pointer-like destination");
+    destination = deriveMxScaleDestination(destination, rewriter, loc);
+    if (!destination)
+      return rewriter.notifyMatchFailure(
+          op, "failed to derive MX scale destination pointer");
 
     FailureOr<LoadCbufToMxControl> control =
         deriveLoadCbufToCaMxControl(loc, op.getM(), op.getK(),
@@ -1581,6 +1602,10 @@ struct ExpandRightLoadMxPattern : public OpRewritePattern<pto::MteL1L0bMxOp> {
       return rewriter.notifyMatchFailure(op, "expected typed L1 source");
     if (!destination)
       return rewriter.notifyMatchFailure(op, "expected pointer-like destination");
+    destination = deriveMxScaleDestination(destination, rewriter, loc);
+    if (!destination)
+      return rewriter.notifyMatchFailure(
+          op, "failed to derive MX scale destination pointer");
     FailureOr<LoadCbufToMxControl> control =
         deriveLoadCbufToCbMxControl(loc, op.getK(), op.getN(),
                                     sourceType.getElementType(),
@@ -1908,6 +1933,56 @@ struct ExpandSimtLaunchPattern : public OpRewritePattern<pto::SimtLaunchOp> {
   }
 };
 
+struct AtomicCtrlUpdate {
+  uint64_t mask;
+  uint64_t value;
+};
+
+template <typename AtomicConfigOp>
+static AtomicCtrlUpdate getAtomicCtrlUpdate();
+
+#define DEFINE_ATOMIC_CTRL_UPDATE(OpTy, Mask, Value)                            \
+  template <>                                                                   \
+  AtomicCtrlUpdate getAtomicCtrlUpdate<pto::OpTy>() {                           \
+    return {Mask, Value};                                                       \
+  }
+
+// CCE set_atomic_* configures CTRL[10:6]. Dtype occupies [8:6] and the
+// reduction operation occupies [10:9]. This matches the structured L0C-to-GM
+// FIXP atomic CTRL encoding used by configureAccStoreCtrl above.
+DEFINE_ATOMIC_CTRL_UPDATE(SetAtomicAddOp, 0x3ULL << 9, 0x0ULL << 9)
+DEFINE_ATOMIC_CTRL_UPDATE(SetAtomicMaxOp, 0x3ULL << 9, 0x1ULL << 9)
+DEFINE_ATOMIC_CTRL_UPDATE(SetAtomicMinOp, 0x3ULL << 9, 0x2ULL << 9)
+DEFINE_ATOMIC_CTRL_UPDATE(SetAtomicNoneOp, 0x7ULL << 6, 0)
+DEFINE_ATOMIC_CTRL_UPDATE(SetAtomicF32Op, 0x7ULL << 6, 0x1ULL << 6)
+DEFINE_ATOMIC_CTRL_UPDATE(SetAtomicF16Op, 0x7ULL << 6, 0x2ULL << 6)
+DEFINE_ATOMIC_CTRL_UPDATE(SetAtomicS16Op, 0x7ULL << 6, 0x3ULL << 6)
+DEFINE_ATOMIC_CTRL_UPDATE(SetAtomicS32Op, 0x7ULL << 6, 0x4ULL << 6)
+DEFINE_ATOMIC_CTRL_UPDATE(SetAtomicS8Op, 0x7ULL << 6, 0x5ULL << 6)
+DEFINE_ATOMIC_CTRL_UPDATE(SetAtomicBF16Op, 0x7ULL << 6, 0x6ULL << 6)
+
+#undef DEFINE_ATOMIC_CTRL_UPDATE
+
+template <typename AtomicConfigOp>
+struct ExpandAtomicConfigPattern
+    : public OpRewritePattern<AtomicConfigOp> {
+  using OpRewritePattern<AtomicConfigOp>::OpRewritePattern;
+
+  LogicalResult matchAndRewrite(AtomicConfigOp op,
+                                PatternRewriter &rewriter) const override {
+    Location loc = op.getLoc();
+    AtomicCtrlUpdate update = getAtomicCtrlUpdate<AtomicConfigOp>();
+    Value ctrl = rewriter.create<pto::GetCtrlOp>(loc);
+    Value clearMask = getI64Constant(loc, rewriter, ~update.mask);
+    Value value = getI64Constant(loc, rewriter, update.value);
+    Value updated = rewriter.create<arith::AndIOp>(loc, ctrl, clearMask);
+    updated = rewriter.create<arith::OrIOp>(loc, updated, value);
+    rewriter.create<pto::SetCtrlOp>(loc, updated);
+    rewriter.eraseOp(op);
+    return success();
+  }
+};
+
 struct VPTOExpandWrapperOpsPass
     : public pto::impl::VPTOExpandWrapperOpsBase<VPTOExpandWrapperOpsPass> {
   using pto::impl::VPTOExpandWrapperOpsBase<
@@ -1938,6 +2013,16 @@ struct VPTOExpandWrapperOpsPass
                  ExpandAccStoreGmPattern,
                  ExpandAccStoreUbPattern,
                  ExpandSimtLaunchPattern,
+                 ExpandAtomicConfigPattern<pto::SetAtomicAddOp>,
+                 ExpandAtomicConfigPattern<pto::SetAtomicMaxOp>,
+                 ExpandAtomicConfigPattern<pto::SetAtomicMinOp>,
+                 ExpandAtomicConfigPattern<pto::SetAtomicNoneOp>,
+                 ExpandAtomicConfigPattern<pto::SetAtomicF32Op>,
+                 ExpandAtomicConfigPattern<pto::SetAtomicF16Op>,
+                 ExpandAtomicConfigPattern<pto::SetAtomicBF16Op>,
+                 ExpandAtomicConfigPattern<pto::SetAtomicS32Op>,
+                 ExpandAtomicConfigPattern<pto::SetAtomicS16Op>,
+                 ExpandAtomicConfigPattern<pto::SetAtomicS8Op>,
                  ExpandMadSemanticPattern<pto::MadOp>,
                  ExpandMadSemanticPattern<pto::MadAccOp>,
                  ExpandMadSemanticPattern<pto::MadBiasOp>,

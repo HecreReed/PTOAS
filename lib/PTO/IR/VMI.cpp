@@ -223,29 +223,6 @@ static FailureOr<int64_t> getLayoutBlockElems(Type type) {
   return getVMILayoutBlockElems(type);
 }
 
-static FailureOr<Type> getVMIPhysicalElementType(VMIVRegType type) {
-  Type elementType = type.getElementType();
-  VMILayoutAttr layout = type.getLayoutAttr();
-  if (!layout || !layout.hasGroupSlotLaneStride())
-    return elementType;
-
-  auto integerType = dyn_cast<IntegerType>(elementType);
-  if (!integerType && isa<FloatType>(elementType))
-    return elementType;
-  if (!integerType)
-    return failure();
-  if (!integerType.isUnsigned())
-    return failure();
-  unsigned elementBits = pto::getPTOStorageElemBitWidth(elementType);
-  int64_t laneStride = layout.getLaneStride();
-  if (elementBits == 0 || laneStride <= 1)
-    return failure();
-  int64_t physicalBits = static_cast<int64_t>(elementBits) * laneStride;
-  if (physicalBits != 16 && physicalBits != 32)
-    return failure();
-  return IntegerType::get(type.getContext(), physicalBits);
-}
-
 static int64_t getMaskGranularityBitWidth(StringRef granularity) {
   if (granularity == "b8")
     return 8;
@@ -286,10 +263,7 @@ static FailureOr<StringRef> getVMIMaskPhysicalGranularity(VMIMaskType type) {
 
 static FailureOr<int64_t> getPhysicalLanesPerPart(Type type) {
   if (auto vregType = dyn_cast<VMIVRegType>(type)) {
-    FailureOr<Type> physicalElementType = getVMIPhysicalElementType(vregType);
-    if (failed(physicalElementType))
-      return failure();
-    return getDataLanesPerPart(*physicalElementType);
+    return getDataLanesPerPart(getVMIPhysicalDataElementType(vregType));
   }
   if (auto maskType = dyn_cast<VMIMaskType>(type)) {
     FailureOr<StringRef> physicalGranularity =
@@ -537,8 +511,8 @@ static LogicalResult verifyPhysicalParts(Operation *op, Type vmiType,
   if (auto vregType = dyn_cast<VMIVRegType>(vmiType)) {
     FailureOr<int64_t> lanesPerPart =
         getPhysicalLanesPerPart(vregType);
-    FailureOr<Type> physicalElementType = getVMIPhysicalElementType(vregType);
-    if (failed(lanesPerPart) || failed(physicalElementType))
+    Type physicalElementType = getVMIPhysicalDataElementType(vregType);
+    if (failed(lanesPerPart))
       return op->emitOpError(
           "requires data element type with known physical lane count");
     for (Type physicalType : physicalTypes) {
@@ -546,7 +520,7 @@ static LogicalResult verifyPhysicalParts(Operation *op, Type vmiType,
       if (!partType)
         return op->emitOpError("requires physical data parts to be !pto.vreg");
       if (partType.getElementCount() != *lanesPerPart ||
-          partType.getElementType() != *physicalElementType)
+          partType.getElementType() != physicalElementType)
         return op->emitOpError(
             "requires physical data part type to match VMI lane-map helper");
     }
@@ -2215,9 +2189,11 @@ LogicalResult VMIScatterOp::verify() {
     return failure();
 
   auto indexElementType = dyn_cast<IntegerType>(indicesType.getElementType());
-  if (!indexElementType || indexElementType.getWidth() != 32 ||
-      indexElementType.isSigned())
-    return emitOpError("requires signless or unsigned 32-bit integer indices");
+  if (!indexElementType || indexElementType.isSigned() ||
+      (indexElementType.getWidth() != 32 &&
+       indexElementType.getWidth() != 16))
+    return emitOpError(
+        "requires signless or unsigned 16-bit or 32-bit integer indices");
 
   if (failed(verifyAllSameVRegShapeAndLayout(getOperation(),
                                              {valueType, indicesType},
@@ -2455,8 +2431,8 @@ verifyVMIVectorScalarOp(Operation *op, VMIVRegType srcType,
         "requires scalar type to match vector element type, got scalar ")
            << scalarType << " vs vector element " << eltTy;
 
-  if (failed(verifyAllSameVRegShapeAndLayout(
-          op, {srcType, resultType}, /*requireSameElement=*/true)))
+  if (failed(verifyAllSameVRegShapeAndLayout(op, {srcType, resultType},
+                                             /*requireSameElement=*/true)))
     return failure();
 
   if (failed(verifyMaskMatchesData(op, maskType, resultType)))
@@ -2482,9 +2458,20 @@ verifyVMIVectorScalarShiftOp(Operation *op, VMIVRegType srcType,
   if (!isVMIIntegerLikeType(eltTy))
     return op->emitOpError(
         "requires integer-like VMI element type for shift");
-
-  return verifyVMIVectorScalarOp(op, srcType, scalarType, resultType,
-                                 maskType, pmode);
+  if (!scalarType.isSignlessInteger(16))
+    return op->emitOpError("requires signless i16 shift amount");
+  if (failed(verifyAllSameVRegShapeAndLayout(op, {srcType, resultType},
+                                             /*requireSameElement=*/true)))
+    return failure();
+  if (failed(verifyMaskMatchesData(op, maskType, resultType)))
+    return failure();
+  if (pmode.has_value()) {
+    StringRef mode = pmode.value();
+    if (mode != "merge" && mode != "zero")
+      return op->emitOpError("unsupported pmode '")
+             << mode << "'; expected \"merge\" or \"zero\"";
+  }
+  return success();
 }
 
 LogicalResult VMIAddSOp::verify() {
@@ -3217,9 +3204,11 @@ LogicalResult VMIVscatterOp::verify() {
 
   auto indexElementType =
       dyn_cast<IntegerType>(offsetsType.getElementType());
-  if (!indexElementType || indexElementType.getWidth() != 32 ||
-      indexElementType.isSigned())
-    return emitOpError("requires signless or unsigned 32-bit integer offsets");
+  if (!indexElementType || indexElementType.isSigned() ||
+      (indexElementType.getWidth() != 32 &&
+       indexElementType.getWidth() != 16))
+    return emitOpError(
+        "requires signless or unsigned 16-bit or 32-bit integer offsets");
 
   if (failed(verifyAllSameVRegShapeAndLayout(getOperation(),
                                              {valueType, offsetsType},
@@ -4168,6 +4157,14 @@ void VMIvLoadOp::getEffects(
 
 //===----------------------------------------------------------------------===//
 // VMIvStoreOp
+
+Type mlir::pto::getVMIPhysicalDataElementType(VMIVRegType type) {
+  // lane_stride describes where logical elements reside inside a physical
+  // vector register; it does not change their element type.  Packed group
+  // slots therefore use the same sparse logical-element carrier as dense
+  // lane-stride values.
+  return type.getElementType();
+}
 
 FailureOr<int64_t> mlir::pto::getDataLanesPerPart(Type elementType) {
   unsigned elementBitWidth = pto::getPTOStorageElemBitWidth(elementType);

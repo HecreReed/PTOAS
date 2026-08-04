@@ -1,0 +1,33 @@
+// Copyright (c) 2026 Huawei Technologies Co., Ltd.
+// This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+// CANN Open Software License Agreement Version 2.0 (the "License").
+// Please refer to the License for details. You may not use this file except in compliance with the License.
+// THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+// INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+// See LICENSE in the root of the software repository for the full text of the License.
+
+// RUN: pto-test-opt --pto-plan-memory --pto-resolve-reserved-buffers %s | FileCheck %s
+
+// Guard: reserved buffers in backend child modules must be planned and then
+// materialized to ordinary address constants.
+
+module {
+  module attributes {pto.backend = "emitc"} {
+    func.func @nested_reserve() {
+      %fifo = pto.reserve_buffer {
+        name = "fifo",
+        size = 4096,
+        location = #pto.address_space<vec>,
+        auto = true
+      } -> i32
+      func.call @consume(%fifo) : (i32) -> ()
+      return
+    }
+    func.func private @consume(i32)
+  }
+}
+
+// CHECK-LABEL: func.func @nested_reserve
+// CHECK: %[[BASE:.*]] = arith.constant 0 : i32
+// CHECK: call @consume(%[[BASE]]) : (i32) -> ()
+// CHECK-NOT: pto.reserve_buffer

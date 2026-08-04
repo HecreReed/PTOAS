@@ -95,7 +95,9 @@ bool DaemonManager::start(const std::string &socketPath,
   // Python startup time depends on the selected TileLib frontend and its
   // imports. Poll instead of relying on one fixed sleep.
   bool socketReady = false;
-  for (int attempt = 0; attempt < 200; ++attempt) {
+  // PTODSL imports can be noticeably slower on heavily loaded CI runners where
+  // many ptoas processes start TileLib daemons concurrently.
+  for (int attempt = 0; attempt < 600; ++attempt) {
     std::this_thread::sleep_for(std::chrono::milliseconds(50));
     if (llvm::sys::fs::exists(socketPath)) {
       socketReady = true;

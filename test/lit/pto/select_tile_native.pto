@@ -1,0 +1,32 @@
+// Copyright (c) 2026 Huawei Technologies Co., Ltd.
+// This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+// CANN Open Software License Agreement Version 2.0 (the "License").
+// Please refer to the License for details. You may not use this file except in compliance with the License.
+// THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+// INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+// See LICENSE in the root of the software repository for the full text of the License.
+
+// RUN: ptoas --pto-level=level3 --pto-arch=a5 --mlir-print-ir-after=pto-resolve-reserved-buffers %s -o /dev/null 2>&1 | FileCheck %s --check-prefix=NATIVE
+// RUN: ptoas --pto-level=level3 --pto-arch=a3 --enable-insert-sync %s | FileCheck %s --check-prefix=EMITC
+
+module {
+  func.func private @tsel_arg(%mask: !pto.tile_buf<vec, 2x128xi8>, %a: !pto.tile_buf<vec, 2x128xf16>, %b: !pto.tile_buf<vec, 2x128xf16>, %tmp: !pto.tile_buf<vec, 2x128xf16>, %dst: !pto.tile_buf<vec, 2x128xf16>) {
+    pto.tsel ins(%mask, %a, %b, %tmp : !pto.tile_buf<vec, 2x128xi8>, !pto.tile_buf<vec, 2x128xf16>, !pto.tile_buf<vec, 2x128xf16>, !pto.tile_buf<vec, 2x128xf16>) outs(%dst : !pto.tile_buf<vec, 2x128xf16>)
+    return
+  }
+  func.func private @tsels_arg(%mask: !pto.tile_buf<vec, 2x128xi8>, %src: !pto.tile_buf<vec, 2x128xi16>, %tmp: !pto.tile_buf<vec, 1x128xi16>, %dst: !pto.tile_buf<vec, 2x128xi16>, %scalar: i16) {
+    pto.tsels ins(%mask, %src, %tmp, %scalar : !pto.tile_buf<vec, 2x128xi8>, !pto.tile_buf<vec, 2x128xi16>, !pto.tile_buf<vec, 1x128xi16>, i16) outs(%dst : !pto.tile_buf<vec, 2x128xi16>)
+    return
+  }
+}
+
+// NATIVE-LABEL: @tsel_arg
+// NATIVE: pto.tsel
+// NATIVE-LABEL: @tsels_arg
+// NATIVE: pto.tsels
+// NATIVE-NOT: memref<
+
+// EMITC-LABEL: tsel_arg(
+// EMITC: TSEL(
+// EMITC-LABEL: tsels_arg(
+// EMITC: TSELS(

@@ -1,9 +1,0 @@
-// RUN: ptoas --pto-level=level3 %s >/dev/null
-
-module {
-  func.func @gm_pointer_cast_addr_is_ignored() {
-    %neg = arith.constant -1 : i64
-    %buf = pto.pointer_cast(%neg) : memref<32x64xf16, #pto.address_space<gm>>
-    return
-  }
-}

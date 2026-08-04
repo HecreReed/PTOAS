@@ -714,6 +714,15 @@ const mlir::pto::BackendInfo &mlir::pto::PTOASContext::getBackendInfo() const {
   return backendInfo;
 }
 
+void mlir::pto::PTOASContext::setVFSIMTSizeFixMode(VFSIMTSizeFixMode value) {
+  vfsimtSizeFixMode = value;
+}
+
+mlir::pto::VFSIMTSizeFixMode
+mlir::pto::PTOASContext::getVFSIMTSizeFixMode() const {
+  return vfsimtSizeFixMode;
+}
+
 void mlir::pto::PTOASContext::setOutputCANNVersionOverride(
     std::optional<CANNVersion> value) {
   outputCANNVersionOverride = std::move(value);
@@ -953,10 +962,26 @@ private:
 };
 
 LogicalResult EmitCBackendJob::run(PTOASContext &context) {
+  OwningOpRef<ModuleOp> singleChildJobModule;
+  OwningOpRef<ModuleOp> *compileUnit = &module;
   ModuleOp op = module.get();
   op->setAttr("pto.backend", StringAttr::get(op.getContext(), "emitc"));
 
-  if (mlir::pto::compilePTOASModule(module, context,
+  SmallVector<ModuleOp, 4> children(op.getOps<ModuleOp>());
+  if (!isUserVisibleIROutputRequested() && children.size() == 1 &&
+      isBackendPartitionedContainer(op)) {
+    FailureOr<OwningOpRef<ModuleOp>> jobModuleOr =
+        buildBackendChildCompileUnit(op, children.front());
+    if (failed(jobModuleOr))
+      return failure();
+    singleChildJobModule = std::move(*jobModuleOr);
+    singleChildJobModule.get()->setAttr(
+        "pto.backend",
+        StringAttr::get(singleChildJobModule.get()->getContext(), "emitc"));
+    compileUnit = &singleChildJobModule;
+  }
+
+  if (mlir::pto::compilePTOASModule(*compileUnit, context,
                                     mlir::pto::PTOBackend::EmitC, result,
                                     /*emitVPTOHostStub=*/false) != 0)
     return failure();
@@ -980,8 +1005,7 @@ LogicalResult VPTOBackendJob::run(PTOASContext &context) {
   // Keep user-visible IR output modes on the original container so dump flags
   // still reflect the input module structure the user asked to inspect.
   if (!isUserVisibleIROutputRequested() && children.size() == 1 &&
-      isBackendPartitionedContainer(op) &&
-      children.front()->hasAttr(mlir::pto::FunctionKernelKindAttr::name)) {
+      isBackendPartitionedContainer(op)) {
     FailureOr<OwningOpRef<ModuleOp>> jobModuleOr =
         buildBackendChildCompileUnit(op, children.front());
     if (failed(jobModuleOr))
@@ -1037,13 +1061,14 @@ static LogicalResult emitVPTOLLVMFatobj(
           jobResult.vptoCubeModule.module.get(),
           jobResult.vptoVectorModule.module.get(), stubSource,
           outputPath, moduleId, *toolchain, context.getTempFiles(),
-          llvm::errs())))
+          context.getVFSIMTSizeFixMode(), llvm::errs())))
     return failure();
   return success();
 }
 
 static LogicalResult collectChildJobs(
     ModuleOp module, mlir::pto::PTOBackend defaultBackend,
+    bool cliBackendOverride,
     PTOASContext &context, SmallVectorImpl<std::string> &fatobjPaths,
     SmallVectorImpl<std::unique_ptr<BackendChildJob>> &backendJobs) {
   SmallVector<ModuleOp, 4> children(module.getOps<ModuleOp>());
@@ -1063,7 +1088,10 @@ static LogicalResult collectChildJobs(
       llvm::errs() << "\n";
     }
     std::string summary = summarizeMixedChildModule(jobModule.get());
-    if (childBackend.value_or(defaultBackend) == mlir::pto::PTOBackend::VPTO)
+    mlir::pto::PTOBackend effectiveBackend =
+        cliBackendOverride ? defaultBackend
+                           : childBackend.value_or(defaultBackend);
+    if (effectiveBackend == mlir::pto::PTOBackend::VPTO)
       backendJobs.push_back(std::make_unique<VPTOBackendChildJob>(
           std::move(jobModule), std::move(summary), context.allocModuleId(),
           fatobjPaths));
@@ -1081,6 +1109,10 @@ static LogicalResult resolveSingleBackend(
     std::optional<mlir::pto::PTOBackend> &singleBackend) {
   singleBackend = std::nullopt;
   if (cliBackendSpecified) {
+    SmallVector<ModuleOp, 4> children(module.getOps<ModuleOp>());
+    if (!isUserVisibleIROutputRequested() && children.size() > 1 &&
+        isBackendPartitionedContainer(module))
+      return success();
     singleBackend = defaultBackend;
     return success();
   }
@@ -1127,6 +1159,7 @@ static LogicalResult resolveSingleBackend(
 static LogicalResult buildBackendInfo(ModuleOp module, bool cliBackendSpecified,
                                       mlir::pto::BackendInfo &backendInfo) {
   backendInfo = mlir::pto::BackendInfo();
+  backendInfo.cliBackendOverride = cliBackendSpecified;
   if (!parseDriverBackend(mlir::pto::ptoBackend,
                           backendInfo.defaultBackend)) {
     llvm::errs() << "Error: invalid --pto-backend='" << mlir::pto::ptoBackend
@@ -1186,6 +1219,7 @@ static LogicalResult runPTOASJobs(OwningOpRef<ModuleOp> &module,
   SmallVector<std::unique_ptr<BackendChildJob>, 4> backendJobs;
   SmallVector<std::string, 4> fatobjPaths;
   if (failed(collectChildJobs(module.get(), backendInfo.defaultBackend,
+                              backendInfo.cliBackendOverride,
                               context, fatobjPaths, backendJobs)))
     return failure();
 
@@ -1251,6 +1285,7 @@ static int runPTOASDriver(int argc, char **argv) {
 
   PTOASContext context(registry, outputFilename, argc, argv);
   context.setOutputCANNVersionOverride(outputCANNVersionOverride);
+  context.setVFSIMTSizeFixMode(mlir::pto::vptoFixVFSIMTSize);
   context.initializeMLIRContext();
 
   std::unique_ptr<llvm::MemoryBuffer> inputBuffer = readInputBuffer();
@@ -1284,12 +1319,6 @@ static int runPTOASDriver(int argc, char **argv) {
   return 1;
 }
 
-extern "C" int ptoas_entrypoint(int argc, char **argv) {
+int mlir::pto::runPTOAS(int argc, char **argv) {
   return runPTOASDriver(argc, argv);
 }
-
-#ifndef PTOAS_BUILD_SHARED_LIBRARY
-int main(int argc, char **argv) {
-  return runPTOASDriver(argc, argv);
-}
-#endif

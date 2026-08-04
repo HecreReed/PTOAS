@@ -1,0 +1,25 @@
+// Copyright (c) 2026 Huawei Technologies Co., Ltd.
+// This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+// CANN Open Software License Agreement Version 2.0 (the "License").
+// Please refer to the License for details. You may not use this file except in compliance with the License.
+// THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+// INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+// See LICENSE in the root of the software repository for the full text of the License.
+
+// PTOViewToMemref converts a pointer-like tile_buf_addr result to a flattened
+// memref. Vscatter must continue accepting that destination representation.
+// RUN: ptoas --pto-arch=a5 --pto-backend=vpto --emit-vpto %s -o - | FileCheck %s
+
+// CHECK-LABEL: func.func @vscatter_tile_buf_addr
+// CHECK: pto.vscatter {{.*}} : !pto.vreg<64xi32>, !pto.ptr<i32, ub>, !pto.vreg<64xui32>, !pto.mask<b32>
+
+module attributes {pto.target_arch = "a5"} {
+  module attributes {pto.backend = "vpto", pto.kernel_kind = #pto.kernel_kind<vector>, pto.target_arch = "a5"} {
+    func.func @vscatter_tile_buf_addr(%value: !pto.vreg<64xi32>, %offsets: !pto.vreg<64xui32>, %mask: !pto.mask<b32>) attributes {pto.entry} {
+      %tile = pto.alloc_tile : !pto.tile_buf<vec, 1x64xi32>
+      %dst = pto.tile_buf_addr %tile : !pto.tile_buf<vec, 1x64xi32> -> !pto.ptr<i32, ub>
+      pto.vscatter %value, %dst, %offsets, %mask : !pto.vreg<64xi32>, !pto.ptr<i32, ub>, !pto.vreg<64xui32>, !pto.mask<b32>
+      return
+    }
+  }
+}

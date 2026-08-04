@@ -8,15 +8,17 @@
 
 //===- PTOUnrollSIMTForPass.cpp -------------------------------------------===//
 //
-// Unroll explicitly annotated scf.for loops inside pto.simt_entry
-// functions to eliminate divergent control flow before LLVM lowering.
+// Unroll explicitly annotated scf.for loops inside SIMT contexts to eliminate
+// divergent control flow before LLVM lowering.
 //
 // Only loops carrying the `{pto.unroll = "full"}` attribute are unrolled.
-// The pass is gated to pto.simt_entry functions so it does not affect
-// general-purpose loops.
+// A SIMT context is either a pto.simt_entry function or an inline
+// pto.section.simt region that has not been outlined yet.  General-purpose
+// loops outside these contexts are not affected.
 //
 //===----------------------------------------------------------------------===//
 
+#include "PTO/IR/PTO.h"
 #include "PTO/Transforms/Passes.h"
 
 #include "mlir/Dialect/Func/IR/FuncOps.h"
@@ -68,6 +70,22 @@ static bool isSIMTEntry(func::FuncOp func) {
   return func->hasAttr(pto::kPTOSimtEntryAttrName);
 }
 
+/// Check whether a function contains an inline SIMT section.
+static bool containsInlineSIMTSection(func::FuncOp func) {
+  WalkResult result =
+      func.walk([](pto::SectionSimtOp) { return WalkResult::interrupt(); });
+  return result.wasInterrupted();
+}
+
+/// Check whether a loop is inside either supported SIMT representation.
+static bool isInSIMTContext(scf::ForOp forOp) {
+  func::FuncOp func = forOp->getParentOfType<func::FuncOp>();
+  if (!func)
+    return false;
+  return isSIMTEntry(func) ||
+         static_cast<bool>(forOp->getParentOfType<pto::SectionSimtOp>());
+}
+
 // ---------------------------------------------------------------------------
 // Rewrite pattern
 // ---------------------------------------------------------------------------
@@ -79,9 +97,8 @@ struct UnrollSIMTForPattern : public OpRewritePattern<scf::ForOp> {
 
   LogicalResult matchAndRewrite(scf::ForOp forOp,
                                 PatternRewriter &rewriter) const override {
-    // Only apply inside SIMT entry functions.
-    auto func = forOp->getParentOfType<func::FuncOp>();
-    if (!func || !isSIMTEntry(func))
+    // Only apply inside an outlined or inline SIMT context.
+    if (!isInSIMTContext(forOp))
       return failure();
 
     // Only unroll loops with explicit {pto.unroll = "full"} annotation.
@@ -126,7 +143,7 @@ struct PTOUnrollSIMTFor : public pto::impl::PTOUnrollSIMTForBase<PTOUnrollSIMTFo
 
   void runOnOperation() override {
     func::FuncOp func = getOperation();
-    if (!isSIMTEntry(func))
+    if (!isSIMTEntry(func) && !containsInlineSIMTSection(func))
       return;
 
     MLIRContext *ctx = &getContext();

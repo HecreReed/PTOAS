@@ -1,0 +1,54 @@
+// Copyright (c) 2026 Huawei Technologies Co., Ltd.
+// This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+// CANN Open Software License Agreement Version 2.0 (the "License").
+// Please refer to the License for details. You may not use this file except in compliance with the License.
+// THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+// INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+// See LICENSE in the root of the software repository for the full text of the License.
+
+// RUN: ptoas --pto-arch=a5 --pto-backend=vpto --emit-vpto --mlir-print-ir-after=pto-materialize-simt-persistent-fragment %s -o /dev/null 2>&1 | FileCheck %s --check-prefix=MATERIALIZE
+
+module attributes {pto.target_arch = "a5", pto.kernel_kind = #pto.kernel_kind<vector>} {
+  func.func @persistent_fragment_section_plan(%dst: !pto.ptr<f32, ub>) attributes {pto.entry} {
+    %c1_i32 = arith.constant 1 : i32
+    %fragment0 = llvm.alloca %c1_i32 x f32 {pto.persistent} : (i32) -> !llvm.ptr
+    %fragment1 = llvm.alloca %c1_i32 x f32 {pto.persistent} : (i32) -> !llvm.ptr
+    pto.section.simt<<<32, 1, 1>>> {
+      %one = arith.constant 1.000000e+00 : f32
+      llvm.store %one, %fragment0 : f32, !llvm.ptr
+    }
+    pto.section.simt<<<32, 1, 1>>> {
+      %two = arith.constant 2.000000e+00 : f32
+      llvm.store %two, %fragment1 : f32, !llvm.ptr
+    }
+    pto.section.simt<<<32, 1, 1>>> {
+      %value0 = llvm.load %fragment0 : !llvm.ptr -> f32
+      %value1 = llvm.load %fragment1 : !llvm.ptr -> f32
+      %result = arith.addf %value0, %value1 : f32
+      %c0 = arith.constant 0 : index
+      pto.store %result, %dst[%c0] : !pto.ptr<f32, ub>, f32
+    }
+    return
+  }
+}
+
+// MATERIALIZE-LABEL: func.func @persistent_fragment_section_plan
+// MATERIALIZE-NOT: llvm.alloca
+// MATERIALIZE: %[[ONE:.*]] = arith.constant 1.000000e+00 : f32
+// MATERIALIZE: %[[TWO:.*]] = arith.constant 2.000000e+00 : f32
+// MATERIALIZE: pto.section.simt<<<32, 1, 1>>> {
+// MATERIALIZE-NEXT: pto.keep %[[ONE]] {slot = 0 : i64} : f32
+// MATERIALIZE: pto.section.simt<<<32, 1, 1>>> {
+// MATERIALIZE-NEXT: %[[CARRY0:.*]] = pto.resume {slot = 0 : i64} : f32
+// MATERIALIZE-NEXT: pto.keep %[[CARRY0]] {slot = 0 : i64} : f32
+// MATERIALIZE-NEXT: pto.keep %[[TWO]] {slot = 1 : i64} : f32
+// MATERIALIZE: pto.section.simt<<<32, 1, 1>>> {
+// MATERIALIZE-NEXT: %[[RESUME0:.*]] = pto.resume {slot = 0 : i64} : f32
+// MATERIALIZE-NEXT: %[[RESUME1:.*]] = pto.resume {slot = 1 : i64} : f32
+// MATERIALIZE: %[[RESULT:.*]] = arith.addf %[[RESUME0]], %[[RESUME1]] : f32
+// MATERIALIZE: pto.store %[[RESULT]],
+// MATERIALIZE: pto.keep %[[RESUME0]] {slot = 0 : i64} : f32
+// MATERIALIZE-NEXT: pto.keep %[[RESUME1]] {slot = 1 : i64} : f32
+// MATERIALIZE-NOT: llvm.getelementptr
+// MATERIALIZE-NOT: llvm.load
+// MATERIALIZE-NOT: llvm.store

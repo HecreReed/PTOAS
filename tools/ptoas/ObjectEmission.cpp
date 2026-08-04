@@ -9,6 +9,7 @@
 #include "ObjectEmission.h"
 
 #include "PTO/Transforms/VPTOLLVMEmitter.h"
+#include "VFSIMTSizePatcher.h"
 
 #include "llvm/ADT/SmallString.h"
 #include "llvm/ADT/SmallVector.h"
@@ -332,15 +333,37 @@ public:
 
   bool emitVectorObject(llvm::Module *module,
                         const mlir::pto::CANNToolchain &toolchain,
+                        mlir::pto::VFSIMTSizeFixMode vfsimtSizeFixMode,
                         llvm::raw_ostream &diagOS) {
     if (!module)
       return true;
     if (failed(tempFiles.create("ptoas-device", ".ll", vectorLLPath, diagOS)))
       return false;
-    if (failed(tempFiles.create("ptoas-device", ".o", vectorObjPath, diagOS)))
+    std::string rawVectorObjPath;
+    if (failed(tempFiles.create("ptoas-device-vector-raw", ".o",
+                                rawVectorObjPath, diagOS)))
       return false;
-    return succeeded(mlir::pto::emitVPTOVectorDeviceObject(
-        *module, vectorLLPath, vectorObjPath, toolchain, stderrPath, diagOS));
+    if (failed(mlir::pto::emitVPTOVectorDeviceObject(
+            *module, vectorLLPath, rawVectorObjPath, toolchain, stderrPath,
+            diagOS)))
+      return false;
+    if (vfsimtSizeFixMode == mlir::pto::VFSIMTSizeFixMode::Off) {
+      vectorObjPath = std::move(rawVectorObjPath);
+      return true;
+    }
+
+    std::string patchedVectorObjPath;
+    if (failed(tempFiles.create("ptoas-device-vector-patched", ".o",
+                                patchedVectorObjPath, diagOS)))
+      return false;
+    mlir::FailureOr<mlir::pto::VFSIMTSizePatchResult> result =
+        mlir::pto::verifyAndPatchVFSIMTSize(
+            *module, rawVectorObjPath, patchedVectorObjPath,
+            vfsimtSizeFixMode, diagOS);
+    if (failed(result))
+      return false;
+    vectorObjPath = std::move(result->objectPath);
+    return true;
   }
 
   bool mergeDeviceObjects(const mlir::pto::CANNToolchain &toolchain,
@@ -1021,7 +1044,8 @@ mlir::LogicalResult mlir::pto::emitFatobjLLVM(
     llvm::Module *cubeModule, llvm::Module *vectorModule,
     llvm::StringRef stubSource, llvm::StringRef outputPath,
     llvm::StringRef moduleId, const CANNToolchain &toolchain,
-    TempFileRegistry &tempFiles, llvm::raw_ostream &diagOS) {
+    TempFileRegistry &tempFiles, VFSIMTSizeFixMode vfsimtSizeFixMode,
+    llvm::raw_ostream &diagOS) {
   if (!cubeModule && !vectorModule) {
     diagOS << "Error: VPTO fatobj emission requires at least one LLVM module.\n";
     return failure();
@@ -1034,7 +1058,8 @@ mlir::LogicalResult mlir::pto::emitFatobjLLVM(
     return failure();
   if (!artifacts.emitCubeObject(cubeModule, toolchain, diagOS))
     return failure();
-  if (!artifacts.emitVectorObject(vectorModule, toolchain, diagOS))
+  if (!artifacts.emitVectorObject(vectorModule, toolchain,
+                                  vfsimtSizeFixMode, diagOS))
     return failure();
   if (!artifacts.mergeDeviceObjects(toolchain, diagOS))
     return failure();
@@ -1081,6 +1106,7 @@ mlir::LogicalResult mlir::pto::linkFatobjs(
 mlir::LogicalResult mlir::pto::emitFatobjLLVMWithRuntime(
     llvm::Module *cubeModule, llvm::Module *vectorModule,
     llvm::StringRef stubSource, llvm::ToolOutputFile &outputFile,
+    VFSIMTSizeFixMode vfsimtSizeFixMode,
     llvm::raw_ostream &diagOS) {
   if (!cubeModule && !vectorModule) {
     diagOS << "Error: VPTO fatobj emission requires at least one LLVM module.\n";
@@ -1100,7 +1126,8 @@ mlir::LogicalResult mlir::pto::emitFatobjLLVMWithRuntime(
 
   if (!artifacts.emitCubeObject(cubeModule, *toolchain, diagOS))
     return failure();
-  if (!artifacts.emitVectorObject(vectorModule, *toolchain, diagOS))
+  if (!artifacts.emitVectorObject(vectorModule, *toolchain,
+                                  vfsimtSizeFixMode, diagOS))
     return failure();
 
   if (!artifacts.mergeDeviceObjects(*toolchain, diagOS))

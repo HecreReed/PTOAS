@@ -47,7 +47,7 @@ class TileLibConstraintTest(unittest.TestCase):
     def test_legal_colmax_renders_structured_mlir(self):
         chosen = select("pto.tcolmax", "a5", _specs())
         mlir = chosen.specialize(**_specs()).mlir_text()
-        for op in ("pto.tile_valid_rows", "memref.subview", "scf.for", "iter_args",
+        for op in ("pto.tile_valid_rows", "!pto.ptr<f32, ub>", "scf.for", "iter_args",
                    "pto.vmax", "pto.vsts", "pto.tilelang.instance"):
             self.assertIn(op, mlir)
         self.assertNotIn("pto.castptr", mlir)

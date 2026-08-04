@@ -16,14 +16,14 @@
 module {
   // Row: dst[r, :] = table[idx[r], :]; idx is a GM [1, R] tensor, no scratch.
   func.func @mgather_gm2l1_row(
-      %mem: memref<1x1x1x64x32xf16, #pto.address_space<gm>>,
-      %idx: memref<1x1x1x1x32xi32, #pto.address_space<gm>>) {
+      %mem: !pto.partition_tensor_view<1x1x1x64x32xf16>,
+      %idx: !pto.partition_tensor_view<1x1x1x1x32xi32>) {
     %dst = pto.alloc_tile
       : !pto.tile_buf<loc=mat, dtype=f16, rows=32, cols=32, v_row=32, v_col=32,
                       blayout=col_major, slayout=row_major, fractal=512, pad=0>
     pto.mgather ins(%mem, %idx
-        : memref<1x1x1x64x32xf16, #pto.address_space<gm>>,
-          memref<1x1x1x1x32xi32, #pto.address_space<gm>>)
+        : !pto.partition_tensor_view<1x1x1x64x32xf16>,
+          !pto.partition_tensor_view<1x1x1x1x32xi32>)
       outs(%dst
         : !pto.tile_buf<loc=mat, dtype=f16, rows=32, cols=32, v_row=32, v_col=32,
                         blayout=col_major, slayout=row_major, fractal=512, pad=0>)
@@ -34,16 +34,16 @@ module {
   // Elem: dst[i, j] = table[idx[i, j]]; idx is a GM [R, C] tensor and a GM
   // scratch workspace stages the gathered elements into NZ layout.
   func.func @mgather_gm2l1_elem(
-      %mem: memref<1x1x1x64x32xf16, #pto.address_space<gm>>,
-      %idx: memref<1x1x1x32x32xi32, #pto.address_space<gm>>,
-      %scratch: memref<1x1x1x32x32xf16, #pto.address_space<gm>>) {
+      %mem: !pto.partition_tensor_view<1x1x1x64x32xf16>,
+      %idx: !pto.partition_tensor_view<1x1x1x32x32xi32>,
+      %scratch: !pto.partition_tensor_view<1x1x1x32x32xf16>) {
     %dst = pto.alloc_tile
       : !pto.tile_buf<loc=mat, dtype=f16, rows=32, cols=32, v_row=32, v_col=32,
                       blayout=col_major, slayout=row_major, fractal=512, pad=0>
     pto.mgather ins(%mem, %idx, %scratch
-        : memref<1x1x1x64x32xf16, #pto.address_space<gm>>,
-          memref<1x1x1x32x32xi32, #pto.address_space<gm>>,
-          memref<1x1x1x32x32xf16, #pto.address_space<gm>>)
+        : !pto.partition_tensor_view<1x1x1x64x32xf16>,
+          !pto.partition_tensor_view<1x1x1x32x32xi32>,
+          !pto.partition_tensor_view<1x1x1x32x32xf16>)
       outs(%dst
         : !pto.tile_buf<loc=mat, dtype=f16, rows=32, cols=32, v_row=32, v_col=32,
                         blayout=col_major, slayout=row_major, fractal=512, pad=0>)

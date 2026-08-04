@@ -22,10 +22,10 @@ from ._scalar_adaptation import coerce_runtime_index_value, normalize_runtime_bi
 from ._surface_types import PartitionTensorView, TensorView, Tile
 from ._types import _normalize_address_space, _resolve, ptr
 
-from mlir.dialects import arith
-from mlir.dialects import memref
-from mlir.dialects import pto as _pto
-from mlir.ir import IndexType, IntegerAttr, IntegerType, MemRefType, ShapedType, StridedLayoutAttr, Type, VectorType
+from ptoas.mlir.dialects import arith
+from ptoas.mlir.dialects import memref
+from ptoas.mlir.dialects import pto as _pto
+from ptoas.mlir.ir import IndexType, IntegerAttr, IntegerType, MemRefType, ShapedType, StridedLayoutAttr, Type, VectorType
 
 
 def _validate_surface_value_access(value):
@@ -387,7 +387,7 @@ class MaskResultValue(_SurfaceValue):
 
 
 class AddressValue(_SurfaceValue):
-    """Author-facing address view backed by either a PTO ptr or a memref."""
+    """Author-facing address view backed by a PTO ptr."""
 
     def __add__(self, offset):
         return AddressOffsetValue(self, offset)
@@ -462,7 +462,7 @@ class TileElementRef:
 
 
 class TileSliceValue(_SurfaceValue):
-    """Author-facing memref view produced by `tile[row, col:]` style indexing."""
+    """Author-facing tile slice descriptor produced by `tile[row, col:]` indexing."""
 
     def __init__(self, value, *, tile: "TileValue", offsets, shape):
         super().__init__(value)
@@ -1004,112 +1004,13 @@ def _materialize_tile_slice(tile: TileValue, key):
 
 
 def _build_tile_slice_view(tile: TileValue, *, raw_offsets, shape):
-    base_memref = _emit_tile_memref(tile)
-    base_type = MemRefType(base_memref.type)
-    rank = len(base_type.shape)
-    offset_operands, static_offsets = _split_dynamic_index_operands(raw_offsets)
-    shape_operands, static_shape = _split_dynamic_index_operands(shape)
-    base_strides, base_offset = base_type.get_strides_and_offset()
-    if rank == 1:
-        slice_type = _make_strided_memref_type(
-            [_static_extent_if_known(shape[0])],
-            base_type.element_type,
-            [base_strides[0]],
-            base_type.memory_space,
-            offset=_compose_static_subview_offset(base_offset, base_strides, raw_offsets),
-        )
-        slice_value = memref.SubViewOp(
-            slice_type,
-            base_memref,
-            offset_operands,
-            shape_operands,
-            [],
-            static_offsets,
-            static_shape,
-            [1],
-        ).result
-        return TileSliceValue(slice_value, tile=tile, offsets=tuple(raw_offsets), shape=shape)
-
-    slice_type = _make_strided_memref_type(
-        [_static_extent_if_known(shape[0])],
-        base_type.element_type,
-        [base_strides[1]],
-        base_type.memory_space,
-        offset=_compose_static_subview_offset(base_offset, base_strides, raw_offsets),
-    )
-    slice_value = memref.SubViewOp(
-        slice_type,
-        base_memref,
-        offset_operands,
-        shape_operands,
-        [],
-        static_offsets,
-        [1, static_shape[0]],
-        [1, 1],
-    ).result
-    return TileSliceValue(slice_value, tile=tile, offsets=tuple(raw_offsets), shape=shape)
-
-
-def _emit_tile_memref(tile: TileValue):
-    memref_type = infer_memref_type_from_surface_value(tile)
-    return _pto.TileBufAddrOp(memref_type, tile.value).result
+    return TileSliceValue(tile.value, tile=tile, offsets=tuple(raw_offsets), shape=shape)
 
 
 def _dynamic_extent(static_dim, start):
     if _is_python_index_literal(start):
         return static_dim - start
     return arith.SubIOp(_index_const(static_dim), _coerce_index_value(start)).result
-
-
-def _static_extent_if_known(extent):
-    return extent if _is_python_index_literal(extent) else ShapedType.get_dynamic_size()
-
-
-def _static_index_attr(value):
-    return value if _is_python_index_literal(value) else ShapedType.get_dynamic_size()
-
-
-def _split_dynamic_index_operands(values):
-    operands = []
-    static_attrs = []
-    for value in values:
-        if _is_python_index_literal(value):
-            static_attrs.append(value)
-        else:
-            operands.append(_coerce_index_value(value))
-            static_attrs.append(ShapedType.get_dynamic_size())
-    return operands, static_attrs
-
-
-def _make_strided_memref_type_with_offset(shape, element_type, strides, memory_space, *, offset):
-    return MemRefType.get(
-        list(shape),
-        element_type,
-        StridedLayoutAttr.get(offset, list(strides)),
-        memory_space,
-    )
-
-
-def _make_strided_memref_type(shape, element_type, strides, memory_space, *, offset=ShapedType.get_dynamic_size()):
-    return _make_strided_memref_type_with_offset(
-        shape,
-        element_type,
-        strides,
-        memory_space,
-        offset=offset,
-    )
-
-
-def _compose_static_subview_offset(base_offset, base_strides, raw_offsets):
-    if base_offset == ShapedType.get_dynamic_size():
-        return ShapedType.get_dynamic_size()
-
-    linear_offset = base_offset
-    for stride, authored_offset in zip(base_strides, raw_offsets):
-        if not _is_python_index_literal(authored_offset):
-            return ShapedType.get_dynamic_size()
-        linear_offset += stride * authored_offset
-    return linear_offset
 
 
 def _mul_index(lhs, rhs):

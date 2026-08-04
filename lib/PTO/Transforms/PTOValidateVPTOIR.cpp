@@ -343,7 +343,7 @@ public:
   }
 
   static bool isResidualEmissionScaffold(Operation *op) {
-    return isa<BindTileOp, memref::SubViewOp, memref::ReinterpretCastOp,
+    return isa<memref::SubViewOp, memref::ReinterpretCastOp,
                memref::MemorySpaceCastOp>(op) ||
            isTrivialEmissionCastPtr(op);
   }
@@ -1086,6 +1086,14 @@ private:
 
   LogicalResult validateEmissionOperationSurface() {
     WalkResult walkResult = helper.getModule().walk([&](Operation *op) {
+      if (isa<BuildAsyncSessionOp, TPutAsyncOp, TGetAsyncOp,
+              WaitAsyncEventOp, TestAsyncEventOp>(op)) {
+        op->emitOpError()
+            << "is not supported by the VPTO backend; async SDMA session "
+               "operations currently require the EmitC backend";
+        return WalkResult::interrupt();
+      }
+
       VPTOBufferAddressFamily family =
           VPTOLegalityHelper::classifyBufferAddressFamily(op);
 

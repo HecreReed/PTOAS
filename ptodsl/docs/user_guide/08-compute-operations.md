@@ -283,6 +283,79 @@ namespace.
 
 ---
 
+#### `pto.tile.scatter(src: Tile, dst: Tile, *, indexes: Tile | None = None, axis: str | None = None, mask_pattern: str | None = None) -> None`
+
+**Description**: Scatters elements from `src` into `dst`. Two modes are available:
+
+**Index mode** (pass `indexes`, omit `mask_pattern`): Each element `src[i, j]` is written to `dst` at the column offset specified by `indexes[i, j]`. The destination tile is zero-initialized before scattering. Uses `pto.vscatter` under the hood.
+
+**Mask-pattern mode** (pass `mask_pattern` and `axis`, omit `indexes`): Elements from `src` are scattered into `dst` with a regular spacing pattern controlled by `mask_pattern` and `axis`. The destination tile is zero-initialized before scattering.
+
+- `axis="row"`: source elements are scattered across columns within each row, interleaved with zeros according to the mask pattern.
+- `axis="col"`: source elements are scattered across rows within each column, placed at strided row positions.
+
+Supported mask patterns:
+
+| Pattern | Row semantics (elements placed at column multiples) | Column semantics (stride, start) |
+|---------|------------------------------------------------------|----------------------------------|
+| `P1111` | Direct copy (no interleaving) | Direct copy (stride=1, start=0) |
+| `P0101` | Every 2nd col, starting at 0 | stride=2, start=0 |
+| `P1010` | Every 2nd col, starting at 1 | stride=2, start=1 |
+| `P0001` | Every 4th col, starting at 0 | stride=4, start=0 |
+| `P0010` | Every 4th col, starting at 1 | stride=4, start=1 |
+| `P0100` | Every 4th col, starting at 2 | stride=4, start=2 |
+| `P1000` | Every 4th col, starting at 3 | stride=4, start=3 |
+
+**Parameters**:
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `src` | `Tile` | Source tile containing data to scatter |
+| `dst` | `Tile` | Destination tile (zero-initialized, then receives scattered data) |
+| `indexes` | `Tile | None` | Index tile specifying per-element column offsets. dtype: `i16`/`ui16` for i8/ui8/i16/ui16/f16/bf16 data; `i32`/`ui32` for i32/ui32/f32 data (index mode) |
+| `axis` | `str | None` | Scatter direction: `"row"` or `"col"` (mask-pattern mode) |
+| `mask_pattern` | `str | None` | Spacing pattern: `"P1111"`, `"P0101"`, `"P1010"`, `"P0001"`, `"P0010"`, `"P0100"`, or `"P1000"` (mask-pattern mode) |
+
+**Returns**: None (writes to `dst`).
+
+**Constraints**:
+
+- A5 target only.
+- Supported element types: `i8`, `i16`, `i32`, `ui8`, `ui16`, `ui32`, `f16`, `bf16`, `f32`.
+- Index mode: `indexes` must have `i16`/`ui16` dtype when data dtype is i8/ui8/i16/ui16/f16/bf16, or `i32`/`ui32` dtype when data dtype is i32/ui32/f32, and the same shape as `src`.
+- Mask-pattern mode: exactly one of `axis` and `mask_pattern` must be provided together; `indexes` must not be set.
+- `dst` must use row-major layout in UB memory space.
+- Runs on `PIPE_V` (vector pipe).
+
+**Example** — index-mode scatter:
+
+```python
+src_tile = pto.alloc_tile(shape=[4, 32], dtype=pto.f32)
+dst_tile = pto.alloc_tile(shape=[4, 32], dtype=pto.f32)
+idx_tile = pto.alloc_tile(shape=[4, 32], dtype=pto.i32)
+pto.tile.scatter(src_tile, dst_tile, indexes=idx_tile)
+```
+
+**Example** — mask-pattern scatter along rows:
+
+```python
+src_tile = pto.alloc_tile(shape=[4, 32], dtype=pto.f16)
+dst_tile = pto.alloc_tile(shape=[4, 64], dtype=pto.f16)
+pto.tile.scatter(src_tile, dst_tile, axis="row", mask_pattern="P0101")
+```
+
+**Example** — mask-pattern scatter along columns:
+
+```python
+src_tile = pto.alloc_tile(shape=[4, 32], dtype=pto.f32)
+dst_tile = pto.alloc_tile(shape=[16, 32], dtype=pto.f32)
+pto.tile.scatter(src_tile, dst_tile, axis="col", mask_pattern="P0010")
+```
+
+The low-level alias `pto.tscatter` is also available when a kernel needs to bypass the `pto.tile` namespace.
+
+---
+
 ### 8.1.7 Broadcast and expansion
 
 Expansion ops take a narrow source (scalar, row vector, or column vector) and broadcast it to a full tile shape. They are useful for applying per-row or per-column coefficients to a tile.
@@ -1453,7 +1526,7 @@ pto.tile.store(dst_tile, out_view)
 | Activation | `tile.relu`, `tile.lrelu` |
 | Row reductions | `tile.rowsum`, `tile.rowmax`, `tile.rowmin`, `tile.rowprod`, `tile.rowargmax`, `tile.rowargmin` |
 | Column reductions | `tile.colsum`, `tile.colmax`, `tile.colmin`, `tile.colprod` |
-| Sort/gather | `tile.sort32`, `tile.mrgsort`, `tile.gather` |
+| Sort/gather/scatter | `tile.sort32`, `tile.mrgsort`, `tile.gather`, `tile.scatter` |
 | Broadcast | `tile.expands`, `tile.rowexpand`, `tile.colexpand` |
 | Row-expand arith | `tile.rowexpandadd`, `tile.rowexpandsub`, `tile.rowexpandmul`, `tile.rowexpanddiv`, `tile.rowexpandmax`, `tile.rowexpandmin`, `tile.rowexpandexpdif` |
 | Col-expand arith | `tile.colexpandadd`, `tile.colexpandsub`, `tile.colexpandmul`, `tile.colexpanddiv`, `tile.colexpandmax`, `tile.colexpandmin`, `tile.colexpandexpdif` |
@@ -2015,6 +2088,62 @@ These ops rearrange data between vector registers without touching UB memory.
 They are useful for switching between interleaved layouts (`x0, y0, x1, y1,
 ...`) and split layouts (`x...`, `y...`) inside `@pto.simd`.
 
+#### `pto.vsqz(vec: VRegType, mask: MaskType) -> VRegType`
+
+**Description**: Compact the active lanes of a vector register toward the
+front while preserving their relative order. Lanes are scanned from low to
+high; lanes for which `mask` is `true` are kept, and the kept elements are
+moved to the lowest result lanes in their original source order. The trailing
+lanes that are no longer occupied are zero-filled according to the underlying
+ISA specification. This is a register compaction: it reorganizes vector
+contents but does not itself perform any store.
+
+**Parameters**:
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `vec` | `VRegType` | Source vector register |
+| `mask` | `MaskType` | Lane predicate selecting the elements to compact |
+
+**Returns**:
+
+| Return Value | Type | Description |
+|--------------|------|-------------|
+| `result` | `VRegType` | Compacted vector; same `VRegType` as `vec` |
+
+**Constraints**:
+- The result `VRegType` is identical to the input `vec` `VRegType`; the result
+  type is inferred from `vec` and cannot be supplied separately.
+- The relative order of the active lanes is preserved.
+- Trailing lanes that are not filled by active elements are zero-filled per
+  the underlying ISA semantics.
+- Low-precision vregs are outside the general-purpose compute/rearrangement
+  surface; `vsqz` does not accept them.
+- `vsqz` is register compaction only — it does not execute a store. There is
+  no `mode` or `stored` parameter; the underlying PTOAS emitter determines
+  store hints (such as for `pto.vstur`) from surrounding user code, not from
+  `vsqz` arguments.
+
+**Example** — compact the active lanes of a row, then store the dense prefix to
+a UB base through the alignment-coupled store chain. `vsqz` only compacts the
+register; the dense store must be performed with `pto.vstur` (the required
+consumer that lets the VPTO LLVM emitter set `VSQZ #st=1`), followed by
+`pto.vstar` to flush the trailing bytes. Do **not** feed the compacted vector
+back to `pto.vsts(..., mask)` with the original mask — the original mask selects
+source lanes, not the compacted positions, so it would write the surviving
+elements to the wrong destinations.
+
+<!-- ptodsl-doc-test: {"mode":"compile_fragment","fixture":"compute_ops.vector_compute","symbol":"compute_ops_vector_probe","compile":{"BLOCK":128}} -->
+```python
+compacted = pto.vsqz(s_row, col_mask)
+store_base = pto.addptr(out_tile.as_ptr(), pto.const(0, dtype=pto.index))
+align0 = pto.init_align()
+align1 = pto.vstur(align0, compacted, store_base, pto.PostUpdate.ON)
+pto.vstar(align1, store_base)
+```
+
+---
+
 #### `pto.vintlv(lhs: VRegType, rhs: VRegType) -> tuple[VRegType, VRegType]`
 
 **Description**: Interleave two vectors lane-by-lane and return the result as a
@@ -2105,7 +2234,7 @@ even_lanes, odd_lanes = pto.vdintlv(packed_low, packed_high)
 | Compare/select | `vcmp`, `vcmps`, `vsel` |
 | Conversion | `vcvt`, `vpack`, `vbitcast`, `pbitcast` |
 | Index generation | `vci` |
-| Rearrangement | `vintlv`, `vdintlv` |
+| Rearrangement | `vsqz`, `vintlv`, `vdintlv` |
 
 ---
 

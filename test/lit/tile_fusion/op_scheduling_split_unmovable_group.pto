@@ -1,0 +1,57 @@
+// Copyright (c) 2026 Huawei Technologies Co., Ltd.
+// This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+// CANN Open Software License Agreement Version 2.0 (the "License").
+// Please refer to the License for details. You may not use this file except in compliance with the License.
+// THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+// INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+// See LICENSE in the root of the software repository for the full text of the License.
+
+// Guards OpScheduling fallback when a planned fusion group cannot be compacted
+// into a single contiguous span because an intervening unmovable op (X) forms
+// an SSA producer chain A -> X -> B -> C. The single planned group 0 must be
+// split into physical spans: [A] (singleton, dropped) and [B, C] (retained as a
+// new contiguous group). This exercises the metadata normalization stage that
+// runs after scheduling completes, without relying on FusionPlan to produce
+// the split (hand-authored metadata is fed directly to pto-op-scheduling).
+//
+// RUN: pto-test-opt %s -pto-op-scheduling | FileCheck %s --check-prefix=SPLIT
+
+module {
+  func.func @op_scheduling_split_unmovable_group(
+      %full0: !pto.tile_buf<vec, 32x32xf32>,
+      %full1: !pto.tile_buf<vec, 32x32xf32>,
+      %full2: !pto.tile_buf<vec, 32x32xf32>,
+      %full3: !pto.tile_buf<vec, 32x32xf32>) {
+    %tmp0 = pto.alloc_tile : !pto.tile_buf<vec, 32x32xf32>
+    %tmp1 = pto.alloc_tile : !pto.tile_buf<vec, 32x32xf32>
+    %tmp2 = pto.alloc_tile : !pto.tile_buf<vec, 32x32xf32>
+    %tmp3 = pto.alloc_tile : !pto.tile_buf<vec, 32x32xf32>
+
+    // A (group 0, order 0) writes %tmp0; X reads %tmp0 (X depends on A).
+    pto.tadd ins(%full0, %full1 : !pto.tile_buf<vec, 32x32xf32>, !pto.tile_buf<vec, 32x32xf32>) outs(%tmp0 : !pto.tile_buf<vec, 32x32xf32>) {pto.fusion.group_id = 0 : i64, pto.fusion.order = 0 : i64}
+    // X writes %tmp1; B reads %tmp1 (B depends on X). X is unannotated and
+    // cannot be crossed in either direction: B cannot move before X because
+    // X defines %tmp1; A cannot move after X because X reads A's %tmp0.
+    pto.tadd ins(%tmp0, %full2 : !pto.tile_buf<vec, 32x32xf32>, !pto.tile_buf<vec, 32x32xf32>) outs(%tmp1 : !pto.tile_buf<vec, 32x32xf32>)
+    // B (group 0, order 1) reads %tmp1, writes %tmp2.
+    pto.tadd ins(%tmp1, %full3 : !pto.tile_buf<vec, 32x32xf32>, !pto.tile_buf<vec, 32x32xf32>) outs(%tmp2 : !pto.tile_buf<vec, 32x32xf32>) {pto.fusion.group_id = 0 : i64, pto.fusion.order = 1 : i64}
+    // C (group 0, order 2) reads %tmp2.
+    pto.tadd ins(%tmp2, %full0 : !pto.tile_buf<vec, 32x32xf32>, !pto.tile_buf<vec, 32x32xf32>) outs(%tmp3 : !pto.tile_buf<vec, 32x32xf32>) {pto.fusion.group_id = 0 : i64, pto.fusion.order = 2 : i64}
+    return
+  }
+}
+
+// After OpScheduling, physical order is A, X, B, C. The planned group 0 is
+// split into span [A] (singleton) and span [B, C] (length 2). Normalization
+// drops A's metadata and re-numbers [B, C] as a new contiguous group 0.
+// SPLIT-LABEL: func.func @op_scheduling_split_unmovable_group(
+// SPLIT: pto.tadd ins(%arg0, %arg1
+// SPLIT-NOT: pto.fusion.group_id
+// SPLIT-NOT: pto.fusion.order
+// SPLIT-NEXT: pto.tadd ins(%{{[0-9]+}}, %arg2
+// SPLIT-NOT: pto.fusion.group_id
+// SPLIT-NOT: pto.fusion.order
+// SPLIT-NEXT: pto.tadd ins(%{{[0-9]+}}, %arg3
+// SPLIT-SAME: {pto.fusion.group_id = 0 : i64, pto.fusion.order = 0 : i64}
+// SPLIT-NEXT: pto.tadd ins(%{{[0-9]+}}, %arg0
+// SPLIT-SAME: {pto.fusion.group_id = 0 : i64, pto.fusion.order = 1 : i64}

@@ -1,0 +1,24 @@
+// Copyright (c) 2026 Huawei Technologies Co., Ltd.
+// This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+// CANN Open Software License Agreement Version 2.0 (the "License").
+// Please refer to the License for details. You may not use this file except in compliance with the License.
+// THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+// INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+// See LICENSE in the root of the software repository for the full text of the License.
+
+// Guard: a shared peer does not make a flag ambiguous when the pipe that
+// executes the operation has dedicated vector/cube ownership.
+// RUN: pto-test-opt --pto-normalize-uncovered-tile-sections %s | FileCheck %s
+
+module attributes {pto.backend = "vpto", pto.target_arch = "a5"} {
+  func.func @shared_peer_flags() attributes {pto.entry} {
+    pto.set_flag[<PIPE_MTE3>, <PIPE_MTE2>, <EVENT_ID0>]
+    pto.wait_flag[<PIPE_MTE2>, <PIPE_V>, <EVENT_ID0>]
+    return
+  }
+}
+
+// CHECK: module attributes {{.*}}pto.kernel_kind = #pto.kernel_kind<vector>
+// CHECK: func.func @shared_peer_flags
+// CHECK-NEXT: pto.set_flag[<PIPE_MTE3>, <PIPE_MTE2>, <EVENT_ID0>]
+// CHECK-NEXT: pto.wait_flag[<PIPE_MTE2>, <PIPE_V>, <EVENT_ID0>]

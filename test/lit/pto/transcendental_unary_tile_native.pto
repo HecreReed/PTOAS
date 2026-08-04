@@ -1,0 +1,46 @@
+// Copyright (c) 2026 Huawei Technologies Co., Ltd.
+// This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+// CANN Open Software License Agreement Version 2.0 (the "License").
+// Please refer to the License for details. You may not use this file except in compliance with the License.
+// THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+// INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+// See LICENSE in the root of the software repository for the full text of the License.
+
+// RUN: ptoas --pto-level=level3 --pto-arch=a5 \
+// RUN:   --mlir-print-ir-after=pto-resolve-reserved-buffers %s -o /dev/null 2>&1 \
+// RUN:   | FileCheck %s --check-prefix=NATIVE
+// RUN: ptoas --pto-level=level3 --pto-arch=a3 --enable-insert-sync %s \
+// RUN:   | FileCheck %s --check-prefix=EMITC
+
+module {
+  func.func private @texp_arg(
+      %src: !pto.tile_buf<vec, 16x16xf32>,
+      %dst: !pto.tile_buf<vec, 16x16xf32>) {
+    pto.texp ins(%src : !pto.tile_buf<vec, 16x16xf32>)
+             outs(%dst : !pto.tile_buf<vec, 16x16xf32>)
+             {precisionType = #pto<exp_precision high_precision>}
+    return
+  }
+
+  func.func private @tlog_arg(
+      %src: !pto.tile_buf<vec, 16x16xf32>,
+      %dst: !pto.tile_buf<vec, 16x16xf32>) {
+    pto.tlog ins(%src : !pto.tile_buf<vec, 16x16xf32>)
+             outs(%dst : !pto.tile_buf<vec, 16x16xf32>)
+             {precisionType = #pto<log_precision high_precision>}
+    return
+  }
+}
+
+// NATIVE-LABEL: func.func private @texp_arg(
+// NATIVE-SAME: %arg0: !pto.tile_buf<vec, 16x16xf32>
+// NATIVE-SAME: %arg1: !pto.tile_buf<vec, 16x16xf32>
+// NATIVE: pto.texp ins(%arg0 : !pto.tile_buf<vec, 16x16xf32>) outs(%arg1 : !pto.tile_buf<vec, 16x16xf32>) {precisionType = #pto<exp_precision high_precision>}
+// NATIVE-LABEL: func.func private @tlog_arg(
+// NATIVE: pto.tlog ins(%arg0 : !pto.tile_buf<vec, 16x16xf32>) outs(%arg1 : !pto.tile_buf<vec, 16x16xf32>) {precisionType = #pto<log_precision high_precision>}
+// NATIVE-NOT: memref<
+
+// EMITC-LABEL: texp_arg(
+// EMITC: TEXP<pto::ExpAlgorithm::HIGH_PRECISION>(
+// EMITC-LABEL: tlog_arg(
+// EMITC: TLOG<pto::LogAlgorithm::HIGH_PRECISION>(

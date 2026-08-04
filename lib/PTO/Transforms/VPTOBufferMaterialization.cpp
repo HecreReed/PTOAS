@@ -68,17 +68,6 @@ Value materializeBufferPointer(Value value, Type elementType,
   if (value.getType() == ptrType)
     return value;
 
-  if (auto bind = value.getDefiningOp<BindTileOp>())
-    return materializeBufferPointer(bind.getSource(), elementType, memorySpace,
-                                    rewriter, loc);
-
-  if (auto cast = value.getDefiningOp<PointerCastOp>()) {
-    if (cast.getAddrs().empty())
-      return {};
-    return rewriter.create<CastPtrOp>(loc, ptrType, cast.getAddrs().front())
-        .getResult();
-  }
-
   Value memrefValue = materializeTileBufferView(value, rewriter, loc);
   auto memrefType = dyn_cast_or_null<MemRefType>(memrefValue.getType());
   if (!memrefValue || !memrefType)

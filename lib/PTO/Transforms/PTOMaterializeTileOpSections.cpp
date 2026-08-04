@@ -77,8 +77,8 @@ static bool isMteDataMovementOperation(Operation *op) {
 
 static bool isForbiddenTileOperation(Operation *op) {
   return isa<TileOpInterface>(op) ||
-         isa<AllocTileOp, AllocMultiTileOp, MaterializeTileOp, ReserveBufferOp,
-             TPrefetchAsyncOp, TAssignOp, TensorViewAddrOp>(op);
+         isa<AllocTileOp, AllocMultiTileOp, ReserveBufferOp, TPrefetchAsyncOp,
+             TAssignOp, TensorViewAddrOp>(op);
 }
 
 static std::optional<unsigned> traceToFunctionArgument(Value value,

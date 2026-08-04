@@ -128,10 +128,6 @@ static Value getCanonicalTrackedValue(Value value) {
     if (!def)
       break;
 
-    if (auto bind = dyn_cast<pto::BindTileOp>(def)) {
-      value = bind.getSource();
-      continue;
-    }
     if (auto tileBufAddr = dyn_cast<pto::TileBufAddrOp>(def)) {
       value = tileBufAddr.getSrc();
       continue;
@@ -198,43 +194,6 @@ static Value getCanonicalTrackedValue(Value value) {
     break;
   }
   return value;
-}
-
-static bool normalizeFusionRegionYieldFrontier(pto::FusionRegionOp fusionRegion) {
-  Block &body = fusionRegion.getBody().front();
-  auto yieldOp = dyn_cast<pto::YieldOp>(body.getTerminator());
-  if (!yieldOp)
-    return false;
-
-  bool changed = false;
-  for (auto [index, yielded] : llvm::enumerate(yieldOp.getValues())) {
-    auto bind = yielded.getDefiningOp<pto::BindTileOp>();
-    if (!bind)
-      continue;
-
-    Value normalized = bind.getSource();
-    if (!normalized || normalized == yielded)
-      continue;
-
-    Value regionResult = fusionRegion.getResult(index);
-    Type originalResultType = regionResult.getType();
-
-    yieldOp->setOperand(index, normalized);
-    if (regionResult.getType() != normalized.getType())
-      regionResult.setType(normalized.getType());
-
-    if (originalResultType != normalized.getType() && !regionResult.use_empty()) {
-      OpBuilder builder(fusionRegion);
-      builder.setInsertionPointAfter(fusionRegion);
-      auto rebound = builder.create<pto::BindTileOp>(
-          bind.getLoc(), originalResultType, regionResult, bind.getValidRow(),
-          bind.getValidCol(), bind.getConfig());
-      rebound->setAttrs(bind->getAttrDictionary());
-      regionResult.replaceAllUsesExcept(rebound.getResult(), rebound);
-    }
-    changed = true;
-  }
-  return changed;
 }
 
 static Operation *getTopLevelAncestorInBlock(Operation *op, Block *block) {
@@ -551,9 +510,6 @@ struct PTOFusionLoadStoreElisionPass
       return;
 
     bool changed = false;
-    func.walk([&](pto::FusionRegionOp fusionRegion) {
-      changed |= normalizeFusionRegionYieldFrontier(fusionRegion);
-    });
 
     llvm::DenseMap<Operation *, FusionRegionStoreContext> regionContexts;
     func.walk([&](pto::FusionRegionOp fusionRegion) {

@@ -8,7 +8,7 @@
 
 // Test that ExpandTileOp + InlineLibCall + FoldTileBufIntrinsics pipeline
 //
-// Pipeline: PTOMaterializeTileHandles -> ExpandTileOp -> InlineLibCall -> FoldTileBufIntrinsics
+// Pipeline: ExpandTileOp -> InlineLibCall -> FoldTileBufIntrinsics
 //
 // RUN: ptoas --pto-arch=a5 --pto-backend=vpto --emit-vpto --enable-tile-op-expand %s -o - 2>/dev/null | FileCheck %s
 

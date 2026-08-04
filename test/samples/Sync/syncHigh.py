@@ -7,9 +7,9 @@
 # INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
 # See LICENSE in the root of the software repository for the full text of the License.
 
-from mlir.ir import Context, Location, Module, InsertionPoint, UnitAttr
-from mlir.dialects import func, arith, pto
-from mlir.ir import F32Type, IndexType
+from ptoas.mlir.ir import Attribute, Context, Location, Module, InsertionPoint, UnitAttr
+from ptoas.mlir.dialects import func, arith, pto
+from ptoas.mlir.ir import F32Type, IndexType
 
 
 def build():
@@ -41,6 +41,9 @@ def build():
             with InsertionPoint(m.body):
                 fn = func.FuncOp("run_sync_high", fn_ty)
                 fn.operation.attributes["pto.entry"] = UnitAttr.get(ctx)
+                fn.operation.attributes["pto.kernel_kind"] = Attribute.parse(
+                    "#pto.kernel_kind<vector>", ctx
+                )
                 entry = fn.add_entry_block()
 
             with InsertionPoint(entry):

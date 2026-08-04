@@ -8,10 +8,8 @@
 
 // Regression guard for issue 791.
 //
-// Guard item 1: VPTOPtrNormalize must rewrite memref-backed `pto.mte_ub_gm`
-// operands into ptr-form operands before wrapper expansion. If this regresses,
-// the op reaches later passes with a memref source and eventually reintroduces
-// an illegal `pto.castptr` from memref to !pto.ptr.
+// Guard item 1: VPTOPtrNormalize preserves the pointer-form `pto.mte_ub_gm`
+// operands before wrapper expansion.
 // RUN: ptoas --pto-arch=a5 --pto-backend=vpto --emit-vpto --mlir-print-ir-after=vpto-ptr-normalize %s -o /dev/null 2>&1 | FileCheck %s --check-prefix=NORMALIZE
 //
 // Guard item 2: after `vpto-expand-wrapper-ops`, the expanded DMA store must
@@ -24,11 +22,10 @@ module attributes {pto.target_arch = "a5", pto.kernel_kind = #pto.kernel_kind<ve
     %c0_i64 = arith.constant 0 : i64
     %c16_i64 = arith.constant 16 : i64
     %c32_i64 = arith.constant 32 : i64
-    %c16 = arith.constant 16 : index
-    %src = pto.pointer_cast(%c0_i64) %c16, %c16 : memref<16x16xf16, #pto.address_space<vec>>
+    %src = pto.castptr %c0_i64 : i64 -> !pto.ptr<f16, ub>
     pto.mte_ub_gm %src, %out_gm, %c32_i64
       nburst(%c16_i64, %c32_i64, %c32_i64)
-      : memref<16x16xf16, #pto.address_space<vec>>, !pto.ptr<f16, gm>, i64, i64, i64, i64
+      : !pto.ptr<f16, ub>, !pto.ptr<f16, gm>, i64, i64, i64, i64
     return
   }
 }
@@ -44,5 +41,5 @@ module attributes {pto.target_arch = "a5", pto.kernel_kind = #pto.kernel_kind<ve
 // EXPAND-SAME: (vpto-expand-wrapper-ops)
 // EXPAND-LABEL: func.func @issue_791_min(%arg0: !pto.ptr<f16, gm>) attributes {pto.aicore} {
 // EXPAND: %[[SRC:.*]] = pto.castptr %{{.*}} : i64 -> !pto.ptr<f16, ub>
-// EXPAND-NOT: pto.castptr %{{.*}} : memref<16x16xf16, #pto.address_space<vec>> -> !pto.ptr<f16, ub>
+// EXPAND-NOT: memref
 // EXPAND: pto.copy_ubuf_to_gm %[[SRC]], %arg0, %{{.*}} : !pto.ptr<f16, ub>, !pto.ptr<f16, gm>, i64, i64, i64, i64, i64, i64

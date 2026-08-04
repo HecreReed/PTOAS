@@ -17,7 +17,7 @@ or as the sub-namespace ``pto`` from the ptodsl package::
     from ptodsl import pto
 
 All user-facing symbols live here.  Low-level MLIR bindings are accessed
-internally as ``_pto`` (``from mlir.dialects import pto as _pto``).
+internally as ``_pto`` (``from ptoas.mlir.dialects import pto as _pto``).
 """
 
 from ._diagnostics import unsupported_public_surface_error
@@ -34,7 +34,7 @@ from ._types import (           # noqa: F401
     si8, si16, si32, si64,
     ui8, ui16, ui32, ui64,
     index,
-    ptr, vreg_type, vec_type, mask_type,
+    ptr, vreg_type, vec_type, mask_type, struct_type,
     _resolve,
 )
 from ._builtin_vector import Vec  # noqa: F401
@@ -84,6 +84,7 @@ from ._vmi_namespace import vmi  # noqa: F401
 # ── Operations ────────────────────────────────────────────────────────────────
 from ._ops import (             # noqa: F401
     const,
+    declare_struct, struct_get, struct_set,
     get_op_attr,
     castptr, addptr,
     vlds, vldas, vldus, vldsx2, vsts, vstsx2,
@@ -107,7 +108,7 @@ from ._ops import (             # noqa: F401
     vadd, vsub, vmul, vdiv, vmax, vmin,
     vand, vor, vxor, vshl, vshr, vshls, vshrs,
     vcmax, vcadd, vcmin, vdup, vexpdif,
-    vexp, vln, vsqrt, vabs, vneg, vrec, vrsqrt, vrelu, vnot,
+    vexp, vln, vsqrt, vabs, vneg, vrec, vrsqrt, vrelu, vnot, vsqz,
     vcgmax, vcgadd, vcgmin, vcpadd,
     vtrc, vprelu, vintlv, vdintlv, vselr,
     chistv2,
@@ -119,9 +120,13 @@ from ._ops import (             # noqa: F401
     vsel,
     make_tensor_view, partition_view,
     alloc_buffer, alloc_tile,
-    tsort32, tmrgsort, tgather,
+    tsort32, tmrgsort, tgather, tscatter,
     mte_load, mte_store, mte_gm_ub, mte_ub_gm, mte_ub_ub, mte_ub_l1,
     mte_gm_l1, mte_l1_ub, mte_gm_l1_frac, mte_l1_bt, mte_l1_fb, mem_bar,
+    set_store_atomic_cfg,
+    set_atomic_add, set_atomic_max, set_atomic_min, set_atomic_none,
+    set_atomic_f32, set_atomic_f16, set_atomic_bf16,
+    set_atomic_s32, set_atomic_s16, set_atomic_s8,
     mte_l1_l0a, mte_l1_l0b, mte_l1_l0a_mx, mte_l1_l0b_mx,
     mte_l0c_l1, mte_l0c_gm, mte_l0c_ub,
     mad, mad_acc, mad_bias, mad_mx, mad_mx_acc, mad_mx_bias,
@@ -153,7 +158,7 @@ from ._ops import (             # noqa: F401
 
 # ── Control flow ──────────────────────────────────────────────────────────────
 from ._control_flow import (    # noqa: F401
-    vecscope,
+    section, vecscope,
     for_, if_, yield_,
     static_range,
     LoopHandle, BranchHandle,

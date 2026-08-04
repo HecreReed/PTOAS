@@ -24,7 +24,7 @@
 // CHECK-NEXT: call @dynamic_shape_tileop(%[[BRANCH_TILE]], %[[BRANCH_ROWS]], %[[BRANCH_COLS]])
 
 // CHECK-LABEL: func.func private @dynamic_shape_tileop(
-// CHECK-SAME: memref<16x16xf32
+// CHECK-SAME: !pto.tile_buf<vec, 16x16xf32, valid=?x?>
 // CHECK-SAME: %{{.*}}: index, %{{.*}}: index)
 
 module attributes {pto.target_arch = "a5"} {

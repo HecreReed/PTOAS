@@ -8,15 +8,15 @@
 
 // RUN: ptoas --mlir-print-ir-after=pto-plan-memory %s 2>&1 1>/dev/null | FileCheck %s --check-prefix=PLAN
 // RUN: ptoas --mlir-print-ir-after=pto-resolve-buffer-select %s 2>&1 1>/dev/null | FileCheck %s --check-prefix=SELECT
+// RUN: ptoas --plan-memory-impl=modern --mlir-print-ir-after=pto-plan-memory %s 2>&1 1>/dev/null | FileCheck %s --check-prefix=PLAN
+// RUN: ptoas --plan-memory-impl=modern --mlir-print-ir-after=pto-resolve-buffer-select %s 2>&1 1>/dev/null | FileCheck %s --check-prefix=SELECT
 
-// End-to-end test for the N == 4 multi-buffer path: PlanMemory must
-// reserve 4 physical slots and emit a 4-address `pto.pointer_cast`.
-// PTOResolveBufferSelect then lowers each constant-slot `pto.slot_marker`
-// to a single-address pointer_cast picking the right slot.
+// End-to-end test for N == 4: PlanMemory records four physical slot addresses,
+// then PTOResolveBufferSelect materializes each selected tile handle.
 
 module {
   func.func @n4_rotate(
-      %gm : memref<16x16xf16, #pto.address_space<gm>>) {
+      %gm : !pto.partition_tensor_view<16x16xf16>) {
     %c0 = arith.constant 0 : index
     %c1 = arith.constant 1 : index
     %c2 = arith.constant 2 : index
@@ -38,30 +38,29 @@ module {
         : !pto.multi_tile_buf<vec, 16x16xf16, count=4>
        -> !pto.tile_buf<vec, 16x16xf16>
 
-    pto.tload ins(%gm : memref<16x16xf16, #pto.address_space<gm>>)
+    pto.tload ins(%gm : !pto.partition_tensor_view<16x16xf16>)
               outs(%s0 : !pto.tile_buf<vec, 16x16xf16>)
-    pto.tload ins(%gm : memref<16x16xf16, #pto.address_space<gm>>)
+    pto.tload ins(%gm : !pto.partition_tensor_view<16x16xf16>)
               outs(%s1 : !pto.tile_buf<vec, 16x16xf16>)
-    pto.tload ins(%gm : memref<16x16xf16, #pto.address_space<gm>>)
+    pto.tload ins(%gm : !pto.partition_tensor_view<16x16xf16>)
               outs(%s2 : !pto.tile_buf<vec, 16x16xf16>)
-    pto.tload ins(%gm : memref<16x16xf16, #pto.address_space<gm>>)
+    pto.tload ins(%gm : !pto.partition_tensor_view<16x16xf16>)
               outs(%s3 : !pto.tile_buf<vec, 16x16xf16>)
     return
   }
 }
 
-// PlanMemory: 4 physical addresses, one `pto.pointer_cast` with 4 i64 args.
+// PlanMemory records four physical addresses on alloc_multi_tile.
 // PLAN: IR Dump After PlanMemory
 // PLAN-LABEL: func.func @n4_rotate
-// PLAN: pto.pointer_cast({{[^,]*}}, {{[^,]*}}, {{[^,]*}}, {{[^,]*}})
+// PLAN: pto.alloc_multi_tile {pto.multi_buffer_addrs = array<i64: 0, 512, 1024, 1536>}
 
-// PTOResolveBufferSelect: four single-addr casts (one per slot), no leftover
-// slot_marker. The original 4-addr cast remains as the alloc anchor.
+// PTOResolveBufferSelect: four addressed alloc_tile ops, no multi-buffer ops.
 // SELECT: IR Dump After PTOResolveBufferSelect
 // SELECT-LABEL: func.func @n4_rotate
-// SELECT-NOT: pto.slot_marker
-// SELECT: pto.pointer_cast({{[^,]*}}, {{[^,]*}}, {{[^,]*}}, {{[^,]*}})
-// SELECT: pto.pointer_cast(%{{[^,)]+}})
-// SELECT: pto.pointer_cast(%{{[^,)]+}})
-// SELECT: pto.pointer_cast(%{{[^,)]+}})
-// SELECT: pto.pointer_cast(%{{[^,)]+}})
+// SELECT-NOT: pto.alloc_multi_tile
+// SELECT-NOT: pto.multi_tile_get
+// SELECT: pto.alloc_tile addr = %{{.*}}
+// SELECT: pto.alloc_tile addr = %{{.*}}
+// SELECT: pto.alloc_tile addr = %{{.*}}
+// SELECT: pto.alloc_tile addr = %{{.*}}

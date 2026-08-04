@@ -1,3 +1,11 @@
+// Copyright (c) 2026 Huawei Technologies Co., Ltd.
+// This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+// CANN Open Software License Agreement Version 2.0 (the "License").
+// Please refer to the License for details. You may not use this file except in compliance with the License.
+// THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+// INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+// See LICENSE in the root of the software repository for the full text of the License.
+
 // RUN: ptoas --pto-backend=vpto --pto-arch=a5 --enable-vpto-soft-postupdate --emit-vpto %s -o - | FileCheck %s
 
 // Accumulator path: base pointer is an iter_arg that advances via pto.addptr.
@@ -6,8 +14,10 @@
 
 // CHECK-LABEL: func.func @accum_base_addptr
 // CHECK: scf.for
+// CHECK-NOT: pto.addptr
 // CHECK:   pto.vlds {{.*}}[%c64] {{.*}} -> !pto.vreg<64xf32>, !pto.ptr<f32,
 // CHECK:   pto.vsts {{.*}} -> !pto.ptr<f32,
+// CHECK-NOT: pto.addptr
 // CHECK:   scf.yield
 
 module attributes {pto.target_arch = "a5", pto.kernel_kind = #pto.kernel_kind<vector>} {

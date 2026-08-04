@@ -9,19 +9,6 @@
 // RUN: ptoas --pto-arch=a3 %s 2>&1 | FileCheck %s --check-prefix=A3
 
 module {
-  func.func @issue157_subview_remote_offset_i8(
-      %src: memref<?xi8, #pto.address_space<gm>>, %off: index) {
-    %c64 = arith.constant 64 : index
-    %sub = memref.subview %src[%off] [%c64] [1]
-      : memref<?xi8, #pto.address_space<gm>>
-        to memref<?xi8, strided<[1], offset: ?>, #pto.address_space<gm>>
-    %tile = pto.alloc_tile
-      : !pto.tile_buf<loc=vec, dtype=i8, rows=1, cols=64, v_row=1, v_col=64, blayout=row_major, slayout=none_box, fractal=512, pad=0>
-    pto.tload ins(%sub : memref<?xi8, strided<[1], offset: ?>, #pto.address_space<gm>>)
-              outs(%tile : !pto.tile_buf<loc=vec, dtype=i8, rows=1, cols=64, v_row=1, v_col=64, blayout=row_major, slayout=none_box, fractal=512, pad=0>)
-    return
-  }
-
   func.func @issue157_partition_remote_offset_i8(%src: !pto.ptr<i8>, %off: index) {
     %c1 = arith.constant 1 : index
     %c64 = arith.constant 64 : index
@@ -38,18 +25,12 @@ module {
   }
 }
 
-// A3-LABEL: AICORE void issue157_subview_remote_offset_i8
-// A3-SAME: (__gm__ int8_t* [[SUB_SRC:[_A-Za-z][_A-Za-z0-9]*]], int64_t [[SUB_OFF:[_A-Za-z][_A-Za-z0-9]*]])
-// A3-DAG: const int64_t [[SUB_ONE:[_A-Za-z][_A-Za-z0-9]*]] = 1;
-// A3-DAG: const int64_t [[SUB_ZERO:[_A-Za-z][_A-Za-z0-9]*]] = 0;
-// A3-NOT: unsigned
-// A3: GlobalTensor<int8_t,
-// A3: ({{.*}}[[SUB_SRC]] + ([[SUB_ZERO]] + [[SUB_OFF]] * [[SUB_ONE]])
-
 // A3-LABEL: AICORE void issue157_partition_remote_offset_i8
 // A3-SAME: (__gm__ int8_t* [[PART_SRC:[_A-Za-z][_A-Za-z0-9]*]], int64_t [[PART_OFF:[_A-Za-z][_A-Za-z0-9]*]])
 // A3-DAG: const int64_t [[PART_ONE:[_A-Za-z][_A-Za-z0-9]*]] = 1;
 // A3-DAG: const int64_t [[PART_ZERO:[_A-Za-z][_A-Za-z0-9]*]] = 0;
 // A3-NOT: unsigned
+// A3: __gm__ int8_t* [[PART_DATA:[_A-Za-z][_A-Za-z0-9]*]] = PTOAS__GLOBAL_TENSOR_DATA(
+// A3: pto::Stride<-1, -1, -1, -1, -1>
 // A3: GlobalTensor<int8_t,
-// A3: ({{.*}}[[PART_SRC]] + ([[PART_ZERO]] + [[PART_OFF]] * [[PART_ONE]])
+// A3: ([[PART_DATA]] + ([[PART_ZERO]] + [[PART_OFF]] * [[PART_ONE]])

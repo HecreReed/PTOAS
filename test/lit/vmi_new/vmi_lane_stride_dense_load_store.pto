@@ -10,6 +10,7 @@
 
 // RUN: pto-test-opt %s -vmi-lower-unified-to-legacy -vmi-layout-fold | FileCheck %s --check-prefix=FOLD
 // RUN: pto-test-opt %s -vmi-lower-unified-to-legacy -vmi-layout-fold -vmi-to-vpto | FileCheck %s --check-prefix=LOWER
+// RUN: pto-test-opt %s -vmi-lower-unified-to-legacy -vmi-layout-fold -vmi-to-vpto -vpto-optimize-vcvt -canonicalize | FileCheck %s --check-prefix=ZERO-GAP
 
 module {
   func.func @vmi_layout_fold_load_lane_stride(
@@ -100,6 +101,24 @@ module {
     return %compact : !pto.vmi.vreg<64xf16, #pto.vmi.layout<contiguous>>
   }
 
+  func.func @vmi_ensure_lane_stride_to_contiguous_f16_two_parts(
+      %value: !pto.vmi.vreg<128xf16, #pto.vmi.layout<contiguous, lane_stride = 2>>)
+      -> !pto.vmi.vreg<128xf16, #pto.vmi.layout<contiguous>> {
+    %compact = pto.vmi.ensure_layout %value
+        : !pto.vmi.vreg<128xf16, #pto.vmi.layout<contiguous, lane_stride = 2>>
+        -> !pto.vmi.vreg<128xf16, #pto.vmi.layout<contiguous>>
+    return %compact : !pto.vmi.vreg<128xf16, #pto.vmi.layout<contiguous>>
+  }
+
+  func.func @vmi_ensure_lane_stride_to_contiguous_ui8_two_parts(
+      %value: !pto.vmi.vreg<256xui8, #pto.vmi.layout<contiguous, lane_stride = 2>>)
+      -> !pto.vmi.vreg<256xui8, #pto.vmi.layout<contiguous>> {
+    %compact = pto.vmi.ensure_layout %value
+        : !pto.vmi.vreg<256xui8, #pto.vmi.layout<contiguous, lane_stride = 2>>
+        -> !pto.vmi.vreg<256xui8, #pto.vmi.layout<contiguous>>
+    return %compact : !pto.vmi.vreg<256xui8, #pto.vmi.layout<contiguous>>
+  }
+
   func.func @vmi_ensure_contiguous_to_lane_stride4_ui8(
       %value: !pto.vmi.vreg<64xui8, #pto.vmi.layout<contiguous>>)
       -> !pto.vmi.vreg<64xui8, #pto.vmi.layout<contiguous, lane_stride = 4>> {
@@ -118,6 +137,84 @@ module {
         -> !pto.vmi.vreg<64xui8, #pto.vmi.layout<contiguous>>
     return %compact : !pto.vmi.vreg<64xui8, #pto.vmi.layout<contiguous>>
   }
+
+  func.func @vmi_ensure_contiguous_to_lane_stride4_ui8_four_parts(
+      %value: !pto.vmi.vreg<256xui8, #pto.vmi.layout<contiguous>>)
+      -> !pto.vmi.vreg<256xui8, #pto.vmi.layout<contiguous, lane_stride = 4>> {
+    %strided = pto.vmi.ensure_layout %value
+        : !pto.vmi.vreg<256xui8, #pto.vmi.layout<contiguous>>
+        -> !pto.vmi.vreg<256xui8, #pto.vmi.layout<contiguous, lane_stride = 4>>
+    return %strided
+        : !pto.vmi.vreg<256xui8, #pto.vmi.layout<contiguous, lane_stride = 4>>
+  }
+
+  func.func @vmi_ensure_lane_stride4_to_contiguous_ui8_four_parts(
+      %value: !pto.vmi.vreg<256xui8, #pto.vmi.layout<contiguous, lane_stride = 4>>)
+      -> !pto.vmi.vreg<256xui8, #pto.vmi.layout<contiguous>> {
+    %compact = pto.vmi.ensure_layout %value
+        : !pto.vmi.vreg<256xui8, #pto.vmi.layout<contiguous, lane_stride = 4>>
+        -> !pto.vmi.vreg<256xui8, #pto.vmi.layout<contiguous>>
+    return %compact : !pto.vmi.vreg<256xui8, #pto.vmi.layout<contiguous>>
+  }
+
+  func.func @vmi_ensure_lane_stride2_to_contiguous_i16_tail(
+      %value: !pto.vmi.vreg<129xi16, #pto.vmi.layout<contiguous, lane_stride = 2>>)
+      -> !pto.vmi.vreg<129xi16, #pto.vmi.layout<contiguous>> {
+    %compact = pto.vmi.ensure_layout %value
+        : !pto.vmi.vreg<129xi16, #pto.vmi.layout<contiguous, lane_stride = 2>>
+        -> !pto.vmi.vreg<129xi16, #pto.vmi.layout<contiguous>>
+    return %compact : !pto.vmi.vreg<129xi16, #pto.vmi.layout<contiguous>>
+  }
+
+  func.func @vmi_ensure_contiguous_to_lane_stride2_i16_tail(
+      %value: !pto.vmi.vreg<129xi16, #pto.vmi.layout<contiguous>>)
+      -> !pto.vmi.vreg<129xi16, #pto.vmi.layout<contiguous, lane_stride = 2>> {
+    %strided = pto.vmi.ensure_layout %value
+        : !pto.vmi.vreg<129xi16, #pto.vmi.layout<contiguous>>
+        -> !pto.vmi.vreg<129xi16, #pto.vmi.layout<contiguous, lane_stride = 2>>
+    return %strided
+        : !pto.vmi.vreg<129xi16, #pto.vmi.layout<contiguous, lane_stride = 2>>
+  }
+
+  func.func @vmi_load_extui_u8_u16_zero_gap(
+      %src: !pto.ptr<ui8, ub>, %off: index)
+      -> !pto.vmi.vreg<128xui16, #pto.vmi.layout<contiguous>> {
+    %load = pto.vmi.vload %src[%off] {dist_mode = "continuous"}
+        : !pto.ptr<ui8, ub>
+        -> !pto.vmi.vreg<128xui8, #pto.vmi.layout<contiguous, lane_stride = 2>>
+    %wide = pto.vmi.vcvt %load
+        : !pto.vmi.vreg<128xui8, #pto.vmi.layout<contiguous, lane_stride = 2>>
+        -> !pto.vmi.vreg<128xui16, #pto.vmi.layout<contiguous>>
+    return %wide
+        : !pto.vmi.vreg<128xui16, #pto.vmi.layout<contiguous>>
+  }
+
+  func.func @vmi_load_extui_u16_u32_zero_gap(
+      %src: !pto.ptr<ui16, ub>, %off: index)
+      -> !pto.vmi.vreg<64xui32, #pto.vmi.layout<contiguous>> {
+    %load = pto.vmi.vload %src[%off] {dist_mode = "continuous"}
+        : !pto.ptr<ui16, ub>
+        -> !pto.vmi.vreg<64xui16, #pto.vmi.layout<contiguous, lane_stride = 2>>
+    %wide = pto.vmi.vcvt %load
+        : !pto.vmi.vreg<64xui16, #pto.vmi.layout<contiguous, lane_stride = 2>>
+        -> !pto.vmi.vreg<64xui32, #pto.vmi.layout<contiguous>>
+    return %wide
+        : !pto.vmi.vreg<64xui32, #pto.vmi.layout<contiguous>>
+  }
+
+  func.func @vmi_load_extui_u8_u32_zero_gap(
+      %src: !pto.ptr<ui8, ub>, %off: index)
+      -> !pto.vmi.vreg<64xui32, #pto.vmi.layout<contiguous>> {
+    %load = pto.vmi.vload %src[%off] {dist_mode = "continuous"}
+        : !pto.ptr<ui8, ub>
+        -> !pto.vmi.vreg<64xui8, #pto.vmi.layout<contiguous, lane_stride = 4>>
+    %wide = pto.vmi.vcvt %load
+        : !pto.vmi.vreg<64xui8, #pto.vmi.layout<contiguous, lane_stride = 4>>
+        -> !pto.vmi.vreg<64xui32, #pto.vmi.layout<contiguous>>
+    return %wide
+        : !pto.vmi.vreg<64xui32, #pto.vmi.layout<contiguous>>
+  }
+
 }
 
 // FOLD-LABEL: func.func @vmi_layout_fold_load_lane_stride(
@@ -182,6 +279,22 @@ module {
 // LOWER-NOT: pto.vmi.
 // LOWER-NOT: !pto.vmi.
 
+// LOWER-LABEL: func.func @vmi_ensure_lane_stride_to_contiguous_f16_two_parts(
+// LOWER-DAG: %[[LOW16:.*]] = pto.vpack {{.*}}, "LOWER" : !pto.vreg<64xui32> -> !pto.vreg<128xui16>
+// LOWER-DAG: %[[HIGH16:.*]] = pto.vpack {{.*}}, "HIGHER" : !pto.vreg<64xui32> -> !pto.vreg<128xui16>
+// LOWER: %[[MERGED16:.*]] = pto.vor %[[LOW16]], %[[HIGH16]]
+// LOWER: pto.vbitcast %[[MERGED16]] : !pto.vreg<128xui16> -> !pto.vreg<128xf16>
+// LOWER-NOT: pto.vmi.
+// LOWER-NOT: !pto.vmi.
+
+// LOWER-LABEL: func.func @vmi_ensure_lane_stride_to_contiguous_ui8_two_parts(
+// LOWER-DAG: %[[LOW8:.*]] = pto.vpack {{.*}}, "LOWER" : !pto.vreg<128xui16> -> !pto.vreg<256xui8>
+// LOWER-DAG: %[[HIGH8:.*]] = pto.vpack {{.*}}, "HIGHER" : !pto.vreg<128xui16> -> !pto.vreg<256xui8>
+// LOWER: %[[MERGED8:.*]] = pto.vor %[[LOW8]], %[[HIGH8]]
+// LOWER: return %[[MERGED8]] : !pto.vreg<256xui8>
+// LOWER-NOT: pto.vmi.
+// LOWER-NOT: !pto.vmi.
+
 // LOWER-LABEL: func.func @vmi_ensure_contiguous_to_lane_stride4_ui8(
 // LOWER: pto.vzunpack {{.*}} : !pto.vreg<256xui8> -> !pto.vreg<128xui16>
 // LOWER: pto.vzunpack {{.*}} : !pto.vreg<128xui16> -> !pto.vreg<64xui32>
@@ -195,3 +308,51 @@ module {
 // LOWER: pto.vpack {{.*}} "LOWER" : !pto.vreg<128xui16> -> !pto.vreg<256xui8>
 // LOWER-NOT: pto.vmi.
 // LOWER-NOT: !pto.vmi.
+
+// LOWER-LABEL: func.func @vmi_ensure_contiguous_to_lane_stride4_ui8_four_parts(
+// LOWER-COUNT-2: pto.vzunpack {{.*}} : !pto.vreg<256xui8> -> !pto.vreg<128xui16>
+// LOWER-COUNT-4: pto.vzunpack
+// LOWER-NOT: pto.vmi.
+// LOWER-NOT: !pto.vmi.
+
+// LOWER-LABEL: func.func @vmi_ensure_lane_stride4_to_contiguous_ui8_four_parts(
+// LOWER: %[[P0:.*]] = pto.vpack {{.*}}, "LOWER" : !pto.vreg<64xui32> -> !pto.vreg<128xui16>
+// LOWER: %[[P1:.*]] = pto.vpack {{.*}}, "HIGHER" : !pto.vreg<64xui32> -> !pto.vreg<128xui16>
+// LOWER: %[[M0:.*]] = pto.vor %[[P0]], %[[P1]]
+// LOWER: %[[P2:.*]] = pto.vpack {{.*}}, "LOWER" : !pto.vreg<64xui32> -> !pto.vreg<128xui16>
+// LOWER: %[[P3:.*]] = pto.vpack {{.*}}, "HIGHER" : !pto.vreg<64xui32> -> !pto.vreg<128xui16>
+// LOWER: %[[M1:.*]] = pto.vor %[[P2]], %[[P3]]
+// LOWER-DAG: %[[LOW:.*]] = pto.vpack %[[M0]], "LOWER"
+// LOWER-DAG: %[[HIGH:.*]] = pto.vpack %[[M1]], "HIGHER"
+// LOWER: pto.vor %[[LOW]], %[[HIGH]]
+// LOWER-NOT: pto.vmi.
+// LOWER-NOT: !pto.vmi.
+
+// LOWER-LABEL: func.func @vmi_ensure_lane_stride2_to_contiguous_i16_tail(
+// LOWER-COUNT-3: pto.vpack {{.*}} : !pto.vreg<64xui32> -> !pto.vreg<128xui16>
+// LOWER-NOT: pto.vmi.
+// LOWER-NOT: !pto.vmi.
+
+// LOWER-LABEL: func.func @vmi_ensure_contiguous_to_lane_stride2_i16_tail(
+// LOWER-COUNT-3: pto.vzunpack {{.*}} : !pto.vreg<128xui16> -> !pto.vreg<64xui32>
+// LOWER-NOT: pto.vmi.
+// LOWER-NOT: !pto.vmi.
+
+// ZERO-GAP-LABEL: func.func @vmi_load_extui_u8_u16_zero_gap(
+// ZERO-GAP: %[[LOAD:.*]] = pto.vlds {{.*}} {dist = "UNPK_B8"}
+// ZERO-GAP: %[[WIDE:.*]] = pto.vbitcast %[[LOAD]] : !pto.vreg<256xui8> -> !pto.vreg<128xui16>
+// ZERO-GAP-NOT: pto.vcvt
+// ZERO-GAP: return %[[WIDE]]
+
+
+// ZERO-GAP-LABEL: func.func @vmi_load_extui_u16_u32_zero_gap(
+// ZERO-GAP: %[[LOAD:.*]] = pto.vlds {{.*}} {dist = "UNPK_B16"}
+// ZERO-GAP: %[[WIDE:.*]] = pto.vbitcast %[[LOAD]] : !pto.vreg<128xui16> -> !pto.vreg<64xui32>
+// ZERO-GAP-NOT: pto.vcvt
+// ZERO-GAP: return %[[WIDE]]
+
+// ZERO-GAP-LABEL: func.func @vmi_load_extui_u8_u32_zero_gap(
+// ZERO-GAP: %[[LOAD:.*]] = pto.vlds {{.*}} {dist = "UNPK4"}
+// ZERO-GAP: %[[WIDE:.*]] = pto.vbitcast %[[LOAD]] : !pto.vreg<256xui8> -> !pto.vreg<64xui32>
+// ZERO-GAP-NOT: pto.vcvt
+// ZERO-GAP: return %[[WIDE]]

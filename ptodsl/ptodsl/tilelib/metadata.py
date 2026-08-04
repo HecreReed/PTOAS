@@ -33,6 +33,7 @@ from .._types import (
     si32 as _si32,
     si64 as _si64,
     tile_buf_type as _tile_buf_type,
+    tensor_view_type_from_dims as _tensor_view_type_from_dims,
     ui8 as _ui8,
     ui16 as _ui16,
     ui32 as _ui32,
@@ -40,7 +41,7 @@ from .._types import (
     _resolve,
 )
 
-from mlir.ir import Type
+from ptoas.mlir.ir import Type
 
 
 @dataclass(frozen=True)
@@ -197,7 +198,7 @@ class ScalarSpec:
 
 @dataclass(frozen=True)
 class ViewSpec:
-    """Concrete specialization of one view/memref TileOp operand."""
+    """Concrete specialization of one tensor-view TileOp operand."""
 
     shape: tuple
     dtype: ScalarType
@@ -206,11 +207,8 @@ class ViewSpec:
     layout: str | None = None
 
     def mlir_type(self):
-        dims = "x".join("?" if dim is None else str(dim) for dim in self.shape)
-        addr_space = _memref_address_space_token(self.memory_space)
-        elem = _resolve(scalar_descriptor(self.dtype))
-        return Type.parse(
-            f"memref<{dims}x{elem}, #pto.address_space<{addr_space}>>"
+        return _resolve(
+            _tensor_view_type_from_dims(self.shape, scalar_descriptor(self.dtype))
         )
 
 
@@ -225,21 +223,6 @@ class VectorSpec:
         dims = "x".join(str(dim) for dim in self.shape)
         elem = _resolve(scalar_descriptor(self.dtype))
         return Type.parse(f"vector<{dims}x{elem}>")
-
-
-def _memref_address_space_token(value: str) -> str:
-    aliases = {
-        "ub": "vec",
-        "vec": "vec",
-        "gm": "gm",
-        "mat": "mat",
-        "left": "left",
-        "right": "right",
-        "acc": "acc",
-        "bias": "bias",
-        "scaling": "scaling",
-    }
-    return aliases.get(str(value), str(value))
 
 
 @dataclass(frozen=True)

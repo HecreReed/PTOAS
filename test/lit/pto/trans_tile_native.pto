@@ -1,0 +1,32 @@
+// Copyright (c) 2026 Huawei Technologies Co., Ltd.
+// This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+// CANN Open Software License Agreement Version 2.0 (the "License").
+// Please refer to the License for details. You may not use this file except in compliance with the License.
+// THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+// INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+// See LICENSE in the root of the software repository for the full text of the License.
+
+// RUN: ptoas --pto-level=level3 --pto-arch=a5 \
+// RUN:   --mlir-print-ir-after=pto-resolve-reserved-buffers %s -o /dev/null 2>&1 \
+// RUN:   | FileCheck %s --check-prefix=NATIVE
+// RUN: ptoas --pto-level=level3 --pto-arch=a3 --enable-insert-sync %s \
+// RUN:   | FileCheck %s --check-prefix=EMITC
+
+module {
+  func.func private @ttrans_arg(
+      %src: !pto.tile_buf<vec, 16x16xf16>,
+      %tmp: !pto.tile_buf<vec, 16x16xf16>,
+      %dst: !pto.tile_buf<vec, 16x16xf16>) {
+    pto.ttrans ins(%src, %tmp : !pto.tile_buf<vec, 16x16xf16>, !pto.tile_buf<vec, 16x16xf16>)
+               outs(%dst : !pto.tile_buf<vec, 16x16xf16>)
+    return
+  }
+}
+
+// NATIVE-LABEL: func.func private @ttrans_arg
+// NATIVE-SAME: (%[[SRC:[^:]+]]: !pto.tile_buf<vec, 16x16xf16>, %[[TMP:[^:]+]]: !pto.tile_buf<vec, 16x16xf16>, %[[DST:[^:]+]]: !pto.tile_buf<vec, 16x16xf16>)
+// NATIVE: pto.ttrans ins(%[[SRC]], %[[TMP]] : !pto.tile_buf<vec, 16x16xf16>, !pto.tile_buf<vec, 16x16xf16>) outs(%[[DST]] : !pto.tile_buf<vec, 16x16xf16>)
+// NATIVE-NOT: memref<
+
+// EMITC-LABEL: ttrans_arg(
+// EMITC: TTRANS(

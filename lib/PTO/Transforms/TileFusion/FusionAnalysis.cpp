@@ -73,12 +73,6 @@ static bool isShapeComputableOp(Operation *op) {
            opName == "arith.divui" || opName == "arith.index_cast";
   }
 
-  // pto.pointer_cast is a pure, regionless op used in interstage setup;
-  // it is not directly a shape computation but may appear in valid-shape
-  // expression trees after lowering.
-  if (opName == "pto.pointer_cast")
-    return true;
-
   return false;
 }
 
@@ -315,20 +309,6 @@ static void bindExplicitValidDims(ShapeConstraintSolver &solver,
                    dims.rows, alloc.getValidRow());
     bindDimToValue(solver, symbolDimByValue, canonicalByValue, signatureMap,
                    dims.cols, alloc.getValidCol());
-    return;
-  }
-  if (auto bind = value.getDefiningOp<pto::BindTileOp>()) {
-    bindDimToValue(solver, symbolDimByValue, canonicalByValue, signatureMap,
-                   dims.rows, bind.getValidRow());
-    bindDimToValue(solver, symbolDimByValue, canonicalByValue, signatureMap,
-                   dims.cols, bind.getValidCol());
-    return;
-  }
-  if (auto materialize = value.getDefiningOp<pto::MaterializeTileOp>()) {
-    bindDimToValue(solver, symbolDimByValue, canonicalByValue, signatureMap,
-                   dims.rows, materialize.getValidRow());
-    bindDimToValue(solver, symbolDimByValue, canonicalByValue, signatureMap,
-                   dims.cols, materialize.getValidCol());
     return;
   }
   if (auto subview = value.getDefiningOp<pto::SubViewOp>()) {

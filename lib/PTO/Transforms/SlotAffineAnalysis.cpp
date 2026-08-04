@@ -22,16 +22,24 @@ using namespace mlir;
 namespace mlir {
 namespace pto {
 
-Value findSlotMarkerExpr(Value v) {
+Value findMultiTileSlotExpr(Value v) {
   int hops = 0;
   while (v && hops++ < 32) {
     Operation *op = v.getDefiningOp();
     if (!op)
       return {};
-    if (auto sm = dyn_cast<pto::SlotMarkerOp>(op))
-      return sm.getSlot();
-    if (auto bind = dyn_cast<pto::BindTileOp>(op)) {
-      v = bind.getSource();
+    if (auto get = dyn_cast<pto::MultiTileGetOp>(op))
+      return get.getSlot();
+    if (auto subview = dyn_cast<pto::SubViewOp>(op)) {
+      v = subview.getSource();
+      continue;
+    }
+    if (auto reshape = dyn_cast<pto::TReshapeOp>(op)) {
+      v = reshape.getSrc();
+      continue;
+    }
+    if (auto bitcast = dyn_cast<pto::BitcastOp>(op)) {
+      v = bitcast.getSrc();
       continue;
     }
     return {};

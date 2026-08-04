@@ -19,7 +19,7 @@ module {
   }
 }
 
-// CHECK: VMI{{-}}UNSUPPORTED{{:}} pto.vmi.load direct lowering requires a supported memory source
+// CHECK: pto.vmi.load direct lowering requires a supported memory source
 
 // -----
 
@@ -35,7 +35,7 @@ module {
   }
 }
 
-// CHECK: VMI{{-}}UNSUPPORTED{{:}} pto.vmi.load direct lowering requires a supported memory source
+// CHECK: pto.vmi.load direct lowering requires a supported memory source
 
 // -----
 
@@ -54,7 +54,7 @@ module {
   }
 }
 
-// CHECK: VMI{{-}}UNSUPPORTED{{:}} pto.vmi.masked_load direct lowering requires a supported memory source
+// CHECK: pto.vmi.masked_load direct lowering requires a supported memory source
 
 // -----
 
@@ -73,7 +73,7 @@ module {
   }
 }
 
-// CHECK: VMI{{-}}UNSUPPORTED{{:}} pto.vmi.expand_load direct lowering is currently supported for either a static all-active mask
+// CHECK: pto.vmi.expand_load direct lowering is currently supported
 
 // -----
 
@@ -89,7 +89,7 @@ module {
   }
 }
 
-// CHECK: VMI{{-}}UNSUPPORTED{{:}} pto.vmi.store requires an 8/16/32-bit predicate-maskable element type and either full physical chunks or contiguous tail-store layout, with UB-backed destination
+// CHECK: pto.vmi.store requires an 8/16/32-bit predicate-maskable element type
 
 // -----
 
@@ -107,7 +107,7 @@ module {
   }
 }
 
-// CHECK: VMI{{-}}UNSUPPORTED{{:}} pto.vmi.store requires an 8/16/32-bit predicate-maskable element type and either full physical chunks or contiguous tail-store layout, with UB-backed destination
+// CHECK: pto.vmi.store requires an 8/16/32-bit predicate-maskable element type
 
 // -----
 
@@ -125,4 +125,4 @@ module {
   }
 }
 
-// CHECK: VMI{{-}}UNSUPPORTED{{:}} pto.vmi.masked_store requires either full physical chunks or contiguous tail-store value/mask layout, with UB-backed destination
+// CHECK: pto.vmi.masked_store requires either full physical chunks

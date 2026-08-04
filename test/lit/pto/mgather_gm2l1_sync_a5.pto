@@ -6,7 +6,7 @@
 // INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
 // See LICENSE in the root of the software repository for the full text of the License.
 
-// Regression for the A5 GM->L1 mgather pipe. PTOViewToMemref rewrites the mat
+// Regression for the A5 GM->L1 mgather pipe. PTOResolveReservedBuffers rewrites the mat
 // destination into a memref<...,mat> before InsertSync / GraphSyncSolver run, so
 // MGatherOp::getPipe() must resolve the MAT address space from the lowered
 // memref form too. If it only matched a TileBufType, A5 would fall through to
@@ -18,8 +18,8 @@
 
 module {
   func.func @mgather_gm2l1_sync(
-      %mem: memref<1x1x1x64x32xf16, #pto.address_space<gm>>,
-      %idx: memref<1x1x1x1x32xi32, #pto.address_space<gm>>) {
+      %mem: !pto.partition_tensor_view<1x1x1x64x32xf16>,
+      %idx: !pto.partition_tensor_view<1x1x1x1x32xi32>) {
     pto.section.cube {
       %m = pto.alloc_tile
         : !pto.tile_buf<loc=mat, dtype=f16, rows=32, cols=32, v_row=32, v_col=32,
@@ -28,8 +28,8 @@ module {
         : !pto.tile_buf<loc=left, dtype=f16, rows=32, cols=32, v_row=32, v_col=32,
                         blayout=row_major, slayout=row_major, fractal=512, pad=0>
       pto.mgather ins(%mem, %idx
-          : memref<1x1x1x64x32xf16, #pto.address_space<gm>>,
-            memref<1x1x1x1x32xi32, #pto.address_space<gm>>)
+          : !pto.partition_tensor_view<1x1x1x64x32xf16>,
+            !pto.partition_tensor_view<1x1x1x1x32xi32>)
         outs(%m
           : !pto.tile_buf<loc=mat, dtype=f16, rows=32, cols=32, v_row=32, v_col=32,
                           blayout=col_major, slayout=row_major, fractal=512, pad=0>)

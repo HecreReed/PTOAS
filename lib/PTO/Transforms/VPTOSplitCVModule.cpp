@@ -36,6 +36,48 @@ static bool hasKernelKindChildModule(ModuleOp module) {
                       [](ModuleOp child) { return hasKernelKind(child); });
 }
 
+static bool hasCVSections(ModuleOp module);
+
+static bool isVPTOBackendModule(ModuleOp module) {
+  auto backend = module->getAttrOfType<StringAttr>("pto.backend");
+  return backend && backend.getValue() == "vpto";
+}
+
+static bool hasConflictingContainerAttrs(ModuleOp outer, ModuleOp child) {
+  for (NamedAttribute attr : child->getAttrs()) {
+    if (attr.getName() == SymbolTable::getSymbolAttrName())
+      continue;
+    Attribute outerValue = outer->getAttr(attr.getName());
+    if (outerValue && outerValue != attr.getValue())
+      return true;
+  }
+  return false;
+}
+
+static bool flattenSingleUnpartitionedChild(ModuleOp module) {
+  SmallVector<Operation *> topLevelOps;
+  for (Operation &op : module.getBodyRegion().front().getOperations())
+    topLevelOps.push_back(&op);
+  if (topLevelOps.size() != 1)
+    return false;
+
+  auto child = dyn_cast<ModuleOp>(topLevelOps.front());
+  if (!child || !isVPTOBackendModule(child) || hasKernelKind(child) ||
+      !hasCVSections(child) || hasConflictingContainerAttrs(module, child))
+    return false;
+
+  SmallVector<NamedAttribute> childAttrs(child->getAttrs().begin(),
+                                         child->getAttrs().end());
+  Region childBody;
+  childBody.takeBody(child.getBodyRegion());
+  child.erase();
+  module.getBodyRegion().takeBody(childBody);
+  for (NamedAttribute attr : childAttrs)
+    if (attr.getName() != SymbolTable::getSymbolAttrName())
+      module->setAttr(attr.getName(), attr.getValue());
+  return true;
+}
+
 static bool isSectionSplitCandidate(func::FuncOp funcOp);
 
 static bool hasCVSections(ModuleOp module) {
@@ -163,7 +205,8 @@ static LogicalResult verifyExplicitKernelKindMatchesSections(ModuleOp module) {
     if (!isCube && !isVector)
       return WalkResult::advance();
     if (isCube != expectsCube) {
-      status = op->emitError("conflicts with explicit pto.kernel_kind on its module");
+      status = op->emitError(
+          "conflicts with explicit pto.kernel_kind on its module");
       return WalkResult::interrupt();
     }
     return WalkResult::advance();
@@ -187,8 +230,9 @@ static LogicalResult verifySectionSplitCandidatesUseSections(ModuleOp module) {
   return status;
 }
 
-static void eraseSectionSplitCandidatesWithoutSectionKind(ModuleOp module,
-                                                          FunctionKernelKind kind) {
+static void
+eraseSectionSplitCandidatesWithoutSectionKind(ModuleOp module,
+                                              FunctionKernelKind kind) {
   SmallVector<func::FuncOp> eraseFuncs;
   module.walk([&](func::FuncOp funcOp) {
     if (isSectionSplitCandidate(funcOp) && !hasSectionKind(funcOp, kind))
@@ -257,6 +301,7 @@ static LogicalResult materializeExplicitKernelKindSections(ModuleOp module) {
 }
 
 static LogicalResult splitCVModule(ModuleOp module) {
+  flattenSingleUnpartitionedChild(module);
   if (hasKernelKind(module))
     return materializeExplicitKernelKindSections(module);
   if (hasKernelKindChildModule(module)) {

@@ -7,12 +7,6 @@
 # INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
 # See LICENSE in the root of the software repository for the full text of the License.
 
-from pathlib import Path
-import sys
-
-
-sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "ptodsl"))
-
 from ptodsl import pto
 
 
@@ -55,6 +49,7 @@ def main() -> None:
     signed_text = vmi_vshr_signed_probe.compile().mlir_text()
     expect("pto.vmi.vshr" in signed_text, "signed probe must emit pto.vmi.vshr")
     expect("pto.vmi.vshrs" in signed_text, "signed probe must emit pto.vmi.vshrs")
+    expect(", i16," in signed_text, "signed probe must use an i16 shift amount")
     expect(
         "!pto.vmi.vreg<128xsi32>" in signed_text,
         "signed probe must preserve the explicit si32 VMI element type",
@@ -63,6 +58,7 @@ def main() -> None:
     unsigned_text = vmi_vshr_unsigned_probe.compile().mlir_text()
     expect("pto.vmi.vshr" in unsigned_text, "unsigned probe must emit pto.vmi.vshr")
     expect("pto.vmi.vshrs" in unsigned_text, "unsigned probe must emit pto.vmi.vshrs")
+    expect(", i16," in unsigned_text, "unsigned probe must use an i16 shift amount")
     expect(
         "!pto.vmi.vreg<128xui32>" in unsigned_text,
         "unsigned probe must preserve the explicit ui32 VMI element type",

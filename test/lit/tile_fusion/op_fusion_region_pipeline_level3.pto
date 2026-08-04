@@ -61,7 +61,6 @@ module {
 // CHECK: pto.alloc_tile addr = %c12288_i64
 // CHECK: pto.alloc_tile addr = %c16384_i64
 // CHECK: pto.fusion_region {
-// CHECK-NOT: pto.pointer_cast
 // CHECK: pto.alloc_tile addr = %c0_i64
 // CHECK: pto.alloc_tile addr = %c4096_i64
 // CHECK: pto.alloc_tile addr = %c8192_i64

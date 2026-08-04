@@ -145,11 +145,6 @@ tryGetConcreteRootAddress(const BaseMemInfo *info) {
   if (auto alloc = dyn_cast<pto::AllocTileOp>(defOp))
     return tryEvalI64Constant(alloc.getAddr());
 
-  if (auto pointerCast = dyn_cast<pto::PointerCastOp>(defOp)) {
-    if (pointerCast.getAddrs().size() == 1)
-      return tryEvalI64Constant(pointerCast.getAddrs().front());
-  }
-
   return std::nullopt;
 }
 

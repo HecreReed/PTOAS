@@ -1,0 +1,72 @@
+// Copyright (c) 2026 Huawei Technologies Co., Ltd.
+// This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+// CANN Open Software License Agreement Version 2.0 (the "License").
+// Please refer to the License for details. You may not use this file except in compliance with the License.
+// THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+// INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+// See LICENSE in the root of the software repository for the full text of the License.
+
+// RUN: ptoas --pto-arch=a5 --pto-backend=vpto --emit-vpto %s -o - | FileCheck %s
+
+module attributes {pto.target_arch = "a5"} {
+  module attributes {pto.backend = "vpto", pto.target_arch = "a5"} {
+    func.func @mixed_micro_kernel(%src: !pto.ptr<bf16, gm>) attributes {pto.entry} {
+    %c0_i64 = arith.constant 0 : i64
+    %l1 = pto.castptr %c0_i64 : i64 -> !pto.ptr<bf16, l1>
+    %c16_i64 = arith.constant 16 : i64
+    %c1_i64 = arith.constant 1 : i64
+    %false = arith.constant false
+    pto.set_flag[<PIPE_FIX>, <PIPE_M>, <EVENT_ID0>]
+    pto.sync.set <PIPE_MTE1>, 5
+    pto.mte_gm_l1_frac %src, %l1, nd2nz,
+      shape(%c16_i64, %c16_i64), src_layout(%c16_i64),
+      dst_group(%c1_i64, %c1_i64, %c16_i64, %c0_i64),
+      ctrl(%c0_i64, %false)
+      : !pto.ptr<bf16, gm>, !pto.ptr<bf16, l1>, nd2nz,
+        shape i64, i64, src_layout(i64), dst_group i64, i64, i64, i64,
+        ctrl i64, i1
+    pto.sync.wait <PIPE_FIX>, 0
+    pto.wait_flag[<PIPE_FIX>, <PIPE_M>, <EVENT_ID0>]
+    pto.sync.set <PIPE_V>, 0
+    pto.section.vector {
+      pto.set_flag[<PIPE_MTE2>, <PIPE_V>, <EVENT_ID1>]
+    }
+    pto.set_flag[<PIPE_MTE3>, <PIPE_V>, <EVENT_ID0>]
+    pto.vecscope {
+      %c64 = arith.constant 64 : index
+      %mask = pto.vmi.create_mask %c64 : index -> !pto.vmi.mask<64xpred>
+    }
+    pto.sync.wait <PIPE_MTE3>, 0
+    pto.section.vector {
+      pto.wait_flag[<PIPE_MTE2>, <PIPE_V>, <EVENT_ID1>]
+    }
+    pto.wait_flag[<PIPE_MTE3>, <PIPE_V>, <EVENT_ID0>]
+    return
+    }
+  }
+}
+
+// CHECK: module attributes
+// CHECK: module attributes
+// CHECK-SAME: pto.kernel_kind = #pto.kernel_kind<vector>
+// CHECK: func.func @mixed_micro_kernel
+// CHECK-NOT: pto.set_flag[<PIPE_FIX>, <PIPE_M>
+// CHECK-NOT: pto.sync.set <PIPE_MTE1>
+// CHECK-NOT: pto.sync.wait <PIPE_FIX>
+// CHECK-NOT: pto.wait_flag[<PIPE_FIX>, <PIPE_M>
+// CHECK: pto.sync.set <PIPE_V>, 0
+// CHECK: pto.set_flag[<PIPE_MTE2>, <PIPE_V>, <EVENT_ID1>]
+// CHECK: pto.set_flag[<PIPE_MTE3>, <PIPE_V>, <EVENT_ID0>]
+// CHECK: pto.vecscope {
+// CHECK: pto.sync.wait <PIPE_MTE3>, 0
+// CHECK: pto.wait_flag[<PIPE_MTE2>, <PIPE_V>, <EVENT_ID1>]
+// CHECK: pto.wait_flag[<PIPE_MTE3>, <PIPE_V>, <EVENT_ID0>]
+// CHECK: module attributes
+// CHECK-SAME: pto.kernel_kind = #pto.kernel_kind<cube>
+// CHECK: func.func @mixed_micro_kernel
+// CHECK-NOT: pto.sync.set <PIPE_V>
+// CHECK-NOT: pto.set_flag[<PIPE_MTE2>, <PIPE_V>
+// CHECK-NOT: pto.set_flag[<PIPE_MTE3>, <PIPE_V>
+// CHECK: pto.copy_gm_to_cbuf_multi_nd2nz
+// CHECK: pto.sync.wait <PIPE_FIX>, 0
+// CHECK: pto.wait_flag[<PIPE_FIX>, <PIPE_M>, <EVENT_ID0>]

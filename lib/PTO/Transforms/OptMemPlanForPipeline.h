@@ -10,11 +10,8 @@
 #ifndef OPT_MEM_PLAN_FOR_PIPELINE_H
 #define OPT_MEM_PLAN_FOR_PIPELINE_H
 #include "PTO/IR/PTO.h"
-#include "mlir/Dialect/Func/IR/FuncOps.h"
-#include "mlir/Dialect/SCF/IR/SCF.h"
-#include "mlir/Dialect/Tensor/IR/Tensor.h"
-#include "mlir/Dialect/Bufferization/IR/Bufferization.h"
 #include "Utils.h"
+#include "mlir/Dialect/Func/IR/FuncOps.h"
 
 namespace mlir {
 namespace pto {
@@ -37,12 +34,6 @@ public:
 private:
   /// Update the buffers for MTE2 and MTE3.
   void UpdateDmaBuffers(SmallVector<Value> dpsOperand);
-
-  template <typename OP>
-  typename std::enable_if<std::is_same_v<OP, memref::LoadOp> ||
-                              std::is_same_v<OP, memref::StoreOp>,
-                          void>::type
-  UpdateScalarBuffers(OP op);
 
   void UpdateScalarBuffersForLowerToLoops(Operation *operands);
 

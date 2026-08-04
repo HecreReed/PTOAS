@@ -13,11 +13,11 @@
 
 module {
   func.func @tmov_fbuf_pipe_selection(
-      %input: memref<1x16xui64, #pto.address_space<gm>>) {
+      %input: !pto.partition_tensor_view<1x16xui64>) {
     %src = pto.alloc_tile : !pto.tile_buf<loc=mat, dtype=ui64, rows=1, cols=16, v_row=1, v_col=16, blayout=row_major, slayout=none_box, fractal=512, pad=0>
     %dst = pto.alloc_tile : !pto.tile_buf<loc=scaling, dtype=ui64, rows=1, cols=16, v_row=1, v_col=16, blayout=row_major, slayout=none_box, fractal=512, pad=0>
 
-    pto.tload ins(%input : memref<1x16xui64, #pto.address_space<gm>>)
+    pto.tload ins(%input : !pto.partition_tensor_view<1x16xui64>)
               outs(%src : !pto.tile_buf<loc=mat, dtype=ui64, rows=1, cols=16, v_row=1, v_col=16, blayout=row_major, slayout=none_box, fractal=512, pad=0>)
     pto.tmov ins(%src : !pto.tile_buf<loc=mat, dtype=ui64, rows=1, cols=16, v_row=1, v_col=16, blayout=row_major, slayout=none_box, fractal=512, pad=0>)
              outs(%dst : !pto.tile_buf<loc=scaling, dtype=ui64, rows=1, cols=16, v_row=1, v_col=16, blayout=row_major, slayout=none_box, fractal=512, pad=0>)

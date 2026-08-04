@@ -10,7 +10,7 @@
 
 // Confirms that two constant-slot uses of a `multi_tile_buf` are recognised
 // as disjoint by InsertSync: the two MTE2 loads land on distinct physical
-// slots (different `pto.pointer_cast` rootBuffer i64 constants), so no
+// slots (different planner-assigned physical addresses), so no
 // inter-slot `set_flag` / `wait_flag` is needed between them. Only the
 // pipeline tail barrier remains. Without slot-aware buffer planning this
 // would otherwise emit redundant MTE2-MTE2 synchronization between the
@@ -18,8 +18,8 @@
 
 module {
   func.func @const_slot_no_inter_sync(
-      %gm0 : memref<16x16xf16, #pto.address_space<gm>>,
-      %gm1 : memref<16x16xf16, #pto.address_space<gm>>) {
+      %gm0 : !pto.partition_tensor_view<16x16xf16>,
+      %gm1 : !pto.partition_tensor_view<16x16xf16>) {
     %c0 = arith.constant 0 : index
     %c1 = arith.constant 1 : index
 
@@ -33,9 +33,9 @@ module {
         : !pto.multi_tile_buf<vec, 16x16xf16, count=2>
        -> !pto.tile_buf<vec, 16x16xf16>
 
-    pto.tload ins(%gm0 : memref<16x16xf16, #pto.address_space<gm>>)
+    pto.tload ins(%gm0 : !pto.partition_tensor_view<16x16xf16>)
               outs(%s0  : !pto.tile_buf<vec, 16x16xf16>)
-    pto.tload ins(%gm1 : memref<16x16xf16, #pto.address_space<gm>>)
+    pto.tload ins(%gm1 : !pto.partition_tensor_view<16x16xf16>)
               outs(%s1  : !pto.tile_buf<vec, 16x16xf16>)
     return
   }

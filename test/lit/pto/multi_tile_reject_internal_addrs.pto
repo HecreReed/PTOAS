@@ -1,0 +1,23 @@
+// Copyright (c) 2026 Huawei Technologies Co., Ltd.
+// This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+// CANN Open Software License Agreement Version 2.0 (the "License").
+// Please refer to the License for details. You may not use this file except in compliance with the License.
+// THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+// INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+// See LICENSE in the root of the software repository for the full text of the License.
+
+// RUN: not ptoas %s 2>&1 | FileCheck %s
+
+// Planner-generated slot addresses are an internal contract. Users must not
+// bypass level validation or memory planning by attaching the attribute.
+
+module {
+  func.func @reject_internal_addrs() {
+    %multi = pto.alloc_multi_tile {
+      pto.multi_buffer_addrs = array<i64: 0, 512>
+    } : !pto.multi_tile_buf<!pto.tile_buf<vec, 16x16xf16>, count=2>
+    return
+  }
+}
+
+// CHECK: attribute 'pto.multi_buffer_addrs' is reserved for pto-plan-memory

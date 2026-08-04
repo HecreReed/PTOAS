@@ -1,0 +1,74 @@
+// Copyright (c) 2026 Huawei Technologies Co., Ltd.
+// This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+// CANN Open Software License Agreement Version 2.0 (the "License").
+// Please refer to the License for details. You may not use this file except in compliance with the License.
+// THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+// INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+// See LICENSE in the root of the software repository for the full text of the License.
+
+// RUN: ptoas --pto-level=level2 --pto-arch=a3 --plan-memory-impl=modern \
+// RUN:   --emit-pto-ir --mlir-print-ir-after=pto-plan-memory %s 2>&1 \
+// RUN:   | FileCheck %s
+
+module attributes {"pto.target_arch" = "a3"} {
+  func.func @inplace_forbid_alias_ttrans() {
+    %src = pto.alloc_tile : !pto.tile_buf<vec, 16x16xf16>
+    %tmp = pto.alloc_tile : !pto.tile_buf<vec, 16x16xf16>
+    %dst = pto.alloc_tile : !pto.tile_buf<vec, 16x16xf16>
+
+    pto.ttrans ins(%src, %tmp : !pto.tile_buf<vec, 16x16xf16>,
+                               !pto.tile_buf<vec, 16x16xf16>)
+               outs(%dst : !pto.tile_buf<vec, 16x16xf16>)
+    return
+  }
+
+  func.func @inplace_forbid_alias_tsel() {
+    %mask = pto.alloc_tile : !pto.tile_buf<vec, 16x32xi8>
+    %src0 = pto.alloc_tile : !pto.tile_buf<vec, 16x16xf16>
+    %src1 = pto.alloc_tile : !pto.tile_buf<vec, 16x16xf16>
+    %tmp = pto.alloc_tile : !pto.tile_buf<vec, 16x16xf16>
+    %dst = pto.alloc_tile : !pto.tile_buf<vec, 16x16xf16>
+
+    pto.tsel ins(%mask, %src0, %src1, %tmp
+                 : !pto.tile_buf<vec, 16x32xi8>,
+                   !pto.tile_buf<vec, 16x16xf16>,
+                   !pto.tile_buf<vec, 16x16xf16>,
+                   !pto.tile_buf<vec, 16x16xf16>)
+             outs(%dst : !pto.tile_buf<vec, 16x16xf16>)
+    return
+  }
+
+  func.func @inplace_forbid_alias_tcvt() {
+    %src = pto.alloc_tile : !pto.tile_buf<vec, 16x16xbf16>
+    %dst = pto.alloc_tile : !pto.tile_buf<vec, 16x16xf32>
+
+    pto.tcvt ins(%src {rmode = #pto<round_mode ROUND>}
+                 : !pto.tile_buf<vec, 16x16xbf16>)
+             outs(%dst : !pto.tile_buf<vec, 16x16xf32>)
+    return
+  }
+}
+
+// CHECK-LABEL: func.func @inplace_forbid_alias_ttrans
+// CHECK-DAG: %[[A0:.*]] = arith.constant 0 : i64
+// CHECK-DAG: %[[A512:.*]] = arith.constant 512 : i64
+// CHECK-DAG: %[[A1024:.*]] = arith.constant 1024 : i64
+// CHECK: pto.alloc_tile addr = %[[A0]]
+// CHECK: pto.alloc_tile addr = %[[A512]]
+// CHECK: pto.alloc_tile addr = %[[A1024]]
+// CHECK-LABEL: func.func @inplace_forbid_alias_tsel
+// CHECK-DAG: %[[B0:.*]] = arith.constant 0 : i64
+// CHECK-DAG: %[[B512:.*]] = arith.constant 512 : i64
+// CHECK-DAG: %[[B1024:.*]] = arith.constant 1024 : i64
+// CHECK-DAG: %[[B1536:.*]] = arith.constant 1536 : i64
+// CHECK: pto.alloc_tile addr = %[[B0]]
+// CHECK: pto.alloc_tile addr = %[[B512]]
+// CHECK: pto.alloc_tile addr = %[[B1024]]
+// CHECK: pto.alloc_tile addr = %[[B1536]]
+// CHECK: pto.alloc_tile addr = %[[B512]]
+// CHECK-LABEL: func.func @inplace_forbid_alias_tcvt
+// CHECK-DAG: %[[C0:.*]] = arith.constant 0 : i64
+// CHECK-DAG: %[[C512:.*]] = arith.constant 512 : i64
+// CHECK: pto.alloc_tile addr = %[[C0]]
+// CHECK: pto.alloc_tile addr = %[[C512]]
+// CHECK-NOT: memref.alloc

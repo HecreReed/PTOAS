@@ -44,4 +44,4 @@ module {
 // CPP-NOT: [[ARR]][
 // CPP: // pto: %sum
 // CPP-NEXT: int32_t [[SUM:v[0-9]+]] = {{.*}}(uint32_t) [[CUR]]{{.*}};
-// CPP-NEXT: [[OUT]][{{v[0-9]+}}] = [[SUM]];
+// CPP-NEXT: {{[(]?}}[[OUT]]{{[)]?}}[{{v[0-9]+}}] = [[SUM]];

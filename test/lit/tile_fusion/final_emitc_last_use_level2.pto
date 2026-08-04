@@ -11,7 +11,7 @@
 // - the final generated C++ still emits output-first last_use slots as
 //   [[pto::last_use(0, 1, 1)]] CALLEE(...)
 //
-// RUN: { ptoas --pto-arch=a5 --pto-level=level2 --enable-op-fusion --emit-pto-ir %s --mlir-print-ir-after=pto-view-to-memref -o /dev/null 2>&1 || true; } | FileCheck %s --check-prefix=IR
+// RUN: { ptoas --pto-arch=a5 --pto-level=level2 --enable-op-fusion --emit-pto-ir %s --mlir-print-ir-after=pto-resolve-reserved-buffers -o /dev/null 2>&1 || true; } | FileCheck %s --check-prefix=IR
 // RUN: ptoas --pto-arch=a5 --pto-level=level2 --enable-op-fusion %s -o - | FileCheck %s --check-prefix=CPP
 
 module {

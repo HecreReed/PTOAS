@@ -39,7 +39,7 @@ module attributes {pto.target_arch = "a5"} {
 // CHECK: module attributes
 // CHECK-SAME: pto.backend = "vpto", pto.kernel_kind = #pto.kernel_kind<vector>, pto.target_arch = "a5"
 // CHECK: func.func @auto_vector_segment
-// CHECK: pto.bind_tile
+// CHECK: pto.alloc_tile addr =
 // CHECK: pto.tload
 // CHECK: pto.tadds
 // CHECK: pto.tstore

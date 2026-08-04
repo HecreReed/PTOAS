@@ -1,0 +1,42 @@
+// Copyright (c) 2026 Huawei Technologies Co., Ltd.
+// This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+// CANN Open Software License Agreement Version 2.0 (the "License").
+// Please refer to the License for details. You may not use this file except in compliance with the License.
+// THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+// INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+// See LICENSE in the root of the software repository for the full text of the License.
+
+// RUN: ptoas --pto-level=level3 --pto-arch=a5 \
+// RUN:   --mlir-print-ir-after=pto-resolve-reserved-buffers %s -o /dev/null 2>&1 \
+// RUN:   | FileCheck %s --check-prefix=NATIVE
+// RUN: ptoas --pto-level=level3 --pto-arch=a3 --enable-insert-sync %s \
+// RUN:   | FileCheck %s --check-prefix=EMITC
+
+module {
+  func.func private @tcolmax_arg(
+      %src: !pto.tile_buf<vec, 16x64xf32>,
+      %dst: !pto.tile_buf<vec, 1x64xf32>) {
+    pto.tcolmax ins(%src : !pto.tile_buf<vec, 16x64xf32>)
+                outs(%dst : !pto.tile_buf<vec, 1x64xf32>)
+    return
+  }
+
+  func.func private @tcolmin_arg(
+      %src: !pto.tile_buf<vec, 16x64xf32>,
+      %dst: !pto.tile_buf<vec, 1x64xf32>) {
+    pto.tcolmin ins(%src : !pto.tile_buf<vec, 16x64xf32>)
+                outs(%dst : !pto.tile_buf<vec, 1x64xf32>)
+    return
+  }
+}
+
+// NATIVE-LABEL: func.func private @tcolmax_arg(
+// NATIVE: pto.tcolmax ins(%arg0 : !pto.tile_buf<vec, 16x64xf32>) outs(%arg1 : !pto.tile_buf<vec, 1x64xf32>)
+// NATIVE-LABEL: func.func private @tcolmin_arg(
+// NATIVE: pto.tcolmin ins(%arg0 : !pto.tile_buf<vec, 16x64xf32>) outs(%arg1 : !pto.tile_buf<vec, 1x64xf32>)
+// NATIVE-NOT: memref<
+
+// EMITC-LABEL: tcolmax_arg(
+// EMITC: TCOLMAX(
+// EMITC-LABEL: tcolmin_arg(
+// EMITC: TCOLMIN(

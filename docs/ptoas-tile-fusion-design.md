@@ -220,6 +220,16 @@ PTO 指令在 Davinci 架构上以 Unified Buffer（UB）中驻留的数据块�
 domain classes、做出融合决策的 pass。`PTOFusionRegionGen` 只消费 `FusionPlan`
 产出的 `pto.fusion.group_id`/`pto.fusion.order` 注解并封装成 `pto.fusion_region`。
 
+`OpScheduling` 是 `FusionPlan` metadata 与下游消费者之间的规范化边界：它在最终
+物理顺序上把无法压紧的 planned group 降级为独立连续 span，清除 singleton
+metadata，并以函数级唯一 ID 重新编号。`RegionGen` 仍保持严格校验；绕过
+`OpScheduling` 直接向 `RegionGen` 提供断裂或不完整 metadata 属于非法
+pipeline/input，不在 `RegionGen` 中静默修复。
+
+全函数重新编号（而非只给被拆分的段分配新 ID）是有意为之：所有 surviving span
+统一重新编号，保证跨 block 与嵌套 region 的 ID 唯一性与确定性，并避免旧 ID
+碰撞或 max-old-ID 记账。
+
 #### 4.2.2 输入层级支持
 
 | Level | 状态 | 说明 |

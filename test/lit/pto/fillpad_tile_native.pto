@@ -1,0 +1,40 @@
+// Copyright (c) 2026 Huawei Technologies Co., Ltd.
+// This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+// CANN Open Software License Agreement Version 2.0 (the "License").
+// Please refer to the License for details. You may not use this file except in compliance with the License.
+// THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+// INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+// See LICENSE in the root of the software repository for the full text of the License.
+
+// RUN: ptoas --pto-level=level3 --pto-arch=a5 \
+// RUN:   --mlir-print-ir-after=pto-resolve-reserved-buffers %s -o /dev/null 2>&1 \
+// RUN:   | FileCheck %s --check-prefix=NATIVE
+// RUN: ptoas --pto-level=level3 --pto-arch=a3 --enable-insert-sync %s \
+// RUN:   | FileCheck %s --check-prefix=EMITC
+
+module {
+  func.func private @tfillpad_arg(
+      %tile: !pto.tile_buf<loc=vec, dtype=f32, rows=32, cols=32, v_row=16, v_col=16, blayout=row_major, slayout=none_box, fractal=512, pad=1>) {
+    pto.tfillpad ins(%tile : !pto.tile_buf<loc=vec, dtype=f32, rows=32, cols=32, v_row=16, v_col=16, blayout=row_major, slayout=none_box, fractal=512, pad=1>)
+                 outs(%tile : !pto.tile_buf<loc=vec, dtype=f32, rows=32, cols=32, v_row=16, v_col=16, blayout=row_major, slayout=none_box, fractal=512, pad=1>)
+    return
+  }
+
+  func.func private @tfillpad_inplace_arg(
+      %tile: !pto.tile_buf<loc=vec, dtype=f32, rows=32, cols=32, v_row=16, v_col=16, blayout=row_major, slayout=none_box, fractal=512, pad=1>) {
+    pto.tfillpad_inplace ins(%tile : !pto.tile_buf<loc=vec, dtype=f32, rows=32, cols=32, v_row=16, v_col=16, blayout=row_major, slayout=none_box, fractal=512, pad=1>)
+                         outs(%tile : !pto.tile_buf<loc=vec, dtype=f32, rows=32, cols=32, v_row=16, v_col=16, blayout=row_major, slayout=none_box, fractal=512, pad=1>)
+    return
+  }
+}
+
+// NATIVE-LABEL: func.func private @tfillpad_arg(
+// NATIVE: pto.tfillpad ins(%arg0
+// NATIVE-LABEL: func.func private @tfillpad_inplace_arg(
+// NATIVE: pto.tfillpad_inplace ins(%arg0
+// NATIVE-NOT: memref<
+
+// EMITC-LABEL: tfillpad_arg(
+// EMITC: TFILLPAD(
+// EMITC-LABEL: tfillpad_inplace_arg(
+// EMITC: TFILLPAD_INPLACE(

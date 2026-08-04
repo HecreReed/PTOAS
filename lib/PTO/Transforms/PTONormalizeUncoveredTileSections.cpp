@@ -69,6 +69,114 @@ static bool isTileLikeOp(Operation *op) {
          op->getName().getStringRef().starts_with("pto.t");
 }
 
+// Low-level PTODSL sources do not contain pto.t* TileOps.  Keep their
+// section inference conservative: only operations with an unambiguous engine
+// ownership are treated as section carriers.
+static bool isRawSectionCarrierOp(Operation *op) {
+  if (isa<SetFlagDynOp>(op) || isa<WaitFlagDynOp>(op))
+    return false;
+  return op &&
+         isa<VectorMicroOpInterface, CubeMicroOpInterface, MteOpInterface,
+             SetFlagOp, WaitFlagOp, SyncSetOp, SyncWaitOp>(op);
+}
+
+static std::optional<InferredSectionKind>
+classifyTileOpByAddressSpace(Operation *op);
+static std::optional<InferredSectionKind> classifyTileOpByPipe(Operation *op);
+static std::optional<AddressSpace> getBufferAddressSpace(Type type);
+
+static std::optional<InferredSectionKind> classifySyncPipe(PIPE pipe) {
+  switch (pipe) {
+  case PIPE::PIPE_M:
+  case PIPE::PIPE_MTE1:
+  case PIPE::PIPE_FIX:
+    return InferredSectionKind::Cube;
+  case PIPE::PIPE_V:
+  case PIPE::PIPE_V2:
+  case PIPE::PIPE_MTE3:
+    return InferredSectionKind::Vector;
+  // Both cores have scalar and MTE2 pipelines.  Their physical section must
+  // come from the peer synchronization pipe or the operation's buffers.
+  case PIPE::PIPE_S:
+  case PIPE::PIPE_MTE2:
+  default:
+    return std::nullopt;
+  }
+}
+
+static bool isSharedSyncPipe(PIPE pipe) {
+  return pipe == PIPE::PIPE_S || pipe == PIPE::PIPE_MTE2;
+}
+
+static std::optional<InferredSectionKind>
+classifyMteOpByAddressSpace(MteOpInterface mteOp) {
+  Value sourceValue = mteOp.getSource();
+  std::optional<AddressSpace> source;
+  if (sourceValue)
+    source = getBufferAddressSpace(sourceValue.getType());
+  Value destinationValue = mteOp.getDestination();
+  if (auto ptoDpsOp = dyn_cast<PTO_DpsInitOpInterface>(mteOp.getOperation())) {
+    OperandRange inits = ptoDpsOp.getDpsInits();
+    if (!inits.empty())
+      destinationValue = inits.front();
+  }
+  std::optional<AddressSpace> destination;
+  if (destinationValue)
+    destination = getBufferAddressSpace(destinationValue.getType());
+
+  if (source && *source == AddressSpace::ACC)
+    return InferredSectionKind::Cube;
+  if (source && *source == AddressSpace::VEC)
+    return InferredSectionKind::Vector;
+  if (!destination)
+    return std::nullopt;
+  if (*destination == AddressSpace::MAT || *destination == AddressSpace::LEFT ||
+      *destination == AddressSpace::RIGHT ||
+      *destination == AddressSpace::BIAS ||
+      *destination == AddressSpace::SCALING)
+    return InferredSectionKind::Cube;
+  if (*destination == AddressSpace::VEC)
+    return InferredSectionKind::Vector;
+  return std::nullopt;
+}
+
+static std::optional<InferredSectionKind>
+classifyRawSectionCarrierOp(Operation *op) {
+  if (!isRawSectionCarrierOp(op))
+    return std::nullopt;
+  if (isa<VectorMicroOpInterface>(op))
+    return InferredSectionKind::Vector;
+  if (isa<CubeMicroOpInterface>(op))
+    return InferredSectionKind::Cube;
+  if (auto mteOp = dyn_cast<MteOpInterface>(op)) {
+    if (auto kind = classifyMteOpByAddressSpace(mteOp))
+      return kind;
+    return classifyTileOpByPipe(op);
+  }
+  if (auto setFlag = dyn_cast<SetFlagOp>(op)) {
+    // set_flag executes on the producer (source) pipe.  A dedicated source
+    // therefore determines physical ownership even when the consumer pipe is
+    // shared; a shared source remains ambiguous and must not inherit ownership
+    // from its peer.
+    if (isSharedSyncPipe(setFlag.getSrcPipe().getPipe()))
+      return std::nullopt;
+    return classifySyncPipe(setFlag.getSrcPipe().getPipe());
+  }
+  if (auto waitFlag = dyn_cast<WaitFlagOp>(op)) {
+    // wait_flag executes on the consumer (destination) pipe.  Mirror the
+    // producer rule above instead of rejecting a uniquely owned consumer just
+    // because its producer uses a shared pipe.
+    if (isSharedSyncPipe(waitFlag.getDstPipe().getPipe()))
+      return std::nullopt;
+    return classifySyncPipe(waitFlag.getDstPipe().getPipe());
+  }
+  if (auto syncSet = dyn_cast<SyncSetOp>(op))
+    return classifySyncPipe(syncSet.getPipe().getPipe());
+  if (auto syncWait = dyn_cast<SyncWaitOp>(op))
+    return classifySyncPipe(syncWait.getPipe().getPipe());
+  return std::nullopt;
+}
+
 static bool isPipeLikeOp(Operation *op) {
   return op && isa<OpPipeInterface>(op);
 }
@@ -104,8 +212,8 @@ static bool hasAnySection(func::FuncOp funcOp) {
 }
 
 static bool hasExplicitFunctionKernelKind(func::FuncOp funcOp) {
-  return funcOp &&
-         funcOp->hasAttrOfType<FunctionKernelKindAttr>(FunctionKernelKindAttr::name);
+  return funcOp && funcOp->hasAttrOfType<FunctionKernelKindAttr>(
+                       FunctionKernelKindAttr::name);
 }
 
 static bool isInsideKernelKindModule(func::FuncOp funcOp) {
@@ -116,10 +224,13 @@ static bool isInsideKernelKindModule(func::FuncOp funcOp) {
 }
 
 static bool hasKnownKernelKindContext(func::FuncOp funcOp) {
-  return isInsideKernelKindModule(funcOp) || hasExplicitFunctionKernelKind(funcOp);
+  return isInsideKernelKindModule(funcOp) ||
+         hasExplicitFunctionKernelKind(funcOp);
 }
 
 static std::optional<AddressSpace> getBufferAddressSpace(Type type) {
+  if (auto ptrType = dyn_cast<PtrType>(type))
+    return ptrType.getMemorySpace().getAddressSpace();
   if (auto tileType = dyn_cast<TileBufType>(type)) {
     if (auto attr =
             dyn_cast_or_null<AddressSpaceAttr>(tileType.getMemorySpace()))
@@ -240,8 +351,7 @@ static std::optional<InferredSectionKind> classifyTileOpByName(Operation *op) {
   return std::nullopt;
 }
 
-static std::optional<InferredSectionKind>
-classifyTileOpByPipe(Operation *op) {
+static std::optional<InferredSectionKind> classifyTileOpByPipe(Operation *op) {
   return inferPhysicalSectionKindFromPipe(op);
 }
 
@@ -348,7 +458,8 @@ static std::optional<InferredSectionKind> classifyTileOp(Operation *op) {
   if (std::optional<InferredSectionKind> kind =
           classifyTStoreBySourceAddressSpace(op))
     return kind;
-  if (std::optional<InferredSectionKind> kind = classifyTileOpByAddressSpace(op))
+  if (std::optional<InferredSectionKind> kind =
+          classifyTileOpByAddressSpace(op))
     return kind;
   return classifyTileOpByPipe(op);
 }
@@ -366,13 +477,26 @@ enum class FunctionKindCacheState : uint8_t {
   InProgress = 3,
 };
 
-static void inspectModuleKindOperation(Operation *op, ModuleKindSummary &summary) {
+static void inspectModuleKindOperation(Operation *op,
+                                       ModuleKindSummary &summary) {
   if (!op)
     return;
+  if (isa<SectionSimtOp, SimtLaunchOp>(op) || isa<SimtOpInterface>(op))
+    ++summary.vectorCount;
   if (isExplicitSection(op))
     return;
 
-  if (isPipeLikeOp(op)) {
+  if (isRawSectionCarrierOp(op)) {
+    if (std::optional<InferredSectionKind> kind =
+            classifyRawSectionCarrierOp(op)) {
+      if (*kind == InferredSectionKind::Vector)
+        ++summary.vectorCount;
+      else
+        ++summary.cubeCount;
+    } else {
+      summary.ambiguousOps.push_back(op);
+    }
+  } else if (isPipeLikeOp(op)) {
     if (std::optional<InferredSectionKind> kind = classifyTileOp(op)) {
       if (*kind == InferredSectionKind::Vector)
         ++summary.vectorCount;
@@ -446,9 +570,9 @@ static func::CallOp getTransparentWrapperCall(func::FuncOp funcOp) {
   return callOp;
 }
 
-static std::optional<InferredSectionKind>
-inferWholeFunctionKind(func::FuncOp funcOp,
-                       llvm::DenseMap<Operation *, FunctionKindCacheState> &cache) {
+static std::optional<InferredSectionKind> inferWholeFunctionKind(
+    func::FuncOp funcOp,
+    llvm::DenseMap<Operation *, FunctionKindCacheState> &cache) {
   if (!funcOp || funcOp.isDeclaration())
     return std::nullopt;
 
@@ -463,7 +587,8 @@ inferWholeFunctionKind(func::FuncOp funcOp,
   ModuleKindSummary summary;
   inspectModuleKindOperation(funcOp.getOperation(), summary);
   std::optional<InferredSectionKind> inferredKind;
-  if (summary.ambiguousOps.empty() && !(summary.vectorCount && summary.cubeCount)) {
+  if (summary.ambiguousOps.empty() &&
+      !(summary.vectorCount && summary.cubeCount)) {
     if (summary.vectorCount)
       inferredKind = InferredSectionKind::Vector;
     else if (summary.cubeCount)
@@ -472,8 +597,8 @@ inferWholeFunctionKind(func::FuncOp funcOp,
 
   if (!inferredKind) {
     if (func::CallOp callOp = getTransparentWrapperCall(funcOp)) {
-      auto callee =
-          SymbolTable::lookupNearestSymbolFrom<func::FuncOp>(funcOp, callOp.getCalleeAttr());
+      auto callee = SymbolTable::lookupNearestSymbolFrom<func::FuncOp>(
+          funcOp, callOp.getCalleeAttr());
       if (callee && callee != funcOp)
         inferredKind = inferWholeFunctionKind(callee, cache);
     }
@@ -484,9 +609,9 @@ inferWholeFunctionKind(func::FuncOp funcOp,
 }
 
 static void assignModuleKernelKind(ModuleOp module, InferredSectionKind kind) {
-  FunctionKernelKind kernelKind =
-      kind == InferredSectionKind::Vector ? FunctionKernelKind::Vector
-                                          : FunctionKernelKind::Cube;
+  FunctionKernelKind kernelKind = kind == InferredSectionKind::Vector
+                                      ? FunctionKernelKind::Vector
+                                      : FunctionKernelKind::Cube;
   module->setAttr(FunctionKernelKindAttr::name,
                   FunctionKernelKindAttr::get(module.getContext(), kernelKind));
 }
@@ -496,9 +621,9 @@ static void assignFunctionKernelKind(func::FuncOp funcOp,
   if (!funcOp)
     return;
 
-  FunctionKernelKind kernelKind =
-      kind == InferredSectionKind::Vector ? FunctionKernelKind::Vector
-                                          : FunctionKernelKind::Cube;
+  FunctionKernelKind kernelKind = kind == InferredSectionKind::Vector
+                                      ? FunctionKernelKind::Vector
+                                      : FunctionKernelKind::Cube;
   funcOp->setAttr(FunctionKernelKindAttr::name,
                   FunctionKernelKindAttr::get(funcOp.getContext(), kernelKind));
 }
@@ -544,7 +669,8 @@ static LogicalResult tryAssignWholeFunctionKernelKind(func::FuncOp funcOp) {
     return success();
 
   llvm::DenseMap<Operation *, FunctionKindCacheState> cache;
-  std::optional<InferredSectionKind> kind = inferWholeFunctionKind(funcOp, cache);
+  std::optional<InferredSectionKind> kind =
+      inferWholeFunctionKind(funcOp, cache);
   if (!kind)
     return success();
 
@@ -557,9 +683,11 @@ static void inspectSegmentOperation(Operation *op,
   if (!op)
     return;
 
-  if (isTileLikeOp(op)) {
+  if (isTileLikeOp(op) || isRawSectionCarrierOp(op)) {
     segment.containsTileOp = true;
-    if (std::optional<InferredSectionKind> kind = classifyTileOp(op)) {
+    std::optional<InferredSectionKind> kind =
+        isTileLikeOp(op) ? classifyTileOp(op) : classifyRawSectionCarrierOp(op);
+    if (kind) {
       if (*kind == InferredSectionKind::Vector)
         ++segment.vectorTileOpCount;
       else
@@ -663,8 +791,9 @@ static void collectUncoveredTopLevelSegments(
 }
 
 template <typename SectionOpT>
-static void wrapUncoveredTopLevelSegment(func::FuncOp funcOp,
-                                         const UncoveredTopLevelSegment &segment) {
+static void
+wrapUncoveredTopLevelSegment(func::FuncOp funcOp,
+                             const UncoveredTopLevelSegment &segment) {
   Block &entryBlock = funcOp.getBody().front();
   Operation *firstOp = segment.firstOp;
   Operation *lastOp = segment.lastOp;
@@ -678,40 +807,44 @@ static void wrapUncoveredTopLevelSegment(func::FuncOp funcOp,
 
   auto firstIt = Block::iterator(firstOp);
   auto afterLastIt = std::next(Block::iterator(lastOp));
-  sectionBlock->getOperations().splice(sectionBlock->end(),
-                                       entryBlock.getOperations(), firstIt,
-                                       afterLastIt);
+  sectionBlock->getOperations().splice(
+      sectionBlock->end(), entryBlock.getOperations(), firstIt, afterLastIt);
 }
 
-static LogicalResult emitSegmentInferenceError(func::FuncOp funcOp,
-                                               const UncoveredTopLevelSegment &segment) {
+static LogicalResult
+emitSegmentInferenceError(func::FuncOp funcOp,
+                          const UncoveredTopLevelSegment &segment) {
   InFlightDiagnostic diag =
-      funcOp.emitOpError("contains an uncovered top-level TileOp segment whose "
+      funcOp.emitOpError("contains an uncovered top-level op segment whose "
                          "section kind cannot be inferred uniquely");
   if (segment.vectorTileOpCount && segment.cubeTileOpCount) {
-    diag << "; saw both vector-like and cube-like TileOps in the same segment";
+    diag << "; saw both vector-like and cube-like ops in the same segment";
   } else if (!segment.ambiguousTileOps.empty()) {
-    diag << "; ambiguous TileOp(s): ";
-    for (size_t i = 0, e = segment.ambiguousTileOps.size(); i < e && i < 3; ++i) {
+    diag << "; ambiguous op(s): ";
+    for (size_t i = 0, e = segment.ambiguousTileOps.size(); i < e && i < 3;
+         ++i) {
       if (i)
         diag << ", ";
       diag << '\'' << segment.ambiguousTileOps[i]->getName().getStringRef()
            << '\'';
     }
   }
+  diag << "; wrap the ambiguous region in pto.section.cube or "
+          "pto.section.vector to specify its physical section explicitly";
   return failure();
 }
 
-static LogicalResult emitResidualUncoveredTileSegmentError(
-    func::FuncOp funcOp, const UncoveredTopLevelSegment &segment) {
+static LogicalResult
+emitResidualUncoveredTileSegmentError(func::FuncOp funcOp,
+                                      const UncoveredTopLevelSegment &segment) {
   InFlightDiagnostic diag = funcOp.emitOpError(
-      "still contains an uncovered top-level TileOp segment after section "
+      "still contains an uncovered top-level op segment after section "
       "normalization");
   if (segment.containsNestedExplicitSection) {
     diag << "; a top-level op mixes nested explicit pto.section.* with sibling "
-            "TileOps outside those sections";
+            "ops outside those sections";
   }
-  diag << "; first uncovered TileOp segment starts at '"
+  diag << "; first uncovered op segment starts at '"
        << (segment.firstTileCarrierOp ? segment.firstTileCarrierOp
                                       : segment.firstOp)
               ->getName()
@@ -746,8 +879,8 @@ static LogicalResult normalizeFunction(func::FuncOp funcOp) {
   return success();
 }
 
-static LogicalResult verifyFunctionHasNoResidualUncoveredTileSegments(
-    func::FuncOp funcOp) {
+static LogicalResult
+verifyFunctionHasNoResidualUncoveredTileSegments(func::FuncOp funcOp) {
   if (hasKnownKernelKindContext(funcOp))
     return success();
 

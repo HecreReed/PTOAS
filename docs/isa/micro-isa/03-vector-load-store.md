@@ -514,21 +514,34 @@ for (int blk = 0; blk < 8; ++blk) {
 - **semantics:** Indexed scatter to UB.
 - **inputs:**
   `%value` is the source vector, `%dest` is the UB base pointer, `%offsets`
-  provides per-lane or per-block indices, and `%mask` selects the active
-  requests.
+  provides unsigned element indices relative to `%dest`, and `%mask` selects
+  the active requests. The legal type combinations are:
+
+  | Value and destination type | Offset type | Mask type | Requests |
+  | --- | --- | --- | --- |
+  | `b8` (`!pto.vreg<256xT>`) | `!pto.vreg<128xui16>` or `!pto.vreg<128xi16>` | `!pto.mask<b16>` | 128 |
+  | `b16` (`!pto.vreg<128xT>`) | `!pto.vreg<128xui16>` or `!pto.vreg<128xi16>` | `!pto.mask<b16>` | 128 |
+  | `b32` (`!pto.vreg<64xT>`) | `!pto.vreg<64xui32>` or `!pto.vreg<64xi32>` | `!pto.mask<b32>` | 64 |
+
+  Signless offset element types have the same unsigned interpretation as the
+  corresponding `ui16` or `ui32` type.
 - **outputs:**
   This op writes UB memory and returns no SSA value.
 - **constraints and limitations:**
-  Only `b8`, `b16`, and `b32` element sizes are supported. The index vector
-  must use a supported integer element type and layout for this family.
-  Each computed address MUST be element-aligned. If two or more indices alias,
-  only one write is guaranteed and the winning lane is implementation-defined.
+  Only `b8`, `b16`, and `b32` element sizes are supported, and `%dest` must have
+  the same element type as `%value`. Each destination address is
+  `%dest + %offsets[i]` in elements, equivalently
+  `byte_address(%dest) + unsigned(%offsets[i]) * sizeof(T)`, and MUST be
+  element-aligned. For `b8`, request `i` stores `%value[2*i]`; odd-numbered
+  source bytes are ignored. If two or more active indices are equal, only one
+  write is guaranteed and the winning request is implementation-defined.
 - **Latency:** **~17** cycles for **`Dtype: B16`**.
 
 ```c
-for (int i = 0; i < N; i++)
+for (int i = 0; i < num_requests; i++)
     if (mask[i])
-        UB[base + offsets[i] * sizeof(T)] = src[i];
+        dest[unsigned(offsets[i])] =
+            sizeof(T) == 1 ? value[2 * i] : value[i];
 ```
 
 ---

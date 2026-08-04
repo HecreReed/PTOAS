@@ -36,9 +36,9 @@ from .control_flow import (
 from .._types import _strip_integer_signedness
 from .module_builder import create_container_child_module
 
-from mlir.dialects import arith, func
-from mlir.dialects import pto as _pto
-from mlir.ir import (
+from ptoas.mlir.dialects import arith, func
+from ptoas.mlir.dialects import pto as _pto
+from ptoas.mlir.ir import (
     Attribute,
     FlatSymbolRefAttr,
     IndexType,
@@ -164,6 +164,8 @@ class TraceSession:
         }
         self._subkernel_stack: list[SubkernelTraceFrame] = []
         self._carry_loop_stack = []
+        self._active_physical_sections: set[object] = set()
+        self._authored_physical_sections: dict[object, set[str]] = {}
         self._inline_subkernel_counter = 0
         self._escaped_inline_values: dict[object, tuple[str, str]] = {}
 
@@ -216,6 +218,83 @@ class TraceSession:
         """Record the root entry block for the active trace."""
         self.entry_block = entry_block
 
+    def _physical_section_function_key(self):
+        return self.current_function.operation
+
+    def _enclosing_physical_section(self):
+        owner = InsertionPoint.current.block.owner
+        while owner is not None:
+            if owner.operation.name in {"pto.section.cube", "pto.section.vector"}:
+                return owner
+            owner = owner.operation.parent
+        return None
+
+    def _existing_physical_section_kinds(self) -> set[str]:
+        kinds = set()
+        for op in self._walk_op_tree(self.current_function.body.blocks[0].operations):
+            if op.operation.name == "pto.section.cube":
+                kinds.add("cube")
+            elif op.operation.name == "pto.section.vector":
+                kinds.add("vector")
+        return kinds
+
+    def _reject_duplicate_physical_section(self, kind: str, *, source: str) -> None:
+        function_key = self._physical_section_function_key()
+        authored_kinds = self._authored_physical_sections.get(function_key, set())
+        if kind in authored_kinds or kind in self._existing_physical_section_kinds():
+            raise RuntimeError(
+                f"{source} would create a second {kind!r} physical section in "
+                f"function @{self.current_function_symbol_name}; each physical "
+                "section kind may appear at most once in a function"
+            )
+
+    @contextmanager
+    def enter_physical_section(self, kind: str):
+        """Create one explicit cube/vector section in the active function."""
+        module_spec = self.current_function_module_spec
+        if (
+            getattr(module_spec, "kernel_kind_explicit", False)
+            and getattr(module_spec, "kernel_kind", None) in {"cube", "vector"}
+        ):
+            raise RuntimeError(
+                "pto.section() cannot be combined with explicit "
+                "@pto.jit(kernel_kind=...); use exactly one physical-placement contract"
+            )
+
+        function_key = self._physical_section_function_key()
+        if self.current_subkernel is not None:
+            raise RuntimeError(
+                "pto.section() is not allowed inside a cube or simd subkernel body; "
+                "the subkernel already defines its physical placement"
+            )
+        if (
+            function_key in self._active_physical_sections
+            or self._enclosing_physical_section() is not None
+        ):
+            raise RuntimeError("nested pto.section() scopes are not allowed")
+
+        self._reject_duplicate_physical_section(
+            kind, source=f"pto.section({kind!r})"
+        )
+
+        section_op = _pto.SectionCubeOp() if kind == "cube" else _pto.SectionVectorOp()
+        section_block = section_op.body.blocks.append()
+        authored_kinds = self._authored_physical_sections.setdefault(function_key, set())
+        authored_kinds.add(kind)
+        self._active_physical_sections.add(function_key)
+        try:
+            with InsertionPoint(section_block):
+                yield section_op
+        except BaseException:
+            if section_op.operation.parent is not None:
+                section_op.operation.erase()
+            authored_kinds.remove(kind)
+            if not authored_kinds:
+                self._authored_physical_sections.pop(function_key, None)
+            raise
+        finally:
+            self._active_physical_sections.remove(function_key)
+
     def validate_surface_value_access(self, value) -> None:
         """Reject inline-subkernel SSA values that escaped their outlined helper body."""
         try:
@@ -251,10 +330,15 @@ class TraceSession:
 
     def _create_subkernel_section_op(self, role: str):
         if role == "simd":
-            return _pto.SectionVectorOp()
-        if role == "cube":
-            return _pto.SectionCubeOp()
-        return None
+            kind = "vector"
+        elif role == "cube":
+            kind = "cube"
+        else:
+            return None
+        self._reject_duplicate_physical_section(
+            kind, source=f"pto.{role} subkernel"
+        )
+        return _pto.SectionVectorOp() if kind == "vector" else _pto.SectionCubeOp()
 
     def _create_inline_subkernel_wrapper(
         self,

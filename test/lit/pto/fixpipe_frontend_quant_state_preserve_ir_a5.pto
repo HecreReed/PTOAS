@@ -130,7 +130,7 @@ module {
 // LATE-NEXT: pto.tpush(
 // LATE: pto.set_quant_scalar(%{{.*}} : f32) {id = 0}
 // LATE-NEXT: pto.tpush(
-// LATE: pto.set_quant_vector(%{{.*}} : memref<1x32xf16{{.*}}#pto.address_space<scaling>>) {id = 1}
+// LATE: pto.set_quant_vector(%{{.*}} : !pto.tile_buf<scaling, 1x32xf16>) {id = 1}
 // LATE-NEXT: pto.tpush(
-// LATE: pto.set_quant_vector(%{{.*}} : memref<1x32xf16{{.*}}#pto.address_space<scaling>>) {id = 1}
+// LATE: pto.set_quant_vector(%{{.*}} : !pto.tile_buf<scaling, 1x32xf16>) {id = 1}
 // LATE-NEXT: pto.tpush(

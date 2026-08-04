@@ -1,0 +1,23 @@
+// RUN: ptoas --pto-arch=a5 --pto-backend=vpto --emit-vpto %s -o - | FileCheck %s
+
+// A cross-core event is emitted by set_flag on the source core and consumed by
+// wait_flag on the destination core. Shared pipes fall back to the peer pipe.
+
+module attributes {pto.target_arch = "a5"} {
+  module attributes {pto.backend = "vpto", pto.target_arch = "a5"} {
+    func.func @cross_core_flags() attributes {pto.entry} {
+      pto.set_flag[<PIPE_FIX>, <PIPE_V>, <EVENT_ID0>]
+      pto.wait_flag[<PIPE_FIX>, <PIPE_V>, <EVENT_ID0>]
+      return
+    }
+  }
+}
+
+// CHECK: module attributes {pto.backend = "vpto", pto.kernel_kind = #pto.kernel_kind<vector>
+// CHECK: func.func @cross_core_flags
+// CHECK-NOT: pto.set_flag
+// CHECK: pto.wait_flag[<PIPE_FIX>, <PIPE_V>, <EVENT_ID0>]
+// CHECK: module attributes {pto.backend = "vpto", pto.kernel_kind = #pto.kernel_kind<cube>
+// CHECK: func.func @cross_core_flags
+// CHECK: pto.set_flag[<PIPE_FIX>, <PIPE_V>, <EVENT_ID0>]
+// CHECK-NOT: pto.wait_flag

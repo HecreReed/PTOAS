@@ -18,13 +18,13 @@
 // Because the producing `tadd` touches *two* multi-buffers at different
 // phases, the dyn event lane for B's hazard must be keyed off B's slot
 // (i%2), NOT the tadd's first read operand A (which is (i+1)%2). The earlier
-// code grabbed the op's first slot_marker memref and would have keyed the
+// code grabbed the op's first multi_tile_get and would have keyed the
 // wait off A's slot -- selecting the wrong event lane and letting the real
 // cross-iter dependency on B through.
 
 module {
-  func.func @two_mb(%gm : memref<16x16xf16, #pto.address_space<gm>>,
-                    %dst : memref<16x16xf16, #pto.address_space<gm>>,
+  func.func @two_mb(%gm : !pto.partition_tensor_view<16x16xf16>,
+                    %dst : !pto.partition_tensor_view<16x16xf16>,
                     %n : index) {
     %c0 = arith.constant 0 : index
     %c1 = arith.constant 1 : index
@@ -45,13 +45,13 @@ module {
           : !pto.multi_tile_buf<vec, 16x16xf16, count=2>
          -> !pto.tile_buf<vec, 16x16xf16>
 
-      pto.tload ins(%gm : memref<16x16xf16, #pto.address_space<gm>>)
+      pto.tload ins(%gm : !pto.partition_tensor_view<16x16xf16>)
                 outs(%sA : !pto.tile_buf<vec, 16x16xf16>)
       pto.tadd ins(%sA, %sA : !pto.tile_buf<vec, 16x16xf16>,
                               !pto.tile_buf<vec, 16x16xf16>)
                outs(%sB : !pto.tile_buf<vec, 16x16xf16>)
       pto.tstore ins(%sB : !pto.tile_buf<vec, 16x16xf16>)
-                 outs(%dst : memref<16x16xf16, #pto.address_space<gm>>)
+                 outs(%dst : !pto.partition_tensor_view<16x16xf16>)
     }
     return
   }

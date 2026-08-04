@@ -8,7 +8,7 @@
 
 // Guard: inferred section normalization must not rewrite functions that already
 // live inside a pto.kernel_kind child module.
-// RUN: ptoas --pto-arch=a5 --pto-backend=vpto --emit-pto-ir %s -o - | FileCheck %s
+// RUN: pto-test-opt --pto-normalize-uncovered-tile-sections %s | FileCheck %s
 
 module attributes {pto.target_arch = "a5"} {
   module attributes {pto.kernel_kind = #pto.kernel_kind<vector>} {
@@ -37,7 +37,7 @@ module attributes {pto.target_arch = "a5"} {
   }
 }
 
-// CHECK: module attributes {pto.backend = "vpto", pto.target_arch = "a5"} {
+// CHECK: module attributes {pto.target_arch = "a5"} {
 // CHECK: module attributes {pto.kernel_kind = #pto.kernel_kind<vector>} {
 // CHECK: func.func @keep_uncovered_vector_ops
 // CHECK: %c0 = arith.constant 0 : index

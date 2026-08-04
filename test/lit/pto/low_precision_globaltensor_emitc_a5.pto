@@ -10,19 +10,19 @@
 
 module {
   func.func @low_precision_globaltensor_emitc_a5(
-      %src_hif8: memref<16x32x!pto.hif8, #pto.address_space<gm>>,
-      %src_f8: memref<16x32xf8E4M3FN, #pto.address_space<gm>>,
-      %dst_f4: memref<16x32x!pto.f4E1M2x2, #pto.address_space<gm>>) {
+      %src_hif8: !pto.partition_tensor_view<16x32x!pto.hif8>,
+      %src_f8: !pto.partition_tensor_view<16x32xf8E4M3FN>,
+      %dst_f4: !pto.partition_tensor_view<16x32x!pto.f4E1M2x2>) {
     %tile_hif8 = pto.alloc_tile : !pto.tile_buf<loc=vec, dtype=!pto.hif8, rows=16, cols=32, v_row=16, v_col=32, blayout=row_major, slayout=none_box, fractal=512, pad=0>
     %tile_f8 = pto.alloc_tile : !pto.tile_buf<loc=vec, dtype=f8E4M3FN, rows=16, cols=32, v_row=16, v_col=32, blayout=row_major, slayout=none_box, fractal=512, pad=0>
     %tile_f4 = pto.alloc_tile : !pto.tile_buf<loc=vec, dtype=!pto.f4E1M2x2, rows=16, cols=32, v_row=16, v_col=32, blayout=row_major, slayout=none_box, fractal=512, pad=0>
 
-    pto.tload ins(%src_hif8 : memref<16x32x!pto.hif8, #pto.address_space<gm>>)
+    pto.tload ins(%src_hif8 : !pto.partition_tensor_view<16x32x!pto.hif8>)
               outs(%tile_hif8 : !pto.tile_buf<loc=vec, dtype=!pto.hif8, rows=16, cols=32, v_row=16, v_col=32, blayout=row_major, slayout=none_box, fractal=512, pad=0>)
-    pto.tprefetch ins(%src_f8 : memref<16x32xf8E4M3FN, #pto.address_space<gm>>)
+    pto.tprefetch ins(%src_f8 : !pto.partition_tensor_view<16x32xf8E4M3FN>)
                   outs(%tile_f8 : !pto.tile_buf<loc=vec, dtype=f8E4M3FN, rows=16, cols=32, v_row=16, v_col=32, blayout=row_major, slayout=none_box, fractal=512, pad=0>)
     pto.tstore ins(%tile_f4 : !pto.tile_buf<loc=vec, dtype=!pto.f4E1M2x2, rows=16, cols=32, v_row=16, v_col=32, blayout=row_major, slayout=none_box, fractal=512, pad=0>)
-               outs(%dst_f4 : memref<16x32x!pto.f4E1M2x2, #pto.address_space<gm>>)
+               outs(%dst_f4 : !pto.partition_tensor_view<16x32x!pto.f4E1M2x2>)
     return
   }
 }

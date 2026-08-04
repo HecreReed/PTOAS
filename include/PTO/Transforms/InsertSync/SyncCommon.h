@@ -102,7 +102,7 @@ struct BaseMemInfo {
   pto::AddressSpace scope;
   SmallVector<uint64_t> baseAddresses; // 用于 Offset 分析
   uint64_t allocateSize;
-  // PlanMemory materializes static local allocations as pointer_cast constants.
+  // PlanMemory materializes static local allocations as physical addresses.
   // This distinguishes their physical addresses from root-relative offsets.
   bool hasKnownPhysicalAddresses;
   // Address-preserving provenance can be lost when a pointer is round-tripped

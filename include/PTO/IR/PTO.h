@@ -141,7 +141,6 @@ inline constexpr char kPTOTargetArchAttrName[] = "pto.target_arch";
 AddressSpaceAttr getPTOAddressSpaceAttr(Type type);
 
 /// Return true if type is a ptr/memref in GM address space (or default).
-bool isScalarPtrOrMemRef(Type type);
 
 enum class PTOArch {
   A3,
@@ -226,8 +225,8 @@ void setExternalArtifactVisibility(func::FuncOp func, bool isExternal);
 /// Validate module-level PTO entry configuration before EmitC lowering.
 LogicalResult validatePTOEntryFunctions(ModuleOp module);
 
-/// Reject !pto.struct function results and operation results other than
-/// pto.declare_struct, so aliases cannot hide stack-storage provenance.
+/// Reject !pto.struct function arguments/results and operation results other
+/// than pto.declare_struct, so aliases cannot hide stack-storage provenance.
 LogicalResult validateStructProvenance(ModuleOp module);
 
 /// Compatibility hook kept for existing pass pipelines. This is now a no-op

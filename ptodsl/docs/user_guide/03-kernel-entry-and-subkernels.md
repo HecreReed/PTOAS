@@ -652,6 +652,30 @@ you can drop below the tile abstraction without leaving the `@pto.jit` entry.
 When you want to delineate an authored vector interval directly in the public
 PTODSL surface, use `with pto.vecscope():` inside an explicit-mode kernel body.
 
+PTOAS normally infers whether uncovered Tile and micro-instruction regions run
+on the Cube or Vector core. If a region only contains operations shared by both
+cores, such as synchronization between `PIPE_MTE2` and `PIPE_S`, inference
+cannot determine the physical core uniquely. Use `with pto.section("cube"):`
+or `with pto.section("vector"):` around that complete region as an explicit
+placement hint:
+
+```python
+@pto.jit(target="a5", mode="explicit")
+def mixed_kernel():
+    with pto.section("cube"):
+        pto.set_flag("MTE2", "S", event_id=0)
+
+    with pto.section("vector"):
+        pto.wait_flag("MTE2", "S", event_id=0)
+```
+
+Explicit sections are an escape hatch rather than a requirement: regions that
+PTOAS can classify should remain uncovered and continue to use automatic
+inference. Sections cannot be nested, each kind may appear at most once per
+function, and `pto.section()` cannot be combined with an explicit
+`@pto.jit(kernel_kind=...)` contract. The context manager is only a placement
+scope and does not expose the underlying IR operation through an `as` binding.
+
 The richer type surface also applies to sub-kernels: in auto mode, a
 sub-kernel's parameters are restricted to `Tile` and PTO scalar types; in
 explicit mode they may also accept `PartitionTensorView` and `pto.ptr`,

@@ -10,7 +10,7 @@
 // shared memref lowering, optional sync insertion, and the non-fused baseline.
 //
 // RUN: ptoas --pto-arch=a5 --pto-level=level2 %s --emit-pto-ir -o - | FileCheck %s --check-prefix=NOFUSE
-// RUN: { ptoas --pto-arch=a5 --pto-level=level2 --enable-op-fusion --emit-pto-ir %s --mlir-print-ir-after=pto-view-to-memref -o /dev/null 2>&1 || true; } | FileCheck %s --check-prefix=SEAM
+// RUN: { ptoas --pto-arch=a5 --pto-level=level2 --enable-op-fusion --emit-pto-ir %s --mlir-print-ir-after=pto-resolve-reserved-buffers -o /dev/null 2>&1 || true; } | FileCheck %s --check-prefix=SEAM
 // RUN: { ptoas --pto-arch=a5 --pto-level=level2 --enable-op-fusion --enable-insert-sync --emit-pto-ir %s --mlir-print-ir-after=pto-insert-sync -o /dev/null 2>&1 || true; } | FileCheck %s --check-prefix=SYNC
 
 module {
@@ -53,12 +53,9 @@ module {
 
 // SEAM-LABEL: func.func @fusion_adapter_placement_level2_tadd(
 // SEAM-NOT: pto.fusion_region
-// SEAM: memref.alloc()
-// SEAM: pto.bind_tile
-// SEAM: memref.alloc()
-// SEAM: pto.bind_tile
-// SEAM: memref.alloc()
-// SEAM: pto.bind_tile
+// SEAM: pto.alloc_tile
+// SEAM: pto.alloc_tile
+// SEAM: pto.alloc_tile
 // SEAM: pto.tadd{{.*}}{pto.fusion.group_id = 0 : i64, pto.fusion.order = 0 : i64{{.*}}}
 // SEAM: pto.tadd{{.*}}{pto.fusion.group_id = 0 : i64, pto.fusion.order = 1 : i64{{.*}}}
 // SEAM: pto.tadd{{.*}}{pto.fusion.group_id = 0 : i64, pto.fusion.order = 2 : i64{{.*}}}

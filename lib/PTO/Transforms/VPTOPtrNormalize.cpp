@@ -132,7 +132,7 @@ static LogicalResult computeSubviewElementOffset(memref::SubViewOp op,
   if (failed(mlir::pto::getPTOMemRefStridesAndOffset(sourceType, strides,
                                                      baseOffset)))
     return failure();
-  // The SSA source already names the base address after bind_tile/pointer_cast
+  // The SSA source already names the base address after ptr-boundary
   // normalization. A dynamic memref layout offset here is metadata we can
   // ignore for ptr normalization and model as zero.
   if (baseOffset == ShapedType::kDynamic)
@@ -275,25 +275,6 @@ static Value materializeScalarAccessPtr(Value source, PatternRewriter &rewriter,
     return rewriter.create<pto::AddPtrOp>(loc, ptrType, basePtr, offset);
   }
 
-  if (auto bind = source.getDefiningOp<pto::BindTileOp>())
-    return materializeScalarAccessPtr(bind.getSource(), rewriter, loc);
-
-  if (auto pointerCast = source.getDefiningOp<pto::PointerCastOp>()) {
-    if (pointerCast.getAddrs().empty())
-      return {};
-    Value addr = pointerCast.getAddrs().front();
-    if (isa<pto::PtrType>(addr.getType()))
-      return addr;
-    if (isa<IntegerType>(addr.getType())) {
-      auto ptrType = dyn_cast<pto::PtrType>(
-          convertSubviewResultType(source.getType()));
-      if (!ptrType)
-        return {};
-      return rewriter.create<pto::CastPtrOp>(loc, ptrType, addr);
-    }
-    return materializeScalarAccessPtr(addr, rewriter, loc);
-  }
-
   // Restrict normalization to memref views that already sit on top of a ptr-like
   // boundary bridge. Materializing fresh memref -> ptr casts here would leave
   // illegal pto.castptr(memref) behind in this pass.
@@ -364,23 +345,39 @@ struct ConvertTileBufAddrToPtrPattern
   }
 };
 
-struct ConvertPointerCastToCastPtrPattern
-    : public OpConversionPattern<pto::PointerCastOp> {
+struct ConvertIntToPtrToCastPtrPattern
+    : public OpConversionPattern<pto::IntToPtrOp> {
   using OpConversionPattern::OpConversionPattern;
 
   LogicalResult
-  matchAndRewrite(pto::PointerCastOp op, OpAdaptor adaptor,
+  matchAndRewrite(pto::IntToPtrOp op, OpAdaptor adaptor,
+                  ConversionPatternRewriter &rewriter) const override {
+    Type convertedType =
+        getTypeConverter()->convertType(op.getResult().getType());
+    if (!isa<pto::PtrType>(convertedType))
+      return rewriter.notifyMatchFailure(op, "expected pointer result type");
+
+    rewriter.replaceOpWithNewOp<pto::CastPtrOp>(op, convertedType,
+                                                adaptor.getAddr());
+    return success();
+  }
+};
+
+struct ConvertPtrToIntToCastPtrPattern
+    : public OpConversionPattern<pto::PtrToIntOp> {
+  using OpConversionPattern::OpConversionPattern;
+
+  LogicalResult
+  matchAndRewrite(pto::PtrToIntOp op, OpAdaptor adaptor,
                   ConversionPatternRewriter &rewriter) const override {
     Type convertedType = getTypeConverter()->convertType(op.getResult().getType());
-    auto ptrType = dyn_cast<pto::PtrType>(convertedType);
-    if (!ptrType)
-      return failure();
+    if (!isa<IntegerType>(convertedType))
+      return rewriter.notifyMatchFailure(op, "expected integer result type");
+    if (!isa<pto::PtrType>(adaptor.getPtr().getType()))
+      return rewriter.notifyMatchFailure(op, "expected pointer input type");
 
-    if (adaptor.getAddrs().empty())
-      return rewriter.notifyMatchFailure(op, "expected at least one address");
-
-    rewriter.replaceOpWithNewOp<pto::CastPtrOp>(op, ptrType,
-                                                adaptor.getAddrs().front());
+    rewriter.replaceOpWithNewOp<pto::CastPtrOp>(op, convertedType,
+                                                adaptor.getPtr());
     return success();
   }
 };
@@ -413,31 +410,6 @@ struct ConvertCastPtrPattern : public OpConversionPattern<pto::CastPtrOp> {
     }
 
     rewriter.replaceOpWithNewOp<pto::CastPtrOp>(op, convertedResultType, input);
-    return success();
-  }
-};
-
-struct ConvertBindTileToPtrPattern : public OpConversionPattern<pto::BindTileOp> {
-  using OpConversionPattern::OpConversionPattern;
-
-  LogicalResult
-  matchAndRewrite(pto::BindTileOp op, OpAdaptor adaptor,
-                  ConversionPatternRewriter &rewriter) const override {
-    Type convertedType = getTypeConverter()->convertType(op.getResult().getType());
-    auto ptrType = dyn_cast<pto::PtrType>(convertedType);
-    if (!ptrType)
-      return failure();
-
-    Value ptr =
-        materializeSubviewInputPtr(adaptor.getSource(), rewriter, op.getLoc());
-    if (!ptr)
-      return rewriter.notifyMatchFailure(op,
-                                         "failed to materialize bind_tile input ptr");
-
-    if (ptr.getType() != ptrType)
-      ptr = rewriter.create<pto::CastPtrOp>(op.getLoc(), ptrType, ptr);
-
-    rewriter.replaceOp(op, ptr);
     return success();
   }
 };
@@ -924,8 +896,9 @@ struct VPTOPtrNormalizePass
     target.addLegalDialect<arith::ArithDialect, func::FuncDialect,
                            scf::SCFDialect>();
     target.addDynamicallyLegalDialect<pto::PTODialect>([](Operation *op) {
-      return !isa<pto::TileBufAddrOp, pto::PointerCastOp, pto::CastPtrOp,
-                  pto::BindTileOp, pto::VldsOp, pto::VstsOp, pto::VsstbOp>(op);
+      return !isa<pto::TileBufAddrOp, pto::CastPtrOp,
+                  pto::IntToPtrOp, pto::PtrToIntOp,
+                  pto::VldsOp, pto::VstsOp, pto::VsstbOp>(op);
     });
     target.addLegalOp<ModuleOp>();
     target.addDynamicallyLegalOp<func::FuncOp>([&](func::FuncOp op) {
@@ -949,18 +922,9 @@ struct VPTOPtrNormalizePass
       return op.getDst().getType() ==
              typeConverter.convertType(op.getDst().getType());
     });
-    target.addDynamicallyLegalOp<pto::PointerCastOp>(
-        [&](pto::PointerCastOp op) {
-          return op.getResult().getType() ==
-                 typeConverter.convertType(op.getResult().getType());
-        });
     target.addDynamicallyLegalOp<pto::CastPtrOp>([&](pto::CastPtrOp op) {
       return !isMemRefType(op.getInput().getType()) &&
              !isMemRefType(op.getResult().getType());
-    });
-    target.addDynamicallyLegalOp<pto::BindTileOp>([&](pto::BindTileOp op) {
-      return op.getResult().getType() ==
-             typeConverter.convertType(op.getResult().getType());
     });
     target.addDynamicallyLegalOp<pto::VldsOp>(
         [&](pto::VldsOp op) {
@@ -1057,8 +1021,8 @@ struct VPTOPtrNormalizePass
     populateCallOpTypeConversionPattern(patterns, typeConverter);
     populateReturnOpTypeConversionPattern(patterns, typeConverter);
     patterns.add<ConvertTileBufAddrToPtrPattern,
-                 ConvertPointerCastToCastPtrPattern, ConvertCastPtrPattern,
-                 ConvertBindTileToPtrPattern,
+                 ConvertIntToPtrToCastPtrPattern,
+                 ConvertPtrToIntToCastPtrPattern, ConvertCastPtrPattern,
                  ConvertSubviewToAddPtrPattern, ConvertVldsSubviewOperandPattern,
                  ConvertVstsSubviewOperandPattern,
                  ConvertVsstbSubviewOperandPattern,

@@ -1,0 +1,64 @@
+// Copyright (c) 2026 Huawei Technologies Co., Ltd.
+// This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+// CANN Open Software License Agreement Version 2.0 (the "License").
+// Please refer to the License for details. You may not use this file except in compliance with the License.
+// THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+// INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+// See LICENSE in the root of the software repository for the full text of the License.
+
+// RUN: ptoas --pto-level=level3 --pto-arch=a5 --mlir-print-ir-after=pto-resolve-reserved-buffers %s -o /dev/null 2>&1 | FileCheck %s --check-prefix=NATIVE
+// RUN: ptoas --pto-level=level3 --pto-arch=a3 --enable-insert-sync %s | FileCheck %s --check-prefix=EMITC
+
+module {
+  func.func private @tcolargmax_arg(%src: !pto.tile_buf<vec, 16x32xf16>, %tmp: !pto.tile_buf<vec, 16x32xf16>, %dst: !pto.tile_buf<vec, 1x32xui32>) {
+    pto.tcolargmax ins(%src, %tmp : !pto.tile_buf<vec, 16x32xf16>, !pto.tile_buf<vec, 16x32xf16>) outs(%dst : !pto.tile_buf<vec, 1x32xui32>)
+    return
+  }
+  func.func private @tcolargmin_arg(%src: !pto.tile_buf<vec, 16x32xf16>, %tmp: !pto.tile_buf<vec, 16x32xf16>, %dst: !pto.tile_buf<vec, 1x32xui32>) {
+    pto.tcolargmin ins(%src, %tmp : !pto.tile_buf<vec, 16x32xf16>, !pto.tile_buf<vec, 16x32xf16>) outs(%dst : !pto.tile_buf<vec, 1x32xui32>)
+    return
+  }
+  func.func private @trowargmax_arg(%src: !pto.tile_buf<vec, 16x32xf16>, %tmp: !pto.tile_buf<vec, 16x32xf16>, %dst: !pto.tile_buf<loc=vec, dtype=ui32, rows=16, cols=1, v_row=16, v_col=1, blayout=col_major, slayout=none_box, fractal=512, pad=0>) {
+    pto.trowargmax ins(%src, %tmp : !pto.tile_buf<vec, 16x32xf16>, !pto.tile_buf<vec, 16x32xf16>) outs(%dst : !pto.tile_buf<loc=vec, dtype=ui32, rows=16, cols=1, v_row=16, v_col=1, blayout=col_major, slayout=none_box, fractal=512, pad=0>)
+    return
+  }
+  func.func private @trowargmin_arg(%src: !pto.tile_buf<vec, 16x32xf16>, %tmp: !pto.tile_buf<vec, 16x32xf16>, %dst: !pto.tile_buf<loc=vec, dtype=ui32, rows=16, cols=1, v_row=16, v_col=1, blayout=col_major, slayout=none_box, fractal=512, pad=0>) {
+    pto.trowargmin ins(%src, %tmp : !pto.tile_buf<vec, 16x32xf16>, !pto.tile_buf<vec, 16x32xf16>) outs(%dst : !pto.tile_buf<loc=vec, dtype=ui32, rows=16, cols=1, v_row=16, v_col=1, blayout=col_major, slayout=none_box, fractal=512, pad=0>)
+    return
+  }
+  func.func private @tpartargmax_arg(%a: !pto.tile_buf<vec, 16x32xf32>, %b: !pto.tile_buf<vec, 16x32xf32>, %ai: !pto.tile_buf<vec, 16x32xui32>, %bi: !pto.tile_buf<vec, 16x32xui32>, %dst: !pto.tile_buf<vec, 16x32xf32>, %di: !pto.tile_buf<vec, 16x32xui32>) {
+    pto.tpartargmax ins(%a, %b, %ai, %bi : !pto.tile_buf<vec, 16x32xf32>, !pto.tile_buf<vec, 16x32xf32>, !pto.tile_buf<vec, 16x32xui32>, !pto.tile_buf<vec, 16x32xui32>) outs(%dst, %di : !pto.tile_buf<vec, 16x32xf32>, !pto.tile_buf<vec, 16x32xui32>)
+    return
+  }
+  func.func private @tpartargmin_arg(%a: !pto.tile_buf<vec, 16x32xf32>, %b: !pto.tile_buf<vec, 16x32xf32>, %ai: !pto.tile_buf<vec, 16x32xui32>, %bi: !pto.tile_buf<vec, 16x32xui32>, %dst: !pto.tile_buf<vec, 16x32xf32>, %di: !pto.tile_buf<vec, 16x32xui32>) {
+    pto.tpartargmin ins(%a, %b, %ai, %bi : !pto.tile_buf<vec, 16x32xf32>, !pto.tile_buf<vec, 16x32xf32>, !pto.tile_buf<vec, 16x32xui32>, !pto.tile_buf<vec, 16x32xui32>) outs(%dst, %di : !pto.tile_buf<vec, 16x32xf32>, !pto.tile_buf<vec, 16x32xui32>)
+    return
+  }
+}
+
+// NATIVE-LABEL: @tcolargmax_arg
+// NATIVE: pto.tcolargmax
+// NATIVE-LABEL: @tcolargmin_arg
+// NATIVE: pto.tcolargmin
+// NATIVE-LABEL: @trowargmax_arg
+// NATIVE: pto.trowargmax
+// NATIVE-LABEL: @trowargmin_arg
+// NATIVE: pto.trowargmin
+// NATIVE-LABEL: @tpartargmax_arg
+// NATIVE: pto.tpartargmax
+// NATIVE-LABEL: @tpartargmin_arg
+// NATIVE: pto.tpartargmin
+// NATIVE-NOT: memref<
+
+// EMITC-LABEL: tcolargmax_arg(
+// EMITC: TCOLARGMAX(
+// EMITC-LABEL: tcolargmin_arg(
+// EMITC: TCOLARGMIN(
+// EMITC-LABEL: trowargmax_arg(
+// EMITC: TROWARGMAX(
+// EMITC-LABEL: trowargmin_arg(
+// EMITC: TROWARGMIN(
+// EMITC-LABEL: tpartargmax_arg(
+// EMITC: TPARTARGMAX(
+// EMITC-LABEL: tpartargmin_arg(
+// EMITC: TPARTARGMIN(

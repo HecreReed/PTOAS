@@ -48,8 +48,8 @@ mlir::pto::SlotRelation compareMemInfoSlotSSA(const MemInfo &memInfo1,
   size_t n = std::max<size_t>(memInfo1.getSz(), memInfo2.getSz());
   if (n < 2 || n > std::numeric_limits<uint32_t>::max())
     return mlir::pto::SlotRelation::kUnknown;
-  Value slot1 = mlir::pto::findSlotMarkerExpr(memInfo1.value);
-  Value slot2 = mlir::pto::findSlotMarkerExpr(memInfo2.value);
+  Value slot1 = mlir::pto::findMultiTileSlotExpr(memInfo1.value);
+  Value slot2 = mlir::pto::findMultiTileSlotExpr(memInfo2.value);
   if (!slot1 || !slot2)
     return mlir::pto::SlotRelation::kUnknown;
   return mlir::pto::compareSlotSSA(slot1, slot2, static_cast<uint32_t>(n));
@@ -500,14 +500,14 @@ Solver::getMultiBufferEventIdInfo(Occurrence *occ1, Occurrence *occ2,
 
   // Capture the slot SSA of the conflicting multi-buffer per side, so dyn
   // event-id codegen keys the event lane off the *hazard* buffer rather than
-  // the op's first slot_marker memref. `slotOpN` is the slot as accessed by
+  // the op's first slot-bearing value. `slotOpN` is the slot as accessed by
   // rwOpN; ambiguity (more than one distinct slot participating in this
   // pair's conflicts) collapses to null, making codegen fall back to the
   // safe N-static fanout.
   Value slotOp1, slotOp2;
   bool slotOp1Ambiguous = false, slotOp2Ambiguous = false;
   auto collectSlot = [](const MemInfo &mi, Value &slot, bool &ambiguous) {
-    Value s = mlir::pto::findSlotMarkerExpr(mi.value);
+    Value s = mlir::pto::findMultiTileSlotExpr(mi.value);
     if (!s)
       return;
     if (!slot)
@@ -2387,7 +2387,7 @@ SyncBeforeAfterMap Solver::getBeforeAfterSyncMaps() {
       // codegen can lower into `pto.set_flag_dyn` / `pto.wait_flag_dyn`.
       // The slots were captured in `getMultiBufferEventIdInfo` from the
       // actual conflicting MemInfo pair, so the dyn event lane is indexed by
-      // the *hazard* buffer's slot -- not the op's first slot_marker memref.
+      // the *hazard* buffer's slot -- not the op's first slot-bearing value.
       // `slotExprOp1/Op2` are keyed to op1(==rwOp1)/op2(==rwOp2); the set
       // side may land on either op depending on the program order resolved
       // by `getSetWaitOcc`, so map by op identity. A null slot (absent or

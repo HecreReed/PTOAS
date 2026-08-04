@@ -6,7 +6,7 @@
 // directly instead of going through the CCEC backend renderer.
 //
 // All three functions live in the same module: ptoas's pipeline contains
-// ModuleOp-scoped passes (pto-view-to-memref, pto-resolve-reserved-buffers)
+// ModuleOp-scoped passes (pto-resolve-reserved-buffers, pto-resolve-reserved-buffers)
 // that won't visit nested modules introduced by `-split-input-file`.
 
 module {
@@ -148,7 +148,7 @@ module {
 
   // CHECK-LABEL: func.func @event_id_fallback
   // CHECK-COUNT-9: {{pto\.set_flag\[<PIPE_MTE2>, <PIPE_V>, <EVENT_ID[0-9]+>\]}}
-  // CHECK: pto.tmuls ins(%4, %cst :
+  // CHECK: pto.tmuls ins(%{{[0-9]+}}, %cst :
 
   func.func @event_id_fallback(%arg0: !pto.ptr<f32>,
                                %arg2: index, %arg3: index, %arg4: index,

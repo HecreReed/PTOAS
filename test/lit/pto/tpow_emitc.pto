@@ -6,7 +6,7 @@
 // INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
 // See LICENSE in the root of the software repository for the full text of the License.
 
-// RUN: ptoas --pto-arch=a3 --mlir-print-ir-after=pto-view-to-memref %s 2>&1 | FileCheck %s --check-prefix=A3
+// RUN: ptoas --pto-arch=a3 --mlir-print-ir-after=pto-resolve-reserved-buffers %s 2>&1 | FileCheck %s --check-prefix=A3
 
 module {
   func.func @tpow_tmp_form() {
@@ -19,6 +19,6 @@ module {
   }
 }
 
-// A3: pto.tpow ins([[BASE:%[0-9]+]], [[EXP:%[0-9]+]], [[TMP:%[0-9]+]] : memref<1x16xf32
-// A3: outs([[DST:%[0-9]+]] : memref<1x16xf32
+// A3: pto.tpow ins([[BASE:%[0-9]+]], [[EXP:%[0-9]+]], [[TMP:%[0-9]+]] : !pto.tile_buf<vec, 1x16xf32
+// A3: outs([[DST:%[0-9]+]] : !pto.tile_buf<vec, 1x16xf32
 // A3: TPOW([[VDST:[_A-Za-z][_A-Za-z0-9]*]], [[VBASE:[_A-Za-z][_A-Za-z0-9]*]], [[VEXP:[_A-Za-z][_A-Za-z0-9]*]], [[VTMP:[_A-Za-z][_A-Za-z0-9]*]]);

@@ -6,23 +6,21 @@
 // INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
 // See LICENSE in the root of the software repository for the full text of the License.
 
-// RUN: ptoas --mlir-print-ir-after=pto-view-to-memref %s 2>&1 1>/dev/null | FileCheck %s
+// RUN: ptoas --mlir-print-ir-after=pto-resolve-reserved-buffers %s 2>&1 1>/dev/null | FileCheck %s
 // RUN: ptoas --mlir-print-ir-after=pto-plan-memory %s 2>&1 1>/dev/null | FileCheck %s --check-prefix=PLAN
 // RUN: ptoas --mlir-print-ir-after=pto-resolve-buffer-select %s 2>&1 1>/dev/null | FileCheck %s --check-prefix=SELECT
+// RUN: ptoas --plan-memory-impl=modern --mlir-print-ir-after=pto-plan-memory %s 2>&1 1>/dev/null | FileCheck %s --check-prefix=PLAN
+// RUN: ptoas --plan-memory-impl=modern --mlir-print-ir-after=pto-resolve-buffer-select %s 2>&1 1>/dev/null | FileCheck %s --check-prefix=SELECT
 
-// Verifies the full multi-buffer pipeline for constant slots:
-//   1. PTOViewToMemref lowers `alloc_multi_tile` to `memref.alloc` with the
-//      `pto.multi_buffer = N : i32` attribute, and `multi_tile_get [%k]` to
-//      `pto.slot_marker` carrying the constant slot SSA.
-//   2. PTOPlanMemory reserves N physical addresses and emits a multi-
-//      address `pto.pointer_cast(addr0, addr1)`.
-//   3. PTOResolveBufferSelect lowers each `slot_marker` to a single-
-//      address `pto.pointer_cast(addrK)` -- one per slot use.
+// Verifies the tile-native multi-buffer pipeline for constant slots:
+//   1. PTOResolveReservedBuffers preserves alloc_multi_tile and multi_tile_get.
+//   2. PTOPlanMemory records the physical slot addresses on alloc_multi_tile.
+//   3. PTOResolveBufferSelect replaces each selection with alloc_tile(addrK).
 
 module {
   func.func @const_slot_two_buffers(
-      %gm0 : memref<16x16xf16, #pto.address_space<gm>>,
-      %gm1 : memref<16x16xf16, #pto.address_space<gm>>) {
+      %gm0 : !pto.partition_tensor_view<16x16xf16>,
+      %gm1 : !pto.partition_tensor_view<16x16xf16>) {
     %c0 = arith.constant 0 : index
     %c1 = arith.constant 1 : index
 
@@ -36,31 +34,31 @@ module {
         : !pto.multi_tile_buf<vec, 16x16xf16, count=2>
        -> !pto.tile_buf<vec, 16x16xf16>
 
-    pto.tload ins(%gm0 : memref<16x16xf16, #pto.address_space<gm>>)
+    pto.tload ins(%gm0 : !pto.partition_tensor_view<16x16xf16>)
               outs(%s0  : !pto.tile_buf<vec, 16x16xf16>)
-    pto.tload ins(%gm1 : memref<16x16xf16, #pto.address_space<gm>>)
+    pto.tload ins(%gm1 : !pto.partition_tensor_view<16x16xf16>)
               outs(%s1  : !pto.tile_buf<vec, 16x16xf16>)
     return
   }
 }
 
-// CHECK: IR Dump After PTOViewToMemref
+// CHECK: IR Dump After PTOResolveReservedBuffers
 // CHECK-LABEL: func.func @const_slot_two_buffers
-// CHECK: memref.alloc() {pto.multi_buffer = 2 : i32}
-// CHECK: pto.slot_marker %{{.*}}[%c0
-// CHECK: pto.slot_marker %{{.*}}[%c1
+// CHECK: %[[MULTI:.*]] = pto.alloc_multi_tile
+// CHECK: pto.multi_tile_get %[[MULTI]][%c0
+// CHECK: pto.multi_tile_get %[[MULTI]][%c1
+// CHECK-NOT: memref.alloc
 
-// Stage 2 -- PlanMemory: two physical slots reserved -> 2-addr pointer_cast.
+// Stage 2 -- PTOPlanMemory records two physical slot addresses.
 // PLAN: IR Dump After PlanMemory
 // PLAN-LABEL: func.func @const_slot_two_buffers
-// PLAN: pto.pointer_cast({{.*}}, {{.*}})
-// PLAN: pto.slot_marker
+// PLAN: pto.alloc_multi_tile {pto.multi_buffer_addrs = array<i64: 0, 512>}
+// PLAN: pto.multi_tile_get
 
-// Stage 3 -- ResolveBufferSelect: each slot_marker becomes a single-addr
-// pointer_cast; original 2-addr pointer_cast remains as alloc anchor.
+// Stage 3 -- ResolveBufferSelect materializes one addressed tile per use.
 // SELECT: IR Dump After PTOResolveBufferSelect
 // SELECT-LABEL: func.func @const_slot_two_buffers
-// SELECT: %[[ANCHOR:.*]] = pto.pointer_cast(%{{.*}}, %{{.*}})
-// SELECT-NOT: pto.slot_marker
-// SELECT: pto.pointer_cast(%[[ADDR0:.*]])
-// SELECT: pto.pointer_cast(%[[ADDR1:.*]])
+// SELECT-NOT: pto.alloc_multi_tile
+// SELECT-NOT: pto.multi_tile_get
+// SELECT: pto.alloc_tile addr = %{{.*}}
+// SELECT: pto.alloc_tile addr = %{{.*}}
