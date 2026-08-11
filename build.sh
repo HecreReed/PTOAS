@@ -245,13 +245,15 @@ configure_ptoas() {
   )
 
   # Inject compiler-rt for __muloti4 (aarch64 -ftrapv __int128) into the
-  # linker flags applied to every PTOAS target.
+  # linker flags applied to every PTOAS target. The static archive must be
+  # pulled in even though linker flags precede the object files: force the
+  # symbol with -Wl,-u so the linker extracts __muloti4 from the archive.
   resolve_compiler_rt
   if [ -n "${PTOAS_COMPILER_RT:-}" ]; then
     ptoas_cmake_args+=(
-      -DCMAKE_EXE_LINKER_FLAGS="${CMAKE_EXE_LINKER_FLAGS:-} ${PTOAS_COMPILER_RT}"
-      -DCMAKE_SHARED_LINKER_FLAGS="${CMAKE_SHARED_LINKER_FLAGS:-} ${PTOAS_COMPILER_RT}"
-      -DCMAKE_MODULE_LINKER_FLAGS="${CMAKE_MODULE_LINKER_FLAGS:-} ${PTOAS_COMPILER_RT}"
+      -DCMAKE_EXE_LINKER_FLAGS="${CMAKE_EXE_LINKER_FLAGS:-} -Wl,-u,__muloti4 ${PTOAS_COMPILER_RT}"
+      -DCMAKE_SHARED_LINKER_FLAGS="${CMAKE_SHARED_LINKER_FLAGS:-} -Wl,-u,__muloti4 ${PTOAS_COMPILER_RT}"
+      -DCMAKE_MODULE_LINKER_FLAGS="${CMAKE_MODULE_LINKER_FLAGS:-} -Wl,-u,__muloti4 ${PTOAS_COMPILER_RT}"
     )
   fi
 
