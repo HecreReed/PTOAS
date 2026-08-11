@@ -327,9 +327,17 @@ main() {
         JOBS="$2"
         shift 2
         ;;
+      -j=*)
+        JOBS="${1#-j=}"
+        shift
+        ;;
       --cann_3rd_lib_path)
         CANN_3RD_LIB_PATH="$2"
         shift 2
+        ;;
+      --cann_3rd_lib_path=*)
+        CANN_3RD_LIB_PATH="${1#--cann_3rd_lib_path=}"
+        shift
         ;;
       *)
         usage
