@@ -31,6 +31,12 @@ export BUILD_PATH="${BASE_PATH}/build"
 export BUILD_OUT_PATH="${BASE_PATH}/build_out"
 export INSTALL_PATH="${BASE_PATH}/install"
 export LLVM_SOURCE_VERSION="19.1.7"
+# The PTOAS tree is built against the vpto-dev LLVM/MLIR 19 "feature-vpto"
+# branch (source of custom calling conventions such as SimtEntry). Source it
+# from GitHub by default; override with LLVM_GIT_URL / LLVM_GIT_REF when a
+# mirror must be used.
+export LLVM_GIT_URL="${LLVM_GIT_URL:-https://github.com/vpto-dev/llvm-project.git}"
+export LLVM_GIT_REF="${LLVM_GIT_REF:-feature-vpto}"
 # Prefer ASCEND_3RD_LIB_PATH when it points to a valid LLVM source cache
 # (CI images set this to /home/jenkins/opensource). Fall back to the in-tree
 # third_party directory for local builds where it is unset.
@@ -40,7 +46,7 @@ else
     CANN_3RD_LIB_PATH="${BASE_PATH}/third_party"
 fi
 HARDENING_CACHE_FILE="${BASE_PATH}/cmake/LinuxHardeningCache.cmake"
-LLVM_PROJECT_URL="https://gitcode.com/cann-src-third-party/llvm/releases/download/${LLVM_SOURCE_VERSION}/llvm-project-llvmorg-${LLVM_SOURCE_VERSION}.tar.gz"
+LLVM_PROJECT_URL="${LLVM_GIT_URL}"
 # Only enable the CentOS7 devtoolset-7 sysroot + gcc-toolchain when the
 # toolchain is actually present. Manylinux and non-CentOS7 images do not ship
 # /opt/rh/devtoolset-7, and forcing these flags there breaks the build because
@@ -93,9 +99,10 @@ prepare_llvm_cache_layout() {
   export LLVM_BUILD_DIR="${CANN_3RD_LIB_PATH}/lib_cache/llvm_${LLVM_SOURCE_VERSION}/build-shared"
 }
 
-# Ensure the LLVM 19 source is present under ${LLVM_SOURCE_DIR}. Accepts an
-# already-populated source tree (the usual CI cache layout where llvm-19/llvm
-# holds the top-level CMakeLists.txt) or downloads the release tarball.
+# Ensure the LLVM 19 source (vpto "feature-vpto" branch) is present under
+# ${LLVM_SOURCE_DIR}. Accepts an already-populated source tree (the usual CI
+# cache layout where llvm-19/llvm holds the top-level CMakeLists.txt) or
+# clones the vpto branch from ${LLVM_GIT_URL}.
 ensure_llvm_source() {
   if [ -f "${LLVM_SOURCE_DIR}/llvm/CMakeLists.txt" ]; then
     # Git checkout layout: the project root is ${LLVM_SOURCE_DIR}/llvm.
@@ -108,14 +115,11 @@ ensure_llvm_source() {
   fi
 
   echo "${dotted_line}"
-  echo "Downloading LLVM ${LLVM_SOURCE_VERSION} source"
+  echo "Cloning LLVM ${LLVM_SOURCE_VERSION} source (${LLVM_GIT_REF})"
   mkdir -p "${CANN_3RD_LIB_PATH}"
-  local tarball="${CANN_3RD_LIB_PATH}/llvm-project-llvmorg-${LLVM_SOURCE_VERSION}.tar.gz"
-  if [ ! -f "${tarball}" ]; then
-    curl -fL "${LLVM_PROJECT_URL}" -o "${tarball}"
-  fi
-  mkdir -p "${LLVM_SOURCE_DIR}"
-  tar -xzf "${tarball}" -C "${LLVM_SOURCE_DIR}" --strip-components=1
+  git clone --depth 1 --single-branch \
+    --branch "${LLVM_GIT_REF}" \
+    "${LLVM_GIT_URL}" "${LLVM_SOURCE_DIR}"
   export LLVM_CMAKE_SOURCE_DIR="${LLVM_SOURCE_DIR}"
 }
 
