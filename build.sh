@@ -179,6 +179,48 @@ ensure_llvm_build() {
 # ---------------------------------------------------------------------------
 # PTOAS build + install
 # ---------------------------------------------------------------------------
+# On aarch64, -ftrapv lowers __int128 multiplication to __muloti4 (compiler-rt).
+# Link the matching compiler-rt builtins so the PTOAS executables/libraries
+# resolve it. Accepts an explicit override via PTOAS_COMPILER_RT.
+resolve_compiler_rt() {
+  if [ -n "${PTOAS_COMPILER_RT:-}" ]; then
+    if [ -f "${PTOAS_COMPILER_RT}" ]; then
+      echo "Using PTOAS_COMPILER_RT=${PTOAS_COMPILER_RT}"
+      return 0
+    fi
+    echo "PTOAS_COMPILER_RT set but not found: ${PTOAS_COMPILER_RT}" >&2
+  fi
+
+  case "$(uname -m)" in
+    aarch64|arm64) _rt_arch="aarch64" ;;
+    x86_64|amd64)  _rt_arch="x86_64" ;;
+    *) return 0 ;;
+  esac
+
+  # Search the active clang's resource dir first, then the system LLVM.
+  local clang_bin
+  clang_bin="$(command -v clang || command -v clang-15 || true)"
+  if [ -n "${clang_bin}" ]; then
+    local clang_res
+    clang_res="$("${clang_bin}" -print-resource-dir 2>/dev/null || true)"
+    if [ -n "${clang_res}" ] && [ -f "${clang_res}/lib/linux/libclang_rt.builtins-${_rt_arch}.a" ]; then
+      PTOAS_COMPILER_RT="${clang_res}/lib/linux/libclang_rt.builtins-${_rt_arch}.a"
+      echo "Using LLVM compiler-rt: ${PTOAS_COMPILER_RT}"
+      return 0
+    fi
+  fi
+
+  # Fall back to the system LLVM clang runtime.
+  local sys_rt
+  sys_rt="$(find /usr/lib/llvm-*/lib/clang -name "libclang_rt.builtins-${_rt_arch}.a" 2>/dev/null | sort -V | tail -1)"
+  if [ -n "${sys_rt}" ]; then
+    PTOAS_COMPILER_RT="${sys_rt}"
+    echo "Using system compiler-rt: ${PTOAS_COMPILER_RT}"
+    return 0
+  fi
+  echo "WARNING: compiler-rt not found; __muloti4 may be unresolved on aarch64" >&2
+}
+
 configure_ptoas() {
   local python_bin
   python_bin="$(command -v python3 || command -v python)"
@@ -201,6 +243,18 @@ configure_ptoas() {
     -DCMAKE_C_COMPILER="$(command -v clang || command -v clang-15 || command -v gcc)"
     -DCMAKE_CXX_COMPILER="$(command -v clang++ || command -v clang++-15 || command -v g++)"
   )
+
+  # Inject compiler-rt for __muloti4 (aarch64 -ftrapv __int128) into the
+  # linker flags applied to every PTOAS target.
+  resolve_compiler_rt
+  if [ -n "${PTOAS_COMPILER_RT:-}" ]; then
+    ptoas_cmake_args+=(
+      -DCMAKE_EXE_LINKER_FLAGS="${CMAKE_EXE_LINKER_FLAGS:-} ${PTOAS_COMPILER_RT}"
+      -DCMAKE_SHARED_LINKER_FLAGS="${CMAKE_SHARED_LINKER_FLAGS:-} ${PTOAS_COMPILER_RT}"
+      -DCMAKE_MODULE_LINKER_FLAGS="${CMAKE_MODULE_LINKER_FLAGS:-} ${PTOAS_COMPILER_RT}"
+    )
+  fi
+
   if [ -f "${HARDENING_CACHE_FILE}" ]; then
     cmake -C "${HARDENING_CACHE_FILE}" "${ptoas_cmake_args[@]}"
   else
