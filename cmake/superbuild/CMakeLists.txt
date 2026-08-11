@@ -19,6 +19,7 @@ include("${PTOAS_SOURCE_DIR}/cmake/fetch_cann_cmake.cmake")
 
 project(ptoas_superbuild NONE)
 
+init_cann_project()
 include(ExternalProject)
 
 if(NOT CANN_CMAKE_SOURCE_DIR)
@@ -153,6 +154,8 @@ mark_as_advanced(PTOAS_CMAKE_AR PTOAS_CMAKE_RANLIB PTOAS_CMAKE_STRIP)
 set(LLVM_COMMON_OPTIONS
     -DLLVM_ENABLE_PROJECTS=mlir
     -DLLVM_ENABLE_ZSTD=OFF
+    -DCMAKE_C_COMPILER_LAUNCHER=${CMAKE_C_COMPILER_LAUNCHER}
+    -DCMAKE_CXX_COMPILER_LAUNCHER=${CMAKE_CXX_COMPILER_LAUNCHER}
     -DCMAKE_C_COMPILER=clang
     -DCMAKE_CXX_COMPILER=clang++
     -DCMAKE_AR=${PTOAS_CMAKE_AR}
