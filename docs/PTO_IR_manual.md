@@ -8754,13 +8754,13 @@ dst[...] = Convert(src[i, j]; fp)
 **Constraints & Verification:**
 
 - **Implementation checks (A2A3)**
-  - Source TileType only suport `loc==acc`
+  - Source TileType only support `loc==acc`
   - Source dtype must be `i32` or `f32`.
   - Shape constraints: `1 <= cols <= 4095`;
   - Runtime: `1 <= src valid column <= 4095`.
   - `fp` is used to configure scaling/FPC state; no separate PTO-visible static constraint is enforced on its shape.
 - **Implementation checks (A5)**
-  - Source TileType only suport `loc==acc`
+  - Source TileType only support `loc==acc`
   - `fp` is used to configure scaling/FPC state; no separate PTO-visible static constraint is enforced on its shape.
 
 **Hardware Mapping:**

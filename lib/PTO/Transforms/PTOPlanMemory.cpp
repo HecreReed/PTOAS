@@ -1128,7 +1128,7 @@ void MemPlan::EmitPlanMemoryFailureInfo() {
     AddressSpace space = iter.first;
     func_.emitError() << stringifyEnum(space) << " overflow, requires "
                       << iter.second << " bits while "
-                      << GetBufferSpaceInfo(space).second << " bits avaliable!";
+                      << GetBufferSpaceInfo(space).second << " bits available!";
   }
 }
 
