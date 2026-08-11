@@ -1,0 +1,29 @@
+// RUN: ptoas --pto-arch=a5 %s 2>&1 | FileCheck %s
+
+// Verifier coverage for pto.textract / pto.tinsert with fp4 packed
+// (f4E2M1x2) low-precision tiles on A5. The A5 element-type predicates
+// (isA5ExtractElemType / isA5SupportedVecElemType) were extended to accept
+// isPTOFloat4PackedType; this case exercises that path through EmitC for both
+// the mat->left extract form and the vec->vec insert form.
+
+module {
+  func.func @textract_tinsert_fp4_low_precision_a5_emitc() {
+    %c0 = arith.constant 0 : index
+
+    // textract: mat(f4E2M1x2) -> left(f4E2M1x2)
+    %mat_src = pto.alloc_tile : !pto.tile_buf<loc=mat, dtype=!pto.f4E2M1x2, rows=16, cols=32, v_row=16, v_col=16, blayout=col_major, slayout=row_major, fractal=512, pad=0>
+    %left_dst = pto.alloc_tile : !pto.tile_buf<loc=left, dtype=!pto.f4E2M1x2, rows=16, cols=32, v_row=16, v_col=16, blayout=col_major, slayout=row_major, fractal=512, pad=0>
+    pto.textract ins(%mat_src, %c0, %c0 : !pto.tile_buf<loc=mat, dtype=!pto.f4E2M1x2, rows=16, cols=32, v_row=16, v_col=16, blayout=col_major, slayout=row_major, fractal=512, pad=0>, index, index)
+                 outs(%left_dst : !pto.tile_buf<loc=left, dtype=!pto.f4E2M1x2, rows=16, cols=32, v_row=16, v_col=16, blayout=col_major, slayout=row_major, fractal=512, pad=0>)
+
+    // tinsert: vec(f4E2M1x2) -> vec(f4E2M1x2)
+    %vec_src = pto.alloc_tile : !pto.tile_buf<loc=vec, dtype=!pto.f4E2M1x2, rows=16, cols=32, v_row=16, v_col=16, blayout=row_major, slayout=none_box, fractal=512, pad=0>
+    %vec_dst = pto.alloc_tile : !pto.tile_buf<loc=vec, dtype=!pto.f4E2M1x2, rows=16, cols=32, v_row=16, v_col=16, blayout=row_major, slayout=none_box, fractal=512, pad=0>
+    pto.tinsert ins(%vec_src, %c0, %c0 : !pto.tile_buf<loc=vec, dtype=!pto.f4E2M1x2, rows=16, cols=32, v_row=16, v_col=16, blayout=row_major, slayout=none_box, fractal=512, pad=0>, index, index)
+                outs(%vec_dst : !pto.tile_buf<loc=vec, dtype=!pto.f4E2M1x2, rows=16, cols=32, v_row=16, v_col=16, blayout=row_major, slayout=none_box, fractal=512, pad=0>)
+    return
+  }
+}
+
+// CHECK: TEXTRACT(
+// CHECK: TINSERT(

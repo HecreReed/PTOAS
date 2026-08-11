@@ -17,22 +17,24 @@
 // lifetime reuse in isolation.
 //
 // CHECK-LABEL: AICORE void vector_kernel(
-// CHECK: TPOP<TPipe<2, Direction::DIR_C2V, 16384, 8, 2, false>,
+// CHECK: TPOP<TPipe<4, Direction::DIR_C2V, 16384, 8, 2, false>,
 // CHECK-NEXT: set_flag(PIPE_MTE2, PIPE_V, EVENT_ID[[OUTER_CARRY:[0-9]+]]);
 // CHECK-NEXT: wait_flag(PIPE_MTE2, PIPE_V, EVENT_ID[[OUTER_CARRY]]);
 // CHECK-NEXT: TNEG(
 // CHECK-NEXT: set_flag(PIPE_V, PIPE_MTE2, EVENT_ID[[OUTER_TAIL:[0-9]+]]);
-// CHECK-NEXT: TFREE<TPipe<2, Direction::DIR_C2V, 16384, 8, 2, false>,
+// CHECK-NEXT: TFREE<TPipe<4, Direction::DIR_C2V, 16384, 8, 2, false>,
 // CHECK-NEXT: wait_flag(PIPE_MTE3, PIPE_V, EVENT_ID[[OUTER_CARRY]]);
 // CHECK-NEXT: wait_flag(PIPE_V, PIPE_MTE2, EVENT_ID[[OUTER_TAIL]]);
-// CHECK-NEXT: for (size_t
-// CHECK: };
+// CHECK-NEXT: wait_flag(PIPE_V, PIPE_MTE2, EVENT_ID[[OUTER_CARRY]]);
+// CHECK-NEXT: TPOP<TPipe<2, Direction::DIR_C2V, 32768, 8, 2, false>,
+// CHECK: wait_flag(PIPE_V, PIPE_MTE2, EVENT_ID[[INNER_TAIL:[0-9]+]]);
+// CHECK-NEXT: TPOP<TPipe<4, Direction::DIR_C2V, 16384, 8, 2, false>,
+// CHECK: set_flag(PIPE_V, PIPE_MTE2, EVENT_ID[[INNER_TAIL]]);
+// CHECK-NEXT: TFREE<TPipe<4, Direction::DIR_C2V, 16384, 8, 2, false>,
 // CHECK-NEXT: set_flag(PIPE_MTE3, PIPE_V, EVENT_ID[[TAIL_HEAD:[0-9]+]]);
 // CHECK-NEXT: set_flag(PIPE_V, PIPE_MTE2, EVENT_ID[[POST_LOOP:[0-9]+]]);
 // CHECK-NEXT: wait_flag(PIPE_V, PIPE_MTE2, EVENT_ID[[POST_LOOP]]);
-// CHECK-NEXT: TPOP<TPipe<2, Direction::DIR_C2V, 16384, 8, 2, false>,
-// CHECK-NEXT: set_flag(PIPE_MTE2, PIPE_V, EVENT_ID[[POST_POP:[0-9]+]]);
-// CHECK-NEXT: wait_flag(PIPE_MTE2, PIPE_V, EVENT_ID[[POST_POP]]);
+// CHECK-NEXT: TPOP<TPipe<4, Direction::DIR_C2V, 16384, 8, 2, false>,
 // CHECK: wait_flag(PIPE_MTE3, PIPE_V, EVENT_ID[[TAIL_HEAD]]);
 // CHECK-NEXT: wait_flag(PIPE_V, PIPE_MTE2, EVENT_ID[[OUTER_CARRY]]);
 
@@ -181,9 +183,9 @@ module {
     return
   }
 
-  func.func @call_both(%ffts: memref<256xi64>, %gm0: !pto.ptr<f32>, %gm1: !pto.ptr<f32>, %gm2: !pto.ptr<f32>)
+  func.func @call_both(%ffts: !pto.ptr<i64>, %gm0: !pto.ptr<f32>, %gm1: !pto.ptr<f32>, %gm2: !pto.ptr<f32>)
       attributes {pto.entry} {
-    pto.set_ffts %ffts : memref<256xi64>
+    pto.set_ffts %ffts : !pto.ptr<i64>
     call @cube_kernel(%gm0, %gm1, %gm2) : (!pto.ptr<f32>, !pto.ptr<f32>, !pto.ptr<f32>) -> ()
     call @vector_kernel(%gm0, %gm1, %gm2) : (!pto.ptr<f32>, !pto.ptr<f32>, !pto.ptr<f32>) -> ()
     return

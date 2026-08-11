@@ -13,13 +13,16 @@
 
 # [关键] 库名重命名为 PTOIR，避免与 LLVM 里的 PTODialect/MLIRPTODialect 冲突
 add_mlir_dialect_library(PTOIR
+  ENABLE_AGGREGATION
+
   PTO.cpp
+  VPTO.cpp
+  VMI.cpp
+  VPTOUbOps.cpp
   PTOAttrs.cpp
   PTOSyncUtils.cpp
   PTOTypeDefs.cpp
   PTOTypeUtils.cpp
-
-  PARTIAL_SOURCES_INTENDED
 
   ADDITIONAL_HEADER_DIRS
   ${PROJECT_SOURCE_DIR}/include/PTO
@@ -31,6 +34,7 @@ add_mlir_dialect_library(PTOIR
   MLIRIR
   MLIRFuncDialect
   MLIRMemRefDialect
+  MLIRSCFDialect
   MLIRControlFlowInterfaces
   MLIRInferTypeOpInterface
   MLIRSideEffectInterfaces

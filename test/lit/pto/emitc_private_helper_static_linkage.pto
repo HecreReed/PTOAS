@@ -1,0 +1,28 @@
+// Copyright (c) 2026 Huawei Technologies Co., Ltd.
+// This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+// CANN Open Software License Agreement Version 2.0 (the "License").
+// Please refer to the License for details. You may not use this file except in compliance with the License.
+// THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+// INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+// See LICENSE in the root of the software repository for the full text of the License.
+
+// RUN: ptoas %s --enable-insert-sync --pto-level=level3 --pto-arch a3 | FileCheck %s
+// Guards issue #884: MLIR private function visibility must lower to C++ static
+// linkage, otherwise same-named private helpers collide across object files.
+
+module {
+  func.func @k(%arg0: !pto.ptr<i64>, %arg1: index) attributes {pto.kernel_kind = #pto.kernel_kind<vector>} {
+    %0 = func.call @my_helper(%arg1) : (index) -> index
+    func.return
+  }
+
+  func.func private @my_helper(%x: index) -> index {
+    %c = arith.constant 1 : index
+    %r = arith.addi %x, %c : index
+    return %r : index
+  }
+}
+
+// CHECK-LABEL: static AICORE int64_t my_helper(
+// CHECK-LABEL: AICORE void k(
+// CHECK: my_helper(

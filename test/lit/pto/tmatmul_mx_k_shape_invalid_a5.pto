@@ -1,0 +1,18 @@
+// Copyright (c) 2026 Huawei Technologies Co., Ltd.
+// Licensed under the CANN Open Software License Agreement Version 2.0.
+//
+// RUN: not ptoas --pto-arch=a5 %s 2>&1 | FileCheck %s --check-prefix=A5
+
+module attributes {pto.target_arch = "a5"} {
+  func.func @tmatmul_mx_k_shape_invalid() attributes {pto.kernel_kind = #pto.kernel_kind<cube>} {
+    %lhs = pto.alloc_tile : !pto.tile_buf<loc=left, dtype=f8E4M3FN, rows=16, cols=32, v_row=16, v_col=32, blayout=col_major, slayout=row_major, fractal=512, pad=0>
+    %rhs = pto.alloc_tile : !pto.tile_buf<loc=right, dtype=f8E4M3FN, rows=32, cols=16, v_row=32, v_col=16, blayout=row_major, slayout=col_major, fractal=512, pad=0>
+    %a_scale = pto.alloc_tile : !pto.tile_buf<loc=scaling, dtype=f16, rows=16, cols=2, v_row=16, v_col=1, blayout=row_major, slayout=row_major, fractal=32, pad=0>
+    %b_scale = pto.alloc_tile : !pto.tile_buf<loc=scaling, dtype=f16, rows=2, cols=16, v_row=1, v_col=16, blayout=col_major, slayout=col_major, fractal=32, pad=0>
+    %dst = pto.alloc_tile : !pto.tile_buf<loc=acc, dtype=f32, rows=16, cols=16, v_row=16, v_col=16, blayout=col_major, slayout=row_major, fractal=512, pad=0>
+    pto.tmatmul.mx ins(%lhs, %a_scale, %rhs, %b_scale : !pto.tile_buf<loc=left, dtype=f8E4M3FN, rows=16, cols=32, v_row=16, v_col=32, blayout=col_major, slayout=row_major, fractal=512, pad=0>, !pto.tile_buf<loc=scaling, dtype=f16, rows=16, cols=2, v_row=16, v_col=1, blayout=row_major, slayout=row_major, fractal=32, pad=0>, !pto.tile_buf<loc=right, dtype=f8E4M3FN, rows=32, cols=16, v_row=32, v_col=16, blayout=row_major, slayout=col_major, fractal=512, pad=0>, !pto.tile_buf<loc=scaling, dtype=f16, rows=2, cols=16, v_row=1, v_col=16, blayout=col_major, slayout=col_major, fractal=32, pad=0>) outs(%dst : !pto.tile_buf<loc=acc, dtype=f32, rows=16, cols=16, v_row=16, v_col=16, blayout=col_major, slayout=row_major, fractal=512, pad=0>)
+    return
+  }
+}
+
+// A5: expects lhs physical K shape to be a positive multiple of 64 on A5

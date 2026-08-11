@@ -1,0 +1,41 @@
+// Copyright (c) 2026 Huawei Technologies Co., Ltd.
+// This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+// CANN Open Software License Agreement Version 2.0 (the "License").
+// Please refer to the License for details. You may not use this file except in compliance with the License.
+// THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+// INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+// See LICENSE in the root of the software repository for the full text of the License.
+
+// A2/A3 supports 32-bit bitwise tile operations. Check both signed and unsigned
+// types through the EmitC path, including TXOR's required scratch tile.
+// RUN: ptoas --pto-arch=a3 %s -o - 2>&1 | FileCheck %s
+
+func.func @bitwise_i32_ui32_a3() attributes {pto.kernel_kind = #pto.kernel_kind<vector>} {
+  %i32_src0 = pto.alloc_tile : !pto.tile_buf<loc=vec, dtype=i32, rows=1, cols=64, v_row=1, v_col=64, blayout=row_major, slayout=none_box, fractal=512, pad=0>
+  %i32_src1 = pto.alloc_tile : !pto.tile_buf<loc=vec, dtype=i32, rows=1, cols=64, v_row=1, v_col=64, blayout=row_major, slayout=none_box, fractal=512, pad=0>
+  %i32_tmp = pto.alloc_tile : !pto.tile_buf<loc=vec, dtype=i32, rows=1, cols=64, v_row=1, v_col=64, blayout=row_major, slayout=none_box, fractal=512, pad=0>
+  %i32_dst = pto.alloc_tile : !pto.tile_buf<loc=vec, dtype=i32, rows=1, cols=64, v_row=1, v_col=64, blayout=row_major, slayout=none_box, fractal=512, pad=0>
+
+  // CHECK-LABEL: AICORE void bitwise_i32_ui32_a3()
+  // CHECK: Tile<TileType::Vec, int32_t
+  // CHECK: TAND(
+  pto.tand ins(%i32_src0, %i32_src1 : !pto.tile_buf<loc=vec, dtype=i32, rows=1, cols=64, v_row=1, v_col=64, blayout=row_major, slayout=none_box, fractal=512, pad=0>, !pto.tile_buf<loc=vec, dtype=i32, rows=1, cols=64, v_row=1, v_col=64, blayout=row_major, slayout=none_box, fractal=512, pad=0>) outs(%i32_dst : !pto.tile_buf<loc=vec, dtype=i32, rows=1, cols=64, v_row=1, v_col=64, blayout=row_major, slayout=none_box, fractal=512, pad=0>)
+  // CHECK: TOR(
+  pto.tor ins(%i32_src0, %i32_src1 : !pto.tile_buf<loc=vec, dtype=i32, rows=1, cols=64, v_row=1, v_col=64, blayout=row_major, slayout=none_box, fractal=512, pad=0>, !pto.tile_buf<loc=vec, dtype=i32, rows=1, cols=64, v_row=1, v_col=64, blayout=row_major, slayout=none_box, fractal=512, pad=0>) outs(%i32_dst : !pto.tile_buf<loc=vec, dtype=i32, rows=1, cols=64, v_row=1, v_col=64, blayout=row_major, slayout=none_box, fractal=512, pad=0>)
+  // CHECK: TXOR(
+  pto.txor ins(%i32_src0, %i32_src1, %i32_tmp : !pto.tile_buf<loc=vec, dtype=i32, rows=1, cols=64, v_row=1, v_col=64, blayout=row_major, slayout=none_box, fractal=512, pad=0>, !pto.tile_buf<loc=vec, dtype=i32, rows=1, cols=64, v_row=1, v_col=64, blayout=row_major, slayout=none_box, fractal=512, pad=0>, !pto.tile_buf<loc=vec, dtype=i32, rows=1, cols=64, v_row=1, v_col=64, blayout=row_major, slayout=none_box, fractal=512, pad=0>) outs(%i32_dst : !pto.tile_buf<loc=vec, dtype=i32, rows=1, cols=64, v_row=1, v_col=64, blayout=row_major, slayout=none_box, fractal=512, pad=0>)
+
+  %ui32_src0 = pto.alloc_tile : !pto.tile_buf<loc=vec, dtype=ui32, rows=1, cols=64, v_row=1, v_col=64, blayout=row_major, slayout=none_box, fractal=512, pad=0>
+  %ui32_src1 = pto.alloc_tile : !pto.tile_buf<loc=vec, dtype=ui32, rows=1, cols=64, v_row=1, v_col=64, blayout=row_major, slayout=none_box, fractal=512, pad=0>
+  %ui32_tmp = pto.alloc_tile : !pto.tile_buf<loc=vec, dtype=ui32, rows=1, cols=64, v_row=1, v_col=64, blayout=row_major, slayout=none_box, fractal=512, pad=0>
+  %ui32_dst = pto.alloc_tile : !pto.tile_buf<loc=vec, dtype=ui32, rows=1, cols=64, v_row=1, v_col=64, blayout=row_major, slayout=none_box, fractal=512, pad=0>
+
+  // CHECK: Tile<TileType::Vec, uint32_t
+  // CHECK: TAND(
+  pto.tand ins(%ui32_src0, %ui32_src1 : !pto.tile_buf<loc=vec, dtype=ui32, rows=1, cols=64, v_row=1, v_col=64, blayout=row_major, slayout=none_box, fractal=512, pad=0>, !pto.tile_buf<loc=vec, dtype=ui32, rows=1, cols=64, v_row=1, v_col=64, blayout=row_major, slayout=none_box, fractal=512, pad=0>) outs(%ui32_dst : !pto.tile_buf<loc=vec, dtype=ui32, rows=1, cols=64, v_row=1, v_col=64, blayout=row_major, slayout=none_box, fractal=512, pad=0>)
+  // CHECK: TOR(
+  pto.tor ins(%ui32_src0, %ui32_src1 : !pto.tile_buf<loc=vec, dtype=ui32, rows=1, cols=64, v_row=1, v_col=64, blayout=row_major, slayout=none_box, fractal=512, pad=0>, !pto.tile_buf<loc=vec, dtype=ui32, rows=1, cols=64, v_row=1, v_col=64, blayout=row_major, slayout=none_box, fractal=512, pad=0>) outs(%ui32_dst : !pto.tile_buf<loc=vec, dtype=ui32, rows=1, cols=64, v_row=1, v_col=64, blayout=row_major, slayout=none_box, fractal=512, pad=0>)
+  // CHECK: TXOR(
+  pto.txor ins(%ui32_src0, %ui32_src1, %ui32_tmp : !pto.tile_buf<loc=vec, dtype=ui32, rows=1, cols=64, v_row=1, v_col=64, blayout=row_major, slayout=none_box, fractal=512, pad=0>, !pto.tile_buf<loc=vec, dtype=ui32, rows=1, cols=64, v_row=1, v_col=64, blayout=row_major, slayout=none_box, fractal=512, pad=0>, !pto.tile_buf<loc=vec, dtype=ui32, rows=1, cols=64, v_row=1, v_col=64, blayout=row_major, slayout=none_box, fractal=512, pad=0>) outs(%ui32_dst : !pto.tile_buf<loc=vec, dtype=ui32, rows=1, cols=64, v_row=1, v_col=64, blayout=row_major, slayout=none_box, fractal=512, pad=0>)
+  return
+}

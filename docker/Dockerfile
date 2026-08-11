@@ -1,12 +1,3 @@
-# Copyright (c) 2026 Huawei Technologies Co., Ltd.
-# This program is free software, you can redistribute it and/or modify it under the terms and conditions of
-# CANN Open Software License Agreement Version 2.0 (the "License").
-# Please refer to the License for details. You may not use this file except in compliance with the License.
-# THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
-# INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
-# See LICENSE in the root of the software repository for the full text of the License.
-# ============================================================================
-
 ARG ARCH=x86_64
 # ARCH options: x86_64, aarch64
 
@@ -15,11 +6,12 @@ ARG ARCH=x86_64
 # -----------------------------------------------------------------------------
 FROM quay.io/pypa/manylinux_2_34_${ARCH} AS builder
 ARG ARCH
-# need to redeclare ARG after FROM
+# need to re-declare ARG after FROM
 
 # NOTE: change $PY_VER for different Python versions (3.8 - 3.14 available)
 ARG PY_VER=cp311-cp311
-ARG LLVM_TAG=llvmorg-19.1.7
+ARG LLVM_REF=feature-vpto
+ARG LLVM_REPO=https://github.com/vpto-dev/llvm-project.git
 
 ## -- usually no need to change below --
 
@@ -28,7 +20,7 @@ ENV PATH="${PY_PATH}/bin:${PATH}"
 
 # dependency
 RUN dnf install -y ninja-build cmake git ccache gcc-c++ lld zip binutils patchelf chrpath && dnf clean all
-RUN pip install --no-cache-dir numpy pybind11 nanobind setuptools wheel auditwheel
+RUN pip install --no-cache-dir numpy 'pybind11<3' 'scikit-build-core>=0.12.2,<2' auditwheel
 
 COPY cmake/LinuxHardeningCache.cmake /tmp/LinuxHardeningCache.cmake
 
@@ -39,11 +31,10 @@ ENV LLVM_BUILD_DIR=$LLVM_SOURCE_DIR/build-release
 
 ENV PTO_SOURCE_DIR=$WORKSPACE_DIR/PTOAS
 ENV PTO_BUILD_DIR=$PTO_SOURCE_DIR/build-release
-ENV PTO_INSTALL_DIR=$PTO_SOURCE_DIR/install-release
 
 # build LLVM
 WORKDIR $WORKSPACE_DIR
-RUN git clone --depth 1 --branch ${LLVM_TAG} https://github.com/llvm/llvm-project.git
+RUN git clone --depth 1 --branch ${LLVM_REF} ${LLVM_REPO} llvm-project
 
 WORKDIR $LLVM_SOURCE_DIR
 RUN cmake -C /tmp/LinuxHardeningCache.cmake -G Ninja -S llvm -B $LLVM_BUILD_DIR \
@@ -52,56 +43,36 @@ RUN cmake -C /tmp/LinuxHardeningCache.cmake -G Ninja -S llvm -B $LLVM_BUILD_DIR 
     -DLLVM_ENABLE_ASSERTIONS=OFF \
     -DMLIR_ENABLE_BINDINGS_PYTHON=ON \
     -DPython3_EXECUTABLE=${PY_PATH}/bin/python \
+    -DPython_EXECUTABLE=${PY_PATH}/bin/python \
+    -Dpybind11_DIR=$(${PY_PATH}/bin/python -m pybind11 --cmakedir) \
     -DCMAKE_BUILD_TYPE=Release \
     -DLLVM_TARGETS_TO_BUILD="host"
 
 RUN ninja -C $LLVM_BUILD_DIR
 
-# build ptoas
+# build the ptoas wheel through the standard PEP 517 backend
 WORKDIR $WORKSPACE_DIR
 RUN git clone https://github.com/zhangstevenunity/PTOAS.git
 # TODO: tag git commit of PTOAS repo
 
 WORKDIR $PTO_SOURCE_DIR
-RUN cmake -C /tmp/LinuxHardeningCache.cmake -G Ninja \
-    -S . \
-    -B $PTO_BUILD_DIR \
-    -DLLVM_DIR=$LLVM_BUILD_DIR/lib/cmake/llvm \
-    -DMLIR_DIR=$LLVM_BUILD_DIR/lib/cmake/mlir \
-    -DPython3_ROOT_DIR=${PY_PATH} \
-    -DPython3_EXECUTABLE=${PY_PATH}/bin/python \
-    -DPython3_FIND_STRATEGY=LOCATION \
-    -Dpybind11_DIR=$(python -m pybind11 --cmakedir) \
-    -DMLIR_PYTHON_PACKAGE_DIR=${LLVM_BUILD_DIR}/tools/mlir/python_packages/mlir_core \
-    -DCMAKE_INSTALL_PREFIX=${PTO_INSTALL_DIR} \
-    -DCMAKE_BUILD_TYPE=Release
-
-RUN ninja -C $PTO_BUILD_DIR && ninja -C $PTO_BUILD_DIR install
-
-# create python wheel
-ENV PY_PACKAGE_DIR=$LLVM_BUILD_DIR/tools/mlir/python_packages/mlir_core/
-
-# copy pto.py, _pto_ops_gen.py 
-RUN cp $PTO_INSTALL_DIR/mlir/dialects/*.py $PY_PACKAGE_DIR/mlir/dialects/
-
-COPY ./setup.py $PY_PACKAGE_DIR/
-
-WORKDIR $PY_PACKAGE_DIR
-RUN python setup.py bdist_wheel
+ENV PTO_WHEEL_DIST_DIR=$PTO_SOURCE_DIR/build/wheel-dist
+RUN SKBUILD_BUILD_DIR=$PTO_BUILD_DIR \
+    python -m pip wheel . --no-build-isolation --no-deps \
+    --wheel-dir "$PTO_WHEEL_DIST_DIR"
 
 # fix missing so
-RUN export LD_LIBRARY_PATH=$LLVM_BUILD_DIR/lib:$PTO_INSTALL_DIR/lib:$LD_LIBRARY_PATH \
-    && auditwheel repair --plat manylinux_2_34_${ARCH} dist/ptoas*.whl
+RUN export LD_LIBRARY_PATH=$LLVM_BUILD_DIR/lib:$LD_LIBRARY_PATH \
+    && auditwheel repair --plat manylinux_2_34_${ARCH} "$PTO_WHEEL_DIST_DIR"/ptoas*.whl -w /wheelhouse
 
-RUN pip install wheelhouse/ptoas*.whl
+RUN pip install /wheelhouse/ptoas*.whl
 
-# test import without adjusting $PYTHONPATH and $LD_LIBRARY_PATH, in some irrelevant dir
+# test the installed wheel contract without adjusting $PYTHONPATH
 WORKDIR /test
-RUN python -c "import mlir.ir"
-RUN python -c "from mlir.dialects import pto"
+RUN PTO_TEST_WHEEL_PATH="/wheelhouse/ptoas*.whl" \
+    bash "$PTO_SOURCE_DIR/docker/test_wheel_imports.sh"
 
-# test ptoas cli
-ENV PATH=$PTO_BUILD_DIR/tools/ptoas:$PATH
+# test the wheel-provided ptoas cli
 RUN which ptoas
 
 WORKDIR $PTO_SOURCE_DIR/test/samples/MatMul/
@@ -111,12 +82,6 @@ RUN ptoas ./tmatmulk.pto -o ./tmatmulk.cpp
 WORKDIR $PTO_SOURCE_DIR/test/samples/Abs/
 RUN python ./abs.py > ./abs.pto
 RUN ptoas --enable-insert-sync ./abs.pto -o ./abs.cpp
-
-# collect only *.so actually needed by ptoas (transitive closure under build dirs)
-# it is smaller (<200 MB) than copying the full $LLVM_BUILD_DIR/lib (>700 MB)
-ENV PTOAS_DEPS_DIR=/ptoas-deps
-COPY copy_ptoas_deps.sh /tmp/copy_ptoas_deps.sh
-RUN mkdir -p $PTOAS_DEPS_DIR && bash /tmp/copy_ptoas_deps.sh
 
 # -----------------------------------------------------------------------------
 # Stage 2: verify wheel and ptoas in ascend/python image (no build tree)
@@ -128,20 +93,15 @@ FROM quay.io/ascend/cann:8.5.0-910b-ubuntu22.04-py3.11 AS runtime
 # - the `ascend/python` image is light-weight (only 500 MB) but lacks `bisheng` to compile cpp file generated by `ptoas`
 # - the `ascend/cann` image has the full CANN for on-device execution, but is very big (10 GB)
 
-# Copy only the wheel, ptoas binary, its .so dependencies, and test scripts from builder
-COPY --from=builder /llvm-workspace/llvm-project/build-release/tools/mlir/python_packages/mlir_core/wheelhouse/ptoas*.whl /tmp/
-COPY --from=builder /llvm-workspace/PTOAS/build-release/tools/ptoas/ptoas /usr/local/bin/ptoas
-
-RUN mkdir -p /usr/local/lib/ptoas
-COPY --from=builder /ptoas-deps/. /usr/local/lib/ptoas/
-ENV LD_LIBRARY_PATH=/usr/local/lib/ptoas:${LD_LIBRARY_PATH}
+# Copy only the repaired wheel and wheel-contract test script from builder.
+COPY --from=builder /wheelhouse/ptoas*.whl /tmp/
+COPY docker/test_wheel_imports.sh /usr/local/bin/test_wheel_imports.sh
 
 RUN pip install --no-cache-dir /tmp/ptoas*.whl && rm /tmp/ptoas*.whl
 
-# test import without adjusting $PYTHONPATH and $LD_LIBRARY_PATH, in some irrelevant dir
+# test the installed wheel contract without adjusting $PYTHONPATH
 WORKDIR /test
-RUN python -c "import mlir.ir"
-RUN python -c "from mlir.dialects import pto"
+RUN bash /usr/local/bin/test_wheel_imports.sh
 
 # same MatMul/Abs sample tests as in builder
 COPY --from=builder /llvm-workspace/PTOAS/test/samples/MatMul/tmatmulk.py /sources/test/MatMul/
@@ -158,8 +118,8 @@ RUN ptoas --enable-insert-sync ./abs.pto -o ./abs.cpp
 # NOTE: if using the smaller `ascend/python` runtime image, can only run until here, cannot test bisheng usage below
 
 # to compile cpp file generated by ptoas, need pto-isa headers
-ARG PTO_ISA_COMMIT=662d7f2a916d6bbde3109ce4a16ed5c28f5d900a
-# pinned: https://gitcode.com/cann/pto-isa/commit/662d7f2a916d6bbde3109ce4a16ed5c28f5d900a
+ARG PTO_ISA_COMMIT=ce3262e3825a235f951917eeada30e52910b6a84
+# pinned: https://gitcode.com/cann/pto-isa/commit/ce3262e3825a235f951917eeada30e52910b6a84
 
 WORKDIR /sources
 RUN git clone https://gitcode.com/cann/pto-isa.git \
@@ -179,10 +139,10 @@ RUN (echo '#if __CCE_AICORE__ == 220 && defined(__DAV_C220_CUBE__)'; cat tmatmul
     > tmatmulk.cpp.tmp && mv tmatmulk.cpp.tmp tmatmulk.cpp
 RUN bisheng $BISHENG_OPTS ./tmatmulk.cpp -o ./matmul_kernel.so
 
-# add torch_npu to facilitate on-device testing during `docker run` (not used at build stage)
+# add torch_npu to faciliate on-device testing during `docker run` (not used at build stage)
 # for available versions see https://pypi.org/project/torch-npu/#history
 RUN pip install --no-cache-dir torch==2.9.0 --index-url https://download.pytorch.org/whl/cpu \
-    && pip install --no-cache-dir torch-npu==2.9.0 \
+    && pip install --no-cache-dir torch-npu==2.9.0.post2 \
     && pip install --no-cache-dir numpy pyyaml
 
 WORKDIR /sources/test/

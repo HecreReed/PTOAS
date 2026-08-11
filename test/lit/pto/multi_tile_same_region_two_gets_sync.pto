@@ -1,0 +1,63 @@
+// Copyright (c) 2026 Huawei Technologies Co., Ltd.
+// This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+// CANN Open Software License Agreement Version 2.0 (the "License").
+// Please refer to the License for details. You may not use this file except in compliance with the License.
+// THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+// INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+// See LICENSE in the root of the software repository for the full text of the License.
+
+// RUN: ptoas --enable-insert-sync --pto-level=level2 --pto-arch=a3 --emit-pto-ir --mlir-print-ir-after=pto-insert-sync %s -o /dev/null 2>&1 1>/dev/null | FileCheck %s --implicit-check-not=pto.wait_flag_dyn --implicit-check-not=pto.set_flag_dyn
+
+// Two dynamic views of the same multi-tile buffer remain live until one vector
+// operation consumes both. A single slot-keyed back-edge event cannot cover the
+// two distinct slot expressions. InsertSync must conservatively synchronize the
+// complete MTE2 group before either load, then release it after the vector use.
+
+module {
+  func.func @two_gets_same_multi_tile(
+      %a : !pto.partition_tensor_view<64x64xf32>,
+      %b : !pto.partition_tensor_view<64x64xf32>,
+      %out : !pto.partition_tensor_view<64x64xf32>) {
+    %c0 = arith.constant 0 : index
+    %c1 = arith.constant 1 : index
+    %c2 = arith.constant 2 : index
+    %c4 = arith.constant 4 : index
+
+    %mb = pto.alloc_multi_tile
+        : !pto.multi_tile_buf<vec, 64x64xf32, count=2>
+    %sum = pto.alloc_tile : !pto.tile_buf<vec, 64x64xf32>
+
+    scf.for %i = %c0 to %c4 step %c1 {
+      %lo_idx = arith.remsi %i, %c2 : index
+      %lo = pto.multi_tile_get %mb[%lo_idx]
+          : !pto.multi_tile_buf<vec, 64x64xf32, count=2>
+         -> !pto.tile_buf<vec, 64x64xf32>
+      pto.tload ins(%a : !pto.partition_tensor_view<64x64xf32>)
+                outs(%lo : !pto.tile_buf<vec, 64x64xf32>)
+
+      %next = arith.addi %i, %c1 : index
+      %hi_idx = arith.remsi %next, %c2 : index
+      %hi = pto.multi_tile_get %mb[%hi_idx]
+          : !pto.multi_tile_buf<vec, 64x64xf32, count=2>
+         -> !pto.tile_buf<vec, 64x64xf32>
+      pto.tload ins(%b : !pto.partition_tensor_view<64x64xf32>)
+                outs(%hi : !pto.tile_buf<vec, 64x64xf32>)
+
+      pto.tadd ins(%lo, %hi : !pto.tile_buf<vec, 64x64xf32>,
+                                    !pto.tile_buf<vec, 64x64xf32>)
+               outs(%sum : !pto.tile_buf<vec, 64x64xf32>)
+      pto.tstore ins(%sum : !pto.tile_buf<vec, 64x64xf32>)
+                 outs(%out : !pto.partition_tensor_view<64x64xf32>)
+    }
+    return
+  }
+}
+
+// CHECK-LABEL: func.func @two_gets_same_multi_tile
+// CHECK: pto.set_flag[<PIPE_V>, <PIPE_MTE2>, [[WAR_EVENT:<EVENT_ID[0-9]+>]]]
+// CHECK: scf.for
+// CHECK: pto.wait_flag[<PIPE_V>, <PIPE_MTE2>, [[WAR_EVENT]]]
+// CHECK: pto.tload
+// CHECK: pto.tload
+// CHECK: pto.tadd
+// CHECK: pto.set_flag[<PIPE_V>, <PIPE_MTE2>, [[WAR_EVENT]]]

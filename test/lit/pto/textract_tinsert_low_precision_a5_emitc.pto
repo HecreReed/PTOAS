@@ -1,0 +1,32 @@
+// RUN: ptoas --pto-arch=a5 %s 2>&1 | FileCheck %s
+
+module {
+  func.func @textract_tinsert_low_precision_a5_emitc() {
+    %c0 = arith.constant 0 : index
+
+    %mat_src = pto.alloc_tile : !pto.tile_buf<loc=mat, dtype=f8E4M3FN, rows=16, cols=32, v_row=16, v_col=32, blayout=col_major, slayout=row_major, fractal=512, pad=0>
+    %left_dst = pto.alloc_tile : !pto.tile_buf<loc=left, dtype=f8E4M3FN, rows=16, cols=32, v_row=16, v_col=32, blayout=col_major, slayout=row_major, fractal=512, pad=0>
+    pto.textract ins(%mat_src, %c0, %c0 : !pto.tile_buf<loc=mat, dtype=f8E4M3FN, rows=16, cols=32, v_row=16, v_col=32, blayout=col_major, slayout=row_major, fractal=512, pad=0>, index, index)
+                 outs(%left_dst : !pto.tile_buf<loc=left, dtype=f8E4M3FN, rows=16, cols=32, v_row=16, v_col=32, blayout=col_major, slayout=row_major, fractal=512, pad=0>)
+
+    %vec_src = pto.alloc_tile : !pto.tile_buf<loc=vec, dtype=!pto.hif8, rows=16, cols=32, v_row=16, v_col=32, blayout=row_major, slayout=none_box, fractal=512, pad=0>
+    %vec_dst = pto.alloc_tile : !pto.tile_buf<loc=vec, dtype=!pto.hif8, rows=16, cols=32, v_row=16, v_col=32, blayout=row_major, slayout=none_box, fractal=512, pad=0>
+    pto.tinsert ins(%vec_src, %c0, %c0 : !pto.tile_buf<loc=vec, dtype=!pto.hif8, rows=16, cols=32, v_row=16, v_col=32, blayout=row_major, slayout=none_box, fractal=512, pad=0>, index, index)
+                outs(%vec_dst : !pto.tile_buf<loc=vec, dtype=!pto.hif8, rows=16, cols=32, v_row=16, v_col=32, blayout=row_major, slayout=none_box, fractal=512, pad=0>)
+
+    %acc_src = pto.alloc_tile : !pto.tile_buf<loc=acc, dtype=f32, rows=16, cols=32, v_row=16, v_col=32, blayout=col_major, slayout=row_major, fractal=1024, pad=0>
+    %fp = pto.alloc_tile : !pto.tile_buf<loc=scaling, dtype=f32, rows=16, cols=32, v_row=16, v_col=32, blayout=row_major, slayout=row_major, fractal=512, pad=0>
+    %mat_dst0 = pto.alloc_tile : !pto.tile_buf<loc=mat, dtype=f8E4M3FN, rows=16, cols=32, v_row=16, v_col=32, blayout=col_major, slayout=row_major, fractal=512, pad=0>
+    %mat_dst1 = pto.alloc_tile : !pto.tile_buf<loc=mat, dtype=f8E5M2, rows=16, cols=32, v_row=16, v_col=32, blayout=col_major, slayout=row_major, fractal=512, pad=0>
+    pto.textract_fp ins(%acc_src, %fp, %c0, %c0 : !pto.tile_buf<loc=acc, dtype=f32, rows=16, cols=32, v_row=16, v_col=32, blayout=col_major, slayout=row_major, fractal=1024, pad=0>, !pto.tile_buf<loc=scaling, dtype=f32, rows=16, cols=32, v_row=16, v_col=32, blayout=row_major, slayout=row_major, fractal=512, pad=0>, index, index)
+                    outs(%mat_dst0 : !pto.tile_buf<loc=mat, dtype=f8E4M3FN, rows=16, cols=32, v_row=16, v_col=32, blayout=col_major, slayout=row_major, fractal=512, pad=0>)
+    pto.tinsert_fp ins(%acc_src, %fp, %c0, %c0 : !pto.tile_buf<loc=acc, dtype=f32, rows=16, cols=32, v_row=16, v_col=32, blayout=col_major, slayout=row_major, fractal=1024, pad=0>, !pto.tile_buf<loc=scaling, dtype=f32, rows=16, cols=32, v_row=16, v_col=32, blayout=row_major, slayout=row_major, fractal=512, pad=0>, index, index)
+                   outs(%mat_dst1 : !pto.tile_buf<loc=mat, dtype=f8E5M2, rows=16, cols=32, v_row=16, v_col=32, blayout=col_major, slayout=row_major, fractal=512, pad=0>)
+    return
+  }
+}
+
+// CHECK: TEXTRACT(
+// CHECK: TINSERT(
+// CHECK: TEXTRACT_FP(
+// CHECK: TINSERT_FP(

@@ -1,0 +1,77 @@
+// Copyright (c) 2026 Huawei Technologies Co., Ltd.
+// This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+// CANN Open Software License Agreement Version 2.0 (the "License").
+// Please refer to the License for details. You may not use this file except in compliance with the License.
+// THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+// INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+// See LICENSE in the root of the software repository for the full text of the License.
+
+// RUN: ( mkdir -p %T && ptoas --pto-arch=a5 --pto-backend=vpto %s -o %t --mlir-print-ir-after=convert-func-to-llvm 2>&1 || true ) | FileCheck %s
+
+module attributes {pto.target_arch = "a5", pto.kernel_kind = #pto.kernel_kind<vector>} {
+  func.func @vgather2_supported_types(
+      %src_u8: !pto.ptr<ui8, ub>, %src_i8: !pto.ptr<i8, ub>,
+      %src_u16: !pto.ptr<ui16, ub>, %src_i16: !pto.ptr<i16, ub>,
+      %src_f16: !pto.ptr<f16, ub>, %src_bf16: !pto.ptr<bf16, ub>,
+      %src_u32: !pto.ptr<ui32, ub>, %src_i32: !pto.ptr<i32, ub>,
+      %src_f32: !pto.ptr<f32, ub>,
+      %offsets16: !pto.vreg<128xui16>, %offsets32: !pto.vreg<64xui32>)
+      attributes {pto.kernel} {
+    %c0 = arith.constant 0 : index
+    %c0_i64 = arith.constant 0 : i64
+    %dst_u16 = pto.castptr %c0_i64 : i64 -> !pto.ptr<ui16, ub>
+    %dst_i16 = pto.castptr %c0_i64 : i64 -> !pto.ptr<i16, ub>
+    pto.vecscope {
+      %mask16 = pto.pset_b16 "PAT_ALL" : !pto.mask<b16>
+      %mask32 = pto.pset_b32 "PAT_ALL" : !pto.mask<b32>
+      %r_u8 = pto.vgather2 %src_u8, %offsets16, %mask16
+          : !pto.ptr<ui8, ub>, !pto.vreg<128xui16>, !pto.mask<b16> -> !pto.vreg<128xui16>
+      pto.vsts %r_u8, %dst_u16[%c0], %mask16
+          : !pto.vreg<128xui16>, !pto.ptr<ui16, ub>, !pto.mask<b16>
+      %r_i8 = pto.vgather2 %src_i8, %offsets16, %mask16
+          : !pto.ptr<i8, ub>, !pto.vreg<128xui16>, !pto.mask<b16> -> !pto.vreg<128xi16>
+      pto.vsts %r_i8, %dst_i16[%c0], %mask16
+          : !pto.vreg<128xi16>, !pto.ptr<i16, ub>, !pto.mask<b16>
+      %r_u16 = pto.vgather2 %src_u16, %offsets16, %mask16
+          : !pto.ptr<ui16, ub>, !pto.vreg<128xui16>, !pto.mask<b16> -> !pto.vreg<128xui16>
+      pto.vsts %r_u16, %src_u16[%c0], %mask16
+          : !pto.vreg<128xui16>, !pto.ptr<ui16, ub>, !pto.mask<b16>
+      %r_i16 = pto.vgather2 %src_i16, %offsets16, %mask16
+          : !pto.ptr<i16, ub>, !pto.vreg<128xui16>, !pto.mask<b16> -> !pto.vreg<128xi16>
+      pto.vsts %r_i16, %src_i16[%c0], %mask16
+          : !pto.vreg<128xi16>, !pto.ptr<i16, ub>, !pto.mask<b16>
+      %r_f16 = pto.vgather2 %src_f16, %offsets16, %mask16
+          : !pto.ptr<f16, ub>, !pto.vreg<128xui16>, !pto.mask<b16> -> !pto.vreg<128xf16>
+      pto.vsts %r_f16, %src_f16[%c0], %mask16
+          : !pto.vreg<128xf16>, !pto.ptr<f16, ub>, !pto.mask<b16>
+      %r_bf16 = pto.vgather2 %src_bf16, %offsets16, %mask16
+          : !pto.ptr<bf16, ub>, !pto.vreg<128xui16>, !pto.mask<b16> -> !pto.vreg<128xbf16>
+      pto.vsts %r_bf16, %src_bf16[%c0], %mask16
+          : !pto.vreg<128xbf16>, !pto.ptr<bf16, ub>, !pto.mask<b16>
+      %r_u32 = pto.vgather2 %src_u32, %offsets32, %mask32
+          : !pto.ptr<ui32, ub>, !pto.vreg<64xui32>, !pto.mask<b32> -> !pto.vreg<64xui32>
+      pto.vsts %r_u32, %src_u32[%c0], %mask32
+          : !pto.vreg<64xui32>, !pto.ptr<ui32, ub>, !pto.mask<b32>
+      %r_i32 = pto.vgather2 %src_i32, %offsets32, %mask32
+          : !pto.ptr<i32, ub>, !pto.vreg<64xui32>, !pto.mask<b32> -> !pto.vreg<64xi32>
+      pto.vsts %r_i32, %src_i32[%c0], %mask32
+          : !pto.vreg<64xi32>, !pto.ptr<i32, ub>, !pto.mask<b32>
+      %r_f32 = pto.vgather2 %src_f32, %offsets32, %mask32
+          : !pto.ptr<f32, ub>, !pto.vreg<64xui32>, !pto.mask<b32> -> !pto.vreg<64xf32>
+      pto.vsts %r_f32, %src_f32[%c0], %mask32
+          : !pto.vreg<64xf32>, !pto.ptr<f32, ub>, !pto.mask<b32>
+    }
+    return
+  }
+}
+
+// CHECK-LABEL: llvm.func @vgather2_supported_types_mix_aiv
+// CHECK-DAG: llvm.call @llvm.hivm.vgather2.v300.v256u8({{.*}}) : (!llvm.ptr<{{[0-9]+}}>, vector<64xi32>, vector<256xi1>) -> vector<128xi16>
+// CHECK-DAG: llvm.call @llvm.hivm.vgather2.v300.v256s8({{.*}}) : (!llvm.ptr<{{[0-9]+}}>, vector<64xi32>, vector<256xi1>) -> vector<128xi16>
+// CHECK-DAG: llvm.call @llvm.hivm.vgather2.v300.v128u16({{.*}}, {{.*}}, {{.*}}) : (!llvm.ptr<{{[0-9]+}}>, vector<64xi32>, vector<256xi1>) -> vector<128xi16>
+// CHECK-DAG: llvm.call @llvm.hivm.vgather2.v300.v128s16({{.*}}, {{.*}}, {{.*}}) : (!llvm.ptr<{{[0-9]+}}>, vector<64xi32>, vector<256xi1>) -> vector<128xi16>
+// CHECK-DAG: llvm.call @llvm.hivm.vgather2.v300.v128f16({{.*}}, {{.*}}, {{.*}}) : (!llvm.ptr<{{[0-9]+}}>, vector<64xi32>, vector<256xi1>) -> vector<128xf16>
+// CHECK-DAG: llvm.call @llvm.hivm.vgather2.v300.v128bf16({{.*}}, {{.*}}, {{.*}}) : (!llvm.ptr<{{[0-9]+}}>, vector<64xi32>, vector<256xi1>) -> vector<128xbf16>
+// CHECK-DAG: llvm.call @llvm.hivm.vgather2.v300.v64u32({{.*}}) : (!llvm.ptr<{{[0-9]+}}>, vector<64xi32>, vector<256xi1>) -> vector<64xi32>
+// CHECK-DAG: llvm.call @llvm.hivm.vgather2.v300.v64s32({{.*}}) : (!llvm.ptr<{{[0-9]+}}>, vector<64xi32>, vector<256xi1>) -> vector<64xi32>
+// CHECK-DAG: llvm.call @llvm.hivm.vgather2.v300.v64f32({{.*}}) : (!llvm.ptr<{{[0-9]+}}>, vector<64xi32>, vector<256xi1>) -> vector<64xf32>

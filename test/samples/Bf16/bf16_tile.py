@@ -6,7 +6,8 @@
 # INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
 # See LICENSE in the root of the software repository for the full text of the License.
 
-from mlir.ir import (
+from ptoas.mlir.ir import (
+    UnitAttr,
     Context,
     Location,
     InsertionPoint,
@@ -14,7 +15,7 @@ from mlir.ir import (
     BF16Type,
     StringAttr,
 )
-from mlir.dialects import func, arith, pto, builtin
+from ptoas.mlir.dialects import func, arith, pto, builtin
 
 
 def _idx_const(v: int):
@@ -46,6 +47,7 @@ def build():
         fn_ty = func.FunctionType.get([ptr_bf16], [])
         with InsertionPoint(module.body):
             fn = func.FuncOp("bf16_tile", fn_ty)
+            fn.operation.attributes["pto.entry"] = UnitAttr.get(ctx)
             entry = fn.add_entry_block()
 
         with InsertionPoint(entry):

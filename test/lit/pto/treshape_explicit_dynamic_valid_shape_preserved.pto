@@ -1,5 +1,5 @@
 // RUN: ptoas --pto-level=level3 --pto-arch=a5 \
-// RUN:   --mlir-print-ir-after=pto-view-to-memref %s -o - 2>&1 | FileCheck %s
+// RUN:   --mlir-print-ir-after=pto-resolve-reserved-buffers %s -o - 2>&1 | FileCheck %s
 
 module {
   func.func @treshape_explicit_dynamic_valid_shape_preserved() {
@@ -35,4 +35,5 @@ module {
 
 // CHECK-DAG: [[PART:%[A-Za-z0-9_]+]] = arith.constant 8 : index
 // CHECK-DAG: [[FULL:%[A-Za-z0-9_]+]] = arith.constant 16 : index
-// CHECK: pto.bind_tile {{.*}}, [[PART]], [[FULL]] {{.*}}blayout=#pto.blayout<col_major>{{.*}}pto.view_semantics = "treshape"
+// CHECK: pto.alloc_tile addr = {{.*}} valid_row = [[PART]] valid_col = [[FULL]] : !pto.tile_buf<vec, 16x16xf32, valid=?x?>
+// CHECK: pto.treshape {{.*}} : !pto.tile_buf<vec, 16x16xf32, valid=?x?> -> !pto.tile_buf<vec, 16x16xf32, valid=?x?, blayout=col_major>

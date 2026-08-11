@@ -1,0 +1,26 @@
+// Copyright (c) 2026 Huawei Technologies Co., Ltd.
+// This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+// CANN Open Software License Agreement Version 2.0 (the "License").
+// Please refer to the License for details. You may not use this file except in compliance with the License.
+// THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+// INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+// See LICENSE in the root of the software repository for the full text of the License.
+
+// RUN: not ptoas --pto-arch=a3 --pto-level=level3 %s 2>&1 | FileCheck %s
+// RUN: not ptoas --pto-arch=a3 %s 2>&1 | FileCheck %s
+
+// A `row_plus_one` (compact=2) slot layout inflates the major stride by one
+// element per row (16x16xf16 -> rowStride=17 -> footprint 542 bytes), while
+// multi-buffer slots are placed at product(shape)*elem_size = 512-byte
+// intervals. Adjacent slots would silently overlap, so the verifier must
+// reject the alloc regardless of build level.
+
+module {
+  func.func @mb_row_plus_one(%base : i64) attributes {pto.entry} {
+    %mb = pto.alloc_multi_tile addr = %base
+        : !pto.multi_tile_buf<!pto.tile_buf<loc=vec, dtype=f16, rows=16, cols=16, v_row=16, v_col=16, blayout=row_major, slayout=none_box, fractal=512, pad=0, compact=2>, count=2>
+    return
+  }
+}
+
+// CHECK: row_plus_one compaction, whose padded storage footprint exceeds product(shape) and would overlap adjacent multi-buffer slots

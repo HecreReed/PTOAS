@@ -1,0 +1,51 @@
+// Copyright (c) 2026 Huawei Technologies Co., Ltd.
+// This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+// CANN Open Software License Agreement Version 2.0 (the "License").
+// Please refer to the License for details. You may not use this file except in compliance with the License.
+// THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+// INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+// See LICENSE in the root of the software repository for the full text of the License.
+
+// RUN: ptoas --enable-insert-sync --mlir-print-ir-after=pto-insert-sync %s 2>&1 1>/dev/null | FileCheck %s
+
+// Confirms that two constant-slot uses of a `multi_tile_buf` are recognised
+// as disjoint by InsertSync: the two MTE2 loads land on distinct physical
+// slots (different planner-assigned physical addresses), so no
+// inter-slot `set_flag` / `wait_flag` is needed between them. Only the
+// pipeline tail barrier remains. Without slot-aware buffer planning this
+// would otherwise emit redundant MTE2-MTE2 synchronization between the
+// two tloads.
+
+module {
+  func.func @const_slot_no_inter_sync(
+      %gm0 : !pto.partition_tensor_view<16x16xf16>,
+      %gm1 : !pto.partition_tensor_view<16x16xf16>) {
+    %c0 = arith.constant 0 : index
+    %c1 = arith.constant 1 : index
+
+    %mb = pto.alloc_multi_tile
+        : !pto.multi_tile_buf<vec, 16x16xf16, count=2>
+
+    %s0 = pto.multi_tile_get %mb[%c0]
+        : !pto.multi_tile_buf<vec, 16x16xf16, count=2>
+       -> !pto.tile_buf<vec, 16x16xf16>
+    %s1 = pto.multi_tile_get %mb[%c1]
+        : !pto.multi_tile_buf<vec, 16x16xf16, count=2>
+       -> !pto.tile_buf<vec, 16x16xf16>
+
+    pto.tload ins(%gm0 : !pto.partition_tensor_view<16x16xf16>)
+              outs(%s0  : !pto.tile_buf<vec, 16x16xf16>)
+    pto.tload ins(%gm1 : !pto.partition_tensor_view<16x16xf16>)
+              outs(%s1  : !pto.tile_buf<vec, 16x16xf16>)
+    return
+  }
+}
+
+// Both tloads run on PIPE_MTE2 but touch disjoint slots, so no
+// MTE2-internal set/wait should be inserted between them. The only sync
+// emitted is the auto pipeline-tail barrier just before `return`.
+// CHECK-LABEL: func.func @const_slot_no_inter_sync
+// CHECK-NOT: pto.set_flag
+// CHECK-NOT: pto.wait_flag
+// CHECK: pto.barrier <PIPE_ALL>
+// CHECK: return

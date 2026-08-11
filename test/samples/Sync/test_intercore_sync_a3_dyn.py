@@ -7,17 +7,17 @@
 # INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
 # See LICENSE in the root of the software repository for the full text of the License.
 
-from mlir.ir import (
+from ptoas.mlir.ir import (
+    UnitAttr,
     Context,
     F32Type,
     IndexType,
     InsertionPoint,
     IntegerType,
     Location,
-    MemRefType,
     Module,
 )
-from mlir.dialects import arith, func, pto, scf
+from ptoas.mlir.dialects import arith, func, pto, scf
 
 
 def build():
@@ -30,12 +30,13 @@ def build():
             idx = IndexType.get(ctx)
             i64 = IntegerType.get_signless(64, ctx)
             i32 = IntegerType.get_signless(32, ctx)
-            ffts_ty = MemRefType.get([256], i64)
+            ffts_ty = pto.PtrType.get(i64, ctx)
             ptr_f32 = pto.PtrType.get(f32, ctx)
             fn_ty = func.FunctionType.get([ffts_ty, ptr_f32, i32], [])
 
             with InsertionPoint(module.body):
                 fn = func.FuncOp("test_intercore_sync_a3_dyn", fn_ty)
+                fn.operation.attributes["pto.entry"] = UnitAttr.get(ctx)
                 entry = fn.add_entry_block()
 
             with InsertionPoint(entry):

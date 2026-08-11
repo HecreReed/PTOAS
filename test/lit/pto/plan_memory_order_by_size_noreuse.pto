@@ -1,0 +1,71 @@
+// Heterogeneous NO-reuse case: three UB tiles of different sizes (src 8KB,
+// idx 8KB, dst 32KB) whose total (48KB) fits the UB budget, so PlanMemory takes
+// the fast no-reuse path (PlanBuffersWithoutReuse) rather than the reuse path.
+// The peak is the same either way here, but --plan-memory-order-by-size must
+// still give a deterministic largest-first layout on this path too: without it
+// the first-generated (small) input tile lands at offset 0; with it the largest
+// tile (dst) is placed first at offset 0. This is the regression guard for the
+// contract that the option means the same thing whether or not reuse kicks in.
+//
+// RUN: ptoas --pto-arch=a3 --mlir-print-ir-after=pto-plan-memory %s 2>&1 1>/dev/null | FileCheck %s --check-prefix=DEFAULT
+// RUN: ptoas --pto-arch=a3 --plan-memory-impl=modern --mlir-print-ir-after=pto-plan-memory %s 2>&1 1>/dev/null | FileCheck %s --check-prefix=BYSIZE
+// RUN: ptoas --pto-arch=a3 --plan-memory-order-by-size --mlir-print-ir-after=pto-plan-memory %s 2>&1 1>/dev/null | FileCheck %s --check-prefix=BYSIZE
+// RUN: ptoas --pto-arch=a3 --plan-memory-impl=modern --plan-memory-order-by-size --mlir-print-ir-after=pto-plan-memory %s 2>&1 1>/dev/null | FileCheck %s --check-prefix=BYSIZE
+
+module {
+  func.func @order_by_size_noreuse(%src_ptr: !pto.ptr<f32>, %idx_ptr: !pto.ptr<ui32>, %dst_ptr: !pto.ptr<f32>) attributes {pto.kernel} {
+    %c0    = arith.constant 0     : index
+    %c1    = arith.constant 1     : index
+    %c2048 = arith.constant 2048  : index
+    %c8192 = arith.constant 8192  : index
+
+    %src_view = pto.make_tensor_view %src_ptr,
+      shape = [%c1, %c1, %c1, %c1, %c2048],
+      strides = [%c2048, %c2048, %c2048, %c2048, %c1]
+      : !pto.tensor_view<1x1x1x1x2048xf32>
+    %idx_view = pto.make_tensor_view %idx_ptr,
+      shape = [%c1, %c1, %c1, %c1, %c2048],
+      strides = [%c2048, %c2048, %c2048, %c2048, %c1]
+      : !pto.tensor_view<1x1x1x1x2048xui32>
+    %dst_view = pto.make_tensor_view %dst_ptr,
+      shape = [%c1, %c1, %c1, %c1, %c8192],
+      strides = [%c8192, %c8192, %c8192, %c8192, %c1]
+      : !pto.tensor_view<1x1x1x1x8192xf32>
+
+    %src_part = pto.partition_view %src_view,
+      offsets = [%c0, %c0, %c0, %c0, %c0],
+      sizes = [%c1, %c1, %c1, %c1, %c2048]
+      : !pto.tensor_view<1x1x1x1x2048xf32> -> !pto.partition_tensor_view<1x1x1x1x2048xf32>
+    %idx_part = pto.partition_view %idx_view,
+      offsets = [%c0, %c0, %c0, %c0, %c0],
+      sizes = [%c1, %c1, %c1, %c1, %c2048]
+      : !pto.tensor_view<1x1x1x1x2048xui32> -> !pto.partition_tensor_view<1x1x1x1x2048xui32>
+    %dst_part = pto.partition_view %dst_view,
+      offsets = [%c0, %c0, %c0, %c0, %c0],
+      sizes = [%c1, %c1, %c1, %c1, %c8192]
+      : !pto.tensor_view<1x1x1x1x8192xf32> -> !pto.partition_tensor_view<1x1x1x1x8192xf32>
+
+    %src_tile = pto.alloc_tile : !pto.tile_buf<vec, 1x2048xf32>
+    %idx_tile = pto.alloc_tile : !pto.tile_buf<vec, 1x2048xui32>
+    %dst_tile = pto.alloc_tile : !pto.tile_buf<vec, 1x8192xf32>
+
+    pto.tload ins(%src_part : !pto.partition_tensor_view<1x1x1x1x2048xf32>)
+              outs(%src_tile : !pto.tile_buf<vec, 1x2048xf32>)
+    pto.tload ins(%idx_part : !pto.partition_tensor_view<1x1x1x1x2048xui32>)
+              outs(%idx_tile : !pto.tile_buf<vec, 1x2048xui32>)
+
+    pto.tsort32 ins(%src_tile, %idx_tile : !pto.tile_buf<vec, 1x2048xf32>,
+                          !pto.tile_buf<vec, 1x2048xui32>)
+             outs(%dst_tile : !pto.tile_buf<vec, 1x8192xf32>)
+
+    pto.tstore ins(%dst_tile : !pto.tile_buf<vec, 1x8192xf32>)
+               outs(%dst_part : !pto.partition_tensor_view<1x1x1x1x8192xf32>)
+    return
+  }
+}
+
+// On the no-reuse fast path the largest tile (dst, 1x8192xf32) gets offset 0
+// ONLY with order-by-size; the default order leaves offset 0 to the smaller
+// first-generated input tile.
+// BYSIZE: pto.alloc_tile addr = %c0_i64 : !pto.tile_buf<vec, 1x8192xf32>
+// DEFAULT-NOT: pto.alloc_tile addr = %c0_i64 : !pto.tile_buf<vec, 1x8192xf32>

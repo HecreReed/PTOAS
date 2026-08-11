@@ -1,0 +1,25 @@
+// Copyright (c) 2026 Huawei Technologies Co., Ltd.
+// This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+// CANN Open Software License Agreement Version 2.0 (the "License").
+// Please refer to the License for details. You may not use this file except in compliance with the License.
+// THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+// INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+// See LICENSE in the root of the software repository for the full text of the License.
+
+// RUN: not ptoas %s 2>&1 | FileCheck %s
+
+// multi_tile_get with a constant slot >= count must be rejected.
+
+module {
+  func.func @bad_const_slot_out_of_range() {
+    %c5 = arith.constant 5 : index
+    %mb = pto.alloc_multi_tile
+        : !pto.multi_tile_buf<vec, 16x16xf16, count=2>
+    %s = pto.multi_tile_get %mb[%c5]
+        : !pto.multi_tile_buf<vec, 16x16xf16, count=2>
+       -> !pto.tile_buf<vec, 16x16xf16>
+    return
+  }
+}
+
+// CHECK: constant slot 5 is out of range for multi_tile_buf count=2

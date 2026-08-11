@@ -1,0 +1,49 @@
+// Copyright (c) 2026 Huawei Technologies Co., Ltd.
+// This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+// CANN Open Software License Agreement Version 2.0 (the "License").
+// Please refer to the License for details. You may not use this file except in compliance with the License.
+// THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+// INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+// See LICENSE in the root of the software repository for the full text of the License.
+
+// A5 GM->L1 elem mgather uses a hidden MTE2 phase even though the source-side
+// index walk and scratch staging happen inside the macro. A downstream TMOV
+// must still wait on PIPE_MTE2, not PIPE_V.
+//
+// RUN: ptoas --pto-arch=a5 --enable-insert-sync %s -o - 2>&1 | FileCheck %s
+
+module {
+  func.func @mgather_gm2l1_elem_sync(
+      %mem: !pto.partition_tensor_view<1x1x1x64x32xf16>,
+      %idx: !pto.partition_tensor_view<1x1x1x32x32xi32>,
+      %scratch: !pto.partition_tensor_view<1x1x1x32x32xf16>) {
+    pto.section.cube {
+      %m = pto.alloc_tile
+        : !pto.tile_buf<loc=mat, dtype=f16, rows=32, cols=32, v_row=32, v_col=32,
+                        blayout=col_major, slayout=row_major, fractal=512, pad=0>
+      %l = pto.alloc_tile
+        : !pto.tile_buf<loc=left, dtype=f16, rows=32, cols=32, v_row=32, v_col=32,
+                        blayout=row_major, slayout=row_major, fractal=512, pad=0>
+      pto.mgather ins(%mem, %idx, %scratch
+          : !pto.partition_tensor_view<1x1x1x64x32xf16>,
+            !pto.partition_tensor_view<1x1x1x32x32xi32>,
+            !pto.partition_tensor_view<1x1x1x32x32xf16>)
+        outs(%m
+          : !pto.tile_buf<loc=mat, dtype=f16, rows=32, cols=32, v_row=32, v_col=32,
+                          blayout=col_major, slayout=row_major, fractal=512, pad=0>)
+        {coalesce = #pto<coalesce elem>}
+      pto.tmov ins(%m
+          : !pto.tile_buf<loc=mat, dtype=f16, rows=32, cols=32, v_row=32, v_col=32,
+                          blayout=col_major, slayout=row_major, fractal=512, pad=0>)
+        outs(%l
+          : !pto.tile_buf<loc=left, dtype=f16, rows=32, cols=32, v_row=32, v_col=32,
+                          blayout=row_major, slayout=row_major, fractal=512, pad=0>)
+    }
+    return
+  }
+}
+
+// CHECK: MGATHER<pto::Coalesce::Elem>
+// CHECK-NEXT: set_flag(PIPE_MTE2, PIPE_MTE1
+// CHECK-NEXT: wait_flag(PIPE_MTE2, PIPE_MTE1
+// CHECK-NEXT: TMOV

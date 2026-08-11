@@ -1,0 +1,95 @@
+// Copyright (c) 2026 Huawei Technologies Co., Ltd.
+// This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+// CANN Open Software License Agreement Version 2.0 (the "License").
+// Please refer to the License for details. You may not use this file except in compliance with the License.
+// THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+// INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+// See LICENSE in the root of the software repository for the full text of the License.
+
+// RUN: ( mkdir -p %T && ptoas --pto-arch=a5 --pto-backend=vpto %s -o %t --mlir-print-ir-after=convert-func-to-llvm 2>&1 || true ) | FileCheck %s
+
+module attributes {pto.target_arch = "a5", pto.kernel_kind = #pto.kernel_kind<vector>} {
+  func.func @simt_float_math_kernel(%dst_f32: !pto.ptr<f32, ub>, %dst_f16: !pto.ptr<f16, ub>, %dst_bf16: !pto.ptr<bf16, ub>) attributes {pto.aicore} {
+    %dim_z = arith.constant 1 : i32
+    %dim_y = arith.constant 1 : i32
+    %dim_x = arith.constant 32 : i32
+    pto.store_vfsimt_info %dim_z, %dim_y, %dim_x : i32, i32, i32
+    func.call @simt_float_math(%dst_f32, %dst_f16, %dst_bf16) : (!pto.ptr<f32, ub>, !pto.ptr<f16, ub>, !pto.ptr<bf16, ub>) -> ()
+    return
+  }
+
+  func.func @simt_float_math(%dst_f32: !pto.ptr<f32, ub>, %dst_f16: !pto.ptr<f16, ub>, %dst_bf16: !pto.ptr<bf16, ub>) attributes {pto.simt_entry} {
+    %c0 = arith.constant 0 : index
+    %c1 = arith.constant 1 : index
+    %c2 = arith.constant 2 : index
+    %c3 = arith.constant 3 : index
+    %c4 = arith.constant 4 : index
+    %c5 = arith.constant 5 : index
+    %c6 = arith.constant 6 : index
+    %c7 = arith.constant 7 : index
+    %f32_a = arith.constant 1.500000e+00 : f32
+    %f32_b = arith.constant 2.000000e+00 : f32
+    %f32_c = arith.constant 4.000000e+00 : f32
+    %f16_a = arith.constant 1.500000e+00 : f16
+    %f16_b = arith.constant 2.000000e+00 : f16
+    %f16_c = arith.constant 4.000000e+00 : f16
+    %bf16_a = arith.constant 1.500000e+00 : bf16
+    %bf16_b = arith.constant 2.000000e+00 : bf16
+    %bf16_c = arith.constant 4.000000e+00 : bf16
+
+    %abs = pto.absf %f32_a : f32 -> f32
+    %fmin = pto.fmin %f32_a, %f32_b : f32, f32 -> f32
+    %fmax = pto.fmax %bf16_a, %bf16_b : bf16, bf16 -> bf16
+    %exp = pto.exp %f32_a : f32 -> f32
+    %exp16 = pto.exp %f16_a : f16 -> f16
+    %log = pto.log %f32_c : f32 -> f32
+    %log16 = pto.log %f16_c : f16 -> f16
+    %pow = pto.pow %f32_b, %f32_c : f32, f32 -> f32
+    %pow16 = pto.pow %f16_b, %f16_c : f16, f16 -> f16
+    %ceil = pto.ceil %bf16_a : bf16 -> bf16
+    %floor = pto.floor %f32_a : f32 -> f32
+    %rint = pto.rint %f16_a : f16 -> f16
+    %round = pto.round %bf16_a : bf16 -> bf16
+    %fma = pto.fma %f32_a, %f32_b, %f32_c : f32, f32, f32 -> f32
+    %fma16 = pto.fma %f16_a, %f16_b, %f16_c : f16, f16, f16 -> f16
+    %fmabf16 = pto.fma %bf16_a, %bf16_b, %bf16_c : bf16, bf16, bf16 -> bf16
+
+    pto.store %abs, %dst_f32[%c0] : !pto.ptr<f32, ub>, f32
+    pto.store %fmin, %dst_f32[%c1] : !pto.ptr<f32, ub>, f32
+    pto.store %exp, %dst_f32[%c2] : !pto.ptr<f32, ub>, f32
+    pto.store %log, %dst_f32[%c3] : !pto.ptr<f32, ub>, f32
+    pto.store %pow, %dst_f32[%c4] : !pto.ptr<f32, ub>, f32
+    pto.store %floor, %dst_f32[%c5] : !pto.ptr<f32, ub>, f32
+    pto.store %fma, %dst_f32[%c6] : !pto.ptr<f32, ub>, f32
+    pto.store %exp16, %dst_f16[%c0] : !pto.ptr<f16, ub>, f16
+    pto.store %log16, %dst_f16[%c1] : !pto.ptr<f16, ub>, f16
+    pto.store %pow16, %dst_f16[%c2] : !pto.ptr<f16, ub>, f16
+    pto.store %rint, %dst_f16[%c3] : !pto.ptr<f16, ub>, f16
+    pto.store %fma16, %dst_f16[%c4] : !pto.ptr<f16, ub>, f16
+    pto.store %fmax, %dst_bf16[%c0] : !pto.ptr<bf16, ub>, bf16
+    pto.store %ceil, %dst_bf16[%c1] : !pto.ptr<bf16, ub>, bf16
+    pto.store %round, %dst_bf16[%c2] : !pto.ptr<bf16, ub>, bf16
+    pto.store %fmabf16, %dst_bf16[%c3] : !pto.ptr<bf16, ub>, bf16
+    return
+  }
+}
+
+// CHECK-LABEL: llvm.func @simt_float_math_kernel_mix_aiv
+// CHECK-DAG: llvm.call @llvm.hivm.store.vfsimt.info
+// CHECK-LABEL: llvm.func @simt_float_math
+// CHECK-DAG: llvm.call @llvm.fabs.f32
+// CHECK-DAG: llvm.call @llvm.minnum.f32
+// CHECK-DAG: llvm.call @llvm.maxnum.bf16
+// CHECK-DAG: llvm.call @llvm.exp.f32
+// CHECK-DAG: llvm.call @llvm.exp.f16
+// CHECK-DAG: llvm.call @llvm.log.f32
+// CHECK-DAG: llvm.call @llvm.log.f16
+// CHECK-DAG: llvm.call @llvm.pow.f32
+// CHECK-DAG: llvm.call @llvm.pow.f16
+// CHECK-DAG: llvm.call @llvm.hivm.ceil.y
+// CHECK-DAG: llvm.call @llvm.hivm.floor.f
+// CHECK-DAG: llvm.call @llvm.hivm.rint.h
+// CHECK-DAG: llvm.call @llvm.hivm.round.y
+// CHECK-DAG: llvm.call @llvm.hivm.ffma.f32.rrr
+// CHECK-DAG: llvm.call @llvm.hivm.ffma.f16.rrr
+// CHECK-DAG: llvm.call @llvm.hivm.ffma.bf16.rrr

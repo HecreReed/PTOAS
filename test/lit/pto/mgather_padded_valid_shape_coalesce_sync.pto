@@ -1,0 +1,85 @@
+// Copyright (c) 2026 Huawei Technologies Co., Ltd.
+// This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+// CANN Open Software License Agreement Version 2.0 (the "License").
+// Please refer to the License for details. You may not use this file except in compliance with the License.
+// THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+// INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+// See LICENSE in the root of the software repository for the full text of the License.
+
+// InsertSync must honor explicit MGather<Row/Elem> after tile buffers are
+// lowered to memrefs. The first kernel has a padded physical index tile (8x16)
+// but valid_shape=1x16 row-major and explicit Row, so A2/A3 must model the Row
+// path as PIPE_S + PIPE_MTE2. The second kernel is explicit Elem.
+//
+// RUN: ptoas --pto-arch=a3 --pto-level=level3 --enable-insert-sync %s -o - 2>&1 | FileCheck %s
+
+module attributes {pto.target_arch = "a2a3"} {
+  func.func @row_major_valid_1xr_is_row(%arg0: !pto.ptr<f32>, %arg1: !pto.ptr<i32>, %arg2: !pto.ptr<f32>)
+      attributes {pto.kernel_kind = #pto.kernel_kind<vector>} {
+    %c0_i64 = arith.constant 0 : i64
+    %c4096_i64 = arith.constant 4096 : i64
+    %c16_index = arith.constant 16 : index
+    %c32_index = arith.constant 32 : index
+    %c1_index = arith.constant 1 : index
+    %c0_index = arith.constant 0 : index
+    %mem_view = pto.make_tensor_view %arg0, shape = [%c16_index, %c32_index], strides = [%c32_index, %c1_index] {layout = #pto.layout<nd>}: !pto.tensor_view<?x?xf32>
+    %idx_view = pto.make_tensor_view %arg1, shape = [%c1_index, %c16_index], strides = [%c16_index, %c1_index] {layout = #pto.layout<nd>}: !pto.tensor_view<?x?xi32>
+    %out_view = pto.make_tensor_view %arg2, shape = [%c16_index, %c32_index], strides = [%c32_index, %c1_index] {layout = #pto.layout<nd>}: !pto.tensor_view<?x?xf32>
+    %idx_tile = pto.alloc_tile addr = %c0_i64 valid_row = %c1_index valid_col = %c16_index : !pto.tile_buf<loc=vec, dtype=i32, rows=8, cols=16, v_row=?, v_col=?, blayout=row_major, slayout=none_box, fractal=512, pad=0>
+    %idx_pview = pto.partition_view %idx_view, offsets = [%c0_index, %c0_index], sizes = [%c1_index, %c16_index] : !pto.tensor_view<?x?xi32> -> !pto.partition_tensor_view<1x16xi32>
+    pto.tload ins(%idx_pview : !pto.partition_tensor_view<1x16xi32>)
+              outs(%idx_tile : !pto.tile_buf<loc=vec, dtype=i32, rows=8, cols=16, v_row=?, v_col=?, blayout=row_major, slayout=none_box, fractal=512, pad=0>)
+    %dst = pto.alloc_tile addr = %c4096_i64 valid_row = %c16_index valid_col = %c32_index : !pto.tile_buf<loc=vec, dtype=f32, rows=16, cols=32, v_row=?, v_col=?, blayout=row_major, slayout=none_box, fractal=512, pad=0>
+    %mem_pview = pto.partition_view %mem_view, offsets = [%c0_index, %c0_index], sizes = [%c16_index, %c32_index] : !pto.tensor_view<?x?xf32> -> !pto.partition_tensor_view<16x32xf32>
+    pto.mgather ins(%mem_pview, %idx_tile
+        : !pto.partition_tensor_view<16x32xf32>,
+          !pto.tile_buf<loc=vec, dtype=i32, rows=8, cols=16, v_row=?, v_col=?, blayout=row_major, slayout=none_box, fractal=512, pad=0>)
+      outs(%dst : !pto.tile_buf<loc=vec, dtype=f32, rows=16, cols=32, v_row=?, v_col=?, blayout=row_major, slayout=none_box, fractal=512, pad=0>)
+      {coalesce = #pto<coalesce row>}
+    %out_pview = pto.partition_view %out_view, offsets = [%c0_index, %c0_index], sizes = [%c16_index, %c32_index] : !pto.tensor_view<?x?xf32> -> !pto.partition_tensor_view<16x32xf32>
+    pto.tstore ins(%dst : !pto.tile_buf<loc=vec, dtype=f32, rows=16, cols=32, v_row=?, v_col=?, blayout=row_major, slayout=none_box, fractal=512, pad=0>)
+               outs(%out_pview : !pto.partition_tensor_view<16x32xf32>)
+    return
+  }
+
+  func.func @row_major_valid_rx1_is_elem(%arg0: !pto.ptr<f32>, %arg1: !pto.ptr<i32>, %arg2: !pto.ptr<f32>)
+      attributes {pto.kernel_kind = #pto.kernel_kind<vector>} {
+    %c0_i64 = arith.constant 0 : i64
+    %c4096_i64 = arith.constant 4096 : i64
+    %c16_index = arith.constant 16 : index
+    %c32_index = arith.constant 32 : index
+    %c1_index = arith.constant 1 : index
+    %c0_index = arith.constant 0 : index
+    %mem_view = pto.make_tensor_view %arg0, shape = [%c16_index, %c32_index], strides = [%c32_index, %c1_index] {layout = #pto.layout<nd>}: !pto.tensor_view<?x?xf32>
+    %idx_view = pto.make_tensor_view %arg1, shape = [%c16_index, %c1_index], strides = [%c1_index, %c1_index] {layout = #pto.layout<nd>}: !pto.tensor_view<?x?xi32>
+    %out_view = pto.make_tensor_view %arg2, shape = [%c16_index, %c32_index], strides = [%c32_index, %c1_index] {layout = #pto.layout<nd>}: !pto.tensor_view<?x?xf32>
+    %idx_tile = pto.alloc_tile addr = %c0_i64 valid_row = %c16_index valid_col = %c1_index : !pto.tile_buf<loc=vec, dtype=i32, rows=16, cols=8, v_row=?, v_col=?, blayout=row_major, slayout=none_box, fractal=512, pad=0>
+    %idx_pview = pto.partition_view %idx_view, offsets = [%c0_index, %c0_index], sizes = [%c16_index, %c1_index] : !pto.tensor_view<?x?xi32> -> !pto.partition_tensor_view<16x1xi32>
+    pto.tload ins(%idx_pview : !pto.partition_tensor_view<16x1xi32>)
+              outs(%idx_tile : !pto.tile_buf<loc=vec, dtype=i32, rows=16, cols=8, v_row=?, v_col=?, blayout=row_major, slayout=none_box, fractal=512, pad=0>)
+    %dst = pto.alloc_tile addr = %c4096_i64 valid_row = %c16_index valid_col = %c32_index : !pto.tile_buf<loc=vec, dtype=f32, rows=16, cols=32, v_row=?, v_col=?, blayout=row_major, slayout=none_box, fractal=512, pad=0>
+    %mem_pview = pto.partition_view %mem_view, offsets = [%c0_index, %c0_index], sizes = [%c16_index, %c32_index] : !pto.tensor_view<?x?xf32> -> !pto.partition_tensor_view<16x32xf32>
+    pto.mgather ins(%mem_pview, %idx_tile
+        : !pto.partition_tensor_view<16x32xf32>,
+          !pto.tile_buf<loc=vec, dtype=i32, rows=16, cols=8, v_row=?, v_col=?, blayout=row_major, slayout=none_box, fractal=512, pad=0>)
+      outs(%dst : !pto.tile_buf<loc=vec, dtype=f32, rows=16, cols=32, v_row=?, v_col=?, blayout=row_major, slayout=none_box, fractal=512, pad=0>)
+      {coalesce = #pto<coalesce elem>}
+    %out_pview = pto.partition_view %out_view, offsets = [%c0_index, %c0_index], sizes = [%c16_index, %c32_index] : !pto.tensor_view<?x?xf32> -> !pto.partition_tensor_view<16x32xf32>
+    pto.tstore ins(%dst : !pto.tile_buf<loc=vec, dtype=f32, rows=16, cols=32, v_row=?, v_col=?, blayout=row_major, slayout=none_box, fractal=512, pad=0>)
+               outs(%out_pview : !pto.partition_tensor_view<16x32xf32>)
+    return
+  }
+}
+
+// CHECK-LABEL: AICORE void row_major_valid_1xr_is_row
+// CHECK:      set_flag(PIPE_MTE2, PIPE_S
+// CHECK:      wait_flag(PIPE_MTE2, PIPE_S
+// CHECK-NEXT: MGATHER<pto::Coalesce::Row>
+// CHECK-NEXT: set_flag(PIPE_MTE2, PIPE_MTE3
+// CHECK:      wait_flag(PIPE_MTE2, PIPE_MTE3
+// CHECK-LABEL: AICORE void row_major_valid_rx1_is_elem
+// CHECK:      set_flag(PIPE_MTE2, PIPE_S
+// CHECK:      wait_flag(PIPE_MTE2, PIPE_S
+// CHECK-NEXT: MGATHER<pto::Coalesce::Elem>
+// CHECK-NEXT: set_flag(PIPE_S, PIPE_MTE3
+// CHECK:      wait_flag(PIPE_S, PIPE_MTE3

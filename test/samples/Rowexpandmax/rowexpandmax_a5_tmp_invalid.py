@@ -6,9 +6,9 @@
 # INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
 # See LICENSE in the root of the software repository for the full text of the License.
 
-from mlir.ir import Context, Location, Module, InsertionPoint, StringAttr, MLIRError
-from mlir.dialects import func, pto
-from mlir.ir import F32Type
+from ptoas.mlir.ir import Context, Location, Module, InsertionPoint, StringAttr, MLIRError, UnitAttr
+from ptoas.mlir.dialects import func, pto
+from ptoas.mlir.ir import F32Type, IntegerType
 
 
 def build():
@@ -20,6 +20,7 @@ def build():
             m.operation.attributes["pto.target_arch"] = StringAttr.get("a5")
 
             f32 = F32Type.get(ctx)
+            i32 = IntegerType.get_signless(32, ctx)
             vec = pto.AddressSpaceAttr.get(pto.AddressSpace.VEC, ctx)
             bl_row = pto.BLayoutAttr.get(pto.BLayout.RowMajor, ctx)
             bl_col = pto.BLayoutAttr.get(pto.BLayout.ColMajor, ctx)
@@ -31,17 +32,19 @@ def build():
             cfg_col = pto.TileBufConfigAttr.get(bl_col, sl, fractal_ab_size, pd, ctx)
 
             full_ty = pto.TileBufType.get([32, 32], f32, vec, [32, 32], cfg_row, ctx)
+            tmp_invalid_ty = pto.TileBufType.get([1, 8], i32, vec, [1, 8], cfg_row, ctx)
             scalar_ty = pto.TileBufType.get([32, 1], f32, vec, [32, 1], cfg_col, ctx)
 
             fn_ty = func.FunctionType.get([], [])
             with InsertionPoint(m.body):
                 fn = func.FuncOp("trowexpandmax_a5_tmp_invalid", fn_ty)
+                fn.operation.attributes["pto.entry"] = UnitAttr.get(ctx)
                 entry = fn.add_entry_block()
 
             with InsertionPoint(entry):
                 src0 = pto.AllocTileOp(full_ty).result
                 src1 = pto.AllocTileOp(scalar_ty).result
-                tmp = pto.AllocTileOp(full_ty).result
+                tmp = pto.AllocTileOp(tmp_invalid_ty).result
                 dst = pto.AllocTileOp(full_ty).result
                 pto.TRowExpandMaxOp(src0=src0, src1=src1, tmp=tmp, dst=dst)
                 func.ReturnOp([])

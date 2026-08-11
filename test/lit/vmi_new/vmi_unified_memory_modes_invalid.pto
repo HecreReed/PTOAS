@@ -1,0 +1,88 @@
+// Copyright (c) 2026 Huawei Technologies Co., Ltd.
+// This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+// CANN Open Software License Agreement Version 2.0 (the "License").
+// Please refer to the License for details. You may not use this file except in compliance with the License.
+// THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+// INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+// See LICENSE in the root of the software repository for the full text of the License.
+
+// RUN: not pto-test-opt %s -split-input-file 2>&1 | FileCheck %s
+
+module {
+  func.func @group_load_element_type_mismatch(
+      %src: !pto.ptr<f32, ub>, %offset: index, %stride: index) {
+    %value = pto.vmi.vload %src[%offset], %stride {group = 8}
+        : !pto.ptr<f32, ub> -> !pto.vmi.vreg<64xf16>
+    return
+  }
+}
+
+// CHECK: 'pto.vmi.vload' op requires memory source element type to match VMI data element type
+
+// -----
+
+module {
+  func.func @group_store_element_type_mismatch(
+      %value: !pto.vmi.vreg<64xf16>, %dst: !pto.ptr<f32, ub>,
+      %offset: index, %stride: index) {
+    pto.vmi.vstore %value, %dst[%offset], %stride {group = 8}
+        : !pto.vmi.vreg<64xf16>, !pto.ptr<f32, ub>
+    return
+  }
+}
+
+// CHECK: 'pto.vmi.vstore' op requires memory destination element type to match VMI data element type
+
+// -----
+
+module {
+  func.func @block_stride_load_element_type_mismatch(
+      %src: !pto.ptr<f32, ub>, %offset: index, %block: i16, %repeat: i16) {
+    %value = pto.vmi.vload %src[%offset], %block, %repeat
+        : !pto.ptr<f32, ub> -> !pto.vmi.vreg<64xf16>
+    return
+  }
+}
+
+// CHECK: 'pto.vmi.vload' op requires memory source element type to match VMI data element type
+
+// -----
+
+module {
+  func.func @block_stride_store_element_type_mismatch(
+      %value: !pto.vmi.vreg<64xf16>, %dst: !pto.ptr<f32, ub>,
+      %offset: index, %block: i16, %repeat: i16) {
+    pto.vmi.vstore %value, %dst[%offset], %block, %repeat
+        : !pto.vmi.vreg<64xf16>, !pto.ptr<f32, ub>
+    return
+  }
+}
+
+// CHECK: 'pto.vmi.vstore' op requires memory destination element type to match VMI data element type
+
+// -----
+
+module {
+  func.func @group_load_nondivisible(
+      %src: !pto.ptr<f32, ub>, %offset: index, %stride: index) {
+    %value = pto.vmi.vload %src[%offset], %stride {group = 6}
+        : !pto.ptr<f32, ub> -> !pto.vmi.vreg<64xf32>
+    return
+  }
+}
+
+// CHECK: 'pto.vmi.vload' op requires num_groups to evenly divide VMI logical lane count 64
+
+// -----
+
+module {
+  func.func @group_store_nondivisible(
+      %value: !pto.vmi.vreg<64xf32>, %dst: !pto.ptr<f32, ub>,
+      %offset: index, %stride: index) {
+    pto.vmi.vstore %value, %dst[%offset], %stride {group = 6}
+        : !pto.vmi.vreg<64xf32>, !pto.ptr<f32, ub>
+    return
+  }
+}
+
+// CHECK: 'pto.vmi.vstore' op requires num_groups to evenly divide VMI logical lane count 64

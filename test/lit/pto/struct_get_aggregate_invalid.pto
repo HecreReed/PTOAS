@@ -1,0 +1,24 @@
+// Copyright (c) 2026 Huawei Technologies Co., Ltd.
+// This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+// CANN Open Software License Agreement Version 2.0 (the "License").
+// Please refer to the License for details. You may not use this file except in compliance with the License.
+// THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+// INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+// See LICENSE in the root of the software repository for the full text of the License.
+
+// RUN: not ptoas %s 2>&1 | FileCheck %s
+
+// A path that stops on a nested !pto.struct is rejected: handing the whole
+// aggregate back as an SSA value would copy it out of the parent struct, so a
+// nested field is reached with a longer path instead.
+
+module {
+  func.func @struct_get_aggregate() {
+    %s = pto.declare_struct -> !pto.struct<!pto.struct<f32, i8>, i16>
+    %inner = pto.struct_get %s[0]
+      : !pto.struct<!pto.struct<f32, i8>, i16> -> !pto.struct<f32, i8>
+    return
+  }
+}
+
+// CHECK: struct path must end at a scalar field

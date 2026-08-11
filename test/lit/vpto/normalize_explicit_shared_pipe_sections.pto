@@ -1,0 +1,30 @@
+// Copyright (c) 2026 Huawei Technologies Co., Ltd.
+// This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+// CANN Open Software License Agreement Version 2.0 (the "License").
+// Please refer to the License for details. You may not use this file except in compliance with the License.
+// THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+// INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+// See LICENSE in the root of the software repository for the full text of the License.
+
+// Guard: explicit physical sections resolve shared-pipe synchronization that
+// automatic section inference cannot classify uniquely.
+// RUN: pto-test-opt --pto-normalize-uncovered-tile-sections %s | FileCheck %s
+
+module attributes {pto.target_arch = "a5"} {
+  func.func @explicit_shared_pipe_sync() attributes {pto.kernel} {
+    pto.section.cube {
+      pto.set_flag[<PIPE_MTE2>, <PIPE_S>, <EVENT_ID0>]
+    }
+    pto.section.vector {
+      pto.wait_flag[<PIPE_MTE2>, <PIPE_S>, <EVENT_ID0>]
+    }
+    return
+  }
+}
+
+// CHECK: pto.section.cube {
+// CHECK-NEXT: pto.set_flag[<PIPE_MTE2>, <PIPE_S>, <EVENT_ID0>]
+// CHECK-NEXT: }
+// CHECK: pto.section.vector {
+// CHECK-NEXT: pto.wait_flag[<PIPE_MTE2>, <PIPE_S>, <EVENT_ID0>]
+// CHECK-NEXT: }

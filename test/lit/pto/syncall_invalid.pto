@@ -1,0 +1,99 @@
+// Copyright (c) 2026 Huawei Technologies Co., Ltd.
+// This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+// CANN Open Software License Agreement Version 2.0 (the "License").
+// Please refer to the License for details. You may not use this file except in compliance with the License.
+// THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+// INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+// See LICENSE in the root of the software repository for the full text of the License.
+//
+// RUN: split-file %s %t
+// RUN: not ptoas %t/missing_gm.pto 2>&1 | FileCheck %s --check-prefix=MISSING-GM
+// RUN: not ptoas %t/legacy_operands.pto 2>&1 | FileCheck %s --check-prefix=LEGACY
+// RUN: not ptoas %t/small_capacity.pto 2>&1 | FileCheck %s --check-prefix=SMALL
+// RUN: not ptoas %t/wrong_element_type.pto 2>&1 | FileCheck %s --check-prefix=ELEM
+// RUN: not ptoas %t/wrong_address_space.pto 2>&1 | FileCheck %s --check-prefix=SPACE
+// RUN: not ptoas %t/wrong_workspace_type.pto 2>&1 | FileCheck %s --check-prefix=TYPE
+// RUN: not ptoas %t/wrong_used_cores_type.pto 2>&1 | FileCheck %s --check-prefix=USED
+// RUN: not ptoas %t/hard_with_operand.pto 2>&1 | FileCheck %s --check-prefix=HARD-OPERAND
+
+// MISSING-GM: error: custom op 'pto.syncall' expects soft syncall to have gm_workspace and optional used_cores
+// LEGACY: error: custom op 'pto.syncall' expects soft syncall to have gm_workspace and optional used_cores
+// SMALL: error: 'pto.syncall' op expects gm_workspace to contain at least 16 i32 elements (64 bytes), but static capacity is 15
+// ELEM: error: 'pto.syncall' op expects gm_workspace element type to be i32
+// SPACE: error: 'pto.syncall' op expects gm_workspace to be in GM address space
+// TYPE: error: 'pto.syncall' op operand #0 must be Ptr, TensorView, or PartitionTensorView
+// USED: error: 'pto.syncall' op operand #1 must be 32-bit signless integer
+// HARD-OPERAND: error: 'pto.syncall' op expects hard syncall to have no gm_workspace or used_cores
+
+//--- missing_gm.pto
+module {
+  func.func @missing_gm() {
+    pto.syncall() mode = #pto.sync_all_mode<soft>, core_type = #pto.sync_core_type<aiv_only>
+    return
+  }
+}
+
+//--- legacy_operands.pto
+module {
+  func.func @legacy_operands(%gm: !pto.ptr<i32, gm>,
+                             %ub: !pto.tile_buf<vec, 1x64xi32>,
+                             %used: i32) {
+    pto.syncall(%gm, %ub, %used : !pto.ptr<i32, gm>, !pto.tile_buf<vec, 1x64xi32>, i32) mode = #pto.sync_all_mode<soft>, core_type = #pto.sync_core_type<aiv_only>
+    return
+  }
+}
+
+//--- small_capacity.pto
+module {
+  func.func @small_capacity(%gm: !pto.tensor_view<15xi32>) {
+    pto.syncall(%gm : !pto.tensor_view<15xi32>) mode = #pto.sync_all_mode<soft>, core_type = #pto.sync_core_type<aiv_only>
+    return
+  }
+}
+
+//--- wrong_element_type.pto
+module {
+  func.func @wrong_element_type(%gm: !pto.ptr<f32, gm>) {
+    pto.syncall(%gm : !pto.ptr<f32, gm>) mode = #pto.sync_all_mode<soft>, core_type = #pto.sync_core_type<aiv_only>
+    return
+  }
+}
+
+//--- wrong_address_space.pto
+module {
+  func.func @wrong_address_space(
+      %gm: !pto.ptr<i32, vec>) {
+    pto.syncall(%gm : !pto.ptr<i32, vec>) mode = #pto.sync_all_mode<soft>, core_type = #pto.sync_core_type<aiv_only>
+    return
+  }
+}
+
+//--- wrong_workspace_type.pto
+module {
+  func.func @wrong_workspace_type(
+      %gm: memref<16xi32, #pto.address_space<gm>>) {
+    pto.syncall(%gm : memref<16xi32, #pto.address_space<gm>>) mode = #pto.sync_all_mode<soft>, core_type = #pto.sync_core_type<aiv_only>
+    return
+  }
+}
+
+//--- wrong_used_cores_type.pto
+module {
+  func.func @wrong_used_cores_type(
+      %gm: !pto.ptr<i32, gm>, %used: index) {
+    pto.syncall(%gm, %used : !pto.ptr<i32, gm>, index) mode = #pto.sync_all_mode<soft>, core_type = #pto.sync_core_type<aiv_only>
+    return
+  }
+}
+
+//--- hard_with_operand.pto
+module {
+  func.func @hard_with_operand(%gm: !pto.ptr<i32, gm>) {
+    "pto.syncall"(%gm) <{
+      core_type = #pto.sync_core_type<aiv_only>,
+      mode = #pto.sync_all_mode<hard>,
+      operandSegmentSizes = array<i32: 1, 0>
+    }> : (!pto.ptr<i32, gm>) -> ()
+    return
+  }
+}

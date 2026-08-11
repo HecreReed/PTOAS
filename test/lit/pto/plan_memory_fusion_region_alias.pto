@@ -1,0 +1,42 @@
+// Copyright (c) 2026 Huawei Technologies Co., Ltd.
+// This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+// CANN Open Software License Agreement Version 2.0 (the "License").
+// Please refer to the License for details. You may not use this file except in compliance with the License.
+// THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+// INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+// See LICENSE in the root of the software repository for the full text of the License.
+
+// RUN: ptoas --pto-level=level2 --pto-arch=a3 --plan-memory-impl=modern \
+// RUN:   --emit-pto-ir --mlir-print-ir-after=pto-plan-memory %s 2>&1 \
+// RUN:   | FileCheck %s
+
+module attributes {pto.target_arch = "a3"} {
+  func.func @fusion_region_result_alias(
+      %src0: !pto.partition_tensor_view<1x1x1x16x16xf16>,
+      %src1: !pto.partition_tensor_view<1x1x1x16x16xf16>,
+      %dst: !pto.partition_tensor_view<1x1x1x16x16xf16>) {
+    %escaped = pto.fusion_region {
+      %live = pto.alloc_tile : !pto.tile_buf<vec, 16x16xf16>
+      pto.tload ins(%src0 : !pto.partition_tensor_view<1x1x1x16x16xf16>)
+                outs(%live : !pto.tile_buf<vec, 16x16xf16>) {layout = #pto.layout<nd>}
+      pto.yield(%live) : (!pto.tile_buf<vec, 16x16xf16>) -> ()
+    } : !pto.tile_buf<vec, 16x16xf16>
+
+    %scratch = pto.alloc_tile : !pto.tile_buf<vec, 16x16xf16>
+    pto.tload ins(%src1 : !pto.partition_tensor_view<1x1x1x16x16xf16>)
+              outs(%scratch : !pto.tile_buf<vec, 16x16xf16>) {layout = #pto.layout<nd>}
+    pto.tstore ins(%scratch : !pto.tile_buf<vec, 16x16xf16>)
+               outs(%dst : !pto.partition_tensor_view<1x1x1x16x16xf16>) {layout = #pto.layout<nd>}
+    pto.tstore ins(%escaped : !pto.tile_buf<vec, 16x16xf16>)
+               outs(%dst : !pto.partition_tensor_view<1x1x1x16x16xf16>) {layout = #pto.layout<nd>}
+    return
+  }
+}
+
+// CHECK-LABEL: func.func @fusion_region_result_alias
+// CHECK-DAG: %[[LIVE_ADDR:.*]] = arith.constant 0 : i64
+// CHECK-DAG: %[[SCRATCH_ADDR:.*]] = arith.constant 512 : i64
+// CHECK: pto.fusion_region
+// CHECK: pto.alloc_tile addr = %[[LIVE_ADDR]]
+// CHECK: pto.yield
+// CHECK: pto.alloc_tile addr = %[[SCRATCH_ADDR]]

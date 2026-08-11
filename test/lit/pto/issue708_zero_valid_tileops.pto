@@ -1,0 +1,52 @@
+// Copyright (c) 2026 Huawei Technologies Co., Ltd.
+// This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+// CANN Open Software License Agreement Version 2.0 (the "License").
+// Please refer to the License for details. You may not use this file except in compliance with the License.
+// THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+// INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+// See LICENSE in the root of the software repository for the full text of the License.
+
+// RUN: ptoas --pto-arch=a5 --emit-pto-ir %s 2>&1 | FileCheck %s
+
+module attributes {"pto.device-spec" = "Ascend910B3"} {
+  func.func @issue708_zero_valid_dma(
+      %src: !pto.ptr<f32>) attributes {pto.kernel_kind = #pto.kernel_kind<vector>} {
+    %c0 = arith.constant 0 : index
+    %c1 = arith.constant 1 : index
+    %c16 = arith.constant 16 : index
+    %tv = pto.make_tensor_view %src, shape = [%c16, %c16], strides = [%c16, %c1] : !pto.tensor_view<?x?xf32>
+    %pv = pto.partition_view %tv, offsets = [%c0, %c0], sizes = [%c16, %c16] : !pto.tensor_view<?x?xf32> -> !pto.partition_tensor_view<16x16xf32>
+    %row0 = pto.alloc_tile : !pto.tile_buf<loc=vec, dtype=f32, rows=16, cols=16, v_row=0, v_col=16, blayout=row_major, slayout=none_box, fractal=512, pad=0>
+    %col0 = pto.alloc_tile : !pto.tile_buf<loc=vec, dtype=f32, rows=16, cols=16, v_row=16, v_col=0, blayout=row_major, slayout=none_box, fractal=512, pad=0>
+    pto.tload ins(%pv : !pto.partition_tensor_view<16x16xf32>)
+              outs(%row0 : !pto.tile_buf<loc=vec, dtype=f32, rows=16, cols=16, v_row=0, v_col=16, blayout=row_major, slayout=none_box, fractal=512, pad=0>)
+    pto.tprefetch ins(%pv : !pto.partition_tensor_view<16x16xf32>)
+                  outs(%col0 : !pto.tile_buf<loc=vec, dtype=f32, rows=16, cols=16, v_row=16, v_col=0, blayout=row_major, slayout=none_box, fractal=512, pad=0>)
+    return
+  }
+
+  func.func @issue708_zero_valid_matrix() attributes {pto.kernel_kind = #pto.kernel_kind<cube>} {
+    %lhs = pto.alloc_tile : !pto.tile_buf<loc=left, dtype=f16, rows=16, cols=32, v_row=0, v_col=32, blayout=col_major, slayout=row_major, fractal=512, pad=0>
+    %rhs = pto.alloc_tile : !pto.tile_buf<loc=right, dtype=f16, rows=32, cols=16, v_row=32, v_col=0, blayout=row_major, slayout=col_major, fractal=512, pad=0>
+    %dst = pto.alloc_tile : !pto.tile_buf<loc=acc, dtype=f32, rows=16, cols=16, v_row=0, v_col=0, blayout=col_major, slayout=row_major, fractal=1024, pad=0>
+    pto.tmatmul ins(%lhs, %rhs : !pto.tile_buf<loc=left, dtype=f16, rows=16, cols=32, v_row=0, v_col=32, blayout=col_major, slayout=row_major, fractal=512, pad=0>, !pto.tile_buf<loc=right, dtype=f16, rows=32, cols=16, v_row=32, v_col=0, blayout=row_major, slayout=col_major, fractal=512, pad=0>)
+                outs(%dst : !pto.tile_buf<loc=acc, dtype=f32, rows=16, cols=16, v_row=0, v_col=0, blayout=col_major, slayout=row_major, fractal=1024, pad=0>)
+    return
+  }
+
+  func.func @issue708_zero_valid_vector() attributes {pto.kernel_kind = #pto.kernel_kind<vector>} {
+    %rem_src = pto.alloc_tile : !pto.tile_buf<loc=vec, dtype=f32, rows=1, cols=16, v_row=0, v_col=16, blayout=row_major, slayout=none_box, fractal=512, pad=0>
+    %rem_tmp = pto.alloc_tile : !pto.tile_buf<loc=vec, dtype=f32, rows=1, cols=16, v_row=0, v_col=16, blayout=row_major, slayout=none_box, fractal=512, pad=0>
+    pto.trem ins(%rem_src, %rem_src, %rem_tmp : !pto.tile_buf<loc=vec, dtype=f32, rows=1, cols=16, v_row=0, v_col=16, blayout=row_major, slayout=none_box, fractal=512, pad=0>, !pto.tile_buf<loc=vec, dtype=f32, rows=1, cols=16, v_row=0, v_col=16, blayout=row_major, slayout=none_box, fractal=512, pad=0>, !pto.tile_buf<loc=vec, dtype=f32, rows=1, cols=16, v_row=0, v_col=16, blayout=row_major, slayout=none_box, fractal=512, pad=0>)
+             outs(%rem_src : !pto.tile_buf<loc=vec, dtype=f32, rows=1, cols=16, v_row=0, v_col=16, blayout=row_major, slayout=none_box, fractal=512, pad=0>)
+    return
+  }
+}
+
+// CHECK-LABEL: func.func @issue708_zero_valid_dma
+// CHECK: pto.tload
+// CHECK: pto.tprefetch
+// CHECK-LABEL: func.func @issue708_zero_valid_matrix
+// CHECK: pto.tmatmul
+// CHECK-LABEL: func.func @issue708_zero_valid_vector
+// CHECK: pto.trem

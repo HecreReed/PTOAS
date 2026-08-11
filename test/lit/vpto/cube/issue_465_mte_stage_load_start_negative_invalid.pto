@@ -1,0 +1,25 @@
+// Copyright (c) 2026 Huawei Technologies Co., Ltd.
+// This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+// CANN Open Software License Agreement Version 2.0 (the "License").
+// Please refer to the License for details. You may not use this file except in compliance with the License.
+// THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+// INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+// See LICENSE in the root of the software repository for the full text of the License.
+
+// RUN: not ptoas --pto-arch=a5 --pto-backend=vpto --emit-vpto %s -o /dev/null 2>&1 | FileCheck %s
+
+module attributes {pto.target_arch = "a5", pto.kernel_kind = #pto.kernel_kind<cube>} {
+  func.func @issue_465_mte_stage_load_start_negative_invalid(
+      %src_mat: memref<?xf16, #pto.address_space<mat>>,
+      %dst_left: memref<?xf16, #pto.address_space<left>>) attributes {pto.kernel} {
+    %c16_i64 = arith.constant 16 : i64
+    %cm1_i64 = arith.constant -1 : i64
+    %c0_i64 = arith.constant 0 : i64
+
+    // CHECK: error: 'pto.mte_l1_l0a' op start_row must be non-negative
+    pto.mte_l1_l0a %src_mat, %dst_left, %c16_i64, %c16_i64, %cm1_i64, %c0_i64
+      : memref<?xf16, #pto.address_space<mat>>, memref<?xf16, #pto.address_space<left>>, i64, i64, i64, i64
+
+    return
+  }
+}

@@ -1,0 +1,15 @@
+// RUN: ptoas --pto-arch=a3 %s 2>&1 | FileCheck %s --check-prefix=A3
+
+module {
+  func.func @tci_ui16_kernel(%dst: !pto.partition_tensor_view<1x16xui16>) {
+    %c7_i16 = arith.constant 7 : i16
+    %c7_ui16 = builtin.unrealized_conversion_cast %c7_i16 : i16 to ui16
+    %tile = pto.alloc_tile : !pto.tile_buf<loc=vec, dtype=ui16, rows=1, cols=16, v_row=1, v_col=16, blayout=row_major, slayout=none_box, fractal=512, pad=0>
+    pto.tci ins(%c7_ui16 : ui16) outs(%tile : !pto.tile_buf<loc=vec, dtype=ui16, rows=1, cols=16, v_row=1, v_col=16, blayout=row_major, slayout=none_box, fractal=512, pad=0>)
+    pto.tstore ins(%tile : !pto.tile_buf<loc=vec, dtype=ui16, rows=1, cols=16, v_row=1, v_col=16, blayout=row_major, slayout=none_box, fractal=512, pad=0>) outs(%dst : !pto.partition_tensor_view<1x16xui16>) {layout = #pto.layout<nd>, pto.inferred_layout = true}
+    return
+  }
+}
+
+// A3: TCI<{{.*}}, uint16_t, 0>(
+// A3-NOT: TCI<{{.*}}, int16_t, 0>(

@@ -1,0 +1,60 @@
+// Copyright (c) 2026 Huawei Technologies Co., Ltd.
+// This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+// CANN Open Software License Agreement Version 2.0 (the "License").
+// Please refer to the License for details. You may not use this file except in compliance with the License.
+// THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+// INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+// See LICENSE in the root of the software repository for the full text of the License.
+
+// RUN: ptoas --pto-arch=a3 --enable-insert-sync %s -o - 2>&1 | FileCheck %s
+// RUN: ptoas --pto-arch=a3 --enable-graph-sync-solver --graph-sync-solver-event-id-max=8 %s -o - 2>&1 | FileCheck %s
+
+// Preload outside the loop and the dynamic-slot loop body both perform
+// tload -> tstore on the selected tile, so both regions should lower to a
+// concrete set_flag/wait_flag pair.
+
+module {
+  func.func @preload_and_loop_set_wait(
+      %gm : !pto.partition_tensor_view<16x16xf16>,
+      %dst : !pto.partition_tensor_view<16x16xf16>,
+      %n : index) {
+    %c0 = arith.constant 0 : index
+    %c1 = arith.constant 1 : index
+    %c2 = arith.constant 2 : index
+
+    %mb = pto.alloc_multi_tile
+        : !pto.multi_tile_buf<vec, 16x16xf16, count=2>
+
+    // Loop-external preload path uses a constant slot id.
+    %pre = pto.multi_tile_get %mb[%c0]
+        : !pto.multi_tile_buf<vec, 16x16xf16, count=2>
+       -> !pto.tile_buf<vec, 16x16xf16>
+    pto.tload ins(%gm : !pto.partition_tensor_view<16x16xf16>)
+              outs(%pre : !pto.tile_buf<vec, 16x16xf16>)
+    pto.tstore ins(%pre : !pto.tile_buf<vec, 16x16xf16>)
+               outs(%dst : !pto.partition_tensor_view<16x16xf16>)
+
+    scf.for %i = %c0 to %n step %c1 {
+      %idx = arith.remui %i, %c2 : index
+      %slot = pto.multi_tile_get %mb[%idx]
+          : !pto.multi_tile_buf<vec, 16x16xf16, count=2>
+         -> !pto.tile_buf<vec, 16x16xf16>
+      pto.tload ins(%gm : !pto.partition_tensor_view<16x16xf16>)
+                outs(%slot : !pto.tile_buf<vec, 16x16xf16>)
+      pto.tstore ins(%slot : !pto.tile_buf<vec, 16x16xf16>)
+                 outs(%dst : !pto.partition_tensor_view<16x16xf16>)
+    }
+    return
+  }
+}
+
+// CHECK-LABEL: AICORE void preload_and_loop_set_wait
+// CHECK: TLOAD([[PRE:[_A-Za-z][_A-Za-z0-9]*]],
+// CHECK: set_flag(PIPE_MTE2, PIPE_MTE3, EVENT_ID[[PRE_EID:[0-9]+]]);
+// CHECK-NEXT: wait_flag(PIPE_MTE2, PIPE_MTE3, EVENT_ID[[PRE_EID]]);
+// CHECK: TSTORE({{[_A-Za-z][_A-Za-z0-9]*}}, [[PRE]]);
+// CHECK: for (
+// CHECK: TLOAD([[LOOP:[_A-Za-z][_A-Za-z0-9]*]],
+// CHECK: set_flag(PIPE_MTE2, PIPE_MTE3, EVENT_ID[[LOOP_EID:[0-9]+]]);
+// CHECK-NEXT: wait_flag(PIPE_MTE2, PIPE_MTE3, EVENT_ID[[LOOP_EID]]);
+// CHECK: TSTORE({{[_A-Za-z][_A-Za-z0-9]*}}, [[LOOP]]);

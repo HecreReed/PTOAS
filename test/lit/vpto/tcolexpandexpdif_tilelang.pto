@@ -1,0 +1,38 @@
+// Test that ExpandTileOp + InlineLibCall + FoldTileBufIntrinsics pipeline
+// expands pto.tcolexpandexpdif via the PTODSL TileLib template
+//
+// Pipeline: ExpandTileOp -> InlineLibCall -> FoldTileBufIntrinsics
+//
+// RUN: ptoas --pto-arch=a5 --pto-backend=vpto --emit-vpto --enable-tile-op-expand %s -o - 2>/dev/null | FileCheck %s
+
+// After the full tile-op-expand path on the VPTO backend, the original
+// pto.tcolexpandexpdif should be lowered to vector-style VPTO IR.
+// CHECK: func.func @TCOLEXPANDEXPDIF
+// CHECK-NOT: pto.tcolexpandexpdif ins
+// CHECK: pto.vecscope
+// CHECK: pto.castptr
+// CHECK: pto.vlds
+// CHECK: pto.vexpdif
+// CHECK: pto.vsts
+
+module attributes {pto.kernel_kind = #pto.kernel_kind<vector>} {
+  func.func @TCOLEXPANDEXPDIF() {
+    %src0 = pto.alloc_tile
+      : !pto.tile_buf<loc=vec, dtype=f32, rows=16, cols=64, v_row=16, v_col=64,
+                      blayout=row_major, slayout=none_box, fractal=512, pad=0>
+    %src1 = pto.alloc_tile
+      : !pto.tile_buf<loc=vec, dtype=f32, rows=1, cols=64, v_row=1, v_col=64,
+                      blayout=row_major, slayout=none_box, fractal=512, pad=0>
+    %dst = pto.alloc_tile
+      : !pto.tile_buf<loc=vec, dtype=f32, rows=16, cols=64, v_row=16, v_col=64,
+                      blayout=row_major, slayout=none_box, fractal=512, pad=0>
+
+    pto.tcolexpandexpdif ins(%src0, %src1 : !pto.tile_buf<loc=vec, dtype=f32, rows=16, cols=64, v_row=16, v_col=64,
+                               blayout=row_major, slayout=none_box, fractal=512, pad=0>,
+                           !pto.tile_buf<loc=vec, dtype=f32, rows=1, cols=64, v_row=1, v_col=64,
+                               blayout=row_major, slayout=none_box, fractal=512, pad=0>)
+              outs(%dst : !pto.tile_buf<loc=vec, dtype=f32, rows=16, cols=64, v_row=16, v_col=64,
+                                    blayout=row_major, slayout=none_box, fractal=512, pad=0>)
+    return
+  }
+}

@@ -227,7 +227,7 @@ pto.tfree_from_aiv(%entry : !pto.tensor_view<...>) {id = 0, split = 0}
 
 以上前端数据传输接口中的 `id` 和 `split` 均为编译期常量属性，不是运行时 SSA operand。
 
-- 取值使用 `TileSplitAxis` 枚举语义：`0/1/2` 分别对应 `TILE_NO_SPLIT`、`TILE_UP_DOWN`、`TILE_LEFT_RIGHT`
+- 取值使用 `TileSplitAxis` 枚举语义：`0/1/2/3/4` 分别对应 `TILE_NO_SPLIT`、`TILE_UP_DOWN`、`TILE_LEFT_RIGHT`、`TILE_UP_DOWN_ODD`、`TILE_LEFT_RIGHT_ODD`
 - lowering 到 PTOAS 内部 IR 时，`split` 继续以属性形式保留
 - `global` entry 的 result type 和 matched initialize op 的 `gm_slot_tensor` metadata 是底层 `GlobalData` 模板实参的 IR 描述；其 element type、静态 shape 与 stride/layout 必须描述完整 FIFO slot。若 consumer 只加载 slot 的子区域，应先 pop 完整 slot descriptor，再由该 descriptor 派生更窄的 GM view。
 
@@ -380,7 +380,14 @@ func.func @vector_kernel(%gm_slot_buffer : !pto.ptr<f32>,
 - 单函数允许多条 `import_reserved_buffer`
 - `DIR_MASK` 只允许 `1`、`2`、`3`
 - `SLOT_SIZE > 0`
-- 使用 consumer 侧 local FIFO buffer 时，`reserve_buffer.size == SLOT_SIZE * SLOT_NUM`
+- 使用 consumer 侧 local FIFO buffer 时，`reserve_buffer.size` 表示该
+  consumer FIFO 实际预留的本地字节数。A2/A3 GM FIFO 路径要求
+  `reserve_buffer.size == SLOT_SIZE * EFFECTIVE_LOCAL_SLOT_NUM`，其中
+  `EFFECTIVE_LOCAL_SLOT_NUM` 为显式 `local_slot_num`，缺省时为有效
+  `slot_num`。A5 L2L 路径不支持 `local_slot_num`，要求
+  `reserve_buffer.size == SLOT_SIZE * EFFECTIVE_SLOT_NUM`。这里的
+  `EFFECTIVE_SLOT_NUM` 为显式 `slot_num`，缺省时 `DIR_MASK=1/2` 为 `8`、
+  `DIR_MASK=3` 为 `4`
 - 使用 consumer 侧 local FIFO buffer 时，C2V consumer 的 `reserve_buffer.location` 必须是 `VEC`
 - 使用 consumer 侧 local FIFO buffer 时，V2C consumer 的 `reserve_buffer.location` 必须是 `MAT`
 - `reserve_buffer.name` 在本函数内必须唯一
@@ -390,7 +397,7 @@ func.func @vector_kernel(%gm_slot_buffer : !pto.ptr<f32>,
 - 启用 local address planning 的编译流程：`reserve_buffer` 只允许 `auto = true`
 - 跳过 local address planning 的编译流程：`reserve_buffer` 只允许 `auto = false` 且显式提供 `base`
 - `import_reserved_buffer` 必须能在 `peer_func` 中找到同名 `reserve_buffer`
-- global-only GM FIFO 的 initialize 只提供 `gm_slot_tensor`，不提供 `gm_slot_buffer`、`local_slot_num`、`c2v_consumer_buf`、`v2c_consumer_buf`，且不要求成对的 `reserve_buffer` / `import_reserved_buffer`
+- global-only GM FIFO 的 initialize 只提供 `gm_slot_tensor`（可附带 `slot_num`），不提供 `gm_slot_buffer`、`local_slot_num`、`c2v_consumer_buf`、`v2c_consumer_buf`，且不要求成对的 `reserve_buffer` / `import_reserved_buffer`
 
 ## 4. 核心约定
 
@@ -414,6 +421,13 @@ handle。
 - `TILE_NO_SPLIT`
 - `TILE_UP_DOWN`
 - `TILE_LEFT_RIGHT`
+- `TILE_UP_DOWN_ODD`
+- `TILE_LEFT_RIGHT_ODD`
+
+当前 odd 模式仅允许单向 C2V 的 GM-backed tile pipe。前端 initialize 必须同时提供
+`gm_slot_tensor` 和 `c2v_consumer_buf`，lowering 后对应带 local consumer buffer 的
+`pto.initialize_l2g2l_pipe`。local C2V、V2C、双向 pipe 以及 GlobalTensor entry
+暂不允许 odd 模式，因为固定版本的 pto-isa 尚未实现这些数据传输/offset 路径。
 
 在 PTOAS 设计中，`split` 的角色定义为：
 
@@ -435,7 +449,7 @@ handle。
 
 - 切分前完整 pipe entry 的字节数
 
-即使 `split` 为 `TILE_UP_DOWN` 或 `TILE_LEFT_RIGHT`，`SLOT_SIZE` 仍然表示未切分前的逻辑 pipe entry 总字节数。
+即使 `split` 为 `TILE_UP_DOWN`、`TILE_LEFT_RIGHT`、`TILE_UP_DOWN_ODD` 或 `TILE_LEFT_RIGHT_ODD`，`SLOT_SIZE` 仍然表示未切分前的逻辑 pipe entry 总字节数。
 
 `split` 只影响底层 `TALLOC/TPUSH/TPOP/TFREE` 的执行方式，不影响 `SLOT_SIZE` 的含义。
 
@@ -444,8 +458,14 @@ handle。
 - `TILE_NO_SPLIT`：不增加 sub-core offset
 - `TILE_UP_DOWN`：sub-core offset 为 `get_subblockid() * rows * cols * sizeof(dtype)`
 - `TILE_LEFT_RIGHT`：sub-core offset 为 `get_subblockid() * cols * sizeof(dtype)`
+- `TILE_UP_DOWN_ODD`：奇数有效行由 AIV0/AIV1 按 `ceil(rows / 2)` 与 `floor(rows / 2)` 切分
+- `TILE_LEFT_RIGHT_ODD`：奇数有效列由 AIV0/AIV1 按 `ceil(cols / 2)` 与 `floor(cols / 2)` 切分
 
-其中 `rows`、`cols` 与 `dtype` 来自 entry 对应底层 `GlobalData` 的静态 shape 与 `RawDType`。PTOAS IR 因此要求 `global` entry 的类型和 view metadata 描述完整 FIFO slot，而不是仅描述 consumer 最终要读取的子 tile。
+GM tile 路径中的偶数和奇数切分模式都使用运行时 valid shape 计算 offset 与
+row stride。odd 模式不会自动推导两个子核的 valid shape：前端必须根据
+`pto.get_subblock_idx` 为 AIV0 传入 `ceil` 半块、为 AIV1 传入 `floor` 半块，
+并把不同的 `valid_row` / `valid_col` operand 传给 `tpop`。描述 GM slot 的
+metadata 仍必须覆盖切分前的完整 FIFO slot。
 
 ### 4.4 `SLOT_NUM` 规则
 
@@ -515,8 +535,10 @@ DIR_BOTH 示例：
     `pto.aic_initialize_pipe` / `pto.aiv_initialize_pipe` 提供并在 A2/A3 lowering 时转发
   - 表示 GM 路径下 consumer 侧 local slot buffer 的槽数，仅在存在 local FIFO buffer 的 tile-entry 路径有意义
   - 仅在通过 GM 传递时对底层 `TPipe` 模板参数有意义，不改变 GM FIFO 的 `slot_num`
+  - A2/A3 consumer 侧 `reserve_buffer.size` 应按
+    `slot_size * effective_local_slot_num` 预留
   - 存在 local FIFO buffer 且缺省时，默认值等于该内部 pipe 的 `slot_num`
-  - 因此当前固定规则下：
+  - 因此前端未显式指定 `slot_num` 时：
     - `DIR_MASK=1/2` 直接 lowering 时，`local_slot_num = 8`
     - `DIR_MASK=3` 单条 DIR_BOTH pipe，`local_slot_num = 4`
   - global-only GM FIFO 不携带 `local_slot_num`
@@ -658,20 +680,24 @@ pto.tfree(%entry, %pipe : !pto.tensor_view<128x512xf32>, !pto.pipe) {split = 0}
 #### A2/A3
 
 - `pto.aic_initialize_pipe` 和 `pto.aiv_initialize_pipe` lower 为 `pto.initialize_l2g2l_pipe`
-- 若前端 init 只提供 `gm_slot_tensor`，则 lower 为只携带 `gm_slot_tensor` 的 global-only GM FIFO；不补 `local_slot_num`，不生成 local consumer address operand，也不依赖 `reserve_buffer` / `import_reserved_buffer`
+- 若前端 init 只提供 `gm_slot_tensor`（可附带 `slot_num`），则 lower 为只携带 `gm_slot_tensor` 的 global-only GM FIFO；不补 `local_slot_num`，不生成 local consumer address operand，也不依赖 `reserve_buffer` / `import_reserved_buffer`
 - 若前端提供了 consumer 侧 local FIFO buffer，且提供了 `local_slot_num`，则直接转发到 lowered
   `pto.initialize_l2g2l_pipe`
-- 若前端提供了 consumer 侧 local FIFO buffer 但未提供更具体信息，lowering 默认补上 `local_slot_num = slot_num`
+- 若前端提供了 consumer 侧 local FIFO buffer 但未提供 `local_slot_num`，lowering 默认补上 `local_slot_num = slot_num`
 
 #### A5
 
 - `pto.aic_initialize_pipe` 和 `pto.aiv_initialize_pipe` lower 为 `pto.initialize_l2l_pipe`
+- A5 不支持 `local_slot_num`；前端 init 若显式携带该属性，verifier 会报错
+- A5 的 consumer 侧 `reserve_buffer.size` 不由 `local_slot_num` 决定；A5
+  L2L pipe 本地 FIFO 地址按 `slot_num` 取模，按
+  `slot_size * effective_slot_num` 预留本地 FIFO buffer
 
 ### 6.2 `DIR_MASK=1/2`
 
 - 只生成一条内部 pipe
-- `slot_num = 8`
-- 对带 consumer 侧 local FIFO buffer 的 `initialize_l2g2l_pipe`，默认 `local_slot_num = 8`
+- `slot_num` 缺省为 `8`，也可由前端显式指定
+- 对带 consumer 侧 local FIFO buffer 的 `initialize_l2g2l_pipe`，默认 `local_slot_num = slot_num`
 - 若前端显式提供 `local_slot_num`，则使用显式值
 - global-only GM FIFO 不携带 `local_slot_num`，地址/descriptor 操作数只有 `gm_slot_tensor`
 
@@ -679,8 +705,8 @@ pto.tfree(%entry, %pipe : !pto.tensor_view<128x512xf32>, !pto.pipe) {split = 0}
 
 前端一个 init op 生成**单条** DIR_BOTH 内部 pipe：
 
-- `%pipe`：`dir_mask = 3`，`slot_num = 4`
-- 若 lowering 为带 consumer 侧 local FIFO buffer 的 `initialize_l2g2l_pipe`，默认 `local_slot_num = 4`
+- `%pipe`：`dir_mask = 3`，`slot_num` 缺省为 `4`，也可由前端显式指定
+- 若 lowering 为带 consumer 侧 local FIFO buffer 的 `initialize_l2g2l_pipe`，默认 `local_slot_num = slot_num`
 - 若前端显式提供 `local_slot_num`，则使用显式值
 
 地址选择规则：
@@ -977,13 +1003,16 @@ pass 在模块级按两步执行：
 
 ### 9.1 前端 verifier
 
-前端 verifier 负责检查：
+前端 IR 需满足以下约束：
 
 - 每个函数 init op 数量是否合法
 - 每个函数 `reserve_buffer` / `import_reserved_buffer` 数量是否合法
 - `DIR_MASK` 取值是否合法
 - `SLOT_SIZE > 0`
-- 使用 consumer 侧 local FIFO buffer 时，`reserve_buffer.size == SLOT_SIZE * SLOT_NUM`
+- 使用 consumer 侧 local FIFO buffer 时，`reserve_buffer.size` 必须匹配对应
+  pipe 的本地 FIFO 字节数：A2/A3 GM FIFO 路径为
+  `SLOT_SIZE * EFFECTIVE_LOCAL_SLOT_NUM`，A5 L2L 路径为
+  `SLOT_SIZE * EFFECTIVE_SLOT_NUM`
 - 使用 consumer 侧 local FIFO buffer 时，`reserve_buffer.location` 与 consumer 函数类型匹配
 - `reserve_buffer.name` 在函数内唯一
 - `import_reserved_buffer` 的 `(name, peer_func)` 在函数内唯一
@@ -995,7 +1024,7 @@ pass 在模块级按两步执行：
 - 方向相关 op 只能出现在合法 kernel 中
 - 前端数据传输 op 的 `split` 必须是合法的编译期常量属性
 - `global` entry 形式的 `talloc_to_*` / `tpush_to_*` / `tpop_from_*` / `tfree_from_*` 只能绑定到 GM FIFO pipe（A2/A3 `initialize_l2g2l_pipe` 路径）
-- 绑定到 global-only GM FIFO 的 initialize 只允许携带 `gm_slot_tensor`，不得携带 `gm_slot_buffer`、`local_slot_num`、`c2v_consumer_buf`、`v2c_consumer_buf`；该路径不要求 `reserve_buffer` / `import_reserved_buffer`
+- 绑定到 global-only GM FIFO 的 initialize 只允许携带 `gm_slot_tensor`（可附带 `slot_num`），不得携带 `gm_slot_buffer`、`local_slot_num`、`c2v_consumer_buf`、`v2c_consumer_buf`；该路径不要求 `reserve_buffer` / `import_reserved_buffer`
 - `gm_slot_tensor` 本身描述单个 slot entry；其字节数必须匹配 `slot_size`
 - `talloc_to_*` / `tpop_from_*` 返回的 `tensor_view` 类型必须匹配 `gm_slot_tensor`
 - `global` entry 的 dtype、shape 与 stride/layout 必须足以生成底层 `GlobalTensor<RawDType, Shape, Stride, Layout>` 类型
@@ -1008,11 +1037,12 @@ pass 在模块级按两步执行：
 内部 verifier 负责检查：
 
 - `slot_size > 0`
-- `slot_num` 只允许 `8` 或 `4`
-- `DIR_MASK=1/2` 时，`slot_num` 必须与单向/双向 lowering 规则一致
+- `slot_num >= 1`
+- legacy 前端 `pto.aic_initialize_pipe` / `pto.aiv_initialize_pipe` 可显式提供
+  `slot_num`；缺省时 `DIR_MASK=1/2` 使用 `8`，`DIR_MASK=3` 使用 `4`
 - `local_slot_num` 若出现，可出现在 `pto.initialize_l2g2l_pipe` 或 legacy 前端
   `pto.aic_initialize_pipe` / `pto.aiv_initialize_pipe` 上，且必须大于 `0`
-  且不大于其对应 lowering 规则下的 `slot_num`；global-only GM FIFO 不携带 `local_slot_num`
+  且不大于其有效 `slot_num`；A5 和 global-only GM FIFO 不携带 `local_slot_num`
 - `flag_base` 若出现，必须满足基本合法性；是否已填写以及具体分配值由 flag 分配保证
 - `pto.initialize_l2g2l_pipe` 必须提供 `gm_addr` 或 `gm_slot_tensor`；只有存在 consumer 侧 local FIFO buffer 时才提供 `local_addr` / `peer_local_addr`
 - `pto.initialize_l2l_pipe` 必须提供 `local_addr`

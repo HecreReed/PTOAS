@@ -6,8 +6,8 @@
 # INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
 # See LICENSE in the root of the software repository for the full text of the License.
 
-from mlir.ir import Context, Location, Module, InsertionPoint, IndexType, F32Type
-from mlir.dialects import func, arith, pto
+from ptoas.mlir.ir import Context, Location, Module, InsertionPoint, IndexType, F32Type, UnitAttr
+from ptoas.mlir.dialects import func, arith, pto
 
 def build_sections_test():
     with Context() as ctx:
@@ -41,6 +41,7 @@ def build_sections_test():
 
             with InsertionPoint(m.body):
                 fn = func.FuncOp("test_cube_vector_sections", fn_ty)
+                fn.operation.attributes["pto.entry"] = UnitAttr.get(ctx)
                 entry = fn.add_entry_block()
 
             with InsertionPoint(entry):

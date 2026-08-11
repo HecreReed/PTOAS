@@ -1,0 +1,45 @@
+// Copyright (c) 2026 Huawei Technologies Co., Ltd.
+// This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+// CANN Open Software License Agreement Version 2.0 (the "License").
+// Please refer to the License for details. You may not use this file except in compliance with the License.
+// THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+// INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+// See LICENSE in the root of the software repository for the full text of the License.
+
+// RUN: ptoas --pto-level=level2 --pto-arch=a3 --plan-memory-impl=modern --emit-pto-ir \
+// RUN:   --mlir-print-ir-after=pto-plan-memory %s 2>&1 1>/dev/null | FileCheck %s
+
+module attributes {"pto.target_arch" = "a3"} {
+  func.func @spec_level0_no_reuse_overlap(
+      %gm : !pto.ptr<f16>) {
+    %c0 = arith.constant 0 : index
+    %c1 = arith.constant 1 : index
+    %c32 = arith.constant 32 : index
+    %gm_view = pto.make_tensor_view %gm,
+      shape = [%c1, %c1, %c1, %c32, %c32],
+      strides = [%c32, %c32, %c32, %c32, %c1]
+      : !pto.tensor_view<1x1x1x32x32xf16>
+    %gm_part = pto.partition_view %gm_view,
+      offsets = [%c0, %c0, %c0, %c0, %c0],
+      sizes = [%c1, %c1, %c1, %c32, %c32]
+      : !pto.tensor_view<1x1x1x32x32xf16>
+     -> !pto.partition_tensor_view<1x1x1x32x32xf16>
+    %src = pto.alloc_tile : !pto.tile_buf<vec, 32x32xf16>
+    %dst = pto.alloc_tile : !pto.tile_buf<vec, 32x32xf16>
+
+    pto.tload ins(%gm_part : !pto.partition_tensor_view<1x1x1x32x32xf16>)
+              outs(%src : !pto.tile_buf<vec, 32x32xf16>) {layout = #pto.layout<nd>}
+    pto.tmov ins(%src : !pto.tile_buf<vec, 32x32xf16>)
+             outs(%dst : !pto.tile_buf<vec, 32x32xf16>)
+    pto.tstore ins(%src : !pto.tile_buf<vec, 32x32xf16>)
+               outs(%gm_part : !pto.partition_tensor_view<1x1x1x32x32xf16>) {layout = #pto.layout<nd>}
+    return
+  }
+}
+
+// CHECK-LABEL: func.func @spec_level0_no_reuse_overlap
+// CHECK-DAG: %[[ADDR0:.*]] = arith.constant 0 : i64
+// CHECK-DAG: %[[ADDR1:.*]] = arith.constant 2048 : i64
+// CHECK: pto.alloc_tile addr = %[[ADDR0]]
+// CHECK: pto.alloc_tile addr = %[[ADDR1]]
+// CHECK-NOT: memref.alloc

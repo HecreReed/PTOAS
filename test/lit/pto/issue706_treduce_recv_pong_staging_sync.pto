@@ -1,0 +1,61 @@
+// Copyright (c) 2026 Huawei Technologies Co., Ltd.
+// This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+// CANN Open Software License Agreement Version 2.0 (the "License").
+// Please refer to the License for details. You may not use this file except in compliance with the License.
+// THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+// INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+// See LICENSE in the root of the software repository for the full text of the License.
+
+// TREDUCE ping-pong mode uses recvPong as an internal receive staging tile.
+// InsertSync must model that hidden write so later tile users cannot race with
+// the MTE2 receive inside the library call.
+//
+// RUN: ptoas --pto-arch=a3 --enable-insert-sync %s -o - 2>&1 | FileCheck %s
+
+module {
+  func.func @treduce_reuses_recv_pong_after_call(
+      %dst_ptr: !pto.ptr<f32>,
+      %peer_ptr: !pto.ptr<f32>)
+      attributes {pto.kernel_kind = #pto.kernel_kind<vector>} {
+    %c0 = arith.constant 0 : index
+    %c1 = arith.constant 1 : index
+    %c32 = arith.constant 32 : index
+
+    %acc = pto.alloc_tile :
+      !pto.tile_buf<loc=vec, dtype=f32, rows=1, cols=32, v_row=1, v_col=32, blayout=row_major, slayout=none_box, fractal=512, pad=0>
+    %ping = pto.alloc_tile :
+      !pto.tile_buf<loc=vec, dtype=f32, rows=1, cols=32, v_row=1, v_col=32, blayout=row_major, slayout=none_box, fractal=512, pad=0>
+    %pong = pto.alloc_tile :
+      !pto.tile_buf<loc=vec, dtype=f32, rows=1, cols=32, v_row=1, v_col=32, blayout=row_major, slayout=none_box, fractal=512, pad=0>
+    %reuse = pto.alloc_tile :
+      !pto.tile_buf<loc=vec, dtype=f32, rows=1, cols=32, v_row=1, v_col=32, blayout=row_major, slayout=none_box, fractal=512, pad=0>
+
+    %dst_view = pto.make_tensor_view %dst_ptr,
+      shape = [%c1, %c32], strides = [%c32, %c1] : !pto.tensor_view<?x?xf32>
+    %dst = pto.partition_view %dst_view,
+      offsets = [%c0, %c0], sizes = [%c1, %c32]
+      : !pto.tensor_view<?x?xf32> -> !pto.partition_tensor_view<1x32xf32>
+
+    %peer_view = pto.make_tensor_view %peer_ptr,
+      shape = [%c1, %c32], strides = [%c32, %c1] : !pto.tensor_view<?x?xf32>
+    %peer = pto.partition_view %peer_view,
+      offsets = [%c0, %c0], sizes = [%c1, %c32]
+      : !pto.tensor_view<?x?xf32> -> !pto.partition_tensor_view<1x32xf32>
+
+    pto.comm.treduce(%dst, %acc, recv(%ping, %pong), group(%peer) :
+        !pto.partition_tensor_view<1x32xf32>,
+        !pto.tile_buf<loc=vec, dtype=f32, rows=1, cols=32, v_row=1, v_col=32, blayout=row_major, slayout=none_box, fractal=512, pad=0>,
+        !pto.tile_buf<loc=vec, dtype=f32, rows=1, cols=32, v_row=1, v_col=32, blayout=row_major, slayout=none_box, fractal=512, pad=0>,
+        !pto.tile_buf<loc=vec, dtype=f32, rows=1, cols=32, v_row=1, v_col=32, blayout=row_major, slayout=none_box, fractal=512, pad=0>,
+        !pto.partition_tensor_view<1x32xf32>) {reduceOp = #pto<reduce_op sum>, root = 0 : i32}
+    pto.tmov ins(%pong : !pto.tile_buf<loc=vec, dtype=f32, rows=1, cols=32, v_row=1, v_col=32, blayout=row_major, slayout=none_box, fractal=512, pad=0>)
+             outs(%reuse : !pto.tile_buf<loc=vec, dtype=f32, rows=1, cols=32, v_row=1, v_col=32, blayout=row_major, slayout=none_box, fractal=512, pad=0>)
+    return
+  }
+}
+
+// CHECK-LABEL: AICORE void treduce_reuses_recv_pong_after_call(
+// CHECK:      pto::comm::TREDUCE(
+// CHECK:      set_flag(PIPE_MTE2, PIPE_V, EVENT_ID[[PONG:[0-9]+]]);
+// CHECK-NEXT: wait_flag(PIPE_MTE2, PIPE_V, EVENT_ID[[PONG]]);
+// CHECK-NEXT: TMOV(

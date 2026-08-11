@@ -15,9 +15,9 @@ Reference:
   - pto-as/test/samples/MatMul/tmatmulk.py
 """
 
-from mlir.ir import Context, Location, InsertionPoint, IndexType, IntegerType, F32Type, StringAttr
-from mlir.dialects import func, arith, scf, pto, builtin
-from mlir.dialects.pto import TLOAD, TMOV_M2L, TMATMUL, TSTORE_ACC, EVENT_ID0
+from ptoas.mlir.ir import Context, Location, InsertionPoint, IndexType, IntegerType, F32Type, StringAttr, UnitAttr
+from ptoas.mlir.dialects import func, arith, scf, pto, builtin
+from ptoas.mlir.dialects.pto import TLOAD, TMOV_M2L, TMATMUL, TSTORE_ACC, EVENT_ID0
 
 
 def _idx_const(v: int):
@@ -140,6 +140,7 @@ def build(
         )
         with InsertionPoint(module.body):
             fn = func.FuncOp("RunTEXTRACT", fn_ty)
+            fn.operation.attributes["pto.entry"] = UnitAttr.get(ctx)
             entry = fn.add_entry_block()
 
         with InsertionPoint(entry):

@@ -1,0 +1,22 @@
+// Copyright (c) 2026 Huawei Technologies Co., Ltd.
+// This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+// the CANN Open Software License Agreement Version 2.0 (the "License").
+// Please refer to the License for details. You may not use this file except in compliance with the License.
+// THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, EXPRESS OR IMPLIED,
+// INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+// See LICENSE in the root of the software repository for the full text of the License.
+
+// RUN: not ptoas --pto-arch=a5 --pto-backend=vpto --emit-vpto %s -o /dev/null 2>&1 | FileCheck %s
+
+module attributes {pto.target_arch = "a5", pto.kernel_kind = #pto.kernel_kind<vector>} {
+  func.func @inline_simt_kernel_invalid_threads(%dst: !pto.ptr<i32, ub>) attributes {pto.entry} {
+    pto.section.simt<<<64, 64, 1>>> {
+      %c0 = arith.constant 0 : index
+      %tid = pto.get_tid_x : i32
+      pto.store %tid, %dst[%c0] : !pto.ptr<i32, ub>, i32
+    }
+    return
+  }
+}
+
+// CHECK: error: 'pto.section.simt' op SIMT launch dimensions must have a positive product no greater than 2048, got (64, 64, 1)

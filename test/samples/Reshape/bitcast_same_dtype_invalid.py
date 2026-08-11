@@ -6,9 +6,9 @@
 # INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
 # See LICENSE in the root of the software repository for the full text of the License.
 
-from mlir.ir import Context, Location, Module, InsertionPoint, MLIRError
-from mlir.dialects import func, pto
-from mlir.ir import F32Type
+from ptoas.mlir.ir import Context, Location, Module, InsertionPoint, MLIRError, UnitAttr
+from ptoas.mlir.dialects import func, pto
+from ptoas.mlir.ir import F32Type
 
 
 def build():
@@ -35,6 +35,7 @@ def build():
             fn_ty = func.FunctionType.get([], [])
             with InsertionPoint(m.body):
                 fn = func.FuncOp("bitcast_same_dtype_invalid", fn_ty)
+                fn.operation.attributes["pto.entry"] = UnitAttr.get(ctx)
                 entry = fn.add_entry_block()
 
             with InsertionPoint(entry):

@@ -1,0 +1,89 @@
+// Copyright (c) 2026 Huawei Technologies Co., Ltd.
+// This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+// CANN Open Software License Agreement Version 2.0 (the "License").
+// Please refer to the License for details. You may not use this file except in compliance with the License.
+// THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+// INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+// See LICENSE in the root of the software repository for the full text of the License.
+
+// RUN: ptoas --enable-insert-sync --mlir-print-ir-after=pto-insert-sync %s 2>&1 1>/dev/null | FileCheck %s
+// RUN: ptoas --enable-graph-sync-solver --graph-sync-solver-event-id-max=8 --mlir-print-ir-after=pto-graph-sync-solver %s 2>&1 1>/dev/null | FileCheck %s --check-prefix=GSS
+
+// Affine slot disjoint optimization: producer touches slot `(iv+1) % 2`,
+// consumer touches slot `iv % 2`. The slot SSA expressions are provably
+// different in every iteration, so the same-iter forward MTE2 -> MTE3
+// dependency is dropped entirely. The back-edge MTE3 -> MTE2 dep across
+// iterations still gets the per-slot dyn flag pipelining.
+//
+// Without affine analysis, InsertSync would conservatively emit
+// `set_flag[MTE2 -> MTE3, EVENT_ID0]` / `wait_flag[MTE2 -> MTE3,
+// EVENT_ID0]` per iteration even though the producer/consumer slots
+// cannot overlap same-iter. With affine the pair is provably disjoint
+// and the same-iter sync is skipped.
+
+module {
+  func.func @prefetch_disjoint_slots(
+      %gm : !pto.partition_tensor_view<16x16xf16>,
+      %dst : !pto.partition_tensor_view<16x16xf16>,
+      %n : index) {
+    %c0 = arith.constant 0 : index
+    %c1 = arith.constant 1 : index
+    %c2 = arith.constant 2 : index
+
+    %mb = pto.alloc_multi_tile
+        : !pto.multi_tile_buf<vec, 16x16xf16, count=2>
+
+    scf.for %i = %c0 to %n step %c1 {
+      %next = arith.addi %i, %c1 : index
+      %cur_idx = arith.remui %i,    %c2 : index
+      %nxt_idx = arith.remui %next, %c2 : index
+
+      // Producer (MTE2): tload writes slot (iv+1)%2.
+      %prod = pto.multi_tile_get %mb[%nxt_idx]
+          : !pto.multi_tile_buf<vec, 16x16xf16, count=2>
+         -> !pto.tile_buf<vec, 16x16xf16>
+      pto.tload ins(%gm : !pto.partition_tensor_view<16x16xf16>)
+                outs(%prod : !pto.tile_buf<vec, 16x16xf16>)
+
+      // Consumer (MTE3): tstore reads slot iv%2.
+      %cons = pto.multi_tile_get %mb[%cur_idx]
+          : !pto.multi_tile_buf<vec, 16x16xf16, count=2>
+         -> !pto.tile_buf<vec, 16x16xf16>
+      pto.tstore ins(%cons : !pto.tile_buf<vec, 16x16xf16>)
+                 outs(%dst : !pto.partition_tensor_view<16x16xf16>)
+    }
+    return
+  }
+}
+
+// Pre-loop primes 2 per-slot events for the back-edge sync.
+// CHECK-LABEL: func.func @prefetch_disjoint_slots
+// CHECK: pto.set_flag[<PIPE_MTE3>, <PIPE_MTE2>, <EVENT_ID0>]
+// CHECK: pto.set_flag[<PIPE_MTE3>, <PIPE_MTE2>, <EVENT_ID1>]
+// CHECK: scf.for
+// Loop body: back-edge dyn wait, the tload, then dyn set after tstore.
+// The same-iter MTE2 -> MTE3 forward sync has been dropped by the affine
+// disjoint-slot proof.
+// CHECK: pto.wait_flag_dyn[<PIPE_MTE3>, <PIPE_MTE2>,
+// CHECK: pto.tload
+// CHECK-NOT: pto.set_flag[<PIPE_MTE2>, <PIPE_MTE3>
+// CHECK-NOT: pto.wait_flag[<PIPE_MTE2>, <PIPE_MTE3>
+// CHECK: pto.tstore
+// CHECK: pto.set_flag_dyn[<PIPE_MTE3>, <PIPE_MTE2>,
+// Post-loop drains.
+// CHECK: pto.wait_flag[<PIPE_MTE3>, <PIPE_MTE2>, <EVENT_ID0>]
+// CHECK: pto.wait_flag[<PIPE_MTE3>, <PIPE_MTE2>, <EVENT_ID1>]
+
+// GSS-LABEL: func.func @prefetch_disjoint_slots
+// GSS: scf.for
+// GSS: pto.wait_flag_dyn[<PIPE_MTE3>, <PIPE_MTE2>,
+// GSS: pto.tload
+// GSS-NOT: pto.set_flag[<PIPE_MTE2>, <PIPE_MTE3>
+// GSS-NOT: pto.wait_flag[<PIPE_MTE2>, <PIPE_MTE3>
+// The MTE2->MTE3 loop-carried dependence remains dyn-slot keyed, but the
+// same-iteration static forward sync is filtered out.
+// GSS: pto.set_flag_dyn[<PIPE_MTE2>, <PIPE_MTE3>,
+// GSS-NOT: pto.set_flag[<PIPE_MTE2>, <PIPE_MTE3>
+// GSS-NOT: pto.wait_flag[<PIPE_MTE2>, <PIPE_MTE3>
+// GSS: pto.tstore
+// GSS: pto.set_flag_dyn[<PIPE_MTE3>, <PIPE_MTE2>,

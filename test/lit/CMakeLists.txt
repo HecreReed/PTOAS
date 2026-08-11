@@ -25,9 +25,18 @@ configure_lit_site_cfg(
 )
 
 set(PTOIR_TEST_DEPENDS
-  FileCheck count not
-  pto-opt
+  ptoas_runtime_deps
+  pto-test-opt
 )
+
+# Installed LLVM packages do not export the build-tree targets for these test
+# tools. Keep target dependencies when PTOAS uses an LLVM build tree without
+# rejecting an installed LLVM prefix during configuration.
+foreach(tool FileCheck count not)
+  if(TARGET ${tool})
+    list(APPEND PTOIR_TEST_DEPENDS ${tool})
+  endif()
+endforeach()
 
 add_lit_testsuite(check-pto "Running the pto regression tests"
         ${CMAKE_CURRENT_BINARY_DIR}

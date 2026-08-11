@@ -9,4 +9,4 @@ func.func @tget_scale_addr_verify_invalid() {
   return
 }
 
-// CHECK: error: 'pto.tget_scale_addr' op src: dtype 'f8E4M3FN' is not supported by this op yet
+// CHECK: error: 'pto.tget_scale_addr' op expects dst to be in the scaling address space

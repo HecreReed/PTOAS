@@ -1,0 +1,34 @@
+// RUN: ptoas --pto-arch=a5 --enable-bufid_sync %s -o - 2>&1 | FileCheck %s
+// RUN: not ptoas --pto-arch=a3 --enable-bufid_sync %s -o - 2>&1 | FileCheck %s --check-prefix=A3ERR
+//
+// CHECK: get_buf(PIPE_MTE2, [[ID:[0-9]+]], 0);
+// CHECK-NEXT: TLOAD
+// CHECK-NEXT: rls_buf(PIPE_MTE2, [[ID]], 0);
+// CHECK-NEXT: get_buf(PIPE_V, [[ID]], 0);
+// CHECK-NEXT: TRELU
+// CHECK-NEXT: rls_buf(PIPE_V, [[ID]], 0);
+// CHECK-NOT: set_flag
+// CHECK-NOT: wait_flag
+//
+// A3ERR: Error: --enable-bufid_sync requires --pto-arch=a5.
+
+module {
+  func.func @bufid_sync_a5_auto(%arg0: !pto.ptr<f32>, %argN: i32) {
+    %c0 = arith.constant 0 : index
+    %c1 = arith.constant 1 : index
+    %c32 = arith.constant 32 : index
+    %n = arith.index_cast %argN : i32 to index
+
+    pto.section.vector {
+      %tv0 = pto.make_tensor_view %arg0, shape = [%n], strides = [%c1] : !pto.tensor_view<?xf32>
+      %ptv0 = pto.partition_view %tv0, offsets = [%c0], sizes = [%c32] : !pto.tensor_view<?xf32> -> !pto.partition_tensor_view<32xf32>
+
+      %tb0 = pto.alloc_tile : !pto.tile_buf<loc=vec, dtype=f32, rows=1, cols=32, v_row=1, v_col=32, blayout=row_major, slayout=none_box, fractal=512, pad=0>
+      %tb1 = pto.alloc_tile : !pto.tile_buf<loc=vec, dtype=f32, rows=1, cols=32, v_row=1, v_col=32, blayout=row_major, slayout=none_box, fractal=512, pad=0>
+
+      pto.tload ins(%ptv0 : !pto.partition_tensor_view<32xf32>) outs(%tb0 : !pto.tile_buf<loc=vec, dtype=f32, rows=1, cols=32, v_row=1, v_col=32, blayout=row_major, slayout=none_box, fractal=512, pad=0>)
+      pto.trelu ins(%tb0 : !pto.tile_buf<loc=vec, dtype=f32, rows=1, cols=32, v_row=1, v_col=32, blayout=row_major, slayout=none_box, fractal=512, pad=0>) outs(%tb1 : !pto.tile_buf<loc=vec, dtype=f32, rows=1, cols=32, v_row=1, v_col=32, blayout=row_major, slayout=none_box, fractal=512, pad=0>)
+    }
+    return
+  }
+}

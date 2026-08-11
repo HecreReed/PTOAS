@@ -1,0 +1,9 @@
+// RUN: ptoas --pto-level=level3 %s >/dev/null
+
+module {
+  func.func @aligned_alloc_tile_addr() {
+    %ok = arith.constant 71232 : i64
+    %tile = pto.alloc_tile addr = %ok : !pto.tile_buf<loc=vec, dtype=f16, rows=32, cols=64, v_row=32, v_col=64, blayout=row_major, slayout=none_box, fractal=512, pad=0>
+    return
+  }
+}

@@ -1,0 +1,139 @@
+# Copyright (c) 2026 Huawei Technologies Co., Ltd.
+# This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+# CANN Open Software License Agreement Version 2.0 (the "License").
+# Please refer to the License for details. You may not use this file except in compliance with the License.
+# THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+# INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+# See LICENSE in the root of the software repository for the full text of the License.
+
+name: Watchdog
+
+on:
+  workflow_run:
+    workflows: ["ci-sim"]
+    types: [completed]
+
+permissions:
+  actions: read
+  contents: read
+  pull-requests: read
+
+jobs:
+  warn-slow-ci-sim:
+    if: ${{ github.event.workflow_run.event == 'pull_request' }}
+    runs-on: ubuntu-22.04
+    permissions:
+      actions: read
+      contents: read
+      issues: write
+      # The warning targets a pull request. Request PR write permission as well
+      # as issues write so both the ci-slow label and conversation comment can
+      # be updated by GITHUB_TOKEN under restrictive repository defaults.
+      pull-requests: write
+    env:
+      SOFT_TIMEOUT_MINUTES: ${{ vars.CI_SIM_SOFT_TIMEOUT_MINUTES || '90' }}
+      PR_CONTEXT_DIR: pr-context
+    steps:
+      # workflow_run executes this workflow from the default branch, so this
+      # checkout never runs a script supplied by the pull request.
+      - name: Checkout trusted watchdog scripts
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ github.repository }}
+          ref: ${{ github.event.repository.default_branch }}
+          persist-credentials: false
+
+      - name: Download PR context
+        uses: actions/download-artifact@v4
+        continue-on-error: true
+        with:
+          name: pr-context
+          path: pr-context
+          run-id: ${{ github.event.workflow_run.id }}
+          github-token: ${{ github.token }}
+
+      - name: Update slow CI warning
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ github.token }}
+          retries: 3
+          script: |
+            const observeRun = require('./.github/scripts/ci_sim_duration_warning.js');
+            core.info(await observeRun({github, context}));
+
+  rerun-self-hosted-git-failure:
+    if: >-
+      ${{
+        github.event.workflow_run.conclusion == 'failure' &&
+        github.event.workflow_run.run_attempt <= 8
+      }}
+    runs-on: ubuntu-22.04
+    permissions:
+      actions: write
+      contents: read
+      pull-requests: read
+    steps:
+      - name: Download PR context
+        uses: actions/download-artifact@v4
+        continue-on-error: true
+        with:
+          name: pr-context
+          path: pr-context
+          run-id: ${{ github.event.workflow_run.id }}
+          github-token: ${{ github.token }}
+
+      - name: Rerun self-hosted git failures
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          RUN_ID: ${{ github.event.workflow_run.id }}
+          RUN_HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          echo "Inspecting CI workflow run ${RUN_ID} in ${REPO}"
+          run_head_sha="${RUN_HEAD_SHA}"
+
+          # ── PR: validate that the run is still current for an open PR ──
+          if [[ -f pr-context/pr-number && -f pr-context/pr-head-sha ]]; then
+            pr_number="$(< pr-context/pr-number)"
+            pr_head_sha="$(< pr-context/pr-head-sha)"
+
+            if [[ ! "${pr_number}" =~ ^[0-9]+$ ||
+                  ! "${pr_head_sha}" =~ ^[0-9a-fA-F]{40}$ ]]; then
+              echo "Invalid pr-context artifact for workflow run ${RUN_ID}; skip rerun."
+              exit 0
+            fi
+
+            read -r pr_state current_head_sha < <(
+              gh api "repos/${REPO}/pulls/${pr_number}" \
+                --jq '[.state, .head.sha] | @tsv'
+            )
+            if [[ "${pr_state}" != "open" ]]; then
+              echo "PR #${pr_number} is ${pr_state}; skip rerun."
+              exit 0
+            fi
+
+            if [[ "${run_head_sha}" != "${current_head_sha}" ]]; then
+              echo "Workflow run ${RUN_ID} is stale for PR #${pr_number}; skip rerun."
+              echo "Run head SHA: ${run_head_sha}"
+              echo "Current PR head SHA: ${current_head_sha}"
+              exit 0
+            fi
+          fi
+          # ── schedule / workflow_dispatch: no pr-context artifact, the commit
+          #    is immutable.  run_attempt <= 8 prevents infinite retry loops.
+
+          git_failure_pattern='(error: RPC failed|Operation timed out|Connection timed out|connection timeout|Failed to connect|Could not resolve host|early EOF|fetch-pack|remote end hung up|GnuTLS recv error|TLS connection|HTTP/2 stream)'
+          log_file="failed.log"
+
+          echo "Downloading failed logs for workflow run ${RUN_ID}"
+          gh run view "${RUN_ID}" --repo "${REPO}" --log-failed > "${log_file}"
+
+          if grep -Eiq "${git_failure_pattern}" "${log_file}"; then
+            echo "Git/network failure detected; rerunning failed jobs."
+            gh api --method POST "repos/${REPO}/actions/runs/${RUN_ID}/rerun-failed-jobs"
+          else
+            echo "Failed jobs did not fail with a recognized git/network error; skip rerun."
+          fi

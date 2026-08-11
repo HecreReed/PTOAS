@@ -24,8 +24,14 @@ module {
   }
 }
 
-// CHECK: func.func @tstore_low_precision_a5_valid(%arg0: memref<16x16xf8E4M3FN>, %arg1: memref<16x16x!pto.hif8>, %arg2: i64)
-// CHECK: pto.tstore ins(
-// CHECK: outs(%arg0 : memref<16x16xf8E4M3FN>)
-// CHECK: pto.tstore ins(
-// CHECK: outs(%arg1 : memref<16x16x!pto.hif8>)
+// CHECK: func.func @tstore_low_precision_a5_valid(%arg0: !pto.partition_tensor_view<16x16xf8E4M3FN>, %arg1: !pto.partition_tensor_view<16x16x!pto.hif8>, %arg2: i64)
+// CHECK: %[[VEC:.*]] = pto.declare_tile -> !pto.tile_buf<vec, 16x16xf8E4M3FN>
+// CHECK: %[[ACC:.*]] = pto.declare_tile -> !pto.tile_buf<acc, 16x16xf32, blayout=col_major, slayout=row_major, fractal=1024>
+// CHECK: pto.section.vector {
+// CHECK: pto.tstore ins(%[[VEC]] : !pto.tile_buf<vec, 16x16xf8E4M3FN>)
+// CHECK: outs(%arg0 : !pto.partition_tensor_view<16x16xf8E4M3FN>)
+// CHECK: }
+// CHECK: pto.section.cube {
+// CHECK: pto.tstore ins(%[[ACC]] : !pto.tile_buf<acc, 16x16xf32, blayout=col_major, slayout=row_major, fractal=1024>, %arg2 : i64)
+// CHECK: outs(%arg1 : !pto.partition_tensor_view<16x16x!pto.hif8>)
+// CHECK: }

@@ -1,0 +1,578 @@
+name: CI
+
+concurrency:
+  group: ci-${{ github.event_name }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+  # Nightly remote-board validation (GitHub cron is UTC).
+  # 22:00 CST (UTC+8) == 14:00 UTC.
+  schedule:
+    - cron: "0 14 * * *"
+  workflow_dispatch:
+    inputs:
+      stage:
+        description: "Validation stage (build|run)"
+        type: choice
+        options: [build, run]
+        default: run
+      run_mode:
+        description: "Run mode passed to generated CMake (sim|npu)"
+        type: choice
+        options: [npu, sim]
+        default: npu
+      soc_version:
+        description: "Ascend SoC version (e.g. Ascend910B1)"
+        type: string
+        default: Ascend910
+      device_id:
+        description: "TaskQueue device selector (`auto` or physical device id)"
+        type: string
+        # NOTE: Shared A3 hosts now require task-submit queueing to obtain
+        # temporary device access. Use `auto` by default so the queue picks an
+        # allowed device and exposes it to the validation command.
+        default: "auto"
+      skip_cases:
+        description: "Comma/space separated testcase names to skip (e.g. scatter,mrgsort)"
+        type: string
+        default: "mix_kernel,vadd_validshape,vadd_validshape_dynamic,print,storefp"
+      run_only_cases:
+        description: "Comma/space separated testcase names to run (empty = run all)"
+        type: string
+        default: ""
+      pto_isa_repo:
+        description: "pto-isa repo URL on remote"
+        type: string
+        default: https://gitcode.com/cann/pto-isa.git
+      pto_isa_commit:
+        description: "pto-isa ref (commit/tag/branch; empty = repo-pinned weekly commit)"
+        type: string
+        # NOTE: Pin a known-good GitCode commit for deterministic runs.
+        default: ce3262e3825a235f951917eeada30e52910b6a84
+      remote_host:
+        description: "SSH host/IP for the NPU machine"
+        type: string
+        default: 101.245.68.6
+      remote_user:
+        description: "SSH user for the NPU machine"
+        type: string
+        default: zhongxuan
+      remote_port:
+        description: "SSH port"
+        type: string
+        default: "22"
+
+permissions:
+  contents: read
+  actions: write
+  pull-requests: read
+
+jobs:
+  license-header-check:
+    if: ${{ github.event_name == 'pull_request' }}
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ github.event.pull_request.head.repo.full_name || github.repository }}
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Check PR386 license headers
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          python3 .github/scripts/check_license_headers.py \
+            --repo "${{ github.repository }}" \
+            --event-name "${{ github.event_name }}" \
+            --pr-number "${{ github.event.pull_request.number || '' }}" \
+            --base-sha "${{ github.event.pull_request.base.sha || github.event.before || '' }}" \
+            --head-sha "${{ github.event.pull_request.head.sha || github.sha }}" \
+            --github-token "${GITHUB_TOKEN}"
+
+  build-and-test:
+    runs-on: ubuntu-22.04
+    env:
+      PTOAS_CLANG_MAJOR: "15"
+      LLVM_REPO: https://github.com/vpto-dev/llvm-project.git
+      LLVM_REF: feature-vpto
+      LLVM_BUILD_DIR: ${{ github.workspace }}/llvm-project/llvm/build-assert
+      LLVM_DIR: ${{ github.workspace }}/llvm-project/llvm/build-assert
+      PTO_BUILD_DIR: ${{ github.workspace }}/build-assert
+      PTOAS_VENV: ${{ github.workspace }}/.venv-ptoas-assert
+      LLVM_CACHE_FLAVOR: llvm19-assert-shared-mlirpy-hardening-v2
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Install dependencies and create developer environment
+        run: |
+          # GitHub-hosted runners may include Microsoft apt sources unrelated to
+          # PTOAS; these can intermittently return 403 and break apt-get update.
+          sudo rm -f \
+            /etc/apt/sources.list.d/azure-cli*.list \
+            /etc/apt/sources.list.d/azure-cli*.sources \
+            /etc/apt/sources.list.d/microsoft-prod*.list \
+            /etc/apt/sources.list.d/microsoft-prod*.sources \
+            /etc/apt/sources.list.d/packages-microsoft-prod*.list \
+            /etc/apt/sources.list.d/packages-microsoft-prod*.sources
+          sudo apt-get update
+          sudo apt-get install -y \
+            ccache cmake git ninja-build \
+            python3 python3-pip python3-venv \
+            clang-${PTOAS_CLANG_MAJOR} lld-${PTOAS_CLANG_MAJOR} \
+            libedit-dev zlib1g-dev libxml2-dev libzstd-dev
+          rm -rf "${PTOAS_VENV}"
+          python3 -m venv "${PTOAS_VENV}"
+          "${PTOAS_VENV}/bin/python" -m pip install --upgrade pip
+          # LLVM/MLIR Python bindings are not yet compatible with pybind11 3.x.
+          "${PTOAS_VENV}/bin/pip" install \
+            'scikit-build-core>=0.12.2,<2' 'pybind11<3' \
+            numpy ml-dtypes
+
+      - name: Define payload paths
+        shell: bash
+        run: |
+          set -euo pipefail
+          # NOTE: Some GitHub/GHES versions don't allow using `${{ runner.temp }}` in
+          # `jobs.<job>.env`. Use the runtime env var instead.
+          tmp_root="${RUNNER_TEMP:-${GITHUB_WORKSPACE}/.tmp}"
+          echo "PAYLOAD_DIR=${tmp_root}/ptoas_payload" >> "${GITHUB_ENV}"
+          echo "PAYLOAD_TGZ=${tmp_root}/ptoas_payload.tgz" >> "${GITHUB_ENV}"
+
+      - name: Prepare payload dir
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf "${PAYLOAD_DIR}" "${PAYLOAD_TGZ}"
+          mkdir -p "${PAYLOAD_DIR}/test/samples"
+          mkdir -p "${PAYLOAD_DIR}/test/npu_validation/scripts"
+          mkdir -p "${PAYLOAD_DIR}/test/npu_validation/templates"
+
+      - name: Resolve clang-${{ env.PTOAS_CLANG_MAJOR }} toolchain
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          clang_c="$(command -v "clang-${PTOAS_CLANG_MAJOR}")"
+          clang_cxx="$(command -v "clang++-${PTOAS_CLANG_MAJOR}")"
+          echo "PTOAS_CMAKE_C_COMPILER=${clang_c}" >> "${GITHUB_ENV}"
+          echo "PTOAS_CMAKE_CXX_COMPILER=${clang_cxx}" >> "${GITHUB_ENV}"
+          "${clang_c}" --version | head -n 1
+          "${clang_cxx}" --version | head -n 1
+
+      - name: Configure ccache
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "CCACHE_DIR=${GITHUB_WORKSPACE}/.ccache" >> "${GITHUB_ENV}"
+          echo "CCACHE_BASEDIR=${GITHUB_WORKSPACE}" >> "${GITHUB_ENV}"
+          echo "CCACHE_COMPILERCHECK=content" >> "${GITHUB_ENV}"
+          echo "CCACHE_NOHASHDIR=true" >> "${GITHUB_ENV}"
+          echo "CMAKE_C_COMPILER_LAUNCHER=ccache" >> "${GITHUB_ENV}"
+          echo "CMAKE_CXX_COMPILER_LAUNCHER=ccache" >> "${GITHUB_ENV}"
+          ccache --version
+
+      # Keep one bounded cache on the default branch. PRs can restore this
+      # shared cache, but do not create a separate cache for every commit.
+      - name: Restore main ccache
+        id: cache-ccache
+        uses: actions/cache/restore@v4
+        with:
+          path: .ccache
+          key: ccache-main-${{ runner.os }}-clang${{ env.PTOAS_CLANG_MAJOR }}-${{ github.sha }}
+          restore-keys: |
+            ccache-main-${{ runner.os }}-clang${{ env.PTOAS_CLANG_MAJOR }}-
+
+      - name: Initialize ccache
+        shell: bash
+        run: |
+          set -euo pipefail
+          ccache --max-size=2G
+          ccache --zero-stats
+
+      - name: Resolve LLVM source SHA
+        shell: bash
+        run: |
+          set -euo pipefail
+          LLVM_SOURCE_SHA="$(git ls-remote "${LLVM_REPO}" "refs/heads/${LLVM_REF}" | awk '{print $1}')"
+          [[ -n "${LLVM_SOURCE_SHA}" ]] || {
+            echo "ERROR: failed to resolve ${LLVM_REPO} ${LLVM_REF}" >&2
+            exit 1
+          }
+          echo "LLVM_SOURCE_SHA=${LLVM_SOURCE_SHA}" >> "${GITHUB_ENV}"
+
+      # 先恢复 LLVM build 缓存
+      - name: Restore LLVM build cache
+        id: cache-llvm
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            llvm-project/llvm/build-assert
+          key: llvm-${{ runner.os }}-clang${{ env.PTOAS_CLANG_MAJOR }}-${{ env.LLVM_SOURCE_SHA }}-${{ env.LLVM_CACHE_FLAVOR }}
+
+      - name: Prepare LLVM source (no rebuild)
+        run: |
+          mkdir -p llvm-project
+          cd llvm-project
+
+          # cache 只保存 build 目录，这里补一个最小 git repo 供 cmake/ninja 使用
+          if [ ! -d .git ]; then
+            git init
+            git remote add origin "${LLVM_REPO}"
+          fi
+
+          git remote set-url origin "${LLVM_REPO}"
+          git fetch --depth 1 origin "${LLVM_SOURCE_SHA}"
+          git checkout --force "${LLVM_SOURCE_SHA}"
+
+      - name: Build LLVM/MLIR (only if cache miss)
+        if: steps.cache-llvm.outputs.cache-hit != 'true'
+        run: |
+          cd llvm-project
+          cmake -C "${GITHUB_WORKSPACE}/cmake/LinuxHardeningCache.cmake" -G Ninja -S llvm -B "${LLVM_BUILD_DIR}" \
+            -DLLVM_ENABLE_PROJECTS="mlir;clang" \
+            -DBUILD_SHARED_LIBS=ON \
+            -DLLVM_ENABLE_ASSERTIONS=ON \
+            -DMLIR_ENABLE_BINDINGS_PYTHON=ON \
+            -DPython3_EXECUTABLE="${PTOAS_VENV}/bin/python" \
+            -DPython_EXECUTABLE="${PTOAS_VENV}/bin/python" \
+            -Dpybind11_DIR="$("${PTOAS_VENV}/bin/python" -m pybind11 --cmakedir)" \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_C_COMPILER="${PTOAS_CMAKE_C_COMPILER}" \
+            -DCMAKE_CXX_COMPILER="${PTOAS_CMAKE_CXX_COMPILER}" \
+            -DLLVM_TARGETS_TO_BUILD="host"
+
+          ninja -C "${LLVM_BUILD_DIR}"
+         
+
+      # LLVM build 完成后立即保存缓存，避免后续测试影响缓存内容
+      - name: Save LLVM build cache
+        if: >-
+          steps.cache-llvm.outputs.cache-hit != 'true' &&
+          github.ref == format('refs/heads/{0}', github.event.repository.default_branch) &&
+          success()
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            llvm-project/llvm/build-assert
+          key: llvm-${{ runner.os }}-clang${{ env.PTOAS_CLANG_MAJOR }}-${{ env.LLVM_SOURCE_SHA }}-${{ env.LLVM_CACHE_FLAVOR }}
+
+      - name: Validate strict CMake 4 configure
+        shell: bash
+        run: |
+          set -euo pipefail
+          cmake4_venv="${RUNNER_TEMP:-${GITHUB_WORKSPACE}/.tmp}/cmake-4.1.3-venv"
+          cmake4_build="${RUNNER_TEMP:-${GITHUB_WORKSPACE}/.tmp}/ptoas-cmake4-strict"
+          rm -rf "${cmake4_venv}" "${cmake4_build}"
+          python3 -m venv "${cmake4_venv}"
+          "${cmake4_venv}/bin/python" -m pip install --upgrade pip
+          "${cmake4_venv}/bin/pip" install "cmake==4.1.3" 'pybind11<3' numpy ml-dtypes
+          cmake4_bin="${cmake4_venv}/bin/cmake"
+          "${cmake4_bin}" --version
+          "${cmake4_bin}" -C "${GITHUB_WORKSPACE}/cmake/LinuxHardeningCache.cmake" \
+            -G Ninja \
+            -S "${GITHUB_WORKSPACE}" \
+            -B "${cmake4_build}" \
+            -DLLVM_DIR="${LLVM_DIR}/lib/cmake/llvm" \
+            -DMLIR_DIR="${LLVM_DIR}/lib/cmake/mlir" \
+            -DPython3_EXECUTABLE="${cmake4_venv}/bin/python" \
+            -DPython3_FIND_STRATEGY=LOCATION \
+            -Dpybind11_DIR="$("${cmake4_venv}/bin/python" -m pybind11 --cmakedir)" \
+            -DMLIR_ENABLE_BINDINGS_PYTHON=ON \
+            -DPTO_ENABLE_PYTHON_BINDING=ON \
+            -DBUILD_TESTING=ON \
+            -DCMAKE_C_COMPILER="${PTOAS_CMAKE_C_COMPILER}" \
+            -DCMAKE_CXX_COMPILER="${PTOAS_CMAKE_CXX_COMPILER}" \
+            -Werror=dev
+
+      - name: Install PTOAS editable
+        run: |
+          set -euo pipefail
+          rm -rf "${PTO_BUILD_DIR}"
+          # Keep a persistent CMake build tree for CTest and lit while exposing
+          # the current sources and Python extension through the developer venv.
+          LLVM_BUILD_DIR="${LLVM_DIR}" \
+          CC="${PTOAS_CMAKE_C_COMPILER}" \
+          CXX="${PTOAS_CMAKE_CXX_COMPILER}" \
+            "${PTOAS_VENV}/bin/python" -m pip install --editable . \
+              --no-build-isolation --no-deps \
+              --config-settings="build-dir=${PTO_BUILD_DIR}"
+
+      - name: Test PTOAS editable install
+        shell: bash
+        run: |
+          set -euo pipefail
+          PATH="${PTOAS_VENV}/bin:${PATH}" \
+          PYTHON="${PTOAS_VENV}/bin/python" \
+            bash docker/test_wheel_imports.sh
+
+      - name: Run PTODSL Python tests
+        shell: bash
+        env:
+          LLVM_DIR: ${{ env.LLVM_DIR }}
+        run: |
+          export PATH="${PTOAS_VENV}/bin:${LLVM_DIR}/bin:${PATH}"
+          ctest --test-dir "${PTO_BUILD_DIR}" --output-on-failure -L PTODSL
+
+      - name: Run lit tests
+        shell: bash
+        env:
+          LLVM_DIR: ${{ env.LLVM_DIR }}
+        run: |
+          export PATH="${PTOAS_VENV}/bin:${LLVM_DIR}/bin:${PATH}"
+          ninja -C "${PTO_BUILD_DIR}" check-pto
+
+      - name: Show ccache statistics
+        if: always()
+        shell: bash
+        run: ccache --show-stats
+
+      - name: Save main ccache
+        if: github.ref == 'refs/heads/main' && success()
+        uses: actions/cache/save@v4
+        with:
+          path: .ccache
+          key: ccache-main-${{ runner.os }}-clang${{ env.PTOAS_CLANG_MAJOR }}-${{ github.sha }}
+
+      - name: Run sample tests (py -> pto -> cpp)
+        shell: bash
+        env:
+          CI_EVENT_NAME: ${{ github.event_name }}
+          WORKFLOW_SOC_VERSION: ${{ github.event.inputs.soc_version || 'Ascend910' }}
+          PTOAS_BIN: ${{ env.PTOAS_VENV }}/bin/ptoas
+          PTOBC_BIN: ${{ env.PTO_BUILD_DIR }}/tools/ptobc/ptobc
+          PTO_BUILD_DIR: ${{ env.PTO_BUILD_DIR }}
+          PYTHON_BIN: ${{ env.PTOAS_VENV }}/bin/python
+        run: |
+          set -euo pipefail
+          export PATH="${PTOAS_VENV}/bin:${PATH}"
+          export PTOAS_OUT_DIR="${PAYLOAD_DIR}/test/samples"
+          if [[ "${CI_EVENT_NAME}" == "workflow_dispatch" || "${CI_EVENT_NAME}" == "schedule" ]]; then
+            # Board-validation payloads must only contain the arch-matching
+            # direct .pto samples. Some A3/A5 qwen decode cases intentionally
+            # share the same testcase basename, so SKIP_CASES cannot
+            # distinguish them later once the payload is built.
+            SOC_VERSION="${WORKFLOW_SOC_VERSION}" bash test/samples/runop.sh --enablebc all
+          else
+            bash test/samples/runop.sh --enablebc all
+          fi
+
+      - name: Build payload artifact
+        if: >-
+          ${{
+            github.event_name == 'workflow_dispatch' ||
+            github.event_name == 'schedule'
+          }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          cp test/npu_validation/scripts/generate_testcase.py "${PAYLOAD_DIR}/test/npu_validation/scripts/"
+          cp test/npu_validation/scripts/run_remote_npu_validation.sh "${PAYLOAD_DIR}/test/npu_validation/scripts/"
+          cp test/npu_validation/templates/* "${PAYLOAD_DIR}/test/npu_validation/templates/"
+          chmod +x "${PAYLOAD_DIR}/test/npu_validation/scripts/run_remote_npu_validation.sh"
+          tar -czf "${PAYLOAD_TGZ}" -C "${PAYLOAD_DIR}" .
+
+      - name: Upload payload artifact
+        if: >-
+          ${{
+            github.event_name == 'workflow_dispatch' ||
+            github.event_name == 'schedule'
+          }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: ptoas_payload
+          path: ${{ env.PAYLOAD_TGZ }}
+          if-no-files-found: error
+
+  remote-npu-validation:
+    needs: build-and-test
+    runs-on: ubuntu-22.04
+    timeout-minutes: 180
+    concurrency:
+      group: remote-npu-validation
+      cancel-in-progress: false
+    # Ordering: `needs: build-and-test` enforces "CI -> remote".
+    if: >-
+      ${{
+        (github.event_name == 'workflow_dispatch' ||
+         github.event_name == 'schedule')
+      }}
+    env:
+      PAYLOAD_DOWNLOAD_DIR: ${{ github.workspace }}/_payload
+      PAYLOAD_TGZ: ${{ github.workspace }}/_payload/ptoas_payload.tgz
+      # Temporary CI gate: skip cases that still error/flap on the remote NPU.
+      # Update this list as we fix the underlying issues.
+      DEFAULT_SKIP_CASES: >-
+        mix_kernel,vadd_validshape,vadd_validshape_dynamic,print,storefp
+    steps:
+      - name: Resolve validation parameters
+        shell: bash
+        env:
+          STAGE: ${{ github.event.inputs.stage || 'run' }}
+          RUN_MODE: ${{ github.event.inputs.run_mode || 'npu' }}
+          SOC_VERSION: ${{ github.event.inputs.soc_version || 'Ascend910' }}
+          DEVICE_ID: ${{ github.event.inputs.device_id || 'auto' }}
+          SKIP_CASES: ${{ github.event.inputs.skip_cases || '' }}
+          RUN_ONLY_CASES: ${{ github.event.inputs.run_only_cases || '' }}
+          PTO_ISA_REPO: ${{ github.event.inputs.pto_isa_repo || 'https://gitcode.com/cann/pto-isa.git' }}
+          PTO_ISA_COMMIT: ${{ github.event.inputs.pto_isa_commit || 'ce3262e3825a235f951917eeada30e52910b6a84' }}
+          REMOTE_HOST: ${{ github.event.inputs.remote_host || '101.245.68.6' }}
+          REMOTE_USER: ${{ github.event.inputs.remote_user || 'zhongxuan' }}
+          REMOTE_PORT: ${{ github.event.inputs.remote_port || '22' }}
+        run: |
+          set -euo pipefail
+          # For scheduled runs, default to DEFAULT_SKIP_CASES (known-bad/flaky).
+          # For workflow_dispatch runs, honor the user's input (the UI default
+          # is pre-filled but can be edited to run everything).
+          if [[ "${GITHUB_EVENT_NAME}" != "workflow_dispatch" ]]; then
+            if [[ -z "${SKIP_CASES}" ]]; then
+              SKIP_CASES="${DEFAULT_SKIP_CASES}"
+            fi
+          fi
+
+          # Some validation samples are arch-specific due to stricter pto-isa
+          # static checks and A5-only tile layouts. Always skip the
+          # non-matching variant based on SOC_VERSION, even for explicit
+          # RUN_ONLY_CASES requests, so remote validation does not try to force
+          # A5-only cases through an A3 flow or vice versa.
+          A3_ONLY_CASES="partition5d,partition5d_dynamic,mrgsort,tmatmulk_autosync,movfp_fixpipe_reuse_a3"
+          A5_ONLY_CASES="partition5d_a5,partition5d_dynamic_a5,mrgsort_a5,tmatmulk_autosync_a5,tpack,matmul_mx_low_precision,gemvmx,tquant_mx,movfp_fixpipe_reuse"
+
+          sv_lc="$(printf '%s' "${SOC_VERSION}" | tr '[:upper:]' '[:lower:]')"
+          is_a5=0
+          if [[ "${sv_lc}" == *"950"* || "${sv_lc}" == *"a5"* ]]; then
+            is_a5=1
+          fi
+
+          if [[ ${is_a5} -eq 1 ]]; then
+            SKIP_CASES="${SKIP_CASES:+${SKIP_CASES},}${A3_ONLY_CASES}"
+          else
+            SKIP_CASES="${SKIP_CASES:+${SKIP_CASES},}${A5_ONLY_CASES}"
+          fi
+
+          echo "STAGE=${STAGE}" >> "${GITHUB_ENV}"
+          echo "RUN_MODE=${RUN_MODE}" >> "${GITHUB_ENV}"
+          echo "SOC_VERSION=${SOC_VERSION}" >> "${GITHUB_ENV}"
+          echo "DEVICE_ID=${DEVICE_ID}" >> "${GITHUB_ENV}"
+          echo "SKIP_CASES=${SKIP_CASES}" >> "${GITHUB_ENV}"
+          echo "RUN_ONLY_CASES=${RUN_ONLY_CASES}" >> "${GITHUB_ENV}"
+          echo "PTO_ISA_REPO=${PTO_ISA_REPO}" >> "${GITHUB_ENV}"
+          echo "PTO_ISA_COMMIT=${PTO_ISA_COMMIT}" >> "${GITHUB_ENV}"
+          echo "REMOTE_HOST=${REMOTE_HOST}" >> "${GITHUB_ENV}"
+          echo "REMOTE_USER=${REMOTE_USER}" >> "${GITHUB_ENV}"
+          echo "REMOTE_PORT=${REMOTE_PORT}" >> "${GITHUB_ENV}"
+
+      - name: Setup SSH
+        shell: bash
+        env:
+          SSH_KEY: ${{ secrets.SSH_KEY }}
+          SSH_KNOWN_HOSTS: ${{ secrets.SSH_KNOWN_HOSTS }}
+        run: |
+          set -euo pipefail
+          if [[ -z "${SSH_KEY}" ]]; then
+            echo "ERROR: secrets.SSH_KEY is not set"
+            exit 1
+          fi
+          if [[ -z "${SSH_KNOWN_HOSTS}" ]]; then
+            echo "ERROR: secrets.SSH_KNOWN_HOSTS is not set"
+            exit 1
+          fi
+
+          mkdir -p ~/.ssh
+          chmod 700 ~/.ssh
+          printf '%s\n' "${SSH_KEY}" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          printf '%s\n' "${SSH_KNOWN_HOSTS}" > ~/.ssh/known_hosts
+          chmod 644 ~/.ssh/known_hosts
+
+      - name: Download payload artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: ptoas_payload
+          path: ${{ env.PAYLOAD_DOWNLOAD_DIR }}
+
+      - name: Vendor pto-isa into payload (offline remote)
+        shell: bash
+        run: |
+          set -euo pipefail
+          tmp_root="${RUNNER_TEMP:-${GITHUB_WORKSPACE}/.tmp}"
+          work="$(mktemp -d "${tmp_root}/ptoas_payload_unpack.XXXXXX")"
+          tar -xzf "${PAYLOAD_TGZ}" -C "${work}"
+
+          rm -rf "${work}/pto-isa"
+          git clone "${PTO_ISA_REPO}" "${work}/pto-isa"
+          if [[ -n "${PTO_ISA_COMMIT}" ]]; then
+            git -C "${work}/pto-isa" checkout -f "${PTO_ISA_COMMIT}"
+          else
+            git -C "${work}/pto-isa" checkout -f origin/HEAD || true
+          fi
+          # Ship a working tree only; remote should not need outbound network.
+          rm -rf "${work}/pto-isa/.git"
+
+          tar -czf "${PAYLOAD_TGZ}" -C "${work}" .
+
+      - name: Copy payload to remote
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ ! -f "${PAYLOAD_TGZ}" ]]; then
+            echo "ERROR: payload tarball not found: ${PAYLOAD_TGZ}"
+            exit 1
+          fi
+          REMOTE_DIR="/tmp/ptoas_npu_validation/${GITHUB_REPOSITORY}/${GITHUB_RUN_ID}"
+          echo "REMOTE_DIR=${REMOTE_DIR}" >> "${GITHUB_ENV}"
+          ssh -p "${REMOTE_PORT}" "${REMOTE_USER}@${REMOTE_HOST}" "rm -rf '${REMOTE_DIR}' && mkdir -p '${REMOTE_DIR}'"
+          scp -P "${REMOTE_PORT}" "${PAYLOAD_TGZ}" "${REMOTE_USER}@${REMOTE_HOST}:${REMOTE_DIR}/payload.tgz"
+
+      - name: Run remote validation
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ -z "${DEVICE_ID}" ]]; then
+            DEVICE_ID="auto"
+          fi
+          ssh -p "${REMOTE_PORT}" "${REMOTE_USER}@${REMOTE_HOST}" \
+            "set -euo pipefail; \
+             cd '${REMOTE_DIR}'; \
+             tar -xzf payload.tgz; \
+             command -v task-submit >/dev/null 2>&1 || { echo 'ERROR: task-submit not found on remote host'; exit 1; }; \
+             task-submit --device '${DEVICE_ID}' --timeout 0 --max-time 0 \
+               --run \"cd '${REMOTE_DIR}' && STAGE='${STAGE}' RUN_MODE='${RUN_MODE}' SOC_VERSION='${SOC_VERSION}' PTO_ISA_REPO='${PTO_ISA_REPO}' PTO_ISA_COMMIT='${PTO_ISA_COMMIT}' DEVICE_ID=\\\${TASK_DEVICE:-${DEVICE_ID}} SKIP_CASES='${SKIP_CASES}' RUN_ONLY_CASES='${RUN_ONLY_CASES}' bash ./test/npu_validation/scripts/run_remote_npu_validation.sh\""
+
+      - name: Fetch results
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ -z "${REMOTE_DIR:-}" ]]; then
+            echo "REMOTE_DIR is not set; skipping results fetch."
+            exit 0
+          fi
+          scp -P "${REMOTE_PORT}" "${REMOTE_USER}@${REMOTE_HOST}:${REMOTE_DIR}/remote_npu_validation_results.tsv" ./remote_npu_validation_results.tsv || true
+
+      - name: Upload results artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: remote_npu_validation_results
+          path: remote_npu_validation_results.tsv
+          if-no-files-found: warn
+
+      - name: Cleanup remote
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ -n "${REMOTE_DIR:-}" ]]; then
+            ssh -p "${REMOTE_PORT}" "${REMOTE_USER}@${REMOTE_HOST}" "rm -rf '${REMOTE_DIR}'" || true
+          fi

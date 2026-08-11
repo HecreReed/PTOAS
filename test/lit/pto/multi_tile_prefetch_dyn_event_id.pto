@@ -1,0 +1,67 @@
+// Copyright (c) 2026 Huawei Technologies Co., Ltd.
+// This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+// CANN Open Software License Agreement Version 2.0 (the "License").
+// Please refer to the License for details. You may not use this file except in compliance with the License.
+// THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+// INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+// See LICENSE in the root of the software repository for the full text of the License.
+
+// RUN: ptoas --enable-insert-sync --mlir-print-ir-after=pto-insert-sync %s 2>&1 1>/dev/null | FileCheck %s
+
+// End-to-end test for the multi-buffer dyn-event-id sync path: a
+// double-buffer prefetch loop with one MTE2 producer and one V consumer,
+// both routed through `pto.multi_tile_get` with a dynamic slot index.
+//
+// Without slot-aware sync the analysis would either drop the dependency
+// (incorrect) or emit a conservative static `set_flag` per iteration,
+// serializing the prefetch. With the slot-aware path the producer side
+// gets `set_flag_dyn[MTE2, V, ...]` keyed off its slot SSA, and the
+// consumer side gets a matching `wait_flag_dyn[MTE2, V, ...]` keyed off
+// its own slot SSA. The hardware event id is selected by an arith.select
+// chain over the N allocated event ids.
+
+module {
+  func.func @prefetch_dyn_eid(
+      %gm : !pto.partition_tensor_view<16x16xf16>,
+      %dst : !pto.partition_tensor_view<16x16xf16>,
+      %n : index) {
+    %c0 = arith.constant 0 : index
+    %c1 = arith.constant 1 : index
+    %c2 = arith.constant 2 : index
+
+    %mb = pto.alloc_multi_tile
+        : !pto.multi_tile_buf<vec, 16x16xf16, count=2>
+
+    scf.for %i = %c0 to %n step %c1 {
+      %idx = arith.remui %i, %c2 : index
+      // Producer: MTE2 load on dynamic slot.
+      %prod = pto.multi_tile_get %mb[%idx]
+          : !pto.multi_tile_buf<vec, 16x16xf16, count=2>
+         -> !pto.tile_buf<vec, 16x16xf16>
+      pto.tload ins(%gm : !pto.partition_tensor_view<16x16xf16>)
+                outs(%prod : !pto.tile_buf<vec, 16x16xf16>)
+      // Consumer: V op on dynamic slot. The MTE2 -> V dep on a
+      // multi-buffer alloc should lower to a dyn event-id pair.
+      pto.tstore ins(%prod : !pto.tile_buf<vec, 16x16xf16>)
+                 outs(%dst : !pto.partition_tensor_view<16x16xf16>)
+    }
+    return
+  }
+}
+
+// CHECK-LABEL: func.func @prefetch_dyn_eid
+// Pre-loop primes both per-slot events (one set per allocated event id).
+// CHECK: pto.set_flag[<PIPE_MTE3>, <PIPE_MTE2>, <EVENT_ID0>]
+// CHECK: pto.set_flag[<PIPE_MTE3>, <PIPE_MTE2>, <EVENT_ID1>]
+// CHECK: scf.for
+// In the loop body the consumer waits first (back-edge into the upcoming
+// store slot), then the producer issues its slot-keyed set after the load.
+// CHECK: arith.select
+// CHECK: pto.wait_flag_dyn[<PIPE_MTE3>, <PIPE_MTE2>,
+// CHECK: pto.tload
+// CHECK: pto.tstore
+// CHECK: arith.select
+// CHECK: pto.set_flag_dyn[<PIPE_MTE3>, <PIPE_MTE2>,
+// Post-loop drains both per-slot events.
+// CHECK: pto.wait_flag[<PIPE_MTE3>, <PIPE_MTE2>, <EVENT_ID0>]
+// CHECK: pto.wait_flag[<PIPE_MTE3>, <PIPE_MTE2>, <EVENT_ID1>]

@@ -1,0 +1,16 @@
+// RUN: not ptoas --pto-level=level3 %s 2>&1 | FileCheck %s
+
+module {
+  func.func @unaligned_tassign_addr() attributes {pto.entry} {
+    %base = arith.constant 0 : i64
+    %bad = arith.constant 70660 : i64
+    %tile = pto.alloc_tile addr = %base
+      : !pto.tile_buf<loc=vec, dtype=f16, rows=32, cols=64, v_row=32, v_col=64, blayout=row_major, slayout=none_box, fractal=512, pad=0>
+    // CHECK: pto.tassign
+    // CHECK: addr must be aligned to 32 bytes for local tile memory space, got 70660
+    %rebased = pto.tassign %tile, %bad
+      : !pto.tile_buf<loc=vec, dtype=f16, rows=32, cols=64, v_row=32, v_col=64, blayout=row_major, slayout=none_box, fractal=512, pad=0>
+     -> !pto.tile_buf<loc=vec, dtype=f16, rows=32, cols=64, v_row=32, v_col=64, blayout=row_major, slayout=none_box, fractal=512, pad=0>
+    return
+  }
+}

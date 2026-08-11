@@ -1,0 +1,53 @@
+// Copyright (c) 2026 Huawei Technologies Co., Ltd.
+// This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+// CANN Open Software License Agreement Version 2.0 (the "License").
+// Please refer to the License for details. You may not use this file except in compliance with the License.
+// THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+// INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+// See LICENSE in the root of the software repository for the full text of the License.
+
+// RUN: ptoas --pto-level=level2 --pto-arch=a3 --emit-pto-ir \
+// RUN:   --mlir-print-ir-after=pto-plan-memory %s 2>&1 1>/dev/null \
+// RUN:   | FileCheck %s --check-prefix=LEGACY
+// RUN: ptoas --pto-level=level2 --pto-arch=a3 --plan-memory-impl=modern \
+// RUN:   --emit-pto-ir --mlir-print-ir-after=pto-plan-memory %s 2>&1 \
+// RUN:   1>/dev/null | FileCheck %s --check-prefix=MODERN
+
+module attributes {pto.target_arch = "a3"} {
+  func.func @row_plus_one_footprint(
+      %src0: !pto.partition_tensor_view<16x16xf32>,
+      %src1: !pto.partition_tensor_view<16x16xf32>,
+      %dst0: !pto.partition_tensor_view<16x16xf32>,
+      %dst1: !pto.partition_tensor_view<16x16xf32>) {
+    %a = pto.alloc_tile
+        : !pto.tile_buf<loc=vec, dtype=f32, rows=16, cols=16, v_row=16, v_col=16, blayout=row_major, slayout=none_box, fractal=512, pad=0, compact=2>
+    %b = pto.alloc_tile
+        : !pto.tile_buf<loc=vec, dtype=f32, rows=16, cols=16, v_row=16, v_col=16, blayout=row_major, slayout=none_box, fractal=512, pad=0, compact=2>
+
+    pto.tload ins(%src0 : !pto.partition_tensor_view<16x16xf32>)
+              outs(%a : !pto.tile_buf<loc=vec, dtype=f32, rows=16, cols=16, v_row=16, v_col=16, blayout=row_major, slayout=none_box, fractal=512, pad=0, compact=2>)
+    pto.tload ins(%src1 : !pto.partition_tensor_view<16x16xf32>)
+              outs(%b : !pto.tile_buf<loc=vec, dtype=f32, rows=16, cols=16, v_row=16, v_col=16, blayout=row_major, slayout=none_box, fractal=512, pad=0, compact=2>)
+    pto.tstore ins(%a : !pto.tile_buf<loc=vec, dtype=f32, rows=16, cols=16, v_row=16, v_col=16, blayout=row_major, slayout=none_box, fractal=512, pad=0, compact=2>)
+               outs(%dst0 : !pto.partition_tensor_view<16x16xf32>)
+    pto.tstore ins(%b : !pto.tile_buf<loc=vec, dtype=f32, rows=16, cols=16, v_row=16, v_col=16, blayout=row_major, slayout=none_box, fractal=512, pad=0, compact=2>)
+               outs(%dst1 : !pto.partition_tensor_view<16x16xf32>)
+    return
+  }
+}
+
+// A 16x16xf32 row_plus_one tile spans (15 * 17 + 16) * 4 = 1084 bytes.
+// With 256-byte local alignment, the next overlapping-live tile must start at
+// 1280 bytes rather than product(shape) * sizeof(f32) = 1024 bytes.
+
+// LEGACY-LABEL: func.func @row_plus_one_footprint
+// LEGACY-DAG: %[[ADDR0:.*]] = arith.constant 0 : i64
+// LEGACY-DAG: %[[ADDR1:.*]] = arith.constant 1280 : i64
+// LEGACY: pto.alloc_tile addr = %[[ADDR0]]
+// LEGACY: pto.alloc_tile addr = %[[ADDR1]]
+
+// MODERN-LABEL: func.func @row_plus_one_footprint
+// MODERN-DAG: %[[ADDR0:.*]] = arith.constant 0 : i64
+// MODERN-DAG: %[[ADDR1:.*]] = arith.constant 1280 : i64
+// MODERN: pto.alloc_tile addr = %[[ADDR0]]
+// MODERN: pto.alloc_tile addr = %[[ADDR1]]

@@ -1,37 +1,38 @@
 // RUN: ptoas --pto-arch a5 --enable-insert-sync %s | FileCheck %s --check-prefix=A5
 // RUN: ptoas --pto-arch a3 %s | FileCheck %s --check-prefix=A3
 
-module attributes {"pto.device-spec" = "Ascend950"} {
-  func.func @tmov_acc_to_vec_mode_a5(%a: memref<32x32xf16, #pto.address_space<gm>>,
-                                     %b: memref<32x32xf16, #pto.address_space<gm>>) {
-    %a_mat = memref.alloc() : memref<32x32xf16, #pto.address_space<mat>>
-    %b_mat = memref.alloc() : memref<32x32xf16, #pto.address_space<mat>>
-    %a_left = memref.alloc() : memref<32x32xf16, #pto.address_space<left>>
-    %b_right = memref.alloc() : memref<32x32xf16, #pto.address_space<right>>
-    %acc = memref.alloc() : memref<32x32xf32, #pto.address_space<acc>>
-    %dst_vec = memref.alloc() : memref<32x32xf32, #pto.address_space<vec>>
+module {
+  func.func @tmov_acc_to_vec_mode_a5(
+      %a: !pto.partition_tensor_view<32x32xf16>,
+      %b: !pto.partition_tensor_view<32x32xf16>) {
+    %a_mat = pto.alloc_tile : !pto.tile_buf<mat, 32x32xf16, blayout=col_major, slayout=row_major>
+    %b_mat = pto.alloc_tile : !pto.tile_buf<mat, 32x32xf16, blayout=col_major, slayout=row_major>
+    %a_left = pto.alloc_tile : !pto.tile_buf<left, 32x32xf16, blayout=row_major, slayout=row_major>
+    %b_right = pto.alloc_tile : !pto.tile_buf<right, 32x32xf16, blayout=row_major, slayout=col_major>
+    %acc = pto.alloc_tile : !pto.tile_buf<acc, 32x32xf32, blayout=col_major, slayout=row_major, fractal=1024>
+    %dst_vec = pto.alloc_tile : !pto.tile_buf<vec, 32x32xf32>
 
-    pto.tload ins(%a : memref<32x32xf16, #pto.address_space<gm>>)
-              outs(%a_mat : memref<32x32xf16, #pto.address_space<mat>>)
-    pto.tload ins(%b : memref<32x32xf16, #pto.address_space<gm>>)
-              outs(%b_mat : memref<32x32xf16, #pto.address_space<mat>>)
-    pto.tmov ins(%a_mat : memref<32x32xf16, #pto.address_space<mat>>)
-             outs(%a_left : memref<32x32xf16, #pto.address_space<left>>)
-    pto.tmov ins(%b_mat : memref<32x32xf16, #pto.address_space<mat>>)
-             outs(%b_right : memref<32x32xf16, #pto.address_space<right>>)
-    pto.tmatmul ins(%a_left, %b_right : memref<32x32xf16, #pto.address_space<left>>,
-                                        memref<32x32xf16, #pto.address_space<right>>)
-                outs(%acc : memref<32x32xf32, #pto.address_space<acc>>)
-    pto.tmov ins(%acc : memref<32x32xf32, #pto.address_space<acc>>)
-             outs(%dst_vec : memref<32x32xf32, #pto.address_space<vec>>)
+    pto.tload ins(%a : !pto.partition_tensor_view<32x32xf16>)
+              outs(%a_mat : !pto.tile_buf<mat, 32x32xf16, blayout=col_major, slayout=row_major>)
+    pto.tload ins(%b : !pto.partition_tensor_view<32x32xf16>)
+              outs(%b_mat : !pto.tile_buf<mat, 32x32xf16, blayout=col_major, slayout=row_major>)
+    pto.tmov ins(%a_mat : !pto.tile_buf<mat, 32x32xf16, blayout=col_major, slayout=row_major>)
+             outs(%a_left : !pto.tile_buf<left, 32x32xf16, blayout=row_major, slayout=row_major>)
+    pto.tmov ins(%b_mat : !pto.tile_buf<mat, 32x32xf16, blayout=col_major, slayout=row_major>)
+             outs(%b_right : !pto.tile_buf<right, 32x32xf16, blayout=row_major, slayout=col_major>)
+    pto.tmatmul ins(%a_left, %b_right : !pto.tile_buf<left, 32x32xf16, blayout=row_major, slayout=row_major>,
+                                        !pto.tile_buf<right, 32x32xf16, blayout=row_major, slayout=col_major>)
+                outs(%acc : !pto.tile_buf<acc, 32x32xf32, blayout=col_major, slayout=row_major, fractal=1024>)
+    pto.tmov ins(%acc : !pto.tile_buf<acc, 32x32xf32, blayout=col_major, slayout=row_major, fractal=1024>)
+             outs(%dst_vec : !pto.tile_buf<vec, 32x32xf32>)
              {accToVecMode = #pto.acc_to_vec_mode<dual_mode_split_m>}
     return
   }
 }
 
-// A5-LABEL: __global__ AICORE void tmov_acc_to_vec_mode_a5(
+// A5-LABEL: AICORE void tmov_acc_to_vec_mode_a5(
 // A5: set_flag(PIPE_M, PIPE_FIX, EVENT_ID0);
 // A5: wait_flag(PIPE_M, PIPE_FIX, EVENT_ID0);
 // A5: TMOV<{{.*}}pto::AccToVecMode::DualModeSplitM{{.*}}>(
-// A3-LABEL: __global__ AICORE void tmov_acc_to_vec_mode_a5(
+// A3-LABEL: AICORE void tmov_acc_to_vec_mode_a5(
 // A3: TMOV<{{.*}}pto::AccToVecMode::DualModeSplitM{{.*}}>(

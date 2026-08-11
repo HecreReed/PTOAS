@@ -1,0 +1,18 @@
+// RUN: ptoas --pto-arch=a5 --pto-backend=vpto --emit-vpto %s -o - | FileCheck %s
+
+module attributes {pto.target_arch = "a5", pto.kernel_kind = #pto.kernel_kind<vector>} {
+  func.func @kernel() {
+    %ctrl = pto.get_ctrl : i64
+    %bit0 = arith.constant 0 : i64
+    %bit45 = arith.constant 45 : i64
+    %ctrl0 = pto.sbitset0 %ctrl, %bit0 : i64, i64 -> i64
+    %ctrl1 = pto.sbitset1 %ctrl0, %bit45 : i64, i64 -> i64
+    pto.set_ctrl %ctrl1 : i64
+    return
+  }
+}
+
+// CHECK: pto.get_ctrl
+// CHECK: pto.sbitset0
+// CHECK: pto.sbitset1
+// CHECK: pto.set_ctrl

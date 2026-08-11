@@ -1,0 +1,67 @@
+// Copyright (c) 2026 Huawei Technologies Co., Ltd.
+// This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+// CANN Open Software License Agreement Version 2.0 (the "License").
+// Please refer to the License for details. You may not use this file except in compliance with the License.
+// THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+// INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+// See LICENSE in the root of the software repository for the full text of the License.
+
+// RUN: ptoas --pto-arch=a3 --enable-insert-sync %s -o - 2>&1 | FileCheck %s --implicit-check-not='#define PIPE_FIX' --implicit-check-not='pto/comm/pto_comm_inst.hpp'
+
+// Regression for issue #1086: pto-inst.hpp exposes communication instructions
+// only in supported PTO compilation phases. Do not bypass that boundary with
+// a direct communication include or define the system PIPE_FIX pipeline token.
+
+module attributes {pto.target_arch = "a2a3"} {
+  func.func @comm_then_fixpipe_store(
+      %signal_ptr: !pto.ptr<i32>,
+      %out_ptr: !pto.ptr<f32>)
+      attributes {pto.kernel_kind = #pto.kernel_kind<cube>} {
+    %c0 = arith.constant 0 : index
+    %c1 = arith.constant 1 : index
+    %c32 = arith.constant 32 : index
+    %c1_i32 = arith.constant 1 : i32
+
+    %signal_view = pto.make_tensor_view %signal_ptr,
+      shape = [%c1], strides = [%c1]
+      : !pto.tensor_view<1xi32>
+    %signal = pto.partition_view %signal_view,
+      offsets = [%c0], sizes = [%c1]
+      : !pto.tensor_view<1xi32> -> !pto.partition_tensor_view<1xi32>
+    pto.comm.twait(%signal, %c1_i32
+      : !pto.partition_tensor_view<1xi32>, i32) {cmp = #pto<wait_cmp ge>}
+
+    %lhs = pto.alloc_tile
+      : !pto.tile_buf<left, 32x32xf16, blayout=row_major, slayout=row_major>
+    %rhs = pto.alloc_tile
+      : !pto.tile_buf<right, 32x32xf16, blayout=row_major, slayout=col_major>
+    %acc = pto.alloc_tile
+      : !pto.tile_buf<acc, 32x32xf32, blayout=col_major, slayout=row_major, fractal=1024>
+    pto.tmatmul
+      ins(%lhs, %rhs
+        : !pto.tile_buf<left, 32x32xf16, blayout=row_major, slayout=row_major>,
+          !pto.tile_buf<right, 32x32xf16, blayout=row_major, slayout=col_major>)
+      outs(%acc
+        : !pto.tile_buf<acc, 32x32xf32, blayout=col_major, slayout=row_major, fractal=1024>)
+
+    %out_view = pto.make_tensor_view %out_ptr,
+      shape = [%c32, %c32], strides = [%c32, %c1]
+      : !pto.tensor_view<32x32xf32>
+    %out = pto.partition_view %out_view,
+      offsets = [%c0, %c0], sizes = [%c32, %c32]
+      : !pto.tensor_view<32x32xf32> -> !pto.partition_tensor_view<32x32xf32>
+    pto.tstore
+      ins(%acc
+        : !pto.tile_buf<acc, 32x32xf32, blayout=col_major, slayout=row_major, fractal=1024>)
+      outs(%out : !pto.partition_tensor_view<32x32xf32>)
+    return
+  }
+}
+
+// CHECK: #include "pto/pto-inst.hpp"
+// CHECK-LABEL: AICORE void comm_then_fixpipe_store(
+// CHECK: pto::comm::TWAIT(
+// CHECK: TMATMUL(
+// CHECK-NEXT: set_flag(PIPE_M, PIPE_FIX, EVENT_ID0);
+// CHECK: wait_flag(PIPE_M, PIPE_FIX, EVENT_ID0);
+// CHECK-NEXT: TSTORE(

@@ -1,0 +1,53 @@
+// Copyright (c) 2026 Huawei Technologies Co., Ltd.
+// This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+// CANN Open Software License Agreement Version 2.0 (the "License").
+// Please refer to the License for details. You may not use this file except in compliance with the License.
+// THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+// INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+// See LICENSE in the root of the software repository for the full text of the License.
+
+// GM->L1 elem mgather writes the GM scratch in its scalar phase before the
+// MTE2 phase reads it. Reusing the same scratch in a following mgather must
+// preserve both sides of that dependency.
+//
+// RUN: ptoas --pto-arch=a5 --enable-insert-sync %s -o - 2>&1 | FileCheck %s
+
+module {
+  func.func @mgather_gm2l1_elem_scratch_reuse(
+      %mem: !pto.partition_tensor_view<1x1x1x64x32xf16>,
+      %idx: !pto.partition_tensor_view<1x1x1x32x32xi32>,
+      %scratch: !pto.partition_tensor_view<1x1x1x32x32xf16>) {
+    pto.section.cube {
+      %m0 = pto.alloc_tile
+        : !pto.tile_buf<loc=mat, dtype=f16, rows=32, cols=32, v_row=32, v_col=32,
+                        blayout=col_major, slayout=row_major, fractal=512, pad=0>
+      %m1 = pto.alloc_tile
+        : !pto.tile_buf<loc=mat, dtype=f16, rows=32, cols=32, v_row=32, v_col=32,
+                        blayout=col_major, slayout=row_major, fractal=512, pad=0>
+      pto.mgather ins(%mem, %idx, %scratch
+          : !pto.partition_tensor_view<1x1x1x64x32xf16>,
+            !pto.partition_tensor_view<1x1x1x32x32xi32>,
+            !pto.partition_tensor_view<1x1x1x32x32xf16>)
+        outs(%m0
+          : !pto.tile_buf<loc=mat, dtype=f16, rows=32, cols=32, v_row=32, v_col=32,
+                          blayout=col_major, slayout=row_major, fractal=512, pad=0>)
+        {coalesce = #pto<coalesce elem>}
+      pto.mgather ins(%mem, %idx, %scratch
+          : !pto.partition_tensor_view<1x1x1x64x32xf16>,
+            !pto.partition_tensor_view<1x1x1x32x32xi32>,
+            !pto.partition_tensor_view<1x1x1x32x32xf16>)
+        outs(%m1
+          : !pto.tile_buf<loc=mat, dtype=f16, rows=32, cols=32, v_row=32, v_col=32,
+                          blayout=col_major, slayout=row_major, fractal=512, pad=0>)
+        {coalesce = #pto<coalesce elem>}
+    }
+    return
+  }
+}
+
+// CHECK:      MGATHER<pto::Coalesce::Elem>
+// CHECK-NEXT: set_flag(PIPE_S, PIPE_MTE2
+// CHECK-NEXT: set_flag(PIPE_MTE2, PIPE_S
+// CHECK-NEXT: wait_flag(PIPE_MTE2, PIPE_S
+// CHECK-NEXT: wait_flag(PIPE_S, PIPE_MTE2
+// CHECK:      MGATHER<pto::Coalesce::Elem>

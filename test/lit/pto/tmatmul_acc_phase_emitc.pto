@@ -48,9 +48,9 @@ module {
   }
 }
 
-// A3: TMATMUL([[C:v[0-9]+]], [[A:v[0-9]+]], [[B:v[0-9]+]]);
-// A3: TMATMUL<AccPhase::Partial>([[C]], [[A]], [[B]]);
-// A3: TMATMUL<AccPhase::Final>([[C]], [[A]], [[B]]);
+// A3: TMATMUL([[C:[_A-Za-z][_A-Za-z0-9]*]], [[A:[_A-Za-z][_A-Za-z0-9]*]], [[B:[_A-Za-z][_A-Za-z0-9]*]]);
+// A3: TMATMUL<pto::AccPhase::Partial>([[C]], [[A]], [[B]]);
+// A3: TMATMUL<pto::AccPhase::Final>([[C]], [[A]], [[B]]);
 // A3: TMATMUL_ACC([[C]], [[C]], [[A]], [[B]]);
-// A3: TMATMUL_ACC<AccPhase::Partial>([[C]], [[C]], [[A]], [[B]]);
-// A3: TMATMUL_ACC<AccPhase::Final>([[C]], [[C]], [[A]], [[B]]);
+// A3: TMATMUL_ACC<pto::AccPhase::Partial>([[C]], [[C]], [[A]], [[B]]);
+// A3: TMATMUL_ACC<pto::AccPhase::Final>([[C]], [[C]], [[A]], [[B]]);

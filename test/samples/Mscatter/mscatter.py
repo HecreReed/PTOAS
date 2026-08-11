@@ -6,9 +6,9 @@
 # INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
 # See LICENSE in the root of the software repository for the full text of the License.
 
-from mlir.ir import Context, Location, Module, InsertionPoint, StringAttr
-from mlir.dialects import func, arith, pto
-from mlir.ir import IndexType, IntegerType
+from ptoas.mlir.ir import Context, Location, Module, InsertionPoint, StringAttr, UnitAttr
+from ptoas.mlir.dialects import func, arith, pto
+from ptoas.mlir.ir import IndexType, IntegerType
 
 
 def build():
@@ -28,6 +28,7 @@ def build():
             bl = pto.BLayoutAttr.get(pto.BLayout.RowMajor, ctx)
             sl = pto.SLayoutAttr.get(pto.SLayout.NoneBox, ctx)
             pd = pto.PadValueAttr.get(pto.PadValue.Null, ctx)
+            coalesce = pto.CoalesceAttr.get(pto.Coalesce.Row, ctx)
 
             fractal_ab_size = pto.TileConfig.fractalABSize
             cfg = pto.TileBufConfigAttr.get(bl, sl, fractal_ab_size, pd, ctx)
@@ -37,6 +38,7 @@ def build():
             fn_ty = func.FunctionType.get([ptr_i32, ptr_i32, ptr_i32], [])
             with InsertionPoint(m.body):
                 fn = func.FuncOp("mscatter_kernel_2d", fn_ty)
+                fn.operation.attributes["pto.entry"] = UnitAttr.get(ctx)
                 entry = fn.add_entry_block()
 
             with InsertionPoint(entry):
@@ -61,7 +63,7 @@ def build():
                 pto.TLoadOp(None, sv0, tb0)
                 pto.TLoadOp(None, sv1, tb1)
 
-                pto.MScatterOp(tb0, tb1, sv2)
+                pto.MScatterOp(tb0, tb1, sv2, coalesce=coalesce)
 
                 func.ReturnOp([])
 

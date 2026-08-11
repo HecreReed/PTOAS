@@ -1,0 +1,124 @@
+// Copyright (c) 2026 Huawei Technologies Co., Ltd.
+// This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+// CANN Open Software License Agreement Version 2.0 (the "License").
+// Please refer to the License for details. You may not use this file except in compliance with the License.
+// THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+// INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+// See LICENSE in the root of the software repository for the full text of the License.
+
+// RUN: ptoas --pto-level=level2 --pto-arch=a3 --plan-memory-impl=modern \
+// RUN:   --emit-pto-ir --mlir-print-ir-after=pto-plan-memory %s 2>&1 \
+// RUN:   | FileCheck %s
+
+module attributes {pto.target_arch = "a3"} {
+  func.func @loop_invariant_no_reuse(
+      %src0: !pto.partition_tensor_view<1x1x1x16x16xf16>,
+      %src1: !pto.partition_tensor_view<1x1x1x16x16xf16>,
+      %dst: !pto.partition_tensor_view<1x1x1x16x16xf16>) {
+    %c0 = arith.constant 0 : index
+    %c1 = arith.constant 1 : index
+    %c4 = arith.constant 4 : index
+    %invariant = pto.alloc_tile : !pto.tile_buf<vec, 16x16xf16>
+    pto.tload ins(%src0 : !pto.partition_tensor_view<1x1x1x16x16xf16>)
+              outs(%invariant : !pto.tile_buf<vec, 16x16xf16>) {layout = #pto.layout<nd>}
+    scf.for %i = %c0 to %c4 step %c1 {
+      pto.tstore ins(%invariant : !pto.tile_buf<vec, 16x16xf16>)
+                 outs(%dst : !pto.partition_tensor_view<1x1x1x16x16xf16>) {layout = #pto.layout<nd>}
+      %scratch = pto.alloc_tile : !pto.tile_buf<vec, 16x16xf16>
+      pto.tload ins(%src1 : !pto.partition_tensor_view<1x1x1x16x16xf16>)
+                outs(%scratch : !pto.tile_buf<vec, 16x16xf16>) {layout = #pto.layout<nd>}
+      pto.tstore ins(%scratch : !pto.tile_buf<vec, 16x16xf16>)
+                 outs(%dst : !pto.partition_tensor_view<1x1x1x16x16xf16>) {layout = #pto.layout<nd>}
+    }
+    return
+  }
+
+  func.func @loop_carried_yield_no_reuse(
+      %src0: !pto.partition_tensor_view<1x1x1x16x16xf16>,
+      %src1: !pto.partition_tensor_view<1x1x1x16x16xf16>,
+      %src2: !pto.partition_tensor_view<1x1x1x16x16xf16>,
+      %dst: !pto.partition_tensor_view<1x1x1x16x16xf16>) {
+    %c0 = arith.constant 0 : index
+    %c1 = arith.constant 1 : index
+    %c4 = arith.constant 4 : index
+    %init = pto.alloc_tile : !pto.tile_buf<vec, 16x16xf16>
+    pto.tload ins(%src0 : !pto.partition_tensor_view<1x1x1x16x16xf16>)
+              outs(%init : !pto.tile_buf<vec, 16x16xf16>) {layout = #pto.layout<nd>}
+    %result = scf.for %i = %c0 to %c4 step %c1
+        iter_args(%carried = %init) -> (!pto.tile_buf<vec, 16x16xf16>) {
+      %scratch = pto.alloc_tile : !pto.tile_buf<vec, 16x16xf16>
+      pto.tload ins(%src1 : !pto.partition_tensor_view<1x1x1x16x16xf16>)
+                outs(%scratch : !pto.tile_buf<vec, 16x16xf16>) {layout = #pto.layout<nd>}
+      pto.tstore ins(%carried : !pto.tile_buf<vec, 16x16xf16>)
+                 outs(%dst : !pto.partition_tensor_view<1x1x1x16x16xf16>) {layout = #pto.layout<nd>}
+      %next = pto.alloc_tile : !pto.tile_buf<vec, 16x16xf16>
+      pto.tload ins(%src2 : !pto.partition_tensor_view<1x1x1x16x16xf16>)
+                outs(%next : !pto.tile_buf<vec, 16x16xf16>) {layout = #pto.layout<nd>}
+      scf.yield %next : !pto.tile_buf<vec, 16x16xf16>
+    }
+    pto.tstore ins(%result : !pto.tile_buf<vec, 16x16xf16>)
+               outs(%dst : !pto.partition_tensor_view<1x1x1x16x16xf16>) {layout = #pto.layout<nd>}
+    return
+  }
+
+  func.func @loop_carried_branch_roots_no_reuse(
+      %src0: !pto.partition_tensor_view<1x1x1x16x16xf16>,
+      %src1: !pto.partition_tensor_view<1x1x1x16x16xf16>,
+      %src2: !pto.partition_tensor_view<1x1x1x16x16xf16>,
+      %dst: !pto.partition_tensor_view<1x1x1x16x16xf16>) {
+    %c0 = arith.constant 0 : index
+    %c1 = arith.constant 1 : index
+    %c4 = arith.constant 4 : index
+    %init = pto.alloc_tile : !pto.tile_buf<vec, 16x16xf16>
+    pto.tload ins(%src0 : !pto.partition_tensor_view<1x1x1x16x16xf16>)
+              outs(%init : !pto.tile_buf<vec, 16x16xf16>) {layout = #pto.layout<nd>}
+    %result = scf.for %i = %c0 to %c4 step %c1
+        iter_args(%carried = %init) -> (!pto.tile_buf<vec, 16x16xf16>) {
+      pto.tstore ins(%carried : !pto.tile_buf<vec, 16x16xf16>)
+                 outs(%dst : !pto.partition_tensor_view<1x1x1x16x16xf16>) {layout = #pto.layout<nd>}
+      %take_then = arith.cmpi slt, %i, %c1 : index
+      %next = scf.if %take_then -> (!pto.tile_buf<vec, 16x16xf16>) {
+        %then = pto.alloc_tile : !pto.tile_buf<vec, 16x16xf16>
+        pto.tload ins(%src1 : !pto.partition_tensor_view<1x1x1x16x16xf16>)
+                  outs(%then : !pto.tile_buf<vec, 16x16xf16>) {layout = #pto.layout<nd>}
+        scf.yield %then : !pto.tile_buf<vec, 16x16xf16>
+      } else {
+        %else = pto.alloc_tile : !pto.tile_buf<vec, 16x16xf16>
+        pto.tload ins(%src2 : !pto.partition_tensor_view<1x1x1x16x16xf16>)
+                  outs(%else : !pto.tile_buf<vec, 16x16xf16>) {layout = #pto.layout<nd>}
+        scf.yield %else : !pto.tile_buf<vec, 16x16xf16>
+      }
+      scf.yield %next : !pto.tile_buf<vec, 16x16xf16>
+    }
+    pto.tstore ins(%result : !pto.tile_buf<vec, 16x16xf16>)
+               outs(%dst : !pto.partition_tensor_view<1x1x1x16x16xf16>) {layout = #pto.layout<nd>}
+    return
+  }
+}
+
+// CHECK-LABEL: func.func @loop_invariant_no_reuse
+// CHECK-DAG: %[[INV_ADDR:.*]] = arith.constant 0 : i64
+// CHECK-DAG: %[[SCRATCH_ADDR:.*]] = arith.constant 512 : i64
+// CHECK: pto.alloc_tile addr = %[[INV_ADDR]]
+// CHECK: scf.for
+// CHECK: pto.alloc_tile addr = %[[SCRATCH_ADDR]]
+
+// CHECK-LABEL: func.func @loop_carried_yield_no_reuse
+// CHECK-DAG: %[[INIT_ADDR:.*]] = arith.constant 0 : i64
+// CHECK-DAG: %[[ADDR512:.*]] = arith.constant 512 : i64
+// CHECK-DAG: %[[ADDR1024:.*]] = arith.constant 1024 : i64
+// CHECK: pto.alloc_tile addr = %[[INIT_ADDR]]
+// CHECK: scf.for
+// CHECK: pto.alloc_tile addr = %[[ADDR1024]]
+// CHECK: pto.alloc_tile addr = %[[ADDR512]]
+
+// CHECK-LABEL: func.func @loop_carried_branch_roots_no_reuse
+// CHECK-DAG: %[[BRANCH_INIT_ADDR:.*]] = arith.constant 0 : i64
+// CHECK-DAG: %[[BRANCH_ADDR512:.*]] = arith.constant 512 : i64
+// CHECK-DAG: %[[BRANCH_ADDR1024:.*]] = arith.constant 1024 : i64
+// CHECK: pto.alloc_tile addr = %[[BRANCH_INIT_ADDR]]
+// CHECK: scf.for
+// CHECK: scf.if
+// CHECK: pto.alloc_tile addr = %[[BRANCH_ADDR512]]
+// CHECK: } else {
+// CHECK: pto.alloc_tile addr = %[[BRANCH_ADDR1024]]

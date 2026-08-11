@@ -30,9 +30,9 @@ def main():
     %10 = arith.ceildivsi %9, %7 : index
     %11 = arith.muli %6, %10 : index
     pto.section.vector {
-      %12 = pto.make_tensor_view %arg0, shape = [%8], strides = [%c1] : !pto.tensor_view<?xf32>
-      %13 = pto.make_tensor_view %arg1, shape = [%8], strides = [%c1] : !pto.tensor_view<?xf32>
-      %14 = pto.make_tensor_view %arg2, shape = [%8], strides = [%c1] : !pto.tensor_view<?xf32>
+      %12 = pto.make_tensor_view %arg0, shape = [%c1, %8], strides = [%8, %c1] : !pto.tensor_view<1x?xf32>
+      %13 = pto.make_tensor_view %arg1, shape = [%c1, %8], strides = [%8, %c1] : !pto.tensor_view<1x?xf32>
+      %14 = pto.make_tensor_view %arg2, shape = [%c1, %8], strides = [%8, %c1] : !pto.tensor_view<1x?xf32>
       %15 = pto.alloc_tile : !pto.tile_buf<loc=vec, dtype=f32, rows=1, cols=8192, v_row=1, v_col=8192, blayout=row_major, slayout=none_box, fractal=512, pad=0>
       %16 = pto.alloc_tile : !pto.tile_buf<loc=vec, dtype=f32, rows=1, cols=8192, v_row=1, v_col=8192, blayout=row_major, slayout=none_box, fractal=512, pad=0>
       %17 = pto.alloc_tile : !pto.tile_buf<loc=vec, dtype=f32, rows=1, cols=8192, v_row=1, v_col=8192, blayout=row_major, slayout=none_box, fractal=512, pad=0>
@@ -51,9 +51,9 @@ def main():
           scf.for %arg4 = %c0 to %25 step %c1 {
             %28 = arith.addi %arg4, %11 : index
             %29 = arith.muli %28, %c8192 : index
-            %30 = pto.partition_view %12, offsets = [%29], sizes = [%c8192] : !pto.tensor_view<?xf32> -> !pto.partition_tensor_view<1x8192xf32>
-            %31 = pto.partition_view %13, offsets = [%29], sizes = [%c8192] : !pto.tensor_view<?xf32> -> !pto.partition_tensor_view<1x8192xf32>
-            %32 = pto.partition_view %14, offsets = [%29], sizes = [%c8192] : !pto.tensor_view<?xf32> -> !pto.partition_tensor_view<1x8192xf32>
+            %30 = pto.partition_view %12, offsets = [%c0, %29], sizes = [%c1, %c8192] : !pto.tensor_view<1x?xf32> -> !pto.partition_tensor_view<1x8192xf32>
+            %31 = pto.partition_view %13, offsets = [%c0, %29], sizes = [%c1, %c8192] : !pto.tensor_view<1x?xf32> -> !pto.partition_tensor_view<1x8192xf32>
+            %32 = pto.partition_view %14, offsets = [%c0, %29], sizes = [%c1, %c8192] : !pto.tensor_view<1x?xf32> -> !pto.partition_tensor_view<1x8192xf32>
             %33 = arith.remui %arg4, %c2 : index
             %34 = arith.cmpi eq, %33, %c0 : index
             scf.if %34 {
@@ -82,4 +82,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-

@@ -1,0 +1,23 @@
+// Copyright (c) 2026 Huawei Technologies Co., Ltd.
+// This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+// CANN Open Software License Agreement Version 2.0 (the "License").
+// Please refer to the License for details. You may not use this file except in compliance with the License.
+// THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+// INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+// See LICENSE in the root of the software repository for the full text of the License.
+
+// RUN: not ptoas %s 2>&1 | FileCheck %s
+
+// An integer width the backend has no exact C++ spelling for (i1 here; i24 and
+// the packed f8/f4 vec formats behave the same) must be rejected by the type
+// verifier. Accepting it would emit the field as `float`, silently changing its
+// width and semantics in the generated C++.
+
+module {
+  func.func @struct_bad_scalar() {
+    %s = pto.declare_struct -> !pto.struct<f32, i1>
+    return
+  }
+}
+
+// CHECK: is not scalar-storable

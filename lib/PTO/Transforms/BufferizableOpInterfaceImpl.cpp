@@ -11,7 +11,6 @@
 
 #include "PTO/Transforms/BufferizableOpInterfaceImpl.h"
 #include "PTO/IR/PTO.h"
-#include "PTO/IR/PTODialect.h"
 #include "mlir/Dialect/Bufferization/IR/BufferizableOpInterface.h"
 #include "mlir/Dialect/Bufferization/IR/DstBufferizableOpInterfaceImpl.h"
 #include "mlir/Dialect/MemRef/IR/MemRef.h"
@@ -25,164 +24,169 @@ using namespace mlir::bufferization;
 namespace {
 
 static LogicalResult bufferizeDestinationStyleOpInterface(
-    RewriterBase& rewriter, DestinationStyleOpInterface op, const BufferizationOptions& options,
+    RewriterBase &rewriter, DestinationStyleOpInterface op,
+    const BufferizationOptions &options,
     bool supportMixedTensorBufferMode = true);
 
-template <typename Derived, typename OpTy, bool supportMixedTensorBufferMode = true, bool readOnlyDpsInputs = false>
-struct PTODpsOpInterfaceBase : public BufferizableOpInterface::ExternalModel<Derived, OpTy> {
-    bool bufferizesToMemoryRead(Operation* op, OpOperand& opOperand, const AnalysisState&) const
-    {
-        auto dpsOp = cast<DestinationStyleOpInterface>(op);
-        if constexpr (readOnlyDpsInputs)
-            return dpsOp.isDpsInput(&opOperand);
-        return true;
-    }
+template <typename Derived, typename OpTy,
+          bool supportMixedTensorBufferMode = true>
+struct PTODpsOpInterfaceBase
+    : public DstBufferizableOpInterfaceExternalModel<Derived, OpTy> {
+  LogicalResult bufferize(Operation *op, RewriterBase &rewriter,
+                          const BufferizationOptions &options) const {
+    return bufferizeDestinationStyleOpInterface(
+        rewriter, cast<DestinationStyleOpInterface>(op), options,
+        supportMixedTensorBufferMode);
+  }
+};
 
-    bool bufferizesToMemoryWrite(Operation* op, OpOperand& opOperand, const AnalysisState&) const
-    {
-        auto dpsOp = cast<DestinationStyleOpInterface>(op);
-        return dpsOp.isDpsInit(&opOperand);
-    }
+template <typename Derived, typename OpTy>
+struct PTOReadWriteDpsOpInterfaceBase
+    : public PTODpsOpInterfaceBase<Derived, OpTy> {
+  bool bufferizesToMemoryRead(Operation *op, OpOperand &opOperand,
+                              const AnalysisState &state) const {
+    auto dpsOp = cast<DestinationStyleOpInterface>(op);
+    return dpsOp.isDpsInput(&opOperand);
+  }
 
-    AliasingValueList getAliasingValues(Operation* op, OpOperand& opOperand, const AnalysisState&) const
-    {
-        auto dpsOp = cast<DestinationStyleOpInterface>(op);
-        if (dpsOp.isDpsInit(&opOperand))
-            return {{dpsOp.getTiedOpResult(&opOperand), BufferRelation::Equivalent}};
-        return {};
-    }
-
-    LogicalResult bufferize(Operation* op, RewriterBase& rewriter, const BufferizationOptions& options) const
-    {
-        return bufferizeDestinationStyleOpInterface(
-            rewriter, cast<DestinationStyleOpInterface>(op), options, supportMixedTensorBufferMode);
-    }
+  bool bufferizesToMemoryWrite(Operation *op, OpOperand &opOperand,
+                               const AnalysisState &state) const {
+    auto dpsOp = cast<DestinationStyleOpInterface>(op);
+    return dpsOp.isDpsInit(&opOperand);
+  }
 };
 
 /// Generic conversion for any DestinationStyleOpInterface on tensors.
 static LogicalResult bufferizeDestinationStyleOpInterface(
-    RewriterBase& rewriter, DestinationStyleOpInterface op, const BufferizationOptions& options,
-    bool supportMixedTensorBufferMode)
-{
+    RewriterBase &rewriter, DestinationStyleOpInterface op,
+    const BufferizationOptions &options,
+    bool supportMixedTensorBufferMode) {
+  // Take a guard before anything else.
+  OpBuilder::InsertionGuard g(rewriter);
+  rewriter.setInsertionPoint(op);
+
+  // Nothing to do. This op is already bufferized.
+  if (op.hasPureBufferSemantics()) {
+    return success();
+  }
+
+  // Ensure op has only tensors. Allow mixed tensor-buffer mode on a per-need
+  // basis.
+  if (!op.hasPureTensorSemantics() && !supportMixedTensorBufferMode) {
+    return op->emitError() << "op does not have tensor semantics";
+  }
+
+  // New operands for the cloned op.
+  SmallVector<Value> newOperands;
+  newOperands.reserve(op->getNumOperands());
+  for (OpOperand &opOperand : op->getOpOperands()) {
+    if (!isa<TensorType>(opOperand.get().getType())) {
+      newOperands.push_back(opOperand.get());
+      continue;
+    }
+    FailureOr<Value> buffer = getBuffer(rewriter, opOperand.get(), options);
+    if (failed(buffer)) {
+      return failure();
+    }
+    newOperands.push_back(*buffer);
+  }
+
+  // New output operands for the cloned op.
+  SmallVector<Value> newOutputBuffers;
+  for (OpResult opResult : op->getOpResults()) {
+    OpOperand *opOperand = op.getDpsInitOperand(opResult.getResultNumber());
+    FailureOr<Value> resultBuffer =
+        getBuffer(rewriter, opOperand->get(), options);
+    if (failed(resultBuffer)) {
+      return failure();
+    }
+    newOutputBuffers.push_back(*resultBuffer);
+  }
+
+  // Set insertion point now that potential alloc/dealloc are introduced.
+  rewriter.setInsertionPoint(op);
+  // Clone the op, but use the new operands.
+  clone(rewriter, op, /*newResultTypes=*/TypeRange{}, newOperands);
+
+  // Replace the results of the old op with the new output buffers.
+  replaceOpWithBufferizedValues(rewriter, op, newOutputBuffers);
+
+  return success();
+}
+
+struct PTOLoadOpInterface
+    : public PTODpsOpInterfaceBase<PTOLoadOpInterface, pto::TLoadOp> {};
+
+struct PTOStoreOpInterface
+    : public DstBufferizableOpInterfaceExternalModel<PTOStoreOpInterface,
+                                                     pto::TStoreOp> {
+  LogicalResult bufferize(Operation *op, RewriterBase &rewriter,
+                          const BufferizationOptions &options) const {
+    auto dpsOp = cast<DestinationStyleOpInterface>(op);
+    if (dpsOp.hasPureBufferSemantics()) {
+      return success();
+    }
+    if (dpsOp.hasPureTensorSemantics()) {
+      return bufferizeDestinationStyleOpInterface(rewriter, dpsOp, options);
+    }
+    // We only handle the case where fixpipe op's input is a tensor from
+    // mmad and fixpipe op's output is a memref type.
+    auto srcOp = dpsOp.getDpsInputOperand(0);
+    auto dstOp = dpsOp.getDpsInitOperand(0);
+    if (!isa<TensorType>(srcOp->get().getType()) ||
+        !isa<MemRefType>(dstOp->get().getType())) {
+      return op->emitError() << "src and dst op should have tensor and memref "
+                                "type, respectively";
+    }
     // Take a guard before anything else.
     OpBuilder::InsertionGuard g(rewriter);
     rewriter.setInsertionPoint(op);
 
-    // Nothing to do. This op is already bufferized.
-    if (op.hasPureBufferSemantics()) {
-        return success();
+    FailureOr<Value> buffer = getBuffer(rewriter, srcOp->get(), options);
+    if (failed(buffer)) {
+      return failure();
     }
-
-    // Ensure op has only tensors. Allow mixed tensor-buffer mode on a per-need
-    // basis.
-    if (!op.hasPureTensorSemantics() && !supportMixedTensorBufferMode) {
-        return op->emitError() << "op does not have tensor semantics";
-    }
-
-    // New operands for the cloned op.
-    SmallVector<Value> newOperands;
-    newOperands.reserve(op->getNumOperands());
-    for (OpOperand& opOperand : op->getOpOperands()) {
-        if (!isa<TensorType>(opOperand.get().getType())) {
-            newOperands.push_back(opOperand.get());
-            continue;
-        }
-        FailureOr<Value> buffer = getBuffer(rewriter, opOperand.get(), options);
-        if (failed(buffer)) {
-            return failure();
-        }
-        newOperands.push_back(*buffer);
-    }
-
-    // New output operands for the cloned op.
-    SmallVector<Value> newOutputBuffers;
-    for (OpResult opResult : op->getOpResults()) {
-        OpOperand* opOperand = op.getDpsInitOperand(opResult.getResultNumber());
-        FailureOr<Value> resultBuffer = getBuffer(rewriter, opOperand->get(), options);
-        if (failed(resultBuffer)) {
-            return failure();
-        }
-        newOutputBuffers.push_back(*resultBuffer);
-    }
-
     // Set insertion point now that potential alloc/dealloc are introduced.
     rewriter.setInsertionPoint(op);
     // Clone the op, but use the new operands.
-    clone(rewriter, op, /*newResultTypes=*/TypeRange{}, newOperands);
-
-    // Replace the results of the old op with the new output buffers.
-    replaceOpWithBufferizedValues(rewriter, op, newOutputBuffers);
-
+    auto newOp = cast<DestinationStyleOpInterface>(clone(
+        rewriter, op, /*newResultTypes=*/TypeRange{}, {*buffer, dstOp->get()}));
+    // We need to manually replace the old op because it has memory effects
+    // and won't be deleted automatically.
+    rewriter.replaceOp(op, newOp);
     return success();
-}
-
-struct PTOLoadOpInterface : public PTODpsOpInterfaceBase<PTOLoadOpInterface, pto::TLoadOp> {};
-
-struct PTOStoreOpInterface : public DstBufferizableOpInterfaceExternalModel<PTOStoreOpInterface, pto::TStoreOp> {
-    LogicalResult bufferize(Operation* op, RewriterBase& rewriter, const BufferizationOptions& options) const
-    {
-        auto dpsOp = cast<DestinationStyleOpInterface>(op);
-        if (dpsOp.hasPureBufferSemantics()) {
-            return success();
-        }
-        if (dpsOp.hasPureTensorSemantics()) {
-            return bufferizeDestinationStyleOpInterface(rewriter, dpsOp, options);
-        }
-        // We only handle the case where fixpipe op's input is a tensor from
-        // mmad and fixpipe op's output is a memref type.
-        auto srcOp = dpsOp.getDpsInputOperand(0);
-        auto dstOp = dpsOp.getDpsInitOperand(0);
-        if (!isa<TensorType>(srcOp->get().getType()) || !isa<MemRefType>(dstOp->get().getType())) {
-            return op->emitError() << "src and dst op should have tensor and memref "
-                                      "type, respectively";
-        }
-        // Take a guard before anything else.
-        OpBuilder::InsertionGuard g(rewriter);
-        rewriter.setInsertionPoint(op);
-
-        FailureOr<Value> buffer = getBuffer(rewriter, srcOp->get(), options);
-        if (failed(buffer)) {
-            return failure();
-        }
-        // Set insertion point now that potential alloc/dealloc are introduced.
-        rewriter.setInsertionPoint(op);
-        // Clone the op, but use the new operands.
-        auto newOp = cast<DestinationStyleOpInterface>(
-            clone(rewriter, op, /*newResultTypes=*/TypeRange{}, {*buffer, dstOp->get()}));
-        // We need to manually replace the old op because it has memory effects
-        // and won't be deleted automatically.
-        rewriter.replaceOp(op, newOp);
-        return success();
-    }
+  }
 };
 
 /// TMrgSortOp format2 keeps only the destination tile in dsts. The executed
 /// vector result remains a non-bufferizable side operand/result.
-struct PTOMrgSortDpsOpInterface : public PTODpsOpInterfaceBase<PTOMrgSortDpsOpInterface, pto::TMrgSortOp> {};
+struct PTOMrgSortDpsOpInterface
+    : public PTODpsOpInterfaceBase<PTOMrgSortDpsOpInterface,
+                                   pto::TMrgSortOp> {};
 
-struct PTOAddOpInterface : public PTODpsOpInterfaceBase<
-                               PTOAddOpInterface, pto::TAddOp,
-                               /*supportMixedTensorBufferMode=*/true,
-                               /*readOnlyDpsInputs=*/true> {
-    bool bufferizesToElementwiseAccess(Operation*, const AnalysisState&, ArrayRef<OpOperand*>) const { return true; }
+struct PTOAddOpInterface
+    : public PTOReadWriteDpsOpInterfaceBase<PTOAddOpInterface, pto::TAddOp> {
+  bool bufferizesToElementwiseAccess(Operation *op, const AnalysisState &state,
+                                     ArrayRef<OpOperand *> opOperands) const {
+    return true;
+  }
 };
 
-struct PTOMatmulOpInterface : public PTODpsOpInterfaceBase<
-                                  PTOMatmulOpInterface, pto::TMatmulOp,
-                                  /*supportMixedTensorBufferMode=*/true,
-                                  /*readOnlyDpsInputs=*/true> {};
+struct PTOMatmulOpInterface
+    : public PTOReadWriteDpsOpInterfaceBase<PTOMatmulOpInterface,
+                                            pto::TMatmulOp> {};
 
 } // namespace
 
-void mlir::pto::registerBufferizableOpInterfaceExternalModels(DialectRegistry& registry)
-{
-    registry.addExtension(+[](MLIRContext* ctx, const pto::PTODialect* dialect) {
-        TLoadOp::attachInterface<PTOLoadOpInterface>(*ctx);
-        TStoreOp::attachInterface<PTOStoreOpInterface>(*ctx);
-        TMrgSortOp::attachInterface<PTOMrgSortDpsOpInterface>(*ctx);
-        TAddOp::attachInterface<PTOAddOpInterface>(*ctx);
-        TMatmulOp::attachInterface<PTOMatmulOpInterface>(*ctx);
-        (void)ctx;
-        (void)dialect;
-    });
+void mlir::pto::registerBufferizableOpInterfaceExternalModels(
+    DialectRegistry &registry) {
+  registry.addExtension(+[](MLIRContext *ctx, pto::PTODialect *dialect) {
+    TLoadOp::attachInterface<PTOLoadOpInterface>(*ctx);
+    TStoreOp::attachInterface<PTOStoreOpInterface>(*ctx);
+    TMrgSortOp::attachInterface<PTOMrgSortDpsOpInterface>(*ctx);
+    TAddOp::attachInterface<PTOAddOpInterface>(*ctx);
+    TMatmulOp::attachInterface<PTOMatmulOpInterface>(*ctx);
+    (void)ctx;
+    (void)dialect;
+  });
 }

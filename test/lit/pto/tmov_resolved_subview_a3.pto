@@ -1,0 +1,36 @@
+// Copyright (c) 2026 Huawei Technologies Co., Ltd.
+// This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+// CANN Open Software License Agreement Version 2.0 (the "License").
+// Please refer to the License for details. You may not use this file except in compliance with the License.
+// THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+// INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+// See LICENSE in the root of the software repository for the full text of the License.
+
+// RUN: ptoas --pto-arch=a3 --pto-level=level3 %s | FileCheck %s
+
+module {
+  func.func @tmov_resolved_subview_a3() {
+    %c0 = arith.constant 0 : index
+    %c1 = arith.constant 1 : index
+    %c8 = arith.constant 8 : index
+    %src_addr = arith.constant 0 : i64
+    %dst_addr = arith.constant 256 : i64
+
+    %src = pto.alloc_tile addr = %src_addr valid_row = %c1 valid_col = %c8 :
+      !pto.tile_buf<loc=vec, dtype=f32, rows=1, cols=8, v_row=?, v_col=?, blayout=row_major, slayout=none_box, fractal=512, pad=0>
+    %dst = pto.alloc_tile addr = %dst_addr :
+      !pto.tile_buf<loc=vec, dtype=f32, rows=8, cols=8, v_row=8, v_col=8, blayout=row_major, slayout=none_box, fractal=512, pad=0>
+    %view = pto.subview %dst[%c0, %c0] sizes [1, 8] valid [%c1, %c8] :
+      !pto.tile_buf<loc=vec, dtype=f32, rows=8, cols=8, v_row=8, v_col=8, blayout=row_major, slayout=none_box, fractal=512, pad=0>
+      -> !pto.tile_buf<loc=vec, dtype=f32, rows=1, cols=8, v_row=1, v_col=8, blayout=row_major, slayout=none_box, fractal=512, pad=0>
+    pto.tmov ins(%src :
+      !pto.tile_buf<loc=vec, dtype=f32, rows=1, cols=8, v_row=?, v_col=?, blayout=row_major, slayout=none_box, fractal=512, pad=0>)
+      outs(%view :
+      !pto.tile_buf<loc=vec, dtype=f32, rows=1, cols=8, v_row=1, v_col=8, blayout=row_major, slayout=none_box, fractal=512, pad=0>)
+    return
+  }
+}
+
+// CHECK-LABEL: AICORE void tmov_resolved_subview_a3()
+// CHECK: Tile<TileType::Vec, float, 1, 8, BLayout::RowMajor, 1, 8,
+// CHECK: TMOV(

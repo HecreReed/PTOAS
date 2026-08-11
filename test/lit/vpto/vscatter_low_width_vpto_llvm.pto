@@ -1,0 +1,36 @@
+// Copyright (c) 2026 Huawei Technologies Co., Ltd.
+// This program is free software; you can redistribute it and/or modify it under the terms and conditions of
+// CANN Open Software License Agreement Version 2.0 (the "License").
+// Please refer to the License for details. You may not use this file except in compliance with the License.
+// THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+// INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+// See LICENSE in the root of the software repository for the full text of the License.
+
+// Guards the b8/b16 vscatter signatures and their LLVM intrinsic selection.
+// RUN: ptoas --cann-output-version=9.0.0 --pto-arch=a5 --pto-backend=vpto --emit-vpto-llvm-ir %s -o - 2>&1 | FileCheck %s
+// RUN: ptoas --cann-output-version=9.0.0-beta.1 --pto-arch=a5 --pto-backend=vpto --emit-vpto-llvm-ir %s -o - 2>&1 | FileCheck %s
+
+module attributes {pto.target_arch = "a5", pto.kernel_kind = #pto.kernel_kind<vector>} {
+  func.func @vscatter_b8(%value: !pto.vreg<256xui8>, %dst: !pto.ptr<ui8, ub>,
+                         %offsets: !pto.vreg<128xui16>) attributes {pto.kernel} {
+    pto.vecscope {
+      %mask = pto.pset_b16 "PAT_ALL" : !pto.mask<b16>
+      pto.vscatter %value, %dst, %offsets, %mask : !pto.vreg<256xui8>, !pto.ptr<ui8, ub>, !pto.vreg<128xui16>, !pto.mask<b16>
+    }
+    return
+  }
+
+  func.func @vscatter_b16(%value: !pto.vreg<128xf16>, %dst: !pto.ptr<f16, ub>,
+                          %offsets: !pto.vreg<128xi16>) attributes {pto.kernel} {
+    pto.vecscope {
+      %mask = pto.pset_b16 "PAT_ALL" : !pto.mask<b16>
+      pto.vscatter %value, %dst, %offsets, %mask : !pto.vreg<128xf16>, !pto.ptr<f16, ub>, !pto.vreg<128xi16>, !pto.mask<b16>
+    }
+    return
+  }
+}
+
+// CHECK-DAG: declare void @llvm.hivm.vscatter.v256u8.v300(<256 x i8>, ptr addrspace(6), <128 x i16>, <256 x i1>)
+// CHECK-DAG: declare void @llvm.hivm.vscatter.v128f16.v300(<128 x half>, ptr addrspace(6), <128 x i16>, <256 x i1>)
+// CHECK: call void @llvm.hivm.vscatter.v256u8.v300
+// CHECK: call void @llvm.hivm.vscatter.v128f16.v300

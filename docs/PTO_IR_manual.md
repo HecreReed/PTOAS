@@ -58,7 +58,11 @@ Element types describe the primitive scalar values that can be stored in tensors
 
 Common element categories include:
 
-- **Integers**: signless integers such as `i1/i8/i16/i32`. Signedness is not encoded in the type; it is selected by operation semantics or attributes where required.
+- **Integers**: signless integers such as `i1/i8/i16/i32`, and, where an op
+  surface requires it, explicitly signed/unsigned integers such as
+  `si8/ui8/si16/ui16/si32/ui32`. Whether an operation accepts only signless
+  integers or also accepts explicit signedness is operation-specific and
+  documented per op family.
 - **Floating-point**: IEEE floating-point types such as `f16/f32`. Some targets may also support additional formats (e.g., `bf16` or low-precision exponent/mantissa formats) with stricter constraints.
 - **Index-like**: index values may appear as scalar operands in certain operations (e.g., offsets, sizes, or scalar comparisons).
 
@@ -99,15 +103,20 @@ number of scalar FP4 elements.
 Operation support is still opt-in. Defining the type in PTO IR does not by
 itself imply that any particular operation accepts it.
 
-### 2.2 `!pto.ptr<elementType>`
+### 2.2 `!pto.ptr<elementType[, memorySpace]>`
 
-A pointer to global memory.
+A typed pointer. `memorySpace` is optional and defaults to `gm`.
 
 | Parameter | Type | Description |
 |-----------|------|-------------|
 | `elementType` | `element-type(i1/i8/i16/i32/f16/f32/bf16...)` | Element type pointed to |
+| `memorySpace` | `gm` or `ub` | Pointer address space alias (`gm` -> global memory, `ub` -> vector/UB memory) |
 
-**Syntax:** `!pto.ptr<f16>`
+**Syntax:** `!pto.ptr<f16>` or `!pto.ptr<f16, ub>`
+
+Pointer conversions are modeled explicitly with [`pto.castptr`](#ptocastptr).
+Between two `!pto.ptr` types, casts are only legal when both pointers stay in
+the same PTO memory space.
 
 ---
 
@@ -154,7 +163,11 @@ A logical partition (slice) of a `tensor_view`. Holds shape and stride informati
 | `fractal` | `int32` | Fractal size |
 | `pad` | `PadValue` mnemonic or integer literal | Padding policy/value selector (tests commonly use `pad=0`) |
 
-Here, `?` denotes a dynamic symbol resolved at runtime.
+Here, `?` denotes a dynamic symbol resolved at runtime. Static and dynamic
+valid dimensions are non-negative counts; a static `v_row=0` or `v_col=0`
+represents an empty valid region. Physical `rows`/`cols` may still describe the
+storage extent, for example an even physical row count with an odd or zero
+`v_row` on a tail tile.
 
 For `dtype=!pto.f4E1M2x2` and `dtype=!pto.f4E2M1x2`, the `rows`/`cols` and
 `v_row`/`v_col` values are physical packed extents. In other words, the packed
@@ -168,7 +181,53 @@ dimension counts FP4 pairs stored per byte, not logical scalar FP4 elements.
 
 ---
 
-### 2.6 `!pto.local_array<D1 x D2 x ... x Dk x T>`
+### 2.6 `!pto.multi_tile_buf<slotType, count=N>`
+
+A **multi-buffer tile** representing N physically-distinct slots that share
+one `tile_buf` shape. Only the underlying physical address differs across
+slots; rank, valid shape, dtype, memory space, and config are identical.
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `slotType` | `!pto.tile_buf<...>` | The per-slot tile_buf type |
+| `count` | unsigned `[2, 16]` | Number of physical slots N |
+
+**Constraints (enforced by the type verifier):**
+- `2 <= count <= 16` (`kPtoMultiBufferMaxNum`)
+- `slotType` follows all the same constraints as a single-slot `tile_buf`
+- `multi_tile_buf` does not appear on function arguments or returns in the
+  initial release; the design's multi-buffer ownership stays inside PTOAS
+
+**Two compatible spellings:**
+
+```mlir
+// Compact (preferred): the slot tile_buf is described inline.
+!pto.multi_tile_buf<vec, 16x16xf16, count=2>
+
+// Verbose: spell out the slot tile_buf explicitly.
+!pto.multi_tile_buf<!pto.tile_buf<vec, 16x16xf16>, count=2>
+```
+
+**Associated ops** (see Section 4 -- multi-buffer expression and slot
+selection):
+
+- `pto.alloc_multi_tile` -- allocate an N-slot multi-buffer tile
+- `pto.multi_tile_get`   -- pick one slot of a multi_tile_buf, yielding a
+  regular `tile_buf` that flows through every existing DMA / compute / view
+  op unchanged
+
+The slot count is part of `!pto.multi_tile_buf`. In level1/level2,
+`PTOPlanMemory` plans all slots and records their physical addresses in the
+internal `pto.multi_buffer_addrs` attribute. `PTOResolveBufferSelect`,
+InsertSync, and GraphSyncSolver consume the tile-native allocation and slot
+selection directly; no memref allocation is introduced.
+
+See `docs/designs/ptoas-multi-buffer-explicit-design.md` for the full
+design.
+
+---
+
+### 2.7 `!pto.local_array<D1 x D2 x ... x Dk x T>`
 
 A **C++ stack-local statically-shaped array**. Lowers to a plain `T a[D1][D2]...;`
 declaration in the emitted C++ — the array's address is decided by the host C++
@@ -185,9 +244,8 @@ compiler, not by PTO memory planning.
 - `T` is a scalar integer or float
 
 **Disjoint from tile-buf world.** Values of `!pto.local_array<...>` never
-participate in `pto.pointer_cast`, `pto-plan-memory`, or
-`AllocToPointerCast` rewrites — these passes match on `memref` / tile-buf
-types and simply do not see this type.
+participate in `pto-plan-memory`; the planner only collects tile allocation
+roots and does not see this type.
 
 **Syntax:**
 ```mlir
@@ -202,6 +260,125 @@ types and simply do not see this type.
 
 The number of indices on `get` / `set` must equal the array's rank
 (verifier-checked).
+
+---
+
+### 2.8 `!pto.struct<T0, T1, ..., Tn-1>`
+
+A **C++ stack-local heterogeneous aggregate** — the heterogeneous dual of
+`!pto.local_array`. Lowers to a plain `struct PtoStruct_X { ... };` definition
+plus a stack variable. The struct's address is decided by the host C++
+compiler, never by PTO memory planning or `pto.pointer_cast`. Fields are
+positionally numbered `f0, f1, ...`, matching an LLVM literal struct.
+
+| Parameter | Type | Constraints |
+|-----------|------|-------------|
+| `fieldTypes` (`T0..Tn-1`) | `i8`/`i16`/`i32`/`i64` (signed, unsigned or signless), `f16`/`bf16`/`f32`/`f64`, or a nested `!pto.struct` | At least one field; recursively scalar-storable |
+
+**Constraints (enforced by the type verifier):**
+
+- At least one field
+- Each field is *scalar-storable*: an integer of width 8/16/32/64, one of
+  `f16`/`bf16`/`f32`/`f64`, or a nested `!pto.struct`
+
+A scalar field must map onto a C++ scalar the backend can name exactly. Integer
+widths with no C++ spelling (`i1`, `i24`, ...) and the packed low-precision
+vec/cube formats (`f8`/`f4` variants) are therefore **rejected**: emitting them
+would silently widen or narrow the field in the generated C++.
+
+**`!pto.local_array` is not a valid field type.** A field is reached with
+`emitc.member`, whose result must be an `!emitc.lvalue`, and `!emitc.lvalue`
+cannot wrap the `!emitc.array` that an array field lowers to. There is no way to
+spell the access, so the type verifier rejects it rather than letting the
+backend fail later. Use a nested `!pto.struct` of scalars, or keep the array as
+a separate `!pto.declare_local_array` value alongside the struct.
+
+**Disjoint from tile-buf world.** Vec/cube types (`tile_buf`, `tensor_view`,
+partition view) and other handle types are **rejected** as fields. This keeps
+the scalar struct world separate from the fractal/layout world, exactly like
+`!pto.local_array`.
+
+**Syntax:**
+```mlir
+!pto.struct<f16, i8>                          // { half f0; int8_t f1; };
+!pto.struct<!pto.struct<f32, i8>, i16>
+  // { PtoStruct_f32_i8 f0; int16_t f1; };
+```
+
+**Passing a struct to a function.** A `!pto.struct` value lowers to a **pointer**
+to its storage, so it can be passed to a helper `func.func` and mutated there:
+
+```mlir
+func.func private @helper(%s : !pto.struct<f32, i8>, %v : f32) {
+  pto.struct_set %s[0], %v : !pto.struct<f32, i8>, f32   // emits `p->f0 = v;`
+  return
+}
+```
+
+The callee reaches fields through `->`; the caller declares real storage, passes
+its address, and still uses `.` on its own copy. Carrying the struct by value
+would make the callee's writes land in a copy, and an `!emitc.lvalue` is
+rejected outright as a function argument type by both `emitc.func` and the C++
+emitter — the pointer is what makes helper functions expressible at all.
+
+**A struct must not escape the scope that declares it.** Because the value is a
+pointer to stack storage, passing it to a terminator would publish that address
+outside the scope that owns it, so `pto.declare_struct` rejects it:
+
+```mlir
+// Rejected: hands the caller a pointer into a dead frame.
+func.func @make() -> !pto.struct<f32, i8> {
+  %s = pto.declare_struct -> !pto.struct<f32, i8>
+  return %s : !pto.struct<f32, i8>
+}
+
+// Rejected: carries the address out of the region that owns the storage.
+%r = scf.if %c -> (!pto.struct<f32, i8>) {
+  %a = pto.declare_struct -> !pto.struct<f32, i8>
+  scf.yield %a : !pto.struct<f32, i8>
+} else { ... }
+```
+
+**A function may not return a `!pto.struct` either**, even one that just passes
+an argument back:
+
+```mlir
+// Rejected: laundering. %r is no longer a pto.declare_struct result, so the
+// per-op check above cannot see that `return %r` publishes the caller's local.
+func.func private @passthrough(%s : !pto.struct<f32, i8>) -> !pto.struct<f32, i8> {
+  return %s : !pto.struct<f32, i8>
+}
+```
+
+Operation and region results can launder provenance in the same way. Therefore,
+struct storage must originate from `pto.declare_struct` or a function argument.
+Other operation results of this type are rejected; this includes aliases
+produced by `arith.select`, `scf.if`, calls, casts, and loop-carried values.
+
+This costs nothing in expressiveness: `pto.struct_set` mutates in place, so a
+struct never needs to be returned or yielded. Declare it in the outer scope and
+pass it **down** as a function argument — the callee writes through the pointer
+and the caller sees the result.
+
+**Generated type name.** The C++ name is derived from the MLIR type spelling of
+the fields (`!pto.struct<f16, i8>` → `PtoStruct_f16_i8`), not from their C++
+spellings. That mapping is injective, so two distinct `!pto.struct` types never
+collide on one name — mangling from the C++ token instead would give `i32` and
+`si32` (both `int32_t`) the same name and emit a duplicate `struct` definition.
+
+**Associated ops** (see Section 4 — mirrors the `local_array` triad):
+- `pto.declare_struct` — declare
+- `pto.struct_get`     — `s.fA.fB...` field read by constant path
+- `pto.struct_set`     — `s.fA.fB... = v;`
+
+Field positions in `get` / `set` are a constant `path` of indices that may
+descend through nested structs (like LLVM `extractvalue` / `insertvalue`).
+
+The path must **end at a scalar**. A path that stops on a nested `!pto.struct`
+is rejected: the member chain lowers to `emitc.member`, which yields an lvalue,
+and returning a whole aggregate as an SSA value would copy it out of the parent
+struct — so a field inside a nested struct is reached with a longer path
+(`%s[0, 1]`) rather than by first getting the inner struct.
 
 ---
 
@@ -448,6 +625,39 @@ result = ptr + offset   // offset is in elements, not bytes
 %ptr_off = pto.addptr %base, %offset : !pto.ptr<f32> -> !pto.ptr<f32>
 ```
 
+##### `pto.castptr` - Explicit Pointer Cast
+
+**Summary:** Performs an explicit cast between integer addresses and `!pto.ptr`,
+or between two `!pto.ptr` types.
+
+**Semantics:**
+
+```mlir
+%p0 = pto.castptr %addr : i64 -> !pto.ptr<f32, ub>
+%p1 = pto.castptr %p0 : !pto.ptr<f32, ub> -> !pto.ptr<i8, ub>
+%addr2 = pto.castptr %p1 : !pto.ptr<i8, ub> -> i64
+```
+
+**Arguments:**
+
+| Name | Type | Description |
+|------|------|-------------|
+| `input` | `integer` or `!pto.ptr<...>` | Source value to cast |
+
+**Results:** `integer` or `!pto.ptr<...>`
+
+**Constraints & Verification:**
+
+- Integer-to-integer casts are rejected; use normal integer cast ops instead
+- Descriptor values such as `!pto.tensor_view<...>` and `!pto.partition_tensor_view<...>` are not legal direct inputs; extract a memref address first
+- Pointer-to-pointer casts are only legal when source and destination stay in
+  the same PTO memory space (`gm` or `ub`)
+- The operation is pure (no side effects)
+
+**Hardware Mapping:**
+
+- No hardware pipeline (representation conversion only)
+
 ##### `pto.make_tensor_view` - Create Tensor View
 
 **Summary:** Constructs a global tensor view from a pointer, declaring the physical base and strides (no allocation, no data movement).
@@ -530,6 +740,43 @@ This op is primarily defined on `!pto.tensor_view`.
 %pv = pto.partition_view %tv,
        offsets = [%c0, %c0], sizes = [%h, %w]
        : !pto.tensor_view<?x?xf32> -> !pto.partition_tensor_view<32x32xf32>
+```
+
+---
+
+##### `pto.get_tensor_view_stride` - Get Tensor View Dimension Stride
+
+**Summary:** Returns the logical stride of a given dimension of a tensor view.
+
+**Semantics:**
+
+```mlir
+stride = get_tensor_view_stride(tv_or_mr, dim_index)
+```
+
+This op is defined on `!pto.tensor_view`. During internal lowering, the same
+query may temporarily appear on the memref form lowered from the tensor view.
+
+**Arguments:**
+
+| Name | Type | Description |
+|------|------|-------------|
+| `tensor_view` | `!pto.tensor_view<...>` or `memref<...>` | Logical tensor view or its lowered memref form |
+| `dim_index` | `index` | Dimension index (0-based) |
+
+**Results:** `index` — the logical stride of the requested dimension, measured
+in elements rather than bytes.
+
+**Notes:**
+
+- This op is the IR counterpart of the DSL-side `TensorView.strides` metadata access.
+- After lowering to memref, static strides may be folded into constants, while dynamic strides are derived from memref metadata.
+
+**Basic Example:**
+
+```mlir
+%s0 = pto.get_tensor_view_stride %tv, %c0 : !pto.tensor_view<?x?xf32> -> index
+%s1 = pto.get_tensor_view_stride %tv, %c1 : !pto.tensor_view<?x?xf32> -> index
 ```
 
 ---
@@ -617,6 +864,98 @@ result = alloc_tile(base_addr, valid_row, valid_col)   // operands are optional
 %tb3 = pto.alloc_tile addr = %ad : !pto.tile_buf<loc=vec, dtype=f16, rows=16, cols=16, v_row=16, v_col=16, blayout=row_major, slayout=none_box, fractal=512, pad=0>
 ```
 
+##### `pto.alloc_multi_tile` - Allocate N-Slot Multi-Buffer Tile
+
+**Summary:** Declares the lifetime of an N-slot multi-buffer tile. Each slot has the same `tile_buf` shape; only the underlying physical address differs. In the default pipeline (`--pto-level=level1|level2`), `PTOPlanMemory` plans the tile-native allocation directly and records all slot addresses in `pto.multi_buffer_addrs`. Under `--pto-level=level3`, the caller owns local memory and must provide an explicit base `addr`; `PTOResolveBufferSelect` derives each selected slot address from that base.
+
+**Semantics:**
+
+```
+result = alloc_multi_tile(addr, valid_row, valid_col)   // operands are optional
+```
+
+**Arguments:**
+
+| Name | Type | Description |
+|------|------|-------------|
+| `addr` | `Optional<I64>` | Base physical byte address of the contiguous N-slot region. Required under `--pto-level=level3`, rejected otherwise. Slot `k` lives at `addr + k * slotBytes` where `slotBytes = product(shape) * element_size`; the caller must reserve `N * slotBytes` bytes at `addr`. |
+| `valid_row` | `Optional<Index>` | Dynamic valid row count (required when slot `v_row` is `?`) |
+| `valid_col` | `Optional<Index>` | Dynamic valid column count (required when slot `v_col` is `?`) |
+
+**Results:** `!pto.multi_tile_buf<...>`
+
+**Constraints & Verification:**
+
+- The result type must have `count` in `[2, 16]`.
+- The slot tile type (rank, valid shape, dtype, memory space, config) is verified the same way as `pto.alloc_tile` for a single slot.
+- `addr` is gated by build level: required under `--pto-level=level3`, rejected under level1/level2 (the same rule `pto.alloc_tile` follows). With an explicit `addr` the slot shape and element size must be static so `slotBytes` is known.
+- **Storage-compact slot layout required.** The N physical slots are placed at `product(shape) * element_size` byte intervals (both the level3 lowering and PlanMemory size them this way). A `row_plus_one` compact mode inflates the major stride by one element per row, so the slot's physical strided footprint exceeds `product(shape)` and adjacent slots would silently overlap. `pto.alloc_multi_tile` therefore rejects `compact = row_plus_one` slot layouts. Non-`row_plus_one` compact layouts and boxed fractal `slayout`s pack densely (footprint equals `product(shape)`) and are supported. (This limit can be lifted once the slot stride is derived from the true strided footprint instead of `product(shape)`.)
+
+**Hardware Mapping:**
+
+- No hardware pipeline (allocation/metadata op). In the default pipeline the N-way physical fan-out is realized by PlanMemory; under level3 it is realized directly from the base `addr` during view lowering.
+
+**Basic Example:**
+
+```mlir
+// level1/level2: addresses chosen by PlanMemory.
+%mb = pto.alloc_multi_tile : !pto.multi_tile_buf<vec, 16x16xf16, count=2>
+%mb2 = pto.alloc_multi_tile : !pto.multi_tile_buf<!pto.tile_buf<vec, 16x16xf16>, count=3>
+
+// level3: caller-owned memory; slot 0 at %base, slot 1 at %base + 512 bytes.
+%base = arith.constant 0 : i64
+%mb3 = pto.alloc_multi_tile addr = %base : !pto.multi_tile_buf<vec, 16x16xf16, count=2>
+```
+
+##### `pto.multi_tile_get` - Select One Slot Of A Multi-Buffer Tile
+
+**Summary:** Returns a single-slot view of a `multi_tile_buf`. The frontend is the source of truth for which slot a given use refers to; the slot index `%k` is an `index` value (constant or any SSA expression) in `[0, count)`. PTOAS does NOT synthesize `iv mod N` for users -- the user expression IS the slot selector. Downstream sync and event-id allocation analyze the slot expressions and emit static `set_flag` / `wait_flag` for constant slots or `set_flag_dyn` / `wait_flag_dyn` for runtime slots.
+
+**Semantics:**
+
+```
+result = multi_tile_get(source, slot)
+```
+
+**Arguments:**
+
+| Name | Type | Description |
+|------|------|-------------|
+| `source` | `MultiTileBufType` | The N-slot multi-buffer tile |
+| `slot` | `Index` | Slot index in `[0, count)` |
+
+**Results:** `!pto.tile_buf<...>` (must equal `source.slotType`)
+
+**Constraints & Verification:**
+
+- Result `tile_buf` must equal `source.slotType` (rank, valid shape, dtype, memory space, config all identical).
+- If `slot` is a constant, the verifier checks `0 <= slot < count`.
+- Pure view op -- no data movement, no extra address arithmetic.
+- `multi_tile_buf` is not allowed on function arguments or results in the initial release.
+
+**Hardware Mapping:**
+
+- No hardware pipeline (metadata-only view).
+
+**Basic Example:**
+
+```mlir
+%mb = pto.alloc_multi_tile : !pto.multi_tile_buf<vec, 16x16xf16, count=2>
+
+// constant-slot selection
+%c0 = arith.constant 0 : index
+%s0 = pto.multi_tile_get %mb[%c0]
+    : !pto.multi_tile_buf<vec, 16x16xf16, count=2>
+   -> !pto.tile_buf<vec, 16x16xf16>
+
+// dynamic-slot selection (e.g. prefetch with %k from the loop body)
+%s_k = pto.multi_tile_get %mb[%k]
+    : !pto.multi_tile_buf<vec, 16x16xf16, count=2>
+   -> !pto.tile_buf<vec, 16x16xf16>
+```
+
+See `docs/designs/ptoas-multi-buffer-explicit-design.md` for the full design (sync/event-id derivation, downstream pass interplay, and end-to-end usage examples).
+
 ##### `pto.subview` - Tile SubView
 
 **Summary:** Create a logical subview from a parent tile. The subview window is expressed by `offsets + sizes`, and the result tile type shape equals `sizes`.
@@ -655,9 +994,14 @@ result.valid = clip(explicit_valid_or_sizes, sizes)
   - For boxed row-major tiles, the subview must keep the full source column extent, and the column offset must be the constant `0`.
   - For boxed col-major tiles, the subview must keep the full source row extent, and the row offset must be the constant `0`.
 - `valid_row` and `valid_col` must be both present or both absent.
-- If `valid_row/valid_col` are omitted, result `valid_shape` defaults to `sizes`.
+- If `valid_row/valid_col` are omitted, the result type is authoritative for the
+  valid extent: any static `valid_shape` in `[0, sizes]` is accepted (this covers
+  the full-size default and a `v_row=0`/`v_col=0` no-op-replay empty marker), and
+  lowering takes the valid extent from the result type rather than `sizes`. A
+  dynamic result valid (`?`) still requires an explicit `valid_row`/`valid_col`
+  operand to supply the runtime extent.
 - If `valid_row/valid_col` are provided:
-  - constant values must be positive and `<= sizes` in each dimension
+  - constant values must be non-negative and `<= sizes` in each dimension
   - non-constant values are represented as dynamic valid dims in the result type
 - The inferred result type uses:
   - `shape = sizes` (logical subview size)
@@ -667,6 +1011,8 @@ result.valid = clip(explicit_valid_or_sizes, sizes)
   - if explicit `valid_row/valid_col` are provided, `valid_shape` is clipped by `sizes`
 - Lowering keeps parent physical stride/base semantics for non-compact access,
   so EmitC behavior remains unchanged from the previous implementation.
+- If an explicit valid dimension is zero, the subview still has the requested
+  physical `sizes`, but its valid region is empty in that dimension.
 
 **Hardware Mapping:**
 
@@ -856,7 +1202,7 @@ For each element (i, j) in the tile valid region:
   - Tile element type must be one of: `i8`, `i16`, `i32`, `i64`, `f16`, `bf16`, `f32`.
   - The destination tile must use `loc=vec` or `loc=mat`.
   - The destination tile element type and source partition element type must have the same bitwidth.
-  - Runtime: all source partition extents and the destination valid region must be positive.
+  - Runtime: all source partition extents must be positive; the destination valid region must be non-negative.
 - **Implementation checks (A5)**
   - The source partition and destination tile element types must be one of `i8/i16/i32/i64/f16/bf16/f32/f8E4M3*/f8E5M2*/!pto.hif8/!pto.f4E1M2x2/!pto.f4E2M1x2`.
   - The destination tile element size must be `1`, `2`, `4`, or `8` bytes, and must match the source partition element size.
@@ -892,17 +1238,17 @@ op is modeled as writing the prefetched data into `dst`.
 
 | Name | Type | Description |
 |------|------|-------------|
-| `src` | `pto.partition_tensor_view` or lowered GM memref | Source global view |
-| `dst` | `pto.tile_buf` or lowered local memref | Destination local tile |
+| `src` | `pto.partition_tensor_view` | Source global view |
+| `dst` | `pto.tile_buf` | Destination local tile |
 
 **Results:** None. Writes into `dst` via DPS pattern.
 
 **Constraints & Verification:**
 
-- `src` must be a partition view before lowering, or the corresponding lowered ranked memref form after `PTOViewToMemref`.
-- `dst` must be a tile buffer before lowering, or the corresponding lowered ranked memref form after `PTOViewToMemref`.
+- `src` must be a partition tensor view.
+- `dst` must be a tile buffer.
 - `dst` must use `loc=vec` or `loc=mat`.
-- Static source extents and static destination valid extents must be positive when known.
+- Static source extents must be positive when known; static destination valid extents must be non-negative when known.
 - `src` and `dst` element types must have the same element size in bytes.
 - Low-precision element types (`f8E4M3*`, `f8E5M2*`, `!pto.hif8`, `!pto.f4E1M2x2`, `!pto.f4E2M1x2`) are only accepted on A5.
 
@@ -940,7 +1286,7 @@ Lowering maps `%ctx` to `pto::PrefetchAsyncContext`, emits
 
 | Name | Type | Description |
 |------|------|-------------|
-| `src` | GM memref / `pto.tensor_view` / `pto.partition_tensor_view` | Source GM region to prefetch |
+| `src` | `pto.tensor_view` / `pto.partition_tensor_view` | Source GM region to prefetch |
 | `ctx` | `!pto.prefetch_async_context` | Explicit PTO prefetch async context |
 
 **Results:**
@@ -962,7 +1308,7 @@ Lowering maps `%ctx` to `pto::PrefetchAsyncContext`, emits
     -> !pto.prefetch_async_context
 %event = pto.tprefetch_async(
     %src, %ctx
-    : memref<128xf32, #pto.address_space<gm>>,
+    : !pto.partition_tensor_view<128xf32>,
       !pto.prefetch_async_context)
     -> !pto.async_event
 %session = pto.get_prefetch_async_session %ctx
@@ -1000,7 +1346,8 @@ For each element (i, j) in the tile valid region:
 
 - Common checks:
   - `src` must be `!pto.tile_buf`, `dst` must be `!pto.partition_tensor_view`.
-  - Static `dst` shape dims and static `src` valid-shape dims must be positive.
+  - Static `dst` shape dims must be positive, and static `src` valid-shape dims
+    must be non-negative.
   - If `preQuantScalar` is present, `src` must be `loc=acc`.
   - If `reluPreMode != no_relu`, `src` must be `loc=acc`.
 - A2/A3 checks:
@@ -1031,7 +1378,19 @@ For each element (i, j) in the tile valid region:
 
 **Type Note (PTO IR):**
 
-- PTO IR uses signless integers. There is no distinct unsigned integer type in verifier rules; documentation strings like `ui8` are represented by signless `i8` in IR type checks.
+- PTO IR is not limited to signless integers. In particular, several current
+  surfaces already use distinct signed/unsigned integer element types such as
+  `ui8`, `si8`, `ui16`, and `ui32`, and verifier rules may depend on that
+  signedness.
+- For this `preQuantScalar` contract, destination element types written below as
+  `i8(ui8)` mean:
+  - signless `i8` remains accepted on legacy surfaces that only constrain width
+    and numeric family
+  - explicit `ui8` is also a first-class PTO IR dtype on surfaces whose
+    semantics depend on unsignedness
+- When a newer contract needs signedness to be user-visible, the manual will
+  call that out explicitly instead of relying on signless `i8` as a synonym for
+  `ui8`.
 
 **Hardware Mapping:**
 
@@ -1221,6 +1580,7 @@ For each element (i, j):
   - `loc=mat -> loc=left/right` has additional target-specific fractal and dtype constraints.
   - `loc=acc -> loc=vec/mat` has additional target-specific fractal, dtype, and alignment constraints.
   - `loc=mat -> loc=scale` has additional target-specific fractal and dtype constraints.
+  - A5 accepts PTO low-precision element types (`f8E4M3*`, `f8E5M2*`, `!pto.hif8`, `!pto.f4E2M1x2`) for `src`/`dst` in supported location pairs.
 
 **Hardware Mapping:**
 
@@ -1239,7 +1599,7 @@ pto.tmov ins(%src : !pto.tile_buf<loc=acc, dtype=f16, rows=16, cols=16, v_row=16
 
 ##### `pto.ttrans` - Transpose Tile
 
-**Summary:** Transposes a tile buffer, using a temporary buffer (tmp is required, TBD).
+**Summary:** Transposes a tile buffer. The current DPS form always carries a required `tmp` operand, but PTO IR does not encode a same-shape tmp contract.
 
 **Semantics:**
 
@@ -1253,7 +1613,7 @@ For each element (i, j):
 | Name | Type | Description |
 |------|------|-------------|
 | `src` | `pto.tile_buf` | Source tile |
-| `tmp` | `pto.tile_buf` | Temporary buffer |
+| `tmp` | `pto.tile_buf` | Temporary workspace operand required by the current DPS form |
 | `dst` | `pto.tile_buf` | Destination tile |
 
 **Results:** None. Writes into `dst` via DPS pattern.
@@ -1261,7 +1621,7 @@ For each element (i, j):
 **Constraints & Verification:**
 
 - **Implementation checks (A2A3)**
-  - Source and destination tile element type must match.
+  - `src`, `tmp`, and `dst` must have the same element type.
   - The source tile must use `blayout=row_major`.
   - Element size must be `1`, `2`, or `4` bytes.
   - Supported element types are restricted per element width:
@@ -1270,7 +1630,7 @@ For each element (i, j):
     - 1 byte: `i8`
   - The transpose domain is taken from the source tile valid region.
 - **Implementation checks (A5)**
-  - Source and destination tile element sizes must match.
+  - `src`, `tmp`, and `dst` must have the same element type.
   - 32-byte alignment constraints are enforced on the major dimension of both input and output (for `blayout=row_major`, check `cols * sizeof(T) % 32 == 0`; for `blayout=col_major`, check `rows * sizeof(T) % 32 == 0`).
   - Supported element types are restricted per element width:
     - 4 bytes: `i32`, `f32`
@@ -1278,7 +1638,9 @@ For each element (i, j):
     - 1 byte: `i8`
   - The implementation operates over the static tile shape (`rows/cols`) and does not consult the valid region.
 - **Temporary tile**:
-  - The C++ API requires `tmp`, but some implementations may not use it.
+  - The current PTO IR surface requires `tmp`.
+  - PTO IR does not require `tmp` to match the shape or valid shape of `src` / `dst`.
+  - The exact workspace size remains target-defined and may depend on transpose mode and stride alignment.
 
 **Hardware Mapping:**
 
@@ -1287,8 +1649,15 @@ For each element (i, j):
 **Basic Example:**
 
 ```mlir
-pto.ttrans ins(%src, %tmp : !pto.tile_buf<loc=vec, dtype=f16, rows=16, cols=16, v_row=16, v_col=16, blayout=row_major, slayout=none_box, fractal=512, pad=0>, !pto.tile_buf<loc=vec, dtype=f16, rows=16, cols=16, v_row=16, v_col=16, blayout=row_major, slayout=none_box, fractal=512, pad=0>)
-           outs(%dst : !pto.tile_buf<loc=vec, dtype=f16, rows=16, cols=16, v_row=16, v_col=16, blayout=row_major, slayout=none_box, fractal=512, pad=0>)
+pto.ttrans ins(%src, %tmp : !pto.tile_buf<loc=vec, dtype=f16, rows=32, cols=16,
+               v_row=32, v_col=16, blayout=row_major, slayout=none_box,
+               fractal=512, pad=0>,
+               !pto.tile_buf<loc=vec, dtype=f16, rows=1, cols=16,
+               v_row=1, v_col=8, blayout=row_major, slayout=none_box,
+               fractal=512, pad=0>)
+           outs(%dst : !pto.tile_buf<loc=vec, dtype=f16, rows=16, cols=32,
+               v_row=16, v_col=32, blayout=row_major, slayout=none_box,
+               fractal=512, pad=0>)
 ```
 
 ### 4.4 Matrix Compute Operations
@@ -1324,17 +1693,20 @@ For each (i, j):
     - `(f32, bf16, bf16)`
   - Shape constraints: `lhs.rows == dst.rows`, `lhs.cols == rhs.rows`, and `rhs.cols == dst.cols`.
   - Tile locations: `lhs.loc=left`, `rhs.loc=right`, `dst.loc=acc`.
-  - Runtime: `m/k/n` (taken from `lhs valid row`, `lhs valid column`, `rhs valid column`) must be in `[1, 4095]`.
+  - Runtime: `m/k/n` (taken from `lhs valid row`, `lhs valid column`, `rhs valid column`) must be in `[0, 4095]`.
 - **Implementation checks (A5)**
   - The destination element type must be `i32` or `f32`.
     - If the destination element type is `i32`, the lhs and rhs element types must both be `i8`.
-    - If the destination element type is `f32`, the lhs/rhs element types support `f16`, `bf16`, `f32`, and selected fp8 pairs (target-defined).
+    - If the destination element type is `f32`, supported lhs/rhs element type pairs are:
+      - `(f16, f16)`, `(bf16, bf16)`, `(f32, f32)`
+      - any pair from the fp8 e4m3/e5m2 families, which lower to `float8_e4m3_t` or `float8_e5m2_t`
+      - `(!pto.hif8, !pto.hif8)`
   - Shape constraints: `lhs.rows == dst.rows`, `lhs.cols == rhs.rows`, and `rhs.cols == dst.cols`.
   - PTO-visible layout/fractal constraints:
     - `lhs.loc=left`, `lhs.blayout=col_major`, `lhs.slayout=row_major`
     - `rhs.loc=right`, `rhs.blayout=row_major`, `rhs.slayout=col_major`
     - `dst.loc=acc`, `dst.blayout=col_major`, `dst.slayout=row_major`
-  - Runtime: `m/k/n` (taken from `lhs valid row`, `lhs valid column`, `rhs valid column`) must be in `[1, 4095]`.
+  - Runtime: `m/k/n` (taken from `lhs valid row`, `lhs valid column`, `rhs valid column`) must be in `[0, 4095]`.
 
 **Hardware Mapping:**
 
@@ -1468,7 +1840,19 @@ For each (i, j):
 **Constraints & Verification:**
 
 - **Implementation checks (A5)**
+  - Supported only on A5 targets.
+  - The destination element type must be `f32`.
+  - Supported lhs/rhs element type pairs are:
+    - any pair from the fp8 e4m3/e5m2 families, which lower to `float8_e4m3_t` or `float8_e5m2_t`
+    - any pair from `!pto.f4E1M2x2` and `!pto.f4E2M1x2`
+  - `lhs`/`rhs`/`dst` follow the same A5 tile location and layout constraints as `pto.tmatmul`.
+  - `lhs_scale` and `rhs_scale` must use `loc=scaling` and compact MX block-scale shapes:
+    - `lhs_scale` shape and valid shape are `[M, ceil(K/32)]`
+    - `rhs_scale` shape and valid shape are `[ceil(K/32), N]`
+  - `lhs_scale` must use `blayout=row_major`, `slayout=row_major`, `fractal=32`.
+  - `rhs_scale` must use `blayout=col_major`, `slayout=col_major`, `fractal=32`.
   - `m/k/n` are taken from `lhs valid row`, `lhs valid column`, and `rhs valid column`.
+  - Runtime: `m/k/n` must be in `[1, 4095]`.
 
 **Hardware Mapping:**
 
@@ -1510,7 +1894,11 @@ dst = acc_in + (lhs * rhs)   // scaling tiles configure target-defined behavior
 **Constraints & Verification:**
 
 - **Implementation checks (A5)**
+  - Supported only on A5 targets.
+  - The `lhs`/`rhs`/`dst` and scaling tile constraints are the same as `pto.tmatmul.mx`.
+  - `acc_in` must be an accumulator tile.
   - `m/k/n` are taken from `lhs valid row`, `lhs valid column`, and `rhs valid column`.
+  - Runtime: `m/k/n` must be in `[1, 4095]`.
 
 **Hardware Mapping:**
 
@@ -1552,9 +1940,12 @@ dst = (lhs * rhs) + bias   // scaling tiles configure target-defined behavior
 **Constraints & Verification:**
 
 - **Implementation checks (A5)**
+  - Supported only on A5 targets.
+  - The `lhs`/`rhs`/`dst` and scaling tile constraints are the same as `pto.tmatmul.mx`.
   - `m/k/n` are taken from `lhs valid row`, `lhs valid column`, and `rhs valid column`.
+  - Runtime: `m/k/n` must be in `[1, 4095]`.
 - **Bias form**:
-  - `bias` must use element type `f32`, `loc=bias`, and `rows=1` (the current implementation enforces this with compile-time checks).
+  - `bias` must use element type `f32`, `loc=bias`, `rows=1`, and `blayout=row_major`.
 
 **Hardware Mapping:**
 
@@ -1601,7 +1992,7 @@ For each row i:
     - `(f32, bf16, bf16)`
   - Shape constraints: `lhs.rows == dst.rows`, `lhs.cols == rhs.rows`, and `rhs.cols == dst.cols`.
   - Tile locations: `lhs.loc=left`, `rhs.loc=right`, `dst.loc=acc`.
-  - Runtime: `m` must be `1`; `k/n` (taken from `rhs valid row`, `rhs valid column`) must be in `[1, 4095]`.
+  - Runtime: `m` must be `1`; `k/n` (taken from `rhs valid row`, `rhs valid column`) must be in `[0, 4095]`.
 - **Implementation checks (A5)**
   - The destination element type must be `i32` or `f32`.
     - If the destination element type is `i32`, the lhs and rhs element types must both be `i8`.
@@ -1612,7 +2003,7 @@ For each row i:
     - `rhs.loc=right`, `rhs.blayout=row_major`, `rhs.slayout=col_major`
     - `dst.loc=acc`, `dst.blayout=col_major`, `dst.slayout=row_major`
   - No explicit runtime range checks on `m/k/n` are enforced in `TMATMUL_IMPL` on this target.
-  - Runtime: `m` must be `1`; `k/n` (taken from `rhs valid row`, `rhs valid column`) must be in `[1, 4095]`.
+  - Runtime: `m` must be `1`; `k/n` (taken from `rhs valid row`, `rhs valid column`) must be in `[0, 4095]`.
 
 **Hardware Mapping:**
 
@@ -1659,7 +2050,7 @@ dst = acc_in + (lhs * rhs)
     - `(f32, bf16, bf16)`
   - Shape constraints: `lhs.rows == dst.rows`, `lhs.cols == rhs.rows`, and `rhs.cols == dst.cols`.
   - Tile locations: `lhs.loc=left`, `rhs.loc=right`, `dst.loc=acc`.
-  - Runtime: `m` must be `1`; `k/n` (taken from `rhs valid row`, `rhs valid column`) must be in `[1, 4095]`.
+  - Runtime: `m` must be `1`; `k/n` (taken from `rhs valid row`, `rhs valid column`) must be in `[0, 4095]`.
 - **Implementation checks (A5)**
   - The destination element type must be `i32` or `f32`.
     - If the destination element type is `i32`, the lhs and rhs element types must both be `i8`.
@@ -1670,7 +2061,7 @@ dst = acc_in + (lhs * rhs)
     - `rhs.loc=right`, `rhs.blayout=row_major`, `rhs.slayout=col_major`
     - `dst.loc=acc`, `dst.blayout=col_major`, `dst.slayout=row_major`
   - No explicit runtime range checks on `m/k/n` are enforced in `TMATMUL_IMPL` on this target.
-  - Runtime: `m` must be `1`; `k/n` (taken from `rhs valid row`, `rhs valid column`) must be in `[1, 4095]`.
+  - Runtime: `m` must be `1`; `k/n` (taken from `rhs valid row`, `rhs valid column`) must be in `[0, 4095]`.
 
 **Hardware Mapping:**
 
@@ -1716,7 +2107,7 @@ dst = (lhs * rhs) + bias
     - `(f32, bf16, bf16)`
   - Shape constraints: `lhs.rows == dst.rows`, `lhs.cols == rhs.rows`, and `rhs.cols == dst.cols`.
   - Tile locations: `lhs.loc=left`, `rhs.loc=right`, `dst.loc=acc`.
-  - Runtime: `m` must be `1`; `k/n` (taken from `rhs valid row`, `rhs valid column`) must be in `[1, 4095]`.
+  - Runtime: `m` must be `1`; `k/n` (taken from `rhs valid row`, `rhs valid column`) must be in `[0, 4095]`.
   - Bias checks:
     - The bias tile element type must exactly match the result tile element type.
     - The bias tile must be configured as a single row.
@@ -1731,7 +2122,7 @@ dst = (lhs * rhs) + bias
     - `rhs.loc=right`, `rhs.blayout=row_major`, `rhs.slayout=col_major`
     - `dst.loc=acc`, `dst.blayout=col_major`, `dst.slayout=row_major`
   - No explicit runtime range checks on `m/k/n` are enforced in `TMATMUL_IMPL` on this target.
-  - Runtime: `m` must be `1`; `k/n` (taken from `rhs valid row`, `rhs valid column`) must be in `[1, 4095]`.
+  - Runtime: `m` must be `1`; `k/n` (taken from `rhs valid row`, `rhs valid column`) must be in `[0, 4095]`.
   - Bias checks:
     - The bias tile element type must exactly match the result tile element type.
     - The bias tile must be configured as a single row.
@@ -1774,8 +2165,22 @@ dst = gemv(a, b)   // quantization/mixed-precision behavior is target-defined
 
 **Constraints & Verification:**
 
-- `a/b/dst` reuse the same GEMV shape/location checks as `pto.tgemv`.
-- `a_scale` and `b_scale` must be valid tile buffers.
+- **Implementation checks (A5)**
+  - Supported only on A5 targets.
+  - The destination element type must be `f32`.
+  - Supported `a`/`b` element type pairs are:
+    - `f8E4M3FN` / `f8E4M3FN`
+    - `f8E4M3FN` / `f8E5M2`
+    - `f8E5M2` / `f8E4M3FN`
+    - `f8E5M2` / `f8E5M2`
+    - any pair from `!pto.f4E1M2x2` and `!pto.f4E2M1x2`
+  - `a`/`b`/`dst` follow the same A5 tile location and layout constraints as `pto.tmatmul`.
+  - `a_scale` and `b_scale` must be tile buffers in `loc=scaling`.
+  - `a_scale` shape and valid shape must be `[M, ceil(K/32)]`.
+  - `b_scale` shape and valid shape must be `[ceil(K/32), N]`.
+  - `a_scale` must use `blayout=row_major`, `slayout=row_major`, `fractal=32`.
+  - `b_scale` must use `blayout=col_major`, `slayout=col_major`, `fractal=32`.
+  - Runtime: `m/k/n` are taken from `a valid row`, `a valid column`, and `b valid column`, and must be in `[1, 4095]`.
 
 **Hardware Mapping:**
 
@@ -1803,6 +2208,14 @@ dst = c_in + gemv(a, b)
 
 **Arguments:** `c_in, a, a_scale, b, b_scale, dst`
 
+**Constraints & Verification:**
+
+- **Implementation checks (A5)**
+  - Supported only on A5 targets.
+  - The `a`/`b`/`dst` and scaling tile constraints are the same as `pto.tgemv.mx`.
+  - `c_in` must be an accumulator tile with the same element type and valid shape as `dst`.
+  - Runtime: `m/k/n` are taken from `a valid row`, `a valid column`, and `b valid column`, and must be in `[1, 4095]`.
+
 **Hardware Mapping:** Matrix pipeline (`PIPE_M`)
 
 **Basic Example:**
@@ -1826,6 +2239,15 @@ dst = gemv(a, b) + bias
 ```
 
 **Arguments:** `a, a_scale, b, b_scale, bias, dst`
+
+**Constraints & Verification:**
+
+- **Implementation checks (A5)**
+  - Supported only on A5 targets.
+  - The `a`/`b`/`dst` and scaling tile constraints are the same as `pto.tgemv.mx`.
+  - `bias` must use element type `f32`, `loc=bias`, `rows=1`, and `blayout=row_major`.
+  - `bias` and `dst` must have the same valid shape.
+  - Runtime: `m/k/n` are taken from `a valid row`, `a valid column`, and `b valid column`, and must be in `[1, 4095]`.
 
 **Hardware Mapping:** Matrix pipeline (`PIPE_M`)
 
@@ -2257,6 +2679,7 @@ For each element (i, j):
 |------|------|-------------|
 | `src0` | `pto.tile_buf` | Dividend tile buffer |
 | `src1` | `pto.tile_buf` | Divisor tile buffer |
+| `tmp` | `pto.tile_buf` | A2/A3 workspace tile. On A5 this operand is kept for ABI compatibility and is not used by the instruction. |
 | `dst` | `pto.tile_buf` | Destination tile buffer |
 
 **Results:** None. Writes into `dst` via DPS pattern.
@@ -2274,15 +2697,15 @@ pto.trem ins(<src0>, <src1>, <tmp> : <src0_type>, <src1_type>, <tmp_type>)
 - **Implementation checks (A2A3)**
   - `src0/src1/dst` element type must match, and must be `i32` or `f32`.
   - `tmp` element type must match `dst`.
-  - `src0/src1/tmp/dst` must use row-major layout (`blayout=row_major`).
+  - `src0/src1/dst` must use row-major layout (`blayout=row_major`).
+  - `tmp` must be a row-major `loc=vec` tile.
   - `src0/src1/dst` must have the same `validRow/validCol`.
-  - `tmp` must provide at least `1` valid row and `tmp.validCol >= dst.validCol`.
+  - `tmp` must provide at least `2` valid rows and `tmp.validCol >= dst.validCol`.
 - **Implementation checks (A5)**
   - `src0/src1/dst` element type must match, and must be one of: `i32`, `i16`, `f16`, `f32`.
-  - `tmp` element type must match `dst`.
-  - `src0/src1/tmp/dst` must use row-major layout (`blayout=row_major`).
+  - `src0/src1/dst` must use row-major layout (`blayout=row_major`).
   - `src0/src1/dst` must have the same `validRow/validCol`.
-  - `tmp` must provide at least `1` valid row and `tmp.validCol >= dst.validCol`.
+  - `tmp` is not used by the A5 implementation. PTO IR still requires it to be a row-major `loc=vec` tile, but no element-type, shape, or valid-shape relation with `src0/src1/dst` is required.
 
 **Hardware Mapping:**
 
@@ -2298,8 +2721,8 @@ pto.trem ins(%a, %b, %tmp : !pto.tile_buf<loc=vec, dtype=f32, rows=16, cols=16,
              !pto.tile_buf<loc=vec, dtype=f32, rows=16, cols=16,
              v_row=16, v_col=16, blayout=row_major, slayout=none_box,
              fractal=512, pad=0>,
-             !pto.tile_buf<loc=vec, dtype=f32, rows=1, cols=16,
-             v_row=1, v_col=16, blayout=row_major, slayout=none_box,
+             !pto.tile_buf<loc=vec, dtype=f32, rows=2, cols=16,
+             v_row=2, v_col=16, blayout=row_major, slayout=none_box,
              fractal=512, pad=0>)
          outs(%c : !pto.tile_buf<loc=vec, dtype=f32, rows=16, cols=16,
              v_row=16, v_col=16, blayout=row_major, slayout=none_box,
@@ -2714,7 +3137,7 @@ For each element (i, j):
 |------|------|-------------|
 | `src0` | `pto.tile_buf` | Source tile buffer (input activations) |
 | `src1` | `pto.tile_buf` | Slope tile buffer (per-element negative slopes) |
-| `tmp` | `pto.tile_buf` | New temporary source tile buffer for A2/A3. This only a placehold parameter in A5, see examples|
+| `tmp` | `pto.tile_buf` | A2/A3 workspace tile. On A5 this operand is kept for ABI compatibility and is not read by the instruction. |
 | `dst` | `pto.tile_buf` | Destination tile buffer |
 
 **Results:** None. Writes into `dst` via DPS pattern.
@@ -2722,7 +3145,7 @@ For each element (i, j):
 **Assembly Format:**
 
 ```
-pto.tprelu ins(<src0>, <src1> : <src0_type>, <src1_type>)
+pto.tprelu ins(<src0>, <src1>, <tmp> : <src0_type>, <src1_type>, <tmp_type>)
            outs(<dst> : <dst_type>)
 ```
 
@@ -2730,14 +3153,19 @@ pto.tprelu ins(<src0>, <src1> : <src0_type>, <src1_type>)
 
 - **Implementation checks (A2A3)**
   - `dst/src0/src1` element types must be identical, and must be one of: `f16`, `f32`.
-  - `tmp` element types must be `u8`.
-  - All three tiles must use row-major layout (`blayout=row_major`).
-  - For `src0` `src1`: `src valid row == dst valid row` and `src valid column == dst valid column`.
-  - For A3, 2 source Tile, destination Tile, temporary space must in different memory range without overlapping.
+  - `tmp` element type must be an 8-bit integer tile type.
+  - `src0`, `src1`, and `dst` must use row-major layout (`blayout=row_major`) and have the same shape.
+  - `tmp` must be a row-major `loc=vec` tile.
+  - `src0` and `src1` must have the same `validRow/validCol` as `dst`.
+  - `tmp.shape[0] >= dst.validRow + 1`. The A2/A3 `TPRELU` implementation uses one extra physical tmp row as scratch when materializing row cmp-mask addresses for `TSEL`.
+  - `tmp.validCol >= ceil(dst.validCol / 8)`. The tmp valid region stores one packed predicate bit per destination element.
+  - `tmp.validRow` does not need to cover the extra scratch row. PTO IR follows the official A2/A3 runtime contract: the extra row is a physical workspace row addressed through `TSUBVIEW`, not part of the tmp valid region.
+  - On A3, `src0`, `src1`, `tmp`, and `dst` must use different storage ranges without overlap.
 - **Implementation checks (A5)**
   - `dst/src0/src1` element types must be identical and must be one of: `f16`, `f32`.
-  - All three tiles must use row-major layout (`blayout=row_major`).
-    - For `src0` `src1`: `src valid row == dst valid row` and `src valid column == dst valid column`.
+  - `src0`, `src1`, and `dst` must use row-major layout (`blayout=row_major`) and have the same shape.
+  - `src0` and `src1` must have the same `validRow/validCol` as `dst`.
+  - `tmp` is not used by the A5 implementation. PTO IR still requires it to be a row-major `loc=vec` tile, but no shape or valid-shape relation with `src0/src1/dst` is required.
 
 
 **Hardware Mapping:**
@@ -2755,8 +3183,8 @@ pto.tprelu ins(%a, %slopes, %tmp : !pto.tile_buf<loc=vec, dtype=f16, rows=16, co
                !pto.tile_buf<loc=vec, dtype=f16, rows=16, cols=16,
                v_row=16, v_col=16, blayout=row_major, slayout=none_box,
                fractal=512, pad=0>,
-               !pto.tile_buf<loc=vec, dtype=f16, rows=16, cols=16,
-               v_row=16, v_col=16, blayout=row_major, slayout=none_box,
+               !pto.tile_buf<loc=vec, dtype=ui8, rows=17, cols=32,
+               v_row=16, v_col=2, blayout=row_major, slayout=none_box,
                fractal=512, pad=0>)
            outs(%c : !pto.tile_buf<loc=vec, dtype=f16, rows=16, cols=16,
                v_row=16, v_col=16, blayout=row_major, slayout=none_box,
@@ -3265,16 +3693,16 @@ pto.trems ins(<src>, <scalar>, <tmp> : <src_type>, <scalar_type>, <tmp_type>)
   - `src/dst` element type must match, and must be `i32` or `f32`.
   - `scalar` type must match the tile element type.
   - `tmp` element type must match `dst`.
-  - `src/tmp/dst` must use row-major layout (`blayout=row_major`).
+  - `src/dst` must use row-major layout (`blayout=row_major`).
+  - `tmp` must be a row-major `loc=vec` tile.
   - `src` and `dst` must have the same `validRow/validCol`.
   - `tmp` must provide at least `1` valid row and `tmp.validCol >= dst.validCol`.
 - **Implementation checks (A5)**
   - `src/dst` element type must match, and must be one of: `i32`, `i16`, `f16`, `f32`.
   - `scalar` type must match the tile element type.
-  - `tmp` element type must match `dst`.
-  - `src/tmp/dst` must use row-major layout (`blayout=row_major`).
+  - `src/dst` must use row-major layout (`blayout=row_major`).
   - `src` and `dst` must have the same `validRow/validCol`.
-  - `tmp` must provide at least `1` valid row and `tmp.validCol >= dst.validCol`.
+  - `tmp` is not used by the A5 implementation. PTO IR still requires it to be a row-major `loc=vec` tile, but no element-type, shape, or valid-shape relation with `src/dst` is required.
 
 **Hardware Mapping:**
 
@@ -3890,7 +4318,7 @@ pto.ttri ins(%diag {upperOrLower = 1 : i32} : i32)
 
 ##### `pto.trsqrt` - Elementwise Reciprocal Square Root
 
-**Summary:** Computes the reciprocal square root for every element.
+**Summary:** Computes the reciprocal square root for every element. The tmp-taking form is optional and is not shape-coupled to `src` or `dst`.
 
 **Semantics:**
 
@@ -3904,7 +4332,9 @@ For each element (i, j):
 | Name | Type | Description |
 |------|------|-------------|
 | `src` | `pto.tile_buf` | Source tile buffer |
+| `tmp` | `Optional<pto.tile_buf>` | Optional workspace tile |
 | `dst` | `pto.tile_buf` | Destination tile buffer |
+| `precisionType` | `#pto<rsqrt_precision ...>` | Precision selector. `high_precision` requires `tmp` |
 
 **Results:** None. Writes into `dst` via DPS pattern.
 
@@ -3912,16 +4342,18 @@ For each element (i, j):
 
 ```
 pto.trsqrt ins(<src> : <src_type>) outs(<dst> : <dst_type>)
+pto.trsqrt ins(<src>, <tmp> : <src_type>, <tmp_type>)
+           outs(<dst> : <dst_type>) {precisionType = #pto<rsqrt_precision high_precision>}
 ```
 
 **Constraints & Verification:**
 
-- **NPU constraints:**
-  - Tile element type must be one of: `f32` or `f16`;
-  - `src` and `dst` must use `loc=vec`;
-  - Valid bounds: `valid row <= rows` and `valid column <= cols`;
-  - Runtime: `src` and `dst` must have the same valid region;
-  - Tiles must use `blayout=row_major`.
+- Tile element type must be `f16` or `f32`.
+- `src` and `dst` must use `loc=vec` and `blayout=row_major`.
+- `src` and `dst` must have the same valid region.
+- `precisionType = #pto<rsqrt_precision high_precision>` requires `tmp`.
+- When `tmp` is provided, it must be a `loc=vec` tile with at least `32` bytes of static storage.
+- PTO IR does not require `tmp` to match the shape or valid shape of `src` / `dst`.
 - **Domain / NaN**:
   - Behavior is target-defined (e.g., for `src == 0` or negative inputs).
 
@@ -3939,6 +4371,16 @@ pto.trsqrt ins(%a : !pto.tile_buf<loc=vec, dtype=f16, rows=16, cols=16,
            outs(%c : !pto.tile_buf<loc=vec, dtype=f16, rows=16, cols=16,
                v_row=16, v_col=16, blayout=row_major, slayout=none_box,
                fractal=512, pad=0>)
+
+pto.trsqrt ins(%a, %tmp : !pto.tile_buf<loc=vec, dtype=f32, rows=1, cols=16,
+               v_row=1, v_col=16, blayout=row_major, slayout=none_box,
+               fractal=512, pad=0>,
+               !pto.tile_buf<loc=vec, dtype=f32, rows=1, cols=8,
+               v_row=1, v_col=8, blayout=row_major, slayout=none_box,
+               fractal=512, pad=0>)
+           outs(%d : !pto.tile_buf<loc=vec, dtype=f32, rows=1, cols=16,
+               v_row=1, v_col=16, blayout=row_major, slayout=none_box,
+               fractal=512, pad=0>) {precisionType = #pto<rsqrt_precision high_precision>}
 ```
 
 ---
@@ -4091,7 +4533,7 @@ pto.tlrelu ins(<src>, <slope> : <src_type>, <slope_type>)
 - **Implementation checks (A2A3)**
   - Tile element type must be one of: `f16`, `f32`.
   - Tile must use `loc=vec`.
-  - Valid bounds: `0 < valid row <= rows` and `0 < valid column <= cols`.
+  - Valid bounds: `0 <= valid row <= rows` and `0 <= valid column <= cols`.
   - Runtime: `src` and `dst` tiles should have the same `validRow/validCol`.
 - **Implementation checks (A5)**
   - Tile element type must be one of: `f16`, `f32`.
@@ -4140,7 +4582,7 @@ Reduce along rows or columns of a tile. All execute on the **Vector pipeline** (
 
 ##### `pto.trowsum` - Row-wise Sum Reduction
 
-**Summary:** Reduces each row by summing across columns.
+**Summary:** Reduces each row by summing across columns. The current DPS form requires a `tmp` operand.
 
 **Semantics:**
 
@@ -4154,6 +4596,7 @@ For each row i:
 | Name | Type | Description |
 |------|------|-------------|
 | `src` | `pto.tile_buf` | Source tile buffer |
+| `tmp` | `pto.tile_buf` | Workspace tile on A2/A3; compatibility placeholder on A5 |
 | `dst` | `pto.tile_buf` | Destination tile buffer (column vector) |
 
 **Results:** None. Writes into `dst` via DPS pattern.
@@ -4161,35 +4604,27 @@ For each row i:
 **Assembly Format:**
 
 ```
-pto.trowsum ins(<src> : <src_type>) outs(<dst> : <dst_type>)
+pto.trowsum ins(<src>, <tmp> : <src_type>, <tmp_type>)
+            outs(<dst> : <dst_type>)
 ```
 
 **Constraints & Verification:**
 
-- **NPU constraints:**
-
-- **Implementation checks (A2A3)**
-  - `src` and `dst` must use `loc=vec`.
-  - `src` must use ND-style tile layout (`blayout=row_major`, `slayout=none_box`).
-  - Tile layout of `dst`:
-    - **Recommended**: a DN-style 1D column vector tile (`cols=1`, `blayout=col_major`)
-    - **Legacy**: an ND-style 2D tile with `valid column == 1`
-  - Data types: `i16`, `i32`, `f16`, or `f32`.
-  - Element type consistency: `src_type == dst_type`.
-  - Valid checks:
-    - `src valid column != 0` and `src valid row != 0`.
-    - `src valid row == dst valid row` (the output valid row must match the input valid row).
-- **Implementation checks (A5)**
-  - `src` and `dst` must use `loc=vec`.
-  - `src` must use ND-style tile layout (`blayout=row_major`, `slayout=none_box`).
-  - Tile layout of `dst`:
-    - **Recommended**: a DN-style 1D column vector tile (`cols=1`, `blayout=col_major`)
-    - **Legacy**: an ND-style 2D tile with `valid column == 1`
-  - Data types: `i16`, `i32`, `f16`, or `f32`.
-  - Element type consistency: `src_type == dst_type`.
-  - Valid checks:
-    - `src valid column != 0` and `src valid row != 0`.
-    - `src valid row == dst valid row` (the output valid row must match the input valid row).
+- `src` and `dst` must use `loc=vec`.
+- `tmp` must be a `loc=vec` tile.
+- `src` must use ND-style tile layout (`blayout=row_major`, `slayout=none_box`).
+- `dst` must use `slayout=none_box` and either:
+  - a DN-style column vector tile (`blayout=col_major`, `cols=1`), or
+  - a legacy ND-style tile with `valid column == 1`.
+- `src` and `dst` must have the same element type.
+- Supported element types are `i16`, `i32`, `f16`, and `f32`.
+- Runtime valid checks:
+  - `src valid_shape[0]` and `src valid_shape[1]` must be non-zero.
+  - `src valid_shape[0] == dst valid_shape[0]`.
+  - `dst valid_shape[1] == 1`.
+- PTO IR does not impose extra `tmp` element-type, shape, or layout constraints for this op.
+- On A2/A3, `tmp` is consumed as reduction workspace.
+- On A5, `tmp` is kept for ABI compatibility and the current implementation does not consume it.
 **Hardware Mapping:**
 
 - Executes on the **Vector pipeline** (`PIPE_V`)
@@ -4198,11 +4633,14 @@ pto.trowsum ins(<src> : <src_type>) outs(<dst> : <dst_type>)
 **Basic Example:**
 
 ```mlir
-pto.trowsum ins(%src : !pto.tile_buf<loc=vec, dtype=f16, rows=16, cols=16,
+pto.trowsum ins(%src, %tmp : !pto.tile_buf<loc=vec, dtype=f16, rows=16, cols=16,
                 v_row=16, v_col=16, blayout=row_major, slayout=none_box,
+                fractal=512, pad=0>,
+                !pto.tile_buf<loc=vec, dtype=f16, rows=1, cols=16,
+                v_row=1, v_col=8, blayout=row_major, slayout=none_box,
                 fractal=512, pad=0>)
             outs(%dst : !pto.tile_buf<loc=vec, dtype=f16, rows=16, cols=1,
-                v_row=16, v_col=1, blayout=row_major, slayout=none_box,
+                v_row=16, v_col=1, blayout=col_major, slayout=none_box,
                 fractal=512, pad=0>)
 ```
 
@@ -4210,7 +4648,7 @@ pto.trowsum ins(%src : !pto.tile_buf<loc=vec, dtype=f16, rows=16, cols=16,
 
 ##### `pto.trowmax` - Row-wise Max Reduction
 
-**Summary:** Reduces each row by taking the maximum across columns.
+**Summary:** Reduces each row by taking the maximum across columns. The current DPS form requires a `tmp` operand.
 
 **Semantics:**
 
@@ -4224,6 +4662,7 @@ For each row i:
 | Name | Type | Description |
 |------|------|-------------|
 | `src` | `pto.tile_buf` | Source tile buffer |
+| `tmp` | `pto.tile_buf` | Workspace tile on A2/A3; compatibility placeholder on A5 |
 | `dst` | `pto.tile_buf` | Destination tile buffer (column vector) |
 
 **Results:** None. Writes into `dst` via DPS pattern.
@@ -4231,35 +4670,27 @@ For each row i:
 **Assembly Format:**
 
 ```
-pto.trowmax ins(<src> : <src_type>) outs(<dst> : <dst_type>)
+pto.trowmax ins(<src>, <tmp> : <src_type>, <tmp_type>)
+           outs(<dst> : <dst_type>)
 ```
 
 **Constraints & Verification:**
 
-- **NPU constraints:**
-
-- **Implementation checks (A2A3)**
-  - `src` and `dst` must use `loc=vec`.
-  - `src` must use ND-style tile layout (`blayout=row_major`, `slayout=none_box`).
-  - Tile layout of `dst`:
-    - **Recommended**: a DN-style 1D column vector tile (`cols=1`, `blayout=col_major`)
-    - **Legacy**: an ND-style 2D tile with `valid column == 1`
-  - Data types: `i16`, `i32`, `f16`, or `f32`.
-  - Element type consistency: `src_type == dst_type`.
-  - Runtime valid checks:
-    - `src valid column != 0` and `src valid row != 0`.
-    - `src valid row == dst valid row` (the output valid row must match the input valid row).
-- **Implementation checks (A5)**
-  - `src` and `dst` must use `loc=vec`.
-  - `src` must use ND-style tile layout (`blayout=row_major`, `slayout=none_box`).
-  - Tile layout of `dst`:
-    - **Recommended**: a DN-style 1D column vector tile (`cols=1`, `blayout=col_major`)
-    - **Legacy**: an ND-style 2D tile with `valid column == 1`
-  - Data types: `i16`, `i32`, `f16`, or `f32`.
-  - Element type consistency: `src_type == dst_type`.
-  - Runtime valid checks:
-    - `src valid column != 0` and `src valid row != 0`.
-    - `src valid row == dst valid row` (the output valid row must match the input valid row).
+- `src` and `dst` must use `loc=vec`.
+- `tmp` must be a `loc=vec` tile and have the same element type as `src`.
+- `src` must use ND-style tile layout (`blayout=row_major`, `slayout=none_box`).
+- `dst` must use `slayout=none_box` and either:
+  - a DN-style column vector tile (`blayout=col_major`, `cols=1`), or
+  - a legacy ND-style tile with `valid column == 1`.
+- `src` and `dst` must have the same element type.
+- Supported element types are `i16`, `i32`, `f16`, and `f32`.
+- Runtime valid checks:
+  - `src valid_shape[0]` and `src valid_shape[1]` must be non-zero.
+  - `src valid_shape[0] == dst valid_shape[0]`.
+  - `dst valid_shape[1] == 1`.
+- PTO IR does not impose extra `tmp` shape or layout constraints for this op.
+- On A2/A3, `tmp` is consumed as reduction workspace.
+- On A5, `tmp` is kept for ABI compatibility and the current implementation does not consume it.
 
 **Hardware Mapping:**
 
@@ -4269,11 +4700,14 @@ pto.trowmax ins(<src> : <src_type>) outs(<dst> : <dst_type>)
 **Basic Example:**
 
 ```mlir
-pto.trowmax ins(%src : !pto.tile_buf<loc=vec, dtype=f16, rows=16, cols=16,
+pto.trowmax ins(%src, %tmp : !pto.tile_buf<loc=vec, dtype=f16, rows=16, cols=16,
                 v_row=16, v_col=16, blayout=row_major, slayout=none_box,
+                fractal=512, pad=0>,
+                !pto.tile_buf<loc=vec, dtype=f16, rows=1, cols=16,
+                v_row=1, v_col=8, blayout=row_major, slayout=none_box,
                 fractal=512, pad=0>)
             outs(%dst : !pto.tile_buf<loc=vec, dtype=f16, rows=16, cols=1,
-                v_row=16, v_col=1, blayout=row_major, slayout=none_box,
+                v_row=16, v_col=1, blayout=col_major, slayout=none_box,
                 fractal=512, pad=0>)
 ```
 
@@ -4295,7 +4729,7 @@ For each row i:
 | Name | Type | Description |
 |------|------|-------------|
 | `src` | `pto.tile_buf` | Source tile buffer |
-| `tmp` | `pto.tile_buf` | Temporary buffer with the same shape/type as `src` |
+| `tmp` | `pto.tile_buf` | A2/A3 reduction workspace tile. On A5 this operand is kept for ABI compatibility and is not used by the instruction. |
 | `dst` | `pto.tile_buf` | Destination tile buffer containing row-wise indices |
 
 **Results:** None. Writes into `dst` via DPS pattern.
@@ -4312,7 +4746,15 @@ pto.trowargmax ins(<src>, <tmp> : <src_type>, <tmp_type>)
 - **Implementation checks (A2A3)**
   - `src`, `tmp`, and `dst` must use `loc=vec`.
   - `src` must use ND-style tile layout (`blayout=row_major`, `slayout=none_box`).
-  - `tmp` must have the same shape, valid shape, and element type as `src`.
+  - `tmp` must have the same element type as `src`.
+  - `elementPerRepeat = 2048 / bitwidth(src element type)`.
+  - `elementPerBlock = 256 / bitwidth(src element type)`.
+  - PTO IR accepts either a legacy `tmp` whose known `valid_shape` exactly matches `src`, or a smaller workspace tile.
+  - For `src.validCol <= elementPerRepeat`, `tmp` may be either:
+    - a DN single-column tile with `tmp.validCol == 1` and `tmp.validRow >= 2 * src.validRow`, or
+    - an ND tile with `tmp.validRow >= src.validRow` and `tmp.validCol >= 2`.
+  - For `src.validCol > elementPerRepeat`, `tmp.validRow >= src.validRow`, and if the physical row count is statically known it must match `src.rows`.
+  - In the large-column path, the minimum required `tmp.validCol` is `stride`, where `repeats = ceil(src.validCol / elementPerRepeat)` and `stride = (ceil(repeats * 2 / elementPerBlock) + ceil(repeats / elementPerBlock)) * elementPerBlock`.
   - `dst` must use `slayout=none_box` and either:
     - a DN-style column vector tile (`blayout=col_major`, `cols=1`), or
     - a legacy ND-style tile with `valid column == 1`.
@@ -4323,7 +4765,8 @@ pto.trowargmax ins(<src>, <tmp> : <src_type>, <tmp_type>)
     - `src valid row == dst valid row`
     - `dst valid column == 1`
 - **Implementation checks (A5)**
-  - Same constraints as A2/A3.
+  - `src` and `dst` follow the same layout, element-type, and valid-region rules as A2/A3.
+  - `tmp` is not used by the A5 implementation. PTO IR still requires it to be a row-major `loc=vec` tile, but no shape or valid-shape relation with `src/dst` is required.
 
 **Hardware Mapping:**
 
@@ -4336,8 +4779,8 @@ pto.trowargmax ins(<src>, <tmp> : <src_type>, <tmp_type>)
 pto.trowargmax ins(%src, %tmp : !pto.tile_buf<loc=vec, dtype=f16, rows=16, cols=32,
                    v_row=16, v_col=32, blayout=row_major, slayout=none_box,
                    fractal=512, pad=0>,
-                   !pto.tile_buf<loc=vec, dtype=f16, rows=16, cols=32,
-                   v_row=16, v_col=32, blayout=row_major, slayout=none_box,
+                   !pto.tile_buf<loc=vec, dtype=f16, rows=16, cols=2,
+                   v_row=16, v_col=2, blayout=row_major, slayout=none_box,
                    fractal=512, pad=0>)
                outs(%dst : !pto.tile_buf<loc=vec, dtype=ui32, rows=16, cols=1,
                    v_row=16, v_col=1, blayout=col_major, slayout=none_box,
@@ -4362,7 +4805,7 @@ For each row i:
 | Name | Type | Description |
 |------|------|-------------|
 | `src` | `pto.tile_buf` | Source tile buffer |
-| `tmp` | `pto.tile_buf` | Temporary buffer (required for intermediate computation) |
+| `tmp` | `pto.tile_buf` | Workspace tile on A2/A3; compatibility placeholder on A5 |
 | `dst` | `pto.tile_buf` | Destination tile buffer (column vector) |
 
 **Results:** None. Writes into `dst` via DPS pattern.
@@ -4376,30 +4819,21 @@ pto.trowmin ins(<src>, <tmp> : <src_type>, <tmp_type>)
 
 **Constraints & Verification:**
 
-- **NPU constraints:**
-
-- **Implementation checks (A2A3)**
-  - `src` and `dst` must use `loc=vec`.
-  - `src` must use ND-style tile layout (`blayout=row_major`, `slayout=none_box`).
-  - Tile layout of `dst`:
-    - **Recommended**: a DN-style 1D column vector tile (`cols=1`, `blayout=col_major`)
-    - **Legacy**: an ND-style 2D tile with `valid column == 1`
-  - Data types: `i16`, `i32`, `f16`, or `f32`.
-  - Element type consistency: `src_type == dst_type`.
-  - Runtime valid checks:
-    - `src valid column != 0` and `src valid row != 0`.
-    - `src valid row == dst valid row` (the output valid row must match the input valid row).
-- **Implementation checks (A5)**
-  - `src` and `dst` must use `loc=vec`.
-  - `src` must use ND-style tile layout (`blayout=row_major`, `slayout=none_box`).
-  - Tile layout of `dst`:
-    - **Recommended**: a DN-style 1D column vector tile (`cols=1`, `blayout=col_major`)
-    - **Legacy**: an ND-style 2D tile with `valid column == 1`
-  - Data types: `i16`, `i32`, `f16`, or `f32`.
-  - Element type consistency: `src_type == dst_type`.
-  - Runtime valid checks:
-    - `src valid column != 0` and `src valid row != 0`.
-    - `src valid row == dst valid row` (the output valid row must match the input valid row).
+- `src` and `dst` must use `loc=vec`.
+- `tmp` must be a `loc=vec` tile and have the same element type as `src`.
+- `src` must use ND-style tile layout (`blayout=row_major`, `slayout=none_box`).
+- `dst` must use `slayout=none_box` and either:
+  - a DN-style column vector tile (`blayout=col_major`, `cols=1`), or
+  - a legacy ND-style tile with `valid column == 1`.
+- `src` and `dst` must have the same element type.
+- Supported element types are `i16`, `i32`, `f16`, and `f32`.
+- Runtime valid checks:
+  - `src valid_shape[0]` and `src valid_shape[1]` must be non-zero.
+  - `src valid_shape[0] == dst valid_shape[0]`.
+  - `dst valid_shape[1] == 1`.
+- PTO IR does not impose extra `tmp` shape or layout constraints for this op.
+- On A2/A3, `tmp` is consumed as reduction workspace.
+- On A5, `tmp` is kept for ABI compatibility and the current implementation does not consume it.
 
 **Hardware Mapping:**
 
@@ -4412,11 +4846,11 @@ pto.trowmin ins(<src>, <tmp> : <src_type>, <tmp_type>)
 pto.trowmin ins(%src, %tmp : !pto.tile_buf<loc=vec, dtype=f16, rows=16, cols=16,
                 v_row=16, v_col=16, blayout=row_major, slayout=none_box,
                 fractal=512, pad=0>,
-                !pto.tile_buf<loc=vec, dtype=f16, rows=16, cols=16,
-                v_row=16, v_col=16, blayout=row_major, slayout=none_box,
+                !pto.tile_buf<loc=vec, dtype=f16, rows=1, cols=16,
+                v_row=1, v_col=8, blayout=row_major, slayout=none_box,
                 fractal=512, pad=0>)
             outs(%dst : !pto.tile_buf<loc=vec, dtype=f16, rows=16, cols=1,
-                v_row=16, v_col=1, blayout=row_major, slayout=none_box,
+                v_row=16, v_col=1, blayout=col_major, slayout=none_box,
                 fractal=512, pad=0>)
 ```
 
@@ -4438,7 +4872,7 @@ For each row i:
 | Name | Type | Description |
 |------|------|-------------|
 | `src` | `pto.tile_buf` | Source tile buffer |
-| `tmp` | `pto.tile_buf` | Temporary buffer with the same shape/type as `src` |
+| `tmp` | `pto.tile_buf` | A2/A3 reduction workspace tile. On A5 this operand is kept for ABI compatibility and is not used by the instruction. |
 | `dst` | `pto.tile_buf` | Destination tile buffer containing row-wise indices |
 
 **Results:** None. Writes into `dst` via DPS pattern.
@@ -4455,7 +4889,15 @@ pto.trowargmin ins(<src>, <tmp> : <src_type>, <tmp_type>)
 - **Implementation checks (A2A3)**
   - `src`, `tmp`, and `dst` must use `loc=vec`.
   - `src` must use ND-style tile layout (`blayout=row_major`, `slayout=none_box`).
-  - `tmp` must have the same shape, valid shape, and element type as `src`.
+  - `tmp` must have the same element type as `src`.
+  - `elementPerRepeat = 2048 / bitwidth(src element type)`.
+  - `elementPerBlock = 256 / bitwidth(src element type)`.
+  - PTO IR accepts either a legacy `tmp` whose known `valid_shape` exactly matches `src`, or a smaller workspace tile.
+  - For `src.validCol <= elementPerRepeat`, `tmp` may be either:
+    - a DN single-column tile with `tmp.validCol == 1` and `tmp.validRow >= 2 * src.validRow`, or
+    - an ND tile with `tmp.validRow >= src.validRow` and `tmp.validCol >= 2`.
+  - For `src.validCol > elementPerRepeat`, `tmp.validRow >= src.validRow`, and if the physical row count is statically known it must match `src.rows`.
+  - In the large-column path, the minimum required `tmp.validCol` is `stride`, where `repeats = ceil(src.validCol / elementPerRepeat)` and `stride = (ceil(repeats * 2 / elementPerBlock) + ceil(repeats / elementPerBlock)) * elementPerBlock`.
   - `dst` must use `slayout=none_box` and either:
     - a DN-style column vector tile (`blayout=col_major`, `cols=1`), or
     - a legacy ND-style tile with `valid column == 1`.
@@ -4466,7 +4908,8 @@ pto.trowargmin ins(<src>, <tmp> : <src_type>, <tmp_type>)
     - `src valid row == dst valid row`
     - `dst valid column == 1`
 - **Implementation checks (A5)**
-  - Same constraints as A2/A3.
+  - `src` and `dst` follow the same layout, element-type, and valid-region rules as A2/A3.
+  - `tmp` is not used by the A5 implementation. PTO IR still requires it to be a row-major `loc=vec` tile, but no shape or valid-shape relation with `src/dst` is required.
 
 **Hardware Mapping:**
 
@@ -4479,8 +4922,8 @@ pto.trowargmin ins(<src>, <tmp> : <src_type>, <tmp_type>)
 pto.trowargmin ins(%src, %tmp : !pto.tile_buf<loc=vec, dtype=f32, rows=16, cols=32,
                    v_row=16, v_col=32, blayout=row_major, slayout=none_box,
                    fractal=512, pad=0>,
-                   !pto.tile_buf<loc=vec, dtype=f32, rows=16, cols=32,
-                   v_row=16, v_col=32, blayout=row_major, slayout=none_box,
+                   !pto.tile_buf<loc=vec, dtype=f32, rows=16, cols=2,
+                   v_row=16, v_col=2, blayout=row_major, slayout=none_box,
                    fractal=512, pad=0>)
                outs(%dst : !pto.tile_buf<loc=vec, dtype=i32, rows=16, cols=1,
                    v_row=16, v_col=1, blayout=col_major, slayout=none_box,
@@ -4505,7 +4948,7 @@ For each row i:
 | Name | Type | Description |
 |------|------|-------------|
 | `src` | `pto.tile_buf` | Source tile buffer |
-| `tmp` | `pto.tile_buf` | Temporary buffer with the same shape/type as `src` |
+| `tmp` | `pto.tile_buf` | Workspace tile on A2/A3; compatibility placeholder on A5 |
 | `dst` | `pto.tile_buf` | Destination tile buffer (column vector) |
 
 **Results:** None. Writes into `dst` via DPS pattern.
@@ -4519,20 +4962,21 @@ pto.trowprod ins(<src>, <tmp> : <src_type>, <tmp_type>)
 
 **Constraints & Verification:**
 
-- **Implementation checks (A2A3)**
-  - `src`, `tmp`, and `dst` must use `loc=vec`.
-  - `src` must use ND-style tile layout (`blayout=row_major`, `slayout=none_box`).
-  - `tmp` must have the same shape, valid shape, and element type as `src`.
-  - `dst` must use `slayout=none_box` and either:
-    - a DN-style column vector tile (`blayout=col_major`, `cols=1`), or
-    - a legacy ND-style tile with `valid column == 1`.
-  - `src`/`tmp`/`dst` element type must be `i16`, `i32`, `f16`, or `f32`.
-  - Runtime valid checks:
-    - `src valid row != 0` and `src valid column != 0`
-    - `src valid row == dst valid row`
-    - `dst valid column == 1`
-- **Implementation checks (A5)**
-  - Same constraints as A2/A3.
+- `src` and `dst` must use `loc=vec`.
+- `tmp` must be a `loc=vec` tile and have the same element type as `src`.
+- `src` must use ND-style tile layout (`blayout=row_major`, `slayout=none_box`).
+- `dst` must use `slayout=none_box` and either:
+  - a DN-style column vector tile (`blayout=col_major`, `cols=1`), or
+  - a legacy ND-style tile with `valid column == 1`.
+- `src` and `dst` must have the same element type.
+- Supported element types are `i16`, `i32`, `f16`, and `f32`.
+- Runtime valid checks:
+  - `src valid_shape[0]` and `src valid_shape[1]` must be non-zero.
+  - `src valid_shape[0] == dst valid_shape[0]`.
+  - `dst valid_shape[1] == 1`.
+- PTO IR does not impose extra `tmp` shape or layout constraints for this op.
+- On A2/A3, `tmp` is consumed as reduction workspace.
+- On A5, `tmp` is kept for ABI compatibility and the current implementation does not consume it.
 
 **Hardware Mapping:**
 
@@ -4545,8 +4989,8 @@ pto.trowprod ins(<src>, <tmp> : <src_type>, <tmp_type>)
 pto.trowprod ins(%src, %tmp : !pto.tile_buf<loc=vec, dtype=i16, rows=16, cols=16,
                  v_row=16, v_col=16, blayout=row_major, slayout=none_box,
                  fractal=512, pad=0>,
-                 !pto.tile_buf<loc=vec, dtype=i16, rows=16, cols=16,
-                 v_row=16, v_col=16, blayout=row_major, slayout=none_box,
+                 !pto.tile_buf<loc=vec, dtype=i16, rows=1, cols=16,
+                 v_row=1, v_col=16, blayout=row_major, slayout=none_box,
                  fractal=512, pad=0>)
              outs(%dst : !pto.tile_buf<loc=vec, dtype=i16, rows=16, cols=1,
                  v_row=16, v_col=1, blayout=col_major, slayout=none_box,
@@ -4557,26 +5001,34 @@ pto.trowprod ins(%src, %tmp : !pto.tile_buf<loc=vec, dtype=i16, rows=16, cols=16
 
 ##### `pto.thistogram` - Row-wise Histogram Accumulation
 
-**Summary:** Updates a 256-bin histogram row in `dst` using each source row and a per-row index selector. This op is only supported on A5.
+**Summary:** Updates a 256-bin histogram row in `dst` using A5 `THISTOGRAM` modes selected by the `byte` attribute.
 
 **Semantics:**
 
 ```
-For each row i:
-    bin = idx[i, 0]
-    dst[i, bin] = histogram_update(dst[i, bin], src[i, :])
+For `src : ui16`, each row updates one histogram bin selected by `idx[i, 0]`.
+
+For `src : ui32`, the exact filtering behavior is defined by the backend `THISTOGRAM<HistByte::BYTE_n>` intrinsic:
+- `byte = 3`: histogram byte 3 directly
+- `byte = 2`: histogram byte 2, filtered by byte 3
+- `byte = 1`: histogram byte 1, filtered by bytes 3 and 2
+- `byte = 0`: histogram byte 0, filtered by bytes 3, 2, and 1
 ```
 
-The exact accumulation performed inside the selected bin is target-defined by the hardware `THISTOGRAM` intrinsic. The `isMSB` attribute selects the intrinsic mode.
+The exact accumulation performed inside the selected bin is target-defined by the hardware `THISTOGRAM` intrinsic. The `byte` attribute maps directly to `HistByte::BYTE_<byte>`.
 
 **Arguments:**
 
 | Name | Type | Description |
 |------|------|-------------|
-| `src` | `pto.tile_buf` | Source tile buffer, one logical row per histogram update |
-| `idx` | `pto.tile_buf` | Per-row bin selector tile |
+| `src` | `pto.tile_buf` | Source tile buffer (`ui16` or `ui32`) |
+| `idx` | `pto.tile_buf` | Selector/filter tile interpreted according to `src` dtype and `byte` |
 | `dst` | `pto.tile_buf` | Destination histogram tile |
-| `isMSB` | `BoolAttr` (default: `true`) | Selects the `THISTOGRAM<...>` intrinsic mode |
+| `byte` | `I32Attr` (default: `1`) | Selects `THISTOGRAM<HistByte::BYTE_<byte>>`, valid range `[0, 3]` |
+
+Legacy inputs using `isMSB` are accepted for compatibility: `isMSB = false`
+maps to `byte = 0`, and `isMSB = true` maps to `byte = 1`. Specifying both
+`byte` and a conflicting legacy `isMSB` is rejected.
 
 **Results:** None. Writes into `dst` via DPS pattern.
 
@@ -4585,7 +5037,7 @@ The exact accumulation performed inside the selected bin is target-defined by th
 ```
 pto.thistogram ins(<src>, <idx> : <src_type>, <idx_type>)
                outs(<dst> : <dst_type>)
-               {isMSB = true}
+               {byte = 1 : i32}
 ```
 
 **Constraints & Verification:**
@@ -4595,15 +5047,24 @@ pto.thistogram ins(<src>, <idx> : <src_type>, <idx_type>)
 - **Implementation checks (A5)**
   - `src`, `idx`, and `dst` must all be `tile_buf` values in `loc=vec`.
   - `src` and `dst` must use `row_major + none_box` layout.
-  - `idx` must use DN-style layout (`col_major + none_box`).
-  - `src` element type must be `ui16`.
+  - `src` element type must be `ui16` or `ui32`.
   - `idx` element type must be `ui8`.
   - `dst` element type must be `ui32`.
+  - `byte` must be in `[0, 3]`.
   - `src`, `idx`, and `dst` must all be rank-2 tiles.
-  - `idx` rows and valid rows must match `src`.
   - `dst` rows and valid rows must match `src`.
-  - `idx` must have exactly one column.
   - `dst` shape[1] and valid_shape[1] must be at least `256`.
+  - When `src` is `ui16`:
+    - `byte` must be `0` or `1`.
+    - `idx` must use DN-style layout (`col_major + none_box`).
+    - `idx` rows and valid rows must match `src`.
+    - `idx` must have exactly one column.
+  - When `src` is `ui32`:
+    - When `byte = 3`, `idx` is accepted but not semantically used by the A5 backend intrinsic; no additional layout or shape constraints are imposed beyond the generic `tile_buf`, `loc=vec`, `dtype=ui8`, and rank-2 requirements.
+    - When `byte = 2`, `1`, or `0`, `idx` must use `row_major + none_box` layout. `idx` cols and valid cols must match `src`.
+    - When `byte = 2`, `idx` rows / valid rows must be `1`.
+    - When `byte = 1`, `idx` rows / valid rows must be `2`.
+    - When `byte = 0`, `idx` rows / valid rows must be `3`.
 
 **Hardware Mapping:**
 
@@ -4621,14 +5082,14 @@ pto.thistogram ins(%src, %idx : !pto.tile_buf<loc=vec, dtype=ui16, rows=8, cols=
                    fractal=512, pad=0>)
                outs(%dst : !pto.tile_buf<loc=vec, dtype=ui32, rows=8, cols=256,
                    v_row=8, v_col=256, blayout=row_major, slayout=none_box,
-                   fractal=512, pad=0>) {isMSB = false}
+                   fractal=512, pad=0>) {byte = 0 : i32}
 ```
 
 ---
 
 ##### `pto.tcolsum` - Column-wise Sum Reduction
 
-**Summary:** Reduces each column by summing across rows. Requires a temporary buffer.
+**Summary:** Reduces each column by summing across rows. The tmp-taking form is optional; when present, it models a workspace tile instead of a same-shape scratch tile.
 
 **Semantics:**
 
@@ -4642,7 +5103,7 @@ For each column j:
 | Name | Type | Description |
 |------|------|-------------|
 | `src` | `pto.tile_buf` | Source tile buffer |
-| `tmp` | `pto.tile_buf` | Temporary buffer (required for intermediate computation) |
+| `tmp` | `Optional<pto.tile_buf>` | Optional workspace tile used by the tmp-taking form |
 | `dst` | `pto.tile_buf` | Destination tile buffer (row vector) |
 | `isBinary` | `BoolAttr` (default: `false`) | Use binary reduction tree |
 
@@ -4651,22 +5112,29 @@ For each column j:
 **Assembly Format:**
 
 ```
-pto.tcolsum ins(<src>, <tmp> : <src_type>, <tmp_type>)
-            outs(<dst> : <dst_type>) isBinary = false
+pto.tcolsum ins(<src> : <src_type>)
+            outs(<dst> : <dst_type>)
+pto.tcolsum ins(<src>, <tmp> {isBinary = true} : <src_type>, <tmp_type>)
+            outs(<dst> : <dst_type>)
 ```
 
 **Constraints & Verification:**
 
-- **Implementation checks (A2A3):**
-- `src`, `tmp`, and `dst` must use `loc=vec`.
-- All tiles must use ND-style layout (`blayout=row_major`, `slayout=none_box`).
-- `src_type` must be one of `f16`, `f32`, `i16`, `i32`, and `dst_type == tmp_type == src_type`.
-- `src valid column == dst valid column`;
-- **Implementation checks (A5):**
-- `src`, `tmp`, and `dst` must use `loc=vec`.
-- All tiles must use ND-style layout (`blayout=row_major`, `slayout=none_box`).
-- `src_type` must be one of `f16`, `f32`, `i8`, `i16`, `i32`,`bf16`, and `dst_type == tmp_type == src_type`.
-- `src valid row` and `src valid column` must be non-zero; `src valid column == dst valid column` is required.
+- `src` and `dst` must use `loc=vec`.
+- `src` and `dst` must use ND-style layout (`blayout=row_major`, `slayout=none_box`).
+- `src` and `dst` must have the same element type.
+- `src valid_shape[1]` must equal `dst valid_shape[1]`.
+- **Implementation checks (A2/A3)**:
+  - Supported element types: `f16`, `f32`, `i16`, `i32`.
+- **Implementation checks (A5)**:
+  - Supported element types: `i8`, `i16`, `i32`, `f16`, `bf16`, `f32`.
+  - `src valid_shape[0]` and `src valid_shape[1]` must both be non-zero.
+- When `tmp` is present:
+  - `tmp` must also use `loc=vec` and ND-style layout.
+  - `tmp` must have the same element type as `src` / `dst`.
+  - In the current PTO IR surface, `tmp` and `isBinary` must appear together.
+  - When `isBinary = true`, `tmp shape[1]` must be at least `src valid_shape[1]`.
+- PTO IR does not require `tmp` to match the full shape or valid shape of `src`.
 
 **Hardware Mapping:**
 
@@ -4679,12 +5147,12 @@ pto.tcolsum ins(<src>, <tmp> : <src_type>, <tmp_type>)
 pto.tcolsum ins(%src, %tmp : !pto.tile_buf<loc=vec, dtype=f32, rows=16, cols=16,
                 v_row=16, v_col=16, blayout=row_major, slayout=none_box,
                 fractal=512, pad=0>,
-                !pto.tile_buf<loc=vec, dtype=f32, rows=16, cols=16,
-                v_row=16, v_col=16, blayout=row_major, slayout=none_box,
+                !pto.tile_buf<loc=vec, dtype=f32, rows=1, cols=16,
+                v_row=1, v_col=16, blayout=row_major, slayout=none_box,
                 fractal=512, pad=0>)
             outs(%dst : !pto.tile_buf<loc=vec, dtype=f32, rows=1, cols=16,
                 v_row=1, v_col=16, blayout=row_major, slayout=none_box,
-                fractal=512, pad=0>) isBinary = false
+                fractal=512, pad=0>) {isBinary = true}
 ```
 
 ---
@@ -4762,7 +5230,7 @@ For each column j:
 | Name | Type | Description |
 |------|------|-------------|
 | `src` | `pto.tile_buf` | Source tile buffer |
-| `tmp` | `pto.tile_buf` | Temporary buffer with the same shape/type as `src` |
+| `tmp` | `pto.tile_buf` | A2/A3 reduction workspace tile. On A5 this operand is kept for ABI compatibility and is not used by the instruction. |
 | `dst` | `pto.tile_buf` | Destination tile buffer containing column-wise indices |
 
 **Results:** None. Writes into `dst` via DPS pattern.
@@ -4778,8 +5246,13 @@ pto.tcolargmax ins(<src>, <tmp> : <src_type>, <tmp_type>)
 
 - **Implementation checks (A2A3)**
   - `src`, `tmp`, and `dst` must use `loc=vec`.
-  - All tiles must use ND-style tile layout (`blayout=row_major`, `slayout=none_box`).
-  - `tmp` must have the same shape, valid shape, and element type as `src`.
+  - `src` and `dst` must use ND-style tile layout (`blayout=row_major`, `slayout=none_box`).
+  - `tmp` must be a row-major `loc=vec` tile and must have the same element type as `src`.
+  - `elementPerRepeat = 2048 / bitwidth(src element type)`.
+  - `elementPerBlock = 256 / bitwidth(src element type)`.
+  - PTO IR accepts either a legacy `tmp` whose known `valid_shape` exactly matches `src`, or a smaller workspace tile.
+  - For the workspace form, `tmp.validRow >= 1`.
+  - The minimum required `tmp.validCol` is `stride`, where `repeats = ceil(src.validCol / elementPerRepeat)` and `stride = (ceil(repeats * 2 / elementPerBlock) + ceil(repeats / elementPerBlock)) * elementPerBlock`.
   - `src` element type must be `f16` or `f32`.
   - `dst` element type must be `i32` or `ui32`.
   - Runtime valid checks:
@@ -4787,7 +5260,8 @@ pto.tcolargmax ins(<src>, <tmp> : <src_type>, <tmp_type>)
     - `dst valid row == 1`
     - `src valid column == dst valid column`
 - **Implementation checks (A5)**
-  - Same constraints as A2/A3.
+  - `src` and `dst` follow the same layout, element-type, and valid-region rules as A2/A3.
+  - `tmp` is not used by the A5 implementation. PTO IR still requires it to be a row-major `loc=vec` tile, but no shape or valid-shape relation with `src/dst` is required.
 
 **Hardware Mapping:**
 
@@ -4800,8 +5274,8 @@ pto.tcolargmax ins(<src>, <tmp> : <src_type>, <tmp_type>)
 pto.tcolargmax ins(%src, %tmp : !pto.tile_buf<loc=vec, dtype=f16, rows=16, cols=32,
                    v_row=16, v_col=32, blayout=row_major, slayout=none_box,
                    fractal=512, pad=0>,
-                   !pto.tile_buf<loc=vec, dtype=f16, rows=16, cols=32,
-                   v_row=16, v_col=32, blayout=row_major, slayout=none_box,
+                   !pto.tile_buf<loc=vec, dtype=f16, rows=1, cols=32,
+                   v_row=1, v_col=32, blayout=row_major, slayout=none_box,
                    fractal=512, pad=0>)
                outs(%dst : !pto.tile_buf<loc=vec, dtype=ui32, rows=1, cols=32,
                    v_row=1, v_col=32, blayout=row_major, slayout=none_box,
@@ -4883,7 +5357,7 @@ For each column j:
 | Name | Type | Description |
 |------|------|-------------|
 | `src` | `pto.tile_buf` | Source tile buffer |
-| `tmp` | `pto.tile_buf` | Temporary buffer with the same shape/type as `src` |
+| `tmp` | `pto.tile_buf` | A2/A3 reduction workspace tile. On A5 this operand is kept for ABI compatibility and is not used by the instruction. |
 | `dst` | `pto.tile_buf` | Destination tile buffer containing column-wise indices |
 
 **Results:** None. Writes into `dst` via DPS pattern.
@@ -4899,8 +5373,13 @@ pto.tcolargmin ins(<src>, <tmp> : <src_type>, <tmp_type>)
 
 - **Implementation checks (A2A3)**
   - `src`, `tmp`, and `dst` must use `loc=vec`.
-  - All tiles must use ND-style tile layout (`blayout=row_major`, `slayout=none_box`).
-  - `tmp` must have the same shape, valid shape, and element type as `src`.
+  - `src` and `dst` must use ND-style tile layout (`blayout=row_major`, `slayout=none_box`).
+  - `tmp` must be a row-major `loc=vec` tile and must have the same element type as `src`.
+  - `elementPerRepeat = 2048 / bitwidth(src element type)`.
+  - `elementPerBlock = 256 / bitwidth(src element type)`.
+  - PTO IR accepts either a legacy `tmp` whose known `valid_shape` exactly matches `src`, or a smaller workspace tile.
+  - For the workspace form, `tmp.validRow >= 1`.
+  - The minimum required `tmp.validCol` is `stride`, where `repeats = ceil(src.validCol / elementPerRepeat)` and `stride = (ceil(repeats * 2 / elementPerBlock) + ceil(repeats / elementPerBlock)) * elementPerBlock`.
   - `src` element type must be `f16` or `f32`.
   - `dst` element type must be `i32` or `ui32`.
   - Runtime valid checks:
@@ -4908,7 +5387,8 @@ pto.tcolargmin ins(<src>, <tmp> : <src_type>, <tmp_type>)
     - `dst valid row == 1`
     - `src valid column == dst valid column`
 - **Implementation checks (A5)**
-  - Same constraints as A2/A3.
+  - `src` and `dst` follow the same layout, element-type, and valid-region rules as A2/A3.
+  - `tmp` is not used by the A5 implementation. PTO IR still requires it to be a row-major `loc=vec` tile, but no shape or valid-shape relation with `src/dst` is required.
 
 **Hardware Mapping:**
 
@@ -4921,8 +5401,8 @@ pto.tcolargmin ins(<src>, <tmp> : <src_type>, <tmp_type>)
 pto.tcolargmin ins(%src, %tmp : !pto.tile_buf<loc=vec, dtype=f32, rows=16, cols=32,
                    v_row=16, v_col=32, blayout=row_major, slayout=none_box,
                    fractal=512, pad=0>,
-                   !pto.tile_buf<loc=vec, dtype=f32, rows=16, cols=32,
-                   v_row=16, v_col=32, blayout=row_major, slayout=none_box,
+                   !pto.tile_buf<loc=vec, dtype=f32, rows=1, cols=32,
+                   v_row=1, v_col=32, blayout=row_major, slayout=none_box,
                    fractal=512, pad=0>)
                outs(%dst : !pto.tile_buf<loc=vec, dtype=i32, rows=1, cols=32,
                    v_row=1, v_col=32, blayout=row_major, slayout=none_box,
@@ -4962,6 +5442,16 @@ element-type constraints are:
 - A5: `i8`, `i16`, `i32`, `f16`, `f32`
 
 `pto.trowexpandexpdif` and `pto.tcolexpandexpdif` remain floating-point only (`f16`/`f32`).
+
+All `pto.trowexpandmul/div/sub/add/expdif/max/min` ops accept both the plain
+two-source form and the tmp-taking form. PTO IR does not require `tmp` to
+match the shape or valid shape of `src0` / `src1` / `dst`. On A5, `tmp` is
+accepted as a compatibility placeholder and may be smaller than the data tiles.
+
+For `pto.trowexpandexpdif/max/min`, PTO IR requires one source to match
+`dst valid_shape` and the other to be a per-row scalar vector. When the A3
+tmp-taking form is used, that scalar-vector operand must use a non-row-major
+layout. When `tmp` is present, it must have the same element type as `dst`.
 
 ---
 
@@ -5386,7 +5876,7 @@ For each element (i, j):
 |------|------|-------------|
 | `src0` | `pto.tile_buf` | Source tile buffer |
 | `src1` | `pto.tile_buf` | Per-row scalar vector |
-| `tmp` | `Optional<pto.tile_buf>` | Optional scratch tile used by the tmp-taking pto-isa overload |
+| `tmp` | `Optional<pto.tile_buf>` | Optional workspace tile on A2/A3; compatibility placeholder on A5 |
 | `dst` | `pto.tile_buf` | Destination tile buffer |
 
 **Results:** None. Writes into `dst` via DPS pattern.
@@ -5404,6 +5894,9 @@ pto.trowexpandmul ins(<src0>, <src1>[, <tmp>] : <src0_type>, <src1_type>[, <tmp_
   - `dst`, `src0`, and `src1` must have the same element type.
   - The shared element type must be `f16` or `f32`.
   - `dst` must use row-major layout (`blayout=row_major`).
+- When `tmp` is present:
+  - PTO IR does not require `tmp` to match the shape or valid shape of `src0` / `src1` / `dst`.
+  - On A5, `tmp` is accepted as a compatibility placeholder and is not consumed by the current implementation.
  
 **Hardware Mapping:**
 
@@ -5413,17 +5906,17 @@ pto.trowexpandmul ins(<src0>, <src1>[, <tmp>] : <src0_type>, <src1_type>[, <tmp_
 **Basic Example:**
 
 ```mlir
-pto.trowexpandmul ins(%src0, %src1, %tmp : !pto.tile_buf<loc=vec, dtype=f32, rows=16, cols=16,
-                      v_row=16, v_col=16, blayout=row_major, slayout=none_box,
+pto.trowexpandmul ins(%src0, %src1, %tmp : !pto.tile_buf<loc=vec, dtype=f32, rows=16, cols=64,
+                      v_row=16, v_col=64, blayout=row_major, slayout=none_box,
                       fractal=512, pad=0>,
                       !pto.tile_buf<loc=vec, dtype=f32, rows=16, cols=1,
-                      v_row=16, v_col=1, blayout=row_major, slayout=none_box,
+                      v_row=16, v_col=1, blayout=col_major, slayout=none_box,
                       fractal=512, pad=0>,
-                      !pto.tile_buf<loc=vec, dtype=f32, rows=16, cols=16,
-                      v_row=16, v_col=16, blayout=row_major, slayout=none_box,
+                      !pto.tile_buf<loc=vec, dtype=f32, rows=1, cols=8,
+                      v_row=1, v_col=8, blayout=row_major, slayout=none_box,
                       fractal=512, pad=0>)
-                  outs(%dst : !pto.tile_buf<loc=vec, dtype=f32, rows=16, cols=16,
-                      v_row=16, v_col=16, blayout=row_major, slayout=none_box,
+                  outs(%dst : !pto.tile_buf<loc=vec, dtype=f32, rows=16, cols=64,
+                      v_row=16, v_col=64, blayout=row_major, slayout=none_box,
                       fractal=512, pad=0>)
 ```
 
@@ -5446,7 +5939,7 @@ For each element (i, j):
 |------|------|-------------|
 | `src0` | `pto.tile_buf` | Source tile buffer |
 | `src1` | `pto.tile_buf` | Per-row scalar vector (divisor) |
-| `tmp` | `Optional<pto.tile_buf>` | Optional scratch tile used by the tmp-taking pto-isa overload |
+| `tmp` | `Optional<pto.tile_buf>` | Optional workspace tile on A2/A3; compatibility placeholder on A5 |
 | `dst` | `pto.tile_buf` | Destination tile buffer |
 
 **Results:** None. Writes into `dst` via DPS pattern.
@@ -5464,6 +5957,10 @@ pto.trowexpanddiv ins(<src0>, <src1>[, <tmp>] : <src0_type>, <src1_type>[, <tmp_
   - `dst`, `src0`, and `src1` must have the same element type.
   - The shared element type must be `f16` or `f32`.
   - `dst` must use row-major layout (`blayout=row_major`).
+- `precisionType = #pto<div_precision high_precision>` requires `tmp`.
+- When `tmp` is present:
+  - PTO IR does not require `tmp` to match the shape or valid shape of `src0` / `src1` / `dst`.
+  - On A5, `tmp` is accepted as a compatibility placeholder and is not consumed by the current implementation.
 
 **Hardware Mapping:**
 
@@ -5473,17 +5970,17 @@ pto.trowexpanddiv ins(<src0>, <src1>[, <tmp>] : <src0_type>, <src1_type>[, <tmp_
 **Basic Example:**
 
 ```mlir
-pto.trowexpanddiv ins(%src0, %src1, %tmp : !pto.tile_buf<loc=vec, dtype=f32, rows=16, cols=16,
-                      v_row=16, v_col=16, blayout=row_major, slayout=none_box,
+pto.trowexpanddiv ins(%src0, %src1, %tmp : !pto.tile_buf<loc=vec, dtype=f32, rows=16, cols=64,
+                      v_row=16, v_col=64, blayout=row_major, slayout=none_box,
                       fractal=512, pad=0>,
                       !pto.tile_buf<loc=vec, dtype=f32, rows=16, cols=1,
-                      v_row=16, v_col=1, blayout=row_major, slayout=none_box,
+                      v_row=16, v_col=1, blayout=col_major, slayout=none_box,
                       fractal=512, pad=0>,
-                      !pto.tile_buf<loc=vec, dtype=f32, rows=16, cols=16,
-                      v_row=16, v_col=16, blayout=row_major, slayout=none_box,
+                      !pto.tile_buf<loc=vec, dtype=f32, rows=1, cols=8,
+                      v_row=1, v_col=8, blayout=row_major, slayout=none_box,
                       fractal=512, pad=0>)
-                  outs(%dst : !pto.tile_buf<loc=vec, dtype=f32, rows=16, cols=16,
-                      v_row=16, v_col=16, blayout=row_major, slayout=none_box,
+                  outs(%dst : !pto.tile_buf<loc=vec, dtype=f32, rows=16, cols=64,
+                      v_row=16, v_col=64, blayout=row_major, slayout=none_box,
                       fractal=512, pad=0>)
 ```
 
@@ -5506,7 +6003,7 @@ For each element (i, j):
 |------|------|-------------|
 | `src0` | `pto.tile_buf` | Source tile buffer |
 | `src1` | `pto.tile_buf` | Per-row scalar vector (subtrahend) |
-| `tmp` | `Optional<pto.tile_buf>` | Optional scratch tile used by the tmp-taking pto-isa overload |
+| `tmp` | `Optional<pto.tile_buf>` | Optional workspace tile on A2/A3; compatibility placeholder on A5 |
 | `dst` | `pto.tile_buf` | Destination tile buffer |
 
 **Results:** None. Writes into `dst` via DPS pattern.
@@ -5526,6 +6023,9 @@ pto.trowexpandsub ins(<src0>, <src1>[, <tmp>] : <src0_type>, <src1_type>[, <tmp_
     - A2/A3: `i16`, `i32`, `f16`, `f32`
     - A5: `i8`, `i16`, `i32`, `f16`, `f32`
   - `dst` must use row-major layout (`blayout=row_major`).
+- When `tmp` is present:
+  - PTO IR does not require `tmp` to match the shape or valid shape of `src0` / `src1` / `dst`.
+  - On A5, `tmp` is accepted as a compatibility placeholder and is not consumed by the current implementation.
 
 **Hardware Mapping:**
 
@@ -5535,17 +6035,17 @@ pto.trowexpandsub ins(<src0>, <src1>[, <tmp>] : <src0_type>, <src1_type>[, <tmp_
 **Basic Example:**
 
 ```mlir
-pto.trowexpandsub ins(%src0, %src1, %tmp : !pto.tile_buf<loc=vec, dtype=f32, rows=16, cols=16,
-                      v_row=16, v_col=16, blayout=row_major, slayout=none_box,
+pto.trowexpandsub ins(%src0, %src1, %tmp : !pto.tile_buf<loc=vec, dtype=f32, rows=16, cols=64,
+                      v_row=16, v_col=64, blayout=row_major, slayout=none_box,
                       fractal=512, pad=0>,
                       !pto.tile_buf<loc=vec, dtype=f32, rows=16, cols=1,
-                      v_row=16, v_col=1, blayout=row_major, slayout=none_box,
+                      v_row=16, v_col=1, blayout=col_major, slayout=none_box,
                       fractal=512, pad=0>,
-                      !pto.tile_buf<loc=vec, dtype=f32, rows=16, cols=16,
-                      v_row=16, v_col=16, blayout=row_major, slayout=none_box,
+                      !pto.tile_buf<loc=vec, dtype=f32, rows=1, cols=8,
+                      v_row=1, v_col=8, blayout=row_major, slayout=none_box,
                       fractal=512, pad=0>)
-                  outs(%dst : !pto.tile_buf<loc=vec, dtype=f32, rows=16, cols=16,
-                      v_row=16, v_col=16, blayout=row_major, slayout=none_box,
+                  outs(%dst : !pto.tile_buf<loc=vec, dtype=f32, rows=16, cols=64,
+                      v_row=16, v_col=64, blayout=row_major, slayout=none_box,
                       fractal=512, pad=0>)
 ```
 
@@ -5568,6 +6068,7 @@ For each element (i, j):
 |------|------|-------------|
 | `src0` | `pto.tile_buf` | Source tile buffer |
 | `src1` | `pto.tile_buf` | Per-row scalar vector |
+| `tmp` | `pto.tile_buf` (optional) | Optional workspace tile on A2/A3; compatibility placeholder on A5 |
 | `dst` | `pto.tile_buf` | Destination tile buffer |
 
 **Results:** None. Writes into `dst` via DPS pattern.
@@ -5575,22 +6076,24 @@ For each element (i, j):
 **Assembly Format:**
 
 ```
-pto.trowexpandadd ins(<src0>, <src1> : <src0_type>, <src1_type>)
+pto.trowexpandadd ins(<src0>, <src1> [, <tmp>] : <src0_type>, <src1_type> [, <tmp_type>])
                   outs(<dst> : <dst_type>)
 ```
 
 **Constraints & Verification:**
-
 - **Implementation checks**:
   - `dst`, `src0`, and `src1` must have the same element type.
   - Element type:
     - A2/A3: `i16`, `i32`, `f16`, `f32`
     - A5: `i8`, `i16`, `i32`, `f16`, `f32`
-  - `src0` and `dst` must have the same shape and the same `valid_shape`.
+  - `src0` and `dst` must have the same `valid_shape`.
   - `src0` and `dst` must use row-major layout (`blayout=row_major`).
   - `src1 valid_shape[0]` must equal `dst valid_shape[0]`.
   - If `src1` is row-major: `src1 valid_shape[1] == 32 / sizeof(dtype)` (`16` for `f16`, `8` for `f32`).
   - If `src1` is not row-major: `src1 valid_shape[1] == 1`.
+- When `tmp` is present:
+  - PTO IR does not require `tmp` to match the shape or valid shape of `src0` / `src1` / `dst`.
+  - On A5, `tmp` is accepted as a compatibility placeholder and is not consumed by the current implementation.
 
 **Hardware Mapping:**
 
@@ -5608,6 +6111,217 @@ pto.trowexpandadd ins(%src0, %src1 : !pto.tile_buf<loc=vec, dtype=f32, rows=16, 
                       fractal=512, pad=0>)
                   outs(%dst : !pto.tile_buf<loc=vec, dtype=f32, rows=16, cols=16,
                       v_row=16, v_col=16, blayout=row_major, slayout=none_box,
+                      fractal=512, pad=0>)
+```
+
+---
+
+##### `pto.trowexpandexpdif` - Row-wise Broadcast Exp-Difference
+
+**Summary:** Computes `exp(src0[i, j] - src1[i, 0])` using a per-row scalar vector.
+
+**Semantics:**
+
+```
+For each element (i, j):
+    dst[i, j] = exp(src0[i, j] - src1[i, 0])
+```
+
+**Arguments:**
+
+| Name | Type | Description |
+|------|------|-------------|
+| `src0` | `pto.tile_buf` | One input tile; one of `src0` / `src1` must match `dst` valid shape |
+| `src1` | `pto.tile_buf` | The other input; interpreted as a per-row scalar vector |
+| `tmp` | `Optional<pto.tile_buf>` | Optional workspace tile on A2/A3; compatibility placeholder on A5 |
+| `dst` | `pto.tile_buf` | Destination tile buffer |
+
+**Results:** None. Writes into `dst` via DPS pattern.
+
+**Assembly Format:**
+
+```
+pto.trowexpandexpdif ins(<src0>, <src1>[, <tmp>] : <src0_type>, <src1_type>[, <tmp_type>])
+                     outs(<dst> : <dst_type>)
+```
+
+**Constraints & Verification:**
+
+- `src0`, `src1`, and `dst` must have the same element type.
+- The shared element type must be `f16` or `f32`.
+- `dst` must use row-major layout (`blayout=row_major`).
+- One of `src0` / `src1` must match `dst valid_shape`; the other must be a per-row scalar vector.
+- The per-row scalar-vector operand must satisfy:
+  - `valid_shape[0] == dst valid_shape[0]`
+  - if it is row-major, `valid_shape[1] == 32 / sizeof(dtype)` (`16` for `f16`, `8` for `f32`)
+  - otherwise, `valid_shape[1] == 1`
+- When the A3 tmp-taking form is used, the scalar-vector operand must use a non-row-major layout.
+- When `tmp` is present:
+  - `tmp` must have the same element type as `dst`.
+  - PTO IR does not require `tmp` to match the shape or valid shape of `src0` / `src1` / `dst`.
+  - On A5, `tmp` is accepted as a compatibility placeholder and is not consumed by the current implementation.
+
+**Hardware Mapping:**
+
+- Executes on the **Vector pipeline** (`PIPE_V`)
+- Operates on data in the **VEC (UB)** memory space
+
+**Basic Example:**
+
+```mlir
+pto.trowexpandexpdif ins(%src0, %src1, %tmp : !pto.tile_buf<loc=vec, dtype=f32, rows=16, cols=64,
+                         v_row=16, v_col=64, blayout=row_major, slayout=none_box,
+                         fractal=512, pad=0>,
+                         !pto.tile_buf<loc=vec, dtype=f32, rows=16, cols=1,
+                         v_row=16, v_col=1, blayout=col_major, slayout=none_box,
+                         fractal=512, pad=0>,
+                         !pto.tile_buf<loc=vec, dtype=f32, rows=1, cols=8,
+                         v_row=1, v_col=8, blayout=row_major, slayout=none_box,
+                         fractal=512, pad=0>)
+                     outs(%dst : !pto.tile_buf<loc=vec, dtype=f32, rows=16, cols=64,
+                         v_row=16, v_col=64, blayout=row_major, slayout=none_box,
+                         fractal=512, pad=0>)
+```
+
+---
+
+##### `pto.trowexpandmax` - Row-wise Broadcast Max
+
+**Summary:** Takes the elementwise maximum of a full tile and a per-row scalar vector.
+
+**Semantics:**
+
+```
+For each element (i, j):
+    dst[i, j] = max(src0[i, j], src1[i, 0])
+```
+
+**Arguments:**
+
+| Name | Type | Description |
+|------|------|-------------|
+| `src0` | `pto.tile_buf` | One input tile; one of `src0` / `src1` must match `dst` valid shape |
+| `src1` | `pto.tile_buf` | The other input; interpreted as a per-row scalar vector |
+| `tmp` | `Optional<pto.tile_buf>` | Optional workspace tile on A2/A3; compatibility placeholder on A5 |
+| `dst` | `pto.tile_buf` | Destination tile buffer |
+
+**Results:** None. Writes into `dst` via DPS pattern.
+
+**Assembly Format:**
+
+```
+pto.trowexpandmax ins(<src0>, <src1>[, <tmp>] : <src0_type>, <src1_type>[, <tmp_type>])
+                  outs(<dst> : <dst_type>)
+```
+
+**Constraints & Verification:**
+
+- `src0`, `src1`, and `dst` must have the same element type.
+- Supported element types are:
+  - A2/A3: `i16`, `i32`, `f16`, `f32`
+  - A5: `i8`, `i16`, `i32`, `f16`, `f32`
+- `dst` must use row-major layout (`blayout=row_major`).
+- One of `src0` / `src1` must match `dst valid_shape`; the other must be a per-row scalar vector.
+- The per-row scalar-vector operand must satisfy:
+  - `valid_shape[0] == dst valid_shape[0]`
+  - if it is row-major, `valid_shape[1] == 32 / sizeof(dtype)` (`32` for `i8`, `16` for `i16` / `f16`, `8` for `i32` / `f32`)
+  - otherwise, `valid_shape[1] == 1`
+- When the A3 tmp-taking form is used, the scalar-vector operand must use a non-row-major layout.
+- When `tmp` is present:
+  - `tmp` must have the same element type as `dst`.
+  - PTO IR does not require `tmp` to match the shape or valid shape of `src0` / `src1` / `dst`.
+  - On A5, `tmp` is accepted as a compatibility placeholder and is not consumed by the current implementation.
+
+**Hardware Mapping:**
+
+- Executes on the **Vector pipeline** (`PIPE_V`)
+- Operates on data in the **VEC (UB)** memory space
+
+**Basic Example:**
+
+```mlir
+pto.trowexpandmax ins(%src0, %src1, %tmp : !pto.tile_buf<loc=vec, dtype=f32, rows=16, cols=64,
+                      v_row=16, v_col=64, blayout=row_major, slayout=none_box,
+                      fractal=512, pad=0>,
+                      !pto.tile_buf<loc=vec, dtype=f32, rows=16, cols=1,
+                      v_row=16, v_col=1, blayout=col_major, slayout=none_box,
+                      fractal=512, pad=0>,
+                      !pto.tile_buf<loc=vec, dtype=f32, rows=1, cols=8,
+                      v_row=1, v_col=8, blayout=row_major, slayout=none_box,
+                      fractal=512, pad=0>)
+                  outs(%dst : !pto.tile_buf<loc=vec, dtype=f32, rows=16, cols=64,
+                      v_row=16, v_col=64, blayout=row_major, slayout=none_box,
+                      fractal=512, pad=0>)
+```
+
+---
+
+##### `pto.trowexpandmin` - Row-wise Broadcast Min
+
+**Summary:** Takes the elementwise minimum of a full tile and a per-row scalar vector.
+
+**Semantics:**
+
+```
+For each element (i, j):
+    dst[i, j] = min(src0[i, j], src1[i, 0])
+```
+
+**Arguments:**
+
+| Name | Type | Description |
+|------|------|-------------|
+| `src0` | `pto.tile_buf` | One input tile; one of `src0` / `src1` must match `dst` valid shape |
+| `src1` | `pto.tile_buf` | The other input; interpreted as a per-row scalar vector |
+| `tmp` | `Optional<pto.tile_buf>` | Optional workspace tile on A2/A3; compatibility placeholder on A5 |
+| `dst` | `pto.tile_buf` | Destination tile buffer |
+
+**Results:** None. Writes into `dst` via DPS pattern.
+
+**Assembly Format:**
+
+```
+pto.trowexpandmin ins(<src0>, <src1>[, <tmp>] : <src0_type>, <src1_type>[, <tmp_type>])
+                  outs(<dst> : <dst_type>)
+```
+
+**Constraints & Verification:**
+
+- `src0`, `src1`, and `dst` must have the same element type.
+- Supported element types are:
+  - A2/A3: `i16`, `i32`, `f16`, `f32`
+  - A5: `i8`, `i16`, `i32`, `f16`, `f32`
+- `dst` must use row-major layout (`blayout=row_major`).
+- One of `src0` / `src1` must match `dst valid_shape`; the other must be a per-row scalar vector.
+- The per-row scalar-vector operand must satisfy:
+  - `valid_shape[0] == dst valid_shape[0]`
+  - if it is row-major, `valid_shape[1] == 32 / sizeof(dtype)` (`32` for `i8`, `16` for `i16` / `f16`, `8` for `i32` / `f32`)
+  - otherwise, `valid_shape[1] == 1`
+- When the A3 tmp-taking form is used, the scalar-vector operand must use a non-row-major layout.
+- When `tmp` is present:
+  - `tmp` must have the same element type as `dst`.
+  - PTO IR does not require `tmp` to match the shape or valid shape of `src0` / `src1` / `dst`.
+  - On A5, `tmp` is accepted as a compatibility placeholder and is not consumed by the current implementation.
+
+**Hardware Mapping:**
+
+- Executes on the **Vector pipeline** (`PIPE_V`)
+- Operates on data in the **VEC (UB)** memory space
+
+**Basic Example:**
+
+```mlir
+pto.trowexpandmin ins(%src0, %src1, %tmp : !pto.tile_buf<loc=vec, dtype=f32, rows=16, cols=64,
+                      v_row=16, v_col=64, blayout=row_major, slayout=none_box,
+                      fractal=512, pad=0>,
+                      !pto.tile_buf<loc=vec, dtype=f32, rows=16, cols=1,
+                      v_row=16, v_col=1, blayout=col_major, slayout=none_box,
+                      fractal=512, pad=0>,
+                      !pto.tile_buf<loc=vec, dtype=f32, rows=1, cols=8,
+                      v_row=1, v_col=8, blayout=row_major, slayout=none_box,
+                      fractal=512, pad=0>)
+                  outs(%dst : !pto.tile_buf<loc=vec, dtype=f32, rows=16, cols=64,
+                      v_row=16, v_col=64, blayout=row_major, slayout=none_box,
                       fractal=512, pad=0>)
 ```
 
@@ -5824,7 +6538,7 @@ For each element (i, j):
 | `mask` | `pto.tile_buf` | Predicate mask |
 | `src0` | `pto.tile_buf` | Value when mask is true |
 | `src1` | `pto.tile_buf` | Value when mask is false |
-| `tmp` | `pto.tile_buf` | Temporary scratch tile required by the current DPS form |
+| `tmp` | `pto.tile_buf` | Placeholder / workspace operand kept by the current DPS form |
 | `dst` | `pto.tile_buf` | Destination tile buffer |
 
 **Results:** None. Writes into `dst` via DPS pattern.
@@ -5838,14 +6552,14 @@ pto.tsel ins(<mask>, <src0>, <src1>, <tmp> : <mask_type>, <type0>, <type1>, <tmp
 
 **Constraints & Verification:**
 
-- **Implementation checks (A2A3)**:
-  - `src0`, `src1`, and `dst` must have the same element type.
-  - The shared element type must be a 16-bit or 32-bit type supported by PTO IR: `i16`, `i32`, `f16`, or `f32`.
-  - `src0`, `src1`, and `dst` must use row-major layout (`blayout=row_major`).
+- `src0`, `src1`, and `dst` must have the same element type.
+- `src0`, `src1`, and `dst` must use row-major layout (`blayout=row_major`).
+- **Implementation checks (A2/A3)**:
+  - The shared element type must be `i16`, `i32`, `f16`, `bf16`, or `f32`.
 - **Implementation checks (A5)**:
-  - `src0`, `src1`, and `dst` must have the same element type.
-  - The shared element type must be an 8-bit, 16-bit, or 32-bit type supported by PTO IR: `i8`, `i16`, `i32`, `f16`, or `f32`.
-  - `src0`, `src1`, and `dst` must use row-major layout (`blayout=row_major`).
+  - The shared element type must be `i8`, `i16`, `i32`, `f16`, `bf16`, or `f32`.
+- The DPS form keeps a `tmp` operand, but PTO IR does not impose an extra tmp shape, valid-shape, or layout relation.
+- On A5, `tmp` may be a placeholder tile that is smaller than `src0` / `src1` / `dst`.
 
 **Hardware Mapping:**
 
@@ -5864,8 +6578,8 @@ pto.tsel ins(%mask, %a, %b, %tmp : !pto.tile_buf<loc=vec, dtype=i8, rows=16, col
              !pto.tile_buf<loc=vec, dtype=f16, rows=16, cols=16,
              v_row=16, v_col=16, blayout=row_major, slayout=none_box,
              fractal=512, pad=0>,
-             !pto.tile_buf<loc=vec, dtype=f16, rows=16, cols=16,
-             v_row=16, v_col=16, blayout=row_major, slayout=none_box,
+             !pto.tile_buf<loc=vec, dtype=f16, rows=1, cols=8,
+             v_row=1, v_col=8, blayout=row_major, slayout=none_box,
              fractal=512, pad=0>)
          outs(%dst : !pto.tile_buf<loc=vec, dtype=f16, rows=16, cols=16,
              v_row=16, v_col=16, blayout=row_major, slayout=none_box,
@@ -5891,7 +6605,7 @@ For each element (i, j):
 |------|------|-------------|
 | `mask` | `pto.tile_buf` | Mask tile (select predicate carrier) |
 | `src` | `pto.tile_buf` | Source tile |
-| `tmp` | `pto.tile_buf` | Temporary scratch tile required by the current DPS form |
+| `tmp` | `pto.tile_buf` | Placeholder / workspace operand kept by the current DPS form |
 | `scalar` | `ScalarType` | Scalar value selected when the mask bit is false |
 | `dst` | `pto.tile_buf` | Destination tile buffer |
 
@@ -5906,16 +6620,16 @@ pto.tsels ins(<mask>, <src>, <tmp>, <scalar> : <mask_type>, <src_type>, <tmp_typ
 
 **Constraints & Verification:**
 
-- **Implementation checks (A2A3)**:
-  - `src` and `dst` must have the same element type.
-  - The shared element type must be a 16-bit or 32-bit type supported by PTO IR: `i16`, `i32`, `f16`, or `f32`.
+- `src` and `dst` must have the same element type.
+- `src` and `dst` must have the same valid region.
+- **Implementation checks (A2/A3)**:
+  - The shared element type must be `i16`, `i32`, `f16`, or `f32`.
   - `src` and `dst` must use row-major layout (`blayout=row_major`).
-  - `src` and `dst` must have the same valid region: `src valid row == dst valid row` and `src valid column == dst valid column`.
 - **Implementation checks (A5)**:
-  - `src` and `dst` must have the same element type.
-  - The shared element type must be an 8-bit, 16-bit, or 32-bit type supported by PTO IR: `i8`, `i16`, `i32`, `f16`, or `f32`.
-  - `src` and `dst` must use row-major layout (`blayout=row_major`).
-  - `src` and `dst` must have the same valid region: `src valid row == dst valid row` and `src valid column == dst valid column`.
+  - The shared element type must be `i8`, `i16`, `i32`, `f16`, or `f32`.
+  - `mask`, `src`, and `dst` must use row-major layout (`blayout=row_major`).
+- The DPS form keeps a `tmp` operand, but PTO IR does not impose an extra tmp shape, valid-shape, or layout relation.
+- On A5, `tmp` may be a placeholder tile that is smaller than `src` / `dst`.
 
 **Hardware Mapping:**
 
@@ -5931,8 +6645,8 @@ pto.tsels ins(%mask, %src, %tmp, %scalar : !pto.tile_buf<loc=vec, dtype=f16, row
               !pto.tile_buf<loc=vec, dtype=f16, rows=16, cols=16,
               v_row=16, v_col=16, blayout=row_major, slayout=none_box,
               fractal=512, pad=0>,
-              !pto.tile_buf<loc=vec, dtype=f16, rows=16, cols=16,
-              v_row=16, v_col=16, blayout=row_major, slayout=none_box,
+              !pto.tile_buf<loc=vec, dtype=f16, rows=1, cols=16,
+              v_row=1, v_col=16, blayout=row_major, slayout=none_box,
               fractal=512, pad=0>, i32)
          outs(%dst : !pto.tile_buf<loc=vec, dtype=f16, rows=16, cols=16,
               v_row=16, v_col=16, blayout=row_major, slayout=none_box,
@@ -6095,26 +6809,24 @@ For each element (i, j):
 |------|------|-------------|
 | `src0` | `pto.tile_buf` | First source tile buffer |
 | `src1` | `pto.tile_buf` | Second source tile buffer |
-| `tmp` | `pto.tile_buf` | New temporary source tile buffer for A2/A3. This only a placehold parameter in A5, see examples|
+| `tmp` | `pto.tile_buf` | Workspace operand on A2/A3; placeholder operand on A5 |
 | `dst` | `pto.tile_buf` | Destination tile buffer |
 
 **Results:** None. Writes into `dst` via DPS pattern.
 
 **Constraints & Verification:**
 
-- **Implementation checks (A2A3)**:
-  - `src0`, `src1`, `tmp` and `dst` must have the same element type.
-  - The shared element type must be an 8-bit or 16-bit signless integer type supported by PTO IR: `i8`, `i16`.
-  - `src0`, `src1`, , `tmp` and `dst` must use row-major layout (`blayout=row_major`).
-  - `src0` and `dst` must have the same valid region: `src0 valid row == dst valid row` and `src0 valid column == dst valid column`.
-  - `src1` and `dst` must have the same valid region: `src1 valid row == dst valid row` and `src1 valid column == dst valid column`.
-  - `tmp` and `dst` must have the same valid region: `tmp valid row == dst valid row` and `tmp valid column == dst valid column`.
+- `src0`, `src1`, and `dst` must have the same element type.
+- `src0`, `src1`, and `dst` must use row-major layout (`blayout=row_major`).
+- `src0` and `dst` must have the same valid region.
+- `src1` and `dst` must have the same valid region.
+- **Implementation checks (A2/A3)**:
+  - The shared element type must be `i8` or `i16`.
+  - `tmp` must have the same element type as `src0` / `src1` / `dst`.
+  - `tmp` must use row-major layout and have the same valid region as `dst`.
 - **Implementation checks (A5)**:
-  - `src0`, `src1`, and `dst` must have the same element type.
-  - The shared element type must be an 8-bit, 16-bit, or 32-bit signless integer type supported by PTO IR: `i8`, `i16`, `i32`.
-  - `src0`, `src1`, and `dst` must use row-major layout (`blayout=row_major`).
-  - `src0` and `dst` must have the same valid region: `src0 valid row == dst valid row` and `src0 valid column == dst valid column`.
-  - `src1` and `dst` must have the same valid region: `src1 valid row == dst valid row` and `src1 valid column == dst valid column`.
+  - The shared element type must be `i8`, `i16`, or `i32`.
+  - The with-`tmp` DPS form is retained, but PTO IR does not impose an extra tmp shape, valid-shape, or layout relation on A5.
 
 **Hardware Mapping:**
 
@@ -6125,27 +6837,27 @@ For each element (i, j):
 
 ```mlir
 // A2/A3
-pto.txor ins(%src0, %src1, %tmp : !pto.tile_buf<loc=vec, dtype=i32, rows=16, cols=16,
+pto.txor ins(%src0, %src1, %tmp : !pto.tile_buf<loc=vec, dtype=i16, rows=16, cols=16,
              v_row=16, v_col=16, blayout=row_major, slayout=none_box,
              fractal=512, pad=0>,
-             !pto.tile_buf<loc=vec, dtype=i32, rows=16, cols=16,
+             !pto.tile_buf<loc=vec, dtype=i16, rows=16, cols=16,
              v_row=16, v_col=16, blayout=row_major, slayout=none_box,
              fractal=512, pad=0>,
-             !pto.tile_buf<loc=vec, dtype=i32, rows=16, cols=16,
+             !pto.tile_buf<loc=vec, dtype=i16, rows=16, cols=16,
              v_row=16, v_col=16, blayout=row_major, slayout=none_box,
              fractal=512, pad=0>)
-         outs(%dst : !pto.tile_buf<loc=vec, dtype=i32, rows=16, cols=16,
+         outs(%dst : !pto.tile_buf<loc=vec, dtype=i16, rows=16, cols=16,
              v_row=16, v_col=16, blayout=row_major, slayout=none_box,
              fractal=512, pad=0>)
-// A5: Reuse %dst which is not actually used by A5.
-pto.txor ins(%src0, %src1, %dst : !pto.tile_buf<loc=vec, dtype=i32, rows=16, cols=16,
+// A5: %tmp_small is a placeholder operand and may be smaller than src/dst.
+pto.txor ins(%src0, %src1, %tmp_small : !pto.tile_buf<loc=vec, dtype=i32, rows=16, cols=16,
              v_row=16, v_col=16, blayout=row_major, slayout=none_box,
              fractal=512, pad=0>,
              !pto.tile_buf<loc=vec, dtype=i32, rows=16, cols=16,
              v_row=16, v_col=16, blayout=row_major, slayout=none_box,
              fractal=512, pad=0>,
-             !pto.tile_buf<loc=vec, dtype=i32, rows=16, cols=16,
-             v_row=16, v_col=16, blayout=row_major, slayout=none_box,
+             !pto.tile_buf<loc=vec, dtype=i32, rows=1, cols=8,
+             v_row=1, v_col=8, blayout=row_major, slayout=none_box,
              fractal=512, pad=0>)
          outs(%dst : !pto.tile_buf<loc=vec, dtype=i32, rows=16, cols=16,
              v_row=16, v_col=16, blayout=row_major, slayout=none_box,
@@ -6469,7 +7181,7 @@ For each element (i, j):
 |------|------|-------------|
 | `src` | `pto.tile_buf` | Source tile buffer |
 | `scalar` | `AnySignlessInteger` | Scalar value |
-| `tmp` | `pto.tile_buf` | Temporary scratch tile; required by the PTO IR DPS form |
+| `tmp` | `pto.tile_buf` | Workspace operand on A2/A3; placeholder operand on A5 |
 | `dst` | `pto.tile_buf` | Destination tile buffer |
 
 **Results:** None. Writes into `dst` via DPS pattern.
@@ -6483,18 +7195,17 @@ pto.txors ins(<src>, <scalar>, <tmp> : <src_type>, <scalar_type>, <tmp_type>)
 
 **Constraints & Verification:**
 
- - Setting the source Tile and destination Tile to the same memory is **Unsupported**.
-- **Implementation checks (A2A3)**:
-  - `src` and `dst` must have the same element type.
-  - The shared element type must be an 8-bit or 16-bit signless integer type supported by PTO IR: `i8`, `i16`.
-  - `src` and `dst` must use row-major layout (`blayout=row_major`).
-  - `src` and `dst` must have the same valid region: `src valid row == dst valid row` and `src valid column == dst valid column`.
-  - The DPS form takes a `tmp` scratch tile. On A2/A3 it is used for calculation; on A5 codegen may ignore it, but the PTO IR operand is still required.
+- Setting the source tile and destination tile to the same memory is **Unsupported**.
+- `src` and `dst` must have the same element type.
+- `src` and `dst` must use row-major layout (`blayout=row_major`).
+- `src` and `dst` must have the same valid region.
+- **Implementation checks (A2/A3)**:
+  - The shared element type must be `i8` or `i16`.
+  - `tmp` must have the same element type as `src` / `dst`.
+  - `tmp` must use row-major layout.
 - **Implementation checks (A5)**:
-  - `sr0`and `dst` must have the same element type.
-  - The shared element type must be an 8-bit, 16-bit, or 32-bit signless integer type supported by PTO IR: `i8`, `i16`, `i32`.
-  - `src` and `dst` must use row-major layout (`blayout=row_major`).
-  - `src` and `dst` must have the same valid region: `src valid row == dst valid row` and `src valid column == dst valid column`.
+  - The shared element type must be `i8`, `i16`, or `i32`.
+  - The current DPS form still carries `tmp`, but PTO IR does not impose an extra tmp shape, valid-shape, or layout relation on A5.
   
 **Hardware Mapping:**
 
@@ -6507,8 +7218,8 @@ pto.txors ins(<src>, <scalar>, <tmp> : <src_type>, <scalar_type>, <tmp_type>)
 pto.txors ins(%a, %s, %tmp : !pto.tile_buf<loc=vec, dtype=i32, rows=16, cols=16,
               v_row=16, v_col=16, blayout=row_major, slayout=none_box,
               fractal=512, pad=0>, i32,
-              !pto.tile_buf<loc=vec, dtype=i32, rows=16, cols=16,
-              v_row=16, v_col=16, blayout=row_major, slayout=none_box,
+              !pto.tile_buf<loc=vec, dtype=i32, rows=1, cols=8,
+              v_row=1, v_col=8, blayout=row_major, slayout=none_box,
               fractal=512, pad=0>)
          outs(%c : !pto.tile_buf<loc=vec, dtype=i32, rows=16, cols=16,
               v_row=16, v_col=16, blayout=row_major, slayout=none_box,
@@ -6763,7 +7474,7 @@ pto.tconcatidx ins(%src0, %src1, %idx0, %idx1 :
 
 **Summary:** Gathers elements from a source tile using one of three PTO-ISA-compatible forms:
 
-- index gather: `src + indices + tmp -> dst`
+- index gather: `src + indices[+ tmp] -> dst`
 - compare gather: `src + kValue + tmp -> dst + cdst`
 - mask-pattern gather: `src + maskPattern -> dst`
 
@@ -6789,7 +7500,7 @@ Mask form:
 | `dst` | `pto.tile_buf` | Main destination tile |
 | `cdst` | `Optional<pto.tile_buf>` | Secondary destination tile used only by compare form |
 | `indices` | `Optional<pto.tile_buf>` | Index tile used only by index form |
-| `tmp` | `Optional<pto.tile_buf>` | Temporary tile used by index form and compare form |
+| `tmp` | `Optional<pto.tile_buf>` | Temporary tile used by compare form; optionally used by index form on A2/A3 (required), A5 (optional) |
 | `kValue` | `Optional<scalar>` | Scalar compare value used only by compare form |
 | `maskPattern` | `Optional<MaskPatternAttr>` | Mask pattern used only by mask form |
 | `cmpMode` | `Optional<CmpModeAttr>` | Compare mode used only by compare form; defaults to `eq` when omitted |
@@ -6813,36 +7524,38 @@ pto.tgather ins(%src, %indices, %tmp : !pto.tile_buf<...>, !pto.tile_buf<...>, !
 // compare + tmp
 pto.tgather ins(%src, %kValue, %tmp : !pto.tile_buf<...>, <scalar_type>, !pto.tile_buf<...>)
            outs(%dst, %cdst : !pto.tile_buf<...>, !pto.tile_buf<...>)
-           {cmpMode = #pto.cmp<eq|gt>, offset = <i32>}
+           {cmpMode = #pto<cmp eq|gt>, offset = <i32>}
 
 // mask pattern
-pto.tgather ins(%src, {maskPattern = #pto.mask_pattern<Pxxxx>} : !pto.tile_buf<...>)
+pto.tgather ins(%src, {maskPattern = #pto.mask_pattern<Pxxxx>} : !pto.tile_buf<...>, "row")
            outs(%dst : !pto.tile_buf<...>)
 ```
 
 **Constraints & Verification:**
 
 - Exactly one of the following forms must be used:
-  - index form: `indices` and `tmp`
+  - index form: `indices` (A5: `tmp` is optional; A2/A3: `tmp` is required)
   - compare form: `kValue`, `tmp`, and `cdst`
   - mask form: `maskPattern`
 - **Index gather: implementation checks (A2/A3)**:
   - `src` and `dst` element types must match and be one of `i16/i32/f16/f32`.
   - `indices` element type must be `i32`.
-  - `tmp` element type must match `indices`.
+  - `tmp` is required; `tmp` element type must match `indices`.
+  - `indices` and `tmp` must have the same valid shape.
 - **Index gather: implementation checks (A5)**:
-  - `src` and `dst` element types must match and be one of `i8/i16/i32/f16/f32`.
+  - `src` and `dst` element types must match and be one of `i8/i16/i32/f16/f32`, or a target-supported fp8 type (`f8E4M3*`/`f8E5M2*`).
   - `indices` element type must be `i16` or `i32`.
+  - `tmp` is optional; PTO IR does not impose an extra tmp shape or valid-shape relation in the A5 index form.
 - **Compare gather: implementation checks (A2/A3)**:
   - `dst` element type must be `i32`.
   - `src` element type must be `f16/f32`, or `i32` when `cmpMode=eq`.
   - `cmpMode` must be `eq` or `gt`.
-  - `src`, `dst` must all be `loc=vec`.
+  - `src`, `dst`, `cdst`, and `tmp` must all be `loc=vec` row-major tiles.
 - **Compare gather: implementation checks (A5)**:
   - `dst` element type must be `i32`.
   - `src` element type must be one of `i16/i32/f16/f32`.
   - `cmpMode` must be `eq` or `gt`.
-  - `src`, `dst` must all be `loc=vec`.
+  - `src`, `dst`, `cdst`, and `tmp` must all be `loc=vec` row-major tiles.
 - **Mask-pattern gather: implementation checks (A2/A3)**:
   - Source element size must be `2` or `4` bytes.
   - `src` and `dst` must both use `loc=vec` and `blayout=row_major`.
@@ -6850,7 +7563,7 @@ pto.tgather ins(%src, {maskPattern = #pto.mask_pattern<Pxxxx>} : !pto.tile_buf<.
 - **Mask-pattern gather: implementation checks (A5)**:
   - Source element size must be `1`, `2`, or `4` bytes.
   - `src` and `dst` must both use `loc=vec` and `blayout=row_major`.
-  - `src`/`dst` element type must be `i8`, `i16`, `i32`, `f16`, `bf16`, `f32`, or fp8-like supported gather types.
+  - `src`/`dst` element type must be `i8`, `i16`, `i32`, `f16`, `bf16`, `f32`, `!pto.hif8`, or a target-supported fp8 type (`f8E4M3*`/`f8E5M2*`).
   - `src` and `dst` element sizes must match.
 
 **Hardware Mapping:**
@@ -6870,7 +7583,7 @@ pto.tgather ins(%src, %k, %tmp : !pto.tile_buf<...>, f16, !pto.tile_buf<...>)
            {offset = 7 : i32}
 
 // mask pattern
-pto.tgather ins(%src, {maskPattern = #pto.mask_pattern<P1111>} : !pto.tile_buf<...>)
+pto.tgather ins(%src, {maskPattern = #pto.mask_pattern<P1111>} : !pto.tile_buf<...>, "row")
            outs(%dst : !pto.tile_buf<...>)
 ```
 
@@ -6917,14 +7630,28 @@ pto.tgatherb ins(%src, %offs : !pto.tile_buf<...>, !pto.tile_buf<...>)
 
 ---
 
-##### `pto.tscatter` - Scatter Rows
+##### `pto.tscatter` - Tile Scatter
 
-**Summary:** Scatters rows from a source tile into a destination tile using per-row indices.
+**Summary:** Scatters elements from a source tile into a destination tile. Two modes are supported: **index mode** (per-element column offsets) and **mask-pattern mode** (regular spacing controlled by a mask pattern and axis).
 
 **Semantics:**
 
+Index mode:
+
 ```
-dst[row_index[i], j] = src[i, j]
+dst[i, indexes[i, j]] = src[i, j]
+```
+
+Mask-pattern mode (axis = `"row"`):
+
+```
+dst[i, j * times + offset] = src[i, j]   // elements interleaved with zeros along columns
+```
+
+Mask-pattern mode (axis = `"col"`):
+
+```
+dst[i * stride + start, j] = src[i, j]   // elements placed at strided row positions
 ```
 
 **Arguments:**
@@ -6932,82 +7659,88 @@ dst[row_index[i], j] = src[i, j]
 | Name | Type | Description |
 |------|------|-------------|
 | `src` | `pto.tile_buf` | Source tile |
-| `indexes` | `pto.tile_buf` | Row index tile |
 | `dst` | `pto.tile_buf` | Destination tile |
+| `indexes` | `pto.tile_buf` (optional) | Index tile (index mode only) |
+| `axis` | `str` attr (optional) | Scatter direction: `"row"` or `"col"` (mask-pattern mode only) |
+| `maskPattern` | `pto.mask_pattern` attr (optional) | Spacing pattern: `P0101`, `P1010`, `P0001`, `P0010`, `P0100`, `P1000`, `P1111` (mask-pattern mode only) |
 
 **Results:** None. Writes into `dst` via DPS pattern.
 
 **Constraints & Verification:**
 
-- **Implementation checks (A2A3)**
+- **Common**
+  - Exactly one of `indexes` operand or `maskPattern` attribute must be provided.
+  - `axis` attribute must not be provided together with `indexes`.
+- **Index mode**
   - `dst`, `src`, and `indexes` must all use `loc=vec`.
   - `dst`/`src` element type must be one of: `i32`, `i16`, `i8`, `f16`, `f32`, `bf16`.
   - `indexes` element type must be one of: `i16`, `i32`.
   - No bounds checks are enforced on `indexes` values.
   - Valid bounds: `dst.valid_shape[i] <= dst.shape[i]`, `src.valid_shape[i] <= src.shape[i]`, and `indexes.valid_shape[i] <= indexes.shape[i]` for each dimension `i`.
   - `dst` and `src` must have the same element type.
+  - `dst.valid_shape[d] >= src.valid_shape[d]` for each dimension `d`.
   - When `dst` element size is 4 bytes, `indexes` element size must also be 4 bytes.
   - When `dst` element size is 2 bytes, `indexes` element size must also be 2 bytes.
   - When `dst` element size is 1 byte, `indexes` element size must be 2 bytes.
-- **Implementation checks (A5)**
-  - `dst`, `src`, and `indexes` must all use `loc=vec`.
+- **Mask-pattern mode**
+  - `dst` and `src` must use `loc=vec` and `row_major` blayout.
   - `dst`/`src` element type must be one of: `i32`, `i16`, `i8`, `f16`, `f32`, `bf16`.
-  - `indexes` element type must be one of: `i16`, `i32`.
-  - No bounds checks are enforced on `indexes` values.
-  - Valid bounds: `dst.valid_shape[i] <= dst.shape[i]`, `src.valid_shape[i] <= src.shape[i]`, and `indexes.valid_shape[i] <= indexes.shape[i]` for each dimension `i`.
   - `dst` and `src` must have the same element type.
-  - When `dst` element size is 4 bytes, `indexes` element size must also be 4 bytes.
-  - When `dst` element size is 2 bytes, `indexes` element size must also be 2 bytes.
-  - When `dst` element size is 1 byte, `indexes` element size must be 2 bytes.
+  - `axis` must be `"row"` or `"col"`.
+  - When `axis = "row"`: `dst.valid_rows == src.valid_rows` and `dst.valid_cols == src.valid_cols * times`.
+  - When `axis = "col"`: `dst.valid_cols == src.valid_cols` and `dst.valid_rows == src.valid_rows * times`.
+  - `times` is the mask expansion factor: `P1111`→1, `P0101`/`P1010`→2, `P0001`/`P0010`/`P0100`/`P1000`→4.
 
 **Hardware Mapping:**
 
 - Executes on the **Vector pipeline** (`PIPE_V`)
 
-**Basic Example:**
+**Index mode example:**
 
 ```mlir
 pto.tscatter ins(%src, %idx : !pto.tile_buf<...>, !pto.tile_buf<...>)
             outs(%dst : !pto.tile_buf<...>)
 ```
 
-Mask form:
+**Mask-pattern mode example:**
 
 ```mlir
-pto.tscatter ins(%src, {maskPattern = #pto.mask_pattern<P0101>} : !pto.tile_buf<...>)
+pto.tscatter ins(%src, {maskPattern = #pto.mask_pattern<P0101>} : !pto.tile_buf<...>, "row")
             outs(%dst : !pto.tile_buf<...>)
 ```
 
-`maskPattern` form is currently intended for A3 / CPU-sim style backends. A5 rejects this form.
+`maskPattern` form lowers to the `pto-isa` `TSCATTER<MaskPattern, ScatterType>` overload on
+backends that provide it, including A2/A3 and A5.
 
 ---
 
 ##### `pto.mgather` - Gather-Load from Global Memory
 
-**Summary:** Loads elements from a global table into a VEC tile using per-element indices. Supports an optional A5-only out-of-bounds mode that lowers to the corresponding `MGATHER<...>` template overload.
+**Summary:** Loads elements from a global table into a VEC tile using per-element indices. Requires an explicit `coalesce` attribute and supports an optional `gatherOob` attribute; these lower to the corresponding `MGATHER<...>` template overload.
 
 **Semantics:**
 
 ```
-row mode (default): dst[r, j] = mem[idx[r], j]
-elem mode:          dst[i, j] = mem[idx[i, j]]
+row mode:  dst[r, j] = mem[idx[r], j]
+elem mode: dst[i, j] = mem[idx[i, j]]
 ```
 
 **Arguments:**
 
 | Name | Type | Default | Description |
 |------|------|---------|-------------|
-| `mem` | `!pto.partition_tensor_view<...>` / GM memref | `NA` | Global source table |
+| `mem` | `!pto.partition_tensor_view<...>` | `NA` | Global source table |
 | `idx` | `pto.tile_buf` | `NA` | Index tile |
 | `dst` | `pto.tile_buf` | `NA` | Destination VEC tile |
-| `gatherOob` | `#pto<gather_oob ...>` | `undefined` | A5-only out-of-bounds mode (`undefined/clamp/wrap/zero`) |
+| `coalesce` | `#pto<coalesce ...>` | required | Explicit coalesce mode (`row` / `elem`) |
+| `gatherOob` | `#pto<gather_oob ...>` | `undefined` | Out-of-bounds mode (`undefined/clamp/wrap/zero`) |
 
 **Results:** None. Writes into `dst` via DPS pattern.
 
 **Constraints & Verification:**
 
 - **Types (data and indices)**  
-  - `mem` and `dst` must have the **same element type**. Supported element types: `i8`/`i16`/`i32`/`f16`/`bf16`/`f32`. On **A5** targets, `float8_e4m3` / `float8_e5m2` family element types are also supported.
+  - `mem` and `dst` must have the **same element type**. Supported element types: `i8`/`i16`/`i32`/`f16`/`bf16`/`f32`. On **A5** targets, `float8_e4m3` / `float8_e5m2` family and `!pto.hif8` element types are also supported.
   - `idx` element type must be signless `i32`.
 
 - **Tile / memory roles**  
@@ -7020,11 +7753,15 @@ elem mode:          dst[i, j] = mem[idx[i, j]]
   - Element mode: `idx valid_shape == dst valid_shape`.
   - Row mode: `idx valid_shape` may be `[1, dst.valid_row]` or `[dst.valid_row, 1]`.
   - The `[1, R]` row-mode variant uses `row_major`; the `[R, 1]` row-mode variant uses `col_major`.
-  - If `mem` is a rank-5 static GM memref, it must satisfy `<1, 1, 1, Rows, RowWidth>`.
 
 - **Out-of-bounds mode**
   - Default `gatherOob = undefined` lowers to the default `MGATHER(dst, mem, idx)` overload.
-  - Non-default `gatherOob` values are only supported on **A5** and lower to `MGATHER<GatherOOB::...>(dst, mem, idx)`.
+  - Non-default `gatherOob` values lower to `MGATHER<Coalesce, GatherOOB::...>(dst, mem, idx)`.
+- **Coalesce mode**
+  - `coalesce` must be specified explicitly; PTOAS does not infer Row or Elem from the `idx` tile shape/layout.
+  - The `idx` tile shape/layout must match the specified mode.
+  - `coalesce = #pto<coalesce row>` lowers to `MGATHER<pto::Coalesce::Row, ...>`.
+  - `coalesce = #pto<coalesce elem>` lowers to `MGATHER<pto::Coalesce::Elem, ...>`.
 
 **Hardware Mapping:**
 
@@ -7033,19 +7770,67 @@ elem mode:          dst[i, j] = mem[idx[i, j]]
 **Basic Example:**
 
 ```mlir
-pto.mgather ins(%mem, %idx : memref<...>, !pto.tile_buf<...>)
+pto.mgather ins(%mem, %idx : !pto.partition_tensor_view<...>, !pto.tile_buf<...>)
            outs(%dst : !pto.tile_buf<...>)
+           {coalesce = #pto<coalesce row>}
 
-pto.mgather ins(%mem, %idx : memref<...>, !pto.tile_buf<...>)
+pto.mgather ins(%mem, %idx : !pto.partition_tensor_view<...>, !pto.tile_buf<...>)
            outs(%dst : !pto.tile_buf<...>)
-           {gatherOob = #pto<gather_oob zero>}
+           {coalesce = #pto<coalesce elem>}
+
+pto.mgather ins(%mem, %idx : !pto.partition_tensor_view<...>, !pto.tile_buf<...>)
+           outs(%dst : !pto.tile_buf<...>)
+           {coalesce = #pto<coalesce row>, gatherOob = #pto<gather_oob zero>}
+```
+
+**GM → L1 (cube `loc=mat`) destination:**
+
+The destination may also be an **L1 / cube `loc=mat` tile in NZ layout**, so a
+gathered table can be fed straight into a matmul without a UB round-trip. This
+mirrors the pto-isa `MGATHER` GM → L1 overloads and is selected automatically
+when `dst` is a `loc=mat` tile.
+
+- **`dst`** — `loc=mat`, `blayout=col_major`, `slayout=row_major`, `fractal=512`
+  (NZ). Padded `cols` must be a multiple of `C0 = 32 / sizeof(elem)` and padded
+  `rows` a multiple of `16` (`FRACTAL_NZ_ROW`).
+- **`idx`** — supplied as a GM `partition_tensor_view`
+  of `i32`, **not** a UB tile: on A5 the cube core that issues the L1 transfer
+  cannot read AIV's UB.
+- **`coalesce`** — must be **explicit** (`row` or `elem`); there is no UB index
+  tile to infer the mode from.
+- **`scratch`** — `coalesce=elem` requires a contiguous **GM `scratch`** operand
+  (`>= dst.rows * dst.cols` elements, element type matching `dst`) used to stage
+  the discrete elements into NZ layout before the bulk GM → L1 copy. `coalesce=row`
+  takes no scratch.
+- Executes on the GM → L1 DMA pipeline (`PIPE_MTE2`) on every arch, like `pto.tload`.
+- Lowering: `row` → `MGATHER<pto::Coalesce::Row[, GatherOOB]>(dst, table, idx)`;
+  `elem` → `MGATHER<pto::Coalesce::Elem[, GatherOOB]>(dst, table, idx, scratch)`.
+
+```mlir
+// Row: no scratch, idx is a GM [1, R] tensor.
+pto.mgather ins(%mem, %idx : !pto.partition_tensor_view<1x1x1x64x32xf16>,
+                             !pto.partition_tensor_view<1x1x1x1x32xi32>)
+           outs(%dst : !pto.tile_buf<loc=mat, dtype=f16, rows=32, cols=32, v_row=32,
+                                     v_col=32, blayout=col_major, slayout=row_major,
+                                     fractal=512, pad=0>)
+           {coalesce = #pto<coalesce row>}
+
+// Elem: GM scratch workspace staged in NZ layout before the bulk copy.
+pto.mgather ins(%mem, %idx, %scratch
+                : !pto.partition_tensor_view<1x1x1x64x32xf16>,
+                  !pto.partition_tensor_view<1x1x1x32x32xi32>,
+                  !pto.partition_tensor_view<1x1x1x32x32xf16>)
+           outs(%dst : !pto.tile_buf<loc=mat, dtype=f16, rows=32, cols=32, v_row=32,
+                                     v_col=32, blayout=col_major, slayout=row_major,
+                                     fractal=512, pad=0>)
+           {coalesce = #pto<coalesce elem>}
 ```
 
 ---
 
 ##### `pto.mscatter` - Scatter-Store to Global Memory
 
-**Summary:** Stores elements from a VEC tile into a global table using per-element indices. Supports optional A5-only atomic and out-of-bounds modes that lower to the corresponding `MSCATTER<...>` template overload family.
+**Summary:** Stores elements from a VEC tile into a global table using per-element indices. Supports optional `coalesce`, atomic, out-of-bounds, and A5-only conflict-mode attributes that lower to the corresponding `MSCATTER<...>` template overload family.
 
 **Semantics:**
 
@@ -7060,16 +7845,18 @@ elem mode:          mem[idx[i, j]] = src[i, j]
 |------|------|---------|-------------|
 | `src` | `pto.tile_buf` | `NA` | Source VEC tile |
 | `idx` | `pto.tile_buf` | `NA` | Index tile |
-| `mem` | `!pto.partition_tensor_view<...>` / GM memref | `NA` | Global destination table |
-| `scatterAtomicOp` | `#pto<scatter_atomic_op ...>` | `none` | A5-only atomic mode (`none/add/max/min`) |
-| `scatterOob` | `#pto<scatter_oob ...>` | `undefined` | A5-only out-of-bounds mode (`undefined/skip/clamp/wrap`) |
+| `mem` | `!pto.partition_tensor_view<...>` | `NA` | Global destination table |
+| `coalesce` | `#pto<coalesce ...>` | inferred | Explicit coalesce mode (`row` / `elem`) |
+| `scatterAtomicOp` | `#pto<scatter_atomic_op ...>` | `none` | Atomic mode (`none/add/max/min`) |
+| `scatterOob` | `#pto<scatter_oob ...>` | `undefined` | Out-of-bounds mode (`undefined/skip/clamp/wrap`) |
+| `scatterConflict` | `#pto<scatter_conflict ...>` | omitted | Optional A5 conflict mode (`default` / `last`) |
 
 **Results:** None. Writes into `mem` via DPS pattern.
 
 **Constraints & Verification:**
 
 - **Types (data and indices)**  
-  - `src` and `mem` must have the **same element type**. Supported element types: `i8`/`i16`/`i32`/`f16`/`bf16`/`f32`. On **A5** targets, `float8_e4m3` / `float8_e5m2` family element types are also supported.
+  - `src` and `mem` must have the **same element type**. Supported element types: `i8`/`i16`/`i32`/`f16`/`bf16`/`f32`. On **A5** targets, `float8_e4m3` / `float8_e5m2` family and `!pto.hif8` element types are also supported.
   - `idx` element type must be signless `i32`.
 
 - **Tile / memory roles**  
@@ -7082,17 +7869,20 @@ elem mode:          mem[idx[i, j]] = src[i, j]
   - Element mode: `idx valid_shape == src valid_shape`.
   - Row mode: `idx valid_shape` may be `[1, src.valid_row]` or `[src.valid_row, 1]`.
   - The `[1, R]` row-mode variant uses `row_major`; the `[R, 1]` row-mode variant uses `col_major`.
-  - If `mem` is a rank-5 static GM memref, it must satisfy `<1, 1, 1, Rows, RowWidth>`.
 
 - **Atomic modes**  
   - Default `scatterAtomicOp = none` lowers to the default `MSCATTER(mem, src, idx)` overload.
-  - Non-default `scatterAtomicOp` values are only supported on **A5**.
+  - Non-default `scatterAtomicOp` values lower to `MSCATTER<Coalesce, ScatterAtomicOp::...>(mem, src, idx)`.
   - `add` requires `i32`/`f16`/`f32`.
   - `max`/`min` require signless `i32` or `f32`.
 
 - **Out-of-bounds modes**
-  - Default `scatterOob = undefined` lowers to the 1-template-parameter `MSCATTER<Atomic>(mem, src, idx)` form when only atomic is specified, or to the default overload when both attrs are default.
-  - Non-default `scatterOob` values are only supported on **A5** and lower to `MSCATTER<ScatterAtomicOp::..., ScatterOOB::...>(mem, src, idx)`.
+  - Default `scatterOob = undefined` lowers to the `MSCATTER<Coalesce, ScatterAtomicOp::...>(mem, src, idx)` form when only atomic is specified, or to the default overload when both attrs are default.
+  - Non-default `scatterOob` values lower to `MSCATTER<Coalesce, ScatterAtomicOp::..., ScatterOOB::...>(mem, src, idx)`.
+- **Coalesce and conflict modes**
+  - If `coalesce` is omitted, PTOAS preserves the existing inference from the `idx` tile shape/layout.
+  - If `coalesce` is specified, the `idx` tile shape/layout must match that mode.
+  - `scatterConflict` is only meaningful on A5 and lowers by filling the full `MSCATTER<Coalesce, Atomic, Oob, Conflict>` template parameter list.
 
 **Hardware Mapping:**
 
@@ -7102,16 +7892,21 @@ elem mode:          mem[idx[i, j]] = src[i, j]
 
 ```mlir
 pto.mscatter ins(%src, %idx : !pto.tile_buf<...>, !pto.tile_buf<...>)
-            outs(%mem : memref<...>)
+            outs(%mem : !pto.partition_tensor_view<...>)
 
 pto.mscatter ins(%src, %idx : !pto.tile_buf<...>, !pto.tile_buf<...>)
-            outs(%mem : memref<...>)
+            outs(%mem : !pto.partition_tensor_view<...>)
             {scatterAtomicOp = #pto<scatter_atomic_op add>}
 
 pto.mscatter ins(%src, %idx : !pto.tile_buf<...>, !pto.tile_buf<...>)
-            outs(%mem : memref<...>)
+            outs(%mem : !pto.partition_tensor_view<...>)
             {scatterAtomicOp = #pto<scatter_atomic_op add>,
              scatterOob = #pto<scatter_oob skip>}
+
+pto.mscatter ins(%src, %idx : !pto.tile_buf<...>, !pto.tile_buf<...>)
+            outs(%mem : !pto.partition_tensor_view<...>)
+            {coalesce = #pto<coalesce elem>,
+             scatterConflict = #pto<scatter_conflict last>}
 ```
 
 ---
@@ -7225,7 +8020,7 @@ dst[i, j] = src[i + indexRow, j + indexCol]
     - `indexCol + dst.cols <= src.cols`
   - `dst` must use `loc=left` or `loc=right` with a target-supported fractal configuration.
 - **Implementation checks (A5)**
-  - `dst` element type must match `src` element type and must be one of the target-supported fp8/fp16/bf16/f32 families listed here.
+  - `dst` element type must match `src` element type and must be one of the target-supported low-precision/fp16/bf16/f32 families (`f8E4M3*`, `f8E5M2*`, `!pto.hif8`, `!pto.f4E2M1x2`, `f16`, `bf16`, `f32`, `i8`).
   - Source layout/fractal must satisfy the target-supported combinations for `left`/`right`/scaling destinations; in PTO IR terms this is expressed through the `blayout`/`slayout`/`fractal` tuple.
   - Destination supports `Mat -> Left/Right/Scale` and also supports `Vec -> Mat` for specific tile locations.
 
@@ -7258,6 +8053,7 @@ For padded elements: dst = PadVal(dst)
 |------|------|-------------|
 | `src` | `pto.tile_buf` | Source tile |
 | `dst` | `pto.tile_buf` | Destination tile (with pad config) |
+| `padValue` | `#pto.pad_value<...>` (optional) | Explicit `TFILLPAD<PadValue>` template argument for `loc=mat`. When present, it must match `dst`'s tile pad configuration. |
 
 **Results:** None. Writes into `dst` via DPS pattern.
 
@@ -7266,6 +8062,7 @@ For padded elements: dst = PadVal(dst)
 - `dst.pad` must not be `null`.
 - `src` and `dst` element sizes must match, and the element size must be `1`, `2`, or `4` bytes.
 - `dst.rows/cols` must match `src.rows/cols`.
+- If `padValue` is present, `dst` must be `loc=mat` and `padValue` must equal the tile type's `pad`.
 - For `loc=mat`, `src` and `dst` must be lowerable to the same `TFILLPAD` tile specialization, i.e. `validShape` and `pad` must be identical.
 
 **Hardware Mapping:**
@@ -7276,6 +8073,9 @@ For padded elements: dst = PadVal(dst)
 
 ```mlir
 pto.tfillpad ins(%src : !pto.tile_buf<...>) outs(%dst : !pto.tile_buf<...>)
+
+pto.tfillpad ins(%src : !pto.tile_buf<...>) outs(%dst : !pto.tile_buf<...>)
+           {padValue = #pto.pad_value<max>}
 ```
 
 ---
@@ -7408,11 +8208,12 @@ pto.tsort32 ins(<src>, <idx>[, <tmp>] : <src_type>, <idx_type>[, <tmp_type>])
 
 **Constraints & Verification:**
 
-- **Implementation checks (A2/A3/A5)**
-  - `dst` element type must be `f16` or `f32`.
-  - `src` element type must match `dst` element type.
-  - `idx` element type must be `u32`.
-  - `src`, `dst`, and `idx` must all use `loc=vec` and `blayout=row_major`.
+- `dst` element type must be `f16` or `f32`.
+- `src` element type must match `dst` element type.
+- `idx` element type must be `u32`.
+- `src`, `dst`, and `idx` must all use `loc=vec` and `blayout=row_major`.
+- If the 4-operand form is used, `tmp` only needs to be a `loc=vec` tile.
+- PTO IR does not impose a same-shape or rounded-tail tmp formula in the verifier.
 
 **Hardware Mapping:**
 
@@ -7448,7 +8249,7 @@ dst = merge_sort(src, blockLen)
 | `src` / `src0..src3` | PTO shaped-like type | Input tile(s); format2 supports 2 to 4 sources |
 | `blockLen` | `AnyInteger` operand | Block length for format1 |
 | `dst` | PTO shaped-like type | Output tile |
-| `tmp` | PTO shaped-like type | Temporary output tile for format2 |
+| `tmp` | PTO shaped-like type | Temporary workspace input tile for format2 |
 | `excuted` | `vector<4xi16>` | Output vector written by format2 |
 
 **Results:** None. Writes into `dst` via DPS pattern.
@@ -7456,30 +8257,32 @@ dst = merge_sort(src, blockLen)
 **Assembly Format:**
 
 ```
-  - `pto.tmrgsort` has two accepted forms:
-    - format1: `ins(src, blockLen : src_type, blockLen_type) outs(dst : dst_type)`
-    - format2: `ins(src0, src1[, src2[, src3]] {exhausted = <bool>} : src0_type, src1_type[, src2_type[, src3_type]]) outs(dst, tmp, excuted : dst_type, tmp_type, vector<4xi16>)`
+pto.tmrgsort ins(<src>, <blockLen> : <src_type>, <blockLen_type>)
+             outs(<dst> : <dst_type>)
+
+pto.tmrgsort ins(<src0>, <src1>[, <src2>[, <src3>]], <tmp> {exhausted = <bool>} :
+                 <src0_type>, <src1_type>[, <src2_type>[, <src3_type>]], <tmp_type>)
+             outs(<dst>, <excuted> : <dst_type>, vector<4xi16>)
 ```
 
 
 **Constraints & Verification:**
 
-- **A2/A3 and Implementation checks (A5)**
-  - Element type must be `f16` or `f32` and must match across `dst/tmp/src*` tiles.
-  - All tiles must use `loc=vec`, `blayout=row_major`, and `rows == 1` (the list is stored in a single row).
+- **Format1 (`ins(src, blockLen) outs(dst)`)**
+  - `src` and `dst` must have the same element type.
+  - The element type must be `f16` or `f32`.
+  - `src` and `dst` must both be rank-2 single-row tiles (`rows == 1` when statically known).
 - **Single-list variant (`TMRGSORT(dst, src, blockLen)`)**:
   - `blockLen` must be a multiple of 64 (as checked by the implementation).
-  - `src valid column` must be an integer multiple of `blockLen * 4`.
-  - `repeatTimes = src valid column / (blockLen * 4)` must be in `[1, 255]`.
+  - PTO IR currently does not enforce the `src valid column` multiple or `repeatTimes` range in the verifier.
 - **Multi-list variants**:
   - Accepts 2-way, 3-way, and 4-way merge forms.
-  - `dst` and `tmp` must have the same element type and shape.
-  - Every `src` must have the same element type as `dst/tmp`.
+  - `dst`, `tmp`, and every `src` must have the same element type.
+  - The shared element type must be `f16` or `f32`.
+  - `dst` and `tmp` must both be rank-2 single-row tiles (`rows == 1` when statically known).
+  - Every `src` must also be a rank-2 single-row tile.
+  - `tmp.cols >= dst.cols`.
   - `excuted` must be `vector<4xi16>`.
-  - PTOAS maps these forms to the following `pto-isa` APIs:
-    - `pto.tmrgsort ins(src0, src1, ...) outs(dst, tmp, excuted)` -> `TMRGSORT(dst, excuted, tmp, src0, src1)`
-    - `pto.tmrgsort ins(src0, src1, src2, ...) outs(dst, tmp, excuted)` -> `TMRGSORT(dst, excuted, tmp, src0, src1, src2)`
-    - `pto.tmrgsort ins(src0, src1, src2, src3, ...) outs(dst, tmp, excuted)` -> `TMRGSORT(dst, excuted, tmp, src0, src1, src2, src3)`
 
 **Hardware Mapping:**
 
@@ -7493,21 +8296,22 @@ pto.tmrgsort ins(%src, %blockLen : !pto.tile_buf<...>, i32)
              outs(%dst : !pto.tile_buf<...>)
 
 // format2
-pto.tmrgsort ins(%src0, %src1 {exhausted = false} :
-                 !pto.tile_buf<...>, !pto.tile_buf<...>)
-             outs(%dst2, %tmp2, %excuted :
-                 !pto.tile_buf<...>, !pto.tile_buf<...>, vector<4xi16>)
-
-pto.tmrgsort ins(%src0, %src1, %src2 {exhausted = true} :
+pto.tmrgsort ins(%src0, %src1, %tmp2 {exhausted = false} :
                  !pto.tile_buf<...>, !pto.tile_buf<...>, !pto.tile_buf<...>)
-             outs(%dst3, %tmp3, %excuted :
-                 !pto.tile_buf<...>, !pto.tile_buf<...>, vector<4xi16>)
+             outs(%dst2, %excuted :
+                 !pto.tile_buf<...>, vector<4xi16>)
 
-pto.tmrgsort ins(%src0, %src1, %src2, %src3 {exhausted = false} :
+pto.tmrgsort ins(%src0, %src1, %src2, %tmp3 {exhausted = true} :
+                 !pto.tile_buf<...>, !pto.tile_buf<...>, !pto.tile_buf<...>,
+                 !pto.tile_buf<...>)
+             outs(%dst3, %excuted :
+                 !pto.tile_buf<...>, vector<4xi16>)
+
+pto.tmrgsort ins(%src0, %src1, %src2, %src3, %tmp4 {exhausted = false} :
                  !pto.tile_buf<...>, !pto.tile_buf<...>,
-                 !pto.tile_buf<...>, !pto.tile_buf<...>)
-             outs(%dst4, %tmp4, %excuted :
-                 !pto.tile_buf<...>, !pto.tile_buf<...>, vector<4xi16>)
+                 !pto.tile_buf<...>, !pto.tile_buf<...>, !pto.tile_buf<...>)
+             outs(%dst4, %excuted :
+                 !pto.tile_buf<...>, vector<4xi16>)
 ```
 
 ---
@@ -7604,6 +8408,7 @@ dst[i, j] = S + linear_index(i, j)   // or descending if requested
 | Name | Type | Description |
 |------|------|-------------|
 | `S` | `Integer` | Starting value |
+| `tmp` | `pto.tile_buf` (optional) | Optional scratch tile forwarded to the `pto-isa` tmp-buffer overload |
 | `dst` | `pto.tile_buf` | Destination tile |
 | `descending` | `BoolAttr` (default: false) | Generate descending sequence |
 
@@ -7613,7 +8418,7 @@ dst[i, j] = S + linear_index(i, j)   // or descending if requested
 
 - **Implementation checks (A2/A3/A5)**
   - Tile element type must be exactly the same type as the `S`.
-  - `dst/scalar` element types must be identical, and must be one of: `i32`, `i16`.
+  - `dst/scalar` element types must be identical, and must be one of: `i16`, `ui16`, `i32`, `ui32`.
   - `dst.cols != 1`.
 
 **Hardware Mapping:**
@@ -7624,6 +8429,7 @@ dst[i, j] = S + linear_index(i, j)   // or descending if requested
 
 ```mlir
 pto.tci ins(%start : i32) outs(%dst : !pto.tile_buf<...>)
+pto.tci ins(%start, %tmp : i32, !pto.tile_buf<...>) outs(%dst : !pto.tile_buf<...>)
 ```
 
 ---
@@ -7820,16 +8626,18 @@ pto.tmov.fp ins(%acc, %fp : !pto.tile_buf<...>, !pto.tile_buf<...>)
 dst[i, j] = Quantize(src[i, j]; fp, quant_type)
 ```
 
-- `INT8_SYM`: symmetric quantization; `dst` element type must be `i8`.
-- `INT8_ASYM`: asymmetric quantization; `dst` element type must be `ui8`.
+- `INT8_SYM`: symmetric quantization; `dst` element type must be `i8`; no `offset` operand is allowed.
+- `INT8_ASYM`: asymmetric quantization; `dst` element type must be `ui8`; an `offset` operand is required.
 
 **Arguments:**
 
 | Name | Type | Description |
 |------|------|-------------|
 | `src` | `pto.tile_buf` | Source tile (`f32`) |
-| `fp` | `pto.tile_buf` | Scaling parameter tile |
+| `fp` | `pto.tile_buf` | Scaling parameter tile (`f32`) |
+| `offset` | `pto.tile_buf` | Optional asymmetric offset tile (`f32`, required for `INT8_ASYM`) |
 | `dst` | `pto.tile_buf` | Destination tile (`i8` for SYM, `ui8` for ASYM) |
+| `tmp` | `pto.tile_buf` | Optional scratch tile. A2/A3 uses it for row-broadcast and fp32-to-s32 conversion scratch. When omitted, PTOAS preserves the no-tmp form and selects the 4-argument backend overload. A5 accepts it as a placeholder but does not require it. |
 
 **Attributes:**
 
@@ -7842,8 +8650,12 @@ dst[i, j] = Quantize(src[i, j]; fp, quant_type)
 **Constraints & Verification:**
 
 - `src` element type must be `f32`.
+- `src` and `dst` must have the same valid shape.
 - `dst` element type must be `i8` (`INT8_SYM`) or `ui8` (`INT8_ASYM`).
-- A2/A3: `src` and `dst` must use row-major layout.
+- `pto.tquant` only models the plain INT8 quantization forms. MX quantization uses `pto.tquant.mx`.
+- A2/A3: `src`, `dst`, and explicit `tmp` must use row-major layout.
+- A2/A3: `fp` and `offset` must be per-row broadcast tiles: non-row-major layout, `valid_shape[0] == dst.valid_shape[0]`, and `valid_shape[1] == 1`.
+- A2/A3: explicit `tmp` must have the same element type, shape, and valid shape as `src`.
 
 **Hardware Mapping:**
 
@@ -7855,6 +8667,66 @@ dst[i, j] = Quantize(src[i, j]; fp, quant_type)
 pto.tquant ins(%src, %fp : !pto.tile_buf<...>, !pto.tile_buf<...>)
            outs(%dst : !pto.tile_buf<...>)
            {quant_type = #pto<quant_type INT8_SYM>}
+
+pto.tquant ins(%src, %fp, %offset : !pto.tile_buf<...>, !pto.tile_buf<...>, !pto.tile_buf<...>)
+           outs(%dst, %tmp : !pto.tile_buf<...>, !pto.tile_buf<...>)
+           {quant_type = #pto<quant_type INT8_ASYM>}
+```
+
+---
+
+##### `pto.tquant.mx` - MX Quantize Tile
+
+**Summary:** A5-only MX quantization form. Quantizes a vector tile into MXFP8 or MXFP4_E2M1 and materializes the auxiliary `exp`, `max`, and `scaling` tiles required by PTO-ISA MX quantization.
+
+**Semantics:**
+
+```
+dst, exp, max, scaling = QuantizeMX(src; quant_type)
+```
+
+- `MXFP8`: source elements are `f32`, `f16`, or `bf16`; destination elements are `i8/ui8`.
+- `MXFP4_E2M1`: source elements are `f16` or `bf16`; destination elements are `!pto.f4E2M1x2`.
+
+**Arguments:**
+
+| Name | Type | Description |
+|------|------|-------------|
+| `src` | `pto.tile_buf` | Source vec tile |
+| `dst` | `pto.tile_buf` | Quantized output tile |
+| `exp` | `pto.tile_buf` | Exponent output tile |
+| `max` | `pto.tile_buf` | Per-group max output tile |
+| `scaling` | `pto.tile_buf` | Scaling output tile |
+
+**Attributes:**
+
+| Name | Type | Description |
+|------|------|-------------|
+| `quant_type` | `#pto.quant_type` | `MXFP8` or `MXFP4_E2M1` |
+
+**Results:** None. Writes into `dst`, `exp`, `max`, and `scaling` via DPS pattern.
+
+**Constraints & Verification:**
+
+- Supported only on A5 targets.
+- `src`, `dst`, `exp`, `max`, and `scaling` must all be vec ND tiles.
+- `scaling` is a per-group tile: it must have the same element type as `src`, and its valid element count must equal `src.valid elements / 32` when statically known (one reciprocal scale per 32-element MX group).
+- `max` must have the same element type as `src`.
+- `exp` must use `i8/ui8` element type.
+- `src.valid_shape[1]` must be a multiple of 32.
+- `exp` and `max` valid element counts must equal `src.valid elements / 32` when statically known.
+
+**Hardware Mapping:**
+
+- Executes on the **Vector pipeline** (`PIPE_V`)
+
+**Basic Example:**
+
+```mlir
+pto.tquant.mx ins(%src : !pto.tile_buf<...>)
+              outs(%dst, %exp, %max, %scaling : !pto.tile_buf<...>, !pto.tile_buf<...>,
+                                                  !pto.tile_buf<...>, !pto.tile_buf<...>)
+              {quant_type = #pto<quant_type MXFP8>}
 ```
 
 ---
@@ -7882,13 +8754,13 @@ dst[...] = Convert(src[i, j]; fp)
 **Constraints & Verification:**
 
 - **Implementation checks (A2A3)**
-  - Source TileType only support `loc==acc`
+  - Source TileType only suport `loc==acc`
   - Source dtype must be `i32` or `f32`.
   - Shape constraints: `1 <= cols <= 4095`;
   - Runtime: `1 <= src valid column <= 4095`.
   - `fp` is used to configure scaling/FPC state; no separate PTO-visible static constraint is enforced on its shape.
 - **Implementation checks (A5)**
-  - Source TileType only support `loc==acc`
+  - Source TileType only suport `loc==acc`
   - `fp` is used to configure scaling/FPC state; no separate PTO-visible static constraint is enforced on its shape.
 
 **Hardware Mapping:**
@@ -8056,17 +8928,13 @@ pto.wait_event [#pto.pipe_event_type<EVENT_LOAD_FROM_GM>, #pto.pipe_event_type<E
 **Forms:**
 
 - Hard sync: no workspace operands
-- Soft AIV-only sync: `gm_workspace + ub_workspace [+ used_cores]`
-- Soft AIC-only sync: `gm_workspace + l1_workspace [+ used_cores]`
-- Soft mixed sync: `gm_workspace + ub_workspace + l1_workspace [+ used_cores]`
+- Soft sync: `gm_workspace [+ used_cores]`
 
 **Arguments:**
 
 | Name | Type | Description |
 |------|------|-------------|
-| `gm_workspace` | optional GM memref of `i32` | Global shared workspace used by soft mode |
-| `ub_workspace` | optional VEC tile/memref of `i32` | Vector-core local workspace for soft mode |
-| `l1_workspace` | optional MAT tile/memref of `i32` | Cube-core local workspace for soft mode |
+| `gm_workspace` | optional GM pointer/tensor/partition view of `i32` | Global shared workspace used by soft mode |
 | `used_cores` | optional `i32` | Explicit participant count for soft mode |
 | `mode` | `#pto.sync_all_mode<...>` | `hard` or `soft` |
 | `core_type` | `#pto.sync_core_type<...>` | `aiv_only`, `aic_only`, or `mix` |
@@ -8076,31 +8944,49 @@ pto.wait_event [#pto.pipe_event_type<EVENT_LOAD_FROM_GM>, #pto.pipe_event_type<E
 **Constraints & Verification:**
 
 - Hard mode requires no workspace operands and no `used_cores`.
+- `core_type` remains required in Hard mode because lowering selects
+  `SYNCALL<SyncCoreType::...>()` from it.
 - Soft mode always requires `gm_workspace`.
-- Soft `aiv_only` requires `ub_workspace` and forbids `l1_workspace`.
-- Soft `aic_only` requires `l1_workspace` and forbids `ub_workspace`.
-- Soft `mix` requires both `ub_workspace` and `l1_workspace`.
-- `gm_workspace` must be a ranked GM memref of `i32`.
-- `ub_workspace` / `l1_workspace` must be rank-1 or rank-2 `i32` tile/memref values in `vec` / `mat` address space respectively.
-- These constraints intentionally mirror the corresponding PTO-ISA API parameter checks in `verify()`.
+- Soft `aiv_only`, `aic_only`, and `mix` use the same operand ABI.
+- `gm_workspace` must be a GM `!pto.ptr`, `!pto.tensor_view`, or
+  `!pto.partition_tensor_view` with `i32` elements.
+- A pointer workspace must reference at least 16 contiguous `i32` elements;
+  pointer capacity is a runtime responsibility because it is not encoded in
+  the pointer type.
+- When all dimensions are static, `gm_workspace` must contain at least 16
+  elements (64 bytes). This verifier check applies to tensor/partition views;
+  dynamic views must provide at least that capacity at runtime.
+- The workspace must occupy an exclusive 64-byte cache line and be
+  zero-initialized before its first `SYNCALL`. Alignment, aliasing, and
+  initialization are runtime responsibilities and cannot be proven by the
+  verifier.
+- Omitting `used_cores`, or passing zero, asks PTO-ISA to derive the participant
+  count from the launch configuration.
 
 **Basic Example:**
 
 ```mlir
-"pto.syncall"(%gm, %ub, %used) {
-  operandSegmentSizes = array<i32: 1, 1, 0, 1>,
+pto.syncall(%gm, %used : !pto.ptr<i32, gm>, i32)
   mode = #pto.sync_all_mode<soft>,
   core_type = #pto.sync_core_type<aiv_only>
-} : (memref<64xi32, #pto.address_space<gm>>,
-     memref<64xi32, #pto.address_space<vec>>,
-     i32) -> ()
+
+"pto.syncall"(%gm_view, %used) {
+  operandSegmentSizes = array<i32: 1, 1>,
+  mode = #pto.sync_all_mode<soft>,
+  core_type = #pto.sync_core_type<aiv_only>
+} : (!pto.partition_tensor_view<16xi32>, i32) -> ()
 
 "pto.syncall"() {
-  operandSegmentSizes = array<i32: 0, 0, 0, 0>,
+  operandSegmentSizes = array<i32: 0, 0>,
   mode = #pto.sync_all_mode<hard>,
   core_type = #pto.sync_core_type<mix>
 } : () -> ()
 ```
+
+**Compatibility:** This is a breaking operand-schema change. Existing
+three/four-operand `.pto` files and `.ptobc` files carrying the former
+four-entry `operandSegmentSizes` must be regenerated. PTOAS and IR producers
+such as PyPTO should be upgraded together.
 
 ---
 
@@ -8331,16 +9217,38 @@ frontend/framework generated IR. The detailed design document is:
   function.
 - `slot_size` is expressed in bytes and uses the pre-split logical pipe-entry
   size.
+- `slot_num` is an optional compile-time integer attribute on
+  `pto.aic_initialize_pipe` / `pto.aiv_initialize_pipe`. It controls the pipe
+  FIFO depth. The `effective_slot_num` is the explicit value when present, or
+  the default value: `8` for `dir_mask = 1/2` or `4` for `dir_mask = 3`.
 - `local_slot_num` is an optional compile-time integer attribute on
   `pto.aic_initialize_pipe` / `pto.aiv_initialize_pipe`.
   On A2/A3 it overrides the default consumer-side local FIFO slot count only
   when the pipe uses a local consumer FIFO buffer. Global-only GM FIFO pipes
   omit it.
+- `pto.reserve_buffer.size` is the byte size of the consumer-side local FIFO
+  buffer. For A2/A3 local FIFO pipes, it should be
+  `slot_size * effective_local_slot_num`, where `effective_local_slot_num` is
+  the explicit `local_slot_num` when present or the effective `slot_num`
+  otherwise. For A5 local FIFO pipes, `local_slot_num` is not configurable and
+  the reserved byte size should be `slot_size * effective_slot_num`.
 - `nosplit` is an optional compile-time boolean attribute on
   `pto.aic_initialize_pipe` / `pto.aiv_initialize_pipe`.
 - `split` is a compile-time attribute, not a runtime SSA operand.
-- `split = 0/1/2` corresponds to `TILE_NO_SPLIT`, `TILE_UP_DOWN`, and
-  `TILE_LEFT_RIGHT`.
+- `split = 0/1/2/3/4` corresponds to `TILE_NO_SPLIT`, `TILE_UP_DOWN`,
+  `TILE_LEFT_RIGHT`, `TILE_UP_DOWN_ODD`, and `TILE_LEFT_RIGHT_ODD`.
+- `TILE_UP_DOWN_ODD` splits an odd valid-row count so AIV0 receives
+  `ceil(valid_rows / 2)` rows and AIV1 receives `floor(valid_rows / 2)` rows.
+  `TILE_LEFT_RIGHT_ODD` applies the same rule to valid columns.
+- Odd split modes are currently supported only by a unidirectional C2V
+  GM-backed tile pipe. The frontend initialize op must provide both
+  `gm_slot_tensor` and `c2v_consumer_buf`; local C2V, V2C, bidirectional, and
+  GlobalTensor-entry odd splits are rejected because the pinned pto-isa does
+  not implement those transfer paths.
+- For an odd C2V tile pop, AIV0 and AIV1 must pass different
+  `valid_row` / `valid_col` operands. The frontend must derive these operands
+  from `pto.get_subblock_idx`: AIV0 supplies the `ceil` half and AIV1 supplies
+  the `floor` half. PTO-ISA does not derive the two valid shapes automatically.
 - `pto.tpop_from_aic` and `pto.tpop_from_aiv` are result-valued frontend ops.
 - Pipe entries support two forms:
   - tile entry: `!pto.tile_buf<...>` or the equivalent local memref after view
@@ -8354,23 +9262,31 @@ frontend/framework generated IR. The detailed design document is:
   (`pto.initialize_l2g2l_pipe`). It does not implicitly execute `pto.tstore` or
   `pto.tload`; callers move data explicitly before `tpush` or after `tpop`.
 - When every transfer op bound to one pipe id uses a global entry, the pipe is
-  a global-only GM FIFO. Its frontend initialize op carries only
-  `gm_slot_tensor`; `gm_slot_buffer`, `c2v_consumer_buf`, `v2c_consumer_buf`, `local_slot_num`,
-  `pto.reserve_buffer`, and `pto.import_reserved_buffer` are not used.
+  a global-only GM FIFO. Its frontend initialize op carries `gm_slot_tensor`
+  and may carry `slot_num`; `gm_slot_buffer`, `c2v_consumer_buf`,
+  `v2c_consumer_buf`, `local_slot_num`, `pto.reserve_buffer`, and
+  `pto.import_reserved_buffer` are not used.
+- A C2V GM-backed tile pipe instead carries both `gm_slot_tensor` and
+  `c2v_consumer_buf`. The GM tensor describes the complete FIFO slot, while
+  the consumer buffer supplies the local vector-tile staging area. This mixed
+  form is currently limited to `dir_mask = 1`.
 - For global entries, the matched initialize op's `gm_slot_tensor` describes
   one FIFO slot entry, not the full multi-slot FIFO buffer. Its dtype, shape,
   stride, and layout must match the `tensor_view` returned by `talloc` /
-  `tpop` and form the pto-isa `GlobalData` template argument. `TILE_UP_DOWN` and
-  `TILE_LEFT_RIGHT` split modes derive sub-core GM address offsets from that
-  single-slot descriptor's static rows, columns, and element dtype.
+  `tpop` and form the pto-isa `GlobalData` template argument. `TILE_UP_DOWN`,
+  `TILE_LEFT_RIGHT`, `TILE_UP_DOWN_ODD`, and `TILE_LEFT_RIGHT_ODD` split modes
+  derive each sub-core's GM view from the single-slot descriptor and the
+  runtime tile valid shape. For odd modes, the two sub-cores' valid shapes must
+  be the explicit `ceil` and `floor` halves described above.
 - If a global-entry result op does not carry explicit stride/layout metadata,
   PTOAS treats it as a row-major contiguous GM view. Non-contiguous cases must
   preserve stride/layout through the producing op metadata, the source view, or
   the lowered GM memref layout.
-- A single logical pipe cannot mix `split = 0` with `split = 1` / `2`.
+- A single logical pipe cannot mix `split = 0` with `split = 1` / `2` / `3` /
+  `4`.
   `nosplit = true` requires all bound data-transfer ops to use `split = 0`;
-  `nosplit = false` requires all bound data-transfer ops to use `split = 1`
-  or `split = 2`.
+  `nosplit = false` requires all bound data-transfer ops to use `split = 1`,
+  `2`, `3`, or `4`.
 - Multiple logical pipes are allowed in one function.
 - A frontend logical pipe is uniquely identified by `function + id + direction`.
 - When `dir_mask = 1` or `2`, one `id` denotes one single-direction logical
@@ -8426,7 +9342,10 @@ When the address is already fixed in the input IR:
 **Arguments:**
 
 - `name`: string attribute identifying the logical reserved buffer
-- `size`: reserved buffer size in bytes
+- `size`: reserved buffer size in bytes. For A2/A3 local FIFO pipes this is
+  `slot_size * effective_local_slot_num`; for A5 local FIFO pipes this is
+  `slot_size * effective_slot_num`. Global-only GM FIFO pipes do not use
+  `pto.reserve_buffer`.
 - `location`: local address-space attribute, typically `vec` or `mat`
 - `auto`: boolean allocation-mode flag in textual IR
 - `base`: optional explicit local base address
@@ -8437,6 +9356,9 @@ When the address is already fixed in the input IR:
 
 - Multiple `pto.reserve_buffer` ops are allowed in one function, but `name`
   must be unique within that function
+- `size` must be greater than `0`; PTOAS allocates exactly the requested byte
+  size, so it should match the local FIFO sizing rule of the pipe that consumes
+  this buffer
 - `location` must be a supported local address space
 - Op-level verification requires:
   - `auto = false` must provide `base`
@@ -8490,7 +9412,7 @@ this op.
 
 ```mlir
 // A2/A3 (with GM slot buffer):
-pto.aic_initialize_pipe {id = 0, dir_mask = 1, slot_size = 1024, local_slot_num = 1}
+pto.aic_initialize_pipe {id = 0, dir_mask = 1, slot_size = 1024, slot_num = 2, local_slot_num = 1}
   (gm_slot_buffer = %gm_buf : !pto.ptr<f32>,
    c2v_consumer_buf = %c2v_import : i32,
    v2c_consumer_buf = %c0_i32 : i32)
@@ -8514,18 +9436,21 @@ pto.aic_initialize_pipe {id = 0, dir_mask = 1, slot_size = 1024, nosplit = true}
   the same function
 - `dir_mask`: communication direction encoding
 - `slot_size`: logical slot size in bytes
+- `slot_num`: optional GM ring FIFO slot count; omitted defaults to `8` for
+  `dir_mask = 1/2` or `4` for `dir_mask = 3`
 - `local_slot_num`: optional A2/A3-only local FIFO slot count override for the
   lowered `pto.initialize_l2g2l_pipe`; omitted for global-only GM FIFO
 - `nosplit`: optional compile-time boolean controlling no-split pipe mode
 - `gm_slot_buffer`: optional GM pointer (`!pto.ptr<T>`), used by A2/A3 GM FIFO
   paths that also use a local consumer FIFO buffer
 - `gm_slot_tensor`: optional single-slot entry descriptor
-  (`!pto.tensor_view<...>`), required by global-only GM FIFO. Its type describes
-  the `tensor_view` returned by `talloc` / `tpop`. This descriptor is retained
-  in IR for entry type validation; EmitC lowers the `TPipe` constructor
-  argument to only the GM FIFO start address
+  (`!pto.tensor_view<...>`), required by global-only GM FIFO and by the A5
+  C2V GM-backed tile path. For a global entry, its type describes the
+  `tensor_view` returned by `talloc` / `tpop`. This descriptor is retained in
+  IR for entry type validation; EmitC lowers the `TPipe` constructor argument
+  to only the GM FIFO start address
 - `c2v_consumer_buf`: optional C2V consumer local base address; omitted for
-  global-only GM FIFO
+  global-only GM FIFO, but required when `gm_slot_tensor` backs a C2V tile pipe
 - `v2c_consumer_buf`: optional V2C consumer local base address; omitted for
   global-only GM FIFO
 
@@ -8536,12 +9461,17 @@ pto.aic_initialize_pipe {id = 0, dir_mask = 1, slot_size = 1024, nosplit = true}
 - Must appear in Cube kernels
 - Multiple `pto.aic_initialize_pipe` ops are allowed in one Cube function, but
   `id` must be unique among frontend initialize ops in that function
+- If `slot_num` is present, it must be greater than `0`
 - If `local_slot_num` is present, it must be greater than `0` and no greater
-  than the legacy slot count implied by `dir_mask`
-  (`8` for `dir_mask = 1/2`, `4` for `dir_mask = 3`)
+  than the effective `slot_num`
+- On A5, `local_slot_num` must be omitted. A local-only frontend pipe lowers to
+  `pto.initialize_l2l_pipe`; a C2V pipe carrying both `gm_slot_tensor` and
+  `c2v_consumer_buf` lowers to `pto.initialize_l2g2l_pipe`
 - A global-only GM FIFO initialize carries only `gm_slot_tensor`; it must not
   carry `gm_slot_buffer`, `local_slot_num`, `c2v_consumer_buf`, or
-  `v2c_consumer_buf`
+  `v2c_consumer_buf`; it may carry `slot_num`
+- A GM-backed tile initialize may combine `gm_slot_tensor` only with
+  `c2v_consumer_buf`, and currently requires `dir_mask = 1`
 - For global-only GM FIFO, `slot_size` must match the byte size of
   `gm_slot_tensor`
 - Global-entry `talloc` / `tpush` / `tpop` / `tfree` entry types must match the
@@ -8551,7 +9481,7 @@ pto.aic_initialize_pipe {id = 0, dir_mask = 1, slot_size = 1024, nosplit = true}
 - If `nosplit = true`, all frontend data-transfer ops bound to the same logical
   pipe must use `split = 0`
 - If `nosplit = false`, all frontend data-transfer ops bound to the same
-  logical pipe must use `split = 1` or `split = 2`
+  logical pipe must use `split = 1`, `2`, `3`, or `4`
 
 ##### `pto.aiv_initialize_pipe` - Frontend Vector Pipe Initialization
 
@@ -8561,7 +9491,7 @@ pto.aic_initialize_pipe {id = 0, dir_mask = 1, slot_size = 1024, nosplit = true}
 
 ```mlir
 // A2/A3 (with GM slot buffer):
-pto.aiv_initialize_pipe {id = 0, dir_mask = 1, slot_size = 1024, local_slot_num = 1}
+pto.aiv_initialize_pipe {id = 0, dir_mask = 1, slot_size = 1024, slot_num = 2, local_slot_num = 1}
   (gm_slot_buffer = %gm_buf : !pto.ptr<f32>,
    c2v_consumer_buf = %c2v_local : i32,
    v2c_consumer_buf = %c0_i32 : i32)
@@ -8594,7 +9524,7 @@ pto.aiv_initialize_pipe {id = 0, dir_mask = 1, slot_size = 1024, nosplit = true}
 - If `nosplit = true`, all frontend data-transfer ops bound to the same logical
   pipe must use `split = 0`
 - If `nosplit = false`, all frontend data-transfer ops bound to the same
-  logical pipe must use `split = 1` or `split = 2`
+  logical pipe must use `split = 1`, `2`, `3`, or `4`
 
 **Basic Example: GlobalTensor Pipe Entry Without Reserve/Import**
 
@@ -9044,7 +9974,8 @@ print(src)
 
 | Name | Type | Description |
 |------|------|-------------|
-| `src` | `pto.tile_buf` | Tile to print |
+| `src` | `pto.tile_buf` / global-memory view | Tile or global-memory view to print |
+| `printFormat` | `i32` (optional, default: `0`) | Print format selector: `0=Width8_Precision4`, `1=Width8_Precision2`, `2=Width10_Precision6` |
 
 **Results:** None.
 
@@ -9071,8 +10002,9 @@ print(src)
 
 - **Formatting**:
 
-  - Floating-point values: printed as `%6.2f`
-  - Integer values: printed as `%6d`
+  - `printFormat = 0`: `Width8_Precision4`
+  - `printFormat = 1`: `Width8_Precision2`
+  - `printFormat = 2`: `Width10_Precision6`
   - For `GlobalTensor`, due to data size and buffer limitations, only elements within its logical shape (defined by `Shape`) are printed.
   - For `tile_buf`, elements outside `valid_shape` are still printed and are marked with a `|` separator when partial validity is specified.
 
@@ -9084,6 +10016,7 @@ print(src)
 
 ```mlir
 pto.tprint ins(%src : !pto.tile_buf<loc=vec, dtype=f16, rows=16, cols=16, v_row=16, v_col=16, blayout=row_major, slayout=none_box, fractal=512, pad=0>)
+pto.tprint ins(%src : !pto.tile_buf<loc=vec, dtype=f32, rows=16, cols=16, v_row=16, v_col=16, blayout=row_major, slayout=none_box, fractal=512, pad=0>) {printFormat = 1 : i32}
 ```
 
 ---
@@ -9175,8 +10108,8 @@ This section documents PTO communication primitives. PTOAS currently exposes:
 
 | Name | Type | Description |
 |------|------|-------------|
-| `scratch` | `pto.tile_buf` / local memref | Local scratch/staging buffer used by the async runtime |
-| `workspace` | `!pto.ptr<...>` / GM memref | Global workspace backing the async session |
+| `scratch` | `pto.tile_buf` | Local scratch/staging buffer used by the async runtime |
+| `workspace` | `!pto.ptr<...>` | Global workspace backing the async session |
 | `sync_id` | optional `i32` attr | Session synchronization ID |
 | `block_bytes` | optional `i64` attr | Communication block size in bytes |
 | `comm_block_offset` | optional `i64` attr | Per-block GM offset in bytes |
@@ -9187,8 +10120,8 @@ This section documents PTO communication primitives. PTOAS currently exposes:
 
 **Constraints & Verification:**
 
-- `scratch` must be tile-like local storage.
-- `workspace` must be a GM pointer/memref.
+- `scratch` must be a local tile buffer.
+- `workspace` must be a GM pointer.
 - Optional attrs are forwarded as session configuration and must use the declared integer types.
 
 **Basic Example:**
@@ -9207,8 +10140,8 @@ This section documents PTO communication primitives. PTOAS currently exposes:
 
 | Name | Type | Description |
 |------|------|-------------|
-| `dst` | GM memref / `pto.tensor_view` / `pto.partition_tensor_view` | Remote destination buffer |
-| `src` | GM memref / `pto.tensor_view` / `pto.partition_tensor_view` | Local source buffer |
+| `dst` | `pto.tensor_view` / `pto.partition_tensor_view` | Remote destination buffer |
+| `src` | `pto.tensor_view` / `pto.partition_tensor_view` | Local source buffer |
 | `session` | `!pto.async_session` | Async DMA session |
 
 **Results:** `!pto.async_event`
@@ -9235,8 +10168,8 @@ This section documents PTO communication primitives. PTOAS currently exposes:
 
 | Name | Type | Description |
 |------|------|-------------|
-| `dst` | GM memref / `pto.tensor_view` / `pto.partition_tensor_view` | Local destination buffer |
-| `src` | GM memref / `pto.tensor_view` / `pto.partition_tensor_view` | Remote source buffer |
+| `dst` | `pto.tensor_view` / `pto.partition_tensor_view` | Local destination buffer |
+| `src` | `pto.tensor_view` / `pto.partition_tensor_view` | Remote source buffer |
 | `session` | `!pto.async_session` | Async DMA session |
 
 **Results:** `!pto.async_event`
@@ -9282,22 +10215,42 @@ This section documents PTO communication primitives. PTOAS currently exposes:
 
 ##### `pto.comm.tput` - Synchronous Remote Write
 
-**Summary:** Lowers to `pto::comm::TPUT(...)` and copies data from local GM to remote GM through a VEC staging tile.
+**Summary:** Copies data synchronously from local GM to remote GM through a VEC staging tile.
 
 **Arguments:**
 
 | Name | Type | Description |
 |------|------|-------------|
-| `dst` | GM memref / `pto.tensor_view` / `pto.partition_tensor_view` | Remote destination buffer |
-| `src` | GM memref / `pto.tensor_view` / `pto.partition_tensor_view` | Local source buffer |
+| `dst` | `pto.tensor_view` / `pto.partition_tensor_view` | Remote destination buffer |
+| `src` | `pto.tensor_view` / `pto.partition_tensor_view` | Local source buffer |
 | `buf` | `buf(%ping)` or `buf(%ping, %pong)` | Staging bundle: one or two local VEC tiles |
 | `atomicType` | `#pto<atomic_type ...>` | Atomic mode, e.g. `atomic_none` or `atomic_add` |
 
 **Constraints & Verification:**
 
-- `dst` / `src` must be GM-shaped values with positive static shapes.
-- `dst` and `src` must have the same element type and static shape.
-- `ping` / `pong` must be local VEC tile-like values whose element type matches `src`.
+- `dst` / `src` must be GM-shaped values. Static dimensions must be positive.
+- Dynamic dimensions are supported only when both operands are
+  `pto.partition_tensor_view` values.
+- `dst` and `src` must have the same element type and identical static/dynamic
+  shape signatures. Corresponding dynamic extents must be equal at runtime.
+- Runtime extents must be nonnegative, and each partition range must remain
+  within its backing tensor view. A zero extent denotes an empty transfer.
+- `ping` / `pong` must be local VEC tile-like values whose element type matches
+  `src`. Their physical `rows` / `cols` must be positive static values.
+- Staging `v_row` / `v_col` values must be positive and may be static or
+  dynamic. If a transfer enters the chunked path, a static `v_row` / `v_col`
+  must exactly divide the corresponding logical row / column extent. Use
+  dynamic valid dimensions when a partial final chunk is possible.
+- When `pong` is present, it must have the same type as `ping`.
+
+**Semantics:**
+
+For every logical index in the common `src` / `dst` shape, the operation reads
+the local `src` element and writes the corresponding remote `dst` element.
+`atomic_none` performs a normal write; an atomic mode such as `atomic_add`
+combines the source value with the destination according to that mode. The
+staging bundle may divide the logical range into chunks but does not change the
+logical transfer extent.
 
 **Examples:**
 
@@ -9309,25 +10262,59 @@ pto.comm.tput(%dst, %src, buf(%ping) : !pto.partition_tensor_view<128xf32>, !pto
 pto.comm.tput(%dst, %src, buf(%ping, %pong) : !pto.partition_tensor_view<128xf32>, !pto.partition_tensor_view<128xf32>, !pto.tile_buf<loc=vec, dtype=f32, rows=1, cols=128, v_row=1, v_col=128, blayout=row_major, slayout=none_box, fractal=512, pad=0>, !pto.tile_buf<loc=vec, dtype=f32, rows=1, cols=128, v_row=1, v_col=128, blayout=row_major, slayout=none_box, fractal=512, pad=0>) {atomicType = #pto<atomic_type atomic_add>}
 ```
 
+For a variable-size transfer, construct both partitions with the same runtime
+extent and use dynamic staging valid dimensions when the extent may require a
+partial final chunk:
+
+```mlir
+%dst_part = pto.partition_view %dst_view,
+  offsets = [%c0, %c0], sizes = [%rows, %c4096]
+  : !pto.tensor_view<?x?xi8> -> !pto.partition_tensor_view<?x4096xi8>
+%src_part = pto.partition_view %src_view,
+  offsets = [%c0, %c0], sizes = [%rows, %c4096]
+  : !pto.tensor_view<?x?xi8> -> !pto.partition_tensor_view<?x4096xi8>
+%stage = pto.alloc_tile addr = %c0_i64
+  valid_row = %c1 valid_col = %c4096
+  : !pto.tile_buf<loc=vec, dtype=i8, rows=1, cols=4096,
+                  v_row=?, v_col=?, blayout=row_major,
+                  slayout=none_box, fractal=512, pad=0>
+pto.comm.tput(%dst_part, %src_part, buf(%stage)
+  : !pto.partition_tensor_view<?x4096xi8>,
+    !pto.partition_tensor_view<?x4096xi8>,
+    !pto.tile_buf<loc=vec, dtype=i8, rows=1, cols=4096,
+                  v_row=?, v_col=?, blayout=row_major,
+                  slayout=none_box, fractal=512, pad=0>)
+  {atomicType = #pto<atomic_type atomic_none>}
+```
+
 ---
 
 ##### `pto.comm.tget` - Synchronous Remote Read
 
-**Summary:** Lowers to `pto::comm::TGET(...)` and copies data from remote GM to local GM through a VEC staging tile.
+**Summary:** Copies data synchronously from remote GM to local GM through a VEC staging tile.
 
 **Arguments:**
 
 | Name | Type | Description |
 |------|------|-------------|
-| `dst` | GM memref / `pto.tensor_view` / `pto.partition_tensor_view` | Local destination buffer |
-| `src` | GM memref / `pto.tensor_view` / `pto.partition_tensor_view` | Remote source buffer |
-| `ping` | `pto.tile_buf` / local VEC memref | Required staging tile (wrapped in `buf(%ping)`) |
-| `pong` | `pto.tile_buf` / local VEC memref | Optional second staging tile (`buf(%ping, %pong)`) |
+| `dst` | `pto.tensor_view` / `pto.partition_tensor_view` | Local destination buffer |
+| `src` | `pto.tensor_view` / `pto.partition_tensor_view` | Remote source buffer |
+| `ping` | `pto.tile_buf` | Required staging tile (wrapped in `buf(%ping)`) |
+| `pong` | `pto.tile_buf` | Optional second staging tile (`buf(%ping, %pong)`) |
 
 **Constraints & Verification:**
 
-- Same GM/global-like and staging constraints as `pto.comm.tput`.
-- `dst` and `src` must have the same element type and static shape.
+- The GM/global-like, dynamic partition, runtime extent, zero-length, and
+  staging constraints are the same as for `pto.comm.tput`.
+- `dst` and `src` must have the same element type and identical static/dynamic
+  shape signatures.
+
+**Semantics:**
+
+For every logical index in the common `src` / `dst` shape, the operation reads
+the remote `src` element and writes the corresponding local `dst` element. The
+staging bundle may divide the logical range into chunks but does not change the
+logical transfer extent.
 
 **Examples:**
 
@@ -9355,6 +10342,16 @@ pto.comm.tget(%dst, %src, buf(%ping, %pong) : !pto.partition_tensor_view<128xf32
 
 - `signal` must be a GM-shaped value with element type `i32`.
 - `value` / `cmpValue` must be signless integer scalars.
+
+**Lowering ordering guarantee:**
+
+- `pto.comm.tnotify` is lowered with a `pipe_barrier(PIPE_ALL)` emitted
+  immediately before the `pto::comm::TNOTIFY(...)` call. `TNOTIFY_IMPL` writes
+  the signal on the scalar pipe and only issues its trailing barrier *after*
+  the store, so this preceding drain is what makes the
+  `peer_TWAIT_returns ⇒ everything I issued before my TNOTIFY is visible`
+  contract hold across `pto.tload` / `pto.tstore` (local or peer-addressed).
+  Callers do not need to insert manual sync.
 
 **Examples:**
 
@@ -9430,7 +10427,8 @@ pto.comm.tbroadcast(%src, recv(%ping, %pong), group(%g0, %g1, %g2) :
 
 - `group` must be non-empty and all members must have identical types.
 - `dst` element type must match the group element type.
-- `ping` / `pong` must be local VEC tile-like values with matching element type.
+- `ping` / `pong` must be local VEC tile-like values with element type matching `dst`.
+- `root` must be a valid index into `group` (i.e. `root < group.size()`).
 
 **Examples:**
 
@@ -9548,7 +10546,7 @@ pto.comm.treduce(%dst, %acc, recv(%ping, %pong), group(%g0, %g1, %g2) :
 Minimum support for **C++ stack-local statically-shaped arrays of scalars** —
 suitable for small auxiliary buffers in host scalar code. Disjoint from the
 tile-buf world: these values do not participate in PTO memory planning or
-`pto.pointer_cast`, and their underlying address is decided by the host C++
+tile address materialization, and their underlying address is decided by the host C++
 compiler. Naming and asm style mirror the `eventid_array` triad.
 
 Operates on the [`!pto.local_array<...>`](#26-ptolocal_arrayd1-x-d2-x--x-dk-x-t) type. See Section 2.6 for type-level constraints.
@@ -9631,6 +10629,124 @@ pto.local_array_set %m[%i, %j], %v
 
 ---
 
+#### Struct Ops (`pto.declare_struct` / `pto.struct_get` / `pto.struct_set`)
+
+C++ stack-local heterogeneous aggregate ops. Disjoint from the tile-buf /
+scratch memory world: the struct's address is decided by the host C++
+compiler. Naming and asm style mirror the `local_array` triad.
+
+Operates on the [`!pto.struct<...>`](#28-ptostructt0-t1--tn-1) type. See
+Section 2.8 for type-level constraints.
+
+##### `pto.declare_struct` - Declare a Stack-Local Struct
+
+**Summary:** Declare a heterogeneous aggregate on the C++ stack.
+
+**Semantics:** `PtoStruct_X s;`
+
+**Arguments:** None.
+
+**Results:** `!pto.struct<T0, ..., Tn-1>`
+
+**Constraints & Verification:**
+
+- The result must not be passed to a terminator (`func.return`, `scf.yield`,
+  ...). The value is a pointer to stack storage owned by the declaring scope, so
+  letting it out would expose the address of storage that is about to die.
+- Relatedly, no function may **return** a `!pto.struct` (checked module-wide),
+  which is what stops a pass-through helper from laundering that address past
+  the per-op check.
+- No other operation may produce a `!pto.struct` result. This prevents
+  `arith.select`, `scf.if`, calls, casts, or loop-carried values from hiding the
+  storage origin.
+
+  See [Section 2.8](#28-ptostructt0-t1--tn-1); mutation is in place, so declare
+  the struct in the outer scope and pass it down instead.
+
+**Basic Example:**
+
+```mlir
+%s = pto.declare_struct -> !pto.struct<f16, i8>   // PtoStruct_f16_i8 s;
+```
+
+---
+
+##### `pto.struct_get` - Read a Field by Constant Path
+
+**Summary:** Read the field reached by a constant `path` of field indices,
+descending through nested structs.
+
+**Semantics:** `s.fA.fB...`, read into a fresh variable so the SSA value keeps
+its value if the struct is mutated later (value semantics, like
+`pto.local_array_get`).
+
+**Arguments:**
+
+| Name | Type | Description |
+|------|------|-------------|
+| `s` | `!pto.struct<...>` | The struct |
+| `path` | `DenseI64ArrayAttr` | Constant field indices, e.g. `[0, 2]` |
+
+**Results:** `value` — the scalar field type at the end of `path`.
+
+**Constraints & Verification:**
+
+- `path` is non-empty; every index is in range at its level.
+- An intermediate index may only descend into a nested struct.
+- `path` must **end at a scalar field**. A path stopping on a nested
+  `!pto.struct` is rejected — returning the aggregate would copy it out of the
+  parent struct; extend the path to reach a scalar inside it.
+- Result type must equal the field type at the end of `path`.
+
+**Basic Example:**
+
+```mlir
+%r = pto.struct_get %s[0]    : !pto.struct<f16, i8> -> f16      // r = s.f0;
+%v = pto.struct_get %s[0, 1]                                    // v = s.f0.f1;
+   : !pto.struct<!pto.struct<f32, i8>, i16> -> i8
+```
+
+---
+
+##### `pto.struct_set` - Write a Field by Constant Path
+
+**Summary:** Write a value into the field reached by a constant `path` of field
+indices, descending through nested structs.
+
+**Semantics:** `s.fA.fB... = value;`
+
+**Arguments:**
+
+| Name | Type | Description |
+|------|------|-------------|
+| `s` | `!pto.struct<...>` | The struct |
+| `path` | `DenseI64ArrayAttr` | Constant field indices, e.g. `[0, 2]` |
+| `value` | `AnyType` | Value to write (must match the field type) |
+
+**Results:** None.
+
+**Constraints & Verification:**
+
+- `path` is non-empty; every index is in range at its level.
+- An intermediate index may only descend into a nested struct.
+- `path` must **end at a scalar field**, same as `pto.struct_get`. A path
+  stopping on a nested `!pto.struct` is rejected — extend it to reach a scalar.
+- Value type must equal the field type at the end of `path`.
+
+**Basic Example:**
+
+```mlir
+pto.struct_set %s[1], %v : !pto.struct<f16, i8>, i8            // s.f1 = v;
+pto.struct_set %s[0, 0], %v                                    // s.f0.f0 = v;
+   : !pto.struct<!pto.struct<f32, i8>, i16>, f32
+```
+
+When the struct is a function argument the same op emits `s->f0 = v;` — see
+[Section 2.8](#28-ptostructt0-t1--tn-1) for why a struct is carried as a
+pointer.
+
+---
+
 ## 5. Operation Summary Table
 
 | Category | Count | Pipeline |
@@ -9654,5 +10770,6 @@ pto.local_array_set %m[%i, %j], %v
 | Runtime Intrinsics | 4 | - (Pure) |
 | Debug | 3 | - |
 | Stack-Local Array | 3 | - (Scalar / Host) |
+| Stack-Local Struct | 3 | - (Scalar / Host) |
 
-**Total: 110 operations**
+**Total: 113 operations**

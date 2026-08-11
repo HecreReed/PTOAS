@@ -1,0 +1,14 @@
+// RUN: not ptoas --pto-arch=a5 %s 2>&1 | FileCheck %s
+
+module {
+  func.func @cube_kernel()
+      attributes {pto.kernel_kind = #pto.kernel_kind<cube>} {
+    %c0_i32 = arith.constant 0 : i32
+    pto.aic_initialize_pipe {id = 0, dir_mask = 1, slot_size = 1024, local_slot_num = 1}
+      (c2v_consumer_buf = %c0_i32 : i32,
+       v2c_consumer_buf = %c0_i32 : i32)
+    return
+  }
+}
+
+// CHECK: error: 'pto.aic_initialize_pipe' op 'local_slot_num' is only supported for a2/a3 frontend pipe lowering

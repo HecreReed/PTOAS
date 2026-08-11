@@ -1,4 +1,0 @@
-[per-file-ignores]
-"test/samples/**/*.py" = ["E402", "F841"]
-"python/pto/dialects/pto.py" = ["F821"]
-"scripts/package/package.py" = ["F841"]

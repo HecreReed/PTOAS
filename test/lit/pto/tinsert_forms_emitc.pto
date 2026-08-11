@@ -1,0 +1,32 @@
+// RUN: ptoas --pto-arch a3 %s | FileCheck %s
+// RUN: ptoas --pto-arch a5 %s | FileCheck %s
+
+module attributes {"pto.device-spec" = "Ascend950"} {
+  func.func @tinsert_forms() {
+    %c0 = arith.constant 0 : index
+    %pre = arith.constant 7 : i64
+    %src_cast = pto.alloc_tile : !pto.tile_buf<loc=acc, dtype=f32, rows=32, cols=32, v_row=32, v_col=32, blayout=col_major, slayout=row_major, fractal=1024, pad=0>
+    %src_quant = pto.alloc_tile : !pto.tile_buf<loc=acc, dtype=f32, rows=32, cols=32, v_row=32, v_col=32, blayout=col_major, slayout=row_major, fractal=1024, pad=0>
+    %fp = pto.alloc_tile : !pto.tile_buf<loc=scaling, dtype=f16, rows=1, cols=32, v_row=1, v_col=32, blayout=row_major, slayout=none_box, fractal=512, pad=0>
+    %dst_cast = pto.alloc_tile : !pto.tile_buf<loc=mat, dtype=f16, rows=32, cols=32, v_row=32, v_col=32, blayout=col_major, slayout=row_major, fractal=512, pad=0>
+    %dst_quant = pto.alloc_tile : !pto.tile_buf<loc=mat, dtype=i8, rows=32, cols=32, v_row=32, v_col=32, blayout=col_major, slayout=row_major, fractal=512, pad=0>
+
+    pto.tinsert ins(%src_cast, %c0, %c0 : !pto.tile_buf<loc=acc, dtype=f32, rows=32, cols=32, v_row=32, v_col=32, blayout=col_major, slayout=row_major, fractal=1024, pad=0>, index, index)
+                outs(%dst_cast : !pto.tile_buf<loc=mat, dtype=f16, rows=32, cols=32, v_row=32, v_col=32, blayout=col_major, slayout=row_major, fractal=512, pad=0>)
+                {reluPreMode = #pto<relu_pre_mode normal_relu>}
+
+    pto.tinsert ins(%src_quant, %c0, %c0 : !pto.tile_buf<loc=acc, dtype=f32, rows=32, cols=32, v_row=32, v_col=32, blayout=col_major, slayout=row_major, fractal=1024, pad=0>, index, index pre_quant %pre : i64)
+                outs(%dst_quant : !pto.tile_buf<loc=mat, dtype=i8, rows=32, cols=32, v_row=32, v_col=32, blayout=col_major, slayout=row_major, fractal=512, pad=0>)
+                {reluPreMode = #pto<relu_pre_mode normal_relu>}
+
+    pto.tinsert_fp ins(%src_quant, %fp, %c0, %c0 : !pto.tile_buf<loc=acc, dtype=f32, rows=32, cols=32, v_row=32, v_col=32, blayout=col_major, slayout=row_major, fractal=1024, pad=0>, !pto.tile_buf<loc=scaling, dtype=f16, rows=1, cols=32, v_row=1, v_col=32, blayout=row_major, slayout=none_box, fractal=512, pad=0>, index, index)
+                   outs(%dst_quant : !pto.tile_buf<loc=mat, dtype=i8, rows=32, cols=32, v_row=32, v_col=32, blayout=col_major, slayout=row_major, fractal=512, pad=0>)
+                   {reluPreMode = #pto<relu_pre_mode normal_relu>}
+    return
+  }
+}
+
+// CHECK-LABEL: AICORE void tinsert_forms(
+// CHECK: TINSERT<{{.*}}ReluPreMode::NormalRelu>([[DST_CAST:[^,]+]], [[SRC_CAST:[^,]+]], [[ROW:[^,]+]], [[COL:[^)]+]]);
+// CHECK: TINSERT<{{.*}}ReluPreMode::NormalRelu>([[DST_QUANT:[^,]+]], [[SRC_QUANT:[^,]+]], [[PRE:[^,]+]], [[ROW]], [[COL]]);
+// CHECK: TINSERT_FP<{{.*}}ReluPreMode::NormalRelu>([[DST_QUANT]], [[SRC_QUANT]], [[FP:[^,]+]], [[ROW]], [[COL]]);

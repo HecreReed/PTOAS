@@ -1,0 +1,22 @@
+// RUN: ptoas --pto-arch=a5 --pto-backend=vpto --emit-vpto --mlir-print-ir-before=vpto-expand-wrapper-ops %s -o /dev/null 2>&1 | FileCheck %s --check-prefix=ROUNDTRIP
+// RUN: ptoas --pto-arch=a5 --pto-backend=vpto --emit-vpto --mlir-print-ir-after=vpto-expand-wrapper-ops %s -o /dev/null 2>&1 | FileCheck %s --check-prefix=EXPAND
+
+module attributes {"pto.target_arch" = "a5", pto.kernel_kind = #pto.kernel_kind<cube>} {
+  func.func @fp_load_probe(%src: !pto.ptr<f32, l1>,
+                           %dst: !pto.ptr<f32, fb>) {
+    %c0_i64 = arith.constant 0 : i64
+    %c1_i64 = arith.constant 1 : i64
+    %c2_i64 = arith.constant 2 : i64
+
+    pto.mte_l1_fb %src, %dst, %c2_i64
+      nburst(%c1_i64, %c0_i64, %c0_i64)
+      : !pto.ptr<f32, l1>, !pto.ptr<f32, fb>, i64, i64, i64, i64
+    return
+  }
+}
+
+// ROUNDTRIP-LABEL: func.func @fp_load_probe(
+// ROUNDTRIP: pto.mte_l1_fb %{{.*}}, %{{.*}}, %{{.*}} nburst(%{{.*}}, %{{.*}}, %{{.*}})
+
+// EXPAND-LABEL: func.func @fp_load_probe(
+// EXPAND: pto.copy_cbuf_to_fbuf

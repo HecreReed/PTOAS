@@ -1,0 +1,23 @@
+// Copyright (c) 2026 Huawei Technologies Co., Ltd.
+// This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+// CANN Open Software License Agreement Version 2.0 (the "License").
+// Please refer to the License for details. You may not use this file except in compliance with the License.
+// THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+// INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+// See LICENSE in the root of the software repository for the full text of the License.
+
+// RUN: not ptoas --pto-arch=a5 --pto-backend=vpto --emit-vpto %s -o /dev/null 2>&1 | FileCheck %s
+
+module attributes {pto.target_arch = "a5", pto.kernel_kind = #pto.kernel_kind<cube>} {
+  func.func @mad_tf32_non_f32_invalid(
+      %lhs: !pto.ptr<f16, l0a>,
+      %rhs: !pto.ptr<f16, l0b>,
+      %dst: !pto.ptr<f32, l0c>) attributes {pto.kernel} {
+    %c16 = arith.constant 16 : i64
+    pto.mad %lhs, %rhs, %dst, %c16, %c16, %c16 tf32_mode(round_even)
+      : !pto.ptr<f16, l0a>, !pto.ptr<f16, l0b>, !pto.ptr<f32, l0c>, i64, i64, i64
+    return
+  }
+}
+
+// CHECK: requires tf32_mode only for f32 lhs/rhs/dst element types

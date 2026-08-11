@@ -1,0 +1,51 @@
+// Copyright (c) 2026 Huawei Technologies Co., Ltd.
+// This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+// CANN Open Software License Agreement Version 2.0 (the "License").
+// Please refer to the License for details. You may not use this file except in compliance with the License.
+// THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+// INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+// See LICENSE in the root of the software repository for the full text of the License.
+
+// RUN: ptoas --cann-output-version=9.0.0 --emit-pto-ir %s -o - 2>&1 | FileCheck %s
+// Guards backend child assembly ABI visibility. Non-entry helpers may remain
+// public in MLIR for cross-child symbol lookup, but only pto.visibility =
+// "external" should preserve artifact-level external visibility.
+
+module attributes {pto.target_arch = "a5"} {
+  module attributes {pto.backend = "emitc"} {
+    func.func private @helper_internal()
+    func.func private @helper_external()
+
+    func.func @entry() attributes {pto.entry} {
+      func.call @helper_internal() : () -> ()
+      func.call @helper_external() : () -> ()
+      return
+    }
+  }
+
+  module attributes {pto.backend = "emitc"} {
+    func.func public @helper_internal() {
+      return
+    }
+
+    func.func public @helper_external() attributes {pto.visibility = "external"} {
+      return
+    }
+  }
+}
+
+// CHECK-LABEL: module attributes {pto.backend = "emitc", pto.target_arch = "a5"} {
+// CHECK: module attributes {pto.backend = "emitc"} {
+// CHECK: func.func private @helper_internal()
+// CHECK: func.func private @helper_external()
+// CHECK: func.func @entry() attributes {pto.entry} {
+// CHECK: call @helper_internal() : () -> ()
+// CHECK: call @helper_external() : () -> ()
+// CHECK: return
+// CHECK: module attributes {pto.backend = "emitc"} {
+// CHECK: func.func public @helper_internal() {
+// CHECK-NEXT: return
+// CHECK-NEXT: }
+// CHECK: func.func public @helper_external() attributes {pto.visibility = "external"} {
+// CHECK-NEXT: return
+// CHECK-NEXT: }

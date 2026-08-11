@@ -9,10 +9,10 @@
 // RUN: not ptoas --pto-arch=a3 %s 2>&1 | FileCheck %s
 
 func.func @tprefetch_low_precision_memref_invalid_a3(
-    %src: memref<16x16x!pto.hif8, #pto.address_space<gm>>,
-    %dst: memref<16x16xi8, #pto.address_space<vec>>) {
-  pto.tprefetch ins(%src : memref<16x16x!pto.hif8, #pto.address_space<gm>>)
-                outs(%dst : memref<16x16xi8, #pto.address_space<vec>>)
+    %src: !pto.partition_tensor_view<16x16x!pto.hif8>,
+    %dst: !pto.tile_buf<vec, 16x32xi8, valid=16x16>) {
+  pto.tprefetch ins(%src : !pto.partition_tensor_view<16x16x!pto.hif8>)
+                outs(%dst : !pto.tile_buf<vec, 16x32xi8, valid=16x16>)
   return
 }
 

@@ -1,18 +1,51 @@
+// Copyright (c) 2026 Huawei Technologies Co., Ltd.
+// This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+// CANN Open Software License Agreement Version 2.0 (the "License").
+// Please refer to the License for details. You may not use this file except in compliance with the License.
+// THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+// INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+// See LICENSE in the root of the software repository for the full text of the License.
+//
 // RUN: ptoas --pto-arch=a5 %s 2>&1 | FileCheck %s
 
 module {
-  func.func @syncall_emitc(%gm: memref<64xi32, #pto.address_space<gm>>,
-                           %ub: memref<64xi32, #pto.address_space<vec>>,
-                           %l1: memref<64xi32, #pto.address_space<mat>>,
-                           %used: i32) {
-    pto.syncall(%gm, %ub, %l1, %used : memref<64xi32, #pto.address_space<gm>>, memref<64xi32, #pto.address_space<vec>>, memref<64xi32, #pto.address_space<mat>>, i32) mode = #pto.sync_all_mode<soft>, core_type = #pto.sync_core_type<mix>
+  func.func @syncall_emitc(
+      %gm: !pto.ptr<i32, gm>, %used: i32) {
+    pto.syncall(%gm, %used : !pto.ptr<i32, gm>, i32) mode = #pto.sync_all_mode<soft>, core_type = #pto.sync_core_type<aiv_only>
+    pto.syncall(%gm, %used : !pto.ptr<i32, gm>, i32) mode = #pto.sync_all_mode<soft>, core_type = #pto.sync_core_type<aic_only>
+    pto.syncall(%gm, %used : !pto.ptr<i32, gm>, i32) mode = #pto.sync_all_mode<soft>, core_type = #pto.sync_core_type<mix>
+    pto.syncall(%gm : !pto.ptr<i32, gm>) mode = #pto.sync_all_mode<soft>, core_type = #pto.sync_core_type<mix>
+    pto.syncall() mode = #pto.sync_all_mode<hard>, core_type = #pto.sync_core_type<aiv_only>
+    pto.syncall() mode = #pto.sync_all_mode<hard>, core_type = #pto.sync_core_type<aic_only>
     pto.syncall() mode = #pto.sync_all_mode<hard>, core_type = #pto.sync_core_type<mix>
     return
   }
 }
 
-// CHECK-LABEL: __global__ AICORE void syncall_emitc(
-// CHECK: Tile<TileType::Vec, int32_t, 1, 64
-// CHECK: Tile<TileType::Mat, int32_t, 1, 64
-// CHECK: SYNCALL<SyncAllMode::Soft, SyncCoreType::Mix>(
+// CHECK-LABEL: AICORE void syncall_emitc(
+// CHECK-NOT: Tile<TileType::Vec
+// CHECK-NOT: Tile<TileType::Mat
+// CHECK-NOT: TASSIGN
+// CHECK: pto::Shape<1, 1, 1, 1, 16>
+// CHECK: pto::Stride<16, 16, 16, 16, 1>
+// CHECK: GlobalTensor<int32_t, pto::Shape<1, 1, 1, 1, 16>, pto::Stride<16, 16, 16, 16, 1>, pto::Layout::ND>
+// CHECK: SYNCALL<SyncAllMode::Soft, SyncCoreType::AIVOnly>({{[^,]+}}, {{[^)]+}});
+// CHECK-NOT: Tile<TileType::Vec
+// CHECK-NOT: Tile<TileType::Mat
+// CHECK-NOT: TASSIGN
+// CHECK: SYNCALL<SyncAllMode::Soft, SyncCoreType::AICOnly>({{[^,]+}}, {{[^)]+}});
+// CHECK-NOT: Tile<TileType::Vec
+// CHECK-NOT: Tile<TileType::Mat
+// CHECK-NOT: TASSIGN
+// CHECK: SYNCALL<SyncAllMode::Soft, SyncCoreType::Mix>({{[^,]+}}, {{[^)]+}});
+// CHECK-NOT: Tile<TileType::Vec
+// CHECK-NOT: Tile<TileType::Mat
+// CHECK-NOT: TASSIGN
+// CHECK: SYNCALL<SyncAllMode::Soft, SyncCoreType::Mix>({{[^,]+}}, int32_t{0});
+// CHECK-NOT: Tile<TileType::Vec
+// CHECK-NOT: Tile<TileType::Mat
+// CHECK-NOT: TASSIGN
+// CHECK: SYNCALL<SyncCoreType::AIVOnly>();
+// CHECK: SYNCALL<SyncCoreType::AICOnly>();
 // CHECK: SYNCALL<SyncCoreType::Mix>();
+// CHECK-NOT: TASSIGN

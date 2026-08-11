@@ -1,0 +1,179 @@
+// RUN: ( mkdir -p %T && ptoas --pto-arch=a5 --pto-backend=vpto %s -o %t --mlir-print-ir-after=convert-func-to-llvm 2>&1 || true ) | FileCheck %s
+
+// Copyright (c) 2026 Huawei Technologies Co., Ltd.
+// This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+// CANN Open Software License Agreement Version 2.0 (the "License").
+// Please refer to the License for details. You may not use this file except in compliance with the License.
+// THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+// INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+// See LICENSE in the root of the software repository for the full text of the License.
+
+// Test LowerPipeEventDynSyncOpPattern for SetFlagDynOp and WaitFlagDynOp lowering to LLVM IR
+
+module attributes {pto.target_arch = "a5", pto.kernel_kind = #pto.kernel_kind<vector>} {
+  
+  // ===----------------------------------------------------------------------===
+  // Section 1: Basic index type event ID
+  // ===----------------------------------------------------------------------===
+  
+  func.func @pipe_event_dyn_sync_basic(%event_id: index) attributes {pto.kernel} {
+    pto.set_flag_dyn [#pto.pipe<PIPE_MTE2>, #pto.pipe<PIPE_MTE3>, %event_id]
+    pto.wait_flag_dyn [#pto.pipe<PIPE_MTE2>, #pto.pipe<PIPE_MTE3>, %event_id]
+    return
+  }
+
+  // ===----------------------------------------------------------------------===
+  // Section 2: Pipe value boundary tests
+  // ===----------------------------------------------------------------------===
+  
+  // Test minimum pipe values: PIPE_S=0, PIPE_V=1, PIPE_M=2
+  func.func @pipe_event_dyn_sync_min_pipes(%eid: index) attributes {pto.kernel} {
+    pto.set_flag_dyn [#pto.pipe<PIPE_S>, #pto.pipe<PIPE_V>, %eid]
+    pto.wait_flag_dyn [#pto.pipe<PIPE_S>, #pto.pipe<PIPE_M>, %eid]
+    return
+  }
+  
+  // Test MTE pipes: PIPE_MTE1=3, PIPE_MTE2=4, PIPE_MTE3=5, PIPE_MTE4=7, PIPE_MTE5=8
+  func.func @pipe_event_dyn_sync_mte_pipes(%eid: index) attributes {pto.kernel} {
+    pto.set_flag_dyn [#pto.pipe<PIPE_MTE1>, #pto.pipe<PIPE_MTE2>, %eid]
+    pto.wait_flag_dyn [#pto.pipe<PIPE_MTE3>, #pto.pipe<PIPE_MTE4>, %eid]
+    pto.set_flag_dyn [#pto.pipe<PIPE_MTE5>, #pto.pipe<PIPE_V>, %eid]
+    return
+  }
+  
+  // Test high pipe values: PIPE_FIX=10, PIPE_V2=9, PIPE_ALL=6
+  func.func @pipe_event_dyn_sync_high_pipes(%eid: index) attributes {pto.kernel} {
+    pto.set_flag_dyn [#pto.pipe<PIPE_FIX>, #pto.pipe<PIPE_V2>, %eid]
+    pto.wait_flag_dyn [#pto.pipe<PIPE_ALL>, #pto.pipe<PIPE_FIX>, %eid]
+    return
+  }
+  
+  // Test virtual pipes: VIRTUAL_PIPE_MTE2_L1A=11, VIRTUAL_PIPE_MTE2_L1B=12
+  func.func @pipe_event_dyn_sync_virtual_pipes(%eid: index) attributes {pto.kernel} {
+    pto.set_flag_dyn [#pto.pipe<VIRTUAL_PIPE_MTE2_L1A>, #pto.pipe<VIRTUAL_PIPE_MTE2_L1B>, %eid]
+    pto.wait_flag_dyn [#pto.pipe<VIRTUAL_PIPE_MTE2_L1A>, #pto.pipe<VIRTUAL_PIPE_MTE2_L1B>, %eid]
+    return
+  }
+
+  // ===----------------------------------------------------------------------===
+  // Section 3: Computed event IDs
+  // ===----------------------------------------------------------------------===
+  
+  func.func @pipe_event_dyn_sync_computed(%base: index, %offset: index) attributes {pto.kernel} {
+    %eid = arith.addi %base, %offset : index
+    pto.set_flag_dyn [#pto.pipe<PIPE_V>, #pto.pipe<PIPE_M>, %eid]
+    pto.wait_flag_dyn [#pto.pipe<PIPE_V>, #pto.pipe<PIPE_M>, %eid]
+    return
+  }
+
+  // ===----------------------------------------------------------------------===
+  // Section 4: Constant event IDs
+  // ===----------------------------------------------------------------------===
+  
+  func.func @pipe_event_dyn_sync_const() attributes {pto.kernel} {
+    %c7 = arith.constant 7 : index
+    pto.set_flag_dyn [#pto.pipe<PIPE_MTE3>, #pto.pipe<PIPE_MTE4>, %c7]
+    pto.wait_flag_dyn [#pto.pipe<PIPE_MTE3>, #pto.pipe<PIPE_MTE4>, %c7]
+    return
+  }
+
+  // ===----------------------------------------------------------------------===
+  // Section 5: Standalone operations (not paired)
+  // ===----------------------------------------------------------------------===
+  
+  func.func @pipe_event_dyn_sync_only_set(%eid: index) attributes {pto.kernel} {
+    pto.set_flag_dyn [#pto.pipe<PIPE_MTE2>, #pto.pipe<PIPE_V>, %eid]
+    return
+  }
+  
+  func.func @pipe_event_dyn_sync_only_wait(%eid: index) attributes {pto.kernel} {
+    pto.wait_flag_dyn [#pto.pipe<PIPE_MTE2>, #pto.pipe<PIPE_V>, %eid]
+    return
+  }
+}
+
+// ===----------------------------------------------------------------------===
+// CHECK patterns for Section 1: Basic
+// ===----------------------------------------------------------------------===
+
+// CHECK-LABEL: llvm.func @pipe_event_dyn_sync_basic_mix_aiv
+// CHECK: llvm.mlir.constant(4 : i64) : i64
+// CHECK: llvm.mlir.constant(5 : i64) : i64
+// CHECK: llvm.call @llvm.hivm.SET.FLAG.REG
+// CHECK: llvm.mlir.constant(4 : i64) : i64
+// CHECK: llvm.mlir.constant(5 : i64) : i64
+// CHECK: llvm.call @llvm.hivm.WAIT.FLAG.REG
+
+// ===----------------------------------------------------------------------===
+// CHECK patterns for Section 2: Pipe boundaries
+// ===----------------------------------------------------------------------===
+
+// CHECK-LABEL: llvm.func @pipe_event_dyn_sync_min_pipes_mix_aiv
+// CHECK: llvm.mlir.constant(0 : i64) : i64
+// CHECK: llvm.mlir.constant(1 : i64) : i64
+// CHECK: llvm.call @llvm.hivm.SET.FLAG.REG
+// CHECK: llvm.mlir.constant(0 : i64) : i64
+// CHECK: llvm.mlir.constant(2 : i64) : i64
+// CHECK: llvm.call @llvm.hivm.WAIT.FLAG.REG
+
+// CHECK-LABEL: llvm.func @pipe_event_dyn_sync_mte_pipes_mix_aiv
+// CHECK: llvm.mlir.constant(3 : i64) : i64
+// CHECK: llvm.mlir.constant(4 : i64) : i64
+// CHECK: llvm.call @llvm.hivm.SET.FLAG.REG
+// CHECK: llvm.mlir.constant(5 : i64) : i64
+// CHECK: llvm.mlir.constant(7 : i64) : i64
+// CHECK: llvm.call @llvm.hivm.WAIT.FLAG.REG
+// CHECK: llvm.mlir.constant(8 : i64) : i64
+// CHECK: llvm.mlir.constant(1 : i64) : i64
+// CHECK: llvm.call @llvm.hivm.SET.FLAG.REG
+
+// CHECK-LABEL: llvm.func @pipe_event_dyn_sync_high_pipes_mix_aiv
+// CHECK: llvm.mlir.constant(10 : i64) : i64
+// CHECK: llvm.mlir.constant(9 : i64) : i64
+// CHECK: llvm.call @llvm.hivm.SET.FLAG.REG
+// CHECK: llvm.mlir.constant(6 : i64) : i64
+// CHECK: llvm.mlir.constant(10 : i64) : i64
+// CHECK: llvm.call @llvm.hivm.WAIT.FLAG.REG
+
+// CHECK-LABEL: llvm.func @pipe_event_dyn_sync_virtual_pipes_mix_aiv
+// CHECK: llvm.mlir.constant(11 : i64) : i64
+// CHECK: llvm.mlir.constant(12 : i64) : i64
+// CHECK: llvm.call @llvm.hivm.SET.FLAG.REG
+// CHECK: llvm.mlir.constant(11 : i64) : i64
+// CHECK: llvm.mlir.constant(12 : i64) : i64
+// CHECK: llvm.call @llvm.hivm.WAIT.FLAG.REG
+
+// ===----------------------------------------------------------------------===
+// CHECK patterns for Section 3: Computed event IDs
+// ===----------------------------------------------------------------------===
+
+// CHECK-LABEL: llvm.func @pipe_event_dyn_sync_computed_mix_aiv
+// CHECK: llvm.add
+// CHECK: llvm.mlir.constant(1 : i64) : i64
+// CHECK: llvm.mlir.constant(2 : i64) : i64
+// CHECK: llvm.call @llvm.hivm.SET.FLAG.REG
+// CHECK: llvm.call @llvm.hivm.WAIT.FLAG.REG
+
+// ===----------------------------------------------------------------------===
+// CHECK patterns for Section 4: Constant event IDs
+// ===----------------------------------------------------------------------===
+
+// CHECK-LABEL: llvm.func @pipe_event_dyn_sync_const_mix_aiv
+// CHECK: llvm.mlir.constant(5 : i64) : i64
+// CHECK: llvm.mlir.constant(7 : i64) : i64
+// CHECK: llvm.mlir.constant(7 : i64) : i64
+// CHECK: llvm.call @llvm.hivm.SET.FLAG.REG
+// CHECK: llvm.mlir.constant(5 : i64) : i64
+// CHECK: llvm.mlir.constant(7 : i64) : i64
+// CHECK: llvm.mlir.constant(7 : i64) : i64
+// CHECK: llvm.call @llvm.hivm.WAIT.FLAG.REG
+
+// ===----------------------------------------------------------------------===
+// CHECK patterns for Section 5: Standalone operations
+// ===----------------------------------------------------------------------===
+
+// CHECK-LABEL: llvm.func @pipe_event_dyn_sync_only_set_mix_aiv
+// CHECK: llvm.call @llvm.hivm.SET.FLAG.REG
+
+// CHECK-LABEL: llvm.func @pipe_event_dyn_sync_only_wait_mix_aiv
+// CHECK: llvm.call @llvm.hivm.WAIT.FLAG.REG

@@ -1,0 +1,57 @@
+// Copyright (c) 2026 Huawei Technologies Co., Ltd.
+// This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+// CANN Open Software License Agreement Version 2.0 (the "License").
+// Please refer to the License for details. You may not use this file except in compliance with the License.
+// THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+// INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+// See LICENSE in the root of the software repository for the full text of the License.
+
+// RUN: ptoas --pto-level=level3 --pto-arch=a5 \
+// RUN:   --mlir-print-ir-after=pto-resolve-reserved-buffers %s -o /dev/null 2>&1 \
+// RUN:   | FileCheck %s --check-prefix=NATIVE
+// RUN: ptoas --pto-level=level3 --pto-arch=a3 --enable-insert-sync %s \
+// RUN:   | FileCheck %s --check-prefix=EMITC
+
+module {
+  func.func private @tsub_arg(%a: !pto.tile_buf<vec, 8x16xi16>, %b: !pto.tile_buf<vec, 8x16xi16>, %dst: !pto.tile_buf<vec, 8x16xi16>) {
+    pto.tsub ins(%a, %b : !pto.tile_buf<vec, 8x16xi16>, !pto.tile_buf<vec, 8x16xi16>) outs(%dst : !pto.tile_buf<vec, 8x16xi16>)
+    return
+  }
+  func.func private @tsubs_arg(%src: !pto.tile_buf<vec, 8x16xi16>, %dst: !pto.tile_buf<vec, 8x16xi16>, %scalar: i16) {
+    pto.tsubs ins(%src, %scalar : !pto.tile_buf<vec, 8x16xi16>, i16) outs(%dst : !pto.tile_buf<vec, 8x16xi16>)
+    return
+  }
+  func.func private @tsubc_arg(%a: !pto.tile_buf<vec, 8x16xi16>, %b: !pto.tile_buf<vec, 8x16xi16>, %c: !pto.tile_buf<vec, 8x16xi16>, %dst: !pto.tile_buf<vec, 8x16xi16>) {
+    pto.tsubc ins(%a, %b, %c : !pto.tile_buf<vec, 8x16xi16>, !pto.tile_buf<vec, 8x16xi16>, !pto.tile_buf<vec, 8x16xi16>) outs(%dst : !pto.tile_buf<vec, 8x16xi16>)
+    return
+  }
+  func.func private @tsubsc_arg(%a: !pto.tile_buf<vec, 8x16xi16>, %b: !pto.tile_buf<vec, 8x16xi16>, %dst: !pto.tile_buf<vec, 8x16xi16>, %scalar: i16) {
+    pto.tsubsc ins(%a, %scalar, %b : !pto.tile_buf<vec, 8x16xi16>, i16, !pto.tile_buf<vec, 8x16xi16>) outs(%dst : !pto.tile_buf<vec, 8x16xi16>)
+    return
+  }
+}
+
+// NATIVE-LABEL: func.func private @tsub_arg
+// NATIVE-SAME: !pto.tile_buf<vec, 8x16xi16>
+// NATIVE: pto.tsub
+// NATIVE-LABEL: func.func private @tsubs_arg
+// NATIVE-SAME: !pto.tile_buf<vec, 8x16xi16>
+// NATIVE: pto.tsubs
+// NATIVE-LABEL: func.func private @tsubc_arg
+// NATIVE-SAME: !pto.tile_buf<vec, 8x16xi16>
+// NATIVE: pto.tsubc
+// NATIVE-LABEL: func.func private @tsubsc_arg
+// NATIVE-SAME: !pto.tile_buf<vec, 8x16xi16>
+// NATIVE: pto.tsubsc
+// NATIVE-NOT: memref<
+
+// EMITC-LABEL: tsub_arg(
+// EMITC: TSUB(
+// EMITC-LABEL: tsubs_arg(
+// EMITC: TSUBS(
+// EMITC-LABEL: tsubc_arg(
+// EMITC: TSUB(
+// EMITC: TADD(
+// EMITC-LABEL: tsubsc_arg(
+// EMITC: TSUBS(
+// EMITC: TADD(

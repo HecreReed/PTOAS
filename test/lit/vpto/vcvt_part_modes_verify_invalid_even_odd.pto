@@ -1,0 +1,22 @@
+// Copyright (c) 2026 Huawei Technologies Co., Ltd.
+// This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+// CANN Open Software License Agreement Version 2.0 (the "License").
+// Please refer to the License for details. You may not use this file except in compliance with the License.
+// THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+// INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+// See LICENSE in the root of the software repository for the full text of the License.
+
+// RUN: not ptoas --pto-arch=a5 --pto-backend=vpto %s 2>&1 | FileCheck %s
+
+// CHECK: error: 'pto.vcvt' op part must be EVEN or ODD for 8/16 and 16/32 vcvt forms
+
+module attributes {pto.target_arch = "a5"} {
+  func.func @vcvt_u16_to_u8_rejects_p0(%seed: ui16) {
+    pto.vecscope {
+      %mask = pto.pset_b16 "PAT_ALL" : !pto.mask<b16>
+      %src = pto.vbr %seed : ui16 -> !pto.vreg<128xui16>
+      %bad = pto.vcvt %src, %mask {sat = "SAT", part = "P0"} : !pto.vreg<128xui16>, !pto.mask<b16> -> !pto.vreg<256xui8>
+    }
+    return
+  }
+}

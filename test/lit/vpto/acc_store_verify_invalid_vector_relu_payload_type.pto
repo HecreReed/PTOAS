@@ -1,0 +1,21 @@
+// RUN: not ptoas --pto-arch=a5 %s -o - 2>&1 | FileCheck %s
+
+module attributes {"pto.target_arch" = "a5"} {
+  func.func @acc_store_verify_invalid_vector_relu_payload_type(
+      %src: !pto.ptr<f32, l0c>, %dst: !pto.ptr<f32, ub>) {
+    %c0_i64 = arith.constant 0 : i64
+    %c16_i64 = arith.constant 16 : i64
+    %c32_i64 = arith.constant 32 : i64
+    %payload = pto.castptr %c0_i64 : i64 -> !pto.ptr<ui64, fb>
+
+    pto.mte_l0c_ub %src, %dst, %c16_i64, %c16_i64, %c16_i64, %c32_i64,
+      dst_mode(%c0_i64),
+      pre_relu(%payload, mode = vector_relu)
+      : !pto.ptr<f32, l0c>, !pto.ptr<f32, ub>, i64, i64, i64, i64, i64,
+        !pto.ptr<ui64, fb>
+
+    return
+  }
+}
+
+// CHECK: vector_relu requires scaling pointer element type to be f16, bf16, or f32

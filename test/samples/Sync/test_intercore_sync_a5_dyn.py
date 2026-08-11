@@ -7,8 +7,8 @@
 # INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
 # See LICENSE in the root of the software repository for the full text of the License.
 
-from mlir.ir import Context, F32Type, IndexType, InsertionPoint, Location, Module
-from mlir.dialects import arith, func, pto
+from ptoas.mlir.ir import Context, F32Type, IndexType, InsertionPoint, Location, Module, UnitAttr
+from ptoas.mlir.dialects import arith, func, pto
 
 
 def build():
@@ -23,11 +23,14 @@ def build():
 
             with InsertionPoint(module.body):
                 fn = func.FuncOp("test_intercore_sync_a5_dyn", fn_ty)
+                fn.operation.attributes["pto.entry"] = UnitAttr.get(ctx)
                 entry = fn.add_entry_block()
 
             with InsertionPoint(entry):
                 c0 = arith.ConstantOp(idx, 0).result
                 c0_evt = arith.ConstantOp(idx, 0).result
+                c16_evt = arith.ConstantOp(idx, 16).result
+                c16_evt_pair = arith.AddIOp(c0_evt, c16_evt).result
                 two = arith.ConstantOp(f32, 2.0).result
                 out = entry.arguments[0]
                 pipe_fix = pto.PipeAttr.get(pto.PIPE.PIPE_FIX, ctx)
@@ -36,6 +39,7 @@ def build():
                 sec_cube = pto.SectionCubeOp()
                 with InsertionPoint(sec_cube.body.blocks.append()):
                     pto.sync_set(pipe_fix, c0_evt)
+                    pto.sync_set(pipe_fix, c16_evt_pair)
 
                 sec_vec = pto.SectionVectorOp()
                 with InsertionPoint(sec_vec.body.blocks.append()):

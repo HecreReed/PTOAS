@@ -1,0 +1,55 @@
+// Copyright (c) 2026 Huawei Technologies Co., Ltd.
+// This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+// CANN Open Software License Agreement Version 2.0 (the "License").
+// Please refer to the License for details. You may not use this file except in compliance with the License.
+// THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+// INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+// See LICENSE in the root of the software repository for the full text of the License.
+
+// Guards that OpScheduling normalization does NOT simply drop the whole
+// planned group when it cannot be compacted. Here a single planned group 0
+// appears as two physical spans of length 2 each, separated by an unmovable
+// producer-chain op X. Both spans are retained and re-numbered as independent
+// contiguous groups 0 and 1 (proving the fix is split-by-span, not undo).
+//
+// RUN: pto-test-opt %s -pto-op-scheduling | FileCheck %s --check-prefix=TWO
+
+module {
+  func.func @op_scheduling_split_two_spans(
+      %full0: !pto.tile_buf<vec, 32x32xf32>,
+      %full1: !pto.tile_buf<vec, 32x32xf32>,
+      %full2: !pto.tile_buf<vec, 32x32xf32>,
+      %full3: !pto.tile_buf<vec, 32x32xf32>,
+      %full4: !pto.tile_buf<vec, 32x32xf32>) {
+    %tmp0 = pto.alloc_tile : !pto.tile_buf<vec, 32x32xf32>
+    %tmp1 = pto.alloc_tile : !pto.tile_buf<vec, 32x32xf32>
+    %bridge = pto.alloc_tile : !pto.tile_buf<vec, 32x32xf32>
+    %tmp2 = pto.alloc_tile : !pto.tile_buf<vec, 32x32xf32>
+    %tmp3 = pto.alloc_tile : !pto.tile_buf<vec, 32x32xf32>
+
+    // Span [A, B] (group 0, order 0,1): A writes %tmp0, B reads %tmp0.
+    pto.tadd ins(%full0, %full1 : !pto.tile_buf<vec, 32x32xf32>, !pto.tile_buf<vec, 32x32xf32>) outs(%tmp0 : !pto.tile_buf<vec, 32x32xf32>) {pto.fusion.group_id = 0 : i64, pto.fusion.order = 0 : i64}
+    pto.tadd ins(%tmp0, %full2 : !pto.tile_buf<vec, 32x32xf32>, !pto.tile_buf<vec, 32x32xf32>) outs(%tmp1 : !pto.tile_buf<vec, 32x32xf32>) {pto.fusion.group_id = 0 : i64, pto.fusion.order = 1 : i64}
+    // X reads B's %tmp1 and produces %bridge for C. B cannot move after X
+    // because X consumes B's output, and C cannot move before X because X
+    // defines C's input, so [A, B] and [C, D] cannot be compacted together.
+    pto.tadd ins(%tmp1, %full3 : !pto.tile_buf<vec, 32x32xf32>, !pto.tile_buf<vec, 32x32xf32>) outs(%bridge : !pto.tile_buf<vec, 32x32xf32>)
+    // Span [C, D] (group 0, order 2,3): C reads %bridge, writes %tmp2; D reads %tmp2.
+    pto.tadd ins(%bridge, %full4 : !pto.tile_buf<vec, 32x32xf32>, !pto.tile_buf<vec, 32x32xf32>) outs(%tmp2 : !pto.tile_buf<vec, 32x32xf32>) {pto.fusion.group_id = 0 : i64, pto.fusion.order = 2 : i64}
+    pto.tadd ins(%tmp2, %full0 : !pto.tile_buf<vec, 32x32xf32>, !pto.tile_buf<vec, 32x32xf32>) outs(%tmp3 : !pto.tile_buf<vec, 32x32xf32>) {pto.fusion.group_id = 0 : i64, pto.fusion.order = 3 : i64}
+    return
+  }
+}
+
+// TWO-LABEL: func.func @op_scheduling_split_two_spans(
+// TWO: pto.tadd ins(%arg0, %arg1
+// TWO-SAME: {pto.fusion.group_id = 0 : i64, pto.fusion.order = 0 : i64}
+// TWO-NEXT: pto.tadd ins(%{{[0-9]+}}, %arg2
+// TWO-SAME: {pto.fusion.group_id = 0 : i64, pto.fusion.order = 1 : i64}
+// TWO-NEXT: pto.tadd ins(%{{[0-9]+}}, %arg3
+// TWO-NOT: pto.fusion.group_id
+// TWO-NOT: pto.fusion.order
+// TWO-NEXT: pto.tadd ins(%{{[0-9]+}}, %arg4
+// TWO-SAME: {pto.fusion.group_id = 1 : i64, pto.fusion.order = 0 : i64}
+// TWO-NEXT: pto.tadd ins(%{{[0-9]+}}, %arg0
+// TWO-SAME: {pto.fusion.group_id = 1 : i64, pto.fusion.order = 1 : i64}

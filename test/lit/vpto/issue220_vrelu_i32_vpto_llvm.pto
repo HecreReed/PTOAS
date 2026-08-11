@@ -1,0 +1,39 @@
+// Copyright (c) 2026 Huawei Technologies Co., Ltd.
+// This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+// CANN Open Software License Agreement Version 2.0 (the "License").
+// Please refer to the License for details. You may not use this file except in compliance with the License.
+// THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+// INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+// See LICENSE in the root of the software repository for the full text of the License.
+
+// Regression test for issue #220: direct VPTO `pto.vrelu` should accept both
+// signless and signed i32 vectors and lower them to the same HIVM callee.
+//
+// RUN: ptoas --cann-output-version=9.0.0 --pto-arch=a5 --pto-backend=vpto --emit-vpto-llvm-ir %s -o - 2>&1 | FileCheck %s
+
+module attributes {pto.target_arch = "a5", pto.kernel_kind = #pto.kernel_kind<vector>} {
+  func.func @vrelu_signless_i32_store(%value: !pto.vreg<64xi32>, %dst: !pto.ptr<i32, ub>) attributes {pto.kernel} {
+    %c0 = arith.constant 0 : index
+    pto.vecscope {
+      %mask = pto.pset_b32 "PAT_ALL" : !pto.mask<b32>
+      %out = pto.vrelu %value, %mask : !pto.vreg<64xi32>, !pto.mask<b32> -> !pto.vreg<64xi32>
+      pto.vsts %out, %dst[%c0], %mask : !pto.vreg<64xi32>, !pto.ptr<i32, ub>, !pto.mask<b32>
+    }
+    return
+  }
+
+  func.func @vrelu_signed_i32_store(%value: !pto.vreg<64xsi32>, %dst: !pto.ptr<si32, ub>) attributes {pto.kernel} {
+    %c0 = arith.constant 0 : index
+    pto.vecscope {
+      %mask = pto.pset_b32 "PAT_ALL" : !pto.mask<b32>
+      %out = pto.vrelu %value, %mask : !pto.vreg<64xsi32>, !pto.mask<b32> -> !pto.vreg<64xsi32>
+      pto.vsts %out, %dst[%c0], %mask : !pto.vreg<64xsi32>, !pto.ptr<si32, ub>, !pto.mask<b32>
+    }
+    return
+  }
+}
+
+// CHECK-LABEL: define void @vrelu_signless_i32_store_mix_aiv
+// CHECK: call <64 x i32> @llvm.hivm.vrelu.x.v64i32
+// CHECK-LABEL: define void @vrelu_signed_i32_store_mix_aiv
+// CHECK: call <64 x i32> @llvm.hivm.vrelu.x.v64i32

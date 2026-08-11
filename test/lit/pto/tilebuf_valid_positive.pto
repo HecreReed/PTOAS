@@ -1,0 +1,39 @@
+// RUN: ptoas --pto-arch=a3 --emit-pto-ir %s -o - 2>&1 | FileCheck %s
+
+// CHECK: module attributes
+// CHECK-LABEL: func.func @test_vec_unboxed_rowmajor
+// CHECK-LABEL: func.func @test_vec_unboxed_colmajor
+// CHECK-LABEL: func.func @test_left_boxed_fractal512
+// CHECK-LABEL: func.func @test_acc_fractal1024
+// CHECK-LABEL: func.func @test_fractal32
+// CHECK-LABEL: func.func @test_rows_one_exempt
+
+func.func @test_vec_unboxed_rowmajor() attributes {pto.kernel_kind = #pto.kernel_kind<vector>} {
+  %tb1 = pto.alloc_tile : !pto.tile_buf<loc=vec, dtype=f16, rows=16, cols=32, v_row=16, v_col=32, blayout=row_major, slayout=none_box, fractal=512, pad=0>
+  return
+}
+
+func.func @test_vec_unboxed_colmajor() attributes {pto.kernel_kind = #pto.kernel_kind<vector>} {
+  %tb2 = pto.alloc_tile : !pto.tile_buf<loc=vec, dtype=f32, rows=16, cols=64, v_row=16, v_col=64, blayout=col_major, slayout=none_box, fractal=512, pad=0>
+  return
+}
+
+func.func @test_left_boxed_fractal512() attributes {pto.kernel_kind = #pto.kernel_kind<vector>} {
+  %tb3 = pto.alloc_tile : !pto.tile_buf<loc=left, dtype=f16, rows=32, cols=32, v_row=32, v_col=32, blayout=row_major, slayout=row_major, fractal=512, pad=0>
+  return
+}
+
+func.func @test_acc_fractal1024() attributes {pto.kernel_kind = #pto.kernel_kind<vector>} {
+  %tb4 = pto.alloc_tile : !pto.tile_buf<loc=acc, dtype=f32, rows=16, cols=16, v_row=16, v_col=16, blayout=row_major, slayout=row_major, fractal=1024, pad=0>
+  return
+}
+
+func.func @test_fractal32() attributes {pto.kernel_kind = #pto.kernel_kind<vector>} {
+  %tb5 = pto.alloc_tile : !pto.tile_buf<loc=mat, dtype=f16, rows=16, cols=16, v_row=16, v_col=16, blayout=row_major, slayout=row_major, fractal=32, pad=0>
+  return
+}
+
+func.func @test_rows_one_exempt() attributes {pto.kernel_kind = #pto.kernel_kind<vector>} {
+  %tb6 = pto.alloc_tile : !pto.tile_buf<loc=left, dtype=f16, rows=1, cols=32, v_row=1, v_col=32, blayout=row_major, slayout=row_major, fractal=512, pad=0>
+  return
+}

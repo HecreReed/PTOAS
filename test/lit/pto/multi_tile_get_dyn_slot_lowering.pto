@@ -1,0 +1,66 @@
+// Copyright (c) 2026 Huawei Technologies Co., Ltd.
+// This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+// CANN Open Software License Agreement Version 2.0 (the "License").
+// Please refer to the License for details. You may not use this file except in compliance with the License.
+// THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+// INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+// See LICENSE in the root of the software repository for the full text of the License.
+
+// RUN: ptoas --mlir-print-ir-after=pto-resolve-reserved-buffers %s 2>&1 1>/dev/null | FileCheck %s
+// RUN: ptoas --mlir-print-ir-after=pto-resolve-buffer-select %s 2>&1 1>/dev/null | FileCheck %s --check-prefix=SELECT
+
+// Verifies that tile-native `multi_tile_get` preserves the user-supplied slot
+// expression through the final `arith.select` chain. The lowering must not
+// synthesize an implicit `iv mod N` expression.
+
+module {
+  func.func @dyn_slot_prefetch(
+      %gm : !pto.partition_tensor_view<16x16xf16>, %n : index) {
+    %c0 = arith.constant 0 : index
+    %c1 = arith.constant 1 : index
+    %c2 = arith.constant 2 : index
+
+    %mb = pto.alloc_multi_tile
+        : !pto.multi_tile_buf<vec, 16x16xf16, count=2>
+
+    scf.for %i = %c0 to %n step %c1 {
+      %next     = arith.addi  %i,    %c1 : index
+      %cur_idx  = arith.remui %i,    %c2 : index
+      %next_idx = arith.remui %next, %c2 : index
+
+      %s_next = pto.multi_tile_get %mb[%next_idx]
+          : !pto.multi_tile_buf<vec, 16x16xf16, count=2>
+         -> !pto.tile_buf<vec, 16x16xf16>
+      pto.tload ins(%gm : !pto.partition_tensor_view<16x16xf16>)
+                outs(%s_next : !pto.tile_buf<vec, 16x16xf16>)
+
+      %s_cur = pto.multi_tile_get %mb[%cur_idx]
+          : !pto.multi_tile_buf<vec, 16x16xf16, count=2>
+         -> !pto.tile_buf<vec, 16x16xf16>
+      pto.tload ins(%gm : !pto.partition_tensor_view<16x16xf16>)
+                outs(%s_cur : !pto.tile_buf<vec, 16x16xf16>)
+    }
+    return
+  }
+}
+
+// CHECK: IR Dump After PTOResolveReservedBuffers
+// CHECK-LABEL: func.func @dyn_slot_prefetch
+// CHECK: %[[MULTI:.*]] = pto.alloc_multi_tile
+// CHECK: %[[NEXT:.*]] = arith.addi %{{.*}}, %c1
+// CHECK-DAG: %[[CUR_IDX:.*]] = arith.remui %arg{{.*}}, %c2
+// CHECK-DAG: %[[NEXT_IDX:.*]] = arith.remui %[[NEXT]], %c2
+// CHECK: pto.multi_tile_get %[[MULTI]][%[[NEXT_IDX]]
+// CHECK: pto.multi_tile_get %[[MULTI]][%[[CUR_IDX]]
+// CHECK-NOT: memref.alloc
+
+// ResolveBufferSelect creates an addressed alloc_tile from an arith.select
+// chain driven by the user SSA (not an implicit iv mod N).
+// SELECT: IR Dump After PTOResolveBufferSelect
+// SELECT-LABEL: func.func @dyn_slot_prefetch
+// SELECT-NOT: pto.alloc_multi_tile
+// SELECT-NOT: pto.multi_tile_get
+// SELECT: arith.select
+// SELECT: pto.alloc_tile addr = %{{.*}}
+// SELECT: arith.select
+// SELECT: pto.alloc_tile addr = %{{.*}}

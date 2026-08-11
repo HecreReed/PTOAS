@@ -6,9 +6,9 @@
 # INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
 # See LICENSE in the root of the software repository for the full text of the License.
 
-from mlir.ir import Context, Location, Module, InsertionPoint
-from mlir.dialects import func, arith, pto
-from mlir.ir import F32Type, IndexType, IntegerType
+from ptoas.mlir.ir import Context, Location, Module, InsertionPoint, UnitAttr
+from ptoas.mlir.dialects import func, arith, pto
+from ptoas.mlir.ir import F32Type, IndexType, IntegerType
 
 
 def build():
@@ -31,13 +31,17 @@ def build():
             fractal_ab_size = pto.TileConfig.fractalABSize
             cfg = pto.TileBufConfigAttr.get(bl, sl, fractal_ab_size, pd, ctx)
             tile_buf_32 = pto.TileBufType.get([32, 32], f32, vec, [32, 32], cfg, ctx)
-            # pto.tprelu verifier: tmp must be uint8 (TPreluCheck in pto-isa).
+            # Match the official passing A3 ST kernel:
+            #   - physical tmp rows = dst rows + 1
+            #   - physical tmp cols = ceil(ceil(dst cols / 8) / 32B) * 32B
+            #   - runtime valid tmp shape = [dst.validRow, ceil(dst.validCol / 8)]
             u8 = IntegerType.get_unsigned(8, ctx)
-            tile_buf_u8 = pto.TileBufType.get([32, 32], u8, vec, [32, 32], cfg, ctx)
+            tile_buf_u8 = pto.TileBufType.get([33, 32], u8, vec, [32, 4], cfg, ctx)
 
             fn_ty = func.FunctionType.get([ptr_f32, ptr_f32, ptr_f32], [])
             with InsertionPoint(m.body):
                 fn = func.FuncOp("prelu_kernel_2d", fn_ty)
+                fn.operation.attributes["pto.entry"] = UnitAttr.get(ctx)
                 entry = fn.add_entry_block()
 
             with InsertionPoint(entry):
@@ -58,11 +62,11 @@ def build():
                 sv0 = pto.PartitionViewOp(tile_view_32, tv0, offsets=[c0, c0], sizes=[c32, c32]).result
                 sv1 = pto.PartitionViewOp(tile_view_32, tv1, offsets=[c0, c0], sizes=[c32, c32]).result
 
-                # tb0/tb1/tb2: f32; tb_tmp: uint8 (pto.tprelu requires tmp to be uint8_t).
+                # tb0/tb1/tb2: f32; tb_tmp: ui8 A3 workspace tile.
                 tb0 = pto.AllocTileOp(tile_buf_32).result
                 tb1 = pto.AllocTileOp(tile_buf_32).result
-                tb_tmp = pto.AllocTileOp(tile_buf_u8).result
                 tb2 = pto.AllocTileOp(tile_buf_32).result
+                tb_tmp = pto.AllocTileOp(tile_buf_u8).result
 
                 # pto.load_dps_tb ins(%sv) outs(%tb)
                 pto.TLoadOp(None, sv0, tb0)  # result=None

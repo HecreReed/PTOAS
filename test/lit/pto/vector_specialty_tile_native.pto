@@ -1,0 +1,48 @@
+// Copyright (c) 2026 Huawei Technologies Co., Ltd.
+// This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+// CANN Open Software License Agreement Version 2.0 (the "License").
+// Please refer to the License for details. You may not use this file except in compliance with the License.
+// THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+// INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+// See LICENSE in the root of the software repository for the full text of the License.
+
+// RUN: ptoas --pto-level=level3 --pto-arch=a5 --mlir-print-ir-after=pto-resolve-reserved-buffers %s -o /dev/null 2>&1 | FileCheck %s --check-prefix=NATIVE
+// RUN: ptoas --pto-level=level3 --pto-arch=a5 --enable-insert-sync %s | FileCheck %s --check-prefix=EMITC
+
+module {
+  func.func private @thistogram_arg(%src: !pto.tile_buf<loc=vec, dtype=ui16, rows=32, cols=32, v_row=8, v_col=32, blayout=row_major, slayout=none_box, fractal=512, pad=0>, %idx: !pto.tile_buf<loc=vec, dtype=ui8, rows=32, cols=1, v_row=8, v_col=1, blayout=col_major, slayout=none_box, fractal=512, pad=0>, %dst: !pto.tile_buf<loc=vec, dtype=ui32, rows=32, cols=256, v_row=8, v_col=256, blayout=row_major, slayout=none_box, fractal=512, pad=0>) {
+    pto.thistogram ins(%src, %idx : !pto.tile_buf<loc=vec, dtype=ui16, rows=32, cols=32, v_row=8, v_col=32, blayout=row_major, slayout=none_box, fractal=512, pad=0>, !pto.tile_buf<loc=vec, dtype=ui8, rows=32, cols=1, v_row=8, v_col=1, blayout=col_major, slayout=none_box, fractal=512, pad=0>) outs(%dst : !pto.tile_buf<loc=vec, dtype=ui32, rows=32, cols=256, v_row=8, v_col=256, blayout=row_major, slayout=none_box, fractal=512, pad=0>)
+    return
+  }
+  func.func private @trandom_arg(%dst: !pto.tile_buf<vec, 4x256xi32>, %k0: i32, %k1: i32, %c0: i32, %c1: i32, %c2: i32, %c3: i32) {
+    pto.trandom ins(%k0, %k1, %c0, %c1, %c2, %c3 {rounds = 7 : i32} : i32, i32, i32, i32, i32, i32) outs(%dst : !pto.tile_buf<vec, 4x256xi32>)
+    return
+  }
+  func.func private @tscatter_arg(%src: !pto.tile_buf<vec, 1x32xf16>, %dst: !pto.tile_buf<vec, 1x64xf16>) {
+    pto.tscatter ins(%src, {maskPattern = #pto.mask_pattern<P0101>} : !pto.tile_buf<vec, 1x32xf16>, "row") outs(%dst : !pto.tile_buf<vec, 1x64xf16>)
+    return
+  }
+  func.func private @ttri_arg(%dst: !pto.tile_buf<vec, 32x32xi32>, %diag: i32) {
+    pto.ttri ins(%diag {upperOrLower = 1 : i32} : i32) outs(%dst : !pto.tile_buf<vec, 32x32xi32>)
+    return
+  }
+}
+
+// NATIVE-LABEL: @thistogram_arg
+// NATIVE: pto.thistogram
+// NATIVE-LABEL: @trandom_arg
+// NATIVE: pto.trandom
+// NATIVE-LABEL: @tscatter_arg
+// NATIVE: pto.tscatter
+// NATIVE-LABEL: @ttri_arg
+// NATIVE: pto.ttri
+// NATIVE-NOT: memref<
+
+// EMITC-LABEL: thistogram_arg(
+// EMITC: THISTOGRAM<
+// EMITC-LABEL: trandom_arg(
+// EMITC: PTOAS__TRANDOM<7>(
+// EMITC-LABEL: tscatter_arg(
+// EMITC: TSCATTER<pto::MaskPattern::P0101, pto::ScatterAxis::SCATTER_ROW>(
+// EMITC-LABEL: ttri_arg(
+// EMITC: TTRI<

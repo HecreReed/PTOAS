@@ -1,0 +1,85 @@
+// Copyright (c) 2026 Huawei Technologies Co., Ltd.
+// This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+// CANN Open Software License Agreement Version 2.0 (the "License").
+// Please refer to the License for details. You may not use this file except in compliance with the License.
+// THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+// INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+// See LICENSE in the root of the software repository for the full text of the License.
+
+// Guard: VPTO cube lowering must accept MX fp4/f8 low-precision payloads and
+// select the expected GM/L1/L0 and MMAD.MX intrinsics.
+// RUN: ( mkdir -p %T && ptoas --pto-arch=a5 --pto-backend=vpto --cann-output-version=9.0.0-beta.1 %s -o %t.beta1 --mlir-print-ir-after=convert-func-to-llvm 2>&1 || true ) | FileCheck %s
+// RUN: ( mkdir -p %T && ptoas --pto-arch=a5 --pto-backend=vpto --cann-output-version=9.0.0 %s -o %t.cann900 --mlir-print-ir-after=convert-func-to-llvm 2>&1 || true ) | FileCheck %s
+
+module attributes {pto.target_arch = "a5", pto.kernel_kind = #pto.kernel_kind<cube>} {
+  func.func @mad_mx_low_precision_vpto_llvm(
+      %a_gm: !pto.ptr<!pto.f4E1M2x2, gm>,
+      %b_gm: !pto.ptr<!pto.f4E2M1x2, gm>,
+      %a_scale_gm: !pto.ptr<!pto.f4E1M2x2, gm>,
+      %b_scale_gm: !pto.ptr<!pto.f4E2M1x2, gm>,
+      %c_gm: !pto.ptr<f32, gm>) attributes {pto.kernel} {
+    %c0_i64 = arith.constant 0 : i64
+    %c1_i64 = arith.constant 1 : i64
+    %c16_i64 = arith.constant 16 : i64
+    %c64_i64 = arith.constant 64 : i64
+    %c512_i64 = arith.constant 512 : i64
+    %c544_i64 = arith.constant 544 : i64
+    %c576_i64 = arith.constant 576 : i64
+    %c608_i64 = arith.constant 608 : i64
+    %c32768_i64 = arith.constant 32768 : i64
+
+    %l1_a_data = pto.castptr %c0_i64 : i64 -> !pto.ptr<!pto.f4E1M2x2, l1>
+    %l1_a_scale = pto.castptr %c512_i64 : i64 -> !pto.ptr<!pto.f4E1M2x2, l1>
+    %l1_b_data = pto.castptr %c544_i64 : i64 -> !pto.ptr<!pto.f4E2M1x2, l1>
+    %l1_b_scale = pto.castptr %c576_i64 : i64 -> !pto.ptr<!pto.f4E2M1x2, l1>
+    %l0a = pto.castptr %c32768_i64 : i64 -> !pto.ptr<!pto.f4E1M2x2, l0a>
+    %l0b = pto.castptr %c32768_i64 : i64 -> !pto.ptr<!pto.f4E2M1x2, l0b>
+    %l0c = pto.castptr %c0_i64 : i64 -> !pto.ptr<f32, l0c>
+
+    pto.mte_gm_l1 %a_gm, %l1_a_data, %c512_i64
+      nburst(%c1_i64, %c0_i64, %c0_i64)
+      : !pto.ptr<!pto.f4E1M2x2, gm>, !pto.ptr<!pto.f4E1M2x2, l1>, i64, i64, i64, i64
+    pto.mte_gm_l1 %a_scale_gm, %l1_a_scale, %c64_i64
+      nburst(%c1_i64, %c0_i64, %c0_i64)
+      : !pto.ptr<!pto.f4E1M2x2, gm>, !pto.ptr<!pto.f4E1M2x2, l1>, i64, i64, i64, i64
+    pto.mte_gm_l1 %b_gm, %l1_b_data, %c512_i64
+      nburst(%c1_i64, %c0_i64, %c0_i64)
+      : !pto.ptr<!pto.f4E2M1x2, gm>, !pto.ptr<!pto.f4E2M1x2, l1>, i64, i64, i64, i64
+    pto.mte_gm_l1 %b_scale_gm, %l1_b_scale, %c64_i64
+      nburst(%c1_i64, %c0_i64, %c0_i64)
+      : !pto.ptr<!pto.f4E2M1x2, gm>, !pto.ptr<!pto.f4E2M1x2, l1>, i64, i64, i64, i64
+
+    pto.mte_l1_l0a %l1_a_data, %l0a, %c16_i64, %c64_i64, %c0_i64, %c0_i64
+      : !pto.ptr<!pto.f4E1M2x2, l1>, !pto.ptr<!pto.f4E1M2x2, l0a>, i64, i64, i64, i64
+    pto.mte_l1_l0b %l1_b_data, %l0b, %c64_i64, %c16_i64, %c0_i64, %c0_i64 {transpose = true}
+      : !pto.ptr<!pto.f4E2M1x2, l1>, !pto.ptr<!pto.f4E2M1x2, l0b>, i64, i64, i64, i64
+    pto.mte_l1_l0a_mx %l1_a_scale, %l0a, %c16_i64, %c64_i64, %c0_i64, %c0_i64
+      : !pto.ptr<!pto.f4E1M2x2, l1>, !pto.ptr<!pto.f4E1M2x2, l0a>, i64, i64, i64, i64
+    pto.mte_l1_l0b_mx %l1_b_scale, %l0b, %c64_i64, %c16_i64, %c0_i64, %c0_i64
+      : !pto.ptr<!pto.f4E2M1x2, l1>, !pto.ptr<!pto.f4E2M1x2, l0b>, i64, i64, i64, i64
+    pto.mad_mx %l0a, %l0b, %l0c, %c16_i64, %c16_i64, %c64_i64
+      : !pto.ptr<!pto.f4E1M2x2, l0a>, !pto.ptr<!pto.f4E2M1x2, l0b>, !pto.ptr<f32, l0c>, i64, i64, i64
+
+    pto.mte_l0c_gm %l0c, %c_gm, %c16_i64, %c16_i64, %c16_i64, %c16_i64, %c0_i64, %c0_i64,
+      nz2nd
+      : !pto.ptr<f32, l0c>, !pto.ptr<f32, gm>, i64, i64, i64, i64, i64, i64
+    return
+  }
+}
+
+// CHECK-LABEL: llvm.func @mad_mx_low_precision_vpto_llvm_mix_aic
+// CHECK: %[[MX_SCALE_SHIFT:.*]] = llvm.mlir.constant(4 : i64) : i64
+// CHECK: llvm.call @llvm.hivm.MOV.OUT.TO.L1.ALIGN.V2.u8.DV
+// CHECK: llvm.call @llvm.hivm.LOAD.L1.TO.L0A.2Dv2.s4
+// CHECK: llvm.call @llvm.hivm.LOAD.L1.TO.L0B.2Dv2.s4
+// CHECK: %[[L0A_DATA_ADDR:.*]] = llvm.ptrtoint {{.*}} : !llvm.ptr<3> to i64
+// CHECK: %[[L0A_SCALE_ADDR:.*]] = llvm.lshr %[[L0A_DATA_ADDR]], %[[MX_SCALE_SHIFT]] : i64
+// CHECK: %[[L0A_SCALE_PTR:.*]] = llvm.inttoptr %[[L0A_SCALE_ADDR]] : i64 to !llvm.ptr<3>
+// CHECK: %[[L0A_INTRINSIC_ADDR:.*]] = llvm.ptrtoint %[[L0A_SCALE_PTR]] : !llvm.ptr<3> to i64
+// CHECK: llvm.call @llvm.hivm.LOAD.L1.TO.L0A.MX.2Dv2.v(%[[L0A_INTRINSIC_ADDR]],
+// CHECK: %[[L0B_DATA_ADDR:.*]] = llvm.ptrtoint {{.*}} : !llvm.ptr<4> to i64
+// CHECK: %[[L0B_SCALE_ADDR:.*]] = llvm.lshr %[[L0B_DATA_ADDR]], %[[MX_SCALE_SHIFT]] : i64
+// CHECK: %[[L0B_SCALE_PTR:.*]] = llvm.inttoptr %[[L0B_SCALE_ADDR]] : i64 to !llvm.ptr<4>
+// CHECK: %[[L0B_INTRINSIC_ADDR:.*]] = llvm.ptrtoint %[[L0B_SCALE_PTR]] : !llvm.ptr<4> to i64
+// CHECK: llvm.call @llvm.hivm.LOAD.L1.TO.L0B.MX.2Dv2.v(%[[L0B_INTRINSIC_ADDR]],
+// CHECK: llvm.call @llvm.hivm.MMAD.MX.e1m2x2e2m1x2

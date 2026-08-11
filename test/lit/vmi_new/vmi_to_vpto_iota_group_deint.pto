@@ -1,0 +1,43 @@
+// Copyright (c) 2026 Huawei Technologies Co., Ltd.
+// This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+// CANN Open Software License Agreement Version 2.0 (the "License").
+// Please refer to the License for details. You may not use this file except in compliance with the License.
+// THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+// INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+// See LICENSE in the root of the software repository for the full text of the License.
+
+// RUN: pto-test-opt %s -vmi-lower-unified-to-legacy -vmi-to-vpto | FileCheck %s
+
+// Grouped vci on a *pre-annotated* deinterleaved result → contiguous group
+// iota + ensure_layout (vdintlv), then sitofp vcvt + interleaved store.
+//
+// NOTE: this only covers the short-circuit rewrite when layout is already
+// present at lower-unified time. Production surface IR has no layout yet —
+// see vmi_to_vpto_iota_group_deint_assign.pto for the real assignment path.
+
+module {
+  func.func @vmi_to_vpto_iota_group2_deint_vcvt(
+      %base: i32, %dst: !pto.ptr<f32, ub>) {
+    %c0 = arith.constant 0 : index
+    %idx = pto.vmi.vci %base {group = 2 : i64}
+        : i32 -> !pto.vmi.vreg<128xi32, #pto.vmi.layout<deinterleaved = 2>>
+    %fp = pto.vmi.vcvt %idx
+        : !pto.vmi.vreg<128xi32, #pto.vmi.layout<deinterleaved = 2>>
+        -> !pto.vmi.vreg<128xf32, #pto.vmi.layout<deinterleaved = 2>>
+    pto.vmi.vstore %fp, %dst[%c0]
+        : !pto.vmi.vreg<128xf32, #pto.vmi.layout<deinterleaved = 2>>,
+          !pto.ptr<f32, ub>
+    return
+  }
+}
+
+// CHECK-LABEL: func.func @vmi_to_vpto_iota_group2_deint_vcvt(
+// CHECK-SAME: %[[BASE:.*]]: i32
+// CHECK: %[[IDX:.*]] = pto.vci %[[BASE]] : i32 -> !pto.vreg<64xi32>
+// CHECK-NOT: pto.vci
+// CHECK: %[[E:.*]], %[[O:.*]] = pto.vdintlv %[[IDX]], %[[IDX]]
+// CHECK: %[[FE:.*]] = pto.vcvt %[[E]]
+// CHECK: %[[FO:.*]] = pto.vcvt %[[O]]
+// CHECK: pto.vstsx2 %[[FE]], %[[FO]], {{.*}}, "INTLV_B32"
+// CHECK-NOT: pto.vmi.
+// CHECK-NOT: !pto.vmi.

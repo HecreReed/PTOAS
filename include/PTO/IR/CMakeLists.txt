@@ -41,6 +41,12 @@ if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/PTOInterfaces.td)
   mlir_tablegen(PTOInterfaces.cpp.inc -gen-op-interface-defs)
 endif()
 
+if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/VPTOInterfaces.td)
+  set(LLVM_TARGET_DEFINITIONS VPTOInterfaces.td)
+  mlir_tablegen(VPTOInterfaces.h.inc -gen-op-interface-decls)
+  mlir_tablegen(VPTOInterfaces.cpp.inc -gen-op-interface-defs)
+endif()
+
 # ============================================================
 # 3. 注册聚合目标
 # ============================================================

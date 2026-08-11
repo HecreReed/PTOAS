@@ -1,0 +1,29 @@
+// Copyright (c) 2026 Huawei Technologies Co., Ltd.
+// This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+// CANN Open Software License Agreement Version 2.0 (the "License").
+// Please refer to the License for details. You may not use this file except in compliance with the License.
+// THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+// INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+// See LICENSE in the root of the software repository for the full text of the License.
+
+// A5 elem-coalesced 1x1 GM->UB mgather lowers to the scalar overload even when
+// InsertSync sees the tile-native dst after PTOResolveReservedBuffers.
+//
+// RUN: ptoas --pto-arch=a5 --enable-insert-sync --pto-insert-sync-debug=2 %s -o - 2>&1 | FileCheck %s
+
+module attributes {pto.target_arch = "a5"} {
+  func.func @mgather_elem_1x1_memref_model(
+      %mem: !pto.partition_tensor_view<1xf32>,
+      %idx: !pto.tile_buf<vec, 1x8xi32, valid=1x1>) {
+    %dst = pto.alloc_tile : !pto.tile_buf<vec, 1x8xf32, valid=1x1>
+    pto.mgather ins(%mem, %idx
+        : !pto.partition_tensor_view<1xf32>, !pto.tile_buf<vec, 1x8xi32, valid=1x1>)
+      outs(%dst : !pto.tile_buf<vec, 1x8xf32, valid=1x1>)
+      {coalesce = #pto<coalesce elem>}
+    return
+  }
+}
+
+// CHECK-LABEL: After Sync Motion
+// CHECK:      COMPOUND pto.mgather [PIPE_V]
+// CHECK-NEXT: COMPOUND pto.mgather [PIPE_S]

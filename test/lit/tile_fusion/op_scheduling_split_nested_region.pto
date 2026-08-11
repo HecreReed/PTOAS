@@ -1,0 +1,98 @@
+// Copyright (c) 2026 Huawei Technologies Co., Ltd.
+// This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+// CANN Open Software License Agreement Version 2.0 (the "License").
+// Please refer to the License for details. You may not use this file except in compliance with the License.
+// THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+// INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+// See LICENSE in the root of the software repository for the full text of the License.
+
+// Guards that post-scheduling normalization recurses into nested regions
+// (scf.if then-block) and that the function-wide group id counter is shared
+// across the outer block and nested regions, while resetting per function.
+//
+// @nested_split: the outer block has an adjacent two-op group using old id 7,
+// which becomes new group 0 (orders 0,1). An scf.if then-region contains
+// A(group 9) -> X(unannotated) -> B(group 9) -> C(group 9) with an SSA
+// producer chain A->X->B->C that cannot be compacted; A is dropped and [B,C]
+// becomes new group 1 (orders 0,1) -- proving the counter is shared across the
+// outer block and the nested region (1 follows 0, not restarted).
+//
+// @second_function: one adjacent two-op group with old id 5, normalized to
+// group 0 -- proving nextGroupId resets per func::FuncOp pass execution.
+//
+// RUN: pto-test-opt %s -pto-op-scheduling | FileCheck %s --check-prefix=NESTED --check-prefix=SECOND
+
+module {
+  func.func @nested_split(
+      %cond: i1,
+      %full0: !pto.tile_buf<vec, 32x32xf32>,
+      %full1: !pto.tile_buf<vec, 32x32xf32>,
+      %full2: !pto.tile_buf<vec, 32x32xf32>,
+      %full3: !pto.tile_buf<vec, 32x32xf32>,
+      %full4: !pto.tile_buf<vec, 32x32xf32>) {
+    %out0 = pto.alloc_tile : !pto.tile_buf<vec, 32x32xf32>
+    %out1 = pto.alloc_tile : !pto.tile_buf<vec, 32x32xf32>
+    %tmp0 = pto.alloc_tile : !pto.tile_buf<vec, 32x32xf32>
+    %tmp1 = pto.alloc_tile : !pto.tile_buf<vec, 32x32xf32>
+    %tmp2 = pto.alloc_tile : !pto.tile_buf<vec, 32x32xf32>
+
+    // Outer adjacent group using old id 7 -> new group 0 (orders 0,1).
+    pto.tadd ins(%full0, %full1 : !pto.tile_buf<vec, 32x32xf32>, !pto.tile_buf<vec, 32x32xf32>) outs(%out0 : !pto.tile_buf<vec, 32x32xf32>) {pto.fusion.group_id = 7 : i64, pto.fusion.order = 0 : i64}
+    pto.tadd ins(%out0, %full2 : !pto.tile_buf<vec, 32x32xf32>, !pto.tile_buf<vec, 32x32xf32>) outs(%out1 : !pto.tile_buf<vec, 32x32xf32>) {pto.fusion.group_id = 7 : i64, pto.fusion.order = 1 : i64}
+
+    scf.if %cond {
+      %ntmp0 = pto.alloc_tile : !pto.tile_buf<vec, 32x32xf32>
+      %ntmp1 = pto.alloc_tile : !pto.tile_buf<vec, 32x32xf32>
+      %ntmp2 = pto.alloc_tile : !pto.tile_buf<vec, 32x32xf32>
+      // A (group 9, order 0) writes %ntmp0; X reads %ntmp0.
+      pto.tadd ins(%full3, %full4 : !pto.tile_buf<vec, 32x32xf32>, !pto.tile_buf<vec, 32x32xf32>) outs(%ntmp0 : !pto.tile_buf<vec, 32x32xf32>) {pto.fusion.group_id = 9 : i64, pto.fusion.order = 0 : i64}
+      // X writes %ntmp1; B reads %ntmp1. Neither A nor B can move across X.
+      pto.tadd ins(%ntmp0, %full3 : !pto.tile_buf<vec, 32x32xf32>, !pto.tile_buf<vec, 32x32xf32>) outs(%ntmp1 : !pto.tile_buf<vec, 32x32xf32>)
+      // B (group 9, order 1) reads %ntmp1, writes %ntmp2.
+      pto.tadd ins(%ntmp1, %full4 : !pto.tile_buf<vec, 32x32xf32>, !pto.tile_buf<vec, 32x32xf32>) outs(%ntmp2 : !pto.tile_buf<vec, 32x32xf32>) {pto.fusion.group_id = 9 : i64, pto.fusion.order = 1 : i64}
+      // C (group 9, order 2) reads %ntmp2.
+      pto.tadd ins(%ntmp2, %full3 : !pto.tile_buf<vec, 32x32xf32>, !pto.tile_buf<vec, 32x32xf32>) outs(%ntmp0 : !pto.tile_buf<vec, 32x32xf32>) {pto.fusion.group_id = 9 : i64, pto.fusion.order = 2 : i64}
+      scf.yield
+    } else {
+      scf.yield
+    }
+    return
+  }
+
+  func.func @second_function(
+      %full0: !pto.tile_buf<vec, 32x32xf32>,
+      %full1: !pto.tile_buf<vec, 32x32xf32>,
+      %full2: !pto.tile_buf<vec, 32x32xf32>) {
+    %out0 = pto.alloc_tile : !pto.tile_buf<vec, 32x32xf32>
+    %out1 = pto.alloc_tile : !pto.tile_buf<vec, 32x32xf32>
+    // One adjacent two-op group with old id 5 -> new group 0 (counter reset).
+    pto.tadd ins(%full0, %full1 : !pto.tile_buf<vec, 32x32xf32>, !pto.tile_buf<vec, 32x32xf32>) outs(%out0 : !pto.tile_buf<vec, 32x32xf32>) {pto.fusion.group_id = 5 : i64, pto.fusion.order = 0 : i64}
+    pto.tadd ins(%out0, %full2 : !pto.tile_buf<vec, 32x32xf32>, !pto.tile_buf<vec, 32x32xf32>) outs(%out1 : !pto.tile_buf<vec, 32x32xf32>) {pto.fusion.group_id = 5 : i64, pto.fusion.order = 1 : i64}
+    return
+  }
+}
+
+// ---- @nested_split: outer group 7 -> group 0; nested [B,C] -> group 1 ----
+// NESTED-LABEL: func.func @nested_split(
+// Outer adjacent group normalized to group 0.
+// NESTED: pto.tadd ins(%arg1, %arg2
+// NESTED-SAME: {pto.fusion.group_id = 0 : i64, pto.fusion.order = 0 : i64}
+// NESTED-NEXT: pto.tadd ins(%{{[0-9]+}}, %arg3
+// NESTED-SAME: {pto.fusion.group_id = 0 : i64, pto.fusion.order = 1 : i64}
+// NESTED: scf.if
+// Nested region: A dropped (no metadata), X unannotated, [B,C] -> group 1.
+// NESTED: pto.tadd ins(%arg4, %arg5
+// NESTED-NOT: pto.fusion.group_id
+// NESTED-NEXT: pto.tadd ins(%{{[0-9]+}}, %arg4
+// NESTED-NOT: pto.fusion.group_id
+// NESTED-NEXT: pto.tadd ins(%{{[0-9]+}}, %arg5
+// NESTED-SAME: {pto.fusion.group_id = 1 : i64, pto.fusion.order = 0 : i64}
+// NESTED-NEXT: pto.tadd ins(%{{[0-9]+}}, %arg4
+// NESTED-SAME: {pto.fusion.group_id = 1 : i64, pto.fusion.order = 1 : i64}
+
+// ---- @second_function: counter reset, group 5 -> group 0 ----
+// SECOND-LABEL: func.func @second_function(
+// SECOND: pto.tadd ins(%arg0, %arg1
+// SECOND-SAME: {pto.fusion.group_id = 0 : i64, pto.fusion.order = 0 : i64}
+// SECOND-NEXT: pto.tadd ins(%{{[0-9]+}}, %arg2
+// SECOND-SAME: {pto.fusion.group_id = 0 : i64, pto.fusion.order = 1 : i64}

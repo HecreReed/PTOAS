@@ -1,0 +1,24 @@
+// Copyright (c) 2026 Huawei Technologies Co., Ltd.
+// This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+// CANN Open Software License Agreement Version 2.0 (the "License").
+// Please refer to the License for details. You may not use this file except in compliance with the License.
+// THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+// INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+// See LICENSE in the root of the software repository for the full text of the License.
+
+// RUN: not pto-test-opt --pto-normalize-uncovered-tile-sections %s -o /dev/null 2>&1 | FileCheck %s
+
+// A shared execution pipe cannot inherit physical ownership from its peer.
+// Guessing here could remove the producer or consumer during CV module split.
+module attributes {pto.target_arch = "a5"} {
+  module attributes {pto.backend = "vpto", pto.target_arch = "a5"} {
+    func.func @shared_flag_pipe() attributes {pto.entry} {
+      pto.set_flag[<PIPE_MTE2>, <PIPE_V>, <EVENT_ID0>]
+      return
+    }
+  }
+}
+
+// CHECK: contains an uncovered top-level op segment whose section kind cannot be inferred uniquely
+// CHECK-SAME: ambiguous op(s): 'pto.set_flag'
+// CHECK-SAME: wrap the ambiguous region in pto.section.cube or pto.section.vector

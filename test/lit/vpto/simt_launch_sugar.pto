@@ -1,0 +1,33 @@
+// Copyright (c) 2026 Huawei Technologies Co., Ltd.
+// This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+// CANN Open Software License Agreement Version 2.0 (the "License").
+// Please refer to the License for details. You may not use this file except in compliance with the License.
+// THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+// INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+// See LICENSE in the root of the software repository for the full text of the License.
+
+// RUN: ptoas --pto-arch=a5 --pto-backend=vpto --emit-vpto --mlir-print-ir-before=vpto-expand-wrapper-ops %s -o /dev/null 2>&1 | FileCheck %s --check-prefix=ROUNDTRIP
+// RUN: ptoas --pto-arch=a5 --pto-backend=vpto --emit-vpto --mlir-print-ir-after=vpto-expand-wrapper-ops %s -o /dev/null 2>&1 | FileCheck %s --check-prefix=EXPAND
+
+module attributes {pto.target_arch = "a5", pto.kernel_kind = #pto.kernel_kind<vector>} {
+  func.func @simt_launch_kernel(%dst: !pto.ptr<i32, ub>) attributes {pto.aicore} {
+    %dim_x = arith.constant 32 : i32
+    %dim_y = arith.constant 2 : i32
+    %dim_z = arith.constant 1 : i32
+    pto.simt_launch @simt_body<<<%dim_x, %dim_y, %dim_z>>>(%dst) : (!pto.ptr<i32, ub>) -> ()
+    return
+  }
+
+  func.func @simt_body(%dst: !pto.ptr<i32, ub>) attributes {pto.simt_entry} {
+    %c0 = arith.constant 0 : index
+    %tid = pto.get_tid_x : i32
+    pto.store %tid, %dst[%c0] : !pto.ptr<i32, ub>, i32
+    return
+  }
+}
+
+// ROUNDTRIP: pto.simt_launch @simt_body<<<{{.*}}, {{.*}}, {{.*}}>>>({{.*}}) : (!pto.ptr<i32, ub>) -> ()
+
+// EXPAND: pto.store_vfsimt_info {{.*}}, {{.*}}, {{.*}} : i32, i32, i32
+// EXPAND-NEXT: call @simt_body{{.*}} : (!pto.ptr<i32, ub>) -> ()
+// EXPAND-NOT: pto.simt_launch

@@ -1,0 +1,42 @@
+// RUN: ptoas --pto-arch=a5 --pto-backend=vpto --emit-vpto --mlir-print-ir-before=vpto-expand-wrapper-ops %s -o /dev/null 2>&1 | FileCheck %s --check-prefix=ROUNDTRIP
+// RUN: ptoas --pto-arch=a5 --pto-backend=vpto --emit-vpto --mlir-print-ir-after=vpto-expand-wrapper-ops %s -o /dev/null 2>&1 | FileCheck %s --check-prefix=EXPAND
+
+module attributes {"pto.target_arch" = "a5", pto.kernel_kind = #pto.kernel_kind<cube>} {
+  func.func @acc_store_gm_probe(%src: !pto.ptr<f32, l0c>,
+                                %dst: !pto.ptr<f16, gm>,
+                                %qfb: !pto.ptr<f32, fb>,
+                                %rfb: !pto.ptr<f32, fb>) {
+    %c0_i64 = arith.constant 0 : i64
+    %c1_i64 = arith.constant 1 : i64
+    %c3_i64 = arith.constant 3 : i64
+    %c5_i64 = arith.constant 5 : i64
+    %c16_i64 = arith.constant 16 : i64
+    %c32_i64 = arith.constant 32 : i64
+
+    pto.mte_l0c_gm %src, %dst, %c16_i64, %c16_i64, %c16_i64, %c32_i64,
+      %c3_i64, %c5_i64,
+      unit_flag(check_and_clear),
+      pre_quant(%qfb, mode = qf322f16_pre_vec),
+      pre_relu(%rfb, mode = vector_relu),
+      nz2dn(%c1_i64),
+      atomic(type = f32, op = max)
+      : !pto.ptr<f32, l0c>, !pto.ptr<f16, gm>, i64, i64, i64, i64, i64, i64,
+      !pto.ptr<f32, fb>, !pto.ptr<f32, fb>, i64
+
+    return
+  }
+}
+
+// ROUNDTRIP-LABEL: func.func @acc_store_gm_probe(
+// ROUNDTRIP: pto.mte_l0c_gm %{{.*}}, %{{.*}}, %{{.*}}, %{{.*}}, %{{.*}}, %{{.*}}, %{{.*}}, %{{.*}}, unit_flag(check_and_clear), pre_quant(%{{.*}}, mode = qf322f16_pre_vec), pre_relu(%{{.*}}, mode = vector_relu), nz2dn(%{{.*}}), atomic(type = f32, op = max)
+
+// EXPAND-LABEL: func.func @acc_store_gm_probe(
+// EXPAND: %[[QFB:.*]] = pto.castptr %{{.*}} : !pto.ptr<f32, fb> -> i64
+// EXPAND: %[[RFB:.*]] = pto.castptr %{{.*}} : !pto.ptr<f32, fb> -> i64
+// EXPAND: pto.set_fpc
+// EXPAND: pto.get_ctrl
+// EXPAND: pto.set_ctrl
+// EXPAND: pto.set_loop3_para
+// EXPAND: pto.set_channel_para
+// EXPAND: pto.copy_matrix_cc_to_gm
+// EXPAND: pto.set_ctrl

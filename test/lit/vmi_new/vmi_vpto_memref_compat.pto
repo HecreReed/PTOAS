@@ -1,0 +1,61 @@
+// Copyright (c) 2026 Huawei Technologies Co., Ltd.
+// This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+// CANN Open Software License Agreement Version 2.0 (the "License").
+// Please refer to the License for details. You may not use this file except in compliance with the License.
+// THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+// INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+// See LICENSE in the root of the software repository for the full text of the License.
+
+// RUN: pto-test-opt %s | FileCheck %s
+// RUN: pto-test-opt --pass-pipeline='builtin.module(func.func(pto-fold-tile-buf-intrinsics))' %s | FileCheck %s --check-prefix=FOLD
+
+module {
+  func.func @vmi_memref_operands(
+      %src: memref<64xf32, #pto.address_space<vec>>,
+      %dst: memref<64xf32, #pto.address_space<vec>>,
+      %offset: index) {
+    %value = "pto.vmi.load"(%src, %offset)
+        : (memref<64xf32, #pto.address_space<vec>>, index)
+        -> !pto.vmi.vreg<64xf32>
+    "pto.vmi.store"(%value, %dst, %offset)
+        : (!pto.vmi.vreg<64xf32>, memref<64xf32, #pto.address_space<vec>>,
+           index) -> ()
+    return
+  }
+
+  func.func @vpto_addr_memref_bridge(
+      %gm: memref<4x8xf32, #pto.address_space<gm>>,
+      %ub: memref<4x8xf32, #pto.address_space<vec>>) {
+    %gm_view = memref.reinterpret_cast %gm to
+        offset: [0], sizes: [4, 8], strides: [8, 1]
+        : memref<4x8xf32, #pto.address_space<gm>>
+        to memref<4x8xf32, strided<[8, 1]>, #pto.address_space<gm>>
+    %gm_sub = memref.subview %gm_view[0, 0] [4, 8] [1, 1]
+        : memref<4x8xf32, strided<[8, 1]>, #pto.address_space<gm>>
+        to memref<4x8xf32, strided<[8, 1]>, #pto.address_space<gm>>
+    %gm_addr = "pto.tensor_view_addr"(%gm_sub)
+        : (memref<4x8xf32, strided<[8, 1]>, #pto.address_space<gm>>)
+        -> memref<4x8xf32, #pto.address_space<gm>>
+    %ub_addr = "pto.tile_buf_addr"(%ub)
+        : (memref<4x8xf32, #pto.address_space<vec>>)
+        -> memref<4x8xf32, #pto.address_space<vec>>
+    %ub_ptr = "pto.tile_buf_addr"(%ub)
+        : (memref<4x8xf32, #pto.address_space<vec>>)
+        -> !pto.ptr<f32, ub>
+    return
+  }
+}
+
+// CHECK-LABEL: func.func @vmi_memref_operands
+// CHECK: pto.vmi.load {{.*}} : memref<64xf32, #pto.address_space<vec>> -> !pto.vmi.vreg<64xf32>
+// CHECK: pto.vmi.store {{.*}} : !pto.vmi.vreg<64xf32>, memref<64xf32, #pto.address_space<vec>>
+
+// CHECK-LABEL: func.func @vpto_addr_memref_bridge
+// CHECK: pto.tensor_view_addr {{.*}} : memref<4x8xf32, strided<[8, 1]>, #pto.address_space<gm>> -> memref<4x8xf32, #pto.address_space<gm>>
+// CHECK: pto.tile_buf_addr {{.*}} : memref<4x8xf32, #pto.address_space<vec>> -> memref<4x8xf32, #pto.address_space<vec>>
+// CHECK: pto.tile_buf_addr {{.*}} : memref<4x8xf32, #pto.address_space<vec>> -> !pto.ptr<f32, ub>
+
+// FOLD-LABEL: func.func @vpto_addr_memref_bridge
+// FOLD-NOT: pto.tensor_view_addr
+// FOLD-NOT: pto.tile_buf_addr
+// FOLD: pto.castptr %arg1 : memref<4x8xf32, #pto.address_space<vec>> -> !pto.ptr<f32, ub>

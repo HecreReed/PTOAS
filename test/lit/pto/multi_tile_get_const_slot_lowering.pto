@@ -1,0 +1,64 @@
+// Copyright (c) 2026 Huawei Technologies Co., Ltd.
+// This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+// CANN Open Software License Agreement Version 2.0 (the "License").
+// Please refer to the License for details. You may not use this file except in compliance with the License.
+// THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+// INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+// See LICENSE in the root of the software repository for the full text of the License.
+
+// RUN: ptoas --mlir-print-ir-after=pto-resolve-reserved-buffers %s 2>&1 1>/dev/null | FileCheck %s
+// RUN: ptoas --mlir-print-ir-after=pto-plan-memory %s 2>&1 1>/dev/null | FileCheck %s --check-prefix=PLAN
+// RUN: ptoas --mlir-print-ir-after=pto-resolve-buffer-select %s 2>&1 1>/dev/null | FileCheck %s --check-prefix=SELECT
+// RUN: ptoas --plan-memory-impl=modern --mlir-print-ir-after=pto-plan-memory %s 2>&1 1>/dev/null | FileCheck %s --check-prefix=PLAN
+// RUN: ptoas --plan-memory-impl=modern --mlir-print-ir-after=pto-resolve-buffer-select %s 2>&1 1>/dev/null | FileCheck %s --check-prefix=SELECT
+
+// Verifies the tile-native multi-buffer pipeline for constant slots:
+//   1. PTOResolveReservedBuffers preserves alloc_multi_tile and multi_tile_get.
+//   2. PTOPlanMemory records the physical slot addresses on alloc_multi_tile.
+//   3. PTOResolveBufferSelect replaces each selection with alloc_tile(addrK).
+
+module {
+  func.func @const_slot_two_buffers(
+      %gm0 : !pto.partition_tensor_view<16x16xf16>,
+      %gm1 : !pto.partition_tensor_view<16x16xf16>) {
+    %c0 = arith.constant 0 : index
+    %c1 = arith.constant 1 : index
+
+    %mb = pto.alloc_multi_tile
+        : !pto.multi_tile_buf<vec, 16x16xf16, count=2>
+
+    %s0 = pto.multi_tile_get %mb[%c0]
+        : !pto.multi_tile_buf<vec, 16x16xf16, count=2>
+       -> !pto.tile_buf<vec, 16x16xf16>
+    %s1 = pto.multi_tile_get %mb[%c1]
+        : !pto.multi_tile_buf<vec, 16x16xf16, count=2>
+       -> !pto.tile_buf<vec, 16x16xf16>
+
+    pto.tload ins(%gm0 : !pto.partition_tensor_view<16x16xf16>)
+              outs(%s0  : !pto.tile_buf<vec, 16x16xf16>)
+    pto.tload ins(%gm1 : !pto.partition_tensor_view<16x16xf16>)
+              outs(%s1  : !pto.tile_buf<vec, 16x16xf16>)
+    return
+  }
+}
+
+// CHECK: IR Dump After PTOResolveReservedBuffers
+// CHECK-LABEL: func.func @const_slot_two_buffers
+// CHECK: %[[MULTI:.*]] = pto.alloc_multi_tile
+// CHECK: pto.multi_tile_get %[[MULTI]][%c0
+// CHECK: pto.multi_tile_get %[[MULTI]][%c1
+// CHECK-NOT: memref.alloc
+
+// Stage 2 -- PTOPlanMemory records two physical slot addresses.
+// PLAN: IR Dump After PlanMemory
+// PLAN-LABEL: func.func @const_slot_two_buffers
+// PLAN: pto.alloc_multi_tile {pto.multi_buffer_addrs = array<i64: 0, 512>}
+// PLAN: pto.multi_tile_get
+
+// Stage 3 -- ResolveBufferSelect materializes one addressed tile per use.
+// SELECT: IR Dump After PTOResolveBufferSelect
+// SELECT-LABEL: func.func @const_slot_two_buffers
+// SELECT-NOT: pto.alloc_multi_tile
+// SELECT-NOT: pto.multi_tile_get
+// SELECT: pto.alloc_tile addr = %{{.*}}
+// SELECT: pto.alloc_tile addr = %{{.*}}

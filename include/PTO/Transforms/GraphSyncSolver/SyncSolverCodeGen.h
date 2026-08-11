@@ -24,33 +24,34 @@ namespace mlir::pto::syncsolver {
 
 class CodeGenerator {
 public:
-    const SyncSolverOptions options;
-    func::FuncOp funcOp;
-    std::unique_ptr<OperationBase> funcIr;
+  const SyncSolverOptions options;
+  func::FuncOp funcOp;
+  std::unique_ptr<OperationBase> funcIr;
 
 private:
-    SyncMap syncMapBefore, syncMapAfter;
+  SyncMap syncMapBefore, syncMapAfter;
 
 public:
-    CodeGenerator() = delete;
+  CodeGenerator() = delete;
 
-    explicit CodeGenerator(std::unique_ptr<Solver> solver) : options(solver->options)
-    {
-        auto [syncBefore, syncAfter] = solver->getBeforeAfterSyncMaps();
-        syncMapBefore = std::move(syncBefore);
-        syncMapAfter = std::move(syncAfter);
-        funcOp = solver->funcOp;
-        funcIr = std::move(solver->funcIr);
-    }
+  explicit CodeGenerator(std::unique_ptr<Solver> solver)
+      : options(solver->options) {
+    auto [syncBefore, syncAfter] = solver->getBeforeAfterSyncMaps();
+    syncMapBefore = std::move(syncBefore);
+    syncMapAfter = std::move(syncAfter);
+    funcOp = solver->funcOp;
+    funcIr = std::move(solver->funcIr);
+  }
 
-    void generateResultOps();
+  void generateResultOps();
 
 private:
-    Operation* resolveSyncAnchor(const OperationBase* opBase) const;
-    Location resolveSyncLoc(OperationBase* opBase);
-    void setInsertionPoint(IRRewriter& rewriter, OperationBase* opBase, bool insertAfter);
-    void emitSyncOp(IRRewriter& rewriter, SyncOp* syncOp);
-    void emitSyncMap(IRRewriter& rewriter, SyncMap& syncMap, bool insertAfter);
+  Operation *resolveSyncAnchor(OperationBase *opBase);
+  Location resolveSyncLoc(OperationBase *opBase);
+  void setInsertionPoint(IRRewriter &rewriter, OperationBase *opBase,
+                         bool insertAfter);
+  void emitSyncOp(IRRewriter &rewriter, SyncOp *syncOp);
+  void emitSyncMap(IRRewriter &rewriter, SyncMap &syncMap, bool insertAfter);
 };
 
 } // namespace mlir::pto::syncsolver

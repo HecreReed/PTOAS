@@ -1,5 +1,5 @@
 // RUN: ptoas --pto-level=level3 --pto-arch=a5 \
-// RUN:   --mlir-print-ir-after=pto-view-to-memref %s -o - 2>&1 | FileCheck %s
+// RUN:   --mlir-print-ir-after=pto-resolve-reserved-buffers %s -o - 2>&1 | FileCheck %s
 
 module attributes {pto.target_arch = "a5"} {
   func.func @a5_tmov_treshape_square_dynamic_valid_shape() {
@@ -29,10 +29,10 @@ module attributes {pto.target_arch = "a5"} {
 
 // CHECK-DAG: [[PART:%[A-Za-z0-9_]+]] = arith.constant 8 : index
 // CHECK-DAG: [[FULL:%[A-Za-z0-9_]+]] = arith.constant 16 : index
-// CHECK: [[SRC_BASE:%[0-9]+]] = pto.bind_tile {{.*}}, [[PART]], [[FULL]] {{.*}}blayout=#pto.blayout<col_major>
-// CHECK: [[DST_BASE:%[0-9]+]] = pto.bind_tile {{.*}}, [[PART]], [[FULL]] {{.*}}blayout=#pto.blayout<col_major>
-// CHECK: [[SRC:%[0-9]+]] = pto.bind_tile [[SRC_BASE]], [[PART]], [[FULL]] {{.*}}blayout=#pto.blayout<row_major>{{.*}}pto.view_semantics = "treshape"
-// CHECK: [[DST:%[0-9]+]] = pto.bind_tile [[DST_BASE]], [[PART]], [[FULL]] {{.*}}blayout=#pto.blayout<row_major>{{.*}}pto.view_semantics = "treshape"
+// CHECK: [[SRC_BASE:%[0-9]+]] = pto.alloc_tile addr = {{.*}} valid_row = [[PART]] valid_col = [[FULL]] : !pto.tile_buf<vec, 16x16xf32, valid=?x?, blayout=col_major>
+// CHECK: [[DST_BASE:%[0-9]+]] = pto.alloc_tile addr = {{.*}} valid_row = [[PART]] valid_col = [[FULL]] : !pto.tile_buf<vec, 16x16xf32, valid=?x?, blayout=col_major>
+// CHECK: [[SRC:%[0-9]+]] = pto.treshape [[SRC_BASE]] : !pto.tile_buf<vec, 16x16xf32, valid=?x?, blayout=col_major> -> !pto.tile_buf<vec, 16x16xf32, valid=?x?>
+// CHECK: [[DST:%[0-9]+]] = pto.treshape [[DST_BASE]] : !pto.tile_buf<vec, 16x16xf32, valid=?x?, blayout=col_major> -> !pto.tile_buf<vec, 16x16xf32, valid=?x?>
 // CHECK: [[SRC_ROW:%[A-Za-z0-9_]+]], [[SRC_COL:%[A-Za-z0-9_]+]] = pto.get_validshape [[SRC_BASE]]
 // CHECK-NEXT: pto.set_validshape [[SRC]], [[SRC_COL]], [[SRC_ROW]]
 // CHECK-NEXT: [[DST_ROW:%[A-Za-z0-9_]+]], [[DST_COL:%[A-Za-z0-9_]+]] = pto.get_validshape [[DST_BASE]]

@@ -1,0 +1,37 @@
+// Please refer to the License for details. You may not use this file except in compliance with the License.
+// THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+// INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+// See LICENSE in the root of the software repository for the full text of the License.
+
+// Test ExpandTileOp expansion for pto.tadds in the VPTO pipeline.
+//
+// RUN: ptoas --pto-arch=a5 --pto-backend=vpto --emit-vpto %s -o - | FileCheck %s
+// RUN: ptoas --pto-arch=a5 --pto-backend=vpto --enable-tile-op-expand --emit-vpto %s -o - | FileCheck %s
+
+// CHECK: func.func @TADDS()
+// CHECK: pto.vecscope
+// CHECK: pto.addptr
+// CHECK: pto.vlds
+// CHECK: pto.vadds
+// CHECK: pto.vsts
+// CHECK-NOT: memref.cast
+// CHECK-NOT: builtin.unrealized_conversion_cast
+
+module {
+  func.func @TADDS() {
+    %a = pto.alloc_tile
+      : !pto.tile_buf<loc=vec, dtype=f32, rows=16, cols=64, v_row=16, v_col=64,
+                      blayout=row_major, slayout=none_box, fractal=512, pad=0>
+    %tile_buf = pto.alloc_tile
+      : !pto.tile_buf<loc=vec, dtype=f32, rows=16, cols=64, v_row=16, v_col=64,
+                      blayout=row_major, slayout=none_box, fractal=512, pad=0>
+    %scalar = arith.constant 1.0 : f32
+
+    pto.tadds ins(%a, %scalar : !pto.tile_buf<loc=vec, dtype=f32, rows=16, cols=64, v_row=16, v_col=64,
+                              blayout=row_major, slayout=none_box, fractal=512, pad=0>,
+                          f32)
+              outs(%tile_buf : !pto.tile_buf<loc=vec, dtype=f32, rows=16, cols=64, v_row=16, v_col=64,
+                                    blayout=row_major, slayout=none_box, fractal=512, pad=0>)
+    return
+  }
+}

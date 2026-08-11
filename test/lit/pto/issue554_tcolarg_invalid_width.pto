@@ -1,5 +1,5 @@
-// RUN: not ptoas --pto-arch=a3 %s 2>&1 | FileCheck %s
-// RUN: not ptoas --pto-arch=a5 %s 2>&1 | FileCheck %s
+// RUN: not ptoas --pto-arch=a3 %s 2>&1 | FileCheck %s --check-prefix=A3
+// RUN: not ptoas --pto-arch=a5 %s 2>&1 | FileCheck %s --check-prefix=A5
 
 module {
   func.func @issue554_tcolargmax_i64_rejected() {
@@ -13,4 +13,5 @@ module {
   }
 }
 
-// CHECK: error: 'pto.tcolargmax' op expects src/tmp element type to be 1, 2, or 4 bytes wide
+// A3: error: 'pto.tcolargmax' op expects src/tmp element type to be 1, 2, or 4 bytes wide
+// A5: error: 'pto.tcolargmax' op expects src element type to be 1, 2, or 4 bytes wide

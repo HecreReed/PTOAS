@@ -1,0 +1,94 @@
+// Copyright (c) 2026 Huawei Technologies Co., Ltd.
+// This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+// CANN Open Software License Agreement Version 2.0 (the "License").
+// Please refer to the License for details. You may not use this file except in compliance with the License.
+// THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+// INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+// See LICENSE in the root of the software repository for the full text of the License.
+
+// RUN: ptoas --pto-arch=a5 --pto-backend=vpto --emit-vpto-llvm-ir %s -o - 2>&1 | FileCheck %s
+// RUN: ptoas --cann-output-version=9.0.0 --pto-arch=a5 --pto-backend=vpto --emit-vpto-llvm-ir %s -o - 2>&1 | FileCheck %s
+
+// Stack-local structs must reach the VPTO LLVM pipeline. The nested access
+// proves each path element is lowered to an aggregate GEP before the scalar
+// store/load, rather than merely passing PTO frontend verification. A struct
+// declared in a loop must still use entry-block stack storage.
+module attributes {pto.target_arch = "a5", pto.kernel_kind = #pto.kernel_kind<vector>} {
+  func.func @struct_vpto_llvm() attributes {pto.kernel} {
+    %i32 = arith.constant 7 : i32
+    %f32 = arith.constant 3.5 : f32
+    %i16 = arith.constant 9 : i16
+    %s = pto.declare_struct -> !pto.struct<i32, !pto.struct<f32, i16>>
+    pto.struct_set %s[0], %i32 : !pto.struct<i32, !pto.struct<f32, i16>>, i32
+    pto.struct_set %s[1, 0], %f32 : !pto.struct<i32, !pto.struct<f32, i16>>, f32
+    pto.struct_set %s[1, 1], %i16 : !pto.struct<i32, !pto.struct<f32, i16>>, i16
+    %value = pto.struct_get %s[1, 0] : !pto.struct<i32, !pto.struct<f32, i16>> -> f32
+    pto.struct_set %s[1, 0], %value : !pto.struct<i32, !pto.struct<f32, i16>>, f32
+    return
+  }
+
+  func.func @struct_vpto_loop() attributes {pto.kernel} {
+    %c0 = arith.constant 0 : index
+    %c3 = arith.constant 3 : index
+    %c1 = arith.constant 1 : index
+    %value = arith.constant 7 : i32
+    scf.for %iv = %c0 to %c3 step %c1 {
+      %s = pto.declare_struct -> !pto.struct<i32>
+      pto.struct_set %s[0], %value : !pto.struct<i32>, i32
+      %read = pto.struct_get %s[0] : !pto.struct<i32> -> i32
+      pto.struct_set %s[0], %read : !pto.struct<i32>, i32
+    }
+    return
+  }
+
+  func.func @struct_vpto_nested_width() attributes {pto.kernel} {
+    %i8 = arith.constant 5 : i8
+    %bf16 = arith.constant 1.500000e+00 : bf16
+    %i16 = arith.constant 9 : i16
+    %i64 = arith.constant 11 : i64
+    %s = pto.declare_struct -> !pto.struct<i8, !pto.struct<bf16, !pto.struct<i16, i64>>>
+    pto.struct_set %s[0], %i8 : !pto.struct<i8, !pto.struct<bf16, !pto.struct<i16, i64>>>, i8
+    pto.struct_set %s[1, 0], %bf16 : !pto.struct<i8, !pto.struct<bf16, !pto.struct<i16, i64>>>, bf16
+    pto.struct_set %s[1, 1, 0], %i16 : !pto.struct<i8, !pto.struct<bf16, !pto.struct<i16, i64>>>, i16
+    pto.struct_set %s[1, 1, 1], %i64 : !pto.struct<i8, !pto.struct<bf16, !pto.struct<i16, i64>>>, i64
+    %read = pto.struct_get %s[1, 1, 1] : !pto.struct<i8, !pto.struct<bf16, !pto.struct<i16, i64>>> -> i64
+    pto.struct_set %s[1, 1, 1], %read : !pto.struct<i8, !pto.struct<bf16, !pto.struct<i16, i64>>>, i64
+    return
+  }
+}
+
+// CHECK-LABEL: define {{.*}} @struct_vpto_llvm_mix_aiv()
+// CHECK: alloca { i32, { float, i16 } }, i64 1
+// CHECK: getelementptr { i32, { float, i16 } }, ptr {{.*}}, i32 0, i32 0
+// CHECK: store i32 7, ptr
+// CHECK: getelementptr { i32, { float, i16 } }, ptr {{.*}}, i32 0, i32 1
+// CHECK: getelementptr { float, i16 }, ptr {{.*}}, i32 0, i32 0
+// CHECK: store float 3.500000e+00, ptr
+// CHECK: getelementptr { float, i16 }, ptr {{.*}}, i32 0, i32 1
+// CHECK: store i16 9, ptr
+// CHECK: getelementptr { float, i16 }, ptr {{.*}}, i32 0, i32 0
+// CHECK: load float, ptr
+
+// CHECK-LABEL: define {{.*}} @struct_vpto_loop_mix_aiv()
+// CHECK: %[[LOOP_STATE:.*]] = alloca { i32 }, i64 1
+// CHECK: br label
+// CHECK-NOT: alloca
+// CHECK: getelementptr { i32 }, ptr %[[LOOP_STATE]], i32 0, i32 0
+// CHECK: store i32 7, ptr
+
+// This three-level mixed-width local struct checks the iterative storage-type
+// construction and explicit scalar alignment.
+// CHECK-LABEL: define {{.*}} @struct_vpto_nested_width_mix_aiv()
+// CHECK: alloca { i8, { bfloat, { i16, i64 } } }, i64 1
+// CHECK: getelementptr { i8, { bfloat, { i16, i64 } } }, ptr {{.*}}, i32 0, i32 0
+// CHECK: store i8 5, ptr {{.*}}, align 1
+// CHECK: getelementptr { i8, { bfloat, { i16, i64 } } }, ptr {{.*}}, i32 0, i32 1
+// CHECK: getelementptr { bfloat, { i16, i64 } }, ptr {{.*}}, i32 0, i32 0
+// CHECK: store bfloat {{.*}}, ptr {{.*}}, align 2
+// CHECK: getelementptr { bfloat, { i16, i64 } }, ptr {{.*}}, i32 0, i32 1
+// CHECK: getelementptr { i16, i64 }, ptr {{.*}}, i32 0, i32 0
+// CHECK: store i16 9, ptr {{.*}}, align 2
+// CHECK: getelementptr { i16, i64 }, ptr {{.*}}, i32 0, i32 1
+// CHECK: store i64 11, ptr {{.*}}, align 8
+// CHECK: getelementptr { i16, i64 }, ptr {{.*}}, i32 0, i32 1
+// CHECK: load i64, ptr {{.*}}, align 8

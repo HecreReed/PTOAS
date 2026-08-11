@@ -1,0 +1,11 @@
+// RUN: not ptoas --pto-arch=a5 %s 2>&1 | FileCheck %s
+
+module {
+  func.func @bad_cube_pipe_without_kernel_context(%consumer_buf: i32) {
+    pto.aic_initialize_pipe {id = 0, dir_mask = 1, slot_size = 1024}
+      (c2v_consumer_buf = %consumer_buf : i32)
+    return
+  }
+}
+
+// CHECK: error: 'pto.aic_initialize_pipe' op must be inside a cube kernel function or section

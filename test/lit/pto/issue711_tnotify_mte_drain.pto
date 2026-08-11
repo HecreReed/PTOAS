@@ -1,0 +1,324 @@
+// Copyright (c) 2026 Huawei Technologies Co., Ltd.
+// This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+// CANN Open Software License Agreement Version 2.0 (the "License").
+// Please refer to the License for details. You may not use this file except in compliance with the License.
+// THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+// INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+// See LICENSE in the root of the software repository for the full text of the License.
+
+// Regression for issue #711 under the explicit memory-consistency contract:
+// TNotify release requires the producer side to drain local producer pipes
+// before the GM fence and before pto.comm.tnotify. PTOAS no longer runs the
+// historical MemoryConsistency analysis pass, so the explicit GM fence lowering
+// drains all vector-kernel pipes before dsb(DSB_DDR).
+
+// RUN: ptoas --pto-arch=a3 %s -o - 2>&1 | FileCheck %s
+
+module {
+  // tstore -> tnotify: the data-producing case (signal must follow the store).
+  func.func @tnotify_drain_after_tstore(
+      %src_ptr: !pto.ptr<f32>,
+      %dst_ptr: !pto.ptr<f32>,
+      %signal_ptr: !pto.ptr<i32>)
+      attributes {pto.kernel_kind = #pto.kernel_kind<vector>} {
+    %c0 = arith.constant 0 : index
+    %c1 = arith.constant 1 : index
+    %c32 = arith.constant 32 : index
+    %v_i32 = arith.constant 1 : i32
+
+    %tile = pto.alloc_tile :
+      !pto.tile_buf<loc=vec, dtype=f32, rows=1, cols=32, v_row=1, v_col=32, blayout=row_major, slayout=none_box, fractal=512, pad=0>
+
+    %src_view = pto.make_tensor_view %src_ptr,
+      shape = [%c1, %c32], strides = [%c32, %c1] : !pto.tensor_view<?x?xf32>
+    %src = pto.partition_view %src_view,
+      offsets = [%c0, %c0], sizes = [%c1, %c32]
+      : !pto.tensor_view<?x?xf32> -> !pto.partition_tensor_view<1x32xf32>
+
+    %dst_view = pto.make_tensor_view %dst_ptr,
+      shape = [%c1, %c32], strides = [%c32, %c1] : !pto.tensor_view<?x?xf32>
+    %dst = pto.partition_view %dst_view,
+      offsets = [%c0, %c0], sizes = [%c1, %c32]
+      : !pto.tensor_view<?x?xf32> -> !pto.partition_tensor_view<1x32xf32>
+
+    pto.tload ins(%src : !pto.partition_tensor_view<1x32xf32>)
+              outs(%tile : !pto.tile_buf<loc=vec, dtype=f32, rows=1, cols=32, v_row=1, v_col=32, blayout=row_major, slayout=none_box, fractal=512, pad=0>)
+    pto.tstore ins(%tile : !pto.tile_buf<loc=vec, dtype=f32, rows=1, cols=32, v_row=1, v_col=32, blayout=row_major, slayout=none_box, fractal=512, pad=0>)
+               outs(%dst : !pto.partition_tensor_view<1x32xf32>)
+    pto.fence.barrier_all #pto.fence_scope<gm>
+
+    %sig_view = pto.make_tensor_view %signal_ptr,
+      shape = [%c1], strides = [%c1] : !pto.tensor_view<1xi32>
+    %sig = pto.partition_view %sig_view,
+      offsets = [%c0], sizes = [%c1]
+      : !pto.tensor_view<1xi32> -> !pto.partition_tensor_view<1xi32>
+    pto.comm.tnotify(%sig, %v_i32 : !pto.partition_tensor_view<1xi32>, i32)
+        {notifyOp = #pto<notify_op set>}
+    return
+  }
+
+  // acc tstore -> tnotify: the vector-kernel release fence uses PIPE_ALL, so
+  // it does not name the cube-side FIX pipe explicitly.
+  func.func @tnotify_drain_after_acc_tstore(
+      %dst_ptr: !pto.ptr<f32>,
+      %signal_ptr: !pto.ptr<i32>)
+      attributes {pto.kernel_kind = #pto.kernel_kind<vector>} {
+    %c0 = arith.constant 0 : index
+    %c1 = arith.constant 1 : index
+    %c16 = arith.constant 16 : index
+    %v_i32 = arith.constant 1 : i32
+
+    %acc = pto.alloc_tile :
+      !pto.tile_buf<loc=acc, dtype=f32, rows=16, cols=16, v_row=16, v_col=16, blayout=col_major, slayout=row_major, fractal=1024, pad=0>
+
+    %dst_view = pto.make_tensor_view %dst_ptr,
+      shape = [%c16, %c16], strides = [%c16, %c1] : !pto.tensor_view<?x?xf32>
+    %dst = pto.partition_view %dst_view,
+      offsets = [%c0, %c0], sizes = [%c16, %c16]
+      : !pto.tensor_view<?x?xf32> -> !pto.partition_tensor_view<16x16xf32>
+
+    pto.tstore ins(%acc : !pto.tile_buf<loc=acc, dtype=f32, rows=16, cols=16, v_row=16, v_col=16, blayout=col_major, slayout=row_major, fractal=1024, pad=0>)
+               outs(%dst : !pto.partition_tensor_view<16x16xf32>)
+    pto.fence.barrier_all #pto.fence_scope<gm>
+
+    %sig_view = pto.make_tensor_view %signal_ptr,
+      shape = [%c1], strides = [%c1] : !pto.tensor_view<1xi32>
+    %sig = pto.partition_view %sig_view,
+      offsets = [%c0], sizes = [%c1]
+      : !pto.tensor_view<1xi32> -> !pto.partition_tensor_view<1xi32>
+    pto.comm.tnotify(%sig, %v_i32 : !pto.partition_tensor_view<1xi32>, i32)
+        {notifyOp = #pto<notify_op set>}
+    return
+  }
+
+  // tload -> tnotify: the input-consumed case (notify must follow the load
+  // so the producer can reuse the source buffer once TWAIT returns).
+  func.func @tnotify_drain_after_tload(
+      %src_ptr: !pto.ptr<f32>,
+      %signal_ptr: !pto.ptr<i32>)
+      attributes {pto.kernel_kind = #pto.kernel_kind<vector>} {
+    %c0 = arith.constant 0 : index
+    %c1 = arith.constant 1 : index
+    %c32 = arith.constant 32 : index
+    %v_i32 = arith.constant 1 : i32
+
+    %tile = pto.alloc_tile :
+      !pto.tile_buf<loc=vec, dtype=f32, rows=1, cols=32, v_row=1, v_col=32, blayout=row_major, slayout=none_box, fractal=512, pad=0>
+
+    %src_view = pto.make_tensor_view %src_ptr,
+      shape = [%c1, %c32], strides = [%c32, %c1] : !pto.tensor_view<?x?xf32>
+    %src = pto.partition_view %src_view,
+      offsets = [%c0, %c0], sizes = [%c1, %c32]
+      : !pto.tensor_view<?x?xf32> -> !pto.partition_tensor_view<1x32xf32>
+
+    pto.tload ins(%src : !pto.partition_tensor_view<1x32xf32>)
+              outs(%tile : !pto.tile_buf<loc=vec, dtype=f32, rows=1, cols=32, v_row=1, v_col=32, blayout=row_major, slayout=none_box, fractal=512, pad=0>)
+    pto.barrier <PIPE_MTE2>
+
+    %sig_view = pto.make_tensor_view %signal_ptr,
+      shape = [%c1], strides = [%c1] : !pto.tensor_view<1xi32>
+    %sig = pto.partition_view %sig_view,
+      offsets = [%c0], sizes = [%c1]
+      : !pto.tensor_view<1xi32> -> !pto.partition_tensor_view<1xi32>
+    pto.comm.tnotify(%sig, %v_i32 : !pto.partition_tensor_view<1xi32>, i32)
+        {notifyOp = #pto<notify_op atomic_add>}
+    return
+  }
+
+  // A user/pass-provided MTE barrier already drains the pending load, so
+  // tnotify lowering should not duplicate the same MTE2 drain.
+  func.func @tnotify_after_existing_mte2_barrier(
+      %src_ptr: !pto.ptr<f32>,
+      %signal_ptr: !pto.ptr<i32>)
+      attributes {pto.kernel_kind = #pto.kernel_kind<vector>} {
+    %c0 = arith.constant 0 : index
+    %c1 = arith.constant 1 : index
+    %c32 = arith.constant 32 : index
+    %v_i32 = arith.constant 1 : i32
+
+    %tile = pto.alloc_tile :
+      !pto.tile_buf<loc=vec, dtype=f32, rows=1, cols=32, v_row=1, v_col=32, blayout=row_major, slayout=none_box, fractal=512, pad=0>
+
+    %src_view = pto.make_tensor_view %src_ptr,
+      shape = [%c1, %c32], strides = [%c32, %c1] : !pto.tensor_view<?x?xf32>
+    %src = pto.partition_view %src_view,
+      offsets = [%c0, %c0], sizes = [%c1, %c32]
+      : !pto.tensor_view<?x?xf32> -> !pto.partition_tensor_view<1x32xf32>
+
+    pto.tload ins(%src : !pto.partition_tensor_view<1x32xf32>)
+              outs(%tile : !pto.tile_buf<loc=vec, dtype=f32, rows=1, cols=32, v_row=1, v_col=32, blayout=row_major, slayout=none_box, fractal=512, pad=0>)
+    pto.barrier <PIPE_MTE2>
+
+    %sig_view = pto.make_tensor_view %signal_ptr,
+      shape = [%c1], strides = [%c1] : !pto.tensor_view<1xi32>
+    %sig = pto.partition_view %sig_view,
+      offsets = [%c0], sizes = [%c1]
+      : !pto.tensor_view<1xi32> -> !pto.partition_tensor_view<1xi32>
+    pto.comm.tnotify(%sig, %v_i32 : !pto.partition_tensor_view<1xi32>, i32)
+        {notifyOp = #pto<notify_op set>}
+    return
+  }
+
+  // The explicit barrier_all drains all vector-kernel pipes, then completes
+  // the publish sequence with a DDR fence.
+  func.func @tnotify_after_existing_mte3_barrier_and_release(
+      %src_ptr: !pto.ptr<f32>,
+      %dst_ptr: !pto.ptr<f32>,
+      %signal_ptr: !pto.ptr<i32>)
+      attributes {pto.kernel_kind = #pto.kernel_kind<vector>} {
+    %c0 = arith.constant 0 : index
+    %c1 = arith.constant 1 : index
+    %c32 = arith.constant 32 : index
+    %v_i32 = arith.constant 1 : i32
+
+    %tile = pto.alloc_tile :
+      !pto.tile_buf<loc=vec, dtype=f32, rows=1, cols=32, v_row=1, v_col=32, blayout=row_major, slayout=none_box, fractal=512, pad=0>
+
+    %src_view = pto.make_tensor_view %src_ptr,
+      shape = [%c1, %c32], strides = [%c32, %c1] : !pto.tensor_view<?x?xf32>
+    %src = pto.partition_view %src_view,
+      offsets = [%c0, %c0], sizes = [%c1, %c32]
+      : !pto.tensor_view<?x?xf32> -> !pto.partition_tensor_view<1x32xf32>
+
+    %dst_view = pto.make_tensor_view %dst_ptr,
+      shape = [%c1, %c32], strides = [%c32, %c1] : !pto.tensor_view<?x?xf32>
+    %dst = pto.partition_view %dst_view,
+      offsets = [%c0, %c0], sizes = [%c1, %c32]
+      : !pto.tensor_view<?x?xf32> -> !pto.partition_tensor_view<1x32xf32>
+
+    pto.tload ins(%src : !pto.partition_tensor_view<1x32xf32>)
+              outs(%tile : !pto.tile_buf<loc=vec, dtype=f32, rows=1, cols=32, v_row=1, v_col=32, blayout=row_major, slayout=none_box, fractal=512, pad=0>)
+    pto.barrier <PIPE_MTE2>
+    pto.tstore ins(%tile : !pto.tile_buf<loc=vec, dtype=f32, rows=1, cols=32, v_row=1, v_col=32, blayout=row_major, slayout=none_box, fractal=512, pad=0>)
+               outs(%dst : !pto.partition_tensor_view<1x32xf32>)
+    pto.fence.barrier_all #pto.fence_scope<gm>
+
+    %sig_view = pto.make_tensor_view %signal_ptr,
+      shape = [%c1], strides = [%c1] : !pto.tensor_view<1xi32>
+    %sig = pto.partition_view %sig_view,
+      offsets = [%c0], sizes = [%c1]
+      : !pto.tensor_view<1xi32> -> !pto.partition_tensor_view<1xi32>
+    pto.comm.tnotify(%sig, %v_i32 : !pto.partition_tensor_view<1xi32>, i32)
+        {notifyOp = #pto<notify_op set>}
+    return
+  }
+
+  // The GM fence lowering is conservative and self-contained; no analysis pass
+  // needs to add a second DDR fence before TNotify.
+  func.func @tnotify_after_existing_mte3_barrier_and_fence(
+      %dst_ptr: !pto.ptr<f32>,
+      %signal_ptr: !pto.ptr<i32>)
+      attributes {pto.kernel_kind = #pto.kernel_kind<vector>} {
+    %c0 = arith.constant 0 : index
+    %c1 = arith.constant 1 : index
+    %c32 = arith.constant 32 : index
+    %v_i32 = arith.constant 1 : i32
+
+    %tile = pto.alloc_tile :
+      !pto.tile_buf<loc=vec, dtype=f32, rows=1, cols=32, v_row=1, v_col=32, blayout=row_major, slayout=none_box, fractal=512, pad=0>
+
+    %dst_view = pto.make_tensor_view %dst_ptr,
+      shape = [%c1, %c32], strides = [%c32, %c1] : !pto.tensor_view<?x?xf32>
+    %dst = pto.partition_view %dst_view,
+      offsets = [%c0, %c0], sizes = [%c1, %c32]
+      : !pto.tensor_view<?x?xf32> -> !pto.partition_tensor_view<1x32xf32>
+
+    pto.tstore ins(%tile : !pto.tile_buf<loc=vec, dtype=f32, rows=1, cols=32, v_row=1, v_col=32, blayout=row_major, slayout=none_box, fractal=512, pad=0>)
+               outs(%dst : !pto.partition_tensor_view<1x32xf32>)
+    pto.fence.barrier_all #pto.fence_scope<gm>
+
+    %sig_view = pto.make_tensor_view %signal_ptr,
+      shape = [%c1], strides = [%c1] : !pto.tensor_view<1xi32>
+    %sig = pto.partition_view %sig_view,
+      offsets = [%c0], sizes = [%c1]
+      : !pto.tensor_view<1xi32> -> !pto.partition_tensor_view<1xi32>
+    pto.comm.tnotify(%sig, %v_i32 : !pto.partition_tensor_view<1xi32>, i32)
+        {notifyOp = #pto<notify_op set>}
+    return
+  }
+
+  // tnotify without prior MTE-side work does not need a release drain.
+  func.func @tnotify_no_mte_drain(
+      %signal_ptr: !pto.ptr<i32>)
+      attributes {pto.kernel_kind = #pto.kernel_kind<vector>} {
+    %c0 = arith.constant 0 : index
+    %c1 = arith.constant 1 : index
+    %v_i32 = arith.constant 1 : i32
+
+    %sig_view = pto.make_tensor_view %signal_ptr,
+      shape = [%c1], strides = [%c1] : !pto.tensor_view<1xi32>
+    %sig = pto.partition_view %sig_view,
+      offsets = [%c0], sizes = [%c1]
+      : !pto.tensor_view<1xi32> -> !pto.partition_tensor_view<1xi32>
+    pto.comm.tnotify(%sig, %v_i32 : !pto.partition_tensor_view<1xi32>, i32)
+        {notifyOp = #pto<notify_op set>}
+    return
+  }
+
+  // twait must NOT receive the new MTE drain -- the receiver-side wait does
+  // not write any peer-visible data, so adding a barrier there would only be
+  // a needless stall. Pair this with --implicit-check-not to lock that in.
+  func.func @twait_no_extra_drain(
+      %signal_ptr: !pto.ptr<i32>)
+      attributes {pto.kernel_kind = #pto.kernel_kind<vector>} {
+    %c0 = arith.constant 0 : index
+    %c1 = arith.constant 1 : index
+    %v_i32 = arith.constant 1 : i32
+
+    %sig_view = pto.make_tensor_view %signal_ptr,
+      shape = [%c1], strides = [%c1] : !pto.tensor_view<1xi32>
+    %sig = pto.partition_view %sig_view,
+      offsets = [%c0], sizes = [%c1]
+      : !pto.tensor_view<1xi32> -> !pto.partition_tensor_view<1xi32>
+    pto.comm.twait(%sig, %v_i32 : !pto.partition_tensor_view<1xi32>, i32)
+        {cmp = #pto<wait_cmp ge>}
+    return
+  }
+}
+
+// CHECK-LABEL: AICORE void tnotify_drain_after_tstore(
+// CHECK:      TLOAD(
+// CHECK:      TSTORE(
+// CHECK:      pipe_barrier(PIPE_ALL);
+// CHECK-NEXT: dsb(DSB_DDR);
+// CHECK:      pto::comm::NotifyOp{{.*}}= pto::comm::NotifyOp::Set;
+// CHECK:      pto::comm::TNOTIFY(
+
+// CHECK-LABEL: AICORE void tnotify_drain_after_acc_tstore(
+// CHECK:      TSTORE
+// CHECK:      pipe_barrier(PIPE_ALL);
+// CHECK-NEXT: dsb(DSB_DDR);
+// CHECK:      pto::comm::TNOTIFY(
+
+// CHECK-LABEL: AICORE void tnotify_drain_after_tload(
+// CHECK:      TLOAD(
+// CHECK:      pipe_barrier(PIPE_MTE2);
+// CHECK-NOT:  dsb(
+// CHECK:      pto::comm::NotifyOp{{.*}}= pto::comm::NotifyOp::AtomicAdd;
+// CHECK:      pto::comm::TNOTIFY(
+
+// CHECK-LABEL: AICORE void tnotify_after_existing_mte2_barrier(
+// CHECK:      TLOAD(
+// CHECK:      pipe_barrier(PIPE_MTE2);
+// CHECK-NOT:  pipe_barrier(
+// CHECK:      pto::comm::TNOTIFY(
+
+// CHECK-LABEL: AICORE void tnotify_after_existing_mte3_barrier_and_release(
+// CHECK:      TSTORE(
+// CHECK:      pipe_barrier(PIPE_ALL);
+// CHECK-NEXT: dsb(DSB_DDR);
+// CHECK:      pto::comm::TNOTIFY(
+
+// CHECK-LABEL: AICORE void tnotify_after_existing_mte3_barrier_and_fence(
+// CHECK:      TSTORE(
+// CHECK:      pipe_barrier(PIPE_ALL);
+// CHECK-NEXT: dsb(DSB_DDR);
+// CHECK:      pto::comm::TNOTIFY(
+
+// CHECK-LABEL: AICORE void tnotify_no_mte_drain(
+// CHECK-NOT:  pipe_barrier(
+// CHECK:      pto::comm::TNOTIFY(
+
+// CHECK-LABEL: AICORE void twait_no_extra_drain(
+// CHECK-NOT:  pipe_barrier(
+// CHECK:      pto::comm::TWAIT(

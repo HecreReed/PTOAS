@@ -1,0 +1,40 @@
+// Copyright (c) 2026 Huawei Technologies Co., Ltd.
+// This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+// CANN Open Software License Agreement Version 2.0 (the "License").
+// Please refer to the License for details. You may not use this file except in compliance with the License.
+// THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+// INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+// See LICENSE in the root of the software repository for the full text of the License.
+
+// RUN: ptoas --pto-level=level3 --pto-arch=a5 \
+// RUN:   --mlir-print-ir-after=pto-resolve-reserved-buffers %s -o - 2>&1 \
+// RUN:   | FileCheck %s --check-prefix=NATIVE
+
+module attributes {pto.target_arch = "a5"} {
+  func.func private @reshape_arg(
+      %src: !pto.tile_buf<loc=vec, dtype=f32, rows=16, cols=1,
+                         v_row=16, v_col=1, blayout=col_major,
+                         slayout=none_box, fractal=512, pad=0>)
+      -> !pto.tile_buf<loc=vec, dtype=f32, rows=1, cols=16,
+                       v_row=1, v_col=16, blayout=row_major,
+                       slayout=none_box, fractal=512, pad=0> {
+    %result = pto.treshape %src
+      : !pto.tile_buf<loc=vec, dtype=f32, rows=16, cols=1,
+                      v_row=16, v_col=1, blayout=col_major,
+                      slayout=none_box, fractal=512, pad=0>
+     -> !pto.tile_buf<loc=vec, dtype=f32, rows=1, cols=16,
+                      v_row=1, v_col=16, blayout=row_major,
+                      slayout=none_box, fractal=512, pad=0>
+    return %result : !pto.tile_buf<loc=vec, dtype=f32, rows=1, cols=16,
+                                   v_row=1, v_col=16, blayout=row_major,
+                                   slayout=none_box, fractal=512, pad=0>
+  }
+}
+
+// NATIVE-LABEL: func.func private @reshape_arg(
+// NATIVE-SAME: !pto.tile_buf<vec, 16x1xf32, blayout=col_major>
+// NATIVE: %[[RESULT:.*]] = pto.treshape %arg0
+// NATIVE-SAME: !pto.tile_buf<vec, 16x1xf32, blayout=col_major>
+// NATIVE-SAME: -> !pto.tile_buf<vec, 1x16xf32>
+// NATIVE: return %[[RESULT]] : !pto.tile_buf<vec, 1x16xf32>
+// NATIVE-NOT: memref<

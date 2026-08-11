@@ -1,0 +1,57 @@
+// Copyright (c) 2026 Huawei Technologies Co., Ltd.
+// This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+// CANN Open Software License Agreement Version 2.0 (the "License").
+// Please refer to the License for details. You may not use this file except in compliance with the License.
+// THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+// INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+// See LICENSE in the root of the software repository for the full text of the License.
+
+// RUN: ptoas --pto-level=level2 --pto-arch=a3 --pto-backend=vpto \
+// RUN:   --plan-memory-impl=modern \
+// RUN:   --emit-pto-ir --mlir-print-ir-after=pto-plan-memory %s 2>&1 \
+// RUN:   | FileCheck %s
+
+module attributes {pto.target_arch = "a3"} {
+  module attributes {
+      pto.backend = "vpto",
+      pto.kernel_kind = #pto.kernel_kind<vector>,
+      pto.target_arch = "a3"} {
+    func.func @child_entry() attributes {pto.entry} {
+      %src = pto.alloc_tile : !pto.tile_buf<vec, 16x16xf16>
+      %dst = pto.alloc_tile : !pto.tile_buf<vec, 16x16xf16>
+      pto.tmov ins(%src : !pto.tile_buf<vec, 16x16xf16>)
+               outs(%dst : !pto.tile_buf<vec, 16x16xf16>)
+      return
+    }
+
+    func.func private @tileop_helper() attributes {pto.tileop.helper} {
+      %zero = arith.constant 0 : i64
+      %offset = arith.constant 0 : index
+      %ptr = pto.castptr %zero : i64 -> !pto.ptr<f32, ub>
+      %mask = pto.pset_b32 "PAT_ALL" : !pto.mask<b32>
+      %vector = pto.vlds %ptr[%offset]
+        : !pto.ptr<f32, ub> -> !pto.vreg<64xf32>
+      pto.vsts %vector, %ptr[%offset], %mask
+        : !pto.vreg<64xf32>, !pto.ptr<f32, ub>, !pto.mask<b32>
+      return
+    }
+  }
+  module attributes {pto.backend = "vpto", pto.target_arch = "a3"} {
+    func.func @plain_child_entry() {
+      %src = pto.alloc_tile : !pto.tile_buf<vec, 16x16xf16>
+      %dst = pto.alloc_tile : !pto.tile_buf<vec, 16x16xf16>
+      pto.tmov ins(%src : !pto.tile_buf<vec, 16x16xf16>)
+               outs(%dst : !pto.tile_buf<vec, 16x16xf16>)
+      return
+    }
+  }
+}
+
+// CHECK-LABEL: func.func @child_entry
+// CHECK-DAG: %[[ADDR:.*]] = arith.constant 0 : i64
+// CHECK: pto.alloc_tile addr = %[[ADDR]]
+// CHECK: pto.alloc_tile addr = %[[ADDR]]
+// CHECK-LABEL: func.func @plain_child_entry
+// CHECK-DAG: %[[PLAIN_ADDR:.*]] = arith.constant 0 : i64
+// CHECK: pto.alloc_tile addr = %[[PLAIN_ADDR]]
+// CHECK: pto.alloc_tile addr = %[[PLAIN_ADDR]]

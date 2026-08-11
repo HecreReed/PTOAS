@@ -1,0 +1,55 @@
+// RUN: ptoas --pto-arch=a5 --pto-backend=vpto --emit-vpto --mlir-print-ir-before=vpto-expand-wrapper-ops %s -o /dev/null 2>&1 | FileCheck %s --check-prefix=ROUNDTRIP
+// RUN: ptoas --pto-arch=a5 --pto-backend=vpto --emit-vpto %s -o - 2>/dev/null | FileCheck %s --check-prefix=EXPAND
+
+module attributes {"pto.target_arch" = "a5", pto.kernel_kind = #pto.kernel_kind<cube>} {
+  func.func @cube_load_frac_roundtrip(%arg0: memref<?xf16, #pto.address_space<gm>>,
+                                      %arg1: memref<?xf16, #pto.address_space<gm>>,
+                                      %dst0: memref<?xf16, #pto.address_space<mat>>,
+                                      %dst1: memref<?xf16, #pto.address_space<mat>>) {
+    %c0_i64 = arith.constant 0 : i64
+    %c1_i64 = arith.constant 1 : i64
+    %c2_i64 = arith.constant 2 : i64
+    %c3_i64 = arith.constant 3 : i64
+    %c4_i64 = arith.constant 4 : i64
+    %c5_i64 = arith.constant 5 : i64
+    %c16_i64 = arith.constant 16 : i64
+    %c20_i64 = arith.constant 20 : i64
+    %c32_i64 = arith.constant 32 : i64
+    %c64_i64 = arith.constant 64 : i64
+    %c256_i64 = arith.constant 256 : i64
+    %c512_i64 = arith.constant 512 : i64
+    %c1024_i64 = arith.constant 1024 : i64
+    %cfalse = arith.constant 0 : i1
+    %ctrue = arith.constant 1 : i1
+
+    pto.mte_gm_l1_frac %arg0, %dst0, nd2nz,
+        shape(%c16_i64, %c5_i64),
+        src_layout(%c32_i64, %c256_i64),
+        dst_group(%c2_i64, %c1_i64, %c4_i64, %c20_i64),
+        ctrl(%c0_i64, %cfalse)
+      : memref<?xf16, #pto.address_space<gm>>, memref<?xf16, #pto.address_space<mat>>, nd2nz,
+        shape i64, i64, src_layout(i64, i64),
+        dst_group i64, i64, i64, i64, ctrl i64, i1
+
+    pto.mte_gm_l1_frac %arg1, %dst1, dn2nz,
+        shape(%c16_i64, %c4_i64),
+        src_layout(%c64_i64),
+        dst_group(%c1_i64, %c1_i64, %c4_i64, %c20_i64),
+        ctrl(%c0_i64, %ctrue)
+      : memref<?xf16, #pto.address_space<gm>>, memref<?xf16, #pto.address_space<mat>>, dn2nz,
+        shape i64, i64, src_layout(i64),
+        dst_group i64, i64, i64, i64, ctrl i64, i1
+
+    return
+  }
+}
+
+// ROUNDTRIP-LABEL: func.func @cube_load_frac_roundtrip(
+// ROUNDTRIP: pto.mte_gm_l1_frac %{{.*}}, %{{.*}}, nd2nz, shape(%{{.*}}, %{{.*}}), src_layout(%{{.*}}, %{{.*}}), dst_group(%{{.*}}, %{{.*}}, %{{.*}}, %{{.*}}), ctrl(%{{.*}}, %{{.*}})
+// ROUNDTRIP: pto.mte_gm_l1_frac %{{.*}}, %{{.*}}, dn2nz, shape(%{{.*}}, %{{.*}}), src_layout(%{{.*}}), dst_group(%{{.*}}, %{{.*}}, %{{.*}}, %{{.*}}), ctrl(%{{.*}}, %{{.*}})
+
+// EXPAND-LABEL: func.func @cube_load_frac_roundtrip(
+// EXPAND: pto.set_mte2_nz_para
+// EXPAND: pto.copy_gm_to_cbuf_multi_nd2nz
+// EXPAND: pto.set_mte2_nz_para
+// EXPAND: pto.copy_gm_to_cbuf_multi_dn2nz

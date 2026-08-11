@@ -31,447 +31,395 @@
 
 namespace mlir::pto::syncsolver {
 
-class GraphSolver;
-
 class Solver {
 public:
-    // Configuration options.
-    const SyncSolverOptions options;
+  // Configuration options.
+  const SyncSolverOptions options;
 
-    // Original MLIR function being processed (may be null for test-only Solver).
-    func::FuncOp funcOp;
+  // Original MLIR function being processed (may be null for test-only Solver).
+  func::FuncOp funcOp;
 
-    // In-memory hierarchical IR (Function -> Scopes -> Ops) used by the solver.
-    std::unique_ptr<OperationBase> funcIr;
+  // In-memory hierarchical IR (Function -> Scopes -> Ops) used by the solver.
+  std::unique_ptr<OperationBase> funcIr;
 
-    // Linearized occurrence sequence (sync IR) built from funcIr, each Occurrence
-    // represents one appearance of an operation in the sync-analysis order.
-    std::vector<std::unique_ptr<Occurrence>> syncIr;
+  // Linearized occurrence sequence (sync IR) built from funcIr, each Occurrence
+  // represents one appearance of an operation in the sync-analysis order.
+  std::vector<std::unique_ptr<Occurrence>> syncIr;
 
-    // Set of RW operations that expose unit-flag feature and need special
-    // handling.
-    llvm::DenseSet<RWOperation*> unitFlagFeaturedOps;
+  // Set of RW operations that expose unit-flag feature and need special
+  // handling.
+  llvm::DenseSet<RWOperation *> unitFlagFeaturedOps;
 
-    // Collected conflict pairs chosen by the algorithm for insertion (and
-    // persistent ones that survive multiple passes).
-    std::vector<std::unique_ptr<ConflictPair>> chosenConflictedPairs, persistentChosenConflictedPairs;
+  // Collected conflict pairs chosen by the algorithm for insertion (and
+  // persistent ones that survive multiple passes).
+  std::vector<std::unique_ptr<ConflictPair>> chosenConflictedPairs,
+      persistentChosenConflictedPairs;
 
 protected:
-    using ExtraConflictPairs = llvm::SmallVector<std::pair<std::unique_ptr<ConflictPair>, Occurrence*>>;
-    int64_t globalSetWaitIndex{0};
-    int64_t maxReuseNum{20};
-    int64_t maxRunNum{99};
-    bool moveBackwardSyncPairsToOutmostLoop{false};
-    bool dontMoveBackwardSyncPairsToOutmostLoop{false};
+  int64_t globalSetWaitIndex{0};
+  int64_t maxReuseNum{20};
+  int64_t maxRunNum{99};
+  bool moveBackwardSyncPairsToOutmostLoop{false};
+  bool dontMoveBackwardSyncPairsToOutmostLoop{false};
 
-    llvm::DenseMap<std::tuple<pto::PIPE, pto::PIPE>, std::unique_ptr<EventIdSolver>> eventIdSolver;
+  llvm::DenseMap<std::tuple<pto::PIPE, pto::PIPE>,
+                 std::unique_ptr<EventIdSolver>>
+      eventIdSolver;
 
-    // Map op -> list of occurrences in syncIr (quick lookup for an op's
-    // occurrences).
-    llvm::DenseMap<const OperationBase*, std::vector<Occurrence*>> opAllOccurrences;
+  // Map op -> list of occurrences in syncIr (quick lookup for an op's
+  // occurrences).
+  llvm::DenseMap<OperationBase *, std::vector<Occurrence *>> opAllOccurrences;
 
-    // Bookkeeping map used to record that a pair (scopeOp, op1, op2, setPipe,
-    // waitPipe) has already been synchronized and which ConflictPair performed
-    // it.
-    SyncScopePairDenseMap<llvm::DenseSet<ConflictPair*>> syncedPairs;
+  // Bookkeeping map used to record that a pair (scopeOp, op1, op2, setPipe,
+  // waitPipe) has already been synchronized and which ConflictPair performed
+  // it.
+  llvm::DenseMap<std::tuple<OperationBase *, OperationBase *, OperationBase *,
+                            CorePipeInfo, CorePipeInfo>,
+                 llvm::DenseSet<ConflictPair *>>
+      syncedPairs;
 
-    SyncScopePairDenseMap<ConflictPair*> replacedWithReusableSyncedPairs;
+  llvm::DenseMap<std::tuple<OperationBase *, OperationBase *, OperationBase *,
+                            CorePipeInfo, CorePipeInfo>,
+                 ConflictPair *>
+      replacedWithReusableSyncedPairs;
 
-    // Chosen conflicts keyed by occurrence (scope occurrence) to allow retrieving
-    // conflicts that affect a particular occurrence subtree.
-    llvm::DenseMap<Occurrence*, llvm::DenseSet<ConflictPair*>> scopeOccChosenConflicts,
-        persistentScopeOccChosenConflicts;
+  // Chosen conflicts keyed by occurrence (scope occurrence) to allow retrieving
+  // conflicts that affect a particular occurrence subtree.
+  llvm::DenseMap<Occurrence *, llvm::DenseSet<ConflictPair *>>
+      scopeOccChosenConflicts, persistentScopeOccChosenConflicts;
 
-    // Chosen conflicts keyed by a pair of scope-occurrences, used when conflicts
-    // are associated with a pair of sibling blocks (e.g., condition branches).
-    llvm::DenseMap<std::pair<Occurrence*, Occurrence*>, llvm::DenseSet<ConflictPair*>> scopeOccPairChosenConflicts,
-        persistentScopeOccPairChosenConflicts;
+  // Chosen conflicts keyed by a pair of scope-occurrences, used when conflicts
+  // are associated with a pair of sibling blocks (e.g., condition branches).
+  llvm::DenseMap<std::pair<Occurrence *, Occurrence *>,
+                 llvm::DenseSet<ConflictPair *>>
+      scopeOccPairChosenConflicts, persistentScopeOccPairChosenConflicts;
 
-    // Processing order list created from syncIr that drives pairwise conflict
-    // checks.
-    std::vector<ProcessingOrder> processingOrders;
+  // Processing order list created from syncIr that drives pairwise conflict
+  // checks.
+  std::vector<ProcessingOrder> processingOrders;
 
-    // Set of processed occurrence pairs to avoid re-processing the same pair.
-    llvm::DenseSet<std::pair<Occurrence*, Occurrence*>> processedOccPairs;
+  // Set of processed occurrence pairs to avoid re-processing the same pair.
+  llvm::DenseSet<std::pair<Occurrence *, Occurrence *>> processedOccPairs;
 
-    // Occurrences marked skippable (exclusion set used during processing).
-    llvm::DenseMap<uint8_t, llvm::DenseSet<Occurrence*>> skipOcc;
+  // Occurrences marked skippable (exclusion set used during processing).
+  llvm::DenseMap<uint8_t, llvm::DenseSet<Occurrence *>> skipOcc;
 
-    // Accumulated backward-sync events for each operation (recorded instead of
-    // inserting explicit conflict pairs). The outer map key is the scope op; the
-    // inner map key is (setPipe, waitPipe) and value is the set of event ids
-    // used.
-    llvm::MapVector<OperationBase*, CorePipePairDenseMap<llvm::DenseMap<int64_t, int64_t>>> backwardSyncEvents;
+  // Accumulated backward-sync events for each operation (recorded instead of
+  // inserting explicit conflict pairs). The outer map key is the scope op; the
+  // inner map key is (setPipe, waitPipe) and value is the set of event ids
+  // used.
+  llvm::MapVector<OperationBase *,
+                  llvm::DenseMap<std::tuple<CorePipeInfo, CorePipeInfo>,
+                                 llvm::DenseMap<int64_t, int64_t>>>
+      backwardSyncEvents;
 
-    llvm::MapVector<OperationBase*, CorePipePairDenseSet> backwardSyncEventsAfterMerge;
+  llvm::MapVector<OperationBase *,
+                  llvm::DenseSet<std::tuple<CorePipeInfo, CorePipeInfo>>>
+      backwardSyncEventsAfterMerge;
 
-    // Memoization of memory-conflict discovery between specific RWOperation
-    // pairs.
-    llvm::DenseMap<
-        std::pair<syncsolver::RWOperation*, syncsolver::RWOperation*>,
-        llvm::SmallVector<std::tuple<CorePipeInfo, CorePipeInfo>>>
-        checkMemoryConflictsMem;
+  // Memoization of memory-conflict discovery between specific RWOperation
+  // pairs.
+  llvm::DenseMap<
+      std::pair<syncsolver::RWOperation *, syncsolver::RWOperation *>,
+      llvm::SmallVector<std::tuple<CorePipeInfo, CorePipeInfo>>>
+      checkMemoryConflictsMem;
 
-    // Set of pipe pairs that were forced to barrier-all (no event ids available).
-    CorePipePairDenseSet barrierAllPairs;
+  // Set of pipe pairs that were forced to barrier-all (no event ids available).
+  llvm::DenseSet<std::tuple<CorePipeInfo, CorePipeInfo>> barrierAllPairs;
 
-    // Set of pipe pairs for which multi-event-id usage is disabled.
-    CorePipePairDenseSet disabledMultiEventIdPairs;
+  // Set of pipe pairs for which multi-event-id usage is disabled.
+  llvm::DenseSet<std::tuple<CorePipeInfo, CorePipeInfo>>
+      disabledMultiEventIdPairs;
 
-    // Count-per-pipe-pair used to limit reuse of conflict pairs (reuse budget).
-    CorePipePairDenseMap<int> reusePairs, reusedPairs;
+  // Count-per-pipe-pair used to limit reuse of conflict pairs (reuse budget).
+  llvm::DenseMap<std::tuple<CorePipeInfo, CorePipeInfo>, int> reusePairs,
+      reusedPairs;
 
-    // Tracks inserted barrier-all markers before occurrences: op -> set of (occ,
-    // isUseless).
-    llvm::DenseMap<OperationBase*, llvm::DenseSet<std::pair<Occurrence*, int32_t>>> insertedBarrierAllBefore;
+  // Tracks inserted barrier-all markers before occurrences: op -> set of (occ,
+  // isUseless).
+  llvm::DenseMap<OperationBase *,
+                 llvm::DenseSet<std::pair<Occurrence *, int32_t>>>
+      insertedBarrierAllBefore;
 
-    // Indices allocated during codegen walk: start/end and inclusive variants
-    // used to evaluate ordering relationships between ops during merging checks.
-    llvm::DenseMap<OperationBase*, int64_t> setWaitStartIndex, setWaitEndIndex, setWaitStartIndexInclusive,
-        setWaitEndIndexInclusive;
+  // Indices allocated during codegen walk: start/end and inclusive variants
+  // used to evaluate ordering relationships between ops during merging checks.
+  llvm::DenseMap<OperationBase *, int64_t> setWaitStartIndex, setWaitEndIndex,
+      setWaitStartIndexInclusive, setWaitEndIndexInclusive;
 
-    // Index of set/wait ops: key=(setPipe,waitPipe,eventId) -> ordered set of
-    // (codegen-index, SetWaitOp*) for quick queries.
-    llvm::DenseMap<std::tuple<pto::PIPE, pto::PIPE, int64_t>, std::set<std::pair<int64_t, SetWaitOp*>>>
-        setWaitFlagOpsIndex;
+  // Index of set/wait ops: key=(setPipe,waitPipe,eventId) -> ordered set of
+  // (codegen-index, SetWaitOp*) for quick queries.
+  llvm::DenseMap<std::tuple<pto::PIPE, pto::PIPE, int64_t>,
+                 std::set<std::pair<int64_t, SetWaitOp *>>>
+      setWaitFlagOpsIndex;
 
 public:
-    Solver() = delete;
-    virtual ~Solver() = default;
+  Solver() = delete;
+  virtual ~Solver() = default;
 
-    Solver(std::unique_ptr<IRTranslator> irTranslator) : options(irTranslator->options)
-    {
-        init(std::move(irTranslator));
-    }
+  Solver(std::unique_ptr<IRTranslator> irTranslator)
+      : options(irTranslator->options) {
+    init(std::move(irTranslator));
+  }
 
-    // Orchestrate the solving process (entry point).
-    void solve();
+  // Orchestrate the solving process (entry point).
+  void solve();
 
-    // Build before/after maps of sync ops computed from chosen conflicts.
-    SyncBeforeAfterMap getBeforeAfterSyncMaps();
+  // Build before/after maps of sync ops computed from chosen conflicts.
+  SyncBeforeAfterMap getBeforeAfterSyncMaps();
 
 protected:
-    void init(std::unique_ptr<IRTranslator> irTranslator)
-    {
-        funcOp = irTranslator->funcOp;
-        funcIr = std::move(irTranslator->funcIr);
-        syncIr = std::move(irTranslator->syncIr);
-        unitFlagFeaturedOps = std::move(irTranslator->unitFlagFeaturedOps);
-        opAllOccurrences = std::move(irTranslator->opAllOccurrences);
-        processingOrders = std::move(irTranslator->processingOrders);
-    }
-
-    // Reset solver internal bookkeeping prior to another pass.
-    void reset(bool resetEventIdRanOutOpts = false);
-
-    llvm::LogicalResult runSolver(bool enableOpts1 = true, bool enableOpts2 = true);
-
-    // Reset unit-flag related bookkeeping prior to another pass.
-    void resetUnitFlag();
-
-    // Walk and process the generated processingOrders to choose conflicts.
-    void processOrders();
-
-    virtual void processConflict(
-        Occurrence* occ1, Occurrence* occ2, RWOperation* rwOp1, RWOperation* rwOp2, bool isUseless);
-
-    std::optional<LoopLikeOpInterface> getMultiBufferLoop(
-        RWOperation* rwOp1, RWOperation* rwOp2, const llvm::SmallVector<MemInfo>& memInfoList1,
-        const llvm::SmallVector<MemInfo>& memInfoList2);
-    std::optional<LoopLikeOpInterface> getMultiBufferLoop(RWOperation* rwOp1, RWOperation* rwOp2);
-    bool validateMultiBufferScope(
-        Occurrence* occ1, Occurrence* occ2, RWOperation* rwOp1, RWOperation* rwOp2,
-        LoopLikeOpInterface& multibufferLoop);
-    void updateMultiBufferConflictStats(
-        RWOperation* rwOp1, RWOperation* rwOp2, const llvm::SmallVector<MemInfo>& lhs,
-        const llvm::SmallVector<MemInfo>& rhs, bool includeMemInfo1Min, bool includeMemInfo2Min, int64_t& lcm,
-        int64_t& minWriteSize);
-    std::optional<int64_t> findMultiBufferEventIdNum(
-        RWOperation* rwOp1, RWOperation* rwOp2, int64_t lcm, int64_t minWriteSize);
-    std::optional<EventIdInfo> getMultiBufferEventIdInfo(
-        Occurrence* occ1, Occurrence* occ2, RWOperation* rwOp1, RWOperation* rwOp2);
-
-    // Determine how many event ids are needed for a particular occurrence pair.
-    EventIdInfo getEventIdInfo(
-        Occurrence* occ1, Occurrence* occ2, RWOperation* rwOp1, RWOperation* rwOp2, CorePipeInfo, CorePipeInfo);
-
-    std::optional<EventIdInfo> checkCVMultiBufferUnrollEventIdInfo(RWOperation* rwOp1, RWOperation* rwOp2);
-    std::optional<EventIdInfo> checkCVMultiBufferPreloadEventIdInfo(RWOperation* rwOp1, RWOperation* rwOp2);
-
-    std::optional<EventIdInfo> checkMultiBufferEventIdInfo(
-        Occurrence* occ1, Occurrence* occ2, RWOperation* rwOp1, RWOperation* rwOp2);
-
-    // Graph-based conflict checking and memory conflict detection helpers.
-    bool checkGraphConflict(
-        Occurrence* occ1, Occurrence* occ2, CorePipeInfo corePipeSrc, CorePipeInfo corePipeDst, EventIdInfo eventIdInfo,
-        std::optional<int> startIndex = {}, std::optional<int> endIndex = {},
-        const llvm::SmallVector<ConflictPair*>& extraConflictPairs = {},
-        const llvm::SmallVector<ConflictPair*>& ignoreConflictPairs = {});
-    void addGraphConflictPair(
-        GraphSolver& graphSolver, llvm::DenseSet<ConflictPair*>& visited, ConflictPair* conflictPair,
-        EventIdInfo eventIdInfo, int startIndex, int endIndex,
-        const llvm::SmallVector<ConflictPair*>& ignoreConflictPairs) const;
-    void addGraphConflictsFromScopes(
-        const Occurrence* occ, GraphSolver& graphSolver, llvm::DenseSet<ConflictPair*>& visited,
-        EventIdInfo eventIdInfo, int startIndex, int endIndex,
-        const llvm::SmallVector<ConflictPair*>& ignoreConflictPairs, bool persistent);
-    void addGraphConflictsFromScopePairs(
-        Occurrence* occ1, Occurrence* occ2, GraphSolver& graphSolver, llvm::DenseSet<ConflictPair*>& visited,
-        EventIdInfo eventIdInfo, int startIndex, int endIndex,
-        const llvm::SmallVector<ConflictPair*>& ignoreConflictPairs);
+  void init(std::unique_ptr<IRTranslator> irTranslator) {
+    funcOp = irTranslator->funcOp;
+    funcIr = std::move(irTranslator->funcIr);
+    syncIr = std::move(irTranslator->syncIr);
+    unitFlagFeaturedOps = std::move(irTranslator->unitFlagFeaturedOps);
+    opAllOccurrences = std::move(irTranslator->opAllOccurrences);
+    processingOrders = std::move(irTranslator->processingOrders);
+  }
+
+  // Reset solver internal bookkeeping prior to another pass.
+  void reset(bool resetEventIdRanOutOpts = false);
+
+  llvm::LogicalResult runSolver(bool enableOpts1 = true,
+                                bool enableOpts2 = true);
+
+  // Reset unit-flag related bookkeeping prior to another pass.
+  void resetUnitFlag();
+
+  // Walk and process the generated processingOrders to choose conflicts.
+  void processOrders();
+
+  virtual void processConflict(Occurrence *occ1, Occurrence *occ2,
+                               RWOperation *rwOp1, RWOperation *rwOp2,
+                               bool isUseless);
+
+  std::optional<LoopLikeOpInterface>
+  getMultiBufferLoop(RWOperation *rwOp1, RWOperation *rwOp2,
+                     const llvm::SmallVector<MemInfo> &memInfoList1,
+                     const llvm::SmallVector<MemInfo> &memInfoList2);
+  std::optional<LoopLikeOpInterface> getMultiBufferLoop(RWOperation *rwOp1,
+                                                        RWOperation *rwOp2);
+  std::optional<EventIdInfo> getMultiBufferEventIdInfo(Occurrence *occ1,
+                                                       Occurrence *occ2,
+                                                       RWOperation *rwOp1,
+                                                       RWOperation *rwOp2);
+
+  // Determine how many event ids are needed for a particular occurrence pair.
+  EventIdInfo getEventIdInfo(Occurrence *occ1, Occurrence *occ2,
+                             RWOperation *rwOp1, RWOperation *rwOp2,
+                             CorePipeInfo corePipeSrc,
+                             CorePipeInfo corePipeDst);
+
+  std::optional<EventIdInfo>
+  checkCVMultiBufferUnrollEventIdInfo(RWOperation *rwOp1, RWOperation *rwOp2);
+  std::optional<EventIdInfo>
+  checkCVMultiBufferPreloadEventIdInfo(RWOperation *rwOp1, RWOperation *rwOp2);
 
-    bool ignoreMemoryConflict(
-        const RWOperation* rwOp1, const RWOperation* rwOp2, const MemInfo& memInfo1, const MemInfo& memInfo2);
+  std::optional<EventIdInfo> checkMultiBufferEventIdInfo(Occurrence *occ1,
+                                                         Occurrence *occ2,
+                                                         RWOperation *rwOp1,
+                                                         RWOperation *rwOp2);
 
-    bool checkMemInfoConflict(
-        RWOperation* rwOp1, RWOperation* rwOp2, const MemInfo& memInfo1, const MemInfo& memInfo2,
-        std::optional<int64_t> lcmLen = {}, std::optional<int64_t> eventIdNum = {});
+  // Graph-based conflict checking and memory conflict detection helpers.
+  bool checkGraphConflict(
+      Occurrence *occ1, Occurrence *occ2, CorePipeInfo corePipeSrc,
+      CorePipeInfo corePipeDst, EventIdInfo eventIdInfo,
+      std::optional<int> startIndex = {}, std::optional<int> endIndex = {},
+      const llvm::SmallVector<ConflictPair *> &extraConflictPairs = {},
+      const llvm::SmallVector<ConflictPair *> &ignoreConflictPairs = {});
 
-    bool checkMemInfoConflict(
-        RWOperation* rwOp1, RWOperation* rwOp2, const llvm::SmallVector<MemInfo>& memInfoList1,
-        const llvm::SmallVector<MemInfo>& memInfoList2, std::optional<int64_t> lcmLen = {},
-        std::optional<int64_t> eventIdNum = {});
+  bool ignoreMemoryConflict(RWOperation *rwOp1, RWOperation *rwOp2,
+                            const MemInfo &memInfo1, const MemInfo &memInfo2);
 
-    llvm::SmallVector<std::tuple<CorePipeInfo, CorePipeInfo>> checkMemoryConflicts(
-        RWOperation* rwOp1, RWOperation* rwOp2);
+  bool checkMemInfoConflict(RWOperation *rwOp1, RWOperation *rwOp2,
+                            const MemInfo &memInfo1, const MemInfo &memInfo2,
+                            std::optional<int64_t> lcmLen = {},
+                            std::optional<int64_t> eventIdNum = {});
 
-    bool checkMemoryConflictBetweenOccExclusive(
-        Occurrence* occ1, Occurrence* occ2,
-        std::function<bool(RWOperation*)> filter = [](RWOperation*) { return true; });
-
-    // Feasibility checks and bookkeeping accessors used by the solver loop.
-    bool checkImpossibleOccPair(Occurrence* occ1, Occurrence* occ2) const;
-
-    bool checkSkipCrossCorePair(Occurrence* occ1, Occurrence* occ2);
-
-    bool checkSkipParallelLoop(Occurrence* occ1, Occurrence* occ2) const;
-
-    bool checkAlreadySynced(Occurrence* occ1, Occurrence* occ2) const;
-
-    bool checkAlreadySyncedWithUnitFlag(Occurrence* occ1, const Occurrence* occ2);
-
-    bool skipMMad1DecomposedLoopOpt(Occurrence* occ1, Occurrence* occ2) const;
-
-    bool checkSyncOpsConflicts(ConflictPair* conflictPair1, ConflictPair* conflictPair2);
-    bool checkSetSyncOpsConflict(ConflictPair* conflictPair1, ConflictPair* conflictPair2);
-    bool checkWaitSyncOpsConflict(ConflictPair* conflictPair1, ConflictPair* conflictPair2);
-
-    // Check whether two ConflictPair ranges/event mapping intersect (same
-    // pipes/events).
-    bool checkIntersect(ConflictPair* conflictPair1, ConflictPair* conflictPair2);
-
-    // Event-id allocation and reuse helpers.
-    std::vector<ConflictPair*> getIntersectingConflictPairs(ConflictPair* conflictPair);
-
-    // Visit tracking helpers for occurrence pairs.
-    bool checkVisited(Occurrence* occ1, Occurrence* occ2);
-
-    bool checkSkippable(bool reverseOrder, Occurrence* occ);
-
-    // Bookkeeping for previously synchronized pairs within a scope to reuse their
-    // event-ids.
-    EventIdNode* getOldEventIdNodeIfExists(ConflictPair* conflictPair);
-
-    void memorizeSyncedPair(ConflictPair* conflictPair);
-
-    llvm::DenseSet<ConflictPair*> getMemorizedSyncedPairs(ConflictPair* conflictPair);
-
-    void memorizeReusedSyncedPair(ConflictPair* conflictPair, ConflictPair* reusedConflictPair);
-
-    void forgetSyncedPair(ConflictPair* conflictPair);
-
-    // Utilities to map an occurrence pair to their set/wait occurrences.
-    std::pair<Occurrence*, Occurrence*> getSetWaitLCAPairOcc(Occurrence* occ1, Occurrence* occ2) const;
-    std::pair<Occurrence*, Occurrence*> getSetWaitOcc(Occurrence* occ1, Occurrence* occ2);
-    std::pair<Occurrence*, Occurrence*> getFixedSetWaitOcc(Occurrence* occ1, Occurrence* occ2);
-    void adjustSetWaitForLoopBoundary(Occurrence* occ1, Occurrence*& setOcc, Occurrence*& waitOcc);
-    void adjustSetWaitForBackwardCondition(
-        Occurrence* occ1, Occurrence* occ2, Occurrence*& setOcc, Occurrence*& waitOcc) const;
-    void adjustSetWaitForCrossCoreLoops(Occurrence* occ1, Occurrence* occ2, Occurrence*& setOcc, Occurrence*& waitOcc);
-    void adjustSetWaitForCrossCoreScopes(Occurrence* occ1, Occurrence* occ2, Occurrence*& setOcc, Occurrence*& waitOcc);
-    void adjustSetWaitForLoopPlaceholders(Occurrence*& setOcc, Occurrence*& waitOcc);
-
-    Occurrence* getBarrierWaitOcc(Occurrence* occ1, Occurrence* occ2);
-
-    std::optional<std::pair<Occurrence*, Occurrence*>> getFunctionBlockSetWaitOcc(
-        const Occurrence* occ1, Occurrence* occ2);
-
-    std::optional<std::pair<Occurrence*, Occurrence*>> getUnlikelyCondSetWaitOcc(Occurrence* occ1, Occurrence* occ2);
-
-    // Convenience to insert barrier-all before a given occurrence/op.
-    void insertBarrierAllBeforeOcc(Occurrence* occ, bool isUseless, bool isPersistent = false);
-
-    void insertBarrierAllBeforeOp(const OperationBase* op, bool isUseless, bool isPersistent);
-
-    // Determine the direction (backward) of a synchronization candidate.
-    bool isBackwardSync(Occurrence* occ1, Occurrence* occ2) const;
-
-    bool reuseCmp(const ConflictPair* conflictPair1, const ConflictPair* conflictPair2) const;
-
-    // Reuse existing conflict pairs where possible to save event ids.
-    ConflictPair* getReusableConflictPair(
-        ConflictPair* conflictPair, const llvm::DenseSet<ConflictPair*>& conflictPairsSet);
-    ConflictPair* findOldReusedConflictPair(ConflictPair* conflictPair);
-    bool hasReusableConflictBudget(const ConflictPair* conflictPair, const ConflictPair* oldReusedConflictPair);
-    ConflictPair* findBestReusableConflictPair(
-        ConflictPair* conflictPair, Occurrence* scopeOcc1, Occurrence* scopeOcc2);
-    void applyReusableConflictPair(ConflictPair* conflictPair, ConflictPair* reusableConflictPair) const;
-
-    bool reuseConflictPair(ConflictPair* conflictPair, Occurrence* scopeOcc1, Occurrence* scopeOcc2);
-
-    std::unique_ptr<EventIdSolver>& getEventIdSolverRef(pto::PIPE pipeSrc, pto::PIPE pipeDst);
-
-    bool checkReuseMultiBufferFlagId(ConflictPair* conflictPair);
-
-    // Primary handler invoked to register/record a found conflict.
-    void handleConflict(
-        Occurrence* occ1, Occurrence* occ2, const RWOperation* rwOp1, const RWOperation* rwOp2,
-        CorePipeInfo corePipeSrc, CorePipeInfo corePipeDst, EventIdInfo eventIdInfo, bool isUseless);
+  bool checkMemInfoConflict(RWOperation *rwOp1, RWOperation *rwOp2,
+                            const llvm::SmallVector<MemInfo> &memInfoList1,
+                            const llvm::SmallVector<MemInfo> &memInfoList2,
+                            std::optional<int64_t> lcmLen = {},
+                            std::optional<int64_t> eventIdNum = {});
 
-    void handleBarrierConflict(
-        Occurrence* occ1, Occurrence* occ2, CorePipeInfo corePipeSrc, CorePipeInfo corePipeDst, bool isUseless);
+  llvm::SmallVector<std::tuple<CorePipeInfo, CorePipeInfo>>
+  checkMemoryConflicts(RWOperation *rwOp1, RWOperation *rwOp2);
 
-    void handleSetWaitConflict(
-        Occurrence* occ1, Occurrence* occ2, CorePipeInfo corePipeSrc, CorePipeInfo corePipeDst, EventIdInfo eventIdInfo,
-        bool isUseless);
-    std::unique_ptr<ConflictPair> createSetWaitConflictPair(
-        Occurrence* occ1, Occurrence* occ2, RWOperation* rwOp1, RWOperation* rwOp2, CorePipeInfo corePipeSrc,
-        CorePipeInfo corePipeDst, EventIdInfo eventIdInfo, bool isUseless, Occurrence*& setOcc, Occurrence*& waitOcc,
-        Occurrence*& normScopeOcc1, Occurrence*& normScopeOcc2, OperationBase*& normScopeOp, Loop*& parentLCALoopOp,
-        Occurrence*& parentLCALoopOcc, Occurrence*& parentLCALoopBeforePHOcc, Occurrence*& parentLCALoopAfterPHOcc);
-    void normalizeSetWaitConflictPair(
-        ConflictPair* conflictPair, Occurrence* occ1, Occurrence* occ2, Occurrence*& setOcc, Occurrence*& waitOcc,
-        CorePipeInfo corePipeSrc, CorePipeInfo corePipeDst);
-    bool prepareSetWaitConflictPairWithEventSolver(
-        EventIdSolver& curEventIdSolver, ConflictPair* conflictPair, Occurrence* occ1, Occurrence* occ2,
-        Occurrence* normScopeOcc1, Occurrence* normScopeOcc2, const OperationBase* normScopeOp,
-        OperationBase* barrierOp, CorePipeInfo corePipeSrc, CorePipeInfo corePipeDst);
-    bool checkColorableOrConvertToBarrierAll(
-        EventIdSolver& curEventIdSolver, ConflictPair* conflictPair, OperationBase* barrierOp, CorePipeInfo corePipeSrc,
-        CorePipeInfo corePipeDst);
-    void initializeConflictEventIdNode(
-        ConflictPair* conflictPair, EventIdSolver& curEventIdSolver, Occurrence* occ1, Occurrence* occ2,
-        const OperationBase* normScopeOp);
-    bool insertExtraConflictPair(
-        EventIdSolver& curEventIdSolver, ConflictPair* conflictPair, Occurrence* setOcc, Occurrence* waitOcc,
-        Occurrence* parentScope, OperationBase* barrierOp, CorePipeInfo corePipeSrc, CorePipeInfo corePipeDst,
-        ExtraConflictPairs& extraConflictPairs, bool couldNotRun = false);
-    bool insertOuterBackwardConflictPairIfNeeded(
-        EventIdSolver& curEventIdSolver, ConflictPair* conflictPair, const Occurrence* setOcc,
-        const Occurrence* waitOcc, const Loop* parentLCALoopOp, const Occurrence* parentLCALoopOcc,
-        Occurrence* parentLCALoopBeforePHOcc, Occurrence* parentLCALoopAfterPHOcc, OperationBase* barrierOp,
-        CorePipeInfo corePipeSrc, CorePipeInfo corePipeDst, ExtraConflictPairs& extraConflictPairs);
-    bool insertBoundaryBackwardConflictPairsIfNeeded(
-        EventIdSolver& curEventIdSolver, ConflictPair* conflictPair, Occurrence* setOcc, Occurrence* waitOcc,
-        Occurrence* normScopeOcc1, Occurrence* normScopeOcc2, Occurrence* parentLCALoopOcc,
-        Occurrence* parentLCALoopBeforePHOcc, Occurrence* parentLCALoopAfterPHOcc, OperationBase* barrierOp,
-        CorePipeInfo corePipeSrc, CorePipeInfo corePipeDst, ExtraConflictPairs& extraConflictPairs);
-    bool collectBackwardConflictExtras(
-        EventIdSolver& curEventIdSolver, ConflictPair* conflictPair, Occurrence* setOcc, Occurrence* waitOcc,
-        Occurrence* normScopeOcc1, Occurrence* normScopeOcc2, Loop* parentLCALoopOp, Occurrence* parentLCALoopOcc,
-        Occurrence* parentLCALoopBeforePHOcc, Occurrence* parentLCALoopAfterPHOcc, OperationBase* barrierOp,
-        CorePipeInfo corePipeSrc, CorePipeInfo corePipeDst, ExtraConflictPairs& extraConflictPairs);
-    void recordChosenConflictPair(
-        ConflictPair* conflictPair, Occurrence* normScopeOcc1, Occurrence* normScopeOcc2,
-        const Occurrence* parentLCALoopOcc);
-    void appendExtraConflictPairs(ExtraConflictPairs& extraConflictPairs);
+  llvm::SmallVector<std::tuple<CorePipeInfo, CorePipeInfo>>
+  checkMemoryConflictsForOcc(Occurrence *occ1, Occurrence *occ2,
+                             RWOperation *rwOp1, RWOperation *rwOp2);
 
-    void handleUnitFlagConflict(
-        Occurrence* occ1, Occurrence* occ2, CorePipeInfo corePipeSrc, CorePipeInfo corePipeDst,
-        UnitFlagInfo unitFlagInfo, bool isUseless);
+  bool checkMemoryConflictBetweenOccExclusive(
+      Occurrence *occ1, Occurrence *occ2,
+      std::function<bool(RWOperation *)> filter = [](RWOperation *) {
+        return true;
+      });
 
-    Occurrence* getFirstIterOcc(Occurrence* occ, Occurrence* parOcc);
+  // Feasibility checks and bookkeeping accessors used by the solver loop.
+  bool checkImpossibleOccPair(Occurrence *occ1, Occurrence *occ2);
 
-    Occurrence* getLastIterOcc(Occurrence* occ, Occurrence* parOcc);
+  bool checkSkipCrossCorePair(Occurrence *occ1, Occurrence *occ2);
 
-    std::optional<std::pair<Occurrence*, Occurrence*>> checkAndApplyMmadl0LoopOpt(
-        ConflictPair* conflictPair, Occurrence* occ1, Occurrence* occ2, Occurrence* parOcc1, Occurrence* parOcc2);
+  bool checkSkipParallelLoop(Occurrence *occ1, Occurrence *occ2);
 
-    // Unit-flag pattern checks used to transform sync into unit-flag modes.
-    std::optional<UnitFlagInfo> checkUnitFlagPatterns(Occurrence*, Occurrence*) const;
+  bool checkAlreadySynced(Occurrence *occ1, Occurrence *occ2);
 
-    void pickAndInsertABarrierAll();
+  bool checkAlreadySyncedWithUnitFlag(Occurrence *occ1, Occurrence *occ2);
 
-    void calcAllEventIds();
+  bool skipMMad1DecomposedLoopOpt(Occurrence *occ1, Occurrence *occ2);
 
-    void collectBackwardSyncEventIds();
+  bool checkSyncOpsConflicts(ConflictPair *conflictPair1,
+                             ConflictPair *conflictPair2);
 
-    void resetAndBuildSetWaitOpIndex(const SyncMap& syncMapBefore, const SyncMap& syncMapAfter);
+  // Check whether two ConflictPair ranges/event mapping intersect (same
+  // pipes/events).
+  bool checkIntersect(ConflictPair *conflictPair1, ConflictPair *conflictPair2);
 
-    std::set<std::pair<int64_t, SetWaitOp*>>& getSetWaitOpsIndexRef(
-        pto::PIPE pipeSrc, pto::PIPE pipeDst, int64_t eventId);
+  // Event-id allocation and reuse helpers.
+  std::vector<ConflictPair *>
+  getIntersectingConflictPairs(ConflictPair *conflictPair);
 
-    void collectSetWaitOpsIndexes(OperationBase* op, const SyncMap& syncMapBefore, const SyncMap& syncMapAfter);
+  // Visit tracking helpers for occurrence pairs.
+  bool checkVisited(Occurrence *occ1, Occurrence *occ2);
 
-    bool checkBackwardSyncEventsContains(
-        OperationBase* op, CorePipeInfo corePipeSrc, CorePipeInfo corePipeDst, int64_t eventId);
+  bool checkSkippable(bool reverseOrder, Occurrence *occ);
 
-    bool checkBackwardSyncEventsContainsAfterMerge(
-        OperationBase* op, CorePipeInfo corePipeSrc, CorePipeInfo corePipeDst);
+  // Bookkeeping for previously synchronized pairs within a scope to reuse their
+  // event-ids.
+  EventIdNode *getOldEventIdNodeIfExists(ConflictPair *conflictPair);
 
-    // Merge-related helpers for backward sync events and scope-level
-    // optimizations.
-    bool checkMergeable(
-        Scope* scopeOp, CorePipeInfo corePipeSrc, CorePipeInfo corePipeDst, int64_t eventId,
-        bool shouldBeUsedAtleastOnce = true);
+  void memorizeSyncedPair(ConflictPair *conflictPair);
 
-    bool checkMergeableConditionScopes(
-        const Condition* conditionOp, CorePipeInfo corePipeSrc, CorePipeInfo corePipeDst, int64_t eventId);
+  llvm::DenseSet<ConflictPair *>
+  getMemorizedSyncedPairs(ConflictPair *conflictPair);
 
-    bool checkMergeableLoopScopes(
-        const Loop* loopOp, CorePipeInfo corePipeSrc, CorePipeInfo corePipeDst, int64_t eventId);
+  void memorizeReusedSyncedPair(ConflictPair *conflictPair,
+                                ConflictPair *reusedConflictPair);
 
-    bool checkMergeableScopeBody(
-        const Scope* scopeOp, const std::set<std::pair<int64_t, SetWaitOp*>>& index, CorePipeInfo corePipeSrc,
-        CorePipeInfo corePipeDst, int64_t eventId);
+  void forgetSyncedPair(ConflictPair *conflictPair);
 
-    void mergeBackwardSyncEventIds(OperationBase* op);
+  // Utilities to map an occurrence pair to their set/wait occurrences.
+  std::pair<Occurrence *, Occurrence *> getSetWaitLCAPairOcc(Occurrence *occ1,
+                                                             Occurrence *occ2);
+  std::pair<Occurrence *, Occurrence *> getSetWaitOcc(Occurrence *occ1,
+                                                      Occurrence *occ2);
+  std::pair<Occurrence *, Occurrence *> getFixedSetWaitOcc(Occurrence *occ1,
+                                                           Occurrence *occ2);
 
-    bool shouldSkipBackwardSyncMerge(OperationBase* op) const;
+  Occurrence *getBarrierWaitOcc(Occurrence *occ1, Occurrence *occ2);
 
-    void collectMergeableBackwardSyncEvents(Scope* scopeOp, CorePipeEventDenseSet& toBeErased);
+  std::optional<std::pair<Occurrence *, Occurrence *>>
+  getFunctionBlockSetWaitOcc(Occurrence *occ1, Occurrence *occ2);
 
-    void collectMergeableBackwardSyncEventsForEventId(
-        Scope* scopeOp, ArrayRef<pto::TCoreType> coreTypes, int64_t eventId, CorePipeEventDenseSet& toBeErased);
+  std::optional<std::pair<Occurrence *, Occurrence *>>
+  getUnlikelyCondSetWaitOcc(Occurrence *occ1, Occurrence *occ2);
 
-    void collectMergeableBackwardSyncEventsForCorePair(
-        Scope* scopeOp, pto::TCoreType coreSrc, pto::TCoreType coreDst, int64_t eventId,
-        CorePipeEventDenseSet& toBeErased);
+  // Convenience to insert barrier-all before a given occurrence/op.
+  void insertBarrierAllBeforeOcc(Occurrence *occ, bool isUseless,
+                                 bool isPersistent = false);
 
-    bool tryCollectMergeableBackwardSyncEvent(
-        Scope* scopeOp, CorePipeInfo corePipeSrc, CorePipeInfo corePipeDst, int64_t eventId,
-        CorePipeEventDenseSet& toBeErased);
+  void insertBarrierAllBeforeOp(OperationBase *op, bool isUseless,
+                                bool isPersistent);
 
-    void eraseMergedBackwardSyncEventsFromChildScope(Scope* childScopeOp, const CorePipeEventDenseSet& toBeErased);
+  // Determine the direction (backward) of a synchronization candidate.
+  bool isBackwardSync(Occurrence *occ1, Occurrence *occ2);
 
-    void eraseMergedBackwardSyncEventsFromNestedScopes(Scope* scopeOp, const CorePipeEventDenseSet& toBeErased);
+  bool reuseCmp(ConflictPair *conflictPair1, ConflictPair *conflictPair2);
 
-    void mergeBackwardSyncPairs(SyncMap& syncMapBefore, SyncMap& syncMapAfter);
+  // Reuse existing conflict pairs where possible to save event ids.
+  ConflictPair *getReusableConflictPair(
+      ConflictPair *conflictPair,
+      const llvm::DenseSet<ConflictPair *> &conflictPairsSet);
 
-    void appendSyncOpsForConflictPair(ConflictPair* conflictPair, SyncMap& syncMapBefore, SyncMap& syncMapAfter);
+  bool reuseConflictPair(ConflictPair *conflictPair, Occurrence *scopeOcc1,
+                         Occurrence *scopeOcc2);
 
-    void appendMergedBackwardSyncScopeOps(SyncMap& syncMapBefore, SyncMap& syncMapAfter);
+  std::unique_ptr<EventIdSolver> &getEventIdSolverRef(pto::PIPE pipeSrc,
+                                                      pto::PIPE pipeDst);
 
-    void insertMergedBackwardSyncPairs();
+  bool checkReuseMultiBufferFlagId(ConflictPair *conflictPair);
 
-    bool pruneStaleMergedBackwardSyncPairs();
+  // Primary handler invoked to register/record a found conflict.
+  void handleConflict(Occurrence *occ1, Occurrence *occ2, RWOperation *rwOp1,
+                      RWOperation *rwOp2, CorePipeInfo corePipeSrc,
+                      CorePipeInfo corePipeDst, EventIdInfo eventIdInfo,
+                      bool isUseless);
 
-    SmallVector<OperationBase*> collectDeepestUnmergedBackwardSyncScopes();
+  void handleBarrierConflict(Occurrence *occ1, Occurrence *occ2,
+                             CorePipeInfo corePipeSrc, CorePipeInfo corePipeDst,
+                             bool isUseless);
 
-    bool insertOuterBackwardSyncPairs(const SmallVectorImpl<OperationBase*>& chosenOps);
+  void handleSetWaitConflict(Occurrence *occ1, Occurrence *occ2,
+                             CorePipeInfo corePipeSrc, CorePipeInfo corePipeDst,
+                             EventIdInfo eventIdInfo, bool isUseless);
 
-    llvm::LogicalResult considerOuterBackwardSyncPairs();
+  void handleUnitFlagConflict(Occurrence *occ1, Occurrence *occ2,
+                              CorePipeInfo corePipeSrc,
+                              CorePipeInfo corePipeDst,
+                              UnitFlagInfo unitFlagInfo, bool isUseless);
 
-    llvm::LogicalResult reuseSyncPairToSaveEventIds();
+  Occurrence *getFirstIterOcc(Occurrence *occ, Occurrence *parOcc);
 
-    llvm::LogicalResult disableMultiEventIdForBarrierAllPairs();
+  Occurrence *getLastIterOcc(Occurrence *occ, Occurrence *parOcc);
 
-    llvm::LogicalResult tryMovingOutBackwardSyncPairsToOuterLoops();
+  std::optional<std::pair<Occurrence *, Occurrence *>>
+  checkAndApplyMmadl0LoopOpt(ConflictPair *conflictPair, Occurrence *occ1,
+                             Occurrence *occ2, Occurrence *parOcc1,
+                             Occurrence *parOcc2);
 
-    Occurrence* getBeforePlaceHolderOcc(Occurrence* occ);
-    Occurrence* getAfterPlaceHolderOcc(Occurrence* occ);
-    Occurrence* getScopeBeginPlaceHolderOcc(Occurrence* occ);
-    Occurrence* getScopeEndPlaceHolderOcc(Occurrence* occ);
+  // Unit-flag pattern checks used to transform sync into unit-flag modes.
+  std::optional<UnitFlagInfo> checkUnitFlagPatterns(Occurrence *occ1,
+                                                    Occurrence *occ2);
+
+  void pickAndInsertABarrierAll();
+
+  void calcAllEventIds();
+
+  void collectBackwardSyncEventIds();
+
+  void resetAndBuildSetWaitOpIndex(const SyncMap &syncMapBefore,
+                                   const SyncMap &syncMapAfter);
+
+  std::set<std::pair<int64_t, SetWaitOp *>> &
+  getSetWaitOpsIndexRef(pto::PIPE pipeSrc, pto::PIPE pipeDst,
+                        int64_t eventId);
+
+  void collectSetWaitOpsIndexes(OperationBase *op, const SyncMap &syncMapBefore,
+                                const SyncMap &syncMapAfter);
+
+  bool checkBackwardSyncEventsContains(OperationBase *op,
+                                       CorePipeInfo corePipeSrc,
+                                       CorePipeInfo corePipeDst,
+                                       int64_t eventId);
+
+  bool checkBackwardSyncEventsContainsAfterMerge(OperationBase *op,
+                                                 CorePipeInfo corePipeSrc,
+                                                 CorePipeInfo corePipeDst);
+
+  // Merge-related helpers for backward sync events and scope-level
+  // optimizations.
+  bool checkMergeable(Scope *scopeOp, CorePipeInfo corePipeSrc,
+                      CorePipeInfo corePipeDst, int64_t eventId,
+                      bool shouldBeUsedAtleastOnce = true);
+
+  void mergeBackwardSyncEventIds(OperationBase *op);
+
+  void mergeBackwardSyncPairs(SyncMap &syncMapBefore, SyncMap &syncMapAfter);
+
+  void insertMergedBackwardSyncPairs();
+
+  llvm::LogicalResult considerOuterBackwardSyncPairs();
+
+  llvm::LogicalResult reuseSyncPairToSaveEventIds();
+
+  llvm::LogicalResult disableMultiEventIdForBarrierAllPairs();
+
+  llvm::LogicalResult tryMovingOutBackwardSyncPairsToOuterLoops();
+
+  Occurrence *getBeforePlaceHolderOcc(Occurrence *occ);
+  Occurrence *getAfterPlaceHolderOcc(Occurrence *occ);
+  Occurrence *getScopeBeginPlaceHolderOcc(Occurrence *occ);
+  Occurrence *getScopeEndPlaceHolderOcc(Occurrence *occ);
 };
 
 } // namespace mlir::pto::syncsolver

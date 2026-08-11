@@ -9,36 +9,46 @@
 #ifndef PTO_IR_PTOTYPEUTILS_H
 #define PTO_IR_PTOTYPEUTILS_H
 
+#include "llvm/ADT/SmallVector.h"
 #include "mlir/IR/BuiltinTypes.h"
 #include "mlir/IR/Operation.h"
-
-#include <cstdint>
+#include "mlir/Support/LLVM.h"
 
 namespace mlir::pto {
 
-inline constexpr unsigned kPTOByteBitWidth = 8;
-inline constexpr unsigned kPTOI8BitWidth = 8;
-inline constexpr unsigned kPTOI16BitWidth = 16;
-inline constexpr unsigned kPTOI32BitWidth = 32;
-inline constexpr unsigned kPTOI64BitWidth = 64;
-inline constexpr unsigned kPTOI128BitWidth = 128;
-inline constexpr unsigned kPTOPaddedTensorRank5D = 5;
-inline constexpr int32_t kFractalSize16 = 16;
-inline constexpr int32_t kFractalSize32 = 32;
-inline constexpr int32_t kFractalSize512 = 512;
-inline constexpr int32_t kFractalSize1024 = 1024;
-inline constexpr unsigned kPTOByteSize = 1;
-inline constexpr unsigned kPTOHalfWordBytes = 2;
-inline constexpr unsigned kPTOWordBytes = 4;
-inline constexpr unsigned kPTODoubleWordBytes = 8;
+namespace detail {
+template <typename MemRefT>
+inline auto getPTOMemRefStridesAndOffsetImpl(
+    MemRefT memTy, SmallVectorImpl<int64_t> &strides, int64_t &offset, int)
+    -> decltype(memTy.getStridesAndOffset(strides, offset)) {
+  return memTy.getStridesAndOffset(strides, offset);
+}
+
+template <typename MemRefT>
+inline LogicalResult getPTOMemRefStridesAndOffsetImpl(
+    MemRefT memTy, SmallVectorImpl<int64_t> &strides, int64_t &offset, long) {
+  return getStridesAndOffset(memTy, strides, offset);
+}
+} // namespace detail
+
+inline LogicalResult getPTOMemRefStridesAndOffset(
+    MemRefType memTy, SmallVectorImpl<int64_t> &strides, int64_t &offset) {
+  return detail::getPTOMemRefStridesAndOffsetImpl(memTy, strides, offset, 0);
+}
 
 bool isPTOFloat8Type(Type t);
+bool isPTOFloat8E4M3LikeType(Type t);
+bool isPTOFloat8E5M2LikeType(Type t);
 bool isPTOHiFloat8Type(Type t);
+bool isPTOF8E8M0Type(Type t);
+bool isPTOHiFloat8x2Type(Type t);
 bool isPTOFloat4PackedType(Type t);
+bool isPTOPackedLdgStgVectorType(Type t);
 bool isPTOLowPrecisionType(Type t);
 
 unsigned getPTOStorageElemBitWidth(Type t);
 unsigned getPTOStorageElemByteSize(Type t);
+unsigned getPTOPackedLdgStgTotalBits(Type t);
 
 } // namespace mlir::pto
 

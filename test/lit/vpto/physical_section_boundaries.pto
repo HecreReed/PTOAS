@@ -1,0 +1,30 @@
+// Copyright (c) 2026 Huawei Technologies Co., Ltd.
+// This program is free software; you can redistribute it and/or modify it
+// under the terms of the CANN Open Software License Agreement Version 2.0.
+
+// Explicit sections and inferred sections use the same physical SSA rule.
+// RUN: pto-test-opt --pto-normalize-uncovered-tile-sections --pto-validate-physical-section-boundaries %s | FileCheck %s
+
+module attributes {pto.target_arch = "a5"} {
+  func.func @legal_capture(%seed: i32) {
+    pto.section.cube {
+      %cube = arith.addi %seed, %seed : i32
+    }
+    return
+  }
+
+  func.func @inferred_sections(%src: !pto.ptr<f32, ub>, %dst: !pto.ptr<f32, ub>) {
+    %c0 = arith.constant 0 : index
+    %mask = pto.pset_b32 "PAT_ALL" : !pto.mask<b32>
+    %vec0 = pto.vlds %src[%c0] : !pto.ptr<f32, ub> -> !pto.vreg<64xf32>
+    %vec1 = pto.vlds %dst[%c0] : !pto.ptr<f32, ub> -> !pto.vreg<64xf32>
+    %sum = pto.vadd %vec0, %vec1, %mask : !pto.vreg<64xf32>, !pto.vreg<64xf32>, !pto.mask<b32> -> !pto.vreg<64xf32>
+    pto.vsts %sum, %dst[%c0], %mask {dist = "NORM_B32"} : !pto.vreg<64xf32>, !pto.ptr<f32, ub>, !pto.mask<b32>
+    return
+  }
+}
+
+// CHECK: func.func @legal_capture
+// CHECK: pto.section.cube {
+// CHECK: func.func @inferred_sections
+// CHECK: pto.vlds

@@ -29,115 +29,129 @@ using namespace mlir::pto;
 
 namespace {
 
-static TFreeOp findMatchingTFree(TPopOp tpopOp)
-{
-    Value pipeHandle = tpopOp.getPipeHandle();
-    Block* block = tpopOp->getBlock();
-    for (auto it = std::next(tpopOp->getIterator()), end = block->end(); it != end; ++it) {
-        if (auto tfreeOp = dyn_cast<TFreeOp>(&*it)) {
-            if (tfreeOp.getPipeHandle() == pipeHandle)
-                return tfreeOp;
-        }
+static TFreeOp findMatchingTFree(TPopOp tpopOp) {
+  Value pipeHandle = tpopOp.getPipeHandle();
+  Block *block = tpopOp->getBlock();
+  for (auto it = std::next(tpopOp->getIterator()), end = block->end();
+       it != end; ++it) {
+    if (auto tfreeOp = dyn_cast<TFreeOp>(&*it)) {
+      if (tfreeOp.getPipeHandle() == pipeHandle)
+        return tfreeOp;
     }
-    return {};
+  }
+  return {};
 }
 
-static Operation* getTopLevelAncestorInBlock(Operation* op, const Block* block)
-{
-    Operation* current = op;
-    while (current && current->getBlock() != block) {
-        Region* parentRegion = current->getParentRegion();
-        if (!parentRegion)
-            return nullptr;
-        current = parentRegion->getParentOp();
-    }
-    return current;
+static Operation *getTopLevelAncestorInBlock(Operation *op, Block *block) {
+  Operation *current = op;
+  while (current && current->getBlock() != block) {
+    Region *parentRegion = current->getParentRegion();
+    if (!parentRegion)
+      return nullptr;
+    current = parentRegion->getParentOp();
+  }
+  return current;
 }
 
-static bool hasSamePipeTPopInRegion(Operation* op, Value pipeHandle, TPopOp current)
-{
-    bool found = false;
-    op->walk([&](TPopOp nestedTpop) {
-        if (nestedTpop == current)
-            return WalkResult::advance();
-        if (nestedTpop.getPipeHandle() == pipeHandle) {
-            found = true;
-            return WalkResult::interrupt();
-        }
-        return WalkResult::advance();
-    });
-    return found;
+static bool hasSamePipeTPopInRegion(Operation *op, Value pipeHandle,
+                                    TPopOp current) {
+  bool found = false;
+  op->walk([&](TPopOp nestedTpop) {
+    if (nestedTpop == current)
+      return WalkResult::advance();
+    if (nestedTpop.getPipeHandle() == pipeHandle) {
+      found = true;
+      return WalkResult::interrupt();
+    }
+    return WalkResult::advance();
+  });
+  return found;
 }
 
-static LogicalResult verifySingleOutstandingUntil(TPopOp tpopOp, const Operation* freeBoundary)
-{
-    if (!freeBoundary || freeBoundary == tpopOp.getOperation())
-        return success();
-
-    Value pipeHandle = tpopOp.getPipeHandle();
-    Block* block = tpopOp->getBlock();
-    for (auto it = std::next(tpopOp->getIterator()), end = block->end(); it != end; ++it) {
-        Operation* op = &*it;
-        if (hasSamePipeTPopInRegion(op, pipeHandle, tpopOp)) {
-            return tpopOp.emitOpError("multiple outstanding pops on the same pipe are not supported");
-        }
-        if (op == freeBoundary)
-            break;
-    }
-
+static LogicalResult verifySingleOutstandingUntil(TPopOp tpopOp,
+                                                  Operation *freeBoundary) {
+  if (!freeBoundary || freeBoundary == tpopOp.getOperation())
     return success();
+
+  Value pipeHandle = tpopOp.getPipeHandle();
+  Block *block = tpopOp->getBlock();
+  for (auto it = std::next(tpopOp->getIterator()), end = block->end();
+       it != end; ++it) {
+    Operation *op = &*it;
+    if (hasSamePipeTPopInRegion(op, pipeHandle, tpopOp)) {
+      return tpopOp.emitOpError(
+          "multiple outstanding pops on the same pipe are not supported");
+    }
+    if (op == freeBoundary)
+      break;
+  }
+
+  return success();
 }
 
-static LogicalResult verifyNoTileUsesAfterTFree(TPopOp tpopOp, TFreeOp tfreeOp)
-{
-    Value tile = tpopOp.getTile();
-    Block* block = tpopOp->getBlock();
+static LogicalResult verifyNoTileUsesAfterTFree(TPopOp tpopOp,
+                                                TFreeOp tfreeOp) {
+  Value tile = tpopOp.getTile();
+  Block *block = tpopOp->getBlock();
 
-    for (OpOperand& use : tile.getUses()) {
-        Operation* topLevelOwner = getTopLevelAncestorInBlock(use.getOwner(), block);
-        if (!topLevelOwner) {
-            return tpopOp.emitOpError("borrowed tile uses must stay in the same parent block as the producing tpop");
-        }
-        if (tfreeOp->isBeforeInBlock(topLevelOwner)) {
-            return tpopOp.emitOpError("tfree must appear after the last use of the borrowed tile");
-        }
+  for (OpOperand &use : tile.getUses()) {
+    Operation *topLevelOwner = getTopLevelAncestorInBlock(use.getOwner(), block);
+    if (!topLevelOwner) {
+      return tpopOp.emitOpError(
+          "borrowed tile uses must stay in the same parent block as the producing tpop");
     }
+    if (tfreeOp->isBeforeInBlock(topLevelOwner)) {
+      return tpopOp.emitOpError(
+          "tfree must appear after the last use of the borrowed tile");
+    }
+  }
 
-    return success();
+  return success();
 }
 
-struct PTOVerifyTFreePass : public mlir::pto::impl::PTOVerifyTFreeBase<PTOVerifyTFreePass> {
-    void runOnOperation() override
-    {
-        func::FuncOp funcOp = getOperation();
+static bool isInsideSectionOrAttributedKernel(TPopOp tpopOp, func::FuncOp funcOp) {
+  if (tpopOp->getParentOfType<SectionCubeOp>() ||
+      tpopOp->getParentOfType<SectionVectorOp>())
+    return true;
+  return funcOp &&
+         funcOp->hasAttr(FunctionKernelKindAttr::name);
+}
 
-        SmallVector<TPopOp> tpops;
-        funcOp.walk([&](TPopOp op) { tpops.push_back(op); });
+struct PTOVerifyTFreePass
+    : public mlir::pto::impl::PTOVerifyTFreeBase<PTOVerifyTFreePass> {
+  void runOnOperation() override {
+    func::FuncOp funcOp = getOperation();
 
-        for (TPopOp tpopOp : tpops) {
-            if (!tpopOp->getParentOfType<SectionCubeOp>() && !tpopOp->getParentOfType<SectionVectorOp>())
-                continue;
+    SmallVector<TPopOp> tpops;
+    funcOp.walk([&](TPopOp op) { tpops.push_back(op); });
 
-            TFreeOp existingTFree = findMatchingTFree(tpopOp);
-            if (!existingTFree) {
-                tpopOp.emitOpError("requires an explicit matching tfree");
-                signalPassFailure();
-                return;
-            }
+    for (TPopOp tpopOp : tpops) {
+      if (!isInsideSectionOrAttributedKernel(tpopOp, funcOp))
+        continue;
 
-            if (failed(verifySingleOutstandingUntil(tpopOp, existingTFree.getOperation()))) {
-                signalPassFailure();
-                return;
-            }
+      TFreeOp existingTFree = findMatchingTFree(tpopOp);
+      if (!existingTFree) {
+        tpopOp.emitOpError("requires an explicit matching tfree");
+        signalPassFailure();
+        return;
+      }
 
-            if (failed(verifyNoTileUsesAfterTFree(tpopOp, existingTFree))) {
-                signalPassFailure();
-                return;
-            }
-        }
+      if (failed(
+              verifySingleOutstandingUntil(tpopOp, existingTFree.getOperation()))) {
+        signalPassFailure();
+        return;
+      }
+
+      if (failed(verifyNoTileUsesAfterTFree(tpopOp, existingTFree))) {
+        signalPassFailure();
+        return;
+      }
     }
+  }
 };
 
 } // namespace
 
-std::unique_ptr<Pass> mlir::pto::createPTOVerifyTFreePass() { return std::make_unique<PTOVerifyTFreePass>(); }
+std::unique_ptr<Pass> mlir::pto::createPTOVerifyTFreePass() {
+  return std::make_unique<PTOVerifyTFreePass>();
+}

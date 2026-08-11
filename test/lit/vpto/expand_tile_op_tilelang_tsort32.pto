@@ -1,0 +1,52 @@
+// Copyright (c) 2026 Huawei Technologies Co., Ltd.
+// This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+// CANN Open Software License Agreement Version 2.0 (the "License").
+// Please refer to the License for details. You may not use this file except in compliance with the License.
+// THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+// INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+// See LICENSE in the root of the software repository for the full text of the License.
+
+// Test that ExpandTileOp + InlineLibCall + FoldTileBufIntrinsics pipeline
+// expands pto.tsort32 via the PTODSL TileLib template
+//
+// Pipeline: ExpandTileOp -> InlineLibCall -> FoldTileBufIntrinsics
+//
+// RUN: ptoas --pto-arch=a5 --pto-backend=vpto --emit-vpto --enable-tile-op-expand %s -o - 2>/dev/null | FileCheck %s
+
+// After the full tile-op-expand path on the VPTO backend, the original
+// pto.tsort32 should be lowered to vector-style VPTO IR.
+// CHECK-LABEL: func.func @TSORT32_no_tmp
+// CHECK-NOT: pto.tsort32 ins
+// CHECK: pto.vbitsort
+
+// CHECK-LABEL: func.func @TSORT32_with_tmp
+// CHECK-NOT: pto.tsort32 ins
+// CHECK: pto.vbitsort
+
+module attributes {pto.kernel_kind = #pto.kernel_kind<vector>} {
+  // Case 1: aligned cols (valid_cols % 32 == 0), no tmp needed
+  func.func @TSORT32_no_tmp() {
+    %src = pto.alloc_tile : !pto.tile_buf<vec, 1x32xf16>
+    %idx = pto.alloc_tile : !pto.tile_buf<vec, 1x32xui32>
+    %dst = pto.alloc_tile : !pto.tile_buf<vec, 1x64xf16>
+
+    pto.tsort32 ins(%src, %idx : !pto.tile_buf<vec, 1x32xf16>,
+                            !pto.tile_buf<vec, 1x32xui32>)
+               outs(%dst : !pto.tile_buf<vec, 1x64xf16>)
+    return
+  }
+
+  // Case 2: unaligned cols (valid_cols % 32 != 0), tmp needed
+  func.func @TSORT32_with_tmp() {
+    %src = pto.alloc_tile : !pto.tile_buf<vec, 1x48xf16>
+    %idx = pto.alloc_tile : !pto.tile_buf<vec, 1x48xui32>
+    %tmp = pto.alloc_tile : !pto.tile_buf<vec, 1x32xf16>
+    %dst = pto.alloc_tile : !pto.tile_buf<vec, 1x96xf16>
+
+    pto.tsort32 ins(%src, %idx, %tmp : !pto.tile_buf<vec, 1x48xf16>,
+                            !pto.tile_buf<vec, 1x48xui32>,
+                            !pto.tile_buf<vec, 1x32xf16>)
+               outs(%dst : !pto.tile_buf<vec, 1x96xf16>)
+    return
+  }
+}

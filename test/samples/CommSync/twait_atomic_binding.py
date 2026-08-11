@@ -6,8 +6,8 @@
 # INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
 # See LICENSE in the root of the software repository for the full text of the License.
 
-from mlir.ir import Context, IndexType, InsertionPoint, IntegerType, Location, Module
-from mlir.dialects import arith, func, pto, scf
+from ptoas.mlir.ir import Context, IndexType, InsertionPoint, IntegerType, Location, Module, UnitAttr
+from ptoas.mlir.dialects import arith, func, pto, scf
 
 
 def build():
@@ -27,6 +27,7 @@ def build():
             fn_ty = func.FunctionType.get([ptr_i32, ptr_i32, i32, i32, i32], [])
             with InsertionPoint(module.body):
                 fn = func.FuncOp("TWaitAtomicKernel", fn_ty)
+                fn.operation.attributes["pto.entry"] = UnitAttr.get(ctx)
                 entry = fn.add_entry_block()
 
             with InsertionPoint(entry):

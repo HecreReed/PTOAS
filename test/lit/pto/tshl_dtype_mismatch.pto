@@ -1,0 +1,60 @@
+// RUN: not ptoas --pto-arch=a5 %s 2>&1 | FileCheck %s
+// Test: TSHL dst data type consistency - more test cases
+
+module {
+  // Case 1: src0/src1=i16, dst=i32 - should fail
+  func.func @tshl_i16_to_i32_fail() {
+    %src0 = pto.alloc_tile : !pto.tile_buf<loc=vec, dtype=i16, rows=1, cols=64, v_row=1, v_col=64, blayout=row_major, slayout=none_box, fractal=512, pad=0>
+    %src1 = pto.alloc_tile : !pto.tile_buf<loc=vec, dtype=i16, rows=1, cols=64, v_row=1, v_col=64, blayout=row_major, slayout=none_box, fractal=512, pad=0>
+    %dst = pto.alloc_tile : !pto.tile_buf<loc=vec, dtype=i32, rows=1, cols=64, v_row=1, v_col=64, blayout=row_major, slayout=none_box, fractal=512, pad=0>
+
+    pto.tshl ins(%src0, %src1 : !pto.tile_buf<loc=vec, dtype=i16, rows=1, cols=64, v_row=1, v_col=64, blayout=row_major, slayout=none_box, fractal=512, pad=0>, !pto.tile_buf<loc=vec, dtype=i16, rows=1, cols=64, v_row=1, v_col=64, blayout=row_major, slayout=none_box, fractal=512, pad=0>)
+        outs(%dst : !pto.tile_buf<loc=vec, dtype=i32, rows=1, cols=64, v_row=1, v_col=64, blayout=row_major, slayout=none_box, fractal=512, pad=0>)
+    return
+  }
+  // CHECK: expects src0, src1, and dst to have the same element type
+
+  // Case 2: src0/src1=i32, dst=f32 - should fail
+  func.func @tshl_i32_to_f32_fail() {
+    %src0 = pto.alloc_tile : !pto.tile_buf<loc=vec, dtype=i32, rows=1, cols=64, v_row=1, v_col=64, blayout=row_major, slayout=none_box, fractal=512, pad=0>
+    %src1 = pto.alloc_tile : !pto.tile_buf<loc=vec, dtype=i32, rows=1, cols=64, v_row=1, v_col=64, blayout=row_major, slayout=none_box, fractal=512, pad=0>
+    %dst = pto.alloc_tile : !pto.tile_buf<loc=vec, dtype=f32, rows=1, cols=64, v_row=1, v_col=64, blayout=row_major, slayout=none_box, fractal=512, pad=0>
+
+    pto.tshl ins(%src0, %src1 : !pto.tile_buf<loc=vec, dtype=i32, rows=1, cols=64, v_row=1, v_col=64, blayout=row_major, slayout=none_box, fractal=512, pad=0>, !pto.tile_buf<loc=vec, dtype=i32, rows=1, cols=64, v_row=1, v_col=64, blayout=row_major, slayout=none_box, fractal=512, pad=0>)
+        outs(%dst : !pto.tile_buf<loc=vec, dtype=f32, rows=1, cols=64, v_row=1, v_col=64, blayout=row_major, slayout=none_box, fractal=512, pad=0>)
+    return
+  }
+
+  // Case 3: src0=i8, src1=i16 (mismatch) - should fail
+  func.func @tshl_src_mismatch_fail() {
+    %src0 = pto.alloc_tile : !pto.tile_buf<loc=vec, dtype=i8, rows=1, cols=64, v_row=1, v_col=64, blayout=row_major, slayout=none_box, fractal=512, pad=0>
+    %src1 = pto.alloc_tile : !pto.tile_buf<loc=vec, dtype=i16, rows=1, cols=64, v_row=1, v_col=64, blayout=row_major, slayout=none_box, fractal=512, pad=0>
+    %dst = pto.alloc_tile : !pto.tile_buf<loc=vec, dtype=i8, rows=1, cols=64, v_row=1, v_col=64, blayout=row_major, slayout=none_box, fractal=512, pad=0>
+
+    pto.tshl ins(%src0, %src1 : !pto.tile_buf<loc=vec, dtype=i8, rows=1, cols=64, v_row=1, v_col=64, blayout=row_major, slayout=none_box, fractal=512, pad=0>, !pto.tile_buf<loc=vec, dtype=i16, rows=1, cols=64, v_row=1, v_col=64, blayout=row_major, slayout=none_box, fractal=512, pad=0>)
+        outs(%dst : !pto.tile_buf<loc=vec, dtype=i8, rows=1, cols=64, v_row=1, v_col=64, blayout=row_major, slayout=none_box, fractal=512, pad=0>)
+    return
+  }
+
+  // Valid case 1: all i8
+  func.func @tshl_i8_valid() {
+    %src0 = pto.alloc_tile : !pto.tile_buf<loc=vec, dtype=i8, rows=1, cols=64, v_row=1, v_col=64, blayout=row_major, slayout=none_box, fractal=512, pad=0>
+    %src1 = pto.alloc_tile : !pto.tile_buf<loc=vec, dtype=i8, rows=1, cols=64, v_row=1, v_col=64, blayout=row_major, slayout=none_box, fractal=512, pad=0>
+    %dst = pto.alloc_tile : !pto.tile_buf<loc=vec, dtype=i8, rows=1, cols=64, v_row=1, v_col=64, blayout=row_major, slayout=none_box, fractal=512, pad=0>
+
+    pto.tshl ins(%src0, %src1 : !pto.tile_buf<loc=vec, dtype=i8, rows=1, cols=64, v_row=1, v_col=64, blayout=row_major, slayout=none_box, fractal=512, pad=0>, !pto.tile_buf<loc=vec, dtype=i8, rows=1, cols=64, v_row=1, v_col=64, blayout=row_major, slayout=none_box, fractal=512, pad=0>)
+        outs(%dst : !pto.tile_buf<loc=vec, dtype=i8, rows=1, cols=64, v_row=1, v_col=64, blayout=row_major, slayout=none_box, fractal=512, pad=0>)
+    return
+  }
+
+  // Valid case 2: all i16
+  func.func @tshl_i16_valid() {
+    %src0 = pto.alloc_tile : !pto.tile_buf<loc=vec, dtype=i16, rows=1, cols=64, v_row=1, v_col=64, blayout=row_major, slayout=none_box, fractal=512, pad=0>
+    %src1 = pto.alloc_tile : !pto.tile_buf<loc=vec, dtype=i16, rows=1, cols=64, v_row=1, v_col=64, blayout=row_major, slayout=none_box, fractal=512, pad=0>
+    %dst = pto.alloc_tile : !pto.tile_buf<loc=vec, dtype=i16, rows=1, cols=64, v_row=1, v_col=64, blayout=row_major, slayout=none_box, fractal=512, pad=0>
+
+    pto.tshl ins(%src0, %src1 : !pto.tile_buf<loc=vec, dtype=i16, rows=1, cols=64, v_row=1, v_col=64, blayout=row_major, slayout=none_box, fractal=512, pad=0>, !pto.tile_buf<loc=vec, dtype=i16, rows=1, cols=64, v_row=1, v_col=64, blayout=row_major, slayout=none_box, fractal=512, pad=0>)
+        outs(%dst : !pto.tile_buf<loc=vec, dtype=i16, rows=1, cols=64, v_row=1, v_col=64, blayout=row_major, slayout=none_box, fractal=512, pad=0>)
+    return
+  }
+}

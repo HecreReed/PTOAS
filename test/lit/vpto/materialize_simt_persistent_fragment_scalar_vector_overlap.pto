@@ -1,0 +1,52 @@
+// Copyright (c) 2026 Huawei Technologies Co., Ltd.
+// This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+// CANN Open Software License Agreement Version 2.0 (the "License").
+// Please refer to the License for details. You may not use this file except in compliance with the License.
+// THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+// INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+// See LICENSE in the root of the software repository for the full text of the License.
+
+// RUN: ptoas --pto-arch=a5 --pto-backend=vpto --emit-vpto --mlir-print-ir-after=pto-materialize-simt-persistent-fragment %s -o /dev/null 2>&1 | FileCheck %s --check-prefix=MATERIALIZE
+
+module attributes {pto.target_arch = "a5", pto.kernel_kind = #pto.kernel_kind<vector>} {
+  func.func @persistent_fragment_scalar_vector_overlap(%dst: !pto.ptr<f32, ub>) attributes {pto.entry} {
+    %c2_i32 = arith.constant 2 : i32
+    %fragment = llvm.alloca %c2_i32 x f32 {pto.persistent} : (i32) -> !llvm.ptr
+    pto.section.simt<<<32, 1, 1>>> {
+      %value = arith.constant dense<[1.000000e+00, 2.000000e+00]> : vector<2xf32>
+      llvm.store %value, %fragment : vector<2xf32>, !llvm.ptr
+    }
+    pto.section.simt<<<32, 1, 1>>> {
+      %c4_i64 = arith.constant 4 : i64
+      %element1 = llvm.getelementptr %fragment[%c4_i64] : (!llvm.ptr, i64) -> !llvm.ptr, i8
+      %scalar1 = llvm.load %element1 : !llvm.ptr -> f32
+      %vector = llvm.load %fragment : !llvm.ptr -> vector<2xf32>
+      %c1_i32 = arith.constant 1 : i32
+      %vector1 = llvm.extractelement %vector[%c1_i32 : i32] : vector<2xf32>
+      %sum = arith.addf %scalar1, %vector1 : f32
+      %c0 = arith.constant 0 : index
+      pto.store %sum, %dst[%c0] : !pto.ptr<f32, ub>, f32
+    }
+    return
+  }
+}
+
+// MATERIALIZE-LABEL: func.func @persistent_fragment_scalar_vector_overlap
+// MATERIALIZE-NOT: llvm.alloca
+// MATERIALIZE: pto.section.simt<<<32, 1, 1>>> {
+// MATERIALIZE: pto.keep %{{.*}} {slot = 0 : i64} : f32
+// MATERIALIZE-NEXT: pto.keep %{{.*}} {slot = 1 : i64} : f32
+// MATERIALIZE: pto.section.simt<<<32, 1, 1>>> {
+// MATERIALIZE-NEXT: %[[RESUME0:.*]] = pto.resume {slot = 0 : i64} : f32
+// MATERIALIZE-NEXT: %[[RESUME1:.*]] = pto.resume {slot = 1 : i64} : f32
+// MATERIALIZE: %[[POISON:.*]] = llvm.mlir.poison : vector<2xf32>
+// MATERIALIZE: %[[VECTOR0:.*]] = llvm.insertelement %[[RESUME0]], %[[POISON]][%{{.*}} : i32] : vector<2xf32>
+// MATERIALIZE: %[[VECTOR1:.*]] = llvm.insertelement %[[RESUME1]], %[[VECTOR0]][%{{.*}} : i32] : vector<2xf32>
+// MATERIALIZE: %[[LANE1:.*]] = llvm.extractelement %[[VECTOR1]][%{{.*}} : i32] : vector<2xf32>
+// MATERIALIZE: %[[SUM:.*]] = arith.addf %[[RESUME1]], %[[LANE1]] : f32
+// MATERIALIZE: pto.store %[[SUM]],
+// MATERIALIZE: pto.keep %[[RESUME0]] {slot = 0 : i64} : f32
+// MATERIALIZE-NEXT: pto.keep %[[RESUME1]] {slot = 1 : i64} : f32
+// MATERIALIZE-NOT: llvm.getelementptr
+// MATERIALIZE-NOT: llvm.load
+// MATERIALIZE-NOT: llvm.store

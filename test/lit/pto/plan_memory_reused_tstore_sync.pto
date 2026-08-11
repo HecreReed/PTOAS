@@ -1,0 +1,70 @@
+// Copyright (c) 2026 Huawei Technologies Co., Ltd.
+// This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+// CANN Open Software License Agreement Version 2.0 (the "License").
+// Please refer to the License for details. You may not use this file except in compliance with the License.
+// THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+// INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+// See LICENSE in the root of the software repository for the full text of the License.
+
+// This test models explicit level3 tile addresses directly: `stored` occupies
+// [1280, 9472) and `reused` occupies [8192, 16384). `stored` dies at tstore,
+// but MTE3 still reads its physical range asynchronously, so the later vector
+// write needs an MTE3 -> V handshake.
+//
+// RUN: ptoas --pto-arch=a3 --pto-level=level3 --enable-insert-sync %s -o - 2>&1 | FileCheck %s
+
+module attributes {pto.target_arch = "a2a3"} {
+  func.func @plan_memory_reused_tstore_sync(
+      %src0: !pto.ptr<f32>, %src1: !pto.ptr<f32>, %dst: !pto.ptr<f32>)
+      attributes {pto.kernel_kind = #pto.kernel_kind<vector>} {
+    %c1280_i64 = arith.constant 1280 : i64
+    %c8192_i64 = arith.constant 8192 : i64
+    %c16384_i64 = arith.constant 16384 : i64
+    %c0 = arith.constant 0 : index
+    %c1 = arith.constant 1 : index
+    %c16 = arith.constant 16 : index
+    %c128 = arith.constant 128 : index
+    %one = arith.constant 1.000000e+00 : f32
+
+    %src0_view = pto.make_tensor_view %src0,
+      shape = [%c1, %c1, %c1, %c16, %c128], strides = [%c128, %c128, %c128, %c128, %c1]
+      : !pto.tensor_view<1x1x1x16x128xf32>
+    %src1_view = pto.make_tensor_view %src1,
+      shape = [%c1, %c1, %c1, %c16, %c128], strides = [%c128, %c128, %c128, %c128, %c1]
+      : !pto.tensor_view<1x1x1x16x128xf32>
+    %dst_view = pto.make_tensor_view %dst,
+      shape = [%c1, %c1, %c1, %c16, %c128], strides = [%c128, %c128, %c128, %c128, %c1]
+      : !pto.tensor_view<1x1x1x16x128xf32>
+    %src0_part = pto.partition_view %src0_view,
+      offsets = [%c0, %c0, %c0, %c0, %c0], sizes = [%c1, %c1, %c1, %c16, %c128]
+      : !pto.tensor_view<1x1x1x16x128xf32> -> !pto.partition_tensor_view<1x1x1x16x128xf32>
+    %src1_part = pto.partition_view %src1_view,
+      offsets = [%c0, %c0, %c0, %c0, %c0], sizes = [%c1, %c1, %c1, %c16, %c128]
+      : !pto.tensor_view<1x1x1x16x128xf32> -> !pto.partition_tensor_view<1x1x1x16x128xf32>
+    %dst_part = pto.partition_view %dst_view,
+      offsets = [%c0, %c0, %c0, %c0, %c0], sizes = [%c1, %c1, %c1, %c16, %c128]
+      : !pto.tensor_view<1x1x1x16x128xf32> -> !pto.partition_tensor_view<1x1x1x16x128xf32>
+
+    %input = pto.alloc_tile addr = %c16384_i64 : !pto.tile_buf<vec, 16x128xf32>
+    %stored = pto.alloc_tile addr = %c1280_i64 : !pto.tile_buf<vec, 16x128xf32>
+    %reused = pto.alloc_tile addr = %c8192_i64 : !pto.tile_buf<vec, 16x128xf32>
+
+    pto.tload ins(%src0_part : !pto.partition_tensor_view<1x1x1x16x128xf32>)
+              outs(%input : !pto.tile_buf<vec, 16x128xf32>)
+    pto.tload ins(%src1_part : !pto.partition_tensor_view<1x1x1x16x128xf32>)
+              outs(%stored : !pto.tile_buf<vec, 16x128xf32>)
+    pto.tmuls ins(%input, %one : !pto.tile_buf<vec, 16x128xf32>, f32)
+              outs(%stored : !pto.tile_buf<vec, 16x128xf32>)
+    pto.tstore ins(%stored : !pto.tile_buf<vec, 16x128xf32>)
+               outs(%dst_part : !pto.partition_tensor_view<1x1x1x16x128xf32>)
+    pto.tmuls ins(%input, %one : !pto.tile_buf<vec, 16x128xf32>, f32)
+              outs(%reused : !pto.tile_buf<vec, 16x128xf32>)
+    return
+  }
+}
+
+// CHECK-LABEL: AICORE void plan_memory_reused_tstore_sync(
+// CHECK:      TSTORE(
+// CHECK-NEXT: set_flag(PIPE_MTE3, PIPE_V, EVENT_ID[[MTE3_TO_V:[0-9]+]]);
+// CHECK-NEXT: wait_flag(PIPE_MTE3, PIPE_V, EVENT_ID[[MTE3_TO_V]]);
+// CHECK-NEXT: TMULS(

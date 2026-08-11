@@ -10,34 +10,6 @@
 set -uo pipefail   # 注意：去掉 -e，避免失败直接退出整个脚本
 
 BASE_DIR="$(cd -- "$(dirname -- "$0")" && pwd)"
-REPO_ROOT="$(cd -- "${BASE_DIR}/../.." && pwd)"
-
-prepend_path_var() {
-  local var_name="$1"
-  local path_value="$2"
-  [[ -d "${path_value}" ]] || return 0
-  case ":${!var_name:-}:" in
-    *":${path_value}:"*) ;;
-    *) export "${var_name}=${path_value}${!var_name:+:${!var_name}}" ;;
-  esac
-}
-
-setup_source_tree_test_env() {
-  local env_file="${REPO_ROOT}/build/ptoas-test-env.sh"
-  if [[ -f "${env_file}" ]]; then
-    # shellcheck disable=SC1090
-    source "${env_file}"
-    return 0
-  fi
-
-  local llvm_build_dir="${LLVM_BUILD_DIR:-${REPO_ROOT}/third_party/lib_cache/llvm_19.1.7/build-shared}"
-  prepend_path_var PYTHONPATH "${llvm_build_dir}/tools/mlir/python_packages/mlir_core"
-  prepend_path_var PYTHONPATH "${PTO_PYTHON_ROOT:-${REPO_ROOT}/install}"
-  prepend_path_var LD_LIBRARY_PATH "${llvm_build_dir}/lib"
-  prepend_path_var LD_LIBRARY_PATH "${PTO_INSTALL_DIR:-${REPO_ROOT}/install}/lib"
-}
-
-setup_source_tree_test_env
 
 # Allow overriding tool/python explicitly:
 #   PTOAS_BIN=/path/to/ptoas PYTHON_BIN=/path/to/python ./runop.sh all
@@ -48,7 +20,7 @@ PTOAS_OUT_DIR="${PTOAS_OUT_DIR:-}"
 PTO_BUILD_DIR="${PTO_BUILD_DIR:-}"
 PTOAS_ENABLE_INSERT_SYNC="${PTOAS_ENABLE_INSERT_SYNC:-1}"
 PTOAS_FLAGS="${PTOAS_FLAGS:-}"
-PTO_PTO_DIRS="${PTO_PTO_DIRS:-Sync Qwen3DecodeA3 Qwen3DecodeA5 DeepseekV4DecodeA3 DeepseekV4DecodeA5 CommSync}"
+PTO_PTO_DIRS="${PTO_PTO_DIRS:-Sync Qwen3DecodeA3 Qwen3DecodeA5 DeepseekV4DecodeA3 DeepseekV4DecodeA5 CommSync Prelu Rem Rems Gemvmx MatmulMxLowPrecision TquantMx Movfp}"
 ENABLE_BC=0
 
 usage() {
@@ -63,10 +35,10 @@ Env:
   PTOBC_BIN   # path to ptobc executable (optional)
   PYTHON_BIN  # python executable to run samples (optional)
   PTOAS_OUT_DIR  # where generated *.mlir/*.cpp go (optional; defaults to a temp dir)
-  PTO_BUILD_DIR  # build directory root that contains tools/ptoas and tools/ptobc (optional)
+  PTO_BUILD_DIR  # build directory root that contains tools/ptobc (optional)
   PTOAS_FLAGS  # extra flags passed to ptoas (e.g. --enable-insert-sync)
   PTOAS_ENABLE_INSERT_SYNC  # 1 to append --enable-insert-sync to PTOAS_FLAGS (default: 1)
-  PTO_PTO_DIRS  # space-separated dirs to run .pto directly (default: Sync Qwen3DecodeA3 Qwen3DecodeA5 DeepseekV4DecodeA3 DeepseekV4DecodeA5)
+  PTO_PTO_DIRS  # space-separated dirs to run .pto directly (default: Sync Qwen3DecodeA3 Qwen3DecodeA5 DeepseekV4DecodeA3 DeepseekV4DecodeA5 CommSync Prelu Rem Rems Gemvmx MatmulMxLowPrecision TquantMx Movfp)
 
 Flags:
   --enablebc  # enable: python -> .pto -> ptobc -> .pto -> ptoas
@@ -90,24 +62,16 @@ lcfirst() {
 
 resolve_ptoas_bin() {
   if [[ -n "${PTOAS_BIN}" ]]; then
-    echo "${PTOAS_BIN}"
-    return 0
+    local override
+    override="$(command -v "${PTOAS_BIN}" 2>/dev/null || true)"
+    if [[ -n "${override}" && -x "${override}" ]]; then
+      echo "${override}"
+      return 0
+    fi
+    return 1
   fi
 
-  # Common locations:
-  # - out-of-tree build in repo: PTOAS/build/tools/ptoas/ptoas
-  # - legacy layout: build/bin/ptoas
   local cand
-  if [[ -n "${PTO_BUILD_DIR}" ]]; then
-    cand="${PTO_BUILD_DIR}/tools/ptoas/ptoas"
-    [[ -x "$cand" ]] && { echo "$cand"; return 0; }
-    cand="${PTO_BUILD_DIR}/bin/ptoas"
-    [[ -x "$cand" ]] && { echo "$cand"; return 0; }
-  fi
-  cand="${BASE_DIR}/../../build/tools/ptoas/ptoas"
-  [[ -x "$cand" ]] && { echo "$cand"; return 0; }
-  cand="${BASE_DIR}/../../../../build/bin/ptoas"
-  [[ -x "$cand" ]] && { echo "$cand"; return 0; }
   cand="$(command -v ptoas 2>/dev/null || true)"
   [[ -n "$cand" && -x "$cand" ]] && { echo "$cand"; return 0; }
 
@@ -248,6 +212,9 @@ process_one_dir() {
     fi
   fi
 
+  local soc_lc="${SOC_VERSION:-}"
+  soc_lc="$(printf '%s' "${soc_lc}" | tr '[:upper:]' '[:lower:]')"
+
   local target_arch_lc
   target_arch_lc="$(printf '%s' "$target_arch" | tr '[:upper:]' '[:lower:]')"
   local expected_vec_barrier="pipe_barrier(PIPE_V)"
@@ -262,7 +229,7 @@ process_one_dir() {
   fi
 
   if [[ -z "$ptoas" || ! -x "$ptoas" ]]; then
-    echo -e "${A}\tFAIL\tMissing executable: PTOAS_BIN (searched common paths)"
+    echo -e "${A}\tFAIL\tMissing ptoas command (install PTOAS or set PTOAS_BIN)"
     return 0
   fi
   if [[ -z "$python" || ! -x "$python" ]]; then
@@ -277,8 +244,6 @@ process_one_dir() {
     echo -e "${A}\tSKIP\tMissing dir: $dir"
     return 0
   fi
-  local soc_lc="${SOC_VERSION:-}"
-  soc_lc="$(printf '%s' "${soc_lc}" | tr '[:upper:]' '[:lower:]')"
   if [[ ( "$A" == "Qwen3DecodeA3" || "$A" == "DeepseekV4DecodeA3" ) && "${target_arch_lc}" != "a3" ]]; then
     local direct_case
     for direct_case in "$dir"/*.pto; do
@@ -334,6 +299,10 @@ process_one_dir() {
         ;;
     esac
     base="$(basename "$f" .py)"
+    if [[ -f "${dir}/${base}-pto.pto" ]]; then
+      echo -e "${A}(${base}.py)\tSKIP\tprefer checked-in direct PTO sample: ${base}-pto.pto"
+      continue
+    fi
     local expect_fail=0
     case "$base" in
       *_invalid|*_xfail) expect_fail=1 ;;
@@ -367,7 +336,7 @@ process_one_dir() {
       echo -e "${A}(${base}.py)\tSKIP\trequires --pto-arch=a5"
       continue
     fi
-    if [[ "$base" == "gemvmx" && "$(printf '%s' "$target_arch" | tr '[:upper:]' '[:lower:]')" != "a5" ]]; then
+    if [[ ( "$base" == "gemvmx" || "$base" == "matmul_mx_low_precision" ) && "$(printf '%s' "$target_arch" | tr '[:upper:]' '[:lower:]')" != "a5" ]]; then
       echo -e "${A}(${base}.py)\tSKIP\trequires --pto-arch=a5"
       continue
     fi
@@ -443,7 +412,7 @@ process_one_dir() {
     ptobc_file="${out_subdir}/${base}.ptobc"
     decoded_pto="${out_subdir}/${base}-roundtrip.pto"
     local sample_use_ptobc_roundtrip="$use_ptobc_roundtrip"
-    # ptobc status: alloc_tile addr operand is required by ptoas level3 for
+    # TODO(ptobc): alloc_tile addr operand is required by ptoas level3 for
     # these A5 repro/control samples, but ptobc v0 currently rejects this
     # form with "operand count mismatch for op: pto.alloc_tile".
     #
@@ -482,6 +451,30 @@ process_one_dir() {
 
     # Write output via -o to avoid mixing debug prints with generated C++.
     local -a ptoas_cmd=("${ptoas_cmd_base[@]}" "$pto_input" -o "$cpp")
+    if [[ "$base" == "syncall_binding" ]]; then
+      local sample_has_level3=0
+      for ((i=0; i<${#ptoas_cmd[@]}; i++)); do
+        if [[ "${ptoas_cmd[$i]}" == "--pto-level=level3" ]]; then
+          sample_has_level3=1
+          break
+        fi
+        if [[ "${ptoas_cmd[$i]}" == "--pto-level" ]]; then
+          if (( i + 1 < ${#ptoas_cmd[@]} )) && [[ "${ptoas_cmd[$((i+1))]}" == "level3" ]]; then
+            sample_has_level3=1
+            break
+          fi
+        fi
+      done
+      if [[ $sample_has_level3 -eq 0 ]]; then
+        ptoas_cmd=("$ptoas")
+        if (( ${#ptoas_flags[@]} )); then
+          ptoas_cmd+=(--pto-level=level3 "${ptoas_flags[@]}")
+        else
+          ptoas_cmd+=(--pto-level=level3)
+        fi
+        ptoas_cmd+=("$pto_input" -o "$cpp")
+      fi
+    fi
     local ptoas_log="${out_subdir}/${base}-ptoas.log"
     if ! "${ptoas_cmd[@]}" >"${ptoas_log}" 2>&1; then
       if [[ $expect_fail -eq 1 ]]; then
@@ -641,7 +634,7 @@ process_one_dir() {
         continue
       fi
       if ! grep -Fq "set_intra_block(PIPE_FIX, 0)" "$cpp" || ! grep -Fq "set_intra_block(PIPE_FIX, 16)" "$cpp"; then
-        echo -e "${A}(${base}.py)\tFAIL\tmissing A5 cube-side mirrored set_intra_block(PIPE_FIX, id/id+16)"
+        echo -e "${A}(${base}.py)\tFAIL\tmissing A5 cube-side explicit set_intra_block(PIPE_FIX, id/id+16)"
         overall=1
         continue
       fi
@@ -663,7 +656,7 @@ process_one_dir() {
         continue
       fi
       if ! grep -Fq "set_intra_block(PIPE_FIX, 0)" "$cpp" || ! grep -Fq "set_intra_block(PIPE_FIX, 16)" "$cpp"; then
-        echo -e "${A}(${base}.py)\tFAIL\tmissing A5 cube-side mirrored set_intra_block(PIPE_FIX, id/id+16)"
+        echo -e "${A}(${base}.py)\tFAIL\tmissing A5 cube-side explicit set_intra_block(PIPE_FIX, id/id+16)"
         overall=1
         continue
       fi
@@ -685,7 +678,7 @@ process_one_dir() {
         continue
       fi
       if ! grep -Fq "set_intra_block(PIPE_FIX, 0)" "$cpp" || ! grep -Fq "set_intra_block(PIPE_FIX, 16)" "$cpp"; then
-        echo -e "${A}(${base}.py)\tFAIL\tmissing PTO-ISA-style cube-side mirrored set_intra_block(PIPE_FIX, id/id+16)"
+        echo -e "${A}(${base}.py)\tFAIL\tmissing PTO-ISA-style explicit set_intra_block(PIPE_FIX, id/id+16)"
         overall=1
         continue
       fi
@@ -752,7 +745,7 @@ process_one_dir() {
         continue
       fi
       if [[ "$set_count" -ne 2 ]]; then
-        echo -e "${A}(${base}.py)\tFAIL\tunexpected number of PIPE_FIX dynamic sync.set calls (expect 2: id and id+16)"
+        echo -e "${A}(${base}.py)\tFAIL\tunexpected number of PIPE_FIX dynamic sync.set calls (expect explicit id and id+16)"
         overall=1
         continue
       fi
@@ -900,7 +893,7 @@ process_one_dir() {
     fi
 
     # Regression guard for Issue #207:
-    # SSA `pto.treshape` (lowered into `pto.bind_tile`) must lower to a single
+    # SSA `pto.treshape` must lower to a single
     # `TRESHAPE(dst, src)` instead of an invalid Tile-to-pointer cast sequence.
     if [[ "$base" == "reshape" ]]; then
       if ! grep -Fq "TRESHAPE(" "$cpp"; then
@@ -1322,15 +1315,37 @@ PY
       esac
       base="$(basename "$f" .pto)"
       local expect_fail=0
+      local case_target_arch_lc="${target_arch_lc}"
+      local -a case_ptoas_cmd_base=("${ptoas_cmd_base[@]}")
       case "$base" in
         *_invalid|*_xfail) expect_fail=1 ;;
       esac
+      if [[ "$A" == "Movfp" && "$base" == "movfp_fixpipe_reuse-pto" && \
+            $has_pto_arch_override -eq 0 && -n "${soc_lc}" && \
+            ( "${soc_lc}" == *"a5"* || "${soc_lc}" == *"950"* ) ]]; then
+        case_ptoas_cmd_base=("$ptoas")
+        if (( ${#ptoas_flags[@]} )); then
+          case_ptoas_cmd_base+=("${ptoas_flags[@]}")
+        fi
+        case_ptoas_cmd_base+=(--pto-arch a5)
+        case_target_arch_lc="a5"
+      fi
       if [[ ( "$base" == "test_tmov_col_major_16x1_align_a5" || \
               "$base" == "test_tmov_row_major_1x16_control_a5" || \
+              "$base" == "movfp_fixpipe_reuse-pto" || \
               "$base" == "decode_projection_incore_0" || \
               "$base" == "rmsnorm_incore_0" ) && \
-            "${target_arch_lc}" != "a5" ]]; then
+            "${case_target_arch_lc}" != "a5" ]]; then
         echo -e "${A}(${base}.pto)\tSKIP\trequires --pto-arch=a5"
+        continue
+      fi
+      if [[ "$base" == "movfp_fixpipe_reuse_a3-pto" && "${case_target_arch_lc}" != "a3" ]]; then
+        echo -e "${A}(${base}.pto)\tSKIP\trequires --pto-arch=a3"
+        continue
+      fi
+      if [[ "$base" == "movfp_fixpipe_reuse_a3-pto" && -n "${soc_lc}" && \
+            ( "${soc_lc}" == *"a5"* || "${soc_lc}" == *"950"* ) ]]; then
+        echo -e "${A}(${base}.pto)\tSKIP\trequires A3 target SOC"
         continue
       fi
       local pto_input="$f"
@@ -1339,12 +1354,21 @@ PY
       cpp="${out_subdir}/${base}.cpp"
       if [[ "$A" == "Qwen3DecodeA3" || "$A" == "Qwen3DecodeA5" || "$A" == "DeepseekV4DecodeA3" || "$A" == "DeepseekV4DecodeA5" ]]; then
         cpp="${out_subdir}/${base}-pto.cpp"
+      elif [[ "$base" == "tquant_mx" ]]; then
+        # Board validation currently discovers generated sample kernels via
+        # the historical `*-pto.cpp` naming convention.
+        cpp="${out_subdir}/${base}-pto.cpp"
       fi
       local sample_use_ptobc_roundtrip="$use_ptobc_roundtrip"
 
-      # ptobc status: Keep ptoas regression coverage for patterns that are not
+      # TODO(ptobc): Keep ptoas regression coverage for patterns that are not
       # yet supported by ptobc roundtrip; re-enable once ptobc catches up.
-      if [[ "$base" == "test_if_else_tile_result" || \
+      if [[ "$base" == "prelu-pto" || \
+            "$base" == "gemvmx-pto" || \
+            "$base" == "matmul_mx_low_precision-pto" || \
+            "$base" == "movfp_fixpipe_reuse-pto" || \
+            "$base" == "movfp_fixpipe_reuse_a3-pto" || \
+            "$base" == "test_if_else_tile_result" || \
             "$base" == "test_tmov_col_major_16x1_align_a5" || \
             "$base" == "test_tmov_row_major_1x16_control_a5" || \
             "$base" == "decode_projection_incore_0" || \
@@ -1375,7 +1399,7 @@ PY
         pto_input="$decoded_pto"
       fi
 
-      local -a ptoas_cmd=("${ptoas_cmd_base[@]}" "$pto_input" -o "$cpp")
+      local -a ptoas_cmd=("${case_ptoas_cmd_base[@]}" "$pto_input" -o "$cpp")
       local ptoas_log="${out_subdir}/${base}-ptoas.log"
       if ! "${ptoas_cmd[@]}" >"${ptoas_log}" 2>&1; then
         if [[ $expect_fail -eq 1 ]]; then

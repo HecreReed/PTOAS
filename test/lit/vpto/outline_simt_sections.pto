@@ -1,0 +1,30 @@
+// Copyright (c) 2026 Huawei Technologies Co., Ltd.
+// This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+// CANN Open Software License Agreement Version 2.0 (the "License").
+// Please refer to the License for details. You may not use this file except in compliance with the License.
+// THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+// INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+// See LICENSE in the root of the software repository for the full text of the License.
+
+// RUN: ptoas --pto-arch=a5 --pto-backend=vpto --emit-vpto --mlir-print-ir-after=pto-outline-simt-sections %s -o /dev/null 2>&1 | FileCheck %s --check-prefix=OUTLINE
+
+module attributes {pto.target_arch = "a5", pto.kernel_kind = #pto.kernel_kind<vector>} {
+  func.func @inline_simt_kernel(%dst: !pto.ptr<i32, ub>) attributes {pto.entry} {
+    pto.section.simt<<<32, 2, 1>>> {
+      %c0 = arith.constant 0 : index
+      %tid = pto.get_tid_x : i32
+      pto.store %tid, %dst[%c0] : !pto.ptr<i32, ub>, i32
+    }
+    return
+  }
+}
+
+// OUTLINE-LABEL: func.func @inline_simt_kernel
+// OUTLINE: arith.constant 32 : i32
+// OUTLINE: arith.constant 2 : i32
+// OUTLINE: arith.constant 1 : i32
+// OUTLINE: pto.simt_launch @inline_simt_kernel_simt_0<<<{{.*}}, {{.*}}, {{.*}}>>>(%arg0) : (!pto.ptr<i32, ub>) -> ()
+// OUTLINE-NOT: pto.section.simt
+// OUTLINE-LABEL: func.func private @inline_simt_kernel_simt_0(%arg0: !pto.ptr<i32, ub>) attributes {pto.simt_entry, pto.simt_max_threads = 64 : i32}
+// OUTLINE: pto.get_tid_x
+// OUTLINE: pto.store {{.*}}, %arg0

@@ -1,0 +1,101 @@
+# Build artifacts
+build/
+build_plain/
+build_plan/
+install/
+
+# TileLang ST standalone build outputs (see temp_docs/standalone_st.md)
+test/tilelang_st/npu/a5/src/st/build/
+test/tilelang_st/npu/a5/src/st/build_plain/
+test/tilelang_st/npu/a5/src/st/build_plan/
+cmake-build-*/
+CMakeFiles/
+CMakeCache.txt
+CMakeScripts/
+Testing/
+Makefile
+cmake_install.cmake
+install_manifest.txt
+CTestTestfile.cmake
+compile_commands.json
+*.ninja
+*.ninja_log
+*.ninja_deps
+
+# Binary outputs
+*.o
+*.obj
+*.lo
+*.la
+*.a
+*.lib
+*.so
+*.dylib
+*.dll
+*.exe
+*.out
+*.app
+*.bin
+
+# Debug/profiling
+*.pdb
+*.dSYM/
+*.gcno
+*.gcda
+*.profraw
+*.profdata
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyd
+*.egg-info/
+.eggs/
+.venv/
+venv/
+.env
+dist/
+
+# Logs/temp
+tmp/
+*.log
+*.tmp
+*.swp
+*.swo
+.cache/
+.pytest_cache/
+
+# PTODSL JIT / msprof simulator artifacts
+.ptodsl_jit/
+.ptodsl_cache/
+msprof_res/
+ptodsl/examples/jit/.cache/
+ptodsl/examples/jit/msprof_res/
+
+# Remote/NPU validation artifacts
+/payload/
+/payload.tgz
+/payload_local*/
+/payload_local*.tgz
+/remote_npu_validation_results*.tsv
+/npu_validation/
+test/samples/**/npu_validation/
+!test/samples/**/npu_validation/
+test/samples/**/npu_validation/*
+!test/samples/**/npu_validation/golden.py
+!test/samples/**/npu_validation/*/
+!test/samples/**/npu_validation/*/golden.py
+/tmp_gen*
+
+# IDE/editor
+.vscode/
+.idea/
+*.iml
+.DS_Store
+.ipynb_checkpoints/
+*.orig
+
+# Local workspace
+.planning/
+.work/
+.local/

@@ -13,34 +13,31 @@
 #
 # Required environment variables:
 #   PTO_SOURCE_DIR  - Path to PTO source directory
-#   PTO_BUILD_DIR   - Path to PTO build directory
-#   LLVM_BUILD_DIR  - Path to LLVM build directory
-#   PTO_INSTALL_DIR - Path to PTO install directory
+#   PTOAS_BIN       - Exact ptoas entrypoint under test
 
-set -e
+set -euo pipefail
 
 # Validate required environment variables
-for var in PTO_SOURCE_DIR PTO_BUILD_DIR LLVM_BUILD_DIR PTO_INSTALL_DIR; do
-  if [ -z "${!var}" ]; then
+for var in PTO_SOURCE_DIR PTOAS_BIN; do
+  if [ -z "${!var:-}" ]; then
     echo "Error: $var environment variable is not set" >&2
     exit 1
   fi
 done
 
-# Setup environment
-export PATH="${PTO_BUILD_DIR}/tools/ptoas:${PATH}"
-export PYTHONPATH="${LLVM_BUILD_DIR}/tools/mlir/python_packages/mlir_core:${PTO_INSTALL_DIR}:${PYTHONPATH}"
-export LD_LIBRARY_PATH="${LLVM_BUILD_DIR}/lib:${PTO_INSTALL_DIR}/lib:${LD_LIBRARY_PATH}"
-export DYLD_LIBRARY_PATH="${LLVM_BUILD_DIR}/lib:${PTO_INSTALL_DIR}/lib:${DYLD_LIBRARY_PATH}"
-
+if [ ! -x "${PTOAS_BIN}" ]; then
+  echo "Error: PTOAS_BIN is not executable: ${PTOAS_BIN}" >&2
+  exit 1
+fi
 echo "Testing ptoas CLI..."
-which ptoas
+echo "${PTOAS_BIN}"
 
 echo "Checking ptoas version..."
-VERSION_OUTPUT="$(ptoas --version | tr -d '\r')"
+VERSION_OUTPUT="$("${PTOAS_BIN}" --version | tr -d '\r')"
 echo "$VERSION_OUTPUT"
-if [ -n "${PTOAS_VERSION:-}" ]; then
-  EXPECTED_VERSION_OUTPUT="ptoas ${PTOAS_VERSION}"
+EXPECTED_PTOAS_CLI_VERSION="${PTOAS_CLI_VERSION:-${PTOAS_VERSION:-}}"
+if [ -n "${EXPECTED_PTOAS_CLI_VERSION}" ]; then
+  EXPECTED_VERSION_OUTPUT="ptoas ${EXPECTED_PTOAS_CLI_VERSION}"
   if [ "${VERSION_OUTPUT}" != "${EXPECTED_VERSION_OUTPUT}" ]; then
     echo "Error: expected '${EXPECTED_VERSION_OUTPUT}', got '${VERSION_OUTPUT}'" >&2
     exit 1
@@ -53,14 +50,14 @@ fi
 echo "Testing MatMul sample..."
 cd "${PTO_SOURCE_DIR}/test/samples/MatMul/"
 python ./tmatmulk.py > ./tmatmulk.pto
-ptoas ./tmatmulk.pto -o ./tmatmulk.cpp
+"${PTOAS_BIN}" ./tmatmulk.pto -o ./tmatmulk.cpp
 echo "MatMul test passed"
 
 # Test Abs sample
 echo "Testing Abs sample..."
 cd "${PTO_SOURCE_DIR}/test/samples/Abs/"
 python ./abs.py > ./abs.pto
-ptoas --enable-insert-sync ./abs.pto -o ./abs.cpp
+"${PTOAS_BIN}" --enable-insert-sync ./abs.pto -o ./abs.cpp
 echo "Abs test passed"
 
 echo "All ptoas CLI tests passed!"

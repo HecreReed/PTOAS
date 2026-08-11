@@ -1,0 +1,29 @@
+// Copyright (c) 2026 Huawei Technologies Co., Ltd.
+// This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+// CANN Open Software License Agreement Version 2.0 (the "License").
+// Please refer to the License for details. You may not use this file except in compliance with the License.
+// THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+// INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+// See LICENSE in the root of the software repository for the full text of the License.
+
+// RUN: ( mkdir -p %T && ptoas --pto-arch=a5 --pto-backend=vpto %s -o %t --mlir-print-ir-after=convert-func-to-llvm 2>&1 || true ) | FileCheck %s
+
+module attributes {pto.target_arch = "a5", pto.kernel_kind = #pto.kernel_kind<cube>} {
+  func.func @load_cbuf_to_cb_2dv2_control() attributes {pto.kernel} {
+    %c0 = arith.constant 0 : i64
+    %c2 = arith.constant 2 : i64
+    %c3 = arith.constant 3 : i64
+    %c4 = arith.constant 4 : i64
+    %c5 = arith.constant 5 : i64
+    %c6 = arith.constant 6 : i64
+    %src = pto.castptr %c0 : i64 -> !pto.ptr<f16, l1>
+    %dst = pto.castptr %c0 : i64 -> !pto.ptr<f16, l0b>
+
+    pto.load_cbuf_to_cb %src, %dst, %c0, %c2, %c3, %c4, %c5, %c6 {transpose = true}
+      : !pto.ptr<f16, l1>, !pto.ptr<f16, l0b>, i64, i64, i64, i64, i64, i64
+    return
+  }
+}
+
+// CHECK-LABEL: llvm.func @load_cbuf_to_cb_2dv2_control_mix_aic
+// CHECK: llvm.call @llvm.hivm.LOAD.L1.TO.L0B.2Dv2.f16

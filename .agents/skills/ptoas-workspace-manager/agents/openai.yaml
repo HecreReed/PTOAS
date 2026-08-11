@@ -1,0 +1,4 @@
+interface:
+  display_name: "PTOAS Workspace Manager"
+  short_description: "Create and safely retire isolated PTOAS development workspaces"
+  default_prompt: "Create or retire a PTOAS feature workspace with isolated Python and build state."

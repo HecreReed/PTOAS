@@ -1,0 +1,30 @@
+// RUN: ptoas --pto-arch=a5 --pto-backend=vpto --emit-vpto --mlir-print-ir-after=vpto-normalize-container %s -o /dev/null 2>&1 | FileCheck %s --check-prefix=MAIN
+// RUN: ptoas --pto-arch=a5 --pto-backend=vpto --emit-vpto --mlir-print-ir-after=vpto-ptr-normalize %s -o /dev/null 2>&1 | FileCheck %s --check-prefix=VPTO
+
+module attributes {pto.target_arch = "a5", pto.kernel_kind = #pto.kernel_kind<vector>} {
+  func.func @kernel(%arg0: i32) attributes { pto.tilelang.instance } {
+    %0 = func.call @__tl_inline_add1_i32(%arg0) : (i32) -> i32
+    func.call @__tl_inline_sink_i32(%0) : (i32) -> ()
+    return
+  }
+
+  func.func private @__tl_inline_add1_i32(%x: i32) -> i32 attributes { pto.tilelang.inline_proc } {
+    %c1 = arith.constant 1 : i32
+    %v = arith.addi %x, %c1 : i32
+    return %v : i32
+  }
+
+  func.func private @__tl_inline_sink_i32(%x: i32) attributes { pto.tilelang.inline_proc } {
+    %c2 = arith.constant 2 : i32
+    %t = arith.addi %x, %c2 : i32
+    return
+  }
+}
+
+// MAIN: // -----// IR Dump After
+// MAIN-SAME: (vpto-normalize-container)
+// MAIN: func.func @kernel
+
+// VPTO: // -----// IR Dump After
+// VPTO-SAME: (vpto-ptr-normalize)
+// VPTO: func.func @kernel

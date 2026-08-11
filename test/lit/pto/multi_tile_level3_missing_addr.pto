@@ -1,0 +1,33 @@
+// Copyright (c) 2026 Huawei Technologies Co., Ltd.
+// This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+// CANN Open Software License Agreement Version 2.0 (the "License").
+// Please refer to the License for details. You may not use this file except in compliance with the License.
+// THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+// INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+// See LICENSE in the root of the software repository for the full text of the License.
+
+// RUN: not ptoas --pto-level=level3 --pto-arch=a5 %s 2>&1 | FileCheck %s
+
+// In level3 automatic address planning is unavailable, so multi-buffer slots
+// have no physical addresses unless the caller provides a base `addr`. Reject
+// the op instead of silently collapsing every slot onto one memref.
+
+module {
+  func.func @l3_missing_addr(
+      %gm0 : !pto.partition_tensor_view<16x16xf16>) attributes {pto.entry} {
+    %c0 = arith.constant 0 : index
+
+    %mb = pto.alloc_multi_tile
+        : !pto.multi_tile_buf<vec, 16x16xf16, count=2>
+
+    %s0 = pto.multi_tile_get %mb[%c0]
+        : !pto.multi_tile_buf<vec, 16x16xf16, count=2>
+       -> !pto.tile_buf<vec, 16x16xf16>
+
+    pto.tload ins(%gm0 : !pto.partition_tensor_view<16x16xf16>)
+              outs(%s0  : !pto.tile_buf<vec, 16x16xf16>)
+    return
+  }
+}
+
+// CHECK: error: pto.alloc_multi_tile requires a base 'addr' operand when --pto-level=level3

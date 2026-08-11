@@ -1,0 +1,16 @@
+// RUN: not ptoas --pto-arch a5 %s 2>&1 | FileCheck %s
+
+module attributes {"pto.device-spec" = "Ascend950"} {
+  func.func @invalid_prequant_mat_source() {
+    %c0 = arith.constant 0 : index
+    %pre = arith.constant 7 : i64
+    %src = pto.alloc_tile : !pto.tile_buf<loc=mat, dtype=f16, rows=32, cols=32, v_row=32, v_col=32, blayout=row_major, slayout=col_major, fractal=512, pad=0>
+    %dst = pto.alloc_tile : !pto.tile_buf<loc=left, dtype=f16, rows=32, cols=32, v_row=32, v_col=32, blayout=col_major, slayout=row_major, fractal=512, pad=0>
+
+    pto.textract ins(%src, %c0, %c0, %pre : !pto.tile_buf<loc=mat, dtype=f16, rows=32, cols=32, v_row=32, v_col=32, blayout=row_major, slayout=col_major, fractal=512, pad=0>, index, index, i64)
+                 outs(%dst : !pto.tile_buf<loc=left, dtype=f16, rows=32, cols=32, v_row=32, v_col=32, blayout=col_major, slayout=row_major, fractal=512, pad=0>)
+    return
+  }
+}
+
+// CHECK: error: 'pto.textract' op expects preQuantScalar form to use loc=acc src

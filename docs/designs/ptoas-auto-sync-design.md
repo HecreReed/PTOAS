@@ -84,7 +84,7 @@
 | 字段 | 类型 | 作用 |
 | --- | --- | --- |
 | `baseBuffer` | `Value` | 当前 op 直接看到的 SSA buffer（可能是 view/cast 链顶端） |
-| `rootBuffer` | `Value` | 静态可知的最根缓冲区（`alloc_tile` / kernel arg / `memref.alloc`） |
+| `rootBuffer` | `Value` | 静态可知的最根缓冲区（`alloc_tile` / `alloc_multi_tile` / kernel ptr arg） |
 | `scope` | `pto::AddressSpace` | 地址空间（GM/MAT/VEC/ACC/LEFT/RIGHT 等） |
 | `baseAddresses` | `SmallVector<uint64_t>` | 已知的偏移列表，配合 `allocateSize` 做精确区间重叠 |
 | `allocateSize` | `uint64_t` | 字节大小 |
@@ -199,8 +199,8 @@ MLIR op，最终生成 `pto::SetFlagOp` / `pto::WaitFlagOp` / `pto::BarrierOp`�
 - 主要逻辑：
   1. `UpdateKernelArgMemInfo()`：把 kernel 参数登记为 GM root buffer。
   2. `RecursionIR(&func.getBody())`：前序遍历 region：
-     - `pto::AllocTileOp` / `DeclareTileMemRefOp` / `PointerCastOp` /
-       `memref::AllocOp` 经 `Update*MemInfo` 写入 `buffer2MemInfoMap_`。
+     - `pto::AllocTileOp` / `pto::AllocMultiTileOp` / `pto::DeclareTileOp`
+       经 `Update*MemInfo` 写入 `buffer2MemInfoMap_`。
      - View / Subview / Cast / Mov 调 `UpdateAliasBufferInfo(result, source)`，
        把派生 buffer 的 `BaseMemInfo` 链回到原 root。
      - `scf::ForOp` / `WhileOp` / `IfOp` / `YieldOp` 经 `UpdateForOpInfo` /
@@ -375,7 +375,7 @@ hazard 判定按三类关系展开：
 
 命中后处理规则很直接：同 pipe 插 `barrier`，跨 pipe 插 `set/wait`。
 
-### 3.1 alias 到底怎么判
+### 5.1 alias 到底怎么判
 
 当前实现不是“强证明式 AA”，而是 correctness-first 的 may-alias 规则：
 
@@ -386,7 +386,7 @@ hazard 判定按三类关系展开：
 
 这套规则在信息不足时会偏保守，但不会牺牲正确性。后续会继续补强动态 shape/offset 场景下的精细分析。
 
-### 3.2 例子：`[V][V][MTE3]`
+### 5.2 例子：`[V][V][MTE3]`
 
 两个 `V` 在语义上可能写的是同一个 root 下的两个不重叠 subview。  
 如果静态阶段能拿到精确 offset/size，系统会判不重叠。  
@@ -396,9 +396,9 @@ hazard 判定按三类关系展开：
 
 ---
 
-## 4. 同步插入：线性、分支、循环
+## 6. 同步插入：线性、分支、循环
 
-### 4.1 线性序列
+### 6.1 线性序列
 
 在线性序列下，算法是一个双层遍历：
 
@@ -450,7 +450,7 @@ hazard 判定按三类关系展开：
 
 这就是 `syncIndex` 的价值：把“同步链条是否真正闭合”编码成可判定状态，避免只按 pipe 粗粒度去重。
 
-### 4.2 先做一件事：把控制流“拉直”
+### 6.2 先做一件事：把控制流“拉直”
 
 在同步分析前，`PTOIRTranslator` 会先把结构化控制流（`scf.if/scf.for/scf.while`）转换成一维 `SyncIR` 数组。  
 这样做不是为了简化语义，而是为了统一扫描实现：核心算法是“对每个 `now` 做反向扫描”。
@@ -520,7 +520,7 @@ flowchart LR
 
 换句话说，数组负责承载顺序，`beginId/branchId/endId` 负责恢复语义边界。两者配合后，算法既能线性实现，也不会丢失控制流语义。
 
-### 4.3 if/else
+### 6.3 if/else
 
 if/else 不是拍平后线性扫完就结束，而是在遇到 `IF_END` 时递归进入 then/else 两段，分别计算同步状态，再合并。
 
@@ -607,7 +607,7 @@ flowchart LR
   C -. "MoveSyncState 仅在可配对时移动" .-> SB2
 ```
 
-### 4.4 loop 回边
+### 6.4 loop 回边
 
 loop 的难点在于“跨迭代依赖”无法通过单次线性扫描直接识别。  
 当前实现在 `LOOP_END` 触发回边分析，大体分两步：
@@ -913,9 +913,9 @@ full-carry:
 
 ---
 
-## 5. event id 分配：先保正确，再做生命周期分配
+## 7. event id 分配：先保正确，再做生命周期分配
 
-### 5.1 首轮生命周期分配算法
+### 7.1 首轮生命周期分配算法
 
 分配时先按 `(srcPipe, dstPipe)` 分池，不同方向互不争用。
 
@@ -932,14 +932,14 @@ full-carry:
 - `B=[35,50]` 与 A 不重叠，可以继续用 `id0`
 - `C=[20,40]` 与 A 重叠，`id0` 冲突，只能换别的 id
 
-### 5.2 回边为什么看起来“特殊”
+### 7.2 回边为什么看起来“特殊”
 
 实现上有两个关键细节：
 
 1. 头尾补偿 set/wait 不是分析阶段生成的，而是在 `SyncEventIdAllocation` 里“分到某个 id 后”追加。
 2. 追加出来的补偿同步，不会再单独跑一次选 id，而是直接继承这次分到的同一个 id。
 
-### 5.3 回边默认按全函数生命周期判冲突的原因
+### 7.3 回边默认按全函数生命周期判冲突的原因
 
 这个策略看起来偏保守，但与回边语义一致：
 
@@ -947,7 +947,7 @@ full-carry:
 2. 默认补偿同步放在函数头尾，生命周期天然被拉长。
 3. 因此先用更大窗口保证不串扰。
 
-### 5.4 回边例子（仅保留基础分配规则）
+### 7.4 回边例子（仅保留基础分配规则）
 
 以单个回边同步对为例：
 
@@ -957,7 +957,7 @@ full-carry:
 
 ---
 
-## 6. 线性序列的形式化证明（简版）
+## 8. 线性序列的形式化证明（简版）
 
 设线性指令序列为 \(I_1,\dots,I_n\)，每条指令有读集 \(R_k\)、写集 \(W_k\)、pipe \(P(k)\)。  
 定义 hazard：
@@ -980,7 +980,7 @@ H(i,j),\ i<j
 
 ---
 
-## 7. 结论
+## 9. 结论
 
 可以归纳为一句话：
 

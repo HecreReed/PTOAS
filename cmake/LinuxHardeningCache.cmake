@@ -10,17 +10,25 @@
 # This cache file is intended to be passed via `cmake -C ...` so release and
 # delivery builds inherit the same compiler options that codecheck expects.
 
+foreach(_flag_var CMAKE_C_FLAGS CMAKE_CXX_FLAGS)
+  set(_flag_value "${${_flag_var}}")
+  foreach(_hardening_flag
+      -D_FORTIFY_SOURCE=2
+      -fstack-protector-strong
+      -ftrapv)
+    if(NOT " ${_flag_value} " MATCHES "(^| )${_hardening_flag}( |$)")
+      string(APPEND _flag_value " ${_hardening_flag}")
+    endif()
+  endforeach()
+  string(STRIP "${_flag_value}" _flag_value)
+  set(${_flag_var} "${_flag_value}" CACHE STRING "Linux hardening flags" FORCE)
+endforeach()
+
 foreach(_flag_var
     CMAKE_EXE_LINKER_FLAGS
     CMAKE_SHARED_LINKER_FLAGS
     CMAKE_MODULE_LINKER_FLAGS)
   set(_flag_value "${${_flag_var}}")
-  # Strip any stale fortify_marker flags left over from a cached CMakeCache.txt
-  # that was created on a different CI image (different build base path).
-  # The correct fortify_marker path is re-added below from the current
-  # PTOAS_FORTIFY_MARKER_OBJECT.
-  string(REGEX REPLACE "(^| )-Wl,-u,ptoas_fortify_marker( |$)" " " _flag_value "${_flag_value}")
-  string(REGEX REPLACE "(^| )[^ ]*fortify_marker[.]o( |$)" " " _flag_value "${_flag_value}")
   foreach(_hardening_flag
       -Wl,-z,relro
       -Wl,-z,now)
@@ -31,32 +39,3 @@ foreach(_flag_var
   string(STRIP "${_flag_value}" _flag_value)
   set(${_flag_var} "${_flag_value}" CACHE STRING "Linux hardening linker flags" FORCE)
 endforeach()
-
-# Prefer the environment variable so a stale PTOAS_FORTIFY_MARKER_OBJECT
-# cached from a different CI image (pointing at a non-existent path) is
-# replaced by the current build's marker object.
-if(DEFINED ENV{PTOAS_FORTIFY_MARKER_OBJECT})
-  set(PTOAS_FORTIFY_MARKER_OBJECT "$ENV{PTOAS_FORTIFY_MARKER_OBJECT}")
-endif()
-
-if(DEFINED PTOAS_FORTIFY_MARKER_OBJECT AND EXISTS "${PTOAS_FORTIFY_MARKER_OBJECT}")
-  foreach(_flag_var
-      CMAKE_EXE_LINKER_FLAGS
-      CMAKE_SHARED_LINKER_FLAGS
-      CMAKE_MODULE_LINKER_FLAGS)
-    set(_flag_value "${${_flag_var}}")
-
-    string(FIND "${_flag_value}" "-Wl,-u,ptoas_fortify_marker" _marker_symbol_pos)
-    if(_marker_symbol_pos EQUAL -1)
-      string(APPEND _flag_value " -Wl,-u,ptoas_fortify_marker")
-    endif()
-
-    string(FIND "${_flag_value}" "${PTOAS_FORTIFY_MARKER_OBJECT}" _marker_object_pos)
-    if(_marker_object_pos EQUAL -1)
-      string(APPEND _flag_value " ${PTOAS_FORTIFY_MARKER_OBJECT}")
-    endif()
-
-    string(STRIP "${_flag_value}" _flag_value)
-    set(${_flag_var} "${_flag_value}" CACHE STRING "Linux hardening linker flags" FORCE)
-  endforeach()
-endif()

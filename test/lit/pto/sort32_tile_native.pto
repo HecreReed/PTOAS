@@ -1,0 +1,32 @@
+// Copyright (c) 2026 Huawei Technologies Co., Ltd.
+// This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+// CANN Open Software License Agreement Version 2.0 (the "License").
+// Please refer to the License for details. You may not use this file except in compliance with the License.
+// THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+// INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+// See LICENSE in the root of the software repository for the full text of the License.
+
+// RUN: ptoas --pto-level=level3 --pto-arch=a5 --mlir-print-ir-after=pto-resolve-reserved-buffers %s -o /dev/null 2>&1 | FileCheck %s --check-prefix=NATIVE
+// RUN: ptoas --pto-level=level3 --pto-arch=a3 --enable-insert-sync %s | FileCheck %s --check-prefix=EMITC
+
+module {
+  func.func private @tsort32_arg(%src: !pto.tile_buf<vec, 1x32xf16>, %idx: !pto.tile_buf<vec, 1x32xui32>, %dst: !pto.tile_buf<vec, 1x64xf16>) {
+    pto.tsort32 ins(%src, %idx : !pto.tile_buf<vec, 1x32xf16>, !pto.tile_buf<vec, 1x32xui32>) outs(%dst : !pto.tile_buf<vec, 1x64xf16>)
+    return
+  }
+  func.func private @tsort32_tmp_arg(%src: !pto.tile_buf<vec, 1x32xf16>, %idx: !pto.tile_buf<vec, 1x32xui32>, %tmp: !pto.tile_buf<vec, 1x64xf16>, %dst: !pto.tile_buf<vec, 1x64xf16>) {
+    pto.tsort32 ins(%src, %idx, %tmp : !pto.tile_buf<vec, 1x32xf16>, !pto.tile_buf<vec, 1x32xui32>, !pto.tile_buf<vec, 1x64xf16>) outs(%dst : !pto.tile_buf<vec, 1x64xf16>)
+    return
+  }
+}
+
+// NATIVE-LABEL: @tsort32_arg
+// NATIVE: pto.tsort32
+// NATIVE-LABEL: @tsort32_tmp_arg
+// NATIVE: pto.tsort32
+// NATIVE-NOT: memref<
+
+// EMITC-LABEL: tsort32_arg(
+// EMITC: TSORT32(
+// EMITC-LABEL: tsort32_tmp_arg(
+// EMITC: TSORT32(

@@ -33,16 +33,18 @@ namespace pto {
 
 class MemScopeInferAndPropagateHelper {
 public:
-    LogicalResult Run(Value operand, const AddressSpaceAttr& targetMemScope);
+  LogicalResult Run(Value operand, const AddressSpaceAttr &targetMemScope);
 
 private:
-    /// Propagate the memory scope change to users of the value.
-    LogicalResult propagateMemScopeToUsers(Value val);
+  /// Propagate the memory scope change to users of the value.
+  LogicalResult propagateMemScopeToUsers(Value val);
 
-    /// Set memory scope for the root alloc op.
-    void setMemRefAllocScope(memref::AllocOp op, const AddressSpaceAttr& newScope);
-    /// Set memory scope for the block argument.
-    void setBlockArgumentScope(BlockArgument operand, const AddressSpaceAttr& targetMemScope);
+  /// Set memory scope for the root alloc op.
+  void setMemRefAllocScope(memref::AllocOp op,
+                           const AddressSpaceAttr &newScope);
+  /// Set memory scope for the block argument.
+  void setBlockArgumentScope(BlockArgument operand,
+                             const AddressSpaceAttr &targetMemScope);
 };
 
 /// Infer, propagate, and set memory scope information to MmadL1Op.

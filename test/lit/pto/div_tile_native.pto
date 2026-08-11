@@ -1,0 +1,60 @@
+// Copyright (c) 2026 Huawei Technologies Co., Ltd.
+// This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+// CANN Open Software License Agreement Version 2.0 (the "License").
+// Please refer to the License for details. You may not use this file except in compliance with the License.
+// THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+// INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+// See LICENSE in the root of the software repository for the full text of the License.
+
+// RUN: ptoas --pto-level=level3 --pto-arch=a5 \
+// RUN:   --mlir-print-ir-after=pto-resolve-reserved-buffers %s -o /dev/null 2>&1 \
+// RUN:   | FileCheck %s --check-prefix=NATIVE
+// RUN: ptoas --pto-level=level3 --pto-arch=a3 --enable-insert-sync %s \
+// RUN:   | FileCheck %s --check-prefix=EMITC
+
+module {
+  func.func private @tdiv_arg(
+      %src0: !pto.tile_buf<vec, 16x16xf32>,
+      %src1: !pto.tile_buf<vec, 16x16xf32>,
+      %dst: !pto.tile_buf<vec, 16x16xf32>) {
+    pto.tdiv ins(%src0, %src1 : !pto.tile_buf<vec, 16x16xf32>, !pto.tile_buf<vec, 16x16xf32>)
+             outs(%dst : !pto.tile_buf<vec, 16x16xf32>)
+             {precisionType = #pto<div_precision high_precision>}
+    return
+  }
+
+  func.func private @tdivs_tile_scalar_arg(
+      %src: !pto.tile_buf<vec, 16x16xf32>,
+      %scalar: f32,
+      %dst: !pto.tile_buf<vec, 16x16xf32>) {
+    pto.tdivs ins(%src, %scalar : !pto.tile_buf<vec, 16x16xf32>, f32)
+              outs(%dst : !pto.tile_buf<vec, 16x16xf32>)
+              {precisionType = #pto<div_precision high_precision>}
+    return
+  }
+
+  func.func private @tdivs_scalar_tile_arg(
+      %scalar: f32,
+      %src: !pto.tile_buf<vec, 16x16xf32>,
+      %dst: !pto.tile_buf<vec, 16x16xf32>) {
+    pto.tdivs ins(%scalar, %src : f32, !pto.tile_buf<vec, 16x16xf32>)
+              outs(%dst : !pto.tile_buf<vec, 16x16xf32>)
+              {precisionType = #pto<div_precision high_precision>}
+    return
+  }
+}
+
+// NATIVE-LABEL: func.func private @tdiv_arg(
+// NATIVE: pto.tdiv ins(%arg0, %arg1 : !pto.tile_buf<vec, 16x16xf32>, !pto.tile_buf<vec, 16x16xf32>) outs(%arg2 : !pto.tile_buf<vec, 16x16xf32>) {precisionType = #pto<div_precision high_precision>}
+// NATIVE-LABEL: func.func private @tdivs_tile_scalar_arg(
+// NATIVE: pto.tdivs ins(%arg0, %arg1 : !pto.tile_buf<vec, 16x16xf32>, f32) outs(%arg2 : !pto.tile_buf<vec, 16x16xf32>) {precisionType = #pto<div_precision high_precision>}
+// NATIVE-LABEL: func.func private @tdivs_scalar_tile_arg(
+// NATIVE: pto.tdivs ins(%arg0, %arg1 : f32, !pto.tile_buf<vec, 16x16xf32>) outs(%arg2 : !pto.tile_buf<vec, 16x16xf32>) {precisionType = #pto<div_precision high_precision>}
+// NATIVE-NOT: memref<
+
+// EMITC-LABEL: tdiv_arg(
+// EMITC: TDIV<pto::DivAlgorithm::HIGH_PRECISION>(
+// EMITC-LABEL: tdivs_tile_scalar_arg(
+// EMITC: TDIVS(
+// EMITC-LABEL: tdivs_scalar_tile_arg(
+// EMITC: TDIVS(

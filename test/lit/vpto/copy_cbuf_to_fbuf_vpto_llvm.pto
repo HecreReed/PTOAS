@@ -1,0 +1,18 @@
+// RUN: ( mkdir -p %T && ptoas --pto-arch=a5 --pto-backend=vpto %s -o %t --mlir-print-ir-after=convert-func-to-llvm 2>&1 || true ) | FileCheck %s
+
+module attributes {pto.target_arch = "a5", pto.kernel_kind = #pto.kernel_kind<cube>} {
+  func.func @copy_cbuf_to_fbuf_basic() attributes {pto.kernel} {
+    %c0 = arith.constant 0 : i64
+    %c2 = arith.constant 2 : i64
+    %c4 = arith.constant 4 : i64
+    %src = pto.castptr %c0 : i64 -> !pto.ptr<ui64, l1>
+    %dst = pto.castptr %c0 : i64 -> !pto.ptr<ui64, fb>
+
+    pto.copy_cbuf_to_fbuf %src, %dst, %c2, %c4, %c0, %c0
+      : !pto.ptr<ui64, l1>, !pto.ptr<ui64, fb>, i64, i64, i64, i64
+    return
+  }
+}
+
+// CHECK-LABEL: llvm.func @copy_cbuf_to_fbuf_basic_mix_aic
+// CHECK: llvm.call @llvm.hivm.MOV.L1.TO.FB.v220

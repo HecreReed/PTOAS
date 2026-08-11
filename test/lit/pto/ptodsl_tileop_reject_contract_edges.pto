@@ -1,0 +1,104 @@
+// Copyright (c) 2026 Huawei Technologies Co., Ltd.
+// This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+// CANN Open Software License Agreement Version 2.0 (the "License").
+// Please refer to the License for details. You may not use this file except in compliance with the License.
+// THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+// INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+// See LICENSE in the root of the software repository for the full text of the License.
+
+// RUN: split-file %s %t
+// RUN: not ptoas --pto-arch=a5 --emit-pto-ir %t/result.pto -o - 2>&1 | FileCheck %s --check-prefix=RESULT
+// RUN: not ptoas --pto-arch=a5 --emit-pto-ir %t/record_event.pto -o - 2>&1 | FileCheck %s --check-prefix=RECORD-EVENT
+// RUN: not ptoas --pto-arch=a5 --emit-pto-ir %t/dynamic_flag.pto -o - 2>&1 | FileCheck %s --check-prefix=DYNAMIC-FLAG
+// RUN: not ptoas --pto-arch=a5 --emit-pto-ir %t/simt_metadata.pto -o - 2>&1 | FileCheck %s --check-prefix=SIMT-METADATA
+// RUN: not ptoas --pto-arch=a5 --emit-pto-ir %t/simt_scalar.pto -o - 2>&1 | FileCheck %s --check-prefix=SIMT-SCALAR
+// RUN: not ptoas --pto-arch=a5 --emit-pto-ir %t/mte.pto -o - 2>&1 | FileCheck %s --check-prefix=MTE
+// RUN: not ptoas --pto-arch=a5 --emit-pto-ir %t/high_level_tile.pto -o - 2>&1 | FileCheck %s --check-prefix=HIGH-LEVEL-TILE
+// RUN: not ptoas --pto-arch=a5 --emit-pto-ir %t/alloc_tile.pto -o - 2>&1 | FileCheck %s --check-prefix=ALLOC-TILE
+
+// RESULT: error: {{.*}}tileop helpers must not return values; write results through mutable Tile parameters
+// RECORD-EVENT: error: {{.*}}tileop helpers must not contain pipe synchronization
+// DYNAMIC-FLAG: error: {{.*}}tileop helpers must not contain pipe synchronization
+// SIMT-METADATA: error: {{.*}}tileop helpers must launch a @pto.simt helper instead of containing SIMT operations directly
+// SIMT-SCALAR: error: {{.*}}tileop helpers must launch a @pto.simt helper instead of containing SIMT operations directly
+// MTE: error: {{.*}}tileop helpers must not contain MTE data movement
+// HIGH-LEVEL-TILE: error: {{.*}}tileop helpers must not contain Tile allocation or high-level TileOps
+// ALLOC-TILE: error: {{.*}}tileop helpers must not contain Tile allocation or high-level TileOps
+
+//--- result.pto
+module attributes {pto.target_arch = "a5"} {
+  func.func private @result() -> i32 attributes {pto.tileop.helper} {
+    %mask = pto.pset_b32 "PAT_ALL" : !pto.mask<b32>
+    %one = arith.constant 1 : i32
+    return %one : i32
+  }
+}
+
+//--- record_event.pto
+module attributes {pto.target_arch = "a5"} {
+  func.func private @record_event() attributes {pto.tileop.helper} {
+    pto.record_event [#pto.pipe_event_type<TLOAD>, #pto.pipe_event_type<TVEC>, #pto.event<EVENT_ID0>]
+    return
+  }
+}
+
+//--- dynamic_flag.pto
+module attributes {pto.target_arch = "a5"} {
+  func.func private @dynamic_flag(%event_id: index) attributes {pto.tileop.helper} {
+    pto.set_flag_dyn [#pto.pipe<PIPE_MTE2>, #pto.pipe<PIPE_V>, %event_id]
+    return
+  }
+}
+
+//--- simt_metadata.pto
+module attributes {pto.target_arch = "a5"} {
+  func.func private @simt_metadata() attributes {pto.tileop.helper} {
+    %one = arith.constant 1 : i32
+    pto.store_vfsimt_info %one, %one, %one : i32, i32, i32
+    return
+  }
+}
+
+//--- simt_scalar.pto
+module attributes {pto.target_arch = "a5"} {
+  func.func private @simt_scalar() attributes {pto.tileop.helper} {
+    %zero = arith.constant 0 : i32
+    %value = pto.prmt %zero, %zero, %zero : i32, i32, i32 -> i32
+    return
+  }
+}
+
+//--- mte.pto
+module attributes {pto.target_arch = "a5"} {
+  func.func private @mte() attributes {pto.tileop.helper} {
+    %c0 = arith.constant 0 : i64
+    %c32 = arith.constant 32 : i64
+    %c128 = arith.constant 128 : i64
+    %src = pto.castptr %c0 : i64 -> !pto.ptr<f32, gm>
+    %dst = pto.castptr %c0 : i64 -> !pto.ptr<f32, ub>
+    pto.mte_gm_ub %src, %dst, %c0, %c128
+      nburst(%c32, %c128, %c128)
+      : !pto.ptr<f32, gm>, !pto.ptr<f32, ub>, i64, i64, i64, i64, i64
+    return
+  }
+}
+
+//--- high_level_tile.pto
+module attributes {pto.target_arch = "a5"} {
+  func.func private @high_level_tile(
+      %src: !pto.tile_buf<vec, 1x16xf32>,
+      %dst: !pto.tile_buf<vec, 1x16xf32>) attributes {pto.tileop.helper} {
+    pto.tadd ins(%src, %src : !pto.tile_buf<vec, 1x16xf32>,
+                              !pto.tile_buf<vec, 1x16xf32>)
+             outs(%dst : !pto.tile_buf<vec, 1x16xf32>)
+    return
+  }
+}
+
+//--- alloc_tile.pto
+module attributes {pto.target_arch = "a5"} {
+  func.func private @alloc_tile() attributes {pto.tileop.helper} {
+    %tile = pto.alloc_tile : !pto.tile_buf<vec, 1x16xf32>
+    return
+  }
+}

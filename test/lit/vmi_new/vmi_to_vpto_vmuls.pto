@@ -1,0 +1,73 @@
+// Copyright (c) 2026 Huawei Technologies Co., Ltd.
+// This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+// CANN Open Software License Agreement Version 2.0 (the "License").
+// Please refer to the License for details. You may not use this file except in compliance with the License.
+// THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+// INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+// See LICENSE in the root of the software repository for the full text of the License.
+
+// RUN: pto-test-opt %s -vmi-lower-unified-to-legacy -vmi-mask-granularity-assignment -vmi-layout-assignment -vmi-to-vpto | FileCheck %s
+
+module {
+  func.func @vmuls_f32_single(
+      %source: !pto.vmi.vreg<64xf32>,
+      %scalar: f32,
+      %mask: !pto.vmi.mask<64xpred>) -> !pto.vmi.vreg<64xf32> {
+    %result = pto.vmi.vmuls %source, %scalar, %mask
+        : !pto.vmi.vreg<64xf32>, f32, !pto.vmi.mask<64xpred>
+        -> !pto.vmi.vreg<64xf32>
+    return %result : !pto.vmi.vreg<64xf32>
+  }
+
+  func.func @vmuls_f32_multichunk(
+      %source: !pto.vmi.vreg<256xf32>,
+      %scalar: f32,
+      %mask: !pto.vmi.mask<256xpred>) -> !pto.vmi.vreg<256xf32> {
+    %result = pto.vmi.vmuls %source, %scalar, %mask
+        : !pto.vmi.vreg<256xf32>, f32, !pto.vmi.mask<256xpred>
+        -> !pto.vmi.vreg<256xf32>
+    return %result : !pto.vmi.vreg<256xf32>
+  }
+
+  func.func @vmuls_f32_deinterleaved(
+      %source: !pto.vmi.vreg<256xf32, #pto.vmi.layout<deinterleaved = 2>>,
+      %scalar: f32,
+      %mask: !pto.vmi.mask<256xb32, #pto.vmi.layout<deinterleaved = 2>>)
+      -> !pto.vmi.vreg<256xf32, #pto.vmi.layout<deinterleaved = 2>> {
+    %result = pto.vmi.vmuls %source, %scalar, %mask
+        : !pto.vmi.vreg<256xf32, #pto.vmi.layout<deinterleaved = 2>>,
+          f32,
+          !pto.vmi.mask<256xb32, #pto.vmi.layout<deinterleaved = 2>>
+        -> !pto.vmi.vreg<256xf32, #pto.vmi.layout<deinterleaved = 2>>
+    return %result
+        : !pto.vmi.vreg<256xf32, #pto.vmi.layout<deinterleaved = 2>>
+  }
+
+  func.func @vmuls_f32_tail(
+      %source: !pto.vmi.vreg<100xf32>,
+      %scalar: f32,
+      %mask: !pto.vmi.mask<100xpred>) -> !pto.vmi.vreg<100xf32> {
+    %result = pto.vmi.vmuls %source, %scalar, %mask
+        : !pto.vmi.vreg<100xf32>, f32, !pto.vmi.mask<100xpred>
+        -> !pto.vmi.vreg<100xf32>
+    return %result : !pto.vmi.vreg<100xf32>
+  }
+}
+
+// CHECK-LABEL: func.func @vmuls_f32_single(
+// CHECK: %[[SINGLE:.*]] = pto.vmuls {{.*}} : !pto.vreg<64xf32>, f32, !pto.mask<b32> -> !pto.vreg<64xf32>
+// CHECK: return %[[SINGLE]] : !pto.vreg<64xf32>
+
+// CHECK-LABEL: func.func @vmuls_f32_multichunk(
+// CHECK-COUNT-4: pto.vmuls {{.*}} : !pto.vreg<64xf32>, f32, !pto.mask<b32> -> !pto.vreg<64xf32>
+
+// CHECK-LABEL: func.func @vmuls_f32_deinterleaved(
+// CHECK-COUNT-4: pto.vmuls {{.*}} : !pto.vreg<64xf32>, f32, !pto.mask<b32> -> !pto.vreg<64xf32>
+
+// CHECK-LABEL: func.func @vmuls_f32_tail(
+// CHECK-COUNT-2: pto.vmuls {{.*}} : !pto.vreg<64xf32>, f32, !pto.mask<b32> -> !pto.vreg<64xf32>
+// CHECK-NOT: pto.vdup
+// CHECK-NOT: pto.vmul {{.*}} : !pto.vreg
+// CHECK-NOT: pto.vmi.
+// CHECK-NOT: !pto.vmi.
+// CHECK-NOT: unrealized_conversion_cast

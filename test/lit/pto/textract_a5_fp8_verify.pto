@@ -1,0 +1,24 @@
+// Copyright (c) 2026 Huawei Technologies Co., Ltd.
+// This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+// CANN Open Software License Agreement Version 2.0 (the "License").
+// Please refer to the License for details. You may not use this file except in compliance with the License.
+// THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+// INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+// See LICENSE in the root of the software repository for the full text of the License.
+// RUN: ptoas --pto-arch=a5 %s -o /dev/null
+
+module attributes {pto.target_arch = "a5"} {
+  func.func @textract_a5_fp8_mat_lr() attributes {pto.kernel_kind = #pto.kernel_kind<cube>} {
+    %c0 = arith.constant 0 : index
+    %src_a = pto.alloc_tile : !pto.tile_buf<loc=mat, dtype=f8E4M3FN, rows=1, cols=256, v_row=1, v_col=256, blayout=col_major, slayout=row_major, fractal=512, pad=0>
+    %dst_a = pto.alloc_tile : !pto.tile_buf<loc=left, dtype=f8E4M3FN, rows=1, cols=256, v_row=1, v_col=256, blayout=col_major, slayout=row_major, fractal=512, pad=0>
+    %src_b = pto.alloc_tile : !pto.tile_buf<loc=mat, dtype=f8E5M2, rows=256, cols=32, v_row=256, v_col=20, blayout=col_major, slayout=row_major, fractal=512, pad=0>
+    %dst_b = pto.alloc_tile : !pto.tile_buf<loc=right, dtype=f8E5M2, rows=256, cols=32, v_row=256, v_col=20, blayout=row_major, slayout=col_major, fractal=512, pad=0>
+
+    pto.textract ins(%src_a, %c0, %c0 : !pto.tile_buf<loc=mat, dtype=f8E4M3FN, rows=1, cols=256, v_row=1, v_col=256, blayout=col_major, slayout=row_major, fractal=512, pad=0>, index, index)
+                outs(%dst_a : !pto.tile_buf<loc=left, dtype=f8E4M3FN, rows=1, cols=256, v_row=1, v_col=256, blayout=col_major, slayout=row_major, fractal=512, pad=0>)
+    pto.textract ins(%src_b, %c0, %c0 : !pto.tile_buf<loc=mat, dtype=f8E5M2, rows=256, cols=32, v_row=256, v_col=20, blayout=col_major, slayout=row_major, fractal=512, pad=0>, index, index)
+                outs(%dst_b : !pto.tile_buf<loc=right, dtype=f8E5M2, rows=256, cols=32, v_row=256, v_col=20, blayout=row_major, slayout=col_major, fractal=512, pad=0>)
+    return
+  }
+}

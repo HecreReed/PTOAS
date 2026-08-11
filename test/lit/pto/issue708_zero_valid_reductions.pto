@@ -1,0 +1,86 @@
+// Copyright (c) 2026 Huawei Technologies Co., Ltd.
+// This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+// CANN Open Software License Agreement Version 2.0 (the "License").
+// Please refer to the License for details. You may not use this file except in compliance with the License.
+// THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+// INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+// See LICENSE in the root of the software repository for the full text of the License.
+
+// RUN: ptoas --pto-arch=a5 --emit-pto-ir %s 2>&1 | FileCheck %s
+
+// PyPTO's dual-AIV no-op replay zeroes every tile's valid region (0x0) on the
+// inactive lane. Row/col reduction and row-expand ops must accept that
+// fully-empty marker (the op writes no elements). One-sided empties remain
+// rejected -- see issue708_zero_valid_*_invalid.pto. The hardware Rv=0 no-op
+// guarantee is tracked separately in pto-isa#143.
+
+module attributes {"pto.device-spec" = "Ascend910B3"} {
+  // Row reduction (reduce over columns): verifyRowReductionValidRegion.
+  func.func @issue708_zero_valid_trowmax() attributes {pto.kernel_kind = #pto.kernel_kind<vector>} {
+    %src = pto.alloc_tile : !pto.tile_buf<loc=vec, dtype=f32, rows=16, cols=16, v_row=0, v_col=0, blayout=row_major, slayout=none_box, fractal=512, pad=0>
+    %tmp = pto.alloc_tile : !pto.tile_buf<loc=vec, dtype=f32, rows=16, cols=16, v_row=0, v_col=0, blayout=row_major, slayout=none_box, fractal=512, pad=0>
+    %dst = pto.alloc_tile : !pto.tile_buf<loc=vec, dtype=f32, rows=16, cols=1, v_row=0, v_col=0, blayout=col_major, slayout=none_box, fractal=512, pad=0>
+    pto.trowmax ins(%src, %tmp : !pto.tile_buf<loc=vec, dtype=f32, rows=16, cols=16, v_row=0, v_col=0, blayout=row_major, slayout=none_box, fractal=512, pad=0>, !pto.tile_buf<loc=vec, dtype=f32, rows=16, cols=16, v_row=0, v_col=0, blayout=row_major, slayout=none_box, fractal=512, pad=0>)
+                outs(%dst : !pto.tile_buf<loc=vec, dtype=f32, rows=16, cols=1, v_row=0, v_col=0, blayout=col_major, slayout=none_box, fractal=512, pad=0>)
+    return
+  }
+
+  // Row reduction (sum): same helper, exercised via trowsum.
+  func.func @issue708_zero_valid_trowsum() attributes {pto.kernel_kind = #pto.kernel_kind<vector>} {
+    %src = pto.alloc_tile : !pto.tile_buf<loc=vec, dtype=f32, rows=16, cols=128, v_row=0, v_col=0, blayout=row_major, slayout=none_box, fractal=512, pad=0>
+    %tmp = pto.alloc_tile : !pto.tile_buf<loc=vec, dtype=f32, rows=16, cols=128, v_row=0, v_col=0, blayout=row_major, slayout=none_box, fractal=512, pad=0>
+    %dst = pto.alloc_tile : !pto.tile_buf<loc=vec, dtype=f32, rows=16, cols=1, v_row=0, v_col=0, blayout=col_major, slayout=none_box, fractal=512, pad=0>
+    pto.trowsum ins(%src, %tmp : !pto.tile_buf<loc=vec, dtype=f32, rows=16, cols=128, v_row=0, v_col=0, blayout=row_major, slayout=none_box, fractal=512, pad=0>, !pto.tile_buf<loc=vec, dtype=f32, rows=16, cols=128, v_row=0, v_col=0, blayout=row_major, slayout=none_box, fractal=512, pad=0>)
+                outs(%dst : !pto.tile_buf<loc=vec, dtype=f32, rows=16, cols=1, v_row=0, v_col=0, blayout=col_major, slayout=none_box, fractal=512, pad=0>)
+    return
+  }
+
+  // Column reduction (reduce over rows): verifyColReductionValidRegion.
+  func.func @issue708_zero_valid_tcolmax() attributes {pto.kernel_kind = #pto.kernel_kind<vector>} {
+    %src = pto.alloc_tile : !pto.tile_buf<loc=vec, dtype=f32, rows=16, cols=8, v_row=0, v_col=0, blayout=row_major, slayout=none_box, fractal=512, pad=0>
+    %dst = pto.alloc_tile : !pto.tile_buf<loc=vec, dtype=f32, rows=1, cols=8, v_row=0, v_col=0, blayout=row_major, slayout=none_box, fractal=512, pad=0>
+    pto.tcolmax ins(%src : !pto.tile_buf<loc=vec, dtype=f32, rows=16, cols=8, v_row=0, v_col=0, blayout=row_major, slayout=none_box, fractal=512, pad=0>)
+                outs(%dst : !pto.tile_buf<loc=vec, dtype=f32, rows=1, cols=8, v_row=0, v_col=0, blayout=row_major, slayout=none_box, fractal=512, pad=0>)
+    return
+  }
+
+  func.func @issue708_zero_valid_tcolsum() attributes {pto.kernel_kind = #pto.kernel_kind<vector>} {
+    %src = pto.alloc_tile : !pto.tile_buf<loc=vec, dtype=f32, rows=16, cols=8, v_row=0, v_col=0, blayout=row_major, slayout=none_box, fractal=512, pad=0>
+    %dst = pto.alloc_tile : !pto.tile_buf<loc=vec, dtype=f32, rows=1, cols=8, v_row=0, v_col=0, blayout=row_major, slayout=none_box, fractal=512, pad=0>
+    pto.tcolsum ins(%src : !pto.tile_buf<loc=vec, dtype=f32, rows=16, cols=8, v_row=0, v_col=0, blayout=row_major, slayout=none_box, fractal=512, pad=0>)
+                outs(%dst : !pto.tile_buf<loc=vec, dtype=f32, rows=1, cols=8, v_row=0, v_col=0, blayout=row_major, slayout=none_box, fractal=512, pad=0>)
+    return
+  }
+
+  // Row expand (broadcast a per-row scalar across columns): TRowExpandOp::verify.
+  func.func @issue708_zero_valid_trowexpand() attributes {pto.kernel_kind = #pto.kernel_kind<vector>} {
+    %src = pto.alloc_tile : !pto.tile_buf<loc=vec, dtype=f32, rows=16, cols=1, v_row=0, v_col=0, blayout=col_major, slayout=none_box, fractal=512, pad=0>
+    %dst = pto.alloc_tile : !pto.tile_buf<loc=vec, dtype=f32, rows=16, cols=16, v_row=0, v_col=0, blayout=row_major, slayout=none_box, fractal=512, pad=0>
+    pto.trowexpand ins(%src : !pto.tile_buf<loc=vec, dtype=f32, rows=16, cols=1, v_row=0, v_col=0, blayout=col_major, slayout=none_box, fractal=512, pad=0>)
+                   outs(%dst : !pto.tile_buf<loc=vec, dtype=f32, rows=16, cols=16, v_row=0, v_col=0, blayout=row_major, slayout=none_box, fractal=512, pad=0>)
+    return
+  }
+
+  // Row-expand reduce-like (broadcast max): verifyTRowExpandReduceLikeOp.
+  func.func @issue708_zero_valid_trowexpandmax() attributes {pto.kernel_kind = #pto.kernel_kind<vector>} {
+    %src0 = pto.alloc_tile : !pto.tile_buf<loc=vec, dtype=f32, rows=16, cols=16, v_row=0, v_col=0, blayout=row_major, slayout=none_box, fractal=512, pad=0>
+    %src1 = pto.alloc_tile : !pto.tile_buf<loc=vec, dtype=f32, rows=16, cols=1, v_row=0, v_col=0, blayout=col_major, slayout=none_box, fractal=512, pad=0>
+    %dst = pto.alloc_tile : !pto.tile_buf<loc=vec, dtype=f32, rows=16, cols=16, v_row=0, v_col=0, blayout=row_major, slayout=none_box, fractal=512, pad=0>
+    pto.trowexpandmax ins(%src0, %src1 : !pto.tile_buf<loc=vec, dtype=f32, rows=16, cols=16, v_row=0, v_col=0, blayout=row_major, slayout=none_box, fractal=512, pad=0>, !pto.tile_buf<loc=vec, dtype=f32, rows=16, cols=1, v_row=0, v_col=0, blayout=col_major, slayout=none_box, fractal=512, pad=0>)
+                      outs(%dst : !pto.tile_buf<loc=vec, dtype=f32, rows=16, cols=16, v_row=0, v_col=0, blayout=row_major, slayout=none_box, fractal=512, pad=0>)
+    return
+  }
+}
+
+// CHECK-LABEL: func.func @issue708_zero_valid_trowmax
+// CHECK: pto.trowmax
+// CHECK-LABEL: func.func @issue708_zero_valid_trowsum
+// CHECK: pto.trowsum
+// CHECK-LABEL: func.func @issue708_zero_valid_tcolmax
+// CHECK: pto.tcolmax
+// CHECK-LABEL: func.func @issue708_zero_valid_tcolsum
+// CHECK: pto.tcolsum
+// CHECK-LABEL: func.func @issue708_zero_valid_trowexpand
+// CHECK: pto.trowexpand
+// CHECK-LABEL: func.func @issue708_zero_valid_trowexpandmax
+// CHECK: pto.trowexpandmax

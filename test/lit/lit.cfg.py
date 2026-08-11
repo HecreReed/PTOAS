@@ -40,12 +40,26 @@ config.test_source_root = os.path.dirname(__file__)
 # test_exec_root: The root path where tests should be run.
 config.test_exec_root = os.path.join(config.ptoir_obj_root, 'test/lit')
 config.ptoir_tools_dir = os.path.join(config.ptoir_obj_root, 'tools/ptoas')
+config.ptoir_test_tools_dir = os.path.join(config.ptoir_obj_root,
+                                           'tools/pto-test-opt')
 
 config.substitutions.append(('%PATH%', config.environment['PATH']))
 config.substitutions.append(('%shlibext', config.llvm_shlib_ext))
 
+if getattr(config, 'pto_enable_vfsim_costmodel', False):
+    config.available_features.add('vfsim-costmodel')
+
 llvm_config.with_system_environment(
-    ['HOME', 'INCLUDE', 'LIB', 'TMP', 'TEMP'])
+    ['HOME', 'INCLUDE', 'LIB', 'TMP', 'TEMP',
+     'ASCEND_HOME_PATH', 'ASCEND_OPP_PATH', 'ASCEND_AICPU_PATH',
+     'ASCEND_TOOLKIT_HOME', 'LD_LIBRARY_PATH', 'PYTHONPATH'])
+
+# Keep build-tree lit tests self-contained. The PTOAS build stages the complete
+# MLIR Python runtime together with generated PTO dialect modules and the PTO
+# extension under one build-tree Python root.
+if getattr(config, 'enable_bindings_python', False):
+    llvm_config.with_environment(
+        'PYTHONPATH', [config.ptoas_python_dir], append_path=True)
 
 llvm_config.use_default_substitutions()
 
@@ -57,9 +71,11 @@ config.excludes = ['Inputs', 'Examples', 'CMakeLists.txt', 'README.txt', 'LICENS
 # Tweak the PATH to include the tools dir.
 llvm_config.with_environment('PATH', config.llvm_tools_dir, append_path=True)
 
-tool_dirs = [config.ptoir_tools_dir, config.llvm_tools_dir]
+tool_dirs = [config.ptoir_tools_dir, config.ptoir_test_tools_dir,
+             config.llvm_tools_dir]
 tools = [
     'ptoas',
+    'pto-test-opt',
 ]
 
 llvm_config.add_tool_substitutions(tools, tool_dirs)

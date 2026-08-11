@@ -168,7 +168,7 @@ cmake --build build --parallel
 ```bash
 export PAYLOAD_ROOT=/tmp/ptoas_payload
 export TARGET_SOC_VERSION=Ascend910
-export PTO_ISA_COMMIT=893e4b00a826231e776539512b5b17f82fc11838
+export PTO_ISA_COMMIT=ce3262e3825a235f951917eeada30e52910b6a84
 
 rm -rf "$PAYLOAD_ROOT"
 mkdir -p "$PAYLOAD_ROOT/test/samples"
@@ -187,7 +187,7 @@ export PTOAS_BIN=$PWD/build/tools/ptoas/ptoas
 export PTOBC_BIN=$PWD/build/tools/ptobc/ptobc
 export PYTHON_BIN=/usr/bin/python3
 export PTOAS_OUT_DIR="$PAYLOAD_ROOT/test/samples"
-export PYTHONPATH="$LLVM_BUILD_DIR/tools/mlir/python_packages/mlir_core:$PTO_INSTALL_DIR:${PYTHONPATH:-}"
+export PYTHONPATH="$PTO_INSTALL_DIR:${PYTHONPATH:-}"
 export LD_LIBRARY_PATH="$LLVM_BUILD_DIR/lib:$PTO_INSTALL_DIR/lib:${LD_LIBRARY_PATH:-}"
 export SOC_VERSION="$TARGET_SOC_VERSION"
 
@@ -220,7 +220,7 @@ export STAGE=build
 export RUN_MODE=npu
 export SOC_VERSION="$TARGET_SOC_VERSION"
 export PTO_ISA_REPO=https://gitcode.com/cann/pto-isa.git
-export PTO_ISA_COMMIT=893e4b00a826231e776539512b5b17f82fc11838
+export PTO_ISA_COMMIT=ce3262e3825a235f951917eeada30e52910b6a84
 
 # 参照 CI 的做法，按目标 SoC 排除非匹配的 A3/A5 变体。
 A3_ONLY_CASES="partition5d,partition5d_dynamic,mrgsort,tmatmulk_autosync"

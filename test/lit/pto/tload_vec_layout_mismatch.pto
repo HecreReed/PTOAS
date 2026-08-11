@@ -1,0 +1,52 @@
+// RUN: not ptoas --pto-arch=a5 %s 2>&1 | FileCheck %s
+// Test: TLOAD.VEC layout validation for A5
+
+module {
+  // Case 1: DN layout (valid for tload)
+  func.func @tload_dn_valid(%ptr: !pto.ptr<f32>) {
+    %c0 = arith.constant 0 : index
+    %c1 = arith.constant 1 : index
+    %c64 = arith.constant 64 : index
+    
+    %tv = pto.make_tensor_view %ptr, shape = [%c1, %c1, %c1, %c1, %c64], strides = [%c64, %c64, %c64, %c64, %c1] : !pto.tensor_view<1x1x1x1x64xf32>
+    %pv = pto.partition_view %tv, offsets = [%c0, %c0, %c0, %c0, %c0], sizes = [%c1, %c1, %c1, %c1, %c64] : !pto.tensor_view<1x1x1x1x64xf32> -> !pto.partition_tensor_view<1x1x1x1x64xf32>
+    %dst = pto.alloc_tile : !pto.tile_buf<loc=vec, dtype=f32, rows=64, cols=1, v_row=64, v_col=1, blayout=col_major, slayout=none_box, fractal=512, pad=0>
+    
+    pto.tload ins(%pv : !pto.partition_tensor_view<1x1x1x1x64xf32>)
+              outs(%dst : !pto.tile_buf<loc=vec, dtype=f32, rows=64, cols=1, v_row=64, v_col=1, blayout=col_major, slayout=none_box, fractal=512, pad=0>)
+    return
+  }
+
+  // Case 2: NZ layout (valid for tload)
+  func.func @tload_nz_valid(%ptr: !pto.ptr<f32>) {
+    %c0 = arith.constant 0 : index
+    %c1 = arith.constant 1 : index
+    %c8 = arith.constant 8 : index
+    %c16 = arith.constant 16 : index
+    %c128 = arith.constant 128 : index
+    
+    %tv = pto.make_tensor_view %ptr, shape = [%c1, %c1, %c1, %c16, %c8], strides = [%c128, %c128, %c128, %c8, %c1] : !pto.tensor_view<1x1x1x16x8xf32>
+    %pv = pto.partition_view %tv, offsets = [%c0, %c0, %c0, %c0, %c0], sizes = [%c1, %c1, %c1, %c16, %c8] : !pto.tensor_view<1x1x1x16x8xf32> -> !pto.partition_tensor_view<1x1x1x16x8xf32>
+    %dst = pto.alloc_tile : !pto.tile_buf<loc=vec, dtype=f32, rows=16, cols=8, v_row=16, v_col=8, blayout=col_major, slayout=row_major, fractal=512, pad=0>
+    
+    pto.tload ins(%pv : !pto.partition_tensor_view<1x1x1x16x8xf32>)
+              outs(%dst : !pto.tile_buf<loc=vec, dtype=f32, rows=16, cols=8, v_row=16, v_col=8, blayout=col_major, slayout=row_major, fractal=512, pad=0>)
+    return
+  }
+
+  // Case 3: Invalid layout combination (row_major + row_major) - should fail
+  func.func @tload_invalid_layout(%ptr: !pto.ptr<f32>) {
+    %c0 = arith.constant 0 : index
+    %c1 = arith.constant 1 : index
+    %c64 = arith.constant 64 : index
+    
+    %tv = pto.make_tensor_view %ptr, shape = [%c1, %c1, %c1, %c1, %c64], strides = [%c64, %c64, %c64, %c64, %c1] : !pto.tensor_view<1x1x1x1x64xf32>
+    %pv = pto.partition_view %tv, offsets = [%c0, %c0, %c0, %c0, %c0], sizes = [%c1, %c1, %c1, %c1, %c64] : !pto.tensor_view<1x1x1x1x64xf32> -> !pto.partition_tensor_view<1x1x1x1x64xf32>
+    %dst = pto.alloc_tile : !pto.tile_buf<loc=vec, dtype=f32, rows=1, cols=64, v_row=1, v_col=64, blayout=row_major, slayout=row_major, fractal=512, pad=0>
+    
+    pto.tload ins(%pv : !pto.partition_tensor_view<1x1x1x1x64xf32>)
+              outs(%dst : !pto.tile_buf<loc=vec, dtype=f32, rows=1, cols=64, v_row=1, v_col=64, blayout=row_major, slayout=row_major, fractal=512, pad=0>)
+    return
+  }
+  // CHECK: expects A5 tload vec dst layout to be ND, DN, or NZ
+}

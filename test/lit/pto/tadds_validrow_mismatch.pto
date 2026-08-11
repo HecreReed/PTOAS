@@ -1,0 +1,60 @@
+// RUN: not ptoas --pto-arch=a5 %s 2>&1 | FileCheck %s
+// Test: TADDS ValidRow consistency - more test cases
+
+module {
+  // Case 1: src ValidRow=1, dst ValidRow=4 - should fail
+  func.func @tadds_row_1_to_4_fail() {
+    %src = pto.alloc_tile : !pto.tile_buf<loc=vec, dtype=f32, rows=4, cols=64, v_row=1, v_col=64, blayout=row_major, slayout=none_box, fractal=512, pad=0>
+    %dst = pto.alloc_tile : !pto.tile_buf<loc=vec, dtype=f32, rows=4, cols=64, v_row=4, v_col=64, blayout=row_major, slayout=none_box, fractal=512, pad=0>
+    %scalar = arith.constant 1.0 : f32
+
+    pto.tadds ins(%src, %scalar : !pto.tile_buf<loc=vec, dtype=f32, rows=4, cols=64, v_row=1, v_col=64, blayout=row_major, slayout=none_box, fractal=512, pad=0>, f32)
+              outs(%dst : !pto.tile_buf<loc=vec, dtype=f32, rows=4, cols=64, v_row=4, v_col=64, blayout=row_major, slayout=none_box, fractal=512, pad=0>)
+    return
+  }
+  // CHECK: expects src and dst to have the same valid_shape[0]
+
+  // Case 2: src ValidRow=3, dst ValidRow=2 - should fail
+  func.func @tadds_row_3_to_2_fail() {
+    %src = pto.alloc_tile : !pto.tile_buf<loc=vec, dtype=f32, rows=4, cols=64, v_row=3, v_col=64, blayout=row_major, slayout=none_box, fractal=512, pad=0>
+    %dst = pto.alloc_tile : !pto.tile_buf<loc=vec, dtype=f32, rows=4, cols=64, v_row=2, v_col=64, blayout=row_major, slayout=none_box, fractal=512, pad=0>
+    %scalar = arith.constant 1.0 : f32
+
+    pto.tadds ins(%src, %scalar : !pto.tile_buf<loc=vec, dtype=f32, rows=4, cols=64, v_row=3, v_col=64, blayout=row_major, slayout=none_box, fractal=512, pad=0>, f32)
+              outs(%dst : !pto.tile_buf<loc=vec, dtype=f32, rows=4, cols=64, v_row=2, v_col=64, blayout=row_major, slayout=none_box, fractal=512, pad=0>)
+    return
+  }
+
+  // Case 3: ValidCol mismatch - should fail  
+  func.func @tadds_col_mismatch_fail() {
+    %src = pto.alloc_tile : !pto.tile_buf<loc=vec, dtype=f32, rows=2, cols=64, v_row=2, v_col=32, blayout=row_major, slayout=none_box, fractal=512, pad=0>
+    %dst = pto.alloc_tile : !pto.tile_buf<loc=vec, dtype=f32, rows=2, cols=64, v_row=2, v_col=64, blayout=row_major, slayout=none_box, fractal=512, pad=0>
+    %scalar = arith.constant 1.0 : f32
+
+    pto.tadds ins(%src, %scalar : !pto.tile_buf<loc=vec, dtype=f32, rows=2, cols=64, v_row=2, v_col=32, blayout=row_major, slayout=none_box, fractal=512, pad=0>, f32)
+              outs(%dst : !pto.tile_buf<loc=vec, dtype=f32, rows=2, cols=64, v_row=2, v_col=64, blayout=row_major, slayout=none_box, fractal=512, pad=0>)
+    return
+  }
+
+  // Valid case 1: ValidRow=4, ValidCol=64
+  func.func @tadds_row4_valid() {
+    %src = pto.alloc_tile : !pto.tile_buf<loc=vec, dtype=f32, rows=4, cols=64, v_row=4, v_col=64, blayout=row_major, slayout=none_box, fractal=512, pad=0>
+    %dst = pto.alloc_tile : !pto.tile_buf<loc=vec, dtype=f32, rows=4, cols=64, v_row=4, v_col=64, blayout=row_major, slayout=none_box, fractal=512, pad=0>
+    %scalar = arith.constant 1.0 : f32
+
+    pto.tadds ins(%src, %scalar : !pto.tile_buf<loc=vec, dtype=f32, rows=4, cols=64, v_row=4, v_col=64, blayout=row_major, slayout=none_box, fractal=512, pad=0>, f32)
+              outs(%dst : !pto.tile_buf<loc=vec, dtype=f32, rows=4, cols=64, v_row=4, v_col=64, blayout=row_major, slayout=none_box, fractal=512, pad=0>)
+    return
+  }
+
+  // Valid case 2: f16 type
+  func.func @tadds_f16_valid() {
+    %src = pto.alloc_tile : !pto.tile_buf<loc=vec, dtype=f16, rows=2, cols=64, v_row=2, v_col=64, blayout=row_major, slayout=none_box, fractal=512, pad=0>
+    %dst = pto.alloc_tile : !pto.tile_buf<loc=vec, dtype=f16, rows=2, cols=64, v_row=2, v_col=64, blayout=row_major, slayout=none_box, fractal=512, pad=0>
+    %scalar = arith.constant 1.0 : f16
+
+    pto.tadds ins(%src, %scalar : !pto.tile_buf<loc=vec, dtype=f16, rows=2, cols=64, v_row=2, v_col=64, blayout=row_major, slayout=none_box, fractal=512, pad=0>, f16)
+              outs(%dst : !pto.tile_buf<loc=vec, dtype=f16, rows=2, cols=64, v_row=2, v_col=64, blayout=row_major, slayout=none_box, fractal=512, pad=0>)
+    return
+  }
+}

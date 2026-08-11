@@ -1,0 +1,86 @@
+// Copyright (c) 2026 Huawei Technologies Co., Ltd.
+// This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+// CANN Open Software License Agreement Version 2.0 (the "License").
+// Please refer to the License for details. You may not use this file except in compliance with the License.
+// THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+// INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+// See LICENSE in the root of the software repository for the full text of the License.
+
+// RUN: split-file %s %t
+// RUN: not ptoas --pto-arch=a5 --pto-backend=vpto %t/v2xi64.pto -o %t/v2xi64.out 2>&1 | FileCheck %s --check-prefix=V2XI64
+// RUN: not ptoas --pto-arch=a5 --pto-backend=vpto %t/v4xf32.pto -o %t/v4xf32.out 2>&1 | FileCheck %s --check-prefix=V4XF32
+// RUN: not ptoas --pto-arch=a5 --pto-backend=vpto %t/v16xf8e4.pto -o %t/v16xf8e4.out 2>&1 | FileCheck %s --check-prefix=V16XF8E4
+// RUN: not ptoas --pto-arch=a5 --pto-backend=vpto %t/v4xf16.pto -o %t/v4xf16.out 2>&1 | FileCheck %s --check-prefix=V4XF16
+// RUN: not ptoas --pto-arch=a5 --pto-backend=vpto %t/v4xi16.pto -o %t/v4xi16.out 2>&1 | FileCheck %s --check-prefix=V4XI16
+// RUN: not ptoas --pto-arch=a5 --pto-backend=vpto %t/v8xi8.pto -o %t/v8xi8.out 2>&1 | FileCheck %s --check-prefix=V8XI8
+
+// V2XI64: currently supports
+// V4XF32: currently supports
+// V16XF8E4: currently supports
+// V4XF16: currently supports
+// V4XI16: currently supports
+// V8XI8: currently supports
+
+//--- v2xi64.pto
+module attributes {pto.target_arch = "a5", pto.kernel_kind = #pto.kernel_kind<vector>} {
+  // vector<2xi64> is 128-bit total — rejected by packed vector type gate.
+  func.func @packed_vector_v2xi64_negative(%gm_v2xi64: !pto.ptr<vector<2xi64>, gm>) attributes {pto.aicore} {
+    %c0 = arith.constant 0 : index
+    %bad = pto.ldg %gm_v2xi64[%c0] : !pto.ptr<vector<2xi64>, gm> -> vector<2xi64>
+    pto.stg %bad, %gm_v2xi64[%c0] : !pto.ptr<vector<2xi64>, gm>, vector<2xi64>
+    return
+  }
+}
+
+//--- v4xf32.pto
+module attributes {pto.target_arch = "a5", pto.kernel_kind = #pto.kernel_kind<vector>} {
+  // vector<4xf32> has dim size 4 — rejected (only fp8 supports 4/8 lanes).
+  func.func @packed_vector_v4xf32_negative(%gm_v4xf32: !pto.ptr<vector<4xf32>, gm>) attributes {pto.aicore} {
+    %c0 = arith.constant 0 : index
+    %bad = pto.ldg %gm_v4xf32[%c0] : !pto.ptr<vector<4xf32>, gm> -> vector<4xf32>
+    pto.stg %bad, %gm_v4xf32[%c0] : !pto.ptr<vector<4xf32>, gm>, vector<4xf32>
+    return
+  }
+}
+
+//--- v16xf8e4.pto
+module attributes {pto.target_arch = "a5", pto.kernel_kind = #pto.kernel_kind<vector>} {
+  // vector<16xf8E4M3FN> is fp8, but lane count 16 is rejected.
+  func.func @packed_vector_v16xf8e4_negative(%gm_v16xf8e4: !pto.ptr<vector<16xf8E4M3FN>, gm>) attributes {pto.aicore} {
+    %c0 = arith.constant 0 : index
+    %bad = pto.ldg %gm_v16xf8e4[%c0] : !pto.ptr<vector<16xf8E4M3FN>, gm> -> vector<16xf8E4M3FN>
+    pto.stg %bad, %gm_v16xf8e4[%c0] : !pto.ptr<vector<16xf8E4M3FN>, gm>, vector<16xf8E4M3FN>
+    return
+  }
+}
+
+//--- v4xf16.pto
+module attributes {pto.target_arch = "a5", pto.kernel_kind = #pto.kernel_kind<vector>} {
+  // Non-fp8 packed vector types remain restricted to lane count 2.
+  func.func @packed_vector_v4xf16_negative(%gm_v4xf16: !pto.ptr<vector<4xf16>, gm>) attributes {pto.aicore} {
+    %c0 = arith.constant 0 : index
+    %bad = pto.ldg %gm_v4xf16[%c0] : !pto.ptr<vector<4xf16>, gm> -> vector<4xf16>
+    pto.stg %bad, %gm_v4xf16[%c0] : !pto.ptr<vector<4xf16>, gm>, vector<4xf16>
+    return
+  }
+}
+
+//--- v4xi16.pto
+module attributes {pto.target_arch = "a5", pto.kernel_kind = #pto.kernel_kind<vector>} {
+  func.func @packed_vector_v4xi16_negative(%gm_v4xi16: !pto.ptr<vector<4xi16>, gm>) attributes {pto.aicore} {
+    %c0 = arith.constant 0 : index
+    %bad = pto.ldg %gm_v4xi16[%c0] : !pto.ptr<vector<4xi16>, gm> -> vector<4xi16>
+    pto.stg %bad, %gm_v4xi16[%c0] : !pto.ptr<vector<4xi16>, gm>, vector<4xi16>
+    return
+  }
+}
+
+//--- v8xi8.pto
+module attributes {pto.target_arch = "a5", pto.kernel_kind = #pto.kernel_kind<vector>} {
+  func.func @packed_vector_v8xi8_negative(%gm_v8xi8: !pto.ptr<vector<8xi8>, gm>) attributes {pto.aicore} {
+    %c0 = arith.constant 0 : index
+    %bad = pto.ldg %gm_v8xi8[%c0] : !pto.ptr<vector<8xi8>, gm> -> vector<8xi8>
+    pto.stg %bad, %gm_v8xi8[%c0] : !pto.ptr<vector<8xi8>, gm>, vector<8xi8>
+    return
+  }
+}

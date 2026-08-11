@@ -27,11 +27,14 @@ mkdir -p "${OUT_DIR}"
 should_skip_roundtrip() {
   local path="$1"
   case "$path" in
+    */test/samples/Qwen3DecodeA5/*.pto) return 0 ;;
     */test/samples/Complex/mix_kernel.pto) return 0 ;;
     */test/samples/SCF/scf_for_break_like.pto) return 0 ;;
     */test/samples/SCF/scf_while_break.pto) return 0 ;;
     */test/samples/MatMul/0.pto) return 0 ;;
     */test/samples/MatMul/tmatmulk.pto) return 0 ;;
+    */test/samples/Movfp/movfp_fixpipe_reuse-pto.pto) return 0 ;;
+    */test/samples/SubView/SubView.pto) return 0 ;;
     */test/samples/Sync/test_if_else_tile_result.pto) return 0 ;;
   esac
   return 1

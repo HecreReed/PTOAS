@@ -1,0 +1,35 @@
+// Copyright (c) 2026 Huawei Technologies Co., Ltd.
+// This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+// CANN Open Software License Agreement Version 2.0 (the "License").
+// Please refer to the License for details. You may not use this file except in compliance with the License.
+// THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+// INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+// See LICENSE in the root of the software repository for the full text of the License.
+
+// Regression test for issue #394: signed floor division can remain in direct
+// VPTO authoring IR and must be expanded before LLVM IR export.
+//
+// RUN: ( mkdir -p %T && ptoas --pto-arch=a5 --pto-backend=vpto %s -o %t --mlir-print-ir-after=convert-func-to-llvm 2>&1 || true ) | FileCheck %s
+
+module attributes {pto.target_arch = "a5", pto.kernel_kind = #pto.kernel_kind<vector>} {
+  func.func @issue_394_floordivsi_vmuls(%value: !pto.vreg<64xf32>, %dst: !pto.ptr<f32, ub>, %gate: i32) attributes {pto.aicore} {
+    %c0 = arith.constant 0 : index
+    %c2_i32 = arith.constant 2 : i32
+    pto.vecscope {
+      %mask = pto.pset_b32 "PAT_ALL" : !pto.mask<b32>
+      %half = arith.floordivsi %gate, %c2_i32 : i32
+      %half_f32 = arith.sitofp %half : i32 to f32
+      %out = pto.vmuls %value, %half_f32, %mask : !pto.vreg<64xf32>, f32, !pto.mask<b32> -> !pto.vreg<64xf32>
+      pto.vsts %out, %dst[%c0], %mask : !pto.vreg<64xf32>, !pto.ptr<f32, ub>, !pto.mask<b32>
+    }
+    return
+  }
+}
+
+// CHECK-LABEL: llvm.func @issue_394_floordivsi_vmuls_mix_aiv
+// CHECK: llvm.sdiv
+// CHECK: llvm.mul
+// CHECK: llvm.icmp "ne"
+// CHECK: llvm.icmp "slt"
+// CHECK: llvm.add
+// CHECK-NOT: arith.floordivsi

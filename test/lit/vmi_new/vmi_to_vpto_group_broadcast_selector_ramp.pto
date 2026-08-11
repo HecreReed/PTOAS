@@ -1,0 +1,179 @@
+// Copyright (c) 2026 Huawei Technologies Co., Ltd.
+// This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+// CANN Open Software License Agreement Version 2.0 (the "License").
+// Please refer to the License for details. You may not use this file except in compliance with the License.
+// THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+// INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+// See LICENSE in the root of the software repository for the full text of the License.
+
+// RUN: pto-test-opt %s -vmi-lower-unified-to-legacy -vmi-to-vpto | FileCheck %s
+
+module {
+  func.func @group_broadcast_contiguous_two_block_multi_packet(
+      %source: !pto.vmi.vreg<16xf32, #pto.vmi.layout<num_groups = 16, slots = 8>>)
+      -> (!pto.vreg<64xf32>, !pto.vreg<64xf32>, !pto.vreg<64xf32>, !pto.vreg<64xf32>) {
+    %broadcast = pto.vmi.vbrc %source {group = 16}
+        : !pto.vmi.vreg<16xf32, #pto.vmi.layout<num_groups = 16, slots = 8>>
+        -> !pto.vmi.vreg<256xf32, #pto.vmi.layout<contiguous>>
+    %p0, %p1, %p2, %p3 = "pto.vmi.unpack"(%broadcast)
+        : (!pto.vmi.vreg<256xf32, #pto.vmi.layout<contiguous>>)
+        -> (!pto.vreg<64xf32>, !pto.vreg<64xf32>, !pto.vreg<64xf32>, !pto.vreg<64xf32>)
+    return %p0, %p1, %p2, %p3
+        : !pto.vreg<64xf32>, !pto.vreg<64xf32>, !pto.vreg<64xf32>, !pto.vreg<64xf32>
+  }
+
+  func.func @group_broadcast_contiguous_four_block(
+      %source: !pto.vmi.vreg<8xui32, #pto.vmi.layout<num_groups = 8, slots = 8>>)
+      -> (!pto.vreg<64xui32>, !pto.vreg<64xui32>, !pto.vreg<64xui32>, !pto.vreg<64xui32>) {
+    %broadcast = pto.vmi.vbrc %source {group = 8}
+        : !pto.vmi.vreg<8xui32, #pto.vmi.layout<num_groups = 8, slots = 8>>
+        -> !pto.vmi.vreg<256xui32, #pto.vmi.layout<contiguous>>
+    %p0, %p1, %p2, %p3 = "pto.vmi.unpack"(%broadcast)
+        : (!pto.vmi.vreg<256xui32, #pto.vmi.layout<contiguous>>)
+        -> (!pto.vreg<64xui32>, !pto.vreg<64xui32>, !pto.vreg<64xui32>, !pto.vreg<64xui32>)
+    return %p0, %p1, %p2, %p3
+        : !pto.vreg<64xui32>, !pto.vreg<64xui32>, !pto.vreg<64xui32>, !pto.vreg<64xui32>
+  }
+
+  func.func @group_broadcast_deinterleaved2_two_chunks_per_part(
+      %source: !pto.vmi.vreg<16xf32, #pto.vmi.layout<num_groups = 16, slots = 8>>)
+      -> (!pto.vreg<64xf32>, !pto.vreg<64xf32>, !pto.vreg<64xf32>, !pto.vreg<64xf32>) {
+    %broadcast = pto.vmi.vbrc %source {group = 16}
+        : !pto.vmi.vreg<16xf32, #pto.vmi.layout<num_groups = 16, slots = 8>>
+        -> !pto.vmi.vreg<256xf32, #pto.vmi.layout<deinterleaved = 2>>
+    %p0, %p1, %p2, %p3 = "pto.vmi.unpack"(%broadcast)
+        : (!pto.vmi.vreg<256xf32, #pto.vmi.layout<deinterleaved = 2>>)
+        -> (!pto.vreg<64xf32>, !pto.vreg<64xf32>, !pto.vreg<64xf32>, !pto.vreg<64xf32>)
+    return %p0, %p1, %p2, %p3
+        : !pto.vreg<64xf32>, !pto.vreg<64xf32>, !pto.vreg<64xf32>, !pto.vreg<64xf32>
+  }
+
+  func.func @group_broadcast_deinterleaved4(
+      %source: !pto.vmi.vreg<8xf32, #pto.vmi.layout<num_groups = 8, slots = 8>>)
+      -> (!pto.vreg<64xf32>, !pto.vreg<64xf32>, !pto.vreg<64xf32>, !pto.vreg<64xf32>) {
+    %broadcast = pto.vmi.vbrc %source {group = 8}
+        : !pto.vmi.vreg<8xf32, #pto.vmi.layout<num_groups = 8, slots = 8>>
+        -> !pto.vmi.vreg<256xf32, #pto.vmi.layout<deinterleaved = 4>>
+    %p0, %p1, %p2, %p3 = "pto.vmi.unpack"(%broadcast)
+        : (!pto.vmi.vreg<256xf32, #pto.vmi.layout<deinterleaved = 4>>)
+        -> (!pto.vreg<64xf32>, !pto.vreg<64xf32>, !pto.vreg<64xf32>, !pto.vreg<64xf32>)
+    return %p0, %p1, %p2, %p3
+        : !pto.vreg<64xf32>, !pto.vreg<64xf32>, !pto.vreg<64xf32>, !pto.vreg<64xf32>
+  }
+
+  func.func @group_broadcast_block_deinterleaved2_two_chunks_per_part(
+      %source: !pto.vmi.vreg<16xf32, #pto.vmi.layout<num_groups = 16, slots = 8>>)
+      -> (!pto.vreg<64xf32>, !pto.vreg<64xf32>, !pto.vreg<64xf32>, !pto.vreg<64xf32>) {
+    %broadcast = pto.vmi.vbrc %source {group = 16}
+        : !pto.vmi.vreg<16xf32, #pto.vmi.layout<num_groups = 16, slots = 8>>
+        -> !pto.vmi.vreg<256xf32, #pto.vmi.layout<block_deinterleaved = 2>>
+    %p0, %p1, %p2, %p3 = "pto.vmi.unpack"(%broadcast)
+        : (!pto.vmi.vreg<256xf32, #pto.vmi.layout<block_deinterleaved = 2>>)
+        -> (!pto.vreg<64xf32>, !pto.vreg<64xf32>, !pto.vreg<64xf32>, !pto.vreg<64xf32>)
+    return %p0, %p1, %p2, %p3
+        : !pto.vreg<64xf32>, !pto.vreg<64xf32>, !pto.vreg<64xf32>, !pto.vreg<64xf32>
+  }
+
+  func.func @group_broadcast_source_lane_stride2(
+      %source: !pto.vmi.vreg<8xf32, #pto.vmi.layout<num_groups = 8, slots = 8, lane_stride = 2>>)
+      -> !pto.vreg<64xf32> {
+    %broadcast = pto.vmi.vbrc %source {group = 8}
+        : !pto.vmi.vreg<8xf32, #pto.vmi.layout<num_groups = 8, slots = 8, lane_stride = 2>>
+        -> !pto.vmi.vreg<64xf32, #pto.vmi.layout<contiguous>>
+    %p0 = "pto.vmi.unpack"(%broadcast)
+        : (!pto.vmi.vreg<64xf32, #pto.vmi.layout<contiguous>>)
+        -> !pto.vreg<64xf32>
+    return %p0 : !pto.vreg<64xf32>
+  }
+
+  func.func @group_broadcast_i8_unsigned_ramp(
+      %source: !pto.vmi.vreg<8xui8, #pto.vmi.layout<num_groups = 8, slots = 8>>)
+      -> !pto.vreg<256xui8> {
+    %broadcast = pto.vmi.vbrc %source {group = 8}
+        : !pto.vmi.vreg<8xui8, #pto.vmi.layout<num_groups = 8, slots = 8>>
+        -> !pto.vmi.vreg<256xui8, #pto.vmi.layout<contiguous>>
+    %p0 = "pto.vmi.unpack"(%broadcast)
+        : (!pto.vmi.vreg<256xui8, #pto.vmi.layout<contiguous>>)
+        -> !pto.vreg<256xui8>
+    return %p0 : !pto.vreg<256xui8>
+  }
+
+  func.func @group_broadcast_full_slots1(
+      %source: !pto.vmi.vreg<2xf32, #pto.vmi.layout<num_groups = 2, slots = 1>>)
+      -> (!pto.vreg<64xf32>, !pto.vreg<64xf32>, !pto.vreg<64xf32>, !pto.vreg<64xf32>) {
+    %broadcast = pto.vmi.vbrc %source {group = 2}
+        : !pto.vmi.vreg<2xf32, #pto.vmi.layout<num_groups = 2, slots = 1>>
+        -> !pto.vmi.vreg<256xf32, #pto.vmi.layout<contiguous>>
+    %p0, %p1, %p2, %p3 = "pto.vmi.unpack"(%broadcast)
+        : (!pto.vmi.vreg<256xf32, #pto.vmi.layout<contiguous>>)
+        -> (!pto.vreg<64xf32>, !pto.vreg<64xf32>, !pto.vreg<64xf32>, !pto.vreg<64xf32>)
+    return %p0, %p1, %p2, %p3
+        : !pto.vreg<64xf32>, !pto.vreg<64xf32>, !pto.vreg<64xf32>, !pto.vreg<64xf32>
+  }
+}
+
+// CHECK-LABEL: func.func @group_broadcast_contiguous_two_block_multi_packet(
+// CHECK-SAME: %[[C_SRC0:arg[0-9]+]]: !pto.vreg<64xf32>, %[[C_SRC1:arg[0-9]+]]: !pto.vreg<64xf32>
+// CHECK: %[[C_IOTA:.*]] = pto.vci {{.*}} -> !pto.vreg<64xui32>
+// CHECK: %[[C_RAMP:.*]] = pto.vshrs %[[C_IOTA]], {{.*}}
+// CHECK-DAG: %[[C_BASE4:.*]] = pto.vadds %[[C_RAMP]], {{.*}}
+// CHECK-DAG: pto.vselr %[[C_SRC0]], %[[C_RAMP]]
+// CHECK-DAG: pto.vselr %[[C_SRC0]], %[[C_BASE4]]
+// CHECK-DAG: pto.vselr %[[C_SRC1]], %[[C_RAMP]]
+// CHECK-DAG: pto.vselr %[[C_SRC1]], %[[C_BASE4]]
+// CHECK-NOT: pto.vsel {{.*}}
+
+// CHECK-LABEL: func.func @group_broadcast_contiguous_four_block(
+// CHECK: %[[C4_IOTA:.*]] = pto.vci
+// CHECK: %[[C4_RAMP:.*]] = pto.vshrs %[[C4_IOTA]], {{.*}}
+// CHECK-DAG: %[[C4_BASE2:.*]] = pto.vadds %[[C4_RAMP]], {{.*}}
+// CHECK-DAG: %[[C4_BASE4:.*]] = pto.vadds %[[C4_RAMP]], {{.*}}
+// CHECK-DAG: %[[C4_BASE6:.*]] = pto.vadds %[[C4_RAMP]], {{.*}}
+// CHECK-DAG: pto.vselr {{.*}}, %[[C4_RAMP]]
+// CHECK-DAG: pto.vselr {{.*}}, %[[C4_BASE2]]
+// CHECK-DAG: pto.vselr {{.*}}, %[[C4_BASE4]]
+// CHECK-DAG: pto.vselr {{.*}}, %[[C4_BASE6]]
+// CHECK-NOT: pto.vsel {{.*}}
+
+// CHECK-LABEL: func.func @group_broadcast_deinterleaved2_two_chunks_per_part(
+// CHECK-SAME: %[[D2_SRC0:arg[0-9]+]]: !pto.vreg<64xf32>, %[[D2_SRC1:arg[0-9]+]]: !pto.vreg<64xf32>
+// CHECK: %[[D2_IOTA:.*]] = pto.vci
+// CHECK: %[[D2_RAMP:.*]] = pto.vshrs %[[D2_IOTA]], {{.*}}
+// CHECK: pto.vselr %[[D2_SRC0]], %[[D2_RAMP]]
+// CHECK: pto.vselr %[[D2_SRC1]], %[[D2_RAMP]]
+// CHECK: pto.vselr %[[D2_SRC0]], %[[D2_RAMP]]
+// CHECK: pto.vselr %[[D2_SRC1]], %[[D2_RAMP]]
+// CHECK-NOT: pto.vsel {{.*}}
+
+// CHECK-LABEL: func.func @group_broadcast_deinterleaved4(
+// CHECK: %[[D4_IOTA:.*]] = pto.vci
+// CHECK: %[[D4_RAMP:.*]] = pto.vshrs %[[D4_IOTA]], {{.*}}
+// CHECK-COUNT-4: pto.vselr {{.*}}, %[[D4_RAMP]]
+// CHECK-NOT: pto.vsel {{.*}}
+
+// CHECK-LABEL: func.func @group_broadcast_block_deinterleaved2_two_chunks_per_part(
+// CHECK-SAME: %[[BD2_SRC0:arg[0-9]+]]: !pto.vreg<64xf32>, %[[BD2_SRC1:arg[0-9]+]]: !pto.vreg<64xf32>
+// CHECK: %[[BD2_IOTA:.*]] = pto.vci
+// CHECK: %[[BD2_RAMP:.*]] = pto.vshrs %[[BD2_IOTA]], {{.*}}
+// CHECK: pto.vselr %[[BD2_SRC0]], %[[BD2_RAMP]]
+// CHECK: pto.vselr %[[BD2_SRC1]], %[[BD2_RAMP]]
+// CHECK: pto.vselr %[[BD2_SRC0]], %[[BD2_RAMP]]
+// CHECK: pto.vselr %[[BD2_SRC1]], %[[BD2_RAMP]]
+// CHECK-NOT: pto.vsel {{.*}}
+
+// CHECK-LABEL: func.func @group_broadcast_source_lane_stride2(
+// CHECK: %[[LS_IOTA:.*]] = pto.vci
+// CHECK: %[[LS_RAMP:.*]] = pto.vshrs %[[LS_IOTA]], {{.*}}
+// CHECK: %[[LS_SCALED:.*]] = pto.vshls %[[LS_RAMP]], {{.*}}
+// CHECK: pto.vselr {{.*}}, %[[LS_SCALED]]
+
+// CHECK-LABEL: func.func @group_broadcast_i8_unsigned_ramp(
+// CHECK: %[[I8_IOTA:.*]] = pto.vci {{.*}} -> !pto.vreg<256xui8>
+// CHECK: %[[I8_RAMP:.*]] = pto.vshrs %[[I8_IOTA]], {{.*}} : !pto.vreg<256xui8>
+// CHECK: pto.vselr {{.*}}, %[[I8_RAMP]]
+
+// CHECK-LABEL: func.func @group_broadcast_full_slots1(
+// CHECK-NOT: pto.vci
+// CHECK-COUNT-4: pto.vdup {{.*}}LOWEST
+// CHECK-NOT: pto.vselr
+// CHECK-NOT: pto.vmi.

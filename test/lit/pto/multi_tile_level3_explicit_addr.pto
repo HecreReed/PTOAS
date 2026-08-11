@@ -1,0 +1,64 @@
+// Copyright (c) 2026 Huawei Technologies Co., Ltd.
+// This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+// CANN Open Software License Agreement Version 2.0 (the "License").
+// Please refer to the License for details. You may not use this file except in compliance with the License.
+// THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+// INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+// See LICENSE in the root of the software repository for the full text of the License.
+
+// RUN: ptoas --pto-level=level3 --pto-arch=a5 --mlir-print-ir-after=pto-resolve-reserved-buffers %s 2>&1 1>/dev/null | FileCheck %s
+// RUN: ptoas --pto-level=level3 --pto-arch=a5 --mlir-print-ir-after=pto-resolve-buffer-select %s 2>&1 1>/dev/null | FileCheck %s --check-prefix=SELECT
+// RUN: not ptoas --pto-level=level1 --pto-arch=a5 %s 2>&1 | FileCheck %s --check-prefix=LVERR
+// RUN: not ptoas --pto-level=level2 --pto-arch=a5 %s 2>&1 | FileCheck %s --check-prefix=LVERR
+
+// Under --pto-level=level3 the caller owns local memory, PTOPlanMemory does not
+// run, and `pto.alloc_multi_tile` carries an explicit base `addr`. Slot k is
+// resolved as `addr + k * slotBytes` (slotBytes = 16*16*2 = 512 here).
+
+module {
+  func.func @l3_two_buffers(
+      %gm0 : !pto.partition_tensor_view<16x16xf16>,
+      %gm1 : !pto.partition_tensor_view<16x16xf16>) attributes {pto.entry} {
+    %c0 = arith.constant 0 : index
+    %c1 = arith.constant 1 : index
+    %base = arith.constant 0 : i64
+
+    %mb = pto.alloc_multi_tile addr = %base
+        : !pto.multi_tile_buf<vec, 16x16xf16, count=2>
+
+    %s0 = pto.multi_tile_get %mb[%c0]
+        : !pto.multi_tile_buf<vec, 16x16xf16, count=2>
+       -> !pto.tile_buf<vec, 16x16xf16>
+    %s1 = pto.multi_tile_get %mb[%c1]
+        : !pto.multi_tile_buf<vec, 16x16xf16, count=2>
+       -> !pto.tile_buf<vec, 16x16xf16>
+
+    pto.tload ins(%gm0 : !pto.partition_tensor_view<16x16xf16>)
+              outs(%s0  : !pto.tile_buf<vec, 16x16xf16>)
+    pto.tload ins(%gm1 : !pto.partition_tensor_view<16x16xf16>)
+              outs(%s1  : !pto.tile_buf<vec, 16x16xf16>)
+    return
+  }
+}
+
+// PTOResolveReservedBuffers preserves the tile-native allocation and selections.
+// CHECK: IR Dump After PTOResolveReservedBuffers
+// CHECK-LABEL: func.func @l3_two_buffers
+// CHECK: %[[BASE:.*]] = arith.constant 0 : i64
+// CHECK: %[[MULTI:.*]] = pto.alloc_multi_tile addr = %[[BASE]]
+// CHECK: pto.multi_tile_get %[[MULTI]][%c0
+// CHECK: pto.multi_tile_get %[[MULTI]][%c1
+// CHECK-NOT: pto.multi_buffer_addrs
+// CHECK-NOT: memref.alloc
+
+// ResolveBufferSelect materializes one addressed alloc_tile per selection.
+// SELECT: IR Dump After PTOResolveBufferSelect
+// SELECT-LABEL: func.func @l3_two_buffers
+// SELECT-NOT: pto.alloc_multi_tile
+// SELECT-NOT: pto.multi_tile_get
+// SELECT: pto.alloc_tile addr = %{{.*}}
+// SELECT: arith.addi
+// SELECT: pto.alloc_tile addr = %{{.*}}
+
+// Outside level3 an explicit addr on alloc_multi_tile is rejected.
+// LVERR: unexpected 'addr' operand on pto.alloc_multi_tile: only supported when --pto-level=level3

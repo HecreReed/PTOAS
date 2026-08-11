@@ -1,0 +1,29 @@
+// Copyright (c) 2026 Huawei Technologies Co., Ltd.
+// This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+// CANN Open Software License Agreement Version 2.0 (the "License").
+// Please refer to the License for details. You may not use this file except in compliance with the License.
+// THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+// INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+// See LICENSE in the root of the software repository for the full text of the License.
+
+// RUN: not ptoas --pto-arch=a5 --emit-pto-ir %s 2>&1 | FileCheck %s
+
+// The fully-empty (0x0) no-op-replay marker is accepted by *plain* row
+// reductions (trowmax/trowsum, see issue708_zero_valid_reductions.pto) but must
+// NOT be accepted by *arg* reductions: trowargmax/trowargmin still emit a real
+// per-row index. This is the same all-zero IR shape a plain trowmax accepts;
+// trowargmax must reject it (matching tcolargmax/tcolargmin, which stay strict
+// via verifyColArgReductionDstLayout). trowargmin shares the same verifier path.
+
+module attributes {"pto.device-spec" = "Ascend910B3"} {
+  func.func @issue708_reject_zero_valid_row_argmax() attributes {pto.kernel_kind = #pto.kernel_kind<vector>} {
+    %src = pto.alloc_tile : !pto.tile_buf<loc=vec, dtype=f16, rows=16, cols=32, v_row=0, v_col=0, blayout=row_major, slayout=none_box, fractal=512, pad=0>
+    %tmp = pto.alloc_tile : !pto.tile_buf<loc=vec, dtype=f16, rows=16, cols=32, v_row=0, v_col=0, blayout=row_major, slayout=none_box, fractal=512, pad=0>
+    %dst = pto.alloc_tile : !pto.tile_buf<loc=vec, dtype=ui32, rows=16, cols=1, v_row=0, v_col=0, blayout=col_major, slayout=none_box, fractal=512, pad=0>
+    pto.trowargmax ins(%src, %tmp : !pto.tile_buf<loc=vec, dtype=f16, rows=16, cols=32, v_row=0, v_col=0, blayout=row_major, slayout=none_box, fractal=512, pad=0>, !pto.tile_buf<loc=vec, dtype=f16, rows=16, cols=32, v_row=0, v_col=0, blayout=row_major, slayout=none_box, fractal=512, pad=0>)
+                   outs(%dst : !pto.tile_buf<loc=vec, dtype=ui32, rows=16, cols=1, v_row=0, v_col=0, blayout=col_major, slayout=none_box, fractal=512, pad=0>)
+    return
+  }
+}
+
+// CHECK: error: 'pto.trowargmax' op expects src valid_shape[0] to be non-zero

@@ -1,0 +1,38 @@
+// Copyright (c) 2026 Huawei Technologies Co., Ltd.
+// This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+// CANN Open Software License Agreement Version 2.0 (the "License").
+// Please refer to the License for details. You may not use this file except in compliance with the License.
+// THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+// INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+// See LICENSE in the root of the software repository for the full text of the License.
+// RUN: not ptoas --pto-arch=a5 %s 2>&1 | FileCheck %s
+
+module attributes {pto.target_arch = "a5"} {
+  func.func @tprint_tmp_invalid(%src: !pto.ptr<f32>, %tmp: !pto.ptr<f32>)
+      attributes {pto.kernel_kind = #pto.kernel_kind<vector>} {
+    %c0 = arith.constant 0 : index
+    %c1 = arith.constant 1 : index
+    %c16 = arith.constant 16 : index
+    %src_view = pto.make_tensor_view %src,
+                shape = [%c16, %c16], strides = [%c16, %c1]
+                {layout = #pto.layout<nd>}
+              : !pto.tensor_view<?x?xf32>
+    %tmp_view = pto.make_tensor_view %tmp,
+                shape = [%c16, %c16], strides = [%c16, %c1]
+                {layout = #pto.layout<nd>}
+              : !pto.tensor_view<?x?xf32>
+    %src_part = pto.partition_view %src_view,
+                offsets = [%c0, %c0], sizes = [%c16, %c16]
+              : !pto.tensor_view<?x?xf32>
+                -> !pto.partition_tensor_view<16x16xf32>
+    %tmp_part = pto.partition_view %tmp_view,
+                offsets = [%c0, %c0], sizes = [%c16, %c16]
+              : !pto.tensor_view<?x?xf32>
+                -> !pto.partition_tensor_view<16x16xf32>
+    pto.tprint ins(%src_part, %tmp_part : !pto.partition_tensor_view<16x16xf32>, !pto.partition_tensor_view<16x16xf32>)
+              {printFormat = #pto<print_format width8_precision2>}
+    return
+  }
+}
+
+// CHECK: error: 'pto.tprint' op expects tmp only when src is a tile_buf

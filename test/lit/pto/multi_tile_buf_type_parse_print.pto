@@ -1,0 +1,43 @@
+// Copyright (c) 2026 Huawei Technologies Co., Ltd.
+// This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+// CANN Open Software License Agreement Version 2.0 (the "License").
+// Please refer to the License for details. You may not use this file except in compliance with the License.
+// THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+// INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+// See LICENSE in the root of the software repository for the full text of the License.
+
+// RUN: ptoas --mlir-print-ir-before=pto-resolve-reserved-buffers %s 2>&1 1>/dev/null | FileCheck %s
+
+// Verifies that both the compact and verbose forms of `!pto.multi_tile_buf`
+// parse and round-trip through the printer. The compact form (preferred)
+// reads as `!pto.multi_tile_buf<vec, 16x16xf16, count=N>` and is what most
+// frontends will use.
+
+module {
+  func.func @mtb_compact_n2() {
+    %mb = pto.alloc_multi_tile
+        : !pto.multi_tile_buf<vec, 16x16xf16, count=2>
+    return
+  }
+
+  func.func @mtb_compact_n4() {
+    %mb = pto.alloc_multi_tile
+        : !pto.multi_tile_buf<vec, 32x32xf32, count=4>
+    return
+  }
+
+  func.func @mtb_verbose() {
+    %mb = pto.alloc_multi_tile
+        : !pto.multi_tile_buf<!pto.tile_buf<vec, 16x16xf16>, count=3>
+    return
+  }
+}
+
+// CHECK-LABEL: func.func @mtb_compact_n2
+// CHECK: pto.alloc_multi_tile : !pto.multi_tile_buf<!pto.tile_buf<vec, 16x16xf16>, count=2>
+
+// CHECK-LABEL: func.func @mtb_compact_n4
+// CHECK: pto.alloc_multi_tile : !pto.multi_tile_buf<!pto.tile_buf<vec, 32x32xf32>, count=4>
+
+// CHECK-LABEL: func.func @mtb_verbose
+// CHECK: pto.alloc_multi_tile : !pto.multi_tile_buf<!pto.tile_buf<vec, 16x16xf16>, count=3>

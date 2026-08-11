@@ -1,0 +1,96 @@
+// Copyright (c) 2026 Huawei Technologies Co., Ltd.
+// This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+// CANN Open Software License Agreement Version 2.0 (the "License").
+// Please refer to the License for details. You may not use this file except in compliance with the License.
+// THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+// INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+// See LICENSE in the root of the software repository for the full text of the License.
+
+// RUN: ptoas --mlir-print-ir-after=pto-resolve-reserved-buffers %s 2>&1 1>/dev/null | FileCheck %s
+// RUN: ptoas --mlir-print-ir-after=pto-resolve-buffer-select %s 2>&1 1>/dev/null | FileCheck %s --check-prefix=SELECT
+// RUN: ptoas --pto-arch=a3 --mlir-print-ir-before=pto-inline-backend-helpers %s -o /dev/null 2>&1 | FileCheck %s --check-prefix=MAT
+// RUN: ptoas --pto-arch=a3 %s -o - 2>&1 | FileCheck %s --check-prefix=EMITC
+
+// Mixed slot-select example: loop-external preload uses a constant slot id,
+// while the loop body uses a runtime slot id to select one physical buffer.
+
+module {
+  func.func @const_preload_dyn_loop_select(
+      %gm : !pto.ptr<f16>, %n : index) {
+    %c0 = arith.constant 0 : index
+    %c1 = arith.constant 1 : index
+    %c2 = arith.constant 2 : index
+    %c16 = arith.constant 16 : index
+
+    %gm_view = pto.make_tensor_view %gm,
+      shape = [%c1, %c1, %c1, %c16, %c16],
+      strides = [%c16, %c16, %c16, %c16, %c1]
+      : !pto.tensor_view<1x1x1x16x16xf16>
+    %gm_part = pto.partition_view %gm_view,
+      offsets = [%c0, %c0, %c0, %c0, %c0],
+      sizes = [%c1, %c1, %c1, %c16, %c16]
+      : !pto.tensor_view<1x1x1x16x16xf16>
+     -> !pto.partition_tensor_view<1x1x1x16x16xf16>
+
+    %mb = pto.alloc_multi_tile
+        : !pto.multi_tile_buf<vec, 16x16xf16, count=2>
+
+    // Preload slot 0 before the loop with a constant slot id.
+    %pre = pto.multi_tile_get %mb[%c0]
+        : !pto.multi_tile_buf<vec, 16x16xf16, count=2>
+       -> !pto.tile_buf<vec, 16x16xf16>
+    pto.tload ins(%gm_part : !pto.partition_tensor_view<1x1x1x16x16xf16>)
+              outs(%pre : !pto.tile_buf<vec, 16x16xf16>)
+
+    scf.for %i = %c0 to %n step %c1 {
+      %idx = arith.remui %i, %c2 : index
+      %slot = pto.multi_tile_get %mb[%idx]
+          : !pto.multi_tile_buf<vec, 16x16xf16, count=2>
+         -> !pto.tile_buf<vec, 16x16xf16>
+      pto.tload ins(%gm_part : !pto.partition_tensor_view<1x1x1x16x16xf16>)
+                outs(%slot : !pto.tile_buf<vec, 16x16xf16>)
+    }
+    return
+  }
+}
+
+// CHECK: IR Dump After PTOResolveReservedBuffers
+// CHECK-LABEL: func.func @const_preload_dyn_loop_select
+// CHECK: %[[MULTI:.*]] = pto.alloc_multi_tile
+// CHECK: pto.multi_tile_get %[[MULTI]][%c0
+// CHECK: scf.for
+// CHECK: %[[IDX:.*]] = arith.remui %arg{{.*}}, %c2
+// CHECK: pto.multi_tile_get %[[MULTI]][%[[IDX]]
+// CHECK-NOT: memref.alloc
+
+// After ResolveBufferSelect, the const preload slot becomes a directly
+// addressed alloc_tile, while the loop slot is chosen with arith.select.
+// SELECT: IR Dump After PTOResolveBufferSelect
+// SELECT-LABEL: func.func @const_preload_dyn_loop_select
+// SELECT-NOT: pto.alloc_multi_tile
+// SELECT-NOT: pto.multi_tile_get
+// SELECT: pto.alloc_tile addr = %{{.*}}
+// SELECT: scf.for
+// SELECT: arith.select
+// SELECT: pto.alloc_tile addr = %{{.*}}
+
+// ResolveBufferSelect carries the dynamic selected buffer address directly in
+// alloc_tile, so EmitC can emit TASSIGN in the loop without a memref bridge.
+// MAT: IR Dump Before PTOInlineBackendHelpers
+// MAT-LABEL: func.func @const_preload_dyn_loop_select
+// MAT: %[[ADDR0:[A-Za-z0-9_]+]] = arith.constant 0 : i64
+// MAT: pto.alloc_tile addr = %[[ADDR0]]
+// MAT: scf.for
+// MAT: %[[ADDR1:[A-Za-z0-9_]+]] = arith.constant 512 : i64
+// MAT: %[[COND:[A-Za-z0-9_]+]] = arith.cmpi eq
+// MAT: %[[DYN_ADDR:[A-Za-z0-9_]+]] = arith.select %[[COND]], %[[ADDR1]], %[[ADDR0]] : i64
+// MAT: pto.alloc_tile addr = %[[DYN_ADDR]]
+
+// EMITC: AICORE void const_preload_dyn_loop_select
+// EMITC: for (
+// EMITC: // pto: %slot
+// EMITC: Tile<TileType::Vec{{.*}}> [[TILE:[_A-Za-z][_A-Za-z0-9]*]];
+// EMITC: // pto:
+// EMITC: uint64_t [[ADDR:[_A-Za-z][_A-Za-z0-9]*]] = (uint64_t)
+// EMITC: TASSIGN([[TILE]], [[ADDR]]);
+// EMITC: TLOAD([[TILE]],

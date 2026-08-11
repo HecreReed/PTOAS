@@ -1,0 +1,74 @@
+// Copyright (c) 2026 Huawei Technologies Co., Ltd.
+// This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+// CANN Open Software License Agreement Version 2.0 (the "License").
+// Please refer to the License for details. You may not use this file except in compliance with the License.
+// THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+// INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+// See LICENSE in the root of the software repository for the full text of the License.
+
+// RUN: ptoas --pto-arch=a3 %s -o - 2>&1 | FileCheck %s
+
+module {
+  func.func @single_line_ptr(%arg0: !pto.ptr<f32>)
+      attributes {pto.kernel_kind = #pto.kernel_kind<vector>} {
+    pto.cmo.cacheinvalid %arg0 single_cache_line : !pto.ptr<f32>
+    return
+  }
+
+  func.func @single_line_partition_view(%arg0: !pto.ptr<f32>)
+      attributes {pto.kernel_kind = #pto.kernel_kind<vector>} {
+    %c0 = arith.constant 0 : index
+    %c1 = arith.constant 1 : index
+    %c16 = arith.constant 16 : index
+    %view = pto.make_tensor_view %arg0,
+      shape = [%c16, %c16], strides = [%c16, %c1]
+      {layout = #pto.layout<nd>} : !pto.tensor_view<?x?xf32>
+    %pview = pto.partition_view %view,
+      offsets = [%c0, %c0], sizes = [%c16, %c16]
+      : !pto.tensor_view<?x?xf32>
+        -> !pto.partition_tensor_view<16x16xf32>
+    pto.cmo.cacheinvalid %pview single_cache_line
+      : !pto.partition_tensor_view<16x16xf32>
+    return
+  }
+
+  func.func @single_line_partition_view_nonzero_offset(
+      %arg0: !pto.ptr<f32>)
+      attributes {pto.kernel_kind = #pto.kernel_kind<vector>} {
+    %c1 = arith.constant 1 : index
+    %c2 = arith.constant 2 : index
+    %c16 = arith.constant 16 : index
+    %c32 = arith.constant 32 : index
+    %view = pto.make_tensor_view %arg0,
+      shape = [%c32, %c32], strides = [%c32, %c1]
+      {layout = #pto.layout<nd>} : !pto.tensor_view<?x?xf32>
+    %pview = pto.partition_view %view,
+      offsets = [%c1, %c2], sizes = [%c16, %c16]
+      : !pto.tensor_view<?x?xf32>
+        -> !pto.partition_tensor_view<16x16xf32>
+    pto.cmo.cacheinvalid %pview single_cache_line
+      : !pto.partition_tensor_view<16x16xf32>
+    return
+  }
+}
+
+// CHECK: template <typename Tensor>
+// CHECK-NEXT: static AICORE inline auto PTOAS__GLOBAL_TENSOR_DATA(Tensor &tensor)
+// CHECK-NOT: pto::GlobalTensor<Element
+// CHECK: template <typename Ptr>
+// CHECK-NEXT: static AICORE inline void PTOAS__DCCI_SINGLE_CACHE_LINE(Ptr ptr) {
+
+// CHECK-LABEL: AICORE void single_line_ptr(
+// CHECK: PTOAS__DCCI_SINGLE_CACHE_LINE({{[_A-Za-z][_A-Za-z0-9]*}});
+
+// CHECK-LABEL: AICORE void single_line_partition_view(
+// CHECK: GlobalTensor<float, {{.*1, 16, 16.*}}> [[PVIEW:[_A-Za-z][_A-Za-z0-9]*]] = GlobalTensor<float, {{.*1, 16, 16.*}}>(
+// CHECK: __gm__ float* [[PVIEW_DATA:[_A-Za-z][_A-Za-z0-9]*]] = PTOAS__GLOBAL_TENSOR_DATA([[PVIEW]]);
+// CHECK: PTOAS__DCCI_SINGLE_CACHE_LINE([[PVIEW_DATA]]);
+
+// CHECK-LABEL: AICORE void single_line_partition_view_nonzero_offset(
+// CHECK-DAG: unsigned [[OFFSET:[_A-Za-z][_A-Za-z0-9]*]] = 34;
+// CHECK: pto::Stride<512, 512, 512, 32, 1>
+// CHECK: GlobalTensor<float, {{.*1, 16, 16.*}}> [[OFFSET_PVIEW:[_A-Za-z][_A-Za-z0-9]*]] = GlobalTensor<float, {{.*1, 16, 16.*}}>({{.*}} + [[OFFSET]],
+// CHECK: __gm__ float* [[OFFSET_DATA:[_A-Za-z][_A-Za-z0-9]*]] = PTOAS__GLOBAL_TENSOR_DATA([[OFFSET_PVIEW]]);
+// CHECK: PTOAS__DCCI_SINGLE_CACHE_LINE([[OFFSET_DATA]]);

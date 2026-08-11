@@ -1,0 +1,63 @@
+// Copyright (c) 2026 Huawei Technologies Co., Ltd.
+// This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+// CANN Open Software License Agreement Version 2.0 (the "License").
+// Please refer to the License for details. You may not use this file except in compliance with the License.
+// THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+// INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+// See LICENSE in the root of the software repository for the full text of the License.
+
+// RUN: ptoas --pto-arch=a3 --pto-level=level3 --enable-insert-sync \
+// RUN:   --mlir-print-ir-after=pto-insert-sync %s -o /dev/null 2>&1 \
+// RUN:   | FileCheck %s --check-prefix=READ
+// RUN: ptoas --pto-arch=a3 --pto-level=level3 --enable-insert-sync \
+// RUN:   --mlir-print-ir-after=pto-insert-sync %s -o /dev/null 2>&1 \
+// RUN:   | FileCheck %s --check-prefix=WRITE
+
+// `tstore_fp` writes its GM destination. A following tload reads the same GM
+// partition, so insert-sync must emit a FIX -> MTE2 dependency after TSTORE_FP.
+
+module attributes {pto.target_arch = "a2a3"} {
+  func.func @tstore_fp_writes_dst(
+      %dst: !pto.partition_tensor_view<1x32xf16>,
+      %src: !pto.tile_buf<acc, 16x32xf32, blayout=col_major, slayout=row_major>,
+      %fp: !pto.tile_buf<scaling, 1x32xf16>)
+      attributes {pto.kernel_kind = #pto.kernel_kind<cube>} {
+    %c0_i64 = arith.constant 0 : i64
+    %tmp = pto.alloc_tile addr = %c0_i64 : !pto.tile_buf<vec, 1x32xf16>
+
+    pto.tstore_fp ins(%src, %fp : !pto.tile_buf<acc, 16x32xf32, blayout=col_major, slayout=row_major>, !pto.tile_buf<scaling, 1x32xf16>)
+                  outs(%dst : !pto.partition_tensor_view<1x32xf16>)
+    pto.tload ins(%dst : !pto.partition_tensor_view<1x32xf16>)
+              outs(%tmp : !pto.tile_buf<vec, 1x32xf16>)
+    return
+  }
+
+  func.func @tstore_fp_reads_acc_src(
+      %lhs: !pto.tile_buf<left, 16x32xf16, blayout=row_major, slayout=row_major>,
+      %rhs: !pto.tile_buf<right, 32x32xf16, blayout=row_major, slayout=col_major>,
+      %fp: !pto.tile_buf<scaling, 1x32xf16>,
+      %dst: !pto.partition_tensor_view<1x32xf16>)
+      attributes {pto.kernel_kind = #pto.kernel_kind<cube>} {
+    %c4096_i64 = arith.constant 4096 : i64
+    %acc = pto.alloc_tile addr = %c4096_i64
+        : !pto.tile_buf<acc, 16x32xf32, blayout=col_major, slayout=row_major, fractal=1024>
+
+    pto.tmatmul ins(%lhs, %rhs : !pto.tile_buf<left, 16x32xf16, blayout=row_major, slayout=row_major>, !pto.tile_buf<right, 32x32xf16, blayout=row_major, slayout=col_major>)
+                outs(%acc : !pto.tile_buf<acc, 16x32xf32, blayout=col_major, slayout=row_major, fractal=1024>)
+    pto.tstore_fp ins(%acc, %fp : !pto.tile_buf<acc, 16x32xf32, blayout=col_major, slayout=row_major, fractal=1024>, !pto.tile_buf<scaling, 1x32xf16>)
+                  outs(%dst : !pto.partition_tensor_view<1x32xf16>)
+    return
+  }
+}
+
+// READ-LABEL: func.func @tstore_fp_reads_acc_src
+// READ: pto.tmatmul
+// READ: pto.set_flag[<PIPE_M>, <PIPE_FIX>,
+// READ: pto.wait_flag[<PIPE_M>, <PIPE_FIX>,
+// READ: pto.tstore_fp
+
+// WRITE-LABEL: func.func @tstore_fp_writes_dst
+// WRITE: pto.tstore_fp
+// WRITE: pto.set_flag[<PIPE_FIX>, <PIPE_MTE2>,
+// WRITE: pto.wait_flag[<PIPE_FIX>, <PIPE_MTE2>,
+// WRITE: pto.tload

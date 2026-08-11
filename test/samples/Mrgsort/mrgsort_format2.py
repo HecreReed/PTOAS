@@ -15,11 +15,11 @@ Important notes for on-device execution:
   - This testcase covers all three forms in a single function entry so it fits
     the remote validation flow.
 """
-from mlir.ir import Context, Location, Module, InsertionPoint
-from mlir.dialects import func, arith, pto
-from mlir.ir import F32Type, IndexType, IntegerType
+from ptoas.mlir.ir import Context, Location, Module, InsertionPoint, UnitAttr
+from ptoas.mlir.dialects import func, arith, pto
+from ptoas.mlir.ir import F32Type, IndexType, IntegerType
 
-from mlir.ir import VectorType
+from ptoas.mlir.ir import VectorType
 
 
 def build():
@@ -64,6 +64,7 @@ def build():
             )
             with InsertionPoint(m.body):
                 fn = func.FuncOp("mrgsort_format2_kernel", fn_ty)
+                fn.operation.attributes["pto.entry"] = UnitAttr.get(ctx)
                 entry = fn.add_entry_block()
 
             with InsertionPoint(entry):

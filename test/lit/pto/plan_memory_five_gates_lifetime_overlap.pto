@@ -1,0 +1,69 @@
+// Copyright (c) 2026 Huawei Technologies Co., Ltd.
+// This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+// CANN Open Software License Agreement Version 2.0 (the "License").
+// Please refer to the License for details. You may not use this file except in compliance with the License.
+// THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+// INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+// See LICENSE in the root of the software repository for the full text of the License.
+
+// RUN: ptoas --pto-level=level2 --pto-arch=a3 --plan-memory-impl=modern \
+// RUN:   --emit-pto-ir --mlir-print-ir-after=pto-plan-memory %s 2>&1 \
+// RUN:   | FileCheck %s
+
+module attributes {"pto.target_arch" = "a3"} {
+  func.func @five_gates_lifetime_overlap(
+      %gm0 : !pto.ptr<f16>, %gm1 : !pto.ptr<f16>,
+      %out0 : !pto.ptr<f16>, %out1 : !pto.ptr<f16>) {
+    %c0 = arith.constant 0 : index
+    %c1 = arith.constant 1 : index
+    %c16 = arith.constant 16 : index
+    %gm0_view = pto.make_tensor_view %gm0,
+      shape = [%c1, %c1, %c1, %c16, %c16],
+      strides = [%c16, %c16, %c16, %c16, %c1]
+      : !pto.tensor_view<1x1x1x16x16xf16>
+    %gm1_view = pto.make_tensor_view %gm1,
+      shape = [%c1, %c1, %c1, %c16, %c16],
+      strides = [%c16, %c16, %c16, %c16, %c1]
+      : !pto.tensor_view<1x1x1x16x16xf16>
+    %out0_view = pto.make_tensor_view %out0,
+      shape = [%c1, %c1, %c1, %c16, %c16],
+      strides = [%c16, %c16, %c16, %c16, %c1]
+      : !pto.tensor_view<1x1x1x16x16xf16>
+    %out1_view = pto.make_tensor_view %out1,
+      shape = [%c1, %c1, %c1, %c16, %c16],
+      strides = [%c16, %c16, %c16, %c16, %c1]
+      : !pto.tensor_view<1x1x1x16x16xf16>
+    %gm0_part = pto.partition_view %gm0_view,
+      offsets = [%c0, %c0, %c0, %c0, %c0], sizes = [%c1, %c1, %c1, %c16, %c16]
+      : !pto.tensor_view<1x1x1x16x16xf16> -> !pto.partition_tensor_view<1x1x1x16x16xf16>
+    %gm1_part = pto.partition_view %gm1_view,
+      offsets = [%c0, %c0, %c0, %c0, %c0], sizes = [%c1, %c1, %c1, %c16, %c16]
+      : !pto.tensor_view<1x1x1x16x16xf16> -> !pto.partition_tensor_view<1x1x1x16x16xf16>
+    %out0_part = pto.partition_view %out0_view,
+      offsets = [%c0, %c0, %c0, %c0, %c0], sizes = [%c1, %c1, %c1, %c16, %c16]
+      : !pto.tensor_view<1x1x1x16x16xf16> -> !pto.partition_tensor_view<1x1x1x16x16xf16>
+    %out1_part = pto.partition_view %out1_view,
+      offsets = [%c0, %c0, %c0, %c0, %c0], sizes = [%c1, %c1, %c1, %c16, %c16]
+      : !pto.tensor_view<1x1x1x16x16xf16> -> !pto.partition_tensor_view<1x1x1x16x16xf16>
+    %buf0 = pto.alloc_tile : !pto.tile_buf<vec, 16x16xf16>
+    %buf1 = pto.alloc_tile : !pto.tile_buf<vec, 16x16xf16>
+
+    pto.tload ins(%gm0_part : !pto.partition_tensor_view<1x1x1x16x16xf16>)
+              outs(%buf0 : !pto.tile_buf<vec, 16x16xf16>) {layout = #pto.layout<nd>}
+    pto.tload ins(%gm1_part : !pto.partition_tensor_view<1x1x1x16x16xf16>)
+              outs(%buf1 : !pto.tile_buf<vec, 16x16xf16>) {layout = #pto.layout<nd>}
+
+    pto.tstore ins(%buf0 : !pto.tile_buf<vec, 16x16xf16>)
+               outs(%out0_part : !pto.partition_tensor_view<1x1x1x16x16xf16>) {layout = #pto.layout<nd>}
+    pto.tstore ins(%buf1 : !pto.tile_buf<vec, 16x16xf16>)
+               outs(%out1_part : !pto.partition_tensor_view<1x1x1x16x16xf16>) {layout = #pto.layout<nd>}
+    return
+  }
+}
+
+// CHECK-LABEL: func.func @five_gates_lifetime_overlap
+// CHECK-DAG: %[[ADDR0:.*]] = arith.constant 0 : i64
+// CHECK-DAG: %[[ADDR1:.*]] = arith.constant 512 : i64
+// CHECK: pto.alloc_tile addr = %[[ADDR0]]
+// CHECK: pto.alloc_tile addr = %[[ADDR1]]
+// CHECK-NOT: memref.alloc

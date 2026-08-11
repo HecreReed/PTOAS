@@ -1,0 +1,38 @@
+// RUN: ptoas --pto-arch=a5 --mlir-print-ir-after-all %s -o /dev/null 2>&1 | FileCheck %s
+
+module {
+  func.func @ptr_addrspace_aliases(
+      %l1: !pto.ptr<f16, l1>,
+      %l0a: !pto.ptr<f16, l0a>,
+      %l0b: !pto.ptr<f16, l0b>,
+      %l0c: !pto.ptr<f32, l0c>,
+      %bt: !pto.ptr<f32, bt>,
+      %fb: !pto.ptr<ui64, fb>) attributes {pto.kernel} {
+    return
+  }
+
+  func.func @ptr_addrspace_legacy_aliases(
+      %mat: !pto.ptr<f16, mat>,
+      %left: !pto.ptr<f16, left>,
+      %right: !pto.ptr<f16, right>,
+      %acc: !pto.ptr<f32, acc>,
+      %bias: !pto.ptr<f32, bias>,
+      %scaling: !pto.ptr<ui64, scaling>) attributes {pto.kernel} {
+    return
+  }
+}
+
+// CHECK-LABEL: func.func @ptr_addrspace_aliases(
+// CHECK-SAME: !pto.ptr<f16, l1>
+// CHECK-SAME: !pto.ptr<f16, l0a>
+// CHECK-SAME: !pto.ptr<f16, l0b>
+// CHECK-SAME: !pto.ptr<f32, l0c>
+// CHECK-SAME: !pto.ptr<f32, bt>
+// CHECK-SAME: !pto.ptr<ui64, fb>
+// CHECK-LABEL: func.func @ptr_addrspace_legacy_aliases(
+// CHECK-SAME: !pto.ptr<f16, l1>
+// CHECK-SAME: !pto.ptr<f16, l0a>
+// CHECK-SAME: !pto.ptr<f16, l0b>
+// CHECK-SAME: !pto.ptr<f32, l0c>
+// CHECK-SAME: !pto.ptr<f32, bt>
+// CHECK-SAME: !pto.ptr<ui64, fb>

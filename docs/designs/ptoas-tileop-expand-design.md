@@ -669,8 +669,8 @@ Fold pass 处理两族 intrinsic，通过严格的模式匹配将它们解析回
 
 ##### tile_buf 系列折叠
 
-每一个被折叠的 tile_buf intrinsic，其 `tile_buf` 操作数必须由如下固定链定义
-（由 `MemrefToTileBuf` pass 保证），否则 pass 直接报错并失败：
+每一个被折叠的 tile_buf intrinsic，其 `tile_buf` 操作数必须能解析到调用点
+的 materialized tile handle，否则 pass 直接报错并失败：
 
 ```mlir
 %0 = pto.pointer_cast(%addr) {config = ...}
@@ -882,7 +882,7 @@ def template_xxx(src0: pto.Tile, src1: pto.Tile, dst: pto.Tile):
 
 - Python DSL 模板编写和实例化的单元测试
   以当前 `lib/TileOps/tadd_template.py` 为例，新增/维护
-  `test/basic/expand_tile_op_tilelang.pto`
+  `test/lit/vpto/expand_tile_op_tilelang.pto`
   作为 `pto.tadd` TileLang 模板实例化的基础回归。该用例覆盖：
   1. `ExpandTileOp` 是否能匹配 `pto.tadd` 并调用 Python DSL helper；
   2. 模板实例化后的 `func.call` 是否能被 inline；
@@ -922,7 +922,7 @@ def template_xxx(src0: pto.Tile, src1: pto.Tile, dst: pto.Tile):
   // expands pto.tadd via the default TileLang Python DSL template
   // lib/TileOps/tadd_template.py.
   //
-  // Pipeline: MemrefToTileBuf -> ExpandTileOp -> InlineLibCall -> FoldTileBufIntrinsics
+  // Pipeline: PTOMaterializeTileHandles -> ExpandTileOp -> InlineLibCall -> FoldTileBufIntrinsics
   //
   // RUN: ptoas --pto-arch=a5 --pto-backend=vpto --enable-tile-op-expand %s -o - 2>/dev/null | FileCheck %s
 
@@ -958,38 +958,23 @@ def template_xxx(src0: pto.Tile, src1: pto.Tile, dst: pto.Tile):
     }
   }
   ```
-- Expand TileOp pass 的端到端测试（`pto.tadd` → Vector IR）
-  使用以下命令生成最终 LLVM IR，并继续交给 Bisheng 做设备侧编译校验：
+- Expand TileOp pass 的端到端测试（`pto.tadd` → VPTO fatobj）
+  使用以下命令生成最终 fatobj，并由 `ptoas` 内部完成 VPTO lowering、device 编译、stub 生成和打包：
 
   ```bash
-  ./build/tools/ptoas/ptoas test/basic/expand_tile_op_tilelang.pto \
+  ./build/tools/ptoas/ptoas test/lit/vpto/expand_tile_op_tilelang.pto \
     --pto-arch=a5 \
     --pto-backend=vpto \
     --enable-tile-op-expand \
-    --vpto-emit-hivm-llvm \
-    -o - \
-    > add.ll
-  ```
-
-  说明：
-  - `stdout` 中的最终产物是 textual LLVM IR，因此这里使用 `-o - > add.ll` 显式落盘。
-
-  随后将生成的 `add.ll` 交给 Bisheng：
-
-  ```bash
-  bisheng \
-    --target=hiipu64-hisilicon-cce \
-    -march=dav-c310-vec \
-    --cce-aicore-arch=dav-c310-vec \
-    --cce-aicore-only \
-    -c -x ir add.ll \
     -o add.o
   ```
 
-  若上述命令成功生成 `add.o`，则说明当前 `pto.tadd` 的向量库模板已经完成：
+  说明：
+  - `add.o` 是 host 可链接的 fatobj 对象。
+  - 若上述命令成功生成 `add.o`，则说明当前 `pto.tadd` 的向量库模板已经完成：
   - TileLang 模板实例化；
-  - `pto.tadd -> Vector IR -> LLVM IR` 的端到端 lowering；
-  - Bisheng 设备侧编译校验。
+  - `pto.tadd -> VPTO -> LLVM` 的端到端 lowering；
+  - device 编译、stub 生成和 fatobj 打包。
 - 融合场景测试（多个 Tile op 连续使用后的 VF Fusion）
 - 更新 `PTO_IR_manual.md` 和 TileLang DSL Guide
 
@@ -1016,17 +1001,13 @@ run_st.py
   │   └─ 配置 simulator / NPU 运行环境
   ├─ build_project()
   │   ├─ cmake -DRUN_MODE=... -DSOC_VERSION=... -DTEST_CASE=... -DPTOAS_BIN=...
-  │   ├─ ptoas: <op>.pto -> <op>_kernel.ll
+  │   ├─ ptoas: <op>.pto -> <op>_kernel.o
   │   │    flags:
   │   │      --pto-arch=a5
   │   │      --pto-backend=vpto
   │   │      --enable-insert-sync
   │   │      --enable-tile-op-expand
-  │   │      --vpto-emit-hivm-llvm
-  │   ├─ bisheng -x ir: <op>_kernel.ll -> <op>_kernel_device.o
-  │   ├─ repack_tilelang_kernel.sh:
-  │   │    <op>_kernel_device.o -> <op>_kernel_repack.o
-  │   ├─ bisheng -xcce: launch.cpp + <op>_kernel_repack.o -> lib<op>_kernel.so
+  │   ├─ bisheng -xcce: launch.cpp + <op>_kernel.o -> lib<op>_kernel.so
   │   └─ bisheng -xc++: main.cpp -> <op>
   ├─ run_gen_data()
   │   └─ 在 build/testcase/<testcase>/ 下生成每个 case 的 input/golden
@@ -1040,19 +1021,15 @@ run_st.py
 
 ```text
 <op>.pto
-  ──ptoas──> <op>_kernel.ll                    (LLVM IR)
-  ──bisheng -x ir──> <op>_kernel_device.o      (device-only 对象)
-  ──repack_tilelang_kernel.sh──> <op>_kernel_repack.o
-                                                (host-linkable fatobj)
-  ──bisheng -xcce launch.cpp + repack.o──> lib<op>_kernel.so
+  ──ptoas──> <op>_kernel.o                     (host-linkable fatobj)
+  ──bisheng -xcce launch.cpp + <op>_kernel.o──> lib<op>_kernel.so
                                                 (共享库)
   ──bisheng -xc++ main.cpp + .so──> <op>       (host 可执行文件)
 ```
 
-其中 repack 步骤是 TileLang ST 与 pto-isa ST 的核心区别：`ptoas + bisheng -x ir` 产出的
-`*_kernel_device.o` 是 device-only 对象，不能直接作为 host 侧链接输入。repack 脚本从
-`launch.cpp` 中抽取 kernel 声明生成 stub，通过 `-fcce-include-aibinary` 嵌入 device binary，
-产出 host 可链接的 fatobj。
+`ptoas` 直接产出 host 可链接的 fatobj。TileLang ST 不再维护 `kernel.ll -> device.o -> repack`
+这条旧中间链路，`launch.cpp` 只负责 host 侧 kernel 声明和 wrapper，最终由 `bisheng -xcce`
+把 `launch.cpp` 与 fatobj 链接成共享库。
 
 运行阶段同样是 ST 框架的一部分，而不是“编译完以后开发者手工处理”的额外步骤：
 
@@ -1146,7 +1123,7 @@ void LaunchTSUB_f32_16x64(float *a, float *b, float *c, void *stream) {
 ```
 
 关键约束：
-- `extern "C" __global__ AICORE void ...` 这一声明形态不可改变，repack 脚本用 sed 从中抽取 stub
+- `extern "C" __global__ AICORE void ...` 声明需要和 `.pto` 中的 `pto.kernel` 函数签名对应
 - kernel 参数类型和顺序必须与 `.pto` 中函数签名一致
 - `<<<1, nullptr, stream>>>` 表示单核启动
 
@@ -1271,9 +1248,10 @@ Python 侧的 case 名、dtype、shape、valid_shape、eps（以及必要时的 
 ##### 运行方式
 
 统一入口为 `test/tilelang_st/script/run_st.py`。前置条件：
-- `ptoas` 已编译（默认路径 `build/tools/ptoas/ptoas`，也可通过 `-p` 指定或 `PTOAS_BIN` 环境变量）
+- `ptoas` 已通过 `./quick_install.sh` 或 editable install 安装到当前
+  Python 环境（也可通过 `-p` 指定或 `PTOAS_BIN` 环境变量覆盖）
 - `ASCEND_HOME_PATH` 已设置
-- 建议先执行 `source scripts/ptoas_env.sh`
+- simulator / NPU 运行前已加载 CANN `setenv.bash`
 
 ```bash
 # simulator 上跑 tsub 全部 case
@@ -1333,8 +1311,7 @@ build/testcase/tsub/
 | 阶段 | 排查方向 |
 |---|---|
 | `ptoas` 编译失败 | 检查 `.pto` 语法、TileLang 模板是否匹配、是否缺少 `--enable-tile-op-expand` |
-| `bisheng -x ir` 失败 | 检查 `build/testcase/<op>/<op>_kernel.ll` 中的 LLVM IR |
-| repack 失败 | 检查 `launch.cpp` 中的 kernel 声明是否符合 `extern "C" __global__ AICORE void` 格式 |
+| fatobj 生成失败 | 检查 `ptoas` stderr、`.pto` 语义和 `pto.kernel` 函数签名 |
 | 链接失败 | 检查共享库符号名一致性、ACL 运行时依赖 |
 | kernel 执行失败 | 确认 `build/testcase/<op>/<case>/input*.bin` 是否已生成 |
 | compare fail | 先检查 `output.bin` vs `golden.bin` 差异，再检查 `.pto` 语义和参数顺序 |

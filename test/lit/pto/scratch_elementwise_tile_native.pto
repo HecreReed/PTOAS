@@ -1,0 +1,40 @@
+// Copyright (c) 2026 Huawei Technologies Co., Ltd.
+// This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+// CANN Open Software License Agreement Version 2.0 (the "License").
+// Please refer to the License for details. You may not use this file except in compliance with the License.
+// THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+// INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+// See LICENSE in the root of the software repository for the full text of the License.
+
+// RUN: ptoas --pto-level=level3 --pto-arch=a5 --mlir-print-ir-after=pto-resolve-reserved-buffers %s -o /dev/null 2>&1 | FileCheck %s --check-prefix=NATIVE
+// RUN: ptoas --pto-level=level3 --pto-arch=a3 --enable-insert-sync %s | FileCheck %s --check-prefix=EMITC
+
+module {
+  func.func private @tprelu_arg(%src: !pto.tile_buf<vec, 16x64xf32>, %slope: !pto.tile_buf<vec, 16x64xf32>, %tmp: !pto.tile_buf<loc=vec, dtype=ui8, rows=17, cols=32, v_row=16, v_col=8, blayout=row_major, slayout=none_box, fractal=512, pad=0>, %dst: !pto.tile_buf<vec, 16x64xf32>) {
+    pto.tprelu ins(%src, %slope, %tmp : !pto.tile_buf<vec, 16x64xf32>, !pto.tile_buf<vec, 16x64xf32>, !pto.tile_buf<loc=vec, dtype=ui8, rows=17, cols=32, v_row=16, v_col=8, blayout=row_major, slayout=none_box, fractal=512, pad=0>) outs(%dst : !pto.tile_buf<vec, 16x64xf32>)
+    return
+  }
+  func.func private @trem_arg(%a: !pto.tile_buf<vec, 1x16xf32>, %b: !pto.tile_buf<vec, 1x16xf32>, %tmp: !pto.tile_buf<vec, 2x16xf32>, %dst: !pto.tile_buf<vec, 1x16xf32>) {
+    pto.trem ins(%a, %b, %tmp : !pto.tile_buf<vec, 1x16xf32>, !pto.tile_buf<vec, 1x16xf32>, !pto.tile_buf<vec, 2x16xf32>) outs(%dst : !pto.tile_buf<vec, 1x16xf32>)
+    return
+  }
+  func.func private @trems_arg(%src: !pto.tile_buf<vec, 1x16xf32>, %tmp: !pto.tile_buf<vec, 1x16xf32>, %dst: !pto.tile_buf<vec, 1x16xf32>, %scalar: f32) {
+    pto.trems ins(%src, %scalar, %tmp : !pto.tile_buf<vec, 1x16xf32>, f32, !pto.tile_buf<vec, 1x16xf32>) outs(%dst : !pto.tile_buf<vec, 1x16xf32>)
+    return
+  }
+}
+
+// NATIVE-LABEL: @tprelu_arg
+// NATIVE: pto.tprelu
+// NATIVE-LABEL: @trem_arg
+// NATIVE: pto.trem
+// NATIVE-LABEL: @trems_arg
+// NATIVE: pto.trems
+// NATIVE-NOT: memref<
+
+// EMITC-LABEL: tprelu_arg(
+// EMITC: TPRELU(
+// EMITC-LABEL: trem_arg(
+// EMITC: TREM(
+// EMITC-LABEL: trems_arg(
+// EMITC: TREMS(

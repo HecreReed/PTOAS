@@ -1,0 +1,76 @@
+// Copyright (c) 2026 Huawei Technologies Co., Ltd.
+// This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+// CANN Open Software License Agreement Version 2.0 (the "License").
+// Please refer to the License for details. You may not use this file except in compliance with the License.
+// THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+// INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+// See LICENSE in the root of the software repository for the full text of the License.
+// RUN: ptoas --pto-arch=a5 %s 2>&1 | FileCheck %s --check-prefix=A5
+// RUN: not ptoas --pto-arch=a3 %s 2>&1 | FileCheck %s --check-prefix=A3ERR
+
+module attributes {"pto.device-spec" = "Ascend910B3"} {
+  func.func @tquant_mxfp8() attributes {pto.kernel_kind = #pto.kernel_kind<vector>} {
+    %src = pto.alloc_tile : !pto.tile_buf<vec, 32x32xf32>
+    %exp = pto.alloc_tile : !pto.tile_buf<vec, 1x32xui8>
+    %max = pto.alloc_tile : !pto.tile_buf<vec, 1x32xf32>
+    %scaling = pto.alloc_tile : !pto.tile_buf<vec, 1x32xf32>
+    %dst = pto.alloc_tile : !pto.tile_buf<vec, 32x32xui8>
+
+    pto.tquant.mx ins(%src : !pto.tile_buf<vec, 32x32xf32>)
+                  outs(%dst, %exp, %max, %scaling :
+                       !pto.tile_buf<vec, 32x32xui8>,
+                       !pto.tile_buf<vec, 1x32xui8>,
+                       !pto.tile_buf<vec, 1x32xf32>,
+                       !pto.tile_buf<vec, 1x32xf32>)
+                  {quant_type = #pto<quant_type MXFP8>}
+    return
+  }
+
+  func.func @tquant_mxfp4_nv() attributes {pto.kernel_kind = #pto.kernel_kind<vector>} {
+    %src = pto.alloc_tile : !pto.tile_buf<vec, 32x64xbf16>
+    %exp = pto.alloc_tile : !pto.tile_buf<vec, 1x64xui8>
+    %max = pto.alloc_tile : !pto.tile_buf<vec, 1x64xbf16>
+    %scaling = pto.alloc_tile : !pto.tile_buf<vec, 1x64xbf16>
+    %dst = pto.alloc_tile : !pto.tile_buf<vec, 32x32x!pto.f4E2M1x2>
+
+    pto.tquant.mx ins(%src : !pto.tile_buf<vec, 32x64xbf16>)
+                  outs(%dst, %exp, %max, %scaling :
+                       !pto.tile_buf<vec, 32x32x!pto.f4E2M1x2>,
+                       !pto.tile_buf<vec, 1x64xui8>,
+                       !pto.tile_buf<vec, 1x64xbf16>,
+                       !pto.tile_buf<vec, 1x64xbf16>)
+                  {quant_type = #pto<quant_type MXFP4_E2M1>,
+                   quantScaleAlg = #pto<quant_scale_alg nv>}
+    return
+  }
+
+  func.func @tquant_mxfp8_nz() attributes {pto.kernel_kind = #pto.kernel_kind<vector>} {
+    %src = pto.alloc_tile : !pto.tile_buf<vec, 32x32xf32>
+    %exp = pto.alloc_tile : !pto.tile_buf<vec, 1x32xui8>
+    %max = pto.alloc_tile : !pto.tile_buf<vec, 1x32xf32>
+    %scaling = pto.alloc_tile : !pto.tile_buf<vec, 1x32xf32>
+    %exp_zz = pto.alloc_tile : !pto.tile_buf<vec, 1x32xui8>
+    %dst = pto.alloc_tile : !pto.tile_buf<vec, 32x32xui8>
+
+    pto.tquant.mx ins(%src : !pto.tile_buf<vec, 32x32xf32>)
+                  outs(%dst, %exp, %max, %scaling, %exp_zz :
+                       !pto.tile_buf<vec, 32x32xui8>,
+                       !pto.tile_buf<vec, 1x32xui8>,
+                       !pto.tile_buf<vec, 1x32xf32>,
+                       !pto.tile_buf<vec, 1x32xf32>,
+                       !pto.tile_buf<vec, 1x32xui8>)
+                  {quant_type = #pto<quant_type MXFP8>,
+                   storeMode = #pto<vec_store_mode nz>}
+    return
+  }
+}
+
+// A5-LABEL: AICORE void tquant_mxfp8(
+// A5: TQUANT<pto::QuantType::MXFP8
+// A5-SAME: >(
+// A5-LABEL: AICORE void tquant_mxfp4_nv(
+// A5: TQUANT<pto::QuantType::MXFP4_E2M1
+// A5-SAME: pto::QuantScaleAlg::NV
+// A5-LABEL: AICORE void tquant_mxfp8_nz(
+// A5: TQUANT<pto::QuantType::MXFP8, pto::VecStoreMode::NZ
+// A3ERR: error: 'pto.tquant.mx' op tquant.mx is only supported on A5

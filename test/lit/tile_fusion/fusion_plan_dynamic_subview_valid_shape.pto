@@ -1,0 +1,39 @@
+// Copyright (c) 2026 Huawei Technologies Co., Ltd.
+// This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+// CANN Open Software License Agreement Version 2.0 (the "License").
+// Please refer to the License for details. You may not use this file except in compliance with the License.
+// THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+// INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+// See LICENSE in the root of the software repository for the full text of the License.
+
+// Guards dynamic valid-shape facts collected from pto.subview explicit valid
+// operands. The old static shape-only domain key could not prove this chain.
+//
+// RUN: ptoas --pto-arch=a5 --pto-level=level2 --enable-op-fusion --enable-shape-inference --emit-pto-ir %s --mlir-print-ir-after=pto-fusion-plan -o /dev/null 2>&1 | FileCheck %s
+
+module {
+  func.func @fusion_plan_dynamic_subview_valid_shape(
+      %src: !pto.tile_buf<vec, 4x16xf32, valid=4x16>,
+      %vrow: index,
+      %vcol: index) {
+    %c0 = arith.constant 0 : index
+    %sub = pto.subview %src[%c0, %c0] sizes [2, 8] valid [%vrow, %vcol] :
+      !pto.tile_buf<vec, 4x16xf32, valid=4x16> -> !pto.tile_buf<vec, 2x8xf32, valid=?x?>
+    %tmp0 = pto.alloc_tile valid_row = %vrow valid_col = %vcol : !pto.tile_buf<vec, 2x8xf32, valid=?x?>
+    %tmp1 = pto.alloc_tile valid_row = %vrow valid_col = %vcol : !pto.tile_buf<vec, 2x8xf32, valid=?x?>
+
+    pto.tadd ins(%sub, %sub : !pto.tile_buf<vec, 2x8xf32, valid=?x?>, !pto.tile_buf<vec, 2x8xf32, valid=?x?>) outs(%tmp0 : !pto.tile_buf<vec, 2x8xf32, valid=?x?>)
+    pto.tmul ins(%tmp0, %sub : !pto.tile_buf<vec, 2x8xf32, valid=?x?>, !pto.tile_buf<vec, 2x8xf32, valid=?x?>) outs(%tmp1 : !pto.tile_buf<vec, 2x8xf32, valid=?x?>)
+    return
+  }
+}
+
+// CHECK: // -----// IR Dump After FusionPlan (pto-fusion-plan) //----- //
+// CHECK-LABEL: func.func @fusion_plan_dynamic_subview_valid_shape(
+// CHECK: pto.tadd ins(%0, %0
+// CHECK-SAME: pto.fusion.group_id = 0 : i64
+// CHECK-SAME: pto.fusion.order = 0 : i64
+// CHECK: pto.tmul ins(%1, %0
+// CHECK-SAME: pto.fusion.group_id = 0 : i64
+// CHECK-SAME: pto.fusion.order = 1 : i64
+// CHECK: return

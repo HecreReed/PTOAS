@@ -1,0 +1,24 @@
+// Copyright (c) 2026 Huawei Technologies Co., Ltd.
+// This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+// CANN Open Software License Agreement Version 2.0 (the "License").
+// Please refer to the License for details. You may not use this file except in compliance with the License.
+// THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+// INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+// See LICENSE in the root of the software repository for the full text of the License.
+
+// RUN: ptoas --pto-arch=a3 --mlir-print-ir-after=pto-resolve-reserved-buffers %s 2>&1 | FileCheck %s --check-prefix=A3
+
+module {
+  func.func @tpow_tmp_form() {
+    %base = pto.alloc_tile : !pto.tile_buf<loc=vec, dtype=f32, rows=1, cols=16, v_row=1, v_col=16, blayout=row_major, slayout=none_box, fractal=512, pad=0>
+    %exp  = pto.alloc_tile : !pto.tile_buf<loc=vec, dtype=f32, rows=1, cols=16, v_row=1, v_col=16, blayout=row_major, slayout=none_box, fractal=512, pad=0>
+    %tmp  = pto.alloc_tile : !pto.tile_buf<loc=vec, dtype=f32, rows=1, cols=16, v_row=1, v_col=16, blayout=row_major, slayout=none_box, fractal=512, pad=0>
+    %dst  = pto.alloc_tile : !pto.tile_buf<loc=vec, dtype=f32, rows=1, cols=16, v_row=1, v_col=16, blayout=row_major, slayout=none_box, fractal=512, pad=0>
+    pto.tpow ins(%base, %exp, %tmp : !pto.tile_buf<loc=vec, dtype=f32, rows=1, cols=16, v_row=1, v_col=16, blayout=row_major, slayout=none_box, fractal=512, pad=0>, !pto.tile_buf<loc=vec, dtype=f32, rows=1, cols=16, v_row=1, v_col=16, blayout=row_major, slayout=none_box, fractal=512, pad=0>, !pto.tile_buf<loc=vec, dtype=f32, rows=1, cols=16, v_row=1, v_col=16, blayout=row_major, slayout=none_box, fractal=512, pad=0>) outs(%dst : !pto.tile_buf<loc=vec, dtype=f32, rows=1, cols=16, v_row=1, v_col=16, blayout=row_major, slayout=none_box, fractal=512, pad=0>)
+    return
+  }
+}
+
+// A3: pto.tpow ins([[BASE:%[0-9]+]], [[EXP:%[0-9]+]], [[TMP:%[0-9]+]] : !pto.tile_buf<vec, 1x16xf32
+// A3: outs([[DST:%[0-9]+]] : !pto.tile_buf<vec, 1x16xf32
+// A3: TPOW([[VDST:[_A-Za-z][_A-Za-z0-9]*]], [[VBASE:[_A-Za-z][_A-Za-z0-9]*]], [[VEXP:[_A-Za-z][_A-Za-z0-9]*]], [[VTMP:[_A-Za-z][_A-Za-z0-9]*]]);

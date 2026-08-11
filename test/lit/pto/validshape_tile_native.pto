@@ -1,0 +1,42 @@
+// Copyright (c) 2026 Huawei Technologies Co., Ltd.
+// This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+// CANN Open Software License Agreement Version 2.0 (the "License").
+// Please refer to the License for details. You may not use this file except in compliance with the License.
+// THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+// INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+// See LICENSE in the root of the software repository for the full text of the License.
+
+// RUN: ptoas --pto-level=level3 --pto-arch=a5 \
+// RUN:   --mlir-print-ir-after=pto-resolve-reserved-buffers %s -o - 2>&1 \
+// RUN:   | FileCheck %s --check-prefix=NATIVE
+
+module attributes {pto.target_arch = "a5"} {
+  func.func private @get_validshape_arg(
+      %src: !pto.tile_buf<loc=vec, dtype=f32, rows=16, cols=16,
+                         v_row=?, v_col=?, blayout=row_major,
+                         slayout=none_box, fractal=512, pad=0>) {
+    %c0_i64 = arith.constant 0 : i64
+    %c16 = arith.constant 16 : index
+    %local = pto.alloc_tile addr = %c0_i64 valid_row = %c16 valid_col = %c16
+      : !pto.tile_buf<loc=vec, dtype=f32, rows=16, cols=16,
+                      v_row=?, v_col=?, blayout=row_major,
+                      slayout=none_box, fractal=512, pad=0>
+    %row, %col = pto.get_validshape %src
+      : !pto.tile_buf<loc=vec, dtype=f32, rows=16, cols=16,
+                      v_row=?, v_col=?, blayout=row_major,
+                      slayout=none_box, fractal=512, pad=0>
+    pto.set_validshape %local, %row, %col
+      : !pto.tile_buf<loc=vec, dtype=f32, rows=16, cols=16,
+                      v_row=?, v_col=?, blayout=row_major,
+                      slayout=none_box, fractal=512, pad=0>
+    return
+  }
+}
+
+// NATIVE-LABEL: func.func private @get_validshape_arg(
+// NATIVE-SAME: !pto.tile_buf<vec, 16x16xf32, valid=?x?>)
+// NATIVE: %[[ROW:.*]], %[[COL:.*]] = pto.get_validshape %arg0
+// NATIVE-SAME: !pto.tile_buf<vec, 16x16xf32, valid=?x?>
+// NATIVE: pto.set_validshape {{.*}}, %[[ROW]], %[[COL]]
+// NATIVE: return
+// NATIVE-NOT: memref<

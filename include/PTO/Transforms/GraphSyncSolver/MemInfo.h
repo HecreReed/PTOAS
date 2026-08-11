@@ -14,63 +14,66 @@
 #include "PTO/IR/PTO.h"
 #include "mlir/Interfaces/LoopLikeInterface.h"
 #include "llvm/ADT/SmallVector.h"
+#include <climits>
+#include <pthread.h>
 
 namespace mlir::pto::syncsolver {
 
 struct PointerLikeInfo {
-    Operation* op{nullptr};
-    llvm::SmallVector<int64_t> addresses;
-    std::optional<int64_t> allocateSize;
-    std::optional<pto::AddressSpace> addressSpace;
-    LoopLikeOpInterface parentLoop{nullptr};
+  Operation *op{nullptr};
+  llvm::SmallVector<int64_t> addresses;
+  std::optional<int64_t> allocateSize;
+  std::optional<pto::AddressSpace> addressSpace;
+  LoopLikeOpInterface parentLoop{nullptr};
+  bool aliasesUnknownRange{false};
 
-    PointerLikeInfo() = default;
-    explicit PointerLikeInfo(Operation* op) : op(op) {}
+  PointerLikeInfo() = default;
+  explicit PointerLikeInfo(Operation *op) : op(op) {}
 
-    std::string str() const;
+  std::string str() const;
 
-    static bool checkConflict(
-        const PointerLikeInfo& pointerLikeInfo1, const PointerLikeInfo& pointerLikeInfo2,
-        std::optional<int64_t> lcmLen = {}, std::optional<int64_t> eventIdNum = {});
+  static bool checkConflict(const PointerLikeInfo &pointerLikeInfo1,
+                            const PointerLikeInfo &pointerLikeInfo2,
+                            std::optional<int64_t> lcmLen = {},
+                            std::optional<int64_t> eventIdNum = {});
 };
 
 struct MemInfo {
-    Value value{nullptr};
-    std::optional<PointerLikeInfo> pointerLikeInfo;
-    bool isWorkSpace{false};
+  Value value{nullptr};
+  std::optional<PointerLikeInfo> pointerLikeInfo;
+  bool isWorkSpace{false};
 
-    MemInfo() = default;
-    explicit MemInfo(Value value, bool isWorkSpace = false) : value(value), isWorkSpace(isWorkSpace) {}
+  MemInfo() = default;
+  explicit MemInfo(Value value, bool isWorkSpace = false)
+      : value(value), isWorkSpace(isWorkSpace) {}
 
-    explicit MemInfo(Value value, PointerLikeInfo pointerLikeInfo, bool isWorkSpace = false)
-        : value(value), pointerLikeInfo(pointerLikeInfo), isWorkSpace(isWorkSpace)
-    {}
+  explicit MemInfo(Value value, PointerLikeInfo pointerLikeInfo,
+                   bool isWorkSpace = false)
+      : value(value), pointerLikeInfo(pointerLikeInfo),
+        isWorkSpace(isWorkSpace) {}
 
-    int64_t getSz() const
-    {
-        if (pointerLikeInfo.has_value()) {
-            return pointerLikeInfo->addresses.size();
-        }
-        if (value != nullptr) {
-            return 1;
-        }
-        return 0;
+  int64_t getSz() const {
+    if (pointerLikeInfo.has_value()) {
+      return pointerLikeInfo->addresses.size();
     }
+    if (value != nullptr) {
+      return 1;
+    }
+    return 0;
+  }
 
-    std::string str() const;
+  std::string str() const;
 
-    static bool checkConflict(
-        const MemInfo& memInfo1, const MemInfo& memInfo2, std::optional<int64_t> lcmLen = {},
-        std::optional<int64_t> eventIdNum = {});
+  static bool checkConflict(const MemInfo &memInfo1, const MemInfo &memInfo2,
+                            std::optional<int64_t> lcmLen = {},
+                            std::optional<int64_t> eventIdNum = {});
 };
 
-llvm::SmallVector<int64_t> getAddresses(const llvm::SmallVector<Value>& addrs);
-
-PointerLikeInfo getPointerLikeInfo(pto::PointerCastOp pointerCastOp);
+llvm::SmallVector<int64_t> getAddresses(const llvm::SmallVector<Value> &addrs);
 
 MemInfo getMemInfo(Value val);
 
-MemInfo getMemInfo(const llvm::SmallVector<int64_t>& addrs);
+MemInfo getMemInfo(const llvm::SmallVector<int64_t> &addrs);
 
 bool isWorkSpaceFuncArgument(Value value);
 

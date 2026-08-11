@@ -1,13 +1,13 @@
 // RUN: ptoas --pto-arch=a5 %s | FileCheck %s
 
 module {
-  func.func @tsync_emitc(%src0: memref<32x32xf32, #pto.address_space<gm>>,
-                         %src1: memref<32x32xf32, #pto.address_space<gm>>) {
-    pto.tsync ins(%src0, %src1 : memref<32x32xf32, #pto.address_space<gm>>, memref<32x32xf32, #pto.address_space<gm>>)
+  func.func @tsync_emitc(%src0: !pto.partition_tensor_view<32x32xf32>,
+                         %src1: !pto.partition_tensor_view<32x32xf32>) {
+    pto.tsync ins(%src0, %src1 : !pto.partition_tensor_view<32x32xf32>, !pto.partition_tensor_view<32x32xf32>)
 
     return
   }
 }
 
-// CHECK-LABEL: __global__ AICORE void tsync_emitc(
+// CHECK-LABEL: AICORE void tsync_emitc(
 // CHECK: TSYNC(

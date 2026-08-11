@@ -16,7 +16,7 @@ namespace mlir {
 class DialectRegistry;
 
 namespace pto {
-void registerBufferizableOpInterfaceExternalModels(DialectRegistry& registry);
+void registerBufferizableOpInterfaceExternalModels(DialectRegistry &registry);
 } // namespace pto
 } // namespace mlir
 

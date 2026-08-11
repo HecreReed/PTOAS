@@ -1,0 +1,89 @@
+// RUN: ptoas --pto-arch=a5 --pto-backend=vpto --emit-vpto %s -o - | FileCheck %s
+
+module attributes {pto.target_arch = "a5"} {
+  module attributes {pto.kernel_kind = #pto.kernel_kind<vector>} {
+  func.func @auto_vecscope_atomic_control_flow(%cond: i1) {
+    %c0 = arith.constant 0 : index
+    %c1 = arith.constant 1 : index
+    %c2 = arith.constant 2 : index
+    %c64 = arith.constant 64 : index
+    %c128 = arith.constant 128 : index
+    %c0_i64 = arith.constant 0 : i64
+    %c16_i32 = arith.constant 16 : i32
+    %cst = arith.constant 1.000000e+00 : f32
+    %ub = pto.castptr %c0_i64 : i64 -> !pto.ptr<f32, ub>
+
+    %mask0, %tail0 = pto.plt_b32 %c16_i32 : i32 -> !pto.mask<b32>, i32
+    scf.for %i = %c0 to %c2 step %c1 {
+      %vec0 = pto.vlds %ub[%i] : !pto.ptr<f32, ub> -> !pto.vreg<64xf32>
+      %sum0 = pto.vadds %vec0, %cst, %mask0 : !pto.vreg<64xf32>, f32, !pto.mask<b32> -> !pto.vreg<64xf32>
+      pto.vsts %sum0, %ub[%i], %mask0 : !pto.vreg<64xf32>, !pto.ptr<f32, ub>, !pto.mask<b32>
+    }
+    scf.if %cond {
+      %vec1 = pto.vlds %ub[%c64] : !pto.ptr<f32, ub> -> !pto.vreg<64xf32>
+      %sum1 = pto.vadds %vec1, %cst, %mask0 : !pto.vreg<64xf32>, f32, !pto.mask<b32> -> !pto.vreg<64xf32>
+      pto.vsts %sum1, %ub[%c64], %mask0 : !pto.vreg<64xf32>, !pto.ptr<f32, ub>, !pto.mask<b32>
+    }
+    %vec2 = pto.vlds %ub[%c128] : !pto.ptr<f32, ub> -> !pto.vreg<64xf32>
+    pto.vsts %vec2, %ub[%c128], %mask0 : !pto.vreg<64xf32>, !pto.ptr<f32, ub>, !pto.mask<b32>
+    return
+  }
+
+  func.func @auto_vecscope_recursive_control_flow_fallback(%cond: i1) {
+    %c0 = arith.constant 0 : index
+    %c64 = arith.constant 64 : index
+    %c0_i64 = arith.constant 0 : i64
+    %c16_i32 = arith.constant 16 : i32
+    %cst = arith.constant 1.000000e+00 : f32
+    %ub = pto.castptr %c0_i64 : i64 -> !pto.ptr<f32, ub>
+
+    scf.if %cond {
+      %mask0 = pto.pset_b32 "PAT_ALL" : !pto.mask<b32>
+      %vec0 = pto.vlds %ub[%c0] : !pto.ptr<f32, ub> -> !pto.vreg<64xf32>
+      pto.vsts %vec0, %ub[%c0], %mask0 : !pto.vreg<64xf32>, !pto.ptr<f32, ub>, !pto.mask<b32>
+
+      pto.barrier #pto.pipe<PIPE_ALL>
+
+      %mask1, %tail = pto.plt_b32 %c16_i32 : i32 -> !pto.mask<b32>, i32
+      %vec1 = pto.vlds %ub[%c64] : !pto.ptr<f32, ub> -> !pto.vreg<64xf32>
+      %sum1 = pto.vadds %vec1, %cst, %mask1 : !pto.vreg<64xf32>, f32, !pto.mask<b32> -> !pto.vreg<64xf32>
+      pto.vsts %sum1, %ub[%c64], %mask1 : !pto.vreg<64xf32>, !pto.ptr<f32, ub>, !pto.mask<b32>
+    }
+    return
+  }
+  }
+}
+
+// CHECK-LABEL: func.func @auto_vecscope_atomic_control_flow
+// CHECK-DAG: %[[LOOP_LB:.*]] = arith.constant 0 : i16
+// CHECK-DAG: %[[LOOP_UB:.*]] = arith.constant 2 : i16
+// CHECK-DAG: %[[LOOP_STEP:.*]] = arith.constant 1 : i16
+// CHECK: pto.vecscope {
+// CHECK: pto.plt_b32
+// CHECK: scf.for %[[LOOP_IV:.*]] = %[[LOOP_LB]] to %[[LOOP_UB]] step %[[LOOP_STEP]]{{.*}}: i16 {
+// CHECK-NEXT: arith.index_cast %[[LOOP_IV]] : i16 to index
+// CHECK: pto.vlds
+// CHECK: pto.vadds
+// CHECK: pto.vsts
+// CHECK: scf.if
+// CHECK: pto.vlds
+// CHECK: pto.vadds
+// CHECK: pto.vsts
+// CHECK: pto.vlds
+// CHECK: pto.vsts
+// CHECK-NEXT: }
+
+// CHECK-LABEL: func.func @auto_vecscope_recursive_control_flow_fallback
+// CHECK: scf.if
+// CHECK-NEXT: pto.vecscope {
+// CHECK: pto.pset_b32
+// CHECK: pto.vlds
+// CHECK: pto.vsts
+// CHECK-NEXT: }
+// CHECK-NEXT: pto.barrier
+// CHECK-NEXT: pto.vecscope {
+// CHECK: pto.plt_b32
+// CHECK: pto.vlds
+// CHECK: pto.vadds
+// CHECK: pto.vsts
+// CHECK-NEXT: }

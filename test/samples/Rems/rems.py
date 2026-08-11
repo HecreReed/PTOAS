@@ -6,9 +6,9 @@
 # INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
 # See LICENSE in the root of the software repository for the full text of the License.
 
-from mlir.ir import Context, Location, Module, InsertionPoint
-from mlir.dialects import func, arith, pto
-from mlir.ir import F32Type, IndexType
+from ptoas.mlir.ir import Context, Location, Module, InsertionPoint, UnitAttr
+from ptoas.mlir.dialects import func, arith, pto
+from ptoas.mlir.ir import F32Type, IndexType
 
 
 def build():
@@ -31,10 +31,14 @@ def build():
             fractal_ab_size = pto.TileConfig.fractalABSize
             cfg = pto.TileBufConfigAttr.get(bl, sl, fractal_ab_size, pd, ctx)
             tile_buf_32 = pto.TileBufType.get([32, 32], f32, vec, [32, 32], cfg, ctx)
+            # A2/A3 TREMS workspace contract only needs 1 valid row and
+            # validCol covering dst.validCol.
+            tile_buf_tmp = pto.TileBufType.get([1, 32], f32, vec, [1, 32], cfg, ctx)
 
             fn_ty = func.FunctionType.get([ptr_f32, ptr_f32], [])
             with InsertionPoint(m.body):
                 fn = func.FuncOp("rems_kernel_2d", fn_ty)
+                fn.operation.attributes["pto.entry"] = UnitAttr.get(ctx)
                 entry = fn.add_entry_block()
 
             with InsertionPoint(entry):
@@ -56,7 +60,7 @@ def build():
 
                 # %5/%6/%7 = pto.alloc_tile : <32x32xf32>
                 tb0 = pto.AllocTileOp(tile_buf_32).result
-                tmp = pto.AllocTileOp(tile_buf_32).result
+                tmp = pto.AllocTileOp(tile_buf_tmp).result
                 tb1 = pto.AllocTileOp(tile_buf_32).result
 
                 pto.TLoadOp(None, sv0, tb0)  # result=None

@@ -1,0 +1,32 @@
+// Copyright (c) 2026 Huawei Technologies Co., Ltd.
+// This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+// CANN Open Software License Agreement Version 2.0 (the "License").
+// Please refer to the License for details. You may not use this file except in compliance with the License.
+// THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+// INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+// See LICENSE in the root of the software repository for the full text of the License.
+
+// Guard: public VPTO helper functions without pto.entry must not be inferred as
+// AICORE kernel entries, otherwise Bisheng emits a PARA_BASE entry prologue for
+// normal device-callable helper arguments.
+// RUN: ( mkdir -p %T && ptoas --pto-arch=a5 --pto-backend=vpto %s -o %t --mlir-print-ir-after=convert-func-to-llvm 2>&1 || true ) | FileCheck %s
+
+module attributes {pto.backend = "vpto", pto.kernel_kind = #pto.kernel_kind<vector>, pto.target_arch = "a5"} {
+  func.func @entry(%src: !pto.ptr<f32, ub>, %dst: !pto.ptr<f32, ub>)
+      attributes {pto.entry} {
+    func.call @helper(%src, %dst) : (!pto.ptr<f32, ub>, !pto.ptr<f32, ub>) -> ()
+    return
+  }
+
+  func.func public @helper(%src: !pto.ptr<f32, ub>, %dst: !pto.ptr<f32, ub>) {
+    %c0 = arith.constant 0 : index
+    %mask = pto.pset_b32 "PAT_ALL" : !pto.mask<b32>
+    %vec = pto.vlds %src[%c0] : !pto.ptr<f32, ub> -> !pto.vreg<64xf32>
+    pto.vsts %vec, %dst[%c0], %mask {dist = "NORM_B32"} : !pto.vreg<64xf32>, !pto.ptr<f32, ub>, !pto.mask<b32>
+    return
+  }
+}
+
+// CHECK-LABEL: llvm.func @entry_mix_aiv
+// CHECK-SAME: attributes {pto.entry}
+// CHECK-LABEL: llvm.func @helper

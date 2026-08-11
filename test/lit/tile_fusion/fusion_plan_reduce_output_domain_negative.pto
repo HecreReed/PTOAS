@@ -1,0 +1,35 @@
+// Copyright (c) 2026 Huawei Technologies Co., Ltd.
+// This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+// CANN Open Software License Agreement Version 2.0 (the "License").
+// Please refer to the License for details. You may not use this file except in compliance with the License.
+// THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+// INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+// See LICENSE in the root of the software repository for the full text of the License.
+
+// Guards the reduce-domain split: a row reduction iterates over the input
+// domain, while a consumer of the reduced row vector iterates over the output
+// domain. Direct dataflow alone must not put those ops in one fusion group.
+//
+// RUN: ptoas --pto-arch=a5 --pto-level=level2 --enable-op-fusion --enable-shape-inference --emit-pto-ir %s --mlir-print-ir-after=pto-fusion-plan -o /dev/null 2>&1 | FileCheck %s
+
+module {
+  func.func @fusion_plan_reduce_output_domain_negative(
+      %src: !pto.tile_buf<vec, 32x32xf32>,
+      %row: !pto.tile_buf<vec, 32x8xf32, valid=32x1>) {
+    %tmp = pto.alloc_tile : !pto.tile_buf<vec, 32x32xf32>
+    %reduce = pto.alloc_tile : !pto.tile_buf<vec, 32x8xf32, valid=32x1>
+    %out = pto.alloc_tile : !pto.tile_buf<vec, 32x8xf32, valid=32x1>
+
+    pto.trowsum ins(%src, %tmp : !pto.tile_buf<vec, 32x32xf32>, !pto.tile_buf<vec, 32x32xf32>) outs(%reduce : !pto.tile_buf<vec, 32x8xf32, valid=32x1>)
+    pto.tadd ins(%reduce, %row : !pto.tile_buf<vec, 32x8xf32, valid=32x1>, !pto.tile_buf<vec, 32x8xf32, valid=32x1>) outs(%out : !pto.tile_buf<vec, 32x8xf32, valid=32x1>)
+    return
+  }
+}
+
+// CHECK: // -----// IR Dump After FusionPlan (pto-fusion-plan) //----- //
+// CHECK-LABEL: func.func @fusion_plan_reduce_output_domain_negative(
+// CHECK: pto.trowsum
+// CHECK-NOT: pto.fusion.group_id
+// CHECK: pto.tadd
+// CHECK-NOT: pto.fusion.group_id
+// CHECK: return

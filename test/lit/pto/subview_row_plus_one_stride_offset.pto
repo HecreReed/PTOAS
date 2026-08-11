@@ -1,13 +1,13 @@
-// RUN: ptoas %s 2>&1 --mlir-print-ir-after=pto-view-to-memref | FileCheck %s
+// RUN: ptoas %s 2>&1 --emit-pto-ir | FileCheck %s
 
 module {
   func.func @subview_row_plus_one_stride_offset(
-      %src: memref<16x16xf32, #pto.address_space<gm>>,
-      %dst: memref<8x8xf32, #pto.address_space<gm>>) {
+      %src: !pto.partition_tensor_view<16x16xf32>,
+      %dst: !pto.partition_tensor_view<8x8xf32>) {
     %c8 = arith.constant 8 : index
 
     %tile = pto.alloc_tile : !pto.tile_buf<loc=vec, dtype=f32, rows=16, cols=16, v_row=16, v_col=16, blayout=row_major, slayout=none_box, fractal=512, pad=0, compact=2>
-    pto.tload ins(%src : memref<16x16xf32, #pto.address_space<gm>>)
+    pto.tload ins(%src : !pto.partition_tensor_view<16x16xf32>)
              outs(%tile : !pto.tile_buf<loc=vec, dtype=f32, rows=16, cols=16, v_row=16, v_col=16, blayout=row_major, slayout=none_box, fractal=512, pad=0, compact=2>)
 
     %s = pto.subview %tile[%c8, %c8] sizes [8, 8] :
@@ -15,12 +15,13 @@ module {
       -> !pto.tile_buf<loc=vec, dtype=f32, rows=8, cols=8, v_row=8, v_col=8, blayout=row_major, slayout=none_box, fractal=512, pad=0, compact=2>
 
     pto.tstore ins(%s : !pto.tile_buf<loc=vec, dtype=f32, rows=8, cols=8, v_row=8, v_col=8, blayout=row_major, slayout=none_box, fractal=512, pad=0, compact=2>)
-              outs(%dst : memref<8x8xf32, #pto.address_space<gm>>)
+              outs(%dst : !pto.partition_tensor_view<8x8xf32>)
     return
   }
 }
 
 // RowPlusOne: major stride should be 17 (not 16).
-// CHECK-DAG: memref.alloc() : memref<16x16xf32, strided<[17, 1]>, #pto.address_space<vec>>
-// CHECK-DAG: memref.subview {{.*}} to memref<8x8xf32, strided<[17, 1], offset: ?>, #pto.address_space<vec>>
-// CHECK-DAG: Tile<TileType::Vec, float, 16, 16, BLayout::RowMajor, 8, 8, SLayout::NoneBox, 512, PadValue::Null, CompactMode::RowPlusOne>
+// CHECK: pto.alloc_tile addr = %c0_i64 : !pto.tile_buf<vec, 16x16xf32, compact=2>
+// CHECK: %c17_i64 = arith.constant 17 : i64
+// CHECK: arith.muli %{{.*}}, %c17_i64 : i64
+// CHECK: pto.alloc_tile addr = %{{.*}} {pto.view_semantics = "subview"} : !pto.tile_buf<vec, 16x16xf32, valid=8x8, compact=2>

@@ -6,7 +6,8 @@
 # INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
 # See LICENSE in the root of the software repository for the full text of the License.
 
-from mlir.ir import (
+from ptoas.mlir.ir import (
+    UnitAttr,
     Context,
     Location,
     Module,
@@ -14,8 +15,8 @@ from mlir.ir import (
     F16Type,
     IndexType,
 )
-from mlir.dialects import func, arith, scf, pto
-from mlir.dialects.arith import CmpIPredicate
+from ptoas.mlir.dialects import func, arith, scf, pto
+from ptoas.mlir.dialects.arith import CmpIPredicate
 
 
 def _idx_const(v: int):
@@ -46,6 +47,7 @@ def build():
             fn_ty = func.FunctionType.get([ptr_f16, ptr_f16], [])
             with InsertionPoint(m.body):
                 fn = func.FuncOp("test_loop_nest_sync", fn_ty)
+                fn.operation.attributes["pto.entry"] = UnitAttr.get(ctx)
                 entry = fn.add_entry_block()
 
             with InsertionPoint(entry):

@@ -1,0 +1,23 @@
+// Copyright (c) 2026 Huawei Technologies Co., Ltd.
+// This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+// CANN Open Software License Agreement Version 2.0 (the "License").
+// Please refer to the License for details. You may not use this file except in compliance with the License.
+// THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+// INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+// See LICENSE in the root of the software repository for the full text of the License.
+
+// RUN: not ptoas --pto-arch=a5 --pto-backend=vpto %s 2>&1 | FileCheck %s
+
+// CHECK: error: 'pto.vmulscvt' op part must be EVEN or ODD
+
+module attributes {pto.target_arch = "a5"} {
+  func.func @vmulscvt_rejects_p0(%seed: f32) {
+    pto.vecscope {
+      %mask = pto.pset_b32 "PAT_ALL" : !pto.mask<b32>
+      %src = pto.vdup %seed, %mask : f32, !pto.mask<b32> -> !pto.vreg<64xf32>
+      %scale = arith.constant 1.000000e+00 : f32
+      %bad = pto.vmulscvt %src, %scale, %mask, "A", "P0" : !pto.vreg<64xf32>, f32, !pto.mask<b32> -> !pto.vreg<128xf16>
+    }
+    return
+  }
+}

@@ -1,0 +1,38 @@
+// Copyright (c) 2026 Huawei Technologies Co., Ltd.
+// This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+// CANN Open Software License Agreement Version 2.0 (the "License").
+// Please refer to the License for details. You may not use this file except in compliance with the License.
+// THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+// INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+// See LICENSE in the root of the software repository for the full text of the License.
+
+// RUN: ptoas --enable-insert-sync %s 2>/dev/null > /dev/null
+
+// Smoke test that the dynamic-slot path still compiles end-to-end through
+// InsertSync and the later PTOResolveBufferSelect lowering. InsertSync runs
+// before PTOResolveBufferSelect, so it models the dynamic slot at
+// `pto.multi_tile_get` rather than seeing the lowering-time arith.select chain.
+// We don't FileCheck specific flag patterns here -- only that the pipeline runs
+// to a clean exit code.
+
+module {
+  func.func @dyn_slot_compiles(
+      %gm : !pto.partition_tensor_view<16x16xf16>, %n : index) {
+    %c0 = arith.constant 0 : index
+    %c1 = arith.constant 1 : index
+    %c2 = arith.constant 2 : index
+
+    %mb = pto.alloc_multi_tile
+        : !pto.multi_tile_buf<vec, 16x16xf16, count=2>
+
+    scf.for %i = %c0 to %n step %c1 {
+      %idx = arith.remui %i, %c2 : index
+      %s = pto.multi_tile_get %mb[%idx]
+          : !pto.multi_tile_buf<vec, 16x16xf16, count=2>
+         -> !pto.tile_buf<vec, 16x16xf16>
+      pto.tload ins(%gm : !pto.partition_tensor_view<16x16xf16>)
+                outs(%s  : !pto.tile_buf<vec, 16x16xf16>)
+    }
+    return
+  }
+}

@@ -1,7 +1,9 @@
-// RUN: ptoas --pto-arch=a3 --mlir-print-ir-after=pto-materialize-tile-handles %s -o /dev/null 2>&1 | FileCheck %s --check-prefix=IR
+// RUN: ptoas --pto-arch=a3 --mlir-print-ir-after=pto-resolve-reserved-buffers %s -o /dev/null 2>&1 | FileCheck %s --check-prefixes=NATIVE,COMMON
+// RUN: ptoas --pto-arch=a3 --mlir-print-ir-before=pto-inline-backend-helpers %s -o /dev/null 2>&1 | FileCheck %s --check-prefixes=MATERIALIZED,COMMON
 // RUN: ptoas --pto-arch=a3 %s -o - 2>&1 | FileCheck %s --check-prefix=EMITC
+// RUN: ptoas --pto-arch=a5 --pto-backend=vpto --emit-vpto %s -o - 2>&1 | FileCheck %s --check-prefix=VPTO
 
-module {
+module attributes {pto.kernel_kind = #pto.kernel_kind<vector>} {
   func.func @control_flow_result_tile_materialization(%cond: i1) {
     %src = pto.alloc_tile : !pto.tile_buf<vec, 16x16xf16>
     %add = pto.alloc_tile : !pto.tile_buf<vec, 16x16xf16>
@@ -48,20 +50,22 @@ module {
   }
 }
 
-// IR: %[[SEL:.*]] = scf.if {{.*}} -> (!pto.tile_buf<vec, 16x16xf16>) {
-// IR:   pto.tadd
-// IR:   scf.yield %{{.*}} : !pto.tile_buf<vec, 16x16xf16>
-// IR: } else {
-// IR:   pto.tmul
-// IR:   scf.yield %{{.*}} : !pto.tile_buf<vec, 16x16xf16>
-// IR: }
-// IR: pto.tadd ins(%[[SEL]], %[[SEL]]
-// IR-LABEL: func.func @loop_carried_tile_materialization
-// IR: %[[RES:.*]] = scf.for {{.*}} -> (!pto.tile_buf<vec, 16x16xf16>) {
-// IR:   pto.tadd
-// IR:   scf.yield %{{.*}} : !pto.tile_buf<vec, 16x16xf16>
-// IR: }
-// IR: pto.tmul ins(%[[RES]], %[[RES]]
+// NATIVE: IR Dump After PTOResolveReservedBuffers
+// MATERIALIZED: IR Dump Before PTOInlineBackendHelpers
+// COMMON: %[[SEL:.*]] = scf.if {{.*}} -> (!pto.tile_buf<vec, 16x16xf16>) {
+// COMMON:   pto.tadd
+// COMMON:   scf.yield %{{.*}} : !pto.tile_buf<vec, 16x16xf16>
+// COMMON: } else {
+// COMMON:   pto.tmul
+// COMMON:   scf.yield %{{.*}} : !pto.tile_buf<vec, 16x16xf16>
+// COMMON: }
+// COMMON: pto.tadd ins(%[[SEL]], %[[SEL]]
+// COMMON-LABEL: func.func @loop_carried_tile_materialization
+// COMMON: %[[RES:.*]] = scf.for {{.*}} -> (!pto.tile_buf<vec, 16x16xf16>) {
+// COMMON:   pto.tadd
+// COMMON:   scf.yield %{{.*}} : !pto.tile_buf<vec, 16x16xf16>
+// COMMON: }
+// COMMON: pto.tmul ins(%[[RES]], %[[RES]]
 
 // EMITC-LABEL: AICORE void control_flow_result_tile_materialization
 // EMITC: if (
@@ -73,3 +77,11 @@ module {
 // EMITC: for (
 // EMITC: TADD(
 // EMITC: TMUL(
+
+// VPTO-LABEL: func.func @control_flow_result_tile_materialization
+// VPTO: %[[SELECTED:.*]] = arith.select {{.*}} : !pto.tile_buf<vec, 16x16xf16>
+// VPTO: pto.tile_buf_addr %[[SELECTED]] : !pto.tile_buf<vec, 16x16xf16> -> !pto.ptr<f16, ub>
+// VPTO-LABEL: func.func @loop_carried_tile_materialization
+// VPTO: %[[RESULT:.*]] = scf.for
+// VPTO: scf.yield {{.*}} : !pto.tile_buf<vec, 16x16xf16>
+// VPTO: pto.tile_buf_addr %[[RESULT]] : !pto.tile_buf<vec, 16x16xf16> -> !pto.ptr<f16, ub>

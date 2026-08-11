@@ -1,0 +1,38 @@
+// Copyright (c) 2026 Huawei Technologies Co., Ltd.
+// This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+// CANN Open Software License Agreement Version 2.0 (the "License").
+// Please refer to the License for details. You may not use this file except in compliance with the License.
+// THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+// INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+// See LICENSE in the root of the software repository for the full text of the License.
+
+// RUN: ptoas --pto-arch=a5 --pto-backend=vpto --emit-vpto-llvm-ir %s -o - 2>&1 | FileCheck %s
+
+// The E8M0 source is a semantic L1 byte payload. The stage-1 destinations are
+// real L0 byte pointers; the MX wrapper owns their conversion to the LOAD.MX ABI.
+module attributes {pto.target_arch = "a5", pto.kernel_kind = #pto.kernel_kind<cube>} {
+  func.func @mad_mx_e8m0_stage_abi_vpto_llvm() attributes {pto.kernel} {
+    %c0 = arith.constant 0 : i64
+    %c2 = arith.constant 2 : i64
+    %c8 = arith.constant 8 : i64
+    %c16 = arith.constant 16 : i64
+    %c32768 = arith.constant 32768 : i64
+    %c131072 = arith.constant 131072 : i64
+    %c135168 = arith.constant 135168 : i64
+
+    %a_scale = pto.castptr %c131072 : i64 -> !pto.ptr<!pto.f8E8M0, l1>
+    %b_scale = pto.castptr %c135168 : i64 -> !pto.ptr<!pto.f8E8M0, l1>
+    %a_stage1 = pto.castptr %c32768 : i64 -> !pto.ptr<f8E4M3FN, l0a>
+    %b_stage1 = pto.castptr %c32768 : i64 -> !pto.ptr<f8E4M3FN, l0b>
+
+    pto.mte_l1_l0a_mx %a_scale, %a_stage1, %c0, %c2, %c16, %c2, %c8, %c2
+      : !pto.ptr<!pto.f8E8M0, l1>, !pto.ptr<f8E4M3FN, l0a>, i64, i64, i64, i64, i64, i64
+    pto.mte_l1_l0b_mx %b_scale, %b_stage1, %c0, %c2, %c16, %c2, %c8, %c2
+      : !pto.ptr<!pto.f8E8M0, l1>, !pto.ptr<f8E4M3FN, l0b>, i64, i64, i64, i64, i64, i64
+    return
+  }
+}
+
+// CHECK-LABEL: define void @mad_mx_e8m0_stage_abi_vpto_llvm_mix_aic()
+// CHECK: call void @llvm.hivm.LOAD.L1.TO.L0A.MX.2Dv2.v(i64 2048, ptr addrspace(2) inttoptr (i64 131072 to ptr addrspace(2)), i64 2267742863360, i64 131080)
+// CHECK: call void @llvm.hivm.LOAD.L1.TO.L0B.MX.2Dv2.v(i64 2048, ptr addrspace(2) inttoptr (i64 135168 to ptr addrspace(2)), i64 2267742863360, i64 131080)

@@ -1,0 +1,58 @@
+// Copyright (c) 2026 Huawei Technologies Co., Ltd.
+// This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+// CANN Open Software License Agreement Version 2.0 (the "License").
+// Please refer to the License for details. You may not use this file except in compliance with the License.
+// THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+// INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+// See LICENSE in the root of the software repository for the full text of the License.
+
+// Negative guard: canonicalizeValue must NOT merge structurally different
+// computed shape expressions into the same solver dim.
+//
+// Scenario 1: mins(vrow0, c32) vs mins(vrow1, c32) — different BlockArguments
+// as the first operand.  These compute different values at runtime and must
+// NOT be treated as equivalent by the solver.
+//
+// Two separate tadd ops whose outputs use mins of different BlockArguments.
+// Since there is no dataflow between them (no producer-consumer edge), they
+// must land in DIFFERENT iteration domain classes and receive DIFFERENT fusion
+// group_ids, so neither tadd carries a pto.fusion.group_id.
+//
+// NOTE: this was split out of the former two-function test
+// fusion_plan_computed_shape_negative.pto because --mlir-print-ir-after on a
+// nested OperationPass<func::FuncOp> does not guarantee dump order matches the
+// source order of functions, which made FileCheck's two ordered CHECK-LABELs
+// fragile.  One function per file sidesteps the ordering entirely.
+//
+// RUN: ptoas --pto-arch=a5 --pto-level=level2 --enable-op-fusion --enable-shape-inference --emit-pto-ir %s --mlir-print-ir-after=pto-fusion-plan -o /dev/null 2>&1 | FileCheck %s
+
+module {
+  func.func @computed_shape_different_args(
+      %arg0: !pto.tile_buf<vec, 32x32xf32, valid=?x?>,
+      %arg1: !pto.tile_buf<vec, 32x32xf32, valid=?x?>,
+      %vrow0: index,
+      %vcol0: index,
+      %vrow1: index,
+      %vcol1: index) {
+    %c32 = arith.constant 32 : index
+    %row0 = arith.minsi %vrow0, %c32 : index
+    %col0 = arith.minsi %vcol0, %c32 : index
+    %row1 = arith.minsi %vrow1, %c32 : index
+    %col1 = arith.minsi %vcol1, %c32 : index
+
+    %tmp0 = pto.alloc_tile valid_row = %row0 valid_col = %col0 : !pto.tile_buf<vec, 32x32xf32, valid=?x?>
+    %tmp1 = pto.alloc_tile valid_row = %row1 valid_col = %col1 : !pto.tile_buf<vec, 32x32xf32, valid=?x?>
+
+    pto.tadd ins(%arg0, %arg0 : !pto.tile_buf<vec, 32x32xf32, valid=?x?>, !pto.tile_buf<vec, 32x32xf32, valid=?x?>) outs(%tmp0 : !pto.tile_buf<vec, 32x32xf32, valid=?x?>)
+    pto.tadd ins(%arg1, %arg1 : !pto.tile_buf<vec, 32x32xf32, valid=?x?>, !pto.tile_buf<vec, 32x32xf32, valid=?x?>) outs(%tmp1 : !pto.tile_buf<vec, 32x32xf32, valid=?x?>)
+    return
+  }
+}
+
+// CHECK: // -----// IR Dump After FusionPlan (pto-fusion-plan) //----- //
+// CHECK-LABEL: func.func @computed_shape_different_args(
+// CHECK: pto.tadd ins(%arg0, %arg0
+// CHECK-NOT: pto.fusion.group_id
+// CHECK: pto.tadd ins(%arg1, %arg1
+// CHECK-NOT: pto.fusion.group_id
+// CHECK: return

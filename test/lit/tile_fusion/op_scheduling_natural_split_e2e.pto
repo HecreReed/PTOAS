@@ -1,0 +1,102 @@
+// Copyright (c) 2026 Huawei Technologies Co., Ltd.
+// This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+// CANN Open Software License Agreement Version 2.0 (the "License").
+// Please refer to the License for details. You may not use this file except in compliance with the License.
+// THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+// INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+// See LICENSE in the root of the software repository for the full text of the License.
+
+// End-to-end regression through the REAL FusionPlan pipeline (no hand-authored
+// pto.fusion.group_id/order). Guards that when FusionPlan naturally plans a
+// fusion group whose members are physically separated by an unmovable op that
+// OpScheduling cannot cross, the post-scheduling normalization stage splits the
+// group by physical span so PTOFusionRegionGen never reports
+// "expected one contiguous span per pto.fusion.group_id within a basic block".
+//
+// The separator here is `pto.tstore`: FusionPlan's hard-barrier check
+// (hasHardBarrierBetween) only treats terminator/region/call ops as blockers,
+// so it happily plans a single group 0 across the tstore; but OpScheduling
+// classifies tstore as a HardBoundary and, because the tstore consumes the tile
+// produced by member A and read again by member B, neither side can be moved
+// across it. The planned group 0 thus survives as two physical spans [A]
+// (singleton, dropped) and [B, C] (retained as a new contiguous group).
+//
+// Three stages are checked: FusionPlan (split group planned), OpScheduling
+// (group split + normalized), PTOFusionRegionGen (one region for [B, C], no
+// error).
+//
+// RUN: pto-test-opt %s -pto-fusion-plan -pto-op-scheduling -pto-fusion-region-gen --mlir-print-ir-after=pto-fusion-plan --mlir-print-ir-after=pto-op-scheduling --mlir-print-ir-after=pto-fusion-region-gen 2>&1 | FileCheck %s --check-prefix=PLAN --check-prefix=SCHEDULE --check-prefix=REGION
+
+module {
+  func.func @op_scheduling_natural_split_e2e(
+      %dst_ptr: !pto.ptr<f32>,
+      %full0: !pto.tile_buf<vec, 32x32xf32>,
+      %full1: !pto.tile_buf<vec, 32x32xf32>,
+      %full2: !pto.tile_buf<vec, 32x32xf32>) {
+    %c0 = arith.constant 0 : index
+    %c1 = arith.constant 1 : index
+    %c32 = arith.constant 32 : index
+    %dst_view = pto.make_tensor_view %dst_ptr,
+      shape = [%c32, %c32], strides = [%c32, %c1]
+      : !pto.tensor_view<?x?xf32>
+    %dst_part = pto.partition_view %dst_view,
+      offsets = [%c0, %c0], sizes = [%c32, %c32]
+      : !pto.tensor_view<?x?xf32> -> !pto.partition_tensor_view<32x32xf32>
+    %tmp0 = pto.alloc_tile : !pto.tile_buf<vec, 32x32xf32>
+    %tmp1 = pto.alloc_tile : !pto.tile_buf<vec, 32x32xf32>
+    %tmp2 = pto.alloc_tile : !pto.tile_buf<vec, 32x32xf32>
+
+    // A (planned member): writes %tmp0.
+    pto.tadd ins(%full0, %full1 : !pto.tile_buf<vec, 32x32xf32>, !pto.tile_buf<vec, 32x32xf32>) outs(%tmp0 : !pto.tile_buf<vec, 32x32xf32>)
+    // X (tstore): FusionPlan ignores it; OpScheduling treats it as a
+    // HardBoundary. It consumes %tmp0, which B also reads below, so neither A
+    // nor B can be moved across it.
+    pto.tstore ins(%tmp0 : !pto.tile_buf<vec, 32x32xf32>) outs(%dst_part : !pto.partition_tensor_view<32x32xf32>)
+    // B (planned member): reads %tmp0, writes %tmp1.
+    pto.tadd ins(%tmp0, %full2 : !pto.tile_buf<vec, 32x32xf32>, !pto.tile_buf<vec, 32x32xf32>) outs(%tmp1 : !pto.tile_buf<vec, 32x32xf32>)
+    // C (planned member): reads %tmp1, writes %tmp2.
+    pto.tadd ins(%tmp1, %full0 : !pto.tile_buf<vec, 32x32xf32>, !pto.tile_buf<vec, 32x32xf32>) outs(%tmp2 : !pto.tile_buf<vec, 32x32xf32>)
+    return
+  }
+}
+
+// ---- Stage 1: FusionPlan plans one group 0 across the tstore ----
+// PLAN: // IR Dump After FusionPlan (pto-fusion-plan) //----- //
+// PLAN-LABEL: func.func @op_scheduling_natural_split_e2e(
+// PLAN: pto.tadd ins(%arg1, %arg2
+// PLAN-SAME: {pto.fusion.group_id = 0 : i64, pto.fusion.order = 0 : i64}
+// PLAN-NEXT: pto.tstore
+// PLAN-NOT: pto.fusion.group_id
+// PLAN-NEXT: pto.tadd ins(%{{[0-9]+}}, %arg3
+// PLAN-SAME: {pto.fusion.group_id = 0 : i64, pto.fusion.order = 1 : i64}
+// PLAN-NEXT: pto.tadd ins(%{{[0-9]+}}, %arg1
+// PLAN-SAME: {pto.fusion.group_id = 0 : i64, pto.fusion.order = 2 : i64}
+
+// ---- Stage 2: OpScheduling cannot compact; normalization splits the group ----
+// The tstore stays physically between A and [B, C]. A's singleton span is
+// dropped (no metadata); [B, C] is re-numbered as a new contiguous group 0.
+// SCHEDULE: // IR Dump After OpScheduling (pto-op-scheduling) //----- //
+// SCHEDULE-LABEL: func.func @op_scheduling_natural_split_e2e(
+// SCHEDULE: pto.tadd ins(%arg1, %arg2
+// SCHEDULE-NOT: pto.fusion.group_id
+// SCHEDULE-NEXT: pto.tstore
+// SCHEDULE-NOT: pto.fusion.group_id
+// SCHEDULE-NEXT: pto.tadd ins(%{{[0-9]+}}, %arg3
+// SCHEDULE-SAME: {pto.fusion.group_id = 0 : i64, pto.fusion.order = 0 : i64}
+// SCHEDULE-NEXT: pto.tadd ins(%{{[0-9]+}}, %arg1
+// SCHEDULE-SAME: {pto.fusion.group_id = 0 : i64, pto.fusion.order = 1 : i64}
+
+// ---- Stage 3: PTOFusionRegionGen encapsulates [B, C]; no contiguous-span error ----
+// REGION: // IR Dump After PTOFusionRegionGen (pto-fusion-region-gen) //----- //
+// REGION-LABEL: func.func @op_scheduling_natural_split_e2e(
+// REGION: pto.tadd ins(%arg1, %arg2
+// REGION-NOT: pto.fusion_region
+// REGION: pto.tstore
+// REGION-NOT: pto.fusion_region
+// REGION: pto.fusion_region {
+// REGION-NEXT: pto.alloc_tile
+// REGION-NEXT: pto.alloc_tile
+// REGION: pto.tadd ins(%{{[0-9]+}}, %arg3
+// REGION: pto.tadd ins(%{{[0-9]+}}, %arg1
+// REGION: pto.yield
+// REGION-NOT: expected one contiguous span per pto.fusion.group_id within a basic block
