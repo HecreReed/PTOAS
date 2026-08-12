@@ -1,6 +1,0 @@
-[submodule "3rdparty/PTO-Gym"]
-	path = 3rdparty/PTO-Gym
-	url = https://github.com/PTO-ISA/PTO-Gym.git
-[submodule "3rdparty/VfSimulator"]
-	path = 3rdparty/VfSimulator
-	url = https://github.com/wang-chonghao/VfSimulator.git
