@@ -41,7 +41,7 @@ repos:
     rev: v0.14.14
     hooks:
       - id: ruff-check
-        args: ["--output-format", "github", "--fix"]
+        args: ["--output-format", "github"]
         types: [python]
         exclude: ^test/npu_validation/templates/|^test/lit/lit\.cfg\.py$
       - id: ruff-format
