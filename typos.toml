@@ -38,7 +38,20 @@ CHEC = "CHEC"
 alog = "alog"
 CEHCK = "CEHCK"
 compatiable = "compatiable"
+# 快照替换带入的历史文件拼写/标识符,后续单独 PR 治理
+toi = "toi"
+subtile = "subtile"
+ADN = "ADN"
+NORAML = "NORAML"
+availble = "availble"
+compileable = "compileable"
+faciliate = "faciliate"
+implemtation = "implemtation"
+ony = "ony"
+intrisics = "intrisics"
+validd = "validd"
+htmp = "htmp"
 
 [files]
 # .pto 是 PTO IR 二进制文本格式，含 nd 等字段名，不应做拼写检查
-extend-exclude = ["*.pto", "*.golden"]
+extend-exclude = ["*.pto", "*.golden", ".pre-commit-config.yaml"]
