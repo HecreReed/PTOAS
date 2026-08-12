@@ -9,6 +9,6 @@
 "test/dsl-st/**/*.py" = ["E731", "F841"]
 "test/kernel-test/**/*.py" = ["E402"]
 "test/lit.cfg.py" = ["F821"]
-"test/tilelang_st/**/*.py" = ["E402", "F841"]
+"test/tilelang_st/**/*.py" = ["E402", "E701", "E702", "F841"]
 "test/tilelib-st/**/*.py" = ["E731", "F841"]
-"test/vpto/**/*.py" = ["E402", "F841"]
+"test/vpto/**/*.py" = ["E402", "E701", "E702", "F841"]
