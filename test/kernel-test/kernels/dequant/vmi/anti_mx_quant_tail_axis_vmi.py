@@ -90,12 +90,7 @@ def _compute_scale_ub(
         if pto.const_expr(DST_FMT == "f32"):
             pto.vmi.vstore(scale_compact, scale_dst_ptr, dst_off, scale_mask)
         else:
-            pto.vmi.vstore(
-                pto.vmi.vcvt(scale_compact, dst_dtype),
-                scale_dst_ptr,
-                dst_off,
-                scale_mask,
-            )
+            pto.vmi.vstore(pto.vmi.vcvt(scale_compact, dst_dtype), scale_dst_ptr, dst_off, scale_mask)
 
 
 def _compute_data_ub(
@@ -136,9 +131,7 @@ def _compute_data_ub(
         y_off = i * _ELEMS_PER_LOOP
 
         x_lo_f8 = pto.vmi.vload(x_ptr, x_off, size=_HALF_ELEMS_PER_LOOP)
-        x_hi_f8 = pto.vmi.vload(
-            x_ptr, x_off + _HALF_ELEMS_PER_LOOP, size=_HALF_ELEMS_PER_LOOP
-        )
+        x_hi_f8 = pto.vmi.vload(x_ptr, x_off + _HALF_ELEMS_PER_LOOP, size=_HALF_ELEMS_PER_LOOP)
         x_lo_f32 = pto.vmi.vcvt(x_lo_f8, pto.f32)
         x_hi_f32 = pto.vmi.vcvt(x_hi_f8, pto.f32)
 
@@ -200,26 +193,18 @@ def _runtime_entry(
     effective_col_block_num = COL_BLOCK_NUM + (COL_BLOCK_NUM % 2)
     total_scale_num = ROW_BLOCK_NUM * effective_col_block_num
     total_block_num = total_scale_num
-    scale_loop_num = (
-        total_scale_num + _BLOCKS_PER_DATA_LOOP - 1
-    ) // _BLOCKS_PER_DATA_LOOP
+    scale_loop_num = (total_scale_num + _BLOCKS_PER_DATA_LOOP - 1) // _BLOCKS_PER_DATA_LOOP
     loop_num2vf = (total_block_num + _BLOCKS_PER_DATA_LOOP - 1) // _BLOCKS_PER_DATA_LOOP
     padded_total_block_num = loop_num2vf * _BLOCKS_PER_DATA_LOOP
     total_elems = padded_total_block_num * _BLOCK_SIZE
 
-    x_ub_ptr = pto.castptr(
-        pto.const(_X_BASE_ADDR, dtype=pto.ui64), pto.ptr(pto.ui8, "ub")
-    )
-    scale_ub_ptr = pto.castptr(
-        pto.const(_RAW_SCALE_BASE_ADDR, dtype=pto.ui64), pto.ptr(pto.ui8, "ub")
-    )
+    x_ub_ptr = pto.castptr(pto.const(_X_BASE_ADDR, dtype=pto.ui64), pto.ptr(pto.ui8, "ub"))
+    scale_ub_ptr = pto.castptr(pto.const(_RAW_SCALE_BASE_ADDR, dtype=pto.ui64), pto.ptr(pto.ui8, "ub"))
     x_bytes = total_elems
     scale_bytes = scale_loop_num * _RAW_SCALE_BYTES_PER_LOOP
 
     if pto.const_expr(DST_FMT == "f32"):
-        y_ub_ptr = pto.castptr(
-            pto.const(_Y_BASE_ADDR, dtype=pto.ui64), pto.ptr(pto.f32, "ub")
-        )
+        y_ub_ptr = pto.castptr(pto.const(_Y_BASE_ADDR, dtype=pto.ui64), pto.ptr(pto.f32, "ub"))
         y_bytes = total_elems * 4
     else:
         y_ub_ptr = pto.castptr(
@@ -229,9 +214,7 @@ def _runtime_entry(
         y_bytes = total_elems * 2
 
     pto.mte_gm_ub(x_gm, x_ub_ptr, 0, x_bytes, nburst=(1, x_bytes, x_bytes))
-    pto.mte_gm_ub(
-        scale_gm, scale_ub_ptr, 0, scale_bytes, nburst=(1, scale_bytes, scale_bytes)
-    )
+    pto.mte_gm_ub(scale_gm, scale_ub_ptr, 0, scale_bytes, nburst=(1, scale_bytes, scale_bytes))
 
     pto.set_flag(pto.Pipe.MTE2, pto.Pipe.V, event_id=0)
     pto.wait_flag(pto.Pipe.MTE2, pto.Pipe.V, event_id=0)

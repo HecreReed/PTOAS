@@ -25,9 +25,7 @@ def main() -> None:
                 f"(total_mismatches={diff.size})"
             )
         else:
-            print(
-                f"[ERROR] compare failed shape mismatch: golden={golden.shape} output={output.shape}"
-            )
+            print(f"[ERROR] compare failed shape mismatch: golden={golden.shape} output={output.shape}")
         sys.exit(2)
     print("[INFO] compare passed")
 

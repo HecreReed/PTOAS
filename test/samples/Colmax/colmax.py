@@ -54,9 +54,7 @@ def build():
                 tv1 = pto.MakeTensorViewOp(tv2_f32, arg1, [c1, c32], [c32, c1]).result
 
                 # Use the constant 'c0' and 'c32' for subview offsets and sizes
-                sv0 = pto.PartitionViewOp(
-                    tile_view_32, tv0, offsets=[c0, c0], sizes=[c32, c32]
-                ).result
+                sv0 = pto.PartitionViewOp(tile_view_32, tv0, offsets=[c0, c0], sizes=[c32, c32]).result
 
                 tb0 = pto.AllocTileOp(tile_buf_32).result
                 tb1 = pto.AllocTileOp(tile_buf_1x32).result
@@ -65,9 +63,7 @@ def build():
 
                 pto.TColMaxOp(tb0, tb1)
 
-                sv1 = pto.PartitionViewOp(
-                    tile_view_1x32, tv1, offsets=[c0, c0], sizes=[c1, c32]
-                ).result
+                sv1 = pto.PartitionViewOp(tile_view_1x32, tv1, offsets=[c0, c0], sizes=[c1, c32]).result
 
                 pto.TStoreOp(None, tb1, sv1)
 

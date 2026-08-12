@@ -97,85 +97,43 @@ def allreduce_min_body(
     scalar.store(reduced, out, idx)
 
 
-@pto.jit(
-    name="allreduce_warp_sum_kernel",
-    kernel_kind="vector",
-    target="a5",
-    mode="explicit",
-    insert_sync=False,
-)
+@pto.jit(name="allreduce_warp_sum_kernel", kernel_kind="vector", target="a5", mode="explicit", insert_sync=False)
 def allreduce_warp_sum_kernel(inp: pto.ptr(pto.f32, "gm"), out: pto.ptr(pto.f32, "gm")):
     scratch = pto.castptr(pto.const(0, dtype=pto.ui64), pto.ptr(pto.f32, "ub"))
     allreduce_sum_body[WARP_THREADS, 1, 1](inp, out, scratch, threads=WARP_THREADS)
     pto.pipe_barrier(pto.Pipe.ALL)
 
 
-@pto.jit(
-    name="allreduce_warp_max_kernel",
-    kernel_kind="vector",
-    target="a5",
-    mode="explicit",
-    insert_sync=False,
-)
+@pto.jit(name="allreduce_warp_max_kernel", kernel_kind="vector", target="a5", mode="explicit", insert_sync=False)
 def allreduce_warp_max_kernel(inp: pto.ptr(pto.f32, "gm"), out: pto.ptr(pto.f32, "gm")):
     scratch = pto.castptr(pto.const(0, dtype=pto.ui64), pto.ptr(pto.f32, "ub"))
     allreduce_max_body[WARP_THREADS, 1, 1](inp, out, scratch, threads=WARP_THREADS)
     pto.pipe_barrier(pto.Pipe.ALL)
 
 
-@pto.jit(
-    name="allreduce_warp_min_kernel",
-    kernel_kind="vector",
-    target="a5",
-    mode="explicit",
-    insert_sync=False,
-)
+@pto.jit(name="allreduce_warp_min_kernel", kernel_kind="vector", target="a5", mode="explicit", insert_sync=False)
 def allreduce_warp_min_kernel(inp: pto.ptr(pto.f32, "gm"), out: pto.ptr(pto.f32, "gm")):
     scratch = pto.castptr(pto.const(0, dtype=pto.ui64), pto.ptr(pto.f32, "ub"))
     allreduce_min_body[WARP_THREADS, 1, 1](inp, out, scratch, threads=WARP_THREADS)
     pto.pipe_barrier(pto.Pipe.ALL)
 
 
-@pto.jit(
-    name="allreduce_cross_sum_kernel",
-    kernel_kind="vector",
-    target="a5",
-    mode="explicit",
-    insert_sync=False,
-)
-def allreduce_cross_sum_kernel(
-    inp: pto.ptr(pto.f32, "gm"), out: pto.ptr(pto.f32, "gm")
-):
+@pto.jit(name="allreduce_cross_sum_kernel", kernel_kind="vector", target="a5", mode="explicit", insert_sync=False)
+def allreduce_cross_sum_kernel(inp: pto.ptr(pto.f32, "gm"), out: pto.ptr(pto.f32, "gm")):
     scratch = pto.castptr(pto.const(0, dtype=pto.ui64), pto.ptr(pto.f32, "ub"))
     allreduce_sum_body[CROSS_THREADS, 1, 1](inp, out, scratch, threads=CROSS_THREADS)
     pto.pipe_barrier(pto.Pipe.ALL)
 
 
-@pto.jit(
-    name="allreduce_cross_max_kernel",
-    kernel_kind="vector",
-    target="a5",
-    mode="explicit",
-    insert_sync=False,
-)
-def allreduce_cross_max_kernel(
-    inp: pto.ptr(pto.f32, "gm"), out: pto.ptr(pto.f32, "gm")
-):
+@pto.jit(name="allreduce_cross_max_kernel", kernel_kind="vector", target="a5", mode="explicit", insert_sync=False)
+def allreduce_cross_max_kernel(inp: pto.ptr(pto.f32, "gm"), out: pto.ptr(pto.f32, "gm")):
     scratch = pto.castptr(pto.const(0, dtype=pto.ui64), pto.ptr(pto.f32, "ub"))
     allreduce_max_body[CROSS_THREADS, 1, 1](inp, out, scratch, threads=CROSS_THREADS)
     pto.pipe_barrier(pto.Pipe.ALL)
 
 
-@pto.jit(
-    name="allreduce_cross_min_kernel",
-    kernel_kind="vector",
-    target="a5",
-    mode="explicit",
-    insert_sync=False,
-)
-def allreduce_cross_min_kernel(
-    inp: pto.ptr(pto.f32, "gm"), out: pto.ptr(pto.f32, "gm")
-):
+@pto.jit(name="allreduce_cross_min_kernel", kernel_kind="vector", target="a5", mode="explicit", insert_sync=False)
+def allreduce_cross_min_kernel(inp: pto.ptr(pto.f32, "gm"), out: pto.ptr(pto.f32, "gm")):
     scratch = pto.castptr(pto.const(0, dtype=pto.ui64), pto.ptr(pto.f32, "ub"))
     allreduce_min_body[CROSS_THREADS, 1, 1](inp, out, scratch, threads=CROSS_THREADS)
     pto.pipe_barrier(pto.Pipe.ALL)
@@ -221,42 +179,12 @@ def case(name: str, kernel, *, threads: int, reducer: str):
 
 
 CASES = [
-    case(
-        "allreduce_warp_sum",
-        allreduce_warp_sum_kernel,
-        threads=WARP_THREADS,
-        reducer="sum",
-    ),
-    case(
-        "allreduce_warp_max",
-        allreduce_warp_max_kernel,
-        threads=WARP_THREADS,
-        reducer="max",
-    ),
-    case(
-        "allreduce_warp_min",
-        allreduce_warp_min_kernel,
-        threads=WARP_THREADS,
-        reducer="min",
-    ),
-    case(
-        "allreduce_cross_sum",
-        allreduce_cross_sum_kernel,
-        threads=CROSS_THREADS,
-        reducer="sum",
-    ),
-    case(
-        "allreduce_cross_max",
-        allreduce_cross_max_kernel,
-        threads=CROSS_THREADS,
-        reducer="max",
-    ),
-    case(
-        "allreduce_cross_min",
-        allreduce_cross_min_kernel,
-        threads=CROSS_THREADS,
-        reducer="min",
-    ),
+    case("allreduce_warp_sum", allreduce_warp_sum_kernel, threads=WARP_THREADS, reducer="sum"),
+    case("allreduce_warp_max", allreduce_warp_max_kernel, threads=WARP_THREADS, reducer="max"),
+    case("allreduce_warp_min", allreduce_warp_min_kernel, threads=WARP_THREADS, reducer="min"),
+    case("allreduce_cross_sum", allreduce_cross_sum_kernel, threads=CROSS_THREADS, reducer="sum"),
+    case("allreduce_cross_max", allreduce_cross_max_kernel, threads=CROSS_THREADS, reducer="max"),
+    case("allreduce_cross_min", allreduce_cross_min_kernel, threads=CROSS_THREADS, reducer="min"),
 ]
 
 

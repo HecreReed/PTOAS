@@ -16,9 +16,7 @@ ELEMS = 256
 # Same numeric probe as quant-f32-to-f8-full: mixes exactly-representable
 # values so the byte-level golden lookup below is deterministic under SAT.
 VALUES = np.array([0.0, 1.0, -1.0, 0.5, 2.0, -2.0, 4.0, -4.0], dtype=np.float32)
-F8E4M3FN_BYTES = np.array(
-    [0x00, 0x38, 0xB8, 0x30, 0x40, 0xC0, 0x48, 0xC8], dtype=np.uint8
-)
+F8E4M3FN_BYTES = np.array([0x00, 0x38, 0xB8, 0x30, 0x40, 0xC0, 0x48, 0xC8], dtype=np.uint8)
 
 
 def generate(output_dir: Path) -> None:

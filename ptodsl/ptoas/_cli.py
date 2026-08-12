@@ -42,7 +42,8 @@ def _resolve_runtime_paths(native_module) -> tuple[Path, Path]:
     tileops_dir = runtime_root / "share" / "ptoas" / "TileOps"
     if not tileops_dir.is_dir():
         raise SystemExit(
-            f"unable to locate packaged PTOAS TileOps resources: expected {tileops_dir}"
+            "unable to locate packaged PTOAS TileOps resources: expected "
+            f"{tileops_dir}"
         )
     return python_root, tileops_dir.resolve()
 

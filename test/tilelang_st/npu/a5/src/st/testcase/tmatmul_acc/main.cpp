@@ -16,14 +16,14 @@
 
 using namespace PtoTestCommon;
 
-void LaunchTMATMUL_ACC_f16_16x32x16(void* a, void* b, void* c, void* stream);
-void LaunchTMATMUL_ACC_f16_128x128x64(void* a, void* b, void* c, void* stream);
-void LaunchTMATMUL_ACC_f16_127x128x61(void* a, void* b, void* c, void* stream);
+void LaunchTMATMUL_ACC_f16_16x32x16(void *a, void *b, void *c, void *stream);
+void LaunchTMATMUL_ACC_f16_128x128x64(void *a, void *b, void *c, void *stream);
+void LaunchTMATMUL_ACC_f16_127x128x61(void *a, void *b, void *c, void *stream);
 
-using LaunchFn = void (*)(void*, void*, void*, void*);
+using LaunchFn = void (*)(void *, void *, void *, void *);
 
 struct TestCase {
-    const char* name;
+    const char *name;
     LaunchFn launch;
     size_t aRows;
     size_t aCols;
@@ -34,14 +34,13 @@ struct TestCase {
 };
 
 static const TestCase kCases[] = {
-    {"f16_16x32x16", LaunchTMATMUL_ACC_f16_16x32x16, 16, 32, 32, 16, 16, 16},
-    {"f16_128x128x64", LaunchTMATMUL_ACC_f16_128x128x64, 128, 128, 128, 64, 128, 64},
-    {"f16_127x128x61", LaunchTMATMUL_ACC_f16_127x128x61, 128, 128, 128, 64, 128, 64},
+    {"f16_16x32x16",    LaunchTMATMUL_ACC_f16_16x32x16,    16,  32,  32,  16,  16,  16},
+    {"f16_128x128x64",  LaunchTMATMUL_ACC_f16_128x128x64,  128, 128, 128, 64, 128, 64},
+    {"f16_127x128x61",  LaunchTMATMUL_ACC_f16_127x128x61,  128, 128, 128, 64, 128, 64},
 };
 static constexpr size_t kNumCases = sizeof(kCases) / sizeof(kCases[0]);
 
-static int RunCase(const TestCase& tc, int deviceId, aclrtStream stream)
-{
+static int RunCase(const TestCase &tc, int deviceId, aclrtStream stream) {
     (void)deviceId;
     int rc = 0;
     const size_t aElems = tc.aRows * tc.aCols;
@@ -54,17 +53,24 @@ static int RunCase(const TestCase& tc, int deviceId, aclrtStream stream)
     size_t bFileSize = bBytes;
 
     std::printf(
-        "[INFO] === case: %s (A=%zux%zu, B=%zux%zu, C=%zux%zu) ===\n", tc.name, tc.aRows, tc.aCols, tc.bRows, tc.bCols,
-        tc.outRows, tc.outCols);
+        "[INFO] === case: %s (A=%zux%zu, B=%zux%zu, C=%zux%zu) ===\n",
+        tc.name,
+        tc.aRows,
+        tc.aCols,
+        tc.bRows,
+        tc.bCols,
+        tc.outRows,
+        tc.outCols
+    );
 
     std::string caseDir = std::string("./") + tc.name;
 
-    void* aHost = nullptr;
-    void* bHost = nullptr;
-    void* outHost = nullptr;
-    void* aDevice = nullptr;
-    void* bDevice = nullptr;
-    void* outDevice = nullptr;
+    void *aHost = nullptr;
+    void *bHost = nullptr;
+    void *outHost = nullptr;
+    void *aDevice = nullptr;
+    void *bDevice = nullptr;
+    void *outDevice = nullptr;
 
     aclrtMallocHost(&aHost, aBytes);
     aclrtMallocHost(&bHost, bBytes);
@@ -116,16 +122,15 @@ static int RunCase(const TestCase& tc, int deviceId, aclrtStream stream)
     return rc;
 }
 
-int main(int argc, char* argv[])
-{
-    const char* caseFilter = (argc > 1) ? argv[1] : nullptr;
+int main(int argc, char *argv[]) {
+    const char *caseFilter = (argc > 1) ? argv[1] : nullptr;
 
     int rc = 0;
     int deviceId = 0;
     aclrtStream stream = nullptr;
 
     aclInit(nullptr);
-    if (const char* envDevice = std::getenv("ACL_DEVICE_ID")) {
+    if (const char *envDevice = std::getenv("ACL_DEVICE_ID")) {
         deviceId = std::atoi(envDevice);
     }
     aclrtSetDevice(deviceId);

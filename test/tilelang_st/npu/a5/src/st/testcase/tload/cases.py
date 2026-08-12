@@ -117,9 +117,7 @@ def select_compared_region(case, arr):
     if case["name"].startswith("dn_pad_"):
         flat = np.asarray(arr).reshape(-1)
         physical_rows = case["shape"][0]
-        pieces = [
-            flat[physical_rows * col : physical_rows * col + vr] for col in range(vc)
-        ]
+        pieces = [flat[physical_rows * col : physical_rows * col + vr] for col in range(vc)]
         return np.concatenate(pieces) if pieces else flat[:0]
 
     if case["name"].startswith("nz_pad_"):

@@ -75,7 +75,7 @@ MTE2_NZ_PARA[15:0]  = groupCount
 
 这里的 `loop2/3/4` 目标 stride 单位都不是 byte，而是 `C0_size`。
 
-在 A5 上，`C0_size` 是硬件固定的 32B 地址单位。
+在 A5 上，`C0_size` 是硬件固定的 32B 地址单位。  
 因此：
 
 - `dst_loop*_stride = 1` 表示目标地址前进 `32B`
@@ -552,7 +552,7 @@ cube_load_frac(
 
 - `src_outer_stride`
 
-这个参数不是每个场景都需要，但一旦做通用接口，最好保留。
+这个参数不是每个场景都需要，但一旦做通用接口，最好保留。  
 在结构化接口里，`src_outer_stride` 仍属于 `src_layout(...)` 的一部分，只是允许省略。
 
 ## 10. 初步判断
@@ -569,4 +569,4 @@ cube_load_frac(
   - `ctrl(...)`
 - 在这套统一接口里，`l2_cache_ctrl` 和 `smallc0_en` 也应保留为显式参数；只有 `sid` 可以继续固定隐藏
 
-如果下一步需要，我可以继续把这份设计文档再往前推进一层，直接写成一版面向 VPTO op 设计的 syntax 草案和 verifier 约束。
+如果下一步需要，我可以继续把这份设计文档再往前推进一层，直接写成一版面向 VPTO op 设计的 syntax 草案和 verifier 约束。 

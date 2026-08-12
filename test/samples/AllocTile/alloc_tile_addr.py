@@ -32,9 +32,7 @@ def build():
 
             # valid_shape=[-1, -1] means v_row/v_col are dynamic and must be
             # provided via valid_row/valid_col operands.
-            tile_buf_dynamic = pto.TileBufType.get(
-                [32, 32], f32, vec, [-1, -1], cfg, ctx
-            )
+            tile_buf_dynamic = pto.TileBufType.get([32, 32], f32, vec, [-1, -1], cfg, ctx)
 
             # Demo signature: (base_addr:i64, vrow:i32, vcol:i32) -> ()
             #
@@ -52,15 +50,13 @@ def build():
                 vcol = arith.IndexCastOp(IndexType.get(ctx), vcol_i32).result
 
                 # addr comes from function argument (i64 value).
-                _ = pto.AllocTileOp(
-                    tile_buf_dynamic, addr=base_addr_i64, valid_row=vrow, valid_col=vcol
-                ).result
+                _ = pto.AllocTileOp(tile_buf_dynamic, addr=base_addr_i64,
+                                    valid_row=vrow, valid_col=vcol).result
 
                 # addr as a constant (i64 value).
                 addr_const = arith.ConstantOp(i64, IntegerAttr.get(i64, 0x1000)).result
-                _ = pto.AllocTileOp(
-                    tile_buf_dynamic, addr=addr_const, valid_row=vrow, valid_col=vcol
-                ).result
+                _ = pto.AllocTileOp(tile_buf_dynamic, addr=addr_const,
+                                    valid_row=vrow, valid_col=vcol).result
 
                 func.ReturnOp([])
 

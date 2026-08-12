@@ -19,9 +19,7 @@ for case in CASES:
     name = case["name"]
 
     if name.startswith("v2v"):
-        src = np.random.uniform(-1.0, 1.0, size=case["shape_src"]).astype(
-            case["dtype_src"]
-        )
+        src = np.random.uniform(-1.0, 1.0, size=case["shape_src"]).astype(case["dtype_src"])
         golden = src.copy()
         save_case_data(name, {"input1": src, "golden": golden})
 

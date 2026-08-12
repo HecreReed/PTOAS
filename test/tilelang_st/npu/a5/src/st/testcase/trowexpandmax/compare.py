@@ -19,22 +19,12 @@ from cases import CASES
 from st_common import result_cmp, style_fail, style_pass
 
 # Inline validation for multi-input format (trowexpandmax uses src0/src1/dst)
-REQUIRED_KEYS = {
-    "name",
-    "dtype",
-    "src0_shape",
-    "src0_valid_shape",
-    "src1_shape",
-    "src1_valid_shape",
-    "dst_shape",
-    "dst_valid_shape",
-}
+REQUIRED_KEYS = {"name", "dtype", "src0_shape", "src0_valid_shape", "src1_shape",
+                 "src1_valid_shape", "dst_shape", "dst_valid_shape"}
 for i, case in enumerate(CASES):
     missing = REQUIRED_KEYS - case.keys()
     if missing:
-        raise ValueError(
-            f"cases[{i}] ({case.get('name', '?')}) missing keys: {missing}"
-        )
+        raise ValueError(f"cases[{i}] ({case.get('name', '?')}) missing keys: {missing}")
 
 
 def main():
@@ -52,12 +42,8 @@ def main():
 
         vr, vc = dst_valid_shape
 
-        golden = np.fromfile(os.path.join(case_dir, "golden.bin"), dtype=dtype).reshape(
-            dst_shape
-        )
-        output = np.fromfile(os.path.join(case_dir, "output.bin"), dtype=dtype).reshape(
-            dst_shape
-        )
+        golden = np.fromfile(os.path.join(case_dir, "golden.bin"), dtype=dtype).reshape(dst_shape)
+        output = np.fromfile(os.path.join(case_dir, "output.bin"), dtype=dtype).reshape(dst_shape)
 
         ok = result_cmp(golden[:vr, :vc], output[:vr, :vc], case["eps"])
         if ok:

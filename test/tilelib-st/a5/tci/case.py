@@ -23,21 +23,20 @@ from ptodsl import pto
 
 
 PTO_TO_NP_DTYPE = {
-    pto.f32: np.float32,
-    pto.f16: np.float16,
-    pto.i32: np.int32,
-    pto.i16: np.int16,
-    pto.i8: np.int8,
+    pto.f32:  np.float32,
+    pto.f16:  np.float16,
+    pto.i32:  np.int32,
+    pto.i16:  np.int16,
+    pto.i8:   np.int8,
     pto.ui32: np.uint32,
     pto.ui16: np.uint16,
-    pto.ui8: np.uint8,
+    pto.ui8:  np.uint8,
 }
 
 
 def npy_dtype(pto_type) -> np.dtype:
     """Return the numpy dtype corresponding to a pto scalar-dtype name."""
     return PTO_TO_NP_DTYPE[pto_type]
-
 
 # Cover short tails, an aligned vector span, a cross-256 span, both directions,
 # and every supported integer width/sign.  Larger spans exercise the same
@@ -61,12 +60,8 @@ def _tci_body(start, dst_ptr, *, dst_rows, dst_cols, dtype, descending):
     block_size = 32 // itemsize
     aligned_cols = ((dst_cols + block_size - 1) // block_size) * block_size
 
-    dst_view = pto.make_tensor_view(
-        dst_ptr, shape=[dst_rows, dst_cols], strides=[dst_cols, 1]
-    )
-    dst_tile = pto.alloc_tile(
-        shape=[dst_rows, aligned_cols], dtype=dtype, valid_shape=[dst_rows, dst_cols]
-    )
+    dst_view = pto.make_tensor_view(dst_ptr, shape=[dst_rows, dst_cols], strides=[dst_cols, 1])
+    dst_tile = pto.alloc_tile(shape=[dst_rows, aligned_cols], dtype=dtype, valid_shape=[dst_rows, dst_cols])
     pto.tile.ci(start, dst_tile, descending=descending)
     pto.tile.store(dst_tile, dst_view)
 
@@ -77,13 +72,18 @@ for _name, _dtype, _dst_shape, _desc in CASE_SHAPES:
     _dr, _dc = _dst_shape
 
     def _make(dr=_dr, dc=_dc, dtype=_dtype, desc=_desc, kernel_name=f"tci_{_name}"):
-        @pto.jit(name=kernel_name, target="a5")
+        @pto.jit(
+            name=kernel_name,
+            target="a5"
+        )
         def _kernel(
             start: dtype,
             dst_ptr: pto.ptr(dtype, "gm"),
         ):
             _tci_body(
-                start, dst_ptr, dst_rows=dr, dst_cols=dc, dtype=dtype, descending=desc
+                start, dst_ptr,
+                dst_rows=dr, dst_cols=dc, dtype=dtype,
+                descending=desc
             )
 
         return _kernel
@@ -115,9 +115,7 @@ for _name, _dtype, _dst_shape, _desc in CASE_SHAPES:
             "tci_" + _name,
             _tci_kernels[_name],
             inputs=lambda _n=_name, _d=_dtype: _make_inputs(_n, _d),
-            expected=lambda src, _d=_dtype, _ds=_dst_shape, _dc=_desc: _make_expected(
-                src, _d, _ds, _dc
-            ),
+            expected=lambda src, _d=_dtype, _ds=_dst_shape, _dc=_desc: _make_expected(src, _d, _ds, _dc),
             rtol=1e-6,
             atol=1e-6,
         )

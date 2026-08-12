@@ -3261,7 +3261,7 @@ pto.tadds ins(<src>, <scalar> : <src_type>, <scalar_type>)
   - Tile must use `loc=vec`.
   - Valid bounds: `valid row <= rows` and `valid column <= cols`.
   - Runtime: `src valid row == dst valid row` and `src valid column == dst valid column`.
-
+  
 **Hardware Mapping:**
 
 - Executes on the **Vector pipeline** (`PIPE_V`)
@@ -5897,7 +5897,7 @@ pto.trowexpandmul ins(<src0>, <src1>[, <tmp>] : <src0_type>, <src1_type>[, <tmp_
 - When `tmp` is present:
   - PTO IR does not require `tmp` to match the shape or valid shape of `src0` / `src1` / `dst`.
   - On A5, `tmp` is accepted as a compatibility placeholder and is not consumed by the current implementation.
-
+ 
 **Hardware Mapping:**
 
 - Executes on the **Vector pipeline** (`PIPE_V`)
@@ -6439,7 +6439,7 @@ pto.tcmp ins(<src0>, <src1> {cmpMode = <mode>} : <type0>, <type1>)
   - Output type must be `i8`.
   - `src0/src1/dst` must use `loc=vec`.
   - Valid bounds: `src valid row <= src.rows` and `src valid column <= src.cols`.
-  - `src0` and `dst` must have the same valid region:
+  - `src0` and `dst` must have the same valid region: 
       `src0 valid row == src1 valid row == dst valid row` and `src0 valid column == src1 valid column`.
 - **Implementation checks (A5)**:
   - Input type must be one of: `i32`, `i16`, `i8`, `f32`, `f16`.
@@ -7143,7 +7143,7 @@ For each element (i, j):
   - The shared element type must be an 8-bit, 16-bit, or 32-bit signless integer type supported by PTO IR: `i8`, `i16`, `i32`.
   - `src0` and `dst` must use row-major layout (`blayout=row_major`).
   - `src0` and `dst` must have the same valid region: `src0 valid row == dst valid row` and `src0 valid column == dst valid column`.
-
+  
 **Unsupported**.
 
 **Hardware Mapping:**
@@ -7206,7 +7206,7 @@ pto.txors ins(<src>, <scalar>, <tmp> : <src_type>, <scalar_type>, <tmp_type>)
 - **Implementation checks (A5)**:
   - The shared element type must be `i8`, `i16`, or `i32`.
   - The current DPS form still carries `tmp`, but PTO IR does not impose an extra tmp shape, valid-shape, or layout relation on A5.
-
+  
 **Hardware Mapping:**
 
 - Executes on the **Vector pipeline** (`PIPE_V`)
@@ -7393,7 +7393,7 @@ pto.tconcat ins(<src0>, <src1> : <src0_type>, <src1_type>)
 - TileType of src and dst tiles must be `loc=vec`
 - The total concatenated valid columns must fit in `dst` capacity:
   - `src0.valid_col + src1.valid_col <= dst.cols` (checked when these values are statically known).
-- `dst valid row = src0/src1 valid row`,
+- `dst valid row = src0/src1 valid row`, 
 - **Implementation checks (A5)**:
 - `src0`, `src1`, and `dst` must have the same element type, and must be one of : `i8/i16/i32/f16/f32/bf16`.
 - All tiles must `blayout=row_major`
@@ -7739,17 +7739,17 @@ elem mode: dst[i, j] = mem[idx[i, j]]
 
 **Constraints & Verification:**
 
-- **Types (data and indices)**
+- **Types (data and indices)**  
   - `mem` and `dst` must have the **same element type**. Supported element types: `i8`/`i16`/`i32`/`f16`/`bf16`/`f32`. On **A5** targets, `float8_e4m3` / `float8_e5m2` family and `!pto.hif8` element types are also supported.
   - `idx` element type must be signless `i32`.
 
-- **Tile / memory roles**
+- **Tile / memory roles**  
   - `dst` must be `loc=vec`, `blayout=row_major`, `slayout=none_box`.
   - `idx` must be `loc=vec`, `slayout=none_box`. `row_major` and `col_major` are both accepted for row mode.
   - `mem` must denote a GlobalTensor in GM memory.
   - `mem` must use `ND` layout when layout can be inferred.
 
-- **Shape**
+- **Shape**  
   - Element mode: `idx valid_shape == dst valid_shape`.
   - Row mode: `idx valid_shape` may be `[1, dst.valid_row]` or `[dst.valid_row, 1]`.
   - The `[1, R]` row-mode variant uses `row_major`; the `[R, 1]` row-mode variant uses `col_major`.
@@ -7855,22 +7855,22 @@ elem mode:          mem[idx[i, j]] = src[i, j]
 
 **Constraints & Verification:**
 
-- **Types (data and indices)**
+- **Types (data and indices)**  
   - `src` and `mem` must have the **same element type**. Supported element types: `i8`/`i16`/`i32`/`f16`/`bf16`/`f32`. On **A5** targets, `float8_e4m3` / `float8_e5m2` family and `!pto.hif8` element types are also supported.
   - `idx` element type must be signless `i32`.
 
-- **Tile / memory roles**
+- **Tile / memory roles**  
   - `src` must be `loc=vec`, `blayout=row_major`, `slayout=none_box`.
   - `idx` must be `loc=vec`, `slayout=none_box`. `row_major` and `col_major` are both accepted for row mode.
   - `mem` must denote a GlobalTensor in GM memory.
   - `mem` must use `ND` layout when layout can be inferred.
 
-- **Shape**
+- **Shape**  
   - Element mode: `idx valid_shape == src valid_shape`.
   - Row mode: `idx valid_shape` may be `[1, src.valid_row]` or `[src.valid_row, 1]`.
   - The `[1, R]` row-mode variant uses `row_major`; the `[R, 1]` row-mode variant uses `col_major`.
 
-- **Atomic modes**
+- **Atomic modes**  
   - Default `scatterAtomicOp = none` lowers to the default `MSCATTER(mem, src, idx)` overload.
   - Non-default `scatterAtomicOp` values lower to `MSCATTER<Coalesce, ScatterAtomicOp::...>(mem, src, idx)`.
   - `add` requires `i32`/`f16`/`f32`.
@@ -8364,17 +8364,17 @@ dst[i, j] = saturate(cast(src[i, j], rmode), satmode)
 - `satmode = ON` requests destination-range clamping after rounding; `OFF` preserves the target's non-saturating conversion path.
 - **A2/A3 and A5 notes:**
   - A2/A3 reject all low-precision `tcvt` operands.
-  - A5 only accepts the following low-precision pairs:
-    `f32 -> f8E4M3*`,
-    `f32 -> f8E5M2*`,
-    `f32 -> !pto.hif8`,
-    `f16 -> !pto.hif8`,
-    `bf16 -> !pto.f4E1M2x2`,
-    `bf16 -> !pto.f4E2M1x2`,
-    `!pto.f4E1M2x2 -> bf16`,
-    `!pto.f4E2M1x2 -> bf16`,
-    `f8E4M3* -> f32`,
-    `f8E5M2* -> f32`,
+  - A5 only accepts the following low-precision pairs: 
+    `f32 -> f8E4M3*`, 
+    `f32 -> f8E5M2*`, 
+    `f32 -> !pto.hif8`, 
+    `f16 -> !pto.hif8`, 
+    `bf16 -> !pto.f4E1M2x2`, 
+    `bf16 -> !pto.f4E2M1x2`, 
+    `!pto.f4E1M2x2 -> bf16`, 
+    `!pto.f4E2M1x2 -> bf16`, 
+    `f8E4M3* -> f32`, 
+    `f8E5M2* -> f32`, 
     `!pto.hif8 -> f32`.
   - Non-low-precision pairs continue to use the existing target-defined behavior.
 

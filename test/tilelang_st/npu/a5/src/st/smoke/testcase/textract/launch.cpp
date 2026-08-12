@@ -12,15 +12,13 @@
 #define AICORE [aicore]
 #endif
 
-extern "C" __global__ AICORE void TEXTRACT_M2L_f16_16x16(__gm__ uint16_t* src, __gm__ uint16_t* id, __gm__ float* out);
-extern "C" __global__ AICORE void TEXTRACT_M2R_f16_16x16(__gm__ uint16_t* id, __gm__ uint16_t* src, __gm__ float* out);
+extern "C" __global__ AICORE void TEXTRACT_M2L_f16_16x16(__gm__ uint16_t *src, __gm__ uint16_t *id, __gm__ float *out);
+extern "C" __global__ AICORE void TEXTRACT_M2R_f16_16x16(__gm__ uint16_t *id, __gm__ uint16_t *src, __gm__ float *out);
 
-void LaunchTEXTRACT_M2L_f16_16x16(uint16_t* src, uint16_t* id, float* out, void* stream)
-{
-    TEXTRACT_M2L_f16_16x16<<<1, nullptr, stream>>>((__gm__ uint16_t*)src, (__gm__ uint16_t*)id, (__gm__ float*)out);
+void LaunchTEXTRACT_M2L_f16_16x16(uint16_t *src, uint16_t *id, float *out, void *stream) {
+    TEXTRACT_M2L_f16_16x16<<<1, nullptr, stream>>>((__gm__ uint16_t *)src, (__gm__ uint16_t *)id, (__gm__ float *)out);
 }
 
-void LaunchTEXTRACT_M2R_f16_16x16(uint16_t* id, uint16_t* src, float* out, void* stream)
-{
-    TEXTRACT_M2R_f16_16x16<<<1, nullptr, stream>>>((__gm__ uint16_t*)id, (__gm__ uint16_t*)src, (__gm__ float*)out);
+void LaunchTEXTRACT_M2R_f16_16x16(uint16_t *id, uint16_t *src, float *out, void *stream) {
+    TEXTRACT_M2R_f16_16x16<<<1, nullptr, stream>>>((__gm__ uint16_t *)id, (__gm__ uint16_t *)src, (__gm__ float *)out);
 }

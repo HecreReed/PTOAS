@@ -33,14 +33,10 @@ def _broadcast_vec_value(descriptor, init):
     if hasattr(raw_init, "type") and VectorType.isinstance(raw_init.type):
         vec_value = VecValue(raw_init)
         if vec_value.type != vector_type:
-            raise TypeError(
-                f"pto.Vec(..., init=vector) expected {vector_type}, got {vec_value.type}"
-            )
+            raise TypeError(f"pto.Vec(..., init=vector) expected {vector_type}, got {vec_value.type}")
         return vec_value
 
-    scalar_value = coerce_scalar_to_type(
-        init, element_type, context="pto.Vec(..., init=...)"
-    )
+    scalar_value = coerce_scalar_to_type(init, element_type, context="pto.Vec(..., init=...)")
     current = llvm.UndefOp(vector_type).res
     i32 = IntegerType.get_signless(32)
     for index in range(descriptor.size):

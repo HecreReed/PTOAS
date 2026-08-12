@@ -14,24 +14,12 @@
 #endif
 
 #if defined(__CCE_AICORE__) && defined(__NPU_ARCH__) && (__NPU_ARCH__ == 2201)
-typedef struct {
-    unsigned char v;
-} hifloat8_t;
-typedef struct {
-    unsigned char v;
-} float8_e4m3_t;
-typedef struct {
-    unsigned char v;
-} float8_e5m2_t;
-typedef struct {
-    unsigned char v;
-} float8_e8m0_t;
-typedef struct {
-    unsigned char v;
-} float4_e1m2x2_t;
-typedef struct {
-    unsigned char v;
-} float4_e2m1x2_t;
+typedef struct { unsigned char v; } hifloat8_t;
+typedef struct { unsigned char v; } float8_e4m3_t;
+typedef struct { unsigned char v; } float8_e5m2_t;
+typedef struct { unsigned char v; } float8_e8m0_t;
+typedef struct { unsigned char v; } float4_e1m2x2_t;
+typedef struct { unsigned char v; } float4_e2m1x2_t;
 #endif
 #include <cstdint>
 
@@ -51,11 +39,16 @@ struct MrgSortExecutedNumList {
 #include "acl/acl.h"
 #endif
 
-extern "C" __global__[aicore] void issue_173_vsts_signed_signless_deep_merged_kernel(
-    __gm__ int16_t* arg0, __gm__ int16_t* arg1, __gm__ int16_t* arg2, __gm__ int16_t* arg3);
+extern "C" __global__ [aicore] void issue_173_vsts_signed_signless_deep_merged_kernel(
+    __gm__ int16_t * arg0,
+    __gm__ int16_t * arg1,
+    __gm__ int16_t * arg2,
+    __gm__ int16_t * arg3);
 
-void LaunchIssue173VstsSignedSignlessDeepMerged(int16_t* p0, int16_t* p1, int16_t* p2, int16_t* p3, void* stream)
-{
-    issue_173_vsts_signed_signless_deep_merged_kernel<<<1, nullptr, stream>>>(
-        (__gm__ int16_t*)p0, (__gm__ int16_t*)p1, (__gm__ int16_t*)p2, (__gm__ int16_t*)p3);
+void LaunchIssue173VstsSignedSignlessDeepMerged(int16_t * p0, int16_t * p1, int16_t * p2, int16_t * p3, void *stream) {
+  issue_173_vsts_signed_signless_deep_merged_kernel<<<1, nullptr, stream>>>(
+      (__gm__ int16_t *)p0,
+      (__gm__ int16_t *)p1,
+      (__gm__ int16_t *)p2,
+      (__gm__ int16_t *)p3);
 }

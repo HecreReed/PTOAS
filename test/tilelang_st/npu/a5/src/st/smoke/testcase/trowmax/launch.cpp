@@ -12,15 +12,15 @@
 #define AICORE [aicore]
 #endif
 
-extern "C" __global__ AICORE void TROWMAX_f32_15x192(__gm__ float* src, __gm__ float* dst);
-extern "C" __global__ AICORE void TROWMAX_i32_7x448_valid7x447(__gm__ int32_t* src, __gm__ int32_t* dst);
+extern "C" __global__ AICORE void TROWMAX_f32_15x192(__gm__ float *src, __gm__ float *dst);
+extern "C" __global__ AICORE void TROWMAX_i32_7x448_valid7x447(__gm__ int32_t *src, __gm__ int32_t *dst);
 
-void LaunchTROWMAX_f32_15x192(float* src, float* dst, void* stream)
-{
-    TROWMAX_f32_15x192<<<1, nullptr, stream>>>((__gm__ float*)src, (__gm__ float*)dst);
+void LaunchTROWMAX_f32_15x192(float *src, float *dst, void *stream) {
+    TROWMAX_f32_15x192<<<1, nullptr, stream>>>((__gm__ float *)src, (__gm__ float *)dst);
 }
 
-void LaunchTROWMAX_i32_7x448_valid7x447(int32_t* src, int32_t* dst, void* stream)
-{
-    TROWMAX_i32_7x448_valid7x447<<<1, nullptr, stream>>>((__gm__ int32_t*)src, (__gm__ int32_t*)dst);
+
+
+void LaunchTROWMAX_i32_7x448_valid7x447(int32_t *src, int32_t *dst, void *stream) {
+    TROWMAX_i32_7x448_valid7x447<<<1, nullptr, stream>>>((__gm__ int32_t *)src, (__gm__ int32_t *)dst);
 }

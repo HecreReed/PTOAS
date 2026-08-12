@@ -22,11 +22,8 @@ import numpy as np
 from pathlib import Path
 import sys
 
-for search_root in (
-    Path(__file__).resolve().parent,
-    Path(__file__).resolve().parents[1],
-):
-    if (search_root / "validation_runtime.py").is_file():
+for search_root in (Path(__file__).resolve().parent, Path(__file__).resolve().parents[1]):
+    if (search_root / 'validation_runtime.py').is_file():
         sys.path.insert(0, str(search_root))
         break
 
@@ -48,7 +45,7 @@ def main():
     generator = rng()
     # Use the 'signed_small' range so all values survive f32->f16 without
     # overflow (f16 max ≈ 65504; values in [-1.5, 1.5] are well within range).
-    src = float_values(generator, meta.elem_counts[src_name], style="signed_small")
+    src = float_values(generator, meta.elem_counts[src_name], style='signed_small')
 
     buffers = default_buffers(meta)
     buffers[src_name] = src
@@ -60,5 +57,5 @@ def main():
     write_golden(meta, {single_output(meta): golden_f16})
 
 
-if __name__ == "__main__":
+if __name__ == '__main__':
     main()

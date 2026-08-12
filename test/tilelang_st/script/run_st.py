@@ -27,9 +27,7 @@ import argparse
 def run_command(command, cwd=None, check=True):
     try:
         print(f"run command: {' '.join(command)}")
-        subprocess.run(
-            command, cwd=cwd, check=check, stdout=None, stderr=None, text=True
-        )
+        subprocess.run(command, cwd=cwd, check=check, stdout=None, stderr=None, text=True)
     except subprocess.CalledProcessError as e:
         print(f"run command failed with return code {e.returncode}")
         raise
@@ -70,7 +68,8 @@ def set_env_variables(run_mode, soc_version):
         ld_lib_path = os.environ.get("LD_LIBRARY_PATH", "")
         if ld_lib_path:
             filtered_paths = [
-                path for path in ld_lib_path.split(":") if "/runtime/lib64" not in path
+                path for path in ld_lib_path.split(":")
+                if "/runtime/lib64" not in path
             ]
             os.environ["LD_LIBRARY_PATH"] = ":".join(filtered_paths)
 
@@ -205,9 +204,7 @@ def _copy_testcase_scripts(testcase, case_filters=None):
             if name == "cases.py":
                 selected_case_names = _normalize_case_filters(case_filters)
                 if selected_case_names:
-                    _write_filtered_cases_module(
-                        os.path.abspath(src), dst, selected_case_names
-                    )
+                    _write_filtered_cases_module(os.path.abspath(src), dst, selected_case_names)
                     continue
             run_command(["cp", src, dst])
 
@@ -261,41 +258,22 @@ def run_compare(testcase, case_filters=None):
 
 def main():
     parser = argparse.ArgumentParser(description="TileLang ST runner")
-    parser.add_argument("-r", "--run-mode", required=True, help="Run mode: sim or npu")
-    parser.add_argument("-v", "--soc-version", required=True, help="SoC version: a5")
-    parser.add_argument(
-        "-t", "--testcase", required=True, help="Test case name (e.g. tadd)"
-    )
-    parser.add_argument(
-        "-p",
-        "--ptoas-bin",
-        required=False,
-        help="Path to ptoas binary (auto-detected if omitted)",
-    )
-    parser.add_argument(
-        "-c",
-        "--case",
-        action="append",
-        default=[],
-        help="Run one or more specific cases within the testcase. Can be passed multiple times.",
-    )
-    parser.add_argument(
-        "-w",
-        "--without-build",
-        action="store_true",
-        help="Skip build (requires prior build)",
-    )
-    parser.add_argument(
-        "--target-dir",
-        required=False,
-        help="TileLang ST target directory. Defaults to npu/<soc>/src/st.",
-    )
-    parser.add_argument(
-        "--build-jobs",
-        type=int,
-        default=None,
-        help="Maximum parallel jobs for the shared CMake build.",
-    )
+    parser.add_argument("-r", "--run-mode", required=True,
+                        help="Run mode: sim or npu")
+    parser.add_argument("-v", "--soc-version", required=True,
+                        help="SoC version: a5")
+    parser.add_argument("-t", "--testcase", required=True,
+                        help="Test case name (e.g. tadd)")
+    parser.add_argument("-p", "--ptoas-bin", required=False,
+                        help="Path to ptoas binary (auto-detected if omitted)")
+    parser.add_argument("-c", "--case", action="append", default=[],
+                        help="Run one or more specific cases within the testcase. Can be passed multiple times.")
+    parser.add_argument("-w", "--without-build", action="store_true",
+                        help="Skip build (requires prior build)")
+    parser.add_argument("--target-dir", required=False,
+                        help="TileLang ST target directory. Defaults to npu/<soc>/src/st.")
+    parser.add_argument("--build-jobs", type=int, default=None,
+                        help="Maximum parallel jobs for the shared CMake build.")
 
     args = parser.parse_args()
 
@@ -305,20 +283,16 @@ def main():
     if args.soc_version == "a5":
         default_soc_version = "Ascend950PR_9599"
     else:
-        print(
-            f"[ERROR] Unsupported soc-version: {args.soc_version}, only a5 is supported",
-            file=sys.stderr,
-        )
+        print(f"[ERROR] Unsupported soc-version: {args.soc_version}, only a5 is supported",
+              file=sys.stderr)
         sys.exit(1)
 
     testcase = args.testcase
 
     ptoas_bin = args.ptoas_bin or find_ptoas_bin()
     if not ptoas_bin:
-        print(
-            "[ERROR] Cannot find ptoas binary. Set PTOAS_BIN env or use -p flag.",
-            file=sys.stderr,
-        )
+        print("[ERROR] Cannot find ptoas binary. "
+              "Set PTOAS_BIN env or use -p flag.", file=sys.stderr)
         sys.exit(1)
     ptoas_bin = os.path.abspath(ptoas_bin)
     print(f"[INFO] ptoas: {ptoas_bin}")
@@ -331,9 +305,7 @@ def main():
         if target_dir:
             target_dir = os.path.abspath(target_dir)
         else:
-            target_dir = os.path.join(
-                tilelang_st_root, "npu", args.soc_version, "src", "st"
-            )
+            target_dir = os.path.join(tilelang_st_root, "npu", args.soc_version, "src", "st")
 
         if not os.path.isdir(target_dir):
             print(f"[ERROR] Target dir not found: {target_dir}", file=sys.stderr)

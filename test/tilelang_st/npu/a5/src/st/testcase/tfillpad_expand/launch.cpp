@@ -14,18 +14,16 @@
 
 // ========== uint16 kernel (C++ case 8) ==========
 
-extern "C" __global__ AICORE void TFILLPAD_EXPAND_u16_260x32_src_259x7(__gm__ uint16_t* src, __gm__ uint16_t* dst);
+extern "C" __global__ AICORE void TFILLPAD_EXPAND_u16_260x32_src_259x7(__gm__ uint16_t *src, __gm__ uint16_t *dst);
 
-void LaunchTFILLPAD_EXPAND_u16_260x32_src_259x7(uint16_t* src, uint16_t* dst, void* stream)
-{
-    TFILLPAD_EXPAND_u16_260x32_src_259x7<<<1, nullptr, stream>>>((__gm__ uint16_t*)src, (__gm__ uint16_t*)dst);
+void LaunchTFILLPAD_EXPAND_u16_260x32_src_259x7(uint16_t *src, uint16_t *dst, void *stream) {
+    TFILLPAD_EXPAND_u16_260x32_src_259x7<<<1, nullptr, stream>>>((__gm__ uint16_t *)src, (__gm__ uint16_t *)dst);
 }
 
 // ========== int8 kernel (C++ case 9) ==========
 
-extern "C" __global__ AICORE void TFILLPAD_EXPAND_s8_260x64_src_259x7(__gm__ int8_t* src, __gm__ int8_t* dst);
+extern "C" __global__ AICORE void TFILLPAD_EXPAND_s8_260x64_src_259x7(__gm__ int8_t *src, __gm__ int8_t *dst);
 
-void LaunchTFILLPAD_EXPAND_s8_260x64_src_259x7(int8_t* src, int8_t* dst, void* stream)
-{
-    TFILLPAD_EXPAND_s8_260x64_src_259x7<<<1, nullptr, stream>>>((__gm__ int8_t*)src, (__gm__ int8_t*)dst);
+void LaunchTFILLPAD_EXPAND_s8_260x64_src_259x7(int8_t *src, int8_t *dst, void *stream) {
+    TFILLPAD_EXPAND_s8_260x64_src_259x7<<<1, nullptr, stream>>>((__gm__ int8_t *)src, (__gm__ int8_t *)dst);
 }

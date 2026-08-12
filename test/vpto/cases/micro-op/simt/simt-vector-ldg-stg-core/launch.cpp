@@ -12,14 +12,17 @@
 #ifndef __CPU_SIM
 #include "acl/acl.h"
 #endif
-extern "C" __global__[aicore] void simt_vector_ldg_stg_core_kernel(
-    __gm__ float* f32x2, __gm__ half* f16x2, __gm__ bfloat16_t* bf16x2, __gm__ int16_t* i16x2, __gm__ int32_t* i32x2,
-    __gm__ void* hif8x2, __gm__ void* i8x2, __gm__ void* fp8e4x2, __gm__ void* fp8e5x2);
+extern "C" __global__ [aicore] void simt_vector_ldg_stg_core_kernel(
+    __gm__ float *f32x2, __gm__ half *f16x2, __gm__ bfloat16_t *bf16x2,
+    __gm__ int16_t *i16x2, __gm__ int32_t *i32x2,
+    __gm__ void *hif8x2, __gm__ void *i8x2,
+    __gm__ void *fp8e4x2, __gm__ void *fp8e5x2);
 void LaunchSimt_vector_ldg_stg_core_kernel(
-    void* f32x2, void* f16x2, void* bf16x2, void* i16x2, void* i32x2, void* hif8x2, void* i8x2, void* fp8e4x2,
-    void* fp8e5x2, void* stream)
-{
-    simt_vector_ldg_stg_core_kernel<<<1, nullptr, stream>>>(
-        (__gm__ float*)f32x2, (__gm__ half*)f16x2, (__gm__ bfloat16_t*)bf16x2, (__gm__ int16_t*)i16x2,
-        (__gm__ int32_t*)i32x2, (__gm__ void*)hif8x2, (__gm__ void*)i8x2, (__gm__ void*)fp8e4x2, (__gm__ void*)fp8e5x2);
+    void *f32x2, void *f16x2, void *bf16x2, void *i16x2, void *i32x2,
+    void *hif8x2, void *i8x2, void *fp8e4x2, void *fp8e5x2, void *stream) {
+  simt_vector_ldg_stg_core_kernel<<<1, nullptr, stream>>>(
+      (__gm__ float *)f32x2, (__gm__ half *)f16x2, (__gm__ bfloat16_t *)bf16x2,
+      (__gm__ int16_t *)i16x2, (__gm__ int32_t *)i32x2,
+      (__gm__ void *)hif8x2, (__gm__ void *)i8x2,
+      (__gm__ void *)fp8e4x2, (__gm__ void *)fp8e5x2);
 }

@@ -22,428 +22,84 @@
 using namespace PtoTestCommon;
 
 // Kernel launch wrappers (defined in launch.cpp)
-void LaunchTCOLARGMIN_f32_1x256(int32_t* dst, float* tmp, float* src, void* stream);
-void LaunchTCOLARGMIN_f32_16x128(int32_t* dst, float* tmp, float* src, void* stream);
-void LaunchTCOLARGMIN_f32_16x256(int32_t* dst, float* tmp, float* src, void* stream);
-void LaunchTCOLARGMIN_f16_1x256(void* dst, void* tmp, void* src, void* stream);
-void LaunchTCOLARGMIN_f16_16x128(void* dst, void* tmp, void* src, void* stream);
-void LaunchTCOLARGMIN_f16_16x256(void* dst, void* tmp, void* src, void* stream);
-void LaunchTCOLARGMIN_ui32_1x256(void* dst, void* tmp, void* src, void* stream);
-void LaunchTCOLARGMIN_ui32_16x128(void* dst, void* tmp, void* src, void* stream);
-void LaunchTCOLARGMIN_ui32_16x256(void* dst, void* tmp, void* src, void* stream);
-void LaunchTCOLARGMIN_ui16_1x256(void* dst, void* tmp, void* src, void* stream);
-void LaunchTCOLARGMIN_ui16_16x128(void* dst, void* tmp, void* src, void* stream);
-void LaunchTCOLARGMIN_ui16_16x256(void* dst, void* tmp, void* src, void* stream);
-void LaunchTCOLARGMIN_ui8_1x256(void* dst, void* tmp, void* src, void* stream);
-void LaunchTCOLARGMIN_ui8_16x128(void* dst, void* tmp, void* src, void* stream);
-void LaunchTCOLARGMIN_ui8_16x256(void* dst, void* tmp, void* src, void* stream);
-void LaunchTCOLARGMIN_i8_1x256(void* dst, void* tmp, void* src, void* stream);
-void LaunchTCOLARGMIN_i8_16x128(void* dst, void* tmp, void* src, void* stream);
-void LaunchTCOLARGMIN_i8_16x256(void* dst, void* tmp, void* src, void* stream);
+void LaunchTCOLARGMIN_f32_1x256(int32_t *dst, float *tmp, float *src, void *stream);
+void LaunchTCOLARGMIN_f32_16x128(int32_t *dst, float *tmp, float *src, void *stream);
+void LaunchTCOLARGMIN_f32_16x256(int32_t *dst, float *tmp, float *src, void *stream);
+void LaunchTCOLARGMIN_f16_1x256(void *dst, void *tmp, void *src, void *stream);
+void LaunchTCOLARGMIN_f16_16x128(void *dst, void *tmp, void *src, void *stream);
+void LaunchTCOLARGMIN_f16_16x256(void *dst, void *tmp, void *src, void *stream);
+void LaunchTCOLARGMIN_ui32_1x256(void *dst, void *tmp, void *src, void *stream);
+void LaunchTCOLARGMIN_ui32_16x128(void *dst, void *tmp, void *src, void *stream);
+void LaunchTCOLARGMIN_ui32_16x256(void *dst, void *tmp, void *src, void *stream);
+void LaunchTCOLARGMIN_ui16_1x256(void *dst, void *tmp, void *src, void *stream);
+void LaunchTCOLARGMIN_ui16_16x128(void *dst, void *tmp, void *src, void *stream);
+void LaunchTCOLARGMIN_ui16_16x256(void *dst, void *tmp, void *src, void *stream);
+void LaunchTCOLARGMIN_ui8_1x256(void *dst, void *tmp, void *src, void *stream);
+void LaunchTCOLARGMIN_ui8_16x128(void *dst, void *tmp, void *src, void *stream);
+void LaunchTCOLARGMIN_ui8_16x256(void *dst, void *tmp, void *src, void *stream);
+void LaunchTCOLARGMIN_i8_1x256(void *dst, void *tmp, void *src, void *stream);
+void LaunchTCOLARGMIN_i8_16x128(void *dst, void *tmp, void *src, void *stream);
+void LaunchTCOLARGMIN_i8_16x256(void *dst, void *tmp, void *src, void *stream);
 
-using LaunchFnFloat = void (*)(int32_t*, float*, float*, void*);
-using LaunchFnVoid = void (*)(void*, void*, void*, void*);
+using LaunchFnFloat = void (*)(int32_t *, float *, float *, void *);
+using LaunchFnVoid = void (*)(void *, void *, void *, void *);
 
 struct TestCase {
-    const char* name;
-    void* launch;
-    size_t srcRows;
-    size_t srcCols;
-    size_t srcValidRows;
-    size_t srcValidCols;
-    size_t tmpRows;
-    size_t tmpCols;
-    size_t tmpValidRows;
-    size_t tmpValidCols;
-    size_t dstRows;
-    size_t dstCols;
-    size_t dstValidCols;
-    size_t srcElemSize;
-    size_t dstElemSize;
-    bool isFp16;
-    bool isUi32;
-    bool isUi16;
-    bool isUi8;
-    bool isI8;
+    const char *name;
+    void *launch;
+    size_t      srcRows;
+    size_t      srcCols;
+    size_t      srcValidRows;
+    size_t      srcValidCols;
+    size_t      tmpRows;
+    size_t      tmpCols;
+    size_t      tmpValidRows;
+    size_t      tmpValidCols;
+    size_t      dstRows;
+    size_t      dstCols;
+    size_t      dstValidCols;
+    size_t      srcElemSize;
+    size_t      dstElemSize;
+    bool        isFp16;
+    bool        isUi32;
+    bool        isUi16;
+    bool        isUi8;
+    bool        isI8;
 };
 
 static const TestCase kCases[] = {
-    {"f32_1x256",
-     (void*)LaunchTCOLARGMIN_f32_1x256,
-     1,
-     256,
-     1,
-     255,
-     1,
-     256,
-     1,
-     255,
-     1,
-     256,
-     255,
-     sizeof(float),
-     sizeof(int32_t),
-     false,
-     false,
-     false,
-     false,
-     false},
-    {"f32_16x128",
-     (void*)LaunchTCOLARGMIN_f32_16x128,
-     16,
-     128,
-     16,
-     127,
-     16,
-     128,
-     16,
-     127,
-     1,
-     128,
-     127,
-     sizeof(float),
-     sizeof(int32_t),
-     false,
-     false,
-     false,
-     false,
-     false},
-    {"f32_16x256",
-     (void*)LaunchTCOLARGMIN_f32_16x256,
-     16,
-     256,
-     15,
-     255,
-     16,
-     256,
-     15,
-     255,
-     1,
-     256,
-     255,
-     sizeof(float),
-     sizeof(int32_t),
-     false,
-     false,
-     false,
-     false,
-     false},
-    {"f16_1x256",
-     (void*)LaunchTCOLARGMIN_f16_1x256,
-     1,
-     256,
-     1,
-     255,
-     1,
-     256,
-     1,
-     255,
-     1,
-     256,
-     255,
-     2,
-     sizeof(int32_t),
-     true,
-     false,
-     false,
-     false,
-     false},
-    {"f16_16x128",
-     (void*)LaunchTCOLARGMIN_f16_16x128,
-     16,
-     128,
-     16,
-     127,
-     16,
-     128,
-     16,
-     127,
-     1,
-     128,
-     127,
-     2,
-     sizeof(int32_t),
-     true,
-     false,
-     false,
-     false,
-     false},
-    {"f16_16x256",
-     (void*)LaunchTCOLARGMIN_f16_16x256,
-     16,
-     256,
-     15,
-     255,
-     16,
-     256,
-     15,
-     255,
-     1,
-     256,
-     255,
-     2,
-     sizeof(int32_t),
-     true,
-     false,
-     false,
-     false,
-     false},
-    {"ui32_1x256",
-     (void*)LaunchTCOLARGMIN_ui32_1x256,
-     1,
-     256,
-     1,
-     255,
-     1,
-     256,
-     1,
-     255,
-     1,
-     256,
-     255,
-     sizeof(uint32_t),
-     sizeof(int32_t),
-     false,
-     true,
-     false,
-     false,
-     false},
-    {"ui32_16x128",
-     (void*)LaunchTCOLARGMIN_ui32_16x128,
-     16,
-     128,
-     16,
-     127,
-     16,
-     128,
-     16,
-     127,
-     1,
-     128,
-     127,
-     sizeof(uint32_t),
-     sizeof(int32_t),
-     false,
-     true,
-     false,
-     false,
-     false},
-    {"ui32_16x256",
-     (void*)LaunchTCOLARGMIN_ui32_16x256,
-     16,
-     256,
-     15,
-     255,
-     16,
-     256,
-     15,
-     255,
-     1,
-     256,
-     255,
-     sizeof(uint32_t),
-     sizeof(int32_t),
-     false,
-     true,
-     false,
-     false,
-     false},
-    {"ui16_1x256",
-     (void*)LaunchTCOLARGMIN_ui16_1x256,
-     1,
-     256,
-     1,
-     255,
-     1,
-     256,
-     1,
-     255,
-     1,
-     256,
-     255,
-     sizeof(uint16_t),
-     sizeof(int32_t),
-     false,
-     false,
-     true,
-     false,
-     false},
-    {"ui16_16x128",
-     (void*)LaunchTCOLARGMIN_ui16_16x128,
-     16,
-     128,
-     16,
-     127,
-     16,
-     128,
-     16,
-     127,
-     1,
-     128,
-     127,
-     sizeof(uint16_t),
-     sizeof(int32_t),
-     false,
-     false,
-     true,
-     false,
-     false},
-    {"ui16_16x256",
-     (void*)LaunchTCOLARGMIN_ui16_16x256,
-     16,
-     256,
-     15,
-     255,
-     16,
-     256,
-     15,
-     255,
-     1,
-     256,
-     255,
-     sizeof(uint16_t),
-     sizeof(int32_t),
-     false,
-     false,
-     true,
-     false,
-     false},
-    {"ui8_1x256",
-     (void*)LaunchTCOLARGMIN_ui8_1x256,
-     1,
-     256,
-     1,
-     255,
-     1,
-     256,
-     1,
-     255,
-     1,
-     256,
-     255,
-     sizeof(uint8_t),
-     sizeof(int32_t),
-     false,
-     false,
-     false,
-     true,
-     false},
-    {"ui8_16x128",
-     (void*)LaunchTCOLARGMIN_ui8_16x128,
-     16,
-     128,
-     16,
-     127,
-     16,
-     128,
-     16,
-     127,
-     1,
-     128,
-     127,
-     sizeof(uint8_t),
-     sizeof(int32_t),
-     false,
-     false,
-     false,
-     true,
-     false},
-    {"ui8_16x256",
-     (void*)LaunchTCOLARGMIN_ui8_16x256,
-     16,
-     256,
-     15,
-     255,
-     16,
-     256,
-     15,
-     255,
-     1,
-     256,
-     255,
-     sizeof(uint8_t),
-     sizeof(int32_t),
-     false,
-     false,
-     false,
-     true,
-     false},
-    {"i8_1x256",
-     (void*)LaunchTCOLARGMIN_i8_1x256,
-     1,
-     256,
-     1,
-     255,
-     1,
-     256,
-     1,
-     255,
-     1,
-     256,
-     255,
-     sizeof(int8_t),
-     sizeof(int32_t),
-     false,
-     false,
-     false,
-     false,
-     true},
-    {"i8_16x128",
-     (void*)LaunchTCOLARGMIN_i8_16x128,
-     16,
-     128,
-     16,
-     127,
-     16,
-     128,
-     16,
-     127,
-     1,
-     128,
-     127,
-     sizeof(int8_t),
-     sizeof(int32_t),
-     false,
-     false,
-     false,
-     false,
-     true},
-    {"i8_16x256",
-     (void*)LaunchTCOLARGMIN_i8_16x256,
-     16,
-     256,
-     15,
-     255,
-     16,
-     256,
-     15,
-     255,
-     1,
-     256,
-     255,
-     sizeof(int8_t),
-     sizeof(int32_t),
-     false,
-     false,
-     false,
-     false,
-     true},
+    {"f32_1x256", (void*)LaunchTCOLARGMIN_f32_1x256, 1, 256, 1, 255, 1, 256, 1, 255, 1, 256, 255, sizeof(float), sizeof(int32_t), false, false, false, false, false},
+    {"f32_16x128", (void*)LaunchTCOLARGMIN_f32_16x128, 16, 128, 16, 127, 16, 128, 16, 127, 1, 128, 127, sizeof(float), sizeof(int32_t), false, false, false, false, false},
+    {"f32_16x256", (void*)LaunchTCOLARGMIN_f32_16x256, 16, 256, 15, 255, 16, 256, 15, 255, 1, 256, 255, sizeof(float), sizeof(int32_t), false, false, false, false, false},
+    {"f16_1x256", (void*)LaunchTCOLARGMIN_f16_1x256, 1, 256, 1, 255, 1, 256, 1, 255, 1, 256, 255, 2, sizeof(int32_t), true, false, false, false, false},
+    {"f16_16x128", (void*)LaunchTCOLARGMIN_f16_16x128, 16, 128, 16, 127, 16, 128, 16, 127, 1, 128, 127, 2, sizeof(int32_t), true, false, false, false, false},
+    {"f16_16x256", (void*)LaunchTCOLARGMIN_f16_16x256, 16, 256, 15, 255, 16, 256, 15, 255, 1, 256, 255, 2, sizeof(int32_t), true, false, false, false, false},
+    {"ui32_1x256", (void*)LaunchTCOLARGMIN_ui32_1x256, 1, 256, 1, 255, 1, 256, 1, 255, 1, 256, 255, sizeof(uint32_t), sizeof(int32_t), false, true, false, false, false},
+    {"ui32_16x128", (void*)LaunchTCOLARGMIN_ui32_16x128, 16, 128, 16, 127, 16, 128, 16, 127, 1, 128, 127, sizeof(uint32_t), sizeof(int32_t), false, true, false, false, false},
+    {"ui32_16x256", (void*)LaunchTCOLARGMIN_ui32_16x256, 16, 256, 15, 255, 16, 256, 15, 255, 1, 256, 255, sizeof(uint32_t), sizeof(int32_t), false, true, false, false, false},
+    {"ui16_1x256", (void*)LaunchTCOLARGMIN_ui16_1x256, 1, 256, 1, 255, 1, 256, 1, 255, 1, 256, 255, sizeof(uint16_t), sizeof(int32_t), false, false, true, false, false},
+    {"ui16_16x128", (void*)LaunchTCOLARGMIN_ui16_16x128, 16, 128, 16, 127, 16, 128, 16, 127, 1, 128, 127, sizeof(uint16_t), sizeof(int32_t), false, false, true, false, false},
+    {"ui16_16x256", (void*)LaunchTCOLARGMIN_ui16_16x256, 16, 256, 15, 255, 16, 256, 15, 255, 1, 256, 255, sizeof(uint16_t), sizeof(int32_t), false, false, true, false, false},
+    {"ui8_1x256", (void*)LaunchTCOLARGMIN_ui8_1x256, 1, 256, 1, 255, 1, 256, 1, 255, 1, 256, 255, sizeof(uint8_t), sizeof(int32_t), false, false, false, true, false},
+    {"ui8_16x128", (void*)LaunchTCOLARGMIN_ui8_16x128, 16, 128, 16, 127, 16, 128, 16, 127, 1, 128, 127, sizeof(uint8_t), sizeof(int32_t), false, false, false, true, false},
+    {"ui8_16x256", (void*)LaunchTCOLARGMIN_ui8_16x256, 16, 256, 15, 255, 16, 256, 15, 255, 1, 256, 255, sizeof(uint8_t), sizeof(int32_t), false, false, false, true, false},
+    {"i8_1x256", (void*)LaunchTCOLARGMIN_i8_1x256, 1, 256, 1, 255, 1, 256, 1, 255, 1, 256, 255, sizeof(int8_t), sizeof(int32_t), false, false, false, false, true},
+    {"i8_16x128", (void*)LaunchTCOLARGMIN_i8_16x128, 16, 128, 16, 127, 16, 128, 16, 127, 1, 128, 127, sizeof(int8_t), sizeof(int32_t), false, false, false, false, true},
+    {"i8_16x256", (void*)LaunchTCOLARGMIN_i8_16x256, 16, 256, 15, 255, 16, 256, 15, 255, 1, 256, 255, sizeof(int8_t), sizeof(int32_t), false, false, false, false, true},
 };
 static constexpr size_t kNumCases = sizeof(kCases) / sizeof(kCases[0]);
 
-static int RunCase(const TestCase& tc, int deviceId, aclrtStream stream)
-{
+static int RunCase(const TestCase &tc, int deviceId, aclrtStream stream) {
     int rc = 0;
     const size_t srcElemCount = tc.srcRows * tc.srcCols;
-    const size_t srcFileSize = srcElemCount * tc.srcElemSize;
+    const size_t srcFileSize  = srcElemCount * tc.srcElemSize;
     const size_t tmpElemCount = tc.tmpRows * tc.tmpCols;
-    const size_t tmpFileSize = tmpElemCount * tc.srcElemSize;
+    const size_t tmpFileSize  = tmpElemCount * tc.srcElemSize;
     const size_t dstElemCount = tc.dstRows * tc.dstCols;
-    const size_t dstFileSize = dstElemCount * tc.dstElemSize;
+    const size_t dstFileSize  = dstElemCount * tc.dstElemSize;
 
-    std::printf(
-        "[INFO] === case: %s (src=%zux%zu, tmp=%zux%zu, dst=%zux%zu, fp16=%d) ===\n", tc.name, tc.srcRows, tc.srcCols,
-        tc.tmpRows, tc.tmpCols, tc.dstRows, tc.dstCols, tc.isFp16);
+    std::printf("[INFO] === case: %s (src=%zux%zu, tmp=%zux%zu, dst=%zux%zu, fp16=%d) ===\n",
+                tc.name, tc.srcRows, tc.srcCols, tc.tmpRows, tc.tmpCols, tc.dstRows, tc.dstCols, tc.isFp16);
 
     std::string caseDir = std::string("./") + tc.name;
     size_t srcFileSizeVar = srcFileSize;
@@ -504,16 +160,15 @@ static int RunCase(const TestCase& tc, int deviceId, aclrtStream stream)
     return rc;
 }
 
-int main(int argc, char* argv[])
-{
-    const char* caseFilter = (argc > 1) ? argv[1] : nullptr;
+int main(int argc, char *argv[]) {
+    const char *caseFilter = (argc > 1) ? argv[1] : nullptr;
 
     int rc = 0;
     int deviceId = 0;
     aclrtStream stream = nullptr;
 
     aclInit(nullptr);
-    if (const char* envDevice = std::getenv("ACL_DEVICE_ID")) {
+    if (const char *envDevice = std::getenv("ACL_DEVICE_ID")) {
         deviceId = std::atoi(envDevice);
     }
     aclrtSetDevice(deviceId);

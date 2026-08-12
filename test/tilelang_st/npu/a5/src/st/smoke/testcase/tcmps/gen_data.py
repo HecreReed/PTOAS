@@ -99,15 +99,11 @@ for case in CASES:
                 else:  # 16B and 8B
                     col_in_iter = col % lanes
                     bit_pos = col_in_iter * bit_multiplier
-                    byte_idx = (row * iters_per_row + col // lanes) * bytes_per_iter + (
-                        bit_pos // 8
-                    )
+                    byte_idx = (row * iters_per_row + col // lanes) * bytes_per_iter + (bit_pos // 8)
                     bit_idx = bit_pos % 8
 
                 if byte_idx < total_output_bytes:
-                    golden[byte_idx] |= 1 << bit_idx
+                    golden[byte_idx] |= (1 << bit_idx)
 
     save_case_data(case["name"], {"input1": input1, "golden": golden})
-    print(
-        f"[INFO] gen_data: {case['name']} shape={shape} valid_shape={valid_shape} dtype={dtype.__name__} out_dtype={out_dtype.__name__} scalar={SCALAR}"
-    )
+    print(f"[INFO] gen_data: {case['name']} shape={shape} valid_shape={valid_shape} dtype={dtype.__name__} out_dtype={out_dtype.__name__} scalar={SCALAR}")

@@ -31,32 +31,20 @@ def generate(output_dir: Path, seed: int) -> None:
         start = segment * VECTOR_BYTES
         stop = start + VECTOR_BYTES
         ramp = np.arange(VECTOR_BYTES, dtype=np.uint16)
-        data[start:stop] = (
-            (data[start:stop].astype(np.uint16) + ramp + 17 * segment) & 0xFF
-        ).astype(np.uint8)
+        data[start:stop] = ((data[start:stop].astype(np.uint16) + ramp + 17 * segment) & 0xFF).astype(np.uint8)
 
     golden = np.zeros((TOTAL_BYTES,), dtype=np.uint8)
-    golden[0 : 5 * VECTOR_BYTES] = data[0 : 5 * VECTOR_BYTES]
-    golden[5 * VECTOR_BYTES : 7 * VECTOR_BYTES] = data[
-        5 * VECTOR_BYTES : 7 * VECTOR_BYTES
-    ]
+    golden[0:5 * VECTOR_BYTES] = data[0:5 * VECTOR_BYTES]
+    golden[5 * VECTOR_BYTES:7 * VECTOR_BYTES] = data[5 * VECTOR_BYTES:7 * VECTOR_BYTES]
     # The b8 block load/store pair observes the next 32-byte block after a
     # same-stride roundtrip, matching the existing block-layout instruction contract.
-    golden[7 * VECTOR_BYTES : 8 * VECTOR_BYTES] = data[
-        7 * VECTOR_BYTES + 32 : 8 * VECTOR_BYTES + 32
-    ]
+    golden[7 * VECTOR_BYTES:8 * VECTOR_BYTES] = data[7 * VECTOR_BYTES + 32:8 * VECTOR_BYTES + 32]
     # Exercise the typed bf16 vsstb intrinsic with contiguous 32-byte blocks.
-    golden[8 * VECTOR_BYTES : 9 * VECTOR_BYTES] = data[
-        8 * VECTOR_BYTES : 9 * VECTOR_BYTES
-    ]
+    golden[8 * VECTOR_BYTES:9 * VECTOR_BYTES] = data[8 * VECTOR_BYTES:9 * VECTOR_BYTES]
     # vldus starts from an explicitly unaligned base.
-    golden[9 * VECTOR_BYTES : 10 * VECTOR_BYTES] = data[
-        9 * VECTOR_BYTES + 1 : 10 * VECTOR_BYTES + 1
-    ]
+    golden[9 * VECTOR_BYTES:10 * VECTOR_BYTES] = data[9 * VECTOR_BYTES + 1:10 * VECTOR_BYTES + 1]
     # vstus/vstas makes only the explicit state-store offset bytes visible here.
-    golden[10 * VECTOR_BYTES : 10 * VECTOR_BYTES + 3] = data[
-        10 * VECTOR_BYTES : 10 * VECTOR_BYTES + 3
-    ]
+    golden[10 * VECTOR_BYTES:10 * VECTOR_BYTES + 3] = data[10 * VECTOR_BYTES:10 * VECTOR_BYTES + 3]
     output_dir.mkdir(parents=True, exist_ok=True)
     data.tofile(output_dir / "v1.bin")
     np.zeros((TOTAL_BYTES,), dtype=np.uint8).tofile(output_dir / "v2.bin")

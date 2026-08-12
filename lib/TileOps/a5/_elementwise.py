@@ -11,9 +11,7 @@ from ptodsl import pto
 import ptodsl.tilelib as tilelib
 
 
-def _ub_or_vec_row_major(
-    operand_memory_spaces, operand_b_layouts, operand_s_layouts, **_
-):
+def _ub_or_vec_row_major(operand_memory_spaces, operand_b_layouts, operand_s_layouts, **_):
     return (
         all(space in {"ub", "vec"} for space in operand_memory_spaces)
         and all(layout == "row_major" for layout in operand_b_layouts)
@@ -130,17 +128,9 @@ def register_binary(*, op, name, vector_op, dtypes, has_tmp=False):
     return template
 
 
-def register_scalar_binary(
-    *,
-    op,
-    name,
-    vector_op,
-    dtypes,
-    broadcast_scalar=False,
-    has_tmp=False,
-    tmp_matches_src_dst=True,
-    reverse_name=None,
-):
+def register_scalar_binary(*, op, name, vector_op, dtypes, broadcast_scalar=False,
+                           has_tmp=False, tmp_matches_src_dst=True,
+                           reverse_name=None):
     """Register a tile/scalar traversal using either a vector-scalar or broadcast op."""
 
     constraints = _common_constraints("src", "dst")
@@ -288,9 +278,8 @@ def register_scalar_fill(*, op, name, dtypes):
     return template
 
 
-def _emit_scalar_binary_body(
-    src, scalar, dst, vector_op, broadcast_scalar, scalar_lhs=False
-):
+def _emit_scalar_binary_body(src, scalar, dst, vector_op, broadcast_scalar,
+                             scalar_lhs=False):
     dtype = dst.dtype
     valid_rows, valid_cols = dst.valid_shape
     lanes = pto.elements_per_vreg(dtype)

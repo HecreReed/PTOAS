@@ -46,20 +46,14 @@ def vmi_vmull_unsigned_zero_probe():
 
 def main() -> None:
     inferred_text = vmi_vmull_inferred_probe.compile().mlir_text()
-    expect(
-        inferred_text.count("pto.vmi.vmull") == 1,
-        "inferred probe must emit one VMI VMULL",
-    )
+    expect(inferred_text.count("pto.vmi.vmull") == 1, "inferred probe must emit one VMI VMULL")
     expect(
         "-> !pto.vmi.vreg<256xi32>, !pto.vmi.vreg<256xi32>" in inferred_text,
         "VMULL must infer both 256xi32 results",
     )
 
     unsigned_text = vmi_vmull_unsigned_zero_probe.compile().mlir_text()
-    expect(
-        unsigned_text.count("pto.vmi.vmull") == 1,
-        "unsigned probe must emit one VMI VMULL",
-    )
+    expect(unsigned_text.count("pto.vmi.vmull") == 1, "unsigned probe must emit one VMI VMULL")
     expect(
         "-> !pto.vmi.vreg<128xui32>, !pto.vmi.vreg<128xui32>" in unsigned_text,
         "VMULL must infer both 128xui32 results",

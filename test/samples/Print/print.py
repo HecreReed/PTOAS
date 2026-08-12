@@ -10,7 +10,6 @@ from ptoas.mlir.ir import Context, Location, Module, InsertionPoint, UnitAttr
 from ptoas.mlir.dialects import func, arith, pto
 from ptoas.mlir.ir import F32Type, IndexType
 
-
 def build():
     with Context() as ctx:
         pto.register_dialect(ctx, load=True)
@@ -50,9 +49,7 @@ def build():
                 tv0 = pto.MakeTensorViewOp(tv2_f32, arg0, [c32, c32], [c32, c1]).result
 
                 # Create partition_view from tensor_view
-                sv0 = pto.PartitionViewOp(
-                    tile_view_32, tv0, offsets=[c0, c0], sizes=[c32, c32]
-                ).result
+                sv0 = pto.PartitionViewOp(tile_view_32, tv0, offsets=[c0, c0], sizes=[c32, c32]).result
 
                 # Allocate tile buffer
                 tb0 = pto.AllocTileOp(tile_buf_32).result

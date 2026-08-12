@@ -31,9 +31,7 @@ from .toolchain import (
 
 
 def _run(cmd: list[str], *, cwd: Path | None = None) -> None:
-    result = subprocess.run(
-        cmd, cwd=str(cwd) if cwd else None, capture_output=True, text=True
-    )
+    result = subprocess.run(cmd, cwd=str(cwd) if cwd else None, capture_output=True, text=True)
     if result.returncode != 0:
         output = (result.stdout or "") + (result.stderr or "")
         raise RuntimeError(
@@ -61,15 +59,15 @@ def _run_ptoas(
         cmd.append(f"--pto-level={pto_level}")
     if insert_sync is True:
         cmd.append("--enable-insert-sync")
-    cmd.extend(
-        [
-            "--enable-tile-op-expand",
-            str(mlir_path),
-            "-o",
-            str(kernel_object),
-        ]
+    cmd.extend([
+        "--enable-tile-op-expand",
+        str(mlir_path),
+        "-o",
+        str(kernel_object),
+    ])
+    _run(
+        cmd
     )
-    _run(cmd)
 
 
 def _effective_insert_sync(*, mode: str, insert_sync: bool | None) -> bool:

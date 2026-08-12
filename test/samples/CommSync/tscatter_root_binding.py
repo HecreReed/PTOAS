@@ -6,16 +6,7 @@
 # INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
 # See LICENSE in the root of the software repository for the full text of the License.
 
-from ptoas.mlir.ir import (
-    Context,
-    F32Type,
-    IndexType,
-    InsertionPoint,
-    IntegerType,
-    Location,
-    Module,
-    UnitAttr,
-)
+from ptoas.mlir.ir import Context, F32Type, IndexType, InsertionPoint, IntegerType, Location, Module, UnitAttr
 from ptoas.mlir.dialects import arith, func, pto, scf
 
 
@@ -52,9 +43,7 @@ def build():
                 entry = fn.add_entry_block()
 
             with InsertionPoint(entry):
-                src_ptr, dst0_ptr, dst1_ptr, dst2_ptr, dst3_ptr, my_rank, nranks = (
-                    entry.arguments
-                )
+                src_ptr, dst0_ptr, dst1_ptr, dst2_ptr, dst3_ptr, my_rank, nranks = entry.arguments
                 c0 = arith.ConstantOp(idx, 0).result
                 c1 = arith.ConstantOp(idx, 1).result
                 c256 = arith.ConstantOp(idx, 256).result

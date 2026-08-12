@@ -14,15 +14,15 @@
 
 // Case: f32_single_1x256_b64 (transplanted from pto-isa case_single1)
 
-extern "C" __global__ AICORE void TMRGSORT_f32_single_1x256_b64(__gm__ float* src, __gm__ float* dst);
-extern "C" __global__ AICORE void TMRGSORT_f16_topk_1280_512(__gm__ half* src, __gm__ half* dst);
+extern "C" __global__ AICORE void TMRGSORT_f32_single_1x256_b64(__gm__ float *src, __gm__ float *dst);
+extern "C" __global__ AICORE void TMRGSORT_f16_topk_1280_512(__gm__ half *src, __gm__ half *dst);
 
-void LaunchTMRGSORT_f32_single_1x256_b64(float* src, float* dst, void* stream)
-{
-    TMRGSORT_f32_single_1x256_b64<<<1, nullptr, stream>>>((__gm__ float*)src, (__gm__ float*)dst);
+void LaunchTMRGSORT_f32_single_1x256_b64(float *src, float *dst, void *stream) {
+    TMRGSORT_f32_single_1x256_b64<<<1, nullptr, stream>>>((__gm__ float *)src, (__gm__ float *)dst);
 }
 
-void LaunchTMRGSORT_f16_topk_1280_512(uint16_t* src, uint16_t* dst, void* stream)
-{
-    TMRGSORT_f16_topk_1280_512<<<1, nullptr, stream>>>((__gm__ half*)src, (__gm__ half*)dst);
+
+
+void LaunchTMRGSORT_f16_topk_1280_512(uint16_t *src, uint16_t *dst, void *stream) {
+    TMRGSORT_f16_topk_1280_512<<<1, nullptr, stream>>>((__gm__ half *)src, (__gm__ half *)dst);
 }

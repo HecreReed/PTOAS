@@ -26,9 +26,7 @@ FLOAT_SIGNATURES = [
 ]
 
 
-def _ub_or_vec_row_major(
-    operand_memory_spaces, operand_b_layouts, operand_s_layouts, **_
-):
+def _ub_or_vec_row_major(operand_memory_spaces, operand_b_layouts, operand_s_layouts, **_):
     return (
         all(space in {"ub", "vec"} for space in operand_memory_spaces)
         and all(layout == "row_major" for layout in operand_b_layouts)
@@ -36,9 +34,7 @@ def _ub_or_vec_row_major(
     )
 
 
-def _row_expand_layout(
-    src0_config, src1_config, dst_config, src1_shape=(), operand_memory_spaces=(), **_
-):
+def _row_expand_layout(src0_config, src1_config, dst_config, src1_shape=(), operand_memory_spaces=(), **_):
     if not all(space in {"ub", "vec"} for space in operand_memory_spaces):
         return False
     if not (src0_config and src1_config and dst_config):
@@ -53,8 +49,12 @@ def _row_expand_layout(
         and len(src1_shape) == 2
         and src1_shape[1] == 1
     )
-    return (src1_row_major and src1_config.s_layout == "none_box") or (
-        src1_col_major_row_scalar and src1_config.s_layout in {"none_box", "row_major"}
+    return (
+        (src1_row_major and src1_config.s_layout == "none_box")
+        or (
+            src1_col_major_row_scalar
+            and src1_config.s_layout in {"none_box", "row_major"}
+        )
     )
 
 
@@ -261,9 +261,7 @@ def _emit_column_expand_body(src0, src1, dst, vector_op):
             col_loop.update(remained=remained)
 
 
-def _valid_row_expand_binary(
-    src0_valid_shape=(), src1_valid_shape=(), dst_valid_shape=(), **_
-):
+def _valid_row_expand_binary(src0_valid_shape=(), src1_valid_shape=(), dst_valid_shape=(), **_):
     return (
         len(src0_valid_shape) == 2
         and len(src1_valid_shape) == 2
@@ -275,9 +273,7 @@ def _valid_row_expand_binary(
     )
 
 
-def _valid_column_expand_binary(
-    src0_valid_shape=(), src1_valid_shape=(), dst_valid_shape=(), **_
-):
+def _valid_column_expand_binary(src0_valid_shape=(), src1_valid_shape=(), dst_valid_shape=(), **_):
     return (
         len(src0_valid_shape) == 2
         and len(src1_valid_shape) == 2

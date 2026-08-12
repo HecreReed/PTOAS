@@ -10,11 +10,7 @@
 from ptodsl import pto
 import ptodsl.tilelib as tilelib
 
-from ._expand_binary import (
-    _ub_or_vec_row_major,
-    _valid_column_expand_binary,
-    register_column_expand_binary,
-)
+from ._expand_binary import _ub_or_vec_row_major, _valid_column_expand_binary, register_column_expand_binary
 
 
 def _divide_i16(lhs, rhs, mask, f32_mask):

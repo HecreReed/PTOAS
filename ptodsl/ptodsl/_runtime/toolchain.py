@@ -46,17 +46,13 @@ def resolve_bisheng() -> str:
     if found:
         return found
 
-    raise FileNotFoundError(
-        "bisheng compiler not found; source ASCEND setenv.bash first"
-    )
+    raise FileNotFoundError("bisheng compiler not found; source ASCEND setenv.bash first")
 
 
 def ascend_home_path() -> Path:
     home = os.environ.get("ASCEND_HOME_PATH")
     if not home:
-        raise EnvironmentError(
-            "ASCEND_HOME_PATH is not set; source CANN setenv.bash first"
-        )
+        raise EnvironmentError("ASCEND_HOME_PATH is not set; source CANN setenv.bash first")
     return Path(home)
 
 

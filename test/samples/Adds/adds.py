@@ -53,12 +53,8 @@ def build():
                 tv1 = pto.MakeTensorViewOp(tv2_f32, arg1, [c32, c32], [c32, c1]).result
 
                 # Use constants for offsets and sizes in SubviewOp
-                sv0 = pto.PartitionViewOp(
-                    tile_view_32, tv0, offsets=[c0, c0], sizes=[c32, c32]
-                ).result
-                sv1 = pto.PartitionViewOp(
-                    tile_view_32, tv1, offsets=[c0, c0], sizes=[c32, c32]
-                ).result
+                sv0 = pto.PartitionViewOp(tile_view_32, tv0, offsets=[c0, c0], sizes=[c32, c32]).result
+                sv1 = pto.PartitionViewOp(tile_view_32, tv1, offsets=[c0, c0], sizes=[c32, c32]).result
 
                 # Allocate tiles
                 tb0 = pto.AllocTileOp(tile_buf_32).result
@@ -71,9 +67,7 @@ def build():
                 pto.TAddSOp(tb0, scale, tb1)
 
                 # Subview on output tensor view
-                sv2 = pto.PartitionViewOp(
-                    tile_view_32, tv1, offsets=[c0, c0], sizes=[c32, c32]
-                ).result
+                sv2 = pto.PartitionViewOp(tile_view_32, tv1, offsets=[c0, c0], sizes=[c32, c32]).result
 
                 # Store the result
                 pto.TStoreOp(None, tb1, sv2)

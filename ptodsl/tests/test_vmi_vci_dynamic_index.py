@@ -142,8 +142,12 @@ def main() -> None:
     with Context():
         i32 = IntegerType.get_signless(32)
         try:
-            _check_vci_group_tiles_phys_vl(i32, 48, 2, context="pto.vmi.vci(...)")
-            raise AssertionError("expected ValueError for untileable group_size=24")
+            _check_vci_group_tiles_phys_vl(
+                i32, 48, 2, context="pto.vmi.vci(...)"
+            )
+            raise AssertionError(
+                "expected ValueError for untileable group_size=24"
+            )
         except ValueError as err:
             expect(
                 "physical lanes" in str(err),
@@ -152,13 +156,17 @@ def main() -> None:
 
         # P2: group=1 is a single group → equivalent to ungrouped; legal even
         # when size does not tile physical VL (same as ungrouped size=100).
-        _check_vci_group_tiles_phys_vl(i32, 100, 1, context="pto.vmi.vci(...)")
+        _check_vci_group_tiles_phys_vl(
+            i32, 100, 1, context="pto.vmi.vci(...)"
+        )
 
     @pto.jit(target="a5", backend="vpto", mode="explicit")
     def vmi_vci_group1_tail_probe():
         dst = pto.alloc_tile(shape=[1, 128], dtype=pto.i32)
         idx = pto.vmi.vci(pto.i32(0), size=100, group=1)
-        pto.vmi.vstore(idx, dst.as_ptr(), pto.const(0, dtype=pto.index))
+        pto.vmi.vstore(
+            idx, dst.as_ptr(), pto.const(0, dtype=pto.index)
+        )
 
     g1_tail = vmi_vci_group1_tail_probe.compile().mlir_text()
     expect(
@@ -171,7 +179,6 @@ def main() -> None:
     )
 
     print("ptodsl_vmi_vci_dynamic_index: PASS")
-
 
 if __name__ == "__main__":
     main()

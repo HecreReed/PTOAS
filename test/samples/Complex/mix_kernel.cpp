@@ -78,3 +78,5 @@ __global__ AICORE void vector_cube_mixed_kernel(__gm__ float* v1, __gm__ float* 
   TROWMAX(v46, v45);
   return;
 }
+
+

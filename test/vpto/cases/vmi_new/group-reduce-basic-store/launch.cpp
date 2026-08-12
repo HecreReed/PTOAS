@@ -12,24 +12,29 @@
 #include <cstdint>
 #if !defined(__CCE_AICORE__) && !defined(TMRGSORT_HPP)
 struct MrgSortExecutedNumList {
-    uint16_t mrgSortList0;
-    uint16_t mrgSortList1;
-    uint16_t mrgSortList2;
-    uint16_t mrgSortList3;
+  uint16_t mrgSortList0;
+  uint16_t mrgSortList1;
+  uint16_t mrgSortList2;
+  uint16_t mrgSortList3;
 };
 #endif
 #ifndef __CPU_SIM
 #include "acl/acl.h"
 #endif
 
-extern "C" __global__[aicore] void vmi_group_reduce_basic_store_kernel(
-    __gm__ float* src8, __gm__ float* src16, __gm__ float* src32, __gm__ float* dst8, __gm__ float* dst16,
-    __gm__ float* dst32);
+extern "C" __global__ [aicore] void
+vmi_group_reduce_basic_store_kernel(__gm__ float *src8,
+                                    __gm__ float *src16,
+                                    __gm__ float *src32,
+                                    __gm__ float *dst8,
+                                    __gm__ float *dst16,
+                                    __gm__ float *dst32);
 
-void LaunchVmi_group_reduce_basic_store_kernel(
-    float* src8, float* src16, float* src32, float* dst8, float* dst16, float* dst32, void* stream)
-{
-    vmi_group_reduce_basic_store_kernel<<<1, nullptr, stream>>>(
-        (__gm__ float*)src8, (__gm__ float*)src16, (__gm__ float*)src32, (__gm__ float*)dst8, (__gm__ float*)dst16,
-        (__gm__ float*)dst32);
+void LaunchVmi_group_reduce_basic_store_kernel(float *src8, float *src16,
+                                               float *src32, float *dst8,
+                                               float *dst16, float *dst32,
+                                               void *stream) {
+  vmi_group_reduce_basic_store_kernel<<<1, nullptr, stream>>>(
+      (__gm__ float *)src8, (__gm__ float *)src16, (__gm__ float *)src32,
+      (__gm__ float *)dst8, (__gm__ float *)dst16, (__gm__ float *)dst32);
 }

@@ -16,7 +16,7 @@ NOTE: Ascend950 (A5) pto-isa requires Vec/Acc tiles for TSTORE. This sample uses
 Vec tiles to stay portable across A2/A3 and A5.
 """
 
-MLIR_TEXT = r"""module {
+MLIR_TEXT = r'''module {
   func.func @run_partition(%arg0: !pto.ptr<f32>, %arg1: !pto.ptr<f32>,
                            %arg2: index, %arg3: index, %arg4: index, %arg5: index, %arg6: index) {
     %c0 = arith.constant 0 : index
@@ -62,7 +62,7 @@ MLIR_TEXT = r"""module {
     return
   }
 }
-"""
+'''
 
 if __name__ == "__main__":
     print(MLIR_TEXT)

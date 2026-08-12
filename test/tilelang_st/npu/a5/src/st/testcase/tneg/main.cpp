@@ -22,23 +22,23 @@
 using namespace PtoTestCommon;
 
 // Kernel launch wrappers (defined in launch.cpp)
-void LaunchTNEG_f32_16x64(void* a, void* b, void* stream);
-void LaunchTNEG_f32_32x32(void* a, void* b, void* stream);
-void LaunchTNEG_f16_16x64(void* a, void* b, void* stream);
-void LaunchTNEG_f16_32x32(void* a, void* b, void* stream);
-void LaunchTNEG_i32_32x32(void* a, void* b, void* stream);
-void LaunchTNEG_i16_64x16(void* a, void* b, void* stream);
+void LaunchTNEG_f32_16x64(void *a, void *b, void *stream);
+void LaunchTNEG_f32_32x32(void *a, void *b, void *stream);
+void LaunchTNEG_f16_16x64(void *a, void *b, void *stream);
+void LaunchTNEG_f16_32x32(void *a, void *b, void *stream);
+void LaunchTNEG_i32_32x32(void *a, void *b, void *stream);
+void LaunchTNEG_i16_64x16(void *a, void *b, void *stream);
 
-using LaunchFn = void (*)(void*, void*, void*);
+using LaunchFn = void (*)(void *, void *, void *);
 
 struct TestCase {
-    const char* name;
-    LaunchFn launch;
-    size_t rows;      // allocated tile rows
-    size_t cols;      // allocated tile cols
-    size_t validRows; // effective computation rows  (<= rows)
-    size_t validCols; // effective computation cols  (<= cols)
-    size_t elemSize;  // bytes per element
+    const char *name;
+    LaunchFn    launch;
+    size_t      rows;       // allocated tile rows
+    size_t      cols;       // allocated tile cols
+    size_t      validRows;  // effective computation rows  (<= rows)
+    size_t      validCols;  // effective computation cols  (<= cols)
+    size_t      elemSize;   // bytes per element
 };
 
 static const TestCase kCases[] = {
@@ -51,15 +51,13 @@ static const TestCase kCases[] = {
 };
 static constexpr size_t kNumCases = sizeof(kCases) / sizeof(kCases[0]);
 
-static int RunCase(const TestCase& tc, int deviceId, aclrtStream stream)
-{
+static int RunCase(const TestCase &tc, int deviceId, aclrtStream stream) {
     int rc = 0;
     const size_t elemCount = tc.rows * tc.cols;
-    const size_t fileSize = elemCount * tc.elemSize;
+    const size_t fileSize  = elemCount * tc.elemSize;
 
-    std::printf(
-        "[INFO] === case: %s (shape=%zux%zu, valid=%zux%zu) ===\n", tc.name, tc.rows, tc.cols, tc.validRows,
-        tc.validCols);
+    std::printf("[INFO] === case: %s (shape=%zux%zu, valid=%zux%zu) ===\n",
+                tc.name, tc.rows, tc.cols, tc.validRows, tc.validCols);
 
     // Per-case data directory
     std::string caseDir = std::string("./") + tc.name;
@@ -68,11 +66,11 @@ static int RunCase(const TestCase& tc, int deviceId, aclrtStream stream)
     void *srcHost = nullptr, *dstHost = nullptr;
     void *srcDevice = nullptr, *dstDevice = nullptr;
 
-    aclrtMallocHost((void**)(&srcHost), fileSize);
-    aclrtMallocHost((void**)(&dstHost), fileSize);
+    aclrtMallocHost((void **)(&srcHost), fileSize);
+    aclrtMallocHost((void **)(&dstHost), fileSize);
 
-    aclrtMalloc((void**)&srcDevice, fileSize, ACL_MEM_MALLOC_HUGE_FIRST);
-    aclrtMalloc((void**)&dstDevice, fileSize, ACL_MEM_MALLOC_HUGE_FIRST);
+    aclrtMalloc((void **)&srcDevice, fileSize, ACL_MEM_MALLOC_HUGE_FIRST);
+    aclrtMalloc((void **)&dstDevice, fileSize, ACL_MEM_MALLOC_HUGE_FIRST);
 
     if (!ReadFile((caseDir + "/input.bin").c_str(), srcFileSize, srcHost, fileSize)) {
         std::fprintf(stderr, "[ERROR] failed to read %s/input.bin\n", caseDir.c_str());
@@ -107,17 +105,16 @@ static int RunCase(const TestCase& tc, int deviceId, aclrtStream stream)
     return rc;
 }
 
-int main(int argc, char* argv[])
-{
+int main(int argc, char *argv[]) {
     // Optional case filter: ./tneg [case_name]
-    const char* caseFilter = (argc > 1) ? argv[1] : nullptr;
+    const char *caseFilter = (argc > 1) ? argv[1] : nullptr;
 
     int rc = 0;
     int deviceId = 0;
     aclrtStream stream = nullptr;
 
     aclInit(nullptr);
-    if (const char* envDevice = std::getenv("ACL_DEVICE_ID")) {
+    if (const char *envDevice = std::getenv("ACL_DEVICE_ID")) {
         deviceId = std::atoi(envDevice);
     }
     aclrtSetDevice(deviceId);

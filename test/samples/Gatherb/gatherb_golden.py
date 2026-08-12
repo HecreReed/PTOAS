@@ -3,16 +3,15 @@ import numpy as np
 from pathlib import Path
 import sys
 
-for search_root in (
-    Path(__file__).resolve().parent,
-    Path(__file__).resolve().parents[1],
-):
-    if (search_root / "validation_runtime.py").is_file():
+for search_root in (Path(__file__).resolve().parent, Path(__file__).resolve().parents[1]):
+    if (search_root / 'validation_runtime.py').is_file():
         sys.path.insert(0, str(search_root))
         break
 
 from validation_runtime import (
     default_buffers,
+    float_values,
+    is_a5_soc,
     load_case_meta,
     rng,
     single_output,
@@ -58,10 +57,10 @@ def main():
         actual_block = end - elem_off
         dst_base = i * block_elems
         if dst_base + actual_block <= n_out:
-            expected[dst_base : dst_base + actual_block] = src[elem_off:end]
+            expected[dst_base:dst_base + actual_block] = src[elem_off:end]
 
     write_golden(meta, {out_name: np.asarray(expected, dtype=src_dtype)})
 
 
-if __name__ == "__main__":
+if __name__ == '__main__':
     main()

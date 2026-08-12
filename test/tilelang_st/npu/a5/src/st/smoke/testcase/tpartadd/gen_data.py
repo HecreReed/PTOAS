@@ -52,59 +52,45 @@ for case in CASES:
     #   - If src1 col_less: copy src0 full, then add for overlapping region
     # If src1_valid == dst_valid: use tpart_op with src1 as full operand (swap src0/src1)
 
-    src0_eq_dst = src0_vr == dst_vr and src0_vc == dst_vc
-    src1_eq_dst = src1_vr == dst_vr and src1_vc == dst_vc
+    src0_eq_dst = (src0_vr == dst_vr and src0_vc == dst_vc)
+    src1_eq_dst = (src1_vr == dst_vr and src1_vc == dst_vc)
 
     if src0_eq_dst:
         # src0 is the full operand matching dst
-        src1_row_lt_dst = src1_vr < dst_vr and src1_vc == dst_vc
-        src1_col_lt_dst = src1_vr <= dst_vr and src1_vc < dst_vc
+        src1_row_lt_dst = (src1_vr < dst_vr and src1_vc == dst_vc)
+        src1_col_lt_dst = (src1_vr <= dst_vr and src1_vc < dst_vc)
 
         if src1_eq_dst:
             # Full add: dst[:] = src0[:] + src1[:]
-            golden[:dst_vr, :dst_vc] = (
-                input1[:dst_vr, :dst_vc] + input2[:dst_vr, :dst_vc]
-            ).astype(dtype, copy=False)
+            golden[:dst_vr, :dst_vc] = (input1[:dst_vr, :dst_vc] + input2[:dst_vr, :dst_vc]).astype(dtype, copy=False)
         elif src1_col_lt_dst:
             # Col_less: first copy src0, then add in overlapping region
             golden[:dst_vr, :dst_vc] = input1[:dst_vr, :dst_vc].copy()
             if src1_vc > 0:
-                golden[:src1_vr, :src1_vc] = (
-                    input1[:src1_vr, :src1_vc] + input2[:src1_vr, :src1_vc]
-                ).astype(dtype, copy=False)
+                golden[:src1_vr, :src1_vc] = (input1[:src1_vr, :src1_vc] + input2[:src1_vr, :src1_vc]).astype(dtype, copy=False)
         elif src1_row_lt_dst:
             # Row_less: add for src1 region, copy src0 for remaining rows
             if src1_vc > 0:
-                golden[:src1_vr, :src1_vc] = (
-                    input1[:src1_vr, :src1_vc] + input2[:src1_vr, :src1_vc]
-                ).astype(dtype, copy=False)
+                golden[:src1_vr, :src1_vc] = (input1[:src1_vr, :src1_vc] + input2[:src1_vr, :src1_vc]).astype(dtype, copy=False)
             golden[src1_vr:dst_vr, :dst_vc] = input1[src1_vr:dst_vr, :dst_vc].copy()
     elif src1_eq_dst:
         # src1 is the full operand matching dst, swap src0/src1 in the logic
-        src0_row_lt_dst = src0_vr < dst_vr and src0_vc == dst_vc
-        src0_col_lt_dst = src0_vr <= dst_vr and src0_vc < dst_vc
+        src0_row_lt_dst = (src0_vr < dst_vr and src0_vc == dst_vc)
+        src0_col_lt_dst = (src0_vr <= dst_vr and src0_vc < dst_vc)
 
         if src0_eq_dst:
             # Full add: dst[:] = src0[:] + src1[:]
-            golden[:dst_vr, :dst_vc] = (
-                input1[:dst_vr, :dst_vc] + input2[:dst_vr, :dst_vc]
-            ).astype(dtype, copy=False)
+            golden[:dst_vr, :dst_vc] = (input1[:dst_vr, :dst_vc] + input2[:dst_vr, :dst_vc]).astype(dtype, copy=False)
         elif src0_col_lt_dst:
             # Col_less: first copy src1, then add in overlapping region
             golden[:dst_vr, :dst_vc] = input2[:dst_vr, :dst_vc].copy()
             if src0_vc > 0:
-                golden[:src0_vr, :src0_vc] = (
-                    input1[:src0_vr, :src0_vc] + input2[:src0_vr, :src0_vc]
-                ).astype(dtype, copy=False)
+                golden[:src0_vr, :src0_vc] = (input1[:src0_vr, :src0_vc] + input2[:src0_vr, :src0_vc]).astype(dtype, copy=False)
         elif src0_row_lt_dst:
             # Row_less: add for src0 region, copy src1 for remaining rows
             if src0_vc > 0:
-                golden[:src0_vr, :src0_vc] = (
-                    input1[:src0_vr, :src0_vc] + input2[:src0_vr, :src0_vc]
-                ).astype(dtype, copy=False)
+                golden[:src0_vr, :src0_vc] = (input1[:src0_vr, :src0_vc] + input2[:src0_vr, :src0_vc]).astype(dtype, copy=False)
             golden[src0_vr:dst_vr, :dst_vc] = input2[src0_vr:dst_vr, :dst_vc].copy()
 
     save_case_data(case["name"], {"input1": input1, "input2": input2, "golden": golden})
-    print(
-        f"[INFO] gen_data: {case['name']} shape={shape} src0_valid={src0_valid} src1_valid={src1_valid} dst_valid={dst_valid} dtype={dtype.__name__}"
-    )
+    print(f"[INFO] gen_data: {case['name']} shape={shape} src0_valid={src0_valid} src1_valid={src1_valid} dst_valid={dst_valid} dtype={dtype.__name__}")

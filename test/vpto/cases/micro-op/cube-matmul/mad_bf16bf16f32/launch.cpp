@@ -11,24 +11,12 @@
 #endif
 
 #if defined(__CCE_AICORE__) && defined(__NPU_ARCH__) && (__NPU_ARCH__ == 2201)
-typedef struct {
-    unsigned char v;
-} hifloat8_t;
-typedef struct {
-    unsigned char v;
-} float8_e4m3_t;
-typedef struct {
-    unsigned char v;
-} float8_e5m2_t;
-typedef struct {
-    unsigned char v;
-} float8_e8m0_t;
-typedef struct {
-    unsigned char v;
-} float4_e1m2x2_t;
-typedef struct {
-    unsigned char v;
-} float4_e2m1x2_t;
+typedef struct { unsigned char v; } hifloat8_t;
+typedef struct { unsigned char v; } float8_e4m3_t;
+typedef struct { unsigned char v; } float8_e5m2_t;
+typedef struct { unsigned char v; } float8_e8m0_t;
+typedef struct { unsigned char v; } float4_e1m2x2_t;
+typedef struct { unsigned char v; } float4_e2m1x2_t;
 #endif
 
 #include <cstdint>
@@ -39,10 +27,10 @@ typedef struct {
 
 #if !defined(__CCE_AICORE__) && !defined(TMRGSORT_HPP)
 struct MrgSortExecutedNumList {
-    uint16_t mrgSortList0;
-    uint16_t mrgSortList1;
-    uint16_t mrgSortList2;
-    uint16_t mrgSortList3;
+  uint16_t mrgSortList0;
+  uint16_t mrgSortList1;
+  uint16_t mrgSortList2;
+  uint16_t mrgSortList3;
 };
 #endif
 
@@ -52,11 +40,13 @@ struct MrgSortExecutedNumList {
 
 using bf16_storage_t = uint16_t;
 
-extern "C" __global__[aicore] void mad_bf16bf16f32_kernel(
-    __gm__ bf16_storage_t* a, __gm__ bf16_storage_t* b, __gm__ float* c);
+extern "C" __global__ [aicore] void mad_bf16bf16f32_kernel(__gm__ bf16_storage_t *a,
+                                                           __gm__ bf16_storage_t *b,
+                                                           __gm__ float *c);
 
-void LaunchMad_bf16bf16f32_kernel(bf16_storage_t* a, bf16_storage_t* b, float* c, void* stream)
-{
-    mad_bf16bf16f32_kernel<<<1, nullptr, stream>>>(
-        (__gm__ bf16_storage_t*)a, (__gm__ bf16_storage_t*)b, (__gm__ float*)c);
+void LaunchMad_bf16bf16f32_kernel(bf16_storage_t *a, bf16_storage_t *b, float *c,
+                                  void *stream) {
+  mad_bf16bf16f32_kernel<<<1, nullptr, stream>>>((__gm__ bf16_storage_t *)a,
+                                                 (__gm__ bf16_storage_t *)b,
+                                                 (__gm__ float *)c);
 }

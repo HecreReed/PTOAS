@@ -13,9 +13,7 @@ import ptodsl.tilelib as tilelib
 from ._common import NUMERIC_DTYPES
 
 
-def _ub_or_vec_row_major(
-    operand_memory_spaces, operand_b_layouts, operand_s_layouts, **_
-):
+def _ub_or_vec_row_major(operand_memory_spaces, operand_b_layouts, operand_s_layouts, **_):
     return (
         all(space in {"ub", "vec"} for space in operand_memory_spaces)
         and all(layout == "row_major" for layout in operand_b_layouts)
@@ -32,9 +30,7 @@ def _valid_within(valid_shape, dst_valid_shape):
     )
 
 
-def _valid_add_mul_partition(
-    src0_valid_shape=(), src1_valid_shape=(), dst_valid_shape=(), **_
-):
+def _valid_add_mul_partition(src0_valid_shape=(), src1_valid_shape=(), dst_valid_shape=(), **_):
     if not (
         _valid_within(src0_valid_shape, dst_valid_shape)
         and _valid_within(src1_valid_shape, dst_valid_shape)
@@ -43,11 +39,10 @@ def _valid_add_mul_partition(
     return src0_valid_shape == dst_valid_shape or src1_valid_shape == dst_valid_shape
 
 
-def _valid_extreme_partition(
-    src0_valid_shape=(), src1_valid_shape=(), dst_valid_shape=(), **_
-):
-    return _valid_within(src0_valid_shape, dst_valid_shape) and _valid_within(
-        src1_valid_shape, dst_valid_shape
+def _valid_extreme_partition(src0_valid_shape=(), src1_valid_shape=(), dst_valid_shape=(), **_):
+    return (
+        _valid_within(src0_valid_shape, dst_valid_shape)
+        and _valid_within(src1_valid_shape, dst_valid_shape)
     )
 
 
@@ -71,12 +66,8 @@ def register_part_binary(*, op, name, vector_op):
         src0_valid_rows, src0_valid_cols = src0.valid_shape
         src1_valid_rows, src1_valid_cols = src1.valid_shape
 
-        src0_eq_dst = (src0_valid_rows == dst_valid_rows) & (
-            src0_valid_cols == dst_valid_cols
-        )
-        src1_eq_dst = (src1_valid_rows == dst_valid_rows) & (
-            src1_valid_cols == dst_valid_cols
-        )
+        src0_eq_dst = (src0_valid_rows == dst_valid_rows) & (src0_valid_cols == dst_valid_cols)
+        src1_eq_dst = (src1_valid_rows == dst_valid_rows) & (src1_valid_cols == dst_valid_cols)
 
         with pto.if_(src0_eq_dst) as src0_full:
             with src0_full.then_:
@@ -131,9 +122,7 @@ def register_part_extreme(*, op, name, vector_op, pad_value):
 
         pad_vec = pto.vbr(pad_value(dtype))
         with pto.for_(0, dst_valid_rows, step=1) as row:
-            col_loop = pto.for_(0, dst_valid_cols, step=lanes).carry(
-                remained=dst_valid_cols
-            )
+            col_loop = pto.for_(0, dst_valid_cols, step=lanes).carry(remained=dst_valid_cols)
             with col_loop:
                 col = col_loop.iv
                 mask, remained = pto.make_mask(dtype, col_loop.remained)
@@ -147,9 +136,7 @@ def register_part_extreme(*, op, name, vector_op, pad_value):
         pto.mem_bar(pto.BarrierType.VST_VLD)
 
         with pto.for_(0, src1_valid_rows, step=1) as row:
-            col_loop = pto.for_(0, src1_valid_cols, step=lanes).carry(
-                remained=src1_valid_cols
-            )
+            col_loop = pto.for_(0, src1_valid_cols, step=lanes).carry(remained=src1_valid_cols)
             with col_loop:
                 col = col_loop.iv
                 mask, remained = pto.make_mask(dtype, col_loop.remained)
@@ -161,9 +148,8 @@ def register_part_extreme(*, op, name, vector_op, pad_value):
     return template
 
 
-def _emit_overlay_binary(
-    dst, full_src, part_src, vector_op, dst_rows, dst_cols, part_rows, part_cols
-):
+def _emit_overlay_binary(dst, full_src, part_src, vector_op, dst_rows, dst_cols,
+                         part_rows, part_cols):
     part_eq_dst = (part_rows == dst_rows) & (part_cols == dst_cols)
 
     with pto.if_(part_eq_dst) as full_part:
@@ -173,13 +159,9 @@ def _emit_overlay_binary(
             with pto.if_(part_cols < dst_cols) as col_partial:
                 with col_partial.then_:
                     _emit_copy(dst, full_src, dst_rows, dst_cols, start_row=0)
-                    _emit_binary(
-                        dst, full_src, part_src, vector_op, part_rows, part_cols
-                    )
+                    _emit_binary(dst, full_src, part_src, vector_op, part_rows, part_cols)
                 with col_partial.else_:
-                    _emit_binary(
-                        dst, full_src, part_src, vector_op, part_rows, part_cols
-                    )
+                    _emit_binary(dst, full_src, part_src, vector_op, part_rows, part_cols)
                     _emit_copy(dst, full_src, dst_rows, dst_cols, start_row=part_rows)
 
 

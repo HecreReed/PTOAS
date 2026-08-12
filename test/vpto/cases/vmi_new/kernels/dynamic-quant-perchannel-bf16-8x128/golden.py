@@ -55,9 +55,7 @@ def bf16_bits_to_f32(values: np.ndarray) -> np.ndarray:
 
 def generate(output_dir: Path) -> None:
     q = np.tile(ROW_Q, (ROWS + len(ROW_Q) - 1) // len(ROW_Q))[:ROWS]
-    col_scales = np.tile(COL_SCALES, (COLS + len(COL_SCALES) - 1) // len(COL_SCALES))[
-        :COLS
-    ]
+    col_scales = np.tile(COL_SCALES, (COLS + len(COL_SCALES) - 1) // len(COL_SCALES))[:COLS]
 
     src = f32_to_bf16_bits(q[:, None] * col_scales[None, :])
     x_f32 = bf16_bits_to_f32(src)

@@ -66,13 +66,11 @@ def generate(output_dir: Path) -> None:
     for lane in range(LANES):
         _fill_arithmetic_buffer(
             lane,
-            values_a=[
-                (1.0 + lane * 10, 2.0 + lane * 10),
-                (3.0 + lane * 10, 4.0 + lane * 10),
-            ],
-            values_b=[(0.5 + lane, 1.5 + lane), (2.5 + lane, 3.5 + lane)],
-            buf=f32x2,
-            golden=golden_f32x2,
+            values_a=[(1.0 + lane * 10, 2.0 + lane * 10),
+                      (3.0 + lane * 10, 4.0 + lane * 10)],
+            values_b=[(0.5 + lane, 1.5 + lane),
+                      (2.5 + lane, 3.5 + lane)],
+            buf=f32x2, golden=golden_f32x2,
         )
     f32x2.tofile(output_dir / "f32x2.bin")
     golden_f32x2.tofile(output_dir / "golden_f32x2.bin")
@@ -83,13 +81,11 @@ def generate(output_dir: Path) -> None:
     for lane in range(LANES):
         _fill_arithmetic_buffer(
             lane,
-            values_a=[
-                (1.0 + lane * 10, 2.0 + lane * 10),
-                (3.0 + lane * 10, 4.0 + lane * 10),
-            ],
-            values_b=[(0.5 + lane, 1.5 + lane), (2.5 + lane, 3.5 + lane)],
-            buf=f16x2,
-            golden=golden_f16x2,
+            values_a=[(1.0 + lane * 10, 2.0 + lane * 10),
+                      (3.0 + lane * 10, 4.0 + lane * 10)],
+            values_b=[(0.5 + lane, 1.5 + lane),
+                      (2.5 + lane, 3.5 + lane)],
+            buf=f16x2, golden=golden_f16x2,
         )
     f16x2.tofile(output_dir / "f16x2.bin")
     golden_f16x2.tofile(output_dir / "golden_f16x2.bin")
@@ -100,13 +96,11 @@ def generate(output_dir: Path) -> None:
     for lane in range(LANES):
         _fill_arithmetic_buffer(
             lane,
-            values_a=[
-                (1.0 + lane * 10, 2.0 + lane * 10),
-                (3.0 + lane * 10, 4.0 + lane * 10),
-            ],
-            values_b=[(0.5 + lane, 1.5 + lane), (2.5 + lane, 3.5 + lane)],
-            buf=bf16_f32_in,
-            golden=bf16_f32_golden,
+            values_a=[(1.0 + lane * 10, 2.0 + lane * 10),
+                      (3.0 + lane * 10, 4.0 + lane * 10)],
+            values_b=[(0.5 + lane, 1.5 + lane),
+                      (2.5 + lane, 3.5 + lane)],
+            buf=bf16_f32_in, golden=bf16_f32_golden,
         )
     bf16x2 = _f32_to_bf16(bf16_f32_in)
     golden_bf16x2 = _f32_to_bf16(bf16_f32_golden)
@@ -119,13 +113,11 @@ def generate(output_dir: Path) -> None:
     for lane in range(LANES):
         _fill_arithmetic_buffer(
             lane,
-            values_a=[
-                (10 + lane * 20, 20 + lane * 20),
-                (30 + lane * 20, 40 + lane * 20),
-            ],
-            values_b=[(5 + lane, 15 + lane), (25 + lane, 35 + lane)],
-            buf=i16x2,
-            golden=golden_i16x2,
+            values_a=[(10 + lane * 20, 20 + lane * 20),
+                      (30 + lane * 20, 40 + lane * 20)],
+            values_b=[(5 + lane, 15 + lane),
+                      (25 + lane, 35 + lane)],
+            buf=i16x2, golden=golden_i16x2,
         )
     i16x2.tofile(output_dir / "i16x2.bin")
     golden_i16x2.tofile(output_dir / "golden_i16x2.bin")
@@ -136,13 +128,11 @@ def generate(output_dir: Path) -> None:
     for lane in range(LANES):
         _fill_arithmetic_buffer(
             lane,
-            values_a=[
-                (100 + lane * 200, 200 + lane * 200),
-                (300 + lane * 200, 400 + lane * 200),
-            ],
-            values_b=[(50 + lane, 150 + lane), (250 + lane, 350 + lane)],
-            buf=i32x2,
-            golden=golden_i32x2,
+            values_a=[(100 + lane * 200, 200 + lane * 200),
+                      (300 + lane * 200, 400 + lane * 200)],
+            values_b=[(50 + lane, 150 + lane),
+                      (250 + lane, 350 + lane)],
+            buf=i32x2, golden=golden_i32x2,
         )
     i32x2.tofile(output_dir / "i32x2.bin")
     golden_i32x2.tofile(output_dir / "golden_i32x2.bin")
@@ -161,19 +151,13 @@ def generate(output_dir: Path) -> None:
 
     # ── Copy: i8x2 (4 vectors x 2 bytes = 8 bytes, stored as uint8) ──
     i8x2 = np.zeros(COPY_ELEMS * 2, dtype=np.uint8)
-    i8x2[0] = 0x01
-    i8x2[1] = 0x02
-    i8x2[2] = 0x11
-    i8x2[3] = 0x12
-    i8x2[4] = 0xCD
-    i8x2[5] = 0xCD
-    i8x2[6] = 0xCD
-    i8x2[7] = 0xCD
+    i8x2[0] = 0x01; i8x2[1] = 0x02
+    i8x2[2] = 0x11; i8x2[3] = 0x12
+    i8x2[4] = 0xCD; i8x2[5] = 0xCD
+    i8x2[6] = 0xCD; i8x2[7] = 0xCD
     golden_i8x2 = np.copy(i8x2)
-    golden_i8x2[4] = i8x2[0]
-    golden_i8x2[5] = i8x2[1]
-    golden_i8x2[6] = i8x2[2]
-    golden_i8x2[7] = i8x2[3]
+    golden_i8x2[4] = i8x2[0]; golden_i8x2[5] = i8x2[1]
+    golden_i8x2[6] = i8x2[2]; golden_i8x2[7] = i8x2[3]
     i8x2.tofile(output_dir / "i8x2.bin")
     golden_i8x2.tofile(output_dir / "golden_i8x2.bin")
 

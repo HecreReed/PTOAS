@@ -60,9 +60,7 @@ class DeviceParameterSpec:
 
     def bind_entry_arguments(self, entry_arguments):
         if not entry_arguments:
-            raise RuntimeError(
-                f"entry ABI for device parameter '{self.name}' is incomplete"
-            )
+            raise RuntimeError(f"entry ABI for device parameter '{self.name}' is incomplete")
         return wrap_surface_value(entry_arguments[0]), entry_arguments[1:]
 
     def abi_signature(self):
@@ -79,9 +77,7 @@ class RuntimeScalarParameterSpec:
 
     def bind_entry_arguments(self, entry_arguments):
         if not entry_arguments:
-            raise RuntimeError(
-                f"entry ABI for runtime scalar parameter '{self.name}' is incomplete"
-            )
+            raise RuntimeError(f"entry ABI for runtime scalar parameter '{self.name}' is incomplete")
         return wrap_surface_value(entry_arguments[0]), entry_arguments[1:]
 
     def abi_signature(self):
@@ -98,17 +94,11 @@ class HelperMarkerParameterSpec:
 
     def bind_entry_arguments(self, entry_arguments):
         if not entry_arguments:
-            raise RuntimeError(
-                f"kernel-module ABI for parameter '{self.name}' is incomplete"
-            )
+            raise RuntimeError(f"kernel-module ABI for parameter '{self.name}' is incomplete")
         return wrap_surface_value(entry_arguments[0]), entry_arguments[1:]
 
     def abi_signature(self):
-        return (
-            "helper-marker",
-            self.name,
-            getattr(self.annotation, "__name__", repr(self.annotation)),
-        )
+        return ("helper-marker", self.name, getattr(self.annotation, "__name__", repr(self.annotation)))
 
 
 @dataclass(frozen=True)
@@ -137,9 +127,9 @@ def _hashable_signature_atom(value):
 
 
 def _is_supported_runtime_scalar_annotation(annotation) -> bool:
-    return isinstance(annotation, _DType) and not isinstance(
-        annotation,
-        (_PtrDescriptor, _StructDescriptor, _VRegDescriptor, _MaskDescriptor),
+    return (
+        isinstance(annotation, _DType)
+        and not isinstance(annotation, (_PtrDescriptor, _StructDescriptor, _VRegDescriptor, _MaskDescriptor))
     )
 
 
@@ -172,9 +162,7 @@ class KernelSignature:
             bound_value, remaining = param.bind_entry_arguments(remaining)
             bound_args.append(bound_value)
         if remaining:
-            raise RuntimeError(
-                f"unexpected trailing entry arguments in PTODSL kernel ABI: {len(remaining)}"
-            )
+            raise RuntimeError(f"unexpected trailing entry arguments in PTODSL kernel ABI: {len(remaining)}")
         return tuple(bound_args)
 
     def default_constexpr_bindings(self):
@@ -244,9 +232,7 @@ def _parse_entry_jit_kernel_signature(py_fn) -> KernelSignature:
                 raise jit_keyword_only_non_constexpr_error(param.name, param.annotation)
             if param.default is inspect.Parameter.empty:
                 raise jit_constexpr_missing_default_error(param.name)
-            constexpr_parameters.append(
-                ConstexprParameterSpec(param.name, param.default)
-            )
+            constexpr_parameters.append(ConstexprParameterSpec(param.name, param.default))
             continue
 
         raise TypeError(
@@ -270,10 +256,7 @@ def _parse_helper_jit_kernel_signature(py_fn) -> KernelSignature:
             inspect.Parameter.POSITIONAL_ONLY,
             inspect.Parameter.POSITIONAL_OR_KEYWORD,
         }:
-            if (
-                param.kind is inspect.Parameter.KEYWORD_ONLY
-                and param.annotation is _const_expr_marker
-            ):
+            if param.kind is inspect.Parameter.KEYWORD_ONLY and param.annotation is _const_expr_marker:
                 raise TypeError(
                     f"@pto.jit(entry=False) keyword-only parameter '{param.name}' uses unsupported kernel-module "
                     "compile-time annotation pto.const_expr. Kernel-module ABI does not support "
@@ -291,19 +274,13 @@ def _parse_helper_jit_kernel_signature(py_fn) -> KernelSignature:
         if isinstance(param.annotation, _StructDescriptor):
             raise jit_struct_annotation_error(param.name)
         if isinstance(param.annotation, _PtrDescriptor):
-            positional_parameters.append(
-                DeviceParameterSpec(param.name, param.annotation)
-            )
+            positional_parameters.append(DeviceParameterSpec(param.name, param.annotation))
             continue
         if _is_supported_runtime_scalar_annotation(param.annotation):
-            positional_parameters.append(
-                RuntimeScalarParameterSpec(param.name, param.annotation)
-            )
+            positional_parameters.append(RuntimeScalarParameterSpec(param.name, param.annotation))
             continue
         if _is_helper_marker_annotation(param.annotation):
-            positional_parameters.append(
-                HelperMarkerParameterSpec(param.name, param.annotation)
-            )
+            positional_parameters.append(HelperMarkerParameterSpec(param.name, param.annotation))
             continue
         raise jit_helper_illegal_formal_annotation_error(param.name, param.annotation)
 

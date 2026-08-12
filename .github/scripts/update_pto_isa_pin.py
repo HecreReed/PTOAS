@@ -157,9 +157,7 @@ def extract_ci_commit(path: pathlib.Path) -> tuple[str, str]:
 
 def extract_docker_commit(path: pathlib.Path) -> tuple[str, str]:
     text = read_text(path)
-    arg_match = re.search(
-        r"^ARG PTO_ISA_COMMIT=([0-9a-f]{40})$", text, flags=re.MULTILINE
-    )
+    arg_match = re.search(r"^ARG PTO_ISA_COMMIT=([0-9a-f]{40})$", text, flags=re.MULTILINE)
     comment_match = re.search(
         r"^# pinned: https://gitcode\.com/cann/pto-isa/commit/([0-9a-f]{40})$",
         text,
@@ -190,7 +188,9 @@ def verify(
 ) -> None:
     ci_default, ci_env = extract_ci_commit(ci_path)
     docker_arg, docker_comment = extract_docker_commit(docker_path)
-    remote_validation_commit = extract_remote_validation_commit(remote_validation_path)
+    remote_validation_commit = extract_remote_validation_commit(
+        remote_validation_path
+    )
     values = {
         f"{ci_path}:workflow_dispatch_default": ci_default,
         f"{ci_path}:runtime_default": ci_env,

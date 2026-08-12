@@ -31,7 +31,7 @@ BINARY_OPS = {
 
 INT_OPS = {
     "bit_and": (pto.tile.bit_and, lambda x, y: x & y),
-    "bit_or": (pto.tile.bit_or, lambda x, y: x | y),
+    "bit_or":  (pto.tile.bit_or,  lambda x, y: x | y),
     "bit_xor": (pto.tile.bit_xor, lambda x, y: x ^ y),
 }
 
@@ -41,14 +41,14 @@ SHIFT_OPS = {
 }
 
 UNARY_OPS = {
-    "abs": (pto.tile.abs, lambda x: np.abs(x)),
+    "abs":  (pto.tile.abs,  lambda x: np.abs(x)),
     "relu": (pto.tile.relu, lambda x: np.maximum(x, 0)),
-    "neg": (pto.tile.neg, lambda x: np.negative(x)),
-    "exp": (pto.tile.exp, lambda x: np.exp(x)),
-    "log": (pto.tile.log, lambda x: np.log(x)),
+    "neg":  (pto.tile.neg,  lambda x: np.negative(x)),
+    "exp":  (pto.tile.exp,  lambda x: np.exp(x)),
+    "log":  (pto.tile.log,  lambda x: np.log(x)),
     "sqrt": (pto.tile.sqrt, lambda x: np.sqrt(np.abs(x))),
-    "rsqrt": (pto.tile.rsqrt, lambda x: 1.0 / np.sqrt(np.abs(x))),
-    "recip": (pto.tile.recip, lambda x: 1.0 / x),
+    "rsqrt":(pto.tile.rsqrt,lambda x: 1.0 / np.sqrt(np.abs(x))),
+    "recip":(pto.tile.recip,lambda x: 1.0 / x),
 }
 
 POSITIVE_INPUT_OPS = {"log", "sqrt", "rsqrt", "recip"}
@@ -413,9 +413,7 @@ def make_scalar_kernel(
     """Return a ``@pto.jit`` KernelHandle for a scalar-tile binary op."""
     tile_op_fn = SCALAR_OPS[op_name][0]
     pto_dtype = getattr(pto, dtype_str)
-    fn_name = (
-        f"scl_{op_name}_{dtype_str}_{rows}x{cols}_s{str(scalar_val).replace('.', 'p')}"
-    )
+    fn_name = f"scl_{op_name}_{dtype_str}_{rows}x{cols}_s{str(scalar_val).replace('.', 'p')}"
 
     def kernel_body(
         A_ptr: pto.ptr(pto_dtype, "gm"),

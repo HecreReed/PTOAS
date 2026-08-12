@@ -107,9 +107,7 @@ class KernelCompiler:
             raise kernel_module_compile_error(self._py_name)
         if self._module_spec.jit_source is not None:
             return self._compile_source_backed(**constexpr_bindings)
-        normalized_bindings = self._kernel_signature.bind_constexpr_bindings(
-            constexpr_bindings
-        )
+        normalized_bindings = self._kernel_signature.bind_constexpr_bindings(constexpr_bindings)
         kernel_identity = self._kernel_identity
         if self._ast_rewrite:
             kernel_identity = (

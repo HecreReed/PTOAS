@@ -21,7 +21,6 @@ from ptoas.mlir.ir import BF16Type, Context, F16Type, F32Type, IndexType, Intege
 if TYPE_CHECKING:
     from .._kernel_compilation import CompiledKernelHandle
 
-
 def _normalize_stream_ptr(stream):
     if stream is None:
         try:

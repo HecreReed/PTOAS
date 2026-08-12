@@ -23,7 +23,7 @@ HEADER_BODY = [
     "This program is free software, you can redistribute it and/or modify it under the terms and conditions of",
     'CANN Open Software License Agreement Version 2.0 (the "License").',
     "Please refer to the License for details. You may not use this file except in compliance with the License.",
-    'THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,',
+    "THIS SOFTWARE IS PROVIDED ON AN \"AS IS\" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,",
     "INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.",
     "See LICENSE in the root of the software repository for the full text of the License.",
 ]
@@ -37,23 +37,13 @@ ZERO_SHA = "0" * 40
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(
-        description="Check PR386-style license headers on changed files."
-    )
-    parser.add_argument(
-        "--repo", required=True, help="owner/repo for GitHub API lookups"
-    )
+    parser = argparse.ArgumentParser(description="Check PR386-style license headers on changed files.")
+    parser.add_argument("--repo", required=True, help="owner/repo for GitHub API lookups")
     parser.add_argument("--event-name", required=True, help="GitHub event name")
-    parser.add_argument(
-        "--pr-number", default="", help="Pull request number for pull_request events"
-    )
+    parser.add_argument("--pr-number", default="", help="Pull request number for pull_request events")
     parser.add_argument("--base-sha", default="", help="Git base SHA for push events")
-    parser.add_argument(
-        "--head-sha", default="HEAD", help="Git head SHA for push events"
-    )
-    parser.add_argument(
-        "--github-token", default="", help="GitHub token used for PR file listing"
-    )
+    parser.add_argument("--head-sha", default="HEAD", help="Git head SHA for push events")
+    parser.add_argument("--github-token", default="", help="GitHub token used for PR file listing")
     return parser.parse_args()
 
 
@@ -85,19 +75,10 @@ def git_output(*args: str) -> list[str]:
 def changed_files_from_git(base_sha: str, head_sha: str) -> list[str]:
     if base_sha and base_sha != ZERO_SHA:
         try:
-            return git_output(
-                "diff", "--name-only", "--diff-filter=ACMR", base_sha, head_sha
-            )
+            return git_output("diff", "--name-only", "--diff-filter=ACMR", base_sha, head_sha)
         except subprocess.CalledProcessError:
             pass
-    return git_output(
-        "diff-tree",
-        "--no-commit-id",
-        "--name-only",
-        "--diff-filter=ACMR",
-        "-r",
-        head_sha,
-    )
+    return git_output("diff-tree", "--no-commit-id", "--name-only", "--diff-filter=ACMR", "-r", head_sha)
 
 
 def github_api_json(url: str, token: str) -> list[dict]:
@@ -160,9 +141,7 @@ def main() -> int:
     args = parse_args()
     try:
         if args.event_name == "pull_request" and args.pr_number:
-            changed_files = changed_files_from_pr(
-                args.repo, args.pr_number, args.github_token
-            )
+            changed_files = changed_files_from_pr(args.repo, args.pr_number, args.github_token)
         else:
             changed_files = changed_files_from_git(args.base_sha, args.head_sha)
     except urllib.error.URLError as exc:
@@ -196,9 +175,7 @@ def main() -> int:
                 print(f"    {line}", file=sys.stderr)
         return 1
 
-    print(
-        f"Checked {len(relevant_files)} changed source/script files: all headers present."
-    )
+    print(f"Checked {len(relevant_files)} changed source/script files: all headers present.")
     return 0
 
 

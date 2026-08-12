@@ -6,7 +6,6 @@
 # INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
 # See LICENSE in the root of the software repository for the full text of the License.
 
-
 def build() -> str:
     return """module {
   func.func @partition_view_verify_rank_mismatch_valid(%ptr : !pto.ptr<f32>) {

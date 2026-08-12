@@ -25,9 +25,11 @@
 namespace mlir {
 namespace pto {
 
-Value materializeBufferPointer(
-    Value value, Type elementType, Attribute memorySpace, PatternRewriter& rewriter, Location loc);
-LogicalResult convertVPTOEmissionBoundaryToPtr(ModuleOp module, llvm::raw_ostream* diagOS = nullptr);
+Value materializeBufferPointer(Value value, Type elementType,
+                               Attribute memorySpace,
+                               PatternRewriter &rewriter, Location loc);
+LogicalResult convertVPTOEmissionBoundaryToPtr(
+    ModuleOp module, llvm::raw_ostream *diagOS = nullptr);
 
 } // namespace pto
 } // namespace mlir

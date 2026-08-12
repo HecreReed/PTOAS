@@ -192,9 +192,7 @@ def parse_instr_log_dir(log_ca_dir: str, measured_only: bool = True) -> InstrLog
 
     if measured_only:
         max_blk = max(record.blk_dim for record in all_launches)
-        kernel_launches = [
-            record for record in all_launches if record.blk_dim == max_blk
-        ]
+        kernel_launches = [record for record in all_launches if record.blk_dim == max_blk]
         if kernel_launches:
             groups = _group_launches(kernel_launches, gap_threshold=2000)
             all_launches = groups[-1] if groups else kernel_launches
@@ -250,17 +248,13 @@ def find_msprof_run_dir(out_dir: str) -> str | None:
 
 def find_msprof_instr_csv(opprof_dir: str) -> str | None:
     patterns = [
-        os.path.join(
-            opprof_dir, "simulator", "core0.veccore0", "core0.veccore0_instr_exe.csv"
-        ),
+        os.path.join(opprof_dir, "simulator", "core0.veccore0", "core0.veccore0_instr_exe.csv"),
         os.path.join(opprof_dir, "**", "core*.veccore*.instr_exe.csv"),
         os.path.join(opprof_dir, "**", "*instr_exe*.csv"),
     ]
     candidates: list[str] = []
     for pattern in patterns:
-        candidates.extend(
-            path for path in glob.glob(pattern, recursive=True) if os.path.isfile(path)
-        )
+        candidates.extend(path for path in glob.glob(pattern, recursive=True) if os.path.isfile(path))
     if not candidates:
         return None
     return max(candidates, key=os.path.getmtime)
@@ -318,10 +312,7 @@ def parse_msprof_metrics(out_dir: str) -> MsprofMetrics:
         "RV_VMADD",
         "RV_VMLS",
     }
-    arith_cycles = (
-        sum(cycles for instr, cycles in instr_cycles.items() if instr in arith_instrs)
-        or None
-    )
+    arith_cycles = sum(cycles for instr, cycles in instr_cycles.items() if instr in arith_instrs) or None
     core_vf_cycles = pipe_cycles.get("RVECEX") or None
 
     return MsprofMetrics(
@@ -342,19 +333,9 @@ def _load_trace_events(trace_path: str) -> list[dict]:
     return payload.get("traceEvents", [])
 
 
-def _pipe_span(
-    events: list[dict], processes: dict[int, str], *needles: str
-) -> int | None:
-    pids = {
-        pid
-        for pid, name in processes.items()
-        if any(needle in name.upper() for needle in needles)
-    }
-    exec_ev = [
-        event
-        for event in events
-        if event.get("ph") == "X" and "dur" in event and event.get("pid") in pids
-    ]
+def _pipe_span(events: list[dict], processes: dict[int, str], *needles: str) -> int | None:
+    pids = {pid for pid, name in processes.items() if any(needle in name.upper() for needle in needles)}
+    exec_ev = [event for event in events if event.get("ph") == "X" and "dur" in event and event.get("pid") in pids]
     if not exec_ev:
         return None
     start = min(event["ts"] for event in exec_ev)
@@ -377,13 +358,9 @@ def parse_trace_metrics(trace_path: str) -> TraceMetrics:
 
     pushq_pids = {pid for pid, name in processes.items() if "PUSHQ" in name.upper()}
     vf_dispatch = [
-        event
-        for event in exec_ev
-        if event.get("pid") in pushq_pids and "VF" in event.get("name", "")
+        event for event in exec_ev if event.get("pid") in pushq_pids and "VF" in event.get("name", "")
     ]
-    pushq_vf_dur = (
-        max((event.get("dur", 0) for event in vf_dispatch), default=0) or None
-    )
+    pushq_vf_dur = max((event.get("dur", 0) for event in vf_dispatch), default=0) or None
 
     rvec_pids = {pid for pid, name in processes.items() if "RVEC" in name.upper()}
     rvec_events = [event for event in exec_ev if event.get("pid") in rvec_pids]
@@ -392,8 +369,7 @@ def parse_trace_metrics(trace_path: str) -> TraceMetrics:
     arith_events = [
         event
         for event in rvecex_events
-        if event.get("name")
-        in {"RV_VMUL", "RV_VADD", "RV_VSUB", "RV_VDIV", "RV_VMAX", "RV_VMIN"}
+        if event.get("name") in {"RV_VMUL", "RV_VADD", "RV_VSUB", "RV_VDIV", "RV_VMAX", "RV_VMIN"}
     ]
     core_vf_span = None
     arith_sum_dur = None
@@ -428,9 +404,7 @@ def parse_trace_metrics(trace_path: str) -> TraceMetrics:
     )
 
 
-def parse_marker_soc_cycles(
-    cannsim_log: str,
-) -> tuple[list[SocCycleRecord], list[SocCycleRecord]]:
+def parse_marker_soc_cycles(cannsim_log: str) -> tuple[list[SocCycleRecord], list[SocCycleRecord]]:
     with open(cannsim_log, encoding="utf-8", errors="replace") as fh:
         lines = fh.readlines()
 
@@ -449,9 +423,7 @@ def parse_marker_soc_cycles(
         match = SOC_CYCLE_RE.search(line)
         if not match:
             continue
-        record = SocCycleRecord(
-            sim_wall_s=float(match.group(1)), soc_cycles=int(match.group(2))
-        )
+        record = SocCycleRecord(sim_wall_s=float(match.group(1)), soc_cycles=int(match.group(2)))
         all_records.append(record)
         if in_window:
             window_records.append(record)
@@ -478,16 +450,8 @@ def parse_run_metrics(out_dir: str) -> RunMetrics:
     log_ca = os.path.join(run_dir, "log_ca") if run_dir else ""
     cannsim_log = os.path.join(run_dir, "cannsim.log") if run_dir else ""
 
-    instr = (
-        parse_instr_log_dir(log_ca)
-        if log_ca and os.path.isdir(log_ca)
-        else InstrLogMetrics.empty()
-    )
-    soc = (
-        parse_soc_cycles(cannsim_log)
-        if cannsim_log and os.path.isfile(cannsim_log)
-        else []
-    )
+    instr = parse_instr_log_dir(log_ca) if log_ca and os.path.isdir(log_ca) else InstrLogMetrics.empty()
+    soc = parse_soc_cycles(cannsim_log) if cannsim_log and os.path.isfile(cannsim_log) else []
     measured = (
         measured_kernel_soc_cycles(cannsim_log)
         if cannsim_log and os.path.isfile(cannsim_log)
@@ -538,15 +502,7 @@ def format_run_summary(metrics: RunMetrics, label: str | None = None) -> str:
     if metrics.msprof.arith_cycles:
         lines.append(f"msprof arith cycles:       {metrics.msprof.arith_cycles}")
     if metrics.msprof.pipe_cycles:
-        ordered_pipes = [
-            "RVECEX",
-            "RVECLD",
-            "RVECST",
-            "RVECSU",
-            "MTE2",
-            "MTE3",
-            "VECTOR",
-        ]
+        ordered_pipes = ["RVECEX", "RVECLD", "RVECST", "RVECSU", "MTE2", "MTE3", "VECTOR"]
         rendered = ", ".join(
             f"{pipe}={metrics.msprof.pipe_cycles[pipe]}"
             for pipe in ordered_pipes
@@ -567,21 +523,15 @@ def format_run_summary(metrics: RunMetrics, label: str | None = None) -> str:
     if metrics.trace.mte3_span:
         lines.append(f"MTE3 span:                 {metrics.trace.mte3_span}")
     if metrics.trace.rvec_op_counts:
-        top_ops = sorted(
-            metrics.trace.rvec_op_counts.items(), key=lambda item: -item[1]
-        )[:6]
-        lines.append(
-            "top RVEC ops: " + ", ".join(f"{name}={count}" for name, count in top_ops)
-        )
+        top_ops = sorted(metrics.trace.rvec_op_counts.items(), key=lambda item: -item[1])[:6]
+        lines.append("top RVEC ops: " + ", ".join(f"{name}={count}" for name, count in top_ops))
 
     if metrics.instr.max_dur:
         lines.append(
             f"instr MaxDur / span:       {metrics.instr.max_dur} / {metrics.instr.span} "
             f"(blkDim={metrics.instr.max_blk_dim})"
         )
-    elif not metrics.cannsim_run_dir or not os.path.isdir(
-        os.path.join(metrics.cannsim_run_dir, "log_ca")
-    ):
+    elif not metrics.cannsim_run_dir or not os.path.isdir(os.path.join(metrics.cannsim_run_dir, "log_ca")):
         lines.append("instr MaxDur / span:       (log_ca unavailable)")
 
     if metrics.measured_kernel_cycles is not None:
@@ -590,16 +540,12 @@ def format_run_summary(metrics: RunMetrics, label: str | None = None) -> str:
             "(coarse; ~420 is normal)"
         )
     elif metrics.steady_soc_cycles is not None:
-        lines.append(
-            f"SoC cycles (steady):       {metrics.steady_soc_cycles}  (coarse)"
-        )
+        lines.append(f"SoC cycles (steady):       {metrics.steady_soc_cycles}  (coarse)")
 
     if metrics.trace.trace_path:
         lines.append(f"trace:                     {metrics.trace.trace_path}")
     elif metrics.cannsim_run_dir and not find_trace_json(metrics.cannsim_run_dir):
-        lines.append(
-            "trace:                     (none — need instr.bin + cannsim report)"
-        )
+        lines.append("trace:                     (none — need instr.bin + cannsim report)")
 
     return "\n".join(lines)
 

@@ -39,6 +39,4 @@ for case in CASES:
     golden = src0 * np.tile(src1, (reps, 1))[:, :dst_col]
 
     save_case_data(case["name"], {"input0": src0, "input1": src1, "golden": golden})
-    print(
-        f"[INFO] gen_data: {case['name']} src0={src0_shape} src1={src1_shape} dst={dst_shape} dtype={dtype.__name__}"
-    )
+    print(f"[INFO] gen_data: {case['name']} src0={src0_shape} src1={src1_shape} dst={dst_shape} dtype={dtype.__name__}")

@@ -80,12 +80,8 @@ def build():
 
                 arg_src, arg_dst = entry.arguments
 
-                tv_src = pto.MakeTensorViewOp(
-                    tv2_f32, arg_src, [c32, c32], [c32, c1]
-                ).result
-                tv_dst = pto.MakeTensorViewOp(
-                    tv2_i16, arg_dst, [c32, c32], [c32, c1]
-                ).result
+                tv_src = pto.MakeTensorViewOp(tv2_f32, arg_src, [c32, c32], [c32, c1]).result
+                tv_dst = pto.MakeTensorViewOp(tv2_i16, arg_dst, [c32, c32], [c32, c1]).result
 
                 sv_src = pto.PartitionViewOp(
                     part_view_f32,

@@ -16,12 +16,12 @@
 
 using namespace PtoTestCommon;
 
-void LaunchTEXTRACT_V2V_ND_f32_16x16(float* src, float* out, void* stream);
+void LaunchTEXTRACT_V2V_ND_f32_16x16(float *src, float *out, void *stream);
 
-using LaunchFn = void (*)(float*, float*, void*);
+using LaunchFn = void (*)(float *, float *, void *);
 
 struct TestCase {
-    const char* name;
+    const char *name;
     LaunchFn launch;
     size_t srcRows;
     size_t srcCols;
@@ -34,8 +34,7 @@ static const TestCase kCases[] = {
 };
 static constexpr size_t kNumCases = sizeof(kCases) / sizeof(kCases[0]);
 
-static int RunCase(const TestCase& tc, int deviceId, aclrtStream stream)
-{
+static int RunCase(const TestCase &tc, int deviceId, aclrtStream stream) {
     (void)deviceId;
     int rc = 0;
     const size_t srcElems = tc.srcRows * tc.srcCols;
@@ -45,15 +44,16 @@ static int RunCase(const TestCase& tc, int deviceId, aclrtStream stream)
     size_t srcFileSize = srcBytes;
 
     std::printf(
-        "[INFO] === case: %s (src=%zux%zu, out=%zux%zu) ===\n", tc.name, tc.srcRows, tc.srcCols, tc.outRows,
-        tc.outCols);
+        "[INFO] === case: %s (src=%zux%zu, out=%zux%zu) ===\n",
+        tc.name, tc.srcRows, tc.srcCols, tc.outRows, tc.outCols
+    );
 
     std::string caseDir = std::string("./") + tc.name;
 
-    void* srcHost = nullptr;
-    void* outHost = nullptr;
-    void* srcDevice = nullptr;
-    void* outDevice = nullptr;
+    void *srcHost = nullptr;
+    void *outHost = nullptr;
+    void *srcDevice = nullptr;
+    void *outDevice = nullptr;
 
     aclrtMallocHost(&srcHost, srcBytes);
     aclrtMallocHost(&outHost, outBytes);
@@ -69,7 +69,11 @@ static int RunCase(const TestCase& tc, int deviceId, aclrtStream stream)
     if (rc == 0) {
         aclrtMemcpy(srcDevice, srcBytes, srcHost, srcBytes, ACL_MEMCPY_HOST_TO_DEVICE);
 
-        tc.launch(static_cast<float*>(srcDevice), static_cast<float*>(outDevice), stream);
+        tc.launch(
+            static_cast<float *>(srcDevice),
+            static_cast<float *>(outDevice),
+            stream
+        );
 
         aclrtSynchronizeStream(stream);
         aclrtMemcpy(outHost, outBytes, outDevice, outBytes, ACL_MEMCPY_DEVICE_TO_HOST);
@@ -80,30 +84,25 @@ static int RunCase(const TestCase& tc, int deviceId, aclrtStream stream)
         rc = 1;
     }
 
-    if (srcDevice != nullptr)
-        aclrtFree(srcDevice);
-    if (outDevice != nullptr)
-        aclrtFree(outDevice);
-    if (srcHost != nullptr)
-        aclrtFreeHost(srcHost);
-    if (outHost != nullptr)
-        aclrtFreeHost(outHost);
+    if (srcDevice != nullptr) aclrtFree(srcDevice);
+    if (outDevice != nullptr) aclrtFree(outDevice);
+    if (srcHost != nullptr) aclrtFreeHost(srcHost);
+    if (outHost != nullptr) aclrtFreeHost(outHost);
 
     if (rc == 0)
         std::printf("[INFO] case %s done\n", tc.name);
     return rc;
 }
 
-int main(int argc, char* argv[])
-{
-    const char* caseFilter = (argc > 1) ? argv[1] : nullptr;
+int main(int argc, char *argv[]) {
+    const char *caseFilter = (argc > 1) ? argv[1] : nullptr;
 
     int rc = 0;
     int deviceId = 0;
     aclrtStream stream = nullptr;
 
     aclInit(nullptr);
-    if (const char* envDevice = std::getenv("ACL_DEVICE_ID")) {
+    if (const char *envDevice = std::getenv("ACL_DEVICE_ID")) {
         deviceId = std::atoi(envDevice);
     }
     aclrtSetDevice(deviceId);
@@ -121,8 +120,7 @@ int main(int argc, char* argv[])
         }
     }
 
-    if (stream != nullptr)
-        aclrtDestroyStream(stream);
+    if (stream != nullptr) aclrtDestroyStream(stream);
     aclrtResetDevice(deviceId);
     aclFinalize();
 

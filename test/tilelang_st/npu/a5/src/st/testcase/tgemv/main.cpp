@@ -17,34 +17,33 @@
 using namespace PtoTestCommon;
 
 // ---- launch wrappers (defined in launch.cpp) ----
-void LaunchTGEMV_f16_1x300x60(void* a, void* b, void* c, void* stream);
-void LaunchTGEMV_BIAS_f16_1x512x85(void* a, void* b, void* bias, void* c, void* stream);
+void LaunchTGEMV_f16_1x300x60(void *a, void *b, void *c, void *stream);
+void LaunchTGEMV_BIAS_f16_1x512x85(void *a, void *b, void *bias, void *c, void *stream);
 
-using LaunchFn3 = void (*)(void*, void*, void*, void*);
-using LaunchFn4 = void (*)(void*, void*, void*, void*, void*);
+using LaunchFn3 = void (*)(void *, void *, void *, void *);
+using LaunchFn4 = void (*)(void *, void *, void *, void *, void *);
 
 struct TestCase {
-    const char* name;
-    bool hasBias;
-    LaunchFn3 launch3;
-    LaunchFn4 launch4;
-    size_t M;
-    size_t K;
-    size_t N;
-    size_t aElemSize;
-    size_t bElemSize;
-    size_t biasElemSize;
-    size_t cElemSize;
+    const char *name;
+    bool        hasBias;
+    LaunchFn3   launch3;
+    LaunchFn4   launch4;
+    size_t      M;
+    size_t      K;
+    size_t      N;
+    size_t      aElemSize;
+    size_t      bElemSize;
+    size_t      biasElemSize;
+    size_t      cElemSize;
 };
 
 static const TestCase kCases[] = {
-    {"gemv_f16_1x300x60", false, LaunchTGEMV_f16_1x300x60, nullptr, 1, 320, 64, 2, 2, 0, 4},
-    {"gemv_bias_f16_1x512x85", true, nullptr, LaunchTGEMV_BIAS_f16_1x512x85, 1, 512, 96, 2, 2, 4, 4},
+    {"gemv_f16_1x300x60",       false, LaunchTGEMV_f16_1x300x60,       nullptr,   1, 320,  64, 2, 2, 0, 4},
+    {"gemv_bias_f16_1x512x85",  true,  nullptr,                       LaunchTGEMV_BIAS_f16_1x512x85,   1, 512,  96, 2, 2, 4, 4},
 };
 static constexpr size_t kNumCases = sizeof(kCases) / sizeof(kCases[0]);
 
-static int RunCase(const TestCase& tc, int deviceId, aclrtStream stream)
-{
+static int RunCase(const TestCase &tc, int deviceId, aclrtStream stream) {
     (void)deviceId;
     int rc = 0;
     size_t aBytes = tc.M * tc.K * tc.aElemSize;
@@ -53,8 +52,9 @@ static int RunCase(const TestCase& tc, int deviceId, aclrtStream stream)
     const size_t cBytes = tc.M * tc.N * tc.cElemSize;
 
     std::printf(
-        "[INFO] === case: %s (M=%zu, K=%zu, N=%zu, a_esize=%zu, b_esize=%zu, c_esize=%zu) ===\n", tc.name, tc.M, tc.K,
-        tc.N, tc.aElemSize, tc.bElemSize, tc.cElemSize);
+        "[INFO] === case: %s (M=%zu, K=%zu, N=%zu, a_esize=%zu, b_esize=%zu, c_esize=%zu) ===\n",
+        tc.name, tc.M, tc.K, tc.N, tc.aElemSize, tc.bElemSize, tc.cElemSize
+    );
 
     std::string caseDir = std::string("./") + tc.name;
 
@@ -64,14 +64,12 @@ static int RunCase(const TestCase& tc, int deviceId, aclrtStream stream)
     aclrtMallocHost(&aHost, aBytes);
     aclrtMallocHost(&bHost, bBytes);
     aclrtMallocHost(&cHost, cBytes);
-    if (tc.hasBias)
-        aclrtMallocHost(&biasHost, biasBytes);
+    if (tc.hasBias) aclrtMallocHost(&biasHost, biasBytes);
 
     aclrtMalloc(&aDevice, aBytes, ACL_MEM_MALLOC_HUGE_FIRST);
     aclrtMalloc(&bDevice, bBytes, ACL_MEM_MALLOC_HUGE_FIRST);
     aclrtMalloc(&cDevice, cBytes, ACL_MEM_MALLOC_HUGE_FIRST);
-    if (tc.hasBias)
-        aclrtMalloc(&biasDevice, biasBytes, ACL_MEM_MALLOC_HUGE_FIRST);
+    if (tc.hasBias) aclrtMalloc(&biasDevice, biasBytes, ACL_MEM_MALLOC_HUGE_FIRST);
 
     if (!ReadFile((caseDir + "/input1.bin").c_str(), aBytes, aHost, aBytes)) {
         std::fprintf(stderr, "[ERROR] failed to read %s/input1.bin\n", caseDir.c_str());
@@ -89,8 +87,7 @@ static int RunCase(const TestCase& tc, int deviceId, aclrtStream stream)
     if (rc == 0) {
         aclrtMemcpy(aDevice, aBytes, aHost, aBytes, ACL_MEMCPY_HOST_TO_DEVICE);
         aclrtMemcpy(bDevice, bBytes, bHost, bBytes, ACL_MEMCPY_HOST_TO_DEVICE);
-        if (tc.hasBias)
-            aclrtMemcpy(biasDevice, biasBytes, biasHost, biasBytes, ACL_MEMCPY_HOST_TO_DEVICE);
+        if (tc.hasBias) aclrtMemcpy(biasDevice, biasBytes, biasHost, biasBytes, ACL_MEMCPY_HOST_TO_DEVICE);
 
         if (tc.hasBias) {
             tc.launch4(aDevice, bDevice, biasDevice, cDevice, stream);
@@ -107,38 +104,29 @@ static int RunCase(const TestCase& tc, int deviceId, aclrtStream stream)
         rc = 1;
     }
 
-    if (aDevice != nullptr)
-        aclrtFree(aDevice);
-    if (bDevice != nullptr)
-        aclrtFree(bDevice);
-    if (biasDevice != nullptr)
-        aclrtFree(biasDevice);
-    if (cDevice != nullptr)
-        aclrtFree(cDevice);
-    if (aHost != nullptr)
-        aclrtFreeHost(aHost);
-    if (bHost != nullptr)
-        aclrtFreeHost(bHost);
-    if (biasHost != nullptr)
-        aclrtFreeHost(biasHost);
-    if (cHost != nullptr)
-        aclrtFreeHost(cHost);
+    if (aDevice != nullptr) aclrtFree(aDevice);
+    if (bDevice != nullptr) aclrtFree(bDevice);
+    if (biasDevice != nullptr) aclrtFree(biasDevice);
+    if (cDevice != nullptr) aclrtFree(cDevice);
+    if (aHost != nullptr) aclrtFreeHost(aHost);
+    if (bHost != nullptr) aclrtFreeHost(bHost);
+    if (biasHost != nullptr) aclrtFreeHost(biasHost);
+    if (cHost != nullptr) aclrtFreeHost(cHost);
 
     if (rc == 0)
         std::printf("[INFO] case %s done\n", tc.name);
     return rc;
 }
 
-int main(int argc, char* argv[])
-{
-    const char* caseFilter = (argc > 1) ? argv[1] : nullptr;
+int main(int argc, char *argv[]) {
+    const char *caseFilter = (argc > 1) ? argv[1] : nullptr;
 
     int rc = 0;
     int deviceId = 0;
     aclrtStream stream = nullptr;
 
     aclInit(nullptr);
-    if (const char* envDevice = std::getenv("ACL_DEVICE_ID")) {
+    if (const char *envDevice = std::getenv("ACL_DEVICE_ID")) {
         deviceId = std::atoi(envDevice);
     }
     aclrtSetDevice(deviceId);

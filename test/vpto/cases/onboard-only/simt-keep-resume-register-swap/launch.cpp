@@ -15,10 +15,12 @@
 #include "acl/acl.h"
 #endif
 
-extern "C" __global__[aicore] void simt_keep_resume_register_swap_kernel(
-    __gm__ int32_t* output32, __gm__ int64_t* output64);
+extern "C" __global__[aicore] void
+simt_keep_resume_register_swap_kernel(__gm__ int32_t *output32,
+                                      __gm__ int64_t *output64);
 
-void LaunchSimtKeepResumeRegisterSwapKernel(int32_t* output32, int64_t* output64, void* stream)
-{
-    simt_keep_resume_register_swap_kernel<<<1, nullptr, stream>>>((__gm__ int32_t*)output32, (__gm__ int64_t*)output64);
+void LaunchSimtKeepResumeRegisterSwapKernel(int32_t *output32,
+                                            int64_t *output64, void *stream) {
+  simt_keep_resume_register_swap_kernel<<<1, nullptr, stream>>>(
+      (__gm__ int32_t *)output32, (__gm__ int64_t *)output64);
 }

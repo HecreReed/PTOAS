@@ -16,12 +16,12 @@
 
 using namespace PtoTestCommon;
 
-void LaunchTEXTRACT_FP_f32_f16_16x16(uint16_t* a, uint16_t* b, float* fb, uint16_t* id, float* out, void* stream);
+void LaunchTEXTRACT_FP_f32_f16_16x16(uint16_t *a, uint16_t *b, float *fb, uint16_t *id, float *out, void *stream);
 
-using LaunchFn = void (*)(uint16_t*, uint16_t*, float*, uint16_t*, float*, void*);
+using LaunchFn = void (*)(uint16_t *, uint16_t *, float *, uint16_t *, float *, void *);
 
 struct TestCase {
-    const char* name;
+    const char *name;
     LaunchFn launch;
     size_t aRows;
     size_t aCols;
@@ -40,8 +40,7 @@ static const TestCase kCases[] = {
 };
 static constexpr size_t kNumCases = sizeof(kCases) / sizeof(kCases[0]);
 
-static int RunCase(const TestCase& tc, int deviceId, aclrtStream stream)
-{
+static int RunCase(const TestCase &tc, int deviceId, aclrtStream stream) {
     (void)deviceId;
     int rc = 0;
     const size_t aElems = tc.aRows * tc.aCols;
@@ -60,21 +59,22 @@ static int RunCase(const TestCase& tc, int deviceId, aclrtStream stream)
     size_t idFileSize = idBytes;
 
     std::printf(
-        "[INFO] === case: %s (a=%zux%zu, b=%zux%zu, fb=%zux%zu, id=%zux%zu, out=%zux%zu) ===\n", tc.name, tc.aRows,
-        tc.aCols, tc.bRows, tc.bCols, tc.fbRows, tc.fbCols, tc.idRows, tc.idCols, tc.outRows, tc.outCols);
+        "[INFO] === case: %s (a=%zux%zu, b=%zux%zu, fb=%zux%zu, id=%zux%zu, out=%zux%zu) ===\n",
+        tc.name, tc.aRows, tc.aCols, tc.bRows, tc.bCols, tc.fbRows, tc.fbCols, tc.idRows, tc.idCols, tc.outRows, tc.outCols
+    );
 
     std::string caseDir = std::string("./") + tc.name;
 
-    void* aHost = nullptr;
-    void* bHost = nullptr;
-    void* fbHost = nullptr;
-    void* idHost = nullptr;
-    void* outHost = nullptr;
-    void* aDevice = nullptr;
-    void* bDevice = nullptr;
-    void* fbDevice = nullptr;
-    void* idDevice = nullptr;
-    void* outDevice = nullptr;
+    void *aHost = nullptr;
+    void *bHost = nullptr;
+    void *fbHost = nullptr;
+    void *idHost = nullptr;
+    void *outHost = nullptr;
+    void *aDevice = nullptr;
+    void *bDevice = nullptr;
+    void *fbDevice = nullptr;
+    void *idDevice = nullptr;
+    void *outDevice = nullptr;
 
     aclrtMallocHost(&aHost, aBytes);
     aclrtMallocHost(&bHost, bBytes);
@@ -112,8 +112,13 @@ static int RunCase(const TestCase& tc, int deviceId, aclrtStream stream)
         aclrtMemcpy(idDevice, idBytes, idHost, idBytes, ACL_MEMCPY_HOST_TO_DEVICE);
 
         tc.launch(
-            static_cast<uint16_t*>(aDevice), static_cast<uint16_t*>(bDevice), static_cast<float*>(fbDevice),
-            static_cast<uint16_t*>(idDevice), static_cast<float*>(outDevice), stream);
+            static_cast<uint16_t *>(aDevice),
+            static_cast<uint16_t *>(bDevice),
+            static_cast<float *>(fbDevice),
+            static_cast<uint16_t *>(idDevice),
+            static_cast<float *>(outDevice),
+            stream
+        );
 
         aclrtSynchronizeStream(stream);
         aclrtMemcpy(outHost, outBytes, outDevice, outBytes, ACL_MEMCPY_DEVICE_TO_HOST);
@@ -124,42 +129,31 @@ static int RunCase(const TestCase& tc, int deviceId, aclrtStream stream)
         rc = 1;
     }
 
-    if (aDevice != nullptr)
-        aclrtFree(aDevice);
-    if (bDevice != nullptr)
-        aclrtFree(bDevice);
-    if (fbDevice != nullptr)
-        aclrtFree(fbDevice);
-    if (idDevice != nullptr)
-        aclrtFree(idDevice);
-    if (outDevice != nullptr)
-        aclrtFree(outDevice);
-    if (aHost != nullptr)
-        aclrtFreeHost(aHost);
-    if (bHost != nullptr)
-        aclrtFreeHost(bHost);
-    if (fbHost != nullptr)
-        aclrtFreeHost(fbHost);
-    if (idHost != nullptr)
-        aclrtFreeHost(idHost);
-    if (outHost != nullptr)
-        aclrtFreeHost(outHost);
+    if (aDevice != nullptr) aclrtFree(aDevice);
+    if (bDevice != nullptr) aclrtFree(bDevice);
+    if (fbDevice != nullptr) aclrtFree(fbDevice);
+    if (idDevice != nullptr) aclrtFree(idDevice);
+    if (outDevice != nullptr) aclrtFree(outDevice);
+    if (aHost != nullptr) aclrtFreeHost(aHost);
+    if (bHost != nullptr) aclrtFreeHost(bHost);
+    if (fbHost != nullptr) aclrtFreeHost(fbHost);
+    if (idHost != nullptr) aclrtFreeHost(idHost);
+    if (outHost != nullptr) aclrtFreeHost(outHost);
 
     if (rc == 0)
         std::printf("[INFO] case %s done\n", tc.name);
     return rc;
 }
 
-int main(int argc, char* argv[])
-{
-    const char* caseFilter = (argc > 1) ? argv[1] : nullptr;
+int main(int argc, char *argv[]) {
+    const char *caseFilter = (argc > 1) ? argv[1] : nullptr;
 
     int rc = 0;
     int deviceId = 0;
     aclrtStream stream = nullptr;
 
     aclInit(nullptr);
-    if (const char* envDevice = std::getenv("ACL_DEVICE_ID")) {
+    if (const char *envDevice = std::getenv("ACL_DEVICE_ID")) {
         deviceId = std::atoi(envDevice);
     }
     aclrtSetDevice(deviceId);
@@ -177,8 +171,7 @@ int main(int argc, char* argv[])
         }
     }
 
-    if (stream != nullptr)
-        aclrtDestroyStream(stream);
+    if (stream != nullptr) aclrtDestroyStream(stream);
     aclrtResetDevice(deviceId);
     aclFinalize();
 

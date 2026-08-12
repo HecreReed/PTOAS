@@ -40,11 +40,10 @@ namespace {
 // Op whitelist — add new ops here to enable signless→unsigned normalization
 // ---------------------------------------------------------------------------
 
-static bool isWhitelisted(Operation* op)
-{
-    return llvm::TypeSwitch<Operation*, bool>(op)
-        .Case<pto::VMIVdhistOp, pto::VMIVchistOp>([](auto) { return true; })
-        .Default([](auto) { return false; });
+static bool isWhitelisted(Operation *op) {
+  return llvm::TypeSwitch<Operation *, bool>(op)
+      .Case<pto::VMIVdhistOp, pto::VMIVchistOp>([](auto) { return true; })
+      .Default([](auto) { return false; });
 }
 
 // ---------------------------------------------------------------------------
@@ -52,44 +51,48 @@ static bool isWhitelisted(Operation* op)
 // ---------------------------------------------------------------------------
 
 /// Returns true if t is a signless VMIVRegType.
-static bool hasSignlessIntElement(pto::VMIVRegType vreg)
-{
-    auto intTy = dyn_cast<IntegerType>(vreg.getElementType());
-    return intTy && intTy.isSignless();
+static bool hasSignlessIntElement(pto::VMIVRegType vreg) {
+  auto intTy = dyn_cast<IntegerType>(vreg.getElementType());
+  return intTy && intTy.isSignless();
 }
 
 /// Creates a new VMIVRegType with the element type replaced by an unsigned
 /// integer of the same width. Layout is preserved.
-static pto::VMIVRegType makeUnsignedVReg(MLIRContext* ctx, pto::VMIVRegType vreg)
-{
-    auto intTy = cast<IntegerType>(vreg.getElementType());
-    auto unsignedElem = IntegerType::get(ctx, intTy.getWidth(), IntegerType::Unsigned);
-    return pto::VMIVRegType::get(ctx, vreg.getElementCount(), unsignedElem, vreg.getLayoutAttr());
+static pto::VMIVRegType makeUnsignedVReg(MLIRContext *ctx,
+                                         pto::VMIVRegType vreg) {
+  auto intTy = cast<IntegerType>(vreg.getElementType());
+  auto unsignedElem = IntegerType::get(ctx, intTy.getWidth(),
+                                       IntegerType::Unsigned);
+  return pto::VMIVRegType::get(ctx, vreg.getElementCount(), unsignedElem,
+                               vreg.getLayoutAttr());
 }
 
 /// Inserts pto.vmi.bitcast before op to convert value v from its current
 /// (signless) type to an unsigned VMIVRegType. Returns the bitcast result.
-static Value insertNormalizeCastBefore(Operation* op, Value v, PatternRewriter& rewriter)
-{
-    auto vreg = cast<pto::VMIVRegType>(v.getType());
-    auto newType = makeUnsignedVReg(rewriter.getContext(), vreg);
-    rewriter.setInsertionPoint(op);
-    return rewriter.create<pto::VMIBitcastOp>(op->getLoc(), newType, v).getResult();
+static Value insertNormalizeCastBefore(Operation *op, Value v,
+                                       PatternRewriter &rewriter) {
+  auto vreg = cast<pto::VMIVRegType>(v.getType());
+  auto newType = makeUnsignedVReg(rewriter.getContext(), vreg);
+  rewriter.setInsertionPoint(op);
+  return rewriter.create<pto::VMIBitcastOp>(op->getLoc(), newType, v)
+      .getResult();
 }
 
 /// Inserts pto.vmi.bitcast after op to convert the result back from
 /// unsigned to its original (signless) type. Updates all uses of the result
 /// (except the bitcast itself) to use the bitcast instead.
-static void insertNormalizeCastAfter(Operation* op, OpResult result, PatternRewriter& rewriter)
-{
-    auto vreg = cast<pto::VMIVRegType>(result.getType());
-    auto newType = makeUnsignedVReg(rewriter.getContext(), vreg);
-    Type oldType = result.getType();
+static void insertNormalizeCastAfter(Operation *op, OpResult result,
+                                     PatternRewriter &rewriter) {
+  auto vreg = cast<pto::VMIVRegType>(result.getType());
+  auto newType = makeUnsignedVReg(rewriter.getContext(), vreg);
+  Type oldType = result.getType();
 
-    result.setType(newType);
-    rewriter.setInsertionPointAfter(op);
-    Value bitcast = rewriter.create<pto::VMIBitcastOp>(op->getLoc(), oldType, result).getResult();
-    result.replaceAllUsesExcept(bitcast, bitcast.getDefiningOp());
+  result.setType(newType);
+  rewriter.setInsertionPointAfter(op);
+  Value bitcast =
+      rewriter.create<pto::VMIBitcastOp>(op->getLoc(), oldType, result)
+          .getResult();
+  result.replaceAllUsesExcept(bitcast, bitcast.getDefiningOp());
 }
 
 // ---------------------------------------------------------------------------
@@ -97,37 +100,38 @@ static void insertNormalizeCastAfter(Operation* op, OpResult result, PatternRewr
 // ---------------------------------------------------------------------------
 
 struct NormalizeSignlessPattern : public RewritePattern {
-    NormalizeSignlessPattern(MLIRContext* ctx) : RewritePattern(MatchAnyOpTypeTag(), /*benefit=*/1, ctx) {}
+  NormalizeSignlessPattern(MLIRContext *ctx)
+      : RewritePattern(MatchAnyOpTypeTag(), /*benefit=*/1, ctx) {}
 
-    LogicalResult matchAndRewrite(Operation* op, PatternRewriter& rewriter) const override
-    {
-        if (!isWhitelisted(op))
-            return failure();
+  LogicalResult matchAndRewrite(Operation *op,
+                                PatternRewriter &rewriter) const override {
+    if (!isWhitelisted(op))
+      return failure();
 
-        bool changed = false;
+    bool changed = false;
 
-        // Normalize operands
-        for (OpOperand& use : op->getOpOperands()) {
-            Value v = use.get();
-            auto vreg = dyn_cast<pto::VMIVRegType>(v.getType());
-            if (!vreg || !hasSignlessIntElement(vreg))
-                continue;
-            Value cast = insertNormalizeCastBefore(op, v, rewriter);
-            use.set(cast);
-            changed = true;
-        }
-
-        // Normalize results
-        for (OpResult r : op->getResults()) {
-            auto vreg = dyn_cast<pto::VMIVRegType>(r.getType());
-            if (!vreg || !hasSignlessIntElement(vreg))
-                continue;
-            insertNormalizeCastAfter(op, r, rewriter);
-            changed = true;
-        }
-
-        return success(changed);
+    // Normalize operands
+    for (OpOperand &use : op->getOpOperands()) {
+      Value v = use.get();
+      auto vreg = dyn_cast<pto::VMIVRegType>(v.getType());
+      if (!vreg || !hasSignlessIntElement(vreg))
+        continue;
+      Value cast = insertNormalizeCastBefore(op, v, rewriter);
+      use.set(cast);
+      changed = true;
     }
+
+    // Normalize results
+    for (OpResult r : op->getResults()) {
+      auto vreg = dyn_cast<pto::VMIVRegType>(r.getType());
+      if (!vreg || !hasSignlessIntElement(vreg))
+        continue;
+      insertNormalizeCastAfter(op, r, rewriter);
+      changed = true;
+    }
+
+    return success(changed);
+  }
 };
 
 // ---------------------------------------------------------------------------
@@ -135,18 +139,19 @@ struct NormalizeSignlessPattern : public RewritePattern {
 // ---------------------------------------------------------------------------
 
 struct VMINormalizeSignlessIntToUnsignedPass
-    : public mlir::pto::impl::VMINormalizeSignlessIntToUnsignedBase<VMINormalizeSignlessIntToUnsignedPass> {
-    MLIR_DEFINE_EXPLICIT_INTERNAL_INLINE_TYPE_ID(VMINormalizeSignlessIntToUnsignedPass)
+    : public mlir::pto::impl::VMINormalizeSignlessIntToUnsignedBase<
+          VMINormalizeSignlessIntToUnsignedPass> {
+  MLIR_DEFINE_EXPLICIT_INTERNAL_INLINE_TYPE_ID(
+      VMINormalizeSignlessIntToUnsignedPass)
 
-    void runOnOperation() override
-    {
-        auto func = getOperation();
-        MLIRContext* ctx = &getContext();
-        RewritePatternSet patterns(ctx);
-        patterns.add<NormalizeSignlessPattern>(ctx);
-        if (failed(applyPatternsAndFoldGreedily(func, std::move(patterns))))
-            signalPassFailure();
-    }
+  void runOnOperation() override {
+    auto func = getOperation();
+    MLIRContext *ctx = &getContext();
+    RewritePatternSet patterns(ctx);
+    patterns.add<NormalizeSignlessPattern>(ctx);
+    if (failed(applyPatternsAndFoldGreedily(func, std::move(patterns))))
+      signalPassFailure();
+  }
 };
 
 } // namespace
@@ -155,7 +160,6 @@ struct VMINormalizeSignlessIntToUnsignedPass
 // Factory
 // ---------------------------------------------------------------------------
 
-std::unique_ptr<Pass> pto::createVMINormalizeSignlessIntToUnsignedPass()
-{
-    return std::make_unique<VMINormalizeSignlessIntToUnsignedPass>();
+std::unique_ptr<Pass> pto::createVMINormalizeSignlessIntToUnsignedPass() {
+  return std::make_unique<VMINormalizeSignlessIntToUnsignedPass>();
 }

@@ -13,26 +13,20 @@
 #endif
 
 extern "C" __global__ AICORE void TINSERT_vec2vec_nd_f16_16x16_into_32x32_idx00(
-    __gm__ uint16_t* src, __gm__ uint16_t* dst, __gm__ uint16_t* out);
+    __gm__ uint16_t *src, __gm__ uint16_t *dst, __gm__ uint16_t *out);
 extern "C" __global__ AICORE void TINSERT_vec2vec_nd_f16_16x16_into_32x32_idx816(
-    __gm__ uint16_t* src, __gm__ uint16_t* dst, __gm__ uint16_t* out);
+    __gm__ uint16_t *src, __gm__ uint16_t *dst, __gm__ uint16_t *out);
 extern "C" __global__ AICORE void TINSERT_vec2vec_nd_f32_16x16_into_32x32_idx00(
-    __gm__ float* src, __gm__ float* dst, __gm__ float* out);
+    __gm__ float *src, __gm__ float *dst, __gm__ float *out);
 
-void LaunchVec2VecND_f16_16x16_into_32x32_idx00(uint16_t* src, uint16_t* dst, uint16_t* out, void* stream)
-{
-    TINSERT_vec2vec_nd_f16_16x16_into_32x32_idx00<<<1, nullptr, stream>>>(
-        (__gm__ uint16_t*)src, (__gm__ uint16_t*)dst, (__gm__ uint16_t*)out);
+void LaunchVec2VecND_f16_16x16_into_32x32_idx00(uint16_t *src, uint16_t *dst, uint16_t *out, void *stream) {
+    TINSERT_vec2vec_nd_f16_16x16_into_32x32_idx00<<<1, nullptr, stream>>>((__gm__ uint16_t *)src, (__gm__ uint16_t *)dst, (__gm__ uint16_t *)out);
 }
 
-void LaunchVec2VecND_f16_16x16_into_32x32_idx816(uint16_t* src, uint16_t* dst, uint16_t* out, void* stream)
-{
-    TINSERT_vec2vec_nd_f16_16x16_into_32x32_idx816<<<1, nullptr, stream>>>(
-        (__gm__ uint16_t*)src, (__gm__ uint16_t*)dst, (__gm__ uint16_t*)out);
+void LaunchVec2VecND_f16_16x16_into_32x32_idx816(uint16_t *src, uint16_t *dst, uint16_t *out, void *stream) {
+    TINSERT_vec2vec_nd_f16_16x16_into_32x32_idx816<<<1, nullptr, stream>>>((__gm__ uint16_t *)src, (__gm__ uint16_t *)dst, (__gm__ uint16_t *)out);
 }
 
-void LaunchVec2VecND_f32_16x16_into_32x32_idx00(float* src, float* dst, float* out, void* stream)
-{
-    TINSERT_vec2vec_nd_f32_16x16_into_32x32_idx00<<<1, nullptr, stream>>>(
-        (__gm__ float*)src, (__gm__ float*)dst, (__gm__ float*)out);
+void LaunchVec2VecND_f32_16x16_into_32x32_idx00(float *src, float *dst, float *out, void *stream) {
+    TINSERT_vec2vec_nd_f32_16x16_into_32x32_idx00<<<1, nullptr, stream>>>((__gm__ float *)src, (__gm__ float *)dst, (__gm__ float *)out);
 }

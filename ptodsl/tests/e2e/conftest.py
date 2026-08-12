@@ -80,7 +80,6 @@ def backend(request):
 # Lazy helpers (import torch/ptodsl only when needed)
 # ---------------------------------------------------------------------------
 
-
 def torch_dtype(name: str):
     import torch
 

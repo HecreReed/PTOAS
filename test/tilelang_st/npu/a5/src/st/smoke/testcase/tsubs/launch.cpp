@@ -17,15 +17,15 @@ static constexpr float TSUBS_SCALAR_F32 = 3.0f;
 
 // Case 0: f32 32x64
 
-extern "C" __global__ AICORE void TSUBS_f32_32x64(__gm__ float* src, __gm__ float* dst, float scalar);
-extern "C" __global__ AICORE void TSUBS_i16_15x192(__gm__ int16_t* src, __gm__ int16_t* dst, int16_t scalar);
+extern "C" __global__ AICORE void TSUBS_f32_32x64(__gm__ float *src, __gm__ float *dst, float scalar);
+extern "C" __global__ AICORE void TSUBS_i16_15x192(__gm__ int16_t *src, __gm__ int16_t *dst, int16_t scalar);
 
-void LaunchTSUBS_i16_15x192(int16_t* src, int16_t* dst, void* stream)
-{
-    TSUBS_i16_15x192<<<1, nullptr, stream>>>((__gm__ int16_t*)src, (__gm__ int16_t*)dst, (int16_t)3);
+void LaunchTSUBS_i16_15x192(int16_t *src, int16_t *dst, void *stream) {
+    TSUBS_i16_15x192<<<1, nullptr, stream>>>((__gm__ int16_t *)src, (__gm__ int16_t *)dst, (int16_t)3);
 }
 
-void LaunchTSUBS_f32_32x64(float* src, float* dst, void* stream)
-{
-    TSUBS_f32_32x64<<<1, nullptr, stream>>>((__gm__ float*)src, (__gm__ float*)dst, TSUBS_SCALAR_F32);
+
+
+void LaunchTSUBS_f32_32x64(float *src, float *dst, void *stream) {
+    TSUBS_f32_32x64<<<1, nullptr, stream>>>((__gm__ float *)src, (__gm__ float *)dst, TSUBS_SCALAR_F32);
 }

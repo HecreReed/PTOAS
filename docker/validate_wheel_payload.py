@@ -30,11 +30,16 @@ FORBIDDEN_FILES = {
 PTOAS_ENTRYPOINT_TARGET = "ptoas._cli:main"
 WHEEL_GLOB = "ptoas*.whl"
 NATIVE_MODULE_PATHS = {
-    f"ptoas/_core{suffix}" for suffix in importlib.machinery.EXTENSION_SUFFIXES
+    f"ptoas/_core{suffix}"
+    for suffix in importlib.machinery.EXTENSION_SUFFIXES
 }
 MLIR_NATIVE_MODULE_PREFIX = "ptoas/mlir/_mlir_libs/"
-PTOAS_COMPILER_LIBRARY_PREFIX = f"{MLIR_NATIVE_MODULE_PREFIX}libPTOASCompiler"
-OBSOLETE_COMMON_CAPI_PREFIX = f"{MLIR_NATIVE_MODULE_PREFIX}libPTOASPythonCAPI"
+PTOAS_COMPILER_LIBRARY_PREFIX = (
+    f"{MLIR_NATIVE_MODULE_PREFIX}libPTOASCompiler"
+)
+OBSOLETE_COMMON_CAPI_PREFIX = (
+    f"{MLIR_NATIVE_MODULE_PREFIX}libPTOASPythonCAPI"
+)
 MLIR_NATIVE_MODULE_PATHS = {
     f"{MLIR_NATIVE_MODULE_PREFIX}_mlir{suffix}"
     for suffix in importlib.machinery.EXTENSION_SUFFIXES
@@ -78,12 +83,14 @@ def _parse_console_scripts(entry_points: str) -> dict[str, str]:
             continue
         if "=" not in line:
             raise SystemExit(
-                f"wheel console_scripts entry point is malformed: {raw_line!r}"
+                "wheel console_scripts entry point is malformed: "
+                f"{raw_line!r}"
             )
         name, target = [part.strip() for part in line.split("=", 1)]
         if name in scripts:
             raise SystemExit(
-                f"wheel console_scripts contains duplicate entry point: {name}"
+                "wheel console_scripts contains duplicate entry point: "
+                f"{name}"
             )
         scripts[name] = target
     return scripts
@@ -150,7 +157,9 @@ def validate_wheel_payload(wheel: Path) -> None:
             )
 
         entry_points_names = sorted(
-            name for name in names if name.endswith(".dist-info/entry_points.txt")
+            name
+            for name in names
+            if name.endswith(".dist-info/entry_points.txt")
         )
         if len(entry_points_names) != 1:
             raise SystemExit(

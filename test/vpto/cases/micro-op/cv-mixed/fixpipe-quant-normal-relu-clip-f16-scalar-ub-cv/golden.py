@@ -33,7 +33,7 @@ def generate(output_dir: Path, seed: int) -> None:
     lhs32 = lhs.astype(np.float32)
     rhs32 = rhs.astype(np.float32)
     for k_idx in range(K):
-        matmul += lhs32[:, k_idx : k_idx + 1] * rhs32[k_idx : k_idx + 1, :]
+        matmul += lhs32[:, k_idx:k_idx + 1] * rhs32[k_idx:k_idx + 1, :]
     relu = qf322f16_normal_relu(matmul)
     clip = np.minimum(relu, CLIP_MAX).astype(np.float16)
 
@@ -49,9 +49,7 @@ def generate(output_dir: Path, seed: int) -> None:
         8: clip,
     }
     for index, golden in mapping.items():
-        np.zeros((M, N), dtype=np.float16).reshape(-1).tofile(
-            output_dir / f"v{index}.bin"
-        )
+        np.zeros((M, N), dtype=np.float16).reshape(-1).tofile(output_dir / f"v{index}.bin")
         golden.reshape(-1).tofile(output_dir / f"golden_v{index}.bin")
 
 

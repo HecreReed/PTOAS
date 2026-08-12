@@ -19,10 +19,7 @@ import sys
 
 import numpy as np
 
-for search_root in (
-    Path(__file__).resolve().parent,
-    Path(__file__).resolve().parents[1],
-):
+for search_root in (Path(__file__).resolve().parent, Path(__file__).resolve().parents[1]):
     if (search_root / "validation_runtime.py").is_file():
         sys.path.insert(0, str(search_root))
         break
@@ -47,14 +44,10 @@ def compare_file_prefix(golden_path, output_path, dtype, logical_count, atol):
     golden = np.fromfile(golden_path, dtype=dtype)
     output = np.fromfile(output_path, dtype=dtype)
     if golden.shape != output.shape:
-        print(
-            f"[ERROR] Shape mismatch: {golden_path} {golden.shape} vs {output_path} {output.shape}"
-        )
+        print(f"[ERROR] Shape mismatch: {golden_path} {golden.shape} vs {output_path} {output.shape}")
         return False
     if golden.size < logical_count:
-        print(
-            f"[ERROR] Buffer too small for logical compare: need {logical_count}, got {golden.size}"
-        )
+        print(f"[ERROR] Buffer too small for logical compare: need {logical_count}, got {golden.size}")
         return False
     golden = golden[:logical_count]
     output = output[:logical_count]
@@ -89,38 +82,14 @@ def main():
 
     ok = True
     # dst: fp8 e4m3fn packed as int8 — exact byte match.
-    ok = (
-        compare_file(f"golden_{dst_name}.bin", f"{dst_name}.bin", np.int8, atol=0.0)
-        and ok
-    )
+    ok = compare_file(f"golden_{dst_name}.bin", f"{dst_name}.bin", np.int8, atol=0.0) and ok
     # exp/max/scaling are logically 16 group values even though A5 remote
     # validation allocates 32-element Vec-backed buffers for the lowered TSTORE.
-    ok = (
-        compare_file_prefix(
-            f"golden_{exp_name}.bin", f"{exp_name}.bin", np.uint8, GROUP_COUNT, atol=0.0
-        )
-        and ok
-    )
-    ok = (
-        compare_file_prefix(
-            f"golden_{max_name}.bin",
-            f"{max_name}.bin",
-            np.float32,
-            GROUP_COUNT,
-            atol=1e-5,
-        )
-        and ok
-    )
-    ok = (
-        compare_file_prefix(
-            f"golden_{scaling_name}.bin",
-            f"{scaling_name}.bin",
-            np.float32,
-            GROUP_COUNT,
-            atol=1e-5,
-        )
-        and ok
-    )
+    ok = compare_file_prefix(f"golden_{exp_name}.bin", f"{exp_name}.bin", np.uint8, GROUP_COUNT, atol=0.0) and ok
+    ok = compare_file_prefix(f"golden_{max_name}.bin", f"{max_name}.bin", np.float32, GROUP_COUNT, atol=1e-5) and ok
+    ok = compare_file_prefix(
+        f"golden_{scaling_name}.bin", f"{scaling_name}.bin", np.float32, GROUP_COUNT, atol=1e-5
+    ) and ok
 
     finalize_compare(ok)
 

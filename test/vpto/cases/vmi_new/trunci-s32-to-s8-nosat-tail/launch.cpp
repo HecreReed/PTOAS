@@ -12,19 +12,21 @@
 #include <cstdint>
 #if !defined(__CCE_AICORE__) && !defined(TMRGSORT_HPP)
 struct MrgSortExecutedNumList {
-    uint16_t mrgSortList0;
-    uint16_t mrgSortList1;
-    uint16_t mrgSortList2;
-    uint16_t mrgSortList3;
+  uint16_t mrgSortList0;
+  uint16_t mrgSortList1;
+  uint16_t mrgSortList2;
+  uint16_t mrgSortList3;
 };
 #endif
 #ifndef __CPU_SIM
 #include "acl/acl.h"
 #endif
 
-extern "C" __global__[aicore] void vmi_trunci_s32_to_s8_nosat_tail_kernel(__gm__ int32_t* src, __gm__ int8_t* dst);
+extern "C" __global__ [aicore] void
+vmi_trunci_s32_to_s8_nosat_tail_kernel(__gm__ int32_t *src, __gm__ int8_t *dst);
 
-void LaunchVmi_trunci_s32_to_s8_nosat_tail_kernel(int32_t* src, int8_t* dst, void* stream)
-{
-    vmi_trunci_s32_to_s8_nosat_tail_kernel<<<1, nullptr, stream>>>((__gm__ int32_t*)src, (__gm__ int8_t*)dst);
+void LaunchVmi_trunci_s32_to_s8_nosat_tail_kernel(int32_t *src, int8_t *dst,
+                                                  void *stream) {
+  vmi_trunci_s32_to_s8_nosat_tail_kernel<<<1, nullptr, stream>>>(
+      (__gm__ int32_t *)src, (__gm__ int8_t *)dst);
 }

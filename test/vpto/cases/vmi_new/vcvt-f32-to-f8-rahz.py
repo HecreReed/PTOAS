@@ -20,9 +20,7 @@ def _bootstrap_dsl_st_common() -> None:
         if (common_dir / "common.py").exists():
             sys.path.insert(0, str(common_dir))
             return
-    raise RuntimeError(
-        "Unable to locate test/dsl-st/common.py from vcvt-f32-to-f8-rahz.py"
-    )
+    raise RuntimeError("Unable to locate test/dsl-st/common.py from vcvt-f32-to-f8-rahz.py")
 
 
 _bootstrap_dsl_st_common()
@@ -48,72 +46,56 @@ CASE_SPECS = [
         "dst_dtype": pto.f8e4m3,
         "rounding": pto.VcvtRoundMode.R,
         "values": F8E4M3_VALUES,
-        "golden": np.array(
-            [0x38, 0x3A, 0xB8, 0xBA, 0x7E, 0xFE, 0x00, 0x00], dtype=np.uint8
-        ),
+        "golden": np.array([0x38, 0x3A, 0xB8, 0xBA, 0x7E, 0xFE, 0x00, 0x00], dtype=np.uint8),
     },
     {
         "name": "vmi_vcvt_f32_to_f8e4m3_a",
         "dst_dtype": pto.f8e4m3,
         "rounding": pto.VcvtRoundMode.A,
         "values": F8E4M3_VALUES,
-        "golden": np.array(
-            [0x39, 0x3A, 0xB9, 0xBA, 0x78, 0xF8, 0x00, 0x00], dtype=np.uint8
-        ),
+        "golden": np.array([0x39, 0x3A, 0xB9, 0xBA, 0x78, 0xF8, 0x00, 0x00], dtype=np.uint8),
     },
     {
         "name": "vmi_vcvt_f32_to_f8e4m3_h",
         "dst_dtype": pto.f8e4m3,
         "rounding": pto.VcvtRoundMode.H,
         "values": F8E4M3_VALUES,
-        "golden": np.array(
-            [0x38, 0x39, 0xB8, 0xB9, 0x7E, 0xFE, 0x00, 0x00], dtype=np.uint8
-        ),
+        "golden": np.array([0x38, 0x39, 0xB8, 0xB9, 0x7E, 0xFE, 0x00, 0x00], dtype=np.uint8),
     },
     {
         "name": "vmi_vcvt_f32_to_f8e4m3_z",
         "dst_dtype": pto.f8e4m3,
         "rounding": pto.VcvtRoundMode.Z,
         "values": F8E4M3_VALUES,
-        "golden": np.array(
-            [0x38, 0x39, 0xB8, 0xB9, 0x7E, 0xFE, 0x00, 0x00], dtype=np.uint8
-        ),
+        "golden": np.array([0x38, 0x39, 0xB8, 0xB9, 0x7E, 0xFE, 0x00, 0x00], dtype=np.uint8),
     },
     {
         "name": "vmi_vcvt_f32_to_f8e5m2_r",
         "dst_dtype": pto.f8e5m2,
         "rounding": pto.VcvtRoundMode.R,
         "values": F8E5M2_VALUES,
-        "golden": np.array(
-            [0x3C, 0x3E, 0xBC, 0xBE, 0x7B, 0xFB, 0x00, 0x00], dtype=np.uint8
-        ),
+        "golden": np.array([0x3C, 0x3E, 0xBC, 0xBE, 0x7B, 0xFB, 0x00, 0x00], dtype=np.uint8),
     },
     {
         "name": "vmi_vcvt_f32_to_f8e5m2_a",
         "dst_dtype": pto.f8e5m2,
         "rounding": pto.VcvtRoundMode.A,
         "values": F8E5M2_VALUES,
-        "golden": np.array(
-            [0x3D, 0x3E, 0xBD, 0xBE, 0x7D, 0xFD, 0x00, 0x00], dtype=np.uint8
-        ),
+        "golden": np.array([0x3D, 0x3E, 0xBD, 0xBE, 0x7D, 0xFD, 0x00, 0x00], dtype=np.uint8),
     },
     {
         "name": "vmi_vcvt_f32_to_f8e5m2_h",
         "dst_dtype": pto.f8e5m2,
         "rounding": pto.VcvtRoundMode.H,
         "values": F8E5M2_VALUES,
-        "golden": np.array(
-            [0x3C, 0x3D, 0xBC, 0xBD, 0x7C, 0xFC, 0x00, 0x00], dtype=np.uint8
-        ),
+        "golden": np.array([0x3C, 0x3D, 0xBC, 0xBD, 0x7C, 0xFC, 0x00, 0x00], dtype=np.uint8),
     },
     {
         "name": "vmi_vcvt_f32_to_f8e5m2_z",
         "dst_dtype": pto.f8e5m2,
         "rounding": pto.VcvtRoundMode.Z,
         "values": F8E5M2_VALUES,
-        "golden": np.array(
-            [0x3C, 0x3D, 0xBC, 0xBD, 0x7C, 0xFC, 0x00, 0x00], dtype=np.uint8
-        ),
+        "golden": np.array([0x3C, 0x3D, 0xBC, 0xBD, 0x7C, 0xFC, 0x00, 0x00], dtype=np.uint8),
     },
 ]
 
@@ -138,9 +120,7 @@ def _build_kernel(case):
     def kernel(src: pto.ptr(pto.f32, "gm"), dst: pto.ptr(pto.ui8, "gm")):
         ub_src = pto.castptr(pto.const(0, dtype=pto.i64), pto.ptr(pto.f32, "ub"))
         ub_dst_u8 = pto.castptr(pto.const(2048, dtype=pto.i64), pto.ptr(pto.ui8, "ub"))
-        ub_dst_f8 = pto.castptr(
-            pto.const(2048, dtype=pto.i64), pto.ptr(dst_dtype, "ub")
-        )
+        ub_dst_f8 = pto.castptr(pto.const(2048, dtype=pto.i64), pto.ptr(dst_dtype, "ub"))
 
         pto.get_buf(pto.Pipe.MTE2, 0)
         pto.mte_gm_ub(src, ub_src, 0, 256, nburst=(4, 256, 256))

@@ -53,9 +53,7 @@ def build():
                 # Output is (32 x 1), stored contiguously.
                 tv1 = pto.MakeTensorViewOp(tv2_f32, arg1, [c32, c1], [c1, c1]).result
 
-                sv0 = pto.PartitionViewOp(
-                    tile_view_32, tv0, offsets=[c0, c0], sizes=[c32, c32]
-                ).result
+                sv0 = pto.PartitionViewOp(tile_view_32, tv0, offsets=[c0, c0], sizes=[c32, c32]).result
 
                 tb0 = pto.AllocTileOp(tile_buf_32).result
                 tb_tmp = pto.AllocTileOp(tile_buf_32).result
@@ -64,9 +62,7 @@ def build():
                 pto.TLoadOp(None, sv0, tb0)
                 pto.TRowMinOp(tb0, tb_tmp, tb1)
 
-                sv1 = pto.PartitionViewOp(
-                    tile_view_32x1, tv1, offsets=[c0, c0], sizes=[c32, c1]
-                ).result
+                sv1 = pto.PartitionViewOp(tile_view_32x1, tv1, offsets=[c0, c0], sizes=[c32, c1]).result
                 pto.TStoreOp(None, tb1, sv1)
 
                 func.ReturnOp([])

@@ -14,9 +14,7 @@ class PTODSLTracingMisuseError(TypeError):
     """Raised when authored Python misuses PTODSL runtime values during tracing."""
 
 
-def _format_source_context(
-    function_name: str | None, source_file: str | None, source_line: int | None
-) -> str:
+def _format_source_context(function_name: str | None, source_file: str | None, source_line: int | None) -> str:
     details = []
     if function_name:
         details.append(f"kernel {function_name!r}")
@@ -40,15 +38,11 @@ def native_python_control_flow_error(usage: str) -> PTODSLTracingMisuseError:
     )
 
 
-def host_tensor_metadata_error(
-    message: str, *, param_name: str | None = None
-) -> TypeError:
+def host_tensor_metadata_error(message: str, *, param_name: str | None = None) -> TypeError:
     """Return one actionable diagnostic for unsupported host-tensor metadata."""
     prefix = "host tensor metadata is incomplete or unsupported"
     if param_name is not None:
-        prefix = (
-            f"@pto.jit host tensor '{param_name}' metadata is incomplete or unsupported"
-        )
+        prefix = f"@pto.jit host tensor '{param_name}' metadata is incomplete or unsupported"
     return TypeError(f"{prefix}: {message}")
 
 
@@ -94,9 +88,7 @@ def jit_struct_annotation_error(name: str) -> TypeError:
     )
 
 
-def jit_helper_illegal_formal_annotation_error(
-    name: str, annotation: object
-) -> TypeError:
+def jit_helper_illegal_formal_annotation_error(name: str, annotation: object) -> TypeError:
     """Return one diagnostic for unsupported ``@pto.jit(entry=False)`` module annotations."""
     return TypeError(
         f"@pto.jit(entry=False) parameter '{name}' uses unsupported kernel-module annotation {annotation!r}. "
@@ -139,9 +131,7 @@ def jit_non_gm_ptr_entry_error(name: str, annotation: object) -> TypeError:
     )
 
 
-def jit_helper_standalone_type_inference_error(
-    name: str, annotation: object
-) -> RuntimeError:
+def jit_helper_standalone_type_inference_error(name: str, annotation: object) -> RuntimeError:
     """Return one diagnostic for kernel-module params that need caller-provided concrete types."""
     return RuntimeError(
         f"@pto.jit(entry=False) parameter '{name}' annotated as {annotation!r} uses an "
@@ -231,27 +221,21 @@ def jit_source_compile_constexpr_error(
     )
 
 
-def jit_source_file_error(
-    source: object, resolved_path: object, reason: str
-) -> FileNotFoundError:
+def jit_source_file_error(source: object, resolved_path: object, reason: str) -> FileNotFoundError:
     """Return one diagnostic for source path resolution/loading failures."""
     return FileNotFoundError(
         f"@pto.jit(source={source!r}) could not load PTO IR source file {str(resolved_path)!r}: {reason}"
     )
 
 
-def jit_source_entry_error(
-    source_path: object, entry_name: str, reason: str
-) -> TypeError:
+def jit_source_entry_error(source_path: object, entry_name: str, reason: str) -> TypeError:
     """Return one diagnostic for source entry selection failures."""
     return TypeError(
         f"@pto.jit(source=...) could not bind entry {entry_name!r} in {str(source_path)!r}: {reason}"
     )
 
 
-def jit_source_abi_error(
-    source_path: object, entry_name: str, reason: str
-) -> TypeError:
+def jit_source_abi_error(source_path: object, entry_name: str, reason: str) -> TypeError:
     """Return one diagnostic for source ABI verification failures."""
     return TypeError(
         f"@pto.jit(source=...) ABI mismatch for entry {entry_name!r} in {str(source_path)!r}: {reason}"
@@ -327,9 +311,7 @@ def subkernel_illegal_parameter_kind_error(role: str, name: str, kind) -> TypeEr
     )
 
 
-def subkernel_illegal_annotation_error(
-    role: str, name: str, annotation: object, expected: str
-) -> TypeError:
+def subkernel_illegal_annotation_error(role: str, name: str, annotation: object, expected: str) -> TypeError:
     """Return one diagnostic for unsupported subkernel ABI annotations."""
     return TypeError(
         f"@pto.{role} parameter '{name}' uses unsupported subkernel annotation {annotation!r}. "
@@ -338,9 +320,7 @@ def subkernel_illegal_annotation_error(
     )
 
 
-def subkernel_argument_type_error(
-    role: str, name: str, expected: str, observed: object
-) -> TypeError:
+def subkernel_argument_type_error(role: str, name: str, expected: str, observed: object) -> TypeError:
     """Return one diagnostic for runtime/callsite subkernel ABI mismatches."""
     return TypeError(
         f"@pto.{role} argument '{name}' violates the declared subkernel interface. "
@@ -349,9 +329,7 @@ def subkernel_argument_type_error(
     )
 
 
-def illegal_subkernel_placement_error(
-    role: str, outer_role: str | None
-) -> RuntimeError:
+def illegal_subkernel_placement_error(role: str, outer_role: str | None) -> RuntimeError:
     """Return one diagnostic for a subkernel call placed outside the supported layer graph."""
     if role == "simt":
         if outer_role == "tileop":
@@ -369,9 +347,7 @@ def illegal_subkernel_placement_error(
     )
 
 
-def illegal_inline_subkernel_placement_error(
-    role: str, outer_role: str | None
-) -> RuntimeError:
+def illegal_inline_subkernel_placement_error(role: str, outer_role: str | None) -> RuntimeError:
     """Return one diagnostic for an inline subkernel scope placed outside the supported layer graph."""
     return RuntimeError(
         f"inline pto.{role}() may only be used from the top-level @pto.jit body; "
@@ -397,9 +373,7 @@ def inline_subkernel_value_escape_error(role: str, type_text: str) -> RuntimeErr
     )
 
 
-def physical_section_value_escape_error(
-    source_kind: str, type_text: str
-) -> RuntimeError:
+def physical_section_value_escape_error(source_kind: str, type_text: str) -> RuntimeError:
     """Return a diagnostic for a value escaping a physical section."""
     return RuntimeError(
         f"cannot use a value defined in pto.section.{source_kind} outside that physical section "
@@ -455,9 +429,7 @@ def tileop_return_value_error(result: object) -> TypeError:
     )
 
 
-def tile_row_alignment_error(
-    *, shape, dtype, row_bytes: int, required_alignment: int
-) -> TypeError:
+def tile_row_alignment_error(*, shape, dtype, row_bytes: int, required_alignment: int) -> TypeError:
     """Return one diagnostic for authored tile shapes violating row-byte alignment."""
     return TypeError(
         "alloc_tile(shape=...) physical row layout is invalid for the current PTODSL tile contract: "
@@ -469,9 +441,7 @@ def tile_row_alignment_error(
     )
 
 
-def explicit_mode_required_error(
-    surface: str, current_mode: str | None
-) -> RuntimeError:
+def explicit_mode_required_error(surface: str, current_mode: str | None) -> RuntimeError:
     """Return one diagnostic for explicit-only surfaces used outside explicit mode."""
     observed_mode = "unknown" if current_mode is None else current_mode
     return RuntimeError(
@@ -481,9 +451,7 @@ def explicit_mode_required_error(
     )
 
 
-def explicit_mode_required_with_context_error(
-    surface: str, module_spec
-) -> RuntimeError:
+def explicit_mode_required_with_context_error(surface: str, module_spec) -> RuntimeError:
     """Return one diagnostic for explicit-only surfaces used outside explicit mode with source context."""
     observed_mode = getattr(module_spec, "mode", None)
     context = _format_source_context(

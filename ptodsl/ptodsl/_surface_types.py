@@ -225,7 +225,6 @@ class SplitMode(str, Enum):
     M = "M"
     N = "N"
 
-
 class PartMode:
     """Public PTODSL EVEN/ODD part selectors."""
 

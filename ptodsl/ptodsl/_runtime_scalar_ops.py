@@ -37,9 +37,7 @@ def emit_runtime_binary_op(op_name: str, lhs, rhs):
     if kind in {"index", "integer"}:
         op_cls = _integer_binary_op(op_name, lhs.type)
         if op_cls is None:
-            raise TypeError(
-                f"runtime scalar operator '{op_name}' is not supported for integer/index values"
-            )
+            raise TypeError(f"runtime scalar operator '{op_name}' is not supported for integer/index values")
         authored_type = lhs.type
         if kind == "integer":
             lhs = _strip_integer_signedness(lhs)
@@ -51,9 +49,7 @@ def emit_runtime_binary_op(op_name: str, lhs, rhs):
     if kind == "float":
         op_cls = _FLOAT_BINARY_OPS.get(op_name)
         if op_cls is None:
-            raise TypeError(
-                f"runtime scalar operator '{op_name}' is not supported for floating-point values"
-            )
+            raise TypeError(f"runtime scalar operator '{op_name}' is not supported for floating-point values")
         return op_cls(lhs, rhs).result
     raise TypeError(f"unsupported runtime scalar operand category '{kind}'")
 
@@ -120,9 +116,7 @@ def emit_runtime_compare(op_name: str, lhs, rhs):
             "ne": arith.CmpFPredicate.ONE,
         }.get(op_name)
         if predicate is None:
-            raise TypeError(
-                f"runtime scalar comparison '{op_name}' is not supported for floating-point values"
-            )
+            raise TypeError(f"runtime scalar comparison '{op_name}' is not supported for floating-point values")
         return arith.CmpFOp(predicate, lhs, rhs).result
 
     if kind == "index":
@@ -135,9 +129,7 @@ def emit_runtime_compare(op_name: str, lhs, rhs):
             "ne": arith.CmpIPredicate.ne,
         }.get(op_name)
         if predicate is None:
-            raise TypeError(
-                f"runtime scalar comparison '{op_name}' is not supported for index values"
-            )
+            raise TypeError(f"runtime scalar comparison '{op_name}' is not supported for index values")
         return arith.CmpIOp(predicate, lhs, rhs).result
 
     if kind == "integer":
@@ -158,16 +150,10 @@ def emit_runtime_compare(op_name: str, lhs, rhs):
             "eq": arith.CmpIPredicate.eq,
             "ne": arith.CmpIPredicate.ne,
         }
-        predicate = (
-            unsigned_predicates if signedness == "unsigned" else signed_predicates
-        ).get(op_name)
+        predicate = (unsigned_predicates if signedness == "unsigned" else signed_predicates).get(op_name)
         if predicate is None:
-            raise TypeError(
-                f"runtime scalar comparison '{op_name}' is not supported for integer values"
-            )
-        return arith.CmpIOp(
-            predicate, _strip_integer_signedness(lhs), _strip_integer_signedness(rhs)
-        ).result
+            raise TypeError(f"runtime scalar comparison '{op_name}' is not supported for integer values")
+        return arith.CmpIOp(predicate, _strip_integer_signedness(lhs), _strip_integer_signedness(rhs)).result
 
     raise TypeError(f"unsupported runtime scalar operand category '{kind}'")
 
@@ -192,9 +178,7 @@ def emit_runtime_bitwise_op(op_name: str, lhs, rhs):
         )
 
     authored_type = lhs.type
-    result = op_cls(
-        _strip_integer_signedness(lhs), _strip_integer_signedness(rhs)
-    ).result
+    result = op_cls(_strip_integer_signedness(lhs), _strip_integer_signedness(rhs)).result
     return _restore_integer_signedness(result, authored_type)
 
 

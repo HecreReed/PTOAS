@@ -214,11 +214,9 @@ CASES = [
     },
 ]
 
-_SMOKE_CASE_NAMES = ["uint32_float_8x1_8x8_8x8", "int32_half_16x1_13x16_13x13"]
+_SMOKE_CASE_NAMES = ['uint32_float_8x1_8x8_8x8', 'int32_half_16x1_13x16_13x13']
 _SMOKE_CASE_NAME_SET = set(_SMOKE_CASE_NAMES)
-_missing = [
-    name for name in _SMOKE_CASE_NAMES if name not in {case["name"] for case in CASES}
-]
+_missing = [name for name in _SMOKE_CASE_NAMES if name not in {case["name"] for case in CASES}]
 if _missing:
     raise RuntimeError("unknown smoke case(s): " + ", ".join(_missing))
 CASES = [case for case in CASES if case["name"] in _SMOKE_CASE_NAME_SET]

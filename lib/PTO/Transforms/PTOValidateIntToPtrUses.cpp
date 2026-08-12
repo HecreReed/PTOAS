@@ -25,48 +25,48 @@ namespace func = ::mlir::func;
 using namespace mlir;
 using namespace mlir::pto;
 
-static bool isAllowedIntToPtrUse(Value ptr, OpOperand& use)
-{
-    Operation* user = use.getOwner();
-    if (isa<LoadScalarOp, StoreScalarOp>(user))
-        return use.getOperandNumber() == 0 && user->getOperand(0) == ptr;
-    return false;
+static bool isAllowedIntToPtrUse(Value ptr, OpOperand &use) {
+  Operation *user = use.getOwner();
+  if (isa<LoadScalarOp, StoreScalarOp>(user))
+    return use.getOperandNumber() == 0 && user->getOperand(0) == ptr;
+  return false;
 }
 
-LogicalResult mlir::pto::validateIntToPtrUses(func::FuncOp func)
-{
-    WalkResult walkResult = func.walk([&](IntToPtrOp op) -> WalkResult {
-        Value ptr = op.getResult();
-        for (OpOperand& use : ptr.getUses()) {
-            if (isAllowedIntToPtrUse(ptr, use))
-                continue;
+LogicalResult mlir::pto::validateIntToPtrUses(func::FuncOp func) {
+  WalkResult walkResult = func.walk([&](IntToPtrOp op) -> WalkResult {
+    Value ptr = op.getResult();
+    for (OpOperand &use : ptr.getUses()) {
+      if (isAllowedIntToPtrUse(ptr, use))
+        continue;
 
-            Operation* user = use.getOwner();
-            InFlightDiagnostic diag = op.emitOpError() << "result may only be used as the pointer operand of "
-                                                          "pto.load_scalar or pto.store_scalar; found use by '"
-                                                       << user->getName().getStringRef() << "'";
-            diag.attachNote(user->getLoc()) << "disallowed pto.inttoptr use here";
-            return WalkResult::interrupt();
-        }
-        return WalkResult::advance();
-    });
+      Operation *user = use.getOwner();
+      InFlightDiagnostic diag =
+          op.emitOpError()
+          << "result may only be used as the pointer operand of "
+             "pto.load_scalar or pto.store_scalar; found use by '"
+          << user->getName().getStringRef() << "'";
+      diag.attachNote(user->getLoc()) << "disallowed pto.inttoptr use here";
+      return WalkResult::interrupt();
+    }
+    return WalkResult::advance();
+  });
 
-    return failure(walkResult.wasInterrupted());
+  return failure(walkResult.wasInterrupted());
 }
 
 namespace {
-struct PTOValidateIntToPtrUsesPass : public mlir::pto::impl::PTOValidateIntToPtrUsesBase<PTOValidateIntToPtrUsesPass> {
-    MLIR_DEFINE_EXPLICIT_INTERNAL_INLINE_TYPE_ID(PTOValidateIntToPtrUsesPass)
+struct PTOValidateIntToPtrUsesPass
+    : public mlir::pto::impl::PTOValidateIntToPtrUsesBase<
+          PTOValidateIntToPtrUsesPass> {
+  MLIR_DEFINE_EXPLICIT_INTERNAL_INLINE_TYPE_ID(PTOValidateIntToPtrUsesPass)
 
-    void runOnOperation() override
-    {
-        if (failed(validateIntToPtrUses(getOperation())))
-            signalPassFailure();
-    }
+  void runOnOperation() override {
+    if (failed(validateIntToPtrUses(getOperation())))
+      signalPassFailure();
+  }
 };
 } // namespace
 
-std::unique_ptr<Pass> mlir::pto::createPTOValidateIntToPtrUsesPass()
-{
-    return std::make_unique<PTOValidateIntToPtrUsesPass>();
+std::unique_ptr<Pass> mlir::pto::createPTOValidateIntToPtrUsesPass() {
+  return std::make_unique<PTOValidateIntToPtrUsesPass>();
 }

@@ -44,9 +44,7 @@ class NativeBuildArtifacts:
     manifest_path: Path
 
 
-def artifact_paths(
-    py_name: str, ir_function_name: str, specialization_key
-) -> NativeBuildArtifacts:
+def artifact_paths(py_name: str, ir_function_name: str, specialization_key) -> NativeBuildArtifacts:
     """Return stable artifact paths for one compiled specialization."""
     digest = _specialization_digest(specialization_key)
     safe_name = py_name.replace("/", "_")
@@ -82,9 +80,7 @@ def write_manifest(
         "compile_config_digest": compile_config_digest,
         "link_config_digest": link_config_digest,
     }
-    artifacts.manifest_path.write_text(
-        json.dumps(manifest, indent=2) + "\n", encoding="utf-8"
-    )
+    artifacts.manifest_path.write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
 
 
 def read_manifest(artifacts: NativeBuildArtifacts) -> dict:
@@ -117,8 +113,7 @@ def is_native_build_current(
     return (
         manifest.get("mlir_digest") == _content_digest(mlir_text)
         and manifest.get("launch_cpp_digest") == _content_digest(launch_cpp_text)
-        and manifest.get("compile_config_digest")
-        == _content_digest(compile_config_text)
+        and manifest.get("compile_config_digest") == _content_digest(compile_config_text)
         and manifest.get("link_config_digest") == _content_digest(link_config_text)
     )
 

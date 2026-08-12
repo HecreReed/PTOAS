@@ -30,9 +30,7 @@ def compare_bin(golden_path: str, output_path: str) -> bool:
         return True
     diff = np.nonzero(golden != output)[0]
     idx = int(diff[0]) if diff.size else 0
-    print(
-        f"[ERROR] first mismatch at idx={idx}: golden={int(golden[idx])}, out={int(output[idx])}"
-    )
+    print(f"[ERROR] first mismatch at idx={idx}: golden={int(golden[idx])}, out={int(output[idx])}")
     return False
 
 

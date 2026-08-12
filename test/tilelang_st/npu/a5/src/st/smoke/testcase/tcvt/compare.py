@@ -19,7 +19,6 @@ from st_common import result_cmp, style_fail, style_pass, validate_cases
 
 _STR_DTYPE_MAP = {"si16": np.int16}
 
-
 def normalize_dtype(dtype):
     return _STR_DTYPE_MAP.get(dtype, dtype)
 
@@ -39,12 +38,8 @@ def main():
         dst_dtype = case["dst_dtype"]
         dst_dtype = normalize_dtype(dst_dtype)
 
-        golden = np.fromfile(
-            os.path.join(case_dir, "golden.bin"), dtype=dst_dtype
-        ).reshape(shape)
-        output = np.fromfile(
-            os.path.join(case_dir, "output.bin"), dtype=dst_dtype
-        ).reshape(shape)
+        golden = np.fromfile(os.path.join(case_dir, "golden.bin"), dtype=dst_dtype).reshape(shape)
+        output = np.fromfile(os.path.join(case_dir, "output.bin"), dtype=dst_dtype).reshape(shape)
 
         ok = result_cmp(golden[:vr, :vc], output[:vr, :vc], case["eps"])
         if ok:

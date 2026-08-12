@@ -32,11 +32,7 @@ def generate(output_dir: Path, seed: int) -> None:
     idx = np.empty((16, 64), dtype=np.int32)
     for row in range(16):
         idx[row] = (lane_ids[::-1] + row * 3 + (lane_ids // 8) * 3) % 64
-    golden_v3 = (
-        np.take_along_axis(src, idx, axis=1)
-        .astype(np.float32, copy=False)
-        .reshape(ROWS, COLS)
-    )
+    golden_v3 = np.take_along_axis(src, idx, axis=1).astype(np.float32, copy=False).reshape(ROWS, COLS)
     v3 = np.zeros((ROWS, COLS), dtype=np.float32)
 
     output_dir.mkdir(parents=True, exist_ok=True)

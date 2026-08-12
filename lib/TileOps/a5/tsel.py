@@ -33,9 +33,7 @@ from ._common import ub_row_major_constraints
     is_post_update=False,
     tags=("select", "predicate-load"),
 )
-def template_tsel(
-    mask: pto.Tile, src0: pto.Tile, src1: pto.Tile, tmp: pto.Tile, dst: pto.Tile
-):
+def template_tsel(mask: pto.Tile, src0: pto.Tile, src1: pto.Tile, tmp: pto.Tile, dst: pto.Tile):
     _ = tmp
     dtype = dst.dtype
     valid_rows, valid_cols = dst.valid_shape
@@ -50,9 +48,7 @@ def template_tsel(
         for row in range(0, valid_rows, 1):
             for col in range(0, paired_cols, pair_width):
                 mask_offset = row * mask_stride + col // 8
-                select_mask_raw = pto.plds(
-                    mask_ptr, mask_offset, dist=pto.PredicateDist.US
-                )
+                select_mask_raw = pto.plds(mask_ptr, mask_offset, dist=pto.PredicateDist.US)
                 select_mask = pto.pbitcast(select_mask_raw, pto.mask_b16)
                 pred0, _ = pto.make_mask(dtype, pair_width)
                 pred1, _ = pto.make_mask(dtype, lanes)
@@ -61,19 +57,17 @@ def template_tsel(
                 select_mask1 = pto.pbitcast(select_mask1, pto.mask_b32)
                 lhs0 = pto.vlds(src0[row, col:])
                 rhs0 = pto.vlds(src1[row, col:])
-                lhs1 = pto.vlds(src0[row, col + lanes :])
-                rhs1 = pto.vlds(src1[row, col + lanes :])
+                lhs1 = pto.vlds(src0[row, col + lanes:])
+                rhs1 = pto.vlds(src1[row, col + lanes:])
                 selected0 = pto.vsel(lhs0, rhs0, select_mask0)
                 selected1 = pto.vsel(lhs1, rhs1, select_mask1)
                 pto.vsts(selected0, dst[row, col:], pred0)
-                pto.vsts(selected1, dst[row, col + lanes :], pred1)
+                pto.vsts(selected1, dst[row, col + lanes:], pred1)
             tail_cols = valid_cols - paired_cols
             if tail_cols > 0:
                 col = paired_cols
                 mask_offset = row * mask_stride + col // 8
-                select_mask_raw = pto.plds(
-                    mask_ptr, mask_offset, dist=pto.PredicateDist.US
-                )
+                select_mask_raw = pto.plds(mask_ptr, mask_offset, dist=pto.PredicateDist.US)
                 select_mask = pto.pbitcast(select_mask_raw, pto.mask_b16)
                 select_mask0 = pto.punpack(select_mask, pto.PredicatePart.LOWER)
                 select_mask0 = pto.pbitcast(select_mask0, pto.mask_b32)
@@ -100,9 +94,7 @@ def template_tsel(
             for col in range(0, valid_cols, lanes):
                 pred, remained = pto.make_mask(dtype, remained)
                 mask_offset = row * mask_stride + col // 8
-                select_mask = pto.plds(
-                    mask_ptr, mask_offset, dist=pto.PredicateDist.NORM
-                )
+                select_mask = pto.plds(mask_ptr, mask_offset, dist=pto.PredicateDist.NORM)
                 lhs = pto.vlds(src0[row, col:])
                 rhs = pto.vlds(src1[row, col:])
                 result = pto.vsel(lhs, rhs, select_mask)

@@ -16,11 +16,13 @@
 #include "acl/acl.h"
 #endif
 
-extern "C" __global__[aicore] void predicate_soft_postupdate_dist_alignment_kernel(
-    __gm__ uint8_t* input, __gm__ uint8_t* output);
+extern "C" __global__[aicore] void
+predicate_soft_postupdate_dist_alignment_kernel(__gm__ uint8_t *input,
+                                                __gm__ uint8_t *output);
 
-void LaunchPredicateSoftPostupdateDistAlignment(uint8_t* input, uint8_t* output, void* stream)
-{
-    predicate_soft_postupdate_dist_alignment_kernel<<<1, nullptr, stream>>>(
-        (__gm__ uint8_t*)input, (__gm__ uint8_t*)output);
+void LaunchPredicateSoftPostupdateDistAlignment(uint8_t *input,
+                                                uint8_t *output,
+                                                void *stream) {
+  predicate_soft_postupdate_dist_alignment_kernel<<<1, nullptr, stream>>>(
+      (__gm__ uint8_t *)input, (__gm__ uint8_t *)output);
 }

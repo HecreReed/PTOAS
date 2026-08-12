@@ -8,16 +8,14 @@
 
 from ptoas.mlir.ir import (
     UnitAttr,
-    Context,
-    Location,
-    InsertionPoint,
-    IndexType,
-    IntegerType,
-    F32Type,
-    StringAttr,
+    Context, Location, InsertionPoint,
+    IndexType, IntegerType, F16Type, F32Type, StringAttr
 )
 from ptoas.mlir.dialects import func, arith, scf, pto, builtin
-from ptoas.mlir.dialects.pto import TLOAD, TMOV_M2L, TMATMUL, TSTORE_ACC, EVENT_ID0
+from ptoas.mlir.dialects.pto import (
+    TLOAD, TMOV_M2L, TMATMUL, TSTORE_ACC,
+    EVENT_ID0
+)
 from ptoas.mlir.dialects.arith import CmpIPredicate
 
 
@@ -26,12 +24,8 @@ def _idx_const(v: int):
 
 
 def build(
-    M=32,
-    K=256,
-    N=32,
-    validM=32,
-    validK=256,
-    validN=32,
+    M=32, K=256, N=32,
+    validM=32, validK=256, validN=32,
     BASEK=32,
     # 下面两个 fractal size 你按工程真实 TileConfig 改一下：
     s_fractal_ab=512,
@@ -61,9 +55,9 @@ def build(
         i1 = IntegerType.get_signless(1)
 
         # ---- tensor view types ----
-        tv2_a = pto.TensorViewType.get(2, t_a)  # [validM, validK]
-        tv2_b = pto.TensorViewType.get(2, t_b)  # [validK, validN]
-        tv2_out = pto.TensorViewType.get(2, t_out)  # [validM, validN]
+        tv2_a = pto.TensorViewType.get(2, t_a)        # [validM, validK]
+        tv2_b = pto.TensorViewType.get(2, t_b)        # [validK, validN]
+        tv2_out = pto.TensorViewType.get(2, t_out)    # [validM, validN]
         tv2_bias = pto.TensorViewType.get(2, t_bias)  # [1, validN]
 
         # ---- tile view types ----
@@ -86,22 +80,23 @@ def build(
             pto.BLayoutAttr.get(pto.BLayout.ColMajor),
             pto.SLayoutAttr.get(pto.SLayout.RowMajor),
             s_fractal_ab,  # 这里也可以单独给 MAT 一个 size
-            pto.PadValueAttr.get(pto.PadValue.Null),
+            pto.PadValueAttr.get(pto.PadValue.Null)
         )
-
+        
         cfg_mat_bias = pto.TileBufConfigAttr.get(
             pto.BLayoutAttr.get(pto.BLayout.RowMajor),
             pto.SLayoutAttr.get(pto.SLayout.NoneBox),
             s_fractal_ab,  # 这里也可以单独给 MAT 一个 size
-            pto.PadValueAttr.get(pto.PadValue.Null),
+            pto.PadValueAttr.get(pto.PadValue.Null)
         )
+
 
         # LEFT tile：A5 pto-isa requires Left tiles to be ColMajor.
         cfg_left = pto.TileBufConfigAttr.get(
             pto.BLayoutAttr.get(pto.BLayout.ColMajor),
             pto.SLayoutAttr.get(pto.SLayout.RowMajor),
             s_fractal_ab,
-            pto.PadValueAttr.get(pto.PadValue.Null),
+            pto.PadValueAttr.get(pto.PadValue.Null)
         )
 
         # RIGHT tile：TileRight ... BLayout RowMajor, SLayout ColMajor, fractalAB
@@ -109,7 +104,7 @@ def build(
             pto.BLayoutAttr.get(pto.BLayout.RowMajor),
             pto.SLayoutAttr.get(pto.SLayout.ColMajor),
             s_fractal_ab,
-            pto.PadValueAttr.get(pto.PadValue.Null),
+            pto.PadValueAttr.get(pto.PadValue.Null)
         )
 
         # ACC tile：TileAcc ... BLayout ColMajor, SLayout RowMajor, fractalC
@@ -117,31 +112,25 @@ def build(
             pto.BLayoutAttr.get(pto.BLayout.ColMajor),
             pto.SLayoutAttr.get(pto.SLayout.RowMajor),
             s_fractal_c,
-            pto.PadValueAttr.get(pto.PadValue.Null),
+            pto.PadValueAttr.get(pto.PadValue.Null)
         )
 
         # BIAS tile：一般不需要分形（这里给 0；你也可给一个专用 size）
         cfg_bias = pto.TileBufConfigAttr.get(
             pto.BLayoutAttr.get(pto.BLayout.RowMajor),
-            pto.SLayoutAttr.get(pto.SLayout.NoneBox),
+            pto.SLayoutAttr.get(pto.SLayout.NoneBox), 
             pto.TileConfig.fractalABSize,
-            pto.PadValueAttr.get(pto.PadValue.Null),
+            pto.PadValueAttr.get(pto.PadValue.Null)
         )
 
         # ---- tile buf types (each has its own cfg) ----
         tile_buf_aMat = pto.TileBufType.get([M, BASEK], t_a, mat, [M, BASEK], cfg_mat)
         tile_buf_bMat = pto.TileBufType.get([BASEK, N], t_b, mat, [BASEK, N], cfg_mat)
-        tile_buf_biasData = pto.TileBufType.get(
-            [1, N], t_bias, mat, [1, N], cfg_mat_bias
-        )
+        tile_buf_biasData = pto.TileBufType.get([1, N], t_bias, mat, [1, N], cfg_mat_bias)
 
-        tile_buf_aTile = pto.TileBufType.get(
-            [M, BASEK], t_a, left, [M, BASEK], cfg_left
-        )
-        tile_buf_bTile = pto.TileBufType.get(
-            [BASEK, N], t_b, right, [BASEK, N], cfg_right
-        )
-        tile_buf_cTile = pto.TileBufType.get([M, N], t_out, acc, [M, N], cfg_acc)
+        tile_buf_aTile = pto.TileBufType.get([M, BASEK], t_a, left, [M, BASEK], cfg_left)
+        tile_buf_bTile = pto.TileBufType.get([BASEK, N], t_b, right, [BASEK, N], cfg_right)
+        tile_buf_cTile = pto.TileBufType.get([M, N], t_out, acc, [M,N], cfg_acc)
         tile_buf_biasTile = pto.TileBufType.get([1, N], t_bias, bias, [1, N], cfg_bias)
 
         # ---- function ----
@@ -166,7 +155,7 @@ def build(
 
             cBASEK = _idx_const(BASEK)
             cIter = _idx_const(iters)
-
+            
             cTileM = _idx_const(M)
             cTileN = _idx_const(N)
 
@@ -178,9 +167,7 @@ def build(
             # OUT: [validM, validN], stride [validN, 1]
             tvOut = pto.MakeTensorViewOp(tv2_out, out_ptr, [cM, cN], [cN, c1]).result
             # BIAS: [1, validN], stride [validN, 1]
-            tvBias = pto.MakeTensorViewOp(
-                tv2_bias, bias_ptr, [cOne, cN], [cN, c1]
-            ).result
+            tvBias = pto.MakeTensorViewOp(tv2_bias, bias_ptr, [cOne, cN], [cN, c1]).result
 
             # ---- alloc tiles ----
             aMatTile = pto.AllocTileOp(tile_buf_aMat).result
@@ -204,15 +191,9 @@ def build(
                 kOff = arith.MulIOp(i, cBASEK).result
 
                 # subviews for this split-K
-                svA = pto.PartitionViewOp(
-                    tile_view_a, tvA, offsets=[c0, kOff], sizes=[cTileM, cBASEK]
-                ).result
-                svB = pto.PartitionViewOp(
-                    tile_view_b, tvB, offsets=[kOff, c0], sizes=[cBASEK, cTileN]
-                ).result
-                svBias = pto.PartitionViewOp(
-                    tile_view_bias, tvBias, offsets=[c0, c0], sizes=[cOne, cTileN]
-                ).result
+                svA = pto.PartitionViewOp(tile_view_a, tvA, offsets=[c0, kOff], sizes=[cTileM, cBASEK]).result
+                svB = pto.PartitionViewOp(tile_view_b, tvB, offsets=[kOff, c0], sizes=[cBASEK, cTileN]).result
+                svBias = pto.PartitionViewOp(tile_view_bias, tvBias, offsets=[c0, c0], sizes=[cOne, cTileN]).result
 
                 # ---- TLOAD ----
                 # 注意：TLOAD 的 valid dims 一般对应目标 tile 的有效区域（a/b/bias）
@@ -228,7 +209,7 @@ def build(
 
                 # ---- sync: MTE2 -> MTE1 ----
                 pto.record_event(TLOAD, TMOV_M2L, EVENT_ID0)
-                pto.wait_event(TLOAD, TMOV_M2L, EVENT_ID0)
+                pto.wait_event  (TLOAD, TMOV_M2L, EVENT_ID0)
 
                 # ---- TMOV ----
                 # TMOV 也传对应 tile 的 valid dims（a/b/bias）
@@ -244,7 +225,7 @@ def build(
 
                 # ---- sync: MTE1 -> M ----
                 pto.record_event(TMOV_M2L, TMATMUL, EVENT_ID0)
-                pto.wait_event(TMOV_M2L, TMATMUL, EVENT_ID0)
+                pto.wait_event  (TMOV_M2L, TMATMUL, EVENT_ID0)
 
                 # ---- i == 0 ? (bias? TMATMUL_BIAS : TMATMUL) : TMATMUL_ACC ----
                 is_i0 = arith.CmpIOp(CmpIPredicate.eq, i, c0).result
@@ -256,7 +237,7 @@ def build(
                     with InsertionPoint(if_bias0.then_block):
                         # L0C 清空 + bias
                         # 约定：valid_dims_c 用于 C 的有效区域
-                        pto.TMatmulBiasOp(None, aTile, bTile, biasTile, cTile)
+                        pto.TMatmulBiasOp(None,aTile, bTile, biasTile, cTile)
                         scf.YieldOp([])
                     with InsertionPoint(if_bias0.else_block):
                         # L0C 清空
@@ -272,19 +253,17 @@ def build(
 
                 # ---- sync: M -> MTE2 ----
                 pto.record_event(TMATMUL, TLOAD, EVENT_ID0)
-                pto.wait_event(TMATMUL, TLOAD, EVENT_ID0)
+                pto.wait_event  (TMATMUL, TLOAD, EVENT_ID0)
 
                 scf.YieldOp([])
 
             # ---- after loop ----
             pto.record_event(TMATMUL, TSTORE_ACC, EVENT_ID0)
-            pto.wait_event(TMATMUL, TSTORE_ACC, EVENT_ID0)
+            pto.wait_event  (TMATMUL, TSTORE_ACC, EVENT_ID0)
 
             # ---- TSTORE ----
             # 写回 OUT，传 C 的 valid dims
-            svOut = pto.PartitionViewOp(
-                tile_view_out, tvOut, offsets=[c0, c0], sizes=[cTileM, cTileN]
-            ).result
+            svOut = pto.PartitionViewOp(tile_view_out, tvOut, offsets=[c0, c0], sizes=[cTileM, cTileN]).result
             pto.TStoreOp(None, cTile, svOut)
 
             func.ReturnOp([])

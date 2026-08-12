@@ -13,41 +13,29 @@
 #endif
 
 // Case 1: fp32_32_16_1_16
-extern "C" __global__ AICORE void TCOLEXPANDEXPDIF_fp32_32_16_1_16(
-    __gm__ float* src0, __gm__ float* src1, __gm__ float* dst);
+extern "C" __global__ AICORE void TCOLEXPANDEXPDIF_fp32_32_16_1_16(__gm__ float *src0, __gm__ float *src1, __gm__ float *dst);
 
-void LaunchTCOLEXPANDEXPDIF_fp32_32_16_1_16(float* src0, float* src1, float* dst, void* stream)
-{
-    TCOLEXPANDEXPDIF_fp32_32_16_1_16<<<1, nullptr, stream>>>(
-        (__gm__ float*)src0, (__gm__ float*)src1, (__gm__ float*)dst);
+void LaunchTCOLEXPANDEXPDIF_fp32_32_16_1_16(float *src0, float *src1, float *dst, void *stream) {
+    TCOLEXPANDEXPDIF_fp32_32_16_1_16<<<1, nullptr, stream>>>((__gm__ float *)src0, (__gm__ float *)src1, (__gm__ float *)dst);
 }
 
 // Case 2: fp32_16_32_1_32
-extern "C" __global__ AICORE void TCOLEXPANDEXPDIF_fp32_16_32_1_32(
-    __gm__ float* src0, __gm__ float* src1, __gm__ float* dst);
+extern "C" __global__ AICORE void TCOLEXPANDEXPDIF_fp32_16_32_1_32(__gm__ float *src0, __gm__ float *src1, __gm__ float *dst);
 
-void LaunchTCOLEXPANDEXPDIF_fp32_16_32_1_32(float* src0, float* src1, float* dst, void* stream)
-{
-    TCOLEXPANDEXPDIF_fp32_16_32_1_32<<<1, nullptr, stream>>>(
-        (__gm__ float*)src0, (__gm__ float*)src1, (__gm__ float*)dst);
+void LaunchTCOLEXPANDEXPDIF_fp32_16_32_1_32(float *src0, float *src1, float *dst, void *stream) {
+    TCOLEXPANDEXPDIF_fp32_16_32_1_32<<<1, nullptr, stream>>>((__gm__ float *)src0, (__gm__ float *)src1, (__gm__ float *)dst);
 }
 
 // Case 3: fp16_32_32_1_32
-extern "C" __global__ AICORE void TCOLEXPANDEXPDIF_fp16_32_32_1_32(
-    __gm__ uint16_t* src0, __gm__ uint16_t* src1, __gm__ uint16_t* dst);
+extern "C" __global__ AICORE void TCOLEXPANDEXPDIF_fp16_32_32_1_32(__gm__ uint16_t *src0, __gm__ uint16_t *src1, __gm__ uint16_t *dst);
 
-void LaunchTCOLEXPANDEXPDIF_fp16_32_32_1_32(uint16_t* src0, uint16_t* src1, uint16_t* dst, void* stream)
-{
-    TCOLEXPANDEXPDIF_fp16_32_32_1_32<<<1, nullptr, stream>>>(
-        (__gm__ uint16_t*)src0, (__gm__ uint16_t*)src1, (__gm__ uint16_t*)dst);
+void LaunchTCOLEXPANDEXPDIF_fp16_32_32_1_32(uint16_t *src0, uint16_t *src1, uint16_t *dst, void *stream) {
+    TCOLEXPANDEXPDIF_fp16_32_32_1_32<<<1, nullptr, stream>>>((__gm__ uint16_t *)src0, (__gm__ uint16_t *)src1, (__gm__ uint16_t *)dst);
 }
 
 // Case 4: fp16_16_128_1_128
-extern "C" __global__ AICORE void TCOLEXPANDEXPDIF_fp16_16_128_1_128(
-    __gm__ uint16_t* src0, __gm__ uint16_t* src1, __gm__ uint16_t* dst);
+extern "C" __global__ AICORE void TCOLEXPANDEXPDIF_fp16_16_128_1_128(__gm__ uint16_t *src0, __gm__ uint16_t *src1, __gm__ uint16_t *dst);
 
-void LaunchTCOLEXPANDEXPDIF_fp16_16_128_1_128(uint16_t* src0, uint16_t* src1, uint16_t* dst, void* stream)
-{
-    TCOLEXPANDEXPDIF_fp16_16_128_1_128<<<1, nullptr, stream>>>(
-        (__gm__ uint16_t*)src0, (__gm__ uint16_t*)src1, (__gm__ uint16_t*)dst);
+void LaunchTCOLEXPANDEXPDIF_fp16_16_128_1_128(uint16_t *src0, uint16_t *src1, uint16_t *dst, void *stream) {
+    TCOLEXPANDEXPDIF_fp16_16_128_1_128<<<1, nullptr, stream>>>((__gm__ uint16_t *)src0, (__gm__ uint16_t *)src1, (__gm__ uint16_t *)dst);
 }

@@ -23,13 +23,12 @@ import os
 import numpy as np
 import struct
 
-from cases import CASES, PADVAL_MAX, PADVAL_MIN, PADVAL_ZERO, PADVAL_NEG1
+from cases import CASES, PADVAL_MAX, PADVAL_MIN, PADVAL_NULL, PADVAL_ZERO, PADVAL_NEG1
 
 
 # FLT_MAX and -FLT_MAX (matching DSL PadValue.MAX/MIN)
 def _float32_from_bits(bits: int) -> float:
     return struct.unpack(">f", bits.to_bytes(4, byteorder="big", signed=False))[0]
-
 
 _FLT_MAX = _float32_from_bits(0x7F7FFFFF)  # ~3.4028235e+38
 _FLT_MIN = _float32_from_bits(0xFF7FFFFF)  # ~-3.4028235e+38
@@ -88,9 +87,7 @@ for case in CASES:
     # Input: generated with src_shape (matching C++ input size)
     src_vr, src_vc = src_valid
     input_data = np.zeros(src_shape, dtype=dtype)
-    input_data[:src_vr, :src_vc] = np.random.randint(
-        1, 10, size=(src_vr, src_vc)
-    ).astype(dtype)
+    input_data[:src_vr, :src_vc] = np.random.randint(1, 10, size=(src_vr, src_vc)).astype(dtype)
 
     # Golden: generated with dst_valid (output size)
     dst_vr, dst_vc = dst_valid
@@ -116,7 +113,5 @@ for case in CASES:
             golden[expand_rows_start:expand_rows_end, :dst_vc] = fill_val
 
     save_case_data(case["name"], {"input": input_data, "golden": golden})
-    print(
-        f"[INFO] gen_data: {case['name']} input={src_shape} golden={dst_valid} "
-        f"fill_pad={fill_padval} dtype={dtype.__name__}"
-    )
+    print(f"[INFO] gen_data: {case['name']} input={src_shape} golden={dst_valid} "
+          f"fill_pad={fill_padval} dtype={dtype.__name__}")

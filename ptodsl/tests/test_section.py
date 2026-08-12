@@ -193,12 +193,8 @@ def main() -> None:
     assert "pto.set_flag[<PIPE_MTE2>, <PIPE_S>, <EVENT_ID0>]" in recovered_text
 
     _expect_raises(TypeError, lambda: pto.section(1), "expects 'cube' or 'vector'")
-    _expect_raises(
-        ValueError, lambda: pto.section("scalar"), "expects 'cube' or 'vector'"
-    )
-    _expect_raises(
-        ValueError, lambda: pto.section("CUBE"), "expects 'cube' or 'vector'"
-    )
+    _expect_raises(ValueError, lambda: pto.section("scalar"), "expects 'cube' or 'vector'")
+    _expect_raises(ValueError, lambda: pto.section("CUBE"), "expects 'cube' or 'vector'")
     _expect_raises(
         RuntimeError,
         lambda: duplicate_section_probe.compile(),
@@ -229,9 +225,7 @@ def main() -> None:
     assert lexical_text.count("pto.section.cube {") == 1
     assert lexical_text.count("pto.section.vector {") == 1
 
-    conditional_lexical_text = (
-        lexical_section_conditional_rebinding_probe.compile().mlir_text()
-    )
+    conditional_lexical_text = lexical_section_conditional_rebinding_probe.compile().mlir_text()
     assert conditional_lexical_text.count("pto.section.cube {") == 1
     assert "scf.if" in conditional_lexical_text
 
@@ -258,7 +252,7 @@ def main() -> None:
     _expect_raises(
         RuntimeError,
         lambda: auto_mode_section_probe.compile(),
-        'only available in @pto.jit(mode="explicit")',
+        "only available in @pto.jit(mode=\"explicit\")",
     )
     _expect_raises(
         RuntimeError,

@@ -12,22 +12,24 @@
 #include <cstdint>
 #if !defined(__CCE_AICORE__) && !defined(TMRGSORT_HPP)
 struct MrgSortExecutedNumList {
-    uint16_t mrgSortList0;
-    uint16_t mrgSortList1;
-    uint16_t mrgSortList2;
-    uint16_t mrgSortList3;
+  uint16_t mrgSortList0;
+  uint16_t mrgSortList1;
+  uint16_t mrgSortList2;
+  uint16_t mrgSortList3;
 };
 #endif
 #ifndef __CPU_SIM
 #include "acl/acl.h"
 #endif
 
-extern "C" __global__[aicore] void vmi_dynamic_create_group_mask_s32_reduce_store_kernel(
-    __gm__ float* src, __gm__ float* copy, __gm__ float* sum, int activeCols);
+extern "C" __global__ [aicore] void
+vmi_dynamic_create_group_mask_s32_reduce_store_kernel(__gm__ float *src, __gm__ float *copy,
+                                         __gm__ float *sum, int activeCols);
 
-void LaunchVmi_dynamic_create_group_mask_s32_reduce_store_kernel(
-    float* src, float* copy, float* sum, int activeCols, void* stream)
-{
-    vmi_dynamic_create_group_mask_s32_reduce_store_kernel<<<1, nullptr, stream>>>(
-        (__gm__ float*)src, (__gm__ float*)copy, (__gm__ float*)sum, activeCols);
+void LaunchVmi_dynamic_create_group_mask_s32_reduce_store_kernel(float *src, float *copy,
+                                                    float *sum, int activeCols,
+                                                    void *stream) {
+  vmi_dynamic_create_group_mask_s32_reduce_store_kernel<<<1, nullptr, stream>>>(
+      (__gm__ float *)src, (__gm__ float *)copy, (__gm__ float *)sum,
+      activeCols);
 }

@@ -47,9 +47,7 @@ def build():
                 row_off = arith.MulIOp(row_idx, c32).result
                 src_off = pto.AddPtrOp(src, row_off).result
 
-                tv0 = pto.MakeTensorViewOp(
-                    tv2_f32, src_off, [c32, c32], [c32, c1]
-                ).result
+                tv0 = pto.MakeTensorViewOp(tv2_f32, src_off, [c32, c32], [c32, c1]).result
                 sv0 = pto.PartitionViewOp(
                     tile_view_32, tv0, offsets=[c0, c0], sizes=[c32, c32]
                 ).result

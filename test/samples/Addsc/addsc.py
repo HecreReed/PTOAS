@@ -48,23 +48,13 @@ def build():
                 arg0, arg1 = entry.arguments
 
                 # %0/%1/%2 = pto.make_tensor_view %arg?, shape=[%c32,%c32] strides=[%c32,%c1]
-                tv_src0 = pto.MakeTensorViewOp(
-                    tv2_f32, arg0, [c32, c32], [c32, c1]
-                ).result
-                tv_src1 = pto.MakeTensorViewOp(
-                    tv2_f32, arg0, [c32, c32], [c32, c1]
-                ).result
-                tv_dst = pto.MakeTensorViewOp(
-                    tv2_f32, arg1, [c32, c32], [c32, c1]
-                ).result
+                tv_src0 = pto.MakeTensorViewOp(tv2_f32, arg0, [c32, c32], [c32, c1]).result
+                tv_src1 = pto.MakeTensorViewOp(tv2_f32, arg0, [c32, c32], [c32, c1]).result
+                tv_dst = pto.MakeTensorViewOp(tv2_f32, arg1, [c32, c32], [c32, c1]).result
 
                 # Using constants for offsets and sizes in SubviewOp
-                sv_src0 = pto.PartitionViewOp(
-                    tile_view_32, tv_src0, offsets=[c0, c0], sizes=[c32, c32]
-                ).result
-                sv_src1 = pto.PartitionViewOp(
-                    tile_view_32, tv_src1, offsets=[c0, c0], sizes=[c32, c32]
-                ).result
+                sv_src0 = pto.PartitionViewOp(tile_view_32, tv_src0, offsets=[c0, c0], sizes=[c32, c32]).result
+                sv_src1 = pto.PartitionViewOp(tile_view_32, tv_src1, offsets=[c0, c0], sizes=[c32, c32]).result
 
                 # Allocate tiles
                 tb_src0 = pto.AllocTileOp(tile_buf_32).result
@@ -79,9 +69,7 @@ def build():
                 pto.TAddSCOp(tb_src0, scale, tb_src1, tb_dst)
 
                 # Subview on output tensor view
-                sv_dst = pto.PartitionViewOp(
-                    tile_view_32, tv_dst, offsets=[c0, c0], sizes=[c32, c32]
-                ).result
+                sv_dst = pto.PartitionViewOp(tile_view_32, tv_dst, offsets=[c0, c0], sizes=[c32, c32]).result
 
                 # Store the result
                 pto.TStoreOp(None, tb_dst, sv_dst)

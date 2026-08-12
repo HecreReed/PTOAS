@@ -38,9 +38,7 @@ _LIB: ctypes.CDLL | None = None
 def _ascend_home() -> Path:
     home = os.environ.get("ASCEND_HOME_PATH") or os.environ.get("ASCEND_TOOLKIT_HOME")
     if not home:
-        raise EnvironmentError(
-            "ASCEND_HOME_PATH is not set. Source CANN setenv.bash first."
-        )
+        raise EnvironmentError("ASCEND_HOME_PATH is not set. Source CANN setenv.bash first.")
     return Path(home)
 
 
@@ -90,7 +88,6 @@ def _load_lib() -> ctypes.CDLL:
 def _vp(t) -> ctypes.c_void_p:
     return ctypes.c_void_p(t.data_ptr())
 
-
 def _launch_cce(lib: ctypes.CDLL, launch_args: RopeLaunchArgs) -> object:
     fn = getattr(lib, launch_args.fn_name)
     fn(
@@ -133,9 +130,7 @@ class RopeCceBackend:
         "f32": rope_f32,
     }
 
-    def is_supported(
-        self, case: object, *, purpose: RunPurpose
-    ) -> tuple[bool, str | None]:
+    def is_supported(self, case: object, *, purpose: RunPurpose) -> tuple[bool, str | None]:
         del case, purpose
         return True, None
 

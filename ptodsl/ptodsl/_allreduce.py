@@ -24,24 +24,9 @@ from __future__ import annotations
 
 from . import scalar
 from ._control_flow import if_, for_
-from ._ops import (
-    const as _const,
-    get_laneid,
-    get_tid_x,
-    redux_add,
-    redux_max,
-    redux_min,
-    shuffle_bfly,
-    syncthreads,
-)
+from ._ops import const as _const, get_laneid, get_tid_x, redux_add, redux_max, redux_min, shuffle_bfly, syncthreads
 from ._surface_values import unwrap_surface_value
-from ._types import (
-    _resolve,
-    float16 as _f16_dtype,
-    float32 as _f32_dtype,
-    si32 as _si32_dtype,
-    ui32 as _ui32_dtype,
-)
+from ._types import _resolve, float16 as _f16_dtype, float32 as _f32_dtype, si32 as _si32_dtype, ui32 as _ui32_dtype
 
 from ptoas.mlir.dialects import pto as _pto
 from ptoas.mlir.ir import F16Type, F32Type, IntegerType
@@ -49,30 +34,19 @@ from ptoas.mlir.ir import F16Type, F32Type, IntegerType
 
 # ── helpers ────────────────────────────────────────────────────────────────────
 
-
 def _is_pow2(n: int) -> bool:
     """Compile-time power-of-two check."""
     return n > 0 and (n & (n - 1)) == 0
 
 
-def _validate_scratch_buffer(
-    scratch,
-    *,
-    value_type,
-    reducer: str,
-    dtype: str,
-    threads: int,
-    scale: int,
-    thread_offset: int,
-) -> None:
+def _validate_scratch_buffer(scratch, *, value_type, reducer: str, dtype: str,
+                             threads: int, scale: int, thread_offset: int) -> None:
     context = f"all_reduce {reducer}/{dtype}/t{threads}/s{scale}/o{thread_offset}"
     raw_scratch = unwrap_surface_value(scratch)
     try:
         scratch_type = _pto.PtrType(raw_scratch.type)
     except Exception as exc:
-        raise TypeError(
-            f"{context} requires a UB scratch buffer pointer, got {raw_scratch.type}"
-        ) from exc
+        raise TypeError(f"{context} requires a UB scratch buffer pointer, got {raw_scratch.type}") from exc
     if scratch_type.element_type != value_type:
         raise TypeError(
             f"{context} scratch element type mismatch: expected {value_type}, got {scratch_type.element_type}"
@@ -95,16 +69,12 @@ def _validate_scratch_buffer(
 _REDUCER_IDENTITY = {
     "sum": {"f32": 0.0, "f16": 0.0, "si32": 0, "ui32": 0},
     "max": {
-        "f32": float("-inf"),
-        "f16": float("-inf"),
-        "si32": -(2**31),
-        "ui32": 0,
+        "f32": float("-inf"), "f16": float("-inf"),
+        "si32": -(2 ** 31), "ui32": 0,
     },
     "min": {
-        "f32": float("inf"),
-        "f16": float("inf"),
-        "si32": 2**31 - 1,
-        "ui32": 2**32 - 1,
+        "f32": float("inf"), "f16": float("inf"),
+        "si32": 2 ** 31 - 1, "ui32": 2 ** 32 - 1,
     },
 }
 
@@ -121,15 +91,12 @@ _REDUCER_REDUX = {
 }
 
 _REDUCER_IDENTITY_DTYPE = {
-    "f32": _f32_dtype,
-    "f16": _f16_dtype,
-    "si32": _si32_dtype,
-    "ui32": _ui32_dtype,
+    "f32": _f32_dtype, "f16": _f16_dtype,
+    "si32": _si32_dtype, "ui32": _ui32_dtype,
 }
 
 
 # ── butterfly  ──────────────────────────────────────────────────────────────────
-
 
 def _emit_butterfly(v, *, threads: int, scale: int, reducer: str):
     """Unrolled butterfly shuffle reduce."""
@@ -143,7 +110,6 @@ def _emit_butterfly(v, *, threads: int, scale: int, reducer: str):
 
 
 # ── warp_hw_reduce  ────────────────────────────────────────────────────────────
-
 
 def _emit_warp_hw_reduce(x, *, threads: int, lane_in_warp, dtype: str, reducer: str):
     """Warp-level hardware reduce with group masking."""
@@ -169,8 +135,8 @@ def _emit_warp_hw_reduce(x, *, threads: int, lane_in_warp, dtype: str, reducer: 
 
 # ── warp_reduce  ───────────────────────────────────────────────────────────────
 
-
-def _emit_warp_reduce(x, *, dtype, threads, scale, thread_offset, reducer):
+def _emit_warp_reduce(x, *,
+                      dtype, threads, scale, thread_offset, reducer):
     """Single-warp all-reduce."""
     extent = threads // scale
     if extent <= 1:
@@ -183,21 +149,16 @@ def _emit_warp_reduce(x, *, dtype, threads, scale, thread_offset, reducer):
 
     if extent >= 16 and scale == 1:
         return _emit_warp_hw_reduce(
-            x,
-            threads=threads,
-            lane_in_warp=lane_in_warp,
-            dtype=dtype,
-            reducer=reducer,
+            x, threads=threads,
+            lane_in_warp=lane_in_warp, dtype=dtype, reducer=reducer,
         )
     return _emit_butterfly(x, threads=threads, scale=scale, reducer=reducer)
 
 
 # ── cross_warp_reduce  ─────────────────────────────────────────────────────────
 
-
-def _emit_cross_warp_reduce(
-    x, scratch, *, dtype, threads, scale, thread_offset, reducer
-):
+def _emit_cross_warp_reduce(x, scratch, *,
+                            dtype, threads, scale, thread_offset, reducer):
     """Cross-warp all-reduce (threads > 32)."""
     num_warps = threads // 32
     c_identity = _const(
@@ -252,10 +213,7 @@ def _emit_cross_warp_reduce(
                     c_identity,
                 )
                 stage4_result = _emit_butterfly(
-                    loaded,
-                    threads=total,
-                    scale=scale,
-                    reducer=reducer,
+                    loaded, threads=total, scale=scale, reducer=reducer,
                 )
             else:
                 is_reducer = lid < scale
@@ -289,8 +247,8 @@ def _emit_cross_warp_reduce(
 
 # ── ub_reduce  ─────────────────────────────────────────────────────────────────
 
-
-def _emit_ub_reduce(x, scratch, *, dtype, threads, scale, thread_offset, reducer):
+def _emit_ub_reduce(x, scratch, *,
+                    dtype, threads, scale, thread_offset, reducer):
     """UB-scratch all-reduce (fallback for non-pow2 or general case)."""
     combine = _REDUCER_COMBINE[reducer]
 
@@ -343,24 +301,23 @@ def _emit_ub_reduce(x, scratch, *, dtype, threads, scale, thread_offset, reducer
 
 # ── public API  ────────────────────────────────────────────────────────────────
 
-
 def _check_params(*, threads, scale, thread_offset):
     """Validate allreduce parameters (compile-time checks)."""
-    for name, val in (
-        ("threads", threads),
-        ("scale", scale),
-        ("thread_offset", thread_offset),
-    ):
+    for name, val in (("threads", threads), ("scale", scale),
+                       ("thread_offset", thread_offset)):
         if not isinstance(val, int):
             raise ValueError(
-                f"all_reduce: '{name}' must be a Python int, got {type(val).__name__}"
+                f"all_reduce: '{name}' must be a Python int, "
+                f"got {type(val).__name__}"
             )
     if threads < 1:
         raise ValueError(f"all_reduce: threads must be >= 1, got {threads}")
     if scale < 1:
         raise ValueError(f"all_reduce: scale must be >= 1, got {scale}")
     if thread_offset < 0:
-        raise ValueError(f"all_reduce: thread_offset must be >= 0, got {thread_offset}")
+        raise ValueError(
+            f"all_reduce: thread_offset must be >= 0, got {thread_offset}"
+        )
     if threads % scale != 0:
         raise ValueError(
             f"all_reduce requires threads % scale == 0; "
@@ -387,13 +344,8 @@ def _simt_allreduce(value, *, threads, scale, thread_offset, scratch, reducer):
     else:
         raise NotImplementedError(f"all_reduce: unsupported dtype {raw_value.type}")
 
-    args = dict(
-        dtype=dtype,
-        threads=threads,
-        scale=scale,
-        thread_offset=thread_offset,
-        reducer=reducer,
-    )
+    args = dict(dtype=dtype, threads=threads, scale=scale,
+                thread_offset=thread_offset, reducer=reducer)
 
     if threads <= 32 and _is_pow2(threads) and _is_pow2(scale):
         return _emit_warp_reduce(value, **args)
@@ -424,38 +376,20 @@ def _simt_allreduce(value, *, threads, scale, thread_offset, scratch, reducer):
 
 def simt_allreduce_sum(value, *, threads, scale=1, thread_offset=0, scratch=None):
     """Sum reduce across SIMT work-items."""
-    return _simt_allreduce(
-        value,
-        threads=threads,
-        scale=scale,
-        thread_offset=thread_offset,
-        scratch=scratch,
-        reducer="sum",
-    )
+    return _simt_allreduce(value, threads=threads, scale=scale,
+                           thread_offset=thread_offset, scratch=scratch, reducer="sum")
 
 
 def simt_allreduce_max(value, *, threads, scale=1, thread_offset=0, scratch=None):
     """Max reduce across SIMT work-items."""
-    return _simt_allreduce(
-        value,
-        threads=threads,
-        scale=scale,
-        thread_offset=thread_offset,
-        scratch=scratch,
-        reducer="max",
-    )
+    return _simt_allreduce(value, threads=threads, scale=scale,
+                           thread_offset=thread_offset, scratch=scratch, reducer="max")
 
 
 def simt_allreduce_min(value, *, threads, scale=1, thread_offset=0, scratch=None):
     """Min reduce across SIMT work-items."""
-    return _simt_allreduce(
-        value,
-        threads=threads,
-        scale=scale,
-        thread_offset=thread_offset,
-        scratch=scratch,
-        reducer="min",
-    )
+    return _simt_allreduce(value, threads=threads, scale=scale,
+                           thread_offset=thread_offset, scratch=scratch, reducer="min")
 
 
 __all__ = [

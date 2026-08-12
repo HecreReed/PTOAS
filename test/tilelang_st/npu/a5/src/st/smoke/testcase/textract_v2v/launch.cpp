@@ -12,9 +12,8 @@
 #define AICORE [aicore]
 #endif
 
-extern "C" __global__ AICORE void TEXTRACT_V2V_ND_f32_16x16(__gm__ float* src, __gm__ float* out);
+extern "C" __global__ AICORE void TEXTRACT_V2V_ND_f32_16x16(__gm__ float *src, __gm__ float *out);
 
-void LaunchTEXTRACT_V2V_ND_f32_16x16(float* src, float* out, void* stream)
-{
-    TEXTRACT_V2V_ND_f32_16x16<<<1, nullptr, stream>>>((__gm__ float*)src, (__gm__ float*)out);
+void LaunchTEXTRACT_V2V_ND_f32_16x16(float *src, float *out, void *stream) {
+    TEXTRACT_V2V_ND_f32_16x16<<<1, nullptr, stream>>>((__gm__ float *)src, (__gm__ float *)out);
 }

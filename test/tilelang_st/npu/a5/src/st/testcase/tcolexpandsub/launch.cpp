@@ -13,59 +13,42 @@
 #endif
 
 // Case 1: fp32_6_128_1_128
-extern "C" __global__ AICORE void TCOLEXPANDSUB_fp32_6_128_1_128(
-    __gm__ float* src0, __gm__ float* src1, __gm__ float* dst);
+extern "C" __global__ AICORE void TCOLEXPANDSUB_fp32_6_128_1_128(__gm__ float *src0, __gm__ float *src1, __gm__ float *dst);
 
-void LaunchTCOLEXPANDSUB_fp32_6_128_1_128(float* src0, float* src1, float* dst, void* stream)
-{
-    TCOLEXPANDSUB_fp32_6_128_1_128<<<1, nullptr, stream>>>(
-        (__gm__ float*)src0, (__gm__ float*)src1, (__gm__ float*)dst);
+void LaunchTCOLEXPANDSUB_fp32_6_128_1_128(float *src0, float *src1, float *dst, void *stream) {
+    TCOLEXPANDSUB_fp32_6_128_1_128<<<1, nullptr, stream>>>((__gm__ float *)src0, (__gm__ float *)src1, (__gm__ float *)dst);
 }
 
 // Case 2: fp32_18_32_1_32
-extern "C" __global__ AICORE void TCOLEXPANDSUB_fp32_18_32_1_32(
-    __gm__ float* src0, __gm__ float* src1, __gm__ float* dst);
+extern "C" __global__ AICORE void TCOLEXPANDSUB_fp32_18_32_1_32(__gm__ float *src0, __gm__ float *src1, __gm__ float *dst);
 
-void LaunchTCOLEXPANDSUB_fp32_18_32_1_32(float* src0, float* src1, float* dst, void* stream)
-{
-    TCOLEXPANDSUB_fp32_18_32_1_32<<<1, nullptr, stream>>>((__gm__ float*)src0, (__gm__ float*)src1, (__gm__ float*)dst);
+void LaunchTCOLEXPANDSUB_fp32_18_32_1_32(float *src0, float *src1, float *dst, void *stream) {
+    TCOLEXPANDSUB_fp32_18_32_1_32<<<1, nullptr, stream>>>((__gm__ float *)src0, (__gm__ float *)src1, (__gm__ float *)dst);
 }
 
 // Case 3: fp16_10_256_1_256
-extern "C" __global__ AICORE void TCOLEXPANDSUB_fp16_10_256_1_256(
-    __gm__ uint16_t* src0, __gm__ uint16_t* src1, __gm__ uint16_t* dst);
+extern "C" __global__ AICORE void TCOLEXPANDSUB_fp16_10_256_1_256(__gm__ uint16_t *src0, __gm__ uint16_t *src1, __gm__ uint16_t *dst);
 
-void LaunchTCOLEXPANDSUB_fp16_10_256_1_256(uint16_t* src0, uint16_t* src1, uint16_t* dst, void* stream)
-{
-    TCOLEXPANDSUB_fp16_10_256_1_256<<<1, nullptr, stream>>>(
-        (__gm__ uint16_t*)src0, (__gm__ uint16_t*)src1, (__gm__ uint16_t*)dst);
+void LaunchTCOLEXPANDSUB_fp16_10_256_1_256(uint16_t *src0, uint16_t *src1, uint16_t *dst, void *stream) {
+    TCOLEXPANDSUB_fp16_10_256_1_256<<<1, nullptr, stream>>>((__gm__ uint16_t *)src0, (__gm__ uint16_t *)src1, (__gm__ uint16_t *)dst);
 }
 
 // Case 4: fp16_12_64_1_64
-extern "C" __global__ AICORE void TCOLEXPANDSUB_fp16_12_64_1_64(
-    __gm__ uint16_t* src0, __gm__ uint16_t* src1, __gm__ uint16_t* dst);
+extern "C" __global__ AICORE void TCOLEXPANDSUB_fp16_12_64_1_64(__gm__ uint16_t *src0, __gm__ uint16_t *src1, __gm__ uint16_t *dst);
 
-void LaunchTCOLEXPANDSUB_fp16_12_64_1_64(uint16_t* src0, uint16_t* src1, uint16_t* dst, void* stream)
-{
-    TCOLEXPANDSUB_fp16_12_64_1_64<<<1, nullptr, stream>>>(
-        (__gm__ uint16_t*)src0, (__gm__ uint16_t*)src1, (__gm__ uint16_t*)dst);
+void LaunchTCOLEXPANDSUB_fp16_12_64_1_64(uint16_t *src0, uint16_t *src1, uint16_t *dst, void *stream) {
+    TCOLEXPANDSUB_fp16_12_64_1_64<<<1, nullptr, stream>>>((__gm__ uint16_t *)src0, (__gm__ uint16_t *)src1, (__gm__ uint16_t *)dst);
 }
 // Case: int32_16_32_1_32
-extern "C" __global__ AICORE void TCOLEXPANDSUB_int32_16_32_1_32(
-    __gm__ int32_t* src0, __gm__ int32_t* src1, __gm__ int32_t* dst);
+extern "C" __global__ AICORE void TCOLEXPANDSUB_int32_16_32_1_32(__gm__ int32_t *src0, __gm__ int32_t *src1, __gm__ int32_t *dst);
 
-void LaunchTCOLEXPANDSUB_int32_16_32_1_32(int32_t* src0, int32_t* src1, int32_t* dst, void* stream)
-{
-    TCOLEXPANDSUB_int32_16_32_1_32<<<1, nullptr, stream>>>(
-        (__gm__ int32_t*)src0, (__gm__ int32_t*)src1, (__gm__ int32_t*)dst);
+void LaunchTCOLEXPANDSUB_int32_16_32_1_32(int32_t *src0, int32_t *src1, int32_t *dst, void *stream) {
+    TCOLEXPANDSUB_int32_16_32_1_32<<<1, nullptr, stream>>>((__gm__ int32_t *)src0, (__gm__ int32_t *)src1, (__gm__ int32_t *)dst);
 }
 
 // Case: int16_16_64_1_64
-extern "C" __global__ AICORE void TCOLEXPANDSUB_int16_16_64_1_64(
-    __gm__ int16_t* src0, __gm__ int16_t* src1, __gm__ int16_t* dst);
+extern "C" __global__ AICORE void TCOLEXPANDSUB_int16_16_64_1_64(__gm__ int16_t *src0, __gm__ int16_t *src1, __gm__ int16_t *dst);
 
-void LaunchTCOLEXPANDSUB_int16_16_64_1_64(int16_t* src0, int16_t* src1, int16_t* dst, void* stream)
-{
-    TCOLEXPANDSUB_int16_16_64_1_64<<<1, nullptr, stream>>>(
-        (__gm__ int16_t*)src0, (__gm__ int16_t*)src1, (__gm__ int16_t*)dst);
+void LaunchTCOLEXPANDSUB_int16_16_64_1_64(int16_t *src0, int16_t *src1, int16_t *dst, void *stream) {
+    TCOLEXPANDSUB_int16_16_64_1_64<<<1, nullptr, stream>>>((__gm__ int16_t *)src0, (__gm__ int16_t *)src1, (__gm__ int16_t *)dst);
 }

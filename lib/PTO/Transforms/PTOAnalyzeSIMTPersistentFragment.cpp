@@ -24,29 +24,29 @@ using namespace mlir;
 namespace {
 
 struct PTOAnalyzeSIMTPersistentFragmentPass
-    : public pto::impl::PTOAnalyzeSIMTPersistentFragmentBase<PTOAnalyzeSIMTPersistentFragmentPass> {
-    using pto::impl::PTOAnalyzeSIMTPersistentFragmentBase<
-        PTOAnalyzeSIMTPersistentFragmentPass>::PTOAnalyzeSIMTPersistentFragmentBase;
+    : public pto::impl::PTOAnalyzeSIMTPersistentFragmentBase<
+          PTOAnalyzeSIMTPersistentFragmentPass> {
+  using pto::impl::PTOAnalyzeSIMTPersistentFragmentBase<
+      PTOAnalyzeSIMTPersistentFragmentPass>::
+      PTOAnalyzeSIMTPersistentFragmentBase;
 
-    void runOnOperation() override
-    {
-        func::FuncOp func = getOperation();
-        if (func.isExternal())
-            return;
+  void runOnOperation() override {
+    func::FuncOp func = getOperation();
+    if (func.isExternal())
+      return;
 
-        const auto& analysis = getAnalysis<pto::SIMTPersistentFragmentAnalysis>();
-        if (!analysis.isValid()) {
-            signalPassFailure();
-            return;
-        }
-
-        markAllAnalysesPreserved();
+    const auto &analysis = getAnalysis<pto::SIMTPersistentFragmentAnalysis>();
+    if (!analysis.isValid()) {
+      signalPassFailure();
+      return;
     }
+
+    markAllAnalysesPreserved();
+  }
 };
 
 } // namespace
 
-std::unique_ptr<Pass> mlir::pto::createPTOAnalyzeSIMTPersistentFragmentPass()
-{
-    return std::make_unique<PTOAnalyzeSIMTPersistentFragmentPass>();
+std::unique_ptr<Pass> mlir::pto::createPTOAnalyzeSIMTPersistentFragmentPass() {
+  return std::make_unique<PTOAnalyzeSIMTPersistentFragmentPass>();
 }

@@ -29,11 +29,7 @@ def main():
         dst_rows, dst_cols = case["dst_shape"]
 
         if not case["has_output"]:
-            print(
-                style_pass(
-                    f"[INFO] {case['name']}: compile-only (no output comparison)"
-                )
-            )
+            print(style_pass(f"[INFO] {case['name']}: compile-only (no output comparison)"))
             continue
 
         golden_path = os.path.join(case_dir, "golden.bin")
@@ -48,11 +44,9 @@ def main():
         output = np.fromfile(output_path, dtype=dtype).reshape(dst_rows, dst_cols)
 
         if golden.shape != output.shape:
-            print(
-                style_fail(
-                    f"[ERROR] {case['name']}: shape mismatch golden={golden.shape} output={output.shape}"
-                )
-            )
+            print(style_fail(
+                f"[ERROR] {case['name']}: shape mismatch golden={golden.shape} output={output.shape}"
+            ))
             all_passed = False
             continue
 

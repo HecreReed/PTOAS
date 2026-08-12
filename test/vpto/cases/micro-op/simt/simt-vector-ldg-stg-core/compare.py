@@ -26,17 +26,13 @@ def _check_exact(name, golden_path, out_path, dtype):
     golden = np.fromfile(golden_path, dtype=dtype)
     out = np.fromfile(out_path, dtype=dtype)
     if golden.shape != out.shape:
-        print(
-            f"[ERROR] {name} shape mismatch: golden {golden.shape} vs out {out.shape}"
-        )
+        print(f"[ERROR] {name} shape mismatch: golden {golden.shape} vs out {out.shape}")
         return False
     ok = np.array_equal(golden, out)
     if not ok:
         idxs = np.nonzero(golden != out)[0]
         idx = int(idxs[0]) if idxs.size else 0
-        print(
-            f"[ERROR] {name} mismatch at idx={idx}: golden={golden[idx]}, out={out[idx]}"
-        )
+        print(f"[ERROR] {name} mismatch at idx={idx}: golden={golden[idx]}, out={out[idx]}")
         if idxs.size > 1:
             print(f"       ({idxs.size} total mismatches, first shown)")
     return ok
@@ -47,17 +43,13 @@ def _check_allclose(name, golden_path, out_path, dtype):
     golden = np.fromfile(golden_path, dtype=dtype)
     out = np.fromfile(out_path, dtype=dtype)
     if golden.shape != out.shape:
-        print(
-            f"[ERROR] {name} shape mismatch: golden {golden.shape} vs out {out.shape}"
-        )
+        print(f"[ERROR] {name} shape mismatch: golden {golden.shape} vs out {out.shape}")
         return False
     ok = np.allclose(golden, out, rtol=0, atol=0, equal_nan=True)
     if not ok:
         idxs = np.nonzero(~np.isclose(golden, out, rtol=0, atol=0, equal_nan=True))[0]
         idx = int(idxs[0]) if idxs.size else 0
-        print(
-            f"[ERROR] {name} mismatch at idx={idx}: golden={golden[idx]}, out={out[idx]}"
-        )
+        print(f"[ERROR] {name} mismatch at idx={idx}: golden={golden[idx]}, out={out[idx]}")
         if idxs.size > 1:
             print(f"       ({idxs.size} total mismatches, first shown)")
     return ok

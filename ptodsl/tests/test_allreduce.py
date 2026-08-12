@@ -16,11 +16,7 @@ def expect(condition: bool, message: str) -> None:
 
 
 def main():
-    from ptodsl._allreduce import (
-        simt_allreduce_sum,
-        simt_allreduce_max,
-        simt_allreduce_min,
-    )
+    from ptodsl._allreduce import simt_allreduce_sum, simt_allreduce_max, simt_allreduce_min
 
     # ══════════════════════════════════════════════════════════════════════════
     # Path 0: identity (threads <= scale)
@@ -45,6 +41,7 @@ def main():
     except ValueError:
         pass
 
+
     # threads < 1
     try:
         simt_allreduce_sum(1.0, threads=0, scale=1)
@@ -55,9 +52,7 @@ def main():
     # validation runs before identity: bad params not bypassed by threads<=scale
     try:
         simt_allreduce_sum(1.0, threads=1, scale=2)
-        raise AssertionError(
-            "expected ValueError for threads%scale!=0 (before identity)"
-        )
+        raise AssertionError("expected ValueError for threads%scale!=0 (before identity)")
     except ValueError:
         pass
 
@@ -88,12 +83,12 @@ def main():
 
     compiled_warp = kernel_warp.compile()
     mlir_warp = compiled_warp.mlir_text()
-    expect("pto.redux_add" in mlir_warp, "IR: redux_add in warp_reduce helper")
-    expect("pto.syncthreads" not in mlir_warp, "IR: warp_reduce has no syncthreads")
-    expect(
-        "pto.shuffle_bfly" not in mlir_warp,
-        "IR: warp_reduce (groups=1) has no shuffle_bfly",
-    )
+    expect("pto.redux_add" in mlir_warp,
+           "IR: redux_add in warp_reduce helper")
+    expect("pto.syncthreads" not in mlir_warp,
+           "IR: warp_reduce has no syncthreads")
+    expect("pto.shuffle_bfly" not in mlir_warp,
+           "IR: warp_reduce (groups=1) has no shuffle_bfly")
     compiled_warp.verify()
 
     # ══════════════════════════════════════════════════════════════════════════
@@ -110,12 +105,12 @@ def main():
 
     compiled_warp_t16 = kernel_warp_t16.compile()
     mlir_warp_t16 = compiled_warp_t16.mlir_text()
-    expect("pto.redux_add" in mlir_warp_t16, "IR: redux_add for groups>1")
-    expect("arith.select" in mlir_warp_t16, "IR: arith.select for group masking")
-    expect(
-        "pto.syncthreads" not in mlir_warp_t16,
-        "IR: warp_reduce (groups=2) has no syncthreads",
-    )
+    expect("pto.redux_add" in mlir_warp_t16,
+           "IR: redux_add for groups>1")
+    expect("arith.select" in mlir_warp_t16,
+           "IR: arith.select for group masking")
+    expect("pto.syncthreads" not in mlir_warp_t16,
+           "IR: warp_reduce (groups=2) has no syncthreads")
     compiled_warp_t16.verify()
 
     # ══════════════════════════════════════════════════════════════════════════
@@ -132,9 +127,12 @@ def main():
 
     compiled_warp_t8 = kernel_warp_t8.compile()
     mlir_warp_t8 = compiled_warp_t8.mlir_text()
-    expect("pto.shuffle_bfly" in mlir_warp_t8, "IR: shuffle_bfly for butterfly path")
-    expect("pto.redux_add" not in mlir_warp_t8, "IR: butterfly has no hardware redux")
-    expect("pto.syncthreads" not in mlir_warp_t8, "IR: butterfly has no syncthreads")
+    expect("pto.shuffle_bfly" in mlir_warp_t8,
+           "IR: shuffle_bfly for butterfly path")
+    expect("pto.redux_add" not in mlir_warp_t8,
+           "IR: butterfly has no hardware redux")
+    expect("pto.syncthreads" not in mlir_warp_t8,
+           "IR: butterfly has no syncthreads")
     compiled_warp_t8.verify()
 
     # ══════════════════════════════════════════════════════════════════════════
@@ -151,13 +149,10 @@ def main():
 
     compiled_warp_s2 = kernel_warp_s2.compile()
     mlir_warp_s2 = compiled_warp_s2.mlir_text()
-    expect(
-        "pto.shuffle_bfly" in mlir_warp_s2, "IR: shuffle_bfly for butterfly (scale>1)"
-    )
-    expect(
-        "pto.redux_add" not in mlir_warp_s2,
-        "IR: butterfly (scale>1) has no hardware redux",
-    )
+    expect("pto.shuffle_bfly" in mlir_warp_s2,
+           "IR: shuffle_bfly for butterfly (scale>1)")
+    expect("pto.redux_add" not in mlir_warp_s2,
+           "IR: butterfly (scale>1) has no hardware redux")
     compiled_warp_s2.verify()
 
     # ── warp_reduce: sum, f32, t=16, s=1, o=4 (non-zero thread_offset) ────────
@@ -171,18 +166,12 @@ def main():
 
     compiled_warp_o4 = kernel_warp_o4.compile()
     mlir_warp_o4 = compiled_warp_o4.mlir_text()
-    expect(
-        "pto.get_tid_x" in mlir_warp_o4,
-        "IR: warp_reduce o=4 uses get_tid_x (not raw get_laneid)",
-    )
-    expect(
-        "arith.subi" in mlir_warp_o4,
-        "IR: warp_reduce o=4 uses subi for tx = tid_x - offset",
-    )
-    expect(
-        "arith.andi" in mlir_warp_o4,
-        "IR: warp_reduce o=4 uses andi to extract lane_in_warp",
-    )
+    expect("pto.get_tid_x" in mlir_warp_o4,
+           "IR: warp_reduce o=4 uses get_tid_x (not raw get_laneid)")
+    expect("arith.subi" in mlir_warp_o4,
+           "IR: warp_reduce o=4 uses subi for tx = tid_x - offset")
+    expect("arith.andi" in mlir_warp_o4,
+           "IR: warp_reduce o=4 uses andi to extract lane_in_warp")
     compiled_warp_o4.verify()
 
     # ══════════════════════════════════════════════════════════════════════════
@@ -199,14 +188,15 @@ def main():
 
     compiled_ub6 = kernel_ub6.compile()
     mlir_ub6 = compiled_ub6.mlir_text()
-    expect("pto.syncthreads" in mlir_ub6, "IR: ub_reduce has syncthreads")
-    expect("pto.store" in mlir_ub6, "IR: ub_reduce has store (write to scratch)")
-    expect("pto.load" in mlir_ub6, "IR: ub_reduce has load (read from scratch)")
+    expect("pto.syncthreads" in mlir_ub6,
+           "IR: ub_reduce has syncthreads")
+    expect("pto.store" in mlir_ub6,
+           "IR: ub_reduce has store (write to scratch)")
+    expect("pto.load" in mlir_ub6,
+           "IR: ub_reduce has load (read from scratch)")
     syncthreads_count = mlir_ub6.count("pto.syncthreads")
-    expect(
-        syncthreads_count == 4,
-        f"IR: ub_reduce has 4 syncthreads, got {syncthreads_count}",
-    )
+    expect(syncthreads_count == 4,
+           f"IR: ub_reduce has 4 syncthreads, got {syncthreads_count}")
     compiled_ub6.verify()
 
     # ── ub_reduce: sum, f32, t=6, s=2 (scale > 1, non-pow2 threads) ─────────
@@ -220,25 +210,21 @@ def main():
 
     compiled_ub6s2 = kernel_ub6s2.compile()
     mlir_ub6s2 = compiled_ub6s2.mlir_text()
-    expect("pto.syncthreads" in mlir_ub6s2, "IR: ub_reduce t=6 s=2 has syncthreads")
-    expect("pto.store" in mlir_ub6s2, "IR: ub_reduce t=6 s=2 has store")
-    expect("pto.load" in mlir_ub6s2, "IR: ub_reduce t=6 s=2 has load")
-    expect(
-        "scf.for" in mlir_ub6s2,
-        "IR: ub_reduce t=6 s=2 has scf.for (sequential reduce loop)",
-    )
-    expect(
-        "pto.redux_add" not in mlir_ub6s2, "IR: ub_reduce t=6 s=2 has no hardware redux"
-    )
-    expect(
-        "pto.shuffle_bfly" not in mlir_ub6s2,
-        "IR: ub_reduce t=6 s=2 has no butterfly shuffle",
-    )
+    expect("pto.syncthreads" in mlir_ub6s2,
+           "IR: ub_reduce t=6 s=2 has syncthreads")
+    expect("pto.store" in mlir_ub6s2,
+           "IR: ub_reduce t=6 s=2 has store")
+    expect("pto.load" in mlir_ub6s2,
+           "IR: ub_reduce t=6 s=2 has load")
+    expect("scf.for" in mlir_ub6s2,
+           "IR: ub_reduce t=6 s=2 has scf.for (sequential reduce loop)")
+    expect("pto.redux_add" not in mlir_ub6s2,
+           "IR: ub_reduce t=6 s=2 has no hardware redux")
+    expect("pto.shuffle_bfly" not in mlir_ub6s2,
+           "IR: ub_reduce t=6 s=2 has no butterfly shuffle")
     # scale>1 fixes: reducer uses lane < scale (ult), not lane_mod == 0
-    expect(
-        "arith.cmpi slt" in mlir_ub6s2 or "arith.cmpi ult" in mlir_ub6s2,
-        "IR: ub_reduce t=6 s=2 reducer uses lane < scale",
-    )
+    expect("arith.cmpi slt" in mlir_ub6s2 or "arith.cmpi ult" in mlir_ub6s2,
+           "IR: ub_reduce t=6 s=2 reducer uses lane < scale")
     compiled_ub6s2.verify()
 
     # ── ub_reduce: sum, f32, t=6, s=1, o=4 (non-zero thread_offset) ─────────
@@ -248,16 +234,13 @@ def main():
         ub_scratch = pto.castptr(zero_u64, pto.ptr(pto.f32, "ub"))
         with pto.simt():
             x = pto.const(1.0, dtype=pto.f32)
-            _result = pto.simt_allreduce_sum(
-                x, scratch=ub_scratch, threads=6, scale=1, thread_offset=4
-            )
+            _result = pto.simt_allreduce_sum(x, scratch=ub_scratch, threads=6, scale=1,
+                                     thread_offset=4)
 
     compiled_ub_o4 = kernel_ub_o4.compile()
     mlir_ub_o4 = compiled_ub_o4.mlir_text()
-    expect(
-        "arith.subi" in mlir_ub_o4,
-        "IR: ub_reduce o=4 uses subi for tx = tid_x - offset",
-    )
+    expect("arith.subi" in mlir_ub_o4,
+           "IR: ub_reduce o=4 uses subi for tx = tid_x - offset")
     compiled_ub_o4.verify()
 
     # ══════════════════════════════════════════════════════════════════════════
@@ -270,38 +253,25 @@ def main():
         ub_scratch = pto.castptr(zero_u64, pto.ptr(pto.f32, "ub"))
         with pto.simt():
             x = pto.const(1.0, dtype=pto.f32)
-            _result = pto.simt_allreduce_sum(
-                x, scratch=ub_scratch, threads=128, scale=1
-            )
+            _result = pto.simt_allreduce_sum(x, scratch=ub_scratch, threads=128, scale=1)
 
     compiled = kernel_128.compile()
     mlir = compiled.mlir_text()
 
-    expect(
-        "pto.section.simt" in mlir,
-        "IR: inline SIMT body stays in pto.section.simt during DSL tracing",
-    )
-    expect(
-        "pto.simt_entry" not in mlir,
-        "IR: inline SIMT body does not become pto.simt_entry during DSL tracing",
-    )
+    expect("pto.section.simt" in mlir,
+           "IR: inline SIMT body stays in pto.section.simt during DSL tracing")
+    expect("pto.simt_entry" not in mlir,
+           "IR: inline SIMT body does not become pto.simt_entry during DSL tracing")
 
     for op_name in (
-        "pto.redux_add",
-        "pto.syncthreads",
-        "pto.store",
-        "pto.load",
-        "pto.get_tid_x",
-        "pto.get_laneid",
-        "arith.select",
-        "scf.if",
+        "pto.redux_add", "pto.syncthreads", "pto.store", "pto.load",
+        "pto.get_tid_x", "pto.get_laneid", "arith.select", "scf.if",
     ):
         expect(op_name in mlir, f"IR: expected '{op_name}' in helper body")
 
     syncthreads_count = mlir.count("pto.syncthreads")
-    expect(
-        syncthreads_count == 3, f"IR: expected 3 syncthreads, got {syncthreads_count}"
-    )
+    expect(syncthreads_count == 3,
+           f"IR: expected 3 syncthreads, got {syncthreads_count}")
 
     compiled.verify()
 
@@ -325,9 +295,7 @@ def main():
         ub_scratch = pto.castptr(zero_u64, pto.ptr(pto.f32, "ub"))
         with pto.simt():
             x = pto.const(1.0, dtype=pto.f32)
-            _result = pto.simt_allreduce_sum(
-                x, scratch=ub_scratch, threads=256, scale=1
-            )
+            _result = pto.simt_allreduce_sum(x, scratch=ub_scratch, threads=256, scale=1)
 
     compiled_256 = kernel_256.compile()
     mlir_256 = compiled_256.mlir_text()
@@ -344,17 +312,14 @@ def main():
         ub_scratch = pto.castptr(zero_u64, pto.ptr(pto.f32, "ub"))
         with pto.simt():
             x = pto.const(1.0, dtype=pto.f32)
-            _result = pto.simt_allreduce_sum(
-                x, scratch=ub_scratch, threads=128, scale=2
-            )
+            _result = pto.simt_allreduce_sum(x, scratch=ub_scratch, threads=128, scale=2)
 
     compiled_cw_s2 = kernel_cw_s2.compile()
     mlir_cw_s2 = compiled_cw_s2.mlir_text()
-    expect(
-        "pto.shuffle_bfly" in mlir_cw_s2,
-        "IR: cross_warp s=2 has shuffle_bfly (butterfly for per-warp + leader)",
-    )
-    expect("pto.syncthreads" in mlir_cw_s2, "IR: cross_warp s=2 has syncthreads")
+    expect("pto.shuffle_bfly" in mlir_cw_s2,
+           "IR: cross_warp s=2 has shuffle_bfly (butterfly for per-warp + leader)")
+    expect("pto.syncthreads" in mlir_cw_s2,
+           "IR: cross_warp s=2 has syncthreads")
     # scale > 1: per-warp uses butterfly, not hardware redux
     compiled_cw_s2.verify()
 
@@ -369,13 +334,12 @@ def main():
         ub_scratch = pto.castptr(zero_u64, pto.ptr(pto.f32, "ub"))
         with pto.simt():
             x = pto.const(1.0, dtype=pto.f32)
-            _result = pto.simt_allreduce_sum(
-                x, scratch=ub_scratch, threads=128, scale=16
-            )
+            _result = pto.simt_allreduce_sum(x, scratch=ub_scratch, threads=128, scale=16)
 
     compiled_cw_s16 = kernel_cw_s16.compile()
     mlir_cw_s16 = compiled_cw_s16.mlir_text()
-    expect("pto.syncthreads" in mlir_cw_s16, "IR: cross_warp s=16 has syncthreads")
+    expect("pto.syncthreads" in mlir_cw_s16,
+           "IR: cross_warp s=16 has syncthreads")
     compiled_cw_s16.verify()
 
     # ── cross_warp: sum, f32, t=128, s=1, o=4 (non-zero thread_offset) ─────
@@ -385,17 +349,15 @@ def main():
         ub_scratch = pto.castptr(zero_u64, pto.ptr(pto.f32, "ub"))
         with pto.simt():
             x = pto.const(1.0, dtype=pto.f32)
-            _result = pto.simt_allreduce_sum(
-                x, scratch=ub_scratch, threads=128, scale=1, thread_offset=4
-            )
+            _result = pto.simt_allreduce_sum(x, scratch=ub_scratch, threads=128, scale=1,
+                                     thread_offset=4)
 
     compiled_cw_o4 = kernel_cw_o4.compile()
     mlir_cw_o4 = compiled_cw_o4.mlir_text()
-    expect("pto.get_tid_x" in mlir_cw_o4, "IR: cross_warp o=4 uses get_tid_x")
-    expect(
-        "arith.subi" in mlir_cw_o4,
-        "IR: cross_warp o=4 uses subi for tx = tid_x - offset",
-    )
+    expect("pto.get_tid_x" in mlir_cw_o4,
+           "IR: cross_warp o=4 uses get_tid_x")
+    expect("arith.subi" in mlir_cw_o4,
+           "IR: cross_warp o=4 uses subi for tx = tid_x - offset")
     compiled_cw_o4.verify()
 
     # ══════════════════════════════════════════════════════════════════════════
@@ -413,9 +375,12 @@ def main():
 
     compiled_ub48 = kernel_ub48.compile()
     mlir_ub48 = compiled_ub48.mlir_text()
-    expect("pto.syncthreads" in mlir_ub48, "IR: ub_reduce fallback has syncthreads")
-    expect("pto.store" in mlir_ub48, "IR: ub_reduce fallback has store")
-    expect("pto.load" in mlir_ub48, "IR: ub_reduce fallback has load")
+    expect("pto.syncthreads" in mlir_ub48,
+           "IR: ub_reduce fallback has syncthreads")
+    expect("pto.store" in mlir_ub48,
+           "IR: ub_reduce fallback has store")
+    expect("pto.load" in mlir_ub48,
+           "IR: ub_reduce fallback has load")
     compiled_ub48.verify()
 
     # ══════════════════════════════════════════════════════════════════════════
@@ -436,6 +401,7 @@ def main():
 
     compiled2.verify()
 
+
     # ══════════════════════════════════════════════════════════════════════════
     # scratch required for ub_reduce and cross_warp paths
     # ══════════════════════════════════════════════════════════════════════════
@@ -452,10 +418,8 @@ def main():
         kernel_no_scratch_cw.compile()
         raise AssertionError("expected ValueError for missing scratch (cross_warp)")
     except ValueError as e:
-        expect(
-            "requires a UB scratch buffer" in str(e),
-            f"error message should mention scratch (cross_warp), got: {e}",
-        )
+        expect("requires a UB scratch buffer" in str(e),
+               f"error message should mention scratch (cross_warp), got: {e}")
 
     # ub_reduce (non-pow2) requires scratch
     @pto.jit(target="a5")
@@ -468,10 +432,8 @@ def main():
         kernel_no_scratch_ub.compile()
         raise AssertionError("expected ValueError for missing scratch (ub_reduce)")
     except ValueError as e:
-        expect(
-            "requires a UB scratch buffer" in str(e),
-            f"error message should mention scratch (ub_reduce), got: {e}",
-        )
+        expect("requires a UB scratch buffer" in str(e),
+               f"error message should mention scratch (ub_reduce), got: {e}")
 
     # scratch must be a pto.ptr type — PTODSL scalar.load/store catch this
     @pto.jit(target="a5")
@@ -492,21 +454,15 @@ def main():
     def kernel_gm_scratch(scratch_gm: pto.ptr(pto.f32, "gm")):
         with pto.simt():
             x = pto.const(1.0, dtype=pto.f32)
-            _result = pto.simt_allreduce_sum(
-                x, scratch=scratch_gm, threads=128, scale=1
-            )
+            _result = pto.simt_allreduce_sum(x, scratch=scratch_gm, threads=128, scale=1)
 
     try:
         kernel_gm_scratch.compile()
         raise AssertionError("expected error for gm scratch")
     except Exception as e:
-        expect(
-            "ub" in str(e).lower()
-            or "vec" in str(e).lower()
-            or "address space" in str(e).lower()
-            or "memory" in str(e).lower(),
-            f"gm scratch error should mention address space, got: {e}",
-        )
+        expect("ub" in str(e).lower() or "vec" in str(e).lower() or "address space" in str(e).lower()
+               or "memory" in str(e).lower(),
+               f"gm scratch error should mention address space, got: {e}")
 
     # cross_warp: i32 scratch with f32 x (dtype mismatch) should be rejected
     @pto.jit(target="a5")
@@ -522,12 +478,9 @@ def main():
         raise AssertionError("expected TypeError for dtype mismatch scratch")
     except TypeError as e:
         err = str(e)
-        expect(
-            "cannot coerce" in err.lower()
-            or "element type" in err.lower()
-            or "mismatch" in err.lower(),
-            f"dtype mismatch should mention type, got: {e}",
-        )
+        expect("cannot coerce" in err.lower() or "element type" in err.lower()
+               or "mismatch" in err.lower(),
+               f"dtype mismatch should mention type, got: {e}")
 
     # ══════════════════════════════════════════════════════════════════════════
     # Max reducer — Path 1a: warp_reduce, hw redux (threads=32, scale=1)
@@ -582,9 +535,7 @@ def main():
         ub_scratch = pto.castptr(zero_u64, pto.ptr(pto.f32, "ub"))
         with pto.simt():
             x = pto.const(1.0, dtype=pto.f32)
-            _result = pto.simt_allreduce_max(
-                x, scratch=ub_scratch, threads=128, scale=1
-            )
+            _result = pto.simt_allreduce_max(x, scratch=ub_scratch, threads=128, scale=1)
 
     compiled_max_cw = kernel_max_cross_warp.compile()
     mlir_max_cw = str(compiled_max_cw.mlir_text())

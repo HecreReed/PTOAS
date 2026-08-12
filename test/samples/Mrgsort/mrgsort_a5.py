@@ -36,9 +36,7 @@ def build():
             fractal_ab_size = pto.TileConfig.fractalABSize
             cfg = pto.TileBufConfigAttr.get(bl, sl, fractal_ab_size, pd, ctx)
             # NOTE: pto.tmrgsort (format1) expects a rank-2 tile with rows == 1.
-            tile_buf_1x1024 = pto.TileBufType.get(
-                [1, 1024], f32, vec, [1, 1024], cfg, ctx
-            )
+            tile_buf_1x1024 = pto.TileBufType.get([1, 1024], f32, vec, [1, 1024], cfg, ctx)
 
             fn_ty = func.FunctionType.get([ptr_f32, ptr_f32], [])
             with InsertionPoint(m.body):
@@ -58,12 +56,8 @@ def build():
                 arg0, arg1 = entry.arguments
 
                 # Flatten as a 1x1024 tensor.
-                tv0 = pto.MakeTensorViewOp(
-                    tv2_f32, arg0, [c1, c1024], [c1024, c1]
-                ).result
-                tv1 = pto.MakeTensorViewOp(
-                    tv2_f32, arg1, [c1, c1024], [c1024, c1]
-                ).result
+                tv0 = pto.MakeTensorViewOp(tv2_f32, arg0, [c1, c1024], [c1024, c1]).result
+                tv1 = pto.MakeTensorViewOp(tv2_f32, arg1, [c1, c1024], [c1024, c1]).result
 
                 sv0 = pto.PartitionViewOp(
                     part_view_1x1024, tv0, offsets=[c0, c0], sizes=[c1, c1024]

@@ -13,14 +13,7 @@ from dataclasses import dataclass
 from enum import Enum
 
 from ptoas.mlir.dialects import func
-from ptoas.mlir.ir import (
-    Attribute,
-    InsertionPoint,
-    Module,
-    Operation,
-    StringAttr,
-    UnitAttr,
-)
+from ptoas.mlir.ir import Attribute, InsertionPoint, Module, Operation, StringAttr, UnitAttr
 
 
 class ModuleStyle(str, Enum):
@@ -82,8 +75,9 @@ def _apply_child_module_attrs(child_op, spec: KernelModuleSpec) -> None:
     """Populate one child module with PTOAS-facing backend metadata."""
     child_op.attributes["pto.target_arch"] = StringAttr.get(spec.target_arch)
     child_op.attributes["pto.backend"] = StringAttr.get(spec.backend)
-    if spec.kernel_kind in {"cube", "vector"} and (
-        spec.backend == "vpto" or (spec.backend == "emitc" and not spec.entry)
+    if (
+        spec.kernel_kind in {"cube", "vector"}
+        and (spec.backend == "vpto" or (spec.backend == "emitc" and not spec.entry))
     ):
         child_op.attributes["pto.kernel_kind"] = Attribute.parse(
             f"#pto.kernel_kind<{spec.kernel_kind}>"
@@ -109,8 +103,9 @@ def _build_backend_partitioned_module(spec: KernelModuleSpec, arg_types):
         ir_fn = func.FuncOp(spec.function_name, fn_ty)
         if spec.entry:
             ir_fn.attributes["pto.entry"] = UnitAttr.get()
-        if spec.kernel_kind in {"cube", "vector"} and (
-            spec.kernel_kind_explicit or (spec.backend == "emitc" and not spec.entry)
+        if (
+            spec.kernel_kind in {"cube", "vector"}
+            and (spec.kernel_kind_explicit or (spec.backend == "emitc" and not spec.entry))
         ):
             ir_fn.attributes["pto.kernel_kind"] = Attribute.parse(
                 f"#pto.kernel_kind<{spec.kernel_kind}>"

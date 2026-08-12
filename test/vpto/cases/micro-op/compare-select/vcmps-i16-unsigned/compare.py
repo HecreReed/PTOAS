@@ -24,9 +24,7 @@ def compare_mask(golden_path, output_path):
     if not np.array_equal(golden, output):
         diff = np.nonzero(golden != output)[0]
         idx = int(diff[0]) if diff.size else 0
-        print(
-            f"[ERROR] Mismatch (packed mask): idx={idx} golden={int(golden[idx])} out={int(output[idx])}"
-        )
+        print(f"[ERROR] Mismatch (packed mask): idx={idx} golden={int(golden[idx])} out={int(output[idx])}")
         return False
     return True
 

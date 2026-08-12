@@ -38,8 +38,8 @@ from ptoas.mlir.ir import (
 
 # ── Address-space name → AddressSpace enum ───────────────────────────────────
 _ADDR_SPACE = {
-    "ub": _pto.AddressSpace.VEC,  # UB == unified buffer == VEC in PTO
-    "gm": _pto.AddressSpace.GM,
+    "ub":  _pto.AddressSpace.VEC,  # UB == unified buffer == VEC in PTO
+    "gm":  _pto.AddressSpace.GM,
     "vec": _pto.AddressSpace.VEC,
     "mat": _pto.AddressSpace.MAT,
     "left": _pto.AddressSpace.LEFT,
@@ -47,8 +47,8 @@ _ADDR_SPACE = {
     "acc": _pto.AddressSpace.ACC,
     "bias": _pto.AddressSpace.BIAS,
     "scaling": _pto.AddressSpace.SCALING,
-    "GM": _pto.AddressSpace.GM,
-    "UB": _pto.AddressSpace.VEC,
+    "GM":  _pto.AddressSpace.GM,
+    "UB":  _pto.AddressSpace.VEC,
     "VEC": _pto.AddressSpace.VEC,
     "MAT": _pto.AddressSpace.MAT,
     "LEFT": _pto.AddressSpace.LEFT,
@@ -60,7 +60,6 @@ _ADDR_SPACE = {
 
 
 # ── Lazy type descriptor base ─────────────────────────────────────────────────
-
 
 class _DType:
     """Deferred MLIR type: only resolves inside an active MLIR context."""
@@ -75,9 +74,7 @@ class _DType:
         target_type = self.resolve()
         kind = _classify_scalar_type(target_type)
         if kind == "float":
-            return arith.ConstantOp(
-                target_type, _parse_float_attr(target_type, value)
-            ).result
+            return arith.ConstantOp(target_type, _parse_float_attr(target_type, value)).result
         if kind == "integer":
             return _materialize_integer_literal(target_type, value)
         raise TypeError(f"unsupported eager constructor target type {target_type}")
@@ -96,7 +93,8 @@ class _PtrDescriptor(_DType):
         space_enum = _normalize_address_space(self._space)
         if space_enum is None:
             raise ValueError(
-                f"Unknown address space '{self._space}'; known: {list(_ADDR_SPACE)}"
+                f"Unknown address space '{self._space}'; "
+                f"known: {list(_ADDR_SPACE)}"
             )
         space_attr = _pto.AddressSpaceAttr.get(space_enum)
         try:
@@ -152,7 +150,6 @@ class _MaskDescriptor(_DType):
     def __repr__(self):
         return f"<pto.mask {self._bits}>"
 
-
 class _StructDescriptor(_DType):
     """Deferred ``!pto.struct<...>`` type assembled from scalar fields."""
 
@@ -180,19 +177,18 @@ class _StructDescriptor(_DType):
         fields = ", ".join(repr(field) for field in self._field_descriptors)
         return f"<pto.struct {fields}>"
 
-
 # Legal logical lane counts for VMI vreg/mask types on the formal PTODSL
 # surface: compact/group-slot flows use the first four values, full logical
 # vectors use 64/128/256.  The IR layer intentionally accepts additional
 # positive lane counts for internal compatibility.
 VMI_LANE_COUNTS = (1, 2, 4, 8, 64, 128, 256)
 
-
 class _VMIVRegDescriptor(_DType):
     def __init__(self, lanes: int, elem):
         if lanes not in VMI_LANE_COUNTS:
             raise ValueError(
-                "pto.vmi.vreg(...) requires lanes to be one of 1, 2, 4, 8, 64, 128, 256"
+                "pto.vmi.vreg(...) requires lanes to be one of "
+                "1, 2, 4, 8, 64, 128, 256"
             )
         self._lanes = lanes
         self._elem = elem
@@ -215,7 +211,8 @@ class _VMIMaskDescriptor(_DType):
     def __init__(self, lanes: int):
         if lanes not in VMI_LANE_COUNTS:
             raise ValueError(
-                "pto.vmi.mask(...) requires lanes to be one of 1, 2, 4, 8, 64, 128, 256"
+                "pto.vmi.mask(...) requires lanes to be one of "
+                "1, 2, 4, 8, 64, 128, 256"
             )
         self._lanes = lanes
         self._granularity = "pred"
@@ -231,7 +228,6 @@ class _VMIMaskDescriptor(_DType):
 
     def __repr__(self):
         return f"<pto.vmi.mask {self._lanes}x{self._granularity}>"
-
 
 class _VecDescriptor(_DType):
     def __init__(self, elem, size: int):
@@ -270,11 +266,7 @@ def _resolve(dtype) -> Type:
 
 
 def _classify_scalar_type(type_obj):
-    if (
-        F32Type.isinstance(type_obj)
-        or F16Type.isinstance(type_obj)
-        or BF16Type.isinstance(type_obj)
-    ):
+    if F32Type.isinstance(type_obj) or F16Type.isinstance(type_obj) or BF16Type.isinstance(type_obj):
         return "float"
     if IndexType.isinstance(type_obj) or IntegerType.isinstance(type_obj):
         return "integer"
@@ -293,9 +285,7 @@ def _isinstance_pto_type(type_obj, type_name: str) -> bool:
 
 def _is_struct_type(type_obj) -> bool:
     """Return whether *type_obj* is a PTO struct type without requiring new bindings."""
-    return isinstance(type_obj, _StructDescriptor) or _isinstance_pto_type(
-        type_obj, "StructType"
-    )
+    return isinstance(type_obj, _StructDescriptor) or _isinstance_pto_type(type_obj, "StructType")
 
 
 def _resolve_struct_field_type(field, *, context: str) -> Type:
@@ -331,16 +321,7 @@ def _classify_storage_dtype(type_obj):
         return "compute"
     if Float8E4M3FNType.isinstance(type_obj) or Float8E5M2Type.isinstance(type_obj):
         return "storage_only"
-    if any(
-        _isinstance_pto_type(type_obj, name)
-        for name in (
-            "F8E8M0Type",
-            "HiF8Type",
-            "HiF8x2Type",
-            "F4E1M2x2Type",
-            "F4E2M1x2Type",
-        )
-    ):
+    if any(_isinstance_pto_type(type_obj, name) for name in ("F8E8M0Type", "HiF8Type", "HiF8x2Type", "F4E1M2x2Type", "F4E2M1x2Type")):
         return "storage_only"
     if VectorType.isinstance(type_obj):
         vec_elem = VectorType(type_obj).element_type
@@ -427,9 +408,7 @@ def _restore_integer_signedness(value, target_type):
 
 def _materialize_integer_literal(target_type, value):
     if not IntegerType.isinstance(target_type):
-        raise TypeError(
-            f"unsupported eager integer constructor target type {target_type}"
-        )
+        raise TypeError(f"unsupported eager integer constructor target type {target_type}")
     signless_type = _signless_integer_type(target_type)
     raw_value = _parse_integer_value(value, target_type=target_type)
     constant = arith.ConstantOp(signless_type, raw_value).result
@@ -446,9 +425,7 @@ def _parse_integer_value(value, *, target_type=None):
     if isinstance(value, str):
         text = value.strip()
         return _parse_integer_text(text)
-    raise TypeError(
-        f"cannot materialize {value!r} as an integer constant of type {target_type}"
-    )
+    raise TypeError(f"cannot materialize {value!r} as an integer constant of type {target_type}")
 
 
 def _parse_integer_text(text: str):
@@ -524,11 +501,11 @@ def _int_descriptor(width: int, signedness: str):
 
 float32 = _DType(F32Type.get)
 float16 = _DType(F16Type.get)
-bf16 = _DType(BF16Type.get)
-f8e4m3 = _DType(Float8E4M3FNType.get)
-f8e5m2 = _DType(Float8E5M2Type.get)
-f8e8m0 = _DType(lambda: _pto.F8E8M0Type.get())
-hif8 = _DType(lambda: _pto.HiF8Type.get())
+bf16    = _DType(BF16Type.get)
+f8e4m3  = _DType(Float8E4M3FNType.get)
+f8e5m2  = _DType(Float8E5M2Type.get)
+f8e8m0  = _DType(lambda: _pto.F8E8M0Type.get())
+hif8    = _DType(lambda: _pto.HiF8Type.get())
 f4e1m2x2 = _DType(lambda: _pto.F4E1M2x2Type.get())
 f4e2m1x2 = _DType(lambda: _pto.F4E2M1x2Type.get())
 _STORAGE_ONLY_DTYPE_DESCRIPTORS = (
@@ -539,26 +516,26 @@ _STORAGE_ONLY_DTYPE_DESCRIPTORS = (
     f4e1m2x2,
     f4e2m1x2,
 )
-int1 = _int_descriptor(1, "signless")
-int8 = _int_descriptor(8, "signless")
-int16 = _int_descriptor(16, "signless")
-int32 = _int_descriptor(32, "signless")
-int64 = _int_descriptor(64, "signless")
-si8 = _int_descriptor(8, "signed")
-si16 = _int_descriptor(16, "signed")
-si32 = _int_descriptor(32, "signed")
-si64 = _int_descriptor(64, "signed")
-ui8 = _int_descriptor(8, "unsigned")
-ui16 = _int_descriptor(16, "unsigned")
-ui32 = _int_descriptor(32, "unsigned")
-ui64 = _int_descriptor(64, "unsigned")
-index = _DType(IndexType.get)
+int1    = _int_descriptor(1, "signless")
+int8    = _int_descriptor(8, "signless")
+int16   = _int_descriptor(16, "signless")
+int32   = _int_descriptor(32, "signless")
+int64   = _int_descriptor(64, "signless")
+si8     = _int_descriptor(8, "signed")
+si16    = _int_descriptor(16, "signed")
+si32    = _int_descriptor(32, "signed")
+si64    = _int_descriptor(64, "signed")
+ui8     = _int_descriptor(8, "unsigned")
+ui16    = _int_descriptor(16, "unsigned")
+ui32    = _int_descriptor(32, "unsigned")
+ui64    = _int_descriptor(64, "unsigned")
+index   = _DType(IndexType.get)
 
 # ── Packed vector type descriptors ──────────────────────────────────────────
 
-f16x2 = _DType(lambda: VectorType.get([2], F16Type.get()))
+f16x2  = _DType(lambda: VectorType.get([2], F16Type.get()))
 bf16x2 = _DType(lambda: VectorType.get([2], BF16Type.get()))
-f32x2 = _DType(lambda: VectorType.get([2], F32Type.get()))
+f32x2  = _DType(lambda: VectorType.get([2], F32Type.get()))
 f8e4m3x2 = _DType(lambda: VectorType.get([2], Float8E4M3FNType.get()))
 f8e4m3x4 = _DType(lambda: VectorType.get([4], Float8E4M3FNType.get()))
 f8e4m3x8 = _DType(lambda: VectorType.get([8], Float8E4M3FNType.get()))
@@ -566,13 +543,12 @@ f8e5m2x2 = _DType(lambda: VectorType.get([2], Float8E5M2Type.get()))
 f8e5m2x4 = _DType(lambda: VectorType.get([4], Float8E5M2Type.get()))
 f8e5m2x8 = _DType(lambda: VectorType.get([8], Float8E5M2Type.get()))
 hif8x2 = _DType(lambda: _pto.HiF8x2Type.get())
-i8x2 = _DType(lambda: VectorType.get([2], IntegerType.get_signless(8)))
-i16x2 = _DType(lambda: VectorType.get([2], IntegerType.get_signless(16)))
-i32x2 = _DType(lambda: VectorType.get([2], IntegerType.get_signless(32)))
+i8x2   = _DType(lambda: VectorType.get([2], IntegerType.get_signless(8)))
+i16x2  = _DType(lambda: VectorType.get([2], IntegerType.get_signless(16)))
+i32x2  = _DType(lambda: VectorType.get([2], IntegerType.get_signless(32)))
 
 
 # ── Type constructor functions ────────────────────────────────────────────────
-
 
 def ptr(elem, space: str = "ub") -> _PtrDescriptor:
     """Return a lazy descriptor for ``!pto.ptr<elem, space>``."""
@@ -611,17 +587,12 @@ def vmi_mask_type(lanes: int) -> _VMIMaskDescriptor:
     return _VMIMaskDescriptor(lanes)
 
 
-def tile_buf_type(
-    shape,
-    dtype,
-    valid_shape=None,
-    *,
-    blayout: str = "RowMajor",
-    address_space: str = "ub",
-    slayout: str = "NoneBox",
-    fractal_size: int = 512,
-    pad: str = "Null",
-) -> Type:
+def tile_buf_type(shape, dtype, valid_shape=None, *,
+                  blayout: str = "RowMajor",
+                  address_space: str = "ub",
+                  slayout: str = "NoneBox",
+                  fractal_size: int = 512,
+                  pad: str = "Null") -> Type:
     """
     Construct a ``!pto.tile_buf<…>`` type via the Python bindings.
 
@@ -651,23 +622,17 @@ def tile_buf_type(
         return _pto.TileBufType.get(shape, elem, space_attr, config=cfg)
     if cfg is None:
         return _pto.TileBufType.get(shape, elem, space_attr, valid_shape=valid_shape)
-    return _pto.TileBufType.get(
-        shape, elem, space_attr, valid_shape=valid_shape, config=cfg
-    )
+    return _pto.TileBufType.get(shape, elem, space_attr, valid_shape=valid_shape, config=cfg)
 
 
 def tensor_view_type(rank: int, elem) -> Type:
     """``!pto.tensor_view<?x…xelem>`` with *rank* all-dynamic dims."""
-    return _pto.TensorViewType.get(
-        rank, _ensure_tensor_storage_dtype(elem, context="pto.tensor_view_type(...)")
-    )
+    return _pto.TensorViewType.get(rank, _ensure_tensor_storage_dtype(elem, context="pto.tensor_view_type(...)"))
 
 
 def tensor_view_type_from_dims(dims, elem) -> Type:
     """``!pto.tensor_view<d0x…xdN x elem>`` when every dimension is static."""
-    resolved_elem = _ensure_tensor_storage_dtype(
-        elem, context="pto.tensor_view_type_from_dims(...)"
-    )
+    resolved_elem = _ensure_tensor_storage_dtype(elem, context="pto.tensor_view_type_from_dims(...)")
     if all(isinstance(dim, int) for dim in dims):
         return _pto.TensorViewType.get(list(dims), resolved_elem)
     return tensor_view_type(len(dims), resolved_elem)
@@ -684,63 +649,26 @@ def part_tensor_view_type(rank: int, elem) -> Type:
 
 def part_tensor_view_type_from_dims(dims, elem) -> Type:
     """``!pto.partition_tensor_view<d0x…xdN x elem>`` when every dimension is static."""
-    resolved_elem = _ensure_tensor_storage_dtype(
-        elem, context="pto.part_tensor_view_type_from_dims(...)"
-    )
+    resolved_elem = _ensure_tensor_storage_dtype(elem, context="pto.part_tensor_view_type_from_dims(...)")
     if all(isinstance(dim, int) for dim in dims):
         return _pto.PartitionTensorViewType.get(list(dims), resolved_elem)
     return part_tensor_view_type(len(dims), resolved_elem)
 
 
 __all__ = [
-    "_DType",
-    "_resolve",
-    "float32",
-    "float16",
-    "bf16",
-    "f16x2",
-    "bf16x2",
-    "f32x2",
-    "f8e4m3x2",
-    "f8e4m3x4",
-    "f8e4m3x8",
-    "f8e5m2x2",
-    "f8e5m2x4",
-    "f8e5m2x8",
-    "hif8x2",
-    "i8x2",
-    "i16x2",
-    "i32x2",
-    "f8e4m3",
-    "f8e5m2",
-    "f8e8m0",
-    "hif8",
-    "f4e1m2x2",
-    "f4e2m1x2",
-    "int1",
-    "int8",
-    "int16",
-    "int32",
-    "int64",
-    "si8",
-    "si16",
-    "si32",
-    "si64",
-    "ui8",
-    "ui16",
-    "ui32",
-    "ui64",
+    "_DType", "_resolve",
+    "float32", "float16", "bf16",
+    "f16x2", "bf16x2", "f32x2",
+    "f8e4m3x2", "f8e4m3x4", "f8e4m3x8",
+    "f8e5m2x2", "f8e5m2x4", "f8e5m2x8", "hif8x2",
+    "i8x2", "i16x2", "i32x2",
+    "f8e4m3", "f8e5m2", "f8e8m0", "hif8", "f4e1m2x2", "f4e2m1x2",
+    "int1", "int8", "int16", "int32", "int64",
+    "si8", "si16", "si32", "si64",
+    "ui8", "ui16", "ui32", "ui64",
     "index",
-    "ptr",
-    "vreg_type",
-    "vec_type",
-    "mask_type",
-    "struct_type",
-    "vmi_vreg_type",
-    "vmi_mask_type",
-    "tile_buf_type",
-    "tensor_view_type",
-    "tensor_view_type_from_dims",
-    "part_tensor_view_type",
-    "part_tensor_view_type_from_dims",
+    "ptr", "vreg_type", "vec_type", "mask_type", "struct_type",
+    "vmi_vreg_type", "vmi_mask_type",
+    "tile_buf_type", "tensor_view_type", "tensor_view_type_from_dims",
+    "part_tensor_view_type", "part_tensor_view_type_from_dims",
 ]

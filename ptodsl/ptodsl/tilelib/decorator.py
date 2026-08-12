@@ -57,27 +57,11 @@ class SpecializedTileTemplate(ModuleArtifact):
         self.context_attrs = dict(context_attrs or {})
 
 
-def tile_template(
-    *,
-    op,
-    target="a5",
-    name=None,
-    dtypes=(),
-    layouts=(),
-    memory_spaces=(),
-    constraints=(),
-    priority=0,
-    fusible=False,
-    loop_depth=None,
-    id=None,
-    Tail=None,
-    is_post_update=False,
-    iteration_axis="none",
-    op_engine="other",
-    op_class="other",
-    tags=(),
-    register=True,
-):
+def tile_template(*, op, target="a5", name=None, dtypes=(), layouts=(),
+                  memory_spaces=(), constraints=(), priority=0, fusible=False,
+                  loop_depth=None, id=None, Tail=None, is_post_update=False,
+                  iteration_axis="none", op_engine="other", op_class="other",
+                  tags=(), register=True):
     """Register a Python function as a TileLib implementation of *op* for *target*."""
     if target != "a5":
         raise ValueError("tile-template tracing currently only supports target='a5'")

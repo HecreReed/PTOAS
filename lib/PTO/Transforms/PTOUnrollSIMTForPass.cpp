@@ -59,30 +59,31 @@ static constexpr llvm::StringLiteral kUnrollAttrName = "pto.unroll";
 static constexpr llvm::StringLiteral kUnrollFullValue = "full";
 
 /// Check whether the loop has the explicit "full unroll" annotation.
-static bool hasUnrollFullAttr(scf::ForOp forOp)
-{
-    if (auto attr = forOp->getAttrOfType<StringAttr>(kUnrollAttrName))
-        return attr.getValue() == kUnrollFullValue;
-    return false;
+static bool hasUnrollFullAttr(scf::ForOp forOp) {
+  if (auto attr = forOp->getAttrOfType<StringAttr>(kUnrollAttrName))
+    return attr.getValue() == kUnrollFullValue;
+  return false;
 }
 
 /// Check whether this function is a SIMT entry.
-static bool isSIMTEntry(func::FuncOp func) { return func->hasAttr(pto::kPTOSimtEntryAttrName); }
+static bool isSIMTEntry(func::FuncOp func) {
+  return func->hasAttr(pto::kPTOSimtEntryAttrName);
+}
 
 /// Check whether a function contains an inline SIMT section.
-static bool containsInlineSIMTSection(func::FuncOp func)
-{
-    WalkResult result = func.walk([](pto::SectionSimtOp) { return WalkResult::interrupt(); });
-    return result.wasInterrupted();
+static bool containsInlineSIMTSection(func::FuncOp func) {
+  WalkResult result =
+      func.walk([](pto::SectionSimtOp) { return WalkResult::interrupt(); });
+  return result.wasInterrupted();
 }
 
 /// Check whether a loop is inside either supported SIMT representation.
-static bool isInSIMTContext(scf::ForOp forOp)
-{
-    func::FuncOp func = forOp->getParentOfType<func::FuncOp>();
-    if (!func)
-        return false;
-    return isSIMTEntry(func) || static_cast<bool>(forOp->getParentOfType<pto::SectionSimtOp>());
+static bool isInSIMTContext(scf::ForOp forOp) {
+  func::FuncOp func = forOp->getParentOfType<func::FuncOp>();
+  if (!func)
+    return false;
+  return isSIMTEntry(func) ||
+         static_cast<bool>(forOp->getParentOfType<pto::SectionSimtOp>());
 }
 
 // ---------------------------------------------------------------------------
@@ -92,40 +93,40 @@ static bool isInSIMTContext(scf::ForOp forOp)
 namespace {
 
 struct UnrollSIMTForPattern : public OpRewritePattern<scf::ForOp> {
-    using OpRewritePattern<scf::ForOp>::OpRewritePattern;
+  using OpRewritePattern<scf::ForOp>::OpRewritePattern;
 
-    LogicalResult matchAndRewrite(scf::ForOp forOp, PatternRewriter& rewriter) const override
-    {
-        // Only apply inside an outlined or inline SIMT context.
-        if (!isInSIMTContext(forOp))
-            return failure();
+  LogicalResult matchAndRewrite(scf::ForOp forOp,
+                                PatternRewriter &rewriter) const override {
+    // Only apply inside an outlined or inline SIMT context.
+    if (!isInSIMTContext(forOp))
+      return failure();
 
-        // Only unroll loops with explicit {pto.unroll = "full"} annotation.
-        if (!hasUnrollFullAttr(forOp))
-            return failure();
+    // Only unroll loops with explicit {pto.unroll = "full"} annotation.
+    if (!hasUnrollFullAttr(forOp))
+      return failure();
 
-        std::optional<int64_t> lb = getConstantIntValue(forOp.getLowerBound());
-        std::optional<int64_t> ub = getConstantIntValue(forOp.getUpperBound());
-        std::optional<int64_t> step = getConstantIntValue(forOp.getStep());
-        if (!lb || !ub || !step || *step <= 0 || *ub <= *lb)
-            return failure();
+    std::optional<int64_t> lb = getConstantIntValue(forOp.getLowerBound());
+    std::optional<int64_t> ub = getConstantIntValue(forOp.getUpperBound());
+    std::optional<int64_t> step = getConstantIntValue(forOp.getStep());
+    if (!lb || !ub || !step || *step <= 0 || *ub <= *lb)
+      return failure();
 
-        int64_t tripCount = (*ub - *lb + *step - 1) / *step;
-        if (tripCount <= 0)
-            return failure();
+    int64_t tripCount = (*ub - *lb + *step - 1) / *step;
+    if (tripCount <= 0)
+      return failure();
 
-        LLVM_DEBUG(
-            llvm::dbgs() << "PTOUnrollSIMTFor: unrolling annotated scf.for tripCount=" << tripCount << " at "
-                         << forOp.getLoc() << "\n");
+    LLVM_DEBUG(llvm::dbgs()
+               << "PTOUnrollSIMTFor: unrolling annotated scf.for tripCount="
+               << tripCount << " at " << forOp.getLoc() << "\n");
 
-        // loopUnrollByFactor returns failure if the loop carries iteration
-        // arguments that have uses outside the loop (live-out values).  In that
-        // case we cannot unroll.
-        if (failed(loopUnrollByFactor(forOp, static_cast<uint64_t>(tripCount))))
-            return failure();
+    // loopUnrollByFactor returns failure if the loop carries iteration
+    // arguments that have uses outside the loop (live-out values).  In that
+    // case we cannot unroll.
+    if (failed(loopUnrollByFactor(forOp, static_cast<uint64_t>(tripCount))))
+      return failure();
 
-        return success();
-    }
+    return success();
+  }
 };
 
 } // namespace
@@ -137,25 +138,25 @@ struct UnrollSIMTForPattern : public OpRewritePattern<scf::ForOp> {
 namespace {
 
 struct PTOUnrollSIMTFor : public pto::impl::PTOUnrollSIMTForBase<PTOUnrollSIMTFor> {
-    using pto::impl::PTOUnrollSIMTForBase<PTOUnrollSIMTFor>::PTOUnrollSIMTForBase;
+  using pto::impl::PTOUnrollSIMTForBase<
+      PTOUnrollSIMTFor>::PTOUnrollSIMTForBase;
 
-    void runOnOperation() override
-    {
-        func::FuncOp func = getOperation();
-        if (!isSIMTEntry(func) && !containsInlineSIMTSection(func))
-            return;
+  void runOnOperation() override {
+    func::FuncOp func = getOperation();
+    if (!isSIMTEntry(func) && !containsInlineSIMTSection(func))
+      return;
 
-        MLIRContext* ctx = &getContext();
-        RewritePatternSet patterns(ctx);
-        patterns.add<UnrollSIMTForPattern>(ctx);
+    MLIRContext *ctx = &getContext();
+    RewritePatternSet patterns(ctx);
+    patterns.add<UnrollSIMTForPattern>(ctx);
 
-        GreedyRewriteConfig config;
-        config.maxIterations = 10; // loops may nest
-        config.strictMode = GreedyRewriteStrictness::ExistingOps;
+    GreedyRewriteConfig config;
+    config.maxIterations = 10; // loops may nest
+    config.strictMode = GreedyRewriteStrictness::ExistingOps;
 
-        if (failed(applyPatternsAndFoldGreedily(func, std::move(patterns), config)))
-            signalPassFailure();
-    }
+    if (failed(applyPatternsAndFoldGreedily(func, std::move(patterns), config)))
+      signalPassFailure();
+  }
 };
 
 } // namespace
@@ -164,4 +165,6 @@ struct PTOUnrollSIMTFor : public pto::impl::PTOUnrollSIMTForBase<PTOUnrollSIMTFo
 // Pass constructor
 // ---------------------------------------------------------------------------
 
-std::unique_ptr<Pass> mlir::pto::createPTOUnrollSIMTForPass() { return std::make_unique<PTOUnrollSIMTFor>(); }
+std::unique_ptr<Pass> mlir::pto::createPTOUnrollSIMTForPass() {
+  return std::make_unique<PTOUnrollSIMTFor>();
+}

@@ -44,56 +44,56 @@ using namespace mlir::pto::syncsolver;
 
 namespace {
 
-struct PTOGraphSyncSolverPass : public mlir::pto::impl::PTOGraphSyncSolverBase<PTOGraphSyncSolverPass> {
-    using Base::Base;
+struct PTOGraphSyncSolverPass
+    : public mlir::pto::impl::PTOGraphSyncSolverBase<PTOGraphSyncSolverPass> {
+  using Base::Base;
 
-    void runOnOperation() override
-    {
-        func::FuncOp func = getOperation();
+  void runOnOperation() override {
+    func::FuncOp func = getOperation();
 
-        // If the function already contains explicit synchronization ops we leave
-        // it alone, matching the behavior of the legacy InsertSync pass to avoid
-        // double-inserting on hand-written kernels.
-        bool hasExplicitSync = false;
-        func.walk([&](Operation* op) {
-            if (isa<pto::SetFlagOp, pto::WaitFlagOp, pto::RecordEventOp, pto::WaitEventOp>(op)) {
-                hasExplicitSync = true;
-                return WalkResult::interrupt();
-            }
-            return WalkResult::advance();
-        });
-        if (hasExplicitSync)
-            return;
+    // If the function already contains explicit synchronization ops we leave
+    // it alone, matching the behavior of the legacy InsertSync pass to avoid
+    // double-inserting on hand-written kernels.
+    bool hasExplicitSync = false;
+    func.walk([&](Operation *op) {
+      if (isa<pto::SetFlagOp, pto::WaitFlagOp, pto::RecordEventOp,
+              pto::WaitEventOp>(op)) {
+        hasExplicitSync = true;
+        return WalkResult::interrupt();
+      }
+      return WalkResult::advance();
+    });
+    if (hasExplicitSync)
+      return;
 
-        // Derive the arch mode from the module's --pto-arch attribute (same
-        // source as LoweringSyncToPipe / PTOA5NormalizeTMov / PTOPlanMemory).
-        // A2/A3 stay memory-based; A5 is register-based and lets
-        // handleBarrierConflict() drop the PIPE_V barrier that A5 hardware
-        // does not support.
-        const bool isA5 = pto::isTargetArchA5(func.getOperation());
-        SyncSolverOptions opts(
-            SyncMode::INTRA_CORE_SYNC,
-            /*isMemBasedArch=*/!isA5,
-            /*isRegBasedArch=*/isA5);
-        opts.eventIdNumMax = eventIdNumMax;
-        auto translator = std::make_unique<IRTranslator>(func, opts);
+    // Derive the arch mode from the module's --pto-arch attribute (same
+    // source as LoweringSyncToPipe / PTOA5NormalizeTMov / PTOPlanMemory).
+    // A2/A3 stay memory-based; A5 is register-based and lets
+    // handleBarrierConflict() drop the PIPE_V barrier that A5 hardware
+    // does not support.
+    const bool isA5 = pto::isTargetArchA5(func.getOperation());
+    SyncSolverOptions opts(SyncMode::INTRA_CORE_SYNC,
+                           /*isMemBasedArch=*/!isA5,
+                           /*isRegBasedArch=*/isA5);
+    opts.eventIdNumMax = eventIdNumMax;
+    auto translator = std::make_unique<IRTranslator>(func, opts);
 
-        // Trivial / empty function bodies have nothing to solve.
-        if (translator->processingOrders.empty()) {
-            return;
-        }
-
-        auto solver = std::make_unique<Solver>(std::move(translator));
-        solver->solve();
-
-        CodeGenerator codegen(std::move(solver));
-        codegen.generateResultOps();
+    // Trivial / empty function bodies have nothing to solve.
+    if (translator->processingOrders.empty()) {
+      return;
     }
+
+    auto solver = std::make_unique<Solver>(std::move(translator));
+    solver->solve();
+
+    CodeGenerator codegen(std::move(solver));
+    codegen.generateResultOps();
+  }
 };
 
 } // namespace
 
-std::unique_ptr<Pass> mlir::pto::createPTOGraphSyncSolverPass(const PTOGraphSyncSolverOptions& options)
-{
-    return std::make_unique<PTOGraphSyncSolverPass>(options);
+std::unique_ptr<Pass> mlir::pto::createPTOGraphSyncSolverPass(
+    const PTOGraphSyncSolverOptions &options) {
+  return std::make_unique<PTOGraphSyncSolverPass>(options);
 }

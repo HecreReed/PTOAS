@@ -6,17 +6,7 @@
 # INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
 # See LICENSE in the root of the software repository for the full text of the License.
 
-from ptoas.mlir.ir import (
-    Attribute,
-    Context,
-    F32Type,
-    IndexType,
-    InsertionPoint,
-    IntegerType,
-    Location,
-    Module,
-    UnitAttr,
-)
+from ptoas.mlir.ir import Attribute, Context, F32Type, IndexType, InsertionPoint, IntegerType, Location, Module, UnitAttr
 from ptoas.mlir.dialects import arith, func, pto
 
 
@@ -43,18 +33,14 @@ def build():
             bl = pto.BLayoutAttr.get(pto.BLayout.RowMajor, ctx)
             sl = pto.SLayoutAttr.get(pto.SLayout.NoneBox, ctx)
             pd = pto.PadValueAttr.get(pto.PadValue.Null, ctx)
-            cfg = pto.TileBufConfigAttr.get(
-                bl, sl, pto.TileConfig.fractalABSize, pd, ctx
-            )
+            cfg = pto.TileBufConfigAttr.get(bl, sl, pto.TileConfig.fractalABSize, pd, ctx)
             tb_f32 = pto.TileBufType.get([1, 64], f32, vec, [1, 64], cfg, ctx)
 
             fn_ty = func.FunctionType.get([ptr_f32, ptr_f32, ptr_i32], [])
             with InsertionPoint(module.body):
                 fn = func.FuncOp("comm_p2p_binding_variants_kernel", fn_ty)
                 fn.operation.attributes["pto.entry"] = UnitAttr.get(ctx)
-                fn.operation.attributes["pto.kernel_kind"] = Attribute.parse(
-                    "#pto.kernel_kind<vector>"
-                )
+                fn.operation.attributes["pto.kernel_kind"] = Attribute.parse("#pto.kernel_kind<vector>")
                 entry = fn.add_entry_block()
 
             with InsertionPoint(entry):
@@ -67,19 +53,11 @@ def build():
 
                 dst_view = pto.MakeTensorViewOp(tv_f32, dst_ptr, [c64], [c1]).result
                 src_view = pto.MakeTensorViewOp(tv_f32, src_ptr, [c64], [c1]).result
-                signal_view = pto.MakeTensorViewOp(
-                    tv_i32, signal_ptr, [c1], [c1]
-                ).result
+                signal_view = pto.MakeTensorViewOp(tv_i32, signal_ptr, [c1], [c1]).result
 
-                dst = pto.PartitionViewOp(
-                    pv_f32, dst_view, offsets=[c0], sizes=[c64]
-                ).result
-                src = pto.PartitionViewOp(
-                    pv_f32, src_view, offsets=[c0], sizes=[c64]
-                ).result
-                signal = pto.PartitionViewOp(
-                    pv_i32, signal_view, offsets=[c0], sizes=[c1]
-                ).result
+                dst = pto.PartitionViewOp(pv_f32, dst_view, offsets=[c0], sizes=[c64]).result
+                src = pto.PartitionViewOp(pv_f32, src_view, offsets=[c0], sizes=[c64]).result
+                signal = pto.PartitionViewOp(pv_i32, signal_view, offsets=[c0], sizes=[c1]).result
 
                 ping = pto.AllocTileOp(tb_f32).result
                 pong = pto.AllocTileOp(tb_f32).result
@@ -97,9 +75,7 @@ def build():
 
                 pto.FenceBarrierAllOp(pto.FenceScope.GM)
                 pto.TNotifyOp(signal, c5, pto.NotifyOpAttr.get(pto.NotifyOp.Set, ctx))
-                pto.TNotifyOp(
-                    signal, c3, pto.NotifyOpAttr.get(pto.NotifyOp.AtomicAdd, ctx)
-                )
+                pto.TNotifyOp(signal, c3, pto.NotifyOpAttr.get(pto.NotifyOp.AtomicAdd, ctx))
                 pto.TWaitOp(signal, c5, pto.WaitCmpAttr.get(pto.WaitCmp.GE, ctx))
                 pto.TTestOp(signal, c5, pto.WaitCmpAttr.get(pto.WaitCmp.EQ, ctx))
                 pto.TTestOp(signal, c3, pto.WaitCmpAttr.get(pto.WaitCmp.NE, ctx))

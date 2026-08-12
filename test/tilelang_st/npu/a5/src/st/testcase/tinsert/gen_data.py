@@ -8,6 +8,7 @@
 
 # coding=utf-8
 
+import os
 import numpy as np
 
 from cases import CASES
@@ -17,7 +18,7 @@ from st_common import setup_case_rng, save_case_data
 def float32_to_bfloat16_and_back(f32_arr):
     """Simulate bfloat16 truncation (round-to-nearest-even truncated to 16-bit)."""
     as_uint32 = f32_arr.view(np.uint32)
-    rounded = (as_uint32 + np.uint32(0x7FFF)) & np.uint32(0xFFFF0000)
+    rounded = ((as_uint32 + np.uint32(0x7FFF)) & np.uint32(0xFFFF0000))
     return rounded.view(np.float32)
 
 
@@ -39,9 +40,7 @@ for case in CASES:
 
         if case["name"].startswith("acc2mat_bf16"):
             id_as_f32 = float32_to_bfloat16_and_back(id_mat)
-            id_as_bf16_bits = (id_as_f32.view(np.uint32) >> np.uint32(16)).astype(
-                np.uint16
-            )
+            id_as_bf16_bits = (id_as_f32.view(np.uint32) >> np.uint32(16)).astype(np.uint16)
             data["input3"] = id_as_bf16_bits
             quantized = float32_to_bfloat16_and_back(matmul_f32)
         elif case["name"].startswith("acc2mat_f16"):

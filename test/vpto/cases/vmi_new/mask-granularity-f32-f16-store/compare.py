@@ -15,9 +15,7 @@ import numpy as np
 def check_f32() -> bool:
     golden = np.fromfile("golden_v2.bin", dtype=np.float32)
     output = np.fromfile("v2.bin", dtype=np.float32)
-    if golden.shape == output.shape and np.allclose(
-        golden, output, atol=1e-5, rtol=1e-5
-    ):
+    if golden.shape == output.shape and np.allclose(golden, output, atol=1e-5, rtol=1e-5):
         return True
     diff = np.nonzero(~np.isclose(golden, output, atol=1e-5, rtol=1e-5))[0]
     idx = int(diff[0]) if diff.size else -1

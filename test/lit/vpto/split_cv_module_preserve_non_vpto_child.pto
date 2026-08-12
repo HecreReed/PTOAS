@@ -24,3 +24,4 @@ module attributes {pto.target_arch = "a5"} {
 // CHECK: module attributes {pto.target_arch = "a5"} {
 // CHECK: module attributes {pto.backend = "emitc", pto.target_arch = "a5"} {
 // CHECK: func.func @emitc_child
+

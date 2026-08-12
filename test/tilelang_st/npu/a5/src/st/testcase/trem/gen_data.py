@@ -30,6 +30,4 @@ for case in CASES:
     golden[:vr, :vc] = np.remainder(input1[:vr, :vc], input2[:vr, :vc])
 
     save_case_data(case["name"], {"input1": input1, "input2": input2, "golden": golden})
-    print(
-        f"[INFO] gen_data: {case['name']} src_shape={shape} src_valid_shape={valid_shape} dst_shape={dst_shape} dtype={dtype.__name__}"
-    )
+    print(f"[INFO] gen_data: {case['name']} src_shape={shape} src_valid_shape={valid_shape} dst_shape={dst_shape} dtype={dtype.__name__}")

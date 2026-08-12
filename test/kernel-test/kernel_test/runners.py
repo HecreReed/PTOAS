@@ -69,9 +69,7 @@ def _emit_backend_artifacts(
     build_plan = getattr(backend, "build_artifact_plan", None)
     if build_plan is None:
         return None
-    return materialize_artifact_plan(
-        case_id, build_plan(case_id, case), root_alias=root_alias
-    )
+    return materialize_artifact_plan(case_id, build_plan(case_id, case), root_alias=root_alias)
 
 
 def run_artifact_suite(
@@ -101,9 +99,7 @@ def run_artifact_suite(
                 message=reason or "backend not wired for this case",
             )
         else:
-            artifacts = _emit_backend_artifacts(
-                backend, case_id, case, root_alias=root_alias
-            )
+            artifacts = _emit_backend_artifacts(backend, case_id, case, root_alias=root_alias)
             if artifacts is None:
                 skipped += 1
                 result = CaseResult(

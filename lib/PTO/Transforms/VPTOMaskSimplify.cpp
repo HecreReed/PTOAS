@@ -24,49 +24,51 @@ using namespace mlir::pto;
 
 namespace {
 
-template <typename OpTy>
-static bool isAllTrueMaskFrom(Value mask)
-{
-    auto op = mask.getDefiningOp<OpTy>();
-    return op && op.getPattern() == "PAT_ALL";
+template <typename OpTy> static bool isAllTrueMaskFrom(Value mask) {
+  auto op = mask.getDefiningOp<OpTy>();
+  return op && op.getPattern() == "PAT_ALL";
 }
 
-static bool isAllTrueMask(Value mask)
-{
-    return isAllTrueMaskFrom<PsetB8Op>(mask) || isAllTrueMaskFrom<PsetB16Op>(mask) ||
-           isAllTrueMaskFrom<PsetB32Op>(mask) || isAllTrueMaskFrom<PgeB8Op>(mask) ||
-           isAllTrueMaskFrom<PgeB16Op>(mask) || isAllTrueMaskFrom<PgeB32Op>(mask);
+static bool isAllTrueMask(Value mask) {
+  return isAllTrueMaskFrom<PsetB8Op>(mask) ||
+         isAllTrueMaskFrom<PsetB16Op>(mask) ||
+         isAllTrueMaskFrom<PsetB32Op>(mask) ||
+         isAllTrueMaskFrom<PgeB8Op>(mask) ||
+         isAllTrueMaskFrom<PgeB16Op>(mask) || isAllTrueMaskFrom<PgeB32Op>(mask);
 }
 
 template <typename OpTy>
 struct SimplifyAllTruePredicateReorder : public OpRewritePattern<OpTy> {
-    using OpRewritePattern<OpTy>::OpRewritePattern;
+  using OpRewritePattern<OpTy>::OpRewritePattern;
 
-    LogicalResult matchAndRewrite(OpTy op, PatternRewriter& rewriter) const override
-    {
-        if (!isAllTrueMask(op.getLhs()) || !isAllTrueMask(op.getRhs()))
-            return failure();
+  LogicalResult matchAndRewrite(OpTy op,
+                                PatternRewriter &rewriter) const override {
+    if (!isAllTrueMask(op.getLhs()) || !isAllTrueMask(op.getRhs()))
+      return failure();
 
-        rewriter.replaceOp(op, {op.getLhs(), op.getRhs()});
-        return success();
-    }
+    rewriter.replaceOp(op, {op.getLhs(), op.getRhs()});
+    return success();
+  }
 };
 
-struct VPTOMaskSimplifyPass : public pto::impl::VPTOMaskSimplifyBase<VPTOMaskSimplifyPass> {
-    void runOnOperation() override
-    {
-        RewritePatternSet patterns(&getContext());
-        patterns.add<
-            SimplifyAllTruePredicateReorder<PintlvB8Op>, SimplifyAllTruePredicateReorder<PintlvB16Op>,
-            SimplifyAllTruePredicateReorder<PintlvB32Op>, SimplifyAllTruePredicateReorder<PdintlvB8Op>,
-            SimplifyAllTruePredicateReorder<PdintlvB16Op>, SimplifyAllTruePredicateReorder<PdintlvB32Op>>(
-            &getContext());
+struct VPTOMaskSimplifyPass
+    : public pto::impl::VPTOMaskSimplifyBase<VPTOMaskSimplifyPass> {
+  void runOnOperation() override {
+    RewritePatternSet patterns(&getContext());
+    patterns.add<SimplifyAllTruePredicateReorder<PintlvB8Op>,
+                 SimplifyAllTruePredicateReorder<PintlvB16Op>,
+                 SimplifyAllTruePredicateReorder<PintlvB32Op>,
+                 SimplifyAllTruePredicateReorder<PdintlvB8Op>,
+                 SimplifyAllTruePredicateReorder<PdintlvB16Op>,
+                 SimplifyAllTruePredicateReorder<PdintlvB32Op>>(&getContext());
 
-        if (failed(applyPatternsAndFoldGreedily(getOperation(), std::move(patterns))))
-            signalPassFailure();
-    }
+    if (failed(applyPatternsAndFoldGreedily(getOperation(), std::move(patterns))))
+      signalPassFailure();
+  }
 };
 
 } // namespace
 
-std::unique_ptr<Pass> mlir::pto::createVPTOMaskSimplifyPass() { return std::make_unique<VPTOMaskSimplifyPass>(); }
+std::unique_ptr<Pass> mlir::pto::createVPTOMaskSimplifyPass() {
+  return std::make_unique<VPTOMaskSimplifyPass>();
+}

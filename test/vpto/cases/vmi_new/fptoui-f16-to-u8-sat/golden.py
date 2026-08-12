@@ -30,26 +30,30 @@ def f16(x):
 PROBE = [
     # --- zeros / smallest RN ties ---
     f16(0.0),
-    f16(0.25),  # RN → 0
-    f16(0.5),  # RN → 0 (banker's)
-    f16(0.75),  # RN → 1
+    f16(0.25),         # RN → 0
+    f16(0.5),          # RN → 0 (banker's)
+    f16(0.75),         # RN → 1
     f16(1.0),
-    f16(1.5),  # RN → 2
-    f16(2.5),  # RN → 2
+    f16(1.5),          # RN → 2
+    f16(2.5),          # RN → 2
+
     # --- typical in-range ---
     f16(3.0),
     f16(42.0),
     f16(127.0),
     f16(200.0),
+
     # --- upper boundary + RN ties near 255 ---
     f16(254.0),
-    f16(254.5),  # RN → 254 (banker's)
+    f16(254.5),        # RN → 254 (banker's)
     f16(255.0),
-    f16(255.5),  # RN → 256 → SAT → 255
+    f16(255.5),        # RN → 256 → SAT → 255
+
     # --- overflow high, must clamp to 255 ---
     f16(256.0),
     f16(1000.0),
-    f16(65504.0),  # f16 max finite
+    f16(65504.0),      # f16 max finite
+
     # --- negatives (all → 0 under V300 SAT) ---
     f16(-0.25),
     f16(-1.0),
@@ -57,11 +61,13 @@ PROBE = [
     f16(-128.0),
     f16(-255.0),
     f16(-1000.0),
-    f16(-65504.0),  # f16 min finite
+    f16(-65504.0),     # f16 min finite
+
     # --- IEEE specials ---
-    f16(float("inf")),  # → 255
+    f16(float("inf")),   # → 255
     f16(float("-inf")),  # → 0
-    f16(float("nan")),  # → 0
+    f16(float("nan")),   # → 0
+
     # --- pad to 32 ---
     f16(64.0),
     f16(128.0),

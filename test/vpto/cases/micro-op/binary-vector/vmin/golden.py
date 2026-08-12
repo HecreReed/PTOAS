@@ -18,16 +18,13 @@ SEED = 19
 LOGICAL_ELEMS = 1000
 OUT_SENTINEL = np.float32(-123.25)
 
-
 def f32_to_bf16_bits(values):
     wide = values.astype(np.float32, copy=False).view(np.uint32)
     rounding = np.uint32(0x7FFF) + ((wide >> 16) & np.uint32(1))
     return ((wide + rounding) >> 16).astype(np.uint16)
 
-
 def bf16_bits_to_f32(bits):
     return (bits.astype(np.uint32) << 16).view(np.float32)
-
 
 def gen_f32(out, rng):
     v1 = rng.uniform(-8.0, 8.0, size=(ROWS, COLS)).astype(np.float32)
@@ -39,7 +36,6 @@ def gen_f32(out, rng):
     v3.reshape(-1).tofile(out / "v3.bin")
     g.reshape(-1).tofile(out / "golden_v3.bin")
 
-
 def gen_f16(out, rng):
     v1 = rng.uniform(-8.0, 8.0, size=(ROWS, COLS)).astype(np.float16)
     v2 = rng.uniform(-8.0, 8.0, size=(ROWS, COLS)).astype(np.float16)
@@ -50,28 +46,22 @@ def gen_f16(out, rng):
     v3.reshape(-1).tofile(out / "v3_f16.bin")
     g.reshape(-1).tofile(out / "golden_v3_f16.bin")
 
-
 def gen_bf16(out, rng):
     elems = ROWS * COLS
     v1_f32 = rng.uniform(-4.0, 4.0, size=elems).astype(np.float32)
     v2_f32 = rng.uniform(-4.0, 4.0, size=elems).astype(np.float32)
     v1 = f32_to_bf16_bits(v1_f32)
     v2 = f32_to_bf16_bits(v2_f32)
-    g = f32_to_bf16_bits(np.minimum(bf16_bits_to_f32(v1), bf16_bits_to_f32(v2)))
+    g = (f32_to_bf16_bits(np.minimum(bf16_bits_to_f32(v1), bf16_bits_to_f32(v2))))
     v3 = np.zeros(elems, dtype=np.uint16)
     v1.tofile(out / "v1_bf16.bin")
     v2.tofile(out / "v2_bf16.bin")
     v3.tofile(out / "v3_bf16.bin")
     g.tofile(out / "golden_v3_bf16.bin")
 
-
 def gen_f32_exceptional(out, rng):
-    specials_a = np.array(
-        [-np.inf, -7.5, -0.0, 0.0, 1.0, np.inf, np.nan, 3.5], dtype=np.float32
-    )
-    specials_b = np.array(
-        [np.inf, 2.5, 0.0, -0.0, -1.0, -np.inf, 1.0, np.nan], dtype=np.float32
-    )
+    specials_a = np.array([-np.inf, -7.5, -0.0, 0.0, 1.0, np.inf, np.nan, 3.5], dtype=np.float32)
+    specials_b = np.array([np.inf, 2.5, 0.0, -0.0, -1.0, -np.inf, 1.0, np.nan], dtype=np.float32)
     v1 = np.resize(specials_a, ROWS * COLS).reshape(ROWS, COLS).astype(np.float32)
     v2 = np.resize(specials_b, ROWS * COLS).reshape(ROWS, COLS).astype(np.float32)
     g = (np.minimum(v1, v2)).astype(np.float32, copy=False)
@@ -80,7 +70,6 @@ def gen_f32_exceptional(out, rng):
     v2.reshape(-1).tofile(out / "v2_f32_exceptional.bin")
     v3.reshape(-1).tofile(out / "v3_f32_exceptional.bin")
     g.reshape(-1).tofile(out / "golden_v3_f32_exceptional.bin")
-
 
 def gen_i16_signed(out, rng):
     v1 = rng.integers(-1000, 1001, size=(ROWS, COLS), dtype=np.int16)
@@ -92,7 +81,6 @@ def gen_i16_signed(out, rng):
     v3.reshape(-1).tofile(out / "v3_i16_signed.bin")
     g.reshape(-1).tofile(out / "golden_v3_i16_signed.bin")
 
-
 def gen_i16_unsigned(out, rng):
     v1 = rng.integers(0, 2001, size=(ROWS, COLS), dtype=np.uint16)
     v2 = rng.integers(0, 2001, size=(ROWS, COLS), dtype=np.uint16)
@@ -103,20 +91,16 @@ def gen_i16_unsigned(out, rng):
     v3.reshape(-1).tofile(out / "v3_i16_unsigned.bin")
     g.reshape(-1).tofile(out / "golden_v3_i16_unsigned.bin")
 
-
 def gen_tail(out, rng):
     v1 = rng.random((ROWS, COLS), dtype=np.float32)
     v2 = rng.random((ROWS, COLS), dtype=np.float32)
     v3 = np.full((ROWS, COLS), OUT_SENTINEL, dtype=np.float32)
     g = np.full((ROWS, COLS), OUT_SENTINEL, dtype=np.float32)
-    g.reshape(-1)[:LOGICAL_ELEMS] = (
-        np.minimum(v1.reshape(-1)[:LOGICAL_ELEMS], v2.reshape(-1)[:LOGICAL_ELEMS])
-    ).astype(np.float32, copy=False)
+    g.reshape(-1)[:LOGICAL_ELEMS] = (np.minimum(v1.reshape(-1)[:LOGICAL_ELEMS], v2.reshape(-1)[:LOGICAL_ELEMS])).astype(np.float32, copy=False)
     v1.reshape(-1).tofile(out / "v1_tail.bin")
     v2.reshape(-1).tofile(out / "v2_tail.bin")
     v3.reshape(-1).tofile(out / "v3_tail.bin")
     g.reshape(-1).tofile(out / "golden_v3_tail.bin")
-
 
 GENERATORS = [
     gen_f32,
@@ -128,7 +112,6 @@ GENERATORS = [
     gen_tail,
 ]
 
-
 def main():
     p = argparse.ArgumentParser()
     p.add_argument("--output-dir", type=Path, default=Path("."))
@@ -139,7 +122,6 @@ def main():
     out.mkdir(parents=True, exist_ok=True)
     for gen in GENERATORS:
         gen(out, rng)
-
 
 if __name__ == "__main__":
     main()

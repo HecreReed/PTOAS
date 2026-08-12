@@ -249,9 +249,7 @@ class TileLibDaemonTest(unittest.TestCase):
         operands = list(TADD_OPERANDS)
         operands[0] = {"kind": "mystery", "dtype": "f32", "shape": [64]}
 
-        with self.assertRaisesRegex(
-            DaemonError, "supports tile, scalar, view, and vector operands"
-        ):
+        with self.assertRaisesRegex(DaemonError, "supports tile, scalar, view, and vector operands"):
             self.client.instantiate(
                 "a5",
                 "pto.tadd",

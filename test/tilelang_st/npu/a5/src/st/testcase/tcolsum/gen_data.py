@@ -32,6 +32,4 @@ for case in CASES:
     golden[:1, :vc] = golden_result
 
     save_case_data(case["name"], {"input": input1, "golden": golden})
-    print(
-        f"[INFO] gen_data: {case['name']} shape={shape} valid_shape={valid_shape} dst_shape={dst_shape} dtype={dtype.__name__}"
-    )
+    print(f"[INFO] gen_data: {case['name']} shape={shape} valid_shape={valid_shape} dst_shape={dst_shape} dtype={dtype.__name__}")

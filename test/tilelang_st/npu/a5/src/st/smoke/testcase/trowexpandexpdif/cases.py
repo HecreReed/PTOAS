@@ -39,7 +39,7 @@ CASES = [
         "dtype": np.float32,
         "src0_shape": (32, 64),
         "src0_valid_shape": (32, 64),
-        "src1_shape": (32, 8),  # physical: 32/sizeof(f32)=8
+        "src1_shape": (32, 8),        # physical: 32/sizeof(f32)=8
         "src1_valid_shape": (32, 1),  # src1Col=1
         "dst_shape": (32, 64),
         "dst_valid_shape": (32, 64),
@@ -51,7 +51,7 @@ CASES = [
         "dtype": np.float16,
         "src0_shape": (16, 32),
         "src0_valid_shape": (16, 32),
-        "src1_shape": (16, 16),  # physical: 32/sizeof(f16)=16
+        "src1_shape": (16, 16),       # physical: 32/sizeof(f16)=16
         "src1_valid_shape": (16, 1),
         "dst_shape": (16, 32),
         "dst_valid_shape": (16, 32),
@@ -73,7 +73,7 @@ CASES = [
     {
         "name": "f32_16x128_noeq",
         "dtype": np.float32,
-        "src0_shape": (16, 128),  # src0eqdst=false
+        "src0_shape": (16, 128),      # src0eqdst=false
         "src0_valid_shape": (16, 128),
         "src1_shape": (16, 8),
         "src1_valid_shape": (16, 1),
@@ -86,11 +86,9 @@ CASES = [
     # - aclFloat16, 16, 64, 16, 16, false (src1Col=16)
 ]
 
-_SMOKE_CASE_NAMES = ["f32_16x32", "f16_16x32"]
+_SMOKE_CASE_NAMES = ['f32_16x32', 'f16_16x32']
 _SMOKE_CASE_NAME_SET = set(_SMOKE_CASE_NAMES)
-_missing = [
-    name for name in _SMOKE_CASE_NAMES if name not in {case["name"] for case in CASES}
-]
+_missing = [name for name in _SMOKE_CASE_NAMES if name not in {case["name"] for case in CASES}]
 if _missing:
     raise RuntimeError("unknown smoke case(s): " + ", ".join(_missing))
 CASES = [case for case in CASES if case["name"] in _SMOKE_CASE_NAME_SET]

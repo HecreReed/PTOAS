@@ -6,7 +6,6 @@
 # INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
 # See LICENSE in the root of the software repository for the full text of the License.
 
-
 def main():
     # Reproducer for zhangstevenunity/PTOAS#128:
     # `ptoas --enable-insert-sync` must handle double-buffer + dynamic-shape IR

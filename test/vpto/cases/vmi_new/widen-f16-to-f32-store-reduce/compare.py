@@ -15,9 +15,7 @@ import numpy as np
 def check(name: str, atol: float, rtol: float) -> bool:
     golden = np.fromfile(f"golden_{name}.bin", dtype=np.float32)
     output = np.fromfile(f"{name}.bin", dtype=np.float32)
-    if golden.shape == output.shape and np.allclose(
-        golden, output, atol=atol, rtol=rtol
-    ):
+    if golden.shape == output.shape and np.allclose(golden, output, atol=atol, rtol=rtol):
         return True
     close = np.isclose(golden, output, atol=atol, rtol=rtol)
     diff = np.nonzero(~close)[0]

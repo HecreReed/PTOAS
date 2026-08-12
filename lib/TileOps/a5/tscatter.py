@@ -7,7 +7,7 @@
 # See LICENSE in the root of the software repository for the full text of the License.
 """PTODSL TileLib templates for ``pto.tscatter``."""
 
-from ptodsl import pto
+from ptodsl import pto, scalar
 import ptodsl.tilelib as tilelib
 
 from ._common import NUMERIC_DTYPES
@@ -141,11 +141,11 @@ def template_tscatter_mask_row(src: pto.Tile, dst: pto.Tile):
                 else:
                     reg0, reg1 = pto.vintlv(zeros, src_reg)
                 mask, _ = pto.make_mask(dtype, py_rem)
-                pto.vsts(reg0, dst[row, col * times :], mask)
+                pto.vsts(reg0, dst[row, col * times:], mask)
                 py_rem -= lanes
                 if py_rem > 0:
                     mask, _ = pto.make_mask(dtype, py_rem)
-                    pto.vsts(reg1, dst[row, col * times + lanes :], mask)
+                    pto.vsts(reg1, dst[row, col * times + lanes:], mask)
                     py_rem -= lanes
             else:
                 if interleave_args[0]:
@@ -159,19 +159,19 @@ def template_tscatter_mask_row(src: pto.Tile, dst: pto.Tile):
                     reg0, reg1 = pto.vintlv(zeros, tmp0)
                     reg2, reg3 = pto.vintlv(zeros, tmp1)
                 mask, _ = pto.make_mask(dtype, py_rem)
-                pto.vsts(reg0, dst[row, col * times :], mask)
+                pto.vsts(reg0, dst[row, col * times:], mask)
                 py_rem -= lanes
                 if py_rem > 0:
                     mask, _ = pto.make_mask(dtype, py_rem)
-                    pto.vsts(reg1, dst[row, col * times + lanes :], mask)
+                    pto.vsts(reg1, dst[row, col * times + lanes:], mask)
                     py_rem -= lanes
                 if py_rem > 0:
                     mask, _ = pto.make_mask(dtype, py_rem)
-                    pto.vsts(reg2, dst[row, col * times + lanes * 2 :], mask)
+                    pto.vsts(reg2, dst[row, col * times + lanes * 2:], mask)
                     py_rem -= lanes
                 if py_rem > 0:
                     mask, _ = pto.make_mask(dtype, py_rem)
-                    pto.vsts(reg3, dst[row, col * times + lanes * 3 :], mask)
+                    pto.vsts(reg3, dst[row, col * times + lanes * 3:], mask)
                     py_rem -= lanes
 
 

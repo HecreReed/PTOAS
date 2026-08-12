@@ -15,7 +15,6 @@ Important notes for on-device execution:
   - This testcase covers all three forms in a single function entry so it fits
     the remote validation flow.
 """
-
 from ptoas.mlir.ir import Context, Location, Module, InsertionPoint, UnitAttr
 from ptoas.mlir.dialects import func, arith, pto
 from ptoas.mlir.ir import F32Type, IndexType, IntegerType
@@ -90,22 +89,12 @@ def build():
                 #   3-way result: 1x384
                 #   4-way result: 1x512
                 # total = 1152 f32
-                tv_out = pto.MakeTensorViewOp(
-                    tv2_f32, arg_out, [c1, c1152], [c1152, c1]
-                ).result
+                tv_out = pto.MakeTensorViewOp(tv2_f32, arg_out, [c1, c1152], [c1152, c1]).result
 
-                sv0 = pto.PartitionViewOp(
-                    part_view_1x128, tv0, offsets=[c0, c0], sizes=[c1, c128]
-                ).result
-                sv1 = pto.PartitionViewOp(
-                    part_view_1x128, tv1, offsets=[c0, c0], sizes=[c1, c128]
-                ).result
-                sv2 = pto.PartitionViewOp(
-                    part_view_1x128, tv2, offsets=[c0, c0], sizes=[c1, c128]
-                ).result
-                sv3 = pto.PartitionViewOp(
-                    part_view_1x128, tv3, offsets=[c0, c0], sizes=[c1, c128]
-                ).result
+                sv0 = pto.PartitionViewOp(part_view_1x128, tv0, offsets=[c0, c0], sizes=[c1, c128]).result
+                sv1 = pto.PartitionViewOp(part_view_1x128, tv1, offsets=[c0, c0], sizes=[c1, c128]).result
+                sv2 = pto.PartitionViewOp(part_view_1x128, tv2, offsets=[c0, c0], sizes=[c1, c128]).result
+                sv3 = pto.PartitionViewOp(part_view_1x128, tv3, offsets=[c0, c0], sizes=[c1, c128]).result
 
                 # Format2 source tiles shared by all 2-way / 3-way / 4-way cases.
                 tb_s0 = pto.AllocTileOp(tile_buf_1x128).result
@@ -151,15 +140,9 @@ def build():
                     exhausted=True,
                 )
 
-                sv_out2 = pto.PartitionViewOp(
-                    part_view_1x256, tv_out, offsets=[c0, c0], sizes=[c1, c256]
-                ).result
-                sv_out3 = pto.PartitionViewOp(
-                    part_view_1x384, tv_out, offsets=[c0, c256], sizes=[c1, c384]
-                ).result
-                sv_out4 = pto.PartitionViewOp(
-                    part_view_1x512, tv_out, offsets=[c0, c640], sizes=[c1, c512]
-                ).result
+                sv_out2 = pto.PartitionViewOp(part_view_1x256, tv_out, offsets=[c0, c0], sizes=[c1, c256]).result
+                sv_out3 = pto.PartitionViewOp(part_view_1x384, tv_out, offsets=[c0, c256], sizes=[c1, c384]).result
+                sv_out4 = pto.PartitionViewOp(part_view_1x512, tv_out, offsets=[c0, c640], sizes=[c1, c512]).result
                 pto.TStoreOp(None, tb_dst2, sv_out2)
                 pto.TStoreOp(None, tb_dst3, sv_out3)
                 pto.TStoreOp(None, tb_dst4, sv_out4)

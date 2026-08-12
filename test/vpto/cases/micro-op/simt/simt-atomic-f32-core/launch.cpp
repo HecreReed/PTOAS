@@ -12,8 +12,7 @@
 #ifndef __CPU_SIM
 #include "acl/acl.h"
 #endif
-extern "C" __global__[aicore] void simt_atomic_f32_core_kernel(__gm__ float* v1);
-void LaunchSimt_atomic_f32_core_kernel(float* v1, void* stream)
-{
-    simt_atomic_f32_core_kernel<<<1, nullptr, stream>>>((__gm__ float*)v1);
+extern "C" __global__ [aicore] void simt_atomic_f32_core_kernel(__gm__ float *v1);
+void LaunchSimt_atomic_f32_core_kernel(float *v1, void *stream) {
+  simt_atomic_f32_core_kernel<<<1, nullptr, stream>>>((__gm__ float *)v1);
 }

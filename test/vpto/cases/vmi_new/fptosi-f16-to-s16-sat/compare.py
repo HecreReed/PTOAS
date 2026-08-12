@@ -18,9 +18,7 @@ def main() -> None:
     if golden.shape != output.shape or not np.array_equal(golden, output):
         diff = np.nonzero(golden != output)[0]
         idx = int(diff[0]) if diff.size else -1
-        print(
-            f"[ERROR] compare failed idx={idx} golden={int(golden[idx]) if idx >= 0 else 'n/a'} output={int(output[idx]) if idx >= 0 else 'n/a'}"
-        )
+        print(f"[ERROR] compare failed idx={idx} golden={int(golden[idx]) if idx >= 0 else 'n/a'} output={int(output[idx]) if idx >= 0 else 'n/a'}")
         sys.exit(2)
     print("[INFO] compare passed")
 

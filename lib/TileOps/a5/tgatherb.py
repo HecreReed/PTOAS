@@ -27,7 +27,7 @@ def gatherb_dtype_signatures(dtypes=NUMERIC_DTYPES):
     op_class="other",
     layouts=("row_major",),
     loop_depth=2,
-    is_post_update=False,
+    is_post_update=False
 )
 def template_tgatherb(src: pto.Tile, offset: pto.Tile, dst: pto.Tile):
     dtype = dst.element_type

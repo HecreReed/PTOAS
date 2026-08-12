@@ -16,34 +16,39 @@
 
 using namespace PtoTestCommon;
 
-void LaunchVec2VecND_f16_16x16_into_32x32_idx00(uint16_t* src, uint16_t* dst, uint16_t* out, void* stream);
-void LaunchVec2VecND_f16_16x16_into_32x32_idx816(uint16_t* src, uint16_t* dst, uint16_t* out, void* stream);
-void LaunchVec2VecND_f32_16x16_into_32x32_idx00(float* src, float* dst, float* out, void* stream);
+void LaunchVec2VecND_f16_16x16_into_32x32_idx00(
+    uint16_t *src, uint16_t *dst, uint16_t *out, void *stream);
+void LaunchVec2VecND_f16_16x16_into_32x32_idx816(
+    uint16_t *src, uint16_t *dst, uint16_t *out, void *stream);
+void LaunchVec2VecND_f32_16x16_into_32x32_idx00(
+    float *src, float *dst, float *out, void *stream);
 
-using LaunchFn = void (*)(void*, void*, void*, void*);
+using LaunchFn = void (*)(void *, void *, void *, void *);
 
 struct TestCase {
-    const char* name;
-    LaunchFn launch;
-    size_t src_rows, src_cols;
-    size_t dst_rows, dst_cols;
-    size_t idx_row, idx_col;
-    bool has_output;
-    size_t elem_bytes;
+    const char *name;
+    LaunchFn    launch;
+    size_t      src_rows, src_cols;
+    size_t      dst_rows, dst_cols;
+    size_t      idx_row, idx_col;
+    bool        has_output;
+    size_t      elem_bytes;
 };
 
 static const TestCase kCases[] = {
-    {"vec2vec_nd_f16_16x16_into_32x32_idx00", reinterpret_cast<LaunchFn>(LaunchVec2VecND_f16_16x16_into_32x32_idx00),
+    {"vec2vec_nd_f16_16x16_into_32x32_idx00",
+     reinterpret_cast<LaunchFn>(LaunchVec2VecND_f16_16x16_into_32x32_idx00),
      16, 16, 32, 32, 0, 0, true, 2},
-    {"vec2vec_nd_f16_16x16_into_32x32_idx816", reinterpret_cast<LaunchFn>(LaunchVec2VecND_f16_16x16_into_32x32_idx816),
+    {"vec2vec_nd_f16_16x16_into_32x32_idx816",
+     reinterpret_cast<LaunchFn>(LaunchVec2VecND_f16_16x16_into_32x32_idx816),
      16, 16, 32, 32, 8, 16, true, 2},
-    {"vec2vec_nd_f32_16x16_into_32x32_idx00", reinterpret_cast<LaunchFn>(LaunchVec2VecND_f32_16x16_into_32x32_idx00),
+    {"vec2vec_nd_f32_16x16_into_32x32_idx00",
+     reinterpret_cast<LaunchFn>(LaunchVec2VecND_f32_16x16_into_32x32_idx00),
      16, 16, 32, 32, 0, 0, true, 4},
 };
 static constexpr size_t kNumCases = sizeof(kCases) / sizeof(kCases[0]);
 
-static int RunCase(const TestCase& tc, int deviceId, aclrtStream stream)
-{
+static int RunCase(const TestCase &tc, int deviceId, aclrtStream stream) {
     (void)deviceId;
     int rc = 0;
     const size_t srcElems = tc.src_rows * tc.src_cols;
@@ -53,9 +58,9 @@ static int RunCase(const TestCase& tc, int deviceId, aclrtStream stream)
     size_t srcFileSize = srcBytes;
     size_t dstFileSize = dstBytes;
 
-    std::printf(
-        "[INFO] === case: %s src=%zux%zu dst=%zux%zu idx=(%zu,%zu) ===\n", tc.name, tc.src_rows, tc.src_cols,
-        tc.dst_rows, tc.dst_cols, tc.idx_row, tc.idx_col);
+    std::printf("[INFO] === case: %s src=%zux%zu dst=%zux%zu idx=(%zu,%zu) ===\n",
+                tc.name, tc.src_rows, tc.src_cols, tc.dst_rows, tc.dst_cols,
+                tc.idx_row, tc.idx_col);
 
     std::string caseDir = std::string("./") + tc.name;
 
@@ -96,34 +101,27 @@ static int RunCase(const TestCase& tc, int deviceId, aclrtStream stream)
         }
     }
 
-    if (srcDev)
-        aclrtFree(srcDev);
-    if (dstDev)
-        aclrtFree(dstDev);
-    if (outDev)
-        aclrtFree(outDev);
-    if (srcHost)
-        aclrtFreeHost(srcHost);
-    if (dstHost)
-        aclrtFreeHost(dstHost);
-    if (outHost)
-        aclrtFreeHost(outHost);
+    if (srcDev) aclrtFree(srcDev);
+    if (dstDev) aclrtFree(dstDev);
+    if (outDev) aclrtFree(outDev);
+    if (srcHost) aclrtFreeHost(srcHost);
+    if (dstHost) aclrtFreeHost(dstHost);
+    if (outHost) aclrtFreeHost(outHost);
 
     if (rc == 0)
         std::printf("[INFO] case %s done\n", tc.name);
     return rc;
 }
 
-int main(int argc, char* argv[])
-{
-    const char* caseFilter = (argc > 1) ? argv[1] : nullptr;
+int main(int argc, char *argv[]) {
+    const char *caseFilter = (argc > 1) ? argv[1] : nullptr;
 
     int rc = 0;
     int deviceId = 0;
     aclrtStream stream = nullptr;
 
     aclInit(nullptr);
-    if (const char* envDevice = std::getenv("ACL_DEVICE_ID")) {
+    if (const char *envDevice = std::getenv("ACL_DEVICE_ID")) {
         deviceId = std::atoi(envDevice);
     }
     aclrtSetDevice(deviceId);

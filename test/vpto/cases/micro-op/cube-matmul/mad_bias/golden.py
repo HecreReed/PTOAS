@@ -25,9 +25,7 @@ def generate(output_dir: Path) -> None:
     n_idx = np.arange(N, dtype=np.float32).reshape(1, N)
     b = (((k_idx * 5 + n_idx * 7) % 23) - 11).astype(np.float16) / np.float16(6.0)
     c = np.zeros((M, N), dtype=np.float32)
-    bias = (((np.arange(N, dtype=np.float32) * 3) % 19) - 9).astype(
-        np.float16
-    ) / np.float16(3.0)
+    bias = (((np.arange(N, dtype=np.float32) * 3) % 19) - 9).astype(np.float16) / np.float16(3.0)
     golden_c = a.astype(np.float32) @ b.astype(np.float32)
     golden_c += bias.astype(np.float32)[None, :]
 

@@ -275,18 +275,10 @@ def _parse_args():
         default=os.environ.get("PTOAS_TILE_LIB_BACKEND", ""),
         help="Optional PTOAS tile-lib backend, for example ptodsl.",
     )
-    parser.add_argument(
-        "--full-only", action="store_true", help="Run only non-smoke ST cases."
-    )
-    parser.add_argument(
-        "--smoke-only", action="store_true", help="Run only smoke ST cases."
-    )
-    parser.add_argument(
-        "--list", action="store_true", help="List selected jobs and exit."
-    )
-    parser.add_argument(
-        "--dry-run", action="store_true", help="Print selected jobs and exit."
-    )
+    parser.add_argument("--full-only", action="store_true", help="Run only non-smoke ST cases.")
+    parser.add_argument("--smoke-only", action="store_true", help="Run only smoke ST cases.")
+    parser.add_argument("--list", action="store_true", help="List selected jobs and exit.")
+    parser.add_argument("--dry-run", action="store_true", help="Print selected jobs and exit.")
     return parser.parse_args()
 
 
@@ -295,10 +287,7 @@ def main():
     repo_root = _repo_root()
 
     if args.full_only and args.smoke_only:
-        print(
-            "[ERROR] --full-only and --smoke-only are mutually exclusive",
-            file=sys.stderr,
-        )
+        print("[ERROR] --full-only and --smoke-only are mutually exclusive", file=sys.stderr)
         return 1
     if args.jobs < 1:
         print("[ERROR] --jobs must be >= 1", file=sys.stderr)
@@ -339,9 +328,7 @@ def main():
         try:
             run_st.set_env_variables(args.run_mode, DEFAULT_SOC_VERSION)
         except Exception as exc:
-            print(
-                f"[ERROR] failed to set TileLang ST environment: {exc}", file=sys.stderr
-            )
+            print(f"[ERROR] failed to set TileLang ST environment: {exc}", file=sys.stderr)
             return 1
         base_env.update(os.environ)
     finally:
@@ -354,9 +341,7 @@ def main():
     print(f"[INFO] output_root={output_root}")
     if args.tile_lib_backend:
         print(f"[INFO] PTOAS_TILE_LIB_BACKEND={args.tile_lib_backend}")
-    print(
-        "[INFO] each testcase uses its own build dir, PTODSL cache, TMPDIR, and daemon socket"
-    )
+    print("[INFO] each testcase uses its own build dir, PTODSL cache, TMPDIR, and daemon socket")
 
     results = []
     max_workers = min(args.jobs, len(jobs))
@@ -384,19 +369,15 @@ def main():
             results.append(result)
             status = "PASS" if result["returncode"] == 0 else "FAIL"
             phase = f" phase={result.get('phase')}" if result.get("phase") else ""
-            print(
-                f"[{status}] {result['name']} ({result['seconds']:.1f}s){phase} {result['log']}"
-            )
+            print(f"[{status}] {result['name']} ({result['seconds']:.1f}s){phase} {result['log']}")
 
     passed_results = [item for item in results if item["returncode"] == 0]
     build_failed_results = [
-        item
-        for item in results
+        item for item in results
         if item["returncode"] != 0 and item.get("phase") == "build"
     ]
     run_failed_results = [
-        item
-        for item in results
+        item for item in results
         if item["returncode"] != 0 and item.get("phase") != "build"
     ]
     failures = build_failed_results + run_failed_results
@@ -429,9 +410,7 @@ def main():
     _print_result_group("passed testcases", passed_results)
     _print_result_group("build-failed testcases", build_failed_results)
     _print_result_group("run-failed testcases", run_failed_results)
-    print(
-        f"[INFO] summary files: {output_root / 'summary.tsv'} {output_root / 'summary.json'}"
-    )
+    print(f"[INFO] summary files: {output_root / 'summary.tsv'} {output_root / 'summary.json'}")
     return 1 if failures else 0
 
 

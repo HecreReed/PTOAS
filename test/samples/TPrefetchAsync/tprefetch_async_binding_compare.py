@@ -13,9 +13,7 @@ import numpy as np
 def _load(path: str) -> np.ndarray:
     arr = np.fromfile(path, dtype=np.float32)
     if arr.size != 128:
-        print(
-            f"[ERROR] Unexpected element count for {path}: got {arr.size}, expect 128"
-        )
+        print(f"[ERROR] Unexpected element count for {path}: got {arr.size}, expect 128")
         sys.exit(1)
     return arr
 
@@ -29,10 +27,8 @@ def main():
 
     mismatch = np.nonzero(dst != golden)[0]
     first = int(mismatch[0])
-    print(
-        f"[ERROR] tprefetch_async_binding mismatch count={mismatch.size}, first={first}, "
-        f"got={float(dst[first])}, expect={float(golden[first])}"
-    )
+    print(f"[ERROR] tprefetch_async_binding mismatch count={mismatch.size}, first={first}, "
+          f"got={float(dst[first])}, expect={float(golden[first])}")
     return 1
 
 

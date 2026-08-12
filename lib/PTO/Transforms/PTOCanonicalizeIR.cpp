@@ -65,27 +65,27 @@ namespace {
 constexpr unsigned kCanonicalRank5 = 5;
 constexpr int64_t kUnitExtent = 1;
 
-static SmallVector<int64_t, kCanonicalRank5> rightAlignShapeToRank5(ArrayRef<int64_t> shape)
-{
-    SmallVector<int64_t, kCanonicalRank5> result(kCanonicalRank5, kUnitExtent);
-    unsigned shift = kCanonicalRank5 - shape.size();
-    for (auto [idx, dim] : llvm::enumerate(shape))
-        result[shift + idx] = dim;
-    return result;
+static SmallVector<int64_t, kCanonicalRank5>
+rightAlignShapeToRank5(ArrayRef<int64_t> shape) {
+  SmallVector<int64_t, kCanonicalRank5> result(kCanonicalRank5, kUnitExtent);
+  unsigned shift = kCanonicalRank5 - shape.size();
+  for (auto [idx, dim] : llvm::enumerate(shape))
+    result[shift + idx] = dim;
+  return result;
 }
 
-static Value getOrCreateIndexConstant(OpBuilder& builder, Location loc, int64_t value)
-{
-    return builder.create<arith::ConstantIndexOp>(loc, value);
+static Value getOrCreateIndexConstant(OpBuilder &builder, Location loc,
+                                      int64_t value) {
+  return builder.create<arith::ConstantIndexOp>(loc, value);
 }
 
-static SmallVector<Value, kCanonicalRank5> rightAlignValuesToRank5(ValueRange values, Value fill)
-{
-    SmallVector<Value, kCanonicalRank5> result(kCanonicalRank5, fill);
-    unsigned shift = kCanonicalRank5 - values.size();
-    for (auto [idx, value] : llvm::enumerate(values))
-        result[shift + idx] = value;
-    return result;
+static SmallVector<Value, kCanonicalRank5>
+rightAlignValuesToRank5(ValueRange values, Value fill) {
+  SmallVector<Value, kCanonicalRank5> result(kCanonicalRank5, fill);
+  unsigned shift = kCanonicalRank5 - values.size();
+  for (auto [idx, value] : llvm::enumerate(values))
+    result[shift + idx] = value;
+  return result;
 }
 
 // ---------------------------------------------------------------------------
@@ -115,260 +115,275 @@ static SmallVector<Value, kCanonicalRank5> rightAlignValuesToRank5(ValueRange va
 // For rank-1 [N], the same rule produces [N*S, N*S, N*S, N*S, S], where S is
 // the original stride.
 // ---------------------------------------------------------------------------
-static SmallVector<Value, kCanonicalRank5> buildCanonicalStrides(MakeTensorViewOp op, IRRewriter& rewriter)
-{
-    rewriter.setInsertionPoint(op);
-    auto loc = op.getLoc();
-    unsigned rank = op.getShape().size();
-    unsigned shift = kCanonicalRank5 - rank;
-    SmallVector<Value, kCanonicalRank5> result = rightAlignValuesToRank5(op.getStrides(), Value());
+static SmallVector<Value, kCanonicalRank5>
+buildCanonicalStrides(MakeTensorViewOp op, IRRewriter &rewriter) {
+  rewriter.setInsertionPoint(op);
+  auto loc = op.getLoc();
+  unsigned rank = op.getShape().size();
+  unsigned shift = kCanonicalRank5 - rank;
+  SmallVector<Value, kCanonicalRank5> result =
+      rightAlignValuesToRank5(op.getStrides(), Value());
 
-    // Compute the first padded leading stride using the cumulative-product rule.
-    // Unit-extent dimensions before `shift` then reuse the same value.
-    Value leadingStride = rewriter.create<arith::MulIOp>(loc, op.getShape().front(), op.getStrides().front());
+  // Compute the first padded leading stride using the cumulative-product rule.
+  // Unit-extent dimensions before `shift` then reuse the same value.
+  Value leadingStride = rewriter.create<arith::MulIOp>(
+      loc, op.getShape().front(), op.getStrides().front());
 
-    for (unsigned i = 0; i < shift; ++i)
-        result[i] = leadingStride;
-    return result;
+  for (unsigned i = 0; i < shift; ++i)
+    result[i] = leadingStride;
+  return result;
 }
 
-static bool isLowRankViewLike(Type type)
-{
-    if (auto viewType = dyn_cast<TensorViewType>(type))
-        return viewType.getRank() > 0 && viewType.getRank() < kCanonicalRank5;
-    if (auto viewType = dyn_cast<PartitionTensorViewType>(type))
-        return viewType.getRank() > 0 && viewType.getRank() < kCanonicalRank5;
-    return false;
+static bool isLowRankViewLike(Type type) {
+  if (auto viewType = dyn_cast<TensorViewType>(type))
+    return viewType.getRank() > 0 && viewType.getRank() < kCanonicalRank5;
+  if (auto viewType = dyn_cast<PartitionTensorViewType>(type))
+    return viewType.getRank() > 0 && viewType.getRank() < kCanonicalRank5;
+  return false;
 }
 
-static std::optional<unsigned> getLowRankViewRank(Type type)
-{
-    if (auto viewType = dyn_cast<TensorViewType>(type)) {
-        unsigned rank = viewType.getRank();
-        if (rank > 0 && rank < kCanonicalRank5)
-            return rank;
-    }
-    if (auto viewType = dyn_cast<PartitionTensorViewType>(type)) {
-        unsigned rank = viewType.getRank();
-        if (rank > 0 && rank < kCanonicalRank5)
-            return rank;
-    }
-    return std::nullopt;
+static std::optional<unsigned> getLowRankViewRank(Type type) {
+  if (auto viewType = dyn_cast<TensorViewType>(type)) {
+    unsigned rank = viewType.getRank();
+    if (rank > 0 && rank < kCanonicalRank5)
+      return rank;
+  }
+  if (auto viewType = dyn_cast<PartitionTensorViewType>(type)) {
+    unsigned rank = viewType.getRank();
+    if (rank > 0 && rank < kCanonicalRank5)
+      return rank;
+  }
+  return std::nullopt;
 }
 
-static Type canonicalViewType(Type type)
-{
-    if (auto viewType = dyn_cast<TensorViewType>(type)) {
-        if (viewType.getRank() > 0 && viewType.getRank() < kCanonicalRank5)
-            return TensorViewType::get(
-                type.getContext(), rightAlignShapeToRank5(viewType.getShape()), viewType.getElementType());
-        return type;
-    }
-    if (auto viewType = dyn_cast<PartitionTensorViewType>(type)) {
-        if (viewType.getRank() > 0 && viewType.getRank() < kCanonicalRank5)
-            return PartitionTensorViewType::get(
-                type.getContext(), rightAlignShapeToRank5(viewType.getShape()), viewType.getElementType());
-        return type;
-    }
+static Type canonicalViewType(Type type) {
+  if (auto viewType = dyn_cast<TensorViewType>(type)) {
+    if (viewType.getRank() > 0 && viewType.getRank() < kCanonicalRank5)
+      return TensorViewType::get(type.getContext(),
+                                 rightAlignShapeToRank5(viewType.getShape()),
+                                 viewType.getElementType());
     return type;
+  }
+  if (auto viewType = dyn_cast<PartitionTensorViewType>(type)) {
+    if (viewType.getRank() > 0 && viewType.getRank() < kCanonicalRank5)
+      return PartitionTensorViewType::get(
+          type.getContext(), rightAlignShapeToRank5(viewType.getShape()),
+          viewType.getElementType());
+    return type;
+  }
+  return type;
 }
 
-static bool canonicalizeValueType(Value value)
-{
-    Type oldType = value.getType();
-    Type newType = canonicalViewType(oldType);
-    if (newType == oldType)
-        return false;
-    value.setType(newType);
-    return true;
+static bool canonicalizeValueType(Value value) {
+  Type oldType = value.getType();
+  Type newType = canonicalViewType(oldType);
+  if (newType == oldType)
+    return false;
+  value.setType(newType);
+  return true;
 }
 
-static LogicalResult rewriteMakeTensorView(MakeTensorViewOp op, IRRewriter& rewriter)
-{
-    auto oldType = dyn_cast<TensorViewType>(op.getResult().getType());
-    if (!oldType || oldType.getRank() == 0 || oldType.getRank() >= kCanonicalRank5)
-        return success();
-
-    unsigned rank = oldType.getRank();
-    if (op.getShape().size() != rank || op.getStrides().size() != rank)
-        return op.emitOpError("low-rank tensor_view must have matching shape and stride operands");
-
-    rewriter.setInsertionPoint(op);
-    Value one = getOrCreateIndexConstant(rewriter, op.getLoc(), kUnitExtent);
-    SmallVector<Value, kCanonicalRank5> newShape = rightAlignValuesToRank5(op.getShape(), one);
-    SmallVector<Value, kCanonicalRank5> newStrides = buildCanonicalStrides(op, rewriter);
-    auto newType = cast<TensorViewType>(canonicalViewType(oldType));
-
-    auto newOp =
-        rewriter.create<MakeTensorViewOp>(op.getLoc(), newType, op.getPtr(), newShape, newStrides, op.getLayoutAttr());
-    rewriter.replaceOp(op, newOp.getResult());
+static LogicalResult rewriteMakeTensorView(MakeTensorViewOp op,
+                                           IRRewriter &rewriter) {
+  auto oldType = dyn_cast<TensorViewType>(op.getResult().getType());
+  if (!oldType || oldType.getRank() == 0 ||
+      oldType.getRank() >= kCanonicalRank5)
     return success();
+
+  unsigned rank = oldType.getRank();
+  if (op.getShape().size() != rank || op.getStrides().size() != rank)
+    return op.emitOpError(
+        "low-rank tensor_view must have matching shape and stride operands");
+
+  rewriter.setInsertionPoint(op);
+  Value one = getOrCreateIndexConstant(rewriter, op.getLoc(), kUnitExtent);
+  SmallVector<Value, kCanonicalRank5> newShape =
+      rightAlignValuesToRank5(op.getShape(), one);
+  SmallVector<Value, kCanonicalRank5> newStrides =
+      buildCanonicalStrides(op, rewriter);
+  auto newType = cast<TensorViewType>(canonicalViewType(oldType));
+
+  auto newOp = rewriter.create<MakeTensorViewOp>(
+      op.getLoc(), newType, op.getPtr(), newShape, newStrides,
+      op.getLayoutAttr());
+  rewriter.replaceOp(op, newOp.getResult());
+  return success();
 }
 
-static LogicalResult rewritePartitionView(PartitionViewOp op, IRRewriter& rewriter)
-{
-    auto sourceType = dyn_cast<TensorViewType>(op.getSource().getType());
-    auto resultType = dyn_cast<PartitionTensorViewType>(op.getResult().getType());
-    if (!sourceType || !resultType)
-        return success();
-
-    unsigned operandRank = op.getOffsets().size();
-    if (operandRank == 0 || operandRank >= kCanonicalRank5 || op.getSizes().size() != operandRank)
-        return success();
-
-    if (sourceType.getRank() != kCanonicalRank5)
-        return op.emitOpError("low-rank partition_tensor_view normalization expects canonical rank-5 "
-                              "source tensor_view");
-
-    rewriter.setInsertionPoint(op);
-    Value zero = getOrCreateIndexConstant(rewriter, op.getLoc(), 0);
-    Value one = getOrCreateIndexConstant(rewriter, op.getLoc(), kUnitExtent);
-    SmallVector<Value, kCanonicalRank5> newOffsets = rightAlignValuesToRank5(op.getOffsets(), zero);
-    SmallVector<Value, kCanonicalRank5> newSizes = rightAlignValuesToRank5(op.getSizes(), one);
-    auto newType = cast<PartitionTensorViewType>(canonicalViewType(resultType));
-
-    auto newOp = rewriter.create<PartitionViewOp>(op.getLoc(), newType, op.getSource(), newOffsets, newSizes);
-    rewriter.replaceOp(op, newOp.getResult());
+static LogicalResult rewritePartitionView(PartitionViewOp op,
+                                          IRRewriter &rewriter) {
+  auto sourceType = dyn_cast<TensorViewType>(op.getSource().getType());
+  auto resultType = dyn_cast<PartitionTensorViewType>(op.getResult().getType());
+  if (!sourceType || !resultType)
     return success();
+
+  unsigned operandRank = op.getOffsets().size();
+  if (operandRank == 0 || operandRank >= kCanonicalRank5 ||
+      op.getSizes().size() != operandRank)
+    return success();
+
+  if (sourceType.getRank() != kCanonicalRank5)
+    return op.emitOpError(
+        "low-rank partition_tensor_view normalization expects canonical rank-5 "
+        "source tensor_view");
+
+  rewriter.setInsertionPoint(op);
+  Value zero = getOrCreateIndexConstant(rewriter, op.getLoc(), 0);
+  Value one = getOrCreateIndexConstant(rewriter, op.getLoc(), kUnitExtent);
+  SmallVector<Value, kCanonicalRank5> newOffsets =
+      rightAlignValuesToRank5(op.getOffsets(), zero);
+  SmallVector<Value, kCanonicalRank5> newSizes =
+      rightAlignValuesToRank5(op.getSizes(), one);
+  auto newType = cast<PartitionTensorViewType>(canonicalViewType(resultType));
+
+  auto newOp = rewriter.create<PartitionViewOp>(
+      op.getLoc(), newType, op.getSource(), newOffsets, newSizes);
+  rewriter.replaceOp(op, newOp.getResult());
+  return success();
 }
 
-static Value buildCanonicalDimIndex(Value dimIndex, unsigned rank, IRRewriter& rewriter, Location loc)
-{
-    rewriter.setInsertionPointAfterValue(dimIndex);
-    Value offset = getOrCreateIndexConstant(rewriter, loc, kCanonicalRank5 - rank);
-    return rewriter.create<arith::AddIOp>(loc, dimIndex, offset);
+static Value buildCanonicalDimIndex(Value dimIndex, unsigned rank,
+                                    IRRewriter &rewriter, Location loc) {
+  rewriter.setInsertionPointAfterValue(dimIndex);
+  Value offset =
+      getOrCreateIndexConstant(rewriter, loc, kCanonicalRank5 - rank);
+  return rewriter.create<arith::AddIOp>(loc, dimIndex, offset);
 }
 
-static void rewriteTensorViewDimOperand(Operation* op, Value dimIndex, unsigned rank, IRRewriter& rewriter)
-{
-    Value newDim = buildCanonicalDimIndex(dimIndex, rank, rewriter, op->getLoc());
-    op->setOperand(1, newDim);
+static void rewriteTensorViewDimOperand(Operation *op, Value dimIndex,
+                                        unsigned rank,
+                                        IRRewriter &rewriter) {
+  Value newDim = buildCanonicalDimIndex(dimIndex, rank, rewriter, op->getLoc());
+  op->setOperand(1, newDim);
 }
 
-static void canonicalizeFunctionType(func::FuncOp func)
-{
-    auto oldType = func.getFunctionType();
-    SmallVector<Type> inputs;
-    SmallVector<Type> results;
-    bool changed = false;
+static void canonicalizeFunctionType(func::FuncOp func) {
+  auto oldType = func.getFunctionType();
+  SmallVector<Type> inputs;
+  SmallVector<Type> results;
+  bool changed = false;
 
-    inputs.reserve(oldType.getNumInputs());
-    for (Type type : oldType.getInputs()) {
-        Type newType = canonicalViewType(type);
-        changed |= newType != type;
-        inputs.push_back(newType);
+  inputs.reserve(oldType.getNumInputs());
+  for (Type type : oldType.getInputs()) {
+    Type newType = canonicalViewType(type);
+    changed |= newType != type;
+    inputs.push_back(newType);
+  }
+
+  results.reserve(oldType.getNumResults());
+  for (Type type : oldType.getResults()) {
+    Type newType = canonicalViewType(type);
+    changed |= newType != type;
+    results.push_back(newType);
+  }
+
+  if (changed)
+    func.setFunctionType(FunctionType::get(func.getContext(), inputs, results));
+}
+
+static void canonicalizeValueTypes(func::FuncOp func) {
+  canonicalizeFunctionType(func);
+
+  func->walk([](Operation *op) {
+    for (Region &region : op->getRegions()) {
+      for (Block &block : region) {
+        for (BlockArgument arg : block.getArguments())
+          canonicalizeValueType(arg);
+      }
     }
 
-    results.reserve(oldType.getNumResults());
-    for (Type type : oldType.getResults()) {
-        Type newType = canonicalViewType(type);
-        changed |= newType != type;
-        results.push_back(newType);
-    }
-
-    if (changed)
-        func.setFunctionType(FunctionType::get(func.getContext(), inputs, results));
-}
-
-static void canonicalizeValueTypes(func::FuncOp func)
-{
-    canonicalizeFunctionType(func);
-
-    func->walk([](Operation* op) {
-        for (Region& region : op->getRegions()) {
-            for (Block& block : region) {
-                for (BlockArgument arg : block.getArguments())
-                    canonicalizeValueType(arg);
-            }
-        }
-
-        for (OpResult result : op->getResults())
-            canonicalizeValueType(result);
-    });
+    for (OpResult result : op->getResults())
+      canonicalizeValueType(result);
+  });
 }
 
 /// Verify that no low-rank view types survived canonicalization.
 /// This catches cases where a new op with rank-dependent operands
 /// was added but not given a structural rewrite in this pass.
-static LogicalResult verifyNoLowRankViewSurvivors(func::FuncOp func)
-{
-    bool anyFailed = false;
-    func.walk([&](Operation* op) {
-        for (Region& region : op->getRegions()) {
-            for (Block& block : region) {
-                for (BlockArgument arg : block.getArguments()) {
-                    if (isLowRankViewLike(arg.getType())) {
-                        emitError(arg.getLoc()) << "low-rank view type survived canonicalization: " << arg.getType()
-                                                << " as block argument";
-                        anyFailed = true;
-                    }
-                }
-            }
+static LogicalResult verifyNoLowRankViewSurvivors(func::FuncOp func) {
+  bool anyFailed = false;
+  func.walk([&](Operation *op) {
+    for (Region &region : op->getRegions()) {
+      for (Block &block : region) {
+        for (BlockArgument arg : block.getArguments()) {
+          if (isLowRankViewLike(arg.getType())) {
+            emitError(arg.getLoc())
+                << "low-rank view type survived canonicalization: "
+                << arg.getType() << " as block argument";
+            anyFailed = true;
+          }
         }
-        for (OpResult result : op->getResults()) {
-            if (isLowRankViewLike(result.getType())) {
-                emitError(op->getLoc()) << "low-rank view type survived canonicalization: " << result.getType()
-                                        << " in op " << op->getName();
-                anyFailed = true;
-            }
-        }
-    });
-    return anyFailed ? failure() : success();
+      }
+    }
+    for (OpResult result : op->getResults()) {
+      if (isLowRankViewLike(result.getType())) {
+        emitError(op->getLoc())
+            << "low-rank view type survived canonicalization: "
+            << result.getType() << " in op " << op->getName();
+        anyFailed = true;
+      }
+    }
+  });
+  return anyFailed ? failure() : success();
 }
 
-struct PTOCanonicalizeIRPass : public mlir::pto::impl::PTOCanonicalizeIRBase<PTOCanonicalizeIRPass> {
-    void runOnOperation() override
-    {
-        func::FuncOp func = getOperation();
-        SmallVector<MakeTensorViewOp> makeViews;
-        SmallVector<PartitionViewOp> partitionViews;
-        SmallVector<std::tuple<Operation*, Value, unsigned>> dimIndexOps;
+struct PTOCanonicalizeIRPass
+    : public mlir::pto::impl::PTOCanonicalizeIRBase<PTOCanonicalizeIRPass> {
+  void runOnOperation() override {
+    func::FuncOp func = getOperation();
+    SmallVector<MakeTensorViewOp> makeViews;
+    SmallVector<PartitionViewOp> partitionViews;
+    SmallVector<std::tuple<Operation *, Value, unsigned>> dimIndexOps;
 
-        func.walk([&](MakeTensorViewOp op) {
-            if (isLowRankViewLike(op.getResult().getType()))
-                makeViews.push_back(op);
-        });
-        func.walk([&](PartitionViewOp op) {
-            unsigned rank = op.getOffsets().size();
-            if (rank > 0 && rank < kCanonicalRank5 && op.getSizes().size() == rank)
-                partitionViews.push_back(op);
-        });
-        func.walk([&](GetTensorViewDimOp op) {
-            if (std::optional<unsigned> rank = getLowRankViewRank(op.getTensorView().getType()))
-                dimIndexOps.emplace_back(op.getOperation(), op.getDimIndex(), *rank);
-        });
-        func.walk([&](GetTensorViewStrideOp op) {
-            if (std::optional<unsigned> rank = getLowRankViewRank(op.getTensorView().getType()))
-                dimIndexOps.emplace_back(op.getOperation(), op.getDimIndex(), *rank);
-        });
+    func.walk([&](MakeTensorViewOp op) {
+      if (isLowRankViewLike(op.getResult().getType()))
+        makeViews.push_back(op);
+    });
+    func.walk([&](PartitionViewOp op) {
+      unsigned rank = op.getOffsets().size();
+      if (rank > 0 && rank < kCanonicalRank5 && op.getSizes().size() == rank)
+        partitionViews.push_back(op);
+    });
+    func.walk([&](GetTensorViewDimOp op) {
+      if (std::optional<unsigned> rank =
+              getLowRankViewRank(op.getTensorView().getType()))
+        dimIndexOps.emplace_back(op.getOperation(), op.getDimIndex(), *rank);
+    });
+    func.walk([&](GetTensorViewStrideOp op) {
+      if (std::optional<unsigned> rank =
+              getLowRankViewRank(op.getTensorView().getType()))
+        dimIndexOps.emplace_back(op.getOperation(), op.getDimIndex(), *rank);
+    });
 
-        IRRewriter rewriter(func.getContext());
-        for (MakeTensorViewOp op : makeViews) {
-            if (failed(rewriteMakeTensorView(op, rewriter))) {
-                signalPassFailure();
-                return;
-            }
-        }
-        for (auto [op, dimIndex, rank] : dimIndexOps)
-            rewriteTensorViewDimOperand(op, dimIndex, rank, rewriter);
-        canonicalizeValueTypes(func);
-        for (PartitionViewOp op : partitionViews) {
-            if (failed(rewritePartitionView(op, rewriter))) {
-                signalPassFailure();
-                return;
-            }
-        }
-
-        // Post-canonicalization verification: ensure no low-rank view types
-        // survived. If any do, it means an op with rank-dependent operands
-        // was not given a structural rewrite.
-        if (failed(verifyNoLowRankViewSurvivors(func))) {
-            signalPassFailure();
-            return;
-        }
+    IRRewriter rewriter(func.getContext());
+    for (MakeTensorViewOp op : makeViews) {
+      if (failed(rewriteMakeTensorView(op, rewriter))) {
+        signalPassFailure();
+        return;
+      }
     }
+    for (auto [op, dimIndex, rank] : dimIndexOps)
+      rewriteTensorViewDimOperand(op, dimIndex, rank, rewriter);
+    canonicalizeValueTypes(func);
+    for (PartitionViewOp op : partitionViews) {
+      if (failed(rewritePartitionView(op, rewriter))) {
+        signalPassFailure();
+        return;
+      }
+    }
+
+    // Post-canonicalization verification: ensure no low-rank view types
+    // survived. If any do, it means an op with rank-dependent operands
+    // was not given a structural rewrite.
+    if (failed(verifyNoLowRankViewSurvivors(func))) {
+      signalPassFailure();
+      return;
+    }
+  }
 };
 
 } // namespace
 
-std::unique_ptr<Pass> mlir::pto::createPTOCanonicalizeIRPass() { return std::make_unique<PTOCanonicalizeIRPass>(); }
+std::unique_ptr<Pass> mlir::pto::createPTOCanonicalizeIRPass() {
+  return std::make_unique<PTOCanonicalizeIRPass>();
+}

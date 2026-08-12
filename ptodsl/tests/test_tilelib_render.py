@@ -62,14 +62,7 @@ class TileLibRenderTest(unittest.TestCase):
     def test_golden_fixture_uses_same_abstraction(self):
         self.assertTrue(FIXTURE.exists(), f"missing golden fixture {FIXTURE}")
         golden = FIXTURE.read_text(encoding="utf-8")
-        for op in (
-            "pto.tile_buf_addr",
-            "!pto.ptr<f32, ub>",
-            "pto.vlds",
-            "pto.vadd",
-            "pto.vsts",
-            "pto.plt_b32",
-        ):
+        for op in ("pto.tile_buf_addr", "!pto.ptr<f32, ub>", "pto.vlds", "pto.vadd", "pto.vsts", "pto.plt_b32"):
             self.assertIn(op, golden)
 
 

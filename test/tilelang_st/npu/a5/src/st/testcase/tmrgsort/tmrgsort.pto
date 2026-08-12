@@ -375,7 +375,7 @@ module attributes {pto.target_arch = "a5", pto.kernel_kind = #pto.kernel_kind<ve
   }
 
   // Format2: 2-list merge sort (f32_2list_b64_basic)
-  func.func @TMRGSORT_f32_2list_b64_basic(%src0_ptr: !pto.ptr<f32>, %src1_ptr: !pto.ptr<f32>,
+  func.func @TMRGSORT_f32_2list_b64_basic(%src0_ptr: !pto.ptr<f32>, %src1_ptr: !pto.ptr<f32>, 
                                           %dst_ptr: !pto.ptr<f32>, %ex_ptr: !pto.ptr<i16>) attributes {pto.kernel} {
     %c0   = arith.constant 0   : index
     %c1   = arith.constant 1   : index
@@ -504,7 +504,7 @@ module attributes {pto.target_arch = "a5", pto.kernel_kind = #pto.kernel_kind<ve
   // Aligned with pto-isa case_exhausted1: TMrgsortMulti<float, 1, 64, 1, 64, 64, 0, 0, 128, 2, true>
   // kGCols_=64 (elements) → 32 structures per input
   // TOPK=128 (elements) → 64 structures output
-  func.func @TMRGSORT_f32_2list_exhausted(%src0_ptr: !pto.ptr<f32>, %src1_ptr: !pto.ptr<f32>,
+  func.func @TMRGSORT_f32_2list_exhausted(%src0_ptr: !pto.ptr<f32>, %src1_ptr: !pto.ptr<f32>, 
                                           %dst_ptr: !pto.ptr<f32>, %ex_ptr: !pto.ptr<i16>) attributes {pto.kernel} {
     %c0   = arith.constant 0   : index
     %c1   = arith.constant 1   : index
@@ -571,7 +571,7 @@ module attributes {pto.target_arch = "a5", pto.kernel_kind = #pto.kernel_kind<ve
   // src2: 128 f32 elements = 64 structures
   // dst:  256 f32 elements = 128 structures
   func.func @TMRGSORT_f32_3list_b64_basic(%src0_ptr: !pto.ptr<f32>, %src1_ptr: !pto.ptr<f32>,
-                                          %src2_ptr: !pto.ptr<f32>, %dst_ptr: !pto.ptr<f32>,
+                                          %src2_ptr: !pto.ptr<f32>, %dst_ptr: !pto.ptr<f32>, 
                                           %ex_ptr: !pto.ptr<i16>) attributes {pto.kernel} {
     %c0   = arith.constant 0   : index
     %c1   = arith.constant 1   : index
@@ -925,7 +925,7 @@ pto.tstore ins(%dst_tile : !pto.tile_buf<vec, 1x1024xf16>)
 
   // Format3: 3-list non-uniform cols (f32_3list_non_uniform)
   // src0: 128 f32 elements = 64 structures
-  // src1: 128 f32 elements = 64 structures
+  // src1: 128 f32 elements = 64 structures  
   // src2: 64 f32 elements = 32 structures
   // dst: 128 f32 elements = 64 structures (topk)
   func.func @TMRGSORT_f32_3list_non_uniform(%src0_ptr: !pto.ptr<f32>, %src1_ptr: !pto.ptr<f32>,

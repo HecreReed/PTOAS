@@ -107,3 +107,5 @@ __global__ AICORE void gqa_softmax_block(__gm__ float* v1, __gm__ float* v2, __g
   pipe_barrier(PIPE_ALL);
   return;
 }
+
+

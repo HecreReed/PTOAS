@@ -27,65 +27,55 @@ from lit.llvm.subst import FindTool
 # Configuration file for the 'lit' test runner.
 
 # name: The name of this test suite.
-config.name = "PTOIR"
+config.name = 'PTOIR'
 
 config.test_format = lit.formats.ShTest(not llvm_config.use_lit_shell)
 
 # suffixes: A list of file extensions to treat as test files.
-config.suffixes = [".pto"]
+config.suffixes = ['.pto']
 
 # test_source_root: The root path where tests are located.
 config.test_source_root = os.path.dirname(__file__)
 
 # test_exec_root: The root path where tests should be run.
-config.test_exec_root = os.path.join(config.ptoir_obj_root, "test/lit")
-config.ptoir_tools_dir = os.path.join(config.ptoir_obj_root, "tools/ptoas")
-config.ptoir_test_tools_dir = os.path.join(config.ptoir_obj_root, "tools/pto-test-opt")
+config.test_exec_root = os.path.join(config.ptoir_obj_root, 'test/lit')
+config.ptoir_tools_dir = os.path.join(config.ptoir_obj_root, 'tools/ptoas')
+config.ptoir_test_tools_dir = os.path.join(config.ptoir_obj_root,
+                                           'tools/pto-test-opt')
 
-config.substitutions.append(("%PATH%", config.environment["PATH"]))
-config.substitutions.append(("%shlibext", config.llvm_shlib_ext))
+config.substitutions.append(('%PATH%', config.environment['PATH']))
+config.substitutions.append(('%shlibext', config.llvm_shlib_ext))
 
-if getattr(config, "pto_enable_vfsim_costmodel", False):
-    config.available_features.add("vfsim-costmodel")
+if getattr(config, 'pto_enable_vfsim_costmodel', False):
+    config.available_features.add('vfsim-costmodel')
 
 llvm_config.with_system_environment(
-    [
-        "HOME",
-        "INCLUDE",
-        "LIB",
-        "TMP",
-        "TEMP",
-        "ASCEND_HOME_PATH",
-        "ASCEND_OPP_PATH",
-        "ASCEND_AICPU_PATH",
-        "ASCEND_TOOLKIT_HOME",
-        "LD_LIBRARY_PATH",
-        "PYTHONPATH",
-    ]
-)
+    ['HOME', 'INCLUDE', 'LIB', 'TMP', 'TEMP',
+     'ASCEND_HOME_PATH', 'ASCEND_OPP_PATH', 'ASCEND_AICPU_PATH',
+     'ASCEND_TOOLKIT_HOME', 'LD_LIBRARY_PATH', 'PYTHONPATH'])
 
 # Keep build-tree lit tests self-contained. The PTOAS build stages the complete
 # MLIR Python runtime together with generated PTO dialect modules and the PTO
 # extension under one build-tree Python root.
-if getattr(config, "enable_bindings_python", False):
+if getattr(config, 'enable_bindings_python', False):
     llvm_config.with_environment(
-        "PYTHONPATH", [config.ptoas_python_dir], append_path=True
-    )
+        'PYTHONPATH', [config.ptoas_python_dir], append_path=True)
 
 llvm_config.use_default_substitutions()
 
 # excludes: A list of directories to exclude from the testsuite. The 'Inputs'
 # subdirectories contain auxiliary inputs for various tests in their parent
 # directories.
-config.excludes = ["Inputs", "Examples", "CMakeLists.txt", "README.txt", "LICENSE.txt"]
+config.excludes = ['Inputs', 'Examples', 'CMakeLists.txt', 'README.txt', 'LICENSE.txt']
 
 # Tweak the PATH to include the tools dir.
-llvm_config.with_environment("PATH", config.llvm_tools_dir, append_path=True)
+llvm_config.with_environment('PATH', config.llvm_tools_dir, append_path=True)
 
-tool_dirs = [config.ptoir_tools_dir, config.ptoir_test_tools_dir, config.llvm_tools_dir]
+tool_dirs = [config.ptoir_tools_dir, config.ptoir_test_tools_dir,
+             config.llvm_tools_dir]
 tools = [
-    "ptoas",
-    "pto-test-opt",
+    'ptoas',
+    'pto-test-opt',
 ]
 
 llvm_config.add_tool_substitutions(tools, tool_dirs)

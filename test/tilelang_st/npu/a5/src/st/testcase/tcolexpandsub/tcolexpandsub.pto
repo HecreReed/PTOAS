@@ -23,12 +23,12 @@ module attributes {pto.target_arch = "a5", pto.kernel_kind = #pto.kernel_kind<ve
       shape = [%c1, %c1, %c1, %c6, %c128],
       strides = [%c768, %c768, %c768, %c128, %c1]
       : !pto.tensor_view<1x1x1x6x128xf32>
-
+    
     %src1_view = pto.make_tensor_view %src1_ptr,
       shape = [%c1, %c1, %c1, %c1, %c128],
       strides = [%c128, %c128, %c128, %c128, %c1]
       : !pto.tensor_view<1x1x1x1x128xf32>
-
+    
     %dst_view = pto.make_tensor_view %dst_ptr,
       shape = [%c1, %c1, %c1, %c6, %c128],
       strides = [%c768, %c768, %c768, %c128, %c1]
@@ -38,12 +38,12 @@ module attributes {pto.target_arch = "a5", pto.kernel_kind = #pto.kernel_kind<ve
       offsets = [%c0, %c0, %c0, %c0, %c0],
       sizes = [%c1, %c1, %c1, %c6, %c128]
       : !pto.tensor_view<1x1x1x6x128xf32> -> !pto.partition_tensor_view<1x1x1x6x128xf32>
-
+    
     %src1_part = pto.partition_view %src1_view,
       offsets = [%c0, %c0, %c0, %c0, %c0],
       sizes = [%c1, %c1, %c1, %c1, %c128]
       : !pto.tensor_view<1x1x1x1x128xf32> -> !pto.partition_tensor_view<1x1x1x1x128xf32>
-
+    
     %dst_part = pto.partition_view %dst_view,
       offsets = [%c0, %c0, %c0, %c0, %c0],
       sizes = [%c1, %c1, %c1, %c6, %c128]
@@ -51,16 +51,16 @@ module attributes {pto.target_arch = "a5", pto.kernel_kind = #pto.kernel_kind<ve
 
     %src0 = pto.alloc_tile
       : !pto.tile_buf<vec, 6x128xf32>
-
+    
     %src1 = pto.alloc_tile
       : !pto.tile_buf<vec, 1x128xf32>
-
+    
     %dst = pto.alloc_tile
       : !pto.tile_buf<vec, 6x128xf32>
 
     pto.tload ins(%src0_part : !pto.partition_tensor_view<1x1x1x6x128xf32>)
               outs(%src0 : !pto.tile_buf<vec, 6x128xf32>)
-
+    
     pto.tload ins(%src1_part : !pto.partition_tensor_view<1x1x1x1x128xf32>)
               outs(%src1 : !pto.tile_buf<vec, 1x128xf32>)
 
@@ -85,12 +85,12 @@ module attributes {pto.target_arch = "a5", pto.kernel_kind = #pto.kernel_kind<ve
       shape = [%c1, %c1, %c1, %c18, %c32],
       strides = [%c576, %c576, %c576, %c32, %c1]
       : !pto.tensor_view<1x1x1x18x32xf32>
-
+    
     %src1_view = pto.make_tensor_view %src1_ptr,
       shape = [%c1, %c1, %c1, %c1, %c32],
       strides = [%c32, %c32, %c32, %c32, %c1]
       : !pto.tensor_view<1x1x1x1x32xf32>
-
+    
     %dst_view = pto.make_tensor_view %dst_ptr,
       shape = [%c1, %c1, %c1, %c18, %c32],
       strides = [%c576, %c576, %c576, %c32, %c1]
@@ -100,12 +100,12 @@ module attributes {pto.target_arch = "a5", pto.kernel_kind = #pto.kernel_kind<ve
       offsets = [%c0, %c0, %c0, %c0, %c0],
       sizes = [%c1, %c1, %c1, %c18, %c32]
       : !pto.tensor_view<1x1x1x18x32xf32> -> !pto.partition_tensor_view<1x1x1x18x32xf32>
-
+    
     %src1_part = pto.partition_view %src1_view,
       offsets = [%c0, %c0, %c0, %c0, %c0],
       sizes = [%c1, %c1, %c1, %c1, %c32]
       : !pto.tensor_view<1x1x1x1x32xf32> -> !pto.partition_tensor_view<1x1x1x1x32xf32>
-
+    
     %dst_part = pto.partition_view %dst_view,
       offsets = [%c0, %c0, %c0, %c0, %c0],
       sizes = [%c1, %c1, %c1, %c18, %c32]
@@ -113,16 +113,16 @@ module attributes {pto.target_arch = "a5", pto.kernel_kind = #pto.kernel_kind<ve
 
     %src0 = pto.alloc_tile
       : !pto.tile_buf<vec, 18x32xf32>
-
+    
     %src1 = pto.alloc_tile
       : !pto.tile_buf<vec, 1x32xf32>
-
+    
     %dst = pto.alloc_tile
       : !pto.tile_buf<vec, 18x32xf32>
 
     pto.tload ins(%src0_part : !pto.partition_tensor_view<1x1x1x18x32xf32>)
               outs(%src0 : !pto.tile_buf<vec, 18x32xf32>)
-
+    
     pto.tload ins(%src1_part : !pto.partition_tensor_view<1x1x1x1x32xf32>)
               outs(%src1 : !pto.tile_buf<vec, 1x32xf32>)
 
@@ -147,12 +147,12 @@ module attributes {pto.target_arch = "a5", pto.kernel_kind = #pto.kernel_kind<ve
       shape = [%c1, %c1, %c1, %c10, %c256],
       strides = [%c2560, %c2560, %c2560, %c256, %c1]
       : !pto.tensor_view<1x1x1x10x256xf16>
-
+    
     %src1_view = pto.make_tensor_view %src1_ptr,
       shape = [%c1, %c1, %c1, %c1, %c256],
       strides = [%c256, %c256, %c256, %c256, %c1]
       : !pto.tensor_view<1x1x1x1x256xf16>
-
+    
     %dst_view = pto.make_tensor_view %dst_ptr,
       shape = [%c1, %c1, %c1, %c10, %c256],
       strides = [%c2560, %c2560, %c2560, %c256, %c1]
@@ -162,12 +162,12 @@ module attributes {pto.target_arch = "a5", pto.kernel_kind = #pto.kernel_kind<ve
       offsets = [%c0, %c0, %c0, %c0, %c0],
       sizes = [%c1, %c1, %c1, %c10, %c256]
       : !pto.tensor_view<1x1x1x10x256xf16> -> !pto.partition_tensor_view<1x1x1x10x256xf16>
-
+    
     %src1_part = pto.partition_view %src1_view,
       offsets = [%c0, %c0, %c0, %c0, %c0],
       sizes = [%c1, %c1, %c1, %c1, %c256]
       : !pto.tensor_view<1x1x1x1x256xf16> -> !pto.partition_tensor_view<1x1x1x1x256xf16>
-
+    
     %dst_part = pto.partition_view %dst_view,
       offsets = [%c0, %c0, %c0, %c0, %c0],
       sizes = [%c1, %c1, %c1, %c10, %c256]
@@ -175,16 +175,16 @@ module attributes {pto.target_arch = "a5", pto.kernel_kind = #pto.kernel_kind<ve
 
     %src0 = pto.alloc_tile
       : !pto.tile_buf<vec, 10x256xf16>
-
+    
     %src1 = pto.alloc_tile
       : !pto.tile_buf<vec, 1x256xf16>
-
+    
     %dst = pto.alloc_tile
       : !pto.tile_buf<vec, 10x256xf16>
 
     pto.tload ins(%src0_part : !pto.partition_tensor_view<1x1x1x10x256xf16>)
               outs(%src0 : !pto.tile_buf<vec, 10x256xf16>)
-
+    
     pto.tload ins(%src1_part : !pto.partition_tensor_view<1x1x1x1x256xf16>)
               outs(%src1 : !pto.tile_buf<vec, 1x256xf16>)
 
@@ -209,12 +209,12 @@ module attributes {pto.target_arch = "a5", pto.kernel_kind = #pto.kernel_kind<ve
       shape = [%c1, %c1, %c1, %c12, %c64],
       strides = [%c768, %c768, %c768, %c64, %c1]
       : !pto.tensor_view<1x1x1x12x64xf16>
-
+    
     %src1_view = pto.make_tensor_view %src1_ptr,
       shape = [%c1, %c1, %c1, %c1, %c64],
       strides = [%c64, %c64, %c64, %c64, %c1]
       : !pto.tensor_view<1x1x1x1x64xf16>
-
+    
     %dst_view = pto.make_tensor_view %dst_ptr,
       shape = [%c1, %c1, %c1, %c12, %c64],
       strides = [%c768, %c768, %c768, %c64, %c1]
@@ -224,12 +224,12 @@ module attributes {pto.target_arch = "a5", pto.kernel_kind = #pto.kernel_kind<ve
       offsets = [%c0, %c0, %c0, %c0, %c0],
       sizes = [%c1, %c1, %c1, %c12, %c64]
       : !pto.tensor_view<1x1x1x12x64xf16> -> !pto.partition_tensor_view<1x1x1x12x64xf16>
-
+    
     %src1_part = pto.partition_view %src1_view,
       offsets = [%c0, %c0, %c0, %c0, %c0],
       sizes = [%c1, %c1, %c1, %c1, %c64]
       : !pto.tensor_view<1x1x1x1x64xf16> -> !pto.partition_tensor_view<1x1x1x1x64xf16>
-
+    
     %dst_part = pto.partition_view %dst_view,
       offsets = [%c0, %c0, %c0, %c0, %c0],
       sizes = [%c1, %c1, %c1, %c12, %c64]
@@ -237,16 +237,16 @@ module attributes {pto.target_arch = "a5", pto.kernel_kind = #pto.kernel_kind<ve
 
     %src0 = pto.alloc_tile
       : !pto.tile_buf<vec, 12x64xf16>
-
+    
     %src1 = pto.alloc_tile
       : !pto.tile_buf<vec, 1x64xf16>
-
+    
     %dst = pto.alloc_tile
       : !pto.tile_buf<vec, 12x64xf16>
 
     pto.tload ins(%src0_part : !pto.partition_tensor_view<1x1x1x12x64xf16>)
               outs(%src0 : !pto.tile_buf<vec, 12x64xf16>)
-
+    
     pto.tload ins(%src1_part : !pto.partition_tensor_view<1x1x1x1x64xf16>)
               outs(%src1 : !pto.tile_buf<vec, 1x64xf16>)
 
@@ -271,12 +271,12 @@ module attributes {pto.target_arch = "a5", pto.kernel_kind = #pto.kernel_kind<ve
       shape = [%c1, %c1, %c1, %c16, %c32],
       strides = [%c512, %c512, %c512, %c32, %c1]
       : !pto.tensor_view<1x1x1x16x32xi32>
-
+    
     %src1_view = pto.make_tensor_view %src1_ptr,
       shape = [%c1, %c1, %c1, %c1, %c32],
       strides = [%c32, %c32, %c32, %c32, %c1]
       : !pto.tensor_view<1x1x1x1x32xi32>
-
+    
     %dst_view = pto.make_tensor_view %dst_ptr,
       shape = [%c1, %c1, %c1, %c16, %c32],
       strides = [%c512, %c512, %c512, %c32, %c1]
@@ -286,12 +286,12 @@ module attributes {pto.target_arch = "a5", pto.kernel_kind = #pto.kernel_kind<ve
       offsets = [%c0, %c0, %c0, %c0, %c0],
       sizes = [%c1, %c1, %c1, %c16, %c32]
       : !pto.tensor_view<1x1x1x16x32xi32> -> !pto.partition_tensor_view<1x1x1x16x32xi32>
-
+    
     %src1_part = pto.partition_view %src1_view,
       offsets = [%c0, %c0, %c0, %c0, %c0],
       sizes = [%c1, %c1, %c1, %c1, %c32]
       : !pto.tensor_view<1x1x1x1x32xi32> -> !pto.partition_tensor_view<1x1x1x1x32xi32>
-
+    
     %dst_part = pto.partition_view %dst_view,
       offsets = [%c0, %c0, %c0, %c0, %c0],
       sizes = [%c1, %c1, %c1, %c16, %c32]
@@ -299,16 +299,16 @@ module attributes {pto.target_arch = "a5", pto.kernel_kind = #pto.kernel_kind<ve
 
     %src0 = pto.alloc_tile
       : !pto.tile_buf<vec, 16x32xi32>
-
+    
     %src1 = pto.alloc_tile
       : !pto.tile_buf<vec, 1x32xi32>
-
+    
     %dst = pto.alloc_tile
       : !pto.tile_buf<vec, 16x32xi32>
 
     pto.tload ins(%src0_part : !pto.partition_tensor_view<1x1x1x16x32xi32>)
               outs(%src0 : !pto.tile_buf<vec, 16x32xi32>)
-
+    
     pto.tload ins(%src1_part : !pto.partition_tensor_view<1x1x1x1x32xi32>)
               outs(%src1 : !pto.tile_buf<vec, 1x32xi32>)
 
@@ -333,12 +333,12 @@ module attributes {pto.target_arch = "a5", pto.kernel_kind = #pto.kernel_kind<ve
       shape = [%c1, %c1, %c1, %c16, %c64],
       strides = [%c1024, %c1024, %c1024, %c64, %c1]
       : !pto.tensor_view<1x1x1x16x64xi16>
-
+    
     %src1_view = pto.make_tensor_view %src1_ptr,
       shape = [%c1, %c1, %c1, %c1, %c64],
       strides = [%c64, %c64, %c64, %c64, %c1]
       : !pto.tensor_view<1x1x1x1x64xi16>
-
+    
     %dst_view = pto.make_tensor_view %dst_ptr,
       shape = [%c1, %c1, %c1, %c16, %c64],
       strides = [%c1024, %c1024, %c1024, %c64, %c1]
@@ -348,12 +348,12 @@ module attributes {pto.target_arch = "a5", pto.kernel_kind = #pto.kernel_kind<ve
       offsets = [%c0, %c0, %c0, %c0, %c0],
       sizes = [%c1, %c1, %c1, %c16, %c64]
       : !pto.tensor_view<1x1x1x16x64xi16> -> !pto.partition_tensor_view<1x1x1x16x64xi16>
-
+    
     %src1_part = pto.partition_view %src1_view,
       offsets = [%c0, %c0, %c0, %c0, %c0],
       sizes = [%c1, %c1, %c1, %c1, %c64]
       : !pto.tensor_view<1x1x1x1x64xi16> -> !pto.partition_tensor_view<1x1x1x1x64xi16>
-
+    
     %dst_part = pto.partition_view %dst_view,
       offsets = [%c0, %c0, %c0, %c0, %c0],
       sizes = [%c1, %c1, %c1, %c16, %c64]
@@ -361,16 +361,16 @@ module attributes {pto.target_arch = "a5", pto.kernel_kind = #pto.kernel_kind<ve
 
     %src0 = pto.alloc_tile
       : !pto.tile_buf<vec, 16x64xi16>
-
+    
     %src1 = pto.alloc_tile
       : !pto.tile_buf<vec, 1x64xi16>
-
+    
     %dst = pto.alloc_tile
       : !pto.tile_buf<vec, 16x64xi16>
 
     pto.tload ins(%src0_part : !pto.partition_tensor_view<1x1x1x16x64xi16>)
               outs(%src0 : !pto.tile_buf<vec, 16x64xi16>)
-
+    
     pto.tload ins(%src1_part : !pto.partition_tensor_view<1x1x1x1x64xi16>)
               outs(%src1 : !pto.tile_buf<vec, 1x64xi16>)
 

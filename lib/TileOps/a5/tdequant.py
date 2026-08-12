@@ -17,14 +17,8 @@ import ptodsl.tilelib as tilelib
 
 
 def _dequant_layout(
-    src_config,
-    scale_config,
-    offset_config,
-    dst_config,
-    operand_memory_spaces,
-    scale_shape,
-    offset_shape,
-    **_,
+    src_config, scale_config, offset_config, dst_config,
+    operand_memory_spaces, scale_shape, offset_shape, **_,
 ):
     # scale/offset may be row- or col-major [rows,1]; the row broadcast is layout-agnostic.
     if not all(space in {"ub", "vec"} for space in operand_memory_spaces):
@@ -50,11 +44,7 @@ def _dequant_layout(
 
 
 def _dequant_shapes(
-    src_valid_shape,
-    scale_valid_shape,
-    offset_valid_shape,
-    dst_valid_shape,
-    **_,
+    src_valid_shape, scale_valid_shape, offset_valid_shape, dst_valid_shape, **_,
 ):
     return (
         len(src_valid_shape) == 2
@@ -94,10 +84,7 @@ def _broadcast_row(tile, row, mask):
     tags=("dequant", "i16"),
 )
 def template_tdequant_i16(
-    src: pto.Tile,
-    scale: pto.Tile,
-    offset: pto.Tile,
-    dst: pto.Tile,
+    src: pto.Tile, scale: pto.Tile, offset: pto.Tile, dst: pto.Tile,
 ):
     valid_rows, valid_cols = dst.valid_shape
     lanes = pto.elements_per_vreg(pto.f32)
@@ -110,9 +97,7 @@ def template_tdequant_i16(
             src_v = pto.vlds(src[row, col:], dist="UNPK_B16")
             value = pto.vcvt(src_v, pto.f32, src_full, part=pto.VcvtPartMode.EVEN)
             offset_b = _broadcast_row(offset, row, mask)
-            scaled = pto.vmul(
-                pto.vsub(value, offset_b, mask), _broadcast_row(scale, row, mask), mask
-            )
+            scaled = pto.vmul(pto.vsub(value, offset_b, mask), _broadcast_row(scale, row, mask), mask)
             pto.vsts(scaled, dst[row, col:], mask)
 
 
@@ -131,10 +116,7 @@ def template_tdequant_i16(
     tags=("dequant", "i8"),
 )
 def template_tdequant_i8(
-    src: pto.Tile,
-    scale: pto.Tile,
-    offset: pto.Tile,
-    dst: pto.Tile,
+    src: pto.Tile, scale: pto.Tile, offset: pto.Tile, dst: pto.Tile,
 ):
     valid_rows, valid_cols = dst.valid_shape
     b8_mask = pto.make_mask(pto.ui8, pto.PAT.ALL)
@@ -148,48 +130,24 @@ def template_tdequant_i8(
             # i8 -> i32 sign-extending interleave (mirrors template_tcvt_si8_to_i32).
             mask_b16_cur, remained = pto.make_mask(pto.i16, remained)
             mask_b16_next, next_remained = pto.make_mask(pto.i16, next_remained)
-            mask_b32_cur = pto.punpack(
-                mask_b16_cur, pto.PredicatePart.LOWER, to_type=pto.mask_b32
-            )
-            mask_b32_next = pto.punpack(
-                mask_b16_next, pto.PredicatePart.LOWER, to_type=pto.mask_b32
-            )
+            mask_b32_cur = pto.punpack(mask_b16_cur, pto.PredicatePart.LOWER, to_type=pto.mask_b32)
+            mask_b32_next = pto.punpack(mask_b16_next, pto.PredicatePart.LOWER, to_type=pto.mask_b32)
             vec_si8_0 = pto.vlds(src[row, col:], dist="UNPK_B8")
             vec_ui8_1, vec_ui8_2 = pto.vintlv(pto.vbitcast(vec_si8_0, pto.ui8), v_zero)
-            i32_cur = pto.vcvt(
-                pto.vbitcast(vec_ui8_1, pto.si8),
-                pto.i32,
-                b8_mask,
-                part=pto.VcvtPartMode.P0,
-            )
-            i32_next = pto.vcvt(
-                pto.vbitcast(vec_ui8_2, pto.si8),
-                pto.i32,
-                b8_mask,
-                part=pto.VcvtPartMode.P0,
-            )
+            i32_cur = pto.vcvt(pto.vbitcast(vec_ui8_1, pto.si8), pto.i32, b8_mask, part=pto.VcvtPartMode.P0)
+            i32_next = pto.vcvt(pto.vbitcast(vec_ui8_2, pto.si8), pto.i32, b8_mask, part=pto.VcvtPartMode.P0)
             # i32 -> f32 (rnd=Z, as in C++).
-            value_cur = pto.vcvt(
-                i32_cur, pto.f32, mask_b32_cur, rnd=pto.VcvtRoundMode.Z
-            )
-            value_next = pto.vcvt(
-                i32_next, pto.f32, mask_b32_next, rnd=pto.VcvtRoundMode.Z
-            )
+            value_cur = pto.vcvt(i32_cur, pto.f32, mask_b32_cur, rnd=pto.VcvtRoundMode.Z)
+            value_next = pto.vcvt(i32_next, pto.f32, mask_b32_next, rnd=pto.VcvtRoundMode.Z)
             scaled_cur = pto.vmul(
-                pto.vsub(
-                    value_cur, _broadcast_row(offset, row, mask_b32_cur), mask_b32_cur
-                ),
+                pto.vsub(value_cur, _broadcast_row(offset, row, mask_b32_cur), mask_b32_cur),
                 _broadcast_row(scale, row, mask_b32_cur),
                 mask_b32_cur,
             )
             scaled_next = pto.vmul(
-                pto.vsub(
-                    value_next,
-                    _broadcast_row(offset, row, mask_b32_next),
-                    mask_b32_next,
-                ),
+                pto.vsub(value_next, _broadcast_row(offset, row, mask_b32_next), mask_b32_next),
                 _broadcast_row(scale, row, mask_b32_next),
                 mask_b32_next,
             )
             pto.vsts(scaled_cur, dst[row, col:], mask_b32_cur)
-            pto.vsts(scaled_next, dst[row, col + lanes_i32 :], mask_b32_next)
+            pto.vsts(scaled_next, dst[row, col + lanes_i32:], mask_b32_next)

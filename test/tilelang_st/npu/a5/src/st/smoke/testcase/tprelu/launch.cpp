@@ -14,15 +14,15 @@
 
 // Case 0: f16 64x64
 
-extern "C" __global__ AICORE void TPRELU_f16_63x63(__gm__ uint16_t* src0, __gm__ uint16_t* src1, __gm__ uint16_t* dst);
-extern "C" __global__ AICORE void TPRELU_f32_64x64(__gm__ float* src0, __gm__ float* src1, __gm__ float* dst);
+extern "C" __global__ AICORE void TPRELU_f16_63x63(__gm__ uint16_t *src0, __gm__ uint16_t *src1, __gm__ uint16_t *dst);
+extern "C" __global__ AICORE void TPRELU_f32_64x64(__gm__ float *src0, __gm__ float *src1, __gm__ float *dst);
 
-void LaunchTPRELU_f16_63x63(uint16_t* src0, uint16_t* src1, uint16_t* dst, void* stream)
-{
-    TPRELU_f16_63x63<<<1, nullptr, stream>>>((__gm__ uint16_t*)src0, (__gm__ uint16_t*)src1, (__gm__ uint16_t*)dst);
+void LaunchTPRELU_f16_63x63(uint16_t *src0, uint16_t *src1, uint16_t *dst, void *stream) {
+    TPRELU_f16_63x63<<<1, nullptr, stream>>>((__gm__ uint16_t *)src0, (__gm__ uint16_t *)src1, (__gm__ uint16_t *)dst);
 }
 
-void LaunchTPRELU_f32_64x64(float* src0, float* src1, float* dst, void* stream)
-{
-    TPRELU_f32_64x64<<<1, nullptr, stream>>>((__gm__ float*)src0, (__gm__ float*)src1, (__gm__ float*)dst);
+
+
+void LaunchTPRELU_f32_64x64(float *src0, float *src1, float *dst, void *stream) {
+    TPRELU_f32_64x64<<<1, nullptr, stream>>>((__gm__ float *)src0, (__gm__ float *)src1, (__gm__ float *)dst);
 }

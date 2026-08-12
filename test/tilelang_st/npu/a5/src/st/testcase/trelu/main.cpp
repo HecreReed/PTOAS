@@ -22,32 +22,32 @@
 using namespace PtoTestCommon;
 
 // Kernel launch wrappers (defined in launch.cpp)
-void LaunchTRELU_int32_64x64(int32_t* input, int32_t* output, void* stream);
-void LaunchTRELU_f16_64x64_v60x60(uint16_t* input, uint16_t* output, void* stream);
-void LaunchTRELU_f32_64x64_v60x60(float* input, float* output, void* stream);
+void LaunchTRELU_int32_64x64(int32_t *input, int32_t *output, void *stream);
+void LaunchTRELU_f16_64x64_v60x60(uint16_t *input, uint16_t *output, void *stream);
+void LaunchTRELU_f32_64x64_v60x60(float *input, float *output, void *stream);
 
 struct TestCase {
-    const char* name;
-    void (*launch)(void*, void*, void*);
-    size_t rows;
-    size_t cols;
-    size_t elemSize;
+    const char *name;
+    void (*launch)(void *, void *, void *);
+    size_t      rows;
+    size_t      cols;
+    size_t      elemSize;
 };
 
 static const TestCase kCases[] = {
-    {"int32_64x64", (void (*)(void*, void*, void*))LaunchTRELU_int32_64x64, 64, 64, sizeof(int32_t)},
-    {"f16_64x64_valid_60x60", (void (*)(void*, void*, void*))LaunchTRELU_f16_64x64_v60x60, 60, 60, sizeof(uint16_t)},
-    {"f32_64x64_valid_60x60", (void (*)(void*, void*, void*))LaunchTRELU_f32_64x64_v60x60, 60, 60, sizeof(float)},
+    {"int32_64x64",             (void (*)(void*, void*, void*))LaunchTRELU_int32_64x64,     64, 64, sizeof(int32_t)},
+    {"f16_64x64_valid_60x60",   (void (*)(void*, void*, void*))LaunchTRELU_f16_64x64_v60x60, 60, 60, sizeof(uint16_t)},
+    {"f32_64x64_valid_60x60",   (void (*)(void*, void*, void*))LaunchTRELU_f32_64x64_v60x60, 60, 60, sizeof(float)},
 };
 static constexpr size_t kNumCases = sizeof(kCases) / sizeof(kCases[0]);
 
-static int RunCase(const TestCase& tc, int deviceId, aclrtStream stream)
-{
+static int RunCase(const TestCase &tc, int deviceId, aclrtStream stream) {
     int rc = 0;
     const size_t elemCount = tc.rows * tc.cols;
-    size_t fileSize = elemCount * tc.elemSize;
+    size_t fileSize  = elemCount * tc.elemSize;
 
-    std::printf("[INFO] === case: %s (shape=%zux%zu) ===\n", tc.name, tc.rows, tc.cols);
+    std::printf("[INFO] === case: %s (shape=%zux%zu) ===\n",
+                tc.name, tc.rows, tc.cols);
 
     std::string caseDir = std::string("./") + tc.name;
 
@@ -93,16 +93,15 @@ static int RunCase(const TestCase& tc, int deviceId, aclrtStream stream)
     return rc;
 }
 
-int main(int argc, char* argv[])
-{
-    const char* caseFilter = (argc > 1) ? argv[1] : nullptr;
+int main(int argc, char *argv[]) {
+    const char *caseFilter = (argc > 1) ? argv[1] : nullptr;
 
     int rc = 0;
     int deviceId = 0;
     aclrtStream stream = nullptr;
 
     aclInit(nullptr);
-    if (const char* envDevice = std::getenv("ACL_DEVICE_ID")) {
+    if (const char *envDevice = std::getenv("ACL_DEVICE_ID")) {
         deviceId = std::atoi(envDevice);
     }
     aclrtSetDevice(deviceId);

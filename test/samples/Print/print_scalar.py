@@ -7,7 +7,6 @@
 # See LICENSE in the root of the software repository for the full text of the License.
 
 """Test pto.print: format is string attribute, scalar is operand. Generates PRINTF("format", scalar) in C++."""
-
 from ptoas.mlir.ir import Context, Location, Module, InsertionPoint, UnitAttr
 from ptoas.mlir.dialects import func, pto
 from ptoas.mlir.ir import F32Type

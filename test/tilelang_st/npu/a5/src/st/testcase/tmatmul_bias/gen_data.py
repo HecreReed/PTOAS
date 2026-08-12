@@ -31,9 +31,7 @@ for case in CASES:
     x2 = np.random.randint(-10, 10, size=(K, N)).astype(b_dtype)
     bias = np.random.randint(1, 10, size=(N,)).astype(bias_dtype)
 
-    golden = np.matmul(x1.astype(c_dtype), x2.astype(c_dtype)).astype(
-        c_dtype
-    ) + bias.astype(c_dtype)
+    golden = np.matmul(x1.astype(c_dtype), x2.astype(c_dtype)).astype(c_dtype) + bias.astype(c_dtype)
 
     # Pad A, B, bias and golden to aligned dimensions so the kernel can load aligned
     # tiles without reading out-of-bounds memory.
@@ -46,15 +44,12 @@ for case in CASES:
     golden_padded = np.zeros((M_aligned, N_aligned), dtype=c_dtype)
     golden_padded[:M, :N] = golden
 
-    save_case_data(
-        case["name"],
-        {
-            "input1": a_padded,
-            "input2": b_padded,
-            "input3": bias_padded,
-            "golden": golden_padded,
-        },
-    )
+    save_case_data(case["name"], {
+        "input1": a_padded,
+        "input2": b_padded,
+        "input3": bias_padded,
+        "golden": golden_padded,
+    })
     print(
         f"[INFO] gen_data: {case['name']} "
         f"M={M} K={K} N={N} M_aligned={M_aligned} K_aligned={K_aligned} N_aligned={N_aligned} "

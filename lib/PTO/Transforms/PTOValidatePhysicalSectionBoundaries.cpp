@@ -29,96 +29,93 @@ namespace pto {
 
 namespace {
 
-static Operation* getNearestPhysicalSection(Operation* op)
-{
-    for (Operation* current = op; current; current = current->getParentOp()) {
-        if (isa<SectionCubeOp, SectionVectorOp>(current))
-            return current;
+static Operation *getNearestPhysicalSection(Operation *op) {
+  for (Operation *current = op; current;
+       current = current->getParentOp()) {
+    if (isa<SectionCubeOp, SectionVectorOp>(current))
+      return current;
+  }
+  return nullptr;
+}
+
+static Operation *getNearestPhysicalSection(BlockArgument argument) {
+  if (!argument)
+    return nullptr;
+  return getNearestPhysicalSection(argument.getOwner()->getParentOp());
+}
+
+static Operation *getDefiningPhysicalSection(Value value) {
+  if (auto blockArgument = dyn_cast<BlockArgument>(value))
+    return getNearestPhysicalSection(blockArgument);
+  if (Operation *definingOp = value.getDefiningOp())
+    return getNearestPhysicalSection(definingOp);
+  return nullptr;
+}
+
+static StringRef getPhysicalSectionKind(Operation *section) {
+  if (!section)
+    return "outside a physical section";
+  return isa<SectionCubeOp>(section) ? "pto.section.cube"
+                                     : "pto.section.vector";
+}
+
+static LogicalResult verifyOperandBoundary(Operation *user, OpOperand &operand) {
+  Operation *definingSection = getDefiningPhysicalSection(operand.get());
+  if (!definingSection)
+    return success();
+
+  Operation *usingSection = getNearestPhysicalSection(user);
+  if (definingSection == usingSection)
+    return success();
+
+  return user->emitOpError()
+         << "value defined in " << getPhysicalSectionKind(definingSection)
+         << " cannot be used " << (usingSection ? "inside " : "outside ")
+         << (usingSection ? getPhysicalSectionKind(usingSection)
+                          : "the defining physical section")
+         << "; physical sections have lexical SSA scope. Pass shared data "
+            "through a caller-owned GM/UB buffer with explicit "
+            "synchronization, or recompute it in the consumer section";
+}
+
+static LogicalResult verifyFunction(func::FuncOp function) {
+  LogicalResult result = success();
+  function.walk([&](Operation *op) {
+    if (failed(result))
+      return WalkResult::interrupt();
+    for (OpOperand &operand : op->getOpOperands()) {
+      if (failed(verifyOperandBoundary(op, operand))) {
+        result = failure();
+        return WalkResult::interrupt();
+      }
     }
-    return nullptr;
-}
-
-static Operation* getNearestPhysicalSection(BlockArgument argument)
-{
-    if (!argument)
-        return nullptr;
-    return getNearestPhysicalSection(argument.getOwner()->getParentOp());
-}
-
-static Operation* getDefiningPhysicalSection(Value value)
-{
-    if (auto blockArgument = dyn_cast<BlockArgument>(value))
-        return getNearestPhysicalSection(blockArgument);
-    if (Operation* definingOp = value.getDefiningOp())
-        return getNearestPhysicalSection(definingOp);
-    return nullptr;
-}
-
-static StringRef getPhysicalSectionKind(Operation* section)
-{
-    if (!section)
-        return "outside a physical section";
-    return isa<SectionCubeOp>(section) ? "pto.section.cube" : "pto.section.vector";
-}
-
-static LogicalResult verifyOperandBoundary(Operation* user, OpOperand& operand)
-{
-    Operation* definingSection = getDefiningPhysicalSection(operand.get());
-    if (!definingSection)
-        return success();
-
-    Operation* usingSection = getNearestPhysicalSection(user);
-    if (definingSection == usingSection)
-        return success();
-
-    return user->emitOpError() << "value defined in " << getPhysicalSectionKind(definingSection) << " cannot be used "
-                               << (usingSection ? "inside " : "outside ")
-                               << (usingSection ? getPhysicalSectionKind(usingSection) :
-                                                  "the defining physical section")
-                               << "; physical sections have lexical SSA scope. Pass shared data "
-                                  "through a caller-owned GM/UB buffer with explicit "
-                                  "synchronization, or recompute it in the consumer section";
-}
-
-static LogicalResult verifyFunction(func::FuncOp function)
-{
-    LogicalResult result = success();
-    function.walk([&](Operation* op) {
-        if (failed(result))
-            return WalkResult::interrupt();
-        for (OpOperand& operand : op->getOpOperands()) {
-            if (failed(verifyOperandBoundary(op, operand))) {
-                result = failure();
-                return WalkResult::interrupt();
-            }
-        }
-        return WalkResult::advance();
-    });
-    return result;
+    return WalkResult::advance();
+  });
+  return result;
 }
 
 struct PTOValidatePhysicalSectionBoundariesPass
-    : public impl::PTOValidatePhysicalSectionBoundariesBase<PTOValidatePhysicalSectionBoundariesPass> {
-    void runOnOperation() override
-    {
-        ModuleOp module = getOperation();
-        LogicalResult result = success();
-        module.walk([&](func::FuncOp function) {
-            if (failed(result))
-                return WalkResult::interrupt();
-            result = verifyFunction(function);
-            return failed(result) ? WalkResult::interrupt() : WalkResult::advance();
-        });
-        if (failed(result))
-            signalPassFailure();
-    }
+    : public impl::PTOValidatePhysicalSectionBoundariesBase<
+          PTOValidatePhysicalSectionBoundariesPass> {
+  void runOnOperation() override {
+    ModuleOp module = getOperation();
+    LogicalResult result = success();
+    module.walk([&](func::FuncOp function) {
+      if (failed(result))
+        return WalkResult::interrupt();
+      result = verifyFunction(function);
+      return failed(result) ? WalkResult::interrupt() : WalkResult::advance();
+    });
+    if (failed(result))
+      signalPassFailure();
+  }
 };
 
 } // namespace
 } // namespace pto
 } // namespace mlir
 
-std::unique_ptr<mlir::Pass> mlir::pto::createPTOValidatePhysicalSectionBoundariesPass()
-{
-    return std::make_unique<mlir::pto::PTOValidatePhysicalSectionBoundariesPass>();
+std::unique_ptr<mlir::Pass>
+mlir::pto::createPTOValidatePhysicalSectionBoundariesPass() {
+  return std::make_unique<mlir::pto::PTOValidatePhysicalSectionBoundariesPass>();
 }

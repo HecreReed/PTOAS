@@ -22,35 +22,35 @@
 using namespace PtoTestCommon;
 
 // Kernel launch wrappers (defined in launch.cpp)
-void LaunchTDIV_f32_16x64(float* a, float* b, float* c, void* stream);
-void LaunchTDIV_f32_32x32(float* a, float* b, float* c, void* stream);
-void LaunchTDIV_f32_64x64(float* a, float* b, float* c, void* stream);
-void LaunchTDIV_f16_16x256(void* a, void* b, void* c, void* stream);
-void LaunchTDIV_f32_16x64_hp_precision(float* a, float* b, float* c, void* stream);
-void LaunchTDIV_f16_16x64_hp_precision(void* a, void* b, void* c, void* stream);
-void LaunchTDIV_f32_16x64_hp_subnormal(float* a, float* b, float* c, void* stream);
-void LaunchTDIV_f16_16x64_hp_subnormal(void* a, void* b, void* c, void* stream);
-void LaunchTDIV_f32_16x64_hp_overflow(float* a, float* b, float* c, void* stream);
-void LaunchTDIV_f16_16x64_hp_overflow(void* a, void* b, void* c, void* stream);
-void LaunchTDIV_f32_32x32_hp(float* a, float* b, float* c, void* stream);
-void LaunchTDIV_f32_64x64_hp(float* a, float* b, float* c, void* stream);
-void LaunchTDIV_f16_16x256_hp(void* a, void* b, void* c, void* stream);
-void LaunchTDIV_f32_16x64_hp_partial(float* a, float* b, float* c, void* stream);
-void LaunchTDIV_f16_16x64_hp_partial(void* a, void* b, void* c, void* stream);
-void LaunchTDIV_f32_2x16_hp(float* a, float* b, float* c, void* stream);
-void LaunchTDIV_f16_2x32_hp(void* a, void* b, void* c, void* stream);
+void LaunchTDIV_f32_16x64(float *a, float *b, float *c, void *stream);
+void LaunchTDIV_f32_32x32(float *a, float *b, float *c, void *stream);
+void LaunchTDIV_f32_64x64(float *a, float *b, float *c, void *stream);
+void LaunchTDIV_f16_16x256(void *a, void *b, void *c, void *stream);
+void LaunchTDIV_f32_16x64_hp_precision(float *a, float *b, float *c, void *stream);
+void LaunchTDIV_f16_16x64_hp_precision(void *a, void *b, void *c, void *stream);
+void LaunchTDIV_f32_16x64_hp_subnormal(float *a, float *b, float *c, void *stream);
+void LaunchTDIV_f16_16x64_hp_subnormal(void *a, void *b, void *c, void *stream);
+void LaunchTDIV_f32_16x64_hp_overflow(float *a, float *b, float *c, void *stream);
+void LaunchTDIV_f16_16x64_hp_overflow(void *a, void *b, void *c, void *stream);
+void LaunchTDIV_f32_32x32_hp(float *a, float *b, float *c, void *stream);
+void LaunchTDIV_f32_64x64_hp(float *a, float *b, float *c, void *stream);
+void LaunchTDIV_f16_16x256_hp(void *a, void *b, void *c, void *stream);
+void LaunchTDIV_f32_16x64_hp_partial(float *a, float *b, float *c, void *stream);
+void LaunchTDIV_f16_16x64_hp_partial(void *a, void *b, void *c, void *stream);
+void LaunchTDIV_f32_2x16_hp(float *a, float *b, float *c, void *stream);
+void LaunchTDIV_f16_2x32_hp(void *a, void *b, void *c, void *stream);
 
 // Generic launch function type for void* pointers
-using LaunchFn = void (*)(void* a, void* b, void* c, void* stream);
+using LaunchFn = void (*)(void *a, void *b, void *c, void *stream);
 
 struct TestCase {
-    const char* name;
-    LaunchFn launch;
-    size_t rows;      // allocated tile rows
-    size_t cols;      // allocated tile cols
-    size_t validRows; // effective computation rows  (<= rows)
-    size_t validCols; // effective computation cols  (<= cols)
-    size_t elemSize;  // bytes per element
+    const char *name;
+    LaunchFn    launch;
+    size_t      rows;       // allocated tile rows
+    size_t      cols;       // allocated tile cols
+    size_t      validRows;  // effective computation rows  (<= rows)
+    size_t      validCols;  // effective computation cols  (<= cols)
+    size_t      elemSize;   // bytes per element
 };
 
 static const TestCase kCases[] = {
@@ -74,15 +74,13 @@ static const TestCase kCases[] = {
 };
 static constexpr size_t kNumCases = sizeof(kCases) / sizeof(kCases[0]);
 
-static int RunCase(const TestCase& tc, int deviceId, aclrtStream stream)
-{
+static int RunCase(const TestCase &tc, int deviceId, aclrtStream stream) {
     int rc = 0;
     const size_t elemCount = tc.rows * tc.cols;
-    const size_t fileSize = elemCount * tc.elemSize;
+    const size_t fileSize  = elemCount * tc.elemSize;
 
-    std::printf(
-        "[INFO] === case: %s (shape=%zux%zu, valid=%zux%zu) ===\n", tc.name, tc.rows, tc.cols, tc.validRows,
-        tc.validCols);
+    std::printf("[INFO] === case: %s (shape=%zux%zu, valid=%zux%zu) ===\n",
+                tc.name, tc.rows, tc.cols, tc.validRows, tc.validCols);
 
     // Per-case data directory
     std::string caseDir = std::string("./") + tc.name;
@@ -92,13 +90,13 @@ static int RunCase(const TestCase& tc, int deviceId, aclrtStream stream)
     float *src0Host = nullptr, *src1Host = nullptr, *dstHost = nullptr;
     float *src0Device = nullptr, *src1Device = nullptr, *dstDevice = nullptr;
 
-    aclrtMallocHost((void**)(&src0Host), fileSize);
-    aclrtMallocHost((void**)(&src1Host), fileSize);
-    aclrtMallocHost((void**)(&dstHost), fileSize);
+    aclrtMallocHost((void **)(&src0Host), fileSize);
+    aclrtMallocHost((void **)(&src1Host), fileSize);
+    aclrtMallocHost((void **)(&dstHost), fileSize);
 
-    aclrtMalloc((void**)&src0Device, fileSize, ACL_MEM_MALLOC_HUGE_FIRST);
-    aclrtMalloc((void**)&src1Device, fileSize, ACL_MEM_MALLOC_HUGE_FIRST);
-    aclrtMalloc((void**)&dstDevice, fileSize, ACL_MEM_MALLOC_HUGE_FIRST);
+    aclrtMalloc((void **)&src0Device, fileSize, ACL_MEM_MALLOC_HUGE_FIRST);
+    aclrtMalloc((void **)&src1Device, fileSize, ACL_MEM_MALLOC_HUGE_FIRST);
+    aclrtMalloc((void **)&dstDevice, fileSize, ACL_MEM_MALLOC_HUGE_FIRST);
 
     if (!ReadFile((caseDir + "/input1.bin").c_str(), src0FileSize, src0Host, fileSize)) {
         std::fprintf(stderr, "[ERROR] failed to read %s/input1.bin\n", caseDir.c_str());
@@ -142,17 +140,16 @@ static int RunCase(const TestCase& tc, int deviceId, aclrtStream stream)
     return rc;
 }
 
-int main(int argc, char* argv[])
-{
+int main(int argc, char *argv[]) {
     // Optional case filter: ./tdiv [case_name]
-    const char* caseFilter = (argc > 1) ? argv[1] : nullptr;
+    const char *caseFilter = (argc > 1) ? argv[1] : nullptr;
 
     int rc = 0;
     int deviceId = 0;
     aclrtStream stream = nullptr;
 
     aclInit(nullptr);
-    if (const char* envDevice = std::getenv("ACL_DEVICE_ID")) {
+    if (const char *envDevice = std::getenv("ACL_DEVICE_ID")) {
         deviceId = std::atoi(envDevice);
     }
     aclrtSetDevice(deviceId);

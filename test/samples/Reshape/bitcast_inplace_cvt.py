@@ -37,12 +37,8 @@ def build():
             fractal_ab_size = pto.TileConfig.fractalABSize
             cfg = pto.TileBufConfigAttr.get(bl, sl, fractal_ab_size, pd, ctx)
 
-            tile_buf_32_f16 = pto.TileBufType.get(
-                [32, 32], f16, vec, [32, 32], cfg, ctx
-            )
-            tile_buf_32_f32 = pto.TileBufType.get(
-                [32, 32], f32, vec, [32, 32], cfg, ctx
-            )
+            tile_buf_32_f16 = pto.TileBufType.get([32, 32], f16, vec, [32, 32], cfg, ctx)
+            tile_buf_32_f32 = pto.TileBufType.get([32, 32], f32, vec, [32, 32], cfg, ctx)
 
             rmode_attr = pto.RoundModeAttr.get(pto.RoundMode.ROUND, ctx)
 
@@ -59,19 +55,11 @@ def build():
 
                 arg_in, arg_out = entry.arguments
 
-                tv_in = pto.MakeTensorViewOp(
-                    tv2_f16, arg_in, [c32, c32], [c32, c1]
-                ).result
-                tv_out = pto.MakeTensorViewOp(
-                    tv2_f32, arg_out, [c32, c32], [c32, c1]
-                ).result
+                tv_in = pto.MakeTensorViewOp(tv2_f16, arg_in, [c32, c32], [c32, c1]).result
+                tv_out = pto.MakeTensorViewOp(tv2_f32, arg_out, [c32, c32], [c32, c1]).result
 
-                sv_in = pto.PartitionViewOp(
-                    tile_view_32_f16, tv_in, offsets=[c0, c0], sizes=[c32, c32]
-                ).result
-                sv_out = pto.PartitionViewOp(
-                    tile_view_32_f32, tv_out, offsets=[c0, c0], sizes=[c32, c32]
-                ).result
+                sv_in = pto.PartitionViewOp(tile_view_32_f16, tv_in, offsets=[c0, c0], sizes=[c32, c32]).result
+                sv_out = pto.PartitionViewOp(tile_view_32_f32, tv_out, offsets=[c0, c0], sizes=[c32, c32]).result
 
                 # Allocate a f32 tile, then bitcast it as a f16 view to load input.
                 # Use tcvt ins/outs to express an in-place conversion back to f32.
@@ -90,3 +78,4 @@ def build():
 
 if __name__ == "__main__":
     print(build())
+

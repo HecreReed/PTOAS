@@ -36,18 +36,14 @@ def gu_init_reference(pv: np.ndarray) -> np.ndarray:
     return pv_f32.copy()
 
 
-def gu_update_reference(
-    o_prev: np.ndarray, pv: np.ndarray, exp_max: np.ndarray
-) -> np.ndarray:
+def gu_update_reference(o_prev: np.ndarray, pv: np.ndarray, exp_max: np.ndarray) -> np.ndarray:
     """Return ``O`` for the update GU pass: ``O = O * exp_max + PV``."""
     o_prev_f32 = np.asarray(o_prev, dtype=np.float32)
     pv_f32 = np.asarray(pv, dtype=np.float32)
     if o_prev_f32.ndim != 2:
         raise ValueError(f"o_prev must be 2D, got shape {o_prev_f32.shape}")
     if pv_f32.shape != o_prev_f32.shape:
-        raise ValueError(
-            f"pv shape {pv_f32.shape} must match o_prev shape {o_prev_f32.shape}"
-        )
+        raise ValueError(f"pv shape {pv_f32.shape} must match o_prev shape {o_prev_f32.shape}")
     rows = o_prev_f32.shape[0]
     exp_f32 = np.asarray(exp_max, dtype=np.float32).reshape(rows, 1)
     return o_prev_f32 * exp_f32 + pv_f32
@@ -197,9 +193,7 @@ def fa_gu_update_vpto_validate(
 
     o_tile = pto.alloc_tile(shape=[BR, BC], dtype=pto.f32, valid_shape=[BR, BC])
     pv_tile = pto.alloc_tile(shape=[BR, BC], dtype=pto.f32, valid_shape=[BR, BC])
-    exp_max = pto.alloc_tile(
-        shape=[BR, 1], dtype=pto.f32, valid_shape=[BR, 1], blayout="ColMajor"
-    )
+    exp_max = pto.alloc_tile(shape=[BR, 1], dtype=pto.f32, valid_shape=[BR, 1], blayout="ColMajor")
 
     pto.tile.load(
         pto.partition_view(o_view, offsets=[0, 0, 0, 0, 0], sizes=[1, 1, 1, BR, BC]),
@@ -210,9 +204,7 @@ def fa_gu_update_vpto_validate(
         pv_tile,
     )
     pto.tile.load(
-        pto.partition_view(
-            exp_max_view, offsets=[0, 0, 0, 0, 0], sizes=[1, 1, 1, BR, 1]
-        ),
+        pto.partition_view(exp_max_view, offsets=[0, 0, 0, 0, 0], sizes=[1, 1, 1, BR, 1]),
         exp_max,
     )
     fa_gu_update_vpto(o_tile, pv_tile, exp_max)
@@ -231,9 +223,7 @@ def fa_gu_vpto_probe(
 ):
     pv_tile = pto.alloc_tile(shape=[BR, BC], dtype=pto.f32, valid_shape=[BR, BC])
     o_tile = pto.alloc_tile(shape=[BR, BC], dtype=pto.f32, valid_shape=[BR, BC])
-    exp_max = pto.alloc_tile(
-        shape=[BR, 1], dtype=pto.f32, valid_shape=[BR, 1], blayout="ColMajor"
-    )
+    exp_max = pto.alloc_tile(shape=[BR, 1], dtype=pto.f32, valid_shape=[BR, 1], blayout="ColMajor")
 
     if INIT:
         fa_gu_init_vpto(pv_tile, o_tile)
@@ -298,9 +288,7 @@ def _to_device(torch, array: np.ndarray):
     return torch.from_numpy(np.ascontiguousarray(array)).to(_DEVICE)
 
 
-def _assert_close(
-    name: str, got: np.ndarray, ref: np.ndarray, *, rtol: float, atol: float
-) -> None:
+def _assert_close(name: str, got: np.ndarray, ref: np.ndarray, *, rtol: float, atol: float) -> None:
     try:
         np.testing.assert_allclose(got, ref, rtol=rtol, atol=atol)
     except AssertionError as exc:
@@ -337,9 +325,7 @@ def run_demo(
 
         got_o = o_t.cpu().numpy()
         _assert_close("init.o", got_o, ref_o, rtol=1e-6, atol=1e-6)
-        print(
-            f"PASS gu-init br={br} bc={bc} compile={compile_s:.3f}s launch={launch_s:.3f}s"
-        )
+        print(f"PASS gu-init br={br} bc={bc} compile={compile_s:.3f}s launch={launch_s:.3f}s")
         return
 
     o_prev = rng.uniform(-4.0, 4.0, size=(br, bc)).astype(np.float32)
@@ -358,9 +344,7 @@ def run_demo(
 
     got_o = o_t.cpu().numpy()
     _assert_close("update.o", got_o, ref_o, rtol=2e-5, atol=2e-5)
-    print(
-        f"PASS gu-update br={br} bc={bc} compile={compile_s:.3f}s launch={launch_s:.3f}s"
-    )
+    print(f"PASS gu-update br={br} bc={bc} compile={compile_s:.3f}s launch={launch_s:.3f}s")
 
 
 def build_arg_parser():
@@ -383,9 +367,7 @@ def build_arg_parser():
     parser.add_argument("--br", type=int, default=32)
     parser.add_argument("--bc", type=int, default=128)
     parser.add_argument("--seed", type=int, default=20260606)
-    parser.add_argument(
-        "-o", "--output", default="-", help="output MLIR path, or '-' for stdout"
-    )
+    parser.add_argument("-o", "--output", default="-", help="output MLIR path, or '-' for stdout")
     return parser
 
 

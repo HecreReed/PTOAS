@@ -7,16 +7,7 @@
 # See LICENSE in the root of the software repository for the full text of the License.
 
 from ptoas.mlir.dialects import arith, func, pto
-from ptoas.mlir.ir import (
-    Context,
-    F32Type,
-    IndexType,
-    InsertionPoint,
-    IntegerType,
-    Location,
-    Module,
-    UnitAttr,
-)
+from ptoas.mlir.ir import Context, F32Type, IndexType, InsertionPoint, IntegerType, Location, Module, UnitAttr
 
 
 def build():
@@ -65,43 +56,19 @@ def build():
                     entry.arguments
                 )
 
-                src0_tv = pto.MakeTensorViewOp(
-                    tv2_f32, src0_ptr, [c16, c32], [c32, c1]
-                ).result
-                src1_tv = pto.MakeTensorViewOp(
-                    tv2_f32, src1_ptr, [c16, c32], [c32, c1]
-                ).result
-                src0_idx_tv = pto.MakeTensorViewOp(
-                    tv2_ui32, src0_idx_ptr, [c16, c32], [c32, c1]
-                ).result
-                src1_idx_tv = pto.MakeTensorViewOp(
-                    tv2_ui32, src1_idx_ptr, [c16, c32], [c32, c1]
-                ).result
-                dst_tv = pto.MakeTensorViewOp(
-                    tv2_f32, dst_ptr, [c16, c32], [c32, c1]
-                ).result
-                dst_idx_tv = pto.MakeTensorViewOp(
-                    tv2_ui32, dst_idx_ptr, [c16, c32], [c32, c1]
-                ).result
+                src0_tv = pto.MakeTensorViewOp(tv2_f32, src0_ptr, [c16, c32], [c32, c1]).result
+                src1_tv = pto.MakeTensorViewOp(tv2_f32, src1_ptr, [c16, c32], [c32, c1]).result
+                src0_idx_tv = pto.MakeTensorViewOp(tv2_ui32, src0_idx_ptr, [c16, c32], [c32, c1]).result
+                src1_idx_tv = pto.MakeTensorViewOp(tv2_ui32, src1_idx_ptr, [c16, c32], [c32, c1]).result
+                dst_tv = pto.MakeTensorViewOp(tv2_f32, dst_ptr, [c16, c32], [c32, c1]).result
+                dst_idx_tv = pto.MakeTensorViewOp(tv2_ui32, dst_idx_ptr, [c16, c32], [c32, c1]).result
 
-                src0 = pto.PartitionViewOp(
-                    tile_view_f32, src0_tv, offsets=[c0, c0], sizes=[c16, c32]
-                ).result
-                src1 = pto.PartitionViewOp(
-                    tile_view_f32, src1_tv, offsets=[c0, c0], sizes=[c16, c32]
-                ).result
-                src0_idx = pto.PartitionViewOp(
-                    tile_view_ui32, src0_idx_tv, offsets=[c0, c0], sizes=[c16, c32]
-                ).result
-                src1_idx = pto.PartitionViewOp(
-                    tile_view_ui32, src1_idx_tv, offsets=[c0, c0], sizes=[c16, c32]
-                ).result
-                dst = pto.PartitionViewOp(
-                    tile_view_f32, dst_tv, offsets=[c0, c0], sizes=[c16, c32]
-                ).result
-                dst_idx = pto.PartitionViewOp(
-                    tile_view_ui32, dst_idx_tv, offsets=[c0, c0], sizes=[c16, c32]
-                ).result
+                src0 = pto.PartitionViewOp(tile_view_f32, src0_tv, offsets=[c0, c0], sizes=[c16, c32]).result
+                src1 = pto.PartitionViewOp(tile_view_f32, src1_tv, offsets=[c0, c0], sizes=[c16, c32]).result
+                src0_idx = pto.PartitionViewOp(tile_view_ui32, src0_idx_tv, offsets=[c0, c0], sizes=[c16, c32]).result
+                src1_idx = pto.PartitionViewOp(tile_view_ui32, src1_idx_tv, offsets=[c0, c0], sizes=[c16, c32]).result
+                dst = pto.PartitionViewOp(tile_view_f32, dst_tv, offsets=[c0, c0], sizes=[c16, c32]).result
+                dst_idx = pto.PartitionViewOp(tile_view_ui32, dst_idx_tv, offsets=[c0, c0], sizes=[c16, c32]).result
 
                 src0_tile = pto.AllocTileOp(tile_f32).result
                 src1_tile = pto.AllocTileOp(tile_f32).result

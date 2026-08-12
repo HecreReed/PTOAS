@@ -16,9 +16,13 @@
 #include "acl/acl.h"
 #endif
 
-extern "C" __global__[aicore] void vmrgsort4_kernel_f32(__gm__ float* src, __gm__ float* dst, __gm__ int16_t* counts);
+extern "C" __global__ [aicore] void vmrgsort4_kernel_f32(__gm__ float *src,
+                                                         __gm__ float *dst,
+                                                         __gm__ int16_t *counts);
 
-void LaunchVmrgsort4_kernel_f32(float* src, float* dst, int16_t* counts, void* stream)
-{
-    vmrgsort4_kernel_f32<<<1, nullptr, stream>>>((__gm__ float*)src, (__gm__ float*)dst, (__gm__ int16_t*)counts);
+void LaunchVmrgsort4_kernel_f32(float *src, float *dst, int16_t *counts,
+                                void *stream) {
+  vmrgsort4_kernel_f32<<<1, nullptr, stream>>>((__gm__ float *)src,
+                                               (__gm__ float *)dst,
+                                               (__gm__ int16_t *)counts);
 }

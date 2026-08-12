@@ -33,15 +33,12 @@ class PTOASCLITests(unittest.TestCase):
             wrapper.write_text("", encoding="utf-8")
             native_module = self._make_native_module(package_root)
 
-            with (
-                mock.patch.object(
-                    _cli, "_load_native_module", return_value=native_module
-                ),
-                mock.patch.dict(
-                    _cli.os.environ,
-                    {"PATH": "/usr/bin"},
-                    clear=True,
-                ),
+            with mock.patch.object(
+                _cli, "_load_native_module", return_value=native_module
+            ), mock.patch.dict(
+                _cli.os.environ,
+                {"PATH": "/usr/bin"},
+                clear=True,
             ):
                 exit_code = _cli.launch(["--version"], wrapper=wrapper)
                 environment = dict(_cli.os.environ)
@@ -83,7 +80,9 @@ class PTOASCLITests(unittest.TestCase):
             ):
                 _cli.launch(arguments, wrapper=wrapper)
 
-        native_module.main.assert_called_once_with([str(wrapper.resolve()), *arguments])
+        native_module.main.assert_called_once_with(
+            [str(wrapper.resolve()), *arguments]
+        )
 
     def test_build_tree_uses_the_same_packaged_resource_layout(self):
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -93,7 +92,9 @@ class PTOASCLITests(unittest.TestCase):
             tileops_dir.mkdir(parents=True)
             native_module = self._make_native_module(package_root)
 
-            python_root, resolved_tileops = _cli._resolve_runtime_paths(native_module)
+            python_root, resolved_tileops = _cli._resolve_runtime_paths(
+                native_module
+            )
 
         self.assertEqual(python_root, package_root.parent.resolve())
         self.assertEqual(resolved_tileops, tileops_dir.resolve())

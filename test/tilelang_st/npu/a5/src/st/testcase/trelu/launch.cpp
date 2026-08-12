@@ -13,25 +13,22 @@
 #endif
 
 // Case 0: int32 64x64
-extern "C" __global__ AICORE void TRELU_int32_64x64(__gm__ int32_t* input, __gm__ int32_t* output);
+extern "C" __global__ AICORE void TRELU_int32_64x64(__gm__ int32_t *input, __gm__ int32_t *output);
 
-void LaunchTRELU_int32_64x64(int32_t* input, int32_t* output, void* stream)
-{
-    TRELU_int32_64x64<<<1, nullptr, stream>>>((__gm__ int32_t*)input, (__gm__ int32_t*)output);
+void LaunchTRELU_int32_64x64(int32_t *input, int32_t *output, void *stream) {
+    TRELU_int32_64x64<<<1, nullptr, stream>>>((__gm__ int32_t *)input, (__gm__ int32_t *)output);
 }
 
 // Case 1: f16 64x64 valid 60x60
-extern "C" __global__ AICORE void TRELU_f16_64x64_v60x60(__gm__ uint16_t* input, __gm__ uint16_t* output);
+extern "C" __global__ AICORE void TRELU_f16_64x64_v60x60(__gm__ uint16_t *input, __gm__ uint16_t *output);
 
-void LaunchTRELU_f16_64x64_v60x60(uint16_t* input, uint16_t* output, void* stream)
-{
-    TRELU_f16_64x64_v60x60<<<1, nullptr, stream>>>((__gm__ uint16_t*)input, (__gm__ uint16_t*)output);
+void LaunchTRELU_f16_64x64_v60x60(uint16_t *input, uint16_t *output, void *stream) {
+    TRELU_f16_64x64_v60x60<<<1, nullptr, stream>>>((__gm__ uint16_t *)input, (__gm__ uint16_t *)output);
 }
 
 // Case 2: f32 64x64 valid 60x60
-extern "C" __global__ AICORE void TRELU_f32_64x64_v60x60(__gm__ float* input, __gm__ float* output);
+extern "C" __global__ AICORE void TRELU_f32_64x64_v60x60(__gm__ float *input, __gm__ float *output);
 
-void LaunchTRELU_f32_64x64_v60x60(float* input, float* output, void* stream)
-{
-    TRELU_f32_64x64_v60x60<<<1, nullptr, stream>>>((__gm__ float*)input, (__gm__ float*)output);
+void LaunchTRELU_f32_64x64_v60x60(float *input, float *output, void *stream) {
+    TRELU_f32_64x64_v60x60<<<1, nullptr, stream>>>((__gm__ float *)input, (__gm__ float *)output);
 }

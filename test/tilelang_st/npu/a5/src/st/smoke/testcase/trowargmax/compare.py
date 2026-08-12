@@ -30,15 +30,9 @@ def main():
         vr, vc = case["valid_shape"]
         out_shape = (vr, 1)
 
-        golden = np.fromfile(
-            os.path.join(case_dir, "golden.bin"),
-            dtype=case["dst_dtype"],
-            count=np.prod(out_shape),
-        ).reshape(out_shape)
+        golden = np.fromfile(os.path.join(case_dir, "golden.bin"), dtype=case["dst_dtype"], count=np.prod(out_shape)).reshape(out_shape)
 
-        output_full = np.fromfile(
-            os.path.join(case_dir, "output.bin"), dtype=case["dst_dtype"]
-        )
+        output_full = np.fromfile(os.path.join(case_dir, "output.bin"), dtype=case["dst_dtype"])
         dst_cols = len(output_full) // vr
         output = output_full.reshape(vr, dst_cols)[:, 0:1]
 

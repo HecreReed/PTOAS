@@ -20,12 +20,8 @@ RNG_SEED = 19
 def generate(output_dir: Path) -> None:
     np.random.seed(RNG_SEED)
     src = np.random.uniform(low=-2, high=2, size=(ROWS, COLS)).astype(np.float32)
-    scale = (np.max(np.abs(src), axis=1, keepdims=True) / np.float32(127.0)).astype(
-        np.float32
-    )
-    inv_scale = np.where(scale != 0, np.float32(1.0) / scale, np.float32(0.0)).astype(
-        np.float32
-    )
+    scale = (np.max(np.abs(src), axis=1, keepdims=True) / np.float32(127.0)).astype(np.float32)
+    inv_scale = np.where(scale != 0, np.float32(1.0) / scale, np.float32(0.0)).astype(np.float32)
     rounded = np.round(src * inv_scale).astype(np.float32)
     golden = np.clip(rounded.astype(np.float16), -128, 127).astype(np.int8)
     dst = np.full((ROWS, COLS), 0xA5, dtype=np.uint8)

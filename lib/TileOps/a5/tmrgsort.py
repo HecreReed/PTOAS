@@ -94,24 +94,14 @@ def template_tmrgsort_single_list(src: pto.Tile, block_len: pto.i32, dst: pto.Ti
     is_post_update=False,
     tags=("sort", "merge", "multi-list"),
 )
-def template_tmrgsort_multi_list2(
-    src0: pto.Tile, src1: pto.Tile, tmp: pto.Tile, dst: pto.Tile, ex_vec
-):
+def template_tmrgsort_multi_list2(src0: pto.Tile, src1: pto.Tile, tmp: pto.Tile, dst: pto.Tile, ex_vec):
     _ = ex_vec
     src0_structures = _structures(src0.valid_shape[1], dst.dtype)
     src1_structures = _structures(src1.valid_shape[1], dst.dtype)
     count = _pack_count(src0_structures, src1_structures)
     exhausted = int(pto.get_op_attr("exhausted", "0"))
     config = pto.i64(1 | (0b0011 << 8) | (exhausted << 12))
-    pto.vmrgsort4(
-        tmp.as_ptr(),
-        src0.as_ptr(),
-        src1.as_ptr(),
-        src0.as_ptr(),
-        src0.as_ptr(),
-        count,
-        config,
-    )
+    pto.vmrgsort4(tmp.as_ptr(), src0.as_ptr(), src1.as_ptr(), src0.as_ptr(), src0.as_ptr(), count, config)
     _copy_tmp_to_dst(tmp, dst)
 
 
@@ -119,10 +109,7 @@ def template_tmrgsort_multi_list2(
     op="pto.tmrgsort",
     target="a5",
     name="template_tmrgsort_multi_list3",
-    dtypes=[
-        ("f32", "f32", "f32", "f32", "f32", "i16"),
-        ("f16", "f16", "f16", "f16", "f16", "i16"),
-    ],
+    dtypes=[("f32", "f32", "f32", "f32", "f32", "i16"), ("f16", "f16", "f16", "f16", "f16", "i16")],
     iteration_axis="none",
     op_engine="vector",
     op_class="other",
@@ -147,15 +134,7 @@ def template_tmrgsort_multi_list3(
     count = _pack_count(src0_structures, src1_structures, src2_structures)
     exhausted = int(pto.get_op_attr("exhausted", "0"))
     config = pto.i64(1 | (0b0111 << 8) | (exhausted << 12))
-    pto.vmrgsort4(
-        tmp.as_ptr(),
-        src0.as_ptr(),
-        src1.as_ptr(),
-        src2.as_ptr(),
-        src0.as_ptr(),
-        count,
-        config,
-    )
+    pto.vmrgsort4(tmp.as_ptr(), src0.as_ptr(), src1.as_ptr(), src2.as_ptr(), src0.as_ptr(), count, config)
     _copy_tmp_to_dst(tmp, dst)
 
 
@@ -190,18 +169,8 @@ def template_tmrgsort_multi_list4(
     src1_structures = _structures(src1.valid_shape[1], dst.dtype)
     src2_structures = _structures(src2.valid_shape[1], dst.dtype)
     src3_structures = _structures(src3.valid_shape[1], dst.dtype)
-    count = _pack_count(
-        src0_structures, src1_structures, src2_structures, src3_structures
-    )
+    count = _pack_count(src0_structures, src1_structures, src2_structures, src3_structures)
     exhausted = int(pto.get_op_attr("exhausted", "0"))
     config = pto.i64(1 | (0b1111 << 8) | (exhausted << 12))
-    pto.vmrgsort4(
-        tmp.as_ptr(),
-        src0.as_ptr(),
-        src1.as_ptr(),
-        src2.as_ptr(),
-        src3.as_ptr(),
-        count,
-        config,
-    )
+    pto.vmrgsort4(tmp.as_ptr(), src0.as_ptr(), src1.as_ptr(), src2.as_ptr(), src3.as_ptr(), count, config)
     _copy_tmp_to_dst(tmp, dst)

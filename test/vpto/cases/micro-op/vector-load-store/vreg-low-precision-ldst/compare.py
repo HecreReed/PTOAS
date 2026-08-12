@@ -40,11 +40,7 @@ def main() -> None:
         diff = np.nonzero(golden != output)[0]
         idx = int(diff[0])
         segment = idx // VECTOR_BYTES
-        name = (
-            SEGMENT_NAMES[segment]
-            if segment < len(SEGMENT_NAMES)
-            else f"segment{segment}"
-        )
+        name = SEGMENT_NAMES[segment] if segment < len(SEGMENT_NAMES) else f"segment{segment}"
         print(
             f"[ERROR] Low-precision byte roundtrip mismatch: type={name} idx={idx} "
             f"golden=0x{int(golden[idx]):02x} out=0x{int(output[idx]):02x}"

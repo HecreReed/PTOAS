@@ -15,15 +15,11 @@ import numpy as np
 def check(output_name: str, golden_name: str) -> None:
     golden = np.fromfile(golden_name, dtype=np.float32)
     output = np.fromfile(output_name, dtype=np.float32)
-    if golden.shape == output.shape and np.allclose(
-        golden, output, atol=1e-4, rtol=1e-4
-    ):
+    if golden.shape == output.shape and np.allclose(golden, output, atol=1e-4, rtol=1e-4):
         return
 
     if golden.shape != output.shape:
-        print(
-            f"[ERROR] compare failed {output_name}: shape golden={golden.shape} output={output.shape}"
-        )
+        print(f"[ERROR] compare failed {output_name}: shape golden={golden.shape} output={output.shape}")
         sys.exit(2)
     diff = np.nonzero(~np.isclose(golden, output, atol=1e-4, rtol=1e-4))[0]
     idx = int(diff[0]) if diff.size else -1

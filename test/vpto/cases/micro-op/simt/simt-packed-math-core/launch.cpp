@@ -13,9 +13,8 @@
 #include "acl/acl.h"
 #endif
 
-extern "C" __global__[aicore] void simt_packed_math_core_kernel(__gm__ uint32_t* out);
+extern "C" __global__ [aicore] void simt_packed_math_core_kernel(__gm__ uint32_t *out);
 
-void LaunchSimt_packed_math_core_kernel(uint32_t* out, void* stream)
-{
-    simt_packed_math_core_kernel<<<1, nullptr, stream>>>((__gm__ uint32_t*)out);
+void LaunchSimt_packed_math_core_kernel(uint32_t *out, void *stream) {
+  simt_packed_math_core_kernel<<<1, nullptr, stream>>>((__gm__ uint32_t *)out);
 }

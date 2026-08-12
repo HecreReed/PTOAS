@@ -12,19 +12,21 @@
 #include <cstdint>
 #if !defined(__CCE_AICORE__) && !defined(TMRGSORT_HPP)
 struct MrgSortExecutedNumList {
-    uint16_t mrgSortList0;
-    uint16_t mrgSortList1;
-    uint16_t mrgSortList2;
-    uint16_t mrgSortList3;
+  uint16_t mrgSortList0;
+  uint16_t mrgSortList1;
+  uint16_t mrgSortList2;
+  uint16_t mrgSortList3;
 };
 #endif
 #ifndef __CPU_SIM
 #include "acl/acl.h"
 #endif
 
-extern "C" __global__[aicore] void vmi_scf_for_loop_carried_store_kernel(__gm__ uint16_t* src, __gm__ float* dst);
+extern "C" __global__ [aicore] void
+vmi_scf_for_loop_carried_store_kernel(__gm__ uint16_t *src, __gm__ float *dst);
 
-void LaunchVmi_scf_for_loop_carried_store_kernel(uint16_t* src, float* dst, void* stream)
-{
-    vmi_scf_for_loop_carried_store_kernel<<<1, nullptr, stream>>>((__gm__ uint16_t*)src, (__gm__ float*)dst);
+void LaunchVmi_scf_for_loop_carried_store_kernel(uint16_t *src, float *dst,
+                                                 void *stream) {
+  vmi_scf_for_loop_carried_store_kernel<<<1, nullptr, stream>>>(
+      (__gm__ uint16_t *)src, (__gm__ float *)dst);
 }

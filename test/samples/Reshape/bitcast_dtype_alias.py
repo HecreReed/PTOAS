@@ -33,12 +33,8 @@ def build():
             fractal_ab_size = pto.TileConfig.fractalABSize
             cfg = pto.TileBufConfigAttr.get(bl, sl, fractal_ab_size, pd, ctx)
 
-            tile_buf_32_f32 = pto.TileBufType.get(
-                [32, 32], f32, vec, [32, 32], cfg, ctx
-            )
-            tile_buf_32_i32 = pto.TileBufType.get(
-                [32, 32], i32, vec, [32, 32], cfg, ctx
-            )
+            tile_buf_32_f32 = pto.TileBufType.get([32, 32], f32, vec, [32, 32], cfg, ctx)
+            tile_buf_32_i32 = pto.TileBufType.get([32, 32], i32, vec, [32, 32], cfg, ctx)
 
             fn_ty = func.FunctionType.get([ptr_f32, ptr_f32], [])
             with InsertionPoint(m.body):
@@ -53,19 +49,11 @@ def build():
 
                 arg_in, arg_out = entry.arguments
 
-                tv_in = pto.MakeTensorViewOp(
-                    tv2_f32, arg_in, [c32, c32], [c32, c1]
-                ).result
-                tv_out = pto.MakeTensorViewOp(
-                    tv2_f32, arg_out, [c32, c32], [c32, c1]
-                ).result
+                tv_in = pto.MakeTensorViewOp(tv2_f32, arg_in, [c32, c32], [c32, c1]).result
+                tv_out = pto.MakeTensorViewOp(tv2_f32, arg_out, [c32, c32], [c32, c1]).result
 
-                sv_in = pto.PartitionViewOp(
-                    tile_view_32_f32, tv_in, offsets=[c0, c0], sizes=[c32, c32]
-                ).result
-                sv_out = pto.PartitionViewOp(
-                    tile_view_32_f32, tv_out, offsets=[c0, c0], sizes=[c32, c32]
-                ).result
+                sv_in = pto.PartitionViewOp(tile_view_32_f32, tv_in, offsets=[c0, c0], sizes=[c32, c32]).result
+                sv_out = pto.PartitionViewOp(tile_view_32_f32, tv_out, offsets=[c0, c0], sizes=[c32, c32]).result
 
                 tb_f32 = pto.AllocTileOp(tile_buf_32_f32).result
                 pto.TLoadOp(None, sv_in, tb_f32)

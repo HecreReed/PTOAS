@@ -13,18 +13,16 @@
 #endif
 
 extern "C" __global__ AICORE void TINSERT_acc2mat_f16_16x16(
-    __gm__ uint16_t* a, __gm__ uint16_t* b, __gm__ uint16_t* id, __gm__ float* c);
+    __gm__ uint16_t *a, __gm__ uint16_t *b, __gm__ uint16_t *id, __gm__ float *c);
 extern "C" __global__ AICORE void TINSERT_acc2mat_bf16_16x16(
-    __gm__ uint16_t* a, __gm__ uint16_t* b, __gm__ uint16_t* id, __gm__ float* c);
+    __gm__ uint16_t *a, __gm__ uint16_t *b, __gm__ uint16_t *id, __gm__ float *c);
 
-void LaunchAcc2Mat_f16_16x16(uint16_t* a, uint16_t* b, uint16_t* id, uint16_t* out, void* stream)
-{
+void LaunchAcc2Mat_f16_16x16(uint16_t *a, uint16_t *b, uint16_t *id, uint16_t *out, void *stream) {
     TINSERT_acc2mat_f16_16x16<<<1, nullptr, stream>>>(
-        (__gm__ uint16_t*)a, (__gm__ uint16_t*)b, (__gm__ uint16_t*)id, (__gm__ float*)out);
+        (__gm__ uint16_t *)a, (__gm__ uint16_t *)b, (__gm__ uint16_t *)id, (__gm__ float *)out);
 }
 
-void LaunchAcc2Mat_bf16_16x16(uint16_t* a, uint16_t* b, uint16_t* id, uint16_t* out, void* stream)
-{
+void LaunchAcc2Mat_bf16_16x16(uint16_t *a, uint16_t *b, uint16_t *id, uint16_t *out, void *stream) {
     TINSERT_acc2mat_bf16_16x16<<<1, nullptr, stream>>>(
-        (__gm__ uint16_t*)a, (__gm__ uint16_t*)b, (__gm__ uint16_t*)id, (__gm__ float*)out);
+        (__gm__ uint16_t *)a, (__gm__ uint16_t *)b, (__gm__ uint16_t *)id, (__gm__ float *)out);
 }

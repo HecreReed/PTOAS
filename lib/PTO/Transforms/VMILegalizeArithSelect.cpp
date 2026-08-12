@@ -32,53 +32,55 @@ using namespace mlir::pto;
 
 namespace {
 
-static bool isVMIValueType(Type type) { return isa<VMIVRegType, VMIMaskType>(type); }
-
-static bool hasScalarI1Condition(arith::SelectOp select)
-{
-    return select.getCondition().getType().isSignlessInteger(1);
+static bool isVMIValueType(Type type) {
+  return isa<VMIVRegType, VMIMaskType>(type);
 }
 
-static void rewriteSelectToIf(arith::SelectOp select)
-{
-    OpBuilder builder(select);
-    auto ifOp = builder.create<scf::IfOp>(
-        select.getLoc(), TypeRange{select.getResult().getType()}, select.getCondition(), /*withElseRegion=*/true);
-
-    {
-        OpBuilder::InsertionGuard guard(builder);
-        builder.setInsertionPointToStart(&ifOp.getThenRegion().front());
-        builder.create<scf::YieldOp>(select.getLoc(), select.getTrueValue());
-        builder.setInsertionPointToStart(&ifOp.getElseRegion().front());
-        builder.create<scf::YieldOp>(select.getLoc(), select.getFalseValue());
-    }
-
-    select.getResult().replaceAllUsesWith(ifOp.getResult(0));
-    select.erase();
+static bool hasScalarI1Condition(arith::SelectOp select) {
+  return select.getCondition().getType().isSignlessInteger(1);
 }
 
-struct VMILegalizeArithSelectPass : public mlir::pto::impl::VMILegalizeArithSelectBase<VMILegalizeArithSelectPass> {
-    MLIR_DEFINE_EXPLICIT_INTERNAL_INLINE_TYPE_ID(VMILegalizeArithSelectPass)
+static void rewriteSelectToIf(arith::SelectOp select) {
+  OpBuilder builder(select);
+  auto ifOp = builder.create<scf::IfOp>(
+      select.getLoc(), TypeRange{select.getResult().getType()},
+      select.getCondition(), /*withElseRegion=*/true);
 
-    void runOnOperation() override
-    {
-        ModuleOp module = getOperation();
-        SmallVector<arith::SelectOp> selects;
-        module.walk([&](arith::SelectOp select) {
-            if (isVMIValueType(select.getResult().getType()) && hasScalarI1Condition(select))
-                selects.push_back(select);
-        });
+  {
+    OpBuilder::InsertionGuard guard(builder);
+    builder.setInsertionPointToStart(&ifOp.getThenRegion().front());
+    builder.create<scf::YieldOp>(select.getLoc(), select.getTrueValue());
+    builder.setInsertionPointToStart(&ifOp.getElseRegion().front());
+    builder.create<scf::YieldOp>(select.getLoc(), select.getFalseValue());
+  }
 
-        for (arith::SelectOp select : llvm::reverse(selects)) {
-            if (select->getBlock() != nullptr)
-                rewriteSelectToIf(select);
-        }
+  select.getResult().replaceAllUsesWith(ifOp.getResult(0));
+  select.erase();
+}
+
+struct VMILegalizeArithSelectPass
+    : public mlir::pto::impl::VMILegalizeArithSelectBase<
+          VMILegalizeArithSelectPass> {
+  MLIR_DEFINE_EXPLICIT_INTERNAL_INLINE_TYPE_ID(VMILegalizeArithSelectPass)
+
+  void runOnOperation() override {
+    ModuleOp module = getOperation();
+    SmallVector<arith::SelectOp> selects;
+    module.walk([&](arith::SelectOp select) {
+      if (isVMIValueType(select.getResult().getType()) &&
+          hasScalarI1Condition(select))
+        selects.push_back(select);
+    });
+
+    for (arith::SelectOp select : llvm::reverse(selects)) {
+      if (select->getBlock() != nullptr)
+        rewriteSelectToIf(select);
     }
+  }
 };
 
 } // namespace
 
-std::unique_ptr<Pass> mlir::pto::createVMILegalizeArithSelectPass()
-{
-    return std::make_unique<VMILegalizeArithSelectPass>();
+std::unique_ptr<Pass> mlir::pto::createVMILegalizeArithSelectPass() {
+  return std::make_unique<VMILegalizeArithSelectPass>();
 }

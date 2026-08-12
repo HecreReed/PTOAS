@@ -27,15 +27,8 @@ import ptodsl.tilelib as tilelib
 )
 def template_tmov_fp_f32_f16(src: pto.Tile, dst: pto.Tile, fp: pto.Tile):
     m, n = dst.valid_shape
-    pto.mte_l0c_l1(
-        src.as_ptr(),
-        dst.as_ptr(),
-        m,
-        n,
-        src.shape[0],
-        dst.shape[1],
-        pre_quant=(fp.as_ptr(), "qf322f16_pre_vec"),
-    )
+    pto.mte_l0c_l1(src.as_ptr(), dst.as_ptr(), m, n, src.shape[0], dst.shape[1],
+                   pre_quant=(fp.as_ptr(), "qf322f16_pre_vec"))
 
 
 @tilelib.tile_template(
@@ -54,12 +47,5 @@ def template_tmov_fp_f32_f16(src: pto.Tile, dst: pto.Tile, fp: pto.Tile):
 )
 def template_tmov_fp_f32_bf16(src: pto.Tile, dst: pto.Tile, fp: pto.Tile):
     m, n = dst.valid_shape
-    pto.mte_l0c_l1(
-        src.as_ptr(),
-        dst.as_ptr(),
-        m,
-        n,
-        src.shape[0],
-        dst.shape[1],
-        pre_quant=(fp.as_ptr(), "qf322bf16_pre_vec"),
-    )
+    pto.mte_l0c_l1(src.as_ptr(), dst.as_ptr(), m, n, src.shape[0], dst.shape[1],
+                   pre_quant=(fp.as_ptr(), "qf322bf16_pre_vec"))

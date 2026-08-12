@@ -82,9 +82,7 @@ def _make_softmax_kernel(name: str, *, rows: int, seq: int):
                     merged_max = pto.vmax(running_max, col_vec, active_rows)
                     running_delta = pto.vsub(running_max, merged_max, active_rows)
                     scaled_running = pto.vexp(running_delta, active_rows)
-                    running_sum_scaled = pto.vmul(
-                        scaled_running, running_sum, active_rows
-                    )
+                    running_sum_scaled = pto.vmul(scaled_running, running_sum, active_rows)
                     col_delta = pto.vsub(col_vec, merged_max, active_rows)
                     col_exp = pto.vexp(col_delta, active_rows)
                     running_sum = pto.vadd(running_sum_scaled, col_exp, active_rows)

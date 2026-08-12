@@ -23,9 +23,7 @@ def build():
             bl = pto.BLayoutAttr.get(pto.BLayout.RowMajor, ctx)
             sl = pto.SLayoutAttr.get(pto.SLayout.NoneBox, ctx)
             pd = pto.PadValueAttr.get(pto.PadValue.Null, ctx)
-            cfg = pto.TileBufConfigAttr.get(
-                bl, sl, pto.TileConfig.fractalABSize, pd, ctx
-            )
+            cfg = pto.TileBufConfigAttr.get(bl, sl, pto.TileConfig.fractalABSize, pd, ctx)
             ub_ty = pto.TileBufType.get([16, 16], f16, vec, [16, 16], cfg, ctx)
 
             fn_ty = func.FunctionType.get([], [])

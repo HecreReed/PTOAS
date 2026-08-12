@@ -29,7 +29,6 @@ from cases import CASES, PADVAL_MAX, PADVAL_MIN, PADVAL_NEG1, PADVAL_ZERO
 def _float32_from_bits(bits: int) -> float:
     return struct.unpack(">f", bits.to_bytes(4, byteorder="big", signed=False))[0]
 
-
 _FLT_MAX = _float32_from_bits(0x7F7FFFFF)  # ~3.4028235e+38
 _FLT_MIN = _float32_from_bits(0xFF7FFFFF)  # ~-3.4028235e+38
 
@@ -78,10 +77,10 @@ for case in CASES:
     setup_case_rng(case)
 
     dtype = case["dtype"]
-    src_shape = case["shape"]  # src physical (input size, matching tensor_view)
-    src_valid = case["valid_shape"]  # src valid region (actual data in input)
-    dst_shape = case["dst_shape"]  # dst physical
-    dst_valid = case["dst_valid_shape"]  # dst valid (output size)
+    src_shape = case["shape"]                # src physical (input size, matching tensor_view)
+    src_valid = case["valid_shape"]          # src valid region (actual data in input)
+    dst_shape = case["dst_shape"]            # dst physical
+    dst_valid = case["dst_valid_shape"]      # dst valid (output size)
     fill_padval = case.get("fill_padval", PADVAL_ZERO)
 
     src_vr, src_vc = src_valid
@@ -90,9 +89,7 @@ for case in CASES:
     # Generate input: random values in src valid region, zeros elsewhere
     # Input size = src_shape (matching tensor_view and C++ input)
     input_data = np.zeros(src_shape, dtype=dtype)
-    input_data[:src_vr, :src_vc] = np.random.randint(
-        1, 10, size=(src_vr, src_vc)
-    ).astype(dtype)
+    input_data[:src_vr, :src_vc] = np.random.randint(1, 10, size=(src_vr, src_vc)).astype(dtype)
 
     # Generate golden: dst valid region (output size)
     golden = np.zeros(dst_valid, dtype=dtype)
@@ -113,7 +110,5 @@ for case in CASES:
         golden[src_vr:dst_vr, :dst_vc] = fill_val
 
     save_case_data(case["name"], {"input": input_data, "golden": golden})
-    print(
-        f"[INFO] gen_data: {case['name']} src={src_shape} valid={src_valid} -> dst={dst_shape} "
-        f"fill_pad={fill_padval} dtype={dtype.__name__}"
-    )
+    print(f"[INFO] gen_data: {case['name']} src={src_shape} valid={src_valid} -> dst={dst_shape} "
+          f"fill_pad={fill_padval} dtype={dtype.__name__}")

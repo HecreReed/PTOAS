@@ -13,19 +13,10 @@ import ptodsl.tilelib as tilelib
 from ._cube import MATMUL_ACC_DTYPES
 
 
-@tilelib.tile_template(
-    op="pto.tgemv.acc",
-    target="a5",
-    name="template_tgemv_acc",
-    dtypes=MATMUL_ACC_DTYPES,
-    iteration_axis="none",
-    op_engine="cube",
-    op_class="other",
-    id=0,
-    loop_depth=1,
-    is_post_update=False,
-    tags=("cube", "gemv", "acc"),
-)
+@tilelib.tile_template(op="pto.tgemv.acc", target="a5", name="template_tgemv_acc",
+                       dtypes=MATMUL_ACC_DTYPES, iteration_axis="none",
+                       op_engine="cube", op_class="other", id=0, loop_depth=1,
+                       is_post_update=False, tags=("cube", "gemv", "acc"))
 def template_tgemv_acc(acc_in: pto.Tile, lhs: pto.Tile, rhs: pto.Tile, dst: pto.Tile):
     _ = acc_in
     _, k = lhs.valid_shape

@@ -11,24 +11,12 @@
 #endif
 
 #if defined(__CCE_AICORE__) && defined(__NPU_ARCH__) && (__NPU_ARCH__ == 2201)
-typedef struct {
-    unsigned char v;
-} hifloat8_t;
-typedef struct {
-    unsigned char v;
-} float8_e4m3_t;
-typedef struct {
-    unsigned char v;
-} float8_e5m2_t;
-typedef struct {
-    unsigned char v;
-} float8_e8m0_t;
-typedef struct {
-    unsigned char v;
-} float4_e1m2x2_t;
-typedef struct {
-    unsigned char v;
-} float4_e2m1x2_t;
+typedef struct { unsigned char v; } hifloat8_t;
+typedef struct { unsigned char v; } float8_e4m3_t;
+typedef struct { unsigned char v; } float8_e5m2_t;
+typedef struct { unsigned char v; } float8_e8m0_t;
+typedef struct { unsigned char v; } float4_e1m2x2_t;
+typedef struct { unsigned char v; } float4_e2m1x2_t;
 #endif
 
 #include <cstdint>
@@ -39,10 +27,10 @@ typedef struct {
 
 #if !defined(__CCE_AICORE__) && !defined(TMRGSORT_HPP)
 struct MrgSortExecutedNumList {
-    uint16_t mrgSortList0;
-    uint16_t mrgSortList1;
-    uint16_t mrgSortList2;
-    uint16_t mrgSortList3;
+  uint16_t mrgSortList0;
+  uint16_t mrgSortList1;
+  uint16_t mrgSortList2;
+  uint16_t mrgSortList3;
 };
 #endif
 
@@ -50,15 +38,20 @@ struct MrgSortExecutedNumList {
 #include "acl/acl.h"
 #endif
 
-extern "C" __global__[aicore] void fixpipe_quant_normal_relu_clip_f16_scalar_ub_cv_kernel(
-    __gm__ __fp16* lhs, __gm__ __fp16* rhs, __gm__ __fp16* out_ub_relu, __gm__ __fp16* out_ub_clip,
-    __gm__ __fp16* out_gm_relu, __gm__ __fp16* out_gm_clip, __gm__ __fp16* out_l1_relu, __gm__ __fp16* out_l1_clip);
+extern "C" __global__ [aicore] void
+fixpipe_quant_normal_relu_clip_f16_scalar_ub_cv_kernel(
+    __gm__ __fp16 *lhs, __gm__ __fp16 *rhs, __gm__ __fp16 *out_ub_relu,
+    __gm__ __fp16 *out_ub_clip, __gm__ __fp16 *out_gm_relu,
+    __gm__ __fp16 *out_gm_clip, __gm__ __fp16 *out_l1_relu,
+    __gm__ __fp16 *out_l1_clip);
 
 void LaunchFixpipe_quant_normal_relu_clip_f16_scalar_ub_cv_kernel(
-    __fp16* lhs, __fp16* rhs, __fp16* outUbRelu, __fp16* outUbClip, __fp16* outGmRelu, __fp16* outGmClip,
-    __fp16* outL1Relu, __fp16* outL1Clip, void* stream)
-{
-    fixpipe_quant_normal_relu_clip_f16_scalar_ub_cv_kernel<<<1, nullptr, stream>>>(
-        (__gm__ __fp16*)lhs, (__gm__ __fp16*)rhs, (__gm__ __fp16*)outUbRelu, (__gm__ __fp16*)outUbClip,
-        (__gm__ __fp16*)outGmRelu, (__gm__ __fp16*)outGmClip, (__gm__ __fp16*)outL1Relu, (__gm__ __fp16*)outL1Clip);
+    __fp16 *lhs, __fp16 *rhs, __fp16 *outUbRelu, __fp16 *outUbClip,
+    __fp16 *outGmRelu, __fp16 *outGmClip, __fp16 *outL1Relu,
+    __fp16 *outL1Clip, void *stream) {
+  fixpipe_quant_normal_relu_clip_f16_scalar_ub_cv_kernel<<<1, nullptr, stream>>>(
+      (__gm__ __fp16 *)lhs, (__gm__ __fp16 *)rhs, (__gm__ __fp16 *)outUbRelu,
+      (__gm__ __fp16 *)outUbClip, (__gm__ __fp16 *)outGmRelu,
+      (__gm__ __fp16 *)outGmClip, (__gm__ __fp16 *)outL1Relu,
+      (__gm__ __fp16 *)outL1Clip);
 }

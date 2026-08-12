@@ -38,12 +38,8 @@ def main():
         eps = case["eps"]
 
         # Load golden and output (both stored with valid_shape)
-        golden = np.fromfile(os.path.join(case_dir, "golden.bin"), dtype=dtype).reshape(
-            valid_shape
-        )
-        output = np.fromfile(os.path.join(case_dir, "output.bin"), dtype=dtype).reshape(
-            valid_shape
-        )
+        golden = np.fromfile(os.path.join(case_dir, "golden.bin"), dtype=dtype).reshape(valid_shape)
+        output = np.fromfile(os.path.join(case_dir, "output.bin"), dtype=dtype).reshape(valid_shape)
 
         # For integer types, eps=0 means exact match
         # For float types, use np.allclose with eps
@@ -52,9 +48,7 @@ def main():
             if not np.array_equal(golden, output):
                 diff = golden - output
                 idx = int(np.argmax(np.abs(diff)))
-                print(
-                    f"[ERROR] {case['name']}: Mismatch at idx={idx} (golden={golden.flat[idx]}, output={output.flat[idx]})"
-                )
+                print(f"[ERROR] {case['name']}: Mismatch at idx={idx} (golden={golden.flat[idx]}, output={output.flat[idx]})")
                 all_passed = False
             else:
                 print(f"[INFO] {case['name']}: compare passed")
@@ -65,19 +59,15 @@ def main():
             o = output.astype(np.float64, copy=False)
 
             if g.shape != o.shape:
-                print(
-                    f"[ERROR] {case['name']}: Shape mismatch: golden {g.shape} vs output {o.shape}"
-                )
+                print(f"[ERROR] {case['name']}: Shape mismatch: golden {g.shape} vs output {o.shape}")
                 all_passed = False
                 continue
 
             if not np.allclose(g, o, atol=eps, rtol=eps, equal_nan=True):
                 abs_diff = np.abs(g - o)
                 idx = int(np.argmax(abs_diff))
-                print(
-                    f"[ERROR] {case['name']}: Mismatch: max diff={float(abs_diff.flat[idx])} "
-                    f"at idx={idx} (golden={g.flat[idx]}, output={o.flat[idx]})"
-                )
+                print(f"[ERROR] {case['name']}: Mismatch: max diff={float(abs_diff.flat[idx])} "
+                      f"at idx={idx} (golden={g.flat[idx]}, output={o.flat[idx]})")
                 all_passed = False
             else:
                 print(f"[INFO] {case['name']}: compare passed")

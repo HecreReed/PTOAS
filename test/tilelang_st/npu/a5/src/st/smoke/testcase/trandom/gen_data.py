@@ -101,15 +101,15 @@ def interleave_values(ctr0, ctr1, ctr2, ctr3):
     tmpH1 = np.empty(n, dtype=np.uint32)
 
     for i in range(half):
-        tmpL0[2 * i] = ctr0[i]
-        tmpL0[2 * i + 1] = ctr2[i]
-        tmpH0[2 * i] = ctr0[i + half]
-        tmpH0[2 * i + 1] = ctr2[i + half]
+        tmpL0[2*i] = ctr0[i]
+        tmpL0[2*i+1] = ctr2[i]
+        tmpH0[2*i] = ctr0[i + half]
+        tmpH0[2*i+1] = ctr2[i + half]
 
-        tmpL1[2 * i] = ctr1[i]
-        tmpL1[2 * i + 1] = ctr3[i]
-        tmpH1[2 * i] = ctr1[i + half]
-        tmpH1[2 * i + 1] = ctr3[i + half]
+        tmpL1[2*i] = ctr1[i]
+        tmpL1[2*i+1] = ctr3[i]
+        tmpH1[2*i] = ctr1[i + half]
+        tmpH1[2*i+1] = ctr3[i + half]
 
     result0 = np.empty(n, dtype=np.uint32)
     result1 = np.empty(n, dtype=np.uint32)
@@ -117,15 +117,15 @@ def interleave_values(ctr0, ctr1, ctr2, ctr3):
     result3 = np.empty(n, dtype=np.uint32)
 
     for i in range(half):
-        result0[2 * i] = tmpL0[i]
-        result0[2 * i + 1] = tmpL1[i]
-        result1[2 * i] = tmpL0[i + half]
-        result1[2 * i + 1] = tmpL1[i + half]
+        result0[2*i] = tmpL0[i]
+        result0[2*i+1] = tmpL1[i]
+        result1[2*i] = tmpL0[i + half]
+        result1[2*i+1] = tmpL1[i + half]
 
-        result2[2 * i] = tmpH0[i]
-        result2[2 * i + 1] = tmpH1[i]
-        result3[2 * i] = tmpH0[i + half]
-        result3[2 * i + 1] = tmpH1[i + half]
+        result2[2*i] = tmpH0[i]
+        result2[2*i+1] = tmpH1[i]
+        result3[2*i] = tmpH0[i + half]
+        result3[2*i+1] = tmpH1[i + half]
 
     return result0, result1, result2, result3
 
@@ -145,9 +145,7 @@ def trandom_generate(key, counter, valid_rows, valid_cols, dtype=np.int32, round
         output: (valid_rows, valid_cols) array of random numbers
     """
     lanes = 64
-    n_loop = (valid_cols + TRANDOM_ONCE_REPEAT * lanes - 1) // (
-        TRANDOM_ONCE_REPEAT * lanes
-    )
+    n_loop = (valid_cols + TRANDOM_ONCE_REPEAT * lanes - 1) // (TRANDOM_ONCE_REPEAT * lanes)
 
     output = np.zeros((valid_rows, valid_cols), dtype=np.uint32)
 
@@ -173,13 +171,7 @@ def trandom_generate(key, counter, valid_rows, valid_cols, dtype=np.int32, round
             tmp_ctr3 = ctr3.copy()
 
             tmp_ctr0, tmp_ctr1, tmp_ctr2, tmp_ctr3 = trandom_kernel(
-                tmp_ctr0,
-                tmp_ctr1,
-                tmp_ctr2,
-                tmp_ctr3,
-                key0_val,
-                key1_val,
-                rounds=rounds,
+                tmp_ctr0, tmp_ctr1, tmp_ctr2, tmp_ctr3, key0_val, key1_val, rounds=rounds
             )
 
             # Apply interleave to match vintlv semantics in trandom_template.py
@@ -202,13 +194,9 @@ def trandom_generate(key, counter, valid_rows, valid_cols, dtype=np.int32, round
             else:
                 s_reg = 0
 
-            counter_add_val = (
-                lanes if j != n_loop - 1 else ((valid_cols - 1) % lanes + 1)
-            )
+            counter_add_val = lanes if j != n_loop - 1 else ((valid_cols - 1) % lanes + 1)
             v_ele_stride = np.full(lanes, np.uint32(counter_add_val), dtype=np.uint32)
-            ctr0, ctr1, ctr2, ctr3 = add_with_128bits(
-                ctr0, ctr1, ctr2, ctr3, v_ele_stride
-            )
+            ctr0, ctr1, ctr2, ctr3 = add_with_128bits(ctr0, ctr1, ctr2, ctr3, v_ele_stride)
 
     return output.view(dtype)
 
@@ -235,19 +223,11 @@ for case in CASES:
         value_min = np.iinfo(dtype).min
         key = np.random.randint(value_min, value_max + 1, size=2, dtype=dtype)
         counter = np.random.randint(value_min, value_max + 1, size=4, dtype=dtype)
-        print(
-            f"[INFO] gen_data: {case['name']} generated new key={key.tolist()} counter={counter.tolist()}"
-        )
+        print(f"[INFO] gen_data: {case['name']} generated new key={key.tolist()} counter={counter.tolist()}")
 
     if os.path.exists(output_file):
-        golden = trandom_generate(
-            key.view(np.uint32),
-            counter.view(np.uint32),
-            valid_rows,
-            valid_cols,
-            dtype=dtype,
-            rounds=rounds,
-        )
+        golden = trandom_generate(key.view(np.uint32), counter.view(np.uint32),
+                                   valid_rows, valid_cols, dtype=dtype, rounds=rounds)
         save_case_data(case["name"], {"key": key, "counter": counter, "golden": golden})
         print(f"[INFO] gen_data: {case['name']} generated golden shape={case['shape']}")
     else:

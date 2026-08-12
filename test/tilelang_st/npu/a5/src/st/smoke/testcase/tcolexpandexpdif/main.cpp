@@ -22,60 +22,57 @@
 using namespace PtoTestCommon;
 
 // Kernel launch wrappers (defined in launch.cpp)
-void LaunchTCOLEXPANDEXPDIF_fp32_32_16_1_16(float* src0, float* src1, float* dst, void* stream);
-void LaunchTCOLEXPANDEXPDIF_fp32_16_32_1_32(float* src0, float* src1, float* dst, void* stream);
-void LaunchTCOLEXPANDEXPDIF_fp16_32_32_1_32(uint16_t* src0, uint16_t* src1, uint16_t* dst, void* stream);
-void LaunchTCOLEXPANDEXPDIF_fp16_16_128_1_128(uint16_t* src0, uint16_t* src1, uint16_t* dst, void* stream);
+void LaunchTCOLEXPANDEXPDIF_fp32_32_16_1_16(float *src0, float *src1, float *dst, void *stream);
+void LaunchTCOLEXPANDEXPDIF_fp32_16_32_1_32(float *src0, float *src1, float *dst, void *stream);
+void LaunchTCOLEXPANDEXPDIF_fp16_32_32_1_32(uint16_t *src0, uint16_t *src1, uint16_t *dst, void *stream);
+void LaunchTCOLEXPANDEXPDIF_fp16_16_128_1_128(uint16_t *src0, uint16_t *src1, uint16_t *dst, void *stream);
 
-using LaunchFn = void (*)(void*, void*, void*, void*);
+using LaunchFn = void (*)(void *, void *, void *, void *);
 
 struct TestCase {
-    const char* name;
-    LaunchFn launch;
-    size_t src0Rows;
-    size_t src0Cols;
-    size_t src1Rows;
-    size_t src1Cols;
-    size_t dstRows;
-    size_t dstCols;
-    size_t validRows;
-    size_t validCols;
-    size_t elemSize;
+    const char *name;
+    LaunchFn    launch;
+    size_t      src0Rows;
+    size_t      src0Cols;
+    size_t      src1Rows;
+    size_t      src1Cols;
+    size_t      dstRows;
+    size_t      dstCols;
+    size_t      validRows;
+    size_t      validCols;
+    size_t      elemSize;
 };
 
 static const TestCase kCases[] = {
-    {"fp32_32_16_1_16", (LaunchFn)LaunchTCOLEXPANDEXPDIF_fp32_32_16_1_16, 32, 16, 1, 16, 32, 16, 32, 16, sizeof(float)},
-    {"fp16_32_32_1_32", (LaunchFn)LaunchTCOLEXPANDEXPDIF_fp16_32_32_1_32, 32, 32, 1, 32, 32, 32, 32, 32,
-     sizeof(uint16_t)},
+{"fp32_32_16_1_16",    (LaunchFn)LaunchTCOLEXPANDEXPDIF_fp32_32_16_1_16,    32, 16,   1, 16,  32, 16,  32, 16,  sizeof(float)},
+{"fp16_32_32_1_32",    (LaunchFn)LaunchTCOLEXPANDEXPDIF_fp16_32_32_1_32,    32, 32,   1, 32,  32, 32,  32, 32,  sizeof(uint16_t)},
 };
 static constexpr size_t kNumCases = sizeof(kCases) / sizeof(kCases[0]);
 
-static int RunCase(const TestCase& tc, int deviceId, aclrtStream stream)
-{
+static int RunCase(const TestCase &tc, int deviceId, aclrtStream stream) {
     int rc = 0;
     const size_t src0ElemCount = tc.src0Rows * tc.src0Cols;
     const size_t src1ElemCount = tc.src1Rows * tc.src1Cols;
-    const size_t dstElemCount = tc.dstRows * tc.dstCols;
-    const size_t src0FileSize = src0ElemCount * tc.elemSize;
-    const size_t src1FileSize = src1ElemCount * tc.elemSize;
-    const size_t dstFileSize = dstElemCount * tc.elemSize;
+    const size_t dstElemCount  = tc.dstRows * tc.dstCols;
+    const size_t src0FileSize  = src0ElemCount * tc.elemSize;
+    const size_t src1FileSize  = src1ElemCount * tc.elemSize;
+    const size_t dstFileSize   = dstElemCount * tc.elemSize;
 
-    std::printf(
-        "[INFO] === case: %s (src0=%zux%zu, src1=%zux%zu -> dst=%zux%zu, valid=%zux%zu) ===\n", tc.name, tc.src0Rows,
-        tc.src0Cols, tc.src1Rows, tc.src1Cols, tc.dstRows, tc.dstCols, tc.validRows, tc.validCols);
+    std::printf("[INFO] === case: %s (src0=%zux%zu, src1=%zux%zu -> dst=%zux%zu, valid=%zux%zu) ===\n",
+                tc.name, tc.src0Rows, tc.src0Cols, tc.src1Rows, tc.src1Cols, tc.dstRows, tc.dstCols, tc.validRows, tc.validCols);
 
     std::string caseDir = std::string("./") + tc.name;
 
     void *src0Host = nullptr, *src1Host = nullptr, *dstHost = nullptr;
     void *src0Device = nullptr, *src1Device = nullptr, *dstDevice = nullptr;
 
-    aclrtMallocHost((void**)(&src0Host), src0FileSize);
-    aclrtMallocHost((void**)(&src1Host), src1FileSize);
-    aclrtMallocHost((void**)(&dstHost), dstFileSize);
+    aclrtMallocHost((void **)(&src0Host), src0FileSize);
+    aclrtMallocHost((void **)(&src1Host), src1FileSize);
+    aclrtMallocHost((void **)(&dstHost), dstFileSize);
 
-    aclrtMalloc((void**)&src0Device, src0FileSize, ACL_MEM_MALLOC_HUGE_FIRST);
-    aclrtMalloc((void**)&src1Device, src1FileSize, ACL_MEM_MALLOC_HUGE_FIRST);
-    aclrtMalloc((void**)&dstDevice, dstFileSize, ACL_MEM_MALLOC_HUGE_FIRST);
+    aclrtMalloc((void **)&src0Device, src0FileSize, ACL_MEM_MALLOC_HUGE_FIRST);
+    aclrtMalloc((void **)&src1Device, src1FileSize, ACL_MEM_MALLOC_HUGE_FIRST);
+    aclrtMalloc((void **)&dstDevice, dstFileSize, ACL_MEM_MALLOC_HUGE_FIRST);
 
     size_t actualSrc0FileSize = src0FileSize;
     size_t actualSrc1FileSize = src1FileSize;
@@ -123,16 +120,15 @@ static int RunCase(const TestCase& tc, int deviceId, aclrtStream stream)
     return rc;
 }
 
-int main(int argc, char* argv[])
-{
-    const char* caseFilter = (argc > 1) ? argv[1] : nullptr;
+int main(int argc, char *argv[]) {
+    const char *caseFilter = (argc > 1) ? argv[1] : nullptr;
 
     int rc = 0;
     int deviceId = 0;
     aclrtStream stream = nullptr;
 
     aclInit(nullptr);
-    if (const char* envDevice = std::getenv("ACL_DEVICE_ID")) {
+    if (const char *envDevice = std::getenv("ACL_DEVICE_ID")) {
         deviceId = std::atoi(envDevice);
     }
     aclrtSetDevice(deviceId);

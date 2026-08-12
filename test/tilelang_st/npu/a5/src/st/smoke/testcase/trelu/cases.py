@@ -51,11 +51,9 @@ CASES = [
     },
 ]
 
-_SMOKE_CASE_NAMES = ["f16_64x64_valid_60x60", "f32_64x64_valid_60x60"]
+_SMOKE_CASE_NAMES = ['f16_64x64_valid_60x60', 'f32_64x64_valid_60x60']
 _SMOKE_CASE_NAME_SET = set(_SMOKE_CASE_NAMES)
-_missing = [
-    name for name in _SMOKE_CASE_NAMES if name not in {case["name"] for case in CASES}
-]
+_missing = [name for name in _SMOKE_CASE_NAMES if name not in {case["name"] for case in CASES}]
 if _missing:
     raise RuntimeError("unknown smoke case(s): " + ", ".join(_missing))
 CASES = [case for case in CASES if case["name"] in _SMOKE_CASE_NAME_SET]

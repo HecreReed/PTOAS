@@ -14,15 +14,15 @@
 
 // Case 0: f32 1x256 (input: 1x256, tmp: 1x256, output: 1x256 indices)
 
-extern "C" __global__ AICORE void TCOLARGMAX_f32_1x256(__gm__ int32_t* dst, __gm__ float* tmp, __gm__ float* src);
-extern "C" __global__ AICORE void TCOLARGMAX_f16_1x256(__gm__ int32_t* dst, __gm__ half* tmp, __gm__ half* src);
+extern "C" __global__ AICORE void TCOLARGMAX_f32_1x256(__gm__ int32_t *dst, __gm__ float *tmp, __gm__ float *src);
+extern "C" __global__ AICORE void TCOLARGMAX_f16_1x256(__gm__ int32_t *dst, __gm__ half *tmp, __gm__ half *src);
 
-void LaunchTCOLARGMAX_f16_1x256(void* dst, void* tmp, void* src, void* stream)
-{
-    TCOLARGMAX_f16_1x256<<<1, nullptr, stream>>>((__gm__ int32_t*)dst, (__gm__ half*)tmp, (__gm__ half*)src);
+void LaunchTCOLARGMAX_f16_1x256(void *dst, void *tmp, void *src, void *stream) {
+    TCOLARGMAX_f16_1x256<<<1, nullptr, stream>>>((__gm__ int32_t *)dst, (__gm__ half *)tmp, (__gm__ half *)src);
 }
 
-void LaunchTCOLARGMAX_f32_1x256(int32_t* dst, float* tmp, float* src, void* stream)
-{
-    TCOLARGMAX_f32_1x256<<<1, nullptr, stream>>>((__gm__ int32_t*)dst, (__gm__ float*)tmp, (__gm__ float*)src);
+
+
+void LaunchTCOLARGMAX_f32_1x256(int32_t *dst, float *tmp, float *src, void *stream) {
+    TCOLARGMAX_f32_1x256<<<1, nullptr, stream>>>((__gm__ int32_t *)dst, (__gm__ float *)tmp, (__gm__ float *)src);
 }

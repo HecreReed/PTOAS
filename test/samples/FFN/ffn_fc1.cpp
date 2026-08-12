@@ -130,3 +130,5 @@ __global__ AICORE void ffn_fc1_block(__gm__ float* v1, __gm__ float* v2, __gm__ 
   pipe_barrier(PIPE_ALL);
   return;
 }
+
+

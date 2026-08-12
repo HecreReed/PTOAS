@@ -49,11 +49,11 @@ CASES = [
         "dtype": np.float32,
         "src_shape": (1, 32),
         "idx_shape": (1, 32),
-        "tmp_shape": None,  # aligned: valid_cols % 32 == 0, no tmp
-        "dst_shape": (1, 128),  # buffer allocation (src_cols * 4)
+        "tmp_shape": None,          # aligned: valid_cols % 32 == 0, no tmp
+        "dst_shape": (1, 128),      # buffer allocation (src_cols * 4)
         "valid_shape": (1, 32),
         "idx_vshape": (1, 32),
-        "dst_vshape": (1, 64),  # actual valid output: src_cols * stride_coef = 32 * 2
+        "dst_vshape": (1, 64),      # actual valid output: src_cols * stride_coef = 32 * 2
         "eps": 1e-6,
     },
     {
@@ -61,11 +61,11 @@ CASES = [
         "dtype": np.float32,
         "src_shape": (1, 64),
         "idx_shape": (1, 64),
-        "tmp_shape": None,  # aligned: valid_cols % 32 == 0, no tmp
-        "dst_shape": (1, 256),  # buffer allocation (src_cols * 4)
+        "tmp_shape": None,          # aligned: valid_cols % 32 == 0, no tmp
+        "dst_shape": (1, 256),      # buffer allocation (src_cols * 4)
         "valid_shape": (1, 64),
         "idx_vshape": (1, 64),
-        "dst_vshape": (1, 128),  # actual valid output: src_cols * stride_coef = 64 * 2
+        "dst_vshape": (1, 128),     # actual valid output: src_cols * stride_coef = 64 * 2
         "eps": 1e-6,
     },
     # f32 cases - multiple rows (aligned, no tmp needed)
@@ -74,11 +74,11 @@ CASES = [
         "dtype": np.float32,
         "src_shape": (2, 32),
         "idx_shape": (2, 32),
-        "tmp_shape": None,  # aligned: valid_cols % 32 == 0, no tmp
-        "dst_shape": (2, 128),  # buffer allocation (src_cols * 4)
+        "tmp_shape": None,          # aligned: valid_cols % 32 == 0, no tmp
+        "dst_shape": (2, 128),      # buffer allocation (src_cols * 4)
         "valid_shape": (2, 32),
         "idx_vshape": (2, 32),
-        "dst_vshape": (2, 64),  # actual valid output: src_cols * stride_coef = 32 * 2
+        "dst_vshape": (2, 64),      # actual valid output: src_cols * stride_coef = 32 * 2
         "eps": 1e-6,
     },
     {
@@ -86,11 +86,11 @@ CASES = [
         "dtype": np.float32,
         "src_shape": (16, 32),
         "idx_shape": (16, 32),
-        "tmp_shape": None,  # aligned: valid_cols % 32 == 0, no tmp
-        "dst_shape": (16, 128),  # buffer allocation (src_cols * 4)
+        "tmp_shape": None,          # aligned: valid_cols % 32 == 0, no tmp
+        "dst_shape": (16, 128),     # buffer allocation (src_cols * 4)
         "valid_shape": (16, 32),
         "idx_vshape": (16, 32),
-        "dst_vshape": (16, 64),  # actual valid output: src_cols * stride_coef = 32 * 2
+        "dst_vshape": (16, 64),     # actual valid output: src_cols * stride_coef = 32 * 2
         "eps": 1e-6,
     },
     # f32 cases - shared idx (aligned, no tmp needed)
@@ -98,40 +98,37 @@ CASES = [
         "name": "f32_2x64_shared_idx",
         "dtype": np.float32,
         "src_shape": (2, 64),
-        "idx_shape": (1, 64),  # shared idx for all rows
-        "tmp_shape": None,  # aligned: valid_cols % 32 == 0, no tmp
-        "dst_shape": (2, 256),  # buffer allocation (src_cols * 4)
+        "idx_shape": (1, 64),       # shared idx for all rows
+        "tmp_shape": None,          # aligned: valid_cols % 32 == 0, no tmp
+        "dst_shape": (2, 256),      # buffer allocation (src_cols * 4)
         "valid_shape": (2, 64),
-        "idx_vshape": (1, 64),  # idx_valid_rows = 1 means shared idx
-        "dst_vshape": (2, 128),  # actual valid output: src_cols * stride_coef = 64 * 2
+        "idx_vshape": (1, 64),      # idx_valid_rows = 1 means shared idx
+        "dst_vshape": (2, 128),     # actual valid output: src_cols * stride_coef = 64 * 2
         "eps": 1e-6,
     },
     {
         "name": "f32_16x64_shared_idx",
         "dtype": np.float32,
         "src_shape": (16, 64),
-        "idx_shape": (1, 64),  # shared idx for all rows
-        "tmp_shape": None,  # aligned: valid_cols % 32 == 0, no tmp
-        "dst_shape": (16, 256),  # buffer allocation (src_cols * 4)
+        "idx_shape": (1, 64),       # shared idx for all rows
+        "tmp_shape": None,          # aligned: valid_cols % 32 == 0, no tmp
+        "dst_shape": (16, 256),     # buffer allocation (src_cols * 4)
         "valid_shape": (16, 64),
-        "idx_vshape": (1, 64),  # idx_valid_rows = 1 means shared idx
-        "dst_vshape": (16, 128),  # actual valid output: src_cols * stride_coef = 64 * 2
+        "idx_vshape": (1, 64),      # idx_valid_rows = 1 means shared idx
+        "dst_vshape": (16, 128),    # actual valid output: src_cols * stride_coef = 64 * 2
         "eps": 1e-6,
     },
     # f32 cases - large shape (multiple vbitsort calls, aligned, no tmp needed)
     {
         "name": "f32_1x8192",
         "dtype": np.float32,
-        "src_shape": (1, 8192),  # 256 * 32, requires loop_num > 1
+        "src_shape": (1, 8192),     # 256 * 32, requires loop_num > 1
         "idx_shape": (1, 8192),
-        "tmp_shape": None,  # aligned: valid_cols % 32 == 0, no tmp
-        "dst_shape": (1, 32768),  # buffer allocation (src_cols * 4)
+        "tmp_shape": None,          # aligned: valid_cols % 32 == 0, no tmp
+        "dst_shape": (1, 32768),    # buffer allocation (src_cols * 4)
         "valid_shape": (1, 8192),
         "idx_vshape": (1, 8192),
-        "dst_vshape": (
-            1,
-            16384,
-        ),  # actual valid output: src_cols * stride_coef = 8192 * 2
+        "dst_vshape": (1, 16384),   # actual valid output: src_cols * stride_coef = 8192 * 2
         "eps": 1e-6,
     },
     # f32 cases - non-32-aligned (requires tmp buffer for padding)
@@ -139,39 +136,39 @@ CASES = [
     {
         "name": "f32_2x13",
         "dtype": np.float32,
-        "src_shape": (2, 16),  # ALIGN_C = ceil(13*4, 32) / 4 = 16
+        "src_shape": (2, 16),          # ALIGN_C = ceil(13*4, 32) / 4 = 16
         "idx_shape": (2, 16),
-        "tmp_shape": (1, 16),  # unaligned: tmp_cols = ceil(13, 32) = 16
-        "dst_shape": (2, 64),  # 4 * ALIGN_C = 64
-        "valid_shape": (2, 13),  # non-32-aligned
+        "tmp_shape": (1, 16),          # unaligned: tmp_cols = ceil(13, 32) = 16
+        "dst_shape": (2, 64),          # 4 * ALIGN_C = 64
+        "valid_shape": (2, 13),        # non-32-aligned
         "idx_vshape": (2, 13),
-        "dst_vshape": (2, 26),  # VALID_C * stride_coef = 13 * 2
+        "dst_vshape": (2, 26),         # VALID_C * stride_coef = 13 * 2
         "eps": 1e-6,
     },
     # Case 5 from C++: VALID_C=4164, large non-aligned shape
     {
         "name": "f32_1x4164",
         "dtype": np.float32,
-        "src_shape": (1, 8192),  # ALIGN_C = 8192 (from C++ hardcoded)
+        "src_shape": (1, 8192),        # ALIGN_C = 8192 (from C++ hardcoded)
         "idx_shape": (1, 8192),
-        "tmp_shape": (1, 4168),  # unaligned: tmp_cols = ceil(4164, 32) = 4168
-        "dst_shape": (1, 32768),  # 4 * ALIGN_C = 32768
-        "valid_shape": (1, 4164),  # non-32-aligned
+        "tmp_shape": (1, 4168),        # unaligned: tmp_cols = ceil(4164, 32) = 4168
+        "dst_shape": (1, 32768),       # 4 * ALIGN_C = 32768
+        "valid_shape": (1, 4164),      # non-32-aligned
         "idx_vshape": (1, 4164),
-        "dst_vshape": (1, 8328),  # VALID_C * stride_coef = 4164 * 2
+        "dst_vshape": (1, 8328),       # VALID_C * stride_coef = 4164 * 2
         "eps": 1e-6,
     },
     # Case 6 from C++: VALID_C=2084, multi-row non-aligned shape
     {
         "name": "f32_2x2084",
         "dtype": np.float32,
-        "src_shape": (2, 3072),  # ALIGN_C = 3072 (from C++ hardcoded)
+        "src_shape": (2, 3072),        # ALIGN_C = 3072 (from C++ hardcoded)
         "idx_shape": (2, 3072),
-        "tmp_shape": (1, 2088),  # unaligned: tmp_cols = ceil(2084, 32) = 2088
-        "dst_shape": (2, 12288),  # 4 * ALIGN_C = 12288
-        "valid_shape": (2, 2084),  # non-32-aligned
+        "tmp_shape": (1, 2088),        # unaligned: tmp_cols = ceil(2084, 32) = 2088
+        "dst_shape": (2, 12288),       # 4 * ALIGN_C = 12288
+        "valid_shape": (2, 2084),      # non-32-aligned
         "idx_vshape": (2, 2084),
-        "dst_vshape": (2, 4168),  # VALID_C * stride_coef = 2084 * 2
+        "dst_vshape": (2, 4168),       # VALID_C * stride_coef = 2084 * 2
         "eps": 1e-6,
     },
     # f16 cases - basic shapes (aligned, no tmp needed)
@@ -180,11 +177,11 @@ CASES = [
         "dtype": np.float16,
         "src_shape": (1, 32),
         "idx_shape": (1, 32),
-        "tmp_shape": None,  # aligned: valid_cols % 32 == 0, no tmp
-        "dst_shape": (1, 128),  # buffer allocation (src_cols * 4 for f16)
+        "tmp_shape": None,          # aligned: valid_cols % 32 == 0, no tmp
+        "dst_shape": (1, 128),      # buffer allocation (src_cols * 4 for f16)
         "valid_shape": (1, 32),
         "idx_vshape": (1, 32),
-        "dst_vshape": (1, 128),  # actual valid output: src_cols * stride_coef = 32 * 4
+        "dst_vshape": (1, 128),     # actual valid output: src_cols * stride_coef = 32 * 4
         "eps": 1e-3,
     },
     {
@@ -192,20 +189,18 @@ CASES = [
         "dtype": np.float16,
         "src_shape": (4, 64),
         "idx_shape": (4, 64),
-        "tmp_shape": None,  # aligned: valid_cols % 32 == 0, no tmp
-        "dst_shape": (4, 256),  # buffer allocation (src_cols * 4 for f16)
+        "tmp_shape": None,          # aligned: valid_cols % 32 == 0, no tmp
+        "dst_shape": (4, 256),      # buffer allocation (src_cols * 4 for f16)
         "valid_shape": (4, 64),
         "idx_vshape": (4, 64),
-        "dst_vshape": (4, 256),  # actual valid output: src_cols * stride_coef = 64 * 4
+        "dst_vshape": (4, 256),     # actual valid output: src_cols * stride_coef = 64 * 4
         "eps": 1e-3,
     },
 ]
 
-_SMOKE_CASE_NAMES = ["f32_2x13", "f16_1x32"]
+_SMOKE_CASE_NAMES = ['f32_2x13', 'f16_1x32']
 _SMOKE_CASE_NAME_SET = set(_SMOKE_CASE_NAMES)
-_missing = [
-    name for name in _SMOKE_CASE_NAMES if name not in {case["name"] for case in CASES}
-]
+_missing = [name for name in _SMOKE_CASE_NAMES if name not in {case["name"] for case in CASES}]
 if _missing:
     raise RuntimeError("unknown smoke case(s): " + ", ".join(_missing))
 CASES = [case for case in CASES if case["name"] in _SMOKE_CASE_NAME_SET]

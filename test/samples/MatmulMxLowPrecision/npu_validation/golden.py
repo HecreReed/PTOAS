@@ -30,20 +30,14 @@ def convert_scale_a_format(scale, block_size=16, c0_size_mx=2):
     pad_m = (block_size - m % block_size) % block_size
     pad_k = (c0_size_mx - k % c0_size_mx) % c0_size_mx
     if pad_m > 0 or pad_k > 0:
-        padded = np.pad(
-            scale, ((0, pad_m), (0, pad_k)), mode="constant", constant_values=0
-        )
+        padded = np.pad(scale, ((0, pad_m), (0, pad_k)), mode="constant", constant_values=0)
     else:
         padded = scale
     m_padded = m + pad_m
     k_padded = k + pad_k
-    result = padded.reshape(
-        (m_padded // block_size, block_size, k_padded // c0_size_mx, c0_size_mx)
-    )
+    result = padded.reshape((m_padded // block_size, block_size, k_padded // c0_size_mx, c0_size_mx))
     result = result.transpose(0, 2, 1, 3)
-    return result.reshape(
-        result.shape[0] * result.shape[1], result.shape[2] * result.shape[3]
-    )
+    return result.reshape(result.shape[0] * result.shape[1], result.shape[2] * result.shape[3])
 
 
 def convert_scale_b_format(scale, block_size=16, c0_size_mx=2):
@@ -51,18 +45,12 @@ def convert_scale_b_format(scale, block_size=16, c0_size_mx=2):
     pad_n = (block_size - n % block_size) % block_size
     pad_k = (c0_size_mx - k % c0_size_mx) % c0_size_mx
     if pad_n > 0 or pad_k > 0:
-        padded = np.pad(
-            scale, ((0, pad_k), (0, pad_n)), mode="constant", constant_values=0
-        )
+        padded = np.pad(scale, ((0, pad_k), (0, pad_n)), mode="constant", constant_values=0)
     else:
         padded = scale
     k_padded, n_padded = padded.shape
-    result = padded.reshape(
-        (k_padded // c0_size_mx, c0_size_mx, n_padded // 16, 16)
-    ).transpose(2, 0, 3, 1)
-    return result.reshape(
-        result.shape[1] * result.shape[3], result.shape[0] * result.shape[2]
-    )
+    result = padded.reshape((k_padded // c0_size_mx, c0_size_mx, n_padded // 16, 16)).transpose(2, 0, 3, 1)
+    return result.reshape(result.shape[1] * result.shape[3], result.shape[0] * result.shape[2])
 
 
 def main():

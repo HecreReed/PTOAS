@@ -12,22 +12,27 @@
 #include <cstdint>
 #if !defined(__CCE_AICORE__) && !defined(TMRGSORT_HPP)
 struct MrgSortExecutedNumList {
-    uint16_t mrgSortList0;
-    uint16_t mrgSortList1;
-    uint16_t mrgSortList2;
-    uint16_t mrgSortList3;
+  uint16_t mrgSortList0;
+  uint16_t mrgSortList1;
+  uint16_t mrgSortList2;
+  uint16_t mrgSortList3;
 };
 #endif
 #ifndef __CPU_SIM
 #include "acl/acl.h"
 #endif
 
-extern "C" __global__[aicore] void vmi_group_reduce_slot_add_store_kernel(
-    __gm__ float* src16, __gm__ float* src32, __gm__ float* rhs, __gm__ float* dst16, __gm__ float* dst32);
+extern "C" __global__ [aicore] void
+vmi_group_reduce_slot_add_store_kernel(__gm__ float *src16,
+                                       __gm__ float *src32,
+                                       __gm__ float *rhs,
+                                       __gm__ float *dst16,
+                                       __gm__ float *dst32);
 
-void LaunchVmi_group_reduce_slot_add_store_kernel(
-    float* src16, float* src32, float* rhs, float* dst16, float* dst32, void* stream)
-{
-    vmi_group_reduce_slot_add_store_kernel<<<1, nullptr, stream>>>(
-        (__gm__ float*)src16, (__gm__ float*)src32, (__gm__ float*)rhs, (__gm__ float*)dst16, (__gm__ float*)dst32);
+void LaunchVmi_group_reduce_slot_add_store_kernel(float *src16, float *src32,
+                                                  float *rhs, float *dst16,
+                                                  float *dst32, void *stream) {
+  vmi_group_reduce_slot_add_store_kernel<<<1, nullptr, stream>>>(
+      (__gm__ float *)src16, (__gm__ float *)src32, (__gm__ float *)rhs,
+      (__gm__ float *)dst16, (__gm__ float *)dst32);
 }

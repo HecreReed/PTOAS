@@ -27,19 +27,12 @@ SEED = 19
 
 def generate(output_dir: Path, seed: int) -> None:
     rng = np.random.default_rng(seed)
-    v1 = rng.integers(
-        np.iinfo(np.int16).min,
-        np.iinfo(np.int16).max + 1,
-        size=INPUT_ELEMS,
-        dtype=np.int16,
-    )
+    v1 = rng.integers(np.iinfo(np.int16).min, np.iinfo(np.int16).max + 1, size=INPUT_ELEMS, dtype=np.int16)
     v2 = np.zeros(OUTPUT_ELEMS, dtype=np.int32)
     golden_v2 = np.zeros(OUTPUT_ELEMS, dtype=np.int32)
     for src_base in range(0, INPUT_ELEMS, 128):
         dst_base = (src_base // 128) * 64
-        golden_v2[dst_base : dst_base + 64] = v1[src_base : src_base + 64].astype(
-            np.int32
-        )
+        golden_v2[dst_base : dst_base + 64] = v1[src_base : src_base + 64].astype(np.int32)
 
     output_dir.mkdir(parents=True, exist_ok=True)
     v1.tofile(output_dir / "v1.bin")

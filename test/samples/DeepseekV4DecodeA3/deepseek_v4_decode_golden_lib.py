@@ -20,17 +20,15 @@ from validation_runtime import (
     write_golden,
 )
 
-SUPPORTED_CASES = frozenset(
-    {
-        "attention_csa_test_refresh_incore_81",
-        "attention_hca_test_incore_54",
-        "attention_swa_test_incore_40",
-        "decode_csa_test_incore_81",
-        "decode_hca_test_incore_54",
-        "decode_swa_test_incore_40",
-        "sparse_attn_test_incore_7",
-    }
-)
+SUPPORTED_CASES = frozenset({
+    "attention_csa_test_refresh_incore_81",
+    "attention_hca_test_incore_54",
+    "attention_swa_test_incore_40",
+    "decode_csa_test_incore_81",
+    "decode_hca_test_incore_54",
+    "decode_swa_test_incore_40",
+    "sparse_attn_test_incore_7",
+})
 
 OUTPUT_ROWS = 1024
 OUTPUT_COLS = 4096
@@ -79,20 +77,12 @@ def build_case(meta, generator, ints):
     input_elems = INPUT_ROWS * INPUT_COLS
     buffers = default_buffers(meta)
     buffers[out_name] = _make_bf16_zeros(meta, out_name, output_elems)
-    buffers[rope_even_name] = _make_fp32_input(
-        meta, rope_even_name, generator, input_elems
-    )
-    buffers[rope_odd_name] = _make_fp32_input(
-        meta, rope_odd_name, generator, input_elems
-    )
+    buffers[rope_even_name] = _make_fp32_input(meta, rope_even_name, generator, input_elems)
+    buffers[rope_odd_name] = _make_fp32_input(meta, rope_odd_name, generator, input_elems)
 
     out = np.array(buffers[out_name], copy=True).reshape(OUTPUT_ROWS, OUTPUT_COLS)
-    rope_even = np.asarray(buffers[rope_even_name], dtype=np.float32).reshape(
-        INPUT_ROWS, INPUT_COLS
-    )
-    rope_odd = np.asarray(buffers[rope_odd_name], dtype=np.float32).reshape(
-        INPUT_ROWS, INPUT_COLS
-    )
+    rope_even = np.asarray(buffers[rope_even_name], dtype=np.float32).reshape(INPUT_ROWS, INPUT_COLS)
+    rope_odd = np.asarray(buffers[rope_odd_name], dtype=np.float32).reshape(INPUT_ROWS, INPUT_COLS)
 
     group_idx = block_idx // BLOCK_GROUP
     lane_idx = block_idx % BLOCK_GROUP
@@ -103,15 +93,12 @@ def build_case(meta, generator, ints):
     for dt in range(DT_PER_GROUP):
         dt_idx = dt_base + dt
         src_row = dt_idx * INPUT_COLS + src_row_lane_offset
-        tile = (
-            rope_even[src_row : src_row + HH_PER_TILE, :]
-            + rope_odd[src_row : src_row + HH_PER_TILE, :]
-        )
+        tile = rope_even[src_row:src_row + HH_PER_TILE, :] + rope_odd[src_row:src_row + HH_PER_TILE, :]
         tile_bf16 = float32_to_bf16(tile)
         dst_row = out_row_base + dt_idx
         for hh in range(HH_PER_TILE):
             col0 = OUTPUT_COL_BASE + hh * OUTPUT_COL_STRIDE
-            out[dst_row, col0 : col0 + INPUT_COLS] = tile_bf16[hh]
+            out[dst_row, col0:col0 + INPUT_COLS] = tile_bf16[hh]
 
     return buffers, {out_name: out.reshape(-1)}
 

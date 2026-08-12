@@ -18,10 +18,10 @@
 
 #if !defined(__CCE_AICORE__) && !defined(TMRGSORT_HPP)
 struct MrgSortExecutedNumList {
-    uint16_t mrgSortList0;
-    uint16_t mrgSortList1;
-    uint16_t mrgSortList2;
-    uint16_t mrgSortList3;
+  uint16_t mrgSortList0;
+  uint16_t mrgSortList1;
+  uint16_t mrgSortList2;
+  uint16_t mrgSortList3;
 };
 #endif
 
@@ -29,11 +29,15 @@ struct MrgSortExecutedNumList {
 #include "acl/acl.h"
 #endif
 
-extern "C" __global__[aicore] void mad_bias_kernel(
-    __gm__ __fp16* a, __gm__ __fp16* b, __gm__ float* c, __gm__ __fp16* bias);
+extern "C" __global__ [aicore] void mad_bias_kernel(__gm__ __fp16 *a,
+                                                     __gm__ __fp16 *b,
+                                                     __gm__ float *c,
+                                                     __gm__ __fp16 *bias);
 
-void LaunchMad_bias_kernel(__fp16* a, __fp16* b, float* c, __fp16* bias, void* stream)
-{
-    mad_bias_kernel<<<1, nullptr, stream>>>(
-        (__gm__ __fp16*)a, (__gm__ __fp16*)b, (__gm__ float*)c, (__gm__ __fp16*)bias);
+void LaunchMad_bias_kernel(__fp16 *a, __fp16 *b, float *c, __fp16 *bias,
+                           void *stream) {
+  mad_bias_kernel<<<1, nullptr, stream>>>((__gm__ __fp16 *)a,
+                                          (__gm__ __fp16 *)b,
+                                          (__gm__ float *)c,
+                                          (__gm__ __fp16 *)bias);
 }

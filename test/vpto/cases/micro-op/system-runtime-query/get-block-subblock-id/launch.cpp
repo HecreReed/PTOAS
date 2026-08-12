@@ -11,24 +11,12 @@
 #endif
 
 #if defined(__CCE_AICORE__) && defined(__NPU_ARCH__) && (__NPU_ARCH__ == 2201)
-typedef struct {
-    unsigned char v;
-} hifloat8_t;
-typedef struct {
-    unsigned char v;
-} float8_e4m3_t;
-typedef struct {
-    unsigned char v;
-} float8_e5m2_t;
-typedef struct {
-    unsigned char v;
-} float8_e8m0_t;
-typedef struct {
-    unsigned char v;
-} float4_e1m2x2_t;
-typedef struct {
-    unsigned char v;
-} float4_e2m1x2_t;
+typedef struct { unsigned char v; } hifloat8_t;
+typedef struct { unsigned char v; } float8_e4m3_t;
+typedef struct { unsigned char v; } float8_e5m2_t;
+typedef struct { unsigned char v; } float8_e8m0_t;
+typedef struct { unsigned char v; } float4_e1m2x2_t;
+typedef struct { unsigned char v; } float4_e2m1x2_t;
 #endif
 #include <stdint.h>
 
@@ -48,9 +36,8 @@ struct MrgSortExecutedNumList {
 #include "acl/acl.h"
 #endif
 
-extern "C" __global__[aicore] void get_block_subblock_id_kernel(__gm__ int64_t* v1);
+extern "C" __global__ [aicore] void get_block_subblock_id_kernel(__gm__ int64_t *v1);
 
-void LaunchGet_block_subblock_id_kernel(int64_t* v1, void* stream)
-{
-    get_block_subblock_id_kernel<<<2, nullptr, stream>>>((__gm__ int64_t*)v1);
+void LaunchGet_block_subblock_id_kernel(int64_t *v1, void *stream) {
+  get_block_subblock_id_kernel<<<2, nullptr, stream>>>((__gm__ int64_t *)v1);
 }

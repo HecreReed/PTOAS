@@ -22,21 +22,22 @@ class raw_ostream;
 namespace mlir::pto {
 
 enum class VFSIMTSizeFixMode {
-    Auto,
-    Off,
-    Verify,
+  Auto,
+  Off,
+  Verify,
 };
 
 struct VFSIMTSizePatchResult {
-    bool changed = false;
-    unsigned verifiedCallSites = 0;
-    unsigned patchedCallSites = 0;
-    std::string objectPath;
+  bool changed = false;
+  unsigned verifiedCallSites = 0;
+  unsigned patchedCallSites = 0;
+  std::string objectPath;
 };
 
-FailureOr<VFSIMTSizePatchResult> verifyAndPatchVFSIMTSize(
-    llvm::Module& module, llvm::StringRef rawObjectPath, llvm::StringRef patchedObjectPath, VFSIMTSizeFixMode mode,
-    llvm::raw_ostream& diagOS);
+FailureOr<VFSIMTSizePatchResult>
+verifyAndPatchVFSIMTSize(llvm::Module &module, llvm::StringRef rawObjectPath,
+                         llvm::StringRef patchedObjectPath,
+                         VFSIMTSizeFixMode mode, llvm::raw_ostream &diagOS);
 
 } // namespace mlir::pto
 

@@ -8,7 +8,7 @@
 
 from ptoas.mlir.ir import Context, Location, Module, InsertionPoint, UnitAttr
 from ptoas.mlir.dialects import func, arith, pto
-from ptoas.mlir.ir import IntegerType, IndexType, BoolAttr
+from ptoas.mlir.ir import IntegerType, IndexType, IntegerAttr, BoolAttr
 
 
 def build():
@@ -48,16 +48,12 @@ def build():
                 descending_attr = BoolAttr.get(True)
 
                 # Output is (1 x 32).
-                tv_dst = pto.MakeTensorViewOp(
-                    tv2_i32, arg0, [c1, c32], [c32, c1]
-                ).result
+                tv_dst = pto.MakeTensorViewOp(tv2_i32, arg0, [c1, c32], [c32, c1]).result
                 tb_dst = pto.AllocTileOp(tile_buf_1x32).result
 
                 pto.TCIOp(arg1, tb_dst, descending=descending_attr)
 
-                sv_dst = pto.PartitionViewOp(
-                    tile_view_1x32, tv_dst, offsets=[c0, c0], sizes=[c1, c32]
-                ).result
+                sv_dst = pto.PartitionViewOp(tile_view_1x32, tv_dst, offsets=[c0, c0], sizes=[c1, c32]).result
                 pto.TStoreOp(None, tb_dst, sv_dst)
 
                 func.ReturnOp([])

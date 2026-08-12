@@ -16,57 +16,63 @@
 namespace mlir::pto {
 namespace {
 
-static AddressSpaceAttr getNormalizedPtrMemorySpace(Attribute memorySpace, MLIRContext* context)
-{
-    if (auto addrSpace = dyn_cast_or_null<AddressSpaceAttr>(memorySpace))
-        return addrSpace;
-    if (auto intAttr = dyn_cast_or_null<IntegerAttr>(memorySpace))
-        return AddressSpaceAttr::get(context, static_cast<AddressSpace>(intAttr.getInt()));
-    return AddressSpaceAttr::get(context, AddressSpace::GM);
+static AddressSpaceAttr getNormalizedPtrMemorySpace(Attribute memorySpace,
+                                                    MLIRContext *context) {
+  if (auto addrSpace = dyn_cast_or_null<AddressSpaceAttr>(memorySpace))
+    return addrSpace;
+  if (auto intAttr = dyn_cast_or_null<IntegerAttr>(memorySpace))
+    return AddressSpaceAttr::get(context,
+                                 static_cast<AddressSpace>(intAttr.getInt()));
+  return AddressSpaceAttr::get(context, AddressSpace::GM);
 }
 
-static Value materializeMemRefView(
-    Value value, ArrayRef<int64_t> shape, Type elementType, Attribute memorySpace, PatternRewriter& rewriter,
-    Location loc)
-{
-    auto memrefType = MemRefType::get(shape, elementType, AffineMap(), memorySpace);
-    if (value.getType() == memrefType)
-        return value;
-    return rewriter.create<UnrealizedConversionCastOp>(loc, TypeRange(ArrayRef<Type>{memrefType}), value).getResult(0);
+static Value materializeMemRefView(Value value, ArrayRef<int64_t> shape,
+                                   Type elementType, Attribute memorySpace,
+                                   PatternRewriter &rewriter, Location loc) {
+  auto memrefType =
+      MemRefType::get(shape, elementType, AffineMap(), memorySpace);
+  if (value.getType() == memrefType)
+    return value;
+  return rewriter
+      .create<UnrealizedConversionCastOp>(
+          loc, TypeRange(ArrayRef<Type>{memrefType}), value)
+      .getResult(0);
 }
 
-static Value materializeTileBufferView(Value value, PatternRewriter& rewriter, Location loc)
-{
-    if (isa<BaseMemRefType>(value.getType()))
-        return value;
+static Value materializeTileBufferView(Value value, PatternRewriter &rewriter,
+                                       Location loc) {
+  if (isa<BaseMemRefType>(value.getType()))
+    return value;
 
-    auto tileType = dyn_cast<TileBufType>(value.getType());
-    if (!tileType)
-        return {};
+  auto tileType = dyn_cast<TileBufType>(value.getType());
+  if (!tileType)
+    return {};
 
-    return materializeMemRefView(
-        value, tileType.getShape(), tileType.getElementType(), tileType.getMemorySpace(), rewriter, loc);
+  return materializeMemRefView(value, tileType.getShape(),
+                               tileType.getElementType(),
+                               tileType.getMemorySpace(), rewriter, loc);
 }
 
 } // namespace
 
-Value materializeBufferPointer(
-    Value value, Type elementType, Attribute memorySpace, PatternRewriter& rewriter, Location loc)
-{
-    if (!value)
-        return {};
+Value materializeBufferPointer(Value value, Type elementType,
+                               Attribute memorySpace,
+                               PatternRewriter &rewriter, Location loc) {
+  if (!value)
+    return {};
 
-    auto ptrMemorySpace = getNormalizedPtrMemorySpace(memorySpace, rewriter.getContext());
-    auto ptrType = PtrType::get(rewriter.getContext(), elementType, ptrMemorySpace);
+  auto ptrMemorySpace =
+      getNormalizedPtrMemorySpace(memorySpace, rewriter.getContext());
+  auto ptrType = PtrType::get(rewriter.getContext(), elementType, ptrMemorySpace);
 
-    if (value.getType() == ptrType)
-        return value;
+  if (value.getType() == ptrType)
+    return value;
 
-    Value memrefValue = materializeTileBufferView(value, rewriter, loc);
-    auto memrefType = dyn_cast_or_null<MemRefType>(memrefValue.getType());
-    if (!memrefValue || !memrefType)
-        return {};
-    return rewriter.create<CastPtrOp>(loc, ptrType, memrefValue).getResult();
+  Value memrefValue = materializeTileBufferView(value, rewriter, loc);
+  auto memrefType = dyn_cast_or_null<MemRefType>(memrefValue.getType());
+  if (!memrefValue || !memrefType)
+    return {};
+  return rewriter.create<CastPtrOp>(loc, ptrType, memrefValue).getResult();
 }
 
 } // namespace mlir::pto

@@ -15,15 +15,14 @@
 #include "mlir-c/IR.h"
 #include "mlir/Bindings/Python/PybindAdaptors.h"
 
-PYBIND11_MODULE(_site_initialize_0, module)
-{
-    module.doc() = "PTOAS MLIR dialect registration";
-    module.def("register_dialects", [](MlirDialectRegistry registry) {
-        mlirDialectHandleInsertDialect(mlirGetDialectHandle__arith__(), registry);
-        mlirDialectHandleInsertDialect(mlirGetDialectHandle__func__(), registry);
-        mlirDialectHandleInsertDialect(mlirGetDialectHandle__llvm__(), registry);
-        mlirDialectHandleInsertDialect(mlirGetDialectHandle__math__(), registry);
-        mlirDialectHandleInsertDialect(mlirGetDialectHandle__memref__(), registry);
-        mlirDialectHandleInsertDialect(mlirGetDialectHandle__scf__(), registry);
-    });
+PYBIND11_MODULE(_site_initialize_0, module) {
+  module.doc() = "PTOAS MLIR dialect registration";
+  module.def("register_dialects", [](MlirDialectRegistry registry) {
+    mlirDialectHandleInsertDialect(mlirGetDialectHandle__arith__(), registry);
+    mlirDialectHandleInsertDialect(mlirGetDialectHandle__func__(), registry);
+    mlirDialectHandleInsertDialect(mlirGetDialectHandle__llvm__(), registry);
+    mlirDialectHandleInsertDialect(mlirGetDialectHandle__math__(), registry);
+    mlirDialectHandleInsertDialect(mlirGetDialectHandle__memref__(), registry);
+    mlirDialectHandleInsertDialect(mlirGetDialectHandle__scf__(), registry);
+  });
 }

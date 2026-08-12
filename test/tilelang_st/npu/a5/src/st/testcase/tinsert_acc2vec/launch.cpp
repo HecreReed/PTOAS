@@ -13,23 +13,23 @@
 #endif
 
 extern "C" __global__ AICORE void TINSERT_acc2vec_nd_f16_16x16(
-    __gm__ uint16_t* a, __gm__ uint16_t* b, __gm__ uint16_t* c);
+    __gm__ uint16_t *a, __gm__ uint16_t *b, __gm__ uint16_t *c);
 extern "C" __global__ AICORE void TINSERT_acc2vec_nd_f32_16x16(
-    __gm__ uint16_t* a, __gm__ uint16_t* b, __gm__ uint32_t* c);
+    __gm__ uint16_t *a, __gm__ uint16_t *b, __gm__ uint32_t *c);
 extern "C" __global__ AICORE void TINSERT_acc2vec_nz_f32_16x16(
-    __gm__ uint16_t* a, __gm__ uint16_t* b, __gm__ uint32_t* c);
+    __gm__ uint16_t *a, __gm__ uint16_t *b, __gm__ uint32_t *c);
 
-void LaunchAcc2VecND_f16_16x16(uint16_t* a, uint16_t* b, uint16_t* c, void* stream)
-{
-    TINSERT_acc2vec_nd_f16_16x16<<<1, nullptr, stream>>>((__gm__ uint16_t*)a, (__gm__ uint16_t*)b, (__gm__ uint16_t*)c);
+void LaunchAcc2VecND_f16_16x16(uint16_t *a, uint16_t *b, uint16_t *c, void *stream) {
+    TINSERT_acc2vec_nd_f16_16x16<<<1, nullptr, stream>>>(
+        (__gm__ uint16_t *)a, (__gm__ uint16_t *)b, (__gm__ uint16_t *)c);
 }
 
-void LaunchAcc2VecND_f32_16x16(uint16_t* a, uint16_t* b, uint32_t* c, void* stream)
-{
-    TINSERT_acc2vec_nd_f32_16x16<<<1, nullptr, stream>>>((__gm__ uint16_t*)a, (__gm__ uint16_t*)b, (__gm__ uint32_t*)c);
+void LaunchAcc2VecND_f32_16x16(uint16_t *a, uint16_t *b, uint32_t *c, void *stream) {
+    TINSERT_acc2vec_nd_f32_16x16<<<1, nullptr, stream>>>(
+        (__gm__ uint16_t *)a, (__gm__ uint16_t *)b, (__gm__ uint32_t *)c);
 }
 
-void LaunchAcc2VecNZ_f32_16x16(uint16_t* a, uint16_t* b, uint32_t* c, void* stream)
-{
-    TINSERT_acc2vec_nz_f32_16x16<<<1, nullptr, stream>>>((__gm__ uint16_t*)a, (__gm__ uint16_t*)b, (__gm__ uint32_t*)c);
+void LaunchAcc2VecNZ_f32_16x16(uint16_t *a, uint16_t *b, uint32_t *c, void *stream) {
+    TINSERT_acc2vec_nz_f32_16x16<<<1, nullptr, stream>>>(
+        (__gm__ uint16_t *)a, (__gm__ uint16_t *)b, (__gm__ uint32_t *)c);
 }

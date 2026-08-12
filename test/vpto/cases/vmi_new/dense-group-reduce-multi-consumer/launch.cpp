@@ -12,21 +12,24 @@
 #include <cstdint>
 #if !defined(__CCE_AICORE__) && !defined(TMRGSORT_HPP)
 struct MrgSortExecutedNumList {
-    uint16_t mrgSortList0;
-    uint16_t mrgSortList1;
-    uint16_t mrgSortList2;
-    uint16_t mrgSortList3;
+  uint16_t mrgSortList0;
+  uint16_t mrgSortList1;
+  uint16_t mrgSortList2;
+  uint16_t mrgSortList3;
 };
 #endif
 #ifndef __CPU_SIM
 #include "acl/acl.h"
 #endif
 
-extern "C" __global__[aicore] void vmi_dense_group_reduce_multi_consumer_kernel(
-    __gm__ float* src, __gm__ float* sum, __gm__ float* copy);
+extern "C" __global__ [aicore] void
+vmi_dense_group_reduce_multi_consumer_kernel(__gm__ float *src,
+                                             __gm__ float *sum,
+                                             __gm__ float *copy);
 
-void LaunchVmi_dense_group_reduce_multi_consumer_kernel(float* src, float* sum, float* copy, void* stream)
-{
-    vmi_dense_group_reduce_multi_consumer_kernel<<<1, nullptr, stream>>>(
-        (__gm__ float*)src, (__gm__ float*)sum, (__gm__ float*)copy);
+void LaunchVmi_dense_group_reduce_multi_consumer_kernel(float *src, float *sum,
+                                                        float *copy,
+                                                        void *stream) {
+  vmi_dense_group_reduce_multi_consumer_kernel<<<1, nullptr, stream>>>(
+      (__gm__ float *)src, (__gm__ float *)sum, (__gm__ float *)copy);
 }

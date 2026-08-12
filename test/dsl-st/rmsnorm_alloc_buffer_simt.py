@@ -16,9 +16,7 @@ from common import assert_close, auto_main
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-EXAMPLE_PATH = (
-    REPO_ROOT / "ptodsl" / "examples" / "rms_norm" / "rmsnorm_alloc_buffer_simt.py"
-)
+EXAMPLE_PATH = REPO_ROOT / "ptodsl" / "examples" / "rms_norm" / "rmsnorm_alloc_buffer_simt.py"
 HIDDEN_SIZE = 4096
 THREADS = 128
 ROUNDS = 8
@@ -58,9 +56,7 @@ RMSNORM_KERNEL = _RMSNormSpecialization()
 
 def make_inputs():
     rng = np.random.RandomState(SEED)
-    x = rng.uniform(-0.75, 0.75, size=(N_CORES * TOKENS_PER_CORE, HIDDEN_SIZE)).astype(
-        np.float32
-    )
+    x = rng.uniform(-0.75, 0.75, size=(N_CORES * TOKENS_PER_CORE, HIDDEN_SIZE)).astype(np.float32)
     w = rng.uniform(0.5, 1.5, size=(HIDDEN_SIZE,)).astype(np.float32)
     y = np.zeros_like(x)
     rstd = np.zeros((N_CORES * TOKENS_PER_CORE,), dtype=np.float32)
@@ -69,9 +65,7 @@ def make_inputs():
 
 def rmsnorm_reference(x: np.ndarray, w: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
     sum_sq = np.sum(x * x, axis=1, dtype=np.float32)
-    rstd = (np.float32(1.0) / np.sqrt(sum_sq / np.float32(x.shape[1]) + EPS)).astype(
-        np.float32
-    )
+    rstd = (np.float32(1.0) / np.sqrt(sum_sq / np.float32(x.shape[1]) + EPS)).astype(np.float32)
     y = (x * rstd[:, None] * w[None, :]).astype(np.float32)
     return y, rstd
 

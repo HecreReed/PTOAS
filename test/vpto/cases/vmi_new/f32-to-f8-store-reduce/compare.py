@@ -15,9 +15,7 @@ import numpy as np
 def check_f32(name: str, atol: float, rtol: float) -> bool:
     golden = np.fromfile(f"golden_{name}.bin", dtype=np.float32)
     output = np.fromfile(f"{name}.bin", dtype=np.float32)
-    close = golden.shape == output.shape and np.allclose(
-        golden, output, atol=atol, rtol=rtol
-    )
+    close = golden.shape == output.shape and np.allclose(golden, output, atol=atol, rtol=rtol)
     if close:
         return True
     diff = np.nonzero(~np.isclose(golden, output, atol=atol, rtol=rtol))[0]
@@ -37,9 +35,7 @@ def check_u8(name: str) -> bool:
         return True
     diff = np.nonzero(golden != output)[0]
     idx = int(diff[0]) if diff.size else -1
-    print(
-        f"[ERROR] compare failed {name} idx={idx} golden=0x{int(golden[idx]):02x} output=0x{int(output[idx]):02x}"
-    )
+    print(f"[ERROR] compare failed {name} idx={idx} golden=0x{int(golden[idx]):02x} output=0x{int(output[idx]):02x}")
     return False
 
 

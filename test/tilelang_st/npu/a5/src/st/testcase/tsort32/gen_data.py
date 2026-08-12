@@ -21,7 +21,7 @@ from cases import CASES
 
 BLOCK_SIZE = 32
 FLOAT_DST_STRIDE_COEF = 2  # for f32
-HALF_DST_STRIDE_COEF = 4  # for f16
+HALF_DST_STRIDE_COEF = 4   # for f16
 
 
 def _to_tuple(shape):
@@ -76,9 +76,7 @@ for case in CASES:
             block_size = block_end - block_start
 
             block_data = input_data[row, block_start:block_end].copy()
-            block_idx = idx_data[
-                0 if idx_vr == 1 else row, block_start:block_end
-            ].astype(np.int32)
+            block_idx = idx_data[0 if idx_vr == 1 else row, block_start:block_end].astype(np.int32)
 
             # For partial blocks, pad with NaN (negative NaN = max value) to make 32 elements
             if block_size < BLOCK_SIZE:
@@ -86,7 +84,7 @@ for case in CASES:
                 # f16: 0x7C00 (+inf), bf16: 0x7FC0, f32: 0x7FC00000 (negative NaN)
                 if dtype == np.float16:
                     pad_val = np.float16(0xFC00)  # +inf for f16
-                elif hasattr(np, "bfloat16") and dtype == np.bfloat16:
+                elif hasattr(np, 'bfloat16') and dtype == np.bfloat16:
                     pad_val = np.bfloat16(0xFF80)
                 else:
                     pad_val = np.float32(0xFF800000)  # negative NaN for f32
@@ -114,16 +112,10 @@ for case in CASES:
                     idx_u32 = np.array(sorted_original_idx[i], dtype=np.uint32)
                     if dtype == np.float16:
                         idx_bytes = idx_u32.tobytes()
-                        golden[row, dst_offset + i * stride_coef + 1] = np.frombuffer(
-                            idx_bytes[:2], dtype=np.float16
-                        )[0]
-                        golden[row, dst_offset + i * stride_coef + 2] = np.frombuffer(
-                            idx_bytes[2:], dtype=np.float16
-                        )[0]
+                        golden[row, dst_offset + i * stride_coef + 1] = np.frombuffer(idx_bytes[:2], dtype=np.float16)[0]
+                        golden[row, dst_offset + i * stride_coef + 2] = np.frombuffer(idx_bytes[2:], dtype=np.float16)[0]
                     else:
-                        golden[row, dst_offset + i * stride_coef + 1] = idx_u32.view(
-                            np.float32
-                        )
+                        golden[row, dst_offset + i * stride_coef + 1] = idx_u32.view(np.float32)
             else:
                 # Full 32-element block
                 # Sort by value in descending order (largest to smallest)
@@ -139,21 +131,10 @@ for case in CASES:
                     idx_u32 = np.array(sorted_original_idx[i], dtype=np.uint32)
                     if dtype == np.float16:
                         idx_bytes = idx_u32.tobytes()
-                        golden[row, dst_offset + i * stride_coef + 1] = np.frombuffer(
-                            idx_bytes[:2], dtype=np.float16
-                        )[0]
-                        golden[row, dst_offset + i * stride_coef + 2] = np.frombuffer(
-                            idx_bytes[2:], dtype=np.float16
-                        )[0]
+                        golden[row, dst_offset + i * stride_coef + 1] = np.frombuffer(idx_bytes[:2], dtype=np.float16)[0]
+                        golden[row, dst_offset + i * stride_coef + 2] = np.frombuffer(idx_bytes[2:], dtype=np.float16)[0]
                     else:
-                        golden[row, dst_offset + i * stride_coef + 1] = idx_u32.view(
-                            np.float32
-                        )
+                        golden[row, dst_offset + i * stride_coef + 1] = idx_u32.view(np.float32)
 
-    save_case_data(
-        case["name"],
-        {"input": input_data, "idx": idx_data.astype(np.uint32), "golden": golden},
-    )
-    print(
-        f"[INFO] gen_data: {case['name']} src_shape={src_shape} idx_shape={idx_shape} dst_shape={dst_shape} dtype={dtype.__name__}"
-    )
+    save_case_data(case["name"], {"input": input_data, "idx": idx_data.astype(np.uint32), "golden": golden})
+    print(f"[INFO] gen_data: {case['name']} src_shape={src_shape} idx_shape={idx_shape} dst_shape={dst_shape} dtype={dtype.__name__}")

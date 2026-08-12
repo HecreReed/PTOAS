@@ -22,31 +22,31 @@
 using namespace PtoTestCommon;
 
 // Kernel launch wrappers (defined in launch.cpp)
-void LaunchTRANDOM_int32_1x256(uint32_t* key, uint32_t* counter, uint32_t* output, void* stream);
-void LaunchTRANDOM_int32_4x256(uint32_t* key, uint32_t* counter, uint32_t* output, void* stream);
+void LaunchTRANDOM_int32_1x256(uint32_t *key, uint32_t *counter, uint32_t *output, void *stream);
+void LaunchTRANDOM_int32_4x256(uint32_t *key, uint32_t *counter, uint32_t *output, void *stream);
 
 struct TestCase {
-    const char* name;
-    void (*launch)(uint32_t*, uint32_t*, uint32_t*, void*);
-    size_t rows;
-    size_t cols;
+    const char *name;
+    void (*launch)(uint32_t *, uint32_t *, uint32_t *, void *);
+    size_t      rows;
+    size_t      cols;
 };
 
 static const TestCase kCases[] = {
-    {"int32_1x256", LaunchTRANDOM_int32_1x256, 1, 256},
-    {"int32_4x256", LaunchTRANDOM_int32_4x256, 4, 256},
+{"int32_1x256", LaunchTRANDOM_int32_1x256, 1, 256},
+{"int32_4x256", LaunchTRANDOM_int32_4x256, 4, 256},
 };
 static constexpr size_t kNumCases = sizeof(kCases) / sizeof(kCases[0]);
 
-static int RunCase(const TestCase& tc, int deviceId, aclrtStream stream)
-{
+static int RunCase(const TestCase &tc, int deviceId, aclrtStream stream) {
     int rc = 0;
     const size_t elemCount = tc.rows * tc.cols;
     const size_t outputSize = elemCount * sizeof(uint32_t);
     size_t keySize = 2 * sizeof(uint32_t);
     size_t counterSize = 4 * sizeof(uint32_t);
 
-    std::printf("[INFO] === case: %s (shape=%zux%zu) ===\n", tc.name, tc.rows, tc.cols);
+    std::printf("[INFO] === case: %s (shape=%zux%zu) ===\n",
+                tc.name, tc.rows, tc.cols);
 
     std::string caseDir = std::string("./") + tc.name;
 
@@ -75,7 +75,7 @@ static int RunCase(const TestCase& tc, int deviceId, aclrtStream stream)
         aclrtMemcpy(keyDevice, keySize, keyHost, keySize, ACL_MEMCPY_HOST_TO_DEVICE);
         aclrtMemcpy(counterDevice, counterSize, counterHost, counterSize, ACL_MEMCPY_HOST_TO_DEVICE);
 
-        tc.launch((uint32_t*)keyDevice, (uint32_t*)counterDevice, (uint32_t*)outputDevice, stream);
+        tc.launch((uint32_t *)keyDevice, (uint32_t *)counterDevice, (uint32_t *)outputDevice, stream);
 
         aclrtSynchronizeStream(stream);
         aclrtMemcpy(outputHost, outputSize, outputDevice, outputSize, ACL_MEMCPY_DEVICE_TO_HOST);
@@ -104,16 +104,15 @@ static int RunCase(const TestCase& tc, int deviceId, aclrtStream stream)
     return rc;
 }
 
-int main(int argc, char* argv[])
-{
-    const char* caseFilter = (argc > 1) ? argv[1] : nullptr;
+int main(int argc, char *argv[]) {
+    const char *caseFilter = (argc > 1) ? argv[1] : nullptr;
 
     int rc = 0;
     int deviceId = 0;
     aclrtStream stream = nullptr;
 
     aclInit(nullptr);
-    if (const char* envDevice = std::getenv("ACL_DEVICE_ID")) {
+    if (const char *envDevice = std::getenv("ACL_DEVICE_ID")) {
         deviceId = std::atoi(envDevice);
     }
     aclrtSetDevice(deviceId);

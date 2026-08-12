@@ -37,18 +37,10 @@ from .._surface_values import wrap_surface_value
 from .._types import _DType, _resolve
 
 from ptoas.mlir.dialects import func
-from ptoas.mlir.ir import (
-    Attribute,
-    InsertionPoint,
-    Location,
-    Module,
-    StringAttr,
-    UnitAttr,
-)
+from ptoas.mlir.ir import Attribute, InsertionPoint, Location, Module, StringAttr, UnitAttr
 
 
 # ── tile handle handed to the template body ────────────────────────────────────────
-
 
 @dataclass(frozen=True)
 class _TemplateTileConfig:
@@ -96,7 +88,6 @@ class _TemplateTile(TileValue):
 
 # ── tracing runtime ────────────────────────────────────────────────────────────────
 
-
 class _TemplateTrace(TracingRuntime):
     def __init__(self, descriptor, tile_specs: dict, context_attrs: dict | None = None):
         super().__init__(
@@ -106,8 +97,7 @@ class _TemplateTrace(TracingRuntime):
                 kernel_kind="vector",
                 mode="explicit",
                 module_style=ModuleStyle.NESTED,
-                source_file=inspect.getsourcefile(descriptor.py_fn)
-                or inspect.getfile(descriptor.py_fn),
+                source_file=inspect.getsourcefile(descriptor.py_fn) or inspect.getfile(descriptor.py_fn),
                 source_line=getattr(descriptor.py_fn.__code__, "co_firstlineno", None),
             )
         )
@@ -115,9 +105,7 @@ class _TemplateTrace(TracingRuntime):
         self.operand_specs = tile_specs
         self.context_attrs = dict(context_attrs or {})
         self._ordered_specs: list = []
-        self._signature_parameters = tuple(
-            inspect.signature(descriptor.py_fn).parameters.items()
-        )
+        self._signature_parameters = tuple(inspect.signature(descriptor.py_fn).parameters.items())
 
     def compute_argument_types(self):
         arg_types = []
@@ -195,11 +183,7 @@ class _TemplateTrace(TracingRuntime):
             module, ir_fn = self._create_instance_module(arg_types)
             session = self.create_session(module, ir_fn)
             entry = ir_fn.add_entry_block()
-            with (
-                InsertionPoint(entry),
-                activate_runtime(self),
-                activate_session(session),
-            ):
+            with InsertionPoint(entry), activate_runtime(self), activate_session(session):
                 self.initialize_session(session, entry)
                 args = self.bind_entry_arguments(entry.arguments)
                 self.trace_entry(*args)
@@ -212,16 +196,12 @@ class _TemplateTrace(TracingRuntime):
 
     def _create_instance_module(self, arg_types):
         module = Module.create()
-        module.operation.attributes["pto.target_arch"] = StringAttr.get(
-            self.descriptor.target
-        )
+        module.operation.attributes["pto.target_arch"] = StringAttr.get(self.descriptor.target)
         with InsertionPoint(module.body):
             fn_ty = func.FunctionType.get(arg_types, [])
             ir_fn = func.FuncOp(self.descriptor.name, fn_ty)
             ir_fn.attributes["pto.tilelang.instance"] = UnitAttr.get()
-            ir_fn.attributes["pto.kernel_kind"] = Attribute.parse(
-                "#pto.kernel_kind<vector>"
-            )
+            ir_fn.attributes["pto.kernel_kind"] = Attribute.parse("#pto.kernel_kind<vector>")
         return module, ir_fn
 
 

@@ -28,17 +28,13 @@ def compare_bin(golden_path: str, output_path: str, dtype) -> bool:
     golden = np.fromfile(golden_path, dtype=dtype)
     output = np.fromfile(output_path, dtype=dtype)
     if golden.shape != output.shape:
-        print(
-            f"[ERROR] Shape mismatch for {output_path}: golden={golden.shape}, output={output.shape}"
-        )
+        print(f"[ERROR] Shape mismatch for {output_path}: golden={golden.shape}, output={output.shape}")
         return False
     if np.array_equal(golden, output):
         return True
     diff = np.nonzero(golden != output)[0]
     idx = int(diff[0]) if diff.size else 0
-    print(
-        f"[ERROR] First mismatch for {output_path} at idx={idx}: golden={golden[idx]}, output={output[idx]}"
-    )
+    print(f"[ERROR] First mismatch for {output_path} at idx={idx}: golden={golden[idx]}, output={output[idx]}")
     return False
 
 

@@ -51,25 +51,13 @@ def build():
 
                 arg0, arg1, arg2 = entry.arguments
 
-                tv_src0 = pto.MakeTensorViewOp(
-                    tv2_i16, arg0, [c32, c16], [c16, c1]
-                ).result
-                tv_src1 = pto.MakeTensorViewOp(
-                    tv2_i16, arg1, [c32, c16], [c16, c1]
-                ).result
-                tv_dst = pto.MakeTensorViewOp(
-                    tv2_i16, arg2, [c32, c32], [c32, c1]
-                ).result
+                tv_src0 = pto.MakeTensorViewOp(tv2_i16, arg0, [c32, c16], [c16, c1]).result
+                tv_src1 = pto.MakeTensorViewOp(tv2_i16, arg1, [c32, c16], [c16, c1]).result
+                tv_dst = pto.MakeTensorViewOp(tv2_i16, arg2, [c32, c32], [c32, c1]).result
 
-                sv_src0 = pto.PartitionViewOp(
-                    tile_view_32x16, tv_src0, offsets=[c0, c0], sizes=[c32, c16]
-                ).result
-                sv_src1 = pto.PartitionViewOp(
-                    tile_view_32x16, tv_src1, offsets=[c0, c0], sizes=[c32, c16]
-                ).result
-                sv_dst = pto.PartitionViewOp(
-                    tile_view_32x32, tv_dst, offsets=[c0, c0], sizes=[c32, c32]
-                ).result
+                sv_src0 = pto.PartitionViewOp(tile_view_32x16, tv_src0, offsets=[c0, c0], sizes=[c32, c16]).result
+                sv_src1 = pto.PartitionViewOp(tile_view_32x16, tv_src1, offsets=[c0, c0], sizes=[c32, c16]).result
+                sv_dst = pto.PartitionViewOp(tile_view_32x32, tv_dst, offsets=[c0, c0], sizes=[c32, c32]).result
 
                 tb_src0 = pto.AllocTileOp(tb_32x16).result
                 tb_src1 = pto.AllocTileOp(tb_32x16).result
@@ -89,3 +77,4 @@ def build():
 
 if __name__ == "__main__":
     print(build())
+

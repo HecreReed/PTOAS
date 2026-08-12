@@ -21,3 +21,4 @@ For pass bugs, prefer the **Before / Expected / Actual** pattern:
 
 - Temporary scripts committed outside `test/` or `test/samples/`
 - Large, non-minimized reproductions when a smaller IR can isolate the issue
+

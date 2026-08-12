@@ -63,9 +63,7 @@ def yield_carry_loop_state(frame: CarryLoopFrame, **kwargs) -> None:
             pieces.append(f"missing: {', '.join(missing)}")
         if extra:
             pieces.append(f"unexpected: {', '.join(extra)}")
-        raise RuntimeError(
-            "loop.update(...) must match carry names exactly; " + "; ".join(pieces)
-        )
+        raise RuntimeError("loop.update(...) must match carry names exactly; " + "; ".join(pieces))
     if frame.yielded:
         raise RuntimeError("loop.update(...) may only be called once per loop body")
     scf.YieldOp([unwrap_surface_value(kwargs[name]) for name in frame.state_names])
@@ -85,9 +83,7 @@ def finish_carry_loop_frame(frame: CarryLoopFrame, exc_type, exc, tb) -> None:
 
 def _coerce_index(value):
     raw_value = unwrap_surface_value(value)
-    return coerce_runtime_index(
-        raw_value, context="pto.for_(...).carry(...) loop bound"
-    )
+    return coerce_runtime_index(raw_value, context="pto.for_(...).carry(...) loop bound")
 
 
 def _materialize_carry_init(value):
@@ -98,9 +94,7 @@ def _materialize_carry_init(value):
             "declare the struct outside the loop and mutate it in place inside the loop body"
         )
     if isinstance(raw_value, bool):
-        raise TypeError(
-            "pto.for_(...).carry(...) does not accept bool loop-carried values"
-        )
+        raise TypeError("pto.for_(...).carry(...) does not accept bool loop-carried values")
     if isinstance(raw_value, int):
         return arith.ConstantOp(IntegerType.get_signless(32), raw_value).result
     return raw_value

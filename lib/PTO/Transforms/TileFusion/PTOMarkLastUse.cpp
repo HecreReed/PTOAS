@@ -34,260 +34,269 @@ using namespace mlir;
 
 namespace {
 
-static constexpr llvm::StringLiteral kFusionGroupIdAttr = "pto.fusion.group_id";
+static constexpr llvm::StringLiteral kFusionGroupIdAttr =
+    "pto.fusion.group_id";
 static constexpr llvm::StringLiteral kFusionOrderAttr = "pto.fusion.order";
 static constexpr llvm::StringLiteral kLastUseAttrName = "pto.last_use";
 
 struct GroupSpanMember {
-    Operation* op = nullptr;
-    int64_t order = 0;
+  Operation *op = nullptr;
+  int64_t order = 0;
 };
 
 struct GroupSpan {
-    Block* block = nullptr;
-    int64_t groupId = -1;
-    SmallVector<GroupSpanMember, 8> members;
+  Block *block = nullptr;
+  int64_t groupId = -1;
+  SmallVector<GroupSpanMember, 8> members;
 };
 
-static bool isTileType(Type type) { return isa<pto::TileBufType>(type); }
-
-static bool isDpsInitOperand(OpOperand& operand)
-{
-    Operation* owner = operand.getOwner();
-    if (auto dpsIface = dyn_cast<pto::PTO_DpsInitOpInterface>(owner)) {
-        for (OpOperand& init : dpsIface.getDpsInitsMutable()) {
-            if (&init == &operand)
-                return true;
-        }
-    }
-    return false;
+static bool isTileType(Type type) {
+  return isa<pto::TileBufType>(type);
 }
 
-static bool isTileOperand(OpOperand& operand) { return isTileType(operand.get().getType()); }
+static bool isDpsInitOperand(OpOperand &operand) {
+  Operation *owner = operand.getOwner();
+  if (auto dpsIface = dyn_cast<pto::PTO_DpsInitOpInterface>(owner)) {
+    for (OpOperand &init : dpsIface.getDpsInitsMutable()) {
+      if (&init == &operand)
+        return true;
+    }
+  }
+  return false;
+}
 
-static bool isTileInputOperand(OpOperand& operand) { return isTileOperand(operand) && !isDpsInitOperand(operand); }
+static bool isTileOperand(OpOperand &operand) {
+  return isTileType(operand.get().getType());
+}
+
+static bool isTileInputOperand(OpOperand &operand) {
+  return isTileOperand(operand) && !isDpsInitOperand(operand);
+}
 
 // The last-use mask is indexed by tile operand slots only, in source operand
 // order after filtering out scalar operands. DPS init/output tile slots are
 // preserved and always materialize as 0.
-static SmallVector<OpOperand*, 4> collectTileOperands(Operation* op)
-{
-    SmallVector<OpOperand*, 4> tileOperands;
-    for (OpOperand& operand : op->getOpOperands()) {
-        if (isTileOperand(operand))
-            tileOperands.push_back(&operand);
-    }
-    return tileOperands;
+static SmallVector<OpOperand *, 4> collectTileOperands(Operation *op) {
+  SmallVector<OpOperand *, 4> tileOperands;
+  for (OpOperand &operand : op->getOpOperands()) {
+    if (isTileOperand(operand))
+      tileOperands.push_back(&operand);
+  }
+  return tileOperands;
 }
 
-static std::optional<int64_t> getRequiredI64Attr(Operation* op, StringRef attrName)
-{
-    if (auto attr = op->getAttrOfType<IntegerAttr>(attrName))
-        return attr.getInt();
-    return std::nullopt;
+static std::optional<int64_t> getRequiredI64Attr(Operation *op,
+                                                 StringRef attrName) {
+  if (auto attr = op->getAttrOfType<IntegerAttr>(attrName))
+    return attr.getInt();
+  return std::nullopt;
 }
 
-static bool hasIncompleteFusionMetadata(Operation* op)
-{
-    const bool hasGroupId = op->hasAttr(kFusionGroupIdAttr);
-    const bool hasOrder = op->hasAttr(kFusionOrderAttr);
-    return hasGroupId != hasOrder;
+static bool hasIncompleteFusionMetadata(Operation *op) {
+  const bool hasGroupId = op->hasAttr(kFusionGroupIdAttr);
+  const bool hasOrder = op->hasAttr(kFusionOrderAttr);
+  return hasGroupId != hasOrder;
 }
 
-static LogicalResult collectGroupSpansInBlock(Block& block, SmallVectorImpl<GroupSpan>& spans)
-{
-    DenseMap<int64_t, unsigned> spanIndexByGroupId;
+static LogicalResult
+collectGroupSpansInBlock(Block &block, SmallVectorImpl<GroupSpan> &spans) {
+  DenseMap<int64_t, unsigned> spanIndexByGroupId;
 
-    GroupSpan current;
+  GroupSpan current;
 
-    auto flush = [&]() -> LogicalResult {
-        if (current.members.empty())
-            return success();
+  auto flush = [&]() -> LogicalResult {
+    if (current.members.empty())
+      return success();
 
-        current.block = &block;
-        auto [it, inserted] = spanIndexByGroupId.try_emplace(current.groupId, spans.size());
-        if (!inserted) {
-            spans[it->second].members.clear();
-            current = GroupSpan();
-            return success();
-        }
-
-        spans.push_back(std::move(current));
-        current = GroupSpan();
-        return success();
-    };
-
-    for (Operation& op : block) {
-        if (hasIncompleteFusionMetadata(&op)) {
-            op.emitError("expected pto.fusion.group_id and pto.fusion.order to "
-                         "either both exist or both be absent");
-            return failure();
-        }
-
-        std::optional<int64_t> groupId = getRequiredI64Attr(&op, kFusionGroupIdAttr);
-        if (!groupId) {
-            if (!current.members.empty()) {
-                // Non-fusion ops between fusion group members are tolerated (e.g.
-                // alloc_tile). Only flush when the next fusion op belongs to a
-                // different group.
-                continue;
-            }
-            if (failed(flush()))
-                return failure();
-            continue;
-        }
-
-        std::optional<int64_t> order = getRequiredI64Attr(&op, kFusionOrderAttr);
-        if (!order) {
-            op.emitError("missing required pto.fusion.order attribute");
-            return failure();
-        }
-
-        if (current.members.empty()) {
-            current.groupId = *groupId;
-            current.members.push_back(GroupSpanMember{&op, *order});
-            continue;
-        }
-
-        if (current.groupId != *groupId) {
-            if (failed(flush()))
-                return failure();
-            current.groupId = *groupId;
-        }
-
-        if (!current.members.empty() && current.members.back().order >= *order) {
-            op.emitError("expected contiguous fusion span to follow increasing "
-                         "pto.fusion.order");
-            return failure();
-        }
-
-        current.members.push_back(GroupSpanMember{&op, *order});
+    current.block = &block;
+    auto [it, inserted] =
+        spanIndexByGroupId.try_emplace(current.groupId, spans.size());
+    if (!inserted) {
+      spans[it->second].members.clear();
+      current = GroupSpan();
+      return success();
     }
 
-    return flush();
-}
-
-static bool isSpanLocalLastUseCandidate(Value value, Operation* currentOp, Block* block)
-{
-    if (!value)
-        return false;
-
-    for (OpOperand& use : value.getUses()) {
-        Operation* user = use.getOwner();
-        if (user == currentOp)
-            continue;
-        if (user->getBlock() != block)
-            return false;
-        if (currentOp->isBeforeInBlock(user))
-            return false;
-    }
-    return true;
-}
-
-static bool hasLaterUseAfterSpan(Value value, Operation* spanEnd, Block* block)
-{
-    for (OpOperand& use : value.getUses()) {
-        Operation* user = use.getOwner();
-        if (user->getBlock() != block)
-            return true;
-        if (spanEnd->isBeforeInBlock(user))
-            return true;
-    }
-    return false;
-}
-
-static bool isHardSpanBarrier(Operation* op)
-{
-    if (op->hasTrait<OpTrait::IsTerminator>() || !op->getRegions().empty())
-        return true;
-    if (isa<CallOpInterface>(op))
-        return true;
-    return false;
-}
-
-static bool hasHardBarrierInSpan(const GroupSpan& span)
-{
-    if (span.members.size() < 2)
-        return false;
-    for (size_t i = 0; i + 1 < span.members.size(); ++i) {
-        Operation* cur = span.members[i].op;
-        Operation* next = span.members[i + 1].op;
-        for (Operation* cursor = cur->getNextNode(); cursor && cursor != next; cursor = cursor->getNextNode()) {
-            if (isHardSpanBarrier(cursor))
-                return true;
-        }
-    }
-    return false;
-}
-
-static void markGroupSpanLastUse(const GroupSpan& span)
-{
-    if (span.members.empty())
-        return;
-
-    if (hasHardBarrierInSpan(span))
-        return;
-
-    Block& block = *span.block;
-    Operation* spanEnd = span.members.back().op;
-    for (const GroupSpanMember& member : span.members) {
-        Operation& op = *member.op;
-        SmallVector<OpOperand*, 4> tileOperands = collectTileOperands(&op);
-        if (tileOperands.empty()) {
-            op.removeAttr(kLastUseAttrName);
-            continue;
-        }
-
-        SmallVector<int64_t, 8> lastUseMask;
-        lastUseMask.reserve(tileOperands.size());
-        for (OpOperand* operand : tileOperands) {
-            if (!isTileInputOperand(*operand)) {
-                lastUseMask.push_back(0);
-                continue;
-            }
-            // isSpanLocalLastUseCandidate的检查范围大于hasLaterUseAfterSpan
-            bool blockedByLaterSpanUse = !isSpanLocalLastUseCandidate(operand->get(), &op, &block);
-            bool blockedByLaterPostSpanUse = hasLaterUseAfterSpan(operand->get(), spanEnd, &block);
-            lastUseMask.push_back((!blockedByLaterSpanUse && !blockedByLaterPostSpanUse) ? 1 : 0);
-        }
-
-        op.setAttr(kLastUseAttrName, Builder(op.getContext()).getDenseI64ArrayAttr(lastUseMask));
-    }
-}
-
-static LogicalResult markRegionLastUse(Region& region)
-{
-    for (Block& block : region.getBlocks()) {
-        SmallVector<GroupSpan, 8> spans;
-        if (failed(collectGroupSpansInBlock(block, spans)))
-            return failure();
-        for (const GroupSpan& span : spans)
-            markGroupSpanLastUse(span);
-
-        for (Operation& op : block)
-            for (Region& nestedRegion : op.getRegions())
-                if (failed(markRegionLastUse(nestedRegion)))
-                    return failure();
-    }
+    spans.push_back(std::move(current));
+    current = GroupSpan();
     return success();
+  };
+
+  for (Operation &op : block) {
+    if (hasIncompleteFusionMetadata(&op)) {
+      op.emitError("expected pto.fusion.group_id and pto.fusion.order to "
+                   "either both exist or both be absent");
+      return failure();
+    }
+
+    std::optional<int64_t> groupId =
+        getRequiredI64Attr(&op, kFusionGroupIdAttr);
+    if (!groupId) {
+      if (!current.members.empty()) {
+        // Non-fusion ops between fusion group members are tolerated (e.g.
+        // alloc_tile). Only flush when the next fusion op belongs to a
+        // different group.
+        continue;
+      }
+      if (failed(flush()))
+        return failure();
+      continue;
+    }
+
+    std::optional<int64_t> order = getRequiredI64Attr(&op, kFusionOrderAttr);
+    if (!order) {
+      op.emitError("missing required pto.fusion.order attribute");
+      return failure();
+    }
+
+    if (current.members.empty()) {
+      current.groupId = *groupId;
+      current.members.push_back(GroupSpanMember{&op, *order});
+      continue;
+    }
+
+    if (current.groupId != *groupId) {
+      if (failed(flush()))
+        return failure();
+      current.groupId = *groupId;
+    }
+
+    if (!current.members.empty() && current.members.back().order >= *order) {
+      op.emitError("expected contiguous fusion span to follow increasing "
+                   "pto.fusion.order");
+      return failure();
+    }
+
+    current.members.push_back(GroupSpanMember{&op, *order});
+  }
+
+  return flush();
 }
 
-struct PTOMarkLastUsePass : public pto::impl::PTOMarkLastUseBase<PTOMarkLastUsePass> {
-    using pto::impl::PTOMarkLastUseBase<PTOMarkLastUsePass>::PTOMarkLastUseBase;
+static bool isSpanLocalLastUseCandidate(Value value, Operation *currentOp,
+                                        Block *block) {
+  if (!value)
+    return false;
 
-    void runOnOperation() override
-    {
-        func::FuncOp func = getOperation();
-        if (func.isExternal())
-            return;
+  for (OpOperand &use : value.getUses()) {
+    Operation *user = use.getOwner();
+    if (user == currentOp)
+      continue;
+    if (user->getBlock() != block)
+      return false;
+    if (currentOp->isBeforeInBlock(user))
+      return false;
+  }
+  return true;
+}
 
-        if (failed(markRegionLastUse(func.getRegion()))) {
-            signalPassFailure();
-            return;
-        }
+static bool hasLaterUseAfterSpan(Value value, Operation *spanEnd, Block *block) {
+  for (OpOperand &use : value.getUses()) {
+    Operation *user = use.getOwner();
+    if (user->getBlock() != block)
+      return true;
+    if (spanEnd->isBeforeInBlock(user))
+      return true;
+  }
+  return false;
+}
+
+static bool isHardSpanBarrier(Operation *op) {
+  if (op->hasTrait<OpTrait::IsTerminator>() || !op->getRegions().empty())
+    return true;
+  if (isa<CallOpInterface>(op))
+    return true;
+  return false;
+}
+
+static bool hasHardBarrierInSpan(const GroupSpan &span) {
+  if (span.members.size() < 2)
+    return false;
+  for (size_t i = 0; i + 1 < span.members.size(); ++i) {
+    Operation *cur = span.members[i].op;
+    Operation *next = span.members[i + 1].op;
+    for (Operation *cursor = cur->getNextNode(); cursor && cursor != next;
+         cursor = cursor->getNextNode()) {
+      if (isHardSpanBarrier(cursor))
+        return true;
     }
+  }
+  return false;
+}
+
+static void markGroupSpanLastUse(const GroupSpan &span) {
+  if (span.members.empty())
+    return;
+
+  if (hasHardBarrierInSpan(span))
+    return;
+
+  Block &block = *span.block;
+  Operation *spanEnd = span.members.back().op;
+  for (const GroupSpanMember &member : span.members) {
+    Operation &op = *member.op;
+    SmallVector<OpOperand *, 4> tileOperands = collectTileOperands(&op);
+    if (tileOperands.empty()) {
+      op.removeAttr(kLastUseAttrName);
+      continue;
+    }
+
+    SmallVector<int64_t, 8> lastUseMask;
+    lastUseMask.reserve(tileOperands.size());
+    for (OpOperand *operand : tileOperands) {
+      if (!isTileInputOperand(*operand)) {
+        lastUseMask.push_back(0);
+        continue;
+      }
+      // isSpanLocalLastUseCandidate的检查范围大于hasLaterUseAfterSpan
+      bool blockedByLaterSpanUse =
+          !isSpanLocalLastUseCandidate(operand->get(), &op, &block);
+      bool blockedByLaterPostSpanUse =
+          hasLaterUseAfterSpan(operand->get(), spanEnd, &block);
+      lastUseMask.push_back(
+          (!blockedByLaterSpanUse && !blockedByLaterPostSpanUse) ? 1 : 0);
+    }
+
+    op.setAttr(kLastUseAttrName,
+               Builder(op.getContext()).getDenseI64ArrayAttr(lastUseMask));
+  }
+}
+
+static LogicalResult markRegionLastUse(Region &region) {
+  for (Block &block : region.getBlocks()) {
+    SmallVector<GroupSpan, 8> spans;
+    if (failed(collectGroupSpansInBlock(block, spans)))
+      return failure();
+    for (const GroupSpan &span : spans)
+      markGroupSpanLastUse(span);
+
+    for (Operation &op : block)
+      for (Region &nestedRegion : op.getRegions())
+        if (failed(markRegionLastUse(nestedRegion)))
+          return failure();
+  }
+  return success();
+}
+
+struct PTOMarkLastUsePass
+    : public pto::impl::PTOMarkLastUseBase<PTOMarkLastUsePass> {
+  using pto::impl::PTOMarkLastUseBase<
+      PTOMarkLastUsePass>::PTOMarkLastUseBase;
+
+  void runOnOperation() override {
+    func::FuncOp func = getOperation();
+    if (func.isExternal())
+      return;
+
+    if (failed(markRegionLastUse(func.getRegion()))) {
+      signalPassFailure();
+      return;
+    }
+  }
 };
 
 } // namespace
 
-std::unique_ptr<Pass> mlir::pto::createPTOMarkLastUsePass() { return std::make_unique<PTOMarkLastUsePass>(); }
+std::unique_ptr<Pass> mlir::pto::createPTOMarkLastUsePass() {
+  return std::make_unique<PTOMarkLastUsePass>();
+}

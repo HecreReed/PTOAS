@@ -24,69 +24,67 @@ using namespace mlir::pto;
 namespace {
 
 template <typename OpT>
-static void assignDefaultIdIfMissing(OpT op, IntegerAttr zeroAttr)
-{
-    if (!op.getIdAttr())
-        op.setIdAttr(zeroAttr);
+static void assignDefaultIdIfMissing(OpT op, IntegerAttr zeroAttr) {
+  if (!op.getIdAttr())
+    op.setIdAttr(zeroAttr);
 }
 
 struct PTOAssignDefaultFrontendPipeIdPass
-    : public mlir::pto::impl::PTOAssignDefaultFrontendPipeIdBase<PTOAssignDefaultFrontendPipeIdPass> {
-    void runOnOperation() override
-    {
-        func::FuncOp funcOp = getOperation();
-        Builder builder(funcOp.getContext());
-        auto zeroAttr = builder.getI32IntegerAttr(0);
+    : public mlir::pto::impl::PTOAssignDefaultFrontendPipeIdBase<
+          PTOAssignDefaultFrontendPipeIdPass> {
+  void runOnOperation() override {
+    func::FuncOp funcOp = getOperation();
+    Builder builder(funcOp.getContext());
+    auto zeroAttr = builder.getI32IntegerAttr(0);
 
-        funcOp.walk([&](Operation* op) {
-            if (auto init = dyn_cast<AicInitializePipeOp>(op)) {
-                assignDefaultIdIfMissing(init, zeroAttr);
-                return WalkResult::advance();
-            }
-            if (auto init = dyn_cast<AivInitializePipeOp>(op)) {
-                assignDefaultIdIfMissing(init, zeroAttr);
-                return WalkResult::advance();
-            }
-            if (auto alloc = dyn_cast<TAllocToAivOp>(op)) {
-                assignDefaultIdIfMissing(alloc, zeroAttr);
-                return WalkResult::advance();
-            }
-            if (auto alloc = dyn_cast<TAllocToAicOp>(op)) {
-                assignDefaultIdIfMissing(alloc, zeroAttr);
-                return WalkResult::advance();
-            }
-            if (auto push = dyn_cast<TPushToAivOp>(op)) {
-                assignDefaultIdIfMissing(push, zeroAttr);
-                return WalkResult::advance();
-            }
-            if (auto push = dyn_cast<TPushToAicOp>(op)) {
-                assignDefaultIdIfMissing(push, zeroAttr);
-                return WalkResult::advance();
-            }
-            if (auto pop = dyn_cast<TPopFromAicOp>(op)) {
-                assignDefaultIdIfMissing(pop, zeroAttr);
-                return WalkResult::advance();
-            }
-            if (auto pop = dyn_cast<TPopFromAivOp>(op)) {
-                assignDefaultIdIfMissing(pop, zeroAttr);
-                return WalkResult::advance();
-            }
-            if (auto free = dyn_cast<TFreeFromAicOp>(op)) {
-                assignDefaultIdIfMissing(free, zeroAttr);
-                return WalkResult::advance();
-            }
-            if (auto free = dyn_cast<TFreeFromAivOp>(op)) {
-                assignDefaultIdIfMissing(free, zeroAttr);
-                return WalkResult::advance();
-            }
-            return WalkResult::advance();
-        });
-    }
+    funcOp.walk([&](Operation *op) {
+      if (auto init = dyn_cast<AicInitializePipeOp>(op)) {
+        assignDefaultIdIfMissing(init, zeroAttr);
+        return WalkResult::advance();
+      }
+      if (auto init = dyn_cast<AivInitializePipeOp>(op)) {
+        assignDefaultIdIfMissing(init, zeroAttr);
+        return WalkResult::advance();
+      }
+      if (auto alloc = dyn_cast<TAllocToAivOp>(op)) {
+        assignDefaultIdIfMissing(alloc, zeroAttr);
+        return WalkResult::advance();
+      }
+      if (auto alloc = dyn_cast<TAllocToAicOp>(op)) {
+        assignDefaultIdIfMissing(alloc, zeroAttr);
+        return WalkResult::advance();
+      }
+      if (auto push = dyn_cast<TPushToAivOp>(op)) {
+        assignDefaultIdIfMissing(push, zeroAttr);
+        return WalkResult::advance();
+      }
+      if (auto push = dyn_cast<TPushToAicOp>(op)) {
+        assignDefaultIdIfMissing(push, zeroAttr);
+        return WalkResult::advance();
+      }
+      if (auto pop = dyn_cast<TPopFromAicOp>(op)) {
+        assignDefaultIdIfMissing(pop, zeroAttr);
+        return WalkResult::advance();
+      }
+      if (auto pop = dyn_cast<TPopFromAivOp>(op)) {
+        assignDefaultIdIfMissing(pop, zeroAttr);
+        return WalkResult::advance();
+      }
+      if (auto free = dyn_cast<TFreeFromAicOp>(op)) {
+        assignDefaultIdIfMissing(free, zeroAttr);
+        return WalkResult::advance();
+      }
+      if (auto free = dyn_cast<TFreeFromAivOp>(op)) {
+        assignDefaultIdIfMissing(free, zeroAttr);
+        return WalkResult::advance();
+      }
+      return WalkResult::advance();
+    });
+  }
 };
 
 } // namespace
 
-std::unique_ptr<Pass> mlir::pto::createPTOAssignDefaultFrontendPipeIdPass()
-{
-    return std::make_unique<PTOAssignDefaultFrontendPipeIdPass>();
+std::unique_ptr<Pass> mlir::pto::createPTOAssignDefaultFrontendPipeIdPass() {
+  return std::make_unique<PTOAssignDefaultFrontendPipeIdPass>();
 }

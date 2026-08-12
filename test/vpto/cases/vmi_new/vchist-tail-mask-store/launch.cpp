@@ -12,21 +12,22 @@
 #include <cstdint>
 #if !defined(__CCE_AICORE__) && !defined(TMRGSORT_HPP)
 struct MrgSortExecutedNumList {
-    uint16_t mrgSortList0;
-    uint16_t mrgSortList1;
-    uint16_t mrgSortList2;
-    uint16_t mrgSortList3;
+  uint16_t mrgSortList0;
+  uint16_t mrgSortList1;
+  uint16_t mrgSortList2;
+  uint16_t mrgSortList3;
 };
 #endif
 #ifndef __CPU_SIM
 #include "acl/acl.h"
 #endif
 
-extern "C" __global__[aicore] void vmi_vchist_tail_mask_store_kernel(
-    __gm__ uint8_t* src, __gm__ uint16_t* acc, __gm__ uint16_t* dst);
+extern "C" __global__ [aicore] void
+vmi_vchist_tail_mask_store_kernel(__gm__ uint8_t *src, __gm__ uint16_t *acc,
+                                 __gm__ uint16_t *dst);
 
-void LaunchVmi_vchist_tail_mask_store_kernel(uint8_t* src, uint16_t* acc, uint16_t* dst, void* stream)
-{
-    vmi_vchist_tail_mask_store_kernel<<<1, nullptr, stream>>>(
-        (__gm__ uint8_t*)src, (__gm__ uint16_t*)acc, (__gm__ uint16_t*)dst);
+void LaunchVmi_vchist_tail_mask_store_kernel(uint8_t *src, uint16_t *acc,
+                                            uint16_t *dst, void *stream) {
+  vmi_vchist_tail_mask_store_kernel<<<1, nullptr, stream>>>(
+      (__gm__ uint8_t *)src, (__gm__ uint16_t *)acc, (__gm__ uint16_t *)dst);
 }

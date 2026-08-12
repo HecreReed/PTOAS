@@ -27,115 +27,124 @@ using namespace mlir;
 using namespace mlir::pto;
 
 namespace {
-static FailureOr<SyncOpType> getSyncOpTypeFromAttr(Attribute attr, Operation* op, StringRef name)
-{
-    auto opType = parseSyncOpTypeLikeAttr(attr);
-    if (succeeded(opType))
-        return *opType;
-    auto diag = op->emitError("expected PipeEventTypeAttr or SyncOpTypeAttr for ");
-    diag << name;
-    return failure();
+static FailureOr<SyncOpType> getSyncOpTypeFromAttr(Attribute attr, Operation *op,
+                                                   StringRef name) {
+  auto opType = parseSyncOpTypeLikeAttr(attr);
+  if (succeeded(opType))
+    return *opType;
+  auto diag =
+      op->emitError("expected PipeEventTypeAttr or SyncOpTypeAttr for ");
+  diag << name;
+  return failure();
 }
 
-static FailureOr<std::pair<PIPE, PIPE>> getConcretePipePair(Operation* op, Attribute srcAttr, Attribute dstAttr)
-{
-    auto srcTypeOr = getSyncOpTypeFromAttr(srcAttr, op, "src_op");
-    if (failed(srcTypeOr))
-        return failure();
-    auto dstTypeOr = getSyncOpTypeFromAttr(dstAttr, op, "dst_op");
-    if (failed(dstTypeOr))
-        return failure();
+static FailureOr<std::pair<PIPE, PIPE>> getConcretePipePair(Operation *op,
+                                                            Attribute srcAttr,
+                                                            Attribute dstAttr) {
+  auto srcTypeOr = getSyncOpTypeFromAttr(srcAttr, op, "src_op");
+  if (failed(srcTypeOr))
+    return failure();
+  auto dstTypeOr = getSyncOpTypeFromAttr(dstAttr, op, "dst_op");
+  if (failed(dstTypeOr))
+    return failure();
 
-    PIPE srcPipe = mapSyncOpTypeToPipe(*srcTypeOr);
-    PIPE dstPipe = mapSyncOpTypeToPipe(*dstTypeOr);
-    if (!isConcreteSyncPipe(srcPipe) || !isConcreteSyncPipe(dstPipe)) {
-        op->emitError("Failed to map SyncOpType to hardware pipe during lowering.");
-        return failure();
-    }
-    return std::make_pair(srcPipe, dstPipe);
+  PIPE srcPipe = mapSyncOpTypeToPipe(*srcTypeOr);
+  PIPE dstPipe = mapSyncOpTypeToPipe(*dstTypeOr);
+  if (!isConcreteSyncPipe(srcPipe) || !isConcreteSyncPipe(dstPipe)) {
+    op->emitError("Failed to map SyncOpType to hardware pipe during lowering.");
+    return failure();
+  }
+  return std::make_pair(srcPipe, dstPipe);
 }
 
 template <typename HighLevelOp, typename LowLevelOp>
-static LogicalResult lowerEventSyncOp(HighLevelOp op, PatternRewriter& rewriter)
-{
-    auto pipes = getConcretePipePair(op.getOperation(), op.getSrcOpAttr(), op.getDstOpAttr());
-    if (failed(pipes))
-        return failure();
-    rewriter.replaceOpWithNewOp<LowLevelOp>(
-        op, PipeAttr::get(op.getContext(), pipes->first), PipeAttr::get(op.getContext(), pipes->second),
-        op.getEventIdAttr());
-    return success();
+static LogicalResult lowerEventSyncOp(HighLevelOp op, PatternRewriter &rewriter) {
+  auto pipes = getConcretePipePair(op.getOperation(), op.getSrcOpAttr(),
+                                   op.getDstOpAttr());
+  if (failed(pipes))
+    return failure();
+  rewriter.replaceOpWithNewOp<LowLevelOp>(
+      op, PipeAttr::get(op.getContext(), pipes->first),
+      PipeAttr::get(op.getContext(), pipes->second), op.getEventIdAttr());
+  return success();
 }
 
 struct RecordEventLowering : public OpRewritePattern<RecordEventOp> {
-    using OpRewritePattern<RecordEventOp>::OpRewritePattern;
+  using OpRewritePattern<RecordEventOp>::OpRewritePattern;
 
-    LogicalResult matchAndRewrite(RecordEventOp op, PatternRewriter& rewriter) const override
-    {
-        return lowerEventSyncOp<RecordEventOp, SetFlagOp>(op, rewriter);
-    }
+  LogicalResult matchAndRewrite(RecordEventOp op,
+                                PatternRewriter &rewriter) const override {
+    return lowerEventSyncOp<RecordEventOp, SetFlagOp>(op, rewriter);
+  }
 };
 
 struct WaitEventLowering : public OpRewritePattern<WaitEventOp> {
-    using OpRewritePattern<WaitEventOp>::OpRewritePattern;
+  using OpRewritePattern<WaitEventOp>::OpRewritePattern;
 
-    LogicalResult matchAndRewrite(WaitEventOp op, PatternRewriter& rewriter) const override
-    {
-        return lowerEventSyncOp<WaitEventOp, WaitFlagOp>(op, rewriter);
-    }
+  LogicalResult matchAndRewrite(WaitEventOp op,
+                                PatternRewriter &rewriter) const override {
+    return lowerEventSyncOp<WaitEventOp, WaitFlagOp>(op, rewriter);
+  }
 };
 
 // High-level barrier -> barrier with mapped pipe
 struct BarrierSyncLowering : public OpRewritePattern<BarrierSyncOp> {
-    using OpRewritePattern<BarrierSyncOp>::OpRewritePattern;
+  using OpRewritePattern<BarrierSyncOp>::OpRewritePattern;
 
-    LogicalResult matchAndRewrite(BarrierSyncOp op, PatternRewriter& rewriter) const override
-    {
-        SyncOpType ty = op.getOpType().getOpType();
-        PIPE pipe = mapSyncOpTypeToPipe(ty);
-        if (!isConcreteSyncPipe(pipe)) {
-            auto diag = op.emitError("barrier_sync failed to map SyncOpType to hardware pipe during lowering: ");
-            diag << op.getOpType();
-            return failure();
-        }
-
-        // A5: TVEC single-pipe barrier is unnecessary/unsupported.
-        if (pipe == PIPE::PIPE_V && isTargetArchA5(op.getOperation())) {
-            rewriter.eraseOp(op);
-            return success();
-        }
-
-        rewriter.replaceOpWithNewOp<BarrierOp>(op, PipeAttr::get(op.getContext(), pipe));
-        return success();
+  LogicalResult matchAndRewrite(BarrierSyncOp op,
+                                PatternRewriter &rewriter) const override {
+    SyncOpType ty = op.getOpType().getOpType();
+    PIPE pipe = mapSyncOpTypeToPipe(ty);
+    if (!isConcreteSyncPipe(pipe)) {
+      auto diag = op.emitError(
+          "barrier_sync failed to map SyncOpType to hardware pipe during lowering: ");
+      diag << op.getOpType();
+      return failure();
     }
+
+    // A5: TVEC single-pipe barrier is unnecessary/unsupported.
+    if (pipe == PIPE::PIPE_V && isTargetArchA5(op.getOperation())) {
+      rewriter.eraseOp(op);
+      return success();
+    }
+
+    rewriter.replaceOpWithNewOp<BarrierOp>(
+        op, PipeAttr::get(op.getContext(), pipe));
+    return success();
+  }
 };
 
 // Legalize explicit low-level barriers for arch constraints.
 struct BarrierLegalizeForArch : public OpRewritePattern<BarrierOp> {
-    using OpRewritePattern<BarrierOp>::OpRewritePattern;
+  using OpRewritePattern<BarrierOp>::OpRewritePattern;
 
-    LogicalResult matchAndRewrite(BarrierOp op, PatternRewriter& rewriter) const override
-    {
-        if (isTargetArchA5(op.getOperation()) && op.getPipe().getPipe() == PIPE::PIPE_V) {
-            rewriter.eraseOp(op);
-            return success();
-        }
-        return failure();
+  LogicalResult matchAndRewrite(BarrierOp op,
+                                PatternRewriter &rewriter) const override {
+    if (isTargetArchA5(op.getOperation()) &&
+        op.getPipe().getPipe() == PIPE::PIPE_V) {
+      rewriter.eraseOp(op);
+      return success();
     }
+    return failure();
+  }
 };
 
-struct LoweringSyncToPipe : public mlir::pto::impl::PTOLoweringSyncToPipeBase<LoweringSyncToPipe> {
-    void runOnOperation() override
-    {
-        func::FuncOp func = getOperation();
-        MLIRContext* context = &getContext();
-        RewritePatternSet patterns(context);
-        patterns.add<RecordEventLowering, WaitEventLowering, BarrierSyncLowering, BarrierLegalizeForArch>(context);
-        if (failed(applyPatternsAndFoldGreedily(func, std::move(patterns))))
-            signalPassFailure();
-    }
+struct LoweringSyncToPipe
+    : public mlir::pto::impl::PTOLoweringSyncToPipeBase<LoweringSyncToPipe> {
+  void runOnOperation() override {
+    func::FuncOp func = getOperation();
+    MLIRContext *context = &getContext();
+    RewritePatternSet patterns(context);
+    patterns.add<RecordEventLowering, WaitEventLowering, BarrierSyncLowering,
+                 BarrierLegalizeForArch>(
+        context);
+    if (failed(applyPatternsAndFoldGreedily(func, std::move(patterns))))
+      signalPassFailure();
+  }
 };
 
 } // namespace
 
-std::unique_ptr<Pass> mlir::pto::createLoweringSyncToPipePass() { return std::make_unique<LoweringSyncToPipe>(); }
+std::unique_ptr<Pass> mlir::pto::createLoweringSyncToPipePass() {
+  return std::make_unique<LoweringSyncToPipe>();
+}

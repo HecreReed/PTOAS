@@ -17,11 +17,7 @@ from kernel_test.backends import ArtifactPlan, RunPurpose
 from kernel_test.npu_runtime import ensure_runtime, stream_ptr, sync
 from kernel_test.pto_artifacts import materialize_artifact_plan
 
-from .anti_mx_quant_tail_axis_vmi import (
-    dequant_vmi_bf16,
-    dequant_vmi_f16,
-    dequant_vmi_f32,
-)
+from .anti_mx_quant_tail_axis_vmi import dequant_vmi_bf16, dequant_vmi_f16, dequant_vmi_f32
 from ..runtime import artifact_case_dir, prepare_compile_args, prepare_launch_args
 
 _VMI_ROOT = Path(__file__).resolve().parent
@@ -77,16 +73,10 @@ class AntiMxQuantTailAxisVmiBackend:
 
     name = "vmi"
 
-    def is_supported(
-        self, case: object, *, purpose: RunPurpose
-    ) -> tuple[bool, str | None]:
+    def is_supported(self, case: object, *, purpose: RunPurpose) -> tuple[bool, str | None]:
         if purpose == "cycle":
             return False, "backend=vmi has correctness launch only; no cycle probe yet"
-        supported = case["src_fmt"] in {"e4m3", "e5m2"} and case["dst_fmt"] in {
-            "f32",
-            "bf16",
-            "f16",
-        }
+        supported = case["src_fmt"] in {"e4m3", "e5m2"} and case["dst_fmt"] in {"f32", "bf16", "f16"}
         if supported:
             return True, None
         return False, "backend=vmi not wired for this case"

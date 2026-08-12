@@ -6,16 +6,7 @@
 # INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
 # See LICENSE in the root of the software repository for the full text of the License.
 
-from ptoas.mlir.ir import (
-    Context,
-    F32Type,
-    IndexType,
-    InsertionPoint,
-    IntegerType,
-    Location,
-    Module,
-    UnitAttr,
-)
+from ptoas.mlir.ir import Context, F32Type, IndexType, InsertionPoint, IntegerType, Location, Module, UnitAttr
 from ptoas.mlir.dialects import arith, func, pto
 
 
@@ -37,9 +28,7 @@ def build():
             bl = pto.BLayoutAttr.get(pto.BLayout.RowMajor, ctx)
             sl = pto.SLayoutAttr.get(pto.SLayout.NoneBox, ctx)
             pd = pto.PadValueAttr.get(pto.PadValue.Null, ctx)
-            cfg = pto.TileBufConfigAttr.get(
-                bl, sl, pto.TileConfig.fractalABSize, pd, ctx
-            )
+            cfg = pto.TileBufConfigAttr.get(bl, sl, pto.TileConfig.fractalABSize, pd, ctx)
             tile_f32 = pto.TileBufType.get([1, 128], f32, vec, [1, 128], cfg, ctx)
 
             fn_ty = func.FunctionType.get([ptr_f32, ptr_f32, ptr_i8], [])
@@ -56,12 +45,8 @@ def build():
 
                 src_view = pto.MakeTensorViewOp(tv_f32, src_ptr, [c128], [c1]).result
                 dst_view = pto.MakeTensorViewOp(tv_f32, dst_ptr, [c128], [c1]).result
-                src = pto.PartitionViewOp(
-                    pv_f32, src_view, offsets=[c0], sizes=[c128]
-                ).result
-                dst = pto.PartitionViewOp(
-                    pv_f32, dst_view, offsets=[c0], sizes=[c128]
-                ).result
+                src = pto.PartitionViewOp(pv_f32, src_view, offsets=[c0], sizes=[c128]).result
+                dst = pto.PartitionViewOp(pv_f32, dst_view, offsets=[c0], sizes=[c128]).result
 
                 prefetch_ctx = pto.MakePrefetchAsyncContextOp(workspace_ptr).result
                 event = pto.TPrefetchAsyncOp(src, prefetch_ctx).result

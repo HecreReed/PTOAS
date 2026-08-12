@@ -205,9 +205,7 @@ def run_case(case: dict[str, object], compiled, torch) -> None:
     torch.npu.synchronize()
     launch_s = time.perf_counter() - t0
 
-    np.testing.assert_allclose(
-        out_scores_dev.cpu().numpy(), ref_values, rtol=1e-5, atol=1e-5
-    )
+    np.testing.assert_allclose(out_scores_dev.cpu().numpy(), ref_values, rtol=1e-5, atol=1e-5)
     np.testing.assert_array_equal(
         out_indices_dev.cpu().numpy().astype(np.uint32),
         ref_indices,

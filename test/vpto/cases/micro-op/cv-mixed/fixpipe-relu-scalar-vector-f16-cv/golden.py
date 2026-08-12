@@ -59,7 +59,7 @@ def generate(output_dir: Path, seed: int) -> None:
     rhs32 = rhs.astype(np.float32)
     matmul = np.zeros((M, N), dtype=np.float32)
     for k_idx in range(K):
-        matmul += lhs32[:, k_idx : k_idx + 1] * rhs32[k_idx : k_idx + 1, :]
+        matmul += lhs32[:, k_idx:k_idx + 1] * rhs32[k_idx:k_idx + 1, :]
 
     scalar_golden = scalar_relu(matmul).astype(np.float16)
     vector_golden = vector_relu(matmul, vector_alphas).astype(np.float16)
@@ -71,9 +71,7 @@ def generate(output_dir: Path, seed: int) -> None:
     rhs.reshape(-1).tofile(output_dir / "v2.bin")
     relu_fp.reshape(-1).tofile(output_dir / "v3.bin")
     for index in range(4, 10):
-        np.zeros((M, N), dtype=np.float16).reshape(-1).tofile(
-            output_dir / f"v{index}.bin"
-        )
+        np.zeros((M, N), dtype=np.float16).reshape(-1).tofile(output_dir / f"v{index}.bin")
         golden = scalar_golden if index in (4, 6, 8) else vector_golden
         golden.reshape(-1).tofile(output_dir / f"golden_v{index}.bin")
 

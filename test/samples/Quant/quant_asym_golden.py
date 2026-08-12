@@ -49,9 +49,11 @@ def main():
     scale_2d = scale.reshape(_ROWS, 1)
     off_2d = off.reshape(_ROWS, 1)
     out = np.clip(
-        np.round(src.reshape(_ROWS, _COLS) * scale_2d + off_2d),
-        0,
-        255,
+        np.round(
+            src.reshape(_ROWS, _COLS) * scale_2d
+            + off_2d
+        ),
+        0, 255,
     ).astype(np.uint8)
     write_golden(meta, {single_output(meta): out})
 

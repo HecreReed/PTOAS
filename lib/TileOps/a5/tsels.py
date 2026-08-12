@@ -11,13 +11,9 @@ from ptodsl import pto
 import ptodsl.tilelib as tilelib
 
 
-def _tsels_shapes(
-    mask_valid_shape=(), src_valid_shape=(), tmp_valid_shape=(), dst_valid_shape=(), **_
-):
+def _tsels_shapes(mask_valid_shape=(), src_valid_shape=(), tmp_valid_shape=(), dst_valid_shape=(), **_):
     _ = mask_valid_shape, tmp_valid_shape
-    return len(src_valid_shape) == 2 and tuple(src_valid_shape) == tuple(
-        dst_valid_shape
-    )
+    return len(src_valid_shape) == 2 and tuple(src_valid_shape) == tuple(dst_valid_shape)
 
 
 @tilelib.tile_template(
@@ -72,9 +68,7 @@ def template_tsels(mask: pto.Tile, src: pto.Tile, tmp: pto.Tile, scalar, dst: pt
         for row in range(0, valid_rows, 1):
             for col in range(0, paired_cols, pair_width):
                 mask_offset = row * mask_stride + col // 8
-                select_mask_raw = pto.plds(
-                    mask_ptr, mask_offset, dist=pto.PredicateDist.US
-                )
+                select_mask_raw = pto.plds(mask_ptr, mask_offset, dist=pto.PredicateDist.US)
                 select_mask = pto.pbitcast(select_mask_raw, pto.mask_b16)
                 pred0, _ = pto.make_mask(dtype, pair_width)
                 pred1, _ = pto.make_mask(dtype, lanes)
@@ -82,18 +76,16 @@ def template_tsels(mask: pto.Tile, src: pto.Tile, tmp: pto.Tile, scalar, dst: pt
                 select_mask0 = pto.pbitcast(select_mask0, pto.mask_b32)
                 select_mask1 = pto.pbitcast(select_mask1, pto.mask_b32)
                 src0 = pto.vlds(src[row, col:])
-                src1 = pto.vlds(src[row, col + lanes :])
+                src1 = pto.vlds(src[row, col + lanes:])
                 selected0 = pto.vsel(src0, scalar_vec, select_mask0)
                 selected1 = pto.vsel(src1, scalar_vec, select_mask1)
                 pto.vsts(selected0, dst[row, col:], pred0)
-                pto.vsts(selected1, dst[row, col + lanes :], pred1)
+                pto.vsts(selected1, dst[row, col + lanes:], pred1)
             tail_cols = valid_cols - paired_cols
             if tail_cols > 0:
                 col = paired_cols
                 mask_offset = row * mask_stride + col // 8
-                select_mask_raw = pto.plds(
-                    mask_ptr, mask_offset, dist=pto.PredicateDist.US
-                )
+                select_mask_raw = pto.plds(mask_ptr, mask_offset, dist=pto.PredicateDist.US)
                 select_mask = pto.pbitcast(select_mask_raw, pto.mask_b16)
                 select_mask0 = pto.punpack(select_mask, pto.PredicatePart.LOWER)
                 select_mask0 = pto.pbitcast(select_mask0, pto.mask_b32)
@@ -118,9 +110,7 @@ def template_tsels(mask: pto.Tile, src: pto.Tile, tmp: pto.Tile, scalar, dst: pt
             for col in range(0, valid_cols, lanes):
                 pred, remained = pto.make_mask(dtype, remained)
                 mask_offset = row * mask_stride + col // 8
-                select_mask = pto.plds(
-                    mask_ptr, mask_offset, dist=pto.PredicateDist.NORM
-                )
+                select_mask = pto.plds(mask_ptr, mask_offset, dist=pto.PredicateDist.NORM)
                 lhs = pto.vlds(src[row, col:])
                 result = pto.vsel(lhs, scalar_vec, select_mask)
                 pto.vsts(result, dst[row, col:], pred)

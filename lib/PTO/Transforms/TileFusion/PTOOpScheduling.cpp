@@ -35,285 +35,281 @@ using namespace mlir;
 
 namespace {
 
-static constexpr llvm::StringLiteral kFusionGroupIdAttr = "pto.fusion.group_id";
+static constexpr llvm::StringLiteral kFusionGroupIdAttr =
+    "pto.fusion.group_id";
 static constexpr llvm::StringLiteral kFusionOrderAttr = "pto.fusion.order";
 
 enum class SchedulingBarrierKind {
-    Movable,
-    LocalBoundary,
-    HardBoundary,
+  Movable,
+  LocalBoundary,
+  HardBoundary,
 };
 
 struct GroupMember {
-    Operation* op = nullptr;
-    int64_t order = 0;
-    unsigned originalIndex = 0;
+  Operation *op = nullptr;
+  int64_t order = 0;
+  unsigned originalIndex = 0;
 };
 
 struct ScheduledGroup {
-    int64_t groupId = 0;
-    unsigned firstOriginalIndex = 0;
-    SmallVector<GroupMember, 8> members;
+  int64_t groupId = 0;
+  unsigned firstOriginalIndex = 0;
+  SmallVector<GroupMember, 8> members;
 };
 
-static std::optional<int64_t> getRequiredI64Attr(Operation* op, StringRef attrName)
-{
-    if (auto attr = op->getAttrOfType<IntegerAttr>(attrName))
-        return attr.getInt();
-    return std::nullopt;
+static std::optional<int64_t> getRequiredI64Attr(Operation *op,
+                                                 StringRef attrName) {
+  if (auto attr = op->getAttrOfType<IntegerAttr>(attrName))
+    return attr.getInt();
+  return std::nullopt;
 }
 
-static bool hasIncompleteFusionMetadata(Operation* op)
-{
-    const bool hasGroupId = op->hasAttr(kFusionGroupIdAttr);
-    const bool hasOrder = op->hasAttr(kFusionOrderAttr);
-    return hasGroupId != hasOrder;
+static bool hasIncompleteFusionMetadata(Operation *op) {
+  const bool hasGroupId = op->hasAttr(kFusionGroupIdAttr);
+  const bool hasOrder = op->hasAttr(kFusionOrderAttr);
+  return hasGroupId != hasOrder;
 }
 
-static bool sharesAnyValue(ArrayRef<Value> lhs, ArrayRef<Value> rhs)
-{
-    for (Value value : lhs)
-        if (llvm::is_contained(rhs, value))
-            return true;
-    return false;
+static bool sharesAnyValue(ArrayRef<Value> lhs, ArrayRef<Value> rhs) {
+  for (Value value : lhs)
+    if (llvm::is_contained(rhs, value))
+      return true;
+  return false;
 }
 
-static SchedulingBarrierKind classifySchedulingBarrier(Operation* op)
-{
-    if (op->hasTrait<OpTrait::IsTerminator>() || !op->getRegions().empty())
-        return SchedulingBarrierKind::HardBoundary;
-    if (isa<CallOpInterface>(op))
-        return SchedulingBarrierKind::HardBoundary;
-    if (isa<pto::AllocTileOp>(op))
-        return SchedulingBarrierKind::Movable;
-
-    FailureOr<pto::FusionOpSemantics> semanticsOr = pto::getFusionOpSemantics(op);
-    if (succeeded(semanticsOr)) {
-        switch (semanticsOr->kind) {
-            case pto::FusionOpKind::Compute:
-                return SchedulingBarrierKind::Movable;
-            case pto::FusionOpKind::LocalBoundary:
-                return SchedulingBarrierKind::LocalBoundary;
-            case pto::FusionOpKind::HardBoundary:
-                return SchedulingBarrierKind::HardBoundary;
-        }
-    }
-    if (!isMemoryEffectFree(op))
-        return SchedulingBarrierKind::HardBoundary;
+static SchedulingBarrierKind classifySchedulingBarrier(Operation *op) {
+  if (op->hasTrait<OpTrait::IsTerminator>() || !op->getRegions().empty())
+    return SchedulingBarrierKind::HardBoundary;
+  if (isa<CallOpInterface>(op))
+    return SchedulingBarrierKind::HardBoundary;
+  if (isa<pto::AllocTileOp>(op))
     return SchedulingBarrierKind::Movable;
-}
 
-static bool hasTileDependency(Operation* opA, Operation* opB)
-{
-    // alloc_tile is a pure buffer allocation with no tile-level data dependency
-    // on any compute op — it does not consume or produce tile data.
-    if (isa<pto::AllocTileOp>(opA) || isa<pto::AllocTileOp>(opB))
-        return false;
-
-    FailureOr<pto::FusionOpSemantics> aSemOr = pto::getFusionOpSemantics(opA);
-    FailureOr<pto::FusionOpSemantics> bSemOr = pto::getFusionOpSemantics(opB);
-    if (failed(aSemOr) || failed(bSemOr))
-        return true;
-
-    const pto::FusionOpSemantics& a = *aSemOr;
-    const pto::FusionOpSemantics& b = *bSemOr;
-
-    return sharesAnyValue(a.tileOutputs, b.tileInputs) || sharesAnyValue(b.tileOutputs, a.tileInputs) ||
-           sharesAnyValue(a.tileOutputs, b.tileOutputs);
-}
-
-static bool crossesOperandDefinition(Operation* movingOp, Operation* candidate)
-{
-    for (Value operand : movingOp->getOperands()) {
-        Operation* defOp = operand.getDefiningOp();
-        if (defOp == candidate)
-            return true;
+  FailureOr<pto::FusionOpSemantics> semanticsOr = pto::getFusionOpSemantics(op);
+  if (succeeded(semanticsOr)) {
+    switch (semanticsOr->kind) {
+    case pto::FusionOpKind::Compute:
+      return SchedulingBarrierKind::Movable;
+    case pto::FusionOpKind::LocalBoundary:
+      return SchedulingBarrierKind::LocalBoundary;
+    case pto::FusionOpKind::HardBoundary:
+      return SchedulingBarrierKind::HardBoundary;
     }
+  }
+  if (!isMemoryEffectFree(op))
+    return SchedulingBarrierKind::HardBoundary;
+  return SchedulingBarrierKind::Movable;
+}
+
+static bool hasTileDependency(Operation *opA, Operation *opB) {
+  // alloc_tile is a pure buffer allocation with no tile-level data dependency
+  // on any compute op — it does not consume or produce tile data.
+  if (isa<pto::AllocTileOp>(opA) || isa<pto::AllocTileOp>(opB))
     return false;
+
+  FailureOr<pto::FusionOpSemantics> aSemOr = pto::getFusionOpSemantics(opA);
+  FailureOr<pto::FusionOpSemantics> bSemOr = pto::getFusionOpSemantics(opB);
+  if (failed(aSemOr) || failed(bSemOr))
+    return true;
+
+  const pto::FusionOpSemantics &a = *aSemOr;
+  const pto::FusionOpSemantics &b = *bSemOr;
+
+  return sharesAnyValue(a.tileOutputs, b.tileInputs) ||
+         sharesAnyValue(b.tileOutputs, a.tileInputs) ||
+         sharesAnyValue(a.tileOutputs, b.tileOutputs);
 }
 
-static bool canMoveEarlierAcross(Operation* movingOp, Operation* candidate)
-{
-    if (crossesOperandDefinition(movingOp, candidate))
-        return false;
+static bool crossesOperandDefinition(Operation *movingOp, Operation *candidate) {
+  for (Value operand : movingOp->getOperands()) {
+    Operation *defOp = operand.getDefiningOp();
+    if (defOp == candidate)
+      return true;
+  }
+  return false;
+}
 
-    switch (classifySchedulingBarrier(candidate)) {
-        case SchedulingBarrierKind::Movable:
-        case SchedulingBarrierKind::LocalBoundary:
-            return !hasTileDependency(movingOp, candidate);
-        case SchedulingBarrierKind::HardBoundary:
-            return false;
-    }
+static bool canMoveEarlierAcross(Operation *movingOp, Operation *candidate) {
+  if (crossesOperandDefinition(movingOp, candidate))
     return false;
-}
 
-static bool canMoveLaterAcross(Operation* movingOp, Operation* candidate)
-{
-    for (Value operand : candidate->getOperands()) {
-        Operation* defOp = operand.getDefiningOp();
-        if (defOp == movingOp)
-            return false;
-    }
-
-    switch (classifySchedulingBarrier(candidate)) {
-        case SchedulingBarrierKind::Movable:
-        case SchedulingBarrierKind::LocalBoundary:
-            return !hasTileDependency(movingOp, candidate);
-        case SchedulingBarrierKind::HardBoundary:
-            return false;
-    }
+  switch (classifySchedulingBarrier(candidate)) {
+  case SchedulingBarrierKind::Movable:
+  case SchedulingBarrierKind::LocalBoundary:
+    return !hasTileDependency(movingOp, candidate);
+  case SchedulingBarrierKind::HardBoundary:
     return false;
+  }
+  return false;
 }
 
-static bool canMoveAfter(Operation* movingOp, Operation* anchorOp)
-{
-    if (!movingOp || !anchorOp || movingOp == anchorOp)
-        return false;
-    if (movingOp->getBlock() != anchorOp->getBlock())
-        return false;
+static bool canMoveLaterAcross(Operation *movingOp, Operation *candidate) {
+  for (Value operand : candidate->getOperands()) {
+    Operation *defOp = operand.getDefiningOp();
+    if (defOp == movingOp)
+      return false;
+  }
 
-    Operation* cursor = anchorOp->getNextNode();
-    while (cursor && cursor != movingOp) {
-        if (!canMoveEarlierAcross(movingOp, cursor))
-            return false;
-        cursor = cursor->getNextNode();
-    }
-    return cursor == movingOp;
+  switch (classifySchedulingBarrier(candidate)) {
+  case SchedulingBarrierKind::Movable:
+  case SchedulingBarrierKind::LocalBoundary:
+    return !hasTileDependency(movingOp, candidate);
+  case SchedulingBarrierKind::HardBoundary:
+    return false;
+  }
+  return false;
 }
 
-static LogicalResult collectScheduledGroups(Block& block, SmallVectorImpl<ScheduledGroup>& groups)
-{
-    DenseMap<int64_t, unsigned> groupIndexById;
+static bool canMoveAfter(Operation *movingOp, Operation *anchorOp) {
+  if (!movingOp || !anchorOp || movingOp == anchorOp)
+    return false;
+  if (movingOp->getBlock() != anchorOp->getBlock())
+    return false;
 
-    unsigned originalIndex = 0;
-    for (Operation& op : block) {
-        if (hasIncompleteFusionMetadata(&op)) {
-            op.emitError("expected pto.fusion.group_id and pto.fusion.order to "
-                         "either both exist or both be absent");
-            return failure();
-        }
+  Operation *cursor = anchorOp->getNextNode();
+  while (cursor && cursor != movingOp) {
+    if (!canMoveEarlierAcross(movingOp, cursor))
+      return false;
+    cursor = cursor->getNextNode();
+  }
+  return cursor == movingOp;
+}
 
-        std::optional<int64_t> groupId = getRequiredI64Attr(&op, kFusionGroupIdAttr);
-        if (!groupId) {
-            ++originalIndex;
-            continue;
-        }
+static LogicalResult
+collectScheduledGroups(Block &block, SmallVectorImpl<ScheduledGroup> &groups) {
+  DenseMap<int64_t, unsigned> groupIndexById;
 
-        std::optional<int64_t> order = getRequiredI64Attr(&op, kFusionOrderAttr);
-        if (!order) {
-            op.emitError("missing required pto.fusion.order attribute");
-            return failure();
-        }
-
-        auto [it, inserted] = groupIndexById.try_emplace(*groupId, groups.size());
-        if (inserted) {
-            ScheduledGroup group;
-            group.groupId = *groupId;
-            group.firstOriginalIndex = originalIndex;
-            groups.push_back(std::move(group));
-        }
-
-        ScheduledGroup& group = groups[it->second];
-        group.members.push_back(GroupMember{&op, *order, originalIndex});
-        ++originalIndex;
+  unsigned originalIndex = 0;
+  for (Operation &op : block) {
+    if (hasIncompleteFusionMetadata(&op)) {
+      op.emitError("expected pto.fusion.group_id and pto.fusion.order to "
+                   "either both exist or both be absent");
+      return failure();
     }
 
-    llvm::sort(groups, [](const ScheduledGroup& lhs, const ScheduledGroup& rhs) {
-        if (lhs.firstOriginalIndex != rhs.firstOriginalIndex)
-            return lhs.firstOriginalIndex < rhs.firstOriginalIndex;
-        return lhs.groupId < rhs.groupId;
+    std::optional<int64_t> groupId =
+        getRequiredI64Attr(&op, kFusionGroupIdAttr);
+    if (!groupId) {
+      ++originalIndex;
+      continue;
+    }
+
+    std::optional<int64_t> order = getRequiredI64Attr(&op, kFusionOrderAttr);
+    if (!order) {
+      op.emitError("missing required pto.fusion.order attribute");
+      return failure();
+    }
+
+    auto [it, inserted] = groupIndexById.try_emplace(*groupId, groups.size());
+    if (inserted) {
+      ScheduledGroup group;
+      group.groupId = *groupId;
+      group.firstOriginalIndex = originalIndex;
+      groups.push_back(std::move(group));
+    }
+
+    ScheduledGroup &group = groups[it->second];
+    group.members.push_back(GroupMember{&op, *order, originalIndex});
+    ++originalIndex;
+  }
+
+  llvm::sort(groups, [](const ScheduledGroup &lhs, const ScheduledGroup &rhs) {
+    if (lhs.firstOriginalIndex != rhs.firstOriginalIndex)
+      return lhs.firstOriginalIndex < rhs.firstOriginalIndex;
+    return lhs.groupId < rhs.groupId;
+  });
+
+  for (ScheduledGroup &group : groups) {
+    llvm::sort(group.members, [](const GroupMember &lhs, const GroupMember &rhs) {
+      if (lhs.order != rhs.order)
+        return lhs.order < rhs.order;
+      return lhs.originalIndex < rhs.originalIndex;
     });
 
-    for (ScheduledGroup& group : groups) {
-        llvm::sort(group.members, [](const GroupMember& lhs, const GroupMember& rhs) {
-            if (lhs.order != rhs.order)
-                return lhs.order < rhs.order;
-            return lhs.originalIndex < rhs.originalIndex;
-        });
-
-        std::optional<int64_t> previousOrder;
-        for (const GroupMember& member : group.members) {
-            if (classifySchedulingBarrier(member.op) != SchedulingBarrierKind::Movable) {
-                member.op->emitError("fusion scheduling metadata must only annotate "
-                                     "movable compute ops");
-                return failure();
-            }
-            if (previousOrder && *previousOrder == member.order) {
-                member.op->emitError("duplicate pto.fusion.order within one fusion "
-                                     "group");
-                return failure();
-            }
-            previousOrder = member.order;
-        }
+    std::optional<int64_t> previousOrder;
+    for (const GroupMember &member : group.members) {
+      if (classifySchedulingBarrier(member.op) !=
+          SchedulingBarrierKind::Movable) {
+        member.op->emitError("fusion scheduling metadata must only annotate "
+                             "movable compute ops");
+        return failure();
+      }
+      if (previousOrder && *previousOrder == member.order) {
+        member.op->emitError("duplicate pto.fusion.order within one fusion "
+                             "group");
+        return failure();
+      }
+      previousOrder = member.order;
     }
+  }
 
-    return success();
+  return success();
 }
 
-static bool canPrefixMoveLaterAcross(ArrayRef<GroupMember> members, Operation* placement, Operation* barrier)
-{
-    for (const GroupMember& prevMember : members) {
-        if (!canMoveLaterAcross(prevMember.op, barrier))
-            return false;
-        if (prevMember.op == placement)
-            break;
-    }
-    return true;
+static bool canPrefixMoveLaterAcross(
+    ArrayRef<GroupMember> members, Operation *placement, Operation *barrier) {
+  for (const GroupMember &prevMember : members) {
+    if (!canMoveLaterAcross(prevMember.op, barrier))
+      return false;
+    if (prevMember.op == placement)
+      break;
+  }
+  return true;
 }
 
-static void movePrefixPastBarrier(ArrayRef<GroupMember> members, Operation* placement, Operation* barrier)
-{
-    Operation* anchor = barrier;
-    for (const GroupMember& prevMember : members) {
-        prevMember.op->moveAfter(anchor);
-        anchor = prevMember.op;
-        if (prevMember.op == placement)
-            break;
-    }
+static void movePrefixPastBarrier(ArrayRef<GroupMember> members,
+                                  Operation *placement,
+                                  Operation *barrier) {
+  Operation *anchor = barrier;
+  for (const GroupMember &prevMember : members) {
+    prevMember.op->moveAfter(anchor);
+    anchor = prevMember.op;
+    if (prevMember.op == placement)
+      break;
+  }
 }
 
-static void scheduleGroup(ScheduledGroup& group)
-{
-    if (group.members.size() < 2)
-        return;
+static void scheduleGroup(ScheduledGroup &group) {
+  if (group.members.size() < 2)
+    return;
 
-    Operation* placement = group.members.front().op;
-    for (GroupMember& member : llvm::drop_begin(group.members)) {
-        Operation* op = member.op;
-        while (op != placement && op != placement->getNextNode()) {
-            if (canMoveAfter(op, placement)) {
-                op->moveAfter(placement);
-                break;
-            }
+  Operation *placement = group.members.front().op;
+  for (GroupMember &member : llvm::drop_begin(group.members)) {
+    Operation *op = member.op;
+    while (op != placement && op != placement->getNextNode()) {
+      if (canMoveAfter(op, placement)) {
+        op->moveAfter(placement);
+        break;
+      }
 
-            Operation* blockingOp = placement->getNextNode();
-            if (!blockingOp || blockingOp == op || !canMoveLaterAcross(placement, blockingOp))
-                break;
+      Operation *blockingOp = placement->getNextNode();
+      if (!blockingOp || blockingOp == op ||
+          !canMoveLaterAcross(placement, blockingOp))
+        break;
 
-            if (!canPrefixMoveLaterAcross(group.members, placement, blockingOp))
-                break;
+      if (!canPrefixMoveLaterAcross(group.members, placement, blockingOp))
+        break;
 
-            movePrefixPastBarrier(group.members, placement, blockingOp);
-        }
-        placement = op;
+      movePrefixPastBarrier(group.members, placement, blockingOp);
     }
+    placement = op;
+  }
 }
 
-static LogicalResult scheduleRegion(Region& region)
-{
-    for (Block& block : region.getBlocks()) {
-        SmallVector<ScheduledGroup, 8> groups;
-        if (failed(collectScheduledGroups(block, groups)))
-            return failure();
-        for (ScheduledGroup& group : groups)
-            scheduleGroup(group);
+static LogicalResult scheduleRegion(Region &region) {
+  for (Block &block : region.getBlocks()) {
+    SmallVector<ScheduledGroup, 8> groups;
+    if (failed(collectScheduledGroups(block, groups)))
+      return failure();
+    for (ScheduledGroup &group : groups)
+      scheduleGroup(group);
 
-        for (Operation& op : block)
-            for (Region& nestedRegion : op.getRegions())
-                if (failed(scheduleRegion(nestedRegion)))
-                    return failure();
-    }
-    return success();
+    for (Operation &op : block)
+      for (Region &nestedRegion : op.getRegions())
+        if (failed(scheduleRegion(nestedRegion)))
+          return failure();
+  }
+  return success();
 }
 
 // ---------------------------------------------------------------------------
@@ -336,8 +332,8 @@ static LogicalResult scheduleRegion(Region& region)
 // ---------------------------------------------------------------------------
 
 struct FusionSpan {
-    int64_t originalGroupId = 0;
-    SmallVector<Operation*, 8> members;
+  int64_t originalGroupId = 0;
+  SmallVector<Operation *, 8> members;
 };
 
 // Collect the physically contiguous spans of fusion metadata in `block`, in
@@ -348,43 +344,45 @@ struct FusionSpan {
 // already rejects the same malformed input. `originalGroupId` is retained only
 // for physical-span boundary detection and degradation accounting; output IDs
 // are always newly allocated in normalizeBlockFusionMetadata.
-static LogicalResult collectPhysicalFusionSpans(Block& block, SmallVectorImpl<FusionSpan>& spans)
-{
-    FusionSpan current;
-    bool hasCurrent = false;
+static LogicalResult
+collectPhysicalFusionSpans(Block &block,
+                           SmallVectorImpl<FusionSpan> &spans) {
+  FusionSpan current;
+  bool hasCurrent = false;
 
-    auto flush = [&]() {
-        if (!hasCurrent)
-            return;
-        spans.push_back(std::move(current));
-        current = FusionSpan{};
-        hasCurrent = false;
-    };
+  auto flush = [&]() {
+    if (!hasCurrent)
+      return;
+    spans.push_back(std::move(current));
+    current = FusionSpan{};
+    hasCurrent = false;
+  };
 
-    for (Operation& op : block) {
-        if (hasIncompleteFusionMetadata(&op)) {
-            op.emitError("expected pto.fusion.group_id and pto.fusion.order to "
-                         "either both exist or both be absent");
-            return failure();
-        }
-
-        std::optional<int64_t> groupId = getRequiredI64Attr(&op, kFusionGroupIdAttr);
-        if (!groupId) {
-            flush();
-            continue;
-        }
-
-        if (!hasCurrent || current.originalGroupId != *groupId) {
-            flush();
-            current.originalGroupId = *groupId;
-            hasCurrent = true;
-        }
-
-        current.members.push_back(&op);
+  for (Operation &op : block) {
+    if (hasIncompleteFusionMetadata(&op)) {
+      op.emitError("expected pto.fusion.group_id and pto.fusion.order to "
+                   "either both exist or both be absent");
+      return failure();
     }
 
-    flush();
-    return success();
+    std::optional<int64_t> groupId =
+        getRequiredI64Attr(&op, kFusionGroupIdAttr);
+    if (!groupId) {
+      flush();
+      continue;
+    }
+
+    if (!hasCurrent || current.originalGroupId != *groupId) {
+      flush();
+      current.originalGroupId = *groupId;
+      hasCurrent = true;
+    }
+
+    current.members.push_back(&op);
+  }
+
+  flush();
+  return success();
 }
 
 // Strip the old planning metadata from `block`, then re-annotate each
@@ -392,81 +390,88 @@ static LogicalResult collectPhysicalFusionSpans(Block& block, SmallVectorImpl<Fu
 // a 0-based `order` reflecting the final physical order. Singleton spans and
 // unannotated ops keep no fusion metadata. `nextGroupId` is shared across the
 // whole function so ids stay unique and dense.
-static LogicalResult normalizeBlockFusionMetadata(Block& block, MLIRContext* context, int64_t& nextGroupId)
-{
-    SmallVector<FusionSpan, 8> spans;
-    if (failed(collectPhysicalFusionSpans(block, spans)))
-        return failure();
+static LogicalResult
+normalizeBlockFusionMetadata(Block &block, MLIRContext *context,
+                            int64_t &nextGroupId) {
+  SmallVector<FusionSpan, 8> spans;
+  if (failed(collectPhysicalFusionSpans(block, spans)))
+    return failure();
 
-    // Remove all old metadata before assigning canonical groups, so that
-    // surviving span ids never collide with stale ids left on singleton or
-    // unrelated ops.
-    for (Operation& op : block) {
-        op.removeAttr(kFusionGroupIdAttr);
-        op.removeAttr(kFusionOrderAttr);
+  // Remove all old metadata before assigning canonical groups, so that
+  // surviving span ids never collide with stale ids left on singleton or
+  // unrelated ops.
+  for (Operation &op : block) {
+    op.removeAttr(kFusionGroupIdAttr);
+    op.removeAttr(kFusionOrderAttr);
+  }
+
+  const IntegerType i64 = IntegerType::get(context, 64);
+  for (FusionSpan &span : spans) {
+    if (span.members.size() < 2)
+      continue;
+
+    const int64_t newGroupId = nextGroupId++;
+    for (auto [order, op] : llvm::enumerate(span.members)) {
+      op->setAttr(kFusionGroupIdAttr, IntegerAttr::get(i64, newGroupId));
+      op->setAttr(kFusionOrderAttr,
+                  IntegerAttr::get(i64, static_cast<int64_t>(order)));
     }
+  }
 
-    const IntegerType i64 = IntegerType::get(context, 64);
-    for (FusionSpan& span : spans) {
-        if (span.members.size() < 2)
-            continue;
-
-        const int64_t newGroupId = nextGroupId++;
-        for (auto [order, op] : llvm::enumerate(span.members)) {
-            op->setAttr(kFusionGroupIdAttr, IntegerAttr::get(i64, newGroupId));
-            op->setAttr(kFusionOrderAttr, IntegerAttr::get(i64, static_cast<int64_t>(order)));
-        }
-    }
-
-    return success();
+  return success();
 }
 
-static LogicalResult normalizeScheduledFusionMetadata(Region& region, MLIRContext* context, int64_t& nextGroupId)
-{
-    for (Block& block : region.getBlocks()) {
-        if (failed(normalizeBlockFusionMetadata(block, context, nextGroupId)))
-            return failure();
+static LogicalResult
+normalizeScheduledFusionMetadata(Region &region, MLIRContext *context,
+                                 int64_t &nextGroupId) {
+  for (Block &block : region.getBlocks()) {
+    if (failed(normalizeBlockFusionMetadata(block, context, nextGroupId)))
+      return failure();
 
-        // Recurse into nested regions in the same pre-order walk used by
-        // scheduleRegion, so the function-wide id counter stays deterministic.
-        for (Operation& op : block)
-            for (Region& nestedRegion : op.getRegions())
-                if (failed(normalizeScheduledFusionMetadata(nestedRegion, context, nextGroupId)))
-                    return failure();
-    }
-    return success();
+    // Recurse into nested regions in the same pre-order walk used by
+    // scheduleRegion, so the function-wide id counter stays deterministic.
+    for (Operation &op : block)
+      for (Region &nestedRegion : op.getRegions())
+        if (failed(normalizeScheduledFusionMetadata(nestedRegion, context,
+                                                    nextGroupId)))
+          return failure();
+  }
+  return success();
 }
 
-struct OpSchedulingPass : public pto::impl::OpSchedulingBase<OpSchedulingPass> {
-    using pto::impl::OpSchedulingBase<OpSchedulingPass>::OpSchedulingBase;
+struct OpSchedulingPass
+    : public pto::impl::OpSchedulingBase<OpSchedulingPass> {
+  using pto::impl::OpSchedulingBase<OpSchedulingPass>::OpSchedulingBase;
 
-    void runOnOperation() override
-    {
-        func::FuncOp func = getOperation();
-        if (func.isExternal())
-            return;
+  void runOnOperation() override {
+    func::FuncOp func = getOperation();
+    if (func.isExternal())
+      return;
 
-        if (failed(scheduleRegion(func.getRegion()))) {
-            signalPassFailure();
-            return;
-        }
-
-        // After scheduling, collapse any group that could not be compacted into a
-        // single contiguous span into independent per-span groups (and drop
-        // singleton spans), so PTOFusionRegionGen never sees a fragmented group_id.
-        int64_t nextGroupId = 0;
-        if (failed(normalizeScheduledFusionMetadata(func.getRegion(), &getContext(), nextGroupId))) {
-            signalPassFailure();
-            return;
-        }
-
-        // OpScheduling only reorders ops *within* a block (it never moves an op
-        // across block boundaries), so the pre-fusion dataflow graph (block
-        // ownership, op->node mapping, write-instance producers) is preserved.
-        markAnalysesPreserved<pto::PreFusionAnalysis>();
+    if (failed(scheduleRegion(func.getRegion()))) {
+      signalPassFailure();
+      return;
     }
+
+    // After scheduling, collapse any group that could not be compacted into a
+    // single contiguous span into independent per-span groups (and drop
+    // singleton spans), so PTOFusionRegionGen never sees a fragmented group_id.
+    int64_t nextGroupId = 0;
+    if (failed(normalizeScheduledFusionMetadata(func.getRegion(),
+                                                &getContext(), nextGroupId))) {
+      signalPassFailure();
+      return;
+    }
+
+    // OpScheduling only reorders ops *within* a block (it never moves an op
+    // across block boundaries), so the pre-fusion dataflow graph (block
+    // ownership, op->node mapping, write-instance producers) is preserved.
+    markAnalysesPreserved<pto::PreFusionAnalysis>();
+  }
 };
 
 } // namespace
 
-std::unique_ptr<Pass> mlir::pto::createOpSchedulingPass() { return std::make_unique<OpSchedulingPass>(); }
+std::unique_ptr<Pass> mlir::pto::createOpSchedulingPass() {
+  return std::make_unique<OpSchedulingPass>();
+}

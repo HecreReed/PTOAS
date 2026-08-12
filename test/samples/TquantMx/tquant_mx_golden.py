@@ -26,21 +26,12 @@ import sys
 
 import numpy as np
 
-for search_root in (
-    Path(__file__).resolve().parent,
-    Path(__file__).resolve().parents[1],
-):
+for search_root in (Path(__file__).resolve().parent, Path(__file__).resolve().parents[1]):
     if (search_root / "validation_runtime.py").is_file():
         sys.path.insert(0, str(search_root))
         break
 
-from validation_runtime import (
-    default_buffers,
-    load_case_meta,
-    rng,
-    write_buffers,
-    write_golden,
-)
+from validation_runtime import default_buffers, load_case_meta, rng, write_buffers, write_golden
 
 
 M = 16
@@ -51,9 +42,7 @@ GROUP_COUNT = (M * K) // GROUP_SIZE
 
 
 def fp32_to_fp8_element(data_abs_max, emax=EMAX):
-    bits = np.uint32(
-        np.frombuffer(np.float32(data_abs_max).tobytes(), dtype=np.uint32)[0]
-    )
+    bits = np.uint32(np.frombuffer(np.float32(data_abs_max).tobytes(), dtype=np.uint32)[0])
     exponent_b32 = int((bits & np.uint32(0x7F800000)) >> np.uint32(23))
     mantissa_b32 = int(bits & np.uint32(0x007FFFFF))
     if exponent_b32 == 0xFF and mantissa_b32 != 0:
@@ -64,7 +53,7 @@ def fp32_to_fp8_element(data_abs_max, emax=EMAX):
     scale_exp = 254 - e8m0
     scaling = np.uint32(scale_exp << 23).view(np.float32)
     if scaling == 0.0:
-        scaling = np.float32(2.0**-127)
+        scaling = np.float32(2.0 ** -127)
     return e8m0, scaling
 
 
@@ -111,9 +100,7 @@ def pack_output_buffer(meta, name, values):
     values = np.asarray(values, dtype=meta.np_types[name]).reshape(-1)
     expected = meta.elem_counts[name]
     if values.size > expected:
-        raise ValueError(
-            f"{name}: expected at most {expected} elements, got {values.size}"
-        )
+        raise ValueError(f"{name}: expected at most {expected} elements, got {values.size}")
     packed = np.zeros(expected, dtype=meta.np_types[name])
     packed[: values.size] = values
     return packed
@@ -164,9 +151,7 @@ def main():
     golden_outputs = {}
 
     # dst: fp8 e4m3fn packed as int8, [M*K] elements.
-    scaling_broadcast = (
-        np.repeat(scaling_per_group, GROUP_SIZE).reshape(M, K).astype(np.float32)
-    )
+    scaling_broadcast = np.repeat(scaling_per_group, GROUP_SIZE).reshape(M, K).astype(np.float32)
     scaled = src.astype(np.float64) * scaling_broadcast.astype(np.float64)
     scaled = np.clip(scaled, -448.0, 448.0).astype(np.float32)
     dst_bytes = fp32_to_fp8e4m3fn_bytes(scaled)
@@ -176,9 +161,7 @@ def main():
     # uses 1x32 Vec-backed buffers. Pad the physical golden buffers to the
     # generated element counts while keeping only the first 16 elements semantic.
     # exp: ui8 [groups] = e8m0 per group.
-    golden_outputs[exp_name] = pack_output_buffer(
-        meta, exp_name, e8m0.reshape(GROUP_COUNT)
-    )
+    golden_outputs[exp_name] = pack_output_buffer(meta, exp_name, e8m0.reshape(GROUP_COUNT))
 
     # max: f32 [groups] = per-group absmax.
     golden_outputs[max_name] = pack_output_buffer(

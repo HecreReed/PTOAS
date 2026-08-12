@@ -21,121 +21,120 @@ using namespace mlir;
 namespace {
 
 struct VPTOKernelStubDecl {
-    std::string logicalName;
-    SmallVector<std::string> argTypes;
+  std::string logicalName;
+  SmallVector<std::string> argTypes;
 };
 
-static std::string getLogicalKernelName(llvm::StringRef symbol)
-{
-    if (symbol.ends_with("_mix_aiv"))
-        return symbol.drop_back(strlen("_mix_aiv")).str();
-    if (symbol.ends_with("_mix_aic"))
-        return symbol.drop_back(strlen("_mix_aic")).str();
-    return symbol.str();
+static std::string getLogicalKernelName(llvm::StringRef symbol) {
+  if (symbol.ends_with("_mix_aiv"))
+    return symbol.drop_back(strlen("_mix_aiv")).str();
+  if (symbol.ends_with("_mix_aic"))
+    return symbol.drop_back(strlen("_mix_aic")).str();
+  return symbol.str();
 }
 
-static std::string getStubScalarCType(Type type)
-{
-    if (isa<IndexType>(type))
-        return "long long";
-    if (auto intType = dyn_cast<IntegerType>(type)) {
-        switch (intType.getWidth()) {
-            case 1:
-            case 8:
-                return "signed char";
-            case 16:
-                return "short";
-            case 32:
-                return "int";
-            case 64:
-                return "long long";
-            default:
-                return "long long";
-        }
-    }
-    if (auto floatType = dyn_cast<FloatType>(type)) {
-        if (floatType.isF32())
-            return "float";
-        if (floatType.isF64())
-            return "double";
-        return "short";
-    }
+static std::string getStubScalarCType(Type type) {
+  if (isa<IndexType>(type))
     return "long long";
+  if (auto intType = dyn_cast<IntegerType>(type)) {
+    switch (intType.getWidth()) {
+    case 1:
+    case 8:
+      return "signed char";
+    case 16:
+      return "short";
+    case 32:
+      return "int";
+    case 64:
+      return "long long";
+    default:
+      return "long long";
+    }
+  }
+  if (auto floatType = dyn_cast<FloatType>(type)) {
+    if (floatType.isF32())
+      return "float";
+    if (floatType.isF64())
+      return "double";
+    return "short";
+  }
+  return "long long";
 }
 
-static std::string getStubCType(Type type)
-{
-    if (isa<pto::PtrType, MemRefType>(type))
-        return "__gm__ void *";
-    return getStubScalarCType(type);
+static std::string getStubCType(Type type) {
+  if (isa<pto::PtrType, MemRefType>(type))
+    return "__gm__ void *";
+  return getStubScalarCType(type);
 }
 
 } // namespace
 
 static LogicalResult collectVPTOKernelStubDecls(
-    ArrayRef<ModuleOp> modules, SmallVectorImpl<VPTOKernelStubDecl>& decls, llvm::raw_ostream& diagOS)
-{
-    bool hadError = false;
-    llvm::StringMap<unsigned> logicalNameToIndex;
+    ArrayRef<ModuleOp> modules, SmallVectorImpl<VPTOKernelStubDecl> &decls,
+    llvm::raw_ostream &diagOS) {
+  bool hadError = false;
+  llvm::StringMap<unsigned> logicalNameToIndex;
 
-    for (ModuleOp module : modules) {
-        module.walk([&](func::FuncOp func) {
-            if (!pto::isPTOEntryFunction(func))
-                return;
+  for (ModuleOp module : modules) {
+    module.walk([&](func::FuncOp func) {
+      if (!pto::isPTOEntryFunction(func))
+        return;
 
-            std::string logicalName = getLogicalKernelName(func.getSymName());
-            SmallVector<std::string> argTypes;
-            argTypes.reserve(func.getNumArguments());
-            for (Type type : func.getArgumentTypes())
-                argTypes.push_back(getStubCType(type));
+      std::string logicalName = getLogicalKernelName(func.getSymName());
+      SmallVector<std::string> argTypes;
+      argTypes.reserve(func.getNumArguments());
+      for (Type type : func.getArgumentTypes())
+        argTypes.push_back(getStubCType(type));
 
-            auto [it, inserted] = logicalNameToIndex.try_emplace(logicalName, decls.size());
-            if (inserted) {
-                decls.push_back(VPTOKernelStubDecl{logicalName, std::move(argTypes)});
-                return;
-            }
+      auto [it, inserted] =
+          logicalNameToIndex.try_emplace(logicalName, decls.size());
+      if (inserted) {
+        decls.push_back(VPTOKernelStubDecl{logicalName, std::move(argTypes)});
+        return;
+      }
 
-            VPTOKernelStubDecl& existing = decls[it->second];
-            if (existing.argTypes != argTypes) {
-                diagOS << "Error: mixed kernel variants disagree on host stub signature "
-                       << "for '" << logicalName << "'.\n";
-                hadError = true;
-            }
-        });
-    }
+      VPTOKernelStubDecl &existing = decls[it->second];
+      if (existing.argTypes != argTypes) {
+        diagOS << "Error: mixed kernel variants disagree on host stub signature "
+               << "for '" << logicalName << "'.\n";
+        hadError = true;
+      }
+    });
+  }
 
-    return hadError ? failure() : success();
+  return hadError ? failure() : success();
 }
 
-LogicalResult mlir::pto::emitVPTOHostStubSource(ModuleOp module, std::string& stubSource, llvm::raw_ostream& diagOS)
-{
-    return emitVPTOHostStubSource(ArrayRef<ModuleOp>(module), stubSource, diagOS);
+LogicalResult mlir::pto::emitVPTOHostStubSource(ModuleOp module,
+                                                std::string &stubSource,
+                                                llvm::raw_ostream &diagOS) {
+  return emitVPTOHostStubSource(ArrayRef<ModuleOp>(module), stubSource, diagOS);
 }
 
-LogicalResult mlir::pto::emitVPTOHostStubSource(
-    ArrayRef<ModuleOp> modules, std::string& stubSource, llvm::raw_ostream& diagOS)
-{
-    SmallVector<VPTOKernelStubDecl> stubDecls;
-    if (failed(collectVPTOKernelStubDecls(modules, stubDecls, diagOS)))
-        return failure();
+LogicalResult mlir::pto::emitVPTOHostStubSource(ArrayRef<ModuleOp> modules,
+                                                std::string &stubSource,
+                                                llvm::raw_ostream &diagOS) {
+  SmallVector<VPTOKernelStubDecl> stubDecls;
+  if (failed(collectVPTOKernelStubDecls(modules, stubDecls, diagOS)))
+    return failure();
 
-    if (stubDecls.empty()) {
-        diagOS << "Error: no PTO entry functions found for host stub emission.\n";
-        return failure();
-    }
+  if (stubDecls.empty()) {
+    diagOS << "Error: no PTO entry functions found for host stub emission.\n";
+    return failure();
+  }
 
-    stubSource.clear();
-    llvm::raw_string_ostream os(stubSource);
-    os << "#ifndef AICORE\n#define AICORE [aicore]\n#endif\n\n";
-    for (const VPTOKernelStubDecl& decl : stubDecls) {
-        os << "extern \"C\" __global__ AICORE void " << decl.logicalName << "(";
-        for (size_t i = 0; i < decl.argTypes.size(); ++i) {
-            if (i)
-                os << ", ";
-            os << decl.argTypes[i] << " arg" << i;
-        }
-        os << ") {}\n";
+  stubSource.clear();
+  llvm::raw_string_ostream os(stubSource);
+  os << "#ifndef AICORE\n#define AICORE [aicore]\n#endif\n\n";
+  for (const VPTOKernelStubDecl &decl : stubDecls) {
+    os << "extern \"C\" __global__ AICORE void " << decl.logicalName << "(";
+    for (size_t i = 0; i < decl.argTypes.size(); ++i) {
+      if (i)
+        os << ", ";
+      os << decl.argTypes[i] << " arg" << i;
     }
-    os.flush();
-    return success();
+    os << ") {}\n";
+  }
+  os.flush();
+  return success();
 }

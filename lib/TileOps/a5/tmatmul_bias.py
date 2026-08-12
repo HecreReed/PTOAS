@@ -13,29 +13,11 @@ import ptodsl.tilelib as tilelib
 from ._cube import MATMUL_BIAS_DTYPES
 
 
-@tilelib.tile_template(
-    op="pto.tmatmul.bias",
-    target="a5",
-    name="template_tmatmul_bias",
-    dtypes=MATMUL_BIAS_DTYPES,
-    iteration_axis="none",
-    op_engine="cube",
-    op_class="other",
-    id=0,
-    loop_depth=1,
-    is_post_update=False,
-    tags=("cube", "matmul", "bias"),
-)
+@tilelib.tile_template(op="pto.tmatmul.bias", target="a5", name="template_tmatmul_bias",
+                       dtypes=MATMUL_BIAS_DTYPES, iteration_axis="none",
+                       op_engine="cube", op_class="other", id=0, loop_depth=1,
+                       is_post_update=False, tags=("cube", "matmul", "bias"))
 def template_tmatmul_bias(lhs: pto.Tile, rhs: pto.Tile, bias: pto.Tile, dst: pto.Tile):
     m, k = lhs.valid_shape
     _, n = rhs.valid_shape
-    pto.mad_bias(
-        lhs.as_ptr(),
-        rhs.as_ptr(),
-        dst.as_ptr(),
-        bias.as_ptr(),
-        m,
-        n,
-        k,
-        disable_gemv=True,
-    )
+    pto.mad_bias(lhs.as_ptr(), rhs.as_ptr(), dst.as_ptr(), bias.as_ptr(), m, n, k, disable_gemv=True)

@@ -7,16 +7,7 @@
 # See LICENSE in the root of the software repository for the full text of the License.
 
 from ptoas.mlir.dialects import arith, func, pto
-from ptoas.mlir.ir import (
-    Context,
-    F32Type,
-    IndexType,
-    InsertionPoint,
-    IntegerType,
-    Location,
-    Module,
-    UnitAttr,
-)
+from ptoas.mlir.ir import Context, F32Type, IndexType, InsertionPoint, IntegerType, Location, Module, UnitAttr
 
 
 def build():
@@ -44,16 +35,10 @@ def build():
             bl = pto.BLayoutAttr.get(pto.BLayout.RowMajor, ctx)
             sl = pto.SLayoutAttr.get(pto.SLayout.NoneBox, ctx)
             pd = pto.PadValueAttr.get(pto.PadValue.Null, ctx)
-            cfg = pto.TileBufConfigAttr.get(
-                bl, sl, pto.TileConfig.fractalABSize, pd, ctx
-            )
+            cfg = pto.TileBufConfigAttr.get(bl, sl, pto.TileConfig.fractalABSize, pd, ctx)
 
-            tile_buf_f32 = pto.TileBufType.get(
-                [rows, cols], f32, vec, [rows, cols], cfg, ctx
-            )
-            tile_buf_u32 = pto.TileBufType.get(
-                [rows, cols], u32, vec, [rows, cols], cfg, ctx
-            )
+            tile_buf_f32 = pto.TileBufType.get([rows, cols], f32, vec, [rows, cols], cfg, ctx)
+            tile_buf_u32 = pto.TileBufType.get([rows, cols], u32, vec, [rows, cols], cfg, ctx)
 
             fn_ty = func.FunctionType.get([ptr_f32, ptr_u32, ptr_f32], [])
             with InsertionPoint(module.body):
@@ -69,25 +54,13 @@ def build():
 
                 src_ptr, indices_ptr, dst_ptr = entry.arguments
 
-                src_tv = pto.MakeTensorViewOp(
-                    tv2_f32, src_ptr, [c32, c64], [c64, c1]
-                ).result
-                indices_tv = pto.MakeTensorViewOp(
-                    tv2_u32, indices_ptr, [c32, c64], [c64, c1]
-                ).result
-                dst_tv = pto.MakeTensorViewOp(
-                    tv2_f32, dst_ptr, [c32, c64], [c64, c1]
-                ).result
+                src_tv = pto.MakeTensorViewOp(tv2_f32, src_ptr, [c32, c64], [c64, c1]).result
+                indices_tv = pto.MakeTensorViewOp(tv2_u32, indices_ptr, [c32, c64], [c64, c1]).result
+                dst_tv = pto.MakeTensorViewOp(tv2_f32, dst_ptr, [c32, c64], [c64, c1]).result
 
-                src_view = pto.PartitionViewOp(
-                    tile_view_f32, src_tv, offsets=[c0, c0], sizes=[c32, c64]
-                ).result
-                indices_view = pto.PartitionViewOp(
-                    tile_view_u32, indices_tv, offsets=[c0, c0], sizes=[c32, c64]
-                ).result
-                dst_view = pto.PartitionViewOp(
-                    tile_view_f32, dst_tv, offsets=[c0, c0], sizes=[c32, c64]
-                ).result
+                src_view = pto.PartitionViewOp(tile_view_f32, src_tv, offsets=[c0, c0], sizes=[c32, c64]).result
+                indices_view = pto.PartitionViewOp(tile_view_u32, indices_tv, offsets=[c0, c0], sizes=[c32, c64]).result
+                dst_view = pto.PartitionViewOp(tile_view_f32, dst_tv, offsets=[c0, c0], sizes=[c32, c64]).result
 
                 src_tile = pto.AllocTileOp(tile_buf_f32).result
                 indices_tile = pto.AllocTileOp(tile_buf_u32).result

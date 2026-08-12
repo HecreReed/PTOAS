@@ -22,48 +22,44 @@
 using namespace PtoTestCommon;
 
 // Kernel launch wrappers (defined in launch.cpp)
-void LaunchTDIVS_f32_32x64(float* src, float* dst, void* stream);
-void LaunchTDIVS_f16_63x64(uint16_t* src, uint16_t* dst, void* stream);
-void LaunchTDIVS_f32_256x16(float* src, float* dst, void* stream);
-void LaunchTDIVS_f16_63x64_scalar_src(uint16_t* src, uint16_t* dst, void* stream);
-void LaunchTDIVS_f32_256x16_scalar_src(float* src, float* dst, void* stream);
+void LaunchTDIVS_f32_32x64(float *src, float *dst, void *stream);
+void LaunchTDIVS_f16_63x64(uint16_t *src, uint16_t *dst, void *stream);
+void LaunchTDIVS_f32_256x16(float *src, float *dst, void *stream);
+void LaunchTDIVS_f16_63x64_scalar_src(uint16_t *src, uint16_t *dst, void *stream);
+void LaunchTDIVS_f32_256x16_scalar_src(float *src, float *dst, void *stream);
 // HIGH_PRECISION mode kernels
-void LaunchTDIVS_f16_63x64_hp(uint16_t* src, uint16_t* dst, void* stream);
-void LaunchTDIVS_f16_16x64_hp_subnormal(uint16_t* src, uint16_t* dst, void* stream);
-void LaunchTDIVS_f32_16x64_hp_overflow(float* src, float* dst, void* stream);
-void LaunchTDIVS_f16_16x64_hp_overflow(uint16_t* src, uint16_t* dst, void* stream);
-void LaunchTDIVS_f16_63x64_hp_scalar_src(uint16_t* src, uint16_t* dst, void* stream);
-void LaunchTDIVS_f16_16x64_hp_subnormal_scalar_src(uint16_t* src, uint16_t* dst, void* stream);
-void LaunchTDIVS_f16_16x64_hp_overflow_scalar_src(uint16_t* src, uint16_t* dst, void* stream);
+void LaunchTDIVS_f16_63x64_hp(uint16_t *src, uint16_t *dst, void *stream);
+void LaunchTDIVS_f16_16x64_hp_subnormal(uint16_t *src, uint16_t *dst, void *stream);
+void LaunchTDIVS_f32_16x64_hp_overflow(float *src, float *dst, void *stream);
+void LaunchTDIVS_f16_16x64_hp_overflow(uint16_t *src, uint16_t *dst, void *stream);
+void LaunchTDIVS_f16_63x64_hp_scalar_src(uint16_t *src, uint16_t *dst, void *stream);
+void LaunchTDIVS_f16_16x64_hp_subnormal_scalar_src(uint16_t *src, uint16_t *dst, void *stream);
+void LaunchTDIVS_f16_16x64_hp_overflow_scalar_src(uint16_t *src, uint16_t *dst, void *stream);
 
 struct TestCase {
-    const char* name;
-    void (*launch)(void*, void*, void*); // src, dst, stream
-    size_t rows;                         // allocated tile rows
-    size_t cols;                         // allocated tile cols
-    size_t validRows;                    // effective computation rows  (<= rows)
-    size_t validCols;                    // effective computation cols  (<= cols)
-    size_t elemSize;                     // bytes per element
+    const char *name;
+    void (*launch)(void *, void *, void *);  // src, dst, stream
+    size_t      rows;       // allocated tile rows
+    size_t      cols;       // allocated tile cols
+    size_t      validRows;  // effective computation rows  (<= rows)
+    size_t      validCols;  // effective computation cols  (<= cols)
+    size_t      elemSize;   // bytes per element
 };
 
 static const TestCase kCases[] = {
-    {"f32_32x64", (void (*)(void*, void*, void*))LaunchTDIVS_f32_32x64, 32, 64, 32, 64, sizeof(float)},
-    {"f32_16x64_hp_overflow", (void (*)(void*, void*, void*))LaunchTDIVS_f32_16x64_hp_overflow, 16, 64, 16, 64,
-     sizeof(float)},
-    {"f16_16x64_hp_subnormal_scalar_src", (void (*)(void*, void*, void*))LaunchTDIVS_f16_16x64_hp_subnormal_scalar_src,
-     16, 64, 16, 64, sizeof(uint16_t)},
+{"f32_32x64",   (void (*)(void*,void*,void*))LaunchTDIVS_f32_32x64,   32,  64,  32,  64,  sizeof(float)},
+{"f32_16x64_hp_overflow",   (void (*)(void*,void*,void*))LaunchTDIVS_f32_16x64_hp_overflow,   16,  64,  16,  64,  sizeof(float)},
+{"f16_16x64_hp_subnormal_scalar_src",  (void (*)(void*,void*,void*))LaunchTDIVS_f16_16x64_hp_subnormal_scalar_src,  16,  64,  16,  64,  sizeof(uint16_t)},
 };
 static constexpr size_t kNumCases = sizeof(kCases) / sizeof(kCases[0]);
 
-static int RunCase(const TestCase& tc, int deviceId, aclrtStream stream)
-{
+static int RunCase(const TestCase &tc, int deviceId, aclrtStream stream) {
     int rc = 0;
     const size_t elemCount = tc.rows * tc.cols;
-    const size_t fileSize = elemCount * tc.elemSize;
+    const size_t fileSize  = elemCount * tc.elemSize;
 
-    std::printf(
-        "[INFO] === case: %s (shape=%zux%zu, valid=%zux%zu) ===\n", tc.name, tc.rows, tc.cols, tc.validRows,
-        tc.validCols);
+    std::printf("[INFO] === case: %s (shape=%zux%zu, valid=%zux%zu) ===\n",
+                tc.name, tc.rows, tc.cols, tc.validRows, tc.validCols);
 
     // Per-case data directory
     std::string caseDir = std::string("./") + tc.name;
@@ -111,17 +107,16 @@ static int RunCase(const TestCase& tc, int deviceId, aclrtStream stream)
     return rc;
 }
 
-int main(int argc, char* argv[])
-{
+int main(int argc, char *argv[]) {
     // Optional case filter: ./tdivs [case_name]
-    const char* caseFilter = (argc > 1) ? argv[1] : nullptr;
+    const char *caseFilter = (argc > 1) ? argv[1] : nullptr;
 
     int rc = 0;
     int deviceId = 0;
     aclrtStream stream = nullptr;
 
     aclInit(nullptr);
-    if (const char* envDevice = std::getenv("ACL_DEVICE_ID")) {
+    if (const char *envDevice = std::getenv("ACL_DEVICE_ID")) {
         deviceId = std::atoi(envDevice);
     }
     aclrtSetDevice(deviceId);

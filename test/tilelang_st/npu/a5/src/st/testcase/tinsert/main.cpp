@@ -16,13 +16,13 @@
 
 using namespace PtoTestCommon;
 
-using LaunchFn = void (*)(uint16_t* a, uint16_t* b, uint16_t* id, uint16_t* out, void* stream);
+using LaunchFn = void (*)(uint16_t *a, uint16_t *b, uint16_t *id, uint16_t *out, void *stream);
 
-void LaunchAcc2Mat_f16_16x16(uint16_t* a, uint16_t* b, uint16_t* id, uint16_t* out, void* stream);
-void LaunchAcc2Mat_bf16_16x16(uint16_t* a, uint16_t* b, uint16_t* id, uint16_t* out, void* stream);
+void LaunchAcc2Mat_f16_16x16(uint16_t *a, uint16_t *b, uint16_t *id, uint16_t *out, void *stream);
+void LaunchAcc2Mat_bf16_16x16(uint16_t *a, uint16_t *b, uint16_t *id, uint16_t *out, void *stream);
 
 struct TestCase {
-    const char* name;
+    const char *name;
     LaunchFn launch;
     size_t m, k, n;
     bool has_output;
@@ -31,13 +31,12 @@ struct TestCase {
 };
 
 static const TestCase kCases[] = {
-    {"acc2mat_f16_16x16", reinterpret_cast<LaunchFn>(LaunchAcc2Mat_f16_16x16), 16, 16, 16, true, 4, true},
+    {"acc2mat_f16_16x16",  reinterpret_cast<LaunchFn>(LaunchAcc2Mat_f16_16x16),  16, 16, 16, true, 4, true},
     {"acc2mat_bf16_16x16", reinterpret_cast<LaunchFn>(LaunchAcc2Mat_bf16_16x16), 16, 16, 16, true, 4, true},
 };
 static constexpr size_t kNumCases = sizeof(kCases) / sizeof(kCases[0]);
 
-static int RunCase(const TestCase& tc, int deviceId, aclrtStream stream)
-{
+static int RunCase(const TestCase &tc, int deviceId, aclrtStream stream) {
     (void)deviceId;
     int rc = 0;
     const size_t aElems = tc.m * tc.k;
@@ -91,8 +90,12 @@ static int RunCase(const TestCase& tc, int deviceId, aclrtStream stream)
         }
 
         tc.launch(
-            static_cast<uint16_t*>(aDev), static_cast<uint16_t*>(bDev), static_cast<uint16_t*>(idDev),
-            static_cast<uint16_t*>(outDev), stream);
+            static_cast<uint16_t *>(aDev),
+            static_cast<uint16_t *>(bDev),
+            static_cast<uint16_t *>(idDev),
+            static_cast<uint16_t *>(outDev),
+            stream
+        );
 
         aclrtSynchronizeStream(stream);
 
@@ -105,38 +108,29 @@ static int RunCase(const TestCase& tc, int deviceId, aclrtStream stream)
         }
     }
 
-    if (aDev)
-        aclrtFree(aDev);
-    if (bDev)
-        aclrtFree(bDev);
-    if (idDev)
-        aclrtFree(idDev);
-    if (outDev)
-        aclrtFree(outDev);
-    if (aHost)
-        aclrtFreeHost(aHost);
-    if (bHost)
-        aclrtFreeHost(bHost);
-    if (idHost)
-        aclrtFreeHost(idHost);
-    if (outHost)
-        aclrtFreeHost(outHost);
+    if (aDev) aclrtFree(aDev);
+    if (bDev) aclrtFree(bDev);
+    if (idDev) aclrtFree(idDev);
+    if (outDev) aclrtFree(outDev);
+    if (aHost) aclrtFreeHost(aHost);
+    if (bHost) aclrtFreeHost(bHost);
+    if (idHost) aclrtFreeHost(idHost);
+    if (outHost) aclrtFreeHost(outHost);
 
     if (rc == 0)
         std::printf("[INFO] case %s done\n", tc.name);
     return rc;
 }
 
-int main(int argc, char* argv[])
-{
-    const char* caseFilter = (argc > 1) ? argv[1] : nullptr;
+int main(int argc, char *argv[]) {
+    const char *caseFilter = (argc > 1) ? argv[1] : nullptr;
 
     int rc = 0;
     int deviceId = 0;
     aclrtStream stream = nullptr;
 
     aclInit(nullptr);
-    if (const char* envDevice = std::getenv("ACL_DEVICE_ID")) {
+    if (const char *envDevice = std::getenv("ACL_DEVICE_ID")) {
         deviceId = std::atoi(envDevice);
     }
     aclrtSetDevice(deviceId);

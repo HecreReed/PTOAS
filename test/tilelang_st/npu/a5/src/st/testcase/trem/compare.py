@@ -29,12 +29,8 @@ def main():
         shape = case["dst_shape"]
         vr, vc = case["dst_valid_shape"]
 
-        golden = np.fromfile(
-            os.path.join(case_dir, "golden.bin"), dtype=case["dtype"]
-        ).reshape(shape)
-        output = np.fromfile(
-            os.path.join(case_dir, "output.bin"), dtype=case["dtype"]
-        ).reshape(shape)
+        golden = np.fromfile(os.path.join(case_dir, "golden.bin"), dtype=case["dtype"]).reshape(shape)
+        output = np.fromfile(os.path.join(case_dir, "output.bin"), dtype=case["dtype"]).reshape(shape)
 
         ok = result_cmp(golden[:vr, :vc], output[:vr, :vc], case["eps"])
         if ok:

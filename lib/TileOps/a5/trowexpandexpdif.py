@@ -10,6 +10,4 @@
 from ._expand_binary import register_row_expand_expdif
 
 
-template_trowexpandexpdif_f32, template_trowexpandexpdif_f16 = (
-    register_row_expand_expdif()
-)
+template_trowexpandexpdif_f32, template_trowexpandexpdif_f16 = register_row_expand_expdif()

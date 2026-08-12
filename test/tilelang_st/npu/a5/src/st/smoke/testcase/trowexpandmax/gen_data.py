@@ -19,22 +19,12 @@ from cases import CASES
 from st_common import setup_case_rng, save_case_data
 
 # Inline validation for multi-input format (trowexpandmax uses src0/src1/dst)
-REQUIRED_KEYS = {
-    "name",
-    "dtype",
-    "src0_shape",
-    "src0_valid_shape",
-    "src1_shape",
-    "src1_valid_shape",
-    "dst_shape",
-    "dst_valid_shape",
-}
+REQUIRED_KEYS = {"name", "dtype", "src0_shape", "src0_valid_shape", "src1_shape",
+                 "src1_valid_shape", "dst_shape", "dst_valid_shape"}
 for i, case in enumerate(CASES):
     missing = REQUIRED_KEYS - case.keys()
     if missing:
-        raise ValueError(
-            f"cases[{i}] ({case.get('name', '?')}) missing keys: {missing}"
-        )
+        raise ValueError(f"cases[{i}] ({case.get('name', '?')}) missing keys: {missing}")
 
 for case in CASES:
     setup_case_rng(case)
@@ -56,8 +46,7 @@ for case in CASES:
     src1_vr = src1_valid_shape[0]
 
     golden[:dst_vr, :dst_vc] = np.maximum(
-        input1[:src0_vr, :src0_vc],
-        np.broadcast_to(input2[:src1_vr, 0:1], (dst_vr, dst_vc)),
+        input1[:src0_vr, :src0_vc], np.broadcast_to(input2[:src1_vr, 0:1], (dst_vr, dst_vc))
     ).astype(dtype, copy=False)
 
     save_case_data(case["name"], {"input1": input1, "input2": input2, "golden": golden})

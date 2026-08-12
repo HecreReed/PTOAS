@@ -107,9 +107,7 @@ def main() -> None:
     if "pto.vmi.vci" not in mlir:
         raise SystemExit("FAIL: expected pto.vmi.vci in frontend MLIR")
     if f"group = {group}" not in mlir and f"{{group = {group}" not in mlir:
-        raise SystemExit(
-            f"FAIL: expected group={group} in frontend MLIR:\n{mlir[:1500]}"
-        )
+        raise SystemExit(f"FAIL: expected group={group} in frontend MLIR:\n{mlir[:1500]}")
 
     torch_dtype = torch.int32 if np_dtype == np.int32 else torch.int16
     out = torch.zeros(expect.shape, dtype=torch_dtype, device=_DEVICE)
@@ -126,17 +124,13 @@ def main() -> None:
         s = size // group
         print(f"FAIL case={args.case} num_mismatch={len(diff)}")
         print(f"  first bad lane={j} got={got[i, j]} expected={expect[i, j]}")
-        print(
-            f"  got groups={[got[0, g * s : (g + 1) * s].tolist() for g in range(group)]}"
-        )
-        print(
-            f"  exp groups={[expect[0, g * s : (g + 1) * s].tolist() for g in range(group)]}"
-        )
+        print(f"  got groups={[got[0, g * s:(g + 1) * s].tolist() for g in range(group)]}")
+        print(f"  exp groups={[expect[0, g * s:(g + 1) * s].tolist() for g in range(group)]}")
         raise SystemExit(1)
 
     s = size // group
     preview = " | ".join(
-        f"g{g}={got[0, g * s : g * s + min(4, s)].tolist()}" for g in range(group)
+        f"g{g}={got[0, g * s:g * s + min(4, s)].tolist()}" for g in range(group)
     )
     print(
         f"PASS case={args.case} size={size} group={group} "

@@ -24,7 +24,6 @@ SOC_VERSION_MAP = {
     "a5": "Ascend950PR_9599",
 }
 
-
 def discover_testcases(testcase_root):
     testcases = []
     for entry in sorted(os.listdir(testcase_root)):
@@ -42,9 +41,7 @@ def load_case_names(testcase_root, testcase):
     if not os.path.isfile(cases_path):
         raise FileNotFoundError(f"cases.py not found: {cases_path}")
 
-    spec = importlib.util.spec_from_file_location(
-        f"_tilelang_{testcase}_cases", cases_path
-    )
+    spec = importlib.util.spec_from_file_location(f"_tilelang_{testcase}_cases", cases_path)
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return [case["name"] for case in module.CASES]
@@ -73,62 +70,43 @@ def parse_args():
         description="Run all TileLang ST testcases for CI or local batch validation."
     )
     parser.add_argument(
-        "-r",
-        "--run-mode",
-        default="sim",
+        "-r", "--run-mode", default="sim",
         help="Run mode: sim or npu (default: sim)",
     )
     parser.add_argument(
-        "-v",
-        "--soc-version",
-        default="a5",
+        "-v", "--soc-version", default="a5",
         help="SoC version: a5 (default: a5)",
     )
     parser.add_argument(
-        "-p",
-        "--ptoas-bin",
-        default=None,
+        "-p", "--ptoas-bin", default=None,
         help="Path to ptoas binary (auto-detected if omitted)",
     )
     parser.add_argument(
-        "-t",
-        "--testcase",
-        action="append",
-        default=[],
+        "-t", "--testcase", action="append", default=[],
         help="Run only selected testcase(s). Can be passed multiple times.",
     )
     parser.add_argument(
-        "-w",
-        "--without-build",
-        action="store_true",
+        "-w", "--without-build", action="store_true",
         help="Skip build and reuse the existing build directory.",
     )
     parser.add_argument(
-        "--fail-fast",
-        action="store_true",
+        "--fail-fast", action="store_true",
         help="Stop immediately after the first failed testcase.",
     )
     parser.add_argument(
-        "--list",
-        action="store_true",
+        "--list", action="store_true",
         help="List discovered testcases and exit.",
     )
     parser.add_argument(
-        "-j",
-        "--jobs",
-        type=int,
-        default=1,
+        "-j", "--jobs", type=int, default=1,
         help="Number of testcases to run in parallel after the shared build (default: 1).",
     )
     parser.add_argument(
-        "--build-jobs",
-        type=int,
-        default=None,
+        "--build-jobs", type=int, default=None,
         help="Maximum parallel jobs for the shared CMake build (default: host CPU count).",
     )
     parser.add_argument(
-        "--smoke",
-        action="store_true",
+        "--smoke", action="store_true",
         help="Run only a representative smoke subset of cases for each testcase.",
     )
     return parser.parse_args()
@@ -155,27 +133,16 @@ def resolve_selected_testcases(all_testcases, requested):
 
 
 def run_testcase_subprocess(
-    run_st_script_path,
-    run_mode,
-    soc_version,
-    ptoas_bin,
-    target_dir,
-    testcase,
-    case_filters=None,
+    run_st_script_path, run_mode, soc_version, ptoas_bin, target_dir, testcase, case_filters=None
 ):
     command = [
         sys.executable,
         run_st_script_path,
-        "-r",
-        run_mode,
-        "-v",
-        soc_version,
-        "-t",
-        testcase,
-        "-p",
-        ptoas_bin,
-        "--target-dir",
-        target_dir,
+        "-r", run_mode,
+        "-v", soc_version,
+        "-t", testcase,
+        "-p", ptoas_bin,
+        "--target-dir", target_dir,
         "-w",
     ]
     for case_filter in case_filters or []:
@@ -285,9 +252,7 @@ def main():
         if args.jobs == 1:
             for index, testcase in enumerate(selected_testcases, start=1):
                 case_filters = resolve_case_filters(testcase_root, testcase, args.smoke)
-                smoke_case_names = resolve_smoke_case_names(
-                    testcase_root, testcase, args.smoke
-                )
+                smoke_case_names = resolve_smoke_case_names(testcase_root, testcase, args.smoke)
                 print(f"[INFO] [{index}/{total}] running testcase: {testcase}")
                 if smoke_case_names:
                     print(f"[INFO] smoke cases: {', '.join(smoke_case_names)}")
@@ -304,17 +269,11 @@ def main():
         else:
             print(f"[INFO] running testcases in parallel with jobs={args.jobs}")
             max_workers = min(args.jobs, total)
-            with concurrent.futures.ThreadPoolExecutor(
-                max_workers=max_workers
-            ) as executor:
+            with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
                 future_to_testcase = {}
                 for index, testcase in enumerate(selected_testcases, start=1):
-                    case_filters = resolve_case_filters(
-                        testcase_root, testcase, args.smoke
-                    )
-                    smoke_case_names = resolve_smoke_case_names(
-                        testcase_root, testcase, args.smoke
-                    )
+                    case_filters = resolve_case_filters(testcase_root, testcase, args.smoke)
+                    smoke_case_names = resolve_smoke_case_names(testcase_root, testcase, args.smoke)
                     print(f"[INFO] [{index}/{total}] queue testcase: {testcase}")
                     if smoke_case_names:
                         print(f"[INFO] smoke cases: {', '.join(smoke_case_names)}")
@@ -348,9 +307,7 @@ def main():
                     print(f"[INFO] ===== testcase {testcase} output end =====")
 
                     if returncode != 0:
-                        failures.append(
-                            (testcase, f"subprocess exited with {returncode}")
-                        )
+                        failures.append((testcase, f"subprocess exited with {returncode}"))
                         print(f"[ERROR] testcase failed: {testcase}")
                         if args.fail_fast:
                             break
@@ -363,9 +320,7 @@ def main():
 
     passed = len(selected_testcases) - len(failures)
     print("[INFO] TileLang ST summary")
-    print(
-        f"[INFO] passed={passed} failed={len(failures)} total={len(selected_testcases)}"
-    )
+    print(f"[INFO] passed={passed} failed={len(failures)} total={len(selected_testcases)}")
     if failures:
         for testcase, reason in failures:
             print(f"[INFO] failed testcase: {testcase} ({reason})")

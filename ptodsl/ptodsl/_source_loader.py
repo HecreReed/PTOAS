@@ -46,9 +46,7 @@ class SourceModuleLoader:
     def source(self) -> str:
         source = self._module_spec.jit_source
         if source is None:
-            raise RuntimeError(
-                "source-backed loader requires KernelModuleSpec.jit_source"
-            )
+            raise RuntimeError("source-backed loader requires KernelModuleSpec.jit_source")
         return source
 
     def cache_identity(self) -> tuple:
@@ -112,10 +110,8 @@ class SourceModuleLoader:
         stripped = source.lstrip()
         if "\n" in source or "\r" in source:
             return True
-        return (
-            stripped.startswith("module {")
-            or stripped.startswith("builtin.module {")
-            or ("module {" in stripped and "func.func @" in stripped)
+        return stripped.startswith("module {") or stripped.startswith("builtin.module {") or (
+            "module {" in stripped and "func.func @" in stripped
         )
 
     def _resolve_source(self) -> tuple[Path | None, str, str]:
@@ -128,9 +124,7 @@ class SourceModuleLoader:
         try:
             return resolved_path.read_text(encoding="utf-8")
         except FileNotFoundError as exc:
-            raise jit_source_file_error(
-                self.source, resolved_path, "file does not exist"
-            ) from exc
+            raise jit_source_file_error(self.source, resolved_path, "file does not exist") from exc
         except OSError as exc:
             raise jit_source_file_error(self.source, resolved_path, str(exc)) from exc
 
@@ -160,10 +154,7 @@ class SourceModuleLoader:
 
     def _verify_entry_abi(self, entry, resolved_path: Path | None) -> None:
         source_label = _source_location_label(self.source, resolved_path)
-        expected = tuple(
-            str(type_obj)
-            for type_obj in self._kernel_signature.compute_entry_arg_types()
-        )
+        expected = tuple(str(type_obj) for type_obj in self._kernel_signature.compute_entry_arg_types())
         actual = tuple(str(type_obj) for type_obj in entry.type.inputs)
         results = tuple(str(type_obj) for type_obj in entry.type.results)
 

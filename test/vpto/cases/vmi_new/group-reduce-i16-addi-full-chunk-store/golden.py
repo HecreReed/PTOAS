@@ -17,7 +17,9 @@ def generate(output_dir: Path) -> None:
     src = (np.arange(512, dtype=np.int32) * 257 + 30000).astype(np.int16)
     dst = np.full(16, -777, dtype=np.int16)
     golden = dst.copy()
-    golden[:2] = np.sum(src.reshape(2, 256), axis=1, dtype=np.int64).astype(np.int16)
+    golden[:2] = np.sum(src.reshape(2, 256), axis=1, dtype=np.int64).astype(
+        np.int16
+    )
 
     output_dir.mkdir(parents=True, exist_ok=True)
     src.tofile(output_dir / "v1.bin")

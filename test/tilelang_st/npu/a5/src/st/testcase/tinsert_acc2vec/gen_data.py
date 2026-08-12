@@ -8,6 +8,7 @@
 
 # coding=utf-8
 
+import os
 import numpy as np
 
 from cases import CASES

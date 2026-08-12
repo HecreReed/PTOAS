@@ -15,9 +15,7 @@ def _has_single_output_row(dst_valid_shape=(), **_):
     return len(dst_valid_shape) == 2 and dst_valid_shape[0] == 1
 
 
-def _ub_or_vec_row_major(
-    operand_memory_spaces, operand_b_layouts, operand_s_layouts, **_
-):
+def _ub_or_vec_row_major(operand_memory_spaces, operand_b_layouts, operand_s_layouts, **_):
     return (
         all(space in {"ub", "vec"} for space in operand_memory_spaces)
         and all(layout == "row_major" for layout in operand_b_layouts)

@@ -17,9 +17,7 @@ CASES = [
     {
         "name": "acc2mat_f16_16x16",
         "kernel": "TINSERT_acc2mat_f16_16x16",
-        "m": 16,
-        "k": 16,
-        "n": 16,
+        "m": 16, "k": 16, "n": 16,
         "dtype": np.float16,
         "dtype_out": np.float32,
         "id_dtype": np.float16,
@@ -30,9 +28,7 @@ CASES = [
     {
         "name": "acc2mat_bf16_16x16",
         "kernel": "TINSERT_acc2mat_bf16_16x16",
-        "m": 16,
-        "k": 16,
-        "n": 16,
+        "m": 16, "k": 16, "n": 16,
         "dtype": np.float16,
         "dtype_out": np.float32,
         "id_dtype": np.uint16,

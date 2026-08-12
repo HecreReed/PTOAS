@@ -20,79 +20,70 @@
 
 using namespace PtoTestCommon;
 
-void LaunchTLOAD_ND_f32_16x64(float* src, float* dst, void* stream);
-void LaunchTLOAD_DN_f32_16x64(float* src, float* dst, void* stream);
-void LaunchTLOAD_NZ_f32_128x128(float* src, float* dst, void* stream);
-void LaunchTLOAD_ND_PAD_ZERO_f32_16x64(float* src, float* dst, void* stream);
-void LaunchTLOAD_DN_PAD_MAX_f32_16x64(float* src, float* dst, void* stream);
-void LaunchTLOAD_NZ_PAD_MIN_f32_128x128(float* src, float* dst, void* stream);
-void LaunchTLOAD_ND_f8e4m3_16x64(uint8_t* src, uint8_t* dst, void* stream);
-void LaunchTLOAD_ND_hif8_16x64(uint8_t* src, uint8_t* dst, void* stream);
+void LaunchTLOAD_ND_f32_16x64(float *src, float *dst, void *stream);
+void LaunchTLOAD_DN_f32_16x64(float *src, float *dst, void *stream);
+void LaunchTLOAD_NZ_f32_128x128(float *src, float *dst, void *stream);
+void LaunchTLOAD_ND_PAD_ZERO_f32_16x64(float *src, float *dst, void *stream);
+void LaunchTLOAD_DN_PAD_MAX_f32_16x64(float *src, float *dst, void *stream);
+void LaunchTLOAD_NZ_PAD_MIN_f32_128x128(float *src, float *dst, void *stream);
+void LaunchTLOAD_ND_f8e4m3_16x64(uint8_t *src, uint8_t *dst, void *stream);
+void LaunchTLOAD_ND_hif8_16x64(uint8_t *src, uint8_t *dst, void *stream);
 
-using LaunchFn = void (*)(void*, void*, void*);
+using LaunchFn = void (*)(void *, void *, void *);
 
-static void RunTLOAD_ND_f32_16x64(void* src, void* dst, void* stream)
-{
-    LaunchTLOAD_ND_f32_16x64(static_cast<float*>(src), static_cast<float*>(dst), stream);
+static void RunTLOAD_ND_f32_16x64(void *src, void *dst, void *stream) {
+    LaunchTLOAD_ND_f32_16x64(static_cast<float *>(src), static_cast<float *>(dst), stream);
 }
 
-static void RunTLOAD_DN_f32_16x64(void* src, void* dst, void* stream)
-{
-    LaunchTLOAD_DN_f32_16x64(static_cast<float*>(src), static_cast<float*>(dst), stream);
+static void RunTLOAD_DN_f32_16x64(void *src, void *dst, void *stream) {
+    LaunchTLOAD_DN_f32_16x64(static_cast<float *>(src), static_cast<float *>(dst), stream);
 }
 
-static void RunTLOAD_NZ_f32_128x128(void* src, void* dst, void* stream)
-{
-    LaunchTLOAD_NZ_f32_128x128(static_cast<float*>(src), static_cast<float*>(dst), stream);
+static void RunTLOAD_NZ_f32_128x128(void *src, void *dst, void *stream) {
+    LaunchTLOAD_NZ_f32_128x128(static_cast<float *>(src), static_cast<float *>(dst), stream);
 }
 
-static void RunTLOAD_ND_PAD_ZERO_f32_16x64(void* src, void* dst, void* stream)
-{
-    LaunchTLOAD_ND_PAD_ZERO_f32_16x64(static_cast<float*>(src), static_cast<float*>(dst), stream);
+static void RunTLOAD_ND_PAD_ZERO_f32_16x64(void *src, void *dst, void *stream) {
+    LaunchTLOAD_ND_PAD_ZERO_f32_16x64(static_cast<float *>(src), static_cast<float *>(dst), stream);
 }
 
-static void RunTLOAD_DN_PAD_MAX_f32_16x64(void* src, void* dst, void* stream)
-{
-    LaunchTLOAD_DN_PAD_MAX_f32_16x64(static_cast<float*>(src), static_cast<float*>(dst), stream);
+static void RunTLOAD_DN_PAD_MAX_f32_16x64(void *src, void *dst, void *stream) {
+    LaunchTLOAD_DN_PAD_MAX_f32_16x64(static_cast<float *>(src), static_cast<float *>(dst), stream);
 }
 
-static void RunTLOAD_NZ_PAD_MIN_f32_128x128(void* src, void* dst, void* stream)
-{
-    LaunchTLOAD_NZ_PAD_MIN_f32_128x128(static_cast<float*>(src), static_cast<float*>(dst), stream);
+static void RunTLOAD_NZ_PAD_MIN_f32_128x128(void *src, void *dst, void *stream) {
+    LaunchTLOAD_NZ_PAD_MIN_f32_128x128(static_cast<float *>(src), static_cast<float *>(dst), stream);
 }
 
-static void RunTLOAD_ND_f8e4m3_16x64(void* src, void* dst, void* stream)
-{
-    LaunchTLOAD_ND_f8e4m3_16x64(static_cast<uint8_t*>(src), static_cast<uint8_t*>(dst), stream);
+static void RunTLOAD_ND_f8e4m3_16x64(void *src, void *dst, void *stream) {
+    LaunchTLOAD_ND_f8e4m3_16x64(static_cast<uint8_t *>(src), static_cast<uint8_t *>(dst), stream);
 }
 
-static void RunTLOAD_ND_hif8_16x64(void* src, void* dst, void* stream)
-{
-    LaunchTLOAD_ND_hif8_16x64(static_cast<uint8_t*>(src), static_cast<uint8_t*>(dst), stream);
+static void RunTLOAD_ND_hif8_16x64(void *src, void *dst, void *stream) {
+    LaunchTLOAD_ND_hif8_16x64(static_cast<uint8_t *>(src), static_cast<uint8_t *>(dst), stream);
 }
 
 struct TestCase {
-    const char* name;
-    LaunchFn launch;
-    size_t rows;
-    size_t cols;
-    size_t elemSize;
+    const char *name;
+    LaunchFn    launch;
+    size_t      rows;
+    size_t      cols;
+    size_t      elemSize;
 };
 
 static const TestCase kCases[] = {
-    {"nd_f32_16x64", RunTLOAD_ND_f32_16x64, 16, 64, sizeof(float)},
-    {"dn_f32_16x64", RunTLOAD_DN_f32_16x64, 16, 64, sizeof(float)},
-    {"nz_f32_128x128", RunTLOAD_NZ_f32_128x128, 128, 128, sizeof(float)},
-    {"nd_f8e4m3_16x64", RunTLOAD_ND_f8e4m3_16x64, 16, 64, sizeof(uint8_t)},
-    {"nd_hif8_16x64", RunTLOAD_ND_hif8_16x64, 16, 64, sizeof(uint8_t)},
+    {"nd_f32_16x64",    RunTLOAD_ND_f32_16x64,    16, 64,  sizeof(float)},
+    {"dn_f32_16x64",    RunTLOAD_DN_f32_16x64,    16, 64,  sizeof(float)},
+    {"nz_f32_128x128",  RunTLOAD_NZ_f32_128x128,  128, 128, sizeof(float)},
+    {"nd_f8e4m3_16x64", RunTLOAD_ND_f8e4m3_16x64, 16, 64,  sizeof(uint8_t)},
+    {"nd_hif8_16x64",   RunTLOAD_ND_hif8_16x64,   16, 64,  sizeof(uint8_t)},
     {"nd_pad_zero_f32_16x64", RunTLOAD_ND_PAD_ZERO_f32_16x64, 16, 64, sizeof(float)},
     {"dn_pad_max_f32_16x64", RunTLOAD_DN_PAD_MAX_f32_16x64, 16, 64, sizeof(float)},
     {"nz_pad_min_f32_128x128", RunTLOAD_NZ_PAD_MIN_f32_128x128, 128, 128, sizeof(float)},
 };
 static constexpr size_t kNumCases = sizeof(kCases) / sizeof(kCases[0]);
 
-static int RunCase(const TestCase& tc, aclrtStream stream)
-{
+static int RunCase(const TestCase &tc, aclrtStream stream) {
     int rc = 0;
     const size_t elemCount = tc.rows * tc.cols;
     const size_t fileSize = elemCount * tc.elemSize;
@@ -102,13 +93,13 @@ static int RunCase(const TestCase& tc, aclrtStream stream)
     std::string caseDir = std::string("./") + tc.name;
     size_t inputFileSize = fileSize;
 
-    void* srcHost = nullptr;
-    void* dstHost = nullptr;
-    void* srcDevice = nullptr;
-    void* dstDevice = nullptr;
+    void *srcHost = nullptr;
+    void *dstHost = nullptr;
+    void *srcDevice = nullptr;
+    void *dstDevice = nullptr;
 
-    aclrtMallocHost((void**)(&srcHost), fileSize);
-    aclrtMallocHost((void**)(&dstHost), fileSize);
+    aclrtMallocHost((void **)(&srcHost), fileSize);
+    aclrtMallocHost((void **)(&dstHost), fileSize);
     aclrtMalloc(&srcDevice, fileSize, ACL_MEM_MALLOC_HUGE_FIRST);
     aclrtMalloc(&dstDevice, fileSize, ACL_MEM_MALLOC_HUGE_FIRST);
 
@@ -143,9 +134,8 @@ static int RunCase(const TestCase& tc, aclrtStream stream)
     return rc;
 }
 
-int main(int argc, char* argv[])
-{
-    const char* caseFilter = (argc > 1) ? argv[1] : nullptr;
+int main(int argc, char *argv[]) {
+    const char *caseFilter = (argc > 1) ? argv[1] : nullptr;
 
     int rc = 0;
     bool matchedCase = (caseFilter == nullptr);
@@ -153,7 +143,7 @@ int main(int argc, char* argv[])
     aclrtStream stream = nullptr;
 
     aclInit(nullptr);
-    if (const char* envDevice = std::getenv("ACL_DEVICE_ID")) {
+    if (const char *envDevice = std::getenv("ACL_DEVICE_ID")) {
         deviceId = std::atoi(envDevice);
     }
     aclrtSetDevice(deviceId);

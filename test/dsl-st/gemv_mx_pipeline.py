@@ -42,7 +42,7 @@ def _decode_e4m3fn(values):
     out = np.zeros(values.shape, dtype=np.float32)
     subnormal = exponent == 0
     normal = (exponent != 0) & (exponent != 0x0F)
-    out[subnormal] = mantissa[subnormal].astype(np.float32) * (2.0**-9)
+    out[subnormal] = mantissa[subnormal].astype(np.float32) * (2.0 ** -9)
     out[normal] = (1.0 + mantissa[normal].astype(np.float32) / 8.0) * np.exp2(
         exponent[normal].astype(np.int32) - 7
     )
@@ -58,7 +58,7 @@ def _decode_e5m2(values):
     out = np.zeros(values.shape, dtype=np.float32)
     subnormal = exponent == 0
     normal = (exponent != 0) & (exponent != 0x1F)
-    out[subnormal] = mantissa[subnormal].astype(np.float32) * (2.0**-16)
+    out[subnormal] = mantissa[subnormal].astype(np.float32) * (2.0 ** -16)
     out[normal] = (1.0 + mantissa[normal].astype(np.float32) / 4.0) * np.exp2(
         exponent[normal].astype(np.int32) - 15
     )
@@ -75,9 +75,7 @@ def _pack_left_scale(scale):
 def _pack_right_scale(scale):
     padded = np.zeros((SCALE_K, N_STORAGE), dtype=np.uint8)
     padded[:SCALE_K, :N] = scale
-    packed = padded.reshape((SCALE_K // 2, 2, N_STORAGE // 16, 16)).transpose(
-        2, 0, 3, 1
-    )
+    packed = padded.reshape((SCALE_K // 2, 2, N_STORAGE // 16, 16)).transpose(2, 0, 3, 1)
     return packed.reshape(SCALE_K, N_STORAGE)
 
 
@@ -183,16 +181,7 @@ def _alloc_bias_tile():
     )
 
 
-def _stage_fp8_tiles(
-    a_ptr,
-    b_ptr,
-    a_scale_ptr,
-    b_scale_ptr,
-    lhs_tile,
-    rhs_tile,
-    bias_ptr=None,
-    bias_tile=None,
-):
+def _stage_fp8_tiles(a_ptr, b_ptr, a_scale_ptr, b_scale_ptr, lhs_tile, rhs_tile, bias_ptr=None, bias_tile=None):
     a_l1_ptr = pto.castptr(pto.ui64(L1_A_DATA_ADDR), pto.ptr(pto.f8e4m3, "mat"))
     a_scale_l1_ptr = pto.castptr(pto.ui64(L1_A_SCALE_ADDR), pto.ptr(pto.f8e4m3, "mat"))
     b_l1_ptr = pto.castptr(pto.ui64(L1_B_DATA_ADDR), pto.ptr(pto.f8e5m2, "mat"))
@@ -284,9 +273,7 @@ def gemv_mx_acc_fp8_pipeline_kernel(
     lhs_tile, lhs_scale_tile, rhs_tile, rhs_scale_tile, dst_tile = _alloc_common_tiles()
     _stage_fp8_tiles(a_ptr, b_ptr, a_scale_ptr, b_scale_ptr, lhs_tile, rhs_tile)
     pto.tile.gemv_mx(lhs_tile, lhs_scale_tile, rhs_tile, rhs_scale_tile, dst_tile)
-    pto.tile.gemv_mx_acc(
-        dst_tile, lhs_tile, lhs_scale_tile, rhs_tile, rhs_scale_tile, dst_tile
-    )
+    pto.tile.gemv_mx_acc(dst_tile, lhs_tile, lhs_scale_tile, rhs_tile, rhs_scale_tile, dst_tile)
     _writeback_output(dst_tile, out_ptr)
 
 
@@ -317,9 +304,7 @@ def gemv_mx_bias_fp8_pipeline_kernel(
         bias_ptr=bias_ptr,
         bias_tile=bias_tile,
     )
-    pto.tile.gemv_mx_bias(
-        lhs_tile, lhs_scale_tile, rhs_tile, rhs_scale_tile, bias_tile, dst_tile
-    )
+    pto.tile.gemv_mx_bias(lhs_tile, lhs_scale_tile, rhs_tile, rhs_scale_tile, bias_tile, dst_tile)
     _writeback_output(dst_tile, out_ptr)
 
 

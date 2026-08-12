@@ -22,41 +22,45 @@ using namespace PtoTestCommon;
 
 // Kernel launch wrapper (defined in launch.cpp)
 // Inplace kernel takes single buffer pointer
-void LaunchTFILLPAD_INPLACE_f32_64x16_noexpand(float* buf, float* dummy, void* stream);
-void LaunchTFILLPAD_INPLACE_f32_260x16_noexpand(float* buf, float* dummy, void* stream);
+void LaunchTFILLPAD_INPLACE_f32_64x16_noexpand(float *buf, float *dummy, void *stream);
+void LaunchTFILLPAD_INPLACE_f32_260x16_noexpand(float *buf, float *dummy, void *stream);
 
 enum class DataType { F32 };
 
 struct TestCase {
-    const char* name;
-    DataType dtype;
-    void (*launch)(float*, float*, void*);
-    size_t rows;
-    size_t cols;
-    size_t validRows;
-    size_t validCols;
-    size_t elemSize;
+    const char *name;
+    DataType    dtype;
+    void (*launch)(float *, float *, void *);
+    size_t      rows;
+    size_t      cols;
+    size_t      validRows;
+    size_t      validCols;
+    size_t      elemSize;
 };
 
 static const TestCase kCases[] = {
-    {"f32_64x16_noexpand", DataType::F32, LaunchTFILLPAD_INPLACE_f32_64x16_noexpand, 64, 16, 64, 16, sizeof(float)},
-    {"f32_260x16_noexpand", DataType::F32, LaunchTFILLPAD_INPLACE_f32_260x16_noexpand, 260, 16, 260, 16, sizeof(float)},
+{"f32_64x16_noexpand", DataType::F32,
+     LaunchTFILLPAD_INPLACE_f32_64x16_noexpand,
+     64, 16, 64, 16, sizeof(float)},
+{"f32_260x16_noexpand", DataType::F32,
+     LaunchTFILLPAD_INPLACE_f32_260x16_noexpand,
+     260, 16, 260, 16, sizeof(float)},
 };
 static constexpr size_t kNumCases = sizeof(kCases) / sizeof(kCases[0]);
 
-static int RunCase(const TestCase& tc, int deviceId, aclrtStream stream)
-{
+static int RunCase(const TestCase &tc, int deviceId, aclrtStream stream) {
     int rc = 0;
     size_t elemCount = tc.rows * tc.cols;
-    size_t fileSize = elemCount * tc.elemSize;
+    size_t fileSize  = elemCount * tc.elemSize;
 
-    std::printf("[INFO] === case: %s (%zux%zu, inplace) ===\n", tc.name, tc.validRows, tc.validCols);
+    std::printf("[INFO] === case: %s (%zux%zu, inplace) ===\n",
+                tc.name, tc.validRows, tc.validCols);
 
     std::string caseDir = std::string("./") + tc.name;
 
     // Single buffer for inplace operation
-    void* bufHost = nullptr;
-    void* bufDevice = nullptr;
+    void *bufHost = nullptr;
+    void *bufDevice = nullptr;
 
     aclrtMallocHost(&bufHost, fileSize);
     aclrtMalloc(&bufDevice, fileSize, ACL_MEM_MALLOC_HUGE_FIRST);
@@ -73,7 +77,7 @@ static int RunCase(const TestCase& tc, int deviceId, aclrtStream stream)
 
         // Run inplace kernel (src == dst = bufDevice)
         // Note: launch wrapper takes two args but inplace kernel uses same physical address
-        tc.launch((float*)bufDevice, (float*)bufDevice, stream);
+        tc.launch((float *)bufDevice, (float *)bufDevice, stream);
 
         aclrtSynchronizeStream(stream);
         // Copy result back (same buffer contains output)
@@ -95,16 +99,15 @@ static int RunCase(const TestCase& tc, int deviceId, aclrtStream stream)
     return rc;
 }
 
-int main(int argc, char* argv[])
-{
-    const char* caseFilter = (argc > 1) ? argv[1] : nullptr;
+int main(int argc, char *argv[]) {
+    const char *caseFilter = (argc > 1) ? argv[1] : nullptr;
 
     int rc = 0;
     int deviceId = 0;
     aclrtStream stream = nullptr;
 
     aclInit(nullptr);
-    if (const char* envDevice = std::getenv("ACL_DEVICE_ID")) {
+    if (const char *envDevice = std::getenv("ACL_DEVICE_ID")) {
         deviceId = std::atoi(envDevice);
     }
     aclrtSetDevice(deviceId);

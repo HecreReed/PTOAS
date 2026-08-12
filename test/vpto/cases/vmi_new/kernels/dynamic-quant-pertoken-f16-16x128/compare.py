@@ -24,9 +24,7 @@ def main() -> None:
         if golden_scale.shape != scale.shape:
             idx = -1
         else:
-            diff = np.nonzero(
-                ~np.isclose(golden_scale, scale, rtol=1.0e-6, atol=1.0e-6)
-            )[0]
+            diff = np.nonzero(~np.isclose(golden_scale, scale, rtol=1.0e-6, atol=1.0e-6))[0]
             idx = int(diff[0]) if diff.size else -1
         print(
             f"[ERROR] scale compare failed idx={idx} "

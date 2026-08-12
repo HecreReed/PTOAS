@@ -10,6 +10,4 @@
 from ._expand_binary import register_column_expand_expdif
 
 
-template_tcolexpandexpdif_f32, template_tcolexpandexpdif_f16 = (
-    register_column_expand_expdif()
-)
+template_tcolexpandexpdif_f32, template_tcolexpandexpdif_f16 = register_column_expand_expdif()

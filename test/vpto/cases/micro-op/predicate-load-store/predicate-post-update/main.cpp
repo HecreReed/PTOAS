@@ -14,69 +14,77 @@
 
 using namespace PtoTestCommon;
 
-void LaunchPredicatePostUpdate(unsigned char* input, unsigned char* output, void* stream);
+void LaunchPredicatePostUpdate(unsigned char *input, unsigned char *output,
+                               void *stream);
 
 namespace {
 constexpr size_t kBufferBytes = 128;
 } // namespace
 
-#define ACL_CHECK(expr)                                                                                                \
-    do {                                                                                                               \
-        const aclError ret = (expr);                                                                                   \
-        if (ret != ACL_SUCCESS) {                                                                                      \
-            std::fprintf(stderr, "[ERROR] %s failed: %d (%s:%d)\n", #expr, static_cast<int>(ret), __FILE__, __LINE__); \
-            rc = 1;                                                                                                    \
-            goto cleanup;                                                                                              \
-        }                                                                                                              \
-    } while (0)
+#define ACL_CHECK(expr)                                                        \
+  do {                                                                         \
+    const aclError ret = (expr);                                               \
+    if (ret != ACL_SUCCESS) {                                                  \
+      std::fprintf(stderr, "[ERROR] %s failed: %d (%s:%d)\n", #expr,           \
+                   static_cast<int>(ret), __FILE__, __LINE__);                 \
+      rc = 1;                                                                  \
+      goto cleanup;                                                            \
+    }                                                                          \
+  } while (0)
 
-int main()
-{
-    unsigned char* inputHost = nullptr;
-    unsigned char* outputHost = nullptr;
-    unsigned char* inputDevice = nullptr;
-    unsigned char* outputDevice = nullptr;
-    aclrtStream stream = nullptr;
-    int rc = 0;
-    bool aclInited = false;
-    bool deviceSet = false;
-    int deviceId = 0;
-    size_t inputSize = kBufferBytes;
-    size_t outputSize = kBufferBytes;
+int main() {
+  unsigned char *inputHost = nullptr;
+  unsigned char *outputHost = nullptr;
+  unsigned char *inputDevice = nullptr;
+  unsigned char *outputDevice = nullptr;
+  aclrtStream stream = nullptr;
+  int rc = 0;
+  bool aclInited = false;
+  bool deviceSet = false;
+  int deviceId = 0;
+  size_t inputSize = kBufferBytes;
+  size_t outputSize = kBufferBytes;
 
-    ACL_CHECK(aclInit(nullptr));
-    aclInited = true;
-    if (const char* envDevice = std::getenv("ACL_DEVICE_ID"))
-        deviceId = std::atoi(envDevice);
-    ACL_CHECK(aclrtSetDevice(deviceId));
-    deviceSet = true;
-    ACL_CHECK(aclrtCreateStream(&stream));
+  ACL_CHECK(aclInit(nullptr));
+  aclInited = true;
+  if (const char *envDevice = std::getenv("ACL_DEVICE_ID"))
+    deviceId = std::atoi(envDevice);
+  ACL_CHECK(aclrtSetDevice(deviceId));
+  deviceSet = true;
+  ACL_CHECK(aclrtCreateStream(&stream));
 
-    ACL_CHECK(aclrtMallocHost(reinterpret_cast<void**>(&inputHost), kBufferBytes));
-    ACL_CHECK(aclrtMallocHost(reinterpret_cast<void**>(&outputHost), kBufferBytes));
-    ACL_CHECK(aclrtMalloc(reinterpret_cast<void**>(&inputDevice), kBufferBytes, ACL_MEM_MALLOC_HUGE_FIRST));
-    ACL_CHECK(aclrtMalloc(reinterpret_cast<void**>(&outputDevice), kBufferBytes, ACL_MEM_MALLOC_HUGE_FIRST));
+  ACL_CHECK(
+      aclrtMallocHost(reinterpret_cast<void **>(&inputHost), kBufferBytes));
+  ACL_CHECK(
+      aclrtMallocHost(reinterpret_cast<void **>(&outputHost), kBufferBytes));
+  ACL_CHECK(aclrtMalloc(reinterpret_cast<void **>(&inputDevice), kBufferBytes,
+                        ACL_MEM_MALLOC_HUGE_FIRST));
+  ACL_CHECK(aclrtMalloc(reinterpret_cast<void **>(&outputDevice), kBufferBytes,
+                        ACL_MEM_MALLOC_HUGE_FIRST));
 
-    ReadFile("./input.bin", inputSize, inputHost, kBufferBytes);
-    ReadFile("./output.bin", outputSize, outputHost, kBufferBytes);
-    ACL_CHECK(aclrtMemcpy(inputDevice, kBufferBytes, inputHost, kBufferBytes, ACL_MEMCPY_HOST_TO_DEVICE));
-    ACL_CHECK(aclrtMemcpy(outputDevice, kBufferBytes, outputHost, kBufferBytes, ACL_MEMCPY_HOST_TO_DEVICE));
+  ReadFile("./input.bin", inputSize, inputHost, kBufferBytes);
+  ReadFile("./output.bin", outputSize, outputHost, kBufferBytes);
+  ACL_CHECK(aclrtMemcpy(inputDevice, kBufferBytes, inputHost, kBufferBytes,
+                        ACL_MEMCPY_HOST_TO_DEVICE));
+  ACL_CHECK(aclrtMemcpy(outputDevice, kBufferBytes, outputHost, kBufferBytes,
+                        ACL_MEMCPY_HOST_TO_DEVICE));
 
-    LaunchPredicatePostUpdate(inputDevice, outputDevice, stream);
-    ACL_CHECK(aclrtSynchronizeStream(stream));
-    ACL_CHECK(aclrtMemcpy(outputHost, kBufferBytes, outputDevice, kBufferBytes, ACL_MEMCPY_DEVICE_TO_HOST));
-    WriteFile("./output.bin", outputHost, kBufferBytes);
+  LaunchPredicatePostUpdate(inputDevice, outputDevice, stream);
+  ACL_CHECK(aclrtSynchronizeStream(stream));
+  ACL_CHECK(aclrtMemcpy(outputHost, kBufferBytes, outputDevice, kBufferBytes,
+                        ACL_MEMCPY_DEVICE_TO_HOST));
+  WriteFile("./output.bin", outputHost, kBufferBytes);
 
 cleanup:
-    aclrtFree(inputDevice);
-    aclrtFree(outputDevice);
-    aclrtFreeHost(inputHost);
-    aclrtFreeHost(outputHost);
-    if (stream != nullptr)
-        aclrtDestroyStream(stream);
-    if (deviceSet)
-        aclrtResetDevice(deviceId);
-    if (aclInited)
-        aclFinalize();
-    return rc;
+  aclrtFree(inputDevice);
+  aclrtFree(outputDevice);
+  aclrtFreeHost(inputHost);
+  aclrtFreeHost(outputHost);
+  if (stream != nullptr)
+    aclrtDestroyStream(stream);
+  if (deviceSet)
+    aclrtResetDevice(deviceId);
+  if (aclInited)
+    aclFinalize();
+  return rc;
 }

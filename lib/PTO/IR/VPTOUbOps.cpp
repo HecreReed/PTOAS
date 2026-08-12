@@ -21,34 +21,46 @@ namespace pto {
 // UBSetMaskOp
 //===----------------------------------------------------------------------===//
 
-void UBSetMaskOp::getEffects(SmallVectorImpl<SideEffects::EffectInstance<MemoryEffects::Effect>>& effects)
-{
-    effects.emplace_back(MemoryEffects::Write::get(), SideEffects::DefaultResource::get());
+void UBSetMaskOp::getEffects(
+    SmallVectorImpl<SideEffects::EffectInstance<MemoryEffects::Effect>>
+        &effects) {
+  effects.emplace_back(MemoryEffects::Write::get(),
+                       SideEffects::DefaultResource::get());
 }
 
-LogicalResult UBSetMaskOp::verify() { return success(); }
+LogicalResult UBSetMaskOp::verify() {
+  return success();
+}
 
 //===----------------------------------------------------------------------===//
 // UBSetMaskCountOp
 //===----------------------------------------------------------------------===//
 
-void UBSetMaskCountOp::getEffects(SmallVectorImpl<SideEffects::EffectInstance<MemoryEffects::Effect>>& effects)
-{
-    effects.emplace_back(MemoryEffects::Write::get(), SideEffects::DefaultResource::get());
+void UBSetMaskCountOp::getEffects(
+    SmallVectorImpl<SideEffects::EffectInstance<MemoryEffects::Effect>>
+        &effects) {
+  effects.emplace_back(MemoryEffects::Write::get(),
+                       SideEffects::DefaultResource::get());
 }
 
-LogicalResult UBSetMaskCountOp::verify() { return success(); }
+LogicalResult UBSetMaskCountOp::verify() {
+  return success();
+}
 
 //===----------------------------------------------------------------------===//
 // UBSetMaskNormOp
 //===----------------------------------------------------------------------===//
 
-void UBSetMaskNormOp::getEffects(SmallVectorImpl<SideEffects::EffectInstance<MemoryEffects::Effect>>& effects)
-{
-    effects.emplace_back(MemoryEffects::Write::get(), SideEffects::DefaultResource::get());
+void UBSetMaskNormOp::getEffects(
+    SmallVectorImpl<SideEffects::EffectInstance<MemoryEffects::Effect>>
+        &effects) {
+  effects.emplace_back(MemoryEffects::Write::get(),
+                       SideEffects::DefaultResource::get());
 }
 
-LogicalResult UBSetMaskNormOp::verify() { return success(); }
+LogicalResult UBSetMaskNormOp::verify() {
+  return success();
+}
 
 } // namespace pto
 } // namespace mlir

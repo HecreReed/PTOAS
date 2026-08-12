@@ -46,16 +46,10 @@ def build():
 
                 arg_src, arg_dst = entry.arguments
 
-                tv_src = pto.MakeTensorViewOp(
-                    tv2_f32, arg_src, [c32, c32], [c32, c1]
-                ).result
-                tv_dst = pto.MakeTensorViewOp(
-                    tv2_f32, arg_dst, [c32, c32], [c32, c1]
-                ).result
+                tv_src = pto.MakeTensorViewOp(tv2_f32, arg_src, [c32, c32], [c32, c1]).result
+                tv_dst = pto.MakeTensorViewOp(tv2_f32, arg_dst, [c32, c32], [c32, c1]).result
 
-                sv_src = pto.PartitionViewOp(
-                    tile_view_32, tv_src, offsets=[c0, c0], sizes=[c32, c32]
-                ).result
+                sv_src = pto.PartitionViewOp(tile_view_32, tv_src, offsets=[c0, c0], sizes=[c32, c32]).result
 
                 tb_src = pto.AllocTileOp(tile_buf_32).result
                 tb_dst = pto.AllocTileOp(tile_buf_32).result
@@ -66,9 +60,7 @@ def build():
                 # Floating-point path requires tmp.
                 pto.TPowSOp(tb_src, scale, tb_dst, tmp=tb_tmp)
 
-                sv_dst = pto.PartitionViewOp(
-                    tile_view_32, tv_dst, offsets=[c0, c0], sizes=[c32, c32]
-                ).result
+                sv_dst = pto.PartitionViewOp(tile_view_32, tv_dst, offsets=[c0, c0], sizes=[c32, c32]).result
                 pto.TStoreOp(None, tb_dst, sv_dst)
 
                 func.ReturnOp([])

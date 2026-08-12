@@ -19,9 +19,9 @@ COLS = 32
 def generate(output_dir: Path) -> None:
     src = np.empty((ROWS, COLS), dtype=np.int8)
     for row in range(ROWS):
-        src[row, :] = (
-            (np.arange(COLS, dtype=np.int16) * 3 + row * 5) % 41 - 20
-        ).astype(np.int8)
+        src[row, :] = ((np.arange(COLS, dtype=np.int16) * 3 + row * 5) % 41 - 20).astype(
+            np.int8
+        )
     dst = np.full(ROWS, -777, dtype=np.int32)
     golden = np.sum(src.astype(np.int32), axis=1, dtype=np.int32).astype(np.int32)
 

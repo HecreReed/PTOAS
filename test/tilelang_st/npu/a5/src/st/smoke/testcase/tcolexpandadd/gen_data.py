@@ -32,11 +32,7 @@ for case in CASES:
     src1_row, src1_col = src1_shape
     reps = dst_shape[0] // src1_row
     expanded_src1 = np.tile(src1, (reps, 1))[:, :valid_col]
-    golden[:valid_row, :valid_col] = (
-        src0[:valid_row, :valid_col] + expanded_src1[:valid_row, :valid_col]
-    ).astype(dtype, copy=False)
+    golden[:valid_row, :valid_col] = (src0[:valid_row, :valid_col] + expanded_src1[:valid_row, :valid_col]).astype(dtype, copy=False)
 
     save_case_data(case["name"], {"input0": src0, "input1": src1, "golden": golden})
-    print(
-        f"[INFO] gen_data: {case['name']} src0={src0_shape} src1={src1_shape} dst={dst_shape} valid={valid_shape} dtype={dtype.__name__}"
-    )
+    print(f"[INFO] gen_data: {case['name']} src0={src0_shape} src1={src1_shape} dst={dst_shape} valid={valid_shape} dtype={dtype.__name__}")

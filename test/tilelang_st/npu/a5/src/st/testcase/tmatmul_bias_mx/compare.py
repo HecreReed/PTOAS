@@ -28,12 +28,8 @@ def main():
         m, n = case["m"], case["n"]
         m_padded = case["m_padded"]
         n_padded = case["n_padded"]
-        golden = np.fromfile(
-            os.path.join(case_dir, "golden.bin"), dtype=np.float32
-        ).reshape(m_padded, n_padded)[:m, :n]
-        output = np.fromfile(
-            os.path.join(case_dir, "output.bin"), dtype=np.float32
-        ).reshape(m_padded, n_padded)[:m, :n]
+        golden = np.fromfile(os.path.join(case_dir, "golden.bin"), dtype=np.float32).reshape(m_padded, n_padded)[:m, :n]
+        output = np.fromfile(os.path.join(case_dir, "output.bin"), dtype=np.float32).reshape(m_padded, n_padded)[:m, :n]
 
         ok = result_cmp(golden, output, case["eps"])
         if ok:

@@ -8,7 +8,7 @@ module attributes {pto.target_arch = "a5"} {
     %reinterpret_cast_0 = memref.reinterpret_cast %arg1 to offset: [0], sizes: [%c32, %c32], strides: [%c32, %c1] {layout = #pto.layout<nd>} : memref<?xf32> to memref<?x?xf32, strided<[?, ?], offset: ?>>
     %memspacecast = memref.memory_space_cast %arg0 : memref<?xf32> to memref<?xf32, 1>
     %0 = builtin.unrealized_conversion_cast %memspacecast : memref<?xf32, 1> to !llvm.struct<(ptr<1>, ptr<1>, i64, array<1 x i64>, array<1 x i64>)>
-    %1 = llvm.extractvalue %0[1] : !llvm.struct<(ptr<1>, ptr<1>, i64, array<1 x i64>, array<1 x i64>)>
+    %1 = llvm.extractvalue %0[1] : !llvm.struct<(ptr<1>, ptr<1>, i64, array<1 x i64>, array<1 x i64>)> 
     %2 = llvm.inttoptr %c0_i64 : i64 to !llvm.ptr<6>
     %3 = arith.index_castui %c32 : index to i64
     %c1_i64 = arith.constant 1 : i64
@@ -45,7 +45,7 @@ module attributes {pto.target_arch = "a5"} {
     a5vm.wait_flag["PIPE_V", "PIPE_MTE3", "EVENT_ID0"]
     %memspacecast_1 = memref.memory_space_cast %arg1 : memref<?xf32> to memref<?xf32, 1>
     %13 = builtin.unrealized_conversion_cast %memspacecast_1 : memref<?xf32, 1> to !llvm.struct<(ptr<1>, ptr<1>, i64, array<1 x i64>, array<1 x i64>)>
-    %14 = llvm.extractvalue %13[1] : !llvm.struct<(ptr<1>, ptr<1>, i64, array<1 x i64>, array<1 x i64>)>
+    %14 = llvm.extractvalue %13[1] : !llvm.struct<(ptr<1>, ptr<1>, i64, array<1 x i64>, array<1 x i64>)> 
     %15 = llvm.getelementptr %14[%c0_i64] : (!llvm.ptr<1>, i64) -> !llvm.ptr<1>, i8
     a5vm.set_loop_size_ubtoout %c1_i64, %c1_i64 : i64, i64
     a5vm.set_loop1_stride_ubtoout %c4096_i64, %c4096_i64 : i64, i64

@@ -58,13 +58,10 @@ class StructSurfaceTest(unittest.TestCase):
         with make_context() as ctx, Location.unknown(ctx):
             resolved = descriptor.resolve()
             self.assertEqual(str(resolved), "!pto.struct<i32, !pto.struct<f32, i16>>")
-            self.assertEqual(
-                [str(field) for field in resolved.field_types],
-                [
-                    "i32",
-                    "!pto.struct<f32, i16>",
-                ],
-            )
+            self.assertEqual([str(field) for field in resolved.field_types], [
+                "i32",
+                "!pto.struct<f32, i16>",
+            ])
 
     def test_struct_surface_emits_nested_get_and_set(self):
         text = struct_surface_kernel.compile().mlir_text()
@@ -95,9 +92,7 @@ class StructSurfaceTest(unittest.TestCase):
 
                 with self.assertRaisesRegex(TypeError, "bool literals"):
                     pto.struct_set(state, 0, True)
-                with self.assertRaisesRegex(
-                    TypeError, "Python int/float literal or an SSA value"
-                ):
+                with self.assertRaisesRegex(TypeError, "Python int/float literal or an SSA value"):
                     pto.struct_set(state, 0, "7")
                 with self.assertRaisesRegex(TypeError, "floating-point literal"):
                     pto.struct_set(state, 0, 3.5)
@@ -116,10 +111,7 @@ class StructSurfaceTest(unittest.TestCase):
                 pto.ptr(pto.i32, "ub"),
             )
             for field in invalid_fields:
-                with (
-                    self.subTest(field=field),
-                    self.assertRaisesRegex(TypeError, "not supported"),
-                ):
+                with self.subTest(field=field), self.assertRaisesRegex(TypeError, "not supported"):
                     pto.struct_type(field).resolve()
 
             module = Module.create()
@@ -135,33 +127,24 @@ class StructSurfaceTest(unittest.TestCase):
                     ((1,), TypeError, "must end at a scalar field"),
                 )
                 for path, error_type, message in invalid_paths:
-                    with (
-                        self.subTest(path=path),
-                        self.assertRaisesRegex(error_type, message),
-                    ):
+                    with self.subTest(path=path), self.assertRaisesRegex(error_type, message):
                         pto.struct_get(state, path)
 
-                with self.assertRaisesRegex(
-                    TypeError, "must be a value of !pto.struct"
-                ):
+                with self.assertRaisesRegex(TypeError, "must be a value of !pto.struct"):
                     pto.struct_get(pto.i32(1), 0)
 
     def test_struct_is_rejected_as_entry_abi_annotation(self):
         def bad_entry(state: STRUCT_TYPE):
             del state
 
-        with self.assertRaisesRegex(
-            TypeError, "Stack-local structs must be created inside"
-        ):
+        with self.assertRaisesRegex(TypeError, "Stack-local structs must be created inside"):
             pto.jit(target="a5")(bad_entry)
 
     def test_struct_is_rejected_as_kernel_module_abi_annotation(self):
         def bad_helper(state: STRUCT_TYPE):
             del state
 
-        with self.assertRaisesRegex(
-            TypeError, "Stack-local structs must be created inside"
-        ):
+        with self.assertRaisesRegex(TypeError, "Stack-local structs must be created inside"):
             pto.jit(target="a5", entry=False)(bad_helper)
 
     def test_struct_is_rejected_as_subkernel_abi_annotation(self):
@@ -169,12 +152,9 @@ class StructSurfaceTest(unittest.TestCase):
             del state
 
         for decorator in (pto.tileop, pto.simt):
-            with (
-                self.subTest(decorator=decorator),
-                self.assertRaisesRegex(
-                    TypeError,
-                    "unsupported subkernel annotation",
-                ),
+            with self.subTest(decorator=decorator), self.assertRaisesRegex(
+                TypeError,
+                "unsupported subkernel annotation",
             ):
                 decorator(bad_subkernel)
 
@@ -183,9 +163,7 @@ class StructSurfaceTest(unittest.TestCase):
         self.assertIn("scf.for", legal_text)
         self.assertIn("pto.struct_set", legal_text)
 
-        with self.assertRaisesRegex(
-            TypeError, "does not accept stack-local struct values"
-        ):
+        with self.assertRaisesRegex(TypeError, "does not accept stack-local struct values"):
             struct_carry_kernel.compile()
 
         with self.assertRaisesRegex(TypeError, "does not accept pto.struct_type"):

@@ -13,21 +13,12 @@ import sys
 
 import numpy as np
 
-for search_root in (
-    Path(__file__).resolve().parent,
-    Path(__file__).resolve().parents[1],
-):
+for search_root in (Path(__file__).resolve().parent, Path(__file__).resolve().parents[1]):
     if (search_root / "validation_runtime.py").is_file():
         sys.path.insert(0, str(search_root))
         break
 
-from validation_runtime import (
-    default_buffers,
-    load_case_meta,
-    rng,
-    write_buffers,
-    write_golden,
-)
+from validation_runtime import default_buffers, load_case_meta, rng, write_buffers, write_golden
 
 
 M = 16
@@ -67,20 +58,10 @@ def main():
 
     cols = np.arange(N, dtype=np.float32)
     fp0_f32 = (np.float32(0.5) + cols * np.float32(0.03125)).reshape(1, N)
-    fp1_f32 = (np.float32(1.0) + (cols % np.float32(7.0)) * np.float32(0.0625)).reshape(
-        1, N
-    )
+    fp1_f32 = (np.float32(1.0) + (cols % np.float32(7.0)) * np.float32(0.0625)).reshape(1, N)
 
-    fp0 = (
-        pack_vector_quant(fp0_f32)
-        .astype(meta.np_types[fp0_name], copy=False)
-        .reshape(1, N)
-    )
-    fp1 = (
-        pack_vector_quant(fp1_f32)
-        .astype(meta.np_types[fp1_name], copy=False)
-        .reshape(1, N)
-    )
+    fp0 = pack_vector_quant(fp0_f32).astype(meta.np_types[fp0_name], copy=False).reshape(1, N)
+    fp1 = pack_vector_quant(fp1_f32).astype(meta.np_types[fp1_name], copy=False).reshape(1, N)
 
     acc = lhs.astype(np.int32) @ rhs.astype(np.int32)
 

@@ -22,79 +22,77 @@
 using namespace PtoTestCommon;
 
 // Kernel launch wrappers (defined in launch.cpp)
-void LaunchTSEL_f32_2x128(uint8_t* mask, float* src0, float* src1, float* dst, void* stream);
-void LaunchTSEL_f32_2x32(uint8_t* mask, float* src0, float* src1, float* dst, void* stream);
-void LaunchTSEL_f32_2x160(uint8_t* mask, float* src0, float* src1, float* dst, void* stream);
-void LaunchTSEL_f32_2x512(uint8_t* mask, float* src0, float* src1, float* dst, void* stream);
-void LaunchTSEL_f16_2x128(uint8_t* mask, uint16_t* src0, uint16_t* src1, uint16_t* dst, void* stream);
-void LaunchTSEL_f16_2x32(uint8_t* mask, uint16_t* src0, uint16_t* src1, uint16_t* dst, void* stream);
-void LaunchTSEL_f16_2x160(uint8_t* mask, uint16_t* src0, uint16_t* src1, uint16_t* dst, void* stream);
-void LaunchTSEL_i8_2x128(uint8_t* mask, int8_t* src0, int8_t* src1, int8_t* dst, void* stream);
-void LaunchTSEL_i8_2x32(uint8_t* mask, int8_t* src0, int8_t* src1, int8_t* dst, void* stream);
-void LaunchTSEL_i8_2x160(uint8_t* mask, int8_t* src0, int8_t* src1, int8_t* dst, void* stream);
+void LaunchTSEL_f32_2x128(uint8_t *mask, float *src0, float *src1, float *dst, void *stream);
+void LaunchTSEL_f32_2x32(uint8_t *mask, float *src0, float *src1, float *dst, void *stream);
+void LaunchTSEL_f32_2x160(uint8_t *mask, float *src0, float *src1, float *dst, void *stream);
+void LaunchTSEL_f32_2x512(uint8_t *mask, float *src0, float *src1, float *dst, void *stream);
+void LaunchTSEL_f16_2x128(uint8_t *mask, uint16_t *src0, uint16_t *src1, uint16_t *dst, void *stream);
+void LaunchTSEL_f16_2x32(uint8_t *mask, uint16_t *src0, uint16_t *src1, uint16_t *dst, void *stream);
+void LaunchTSEL_f16_2x160(uint8_t *mask, uint16_t *src0, uint16_t *src1, uint16_t *dst, void *stream);
+void LaunchTSEL_i8_2x128(uint8_t *mask, int8_t *src0, int8_t *src1, int8_t *dst, void *stream);
+void LaunchTSEL_i8_2x32(uint8_t *mask, int8_t *src0, int8_t *src1, int8_t *dst, void *stream);
+void LaunchTSEL_i8_2x160(uint8_t *mask, int8_t *src0, int8_t *src1, int8_t *dst, void *stream);
 
 enum DataType { DT_F32, DT_F16, DT_I8 };
 
-using LaunchFnF32 = void (*)(uint8_t*, float*, float*, float*, void*);
-using LaunchFnF16 = void (*)(uint8_t*, uint16_t*, uint16_t*, uint16_t*, void*);
-using LaunchFnI8 = void (*)(uint8_t*, int8_t*, int8_t*, int8_t*, void*);
+using LaunchFnF32 = void (*)(uint8_t *, float *, float *, float *, void *);
+using LaunchFnF16 = void (*)(uint8_t *, uint16_t *, uint16_t *, uint16_t *, void *);
+using LaunchFnI8 = void (*)(uint8_t *, int8_t *, int8_t *, int8_t *, void *);
 
 struct TestCase {
-    const char* name;
-    DataType dtype;
+    const char *name;
+    DataType    dtype;
     LaunchFnF32 launchF32;
     LaunchFnF16 launchF16;
-    LaunchFnI8 launchI8;
-    size_t rows;
-    size_t cols;
-    size_t validRows;
-    size_t validCols;
-    size_t elemSize;
+    LaunchFnI8  launchI8;
+    size_t      rows;
+    size_t      cols;
+    size_t      validRows;
+    size_t      validCols;
+    size_t      elemSize;
 };
 
 static const TestCase kCases[] = {
-    {"f32_2x128", DT_F32, LaunchTSEL_f32_2x128, nullptr, nullptr, 2, 128, 2, 128, sizeof(float)},
-    {"f32_2x32", DT_F32, LaunchTSEL_f32_2x32, nullptr, nullptr, 2, 32, 2, 32, sizeof(float)},
-    {"f32_2x160", DT_F32, LaunchTSEL_f32_2x160, nullptr, nullptr, 2, 160, 2, 160, sizeof(float)},
-    {"f32_2x512", DT_F32, LaunchTSEL_f32_2x512, nullptr, nullptr, 2, 512, 2, 512, sizeof(float)},
-    {"f16_2x128", DT_F16, nullptr, LaunchTSEL_f16_2x128, nullptr, 2, 128, 2, 128, sizeof(uint16_t)},
-    {"f16_2x32", DT_F16, nullptr, LaunchTSEL_f16_2x32, nullptr, 2, 32, 2, 32, sizeof(uint16_t)},
-    {"f16_2x160", DT_F16, nullptr, LaunchTSEL_f16_2x160, nullptr, 2, 160, 2, 160, sizeof(uint16_t)},
-    {"i8_2x128", DT_I8, nullptr, nullptr, LaunchTSEL_i8_2x128, 2, 128, 2, 128, sizeof(int8_t)},
-    {"i8_2x32", DT_I8, nullptr, nullptr, LaunchTSEL_i8_2x32, 2, 32, 2, 32, sizeof(int8_t)},
-    {"i8_2x160", DT_I8, nullptr, nullptr, LaunchTSEL_i8_2x160, 2, 160, 2, 160, sizeof(int8_t)},
+    {"f32_2x128",  DT_F32, LaunchTSEL_f32_2x128,  nullptr,              nullptr,            2, 128,  2, 128,  sizeof(float)},
+    {"f32_2x32",   DT_F32, LaunchTSEL_f32_2x32,   nullptr,              nullptr,            2, 32,   2, 32,   sizeof(float)},
+    {"f32_2x160",  DT_F32, LaunchTSEL_f32_2x160,  nullptr,              nullptr,            2, 160,  2, 160,  sizeof(float)},
+    {"f32_2x512",  DT_F32, LaunchTSEL_f32_2x512,  nullptr,              nullptr,            2, 512,  2, 512,  sizeof(float)},
+    {"f16_2x128",  DT_F16, nullptr,              LaunchTSEL_f16_2x128,  nullptr,            2, 128,  2, 128,  sizeof(uint16_t)},
+    {"f16_2x32",   DT_F16, nullptr,              LaunchTSEL_f16_2x32,   nullptr,            2, 32,   2, 32,   sizeof(uint16_t)},
+    {"f16_2x160",  DT_F16, nullptr,              LaunchTSEL_f16_2x160,  nullptr,            2, 160,  2, 160,  sizeof(uint16_t)},
+    {"i8_2x128",   DT_I8,  nullptr,              nullptr,              LaunchTSEL_i8_2x128,  2, 128,  2, 128,  sizeof(int8_t)},
+    {"i8_2x32",    DT_I8,  nullptr,              nullptr,              LaunchTSEL_i8_2x32,   2, 32,   2, 32,   sizeof(int8_t)},
+    {"i8_2x160",   DT_I8,  nullptr,              nullptr,              LaunchTSEL_i8_2x160,  2, 160,  2, 160,  sizeof(int8_t)},
 };
 static constexpr size_t kNumCases = sizeof(kCases) / sizeof(kCases[0]);
 
-static int RunCase(const TestCase& tc, int deviceId, aclrtStream stream)
-{
+static int RunCase(const TestCase &tc, int deviceId, aclrtStream stream) {
     int rc = 0;
     const size_t elemCount = tc.rows * tc.cols;
     const size_t fileSizeConst = elemCount * tc.elemSize;
     const size_t maskCols = (tc.validCols + 7) / 8;
     const size_t maskFileSizeConst = tc.validRows * maskCols * sizeof(uint8_t);
 
-    std::printf(
-        "[INFO] === case: %s (shape=%zux%zu, valid=%zux%zu) ===\n", tc.name, tc.rows, tc.cols, tc.validRows,
-        tc.validCols);
+    std::printf("[INFO] === case: %s (shape=%zux%zu, valid=%zux%zu) ===\n",
+                tc.name, tc.rows, tc.cols, tc.validRows, tc.validCols);
 
     std::string caseDir = std::string("./") + tc.name;
 
     if (tc.dtype == DT_F32) {
-        uint8_t* maskHost = nullptr;
+        uint8_t *maskHost = nullptr;
         float *src0Host = nullptr, *src1Host = nullptr, *dstHost = nullptr;
-        uint8_t* maskDevice = nullptr;
+        uint8_t *maskDevice = nullptr;
         float *src0Device = nullptr, *src1Device = nullptr, *dstDevice = nullptr;
 
-        aclrtMallocHost((void**)(&maskHost), maskFileSizeConst);
-        aclrtMallocHost((void**)(&src0Host), fileSizeConst);
-        aclrtMallocHost((void**)(&src1Host), fileSizeConst);
-        aclrtMallocHost((void**)(&dstHost), fileSizeConst);
+        aclrtMallocHost((void **)(&maskHost), maskFileSizeConst);
+        aclrtMallocHost((void **)(&src0Host), fileSizeConst);
+        aclrtMallocHost((void **)(&src1Host), fileSizeConst);
+        aclrtMallocHost((void **)(&dstHost), fileSizeConst);
 
-        aclrtMalloc((void**)&maskDevice, maskFileSizeConst, ACL_MEM_MALLOC_HUGE_FIRST);
-        aclrtMalloc((void**)&src0Device, fileSizeConst, ACL_MEM_MALLOC_HUGE_FIRST);
-        aclrtMalloc((void**)&src1Device, fileSizeConst, ACL_MEM_MALLOC_HUGE_FIRST);
-        aclrtMalloc((void**)&dstDevice, fileSizeConst, ACL_MEM_MALLOC_HUGE_FIRST);
+        aclrtMalloc((void **)&maskDevice, maskFileSizeConst, ACL_MEM_MALLOC_HUGE_FIRST);
+        aclrtMalloc((void **)&src0Device, fileSizeConst, ACL_MEM_MALLOC_HUGE_FIRST);
+        aclrtMalloc((void **)&src1Device, fileSizeConst, ACL_MEM_MALLOC_HUGE_FIRST);
+        aclrtMalloc((void **)&dstDevice, fileSizeConst, ACL_MEM_MALLOC_HUGE_FIRST);
 
         size_t fileSize = fileSizeConst;
         if (!ReadFile((caseDir + "/input1.bin").c_str(), fileSize, src0Host, fileSizeConst)) {
@@ -145,20 +143,20 @@ static int RunCase(const TestCase& tc, int deviceId, aclrtStream stream)
         if (dstHost != nullptr)
             aclrtFreeHost(dstHost);
     } else if (tc.dtype == DT_F16) {
-        uint8_t* maskHost = nullptr;
+        uint8_t *maskHost = nullptr;
         uint16_t *src0Host = nullptr, *src1Host = nullptr, *dstHost = nullptr;
-        uint8_t* maskDevice = nullptr;
+        uint8_t *maskDevice = nullptr;
         uint16_t *src0Device = nullptr, *src1Device = nullptr, *dstDevice = nullptr;
 
-        aclrtMallocHost((void**)(&maskHost), maskFileSizeConst);
-        aclrtMallocHost((void**)(&src0Host), fileSizeConst);
-        aclrtMallocHost((void**)(&src1Host), fileSizeConst);
-        aclrtMallocHost((void**)(&dstHost), fileSizeConst);
+        aclrtMallocHost((void **)(&maskHost), maskFileSizeConst);
+        aclrtMallocHost((void **)(&src0Host), fileSizeConst);
+        aclrtMallocHost((void **)(&src1Host), fileSizeConst);
+        aclrtMallocHost((void **)(&dstHost), fileSizeConst);
 
-        aclrtMalloc((void**)&maskDevice, maskFileSizeConst, ACL_MEM_MALLOC_HUGE_FIRST);
-        aclrtMalloc((void**)&src0Device, fileSizeConst, ACL_MEM_MALLOC_HUGE_FIRST);
-        aclrtMalloc((void**)&src1Device, fileSizeConst, ACL_MEM_MALLOC_HUGE_FIRST);
-        aclrtMalloc((void**)&dstDevice, fileSizeConst, ACL_MEM_MALLOC_HUGE_FIRST);
+        aclrtMalloc((void **)&maskDevice, maskFileSizeConst, ACL_MEM_MALLOC_HUGE_FIRST);
+        aclrtMalloc((void **)&src0Device, fileSizeConst, ACL_MEM_MALLOC_HUGE_FIRST);
+        aclrtMalloc((void **)&src1Device, fileSizeConst, ACL_MEM_MALLOC_HUGE_FIRST);
+        aclrtMalloc((void **)&dstDevice, fileSizeConst, ACL_MEM_MALLOC_HUGE_FIRST);
 
         size_t fileSize = fileSizeConst;
         if (!ReadFile((caseDir + "/input1.bin").c_str(), fileSize, src0Host, fileSizeConst)) {
@@ -209,20 +207,20 @@ static int RunCase(const TestCase& tc, int deviceId, aclrtStream stream)
         if (dstHost != nullptr)
             aclrtFreeHost(dstHost);
     } else {
-        uint8_t* maskHost = nullptr;
+        uint8_t *maskHost = nullptr;
         int8_t *src0Host = nullptr, *src1Host = nullptr, *dstHost = nullptr;
-        uint8_t* maskDevice = nullptr;
+        uint8_t *maskDevice = nullptr;
         int8_t *src0Device = nullptr, *src1Device = nullptr, *dstDevice = nullptr;
 
-        aclrtMallocHost((void**)(&maskHost), maskFileSizeConst);
-        aclrtMallocHost((void**)(&src0Host), fileSizeConst);
-        aclrtMallocHost((void**)(&src1Host), fileSizeConst);
-        aclrtMallocHost((void**)(&dstHost), fileSizeConst);
+        aclrtMallocHost((void **)(&maskHost), maskFileSizeConst);
+        aclrtMallocHost((void **)(&src0Host), fileSizeConst);
+        aclrtMallocHost((void **)(&src1Host), fileSizeConst);
+        aclrtMallocHost((void **)(&dstHost), fileSizeConst);
 
-        aclrtMalloc((void**)&maskDevice, maskFileSizeConst, ACL_MEM_MALLOC_HUGE_FIRST);
-        aclrtMalloc((void**)&src0Device, fileSizeConst, ACL_MEM_MALLOC_HUGE_FIRST);
-        aclrtMalloc((void**)&src1Device, fileSizeConst, ACL_MEM_MALLOC_HUGE_FIRST);
-        aclrtMalloc((void**)&dstDevice, fileSizeConst, ACL_MEM_MALLOC_HUGE_FIRST);
+        aclrtMalloc((void **)&maskDevice, maskFileSizeConst, ACL_MEM_MALLOC_HUGE_FIRST);
+        aclrtMalloc((void **)&src0Device, fileSizeConst, ACL_MEM_MALLOC_HUGE_FIRST);
+        aclrtMalloc((void **)&src1Device, fileSizeConst, ACL_MEM_MALLOC_HUGE_FIRST);
+        aclrtMalloc((void **)&dstDevice, fileSizeConst, ACL_MEM_MALLOC_HUGE_FIRST);
 
         size_t fileSize = fileSizeConst;
         if (!ReadFile((caseDir + "/input1.bin").c_str(), fileSize, src0Host, fileSizeConst)) {
@@ -279,16 +277,15 @@ static int RunCase(const TestCase& tc, int deviceId, aclrtStream stream)
     return rc;
 }
 
-int main(int argc, char* argv[])
-{
-    const char* caseFilter = (argc > 1) ? argv[1] : nullptr;
+int main(int argc, char *argv[]) {
+    const char *caseFilter = (argc > 1) ? argv[1] : nullptr;
 
     int rc = 0;
     int deviceId = 0;
     aclrtStream stream = nullptr;
 
     aclInit(nullptr);
-    if (const char* envDevice = std::getenv("ACL_DEVICE_ID")) {
+    if (const char *envDevice = std::getenv("ACL_DEVICE_ID")) {
         deviceId = std::atoi(envDevice);
     }
     aclrtSetDevice(deviceId);

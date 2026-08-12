@@ -33,12 +33,8 @@ def main():
         eps = case["eps"]
 
         # Golden and output are always f32 (ACC output dtype)
-        golden = np.fromfile(
-            os.path.join(name, "golden.bin"), dtype=np.float32
-        ).reshape(M, N)
-        output = np.fromfile(
-            os.path.join(name, "output.bin"), dtype=np.float32
-        ).reshape(M, N)
+        golden = np.fromfile(os.path.join(name, "golden.bin"), dtype=np.float32).reshape(M, N)
+        output = np.fromfile(os.path.join(name, "output.bin"), dtype=np.float32).reshape(M, N)
 
         ok = result_cmp(golden, output, eps)
         if ok:

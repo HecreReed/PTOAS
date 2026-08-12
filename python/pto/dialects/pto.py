@@ -175,9 +175,7 @@ def _install_default_precision_type_compat():
     )
     for op_name, attr_cls, enum_value in specs:
         op_cls = getattr(_pto_ops_gen, op_name, None)
-        if op_cls is None or getattr(
-            op_cls, "_pto_default_precision_type_compat", False
-        ):
+        if op_cls is None or getattr(op_cls, "_pto_default_precision_type_compat", False):
             continue
         original_init = op_cls.__init__
 
@@ -657,9 +655,7 @@ def set_ffts(ffts, *, loc=None, ip=None):
 def get_buf(op_type, buf_id, mode=0, *, loc=None, ip=None):
     ctx = loc.context if loc else _ods_ir.Context.current
     if isinstance(op_type, (PipeAttr, PIPE)):
-        raise TypeError(
-            "get_buf expects SyncOpType (or SyncOpTypeAttr), not PIPE/PipeAttr"
-        )
+        raise TypeError("get_buf expects SyncOpType (or SyncOpTypeAttr), not PIPE/PipeAttr")
     attrs = {
         "op_type": _ensure_sync_attr(op_type, ctx),
         "buf_id": _ensure_i32_attr(buf_id, "buf_id", ctx),
@@ -676,9 +672,7 @@ def get_buf(op_type, buf_id, mode=0, *, loc=None, ip=None):
 def rls_buf(op_type, buf_id, mode=0, *, loc=None, ip=None):
     ctx = loc.context if loc else _ods_ir.Context.current
     if isinstance(op_type, (PipeAttr, PIPE)):
-        raise TypeError(
-            "rls_buf expects SyncOpType (or SyncOpTypeAttr), not PIPE/PipeAttr"
-        )
+        raise TypeError("rls_buf expects SyncOpType (or SyncOpTypeAttr), not PIPE/PipeAttr")
     attrs = {
         "op_type": _ensure_sync_attr(op_type, ctx),
         "buf_id": _ensure_i32_attr(buf_id, "buf_id", ctx),
@@ -778,7 +772,6 @@ EVENT_ID5 = EVENT.EVENT_ID5
 EVENT_ID6 = EVENT.EVENT_ID6
 EVENT_ID7 = EVENT.EVENT_ID7
 
-
 class TileConfig:
     alignedSize = 32
     fixedRowSize = 16
@@ -820,20 +813,12 @@ class PartitionViewOp(_GeneratedPartitionViewOp):
             self._init_inferred(source, offsets, sizes, args, loc, ip)
             return
 
-        if (
-            len(args) == 4
-            and offsets is _PARTITION_VIEW_UNSET
-            and sizes is _PARTITION_VIEW_UNSET
-        ):
+        if len(args) == 4 and offsets is _PARTITION_VIEW_UNSET and sizes is _PARTITION_VIEW_UNSET:
             result, source, offsets, sizes = args
             self._init_explicit(result, source, offsets, sizes, (), loc, ip)
             return
 
-        if (
-            len(args) == 2
-            and offsets is not _PARTITION_VIEW_UNSET
-            and sizes is not _PARTITION_VIEW_UNSET
-        ):
+        if len(args) == 2 and offsets is not _PARTITION_VIEW_UNSET and sizes is not _PARTITION_VIEW_UNSET:
             result, source = args
             self._init_explicit(result, source, offsets, sizes, (), loc, ip)
             return
@@ -1068,9 +1053,7 @@ class _VKernelStructDef(_VKernelType):
     fields: tuple
 
     def render(self):
-        raise _VKernelCompileError(
-            f"{self.name} is a template-only surface type; use .jit(...) to specialize it"
-        )
+        raise _VKernelCompileError(f"{self.name} is a template-only surface type; use .jit(...) to specialize it")
 
     def __call__(self, **kwargs):
         return _VKernelStructBinding(self, dict(kwargs))
@@ -1167,9 +1150,7 @@ def _load_standard_dialects():
         from ptoas.mlir.dialects import func as _mlir_func  # noqa: F401
         from ptoas.mlir.dialects import scf as _mlir_scf  # noqa: F401
     except ImportError as exc:
-        raise RuntimeError(
-            "mlir standard dialect python bindings are required for vkernel parsing"
-        ) from exc
+        raise RuntimeError("mlir standard dialect python bindings are required for vkernel parsing") from exc
 
 
 class _VKernelContext:
@@ -1260,14 +1241,11 @@ class _VKernelBuilder:
         expr = _ast.Expression(body=node)
         globals_dict = dict(self.py_fn.__globals__)
         globals_dict.update(globals())
-        value = eval(
-            compile(expr, self.py_fn.__code__.co_filename, "eval"), globals_dict, {}
-        )
+        value = eval(compile(expr, self.py_fn.__code__.co_filename, "eval"),
+                     globals_dict, {})
         value = _coerce_surface_type(value)
         if not isinstance(value, _VKernelType):
-            raise _VKernelCompileError(
-                f"unsupported vkernel type annotation: {value!r}"
-            )
+            raise _VKernelCompileError(f"unsupported vkernel type annotation: {value!r}")
         return value
 
     def _new_value(self, ty=None):
@@ -1282,9 +1260,7 @@ class _VKernelBuilder:
         if value.name is not None:
             return value
         if value.literal is None:
-            raise _VKernelCompileError(
-                "value has no SSA name and cannot be materialized"
-            )
+            raise _VKernelCompileError("value has no SSA name and cannot be materialized")
         if value.type is None:
             raise _VKernelCompileError("literal requires type context")
         value.name = self.ctx.new_ssa()
@@ -1292,11 +1268,7 @@ class _VKernelBuilder:
         if isinstance(value.literal, bool):
             self._emit(lines, indent, f"{value.name} = arith.constant {lit}")
         else:
-            self._emit(
-                lines,
-                indent,
-                f"{value.name} = arith.constant {lit} : {value.type.render()}",
-            )
+            self._emit(lines, indent, f"{value.name} = arith.constant {lit} : {value.type.render()}")
         return value
 
     def _literal_value(self, node, lines, indent, expected_type):
@@ -1314,9 +1286,7 @@ class _VKernelBuilder:
             base = self._lower_expr(node.value, env, lines, indent)
         if isinstance(base, _VKStructValue):
             if node.attr not in base.fields:
-                raise _VKernelCompileError(
-                    f"unsupported struct attribute '{node.attr}'"
-                )
+                raise _VKernelCompileError(f"unsupported struct attribute '{node.attr}'")
             field = base.fields[node.attr]
             if isinstance(field, _VKValue):
                 return self._materialize_value(field, lines, indent, expected_type)
@@ -1330,9 +1300,7 @@ class _VKernelBuilder:
         base = self._lower_expr(node.value, env, lines, indent)
         if not isinstance(base, _VKStaticSequence):
             raise _VKernelCompileError("subscript base must be a static sequence")
-        if not isinstance(node.slice, _ast.Constant) or not isinstance(
-            node.slice.value, int
-        ):
+        if not isinstance(node.slice, _ast.Constant) or not isinstance(node.slice.value, int):
             raise _VKernelCompileError("only constant integer subscripts are supported")
         index = node.slice.value
         if index < 0 or index >= len(base.values):
@@ -1340,11 +1308,7 @@ class _VKernelBuilder:
         value = base.values[index]
         if not isinstance(value, _VKValue):
             value = _VKValue(type=expected_type, literal=value)
-        return (
-            self._materialize_value(value, lines, indent, expected_type)
-            if expected_type is not None
-            else value
-        )
+        return self._materialize_value(value, lines, indent, expected_type) if expected_type is not None else value
 
     def _lower_binop(self, node, env, lines, indent, expected_type=None):
         lhs = self._lower_expr(node.left, env, lines, indent)
@@ -1355,13 +1319,9 @@ class _VKernelBuilder:
             elif isinstance(node.op, _ast.FloorDiv):
                 result = lhs.literal // rhs.literal
             else:
-                raise _VKernelCompileError(
-                    f"unsupported binary operator: {type(node.op).__name__}"
-                )
+                raise _VKernelCompileError(f"unsupported binary operator: {type(node.op).__name__}")
             return _VKValue(type=expected_type, literal=result)
-        raise _VKernelCompileError(
-            "non-constant binary expressions are not supported yet"
-        )
+        raise _VKernelCompileError("non-constant binary expressions are not supported yet")
 
     def _lower_expr(self, node, env, lines, indent, expected_type=None):
         if isinstance(node, _ast.Name):
@@ -1369,9 +1329,7 @@ class _VKernelBuilder:
                 raise _VKernelCompileError(f"unknown name '{node.id}'")
             value = env[node.id]
             if isinstance(value, (_VKStructValue, _VKStaticSequence)):
-                raise _VKernelCompileError(
-                    f"name '{node.id}' is not a scalar/SSA value"
-                )
+                raise _VKernelCompileError(f"name '{node.id}' is not a scalar/SSA value")
             if (
                 isinstance(value, _VKValue)
                 and value.name is None
@@ -1393,24 +1351,14 @@ class _VKernelBuilder:
         if isinstance(node, _ast.BinOp):
             return self._lower_binop(node, env, lines, indent, expected_type)
         if isinstance(node, _ast.Call):
-            results = self._lower_call(
-                node,
-                env,
-                lines,
-                indent,
-                expected_types=[expected_type] if expected_type else None,
-            )
+            results = self._lower_call(node, env, lines, indent, expected_types=[expected_type] if expected_type else None)
             if len(results) != 1:
                 raise _VKernelCompileError("expression expected single result")
             return results[0]
         raise _VKernelCompileError(f"unsupported expression: {type(node).__name__}")
 
     def _lower_call_name(self, node):
-        if (
-            isinstance(node, _ast.Attribute)
-            and isinstance(node.value, _ast.Name)
-            and node.value.id == "pto"
-        ):
+        if isinstance(node, _ast.Attribute) and isinstance(node.value, _ast.Name) and node.value.id == "pto":
             return node.attr
         raise _VKernelCompileError("only pto.* calls are supported")
 
@@ -1431,9 +1379,7 @@ class _VKernelBuilder:
         return None
 
     def _format_typed_operands(self, values):
-        return ", ".join(v.name for v in values), ", ".join(
-            v.render_type() for v in values
-        )
+        return ", ".join(v.name for v in values), ", ".join(v.render_type() for v in values)
 
     def _lower_call(self, node, env, lines, indent, expected_types=None):
         opname = self._lower_call_name(node.func)
@@ -1450,29 +1396,19 @@ class _VKernelBuilder:
             result_type = self._eval_type_expr(node.args[1])
             addr = self._lower_expr(node.args[0], env, lines, indent, i64)
             result = self._new_value(result_type)
-            self._emit(
-                lines,
-                indent,
-                f"{result.name} = pto.castptr {addr.name} : {addr.render_type()} -> {result.render_type()}",
-            )
+            self._emit(lines, indent, f"{result.name} = pto.castptr {addr.name} : {addr.render_type()} -> {result.render_type()}")
             return [result]
 
         if opname == "copy_gm_to_ubuf":
             expected = [None, None, i64, i64, i64, i64, i64, i1, i64, i64, i64]
-            ops = [
-                self._lower_expr(arg, env, lines, indent, expected[i])
-                for i, arg in enumerate(node.args)
-            ]
+            ops = [self._lower_expr(arg, env, lines, indent, expected[i]) for i, arg in enumerate(node.args)]
             operands, types = self._format_typed_operands(ops)
             self._emit(lines, indent, f"pto.copy_gm_to_ubuf {operands} : {types}")
             return []
 
         if opname == "copy_ubuf_to_gm":
             expected = [None, None, i64, i64, i64, i64, i64, i64]
-            ops = [
-                self._lower_expr(arg, env, lines, indent, expected[i])
-                for i, arg in enumerate(node.args)
-            ]
+            ops = [self._lower_expr(arg, env, lines, indent, expected[i]) for i, arg in enumerate(node.args)]
             operands, types = self._format_typed_operands(ops)
             self._emit(lines, indent, f"pto.copy_ubuf_to_gm {operands} : {types}")
             return []
@@ -1483,9 +1419,7 @@ class _VKernelBuilder:
                 if not isinstance(arg, _ast.Constant) or not isinstance(arg.value, str):
                     raise _VKernelCompileError(f"pto.{opname} expects string literals")
                 attrs.append(arg.value)
-            self._emit(
-                lines, indent, f'pto.{opname}["{attrs[0]}", "{attrs[1]}", "{attrs[2]}"]'
-            )
+            self._emit(lines, indent, f'pto.{opname}["{attrs[0]}", "{attrs[1]}", "{attrs[2]}"]')
             return []
 
         if opname == "barrier":
@@ -1499,11 +1433,7 @@ class _VKernelBuilder:
             src = self._lower_expr(node.args[0], env, lines, indent, i32)
             res0 = self._new_value(mask)
             res1 = self._new_value(i32)
-            self._emit(
-                lines,
-                indent,
-                f"{res0.name}, {res1.name} = pto.plt_b32 {src.name} : i32 -> !pto.mask, i32",
-            )
+            self._emit(lines, indent, f"{res0.name}, {res1.name} = pto.plt_b32 {src.name} : i32 -> !pto.mask, i32")
             return [res0, res1]
 
         if opname == "pset_b32":
@@ -1511,9 +1441,7 @@ class _VKernelBuilder:
             if not isinstance(arg, _ast.Constant) or not isinstance(arg.value, str):
                 raise _VKernelCompileError("pto.pset_b32 expects a string literal")
             res = self._new_value(mask)
-            self._emit(
-                lines, indent, f'{res.name} = pto.pset_b32 "{arg.value}" : !pto.mask'
-            )
+            self._emit(lines, indent, f'{res.name} = pto.pset_b32 "{arg.value}" : !pto.mask')
             return [res]
 
         if opname == "vlds":
@@ -1521,25 +1449,17 @@ class _VKernelBuilder:
             if not isinstance(ptr_value.type, _VKernelPtrType):
                 raise _VKernelCompileError("pto.vlds expects a ptr operand")
             offset = self._lower_expr(node.args[1], env, lines, indent, _vk_index)
-            result = self._new_value(
-                vreg(_ptr_vector_lanes(ptr_value.type), ptr_value.type.elem)
-            )
-            self._emit(
-                lines,
-                indent,
-                f"{result.name} = pto.vlds {ptr_value.name}[{offset.name}] : {ptr_value.render_type()} -> {result.render_type()}",
-            )
+            result = self._new_value(vreg(_ptr_vector_lanes(ptr_value.type), ptr_value.type.elem))
+            self._emit(lines, indent,
+                       f"{result.name} = pto.vlds {ptr_value.name}[{offset.name}] : {ptr_value.render_type()} -> {result.render_type()}")
             return [result]
 
         if opname == "vabs":
             vec_value = self._lower_expr(node.args[0], env, lines, indent)
             mask_value = self._lower_expr(node.args[1], env, lines, indent, mask)
             result = self._new_value(vec_value.type)
-            self._emit(
-                lines,
-                indent,
-                f"{result.name} = pto.vabs {vec_value.name}, {mask_value.name} : {vec_value.render_type()}, {mask_value.render_type()} -> {result.render_type()}",
-            )
+            self._emit(lines, indent,
+                       f"{result.name} = pto.vabs {vec_value.name}, {mask_value.name} : {vec_value.render_type()}, {mask_value.render_type()} -> {result.render_type()}")
             return [result]
 
         if opname == "vsts":
@@ -1547,11 +1467,8 @@ class _VKernelBuilder:
             ptr_value = self._lower_expr(node.args[1], env, lines, indent)
             offset = self._lower_expr(node.args[2], env, lines, indent, _vk_index)
             mask_value = self._lower_expr(node.args[3], env, lines, indent, mask)
-            self._emit(
-                lines,
-                indent,
-                f"pto.vsts {vec_value.name}, {ptr_value.name}[{offset.name}], {mask_value.name} : {vec_value.render_type()}, {ptr_value.render_type()}, {mask_value.render_type()}",
-            )
+            self._emit(lines, indent,
+                       f"pto.vsts {vec_value.name}, {ptr_value.name}[{offset.name}], {mask_value.name} : {vec_value.render_type()}, {ptr_value.render_type()}, {mask_value.render_type()}")
             return []
 
         raise _VKernelCompileError(f"unsupported pto op in vkernel: {opname}")
@@ -1585,9 +1502,7 @@ class _VKernelBuilder:
         for stmt in statements:
             if isinstance(stmt, _ast.Assign):
                 if len(stmt.targets) != 1:
-                    raise _VKernelCompileError(
-                        "multiple assignment targets are not supported"
-                    )
+                    raise _VKernelCompileError("multiple assignment targets are not supported")
                 target = stmt.targets[0]
                 if isinstance(target, _ast.Name):
                     value = self._lower_expr(stmt.value, current_env, lines, indent)
@@ -1598,9 +1513,7 @@ class _VKernelBuilder:
                         raise _VKernelCompileError("tuple assignment arity mismatch")
                     for elt, value in zip(target.elts, results):
                         if not isinstance(elt, _ast.Name):
-                            raise _VKernelCompileError(
-                                "tuple assignment only supports names"
-                            )
+                            raise _VKernelCompileError("tuple assignment only supports names")
                         current_env[elt.id] = value
                 else:
                     raise _VKernelCompileError("unsupported assignment target")
@@ -1608,17 +1521,11 @@ class _VKernelBuilder:
 
             if isinstance(stmt, _ast.AnnAssign):
                 if stmt.value is None:
-                    raise _VKernelCompileError(
-                        "annotation-only assignment is not supported"
-                    )
+                    raise _VKernelCompileError("annotation-only assignment is not supported")
                 if not isinstance(stmt.target, _ast.Name):
-                    raise _VKernelCompileError(
-                        "annotated assignment only supports names"
-                    )
+                    raise _VKernelCompileError("annotated assignment only supports names")
                 target_type = self._eval_type_expr(stmt.annotation)
-                value = self._lower_expr(
-                    stmt.value, current_env, lines, indent, target_type
-                )
+                value = self._lower_expr(stmt.value, current_env, lines, indent, target_type)
                 current_env[stmt.target.id] = value
                 continue
 
@@ -1643,13 +1550,9 @@ class _VKernelBuilder:
                 if name not in ("strict_vecscope", "vecscope"):
                     raise _VKernelCompileError("unsupported with context")
                 if name == "strict_vecscope":
-                    body_lines, body_result = self._compile_strict_vecscope(
-                        item, stmt.body, current_env, indent
-                    )
+                    body_lines, body_result = self._compile_strict_vecscope(item, stmt.body, current_env, indent)
                 else:
-                    body_lines, body_result = self._compile_vecscope(
-                        stmt.body, current_env, indent
-                    )
+                    body_lines, body_result = self._compile_vecscope(stmt.body, current_env, indent)
                 lines.extend(body_lines)
                 current_env.update(body_result)
                 continue
@@ -1680,13 +1583,9 @@ class _VKernelBuilder:
 
     def _compile_strict_vecscope(self, item, body, outer_env, indent):
         if not isinstance(item.optional_vars, _ast.Tuple):
-            raise _VKernelCompileError(
-                "pto.strict_vecscope requires tuple binding in 'as'"
-            )
+            raise _VKernelCompileError("pto.strict_vecscope requires tuple binding in 'as'")
         if len(item.context_expr.args) != len(item.optional_vars.elts):
-            raise _VKernelCompileError(
-                "strict_vecscope capture arity must match bound block arguments"
-            )
+            raise _VKernelCompileError("strict_vecscope capture arity must match bound block arguments")
         arg_names = []
         inner_env = {}
         for elt in item.optional_vars.elts:
@@ -1705,25 +1604,15 @@ class _VKernelBuilder:
         body_lines, body_env = self._compile_block(body, inner_env, indent + 1)
         captures = []
         for name, arg in arg_names:
-            if (
-                arg.type is None
-                and name in body_env
-                and body_env[name].type is not None
-            ):
+            if arg.type is None and name in body_env and body_env[name].type is not None:
                 arg.type = body_env[name].type
         for expr, (_, arg) in zip(item.context_expr.args, arg_names):
             if arg.type is None:
-                raise _VKernelCompileError(
-                    "strict_vecscope block argument type could not be inferred"
-                )
-            capture = self._lower_expr(
-                expr, outer_env, lines, indent, expected_type=arg.type
-            )
+                raise _VKernelCompileError("strict_vecscope block argument type could not be inferred")
+            capture = self._lower_expr(expr, outer_env, lines, indent, expected_type=arg.type)
             captures.append(capture)
         capture_operands = ", ".join(value.name for value in captures)
-        block_args = ", ".join(
-            f"{arg.name}: {arg.render_type()}" for _, arg in arg_names
-        )
+        block_args = ", ".join(f"{arg.name}: {arg.render_type()}" for _, arg in arg_names)
         func_type = ", ".join(arg.render_type() for _, arg in arg_names)
 
         self._emit(lines, indent, f"pto.strict_vecscope({capture_operands}) {{")
@@ -1735,11 +1624,7 @@ class _VKernelBuilder:
     def _compile_for(self, stmt, outer_env, indent):
         if not isinstance(stmt.target, _ast.Name):
             raise _VKernelCompileError("for target must be a single name")
-        if (
-            not isinstance(stmt.iter, _ast.Call)
-            or not isinstance(stmt.iter.func, _ast.Name)
-            or stmt.iter.func.id != "range"
-        ):
+        if not isinstance(stmt.iter, _ast.Call) or not isinstance(stmt.iter.func, _ast.Name) or stmt.iter.func.id != "range":
             raise _VKernelCompileError("only Python range(...) loops are supported")
         if len(stmt.iter.args) != 3:
             raise _VKernelCompileError("range expects exactly 3 arguments in vkernel")
@@ -1779,8 +1664,7 @@ class _VKernelBuilder:
                 carried_with_initials.append((name, before, after))
             carried = carried_with_initials
             iter_args = ", ".join(
-                f"{iter_arg_map[name].name} = {before.name}"
-                for name, before, _ in carried
+                f"{iter_arg_map[name].name} = {before.name}" for name, before, _ in carried
             )
             self._emit(
                 lines,
@@ -1789,11 +1673,7 @@ class _VKernelBuilder:
             )
             yield_line = f"scf.yield {', '.join(after.name for _, _, after in carried)} : {', '.join(results)}"
         else:
-            self._emit(
-                lines,
-                indent,
-                f"scf.for {iv.name} = {lb.name} to {ub.name} step {step.name} {{",
-            )
+            self._emit(lines, indent, f"scf.for {iv.name} = {lb.name} to {ub.name} step {step.name} {{")
         lines.extend(body_lines)
         if yield_line:
             self._emit(lines, indent + 1, yield_line)
@@ -1808,12 +1688,8 @@ class _VKernelBuilder:
     def _compile_if(self, stmt, outer_env, indent):
         lines = []
         cond = self._lower_expr(stmt.test, outer_env, lines, indent, i1)
-        then_lines, then_env = self._compile_block(
-            stmt.body, dict(outer_env), indent + 1
-        )
-        else_lines, else_env = self._compile_block(
-            stmt.orelse, dict(outer_env), indent + 1
-        )
+        then_lines, then_env = self._compile_block(stmt.body, dict(outer_env), indent + 1)
+        else_lines, else_env = self._compile_block(stmt.orelse, dict(outer_env), indent + 1)
         updated = []
         for name, before in outer_env.items():
             then_val = then_env.get(name, before)
@@ -1826,24 +1702,12 @@ class _VKernelBuilder:
         if updated:
             result = self._new_value()
             types = ", ".join(val.type.render() for _, val, _ in updated)
-            self._emit(
-                lines,
-                indent,
-                f"{result.name}:{len(updated)} = scf.if {cond.name} -> ({types}) {{",
-            )
+            self._emit(lines, indent, f"{result.name}:{len(updated)} = scf.if {cond.name} -> ({types}) {{")
             lines.extend(then_lines)
-            self._emit(
-                lines,
-                indent + 1,
-                f"scf.yield {', '.join(val.name for _, val, _ in updated)} : {types}",
-            )
+            self._emit(lines, indent + 1, f"scf.yield {', '.join(val.name for _, val, _ in updated)} : {types}")
             self._emit(lines, indent, "} else {")
             lines.extend(else_lines)
-            self._emit(
-                lines,
-                indent + 1,
-                f"scf.yield {', '.join(val.name for _, _, val in updated)} : {types}",
-            )
+            self._emit(lines, indent + 1, f"scf.yield {', '.join(val.name for _, _, val in updated)} : {types}")
             self._emit(lines, indent, "}")
             updated_env = dict(outer_env)
             for idx, (name, then_val, _) in enumerate(updated):
@@ -1864,23 +1728,16 @@ class _VKernelBuilder:
         for arg in self.fn_def.args.args:
             arg_ty = _coerce_surface_type(self.py_fn.__annotations__.get(arg.arg))
             if arg_ty is None:
-                raise _VKernelCompileError(
-                    f"missing type annotation for argument '{arg.arg}'"
-                )
+                raise _VKernelCompileError(f"missing type annotation for argument '{arg.arg}'")
             if not isinstance(arg_ty, _VKernelType):
-                raise _VKernelCompileError(
-                    f"unsupported type annotation for argument '{arg.arg}'"
-                )
+                raise _VKernelCompileError(f"unsupported type annotation for argument '{arg.arg}'")
             if isinstance(arg_ty, _VKernelStructDef):
                 if arg.arg not in self.specialization:
                     raise _VKernelCompileError(
                         f"template argument '{arg.arg}: {arg_ty.name}' requires .jit(...) specialization"
                     )
                 binding = self.specialization[arg.arg]
-                if (
-                    not isinstance(binding, _VKernelStructBinding)
-                    or binding.schema != arg_ty
-                ):
+                if not isinstance(binding, _VKernelStructBinding) or binding.schema != arg_ty:
                     raise _VKernelCompileError(
                         f"specialization for '{arg.arg}' must be a {arg_ty.name}(...) binding"
                     )
@@ -1924,9 +1781,7 @@ class _VKernelBuilder:
             arg_val = self._new_arg_value(arg_ty)
             arg_types.append(f"{arg_val.name}: {arg_ty.render()}")
             env[arg.arg] = arg_val
-        self._emit(
-            lines, 1, f"func.func @{self.kernel_name}({', '.join(arg_types)}) {{"
-        )
+        self._emit(lines, 1, f"func.func @{self.kernel_name}({', '.join(arg_types)}) {{")
         body_lines, _ = self._compile_block(self.fn_def.body, env, 2)
         lines.extend(body_lines)
         if not any(line.strip() == "return" for line in body_lines):
@@ -1951,9 +1806,7 @@ class VKernelHandle:
         for node in module.body:
             if isinstance(node, _ast.FunctionDef) and node.name == self._py_fn.__name__:
                 return node
-        raise _VKernelCompileError(
-            f"failed to locate function AST for {self._py_fn.__name__}"
-        )
+        raise _VKernelCompileError(f"failed to locate function AST for {self._py_fn.__name__}")
 
     def mlir_text(self):
         if self._cached_text is None:
@@ -2007,25 +1860,16 @@ def vkernel(py_fn=None, *, target="a5", name=None, verify=True):
     return wrap(py_fn)
 
 
-__all__.extend(
-    [
-        "vkernel",
-        "VKernelHandle",
-        "struct",
-        "Tile",
-        "tile",
-        "const",
-        "ptr",
-        "vreg",
-        "i1",
-        "i8",
-        "i16",
-        "i32",
-        "i64",
-        "f16",
-        "bf16",
-        "f32",
-        "mask",
-        "align",
-    ]
-)
+__all__.extend([
+    "vkernel",
+    "VKernelHandle",
+    "struct",
+    "Tile",
+    "tile",
+    "const",
+    "ptr",
+    "vreg",
+    "i1", "i8", "i16", "i32", "i64",
+    "f16", "bf16", "f32",
+    "mask", "align",
+])

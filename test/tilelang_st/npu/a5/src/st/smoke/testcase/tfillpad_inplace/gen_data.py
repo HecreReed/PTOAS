@@ -22,11 +22,9 @@ import struct
 
 from cases import CASES
 
-
 # FLT_MAX for float (matching DSL PadValue.MAX)
 def _float32_from_bits(bits: int) -> float:
     return struct.unpack(">f", bits.to_bytes(4, byteorder="big", signed=False))[0]
-
 
 _FLT_MAX = _float32_from_bits(0x7F7FFFFF)  # ~3.4028235e+38
 
@@ -96,8 +94,6 @@ for case in CASES:
         golden[src_vr:dst_vr, :dst_vc] = fill_val
 
     save_case_data(case["name"], {"input": input_data, "golden": golden})
-    print(
-        f"[INFO] gen_data: {case['name']} "
-        f"src_valid={src_valid} dst_shape={dst_shape} "
-        f"fill_pad={fill_padval} dtype={dtype.__name__}"
-    )
+    print(f"[INFO] gen_data: {case['name']} "
+          f"src_valid={src_valid} dst_shape={dst_shape} "
+          f"fill_pad={fill_padval} dtype={dtype.__name__}")

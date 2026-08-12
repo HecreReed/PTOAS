@@ -38,6 +38,4 @@ for case in CASES:
 
     golden = golden.astype(dtype, copy=False)
     save_case_data(case["name"], {"input1": input1, "golden": golden})
-    print(
-        f"[INFO] gen_data: {case['name']} shape={shape} valid_shape={valid_shape} dtype={dtype.__name__}"
-    )
+    print(f"[INFO] gen_data: {case['name']} shape={shape} valid_shape={valid_shape} dtype={dtype.__name__}")

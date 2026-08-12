@@ -36,8 +36,8 @@ def _div_three_candidate_search_f32(lhs, rhs, mask):
     """
 
     # IEEE 754 Float32 bit patterns (corresponds to Div754.hpp:18-19)
-    inf_bound_u32 = pto.ui32(0x7F800000)  # Infinity bound: sign=0, exp=255, mant=0
-    sign_bit_u32 = pto.ui32(0x80000000)  # Sign bit mask: bit31=1, others=0
+    inf_bound_u32 = pto.ui32(0x7f800000)  # Infinity bound: sign=0, exp=255, mant=0
+    sign_bit_u32 = pto.ui32(0x80000000)   # Sign bit mask: bit31=1, others=0
     zero_f32 = pto.f32(0.0)
     one_f32 = pto.f32(1.0)
     neg_one_f32 = pto.f32(-1.0)
@@ -89,21 +89,17 @@ def _div_ieee754_f32_impl(src0, src1, mask):
     """
 
     # IEEE 754 Float32 bit masks and constants (corresponds to Div754.hpp:69-81)
-    F32_INF = pto.ui32(0x7F800000)  # +Infinity: sign=0, exp=255, mant=0
-    sign_extractor = pto.ui32(0x80000000)  # Sign bit mask (bit31)
-    exponent_extractor = pto.ui32(0x807FFFFF)  # Clear exponent bits [30:23]
-    exponent_normalizer = pto.ui32(0x3F800000)  # Bias 127: 1.0f reference
-    subnormal_threshold = pto.ui32(0x007FFFFF)  # Max subnormal: (1-2^-23)*2^-126
-    nan_value = pto.ui32(0x7FC00000)  # Quiet NaN: exp=255, mant=0x400000
-    min_denormal = pto.ui32(0x1)  # Smallest positive: 2^-149
+    F32_INF = pto.ui32(0x7f800000)            # +Infinity: sign=0, exp=255, mant=0
+    sign_extractor = pto.ui32(0x80000000)     # Sign bit mask (bit31)
+    exponent_extractor = pto.ui32(0x807FFFFF) # Clear exponent bits [30:23]
+    exponent_normalizer = pto.ui32(0x3F800000) # Bias 127: 1.0f reference
+    subnormal_threshold = pto.ui32(0x007FFFFF) # Max subnormal: (1-2^-23)*2^-126
+    nan_value = pto.ui32(0x7fc00000)          # Quiet NaN: exp=255, mant=0x400000
+    min_denormal = pto.ui32(0x1)              # Smallest positive: 2^-149
 
     # Subnormal normalization factors (corresponds to Div754.hpp:86-89)
-    normalize_scale_enlarge = pto.f32(
-        8388608.0
-    )  # 2^23: shifts subnormals to normal range
-    normalize_scale_reduce = pto.f32(
-        1.1920928955078125e-07
-    )  # 2^-23: inverse for result compensation
+    normalize_scale_enlarge = pto.f32(8388608.0)           # 2^23: shifts subnormals to normal range
+    normalize_scale_reduce = pto.f32(1.1920928955078125e-07) # 2^-23: inverse for result compensation
 
     src0_abs = pto.vabs(src0, mask)
     src1_abs = pto.vabs(src1, mask)
@@ -126,15 +122,11 @@ def _div_ieee754_f32_impl(src0, src1, mask):
     # NOTE: Uses EQ/LT comparison matching pto-isa Div754.hpp asymmetry:
     # - src0: EQ comparison (Div754.hpp:159) - detects exact max subnormal
     # - src1: LT comparison (Div754.hpp:166) - covers entire subnormal range
-    mask_src0_subnormal = pto.vcmp(
-        src0_abs_u32, pto.vbr(subnormal_threshold), mask, pto.CmpMode.EQ
-    )
+    mask_src0_subnormal = pto.vcmp(src0_abs_u32, pto.vbr(subnormal_threshold), mask, pto.CmpMode.EQ)
     mask_src0_normal = pto.pnot(mask_src0_subnormal, mask)
     src0_subnormal = pto.vmuls(src0, normalize_scale_enlarge, mask_src0_subnormal)
 
-    mask_src1_subnormal = pto.vcmp(
-        src1_abs_u32, pto.vbr(subnormal_threshold), mask, pto.CmpMode.LT
-    )
+    mask_src1_subnormal = pto.vcmp(src1_abs_u32, pto.vbr(subnormal_threshold), mask, pto.CmpMode.LT)
     mask_src1_normal = pto.pnot(mask_src1_subnormal, mask)
     src1_subnormal = pto.vmuls(src1, normalize_scale_enlarge, mask_src1_subnormal)
 
@@ -243,9 +235,7 @@ def _div_ieee754_f32_impl(src0, src1, mask):
     # Handle negative exponent (underflow scenarios)
     # Corresponds to Div754.hpp:275
     # Value 0x00400000 = Float32 with exp=0, mantissa bit22=1 (used for shift calculation)
-    four_million = pto.i32(
-        4194304
-    )  # Normal float 1.0 in bit representation for exponent manipulation
+    four_million = pto.i32(4194304)  # Normal float 1.0 in bit representation for exponent manipulation
     scale_abs = pto.vabs(scale, mask_pos_exp_not)
 
     shr_base_vec = pto.vdup(four_million, mask_pos_exp_not)
@@ -281,19 +271,17 @@ def _div_ieee754_f16_impl(src0, src1, mask):
     """
 
     # IEEE 754 Float16 bit masks and constants (corresponds to Div754.hpp:293-309)
-    F16_INF = pto.ui16(0x7C00)  # +Infinity: sign=0, exp=31, mant=0
-    exponent_extractor = pto.ui16(0x83FF)  # Clear exponent bits [14:10]
+    F16_INF = pto.ui16(0x7C00)              # +Infinity: sign=0, exp=31, mant=0
+    exponent_extractor = pto.ui16(0x83FF)   # Clear exponent bits [14:10]
     exponent_normalizer = pto.ui16(0x3C00)  # 1.0f16 reference (bias=15)
-    sign_extractor = pto.ui16(0x8000)  # Sign bit mask (bit15)
+    sign_extractor = pto.ui16(0x8000)       # Sign bit mask (bit15)
     subnormal_threshold = pto.ui16(0x03FF)  # Max subnormal: (1-2^-10)*2^-14
-    nan_value = pto.ui16(0x7E00)  # Quiet NaN: exp=31, mant=0x200
-    min_denormal = pto.ui16(0x1)  # Smallest positive: 2^-24
+    nan_value = pto.ui16(0x7E00)            # Quiet NaN: exp=31, mant=0x200
+    min_denormal = pto.ui16(0x1)            # Smallest positive: 2^-24
 
     # Subnormal normalization factors (corresponds to Div754.hpp:306-309)
-    normalize_scale_enlarge = pto.f16(1024.0)  # 2^10: shifts subnormals to normal range
-    normalize_scale_reduce = pto.f16(
-        0.0009765625
-    )  # 2^-10: inverse for result compensation
+    normalize_scale_enlarge = pto.f16(1024.0)             # 2^10: shifts subnormals to normal range
+    normalize_scale_reduce = pto.f16(0.0009765625)        # 2^-10: inverse for result compensation
 
     src0_abs = pto.vabs(src0, mask)
     src1_abs = pto.vabs(src1, mask)
@@ -317,15 +305,11 @@ def _div_ieee754_f16_impl(src0, src1, mask):
     # Detect subnormal numbers (denormals)
     # NOTE: F16 uses LT for BOTH src0 and src1 (symmetric detection)
     # Different from F32's asymmetric EQ/LT pattern
-    mask_src0_subnormal = pto.vcmp(
-        src0_abs_u16, pto.vbr(subnormal_threshold), mask, pto.CmpMode.LT
-    )
+    mask_src0_subnormal = pto.vcmp(src0_abs_u16, pto.vbr(subnormal_threshold), mask, pto.CmpMode.LT)
     mask_src0_normal = pto.pnot(mask_src0_subnormal, mask)
     src0_subnormal = pto.vmuls(src0, normalize_scale_enlarge, mask_src0_subnormal)
 
-    mask_src1_subnormal = pto.vcmp(
-        src1_abs_u16, pto.vbr(subnormal_threshold), mask, pto.CmpMode.LT
-    )
+    mask_src1_subnormal = pto.vcmp(src1_abs_u16, pto.vbr(subnormal_threshold), mask, pto.CmpMode.LT)
     mask_src1_normal = pto.pnot(mask_src1_subnormal, mask)
     src1_subnormal = pto.vmuls(src1, normalize_scale_enlarge, mask_src1_subnormal)
 

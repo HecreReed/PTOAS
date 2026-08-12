@@ -38,18 +38,18 @@ def main():
 
     # (golden, output, dtype, eps, count, label)
     checks = [
-        ("golden_v3.bin", "v3.bin", np.float32, 1e-4, -1, "f32"),
-        ("golden_v3_f16.bin", "v3_f16.bin", np.float16, 5e-3, 1024, "f16"),
-        ("golden_v3_bf16.bin", "v3_bf16.bin", np.uint16, 0, 1024, "bf16"),
-        ("golden_v3_x.bin", "v3_x.bin", np.float32, 1e-4, -1, "f32-exceptional"),
-        ("golden_v3_i16s.bin", "v3_i16s.bin", np.int16, 0, 1024, "i16-signed"),
-        ("golden_v3_tail.bin", "v3_tail.bin", np.float32, 1e-4, 1000, "tail"),
+        ("golden_v3.bin",      "v3.bin",      np.float32, 1e-4,  -1,   "f32"),
+        ("golden_v3_f16.bin",  "v3_f16.bin",  np.float16, 5e-3,  1024, "f16"),
+        ("golden_v3_bf16.bin", "v3_bf16.bin", np.uint16,  0,     1024, "bf16"),
+        ("golden_v3_x.bin",    "v3_x.bin",    np.float32, 1e-4,  -1,   "f32-exceptional"),
+        ("golden_v3_i16s.bin", "v3_i16s.bin", np.int16,   0,     1024, "i16-signed"),
+        ("golden_v3_tail.bin", "v3_tail.bin", np.float32, 1e-4,  1000, "tail"),
     ]
     # Overflow variants need exact match (wrapping arithmetic)
     checks_exact = [
-        ("golden_v3_i16s_ov.bin", "v3_i16s_ov.bin", np.int16, "i16-signed-overflow"),
-        ("golden_v3_i16u.bin", "v3_i16u.bin", np.uint16, "i16-unsigned"),
-        ("golden_v3_i16u_ov.bin", "v3_i16u_ov.bin", np.uint16, "i16-unsigned-overflow"),
+        ("golden_v3_i16s_ov.bin", "v3_i16s_ov.bin", np.int16,   "i16-signed-overflow"),
+        ("golden_v3_i16u.bin",    "v3_i16u.bin",    np.uint16,  "i16-unsigned"),
+        ("golden_v3_i16u_ov.bin", "v3_i16u_ov.bin", np.uint16,  "i16-unsigned-overflow"),
     ]
 
     failed = []
@@ -69,9 +69,7 @@ def main():
         if strict:
             print(f"[ERROR] {len(failed)} variant(s) failed: {', '.join(failed)}")
             sys.exit(2)
-        print(
-            f"[WARN] {len(failed)} variant(s) failed (non-gating): {', '.join(failed)}"
-        )
+        print(f"[WARN] {len(failed)} variant(s) failed (non-gating): {', '.join(failed)}")
         return
     print("[INFO] compare passed (all 9 variants)")
 

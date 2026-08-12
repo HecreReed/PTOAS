@@ -91,15 +91,7 @@ def template_trandom(
             for _round in range(0, rounds, 1):
                 _ = _round
                 tmp0, tmp1, tmp2, tmp3, tmp_key0, tmp_key1 = _philox_round(
-                    tmp0,
-                    tmp1,
-                    tmp2,
-                    tmp3,
-                    tmp_key0,
-                    tmp_key1,
-                    const0,
-                    const1,
-                    full_mask,
+                    tmp0, tmp1, tmp2, tmp3, tmp_key0, tmp_key1, const0, const1, full_mask
                 )
 
             tmp_l0, tmp_h0 = pto.vintlv(tmp0, tmp2)
@@ -112,16 +104,10 @@ def template_trandom(
             mask2, remained = pto.make_mask(dtype, remained)
             mask3, remained = pto.make_mask(dtype, remained)
 
-            pto.vsts(tmp0, dst[row, TRANDOM_ONCE_REPEAT * repeat * lanes :], mask0)
-            pto.vsts(
-                tmp1, dst[row, (TRANDOM_ONCE_REPEAT * repeat + 1) * lanes :], mask1
-            )
-            pto.vsts(
-                tmp2, dst[row, (TRANDOM_ONCE_REPEAT * repeat + 2) * lanes :], mask2
-            )
-            pto.vsts(
-                tmp3, dst[row, (TRANDOM_ONCE_REPEAT * repeat + 3) * lanes :], mask3
-            )
+            pto.vsts(tmp0, dst[row, TRANDOM_ONCE_REPEAT * repeat * lanes:], mask0)
+            pto.vsts(tmp1, dst[row, (TRANDOM_ONCE_REPEAT * repeat + 1) * lanes:], mask1)
+            pto.vsts(tmp2, dst[row, (TRANDOM_ONCE_REPEAT * repeat + 2) * lanes:], mask2)
+            pto.vsts(tmp3, dst[row, (TRANDOM_ONCE_REPEAT * repeat + 3) * lanes:], mask3)
 
             tail_counter_add = (valid_cols - 1) % lanes + 1
             counter_add = scalar.select(

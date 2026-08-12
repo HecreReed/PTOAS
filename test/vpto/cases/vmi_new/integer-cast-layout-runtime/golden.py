@@ -33,98 +33,18 @@ def generate(output_dir: Path) -> None:
     u8 = np.arange(256, dtype=np.uint8)
     i8 = np.arange(-128, 128, dtype=np.int16).astype(np.int8)
     u16 = repeat(
-        [
-            0,
-            1,
-            127,
-            128,
-            255,
-            256,
-            257,
-            32767,
-            32768,
-            65534,
-            65535,
-            0x1234,
-            0xABCD,
-            0xFF80,
-            0x00FF,
-            0x0100,
-        ],
-        128,
-        np.uint16,
-    )
+        [0, 1, 127, 128, 255, 256, 257, 32767, 32768, 65534, 65535,
+         0x1234, 0xABCD, 0xFF80, 0x00FF, 0x0100], 128, np.uint16)
     i16 = repeat(
-        [
-            -32768,
-            -32767,
-            -1025,
-            -257,
-            -256,
-            -255,
-            -129,
-            -128,
-            -127,
-            -1,
-            0,
-            1,
-            127,
-            128,
-            255,
-            256,
-            257,
-            32767,
-        ],
-        128,
-        np.int16,
-    )
+        [-32768, -32767, -1025, -257, -256, -255, -129, -128, -127,
+         -1, 0, 1, 127, 128, 255, 256, 257, 32767], 128, np.int16)
     u32 = repeat(
-        [
-            0,
-            1,
-            127,
-            128,
-            255,
-            256,
-            65535,
-            65536,
-            0x12345678,
-            0x80000000,
-            0xFFFFFF80,
-            0xFFFFFFFF,
-            0xA5A55A5A,
-        ],
-        64,
-        np.uint32,
-    )
+        [0, 1, 127, 128, 255, 256, 65535, 65536, 0x12345678,
+         0x80000000, 0xFFFFFF80, 0xFFFFFFFF, 0xA5A55A5A], 64, np.uint32)
     i32 = repeat(
-        [
-            -2147483648,
-            -2147483647,
-            -65537,
-            -65536,
-            -32769,
-            -32768,
-            -257,
-            -256,
-            -129,
-            -128,
-            -1,
-            0,
-            1,
-            127,
-            128,
-            255,
-            256,
-            32767,
-            32768,
-            65535,
-            65536,
-            2147483647,
-        ],
-        64,
-        np.int32,
-    )
+        [-2147483648, -2147483647, -65537, -65536, -32769, -32768,
+         -257, -256, -129, -128, -1, 0, 1, 127, 128, 255, 256, 32767,
+         32768, 65535, 65536, 2147483647], 64, np.int32)
 
     output_dir.mkdir(parents=True, exist_ok=True)
     write_case(output_dir, 1, u8, [u8.astype(np.uint16), u8.astype(np.uint32)])
@@ -144,8 +64,7 @@ def generate(output_dir: Path) -> None:
         23: zero_gap_u16.astype(np.uint32),
     }.items():
         np.full(expected.nbytes, SENTINEL, dtype=np.uint8).tofile(
-            output_dir / f"v{index}.bin"
-        )
+            output_dir / f"v{index}.bin")
         expected.tofile(output_dir / f"golden_v{index}.bin")
 
     assert np.any(u16.astype(np.uint8) != np.minimum(u16, 255).astype(np.uint8))

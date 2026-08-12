@@ -15,9 +15,7 @@ import numpy as np
 ROWS = 8
 GROUP_SIZE = 32
 VALUES = np.array([0.0, 1.0, -1.0, 0.5, 2.0, -2.0, 4.0, -4.0], dtype=np.float32)
-F8E4M3FN_BYTES = np.array(
-    [0x00, 0x38, 0xB8, 0x30, 0x40, 0xC0, 0x48, 0xC8], dtype=np.uint8
-)
+F8E4M3FN_BYTES = np.array([0x00, 0x38, 0xB8, 0x30, 0x40, 0xC0, 0x48, 0xC8], dtype=np.uint8)
 SENTINEL_F32 = np.float32(-777.0)
 SENTINEL_U8 = np.uint8(0xA5)
 
@@ -29,9 +27,7 @@ def generate(output_dir: Path) -> None:
         value_idx = row % len(VALUES)
         if row == 0:
             src[row, :] = np.tile(VALUES, GROUP_SIZE // len(VALUES))
-            golden_out8[row, :] = np.tile(
-                F8E4M3FN_BYTES, GROUP_SIZE // len(F8E4M3FN_BYTES)
-            )
+            golden_out8[row, :] = np.tile(F8E4M3FN_BYTES, GROUP_SIZE // len(F8E4M3FN_BYTES))
         else:
             src[row, :] = VALUES[value_idx]
             golden_out8[row, :] = F8E4M3FN_BYTES[value_idx]

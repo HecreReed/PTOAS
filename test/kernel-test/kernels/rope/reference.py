@@ -18,9 +18,7 @@ from .tile_config import DEFAULT_TILE, DTYPES, MODES, TileConfig
 SEED = 42
 
 
-def cpu_rotary_half(
-    x: torch.Tensor, cos: torch.Tensor, sin: torch.Tensor
-) -> torch.Tensor:
+def cpu_rotary_half(x: torch.Tensor, cos: torch.Tensor, sin: torch.Tensor) -> torch.Tensor:
     x1, x2 = torch.chunk(x, 2, -1)
     x_new = torch.cat((-x2, x1), dim=-1)
     cos_b = cos.unsqueeze(1)
@@ -28,9 +26,7 @@ def cpu_rotary_half(
     return cos_b * x + sin_b * x_new
 
 
-def cpu_rotary_interleave(
-    x: torch.Tensor, cos: torch.Tensor, sin: torch.Tensor
-) -> torch.Tensor:
+def cpu_rotary_interleave(x: torch.Tensor, cos: torch.Tensor, sin: torch.Tensor) -> torch.Tensor:
     x1 = x[..., ::2]
     x2 = x[..., 1::2]
     x_new = torch.stack((-x2, x1), dim=-1).reshape(x.shape)

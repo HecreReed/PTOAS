@@ -67,9 +67,7 @@ def make_operator_spec(
     create_backend: Callable[[str], BackendAdapter],
     list_cases: Callable[[str], Mapping[str, object]],
     verify: Callable[[str, object, object], CaseResult] = _empty_verify,
-    cycle_fields: Callable[
-        [str, object, BackendAdapter], Mapping[str, object]
-    ] = _empty_cycle_fields,
+    cycle_fields: Callable[[str, object, BackendAdapter], Mapping[str, object]] = _empty_cycle_fields,
     summary: str = "",
 ) -> OperatorSpec:
     """Build a normalized operator spec with immutable backend names."""
@@ -106,9 +104,7 @@ class KernelRegistry:
 
 
 def _resolve_kernel_dir(kernel_dir: str | os.PathLike[str] | None) -> Path:
-    candidate = (
-        DEFAULT_KERNEL_ROOT if kernel_dir is None else Path(kernel_dir).expanduser()
-    )
+    candidate = DEFAULT_KERNEL_ROOT if kernel_dir is None else Path(kernel_dir).expanduser()
     resolved = candidate.resolve()
     if not resolved.exists():
         raise RegistryError(f"kernel directory does not exist: {resolved}")
@@ -120,10 +116,7 @@ def _resolve_kernel_dir(kernel_dir: str | os.PathLike[str] | None) -> Path:
 def _looks_like_kernel_package_dir(kernel_dir: Path) -> bool:
     if not (kernel_dir / "__init__.py").is_file():
         return False
-    return any(
-        (kernel_dir / name).exists()
-        for name in ("backends.py", "spec.py", "cycle_metrics.py")
-    )
+    return any((kernel_dir / name).exists() for name in ("backends.py", "spec.py", "cycle_metrics.py"))
 
 
 def _namespace_package_name(kernel_dir: Path) -> str:
@@ -136,9 +129,7 @@ def _ensure_namespace_package(module_name: str, search_path: Path) -> None:
     if existing is not None:
         module_path = getattr(existing, "__path__", None)
         if module_path is None:
-            raise RegistryError(
-                f"module namespace conflict while loading kernels: {module_name}"
-            )
+            raise RegistryError(f"module namespace conflict while loading kernels: {module_name}")
         if str(search_path) not in module_path:
             module_path.append(str(search_path))
         return
@@ -225,7 +216,6 @@ def _load_from_module(module_name: str, registry: KernelRegistry) -> None:
     raise RegistryError(
         f"kernel module {module_name!r} must expose register(), get_kernel_spec(), or KERNEL_SPEC"
     )
-
 
 def load_registry(kernel_dir: str | os.PathLike[str] | None = None) -> KernelRegistry:
     """Load all kernel operators from the default or requested kernel directory."""

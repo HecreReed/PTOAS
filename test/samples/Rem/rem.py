@@ -48,18 +48,14 @@ def build():
                 c32 = arith.ConstantOp(IndexType.get(ctx), 32).result
 
                 arg0, arg1, arg2 = entry.arguments
-
+                
                 tv0 = pto.MakeTensorViewOp(tv2_f32, arg0, [c32, c32], [c32, c1]).result
                 tv1 = pto.MakeTensorViewOp(tv2_f32, arg1, [c32, c32], [c32, c1]).result
                 tv2 = pto.MakeTensorViewOp(tv2_f32, arg2, [c32, c32], [c32, c1]).result
 
                 # Replaced immediate numbers with constants c0 and c32
-                sv0 = pto.PartitionViewOp(
-                    tile_view_32, tv0, offsets=[c0, c0], sizes=[c32, c32]
-                ).result
-                sv1 = pto.PartitionViewOp(
-                    tile_view_32, tv1, offsets=[c0, c0], sizes=[c32, c32]
-                ).result
+                sv0 = pto.PartitionViewOp(tile_view_32, tv0, offsets=[c0, c0], sizes=[c32, c32]).result
+                sv1 = pto.PartitionViewOp(tile_view_32, tv1, offsets=[c0, c0], sizes=[c32, c32]).result
 
                 tb0 = pto.AllocTileOp(tile_buf_32).result
                 tb1 = pto.AllocTileOp(tile_buf_32).result
@@ -72,9 +68,7 @@ def build():
                 pto.TRemOp(tb0, tb1, tmp, tb2)
 
                 # Replaced immediate numbers with constants c0 and c32
-                sv2 = pto.PartitionViewOp(
-                    tile_view_32, tv2, offsets=[c0, c0], sizes=[c32, c32]
-                ).result
+                sv2 = pto.PartitionViewOp(tile_view_32, tv2, offsets=[c0, c0], sizes=[c32, c32]).result
 
                 pto.TStoreOp(None, tb2, sv2)
 

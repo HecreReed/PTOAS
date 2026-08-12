@@ -22,24 +22,12 @@
 #endif
 
 #if defined(__CCE_AICORE__) && defined(__NPU_ARCH__) && (__NPU_ARCH__ == 2201)
-typedef struct {
-    unsigned char v;
-} hifloat8_t;
-typedef struct {
-    unsigned char v;
-} float8_e4m3_t;
-typedef struct {
-    unsigned char v;
-} float8_e5m2_t;
-typedef struct {
-    unsigned char v;
-} float8_e8m0_t;
-typedef struct {
-    unsigned char v;
-} float4_e1m2x2_t;
-typedef struct {
-    unsigned char v;
-} float4_e2m1x2_t;
+typedef struct { unsigned char v; } hifloat8_t;
+typedef struct { unsigned char v; } float8_e4m3_t;
+typedef struct { unsigned char v; } float8_e5m2_t;
+typedef struct { unsigned char v; } float8_e8m0_t;
+typedef struct { unsigned char v; } float4_e1m2x2_t;
+typedef struct { unsigned char v; } float4_e2m1x2_t;
 #endif
 #include <stdint.h>
 
@@ -66,9 +54,8 @@ struct MrgSortExecutedNumList {
 #include "acl/acl.h"
 #endif
 
-extern "C" __global__[aicore] void vbr_u8_kernel_2d(__gm__ uint8_t* v1);
+extern "C" __global__ [aicore] void vbr_u8_kernel_2d(__gm__ uint8_t *v1);
 
-void LaunchVbr_u8_kernel_2d(uint8_t* v1, void* stream)
-{
-    vbr_u8_kernel_2d<<<1, nullptr, stream>>>((__gm__ uint8_t*)v1);
+void LaunchVbr_u8_kernel_2d(uint8_t *v1, void *stream) {
+  vbr_u8_kernel_2d<<<1, nullptr, stream>>>((__gm__ uint8_t *)v1);
 }

@@ -8,13 +8,8 @@
 
 from ptoas.mlir.ir import (
     UnitAttr,
-    Context,
-    Location,
-    InsertionPoint,
-    IndexType,
-    IntegerType,
-    F32Type,
-    StringAttr,
+    Context, Location, InsertionPoint,
+    IndexType, IntegerType, F16Type, F32Type, StringAttr
 )
 from ptoas.mlir.dialects import func, arith, scf, pto, builtin
 from ptoas.mlir.dialects.arith import CmpIPredicate
@@ -25,12 +20,8 @@ def _idx_const(v: int):
 
 
 def build(
-    M=32,
-    K=256,
-    N=32,
-    validM=32,
-    validK=256,
-    validN=32,
+    M=32, K=256, N=32,
+    validM=32, validK=256, validN=32,
     BASEK=32,
     # 下面两个 fractal size 你按工程真实 TileConfig 改一下：
     s_fractal_ab=512,
@@ -67,9 +58,9 @@ def build(
         i1 = IntegerType.get_signless(1)
 
         # ---- tensor view types ----
-        tv2_a = pto.TensorViewType.get(2, t_a)  # [validM, validK]
-        tv2_b = pto.TensorViewType.get(2, t_b)  # [validK, validN]
-        tv2_out = pto.TensorViewType.get(2, t_out)  # [validM, validN]
+        tv2_a = pto.TensorViewType.get(2, t_a)        # [validM, validK]
+        tv2_b = pto.TensorViewType.get(2, t_b)        # [validK, validN]
+        tv2_out = pto.TensorViewType.get(2, t_out)    # [validM, validN]
         tv2_bias = pto.TensorViewType.get(2, t_bias)  # [1, validN]
 
         # ---- tile view types ----
@@ -132,16 +123,10 @@ def build(
         # ---- tile buf types (each has its own cfg) ----
         tile_buf_aMat = pto.TileBufType.get([M, BASEK], t_a, mat, [M, BASEK], cfg_mat)
         tile_buf_bMat = pto.TileBufType.get([BASEK, N], t_b, mat, [BASEK, N], cfg_mat)
-        tile_buf_biasData = pto.TileBufType.get(
-            [1, N], t_bias, mat, [1, N], cfg_mat_bias
-        )
+        tile_buf_biasData = pto.TileBufType.get([1, N], t_bias, mat, [1, N], cfg_mat_bias)
 
-        tile_buf_aTile = pto.TileBufType.get(
-            [M, BASEK], t_a, left, [M, BASEK], cfg_left
-        )
-        tile_buf_bTile = pto.TileBufType.get(
-            [BASEK, N], t_b, right, [BASEK, N], cfg_right
-        )
+        tile_buf_aTile = pto.TileBufType.get([M, BASEK], t_a, left, [M, BASEK], cfg_left)
+        tile_buf_bTile = pto.TileBufType.get([BASEK, N], t_b, right, [BASEK, N], cfg_right)
         tile_buf_cTile = pto.TileBufType.get([M, N], t_out, acc, [M, N], cfg_acc)
         tile_buf_biasTile = pto.TileBufType.get([1, N], t_bias, bias, [1, N], cfg_bias)
 
@@ -175,9 +160,7 @@ def build(
             tvA = pto.MakeTensorViewOp(tv2_a, a_ptr, [cM, cK], [cK, c1]).result
             tvB = pto.MakeTensorViewOp(tv2_b, b_ptr, [cK, cN], [cN, c1]).result
             tvOut = pto.MakeTensorViewOp(tv2_out, out_ptr, [cM, cN], [cN, c1]).result
-            tvBias = pto.MakeTensorViewOp(
-                tv2_bias, bias_ptr, [cOne, cN], [cN, c1]
-            ).result
+            tvBias = pto.MakeTensorViewOp(tv2_bias, bias_ptr, [cOne, cN], [cN, c1]).result
 
             # ---- alloc tiles ----
             aMatTile = pto.AllocTileOp(tile_buf_aMat).result

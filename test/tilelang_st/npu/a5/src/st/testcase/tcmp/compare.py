@@ -30,21 +30,15 @@ def main():
         dst_dtype = case["dst_dtype"]
         valid_shape = case["valid_shape"]
         vr, vc = valid_shape
-
+        
         # Only compare the packed mask region: rows x (cols//8)
         packed_cols = vc // 8
 
-        golden = np.fromfile(
-            os.path.join(case_dir, "golden.bin"), dtype=dst_dtype
-        ).reshape(shape)
-        output = np.fromfile(
-            os.path.join(case_dir, "output.bin"), dtype=dst_dtype
-        ).reshape(shape)
+        golden = np.fromfile(os.path.join(case_dir, "golden.bin"), dtype=dst_dtype).reshape(shape)
+        output = np.fromfile(os.path.join(case_dir, "output.bin"), dtype=dst_dtype).reshape(shape)
 
         # Compare packed mask output in valid region
-        ok = result_cmp(
-            golden[:vr, :packed_cols], output[:vr, :packed_cols], case["eps"]
-        )
+        ok = result_cmp(golden[:vr, :packed_cols], output[:vr, :packed_cols], case["eps"])
         if ok:
             print(style_pass(f"[INFO] {case['name']}: compare passed"))
         else:

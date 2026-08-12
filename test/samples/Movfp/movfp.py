@@ -110,28 +110,16 @@ def build():
                 ctx,
             )
 
-            tile_buf_a_mat = pto.TileBufType.get(
-                [M, K], f16, mat, [M, K], cfg_a_mat, ctx
-            )
-            tile_buf_b_mat = pto.TileBufType.get(
-                [K, N], f16, mat, [K, N], cfg_b_mat, ctx
-            )
+            tile_buf_a_mat = pto.TileBufType.get([M, K], f16, mat, [M, K], cfg_a_mat, ctx)
+            tile_buf_b_mat = pto.TileBufType.get([K, N], f16, mat, [K, N], cfg_b_mat, ctx)
             tile_buf_a = pto.TileBufType.get([M, K], f16, left, [M, K], cfg_left, ctx)
             tile_buf_b = pto.TileBufType.get([K, N], f16, right, [K, N], cfg_right, ctx)
-            tile_buf_acc = pto.TileBufType.get(
-                [M_ALIGN, N], f32, acc, [M, N], cfg_acc, ctx
-            )
-            tile_buf_out_mat = pto.TileBufType.get(
-                [M_ALIGN, N], i8, mat, [M, N], cfg_out_mat, ctx
-            )
+            tile_buf_acc = pto.TileBufType.get([M_ALIGN, N], f32, acc, [M, N], cfg_acc, ctx)
+            tile_buf_out_mat = pto.TileBufType.get([M_ALIGN, N], i8, mat, [M, N], cfg_out_mat, ctx)
 
             # fp scaling: load into MAT then TMOV -> SCALING
-            tile_buf_fp_mat = pto.TileBufType.get(
-                [1, 16], ui64, mat, [1, 16], cfg_fp, ctx
-            )
-            tile_buf_fp_scaling = pto.TileBufType.get(
-                [1, 16], ui64, scaling, [1, 16], cfg_fp, ctx
-            )
+            tile_buf_fp_mat = pto.TileBufType.get([1, 16], ui64, mat, [1, 16], cfg_fp, ctx)
+            tile_buf_fp_scaling = pto.TileBufType.get([1, 16], ui64, scaling, [1, 16], cfg_fp, ctx)
 
             # Function takes 4 arguments: a_ptr, b_ptr, fp_ptr, out_ptr (f32)
             # Note: TMOV_FP produces a MAT (int8) tile; we keep that as an internal
@@ -156,25 +144,13 @@ def build():
 
                 tv_a = pto.MakeTensorViewOp(tv2_f16, arg_a, [cM, cK], [cK, c1]).result
                 tv_b = pto.MakeTensorViewOp(tv2_f16, arg_b, [cK, cN], [cN, c1]).result
-                tv_fp = pto.MakeTensorViewOp(
-                    tv2_ui64, arg_fp, [c1, c16], [c16, c1]
-                ).result
-                tv_out = pto.MakeTensorViewOp(
-                    tv2_f32, arg_out, [cM, cN], [cN, c1]
-                ).result
+                tv_fp = pto.MakeTensorViewOp(tv2_ui64, arg_fp, [c1, c16], [c16, c1]).result
+                tv_out = pto.MakeTensorViewOp(tv2_f32, arg_out, [cM, cN], [cN, c1]).result
 
-                sv_a = pto.PartitionViewOp(
-                    tile_view_a, tv_a, offsets=[c0, c0], sizes=[cM, cK]
-                ).result
-                sv_b = pto.PartitionViewOp(
-                    tile_view_b, tv_b, offsets=[c0, c0], sizes=[cK, cN]
-                ).result
-                sv_fp = pto.PartitionViewOp(
-                    tile_view_fp, tv_fp, offsets=[c0, c0], sizes=[c1, c16]
-                ).result
-                sv_out = pto.PartitionViewOp(
-                    tile_view_out, tv_out, offsets=[c0, c0], sizes=[cM, cN]
-                ).result
+                sv_a = pto.PartitionViewOp(tile_view_a, tv_a, offsets=[c0, c0], sizes=[cM, cK]).result
+                sv_b = pto.PartitionViewOp(tile_view_b, tv_b, offsets=[c0, c0], sizes=[cK, cN]).result
+                sv_fp = pto.PartitionViewOp(tile_view_fp, tv_fp, offsets=[c0, c0], sizes=[c1, c16]).result
+                sv_out = pto.PartitionViewOp(tile_view_out, tv_out, offsets=[c0, c0], sizes=[cM, cN]).result
 
                 a_mat = pto.AllocTileOp(tile_buf_a_mat).result
                 b_mat = pto.AllocTileOp(tile_buf_b_mat).result

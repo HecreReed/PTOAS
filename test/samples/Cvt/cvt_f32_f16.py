@@ -16,17 +16,7 @@ Pipeline:
     make_tensor_view -> partition_view -> alloc_tile -> tload -> tcvt -> tstore
 """
 
-from ptoas.mlir.ir import (
-    Attribute,
-    Context,
-    F16Type,
-    F32Type,
-    IndexType,
-    InsertionPoint,
-    Location,
-    Module,
-    UnitAttr,
-)
+from ptoas.mlir.ir import Attribute, Context, F16Type, F32Type, IndexType, InsertionPoint, Location, Module, UnitAttr
 from ptoas.mlir.dialects import arith, func, pto
 
 
@@ -50,9 +40,9 @@ def build():
             part_view_f16 = pto.PartitionTensorViewType.get([32, 32], f16, ctx)
 
             vec = pto.AddressSpaceAttr.get(pto.AddressSpace.VEC, ctx)
-            bl = pto.BLayoutAttr.get(pto.BLayout.RowMajor, ctx)
-            sl = pto.SLayoutAttr.get(pto.SLayout.NoneBox, ctx)
-            pd = pto.PadValueAttr.get(pto.PadValue.Null, ctx)
+            bl  = pto.BLayoutAttr.get(pto.BLayout.RowMajor, ctx)
+            sl  = pto.SLayoutAttr.get(pto.SLayout.NoneBox, ctx)
+            pd  = pto.PadValueAttr.get(pto.PadValue.Null, ctx)
 
             fractal_ab_size = pto.TileConfig.fractalABSize
             cfg = pto.TileBufConfigAttr.get(bl, sl, fractal_ab_size, pd, ctx)
@@ -70,27 +60,19 @@ def build():
                 entry = fn.add_entry_block()
 
             with InsertionPoint(entry):
-                c0 = arith.ConstantOp(IndexType.get(ctx), 0).result
-                c1 = arith.ConstantOp(IndexType.get(ctx), 1).result
+                c0  = arith.ConstantOp(IndexType.get(ctx), 0).result
+                c1  = arith.ConstantOp(IndexType.get(ctx), 1).result
                 c32 = arith.ConstantOp(IndexType.get(ctx), 32).result
 
                 arg_src, arg_dst = entry.arguments
 
                 # Build tensor views over the raw pointers.
-                tv_src = pto.MakeTensorViewOp(
-                    tv2_f32, arg_src, [c32, c32], [c32, c1]
-                ).result
-                tv_dst = pto.MakeTensorViewOp(
-                    tv2_f16, arg_dst, [c32, c32], [c32, c1]
-                ).result
+                tv_src = pto.MakeTensorViewOp(tv2_f32, arg_src, [c32, c32], [c32, c1]).result
+                tv_dst = pto.MakeTensorViewOp(tv2_f16, arg_dst, [c32, c32], [c32, c1]).result
 
                 # Partition views select the 32x32 tile window.
-                sv_src = pto.PartitionViewOp(
-                    part_view_f32, tv_src, offsets=[c0, c0], sizes=[c32, c32]
-                ).result
-                sv_dst = pto.PartitionViewOp(
-                    part_view_f16, tv_dst, offsets=[c0, c0], sizes=[c32, c32]
-                ).result
+                sv_src = pto.PartitionViewOp(part_view_f32, tv_src, offsets=[c0, c0], sizes=[c32, c32]).result
+                sv_dst = pto.PartitionViewOp(part_view_f16, tv_dst, offsets=[c0, c0], sizes=[c32, c32]).result
 
                 # Allocate tile buffers.
                 tb_src = pto.AllocTileOp(tile_buf_f32).result

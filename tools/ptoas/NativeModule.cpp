@@ -20,24 +20,22 @@ namespace py = pybind11;
 
 namespace {
 
-int runPTOASFromPython(const std::vector<std::string>& arguments)
-{
-    std::vector<std::string> storage = arguments;
-    std::vector<char*> argv;
-    argv.reserve(storage.size());
-    for (std::string& argument : storage)
-        argv.push_back(argument.data());
+int runPTOASFromPython(const std::vector<std::string> &arguments) {
+  std::vector<std::string> storage = arguments;
+  std::vector<char *> argv;
+  argv.reserve(storage.size());
+  for (std::string &argument : storage)
+    argv.push_back(argument.data());
 
-    py::gil_scoped_release release;
-    return mlir::pto::runPTOAS(static_cast<int>(argv.size()), argv.data());
+  py::gil_scoped_release release;
+  return mlir::pto::runPTOAS(static_cast<int>(argv.size()), argv.data());
 }
 
 } // namespace
 
-PYBIND11_MODULE(_core, module)
-{
-    module.doc() = "PTOAS compiler and PTO dialect native bindings";
-    py::module_::import("ptoas.mlir.ir");
-    mlir::pto::python::populatePTODialectBindings(module);
-    module.def("main", &runPTOASFromPython, py::arg("argv"));
+PYBIND11_MODULE(_core, module) {
+  module.doc() = "PTOAS compiler and PTO dialect native bindings";
+  py::module_::import("ptoas.mlir.ir");
+  mlir::pto::python::populatePTODialectBindings(module);
+  module.def("main", &runPTOASFromPython, py::arg("argv"));
 }

@@ -28,8 +28,8 @@ from ptodsl import pto
 # (name, dtype, rows, cols). rows/cols chosen so the major dim is 32-byte
 # aligned: cols * sizeof(dtype) % 32 == 0.
 CASE_SHAPES = [
-    ("f32_8x64", pto.f32, 8, 64),  # wide b32: RowWise path
-    ("f32_64x8", pto.f32, 64, 8),  # tall b32: ColWise path
+    ("f32_8x64", pto.f32, 8, 64),    # wide b32: RowWise path
+    ("f32_64x8", pto.f32, 64, 8),    # tall b32: ColWise path
     ("f32_32x32", pto.f32, 32, 32),  # square b32
     ("i32_8x64", pto.i32, 8, 64),
     ("f16_64x16", pto.f16, 64, 16),  # tall b16 (16*2=32 aligned)
@@ -69,15 +69,13 @@ for _name, _dtype, _rows, _cols in CASE_SHAPES:
 
 # numpy dtype mapping for input generation + golden
 _PTO_TO_NP = {
-    pto.f32: np.float32,
-    pto.f16: np.float16,
+    pto.f32: np.float32, pto.f16: np.float16,
     pto.i32: np.int32,
 }
 
 
 def _make_inputs(name, dtype, rows, cols):
     import zlib
-
     np_dtype = _PTO_TO_NP[dtype]
     np.random.seed(zlib.crc32(name.encode("utf-8")) & 0xFFFFFFFF)
     # use small ints in float range to avoid f16 overflow / bf16 precision loss
@@ -95,9 +93,7 @@ for _name, _dtype, _rows, _cols in CASE_SHAPES:
         golden_output_case(
             "ttrans_" + _name,
             _ttrans_kernels[_name],
-            inputs=lambda _n=_name, _d=_dtype, _r=_rows, _c=_cols: _make_inputs(
-                _n, _d, _r, _c
-            ),
+            inputs=lambda _n=_name, _d=_dtype, _r=_rows, _c=_cols: _make_inputs(_n, _d, _r, _c),
             expected=_make_expected,
             rtol=1e-3,  # f16/bf16 need looser tol
             atol=1e-3,

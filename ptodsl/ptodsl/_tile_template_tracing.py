@@ -181,19 +181,13 @@ class _TileProxy:
             or not _is_index_like(key[0])
             or not isinstance(key[1], slice)
         ):
-            raise TypeError(
-                "tile-template tracing only supports tile[row, col:] indexing"
-            )
+            raise TypeError("tile-template tracing only supports tile[row, col:] indexing")
         row, col_slice = key
         if col_slice.stop is not None or col_slice.step is not None:
-            raise TypeError(
-                "tile-template tracing only supports tile[row, col:] slices"
-            )
+            raise TypeError("tile-template tracing only supports tile[row, col:] slices")
         col = 0 if col_slice.start is None else col_slice.start
         if not _is_index_like(col):
-            raise TypeError(
-                "tile-template tracing only supports integer/index column offsets"
-            )
+            raise TypeError("tile-template tracing only supports integer/index column offsets")
         _validate_static_bound(row, self._spec.shape[0], "row")
         _validate_static_bound(col, self._spec.shape[1], "column")
         return _TileSlice(self, row=row, col=col)
@@ -246,9 +240,7 @@ class _LoopHandle:
                 + "; ".join(pieces)
             )
         ordered = tuple(kwargs[name] for name in self._state_names)
-        self._trace._yield_loop_values(
-            ordered, surface="loop.yield_state", from_named_state=True
-        )
+        self._trace._yield_loop_values(ordered, surface="loop.yield_state", from_named_state=True)
 
 
 class _VecScopeCM:
@@ -298,8 +290,7 @@ class _TraceBuilder(TracingRuntime):
                 kernel_kind="vector",
                 mode="auto",
                 module_style=ModuleStyle.NESTED,
-                source_file=inspect.getsourcefile(descriptor.py_fn)
-                or inspect.getfile(descriptor.py_fn),
+                source_file=inspect.getsourcefile(descriptor.py_fn) or inspect.getfile(descriptor.py_fn),
                 source_line=getattr(descriptor.py_fn.__code__, "co_firstlineno", None),
             )
         )
@@ -325,9 +316,7 @@ class _TraceBuilder(TracingRuntime):
                 )
             spec = self.tile_specs.get(param_name)
             if spec is None:
-                raise ValueError(
-                    f"missing specialization for Tile parameter {param_name!r}"
-                )
+                raise ValueError(f"missing specialization for Tile parameter {param_name!r}")
             ordered_specs.append((param_name, spec))
             arg_types.append(spec.mlir_type())
         self._ordered_specs = ordered_specs
@@ -356,9 +345,7 @@ class _TraceBuilder(TracingRuntime):
             raise ValueError("for_() accepts either iter_args= or state=, not both")
         if state is not None:
             if not hasattr(state, "items"):
-                raise TypeError(
-                    "for_(..., state=...) expects a mapping of name -> initial value"
-                )
+                raise TypeError("for_(..., state=...) expects a mapping of name -> initial value")
             for name in state:
                 if not isinstance(name, str) or not name:
                     raise TypeError("for_ state names must be non-empty strings")
@@ -369,14 +356,10 @@ class _TraceBuilder(TracingRuntime):
 
     def _yield_loop_values(self, vals, *, surface: str, from_named_state: bool):
         if not self._loop_stack:
-            raise RuntimeError(
-                f"{surface}(...) may only be used inside a tile-template for_ block"
-            )
+            raise RuntimeError(f"{surface}(...) may only be used inside a tile-template for_ block")
         frame = self._loop_stack[-1]
         if frame["kind"] != "for":
-            raise RuntimeError(
-                f"{surface}(...) may only be used inside a tile-template for_ block"
-            )
+            raise RuntimeError(f"{surface}(...) may only be used inside a tile-template for_ block")
         if frame["state_names"] and not from_named_state:
             raise RuntimeError(
                 f"{surface}(...) is ambiguous for tile-template for_ with named state; "
@@ -418,9 +401,7 @@ class _TraceBuilder(TracingRuntime):
         cached = self._tile_ptr_cache.get(cache_key)
         if cached is not None:
             return cached
-        ptr_type = _resolve(
-            _ptr(_scalar_descriptor(tile.element_type), tile._spec.memory_space)
-        )
+        ptr_type = _resolve(_ptr(_scalar_descriptor(tile.element_type), tile._spec.memory_space))
         ptr_value = _Value(_pto.TileBufAddrOp(ptr_type, tile._arg_value).result)
         self._tile_ptr_cache[cache_key] = ptr_value
         return ptr_value
@@ -506,9 +487,7 @@ class _TraceBuilder(TracingRuntime):
                     raise RuntimeError(
                         "tile-template for_ with named state requires explicit loop.yield_state(...)"
                     )
-                raise RuntimeError(
-                    "tile-template for_ with iter_args requires explicit yield_(...)"
-                )
+                raise RuntimeError("tile-template for_ with iter_args requires explicit yield_(...)")
             if not frame["iter_args"]:
                 scf.YieldOp([])
         frame["ip"].__exit__(exc_type, exc, tb)
@@ -604,15 +583,11 @@ def yield_(*vals):
 
 
 def get_lanes(dtype: ScalarType) -> _Value:
-    return require_active_runtime("get_lanes", expected_type=_TraceBuilder).index_const(
-        dtype.lanes
-    )
+    return require_active_runtime("get_lanes", expected_type=_TraceBuilder).index_const(dtype.lanes)
 
 
 def scalar_const(value: int, dtype: ScalarType) -> _Value:
-    return require_active_runtime(
-        "scalar_const", expected_type=_TraceBuilder
-    ).scalar_const(value, dtype)
+    return require_active_runtime("scalar_const", expected_type=_TraceBuilder).scalar_const(value, dtype)
 
 
 def make_mask(dtype: ScalarType, remained) -> tuple[_MaskValue, _Value]:
@@ -644,25 +619,16 @@ def vlds(tile_slice: _TileSlice) -> _VectorValue:
         raise TypeError("tile-template tracing only supports vlds(tile[row, col:])")
     ptr_value = trace.ensure_tile_ptr(tile_slice.tile)
     offset = trace.materialize_linear_offset(tile_slice)
-    vector_ty = _resolve(
-        _vreg_type(
-            tile_slice.tile.element_type.lanes,
-            _scalar_descriptor(tile_slice.tile.element_type),
-        )
-    )
+    vector_ty = _resolve(_vreg_type(tile_slice.tile.element_type.lanes, _scalar_descriptor(tile_slice.tile.element_type)))
     result = _pto.VldsOp(vector_ty, None, ptr_value.value, offset.value).result
     return _VectorValue(result, tile_slice.tile.element_type)
 
 
 def vadd(lhs: _VectorValue, rhs: _VectorValue, mask: _MaskValue) -> _VectorValue:
     if lhs.dtype != rhs.dtype:
-        raise TypeError(
-            "tile-template tracing expects vadd operands to use the same dtype"
-        )
+        raise TypeError("tile-template tracing expects vadd operands to use the same dtype")
     if lhs.dtype != mask.dtype:
-        raise TypeError(
-            "tile-template tracing expects vadd mask dtype to match vector dtype"
-        )
+        raise TypeError("tile-template tracing expects vadd mask dtype to match vector dtype")
     result = _pto.VaddOp(lhs.value.type, lhs.value, rhs.value, mask.value).result
     return _VectorValue(result, lhs.dtype)
 
@@ -670,13 +636,9 @@ def vadd(lhs: _VectorValue, rhs: _VectorValue, mask: _MaskValue) -> _VectorValue
 def vsts(vec: _VectorValue, tile_slice: _TileSlice, mask: _MaskValue) -> None:
     trace = require_active_runtime("vsts", expected_type=_TraceBuilder)
     if vec.dtype != mask.dtype:
-        raise TypeError(
-            "tile-template tracing expects vsts mask dtype to match vector dtype"
-        )
+        raise TypeError("tile-template tracing expects vsts mask dtype to match vector dtype")
     if vec.dtype != tile_slice.tile.element_type:
-        raise TypeError(
-            "tile-template tracing expects vsts destination dtype to match vector dtype"
-        )
+        raise TypeError("tile-template tracing expects vsts destination dtype to match vector dtype")
     ptr_value = trace.ensure_tile_ptr(tile_slice.tile)
     offset = trace.materialize_linear_offset(tile_slice)
     _pto.VstsOp(None, vec.value, ptr_value.value, offset.value, mask.value)
@@ -691,9 +653,7 @@ def _is_tile_annotation(annotation) -> bool:
 
 
 def _is_index_like(value) -> bool:
-    return isinstance(value, int) or (
-        isinstance(value, _Value) and value.type_text == str(_resolve(_index))
-    )
+    return isinstance(value, int) or (isinstance(value, _Value) and value.type_text == str(_resolve(_index)))
 
 
 def _validate_static_bound(value, upper_bound: int, label: str):

@@ -30,11 +30,11 @@ def main() -> None:
     strict = os.getenv("COMPARE_STRICT", "1") != "0"
     ok = compare_bin("golden_v2.bin", "v2.bin")
     if not ok:
-        if strict:
-            print("[ERROR] compare failed")
-            sys.exit(2)
-        print("[WARN] compare failed (non-gating)")
-        return
+      if strict:
+        print("[ERROR] compare failed")
+        sys.exit(2)
+      print("[WARN] compare failed (non-gating)")
+      return
     print("[INFO] compare passed")
 
 

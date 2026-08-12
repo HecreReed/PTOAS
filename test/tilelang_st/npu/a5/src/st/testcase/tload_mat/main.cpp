@@ -21,38 +21,37 @@ using namespace PtoTestCommon;
 
 // Kernel launch wrappers (defined in launch.cpp)
 // All cases: dst(f32) + x1 + x2 (3 GM pointers, dst always float32 for ACC output)
-void LaunchTLOAD_MAT_f16_nd2nz(float* dst, float* x1, float* x2, void* stream);
-void LaunchTLOAD_MAT_bf16_nd2nz(float* dst, void* x1, void* x2, void* stream);
-void LaunchTLOAD_MAT_f32_nd2nz(float* dst, float* x1, float* x2, void* stream);
-void LaunchTLOAD_MAT_f16_dn2nz(float* dst, float* x1, float* x2, void* stream);
-void LaunchTLOAD_MAT_bf16_dn2nz(float* dst, void* x1, void* x2, void* stream);
-void LaunchTLOAD_MAT_f32_dn2nz(float* dst, float* x1, float* x2, void* stream);
+void LaunchTLOAD_MAT_f16_nd2nz(float *dst, float *x1, float *x2, void *stream);
+void LaunchTLOAD_MAT_bf16_nd2nz(float *dst, void *x1, void *x2, void *stream);
+void LaunchTLOAD_MAT_f32_nd2nz(float *dst, float *x1, float *x2, void *stream);
+void LaunchTLOAD_MAT_f16_dn2nz(float *dst, float *x1, float *x2, void *stream);
+void LaunchTLOAD_MAT_bf16_dn2nz(float *dst, void *x1, void *x2, void *stream);
+void LaunchTLOAD_MAT_f32_dn2nz(float *dst, float *x1, float *x2, void *stream);
 
-using LaunchFn3Float = void (*)(float*, float*, float*, void*);
-using LaunchFn3Void = void (*)(void*, void*, void*, void*);
+using LaunchFn3Float = void (*)(float *, float *, float *, void *);
+using LaunchFn3Void  = void (*)(void *, void *, void *, void *);
 
 struct TestCase {
-    const char* name;
-    void* launch;
+    const char *name;
+    void *launch;
     size_t M, N, K;
-    size_t x1ElemSize;  // sizeof src dtype
-    size_t x2ElemSize;  // sizeof src dtype
-    size_t dstElemSize; // sizeof dst dtype (always 4 = f32)
-    bool dstIsFp32;     // true if dst uses float* launch signature
+    size_t x1ElemSize;   // sizeof src dtype
+    size_t x2ElemSize;   // sizeof src dtype
+    size_t dstElemSize;  // sizeof dst dtype (always 4 = f32)
+    bool dstIsFp32;      // true if dst uses float* launch signature
 };
 
 static const TestCase kCases[] = {
-    {"f16_nd2nz", (void*)LaunchTLOAD_MAT_f16_nd2nz, 16, 32, 16, 2, 2, 4, true},
+    {"f16_nd2nz",  (void*)LaunchTLOAD_MAT_f16_nd2nz,  16, 32, 16, 2, 2, 4, true},
     {"bf16_nd2nz", (void*)LaunchTLOAD_MAT_bf16_nd2nz, 16, 32, 16, 2, 2, 4, true},
-    {"f32_nd2nz", (void*)LaunchTLOAD_MAT_f32_nd2nz, 16, 32, 16, 4, 4, 4, true},
-    {"f16_dn2nz", (void*)LaunchTLOAD_MAT_f16_dn2nz, 16, 32, 16, 2, 2, 4, true},
+    {"f32_nd2nz",  (void*)LaunchTLOAD_MAT_f32_nd2nz,  16, 32, 16, 4, 4, 4, true},
+    {"f16_dn2nz",  (void*)LaunchTLOAD_MAT_f16_dn2nz,  16, 32, 16, 2, 2, 4, true},
     {"bf16_dn2nz", (void*)LaunchTLOAD_MAT_bf16_dn2nz, 16, 32, 16, 2, 2, 4, true},
-    {"f32_dn2nz", (void*)LaunchTLOAD_MAT_f32_dn2nz, 16, 32, 16, 4, 4, 4, true},
+    {"f32_dn2nz",  (void*)LaunchTLOAD_MAT_f32_dn2nz,  16, 32, 16, 4, 4, 4, true},
 };
 static constexpr size_t kNumCases = sizeof(kCases) / sizeof(kCases[0]);
 
-static int RunCase(const TestCase& tc, int deviceId, aclrtStream stream)
-{
+static int RunCase(const TestCase &tc, int deviceId, aclrtStream stream) {
     int rc = 0;
     const size_t x1Count = tc.M * tc.K;
     const size_t x2Count = tc.K * tc.N;
@@ -61,7 +60,8 @@ static int RunCase(const TestCase& tc, int deviceId, aclrtStream stream)
     const size_t x2Size = x2Count * tc.x2ElemSize;
     const size_t dstSize = dstCount * tc.dstElemSize;
 
-    std::printf("[INFO] === case: %s (M=%zu,N=%zu,K=%zu) ===\n", tc.name, tc.M, tc.N, tc.K);
+    std::printf("[INFO] === case: %s (M=%zu,N=%zu,K=%zu) ===\n",
+                tc.name, tc.M, tc.N, tc.K);
 
     std::string caseDir = std::string("./") + tc.name;
 
@@ -109,34 +109,27 @@ static int RunCase(const TestCase& tc, int deviceId, aclrtStream stream)
         rc = 1;
     }
 
-    if (x1Dev)
-        aclrtFree(x1Dev);
-    if (x2Dev)
-        aclrtFree(x2Dev);
-    if (dstDev)
-        aclrtFree(dstDev);
-    if (x1Host)
-        aclrtFreeHost(x1Host);
-    if (x2Host)
-        aclrtFreeHost(x2Host);
-    if (dstHost)
-        aclrtFreeHost(dstHost);
+    if (x1Dev) aclrtFree(x1Dev);
+    if (x2Dev) aclrtFree(x2Dev);
+    if (dstDev) aclrtFree(dstDev);
+    if (x1Host) aclrtFreeHost(x1Host);
+    if (x2Host) aclrtFreeHost(x2Host);
+    if (dstHost) aclrtFreeHost(dstHost);
 
     if (rc == 0)
         std::printf("[INFO] case %s done\n", tc.name);
     return rc;
 }
 
-int main(int argc, char* argv[])
-{
-    const char* caseFilter = (argc > 1) ? argv[1] : nullptr;
+int main(int argc, char *argv[]) {
+    const char *caseFilter = (argc > 1) ? argv[1] : nullptr;
 
     int rc = 0;
     int deviceId = 0;
     aclrtStream stream = nullptr;
 
     aclInit(nullptr);
-    if (const char* envDevice = std::getenv("ACL_DEVICE_ID")) {
+    if (const char *envDevice = std::getenv("ACL_DEVICE_ID")) {
         deviceId = std::atoi(envDevice);
     }
     aclrtSetDevice(deviceId);
@@ -154,8 +147,7 @@ int main(int argc, char* argv[])
         }
     }
 
-    if (stream)
-        aclrtDestroyStream(stream);
+    if (stream) aclrtDestroyStream(stream);
     aclrtResetDevice(deviceId);
     aclFinalize();
 

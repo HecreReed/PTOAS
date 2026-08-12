@@ -305,9 +305,7 @@ def template_tstore_acc_to_gm_nz2nz(src: pto.Tile, dst: pto.PartitionTensorView)
     is_post_update=False,
     tags=("store", "acc", "gm", "fp"),
 )
-def template_tstore_fp_acc_to_gm(
-    src: pto.Tile, fp: pto.Tile, dst: pto.PartitionTensorView
-):
+def template_tstore_fp_acc_to_gm(src: pto.Tile, fp: pto.Tile, dst: pto.PartitionTensorView):
     m, n = src.valid_shape
     strides = dst.strides
     quant_mode = "qf322bf16_pre_vec" if str(fp.dtype) == "bf16" else "qf322f16_pre_vec"

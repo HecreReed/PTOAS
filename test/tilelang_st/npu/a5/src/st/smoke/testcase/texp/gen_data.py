@@ -26,8 +26,8 @@ for case in CASES:
     high_precision = case["high_precision"]
 
     if high_precision:
-        hex_threshold = "007FFFFF"
-        bound_val = struct.unpack("!f", bytes.fromhex(hex_threshold))[0]
+        hex_threshold = '007FFFFF'
+        bound_val = struct.unpack('!f', bytes.fromhex(hex_threshold))[0]
         max_val = math.log(bound_val)
         min_val = max_val * 2
         input = np.random.uniform(min_val, max_val, size=shape).astype(dtype)
@@ -39,6 +39,4 @@ for case in CASES:
     golden[:vr, :vc] = np.exp(input[:vr, :vc]).astype(dtype, copy=False)
 
     save_case_data(case["name"], {"input": input, "golden": golden})
-    print(
-        f"[INFO] gen_data: {case['name']} shape={shape} valid_shape={valid_shape} dtype={dtype.__name__} high_precision={high_precision}"
-    )
+    print(f"[INFO] gen_data: {case['name']} shape={shape} valid_shape={valid_shape} dtype={dtype.__name__} high_precision={high_precision}")

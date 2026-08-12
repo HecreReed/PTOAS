@@ -14,9 +14,10 @@
 #include "acl/acl.h"
 #endif
 
-extern "C" __global__[aicore] void ld_st_dev_kernel(__gm__ int32_t* src, __gm__ int32_t* dst);
+extern "C" __global__ [aicore] void ld_st_dev_kernel(__gm__ int32_t *src,
+                                                     __gm__ int32_t *dst);
 
-void LaunchLd_st_dev_kernel(int32_t* src, int32_t* dst, void* stream)
-{
-    ld_st_dev_kernel<<<1, nullptr, stream>>>((__gm__ int32_t*)src, (__gm__ int32_t*)dst);
+void LaunchLd_st_dev_kernel(int32_t *src, int32_t *dst, void *stream) {
+  ld_st_dev_kernel<<<1, nullptr, stream>>>((__gm__ int32_t *)src,
+                                           (__gm__ int32_t *)dst);
 }

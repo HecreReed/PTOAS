@@ -27,10 +27,7 @@ def expect_raises(callback, exc_type, *message_fragments: str) -> None:
     except exc_type as exc:
         text = str(exc)
         for fragment in message_fragments:
-            expect(
-                fragment in text,
-                f"expected diagnostic fragment {fragment!r} in {text!r}",
-            )
+            expect(fragment in text, f"expected diagnostic fragment {fragment!r} in {text!r}")
     else:
         raise AssertionError(f"expected {exc_type.__name__} to be raised")
 
@@ -108,7 +105,6 @@ def vmi_vbrc_untyped_scalar_probe():
 def vmi_vci_untyped_scalar_probe():
     _ = pto.vmi.vci(0, size=64, order="ASC")
 
-
 @pto.jit(target="a5")
 def vmi_vinterpret_cast_missing_dtype_probe():
     src = pto.vmi.vbrc(pto.f32(0.0), size=64)
@@ -163,7 +159,6 @@ def vmi_vbrc_group_lane_mismatch_probe():
     offset = pto.const(0, dtype=pto.index)
     compact = pto.vmi.vload(src, offset, size=16)
     _ = pto.vmi.vbrc(compact, size=64, group=8)
-
 
 @pto.jit(target="a5")
 def vmi_vload_missing_size_probe():
@@ -851,10 +846,7 @@ def main() -> None:
         "pto.i32/pto.f32/pto.i1",
     )
     gm_ptr_entry_probe = define_gm_ptr_entry_annotation_probe()
-    expect(
-        hasattr(gm_ptr_entry_probe, "compile"),
-        "expected explicit GM pointer entry to be accepted",
-    )
+    expect(hasattr(gm_ptr_entry_probe, "compile"), "expected explicit GM pointer entry to be accepted")
     expect_raises(
         define_default_ptr_entry_annotation_probe,
         TypeError,

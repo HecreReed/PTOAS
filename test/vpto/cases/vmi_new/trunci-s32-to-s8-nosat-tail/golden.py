@@ -35,37 +35,16 @@ SENTINEL = 0xA5
 def _build_inputs() -> np.ndarray:
     probes_i32 = np.array(
         [
-            0,
-            1,
-            -1,
-            42,
-            -42,
-            127,
-            -128,
-            64,
-            128,
-            200,
-            255,
-            256,
-            257,
-            511,
-            512,
-            1000,
-            -129,
-            -200,
-            -255,
-            -256,
-            -257,
-            -511,
-            -512,
-            -1000,
-            0x7FFFFFFF,
+                0,     1,    -1,    42,   -42,   127,  -128,    64,
+              128,   200,   255,   256,   257,   511,   512,  1000,
+             -129,  -200,  -255,  -256,  -257,  -511,  -512, -1000,
+             0x7FFFFFFF,
             -0x80000000,
-            0x7FFFFF80,
+             0x7FFFFF80,
             -0x7FFFFF80,
-            0x0000FF80,
+             0x0000FF80,
             -0x000000FF,
-            0x12345678,
+             0x12345678,
             -0x12345678,
         ],
         dtype=np.int64,
@@ -96,8 +75,7 @@ def generate(output_dir: Path) -> None:
     if np.array_equal(valid_nosat, valid_sat):
         raise SystemExit(
             "[FATAL] NOSAT golden coincidentally equals SAT reference on the "
-            "valid prefix; adjust probe set to include out-of-range inputs."
-        )
+            "valid prefix; adjust probe set to include out-of-range inputs.")
 
     dst_init = np.full(DST_ELEMS, SENTINEL, dtype=np.uint8)
 

@@ -25,9 +25,7 @@ def compare_bin(golden_path, output_path, dtype):
     golden = np.fromfile(golden_path, dtype=dtype_np)
     output = np.fromfile(output_path, dtype=dtype_np)
     if golden.shape != output.shape:
-        print(
-            f"[ERROR] Shape mismatch: {golden_path} {golden.shape} vs {output_path} {output.shape}"
-        )
+        print(f"[ERROR] Shape mismatch: {golden_path} {golden.shape} vs {output_path} {output.shape}")
         return False
     if not np.array_equal(golden, output):
         diff = np.nonzero(golden != output)[0]
@@ -44,11 +42,11 @@ def main():
     strict = os.getenv("COMPARE_STRICT", "1") != "0"
     ok = compare_bin("golden_v2.bin", "v2.bin", np.int16)
     if not ok:
-        if strict:
-            print("[ERROR] compare failed")
-            sys.exit(2)
-        print("[WARN] compare failed (non-gating)")
-        return
+      if strict:
+          print("[ERROR] compare failed")
+          sys.exit(2)
+      print("[WARN] compare failed (non-gating)")
+      return
     print("[INFO] compare passed")
 
 

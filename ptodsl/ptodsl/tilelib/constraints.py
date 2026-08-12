@@ -192,7 +192,10 @@ def evaluate_candidate(
             f"unexpected operand specifications for {', '.join(extra)}",
         )
 
-    ordered_specs = {name: tile_specs[name] for name in descriptor.param_names}
+    ordered_specs = {
+        name: tile_specs[name]
+        for name in descriptor.param_names
+    }
     context = build_context(ordered_specs, target, op)
 
     metadata = descriptor.metadata
@@ -294,7 +297,6 @@ def require_valid_rows(operand_name, rows):
     def _require_valid_rows(**context):
         shape = context.get(f"{operand_name}_valid_shape")
         return shape is not None and shape[0] == rows
-
     return _require_valid_rows
 
 
@@ -302,9 +304,7 @@ def require_contiguous(required=True):
     def _require_contiguous(operand_rows, operand_cols, operand_valid_cols, **_):
         if not required:
             return True
-        full_cols = all(
-            valid == cols for valid, cols in zip(operand_valid_cols, operand_cols)
-        )
+        full_cols = all(valid == cols for valid, cols in zip(operand_valid_cols, operand_cols))
         single_row = all(rows == 1 for rows in operand_rows)
         return full_cols or single_row
 

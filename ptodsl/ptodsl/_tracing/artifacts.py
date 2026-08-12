@@ -19,14 +19,7 @@ class ModuleArtifact:
     Subclasses may either pass an eager ``module`` or a lazy ``module_factory``.
     """
 
-    def __init__(
-        self,
-        py_name: str,
-        *,
-        module=None,
-        module_factory=None,
-        mlir_text: str | None = None,
-    ):
+    def __init__(self, py_name: str, *, module=None, module_factory=None, mlir_text: str | None = None):
         self._py_name = py_name
         self._cached_module = module
         self._module_factory = module_factory

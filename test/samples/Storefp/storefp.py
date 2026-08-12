@@ -10,7 +10,6 @@ from ptoas.mlir.ir import Context, Location, Module, InsertionPoint, UnitAttr
 from ptoas.mlir.dialects import func, arith, pto
 from ptoas.mlir.ir import F32Type, IntegerType, IndexType
 
-
 def build():
     with Context() as ctx:
         pto.register_dialect(ctx, load=True)
@@ -46,9 +45,7 @@ def build():
             )
 
             acc_tile_ty = pto.TileBufType.get([16, 32], f32, acc, [1, 32], cfg_acc, ctx)
-            fp_tile_ty = pto.TileBufType.get(
-                [1, 16], u64, scaling, [1, 16], cfg_fp, ctx
-            )
+            fp_tile_ty = pto.TileBufType.get([1, 16], u64, scaling, [1, 16], cfg_fp, ctx)
 
             fn_ty = func.FunctionType.get([ptr_i8], [])
             with InsertionPoint(m.body):
@@ -63,9 +60,7 @@ def build():
                 c32 = arith.ConstantOp(IndexType.get(ctx), 32).result
 
                 tv = pto.MakeTensorViewOp(tv2_i8, dst_ptr, [c32, c32], [c32, c1]).result
-                sv = pto.PartitionViewOp(
-                    tile_view_8, tv, offsets=[c0, c0], sizes=[c32, c32]
-                ).result
+                sv = pto.PartitionViewOp(tile_view_8, tv, offsets=[c0, c0], sizes=[c32, c32]).result
 
                 acc_tile = pto.AllocTileOp(acc_tile_ty).result
                 fp_tile = pto.AllocTileOp(fp_tile_ty).result

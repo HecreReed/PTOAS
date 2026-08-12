@@ -27,7 +27,6 @@ _DEVICE = "npu:0"
 # Kernel
 # ---------------------------------------------------------------------------
 
-
 def _tadd_tile(A, B, C, rows: int, cols: int) -> None:
     c0 = pto.const(0)
     c1 = pto.const(1)
@@ -136,7 +135,10 @@ def run_case(case: dict, torch) -> None:
     launch_s = time.perf_counter() - t0
 
     torch.testing.assert_close(ref, c.cpu().numpy(), rtol=case["eps"], atol=case["eps"])
-    print(f"PASS {case['name']}  compile={compile_s:.3f}s launch={launch_s:.3f}s")
+    print(
+        f"PASS {case['name']}  "
+        f"compile={compile_s:.3f}s launch={launch_s:.3f}s"
+    )
 
 
 def test_tadd() -> None:

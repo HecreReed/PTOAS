@@ -35,13 +35,9 @@ for case in CASES:
     scale = np.random.uniform(1.0, 4.0, size=shape_scale).astype(dtype_scale)
 
     # Compute golden: matmul result as float32 (no fixpipe)
-    golden = np.matmul(lhs.astype(np.float32), rhs.astype(np.float32)).astype(
-        np.float32
-    )
+    golden = np.matmul(lhs.astype(np.float32), rhs.astype(np.float32)).astype(np.float32)
 
-    save_case_data(
-        case["name"], {"input1": lhs, "input2": rhs, "scale": scale, "golden": golden}
-    )
+    save_case_data(case["name"], {"input1": lhs, "input2": rhs, "scale": scale, "golden": golden})
     print(
         f"[INFO] gen_data: {case['name']} "
         f"lhs={shape_a} rhs={shape_b} scale={shape_scale} out={case['shape_c']} dtype=f32"

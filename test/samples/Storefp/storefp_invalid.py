@@ -42,12 +42,8 @@ def build():
                 ctx,
             )
 
-            src_tile_ty = pto.TileBufType.get(
-                [16, 32], f16, vec, [16, 32], cfg_vec, ctx
-            )
-            fp_tile_ty = pto.TileBufType.get(
-                [1, 16], u64, scaling, [1, 16], cfg_fp, ctx
-            )
+            src_tile_ty = pto.TileBufType.get([16, 32], f16, vec, [16, 32], cfg_vec, ctx)
+            fp_tile_ty = pto.TileBufType.get([1, 16], u64, scaling, [1, 16], cfg_fp, ctx)
             dst_memref_ty = MemRefType.get([16, 32], i8, memory_space=gm)
 
             fn_ty = func.FunctionType.get([dst_memref_ty], [])

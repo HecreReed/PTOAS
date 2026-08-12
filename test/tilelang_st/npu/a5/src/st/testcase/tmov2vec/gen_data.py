@@ -23,9 +23,7 @@ for case in CASES:
 
     lhs = np.random.uniform(-1.0, 1.0, size=shape_a).astype(dtype)
     rhs = np.random.uniform(-1.0, 1.0, size=shape_b).astype(dtype)
-    golden = np.matmul(lhs.astype(np.float32), rhs.astype(np.float32)).astype(
-        np.float32
-    )
+    golden = np.matmul(lhs.astype(np.float32), rhs.astype(np.float32)).astype(np.float32)
 
     save_case_data(case["name"], {"input1": lhs, "input2": rhs, "golden": golden})
     print(

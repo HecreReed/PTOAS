@@ -9,6 +9,7 @@
 # coding=utf-8
 
 import sys
+import os
 from pathlib import Path
 
 # Add current directory to path for standalone execution
@@ -81,15 +82,11 @@ def generate_subnormal_test_data(shape, dtype, direction):
     rows, cols = shape
 
     if dtype == np.float32:
-        subnormal_max = np.frombuffer(
-            np.array([0x007FFFFF], dtype=np.uint32), dtype=np.float32
-        )[0]
+        subnormal_max = np.frombuffer(np.array([0x007FFFFF], dtype=np.uint32), dtype=np.float32)[0]
         subnormal_min = np.float32(1e-45)
         normal_min = np.float32(1e-38) * np.float32(2.0)  # smallest normal
     else:  # float16
-        subnormal_max = np.frombuffer(
-            np.array([0x03FF], dtype=np.uint16), dtype=np.float16
-        )[0]
+        subnormal_max = np.frombuffer(np.array([0x03FF], dtype=np.uint16), dtype=np.float16)[0]
         subnormal_min = np.float16(1e-8)
         normal_min = np.float16(6e-5) * np.float16(2.0)
 
@@ -102,17 +99,14 @@ def generate_subnormal_test_data(shape, dtype, direction):
         input1[:quarter, :] = subnormal_max
 
         # Section 2: Mid-range subnormal / normal
-        input1[quarter : 2 * quarter, :] = np.random.uniform(
-            subnormal_min, subnormal_max, size=(quarter, cols)
-        ).astype(dtype)
+        input1[quarter:2*quarter, :] = np.random.uniform(
+            subnormal_min, subnormal_max, size=(quarter, cols)).astype(dtype)
 
         # Section 3: Smallest subnormal / normal
-        input1[2 * quarter : 3 * quarter, :] = subnormal_min
+        input1[2*quarter:3*quarter, :] = subnormal_min
 
         # Section 4: Normal reference
-        input1[3 * quarter :, :] = np.random.uniform(
-            0.1, 100.0, size=(rows - 3 * quarter, cols)
-        ).astype(dtype)
+        input1[3*quarter:, :] = np.random.uniform(0.1, 100.0, size=(rows-3*quarter, cols)).astype(dtype)
 
         scalar = dtype(10.0)
     else:  # scalar_src
@@ -125,19 +119,15 @@ def generate_subnormal_test_data(shape, dtype, direction):
         input1[:quarter, :] = subnormal_max
 
         # Section 2: normal / mid subnormal -> larger
-        input1[quarter : 2 * quarter, :] = np.random.uniform(
-            subnormal_max * 0.1, subnormal_max, size=(quarter, cols)
-        ).astype(dtype)
+        input1[quarter:2*quarter, :] = np.random.uniform(
+            subnormal_max * 0.1, subnormal_max, size=(quarter, cols)).astype(dtype)
 
         # Section 3: normal / tiny subnormal -> very large (near overflow)
-        input1[2 * quarter : 3 * quarter, :] = np.random.uniform(
-            subnormal_min, subnormal_max * 0.1, size=(quarter, cols)
-        ).astype(dtype)
+        input1[2*quarter:3*quarter, :] = np.random.uniform(
+            subnormal_min, subnormal_max * 0.1, size=(quarter, cols)).astype(dtype)
 
         # Section 4: Normal reference
-        input1[3 * quarter :, :] = np.random.uniform(
-            0.1, 100.0, size=(rows - 3 * quarter, cols)
-        ).astype(dtype)
+        input1[3*quarter:, :] = np.random.uniform(0.1, 100.0, size=(rows-3*quarter, cols)).astype(dtype)
 
         # Use a small normal scalar that won't overflow when divided by smallest subnormal
         if dtype == np.float32:
@@ -180,17 +170,14 @@ def generate_overflow_test_data(shape, dtype, direction):
         input1[:quarter, :] = overflow_trigger
 
         # Section 2: Near overflow boundary
-        input1[quarter : 2 * quarter, :] = np.random.uniform(
-            large_val, overflow_trigger, size=(quarter, cols)
-        ).astype(dtype)
+        input1[quarter:2*quarter, :] = np.random.uniform(large_val, overflow_trigger,
+                                                          size=(quarter, cols)).astype(dtype)
 
         # Section 3: Underflow - tiny / large
-        input1[2 * quarter : 3 * quarter, :] = underflow_trigger
+        input1[2*quarter:3*quarter, :] = underflow_trigger
 
         # Section 4: Normal reference
-        input1[3 * quarter :, :] = np.random.uniform(
-            0.1, 100.0, size=(rows - 3 * quarter, cols)
-        ).astype(dtype)
+        input1[3*quarter:, :] = np.random.uniform(0.1, 100.0, size=(rows-3*quarter, cols)).astype(dtype)
 
         scalar = dtype(tiny_val)  # Tiny scalar triggers overflow
 
@@ -202,17 +189,14 @@ def generate_overflow_test_data(shape, dtype, direction):
         input1[:quarter, :] = tiny_val  # Tiny divisor
 
         # Section 2: Near overflow boundary
-        input1[quarter : 2 * quarter, :] = np.random.uniform(
-            tiny_val / 10, tiny_val, size=(quarter, cols)
-        ).astype(dtype)
+        input1[quarter:2*quarter, :] = np.random.uniform(
+            tiny_val/10, tiny_val, size=(quarter, cols)).astype(dtype)
 
         # Section 3: Underflow - scalar / large src
-        input1[2 * quarter : 3 * quarter, :] = large_val
+        input1[2*quarter:3*quarter, :] = large_val
 
         # Section 4: Normal reference
-        input1[3 * quarter :, :] = np.random.uniform(
-            0.1, 100.0, size=(rows - 3 * quarter, cols)
-        ).astype(dtype)
+        input1[3*quarter:, :] = np.random.uniform(0.1, 100.0, size=(rows-3*quarter, cols)).astype(dtype)
 
         # Large scalar triggers overflow when divided by tiny src
         scalar = dtype(overflow_trigger)
@@ -252,7 +236,7 @@ for case in CASES:
     vr, vc = valid_shape
 
     # Suppress overflow/divide warnings for boundary tests (expected behavior)
-    with np.errstate(over="ignore", divide="ignore", invalid="ignore"):
+    with np.errstate(over='ignore', divide='ignore', invalid='ignore'):
         if direction == "src_scalar":
             golden[:vr, :vc] = (input1[:vr, :vc] / scalar_val).astype(dtype, copy=False)
         else:  # scalar_src
@@ -260,6 +244,4 @@ for case in CASES:
 
     save_case_data(case["name"], {"input1": input1, "golden": golden})
     precision_type = case.get("precision_type", "default")
-    print(
-        f"[INFO] gen_data: {case['name']} shape={shape} valid_shape={valid_shape} dtype={dtype.__name__} direction={direction} test={test_pattern} precision={precision_type} scalar={scalar_val}"
-    )
+    print(f"[INFO] gen_data: {case['name']} shape={shape} valid_shape={valid_shape} dtype={dtype.__name__} direction={direction} test={test_pattern} precision={precision_type} scalar={scalar_val}")

@@ -225,7 +225,8 @@ def _legal_candidate_specs(
     ]
     if not legal:
         reasons = "; ".join(
-            f"{descriptor.name}: {reason}" for descriptor, _, reason in evaluated
+            f"{descriptor.name}: {reason}"
+            for descriptor, _, reason in evaluated
         )
         raise _registry.NoMatchingTemplate(
             f"no legal template for op={op!r} target={target!r}; {reasons}"

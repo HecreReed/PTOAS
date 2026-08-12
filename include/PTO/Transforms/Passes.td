@@ -30,14 +30,14 @@ def PTOInsertSync : Pass<"pto-insert-sync", "func::FuncOp"> {
     Analyzes data dependencies between Cube, Vector and MTE pipelines
     and inserts explicit synchronization instructions.
   }];
-
+ 
   // Declare the constructor function name
   let constructor = "mlir::pto::createPTOInsertSyncPass()";
 
   let dependentDialects = [
     "mlir::pto::PTODialect",
     "mlir::memref::MemRefDialect",
-    "mlir::arith::ArithDialect"
+    "mlir::arith::ArithDialect" 
   ];
 }
 

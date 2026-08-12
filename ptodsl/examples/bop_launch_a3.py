@@ -70,7 +70,6 @@ def _binop_tile(A, B, C, rows: int, cols: int, op: str) -> None:
 # TSUB kernels
 # ---------------------------------------------------------------------------
 
-
 @pto.jit(
     name="TSUB_f32_1x64",
     kernel_kind="vector",
@@ -101,7 +100,6 @@ def TSUB_f32_16x64(
 # TMUL kernels
 # ---------------------------------------------------------------------------
 
-
 @pto.jit(
     name="TMUL_f32_1x64",
     kernel_kind="vector",
@@ -131,7 +129,6 @@ def TMUL_f32_16x64(
 # ---------------------------------------------------------------------------
 # TDIV kernels
 # ---------------------------------------------------------------------------
-
 
 @pto.jit(
     name="TDIV_f32_1x64",
@@ -164,55 +161,24 @@ def TDIV_f32_16x64(
 # ---------------------------------------------------------------------------
 
 CASES = [
-    {
-        "name": "sub_f32_1x64",
-        "kernel": TSUB_f32_1x64,
-        "shape": (1, 64),
-        "op": "sub",
-        "eps": 1e-6,
-    },
-    {
-        "name": "sub_f32_16x64",
-        "kernel": TSUB_f32_16x64,
-        "shape": (16, 64),
-        "op": "sub",
-        "eps": 1e-6,
-    },
-    {
-        "name": "mul_f32_1x64",
-        "kernel": TMUL_f32_1x64,
-        "shape": (1, 64),
-        "op": "mul",
-        "eps": 1e-6,
-    },
-    {
-        "name": "mul_f32_16x64",
-        "kernel": TMUL_f32_16x64,
-        "shape": (16, 64),
-        "op": "mul",
-        "eps": 1e-6,
-    },
-    {
-        "name": "div_f32_1x64",
-        "kernel": TDIV_f32_1x64,
-        "shape": (1, 64),
-        "op": "div",
-        "eps": 1e-3,
-    },
-    {
-        "name": "div_f32_16x64",
-        "kernel": TDIV_f32_16x64,
-        "shape": (16, 64),
-        "op": "div",
-        "eps": 1e-3,
-    },
+    {"name": "sub_f32_1x64",  "kernel": TSUB_f32_1x64,  "shape": (1, 64),
+     "op": "sub",  "eps": 1e-6},
+    {"name": "sub_f32_16x64", "kernel": TSUB_f32_16x64, "shape": (16, 64),
+     "op": "sub",  "eps": 1e-6},
+    {"name": "mul_f32_1x64",  "kernel": TMUL_f32_1x64,  "shape": (1, 64),
+     "op": "mul",  "eps": 1e-6},
+    {"name": "mul_f32_16x64", "kernel": TMUL_f32_16x64, "shape": (16, 64),
+     "op": "mul",  "eps": 1e-6},
+    {"name": "div_f32_1x64",  "kernel": TDIV_f32_1x64,  "shape": (1, 64),
+     "op": "div",  "eps": 1e-3},
+    {"name": "div_f32_16x64", "kernel": TDIV_f32_16x64, "shape": (16, 64),
+     "op": "div",  "eps": 1e-3},
 ]
 
 
 # ---------------------------------------------------------------------------
 # Host
 # ---------------------------------------------------------------------------
-
 
 def init_torch_npu() -> None:
     import torch
@@ -250,7 +216,10 @@ def run_case(case: dict, torch) -> None:
     launch_s = time.perf_counter() - t0
 
     torch.testing.assert_close(ref, c.cpu().numpy(), rtol=case["eps"], atol=case["eps"])
-    print(f"PASS {case['name']}  compile={compile_s:.3f}s launch={launch_s:.3f}s")
+    print(
+        f"PASS {case['name']}  "
+        f"compile={compile_s:.3f}s launch={launch_s:.3f}s"
+    )
 
 
 def test_bop() -> None:

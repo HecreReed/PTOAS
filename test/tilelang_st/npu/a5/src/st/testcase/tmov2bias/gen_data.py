@@ -31,14 +31,10 @@ for case in CASES:
     # Compute golden: matmul + bias as float32
     # Acc = lhs @ rhs, then add bias (broadcast along column dimension)
     matmul_result = np.matmul(lhs.astype(np.float32), rhs.astype(np.float32))
-    golden = matmul_result + bias.astype(
-        np.float32
-    )  # bias broadcasts to (1, N) -> (M, N)
+    golden = matmul_result + bias.astype(np.float32)  # bias broadcasts to (1, N) -> (M, N)
     golden = golden.astype(np.float32)
 
-    save_case_data(
-        case["name"], {"input1": lhs, "input2": rhs, "bias": bias, "golden": golden}
-    )
+    save_case_data(case["name"], {"input1": lhs, "input2": rhs, "bias": bias, "golden": golden})
     print(
         f"[INFO] gen_data: {case['name']} "
         f"lhs={shape_a} rhs={shape_b} bias={shape_bias} out={case['shape_c']} dtype=float16"

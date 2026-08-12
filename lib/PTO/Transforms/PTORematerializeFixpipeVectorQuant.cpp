@@ -39,62 +39,65 @@ using namespace mlir::pto;
 namespace {
 
 struct PTORematerializeFixpipeVectorQuantPass
-    : public mlir::pto::impl::PTORematerializeFixpipeVectorQuantBase<PTORematerializeFixpipeVectorQuantPass> {
-    using Base = mlir::pto::impl::PTORematerializeFixpipeVectorQuantBase<PTORematerializeFixpipeVectorQuantPass>;
-    using Base::Base;
+    : public mlir::pto::impl::PTORematerializeFixpipeVectorQuantBase<
+          PTORematerializeFixpipeVectorQuantPass> {
+  using Base =
+      mlir::pto::impl::PTORematerializeFixpipeVectorQuantBase<
+          PTORematerializeFixpipeVectorQuantPass>;
+  using Base::Base;
 
-    void runOnOperation() override
-    {
-        func::FuncOp funcOp = getOperation();
-        SmallVector<Operation*> eraseList;
+  void runOnOperation() override {
+    func::FuncOp funcOp = getOperation();
+    SmallVector<Operation *> eraseList;
 
-        auto processBlock = [&](auto&& self, Block& block) -> LogicalResult {
-            llvm::DenseMap<int32_t, SetQuantVectorOp> activeVectorById;
-            SmallVector<Operation*> originalOps;
-            for (Operation& op : block)
-                originalOps.push_back(&op);
+    auto processBlock = [&](auto &&self, Block &block) -> LogicalResult {
+      llvm::DenseMap<int32_t, SetQuantVectorOp> activeVectorById;
+      SmallVector<Operation *> originalOps;
+      for (Operation &op : block)
+        originalOps.push_back(&op);
 
-            for (Operation* op : originalOps) {
-                if (auto setQuantVector = dyn_cast<SetQuantVectorOp>(op)) {
-                    activeVectorById[setQuantVector.getId()] = setQuantVector;
-                    eraseList.push_back(op);
-                } else if (auto tpush = dyn_cast<TPushOp>(op)) {
-                    auto accPushEpilogue = getPipeInitAccPushEpilogue(getPipeInitDef(tpush.getPipeHandle()));
-                    auto pipeId = getFrontendPipeIdFromHandle(tpush.getPipeHandle());
-                    if (accPushEpilogue && pipeId && isVectorFixpipeQuant(accPushEpilogue.getQuant())) {
-                        auto it = activeVectorById.find(*pipeId);
-                        if (it != activeVectorById.end()) {
-                            OpBuilder builder(tpush);
-                            builder.clone(*it->second.getOperation());
-                        }
-                    }
-                }
-
-                for (Region& region : op->getRegions()) {
-                    for (Block& nestedBlock : region) {
-                        if (failed(self(self, nestedBlock)))
-                            return failure();
-                    }
-                }
+      for (Operation *op : originalOps) {
+        if (auto setQuantVector = dyn_cast<SetQuantVectorOp>(op)) {
+          activeVectorById[setQuantVector.getId()] = setQuantVector;
+          eraseList.push_back(op);
+        } else if (auto tpush = dyn_cast<TPushOp>(op)) {
+          auto accPushEpilogue =
+              getPipeInitAccPushEpilogue(getPipeInitDef(tpush.getPipeHandle()));
+          auto pipeId = getFrontendPipeIdFromHandle(tpush.getPipeHandle());
+          if (accPushEpilogue && pipeId &&
+              isVectorFixpipeQuant(accPushEpilogue.getQuant())) {
+            auto it = activeVectorById.find(*pipeId);
+            if (it != activeVectorById.end()) {
+              OpBuilder builder(tpush);
+              builder.clone(*it->second.getOperation());
             }
-            return success();
-        };
-
-        for (Block& block : funcOp.getBlocks()) {
-            if (failed(processBlock(processBlock, block))) {
-                signalPassFailure();
-                return;
-            }
+          }
         }
 
-        for (Operation* op : eraseList)
-            op->erase();
+        for (Region &region : op->getRegions()) {
+          for (Block &nestedBlock : region) {
+            if (failed(self(self, nestedBlock)))
+              return failure();
+          }
+        }
+      }
+      return success();
+    };
+
+    for (Block &block : funcOp.getBlocks()) {
+      if (failed(processBlock(processBlock, block))) {
+        signalPassFailure();
+        return;
+      }
     }
+
+    for (Operation *op : eraseList)
+      op->erase();
+  }
 };
 
 } // namespace
 
-std::unique_ptr<Pass> mlir::pto::createPTORematerializeFixpipeVectorQuantPass()
-{
-    return std::make_unique<PTORematerializeFixpipeVectorQuantPass>();
+std::unique_ptr<Pass> mlir::pto::createPTORematerializeFixpipeVectorQuantPass() {
+  return std::make_unique<PTORematerializeFixpipeVectorQuantPass>();
 }

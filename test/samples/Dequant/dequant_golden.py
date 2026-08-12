@@ -19,9 +19,9 @@ import numpy as np
 from pathlib import Path
 import sys
 
-_ROWS = 32
-_COLS = 32
-_PARA_COLS = 8  # columns in the scale/offset tile buffer
+_ROWS       = 32
+_COLS       = 32
+_PARA_COLS  = 8   # columns in the scale/offset tile buffer
 
 for search_root in (
     Path(__file__).resolve().parent,
@@ -48,21 +48,20 @@ def main():
     src_name, scale_name, offset_name = meta.inputs
     generator = rng()
     # i16 source values: bitwise style gives values in [-256, 256)
-    src = int_values(generator, meta.elem_counts[src_name], np.int16, style="bitwise")
-    scale = float_values(generator, meta.elem_counts[scale_name], style="positive")
-    offset = float_values(
-        generator, meta.elem_counts[offset_name], style="signed_small"
-    )
+    src   = int_values(generator, meta.elem_counts[src_name],
+                       np.int16, style='bitwise')
+    scale  = float_values(generator, meta.elem_counts[scale_name], style="positive")
+    offset = float_values(generator, meta.elem_counts[offset_name], style="signed_small")
 
     buffers = default_buffers(meta)
-    buffers[src_name] = src
-    buffers[scale_name] = scale
+    buffers[src_name]    = src
+    buffers[scale_name]  = scale
     buffers[offset_name] = offset
     write_buffers(meta, buffers)
 
-    src_f32 = src.reshape(_ROWS, _COLS).astype(np.float32)
-    scale_row = scale.reshape(_ROWS, _PARA_COLS)[:, 0]  # first col per row
-    offset_row = offset.reshape(_ROWS, _PARA_COLS)[:, 0]  # first col per row
+    src_f32     = src.reshape(_ROWS, _COLS).astype(np.float32)
+    scale_row   = scale.reshape(_ROWS, _PARA_COLS)[:, 0]    # first col per row
+    offset_row  = offset.reshape(_ROWS, _PARA_COLS)[:, 0]   # first col per row
 
     out = (src_f32 - offset_row[:, None]) * scale_row[:, None]
     write_golden(meta, {single_output(meta): out.astype(np.float32)})

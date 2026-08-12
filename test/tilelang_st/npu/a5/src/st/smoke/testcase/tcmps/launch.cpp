@@ -18,15 +18,15 @@ static constexpr int32_t TCMP_SCALAR_I32 = 5;
 
 // Case 0: f32 1x64
 
-extern "C" __global__ AICORE void TCMP_f32_1x64(__gm__ float* src, __gm__ uint8_t* dst, float scalar);
-extern "C" __global__ AICORE void TCMP_i32_16x32(__gm__ int32_t* src, __gm__ uint8_t* dst, int32_t scalar);
+extern "C" __global__ AICORE void TCMP_f32_1x64(__gm__ float *src, __gm__ uint8_t *dst, float scalar);
+extern "C" __global__ AICORE void TCMP_i32_16x32(__gm__ int32_t *src, __gm__ uint8_t *dst, int32_t scalar);
 
-void LaunchTCMP_f32_1x64(float* src, uint8_t* dst, void* stream)
-{
-    TCMP_f32_1x64<<<1, nullptr, stream>>>((__gm__ float*)src, (__gm__ uint8_t*)dst, TCMP_SCALAR_F32);
+void LaunchTCMP_f32_1x64(float *src, uint8_t *dst, void *stream) {
+    TCMP_f32_1x64<<<1, nullptr, stream>>>((__gm__ float *)src, (__gm__ uint8_t *)dst, TCMP_SCALAR_F32);
 }
 
-void LaunchTCMP_i32_16x32(int32_t* src, uint8_t* dst, void* stream)
-{
-    TCMP_i32_16x32<<<1, nullptr, stream>>>((__gm__ int32_t*)src, (__gm__ uint8_t*)dst, TCMP_SCALAR_I32);
+
+
+void LaunchTCMP_i32_16x32(int32_t *src, uint8_t *dst, void *stream) {
+    TCMP_i32_16x32<<<1, nullptr, stream>>>((__gm__ int32_t *)src, (__gm__ uint8_t *)dst, TCMP_SCALAR_I32);
 }

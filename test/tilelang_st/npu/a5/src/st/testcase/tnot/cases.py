@@ -25,45 +25,45 @@ import numpy as np
 
 CASES = [
     {
-        "name": "int8_64x64",
-        "dtype": np.int8,
-        "shape": (64, 64),
-        "valid_shape": (64, 64),
-        "eps": 0,
+        "name": "int8_64x64",   
+        "dtype": np.int8,   
+        "shape": (64, 64), 
+        "valid_shape": (64, 64), 
+        "eps": 0
     },
     {
-        "name": "uint8_60x60",
-        "dtype": np.uint8,
-        "shape": (64, 64),
-        "valid_shape": (60, 60),
-        "eps": 0,
+        "name": "uint8_60x60",  
+        "dtype": np.uint8,  
+        "shape": (64, 64), 
+        "valid_shape": (60, 60), 
+        "eps": 0
     },
     {
-        "name": "int16_64x64",
-        "dtype": np.int16,
-        "shape": (64, 64),
-        "valid_shape": (64, 64),
-        "eps": 0,
+        "name": "int16_64x64",  
+        "dtype": np.int16,  
+        "shape": (64, 64), 
+        "valid_shape": (64, 64), 
+        "eps": 0
     },
     {
-        "name": "uint16_60x60",
-        "dtype": np.uint16,
-        "shape": (64, 64),
-        "valid_shape": (60, 60),
-        "eps": 0,
+        "name": "uint16_60x60", 
+        "dtype": np.uint16, 
+        "shape": (64, 64), 
+        "valid_shape": (60, 60), 
+        "eps": 0
     },
     {
-        "name": "int32_64x64",
-        "dtype": np.int32,
-        "shape": (64, 64),
-        "valid_shape": (64, 64),
-        "eps": 0,
+        "name": "int32_64x64",  
+        "dtype": np.int32,  
+        "shape": (64, 64), 
+        "valid_shape": (64, 64), 
+        "eps": 0
     },
     {
-        "name": "uint32_60x60",
-        "dtype": np.uint32,
-        "shape": (64, 64),
-        "valid_shape": (60, 60),
-        "eps": 0,
+        "name": "uint32_60x60", 
+        "dtype": np.uint32, 
+        "shape": (64, 64), 
+        "valid_shape": (60, 60), 
+        "eps": 0
     },
 ]

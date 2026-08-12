@@ -27,45 +27,48 @@ namespace llvm {
 class LLVMContext;
 class Module;
 class raw_ostream;
-} // namespace llvm
+}
 
 namespace mlir::pto {
 
 struct VPTOEmissionOptions {
-    bool dumpVPTOIR = false;
-    std::string targetTriple;
-    std::string march;
-    std::string aicoreArch;
-    std::string defaultTargetCPU;
-    std::string defaultTargetFeatures;
-    CANNVersion cannVersion = CANNVersion{9, 0, 0, 1};
+  bool dumpVPTOIR = false;
+  std::string targetTriple;
+  std::string march;
+  std::string aicoreArch;
+  std::string defaultTargetCPU;
+  std::string defaultTargetFeatures;
+  CANNVersion cannVersion = CANNVersion{9, 0, 0, 1};
 };
 
 struct EmittedLLVMModule {
-    void reset()
-    {
-        module.reset();
-        context.reset();
-    }
+  void reset() {
+    module.reset();
+    context.reset();
+  }
 
-    std::unique_ptr<llvm::LLVMContext> context;
-    std::unique_ptr<llvm::Module> module;
+  std::unique_ptr<llvm::LLVMContext> context;
+  std::unique_ptr<llvm::Module> module;
 };
 
 LogicalResult lowerVPTOModuleToLLVMIRText(
-    ModuleOp module, const VPTOEmissionOptions& options, std::string& output, llvm::raw_ostream& diagOS);
+    ModuleOp module, const VPTOEmissionOptions &options, std::string &output,
+    llvm::raw_ostream &diagOS);
 
 LogicalResult lowerVPTOModuleToLLVMModules(
-    ModuleOp module, const VPTOEmissionOptions& options, EmittedLLVMModule& cubeModule, EmittedLLVMModule& vectorModule,
-    llvm::raw_ostream& diagOS);
+    ModuleOp module, const VPTOEmissionOptions &options,
+    EmittedLLVMModule &cubeModule, EmittedLLVMModule &vectorModule,
+    llvm::raw_ostream &diagOS);
 
 LogicalResult lowerVPTOModuleToLLVMModulesBeta1(
-    ModuleOp module, const VPTOEmissionOptions& options, EmittedLLVMModule& cubeModule, EmittedLLVMModule& vectorModule,
-    llvm::raw_ostream& diagOS);
+    ModuleOp module, const VPTOEmissionOptions &options,
+    EmittedLLVMModule &cubeModule, EmittedLLVMModule &vectorModule,
+    llvm::raw_ostream &diagOS);
 
 LogicalResult lowerVPTOModuleToLLVMModulesCANN900(
-    ModuleOp module, const VPTOEmissionOptions& options, EmittedLLVMModule& cubeModule, EmittedLLVMModule& vectorModule,
-    llvm::raw_ostream& diagOS);
+    ModuleOp module, const VPTOEmissionOptions &options,
+    EmittedLLVMModule &cubeModule, EmittedLLVMModule &vectorModule,
+    llvm::raw_ostream &diagOS);
 
 } // namespace mlir::pto
 

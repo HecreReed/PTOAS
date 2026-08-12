@@ -14,15 +14,15 @@
 
 // Case 0: int8 64x64
 
-extern "C" __global__ AICORE void TNOT_int8_64x64(__gm__ int8_t* a, __gm__ int8_t* b);
-extern "C" __global__ AICORE void TNOT_uint8_60x60(__gm__ uint8_t* a, __gm__ uint8_t* b);
+extern "C" __global__ AICORE void TNOT_int8_64x64(__gm__ int8_t *a, __gm__ int8_t *b);
+extern "C" __global__ AICORE void TNOT_uint8_60x60(__gm__ uint8_t *a, __gm__ uint8_t *b);
 
-void LaunchTNOT_uint8_60x60(void* a, void* b, void* stream)
-{
-    TNOT_uint8_60x60<<<1, nullptr, stream>>>((__gm__ uint8_t*)a, (__gm__ uint8_t*)b);
+void LaunchTNOT_uint8_60x60(void *a, void *b, void *stream) {
+    TNOT_uint8_60x60<<<1, nullptr, stream>>>((__gm__ uint8_t *)a, (__gm__ uint8_t *)b);
 }
 
-void LaunchTNOT_int8_64x64(void* a, void* b, void* stream)
-{
-    TNOT_int8_64x64<<<1, nullptr, stream>>>((__gm__ int8_t*)a, (__gm__ int8_t*)b);
+
+
+void LaunchTNOT_int8_64x64(void *a, void *b, void *stream) {
+    TNOT_int8_64x64<<<1, nullptr, stream>>>((__gm__ int8_t *)a, (__gm__ int8_t *)b);
 }

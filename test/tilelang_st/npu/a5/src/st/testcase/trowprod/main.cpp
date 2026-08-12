@@ -20,86 +20,84 @@
 using namespace PtoTestCommon;
 
 // Kernel launch wrappers (defined in launch.cpp)
-void LaunchTROWPROD_f32_127x64_valid127x63(float* src, float* dst, void* stream);
-void LaunchTROWPROD_f32_63x64(float* src, float* dst, void* stream);
-void LaunchTROWPROD_f32_31x128_valid31x127(float* src, float* dst, void* stream);
-void LaunchTROWPROD_f32_15x192(float* src, float* dst, void* stream);
-void LaunchTROWPROD_f32_7x448_valid7x447(float* src, float* dst, void* stream);
-void LaunchTROWPROD_f16_256x16_valid256x15(uint16_t* src, uint16_t* dst, void* stream);
-void LaunchTROWPROD_f32_64x128(float* src, float* dst, void* stream);
-void LaunchTROWPROD_f32_32x256(float* src, float* dst, void* stream);
-void LaunchTROWPROD_f32_16x512(float* src, float* dst, void* stream);
-void LaunchTROWPROD_f32_8x1024(float* src, float* dst, void* stream);
-void LaunchTROWPROD_i32_127x64_valid127x63(int32_t* src, int32_t* dst, void* stream);
-void LaunchTROWPROD_i32_63x64(int32_t* src, int32_t* dst, void* stream);
-void LaunchTROWPROD_i32_31x128_valid31x127(int32_t* src, int32_t* dst, void* stream);
-void LaunchTROWPROD_i32_15x192(int32_t* src, int32_t* dst, void* stream);
-void LaunchTROWPROD_i32_7x448_valid7x447(int32_t* src, int32_t* dst, void* stream);
-void LaunchTROWPROD_i16_256x16_valid256x15(int16_t* src, int16_t* dst, void* stream);
-void LaunchTROWPROD_i16_63x64(int16_t* src, int16_t* dst, void* stream);
-void LaunchTROWPROD_i16_31x128_valid31x127(int16_t* src, int16_t* dst, void* stream);
+void LaunchTROWPROD_f32_127x64_valid127x63(float *src, float *dst, void *stream);
+void LaunchTROWPROD_f32_63x64(float *src, float *dst, void *stream);
+void LaunchTROWPROD_f32_31x128_valid31x127(float *src, float *dst, void *stream);
+void LaunchTROWPROD_f32_15x192(float *src, float *dst, void *stream);
+void LaunchTROWPROD_f32_7x448_valid7x447(float *src, float *dst, void *stream);
+void LaunchTROWPROD_f16_256x16_valid256x15(uint16_t *src, uint16_t *dst, void *stream);
+void LaunchTROWPROD_f32_64x128(float *src, float *dst, void *stream);
+void LaunchTROWPROD_f32_32x256(float *src, float *dst, void *stream);
+void LaunchTROWPROD_f32_16x512(float *src, float *dst, void *stream);
+void LaunchTROWPROD_f32_8x1024(float *src, float *dst, void *stream);
+void LaunchTROWPROD_i32_127x64_valid127x63(int32_t *src, int32_t *dst, void *stream);
+void LaunchTROWPROD_i32_63x64(int32_t *src, int32_t *dst, void *stream);
+void LaunchTROWPROD_i32_31x128_valid31x127(int32_t *src, int32_t *dst, void *stream);
+void LaunchTROWPROD_i32_15x192(int32_t *src, int32_t *dst, void *stream);
+void LaunchTROWPROD_i32_7x448_valid7x447(int32_t *src, int32_t *dst, void *stream);
+void LaunchTROWPROD_i16_256x16_valid256x15(int16_t *src, int16_t *dst, void *stream);
+void LaunchTROWPROD_i16_63x64(int16_t *src, int16_t *dst, void *stream);
+void LaunchTROWPROD_i16_31x128_valid31x127(int16_t *src, int16_t *dst, void *stream);
 
-using LaunchFnF32 = void (*)(float*, float*, void*);
-using LaunchFnF16 = void (*)(uint16_t*, uint16_t*, void*);
-using LaunchFnI32 = void (*)(int32_t*, int32_t*, void*);
-using LaunchFnI16 = void (*)(int16_t*, int16_t*, void*);
+using LaunchFnF32 = void (*)(float *, float *, void *);
+using LaunchFnF16 = void (*)(uint16_t *, uint16_t *, void *);
+using LaunchFnI32 = void (*)(int32_t *, int32_t *, void *);
+using LaunchFnI16 = void (*)(int16_t *, int16_t *, void *);
 
 enum class DType { F32, F16, I32, I16 };
 
 struct TestCase {
-    const char* name;
-    DType dtype;
+    const char *name;
+    DType       dtype;
     union {
         LaunchFnF32 launchF32;
         LaunchFnF16 launchF16;
         LaunchFnI32 launchI32;
         LaunchFnI16 launchI16;
     };
-    size_t rows;      // allocated tile rows
-    size_t cols;      // allocated tile cols
-    size_t validRows; // effective computation rows  (<= rows)
-    size_t validCols; // effective computation cols  (<= cols)
-    size_t elemSize;  // bytes per element
+    size_t      rows;       // allocated tile rows
+    size_t      cols;       // allocated tile cols
+    size_t      validRows;  // effective computation rows  (<= rows)
+    size_t      validCols;  // effective computation cols  (<= cols)
+    size_t      elemSize;   // bytes per element
 };
 
 static const TestCase kCases[] = {
     // f32 cases
-    {"f32_127x64_valid127x63", DType::F32, .launchF32 = LaunchTROWPROD_f32_127x64_valid127x63, 127, 64, 127, 63, 4},
-    {"f32_63x64", DType::F32, .launchF32 = LaunchTROWPROD_f32_63x64, 63, 64, 63, 64, 4},
-    {"f32_31x128_valid31x127", DType::F32, .launchF32 = LaunchTROWPROD_f32_31x128_valid31x127, 31, 128, 31, 127, 4},
-    {"f32_15x192", DType::F32, .launchF32 = LaunchTROWPROD_f32_15x192, 15, 192, 15, 192, 4},
-    {"f32_7x448_valid7x447", DType::F32, .launchF32 = LaunchTROWPROD_f32_7x448_valid7x447, 7, 448, 7, 447, 4},
+    {"f32_127x64_valid127x63",              DType::F32, .launchF32 = LaunchTROWPROD_f32_127x64_valid127x63,              127,  64,  127,  63,  4},
+    {"f32_63x64",                           DType::F32, .launchF32 = LaunchTROWPROD_f32_63x64,                           63,   64,  63,   64,  4},
+    {"f32_31x128_valid31x127",              DType::F32, .launchF32 = LaunchTROWPROD_f32_31x128_valid31x127,              31,   128, 31,   127, 4},
+    {"f32_15x192",                          DType::F32, .launchF32 = LaunchTROWPROD_f32_15x192,                          15,   192, 15,   192, 4},
+    {"f32_7x448_valid7x447",                DType::F32, .launchF32 = LaunchTROWPROD_f32_7x448_valid7x447,                7,    448, 7,    447, 4},
     // f16 case
-    {"f16_256x16_valid256x15", DType::F16, .launchF16 = LaunchTROWPROD_f16_256x16_valid256x15, 256, 16, 256, 15, 2},
+    {"f16_256x16_valid256x15",              DType::F16, .launchF16 = LaunchTROWPROD_f16_256x16_valid256x15,              256,  16,  256,  15,  2},
     // f32 DN dst cases
-    {"f32_64x128", DType::F32, .launchF32 = LaunchTROWPROD_f32_64x128, 64, 128, 64, 128, 4},
-    {"f32_32x256", DType::F32, .launchF32 = LaunchTROWPROD_f32_32x256, 32, 256, 32, 256, 4},
-    {"f32_16x512", DType::F32, .launchF32 = LaunchTROWPROD_f32_16x512, 16, 512, 16, 512, 4},
-    {"f32_8x1024", DType::F32, .launchF32 = LaunchTROWPROD_f32_8x1024, 8, 1024, 8, 1024, 4},
+    {"f32_64x128",                          DType::F32, .launchF32 = LaunchTROWPROD_f32_64x128,                          64,   128, 64,   128, 4},
+    {"f32_32x256",                          DType::F32, .launchF32 = LaunchTROWPROD_f32_32x256,                          32,   256, 32,   256, 4},
+    {"f32_16x512",                          DType::F32, .launchF32 = LaunchTROWPROD_f32_16x512,                          16,   512, 16,   512, 4},
+    {"f32_8x1024",                          DType::F32, .launchF32 = LaunchTROWPROD_f32_8x1024,                          8,    1024,8,    1024,4},
     // int32 cases
-    {"i32_127x64_valid127x63", DType::I32, .launchI32 = LaunchTROWPROD_i32_127x64_valid127x63, 127, 64, 127, 63, 4},
-    {"i32_63x64", DType::I32, .launchI32 = LaunchTROWPROD_i32_63x64, 63, 64, 63, 64, 4},
-    {"i32_31x128_valid31x127", DType::I32, .launchI32 = LaunchTROWPROD_i32_31x128_valid31x127, 31, 128, 31, 127, 4},
-    {"i32_15x192", DType::I32, .launchI32 = LaunchTROWPROD_i32_15x192, 15, 192, 15, 192, 4},
-    {"i32_7x448_valid7x447", DType::I32, .launchI32 = LaunchTROWPROD_i32_7x448_valid7x447, 7, 448, 7, 447, 4},
+    {"i32_127x64_valid127x63",              DType::I32, .launchI32 = LaunchTROWPROD_i32_127x64_valid127x63,              127,  64,  127,  63,  4},
+    {"i32_63x64",                           DType::I32, .launchI32 = LaunchTROWPROD_i32_63x64,                           63,   64,  63,   64,  4},
+    {"i32_31x128_valid31x127",              DType::I32, .launchI32 = LaunchTROWPROD_i32_31x128_valid31x127,              31,   128, 31,   127, 4},
+    {"i32_15x192",                          DType::I32, .launchI32 = LaunchTROWPROD_i32_15x192,                          15,   192, 15,   192, 4},
+    {"i32_7x448_valid7x447",                DType::I32, .launchI32 = LaunchTROWPROD_i32_7x448_valid7x447,                7,    448, 7,    447, 4},
     // int16 cases
-    {"i16_256x16_valid256x15", DType::I16, .launchI16 = LaunchTROWPROD_i16_256x16_valid256x15, 256, 16, 256, 15, 2},
-    {"i16_63x64", DType::I16, .launchI16 = LaunchTROWPROD_i16_63x64, 63, 64, 63, 64, 2},
-    {"i16_31x128_valid31x127", DType::I16, .launchI16 = LaunchTROWPROD_i16_31x128_valid31x127, 31, 128, 31, 127, 2},
+    {"i16_256x16_valid256x15",              DType::I16, .launchI16 = LaunchTROWPROD_i16_256x16_valid256x15,              256,  16,  256,  15,  2},
+    {"i16_63x64",                           DType::I16, .launchI16 = LaunchTROWPROD_i16_63x64,                           63,   64,  63,   64,  2},
+    {"i16_31x128_valid31x127",              DType::I16, .launchI16 = LaunchTROWPROD_i16_31x128_valid31x127,              31,   128, 31,   127, 2},
 };
 static constexpr size_t kNumCases = sizeof(kCases) / sizeof(kCases[0]);
 
-static int RunCase(const TestCase& tc, int deviceId, aclrtStream stream)
-{
+static int RunCase(const TestCase &tc, int deviceId, aclrtStream stream) {
     int rc = 0;
     const size_t srcElemCount = tc.rows * tc.cols;
-    const size_t srcFileSize = srcElemCount * tc.elemSize;
+    const size_t srcFileSize  = srcElemCount * tc.elemSize;
     const size_t dstElemCount = tc.validRows * 1;
-    const size_t dstFileSize = dstElemCount * tc.elemSize;
+    const size_t dstFileSize  = dstElemCount * tc.elemSize;
 
-    std::printf(
-        "[INFO] === case: %s (shape=%zux%zu, valid=%zux%zu) ===\n", tc.name, tc.rows, tc.cols, tc.validRows,
-        tc.validCols);
+    std::printf("[INFO] === case: %s (shape=%zux%zu, valid=%zux%zu) ===\n",
+                tc.name, tc.rows, tc.cols, tc.validRows, tc.validCols);
 
     // Per-case data directory
     std::string caseDir = std::string("./") + tc.name;
@@ -123,18 +121,10 @@ static int RunCase(const TestCase& tc, int deviceId, aclrtStream stream)
         aclrtMemcpy(src0Device, srcFileSize, src0Host, srcFileSize, ACL_MEMCPY_HOST_TO_DEVICE);
 
         switch (tc.dtype) {
-            case DType::F32:
-                tc.launchF32((float*)src0Device, (float*)dstDevice, stream);
-                break;
-            case DType::F16:
-                tc.launchF16((uint16_t*)src0Device, (uint16_t*)dstDevice, stream);
-                break;
-            case DType::I32:
-                tc.launchI32((int32_t*)src0Device, (int32_t*)dstDevice, stream);
-                break;
-            case DType::I16:
-                tc.launchI16((int16_t*)src0Device, (int16_t*)dstDevice, stream);
-                break;
+            case DType::F32: tc.launchF32((float *)src0Device, (float *)dstDevice, stream); break;
+            case DType::F16: tc.launchF16((uint16_t *)src0Device, (uint16_t *)dstDevice, stream); break;
+            case DType::I32: tc.launchI32((int32_t *)src0Device, (int32_t *)dstDevice, stream); break;
+            case DType::I16: tc.launchI16((int16_t *)src0Device, (int16_t *)dstDevice, stream); break;
         }
 
         aclrtSynchronizeStream(stream);
@@ -160,17 +150,16 @@ static int RunCase(const TestCase& tc, int deviceId, aclrtStream stream)
     return rc;
 }
 
-int main(int argc, char* argv[])
-{
+int main(int argc, char *argv[]) {
     // Optional case filter: ./trowprod [case_name]
-    const char* caseFilter = (argc > 1) ? argv[1] : nullptr;
+    const char *caseFilter = (argc > 1) ? argv[1] : nullptr;
 
     int rc = 0;
     int deviceId = 0;
     aclrtStream stream = nullptr;
 
     aclInit(nullptr);
-    if (const char* envDevice = std::getenv("ACL_DEVICE_ID")) {
+    if (const char *envDevice = std::getenv("ACL_DEVICE_ID")) {
         deviceId = std::atoi(envDevice);
     }
     aclrtSetDevice(deviceId);

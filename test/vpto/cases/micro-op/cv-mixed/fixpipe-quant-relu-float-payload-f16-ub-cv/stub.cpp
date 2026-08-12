@@ -16,12 +16,15 @@
 #define __gm__
 #endif
 
-extern "C" __global__[aicore] void fixpipe_quant_relu_float_payload_f16_ub_cv_kernel(
-    __gm__ __fp16* lhs, __gm__ __fp16* rhs, __gm__ __fp16* out_ub, __gm__ __fp16* out_gm, __gm__ __fp16* out_l1)
-{
-    (void)lhs;
-    (void)rhs;
-    (void)out_ub;
-    (void)out_gm;
-    (void)out_l1;
+extern "C" __global__ [aicore] void
+fixpipe_quant_relu_float_payload_f16_ub_cv_kernel(__gm__ __fp16 *lhs,
+                                                  __gm__ __fp16 *rhs,
+                                                  __gm__ __fp16 *out_ub,
+                                                  __gm__ __fp16 *out_gm,
+                                                  __gm__ __fp16 *out_l1) {
+  (void)lhs;
+  (void)rhs;
+  (void)out_ub;
+  (void)out_gm;
+  (void)out_l1;
 }

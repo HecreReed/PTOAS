@@ -11,24 +11,12 @@
 #endif
 
 #if defined(__CCE_AICORE__) && defined(__NPU_ARCH__) && (__NPU_ARCH__ == 2201)
-typedef struct {
-    unsigned char v;
-} hifloat8_t;
-typedef struct {
-    unsigned char v;
-} float8_e4m3_t;
-typedef struct {
-    unsigned char v;
-} float8_e5m2_t;
-typedef struct {
-    unsigned char v;
-} float8_e8m0_t;
-typedef struct {
-    unsigned char v;
-} float4_e1m2x2_t;
-typedef struct {
-    unsigned char v;
-} float4_e2m1x2_t;
+typedef struct { unsigned char v; } hifloat8_t;
+typedef struct { unsigned char v; } float8_e4m3_t;
+typedef struct { unsigned char v; } float8_e5m2_t;
+typedef struct { unsigned char v; } float8_e8m0_t;
+typedef struct { unsigned char v; } float4_e1m2x2_t;
+typedef struct { unsigned char v; } float4_e2m1x2_t;
 #endif
 #include <cstdint>
 
@@ -48,12 +36,19 @@ struct MrgSortExecutedNumList {
 #include "acl/acl.h"
 #endif
 
-extern "C" __global__[aicore] void dma_copy_rearrange_kernel(
-    __gm__ int16_t* v1, __gm__ int16_t* v2, int64_t n_burst, int64_t len_burst, int64_t src_gap, int64_t dst_gap);
+extern "C" __global__ [aicore] void dma_copy_rearrange_kernel(__gm__ int16_t *v1,
+                                                              __gm__ int16_t *v2,
+                                                              int64_t n_burst,
+                                                              int64_t len_burst,
+                                                              int64_t src_gap,
+                                                              int64_t dst_gap);
 
-void LaunchDma_copy_rearrange_kernel(
-    int16_t* v1, int16_t* v2, int64_t n_burst, int64_t len_burst, int64_t src_gap, int64_t dst_gap, void* stream)
-{
-    dma_copy_rearrange_kernel<<<1, nullptr, stream>>>(
-        (__gm__ int16_t*)v1, (__gm__ int16_t*)v2, n_burst, len_burst, src_gap, dst_gap);
+void LaunchDma_copy_rearrange_kernel(int16_t *v1, int16_t *v2,
+                                     int64_t n_burst, int64_t len_burst,
+                                     int64_t src_gap, int64_t dst_gap,
+                                     void *stream) {
+  dma_copy_rearrange_kernel<<<1, nullptr, stream>>>((__gm__ int16_t *)v1,
+                                                    (__gm__ int16_t *)v2,
+                                                    n_burst, len_burst,
+                                                    src_gap, dst_gap);
 }

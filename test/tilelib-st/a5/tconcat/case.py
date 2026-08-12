@@ -75,18 +75,10 @@ _tconcat_kernels = {}
 for _name, _npdt, _r, _c0, _c1 in CASE_SPECS:
     _dt = _NP_TO_PTO[np.dtype(_npdt)]
     _esz = np.dtype(_npdt).itemsize
-
     def _make(dt=_dt, esz=_esz, r=_r, c0=_c0, c1=_c1, kernel_name=f"tconcat_{_name}"):
         @pto.jit(name=kernel_name, target="a5")
-        def _kernel(
-            s0_ptr: pto.ptr(dt, "gm"),
-            s1_ptr: pto.ptr(dt, "gm"),
-            d_ptr: pto.ptr(dt, "gm"),
-        ):
-            _concat_body(
-                s0_ptr, s1_ptr, d_ptr, dtype=dt, elemsize=esz, rows=r, c0=c0, c1=c1
-            )
-
+        def _kernel(s0_ptr: pto.ptr(dt, "gm"), s1_ptr: pto.ptr(dt, "gm"), d_ptr: pto.ptr(dt, "gm")):
+            _concat_body(s0_ptr, s1_ptr, d_ptr, dtype=dt, elemsize=esz, rows=r, c0=c0, c1=c1)
         return _kernel
 
     _tconcat_kernels[_name] = _make()
@@ -95,7 +87,6 @@ for _name, _npdt, _r, _c0, _c1 in CASE_SPECS:
 def _make_inputs(name, npdt, rows, c0, c1):
     # Deterministic per-case seed (crc32(name)); value range (-1000, 1000).
     import zlib
-
     np.random.seed(zlib.crc32(name.encode("utf-8")) & 0xFFFFFFFF)
     a = np.random.uniform(-1000, 1000, size=(rows, c0)).astype(npdt)
     b = np.random.uniform(-1000, 1000, size=(rows, c1)).astype(npdt)
@@ -112,11 +103,9 @@ for _name, _npdt, _r, _c0, _c1 in CASE_SPECS:
         golden_output_case(
             "tconcat_" + _name,
             _tconcat_kernels[_name],
-            inputs=lambda _name=_name,
-            _npdt=_npdt,
-            _r=_r,
-            _c0=_c0,
-            _c1=_c1: _make_inputs("tconcat_" + _name, _npdt, _r, _c0, _c1),
+            inputs=lambda _name=_name, _npdt=_npdt, _r=_r, _c0=_c0, _c1=_c1: _make_inputs(
+                "tconcat_" + _name, _npdt, _r, _c0, _c1
+            ),
             expected=_make_expected,
             output_shape=(_r, _c0 + _c1),
             output_dtype=_npdt,

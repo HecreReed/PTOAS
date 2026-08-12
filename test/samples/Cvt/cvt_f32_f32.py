@@ -8,7 +8,7 @@
 
 from ptoas.mlir.ir import Context, Location, Module, InsertionPoint, UnitAttr
 from ptoas.mlir.dialects import func, arith, pto
-from ptoas.mlir.ir import F32Type, IndexType
+from ptoas.mlir.ir import F32Type, IndexType, BoolAttr
 
 
 def build():
@@ -47,17 +47,13 @@ def build():
                 c32 = arith.ConstantOp(IndexType.get(ctx), 32).result
 
                 arg0, arg1 = entry.arguments
-
+                
                 tv0 = pto.MakeTensorViewOp(tv2_f32, arg0, [c32, c32], [c32, c1]).result
                 tv1 = pto.MakeTensorViewOp(tv2_f32, arg1, [c32, c32], [c32, c1]).result
 
                 # Replace the immediate values with the constants defined
-                sv0 = pto.PartitionViewOp(
-                    tile_view_32, tv0, offsets=[c0, c0], sizes=[c32, c32]
-                ).result
-                sv1 = pto.PartitionViewOp(
-                    tile_view_32, tv1, offsets=[c0, c0], sizes=[c32, c32]
-                ).result
+                sv0 = pto.PartitionViewOp(tile_view_32, tv0, offsets=[c0, c0], sizes=[c32, c32]).result
+                sv1 = pto.PartitionViewOp(tile_view_32, tv1, offsets=[c0, c0], sizes=[c32, c32]).result
 
                 tb0 = pto.AllocTileOp(tile_buf_32).result
                 tb1 = pto.AllocTileOp(tile_buf_32).result

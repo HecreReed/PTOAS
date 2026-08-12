@@ -26,20 +26,19 @@ namespace ptobc {
 mlir::OwningOpRef<mlir::ModuleOp> parsePTOFile(mlir::MLIRContext& ctx, const std::string& path);
 PTOBCFile encodeFromMLIRModule(mlir::ModuleOp module);
 void decodeFileToPTO(const std::string& inPath, const std::string& outPath);
-} // namespace ptobc
+}
 
-static void usage()
-{
-    std::cerr << "ptobc (v0)\n\n"
-              << "Usage:\n"
-              << "  ptobc encode <input.pto> -o <out.ptobc>\n"
-              << "  ptobc decode <input.ptobc> -o <out.pto>\n";
+static void usage() {
+  std::cerr << "ptobc (v0)\n\n"
+            << "Usage:\n"
+            << "  ptobc encode <input.pto> -o <out.ptobc>\n"
+            << "  ptobc decode <input.ptobc> -o <out.pto>\n";
 }
 
 struct CommandLineOptions {
-    std::string cmd;
-    std::string input;
-    std::string output;
+  std::string cmd;
+  std::string input;
+  std::string output;
 };
 
 namespace {
@@ -52,95 +51,89 @@ constexpr size_t kFirstOptionArgumentIndex = 3;
 constexpr size_t kNextArgumentOffset = 1;
 constexpr int kUsageExitCode = 2;
 
-static std::vector<std::string> collectArguments(int argc, char* argv[])
-{
-    std::vector<std::string> args;
-    args.reserve(static_cast<size_t>(argc));
-    for (int i = 0; i < argc; ++i)
-        args.emplace_back(argv[i]);
-    return args;
+static std::vector<std::string> collectArguments(int argc, char *argv[]) {
+  std::vector<std::string> args;
+  args.reserve(static_cast<size_t>(argc));
+  for (int i = 0; i < argc; ++i)
+    args.emplace_back(argv[i]);
+  return args;
 }
 
 } // namespace
 
-static std::optional<CommandLineOptions> parseCommandLine(const std::vector<std::string>& args)
-{
-    if (args.size() < kCommandArgumentCount)
-        return std::nullopt;
+static std::optional<CommandLineOptions>
+parseCommandLine(const std::vector<std::string> &args) {
+  if (args.size() < kCommandArgumentCount)
+    return std::nullopt;
 
-    CommandLineOptions options{args[kCommandArgumentIndex], "", ""};
-    if (options.cmd != "encode" && options.cmd != "decode")
-        return options;
-    if (args.size() < kFullCommandArgumentCount)
-        return std::nullopt;
-
-    options.input = args[kInputArgumentIndex];
-    for (size_t i = kFirstOptionArgumentIndex; i < args.size(); ++i) {
-        const std::string& arg = args[i];
-        if (arg == "-o" && i + kNextArgumentOffset < args.size())
-            options.output = args[++i];
-    }
-    if (options.output.empty())
-        return std::nullopt;
+  CommandLineOptions options{args[kCommandArgumentIndex], "", ""};
+  if (options.cmd != "encode" && options.cmd != "decode")
     return options;
+  if (args.size() < kFullCommandArgumentCount)
+    return std::nullopt;
+
+  options.input = args[kInputArgumentIndex];
+  for (size_t i = kFirstOptionArgumentIndex; i < args.size(); ++i) {
+    const std::string &arg = args[i];
+    if (arg == "-o" && i + kNextArgumentOffset < args.size())
+      options.output = args[++i];
+  }
+  if (options.output.empty())
+    return std::nullopt;
+  return options;
 }
 
-static mlir::DialectRegistry buildRegistry()
-{
-    mlir::DialectRegistry registry;
-    registry.insert<
-        mlir::func::FuncDialect, mlir::arith::ArithDialect, mlir::affine::AffineDialect, mlir::memref::MemRefDialect,
-        mlir::scf::SCFDialect, mlir::pto::PTODialect>();
-    return registry;
+static mlir::DialectRegistry buildRegistry() {
+  mlir::DialectRegistry registry;
+  registry.insert<mlir::func::FuncDialect, mlir::arith::ArithDialect,
+                  mlir::affine::AffineDialect, mlir::memref::MemRefDialect,
+                  mlir::scf::SCFDialect, mlir::pto::PTODialect>();
+  return registry;
 }
 
-static void preloadDialects(mlir::MLIRContext& ctx)
-{
-    (void)ctx.getOrLoadDialect<mlir::func::FuncDialect>();
-    (void)ctx.getOrLoadDialect<mlir::arith::ArithDialect>();
-    (void)ctx.getOrLoadDialect<mlir::affine::AffineDialect>();
-    (void)ctx.getOrLoadDialect<mlir::memref::MemRefDialect>();
-    (void)ctx.getOrLoadDialect<mlir::scf::SCFDialect>();
-    (void)ctx.getOrLoadDialect<mlir::pto::PTODialect>();
+static void preloadDialects(mlir::MLIRContext &ctx) {
+  (void)ctx.getOrLoadDialect<mlir::func::FuncDialect>();
+  (void)ctx.getOrLoadDialect<mlir::arith::ArithDialect>();
+  (void)ctx.getOrLoadDialect<mlir::affine::AffineDialect>();
+  (void)ctx.getOrLoadDialect<mlir::memref::MemRefDialect>();
+  (void)ctx.getOrLoadDialect<mlir::scf::SCFDialect>();
+  (void)ctx.getOrLoadDialect<mlir::pto::PTODialect>();
 }
 
-static int runEncode(const CommandLineOptions& options)
-{
-    mlir::MLIRContext ctx(buildRegistry());
-    ctx.allowUnregisteredDialects(true);
-    preloadDialects(ctx);
+static int runEncode(const CommandLineOptions &options) {
+  mlir::MLIRContext ctx(buildRegistry());
+  ctx.allowUnregisteredDialects(true);
+  preloadDialects(ctx);
 
-    auto module = ptobc::parsePTOFile(ctx, options.input);
-    auto file = ptobc::encodeFromMLIRModule(*module);
-    auto bytes = file.serialize();
-    ptobc::writeFile(options.output, bytes);
-    return 0;
+  auto module = ptobc::parsePTOFile(ctx, options.input);
+  auto file = ptobc::encodeFromMLIRModule(*module);
+  auto bytes = file.serialize();
+  ptobc::writeFile(options.output, bytes);
+  return 0;
 }
 
-static int runDecode(const CommandLineOptions& options)
-{
-    ptobc::decodeFileToPTO(options.input, options.output);
-    return 0;
+static int runDecode(const CommandLineOptions &options) {
+  ptobc::decodeFileToPTO(options.input, options.output);
+  return 0;
 }
 
-int main(int argc, char** argv)
-{
-    auto args = collectArguments(argc, argv);
-    auto options = parseCommandLine(args);
-    if (!options) {
-        usage();
-        return kUsageExitCode;
-    }
+int main(int argc, char **argv) {
+  auto args = collectArguments(argc, argv);
+  auto options = parseCommandLine(args);
+  if (!options) {
+    usage();
+    return kUsageExitCode;
+  }
 
-    try {
-        if (options->cmd == "encode")
-            return runEncode(*options);
-        if (options->cmd == "decode")
-            return runDecode(*options);
-        usage();
-        return kUsageExitCode;
-    } catch (const std::exception& e) {
-        std::cerr << "ERROR: " << e.what() << "\n";
-        return 1;
-    }
+  try {
+    if (options->cmd == "encode")
+      return runEncode(*options);
+    if (options->cmd == "decode")
+      return runDecode(*options);
+    usage();
+    return kUsageExitCode;
+  } catch (const std::exception& e) {
+    std::cerr << "ERROR: " << e.what() << "\n";
+    return 1;
+  }
 }

@@ -30,16 +30,8 @@ def main():
         vr, vc = case["valid_shape"]
         out_shape = (vr, 1)
 
-        golden = np.fromfile(
-            os.path.join(case_dir, "golden.bin"),
-            dtype=case["dtype"],
-            count=np.prod(out_shape),
-        ).reshape(out_shape)
-        output = np.fromfile(
-            os.path.join(case_dir, "output.bin"),
-            dtype=case["dtype"],
-            count=np.prod(out_shape),
-        ).reshape(out_shape)
+        golden = np.fromfile(os.path.join(case_dir, "golden.bin"), dtype=case["dtype"], count=np.prod(out_shape)).reshape(out_shape)
+        output = np.fromfile(os.path.join(case_dir, "output.bin"), dtype=case["dtype"], count=np.prod(out_shape)).reshape(out_shape)
 
         ok = result_cmp(golden, output, case["eps"])
         if ok:

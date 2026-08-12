@@ -10,9 +10,9 @@
 // CHECK-LABEL: func.func @TRandom_test
 
 // Test template for pto.trandom operator
-//
+// 
 // NOTE: pto.trandom uses Philox random number generation.
-// It requires special operations (vci, vmull, vbr) that may not be
+// It requires special operations (vci, vmull, vbr) that may not be 
 // fully supported in current TileLang DSL without extension.
 //
 // This test file demonstrates expected IR structure.
@@ -31,7 +31,7 @@ module {
 
     // Note: pto.trandom may not be defined in current PTO IR
     // This shows expected usage pattern when available
-
+    
     return
   }
 }

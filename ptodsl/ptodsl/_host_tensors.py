@@ -22,9 +22,7 @@ def _normalize_tensor_shape(shape):
     except TypeError as exc:
         raise host_tensor_metadata_error("missing iterable .shape") from exc
     except ValueError as exc:
-        raise host_tensor_metadata_error(
-            ".shape must contain integer-like dimensions"
-        ) from exc
+        raise host_tensor_metadata_error(".shape must contain integer-like dimensions") from exc
 
 
 def _normalize_tensor_strides(tensor):
@@ -33,13 +31,9 @@ def _normalize_tensor_strides(tensor):
         try:
             return tuple(int(dim) for dim in stride_method())
         except TypeError as exc:
-            raise host_tensor_metadata_error(
-                ".stride() must return an iterable of integer-like dimensions"
-            ) from exc
+            raise host_tensor_metadata_error(".stride() must return an iterable of integer-like dimensions") from exc
         except ValueError as exc:
-            raise host_tensor_metadata_error(
-                ".stride() must return integer-like dimensions"
-            ) from exc
+            raise host_tensor_metadata_error(".stride() must return integer-like dimensions") from exc
     strides = getattr(tensor, "strides", None)
     if strides is None:
         raise host_tensor_metadata_error("missing .strides or .stride()")
@@ -48,9 +42,7 @@ def _normalize_tensor_strides(tensor):
     except TypeError as exc:
         raise host_tensor_metadata_error(".strides must be iterable") from exc
     except ValueError as exc:
-        raise host_tensor_metadata_error(
-            ".strides must contain integer-like dimensions"
-        ) from exc
+        raise host_tensor_metadata_error(".strides must contain integer-like dimensions") from exc
 
 
 def _extract_tensor_data_handle(tensor):
@@ -157,7 +149,6 @@ class HostTensorValue:
 
     def __init__(self, name: str, spec: TensorSpec, data_handle, shape, strides):
         from ._surface_values import wrap_surface_value
-
         self.name = name
         self.spec = spec
         self.data_handle = wrap_surface_value(data_handle)
@@ -185,8 +176,8 @@ def bind_host_tensor_argument(name: str, spec: TensorSpec, entry_arguments):
             f"arguments, got {len(entry_arguments)}"
         )
     data_handle = entry_arguments[0]
-    shape = entry_arguments[1 : 1 + spec.rank]
-    strides = entry_arguments[1 + spec.rank : 1 + spec.rank + spec.rank]
+    shape = entry_arguments[1:1 + spec.rank]
+    strides = entry_arguments[1 + spec.rank:1 + spec.rank + spec.rank]
     return (
         HostTensorValue(name, spec, data_handle, shape, strides),
         entry_arguments[expected:],

@@ -14,16 +14,14 @@
 
 // f32 kernels
 
-extern "C" __global__ AICORE void TROWEXPANDADD_f32_16x32(__gm__ float* src0, __gm__ float* src1, __gm__ float* dst);
-extern "C" __global__ AICORE void TROWEXPANDADD_i32_16x32(
-    __gm__ int32_t* src0, __gm__ int32_t* src1, __gm__ int32_t* dst);
+extern "C" __global__ AICORE void TROWEXPANDADD_f32_16x32(__gm__ float *src0, __gm__ float *src1, __gm__ float *dst);
+extern "C" __global__ AICORE void TROWEXPANDADD_i32_16x32(__gm__ int32_t *src0, __gm__ int32_t *src1, __gm__ int32_t *dst);
 
-void LaunchTROWEXPANDADD_f32_16x32(float* src0, float* src1, float* dst, void* stream)
-{
-    TROWEXPANDADD_f32_16x32<<<1, nullptr, stream>>>((__gm__ float*)src0, (__gm__ float*)src1, (__gm__ float*)dst);
+void LaunchTROWEXPANDADD_f32_16x32(float *src0, float *src1, float *dst, void *stream) {
+    TROWEXPANDADD_f32_16x32<<<1, nullptr, stream>>>((__gm__ float *)src0, (__gm__ float *)src1, (__gm__ float *)dst);
 }
 
-void LaunchTROWEXPANDADD_i32_16x32(void* src0, void* src1, void* dst, void* stream)
-{
-    TROWEXPANDADD_i32_16x32<<<1, nullptr, stream>>>((__gm__ int32_t*)src0, (__gm__ int32_t*)src1, (__gm__ int32_t*)dst);
+
+void LaunchTROWEXPANDADD_i32_16x32(void *src0, void *src1, void *dst, void *stream) {
+    TROWEXPANDADD_i32_16x32<<<1, nullptr, stream>>>((__gm__ int32_t *)src0, (__gm__ int32_t *)src1, (__gm__ int32_t *)dst);
 }

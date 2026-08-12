@@ -73,6 +73,5 @@ def main():
     test_vector_float_cast_rejects_shape_mismatch()
     print("ptodsl_scalar_cast: PASS")
 
-
 if __name__ == "__main__":
     main()

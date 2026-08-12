@@ -11,15 +11,7 @@ from ptodsl import pto
 import ptodsl.tilelib as tilelib
 
 
-def _textract_fp_constraint(
-    src_kind,
-    src_memory_space,
-    fp_kind,
-    fp_memory_space,
-    dst_kind,
-    dst_memory_space,
-    **_,
-):
+def _textract_fp_constraint(src_kind, src_memory_space, fp_kind, fp_memory_space, dst_kind, dst_memory_space, **_):
     return (
         src_kind == "tile"
         and fp_kind == "tile"
@@ -48,13 +40,7 @@ def _register_textract_fp(name, signatures, quant_mode, template_id):
         is_post_update=False,
         tags=("extract", "acc", "mat", "fp"),
     )
-    def _template(
-        src: pto.Tile,
-        fp: pto.Tile,
-        index_row: pto.i32,
-        index_col: pto.i32,
-        dst: pto.Tile,
-    ):
+    def _template(src: pto.Tile, fp: pto.Tile, index_row: pto.i32, index_col: pto.i32, dst: pto.Tile):
         m, n = dst.valid_shape
         src_ptr = src.as_ptr()
         if str(src.dtype) == "si32":

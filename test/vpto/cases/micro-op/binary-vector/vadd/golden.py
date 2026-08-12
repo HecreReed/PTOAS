@@ -24,7 +24,6 @@ OUT_SENTINEL = np.float32(-123.25)
 
 # ---- helpers ----
 
-
 def f32_to_bf16_bits(values: np.ndarray) -> np.ndarray:
     wide = values.astype(np.float32, copy=False).view(np.uint32)
     rounding = np.uint32(0x7FFF) + ((wide >> 16) & np.uint32(1))
@@ -46,7 +45,6 @@ def wrap_add_u16(lhs: np.ndarray, rhs: np.ndarray) -> np.ndarray:
 
 
 # ---- generators ----
-
 
 def gen_f32(out: Path, rng: np.random.Generator) -> None:
     v1 = rng.uniform(-8.0, 8.0, size=(ROWS, COLS)).astype(np.float32)
@@ -85,12 +83,8 @@ def gen_bf16(out: Path, rng: np.random.Generator) -> None:
 
 
 def gen_f32_exceptional(out: Path, _rng: np.random.Generator) -> None:
-    specials_a = np.array(
-        [-np.inf, -7.5, -0.0, 0.0, 1.0, np.inf, np.nan, 3.5], dtype=np.float32
-    )
-    specials_b = np.array(
-        [np.inf, 2.5, 0.0, -0.0, -1.0, -np.inf, 1.0, np.nan], dtype=np.float32
-    )
+    specials_a = np.array([-np.inf, -7.5, -0.0, 0.0, 1.0, np.inf, np.nan, 3.5], dtype=np.float32)
+    specials_b = np.array([np.inf, 2.5, 0.0, -0.0, -1.0, -np.inf, 1.0, np.nan], dtype=np.float32)
     v1 = np.resize(specials_a, ROWS * COLS).reshape(ROWS, COLS).astype(np.float32)
     v2 = np.resize(specials_b, ROWS * COLS).reshape(ROWS, COLS).astype(np.float32)
     v3 = np.zeros((ROWS, COLS), dtype=np.float32)
@@ -114,12 +108,8 @@ def gen_i16_signed(out: Path, rng: np.random.Generator) -> None:
 
 def gen_i16_signed_overflow(out: Path, _rng: np.random.Generator) -> None:
     elems = ROWS * COLS
-    lhs_pattern = np.array(
-        [32767, 32760, -32768, -32760, 1000, -1000, 12345, -12345], dtype=np.int16
-    )
-    rhs_pattern = np.array(
-        [1, 100, -1, -100, 30000, -30000, 23456, -23456], dtype=np.int16
-    )
+    lhs_pattern = np.array([32767, 32760, -32768, -32760, 1000, -1000, 12345, -12345], dtype=np.int16)
+    rhs_pattern = np.array([1, 100, -1, -100, 30000, -30000, 23456, -23456], dtype=np.int16)
     repeats = elems // lhs_pattern.size
     v1 = np.tile(lhs_pattern, repeats)
     v2 = np.tile(rhs_pattern, repeats)
@@ -144,12 +134,8 @@ def gen_i16_unsigned(out: Path, rng: np.random.Generator) -> None:
 
 def gen_i16_unsigned_overflow(out: Path, _rng: np.random.Generator) -> None:
     elems = ROWS * COLS
-    lhs_pattern = np.array(
-        [65535, 65530, 65500, 60000, 100, 0, 32768, 12345], dtype=np.uint16
-    )
-    rhs_pattern = np.array(
-        [1, 10, 1000, 10000, 65535, 5, 40000, 60000], dtype=np.uint16
-    )
+    lhs_pattern = np.array([65535, 65530, 65500, 60000, 100, 0, 32768, 12345], dtype=np.uint16)
+    rhs_pattern = np.array([1, 10, 1000, 10000, 65535, 5, 40000, 60000], dtype=np.uint16)
     repeats = elems // lhs_pattern.size
     v1 = np.tile(lhs_pattern, repeats)
     v2 = np.tile(rhs_pattern, repeats)

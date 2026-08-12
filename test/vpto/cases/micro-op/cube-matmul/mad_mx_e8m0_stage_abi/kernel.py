@@ -57,12 +57,8 @@ def mad_mx_e8m0_stage_abi_kernel(
     # scale-stage destination required by the LOAD.MX ABI.
     a_l1 = pto.castptr(pto.ui64(L1_A_DATA_ADDR), pto.ptr(pto.f8e4m3, "mat"))
     b_l1 = pto.castptr(pto.ui64(L1_B_DATA_ADDR), pto.ptr(pto.f8e4m3, "mat"))
-    a_scale_storage_l1 = pto.castptr(
-        pto.ui64(L1_A_SCALE_ADDR), pto.ptr(pto.ui16, "mat")
-    )
-    b_scale_storage_l1 = pto.castptr(
-        pto.ui64(L1_B_SCALE_ADDR), pto.ptr(pto.ui16, "mat")
-    )
+    a_scale_storage_l1 = pto.castptr(pto.ui64(L1_A_SCALE_ADDR), pto.ptr(pto.ui16, "mat"))
+    b_scale_storage_l1 = pto.castptr(pto.ui64(L1_B_SCALE_ADDR), pto.ptr(pto.ui16, "mat"))
     a_scale_l1 = pto.castptr(pto.ui64(L1_A_SCALE_ADDR), pto.ptr(pto.f8e8m0, "mat"))
     b_scale_l1 = pto.castptr(pto.ui64(L1_B_SCALE_ADDR), pto.ptr(pto.f8e8m0, "mat"))
     # The second K half follows the first Mx128 / 128xN tile in L1.
@@ -100,30 +96,18 @@ def mad_mx_e8m0_stage_abi_kernel(
     pto.mte_l1_l0a(a_l1, a_l0_stage0, M, TILE_K_SUB)
     pto.mte_l1_l0b(b_l1, b_l0_stage0, TILE_K_SUB, N, transpose=True)
     pto.mte_l1_l0a_mx(
-        a_scale_l1,
-        a_l0_stage0,
-        x_start=0,
-        y_start=0,
-        x_step=M // 16,
-        y_step=2,
-        src_stride=SCALE_SRC_STRIDE,
-        dst_stride=2,
+        a_scale_l1, a_l0_stage0,
+        x_start=0, y_start=0, x_step=M // 16, y_step=2,
+        src_stride=SCALE_SRC_STRIDE, dst_stride=2,
     )
     pto.mte_l1_l0b_mx(
-        b_scale_l1,
-        b_l0_stage0,
-        x_start=0,
-        y_start=0,
-        x_step=N // 16,
-        y_step=2,
-        src_stride=SCALE_SRC_STRIDE,
-        dst_stride=2,
+        b_scale_l1, b_l0_stage0,
+        x_start=0, y_start=0, x_step=N // 16, y_step=2,
+        src_stride=SCALE_SRC_STRIDE, dst_stride=2,
     )
     pto.set_flag(pto.Pipe.MTE1, pto.Pipe.M, event_id=0)
     pto.wait_flag(pto.Pipe.MTE1, pto.Pipe.M, event_id=0)
-    pto.mad_mx(
-        a_l0_stage0, b_l0_stage0, c_l0, M, N, TILE_K_SUB, disable_gemv=True, sat="sat"
-    )
+    pto.mad_mx(a_l0_stage0, b_l0_stage0, c_l0, M, N, TILE_K_SUB, disable_gemv=True, sat="sat")
     pto.pipe_barrier(pto.Pipe.ALL)
 
     pto.mte_l1_l0a(a_l1_stage1, a_l0_stage1, M, TILE_K_SUB)
@@ -131,30 +115,18 @@ def mad_mx_e8m0_stage_abi_kernel(
     # y_start=2 selects the second K=128 scale half. Together with the nonzero
     # L0 destination, this distinguishes raw addresses from pre-divided ones.
     pto.mte_l1_l0a_mx(
-        a_scale_l1,
-        a_l0_stage1,
-        x_start=0,
-        y_start=2,
-        x_step=M // 16,
-        y_step=2,
-        src_stride=SCALE_SRC_STRIDE,
-        dst_stride=2,
+        a_scale_l1, a_l0_stage1,
+        x_start=0, y_start=2, x_step=M // 16, y_step=2,
+        src_stride=SCALE_SRC_STRIDE, dst_stride=2,
     )
     pto.mte_l1_l0b_mx(
-        b_scale_l1,
-        b_l0_stage1,
-        x_start=0,
-        y_start=2,
-        x_step=N // 16,
-        y_step=2,
-        src_stride=SCALE_SRC_STRIDE,
-        dst_stride=2,
+        b_scale_l1, b_l0_stage1,
+        x_start=0, y_start=2, x_step=N // 16, y_step=2,
+        src_stride=SCALE_SRC_STRIDE, dst_stride=2,
     )
     pto.set_flag(pto.Pipe.MTE1, pto.Pipe.M, event_id=1)
     pto.wait_flag(pto.Pipe.MTE1, pto.Pipe.M, event_id=1)
-    pto.mad_mx_acc(
-        a_l0_stage1, b_l0_stage1, c_l0, M, N, TILE_K_SUB, disable_gemv=True, sat="sat"
-    )
+    pto.mad_mx_acc(a_l0_stage1, b_l0_stage1, c_l0, M, N, TILE_K_SUB, disable_gemv=True, sat="sat")
 
     pto.set_flag(pto.Pipe.M, pto.Pipe.FIX, event_id=1)
     pto.wait_flag(pto.Pipe.M, pto.Pipe.FIX, event_id=1)
@@ -172,11 +144,9 @@ def _pack_scale_pairs(scale_bytes):
     assert scale_bytes.shape[1] == K // SCALE_GROUP_K
 
     mn = scale_bytes.shape[0]
-    pairs = (
-        np.ascontiguousarray(scale_bytes.reshape(mn, SCALE_PAIR_COUNT, 2))
-        .view(np.uint16)
-        .reshape(mn, SCALE_PAIR_COUNT)
-    )
+    pairs = np.ascontiguousarray(
+        scale_bytes.reshape(mn, SCALE_PAIR_COUNT, 2)
+    ).view(np.uint16).reshape(mn, SCALE_PAIR_COUNT)
     assert mn % SCALE_X_BLOCK == 0
     packed = np.full(
         (mn // SCALE_X_BLOCK, SCALE_SRC_STRIDE, SCALE_X_BLOCK),

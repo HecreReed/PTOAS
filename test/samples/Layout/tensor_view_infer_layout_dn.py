@@ -56,9 +56,7 @@ def build():
 
                 src, dst = entry.arguments
 
-                src_view = pto.MakeTensorViewOp(
-                    tv2_f32, src, [c16, c1], [c1, c1]
-                ).result
+                src_view = pto.MakeTensorViewOp(tv2_f32, src, [c16, c1], [c1, c1]).result
                 src_part = pto.PartitionViewOp(
                     tile_view_16x1, src_view, offsets=[c0, c0], sizes=[c16, c1]
                 ).result
@@ -66,9 +64,7 @@ def build():
                 tile = pto.AllocTileOp(tile_buf_16x1).result
                 pto.TLoadOp(None, src_part, tile)
 
-                dst_view = pto.MakeTensorViewOp(
-                    tv2_f32, dst, [c16, c1], [c1, c1]
-                ).result
+                dst_view = pto.MakeTensorViewOp(tv2_f32, dst, [c16, c1], [c1, c1]).result
                 dst_part = pto.PartitionViewOp(
                     tile_view_16x1, dst_view, offsets=[c0, c0], sizes=[c16, c1]
                 ).result

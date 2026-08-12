@@ -59,9 +59,7 @@ def main() -> None:
     for name in names:
         wrapper = PTODSL_ALIASES.get(name, name)
         assert hasattr(pto.vmi, wrapper), f"missing PTODSL wrapper for pto.vmi.{name}"
-        assert hasattr(generated_pto, f"vmi_{name}"), (
-            f"missing generated binding for pto.vmi.{name}"
-        )
+        assert hasattr(generated_pto, f"vmi_{name}"), f"missing generated binding for pto.vmi.{name}"
         definition = re.search(
             rf'^def\s+\w+\s*:\s*(VMI_Op|VMI_VecScalarOp|VMIHistogramOp)<"{re.escape(name)}"[\s\S]*?(?=^def\s|\Z)',
             ods,
@@ -70,19 +68,11 @@ def main() -> None:
         assert definition, f"missing ODS op for pto.vmi.{name}"
         verifier_text = definition.group(0)
         if definition.group(1) == "VMI_VecScalarOp":
-            verifier_text += re.search(
-                r"class VMI_VecScalarOp[\s\S]*?^}", ods, re.MULTILINE
-            ).group(0)
+            verifier_text += re.search(r'class VMI_VecScalarOp[\s\S]*?^}', ods, re.MULTILINE).group(0)
         elif definition.group(1) == "VMIHistogramOp":
-            verifier_text += re.search(
-                r"class VMIHistogramOp[\s\S]*?^}", ods, re.MULTILINE
-            ).group(0)
-        assert "let hasVerifier = 1;" in verifier_text, (
-            f"missing verifier for pto.vmi.{name}"
-        )
-        assert f'"pto.vmi.{name}"' in emission_test, (
-            f"missing emission assertion for pto.vmi.{name}"
-        )
+            verifier_text += re.search(r'class VMIHistogramOp[\s\S]*?^}', ods, re.MULTILINE).group(0)
+        assert "let hasVerifier = 1;" in verifier_text, f"missing verifier for pto.vmi.{name}"
+        assert f'"pto.vmi.{name}"' in emission_test, f"missing emission assertion for pto.vmi.{name}"
 
 
 if __name__ == "__main__":

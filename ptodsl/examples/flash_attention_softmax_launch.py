@@ -46,7 +46,12 @@ def _make_softmax_kernel(name: str, *, rows: int, seq: int):
     if seq <= 0:
         raise ValueError("seq must be positive")
 
-    @pto.jit(name=name, target="a5", mode="explicit", insert_sync=False)
+    @pto.jit(
+        name=name,
+        target="a5",
+        mode="explicit",
+        insert_sync=False
+    )
     def kernel(
         scores_ptr: pto.ptr(pto.f32, "gm"),
         out_ptr: pto.ptr(pto.f32, "gm"),
@@ -230,7 +235,10 @@ def run_case(case: dict[str, object], torch) -> None:
 
     np.testing.assert_allclose(out_t.cpu().numpy(), ref_out, rtol=1e-5, atol=1e-5)
 
-    print(f"PASS {case['name']}  compile={compile_s:.3f}s launch={launch_s:.3f}s")
+    print(
+        f"PASS {case['name']}  "
+        f"compile={compile_s:.3f}s launch={launch_s:.3f}s"
+    )
 
 
 def test_softmax() -> None:

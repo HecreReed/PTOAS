@@ -29,32 +29,31 @@ See LICENSE in the root of the software repository for the full text of the Lice
 
 using namespace PtoTestCommon;
 
-#define ACL_CHECK(expr)                                                                                    \
-    do {                                                                                                   \
-        const aclError _ret = (expr);                                                                      \
-        if (_ret != ACL_SUCCESS) {                                                                         \
+#define ACL_CHECK(expr)                                                                          \
+    do {                                                                                         \
+        const aclError _ret = (expr);                                                            \
+        if (_ret != ACL_SUCCESS) {                                                               \
             std::fprintf(stderr, "[ERROR] %s failed: %d (%s:%d)\n", #expr, (int)_ret, __FILE__, __LINE__); \
-            const char* _recent = aclGetRecentErrMsg();                                                    \
-            if (_recent != nullptr && _recent[0] != '\0') {                                                \
-                std::fprintf(stderr, "[ERROR] RecentErrMsg: %s\n", _recent);                               \
-            }                                                                                              \
-            rc = 1;                                                                                        \
-            goto cleanup;                                                                                  \
-        }                                                                                                  \
+            const char *_recent = aclGetRecentErrMsg();                                          \
+            if (_recent != nullptr && _recent[0] != '\0') {                                      \
+                std::fprintf(stderr, "[ERROR] RecentErrMsg: %s\n", _recent);                     \
+            }                                                                                    \
+            rc = 1;                                                                              \
+            goto cleanup;                                                                        \
+        }                                                                                        \
     } while (0)
 
-void LaunchVdup_lane_kernel_2d(float* src, float* outLow, float* outHigh, void* stream);
+void LaunchVdup_lane_kernel_2d(float *src, float *outLow, float *outHigh, void *stream);
 
-int main()
-{
+int main() {
     size_t elemCount = 1024;
     size_t fileSize = elemCount * sizeof(float);
-    float* srcHost = nullptr;
-    float* outLowHost = nullptr;
-    float* outHighHost = nullptr;
-    float* srcDevice = nullptr;
-    float* outLowDevice = nullptr;
-    float* outHighDevice = nullptr;
+    float *srcHost = nullptr;
+    float *outLowHost = nullptr;
+    float *outHighHost = nullptr;
+    float *srcDevice = nullptr;
+    float *outLowDevice = nullptr;
+    float *outHighDevice = nullptr;
 
     int rc = 0;
     bool aclInited = false;
@@ -64,18 +63,18 @@ int main()
 
     ACL_CHECK(aclInit(nullptr));
     aclInited = true;
-    if (const char* envDevice = std::getenv("ACL_DEVICE_ID"))
+    if (const char *envDevice = std::getenv("ACL_DEVICE_ID"))
         deviceId = std::atoi(envDevice);
     ACL_CHECK(aclrtSetDevice(deviceId));
     deviceSet = true;
     ACL_CHECK(aclrtCreateStream(&stream));
 
-    ACL_CHECK(aclrtMallocHost((void**)(&srcHost), fileSize));
-    ACL_CHECK(aclrtMallocHost((void**)(&outLowHost), fileSize));
-    ACL_CHECK(aclrtMallocHost((void**)(&outHighHost), fileSize));
-    ACL_CHECK(aclrtMalloc((void**)&srcDevice, fileSize, ACL_MEM_MALLOC_HUGE_FIRST));
-    ACL_CHECK(aclrtMalloc((void**)&outLowDevice, fileSize, ACL_MEM_MALLOC_HUGE_FIRST));
-    ACL_CHECK(aclrtMalloc((void**)&outHighDevice, fileSize, ACL_MEM_MALLOC_HUGE_FIRST));
+    ACL_CHECK(aclrtMallocHost((void **)(&srcHost), fileSize));
+    ACL_CHECK(aclrtMallocHost((void **)(&outLowHost), fileSize));
+    ACL_CHECK(aclrtMallocHost((void **)(&outHighHost), fileSize));
+    ACL_CHECK(aclrtMalloc((void **)&srcDevice, fileSize, ACL_MEM_MALLOC_HUGE_FIRST));
+    ACL_CHECK(aclrtMalloc((void **)&outLowDevice, fileSize, ACL_MEM_MALLOC_HUGE_FIRST));
+    ACL_CHECK(aclrtMalloc((void **)&outHighDevice, fileSize, ACL_MEM_MALLOC_HUGE_FIRST));
 
     ReadFile("./src.bin", fileSize, srcHost, fileSize);
     ACL_CHECK(aclrtMemcpy(srcDevice, fileSize, srcHost, fileSize, ACL_MEMCPY_HOST_TO_DEVICE));
@@ -100,19 +99,20 @@ cleanup:
     if (stream != nullptr) {
         const aclError ret = aclrtDestroyStream(stream);
         if (ret != ACL_SUCCESS)
-            std::fprintf(
-                stderr, "[ERROR] aclrtDestroyStream(stream) failed: %d (%s:%d)\n", (int)ret, __FILE__, __LINE__);
+            std::fprintf(stderr, "[ERROR] aclrtDestroyStream(stream) failed: %d (%s:%d)\n",
+                         (int)ret, __FILE__, __LINE__);
     }
     if (deviceSet) {
         const aclError ret = aclrtResetDevice(deviceId);
         if (ret != ACL_SUCCESS)
-            std::fprintf(
-                stderr, "[ERROR] aclrtResetDevice(deviceId) failed: %d (%s:%d)\n", (int)ret, __FILE__, __LINE__);
+            std::fprintf(stderr, "[ERROR] aclrtResetDevice(deviceId) failed: %d (%s:%d)\n",
+                         (int)ret, __FILE__, __LINE__);
     }
     if (aclInited) {
         const aclError ret = aclFinalize();
         if (ret != ACL_SUCCESS)
-            std::fprintf(stderr, "[ERROR] aclFinalize() failed: %d (%s:%d)\n", (int)ret, __FILE__, __LINE__);
+            std::fprintf(stderr, "[ERROR] aclFinalize() failed: %d (%s:%d)\n",
+                         (int)ret, __FILE__, __LINE__);
     }
 
     return rc;

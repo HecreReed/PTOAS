@@ -12,11 +12,8 @@
 #define AICORE [aicore]
 #endif
 
-extern "C" __global__ AICORE void TEXTRACT_FP_f32_f16_16x16(
-    __gm__ uint16_t* a, __gm__ uint16_t* b, __gm__ float* fb, __gm__ uint16_t* id, __gm__ float* out);
+extern "C" __global__ AICORE void TEXTRACT_FP_f32_f16_16x16(__gm__ uint16_t *a, __gm__ uint16_t *b, __gm__ float *fb, __gm__ uint16_t *id, __gm__ float *out);
 
-void LaunchTEXTRACT_FP_f32_f16_16x16(uint16_t* a, uint16_t* b, float* fb, uint16_t* id, float* out, void* stream)
-{
-    TEXTRACT_FP_f32_f16_16x16<<<1, nullptr, stream>>>(
-        (__gm__ uint16_t*)a, (__gm__ uint16_t*)b, (__gm__ float*)fb, (__gm__ uint16_t*)id, (__gm__ float*)out);
+void LaunchTEXTRACT_FP_f32_f16_16x16(uint16_t *a, uint16_t *b, float *fb, uint16_t *id, float *out, void *stream) {
+    TEXTRACT_FP_f32_f16_16x16<<<1, nullptr, stream>>>((__gm__ uint16_t *)a, (__gm__ uint16_t *)b, (__gm__ float *)fb, (__gm__ uint16_t *)id, (__gm__ float *)out);
 }

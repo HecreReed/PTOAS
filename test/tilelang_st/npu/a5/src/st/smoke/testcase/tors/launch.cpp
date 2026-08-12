@@ -18,15 +18,15 @@ static constexpr int16_t TORS_SCALAR_I16 = 3;
 
 // Case 0: i32 32x64
 
-extern "C" __global__ AICORE void TORS_i32_32x64(__gm__ int32_t* src, __gm__ int32_t* dst, int32_t scalar);
-extern "C" __global__ AICORE void TORS_i16_15x192(__gm__ int16_t* src, __gm__ int16_t* dst, int16_t scalar);
+extern "C" __global__ AICORE void TORS_i32_32x64(__gm__ int32_t *src, __gm__ int32_t *dst, int32_t scalar);
+extern "C" __global__ AICORE void TORS_i16_15x192(__gm__ int16_t *src, __gm__ int16_t *dst, int16_t scalar);
 
-void LaunchTORS_i32_32x64(int32_t* src, int32_t* dst, void* stream)
-{
-    TORS_i32_32x64<<<1, nullptr, stream>>>((__gm__ int32_t*)src, (__gm__ int32_t*)dst, TORS_SCALAR_I32);
+void LaunchTORS_i32_32x64(int32_t *src, int32_t *dst, void *stream) {
+    TORS_i32_32x64<<<1, nullptr, stream>>>((__gm__ int32_t *)src, (__gm__ int32_t *)dst, TORS_SCALAR_I32);
 }
 
-void LaunchTORS_i16_15x192(int16_t* src, int16_t* dst, void* stream)
-{
-    TORS_i16_15x192<<<1, nullptr, stream>>>((__gm__ int16_t*)src, (__gm__ int16_t*)dst, TORS_SCALAR_I16);
+
+
+void LaunchTORS_i16_15x192(int16_t *src, int16_t *dst, void *stream) {
+    TORS_i16_15x192<<<1, nullptr, stream>>>((__gm__ int16_t *)src, (__gm__ int16_t *)dst, TORS_SCALAR_I16);
 }

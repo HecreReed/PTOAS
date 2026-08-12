@@ -16,9 +16,7 @@ def main() -> None:
     for name in ("v3", "v4"):
         golden = np.fromfile(f"golden_{name}.bin", dtype=np.float32)
         output = np.fromfile(f"{name}.bin", dtype=np.float32)
-        if golden.shape != output.shape or not np.allclose(
-            golden, output, atol=1e-5, rtol=1e-5
-        ):
+        if golden.shape != output.shape or not np.allclose(golden, output, atol=1e-5, rtol=1e-5):
             diff = np.nonzero(~np.isclose(golden, output, atol=1e-5, rtol=1e-5))[0]
             idx = int(diff[0]) if diff.size else -1
             print(

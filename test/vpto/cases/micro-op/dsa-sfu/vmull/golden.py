@@ -23,8 +23,6 @@ import numpy as np
 ROWS = 32
 COLS = 32
 SEED = 19
-
-
 def generate(output_dir: Path, seed: int) -> None:
     rng = np.random.default_rng(seed)
     lhs = rng.integers(-10000, 10000, size=(ROWS // 2, COLS), dtype=np.int32)
@@ -32,9 +30,7 @@ def generate(output_dir: Path, seed: int) -> None:
     v1 = np.concatenate([lhs, rhs], axis=0).astype(np.int32, copy=False)
     prod = lhs.astype(np.int64) * rhs.astype(np.int64)
     low = (prod & np.int64(0xFFFFFFFF)).astype(np.uint32).view(np.int32)
-    high = (
-        ((prod >> np.int64(32)) & np.int64(0xFFFFFFFF)).astype(np.uint32).view(np.int32)
-    )
+    high = ((prod >> np.int64(32)) & np.int64(0xFFFFFFFF)).astype(np.uint32).view(np.int32)
     golden_v2 = np.concatenate([low, high], axis=0).astype(np.int32, copy=False)
     v2 = np.zeros((ROWS, COLS), dtype=np.int32)
 

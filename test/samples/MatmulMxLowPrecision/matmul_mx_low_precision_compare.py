@@ -12,10 +12,7 @@ import sys
 
 import numpy as np
 
-for search_root in (
-    Path(__file__).resolve().parent,
-    Path(__file__).resolve().parents[1],
-):
+for search_root in (Path(__file__).resolve().parent, Path(__file__).resolve().parents[1]):
     if (search_root / "validation_runtime.py").is_file():
         sys.path.insert(0, str(search_root))
         break

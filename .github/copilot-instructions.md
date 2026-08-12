@@ -9,3 +9,4 @@ Please refer to:
 
 When changing public-facing behavior (dialect ops, passes, CLI flags, codegen),
 ensure cross-layer consistency (ODS/IR verifiers, lowering/codegen, Python bindings, docs, tests).
+

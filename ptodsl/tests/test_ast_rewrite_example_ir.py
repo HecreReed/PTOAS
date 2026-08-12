@@ -38,9 +38,7 @@ def mlir_op_sequence(text: str) -> list[str]:
     ops = []
     for line in text.splitlines():
         stripped = line.strip()
-        match = re.search(
-            r"(?:%[\w#]+(?:\s*:\s*[^=]+)?\s*=\s*)?([a-z][\w]*\.[\w_]+)", stripped
-        )
+        match = re.search(r"(?:%[\w#]+(?:\s*:\s*[^=]+)?\s*=\s*)?([a-z][\w]*\.[\w_]+)", stripped)
         if match is not None:
             ops.append(match.group(1))
     return ops
@@ -49,10 +47,7 @@ def mlir_op_sequence(text: str) -> list[str]:
 def load_example(filename: str, module_name: str):
     demo_path = REPO_ROOT / "ptodsl" / "examples" / filename
     spec = spec_from_file_location(module_name, demo_path)
-    expect(
-        spec is not None and spec.loader is not None,
-        f"unable to create import spec for {demo_path}",
-    )
+    expect(spec is not None and spec.loader is not None, f"unable to create import spec for {demo_path}")
     module = module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
@@ -65,9 +60,7 @@ def compare_modules(
     label: str,
     required_patterns: tuple[str, ...],
 ) -> None:
-    expect_parse_roundtrip_and_verify(
-        ast_rewrite_text, f"AST-rewrite {label} example MLIR"
-    )
+    expect_parse_roundtrip_and_verify(ast_rewrite_text, f"AST-rewrite {label} example MLIR")
     expect_parse_roundtrip_and_verify(explicit_text, f"explicit {label} baseline MLIR")
     expect(
         mlir_op_sequence(ast_rewrite_text) == mlir_op_sequence(explicit_text),
@@ -163,15 +156,11 @@ def make_explicit_softmax_kernel(name: str, *, rows: int, seq: int):
                 pto.wait_flag("MTE2", "V", event_id=0)
 
                 # Explicit-mode examples intentionally keep pure compute inline.
-                row_loop = pto.for_(0, runtime_rows, step=packed_rows).carry(
-                    remained=runtime_rows
-                )
+                row_loop = pto.for_(0, runtime_rows, step=packed_rows).carry(remained=runtime_rows)
                 with row_loop:
                     row_base = row_loop.iv
                     remaining_rows = row_loop.remained
-                    active_rows, remaining_after_pack = pto.make_mask(
-                        pto.f32, remaining_rows
-                    )
+                    active_rows, remaining_after_pack = pto.make_mask(pto.f32, remaining_rows)
                     running_max = pto.vlds(scores_tile[0, row_base:])
                     running_sum = pto.vbr(1.0)
 
@@ -187,15 +176,11 @@ def make_explicit_softmax_kernel(name: str, *, rows: int, seq: int):
                         merged_max = pto.vmax(running_max, col_vec, active_rows)
                         running_delta = pto.vsub(running_max, merged_max, active_rows)
                         scaled_running = pto.vexp(running_delta, active_rows)
-                        running_sum_scaled = pto.vmul(
-                            scaled_running, running_sum, active_rows
-                        )
+                        running_sum_scaled = pto.vmul(scaled_running, running_sum, active_rows)
                         col_delta = pto.vsub(col_vec, merged_max, active_rows)
                         col_exp = pto.vexp(col_delta, active_rows)
                         merged_sum = pto.vadd(running_sum_scaled, col_exp, active_rows)
-                        softmax_loop.update(
-                            running_max=merged_max, running_sum=merged_sum
-                        )
+                        softmax_loop.update(running_max=merged_max, running_sum=merged_sum)
 
                     final_max = softmax_loop.final("running_max")
                     final_sum = softmax_loop.final("running_sum")
@@ -354,18 +339,10 @@ def make_explicit_flash_attention_kernel(example):
         kv_strides = [seq_k * heads * dim, heads * dim, dim, 1]
         o_strides = [seq_q * heads * dim, heads * dim, dim, 1]
 
-        q_view = pto.make_tensor_view(
-            Q_ptr, shape=[batch, seq_q, heads, dim], strides=q_strides
-        )
-        k_view = pto.make_tensor_view(
-            K_ptr, shape=[batch, seq_k, heads, dim], strides=kv_strides
-        )
-        v_view = pto.make_tensor_view(
-            V_ptr, shape=[batch, seq_k, heads, dim], strides=kv_strides
-        )
-        o_view = pto.make_tensor_view(
-            O_ptr, shape=[batch, seq_q, heads, dim], strides=o_strides
-        )
+        q_view = pto.make_tensor_view(Q_ptr, shape=[batch, seq_q, heads, dim], strides=q_strides)
+        k_view = pto.make_tensor_view(K_ptr, shape=[batch, seq_k, heads, dim], strides=kv_strides)
+        v_view = pto.make_tensor_view(V_ptr, shape=[batch, seq_k, heads, dim], strides=kv_strides)
+        o_view = pto.make_tensor_view(O_ptr, shape=[batch, seq_q, heads, dim], strides=o_strides)
 
         block_idx = pto.get_block_idx()
         block_num = pto.get_block_num()
@@ -378,18 +355,10 @@ def make_explicit_flash_attention_kernel(example):
         batch_idx = block_idx // heads
         head_idx = block_idx % heads
 
-        q_head = pto.partition_view(
-            q_view, offsets=[batch_idx, 0, head_idx, 0], sizes=[1, seq_q, 1, dim]
-        )
-        k_head = pto.partition_view(
-            k_view, offsets=[batch_idx, 0, head_idx, 0], sizes=[1, seq_k, 1, dim]
-        )
-        v_head = pto.partition_view(
-            v_view, offsets=[batch_idx, 0, head_idx, 0], sizes=[1, seq_k, 1, dim]
-        )
-        o_head = pto.partition_view(
-            o_view, offsets=[batch_idx, 0, head_idx, 0], sizes=[1, seq_q, 1, dim]
-        )
+        q_head = pto.partition_view(q_view, offsets=[batch_idx, 0, head_idx, 0], sizes=[1, seq_q, 1, dim])
+        k_head = pto.partition_view(k_view, offsets=[batch_idx, 0, head_idx, 0], sizes=[1, seq_k, 1, dim])
+        v_head = pto.partition_view(v_view, offsets=[batch_idx, 0, head_idx, 0], sizes=[1, seq_k, 1, dim])
+        o_head = pto.partition_view(o_view, offsets=[batch_idx, 0, head_idx, 0], sizes=[1, seq_q, 1, dim])
 
         Br = BLOCK_Q
         Bc = BLOCK_KV
@@ -426,31 +395,15 @@ def make_explicit_flash_attention_kernel(example):
             slayout="RowMajor",
         )
 
-        o_prev_tile = pto.alloc_tile(
-            shape=[Br, D], dtype=pto.f32, valid_shape=[full_br, dim]
-        )
-        o_next_tile = pto.alloc_tile(
-            shape=[Br, D], dtype=pto.f32, valid_shape=[full_br, dim]
-        )
-        m_prev_tile = pto.alloc_tile(
-            shape=[Br, 1], dtype=pto.f32, valid_shape=[full_br, one], blayout="ColMajor"
-        )
-        m_next_tile = pto.alloc_tile(
-            shape=[Br, 1], dtype=pto.f32, valid_shape=[full_br, one], blayout="ColMajor"
-        )
-        l_prev_tile = pto.alloc_tile(
-            shape=[Br, 1], dtype=pto.f32, valid_shape=[full_br, one], blayout="ColMajor"
-        )
-        l_next_tile = pto.alloc_tile(
-            shape=[Br, 1], dtype=pto.f32, valid_shape=[full_br, one], blayout="ColMajor"
-        )
+        o_prev_tile = pto.alloc_tile(shape=[Br, D], dtype=pto.f32, valid_shape=[full_br, dim])
+        o_next_tile = pto.alloc_tile(shape=[Br, D], dtype=pto.f32, valid_shape=[full_br, dim])
+        m_prev_tile = pto.alloc_tile(shape=[Br, 1], dtype=pto.f32, valid_shape=[full_br, one], blayout="ColMajor")
+        m_next_tile = pto.alloc_tile(shape=[Br, 1], dtype=pto.f32, valid_shape=[full_br, one], blayout="ColMajor")
+        l_prev_tile = pto.alloc_tile(shape=[Br, 1], dtype=pto.f32, valid_shape=[full_br, one], blayout="ColMajor")
+        l_next_tile = pto.alloc_tile(shape=[Br, 1], dtype=pto.f32, valid_shape=[full_br, one], blayout="ColMajor")
 
-        s_tile = pto.alloc_tile(
-            shape=[Br, Bc], dtype=pto.f32, valid_shape=[full_br, full_bc]
-        )
-        p_tile = pto.alloc_tile(
-            shape=[Br, Bc], dtype=pto.f32, valid_shape=[full_br, full_bc]
-        )
+        s_tile = pto.alloc_tile(shape=[Br, Bc], dtype=pto.f32, valid_shape=[full_br, full_bc])
+        p_tile = pto.alloc_tile(shape=[Br, Bc], dtype=pto.f32, valid_shape=[full_br, full_bc])
         p_mat = pto.alloc_tile(
             shape=[Br, Bc],
             dtype=pto.f32,
@@ -459,15 +412,9 @@ def make_explicit_flash_attention_kernel(example):
             blayout="ColMajor",
             slayout="RowMajor",
         )
-        pv_tile = pto.alloc_tile(
-            shape=[Br, D], dtype=pto.f32, valid_shape=[full_br, dim]
-        )
-        alpha_tile = pto.alloc_tile(
-            shape=[Br, 1], dtype=pto.f32, valid_shape=[full_br, one], blayout="ColMajor"
-        )
-        beta_tile = pto.alloc_tile(
-            shape=[Br, 1], dtype=pto.f32, valid_shape=[full_br, one], blayout="ColMajor"
-        )
+        pv_tile = pto.alloc_tile(shape=[Br, D], dtype=pto.f32, valid_shape=[full_br, dim])
+        alpha_tile = pto.alloc_tile(shape=[Br, 1], dtype=pto.f32, valid_shape=[full_br, one], blayout="ColMajor")
+        beta_tile = pto.alloc_tile(shape=[Br, 1], dtype=pto.f32, valid_shape=[full_br, one], blayout="ColMajor")
 
         q_l0a = pto.alloc_tile(
             shape=[Br, D],
@@ -505,12 +452,8 @@ def make_explicit_flash_attention_kernel(example):
 
         with pto.for_(0, q_blocks, step=1) as qi:
             q_rows = example._block_valid_extent(seq_q, qi, Br)
-            q_part = pto.partition_view(
-                q_head, offsets=[0, qi * Br, 0, 0], sizes=[1, q_rows, 1, dim]
-            )
-            o_part = pto.partition_view(
-                o_head, offsets=[0, qi * Br, 0, 0], sizes=[1, q_rows, 1, dim]
-            )
+            q_part = pto.partition_view(q_head, offsets=[0, qi * Br, 0, 0], sizes=[1, q_rows, 1, dim])
+            o_part = pto.partition_view(o_head, offsets=[0, qi * Br, 0, 0], sizes=[1, q_rows, 1, dim])
 
             q_mat.valid_shape = [q_rows, dim]
             o_prev_tile.valid_shape = [q_rows, dim]
@@ -541,12 +484,8 @@ def make_explicit_flash_attention_kernel(example):
                 l_cur = kv_loop.l
                 o_cur = kv_loop.o
                 kv_rows = example._block_valid_extent(seq_k, kj, Bc)
-                k_part = pto.partition_view(
-                    k_head, offsets=[0, kj * Bc, 0, 0], sizes=[1, kv_rows, 1, dim]
-                )
-                v_part = pto.partition_view(
-                    v_head, offsets=[0, kj * Bc, 0, 0], sizes=[1, kv_rows, 1, dim]
-                )
+                k_part = pto.partition_view(k_head, offsets=[0, kj * Bc, 0, 0], sizes=[1, kv_rows, 1, dim])
+                v_part = pto.partition_view(v_head, offsets=[0, kj * Bc, 0, 0], sizes=[1, kv_rows, 1, dim])
 
                 k_mat.valid_shape = [kv_rows, dim]
                 v_mat.valid_shape = [kv_rows, dim]
@@ -618,15 +557,11 @@ EXPLICIT_LAUNCH_SOFTMAX_ROWS81_SEQ96 = make_explicit_launch_softmax_kernel(
 
 
 def explicit_softmax_module():
-    return pto.merge_jit_modules(
-        EXPLICIT_SOFTMAX_ROWS64_SEQ128, EXPLICIT_SOFTMAX_ROWS81_SEQ96
-    )
+    return pto.merge_jit_modules(EXPLICIT_SOFTMAX_ROWS64_SEQ128, EXPLICIT_SOFTMAX_ROWS81_SEQ96)
 
 
 def explicit_launch_softmax_module():
-    return pto.merge_jit_modules(
-        EXPLICIT_LAUNCH_SOFTMAX_ROWS64_SEQ128, EXPLICIT_LAUNCH_SOFTMAX_ROWS81_SEQ96
-    )
+    return pto.merge_jit_modules(EXPLICIT_LAUNCH_SOFTMAX_ROWS64_SEQ128, EXPLICIT_LAUNCH_SOFTMAX_ROWS81_SEQ96)
 
 
 def main() -> None:
@@ -638,21 +573,12 @@ def main() -> None:
         required_patterns=("scf.for", "pto.vadd", "pto.vsts"),
     )
 
-    softmax_example = load_example(
-        "softmax_dsl.py", "ptodsl_softmax_ast_rewrite_example"
-    )
+    softmax_example = load_example("softmax_dsl.py", "ptodsl_softmax_ast_rewrite_example")
     compare_modules(
         str(softmax_example.build()),
         str(explicit_softmax_module()),
         label="softmax_dsl",
-        required_patterns=(
-            "scf.if",
-            "scf.for",
-            "iter_args(",
-            "scf.yield",
-            "pto.vexp",
-            "pto.vdiv",
-        ),
+        required_patterns=("scf.if", "scf.for", "iter_args(", "scf.yield", "pto.vexp", "pto.vdiv"),
     )
 
     launch_softmax_example = load_example(
@@ -663,22 +589,14 @@ def main() -> None:
         str(launch_softmax_example.emit_mlir()),
         str(explicit_launch_softmax_module()),
         label="flash_attention_softmax_launch",
-        required_patterns=(
-            "scf.for",
-            "iter_args(",
-            "scf.yield",
-            "pto.vexp",
-            "pto.vdiv",
-        ),
+        required_patterns=("scf.for", "iter_args(", "scf.yield", "pto.vexp", "pto.vdiv"),
     )
 
     flash_attention_example = load_example(
         "flash_attention_sketch.py",
         "ptodsl_flash_attention_ast_rewrite_example",
     )
-    explicit_flash_attention_kernel = make_explicit_flash_attention_kernel(
-        flash_attention_example
-    )
+    explicit_flash_attention_kernel = make_explicit_flash_attention_kernel(flash_attention_example)
     compare_modules(
         flash_attention_example.flash_attention_kernel.compile(
             BLOCK_Q=64,
@@ -693,13 +611,7 @@ def main() -> None:
             CAUSAL=True,
         ).mlir_text(),
         label="flash_attention_sketch",
-        required_patterns=(
-            "scf.for",
-            "iter_args(",
-            "scf.yield",
-            "func.call",
-            "pto.mad",
-        ),
+        required_patterns=("scf.for", "iter_args(", "scf.yield", "func.call", "pto.mad"),
     )
 
     print("ptodsl_ast_rewrite_example_ir: PASS")

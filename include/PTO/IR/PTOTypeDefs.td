@@ -80,10 +80,10 @@ def TensorViewType : TypeDef<PTO_Dialect, "TensorView"> {
 // =============================================================================
 def PartitionTensorViewType : TypeDef<PTO_Dialect, "PartitionTensorView"> {
   let mnemonic = "partition_tensor_view";
-
+  
   let summary = "A logical partition of a tensor view (high-dimensional)";
   let description = [{
-    Represents a logical slice of a global tensor. It holds shape and stride
+    Represents a logical slice of a global tensor. It holds shape and stride 
     information but does not own the data.
     Corresponds to the 'partition_view' concept in the design spec.
   }];
@@ -107,7 +107,7 @@ def PartitionTensorViewType : TypeDef<PTO_Dialect, "PartitionTensorView"> {
   let extraClassDeclaration = [{
     int64_t getRank() const { return getShape().size(); }
     int64_t getDimSize(unsigned idx) const { return getShape()[idx]; }
-
+    
     int64_t getNumElements() const {
       int64_t num = 1;
       for (int64_t dim : getShape()) {

@@ -16,10 +16,9 @@
 #define __gm__
 #endif
 
-extern "C" __global__[aicore] void fixpipe_clip_ub_cv_kernel(
-    __gm__ __fp16* src, __gm__ __fp16* id, __gm__ float* out_clip)
-{
-    (void)src;
-    (void)id;
-    (void)out_clip;
+extern "C" __global__ [aicore] void fixpipe_clip_ub_cv_kernel(
+    __gm__ __fp16 *src, __gm__ __fp16 *id, __gm__ float *out_clip) {
+  (void)src;
+  (void)id;
+  (void)out_clip;
 }
