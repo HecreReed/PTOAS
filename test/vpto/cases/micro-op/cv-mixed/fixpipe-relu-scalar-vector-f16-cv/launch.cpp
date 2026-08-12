@@ -11,12 +11,24 @@
 #endif
 
 #if defined(__CCE_AICORE__) && defined(__NPU_ARCH__) && (__NPU_ARCH__ == 2201)
-typedef struct { unsigned char v; } hifloat8_t;
-typedef struct { unsigned char v; } float8_e4m3_t;
-typedef struct { unsigned char v; } float8_e5m2_t;
-typedef struct { unsigned char v; } float8_e8m0_t;
-typedef struct { unsigned char v; } float4_e1m2x2_t;
-typedef struct { unsigned char v; } float4_e2m1x2_t;
+typedef struct {
+    unsigned char v;
+} hifloat8_t;
+typedef struct {
+    unsigned char v;
+} float8_e4m3_t;
+typedef struct {
+    unsigned char v;
+} float8_e5m2_t;
+typedef struct {
+    unsigned char v;
+} float8_e8m0_t;
+typedef struct {
+    unsigned char v;
+} float4_e1m2x2_t;
+typedef struct {
+    unsigned char v;
+} float4_e2m1x2_t;
 #endif
 
 #include <cstdint>
@@ -27,10 +39,10 @@ typedef struct { unsigned char v; } float4_e2m1x2_t;
 
 #if !defined(__CCE_AICORE__) && !defined(TMRGSORT_HPP)
 struct MrgSortExecutedNumList {
-  uint16_t mrgSortList0;
-  uint16_t mrgSortList1;
-  uint16_t mrgSortList2;
-  uint16_t mrgSortList3;
+    uint16_t mrgSortList0;
+    uint16_t mrgSortList1;
+    uint16_t mrgSortList2;
+    uint16_t mrgSortList3;
 };
 #endif
 
@@ -38,19 +50,17 @@ struct MrgSortExecutedNumList {
 #include "acl/acl.h"
 #endif
 
-extern "C" __global__ [aicore] void fixpipe_relu_scalar_vector_f16_cv_kernel(
-    __gm__ __fp16 *lhs, __gm__ __fp16 *rhs, __gm__ uint32_t *relu_fp,
-    __gm__ __fp16 *out_ub_scalar, __gm__ __fp16 *out_ub_vector,
-    __gm__ __fp16 *out_gm_scalar, __gm__ __fp16 *out_gm_vector,
-    __gm__ __fp16 *out_l1_scalar, __gm__ __fp16 *out_l1_vector);
+extern "C" __global__[aicore] void fixpipe_relu_scalar_vector_f16_cv_kernel(
+    __gm__ __fp16* lhs, __gm__ __fp16* rhs, __gm__ uint32_t* relu_fp, __gm__ __fp16* out_ub_scalar,
+    __gm__ __fp16* out_ub_vector, __gm__ __fp16* out_gm_scalar, __gm__ __fp16* out_gm_vector,
+    __gm__ __fp16* out_l1_scalar, __gm__ __fp16* out_l1_vector);
 
 void LaunchFixpipe_relu_scalar_vector_f16_cv_kernel(
-    __fp16 *lhs, __fp16 *rhs, uint32_t *reluFp, __fp16 *outUbScalar,
-    __fp16 *outUbVector, __fp16 *outGmScalar, __fp16 *outGmVector,
-    __fp16 *outL1Scalar, __fp16 *outL1Vector, void *stream) {
-  fixpipe_relu_scalar_vector_f16_cv_kernel<<<1, nullptr, stream>>>(
-      (__gm__ __fp16 *)lhs, (__gm__ __fp16 *)rhs, (__gm__ uint32_t *)reluFp,
-      (__gm__ __fp16 *)outUbScalar, (__gm__ __fp16 *)outUbVector,
-      (__gm__ __fp16 *)outGmScalar, (__gm__ __fp16 *)outGmVector,
-      (__gm__ __fp16 *)outL1Scalar, (__gm__ __fp16 *)outL1Vector);
+    __fp16* lhs, __fp16* rhs, uint32_t* reluFp, __fp16* outUbScalar, __fp16* outUbVector, __fp16* outGmScalar,
+    __fp16* outGmVector, __fp16* outL1Scalar, __fp16* outL1Vector, void* stream)
+{
+    fixpipe_relu_scalar_vector_f16_cv_kernel<<<1, nullptr, stream>>>(
+        (__gm__ __fp16*)lhs, (__gm__ __fp16*)rhs, (__gm__ uint32_t*)reluFp, (__gm__ __fp16*)outUbScalar,
+        (__gm__ __fp16*)outUbVector, (__gm__ __fp16*)outGmScalar, (__gm__ __fp16*)outGmVector,
+        (__gm__ __fp16*)outL1Scalar, (__gm__ __fp16*)outL1Vector);
 }

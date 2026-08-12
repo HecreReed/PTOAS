@@ -25,7 +25,9 @@ def compare_bin(golden_path: str, output_path: str) -> bool:
         return True
     diff = np.where(np.abs(golden - output) > (1e-2 + 1e-2 * np.abs(golden)))[0]
     idx = int(diff[0]) if diff.size else 0
-    print(f"[ERROR] first mismatch at idx={idx}: golden={float(golden[idx])}, out={float(output[idx])}")
+    print(
+        f"[ERROR] first mismatch at idx={idx}: golden={float(golden[idx])}, out={float(output[idx])}"
+    )
     return False
 
 

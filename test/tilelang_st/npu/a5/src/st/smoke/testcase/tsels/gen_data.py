@@ -28,15 +28,25 @@ for case in CASES:
 
     if dtype in (np.int8, np.uint8, np.int16, np.uint16, np.int32, np.uint32):
         dtype_info = np.iinfo(dtype)
-        input1 = np.random.randint(dtype_info.min, dtype_info.max, size=src_shape).astype(dtype)
-        input2 = np.random.randint(dtype_info.min, dtype_info.max, size=[1]).astype(dtype)
+        input1 = np.random.randint(
+            dtype_info.min, dtype_info.max, size=src_shape
+        ).astype(dtype)
+        input2 = np.random.randint(dtype_info.min, dtype_info.max, size=[1]).astype(
+            dtype
+        )
     else:
         dtype_info = np.finfo(dtype)
-        input1 = np.random.uniform(low=dtype_info.min, high=dtype_info.max, size=src_shape).astype(dtype)
-        input2 = np.random.uniform(low=dtype_info.min, high=dtype_info.max, size=[1]).astype(dtype)
+        input1 = np.random.uniform(
+            low=dtype_info.min, high=dtype_info.max, size=src_shape
+        ).astype(dtype)
+        input2 = np.random.uniform(
+            low=dtype_info.min, high=dtype_info.max, size=[1]
+        ).astype(dtype)
 
     mask_dtype_info = np.iinfo(dtype_mask)
-    mask = np.random.randint(mask_dtype_info.min, mask_dtype_info.max, size=mask_shape).astype(dtype_mask)
+    mask = np.random.randint(
+        mask_dtype_info.min, mask_dtype_info.max, size=mask_shape
+    ).astype(dtype_mask)
     mask_u8view = mask.view(np.uint8).reshape(mask_shape[0], -1)
     golden = np.zeros(dst_shape, dtype=dtype)
 
@@ -45,5 +55,10 @@ for case in CASES:
             do_select = (1 << (x & 7)) & mask_u8view[y, x >> 3]
             golden[y, x] = input1[y, x] if do_select != 0 else input2[0]
 
-    save_case_data(case["name"], {"mask": mask, "input1": input1, "input2": input2, "golden": golden})
-    print(f"[INFO] gen_data: {case['name']} dst={dst_shape} mask={mask_shape} src={src_shape} valid={valid_shape} dtype={dtype.__name__} mask_dtype={dtype_mask.__name__}")
+    save_case_data(
+        case["name"],
+        {"mask": mask, "input1": input1, "input2": input2, "golden": golden},
+    )
+    print(
+        f"[INFO] gen_data: {case['name']} dst={dst_shape} mask={mask_shape} src={src_shape} valid={valid_shape} dtype={dtype.__name__} mask_dtype={dtype_mask.__name__}"
+    )

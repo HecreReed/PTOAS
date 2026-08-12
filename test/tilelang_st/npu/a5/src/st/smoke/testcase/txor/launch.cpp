@@ -14,13 +14,15 @@
 
 // Case 0: i32 16x64
 
-extern "C" __global__ AICORE void TXOR_i32_16x64(__gm__ int32_t *a, __gm__ int32_t *b, __gm__ int32_t *c);
-extern "C" __global__ AICORE void TXOR_i32_32x32(__gm__ int32_t *a, __gm__ int32_t *b, __gm__ int32_t *c);
+extern "C" __global__ AICORE void TXOR_i32_16x64(__gm__ int32_t* a, __gm__ int32_t* b, __gm__ int32_t* c);
+extern "C" __global__ AICORE void TXOR_i32_32x32(__gm__ int32_t* a, __gm__ int32_t* b, __gm__ int32_t* c);
 
-void LaunchTXOR_i32_32x32(int32_t *a, int32_t *b, int32_t *c, void *stream) {
-    TXOR_i32_32x32<<<1, nullptr, stream>>>((__gm__ int32_t *)a, (__gm__ int32_t *)b, (__gm__ int32_t *)c);
+void LaunchTXOR_i32_32x32(int32_t* a, int32_t* b, int32_t* c, void* stream)
+{
+    TXOR_i32_32x32<<<1, nullptr, stream>>>((__gm__ int32_t*)a, (__gm__ int32_t*)b, (__gm__ int32_t*)c);
 }
 
-void LaunchTXOR_i32_16x64(int32_t *a, int32_t *b, int32_t *c, void *stream) {
-    TXOR_i32_16x64<<<1, nullptr, stream>>>((__gm__ int32_t *)a, (__gm__ int32_t *)b, (__gm__ int32_t *)c);
+void LaunchTXOR_i32_16x64(int32_t* a, int32_t* b, int32_t* c, void* stream)
+{
+    TXOR_i32_16x64<<<1, nullptr, stream>>>((__gm__ int32_t*)a, (__gm__ int32_t*)b, (__gm__ int32_t*)c);
 }

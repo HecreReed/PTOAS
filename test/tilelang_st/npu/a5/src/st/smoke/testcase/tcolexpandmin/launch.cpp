@@ -14,14 +14,19 @@
 
 // Case 1: fp32_16_128_1_128
 
-extern "C" __global__ AICORE void TCOLEXPANDMIN_fp16_10_64_1_64(__gm__ uint16_t *src0, __gm__ uint16_t *src1, __gm__ uint16_t *dst);
-extern "C" __global__ AICORE void TCOLEXPANDMIN_int32_16_32_1_32(__gm__ int32_t *src0, __gm__ int32_t *src1, __gm__ int32_t *dst);
+extern "C" __global__ AICORE void TCOLEXPANDMIN_fp16_10_64_1_64(
+    __gm__ uint16_t* src0, __gm__ uint16_t* src1, __gm__ uint16_t* dst);
+extern "C" __global__ AICORE void TCOLEXPANDMIN_int32_16_32_1_32(
+    __gm__ int32_t* src0, __gm__ int32_t* src1, __gm__ int32_t* dst);
 
-void LaunchTCOLEXPANDMIN_fp16_10_64_1_64(uint16_t *src0, uint16_t *src1, uint16_t *dst, void *stream) {
-    TCOLEXPANDMIN_fp16_10_64_1_64<<<1, nullptr, stream>>>((__gm__ uint16_t *)src0, (__gm__ uint16_t *)src1, (__gm__ uint16_t *)dst);
+void LaunchTCOLEXPANDMIN_fp16_10_64_1_64(uint16_t* src0, uint16_t* src1, uint16_t* dst, void* stream)
+{
+    TCOLEXPANDMIN_fp16_10_64_1_64<<<1, nullptr, stream>>>(
+        (__gm__ uint16_t*)src0, (__gm__ uint16_t*)src1, (__gm__ uint16_t*)dst);
 }
 
-
-void LaunchTCOLEXPANDMIN_int32_16_32_1_32(int32_t *src0, int32_t *src1, int32_t *dst, void *stream) {
-    TCOLEXPANDMIN_int32_16_32_1_32<<<1, nullptr, stream>>>((__gm__ int32_t *)src0, (__gm__ int32_t *)src1, (__gm__ int32_t *)dst);
+void LaunchTCOLEXPANDMIN_int32_16_32_1_32(int32_t* src0, int32_t* src1, int32_t* dst, void* stream)
+{
+    TCOLEXPANDMIN_int32_16_32_1_32<<<1, nullptr, stream>>>(
+        (__gm__ int32_t*)src0, (__gm__ int32_t*)src1, (__gm__ int32_t*)dst);
 }

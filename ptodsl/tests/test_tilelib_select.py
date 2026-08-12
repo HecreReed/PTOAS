@@ -42,27 +42,31 @@ def _plain_specs(*, dtype="f32", memory_space="ub", b_layout="row_major"):
 class TileLibSelectTest(unittest.TestCase):
     def test_hard_metadata_legality_is_centralized(self):
         registry = TileTemplateRegistry()
-        registry.register(SimpleNamespace(
-            op="pto.test_metadata",
-            target="a5",
-            name="metadata_candidate",
-            param_names=("src0", "src1", "dst"),
-            metadata=TemplateMetadata.build(
+        registry.register(
+            SimpleNamespace(
                 op="pto.test_metadata",
                 target="a5",
                 name="metadata_candidate",
-                dtypes=(("f32", "f32", "f32"),),
-                layouts=("row_major",),
-                memory_spaces=("ub",),
-            ),
-        ))
+                param_names=("src0", "src1", "dst"),
+                metadata=TemplateMetadata.build(
+                    op="pto.test_metadata",
+                    target="a5",
+                    name="metadata_candidate",
+                    dtypes=(("f32", "f32", "f32"),),
+                    layouts=("row_major",),
+                    memory_spaces=("ub",),
+                ),
+            )
+        )
 
         legal = registry.legal_candidates(
             "pto.test_metadata",
             "a5",
             _plain_specs(),
         )
-        self.assertEqual([candidate.name for candidate in legal], ["metadata_candidate"])
+        self.assertEqual(
+            [candidate.name for candidate in legal], ["metadata_candidate"]
+        )
 
         for specs in (
             _plain_specs(dtype="i8"),
@@ -79,18 +83,20 @@ class TileLibSelectTest(unittest.TestCase):
 
     def test_context_attributes_are_available_to_constraints(self):
         registry = TileTemplateRegistry()
-        registry.register(SimpleNamespace(
-            op="pto.test_context",
-            target="a5",
-            name="context_candidate",
-            param_names=("src0", "src1", "dst"),
-            metadata=TemplateMetadata.build(
+        registry.register(
+            SimpleNamespace(
                 op="pto.test_context",
                 target="a5",
                 name="context_candidate",
-                constraints=(lambda mode: mode == "enabled",),
-            ),
-        ))
+                param_names=("src0", "src1", "dst"),
+                metadata=TemplateMetadata.build(
+                    op="pto.test_context",
+                    target="a5",
+                    name="context_candidate",
+                    constraints=(lambda mode: mode == "enabled",),
+                ),
+            )
+        )
 
         legal = registry.legal_candidates(
             "pto.test_context",
@@ -110,20 +116,22 @@ class TileLibSelectTest(unittest.TestCase):
 
     def test_scalar_operand_dtypes_participate_in_legality(self):
         registry = TileTemplateRegistry()
-        registry.register(SimpleNamespace(
-            op="pto.test_scalar",
-            target="a5",
-            name="scalar_candidate",
-            param_names=("src", "scalar", "dst"),
-            metadata=TemplateMetadata.build(
+        registry.register(
+            SimpleNamespace(
                 op="pto.test_scalar",
                 target="a5",
                 name="scalar_candidate",
-                dtypes=(("f32", "f32", "f32"),),
-                layouts=("row_major",),
-                memory_spaces=("ub",),
-            ),
-        ))
+                param_names=("src", "scalar", "dst"),
+                metadata=TemplateMetadata.build(
+                    op="pto.test_scalar",
+                    target="a5",
+                    name="scalar_candidate",
+                    dtypes=(("f32", "f32", "f32"),),
+                    layouts=("row_major",),
+                    memory_spaces=("ub",),
+                ),
+            )
+        )
         tile = TileSpec(shape=(8, 64), dtype=ScalarType("f32"))
 
         legal = registry.legal_candidates(
@@ -150,7 +158,9 @@ class TileLibSelectTest(unittest.TestCase):
 
     def test_tadd_uses_single_elementwise_candidate(self):
         candidates = legal_candidates("pto.tadd", "a5", _f32_specs())
-        self.assertEqual([candidate.name for candidate in candidates], ["template_tadd"])
+        self.assertEqual(
+            [candidate.name for candidate in candidates], ["template_tadd"]
+        )
 
         chosen = select("pto.tadd", "a5", _f32_specs())
         self.assertEqual(chosen.name, "template_tadd")

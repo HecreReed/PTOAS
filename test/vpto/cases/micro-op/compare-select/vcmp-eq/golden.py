@@ -47,7 +47,9 @@ def generate(output_dir: Path, seed: int) -> None:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Generate inputs/golden for VPTO vcmp-eq.")
+    parser = argparse.ArgumentParser(
+        description="Generate inputs/golden for VPTO vcmp-eq."
+    )
     parser.add_argument("--output-dir", type=Path, default=Path("."))
     parser.add_argument("--seed", type=int, default=SEED)
     args = parser.parse_args()

@@ -22,8 +22,16 @@ ELEMENTWISE = {
 }
 
 # Structured abstraction every elementwise template must preserve.
-SHARED_OPS = ["pto.tile_buf_addr", "!pto.ptr<f32, ub>", "scf.for", "iter_args",
-              "pto.plt_b32", "pto.vlds", "pto.vsts", "pto.tilelang.instance"]
+SHARED_OPS = [
+    "pto.tile_buf_addr",
+    "!pto.ptr<f32, ub>",
+    "scf.for",
+    "iter_args",
+    "pto.plt_b32",
+    "pto.vlds",
+    "pto.vsts",
+    "pto.tilelang.instance",
+]
 
 
 def _f32_specs():
@@ -39,10 +47,10 @@ class TileLibElementwiseTest(unittest.TestCase):
                 self.assertEqual(descriptor.name, name)
 
                 mlir = descriptor.specialize(**_f32_specs()).mlir_text()
-                self.assertIn(vop, mlir)                 # the op's own vector instruction
+                self.assertIn(vop, mlir)  # the op's own vector instruction
                 for shared in SHARED_OPS:
                     self.assertIn(shared, mlir)
-                self.assertNotIn("pto.castptr", mlir)    # structured, not bare-pointer
+                self.assertNotIn("pto.castptr", mlir)  # structured, not bare-pointer
 
 
 if __name__ == "__main__":

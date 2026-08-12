@@ -6,7 +6,15 @@
 # INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
 # See LICENSE in the root of the software repository for the full text of the License.
 
-from ptoas.mlir.ir import Context, F32Type, IndexType, InsertionPoint, Location, Module, UnitAttr
+from ptoas.mlir.ir import (
+    Context,
+    F32Type,
+    IndexType,
+    InsertionPoint,
+    Location,
+    Module,
+    UnitAttr,
+)
 from ptoas.mlir.dialects import arith, func, pto
 from ptoas.mlir.ir import IntegerType
 
@@ -50,7 +58,9 @@ def build():
                 tv0 = pto.MakeTensorViewOp(tv2_f32, arg0, [c32, c32], [c32, c1]).result
                 tv1 = pto.MakeTensorViewOp(tv2_f32, arg1, [c32, c32], [c32, c1]).result
 
-                sv0 = pto.PartitionViewOp(tile_view_f32, tv0, offsets=[c0, c0], sizes=[c32, c32]).result
+                sv0 = pto.PartitionViewOp(
+                    tile_view_f32, tv0, offsets=[c0, c0], sizes=[c32, c32]
+                ).result
 
                 tb0 = pto.AllocTileOp(tile_buf_f32).result
                 tb1 = pto.AllocTileOp(tile_buf_f32).result
@@ -59,7 +69,9 @@ def build():
                 mp = pto.MaskPatternAttr.get(pto.MaskPattern.P1111, ctx)
                 pto.TGatherOp(tb0, tb1, maskPattern=mp, axis="row")
 
-                sv1 = pto.PartitionViewOp(tile_view_f32, tv1, offsets=[c0, c0], sizes=[c32, c32]).result
+                sv1 = pto.PartitionViewOp(
+                    tile_view_f32, tv1, offsets=[c0, c0], sizes=[c32, c32]
+                ).result
                 pto.TStoreOp(None, tb1, sv1)
 
                 func.ReturnOp([])

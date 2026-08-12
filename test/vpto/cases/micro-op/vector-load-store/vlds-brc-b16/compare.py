@@ -56,14 +56,18 @@ def compare_bin(golden_path, output_path, dtype, eps):
     golden = np.fromfile(golden_path, dtype=dtype_np)
     output = np.fromfile(output_path, dtype=dtype_np)
     if golden.shape != output.shape:
-        print(f"[ERROR] Shape mismatch: {golden_path} {golden.shape} vs {output_path} {output.shape}")
+        print(
+            f"[ERROR] Shape mismatch: {golden_path} {golden.shape} vs {output_path} {output.shape}"
+        )
         return False
     if not np.allclose(golden, output, atol=eps, rtol=eps, equal_nan=True):
         if golden.size:
             if np.issubdtype(dtype_np, np.floating):
                 g = golden.astype(np.float64, copy=False)
                 o = output.astype(np.float64, copy=False)
-            elif np.issubdtype(dtype_np, np.integer) or np.issubdtype(dtype_np, np.unsignedinteger):
+            elif np.issubdtype(dtype_np, np.integer) or np.issubdtype(
+                dtype_np, np.unsignedinteger
+            ):
                 g = golden.astype(np.int64, copy=False)
                 o = output.astype(np.int64, copy=False)
             else:
@@ -77,7 +81,9 @@ def compare_bin(golden_path, output_path, dtype, eps):
                 f"(golden={g[idx]}, out={o[idx]}, dtype={dtype_np})"
             )
         else:
-            print(f"[ERROR] Mismatch: {golden_path} vs {output_path}, empty buffers, dtype={dtype_np}")
+            print(
+                f"[ERROR] Mismatch: {golden_path} vs {output_path}, empty buffers, dtype={dtype_np}"
+            )
         return False
     return True
 
@@ -114,7 +120,9 @@ def compare_bin_prefix(golden_path, output_path, dtype, eps, count):
             if np.issubdtype(dtype_np, np.floating):
                 g = golden.astype(np.float64, copy=False)
                 o = output.astype(np.float64, copy=False)
-            elif np.issubdtype(dtype_np, np.integer) or np.issubdtype(dtype_np, np.unsignedinteger):
+            elif np.issubdtype(dtype_np, np.integer) or np.issubdtype(
+                dtype_np, np.unsignedinteger
+            ):
                 g = golden.astype(np.int64, copy=False)
                 o = output.astype(np.int64, copy=False)
             else:
@@ -128,7 +136,9 @@ def compare_bin_prefix(golden_path, output_path, dtype, eps, count):
                 f"(golden={g[idx]}, out={o[idx]}, dtype={dtype_np}, count={count})"
             )
         else:
-            print(f"[ERROR] Mismatch (prefix): {golden_path} vs {output_path}, empty buffers, dtype={dtype_np}")
+            print(
+                f"[ERROR] Mismatch (prefix): {golden_path} vs {output_path}, empty buffers, dtype={dtype_np}"
+            )
         return False
     return True
 
@@ -196,7 +206,10 @@ def compare_packed_pred_mask(golden_path, output_path, logical_elems, src_elem_b
 def main():
     strict = os.getenv("COMPARE_STRICT", "1") != "0"
     ok = True
-    ok = compare_bin_prefix("golden_v2.bin", "v2.bin", np.float16, 0.0001, PREFIX_ELEMS) and ok
+    ok = (
+        compare_bin_prefix("golden_v2.bin", "v2.bin", np.float16, 0.0001, PREFIX_ELEMS)
+        and ok
+    )
     if not ok:
         if strict:
             print("[ERROR] compare failed")

@@ -9,38 +9,45 @@
 #define __VEC_SCOPE__
 #endif
 #if defined(__CCE_AICORE__) && defined(__NPU_ARCH__) && (__NPU_ARCH__ == 2201)
-typedef struct { unsigned char v; } hifloat8_t;
-typedef struct { unsigned char v; } float8_e4m3_t;
-typedef struct { unsigned char v; } float8_e5m2_t;
-typedef struct { unsigned char v; } float8_e8m0_t;
-typedef struct { unsigned char v; } float4_e1m2x2_t;
-typedef struct { unsigned char v; } float4_e2m1x2_t;
+typedef struct {
+    unsigned char v;
+} hifloat8_t;
+typedef struct {
+    unsigned char v;
+} float8_e4m3_t;
+typedef struct {
+    unsigned char v;
+} float8_e5m2_t;
+typedef struct {
+    unsigned char v;
+} float8_e8m0_t;
+typedef struct {
+    unsigned char v;
+} float4_e1m2x2_t;
+typedef struct {
+    unsigned char v;
+} float4_e2m1x2_t;
 #endif
 #include <stdint.h>
 #if defined(__CCE_AICORE__) && defined(PTOAS_ENABLE_CCE_PRINT)
 #include <ccelib/print/print.h>
 #endif
 #if !defined(__CCE_AICORE__) && !defined(TMRGSORT_HPP)
-struct MrgSortExecutedNumList { uint16_t mrgSortList0,mrgSortList1,mrgSortList2,mrgSortList3; };
+struct MrgSortExecutedNumList {
+    uint16_t mrgSortList0, mrgSortList1, mrgSortList2, mrgSortList3;
+};
 #endif
 #ifndef __CPU_SIM
 #include "acl/acl.h"
 #endif
 
-extern "C" __global__ [aicore] void vci_deep_merged_kernel(
-    __gm__ half * arg0,
-    __gm__ half * arg1,
-    __gm__ int8_t * arg2,
-    __gm__ int8_t * arg3,
-    __gm__ int32_t * arg4,
-    __gm__ int32_t * arg5);
+extern "C" __global__[aicore] void vci_deep_merged_kernel(
+    __gm__ half* arg0, __gm__ half* arg1, __gm__ int8_t* arg2, __gm__ int8_t* arg3, __gm__ int32_t* arg4,
+    __gm__ int32_t* arg5);
 
-void LaunchVciDeepMerged(int32_t * p0, int32_t * p1, void *stream) {
-  vci_deep_merged_kernel<<<1, nullptr, stream>>>(
-      (__gm__ half *)p0,
-      (__gm__ half *)p0,
-      (__gm__ int8_t *)p0,
-      (__gm__ int8_t *)p0,
-      (__gm__ int32_t *)p0,
-      (__gm__ int32_t *)p1);
+void LaunchVciDeepMerged(int32_t* p0, int32_t* p1, void* stream)
+{
+    vci_deep_merged_kernel<<<1, nullptr, stream>>>(
+        (__gm__ half*)p0, (__gm__ half*)p0, (__gm__ int8_t*)p0, (__gm__ int8_t*)p0, (__gm__ int32_t*)p0,
+        (__gm__ int32_t*)p1);
 }

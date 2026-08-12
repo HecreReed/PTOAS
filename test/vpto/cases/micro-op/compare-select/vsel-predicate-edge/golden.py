@@ -24,7 +24,7 @@ def generate(output_dir: Path, seed: int) -> None:
     rhs = lhs.copy()
 
     lane_ids = np.arange(LANES, dtype=np.int32)
-    edge_mask = ((lane_ids < 4) | (lane_ids >= 60) | ((lane_ids % 17) == 0))
+    edge_mask = (lane_ids < 4) | (lane_ids >= 60) | ((lane_ids % 17) == 0)
     rhs[edge_mask] = (rhs[edge_mask] + np.float32(3.5)).astype(np.float32)
     rhs[~edge_mask] = (rhs[~edge_mask] - np.float32(2.0)).astype(np.float32)
 
@@ -39,7 +39,9 @@ def generate(output_dir: Path, seed: int) -> None:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Generate inputs/golden for VPTO vsel-predicate-edge.")
+    parser = argparse.ArgumentParser(
+        description="Generate inputs/golden for VPTO vsel-predicate-edge."
+    )
     parser.add_argument("--output-dir", type=Path, default=Path("."))
     parser.add_argument("--seed", type=int, default=SEED)
     args = parser.parse_args()

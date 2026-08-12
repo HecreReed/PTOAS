@@ -44,7 +44,11 @@ def register_row_arg(*, op, name, reduce_op, cmp_mode):
         op=op,
         target="a5",
         name=name,
-        dtypes=[(dtype, dtype, index_dtype) for dtype in NUMERIC_DTYPES for index_dtype in ("i32", "ui32")],
+        dtypes=[
+            (dtype, dtype, index_dtype)
+            for dtype in NUMERIC_DTYPES
+            for index_dtype in ("i32", "ui32")
+        ],
         iteration_axis="row",
         op_engine="vector",
         op_class="reduction",
@@ -93,7 +97,9 @@ def register_row_arg(*, op, name, reduce_op, cmp_mode):
                 idx_acc = pto.vsel(idx, idx_acc, cmp_idx)
 
             dst_addr = pto.addptr(dst_ptr, row * dst_cols)
-            pto.vsts(idx_acc, dst_addr, 0, idx_one_mask, dist=element_store_dist(idx_dtype))
+            pto.vsts(
+                idx_acc, dst_addr, 0, idx_one_mask, dist=element_store_dist(idx_dtype)
+            )
 
     return template
 

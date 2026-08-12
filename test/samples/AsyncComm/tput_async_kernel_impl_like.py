@@ -17,7 +17,6 @@ from ptoas.mlir.ir import (
     Location,
     Module,
     Operation,
-    Type,
 )
 from ptoas.mlir.dialects import arith, func, pto, scf
 
@@ -58,6 +57,7 @@ def _wait_async_event(event, session):
 
 def _wait_after_async(event, session):
     _wait_async_event(event, session)
+
 
 def build():
     with Context() as ctx:
@@ -123,14 +123,28 @@ def build():
                 c256_i32 = arith.ConstantOp(i32, 256).result
                 c256 = arith.ConstantOp(idx, 256).result
                 c1_idx = arith.ConstantOp(idx, 1).result
-                dst_rank1_tv = pto.MakeTensorViewOp(tv1_f32, dst_rank1_ptr, [c256], [c1_idx]).result
-                dst_rank2_tv = pto.MakeTensorViewOp(tv1_f32, dst_rank2_ptr, [c256], [c1_idx]).result
-                dst_rank3_tv = pto.MakeTensorViewOp(tv1_f32, dst_rank3_ptr, [c256], [c1_idx]).result
+                dst_rank1_tv = pto.MakeTensorViewOp(
+                    tv1_f32, dst_rank1_ptr, [c256], [c1_idx]
+                ).result
+                dst_rank2_tv = pto.MakeTensorViewOp(
+                    tv1_f32, dst_rank2_ptr, [c256], [c1_idx]
+                ).result
+                dst_rank3_tv = pto.MakeTensorViewOp(
+                    tv1_f32, dst_rank3_ptr, [c256], [c1_idx]
+                ).result
                 src_tv = pto.MakeTensorViewOp(tv1_f32, src_ptr, [c256], [c1_idx]).result
-                dst_rank1 = pto.PartitionViewOp(pv1_f32, dst_rank1_tv, offsets=[c0], sizes=[c256]).result
-                dst_rank2 = pto.PartitionViewOp(pv1_f32, dst_rank2_tv, offsets=[c0], sizes=[c256]).result
-                dst_rank3 = pto.PartitionViewOp(pv1_f32, dst_rank3_tv, offsets=[c0], sizes=[c256]).result
-                src = pto.PartitionViewOp(pv1_f32, src_tv, offsets=[c0], sizes=[c256]).result
+                dst_rank1 = pto.PartitionViewOp(
+                    pv1_f32, dst_rank1_tv, offsets=[c0], sizes=[c256]
+                ).result
+                dst_rank2 = pto.PartitionViewOp(
+                    pv1_f32, dst_rank2_tv, offsets=[c0], sizes=[c256]
+                ).result
+                dst_rank3 = pto.PartitionViewOp(
+                    pv1_f32, dst_rank3_tv, offsets=[c0], sizes=[c256]
+                ).result
+                src = pto.PartitionViewOp(
+                    pv1_f32, src_tv, offsets=[c0], sizes=[c256]
+                ).result
                 count_gt_zero = arith.CmpIOp(
                     arith.CmpIPredicate.sgt, elem_count, c0_i32
                 ).result
@@ -149,7 +163,9 @@ def build():
 
                 with InsertionPoint(valid_if.then_block):
                     scratch = pto.AllocTileOp(scratch_ty).result
-                    session = _build_async_session(scratch, workspace_ptr, i32, ctx, sync_id=0)
+                    session = _build_async_session(
+                        scratch, workspace_ptr, i32, ctx, sync_id=0
+                    )
 
                     is_root = arith.CmpIOp(
                         arith.CmpIPredicate.eq, my_rank, root_rank

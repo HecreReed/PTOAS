@@ -78,13 +78,13 @@ def generate(output_dir: Path, seed: int) -> None:
 
 
 def main() -> None:
-  parser = argparse.ArgumentParser(
-      description="Generate inputs/golden for VPTO vsel-f32-plds-us-pintlv-pbitcast."
-  )
-  parser.add_argument("--output-dir", type=Path, default=Path("."))
-  parser.add_argument("--seed", type=int, default=SEED)
-  args = parser.parse_args()
-  generate(args.output_dir, args.seed)
+    parser = argparse.ArgumentParser(
+        description="Generate inputs/golden for VPTO vsel-f32-plds-us-pintlv-pbitcast."
+    )
+    parser.add_argument("--output-dir", type=Path, default=Path("."))
+    parser.add_argument("--seed", type=int, default=SEED)
+    args = parser.parse_args()
+    generate(args.output_dir, args.seed)
 
 
 if __name__ == "__main__":

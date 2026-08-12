@@ -20,9 +20,7 @@ from pathlib import Path
 
 COMPILER_LIBRARY_PREFIX = "libPTOASCompiler"
 OBSOLETE_LIBRARY_PREFIX = "libPTOASPythonCAPI"
-EXTERNAL_IMPLEMENTATION_PATTERN = re.compile(
-    r"^lib(?:LLVM|MLIR|PTOIR|PTOTransforms)"
-)
+EXTERNAL_IMPLEMENTATION_PATTERN = re.compile(r"^lib(?:LLVM|MLIR|PTOIR|PTOTransforms)")
 
 
 def _dependencies(binary: Path) -> set[str]:
@@ -105,7 +103,9 @@ def validate(package_root: Path, expect_static_llvm: bool) -> None:
             )
 
     if failures:
-        raise SystemExit("native dependency validation failed:\n  " + "\n  ".join(failures))
+        raise SystemExit(
+            "native dependency validation failed:\n  " + "\n  ".join(failures)
+        )
 
     profile = "static LLVM" if expect_static_llvm else "shared LLVM"
     print(

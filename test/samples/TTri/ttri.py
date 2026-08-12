@@ -12,7 +12,15 @@ Generates one lower-triangular and one upper-triangular 32x32 i32 tile and
 stores them into a single output buffer as two consecutive 32x32 slices.
 """
 
-from ptoas.mlir.ir import Context, Location, Module, InsertionPoint, IndexType, IntegerType, UnitAttr
+from ptoas.mlir.ir import (
+    Context,
+    Location,
+    Module,
+    InsertionPoint,
+    IndexType,
+    IntegerType,
+    UnitAttr,
+)
 from ptoas.mlir.dialects import func, arith, pto
 
 
@@ -32,7 +40,9 @@ def build():
             bl = pto.BLayoutAttr.get(pto.BLayout.RowMajor, ctx)
             sl = pto.SLayoutAttr.get(pto.SLayout.NoneBox, ctx)
             pd = pto.PadValueAttr.get(pto.PadValue.Null, ctx)
-            cfg = pto.TileBufConfigAttr.get(bl, sl, pto.TileConfig.fractalABSize, pd, ctx)
+            cfg = pto.TileBufConfigAttr.get(
+                bl, sl, pto.TileConfig.fractalABSize, pd, ctx
+            )
             tb_32x32 = pto.TileBufType.get([32, 32], i32, vec, [32, 32], cfg, ctx)
 
             fn_ty = func.FunctionType.get([ptr_i32], [])
@@ -51,7 +61,9 @@ def build():
 
                 out_ptr = entry.arguments[0]
 
-                out_tv = pto.MakeTensorViewOp(tv2_i32, out_ptr, [c64, c32], [c32, c1]).result
+                out_tv = pto.MakeTensorViewOp(
+                    tv2_i32, out_ptr, [c64, c32], [c32, c1]
+                ).result
                 out_lower = pto.PartitionViewOp(
                     ptv_32x32, out_tv, offsets=[c0, c0], sizes=[c32, c32]
                 ).result

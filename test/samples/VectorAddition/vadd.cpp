@@ -68,5 +68,3 @@ __global__ AICORE void vec_add_kernel_2d(__gm__ float* v1, __gm__ float* v2, __g
   TSTORE(v43, v33);
   return;
 }
-
-

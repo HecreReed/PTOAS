@@ -59,7 +59,7 @@ for case in CASES:
     else:  # 8B: NORM mode (32 bytes per iteration)
         bytes_per_iter = 32
         bit_multiplier = 1
-    
+
     # Calculate iterations (total)
     total_elm = vr * vc
     if elem_size == 4:  # 32B: special handling for linear offset
@@ -77,7 +77,7 @@ for case in CASES:
         iters_per_row = (vc + lanes - 1) // lanes
         total_iters = vr * iters_per_row
         total_output_bytes = total_iters * bytes_per_iter
-    
+
     # Output buffer size matches actual output
     golden = np.zeros(total_output_bytes, dtype=np.uint8)
 
@@ -99,11 +99,15 @@ for case in CASES:
                 else:  # 16B and 8B
                     col_in_iter = col % lanes
                     bit_pos = col_in_iter * bit_multiplier
-                    byte_idx = (row * iters_per_row + col // lanes) * bytes_per_iter + (bit_pos // 8)
+                    byte_idx = (row * iters_per_row + col // lanes) * bytes_per_iter + (
+                        bit_pos // 8
+                    )
                     bit_idx = bit_pos % 8
-                
+
                 if byte_idx < total_output_bytes:
-                    golden[byte_idx] |= (1 << bit_idx)
+                    golden[byte_idx] |= 1 << bit_idx
 
     save_case_data(case["name"], {"input1": input1, "golden": golden})
-    print(f"[INFO] gen_data: {case['name']} shape={shape} valid_shape={valid_shape} dtype={dtype.__name__} out_dtype={out_dtype.__name__} scalar={SCALAR}")
+    print(
+        f"[INFO] gen_data: {case['name']} shape={shape} valid_shape={valid_shape} dtype={dtype.__name__} out_dtype={out_dtype.__name__} scalar={SCALAR}"
+    )

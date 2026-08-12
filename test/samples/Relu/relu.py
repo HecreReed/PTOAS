@@ -50,7 +50,9 @@ def build():
                 tv1 = pto.MakeTensorViewOp(tv2_f32, arg1, [c32, c32], [c32, c1]).result
 
                 # Replacing the immediate numbers with constants c0 and c32
-                sv0 = pto.PartitionViewOp(tile_view_32, tv0, offsets=[c0, c0], sizes=[c32, c32]).result
+                sv0 = pto.PartitionViewOp(
+                    tile_view_32, tv0, offsets=[c0, c0], sizes=[c32, c32]
+                ).result
 
                 tb0 = pto.AllocTileOp(tile_buf_32).result
                 tb1 = pto.AllocTileOp(tile_buf_32).result
@@ -60,7 +62,9 @@ def build():
                 pto.TReluOp(tb0, tb1)
 
                 # Replacing the immediate numbers with constants c0 and c32
-                sv1 = pto.PartitionViewOp(tile_view_32, tv1, offsets=[c0, c0], sizes=[c32, c32]).result
+                sv1 = pto.PartitionViewOp(
+                    tile_view_32, tv1, offsets=[c0, c0], sizes=[c32, c32]
+                ).result
 
                 pto.TStoreOp(None, tb1, sv1)
 

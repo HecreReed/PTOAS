@@ -17,20 +17,29 @@
 
 using namespace PtoTestCommon;
 
-void LaunchTSELS_uint8_uint16_2x32_2x16_2x32_2x32(uint16_t *mask, uint8_t *src, uint8_t *dst, void *scalar_ptr, void *stream);
-void LaunchTSELS_uint16_uint8_2x16_2x32_2x16_2x16(uint8_t *mask, uint16_t *src, uint16_t *dst, void *scalar_ptr, void *stream);
-void LaunchTSELS_uint16_uint32_2x16_2x8_2x16_2x16(uint32_t *mask, uint16_t *src, uint16_t *dst, void *scalar_ptr, void *stream);
-void LaunchTSELS_uint32_uint16_2x8_2x16_2x8_2x8(uint16_t *mask, uint32_t *src, uint32_t *dst, void *scalar_ptr, void *stream);
-void LaunchTSELS_f16_uint8_2x16_2x32_2x16_2x16(uint8_t *mask, uint16_t *src, uint16_t *dst, void *scalar_ptr, void *stream);
-void LaunchTSELS_f16_uint32_2x16_2x8_2x16_2x16(uint32_t *mask, uint16_t *src, uint16_t *dst, void *scalar_ptr, void *stream);
-void LaunchTSELS_f32_uint16_2x8_2x16_2x8_2x8(uint16_t *mask, float *src, float *dst, void *scalar_ptr, void *stream);
-void LaunchTSELS_uint8_uint8_2x32_2x64_2x128_2x31(uint8_t *mask, uint8_t *src, uint8_t *dst, void *scalar_ptr, void *stream);
-void LaunchTSELS_f32_uint8_2x32_2x64_2x128_2x31(uint8_t *mask, float *src, float *dst, void *scalar_ptr, void *stream);
-void LaunchTSELS_f16_uint8_32x672_32x96_32x672_32x666(uint8_t *mask, uint16_t *src, uint16_t *dst, void *scalar_ptr, void *stream);
-void LaunchTSELS_f32_uint8_1x8192_1x4096_1x8192_1x8192(uint8_t *mask, float *src, float *dst, void *scalar_ptr, void *stream);
+void LaunchTSELS_uint8_uint16_2x32_2x16_2x32_2x32(
+    uint16_t* mask, uint8_t* src, uint8_t* dst, void* scalar_ptr, void* stream);
+void LaunchTSELS_uint16_uint8_2x16_2x32_2x16_2x16(
+    uint8_t* mask, uint16_t* src, uint16_t* dst, void* scalar_ptr, void* stream);
+void LaunchTSELS_uint16_uint32_2x16_2x8_2x16_2x16(
+    uint32_t* mask, uint16_t* src, uint16_t* dst, void* scalar_ptr, void* stream);
+void LaunchTSELS_uint32_uint16_2x8_2x16_2x8_2x8(
+    uint16_t* mask, uint32_t* src, uint32_t* dst, void* scalar_ptr, void* stream);
+void LaunchTSELS_f16_uint8_2x16_2x32_2x16_2x16(
+    uint8_t* mask, uint16_t* src, uint16_t* dst, void* scalar_ptr, void* stream);
+void LaunchTSELS_f16_uint32_2x16_2x8_2x16_2x16(
+    uint32_t* mask, uint16_t* src, uint16_t* dst, void* scalar_ptr, void* stream);
+void LaunchTSELS_f32_uint16_2x8_2x16_2x8_2x8(uint16_t* mask, float* src, float* dst, void* scalar_ptr, void* stream);
+void LaunchTSELS_uint8_uint8_2x32_2x64_2x128_2x31(
+    uint8_t* mask, uint8_t* src, uint8_t* dst, void* scalar_ptr, void* stream);
+void LaunchTSELS_f32_uint8_2x32_2x64_2x128_2x31(uint8_t* mask, float* src, float* dst, void* scalar_ptr, void* stream);
+void LaunchTSELS_f16_uint8_32x672_32x96_32x672_32x666(
+    uint8_t* mask, uint16_t* src, uint16_t* dst, void* scalar_ptr, void* stream);
+void LaunchTSELS_f32_uint8_1x8192_1x4096_1x8192_1x8192(
+    uint8_t* mask, float* src, float* dst, void* scalar_ptr, void* stream);
 
 struct TestCase {
-    const char *name;
+    const char* name;
     void (*launch)(void*, void*, void*, void*, void*);
     size_t dstRows, dstCols;
     size_t maskRows, maskCols;
@@ -42,20 +51,26 @@ struct TestCase {
 };
 
 static const TestCase kCases[] = {
-{"uint32_uint16_2x8_2x16_2x8_2x8", (void(*)(void*,void*,void*,void*,void*))LaunchTSELS_uint32_uint16_2x8_2x16_2x8_2x8, 2, 8, 2, 16, 2, 8, 2, 8, 4, 2, 4},
-{"uint8_uint8_2x32_2x64_2x128_2x31", (void(*)(void*,void*,void*,void*,void*))LaunchTSELS_uint8_uint8_2x32_2x64_2x128_2x31, 2, 32, 2, 64, 2, 128, 2, 31, 1, 1, 1},
+    {"uint32_uint16_2x8_2x16_2x8_2x8",
+     (void (*)(void*, void*, void*, void*, void*))LaunchTSELS_uint32_uint16_2x8_2x16_2x8_2x8, 2, 8, 2, 16, 2, 8, 2, 8,
+     4, 2, 4},
+    {"uint8_uint8_2x32_2x64_2x128_2x31",
+     (void (*)(void*, void*, void*, void*, void*))LaunchTSELS_uint8_uint8_2x32_2x64_2x128_2x31, 2, 32, 2, 64, 2, 128, 2,
+     31, 1, 1, 1},
 };
 static constexpr size_t kNumCases = sizeof(kCases) / sizeof(kCases[0]);
 
-static int RunCase(const TestCase &tc, int deviceId, aclrtStream stream) {
+static int RunCase(const TestCase& tc, int deviceId, aclrtStream stream)
+{
     int rc = 0;
     size_t dstFileSize = tc.dstRows * tc.dstCols * tc.dstElemSize;
     size_t maskFileSize = tc.maskRows * tc.maskCols * tc.maskElemSize;
     size_t srcFileSize = tc.srcRows * tc.srcCols * tc.srcElemSize;
     size_t scalarFileSize = tc.dstElemSize;
 
-    std::printf("[INFO] === case: %s (dst=%zux%zu, mask=%zux%zu, src=%zux%zu, valid=%zux%zu) ===\n",
-                tc.name, tc.dstRows, tc.dstCols, tc.maskRows, tc.maskCols, tc.srcRows, tc.srcCols, tc.validRows, tc.validCols);
+    std::printf(
+        "[INFO] === case: %s (dst=%zux%zu, mask=%zux%zu, src=%zux%zu, valid=%zux%zu) ===\n", tc.name, tc.dstRows,
+        tc.dstCols, tc.maskRows, tc.maskCols, tc.srcRows, tc.srcCols, tc.validRows, tc.validCols);
 
     std::string caseDir = std::string("./") + tc.name;
     const size_t maskFileSizeBuf = maskFileSize;
@@ -104,27 +119,36 @@ static int RunCase(const TestCase &tc, int deviceId, aclrtStream stream) {
         rc = 1;
     }
 
-    if (maskDevice != nullptr) aclrtFree(maskDevice);
-    if (srcDevice != nullptr) aclrtFree(srcDevice);
-    if (dstDevice != nullptr) aclrtFree(dstDevice);
-    if (maskHost != nullptr) aclrtFreeHost(maskHost);
-    if (srcHost != nullptr) aclrtFreeHost(srcHost);
-    if (dstHost != nullptr) aclrtFreeHost(dstHost);
-    if (scalarHost != nullptr) aclrtFreeHost(scalarHost);
+    if (maskDevice != nullptr)
+        aclrtFree(maskDevice);
+    if (srcDevice != nullptr)
+        aclrtFree(srcDevice);
+    if (dstDevice != nullptr)
+        aclrtFree(dstDevice);
+    if (maskHost != nullptr)
+        aclrtFreeHost(maskHost);
+    if (srcHost != nullptr)
+        aclrtFreeHost(srcHost);
+    if (dstHost != nullptr)
+        aclrtFreeHost(dstHost);
+    if (scalarHost != nullptr)
+        aclrtFreeHost(scalarHost);
 
-    if (rc == 0) std::printf("[INFO] case %s done\n", tc.name);
+    if (rc == 0)
+        std::printf("[INFO] case %s done\n", tc.name);
     return rc;
 }
 
-int main(int argc, char *argv[]) {
-    const char *caseFilter = (argc > 1) ? argv[1] : nullptr;
+int main(int argc, char* argv[])
+{
+    const char* caseFilter = (argc > 1) ? argv[1] : nullptr;
 
     int rc = 0;
     int deviceId = 0;
     aclrtStream stream = nullptr;
 
     aclInit(nullptr);
-    if (const char *envDevice = std::getenv("ACL_DEVICE_ID")) {
+    if (const char* envDevice = std::getenv("ACL_DEVICE_ID")) {
         deviceId = std::atoi(envDevice);
     }
     aclrtSetDevice(deviceId);
@@ -142,7 +166,8 @@ int main(int argc, char *argv[]) {
         }
     }
 
-    if (stream != nullptr) aclrtDestroyStream(stream);
+    if (stream != nullptr)
+        aclrtDestroyStream(stream);
     aclrtResetDevice(deviceId);
     aclFinalize();
 

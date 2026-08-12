@@ -14,13 +14,15 @@
 
 // Case 0: f32 16x64
 
-extern "C" __global__ AICORE void TMAX_f32_16x64(__gm__ float *a, __gm__ float *b, __gm__ float *c);
-extern "C" __global__ AICORE void TMAX_f32_32x32(__gm__ float *a, __gm__ float *b, __gm__ float *c);
+extern "C" __global__ AICORE void TMAX_f32_16x64(__gm__ float* a, __gm__ float* b, __gm__ float* c);
+extern "C" __global__ AICORE void TMAX_f32_32x32(__gm__ float* a, __gm__ float* b, __gm__ float* c);
 
-void LaunchTMAX_f32_32x32(float *a, float *b, float *c, void *stream) {
-    TMAX_f32_32x32<<<1, nullptr, stream>>>((__gm__ float *)a, (__gm__ float *)b, (__gm__ float *)c);
+void LaunchTMAX_f32_32x32(float* a, float* b, float* c, void* stream)
+{
+    TMAX_f32_32x32<<<1, nullptr, stream>>>((__gm__ float*)a, (__gm__ float*)b, (__gm__ float*)c);
 }
 
-void LaunchTMAX_f32_16x64(float *a, float *b, float *c, void *stream) {
-    TMAX_f32_16x64<<<1, nullptr, stream>>>((__gm__ float *)a, (__gm__ float *)b, (__gm__ float *)c);
+void LaunchTMAX_f32_16x64(float* a, float* b, float* c, void* stream)
+{
+    TMAX_f32_16x64<<<1, nullptr, stream>>>((__gm__ float*)a, (__gm__ float*)b, (__gm__ float*)c);
 }

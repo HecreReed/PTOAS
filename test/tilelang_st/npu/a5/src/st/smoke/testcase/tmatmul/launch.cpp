@@ -12,8 +12,9 @@
 #define AICORE [aicore]
 #endif
 
-extern "C" __global__ AICORE void TMATMUL_f16_16x16x16(__gm__ uint16_t *a, __gm__ uint16_t *b, __gm__ float *c);
+extern "C" __global__ AICORE void TMATMUL_f16_16x16x16(__gm__ uint16_t* a, __gm__ uint16_t* b, __gm__ float* c);
 
-void LaunchTMATMUL_f16_16x16x16(uint16_t *a, uint16_t *b, float *c, void *stream) {
-    TMATMUL_f16_16x16x16<<<1, nullptr, stream>>>((__gm__ uint16_t *)a, (__gm__ uint16_t *)b, (__gm__ float *)c);
+void LaunchTMATMUL_f16_16x16x16(uint16_t* a, uint16_t* b, float* c, void* stream)
+{
+    TMATMUL_f16_16x16x16<<<1, nullptr, stream>>>((__gm__ uint16_t*)a, (__gm__ uint16_t*)b, (__gm__ float*)c);
 }

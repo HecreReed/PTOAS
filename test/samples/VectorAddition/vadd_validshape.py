@@ -6,9 +6,10 @@
 # INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
 # See LICENSE in the root of the software repository for the full text of the License.
 
-from ptoas.mlir.ir import Context, Location, Module, InsertionPoint, IntegerType, UnitAttr
+from ptoas.mlir.ir import Context, Location, Module, InsertionPoint, UnitAttr
 from ptoas.mlir.dialects import func, arith, pto
 from ptoas.mlir.ir import F32Type, IndexType
+
 
 def build():
     with Context() as ctx:
@@ -53,8 +54,12 @@ def build():
                 tv2 = pto.MakeTensorViewOp(tv2_f32, arg2, [c32, c32], [c32, c1]).result
 
                 # %3/%4/%8 = pto.subview %tv, offsets=[%c0,%c0], sizes=[32,32]
-                sv0 = pto.PartitionViewOp(tile_view_32, tv0, offsets=[c0, c0], sizes=[c32, c32]).result
-                sv1 = pto.PartitionViewOp(tile_view_32, tv1, offsets=[c0, c0], sizes=[c32, c32]).result
+                sv0 = pto.PartitionViewOp(
+                    tile_view_32, tv0, offsets=[c0, c0], sizes=[c32, c32]
+                ).result
+                sv1 = pto.PartitionViewOp(
+                    tile_view_32, tv1, offsets=[c0, c0], sizes=[c32, c32]
+                ).result
 
                 # %5/%6/%7 = pto.alloc_tile : <32x32xf32>
                 tb0 = pto.AllocTileOp(tile_buf_32_vs, valid_row=c1, valid_col=c1).result
@@ -69,7 +74,9 @@ def build():
                 pto.TAddOp(tb0, tb1, tb2)
 
                 # %8 = subview on output tensor_view
-                sv2 = pto.PartitionViewOp(tile_view_32, tv2, offsets=[c0, c0], sizes=[c32, c32]).result
+                sv2 = pto.PartitionViewOp(
+                    tile_view_32, tv2, offsets=[c0, c0], sizes=[c32, c32]
+                ).result
 
                 # pto.store_dps_tb ins(%tb2) outs(%sv2)
                 pto.TStoreOp(None, tb2, sv2)
@@ -78,6 +85,7 @@ def build():
 
             m.operation.verify()
             return m
+
 
 if __name__ == "__main__":
     print(build())

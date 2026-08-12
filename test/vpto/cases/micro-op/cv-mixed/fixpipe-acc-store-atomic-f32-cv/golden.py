@@ -29,11 +29,13 @@ def generate(output_dir: Path, seed: int) -> None:
     rhs32 = rhs.astype(np.float32)
     matmul = np.zeros((M, N), dtype=np.float32)
     for k_idx in range(K):
-        matmul += lhs32[:, k_idx:k_idx + 1] * rhs32[k_idx:k_idx + 1, :]
+        matmul += lhs32[:, k_idx : k_idx + 1] * rhs32[k_idx : k_idx + 1, :]
 
     plain_init = np.zeros((M, N), dtype=np.float32)
     atomic_add_init = np.full((M, N), ATOMIC_ADD_INIT, dtype=np.float32)
-    parity = ((np.arange(M * N, dtype=np.int32).reshape(M, N) & 1) * 2 - 1).astype(np.float32)
+    parity = ((np.arange(M * N, dtype=np.int32).reshape(M, N) & 1) * 2 - 1).astype(
+        np.float32
+    )
     atomic_max_init = matmul + parity * ATOMIC_DELTA
     atomic_min_init = matmul - parity * ATOMIC_DELTA
     atomic_add_golden = atomic_add_init + matmul

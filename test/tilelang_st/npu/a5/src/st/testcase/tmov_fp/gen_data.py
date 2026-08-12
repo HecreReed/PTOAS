@@ -54,7 +54,16 @@ for case in CASES:
     # Readback: Mat_f16 @ Identity -> Output (f32)
     golden = mat_f16.astype(np.float32)
 
-    save_case_data(case["name"], {"input1": lhs, "input2": rhs, "scale": scale, "identity": identity, "golden": golden})
+    save_case_data(
+        case["name"],
+        {
+            "input1": lhs,
+            "input2": rhs,
+            "scale": scale,
+            "identity": identity,
+            "golden": golden,
+        },
+    )
     print(
         f"[INFO] gen_data: {case['name']} "
         f"lhs={shape_a} rhs={shape_b} scale={shape_scale} (all_ones) id={shape_id} out={case['shape_c']} dtype=f32"

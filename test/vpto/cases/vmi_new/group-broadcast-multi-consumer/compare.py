@@ -15,7 +15,9 @@ import numpy as np
 def main() -> None:
     golden_sum = np.fromfile("golden_v2.bin", dtype=np.float32)
     output_sum = np.fromfile("v2.bin", dtype=np.float32)
-    if golden_sum.shape != output_sum.shape or not np.allclose(golden_sum, output_sum, atol=1e-4, rtol=1e-4):
+    if golden_sum.shape != output_sum.shape or not np.allclose(
+        golden_sum, output_sum, atol=1e-4, rtol=1e-4
+    ):
         diff = np.nonzero(~np.isclose(golden_sum, output_sum, atol=1e-4, rtol=1e-4))[0]
         idx = int(diff[0]) if diff.size else -1
         print(
@@ -27,8 +29,12 @@ def main() -> None:
 
     golden_dense = np.fromfile("golden_v3.bin", dtype=np.float16)
     output_dense = np.fromfile("v3.bin", dtype=np.float16)
-    if golden_dense.shape != output_dense.shape or not np.array_equal(golden_dense, output_dense):
-        diff = np.nonzero(golden_dense.view(np.uint16) != output_dense.view(np.uint16))[0]
+    if golden_dense.shape != output_dense.shape or not np.array_equal(
+        golden_dense, output_dense
+    ):
+        diff = np.nonzero(golden_dense.view(np.uint16) != output_dense.view(np.uint16))[
+            0
+        ]
         idx = int(diff[0]) if diff.size else -1
         print(
             f"[ERROR] compare failed v3 idx={idx} "

@@ -23,7 +23,9 @@ def compare_bin(golden_path, output_path, dtype, eps):
         return False
     golden = np.fromfile(golden_path, dtype=dtype)
     output = np.fromfile(output_path, dtype=dtype)
-    return golden.shape == output.shape and np.allclose(golden, output, atol=eps, rtol=eps, equal_nan=True)
+    return golden.shape == output.shape and np.allclose(
+        golden, output, atol=eps, rtol=eps, equal_nan=True
+    )
 
 
 def main():

@@ -33,8 +33,12 @@ def main():
         dtype = case["dtype"]
         dst_vr, dst_vc = case["dst_vshape"]
 
-        golden = np.fromfile(os.path.join(case_dir, "golden.bin"), dtype=dtype).reshape(shape)
-        output = np.fromfile(os.path.join(case_dir, "output.bin"), dtype=dtype).reshape(shape)
+        golden = np.fromfile(os.path.join(case_dir, "golden.bin"), dtype=dtype).reshape(
+            shape
+        )
+        output = np.fromfile(os.path.join(case_dir, "output.bin"), dtype=dtype).reshape(
+            shape
+        )
 
         # Compare only the dst valid region
         ok = result_cmp(golden[:dst_vr, :dst_vc], output[:dst_vr, :dst_vc], case["eps"])

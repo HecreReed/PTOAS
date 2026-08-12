@@ -13,17 +13,55 @@
 import numpy as np
 
 CASES = [
-    {"name": "f32_32x64", "dtype": np.float32, "shape": (32, 64), "valid_shape": (32, 64), "eps": 1e-6},
-    {"name": "f16_63x64", "dtype": np.float16, "shape": (63, 64), "valid_shape": (63, 64), "eps": 1e-3},
-    {"name": "i32_31x128", "dtype": np.int32, "shape": (31, 128), "valid_shape": (31, 128), "eps": 0},
-    {"name": "i16_15x192", "dtype": np.int16, "shape": (15, 192), "valid_shape": (15, 192), "eps": 0},
-    {"name": "f32_7x448", "dtype": np.float32, "shape": (7, 448), "valid_shape": (7, 448), "eps": 1e-6},
-    {"name": "f32_256x16", "dtype": np.float32, "shape": (256, 16), "valid_shape": (256, 16), "eps": 1e-6},
+    {
+        "name": "f32_32x64",
+        "dtype": np.float32,
+        "shape": (32, 64),
+        "valid_shape": (32, 64),
+        "eps": 1e-6,
+    },
+    {
+        "name": "f16_63x64",
+        "dtype": np.float16,
+        "shape": (63, 64),
+        "valid_shape": (63, 64),
+        "eps": 1e-3,
+    },
+    {
+        "name": "i32_31x128",
+        "dtype": np.int32,
+        "shape": (31, 128),
+        "valid_shape": (31, 128),
+        "eps": 0,
+    },
+    {
+        "name": "i16_15x192",
+        "dtype": np.int16,
+        "shape": (15, 192),
+        "valid_shape": (15, 192),
+        "eps": 0,
+    },
+    {
+        "name": "f32_7x448",
+        "dtype": np.float32,
+        "shape": (7, 448),
+        "valid_shape": (7, 448),
+        "eps": 1e-6,
+    },
+    {
+        "name": "f32_256x16",
+        "dtype": np.float32,
+        "shape": (256, 16),
+        "valid_shape": (256, 16),
+        "eps": 1e-6,
+    },
 ]
 
-_SMOKE_CASE_NAMES = ['f32_32x64', 'i16_15x192']
+_SMOKE_CASE_NAMES = ["f32_32x64", "i16_15x192"]
 _SMOKE_CASE_NAME_SET = set(_SMOKE_CASE_NAMES)
-_missing = [name for name in _SMOKE_CASE_NAMES if name not in {case["name"] for case in CASES}]
+_missing = [
+    name for name in _SMOKE_CASE_NAMES if name not in {case["name"] for case in CASES}
+]
 if _missing:
     raise RuntimeError("unknown smoke case(s): " + ", ".join(_missing))
 CASES = [case for case in CASES if case["name"] in _SMOKE_CASE_NAME_SET]

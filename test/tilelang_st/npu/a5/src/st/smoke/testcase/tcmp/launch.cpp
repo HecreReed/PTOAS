@@ -14,22 +14,21 @@
 
 // Case 1: f16 32x32 eq (half_32x32_32x32)
 
-extern "C" __global__ AICORE void TCMP_f32_8x64_gt(__gm__ float *a, __gm__ float *b, __gm__ int8_t *c);
-extern "C" __global__ AICORE void TCMP_i32_4x64_ne(__gm__ int32_t *a, __gm__ int32_t *b, __gm__ int8_t *c);
-extern "C" __global__ AICORE void TCMP_i16_32x32_eq(__gm__ int16_t *a, __gm__ int16_t *b, __gm__ int8_t *c);
+extern "C" __global__ AICORE void TCMP_f32_8x64_gt(__gm__ float* a, __gm__ float* b, __gm__ int8_t* c);
+extern "C" __global__ AICORE void TCMP_i32_4x64_ne(__gm__ int32_t* a, __gm__ int32_t* b, __gm__ int8_t* c);
+extern "C" __global__ AICORE void TCMP_i16_32x32_eq(__gm__ int16_t* a, __gm__ int16_t* b, __gm__ int8_t* c);
 
-void LaunchTCMP_f32_8x64_gt(float *a, float *b, int8_t *c, void *stream) {
-    TCMP_f32_8x64_gt<<<1, nullptr, stream>>>((__gm__ float *)a, (__gm__ float *)b, (__gm__ int8_t *)c);
+void LaunchTCMP_f32_8x64_gt(float* a, float* b, int8_t* c, void* stream)
+{
+    TCMP_f32_8x64_gt<<<1, nullptr, stream>>>((__gm__ float*)a, (__gm__ float*)b, (__gm__ int8_t*)c);
 }
 
-
-
-void LaunchTCMP_i32_4x64_ne(int32_t *a, int32_t *b, int8_t *c, void *stream) {
-    TCMP_i32_4x64_ne<<<1, nullptr, stream>>>((__gm__ int32_t *)a, (__gm__ int32_t *)b, (__gm__ int8_t *)c);
+void LaunchTCMP_i32_4x64_ne(int32_t* a, int32_t* b, int8_t* c, void* stream)
+{
+    TCMP_i32_4x64_ne<<<1, nullptr, stream>>>((__gm__ int32_t*)a, (__gm__ int32_t*)b, (__gm__ int8_t*)c);
 }
 
-
-
-void LaunchTCMP_i16_32x32_eq(int16_t *a, int16_t *b, int8_t *c, void *stream) {
-    TCMP_i16_32x32_eq<<<1, nullptr, stream>>>((__gm__ int16_t *)a, (__gm__ int16_t *)b, (__gm__ int8_t *)c);
+void LaunchTCMP_i16_32x32_eq(int16_t* a, int16_t* b, int8_t* c, void* stream)
+{
+    TCMP_i16_32x32_eq<<<1, nullptr, stream>>>((__gm__ int16_t*)a, (__gm__ int16_t*)b, (__gm__ int8_t*)c);
 }

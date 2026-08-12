@@ -90,7 +90,6 @@ CASES = [
         "valid_shape": (8, 1024),
         "eps": 1e-3,
     },
-
     # int32 cases (case11-case15 from pto-isa)
     {
         "name": "i32_127x64_valid127x63",
@@ -127,7 +126,6 @@ CASES = [
         "valid_shape": (7, 447),
         "eps": 0,
     },
-
     # int16 cases (case16-case18 from pto-isa)
     {
         "name": "i16_256x16_valid256x15",

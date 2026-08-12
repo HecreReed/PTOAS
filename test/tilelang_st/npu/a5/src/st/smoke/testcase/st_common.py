@@ -31,7 +31,9 @@ REQUIRED_CASE_KEYS = {"name", "dtype", "shape", "valid_shape", "eps"}
 
 def _to_shape_tuple(shape):
     if not isinstance(shape, (tuple, list)):
-        raise ValueError(f"shape must be tuple/list, got {type(shape).__name__}: {shape!r}")
+        raise ValueError(
+            f"shape must be tuple/list, got {type(shape).__name__}: {shape!r}"
+        )
     if not shape:
         raise ValueError("shape must not be empty")
     dims = tuple(int(dim) for dim in shape)
@@ -55,7 +57,9 @@ def validate_cases(cases):
     for i, case in enumerate(cases):
         missing = REQUIRED_CASE_KEYS - case.keys()
         if missing:
-            raise ValueError(f"cases[{i}] ({case.get('name', '?')}) missing keys: {missing}")
+            raise ValueError(
+                f"cases[{i}] ({case.get('name', '?')}) missing keys: {missing}"
+            )
         _validate_shape_pair(case["shape"], case["valid_shape"], "shape")
         has_dst_shape = "dst_shape" in case
         has_dst_valid_shape = "dst_valid_shape" in case
@@ -70,6 +74,7 @@ def validate_cases(cases):
 # ---------------------------------------------------------------------------
 # Data generation helpers
 # ---------------------------------------------------------------------------
+
 
 def setup_case_rng(case):
     """Set a per-case deterministic random seed.
@@ -122,6 +127,7 @@ def style_fail(text):
 # Comparison
 # ---------------------------------------------------------------------------
 
+
 def result_cmp(golden, output, eps):
     """Compare already prepared golden/output arrays.
 
@@ -131,13 +137,19 @@ def result_cmp(golden, output, eps):
     o = np.asarray(output).astype(np.float64, copy=False)
 
     if g.shape != o.shape:
-        print(style_fail(f"[ERROR] Shape mismatch: golden {g.shape} vs output {o.shape}"))
+        print(
+            style_fail(f"[ERROR] Shape mismatch: golden {g.shape} vs output {o.shape}")
+        )
         return False
     if not np.allclose(g, o, atol=eps, rtol=eps, equal_nan=True):
         abs_diff = np.abs(g - o)
         idx = int(np.argmax(abs_diff))
-        print(style_fail(f"[ERROR] Mismatch: max diff={float(abs_diff.flat[idx])} "
-                         f"at flat idx={idx} "
-                         f"(golden={g.flat[idx]}, output={o.flat[idx]})"))
+        print(
+            style_fail(
+                f"[ERROR] Mismatch: max diff={float(abs_diff.flat[idx])} "
+                f"at flat idx={idx} "
+                f"(golden={g.flat[idx]}, output={o.flat[idx]})"
+            )
+        )
         return False
     return True

@@ -30,7 +30,7 @@ SHAPES = [
     (2, 64, 2, 64),
     (4, 32, 4, 32),
     (2, 128, 2, 128),
-    (4, 128, 4, 65),   # Partial tiles
+    (4, 128, 4, 65),  # Partial tiles
     (4, 256, 4, 200),  # Partial tiles
     (1, 256, 1, 129),  # Partial tiles
 ]
@@ -92,19 +92,21 @@ def _make_cases(src_dtype, dst_dtype):
     src_name = dtype_name(src_dtype)
     dst_name = dtype_name(dst_dtype)
     eps = eps_for_dtype(dst_dtype)
-    
+
     cases = []
     for rows, cols, v_rows, v_cols in SHAPES:
         shape_name = f"{rows}x{cols}" if v_cols == cols else f"{v_rows}x{v_cols}"
-        cases.append({
-            "name": f"{src_name}_to_{dst_name}_{shape_name}",
-            "dtype": dst_dtype,
-            "src_dtype": src_dtype,
-            "dst_dtype": dst_dtype,
-            "shape": (rows, cols),
-            "valid_shape": (v_rows, v_cols),
-            "eps": eps,
-        })
+        cases.append(
+            {
+                "name": f"{src_name}_to_{dst_name}_{shape_name}",
+                "dtype": dst_dtype,
+                "src_dtype": src_dtype,
+                "dst_dtype": dst_dtype,
+                "shape": (rows, cols),
+                "valid_shape": (v_rows, v_cols),
+                "eps": eps,
+            }
+        )
     return cases
 
 
@@ -130,7 +132,9 @@ def _make_low_precision_cases():
             "eps": eps_for_dtype(dst_dtype),
         }
         if dst_dtype in (F4E1M2X2, F4E2M1X2):
-            case["name"] = f"{dtype_name(src_dtype)}_to_{dtype_name(dst_dtype)}_16x64_to_16x32"
+            case["name"] = (
+                f"{dtype_name(src_dtype)}_to_{dtype_name(dst_dtype)}_16x64_to_16x32"
+            )
             case["dst_shape"] = (16, 32)
             case["dst_valid_shape"] = (16, 32)
         lowp_cases.append(case)
@@ -139,15 +143,17 @@ def _make_low_precision_cases():
         (np.float32, HIF8),
     ):
         shape = (4, 96)
-        lowp_cases.append({
-            "name": f"{dtype_name(src_dtype)}_to_{dtype_name(dst_dtype)}_{shape[0]}x{shape[1]}",
-            "dtype": storage_dtype(dst_dtype),
-            "src_dtype": src_dtype,
-            "dst_dtype": dst_dtype,
-            "shape": shape,
-            "valid_shape": shape,
-            "eps": eps_for_dtype(dst_dtype),
-        })
+        lowp_cases.append(
+            {
+                "name": f"{dtype_name(src_dtype)}_to_{dtype_name(dst_dtype)}_{shape[0]}x{shape[1]}",
+                "dtype": storage_dtype(dst_dtype),
+                "src_dtype": src_dtype,
+                "dst_dtype": dst_dtype,
+                "shape": shape,
+                "valid_shape": shape,
+                "eps": eps_for_dtype(dst_dtype),
+            }
+        )
     return lowp_cases
 
 

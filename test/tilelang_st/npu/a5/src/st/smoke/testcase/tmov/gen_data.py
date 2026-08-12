@@ -15,7 +15,6 @@ For tmov (Vec-to-Vec data movement):
   - golden: exact copy of source tile (valid_shape region)
 """
 
-import os
 import sys
 import numpy as np
 
@@ -49,7 +48,9 @@ def main():
         golden[:vr, :vc] = input_data[:vr, :vc].copy()
 
         save_case_data(case["name"], {"input": input_data, "golden": golden})
-        print(f"[INFO] gen_data: {case['name']} shape={shape} valid_shape={valid_shape} dtype={dtype.__name__}")
+        print(
+            f"[INFO] gen_data: {case['name']} shape={shape} valid_shape={valid_shape} dtype={dtype.__name__}"
+        )
 
 
 if __name__ == "__main__":

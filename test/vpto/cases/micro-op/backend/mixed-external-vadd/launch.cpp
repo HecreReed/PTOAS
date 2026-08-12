@@ -15,11 +15,9 @@
 #include "acl/acl.h"
 #endif
 
-extern "C" __global__ [aicore] void mixed_external_vadd_kernel(
-    __gm__ float *lhs, __gm__ float *rhs, __gm__ float *out);
+extern "C" __global__[aicore] void mixed_external_vadd_kernel(__gm__ float* lhs, __gm__ float* rhs, __gm__ float* out);
 
-void LaunchMixed_external_vadd_kernel(float *lhs, float *rhs, float *out,
-                                      void *stream) {
-  mixed_external_vadd_kernel<<<1, nullptr, stream>>>(
-      (__gm__ float *)lhs, (__gm__ float *)rhs, (__gm__ float *)out);
+void LaunchMixed_external_vadd_kernel(float* lhs, float* rhs, float* out, void* stream)
+{
+    mixed_external_vadd_kernel<<<1, nullptr, stream>>>((__gm__ float*)lhs, (__gm__ float*)rhs, (__gm__ float*)out);
 }

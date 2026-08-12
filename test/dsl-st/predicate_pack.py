@@ -61,8 +61,12 @@ def predicate_pack_part_kernel(
         shape=[1, 1, 1, ROWS, ROW_BYTES],
         strides=[out_total, out_total, out_total, ROW_BYTES, 1],
     )
-    inp_part = pto.partition_view(inp_view, offsets=offsets, sizes=[1, 1, 1, rows, cols])
-    out_part = pto.partition_view(out_view, offsets=offsets, sizes=[1, 1, 1, ROWS, ROW_BYTES])
+    inp_part = pto.partition_view(
+        inp_view, offsets=offsets, sizes=[1, 1, 1, rows, cols]
+    )
+    out_part = pto.partition_view(
+        out_view, offsets=offsets, sizes=[1, 1, 1, ROWS, ROW_BYTES]
+    )
 
     src_tile = pto.alloc_tile(
         shape=[1, 32],

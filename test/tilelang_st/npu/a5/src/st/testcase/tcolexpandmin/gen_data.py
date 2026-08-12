@@ -35,8 +35,10 @@ for case in CASES:
     src0 = np.random.randint(1, 10, size=src0_shape).astype(dtype)
     src1 = np.random.randint(1, 10, size=src1_shape).astype(dtype)
 
-    golden = np.minimum(src0, np.tile(src1, (reps, 1))[:, :dst_shape[1]])
+    golden = np.minimum(src0, np.tile(src1, (reps, 1))[:, : dst_shape[1]])
     golden = golden.astype(dtype)
 
     save_case_data(case["name"], {"input0": src0, "input1": src1, "golden": golden})
-    print(f"[INFO] gen_data: {case['name']} src0={src0_shape} src1={src1_shape} dst={dst_shape} valid={valid_shape} dtype={dtype.__name__}")
+    print(
+        f"[INFO] gen_data: {case['name']} src0={src0_shape} src1={src1_shape} dst={dst_shape} valid={valid_shape} dtype={dtype.__name__}"
+    )

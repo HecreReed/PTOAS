@@ -49,17 +49,14 @@ std::unique_ptr<Pass> createPTOVerifyTFreePass();
 // Creates a pass for ...
 std::unique_ptr<Pass> createPTOInsertSyncPass();
 std::unique_ptr<Pass> createPTOInjectBarrierAllSyncPass();
-std::unique_ptr<Pass>
-createPTOBufidSyncPass(const PTOBufidSyncOptions &options = {});
+std::unique_ptr<Pass> createPTOBufidSyncPass(const PTOBufidSyncOptions& options = {});
 
 // Graph-based intra-core sync solver (coexists with PTOInsertSync).
-std::unique_ptr<Pass>
-createPTOGraphSyncSolverPass(const PTOGraphSyncSolverOptions &options = {});
+std::unique_ptr<Pass> createPTOGraphSyncSolverPass(const PTOGraphSyncSolverOptions& options = {});
 // Default arch is A3 unless overridden by callers.
 std::unique_ptr<Pass> createEmitPTOManualPass();
 // Explicitly select target arch for codegen.
 std::unique_ptr<Pass> createEmitPTOManualPass(PTOArch arch);
-
 
 /// Create a pass to convert ops from other dialects to PTO Ops.
 std::unique_ptr<Pass> createConvertToPTOOpPass();
@@ -68,10 +65,8 @@ std::unique_ptr<Pass> createConvertToPTOOpPass();
 /// PTO Ops.
 std::unique_ptr<Pass> createInferPTOMemScopePass();
 
-std::unique_ptr<Pass>
-createPlanMemoryPass(const PlanMemoryOptions &options = {});
-std::unique_ptr<Pass>
-createPlanMemoryModernPass(const PlanMemoryOptions &options);
+std::unique_ptr<Pass> createPlanMemoryPass(const PlanMemoryOptions& options = {});
+std::unique_ptr<Pass> createPlanMemoryModernPass(const PlanMemoryOptions& options);
 std::unique_ptr<Pass> createPTORemoveRedundantBarrierPass();
 std::unique_ptr<Pass> createPTOValidateIntToPtrUsesPass();
 std::unique_ptr<Pass> createPTORematerializeFixpipeVectorQuantPass();
@@ -82,8 +77,7 @@ std::unique_ptr<Pass> createPTORemoveIdentityTMovPass();
 std::unique_ptr<Pass> createPreFusionAnalysisPass();
 std::unique_ptr<Pass> createPrintPreFusionAnalysisPass();
 std::unique_ptr<Pass> createFusionPlanPass();
-std::unique_ptr<Pass>
-createFusionPlanPass(const FusionPlanOptions &options);
+std::unique_ptr<Pass> createFusionPlanPass(const FusionPlanOptions& options);
 std::unique_ptr<Pass> createOpSchedulingPass();
 std::unique_ptr<Pass> createPTOMarkLastUsePass();
 std::unique_ptr<Pass> createPTOFusionRegionGenPass();
@@ -99,8 +93,7 @@ std::unique_ptr<Pass> createPTOInferVPTOVecScopePass();
 std::unique_ptr<Pass> createVPTOExpandWrapperOpsPass();
 std::unique_ptr<Pass> createVPTOSoftPostUpdatePass();
 std::unique_ptr<Pass> createPTOVPTOPtrBoundaryPass();
-std::unique_ptr<Pass>
-createPTOLowLevelLoopFusionPass(const PTOLowLevelLoopFusionOptions &options = {});
+std::unique_ptr<Pass> createPTOLowLevelLoopFusionPass(const PTOLowLevelLoopFusionOptions& options = {});
 std::unique_ptr<Pass> createPTOFusionPredicateElisionPass();
 std::unique_ptr<Pass> createPTOFusionLoadStoreElisionPass();
 std::unique_ptr<Pass> createPTOUnrollAfterLoopFusionPass();
@@ -110,17 +103,13 @@ std::unique_ptr<Pass> createVPTOPtrCastCleanupPass();
 std::unique_ptr<Pass> createVPTOCombineReductionsPass();
 std::unique_ptr<Pass> createVPTOOptimizeVcvtPass();
 std::unique_ptr<Pass> createVPTOMaskSimplifyPass();
-LogicalResult validateVPTOAuthoringIR(ModuleOp module,
-                                      llvm::raw_ostream *diagOS = nullptr);
-LogicalResult validateVPTOEmissionIR(ModuleOp module,
-                                     llvm::raw_ostream *diagOS = nullptr);
+LogicalResult validateVPTOAuthoringIR(ModuleOp module, llvm::raw_ostream* diagOS = nullptr);
+LogicalResult validateVPTOEmissionIR(ModuleOp module, llvm::raw_ostream* diagOS = nullptr);
 std::unique_ptr<Pass> createPTOValidateVPTOIRPass();
 std::unique_ptr<Pass> createPTOValidateVPTOEmissionIRPass();
-LogicalResult validateVMIProducerBoundaryIR(ModuleOp module,
-                                            llvm::raw_ostream *diagOS = nullptr);
-LogicalResult validateVMILayoutAssignedIR(ModuleOp module,
-                                          llvm::raw_ostream *diagOS = nullptr,
-                                          bool verifyHelperSupport = true);
+LogicalResult validateVMIProducerBoundaryIR(ModuleOp module, llvm::raw_ostream* diagOS = nullptr);
+LogicalResult validateVMILayoutAssignedIR(
+    ModuleOp module, llvm::raw_ostream* diagOS = nullptr, bool verifyHelperSupport = true);
 std::unique_ptr<Pass> createPTOValidateVMIIRPass();
 std::unique_ptr<Pass> createPTOValidateVMILayoutIRPass();
 std::unique_ptr<Pass> createVMIPreAssignmentCombinePass();
@@ -134,18 +123,15 @@ std::unique_ptr<Pass> createVMILowerUnifiedToLegacyPass();
 std::unique_ptr<Pass> createVMINormalizeSignlessIntToUnsignedPass();
 std::unique_ptr<Pass> createVMIToVPTOPass();
 std::unique_ptr<Pass> createInsertTemplateAttributesPass();
-std::unique_ptr<Pass> createInsertTemplateAttributesPass(
-    const InsertTemplateAttributesOptions &options);
+std::unique_ptr<Pass> createInsertTemplateAttributesPass(const InsertTemplateAttributesOptions& options);
 std::unique_ptr<Pass> createExpandTileOpPass();
-std::unique_ptr<Pass> createExpandTileOpPass(const ExpandTileOpOptions &options);
+std::unique_ptr<Pass> createExpandTileOpPass(const ExpandTileOpOptions& options);
 std::unique_ptr<Pass> createFoldTileBufIntrinsicsPass();
 std::unique_ptr<Pass> createFoldTileBufIntrinsicsPass(llvm::StringRef foldMode);
 std::unique_ptr<Pass> createPTOCanonicalizeIRPass();
 std::unique_ptr<Pass> createLowerPTOToUBufOpsPass();
-std::unique_ptr<Pass>
-createPTOInlineLibCallPass(const PTOInlineLibCallOptions &options = {});
-std::unique_ptr<Pass> createPTOInlineBackendHelpersPass(
-    const PTOInlineBackendHelpersOptions &options = {});
+std::unique_ptr<Pass> createPTOInlineLibCallPass(const PTOInlineLibCallOptions& options = {});
+std::unique_ptr<Pass> createPTOInlineBackendHelpersPass(const PTOInlineBackendHelpersOptions& options = {});
 
 //===----------------------------------------------------------------------===//
 // Registration
@@ -157,6 +143,5 @@ std::unique_ptr<Pass> createPTOInlineBackendHelpersPass(
 
 } // namespace pto
 } // namespace mlir
-
 
 #endif // MLIR_DIALECT_PTO_TRANSFORMS_PASSES_H

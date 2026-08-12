@@ -15,9 +15,8 @@ from ._common import NUMERIC_DTYPES
 from ._elementwise import _ub_or_vec_row_major
 
 
-TRI_DTYPES = [
-    ("i32", dtype) for dtype in NUMERIC_DTYPES
-]
+TRI_DTYPES = [("i32", dtype) for dtype in NUMERIC_DTYPES]
+
 
 def _scalar_tile(operand_kinds=(), **_):
     return operand_kinds == ("scalar", "tile")
@@ -106,7 +105,7 @@ def template_ttri_upper(diagonal, dst: pto.Tile):
         start_row = scalar.index_cast(pto.const(0, dtype=pto.i32))
     else:
         start_row = scalar.index_cast(1 - diagonal)
-    
+
     start_num = diagonal
     for row in range(valid_rows):
         remained = valid_cols

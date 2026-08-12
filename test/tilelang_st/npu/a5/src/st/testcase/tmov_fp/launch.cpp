@@ -12,8 +12,11 @@
 #define AICORE [aicore]
 #endif
 
-extern "C" __global__ AICORE void TMOV_FP_f16_16x16x16(__gm__ uint16_t *a, __gm__ uint16_t *b, __gm__ float *scale, __gm__ uint16_t *id, __gm__ float *c);
+extern "C" __global__ AICORE void TMOV_FP_f16_16x16x16(
+    __gm__ uint16_t* a, __gm__ uint16_t* b, __gm__ float* scale, __gm__ uint16_t* id, __gm__ float* c);
 
-void LaunchTMOV_FP_f16_16x16x16(uint16_t *a, uint16_t *b, float *scale, uint16_t *id, float *c, void *stream) {
-    TMOV_FP_f16_16x16x16<<<1, nullptr, stream>>>((__gm__ uint16_t *)a, (__gm__ uint16_t *)b, (__gm__ float *)scale, (__gm__ uint16_t *)id, (__gm__ float *)c);
+void LaunchTMOV_FP_f16_16x16x16(uint16_t* a, uint16_t* b, float* scale, uint16_t* id, float* c, void* stream)
+{
+    TMOV_FP_f16_16x16x16<<<1, nullptr, stream>>>(
+        (__gm__ uint16_t*)a, (__gm__ uint16_t*)b, (__gm__ float*)scale, (__gm__ uint16_t*)id, (__gm__ float*)c);
 }

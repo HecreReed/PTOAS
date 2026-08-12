@@ -40,10 +40,14 @@ def generate(output_dir: Path) -> None:
         golden_v1[base + 7] = 0
         golden_v1[base + 8] = 0
         golden_v1[base + 9] = i32_bits(1 << lane)
-        golden_v1[base + 10] = i32_bits((1 << (lane + 1)) - 1) if lane < 31 else np.int32(-1)
+        golden_v1[base + 10] = (
+            i32_bits((1 << (lane + 1)) - 1) if lane < 31 else np.int32(-1)
+        )
         golden_v1[base + 11] = i32_bits((1 << lane) - 1)
         golden_v1[base + 12] = i32_bits(0xFFFFFFFF << lane)
-        golden_v1[base + 13] = i32_bits(0xFFFFFFFF << (lane + 1)) if lane < 31 else np.int32(0)
+        golden_v1[base + 13] = (
+            i32_bits(0xFFFFFFFF << (lane + 1)) if lane < 31 else np.int32(0)
+        )
         golden_v1[base + 14] = 0
         golden_v1[base + 15] = 1
         golden_v1[base + 16] = 0

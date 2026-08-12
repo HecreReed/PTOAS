@@ -34,17 +34,17 @@ for case in CASES:
     input2_valid = input2[:vr, :vc]
 
     if cmp_mode == "eq":
-        mask_bits[:vr, :vc] = (input1_valid == input2_valid)
+        mask_bits[:vr, :vc] = input1_valid == input2_valid
     elif cmp_mode == "ne":
-        mask_bits[:vr, :vc] = (input1_valid != input2_valid)
+        mask_bits[:vr, :vc] = input1_valid != input2_valid
     elif cmp_mode == "lt":
-        mask_bits[:vr, :vc] = (input1_valid < input2_valid)
+        mask_bits[:vr, :vc] = input1_valid < input2_valid
     elif cmp_mode == "gt":
-        mask_bits[:vr, :vc] = (input1_valid > input2_valid)
+        mask_bits[:vr, :vc] = input1_valid > input2_valid
     elif cmp_mode == "ge":
-        mask_bits[:vr, :vc] = (input1_valid >= input2_valid)
+        mask_bits[:vr, :vc] = input1_valid >= input2_valid
     elif cmp_mode == "le":
-        mask_bits[:vr, :vc] = (input1_valid <= input2_valid)
+        mask_bits[:vr, :vc] = input1_valid <= input2_valid
 
     # dst shape is same as src shape, but only first cols//8 columns store packed mask bytes
     # remaining columns are padding (zeros)
@@ -60,11 +60,13 @@ for case in CASES:
             for bit in range(8):
                 src_col = col_byte * 8 + bit
                 if src_col < vc and mask_bits[row, src_col]:
-                    byte_val |= (1 << bit)
+                    byte_val |= 1 << bit
             golden[row, col_byte] = byte_val
 
     # Cast to int8 for final output
     golden = golden.astype(dst_dtype)
 
     save_case_data(case["name"], {"input1": input1, "input2": input2, "golden": golden})
-    print(f"[INFO] gen_data: {case['name']} shape={shape} valid_shape={valid_shape} cmp_mode={cmp_mode}")
+    print(
+        f"[INFO] gen_data: {case['name']} shape={shape} valid_shape={valid_shape} cmp_mode={cmp_mode}"
+    )

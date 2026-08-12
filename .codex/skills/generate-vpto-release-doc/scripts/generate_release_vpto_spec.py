@@ -131,7 +131,9 @@ def extract_sections(markdown: str) -> dict[str, str]:
     for index, match in enumerate(headings):
         heading = match.group(0).strip()
         start = match.start()
-        end = headings[index + 1].start() if index + 1 < len(headings) else len(markdown)
+        end = (
+            headings[index + 1].start() if index + 1 < len(headings) else len(markdown)
+        )
         sections[heading] = markdown[start:end].strip() + "\n"
     return sections
 
@@ -187,7 +189,9 @@ def strip_spec_unwanted_lines(markdown: str) -> str:
 
 def normalize_part_three_heading(text: str) -> str:
     lines = text.splitlines()
-    if len(lines) >= 2 and lines[0].startswith("## Part III: ISA Instruction Reference"):
+    if len(lines) >= 2 and lines[0].startswith(
+        "## Part III: ISA Instruction Reference"
+    ):
         if lines[1].startswith("# Part III: ISA Instruction Reference"):
             lines = ["## Part III: ISA Instruction Reference — Summary"] + lines[2:]
     return "\n".join(lines).strip() + "\n"
@@ -238,7 +242,9 @@ def rewrite_cross_bundle_links(
         split_output_names,
         output_dir_overridden,
     )
-    peer_link_re = re.compile(PEER_LINK_RE_TEMPLATE.format(peer_dir=re.escape(peer_dir)))
+    peer_link_re = re.compile(
+        PEER_LINK_RE_TEMPLATE.format(peer_dir=re.escape(peer_dir))
+    )
 
     def repl(match: re.Match[str]) -> str:
         chapter = match.group("chapter").lower()
@@ -510,7 +516,9 @@ def resolve_output_dir(target: str, output_dir: Path | None) -> Path:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--version", required=True, help="Release version, for example 0.4")
+    parser.add_argument(
+        "--version", required=True, help="Release version, for example 0.4"
+    )
     parser.add_argument(
         "--version-note",
         help="Version bullet text for the requested target and version",

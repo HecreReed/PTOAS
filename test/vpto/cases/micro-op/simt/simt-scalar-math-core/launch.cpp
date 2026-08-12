@@ -12,7 +12,8 @@
 #ifndef __CPU_SIM
 #include "acl/acl.h"
 #endif
-extern "C" __global__ [aicore] void simt_scalar_math_core_kernel(__gm__ int *v1);
-void LaunchSimt_scalar_math_core_kernel(int *v1, void *stream) {
-  simt_scalar_math_core_kernel<<<1, nullptr, stream>>>((__gm__ int *)v1);
+extern "C" __global__[aicore] void simt_scalar_math_core_kernel(__gm__ int* v1);
+void LaunchSimt_scalar_math_core_kernel(int* v1, void* stream)
+{
+    simt_scalar_math_core_kernel<<<1, nullptr, stream>>>((__gm__ int*)v1);
 }

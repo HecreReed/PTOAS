@@ -35,5 +35,3 @@ module attributes {"pto.target_arch" = "a5"} {
   }
 
 }
-
-

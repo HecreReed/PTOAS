@@ -27,8 +27,12 @@ def main():
         case_dir = case["name"]
         shape_c = case["shape_c"]
         dtype_c = case.get("dtype_c", np.float32)
-        golden = np.fromfile(os.path.join(case_dir, "golden.bin"), dtype=dtype_c).reshape(shape_c)
-        output = np.fromfile(os.path.join(case_dir, "output.bin"), dtype=dtype_c).reshape(shape_c)
+        golden = np.fromfile(
+            os.path.join(case_dir, "golden.bin"), dtype=dtype_c
+        ).reshape(shape_c)
+        output = np.fromfile(
+            os.path.join(case_dir, "output.bin"), dtype=dtype_c
+        ).reshape(shape_c)
 
         ok = result_cmp(golden, output, case["eps"])
         if ok:

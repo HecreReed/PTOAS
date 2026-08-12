@@ -19,7 +19,6 @@
 # f32 spans far beyond si16, so out-of-range clamping is the dominant path.
 
 import argparse
-import struct
 from pathlib import Path
 
 import numpy as np
@@ -36,46 +35,42 @@ def f32(x):
 # A 32-value probe. ELEMS = 256 = 8 * 32, giving a clean 8x-repeat schedule.
 PROBE = [
     # --- in-range RN edges + typical values ---
-    f32(0.0),          # 0
-    f32(0.5),          # RN -> 0
-    f32(1.5),          # RN -> 2
-    f32(2.5),          # RN -> 2
-    f32(-0.5),         # RN -> 0
-    f32(-1.5),         # RN -> -2
-    f32(-2.5),         # RN -> -2
-    f32(1.0),          # 1
-    f32(-1.0),         # -1
-    f32(127.0),        # 127
-    f32(-128.0),       # -128
-
+    f32(0.0),  # 0
+    f32(0.5),  # RN -> 0
+    f32(1.5),  # RN -> 2
+    f32(2.5),  # RN -> 2
+    f32(-0.5),  # RN -> 0
+    f32(-1.5),  # RN -> -2
+    f32(-2.5),  # RN -> -2
+    f32(1.0),  # 1
+    f32(-1.0),  # -1
+    f32(127.0),  # 127
+    f32(-128.0),  # -128
     # --- boundary clamping ---
-    f32(32767.0),      # exactly INT16_MAX
-    f32(32767.5),      # RN -> 32768 -> clamp 32767
-    f32(32768.0),      # clamp 32767
-    f32(32769.0),      # clamp 32767
-    f32(-32768.0),     # exactly INT16_MIN
-    f32(-32768.5),     # RN -> -32769 -> clamp -32768
-    f32(-32769.0),     # clamp -32768
-
+    f32(32767.0),  # exactly INT16_MAX
+    f32(32767.5),  # RN -> 32768 -> clamp 32767
+    f32(32768.0),  # clamp 32767
+    f32(32769.0),  # clamp 32767
+    f32(-32768.0),  # exactly INT16_MIN
+    f32(-32768.5),  # RN -> -32769 -> clamp -32768
+    f32(-32769.0),  # clamp -32768
     # --- well out of range -> clamp ---
-    f32(40000.0),      # clamp 32767
-    f32(-40000.0),     # clamp -32768
-    f32(100000.0),     # clamp 32767
-    f32(-100000.0),    # clamp -32768
-    f32(1e6),          # clamp 32767
-    f32(-1e6),         # clamp -32768
-    f32(3.4e38),       # near f32 max -> clamp 32767
-    f32(-3.4e38),      # clamp -32768
-    f32(float("inf")), # clamp 32767
-    f32(float("-inf")),# clamp -32768
-
+    f32(40000.0),  # clamp 32767
+    f32(-40000.0),  # clamp -32768
+    f32(100000.0),  # clamp 32767
+    f32(-100000.0),  # clamp -32768
+    f32(1e6),  # clamp 32767
+    f32(-1e6),  # clamp -32768
+    f32(3.4e38),  # near f32 max -> clamp 32767
+    f32(-3.4e38),  # clamp -32768
+    f32(float("inf")),  # clamp 32767
+    f32(float("-inf")),  # clamp -32768
     # --- NaN saturates to 0 under V300 SAT ---
     f32(float("nan")),
-
     # --- extra RN edges ---
-    f32(0.25),         # RN -> 0
-    f32(0.75),         # RN -> 1
-    f32(-0.25),        # RN -> 0
+    f32(0.25),  # RN -> 0
+    f32(0.75),  # RN -> 1
+    f32(-0.25),  # RN -> 0
 ]
 
 assert len(PROBE) == 32, f"PROBE length must be 32, got {len(PROBE)}"

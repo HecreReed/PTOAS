@@ -28,6 +28,7 @@ _DTYPE_TO_CPP = {
     np.uint64: "uint64_t",
 }
 
+
 def gen_launch():
     lines = [
         "// Copyright (c) 2026 Huawei Technologies Co., Ltd.",
@@ -54,9 +55,15 @@ def gen_launch():
         src_cpp = _DTYPE_TO_CPP.get(c["src_dtype"], "float")
         dst_cpp = _DTYPE_TO_CPP.get(c["dst_dtype"], "float")
 
-        extern_decls.append(f'extern "C" __global__ AICORE void TCVT_{name}(__gm__ {src_cpp} *src, __gm__ {dst_cpp} *dst);')
-        launch_funcs.append(f"void LaunchTCVT_{name}(void *src, void *dst, void *stream) {{")
-        launch_funcs.append(f"    TCVT_{name}<<<1, nullptr, stream>>>((__gm__ {src_cpp} *)src, (__gm__ {dst_cpp} *)dst);")
+        extern_decls.append(
+            f'extern "C" __global__ AICORE void TCVT_{name}(__gm__ {src_cpp} *src, __gm__ {dst_cpp} *dst);'
+        )
+        launch_funcs.append(
+            f"void LaunchTCVT_{name}(void *src, void *dst, void *stream) {{"
+        )
+        launch_funcs.append(
+            f"    TCVT_{name}<<<1, nullptr, stream>>>((__gm__ {src_cpp} *)src, (__gm__ {dst_cpp} *)dst);"
+        )
         launch_funcs.append("}")
         launch_funcs.append("")
 
@@ -65,6 +72,7 @@ def gen_launch():
     lines.extend(launch_funcs)
 
     return "\n".join(lines)
+
 
 def gen_main():
     lines = [
@@ -90,26 +98,30 @@ def gen_main():
 
     decls = []
     for c in cases.CASES:
-        decls.append(f"void LaunchTCVT_{c['name']}(void *src, void *dst, void *stream);")
+        decls.append(
+            f"void LaunchTCVT_{c['name']}(void *src, void *dst, void *stream);"
+        )
 
     lines.extend(decls)
-    lines.extend([
-        "",
-        "using LaunchFn = void (*)(void *, void *, void *);",
-        "",
-        "struct TestCase {",
-        "    const char *name;",
-        "    LaunchFn    launch;",
-        "    size_t      srcRows;",
-        "    size_t      srcCols;",
-        "    size_t      dstRows;",
-        "    size_t      dstCols;",
-        "    size_t      srcElemSize;",
-        "    size_t      dstElemSize;",
-        "};",
-        "",
-        "static const TestCase kCases[] = {",
-    ])
+    lines.extend(
+        [
+            "",
+            "using LaunchFn = void (*)(void *, void *, void *);",
+            "",
+            "struct TestCase {",
+            "    const char *name;",
+            "    LaunchFn    launch;",
+            "    size_t      srcRows;",
+            "    size_t      srcCols;",
+            "    size_t      dstRows;",
+            "    size_t      dstCols;",
+            "    size_t      srcElemSize;",
+            "    size_t      dstElemSize;",
+            "};",
+            "",
+            "static const TestCase kCases[] = {",
+        ]
+    )
 
     case_entries = []
     for c in cases.CASES:
@@ -117,112 +129,120 @@ def gen_main():
         src_cpp = _DTYPE_TO_CPP.get(c["src_dtype"], "float")
         dst_cpp = _DTYPE_TO_CPP.get(c["dst_dtype"], "float")
         rows, cols = c["shape"]
-        case_entries.append(f'    {{"{name}", LaunchTCVT_{name}, {rows}, {cols}, {rows}, {cols}, sizeof({src_cpp}), sizeof({dst_cpp})}},')
+        case_entries.append(
+            f'    {{"{name}", LaunchTCVT_{name}, {rows}, {cols}, {rows}, {cols}, sizeof({src_cpp}), sizeof({dst_cpp})}},'
+        )
 
     lines.extend(case_entries)
-    lines.extend([
-        "};",
-        "static constexpr size_t kNumCases = sizeof(kCases) / sizeof(kCases[0]);",
-        "",
-    ])
+    lines.extend(
+        [
+            "};",
+            "static constexpr size_t kNumCases = sizeof(kCases) / sizeof(kCases[0]);",
+            "",
+        ]
+    )
 
     # RunCase 和 main 函数保持不变
-    lines.extend([
-        "static int RunCase(const TestCase &tc, int deviceId, aclrtStream stream) {",
-        "    (void)deviceId;",
-        "    int rc = 0;",
-        "    const size_t srcElemCount = tc.srcRows * tc.srcCols;",
-        "    const size_t dstElemCount = tc.dstRows * tc.dstCols;",
-        "    size_t srcFileSize = srcElemCount * tc.srcElemSize;",
-        "    size_t dstFileSize = dstElemCount * tc.dstElemSize;",
-        "",
-        '    std::printf("[INFO] === case: %s (src=%zux%zu, dst=%zux%zu) ===\\n",',
-        "                tc.name, tc.srcRows, tc.srcCols, tc.dstRows, tc.dstCols);",
-        "",
-        '    std::string caseDir = std::string("./") + tc.name;',
-        "",
-        "    void *srcHost = nullptr;",
-        "    void *dstHost = nullptr;",
-        "    void *srcDevice = nullptr;",
-        "    void *dstDevice = nullptr;",
-        "",
-        "    aclrtMallocHost(&srcHost, srcFileSize);",
-        "    aclrtMallocHost(&dstHost, dstFileSize);",
-        "",
-        "    aclrtMalloc(&srcDevice, srcFileSize, ACL_MEM_MALLOC_HUGE_FIRST);",
-        "    aclrtMalloc(&dstDevice, dstFileSize, ACL_MEM_MALLOC_HUGE_FIRST);",
-        "",
-        '    if (!ReadFile((caseDir + "/input.bin").c_str(), srcFileSize, srcHost, srcFileSize)) {',
-        '        std::fprintf(stderr, "[ERROR] failed to read %s/input.bin\\n", caseDir.c_str());',
-        "        rc = 1;",
-        "    }",
-        "",
-        "    if (rc == 0) {",
-        "        aclrtMemcpy(srcDevice, srcFileSize, srcHost, srcFileSize, ACL_MEMCPY_HOST_TO_DEVICE);",
-        "        tc.launch(srcDevice, dstDevice, stream);",
-        "        aclrtSynchronizeStream(stream);",
-        "        aclrtMemcpy(dstHost, dstFileSize, dstDevice, dstFileSize, ACL_MEMCPY_DEVICE_TO_HOST);",
-        "    }",
-        "",
-        '    if (rc == 0 && !WriteFile((caseDir + "/output.bin").c_str(), dstHost, dstFileSize)) {',
-        '        std::fprintf(stderr, "[ERROR] failed to write %s/output.bin\\n", caseDir.c_str());',
-        "        rc = 1;",
-        "    }",
-        "",
-        "    if (srcDevice != nullptr)",
-        "        aclrtFree(srcDevice);",
-        "    if (dstDevice != nullptr)",
-        "        aclrtFree(dstDevice);",
-        "    if (srcHost != nullptr)",
-        "        aclrtFreeHost(srcHost);",
-        "    if (dstHost != nullptr)",
-        "        aclrtFreeHost(dstHost);",
-        "",
-        "    if (rc == 0)",
-        '        std::printf("[INFO] case %s done\\n", tc.name);',
-        "    return rc;",
-        "}",
-        "",
-        "int main(int argc, char *argv[]) {",
-        "    const char *caseFilter = (argc > 1) ? argv[1] : nullptr;",
-        "",
-        "    int rc = 0;",
-        "    int deviceId = 0;",
-        "    aclrtStream stream = nullptr;",
-        "",
-        "    aclInit(nullptr);",
-        '    if (const char *envDevice = std::getenv("ACL_DEVICE_ID")) {',
-        "        deviceId = std::atoi(envDevice);",
-        "    }",
-        "    aclrtSetDevice(deviceId);",
-        "    aclrtCreateStream(&stream);",
-        "",
-        "    for (size_t i = 0; i < kNumCases; ++i) {",
-        "        if (caseFilter != nullptr && std::strcmp(kCases[i].name, caseFilter) != 0) {",
-        "            continue;",
-        "        }",
-        "        int ret = RunCase(kCases[i], deviceId, stream);",
-        "        if (ret != 0) {",
-        '            std::fprintf(stderr, "[ERROR] case %s failed\\n", kCases[i].name);',
-        "            rc = 1;",
-        "            break;",
-        "        }",
-        "    }",
-        "",
-        "    if (stream != nullptr)",
-        "        aclrtDestroyStream(stream);",
-        "    aclrtResetDevice(deviceId);",
-        "    aclFinalize();",
-        "",
-        "    return rc;",
-        "}",
-        ""
-    ])
+    lines.extend(
+        [
+            "static int RunCase(const TestCase &tc, int deviceId, aclrtStream stream) {",
+            "    (void)deviceId;",
+            "    int rc = 0;",
+            "    const size_t srcElemCount = tc.srcRows * tc.srcCols;",
+            "    const size_t dstElemCount = tc.dstRows * tc.dstCols;",
+            "    size_t srcFileSize = srcElemCount * tc.srcElemSize;",
+            "    size_t dstFileSize = dstElemCount * tc.dstElemSize;",
+            "",
+            '    std::printf("[INFO] === case: %s (src=%zux%zu, dst=%zux%zu) ===\\n",',
+            "                tc.name, tc.srcRows, tc.srcCols, tc.dstRows, tc.dstCols);",
+            "",
+            '    std::string caseDir = std::string("./") + tc.name;',
+            "",
+            "    void *srcHost = nullptr;",
+            "    void *dstHost = nullptr;",
+            "    void *srcDevice = nullptr;",
+            "    void *dstDevice = nullptr;",
+            "",
+            "    aclrtMallocHost(&srcHost, srcFileSize);",
+            "    aclrtMallocHost(&dstHost, dstFileSize);",
+            "",
+            "    aclrtMalloc(&srcDevice, srcFileSize, ACL_MEM_MALLOC_HUGE_FIRST);",
+            "    aclrtMalloc(&dstDevice, dstFileSize, ACL_MEM_MALLOC_HUGE_FIRST);",
+            "",
+            '    if (!ReadFile((caseDir + "/input.bin").c_str(), srcFileSize, srcHost, srcFileSize)) {',
+            '        std::fprintf(stderr, "[ERROR] failed to read %s/input.bin\\n", caseDir.c_str());',
+            "        rc = 1;",
+            "    }",
+            "",
+            "    if (rc == 0) {",
+            "        aclrtMemcpy(srcDevice, srcFileSize, srcHost, srcFileSize, ACL_MEMCPY_HOST_TO_DEVICE);",
+            "        tc.launch(srcDevice, dstDevice, stream);",
+            "        aclrtSynchronizeStream(stream);",
+            "        aclrtMemcpy(dstHost, dstFileSize, dstDevice, dstFileSize, ACL_MEMCPY_DEVICE_TO_HOST);",
+            "    }",
+            "",
+            '    if (rc == 0 && !WriteFile((caseDir + "/output.bin").c_str(), dstHost, dstFileSize)) {',
+            '        std::fprintf(stderr, "[ERROR] failed to write %s/output.bin\\n", caseDir.c_str());',
+            "        rc = 1;",
+            "    }",
+            "",
+            "    if (srcDevice != nullptr)",
+            "        aclrtFree(srcDevice);",
+            "    if (dstDevice != nullptr)",
+            "        aclrtFree(dstDevice);",
+            "    if (srcHost != nullptr)",
+            "        aclrtFreeHost(srcHost);",
+            "    if (dstHost != nullptr)",
+            "        aclrtFreeHost(dstHost);",
+            "",
+            "    if (rc == 0)",
+            '        std::printf("[INFO] case %s done\\n", tc.name);',
+            "    return rc;",
+            "}",
+            "",
+            "int main(int argc, char *argv[]) {",
+            "    const char *caseFilter = (argc > 1) ? argv[1] : nullptr;",
+            "",
+            "    int rc = 0;",
+            "    int deviceId = 0;",
+            "    aclrtStream stream = nullptr;",
+            "",
+            "    aclInit(nullptr);",
+            '    if (const char *envDevice = std::getenv("ACL_DEVICE_ID")) {',
+            "        deviceId = std::atoi(envDevice);",
+            "    }",
+            "    aclrtSetDevice(deviceId);",
+            "    aclrtCreateStream(&stream);",
+            "",
+            "    for (size_t i = 0; i < kNumCases; ++i) {",
+            "        if (caseFilter != nullptr && std::strcmp(kCases[i].name, caseFilter) != 0) {",
+            "            continue;",
+            "        }",
+            "        int ret = RunCase(kCases[i], deviceId, stream);",
+            "        if (ret != 0) {",
+            '            std::fprintf(stderr, "[ERROR] case %s failed\\n", kCases[i].name);',
+            "            rc = 1;",
+            "            break;",
+            "        }",
+            "    }",
+            "",
+            "    if (stream != nullptr)",
+            "        aclrtDestroyStream(stream);",
+            "    aclrtResetDevice(deviceId);",
+            "    aclFinalize();",
+            "",
+            "    return rc;",
+            "}",
+            "",
+        ]
+    )
 
     return "\n".join(lines)
 
+
 if __name__ == "__main__":
     from pathlib import Path
+
     HERE = Path(__file__).parent
 
     with open(HERE / "launch.cpp", "w") as f:

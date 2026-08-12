@@ -23,8 +23,10 @@ def compare_bin(golden_path: str, output_path: str) -> bool:
         return False
     if np.allclose(golden, output, atol=1e-3, rtol=1e-3):
         return True
-    diff = np.where(np.abs(golden.astype(np.float32) - output.astype(np.float32)) >
-                    (1e-3 + 1e-3 * np.abs(golden.astype(np.float32))))[0]
+    diff = np.where(
+        np.abs(golden.astype(np.float32) - output.astype(np.float32))
+        > (1e-3 + 1e-3 * np.abs(golden.astype(np.float32)))
+    )[0]
     idx = int(diff[0]) if diff.size else 0
     print(
         f"[ERROR] first mismatch at idx={idx}: "

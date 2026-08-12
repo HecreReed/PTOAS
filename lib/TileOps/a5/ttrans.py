@@ -24,9 +24,17 @@ B32_DTYPES = ("f32", "i32", "ui32")
 B16_DTYPES = ("f16", "bf16", "i16", "ui16")
 B8_DTYPES = ("i8", "ui8")
 
-_BYTEWIDTH_BY_NAME = {"f32": 4, "i32": 4, "ui32": 4,
-                      "f16": 2, "bf16": 2, "i16": 2, "ui16": 2,
-                      "i8": 1, "ui8": 1}
+_BYTEWIDTH_BY_NAME = {
+    "f32": 4,
+    "i32": 4,
+    "ui32": 4,
+    "f16": 2,
+    "bf16": 2,
+    "i16": 2,
+    "ui16": 2,
+    "i8": 1,
+    "ui8": 1,
+}
 
 
 def _ub_row_major_2d(operand_memory_spaces, operand_b_layouts, operand_s_layouts, **_):
@@ -218,7 +226,7 @@ def template_ttrans_b8_colwise(src: pto.Tile, tmp: pto.Tile, dst: pto.Tile):
     dtype = dst.dtype  # i8/ui8
     valid_rows, valid_cols = src.valid_shape
     # packed lanes: two b8 per b16 lane
-    packed_lanes = pto.elements_per_vreg(dtype) >> 1   # 256/2 = 128
+    packed_lanes = pto.elements_per_vreg(dtype) >> 1  # 256/2 = 128
     src_stride = src.shape[1]
     valid_rows_minus_1 = valid_rows - 1
     src_ptr = src.as_ptr()

@@ -78,7 +78,7 @@ tests/st/tadd/
    ```cpp
    #include "gtest/gtest.h"
    #include "pto/npu/a5/TNewOp.hpp"  // Your new operation header
-   
+
    class TNEWOPTest : public ::testing::Test {
    protected:
        void SetUp() override {
@@ -88,7 +88,7 @@ tests/st/tadd/
            // Cleanup
        }
    };
-   
+
    TEST_F(TNEWOPTest, case_float_64x64) {
        // Setup input data
        // Call the operation
@@ -306,7 +306,7 @@ def verify_ub_dump(log_path, expected_values, start_addr=0):
                         addr_hex, val_hex = part.split('=')
                         addr = int(addr_hex.strip(), 16)
                         val = hex_to_float(val_hex.strip().strip('[]'))
-                        
+
                         idx = (addr - start_addr) // 4
                         if idx < len(expected_values):
                             if abs(val - expected_values[idx]) > 1e-5:

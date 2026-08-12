@@ -24,7 +24,9 @@ def fill_matrix(cols: int, base_start: float, row_step: float) -> np.ndarray:
     return out
 
 
-def write_case(output_dir: Path, matrix: np.ndarray, src_name: str, dst_name: str, golden_name: str) -> None:
+def write_case(
+    output_dir: Path, matrix: np.ndarray, src_name: str, dst_name: str, golden_name: str
+) -> None:
     dst = np.full(ROWS, SENTINEL, dtype=np.float32)
     golden = np.sum(matrix, axis=1, dtype=np.float32).astype(np.float32)
     matrix.reshape(-1).tofile(output_dir / src_name)
@@ -34,9 +36,19 @@ def write_case(output_dir: Path, matrix: np.ndarray, src_name: str, dst_name: st
 
 def generate(output_dir: Path) -> None:
     output_dir.mkdir(parents=True, exist_ok=True)
-    write_case(output_dir, fill_matrix(8, -0.5, 0.03125), "v1.bin", "v4.bin", "golden_v4.bin")
-    write_case(output_dir, fill_matrix(16, -0.75, 0.046875), "v2.bin", "v5.bin", "golden_v5.bin")
-    write_case(output_dir, fill_matrix(32, -0.875, 0.0625), "v3.bin", "v6.bin", "golden_v6.bin")
+    write_case(
+        output_dir, fill_matrix(8, -0.5, 0.03125), "v1.bin", "v4.bin", "golden_v4.bin"
+    )
+    write_case(
+        output_dir,
+        fill_matrix(16, -0.75, 0.046875),
+        "v2.bin",
+        "v5.bin",
+        "golden_v5.bin",
+    )
+    write_case(
+        output_dir, fill_matrix(32, -0.875, 0.0625), "v3.bin", "v6.bin", "golden_v6.bin"
+    )
 
 
 def main() -> None:

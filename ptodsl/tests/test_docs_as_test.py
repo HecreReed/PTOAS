@@ -15,7 +15,6 @@ import json
 import linecache
 import re
 import subprocess
-import sys
 import tempfile
 from unittest import mock
 
@@ -30,7 +29,9 @@ from ptoas.mlir.ir import Module
 from support.docs_fragment_fixtures import FRAGMENT_FIXTURES, render_fragment_fixture
 
 FENCE_RE = re.compile(r"^```(?P<lang>[A-Za-z0-9_+-]*)\s*$")
-META_RE = re.compile(r"^\s*<!--\s*ptodsl-doc-(?P<kind>test|pending)\s*:\s*(?P<body>.*?)\s*-->\s*$")
+META_RE = re.compile(
+    r"^\s*<!--\s*ptodsl-doc-(?P<kind>test|pending)\s*:\s*(?P<body>.*?)\s*-->\s*$"
+)
 
 
 @dataclass(frozen=True)
@@ -84,12 +85,16 @@ def expect(condition: bool, message: str) -> None:
         raise AssertionError(message)
 
 
-def format_doc_context(path: Path, start_line: int, symbol: Optional[str] = None) -> str:
+def format_doc_context(
+    path: Path, start_line: int, symbol: Optional[str] = None
+) -> str:
     symbol_text = symbol if symbol is not None else "<unknown>"
     return f"{path}:{start_line} [symbol={symbol_text}]"
 
 
-def fail_doc(path: Path, start_line: int, message: str, symbol: Optional[str] = None) -> None:
+def fail_doc(
+    path: Path, start_line: int, message: str, symbol: Optional[str] = None
+) -> None:
     raise AssertionError(f"{format_doc_context(path, start_line, symbol)}: {message}")
 
 
@@ -97,14 +102,19 @@ def iter_markdown_files(root: Path) -> Iterable[Path]:
     yield from sorted(root.glob("*.md"))
 
 
-def parse_metadata_line(path: Path, line: str, line_number: int) -> Optional[DocBlockMetadata]:
+def parse_metadata_line(
+    path: Path, line: str, line_number: int
+) -> Optional[DocBlockMetadata]:
     match = META_RE.match(line)
     if match is None:
         return None
 
     kind = match.group("kind")
     body = match.group("body").strip()
-    expect(body, f"{format_doc_context(path, line_number)}: ptodsl-doc-{kind} metadata must not be empty")
+    expect(
+        body,
+        f"{format_doc_context(path, line_number)}: ptodsl-doc-{kind} metadata must not be empty",
+    )
     if kind == "test":
         try:
             json.loads(body)
@@ -112,17 +122,24 @@ def parse_metadata_line(path: Path, line: str, line_number: int) -> Optional[Doc
             raise AssertionError(
                 f"{format_doc_context(path, line_number)}: ptodsl-doc-test metadata must be valid JSON: {exc.msg}"
             ) from exc
-    return DocBlockMetadata(kind=kind, body=body, line=line_number, raw=line.rstrip("\n"))
+    return DocBlockMetadata(
+        kind=kind, body=body, line=line_number, raw=line.rstrip("\n")
+    )
 
 
-def find_block_metadata(path: Path, lines: list[str], fence_line: int) -> Optional[DocBlockMetadata]:
+def find_block_metadata(
+    path: Path, lines: list[str], fence_line: int
+) -> Optional[DocBlockMetadata]:
     candidate = fence_line - 2
     while candidate >= 0 and not lines[candidate].strip():
         candidate -= 1
     if candidate < 0:
         return None
     line = lines[candidate]
-    if line.lstrip().startswith("<!-- ptodsl-doc-") and parse_metadata_line(path, line, candidate + 1) is None:
+    if (
+        line.lstrip().startswith("<!-- ptodsl-doc-")
+        and parse_metadata_line(path, line, candidate + 1) is None
+    ):
         fail_doc(path, fence_line, "malformed ptodsl-doc metadata comment")
     return parse_metadata_line(path, line, candidate + 1)
 
@@ -156,7 +173,9 @@ def run_ptoas_frontend_verify(ptoas_bin: Path, mlir_text: str, label: str) -> No
     child_modules = extract_child_module_texts(mlir_text, label)
 
     for index, child_text in enumerate(child_modules, start=1):
-        with tempfile.NamedTemporaryFile("w", suffix=".mlir", delete=False, encoding="utf-8") as handle:
+        with tempfile.NamedTemporaryFile(
+            "w", suffix=".mlir", delete=False, encoding="utf-8"
+        ) as handle:
             handle.write(child_text)
             input_path = Path(handle.name)
 
@@ -174,14 +193,18 @@ def run_ptoas_frontend_verify(ptoas_bin: Path, mlir_text: str, label: str) -> No
         if result.returncode == 0 and result.stdout.strip():
             continue
 
-        if "expected VPTO container top level to contain only kernel submodules" in result.stderr:
+        if (
+            "expected VPTO container top level to contain only kernel submodules"
+            in result.stderr
+        ):
             continue
 
         if "VPTO LLVM emission failed" in result.stderr:
             continue
 
         if (
-            "object output requires an explicit file path passed with -o." in result.stderr
+            "object output requires an explicit file path passed with -o."
+            in result.stderr
         ):
             with tempfile.TemporaryDirectory() as temp_dir:
                 temp_root = Path(temp_dir)
@@ -198,7 +221,8 @@ def run_ptoas_frontend_verify(ptoas_bin: Path, mlir_text: str, label: str) -> No
                 artifact_size = output_path.stat().st_size if artifact_exists else 0
             if fallback_result.returncode != 0 and (
                 "ASCEND_HOME_PATH is required" in fallback_result.stderr
-                or "CANN toolchain is required but was not initialized" in fallback_result.stderr
+                or "CANN toolchain is required but was not initialized"
+                in fallback_result.stderr
             ):
                 continue
             expect(
@@ -206,7 +230,10 @@ def run_ptoas_frontend_verify(ptoas_bin: Path, mlir_text: str, label: str) -> No
                 f"{child_label} should pass PTOAS fallback compilation when the VPTO fast path skips --emit-pto-ir.\n"
                 f"stdout:\n{fallback_result.stdout}\nstderr:\n{fallback_result.stderr}",
             )
-            expect(artifact_exists, f"{child_label} should produce an output artifact via fallback ptoas -o")
+            expect(
+                artifact_exists,
+                f"{child_label} should produce an output artifact via fallback ptoas -o",
+            )
             expect(
                 artifact_size > 0,
                 f"{child_label} should produce a non-empty output artifact via fallback ptoas -o",
@@ -217,12 +244,21 @@ def run_ptoas_frontend_verify(ptoas_bin: Path, mlir_text: str, label: str) -> No
             result.returncode == 0,
             f"{child_label} should pass PTOAS frontend verification.\nstdout:\n{result.stdout}\nstderr:\n{result.stderr}",
         )
-        expect(result.stdout.strip(), f"{child_label} should emit non-empty PTO IR after PTOAS frontend passes")
+        expect(
+            result.stdout.strip(),
+            f"{child_label} should emit non-empty PTO IR after PTOAS frontend passes",
+        )
 
 
 def parse_test_directive(block: MarkdownCodeBlock) -> DocTestDirective:
-    expect(block.metadata is not None, f"{block_label(block)}: python code block missing metadata")
-    expect(block.metadata.kind == "test", f"{block_label(block)}: expected ptodsl-doc-test metadata")
+    expect(
+        block.metadata is not None,
+        f"{block_label(block)}: python code block missing metadata",
+    )
+    expect(
+        block.metadata.kind == "test",
+        f"{block_label(block)}: expected ptodsl-doc-test metadata",
+    )
 
     try:
         payload = json.loads(block.metadata.body)
@@ -248,7 +284,11 @@ def parse_test_directive(block: MarkdownCodeBlock) -> DocTestDirective:
     )
     if files is not None:
         expect(
-            isinstance(files, dict) and all(isinstance(path, str) and isinstance(text, str) for path, text in files.items()),
+            isinstance(files, dict)
+            and all(
+                isinstance(path, str) and isinstance(text, str)
+                for path, text in files.items()
+            ),
             f"{block_label(block, symbol if isinstance(symbol, str) and symbol else None)}: "
             "ptodsl-doc-test metadata 'files' must be an object mapping relative file paths to text",
         )
@@ -281,7 +321,9 @@ def parse_test_directive(block: MarkdownCodeBlock) -> DocTestDirective:
                 fixture=fixture,
                 files=files,
             )
-        return DocTestDirective(mode=mode, symbol=symbol, compile_kwargs=compile_kwargs, files=files)
+        return DocTestDirective(
+            mode=mode, symbol=symbol, compile_kwargs=compile_kwargs, files=files
+        )
 
     if mode == "launch_fragment":
         expect(
@@ -388,8 +430,14 @@ def verify_compiled_target(
     *,
     frontend_verify: bool,
 ) -> None:
-    expect(directive.symbol is not None, f"{block_label(block)}: compile mode requires a symbol")
-    expect(directive.compile_kwargs is not None, f"{block_label(block, directive.symbol)}: compile mode requires compile kwargs")
+    expect(
+        directive.symbol is not None,
+        f"{block_label(block)}: compile mode requires a symbol",
+    )
+    expect(
+        directive.compile_kwargs is not None,
+        f"{block_label(block, directive.symbol)}: compile mode requires compile kwargs",
+    )
     expect(
         directive.symbol in namespace,
         f"{block_label(block, directive.symbol)}: declared symbol is missing from snippet namespace",
@@ -431,8 +479,12 @@ def verify_compiled_target(
 def run_compile_block(block: MarkdownCodeBlock, ptoas_bin: Path) -> None:
     directive = parse_test_directive(block)
     with directive_execution_dir(directive) as source_dir:
-        namespace = execute_source(block.text, block, directive.symbol, source_dir=source_dir)
-        verify_compiled_target(block, directive, namespace, ptoas_bin, frontend_verify=False)
+        namespace = execute_source(
+            block.text, block, directive.symbol, source_dir=source_dir
+        )
+        verify_compiled_target(
+            block, directive, namespace, ptoas_bin, frontend_verify=False
+        )
 
 
 def run_compile_fragment_block(block: MarkdownCodeBlock, ptoas_bin: Path) -> None:
@@ -446,14 +498,20 @@ def run_compile_fragment_block(block: MarkdownCodeBlock, ptoas_bin: Path) -> Non
         f"{block_label(block, directive.symbol)}: unknown fragment fixture {directive.fixture!r}",
     )
     try:
-        rendered_source = render_fragment_fixture(FRAGMENT_FIXTURES[directive.fixture], block.text)
+        rendered_source = render_fragment_fixture(
+            FRAGMENT_FIXTURES[directive.fixture], block.text
+        )
     except ValueError as exc:
         raise AssertionError(
             f"{block_label(block, directive.symbol)}: fragment fixture {directive.fixture!r} is invalid: {exc}"
         ) from exc
     with directive_execution_dir(directive) as source_dir:
-        namespace = execute_source(rendered_source, block, directive.symbol, source_dir=source_dir)
-        verify_compiled_target(block, directive, namespace, ptoas_bin, frontend_verify=False)
+        namespace = execute_source(
+            rendered_source, block, directive.symbol, source_dir=source_dir
+        )
+        verify_compiled_target(
+            block, directive, namespace, ptoas_bin, frontend_verify=False
+        )
 
 
 def run_launch_fragment_block(block: MarkdownCodeBlock, ptoas_bin: Path) -> None:
@@ -467,7 +525,9 @@ def run_launch_fragment_block(block: MarkdownCodeBlock, ptoas_bin: Path) -> None
         f"{block_label(block, directive.symbol)}: unknown fragment fixture {directive.fixture!r}",
     )
     try:
-        rendered_source = render_fragment_fixture(FRAGMENT_FIXTURES[directive.fixture], block.text)
+        rendered_source = render_fragment_fixture(
+            FRAGMENT_FIXTURES[directive.fixture], block.text
+        )
     except ValueError as exc:
         raise AssertionError(
             f"{block_label(block, directive.symbol)}: fragment fixture {directive.fixture!r} is invalid: {exc}"
@@ -507,9 +567,12 @@ def run_launch_fragment_block(block: MarkdownCodeBlock, ptoas_bin: Path) -> None
             isinstance(mlir_text, str) and mlir_text.strip(),
             f"{block_label(block, directive.symbol)}: compiled launch target should expose non-empty mlir_text()",
         )
-        label = block_label(block, directive.symbol or getattr(compiled, "ir_function_name", None))
+        label = block_label(
+            block, directive.symbol or getattr(compiled, "ir_function_name", None)
+        )
         expect_parse_roundtrip_and_verify(mlir_text, label)
         run_ptoas_frontend_verify(ptoas_bin, mlir_text, label)
+
 
 def scan_markdown_file(path: Path) -> MarkdownScanResult:
     lines = path.read_text(encoding="utf-8").splitlines(keepends=True)
@@ -555,10 +618,14 @@ def scan_markdown_file(path: Path) -> MarkdownScanResult:
 
 
 def scan_user_guide() -> tuple[MarkdownScanResult, ...]:
-    return tuple(scan_markdown_file(path) for path in iter_markdown_files(USER_GUIDE_ROOT))
+    return tuple(
+        scan_markdown_file(path) for path in iter_markdown_files(USER_GUIDE_ROOT)
+    )
 
 
-def collect_python_blocks(results: Iterable[MarkdownScanResult]) -> tuple[MarkdownCodeBlock, ...]:
+def collect_python_blocks(
+    results: Iterable[MarkdownScanResult],
+) -> tuple[MarkdownCodeBlock, ...]:
     blocks: list[MarkdownCodeBlock] = []
     for result in results:
         for block in result.blocks:
@@ -567,7 +634,9 @@ def collect_python_blocks(results: Iterable[MarkdownScanResult]) -> tuple[Markdo
     return tuple(blocks)
 
 
-def collect_tagged_python_blocks(blocks: Iterable[MarkdownCodeBlock]) -> tuple[MarkdownCodeBlock, ...]:
+def collect_tagged_python_blocks(
+    blocks: Iterable[MarkdownCodeBlock],
+) -> tuple[MarkdownCodeBlock, ...]:
     return tuple(block for block in blocks if block.metadata is not None)
 
 
@@ -586,7 +655,9 @@ def summarize_metadata(blocks: Iterable[MarkdownCodeBlock]) -> tuple[int, int]:
     return test_count, pending_count
 
 
-def collect_test_blocks(blocks: Iterable[MarkdownCodeBlock]) -> tuple[MarkdownCodeBlock, ...]:
+def collect_test_blocks(
+    blocks: Iterable[MarkdownCodeBlock],
+) -> tuple[MarkdownCodeBlock, ...]:
     return tuple(
         block
         for block in blocks
@@ -607,22 +678,32 @@ def summarize_test_modes(blocks: Iterable[MarkdownCodeBlock]) -> tuple[int, int,
         elif directive.mode == "launch_fragment":
             launch_fragment_count += 1
         else:
-            raise AssertionError(f"{block_label(block)}: unsupported docs-as-test mode {directive.mode!r}")
+            raise AssertionError(
+                f"{block_label(block)}: unsupported docs-as-test mode {directive.mode!r}"
+            )
     return compile_count, compile_fragment_count, launch_fragment_count
 
 
 def main() -> None:
-    expect(USER_GUIDE_ROOT.is_dir(), f"missing PTODSL user guide directory: {USER_GUIDE_ROOT}")
+    expect(
+        USER_GUIDE_ROOT.is_dir(),
+        f"missing PTODSL user guide directory: {USER_GUIDE_ROOT}",
+    )
 
     results = scan_user_guide()
     python_blocks = collect_python_blocks(results)
     tagged_python_blocks = collect_tagged_python_blocks(python_blocks)
     test_count, pending_count = summarize_metadata(tagged_python_blocks)
     test_blocks = collect_test_blocks(tagged_python_blocks)
-    compile_test_count, compile_fragment_test_count, launch_fragment_test_count = summarize_test_modes(test_blocks)
+    compile_test_count, compile_fragment_test_count, launch_fragment_test_count = (
+        summarize_test_modes(test_blocks)
+    )
 
     expect(bool(results), f"no markdown files found under {USER_GUIDE_ROOT}")
-    expect(bool(python_blocks), f"no Python fenced code blocks found under {USER_GUIDE_ROOT}")
+    expect(
+        bool(python_blocks),
+        f"no Python fenced code blocks found under {USER_GUIDE_ROOT}",
+    )
 
     if compile_test_count or compile_fragment_test_count or launch_fragment_test_count:
         try:
@@ -631,7 +712,8 @@ def main() -> None:
             compile_blocks = [
                 block
                 for block in test_blocks
-                if parse_test_directive(block).mode in ("compile", "compile_fragment", "launch_fragment")
+                if parse_test_directive(block).mode
+                in ("compile", "compile_fragment", "launch_fragment")
             ]
             fail_doc(compile_blocks[0].path, compile_blocks[0].start_line, str(exc))
     else:
@@ -639,7 +721,10 @@ def main() -> None:
     for block in test_blocks:
         directive = parse_test_directive(block)
         if directive.mode == "compile":
-            expect(ptoas_bin is not None, f"{block_label(block, directive.symbol)}: missing ptoas binary for compile-mode docs test")
+            expect(
+                ptoas_bin is not None,
+                f"{block_label(block, directive.symbol)}: missing ptoas binary for compile-mode docs test",
+            )
             run_compile_block(block, ptoas_bin)
         elif directive.mode == "compile_fragment":
             expect(
@@ -654,7 +739,9 @@ def main() -> None:
             )
             run_launch_fragment_block(block, ptoas_bin)
         else:
-            raise AssertionError(f"{block_label(block)}: unsupported docs-as-test mode {directive.mode!r}")
+            raise AssertionError(
+                f"{block_label(block)}: unsupported docs-as-test mode {directive.mode!r}"
+            )
 
     markdown_count = len(results)
     python_count = len(python_blocks)

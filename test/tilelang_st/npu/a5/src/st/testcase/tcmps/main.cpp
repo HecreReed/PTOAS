@@ -22,32 +22,33 @@
 using namespace PtoTestCommon;
 
 // Kernel launch wrappers (defined in launch.cpp)
-void LaunchTCMP_f32_1x64(float *src, uint8_t *dst, void *stream);
-void LaunchTCMP_f32_4x64(float *src, uint8_t *dst, void *stream);
-void LaunchTCMP_f32_8x64(float *src, uint8_t *dst, void *stream);
-void LaunchTCMP_f32_32x64(float *src, uint8_t *dst, void *stream);
-void LaunchTCMP_f32_128x128(float *src, uint8_t *dst, void *stream);
-void LaunchTCMP_i32_16x32(int32_t *src, uint8_t *dst, void *stream);
-void LaunchTCMP_i32_32x32(int32_t *src, uint8_t *dst, void *stream);
-void LaunchTCMP_i32_32x64_valid32x64(int32_t *src, uint8_t *dst, void *stream);
-void LaunchTCMP_f32_7x448(float *src, uint8_t *dst, void *stream);
-void LaunchTCMP_f32_256x16(float *src, uint8_t *dst, void *stream);
-void LaunchTCMP_i32_31x128(int32_t *src, uint8_t *dst, void *stream);
-void LaunchTCMP_f16_32x128(uint16_t *src, uint8_t *dst, void *stream);
-void LaunchTCMP_i16_32x128(int16_t *src, uint8_t *dst, void *stream);
+void LaunchTCMP_f32_1x64(float* src, uint8_t* dst, void* stream);
+void LaunchTCMP_f32_4x64(float* src, uint8_t* dst, void* stream);
+void LaunchTCMP_f32_8x64(float* src, uint8_t* dst, void* stream);
+void LaunchTCMP_f32_32x64(float* src, uint8_t* dst, void* stream);
+void LaunchTCMP_f32_128x128(float* src, uint8_t* dst, void* stream);
+void LaunchTCMP_i32_16x32(int32_t* src, uint8_t* dst, void* stream);
+void LaunchTCMP_i32_32x32(int32_t* src, uint8_t* dst, void* stream);
+void LaunchTCMP_i32_32x64_valid32x64(int32_t* src, uint8_t* dst, void* stream);
+void LaunchTCMP_f32_7x448(float* src, uint8_t* dst, void* stream);
+void LaunchTCMP_f32_256x16(float* src, uint8_t* dst, void* stream);
+void LaunchTCMP_i32_31x128(int32_t* src, uint8_t* dst, void* stream);
+void LaunchTCMP_f16_32x128(uint16_t* src, uint8_t* dst, void* stream);
+void LaunchTCMP_i16_32x128(int16_t* src, uint8_t* dst, void* stream);
 
 struct TestCase {
-    const char *name;
-    void (*launch)(void *, void *, void *);  // src, dst, stream
-    size_t      rows;       // allocated tile rows
-    size_t      cols;       // allocated tile cols
-    size_t      validRows;  // effective computation rows  (<= rows)
-    size_t      validCols;  // effective computation cols  (<= cols)
-    size_t      srcElemSize; // bytes per source element
-    size_t      dstElemSize; // bytes per destination element
+    const char* name;
+    void (*launch)(void*, void*, void*); // src, dst, stream
+    size_t rows;                         // allocated tile rows
+    size_t cols;                         // allocated tile cols
+    size_t validRows;                    // effective computation rows  (<= rows)
+    size_t validCols;                    // effective computation cols  (<= cols)
+    size_t srcElemSize;                  // bytes per source element
+    size_t dstElemSize;                  // bytes per destination element
 };
 
-static size_t GetDstElemCount(const TestCase &tc) {
+static size_t GetDstElemCount(const TestCase& tc)
+{
     if (tc.srcElemSize == sizeof(float) || tc.srcElemSize == sizeof(int32_t)) {
         const size_t logicalElems = tc.validRows * tc.validCols;
         const size_t repeatElm = 256 / tc.srcElemSize;
@@ -61,31 +62,41 @@ static size_t GetDstElemCount(const TestCase &tc) {
 }
 
 static const TestCase kCases[] = {
-    {"f32_1x64",              (void (*)(void*,void*,void*))LaunchTCMP_f32_1x64,              1,   64,   1,   64,  sizeof(float),    sizeof(uint8_t)},
-    {"f32_4x64",              (void (*)(void*,void*,void*))LaunchTCMP_f32_4x64,              4,   64,   4,   64,  sizeof(float),    sizeof(uint8_t)},
-    {"f32_8x64",              (void (*)(void*,void*,void*))LaunchTCMP_f32_8x64,              8,   64,   8,   64,  sizeof(float),    sizeof(uint8_t)},
-    {"f32_32x64",             (void (*)(void*,void*,void*))LaunchTCMP_f32_32x64,             32,  64,   32,  64,  sizeof(float),    sizeof(uint8_t)},
-    {"f32_128x128",           (void (*)(void*,void*,void*))LaunchTCMP_f32_128x128,           128, 128,  128, 128, sizeof(float),    sizeof(uint8_t)},
-    {"i32_16x32",             (void (*)(void*,void*,void*))LaunchTCMP_i32_16x32,             16,  32,   16,  32,  sizeof(int32_t),  sizeof(uint8_t)},
-    {"i32_32x32",             (void (*)(void*,void*,void*))LaunchTCMP_i32_32x32,             32,  32,   32,  32,  sizeof(int32_t),  sizeof(uint8_t)},
-    {"i32_32x64_valid32x64",  (void (*)(void*,void*,void*))LaunchTCMP_i32_32x64_valid32x64,  64,  64,   32,  64,  sizeof(int32_t),  sizeof(uint8_t)},
-    {"f32_7x448",             (void (*)(void*,void*,void*))LaunchTCMP_f32_7x448,             7,   448,  7,   448, sizeof(float),    sizeof(uint8_t)},
-    {"f32_256x16",            (void (*)(void*,void*,void*))LaunchTCMP_f32_256x16,            256, 16,   256, 16,  sizeof(float),    sizeof(uint8_t)},
-    {"i32_31x128",            (void (*)(void*,void*,void*))LaunchTCMP_i32_31x128,            31,  128,  31,  128, sizeof(int32_t),  sizeof(uint8_t)},
-    {"f16_32x128",            (void (*)(void*,void*,void*))LaunchTCMP_f16_32x128,            32,  128,  32,  128, sizeof(uint16_t), sizeof(uint8_t)},
-    {"i16_32x128",            (void (*)(void*,void*,void*))LaunchTCMP_i16_32x128,            32,  128,  32,  128, sizeof(int16_t),  sizeof(uint8_t)},
+    {"f32_1x64", (void (*)(void*, void*, void*))LaunchTCMP_f32_1x64, 1, 64, 1, 64, sizeof(float), sizeof(uint8_t)},
+    {"f32_4x64", (void (*)(void*, void*, void*))LaunchTCMP_f32_4x64, 4, 64, 4, 64, sizeof(float), sizeof(uint8_t)},
+    {"f32_8x64", (void (*)(void*, void*, void*))LaunchTCMP_f32_8x64, 8, 64, 8, 64, sizeof(float), sizeof(uint8_t)},
+    {"f32_32x64", (void (*)(void*, void*, void*))LaunchTCMP_f32_32x64, 32, 64, 32, 64, sizeof(float), sizeof(uint8_t)},
+    {"f32_128x128", (void (*)(void*, void*, void*))LaunchTCMP_f32_128x128, 128, 128, 128, 128, sizeof(float),
+     sizeof(uint8_t)},
+    {"i32_16x32", (void (*)(void*, void*, void*))LaunchTCMP_i32_16x32, 16, 32, 16, 32, sizeof(int32_t),
+     sizeof(uint8_t)},
+    {"i32_32x32", (void (*)(void*, void*, void*))LaunchTCMP_i32_32x32, 32, 32, 32, 32, sizeof(int32_t),
+     sizeof(uint8_t)},
+    {"i32_32x64_valid32x64", (void (*)(void*, void*, void*))LaunchTCMP_i32_32x64_valid32x64, 64, 64, 32, 64,
+     sizeof(int32_t), sizeof(uint8_t)},
+    {"f32_7x448", (void (*)(void*, void*, void*))LaunchTCMP_f32_7x448, 7, 448, 7, 448, sizeof(float), sizeof(uint8_t)},
+    {"f32_256x16", (void (*)(void*, void*, void*))LaunchTCMP_f32_256x16, 256, 16, 256, 16, sizeof(float),
+     sizeof(uint8_t)},
+    {"i32_31x128", (void (*)(void*, void*, void*))LaunchTCMP_i32_31x128, 31, 128, 31, 128, sizeof(int32_t),
+     sizeof(uint8_t)},
+    {"f16_32x128", (void (*)(void*, void*, void*))LaunchTCMP_f16_32x128, 32, 128, 32, 128, sizeof(uint16_t),
+     sizeof(uint8_t)},
+    {"i16_32x128", (void (*)(void*, void*, void*))LaunchTCMP_i16_32x128, 32, 128, 32, 128, sizeof(int16_t),
+     sizeof(uint8_t)},
 };
 static constexpr size_t kNumCases = sizeof(kCases) / sizeof(kCases[0]);
 
-static int RunCase(const TestCase &tc, int deviceId, aclrtStream stream) {
+static int RunCase(const TestCase& tc, int deviceId, aclrtStream stream)
+{
     int rc = 0;
     const size_t srcElemCount = tc.rows * tc.cols;
     const size_t dstElemCount = GetDstElemCount(tc);
-    const size_t srcFileSize  = srcElemCount * tc.srcElemSize;
-    const size_t dstFileSize  = dstElemCount * tc.dstElemSize;
+    const size_t srcFileSize = srcElemCount * tc.srcElemSize;
+    const size_t dstFileSize = dstElemCount * tc.dstElemSize;
 
-    std::printf("[INFO] === case: %s (shape=%zux%zu, valid=%zux%zu) ===\n",
-                tc.name, tc.rows, tc.cols, tc.validRows, tc.validCols);
+    std::printf(
+        "[INFO] === case: %s (shape=%zux%zu, valid=%zux%zu) ===\n", tc.name, tc.rows, tc.cols, tc.validRows,
+        tc.validCols);
 
     // Per-case data directory
     std::string caseDir = std::string("./") + tc.name;
@@ -133,16 +144,17 @@ static int RunCase(const TestCase &tc, int deviceId, aclrtStream stream) {
     return rc;
 }
 
-int main(int argc, char *argv[]) {
+int main(int argc, char* argv[])
+{
     // Optional case filter: ./tcmps [case_name]
-    const char *caseFilter = (argc > 1) ? argv[1] : nullptr;
+    const char* caseFilter = (argc > 1) ? argv[1] : nullptr;
 
     int rc = 0;
     int deviceId = 0;
     aclrtStream stream = nullptr;
 
     aclInit(nullptr);
-    if (const char *envDevice = std::getenv("ACL_DEVICE_ID")) {
+    if (const char* envDevice = std::getenv("ACL_DEVICE_ID")) {
         deviceId = std::atoi(envDevice);
     }
     aclrtSetDevice(deviceId);

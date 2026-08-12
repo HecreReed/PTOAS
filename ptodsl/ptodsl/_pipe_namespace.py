@@ -31,12 +31,14 @@ def _infer_global_slot_size(gm_slot_tensor) -> int:
     value = unwrap_surface_value(gm_slot_tensor)
     tensor_type = value.type
     if not _pto.TensorViewType.isinstance(tensor_type):
-        raise TypeError(
-            "pipe.c2v/v2c expects gm_slot_tensor to be !pto.tensor_view"
-        )
+        raise TypeError("pipe.c2v/v2c expects gm_slot_tensor to be !pto.tensor_view")
 
     tensor_view_type = _pto.TensorViewType(tensor_type)
-    shape = tuple(surface_shape) if surface_shape is not None else tuple(tensor_view_type.shape)
+    shape = (
+        tuple(surface_shape)
+        if surface_shape is not None
+        else tuple(tensor_view_type.shape)
+    )
     if any(dim < 0 for dim in shape):
         raise ValueError(
             "pipe.c2v/v2c cannot infer slot_size from a dynamic gm_slot_tensor shape"
@@ -47,7 +49,9 @@ def _infer_global_slot_size(gm_slot_tensor) -> int:
     return count * _element_bytewidth(tensor_view_type.element_type)
 
 
-def _infer_unambiguous_global_slot_size(gm_slot_tensor, *, nosplit, context: str) -> int:
+def _infer_unambiguous_global_slot_size(
+    gm_slot_tensor, *, nosplit, context: str
+) -> int:
     if nosplit is True:
         return _infer_global_slot_size(gm_slot_tensor)
     raise TypeError(
@@ -80,7 +84,9 @@ def _normalize_result_type(value, *, context: str):
 def _normalize_valid_shape(valid_shape, *, valid_row, valid_col):
     if valid_shape is not None:
         if valid_row is not None or valid_col is not None:
-            raise TypeError("pipe.pop(...) accepts either valid_shape or valid_row/valid_col, not both")
+            raise TypeError(
+                "pipe.pop(...) accepts either valid_shape or valid_row/valid_col, not both"
+            )
         if len(valid_shape) == 1:
             valid_row, valid_col = 1, valid_shape[0]
         elif len(valid_shape) == 2:
@@ -88,7 +94,9 @@ def _normalize_valid_shape(valid_shape, *, valid_row, valid_col):
         else:
             raise TypeError("pipe.pop(valid_shape=...) expects one or two dimensions")
     if (valid_row is None) != (valid_col is None):
-        raise TypeError("pipe.pop(...) requires valid_row and valid_col to be provided together")
+        raise TypeError(
+            "pipe.pop(...) requires valid_row and valid_col to be provided together"
+        )
     if valid_row is None:
         return None, None
     return (
@@ -175,7 +183,9 @@ class _PipeSurface:
 
     def push(self, entry, split=0):
         if self._descriptor.direction == "both":
-            raise TypeError("bidirectional local pipes do not have an unambiguous push direction")
+            raise TypeError(
+                "bidirectional local pipes do not have an unambiguous push direction"
+            )
         split = _as_int(split, context="pipe.push(..., split=...)")
         if entry is None:
             raise TypeError("push() requires an entry value")
@@ -185,13 +195,25 @@ class _PipeSurface:
         else:
             _pto.TPushToAicOp(entry_value, split, id=self.id)
 
-    def pop(self, split=0, result_type=None, *, valid_shape=None, valid_row=None, valid_col=None):
+    def pop(
+        self,
+        split=0,
+        result_type=None,
+        *,
+        valid_shape=None,
+        valid_row=None,
+        valid_col=None,
+    ):
         if self._descriptor.direction == "both":
-            raise TypeError("bidirectional local pipes do not have an unambiguous pop direction")
+            raise TypeError(
+                "bidirectional local pipes do not have an unambiguous pop direction"
+            )
         split = _as_int(split, context="pipe.pop(..., split=...)")
         if result_type is None:
             result_type = self.entry_type
-        result_type = _normalize_result_type(result_type, context="pipe.pop(..., result_type=...)")
+        result_type = _normalize_result_type(
+            result_type, context="pipe.pop(..., result_type=...)"
+        )
         if result_type is None:
             raise TypeError("pop() requires result_type for local/tile-entry pipes")
         valid_row, valid_col = _normalize_valid_shape(
@@ -207,7 +229,9 @@ class _PipeSurface:
 
     def free(self, entry=None, split=0):
         if self._descriptor.direction == "both":
-            raise TypeError("bidirectional local pipes do not have an unambiguous free direction")
+            raise TypeError(
+                "bidirectional local pipes do not have an unambiguous free direction"
+            )
         split = _as_int(split, context="pipe.free(..., split=...)")
         if self._descriptor.gm_slot_tensor is not None and entry is None:
             raise TypeError("free() requires an entry value for global-entry pipes")
@@ -254,7 +278,9 @@ class _PipeSurface:
         if desc.direction in ("v2c", "both"):
             init_kwargs["v2c_consumer_buf"] = desc.v2c_consumer_buf
 
-        init_kwargs = {key: value for key, value in init_kwargs.items() if value is not None}
+        init_kwargs = {
+            key: value for key, value in init_kwargs.items() if value is not None
+        }
 
         if side == "cube":
             _pto.AicInitializePipeOp(
@@ -288,7 +314,9 @@ class _PipeNamespace:
         entry_type = None
         if slot_size is None:
             if gm_slot_tensor is None:
-                raise TypeError(f"pipe.{direction}(...) requires slot_size when gm_slot_tensor is not provided")
+                raise TypeError(
+                    f"pipe.{direction}(...) requires slot_size when gm_slot_tensor is not provided"
+                )
             slot_size = _infer_unambiguous_global_slot_size(
                 gm_slot_tensor,
                 nosplit=nosplit,
@@ -296,14 +324,22 @@ class _PipeNamespace:
             )
         if gm_slot_tensor is not None:
             if consumer_buf is not None:
-                raise TypeError(f"pipe.{direction}(...) does not accept consumer_buf when gm_slot_tensor is provided")
+                raise TypeError(
+                    f"pipe.{direction}(...) does not accept consumer_buf when gm_slot_tensor is provided"
+                )
             if gm_slot_buffer is not None:
-                raise TypeError(f"pipe.{direction}(...) does not accept gm_slot_buffer when gm_slot_tensor is provided")
+                raise TypeError(
+                    f"pipe.{direction}(...) does not accept gm_slot_buffer when gm_slot_tensor is provided"
+                )
             if local_slot_num is not None:
-                raise TypeError(f"pipe.{direction}(...) does not accept local_slot_num when gm_slot_tensor is provided")
+                raise TypeError(
+                    f"pipe.{direction}(...) does not accept local_slot_num when gm_slot_tensor is provided"
+                )
             entry_type = unwrap_surface_value(gm_slot_tensor).type
         elif consumer_buf is None:
-            raise TypeError(f"pipe.{direction}(...) requires consumer_buf for local pipes")
+            raise TypeError(
+                f"pipe.{direction}(...) requires consumer_buf for local pipes"
+            )
         descriptor = _PipeDescriptor(
             kind="global" if gm_slot_tensor is not None else "local",
             direction=direction,
@@ -312,8 +348,12 @@ class _PipeNamespace:
             entry_type=entry_type,
             gm_slot_tensor=_normalize_entry_value(gm_slot_tensor),
             gm_slot_buffer=_normalize_entry_value(gm_slot_buffer),
-            c2v_consumer_buf=_normalize_entry_value(consumer_buf) if direction == "c2v" else None,
-            v2c_consumer_buf=_normalize_entry_value(consumer_buf) if direction == "v2c" else None,
+            c2v_consumer_buf=_normalize_entry_value(consumer_buf)
+            if direction == "c2v"
+            else None,
+            v2c_consumer_buf=_normalize_entry_value(consumer_buf)
+            if direction == "v2c"
+            else None,
             local_slot_num=None if local_slot_num is None else int(local_slot_num),
             nosplit=nosplit,
         )

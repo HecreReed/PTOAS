@@ -47,6 +47,7 @@ def build_module():
 
         m = Module.create()
         with InsertionPoint(m.body):
+
             @func.FuncOp.from_py_func(ptr_f32, ptr_f32)
             def run_partition(src, dst):
                 c0 = idx(0)
@@ -54,7 +55,9 @@ def build_module():
                 shape = [idx(1), idx(1), idx(16), idx(1024), idx(1024)]
                 strides = [idx(1048576), idx(1048576), idx(1048576), idx(1024), idx(1)]
 
-                base_view = pto.MakeTensorViewOp(tensor_view_ty, src, shape, strides).result
+                base_view = pto.MakeTensorViewOp(
+                    tensor_view_ty, src, shape, strides
+                ).result
 
                 part = pto.PartitionViewOp(
                     part_view_ty,
@@ -66,7 +69,9 @@ def build_module():
                 tile = pto.AllocTileOp(tile_buf_ty).result
                 pto.TLoadOp(None, part, tile)
 
-                dst_view = pto.MakeTensorViewOp(tensor_view_ty, dst, shape, strides).result
+                dst_view = pto.MakeTensorViewOp(
+                    tensor_view_ty, dst, shape, strides
+                ).result
                 dst_part = pto.PartitionViewOp(
                     part_view_ty,
                     dst_view,
@@ -83,4 +88,3 @@ def build_module():
 if __name__ == "__main__":
     module = build_module()
     print(module)
-

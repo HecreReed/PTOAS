@@ -8,8 +8,10 @@
 # See LICENSE in the root of the software repository for the full text of the License.
 
 # Merged vdiv compare.
-import os, sys
+import os
+import sys
 import numpy as np
+
 
 def _cmp(golden, output, dtype, eps, count=-1):
     if not os.path.exists(golden) or not os.path.exists(output):
@@ -19,6 +21,7 @@ def _cmp(golden, output, dtype, eps, count=-1):
     o = np.fromfile(output, dtype=dtype, **kw)
     return g.shape == o.shape and np.allclose(g, o, atol=eps, rtol=eps, equal_nan=True)
 
+
 def _cmpeq(golden, output, dtype):
     if not os.path.exists(golden) or not os.path.exists(output):
         return False
@@ -26,36 +29,48 @@ def _cmpeq(golden, output, dtype):
     o = np.fromfile(output, dtype=dtype)
     return g.shape == o.shape and np.array_equal(g, o)
 
+
 def main():
     strict = os.getenv("COMPARE_STRICT", "1") != "0"
     failed = []
-    if not (_cmp("golden_v3.bin","v3.bin",np.float32,1e-4,-1)):
-        failed.append('f32')
-        print('[ERROR] compare failed: f32')
+    if not (_cmp("golden_v3.bin", "v3.bin", np.float32, 1e-4, -1)):
+        failed.append("f32")
+        print("[ERROR] compare failed: f32")
     else:
-        print('[INFO] f32: passed')
-    if not (_cmp("golden_v3_f16.bin","v3_f16.bin",np.float16,5e-3,1024)):
-        failed.append('f16')
-        print('[ERROR] compare failed: f16')
+        print("[INFO] f32: passed")
+    if not (_cmp("golden_v3_f16.bin", "v3_f16.bin", np.float16, 5e-3, 1024)):
+        failed.append("f16")
+        print("[ERROR] compare failed: f16")
     else:
-        print('[INFO] f16: passed')
-    if not (_cmp("golden_v3_f32_exceptional.bin","v3_f32_exceptional.bin",np.float32,1e-4,-1)):
-        failed.append('f32_exceptional')
-        print('[ERROR] compare failed: f32_exceptional')
+        print("[INFO] f16: passed")
+    if not (
+        _cmp(
+            "golden_v3_f32_exceptional.bin",
+            "v3_f32_exceptional.bin",
+            np.float32,
+            1e-4,
+            -1,
+        )
+    ):
+        failed.append("f32_exceptional")
+        print("[ERROR] compare failed: f32_exceptional")
     else:
-        print('[INFO] f32_exceptional: passed')
-    if not (_cmp("golden_v3_tail.bin","v3_tail.bin",np.float32,1e-4,1000)):
-        failed.append('tail')
-        print('[ERROR] compare failed: tail')
+        print("[INFO] f32_exceptional: passed")
+    if not (_cmp("golden_v3_tail.bin", "v3_tail.bin", np.float32, 1e-4, 1000)):
+        failed.append("tail")
+        print("[ERROR] compare failed: tail")
     else:
-        print('[INFO] tail: passed')
+        print("[INFO] tail: passed")
     if failed:
         if strict:
             print(f"[ERROR] {len(failed)} variant(s) failed: {','.join(failed)}")
             sys.exit(2)
-        print(f"[WARN] {len(failed)} variant(s) failed (non-gating): {','.join(failed)}")
+        print(
+            f"[WARN] {len(failed)} variant(s) failed (non-gating): {','.join(failed)}"
+        )
         return
     print("[INFO] compare passed (all 4 variants)")
+
 
 if __name__ == "__main__":
     main()

@@ -14,17 +14,18 @@
 
 // ========== Smoke case: float, 64x16, no expansion (inplace single buffer) ==========
 
-extern "C" __global__ AICORE void TFILLPAD_INPLACE_f32_64x16_noexpand(__gm__ float *buf);
-extern "C" __global__ AICORE void TFILLPAD_INPLACE_f32_260x16_noexpand(__gm__ float *buf);
+extern "C" __global__ AICORE void TFILLPAD_INPLACE_f32_64x16_noexpand(__gm__ float* buf);
+extern "C" __global__ AICORE void TFILLPAD_INPLACE_f32_260x16_noexpand(__gm__ float* buf);
 
-void LaunchTFILLPAD_INPLACE_f32_260x16_noexpand(float *buf, float *dummy, void *stream) {
+void LaunchTFILLPAD_INPLACE_f32_260x16_noexpand(float* buf, float* dummy, void* stream)
+{
     // Inplace kernel: single buffer, src == dst physically
     // dummy parameter ignored, only buf is used
-    TFILLPAD_INPLACE_f32_260x16_noexpand<<<1, nullptr, stream>>>((__gm__ float *)buf);
+    TFILLPAD_INPLACE_f32_260x16_noexpand<<<1, nullptr, stream>>>((__gm__ float*)buf);
 }
 
-
-void LaunchTFILLPAD_INPLACE_f32_64x16_noexpand(float *buf, float *dummy, void *stream) {
+void LaunchTFILLPAD_INPLACE_f32_64x16_noexpand(float* buf, float* dummy, void* stream)
+{
     (void)dummy;
-    TFILLPAD_INPLACE_f32_64x16_noexpand<<<1, nullptr, stream>>>((__gm__ float *)buf);
+    TFILLPAD_INPLACE_f32_64x16_noexpand<<<1, nullptr, stream>>>((__gm__ float*)buf);
 }

@@ -19,6 +19,8 @@ ROWS = 32
 COLS = 32
 SEED = 19
 LANES = 64
+
+
 def generate(output_dir: Path, seed: int) -> None:
     rng = np.random.default_rng(seed)
     v1 = rng.uniform(-8.0, 8.0, size=(ROWS, COLS)).astype(np.float32)
@@ -29,7 +31,7 @@ def generate(output_dir: Path, seed: int) -> None:
     flat_out = golden_v2.reshape(-1)
     flat_out_u32 = flat_out.view(np.uint32)
     for offset in range(0, flat_in.size, LANES):
-        chunk = flat_in[offset:offset + LANES]
+        chunk = flat_in[offset : offset + LANES]
         idx = int(np.argmax(chunk))
         flat_out[offset] = chunk[idx]
         flat_out_u32[offset + 1] = np.uint32(idx)

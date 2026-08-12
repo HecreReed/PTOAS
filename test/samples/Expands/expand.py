@@ -52,7 +52,9 @@ def build():
                 pto.TExpandsOp(scale, tb1)
 
                 # Using constant c32 for subview size
-                sv1 = pto.PartitionViewOp(tile_view_32, tv1, offsets=[c0, c0], sizes=[c32, c32]).result
+                sv1 = pto.PartitionViewOp(
+                    tile_view_32, tv1, offsets=[c0, c0], sizes=[c32, c32]
+                ).result
                 pto.TStoreOp(None, tb1, sv1)
 
                 func.ReturnOp([])

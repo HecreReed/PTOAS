@@ -65,8 +65,8 @@
 namespace rope_cce {
 
 // Vector lane counts (elements per 256-byte register).
-constexpr uint16_t VL_F32 = 64;   // fp32 / i32
-constexpr uint16_t VL_F16 = 128;  // fp16 / bf16 / i16
+constexpr uint16_t VL_F32 = 64;  // fp32 / i32
+constexpr uint16_t VL_F16 = 128; // fp16 / bf16 / i16
 // CCE 32-byte hardware block size (used for aligning strided UB offsets).
 constexpr uint16_t BLOCK_BYTE_32 = 32;
 
@@ -89,9 +89,9 @@ namespace simd_inlined {
 // vcvt_*_to_fp32_*even (PART_EVEN). Using vcvt_odd after UNPK_B16
 // would extract the zero/padding lanes and produce garbage.
 template <typename F16Dst, typename U16Src>
-ROPE_SIMD_FN void vlds_unpk_b16(F16Dst &dst, U16Src src, int32_t off)
+ROPE_SIMD_FN void vlds_unpk_b16(F16Dst& dst, U16Src src, int32_t off)
 {
-    vlds((vector_f16 &)dst, (__ubuf__ half *)src, off, UNPK_B16);
+    vlds((vector_f16&)dst, (__ubuf__ half*)src, off, UNPK_B16);
 }
 
 // Load 128 b16 values densely (NORM mode). All 128 halfword positions
@@ -99,17 +99,17 @@ ROPE_SIMD_FN void vlds_unpk_b16(F16Dst &dst, U16Src src, int32_t off)
 // This is the load used by ComputeF16, which stays entirely in fp16
 // arithmetic and does not widen to fp32 (no vcvt call needed).
 template <typename F16Dst, typename U16Src>
-ROPE_SIMD_FN void vlds_norm_b16(F16Dst &dst, U16Src src, int32_t off)
+ROPE_SIMD_FN void vlds_norm_b16(F16Dst& dst, U16Src src, int32_t off)
 {
-    vlds((vector_f16 &)dst, (__ubuf__ half *)src, off, NORM);
+    vlds((vector_f16&)dst, (__ubuf__ half*)src, off, NORM);
 }
 
 // Load 64 bf16 values from UB into a 128-lane vector register using
 // UNPK_B16 mode. Same even-lane-only placement as vlds_unpk_b16 above.
 template <typename BF16Dst, typename U16Src>
-ROPE_SIMD_FN void vlds_unpk_b16_bf16(BF16Dst &dst, U16Src src, int32_t off)
+ROPE_SIMD_FN void vlds_unpk_b16_bf16(BF16Dst& dst, U16Src src, int32_t off)
 {
-    vlds((vector_bf16 &)dst, (__ubuf__ bfloat16_t *)src, off, UNPK_B16);
+    vlds((vector_bf16&)dst, (__ubuf__ bfloat16_t*)src, off, UNPK_B16);
 }
 
 // Extract fp32 values from ODD halfword positions [1, 3, 5, ..., 127].
@@ -121,9 +121,9 @@ ROPE_SIMD_FN void vlds_unpk_b16_bf16(BF16Dst &dst, U16Src src, int32_t off)
 // lanes (e.g. via DINTLV_B16 x2 + vintlv x2 double-width loads, as in
 // mx_quant) needs BOTH vcvt_even and vcvt_odd to widen the full register.
 template <typename F32Dst, typename F16Src>
-ROPE_SIMD_FN void vcvt_fp16_to_fp32_odd(F32Dst &dst, F16Src src, MaskReg mask)
+ROPE_SIMD_FN void vcvt_fp16_to_fp32_odd(F32Dst& dst, F16Src src, MaskReg mask)
 {
-    vcvt((vector_f32 &)dst, (vector_f16 &)src, mask, PART_ODD, MODE_ZEROING);
+    vcvt((vector_f32&)dst, (vector_f16&)src, mask, PART_ODD, MODE_ZEROING);
 }
 
 // Extract fp32 values from EVEN halfword positions [0, 2, 4, ..., 126].
@@ -131,18 +131,18 @@ ROPE_SIMD_FN void vcvt_fp16_to_fp32_odd(F32Dst &dst, F16Src src, MaskReg mask)
 // vlds_unpk_b16 places 64 valid b16 elements at even positions,
 // vcvt_even recovers all 64 into a fp32 vector register.
 template <typename F32Dst, typename F16Src>
-ROPE_SIMD_FN void vcvt_fp16_to_fp32_even(F32Dst &dst, F16Src src, MaskReg mask)
+ROPE_SIMD_FN void vcvt_fp16_to_fp32_even(F32Dst& dst, F16Src src, MaskReg mask)
 {
-    vcvt((vector_f32 &)dst, (vector_f16 &)src, mask, PART_EVEN, MODE_ZEROING);
+    vcvt((vector_f32&)dst, (vector_f16&)src, mask, PART_EVEN, MODE_ZEROING);
 }
 
 // Extract fp32 values from EVEN halfword positions of a bf16 register.
 // Pairs with vlds_unpk_b16_bf16 (UNPK_B16 load). Same even-only
 // semantics as vcvt_fp16_to_fp32_even; no _odd counterpart needed.
 template <typename F32Dst, typename BF16Src>
-ROPE_SIMD_FN void vcvt_bf16_to_fp32_even(F32Dst &dst, BF16Src src, MaskReg mask)
+ROPE_SIMD_FN void vcvt_bf16_to_fp32_even(F32Dst& dst, BF16Src src, MaskReg mask)
 {
-    vcvt((vector_f32 &)dst, (vector_bf16 &)src, mask, PART_EVEN, MODE_ZEROING);
+    vcvt((vector_f32&)dst, (vector_bf16&)src, mask, PART_EVEN, MODE_ZEROING);
 }
 
 // --- Narrowing conversions: fp32 → fp16 / fp32 → bf16 ---
@@ -160,15 +160,15 @@ ROPE_SIMD_FN void vcvt_bf16_to_fp32_even(F32Dst &dst, BF16Src src, MaskReg mask)
 // ComputeF32 stays entirely in fp32.  It is kept in the shim for
 // completeness (useful when porting a fp32-accum → fp16-output kernel).
 template <typename F16Dst, typename F32Src>
-ROPE_SIMD_FN void vcvt_fp32_to_fp16_narrow(F16Dst &dst, F32Src src, MaskReg mask)
+ROPE_SIMD_FN void vcvt_fp32_to_fp16_narrow(F16Dst& dst, F32Src src, MaskReg mask)
 {
-    vcvt((vector_f16 &)dst, (vector_f32 &)src, mask, ROUND_R, RS_DISABLE, PART_EVEN, MODE_ZEROING);
+    vcvt((vector_f16&)dst, (vector_f32&)src, mask, ROUND_R, RS_DISABLE, PART_EVEN, MODE_ZEROING);
 }
 
 template <typename BF16Dst, typename F32Src>
-ROPE_SIMD_FN void vcvt_f32_to_bf16_narrow(BF16Dst &dst, F32Src src, MaskReg mask)
+ROPE_SIMD_FN void vcvt_f32_to_bf16_narrow(BF16Dst& dst, F32Src src, MaskReg mask)
 {
-    vcvt((vector_bf16 &)dst, (vector_f32 &)src, mask, ROUND_R, RS_DISABLE, PART_EVEN, MODE_ZEROING);
+    vcvt((vector_bf16&)dst, (vector_f32&)src, mask, ROUND_R, RS_DISABLE, PART_EVEN, MODE_ZEROING);
 }
 
 // --- Arithmetic: element-wise vmul / vadd / vsub in fp16 or fp32 ---
@@ -180,39 +180,39 @@ ROPE_SIMD_FN void vcvt_f32_to_bf16_narrow(BF16Dst &dst, F32Src src, MaskReg mask
 // `MODE_ZEROING` writes 0 to inactive lanes (vs. `MODE_MERGE` which
 // keeps the prior register bits).  For RoPE we always use `MODE_ZEROING`.
 template <typename F32Dst, typename F32SrcA, typename F32SrcB>
-ROPE_SIMD_FN void vmul_f32(F32Dst &dst, F32SrcA a, F32SrcB b, MaskReg mask)
+ROPE_SIMD_FN void vmul_f32(F32Dst& dst, F32SrcA a, F32SrcB b, MaskReg mask)
 {
-    vmul((vector_f32 &)dst, (vector_f32 &)a, (vector_f32 &)b, mask, MODE_ZEROING);
+    vmul((vector_f32&)dst, (vector_f32&)a, (vector_f32&)b, mask, MODE_ZEROING);
 }
 
 template <typename F16Dst, typename F16SrcA, typename F16SrcB>
-ROPE_SIMD_FN void vmul_f16(F16Dst &dst, F16SrcA a, F16SrcB b, MaskReg mask)
+ROPE_SIMD_FN void vmul_f16(F16Dst& dst, F16SrcA a, F16SrcB b, MaskReg mask)
 {
-    vmul((vector_f16 &)dst, (vector_f16 &)a, (vector_f16 &)b, mask, MODE_ZEROING);
+    vmul((vector_f16&)dst, (vector_f16&)a, (vector_f16&)b, mask, MODE_ZEROING);
 }
 
 template <typename F32Dst, typename F32SrcA, typename F32SrcB>
-ROPE_SIMD_FN void vadd_f32(F32Dst &dst, F32SrcA a, F32SrcB b, MaskReg mask)
+ROPE_SIMD_FN void vadd_f32(F32Dst& dst, F32SrcA a, F32SrcB b, MaskReg mask)
 {
-    vadd((vector_f32 &)dst, (vector_f32 &)a, (vector_f32 &)b, mask, MODE_ZEROING);
+    vadd((vector_f32&)dst, (vector_f32&)a, (vector_f32&)b, mask, MODE_ZEROING);
 }
 
 template <typename F16Dst, typename F16SrcA, typename F16SrcB>
-ROPE_SIMD_FN void vadd_f16(F16Dst &dst, F16SrcA a, F16SrcB b, MaskReg mask)
+ROPE_SIMD_FN void vadd_f16(F16Dst& dst, F16SrcA a, F16SrcB b, MaskReg mask)
 {
-    vadd((vector_f16 &)dst, (vector_f16 &)a, (vector_f16 &)b, mask, MODE_ZEROING);
+    vadd((vector_f16&)dst, (vector_f16&)a, (vector_f16&)b, mask, MODE_ZEROING);
 }
 
 template <typename F32Dst, typename F32SrcA, typename F32SrcB>
-ROPE_SIMD_FN void vsub_f32(F32Dst &dst, F32SrcA a, F32SrcB b, MaskReg mask)
+ROPE_SIMD_FN void vsub_f32(F32Dst& dst, F32SrcA a, F32SrcB b, MaskReg mask)
 {
-    vsub((vector_f32 &)dst, (vector_f32 &)a, (vector_f32 &)b, mask, MODE_ZEROING);
+    vsub((vector_f32&)dst, (vector_f32&)a, (vector_f32&)b, mask, MODE_ZEROING);
 }
 
 template <typename F16Dst, typename F16SrcA, typename F16SrcB>
-ROPE_SIMD_FN void vsub_f16(F16Dst &dst, F16SrcA a, F16SrcB b, MaskReg mask)
+ROPE_SIMD_FN void vsub_f16(F16Dst& dst, F16SrcA a, F16SrcB b, MaskReg mask)
 {
-    vsub((vector_f16 &)dst, (vector_f16 &)a, (vector_f16 &)b, mask, MODE_ZEROING);
+    vsub((vector_f16&)dst, (vector_f16&)a, (vector_f16&)b, mask, MODE_ZEROING);
 }
 
 // --- In-register interleave / deinterleave ---
@@ -237,13 +237,13 @@ ROPE_SIMD_FN void vsub_f16(F16Dst &dst, F16SrcA a, F16SrcB b, MaskReg mask)
 // The "_x2" suffix in these wrappers reflects that the underlying CCE
 // `vintlv` / `vdintlv` intrinsics always produce CONSUMER two outputs.
 template <typename Dst, typename Src>
-ROPE_SIMD_FN void vdintlv_x2(Dst &d0, Dst &d1, Src s0, Src s1)
+ROPE_SIMD_FN void vdintlv_x2(Dst& d0, Dst& d1, Src s0, Src s1)
 {
     vdintlv(d0, d1, s0, s1);
 }
 
 template <typename Dst, typename Src>
-ROPE_SIMD_FN void vintlv_x2(Dst &d0, Dst &d1, Src s0, Src s1)
+ROPE_SIMD_FN void vintlv_x2(Dst& d0, Dst& d1, Src s0, Src s1)
 {
     vintlv(d0, d1, s0, s1);
 }
@@ -259,15 +259,15 @@ ROPE_SIMD_FN void vintlv_x2(Dst &d0, Dst &d1, Src s0, Src s1)
 // in INTERLEAVE mode.  A single broadcast is much more efficient than
 // loading a pre-filled constant tensor from UB.
 template <typename F32Dst>
-ROPE_SIMD_FN void vbr_f32(F32Dst &dst, float val)
+ROPE_SIMD_FN void vbr_f32(F32Dst& dst, float val)
 {
-    vbr((vector_f32 &)dst, val);
+    vbr((vector_f32&)dst, val);
 }
 
 template <typename F16Dst>
-ROPE_SIMD_FN void vbr_f16(F16Dst &dst, half val)
+ROPE_SIMD_FN void vbr_f16(F16Dst& dst, half val)
 {
-    vbr((vector_f16 &)dst, val);
+    vbr((vector_f16&)dst, val);
 }
 
 // --- Mask construction: plt_b32 / plt_b16 ---
@@ -285,15 +285,9 @@ ROPE_SIMD_FN void vbr_f16(F16Dst &dst, half val)
 //
 // Usage: `cnt = min(remaining_elements, VL)` for the last partial block
 // of a D tile — otherwise full-block loads use cnt = VL directly.
-ROPE_CCE_INTERNAL MaskReg make_mask(uint32_t cnt)
-{
-    return plt_b32(cnt, POST_UPDATE);
-}
+ROPE_CCE_INTERNAL MaskReg make_mask(uint32_t cnt) { return plt_b32(cnt, POST_UPDATE); }
 
-ROPE_CCE_INTERNAL MaskReg make_mask_b16(uint32_t cnt)
-{
-    return plt_b16(cnt, POST_UPDATE);
-}
+ROPE_CCE_INTERNAL MaskReg make_mask_b16(uint32_t cnt) { return plt_b16(cnt, POST_UPDATE); }
 
 // --- Store operations: PK_B32 vs NORM_B16 vs NORM_B32 ---
 //
@@ -319,26 +313,26 @@ ROPE_CCE_INTERNAL MaskReg make_mask_b16(uint32_t cnt)
 template <typename F16Src, typename U16Dst>
 ROPE_SIMD_FN void vsts_pk_b32(F16Src src, U16Dst dst, int32_t off, MaskReg mask)
 {
-    vsts((vector_f16 &)src, (__ubuf__ half *)dst, off, PK_B32, mask);
+    vsts((vector_f16&)src, (__ubuf__ half*)dst, off, PK_B32, mask);
 }
 
 // `vsts_pk_b32_bf16`: USED by ComputeBf16 (narrowing fp32 → bf16 store).
 template <typename BF16Src, typename U16Dst>
 ROPE_SIMD_FN void vsts_pk_b32_bf16(BF16Src src, U16Dst dst, int32_t off, MaskReg mask)
 {
-    vsts((vector_bf16 &)src, (__ubuf__ bfloat16_t *)dst, off, PK_B32, mask);
+    vsts((vector_bf16&)src, (__ubuf__ bfloat16_t*)dst, off, PK_B32, mask);
 }
 
 template <typename F16Src, typename U16Dst>
 ROPE_SIMD_FN void vsts_norm_b16(F16Src src, U16Dst dst, int32_t off, MaskReg mask)
 {
-    vsts((vector_f16 &)src, (__ubuf__ half *)dst, off, NORM_B16, mask);
+    vsts((vector_f16&)src, (__ubuf__ half*)dst, off, NORM_B16, mask);
 }
 
 template <typename F32Src, typename U32Dst>
 ROPE_SIMD_FN void vsts_norm_b32(F32Src src, U32Dst dst, int32_t off, MaskReg mask)
 {
-    vsts((vector_f32 &)src, (__ubuf__ float *)dst, off, NORM_B32, mask);
+    vsts((vector_f32&)src, (__ubuf__ float*)dst, off, NORM_B32, mask);
 }
 
 // --- fp32 load: vlds_norm_b32 ---
@@ -349,13 +343,13 @@ ROPE_SIMD_FN void vsts_norm_b32(F32Src src, U32Dst dst, int32_t off, MaskReg mas
 //
 // PTO IR: pto.vlds {dist = "DIST_NORM_B32"}
 template <typename F32Dst, typename U32Src>
-ROPE_SIMD_FN void vlds_norm_b32(F32Dst &dst, U32Src src, int32_t off)
+ROPE_SIMD_FN void vlds_norm_b32(F32Dst& dst, U32Src src, int32_t off)
 {
-    vlds((vector_f32 &)dst, (__ubuf__ float *)src, off, NORM);
+    vlds((vector_f32&)dst, (__ubuf__ float*)src, off, NORM);
 }
 
-}
+} // namespace simd_inlined
 
-}
+} // namespace rope_cce
 
 #endif

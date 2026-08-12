@@ -31,7 +31,9 @@ def unsigned_pattern(size: int, salt: int) -> np.ndarray:
     return (values & np.uint64(0xFFFFFFFF)).astype(np.uint32)
 
 
-def product_halves(lhs: np.ndarray, rhs: np.ndarray, *, signed: bool) -> tuple[np.ndarray, np.ndarray]:
+def product_halves(
+    lhs: np.ndarray, rhs: np.ndarray, *, signed: bool
+) -> tuple[np.ndarray, np.ndarray]:
     if signed:
         product = lhs.astype(np.int64) * rhs.astype(np.int64)
         low = (product & np.int64(0xFFFFFFFF)).astype(np.uint32)
@@ -64,7 +66,9 @@ def generate(output_dir: Path) -> None:
     signed_low, signed_high = product_halves(signed_lhs, signed_rhs, signed=True)
     golden_low[[0, 63]] = signed_low[[0, 63]]
     golden_high[[0, 63]] = signed_high[[0, 63]]
-    unsigned_low, unsigned_high = product_halves(unsigned_lhs, unsigned_rhs, signed=False)
+    unsigned_low, unsigned_high = product_halves(
+        unsigned_lhs, unsigned_rhs, signed=False
+    )
     golden_low[SIGNED_LANES:] = unsigned_low
     golden_high[SIGNED_LANES:] = unsigned_high
 

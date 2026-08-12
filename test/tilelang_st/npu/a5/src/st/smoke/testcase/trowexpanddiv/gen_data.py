@@ -19,12 +19,22 @@ from cases import CASES
 from st_common import setup_case_rng, save_case_data
 
 # Inline validation for multi-input format (trowexpanddiv uses src0/src1/dst)
-REQUIRED_KEYS = {"name", "dtype", "src0_shape", "src0_valid_shape", "src1_shape",
-                 "src1_valid_shape", "dst_shape", "dst_valid_shape"}
+REQUIRED_KEYS = {
+    "name",
+    "dtype",
+    "src0_shape",
+    "src0_valid_shape",
+    "src1_shape",
+    "src1_valid_shape",
+    "dst_shape",
+    "dst_valid_shape",
+}
 for i, case in enumerate(CASES):
     missing = REQUIRED_KEYS - case.keys()
     if missing:
-        raise ValueError(f"cases[{i}] ({case.get('name', '?')}) missing keys: {missing}")
+        raise ValueError(
+            f"cases[{i}] ({case.get('name', '?')}) missing keys: {missing}"
+        )
 
 for case in CASES:
     setup_case_rng(case)
@@ -57,8 +67,9 @@ for case in CASES:
             # src1Col > 1: each src1 column broadcasts to dst_vc/src1_vc dst columns
             block_size = dst_vc // src1_vc
             for c in range(src1_vc):
-                golden[:dst_vr, c*block_size:(c+1)*block_size] = (
-                    input1[:src0_vr, c*block_size:(c+1)*block_size] // input2[:src1_vr, c:c+1]
+                golden[:dst_vr, c * block_size : (c + 1) * block_size] = (
+                    input1[:src0_vr, c * block_size : (c + 1) * block_size]
+                    // input2[:src1_vr, c : c + 1]
                 ).astype(dtype, copy=False)
     else:
         if src1_vc == 1:
@@ -69,8 +80,9 @@ for case in CASES:
             # src1Col > 1: each src1 column broadcasts to dst_vc/src1_vc dst columns
             block_size = dst_vc // src1_vc
             for c in range(src1_vc):
-                golden[:dst_vr, c*block_size:(c+1)*block_size] = (
-                    input1[:src0_vr, c*block_size:(c+1)*block_size] / input2[:src1_vr, c:c+1]
+                golden[:dst_vr, c * block_size : (c + 1) * block_size] = (
+                    input1[:src0_vr, c * block_size : (c + 1) * block_size]
+                    / input2[:src1_vr, c : c + 1]
                 ).astype(dtype, copy=False)
 
     save_case_data(case["name"], {"input1": input1, "input2": input2, "golden": golden})

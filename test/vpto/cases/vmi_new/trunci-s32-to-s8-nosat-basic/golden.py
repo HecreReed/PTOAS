@@ -39,22 +39,43 @@ def _build_inputs() -> np.ndarray:
     probes_i32 = np.array(
         [
             # In-range: NOSAT == SAT
-                0,     1,    -1,    42,   -42,   127,  -128,    64,
+            0,
+            1,
+            -1,
+            42,
+            -42,
+            127,
+            -128,
+            64,
             # Positive overflow: NOSAT != SAT
-              128,   200,   255,   256,   257,   511,   512,  1000,
+            128,
+            200,
+            255,
+            256,
+            257,
+            511,
+            512,
+            1000,
             # Negative overflow: NOSAT != SAT
-             -129,  -200,  -255,  -256,  -257,  -511,  -512, -1000,
+            -129,
+            -200,
+            -255,
+            -256,
+            -257,
+            -511,
+            -512,
+            -1000,
             # High-bit corners (Python ints; cast to int32)
-             0x7FFFFFFF,   # INT32_MAX  -> low byte 0xFF -> int8 -1
-            -0x80000000,   # INT32_MIN  -> low byte 0x00 -> int8  0
-             0x7FFFFF80,   #             -> low byte 0x80 -> int8 -128
-            -0x7FFFFF80,   #             -> low byte 0x80 -> int8 -128
-             0x0000FF80,   #             -> low byte 0x80 -> int8 -128
-            -0x000000FF,   #             -> low byte 0x01 -> int8  1
-             0x12345678,   #             -> low byte 0x78 -> int8 120
-            -0x12345678,   #             -> low byte 0x88 -> int8 -120
+            0x7FFFFFFF,  # INT32_MAX  -> low byte 0xFF -> int8 -1
+            -0x80000000,  # INT32_MIN  -> low byte 0x00 -> int8  0
+            0x7FFFFF80,  #             -> low byte 0x80 -> int8 -128
+            -0x7FFFFF80,  #             -> low byte 0x80 -> int8 -128
+            0x0000FF80,  #             -> low byte 0x80 -> int8 -128
+            -0x000000FF,  #             -> low byte 0x01 -> int8  1
+            0x12345678,  #             -> low byte 0x78 -> int8 120
+            -0x12345678,  #             -> low byte 0x88 -> int8 -120
         ],
-        dtype=np.int64,   # int32 range would overflow -0x80000000 as a Python literal
+        dtype=np.int64,  # int32 range would overflow -0x80000000 as a Python literal
     ).astype(np.int32)
     assert probes_i32.size == 32, f"probe count changed: {probes_i32.size}"
     src = np.tile(probes_i32, SRC_ELEMS // probes_i32.size).astype(np.int32)
@@ -81,7 +102,8 @@ def generate(output_dir: Path) -> None:
     if np.array_equal(golden, sat_ref):
         raise SystemExit(
             "[FATAL] NOSAT golden coincidentally equals SAT reference; "
-            "adjust probe set to include out-of-range inputs.")
+            "adjust probe set to include out-of-range inputs."
+        )
 
     dst_init = np.full(DST_ELEMS, 0xA5, dtype=np.uint8)
 

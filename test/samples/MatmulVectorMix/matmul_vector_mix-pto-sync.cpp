@@ -104,5 +104,3 @@ __global__ AICORE void matmul_vector_mix_kernel_2d(__gm__ float* v1, __gm__ floa
   pipe_barrier(PIPE_ALL);
   return;
 }
-
-

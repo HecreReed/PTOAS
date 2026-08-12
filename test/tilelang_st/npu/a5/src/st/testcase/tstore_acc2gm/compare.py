@@ -55,8 +55,14 @@ def main():
         if dst_layout == "nz2dn":
             # NZ2DN: golden is stored as [M, N] row-major; output is [N, M] DN col-major.
             # Read golden as [M, N], transpose to [N, M] to match kernel output layout.
-            golden = np.fromfile(os.path.join(name, "golden.bin"), dtype=dtype).reshape(M, N).T
-            output = np.fromfile(os.path.join(name, "output.bin"), dtype=dtype).reshape(N, M)
+            golden = (
+                np.fromfile(os.path.join(name, "golden.bin"), dtype=dtype)
+                .reshape(M, N)
+                .T
+            )
+            output = np.fromfile(os.path.join(name, "output.bin"), dtype=dtype).reshape(
+                N, M
+            )
             # Convert DN (col-major) back to ND (row-major) [M, N] for comparison
             # DN format stores data as col-major, so transpose gives row-major [M, N]
         elif dst_layout == "nz2nz":
@@ -69,8 +75,12 @@ def main():
             output = output_flat.reshape(M, N)
         else:
             # NZ2ND: output is [M, N] in row-major (ND) format
-            golden = np.fromfile(os.path.join(name, "golden.bin"), dtype=dtype).reshape(M, N)
-            output = np.fromfile(os.path.join(name, "output.bin"), dtype=dtype).reshape(M, N)
+            golden = np.fromfile(os.path.join(name, "golden.bin"), dtype=dtype).reshape(
+                M, N
+            )
+            output = np.fromfile(os.path.join(name, "output.bin"), dtype=dtype).reshape(
+                M, N
+            )
 
         # For bf16 stored as uint16, convert back to f32 for comparison
         dst_dtype_raw = case.get("dst_dtype_raw", None)

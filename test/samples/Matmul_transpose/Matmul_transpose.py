@@ -15,7 +15,16 @@ Reference:
   - pto-as/test/samples/MatMul/tmatmulk.py
 """
 
-from ptoas.mlir.ir import Context, Location, InsertionPoint, IndexType, IntegerType, F32Type, StringAttr, UnitAttr
+from ptoas.mlir.ir import (
+    Context,
+    Location,
+    InsertionPoint,
+    IndexType,
+    IntegerType,
+    F32Type,
+    StringAttr,
+    UnitAttr,
+)
 from ptoas.mlir.dialects import func, arith, scf, pto, builtin
 from ptoas.mlir.dialects.pto import TLOAD, TMOV_M2L, TMATMUL, TSTORE_ACC, EVENT_ID0
 
@@ -135,16 +144,16 @@ def build(
         )
 
         # 函数签名: (out, src0, src1, isAtranspose, isBtranspose)
-        fn_ty = func.FunctionType.get(
-            [ptr_out, ptr_src0, ptr_src1, i1, i1], []
-        )
+        fn_ty = func.FunctionType.get([ptr_out, ptr_src0, ptr_src1, i1, i1], [])
         with InsertionPoint(module.body):
             fn = func.FuncOp("RunTEXTRACT", fn_ty)
             fn.operation.attributes["pto.entry"] = UnitAttr.get(ctx)
             entry = fn.add_entry_block()
 
         with InsertionPoint(entry):
-            out_ptr, src0_ptr, src1_ptr, is_a_transpose, is_b_transpose = entry.arguments
+            out_ptr, src0_ptr, src1_ptr, is_a_transpose, is_b_transpose = (
+                entry.arguments
+            )
 
             c0 = _idx_const(0)
             c1 = _idx_const(1)

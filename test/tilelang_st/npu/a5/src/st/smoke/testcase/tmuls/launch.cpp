@@ -17,15 +17,15 @@ static constexpr float TMULS_SCALAR_F32 = 3.0f;
 
 // Case 0: f32 32x64
 
-extern "C" __global__ AICORE void TMULS_f32_32x64(__gm__ float *src, __gm__ float *dst, float scalar);
-extern "C" __global__ AICORE void TMULS_i16_15x192(__gm__ int16_t *src, __gm__ int16_t *dst, int16_t scalar);
+extern "C" __global__ AICORE void TMULS_f32_32x64(__gm__ float* src, __gm__ float* dst, float scalar);
+extern "C" __global__ AICORE void TMULS_i16_15x192(__gm__ int16_t* src, __gm__ int16_t* dst, int16_t scalar);
 
-void LaunchTMULS_f32_32x64(float *src, float *dst, void *stream) {
-    TMULS_f32_32x64<<<1, nullptr, stream>>>((__gm__ float *)src, (__gm__ float *)dst, TMULS_SCALAR_F32);
+void LaunchTMULS_f32_32x64(float* src, float* dst, void* stream)
+{
+    TMULS_f32_32x64<<<1, nullptr, stream>>>((__gm__ float*)src, (__gm__ float*)dst, TMULS_SCALAR_F32);
 }
 
-
-
-void LaunchTMULS_i16_15x192(int16_t *src, int16_t *dst, void *stream) {
-    TMULS_i16_15x192<<<1, nullptr, stream>>>((__gm__ int16_t *)src, (__gm__ int16_t *)dst, (int16_t)3);
+void LaunchTMULS_i16_15x192(int16_t* src, int16_t* dst, void* stream)
+{
+    TMULS_i16_15x192<<<1, nullptr, stream>>>((__gm__ int16_t*)src, (__gm__ int16_t*)dst, (int16_t)3);
 }

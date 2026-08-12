@@ -12,10 +12,8 @@
 #ifndef __CPU_SIM
 #include "acl/acl.h"
 #endif
-extern "C" __global__ [aicore] void simt_atomic_packed_core_kernel(
-    __gm__ uint32_t *h2, __gm__ uint32_t *b2);
-void LaunchSimt_atomic_packed_core_kernel(uint32_t *h2, uint32_t *b2,
-                                          void *stream) {
-  simt_atomic_packed_core_kernel<<<1, nullptr, stream>>>(
-      (__gm__ uint32_t *)h2, (__gm__ uint32_t *)b2);
+extern "C" __global__[aicore] void simt_atomic_packed_core_kernel(__gm__ uint32_t* h2, __gm__ uint32_t* b2);
+void LaunchSimt_atomic_packed_core_kernel(uint32_t* h2, uint32_t* b2, void* stream)
+{
+    simt_atomic_packed_core_kernel<<<1, nullptr, stream>>>((__gm__ uint32_t*)h2, (__gm__ uint32_t*)b2);
 }

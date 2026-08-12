@@ -48,17 +48,12 @@ LOW_PRECISION_PAIRS = (
     ("f4e2m1x2", "f4e2m1x2"),
 )
 
-MATMUL_MX_DTYPES = [
-    (lhs, "f16", rhs, "f16", "f32")
-    for lhs, rhs in LOW_PRECISION_PAIRS
-]
+MATMUL_MX_DTYPES = [(lhs, "f16", rhs, "f16", "f32") for lhs, rhs in LOW_PRECISION_PAIRS]
 MATMUL_MX_ACC_DTYPES = [
-    ("f32", lhs, "f16", rhs, "f16", "f32")
-    for lhs, rhs in LOW_PRECISION_PAIRS
+    ("f32", lhs, "f16", rhs, "f16", "f32") for lhs, rhs in LOW_PRECISION_PAIRS
 ]
 MATMUL_MX_BIAS_DTYPES = [
-    (lhs, "f16", rhs, "f16", "f32", "f32")
-    for lhs, rhs in LOW_PRECISION_PAIRS
+    (lhs, "f16", rhs, "f16", "f32", "f32") for lhs, rhs in LOW_PRECISION_PAIRS
 ]
 
 

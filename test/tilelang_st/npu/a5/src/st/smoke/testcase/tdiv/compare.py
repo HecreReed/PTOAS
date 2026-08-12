@@ -72,7 +72,7 @@ def compute_ulp_difference(golden, output, dtype):
     golden_sign = golden_int >> sign_bit
     output_sign = output_int >> sign_bit
 
-    same_sign = (golden_sign == output_sign)
+    same_sign = golden_sign == output_sign
 
     # For same sign: subtract representations
     ulp_diff_same = np.abs(golden_int.astype(np.int64) - output_int.astype(np.int64))
@@ -112,14 +112,20 @@ def check_nan_inf_consistency(golden, output, relaxed=False):
         output_nan_count = np.sum(output_nan)
         # Allow 20% variance in NaN count
         if golden_nan_count > 0:
-            variance = abs(golden_nan_count - output_nan_count) / float(golden_nan_count)
+            variance = abs(golden_nan_count - output_nan_count) / float(
+                golden_nan_count
+            )
             if variance > 0.2:
-                return False, "NaN count variance > 20% (golden={}, output={})".format(golden_nan_count, output_nan_count)
+                return False, "NaN count variance > 20% (golden={}, output={})".format(
+                    golden_nan_count, output_nan_count
+                )
         # Continue with other checks even if NaN positions differ
     else:
         if not np.array_equal(golden_nan, output_nan):
             nan_mismatch = np.where(golden_nan != output_nan)
-            return False, "NaN position mismatch at {} positions".format(len(nan_mismatch[0]))
+            return False, "NaN position mismatch at {} positions".format(
+                len(nan_mismatch[0])
+            )
 
     # Check Inf positions
     golden_inf = np.isinf(golden)
@@ -139,7 +145,9 @@ def check_nan_inf_consistency(golden, output, relaxed=False):
     return True, None
 
 
-def compare_high_precision_result(golden, output, dtype, ulp_tolerance=1, eps=1e-6, relaxed_nan=False):
+def compare_high_precision_result(
+    golden, output, dtype, ulp_tolerance=1, eps=1e-6, relaxed_nan=False
+):
     """Compare results for HIGH_PRECISION mode.
 
     High-precision algorithm uses three-candidate search which may select
@@ -213,8 +221,12 @@ def main():
         precision_type = case.get("precision_type", "default")
         check_inf_nan = case.get("check_inf_nan", False)
 
-        golden = np.fromfile(os.path.join(case_dir, "golden.bin"), dtype=case["dtype"]).reshape(shape)
-        output = np.fromfile(os.path.join(case_dir, "output.bin"), dtype=case["dtype"]).reshape(shape)
+        golden = np.fromfile(
+            os.path.join(case_dir, "golden.bin"), dtype=case["dtype"]
+        ).reshape(shape)
+        output = np.fromfile(
+            os.path.join(case_dir, "output.bin"), dtype=case["dtype"]
+        ).reshape(shape)
 
         eps = case["eps"]
         dtype_name = case["dtype"].__name__
@@ -228,11 +240,17 @@ def main():
             ok = np.array_equal(golden_valid, output_valid)
             if not ok:
                 mismatch = np.where(golden_valid != output_valid)
-                print(style_fail(f"[ERROR] {case['name']}: mismatches at {len(mismatch[0])} positions"))
+                print(
+                    style_fail(
+                        f"[ERROR] {case['name']}: mismatches at {len(mismatch[0])} positions"
+                    )
+                )
                 if len(mismatch[0]) > 0 and len(mismatch[0]) <= 10:
                     for i in range(len(mismatch[0])):
                         r, c = mismatch[0][i], mismatch[1][i]
-                        print(f"  [{r},{c}] golden={golden_valid[r,c]} output={output_valid[r,c]}")
+                        print(
+                            f"  [{r},{c}] golden={golden_valid[r, c]} output={output_valid[r, c]}"
+                        )
                 all_passed = False
                 continue
 
@@ -244,23 +262,47 @@ def main():
                 # Use relaxed NaN checking for nan_inf and boundary tests
                 relaxed_nan = test_pattern in ("nan_inf", "boundary")
                 ok, msg = compare_high_precision_result(
-                    golden_valid, output_valid, case["dtype"],
-                    ulp_tolerance=ulp_tolerance, eps=eps, relaxed_nan=relaxed_nan
+                    golden_valid,
+                    output_valid,
+                    case["dtype"],
+                    ulp_tolerance=ulp_tolerance,
+                    eps=eps,
+                    relaxed_nan=relaxed_nan,
                 )
                 if not ok:
-                    print(style_fail("[ERROR] {}: {} (test={})".format(case['name'], msg, test_pattern)))
+                    print(
+                        style_fail(
+                            "[ERROR] {}: {} (test={})".format(
+                                case["name"], msg, test_pattern
+                            )
+                        )
+                    )
                     all_passed = False
                     continue
                 elif msg:
-                    print(style_pass("[INFO] {}: {} (test={})".format(case['name'], msg, test_pattern)))
+                    print(
+                        style_pass(
+                            "[INFO] {}: {} (test={})".format(
+                                case["name"], msg, test_pattern
+                            )
+                        )
+                    )
 
             # check_inf_nan flag or boundary test: check NaN/Inf separately
             elif check_inf_nan or test_pattern == "boundary":
                 # Use relaxed NaN checking for nan_inf and boundary tests
                 relaxed = test_pattern in ("nan_inf", "boundary")
-                ok, msg = check_nan_inf_consistency(golden_valid, output_valid, relaxed=relaxed)
+                ok, msg = check_nan_inf_consistency(
+                    golden_valid, output_valid, relaxed=relaxed
+                )
                 if not ok:
-                    print(style_fail("[ERROR] {}: {} (test={})".format(case['name'], msg, test_pattern)))
+                    print(
+                        style_fail(
+                            "[ERROR] {}: {} (test={})".format(
+                                case["name"], msg, test_pattern
+                            )
+                        )
+                    )
                     all_passed = False
                     continue
 
@@ -270,9 +312,17 @@ def main():
                 normal_mask = ~(golden_nan | golden_inf)
 
                 if np.any(normal_mask):
-                    ok = result_cmp(golden_valid[normal_mask], output_valid[normal_mask], eps)
+                    ok = result_cmp(
+                        golden_valid[normal_mask], output_valid[normal_mask], eps
+                    )
                     if not ok:
-                        print(style_fail("[ERROR] {}: numerical mismatch (test={})".format(case['name'], test_pattern)))
+                        print(
+                            style_fail(
+                                "[ERROR] {}: numerical mismatch (test={})".format(
+                                    case["name"], test_pattern
+                                )
+                            )
+                        )
                         all_passed = False
                         continue
 
@@ -280,11 +330,23 @@ def main():
             else:
                 ok = result_cmp(golden_valid, output_valid, eps)
                 if not ok:
-                    print(style_fail("[ERROR] {}: comparison failed (test={})".format(case['name'], test_pattern)))
+                    print(
+                        style_fail(
+                            "[ERROR] {}: comparison failed (test={})".format(
+                                case["name"], test_pattern
+                            )
+                        )
+                    )
                     all_passed = False
                     continue
 
-        print(style_pass("[INFO] {}: passed (dtype={}, precision={}, test={})".format(case['name'], dtype_name, precision_type, test_pattern)))
+        print(
+            style_pass(
+                "[INFO] {}: passed (dtype={}, precision={}, test={})".format(
+                    case["name"], dtype_name, precision_type, test_pattern
+                )
+            )
+        )
 
     if not all_passed:
         sys.exit(2)

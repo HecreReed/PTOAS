@@ -12,12 +12,21 @@ import sys
 
 import numpy as np
 
-for search_root in (Path(__file__).resolve().parent, Path(__file__).resolve().parents[1]):
+for search_root in (
+    Path(__file__).resolve().parent,
+    Path(__file__).resolve().parents[1],
+):
     if (search_root / "validation_runtime.py").is_file():
         sys.path.insert(0, str(search_root))
         break
 
-from validation_runtime import default_buffers, load_case_meta, rng, write_buffers, write_golden
+from validation_runtime import (
+    default_buffers,
+    load_case_meta,
+    rng,
+    write_buffers,
+    write_golden,
+)
 
 
 M = 16
@@ -48,10 +57,16 @@ def main():
     rhs = generator.integers(-3, 4, size=(K, N), dtype=np.int16).astype(np.int8)
 
     cols = np.arange(N, dtype=np.float32)
-    fp0 = (np.float32(0.5) + cols * np.float32(0.03125)).astype(meta.np_types[fp0_name]).reshape(1, N)
-    fp1 = (np.float32(1.0) + (cols % np.float32(7.0)) * np.float32(0.0625)).astype(
-        meta.np_types[fp1_name]
-    ).reshape(1, N)
+    fp0 = (
+        (np.float32(0.5) + cols * np.float32(0.03125))
+        .astype(meta.np_types[fp0_name])
+        .reshape(1, N)
+    )
+    fp1 = (
+        (np.float32(1.0) + (cols % np.float32(7.0)) * np.float32(0.0625))
+        .astype(meta.np_types[fp1_name])
+        .reshape(1, N)
+    )
 
     acc = lhs.astype(np.int32) @ rhs.astype(np.int32)
     fp0_f32 = fp0.astype(np.float32, copy=False).reshape(1, N)

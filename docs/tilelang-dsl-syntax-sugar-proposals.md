@@ -327,7 +327,7 @@ These syntax sugar enhancements can be implemented through:
 
 ### High Priority (Immediate Value)
 1. Array view abstraction
-2. Simplified copy operations  
+2. Simplified copy operations
 3. Automatic mask inference
 
 ### Medium Priority (Significant Ergonomics Improvement)
@@ -350,19 +350,19 @@ def mixed_kernel(src: pto.ptr(pto.f32, MemorySpace.GM),
                  dst: pto.ptr(pto.f32, MemorySpace.GM)):
     # Low-level: manual pointer setup
     ub_in = pto.castptr(0, pto.ptr(pto.f32, MemorySpace.UB))
-    
+
     # High-level: array view for computation
     ub_array = pto.ub_array(256, pto.f32, base_ptr=ub_in)
-    
+
     # Mixed: low-level copy, high-level computation
     pto.copy_gm_to_ubuf(src, ub_in, 0, 32, 128, 0, 0, False, 0, 128, 128)
-    
+
     with pto.vector_scope():
         for i in pto.range(0, 256, 64):
             vec = ub_array.load_element(i)
             result = vec.abs(mask="PAT_ALL")
             ub_array.store_element(i, result)
-    
+
     # Low-level: copy back
     pto.copy_ubuf_to_gm(ub_in, dst, 0, 32, 128, 0, 128, 128)
 ```

@@ -7,7 +7,16 @@
 # See LICENSE in the root of the software repository for the full text of the License.
 
 from ptoas.mlir.dialects import arith, func, pto
-from ptoas.mlir.ir import Context, F32Type, IndexType, InsertionPoint, IntegerType, Location, Module, UnitAttr
+from ptoas.mlir.ir import (
+    Context,
+    F32Type,
+    IndexType,
+    InsertionPoint,
+    IntegerType,
+    Location,
+    Module,
+    UnitAttr,
+)
 
 
 def build():
@@ -30,17 +39,32 @@ def build():
             offset_rows = 2
             offset_cols = 16
 
-            tile_view_f32 = pto.PartitionTensorViewType.get([src_rows, src_cols], f32, ctx)
-            tile_view_u32 = pto.PartitionTensorViewType.get([offset_rows, offset_cols], u32, ctx)
+            tile_view_f32 = pto.PartitionTensorViewType.get(
+                [src_rows, src_cols], f32, ctx
+            )
+            tile_view_u32 = pto.PartitionTensorViewType.get(
+                [offset_rows, offset_cols], u32, ctx
+            )
 
             vec = pto.AddressSpaceAttr.get(pto.AddressSpace.VEC, ctx)
             bl = pto.BLayoutAttr.get(pto.BLayout.RowMajor, ctx)
             sl = pto.SLayoutAttr.get(pto.SLayout.NoneBox, ctx)
             pd = pto.PadValueAttr.get(pto.PadValue.Null, ctx)
-            cfg = pto.TileBufConfigAttr.get(bl, sl, pto.TileConfig.fractalABSize, pd, ctx)
+            cfg = pto.TileBufConfigAttr.get(
+                bl, sl, pto.TileConfig.fractalABSize, pd, ctx
+            )
 
-            tile_buf_f32 = pto.TileBufType.get([src_rows, src_cols], f32, vec, [src_rows, src_cols], cfg, ctx)
-            tile_buf_u32 = pto.TileBufType.get([offset_rows, offset_cols], u32, vec, [offset_rows, offset_cols], cfg, ctx)
+            tile_buf_f32 = pto.TileBufType.get(
+                [src_rows, src_cols], f32, vec, [src_rows, src_cols], cfg, ctx
+            )
+            tile_buf_u32 = pto.TileBufType.get(
+                [offset_rows, offset_cols],
+                u32,
+                vec,
+                [offset_rows, offset_cols],
+                cfg,
+                ctx,
+            )
 
             fn_ty = func.FunctionType.get([ptr_f32, ptr_u32, ptr_f32], [])
             with InsertionPoint(module.body):
@@ -57,13 +81,25 @@ def build():
 
                 src_ptr, offset_ptr, dst_ptr = entry.arguments
 
-                src_tv = pto.MakeTensorViewOp(tv2_f32, src_ptr, [c2, c128], [c128, c1]).result
-                offset_tv = pto.MakeTensorViewOp(tv2_u32, offset_ptr, [c2, c16], [c16, c1]).result
-                dst_tv = pto.MakeTensorViewOp(tv2_f32, dst_ptr, [c2, c128], [c128, c1]).result
+                src_tv = pto.MakeTensorViewOp(
+                    tv2_f32, src_ptr, [c2, c128], [c128, c1]
+                ).result
+                offset_tv = pto.MakeTensorViewOp(
+                    tv2_u32, offset_ptr, [c2, c16], [c16, c1]
+                ).result
+                dst_tv = pto.MakeTensorViewOp(
+                    tv2_f32, dst_ptr, [c2, c128], [c128, c1]
+                ).result
 
-                src_view = pto.PartitionViewOp(tile_view_f32, src_tv, offsets=[c0, c0], sizes=[c2, c128]).result
-                offset_view = pto.PartitionViewOp(tile_view_u32, offset_tv, offsets=[c0, c0], sizes=[c2, c16]).result
-                dst_view = pto.PartitionViewOp(tile_view_f32, dst_tv, offsets=[c0, c0], sizes=[c2, c128]).result
+                src_view = pto.PartitionViewOp(
+                    tile_view_f32, src_tv, offsets=[c0, c0], sizes=[c2, c128]
+                ).result
+                offset_view = pto.PartitionViewOp(
+                    tile_view_u32, offset_tv, offsets=[c0, c0], sizes=[c2, c16]
+                ).result
+                dst_view = pto.PartitionViewOp(
+                    tile_view_f32, dst_tv, offsets=[c0, c0], sizes=[c2, c128]
+                ).result
 
                 src_tile = pto.AllocTileOp(tile_buf_f32).result
                 offset_tile = pto.AllocTileOp(tile_buf_u32).result

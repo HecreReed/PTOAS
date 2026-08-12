@@ -13,43 +13,58 @@
 #endif
 
 // f32 kernels
-extern "C" __global__ AICORE void TROWEXPANDMUL_f32_16x32(__gm__ float *src0, __gm__ float *src1, __gm__ float *dst);
-extern "C" __global__ AICORE void TROWEXPANDMUL_f32_56x128(__gm__ float *src0, __gm__ float *src1, __gm__ float *dst);
+extern "C" __global__ AICORE void TROWEXPANDMUL_f32_16x32(__gm__ float* src0, __gm__ float* src1, __gm__ float* dst);
+extern "C" __global__ AICORE void TROWEXPANDMUL_f32_56x128(__gm__ float* src0, __gm__ float* src1, __gm__ float* dst);
 
-void LaunchTROWEXPANDMUL_f32_16x32(float *src0, float *src1, float *dst, void *stream) {
-    TROWEXPANDMUL_f32_16x32<<<1, nullptr, stream>>>((__gm__ float *)src0, (__gm__ float *)src1, (__gm__ float *)dst);
+void LaunchTROWEXPANDMUL_f32_16x32(float* src0, float* src1, float* dst, void* stream)
+{
+    TROWEXPANDMUL_f32_16x32<<<1, nullptr, stream>>>((__gm__ float*)src0, (__gm__ float*)src1, (__gm__ float*)dst);
 }
-void LaunchTROWEXPANDMUL_f32_56x128(float *src0, float *src1, float *dst, void *stream) {
-    TROWEXPANDMUL_f32_56x128<<<1, nullptr, stream>>>((__gm__ float *)src0, (__gm__ float *)src1, (__gm__ float *)dst);
+void LaunchTROWEXPANDMUL_f32_56x128(float* src0, float* src1, float* dst, void* stream)
+{
+    TROWEXPANDMUL_f32_56x128<<<1, nullptr, stream>>>((__gm__ float*)src0, (__gm__ float*)src1, (__gm__ float*)dst);
 }
 
 // f16 kernels (use uint16_t for aclFloat16)
-extern "C" __global__ AICORE void TROWEXPANDMUL_f16_48x64(__gm__ uint16_t *src0, __gm__ uint16_t *src1, __gm__ uint16_t *dst);
-extern "C" __global__ AICORE void TROWEXPANDMUL_f16_16x128(__gm__ uint16_t *src0, __gm__ uint16_t *src1, __gm__ uint16_t *dst);
-extern "C" __global__ AICORE void TROWEXPANDMUL_f16_32x64_noeq(__gm__ uint16_t *src0, __gm__ uint16_t *src1, __gm__ uint16_t *dst);
+extern "C" __global__ AICORE void TROWEXPANDMUL_f16_48x64(
+    __gm__ uint16_t* src0, __gm__ uint16_t* src1, __gm__ uint16_t* dst);
+extern "C" __global__ AICORE void TROWEXPANDMUL_f16_16x128(
+    __gm__ uint16_t* src0, __gm__ uint16_t* src1, __gm__ uint16_t* dst);
+extern "C" __global__ AICORE void TROWEXPANDMUL_f16_32x64_noeq(
+    __gm__ uint16_t* src0, __gm__ uint16_t* src1, __gm__ uint16_t* dst);
 
-void LaunchTROWEXPANDMUL_f16_48x64(void *src0, void *src1, void *dst, void *stream) {
-    TROWEXPANDMUL_f16_48x64<<<1, nullptr, stream>>>((__gm__ uint16_t *)src0, (__gm__ uint16_t *)src1, (__gm__ uint16_t *)dst);
+void LaunchTROWEXPANDMUL_f16_48x64(void* src0, void* src1, void* dst, void* stream)
+{
+    TROWEXPANDMUL_f16_48x64<<<1, nullptr, stream>>>(
+        (__gm__ uint16_t*)src0, (__gm__ uint16_t*)src1, (__gm__ uint16_t*)dst);
 }
-void LaunchTROWEXPANDMUL_f16_16x128(void *src0, void *src1, void *dst, void *stream) {
-    TROWEXPANDMUL_f16_16x128<<<1, nullptr, stream>>>((__gm__ uint16_t *)src0, (__gm__ uint16_t *)src1, (__gm__ uint16_t *)dst);
+void LaunchTROWEXPANDMUL_f16_16x128(void* src0, void* src1, void* dst, void* stream)
+{
+    TROWEXPANDMUL_f16_16x128<<<1, nullptr, stream>>>(
+        (__gm__ uint16_t*)src0, (__gm__ uint16_t*)src1, (__gm__ uint16_t*)dst);
 }
-void LaunchTROWEXPANDMUL_f16_32x64_noeq(void *src0, void *src1, void *dst, void *stream) {
-    TROWEXPANDMUL_f16_32x64_noeq<<<1, nullptr, stream>>>((__gm__ uint16_t *)src0, (__gm__ uint16_t *)src1, (__gm__ uint16_t *)dst);
+void LaunchTROWEXPANDMUL_f16_32x64_noeq(void* src0, void* src1, void* dst, void* stream)
+{
+    TROWEXPANDMUL_f16_32x64_noeq<<<1, nullptr, stream>>>(
+        (__gm__ uint16_t*)src0, (__gm__ uint16_t*)src1, (__gm__ uint16_t*)dst);
 }
 
 // i32 kernels
-extern "C" __global__ AICORE void TROWEXPANDMUL_i32_16x32(__gm__ int32_t *src0, __gm__ int32_t *src1, __gm__ int32_t *dst);
+extern "C" __global__ AICORE void TROWEXPANDMUL_i32_16x32(
+    __gm__ int32_t* src0, __gm__ int32_t* src1, __gm__ int32_t* dst);
 
-void LaunchTROWEXPANDMUL_i32_16x32(void *src0, void *src1, void *dst, void *stream) {
-    TROWEXPANDMUL_i32_16x32<<<1, nullptr, stream>>>((__gm__ int32_t *)src0, (__gm__ int32_t *)src1, (__gm__ int32_t *)dst);
+void LaunchTROWEXPANDMUL_i32_16x32(void* src0, void* src1, void* dst, void* stream)
+{
+    TROWEXPANDMUL_i32_16x32<<<1, nullptr, stream>>>((__gm__ int32_t*)src0, (__gm__ int32_t*)src1, (__gm__ int32_t*)dst);
 }
 
 // i16 kernels
-extern "C" __global__ AICORE void TROWEXPANDMUL_i16_16x64(__gm__ int16_t *src0, __gm__ int16_t *src1, __gm__ int16_t *dst);
+extern "C" __global__ AICORE void TROWEXPANDMUL_i16_16x64(
+    __gm__ int16_t* src0, __gm__ int16_t* src1, __gm__ int16_t* dst);
 
-void LaunchTROWEXPANDMUL_i16_16x64(void *src0, void *src1, void *dst, void *stream) {
-    TROWEXPANDMUL_i16_16x64<<<1, nullptr, stream>>>((__gm__ int16_t *)src0, (__gm__ int16_t *)src1, (__gm__ int16_t *)dst);
+void LaunchTROWEXPANDMUL_i16_16x64(void* src0, void* src1, void* dst, void* stream)
+{
+    TROWEXPANDMUL_i16_16x64<<<1, nullptr, stream>>>((__gm__ int16_t*)src0, (__gm__ int16_t*)src1, (__gm__ int16_t*)dst);
 }
 
 // Note: launchTRowExpandMul2 with src1Col>1 has different semantics - TBD

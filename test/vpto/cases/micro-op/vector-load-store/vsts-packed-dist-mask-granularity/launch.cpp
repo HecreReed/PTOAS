@@ -17,12 +17,24 @@
 #endif
 
 #if defined(__CCE_AICORE__) && defined(__NPU_ARCH__) && (__NPU_ARCH__ == 2201)
-typedef struct { unsigned char v; } hifloat8_t;
-typedef struct { unsigned char v; } float8_e4m3_t;
-typedef struct { unsigned char v; } float8_e5m2_t;
-typedef struct { unsigned char v; } float8_e8m0_t;
-typedef struct { unsigned char v; } float4_e1m2x2_t;
-typedef struct { unsigned char v; } float4_e2m1x2_t;
+typedef struct {
+    unsigned char v;
+} hifloat8_t;
+typedef struct {
+    unsigned char v;
+} float8_e4m3_t;
+typedef struct {
+    unsigned char v;
+} float8_e5m2_t;
+typedef struct {
+    unsigned char v;
+} float8_e8m0_t;
+typedef struct {
+    unsigned char v;
+} float4_e1m2x2_t;
+typedef struct {
+    unsigned char v;
+} float4_e2m1x2_t;
 #endif
 #include <cstdint>
 
@@ -32,23 +44,21 @@ typedef struct { unsigned char v; } float4_e2m1x2_t;
 
 #if !defined(__CCE_AICORE__) && !defined(TMRGSORT_HPP)
 struct MrgSortExecutedNumList {
-  uint16_t mrgSortList0;
-  uint16_t mrgSortList1;
-  uint16_t mrgSortList2;
-  uint16_t mrgSortList3;
+    uint16_t mrgSortList0;
+    uint16_t mrgSortList1;
+    uint16_t mrgSortList2;
+    uint16_t mrgSortList3;
 };
 #endif
 #ifndef __CPU_SIM
 #include "acl/acl.h"
 #endif
 
-extern "C" __global__ [aicore] void vsts_packed_dist_mask_granularity_kernel(
-    __gm__ int64_t *v1, __gm__ float *v2, __gm__ uint8_t *v3, __gm__ uint8_t *v4);
+extern "C" __global__[aicore] void vsts_packed_dist_mask_granularity_kernel(
+    __gm__ int64_t* v1, __gm__ float* v2, __gm__ uint8_t* v3, __gm__ uint8_t* v4);
 
-void LaunchVstsPackedDistMaskGranularityKernel(int64_t *v1, float *v2,
-                                               uint8_t *v3, uint8_t *v4,
-                                               void *stream) {
-  vsts_packed_dist_mask_granularity_kernel<<<1, nullptr, stream>>>(
-      (__gm__ int64_t *)v1, (__gm__ float *)v2, (__gm__ uint8_t *)v3,
-      (__gm__ uint8_t *)v4);
+void LaunchVstsPackedDistMaskGranularityKernel(int64_t* v1, float* v2, uint8_t* v3, uint8_t* v4, void* stream)
+{
+    vsts_packed_dist_mask_granularity_kernel<<<1, nullptr, stream>>>(
+        (__gm__ int64_t*)v1, (__gm__ float*)v2, (__gm__ uint8_t*)v3, (__gm__ uint8_t*)v4);
 }

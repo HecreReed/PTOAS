@@ -67,7 +67,6 @@ CASES = [
         "scalar": 42.0,
         "eps": 1e-6,
     },
-
     # ========== int32 cases ==========
     {
         "name": "i32_64x64_scalar100",
@@ -85,7 +84,6 @@ CASES = [
         "scalar": 99,
         "eps": 0,
     },
-
     # ========== half (fp16) cases ==========
     {
         "name": "f16_64x64_scalar1_5",
@@ -103,7 +101,6 @@ CASES = [
         "scalar": 2.5,
         "eps": 1e-3,
     },
-
     # ========== int16 cases ==========
     {
         "name": "i16_64x64_scalar50",

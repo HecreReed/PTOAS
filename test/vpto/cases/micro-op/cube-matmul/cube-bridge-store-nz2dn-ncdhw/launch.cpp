@@ -11,12 +11,24 @@
 #endif
 
 #if defined(__CCE_AICORE__) && defined(__NPU_ARCH__) && (__NPU_ARCH__ == 2201)
-typedef struct { unsigned char v; } hifloat8_t;
-typedef struct { unsigned char v; } float8_e4m3_t;
-typedef struct { unsigned char v; } float8_e5m2_t;
-typedef struct { unsigned char v; } float8_e8m0_t;
-typedef struct { unsigned char v; } float4_e1m2x2_t;
-typedef struct { unsigned char v; } float4_e2m1x2_t;
+typedef struct {
+    unsigned char v;
+} hifloat8_t;
+typedef struct {
+    unsigned char v;
+} float8_e4m3_t;
+typedef struct {
+    unsigned char v;
+} float8_e5m2_t;
+typedef struct {
+    unsigned char v;
+} float8_e8m0_t;
+typedef struct {
+    unsigned char v;
+} float4_e1m2x2_t;
+typedef struct {
+    unsigned char v;
+} float4_e2m1x2_t;
 #endif
 
 #include <cstdint>
@@ -27,10 +39,10 @@ typedef struct { unsigned char v; } float4_e2m1x2_t;
 
 #if !defined(__CCE_AICORE__) && !defined(TMRGSORT_HPP)
 struct MrgSortExecutedNumList {
-  uint16_t mrgSortList0;
-  uint16_t mrgSortList1;
-  uint16_t mrgSortList2;
-  uint16_t mrgSortList3;
+    uint16_t mrgSortList0;
+    uint16_t mrgSortList1;
+    uint16_t mrgSortList2;
+    uint16_t mrgSortList3;
 };
 #endif
 
@@ -38,11 +50,11 @@ struct MrgSortExecutedNumList {
 #include "acl/acl.h"
 #endif
 
-extern "C" __global__ [aicore] void cube_bridge_store_nz2dn_ncdhw_kernel(
-    __gm__ __fp16 *a, __gm__ __fp16 *b, __gm__ float *c);
+extern "C" __global__[aicore] void cube_bridge_store_nz2dn_ncdhw_kernel(
+    __gm__ __fp16* a, __gm__ __fp16* b, __gm__ float* c);
 
-void LaunchCube_bridge_store_nz2dn_ncdhw_kernel(__fp16 *a, __fp16 *b, float *c,
-                                                void *stream) {
-  cube_bridge_store_nz2dn_ncdhw_kernel<<<1, nullptr, stream>>>(
-      (__gm__ __fp16 *)a, (__gm__ __fp16 *)b, (__gm__ float *)c);
+void LaunchCube_bridge_store_nz2dn_ncdhw_kernel(__fp16* a, __fp16* b, float* c, void* stream)
+{
+    cube_bridge_store_nz2dn_ncdhw_kernel<<<1, nullptr, stream>>>(
+        (__gm__ __fp16*)a, (__gm__ __fp16*)b, (__gm__ float*)c);
 }

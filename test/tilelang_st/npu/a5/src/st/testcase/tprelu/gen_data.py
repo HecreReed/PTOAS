@@ -38,4 +38,6 @@ for case in CASES:
                 golden[i, j] = dtype(input0[i, j] * input1[i, j])
 
     save_case_data(case["name"], {"input0": input0, "input1": input1, "golden": golden})
-    print(f"[INFO] gen_data: {case['name']} src_shape={shape} src_valid_shape={valid_shape} dst_shape={dst_shape} dtype={dtype.__name__}")
+    print(
+        f"[INFO] gen_data: {case['name']} src_shape={shape} src_valid_shape={valid_shape} dst_shape={dst_shape} dtype={dtype.__name__}"
+    )

@@ -22,7 +22,7 @@ def generate(output_dir: Path) -> None:
 
     src = (np.arange(SOURCE_ELEMS, dtype=np.uint16) % BINS).astype(np.uint8)
     acc = (np.arange(BINS, dtype=np.uint16) % np.uint16(5)).astype(np.uint16)
-    dst = np.full(BINS, np.uint16(0xcccc), dtype=np.uint16)
+    dst = np.full(BINS, np.uint16(0xCCCC), dtype=np.uint16)
 
     # Cumulative histogram: bin[i] = acc[i] + sum_{j=0}^{i} count[j]
     counts = np.bincount(src[:LOGICAL_LANES].astype(np.int64), minlength=BINS)

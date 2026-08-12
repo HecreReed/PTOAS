@@ -29,7 +29,9 @@ def build_parser() -> argparse.ArgumentParser:
             "Defaults to test/kernel-test/kernels or $KERNEL_TEST_KERNEL_DIR."
         ),
     )
-    parser.add_argument("--list-ops", action="store_true", help="List registered kernels")
+    parser.add_argument(
+        "--list-ops", action="store_true", help="List registered kernels"
+    )
     parser.add_argument("--op", help="Kernel name to run")
     parser.add_argument(
         "--workflow",
@@ -40,7 +42,9 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--backend", help="Backend name")
     parser.add_argument("--case", action="append", default=[], help="Case id to run")
     parser.add_argument("--case-filter", help="Substring filter for cases")
-    parser.add_argument("--list-cases", action="store_true", help="List cases for one kernel")
+    parser.add_argument(
+        "--list-cases", action="store_true", help="List cases for one kernel"
+    )
     parser.add_argument(
         "--emit-mlir",
         action="store_true",
@@ -80,7 +84,9 @@ def main(argv: Sequence[str] | None = None) -> int:
             parser.error(f"unknown kernel: {args.op}")
         case_ids = sorted(spec.list_cases(args.workflow).keys())
         if not case_ids:
-            print(f"No cases registered for kernel {spec.name} workflow={args.workflow}.")
+            print(
+                f"No cases registered for kernel {spec.name} workflow={args.workflow}."
+            )
             return 0
         _print_lines(case_ids)
         return 0
@@ -136,4 +142,6 @@ def main(argv: Sequence[str] | None = None) -> int:
         "backend": backend.name,
         **dict(spec.cycle_fields(case_id, case, backend)),
     }
-    return run_cycle_probe(case_id=case_id, case=case, backend=backend, marker_fields=marker_fields)
+    return run_cycle_probe(
+        case_id=case_id, case=case, backend=backend, marker_fields=marker_fields
+    )

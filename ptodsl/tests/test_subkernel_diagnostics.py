@@ -22,7 +22,10 @@ def expect_raises(callback, exc_type, *message_fragments: str) -> None:
     except exc_type as exc:
         text = str(exc)
         for fragment in message_fragments:
-            expect(fragment in text, f"expected diagnostic fragment {fragment!r} in {text!r}")
+            expect(
+                fragment in text,
+                f"expected diagnostic fragment {fragment!r} in {text!r}",
+            )
     else:
         raise AssertionError(f"expected {exc_type.__name__} to be raised")
 

@@ -53,8 +53,12 @@ def build():
 
                 # %3/%4/%8 = pto.subview %tv, offsets=[%c0,%c0], sizes=[%c32,%c32]
                 # Now using constants c0 and c32 instead of immediate numbers
-                sv0 = pto.PartitionViewOp(tile_view_32, tv0, offsets=[c0, c0], sizes=[c32, c32]).result
-                sv1 = pto.PartitionViewOp(tile_view_32, tv1, offsets=[c0, c0], sizes=[c32, c32]).result
+                sv0 = pto.PartitionViewOp(
+                    tile_view_32, tv0, offsets=[c0, c0], sizes=[c32, c32]
+                ).result
+                sv1 = pto.PartitionViewOp(
+                    tile_view_32, tv1, offsets=[c0, c0], sizes=[c32, c32]
+                ).result
 
                 # %5/%6/%7 = pto.alloc_tile : <32x32xf32>
                 tb0 = pto.AllocTileOp(tile_buf_32).result
@@ -68,7 +72,9 @@ def build():
                 pto.TMinSOp(tb0, scale, tb1)
 
                 # %8 = subview on output tensor_view
-                sv2 = pto.PartitionViewOp(tile_view_32, tv1, offsets=[c0, c0], sizes=[c32, c32]).result
+                sv2 = pto.PartitionViewOp(
+                    tile_view_32, tv1, offsets=[c0, c0], sizes=[c32, c32]
+                ).result
 
                 # Store the result back into the output tensor
                 pto.TStoreOp(None, tb1, sv2)

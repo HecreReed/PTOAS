@@ -19,12 +19,22 @@ from cases import CASES
 from st_common import setup_case_rng, save_case_data
 
 # Inline validation for multi-input format (trowexpandsub uses src0/src1/dst)
-REQUIRED_KEYS = {"name", "dtype", "src0_shape", "src0_valid_shape", "src1_shape",
-                 "src1_valid_shape", "dst_shape", "dst_valid_shape"}
+REQUIRED_KEYS = {
+    "name",
+    "dtype",
+    "src0_shape",
+    "src0_valid_shape",
+    "src1_shape",
+    "src1_valid_shape",
+    "dst_shape",
+    "dst_valid_shape",
+}
 for i, case in enumerate(CASES):
     missing = REQUIRED_KEYS - case.keys()
     if missing:
-        raise ValueError(f"cases[{i}] ({case.get('name', '?')}) missing keys: {missing}")
+        raise ValueError(
+            f"cases[{i}] ({case.get('name', '?')}) missing keys: {missing}"
+        )
 
 for case in CASES:
     setup_case_rng(case)
@@ -51,4 +61,6 @@ for case in CASES:
     ).astype(dtype, copy=False)
 
     save_case_data(case["name"], {"input1": input1, "input2": input2, "golden": golden})
-    print(f"[INFO] gen_data: {case['name']} src0={src0_shape} src1={src1_shape} dst={dst_shape} dtype={dtype.__name__}")
+    print(
+        f"[INFO] gen_data: {case['name']} src0={src0_shape} src1={src1_shape} dst={dst_shape} dtype={dtype.__name__}"
+    )

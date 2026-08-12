@@ -21,12 +21,9 @@ class raw_ostream;
 
 namespace mlir::pto {
 
-LogicalResult emitVPTOHostStubSource(ModuleOp module, std::string &stubSource,
-                                     llvm::raw_ostream &diagOS);
+LogicalResult emitVPTOHostStubSource(ModuleOp module, std::string& stubSource, llvm::raw_ostream& diagOS);
 
-LogicalResult emitVPTOHostStubSource(ArrayRef<ModuleOp> modules,
-                                     std::string &stubSource,
-                                     llvm::raw_ostream &diagOS);
+LogicalResult emitVPTOHostStubSource(ArrayRef<ModuleOp> modules, std::string& stubSource, llvm::raw_ostream& diagOS);
 
 } // namespace mlir::pto
 

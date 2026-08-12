@@ -14,7 +14,7 @@ import sys
 import numpy as np
 
 from cases import CASES
-from st_common import result_cmp, style_fail, style_pass, validate_cases
+from st_common import style_fail, style_pass, validate_cases
 
 
 def main():
@@ -33,7 +33,7 @@ def main():
         out_dtype = case["out_dtype"]
         elem_size = np.dtype(dtype).itemsize
         lanes = 256 // elem_size
-        
+
         # Calculate expected output size (same as gen_data.py)
         total_elm = vr * vc
         if elem_size == 4:  # 32B
@@ -49,16 +49,16 @@ def main():
             bytes_per_iter = 32
             iters_per_row = (vc + lanes - 1) // lanes
             expected_bytes = vr * iters_per_row * bytes_per_iter
-        
+
         # Read golden (already correct size from gen_data.py)
         golden = np.fromfile(os.path.join(case_dir, "golden.bin"), dtype=np.uint8)
-        
+
         # Read output and truncate/zero-pad to expected size
         output = np.fromfile(os.path.join(case_dir, "output.bin"), dtype=np.uint8)
         if len(output) > expected_bytes:
             output = output[:expected_bytes]
         elif len(output) < expected_bytes:
-            output = np.pad(output, (0, expected_bytes - len(output)), mode='constant')
+            output = np.pad(output, (0, expected_bytes - len(output)), mode="constant")
 
         # Compare byte-by-byte
         ok = np.array_equal(golden, output)
@@ -69,10 +69,18 @@ def main():
             if len(diff_indices) > 0:
                 diff_idx = diff_indices[0]
                 max_diff = int(np.max(np.abs(golden.astype(int) - output.astype(int))))
-                print(style_fail(f"[ERROR] Mismatch: max diff={max_diff} at byte idx={diff_idx} "
-                                 f"(golden=0x{golden[diff_idx]:02x}, output=0x{output[diff_idx]:02x})"))
+                print(
+                    style_fail(
+                        f"[ERROR] Mismatch: max diff={max_diff} at byte idx={diff_idx} "
+                        f"(golden=0x{golden[diff_idx]:02x}, output=0x{output[diff_idx]:02x})"
+                    )
+                )
             else:
-                print(style_fail(f"[ERROR] Mismatch: shapes differ golden={golden.shape} output={output.shape}"))
+                print(
+                    style_fail(
+                        f"[ERROR] Mismatch: shapes differ golden={golden.shape} output={output.shape}"
+                    )
+                )
 
         if ok:
             print(style_pass(f"[INFO] {case['name']}: compare passed"))

@@ -29,7 +29,11 @@ def main():
         dtype_out = case["dtype_out"]
 
         if not case.get("has_output", False):
-            print(style_pass(f"[INFO] {case['name']}: compile-only (no output comparison)"))
+            print(
+                style_pass(
+                    f"[INFO] {case['name']}: compile-only (no output comparison)"
+                )
+            )
             continue
 
         golden_path = os.path.join(case_dir, "golden.bin")
@@ -50,9 +54,11 @@ def main():
             if output.size == m * n:
                 output = output.reshape(m, n)
             else:
-                print(style_fail(
-                    f"[ERROR] {case['name']}: size mismatch golden={golden.size} output={output.size}"
-                ))
+                print(
+                    style_fail(
+                        f"[ERROR] {case['name']}: size mismatch golden={golden.size} output={output.size}"
+                    )
+                )
                 all_passed = False
                 continue
 

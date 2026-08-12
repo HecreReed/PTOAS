@@ -17,7 +17,9 @@ CASES = [
     {
         "name": "acc2vec_nd_f16_16x16",
         "kernel": "TINSERT_acc2vec_nd_f16_16x16",
-        "m": 16, "k": 16, "n": 16,
+        "m": 16,
+        "k": 16,
+        "n": 16,
         "dtype": np.float16,
         "dtype_out": np.float16,
         "has_output": True,
@@ -26,7 +28,9 @@ CASES = [
     {
         "name": "acc2vec_nd_f32_16x16",
         "kernel": "TINSERT_acc2vec_nd_f32_16x16",
-        "m": 16, "k": 16, "n": 16,
+        "m": 16,
+        "k": 16,
+        "n": 16,
         "dtype": np.float16,
         "dtype_out": np.float32,
         "has_output": True,
@@ -35,7 +39,9 @@ CASES = [
     {
         "name": "acc2vec_nz_f32_16x16",
         "kernel": "TINSERT_acc2vec_nz_f32_16x16",
-        "m": 16, "k": 16, "n": 16,
+        "m": 16,
+        "k": 16,
+        "n": 16,
         "dtype": np.float16,
         "dtype_out": np.float32,
         "path": "acc2vec_nz",

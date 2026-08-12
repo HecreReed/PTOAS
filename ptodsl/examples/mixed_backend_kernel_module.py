@@ -71,8 +71,12 @@ def emitc_entry_calls_vpto_module(
     o_ptr: pto.ptr(pto.f32, "gm"),
     rows: pto.i32,
 ):
-    x_view = pto.make_tensor_view(x_ptr, shape=[rows, _ROW_ELEMS], strides=[_ROW_ELEMS, 1])
-    o_view = pto.make_tensor_view(o_ptr, shape=[rows, _ROW_ELEMS], strides=[_ROW_ELEMS, 1])
+    x_view = pto.make_tensor_view(
+        x_ptr, shape=[rows, _ROW_ELEMS], strides=[_ROW_ELEMS, 1]
+    )
+    o_view = pto.make_tensor_view(
+        o_ptr, shape=[rows, _ROW_ELEMS], strides=[_ROW_ELEMS, 1]
+    )
     x_row_tile = pto.alloc_tile(shape=[1, _ROW_ELEMS], dtype=pto.f32)
     o_row_tile = pto.alloc_tile(shape=[1, _ROW_ELEMS], dtype=pto.f32)
 

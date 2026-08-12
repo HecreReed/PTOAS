@@ -50,7 +50,9 @@ CASES = [
     Case("four_cores_two_tokens_each", n_cores=4, tokens_per_core=2, seed=0x483402),
 ]
 
-FULL_CASE = Case("full_64_cores_64_tokens_each", n_cores=64, tokens_per_core=64, seed=0x483640)
+FULL_CASE = Case(
+    "full_64_cores_64_tokens_each", n_cores=64, tokens_per_core=64, seed=0x483640
+)
 
 
 def init_runtime():
@@ -73,14 +75,20 @@ def make_inputs(case: Case) -> tuple[np.ndarray, np.ndarray]:
     w = rng.uniform(0.5, 1.5, size=(_HIDDEN_SIZE,)).astype(np.float32)
 
     # Make token/core addressing mistakes obvious in the output comparison.
-    token_offsets = (np.arange(case.tokens, dtype=np.float32)[:, None] * np.float32(0.001))
+    token_offsets = np.arange(case.tokens, dtype=np.float32)[:, None] * np.float32(
+        0.001
+    )
     x = (x + token_offsets).astype(np.float32)
     return x, w
 
 
-def rmsnorm_reference(x: np.ndarray, w: np.ndarray, eps: np.float32) -> tuple[np.ndarray, np.ndarray]:
+def rmsnorm_reference(
+    x: np.ndarray, w: np.ndarray, eps: np.float32
+) -> tuple[np.ndarray, np.ndarray]:
     sum_sq = np.sum(x * x, axis=1, dtype=np.float32)
-    rstd = (np.float32(1.0) / np.sqrt(sum_sq / np.float32(x.shape[1]) + eps)).astype(np.float32)
+    rstd = (np.float32(1.0) / np.sqrt(sum_sq / np.float32(x.shape[1]) + eps)).astype(
+        np.float32
+    )
     y = (x * rstd[:, None] * w[None, :]).astype(np.float32)
     return y, rstd
 

@@ -6,7 +6,18 @@
 # INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
 # See LICENSE in the root of the software repository for the full text of the License.
 
-from ptoas.mlir.ir import Context, Location, Module, InsertionPoint, F32Type, IntegerType, IntegerAttr, IndexType, Operation, UnitAttr
+from ptoas.mlir.ir import (
+    Context,
+    Location,
+    Module,
+    InsertionPoint,
+    F32Type,
+    IntegerType,
+    IntegerAttr,
+    IndexType,
+    Operation,
+    UnitAttr,
+)
 from ptoas.mlir.dialects import arith, func, pto, scf
 
 
@@ -42,6 +53,7 @@ def _wait_async_event(event, session):
         return pto.WaitAsyncEventOp(event, session)
     Operation.create("pto.comm.wait_async_event", operands=[event, session], results=[])
 
+
 def build():
     with Context() as ctx:
         pto.register_dialect(ctx, load=True)
@@ -75,8 +87,12 @@ def build():
                 c1 = arith.ConstantOp(idx, 1).result
                 dst_tv = pto.MakeTensorViewOp(tv1_f32, dst_ptr, [c128], [c1]).result
                 src_tv = pto.MakeTensorViewOp(tv1_f32, src_ptr, [c128], [c1]).result
-                dst = pto.PartitionViewOp(pv1_f32, dst_tv, offsets=[c0], sizes=[c128]).result
-                src = pto.PartitionViewOp(pv1_f32, src_tv, offsets=[c0], sizes=[c128]).result
+                dst = pto.PartitionViewOp(
+                    pv1_f32, dst_tv, offsets=[c0], sizes=[c128]
+                ).result
+                src = pto.PartitionViewOp(
+                    pv1_f32, src_tv, offsets=[c0], sizes=[c128]
+                ).result
                 c1_i32 = arith.ConstantOp(i32, 1).result
                 single_rank = arith.CmpIOp(
                     arith.CmpIPredicate.sle, nranks, c1_i32
@@ -88,9 +104,15 @@ def build():
 
                 with InsertionPoint(guarded.else_block):
                     scratch = pto.AllocTileOp(scratch_ty).result
-                    session = _build_async_session(scratch, workspace_ptr, i32, ctx, sync_id=0)
-                    put_event = _async_transfer("pto.comm.tput_async", dst, src, session, ctx)
-                    get_event = _async_transfer("pto.comm.tget_async", src, dst, session, ctx)
+                    session = _build_async_session(
+                        scratch, workspace_ptr, i32, ctx, sync_id=0
+                    )
+                    put_event = _async_transfer(
+                        "pto.comm.tput_async", dst, src, session, ctx
+                    )
+                    get_event = _async_transfer(
+                        "pto.comm.tget_async", src, dst, session, ctx
+                    )
                     _wait_async_event(put_event, session)
                     if hasattr(pto, "TestAsyncEventOp"):
                         pto.TestAsyncEventOp(get_event, session)

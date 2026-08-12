@@ -31,10 +31,10 @@ def read_value_index_pairs(filepath, dtype, count):
     values = []
     indices = []
 
-    struct_fmt = 'fI' if dtype == np.float32 else 'e2xI'
+    struct_fmt = "fI" if dtype == np.float32 else "e2xI"
     struct_size = struct.calcsize(struct_fmt)
 
-    with open(filepath, 'rb') as f:
+    with open(filepath, "rb") as f:
         for _ in range(count):
             data = f.read(struct_size)
             if not data:
@@ -48,11 +48,11 @@ def read_value_index_pairs(filepath, dtype, count):
 
 def handle_output_data(golden_vals, golden_idx, output_vals, output_idx):
     """Handle exhausted case: zero output values and indices where golden values are 0.
-    
+
     Following pto-isa HandleOutputData logic:
     - Scan from end, find first non-zero golden value
     - Zero output values where golden values are 0
-    
+
     Also zero output indices where golden indices are 0 (matching gen_data.py behavior).
     """
     size = len(golden_vals)
@@ -69,7 +69,7 @@ def handle_output_data(golden_vals, golden_idx, output_vals, output_idx):
 
 def compare_multilist(case):
     """Compare multi-list merge sort output.
-    
+
     For multi-list format:
     - Read input0.bin, input1.bin, etc.
     - Read output.bin
@@ -80,39 +80,41 @@ def compare_multilist(case):
     src_cols = case["src_cols"]
     topk = case["topk"]
     exhausted = case.get("exhausted", False)
-    
+
     # Calculate element divisor
     if dtype == np.float16:
         elem_divisor = 4
     else:
         elem_divisor = 2
-    
+
     # Total structures to compare
     total_structures = sum(src_cols)
-    
+
     # Read golden output
     golden_vals, golden_indices = read_value_index_pairs(
         os.path.join(case["name"], "golden.bin"), dtype, total_structures
     )
-    
+
     # Read actual output
     output_vals, output_indices = read_value_index_pairs(
         os.path.join(case["name"], "output.bin"), dtype, total_structures
     )
-    
+
     if exhausted:
         handle_output_data(golden_vals, golden_indices, output_vals, output_indices)
-    
+
     # Compare top-k elements (only compare the valid output)
     vals_ok = result_cmp(golden_vals[:topk], output_vals[:topk], case["eps"])
-    indices_ok = np.allclose(golden_indices[:topk], output_indices[:topk], atol=0, rtol=0)
-    
+    indices_ok = np.allclose(
+        golden_indices[:topk], output_indices[:topk], atol=0, rtol=0
+    )
+
     return vals_ok and indices_ok
 
 
 def compare_topk(case):
     """Compare TopK output.
-    
+
     For TopK format:
     - Read input0.bin (unsorted raw data)
     - Read output.bin (top-k sorted data)
@@ -122,30 +124,32 @@ def compare_topk(case):
     valid_shape = case["valid_shape"]
     valid_rows, valid_cols = valid_shape
     topk = case["topk"]
-    
+
     # Get element divisor based on dtype
     if dtype == np.float16:
         elem_divisor = 4
     else:
         elem_divisor = 2
-    
+
     # Total structures in input
     total_structures = valid_cols // elem_divisor
-    
+
     # Read golden output
     golden_vals, golden_indices = read_value_index_pairs(
         os.path.join(case["name"], "golden.bin"), dtype, total_structures
     )
-    
+
     # Read actual output
     output_vals, output_indices = read_value_index_pairs(
         os.path.join(case["name"], "output.bin"), dtype, topk
     )
-    
+
     # Compare top-k elements
     vals_ok = result_cmp(golden_vals[:topk], output_vals[:topk], case["eps"])
-    indices_ok = np.allclose(golden_indices[:topk], output_indices[:topk], atol=0, rtol=0)
-    
+    indices_ok = np.allclose(
+        golden_indices[:topk], output_indices[:topk], atol=0, rtol=0
+    )
+
     return vals_ok and indices_ok
 
 
@@ -158,13 +162,13 @@ def main():
             continue
 
         format_type = case.get("format", "single")
-        
+
         if format_type == "single":
             dtype = case["dtype"]
             valid_shape = case["valid_shape"]
             valid_rows, valid_cols = valid_shape
             block_len = case["block_len"]
-            
+
             # Get element divisor based on dtype
             if dtype == np.float16:
                 elem_divisor = 4
@@ -191,7 +195,7 @@ def main():
                 if not indices_ok:
                     print(style_fail(f"[ERROR] {case['name']}: indices mismatch"))
                 all_passed = False
-        
+
         elif format_type == "multi":
             ok = compare_multilist(case)
             if ok:
@@ -199,7 +203,7 @@ def main():
             else:
                 print(style_fail(f"[ERROR] {case['name']}: values or indices mismatch"))
                 all_passed = False
-        
+
         elif format_type == "topk":
             ok = compare_topk(case)
             if ok:
@@ -207,9 +211,11 @@ def main():
             else:
                 print(style_fail(f"[ERROR] {case['name']}: values or indices mismatch"))
                 all_passed = False
-        
+
         else:
-            print(style_fail(f"[ERROR] {case['name']}: unsupported format {format_type}"))
+            print(
+                style_fail(f"[ERROR] {case['name']}: unsupported format {format_type}")
+            )
             all_passed = False
 
     if not all_passed:

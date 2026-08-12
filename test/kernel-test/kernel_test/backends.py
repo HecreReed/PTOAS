@@ -43,7 +43,9 @@ class BackendAdapter(Protocol):
 
     name: str
 
-    def is_supported(self, case: object, *, purpose: RunPurpose) -> tuple[bool, str | None]:
+    def is_supported(
+        self, case: object, *, purpose: RunPurpose
+    ) -> tuple[bool, str | None]:
         """Return support status and an optional human-readable reason."""
 
     def launch(self, case: object, *, purpose: RunPurpose) -> object:

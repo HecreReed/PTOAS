@@ -13,29 +13,33 @@
 #endif
 
 // Case 0: f32 16x64
-extern "C" __global__ AICORE void TRSQRT_f32_16x64(__gm__ float *a, __gm__ float *b);
+extern "C" __global__ AICORE void TRSQRT_f32_16x64(__gm__ float* a, __gm__ float* b);
 
-void LaunchTRSQRT_f32_16x64(void *a, void *b, void *stream) {
-    TRSQRT_f32_16x64<<<1, nullptr, stream>>>((__gm__ float *)a, (__gm__ float *)b);
+void LaunchTRSQRT_f32_16x64(void* a, void* b, void* stream)
+{
+    TRSQRT_f32_16x64<<<1, nullptr, stream>>>((__gm__ float*)a, (__gm__ float*)b);
 }
 
 // Case 1: f32 32x32
-extern "C" __global__ AICORE void TRSQRT_f32_32x32(__gm__ float *a, __gm__ float *b);
+extern "C" __global__ AICORE void TRSQRT_f32_32x32(__gm__ float* a, __gm__ float* b);
 
-void LaunchTRSQRT_f32_32x32(void *a, void *b, void *stream) {
-    TRSQRT_f32_32x32<<<1, nullptr, stream>>>((__gm__ float *)a, (__gm__ float *)b);
+void LaunchTRSQRT_f32_32x32(void* a, void* b, void* stream)
+{
+    TRSQRT_f32_32x32<<<1, nullptr, stream>>>((__gm__ float*)a, (__gm__ float*)b);
 }
 
 // Case 2: f16 16x64
-extern "C" __global__ AICORE void TRSQRT_f16_16x64(__gm__ uint16_t *a, __gm__ uint16_t *b);
+extern "C" __global__ AICORE void TRSQRT_f16_16x64(__gm__ uint16_t* a, __gm__ uint16_t* b);
 
-void LaunchTRSQRT_f16_16x64(void *a, void *b, void *stream) {
-    TRSQRT_f16_16x64<<<1, nullptr, stream>>>((__gm__ uint16_t *)a, (__gm__ uint16_t *)b);
+void LaunchTRSQRT_f16_16x64(void* a, void* b, void* stream)
+{
+    TRSQRT_f16_16x64<<<1, nullptr, stream>>>((__gm__ uint16_t*)a, (__gm__ uint16_t*)b);
 }
 
 // Case 3: f16 32x32
-extern "C" __global__ AICORE void TRSQRT_f16_32x32(__gm__ uint16_t *a, __gm__ uint16_t *b);
+extern "C" __global__ AICORE void TRSQRT_f16_32x32(__gm__ uint16_t* a, __gm__ uint16_t* b);
 
-void LaunchTRSQRT_f16_32x32(void *a, void *b, void *stream) {
-    TRSQRT_f16_32x32<<<1, nullptr, stream>>>((__gm__ uint16_t *)a, (__gm__ uint16_t *)b);
+void LaunchTRSQRT_f16_32x32(void* a, void* b, void* stream)
+{
+    TRSQRT_f16_32x32<<<1, nullptr, stream>>>((__gm__ uint16_t*)a, (__gm__ uint16_t*)b);
 }

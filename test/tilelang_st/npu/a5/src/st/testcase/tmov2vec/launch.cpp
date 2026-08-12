@@ -12,8 +12,9 @@
 #define AICORE [aicore]
 #endif
 
-extern "C" __global__ AICORE void TMOV2VEC_f16_f32_16x16x16(__gm__ uint16_t *a, __gm__ uint16_t *b, __gm__ float *c);
+extern "C" __global__ AICORE void TMOV2VEC_f16_f32_16x16x16(__gm__ uint16_t* a, __gm__ uint16_t* b, __gm__ float* c);
 
-void LaunchTMOV2VEC_f16_f32_16x16x16(uint16_t *a, uint16_t *b, float *c, void *stream) {
-    TMOV2VEC_f16_f32_16x16x16<<<1, nullptr, stream>>>((__gm__ uint16_t *)a, (__gm__ uint16_t *)b, (__gm__ float *)c);
+void LaunchTMOV2VEC_f16_f32_16x16x16(uint16_t* a, uint16_t* b, float* c, void* stream)
+{
+    TMOV2VEC_f16_f32_16x16x16<<<1, nullptr, stream>>>((__gm__ uint16_t*)a, (__gm__ uint16_t*)b, (__gm__ float*)c);
 }

@@ -27,14 +27,14 @@ from ptodsl import pto
 
 
 PTO_TO_NP_DTYPE = {
-    pto.f32:  np.float32,
-    pto.f16:  np.float16,
-    pto.i32:  np.int32,
-    pto.i16:  np.int16,
-    pto.i8:   np.int8,
+    pto.f32: np.float32,
+    pto.f16: np.float16,
+    pto.i32: np.int32,
+    pto.i16: np.int16,
+    pto.i8: np.int8,
     pto.ui32: np.uint32,
     pto.ui16: np.uint16,
-    pto.ui8:  np.uint8,
+    pto.ui8: np.uint8,
 }
 
 
@@ -62,7 +62,9 @@ CASE_SHAPES = [
 ]
 
 
-def _tgatherb_body(src_ptr, offset_ptr, dst_ptr, *, src_rows, src_cols, dst_rows, dst_cols, dtype):
+def _tgatherb_body(
+    src_ptr, offset_ptr, dst_ptr, *, src_rows, src_cols, dst_rows, dst_cols, dtype
+):
     """Shared kernel body for the tgatherb cases.
 
     Loads *src* and *offset* tiles from GM, performs block-gather using
@@ -71,9 +73,15 @@ def _tgatherb_body(src_ptr, offset_ptr, dst_ptr, *, src_rows, src_cols, dst_rows
     block_size_elem = 32 // np.dtype(npy_dtype(dtype)).itemsize
     offset_cols = dst_cols // block_size_elem
 
-    src_view = pto.make_tensor_view(src_ptr, shape=[src_rows, src_cols], strides=[src_cols, 1])
-    offset_view = pto.make_tensor_view(offset_ptr, shape=[dst_rows, offset_cols], strides=[offset_cols, 1])
-    dst_view = pto.make_tensor_view(dst_ptr, shape=[dst_rows, dst_cols], strides=[dst_cols, 1])
+    src_view = pto.make_tensor_view(
+        src_ptr, shape=[src_rows, src_cols], strides=[src_cols, 1]
+    )
+    offset_view = pto.make_tensor_view(
+        offset_ptr, shape=[dst_rows, offset_cols], strides=[offset_cols, 1]
+    )
+    dst_view = pto.make_tensor_view(
+        dst_ptr, shape=[dst_rows, dst_cols], strides=[dst_cols, 1]
+    )
 
     src_tile = pto.alloc_tile(shape=[src_rows, src_cols], dtype=dtype)
     offset_tile = pto.alloc_tile(shape=[dst_rows, offset_cols], dtype=pto.ui32)
@@ -91,19 +99,24 @@ for _name, _dtype, _src_shape, _dst_shape in CASE_SHAPES:
     _sr, _sc = _src_shape
     _dr, _dc = _dst_shape
 
-    def _make(sr=_sr, sc=_sc, dr=_dr, dc=_dc, dtype=_dtype, kernel_name=f"tgatherb_{_name}"):
-        @pto.jit(
-            name=kernel_name,
-            target="a5"
-        )
+    def _make(
+        sr=_sr, sc=_sc, dr=_dr, dc=_dc, dtype=_dtype, kernel_name=f"tgatherb_{_name}"
+    ):
+        @pto.jit(name=kernel_name, target="a5")
         def _kernel(
             src_ptr: pto.ptr(dtype, "gm"),
             offset_ptr: pto.ptr(pto.ui32, "gm"),
             dst_ptr: pto.ptr(dtype, "gm"),
         ):
             _tgatherb_body(
-                src_ptr, offset_ptr, dst_ptr,
-                src_rows=sr, src_cols=sc, dst_rows=dr, dst_cols=dc, dtype=dtype,
+                src_ptr,
+                offset_ptr,
+                dst_ptr,
+                src_rows=sr,
+                src_cols=sc,
+                dst_rows=dr,
+                dst_cols=dc,
+                dtype=dtype,
             )
 
         return _kernel
@@ -162,7 +175,10 @@ for _name, _dtype, _src_shape, _dst_shape in CASE_SHAPES:
         golden_output_case(
             "tgatherb_" + _name,
             _tgatherb_kernels[_name],
-            inputs=lambda _n=_name, _d=_dtype, _ss=_src_shape, _ds=_dst_shape: _make_inputs(_n, _d, _ss, _ds),
+            inputs=lambda _n=_name,
+            _d=_dtype,
+            _ss=_src_shape,
+            _ds=_dst_shape: _make_inputs(_n, _d, _ss, _ds),
             expected=lambda src, offsets, _d=_dtype: _make_expected(src, offsets, _d),
             rtol=1e-6,
             atol=1e-6,

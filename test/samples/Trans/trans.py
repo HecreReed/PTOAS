@@ -52,7 +52,9 @@ def build():
                 tv1 = pto.MakeTensorViewOp(tv2_f32, arg1, [c32, c32], [c32, c1]).result
 
                 # input subview
-                sv0 = pto.PartitionViewOp(tile_view_32, tv0, offsets=[c0, c0], sizes=[c32, c32]).result
+                sv0 = pto.PartitionViewOp(
+                    tile_view_32, tv0, offsets=[c0, c0], sizes=[c32, c32]
+                ).result
 
                 # alloc tiles: src, tmp, dst
                 tb_src = pto.AllocTileOp(tile_buf_32).result
@@ -66,7 +68,9 @@ def build():
                 pto.TTransOp(tb_src, tb_tmp, tb_dst)
 
                 # output subview
-                sv1 = pto.PartitionViewOp(tile_view_32, tv1, offsets=[c0, c0], sizes=[c32, c32]).result
+                sv1 = pto.PartitionViewOp(
+                    tile_view_32, tv1, offsets=[c0, c0], sizes=[c32, c32]
+                ).result
 
                 # store (optional result -> None)
                 pto.TStoreOp(None, tb_dst, sv1)

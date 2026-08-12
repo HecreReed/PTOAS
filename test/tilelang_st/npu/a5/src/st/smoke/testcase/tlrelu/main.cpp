@@ -23,40 +23,42 @@
 using namespace PtoTestCommon;
 
 // Kernel launch wrappers (defined in launch.cpp)
-void LaunchTLRELU_f32_32x64_dst128(float *src, float *dst, float slope, void *stream);
-void LaunchTLRELU_f16_63x64_dst128(uint16_t *src, uint16_t *dst, float slope, void *stream);
-void LaunchTLRELU_f32_7x448_dst512(float *src, float *dst, float slope, void *stream);
-void LaunchTLRELU_f32_256x16_dst32(float *src, float *dst, float slope, void *stream);
+void LaunchTLRELU_f32_32x64_dst128(float* src, float* dst, float slope, void* stream);
+void LaunchTLRELU_f16_63x64_dst128(uint16_t* src, uint16_t* dst, float slope, void* stream);
+void LaunchTLRELU_f32_7x448_dst512(float* src, float* dst, float slope, void* stream);
+void LaunchTLRELU_f32_256x16_dst32(float* src, float* dst, float slope, void* stream);
 
-using LaunchFn = void (*)(void *, void *, float, void *);
+using LaunchFn = void (*)(void*, void*, float, void*);
 
 struct TestCase {
-    const char *name;
-    LaunchFn    launch;
-    size_t      srcRows;      // src tile rows
-    size_t      srcCols;      // src tile cols
-    size_t      dstRows;      // dst tile rows (may have padding)
-    size_t      dstCols;      // dst tile cols (may have padding)
-    size_t      validRows;    // effective computation rows  (<= srcRows, dstRows)
-    size_t      validCols;    // effective computation cols  (<= srcCols, dstCols)
-    size_t      elemSize;     // bytes per element
-    bool        isFp16;       // true for float16 case
+    const char* name;
+    LaunchFn launch;
+    size_t srcRows;   // src tile rows
+    size_t srcCols;   // src tile cols
+    size_t dstRows;   // dst tile rows (may have padding)
+    size_t dstCols;   // dst tile cols (may have padding)
+    size_t validRows; // effective computation rows  (<= srcRows, dstRows)
+    size_t validCols; // effective computation cols  (<= srcCols, dstCols)
+    size_t elemSize;  // bytes per element
+    bool isFp16;      // true for float16 case
 };
 
 static const TestCase kCases[] = {
-{"f32_32x64_dst128",    (LaunchFn)LaunchTLRELU_f32_32x64_dst128,    32,   64,   32,  128, 32,  64,  sizeof(float),  false},
-{"f32_7x448_dst512",    (LaunchFn)LaunchTLRELU_f32_7x448_dst512,    7,    448,  7,   512, 7,   448, sizeof(float),  false},
+    {"f32_32x64_dst128", (LaunchFn)LaunchTLRELU_f32_32x64_dst128, 32, 64, 32, 128, 32, 64, sizeof(float), false},
+    {"f32_7x448_dst512", (LaunchFn)LaunchTLRELU_f32_7x448_dst512, 7, 448, 7, 512, 7, 448, sizeof(float), false},
 };
 static constexpr size_t kNumCases = sizeof(kCases) / sizeof(kCases[0]);
 
-static int RunCase(const TestCase &tc, int deviceId, aclrtStream stream) {
+static int RunCase(const TestCase& tc, int deviceId, aclrtStream stream)
+{
     int rc = 0;
     size_t srcFileSize = tc.srcRows * tc.srcCols * tc.elemSize;
     size_t dstFileSize = tc.dstRows * tc.dstCols * tc.elemSize;
     size_t actualSize = 0;
 
-    std::printf("[INFO] === case: %s (src=%zux%zu, dst=%zux%zu, valid=%zux%zu) ===\n",
-                tc.name, tc.srcRows, tc.srcCols, tc.dstRows, tc.dstCols, tc.validRows, tc.validCols);
+    std::printf(
+        "[INFO] === case: %s (src=%zux%zu, dst=%zux%zu, valid=%zux%zu) ===\n", tc.name, tc.srcRows, tc.srcCols,
+        tc.dstRows, tc.dstCols, tc.validRows, tc.validCols);
 
     // Per-case data directory
     std::string caseDir = std::string("./") + tc.name;
@@ -83,7 +85,7 @@ static int RunCase(const TestCase &tc, int deviceId, aclrtStream stream) {
             std::fprintf(stderr, "[ERROR] failed to open %s/slope.bin\n", caseDir.c_str());
             rc = 1;
         } else {
-            slopeFile.read(reinterpret_cast<char *>(&slope), sizeof(float));
+            slopeFile.read(reinterpret_cast<char*>(&slope), sizeof(float));
             slopeFile.close();
         }
     }
@@ -116,16 +118,17 @@ static int RunCase(const TestCase &tc, int deviceId, aclrtStream stream) {
     return rc;
 }
 
-int main(int argc, char *argv[]) {
+int main(int argc, char* argv[])
+{
     // Optional case filter: ./tlrelu [case_name]
-    const char *caseFilter = (argc > 1) ? argv[1] : nullptr;
+    const char* caseFilter = (argc > 1) ? argv[1] : nullptr;
 
     int rc = 0;
     int deviceId = 0;
     aclrtStream stream = nullptr;
 
     aclInit(nullptr);
-    if (const char *envDevice = std::getenv("ACL_DEVICE_ID")) {
+    if (const char* envDevice = std::getenv("ACL_DEVICE_ID")) {
         deviceId = std::atoi(envDevice);
     }
     aclrtSetDevice(deviceId);

@@ -12,45 +12,54 @@
 
 using namespace PtoTestCommon;
 
-#define ACL_CHECK(expr) do { const aclError _ret = (expr); if (_ret != ACL_SUCCESS) { std::fprintf(stderr, "[ERROR] %s failed: %d (%s:%d)\n", #expr, (int)_ret, __FILE__, __LINE__); rc = 1; goto cleanup; } } while (0)
+#define ACL_CHECK(expr)                                                                                    \
+    do {                                                                                                   \
+        const aclError _ret = (expr);                                                                      \
+        if (_ret != ACL_SUCCESS) {                                                                         \
+            std::fprintf(stderr, "[ERROR] %s failed: %d (%s:%d)\n", #expr, (int)_ret, __FILE__, __LINE__); \
+            rc = 1;                                                                                        \
+            goto cleanup;                                                                                  \
+        }                                                                                                  \
+    } while (0)
 
-void LaunchSimt_gm_memory_core_kernel(int *v1, void *stream);
+void LaunchSimt_gm_memory_core_kernel(int* v1, void* stream);
 
-int main() {
-  size_t elemCount_v1 = 128;
-  size_t fileSize_v1 = elemCount_v1 * sizeof(int);
-  int *v1Host = nullptr;
-  int *v1Device = nullptr;
-  int rc = 0;
-  bool aclInited = false;
-  bool deviceSet = false;
-  int deviceId = 0;
-  aclrtStream stream = nullptr;
+int main()
+{
+    size_t elemCount_v1 = 128;
+    size_t fileSize_v1 = elemCount_v1 * sizeof(int);
+    int* v1Host = nullptr;
+    int* v1Device = nullptr;
+    int rc = 0;
+    bool aclInited = false;
+    bool deviceSet = false;
+    int deviceId = 0;
+    aclrtStream stream = nullptr;
 
-  ACL_CHECK(aclInit(nullptr));
-  aclInited = true;
-  if (const char *envDevice = std::getenv("ACL_DEVICE_ID"))
-    deviceId = std::atoi(envDevice);
-  ACL_CHECK(aclrtSetDevice(deviceId));
-  deviceSet = true;
-  ACL_CHECK(aclrtCreateStream(&stream));
-  ACL_CHECK(aclrtMallocHost((void **)(&v1Host), fileSize_v1));
-  ACL_CHECK(aclrtMalloc((void **)&v1Device, fileSize_v1, ACL_MEM_MALLOC_HUGE_FIRST));
-  ReadFile("./v1.bin", fileSize_v1, v1Host, fileSize_v1);
-  ACL_CHECK(aclrtMemcpy(v1Device, fileSize_v1, v1Host, fileSize_v1, ACL_MEMCPY_HOST_TO_DEVICE));
-  LaunchSimt_gm_memory_core_kernel(v1Device, stream);
-  ACL_CHECK(aclrtSynchronizeStream(stream));
-  ACL_CHECK(aclrtMemcpy(v1Host, fileSize_v1, v1Device, fileSize_v1, ACL_MEMCPY_DEVICE_TO_HOST));
-  WriteFile("./v1.bin", v1Host, fileSize_v1);
+    ACL_CHECK(aclInit(nullptr));
+    aclInited = true;
+    if (const char* envDevice = std::getenv("ACL_DEVICE_ID"))
+        deviceId = std::atoi(envDevice);
+    ACL_CHECK(aclrtSetDevice(deviceId));
+    deviceSet = true;
+    ACL_CHECK(aclrtCreateStream(&stream));
+    ACL_CHECK(aclrtMallocHost((void**)(&v1Host), fileSize_v1));
+    ACL_CHECK(aclrtMalloc((void**)&v1Device, fileSize_v1, ACL_MEM_MALLOC_HUGE_FIRST));
+    ReadFile("./v1.bin", fileSize_v1, v1Host, fileSize_v1);
+    ACL_CHECK(aclrtMemcpy(v1Device, fileSize_v1, v1Host, fileSize_v1, ACL_MEMCPY_HOST_TO_DEVICE));
+    LaunchSimt_gm_memory_core_kernel(v1Device, stream);
+    ACL_CHECK(aclrtSynchronizeStream(stream));
+    ACL_CHECK(aclrtMemcpy(v1Host, fileSize_v1, v1Device, fileSize_v1, ACL_MEMCPY_DEVICE_TO_HOST));
+    WriteFile("./v1.bin", v1Host, fileSize_v1);
 
 cleanup:
-  aclrtFree(v1Device);
-  aclrtFreeHost(v1Host);
-  if (stream)
-    aclrtDestroyStream(stream);
-  if (deviceSet)
-    aclrtResetDevice(deviceId);
-  if (aclInited)
-    aclFinalize();
-  return rc;
+    aclrtFree(v1Device);
+    aclrtFreeHost(v1Host);
+    if (stream)
+        aclrtDestroyStream(stream);
+    if (deviceSet)
+        aclrtResetDevice(deviceId);
+    if (aclInited)
+        aclFinalize();
+    return rc;
 }

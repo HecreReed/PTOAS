@@ -1,0 +1,13 @@
+===================================
+OAT Scan Result Summary
+===================================
+Scan Time: 2026-08-12 13:04:50
+Project: work
+Files Checked: 6
+
+-----------------------------------
+Invalid File Type Total Count: 0
+
+-----------------------------------
+License Header Invalid Total Count: 0
+===================================

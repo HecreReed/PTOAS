@@ -21,22 +21,20 @@ namespace pto {
 
 class BufidSyncCodegen {
 public:
-  BufidSyncCodegen(func::FuncOp func,
-                   const DenseMap<Operation *, BufSyncPipeBuild> &op2BufSync,
-                   const BufidSyncIdAlloc &idAlloc)
-      : func_(func), op2BufSync_(op2BufSync), idAlloc_(idAlloc) {}
+    BufidSyncCodegen(
+        func::FuncOp func, const DenseMap<Operation*, BufSyncPipeBuild>& op2BufSync, const BufidSyncIdAlloc& idAlloc)
+        : func_(func), op2BufSync_(op2BufSync), idAlloc_(idAlloc)
+    {}
 
-  LogicalResult run();
+    LogicalResult run();
 
 private:
-  std::optional<pto::SyncOpType>
-  mapPipelineToSyncOpType(PipelineType pipe) const;
-  pto::PipeEventTypeAttr getOpTypeAttr(Builder &builder,
-                                       pto::SyncOpType opType) const;
+    std::optional<pto::SyncOpType> mapPipelineToSyncOpType(PipelineType pipe) const;
+    pto::PipeEventTypeAttr getOpTypeAttr(Builder& builder, pto::SyncOpType opType) const;
 
-  func::FuncOp func_;
-  const DenseMap<Operation *, BufSyncPipeBuild> &op2BufSync_;
-  const BufidSyncIdAlloc &idAlloc_;
+    func::FuncOp func_;
+    const DenseMap<Operation*, BufSyncPipeBuild>& op2BufSync_;
+    const BufidSyncIdAlloc& idAlloc_;
 };
 
 } // namespace pto

@@ -45,7 +45,10 @@ CASE_SPECS = [
     },
 ]
 
-def _roundtrip_body(src_ptr, dst_ptr, *, rows, cols, view_strides=None, tile_kwargs=None):
+
+def _roundtrip_body(
+    src_ptr, dst_ptr, *, rows, cols, view_strides=None, tile_kwargs=None
+):
     total = rows * cols
     if view_strides is None:
         view_strides = [total, total, total, cols, 1]
@@ -76,7 +79,13 @@ for _spec in CASE_SPECS:
     _kernel_name = _spec["kernel_name"]
     _case_name = _spec["case_name"]
 
-    def _make(rows=_rows, cols=_cols, view_strides=_view_strides, tile_kwargs=_tile_kwargs, kernel_name=_kernel_name):
+    def _make(
+        rows=_rows,
+        cols=_cols,
+        view_strides=_view_strides,
+        tile_kwargs=_tile_kwargs,
+        kernel_name=_kernel_name,
+    ):
         @pto.jit(
             name=kernel_name,
             target="a5",
@@ -118,7 +127,9 @@ for _spec in CASE_SPECS:
         golden_output_case(
             "tload_store_" + _case_name,
             _tload_store_kernels[_case_name],
-            inputs=lambda _case_name=_case_name, _shape=_shape: [_make_input(_case_name, _shape)],
+            inputs=lambda _case_name=_case_name, _shape=_shape: [
+                _make_input(_case_name, _shape)
+            ],
             expected=_make_expected,
             rtol=1e-6,
             atol=1e-6,

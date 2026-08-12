@@ -10,6 +10,7 @@
 Test that TGetValOp rejects MAT tile_buf (Ascend hardware does not support
 reading from MAT tile_buf to scalar). Verification must fail.
 """
+
 from ptoas.mlir.ir import Context, Location, Module, InsertionPoint, MLIRError, UnitAttr
 from ptoas.mlir.dialects import func, arith, pto
 from ptoas.mlir.ir import F32Type, IndexType

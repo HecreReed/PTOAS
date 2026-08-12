@@ -21,47 +21,49 @@
 using namespace PtoTestCommon;
 
 // Kernel launch wrappers (defined in launch.cpp)
-void LaunchTCOLPROD_f32_1x256(float *dst, float *src, void *stream);
-void LaunchTCOLPROD_f32_16x128(float *dst, float *src, void *stream);
-void LaunchTCOLPROD_i16_1x256(void *dst, void *src, void *stream);
-void LaunchTCOLPROD_i16_16x256(void *dst, void *src, void *stream);
-void LaunchTCOLPROD_ui16_16x128(void *dst, void *src, void *stream);
-void LaunchTCOLPROD_i32_1x256(void *dst, void *src, void *stream);
-void LaunchTCOLPROD_i32_16x256(void *dst, void *src, void *stream);
-void LaunchTCOLPROD_ui32_16x128(void *dst, void *src, void *stream);
+void LaunchTCOLPROD_f32_1x256(float* dst, float* src, void* stream);
+void LaunchTCOLPROD_f32_16x128(float* dst, float* src, void* stream);
+void LaunchTCOLPROD_i16_1x256(void* dst, void* src, void* stream);
+void LaunchTCOLPROD_i16_16x256(void* dst, void* src, void* stream);
+void LaunchTCOLPROD_ui16_16x128(void* dst, void* src, void* stream);
+void LaunchTCOLPROD_i32_1x256(void* dst, void* src, void* stream);
+void LaunchTCOLPROD_i32_16x256(void* dst, void* src, void* stream);
+void LaunchTCOLPROD_ui32_16x128(void* dst, void* src, void* stream);
 
-using LaunchFnFloat = void (*)(float *, float *, void *);
-using LaunchFnVoid = void (*)(void *, void *, void *);
+using LaunchFnFloat = void (*)(float*, float*, void*);
+using LaunchFnVoid = void (*)(void*, void*, void*);
 
 struct TestCase {
-    const char *name;
-    void *launch;
-    size_t      srcRows;
-    size_t      srcCols;
-    size_t      srcValidRows;
-    size_t      srcValidCols;
-    size_t      dstRows;
-    size_t      dstCols;
-    size_t      dstValidCols;
-    size_t      elemSize;
-    bool        isFp16;
+    const char* name;
+    void* launch;
+    size_t srcRows;
+    size_t srcCols;
+    size_t srcValidRows;
+    size_t srcValidCols;
+    size_t dstRows;
+    size_t dstCols;
+    size_t dstValidCols;
+    size_t elemSize;
+    bool isFp16;
 };
 
 static const TestCase kCases[] = {
-{"f32_1x256", (void*)LaunchTCOLPROD_f32_1x256, 1, 256, 1, 255, 1, 256, 255, sizeof(float), false},
-{"i16_1x256", (void*)LaunchTCOLPROD_i16_1x256, 1, 256, 1, 255, 1, 256, 255, 2, true},
+    {"f32_1x256", (void*)LaunchTCOLPROD_f32_1x256, 1, 256, 1, 255, 1, 256, 255, sizeof(float), false},
+    {"i16_1x256", (void*)LaunchTCOLPROD_i16_1x256, 1, 256, 1, 255, 1, 256, 255, 2, true},
 };
 static constexpr size_t kNumCases = sizeof(kCases) / sizeof(kCases[0]);
 
-static int RunCase(const TestCase &tc, int deviceId, aclrtStream stream) {
+static int RunCase(const TestCase& tc, int deviceId, aclrtStream stream)
+{
     int rc = 0;
     const size_t srcElemCount = tc.srcRows * tc.srcCols;
-    const size_t srcFileSize  = srcElemCount * tc.elemSize;
+    const size_t srcFileSize = srcElemCount * tc.elemSize;
     const size_t dstElemCount = tc.dstRows * tc.dstCols;
-    const size_t dstFileSize  = dstElemCount * tc.elemSize;
+    const size_t dstFileSize = dstElemCount * tc.elemSize;
 
-    std::printf("[INFO] === case: %s (src=%zux%zu, dst=%zux%zu, fp16=%d) ===\n",
-                tc.name, tc.srcRows, tc.srcCols, tc.dstRows, tc.dstCols, tc.isFp16);
+    std::printf(
+        "[INFO] === case: %s (src=%zux%zu, dst=%zux%zu, fp16=%d) ===\n", tc.name, tc.srcRows, tc.srcCols, tc.dstRows,
+        tc.dstCols, tc.isFp16);
 
     std::string caseDir = std::string("./") + tc.name;
     size_t srcFileSizeVar = srcFileSize;
@@ -115,15 +117,16 @@ static int RunCase(const TestCase &tc, int deviceId, aclrtStream stream) {
     return rc;
 }
 
-int main(int argc, char *argv[]) {
-    const char *caseFilter = (argc > 1) ? argv[1] : nullptr;
+int main(int argc, char* argv[])
+{
+    const char* caseFilter = (argc > 1) ? argv[1] : nullptr;
 
     int rc = 0;
     int deviceId = 0;
     aclrtStream stream = nullptr;
 
     aclInit(nullptr);
-    if (const char *envDevice = std::getenv("ACL_DEVICE_ID")) {
+    if (const char* envDevice = std::getenv("ACL_DEVICE_ID")) {
         deviceId = std::atoi(envDevice);
     }
     aclrtSetDevice(deviceId);

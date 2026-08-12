@@ -53,16 +53,20 @@ for case in CASES:
     # 3. dst[0:src1_vr, 0:src1_vc] = min(dst[0:src1_vr, 0:src1_vc], src1[0:src1_vr, 0:src1_vc])
     #    (apply min in src1 valid region)
 
-    src0_eq_dst = (src0_vr == dst_vr and src0_vc == dst_vc)
-    src1_eq_dst = (src1_vr == dst_vr and src1_vc == dst_vc)
+    src0_eq_dst = src0_vr == dst_vr and src0_vc == dst_vc
+    src1_eq_dst = src1_vr == dst_vr and src1_vc == dst_vc
 
     if src0_eq_dst and src1_eq_dst:
         # Full min: both src0 and src1 cover entire dst
-        golden[:dst_vr, :dst_vc] = np.minimum(input1[:dst_vr, :dst_vc], input2[:dst_vr, :dst_vc]).astype(dtype, copy=False)
+        golden[:dst_vr, :dst_vc] = np.minimum(
+            input1[:dst_vr, :dst_vc], input2[:dst_vr, :dst_vc]
+        ).astype(dtype, copy=False)
     elif src0_eq_dst:
         # src0 covers dst, src1 is partial
         # dst = src0 (copy), then min(dst, src1) in src1 region = min(src0, src1) in src1 region, src0 in rest
-        golden[:src1_vr, :src1_vc] = np.minimum(input1[:src1_vr, :src1_vc], input2[:src1_vr, :src1_vc]).astype(dtype, copy=False)
+        golden[:src1_vr, :src1_vc] = np.minimum(
+            input1[:src1_vr, :src1_vc], input2[:src1_vr, :src1_vc]
+        ).astype(dtype, copy=False)
         if src1_vc < dst_vc:
             golden[:src1_vr, src1_vc:dst_vc] = input1[:src1_vr, src1_vc:dst_vc].copy()
         if src1_vr < dst_vr:
@@ -70,7 +74,9 @@ for case in CASES:
     elif src1_eq_dst:
         # src1 covers dst, src0 is partial
         # dst = Max, then copy src0 in src0 region, then min(dst, src1) in src1 region
-        golden[:src0_vr, :src0_vc] = np.minimum(input1[:src0_vr, :src0_vc], input2[:src0_vr, :src0_vc]).astype(dtype, copy=False)
+        golden[:src0_vr, :src0_vc] = np.minimum(
+            input1[:src0_vr, :src0_vc], input2[:src0_vr, :src0_vc]
+        ).astype(dtype, copy=False)
         if src0_vc < dst_vc:
             golden[:src0_vr, src0_vc:dst_vc] = input2[:src0_vr, src0_vc:dst_vc].copy()
         if src0_vr < dst_vr:
@@ -80,7 +86,9 @@ for case in CASES:
         min_vc = min(src0_vc, src1_vc)
 
         # Region 1: [0:min_vr, 0:min_vc] - overlapping region (both src0 and src1 valid)
-        golden[:min_vr, :min_vc] = np.minimum(input1[:min_vr, :min_vc], input2[:min_vr, :min_vc]).astype(dtype, copy=False)
+        golden[:min_vr, :min_vc] = np.minimum(
+            input1[:min_vr, :min_vc], input2[:min_vr, :min_vc]
+        ).astype(dtype, copy=False)
 
         # Region 2: [0:src0_vr, min_vc:src0_vc] if src0_vc > min_vc
         if src0_vc > min_vc:
@@ -92,7 +100,9 @@ for case in CASES:
 
         # Region 4: [min_vr:src1_vr, min_vc:src1_vc] if src1_vr > min_vr AND src1_vc > min_vc
         if src1_vr > min_vr and src1_vc > min_vc:
-            golden[min_vr:src1_vr, min_vc:src1_vc] = input2[min_vr:src1_vr, min_vc:src1_vc].copy()
+            golden[min_vr:src1_vr, min_vc:src1_vc] = input2[
+                min_vr:src1_vr, min_vc:src1_vc
+            ].copy()
 
         # Region 5: [0:min_vr, src1_vc:src0_vc] if src0_vc > src1_vc
         if src0_vc > src1_vc and min_vr > 0:
@@ -124,4 +134,6 @@ for case in CASES:
             golden[src0_vr:src1_vr, src1_vc:src0_vc] = max_val
 
     save_case_data(case["name"], {"input1": input1, "input2": input2, "golden": golden})
-    print(f"[INFO] gen_data: {case['name']} shape={shape} src0_valid={src0_valid} src1_valid={src1_valid} dst_valid={dst_valid} dtype={dtype.__name__}")
+    print(
+        f"[INFO] gen_data: {case['name']} shape={shape} src0_valid={src0_valid} src1_valid={src1_valid} dst_valid={dst_valid} dtype={dtype.__name__}"
+    )

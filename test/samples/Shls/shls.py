@@ -50,7 +50,9 @@ def build():
                 tv0 = pto.MakeTensorViewOp(tv2_i32, arg0, [c32, c32], [c32, c1]).result
                 tv1 = pto.MakeTensorViewOp(tv2_i32, arg1, [c32, c32], [c32, c1]).result
 
-                sv0 = pto.PartitionViewOp(tile_view_32, tv0, offsets=[c0, c0], sizes=[c32, c32]).result
+                sv0 = pto.PartitionViewOp(
+                    tile_view_32, tv0, offsets=[c0, c0], sizes=[c32, c32]
+                ).result
 
                 tb0 = pto.AllocTileOp(tile_buf_32).result
                 tb1 = pto.AllocTileOp(tile_buf_32).result
@@ -59,7 +61,9 @@ def build():
 
                 pto.TShlSOp(tb0, shift_count, tb1)
 
-                sv1 = pto.PartitionViewOp(tile_view_32, tv1, offsets=[c0, c0], sizes=[c32, c32]).result
+                sv1 = pto.PartitionViewOp(
+                    tile_view_32, tv1, offsets=[c0, c0], sizes=[c32, c32]
+                ).result
                 pto.TStoreOp(None, tb1, sv1)
 
                 func.ReturnOp([])

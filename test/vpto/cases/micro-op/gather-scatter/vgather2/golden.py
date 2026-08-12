@@ -35,20 +35,30 @@ def generate(output_dir: Path, seed: int) -> None:
     v3 = np.zeros((ROWS, COLS), dtype=np.float32)
 
     flat_f16 = rng.uniform(-4.0, 4.0, size=(ROWS * COLS,)).astype(np.float16)
-    offsets_u16 = (((np.arange(ROWS * COLS, dtype=np.uint32) * 11) + 5) %
-                   (ROWS * COLS)).astype(np.uint16)
+    offsets_u16 = (
+        ((np.arange(ROWS * COLS, dtype=np.uint32) * 11) + 5) % (ROWS * COLS)
+    ).astype(np.uint16)
     gathered_f16 = flat_f16[offsets_u16.astype(np.int32)].reshape(ROWS, COLS)
     v4 = flat_f16.reshape(ROWS, COLS)
     v5 = offsets_u16.reshape(ROWS, COLS)
     v6 = np.zeros((ROWS, COLS), dtype=np.float16)
 
     flat_u8 = rng.integers(0, 256, size=(ROWS * COLS,), dtype=np.uint8)
-    gathered_u8 = flat_u8[offsets_u16.astype(np.int32)].astype(np.uint16).reshape(ROWS, COLS)
+    gathered_u8 = (
+        flat_u8[offsets_u16.astype(np.int32)].astype(np.uint16).reshape(ROWS, COLS)
+    )
     v7 = flat_u8.reshape(ROWS, COLS)
     v8 = np.zeros((ROWS, COLS), dtype=np.uint16)
 
-    flat_i8 = rng.integers(-128, 128, size=(ROWS * COLS,), dtype=np.int16).astype(np.int8)
-    gathered_i8 = flat_i8[offsets_u16.astype(np.int32)].view(np.uint8).astype(np.int16).reshape(ROWS, COLS)
+    flat_i8 = rng.integers(-128, 128, size=(ROWS * COLS,), dtype=np.int16).astype(
+        np.int8
+    )
+    gathered_i8 = (
+        flat_i8[offsets_u16.astype(np.int32)]
+        .view(np.uint8)
+        .astype(np.int16)
+        .reshape(ROWS, COLS)
+    )
     v9 = flat_i8.reshape(ROWS, COLS)
     v10 = np.zeros((ROWS, COLS), dtype=np.int16)
 

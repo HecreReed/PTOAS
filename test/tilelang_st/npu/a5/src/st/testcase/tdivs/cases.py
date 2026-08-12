@@ -97,7 +97,6 @@ CASES = [
         "eps": 1e-6,
         "direction": "scalar_src",
     },
-
     # ============================================================
     # HIGH_PRECISION mode - src / scalar direction
     # ============================================================
@@ -124,7 +123,6 @@ CASES = [
         "test_pattern": "precision_sensitive",
         "ulp_tolerance": 1,
     },
-
     # Subnormal numbers
     {
         "name": "f32_16x64_hp_subnormal",
@@ -148,7 +146,6 @@ CASES = [
         "test_pattern": "subnormal",
         "ulp_tolerance": 2,
     },
-
     # Overflow/Underflow boundaries
     {
         "name": "f32_16x64_hp_overflow",
@@ -170,7 +167,6 @@ CASES = [
         "direction": "src_scalar",
         "test_pattern": "overflow",
     },
-
     # ============================================================
     # HIGH_PRECISION mode - scalar / src direction
     # ============================================================
@@ -196,7 +192,6 @@ CASES = [
         "test_pattern": "precision_sensitive",
         "ulp_tolerance": 1,
     },
-
     # Subnormal - scalar / src (scalar is normal, src contains subnormals)
     {
         "name": "f32_16x64_hp_subnormal_scalar_src",
@@ -220,7 +215,6 @@ CASES = [
         "test_pattern": "subnormal",
         "ulp_tolerance": 2,
     },
-
     # Overflow - scalar / src (division by small src values)
     {
         "name": "f32_16x64_hp_overflow_scalar_src",

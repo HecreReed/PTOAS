@@ -23,45 +23,24 @@ constexpr int32_t kMaxDAlign = 64;
 constexpr int32_t kEsF16 = 2;
 constexpr int32_t kEsF32 = 4;
 
-ROPE_CCE_INTERNAL void GmLoadContig(
-    __ubuf__ uint16_t *ub,
-    __gm__ uint16_t *gm,
-    uint32_t elemCount,
-    int32_t es)
+ROPE_CCE_INTERNAL void GmLoadContig(__ubuf__ uint16_t* ub, __gm__ uint16_t* gm, uint32_t elemCount, int32_t es)
 {
     uint32_t bytes = elemCount * (uint32_t)es;
-    copy_gm_to_ubuf_align_v2(
-        ub, gm,
-        0, 1, bytes,
-        0, 0, false, 0,
-        bytes, bytes);
+    copy_gm_to_ubuf_align_v2(ub, gm, 0, 1, bytes, 0, 0, false, 0, bytes, bytes);
 }
 
-ROPE_CCE_INTERNAL void GmStoreContig(
-    __gm__ uint16_t *gm,
-    __ubuf__ uint16_t *ub,
-    uint32_t elemCount,
-    int32_t es)
+ROPE_CCE_INTERNAL void GmStoreContig(__gm__ uint16_t* gm, __ubuf__ uint16_t* ub, uint32_t elemCount, int32_t es)
 {
     uint32_t bytes = elemCount * (uint32_t)es;
-    copy_ubuf_to_gm_align_v2(
-        gm, ub,
-        0, 1, bytes,
-        0, bytes, bytes);
+    copy_ubuf_to_gm_align_v2(gm, ub, 0, 1, bytes, 0, bytes, bytes);
 }
 
-ROPE_CCE_INTERNAL void GmLoadF16Contig(
-    __ubuf__ uint16_t *ub,
-    __gm__ uint16_t *gm,
-    uint32_t elemCount)
+ROPE_CCE_INTERNAL void GmLoadF16Contig(__ubuf__ uint16_t* ub, __gm__ uint16_t* gm, uint32_t elemCount)
 {
     GmLoadContig(ub, gm, elemCount, kEsF16);
 }
 
-ROPE_CCE_INTERNAL void GmStoreF16Contig(
-    __gm__ uint16_t *gm,
-    __ubuf__ uint16_t *ub,
-    uint32_t elemCount)
+ROPE_CCE_INTERNAL void GmStoreF16Contig(__gm__ uint16_t* gm, __ubuf__ uint16_t* ub, uint32_t elemCount)
 {
     GmStoreContig(gm, ub, elemCount, kEsF16);
 }

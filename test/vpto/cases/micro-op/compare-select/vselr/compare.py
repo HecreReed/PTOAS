@@ -16,6 +16,7 @@ import os
 import sys
 import numpy as np
 
+
 def compare_tensor(golden_path, output_path):
     if not os.path.exists(golden_path) or not os.path.exists(output_path):
         return False
@@ -26,7 +27,9 @@ def compare_tensor(golden_path, output_path):
     if not np.allclose(golden, output, rtol=0.0, atol=0.0):
         diff = np.nonzero(golden != output)[0]
         idx = int(diff[0]) if diff.size else 0
-        print(f"[ERROR] Mismatch: idx={idx} golden={float(golden[idx])} out={float(output[idx])}")
+        print(
+            f"[ERROR] Mismatch: idx={idx} golden={float(golden[idx])} out={float(output[idx])}"
+        )
         return False
     return True
 

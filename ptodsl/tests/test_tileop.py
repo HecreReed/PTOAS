@@ -178,7 +178,9 @@ def main() -> None:
         assert "only invoke @pto.simt through an explicit launch" in message
         assert "helper[dim_x, dim_y, dim_z](...)" in message
     else:
-        raise AssertionError("direct @pto.simt call inside @pto.tileop must be rejected")
+        raise AssertionError(
+            "direct @pto.simt call inside @pto.tileop must be rejected"
+        )
 
     try:
         invalid_scalar_argument_entry.compile(TRACE_TOKEN=1)
@@ -195,7 +197,9 @@ def main() -> None:
         assert "cannot call @pto.jit(entry=False)" in message
         assert "enclosing @pto.jit kernel" in message
     else:
-        raise AssertionError("@pto.tileop calls to @pto.jit(entry=False) must be rejected")
+        raise AssertionError(
+            "@pto.tileop calls to @pto.jit(entry=False) must be rejected"
+        )
 
     try:
         define_tileop_result_annotation()

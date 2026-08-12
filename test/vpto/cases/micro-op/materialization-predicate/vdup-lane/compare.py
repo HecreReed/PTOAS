@@ -30,7 +30,9 @@ def compare_bin(golden_path, output_path, dtype, eps):
     golden = np.fromfile(golden_path, dtype=dtype_np)
     output = np.fromfile(output_path, dtype=dtype_np)
     if golden.shape != output.shape:
-        print(f"[ERROR] Shape mismatch: {golden_path} {golden.shape} vs {output_path} {output.shape}")
+        print(
+            f"[ERROR] Shape mismatch: {golden_path} {golden.shape} vs {output_path} {output.shape}"
+        )
         return False
     if not np.allclose(golden, output, atol=eps, rtol=eps, equal_nan=True):
         diff = np.abs(golden.astype(np.float64) - output.astype(np.float64))

@@ -28,7 +28,9 @@ def build():
             sl = pto.SLayoutAttr.get(pto.SLayout.NoneBox, ctx)
             pd = pto.PadValueAttr.get(pto.PadValue.Zero, ctx)
 
-            cfg = pto.TileBufConfigAttr.get(bl, sl, pto.TileConfig.fractalABSize, pd, ctx)
+            cfg = pto.TileBufConfigAttr.get(
+                bl, sl, pto.TileConfig.fractalABSize, pd, ctx
+            )
             tile_ty = pto.TileBufType.get([32, 32], f32, vec, [32, 32], cfg, ctx)
 
             fn_ty = func.FunctionType.get([ptr_f32, ptr_f32], [])
@@ -45,8 +47,12 @@ def build():
                 arg0, arg1 = entry.arguments
                 tv0 = pto.MakeTensorViewOp(tv2_f32, arg0, [c32, c32], [c32, c1]).result
                 tv1 = pto.MakeTensorViewOp(tv2_f32, arg1, [c32, c32], [c32, c1]).result
-                sv0 = pto.PartitionViewOp(tile_view_32, tv0, offsets=[c0, c0], sizes=[c32, c32]).result
-                sv1 = pto.PartitionViewOp(tile_view_32, tv1, offsets=[c0, c0], sizes=[c32, c32]).result
+                sv0 = pto.PartitionViewOp(
+                    tile_view_32, tv0, offsets=[c0, c0], sizes=[c32, c32]
+                ).result
+                sv1 = pto.PartitionViewOp(
+                    tile_view_32, tv1, offsets=[c0, c0], sizes=[c32, c32]
+                ).result
 
                 tile = pto.AllocTileOp(tile_ty).result
                 pto.TLoadOp(None, sv0, tile)

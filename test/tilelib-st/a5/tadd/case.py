@@ -31,6 +31,7 @@ CASE_SHAPES = [
     ("f32_32x32", (32, 32)),
 ]
 
+
 def _tadd_body(a_ptr, b_ptr, c_ptr, *, rows, cols):
     """Shared kernel body for the two tadd cases."""
 
@@ -75,6 +76,7 @@ def _make_inputs(name, shape):
     # Deterministic per-case seed, mirroring st_common.setup_case_rng which uses
     # crc32(name).  Original value range was randint(1, 10).
     import zlib
+
     np.random.seed(zlib.crc32(name.encode("utf-8")) & 0xFFFFFFFF)
     a = np.random.randint(1, 10, size=shape).astype(np.float32)
     b = np.random.randint(1, 10, size=shape).astype(np.float32)

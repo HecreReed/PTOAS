@@ -40,7 +40,9 @@ def build():
             bl = pto.BLayoutAttr.get(pto.BLayout.RowMajor, ctx)
             sl = pto.SLayoutAttr.get(pto.SLayout.NoneBox, ctx)
             pd = pto.PadValueAttr.get(pto.PadValue.Null, ctx)
-            cfg = pto.TileBufConfigAttr.get(bl, sl, pto.TileConfig.fractalABSize, pd, ctx)
+            cfg = pto.TileBufConfigAttr.get(
+                bl, sl, pto.TileConfig.fractalABSize, pd, ctx
+            )
             tile_buf = pto.TileBufType.get([16, 16], f16, vec, [16, 16], cfg, ctx)
 
             fn_ty = func.FunctionType.get([ptr_f16, ptr_f16, ptr_f16, ptr_f16], [])
@@ -56,10 +58,18 @@ def build():
                 c1 = _idx_const(1)
                 c16 = _idx_const(16)
 
-                tv_in0 = pto.MakeTensorViewOp(tv2, in0_ptr, [c16, c16], [c16, c1]).result
-                tv_in1 = pto.MakeTensorViewOp(tv2, in1_ptr, [c16, c16], [c16, c1]).result
-                tv_out0 = pto.MakeTensorViewOp(tv2, out0_ptr, [c16, c16], [c16, c1]).result
-                tv_out1 = pto.MakeTensorViewOp(tv2, out1_ptr, [c16, c16], [c16, c1]).result
+                tv_in0 = pto.MakeTensorViewOp(
+                    tv2, in0_ptr, [c16, c16], [c16, c1]
+                ).result
+                tv_in1 = pto.MakeTensorViewOp(
+                    tv2, in1_ptr, [c16, c16], [c16, c1]
+                ).result
+                tv_out0 = pto.MakeTensorViewOp(
+                    tv2, out0_ptr, [c16, c16], [c16, c1]
+                ).result
+                tv_out1 = pto.MakeTensorViewOp(
+                    tv2, out1_ptr, [c16, c16], [c16, c1]
+                ).result
 
                 sv_in0 = pto.PartitionViewOp(
                     tile_view, tv_in0, offsets=[c0, c0], sizes=[c16, c16]

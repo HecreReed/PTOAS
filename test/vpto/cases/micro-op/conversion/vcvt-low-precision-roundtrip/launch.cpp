@@ -11,22 +11,34 @@
 #endif
 
 #if defined(__CCE_AICORE__) && defined(__NPU_ARCH__) && (__NPU_ARCH__ == 2201)
-typedef struct { unsigned char v; } hifloat8_t;
-typedef struct { unsigned char v; } float8_e4m3_t;
-typedef struct { unsigned char v; } float8_e5m2_t;
-typedef struct { unsigned char v; } float8_e8m0_t;
-typedef struct { unsigned char v; } float4_e1m2x2_t;
-typedef struct { unsigned char v; } float4_e2m1x2_t;
+typedef struct {
+    unsigned char v;
+} hifloat8_t;
+typedef struct {
+    unsigned char v;
+} float8_e4m3_t;
+typedef struct {
+    unsigned char v;
+} float8_e5m2_t;
+typedef struct {
+    unsigned char v;
+} float8_e8m0_t;
+typedef struct {
+    unsigned char v;
+} float4_e1m2x2_t;
+typedef struct {
+    unsigned char v;
+} float4_e2m1x2_t;
 #endif
 
 #include <cstdint>
 
 #if !defined(__CCE_AICORE__) && !defined(TMRGSORT_HPP)
 struct MrgSortExecutedNumList {
-  uint16_t mrgSortList0;
-  uint16_t mrgSortList1;
-  uint16_t mrgSortList2;
-  uint16_t mrgSortList3;
+    uint16_t mrgSortList0;
+    uint16_t mrgSortList1;
+    uint16_t mrgSortList2;
+    uint16_t mrgSortList3;
 };
 #endif
 
@@ -34,22 +46,17 @@ struct MrgSortExecutedNumList {
 #include "acl/acl.h"
 #endif
 
-extern "C" __global__ [aicore] void vcvt_low_precision_roundtrip_kernel(
-    __gm__ uint8_t *f8e4_in, __gm__ uint8_t *f8e5_in,
-    __gm__ uint8_t *hif8_in, __gm__ uint8_t *f4e1_in,
-    __gm__ uint8_t *f4e2_in, __gm__ uint8_t *f8e4_out,
-    __gm__ uint8_t *f8e5_out, __gm__ uint8_t *hif8_out,
-    __gm__ uint8_t *f4e1_out, __gm__ uint8_t *f4e2_out);
+extern "C" __global__[aicore] void vcvt_low_precision_roundtrip_kernel(
+    __gm__ uint8_t* f8e4_in, __gm__ uint8_t* f8e5_in, __gm__ uint8_t* hif8_in, __gm__ uint8_t* f4e1_in,
+    __gm__ uint8_t* f4e2_in, __gm__ uint8_t* f8e4_out, __gm__ uint8_t* f8e5_out, __gm__ uint8_t* hif8_out,
+    __gm__ uint8_t* f4e1_out, __gm__ uint8_t* f4e2_out);
 
 void LaunchVcvt_low_precision_roundtrip_kernel(
-    uint8_t *f8e4_in, uint8_t *f8e5_in, uint8_t *hif8_in,
-    uint8_t *f4e1_in, uint8_t *f4e2_in, uint8_t *f8e4_out,
-    uint8_t *f8e5_out, uint8_t *hif8_out, uint8_t *f4e1_out,
-    uint8_t *f4e2_out, void *stream) {
-  vcvt_low_precision_roundtrip_kernel<<<1, nullptr, stream>>>(
-      (__gm__ uint8_t *)f8e4_in, (__gm__ uint8_t *)f8e5_in,
-      (__gm__ uint8_t *)hif8_in, (__gm__ uint8_t *)f4e1_in,
-      (__gm__ uint8_t *)f4e2_in, (__gm__ uint8_t *)f8e4_out,
-      (__gm__ uint8_t *)f8e5_out, (__gm__ uint8_t *)hif8_out,
-      (__gm__ uint8_t *)f4e1_out, (__gm__ uint8_t *)f4e2_out);
+    uint8_t* f8e4_in, uint8_t* f8e5_in, uint8_t* hif8_in, uint8_t* f4e1_in, uint8_t* f4e2_in, uint8_t* f8e4_out,
+    uint8_t* f8e5_out, uint8_t* hif8_out, uint8_t* f4e1_out, uint8_t* f4e2_out, void* stream)
+{
+    vcvt_low_precision_roundtrip_kernel<<<1, nullptr, stream>>>(
+        (__gm__ uint8_t*)f8e4_in, (__gm__ uint8_t*)f8e5_in, (__gm__ uint8_t*)hif8_in, (__gm__ uint8_t*)f4e1_in,
+        (__gm__ uint8_t*)f4e2_in, (__gm__ uint8_t*)f8e4_out, (__gm__ uint8_t*)f8e5_out, (__gm__ uint8_t*)hif8_out,
+        (__gm__ uint8_t*)f4e1_out, (__gm__ uint8_t*)f4e2_out);
 }

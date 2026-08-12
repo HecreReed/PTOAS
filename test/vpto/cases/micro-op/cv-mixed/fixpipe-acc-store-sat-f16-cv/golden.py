@@ -54,8 +54,9 @@ def generate(output_dir: Path) -> None:
         posinf=np.finfo(np.float16).max,
         neginf=np.finfo(np.float16).min,
     )
-    sat_golden = np.clip(sat_golden, np.finfo(np.float16).min,
-                         np.finfo(np.float16).max).astype(np.float16)
+    sat_golden = np.clip(
+        sat_golden, np.finfo(np.float16).min, np.finfo(np.float16).max
+    ).astype(np.float16)
     with np.errstate(over="ignore", invalid="ignore"):
         nosat_golden = matmul.astype(np.float16)
     if np.array_equal(sat_golden.view(np.uint16), nosat_golden.view(np.uint16)):

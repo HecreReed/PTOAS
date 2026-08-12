@@ -27,8 +27,8 @@ CASES = [
         "dtype": np.float32,
         "src0_shape": (8, 128),
         "src0_valid_shape": (8, 128),
-        "src1_shape": (8, 8),         # physical: 32/sizeof(f32)=8
-        "src1_valid_shape": (8, 1),   # src1Col=1
+        "src1_shape": (8, 8),  # physical: 32/sizeof(f32)=8
+        "src1_valid_shape": (8, 1),  # src1Col=1
         "dst_shape": (8, 128),
         "dst_valid_shape": (8, 128),
         "eps": 1e-6,
@@ -51,7 +51,7 @@ CASES = [
         "dtype": np.float16,
         "src0_shape": (16, 256),
         "src0_valid_shape": (16, 256),
-        "src1_shape": (16, 16),       # physical: 32/sizeof(f16)=16
+        "src1_shape": (16, 16),  # physical: 32/sizeof(f16)=16
         "src1_valid_shape": (16, 1),
         "dst_shape": (16, 256),
         "dst_valid_shape": (16, 256),
@@ -73,7 +73,7 @@ CASES = [
     {
         "name": "f32_16x128_noeq",
         "dtype": np.float32,
-        "src0_shape": (16, 128),      # src0eqdst=false
+        "src0_shape": (16, 128),  # src0eqdst=false
         "src0_valid_shape": (16, 128),
         "src1_shape": (16, 8),
         "src1_valid_shape": (16, 1),
@@ -87,7 +87,7 @@ CASES = [
         "dtype": np.int32,
         "src0_shape": (16, 32),
         "src0_valid_shape": (16, 32),
-        "src1_shape": (16, 8),        # physical: 32/sizeof(i32)=8
+        "src1_shape": (16, 8),  # physical: 32/sizeof(i32)=8
         "src1_valid_shape": (16, 1),
         "dst_shape": (16, 32),
         "dst_valid_shape": (16, 32),
@@ -99,7 +99,7 @@ CASES = [
         "dtype": np.int16,
         "src0_shape": (16, 64),
         "src0_valid_shape": (16, 64),
-        "src1_shape": (16, 16),       # physical: 32/sizeof(i16)=16
+        "src1_shape": (16, 16),  # physical: 32/sizeof(i16)=16
         "src1_valid_shape": (16, 1),
         "dst_shape": (16, 64),
         "dst_valid_shape": (16, 64),

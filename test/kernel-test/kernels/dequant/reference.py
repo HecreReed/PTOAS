@@ -37,7 +37,9 @@ def _case_id(src_fmt: str, dst_fmt: str) -> str:
 
 
 def _e8m0_to_f32(bits: np.ndarray) -> np.ndarray:
-    return np.exp2(np.asarray(bits, dtype=np.uint8).astype(np.int32) - 127).astype(np.float32)
+    return np.exp2(np.asarray(bits, dtype=np.uint8).astype(np.int32) - 127).astype(
+        np.float32
+    )
 
 
 def _torch_src_dtype(src_fmt: str) -> torch.dtype:
@@ -48,7 +50,9 @@ def _torch_src_dtype(src_fmt: str) -> torch.dtype:
     raise ValueError(f"unknown src_fmt: {src_fmt}")
 
 
-def _quantize_src_to_bits(src_fmt: str, values: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+def _quantize_src_to_bits(
+    src_fmt: str, values: np.ndarray
+) -> tuple[np.ndarray, np.ndarray]:
     values_t = torch.from_numpy(np.asarray(values, dtype=np.float32))
     quantized_t = values_t.to(_torch_src_dtype(src_fmt))
     x_bits = quantized_t.view(torch.uint8).numpy().copy()
@@ -63,7 +67,13 @@ def _cast_output(dst_fmt: str, values: np.ndarray) -> np.ndarray:
     if dst_fmt == "f16":
         return values.astype(np.float16).astype(np.float32)
     if dst_fmt == "bf16":
-        return torch.from_numpy(values).to(torch.bfloat16).float().numpy().astype(np.float32, copy=True)
+        return (
+            torch.from_numpy(values)
+            .to(torch.bfloat16)
+            .float()
+            .numpy()
+            .astype(np.float32, copy=True)
+        )
     raise ValueError(f"unknown dst_fmt: {dst_fmt}")
 
 
@@ -96,18 +106,26 @@ def generate_case(
     padded_block_num = loop_num2vf * _BLOCKS_PER_LOOP
 
     rng = np.random.default_rng(_SEED)
-    x_valid = rng.normal(0.0, 0.5, size=total_block_num * _BLOCK_SIZE).astype(np.float32)
+    x_valid = rng.normal(0.0, 0.5, size=total_block_num * _BLOCK_SIZE).astype(
+        np.float32
+    )
     x_padded = np.zeros(padded_block_num * _BLOCK_SIZE, dtype=np.float32)
     x_padded[: x_valid.size] = x_valid
 
-    scale_bits = np.tile(_E8M0_BYTES, (total_block_num + _E8M0_BYTES.size - 1) // _E8M0_BYTES.size)[:total_block_num]
+    scale_bits = np.tile(
+        _E8M0_BYTES, (total_block_num + _E8M0_BYTES.size - 1) // _E8M0_BYTES.size
+    )[:total_block_num]
     scale_bits = scale_bits.astype(np.uint8, copy=True)
     scale_values = _e8m0_to_f32(scale_bits)
-    scale_bits_padded = np.zeros(loop_num2vf * _RAW_SCALE_BYTES_PER_LOOP, dtype=np.uint8)
+    scale_bits_padded = np.zeros(
+        loop_num2vf * _RAW_SCALE_BYTES_PER_LOOP, dtype=np.uint8
+    )
     for i in range(loop_num2vf):
         src_off = i * _BLOCKS_PER_LOOP
         dst_off = i * _RAW_SCALE_BYTES_PER_LOOP
-        scale_bits_padded[dst_off : dst_off + _BLOCKS_PER_LOOP] = scale_bits[src_off : src_off + _BLOCKS_PER_LOOP]
+        scale_bits_padded[dst_off : dst_off + _BLOCKS_PER_LOOP] = scale_bits[
+            src_off : src_off + _BLOCKS_PER_LOOP
+        ]
 
     x_bits, x_quantized = _quantize_src_to_bits(src_fmt, x_padded)
     block_scale = np.zeros(padded_block_num, dtype=np.float32)

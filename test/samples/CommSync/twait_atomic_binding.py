@@ -6,7 +6,15 @@
 # INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
 # See LICENSE in the root of the software repository for the full text of the License.
 
-from ptoas.mlir.ir import Context, IndexType, InsertionPoint, IntegerType, Location, Module, UnitAttr
+from ptoas.mlir.ir import (
+    Context,
+    IndexType,
+    InsertionPoint,
+    IntegerType,
+    Location,
+    Module,
+    UnitAttr,
+)
 from ptoas.mlir.dialects import arith, func, pto, scf
 
 
@@ -31,14 +39,20 @@ def build():
                 entry = fn.add_entry_block()
 
             with InsertionPoint(entry):
-                local_counter_ptr, remote_counter_ptr, threshold, iters, my_rank = entry.arguments
+                local_counter_ptr, remote_counter_ptr, threshold, iters, my_rank = (
+                    entry.arguments
+                )
                 c0 = arith.ConstantOp(idx, 0).result
                 c1 = arith.ConstantOp(idx, 1).result
                 c0_i32 = arith.ConstantOp(i32, 0).result
                 c1_i32 = arith.ConstantOp(i32, 1).result
 
-                local_view = pto.MakeTensorViewOp(tv_i32, local_counter_ptr, [c1], [c1]).result
-                remote_view = pto.MakeTensorViewOp(tv_i32, remote_counter_ptr, [c1], [c1]).result
+                local_view = pto.MakeTensorViewOp(
+                    tv_i32, local_counter_ptr, [c1], [c1]
+                ).result
+                remote_view = pto.MakeTensorViewOp(
+                    tv_i32, remote_counter_ptr, [c1], [c1]
+                ).result
                 local_counter = pto.PartitionViewOp(
                     pv_i32, local_view, offsets=[c0], sizes=[c1]
                 ).result
@@ -46,7 +60,9 @@ def build():
                     pv_i32, remote_view, offsets=[c0], sizes=[c1]
                 ).result
 
-                is_non_root = arith.CmpIOp(arith.CmpIPredicate.ne, my_rank, c0_i32).result
+                is_non_root = arith.CmpIOp(
+                    arith.CmpIPredicate.ne, my_rank, c0_i32
+                ).result
                 branch = scf.IfOp(is_non_root, [], hasElse=True)
 
                 with InsertionPoint(branch.then_block):

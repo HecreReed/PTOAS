@@ -25,14 +25,22 @@ for case in CASES:
 
     if dtype in (np.int8, np.uint8, np.int16, np.uint16, np.int32, np.uint32):
         dtype_info = np.iinfo(dtype)
-        input1 = np.random.randint(dtype_info.min, dtype_info.max, size=shape).astype(dtype)
+        input1 = np.random.randint(dtype_info.min, dtype_info.max, size=shape).astype(
+            dtype
+        )
     else:
         dtype_info = np.finfo(dtype)
-        input1 = np.random.uniform(low=dtype_info.min, high=dtype_info.max, size=shape).astype(dtype)
+        input1 = np.random.uniform(
+            low=dtype_info.min, high=dtype_info.max, size=shape
+        ).astype(dtype)
 
     out_shape = (valid_shape[0], 1)
     golden = np.zeros(out_shape, dtype=dst_dtype)
-    golden[:, 0:1] = np.argmin(input1[:, :valid_shape[1]], axis=1, keepdims=True).astype(dst_dtype)
+    golden[:, 0:1] = np.argmin(
+        input1[:, : valid_shape[1]], axis=1, keepdims=True
+    ).astype(dst_dtype)
 
     save_case_data(case["name"], {"input1": input1, "golden": golden})
-    print(f"[INFO] gen_data: {case['name']} shape={shape} valid_shape={valid_shape} dtype={dtype.__name__}")
+    print(
+        f"[INFO] gen_data: {case['name']} shape={shape} valid_shape={valid_shape} dtype={dtype.__name__}"
+    )

@@ -10,7 +10,6 @@
 # coding=utf-8
 
 import numpy as np
-import struct
 from cases import CASES
 from st_common import validate_cases, setup_case_rng, save_case_data
 
@@ -41,5 +40,9 @@ for case in CASES:
 
     slope_arr = np.array([slope[0, 0]], dtype=np.float32)
 
-    save_case_data(case["name"], {"input": input_arr, "slope": slope_arr, "golden": golden})
-    print(f"[INFO] gen_data: {case['name']} shape={shape} dst_shape={dst_shape} valid_shape={valid_shape} dtype={dtype.__name__}")
+    save_case_data(
+        case["name"], {"input": input_arr, "slope": slope_arr, "golden": golden}
+    )
+    print(
+        f"[INFO] gen_data: {case['name']} shape={shape} dst_shape={dst_shape} valid_shape={valid_shape} dtype={dtype.__name__}"
+    )

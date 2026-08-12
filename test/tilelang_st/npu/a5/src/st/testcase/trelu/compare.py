@@ -29,8 +29,12 @@ def main():
         case_dir = case["name"]
         shape = case["shape"]
 
-        golden = np.fromfile(os.path.join(case_dir, "golden.bin"), dtype=case["dtype"]).reshape(shape)
-        output = np.fromfile(os.path.join(case_dir, "output.bin"), dtype=case["dtype"]).reshape(shape)
+        golden = np.fromfile(
+            os.path.join(case_dir, "golden.bin"), dtype=case["dtype"]
+        ).reshape(shape)
+        output = np.fromfile(
+            os.path.join(case_dir, "output.bin"), dtype=case["dtype"]
+        ).reshape(shape)
 
         ok = result_cmp(golden, output, case["eps"])
         if ok:

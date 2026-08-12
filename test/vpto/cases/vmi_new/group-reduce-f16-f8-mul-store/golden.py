@@ -18,7 +18,9 @@ ROW_STRIDE = 320
 TOTAL_ELEMS = ROWS * ROW_STRIDE
 F16_VALUES = np.array([0.125, 0.25], dtype=np.float16)
 VALUES = np.array([0.0, 1.0, -1.0, 0.5, 2.0, -2.0, 4.0, -4.0], dtype=np.float32)
-F8E4M3FN_BYTES = np.array([0x00, 0x38, 0xB8, 0x30, 0x40, 0xC0, 0x48, 0xC8], dtype=np.uint8)
+F8E4M3FN_BYTES = np.array(
+    [0x00, 0x38, 0xB8, 0x30, 0x40, 0xC0, 0x48, 0xC8], dtype=np.uint8
+)
 SENTINEL = np.float32(-123.25)
 
 

@@ -11,7 +11,9 @@ from ptodsl import pto
 import ptodsl.tilelib as tilelib
 
 
-def _ub_or_vec_row_major(operand_memory_spaces, operand_b_layouts, operand_s_layouts, **_):
+def _ub_or_vec_row_major(
+    operand_memory_spaces, operand_b_layouts, operand_s_layouts, **_
+):
     return (
         all(space in {"ub", "vec"} for space in operand_memory_spaces)
         and all(layout == "row_major" for layout in operand_b_layouts)

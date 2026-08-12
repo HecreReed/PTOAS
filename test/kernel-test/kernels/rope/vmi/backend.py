@@ -56,10 +56,18 @@ def rope_vmi_f16(
     row_bytes = SIM_D * 2
     cs_bytes = SIM_D * 2
 
-    cos_ptr = pto.castptr(pto.const(_UB_BASE_2B_COS, dtype=pto.ui64), pto.ptr(pto.f16, "ub"))
-    sin_ptr = pto.castptr(pto.const(_UB_BASE_2B_SIN, dtype=pto.ui64), pto.ptr(pto.f16, "ub"))
-    x_ptr = pto.castptr(pto.const(_UB_BASE_2B_X, dtype=pto.ui64), pto.ptr(pto.f16, "ub"))
-    y_ptr = pto.castptr(pto.const(_UB_BASE_2B_Y, dtype=pto.ui64), pto.ptr(pto.f16, "ub"))
+    cos_ptr = pto.castptr(
+        pto.const(_UB_BASE_2B_COS, dtype=pto.ui64), pto.ptr(pto.f16, "ub")
+    )
+    sin_ptr = pto.castptr(
+        pto.const(_UB_BASE_2B_SIN, dtype=pto.ui64), pto.ptr(pto.f16, "ub")
+    )
+    x_ptr = pto.castptr(
+        pto.const(_UB_BASE_2B_X, dtype=pto.ui64), pto.ptr(pto.f16, "ub")
+    )
+    y_ptr = pto.castptr(
+        pto.const(_UB_BASE_2B_Y, dtype=pto.ui64), pto.ptr(pto.f16, "ub")
+    )
 
     pto.mte_gm_ub(cos_gm, cos_ptr, 0, cs_bytes, nburst=(s_count, cs_bytes, cs_bytes))
     pto.mte_gm_ub(sin_gm, sin_ptr, 0, cs_bytes, nburst=(s_count, cs_bytes, cs_bytes))
@@ -160,10 +168,18 @@ def rope_vmi_bf16(
     row_bytes = SIM_D * 2
     cs_bytes = SIM_D * 2
 
-    cos_ptr = pto.castptr(pto.const(_UB_BASE_2B_COS, dtype=pto.ui64), pto.ptr(pto.f16, "ub"))
-    sin_ptr = pto.castptr(pto.const(_UB_BASE_2B_SIN, dtype=pto.ui64), pto.ptr(pto.f16, "ub"))
-    x_ptr = pto.castptr(pto.const(_UB_BASE_2B_X, dtype=pto.ui64), pto.ptr(pto.bf16, "ub"))
-    y_ptr = pto.castptr(pto.const(_UB_BASE_2B_Y, dtype=pto.ui64), pto.ptr(pto.bf16, "ub"))
+    cos_ptr = pto.castptr(
+        pto.const(_UB_BASE_2B_COS, dtype=pto.ui64), pto.ptr(pto.f16, "ub")
+    )
+    sin_ptr = pto.castptr(
+        pto.const(_UB_BASE_2B_SIN, dtype=pto.ui64), pto.ptr(pto.f16, "ub")
+    )
+    x_ptr = pto.castptr(
+        pto.const(_UB_BASE_2B_X, dtype=pto.ui64), pto.ptr(pto.bf16, "ub")
+    )
+    y_ptr = pto.castptr(
+        pto.const(_UB_BASE_2B_Y, dtype=pto.ui64), pto.ptr(pto.bf16, "ub")
+    )
 
     pto.mte_gm_ub(cos_gm, cos_ptr, 0, cs_bytes, nburst=(s_count, cs_bytes, cs_bytes))
     pto.mte_gm_ub(sin_gm, sin_ptr, 0, cs_bytes, nburst=(s_count, cs_bytes, cs_bytes))
@@ -270,10 +286,18 @@ def rope_vmi_f32(
     row_bytes = SIM_D * 4
     cs_bytes = SIM_D * 4
 
-    cos_ptr = pto.castptr(pto.const(_UB_BASE_4B_COS, dtype=pto.ui64), pto.ptr(pto.f32, "ub"))
-    sin_ptr = pto.castptr(pto.const(_UB_BASE_4B_SIN, dtype=pto.ui64), pto.ptr(pto.f32, "ub"))
-    x_ptr = pto.castptr(pto.const(_UB_BASE_4B_X, dtype=pto.ui64), pto.ptr(pto.f32, "ub"))
-    y_ptr = pto.castptr(pto.const(_UB_BASE_4B_Y, dtype=pto.ui64), pto.ptr(pto.f32, "ub"))
+    cos_ptr = pto.castptr(
+        pto.const(_UB_BASE_4B_COS, dtype=pto.ui64), pto.ptr(pto.f32, "ub")
+    )
+    sin_ptr = pto.castptr(
+        pto.const(_UB_BASE_4B_SIN, dtype=pto.ui64), pto.ptr(pto.f32, "ub")
+    )
+    x_ptr = pto.castptr(
+        pto.const(_UB_BASE_4B_X, dtype=pto.ui64), pto.ptr(pto.f32, "ub")
+    )
+    y_ptr = pto.castptr(
+        pto.const(_UB_BASE_4B_Y, dtype=pto.ui64), pto.ptr(pto.f32, "ub")
+    )
 
     pto.mte_gm_ub(cos_gm, cos_ptr, 0, cs_bytes, nburst=(s_count, cs_bytes, cs_bytes))
     pto.mte_gm_ub(sin_gm, sin_ptr, 0, cs_bytes, nburst=(s_count, cs_bytes, cs_bytes))
@@ -427,9 +451,14 @@ class RopeVmiBackend:
         "f32": rope_f32,
     }
 
-    def is_supported(self, case: object, *, purpose: RunPurpose) -> tuple[bool, str | None]:
+    def is_supported(
+        self, case: object, *, purpose: RunPurpose
+    ) -> tuple[bool, str | None]:
         del purpose
-        supported = case["dtype"] in {"f16", "bf16", "f32"} and case["mode"] in {"half", "interleave"}
+        supported = case["dtype"] in {"f16", "bf16", "f32"} and case["mode"] in {
+            "half",
+            "interleave",
+        }
         if supported:
             return True, None
         return False, "backend=vmi not wired for this case"

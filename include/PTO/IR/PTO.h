@@ -45,7 +45,7 @@
 //===----------------------------------------------------------------------===//
 // PTO Interfaces
 //===----------------------------------------------------------------------===//
- 
+
 #include "PTO/IR/PTOInterfaces.h.inc"
 #include "PTO/IR/VPTOInterfaces.h.inc"
 
@@ -84,43 +84,43 @@ inline constexpr int32_t kFractalABSize = 512;
 inline constexpr int32_t kFractalCSize = 1024;
 
 struct DmaLoopConfig {
-  Value count;
-  Value srcStride;
-  Value dstStride;
+    Value count;
+    Value srcStride;
+    Value dstStride;
 };
 
 struct DmaPadConfig {
-  Value value;
-  Value leftCount;
-  Value rightCount;
+    Value value;
+    Value leftCount;
+    Value rightCount;
 };
 
 struct AccStoreModeConfig {
-  AccStoreMode mode;
-  std::optional<Value> split;
-  std::optional<Value> loop0SrcStride;
+    AccStoreMode mode;
+    std::optional<Value> split;
+    std::optional<Value> loop0SrcStride;
 };
 
 struct CubeLoadFracShapeConfig {
-  Value nValue;
-  Value dValue;
+    Value nValue;
+    Value dValue;
 };
 
 struct CubeLoadFracSrcLayoutConfig {
-  Value srcInnerStride;
-  std::optional<Value> srcOuterStride;
+    Value srcInnerStride;
+    std::optional<Value> srcOuterStride;
 };
 
 struct CubeLoadFracDstGroupConfig {
-  Value groupCount;
-  Value dstLoop2Stride;
-  Value dstLoop3Stride;
-  Value dstLoop4Stride;
+    Value groupCount;
+    Value dstLoop2Stride;
+    Value dstLoop3Stride;
+    Value dstLoop4Stride;
 };
 
 struct CubeLoadFracCtrlConfig {
-  Value l2CacheCtrl;
-  Value smallc0En;
+    Value l2CacheCtrl;
+    Value smallc0En;
 };
 
 } // namespace pto
@@ -143,42 +143,41 @@ AddressSpaceAttr getPTOAddressSpaceAttr(Type type);
 /// Return true if type is a ptr/memref in GM address space (or default).
 
 enum class PTOArch {
-  A3,
-  A5,
+    A3,
+    A5,
 };
 
 /// Resolve the effective PTO target architecture from module-level IR state.
 PTOArch getTargetArch(ModuleOp module);
-PTOArch getTargetArch(Operation *op);
+PTOArch getTargetArch(Operation* op);
 bool isTargetArchA3(ModuleOp module);
 bool isTargetArchA5(ModuleOp module);
-bool isTargetArchA3(Operation *op);
-bool isTargetArchA5(Operation *op);
+bool isTargetArchA3(Operation* op);
+bool isTargetArchA5(Operation* op);
 
 enum class PTOParserTargetArch {
-  Unspecified,
-  A3,
-  A5,
+    Unspecified,
+    A3,
+    A5,
 };
 
-void setPTOParserTargetArch(MLIRContext *context, PTOParserTargetArch arch);
-PTOParserTargetArch getPTOParserTargetArch(MLIRContext *context);
+void setPTOParserTargetArch(MLIRContext* context, PTOParserTargetArch arch);
+PTOParserTargetArch getPTOParserTargetArch(MLIRContext* context);
 
 class ScopedPTOParserTargetArch {
 public:
-  explicit ScopedPTOParserTargetArch(MLIRContext *context,
-                                     PTOParserTargetArch arch);
-  ~ScopedPTOParserTargetArch();
+    explicit ScopedPTOParserTargetArch(MLIRContext* context, PTOParserTargetArch arch);
+    ~ScopedPTOParserTargetArch();
 
 private:
-  MLIRContext *context;
-  PTOParserTargetArch previousArch;
+    MLIRContext* context;
+    PTOParserTargetArch previousArch;
 };
 
 /// Return the target-specific alignment size in bytes for a supported
 /// load/store vector op. Unsupported operations, modes, and targets return
 /// std::nullopt.
-std::optional<int64_t> getLoadStoreVecAlignmentSize(Operation *op);
+std::optional<int64_t> getLoadStoreVecAlignmentSize(Operation* op);
 
 /// Function attributes that mark an explicit PTO kernel entry.
 inline constexpr llvm::StringLiteral kPTOEntryAttrName = "pto.entry";
@@ -186,25 +185,23 @@ inline constexpr llvm::StringLiteral kLegacyHACCEntryAttrName = "hacc.entry";
 inline constexpr llvm::StringLiteral kPTOKernelAttrName = "pto.kernel";
 inline constexpr llvm::StringLiteral kLegacyPTOAICoreAttrName = "pto.aicore";
 inline constexpr llvm::StringLiteral kPTOSimtEntryAttrName = "pto.simt_entry";
-inline constexpr llvm::StringLiteral kPTOSimtMaxThreadsAttrName =
-    "pto.simt_max_threads";
-inline constexpr llvm::StringLiteral kPTOSimtMaxRegistersAttrName =
-    "pto.simt_max_regs";
+inline constexpr llvm::StringLiteral kPTOSimtMaxThreadsAttrName = "pto.simt_max_threads";
+inline constexpr llvm::StringLiteral kPTOSimtMaxRegistersAttrName = "pto.simt_max_regs";
 inline constexpr llvm::StringLiteral kPTOVisibilityAttrName = "pto.visibility";
 inline constexpr llvm::StringLiteral kPTOVisibilityInternalValue = "internal";
 inline constexpr llvm::StringLiteral kPTOVisibilityExternalValue = "external";
-inline constexpr llvm::StringLiteral kPTODSLLogicalNameAttrName =
-    "pto.ptodsl.logical_name";
+inline constexpr llvm::StringLiteral kPTODSLLogicalNameAttrName = "pto.ptodsl.logical_name";
 
 /// Return the PTODSL logical function name when present, otherwise fall back to
 /// the current symbol name. PTODSL uses this to mark ABI-specialized helper and
 /// kernel-module symbols without relying on symbol-name parsing.
-inline StringRef getPTODSLLogicalNameOrSymbolName(func::FuncOp func) {
-  if (!func)
-    return {};
-  if (auto attr = func->getAttrOfType<StringAttr>(kPTODSLLogicalNameAttrName))
-    return attr.getValue();
-  return func.getSymName();
+inline StringRef getPTODSLLogicalNameOrSymbolName(func::FuncOp func)
+{
+    if (!func)
+        return {};
+    if (auto attr = func->getAttrOfType<StringAttr>(kPTODSLLogicalNameAttrName))
+        return attr.getValue();
+    return func.getSymName();
 }
 
 /// Return true if the function carries an explicit entry marker. PTO accepts
@@ -242,8 +239,7 @@ void annotatePTOEntryFunctions(ModuleOp module);
 /// This first honors ordinary nearest symbol lookup, then falls back to the
 /// outer backend-partitioned container and PTODSL ABI-specialized public
 /// helper symbols when needed.
-func::FuncOp lookupPeerFuncAcrossContainer(Operation *op,
-                                           FlatSymbolRefAttr peerAttr);
+func::FuncOp lookupPeerFuncAcrossContainer(Operation* op, FlatSymbolRefAttr peerAttr);
 
 /// Find one reserve_buffer by logical name inside a function.
 ReserveBufferOp findReserveBufferByName(func::FuncOp funcOp, StringRef name);

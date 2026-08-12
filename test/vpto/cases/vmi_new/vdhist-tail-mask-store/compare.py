@@ -20,7 +20,9 @@ def main() -> None:
         return
 
     if golden.shape != output.shape:
-        print(f"[ERROR] compare failed v3.bin: shape golden={golden.shape} output={output.shape}")
+        print(
+            f"[ERROR] compare failed v3.bin: shape golden={golden.shape} output={output.shape}"
+        )
         sys.exit(2)
     diff = np.nonzero(golden != output)[0]
     idx = int(diff[0]) if diff.size else -1

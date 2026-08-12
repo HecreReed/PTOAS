@@ -106,7 +106,9 @@ def deduce_layout(TileDataA, TileDataB):
     return LayoutT.NONE
 
 
-def resolve_acc_mode(mode: AccMode, isFirstSlice: bool, isLastSlice: bool) -> MatmulCallConfig:
+def resolve_acc_mode(
+    mode: AccMode, isFirstSlice: bool, isLastSlice: bool
+) -> MatmulCallConfig:
     if mode == AccMode.Init:
         return MatmulCallConfig(not isFirstSlice, AccPhase.Unknown)
     elif mode == AccMode.Acc:
@@ -217,17 +219,25 @@ def pto_macro_matmul(
                         with phase_is_final_br.then_:
                             pto.tile.matmul_acc(cAccTile, al0Tile, bl0Tile, cAccTile)
                         with phase_is_final_br.else_:
-                            with pto.if_(cfg.phase == AccPhase.Partial) as phase_is_partial_br:
+                            with pto.if_(
+                                cfg.phase == AccPhase.Partial
+                            ) as phase_is_partial_br:
                                 with phase_is_partial_br.then_:
-                                    pto.tile.matmul_acc(cAccTile, al0Tile, bl0Tile, cAccTile)
+                                    pto.tile.matmul_acc(
+                                        cAccTile, al0Tile, bl0Tile, cAccTile
+                                    )
                                 with phase_is_partial_br.else_:
-                                    pto.tile.matmul_acc(cAccTile, al0Tile, bl0Tile, cAccTile)
+                                    pto.tile.matmul_acc(
+                                        cAccTile, al0Tile, bl0Tile, cAccTile
+                                    )
                 with use_acc_br.else_:
                     with pto.if_(cfg.phase == AccPhase.Final) as phase_is_final_br:
                         with phase_is_final_br.then_:
                             pto.tile.matmul(al0Tile, bl0Tile, cAccTile)
                         with phase_is_final_br.else_:
-                            with pto.if_(cfg.phase == AccPhase.Partial) as phase_is_partial_br:
+                            with pto.if_(
+                                cfg.phase == AccPhase.Partial
+                            ) as phase_is_partial_br:
                                 with phase_is_partial_br.then_:
                                     pto.tile.matmul(al0Tile, bl0Tile, cAccTile)
                                 with phase_is_partial_br.else_:

@@ -32,77 +32,79 @@ using namespace mlir::pto;
 
 namespace {
 
-static bool hasReadOrWriteMemoryEffect(Operation *op) {
-  auto memEffect = dyn_cast<MemoryEffectOpInterface>(op);
-  return memEffect && (memEffect.hasEffect<MemoryEffects::Read>() ||
-                       memEffect.hasEffect<MemoryEffects::Write>());
+static bool hasReadOrWriteMemoryEffect(Operation* op)
+{
+    auto memEffect = dyn_cast<MemoryEffectOpInterface>(op);
+    return memEffect && (memEffect.hasEffect<MemoryEffects::Read>() || memEffect.hasEffect<MemoryEffects::Write>());
 }
 
-static bool isPipeAllBarrier(Operation *op) {
-  auto barrier = dyn_cast_or_null<pto::BarrierOp>(op);
-  return barrier && barrier.getPipe().getPipe() == pto::PIPE::PIPE_ALL;
+static bool isPipeAllBarrier(Operation* op)
+{
+    auto barrier = dyn_cast_or_null<pto::BarrierOp>(op);
+    return barrier && barrier.getPipe().getPipe() == pto::PIPE::PIPE_ALL;
 }
 
-static bool hasPreviousPipeAllBarrier(Operation *op) {
-  Block *block = op->getBlock();
-  if (!block)
-    return false;
-  auto it = op->getIterator();
-  if (it == block->begin())
-    return false;
-  return isPipeAllBarrier(&*std::prev(it));
+static bool hasPreviousPipeAllBarrier(Operation* op)
+{
+    Block* block = op->getBlock();
+    if (!block)
+        return false;
+    auto it = op->getIterator();
+    if (it == block->begin())
+        return false;
+    return isPipeAllBarrier(&*std::prev(it));
 }
 
-static bool shouldInjectBarrierAllBefore(Operation *op) {
-  Dialect *dialect = op->getDialect();
-  if (!dialect ||
-      dialect->getNamespace() != pto::PTODialect::getDialectNamespace())
-    return false;
+static bool shouldInjectBarrierAllBefore(Operation* op)
+{
+    Dialect* dialect = op->getDialect();
+    if (!dialect || dialect->getNamespace() != pto::PTODialect::getDialectNamespace())
+        return false;
 
-  return isa<pto::OpPipeInterface>(op) && hasReadOrWriteMemoryEffect(op);
+    return isa<pto::OpPipeInterface>(op) && hasReadOrWriteMemoryEffect(op);
 }
 
-struct PTOInjectBarrierAllSyncPass
-    : public mlir::pto::impl::PTOInjectBarrierAllSyncBase<
-          PTOInjectBarrierAllSyncPass> {
-  void runOnOperation() override {
-    func::FuncOp func = getOperation();
-    SmallVector<Operation *> insertionPoints;
-    SmallVector<func::ReturnOp> tailInsertionPoints;
-    bool sawMemoryEffectingPipeOp = false;
+struct PTOInjectBarrierAllSyncPass : public mlir::pto::impl::PTOInjectBarrierAllSyncBase<PTOInjectBarrierAllSyncPass> {
+    void runOnOperation() override
+    {
+        func::FuncOp func = getOperation();
+        SmallVector<Operation*> insertionPoints;
+        SmallVector<func::ReturnOp> tailInsertionPoints;
+        bool sawMemoryEffectingPipeOp = false;
 
-    func.walk<WalkOrder::PreOrder>([&](Operation *op) {
-      if (shouldInjectBarrierAllBefore(op)) {
-        sawMemoryEffectingPipeOp = true;
-        if (hasPreviousPipeAllBarrier(op))
-          return WalkResult::advance();
-        insertionPoints.push_back(op);
-      }
-      return WalkResult::advance();
-    });
+        func.walk<WalkOrder::PreOrder>([&](Operation* op) {
+            if (shouldInjectBarrierAllBefore(op)) {
+                sawMemoryEffectingPipeOp = true;
+                if (hasPreviousPipeAllBarrier(op))
+                    return WalkResult::advance();
+                insertionPoints.push_back(op);
+            }
+            return WalkResult::advance();
+        });
 
-    if (sawMemoryEffectingPipeOp) {
-      func.walk([&](func::ReturnOp ret) {
-        if (!hasPreviousPipeAllBarrier(ret))
-          tailInsertionPoints.push_back(ret);
-      });
+        if (sawMemoryEffectingPipeOp) {
+            func.walk([&](func::ReturnOp ret) {
+                if (!hasPreviousPipeAllBarrier(ret))
+                    tailInsertionPoints.push_back(ret);
+            });
+        }
+
+        OpBuilder builder(func.getContext());
+        auto pipeAll = pto::PipeAttr::get(func.getContext(), pto::PIPE::PIPE_ALL);
+        for (Operation* op : insertionPoints) {
+            builder.setInsertionPoint(op);
+            builder.create<pto::BarrierOp>(op->getLoc(), pipeAll);
+        }
+        for (func::ReturnOp ret : tailInsertionPoints) {
+            builder.setInsertionPoint(ret);
+            builder.create<pto::BarrierOp>(ret.getLoc(), pipeAll);
+        }
     }
-
-    OpBuilder builder(func.getContext());
-    auto pipeAll = pto::PipeAttr::get(func.getContext(), pto::PIPE::PIPE_ALL);
-    for (Operation *op : insertionPoints) {
-      builder.setInsertionPoint(op);
-      builder.create<pto::BarrierOp>(op->getLoc(), pipeAll);
-    }
-    for (func::ReturnOp ret : tailInsertionPoints) {
-      builder.setInsertionPoint(ret);
-      builder.create<pto::BarrierOp>(ret.getLoc(), pipeAll);
-    }
-  }
 };
 
 } // namespace
 
-std::unique_ptr<Pass> mlir::pto::createPTOInjectBarrierAllSyncPass() {
-  return std::make_unique<PTOInjectBarrierAllSyncPass>();
+std::unique_ptr<Pass> mlir::pto::createPTOInjectBarrierAllSyncPass()
+{
+    return std::make_unique<PTOInjectBarrierAllSyncPass>();
 }

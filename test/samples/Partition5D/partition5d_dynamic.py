@@ -16,7 +16,7 @@ valid_col = arg11
 Tile capacity fixed 256x16; valid dims are dynamic for tail blocks.
 """
 
-MLIR_TEXT = r'''module {
+MLIR_TEXT = r"""module {
   func.func @run_partition(%arg0: !pto.ptr<f32>, %arg1: !pto.ptr<f32>,
                            %arg2: index, %arg3: index, %arg4: index, %arg5: index, %arg6: index,
                            %arg7: index, %arg8: index, %arg9: index, %arg10: index, %arg11: index) {
@@ -62,7 +62,7 @@ MLIR_TEXT = r'''module {
     return
   }
 }
-'''
+"""
 
 if __name__ == "__main__":
     print(MLIR_TEXT)

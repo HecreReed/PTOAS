@@ -24,7 +24,9 @@ def compare_bin(label, golden_path, output_path):
     golden = np.fromfile(golden_path, dtype=np.uint8)
     output = np.fromfile(output_path, dtype=np.uint8)
     if golden.shape != output.shape:
-        print(f"[ERROR] {label}: shape mismatch golden={golden.shape} output={output.shape}")
+        print(
+            f"[ERROR] {label}: shape mismatch golden={golden.shape} output={output.shape}"
+        )
         return False
     if np.array_equal(golden, output):
         return True

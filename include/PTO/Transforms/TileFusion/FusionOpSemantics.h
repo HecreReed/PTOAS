@@ -19,32 +19,32 @@ namespace mlir {
 namespace pto {
 
 enum class FusionOpKind {
-  Compute,
-  LocalBoundary,
-  HardBoundary,
+    Compute,
+    LocalBoundary,
+    HardBoundary,
 };
 
 enum class FusionComputeFamily {
-  Unknown,
-  Elementwise,
-  ScalarExpand,
-  RowBroadcastBinary,
-  ReduceRow,
-  ReduceCol,
+    Unknown,
+    Elementwise,
+    ScalarExpand,
+    RowBroadcastBinary,
+    ReduceRow,
+    ReduceCol,
 };
 
 struct FusionOpSemantics {
-  FusionOpKind kind = FusionOpKind::HardBoundary;
-  FusionComputeFamily computeFamily = FusionComputeFamily::Unknown;
-  Operation *op = nullptr;
-  std::string opName;
-  SmallVector<Value, 4> tileInputs;
-  SmallVector<Value, 2> tileOutputs;
-  SmallVector<Value, 2> scalarInputs;
+    FusionOpKind kind = FusionOpKind::HardBoundary;
+    FusionComputeFamily computeFamily = FusionComputeFamily::Unknown;
+    Operation* op = nullptr;
+    std::string opName;
+    SmallVector<Value, 4> tileInputs;
+    SmallVector<Value, 2> tileOutputs;
+    SmallVector<Value, 2> scalarInputs;
 };
 
 bool isSupportedPreFusionComputeOp(StringRef opName);
-FailureOr<FusionOpSemantics> getFusionOpSemantics(Operation *op);
+FailureOr<FusionOpSemantics> getFusionOpSemantics(Operation* op);
 
 } // namespace pto
 } // namespace mlir

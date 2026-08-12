@@ -13,7 +13,9 @@ import ptodsl.tilelib as tilelib
 from ptoas.mlir.dialects import pto as _pto
 
 
-def _rowwise(src_shape, src_valid_shape, dst_shape, dst_valid_shape, src_config, dst_config, **_):
+def _rowwise(
+    src_shape, src_valid_shape, dst_shape, dst_valid_shape, src_config, dst_config, **_
+):
     return (
         tuple(src_shape) == tuple(dst_shape)
         and tuple(src_valid_shape) == tuple(dst_valid_shape)
@@ -24,7 +26,9 @@ def _rowwise(src_shape, src_valid_shape, dst_shape, dst_valid_shape, src_config,
     )
 
 
-def _rowwise_bf16_to_fp4(src_shape, src_valid_shape, dst_shape, dst_valid_shape, src_config, dst_config, **_):
+def _rowwise_bf16_to_fp4(
+    src_shape, src_valid_shape, dst_shape, dst_valid_shape, src_config, dst_config, **_
+):
     return (
         len(src_shape) == 2
         and len(dst_shape) == 2
@@ -72,7 +76,9 @@ def _part_mode(token):
 
 def _vselr_low_precision(src, idx):
     raw_src = unwrap_surface_value(src)
-    return wrap_surface_value(_pto.VselrOp(raw_src.type, raw_src, unwrap_surface_value(idx)).result)
+    return wrap_surface_value(
+        _pto.VselrOp(raw_src.type, raw_src, unwrap_surface_value(idx)).result
+    )
 
 
 def _render_tcvt(
@@ -100,7 +106,11 @@ def _render_tcvt(
             convert_mask_value = mask
             if convert_mask == "src_full":
                 convert_mask_value = pto.make_mask(src.dtype, pto.PAT.ALL)
-            vec = pto.vlds(src[row, col:], dist=load_dist) if load_dist else pto.vlds(src[row, col:])
+            vec = (
+                pto.vlds(src[row, col:], dist=load_dist)
+                if load_dist
+                else pto.vlds(src[row, col:])
+            )
             kwargs = {}
             if rnd:
                 kwargs["rnd"] = _round_mode()
@@ -183,6 +193,7 @@ template_tcvt_i16_to_f16 = _register_tcvt(
     rnd=True,
 )
 
+
 @tilelib.tile_template(
     op="pto.tcvt",
     target="a5",
@@ -225,6 +236,7 @@ def template_tcvt_f16_to_i16(src: pto.Tile, dst: pto.Tile):
             )
             pto.vsts(vec_i16, dst[row, col:], store_mask, dist=pto.VStoreDist.PK_B32)
             col_loop.update(remained=remained)
+
 
 template_tcvt_bf16_to_f16 = _register_tcvt(
     name="template_tcvt_bf16_to_f16",
@@ -362,8 +374,11 @@ def template_tcvt_f32_to_i64(src: pto.Tile, dst: pto.Tile):
                 sat=pto.VcvtSatMode.SAT,
                 part=pto.VcvtPartMode.EVEN,
             )
-            pto.vsts(converted, dst[row, col:], store_mask, dist=pto.VStoreDist.NORM_B32)
+            pto.vsts(
+                converted, dst[row, col:], store_mask, dist=pto.VStoreDist.NORM_B32
+            )
             col_loop.update(remained=remained)
+
 
 template_tcvt_f16_to_i32 = _register_tcvt(
     name="template_tcvt_f16_to_i32",
@@ -648,8 +663,12 @@ def template_tcvt_si8_to_i32(src: pto.Tile, dst: pto.Tile):
             col = col_loop.iv
             mask_b16_cur, remained = pto.make_mask(pto.i16, remained)
             mask_b16_next, next_remained = pto.make_mask(pto.i16, next_remained)
-            mask_b32_cur = pto.punpack(mask_b16_cur, pto.PredicatePart.LOWER, to_type=pto.mask_b32)
-            mask_b32_next = pto.punpack(mask_b16_next, pto.PredicatePart.LOWER, to_type=pto.mask_b32)
+            mask_b32_cur = pto.punpack(
+                mask_b16_cur, pto.PredicatePart.LOWER, to_type=pto.mask_b32
+            )
+            mask_b32_next = pto.punpack(
+                mask_b16_next, pto.PredicatePart.LOWER, to_type=pto.mask_b32
+            )
             vec_si8_0 = pto.vlds(src[row, col:], dist="UNPK_B8")
             vec_ui8_0 = pto.vbitcast(vec_si8_0, pto.ui8)
             vec_ui8_1, vec_ui8_2 = pto.vintlv(vec_ui8_0, v_zero)
@@ -657,8 +676,15 @@ def template_tcvt_si8_to_i32(src: pto.Tile, dst: pto.Tile):
             vec_si8_2 = pto.vbitcast(vec_ui8_2, pto.si8)
             output_0 = pto.vcvt(vec_si8_1, pto.i32, b8_mask, part=pto.VcvtPartMode.P0)
             output_1 = pto.vcvt(vec_si8_2, pto.i32, b8_mask, part=pto.VcvtPartMode.P0)
-            pto.vsts(output_0, dst[row, col:], mask_b32_cur, dist=pto.VStoreDist.NORM_B32)
-            pto.vsts(output_1, dst[row, col + lanes_i32:], mask_b32_next, dist=pto.VStoreDist.NORM_B32)
+            pto.vsts(
+                output_0, dst[row, col:], mask_b32_cur, dist=pto.VStoreDist.NORM_B32
+            )
+            pto.vsts(
+                output_1,
+                dst[row, col + lanes_i32 :],
+                mask_b32_next,
+                dist=pto.VStoreDist.NORM_B32,
+            )
             col_loop.update(remained=remained, next_remained=next_remained)
 
 
@@ -795,7 +821,9 @@ def template_tcvt_i32_to_i64(src: pto.Tile, dst: pto.Tile):
                 full_mask,
                 part=pto.VcvtPartMode.EVEN,
             )
-            pto.vsts(converted, dst[row, col:], store_mask, dist=pto.VStoreDist.NORM_B32)
+            pto.vsts(
+                converted, dst[row, col:], store_mask, dist=pto.VStoreDist.NORM_B32
+            )
             col_loop.update(remained=remained)
 
 
@@ -1022,7 +1050,7 @@ def template_tcvt_bf16_to_fp4(src: pto.Tile, dst: pto.Tile):
             col = col_loop.iv
             dst_mask, remained = pto.make_mask(dst_dtype, remained)
             src_mask, src_remained = pto.make_mask(src.dtype, src_remained)
-            vec = pto.vlds(src[row, col * 2:])
+            vec = pto.vlds(src[row, col * 2 :])
             converted = pto.vcvt(
                 vec,
                 dst_dtype,

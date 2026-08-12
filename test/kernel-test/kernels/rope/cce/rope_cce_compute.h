@@ -109,16 +109,9 @@ namespace rope_cce {
  * Register pressure: 10 vector_f16 registers (all 256 B each).
  *===========================================================================*/
 ROPE_CCE_INTERNAL void ComputeF16(
-    __ubuf__ uint16_t *x_ub16,
-    __ubuf__ uint16_t *cos_ub16,
-    __ubuf__ uint16_t *sin_ub16,
-    __ubuf__ uint16_t *y_ub16,
-    int32_t sCount, int32_t nCount,
-    int32_t dLen, int32_t dAlign,
-    int32_t xSStep, int32_t xNStep,
-    int32_t csSStep,
-    int32_t ySStep, int32_t yNStep,
-    int32_t mode)
+    __ubuf__ uint16_t* x_ub16, __ubuf__ uint16_t* cos_ub16, __ubuf__ uint16_t* sin_ub16, __ubuf__ uint16_t* y_ub16,
+    int32_t sCount, int32_t nCount, int32_t dLen, int32_t dAlign, int32_t xSStep, int32_t xNStep, int32_t csSStep,
+    int32_t ySStep, int32_t yNStep, int32_t mode)
 {
     __VEC_SCOPE__
     {
@@ -150,10 +143,10 @@ ROPE_CCE_INTERNAL void ComputeF16(
         //     else:  # INTERLEAVE / GPT-J layout
         //       rot = [-x1, x0, -x3, x2, ...] per (s,n) row
         //       y[s,n,:] = fp16(x[s,n,:] * cos[s,:] + rot * sin[s,:])
-        __ubuf__ half *xH = (__ubuf__ half *)x_ub16;
-        __ubuf__ half *cosH = (__ubuf__ half *)cos_ub16;
-        __ubuf__ half *sinH = (__ubuf__ half *)sin_ub16;
-        __ubuf__ half *yH = (__ubuf__ half *)y_ub16;
+        __ubuf__ half* xH = (__ubuf__ half*)x_ub16;
+        __ubuf__ half* cosH = (__ubuf__ half*)cos_ub16;
+        __ubuf__ half* sinH = (__ubuf__ half*)sin_ub16;
+        __ubuf__ half* yH = (__ubuf__ half*)y_ub16;
 
         int32_t halfD = dLen / 2;
         int32_t halfDAl = calign(halfD, (int32_t)BLOCK_BYTE_32 / 2);
@@ -184,7 +177,8 @@ ROPE_CCE_INTERNAL void ComputeF16(
                 for (uint16_t rep = 0; rep < (uint16_t)repeatTimesF16; rep++) {
                     uint16_t elemOff = (uint16_t)((uint32_t)rep * VL_F16);
                     uint32_t cnt = (uint32_t)(halfD - (int32_t)elemOff);
-                    if (cnt > (uint32_t)VL_F16) cnt = (uint32_t)VL_F16;
+                    if (cnt > (uint32_t)VL_F16)
+                        cnt = (uint32_t)VL_F16;
                     // b16 granularity mask — one bit per fp16 element, `cnt` active.
                     MaskReg mask16 = simd_inlined::make_mask_b16(cnt);
 
@@ -260,7 +254,7 @@ ROPE_CCE_INTERNAL void ComputeF16(
             vector_f16 negOne;
             simd_inlined::vbr_f16(negOne, (half)(-1.0f));
 
-            int32_t blockSize = (int32_t)VL_F32;        // 64 fp16 per interleave block
+            int32_t blockSize = (int32_t)VL_F32; // 64 fp16 per interleave block
             int32_t dBlocks = cdiv(dLen, blockSize);
 
             for (uint16_t s = 0; s < (uint16_t)sCount; s++) {
@@ -272,7 +266,7 @@ ROPE_CCE_INTERNAL void ComputeF16(
                     // pairCnt = number of (even, odd) pairs in this block = cnt/2 (rounded up).
                     uint32_t pairCnt = (cnt + 1U) / 2U;
 
-                    MaskReg mask = simd_inlined::make_mask_b16(cnt);      // full block
+                    MaskReg mask = simd_inlined::make_mask_b16(cnt);         // full block
                     MaskReg maskPair = simd_inlined::make_mask_b16(pairCnt); // pair-only
 
                     // ---- Hoisted cos/sin loads (shared across heads) ----
@@ -301,9 +295,9 @@ ROPE_CCE_INTERNAL void ComputeF16(
                         simd_inlined::vintlv_x2(hxnew, hxnew_hi, hnegodd, heven);
 
                         // ---- y = x * cos + rotated(x) * sin ----
-                        simd_inlined::vmul_f16(hta, xr, cosr, mask);     // hta = x * cos
-                        simd_inlined::vmul_f16(htb, hxnew, sinr, mask);  // htb = rotated(x) * sin
-                        simd_inlined::vadd_f16(htb, hta, htb, mask);     // y   = hta + htb
+                        simd_inlined::vmul_f16(hta, xr, cosr, mask);    // hta = x * cos
+                        simd_inlined::vmul_f16(htb, hxnew, sinr, mask); // htb = rotated(x) * sin
+                        simd_inlined::vadd_f16(htb, hta, htb, mask);    // y   = hta + htb
                         simd_inlined::vsts_norm_b16(htb, yH + yOff + off, 0, mask);
                     }
                 }
@@ -337,16 +331,9 @@ ROPE_CCE_INTERNAL void ComputeF16(
  *   incorrect fp16 bit-reinterpretation approach.
  */
 ROPE_CCE_INTERNAL void ComputeBf16(
-    __ubuf__ uint16_t *x_ub16,
-    __ubuf__ uint16_t *cos_ub16,
-    __ubuf__ uint16_t *sin_ub16,
-    __ubuf__ uint16_t *y_ub16,
-    int32_t sCount, int32_t nCount,
-    int32_t dLen, int32_t dAlign,
-    int32_t xSStep, int32_t xNStep,
-    int32_t csSStep,
-    int32_t ySStep, int32_t yNStep,
-    int32_t mode)
+    __ubuf__ uint16_t* x_ub16, __ubuf__ uint16_t* cos_ub16, __ubuf__ uint16_t* sin_ub16, __ubuf__ uint16_t* y_ub16,
+    int32_t sCount, int32_t nCount, int32_t dLen, int32_t dAlign, int32_t xSStep, int32_t xNStep, int32_t csSStep,
+    int32_t ySStep, int32_t yNStep, int32_t mode)
 {
     __VEC_SCOPE__
     {
@@ -387,10 +374,10 @@ ROPE_CCE_INTERNAL void ComputeBf16(
         // ---- Typed UB pointer setup ----
         // x/y are bf16 in UB; cos/sin are fp16 in UB.
         // Casts only set the address-space / element-type view.
-        __ubuf__ bfloat16_t *xB = (__ubuf__ bfloat16_t *)x_ub16;
-        __ubuf__ bfloat16_t *yB = (__ubuf__ bfloat16_t *)y_ub16;
-        __ubuf__ half *cosH = (__ubuf__ half *)cos_ub16;
-        __ubuf__ half *sinH = (__ubuf__ half *)sin_ub16;
+        __ubuf__ bfloat16_t* xB = (__ubuf__ bfloat16_t*)x_ub16;
+        __ubuf__ bfloat16_t* yB = (__ubuf__ bfloat16_t*)y_ub16;
+        __ubuf__ half* cosH = (__ubuf__ half*)cos_ub16;
+        __ubuf__ half* sinH = (__ubuf__ half*)sin_ub16;
 
         // halfD = D/2 (the width of each rotatable half)
         // halfDAl = halfD aligned up to (BLOCK_BYTE_32/2) = 16 elements,
@@ -425,7 +412,8 @@ ROPE_CCE_INTERNAL void ComputeBf16(
                     uint32_t elemOff = (uint32_t)rep * (uint32_t)VL_F32;
                     int32_t elemOffH = (int32_t)elemOff;
                     uint32_t cnt = (uint32_t)(halfD - elemOffH);
-                    if (cnt > (uint32_t)VL_F32) cnt = (uint32_t)VL_F32;
+                    if (cnt > (uint32_t)VL_F32)
+                        cnt = (uint32_t)VL_F32;
                     // 64-lane (b32) mask — `cnt` active fp32 lanes.
                     MaskReg mask32 = simd_inlined::make_mask(cnt);
 
@@ -434,14 +422,14 @@ ROPE_CCE_INTERNAL void ComputeBf16(
                     //   load 64 fp16 via UNPK_B16 (landing at even positions)
                     //   widen to 64 fp32 via PART_EVEN.
                     simd_inlined::vlds_unpk_b16(htmp0, cosH + csOff + elemOffH, 0);
-                    simd_inlined::vcvt_fp16_to_fp32_even(fc, htmp0, mask32);   // fc  = cos_low  (fp32)
+                    simd_inlined::vcvt_fp16_to_fp32_even(fc, htmp0, mask32); // fc  = cos_low  (fp32)
                     simd_inlined::vlds_unpk_b16(htmp0, sinH + csOff + elemOffH, 0);
-                    simd_inlined::vcvt_fp16_to_fp32_even(fs, htmp0, mask32);   // fs  = sin_low  (fp32)
+                    simd_inlined::vcvt_fp16_to_fp32_even(fs, htmp0, mask32); // fs  = sin_low  (fp32)
 
                     simd_inlined::vlds_unpk_b16(htmp0, cosH + csOff + elemOffH + halfDAl, 0);
-                    simd_inlined::vcvt_fp16_to_fp32_even(fc2, htmp0, mask32);  // fc2 = cos_high (fp32)
+                    simd_inlined::vcvt_fp16_to_fp32_even(fc2, htmp0, mask32); // fc2 = cos_high (fp32)
                     simd_inlined::vlds_unpk_b16(htmp0, sinH + csOff + elemOffH + halfDAl, 0);
-                    simd_inlined::vcvt_fp16_to_fp32_even(fs2, htmp0, mask32);  // fs2 = sin_high (fp32)
+                    simd_inlined::vcvt_fp16_to_fp32_even(fs2, htmp0, mask32); // fs2 = sin_high (fp32)
 
                     for (uint16_t n = 0; n < (uint16_t)nCount; n++) {
                         int32_t xOff = s * xSStep + n * xNStep;
@@ -450,23 +438,23 @@ ROPE_CCE_INTERNAL void ComputeBf16(
                         // ---- Per-head x load-and-widen ----
                         // Load two bf16 halves via UNPK_B16, widen each to fp32.
                         simd_inlined::vlds_unpk_b16_bf16(htmp0, xB + xOff + elemOffH, 0);
-                        simd_inlined::vcvt_bf16_to_fp32_even(fx0, htmp0, mask32);  // fx0 = x_low  (fp32)
+                        simd_inlined::vcvt_bf16_to_fp32_even(fx0, htmp0, mask32); // fx0 = x_low  (fp32)
                         simd_inlined::vlds_unpk_b16_bf16(htmp1, xB + xOff + elemOffH + halfDAl, 0);
-                        simd_inlined::vcvt_bf16_to_fp32_even(fx1, htmp1, mask32);  // fx1 = x_high (fp32)
+                        simd_inlined::vcvt_bf16_to_fp32_even(fx1, htmp1, mask32); // fx1 = x_high (fp32)
 
                         // ---- Compute y0 = cos_low * x_low - sin_low * x_high ----
-                        simd_inlined::vmul_f32(ft,  fc, fx0, mask32);   // ft  = cos_low * x_low
-                        simd_inlined::vmul_f32(ft2, fs, fx1, mask32);   // ft2 = sin_low * x_high
-                        simd_inlined::vsub_f32(ft,  ft, ft2, mask32);   // y0  = ft - ft2
+                        simd_inlined::vmul_f32(ft, fc, fx0, mask32);  // ft  = cos_low * x_low
+                        simd_inlined::vmul_f32(ft2, fs, fx1, mask32); // ft2 = sin_low * x_high
+                        simd_inlined::vsub_f32(ft, ft, ft2, mask32);  // y0  = ft - ft2
 
                         // ---- Narrow y0 to bf16 and store (low half of y) ----
                         simd_inlined::vcvt_f32_to_bf16_narrow(htmp0, ft, mask32); // fp32 → bf16 at even lanes
-                        simd_inlined::vsts_pk_b32_bf16(htmp0, yB + yOff + elemOffH, 0, mask32);  // dense bf16 → UB
+                        simd_inlined::vsts_pk_b32_bf16(htmp0, yB + yOff + elemOffH, 0, mask32); // dense bf16 → UB
 
                         // ---- Compute y1 = cos_high * x_high + sin_high * x_low ----
-                        simd_inlined::vmul_f32(ft,  fc2, fx1, mask32);  // ft  = cos_high * x_high
-                        simd_inlined::vmul_f32(ft2, fs2, fx0, mask32);  // ft2 = sin_high * x_low
-                        simd_inlined::vadd_f32(ft,  ft, ft2, mask32);   // y1  = ft + ft2
+                        simd_inlined::vmul_f32(ft, fc2, fx1, mask32);  // ft  = cos_high * x_high
+                        simd_inlined::vmul_f32(ft2, fs2, fx0, mask32); // ft2 = sin_high * x_low
+                        simd_inlined::vadd_f32(ft, ft, ft2, mask32);   // y1  = ft + ft2
 
                         // ---- Narrow y1 to bf16 and store (high half of y) ----
                         simd_inlined::vcvt_f32_to_bf16_narrow(htmp0, ft, mask32);
@@ -498,14 +486,14 @@ ROPE_CCE_INTERNAL void ComputeBf16(
                     // pairCnt = ceil(cnt/2) — number of even/odd pairs in this block.
                     uint32_t pairCnt = (cnt + 1U) / 2U;
 
-                    MaskReg mask32   = simd_inlined::make_mask(cnt);      // full block (b32)
-                    MaskReg maskHalf = simd_inlined::make_mask(pairCnt);  // pairs only
+                    MaskReg mask32 = simd_inlined::make_mask(cnt);       // full block (b32)
+                    MaskReg maskHalf = simd_inlined::make_mask(pairCnt); // pairs only
 
                     // ---- Hoisted cos/sin load-and-widen ----
                     simd_inlined::vlds_unpk_b16(htmp0, cosH + csOff + off, 0);
-                    simd_inlined::vcvt_fp16_to_fp32_even(fc, htmp0, mask32);   // fc = cos (fp32)
+                    simd_inlined::vcvt_fp16_to_fp32_even(fc, htmp0, mask32); // fc = cos (fp32)
                     simd_inlined::vlds_unpk_b16(htmp0, sinH + csOff + off, 0);
-                    simd_inlined::vcvt_fp16_to_fp32_even(fs, htmp0, mask32);   // fs = sin (fp32)
+                    simd_inlined::vcvt_fp16_to_fp32_even(fs, htmp0, mask32); // fs = sin (fp32)
 
                     for (uint16_t n = 0; n < (uint16_t)nCount; n++) {
                         int32_t xOff = s * xSStep + n * xNStep;
@@ -513,7 +501,7 @@ ROPE_CCE_INTERNAL void ComputeBf16(
 
                         // ---- Per-head x load-and-widen ----
                         simd_inlined::vlds_unpk_b16_bf16(htmp0, xB + xOff + off, 0);
-                        simd_inlined::vcvt_bf16_to_fp32_even(fx0, htmp0, mask32);  // fx0 = x (fp32)
+                        simd_inlined::vcvt_bf16_to_fp32_even(fx0, htmp0, mask32); // fx0 = x (fp32)
 
                         // ---- Form the rotated partner in fp32 space ----
                         // Step 1: split into even/odd streams:
@@ -533,9 +521,9 @@ ROPE_CCE_INTERNAL void ComputeBf16(
                         //   `fx0` avoids aliasing concerns with the vintlv output).
                         // ft  = rotated(x) * sin
                         // then add to get y.
-                        simd_inlined::vmul_f32(ft2, fx0, fc, mask32);   // ft2 = x * cos
-                        simd_inlined::vmul_f32(ft,  ft,  fs, mask32);   // ft  = rotated(x) * sin
-                        simd_inlined::vadd_f32(ft,  ft2, ft, mask32);   // y   = x*cos + rotated*sin
+                        simd_inlined::vmul_f32(ft2, fx0, fc, mask32); // ft2 = x * cos
+                        simd_inlined::vmul_f32(ft, ft, fs, mask32);   // ft  = rotated(x) * sin
+                        simd_inlined::vadd_f32(ft, ft2, ft, mask32);  // y   = x*cos + rotated*sin
 
                         // ---- Narrow and store ----
                         simd_inlined::vcvt_f32_to_bf16_narrow(htmp0, ft, mask32);
@@ -568,16 +556,9 @@ ROPE_CCE_INTERNAL void ComputeBf16(
  * Mask granularity: b32 (one bit per fp32 element).
  *===========================================================================*/
 ROPE_CCE_INTERNAL void ComputeF32(
-    __ubuf__ uint16_t *x_ub16,
-    __ubuf__ uint16_t *cos_ub16,
-    __ubuf__ uint16_t *sin_ub16,
-    __ubuf__ uint16_t *y_ub16,
-    int32_t sCount, int32_t nCount,
-    int32_t dLen, int32_t dAlign,
-    int32_t xSStep, int32_t xNStep,
-    int32_t csSStep,
-    int32_t ySStep, int32_t yNStep,
-    int32_t mode)
+    __ubuf__ uint16_t* x_ub16, __ubuf__ uint16_t* cos_ub16, __ubuf__ uint16_t* sin_ub16, __ubuf__ uint16_t* y_ub16,
+    int32_t sCount, int32_t nCount, int32_t dLen, int32_t dAlign, int32_t xSStep, int32_t xNStep, int32_t csSStep,
+    int32_t ySStep, int32_t yNStep, int32_t mode)
 {
     __VEC_SCOPE__
     {
@@ -612,10 +593,10 @@ ROPE_CCE_INTERNAL void ComputeF32(
         //       se, so = sin[s,0::2], sin[s,1::2]
         //       y[s,n,0::2] = xe * ce - xo * se
         //       y[s,n,1::2] = xo * co + xe * so
-        __ubuf__ float *xF   = (__ubuf__ float *)x_ub16;
-        __ubuf__ float *cosF = (__ubuf__ float *)cos_ub16;
-        __ubuf__ float *sinF = (__ubuf__ float *)sin_ub16;
-        __ubuf__ float *yF   = (__ubuf__ float *)y_ub16;
+        __ubuf__ float* xF = (__ubuf__ float*)x_ub16;
+        __ubuf__ float* cosF = (__ubuf__ float*)cos_ub16;
+        __ubuf__ float* sinF = (__ubuf__ float*)sin_ub16;
+        __ubuf__ float* yF = (__ubuf__ float*)y_ub16;
 
         // halfDAl aligned to (BLOCK_BYTE_32 / 4) = 8 fp32 elements = 32 bytes.
         int32_t halfD = dLen / 2;
@@ -637,7 +618,8 @@ ROPE_CCE_INTERNAL void ComputeF32(
                 for (uint16_t rep = 0; rep < (uint16_t)repeatTimes; rep++) {
                     uint32_t elemOff = (uint32_t)rep * (uint32_t)VL_F32;
                     uint32_t cnt = (uint32_t)(halfD - (int32_t)elemOff);
-                    if (cnt > (uint32_t)VL_F32) cnt = (uint32_t)VL_F32;
+                    if (cnt > (uint32_t)VL_F32)
+                        cnt = (uint32_t)VL_F32;
                     MaskReg mask32 = simd_inlined::make_mask(cnt);
 
                     // ---- Hoisted cos/sin loads (shared across heads) ----
@@ -681,7 +663,7 @@ ROPE_CCE_INTERNAL void ComputeF32(
             vector_f32 negOne;
             simd_inlined::vbr_f32(negOne, -1.0f);
 
-            int32_t blockSize = (int32_t)VL_F32;      // 64 fp32 per block
+            int32_t blockSize = (int32_t)VL_F32; // 64 fp32 per block
             int32_t dBlocks = cdiv(dLen, blockSize);
 
             for (uint16_t s = 0; s < (uint16_t)sCount; s++) {
@@ -706,14 +688,14 @@ ROPE_CCE_INTERNAL void ComputeF32(
                         simd_inlined::vlds_norm_b32(fx0, xF + xOff + off, 0);
 
                         // ---- Form the rotated partner: [-x1, x0, -x3, x2, ...] ----
-                        simd_inlined::vdintlv_x2(heven, hodd, fx0, fx0);      // split even/odd
-                        simd_inlined::vmul_f32(hnegOdd, hodd, negOne, maskHalf); // negate odd
+                        simd_inlined::vdintlv_x2(heven, hodd, fx0, fx0);          // split even/odd
+                        simd_inlined::vmul_f32(hnegOdd, hodd, negOne, maskHalf);  // negate odd
                         simd_inlined::vintlv_x2(hxnew, hxnew_hi, hnegOdd, heven); // rebuild partner
 
                         // y = x * cos + rotated(x) * sin
-                        simd_inlined::vmul_f32(fta, fx0, fc0, mask);          // x * cos
-                        simd_inlined::vmul_f32(ftb, hxnew, fs0, mask);        // rotated(x) * sin
-                        simd_inlined::vadd_f32(fy0, fta, ftb, mask);          // y
+                        simd_inlined::vmul_f32(fta, fx0, fc0, mask);   // x * cos
+                        simd_inlined::vmul_f32(ftb, hxnew, fs0, mask); // rotated(x) * sin
+                        simd_inlined::vadd_f32(fy0, fta, ftb, mask);   // y
                         simd_inlined::vsts_norm_b32(fy0, yF + yOff + off, 0, mask);
                     }
                 }
@@ -722,7 +704,7 @@ ROPE_CCE_INTERNAL void ComputeF32(
     }
 }
 
-}
+} // namespace rope_cce
 
 #endif
 

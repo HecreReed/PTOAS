@@ -233,7 +233,7 @@ class TemplateMetadata:
     target: str
     name: str
     # Hard constraints
-    dtypes: tuple = ()          # tuple of per-operand dtype-name tuples, e.g. (("f32","f32","f32"),)
+    dtypes: tuple = ()  # tuple of per-operand dtype-name tuples, e.g. (("f32","f32","f32"),)
     # Empty means unrestricted. One value applies to every operand; otherwise
     # provide one value per template parameter.
     layouts: tuple = ()
@@ -280,10 +280,26 @@ class TemplateMetadata:
         return value
 
     @staticmethod
-    def build(*, op, target, name, dtypes=(), layouts=(), memory_spaces=(),
-              constraints=(), priority=0, fusible=False, loop_depth=None,
-              id=None, Tail=None, is_post_update=False, iteration_axis="none",
-              op_engine="other", op_class="other", tags=()):
+    def build(
+        *,
+        op,
+        target,
+        name,
+        dtypes=(),
+        layouts=(),
+        memory_spaces=(),
+        constraints=(),
+        priority=0,
+        fusible=False,
+        loop_depth=None,
+        id=None,
+        Tail=None,
+        is_post_update=False,
+        iteration_axis="none",
+        op_engine="other",
+        op_class="other",
+        tags=(),
+    ):
         return TemplateMetadata(
             op=op,
             target=target,

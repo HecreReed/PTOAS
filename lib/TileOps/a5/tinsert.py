@@ -16,7 +16,9 @@ from ._common import NUMERIC_DTYPES
 BLOCK_BYTE_SIZE = 32
 
 
-def _acc_to_mat(src_kind, dst_kind, src_memory_space, dst_memory_space, src_config, dst_config, **_):
+def _acc_to_mat(
+    src_kind, dst_kind, src_memory_space, dst_memory_space, src_config, dst_config, **_
+):
     return (
         src_kind == "tile"
         and dst_kind == "tile"
@@ -29,7 +31,9 @@ def _acc_to_mat(src_kind, dst_kind, src_memory_space, dst_memory_space, src_conf
     )
 
 
-def _acc_to_vec_nd(src_kind, dst_kind, src_memory_space, dst_memory_space, dst_config, **_):
+def _acc_to_vec_nd(
+    src_kind, dst_kind, src_memory_space, dst_memory_space, dst_config, **_
+):
     return (
         src_kind == "tile"
         and dst_kind == "tile"
@@ -40,7 +44,9 @@ def _acc_to_vec_nd(src_kind, dst_kind, src_memory_space, dst_memory_space, dst_c
     )
 
 
-def _acc_to_vec_nz(src_kind, dst_kind, src_memory_space, dst_memory_space, dst_config, **_):
+def _acc_to_vec_nz(
+    src_kind, dst_kind, src_memory_space, dst_memory_space, dst_config, **_
+):
     return (
         src_kind == "tile"
         and dst_kind == "tile"
@@ -51,7 +57,16 @@ def _acc_to_vec_nz(src_kind, dst_kind, src_memory_space, dst_memory_space, dst_c
     )
 
 
-def _vec_to_vec_nd(src_memory_space, dst_memory_space, src_config, dst_config, src_valid_shape, src_dtype, dst_dtype, **_):
+def _vec_to_vec_nd(
+    src_memory_space,
+    dst_memory_space,
+    src_config,
+    dst_config,
+    src_valid_shape,
+    src_dtype,
+    dst_dtype,
+    **_,
+):
     return (
         src_memory_space == "ub"
         and dst_memory_space == "ub"
@@ -64,7 +79,16 @@ def _vec_to_vec_nd(src_memory_space, dst_memory_space, src_config, dst_config, s
     )
 
 
-def _vec_to_vec_nd_scalar(src_memory_space, dst_memory_space, src_config, dst_config, src_valid_shape, src_dtype, dst_dtype, **_):
+def _vec_to_vec_nd_scalar(
+    src_memory_space,
+    dst_memory_space,
+    src_config,
+    dst_config,
+    src_valid_shape,
+    src_dtype,
+    dst_dtype,
+    **_,
+):
     return (
         src_memory_space == "ub"
         and dst_memory_space == "ub"
@@ -243,7 +267,9 @@ def template_tinsert_acc_to_vec_nz_basic(
     c0_size = BLOCK_BYTE_SIZE // elem_bytes
     valid_rows, valid_cols_raw = src.valid_shape
     valid_cols_align = 16 if str(dst.dtype) == "f32" else c0_size
-    valid_cols = (valid_cols_raw + valid_cols_align - 1) // valid_cols_align * valid_cols_align
+    valid_cols = (
+        (valid_cols_raw + valid_cols_align - 1) // valid_cols_align * valid_cols_align
+    )
 
     col_block = index_col // c0_size
     col_mod = index_col - col_block * c0_size
@@ -291,7 +317,7 @@ def template_tinsert_vec_to_vec_nd_basic(
         for col in range(0, valid_cols, lanes):
             mask, remained = pto.make_mask(dtype, remained)
             data = pto.vlds(src[row, col:])
-            pto.vsts(data, dst[index_row + row, index_col + col:], mask)
+            pto.vsts(data, dst[index_row + row, index_col + col :], mask)
 
 
 @tilelib.tile_template(

@@ -19,26 +19,26 @@ namespace mlir {
 namespace pto {
 
 struct SyncMacroPhase {
-  unsigned phaseId{0};
-  PipelineType pipe{PipelineType::PIPE_UNASSIGNED};
-  SmallVector<Value> defValues;
-  SmallVector<Value> useValues;
+    unsigned phaseId{0};
+    PipelineType pipe{PipelineType::PIPE_UNASSIGNED};
+    SmallVector<Value> defValues;
+    SmallVector<Value> useValues;
 };
 
 struct SyncMacroHiddenEvent {
-  PipelineType srcPipe{PipelineType::PIPE_UNASSIGNED};
-  PipelineType dstPipe{PipelineType::PIPE_UNASSIGNED};
-  SmallVector<unsigned> eventIds;
+    PipelineType srcPipe{PipelineType::PIPE_UNASSIGNED};
+    PipelineType dstPipe{PipelineType::PIPE_UNASSIGNED};
+    SmallVector<unsigned> eventIds;
 };
 
 struct SyncMacroModel {
-  SmallVector<SyncMacroPhase> phases;
-  SmallVector<SyncMacroHiddenEvent> hiddenEvents;
+    SmallVector<SyncMacroPhase> phases;
+    SmallVector<SyncMacroHiddenEvent> hiddenEvents;
 
-  explicit operator bool() const { return !phases.empty(); }
+    explicit operator bool() const { return !phases.empty(); }
 };
 
-std::optional<SyncMacroModel> getSyncMacroModel(Operation *op);
+std::optional<SyncMacroModel> getSyncMacroModel(Operation* op);
 
 } // namespace pto
 } // namespace mlir

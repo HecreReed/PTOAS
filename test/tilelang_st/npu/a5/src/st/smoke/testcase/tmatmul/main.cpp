@@ -16,12 +16,12 @@
 
 using namespace PtoTestCommon;
 
-void LaunchTMATMUL_f16_16x16x16(uint16_t *a, uint16_t *b, float *c, void *stream);
+void LaunchTMATMUL_f16_16x16x16(uint16_t* a, uint16_t* b, float* c, void* stream);
 
-using LaunchFn = void (*)(uint16_t *, uint16_t *, float *, void *);
+using LaunchFn = void (*)(uint16_t*, uint16_t*, float*, void*);
 
 struct TestCase {
-    const char *name;
+    const char* name;
     LaunchFn launch;
     size_t lhsRows;
     size_t lhsCols;
@@ -32,11 +32,12 @@ struct TestCase {
 };
 
 static const TestCase kCases[] = {
-{"f16_16x16x16", LaunchTMATMUL_f16_16x16x16, 16, 16, 16, 16, 16, 16},
+    {"f16_16x16x16", LaunchTMATMUL_f16_16x16x16, 16, 16, 16, 16, 16, 16},
 };
 static constexpr size_t kNumCases = sizeof(kCases) / sizeof(kCases[0]);
 
-static int RunCase(const TestCase &tc, int deviceId, aclrtStream stream) {
+static int RunCase(const TestCase& tc, int deviceId, aclrtStream stream)
+{
     (void)deviceId;
     int rc = 0;
     const size_t lhsElems = tc.lhsRows * tc.lhsCols;
@@ -49,24 +50,17 @@ static int RunCase(const TestCase &tc, int deviceId, aclrtStream stream) {
     size_t rhsFileSize = rhsBytes;
 
     std::printf(
-        "[INFO] === case: %s (lhs=%zux%zu, rhs=%zux%zu, out=%zux%zu) ===\n",
-        tc.name,
-        tc.lhsRows,
-        tc.lhsCols,
-        tc.rhsRows,
-        tc.rhsCols,
-        tc.outRows,
-        tc.outCols
-    );
+        "[INFO] === case: %s (lhs=%zux%zu, rhs=%zux%zu, out=%zux%zu) ===\n", tc.name, tc.lhsRows, tc.lhsCols,
+        tc.rhsRows, tc.rhsCols, tc.outRows, tc.outCols);
 
     std::string caseDir = std::string("./") + tc.name;
 
-    void *lhsHost = nullptr;
-    void *rhsHost = nullptr;
-    void *outHost = nullptr;
-    void *lhsDevice = nullptr;
-    void *rhsDevice = nullptr;
-    void *outDevice = nullptr;
+    void* lhsHost = nullptr;
+    void* rhsHost = nullptr;
+    void* outHost = nullptr;
+    void* lhsDevice = nullptr;
+    void* rhsDevice = nullptr;
+    void* outDevice = nullptr;
 
     aclrtMallocHost(&lhsHost, lhsBytes);
     aclrtMallocHost(&rhsHost, rhsBytes);
@@ -90,11 +84,8 @@ static int RunCase(const TestCase &tc, int deviceId, aclrtStream stream) {
         aclrtMemcpy(rhsDevice, rhsBytes, rhsHost, rhsBytes, ACL_MEMCPY_HOST_TO_DEVICE);
 
         tc.launch(
-            static_cast<uint16_t *>(lhsDevice),
-            static_cast<uint16_t *>(rhsDevice),
-            static_cast<float *>(outDevice),
-            stream
-        );
+            static_cast<uint16_t*>(lhsDevice), static_cast<uint16_t*>(rhsDevice), static_cast<float*>(outDevice),
+            stream);
 
         aclrtSynchronizeStream(stream);
         aclrtMemcpy(outHost, outBytes, outDevice, outBytes, ACL_MEMCPY_DEVICE_TO_HOST);
@@ -123,15 +114,16 @@ static int RunCase(const TestCase &tc, int deviceId, aclrtStream stream) {
     return rc;
 }
 
-int main(int argc, char *argv[]) {
-    const char *caseFilter = (argc > 1) ? argv[1] : nullptr;
+int main(int argc, char* argv[])
+{
+    const char* caseFilter = (argc > 1) ? argv[1] : nullptr;
 
     int rc = 0;
     int deviceId = 0;
     aclrtStream stream = nullptr;
 
     aclInit(nullptr);
-    if (const char *envDevice = std::getenv("ACL_DEVICE_ID")) {
+    if (const char* envDevice = std::getenv("ACL_DEVICE_ID")) {
         deviceId = std::atoi(envDevice);
     }
     aclrtSetDevice(deviceId);

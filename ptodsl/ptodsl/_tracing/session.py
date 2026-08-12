@@ -67,7 +67,10 @@ class HelperFunctionSpec:
             self.symbol_name,
             tuple(str(arg_type) for arg_type in self.arg_types),
             tuple(str(result_type) for result_type in self.result_types),
-            tuple((attr_name, str(attr_value)) for attr_name, attr_value in self.attributes),
+            tuple(
+                (attr_name, str(attr_value))
+                for attr_name, attr_value in self.attributes
+            ),
         )
 
     def specialized_symbol_name(self) -> str:
@@ -145,9 +148,13 @@ class TraceSession:
         self._function_stack = [entry_function]
         self._function_owner_symbol_stack = [entry_function.name.value]
         self._entry_child_op = entry_function.operation.parent.parent
-        self._entry_child_symbol_table = entry_function.operation.parent.regions[0].blocks[0]
+        self._entry_child_symbol_table = entry_function.operation.parent.regions[
+            0
+        ].blocks[0]
         self._helpers: dict[tuple[str, tuple], object] = {}
-        self._simt_helper_specializations: dict[SimtHelperSpecializationKey, object] = {}
+        self._simt_helper_specializations: dict[
+            SimtHelperSpecializationKey, object
+        ] = {}
         self._simt_helper_symbol_counters: dict[str, int] = {}
         self._kernel_module_primary_functions: dict[tuple, object] = {}
         self._kernel_module_private_imports: dict[tuple[str, str], object] = {}
@@ -187,7 +194,9 @@ class TraceSession:
     @property
     def current_function_module_spec(self):
         """Return the module spec that owns the actively lowered function."""
-        current_record = self._kernel_module_child_records.get(self.current_function_owner_symbol_name)
+        current_record = self._kernel_module_child_records.get(
+            self.current_function_owner_symbol_name
+        )
         if current_record is not None:
             return current_record.module_spec
         return self.module_spec
@@ -255,10 +264,9 @@ class TraceSession:
     def enter_physical_section(self, kind: str):
         """Create one explicit cube/vector section in the active function."""
         module_spec = self.current_function_module_spec
-        if (
-            getattr(module_spec, "kernel_kind_explicit", False)
-            and getattr(module_spec, "kernel_kind", None) in {"cube", "vector"}
-        ):
+        if getattr(module_spec, "kernel_kind_explicit", False) and getattr(
+            module_spec, "kernel_kind", None
+        ) in {"cube", "vector"}:
             raise RuntimeError(
                 "pto.section() cannot be combined with explicit "
                 "@pto.jit(kernel_kind=...); use exactly one physical-placement contract"
@@ -276,13 +284,13 @@ class TraceSession:
         ):
             raise RuntimeError("nested pto.section() scopes are not allowed")
 
-        self._reject_duplicate_physical_section(
-            kind, source=f"pto.section({kind!r})"
-        )
+        self._reject_duplicate_physical_section(kind, source=f"pto.section({kind!r})")
 
         section_op = _pto.SectionCubeOp() if kind == "cube" else _pto.SectionVectorOp()
         section_block = section_op.body.blocks.append()
-        authored_kinds = self._authored_physical_sections.setdefault(function_key, set())
+        authored_kinds = self._authored_physical_sections.setdefault(
+            function_key, set()
+        )
         authored_kinds.add(kind)
         self._active_physical_sections.add(function_key)
         try:
@@ -311,13 +319,18 @@ class TraceSession:
             for region in op_view.operation.regions:
                 for block in region.blocks:
                     for argument in block.arguments:
-                        self._physical_section_values[argument] = (kind, str(argument.type))
+                        self._physical_section_values[argument] = (
+                            kind,
+                            str(argument.type),
+                        )
 
     def validate_surface_value_access(self, value) -> None:
         """Reject inline-subkernel SSA values that escaped their outlined helper body."""
         raw_value = getattr(value, "_value", value)
         section_record = self._physical_section_values.get(raw_value)
-        if section_record is not None and not self._is_value_inside_active_section(raw_value):
+        if section_record is not None and not self._is_value_inside_active_section(
+            raw_value
+        ):
             kind, type_text = section_record
             raise physical_section_value_escape_error(kind, type_text)
         try:
@@ -349,7 +362,9 @@ class TraceSession:
     @contextmanager
     def enter_function(self, ir_fn, *, owner_symbol_name: str | None = None):
         """Push *ir_fn* as the current active function in this session."""
-        owner_symbol_name = ir_fn.name.value if owner_symbol_name is None else owner_symbol_name
+        owner_symbol_name = (
+            ir_fn.name.value if owner_symbol_name is None else owner_symbol_name
+        )
         self._function_stack.append(ir_fn)
         self._function_owner_symbol_stack.append(owner_symbol_name)
         try:
@@ -358,7 +373,9 @@ class TraceSession:
             popped_owner = self._function_owner_symbol_stack.pop()
             popped = self._function_stack.pop()
             if popped is not ir_fn or popped_owner != owner_symbol_name:
-                raise RuntimeError("PTODSL trace-session function stack corruption detected")
+                raise RuntimeError(
+                    "PTODSL trace-session function stack corruption detected"
+                )
 
     def _next_inline_subkernel_symbol(self, base_symbol_name: str) -> str:
         suffix = self._inline_subkernel_counter
@@ -372,9 +389,7 @@ class TraceSession:
             kind = "cube"
         else:
             return None
-        self._reject_duplicate_physical_section(
-            kind, source=f"pto.{role} subkernel"
-        )
+        self._reject_duplicate_physical_section(kind, source=f"pto.{role} subkernel")
         return _pto.SectionVectorOp() if kind == "vector" else _pto.SectionCubeOp()
 
     def _create_inline_subkernel_wrapper(
@@ -465,7 +480,9 @@ class TraceSession:
         finally:
             popped = self._subkernel_stack.pop()
             if popped is not frame:
-                raise RuntimeError("PTODSL trace-session subkernel stack corruption detected")
+                raise RuntimeError(
+                    "PTODSL trace-session subkernel stack corruption detected"
+                )
 
     @contextmanager
     def enter_inline_subkernel(
@@ -512,7 +529,9 @@ class TraceSession:
         finally:
             popped = self._subkernel_stack.pop()
             if popped is not frame:
-                raise RuntimeError("PTODSL trace-session subkernel stack corruption detected")
+                raise RuntimeError(
+                    "PTODSL trace-session subkernel stack corruption detected"
+                )
 
     @contextmanager
     def enter_subkernel(self, subkernel):
@@ -591,7 +610,9 @@ class TraceSession:
                 continue
             raise inline_tileop_capture_type_error(position, str(value.type))
 
-    def _outline_inline_subkernel(self, outline_frame: InlineSubkernelOutlineFrame) -> None:
+    def _outline_inline_subkernel(
+        self, outline_frame: InlineSubkernelOutlineFrame
+    ) -> None:
         role = outline_frame.trace_frame.role
         section_policy = self._subkernel_section_policy(role)
         if role in {"simd", "cube"} and section_policy != "function_kind":
@@ -619,10 +640,14 @@ class TraceSession:
 
         with InsertionPoint(outline_frame.wrapper_op.operation):
             if role == "simt" and outline_frame.simt_launch_dims is not None:
-                dim_x, dim_y, dim_z = _coerce_simt_launch_dims(outline_frame.simt_launch_dims)
+                dim_x, dim_y, dim_z = _coerce_simt_launch_dims(
+                    outline_frame.simt_launch_dims
+                )
                 Operation.create(
                     "pto.simt_launch",
-                    attributes={"callee": FlatSymbolRefAttr.get(_symbol_name(helper_fn))},
+                    attributes={
+                        "callee": FlatSymbolRefAttr.get(_symbol_name(helper_fn))
+                    },
                     operands=[dim_x, dim_y, dim_z, *captures],
                 )
             else:
@@ -695,40 +720,57 @@ class TraceSession:
         """Emit the one legal ``loop.update(...)`` for the active carry loop."""
         active = self.current_carry_loop
         if active is None or active is not frame:
-            raise RuntimeError("loop.update(...) may only be called inside the active carry loop body")
+            raise RuntimeError(
+                "loop.update(...) may only be called inside the active carry loop body"
+            )
         yield_carry_loop_state(frame, **kwargs)
 
     def finish_carry_loop(self, frame, exc_type, exc, tb):
         """Finalize one active authored carry loop and close its body insertion point."""
         if not self._carry_loop_stack:
-            raise RuntimeError("carry-loop exit without a matching active PTODSL trace-session frame")
+            raise RuntimeError(
+                "carry-loop exit without a matching active PTODSL trace-session frame"
+            )
         popped = self._carry_loop_stack.pop()
         if popped is not frame:
-            raise RuntimeError("PTODSL trace-session carry-loop stack corruption detected")
+            raise RuntimeError(
+                "PTODSL trace-session carry-loop stack corruption detected"
+            )
         finish_carry_loop_frame(frame, exc_type, exc, tb)
 
     def lower_simt_helper_subkernel(self, subkernel, *args, **kwargs):
         """Lower one ``@pto.simt`` call through a dedicated helper function."""
-        helper_fn, arg_templates = self._get_or_create_simt_helper_function(subkernel, *args, **kwargs)
+        helper_fn, arg_templates = self._get_or_create_simt_helper_function(
+            subkernel, *args, **kwargs
+        )
 
         self._emit_simt_helper_launch_metadata()
         func.CallOp(helper_fn, [unwrap_surface_value(arg) for arg in arg_templates])
 
     def lower_simt_launch_subkernel(self, subkernel, *args, dims, **kwargs):
         """Lower one explicit ``pto.simt_launch`` call through a SIMT helper."""
-        helper_fn, arg_templates = self._get_or_create_simt_helper_function(subkernel, *args, **kwargs)
+        helper_fn, arg_templates = self._get_or_create_simt_helper_function(
+            subkernel, *args, **kwargs
+        )
         dim_x, dim_y, dim_z = _coerce_simt_launch_dims(dims)
         Operation.create(
             "pto.simt_launch",
             attributes={"callee": FlatSymbolRefAttr.get(_symbol_name(helper_fn))},
-            operands=[dim_x, dim_y, dim_z, *[unwrap_surface_value(arg) for arg in arg_templates]],
+            operands=[
+                dim_x,
+                dim_y,
+                dim_z,
+                *[unwrap_surface_value(arg) for arg in arg_templates],
+            ],
         )
 
     def _get_or_create_simt_helper_function(self, subkernel, *args, **kwargs):
         """Return the reusable ``pto.simt_entry`` helper for *subkernel*."""
         outer_frame = self.current_subkernel
         if outer_frame is not None and outer_frame.role == "simt":
-            raise RuntimeError("@pto.simt helper lowering does not support nested SIMT helper calls")
+            raise RuntimeError(
+                "@pto.simt helper lowering does not support nested SIMT helper calls"
+            )
 
         arg_templates = tuple(args)
         _reject_simt_helper_alloc_buffer_args(arg_templates)
@@ -789,7 +831,9 @@ class TraceSession:
     ):
         """Create one helper using an already materialized symbol name."""
         owner_symbol_name = (
-            self.current_function_owner_symbol_name if owner_symbol_name is None else owner_symbol_name
+            self.current_function_owner_symbol_name
+            if owner_symbol_name is None
+            else owner_symbol_name
         )
         fn_ty = func.FunctionType.get(list(arg_types), [])
         symbol_table = self.get_or_create_kernel_module_child_symbol_table(
@@ -844,7 +888,9 @@ class TraceSession:
                 "launch explicit @pto.simt helpers."
             )
         if kwargs:
-            raise TypeError("@pto.jit(entry=False) kernel module calls do not support keyword arguments yet")
+            raise TypeError(
+                "@pto.jit(entry=False) kernel module calls do not support keyword arguments yet"
+            )
 
         compiler = kernel_handle._compiler
         kernel_signature = compiler._kernel_signature
@@ -860,7 +906,8 @@ class TraceSession:
             )
         arg_templates = tuple(
             const(arg, dtype=param.annotation)
-            if isinstance(param, RuntimeScalarParameterSpec) and not hasattr(unwrap_surface_value(arg), "type")
+            if isinstance(param, RuntimeScalarParameterSpec)
+            and not hasattr(unwrap_surface_value(arg), "type")
             else arg
             for param, arg in zip(positional_params, args)
         )
@@ -894,7 +941,9 @@ class TraceSession:
             caller_symbol_name,
             helper_spec,
         )
-        self.record_kernel_module_dependency(caller_symbol_name, helper_spec.symbol_name)
+        self.record_kernel_module_dependency(
+            caller_symbol_name, helper_spec.symbol_name
+        )
         call_args = [unwrap_surface_value(arg) for arg in arg_templates]
         func.CallOp(import_fn, call_args)
 
@@ -909,7 +958,9 @@ class TraceSession:
         """Mark one ABI-specialized PTODSL symbol with its authored logical name."""
         func_op.attributes["pto.ptodsl.logical_name"] = StringAttr.get(logical_name)
 
-    def get_or_create_helper_function(self, spec: HelperFunctionSpec, *, owner_symbol_name: str | None = None):
+    def get_or_create_helper_function(
+        self, spec: HelperFunctionSpec, *, owner_symbol_name: str | None = None
+    ):
         """
         Look up or create a helper ``func.func`` in the owning child module.
 
@@ -917,7 +968,9 @@ class TraceSession:
         symbol was emitted in this trace session.
         """
         owner_symbol_name = (
-            self.current_function_owner_symbol_name if owner_symbol_name is None else owner_symbol_name
+            self.current_function_owner_symbol_name
+            if owner_symbol_name is None
+            else owner_symbol_name
         )
         cache_key = (owner_symbol_name, spec.cache_key())
         helper = self._helpers.get(cache_key)
@@ -935,12 +988,16 @@ class TraceSession:
             self._attach_ptodsl_logical_name_attr(helper, spec.symbol_name)
             for attr_name, attr_value in spec.attributes:
                 helper.attributes[attr_name] = attr_value
-            if any(attr_name == "pto.tileop.helper" for attr_name, _ in spec.attributes):
+            if any(
+                attr_name == "pto.tileop.helper" for attr_name, _ in spec.attributes
+            ):
                 helper.attributes["sym_visibility"] = StringAttr.get("private")
         self._helpers[cache_key] = helper
         return helper, True
 
-    def get_or_create_kernel_module_primary_function(self, spec: HelperFunctionSpec, module_spec):
+    def get_or_create_kernel_module_primary_function(
+        self, spec: HelperFunctionSpec, module_spec
+    ):
         """Look up or create the primary definition for one kernel-module callee."""
         cache_key = spec.cache_key()
         helper = self._kernel_module_primary_functions.get(cache_key)
@@ -949,7 +1006,9 @@ class TraceSession:
 
         fn_ty = func.FunctionType.get(list(spec.arg_types), list(spec.result_types))
         specialized_symbol_name = spec.specialized_symbol_name()
-        symbol_table = self.get_or_create_kernel_module_child_symbol_table(specialized_symbol_name, module_spec)
+        symbol_table = self.get_or_create_kernel_module_child_symbol_table(
+            specialized_symbol_name, module_spec
+        )
         with InsertionPoint(symbol_table):
             helper = func.FuncOp(specialized_symbol_name, fn_ty)
             self._attach_ptodsl_logical_name_attr(helper, spec.symbol_name)
@@ -968,7 +1027,9 @@ class TraceSession:
         self._kernel_module_primary_functions[cache_key] = helper
         return helper, True
 
-    def kernel_module_import_symbol_name(self, caller_symbol_name: str, callee_symbol_name: str) -> str:
+    def kernel_module_import_symbol_name(
+        self, caller_symbol_name: str, callee_symbol_name: str
+    ) -> str:
         """Return the import declaration symbol for one caller/callee pair."""
         _ = caller_symbol_name
         return callee_symbol_name
@@ -986,7 +1047,9 @@ class TraceSession:
             return helper, False
 
         fn_ty = func.FunctionType.get(list(spec.arg_types), list(spec.result_types))
-        import_symbol_name = self.kernel_module_import_symbol_name(caller_symbol_name, target_symbol_name)
+        import_symbol_name = self.kernel_module_import_symbol_name(
+            caller_symbol_name, target_symbol_name
+        )
         caller_symbol_table = self.get_or_create_kernel_module_child_symbol_table(
             caller_symbol_name,
             self._kernel_module_child_records[caller_symbol_name].module_spec,
@@ -998,7 +1061,9 @@ class TraceSession:
         self._kernel_module_private_imports[key] = helper
         return helper, True
 
-    def record_kernel_module_dependency(self, caller_symbol_name: str, callee_symbol_name: str) -> None:
+    def record_kernel_module_dependency(
+        self, caller_symbol_name: str, callee_symbol_name: str
+    ) -> None:
         """Record one caller->callee dependency edge for kernel-module assembly."""
         deps = self._kernel_module_dependencies.setdefault(caller_symbol_name, set())
         deps.add(callee_symbol_name)
@@ -1013,7 +1078,10 @@ class TraceSession:
                         import_symbol_name=helper.name.value,
                         target_symbol_name=callee_symbol_name,
                     )
-                    for (caller_symbol_name, callee_symbol_name), helper in self._kernel_module_private_imports.items()
+                    for (
+                        caller_symbol_name,
+                        callee_symbol_name,
+                    ), helper in self._kernel_module_private_imports.items()
                 ),
                 key=lambda record: (
                     record.caller_symbol_name,
@@ -1024,11 +1092,15 @@ class TraceSession:
         )
         dependencies = tuple(
             (caller_symbol_name, tuple(sorted(callee_symbol_names)))
-            for caller_symbol_name, callee_symbol_names in sorted(self._kernel_module_dependencies.items())
+            for caller_symbol_name, callee_symbol_names in sorted(
+                self._kernel_module_dependencies.items()
+            )
         )
         return KernelModuleGraphSnapshot(imports=imports, dependencies=dependencies)
 
-    def get_or_create_kernel_module_child_symbol_table(self, primary_symbol_name: str, module_spec):
+    def get_or_create_kernel_module_child_symbol_table(
+        self, primary_symbol_name: str, module_spec
+    ):
         """Return the child-module symbol table that owns *primary_symbol_name*."""
         symbol_table = self._kernel_module_child_symbol_tables.get(primary_symbol_name)
         if symbol_table is not None:
@@ -1036,25 +1108,33 @@ class TraceSession:
 
         child_op, symbol_table = create_container_child_module(self.module, module_spec)
         self._kernel_module_child_symbol_tables[primary_symbol_name] = symbol_table
-        self._kernel_module_child_records[primary_symbol_name] = TracedChildModuleRecord(
-            symbol_name=f"{primary_symbol_name}$child",
-            primary_symbol_name=primary_symbol_name,
-            role="kernel_module",
-            module_spec=module_spec,
+        self._kernel_module_child_records[primary_symbol_name] = (
+            TracedChildModuleRecord(
+                symbol_name=f"{primary_symbol_name}$child",
+                primary_symbol_name=primary_symbol_name,
+                role="kernel_module",
+                module_spec=module_spec,
+            )
         )
         return symbol_table
 
     def validate_final_state(self) -> None:
         """Check that tracing-time session stacks were fully unwound."""
         if self._subkernel_stack:
-            raise RuntimeError("PTODSL trace-session exited with an open subkernel lowering frame")
+            raise RuntimeError(
+                "PTODSL trace-session exited with an open subkernel lowering frame"
+            )
         if self._carry_loop_stack:
-            raise RuntimeError("PTODSL trace-session exited with an open loop-carry lowering frame")
+            raise RuntimeError(
+                "PTODSL trace-session exited with an open loop-carry lowering frame"
+            )
 
 
 def _coerce_simt_launch_dims(dims):
     if not isinstance(dims, (tuple, list)) or len(dims) != 3:
-        raise TypeError("pto.simt_launch(..., dims=...) expects a 3-item (dim_x, dim_y, dim_z) tuple")
+        raise TypeError(
+            "pto.simt_launch(..., dims=...) expects a 3-item (dim_x, dim_y, dim_z) tuple"
+        )
     return tuple(
         _coerce_i32_dim(dim, context=f"pto.simt_launch(..., dims[{index}])")
         for index, dim in enumerate(dims)
@@ -1065,7 +1145,9 @@ def _coerce_simt_section_dims(dims):
     if dims is None:
         dims = (1, 1, 1)
     if not isinstance(dims, (tuple, list)) or len(dims) != 3:
-        raise TypeError("pto.simt(...) expects exactly three launch dimensions: dim_x, dim_y, dim_z")
+        raise TypeError(
+            "pto.simt(...) expects exactly three launch dimensions: dim_x, dim_y, dim_z"
+        )
     return tuple(
         _coerce_i32_dim_attr(dim, context=f"pto.simt(..., dim[{index}])")
         for index, dim in enumerate(dims)
@@ -1079,14 +1161,18 @@ def _coerce_i32_dim(value, *, context: str):
         raise TypeError(f"{context} does not accept bool values")
     if isinstance(raw_value, int):
         if raw_value < 0:
-            raise ValueError(f"{context} expects a non-negative i32 launch dimension, got {raw_value}")
+            raise ValueError(
+                f"{context} expects a non-negative i32 launch dimension, got {raw_value}"
+            )
         return arith.ConstantOp(i32, raw_value).result
     if IndexType.isinstance(raw_value.type):
         return arith.IndexCastOp(i32, raw_value).result
     if IntegerType.isinstance(raw_value.type):
         width = IntegerType(raw_value.type).width
         if width != 32:
-            raise TypeError(f"{context} expects i32 launch dimension, got {raw_value.type}")
+            raise TypeError(
+                f"{context} expects i32 launch dimension, got {raw_value.type}"
+            )
         return _strip_integer_signedness(raw_value)
     raise TypeError(f"{context} expects i32 launch dimension, got {raw_value.type}")
 
@@ -1098,17 +1184,25 @@ def _coerce_i32_dim_attr(value, *, context: str):
         raise TypeError(f"{context} does not accept bool values")
     if isinstance(raw_value, int):
         if raw_value < 0:
-            raise ValueError(f"{context} expects a non-negative i32 launch dimension, got {raw_value}")
+            raise ValueError(
+                f"{context} expects a non-negative i32 launch dimension, got {raw_value}"
+            )
         if raw_value > 0x7FFFFFFF:
-            raise ValueError(f"{context} expects a signed i32 launch dimension, got {raw_value}")
+            raise ValueError(
+                f"{context} expects a signed i32 launch dimension, got {raw_value}"
+            )
         return IntegerAttr.get(i32, raw_value)
-    raise TypeError(f"{context} expects a static Python int launch dimension, got {type(value).__name__}")
+    raise TypeError(
+        f"{context} expects a static Python int launch dimension, got {type(value).__name__}"
+    )
 
 
 def _is_alloc_buffer_arg(value) -> bool:
     if isinstance(value, AllocatedBufferValue):
         return True
-    return isinstance(value, AddressOffsetValue) and isinstance(value.base, AllocatedBufferValue)
+    return isinstance(value, AddressOffsetValue) and isinstance(
+        value.base, AllocatedBufferValue
+    )
 
 
 def _reject_simt_helper_alloc_buffer_args(args):
@@ -1124,7 +1218,7 @@ def _reject_simt_helper_alloc_buffer_args(args):
 def _symbol_name(ir_fn) -> str:
     try:
         name_attr = ir_fn.attributes["sym_name"]
-    except KeyError as exc:
+    except KeyError:
         raise RuntimeError("PTODSL helper function is missing sym_name")
     if name_attr is None:
         raise RuntimeError("PTODSL helper function has empty sym_name")
@@ -1172,7 +1266,11 @@ def _simt_static_signature_atom(value):
         if isinstance(value, set):
             return (
                 "set",
-                tuple(sorted((_simt_static_signature_atom(item) for item in value), key=repr)),
+                tuple(
+                    sorted(
+                        (_simt_static_signature_atom(item) for item in value), key=repr
+                    )
+                ),
             )
         return (type(value).__name__, repr(value))
     return value

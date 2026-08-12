@@ -29,4 +29,6 @@ for case in CASES:
     golden = np.maximum(input1, 0)
 
     save_case_data(case["name"], {"input": input1, "golden": golden})
-    print(f"[INFO] gen_data: {case['name']} shape={shape} valid_shape={case['valid_shape']} dtype={dtype.__name__}")
+    print(
+        f"[INFO] gen_data: {case['name']} shape={shape} valid_shape={case['valid_shape']} dtype={dtype.__name__}"
+    )

@@ -8,7 +8,8 @@
 # See LICENSE in the root of the software repository for the full text of the License.
 
 from pathlib import Path
-import sys, numpy as np
+import sys
+import numpy as np
 
 if __package__ in {None, ""}:
     sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
@@ -32,7 +33,9 @@ def get_k_index(cumulative_hist_asc, k):
     if cumulative_hist_asc.size == 0:
         return 0
     total = cumulative_hist_asc[-1]
-    cumulative_hist_desc = total - np.concatenate(([0], cumulative_hist_asc[:-1])).astype(np.uint32)
+    cumulative_hist_desc = total - np.concatenate(
+        ([0], cumulative_hist_asc[:-1])
+    ).astype(np.uint32)
     valid_bins = np.flatnonzero(cumulative_hist_desc >= k)
     if valid_bins.size == 0:
         return 0
@@ -95,15 +98,27 @@ def _gen_u32_golden(rows, cols, byte, k):
 # Each branch keeps partial-repeat, exact-repeat, and multi-row coverage. U32
 # also retains a multi-repeat tail and every byte/filter depth.
 _U16_CASES = [
-    (1, 128, "MSB", 2), (1, 256, "MSB", 2), (2, 100, "MSB", 2),
-    (1, 128, "LSB", 1), (1, 256, "LSB", 1), (2, 100, "LSB", 1),
+    (1, 128, "MSB", 2),
+    (1, 256, "MSB", 2),
+    (2, 100, "MSB", 2),
+    (1, 128, "LSB", 1),
+    (1, 256, "LSB", 1),
+    (2, 100, "LSB", 1),
 ]
 
 _U32_CASES = [
-    (1, 128, 3, 1), (1, 256, 3, 1), (2, 384, 3, 1),
-    (1, 128, 2, 1), (1, 256, 2, 1), (2, 384, 2, 1),
-    (1, 128, 1, 1), (1, 256, 1, 1), (2, 384, 1, 1),
-    (1, 128, 0, 1), (1, 256, 0, 1), (2, 384, 0, 1),
+    (1, 128, 3, 1),
+    (1, 256, 3, 1),
+    (2, 384, 3, 1),
+    (1, 128, 2, 1),
+    (1, 256, 2, 1),
+    (2, 384, 2, 1),
+    (1, 128, 1, 1),
+    (1, 256, 1, 1),
+    (2, 384, 1, 1),
+    (1, 128, 0, 1),
+    (1, 256, 0, 1),
+    (2, 384, 0, 1),
 ]
 
 CASES = []
@@ -118,26 +133,50 @@ for _rows, _cols, _mode, _k in _U16_CASES:
     _aligned_rows = _ceil(_rows, _BLOCK_BYTES)
     _kname = f"thistogram_u16_{_mode.lower()}_{_rows}x{_cols}_k{_k}"
 
-    def _make_u16(rows=_rows, cols=_cols, byte=_byte, is_msb=_is_msb,
-                  aligned_src=_aligned_src, aligned_rows=_aligned_rows, kname=_kname):
+    def _make_u16(
+        rows=_rows,
+        cols=_cols,
+        byte=_byte,
+        is_msb=_is_msb,
+        aligned_src=_aligned_src,
+        aligned_rows=_aligned_rows,
+        kname=_kname,
+    ):
         @pto.jit(name=kname, target="a5")
-        def _kernel(src_ptr: pto.ptr(pto.ui16, "gm"),
-                    idx_ptr: pto.ptr(pto.ui8, "gm"),
-                    out_ptr: pto.ptr(pto.ui32, "gm")):
-            src_view = pto.make_tensor_view(src_ptr, shape=[rows, cols], strides=[cols, 1])
-            out_view = pto.make_tensor_view(out_ptr, shape=[rows, 256], strides=[256, 1])
-            src_tile = pto.alloc_tile(shape=[aligned_rows, aligned_src], dtype=pto.ui16,
-                                       valid_shape=[rows, cols])
-            out_tile = pto.alloc_tile(shape=[aligned_rows, 256], dtype=pto.ui32,
-                                      valid_shape=[rows, 256])
-            idx_tile = pto.alloc_tile(shape=[aligned_rows, 1], dtype=pto.ui8,
-                                      valid_shape=[rows, 1], blayout="ColMajor")
+        def _kernel(
+            src_ptr: pto.ptr(pto.ui16, "gm"),
+            idx_ptr: pto.ptr(pto.ui8, "gm"),
+            out_ptr: pto.ptr(pto.ui32, "gm"),
+        ):
+            src_view = pto.make_tensor_view(
+                src_ptr, shape=[rows, cols], strides=[cols, 1]
+            )
+            out_view = pto.make_tensor_view(
+                out_ptr, shape=[rows, 256], strides=[256, 1]
+            )
+            src_tile = pto.alloc_tile(
+                shape=[aligned_rows, aligned_src],
+                dtype=pto.ui16,
+                valid_shape=[rows, cols],
+            )
+            out_tile = pto.alloc_tile(
+                shape=[aligned_rows, 256], dtype=pto.ui32, valid_shape=[rows, 256]
+            )
+            idx_tile = pto.alloc_tile(
+                shape=[aligned_rows, 1],
+                dtype=pto.ui8,
+                valid_shape=[rows, 1],
+                blayout="ColMajor",
+            )
             pto.tile.load(src_view, src_tile)
             if not is_msb:
-                idx_view = pto.make_tensor_view(idx_ptr, shape=[rows, 1], strides=[1, 1])
+                idx_view = pto.make_tensor_view(
+                    idx_ptr, shape=[rows, 1], strides=[1, 1]
+                )
                 pto.tile.load(idx_view, idx_tile)
             pto.tile.histogram(src_tile, idx_tile, out_tile, byte=byte)
             pto.tile.store(out_tile, out_view)
+
         return _kernel
 
     _KERNELS[_kname] = _make_u16()
@@ -145,14 +184,18 @@ for _rows, _cols, _mode, _k in _U16_CASES:
     _src, _idx, _golden = _gen_u16_golden(_rows, _cols, _mode, _k)
     _idx_data = np.zeros(_rows, dtype=np.uint8) if _is_msb else _idx
 
-    CASES.append(golden_output_case(
-        _kname, _KERNELS[_kname],
-        inputs=lambda s=_src, i=_idx_data: [s, i],
-        expected=_golden,
-        output_shape=[_rows, 256],
-        output_dtype=np.uint32,
-        rtol=0.0, atol=1e-6,
-    ))
+    CASES.append(
+        golden_output_case(
+            _kname,
+            _KERNELS[_kname],
+            inputs=lambda s=_src, i=_idx_data: [s, i],
+            expected=_golden,
+            output_shape=[_rows, 256],
+            output_dtype=np.uint32,
+            rtol=0.0,
+            atol=1e-6,
+        )
+    )
 
 
 for _rows, _cols, _byte, _k in _U32_CASES:
@@ -161,27 +204,47 @@ for _rows, _cols, _byte, _k in _U32_CASES:
     _aligned_idx_col = _ceil(_cols, _BLOCK_BYTES) if _byte < 3 else _BLOCK_BYTES
     _kname = f"thistogram_u32_b{_byte}_{_rows}x{_cols}_k{_k}"
 
-    def _make_u32(rows=_rows, cols=_cols, byte=_byte,
-                  aligned_col=_aligned_col, num_idx_rows=_num_idx_rows,
-                  aligned_idx_col=_aligned_idx_col, kname=_kname):
+    def _make_u32(
+        rows=_rows,
+        cols=_cols,
+        byte=_byte,
+        aligned_col=_aligned_col,
+        num_idx_rows=_num_idx_rows,
+        aligned_idx_col=_aligned_idx_col,
+        kname=_kname,
+    ):
         @pto.jit(name=kname, target="a5")
-        def _kernel(src_ptr: pto.ptr(pto.ui32, "gm"),
-                    idx_ptr: pto.ptr(pto.ui8, "gm"),
-                    out_ptr: pto.ptr(pto.ui32, "gm")):
-            src_view = pto.make_tensor_view(src_ptr, shape=[rows, cols], strides=[cols, 1])
-            out_view = pto.make_tensor_view(out_ptr, shape=[rows, 256], strides=[256, 1])
-            src_tile = pto.alloc_tile(shape=[rows, aligned_col], dtype=pto.ui32,
-                                       valid_shape=[rows, cols])
-            out_tile = pto.alloc_tile(shape=[rows, 256], dtype=pto.ui32,
-                                      valid_shape=[rows, 256])
-            idx_tile = pto.alloc_tile(shape=[num_idx_rows, aligned_idx_col], dtype=pto.ui8,
-                                      valid_shape=[num_idx_rows, cols] if byte < 3 else [1, 1])
+        def _kernel(
+            src_ptr: pto.ptr(pto.ui32, "gm"),
+            idx_ptr: pto.ptr(pto.ui8, "gm"),
+            out_ptr: pto.ptr(pto.ui32, "gm"),
+        ):
+            src_view = pto.make_tensor_view(
+                src_ptr, shape=[rows, cols], strides=[cols, 1]
+            )
+            out_view = pto.make_tensor_view(
+                out_ptr, shape=[rows, 256], strides=[256, 1]
+            )
+            src_tile = pto.alloc_tile(
+                shape=[rows, aligned_col], dtype=pto.ui32, valid_shape=[rows, cols]
+            )
+            out_tile = pto.alloc_tile(
+                shape=[rows, 256], dtype=pto.ui32, valid_shape=[rows, 256]
+            )
+            idx_tile = pto.alloc_tile(
+                shape=[num_idx_rows, aligned_idx_col],
+                dtype=pto.ui8,
+                valid_shape=[num_idx_rows, cols] if byte < 3 else [1, 1],
+            )
             pto.tile.load(src_view, src_tile)
             if byte < 3:
-                idx_view = pto.make_tensor_view(idx_ptr, shape=[num_idx_rows, cols], strides=[cols, 1])
+                idx_view = pto.make_tensor_view(
+                    idx_ptr, shape=[num_idx_rows, cols], strides=[cols, 1]
+                )
                 pto.tile.load(idx_view, idx_tile)
             pto.tile.histogram(src_tile, idx_tile, out_tile, byte=byte)
             pto.tile.store(out_tile, out_view)
+
         return _kernel
 
     _KERNELS[_kname] = _make_u32()
@@ -189,13 +252,17 @@ for _rows, _cols, _byte, _k in _U32_CASES:
     _src, _idx, _golden = _gen_u32_golden(_rows, _cols, _byte, _k)
     _idx_data = np.zeros(1, dtype=np.uint8) if _byte == 3 else _idx
 
-    CASES.append(golden_output_case(
-        _kname, _KERNELS[_kname],
-        inputs=lambda s=_src, i=_idx_data: [s, i],
-        expected=_golden,
-        output_shape=[_rows, 256],
-        output_dtype=np.uint32,
-        rtol=0.0, atol=1e-6,
-    ))
+    CASES.append(
+        golden_output_case(
+            _kname,
+            _KERNELS[_kname],
+            inputs=lambda s=_src, i=_idx_data: [s, i],
+            expected=_golden,
+            output_shape=[_rows, 256],
+            output_dtype=np.uint32,
+            rtol=0.0,
+            atol=1e-6,
+        )
+    )
 
 auto_main(globals())

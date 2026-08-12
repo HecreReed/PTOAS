@@ -24,8 +24,12 @@ import sys
 
 def parse_args():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--source-dir", required=True, help="Original camodel simulator lib directory.")
-    parser.add_argument("--output-dir", required=True, help="Quiet camodel output directory.")
+    parser.add_argument(
+        "--source-dir", required=True, help="Original camodel simulator lib directory."
+    )
+    parser.add_argument(
+        "--output-dir", required=True, help="Quiet camodel output directory."
+    )
     return parser.parse_args()
 
 

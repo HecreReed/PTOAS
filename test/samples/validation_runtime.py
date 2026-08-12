@@ -58,16 +58,18 @@ class CaseMeta:
         return [name for name in self.read_order if name not in self.outputs]
 
 
-def load_case_meta(main_cpp: str = 'main.cpp', outputs_txt: str = 'outputs.txt') -> CaseMeta:
-    text = Path(main_cpp).read_text(encoding='utf-8')
+def load_case_meta(
+    main_cpp: str = "main.cpp", outputs_txt: str = "outputs.txt"
+) -> CaseMeta:
+    text = Path(main_cpp).read_text(encoding="utf-8")
     elem_counts = {
         match.group(1): int(match.group(2))
-        for match in re.finditer(r'size_t\s+elemCount_(\w+)\s*=\s*(\d+);', text)
+        for match in re.finditer(r"size_t\s+elemCount_(\w+)\s*=\s*(\d+);", text)
     }
     np_types = {
         match.group(1): np.dtype(_HOST_TYPE_TO_NP[match.group(2).strip()])
         for match in re.finditer(
-            r'size_t\s+fileSize_(\w+)\s*=\s*elemCount_\1\s*\*\s*sizeof\(([^)]+)\);',
+            r"size_t\s+fileSize_(\w+)\s*=\s*elemCount_\1\s*\*\s*sizeof\(([^)]+)\);",
             text,
         )
     }
@@ -75,23 +77,32 @@ def load_case_meta(main_cpp: str = 'main.cpp', outputs_txt: str = 'outputs.txt')
     outputs_path = Path(outputs_txt)
     outputs = []
     if outputs_path.is_file():
-        outputs = [line.strip() for line in outputs_path.read_text(encoding='utf-8').splitlines() if line.strip()]
-    return CaseMeta(elem_counts=elem_counts, np_types=np_types, read_order=read_order, outputs=outputs)
+        outputs = [
+            line.strip()
+            for line in outputs_path.read_text(encoding="utf-8").splitlines()
+            if line.strip()
+        ]
+    return CaseMeta(
+        elem_counts=elem_counts,
+        np_types=np_types,
+        read_order=read_order,
+        outputs=outputs,
+    )
 
 
-def load_scalar_assignments(ctype: str, main_cpp: str = 'main.cpp') -> List[int]:
-    text = Path(main_cpp).read_text(encoding='utf-8')
-    pattern = rf'{re.escape(ctype)}\s+\w+\s*=\s*(-?\d+);'
+def load_scalar_assignments(ctype: str, main_cpp: str = "main.cpp") -> List[int]:
+    text = Path(main_cpp).read_text(encoding="utf-8")
+    pattern = rf"{re.escape(ctype)}\s+\w+\s*=\s*(-?\d+);"
     return [int(value) for value in re.findall(pattern, text)]
 
 
-def load_int32_assignments(main_cpp: str = 'main.cpp') -> List[int]:
-    return load_scalar_assignments('int32_t', main_cpp=main_cpp)
+def load_int32_assignments(main_cpp: str = "main.cpp") -> List[int]:
+    return load_scalar_assignments("int32_t", main_cpp=main_cpp)
 
 
-def load_integer_assignments(main_cpp: str = 'main.cpp') -> List[int]:
-    text = Path(main_cpp).read_text(encoding='utf-8')
-    pattern = r'\b(?:u?int(?:8|16|32|64)_t|int|unsigned)\s+\w+\s*=\s*(-?(?:0x[0-9A-Fa-f]+|\d+));'
+def load_integer_assignments(main_cpp: str = "main.cpp") -> List[int]:
+    text = Path(main_cpp).read_text(encoding="utf-8")
+    pattern = r"\b(?:u?int(?:8|16|32|64)_t|int|unsigned)\s+\w+\s*=\s*(-?(?:0x[0-9A-Fa-f]+|\d+));"
     return [int(value, 0) for value in re.findall(pattern, text)]
 
 
@@ -100,12 +111,12 @@ def rng():
 
 
 def soc_version() -> str:
-    return os.getenv('SOC_VERSION', os.getenv('SIM_SOC_VERSION', '')).strip().lower()
+    return os.getenv("SOC_VERSION", os.getenv("SIM_SOC_VERSION", "")).strip().lower()
 
 
 def is_a5_soc() -> bool:
     sv = soc_version()
-    return '950' in sv or 'a5' in sv or '910_95' in sv
+    return "950" in sv or "a5" in sv or "910_95" in sv
 
 
 def bf16_to_float32(values: np.ndarray) -> np.ndarray:
@@ -120,14 +131,18 @@ def float32_to_bf16(values: np.ndarray) -> np.ndarray:
     return ((bits + round_bias) >> 16).astype(np.uint16)
 
 
-def load_strided_2d(buffer, *, offset: int, rows: int, cols: int, row_stride: int) -> np.ndarray:
+def load_strided_2d(
+    buffer, *, offset: int, rows: int, cols: int, row_stride: int
+) -> np.ndarray:
     flat = np.asarray(buffer).reshape(-1)
     tile = np.empty((rows, cols), dtype=flat.dtype)
     for row in range(rows):
         start = offset + row * row_stride
         stop = start + cols
         if stop > flat.size:
-            raise ValueError(f'strided load out of bounds: [{start}:{stop}] > {flat.size}')
+            raise ValueError(
+                f"strided load out of bounds: [{start}:{stop}] > {flat.size}"
+            )
         tile[row, :] = flat[start:stop]
     return tile
 
@@ -140,48 +155,52 @@ def store_strided_2d(buffer, tile, *, offset: int, row_stride: int):
         start = offset + row * row_stride
         stop = start + cols
         if stop > flat.size:
-            raise ValueError(f'strided store out of bounds: [{start}:{stop}] > {flat.size}')
+            raise ValueError(
+                f"strided store out of bounds: [{start}:{stop}] > {flat.size}"
+            )
         flat[start:stop] = tile_arr[row]
     return flat
 
 
 def float_values(generator, count: int, *, style: str) -> np.ndarray:
-    if style == 'signed':
+    if style == "signed":
         values = generator.uniform(-3.0, 3.0, size=count).astype(np.float32)
-    elif style == 'signed_small':
+    elif style == "signed_small":
         values = generator.uniform(-1.5, 1.5, size=count).astype(np.float32)
-    elif style == 'nonzero_signed':
+    elif style == "nonzero_signed":
         values = generator.uniform(-3.0, 3.0, size=count).astype(np.float32)
         mask = np.abs(values) < np.float32(0.25)
-        values[mask] = np.where(values[mask] >= 0.0, np.float32(0.25), np.float32(-0.25))
-    elif style == 'positive':
+        values[mask] = np.where(
+            values[mask] >= 0.0, np.float32(0.25), np.float32(-0.25)
+        )
+    elif style == "positive":
         values = generator.uniform(0.25, 4.0, size=count).astype(np.float32)
-    elif style in {'exp', 'cmp'}:
+    elif style in {"exp", "cmp"}:
         values = generator.uniform(-2.0, 2.0, size=count).astype(np.float32)
     else:
-        raise ValueError(f'unsupported float style: {style}')
+        raise ValueError(f"unsupported float style: {style}")
     return values
 
 
 def int_values(generator, count: int, dtype: np.dtype, *, style: str) -> np.ndarray:
     dtype = np.dtype(dtype)
     if dtype == np.dtype(np.int8):
-        if style != 'bitwise':
-            raise ValueError(f'unsupported int8 style: {style}')
+        if style != "bitwise":
+            raise ValueError(f"unsupported int8 style: {style}")
         values = generator.integers(-128, 128, size=count, dtype=np.int32)
     elif dtype == np.dtype(np.int16):
-        if style != 'bitwise':
-            raise ValueError(f'unsupported int16 style: {style}')
+        if style != "bitwise":
+            raise ValueError(f"unsupported int16 style: {style}")
         values = generator.integers(-256, 256, size=count, dtype=np.int32)
     elif dtype == np.dtype(np.int32):
-        if style == 'bitwise':
+        if style == "bitwise":
             values = generator.integers(-256, 256, size=count, dtype=np.int32)
-        elif style == 'shift_small':
+        elif style == "shift_small":
             values = generator.integers(0, 4, size=count, dtype=np.int32)
         else:
-            raise ValueError(f'unsupported int32 style: {style}')
+            raise ValueError(f"unsupported int32 style: {style}")
     else:
-        raise ValueError(f'unsupported dtype/style pair: {dtype}/{style}')
+        raise ValueError(f"unsupported dtype/style pair: {dtype}/{style}")
     return values.astype(dtype, copy=False)
 
 
@@ -189,39 +208,44 @@ def matrix32(values: np.ndarray, rows: int = ROWS, cols: int = COLS) -> np.ndarr
     flat = np.asarray(values).reshape(-1)
     expected = rows * cols
     if flat.size != expected:
-        raise ValueError(f'expected {expected} elements, got {flat.size}')
+        raise ValueError(f"expected {expected} elements, got {flat.size}")
     return flat.reshape(rows, cols)
 
 
 def default_buffers(meta: CaseMeta):
-    return {name: np.zeros(meta.elem_counts[name], dtype=meta.np_types[name]) for name in meta.read_order}
+    return {
+        name: np.zeros(meta.elem_counts[name], dtype=meta.np_types[name])
+        for name in meta.read_order
+    }
 
 
 def write_buffers(meta: CaseMeta, buffers):
     for name in meta.read_order:
         if name not in buffers:
-            raise KeyError(f'missing buffer for {name}')
+            raise KeyError(f"missing buffer for {name}")
         array = np.asarray(buffers[name], dtype=meta.np_types[name]).reshape(-1)
         expected = meta.elem_counts[name]
         if array.size != expected:
-            raise ValueError(f'{name}: expected {expected} elements, got {array.size}')
-        array.tofile(f'{name}.bin')
+            raise ValueError(f"{name}: expected {expected} elements, got {array.size}")
+        array.tofile(f"{name}.bin")
 
 
 def write_golden(meta: CaseMeta, outputs):
     for name in meta.outputs:
         if name not in outputs:
-            raise KeyError(f'missing golden for {name}')
+            raise KeyError(f"missing golden for {name}")
         array = np.asarray(outputs[name], dtype=meta.np_types[name]).reshape(-1)
         expected = meta.elem_counts[name]
         if array.size != expected:
-            raise ValueError(f'{name}: expected {expected} golden elements, got {array.size}')
-        array.tofile(f'golden_{name}.bin')
+            raise ValueError(
+                f"{name}: expected {expected} golden elements, got {array.size}"
+            )
+        array.tofile(f"golden_{name}.bin")
 
 
 def single_output(meta: CaseMeta) -> str:
     if len(meta.outputs) != 1:
-        raise ValueError(f'expected exactly one output, got {meta.outputs}')
+        raise ValueError(f"expected exactly one output, got {meta.outputs}")
     return meta.outputs[0]
 
 
@@ -240,18 +264,20 @@ def packed_mask_storage_bytes(elem_count: int, dtype) -> int:
 def packed_mask_storage_cols(*, elem_count: int, dtype, rows: int = ROWS) -> int:
     storage_bytes = packed_mask_storage_bytes(elem_count, dtype)
     if storage_bytes % rows != 0:
-        raise ValueError(f'packed mask storage {storage_bytes} bytes is not divisible by rows={rows}')
+        raise ValueError(
+            f"packed mask storage {storage_bytes} bytes is not divisible by rows={rows}"
+        )
     return storage_bytes // rows
 
 
 def pack_predicate_mask(bits: np.ndarray, *, storage_cols: int) -> np.ndarray:
     bits = np.asarray(bits, dtype=np.bool_)
     if bits.ndim != 2:
-        raise ValueError('mask bits must be a 2D array')
+        raise ValueError("mask bits must be a 2D array")
     rows, cols = bits.shape
     used_cols = packed_row_bytes(cols)
     if storage_cols < used_cols:
-        raise ValueError(f'storage_cols={storage_cols} is too small for cols={cols}')
+        raise ValueError(f"storage_cols={storage_cols} is too small for cols={cols}")
     packed = np.zeros((rows, storage_cols), dtype=np.uint8)
     for row in range(rows):
         for byte_index, base_col in enumerate(range(0, cols, 8)):
@@ -267,7 +293,7 @@ def pack_predicate_mask(bits: np.ndarray, *, storage_cols: int) -> np.ndarray:
 def pack_predicate_mask_dense(bits: np.ndarray) -> np.ndarray:
     bits = np.asarray(bits, dtype=np.bool_)
     if bits.ndim != 2:
-        raise ValueError('mask bits must be a 2D array')
+        raise ValueError("mask bits must be a 2D array")
     rows, cols = bits.shape
     packed = np.zeros((rows, packed_row_bytes(cols)), dtype=np.uint8)
     for row in range(rows):
@@ -281,7 +307,9 @@ def pack_predicate_mask_dense(bits: np.ndarray) -> np.ndarray:
     return packed.reshape(-1)
 
 
-def pack_predicate_mask_for_buffer(bits: np.ndarray, *, elem_count: int, dtype, rows: int = ROWS) -> np.ndarray:
+def pack_predicate_mask_for_buffer(
+    bits: np.ndarray, *, elem_count: int, dtype, rows: int = ROWS
+) -> np.ndarray:
     dtype = np.dtype(dtype)
     expected_bytes = packed_mask_storage_bytes(elem_count, dtype)
     if is_a5_soc():
@@ -289,24 +317,30 @@ def pack_predicate_mask_for_buffer(bits: np.ndarray, *, elem_count: int, dtype, 
         dense_bytes = pack_predicate_mask_dense(bits)
         if dense_bytes.nbytes > expected_bytes:
             raise ValueError(
-                f'packed mask byte size mismatch: expected <= {expected_bytes}, got {dense_bytes.nbytes}'
+                f"packed mask byte size mismatch: expected <= {expected_bytes}, got {dense_bytes.nbytes}"
             )
-        packed_bytes[:dense_bytes.size] = dense_bytes
+        packed_bytes[: dense_bytes.size] = dense_bytes
     else:
-        storage_cols = packed_mask_storage_cols(elem_count=elem_count, dtype=dtype, rows=rows)
+        storage_cols = packed_mask_storage_cols(
+            elem_count=elem_count, dtype=dtype, rows=rows
+        )
         packed_bytes = pack_predicate_mask(bits, storage_cols=storage_cols)
         if packed_bytes.nbytes != expected_bytes:
             raise ValueError(
-                f'packed mask byte size mismatch: expected {expected_bytes}, got {packed_bytes.nbytes}'
+                f"packed mask byte size mismatch: expected {expected_bytes}, got {packed_bytes.nbytes}"
             )
     return np.frombuffer(packed_bytes.tobytes(), dtype=dtype).copy()
 
 
-def _report_compare_failure(golden: np.ndarray, output: np.ndarray, golden_path: str, output_path: str):
+def _report_compare_failure(
+    golden: np.ndarray, output: np.ndarray, golden_path: str, output_path: str
+):
     if golden.size == 0:
-        print(f'[ERROR] Mismatch: {golden_path} vs {output_path}, empty buffers')
+        print(f"[ERROR] Mismatch: {golden_path} vs {output_path}, empty buffers")
         return
-    if np.issubdtype(golden.dtype, np.integer) or np.issubdtype(golden.dtype, np.unsignedinteger):
+    if np.issubdtype(golden.dtype, np.integer) or np.issubdtype(
+        golden.dtype, np.unsignedinteger
+    ):
         golden_cmp = golden.astype(np.int64, copy=False)
         output_cmp = output.astype(np.int64, copy=False)
     else:
@@ -315,23 +349,25 @@ def _report_compare_failure(golden: np.ndarray, output: np.ndarray, golden_path:
     diff = np.abs(golden_cmp - output_cmp)
     index = int(np.argmax(diff))
     print(
-        f'[ERROR] Mismatch: {golden_path} vs {output_path}, max diff={float(diff[index])} at idx={index} '
-        f'(golden={golden_cmp[index]}, out={output_cmp[index]}, dtype={golden.dtype})'
+        f"[ERROR] Mismatch: {golden_path} vs {output_path}, max diff={float(diff[index])} at idx={index} "
+        f"(golden={golden_cmp[index]}, out={output_cmp[index]}, dtype={golden.dtype})"
     )
 
 
 def compare_file(golden_path: str, output_path: str, dtype, atol: float) -> bool:
     if not os.path.exists(output_path):
-        print(f'[ERROR] Output missing: {output_path}')
+        print(f"[ERROR] Output missing: {output_path}")
         return False
     if not os.path.exists(golden_path):
-        print(f'[ERROR] Golden missing: {golden_path}')
+        print(f"[ERROR] Golden missing: {golden_path}")
         return False
     dtype = np.dtype(dtype)
     golden = np.fromfile(golden_path, dtype=dtype)
     output = np.fromfile(output_path, dtype=dtype)
     if golden.shape != output.shape:
-        print(f'[ERROR] Shape mismatch: {golden_path} {golden.shape} vs {output_path} {output.shape}')
+        print(
+            f"[ERROR] Shape mismatch: {golden_path} {golden.shape} vs {output_path} {output.shape}"
+        )
         return False
     if np.issubdtype(dtype, np.integer) or np.issubdtype(dtype, np.unsignedinteger):
         if atol == 0.0:
@@ -346,31 +382,35 @@ def compare_file(golden_path: str, output_path: str, dtype, atol: float) -> bool
     return True
 
 
-def compare_packed_mask_file(golden_path: str, output_path: str, *, rows: int = ROWS, cols: int = COLS) -> bool:
+def compare_packed_mask_file(
+    golden_path: str, output_path: str, *, rows: int = ROWS, cols: int = COLS
+) -> bool:
     if not os.path.exists(output_path):
-        print(f'[ERROR] Output missing: {output_path}')
+        print(f"[ERROR] Output missing: {output_path}")
         return False
     if not os.path.exists(golden_path):
-        print(f'[ERROR] Golden missing: {golden_path}')
+        print(f"[ERROR] Golden missing: {golden_path}")
         return False
     golden = np.fromfile(golden_path, dtype=np.uint8)
     output = np.fromfile(output_path, dtype=np.uint8)
     if is_a5_soc():
         used_bytes = packed_mask_payload_bytes(rows=rows, cols=cols)
         if golden.size < used_bytes or output.size < used_bytes:
-            print(f'[ERROR] Packed mask storage is too small: need {used_bytes} bytes')
+            print(f"[ERROR] Packed mask storage is too small: need {used_bytes} bytes")
             return False
         golden_view = golden[:used_bytes]
         output_view = output[:used_bytes]
     else:
         if golden.size % rows != 0 or output.size % rows != 0:
-            print(f'[ERROR] Packed mask buffer size is not divisible by rows={rows}')
+            print(f"[ERROR] Packed mask buffer size is not divisible by rows={rows}")
             return False
         golden_cols = golden.size // rows
         output_cols = output.size // rows
         used_cols = packed_row_bytes(cols)
         if golden_cols < used_cols or output_cols < used_cols:
-            print(f'[ERROR] Packed mask storage is too small: need {used_cols} bytes per row')
+            print(
+                f"[ERROR] Packed mask storage is too small: need {used_cols} bytes per row"
+            )
             return False
         golden_view = golden.reshape(rows, golden_cols)[:, :used_cols].reshape(-1)
         output_view = output.reshape(rows, output_cols)[:, :used_cols].reshape(-1)
@@ -378,22 +418,22 @@ def compare_packed_mask_file(golden_path: str, output_path: str, *, rows: int = 
         diff = np.nonzero(golden_view != output_view)[0]
         index = int(diff[0]) if diff.size else 0
         print(
-            f'[ERROR] Packed mask mismatch: {golden_path} vs {output_path}, idx={index} '
-            f'(golden={int(golden_view[index])}, out={int(output_view[index])})'
+            f"[ERROR] Packed mask mismatch: {golden_path} vs {output_path}, idx={index} "
+            f"(golden={int(golden_view[index])}, out={int(output_view[index])})"
         )
         return False
     return True
 
 
 def finalize_compare(ok: bool):
-    strict = os.getenv('COMPARE_STRICT', '1') != '0'
+    strict = os.getenv("COMPARE_STRICT", "1") != "0"
     if not ok:
         if strict:
-            print('[ERROR] compare failed')
+            print("[ERROR] compare failed")
             sys.exit(2)
-        print('[WARN] compare failed (non-gating)')
+        print("[WARN] compare failed (non-gating)")
         return False
-    print('[INFO] compare passed')
+    print("[INFO] compare passed")
     return True
 
 
@@ -401,7 +441,7 @@ def compare_outputs(dtype, atol: float):
     meta = load_case_meta()
     ok = True
     for name in meta.outputs:
-        ok = compare_file(f'golden_{name}.bin', f'{name}.bin', dtype, atol) and ok
+        ok = compare_file(f"golden_{name}.bin", f"{name}.bin", dtype, atol) and ok
     return finalize_compare(ok)
 
 
@@ -409,5 +449,10 @@ def compare_packed_mask_outputs(*, rows: int = ROWS, cols: int = COLS):
     meta = load_case_meta()
     ok = True
     for name in meta.outputs:
-        ok = compare_packed_mask_file(f'golden_{name}.bin', f'{name}.bin', rows=rows, cols=cols) and ok
+        ok = (
+            compare_packed_mask_file(
+                f"golden_{name}.bin", f"{name}.bin", rows=rows, cols=cols
+            )
+            and ok
+        )
     return finalize_compare(ok)

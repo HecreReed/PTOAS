@@ -14,12 +14,24 @@
 #endif
 
 #if defined(__CCE_AICORE__) && defined(__NPU_ARCH__) && (__NPU_ARCH__ == 2201)
-typedef struct { unsigned char v; } hifloat8_t;
-typedef struct { unsigned char v; } float8_e4m3_t;
-typedef struct { unsigned char v; } float8_e5m2_t;
-typedef struct { unsigned char v; } float8_e8m0_t;
-typedef struct { unsigned char v; } float4_e1m2x2_t;
-typedef struct { unsigned char v; } float4_e2m1x2_t;
+typedef struct {
+    unsigned char v;
+} hifloat8_t;
+typedef struct {
+    unsigned char v;
+} float8_e4m3_t;
+typedef struct {
+    unsigned char v;
+} float8_e5m2_t;
+typedef struct {
+    unsigned char v;
+} float8_e8m0_t;
+typedef struct {
+    unsigned char v;
+} float4_e1m2x2_t;
+typedef struct {
+    unsigned char v;
+} float4_e2m1x2_t;
 #endif
 #include <cstdint>
 
@@ -39,11 +51,9 @@ struct MrgSortExecutedNumList {
 #include "acl/acl.h"
 #endif
 
-extern "C" __global__ [aicore] void vcvt_u32_to_u8_part_p0123_kernel(
-    __gm__ uint32_t *v1, __gm__ uint8_t *v2);
+extern "C" __global__[aicore] void vcvt_u32_to_u8_part_p0123_kernel(__gm__ uint32_t* v1, __gm__ uint8_t* v2);
 
-void LaunchVcvt_u32_to_u8_part_p0123_kernel(uint32_t *v1, uint8_t *v2,
-                                            void *stream) {
-  vcvt_u32_to_u8_part_p0123_kernel<<<1, nullptr, stream>>>(
-      (__gm__ uint32_t *)v1, (__gm__ uint8_t *)v2);
+void LaunchVcvt_u32_to_u8_part_p0123_kernel(uint32_t* v1, uint8_t* v2, void* stream)
+{
+    vcvt_u32_to_u8_part_p0123_kernel<<<1, nullptr, stream>>>((__gm__ uint32_t*)v1, (__gm__ uint8_t*)v2);
 }

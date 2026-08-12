@@ -23,17 +23,13 @@ N0 = 16
 def pack_lhs_cube_fractal(matrix: np.ndarray) -> np.ndarray:
     m, k = matrix.shape
     assert m % M0 == 0 and k % K0 == 0
-    return matrix.reshape(m // M0, M0, k // K0, K0).transpose(
-        2, 0, 1, 3
-    )
+    return matrix.reshape(m // M0, M0, k // K0, K0).transpose(2, 0, 1, 3)
 
 
 def pack_rhs_cube_fractal(matrix: np.ndarray) -> np.ndarray:
     k, n = matrix.shape
     assert k % K0 == 0 and n % N0 == 0
-    return matrix.reshape(k // K0, K0, n // N0, N0).transpose(
-        0, 2, 1, 3
-    )
+    return matrix.reshape(k // K0, K0, n // N0, N0).transpose(0, 2, 1, 3)
 
 
 def fp8_e4m3_to_f32(bits: np.ndarray) -> np.ndarray:

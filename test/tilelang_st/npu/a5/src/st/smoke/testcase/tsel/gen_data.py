@@ -38,7 +38,15 @@ for case in CASES:
                 col = packed_col * 8 + bit
                 if col >= vc:
                     break
-                golden[row, col] = src0_valid[row, col] if ((byte >> bit) & 1) else src1_valid[row, col]
+                golden[row, col] = (
+                    src0_valid[row, col]
+                    if ((byte >> bit) & 1)
+                    else src1_valid[row, col]
+                )
 
-    save_case_data(case["name"], {"input1": src0, "input2": src1, "input3": mask, "golden": golden})
-    print(f"[INFO] gen_data: {case['name']} shape={shape} valid_shape={valid_shape} dtype={dtype.__name__}")
+    save_case_data(
+        case["name"], {"input1": src0, "input2": src1, "input3": mask, "golden": golden}
+    )
+    print(
+        f"[INFO] gen_data: {case['name']} shape={shape} valid_shape={valid_shape} dtype={dtype.__name__}"
+    )

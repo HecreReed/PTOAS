@@ -6,7 +6,15 @@
 # INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
 # See LICENSE in the root of the software repository for the full text of the License.
 
-from ptoas.mlir.ir import Context, F32Type, IndexType, InsertionPoint, Location, Module, UnitAttr
+from ptoas.mlir.ir import (
+    Context,
+    F32Type,
+    IndexType,
+    InsertionPoint,
+    Location,
+    Module,
+    UnitAttr,
+)
 from ptoas.mlir.dialects import arith, func, pto
 
 
@@ -27,7 +35,9 @@ def build():
             bl = pto.BLayoutAttr.get(pto.BLayout.RowMajor, ctx)
             sl = pto.SLayoutAttr.get(pto.SLayout.NoneBox, ctx)
             pd = pto.PadValueAttr.get(pto.PadValue.Null, ctx)
-            cfg = pto.TileBufConfigAttr.get(bl, sl, pto.TileConfig.fractalABSize, pd, ctx)
+            cfg = pto.TileBufConfigAttr.get(
+                bl, sl, pto.TileConfig.fractalABSize, pd, ctx
+            )
             tb_f32 = pto.TileBufType.get([1, 64], f32, vec, [1, 64], cfg, ctx)
 
             fn_ty = func.FunctionType.get(

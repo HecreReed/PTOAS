@@ -17,45 +17,47 @@
 using namespace PtoTestCommon;
 
 // ---- launch wrappers (defined in launch.cpp) ----
-void LaunchTMATMUL_BIAS_f16_16x16x16(void *a, void *b, void *bias, void *c, void *stream);
-void LaunchTMATMUL_BIAS_f16_bias_f16_16x15x16(void *a, void *b, void *bias, void *c, void *stream);
-void LaunchTMATMUL_BIAS_f16_bias_bf16_112x127x80(void *a, void *b, void *bias, void *c, void *stream);
-void LaunchTMATMUL_BIAS_bf16_bias_bf16_80x112x63(void *a, void *b, void *bias, void *c, void *stream);
-void LaunchTMATMUL_BIAS_f32_bias_f32_127x128x63(void *a, void *b, void *bias, void *c, void *stream);
+void LaunchTMATMUL_BIAS_f16_16x16x16(void* a, void* b, void* bias, void* c, void* stream);
+void LaunchTMATMUL_BIAS_f16_bias_f16_16x15x16(void* a, void* b, void* bias, void* c, void* stream);
+void LaunchTMATMUL_BIAS_f16_bias_bf16_112x127x80(void* a, void* b, void* bias, void* c, void* stream);
+void LaunchTMATMUL_BIAS_bf16_bias_bf16_80x112x63(void* a, void* b, void* bias, void* c, void* stream);
+void LaunchTMATMUL_BIAS_f32_bias_f32_127x128x63(void* a, void* b, void* bias, void* c, void* stream);
 
-void LaunchTMATMUL_BIAS_i8_bias_i32_8x7x6(void *a, void *b, void *bias, void *c, void *stream);
+void LaunchTMATMUL_BIAS_i8_bias_i32_8x7x6(void* a, void* b, void* bias, void* c, void* stream);
 
-using LaunchFn = void (*)(void *, void *, void *, void *, void *);
+using LaunchFn = void (*)(void*, void*, void*, void*, void*);
 
 struct TestCase {
-    const char *name;
-    LaunchFn    launch;
-    size_t      M;         // valid rows
-    size_t      K;
-    size_t      N;         // valid cols
-    size_t      M_aligned; // aligned rows (tileM)
-    size_t      K_aligned; // aligned inner dim (tileK)
-    size_t      N_aligned; // aligned cols (tileN)
-    size_t      aElemSize;
-    size_t      bElemSize;
-    size_t      biasElemSize;
-    size_t      cElemSize;
+    const char* name;
+    LaunchFn launch;
+    size_t M; // valid rows
+    size_t K;
+    size_t N;         // valid cols
+    size_t M_aligned; // aligned rows (tileM)
+    size_t K_aligned; // aligned inner dim (tileK)
+    size_t N_aligned; // aligned cols (tileN)
+    size_t aElemSize;
+    size_t bElemSize;
+    size_t biasElemSize;
+    size_t cElemSize;
 };
 
 static const TestCase kCases[] = {
-    {"f16_16x16x16",                         LaunchTMATMUL_BIAS_f16_16x16x16,                         16,  16,  16,  16,  16,  16,  2, 2, 4, 4},
+    {"f16_16x16x16", LaunchTMATMUL_BIAS_f16_16x16x16, 16, 16, 16, 16, 16, 16, 2, 2, 4, 4},
 
-    {"i8_bias_i32_8x7x6",                   LaunchTMATMUL_BIAS_i8_bias_i32_8x7x6,              8,   7,   6,   16,  32,  32,  1, 1, 4, 4},
+    {"i8_bias_i32_8x7x6", LaunchTMATMUL_BIAS_i8_bias_i32_8x7x6, 8, 7, 6, 16, 32, 32, 1, 1, 4, 4},
 
-    {"f16_bias_f16_16x15x16",              LaunchTMATMUL_BIAS_f16_bias_f16_16x15x16,             16,  15,  16,  16,  16,  16,  2, 2, 4, 4},  // DEBUG: f32 bias
-    {"f16_bias_bf16_112x127x80",           LaunchTMATMUL_BIAS_f16_bias_bf16_112x127x80,         112, 127, 80,  112, 128, 80,  2, 2, 4, 4},
-    {"bf16_bias_bf16_80x112x63",           LaunchTMATMUL_BIAS_bf16_bias_bf16_80x112x63,          80, 112, 63,  80,  128, 64,  2, 2, 4, 4},
-    {"f32_bias_f32_127x128x63",            LaunchTMATMUL_BIAS_f32_bias_f32_127x128x63,          127, 128, 63,  128, 128, 64,  4, 4, 4, 4},
+    {"f16_bias_f16_16x15x16", LaunchTMATMUL_BIAS_f16_bias_f16_16x15x16, 16, 15, 16, 16, 16, 16, 2, 2, 4,
+     4}, // DEBUG: f32 bias
+    {"f16_bias_bf16_112x127x80", LaunchTMATMUL_BIAS_f16_bias_bf16_112x127x80, 112, 127, 80, 112, 128, 80, 2, 2, 4, 4},
+    {"bf16_bias_bf16_80x112x63", LaunchTMATMUL_BIAS_bf16_bias_bf16_80x112x63, 80, 112, 63, 80, 128, 64, 2, 2, 4, 4},
+    {"f32_bias_f32_127x128x63", LaunchTMATMUL_BIAS_f32_bias_f32_127x128x63, 127, 128, 63, 128, 128, 64, 4, 4, 4, 4},
 
 };
 static constexpr size_t kNumCases = sizeof(kCases) / sizeof(kCases[0]);
 
-static int RunCase(const TestCase &tc, int deviceId, aclrtStream stream) {
+static int RunCase(const TestCase& tc, int deviceId, aclrtStream stream)
+{
     (void)deviceId;
     int rc = 0;
     // Allocate device buffers at aligned sizes so GM→L1 loads don't read OOB.
@@ -68,9 +70,8 @@ static int RunCase(const TestCase &tc, int deviceId, aclrtStream stream) {
     size_t biasFileSize = biasBytes;
 
     std::printf(
-        "[INFO] === case: %s (M=%zu, K=%zu, N=%zu, M_aligned=%zu, N_aligned=%zu) ===\n",
-        tc.name, tc.M, tc.K, tc.N, tc.M_aligned, tc.N_aligned
-    );
+        "[INFO] === case: %s (M=%zu, K=%zu, N=%zu, M_aligned=%zu, N_aligned=%zu) ===\n", tc.name, tc.M, tc.K, tc.N,
+        tc.M_aligned, tc.N_aligned);
 
     std::string caseDir = std::string("./") + tc.name;
 
@@ -116,29 +117,38 @@ static int RunCase(const TestCase &tc, int deviceId, aclrtStream stream) {
         rc = 1;
     }
 
-    if (aDevice != nullptr) aclrtFree(aDevice);
-    if (bDevice != nullptr) aclrtFree(bDevice);
-    if (biasDevice != nullptr) aclrtFree(biasDevice);
-    if (cDevice != nullptr) aclrtFree(cDevice);
-    if (aHost != nullptr) aclrtFreeHost(aHost);
-    if (bHost != nullptr) aclrtFreeHost(bHost);
-    if (biasHost != nullptr) aclrtFreeHost(biasHost);
-    if (cHost != nullptr) aclrtFreeHost(cHost);
+    if (aDevice != nullptr)
+        aclrtFree(aDevice);
+    if (bDevice != nullptr)
+        aclrtFree(bDevice);
+    if (biasDevice != nullptr)
+        aclrtFree(biasDevice);
+    if (cDevice != nullptr)
+        aclrtFree(cDevice);
+    if (aHost != nullptr)
+        aclrtFreeHost(aHost);
+    if (bHost != nullptr)
+        aclrtFreeHost(bHost);
+    if (biasHost != nullptr)
+        aclrtFreeHost(biasHost);
+    if (cHost != nullptr)
+        aclrtFreeHost(cHost);
 
     if (rc == 0)
         std::printf("[INFO] case %s done\n", tc.name);
     return rc;
 }
 
-int main(int argc, char *argv[]) {
-    const char *caseFilter = (argc > 1) ? argv[1] : nullptr;
+int main(int argc, char* argv[])
+{
+    const char* caseFilter = (argc > 1) ? argv[1] : nullptr;
 
     int rc = 0;
     int deviceId = 0;
     aclrtStream stream = nullptr;
 
     aclInit(nullptr);
-    if (const char *envDevice = std::getenv("ACL_DEVICE_ID")) {
+    if (const char* envDevice = std::getenv("ACL_DEVICE_ID")) {
         deviceId = std::atoi(envDevice);
     }
     aclrtSetDevice(deviceId);

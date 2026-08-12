@@ -21,7 +21,27 @@ import numpy as np
 
 SEED = 19
 OUTPUT_WORDS = 32
-GOLDEN_PREFIX_WORDS = np.array([1431655765, 1431655765, 1431655765, 1431655765, 0, 0, 0, 0, 1431655765, 1431655765, 1431655765, 1431655765, 0, 0, 0, 0], dtype=np.uint32)
+GOLDEN_PREFIX_WORDS = np.array(
+    [
+        1431655765,
+        1431655765,
+        1431655765,
+        1431655765,
+        0,
+        0,
+        0,
+        0,
+        1431655765,
+        1431655765,
+        1431655765,
+        1431655765,
+        0,
+        0,
+        0,
+        0,
+    ],
+    dtype=np.uint32,
+)
 
 
 def generate(output_dir: Path, seed: int) -> None:

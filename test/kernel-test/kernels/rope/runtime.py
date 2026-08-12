@@ -66,7 +66,9 @@ def artifact_case_dir_name(case: dict[str, object]) -> str:
     return f"{case['dtype']}_{case['mode']}_s{tile.s}_n{tile.n}"
 
 
-def artifact_case_dir(root: Path, case: dict[str, object], *, backend_name: str) -> Path:
+def artifact_case_dir(
+    root: Path, case: dict[str, object], *, backend_name: str
+) -> Path:
     """Return the backend-specific rope artifact directory for one case."""
 
     return root / backend_name / artifact_case_dir_name(case)

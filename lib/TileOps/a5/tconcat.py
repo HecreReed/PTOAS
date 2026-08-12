@@ -69,4 +69,4 @@ def template_tconcat(src0: pto.Tile, src1: pto.Tile, dst: pto.Tile):
         for col in range(0, cols1, lanes):
             mask1, remained1 = pto.make_mask(dtype, remained1)
             value1 = pto.vlds(src1[row, col:])
-            pto.vsts(value1, dst[row, cols0 + col:], mask1)
+            pto.vsts(value1, dst[row, cols0 + col :], mask1)

@@ -95,11 +95,11 @@ module attributes {pto.target_arch = "a5", pto.kernel_kind = #pto.kernel_kind<ve
 
     // inactive cross-case merge from micro-op/vector-load-store/vlds
     scf.if %__case_merge_guard {
-      
+
           %__deep_merge_guard_cmg22_1 = arith.constant false
           // inactive merged from vabs_kernel_2d_vlds_tail
           scf.if %__deep_merge_guard_cmg22_1 {
-      
+
           %c0_m0_cmg22_1 = arith.constant 0 : index
           %c1_m0_cmg22_1 = arith.constant 1 : index
           %c64_m0_cmg22_1 = arith.constant 64 : index
@@ -111,18 +111,18 @@ module attributes {pto.target_arch = "a5", pto.kernel_kind = #pto.kernel_kind<ve
           %c4096_i64_m0_cmg22_1 = arith.constant 4096 : i64
           %c1000_i32_m0_cmg22_1 = arith.constant 1000 : i32
           %c1024_i32_m0_cmg22_1 = arith.constant 1024 : i32
-      
+
           %ub_in_m0_cmg22_1 = pto.castptr %c0_i64_m0_cmg22_1 : i64 -> !pto.ptr<f32, ub>
           %ub_out_m0_cmg22_1 = pto.castptr %c4096_i64_m0_cmg22_1 : i64 -> !pto.ptr<f32, ub>
-      
+
           %false_m0_cmg22_1 = arith.constant false
           pto.mte_gm_ub %arg0, %ub_in_m0_cmg22_1, %c0_i64_m0_cmg22_1, %c128_i64_m0_cmg22_1
             nburst(%c32_i64_m0_cmg22_1, %c128_i64_m0_cmg22_1, %c128_i64_m0_cmg22_1)
             : !pto.ptr<f32, gm>, !pto.ptr<f32, ub>, i64, i64, i64, i64, i64
-      
+
           pto.set_flag["PIPE_MTE2", "PIPE_V", "EVENT_ID0"]
           pto.wait_flag["PIPE_MTE2", "PIPE_V", "EVENT_ID0"]
-      
+
           pto.vecscope {
             %__m0_cmg22_1:1 = scf.for %offset_m0_cmg22_1 = %c0_m0_cmg22_1 to %c1024_m0_cmg22_1 step %c64_m0_cmg22_1 iter_args(%remaining_m0_cmg22_1 = %c1000_i32_m0_cmg22_1) -> (i32) {
               %mask_m0_cmg22_1, %next_remaining_m0_cmg22_1 = pto.plt_b32 %remaining_m0_cmg22_1 : i32 -> !pto.mask<b32>, i32
@@ -131,17 +131,17 @@ module attributes {pto.target_arch = "a5", pto.kernel_kind = #pto.kernel_kind<ve
               scf.yield %next_remaining_m0_cmg22_1 : i32
             }
           }
-      
+
           pto.set_flag["PIPE_V", "PIPE_MTE3", "EVENT_ID0"]
           pto.wait_flag["PIPE_V", "PIPE_MTE3", "EVENT_ID0"]
           pto.mte_ub_gm %ub_out_m0_cmg22_1, %arg1, %c128_i64_m0_cmg22_1
             nburst(%c32_i64_m0_cmg22_1, %c128_i64_m0_cmg22_1, %c128_i64_m0_cmg22_1)
             : !pto.ptr<f32, ub>, !pto.ptr<f32, gm>, i64, i64, i64, i64
           pto.barrier #pto.pipe<PIPE_ALL>
-      
+
           }
           // active merged from vabs_kernel_2d
-      
+
           %c0_m1_cmg22_1 = arith.constant 0 : index
           %c1_m1_cmg22_1 = arith.constant 1 : index
           %c64_m1_cmg22_1 = arith.constant 64 : index
@@ -152,18 +152,18 @@ module attributes {pto.target_arch = "a5", pto.kernel_kind = #pto.kernel_kind<ve
           %c128_i64_m1_cmg22_1 = arith.constant 128 : i64
           %c4096_i64_m1_cmg22_1 = arith.constant 4096 : i64
           %c1024_i32_m1_cmg22_1 = arith.constant 1024 : i32
-      
+
           %ub_in_m1_cmg22_1 = pto.castptr %c0_i64_m1_cmg22_1 : i64 -> !pto.ptr<f32, ub>
           %ub_out_m1_cmg22_1 = pto.castptr %c4096_i64_m1_cmg22_1 : i64 -> !pto.ptr<f32, ub>
-      
+
           %false_m1_cmg22_1 = arith.constant false
           pto.mte_gm_ub %arg2, %ub_in_m1_cmg22_1, %c0_i64_m1_cmg22_1, %c128_i64_m1_cmg22_1
             nburst(%c32_i64_m1_cmg22_1, %c128_i64_m1_cmg22_1, %c128_i64_m1_cmg22_1)
             : !pto.ptr<f32, gm>, !pto.ptr<f32, ub>, i64, i64, i64, i64, i64
-      
+
           pto.set_flag["PIPE_MTE2", "PIPE_V", "EVENT_ID0"]
           pto.wait_flag["PIPE_MTE2", "PIPE_V", "EVENT_ID0"]
-      
+
           pto.vecscope {
             %__m1_cmg22_1:1 = scf.for %offset_m1_cmg22_1 = %c0_m1_cmg22_1 to %c1024_m1_cmg22_1 step %c64_m1_cmg22_1 iter_args(%remaining_m1_cmg22_1 = %c1024_i32_m1_cmg22_1) -> (i32) {
               %mask_m1_cmg22_1, %next_remaining_m1_cmg22_1 = pto.plt_b32 %remaining_m1_cmg22_1 : i32 -> !pto.mask<b32>, i32
@@ -172,7 +172,7 @@ module attributes {pto.target_arch = "a5", pto.kernel_kind = #pto.kernel_kind<ve
               scf.yield %next_remaining_m1_cmg22_1 : i32
             }
           }
-      
+
           pto.set_flag["PIPE_V", "PIPE_MTE3", "EVENT_ID0"]
           pto.wait_flag["PIPE_V", "PIPE_MTE3", "EVENT_ID0"]
           pto.mte_ub_gm %ub_out_m1_cmg22_1, %arg3, %c128_i64_m1_cmg22_1
@@ -183,11 +183,11 @@ module attributes {pto.target_arch = "a5", pto.kernel_kind = #pto.kernel_kind<ve
 
     // inactive cross-case merge from micro-op/vector-load-store/vldsx2-vstsx2
     scf.if %__case_merge_guard {
-      
+
           %__deep_merge_guard_cmg22_2 = arith.constant false
           // inactive merged from vldx2_vstsx2_b8_f32_kernel
           scf.if %__deep_merge_guard_cmg22_2 {
-      
+
           %c0_m0_cmg22_2 = arith.constant 0 : index
           %c1_m0_cmg22_2 = arith.constant 1 : index
           %c8_m0_cmg22_2 = arith.constant 8 : index
@@ -199,16 +199,16 @@ module attributes {pto.target_arch = "a5", pto.kernel_kind = #pto.kernel_kind<ve
           %c4096_i64_m0_cmg22_2 = arith.constant 4096 : i64
           %c64_i32_m0_cmg22_2 = arith.constant 64 : i32
           %false_m0_cmg22_2 = arith.constant false
-      
+
           %ub_in_m0_cmg22_2 = pto.castptr %c0_i64_m0_cmg22_2 : i64 -> !pto.ptr<f32, ub>
           %ub_out_m0_cmg22_2 = pto.castptr %c4096_i64_m0_cmg22_2 : i64 -> !pto.ptr<f32, ub>
           pto.mte_gm_ub %arg0, %ub_in_m0_cmg22_2, %c0_i64_m0_cmg22_2, %c128_i64_m0_cmg22_2
             nburst(%c32_i64_m0_cmg22_2, %c128_i64_m0_cmg22_2, %c128_i64_m0_cmg22_2)
             : !pto.ptr<f32, gm>, !pto.ptr<f32, ub>, i64, i64, i64, i64, i64
-      
+
           pto.set_flag["PIPE_MTE2", "PIPE_V", "EVENT_ID0"]
           pto.wait_flag["PIPE_MTE2", "PIPE_V", "EVENT_ID0"]
-      
+
           pto.vecscope {
             scf.for %group_m0_cmg22_2 = %c0_m0_cmg22_2 to %c8_m0_cmg22_2 step %c1_m0_cmg22_2 {
               %group_base_m0_cmg22_2 = arith.muli %group_m0_cmg22_2, %c128_m0_cmg22_2 : index
@@ -223,17 +223,17 @@ module attributes {pto.target_arch = "a5", pto.kernel_kind = #pto.kernel_kind<ve
               }
             }
           }
-      
+
           pto.set_flag["PIPE_V", "PIPE_MTE3", "EVENT_ID0"]
           pto.wait_flag["PIPE_V", "PIPE_MTE3", "EVENT_ID0"]
           pto.mte_ub_gm %ub_out_m0_cmg22_2, %arg1, %c128_i64_m0_cmg22_2
             nburst(%c32_i64_m0_cmg22_2, %c128_i64_m0_cmg22_2, %c128_i64_m0_cmg22_2)
             : !pto.ptr<f32, ub>, !pto.ptr<f32, gm>, i64, i64, i64, i64
           pto.barrier #pto.pipe<PIPE_ALL>
-      
+
           }
           // active merged from vldx2_vstsx2_kernel
-      
+
           %c0_m1_cmg22_2 = arith.constant 0 : index
           %c1_m1_cmg22_2 = arith.constant 1 : index
           %c8_m1_cmg22_2 = arith.constant 8 : index
@@ -245,16 +245,16 @@ module attributes {pto.target_arch = "a5", pto.kernel_kind = #pto.kernel_kind<ve
           %c4096_i64_m1_cmg22_2 = arith.constant 4096 : i64
           %c64_i32_m1_cmg22_2 = arith.constant 64 : i32
           %false_m1_cmg22_2 = arith.constant false
-      
+
           %ub_in_m1_cmg22_2 = pto.castptr %c0_i64_m1_cmg22_2 : i64 -> !pto.ptr<f32, ub>
           %ub_out_m1_cmg22_2 = pto.castptr %c4096_i64_m1_cmg22_2 : i64 -> !pto.ptr<f32, ub>
           pto.mte_gm_ub %arg2, %ub_in_m1_cmg22_2, %c0_i64_m1_cmg22_2, %c128_i64_m1_cmg22_2
             nburst(%c32_i64_m1_cmg22_2, %c128_i64_m1_cmg22_2, %c128_i64_m1_cmg22_2)
             : !pto.ptr<f32, gm>, !pto.ptr<f32, ub>, i64, i64, i64, i64, i64
-      
+
           pto.set_flag["PIPE_MTE2", "PIPE_V", "EVENT_ID0"]
           pto.wait_flag["PIPE_MTE2", "PIPE_V", "EVENT_ID0"]
-      
+
           pto.vecscope {
             scf.for %group_m1_cmg22_2 = %c0_m1_cmg22_2 to %c8_m1_cmg22_2 step %c1_m1_cmg22_2 {
               %group_base_m1_cmg22_2 = arith.muli %group_m1_cmg22_2, %c128_m1_cmg22_2 : index
@@ -269,7 +269,7 @@ module attributes {pto.target_arch = "a5", pto.kernel_kind = #pto.kernel_kind<ve
               }
             }
           }
-      
+
           pto.set_flag["PIPE_V", "PIPE_MTE3", "EVENT_ID0"]
           pto.wait_flag["PIPE_V", "PIPE_MTE3", "EVENT_ID0"]
           pto.mte_ub_gm %ub_out_m1_cmg22_2, %arg3, %c128_i64_m1_cmg22_2
@@ -280,11 +280,11 @@ module attributes {pto.target_arch = "a5", pto.kernel_kind = #pto.kernel_kind<ve
 
     // inactive cross-case merge from micro-op/vector-load-store/vsts
     scf.if %__case_merge_guard {
-      
+
           %__deep_merge_guard_cmg22_3 = arith.constant false
           // inactive merged from vsts_tail_kernel
           scf.if %__deep_merge_guard_cmg22_3 {
-      
+
           %c0_m0_cmg22_3 = arith.constant 0 : index
           %c1_i64_m0_cmg22_3 = arith.constant 1 : i64
           %c0_i64_m0_cmg22_3 = arith.constant 0 : i64
@@ -293,16 +293,16 @@ module attributes {pto.target_arch = "a5", pto.kernel_kind = #pto.kernel_kind<ve
           %c4096_i64_m0_cmg22_3 = arith.constant 4096 : i64
           %c13_i32_m0_cmg22_3 = arith.constant 13 : i32
           %false_m0_cmg22_3 = arith.constant false
-      
+
           %ub_in_m0_cmg22_3 = pto.castptr %c0_i64_m0_cmg22_3 : i64 -> !pto.ptr<f32, ub>
           %ub_out_m0_cmg22_3 = pto.castptr %c4096_i64_m0_cmg22_3 : i64 -> !pto.ptr<f32, ub>
           pto.mte_gm_ub %arg0, %ub_in_m0_cmg22_3, %c0_i64_m0_cmg22_3, %c128_i64_m0_cmg22_3
             nburst(%c32_i64_m0_cmg22_3, %c128_i64_m0_cmg22_3, %c128_i64_m0_cmg22_3)
             : !pto.ptr<f32, gm>, !pto.ptr<f32, ub>, i64, i64, i64, i64, i64
-      
+
           pto.set_flag["PIPE_MTE2", "PIPE_V", "EVENT_ID0"]
           pto.wait_flag["PIPE_MTE2", "PIPE_V", "EVENT_ID0"]
-      
+
           %c1_m0_cmg22_3 = arith.constant 1 : index
           pto.vecscope {
             scf.for %iv_m0_cmg22_3 = %c0_m0_cmg22_3 to %c1_m0_cmg22_3 step %c1_m0_cmg22_3 {
@@ -312,17 +312,17 @@ module attributes {pto.target_arch = "a5", pto.kernel_kind = #pto.kernel_kind<ve
                   : !pto.vreg<64xf32>, !pto.ptr<f32, ub>, !pto.mask<b32>
             }
           }
-      
+
           pto.set_flag["PIPE_V", "PIPE_MTE3", "EVENT_ID0"]
           pto.wait_flag["PIPE_V", "PIPE_MTE3", "EVENT_ID0"]
           pto.mte_ub_gm %ub_out_m0_cmg22_3, %arg1, %c128_i64_m0_cmg22_3
             nburst(%c32_i64_m0_cmg22_3, %c128_i64_m0_cmg22_3, %c128_i64_m0_cmg22_3)
             : !pto.ptr<f32, ub>, !pto.ptr<f32, gm>, i64, i64, i64, i64
           pto.barrier #pto.pipe<PIPE_ALL>
-      
+
           }
           // active merged from vsts_kernel_2d
-      
+
           %c0_m1_cmg22_3 = arith.constant 0 : index
           %c1_m1_cmg22_3 = arith.constant 1 : index
           %c64_m1_cmg22_3 = arith.constant 64 : index
@@ -333,18 +333,18 @@ module attributes {pto.target_arch = "a5", pto.kernel_kind = #pto.kernel_kind<ve
           %c128_i64_m1_cmg22_3 = arith.constant 128 : i64
           %c4096_i64_m1_cmg22_3 = arith.constant 4096 : i64
           %c1024_i32_m1_cmg22_3 = arith.constant 1024 : i32
-      
+
           %ub_in_m1_cmg22_3 = pto.castptr %c0_i64_m1_cmg22_3 : i64 -> !pto.ptr<f32, ub>
           %ub_out_m1_cmg22_3 = pto.castptr %c4096_i64_m1_cmg22_3 : i64 -> !pto.ptr<f32, ub>
-      
+
           %false_m1_cmg22_3 = arith.constant false
           pto.mte_gm_ub %arg2, %ub_in_m1_cmg22_3, %c0_i64_m1_cmg22_3, %c128_i64_m1_cmg22_3
             nburst(%c32_i64_m1_cmg22_3, %c128_i64_m1_cmg22_3, %c128_i64_m1_cmg22_3)
             : !pto.ptr<f32, gm>, !pto.ptr<f32, ub>, i64, i64, i64, i64, i64
-      
+
           pto.set_flag["PIPE_MTE2", "PIPE_V", "EVENT_ID0"]
           pto.wait_flag["PIPE_MTE2", "PIPE_V", "EVENT_ID0"]
-      
+
           pto.vecscope {
             %__m1_cmg22_3:1 = scf.for %offset_m1_cmg22_3 = %c0_m1_cmg22_3 to %c1024_m1_cmg22_3 step %c64_m1_cmg22_3 iter_args(%remaining_m1_cmg22_3 = %c1024_i32_m1_cmg22_3) -> (i32) {
               %mask_m1_cmg22_3, %next_remaining_m1_cmg22_3 = pto.plt_b32 %remaining_m1_cmg22_3 : i32 -> !pto.mask<b32>, i32
@@ -353,7 +353,7 @@ module attributes {pto.target_arch = "a5", pto.kernel_kind = #pto.kernel_kind<ve
               scf.yield %next_remaining_m1_cmg22_3 : i32
             }
           }
-      
+
           pto.set_flag["PIPE_V", "PIPE_MTE3", "EVENT_ID0"]
           pto.wait_flag["PIPE_V", "PIPE_MTE3", "EVENT_ID0"]
           pto.mte_ub_gm %ub_out_m1_cmg22_3, %arg3, %c128_i64_m1_cmg22_3
@@ -364,11 +364,11 @@ module attributes {pto.target_arch = "a5", pto.kernel_kind = #pto.kernel_kind<ve
 
     // inactive cross-case merge from micro-op/vector-load-store/vstur
     scf.if %__case_merge_guard {
-      
+
           %__deep_merge_guard_cmg22_4 = arith.constant false
           // inactive merged from vstur_init_align_outside_loop_kernel_2d
           scf.if %__deep_merge_guard_cmg22_4 {
-      
+
           %c1_m0_cmg22_4 = arith.constant 1 : index
           %c0_i64_m0_cmg22_4 = arith.constant 0 : i64
           %c1_i64_m0_cmg22_4 = arith.constant 1 : i64
@@ -377,19 +377,19 @@ module attributes {pto.target_arch = "a5", pto.kernel_kind = #pto.kernel_kind<ve
           %c128_i64_m0_cmg22_4 = arith.constant 128 : i64
           %c4096_i64_m0_cmg22_4 = arith.constant 4096 : i64
           %c0_m0_cmg22_4 = arith.constant 0 : index
-      
+
           %ub_in_m0_cmg22_4 = pto.castptr %c0_i64_m0_cmg22_4 : i64 -> !pto.ptr<f32, ub>
           %ub_out_m0_cmg22_4 = pto.castptr %c4096_i64_m0_cmg22_4 : i64 -> !pto.ptr<f32, ub>
           %ub_out1_m0_cmg22_4 = pto.addptr %ub_out_m0_cmg22_4, %c1_m0_cmg22_4 : !pto.ptr<f32, ub> -> !pto.ptr<f32, ub>
-      
+
           %false_m0_cmg22_4 = arith.constant false
           pto.mte_gm_ub %arg0, %ub_in_m0_cmg22_4, %c0_i64_m0_cmg22_4, %c128_i64_m0_cmg22_4
             nburst(%c32_i64_m0_cmg22_4, %c128_i64_m0_cmg22_4, %c128_i64_m0_cmg22_4)
             : !pto.ptr<f32, gm>, !pto.ptr<f32, ub>, i64, i64, i64, i64, i64
-      
+
           pto.set_flag["PIPE_MTE2", "PIPE_V", "EVENT_ID0"]
           pto.wait_flag["PIPE_MTE2", "PIPE_V", "EVENT_ID0"]
-      
+
           pto.vecscope {
             pto.sprclr "AR"
             %align0_m0_cmg22_4 = pto.init_align : !pto.align
@@ -404,17 +404,17 @@ module attributes {pto.target_arch = "a5", pto.kernel_kind = #pto.kernel_kind<ve
             }
             pto.vstar %align_final_m0_cmg22_4, %ub_out1_m0_cmg22_4 : !pto.align, !pto.ptr<f32, ub>
           }
-      
+
           pto.set_flag["PIPE_V", "PIPE_MTE3", "EVENT_ID0"]
           pto.wait_flag["PIPE_V", "PIPE_MTE3", "EVENT_ID0"]
           pto.mte_ub_gm %ub_out_m0_cmg22_4, %arg1, %c128_i64_m0_cmg22_4
             nburst(%c32_i64_m0_cmg22_4, %c128_i64_m0_cmg22_4, %c128_i64_m0_cmg22_4)
             : !pto.ptr<f32, ub>, !pto.ptr<f32, gm>, i64, i64, i64, i64
           pto.barrier #pto.pipe<PIPE_ALL>
-      
+
           }
           // active merged from vstur_kernel_2d
-      
+
           %c1_m1_cmg22_4 = arith.constant 1 : index
           %c0_i64_m1_cmg22_4 = arith.constant 0 : i64
           %c1_i64_m1_cmg22_4 = arith.constant 1 : i64
@@ -423,19 +423,19 @@ module attributes {pto.target_arch = "a5", pto.kernel_kind = #pto.kernel_kind<ve
           %c128_i64_m1_cmg22_4 = arith.constant 128 : i64
           %c4096_i64_m1_cmg22_4 = arith.constant 4096 : i64
           %c0_m1_cmg22_4 = arith.constant 0 : index
-      
+
           %ub_in_m1_cmg22_4 = pto.castptr %c0_i64_m1_cmg22_4 : i64 -> !pto.ptr<f32, ub>
           %ub_out_m1_cmg22_4 = pto.castptr %c4096_i64_m1_cmg22_4 : i64 -> !pto.ptr<f32, ub>
           %ub_out1_m1_cmg22_4 = pto.addptr %ub_out_m1_cmg22_4, %c1_m1_cmg22_4 : !pto.ptr<f32, ub> -> !pto.ptr<f32, ub>
-      
+
           %false_m1_cmg22_4 = arith.constant false
           pto.mte_gm_ub %arg2, %ub_in_m1_cmg22_4, %c0_i64_m1_cmg22_4, %c128_i64_m1_cmg22_4
             nburst(%c32_i64_m1_cmg22_4, %c128_i64_m1_cmg22_4, %c128_i64_m1_cmg22_4)
             : !pto.ptr<f32, gm>, !pto.ptr<f32, ub>, i64, i64, i64, i64, i64
-      
+
           pto.set_flag["PIPE_MTE2", "PIPE_V", "EVENT_ID0"]
           pto.wait_flag["PIPE_MTE2", "PIPE_V", "EVENT_ID0"]
-      
+
           pto.vecscope {
             pto.sprclr "AR"
             scf.for %offset_m1_cmg22_4 = %c0_m1_cmg22_4 to %c1_m1_cmg22_4 step %c1_m1_cmg22_4 {
@@ -448,7 +448,7 @@ module attributes {pto.target_arch = "a5", pto.kernel_kind = #pto.kernel_kind<ve
               pto.vstar %align1_m1_cmg22_4, %ub_out1_m1_cmg22_4 : !pto.align, !pto.ptr<f32, ub>
             }
           }
-      
+
           pto.set_flag["PIPE_V", "PIPE_MTE3", "EVENT_ID0"]
           pto.wait_flag["PIPE_V", "PIPE_MTE3", "EVENT_ID0"]
           pto.mte_ub_gm %ub_out_m1_cmg22_4, %arg3, %c128_i64_m1_cmg22_4

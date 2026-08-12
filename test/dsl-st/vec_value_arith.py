@@ -70,11 +70,13 @@ def make_expected(inp):
     xy = inp.reshape(THREADS, 2 * VEC)
     x = xy[:, :VEC]
     y = xy[:, VEC:]
-    return np.concatenate([
-        (x + y).reshape(-1),
-        (x - y).reshape(-1),
-        (x * y).reshape(-1),
-    ]).astype(np.float32)
+    return np.concatenate(
+        [
+            (x + y).reshape(-1),
+            (x - y).reshape(-1),
+            (x * y).reshape(-1),
+        ]
+    ).astype(np.float32)
 
 
 CASES = [

@@ -79,12 +79,18 @@ def build():
                 ctx,
             )
 
-            tile_buf_a_mat = pto.TileBufType.get([M, K], f16, mat, [M, K], cfg_a_mat, ctx)
-            tile_buf_b_mat = pto.TileBufType.get([K, N], f16, mat, [K, N], cfg_b_mat, ctx)
+            tile_buf_a_mat = pto.TileBufType.get(
+                [M, K], f16, mat, [M, K], cfg_a_mat, ctx
+            )
+            tile_buf_b_mat = pto.TileBufType.get(
+                [K, N], f16, mat, [K, N], cfg_b_mat, ctx
+            )
             tile_buf_a = pto.TileBufType.get([M, K], f16, left, [M, K], cfg_left, ctx)
             tile_buf_b = pto.TileBufType.get([K, N], f16, right, [K, N], cfg_right, ctx)
             # TGEMV expects the ACC tile rows to be aligned to 16 on some SoCs.
-            tile_buf_c = pto.TileBufType.get([M_ALIGN, N], f32, acc, [M, N], cfg_acc, ctx)
+            tile_buf_c = pto.TileBufType.get(
+                [M_ALIGN, N], f32, acc, [M, N], cfg_acc, ctx
+            )
 
             fn_ty = func.FunctionType.get([ptr_f16, ptr_f16, ptr_f32], [])
             with InsertionPoint(m.body):
@@ -103,10 +109,16 @@ def build():
 
                 tv_a = pto.MakeTensorViewOp(tv2_f16, arg_a, [cM, cK], [cK, c1]).result
                 tv_b = pto.MakeTensorViewOp(tv2_f16, arg_b, [cK, cN], [cN, c1]).result
-                tv_out = pto.MakeTensorViewOp(tv2_f32, arg_out, [cM, cN], [cN, c1]).result
+                tv_out = pto.MakeTensorViewOp(
+                    tv2_f32, arg_out, [cM, cN], [cN, c1]
+                ).result
 
-                sv_a = pto.PartitionViewOp(tile_view_a, tv_a, offsets=[c0, c0], sizes=[cM, cK]).result
-                sv_b = pto.PartitionViewOp(tile_view_b, tv_b, offsets=[c0, c0], sizes=[cK, cN]).result
+                sv_a = pto.PartitionViewOp(
+                    tile_view_a, tv_a, offsets=[c0, c0], sizes=[cM, cK]
+                ).result
+                sv_b = pto.PartitionViewOp(
+                    tile_view_b, tv_b, offsets=[c0, c0], sizes=[cK, cN]
+                ).result
 
                 a_mat = pto.AllocTileOp(tile_buf_a_mat).result
                 b_mat = pto.AllocTileOp(tile_buf_b_mat).result
@@ -124,7 +136,9 @@ def build():
                 pto.TMovOp(None, b_mat, b_tile)
                 pto.TGemvOp(None, a_tile, b_tile, c_tile)
 
-                sv_out = pto.PartitionViewOp(tile_view_c, tv_out, offsets=[c0, c0], sizes=[cM, cN]).result
+                sv_out = pto.PartitionViewOp(
+                    tile_view_c, tv_out, offsets=[c0, c0], sizes=[cM, cN]
+                ).result
                 pto.TStoreOp(None, c_tile, sv_out)
 
                 func.ReturnOp([])

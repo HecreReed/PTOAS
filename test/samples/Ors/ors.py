@@ -49,12 +49,20 @@ def build():
 
                 # %0/%1/%2 = pto.make_tensor_view %arg?, shape=[%c32,%c32] strides=[%c32,%c1]
                 # 这里用原生 builder：通常签名会是 (result_type, ptr, shape, strides)
-                tv_src = pto.MakeTensorViewOp(tv2_i16, arg0, [c32, c32], [c32, c1]).result
-                tv_dst = pto.MakeTensorViewOp(tv2_i16, arg1, [c32, c32], [c32, c1]).result
+                tv_src = pto.MakeTensorViewOp(
+                    tv2_i16, arg0, [c32, c32], [c32, c1]
+                ).result
+                tv_dst = pto.MakeTensorViewOp(
+                    tv2_i16, arg1, [c32, c32], [c32, c1]
+                ).result
 
                 # %3/%4/%8 = pto.subview %tv, offsets=[%c0,%c0], sizes=[%c32,%c32]
-                sv_src = pto.PartitionViewOp(tile_view_32, tv_src, offsets=[c0, c0], sizes=[c32, c32]).result
-                sv_dst = pto.PartitionViewOp(tile_view_32, tv_dst, offsets=[c0, c0], sizes=[c32, c32]).result
+                sv_src = pto.PartitionViewOp(
+                    tile_view_32, tv_src, offsets=[c0, c0], sizes=[c32, c32]
+                ).result
+                sv_dst = pto.PartitionViewOp(
+                    tile_view_32, tv_dst, offsets=[c0, c0], sizes=[c32, c32]
+                ).result
 
                 # %5/%6/%7 = pto.alloc_tile : <32x32xi32>
                 tb_src = pto.AllocTileOp(tile_buf_32).result

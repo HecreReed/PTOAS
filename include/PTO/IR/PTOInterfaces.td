@@ -12,12 +12,12 @@
 // See LICENSE in the root of the software repository for the full text of the License.
 
 // mlir/include/mlir/Dialect/PTO/IR/PTOInterfaces.td
- 
+
 #ifndef MLIR_DIALECT_PTO_IR_PTOINTERFACES
 #define MLIR_DIALECT_PTO_IR_PTOINTERFACES
- 
+
 include "mlir/IR/OpBase.td"
- 
+
 // 定义 OpPipeInterface
 def OpPipeInterface : OpInterface<"OpPipeInterface"> {
   let description = [{
@@ -25,9 +25,9 @@ def OpPipeInterface : OpInterface<"OpPipeInterface"> {
     This is used by the InjectSync pass to insert synchronization barriers between
     different hardware units (e.g., MTE2 -> Vector).
   }];
-  
+
   let cppNamespace = "::mlir::pto";
- 
+
   let methods = [
     InterfaceMethod<
       "Get the hardware pipe where this operation executes.",

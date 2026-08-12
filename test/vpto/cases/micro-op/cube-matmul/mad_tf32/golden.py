@@ -29,12 +29,12 @@ def generate(output_dir: Path) -> None:
     col = np.arange(K, dtype=np.float32).reshape(1, K)
     a_base = (((row * 11 + col * 3) % 31) - 15).astype(np.float32) / 7.0
     a_perturb = (((row * 5 + col * 9) % 17) + 1).astype(np.float32)
-    a = a_base + a_perturb * np.float32(2.0 ** -13)
+    a = a_base + a_perturb * np.float32(2.0**-13)
     k_idx = np.arange(K, dtype=np.float32).reshape(K, 1)
     n_idx = np.arange(N, dtype=np.float32).reshape(1, N)
     b_base = (((k_idx * 5 - n_idx * 13) % 37) - 18).astype(np.float32) / 9.0
     b_perturb = (((k_idx * 7 + n_idx * 3) % 19) + 1).astype(np.float32)
-    b = b_base - b_perturb * np.float32(2.0 ** -13)
+    b = b_base - b_perturb * np.float32(2.0**-13)
     c_tf32 = np.zeros((M, N), dtype=np.float32)
     c_plain = np.zeros((M, N), dtype=np.float32)
     golden_tf32 = tf32_round_even(a) @ tf32_round_even(b)

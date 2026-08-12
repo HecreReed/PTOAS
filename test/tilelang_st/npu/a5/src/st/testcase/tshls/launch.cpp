@@ -16,29 +16,33 @@
 static constexpr int16_t TSHLS_SCALAR = 2;
 
 // Case 0: i32 32x64
-extern "C" __global__ AICORE void TSHLS_i32_32x64(__gm__ int32_t *src, __gm__ int32_t *dst, int16_t scalar);
+extern "C" __global__ AICORE void TSHLS_i32_32x64(__gm__ int32_t* src, __gm__ int32_t* dst, int16_t scalar);
 
-void LaunchTSHLS_i32_32x64(int32_t *src, int32_t *dst, void *stream) {
-    TSHLS_i32_32x64<<<1, nullptr, stream>>>((__gm__ int32_t *)src, (__gm__ int32_t *)dst, TSHLS_SCALAR);
+void LaunchTSHLS_i32_32x64(int32_t* src, int32_t* dst, void* stream)
+{
+    TSHLS_i32_32x64<<<1, nullptr, stream>>>((__gm__ int32_t*)src, (__gm__ int32_t*)dst, TSHLS_SCALAR);
 }
 
 // Case 1: i16 63x64
-extern "C" __global__ AICORE void TSHLS_i16_63x64(__gm__ int16_t *src, __gm__ int16_t *dst, int16_t scalar);
+extern "C" __global__ AICORE void TSHLS_i16_63x64(__gm__ int16_t* src, __gm__ int16_t* dst, int16_t scalar);
 
-void LaunchTSHLS_i16_63x64(int16_t *src, int16_t *dst, void *stream) {
-    TSHLS_i16_63x64<<<1, nullptr, stream>>>((__gm__ int16_t *)src, (__gm__ int16_t *)dst, TSHLS_SCALAR);
+void LaunchTSHLS_i16_63x64(int16_t* src, int16_t* dst, void* stream)
+{
+    TSHLS_i16_63x64<<<1, nullptr, stream>>>((__gm__ int16_t*)src, (__gm__ int16_t*)dst, TSHLS_SCALAR);
 }
 
 // Case 2: i32 31x128
-extern "C" __global__ AICORE void TSHLS_i32_31x128(__gm__ int32_t *src, __gm__ int32_t *dst, int16_t scalar);
+extern "C" __global__ AICORE void TSHLS_i32_31x128(__gm__ int32_t* src, __gm__ int32_t* dst, int16_t scalar);
 
-void LaunchTSHLS_i32_31x128(int32_t *src, int32_t *dst, void *stream) {
-    TSHLS_i32_31x128<<<1, nullptr, stream>>>((__gm__ int32_t *)src, (__gm__ int32_t *)dst, TSHLS_SCALAR);
+void LaunchTSHLS_i32_31x128(int32_t* src, int32_t* dst, void* stream)
+{
+    TSHLS_i32_31x128<<<1, nullptr, stream>>>((__gm__ int32_t*)src, (__gm__ int32_t*)dst, TSHLS_SCALAR);
 }
 
 // Case 3: i16 15x192
-extern "C" __global__ AICORE void TSHLS_i16_15x192(__gm__ int16_t *src, __gm__ int16_t *dst, int16_t scalar);
+extern "C" __global__ AICORE void TSHLS_i16_15x192(__gm__ int16_t* src, __gm__ int16_t* dst, int16_t scalar);
 
-void LaunchTSHLS_i16_15x192(int16_t *src, int16_t *dst, void *stream) {
-    TSHLS_i16_15x192<<<1, nullptr, stream>>>((__gm__ int16_t *)src, (__gm__ int16_t *)dst, TSHLS_SCALAR);
+void LaunchTSHLS_i16_15x192(int16_t* src, int16_t* dst, void* stream)
+{
+    TSHLS_i16_15x192<<<1, nullptr, stream>>>((__gm__ int16_t*)src, (__gm__ int16_t*)dst, TSHLS_SCALAR);
 }

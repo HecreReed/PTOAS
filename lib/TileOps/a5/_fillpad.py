@@ -134,7 +134,9 @@ def _fill(dst, row_start, row_stop, col_start, col_stop, scalar_tail_start=None)
     vector_col_stop = scalar_tail_start if scalar_tail_start is not None else col_stop
     with pto.for_(row_start, row_stop, step=1) as row:
         remained = vector_col_stop - col_start
-        col_loop = pto.for_(col_start, vector_col_stop, step=lanes).carry(remained=remained)
+        col_loop = pto.for_(col_start, vector_col_stop, step=lanes).carry(
+            remained=remained
+        )
         with col_loop:
             col = col_loop.iv
             mask, remained = pto.make_mask(dtype, remained)
@@ -173,16 +175,34 @@ def register_fillpad(*, op, name, copy):
         lanes = pto.elements_per_vreg(dst.dtype)
         aligned_cols = (src_valid_cols // lanes) * lanes
         if not copy:
-            _fill_inplace(dst, src_valid_rows, src_valid_cols, dst_valid_rows, dst_valid_cols)
+            _fill_inplace(
+                dst, src_valid_rows, src_valid_cols, dst_valid_rows, dst_valid_cols
+            )
             return
         if copy:
             _copy_region(src, dst, src_valid_rows, 0, aligned_cols)
-        fill_row_stop = dst_valid_rows if op == "pto.tfillpad_expand" else src_valid_rows
+        fill_row_stop = (
+            dst_valid_rows if op == "pto.tfillpad_expand" else src_valid_rows
+        )
         scalar_tail_start = _scalar_tail_start(dst, lanes)
-        _fill(dst, 0, fill_row_stop, aligned_cols, dst_valid_cols, scalar_tail_start=scalar_tail_start)
+        _fill(
+            dst,
+            0,
+            fill_row_stop,
+            aligned_cols,
+            dst_valid_cols,
+            scalar_tail_start=scalar_tail_start,
+        )
         if copy:
             _copy_region(src, dst, src_valid_rows, aligned_cols, src_valid_cols)
-        _fill(dst, src_valid_rows, dst_valid_rows, 0, dst_valid_cols, scalar_tail_start=scalar_tail_start)
+        _fill(
+            dst,
+            src_valid_rows,
+            dst_valid_rows,
+            0,
+            dst_valid_cols,
+            scalar_tail_start=scalar_tail_start,
+        )
 
     return template
 

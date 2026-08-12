@@ -22,41 +22,43 @@
 using namespace PtoTestCommon;
 
 // Kernel launch wrappers (defined in launch.cpp)
-void LaunchTCOLEXPAND_int8_2_32_256_255(int8_t *src, int8_t *dst, void *stream);
-void LaunchTCOLEXPAND_float_1_8_128_63(float *src, float *dst, void *stream);
-void LaunchTCOLEXPAND_half_1_33_512_512(uint16_t *src, uint16_t *dst, void *stream);
-void LaunchTCOLEXPAND_int8_2_17_256_44(int8_t *src, int8_t *dst, void *stream);
-void LaunchTCOLEXPAND_float_1_54_64_63(float *src, float *dst, void *stream);
+void LaunchTCOLEXPAND_int8_2_32_256_255(int8_t* src, int8_t* dst, void* stream);
+void LaunchTCOLEXPAND_float_1_8_128_63(float* src, float* dst, void* stream);
+void LaunchTCOLEXPAND_half_1_33_512_512(uint16_t* src, uint16_t* dst, void* stream);
+void LaunchTCOLEXPAND_int8_2_17_256_44(int8_t* src, int8_t* dst, void* stream);
+void LaunchTCOLEXPAND_float_1_54_64_63(float* src, float* dst, void* stream);
 
-using LaunchFn = void (*)(void *, void *, void *);
+using LaunchFn = void (*)(void*, void*, void*);
 
 struct TestCase {
-    const char *name;
-    LaunchFn    launch;
-    size_t      srcRows;
-    size_t      srcCols;
-    size_t      dstRows;
-    size_t      dstCols;
-    size_t      validRows;
-    size_t      validCols;
-    size_t      elemSize;
+    const char* name;
+    LaunchFn launch;
+    size_t srcRows;
+    size_t srcCols;
+    size_t dstRows;
+    size_t dstCols;
+    size_t validRows;
+    size_t validCols;
+    size_t elemSize;
 };
 
 static const TestCase kCases[] = {
-{"float_1_8_128_63",    (LaunchFn)LaunchTCOLEXPAND_float_1_8_128_63,    1, 128,  8, 128,  8,  63, sizeof(float)},
-{"int8_2_17_256_44",    (LaunchFn)LaunchTCOLEXPAND_int8_2_17_256_44,    2, 256, 17, 256, 17,  44, sizeof(int8_t)},
+    {"float_1_8_128_63", (LaunchFn)LaunchTCOLEXPAND_float_1_8_128_63, 1, 128, 8, 128, 8, 63, sizeof(float)},
+    {"int8_2_17_256_44", (LaunchFn)LaunchTCOLEXPAND_int8_2_17_256_44, 2, 256, 17, 256, 17, 44, sizeof(int8_t)},
 };
 static constexpr size_t kNumCases = sizeof(kCases) / sizeof(kCases[0]);
 
-static int RunCase(const TestCase &tc, int deviceId, aclrtStream stream) {
+static int RunCase(const TestCase& tc, int deviceId, aclrtStream stream)
+{
     int rc = 0;
     const size_t srcElemCount = tc.srcRows * tc.srcCols;
     const size_t dstElemCount = tc.dstRows * tc.dstCols;
-    const size_t srcFileSize  = srcElemCount * tc.elemSize;
-    const size_t dstFileSize  = dstElemCount * tc.elemSize;
+    const size_t srcFileSize = srcElemCount * tc.elemSize;
+    const size_t dstFileSize = dstElemCount * tc.elemSize;
 
-    std::printf("[INFO] === case: %s (src=%zux%zu -> dst=%zux%zu, valid=%zux%zu) ===\n",
-                tc.name, tc.srcRows, tc.srcCols, tc.dstRows, tc.dstCols, tc.validRows, tc.validCols);
+    std::printf(
+        "[INFO] === case: %s (src=%zux%zu -> dst=%zux%zu, valid=%zux%zu) ===\n", tc.name, tc.srcRows, tc.srcCols,
+        tc.dstRows, tc.dstCols, tc.validRows, tc.validCols);
 
     std::string caseDir = std::string("./") + tc.name;
     size_t actualSrcFileSize = srcFileSize;
@@ -64,11 +66,11 @@ static int RunCase(const TestCase &tc, int deviceId, aclrtStream stream) {
     void *srcHost = nullptr, *dstHost = nullptr;
     void *srcDevice = nullptr, *dstDevice = nullptr;
 
-    aclrtMallocHost((void **)(&srcHost), srcFileSize);
-    aclrtMallocHost((void **)(&dstHost), dstFileSize);
+    aclrtMallocHost((void**)(&srcHost), srcFileSize);
+    aclrtMallocHost((void**)(&dstHost), dstFileSize);
 
-    aclrtMalloc((void **)&srcDevice, srcFileSize, ACL_MEM_MALLOC_HUGE_FIRST);
-    aclrtMalloc((void **)&dstDevice, dstFileSize, ACL_MEM_MALLOC_HUGE_FIRST);
+    aclrtMalloc((void**)&srcDevice, srcFileSize, ACL_MEM_MALLOC_HUGE_FIRST);
+    aclrtMalloc((void**)&dstDevice, dstFileSize, ACL_MEM_MALLOC_HUGE_FIRST);
 
     if (!ReadFile((caseDir + "/input0.bin").c_str(), actualSrcFileSize, srcHost, srcFileSize)) {
         std::fprintf(stderr, "[ERROR] failed to read %s/input0.bin\n", caseDir.c_str());
@@ -103,15 +105,16 @@ static int RunCase(const TestCase &tc, int deviceId, aclrtStream stream) {
     return rc;
 }
 
-int main(int argc, char *argv[]) {
-    const char *caseFilter = (argc > 1) ? argv[1] : nullptr;
+int main(int argc, char* argv[])
+{
+    const char* caseFilter = (argc > 1) ? argv[1] : nullptr;
 
     int rc = 0;
     int deviceId = 0;
     aclrtStream stream = nullptr;
 
     aclInit(nullptr);
-    if (const char *envDevice = std::getenv("ACL_DEVICE_ID")) {
+    if (const char* envDevice = std::getenv("ACL_DEVICE_ID")) {
         deviceId = std::atoi(envDevice);
     }
     aclrtSetDevice(deviceId);

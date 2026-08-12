@@ -73,7 +73,9 @@ from rmsnorm_alloc_buffer_simt_launch_common import (  # noqa: E402
 _DYN_SHARED_BYTES = 82496
 
 
-def _manual_launch_cpp(*, ir_function_name: str, launch_symbol: str, dyn_shared_bytes: int) -> str:
+def _manual_launch_cpp(
+    *, ir_function_name: str, launch_symbol: str, dyn_shared_bytes: int
+) -> str:
     return f"""#include <stdint.h>
 
 #ifndef AICORE
@@ -107,16 +109,22 @@ extern "C" void {launch_symbol}(
 
 
 def _manual_cache_dir(compiled, launch_cpp_text: str) -> Path:
-    payload = "\n".join([
-        compiled.mlir_text(),
-        launch_cpp_text,
-        repr(compiled.specialization_key),
-    ]).encode("utf-8")
+    payload = "\n".join(
+        [
+            compiled.mlir_text(),
+            launch_cpp_text,
+            repr(compiled.specialization_key),
+        ]
+    ).encode("utf-8")
     digest = hashlib.sha256(payload).hexdigest()[:16]
-    return Path.home() / ".cache" / "ptodsl" / f"{compiled._py_name}_manual_dynub_{digest}"
+    return (
+        Path.home() / ".cache" / "ptodsl" / f"{compiled._py_name}_manual_dynub_{digest}"
+    )
 
 
-def build_manual_library(compiled, *, dyn_shared_bytes: int = _DYN_SHARED_BYTES) -> tuple[Path, str]:
+def build_manual_library(
+    compiled, *, dyn_shared_bytes: int = _DYN_SHARED_BYTES
+) -> tuple[Path, str]:
     module_spec = compiled._module_spec
     ir_function_name = module_spec.function_name
     launch_symbol = f"ptodsl_manual_launch_{ir_function_name}"
@@ -165,7 +173,17 @@ def build_manual_library(compiled, *, dyn_shared_bytes: int = _DYN_SHARED_BYTES)
     return shared_library, launch_symbol
 
 
-def _manual_launch(compiled, *, grid: int, stream, x_ptr: int, y_ptr: int, w_ptr: int, rstd_ptr: int, eps: float):
+def _manual_launch(
+    compiled,
+    *,
+    grid: int,
+    stream,
+    x_ptr: int,
+    y_ptr: int,
+    w_ptr: int,
+    rstd_ptr: int,
+    eps: float,
+):
     lib_path, launch_symbol = build_manual_library(compiled)
     lib = ctypes.CDLL(str(lib_path))
     launch = getattr(lib, launch_symbol)
@@ -230,7 +248,12 @@ def run_case_manual(case: Case, torch) -> None:
     torch.npu.synchronize()
     launch_s = time.perf_counter() - t0
 
-    y_out = y_storage[: case.tokens * _HIDDEN_SIZE].cpu().numpy().reshape(case.tokens, _HIDDEN_SIZE)
+    y_out = (
+        y_storage[: case.tokens * _HIDDEN_SIZE]
+        .cpu()
+        .numpy()
+        .reshape(case.tokens, _HIDDEN_SIZE)
+    )
     rstd_out = rstd_storage[: case.tokens].cpu().numpy()
     y_guard = y_storage[case.tokens * _HIDDEN_SIZE :].cpu().numpy()
     rstd_guard = rstd_storage[case.tokens :].cpu().numpy()
@@ -254,13 +277,19 @@ def run_case_manual(case: Case, torch) -> None:
 
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--device", default=_DEVICE, help="torch NPU device, default: npu:0")
+    parser.add_argument(
+        "--device", default=_DEVICE, help="torch NPU device, default: npu:0"
+    )
     parser.add_argument(
         "--case",
         choices=[case.name for case in CASES] + [FULL_CASE.name, "all"],
         default="all",
     )
-    parser.add_argument("--include-full", action="store_true", help="include the 64-core x 64-token full case")
+    parser.add_argument(
+        "--include-full",
+        action="store_true",
+        help="include the 64-core x 64-token full case",
+    )
     args = parser.parse_args(argv)
 
     launch_common._DEVICE = args.device

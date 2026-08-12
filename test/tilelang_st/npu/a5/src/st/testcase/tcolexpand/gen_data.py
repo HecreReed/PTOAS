@@ -31,4 +31,6 @@ for case in CASES:
         golden[i, :valid_col] = src[0, :valid_col]
 
     save_case_data(case["name"], {"input0": src, "golden": golden})
-    print(f"[INFO] gen_data: {case['name']} src={src_shape} dst={dst_shape} valid={valid_shape} dtype={dtype.__name__}")
+    print(
+        f"[INFO] gen_data: {case['name']} src={src_shape} dst={dst_shape} valid={valid_shape} dtype={dtype.__name__}"
+    )

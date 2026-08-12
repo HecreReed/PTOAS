@@ -60,7 +60,6 @@ CASES = [
         "eps": 1e-3,
         "test_pattern": "normal",
     },
-
     # ============================================================
     # HIGH_PRECISION mode - comprehensive boundary tests
     # ============================================================
@@ -85,7 +84,6 @@ CASES = [
         "test_pattern": "precision_sensitive",
         "ulp_tolerance": 1,
     },
-
     # Subnormal numbers - tests denormal normalization and compensation
     {
         "name": "f32_16x64_hp_subnormal",
@@ -107,8 +105,7 @@ CASES = [
         "test_pattern": "subnormal",
         "ulp_tolerance": 2,
     },
-
-# Overflow/Underflow boundaries - tests exponent handling
+    # Overflow/Underflow boundaries - tests exponent handling
     {
         "name": "f32_16x64_hp_overflow",
         "dtype": np.float32,
@@ -127,7 +124,6 @@ CASES = [
         "precision_type": "high_precision",
         "test_pattern": "overflow",
     },
-
     # Different shapes - test tile size variations
     {
         "name": "f32_32x32_hp",
@@ -159,7 +155,6 @@ CASES = [
         "test_pattern": "precision_sensitive",
         "ulp_tolerance": 2,
     },
-
     # Partial valid shape - test masked computation
     {
         "name": "f32_16x64_hp_partial",
@@ -181,7 +176,6 @@ CASES = [
         "test_pattern": "precision_sensitive",
         "ulp_tolerance": 2,
     },
-
     # Small shape HP tests - aligned with pto-isa (case_float_hp_2x16, case_half_hp_2x32)
     {
         "name": "f32_2x16_hp",
@@ -205,9 +199,11 @@ CASES = [
     },
 ]
 
-_SMOKE_CASE_NAMES = ['f32_16x64', 'f32_16x64_hp_subnormal', 'f16_16x64_hp_partial']
+_SMOKE_CASE_NAMES = ["f32_16x64", "f32_16x64_hp_subnormal", "f16_16x64_hp_partial"]
 _SMOKE_CASE_NAME_SET = set(_SMOKE_CASE_NAMES)
-_missing = [name for name in _SMOKE_CASE_NAMES if name not in {case["name"] for case in CASES}]
+_missing = [
+    name for name in _SMOKE_CASE_NAMES if name not in {case["name"] for case in CASES}
+]
 if _missing:
     raise RuntimeError("unknown smoke case(s): " + ", ".join(_missing))
 CASES = [case for case in CASES if case["name"] in _SMOKE_CASE_NAME_SET]

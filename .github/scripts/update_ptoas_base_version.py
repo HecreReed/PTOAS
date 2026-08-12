@@ -55,7 +55,7 @@ def parse_args() -> argparse.Namespace:
 def normalize_version(version: str) -> str:
     normalized = version.strip()
     if normalized.startswith("ptoas-"):
-        normalized = normalized[len("ptoas-"):]
+        normalized = normalized[len("ptoas-") :]
     if normalized.startswith("v"):
         normalized = normalized[1:]
     if not re.fullmatch(r"[0-9]+\.[0-9]+", normalized):
@@ -74,9 +74,7 @@ def read_base_version(cmake_file: pathlib.Path) -> str:
     content = cmake_file.read_text(encoding="utf-8")
     match = PROJECT_VERSION_RE.search(content)
     if not match:
-        raise ValueError(
-            f"could not find 'project(ptoas VERSION x.y)' in {cmake_file}"
-        )
+        raise ValueError(f"could not find 'project(ptoas VERSION x.y)' in {cmake_file}")
     return match.group(2)
 
 
@@ -115,9 +113,7 @@ def update_base_version(cmake_file: pathlib.Path, version: str) -> bool:
 
     updated, count = PROJECT_VERSION_RE.subn(repl, content, count=1)
     if count != 1:
-        raise ValueError(
-            f"could not find 'project(ptoas VERSION x.y)' in {cmake_file}"
-        )
+        raise ValueError(f"could not find 'project(ptoas VERSION x.y)' in {cmake_file}")
     if updated == content:
         return False
     cmake_file.write_text(updated, encoding="utf-8")

@@ -38,8 +38,13 @@ class TileTemplateRegistry:
     def register(self, descriptor) -> None:
         # Re-registration (e.g. module reload) replaces the prior entry with the same name.
         self._descriptors = [
-            d for d in self._descriptors
-            if not (d.op == descriptor.op and d.target == descriptor.target and d.name == descriptor.name)
+            d
+            for d in self._descriptors
+            if not (
+                d.op == descriptor.op
+                and d.target == descriptor.target
+                and d.name == descriptor.name
+            )
         ]
         self._descriptors.append(descriptor)
 
@@ -49,11 +54,14 @@ class TileTemplateRegistry:
     def lookup(self, op: str, target: str) -> list:
         return [d for d in self._descriptors if d.op == op and d.target == target]
 
-    def legal_candidates(self, op: str, target: str, tile_specs: dict,
-                         context_attrs: dict | None = None) -> list:
+    def legal_candidates(
+        self, op: str, target: str, tile_specs: dict, context_attrs: dict | None = None
+    ) -> list:
         candidates = self.lookup(op, target)
         if not candidates:
-            raise NoMatchingTemplate(f"no template registered for op={op!r} target={target!r}")
+            raise NoMatchingTemplate(
+                f"no template registered for op={op!r} target={target!r}"
+            )
 
         evaluated = [
             (
@@ -68,11 +76,7 @@ class TileTemplateRegistry:
             )
             for descriptor in candidates
         ]
-        legal = [
-            descriptor
-            for descriptor, result in evaluated
-            if result.legal
-        ]
+        legal = [descriptor for descriptor, result in evaluated if result.legal]
         if not legal:
             reasons = "; ".join(
                 f"{descriptor.name}: {result.reason}"
@@ -85,8 +89,14 @@ class TileTemplateRegistry:
         legal.sort(key=lambda d: d.metadata.priority, reverse=True)
         return legal
 
-    def select(self, op: str, target: str, tile_specs: dict,
-               context_attrs: dict | None = None, candidate_id: str | None = None):
+    def select(
+        self,
+        op: str,
+        target: str,
+        tile_specs: dict,
+        context_attrs: dict | None = None,
+        candidate_id: str | None = None,
+    ):
         legal = self.legal_candidates(op, target, tile_specs, context_attrs)
         if candidate_id:
             for descriptor in legal:
@@ -132,14 +142,20 @@ def _load_default_templates(op: str, target: str) -> None:
     load_template(op, target)
 
 
-def legal_candidates(op: str, target: str, tile_specs: dict,
-                     context_attrs: dict | None = None):
+def legal_candidates(
+    op: str, target: str, tile_specs: dict, context_attrs: dict | None = None
+):
     _load_default_templates(op, target)
     return _DEFAULT_REGISTRY.legal_candidates(op, target, tile_specs, context_attrs)
 
 
-def select(op: str, target: str, tile_specs: dict, context_attrs: dict | None = None,
-           candidate_id: str | None = None):
+def select(
+    op: str,
+    target: str,
+    tile_specs: dict,
+    context_attrs: dict | None = None,
+    candidate_id: str | None = None,
+):
     _load_default_templates(op, target)
     return _DEFAULT_REGISTRY.select(op, target, tile_specs, context_attrs, candidate_id)
 

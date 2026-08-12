@@ -89,7 +89,9 @@ def golden_output_case(
         )
         if launch_args is None:
             return [*host_inputs, out], golden
-        extra_launch_args = launch_args(*host_inputs) if callable(launch_args) else list(launch_args)
+        extra_launch_args = (
+            launch_args(*host_inputs) if callable(launch_args) else list(launch_args)
+        )
         return [*host_inputs, out], golden, extra_launch_args
 
     def check_case(device_inputs, golden):

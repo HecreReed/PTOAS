@@ -14,15 +14,15 @@
 
 // Case 0: f32 64x64
 
-extern "C" __global__ AICORE void TMOV_f32_32x32(__gm__ float *src, __gm__ float *dst);
-extern "C" __global__ AICORE void TMOV_f16_32x32(__gm__ uint16_t *src, __gm__ uint16_t *dst);
+extern "C" __global__ AICORE void TMOV_f32_32x32(__gm__ float* src, __gm__ float* dst);
+extern "C" __global__ AICORE void TMOV_f16_32x32(__gm__ uint16_t* src, __gm__ uint16_t* dst);
 
-void LaunchTMOV_f32_32x32(float *src, float *dst, void *stream) {
-    TMOV_f32_32x32<<<1, nullptr, stream>>>((__gm__ float *)src, (__gm__ float *)dst);
+void LaunchTMOV_f32_32x32(float* src, float* dst, void* stream)
+{
+    TMOV_f32_32x32<<<1, nullptr, stream>>>((__gm__ float*)src, (__gm__ float*)dst);
 }
 
-
-
-void LaunchTMOV_f16_32x32(uint16_t *src, uint16_t *dst, void *stream) {
-    TMOV_f16_32x32<<<1, nullptr, stream>>>((__gm__ uint16_t *)src, (__gm__ uint16_t *)dst);
+void LaunchTMOV_f16_32x32(uint16_t* src, uint16_t* dst, void* stream)
+{
+    TMOV_f16_32x32<<<1, nullptr, stream>>>((__gm__ uint16_t*)src, (__gm__ uint16_t*)dst);
 }

@@ -4,7 +4,7 @@ module attributes {"pto.device-spec" = "Ascend910B1"} {
     %c1 = arith.constant 1 : index
     %c10 = arith.constant 10 : index
     %c32 = arith.constant 32 : index
-    
+
     // [Fix] 使用 2D 形状 (32x32 = 1024 elements)
     // 这样 strides 和 offsets 都是 2 个元素，避免越界
     %src = pto.make_tensor_view %arg0, shape = [%c32, %c32], strides = [%c32, %c1] : !pto.tensor_view<?x?xf32>

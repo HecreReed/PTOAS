@@ -23,7 +23,9 @@ def generate(output_dir: Path) -> None:
     row_min = np.min(src, axis=1, keepdims=True)
     row_max = np.max(src, axis=1, keepdims=True)
     scale = ((row_max - row_min) / np.float32(255.0)).astype(np.float32)
-    inv_scale = np.where(scale != 0, np.float32(1.0) / scale, np.float32(0.0)).astype(np.float32)
+    inv_scale = np.where(scale != 0, np.float32(1.0) / scale, np.float32(0.0)).astype(
+        np.float32
+    )
     offset = np.clip(np.round(-row_min / scale), 0, 255).astype(np.float32)
     rounded = np.round(src * inv_scale + offset).astype(np.float32)
     golden = np.clip(rounded.astype(np.float16), 0, 255).astype(np.uint8)

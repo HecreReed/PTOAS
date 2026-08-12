@@ -53,7 +53,7 @@ CASES = [
         "src_shape": (1, 256),  # kGCols=256 float elements
         "dst_shape": (1, 256),  # kGCols=256 float elements
         "valid_shape": (1, 256),
-        "block_len": 64,        # float elements (=32 structures)
+        "block_len": 64,  # float elements (=32 structures)
         "eps": 1e-6,
     },
     # Transplanted from pto-isa case_single2: TMrgsortSingle<float, 1, 320, 1, 256, 64>
@@ -67,7 +67,7 @@ CASES = [
         "src_shape": (1, 320),  # kGCols=320 float elements (global)
         "dst_shape": (1, 320),  # kGCols=320 float elements (global)
         "valid_shape": (1, 256),  # kTCols=256 (effective tile region)
-        "block_len": 64,        # float elements (=32 structures)
+        "block_len": 64,  # float elements (=32 structures)
         "eps": 1e-6,
     },
     # Transplanted from pto-isa case_single3: TMrgsortSingle<float, 1, 512, 1, 512, 64>
@@ -80,7 +80,7 @@ CASES = [
         "src_shape": (1, 512),  # kGCols=512 float elements
         "dst_shape": (1, 512),  # kGCols=512 float elements
         "valid_shape": (1, 512),
-        "block_len": 64,        # float elements (=32 structures)
+        "block_len": 64,  # float elements (=32 structures)
         "eps": 1e-6,
     },
     # Transplanted from pto-isa case_single4: TMrgsortSingle<float, 1, 640, 1, 512, 64>
@@ -94,7 +94,7 @@ CASES = [
         "src_shape": (1, 640),  # kGCols=640 float elements (global)
         "dst_shape": (1, 640),  # kGCols=640 float elements (global)
         "valid_shape": (1, 512),  # kTCols=512 (effective tile region)
-        "block_len": 64,        # float elements (=32 structures)
+        "block_len": 64,  # float elements (=32 structures)
         "eps": 1e-6,
     },
     # Transplanted from pto-isa case_single5: TMrgsortSingle<uint16_t, 1, 256, 1, 256, 64>
@@ -109,8 +109,8 @@ CASES = [
         "src_shape": (1, 512),  # kGCols*TYPE_COEF=512 f16 elements = 128 structures
         "dst_shape": (1, 512),  # kGCols*TYPE_COEF=512 f16 elements
         "valid_shape": (1, 512),
-        "block_len": 128,       # block_len*TYPE_COEF=128 f16 elements = 32 structures
-        "eps": 1e-3,            # f16 has lower precision
+        "block_len": 128,  # block_len*TYPE_COEF=128 f16 elements = 32 structures
+        "eps": 1e-3,  # f16 has lower precision
     },
     # Transplanted from pto-isa case_single6: TMrgsortSingle<uint16_t, 1, 320, 1, 256, 64>
     # TYPE_COEF=2: kGCols*2=640, kTCols*2=512, blockLen*2=128 (kernel internal)
@@ -123,7 +123,7 @@ CASES = [
         "src_shape": (1, 640),  # kGCols*TYPE_COEF=640 f16 elements (global)
         "dst_shape": (1, 640),  # kGCols*TYPE_COEF=640 f16 elements (global)
         "valid_shape": (1, 512),  # kTCols*TYPE_COEF=512 (effective tile region)
-        "block_len": 128,       # block_len*TYPE_COEF=128 f16 elements = 32 structures
+        "block_len": 128,  # block_len*TYPE_COEF=128 f16 elements = 32 structures
         "eps": 1e-3,
     },
     # Transplanted from pto-isa case_single7: TMrgsortSingle<uint16_t, 1, 512, 1, 512, 64>
@@ -136,7 +136,7 @@ CASES = [
         "src_shape": (1, 1024),  # kGCols*TYPE_COEF=1024 f16 elements = 256 structures
         "dst_shape": (1, 1024),  # kGCols*TYPE_COEF=1024 f16 elements
         "valid_shape": (1, 1024),
-        "block_len": 128,        # block_len*TYPE_COEF=128 f16 elements = 32 structures
+        "block_len": 128,  # block_len*TYPE_COEF=128 f16 elements = 32 structures
         "eps": 1e-3,
     },
     # Transplanted from pto-isa case_single8: TMrgsortSingle<uint16_t, 1, 1024, 1, 1024, 256>
@@ -149,7 +149,7 @@ CASES = [
         "src_shape": (1, 2048),  # kGCols*TYPE_COEF=2048 f16 elements = 512 structures
         "dst_shape": (1, 2048),  # kGCols*TYPE_COEF=2048 f16 elements
         "valid_shape": (1, 2048),
-        "block_len": 512,        # block_len*TYPE_COEF=512 f16 elements = 128 structures
+        "block_len": 512,  # block_len*TYPE_COEF=512 f16 elements = 128 structures
         "eps": 1e-3,
     },
     # Format2: multi-list merge (2-list merge)
@@ -202,7 +202,11 @@ CASES = [
         "format": "multi",
         "list_num": 3,
         "src_cols": [64, 64, 64],  # 64 structures per list
-        "src_shape": [(1, 128), (1, 128), (1, 128)],  # 128 f32 elements = 64 structures each
+        "src_shape": [
+            (1, 128),
+            (1, 128),
+            (1, 128),
+        ],  # 128 f32 elements = 64 structures each
         "dst_shape": (1, 256),  # 256 f32 elements = 128 structures
         "valid_shape": (1, 256),
         "topk": 128,  # topk structures (192 available, output 128)
@@ -229,7 +233,12 @@ CASES = [
         "format": "multi",
         "list_num": 4,
         "src_cols": [64, 64, 64, 64],  # 64 structures per list
-        "src_shape": [(1, 256), (1, 256), (1, 256), (1, 256)],  # 256 f16 elements = 64 structures each
+        "src_shape": [
+            (1, 256),
+            (1, 256),
+            (1, 256),
+            (1, 256),
+        ],  # 256 f16 elements = 64 structures each
         "dst_shape": (1, 1024),  # 1024 f16 elements = 256 structures
         "valid_shape": (1, 1024),
         "topk": 256,  # topk structures (256 available, output 256)
@@ -276,7 +285,11 @@ CASES = [
         "format": "multi",
         "list_num": 3,
         "src_cols": [128, 128, 128],  # 128 structures per list (512 f16 elements)
-        "src_shape": [(1, 512), (1, 512), (1, 512)],  # 512 f16 elements = 128 structures
+        "src_shape": [
+            (1, 512),
+            (1, 512),
+            (1, 512),
+        ],  # 512 f16 elements = 128 structures
         "dst_shape": (1, 1536),  # 1536 f16 elements = 384 structures (=TOPK)
         "valid_shape": (1, 1536),
         "topk": 384,  # structures (=384)
@@ -297,7 +310,6 @@ CASES = [
         "exhausted": False,
         "eps": 1e-6,
     },
-    
     # Format5: TopK (full sorting with top-k output)
     # Following pto-isa case_topk1-6
     # Input: unsorted raw data (value-index interleaved)
@@ -367,5 +379,5 @@ CASES = [
         "topk": 128,  # output 128 structures
         "block_len": 64,
         "eps": 1e-3,
-    }
+    },
 ]

@@ -24,63 +24,59 @@ using namespace mlir::pto;
 
 namespace {
 
-static bool isVPTOKernelSubmodule(ModuleOp module) {
-  return module->hasAttr(FunctionKernelKindAttr::name);
+static bool isVPTOKernelSubmodule(ModuleOp module) { return module->hasAttr(FunctionKernelKindAttr::name); }
+
+static LogicalResult verifyNormalizedVPTOContainer(ModuleOp module)
+{
+    bool hasChildModules = false;
+    for (Operation& op : module.getBodyRegion().front().getOperations()) {
+        auto child = dyn_cast<ModuleOp>(op);
+        if (!child) {
+            return op.emitError() << "expected VPTO container top level to contain only kernel "
+                                     "submodules";
+        }
+        hasChildModules = true;
+        if (!isVPTOKernelSubmodule(child)) {
+            return child.emitError() << "expected VPTO kernel submodule to carry 'pto.kernel_kind'";
+        }
+    }
+
+    if (hasChildModules)
+        return success();
+
+    return module.emitError() << "expected VPTO input to be a kernel submodule with "
+                                 "'pto.kernel_kind' or a container of kernel submodules";
 }
 
-static LogicalResult verifyNormalizedVPTOContainer(ModuleOp module) {
-  bool hasChildModules = false;
-  for (Operation &op : module.getBodyRegion().front().getOperations()) {
-    auto child = dyn_cast<ModuleOp>(op);
-    if (!child) {
-      return op.emitError()
-             << "expected VPTO container top level to contain only kernel "
-                "submodules";
+struct VPTONormalizeContainerPass : public mlir::pto::impl::VPTONormalizeContainerBase<VPTONormalizeContainerPass> {
+    void runOnOperation() override
+    {
+        ModuleOp module = getOperation();
+        if (isVPTOKernelSubmodule(module)) {
+            MLIRContext* context = module.getContext();
+            SmallVector<NamedAttribute> outerAttrs;
+            for (NamedAttribute attr : module->getAttrs())
+                if (attr.getName() != SymbolTable::getSymbolAttrName() &&
+                    attr.getName() != FunctionKernelKindAttr::name)
+                    outerAttrs.push_back(attr);
+
+            auto child = ModuleOp::create(module.getLoc());
+            child->setAttrs(module->getAttrDictionary());
+            child.getBodyRegion().takeBody(module.getBodyRegion());
+
+            module->setAttrs(DictionaryAttr::get(context, outerAttrs));
+            module.getBodyRegion().push_back(new Block);
+            module.getBodyRegion().front().push_back(child.getOperation());
+        }
+
+        if (failed(verifyNormalizedVPTOContainer(module)))
+            signalPassFailure();
     }
-    hasChildModules = true;
-    if (!isVPTOKernelSubmodule(child)) {
-      return child.emitError()
-             << "expected VPTO kernel submodule to carry 'pto.kernel_kind'";
-    }
-  }
-
-  if (hasChildModules)
-    return success();
-
-  return module.emitError()
-         << "expected VPTO input to be a kernel submodule with "
-            "'pto.kernel_kind' or a container of kernel submodules";
-}
-
-struct VPTONormalizeContainerPass
-    : public mlir::pto::impl::VPTONormalizeContainerBase<
-          VPTONormalizeContainerPass> {
-  void runOnOperation() override {
-    ModuleOp module = getOperation();
-    if (isVPTOKernelSubmodule(module)) {
-      MLIRContext *context = module.getContext();
-      SmallVector<NamedAttribute> outerAttrs;
-      for (NamedAttribute attr : module->getAttrs())
-        if (attr.getName() != SymbolTable::getSymbolAttrName() &&
-            attr.getName() != FunctionKernelKindAttr::name)
-          outerAttrs.push_back(attr);
-
-      auto child = ModuleOp::create(module.getLoc());
-      child->setAttrs(module->getAttrDictionary());
-      child.getBodyRegion().takeBody(module.getBodyRegion());
-
-      module->setAttrs(DictionaryAttr::get(context, outerAttrs));
-      module.getBodyRegion().push_back(new Block);
-      module.getBodyRegion().front().push_back(child.getOperation());
-    }
-
-    if (failed(verifyNormalizedVPTOContainer(module)))
-      signalPassFailure();
-  }
 };
 
 } // namespace
 
-std::unique_ptr<Pass> mlir::pto::createVPTONormalizeContainerPass() {
-  return std::make_unique<VPTONormalizeContainerPass>();
+std::unique_ptr<Pass> mlir::pto::createVPTONormalizeContainerPass()
+{
+    return std::make_unique<VPTONormalizeContainerPass>();
 }

@@ -22,34 +22,36 @@
 using namespace PtoTestCommon;
 
 // Kernel launch wrappers (defined in launch.cpp)
-void LaunchTAND_i32_16x64(int32_t *a, int32_t *b, int32_t *c, void *stream);
-void LaunchTAND_i32_32x32(int32_t *a, int32_t *b, int32_t *c, void *stream);
+void LaunchTAND_i32_16x64(int32_t* a, int32_t* b, int32_t* c, void* stream);
+void LaunchTAND_i32_32x32(int32_t* a, int32_t* b, int32_t* c, void* stream);
 
-using LaunchFn = void (*)(int32_t *, int32_t *, int32_t *, void *);
+using LaunchFn = void (*)(int32_t*, int32_t*, int32_t*, void*);
 
 struct TestCase {
-    const char *name;
-    LaunchFn    launch;
-    size_t      rows;       // allocated tile rows
-    size_t      cols;       // allocated tile cols
-    size_t      validRows;  // effective computation rows  (<= rows)
-    size_t      validCols;  // effective computation cols  (<= cols)
-    size_t      elemSize;   // bytes per element
+    const char* name;
+    LaunchFn launch;
+    size_t rows;      // allocated tile rows
+    size_t cols;      // allocated tile cols
+    size_t validRows; // effective computation rows  (<= rows)
+    size_t validCols; // effective computation cols  (<= cols)
+    size_t elemSize;  // bytes per element
 };
 
 static const TestCase kCases[] = {
-{"i32_16x64", LaunchTAND_i32_16x64, 16, 64, 16, 64, sizeof(int32_t)},
-{"i32_32x32", LaunchTAND_i32_32x32, 32, 32, 32, 32, sizeof(int32_t)},
+    {"i32_16x64", LaunchTAND_i32_16x64, 16, 64, 16, 64, sizeof(int32_t)},
+    {"i32_32x32", LaunchTAND_i32_32x32, 32, 32, 32, 32, sizeof(int32_t)},
 };
 static constexpr size_t kNumCases = sizeof(kCases) / sizeof(kCases[0]);
 
-static int RunCase(const TestCase &tc, int deviceId, aclrtStream stream) {
+static int RunCase(const TestCase& tc, int deviceId, aclrtStream stream)
+{
     int rc = 0;
     const size_t elemCount = tc.rows * tc.cols;
-    const size_t fileSize  = elemCount * tc.elemSize;
+    const size_t fileSize = elemCount * tc.elemSize;
 
-    std::printf("[INFO] === case: %s (shape=%zux%zu, valid=%zux%zu) ===\n",
-                tc.name, tc.rows, tc.cols, tc.validRows, tc.validCols);
+    std::printf(
+        "[INFO] === case: %s (shape=%zux%zu, valid=%zux%zu) ===\n", tc.name, tc.rows, tc.cols, tc.validRows,
+        tc.validCols);
 
     // Per-case data directory
     std::string caseDir = std::string("./") + tc.name;
@@ -59,13 +61,13 @@ static int RunCase(const TestCase &tc, int deviceId, aclrtStream stream) {
     int32_t *src0Host = nullptr, *src1Host = nullptr, *dstHost = nullptr;
     int32_t *src0Device = nullptr, *src1Device = nullptr, *dstDevice = nullptr;
 
-    aclrtMallocHost((void **)(&src0Host), fileSize);
-    aclrtMallocHost((void **)(&src1Host), fileSize);
-    aclrtMallocHost((void **)(&dstHost), fileSize);
+    aclrtMallocHost((void**)(&src0Host), fileSize);
+    aclrtMallocHost((void**)(&src1Host), fileSize);
+    aclrtMallocHost((void**)(&dstHost), fileSize);
 
-    aclrtMalloc((void **)&src0Device, fileSize, ACL_MEM_MALLOC_HUGE_FIRST);
-    aclrtMalloc((void **)&src1Device, fileSize, ACL_MEM_MALLOC_HUGE_FIRST);
-    aclrtMalloc((void **)&dstDevice, fileSize, ACL_MEM_MALLOC_HUGE_FIRST);
+    aclrtMalloc((void**)&src0Device, fileSize, ACL_MEM_MALLOC_HUGE_FIRST);
+    aclrtMalloc((void**)&src1Device, fileSize, ACL_MEM_MALLOC_HUGE_FIRST);
+    aclrtMalloc((void**)&dstDevice, fileSize, ACL_MEM_MALLOC_HUGE_FIRST);
 
     if (!ReadFile((caseDir + "/input1.bin").c_str(), src0FileSize, src0Host, fileSize)) {
         std::fprintf(stderr, "[ERROR] failed to read %s/input1.bin\n", caseDir.c_str());
@@ -109,16 +111,17 @@ static int RunCase(const TestCase &tc, int deviceId, aclrtStream stream) {
     return rc;
 }
 
-int main(int argc, char *argv[]) {
+int main(int argc, char* argv[])
+{
     // Optional case filter: ./tand [case_name]
-    const char *caseFilter = (argc > 1) ? argv[1] : nullptr;
+    const char* caseFilter = (argc > 1) ? argv[1] : nullptr;
 
     int rc = 0;
     int deviceId = 0;
     aclrtStream stream = nullptr;
 
     aclInit(nullptr);
-    if (const char *envDevice = std::getenv("ACL_DEVICE_ID")) {
+    if (const char* envDevice = std::getenv("ACL_DEVICE_ID")) {
         deviceId = std::atoi(envDevice);
     }
     aclrtSetDevice(deviceId);

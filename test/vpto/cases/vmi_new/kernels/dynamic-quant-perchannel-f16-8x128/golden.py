@@ -44,7 +44,9 @@ COL_SCALES = np.array([0.125, 0.25, 0.5, 1.0, 2.0], dtype=np.float32)
 
 def generate(output_dir: Path) -> None:
     q = np.tile(ROW_Q, (ROWS + len(ROW_Q) - 1) // len(ROW_Q))[:ROWS]
-    col_scales = np.tile(COL_SCALES, (COLS + len(COL_SCALES) - 1) // len(COL_SCALES))[:COLS]
+    col_scales = np.tile(COL_SCALES, (COLS + len(COL_SCALES) - 1) // len(COL_SCALES))[
+        :COLS
+    ]
 
     src = (q[:, None] * col_scales[None, :]).astype(np.float16)
     x_f32 = src.astype(np.float32)

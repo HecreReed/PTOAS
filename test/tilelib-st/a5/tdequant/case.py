@@ -68,7 +68,11 @@ def _dequant_body(src_ptr, scale_ptr, off_ptr, dst_ptr, *, src_dtype, rows, cols
     off_view = pto.make_tensor_view(off_ptr, shape=[rows, 1], strides=[1, 1])
     dst_view = pto.make_tensor_view(dst_ptr, shape=[rows, cols], strides=[cols, 1])
 
-    src_esize = np.dtype(np.int16).itemsize if src_dtype is pto.i16 else np.dtype(np.int8).itemsize
+    src_esize = (
+        np.dtype(np.int16).itemsize
+        if src_dtype is pto.i16
+        else np.dtype(np.int8).itemsize
+    )
     src_tile = _alloc_row_tile(rows, cols, src_esize, src_dtype)
     scale_tile = _alloc_col_tile(rows, pto.f32)
     off_tile = _alloc_col_tile(rows, pto.f32)
@@ -84,11 +88,25 @@ def _dequant_body(src_ptr, scale_ptr, off_ptr, dst_ptr, *, src_dtype, rows, cols
 _dequant_kernels = {}
 for _name, _npdt, _flag, _r, _c in CASE_SPECS:
     _sdt = _SRC_NP_TO_PTO[np.dtype(_npdt)]
+
     def _make(src_dtype=_sdt, r=_r, c=_c, kernel_name=f"tdequant_{_name}"):
         @pto.jit(name=kernel_name, target="a5")
-        def _kernel(src_ptr: pto.ptr(src_dtype, "gm"), scale_ptr: pto.ptr(pto.f32, "gm"),
-                    off_ptr: pto.ptr(pto.f32, "gm"), dst_ptr: pto.ptr(pto.f32, "gm")):
-            _dequant_body(src_ptr, scale_ptr, off_ptr, dst_ptr, src_dtype=src_dtype, rows=r, cols=c)
+        def _kernel(
+            src_ptr: pto.ptr(src_dtype, "gm"),
+            scale_ptr: pto.ptr(pto.f32, "gm"),
+            off_ptr: pto.ptr(pto.f32, "gm"),
+            dst_ptr: pto.ptr(pto.f32, "gm"),
+        ):
+            _dequant_body(
+                src_ptr,
+                scale_ptr,
+                off_ptr,
+                dst_ptr,
+                src_dtype=src_dtype,
+                rows=r,
+                cols=c,
+            )
+
         return _kernel
 
     _dequant_kernels[_name] = _make()
@@ -97,6 +115,7 @@ for _name, _npdt, _flag, _r, _c in CASE_SPECS:
 def _make_inputs(name, npdt, flag, rows, cols):
     # Deterministic per-case seed; value range (-100, 100).
     import zlib
+
     np.random.seed(zlib.crc32(name.encode("utf-8")) & 0xFFFFFFFF)
     src = np.random.uniform(-100, 100, size=(rows, cols)).astype(npdt)
     scale = np.random.uniform(-100, 100, size=(rows, 1)).astype(np.float32)
@@ -117,9 +136,11 @@ for _name, _npdt, _flag, _r, _c in CASE_SPECS:
         golden_output_case(
             "tdequant_" + _name,
             _dequant_kernels[_name],
-            inputs=lambda _name=_name, _npdt=_npdt, _flag=_flag, _r=_r, _c=_c: _make_inputs(
-                "tdequant_" + _name, _npdt, _flag, _r, _c
-            ),
+            inputs=lambda _name=_name,
+            _npdt=_npdt,
+            _flag=_flag,
+            _r=_r,
+            _c=_c: _make_inputs("tdequant_" + _name, _npdt, _flag, _r, _c),
             expected=_make_expected,
             output_shape=(_r, _c),
             output_dtype=np.float32,

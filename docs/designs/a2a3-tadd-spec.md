@@ -1,7 +1,7 @@
 # a2a3 llvm lowering spec
 These specifications are for lowering on A2 and A3, i.e. pto -> vpto -> llvm.
 
-## instruction mapping pto -> pto.ub.* 
+## instruction mapping pto -> pto.ub.*
 - pto.tadd to pto.ub.vadd
 - pto.tload to pto.ub.gm_to_ub
 - pto.tstore to pto.ub.ub_to_gm
@@ -31,7 +31,7 @@ python ptodsl/examples/tadd_launch_a3.py
 - add a test for every lowering pto.* -> pto.ub.*
 - tests should use captures to check arguments of the ops not just a mnemonic check
 - use this docker image cce-mlir-dev-npu-aarch64-llvm19-cann900
-- full command  
+- full command
 ```sh
-docker run --rm -i -v $(pwd):/workspace -v /tmp/opencode/ptoas-cce-build:/tmp/ptoas-build -v /tmp/opencode/ptoas-cce-install:/tmp/ptoas-install --ipc=host --privileged --device=/dev/davinci0 --device=/dev/davinci1 --device=/dev/davinci2 --device=/dev/davinci3 --device=/dev/davinci4 --device=/dev/davinci5 --device=/dev/davinci6 --device=/dev/davinci7 --device=/dev/davinci_manager --device=/dev/devmm_svm --device=/dev/hisi_hdc -v /usr/local/bin/npu-smi:/usr/local/bin/npu-smi -v /usr/local/Ascend/driver:/usr/local/Ascend/driver:ro -v /etc/ascend_install.info:/etc/ascend_install.info:ro --user $(id -u):$(id -g) -e HOME=/tmp --entrypoint bash cce-mlir-dev-npu-aarch64-llvm19-cann900 
+docker run --rm -i -v $(pwd):/workspace -v /tmp/opencode/ptoas-cce-build:/tmp/ptoas-build -v /tmp/opencode/ptoas-cce-install:/tmp/ptoas-install --ipc=host --privileged --device=/dev/davinci0 --device=/dev/davinci1 --device=/dev/davinci2 --device=/dev/davinci3 --device=/dev/davinci4 --device=/dev/davinci5 --device=/dev/davinci6 --device=/dev/davinci7 --device=/dev/davinci_manager --device=/dev/devmm_svm --device=/dev/hisi_hdc -v /usr/local/bin/npu-smi:/usr/local/bin/npu-smi -v /usr/local/Ascend/driver:/usr/local/Ascend/driver:ro -v /etc/ascend_install.info:/etc/ascend_install.info:ro --user $(id -u):$(id -g) -e HOME=/tmp --entrypoint bash cce-mlir-dev-npu-aarch64-llvm19-cann900
 ```

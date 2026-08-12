@@ -99,7 +99,9 @@ def fp32_to_fp8e4m3fn_bytes(arr):
 
 
 def fp32_to_fp8_element(data_abs_max, emax=EMAX):
-    bits = np.uint32(np.frombuffer(np.float32(data_abs_max).tobytes(), dtype=np.uint32)[0])
+    bits = np.uint32(
+        np.frombuffer(np.float32(data_abs_max).tobytes(), dtype=np.uint32)[0]
+    )
     exponent_b32 = int((bits & np.uint32(0x7F800000)) >> np.uint32(23))
     mantissa_b32 = int(bits & np.uint32(0x007FFFFF))
     if exponent_b32 == 0xFF and mantissa_b32 != 0:
@@ -110,7 +112,7 @@ def fp32_to_fp8_element(data_abs_max, emax=EMAX):
     scale_exp = 254 - e8m0
     scaling = np.uint32(scale_exp << 23).view(np.float32)
     if scaling == 0.0:
-        scaling = np.float32(2.0 ** -127)
+        scaling = np.float32(2.0**-127)
     return e8m0, scaling
 
 
@@ -147,7 +149,9 @@ def main():
     # dst: fp8 e4m3 = clamp(src * scaling, -448, 448), packed as int8 bytes.
     # Pure-numpy fp32 -> fp8 e4m3fn (round-to-nearest-even), no ml_dtypes needed.
     # scaling_per_group is [16]; broadcast across each group of 32 to match src [16,32].
-    scaling_broadcast = np.repeat(scaling_per_group, GROUP_SIZE).reshape(M, K).astype(np.float32)
+    scaling_broadcast = (
+        np.repeat(scaling_per_group, GROUP_SIZE).reshape(M, K).astype(np.float32)
+    )
     scaled = src.astype(np.float64) * scaling_broadcast.astype(np.float64)
     scaled = np.clip(scaled, -448.0, 448.0).astype(np.float32)
     dst_bytes = fp32_to_fp8e4m3fn_bytes(scaled)

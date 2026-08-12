@@ -18,7 +18,9 @@ COLS = 16
 
 
 def generate(output_dir: Path) -> None:
-    src = ((np.arange(ROWS * COLS, dtype=np.int32).reshape(ROWS, COLS) * 3) % 97 - 48).astype(np.int16)
+    src = (
+        (np.arange(ROWS * COLS, dtype=np.int32).reshape(ROWS, COLS) * 3) % 97 - 48
+    ).astype(np.int16)
     dst = np.zeros((ROWS, COLS), dtype=np.int16)
     golden_dst = src.copy()
 

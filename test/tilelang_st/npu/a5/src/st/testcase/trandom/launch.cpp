@@ -13,8 +13,11 @@
 #endif
 
 // Case 0: ui32 4x256
-extern "C" __global__ AICORE void TRANDOM_int32_4x256(__gm__ uint32_t *key, __gm__ uint32_t *counter, __gm__ uint32_t *output);
+extern "C" __global__ AICORE void TRANDOM_int32_4x256(
+    __gm__ uint32_t* key, __gm__ uint32_t* counter, __gm__ uint32_t* output);
 
-void LaunchTRANDOM_int32_4x256(uint32_t *key, uint32_t *counter, uint32_t *output, void *stream) {
-    TRANDOM_int32_4x256<<<1, nullptr, stream>>>((__gm__ uint32_t *)key, (__gm__ uint32_t *)counter, (__gm__ uint32_t *)output);
+void LaunchTRANDOM_int32_4x256(uint32_t* key, uint32_t* counter, uint32_t* output, void* stream)
+{
+    TRANDOM_int32_4x256<<<1, nullptr, stream>>>(
+        (__gm__ uint32_t*)key, (__gm__ uint32_t*)counter, (__gm__ uint32_t*)output);
 }

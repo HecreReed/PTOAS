@@ -49,8 +49,7 @@ class TreeWrapperTests(unittest.TestCase):
         saved_sys_path = list(sys.path)
         saved_argv = list(sys.argv)
         saved_modules = {
-            name: sys.modules.pop(name, None)
-            for name in ("ptoas", "ptoas._cli")
+            name: sys.modules.pop(name, None) for name in ("ptoas", "ptoas._cli")
         }
         try:
             sys.path = [entry for entry in sys.path if entry != str(python_root)]

@@ -36,17 +36,25 @@ DEFAULT_S1_TILE = int(os.environ.get("FA_S1_TILE", "256"))
 if DEFAULT_S1_TILE not in (256, 512):
     raise ValueError(f"FA_S1_TILE must be 256 or 512, got {DEFAULT_S1_TILE}")
 if DEFAULT_S1_TILE % CUBE_S1 != 0:
-    raise ValueError(f"FA_S1_TILE={DEFAULT_S1_TILE} must be a multiple of CUBE_S1={CUBE_S1}")
+    raise ValueError(
+        f"FA_S1_TILE={DEFAULT_S1_TILE} must be a multiple of CUBE_S1={CUBE_S1}"
+    )
 
 DEFAULT_Q_ROWS = int(os.environ.get("FA_Q_ROWS", "128"))
 if DEFAULT_Q_ROWS % S0 != 0:
     raise ValueError(f"FA_Q_ROWS={DEFAULT_Q_ROWS} must be a multiple of S0={S0}")
 
-DEFAULT_QK_PRELOAD = int(os.environ.get("FA_QK_PRELOAD", os.environ.get("FA_DSL_QK_PRELOAD", "3")))
+DEFAULT_QK_PRELOAD = int(
+    os.environ.get("FA_QK_PRELOAD", os.environ.get("FA_DSL_QK_PRELOAD", "3"))
+)
 if DEFAULT_QK_PRELOAD not in (3, 4):
     raise ValueError(f"FA_QK_PRELOAD must be 3 or 4, got {DEFAULT_QK_PRELOAD}")
 
-DEFAULT_EXP_RING = int(os.environ.get("FA_EXP_RING", os.environ.get("FA_DSL_EXP_RING", str(DEFAULT_QK_PRELOAD))))
+DEFAULT_EXP_RING = int(
+    os.environ.get(
+        "FA_EXP_RING", os.environ.get("FA_DSL_EXP_RING", str(DEFAULT_QK_PRELOAD))
+    )
+)
 if DEFAULT_EXP_RING != DEFAULT_QK_PRELOAD:
     raise ValueError(
         f"FA_EXP_RING must currently equal FA_QK_PRELOAD ({DEFAULT_QK_PRELOAD}), got {DEFAULT_EXP_RING}"
@@ -65,7 +73,9 @@ _CUBE_SYMBOL = "hw_native_flash_attention_cv_split_cube"
 _VECTOR_SYMBOL = "hw_native_flash_attention_cv_split_vector"
 
 
-def _gm_slot_layout(*, head_dim: int, s1_tile: int) -> tuple[int, int, int, int, int, int, int, int]:
+def _gm_slot_layout(
+    *, head_dim: int, s1_tile: int
+) -> tuple[int, int, int, int, int, int, int, int]:
     SLOT_SIZE_QK = S0 * s1_tile * 4
     SLOT_SIZE_PV = S0 * head_dim * 4
     SLOT_SIZE_P = S0 * s1_tile * 2
@@ -86,9 +96,13 @@ def _gm_slot_layout(*, head_dim: int, s1_tile: int) -> tuple[int, int, int, int,
     )
 
 
-def _validate_specialization(*, head_dim: int, s1_tile: int, qk_preload: int, causal: bool, q_rows: int) -> None:
+def _validate_specialization(
+    *, head_dim: int, s1_tile: int, qk_preload: int, causal: bool, q_rows: int
+) -> None:
     if head_dim != HEAD:
-        raise ValueError(f"cv-split flash attention currently requires head_dim={HEAD}, got {head_dim}")
+        raise ValueError(
+            f"cv-split flash attention currently requires head_dim={HEAD}, got {head_dim}"
+        )
     if s1_tile not in (256, 512):
         raise ValueError(f"s1_tile must be 256 or 512, got {s1_tile}")
     if s1_tile % CUBE_S1 != 0:
@@ -96,9 +110,12 @@ def _validate_specialization(*, head_dim: int, s1_tile: int, qk_preload: int, ca
     if qk_preload not in (3, 4):
         raise ValueError(f"qk_preload must be 3 or 4, got {qk_preload}")
     if causal:
-        raise ValueError("hw-native flash attention cv-split port is non-causal; causal=True is not supported yet")
+        raise ValueError(
+            "hw-native flash attention cv-split port is non-causal; causal=True is not supported yet"
+        )
     if q_rows % S0 != 0:
         raise ValueError(f"q_rows={q_rows} must be a multiple of S0={S0}")
+
 
 # -------------------------------------------------------------------------
 # Helper: even share of NUM_Q_BLOCKS across this core grid.
@@ -117,11 +134,15 @@ def compute_qb_range(total_q_blocks):
     return bid, qb_start, qb_start + per_core
 
 
-def _specialized_symbol(base: str, *, head_dim: int, s1_tile: int, qk_preload: int, q_rows: int) -> str:
+def _specialized_symbol(
+    base: str, *, head_dim: int, s1_tile: int, qk_preload: int, q_rows: int
+) -> str:
     return f"{base}_h{head_dim}_s1t{s1_tile}_qp{qk_preload}_qr{q_rows}"
 
 
-def _validate_runtime_problem(*, q_rows: int, s1: int, s1_tile: int, qk_preload: int) -> None:
+def _validate_runtime_problem(
+    *, q_rows: int, s1: int, s1_tile: int, qk_preload: int
+) -> None:
     if q_rows <= 0:
         raise ValueError(f"q_rows must be positive, got {q_rows}")
     if s1 <= 0:
@@ -135,7 +156,9 @@ def _validate_runtime_problem(*, q_rows: int, s1: int, s1_tile: int, qk_preload:
         )
 
 
-def _reference_flash_attention(q: np.ndarray, k_tokens: np.ndarray, v_tokens: np.ndarray) -> np.ndarray:
+def _reference_flash_attention(
+    q: np.ndarray, k_tokens: np.ndarray, v_tokens: np.ndarray
+) -> np.ndarray:
     q_f32 = q.astype(np.float32, copy=False)
     k_f32 = k_tokens.astype(np.float32, copy=False)
     v_f32 = v_tokens.astype(np.float32, copy=False)
@@ -215,7 +238,7 @@ def _build_flash_attention_entry(
     vec_gu_rows = S0 // VEC_CORES
     vec_s0 = S0 // VEC_CORES // tile_factor
     total_q_blocks = q_rows // S0
-    scale_value = 1.0 / (head_dim ** 0.5)
+    scale_value = 1.0 / (head_dim**0.5)
     exp_ring = DEFAULT_EXP_RING if qk_preload == DEFAULT_QK_PRELOAD else qk_preload
     qk_c2v_pipe_id = int(QK_C2V_PIPE_ID)
     p_v2c_pipe_id = int(P_V2C_PIPE_ID)
@@ -269,7 +292,9 @@ def _build_flash_attention_entry(
         gm_p = pto.addptr(gm_blk_fp16, 2 * GM_P_OFF_F32)
 
         # ---- QK pipe (cube producer): l2g2l GM-staged slot ----
-        qk_slot_view = pto.make_tensor_view(gm_qk, shape=[S0, s1_tile], strides=[s1_tile, 1])
+        qk_slot_view = pto.make_tensor_view(
+            gm_qk, shape=[S0, s1_tile], strides=[s1_tile, 1]
+        )
         qk_pipe = pto.pipe.c2v(
             slot_size=SLOT_SIZE_QK,
             gm_slot_tensor=qk_slot_view,
@@ -277,7 +302,9 @@ def _build_flash_attention_entry(
         )
 
         # ---- PV pipe (cube producer): l2g2l GM-staged slot ----
-        pv_slot_view = pto.make_tensor_view(gm_pv, shape=[S0, head_dim], strides=[head_dim, 1])
+        pv_slot_view = pto.make_tensor_view(
+            gm_pv, shape=[S0, head_dim], strides=[head_dim, 1]
+        )
         pv_pipe = pto.pipe.c2v(
             slot_size=SLOT_SIZE_PV,
             gm_slot_tensor=pv_slot_view,
@@ -285,7 +312,9 @@ def _build_flash_attention_entry(
         )
 
         # ---- P pipe (cube consumer of vec output): l2g2l GM-staged slot ----
-        p_slot_view_cube = pto.make_tensor_view(gm_p, shape=[S0, s1_tile], strides=[s1_tile, 1])
+        p_slot_view_cube = pto.make_tensor_view(
+            gm_p, shape=[S0, s1_tile], strides=[s1_tile, 1]
+        )
         p_pipe = pto.pipe.v2c(
             slot_size=SLOT_SIZE_P,
             gm_slot_tensor=p_slot_view_cube,
@@ -383,7 +412,9 @@ def _build_flash_attention_entry(
         pv_acc = [pv_acc_a, pv_acc_a]
 
         tv_q = pto.make_tensor_view(gm_q, shape=[s0, head_dim], strides=[head_dim, 1])
-        tv_k = pto.make_tensor_view(gm_k, shape=[head_dim, s1], strides=[1, head_dim], layout="DN")
+        tv_k = pto.make_tensor_view(
+            gm_k, shape=[head_dim, s1], strides=[1, head_dim], layout="DN"
+        )
         tv_v = pto.make_tensor_view(gm_v, shape=[s1, head_dim], strides=[head_dim, 1])
 
         # Closures over the shared tile state. The steady state overlaps PV for
@@ -520,14 +551,18 @@ def _build_flash_attention_entry(
         # Vec sees one slot as [VecGuRows, S1_TILE] -- SPLIT_UP_DOWN halves
         # the row count when crossing into the subblock; per row_slice we
         # tload a [Vec_S0, S1_TILE] partition.
-        qk_slot_view = pto.make_tensor_view(gm_qk, shape=[vec_gu_rows, s1_tile], strides=[s1_tile, 1])
+        qk_slot_view = pto.make_tensor_view(
+            gm_qk, shape=[vec_gu_rows, s1_tile], strides=[s1_tile, 1]
+        )
         qk_pipe = pto.pipe.c2v(
             slot_size=SLOT_SIZE_QK,
             gm_slot_tensor=qk_slot_view,
             id=qk_c2v_pipe_id,
         )
         # ---- PV pipe (vec consumer): l2g2l GM-staged slot ----
-        pv_slot_view = pto.make_tensor_view(gm_pv, shape=[vec_gu_rows, head_dim], strides=[head_dim, 1])
+        pv_slot_view = pto.make_tensor_view(
+            gm_pv, shape=[vec_gu_rows, head_dim], strides=[head_dim, 1]
+        )
         pv_pipe = pto.pipe.c2v(
             slot_size=SLOT_SIZE_PV,
             gm_slot_tensor=pv_slot_view,
@@ -535,7 +570,9 @@ def _build_flash_attention_entry(
         )
 
         # ---- P pipe (vec producer): l2g2l GM-staged slot ----
-        p_slot_view = pto.make_tensor_view(gm_p, shape=[vec_gu_rows, s1_tile], strides=[s1_tile, 1])
+        p_slot_view = pto.make_tensor_view(
+            gm_p, shape=[vec_gu_rows, s1_tile], strides=[s1_tile, 1]
+        )
         p_pipe = pto.pipe.v2c(
             slot_size=SLOT_SIZE_P,
             gm_slot_tensor=p_slot_view,
@@ -555,30 +592,61 @@ def _build_flash_attention_entry(
         tmp = pto.alloc_tile(shape=[vec_s0, s1_tile], dtype=pto.f32)
         p_fp32 = pto.alloc_tile(shape=[vec_s0, s1_tile], dtype=pto.f32)
         p_fp16 = pto.alloc_tile(shape=[vec_s0, s1_tile], dtype=pto.f16)
-        pv_vec = [pto.alloc_tile(shape=[vec_s0, head_dim], dtype=pto.f32) for _ in range(tile_factor)]
-        o_tile = [pto.alloc_tile(shape=[vec_s0, head_dim], dtype=pto.f32) for _ in range(tile_factor)]
+        pv_vec = [
+            pto.alloc_tile(shape=[vec_s0, head_dim], dtype=pto.f32)
+            for _ in range(tile_factor)
+        ]
+        o_tile = [
+            pto.alloc_tile(shape=[vec_s0, head_dim], dtype=pto.f32)
+            for _ in range(tile_factor)
+        ]
 
         running_max = [
-            pto.alloc_tile(shape=[vec_s0, 1], dtype=pto.f32, valid_shape=[vec_s0, 1], blayout="ColMajor")
+            pto.alloc_tile(
+                shape=[vec_s0, 1],
+                dtype=pto.f32,
+                valid_shape=[vec_s0, 1],
+                blayout="ColMajor",
+            )
             for _ in range(tile_factor)
         ]
         running_sum = [
-            pto.alloc_tile(shape=[vec_s0, 1], dtype=pto.f32, valid_shape=[vec_s0, 1], blayout="ColMajor")
+            pto.alloc_tile(
+                shape=[vec_s0, 1],
+                dtype=pto.f32,
+                valid_shape=[vec_s0, 1],
+                blayout="ColMajor",
+            )
             for _ in range(tile_factor)
         ]
         local_max = [
-            pto.alloc_tile(shape=[vec_s0, 1], dtype=pto.f32, valid_shape=[vec_s0, 1], blayout="ColMajor")
+            pto.alloc_tile(
+                shape=[vec_s0, 1],
+                dtype=pto.f32,
+                valid_shape=[vec_s0, 1],
+                blayout="ColMajor",
+            )
             for _ in range(tile_factor)
         ]
         local_sum = [
-            pto.alloc_tile(shape=[vec_s0, 1], dtype=pto.f32, valid_shape=[vec_s0, 1], blayout="ColMajor")
+            pto.alloc_tile(
+                shape=[vec_s0, 1],
+                dtype=pto.f32,
+                valid_shape=[vec_s0, 1],
+                blayout="ColMajor",
+            )
             for _ in range(tile_factor)
         ]
         # The shorter 140tflops-style preload only needs one exp_max slot per
         # preloaded logical S1 tile.
         exp_max_ring = [
             [
-                pto.alloc_tile(shape=[vec_s0, 1], dtype=pto.f32, valid_shape=[vec_s0, 1], blayout="ColMajor")
+                pto.alloc_tile(
+                    shape=[vec_s0, 1],
+                    dtype=pto.f32,
+                    valid_shape=[vec_s0, 1],
+                    blayout="ColMajor",
+                )
                 for _ in range(tile_factor)
             ]
             for _ in range(exp_ring)
@@ -587,7 +655,9 @@ def _build_flash_attention_entry(
         softmax_scale = scale_value
         sb_idx = scalar.index_cast(pto.get_subblock_idx())
         row_off_sb = sb_idx * S0_HALF
-        tv_o = pto.make_tensor_view(gm_o, shape=[s0_index, head_dim], strides=[head_dim, 1])
+        tv_o = pto.make_tensor_view(
+            gm_o, shape=[s0_index, head_dim], strides=[head_dim, 1]
+        )
 
         # ---- apply_softmax(exp_max_slots, is_init): one streaming softmax ------
         # Pop the wide QK slot (full subblock) and talloc one wide P slot;
@@ -612,14 +682,24 @@ def _build_flash_attention_entry(
                 rsum = running_sum[row_slice]
                 exp_slot = exp_max_slots[row_slice]
                 pto.tile.rowmax(qk, lmax, tmp=tmp)
-                
+
                 # Reshape reductions to row-major so scalar broadcast helpers work.
-                local_max_r = pto.tile.reshape(lmax, shape=[1, vec_s0], blayout="RowMajor")
-                running_max_r = pto.tile.reshape(rmax, shape=[1, vec_s0], blayout="RowMajor")
-                running_sum_r = pto.tile.reshape(rsum, shape=[1, vec_s0], blayout="RowMajor")
-                local_sum_r = pto.tile.reshape(lsum, shape=[1, vec_s0], blayout="RowMajor")
-                exp_max_r = pto.tile.reshape(exp_slot, shape=[1, vec_s0], blayout="RowMajor")
-                
+                local_max_r = pto.tile.reshape(
+                    lmax, shape=[1, vec_s0], blayout="RowMajor"
+                )
+                running_max_r = pto.tile.reshape(
+                    rmax, shape=[1, vec_s0], blayout="RowMajor"
+                )
+                running_sum_r = pto.tile.reshape(
+                    rsum, shape=[1, vec_s0], blayout="RowMajor"
+                )
+                local_sum_r = pto.tile.reshape(
+                    lsum, shape=[1, vec_s0], blayout="RowMajor"
+                )
+                exp_max_r = pto.tile.reshape(
+                    exp_slot, shape=[1, vec_s0], blayout="RowMajor"
+                )
+
                 if pto.const_expr(is_init):
                     pto.tile.rowexpandsub(qk, lmax, p_fp32)
                     pto.tile.mov(local_max_r, running_max_r)
@@ -664,8 +744,12 @@ def _build_flash_attention_entry(
                 if pto.const_expr(is_init):
                     pto.tile.mov(pv_vec[row_slice], o_tile[row_slice])
                 else:
-                    pto.tile.rowexpandmul(o_tile[row_slice], exp_max_slots[row_slice], o_tile[row_slice])
-                    pto.tile.add(o_tile[row_slice], pv_vec[row_slice], o_tile[row_slice])
+                    pto.tile.rowexpandmul(
+                        o_tile[row_slice], exp_max_slots[row_slice], o_tile[row_slice]
+                    )
+                    pto.tile.add(
+                        o_tile[row_slice], pv_vec[row_slice], o_tile[row_slice]
+                    )
             pv_pipe.free(pv_entry, split=split_up_down)
 
         def apply_softmax_for_tile(tile_id):
@@ -719,14 +803,23 @@ def _build_flash_attention_entry(
             # Final divide + GM store, one row_slice at a time.
             for row_slice in pto.static_range(tile_factor):
                 row_off = row_off_sb + row_slice * vec_s0
-                pto.tile.rowexpanddiv(o_tile[row_slice], running_sum[row_slice], o_tile[row_slice])
+                pto.tile.rowexpanddiv(
+                    o_tile[row_slice], running_sum[row_slice], o_tile[row_slice]
+                )
                 pto.tile.store(
                     o_tile[row_slice],
                     tv_o,
                     offsets=[qb * S0 + row_off, 0],
                     sizes=[vec_s0, head_dim],
                 )
-    @pto.jit(name=entry_symbol, target="a5", mode="explicit", backend="emitc", insert_sync=True)
+
+    @pto.jit(
+        name=entry_symbol,
+        target="a5",
+        mode="explicit",
+        backend="emitc",
+        insert_sync=True,
+    )
     def flash_attention_entry(
         gm_slot_buffer: pto.ptr(pto.f32, "gm"),
         gm_slot_buffer_fp16: pto.ptr(pto.f16, "gm"),
@@ -827,8 +920,12 @@ def run_demo(
         _GM_PV_OFF_F32,
         _GM_P_OFF_F32,
     ) = _gm_slot_layout(head_dim=head_dim, s1_tile=s1_tile)
-    gm_slot_buffer_t = torch.empty(total_q_blocks * GM_ELEMS_PER_BLOCK, dtype=torch.float32, device=_DEVICE)
-    gm_slot_buffer_fp16_t = torch.empty(total_q_blocks * (2 * GM_ELEMS_PER_BLOCK), dtype=torch.float16, device=_DEVICE)
+    gm_slot_buffer_t = torch.empty(
+        total_q_blocks * GM_ELEMS_PER_BLOCK, dtype=torch.float32, device=_DEVICE
+    )
+    gm_slot_buffer_fp16_t = torch.empty(
+        total_q_blocks * (2 * GM_ELEMS_PER_BLOCK), dtype=torch.float16, device=_DEVICE
+    )
     stream = _current_stream(torch)
 
     t0 = time.perf_counter()
@@ -885,7 +982,9 @@ def build_arg_parser():
     )
     parser.add_argument("--seed", type=int, default=20260601)
     parser.add_argument("--causal", action="store_true")
-    parser.add_argument("-o", "--output", default="-", help="output MLIR path, or '-' for stdout")
+    parser.add_argument(
+        "-o", "--output", default="-", help="output MLIR path, or '-' for stdout"
+    )
     return parser
 
 

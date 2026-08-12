@@ -11,6 +11,4 @@
 #ifndef __gm__
 #define __gm__
 #endif
-extern "C" __global__ [aicore] void simt_keep_resume_kernel(__gm__ int *v1) {
-  (void)v1;
-}
+extern "C" __global__[aicore] void simt_keep_resume_kernel(__gm__ int* v1) { (void)v1; }

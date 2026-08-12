@@ -79,11 +79,12 @@ class ResolvePtoasBinaryTests(unittest.TestCase):
 
             path_ptoas = temp_root / "path-ptoas"
 
-            with mock.patch.dict(
-                os.environ, {"PTOAS_BIN": str(env_ptoas)}, clear=True
-            ), mock.patch.object(
-                toolchain.shutil, "which", return_value=str(path_ptoas)
-            ) as which:
+            with (
+                mock.patch.dict(os.environ, {"PTOAS_BIN": str(env_ptoas)}, clear=True),
+                mock.patch.object(
+                    toolchain.shutil, "which", return_value=str(path_ptoas)
+                ) as which,
+            ):
                 resolved = toolchain.resolve_ptoas_binary()
 
             self.assertEqual(resolved, env_ptoas)
@@ -92,9 +93,12 @@ class ResolvePtoasBinaryTests(unittest.TestCase):
     def test_path_is_used_without_env_override(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             path_ptoas = Path(temp_dir) / "path-ptoas"
-            with mock.patch.dict(os.environ, {}, clear=True), mock.patch.object(
-                toolchain.shutil, "which", return_value=str(path_ptoas)
-            ) as which:
+            with (
+                mock.patch.dict(os.environ, {}, clear=True),
+                mock.patch.object(
+                    toolchain.shutil, "which", return_value=str(path_ptoas)
+                ) as which,
+            ):
                 resolved = toolchain.resolve_ptoas_binary()
 
             self.assertEqual(resolved, path_ptoas)
@@ -103,9 +107,10 @@ class ResolvePtoasBinaryTests(unittest.TestCase):
     def test_invalid_env_override_raises(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             missing = Path(temp_dir) / "missing-ptoas"
-            with mock.patch.dict(
-                os.environ, {"PTOAS_BIN": str(missing)}, clear=True
-            ), mock.patch.object(toolchain.shutil, "which", return_value=None):
+            with (
+                mock.patch.dict(os.environ, {"PTOAS_BIN": str(missing)}, clear=True),
+                mock.patch.object(toolchain.shutil, "which", return_value=None),
+            ):
                 with self.assertRaises(FileNotFoundError):
                     toolchain.resolve_ptoas_binary()
 

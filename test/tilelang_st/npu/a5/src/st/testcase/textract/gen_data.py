@@ -14,22 +14,29 @@ from cases import CASES
 from st_common import setup_case_rng, save_case_data
 
 
-import os
-
-
 for case in CASES:
     setup_case_rng(case)
     name = case["name"]
 
     if name.startswith("mat2left"):
-        src = np.random.uniform(-1.0, 1.0, size=case["shape_src"]).astype(case["dtype_src"])
-        id_mat = np.eye(case["shape_id"][0], case["shape_id"][1], dtype=case["dtype_id"])
-        golden = np.matmul(src.astype(np.float32), id_mat.astype(np.float32)).astype(np.float32)
+        src = np.random.uniform(-1.0, 1.0, size=case["shape_src"]).astype(
+            case["dtype_src"]
+        )
+        id_mat = np.eye(
+            case["shape_id"][0], case["shape_id"][1], dtype=case["dtype_id"]
+        )
+        golden = np.matmul(src.astype(np.float32), id_mat.astype(np.float32)).astype(
+            np.float32
+        )
         save_case_data(name, {"input1": src, "input2": id_mat, "golden": golden})
 
     elif name.startswith("mat2right"):
-        id_mat = np.eye(case["shape_id"][0], case["shape_id"][1], dtype=case["dtype_id"])
-        src = np.random.uniform(-1.0, 1.0, size=case["shape_src"]).astype(case["dtype_src"])
+        id_mat = np.eye(
+            case["shape_id"][0], case["shape_id"][1], dtype=case["dtype_id"]
+        )
+        src = np.random.uniform(-1.0, 1.0, size=case["shape_src"]).astype(
+            case["dtype_src"]
+        )
         golden = src.astype(np.float32).T.copy()
         save_case_data(name, {"input1": id_mat, "input2": src, "golden": golden})
 

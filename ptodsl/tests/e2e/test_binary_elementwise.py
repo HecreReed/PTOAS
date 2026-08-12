@@ -23,7 +23,16 @@ from __future__ import annotations
 
 import pytest
 
-from .common import BINARY_OPS, INT_OPS, SHIFT_OPS, make_binary_kernel, make_shift_kernel, launch_and_check, launch_and_check_int, launch_and_check_shift
+from .common import (
+    BINARY_OPS,
+    INT_OPS,
+    SHIFT_OPS,
+    make_binary_kernel,
+    make_shift_kernel,
+    launch_and_check,
+    launch_and_check_int,
+    launch_and_check_shift,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -95,8 +104,12 @@ def test_binary_f32(case, torch, target_arch, backend):
     op_name, ref_fn, dtype_str, rows, cols, desc = case
 
     kernel = make_binary_kernel(
-        op_name, rows, cols, dtype_str=dtype_str,
-        target=target_arch, backend=backend,
+        op_name,
+        rows,
+        cols,
+        dtype_str=dtype_str,
+        target=target_arch,
+        backend=backend,
     )
     compile_s, launch_s = launch_and_check(
         op_name=op_name,
@@ -106,8 +119,10 @@ def test_binary_f32(case, torch, target_arch, backend):
         dtype_str=dtype_str,
         torch=torch,
     )
-    print(f"  PASS {op_name} {dtype_str} {rows}x{cols} ({desc}) "
-          f"compile={compile_s:.3f}s launch={launch_s:.3f}s")
+    print(
+        f"  PASS {op_name} {dtype_str} {rows}x{cols} ({desc}) "
+        f"compile={compile_s:.3f}s launch={launch_s:.3f}s"
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -130,8 +145,12 @@ def test_binary_f16(case, torch, target_arch, backend):
     op_name, ref_fn, dtype_str, rows, cols, desc = case
 
     kernel = make_binary_kernel(
-        op_name, rows, cols, dtype_str=dtype_str,
-        target=target_arch, backend=backend,
+        op_name,
+        rows,
+        cols,
+        dtype_str=dtype_str,
+        target=target_arch,
+        backend=backend,
     )
     compile_s, launch_s = launch_and_check(
         op_name=op_name,
@@ -143,8 +162,10 @@ def test_binary_f16(case, torch, target_arch, backend):
         rtol=1e-3,
         atol=1e-3,
     )
-    print(f"  PASS {op_name} {dtype_str} {rows}x{cols} ({desc}) "
-          f"compile={compile_s:.3f}s launch={launch_s:.3f}s")
+    print(
+        f"  PASS {op_name} {dtype_str} {rows}x{cols} ({desc}) "
+        f"compile={compile_s:.3f}s launch={launch_s:.3f}s"
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -175,8 +196,12 @@ def test_binary_int16(case, torch, target_arch, backend):
     op_name, ref_fn, rows, cols, desc = case
 
     kernel = make_binary_kernel(
-        op_name, rows, cols, dtype_str="int16",
-        target=target_arch, backend=backend,
+        op_name,
+        rows,
+        cols,
+        dtype_str="int16",
+        target=target_arch,
+        backend=backend,
     )
     compile_s, launch_s = launch_and_check_int(
         kernel_handle=kernel,
@@ -184,8 +209,10 @@ def test_binary_int16(case, torch, target_arch, backend):
         shape=(rows, cols),
         torch=torch,
     )
-    print(f"  PASS {op_name} int16 {rows}x{cols} ({desc}) "
-          f"compile={compile_s:.3f}s launch={launch_s:.3f}s")
+    print(
+        f"  PASS {op_name} int16 {rows}x{cols} ({desc}) "
+        f"compile={compile_s:.3f}s launch={launch_s:.3f}s"
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -211,8 +238,12 @@ def test_shift_int16(case, torch, target_arch, backend):
     op_name, ref_fn, rows, cols, shift_val, desc = case
 
     kernel = make_shift_kernel(
-        op_name, rows, cols, shift_val=shift_val,
-        target=target_arch, backend=backend,
+        op_name,
+        rows,
+        cols,
+        shift_val=shift_val,
+        target=target_arch,
+        backend=backend,
     )
     compile_s, launch_s = launch_and_check_shift(
         kernel_handle=kernel,
@@ -221,5 +252,7 @@ def test_shift_int16(case, torch, target_arch, backend):
         shift_val=shift_val,
         torch=torch,
     )
-    print(f"  PASS {op_name} int16 {rows}x{cols} <<{shift_val} ({desc}) "
-          f"compile={compile_s:.3f}s launch={launch_s:.3f}s")
+    print(
+        f"  PASS {op_name} int16 {rows}x{cols} <<{shift_val} ({desc}) "
+        f"compile={compile_s:.3f}s launch={launch_s:.3f}s"
+    )

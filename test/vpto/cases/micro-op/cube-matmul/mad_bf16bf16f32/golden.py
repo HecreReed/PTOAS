@@ -36,7 +36,9 @@ def generate(output_dir: Path) -> None:
     a = to_bf16_bits(a_f32)
     b = to_bf16_bits(b_f32)
     c = np.zeros((M, N), dtype=np.float32)
-    golden_c = bf16_bits_to_f32(a).astype(np.float32) @ bf16_bits_to_f32(b).astype(np.float32)
+    golden_c = bf16_bits_to_f32(a).astype(np.float32) @ bf16_bits_to_f32(b).astype(
+        np.float32
+    )
 
     output_dir.mkdir(parents=True, exist_ok=True)
     a.reshape(-1).tofile(output_dir / "v1.bin")

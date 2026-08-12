@@ -9,8 +9,6 @@
 # coding=utf-8
 
 import os
-import sys
-import math
 import numpy as np
 import ml_dtypes
 import en_dtypes
@@ -61,13 +59,17 @@ def pack_mx_lhs_fp8_fractal_chunks(matrix, chunk_physical_rows):
     packed_chunks = []
     row = 0
     for rows in chunk_physical_rows:
-        chunk = matrix[row:row + rows, :]
+        chunk = matrix[row : row + rows, :]
         if chunk.shape[0] != rows:
-            raise ValueError(f"invalid split_m_physical_rows {chunk_physical_rows} for M={matrix.shape[0]}")
+            raise ValueError(
+                f"invalid split_m_physical_rows {chunk_physical_rows} for M={matrix.shape[0]}"
+            )
         packed_chunks.append(pack_mx_lhs_fp8_fractal(chunk).reshape(-1))
         row += rows
     if row != matrix.shape[0]:
-        raise ValueError(f"invalid split_m_physical_rows {chunk_physical_rows} for M={matrix.shape[0]}")
+        raise ValueError(
+            f"invalid split_m_physical_rows {chunk_physical_rows} for M={matrix.shape[0]}"
+        )
     return np.ascontiguousarray(np.concatenate(packed_chunks))
 
 
@@ -82,14 +84,20 @@ def convert_scale_a_format(scale, block_size=16, c0_size_mx=2):
     pad_m = (block_size - m % block_size) % block_size
     pad_k = (c0_size_mx - k % c0_size_mx) % c0_size_mx
     if pad_m > 0 or pad_k > 0:
-        padded = np.pad(scale, ((0, pad_m), (0, pad_k)), mode='constant', constant_values=0)
+        padded = np.pad(
+            scale, ((0, pad_m), (0, pad_k)), mode="constant", constant_values=0
+        )
     else:
         padded = scale
     m_padded = m + pad_m
     k_padded = k + pad_k
-    result = padded.reshape((int(m_padded / block_size), block_size, int(k_padded / c0_size_mx), c0_size_mx))
+    result = padded.reshape(
+        (int(m_padded / block_size), block_size, int(k_padded / c0_size_mx), c0_size_mx)
+    )
     result = result.transpose(0, 2, 1, 3)
-    result = result.reshape(result.shape[0] * result.shape[1], result.shape[2] * result.shape[3])
+    result = result.reshape(
+        result.shape[0] * result.shape[1], result.shape[2] * result.shape[3]
+    )
     return result
 
 
@@ -102,12 +110,18 @@ def convert_scale_b_format(scale, block_size=16, c0_size_mx=2, n_pad_to=None):
     pad_n = target_n - n
     pad_k = (c0_size_mx - k % c0_size_mx) % c0_size_mx
     if pad_n > 0 or pad_k > 0:
-        padded = np.pad(scale, ((0, pad_k), (0, pad_n)), mode='constant', constant_values=0)
+        padded = np.pad(
+            scale, ((0, pad_k), (0, pad_n)), mode="constant", constant_values=0
+        )
     else:
         padded = scale
     k_padded, n_padded = padded.shape
-    result = padded.reshape((int(k_padded / c0_size_mx), c0_size_mx, int(n_padded / 16), 16)).transpose(2, 0, 3, 1)
-    result = result.reshape(result.shape[1] * result.shape[3], result.shape[0] * result.shape[2])
+    result = padded.reshape(
+        (int(k_padded / c0_size_mx), c0_size_mx, int(n_padded / 16), 16)
+    ).transpose(2, 0, 3, 1)
+    result = result.reshape(
+        result.shape[1] * result.shape[3], result.shape[0] * result.shape[2]
+    )
     return result
 
 
@@ -152,8 +166,12 @@ def gen_golden(case):
             x1_bin = pack_mx_lhs_fp8_fractal(x1_padded)
         x2_bin = pack_mx_rhs_fp8_fractal(x2_padded)
 
-    x1_scale = np.random.randint(127, 130, [m, ceil_div(k_aligned, 32)]).astype(np.uint8)
-    x2_scale = np.random.randint(127, 130, [ceil_div(k_aligned, 32), n]).astype(np.uint8)
+    x1_scale = np.random.randint(127, 130, [m, ceil_div(k_aligned, 32)]).astype(
+        np.uint8
+    )
+    x2_scale = np.random.randint(127, 130, [ceil_div(k_aligned, 32), n]).astype(
+        np.uint8
+    )
 
     x1_mx = 2 ** (x1_scale.astype(np.float64) - 127)
     x2_mx = 2 ** (x2_scale.astype(np.float64) - 127)
@@ -198,9 +216,17 @@ for case in CASES:
 
     x1, x2, x1_scale, x2_scale, bias, golden = gen_golden(case)
 
-    save_dict = {"input1": x1, "input2": x2, "scale1": x1_scale, "scale2": x2_scale, "golden": golden}
+    save_dict = {
+        "input1": x1,
+        "input2": x2,
+        "scale1": x1_scale,
+        "scale2": x2_scale,
+        "golden": golden,
+    }
     if bias is not None:
         save_dict["bias"] = bias
 
     save_case_data(case_dir, save_dict)
-    print(f"[INFO] gen_data: {case_dir} m={case['m']} k={case['k']} n={case['n']} is_bias={case['is_bias']} is_fp4={case['is_fp4']}")
+    print(
+        f"[INFO] gen_data: {case_dir} m={case['m']} k={case['k']} n={case['n']} is_bias={case['is_bias']} is_fp4={case['is_fp4']}"
+    )

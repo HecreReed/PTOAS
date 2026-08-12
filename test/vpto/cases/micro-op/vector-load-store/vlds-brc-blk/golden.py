@@ -34,7 +34,9 @@ def generate(output_dir: Path, seed: int) -> None:
     golden_v2 = np.zeros((ELEMENTS,), dtype=np.uint8)
     repeats = LANES // BLOCK_BYTES
     for offset in range(0, ACTIVE_ELEMS, LANES):
-        golden_v2[offset : offset + LANES] = np.tile(v1[offset : offset + BLOCK_BYTES], repeats)
+        golden_v2[offset : offset + LANES] = np.tile(
+            v1[offset : offset + BLOCK_BYTES], repeats
+        )
 
     output_dir.mkdir(parents=True, exist_ok=True)
     v1.tofile(output_dir / "v1.bin")

@@ -28,7 +28,9 @@ def nchw_to_c1hw_n16_16_c0(nchw_tensor: np.ndarray, c0: int = 16) -> np.ndarray:
     padded = np.pad(nchw_tensor, ((0, n_pad - n), (0, c_pad - c), (0, 0), (0, 0)))
     nc1c0hw = padded.reshape(n_pad, c1, c0, h, w)
     n16 = nc1c0hw.reshape(n_pad // 16, 16, c1, c0, h, w)
-    return np.transpose(n16, (2, 4, 5, 0, 1, 3)).reshape(c1 * h * w, n_pad // 16, 16, c0)
+    return np.transpose(n16, (2, 4, 5, 0, 1, 3)).reshape(
+        c1 * h * w, n_pad // 16, 16, c0
+    )
 
 
 def ncdhw_to_ndc1hwc0(ncdhw_tensor: np.ndarray, c0: int = 16) -> np.ndarray:
@@ -44,10 +46,14 @@ def ncdhw_to_c1dhw_n16_16_c0(ncdhw_tensor: np.ndarray, c0: int = 16) -> np.ndarr
     n_pad = ((n + 15) // 16) * 16
     c_pad = ((c + c0 - 1) // c0) * c0
     c1 = c_pad // c0
-    padded = np.pad(ncdhw_tensor, ((0, n_pad - n), (0, c_pad - c), (0, 0), (0, 0), (0, 0)))
+    padded = np.pad(
+        ncdhw_tensor, ((0, n_pad - n), (0, c_pad - c), (0, 0), (0, 0), (0, 0))
+    )
     nc1c0dhw = padded.reshape(n_pad, c1, c0, d, h, w)
     n16 = nc1c0dhw.reshape(n_pad // 16, 16, c1, c0, d, h, w)
-    return np.transpose(n16, (2, 4, 5, 6, 0, 1, 3)).reshape(c1 * d * h * w, n_pad // 16, 16, c0)
+    return np.transpose(n16, (2, 4, 5, 6, 0, 1, 3)).reshape(
+        c1 * d * h * w, n_pad // 16, 16, c0
+    )
 
 
 def write(path: Path, array: np.ndarray) -> None:
@@ -57,25 +63,49 @@ def write(path: Path, array: np.ndarray) -> None:
 def generate(output_dir: Path) -> None:
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    lhs_nd2nz_case1 = (np.arange(40 * 50, dtype=np.float16).reshape(40, 50) * np.float16(0.5) +
-                       np.float16(17)).astype(np.float16)
-    nd2nz_case1 = (np.arange(50 * 60, dtype=np.float16).reshape(50, 60) * np.float16(0.25) +
-                   np.float16(3)).astype(np.float16)
-    lhs = (np.arange(16 * 16, dtype=np.float16).reshape(16, 16) + 2001).astype(np.float16)
-    dn2nz = (np.arange(16 * 16, dtype=np.float16).reshape(16, 16) + 301).astype(np.float16)
-    nchw = (np.arange(1 * 10 * 1 * 16, dtype=np.float16).reshape(1, 10, 1, 16) + 601).astype(np.float16)
-    nchw_fz4d = (np.arange(5 * 16, dtype=np.float16).reshape(5, 16, 1, 1) + 901).astype(np.float16)
-    ncdhw = (np.arange(1 * 7 * 1 * 1 * 16, dtype=np.float16).reshape(1, 7, 1, 1, 16) + 1201).astype(np.float16)
-    ncdhw_fz3d = (np.arange(3 * 16, dtype=np.float16).reshape(3, 16, 1, 1, 1) + 1501).astype(np.float16)
+    lhs_nd2nz_case1 = (
+        np.arange(40 * 50, dtype=np.float16).reshape(40, 50) * np.float16(0.5)
+        + np.float16(17)
+    ).astype(np.float16)
+    nd2nz_case1 = (
+        np.arange(50 * 60, dtype=np.float16).reshape(50, 60) * np.float16(0.25)
+        + np.float16(3)
+    ).astype(np.float16)
+    lhs = (np.arange(16 * 16, dtype=np.float16).reshape(16, 16) + 2001).astype(
+        np.float16
+    )
+    dn2nz = (np.arange(16 * 16, dtype=np.float16).reshape(16, 16) + 301).astype(
+        np.float16
+    )
+    nchw = (
+        np.arange(1 * 10 * 1 * 16, dtype=np.float16).reshape(1, 10, 1, 16) + 601
+    ).astype(np.float16)
+    nchw_fz4d = (np.arange(5 * 16, dtype=np.float16).reshape(5, 16, 1, 1) + 901).astype(
+        np.float16
+    )
+    ncdhw = (
+        np.arange(1 * 7 * 1 * 1 * 16, dtype=np.float16).reshape(1, 7, 1, 1, 16) + 1201
+    ).astype(np.float16)
+    ncdhw_fz3d = (
+        np.arange(3 * 16, dtype=np.float16).reshape(3, 16, 1, 1, 1) + 1501
+    ).astype(np.float16)
 
     lhs_nd2nz_case1_f32 = lhs_nd2nz_case1.astype(np.float32)
     lhs_f32 = lhs.astype(np.float32)
     golden_nd2nz = lhs_nd2nz_case1_f32 @ nd2nz_case1.astype(np.float32)
     golden_dn2nz = lhs_f32 @ dn2nz.astype(np.float32)
-    golden_nchw_nc1hwc0 = lhs_f32 @ nchw_to_nc1hwc0(nchw).reshape(16, 16).astype(np.float32)
-    golden_nchw_fz4d = lhs_f32 @ nchw_to_c1hw_n16_16_c0(nchw_fz4d).reshape(16, 16).astype(np.float32)
-    golden_ncdhw_ndc1hwc0 = lhs_f32 @ ncdhw_to_ndc1hwc0(ncdhw).reshape(16, 16).astype(np.float32)
-    golden_ncdhw_fz3d = lhs_f32 @ ncdhw_to_c1dhw_n16_16_c0(ncdhw_fz3d).reshape(16, 16).astype(np.float32)
+    golden_nchw_nc1hwc0 = lhs_f32 @ nchw_to_nc1hwc0(nchw).reshape(16, 16).astype(
+        np.float32
+    )
+    golden_nchw_fz4d = lhs_f32 @ nchw_to_c1hw_n16_16_c0(nchw_fz4d).reshape(
+        16, 16
+    ).astype(np.float32)
+    golden_ncdhw_ndc1hwc0 = lhs_f32 @ ncdhw_to_ndc1hwc0(ncdhw).reshape(16, 16).astype(
+        np.float32
+    )
+    golden_ncdhw_fz3d = lhs_f32 @ ncdhw_to_c1dhw_n16_16_c0(ncdhw_fz3d).reshape(
+        16, 16
+    ).astype(np.float32)
 
     zeros_nd2nz = np.zeros((40, 60), dtype=np.float32)
     zeros = np.zeros((16, 16), dtype=np.float32)

@@ -10,5 +10,5 @@
 from qwen3_decode_golden_lib import run_case
 
 
-if __name__ == '__main__':
-    run_case('down_proj_residual')
+if __name__ == "__main__":
+    run_case("down_proj_residual")

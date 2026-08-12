@@ -58,16 +58,20 @@ def make_vector_quant_params(n: int) -> np.ndarray:
 
 
 def generate(output_dir: Path, seed: int) -> None:
-    a = (np.arange(M * K, dtype=np.float32).reshape(M, K) * np.float32(0.01) +
-         np.float32(0.5)).astype(np.float16)
-    b = (np.arange(K * N, dtype=np.float32).reshape(K, N) * np.float32(0.005) +
-         np.float32(0.25)).astype(np.float16)
+    a = (
+        np.arange(M * K, dtype=np.float32).reshape(M, K) * np.float32(0.01)
+        + np.float32(0.5)
+    ).astype(np.float16)
+    b = (
+        np.arange(K * N, dtype=np.float32).reshape(K, N) * np.float32(0.005)
+        + np.float32(0.25)
+    ).astype(np.float16)
     fp = make_vector_quant_params(FP_QUANT_ELEMS)
     matmul = np.zeros((M, N), dtype=np.float32)
     a32 = a.astype(np.float32)
     b32 = b.astype(np.float32)
     for k_idx in range(K):
-        matmul += a32[:, k_idx:k_idx + 1] * b32[k_idx:k_idx + 1, :]
+        matmul += a32[:, k_idx : k_idx + 1] * b32[k_idx : k_idx + 1, :]
     golden = qf322f16_pre(matmul, fp)
 
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -75,8 +79,10 @@ def generate(output_dir: Path, seed: int) -> None:
     b.reshape(-1).tofile(output_dir / "v2.bin")
     fp.view(np.uint32).reshape(FP_TRANSPORT_ELEMS).tofile(output_dir / "v3.bin")
     for index in range(4, 7):
-      np.zeros((M, N), dtype=np.float16).reshape(-1).tofile(output_dir / f"v{index}.bin")
-      golden.reshape(-1).tofile(output_dir / f"golden_v{index}.bin")
+        np.zeros((M, N), dtype=np.float16).reshape(-1).tofile(
+            output_dir / f"v{index}.bin"
+        )
+        golden.reshape(-1).tofile(output_dir / f"golden_v{index}.bin")
 
 
 def main() -> None:

@@ -13,9 +13,23 @@ import ptodsl.tilelib as tilelib
 from ._common import ub_row_major_constraints
 
 
-FMOD_DTYPES = [("f32", "f32", "f32"), ("f16", "f16", "f16"), ("i16", "i16", "i16"), ("ui16", "ui16", "ui16")]
-FMODS_DTYPES = [("f32", "f32", "f32"), ("f16", "f16", "f16"), ("i32", "i32", "i32"), ("i16", "i16", "i16")]
-REM_DTYPES = [("f32", "f32", "f32", "f32"), ("f16", "f16", "f16", "f16"), ("i32", "i32", "i32", "i32")]
+FMOD_DTYPES = [
+    ("f32", "f32", "f32"),
+    ("f16", "f16", "f16"),
+    ("i16", "i16", "i16"),
+    ("ui16", "ui16", "ui16"),
+]
+FMODS_DTYPES = [
+    ("f32", "f32", "f32"),
+    ("f16", "f16", "f16"),
+    ("i32", "i32", "i32"),
+    ("i16", "i16", "i16"),
+]
+REM_DTYPES = [
+    ("f32", "f32", "f32", "f32"),
+    ("f16", "f16", "f16", "f16"),
+    ("i32", "i32", "i32", "i32"),
+]
 REMS_DTYPES = [("f32", "f32", "f32", "f32"), ("f16", "f16", "f16", "f16")]
 
 
@@ -159,7 +173,9 @@ def _emit_scalar(src, scalar, dst, round_mode):
             col = col_loop.iv
             mask, remained = pto.make_mask(dtype, col_loop.remained)
             value = pto.vlds(src[row, col:])
-            result = _scalar_remainder(value, scalar, mask, round_mode=round_mode, dtype=dtype)
+            result = _scalar_remainder(
+                value, scalar, mask, round_mode=round_mode, dtype=dtype
+            )
             pto.vsts(result, dst[row, col:], mask)
             col_loop.update(remained=remained)
 

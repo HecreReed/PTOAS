@@ -29,11 +29,11 @@
 
 namespace mlir {
 namespace pto {
-  // [FIX] 给 mlir::func 起别名为 func，这样 .inc 文件里的 func::FuncOp 就能找到了
-  namespace func = ::mlir::func;
+// [FIX] 给 mlir::func 起别名为 func，这样 .inc 文件里的 func::FuncOp 就能找到了
+namespace func = ::mlir::func;
 
-  #define GEN_PASS_DEF_PTOINSERTSYNC
-  #include "PTO/Transforms/Passes.h.inc"
+#define GEN_PASS_DEF_PTOINSERTSYNC
+#include "PTO/Transforms/Passes.h.inc"
 } // namespace pto
 } // namespace mlir
 
@@ -46,112 +46,104 @@ namespace {
 // Main Pass Implementation
 // ==============================================================================
 
-static bool hasGatherScatterLikeOps(func::FuncOp func) {
-  bool found = false;
-  func.walk([&](Operation *op) {
-    if (isa<pto::TGatherOp, pto::TGatherBOp, pto::TScatterOp, pto::MGatherOp,
-            pto::MScatterOp>(op)) {
-      found = true;
-      return WalkResult::interrupt();
-    }
-    return WalkResult::advance();
-  });
-  return found;
+static bool hasGatherScatterLikeOps(func::FuncOp func)
+{
+    bool found = false;
+    func.walk([&](Operation* op) {
+        if (isa<pto::TGatherOp, pto::TGatherBOp, pto::TScatterOp, pto::MGatherOp, pto::MScatterOp>(op)) {
+            found = true;
+            return WalkResult::interrupt();
+        }
+        return WalkResult::advance();
+    });
+    return found;
 }
 
 struct PTOInsertSyncPass : public mlir::pto::impl::PTOInsertSyncBase<PTOInsertSyncPass> {
-  void runOnOperation() override {
-    func::FuncOp func = getOperation();
+    void runOnOperation() override
+    {
+        func::FuncOp func = getOperation();
 
-    // Backend-partitioned PTODSL containers carry private func declarations
-    // in the outer child module to model cross-child calls. Those declaration
-    // funcs have a function type but no entry block arguments, so the
-    // translator's argument walk must not run on them.
-    if (func.isDeclaration())
-      return;
+        // Backend-partitioned PTODSL containers carry private func declarations
+        // in the outer child module to model cross-child calls. Those declaration
+        // funcs have a function type but no entry block arguments, so the
+        // translator's argument walk must not run on them.
+        if (func.isDeclaration())
+            return;
 
-    // If the function already contains explicit synchronization ops (either
-    // low-level pipe flags or the higher-level record/wait events), do not run
-    // the automatic insertion pass again. Re-inserting on top of manual sync
-    // can introduce duplicated/mismatched event dependencies that may lead to
-    // runtime failures on NPU.
-    //
-    bool hasExplicitSync = false;
-    func.walk([&](Operation *op) {
-      if (isa<pto::SetFlagOp, pto::WaitFlagOp, pto::RecordEventOp,
-              pto::WaitEventOp>(op)) {
-        hasExplicitSync = true;
-        return WalkResult::interrupt();
-      }
-      return WalkResult::advance();
-    });
-    if (hasExplicitSync) {
-      return;
+        // If the function already contains explicit synchronization ops (either
+        // low-level pipe flags or the higher-level record/wait events), do not run
+        // the automatic insertion pass again. Re-inserting on top of manual sync
+        // can introduce duplicated/mismatched event dependencies that may lead to
+        // runtime failures on NPU.
+        //
+        bool hasExplicitSync = false;
+        func.walk([&](Operation* op) {
+            if (isa<pto::SetFlagOp, pto::WaitFlagOp, pto::RecordEventOp, pto::WaitEventOp>(op)) {
+                hasExplicitSync = true;
+                return WalkResult::interrupt();
+            }
+            return WalkResult::advance();
+        });
+        if (hasExplicitSync) {
+            return;
+        }
+
+        // 0. 数据结构准备
+        MemoryDependentAnalyzer memAnalyzer;
+        SyncIRs syncIR;
+        SyncOperations syncOpsStorage;
+        Buffer2MemInfoMap buffer2MemInfoMap;
+
+        // 1. Translator: 构建 SyncIR
+        PTOIRTranslator translator(syncIR, memAnalyzer, buffer2MemInfoMap, func, SyncAnalysisMode::NORMALSYNC);
+        translator.Build();
+
+        // 如果 IR 太简单，直接跳过
+        if (syncIR.size() <= 1)
+            return;
+
+        dumpInsertSyncPhase("After Translator", syncIR, syncOpsStorage, func.getOperation());
+
+        // 2. Analyzer: 依赖分析与插入逻辑 Sync
+        InsertSyncAnalysis analyzer(syncIR, memAnalyzer, syncOpsStorage, func, SyncAnalysisMode::NORMALSYNC);
+        analyzer.Run(/*insertBarAllAtLast=*/true);
+
+        dumpInsertSyncPhase("After Analysis", syncIR, syncOpsStorage, func.getOperation());
+
+        // [NEW] 3. Optimization: Sync Motion
+        // 将不必要的 Wait 提至 Loop 外，将不必要的 Set 沉降到 Loop 后
+        MoveSyncState syncMove(syncIR, syncOpsStorage);
+        syncMove.Run(); // 执行优化
+
+        dumpInsertSyncPhase("After Sync Motion", syncIR, syncOpsStorage, func.getOperation());
+
+        // 4. [NEW] Optimization 2: Remove Redundant Sync
+        // 消除由于 Motion 或 Analysis 产生的冗余同步对。
+        //
+        // NOTE:
+        // Current redundancy matching is pipe-pair based and may over-remove
+        // set/wait around gather/scatter-like ops on A5, causing runtime mismatch
+        // or vector exceptions. Keep correctness-first behavior here by skipping
+        // this optimization for those kernels until dependency-aware matching is
+        // added.
+        if (!hasGatherScatterLikeOps(func)) {
+            RemoveRedundantSync removeRedundant(syncIR, syncOpsStorage, SyncAnalysisMode::NORMALSYNC);
+            removeRedundant.Run();
+        }
+
+        dumpInsertSyncPhase("After Remove Redundant Sync", syncIR, syncOpsStorage, func.getOperation());
+
+        SyncEventIdAllocation eventIdAllocation(syncIR, syncOpsStorage);
+        eventIdAllocation.Allocate();
+
+        dumpInsertSyncPhase("After EventId Allocation", syncIR, syncOpsStorage, func.getOperation());
+
+        SyncCodegen codegen(syncIR, func, SyncAnalysisMode::NORMALSYNC);
+        codegen.Run();
     }
-
-    // 0. 数据结构准备
-    MemoryDependentAnalyzer memAnalyzer;
-    SyncIRs syncIR;
-    SyncOperations syncOpsStorage;
-    Buffer2MemInfoMap buffer2MemInfoMap;
-
-    // 1. Translator: 构建 SyncIR
-    PTOIRTranslator translator(syncIR, memAnalyzer, buffer2MemInfoMap, func, SyncAnalysisMode::NORMALSYNC);
-    translator.Build();
-
-    // 如果 IR 太简单，直接跳过
-    if (syncIR.size() <= 1) return;
-
-    dumpInsertSyncPhase("After Translator", syncIR, syncOpsStorage,
-                        func.getOperation());
-
-    // 2. Analyzer: 依赖分析与插入逻辑 Sync
-    InsertSyncAnalysis analyzer(syncIR, memAnalyzer, syncOpsStorage, func,
-                                SyncAnalysisMode::NORMALSYNC);
-    analyzer.Run(/*insertBarAllAtLast=*/true);
-
-    dumpInsertSyncPhase("After Analysis", syncIR, syncOpsStorage,
-                        func.getOperation());
-
-    // [NEW] 3. Optimization: Sync Motion
-    // 将不必要的 Wait 提至 Loop 外，将不必要的 Set 沉降到 Loop 后
-    MoveSyncState syncMove(syncIR, syncOpsStorage);
-    syncMove.Run(); // 执行优化
-
-    dumpInsertSyncPhase("After Sync Motion", syncIR, syncOpsStorage,
-                        func.getOperation());
-
-    // 4. [NEW] Optimization 2: Remove Redundant Sync
-    // 消除由于 Motion 或 Analysis 产生的冗余同步对。
-    //
-    // NOTE:
-    // Current redundancy matching is pipe-pair based and may over-remove
-    // set/wait around gather/scatter-like ops on A5, causing runtime mismatch
-    // or vector exceptions. Keep correctness-first behavior here by skipping
-    // this optimization for those kernels until dependency-aware matching is
-    // added.
-    if (!hasGatherScatterLikeOps(func)) {
-      RemoveRedundantSync removeRedundant(syncIR, syncOpsStorage,
-                                          SyncAnalysisMode::NORMALSYNC);
-      removeRedundant.Run();
-    }
-
-    dumpInsertSyncPhase("After Remove Redundant Sync", syncIR, syncOpsStorage,
-                        func.getOperation());
-
-    SyncEventIdAllocation eventIdAllocation(syncIR, syncOpsStorage);
-    eventIdAllocation.Allocate();
-
-    dumpInsertSyncPhase("After EventId Allocation", syncIR, syncOpsStorage,
-                        func.getOperation());
-
-    SyncCodegen codegen(syncIR, func, SyncAnalysisMode::NORMALSYNC);
-    codegen.Run();
-  }
 };
 
 } // namespace
 
-std::unique_ptr<Pass> mlir::pto::createPTOInsertSyncPass() {
-  return std::make_unique<PTOInsertSyncPass>();
-}
+std::unique_ptr<Pass> mlir::pto::createPTOInsertSyncPass() { return std::make_unique<PTOInsertSyncPass>(); }

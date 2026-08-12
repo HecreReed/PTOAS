@@ -156,7 +156,9 @@ def _parse_args():
         )
     )
     parser.add_argument("-r", "--run-mode", default="sim", help="Run mode: sim or npu.")
-    parser.add_argument("-v", "--soc-version", default="a5", help="SoC version key, default: a5.")
+    parser.add_argument(
+        "-v", "--soc-version", default="a5", help="SoC version key, default: a5."
+    )
     parser.add_argument(
         "-p",
         "--ptoas-bin",
@@ -197,9 +199,17 @@ def _parse_args():
         action="store_true",
         help="Skip the shared build and run testcases with -w.",
     )
-    parser.add_argument("--fail-fast", action="store_true", help="Stop queuing after the first failure.")
-    parser.add_argument("--list", action="store_true", help="List selected testcases and exit.")
-    parser.add_argument("--dry-run", action="store_true", help="Print selected testcases and commands only.")
+    parser.add_argument(
+        "--fail-fast", action="store_true", help="Stop queuing after the first failure."
+    )
+    parser.add_argument(
+        "--list", action="store_true", help="List selected testcases and exit."
+    )
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Print selected testcases and commands only.",
+    )
     return parser.parse_args()
 
 
@@ -264,9 +274,13 @@ def main():
     try:
         if not args.skip_build:
             print("[INFO] building all selected smoke/full ST targets once")
-            build_result = _run_build(args, default_soc_version, target_dir, log_dir, ptoas_bin)
+            build_result = _run_build(
+                args, default_soc_version, target_dir, log_dir, ptoas_bin
+            )
             results.append(build_result)
-            print(f"[PASS] build ({build_result['seconds']:.1f}s) {build_result['log']}")
+            print(
+                f"[PASS] build ({build_result['seconds']:.1f}s) {build_result['log']}"
+            )
     except Exception as exc:
         build_result = {
             "name": "build",
@@ -285,7 +299,9 @@ def main():
     max_workers = min(args.jobs, len(selected))
     with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
         future_to_testcase = {
-            executor.submit(_run_one_testcase, args, testcase, target_dir, log_dir, ptoas_bin): testcase
+            executor.submit(
+                _run_one_testcase, args, testcase, target_dir, log_dir, ptoas_bin
+            ): testcase
             for testcase in selected
         }
         for future in concurrent.futures.as_completed(future_to_testcase):
@@ -319,7 +335,9 @@ def main():
         "target_dir": str(target_dir),
         "ptoas": str(ptoas_bin),
         "log_dir": str(log_dir),
-        "passed": sum(1 for item in results if item["name"] != "build" and item["returncode"] == 0),
+        "passed": sum(
+            1 for item in results if item["name"] != "build" and item["returncode"] == 0
+        ),
         "failed": len(failures),
         "total": len(selected),
         "results": results,

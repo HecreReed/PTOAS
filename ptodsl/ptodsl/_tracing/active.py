@@ -24,7 +24,9 @@ def activate_runtime(runtime):
     finally:
         popped = _ACTIVE_RUNTIME_STACK.pop()
         if popped is not runtime:
-            raise RuntimeError("PTODSL active tracing runtime stack corruption detected")
+            raise RuntimeError(
+                "PTODSL active tracing runtime stack corruption detected"
+            )
 
 
 @contextmanager

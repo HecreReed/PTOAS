@@ -16,7 +16,12 @@ import sys
 from collections.abc import Callable
 from dataclasses import dataclass
 
-from .cycle_metrics import RunMetrics, format_run_summary, format_table, parse_run_metrics
+from .cycle_metrics import (
+    RunMetrics,
+    format_run_summary,
+    format_table,
+    parse_run_metrics,
+)
 
 
 @dataclass(frozen=True)
@@ -29,13 +34,17 @@ class CycleReporterSpec:
     parse_metrics: Callable[[str], RunMetrics] = parse_run_metrics
     format_summary: Callable[[RunMetrics, str | None], str] = format_run_summary
     format_table: Callable[[list[tuple[str, RunMetrics]]], str] = format_table
-    label_for_dir: Callable[[str], str] = lambda path: os.path.basename(path.rstrip("/"))
+    label_for_dir: Callable[[str], str] = lambda path: os.path.basename(
+        path.rstrip("/")
+    )
 
 
 def run_cycle_report(spec: CycleReporterSpec, argv: list[str] | None = None) -> int:
     """Run one kernel-local cycle report with shared CLI behavior."""
 
-    parser = argparse.ArgumentParser(description=f"Parse {spec.name} cycle metrics from kernel-test outputs")
+    parser = argparse.ArgumentParser(
+        description=f"Parse {spec.name} cycle metrics from kernel-test outputs"
+    )
     parser.add_argument(
         "out_dirs",
         nargs="*",

@@ -43,9 +43,7 @@ def recv_message(sock) -> dict:
     """Receive one length-prefixed UTF-8 JSON message."""
     length = int.from_bytes(recv_exactly(sock, 4), byteorder="big")
     if length > MAX_MESSAGE_SIZE:
-        raise ValueError(
-            f"message length {length} exceeds limit {MAX_MESSAGE_SIZE}"
-        )
+        raise ValueError(f"message length {length} exceeds limit {MAX_MESSAGE_SIZE}")
     return json.loads(recv_exactly(sock, length).decode("utf-8"))
 
 

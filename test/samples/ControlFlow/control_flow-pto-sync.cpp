@@ -75,5 +75,3 @@ __global__ AICORE void control_flow_kernel_2d(__gm__ float* v1, __gm__ float* v2
   pipe_barrier(PIPE_ALL);
   return;
 }
-
-

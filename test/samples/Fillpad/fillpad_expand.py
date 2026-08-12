@@ -48,8 +48,12 @@ def build():
 
                 arg0, arg1 = entry.arguments
 
-                src_tv = pto.MakeTensorViewOp(tv2_f32, arg0, [c32, c16], [c16, c1]).result
-                dst_tv = pto.MakeTensorViewOp(tv2_f32, arg1, [c32, c32], [c32, c1]).result
+                src_tv = pto.MakeTensorViewOp(
+                    tv2_f32, arg0, [c32, c16], [c16, c1]
+                ).result
+                dst_tv = pto.MakeTensorViewOp(
+                    tv2_f32, arg1, [c32, c32], [c32, c1]
+                ).result
 
                 src_sv = pto.PartitionViewOp(
                     tile_view_32_16, src_tv, offsets=[c0, c0], sizes=[c32, c16]

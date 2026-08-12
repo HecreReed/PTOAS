@@ -68,10 +68,9 @@ def generate(output_dir: Path) -> None:
     a_scale = pack_a_scale(a_scale_matrix)
     b_scale = pack_b_scale(b_scale_matrix)
     c = np.zeros((M, N), dtype=np.float32)
-    bias = (
-        (((np.arange(N, dtype=np.float32) * 5) % 23) - 11).astype(np.float16)
-        / np.float16(4.0)
-    )
+    bias = (((np.arange(N, dtype=np.float32) * 5) % 23) - 11).astype(
+        np.float16
+    ) / np.float16(4.0)
 
     a_f32 = fp8_e4m3_to_f32(a_matrix)
     b_f32 = fp8_e4m3_to_f32(b_matrix)

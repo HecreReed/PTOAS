@@ -6,7 +6,15 @@
 # INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
 # See LICENSE in the root of the software repository for the full text of the License.
 
-from ptoas.mlir.ir import Context, InsertionPoint, Location, Module, IndexType, F16Type, UnitAttr
+from ptoas.mlir.ir import (
+    Context,
+    InsertionPoint,
+    Location,
+    Module,
+    IndexType,
+    F16Type,
+    UnitAttr,
+)
 from ptoas.mlir.dialects import arith, func, pto
 
 
@@ -26,7 +34,9 @@ def build():
             bl = pto.BLayoutAttr.get(pto.BLayout.RowMajor, ctx)
             sl = pto.SLayoutAttr.get(pto.SLayout.NoneBox, ctx)
             pd = pto.PadValueAttr.get(pto.PadValue.Null, ctx)
-            cfg = pto.TileBufConfigAttr.get(bl, sl, pto.TileConfig.fractalABSize, pd, ctx)
+            cfg = pto.TileBufConfigAttr.get(
+                bl, sl, pto.TileConfig.fractalABSize, pd, ctx
+            )
             tb_16x16 = pto.TileBufType.get([16, 16], f16, vec, [16, 16], cfg, ctx)
 
             fn_ty = func.FunctionType.get([ptr_f16, ptr_f16], [])
@@ -40,8 +50,12 @@ def build():
                 c1 = arith.ConstantOp(idx, 1).result
                 c16 = arith.ConstantOp(idx, 16).result
 
-                src_view = pto.MakeTensorViewOp(tv2_f16, entry.arguments[0], [c16, c16], [c16, c1]).result
-                dst_view = pto.MakeTensorViewOp(tv2_f16, entry.arguments[1], [c16, c16], [c16, c1]).result
+                src_view = pto.MakeTensorViewOp(
+                    tv2_f16, entry.arguments[0], [c16, c16], [c16, c1]
+                ).result
+                dst_view = pto.MakeTensorViewOp(
+                    tv2_f16, entry.arguments[1], [c16, c16], [c16, c1]
+                ).result
                 src_part = pto.PartitionViewOp(
                     ptv_16x16, src_view, offsets=[c0, c0], sizes=[c16, c16]
                 ).result

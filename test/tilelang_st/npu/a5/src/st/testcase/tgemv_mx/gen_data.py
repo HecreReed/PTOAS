@@ -9,8 +9,6 @@
 # coding=utf-8
 
 import os
-import sys
-import math
 import numpy as np
 import ml_dtypes
 import en_dtypes
@@ -47,14 +45,20 @@ def convert_scale_a_format(scale, block_size=16, c0_size_mx=2):
     pad_m = (block_size - m % block_size) % block_size
     pad_k = (c0_size_mx - k % c0_size_mx) % c0_size_mx
     if pad_m > 0 or pad_k > 0:
-        padded = np.pad(scale, ((0, pad_m), (0, pad_k)), mode='constant', constant_values=0)
+        padded = np.pad(
+            scale, ((0, pad_m), (0, pad_k)), mode="constant", constant_values=0
+        )
     else:
         padded = scale
     m_padded = m + pad_m
     k_padded = k + pad_k
-    result = padded.reshape((int(m_padded / block_size), block_size, int(k_padded / c0_size_mx), c0_size_mx))
+    result = padded.reshape(
+        (int(m_padded / block_size), block_size, int(k_padded / c0_size_mx), c0_size_mx)
+    )
     result = result.transpose(0, 2, 1, 3)
-    result = result.reshape(result.shape[0] * result.shape[1], result.shape[2] * result.shape[3])
+    result = result.reshape(
+        result.shape[0] * result.shape[1], result.shape[2] * result.shape[3]
+    )
     return result
 
 
@@ -63,12 +67,18 @@ def convert_scale_b_format(scale, block_size=16, c0_size_mx=2):
     pad_n = (block_size - n % block_size) % block_size
     pad_k = (c0_size_mx - k % c0_size_mx) % c0_size_mx
     if pad_n > 0 or pad_k > 0:
-        padded = np.pad(scale, ((0, pad_k), (0, pad_n)), mode='constant', constant_values=0)
+        padded = np.pad(
+            scale, ((0, pad_k), (0, pad_n)), mode="constant", constant_values=0
+        )
     else:
         padded = scale
     k_padded, n_padded = padded.shape
-    result = padded.reshape((int(k_padded / c0_size_mx), c0_size_mx, int(n_padded / 16), 16)).transpose(2, 0, 3, 1)
-    result = result.reshape(result.shape[1] * result.shape[3], result.shape[0] * result.shape[2])
+    result = padded.reshape(
+        (int(k_padded / c0_size_mx), c0_size_mx, int(n_padded / 16), 16)
+    ).transpose(2, 0, 3, 1)
+    result = result.reshape(
+        result.shape[1] * result.shape[3], result.shape[0] * result.shape[2]
+    )
     return result
 
 
@@ -81,12 +91,18 @@ def convert_scale_a_row_major_padded(scale, block_size=16, c0_size_mx=2):
     pad_m = (block_size - m % block_size) % block_size
     pad_k = (c0_size_mx - k % c0_size_mx) % c0_size_mx
     if pad_m > 0 or pad_k > 0:
-        return np.pad(scale, ((0, pad_m), (0, pad_k)), mode='constant', constant_values=0)
+        return np.pad(
+            scale, ((0, pad_m), (0, pad_k)), mode="constant", constant_values=0
+        )
     return scale.copy()
 
 
 def convert_scale_b_nd(scale):
-    return scale.reshape((scale.shape[0] // 2, 2, scale.shape[1])).transpose(0, 2, 1).copy()
+    return (
+        scale.reshape((scale.shape[0] // 2, 2, scale.shape[1]))
+        .transpose(0, 2, 1)
+        .copy()
+    )
 
 
 def convert_scale_b_nd_padded(scale, block_size=16, c0_size_mx=2):
@@ -94,8 +110,14 @@ def convert_scale_b_nd_padded(scale, block_size=16, c0_size_mx=2):
     pad_n = (block_size - n % block_size) % block_size
     pad_k = (c0_size_mx - k % c0_size_mx) % c0_size_mx
     if pad_n > 0 or pad_k > 0:
-        scale = np.pad(scale, ((0, pad_k), (0, pad_n)), mode='constant', constant_values=0)
-    return scale.reshape((scale.shape[0] // c0_size_mx, c0_size_mx, scale.shape[1])).transpose(0, 2, 1).copy()
+        scale = np.pad(
+            scale, ((0, pad_k), (0, pad_n)), mode="constant", constant_values=0
+        )
+    return (
+        scale.reshape((scale.shape[0] // c0_size_mx, c0_size_mx, scale.shape[1]))
+        .transpose(0, 2, 1)
+        .copy()
+    )
 
 
 def convert_scale_b_raw(scale):
@@ -105,7 +127,12 @@ def convert_scale_b_raw(scale):
 def convert_scale_b_pair_groups(scale):
     # Raw micro-op tgemv_mx consumes right MX scale as linear bytes, but the
     # effective logical order groups K/32 rows in pairs before flattening.
-    return scale.reshape((scale.shape[0] // 2, 2, scale.shape[1])).transpose(0, 2, 1).reshape(scale.shape[0], scale.shape[1]).copy()
+    return (
+        scale.reshape((scale.shape[0] // 2, 2, scale.shape[1]))
+        .transpose(0, 2, 1)
+        .reshape(scale.shape[0], scale.shape[1])
+        .copy()
+    )
 
 
 def convert_scale_b_gemv_micro(scale, block_size=16, c0_size_mx=2):
@@ -120,7 +147,9 @@ def convert_scale_b_gemv_micro(scale, block_size=16, c0_size_mx=2):
     pad_n = (block_size - n % block_size) % block_size
     pad_k = (c0_size_mx - k % c0_size_mx) % c0_size_mx
     if pad_n > 0 or pad_k > 0:
-        padded = np.pad(scale, ((0, pad_k), (0, pad_n)), mode='constant', constant_values=0)
+        padded = np.pad(
+            scale, ((0, pad_k), (0, pad_n)), mode="constant", constant_values=0
+        )
     else:
         padded = scale
     k_padded, n_padded = padded.shape
@@ -130,8 +159,12 @@ def convert_scale_b_gemv_micro(scale, block_size=16, c0_size_mx=2):
     lane_major = paired.transpose(1, 2, 0, 3)[::-1]
     if n_blocks % 2 != 0:
         return lane_major.reshape(k_padded, n_padded).copy()
-    return lane_major.reshape(c0_size_mx, n_blocks // 2, 2, k_pairs, block_size) \
-        .transpose(1, 0, 2, 3, 4).reshape(k_padded, n_padded).copy()
+    return (
+        lane_major.reshape(c0_size_mx, n_blocks // 2, 2, k_pairs, block_size)
+        .transpose(1, 0, 2, 3, 4)
+        .reshape(k_padded, n_padded)
+        .copy()
+    )
 
 
 def convert_scale_b_nn(scale, block_size=16, c0_size_mx=2):
@@ -139,7 +172,9 @@ def convert_scale_b_nn(scale, block_size=16, c0_size_mx=2):
     pad_n = (block_size - n % block_size) % block_size
     pad_k = (c0_size_mx - k % c0_size_mx) % c0_size_mx
     if pad_n > 0 or pad_k > 0:
-        padded = np.pad(scale, ((0, pad_k), (0, pad_n)), mode='constant', constant_values=0)
+        padded = np.pad(
+            scale, ((0, pad_k), (0, pad_n)), mode="constant", constant_values=0
+        )
     else:
         padded = scale
     k_padded, n_padded = padded.shape
@@ -187,8 +222,12 @@ def gen_golden(case):
         x1_bin = x1_padded
         x2_bin = x2_padded
 
-    x1_scale = np.random.randint(127, 130, [m, ceil_div(k_aligned, 32)]).astype(np.uint8)
-    x2_scale = np.random.randint(127, 130, [ceil_div(k_aligned, 32), n]).astype(np.uint8)
+    x1_scale = np.random.randint(127, 130, [m, ceil_div(k_aligned, 32)]).astype(
+        np.uint8
+    )
+    x2_scale = np.random.randint(127, 130, [ceil_div(k_aligned, 32), n]).astype(
+        np.uint8
+    )
 
     x1_mx = 2 ** (x1_scale.astype(np.float64) - 127)
     x2_mx = 2 ** (x2_scale.astype(np.float64) - 127)
@@ -203,7 +242,10 @@ def gen_golden(case):
     x1_float = x1_full[:, :k]
     x2_float = x2_full[:k, :]
 
-    if case["name"] in ("gemv_mx_fp8_e4m3_e5m2_1x256x20", "gemv_mx_bias_fp4_e1m2_1x2048x64"):
+    if case["name"] in (
+        "gemv_mx_fp8_e4m3_e5m2_1x256x20",
+        "gemv_mx_bias_fp4_e1m2_1x2048x64",
+    ):
         x1_scale_gm = convert_scale_a_row_major_padded(x1_scale, 16, 2)
     else:
         x1_scale_gm = convert_scale_a_format(x1_scale, 16, 2)
@@ -236,9 +278,17 @@ for case in CASES:
 
     x1, x2, x1_scale, x2_scale, bias, golden = gen_golden(case)
 
-    save_dict = {"input1": x1, "input2": x2, "scale1": x1_scale, "scale2": x2_scale, "golden": golden}
+    save_dict = {
+        "input1": x1,
+        "input2": x2,
+        "scale1": x1_scale,
+        "scale2": x2_scale,
+        "golden": golden,
+    }
     if bias is not None:
         save_dict["bias"] = bias
 
     save_case_data(case_dir, save_dict)
-    print(f"[INFO] gen_data: {case_dir} m={case['m']} k={case['k']} n={case['n']} is_bias={case['is_bias']} is_fp4={case['is_fp4']}")
+    print(
+        f"[INFO] gen_data: {case_dir} m={case['m']} k={case['k']} n={case['n']} is_bias={case['is_bias']} is_fp4={case['is_fp4']}"
+    )

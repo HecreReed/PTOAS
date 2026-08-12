@@ -6,7 +6,15 @@
 # INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
 # See LICENSE in the root of the software repository for the full text of the License.
 
-from ptoas.mlir.ir import Context, IndexType, InsertionPoint, IntegerType, Location, Module, UnitAttr
+from ptoas.mlir.ir import (
+    Context,
+    IndexType,
+    InsertionPoint,
+    IntegerType,
+    Location,
+    Module,
+    UnitAttr,
+)
 from ptoas.mlir.dialects import arith, func, pto
 
 
@@ -36,7 +44,9 @@ def build():
                 c1 = arith.ConstantOp(idx, 1).result
                 one_i32 = arith.ConstantOp(i32, 1).result
 
-                signal_view = pto.MakeTensorViewOp(tv_i32, signal_ptr, [c1], [c1]).result
+                signal_view = pto.MakeTensorViewOp(
+                    tv_i32, signal_ptr, [c1], [c1]
+                ).result
                 signal = pto.PartitionViewOp(
                     pv_i32, signal_view, offsets=[c0], sizes=[c1]
                 ).result

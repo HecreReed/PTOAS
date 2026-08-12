@@ -58,13 +58,17 @@ ATTN_SCALE = np.float32(1.0 / np.sqrt(HEAD_DIM))
 NEG_INF = np.finfo(np.float32).min
 
 
-def make_fp32(generator, count: int, *, scale: float = 0.05, positive: bool = False) -> np.ndarray:
+def make_fp32(
+    generator, count: int, *, scale: float = 0.05, positive: bool = False
+) -> np.ndarray:
     if positive:
         return generator.uniform(0.25, 1.5, size=count).astype(np.float32)
     return generator.uniform(-scale, scale, size=count).astype(np.float32)
 
 
-def make_bf16(generator, count: int, *, scale: float = 0.05, positive: bool = False) -> np.ndarray:
+def make_bf16(
+    generator, count: int, *, scale: float = 0.05, positive: bool = False
+) -> np.ndarray:
     return float32_to_bf16(make_fp32(generator, count, scale=scale, positive=positive))
 
 
@@ -83,7 +87,7 @@ def make_padded_rows_bf16(
     for row in range(rows):
         if row % rows_per_group >= active_rows:
             start = row * cols
-            out[start:start + cols] = 0
+            out[start : start + cols] = 0
     return out
 
 
@@ -91,8 +95,12 @@ def _flat_output(meta, name: str):
     return np.zeros(meta.elem_counts[name], dtype=meta.np_types[name])
 
 
-def _store_group_scores(buffer, values, *, group_index: int, sb: int, rows_per_group: int, cols: int):
-    offset = (group_index * MAX_CTX_BLOCKS * rows_per_group + sb * rows_per_group) * cols
+def _store_group_scores(
+    buffer, values, *, group_index: int, sb: int, rows_per_group: int, cols: int
+):
+    offset = (
+        group_index * MAX_CTX_BLOCKS * rows_per_group + sb * rows_per_group
+    ) * cols
     return store_strided_2d(buffer, values, offset=offset, row_stride=cols)
 
 
@@ -107,7 +115,13 @@ def build_rmsnorm(meta, generator, ints):
     for kb in range(HIDDEN // RMSNORM_K_CHUNK):
         k0 = kb * RMSNORM_K_CHUNK
         x_chunk = bf16_to_float32(
-            load_strided_2d(buffers["v1"], offset=k0, rows=BATCH, cols=RMSNORM_K_CHUNK, row_stride=HIDDEN)
+            load_strided_2d(
+                buffers["v1"],
+                offset=k0,
+                rows=BATCH,
+                cols=RMSNORM_K_CHUNK,
+                row_stride=HIDDEN,
+            )
         )
         sq_sum += np.sum(x_chunk * x_chunk, axis=1, keepdims=True)
     inv_rms = np.reciprocal(np.sqrt(sq_sum * HIDDEN_INV + EPS))
@@ -115,11 +129,21 @@ def build_rmsnorm(meta, generator, ints):
     for kb in range(HIDDEN // RMSNORM_K_CHUNK):
         k0 = kb * RMSNORM_K_CHUNK
         x_chunk = bf16_to_float32(
-            load_strided_2d(buffers["v1"], offset=k0, rows=BATCH, cols=RMSNORM_K_CHUNK, row_stride=HIDDEN)
+            load_strided_2d(
+                buffers["v1"],
+                offset=k0,
+                rows=BATCH,
+                cols=RMSNORM_K_CHUNK,
+                row_stride=HIDDEN,
+            )
         )
-        gamma = load_strided_2d(buffers["v3"], offset=k0, rows=1, cols=RMSNORM_K_CHUNK, row_stride=HIDDEN).astype(np.float32)
+        gamma = load_strided_2d(
+            buffers["v3"], offset=k0, rows=1, cols=RMSNORM_K_CHUNK, row_stride=HIDDEN
+        ).astype(np.float32)
         normed = x_chunk * inv_rms * gamma
-        output = store_strided_2d(output, float32_to_bf16(normed), offset=k0, row_stride=HIDDEN)
+        output = store_strided_2d(
+            output, float32_to_bf16(normed), offset=k0, row_stride=HIDDEN
+        )
     return buffers, {"v2": output}
 
 
@@ -134,9 +158,23 @@ def build_q_proj(meta, generator, ints):
     acc = np.zeros((BATCH, Q_OUT_CHUNK), dtype=np.float32)
     for kb in range(HIDDEN // Q_PROJ_K_CHUNK):
         k0 = kb * Q_PROJ_K_CHUNK
-        normed = bf16_to_float32(load_strided_2d(buffers["v1"], offset=k0, rows=BATCH, cols=Q_PROJ_K_CHUNK, row_stride=HIDDEN))
+        normed = bf16_to_float32(
+            load_strided_2d(
+                buffers["v1"],
+                offset=k0,
+                rows=BATCH,
+                cols=Q_PROJ_K_CHUNK,
+                row_stride=HIDDEN,
+            )
+        )
         w_chunk = bf16_to_float32(
-            load_strided_2d(buffers["v2"], offset=k0 * HIDDEN + q0, rows=Q_PROJ_K_CHUNK, cols=Q_OUT_CHUNK, row_stride=HIDDEN)
+            load_strided_2d(
+                buffers["v2"],
+                offset=k0 * HIDDEN + q0,
+                rows=Q_PROJ_K_CHUNK,
+                cols=Q_OUT_CHUNK,
+                row_stride=HIDDEN,
+            )
         )
         acc += normed @ w_chunk
     output = np.array(buffers["v3"], copy=True)
@@ -158,12 +196,32 @@ def build_kv_proj(meta, generator, ints):
     v_acc = np.zeros((BATCH, KV_OUT_CHUNK), dtype=np.float32)
     for kb in range(HIDDEN // KV_PROJ_K_CHUNK):
         k0 = kb * KV_PROJ_K_CHUNK
-        normed = bf16_to_float32(load_strided_2d(buffers["v1"], offset=k0, rows=BATCH, cols=KV_PROJ_K_CHUNK, row_stride=HIDDEN))
+        normed = bf16_to_float32(
+            load_strided_2d(
+                buffers["v1"],
+                offset=k0,
+                rows=BATCH,
+                cols=KV_PROJ_K_CHUNK,
+                row_stride=HIDDEN,
+            )
+        )
         wk_chunk = bf16_to_float32(
-            load_strided_2d(buffers["v2"], offset=k0 * KV_HIDDEN + kv0, rows=KV_PROJ_K_CHUNK, cols=KV_OUT_CHUNK, row_stride=KV_HIDDEN)
+            load_strided_2d(
+                buffers["v2"],
+                offset=k0 * KV_HIDDEN + kv0,
+                rows=KV_PROJ_K_CHUNK,
+                cols=KV_OUT_CHUNK,
+                row_stride=KV_HIDDEN,
+            )
         )
         wv_chunk = bf16_to_float32(
-            load_strided_2d(buffers["v3"], offset=k0 * KV_HIDDEN + kv0, rows=KV_PROJ_K_CHUNK, cols=KV_OUT_CHUNK, row_stride=KV_HIDDEN)
+            load_strided_2d(
+                buffers["v3"],
+                offset=k0 * KV_HIDDEN + kv0,
+                rows=KV_PROJ_K_CHUNK,
+                cols=KV_OUT_CHUNK,
+                row_stride=KV_HIDDEN,
+            )
         )
         k_acc += normed @ wk_chunk
         v_acc += normed @ wv_chunk
@@ -218,25 +276,52 @@ def build_rope_kv_cache(meta, generator, ints):
     ).astype(np.float32)
     for kvh in range(NUM_KV_HEADS):
         kv_col = kvh * HEAD_DIM
-        k_lo = k_proj[:, kv_col:kv_col + HALF_DIM]
-        k_hi = k_proj[:, kv_col + HALF_DIM:kv_col + HEAD_DIM]
+        k_lo = k_proj[:, kv_col : kv_col + HALF_DIM]
+        k_hi = k_proj[:, kv_col + HALF_DIM : kv_col + HEAD_DIM]
         rot_lo = k_lo * cos_lo - k_hi * sin_lo
         rot_hi = k_hi * cos_hi + k_lo * sin_hi
         cache_row = batch_index * NUM_KV_HEADS * MAX_SEQ + kvh * MAX_SEQ + pos
-        out_k = store_strided_2d(out_k, float32_to_bf16(rot_lo), offset=cache_row * HEAD_DIM, row_stride=HEAD_DIM)
-        out_k = store_strided_2d(out_k, float32_to_bf16(rot_hi), offset=cache_row * HEAD_DIM + HALF_DIM, row_stride=HEAD_DIM)
-        v_chunk = v_proj[:, kv_col:kv_col + HEAD_DIM]
-        out_v = store_strided_2d(out_v, float32_to_bf16(v_chunk), offset=cache_row * HEAD_DIM, row_stride=HEAD_DIM)
+        out_k = store_strided_2d(
+            out_k,
+            float32_to_bf16(rot_lo),
+            offset=cache_row * HEAD_DIM,
+            row_stride=HEAD_DIM,
+        )
+        out_k = store_strided_2d(
+            out_k,
+            float32_to_bf16(rot_hi),
+            offset=cache_row * HEAD_DIM + HALF_DIM,
+            row_stride=HEAD_DIM,
+        )
+        v_chunk = v_proj[:, kv_col : kv_col + HEAD_DIM]
+        out_v = store_strided_2d(
+            out_v,
+            float32_to_bf16(v_chunk),
+            offset=cache_row * HEAD_DIM,
+            row_stride=HEAD_DIM,
+        )
 
         q_col = kvh * Q_PROJ_WINDOW
-        q_block = q_proj[:, q_col:q_col + Q_PROJ_WINDOW].reshape(Q_HEAD_BATCH, HEAD_DIM)
+        q_block = q_proj[:, q_col : q_col + Q_PROJ_WINDOW].reshape(
+            Q_HEAD_BATCH, HEAD_DIM
+        )
         q_lo = q_block[:, :HALF_DIM]
         q_hi = q_block[:, HALF_DIM:]
         q_rot_lo = q_lo * cos_lo - q_hi * sin_lo
         q_rot_hi = q_hi * cos_hi + q_lo * sin_hi
         q_row = batch_index * TOTAL_Q_GROUPS * Q_HEAD_PAD + kvh * Q_HEAD_PAD
-        out_q = store_strided_2d(out_q, float32_to_bf16(q_rot_lo), offset=q_row * HEAD_DIM, row_stride=HEAD_DIM)
-        out_q = store_strided_2d(out_q, float32_to_bf16(q_rot_hi), offset=q_row * HEAD_DIM + HALF_DIM, row_stride=HEAD_DIM)
+        out_q = store_strided_2d(
+            out_q,
+            float32_to_bf16(q_rot_lo),
+            offset=q_row * HEAD_DIM,
+            row_stride=HEAD_DIM,
+        )
+        out_q = store_strided_2d(
+            out_q,
+            float32_to_bf16(q_rot_hi),
+            offset=q_row * HEAD_DIM + HALF_DIM,
+            row_stride=HEAD_DIM,
+        )
     return buffers, {"v1": out_q, "v2": out_k, "v3": out_v}
 
 
@@ -258,13 +343,40 @@ def build_qk_matmul(meta, generator, ints):
     }
     output = np.array(buffers["v2"], copy=True)
     for gi in (gi0, gi1):
-        q_offset = (batch_index * TOTAL_Q_GROUPS * Q_HEAD_PAD + gi * Q_HEAD_PAD) * HEAD_DIM
-        q_padded = bf16_to_float32(load_strided_2d(buffers["v1"], offset=q_offset, rows=Q_HEAD_PAD, cols=HEAD_DIM, row_stride=HEAD_DIM))
+        q_offset = (
+            batch_index * TOTAL_Q_GROUPS * Q_HEAD_PAD + gi * Q_HEAD_PAD
+        ) * HEAD_DIM
+        q_padded = bf16_to_float32(
+            load_strided_2d(
+                buffers["v1"],
+                offset=q_offset,
+                rows=Q_HEAD_PAD,
+                cols=HEAD_DIM,
+                row_stride=HEAD_DIM,
+            )
+        )
         for sb in range(ctx_blocks):
-            cache_offset = (batch_index * NUM_KV_HEADS * MAX_SEQ + gi * MAX_SEQ + sb * SEQ_TILE) * HEAD_DIM
-            k_tile = bf16_to_float32(load_strided_2d(buffers["v3"], offset=cache_offset, rows=SEQ_TILE, cols=HEAD_DIM, row_stride=HEAD_DIM))
+            cache_offset = (
+                batch_index * NUM_KV_HEADS * MAX_SEQ + gi * MAX_SEQ + sb * SEQ_TILE
+            ) * HEAD_DIM
+            k_tile = bf16_to_float32(
+                load_strided_2d(
+                    buffers["v3"],
+                    offset=cache_offset,
+                    rows=SEQ_TILE,
+                    cols=HEAD_DIM,
+                    row_stride=HEAD_DIM,
+                )
+            )
             raw_scores = q_padded @ k_tile.T
-            output = _store_group_scores(output, raw_scores, group_index=gi, sb=sb, rows_per_group=Q_HEAD_PAD, cols=SEQ_TILE)
+            output = _store_group_scores(
+                output,
+                raw_scores,
+                group_index=gi,
+                sb=sb,
+                rows_per_group=Q_HEAD_PAD,
+                cols=SEQ_TILE,
+            )
     return buffers, {"v2": output}
 
 
@@ -286,7 +398,9 @@ def build_softmax(meta, generator, ints):
             valid_len = min(SEQ_TILE, max(ctx_len - sb * SEQ_TILE, 0))
             scores = np.full((Q_HEAD_BATCH, SEQ_TILE), NEG_INF, dtype=np.float32)
             if valid_len > 0:
-                in_offset = (gi * MAX_CTX_BLOCKS * Q_HEAD_PAD + sb * Q_HEAD_PAD) * SEQ_TILE
+                in_offset = (
+                    gi * MAX_CTX_BLOCKS * Q_HEAD_PAD + sb * Q_HEAD_PAD
+                ) * SEQ_TILE
                 scores_valid = load_strided_2d(
                     buffers["v4"],
                     offset=in_offset,
@@ -300,10 +414,17 @@ def build_softmax(meta, generator, ints):
             exp_scores = np.exp(scores - cur_mi)
             exp_scores_bf16 = float32_to_bf16(exp_scores)
             cur_li = np.sum(bf16_to_float32(exp_scores_bf16), axis=1, keepdims=True)
-            out_exp = _store_group_scores(out_exp, exp_scores_bf16, group_index=gi, sb=sb, rows_per_group=Q_HEAD_PAD, cols=SEQ_TILE)
+            out_exp = _store_group_scores(
+                out_exp,
+                exp_scores_bf16,
+                group_index=gi,
+                sb=sb,
+                rows_per_group=Q_HEAD_PAD,
+                cols=SEQ_TILE,
+            )
             base = gi * MAX_CTX_BLOCKS * Q_HEAD_BATCH + sb * Q_HEAD_BATCH
-            out_mi[base:base + Q_HEAD_BATCH] = cur_mi.reshape(-1)
-            out_li[base:base + Q_HEAD_BATCH] = cur_li.reshape(-1)
+            out_mi[base : base + Q_HEAD_BATCH] = cur_mi.reshape(-1)
+            out_li[base : base + Q_HEAD_BATCH] = cur_li.reshape(-1)
     return buffers, {"v1": out_li, "v2": out_mi, "v3": out_exp}
 
 
@@ -329,12 +450,35 @@ def build_sv_matmul(meta, generator, ints):
         for sb in range(ctx_blocks):
             exp_offset = (gi * MAX_CTX_BLOCKS * Q_HEAD_PAD + sb * Q_HEAD_PAD) * SEQ_TILE
             exp_tile = bf16_to_float32(
-                load_strided_2d(buffers["v2"], offset=exp_offset, rows=Q_HEAD_PAD, cols=SEQ_TILE, row_stride=SEQ_TILE)
+                load_strided_2d(
+                    buffers["v2"],
+                    offset=exp_offset,
+                    rows=Q_HEAD_PAD,
+                    cols=SEQ_TILE,
+                    row_stride=SEQ_TILE,
+                )
             )
-            cache_offset = (batch_index * NUM_KV_HEADS * MAX_SEQ + gi * MAX_SEQ + sb * SEQ_TILE) * HEAD_DIM
-            v_tile = bf16_to_float32(load_strided_2d(buffers["v3"], offset=cache_offset, rows=SEQ_TILE, cols=HEAD_DIM, row_stride=HEAD_DIM))
+            cache_offset = (
+                batch_index * NUM_KV_HEADS * MAX_SEQ + gi * MAX_SEQ + sb * SEQ_TILE
+            ) * HEAD_DIM
+            v_tile = bf16_to_float32(
+                load_strided_2d(
+                    buffers["v3"],
+                    offset=cache_offset,
+                    rows=SEQ_TILE,
+                    cols=HEAD_DIM,
+                    row_stride=HEAD_DIM,
+                )
+            )
             oi_tmp = exp_tile @ v_tile
-            output = _store_group_scores(output, oi_tmp, group_index=gi, sb=sb, rows_per_group=Q_HEAD_PAD, cols=HEAD_DIM)
+            output = _store_group_scores(
+                output,
+                oi_tmp,
+                group_index=gi,
+                sb=sb,
+                rows_per_group=Q_HEAD_PAD,
+                cols=HEAD_DIM,
+            )
     return buffers, {"v1": output}
 
 
@@ -358,8 +502,12 @@ def build_online_softmax(meta, generator, ints):
             cols=HEAD_DIM,
             row_stride=HEAD_DIM,
         ).astype(np.float32)
-        mi = np.asarray(buffers["v2"][base:base + Q_HEAD_BATCH], dtype=np.float32).reshape(Q_HEAD_BATCH, 1)
-        li = np.asarray(buffers["v3"][base:base + Q_HEAD_BATCH], dtype=np.float32).reshape(Q_HEAD_BATCH, 1)
+        mi = np.asarray(
+            buffers["v2"][base : base + Q_HEAD_BATCH], dtype=np.float32
+        ).reshape(Q_HEAD_BATCH, 1)
+        li = np.asarray(
+            buffers["v3"][base : base + Q_HEAD_BATCH], dtype=np.float32
+        ).reshape(Q_HEAD_BATCH, 1)
         for sb in range(1, ctx_blocks):
             oi_tmp = load_strided_2d(
                 buffers["v1"],
@@ -369,11 +517,15 @@ def build_online_softmax(meta, generator, ints):
                 row_stride=HEAD_DIM,
             ).astype(np.float32)
             cur_mi = np.asarray(
-                buffers["v2"][base + sb * Q_HEAD_BATCH:base + (sb + 1) * Q_HEAD_BATCH],
+                buffers["v2"][
+                    base + sb * Q_HEAD_BATCH : base + (sb + 1) * Q_HEAD_BATCH
+                ],
                 dtype=np.float32,
             ).reshape(Q_HEAD_BATCH, 1)
             cur_li = np.asarray(
-                buffers["v3"][base + sb * Q_HEAD_BATCH:base + (sb + 1) * Q_HEAD_BATCH],
+                buffers["v3"][
+                    base + sb * Q_HEAD_BATCH : base + (sb + 1) * Q_HEAD_BATCH
+                ],
                 dtype=np.float32,
             ).reshape(Q_HEAD_BATCH, 1)
             mi_new = np.maximum(mi, cur_mi)
@@ -417,7 +569,13 @@ def build_out_proj_residual(meta, generator, ints):
                     )
                 )
                 w_chunk = bf16_to_float32(
-                    load_strided_2d(buffers["v4"], offset=k0 * HIDDEN + o0, rows=K_CHUNK, cols=Q_OUT_CHUNK, row_stride=HIDDEN)
+                    load_strided_2d(
+                        buffers["v4"],
+                        offset=k0 * HIDDEN + o0,
+                        rows=K_CHUNK,
+                        cols=Q_OUT_CHUNK,
+                        row_stride=HIDDEN,
+                    )
                 )
                 acc += attn_chunk @ w_chunk
             resid = bf16_to_float32(
@@ -429,7 +587,9 @@ def build_out_proj_residual(meta, generator, ints):
                     row_stride=HIDDEN,
                 )
             )
-            output = store_strided_2d(output, acc + resid, offset=row_base * HIDDEN + o0, row_stride=HIDDEN)
+            output = store_strided_2d(
+                output, acc + resid, offset=row_base * HIDDEN + o0, row_stride=HIDDEN
+            )
     return buffers, {"v1": output}
 
 
@@ -443,16 +603,24 @@ def build_post_rmsnorm(meta, generator, ints):
     sq_sum = np.zeros((BATCH, 1), dtype=np.float32)
     for kb in range(HIDDEN_BLOCKS):
         k0 = kb * K_CHUNK
-        resid_chunk = load_strided_2d(buffers["v1"], offset=k0, rows=BATCH, cols=K_CHUNK, row_stride=HIDDEN).astype(np.float32)
+        resid_chunk = load_strided_2d(
+            buffers["v1"], offset=k0, rows=BATCH, cols=K_CHUNK, row_stride=HIDDEN
+        ).astype(np.float32)
         sq_sum += np.sum(resid_chunk * resid_chunk, axis=1, keepdims=True)
     inv_rms = np.reciprocal(np.sqrt(sq_sum * HIDDEN_INV + EPS))
     output = np.array(buffers["v2"], copy=True)
     for kb in range(HIDDEN_BLOCKS):
         k0 = kb * K_CHUNK
-        resid_chunk = load_strided_2d(buffers["v1"], offset=k0, rows=BATCH, cols=K_CHUNK, row_stride=HIDDEN).astype(np.float32)
-        gamma = load_strided_2d(buffers["v3"], offset=k0, rows=1, cols=K_CHUNK, row_stride=HIDDEN).astype(np.float32)
+        resid_chunk = load_strided_2d(
+            buffers["v1"], offset=k0, rows=BATCH, cols=K_CHUNK, row_stride=HIDDEN
+        ).astype(np.float32)
+        gamma = load_strided_2d(
+            buffers["v3"], offset=k0, rows=1, cols=K_CHUNK, row_stride=HIDDEN
+        ).astype(np.float32)
         post_normed = resid_chunk * inv_rms * gamma
-        output = store_strided_2d(output, float32_to_bf16(post_normed), offset=k0, row_stride=HIDDEN)
+        output = store_strided_2d(
+            output, float32_to_bf16(post_normed), offset=k0, row_stride=HIDDEN
+        )
     return buffers, {"v2": output}
 
 
@@ -468,9 +636,19 @@ def _build_group_proj(meta, generator, ints):
     acc = np.zeros((BATCH, MLP_OUT_CHUNK), dtype=np.float32)
     for kb in range(HIDDEN_BLOCKS):
         k0 = kb * K_CHUNK
-        post_chunk = bf16_to_float32(load_strided_2d(buffers["v1"], offset=k0, rows=BATCH, cols=K_CHUNK, row_stride=HIDDEN))
+        post_chunk = bf16_to_float32(
+            load_strided_2d(
+                buffers["v1"], offset=k0, rows=BATCH, cols=K_CHUNK, row_stride=HIDDEN
+            )
+        )
         w_chunk = bf16_to_float32(
-            load_strided_2d(buffers["v2"], offset=k0 * INTERMEDIATE + global_o0, rows=K_CHUNK, cols=MLP_OUT_CHUNK, row_stride=INTERMEDIATE)
+            load_strided_2d(
+                buffers["v2"],
+                offset=k0 * INTERMEDIATE + global_o0,
+                rows=K_CHUNK,
+                cols=MLP_OUT_CHUNK,
+                row_stride=INTERMEDIATE,
+            )
         )
         acc += post_chunk @ w_chunk
     output = np.array(buffers["v3"], copy=True)
@@ -495,12 +673,26 @@ def build_silu(meta, generator, ints):
         "v2": make_fp32(generator, meta.elem_counts["v2"], scale=0.05),
         "v3": _flat_output(meta, "v3"),
     }
-    gate = load_strided_2d(buffers["v1"], offset=local_o0, rows=BATCH, cols=MLP_OUT_CHUNK, row_stride=MLP_GROUP_CHUNK).astype(np.float32)
-    up = load_strided_2d(buffers["v2"], offset=local_o0, rows=BATCH, cols=MLP_OUT_CHUNK, row_stride=MLP_GROUP_CHUNK).astype(np.float32)
+    gate = load_strided_2d(
+        buffers["v1"],
+        offset=local_o0,
+        rows=BATCH,
+        cols=MLP_OUT_CHUNK,
+        row_stride=MLP_GROUP_CHUNK,
+    ).astype(np.float32)
+    up = load_strided_2d(
+        buffers["v2"],
+        offset=local_o0,
+        rows=BATCH,
+        cols=MLP_OUT_CHUNK,
+        row_stride=MLP_GROUP_CHUNK,
+    ).astype(np.float32)
     sigmoid = np.reciprocal(np.float32(1.0) + np.exp(-gate))
     mlp_chunk = gate * sigmoid * up
     output = np.array(buffers["v3"], copy=True)
-    output = store_strided_2d(output, float32_to_bf16(mlp_chunk), offset=global_o0, row_stride=INTERMEDIATE)
+    output = store_strided_2d(
+        output, float32_to_bf16(mlp_chunk), offset=global_o0, row_stride=INTERMEDIATE
+    )
     return buffers, {"v3": output}
 
 
@@ -529,7 +721,13 @@ def build_down_proj_residual(meta, generator, ints):
                     )
                 )
                 w_chunk = bf16_to_float32(
-                    load_strided_2d(buffers["v4"], offset=k0 * HIDDEN + d0, rows=DOWN_K_CHUNK, cols=DOWN_N_CHUNK, row_stride=HIDDEN)
+                    load_strided_2d(
+                        buffers["v4"],
+                        offset=k0 * HIDDEN + d0,
+                        rows=DOWN_K_CHUNK,
+                        cols=DOWN_N_CHUNK,
+                        row_stride=HIDDEN,
+                    )
                 )
                 acc += mlp_chunk @ w_chunk
             resid = load_strided_2d(
@@ -568,7 +766,7 @@ BUILDERS = {
 
 def _build_legacy_name_map(meta):
     ordered = list(meta.read_order)
-    return {f'v{idx}': name for idx, name in enumerate(ordered, start=1)}
+    return {f"v{idx}": name for idx, name in enumerate(ordered, start=1)}
 
 
 def _with_legacy_meta_aliases(meta, legacy_to_actual):

@@ -51,8 +51,9 @@ def generate(output_dir: Path, seed: int) -> None:
         ],
         dtype=np.int32,
     )
-    base = rng.integers(np.iinfo(np.int32).min, np.iinfo(np.int32).max,
-                        size=INPUT_ELEMS, dtype=np.int32)
+    base = rng.integers(
+        np.iinfo(np.int32).min, np.iinfo(np.int32).max, size=INPUT_ELEMS, dtype=np.int32
+    )
     base[: edge.size] = edge
     v1 = base.astype(np.int64)
     v2 = np.zeros(OUTPUT_ELEMS, dtype=np.float32)

@@ -508,7 +508,7 @@ ok = result_cmp(golden[:vr, :vc], output[:vr, :vc], case["eps"])
 
 ### 9.2 参数顺序一致
 
-`.pto` 里 kernel 的参数顺序、`launch.cpp` 声明顺序、`main.cpp` 里 launch wrapper 的参数顺序必须一致。  
+`.pto` 里 kernel 的参数顺序、`launch.cpp` 声明顺序、`main.cpp` 里 launch wrapper 的参数顺序必须一致。
 如果 `tadd` 的语义是 `(a, b) -> c`，那 host 侧和 compare 也都要按这个顺序组织。
 
 ### 9.3 shape、valid_shape、dst_shape 和 dtype 一致

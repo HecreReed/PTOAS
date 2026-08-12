@@ -80,7 +80,11 @@ class TracingRuntime:
             module, ir_fn = create_kernel_module(self.module_spec, arg_types)
             session = self.create_session(module, ir_fn)
             entry = ir_fn.add_entry_block()
-            with InsertionPoint(entry), activate_runtime(self), activate_session(session):
+            with (
+                InsertionPoint(entry),
+                activate_runtime(self),
+                activate_session(session),
+            ):
                 self.initialize_session(session, entry)
                 args = self.bind_entry_arguments(entry.arguments)
                 self.trace_entry(*args)
@@ -89,7 +93,9 @@ class TracingRuntime:
                 self.finalize_session(session)
                 session.validate_final_state()
             self.verify_module(module)
-            return module, {"kernel_module_graph": session.snapshot_kernel_module_graph()}
+            return module, {
+                "kernel_module_graph": session.snapshot_kernel_module_graph()
+            }
 
 
 class CallbackTracingRuntime(TracingRuntime):
@@ -110,7 +116,9 @@ class CallbackTracingRuntime(TracingRuntime):
 class SignatureTracingRuntime(TracingRuntime):
     """Tracing runtime that binds a parsed PTODSL kernel signature."""
 
-    def __init__(self, module_spec, kernel_signature, callback, *, constexpr_bindings=None):
+    def __init__(
+        self, module_spec, kernel_signature, callback, *, constexpr_bindings=None
+    ):
         super().__init__(module_spec)
         self._kernel_signature = kernel_signature
         self._callback = callback

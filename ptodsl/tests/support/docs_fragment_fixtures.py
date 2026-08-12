@@ -35,9 +35,7 @@ def render_fragment_fixture(fixture: FragmentFixture, snippet: str) -> str:
 
         placeholder_count += 1
         if line.strip() != SNIPPET_PLACEHOLDER:
-            raise ValueError(
-                f"fixture placeholder must occupy its own line: {line!r}"
-            )
+            raise ValueError(f"fixture placeholder must occupy its own line: {line!r}")
 
         indent = line[: line.index(SNIPPET_PLACEHOLDER)]
         rendered_lines.extend(
@@ -696,7 +694,7 @@ FRAGMENT_FIXTURES = {
         """
     ),
     "kernel_entry.inline_explicit_scope": _fixture(
-        f"""
+        """
         @pto.jit(target="a5", mode="explicit")
         def kernel_entry_inline_explicit_scope_probe(
             A_ptr: pto.ptr(pto.f32, "gm"),

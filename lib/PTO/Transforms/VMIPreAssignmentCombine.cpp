@@ -33,90 +33,90 @@ using namespace mlir::pto;
 
 namespace {
 
-static std::optional<int64_t> getConstantIndexValue(Value value) {
-  if (auto constant = value.getDefiningOp<arith::ConstantIndexOp>())
-    return constant.value();
-  if (auto constant = value.getDefiningOp<arith::ConstantOp>())
-    if (auto integerAttr = dyn_cast<IntegerAttr>(constant.getValue()))
-      return integerAttr.getInt();
-  return std::nullopt;
+static std::optional<int64_t> getConstantIndexValue(Value value)
+{
+    if (auto constant = value.getDefiningOp<arith::ConstantIndexOp>())
+        return constant.value();
+    if (auto constant = value.getDefiningOp<arith::ConstantOp>())
+        if (auto integerAttr = dyn_cast<IntegerAttr>(constant.getValue()))
+            return integerAttr.getInt();
+    return std::nullopt;
 }
 
-static LogicalResult canonicalizeContiguousGroupLoads(ModuleOp module) {
-  SmallVector<VMIGroupLoadOp> loads;
-  module.walk([&](VMIGroupLoadOp load) {
-    auto resultType = dyn_cast<VMIVRegType>(load.getResult().getType());
-    if (!resultType)
-      return;
+static LogicalResult canonicalizeContiguousGroupLoads(ModuleOp module)
+{
+    SmallVector<VMIGroupLoadOp> loads;
+    module.walk([&](VMIGroupLoadOp load) {
+        auto resultType = dyn_cast<VMIVRegType>(load.getResult().getType());
+        if (!resultType)
+            return;
 
-    int64_t numGroups = load.getNumGroupsAttr().getInt();
-    int64_t laneCount = resultType.getElementCount();
-    if (numGroups <= 0 || laneCount % numGroups != 0)
-      return;
+        int64_t numGroups = load.getNumGroupsAttr().getInt();
+        int64_t laneCount = resultType.getElementCount();
+        if (numGroups <= 0 || laneCount % numGroups != 0)
+            return;
 
-    std::optional<int64_t> rowStride =
-        getConstantIndexValue(load.getRowStride());
-    if (rowStride && *rowStride == laneCount / numGroups)
-      loads.push_back(load);
-  });
+        std::optional<int64_t> rowStride = getConstantIndexValue(load.getRowStride());
+        if (rowStride && *rowStride == laneCount / numGroups)
+            loads.push_back(load);
+    });
 
-  OpBuilder builder(module.getContext());
-  for (VMIGroupLoadOp load : loads) {
-    builder.setInsertionPoint(load);
-    auto replacement = builder.create<VMILoadOp>(
-        load.getLoc(), load.getResult().getType(), load.getSource(),
-        load.getOffset());
-    load.getResult().replaceAllUsesWith(replacement.getResult());
-    load.erase();
-  }
-  return success();
+    OpBuilder builder(module.getContext());
+    for (VMIGroupLoadOp load : loads) {
+        builder.setInsertionPoint(load);
+        auto replacement =
+            builder.create<VMILoadOp>(load.getLoc(), load.getResult().getType(), load.getSource(), load.getOffset());
+        load.getResult().replaceAllUsesWith(replacement.getResult());
+        load.erase();
+    }
+    return success();
 }
 
-static LogicalResult fuseGroupSlotBroadcastLoads(ModuleOp module) {
-  SmallVector<VMIGroupBroadcastOp> broadcasts;
-  module.walk([&](VMIGroupBroadcastOp broadcast) {
-    auto load = broadcast.getSource().getDefiningOp<VMIGroupSlotLoadOp>();
-    if (!load || !load.getResult().hasOneUse())
-      return;
-    if (load.getNumGroupsAttr().getInt() !=
-        broadcast.getNumGroupsAttr().getInt())
-      return;
+static LogicalResult fuseGroupSlotBroadcastLoads(ModuleOp module)
+{
+    SmallVector<VMIGroupBroadcastOp> broadcasts;
+    module.walk([&](VMIGroupBroadcastOp broadcast) {
+        auto load = broadcast.getSource().getDefiningOp<VMIGroupSlotLoadOp>();
+        if (!load || !load.getResult().hasOneUse())
+            return;
+        if (load.getNumGroupsAttr().getInt() != broadcast.getNumGroupsAttr().getInt())
+            return;
 
-    if (!isa<VMIVRegType>(broadcast.getResult().getType()))
-      return;
-    broadcasts.push_back(broadcast);
-  });
+        if (!isa<VMIVRegType>(broadcast.getResult().getType()))
+            return;
+        broadcasts.push_back(broadcast);
+    });
 
-  OpBuilder builder(module.getContext());
-  for (VMIGroupBroadcastOp broadcast : broadcasts) {
-    auto load = broadcast.getSource().getDefiningOp<VMIGroupSlotLoadOp>();
-    if (!load)
-      continue;
+    OpBuilder builder(module.getContext());
+    for (VMIGroupBroadcastOp broadcast : broadcasts) {
+        auto load = broadcast.getSource().getDefiningOp<VMIGroupSlotLoadOp>();
+        if (!load)
+            continue;
 
-    builder.setInsertionPoint(broadcast);
-    auto fused = builder.create<VMIGroupBroadcastLoadOp>(
-        broadcast.getLoc(), broadcast.getResult().getType(), load.getSource(),
-        load.getOffset(), load.getSourceGroupStride(),
-        broadcast.getNumGroupsAttr());
-    broadcast.getResult().replaceAllUsesWith(fused.getResult());
-    broadcast.erase();
-    if (load->use_empty())
-      load.erase();
-  }
-  return success();
+        builder.setInsertionPoint(broadcast);
+        auto fused = builder.create<VMIGroupBroadcastLoadOp>(
+            broadcast.getLoc(), broadcast.getResult().getType(), load.getSource(), load.getOffset(),
+            load.getSourceGroupStride(), broadcast.getNumGroupsAttr());
+        broadcast.getResult().replaceAllUsesWith(fused.getResult());
+        broadcast.erase();
+        if (load->use_empty())
+            load.erase();
+    }
+    return success();
 }
 
-struct VMIPreAssignmentCombinePass
-    : pto::impl::VMIPreAssignmentCombineBase<VMIPreAssignmentCombinePass> {
-  void runOnOperation() override {
-    if (failed(canonicalizeContiguousGroupLoads(getOperation())) ||
-        failed(fuseGroupSlotBroadcastLoads(getOperation())))
-      signalPassFailure();
-  }
+struct VMIPreAssignmentCombinePass : pto::impl::VMIPreAssignmentCombineBase<VMIPreAssignmentCombinePass> {
+    void runOnOperation() override
+    {
+        if (failed(canonicalizeContiguousGroupLoads(getOperation())) ||
+            failed(fuseGroupSlotBroadcastLoads(getOperation())))
+            signalPassFailure();
+    }
 };
 
 } // namespace
 
-std::unique_ptr<Pass> mlir::pto::createVMIPreAssignmentCombinePass() {
-  return std::make_unique<VMIPreAssignmentCombinePass>();
+std::unique_ptr<Pass> mlir::pto::createVMIPreAssignmentCombinePass()
+{
+    return std::make_unique<VMIPreAssignmentCombinePass>();
 }

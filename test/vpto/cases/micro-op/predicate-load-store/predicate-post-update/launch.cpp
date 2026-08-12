@@ -16,12 +16,10 @@
 #include "acl/acl.h"
 #endif
 
-extern "C" __global__[aicore] void
-predicate_post_update_kernel(__gm__ unsigned char *input,
-                             __gm__ unsigned char *output);
+extern "C" __global__[aicore] void predicate_post_update_kernel(
+    __gm__ unsigned char* input, __gm__ unsigned char* output);
 
-void LaunchPredicatePostUpdate(unsigned char *input, unsigned char *output,
-                               void *stream) {
-  predicate_post_update_kernel<<<1, nullptr, stream>>>(
-      (__gm__ unsigned char *)input, (__gm__ unsigned char *)output);
+void LaunchPredicatePostUpdate(unsigned char* input, unsigned char* output, void* stream)
+{
+    predicate_post_update_kernel<<<1, nullptr, stream>>>((__gm__ unsigned char*)input, (__gm__ unsigned char*)output);
 }

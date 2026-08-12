@@ -6,7 +6,15 @@
 # INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
 # See LICENSE in the root of the software repository for the full text of the License.
 
-from ptoas.mlir.ir import Attribute, Context, Location, Module, InsertionPoint, StringAttr, UnitAttr
+from ptoas.mlir.ir import (
+    Attribute,
+    Context,
+    Location,
+    Module,
+    InsertionPoint,
+    StringAttr,
+    UnitAttr,
+)
 from ptoas.mlir.dialects import func, arith, pto
 from ptoas.mlir.ir import IndexType, IntegerType
 
@@ -31,7 +39,9 @@ def build():
 
             fractal_ab_size = pto.TileConfig.fractalABSize
             cfg = pto.TileBufConfigAttr.get(bl, sl, fractal_ab_size, pd, ctx)
-            tile_buf_data_i32 = pto.TileBufType.get([32, 32], i32, vec, [32, 32], cfg, ctx)
+            tile_buf_data_i32 = pto.TileBufType.get(
+                [32, 32], i32, vec, [32, 32], cfg, ctx
+            )
             tile_buf_idx_i32 = pto.TileBufType.get([1, 32], i32, vec, [1, 32], cfg, ctx)
 
             fn_ty = func.FunctionType.get([ptr_i32, ptr_i32, ptr_i32], [])
@@ -52,18 +62,24 @@ def build():
                 tv1 = pto.MakeTensorViewOp(tv2_i32, arg1, [c1, c32], [c32, c1]).result
                 tv2 = pto.MakeTensorViewOp(tv2_i32, arg2, [c32, c32], [c32, c1]).result
 
-                sv0 = pto.PartitionViewOp(tile_view_32, tv0, offsets=[c0, c0], sizes=[c32, c32]).result
-                sv1 = pto.PartitionViewOp(tile_view_1x32, tv1, offsets=[c0, c0], sizes=[c1, c32]).result
+                sv0 = pto.PartitionViewOp(
+                    tile_view_32, tv0, offsets=[c0, c0], sizes=[c32, c32]
+                ).result
+                sv1 = pto.PartitionViewOp(
+                    tile_view_1x32, tv1, offsets=[c0, c0], sizes=[c1, c32]
+                ).result
 
                 tb1 = pto.AllocTileOp(tile_buf_idx_i32).result
                 tb2 = pto.AllocTileOp(tile_buf_data_i32).result
 
                 pto.TLoadOp(None, sv1, tb1)
                 pto.MGatherOp(
-                    sv0, tb1, tb2,
-                    coalesce=Attribute.parse("#pto<coalesce row>"))
+                    sv0, tb1, tb2, coalesce=Attribute.parse("#pto<coalesce row>")
+                )
 
-                sv2 = pto.PartitionViewOp(tile_view_32, tv2, offsets=[c0, c0], sizes=[c32, c32]).result
+                sv2 = pto.PartitionViewOp(
+                    tile_view_32, tv2, offsets=[c0, c0], sizes=[c32, c32]
+                ).result
                 pto.TStoreOp(None, tb2, sv2)
 
                 func.ReturnOp([])

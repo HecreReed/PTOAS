@@ -28,11 +28,11 @@ def is_sub_int(dtype):
 def _make_input_inner(src_dtype, shape):
     total = int(np.prod(shape))
     float_types = (np.float32, np.float16, ml_dtypes.bfloat16)
-    int8_like_types = (np.int8, )
+    int8_like_types = (np.int8,)
 
     # Generate input data
     if src_dtype in float_types:
-        return (np.random.random([total]) * 200 - 100)
+        return np.random.random([total]) * 200 - 100
     elif src_dtype in int8_like_types:
         return np.random.randint(-128, 128, [total])
     elif src_dtype == np.uint8:
@@ -50,7 +50,11 @@ def _make_input_inner(src_dtype, shape):
 
 
 def make_input(src_dtype, shape):
-    return _make_input_inner(src_dtype, shape).astype(normalize_dtype(src_dtype)).reshape(shape)
+    return (
+        _make_input_inner(src_dtype, shape)
+        .astype(normalize_dtype(src_dtype))
+        .reshape(shape)
+    )
 
 
 def round_half_away_from_zero(values):
@@ -118,7 +122,9 @@ def truncate_to_int(values: np.ndarray, dst_dtype):
             truncated_val = word_val if word_val < 32768 else word_val - 65536
         elif dst_dtype == np.int32:
             dword_val = int_val & 0xFFFFFFFF
-            truncated_val = dword_val if dword_val < 2147483648 else dword_val - 4294967296
+            truncated_val = (
+                dword_val if dword_val < 2147483648 else dword_val - 4294967296
+            )
         else:
             truncated_val = int_val
         golden_list.append(truncated_val)
@@ -143,6 +149,7 @@ def apply_valid_shape(values: np.ndarray, valid_shape, dst_dtype):
     masked = np.zeros_like(values, dtype=dst_dtype)
     masked[:vr, :vc] = values[:vr, :vc]
     return masked
+
 
 def generate_golden(case):
     src_dtype = case["src_dtype"]

@@ -11,7 +11,16 @@ from ptodsl import pto
 import ptodsl.tilelib as tilelib
 
 
-def _constraints(src_config, tmp_config, dst_config, src_dtype, tmp_dtype, dst_dtype, dst_valid_shape, **_):
+def _constraints(
+    src_config,
+    tmp_config,
+    dst_config,
+    src_dtype,
+    tmp_dtype,
+    dst_dtype,
+    dst_valid_shape,
+    **_,
+):
     return (
         src_config.b_layout == "row_major"
         and tmp_config.b_layout == "row_major"
@@ -113,12 +122,16 @@ def register_col_arg_template(*, op, name, cmp_mode, reduce_op):
                 index_old = pto.vsel(index_new, index_old, select)
                 best_vals = reduce_op(best_vals, new_vals, elem_mask)
 
-            index_even = pto.vcvt(index_old, pto.i32, full_mask, part=pto.VcvtPartMode.EVEN)
-            index_odd = pto.vcvt(index_old, pto.i32, full_mask, part=pto.VcvtPartMode.ODD)
+            index_even = pto.vcvt(
+                index_old, pto.i32, full_mask, part=pto.VcvtPartMode.EVEN
+            )
+            index_odd = pto.vcvt(
+                index_old, pto.i32, full_mask, part=pto.VcvtPartMode.ODD
+            )
             index_lo, index_hi = pto.vintlv(index_even, index_odd)
 
             pto.vsts(index_lo, dst[0, col:], mask_i32_0)
-            pto.vsts(index_hi, dst[0, col + lanes_i32:], mask_i32_1)
+            pto.vsts(index_hi, dst[0, col + lanes_i32 :], mask_i32_1)
 
     @tilelib.tile_template(
         op=op,
@@ -160,45 +173,91 @@ def register_col_arg_template(*, op, name, cmp_mode, reduce_op):
             index_new_odd = pto.vdup(index_dtype(0), full_mask_index)
 
             vreg_old = pto.vlds(src[0, col:])
-            vreg_old_even = pto.vcvt(vreg_old, intermediate_dtype, full_mask_i8, part=pto.VcvtPartMode.EVEN)
-            vreg_old_odd = pto.vcvt(vreg_old, intermediate_dtype, full_mask_i8, part=pto.VcvtPartMode.ODD)
+            vreg_old_even = pto.vcvt(
+                vreg_old, intermediate_dtype, full_mask_i8, part=pto.VcvtPartMode.EVEN
+            )
+            vreg_old_odd = pto.vcvt(
+                vreg_old, intermediate_dtype, full_mask_i8, part=pto.VcvtPartMode.ODD
+            )
 
             for row in range(1, src_valid_rows, 1):
-                index_new_even = pto.vadds(index_new_even, index_dtype(1), full_mask_index)
-                index_new_odd = pto.vadds(index_new_odd, index_dtype(1), full_mask_index)
+                index_new_even = pto.vadds(
+                    index_new_even, index_dtype(1), full_mask_index
+                )
+                index_new_odd = pto.vadds(
+                    index_new_odd, index_dtype(1), full_mask_index
+                )
                 vreg_new = pto.vlds(src[row, col:])
-                vreg_new_even = pto.vcvt(vreg_new, intermediate_dtype, full_mask_i8, part=pto.VcvtPartMode.EVEN)
-                vreg_new_odd = pto.vcvt(vreg_new, intermediate_dtype, full_mask_i8, part=pto.VcvtPartMode.ODD)
+                vreg_new_even = pto.vcvt(
+                    vreg_new,
+                    intermediate_dtype,
+                    full_mask_i8,
+                    part=pto.VcvtPartMode.EVEN,
+                )
+                vreg_new_odd = pto.vcvt(
+                    vreg_new,
+                    intermediate_dtype,
+                    full_mask_i8,
+                    part=pto.VcvtPartMode.ODD,
+                )
 
-                select_even = pto.vcmp(vreg_new_even, vreg_old_even, full_mask_intermediate, cmp_mode)
-                select_odd = pto.vcmp(vreg_new_odd, vreg_old_odd, full_mask_intermediate, cmp_mode)
+                select_even = pto.vcmp(
+                    vreg_new_even, vreg_old_even, full_mask_intermediate, cmp_mode
+                )
+                select_odd = pto.vcmp(
+                    vreg_new_odd, vreg_old_odd, full_mask_intermediate, cmp_mode
+                )
 
                 index_old_even = pto.vsel(index_new_even, index_old_even, select_even)
                 index_old_odd = pto.vsel(index_new_odd, index_old_odd, select_odd)
 
-                vreg_old_even = reduce_op(vreg_old_even, vreg_new_even, full_mask_intermediate)
-                vreg_old_odd = reduce_op(vreg_old_odd, vreg_new_odd, full_mask_intermediate)
+                vreg_old_even = reduce_op(
+                    vreg_old_even, vreg_new_even, full_mask_intermediate
+                )
+                vreg_old_odd = reduce_op(
+                    vreg_old_odd, vreg_new_odd, full_mask_intermediate
+                )
 
             index_output_0, index_output_1 = pto.vintlv(index_old_even, index_old_odd)
-            output_even = pto.vcvt(index_output_0, final_dtype, full_mask_intermediate, part=pto.VcvtPartMode.EVEN)
-            output_odd = pto.vcvt(index_output_0, final_dtype, full_mask_intermediate, part=pto.VcvtPartMode.ODD)
+            output_even = pto.vcvt(
+                index_output_0,
+                final_dtype,
+                full_mask_intermediate,
+                part=pto.VcvtPartMode.EVEN,
+            )
+            output_odd = pto.vcvt(
+                index_output_0,
+                final_dtype,
+                full_mask_intermediate,
+                part=pto.VcvtPartMode.ODD,
+            )
             output_0, output_1 = pto.vintlv(output_even, output_odd)
 
             output_0 = pto.vbitcast(output_0, pto.i32)
             output_1 = pto.vbitcast(output_1, pto.i32)
 
             pto.vsts(output_0, dst[0, col:], mask_i32_0)
-            pto.vsts(output_1, dst[0, col + lanes_i32:], mask_i32_1)
+            pto.vsts(output_1, dst[0, col + lanes_i32 :], mask_i32_1)
 
-            output_even = pto.vcvt(index_output_1, final_dtype, full_mask_intermediate, part=pto.VcvtPartMode.EVEN)
-            output_odd = pto.vcvt(index_output_1, final_dtype, full_mask_intermediate, part=pto.VcvtPartMode.ODD)
+            output_even = pto.vcvt(
+                index_output_1,
+                final_dtype,
+                full_mask_intermediate,
+                part=pto.VcvtPartMode.EVEN,
+            )
+            output_odd = pto.vcvt(
+                index_output_1,
+                final_dtype,
+                full_mask_intermediate,
+                part=pto.VcvtPartMode.ODD,
+            )
             output_0, output_1 = pto.vintlv(output_even, output_odd)
 
             output_0 = pto.vbitcast(output_0, pto.i32)
             output_1 = pto.vbitcast(output_1, pto.i32)
 
-            pto.vsts(output_0, dst[0, col + 2 * lanes_i32:], mask_i32_2)
-            pto.vsts(output_1, dst[0, col + 3 * lanes_i32:], mask_i32_3)
+            pto.vsts(output_0, dst[0, col + 2 * lanes_i32 :], mask_i32_2)
+            pto.vsts(output_1, dst[0, col + 3 * lanes_i32 :], mask_i32_3)
 
     return template
 

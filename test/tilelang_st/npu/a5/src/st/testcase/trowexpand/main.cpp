@@ -22,27 +22,27 @@ using namespace PtoTestCommon;
 
 // Kernel launch wrappers (defined in launch.cpp)
 // f32
-void LaunchTROWEXPAND_f32_16x128(float *src, float *dst, void *stream);
-void LaunchTROWEXPAND_f32_16x127(float *src, float *dst, void *stream);
+void LaunchTROWEXPAND_f32_16x128(float* src, float* dst, void* stream);
+void LaunchTROWEXPAND_f32_16x127(float* src, float* dst, void* stream);
 // f16
-void LaunchTROWEXPAND_f16_16x512(void *src, void *dst, void *stream);
-void LaunchTROWEXPAND_f16_16x511(void *src, void *dst, void *stream);
+void LaunchTROWEXPAND_f16_16x512(void* src, void* dst, void* stream);
+void LaunchTROWEXPAND_f16_16x511(void* src, void* dst, void* stream);
 // i8
-void LaunchTROWEXPAND_i8_16x256(void *src, void *dst, void *stream);
-void LaunchTROWEXPAND_i8_16x255(void *src, void *dst, void *stream);
+void LaunchTROWEXPAND_i8_16x256(void* src, void* dst, void* stream);
+void LaunchTROWEXPAND_i8_16x255(void* src, void* dst, void* stream);
 
 // Generic launch function type
-using LaunchFn = void (*)(void *, void *, void *);
+using LaunchFn = void (*)(void*, void*, void*);
 
 struct TestCase {
-    const char *name;
-    LaunchFn    launch;
-    size_t      srcRows;
-    size_t      srcCols;       // srcCols = 32/sizeof(dtype) for alignment
-    size_t      dstRows;
-    size_t      dstCols;
-    size_t      dstValidCols;  // effective output columns
-    size_t      elemSize;      // bytes per element
+    const char* name;
+    LaunchFn launch;
+    size_t srcRows;
+    size_t srcCols; // srcCols = 32/sizeof(dtype) for alignment
+    size_t dstRows;
+    size_t dstCols;
+    size_t dstValidCols; // effective output columns
+    size_t elemSize;     // bytes per element
 };
 
 static const TestCase kCases[] = {
@@ -58,24 +58,26 @@ static const TestCase kCases[] = {
 };
 static constexpr size_t kNumCases = sizeof(kCases) / sizeof(kCases[0]);
 
-static int RunCase(const TestCase &tc, int deviceId, aclrtStream stream) {
+static int RunCase(const TestCase& tc, int deviceId, aclrtStream stream)
+{
     int rc = 0;
-    size_t srcFileSize  = tc.srcRows * tc.srcCols * tc.elemSize;
+    size_t srcFileSize = tc.srcRows * tc.srcCols * tc.elemSize;
     const size_t dstFileSize = tc.dstRows * tc.dstCols * tc.elemSize;
 
-    std::printf("[INFO] === case: %s (src=%zux%zu, dst=%zux%zu, valid_cols=%zu) ===\n",
-                tc.name, tc.srcRows, tc.srcCols, tc.dstRows, tc.dstCols, tc.dstValidCols);
+    std::printf(
+        "[INFO] === case: %s (src=%zux%zu, dst=%zux%zu, valid_cols=%zu) ===\n", tc.name, tc.srcRows, tc.srcCols,
+        tc.dstRows, tc.dstCols, tc.dstValidCols);
 
     std::string caseDir = std::string("./") + tc.name;
 
     void *srcHost = nullptr, *dstHost = nullptr;
     void *srcDevice = nullptr, *dstDevice = nullptr;
 
-    aclrtMallocHost((void **)(&srcHost), srcFileSize);
-    aclrtMallocHost((void **)(&dstHost), dstFileSize);
+    aclrtMallocHost((void**)(&srcHost), srcFileSize);
+    aclrtMallocHost((void**)(&dstHost), dstFileSize);
 
-    aclrtMalloc((void **)&srcDevice, srcFileSize, ACL_MEM_MALLOC_HUGE_FIRST);
-    aclrtMalloc((void **)&dstDevice, dstFileSize, ACL_MEM_MALLOC_HUGE_FIRST);
+    aclrtMalloc((void**)&srcDevice, srcFileSize, ACL_MEM_MALLOC_HUGE_FIRST);
+    aclrtMalloc((void**)&dstDevice, dstFileSize, ACL_MEM_MALLOC_HUGE_FIRST);
 
     if (!ReadFile((caseDir + "/input.bin").c_str(), srcFileSize, srcHost, srcFileSize)) {
         std::fprintf(stderr, "[ERROR] failed to read %s/input.bin\n", caseDir.c_str());
@@ -110,15 +112,16 @@ static int RunCase(const TestCase &tc, int deviceId, aclrtStream stream) {
     return rc;
 }
 
-int main(int argc, char *argv[]) {
-    const char *caseFilter = (argc > 1) ? argv[1] : nullptr;
+int main(int argc, char* argv[])
+{
+    const char* caseFilter = (argc > 1) ? argv[1] : nullptr;
 
     int rc = 0;
     int deviceId = 0;
     aclrtStream stream = nullptr;
 
     aclInit(nullptr);
-    if (const char *envDevice = std::getenv("ACL_DEVICE_ID")) {
+    if (const char* envDevice = std::getenv("ACL_DEVICE_ID")) {
         deviceId = std::atoi(envDevice);
     }
     aclrtSetDevice(deviceId);

@@ -25,7 +25,7 @@ for case in CASES:
     dst = np.random.uniform(-1.0, 1.0, size=(dst_rows, dst_cols)).astype(dtype)
 
     golden = dst.copy()
-    golden[idx_row:idx_row + src_rows, idx_col:idx_col + src_cols] = src
+    golden[idx_row : idx_row + src_rows, idx_col : idx_col + src_cols] = src
 
     data = {"input1": src, "input2": dst, "golden": golden}
     save_case_data(case["name"], data)

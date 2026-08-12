@@ -22,57 +22,62 @@
 using namespace PtoTestCommon;
 
 // Kernel launch wrappers (defined in launch.cpp)
-void LaunchTCOLEXPANDDIV_fp32_32_64_1_64(float *src0, float *src1, float *dst, void *stream);
-void LaunchTCOLEXPANDDIV_fp32_8_32_1_32(float *src0, float *src1, float *dst, void *stream);
-void LaunchTCOLEXPANDDIV_fp16_16_64_1_64(uint16_t *src0, uint16_t *src1, uint16_t *dst, void *stream);
-void LaunchTCOLEXPANDDIV_fp16_4_128_1_128(uint16_t *src0, uint16_t *src1, uint16_t *dst, void *stream);
-void LaunchTCOLEXPANDDIV_int32_16_32_1_32(int32_t *src0, int32_t *src1, int32_t *dst, void *stream);
-void LaunchTCOLEXPANDDIV_int16_16_64_1_64(int16_t *src0, int16_t *src1, int16_t *dst, void *stream);
-void LaunchTCOLEXPANDDIV_fp32_40_32_1_32(float *src0, float *src1, float *dst, void *stream);
-void LaunchTCOLEXPANDDIV_fp16_16_128_1_128(uint16_t *src0, uint16_t *src1, uint16_t *dst, void *stream);
-void LaunchTCOLEXPANDDIV_fp32_20_64_1_64(float *src0, float *src1, float *dst, void *stream);
+void LaunchTCOLEXPANDDIV_fp32_32_64_1_64(float* src0, float* src1, float* dst, void* stream);
+void LaunchTCOLEXPANDDIV_fp32_8_32_1_32(float* src0, float* src1, float* dst, void* stream);
+void LaunchTCOLEXPANDDIV_fp16_16_64_1_64(uint16_t* src0, uint16_t* src1, uint16_t* dst, void* stream);
+void LaunchTCOLEXPANDDIV_fp16_4_128_1_128(uint16_t* src0, uint16_t* src1, uint16_t* dst, void* stream);
+void LaunchTCOLEXPANDDIV_int32_16_32_1_32(int32_t* src0, int32_t* src1, int32_t* dst, void* stream);
+void LaunchTCOLEXPANDDIV_int16_16_64_1_64(int16_t* src0, int16_t* src1, int16_t* dst, void* stream);
+void LaunchTCOLEXPANDDIV_fp32_40_32_1_32(float* src0, float* src1, float* dst, void* stream);
+void LaunchTCOLEXPANDDIV_fp16_16_128_1_128(uint16_t* src0, uint16_t* src1, uint16_t* dst, void* stream);
+void LaunchTCOLEXPANDDIV_fp32_20_64_1_64(float* src0, float* src1, float* dst, void* stream);
 
-using LaunchFn = void (*)(void *, void *, void *, void *);
+using LaunchFn = void (*)(void*, void*, void*, void*);
 
 struct TestCase {
-    const char *name;
-    LaunchFn    launch;
-    size_t      src0Rows;
-    size_t      src0Cols;
-    size_t      src1Rows;
-    size_t      src1Cols;
-    size_t      dstRows;
-    size_t      dstCols;
-    size_t      validRows;
-    size_t      validCols;
-    size_t      elemSize;
+    const char* name;
+    LaunchFn launch;
+    size_t src0Rows;
+    size_t src0Cols;
+    size_t src1Rows;
+    size_t src1Cols;
+    size_t dstRows;
+    size_t dstCols;
+    size_t validRows;
+    size_t validCols;
+    size_t elemSize;
 };
 
 static const TestCase kCases[] = {
-    {"fp32_32_64_1_64",   (LaunchFn)LaunchTCOLEXPANDDIV_fp32_32_64_1_64,   32, 64, 1, 64, 32, 64, 32, 64, sizeof(float)},
-    {"fp32_8_32_1_32",    (LaunchFn)LaunchTCOLEXPANDDIV_fp32_8_32_1_32,    8,  32, 1, 32, 8,  32, 8,  32, sizeof(float)},
-    {"fp16_16_64_1_64",   (LaunchFn)LaunchTCOLEXPANDDIV_fp16_16_64_1_64,   16, 64, 1, 64, 16, 64, 16, 64, sizeof(uint16_t)},
-    {"fp16_4_128_1_128",  (LaunchFn)LaunchTCOLEXPANDDIV_fp16_4_128_1_128,  4, 128, 1, 128, 4, 128, 4, 128, sizeof(uint16_t)},
-    {"int32_16_32_1_32",  (LaunchFn)LaunchTCOLEXPANDDIV_int32_16_32_1_32,  16,  32, 1,  32, 16,  32, 16,  32, sizeof(int32_t)},
-    {"int16_16_64_1_64",  (LaunchFn)LaunchTCOLEXPANDDIV_int16_16_64_1_64,  16,  64, 1,  64, 16,  64, 16,  64, sizeof(int16_t)},
-    {"fp32_40_32_1_32",   (LaunchFn)LaunchTCOLEXPANDDIV_fp32_40_32_1_32,   40,  32, 1,  32, 40,  32, 40,  32, sizeof(float)},
-    {"fp16_16_128_1_128", (LaunchFn)LaunchTCOLEXPANDDIV_fp16_16_128_1_128, 16, 128, 1, 128, 16, 128, 16, 128, sizeof(uint16_t)},
-    {"fp32_20_64_1_64",   (LaunchFn)LaunchTCOLEXPANDDIV_fp32_20_64_1_64,   20,  64, 1,  64, 20,  64, 20,  64, sizeof(float)},
+    {"fp32_32_64_1_64", (LaunchFn)LaunchTCOLEXPANDDIV_fp32_32_64_1_64, 32, 64, 1, 64, 32, 64, 32, 64, sizeof(float)},
+    {"fp32_8_32_1_32", (LaunchFn)LaunchTCOLEXPANDDIV_fp32_8_32_1_32, 8, 32, 1, 32, 8, 32, 8, 32, sizeof(float)},
+    {"fp16_16_64_1_64", (LaunchFn)LaunchTCOLEXPANDDIV_fp16_16_64_1_64, 16, 64, 1, 64, 16, 64, 16, 64, sizeof(uint16_t)},
+    {"fp16_4_128_1_128", (LaunchFn)LaunchTCOLEXPANDDIV_fp16_4_128_1_128, 4, 128, 1, 128, 4, 128, 4, 128,
+     sizeof(uint16_t)},
+    {"int32_16_32_1_32", (LaunchFn)LaunchTCOLEXPANDDIV_int32_16_32_1_32, 16, 32, 1, 32, 16, 32, 16, 32,
+     sizeof(int32_t)},
+    {"int16_16_64_1_64", (LaunchFn)LaunchTCOLEXPANDDIV_int16_16_64_1_64, 16, 64, 1, 64, 16, 64, 16, 64,
+     sizeof(int16_t)},
+    {"fp32_40_32_1_32", (LaunchFn)LaunchTCOLEXPANDDIV_fp32_40_32_1_32, 40, 32, 1, 32, 40, 32, 40, 32, sizeof(float)},
+    {"fp16_16_128_1_128", (LaunchFn)LaunchTCOLEXPANDDIV_fp16_16_128_1_128, 16, 128, 1, 128, 16, 128, 16, 128,
+     sizeof(uint16_t)},
+    {"fp32_20_64_1_64", (LaunchFn)LaunchTCOLEXPANDDIV_fp32_20_64_1_64, 20, 64, 1, 64, 20, 64, 20, 64, sizeof(float)},
 };
 static constexpr size_t kNumCases = sizeof(kCases) / sizeof(kCases[0]);
 
-static int RunCase(const TestCase &tc, int deviceId, aclrtStream stream) {
+static int RunCase(const TestCase& tc, int deviceId, aclrtStream stream)
+{
     int rc = 0;
     const size_t src0ElemCount = tc.src0Rows * tc.src0Cols;
     const size_t src1ElemCount = tc.src1Rows * tc.src1Cols;
-    const size_t dstElemCount  = tc.dstRows * tc.dstCols;
-    const size_t src0FileSize  = src0ElemCount * tc.elemSize;
-    const size_t src1FileSize  = src1ElemCount * tc.elemSize;
-    const size_t dstFileSize   = dstElemCount * tc.elemSize;
+    const size_t dstElemCount = tc.dstRows * tc.dstCols;
+    const size_t src0FileSize = src0ElemCount * tc.elemSize;
+    const size_t src1FileSize = src1ElemCount * tc.elemSize;
+    const size_t dstFileSize = dstElemCount * tc.elemSize;
 
-    std::printf("[INFO] === case: %s (src0=%zux%zu, src1=%zux%zu -> dst=%zux%zu, valid=%zux%zu) ===\n",
-                tc.name, tc.src0Rows, tc.src0Cols, tc.src1Rows, tc.src1Cols, 
-                tc.dstRows, tc.dstCols, tc.validRows, tc.validCols);
+    std::printf(
+        "[INFO] === case: %s (src0=%zux%zu, src1=%zux%zu -> dst=%zux%zu, valid=%zux%zu) ===\n", tc.name, tc.src0Rows,
+        tc.src0Cols, tc.src1Rows, tc.src1Cols, tc.dstRows, tc.dstCols, tc.validRows, tc.validCols);
 
     std::string caseDir = std::string("./") + tc.name;
     size_t actualSrc0FileSize = src0FileSize;
@@ -81,13 +86,13 @@ static int RunCase(const TestCase &tc, int deviceId, aclrtStream stream) {
     void *src0Host = nullptr, *src1Host = nullptr, *dstHost = nullptr;
     void *src0Device = nullptr, *src1Device = nullptr, *dstDevice = nullptr;
 
-    aclrtMallocHost((void **)(&src0Host), src0FileSize);
-    aclrtMallocHost((void **)(&src1Host), src1FileSize);
-    aclrtMallocHost((void **)(&dstHost), dstFileSize);
+    aclrtMallocHost((void**)(&src0Host), src0FileSize);
+    aclrtMallocHost((void**)(&src1Host), src1FileSize);
+    aclrtMallocHost((void**)(&dstHost), dstFileSize);
 
-    aclrtMalloc((void **)&src0Device, src0FileSize, ACL_MEM_MALLOC_HUGE_FIRST);
-    aclrtMalloc((void **)&src1Device, src1FileSize, ACL_MEM_MALLOC_HUGE_FIRST);
-    aclrtMalloc((void **)&dstDevice, dstFileSize, ACL_MEM_MALLOC_HUGE_FIRST);
+    aclrtMalloc((void**)&src0Device, src0FileSize, ACL_MEM_MALLOC_HUGE_FIRST);
+    aclrtMalloc((void**)&src1Device, src1FileSize, ACL_MEM_MALLOC_HUGE_FIRST);
+    aclrtMalloc((void**)&dstDevice, dstFileSize, ACL_MEM_MALLOC_HUGE_FIRST);
 
     if (!ReadFile((caseDir + "/input0.bin").c_str(), actualSrc0FileSize, src0Host, src0FileSize)) {
         std::fprintf(stderr, "[ERROR] failed to read %s/input0.bin\n", caseDir.c_str());
@@ -132,15 +137,16 @@ static int RunCase(const TestCase &tc, int deviceId, aclrtStream stream) {
     return rc;
 }
 
-int main(int argc, char *argv[]) {
-    const char *caseFilter = (argc > 1) ? argv[1] : nullptr;
+int main(int argc, char* argv[])
+{
+    const char* caseFilter = (argc > 1) ? argv[1] : nullptr;
 
     int rc = 0;
     int deviceId = 0;
     aclrtStream stream = nullptr;
 
     aclInit(nullptr);
-    if (const char *envDevice = std::getenv("ACL_DEVICE_ID")) {
+    if (const char* envDevice = std::getenv("ACL_DEVICE_ID")) {
         deviceId = std::atoi(envDevice);
     }
     aclrtSetDevice(deviceId);

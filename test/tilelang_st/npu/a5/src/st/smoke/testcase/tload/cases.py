@@ -103,7 +103,9 @@ def select_compared_region(case, arr):
     if case["name"].startswith("dn_pad_"):
         flat = np.asarray(arr).reshape(-1)
         physical_rows = case["shape"][0]
-        pieces = [flat[physical_rows * col : physical_rows * col + vr] for col in range(vc)]
+        pieces = [
+            flat[physical_rows * col : physical_rows * col + vr] for col in range(vc)
+        ]
         return np.concatenate(pieces) if pieces else flat[:0]
 
     if case["name"].startswith("nz_pad_"):
@@ -122,9 +124,12 @@ def select_compared_region(case, arr):
 
     return np.asarray(arr)[:vr, :vc]
 
-_SMOKE_CASE_NAMES = ['nd_f32_16x64', 'dn_pad_max_f32_16x64']
+
+_SMOKE_CASE_NAMES = ["nd_f32_16x64", "dn_pad_max_f32_16x64"]
 _SMOKE_CASE_NAME_SET = set(_SMOKE_CASE_NAMES)
-_missing = [name for name in _SMOKE_CASE_NAMES if name not in {case["name"] for case in CASES}]
+_missing = [
+    name for name in _SMOKE_CASE_NAMES if name not in {case["name"] for case in CASES}
+]
 if _missing:
     raise RuntimeError("unknown smoke case(s): " + ", ".join(_missing))
 CASES = [case for case in CASES if case["name"] in _SMOKE_CASE_NAME_SET]

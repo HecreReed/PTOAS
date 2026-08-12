@@ -13,10 +13,19 @@ import ptodsl.tilelib as tilelib
 from ._cube import MATMUL_BIAS_DTYPES
 
 
-@tilelib.tile_template(op="pto.tgemv.bias", target="a5", name="template_tgemv_bias",
-                       dtypes=MATMUL_BIAS_DTYPES, iteration_axis="none",
-                       op_engine="cube", op_class="other", id=0, loop_depth=1,
-                       is_post_update=False, tags=("cube", "gemv", "bias"))
+@tilelib.tile_template(
+    op="pto.tgemv.bias",
+    target="a5",
+    name="template_tgemv_bias",
+    dtypes=MATMUL_BIAS_DTYPES,
+    iteration_axis="none",
+    op_engine="cube",
+    op_class="other",
+    id=0,
+    loop_depth=1,
+    is_post_update=False,
+    tags=("cube", "gemv", "bias"),
+)
 def template_tgemv_bias(lhs: pto.Tile, rhs: pto.Tile, bias: pto.Tile, dst: pto.Tile):
     _, k = lhs.valid_shape
     _, n = rhs.valid_shape

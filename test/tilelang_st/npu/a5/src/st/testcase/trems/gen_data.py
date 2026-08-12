@@ -39,9 +39,13 @@ for case in CASES:
     vr, vc = valid_shape
     scalar_val = dtype(SCALAR)
     if np.issubdtype(dtype, np.floating):
-        golden[:vr, :vc] = (input1[:vr, :vc] - np.trunc(input1[:vr, :vc] / scalar_val) * scalar_val).astype(dtype, copy=False)
+        golden[:vr, :vc] = (
+            input1[:vr, :vc] - np.trunc(input1[:vr, :vc] / scalar_val) * scalar_val
+        ).astype(dtype, copy=False)
     else:
         golden[:vr, :vc] = (input1[:vr, :vc] % scalar_val).astype(dtype, copy=False)
 
     save_case_data(case["name"], {"input1": input1, "golden": golden})
-    print(f"[INFO] gen_data: {case['name']} src_shape={shape} src_valid_shape={valid_shape} dst_shape={dst_shape} dtype={dtype.__name__} scalar={SCALAR}")
+    print(
+        f"[INFO] gen_data: {case['name']} src_shape={shape} src_valid_shape={valid_shape} dst_shape={dst_shape} dtype={dtype.__name__} scalar={SCALAR}"
+    )

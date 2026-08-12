@@ -13,10 +13,21 @@ import numpy as np
 
 
 OUTPUT_DTYPES = {
-    2: np.uint16, 3: np.uint32, 5: np.int16, 6: np.int32,
-    8: np.uint32, 9: np.uint8, 11: np.int32, 12: np.int8,
-    14: np.uint16, 15: np.uint8, 17: np.int16, 18: np.int8,
-    21: np.uint16, 22: np.uint32, 23: np.uint32,
+    2: np.uint16,
+    3: np.uint32,
+    5: np.int16,
+    6: np.int32,
+    8: np.uint32,
+    9: np.uint8,
+    11: np.int32,
+    12: np.int8,
+    14: np.uint16,
+    15: np.uint8,
+    17: np.int16,
+    18: np.int8,
+    21: np.uint16,
+    22: np.uint32,
+    23: np.uint32,
 }
 
 
@@ -33,8 +44,7 @@ def main() -> None:
             continue
         mismatches = np.flatnonzero(golden != output)
         shown = mismatches[:8]
-        details = ", ".join(
-            f"{int(i)}:{golden[i]}!={output[i]}" for i in shown)
+        details = ", ".join(f"{int(i)}:{golden[i]}!={output[i]}" for i in shown)
         print(f"[ERROR] v{index}: {mismatches.size} mismatches ({details})")
     if failed:
         sys.exit(2)

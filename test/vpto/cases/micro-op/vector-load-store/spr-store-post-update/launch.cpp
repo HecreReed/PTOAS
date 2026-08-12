@@ -16,14 +16,11 @@
 #include "acl/acl.h"
 #endif
 
-extern "C" __global__[aicore] void
-spr_store_post_update_kernel(__gm__ unsigned int *input,
-                             __gm__ unsigned int *output_i,
-                             __gm__ unsigned int *output_s);
+extern "C" __global__[aicore] void spr_store_post_update_kernel(
+    __gm__ unsigned int* input, __gm__ unsigned int* output_i, __gm__ unsigned int* output_s);
 
-void LaunchSprStorePostUpdate(uint32_t *input, uint32_t *outputI,
-                              uint32_t *outputS, void *stream) {
-  spr_store_post_update_kernel<<<1, nullptr, stream>>>(
-      (__gm__ unsigned int *)input, (__gm__ unsigned int *)outputI,
-      (__gm__ unsigned int *)outputS);
+void LaunchSprStorePostUpdate(uint32_t* input, uint32_t* outputI, uint32_t* outputS, void* stream)
+{
+    spr_store_post_update_kernel<<<1, nullptr, stream>>>(
+        (__gm__ unsigned int*)input, (__gm__ unsigned int*)outputI, (__gm__ unsigned int*)outputS);
 }

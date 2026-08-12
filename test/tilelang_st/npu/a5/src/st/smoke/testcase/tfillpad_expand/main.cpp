@@ -22,51 +22,58 @@
 using namespace PtoTestCommon;
 
 // Kernel launch wrappers (defined in launch.cpp)
-void LaunchTFILLPAD_EXPAND_u16_64x16_src_63x7(uint16_t *src, uint16_t *dst, void *stream);
-void LaunchTFILLPAD_EXPAND_u16_260x32_src_259x7(uint16_t *src, uint16_t *dst, void *stream);
+void LaunchTFILLPAD_EXPAND_u16_64x16_src_63x7(uint16_t* src, uint16_t* dst, void* stream);
+void LaunchTFILLPAD_EXPAND_u16_260x32_src_259x7(uint16_t* src, uint16_t* dst, void* stream);
 
 enum class DataType { U16, S8 };
 
 struct TestCase {
-    const char *name;
-    DataType    dtype;
-    void (*launch)(void *, void *, void *);  // Generic launch function pointer
-    size_t      srcRows;
-    size_t      srcCols;
-    size_t      srcValidRows;
-    size_t      srcValidCols;
-    size_t      dstRows;
-    size_t      dstCols;
-    size_t      dstValidRows;
-    size_t      dstValidCols;
-    size_t      elemSize;
+    const char* name;
+    DataType dtype;
+    void (*launch)(void*, void*, void*); // Generic launch function pointer
+    size_t srcRows;
+    size_t srcCols;
+    size_t srcValidRows;
+    size_t srcValidCols;
+    size_t dstRows;
+    size_t dstCols;
+    size_t dstValidRows;
+    size_t dstValidCols;
+    size_t elemSize;
 };
 
 // Helper to wrap type-specific launch functions
-template<typename T>
-void wrapLaunch(void *src, void *dst, void *stream, void (*fn)(T *, T *, void *)) {
-    fn((T *)src, (T *)dst, stream);
+template <typename T>
+void wrapLaunch(void* src, void* dst, void* stream, void (*fn)(T*, T*, void*))
+{
+    fn((T*)src, (T*)dst, stream);
 }
 
 static const TestCase kCases[] = {
-{"u16_64x16_src_63x7", DataType::U16,
-     [](void *src, void *dst, void *stream) { wrapLaunch<uint16_t>(src, dst, stream, LaunchTFILLPAD_EXPAND_u16_64x16_src_63x7); },
+    {"u16_64x16_src_63x7", DataType::U16,
+     [](void* src, void* dst, void* stream) {
+         wrapLaunch<uint16_t>(src, dst, stream, LaunchTFILLPAD_EXPAND_u16_64x16_src_63x7);
+     },
      64, 16, 63, 7, 64, 16, 64, 16, sizeof(uint16_t)},
-{"u16_260x32_src_259x7", DataType::U16,
-     [](void *src, void *dst, void *stream) { wrapLaunch<uint16_t>(src, dst, stream, LaunchTFILLPAD_EXPAND_u16_260x32_src_259x7); },
+    {"u16_260x32_src_259x7", DataType::U16,
+     [](void* src, void* dst, void* stream) {
+         wrapLaunch<uint16_t>(src, dst, stream, LaunchTFILLPAD_EXPAND_u16_260x32_src_259x7);
+     },
      260, 32, 259, 7, 260, 32, 260, 32, sizeof(uint16_t)},
 };
 static constexpr size_t kNumCases = sizeof(kCases) / sizeof(kCases[0]);
 
-static int RunCase(const TestCase &tc, int deviceId, aclrtStream stream) {
+static int RunCase(const TestCase& tc, int deviceId, aclrtStream stream)
+{
     int rc = 0;
     size_t srcElemCount = tc.srcRows * tc.srcCols;
     size_t dstElemCount = tc.dstRows * tc.dstCols;
-    size_t srcFileSize  = srcElemCount * tc.elemSize;
-    size_t dstFileSize  = dstElemCount * tc.elemSize;
+    size_t srcFileSize = srcElemCount * tc.elemSize;
+    size_t dstFileSize = dstElemCount * tc.elemSize;
 
-    std::printf("[INFO] === case: %s (src=%zux%zu valid=%zux%zu -> dst=%zux%zu) ===\n",
-                tc.name, tc.srcRows, tc.srcCols, tc.srcValidRows, tc.srcValidCols, tc.dstRows, tc.dstCols);
+    std::printf(
+        "[INFO] === case: %s (src=%zux%zu valid=%zux%zu -> dst=%zux%zu) ===\n", tc.name, tc.srcRows, tc.srcCols,
+        tc.srcValidRows, tc.srcValidCols, tc.dstRows, tc.dstCols);
 
     std::string caseDir = std::string("./") + tc.name;
     size_t inputFileSize = srcFileSize;
@@ -113,15 +120,16 @@ static int RunCase(const TestCase &tc, int deviceId, aclrtStream stream) {
     return rc;
 }
 
-int main(int argc, char *argv[]) {
-    const char *caseFilter = (argc > 1) ? argv[1] : nullptr;
+int main(int argc, char* argv[])
+{
+    const char* caseFilter = (argc > 1) ? argv[1] : nullptr;
 
     int rc = 0;
     int deviceId = 0;
     aclrtStream stream = nullptr;
 
     aclInit(nullptr);
-    if (const char *envDevice = std::getenv("ACL_DEVICE_ID")) {
+    if (const char* envDevice = std::getenv("ACL_DEVICE_ID")) {
         deviceId = std::atoi(envDevice);
     }
     aclrtSetDevice(deviceId);

@@ -61,8 +61,13 @@ def test_scalar_f32(case, torch, target_arch, backend):
     op_name, ref_fn, rows, cols, scalar_val, desc = case
 
     kernel = make_scalar_kernel(
-        op_name, rows, cols, scalar_val, dtype_str="float32",
-        target=target_arch, backend=backend,
+        op_name,
+        rows,
+        cols,
+        scalar_val,
+        dtype_str="float32",
+        target=target_arch,
+        backend=backend,
     )
     compile_s, launch_s = launch_and_check_scalar(
         op_name=op_name,
@@ -73,8 +78,10 @@ def test_scalar_f32(case, torch, target_arch, backend):
         dtype_str="float32",
         torch=torch,
     )
-    print(f"  PASS {op_name} f32 {rows}x{cols} s{scalar_val} ({desc}) "
-          f"compile={compile_s:.3f}s launch={launch_s:.3f}s")
+    print(
+        f"  PASS {op_name} f32 {rows}x{cols} s{scalar_val} ({desc}) "
+        f"compile={compile_s:.3f}s launch={launch_s:.3f}s"
+    )
 
 
 @pytest.mark.require_npu
@@ -83,8 +90,13 @@ def test_scalar_f16(case, torch, target_arch, backend):
     op_name, ref_fn, rows, cols, scalar_val, desc = case
 
     kernel = make_scalar_kernel(
-        op_name, rows, cols, scalar_val, dtype_str="float16",
-        target=target_arch, backend=backend,
+        op_name,
+        rows,
+        cols,
+        scalar_val,
+        dtype_str="float16",
+        target=target_arch,
+        backend=backend,
     )
     compile_s, launch_s = launch_and_check_scalar(
         op_name=op_name,
@@ -95,5 +107,7 @@ def test_scalar_f16(case, torch, target_arch, backend):
         dtype_str="float16",
         torch=torch,
     )
-    print(f"  PASS {op_name} f16 {rows}x{cols} s{scalar_val} ({desc}) "
-          f"compile={compile_s:.3f}s launch={launch_s:.3f}s")
+    print(
+        f"  PASS {op_name} f16 {rows}x{cols} s{scalar_val} ({desc}) "
+        f"compile={compile_s:.3f}s launch={launch_s:.3f}s"
+    )

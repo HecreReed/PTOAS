@@ -31,10 +31,10 @@ def read_value_index_pairs(filepath, dtype, count):
     values = []
     indices = []
 
-    struct_fmt = 'fI' if dtype == np.float32 else 'e2xI'
+    struct_fmt = "fI" if dtype == np.float32 else "e2xI"
     struct_size = struct.calcsize(struct_fmt)
 
-    with open(filepath, 'rb') as f:
+    with open(filepath, "rb") as f:
         for _ in range(count):
             data = f.read(struct_size)
             if not data:
@@ -105,7 +105,9 @@ def compare_multilist(case):
 
     # Compare top-k elements (only compare the valid output)
     vals_ok = result_cmp(golden_vals[:topk], output_vals[:topk], case["eps"])
-    indices_ok = np.allclose(golden_indices[:topk], output_indices[:topk], atol=0, rtol=0)
+    indices_ok = np.allclose(
+        golden_indices[:topk], output_indices[:topk], atol=0, rtol=0
+    )
 
     return vals_ok and indices_ok
 
@@ -144,7 +146,9 @@ def compare_topk(case):
 
     # Compare top-k elements
     vals_ok = result_cmp(golden_vals[:topk], output_vals[:topk], case["eps"])
-    indices_ok = np.allclose(golden_indices[:topk], output_indices[:topk], atol=0, rtol=0)
+    indices_ok = np.allclose(
+        golden_indices[:topk], output_indices[:topk], atol=0, rtol=0
+    )
 
     return vals_ok and indices_ok
 
@@ -209,7 +213,9 @@ def main():
                 all_passed = False
 
         else:
-            print(style_fail(f"[ERROR] {case['name']}: unsupported format {format_type}"))
+            print(
+                style_fail(f"[ERROR] {case['name']}: unsupported format {format_type}")
+            )
             all_passed = False
 
     if not all_passed:

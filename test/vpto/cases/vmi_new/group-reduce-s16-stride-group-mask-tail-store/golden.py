@@ -26,7 +26,9 @@ def generate(output_dir: Path) -> None:
     inactive_base = np.linspace(31.0, 35.0, GROUP_SIZE - ACTIVE, dtype=np.float32)
     for row in range(ROWS):
         begin = row * ROW_STRIDE
-        src[begin : begin + ACTIVE] = active_base + np.float32(row) * np.float32(0.03125)
+        src[begin : begin + ACTIVE] = active_base + np.float32(row) * np.float32(
+            0.03125
+        )
         src[begin + ACTIVE : begin + GROUP_SIZE] = inactive_base + np.float32(row)
         golden[row] = np.sum(src[begin : begin + ACTIVE], dtype=np.float32)
 

@@ -128,7 +128,7 @@ def main() -> None:
     if args.groups == 2:
         half = (
             f" half0={got[0, :4].tolist()}"
-            f"|half1={got[0, PHYS_VL:PHYS_VL + 4].tolist()}"
+            f"|half1={got[0, PHYS_VL : PHYS_VL + 4].tolist()}"
         )
     print(
         f"PASS groups={args.groups} remat={K_REMAT} "

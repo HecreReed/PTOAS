@@ -27,7 +27,11 @@ from ._runtime_index_ops import coerce_runtime_index
 from ._scalar_coercion import coerce_scalar_to_type
 from ._surface_types import const_expr
 from ._tracing.active import current_session, require_active_session
-from ._surface_values import unwrap_surface_value, wrap_like_surface_value, wrap_surface_value
+from ._surface_values import (
+    unwrap_surface_value,
+    wrap_like_surface_value,
+    wrap_surface_value,
+)
 from ._types import _StructDescriptor
 
 from ptoas.mlir.dialects import pto as _pto, scf
@@ -36,13 +40,17 @@ from ptoas.mlir.ir import InsertionPoint
 
 # ── vecscope ──────────────────────────────────────────────────────────────────
 
+
 def _require_explicit_mode(surface: str):
     session = current_session()
     if session is None:
         return
-    current_module_spec = getattr(session, "current_function_module_spec", session.module_spec)
+    current_module_spec = getattr(
+        session, "current_function_module_spec", session.module_spec
+    )
     if getattr(current_module_spec, "mode", None) != "explicit":
         raise explicit_mode_required_with_context_error(surface, current_module_spec)
+
 
 class _VecScopeCM:
     """Context manager for ``pto.vecscope { … }``."""
@@ -93,11 +101,14 @@ def section(kind: str) -> _SectionCM:
 
 # ── compile-time control-flow helpers ─────────────────────────────────────────
 
+
 def static_range(*args):
     """Return ``range(*args)`` for trace-time unrolling under AST rewrite."""
     return range(*args)
 
+
 # ── for_ ──────────────────────────────────────────────────────────────────────
+
 
 class LoopHandle:
     """
@@ -122,7 +133,9 @@ class LoopHandle:
     def iter_args(self):
         return tuple(
             wrap_like_surface_value(template, value)
-            for template, value in zip(self._iter_arg_templates, self._op.inner_iter_args)
+            for template, value in zip(
+                self._iter_arg_templates, self._op.inner_iter_args
+            )
         )
 
     @property
@@ -139,7 +152,9 @@ class _ForCM:
         self._stop = stop
         self._step = step
         self._iter_arg_templates = tuple(iter_args) if iter_args is not None else ()
-        self._iter_args = [unwrap_surface_value(value) for value in self._iter_arg_templates]
+        self._iter_args = [
+            unwrap_surface_value(value) for value in self._iter_arg_templates
+        ]
         self._for_op = None
         self._ip = None
 
@@ -244,19 +259,25 @@ class _CarryForCM(_ForCM):
     @property
     def iv(self):
         if not self._entered:
-            raise RuntimeError("loop.iv is only available inside an active carry loop body")
+            raise RuntimeError(
+                "loop.iv is only available inside an active carry loop body"
+            )
         return self._loop_handle.iv
 
     def __getattr__(self, name):
         if name in self._state_names:
             if not self._entered:
-                raise RuntimeError(f"loop.{name} is only available inside an active carry loop body")
+                raise RuntimeError(
+                    f"loop.{name} is only available inside an active carry loop body"
+                )
             return getattr(self._state, name)
         raise AttributeError(name)
 
     def update(self, **kwargs):
         if not self._entered:
-            raise RuntimeError("loop.update(...) may only be called inside the loop body")
+            raise RuntimeError(
+                "loop.update(...) may only be called inside the loop body"
+            )
         if self._session_frame is not None:
             self._session.update_carry_loop(self._session_frame, **kwargs)
             return
@@ -268,17 +289,20 @@ class _CarryForCM(_ForCM):
                 pieces.append(f"missing: {', '.join(missing)}")
             if extra:
                 pieces.append(f"unexpected: {', '.join(extra)}")
-            raise RuntimeError("loop.update(...) must match carry names exactly; " + "; ".join(pieces))
+            raise RuntimeError(
+                "loop.update(...) must match carry names exactly; " + "; ".join(pieces)
+            )
         if self._yield_values is not None:
             raise RuntimeError("loop.update(...) may only be called once per loop body")
         self._yield_values = [
-            unwrap_surface_value(kwargs[name])
-            for name in self._state_names
+            unwrap_surface_value(kwargs[name]) for name in self._state_names
         ]
 
     def final(self, name):
         if self._for_op is None:
-            raise RuntimeError("loop.final(...) is only available after the loop has been built")
+            raise RuntimeError(
+                "loop.final(...) is only available after the loop has been built"
+            )
         try:
             index = self._state_names.index(name)
         except ValueError as exc:
@@ -286,7 +310,9 @@ class _CarryForCM(_ForCM):
                 f"loop.final(...) requested unknown carry state '{name}'; "
                 f"expected one of: {', '.join(self._state_names)}"
             ) from exc
-        return wrap_like_surface_value(self._state_templates[index], self._for_op.results[index])
+        return wrap_like_surface_value(
+            self._state_templates[index], self._for_op.results[index]
+        )
 
 
 class _ForBuilder:
@@ -304,7 +330,9 @@ class _ForBuilder:
 
     def carry(self, **kwargs):
         if not kwargs:
-            raise ValueError("carry(...) requires at least one named loop-carried value")
+            raise ValueError(
+                "carry(...) requires at least one named loop-carried value"
+            )
         for name, value in kwargs.items():
             if not isinstance(name, str) or not name:
                 raise TypeError("carry(...) names must be non-empty strings")
@@ -322,6 +350,7 @@ def _coerce_index(value):
 
 
 # ── if_ ───────────────────────────────────────────────────────────────────────
+
 
 def _find_parent_block(op_view):
     """Return the block that directly contains *op_view*."""
@@ -441,14 +470,18 @@ class _IfCM:
 
     def _enter_branch(self, branch_name):
         if self._finalized:
-            raise RuntimeError("pto.if_(...) branches are no longer available after the conditional closes")
+            raise RuntimeError(
+                "pto.if_(...) branches are no longer available after the conditional closes"
+            )
         if self._active_branch is not None:
             raise RuntimeError(
                 "pto.if_(...) does not support nested branch entry; close the current "
                 f"br.{self._active_branch}_ block before entering br.{branch_name}_"
             )
         if self._branch_closed[branch_name]:
-            raise RuntimeError(f"br.{branch_name}_ may only be entered once per pto.if_(...)")
+            raise RuntimeError(
+                f"br.{branch_name}_ may only be entered once per pto.if_(...)"
+            )
         self._active_branch = branch_name
         self._branch_entered[branch_name] = True
 
@@ -459,18 +492,24 @@ class _IfCM:
 
     def _assign_branch_values(self, kwargs):
         if self._active_branch is None:
-            raise RuntimeError("br.assign(...) may only be used inside br.then_ or br.else_")
+            raise RuntimeError(
+                "br.assign(...) may only be used inside br.then_ or br.else_"
+            )
         if not kwargs:
             raise ValueError("br.assign(...) requires at least one named value")
         branch_name = self._active_branch
         if self._branch_assignments[branch_name] is not None:
-            raise RuntimeError(f"br.{branch_name}_ may call br.assign(...) at most once")
+            raise RuntimeError(
+                f"br.{branch_name}_ may call br.assign(...) at most once"
+            )
         raw_values = {}
         templates = {}
         order = tuple(kwargs.keys())
         for name, value in kwargs.items():
             raw_value = unwrap_surface_value(value)
-            if not hasattr(raw_value, "type") and not _is_branch_assign_literal(raw_value):
+            if not hasattr(raw_value, "type") and not _is_branch_assign_literal(
+                raw_value
+            ):
                 raise TypeError(
                     "br.assign(...) expects PTO runtime values, authored surface values, "
                     "or Python scalar literals that can be inferred from the opposite branch; "
@@ -486,7 +525,9 @@ class _IfCM:
 
     def _get_merged_value(self, name):
         if not self._finalized:
-            raise RuntimeError(f"br.{name} is only available after the pto.if_(...) block closes")
+            raise RuntimeError(
+                f"br.{name} is only available after the pto.if_(...) block closes"
+            )
         if self._merged_values is None or name not in self._merged_values:
             expected = ()
             if self._merged_values:
@@ -542,7 +583,9 @@ class _IfCM:
                 pieces.append(f"missing in else: {', '.join(missing_in_else)}")
             if missing_in_then:
                 pieces.append(f"missing in then: {', '.join(missing_in_then)}")
-            raise RuntimeError("br.assign(...) names must match across branches; " + "; ".join(pieces))
+            raise RuntimeError(
+                "br.assign(...) names must match across branches; " + "; ".join(pieces)
+            )
 
         order = then_assignment["order"]
         resolved_then_values = {}
@@ -583,7 +626,9 @@ class _IfCM:
         final_if = scf.IfOp(self._cond_value, hasElse=has_else)
         _move_block_ops(self._tmp_if.then_block, final_if.then_block, yield_values=[])
         if has_else:
-            _move_block_ops(self._tmp_if.else_block, final_if.else_block, yield_values=[])
+            _move_block_ops(
+                self._tmp_if.else_block, final_if.else_block, yield_values=[]
+            )
         self._merged_values = {}
         self._tmp_if.erase()
         self._tmp_if = final_if
@@ -591,15 +636,17 @@ class _IfCM:
     def _finalize_merged_if(self, merge_spec):
         final_if = scf.IfOp(self._cond_value, merge_spec["result_types"], hasElse=True)
         then_yield_values = [
-            merge_spec["then"]["raw_values"][name]
-            for name in merge_spec["order"]
+            merge_spec["then"]["raw_values"][name] for name in merge_spec["order"]
         ]
         else_yield_values = [
-            merge_spec["else"]["raw_values"][name]
-            for name in merge_spec["order"]
+            merge_spec["else"]["raw_values"][name] for name in merge_spec["order"]
         ]
-        _move_block_ops(self._tmp_if.then_block, final_if.then_block, yield_values=then_yield_values)
-        _move_block_ops(self._tmp_if.else_block, final_if.else_block, yield_values=else_yield_values)
+        _move_block_ops(
+            self._tmp_if.then_block, final_if.then_block, yield_values=then_yield_values
+        )
+        _move_block_ops(
+            self._tmp_if.else_block, final_if.else_block, yield_values=else_yield_values
+        )
 
         merged = {}
         for name, template, result in zip(
@@ -676,12 +723,20 @@ def _reconcile_branch_assignment_values(name, then_value, else_value):
 
 # ── yield_ ────────────────────────────────────────────────────────────────────
 
+
 def yield_(*vals):
     """Emit ``scf.yield`` with the given values."""
     scf.YieldOp([unwrap_surface_value(value) for value in vals])
 
 
 __all__ = [
-    "section", "vecscope", "static_range", "const_expr", "LoopHandle", "BranchHandle",
-    "for_", "if_", "yield_",
+    "section",
+    "vecscope",
+    "static_range",
+    "const_expr",
+    "LoopHandle",
+    "BranchHandle",
+    "for_",
+    "if_",
+    "yield_",
 ]

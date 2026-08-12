@@ -28,7 +28,7 @@ def generate(output_dir: Path, seed: int) -> None:
     rhs32 = rhs.astype(np.float32)
     matmul = np.zeros((M, N), dtype=np.float32)
     for k_idx in range(K):
-        matmul += lhs32[:, k_idx:k_idx + 1] * rhs32[k_idx:k_idx + 1, :]
+        matmul += lhs32[:, k_idx : k_idx + 1] * rhs32[k_idx : k_idx + 1, :]
     relu_pre = np.where(matmul >= np.float32(0.0), matmul, matmul * ALPHA)
     golden = relu_pre.astype(np.float16)
 
@@ -36,7 +36,9 @@ def generate(output_dir: Path, seed: int) -> None:
     lhs.reshape(-1).tofile(output_dir / "v1.bin")
     rhs.reshape(-1).tofile(output_dir / "v2.bin")
     for index in range(3, 6):
-        np.zeros((M, N), dtype=np.float16).reshape(-1).tofile(output_dir / f"v{index}.bin")
+        np.zeros((M, N), dtype=np.float16).reshape(-1).tofile(
+            output_dir / f"v{index}.bin"
+        )
         golden.reshape(-1).tofile(output_dir / f"golden_v{index}.bin")
 
 

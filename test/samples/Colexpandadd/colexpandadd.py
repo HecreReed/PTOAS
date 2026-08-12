@@ -51,8 +51,12 @@ def build():
                 tv1 = pto.MakeTensorViewOp(tv2_f32, arg1, [c1, c32], [c32, c1]).result
                 tv2 = pto.MakeTensorViewOp(tv2_f32, arg2, [c32, c32], [c32, c1]).result
 
-                sv0 = pto.PartitionViewOp(tile_view_32x32, tv0, offsets=[c0, c0], sizes=[c32, c32]).result
-                sv1 = pto.PartitionViewOp(tile_view_1x32, tv1, offsets=[c0, c0], sizes=[c1, c32]).result
+                sv0 = pto.PartitionViewOp(
+                    tile_view_32x32, tv0, offsets=[c0, c0], sizes=[c32, c32]
+                ).result
+                sv1 = pto.PartitionViewOp(
+                    tile_view_1x32, tv1, offsets=[c0, c0], sizes=[c1, c32]
+                ).result
 
                 tb0 = pto.AllocTileOp(tile_buf_32x32).result
                 tb1 = pto.AllocTileOp(tile_buf_1x32).result
@@ -62,7 +66,9 @@ def build():
                 pto.TLoadOp(None, sv1, tb1)
                 pto.TColExpandAddOp(tb0, tb1, tb2)
 
-                sv2 = pto.PartitionViewOp(tile_view_32x32, tv2, offsets=[c0, c0], sizes=[c32, c32]).result
+                sv2 = pto.PartitionViewOp(
+                    tile_view_32x32, tv2, offsets=[c0, c0], sizes=[c32, c32]
+                ).result
                 pto.TStoreOp(None, tb2, sv2)
 
                 func.ReturnOp([])

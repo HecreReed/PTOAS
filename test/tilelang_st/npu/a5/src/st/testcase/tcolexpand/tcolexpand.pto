@@ -23,7 +23,7 @@ module attributes {pto.target_arch = "a5", pto.kernel_kind = #pto.kernel_kind<ve
       shape = [%c1, %c1, %c1, %c1, %c512],
       strides = [%c512, %c512, %c512, %c512, %c1]
       : !pto.tensor_view<1x1x1x1x512xf16>
-    
+
     %dst_view = pto.make_tensor_view %dst_ptr,
       shape = [%c1, %c1, %c1, %c16, %c512],
       strides = [%c8192, %c8192, %c8192, %c512, %c1]
@@ -33,7 +33,7 @@ module attributes {pto.target_arch = "a5", pto.kernel_kind = #pto.kernel_kind<ve
       offsets = [%c0, %c0, %c0, %c0, %c0],
       sizes = [%c1, %c1, %c1, %c1, %c512]
       : !pto.tensor_view<1x1x1x1x512xf16> -> !pto.partition_tensor_view<1x1x1x1x512xf16>
-    
+
     %dst_part = pto.partition_view %dst_view,
       offsets = [%c0, %c0, %c0, %c0, %c0],
       sizes = [%c1, %c1, %c1, %c16, %c512]
@@ -41,7 +41,7 @@ module attributes {pto.target_arch = "a5", pto.kernel_kind = #pto.kernel_kind<ve
 
     %src = pto.alloc_tile
       : !pto.tile_buf<vec, 1x512xf16>
-    
+
     %dst = pto.alloc_tile
       : !pto.tile_buf<vec, 16x512xf16>
 
@@ -71,7 +71,7 @@ module attributes {pto.target_arch = "a5", pto.kernel_kind = #pto.kernel_kind<ve
       shape = [%c1, %c1, %c1, %c2, %c256],
       strides = [%c512, %c512, %c512, %c256, %c1]
       : !pto.tensor_view<1x1x1x2x256xi8>
-    
+
     %dst_view = pto.make_tensor_view %dst_ptr,
       shape = [%c1, %c1, %c1, %c32, %c256],
       strides = [%c8192, %c8192, %c8192, %c256, %c1]
@@ -81,7 +81,7 @@ module attributes {pto.target_arch = "a5", pto.kernel_kind = #pto.kernel_kind<ve
       offsets = [%c0, %c0, %c0, %c0, %c0],
       sizes = [%c1, %c1, %c1, %c2, %c255]
       : !pto.tensor_view<1x1x1x2x256xi8> -> !pto.partition_tensor_view<1x1x1x2x255xi8>
-    
+
     %dst_part = pto.partition_view %dst_view,
       offsets = [%c0, %c0, %c0, %c0, %c0],
       sizes = [%c1, %c1, %c1, %c32, %c255]
@@ -89,7 +89,7 @@ module attributes {pto.target_arch = "a5", pto.kernel_kind = #pto.kernel_kind<ve
 
     %src = pto.alloc_tile
       : !pto.tile_buf<vec, 2x256xi8, valid=2x255>
-    
+
     %dst = pto.alloc_tile
       : !pto.tile_buf<vec, 32x256xi8, valid=32x255>
 
@@ -117,7 +117,7 @@ module attributes {pto.target_arch = "a5", pto.kernel_kind = #pto.kernel_kind<ve
       shape = [%c1, %c1, %c1, %c1, %c128],
       strides = [%c128, %c128, %c128, %c128, %c1]
       : !pto.tensor_view<1x1x1x1x128xf32>
-    
+
     %dst_view = pto.make_tensor_view %dst_ptr,
       shape = [%c1, %c1, %c1, %c8, %c128],
       strides = [%c1024, %c1024, %c1024, %c128, %c1]
@@ -127,7 +127,7 @@ module attributes {pto.target_arch = "a5", pto.kernel_kind = #pto.kernel_kind<ve
       offsets = [%c0, %c0, %c0, %c0, %c0],
       sizes = [%c1, %c1, %c1, %c1, %c63]
       : !pto.tensor_view<1x1x1x1x128xf32> -> !pto.partition_tensor_view<1x1x1x1x63xf32>
-    
+
     %dst_part = pto.partition_view %dst_view,
       offsets = [%c0, %c0, %c0, %c0, %c0],
       sizes = [%c1, %c1, %c1, %c8, %c63]
@@ -135,7 +135,7 @@ module attributes {pto.target_arch = "a5", pto.kernel_kind = #pto.kernel_kind<ve
 
     %src = pto.alloc_tile
       : !pto.tile_buf<vec, 1x128xf32, valid=1x63>
-    
+
     %dst = pto.alloc_tile
       : !pto.tile_buf<vec, 8x128xf32, valid=8x63>
 
@@ -162,7 +162,7 @@ module attributes {pto.target_arch = "a5", pto.kernel_kind = #pto.kernel_kind<ve
       shape = [%c1, %c1, %c1, %c1, %c512],
       strides = [%c512, %c512, %c512, %c512, %c1]
       : !pto.tensor_view<1x1x1x1x512xf16>
-    
+
     %dst_view = pto.make_tensor_view %dst_ptr,
       shape = [%c1, %c1, %c1, %c33, %c512],
       strides = [%c16896, %c16896, %c16896, %c512, %c1]
@@ -172,7 +172,7 @@ module attributes {pto.target_arch = "a5", pto.kernel_kind = #pto.kernel_kind<ve
       offsets = [%c0, %c0, %c0, %c0, %c0],
       sizes = [%c1, %c1, %c1, %c1, %c512]
       : !pto.tensor_view<1x1x1x1x512xf16> -> !pto.partition_tensor_view<1x1x1x1x512xf16>
-    
+
     %dst_part = pto.partition_view %dst_view,
       offsets = [%c0, %c0, %c0, %c0, %c0],
       sizes = [%c1, %c1, %c1, %c33, %c512]
@@ -180,7 +180,7 @@ module attributes {pto.target_arch = "a5", pto.kernel_kind = #pto.kernel_kind<ve
 
     %src = pto.alloc_tile
       : !pto.tile_buf<vec, 1x512xf16>
-    
+
     %dst = pto.alloc_tile
       : !pto.tile_buf<vec, 33x512xf16>
 
@@ -210,7 +210,7 @@ module attributes {pto.target_arch = "a5", pto.kernel_kind = #pto.kernel_kind<ve
       shape = [%c1, %c1, %c1, %c2, %c256],
       strides = [%c512, %c512, %c512, %c256, %c1]
       : !pto.tensor_view<1x1x1x2x256xi8>
-    
+
     %dst_view = pto.make_tensor_view %dst_ptr,
       shape = [%c1, %c1, %c1, %c17, %c256],
       strides = [%c4352, %c4352, %c4352, %c256, %c1]
@@ -220,7 +220,7 @@ module attributes {pto.target_arch = "a5", pto.kernel_kind = #pto.kernel_kind<ve
       offsets = [%c0, %c0, %c0, %c0, %c0],
       sizes = [%c1, %c1, %c1, %c2, %c44]
       : !pto.tensor_view<1x1x1x2x256xi8> -> !pto.partition_tensor_view<1x1x1x2x44xi8>
-    
+
     %dst_part = pto.partition_view %dst_view,
       offsets = [%c0, %c0, %c0, %c0, %c0],
       sizes = [%c1, %c1, %c1, %c17, %c44]
@@ -228,7 +228,7 @@ module attributes {pto.target_arch = "a5", pto.kernel_kind = #pto.kernel_kind<ve
 
     %src = pto.alloc_tile
       : !pto.tile_buf<vec, 2x256xi8, valid=2x44>
-    
+
     %dst = pto.alloc_tile
       : !pto.tile_buf<vec, 17x256xi8, valid=17x44>
 
@@ -256,7 +256,7 @@ module attributes {pto.target_arch = "a5", pto.kernel_kind = #pto.kernel_kind<ve
       shape = [%c1, %c1, %c1, %c1, %c64],
       strides = [%c64, %c64, %c64, %c64, %c1]
       : !pto.tensor_view<1x1x1x1x64xf32>
-    
+
     %dst_view = pto.make_tensor_view %dst_ptr,
       shape = [%c1, %c1, %c1, %c54, %c64],
       strides = [%c3456, %c3456, %c3456, %c64, %c1]
@@ -266,7 +266,7 @@ module attributes {pto.target_arch = "a5", pto.kernel_kind = #pto.kernel_kind<ve
       offsets = [%c0, %c0, %c0, %c0, %c0],
       sizes = [%c1, %c1, %c1, %c1, %c63]
       : !pto.tensor_view<1x1x1x1x64xf32> -> !pto.partition_tensor_view<1x1x1x1x63xf32>
-    
+
     %dst_part = pto.partition_view %dst_view,
       offsets = [%c0, %c0, %c0, %c0, %c0],
       sizes = [%c1, %c1, %c1, %c54, %c63]
@@ -274,7 +274,7 @@ module attributes {pto.target_arch = "a5", pto.kernel_kind = #pto.kernel_kind<ve
 
     %src = pto.alloc_tile
       : !pto.tile_buf<vec, 1x64xf32, valid=1x63>
-    
+
     %dst = pto.alloc_tile
       : !pto.tile_buf<vec, 54x64xf32, valid=54x63>
 

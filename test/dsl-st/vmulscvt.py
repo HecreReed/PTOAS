@@ -57,8 +57,12 @@ def vmulscvt_pack_kernel(
         shape=[1, 1, 1, 1, OUT_COLS],
         strides=[out_total, out_total, out_total, out_total, 1],
     )
-    inp_part = pto.partition_view(inp_view, offsets=offsets, sizes=[1, 1, 1, 1, SRC_COLS])
-    out_part = pto.partition_view(out_view, offsets=offsets, sizes=[1, 1, 1, 1, OUT_COLS])
+    inp_part = pto.partition_view(
+        inp_view, offsets=offsets, sizes=[1, 1, 1, 1, SRC_COLS]
+    )
+    out_part = pto.partition_view(
+        out_view, offsets=offsets, sizes=[1, 1, 1, 1, OUT_COLS]
+    )
 
     src_tile = pto.alloc_tile(
         shape=[1, SRC_COLS],
@@ -106,7 +110,9 @@ def vmulscvt_pack_kernel(
 def make_inputs():
     # Use exact binary fractions so the test focuses on packing/layout rather
     # than float16 tie-breaking behavior.
-    inp = ((np.arange(SRC_COLS, dtype=np.int32) - (SRC_COLS // 2)) / 8.0).astype(np.float32)
+    inp = ((np.arange(SRC_COLS, dtype=np.int32) - (SRC_COLS // 2)) / 8.0).astype(
+        np.float32
+    )
     return [inp.reshape(1, SRC_COLS)]
 
 

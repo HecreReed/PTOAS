@@ -76,7 +76,7 @@ def build():
             # VReg and Mask types have no Python-binding constructors yet;
             # Type.parse is the only available path for these two.
             vreg_64f32 = Type.parse("!pto.vreg<64xf32>")
-            mask_b32   = Type.parse("!pto.mask<b32>")
+            mask_b32 = Type.parse("!pto.mask<b32>")
 
             # ── Shared attributes ─────────────────────────────────────────
             target_arch_attr = StringAttr.get("a5")
@@ -152,7 +152,9 @@ def build():
                                 vreg6 = pto.VldsOp(vreg_64f32, ptr5, c0).result
 
                                 # %7 = pto.vadd %4, %6, %mask
-                                vreg7 = pto.VaddOp(vreg_64f32, vreg4, vreg6, mask).result
+                                vreg7 = pto.VaddOp(
+                                    vreg_64f32, vreg4, vreg6, mask
+                                ).result
 
                                 # pto.vsts %7, %5[%c0], %mask
                                 pto.VstsOp(vreg7, ptr5, c0, mask)

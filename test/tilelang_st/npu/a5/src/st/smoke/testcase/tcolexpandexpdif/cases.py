@@ -32,7 +32,7 @@ CASES = [
         "name": "fp32_32_16_1_16",
         "dtype": np.float32,
         "src0_shape": (32, 16),
-                "src1_shape": (1, 16),
+        "src1_shape": (1, 16),
         "shape": (32, 16),
         "valid_shape": (32, 16),
         "eps": 1e-5,
@@ -41,7 +41,7 @@ CASES = [
         "name": "fp32_16_32_1_32",
         "dtype": np.float32,
         "src0_shape": (16, 32),
-                "src1_shape": (1, 32),
+        "src1_shape": (1, 32),
         "shape": (16, 32),
         "valid_shape": (16, 32),
         "eps": 1e-5,
@@ -50,7 +50,7 @@ CASES = [
         "name": "fp16_32_32_1_32",
         "dtype": np.float16,
         "src0_shape": (32, 32),
-                "src1_shape": (1, 32),
+        "src1_shape": (1, 32),
         "shape": (32, 32),
         "valid_shape": (32, 32),
         "eps": 1e-2,
@@ -59,16 +59,18 @@ CASES = [
         "name": "fp16_16_128_1_128",
         "dtype": np.float16,
         "src0_shape": (16, 128),
-                "src1_shape": (1, 128),
+        "src1_shape": (1, 128),
         "shape": (16, 128),
         "valid_shape": (16, 128),
         "eps": 1e-2,
     },
 ]
 
-_SMOKE_CASE_NAMES = ['fp32_32_16_1_16', 'fp16_32_32_1_32']
+_SMOKE_CASE_NAMES = ["fp32_32_16_1_16", "fp16_32_32_1_32"]
 _SMOKE_CASE_NAME_SET = set(_SMOKE_CASE_NAMES)
-_missing = [name for name in _SMOKE_CASE_NAMES if name not in {case["name"] for case in CASES}]
+_missing = [
+    name for name in _SMOKE_CASE_NAMES if name not in {case["name"] for case in CASES}
+]
 if _missing:
     raise RuntimeError("unknown smoke case(s): " + ", ".join(_missing))
 CASES = [case for case in CASES if case["name"] in _SMOKE_CASE_NAME_SET]

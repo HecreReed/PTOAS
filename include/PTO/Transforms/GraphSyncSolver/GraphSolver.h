@@ -18,62 +18,60 @@ namespace mlir::pto::syncsolver {
 
 class GraphSolver {
 public:
-  struct Edge {
-    ConflictPair *const conflictPair;
-    const CorePipeInfo corePipeSrc;
-    const CorePipeInfo corePipeDst;
-    const int startIndex;
-    const int endIndex;
-    const bool isUnitFlag;
-    Edge() = delete;
-    Edge(ConflictPair *conflictPair, CorePipeInfo corePipeSrc,
-         CorePipeInfo corePipeDst, int startIndex, int endIndex,
-         bool isUnitFlag)
-        : conflictPair(conflictPair), corePipeSrc(corePipeSrc),
-          corePipeDst(corePipeDst), startIndex(startIndex), endIndex(endIndex),
-          isUnitFlag(isUnitFlag) {}
-    Edge(CorePipeInfo corePipeSrc, CorePipeInfo corePipeDst, int startIndex,
-         int endIndex)
-        : Edge(nullptr, corePipeSrc, corePipeDst, startIndex, endIndex, false) {
-    }
-    bool operator<(const Edge &other) const;
-  };
+    struct Edge {
+        ConflictPair* const conflictPair;
+        const CorePipeInfo corePipeSrc;
+        const CorePipeInfo corePipeDst;
+        const int startIndex;
+        const int endIndex;
+        const bool isUnitFlag;
+        Edge() = delete;
+        Edge(
+            ConflictPair* conflictPair, CorePipeInfo corePipeSrc, CorePipeInfo corePipeDst, int startIndex,
+            int endIndex, bool isUnitFlag)
+            : conflictPair(conflictPair),
+              corePipeSrc(corePipeSrc),
+              corePipeDst(corePipeDst),
+              startIndex(startIndex),
+              endIndex(endIndex),
+              isUnitFlag(isUnitFlag)
+        {}
+        Edge(CorePipeInfo corePipeSrc, CorePipeInfo corePipeDst, int startIndex, int endIndex)
+            : Edge(nullptr, corePipeSrc, corePipeDst, startIndex, endIndex, false)
+        {}
+        bool operator<(const Edge& other) const;
+    };
 
-  // Configuration options.
-  const SyncSolverOptions options;
+    // Configuration options.
+    const SyncSolverOptions options;
 
-  // adjacencyList[pipeSrc][pipeDst] stores a set of Edge objects representing
-  // directed transitions from pipeSrc to pipeDst that are valid for a given
-  // (startIndex,endIndex) lifetime. Used by runDijkstra to compute minimum
-  // distance paths between two pipe ids taking ordering constraints into
-  // account.
-  llvm::DenseMap<CorePipeInfo, llvm::DenseMap<CorePipeInfo, std::set<Edge>>>
-      adjacencyList;
+    // adjacencyList[pipeSrc][pipeDst] stores a set of Edge objects representing
+    // directed transitions from pipeSrc to pipeDst that are valid for a given
+    // (startIndex,endIndex) lifetime. Used by runDijkstra to compute minimum
+    // distance paths between two pipe ids taking ordering constraints into
+    // account.
+    llvm::DenseMap<CorePipeInfo, llvm::DenseMap<CorePipeInfo, std::set<Edge>>> adjacencyList;
 
-  GraphSolver(const SyncSolverOptions &options) : options(options) {}
+    GraphSolver(const SyncSolverOptions& options) : options(options) {}
 
-  // Add a pipe-pair edge annotated with its active index interval.
-  void addPair(ConflictPair *conflictPair, CorePipeInfo corePipeSrc,
-               CorePipeInfo corePipeDst, int startIndex, int endIndex,
-               bool isUnitFlag = false);
+    // Add a pipe-pair edge annotated with its active index interval.
+    void addPair(
+        ConflictPair* conflictPair, CorePipeInfo corePipeSrc, CorePipeInfo corePipeDst, int startIndex, int endIndex,
+        bool isUnitFlag = false);
 
-  // Build adjacency list from a ConflictPair by decomposing it into edges.
-  void addConflictPair(syncsolver::ConflictPair *conflictPair);
+    // Build adjacency list from a ConflictPair by decomposing it into edges.
+    void addConflictPair(syncsolver::ConflictPair* conflictPair);
 
-  // Compact or merge overlapping edges to speed up Dijkstra queries.
-  void optimizeAdjacencyList();
+    // Compact or merge overlapping edges to speed up Dijkstra queries.
+    void optimizeAdjacencyList();
 
-  // Run shortest-path search (Dijkstra-like) with ordering constraints to find
-  // the minimal reachable index for a path from startPipe to endPipe.
-  std::optional<int> runDijkstra(CorePipeInfo corePipeSrc,
-                                 CorePipeInfo corePipeDst, int startIndex,
-                                 int endIndex);
+    // Run shortest-path search (Dijkstra-like) with ordering constraints to find
+    // the minimal reachable index for a path from startPipe to endPipe.
+    std::optional<int> runDijkstra(CorePipeInfo corePipeSrc, CorePipeInfo corePipeDst, int startIndex, int endIndex);
 
-  std::optional<int> runDijkstraUnitFlagEnabled(Occurrence *occ1,
-                                                Occurrence *occ2,
-                                                CorePipeInfo corePipeSrc,
-                                                CorePipeInfo corePipeDst,
-                                                int startIndex, int endIndex);
+    std::optional<int> runDijkstraUnitFlagEnabled(
+        Occurrence* occ1, Occurrence* occ2, CorePipeInfo corePipeSrc, CorePipeInfo corePipeDst, int startIndex,
+        int endIndex);
 };
 } // namespace mlir::pto::syncsolver
 

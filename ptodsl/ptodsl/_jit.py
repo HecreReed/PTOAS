@@ -28,11 +28,15 @@ from ._tracing import (
     current_runtime,
 )
 
-from ptoas.mlir.ir import InsertionPoint, Module, WalkResult
+from ptoas.mlir.ir import InsertionPoint, Module
 
 
 _MODULE_ATTRS = ("pto.target_arch", "pto.backend")
-_SUPPORTED_FRONTEND_OPTION_KEYS = {"ast_rewrite", "rewrite_part", "dump_rewritten_source"}
+_SUPPORTED_FRONTEND_OPTION_KEYS = {
+    "ast_rewrite",
+    "rewrite_part",
+    "dump_rewritten_source",
+}
 _SUPPORTED_REWRITE_PARTS = {"control_flow"}
 _DEFAULT_KERNEL_KIND = None
 
@@ -100,15 +104,27 @@ def _normalize_frontend_options(*, ast_rewrite, frontend_options):
 
     unknown = set(frontend_options) - _SUPPORTED_FRONTEND_OPTION_KEYS
     if unknown:
-        raise ValueError(f"@pto.jit frontend_options has unsupported keys: {sorted(unknown)!r}")
+        raise ValueError(
+            f"@pto.jit frontend_options has unsupported keys: {sorted(unknown)!r}"
+        )
 
     option_ast_rewrite = frontend_options.get("ast_rewrite")
     if option_ast_rewrite is not None and not isinstance(option_ast_rewrite, bool):
         raise TypeError("@pto.jit frontend_options['ast_rewrite'] must be a bool")
-    if ast_rewrite is not None and option_ast_rewrite is not None and bool(ast_rewrite) != option_ast_rewrite:
-        raise ValueError("@pto.jit ast_rewrite conflicts with frontend_options['ast_rewrite']")
+    if (
+        ast_rewrite is not None
+        and option_ast_rewrite is not None
+        and bool(ast_rewrite) != option_ast_rewrite
+    ):
+        raise ValueError(
+            "@pto.jit ast_rewrite conflicts with frontend_options['ast_rewrite']"
+        )
 
-    enabled = option_ast_rewrite if option_ast_rewrite is not None else (True if ast_rewrite is None else bool(ast_rewrite))
+    enabled = (
+        option_ast_rewrite
+        if option_ast_rewrite is not None
+        else (True if ast_rewrite is None else bool(ast_rewrite))
+    )
 
     rewrite_part = frontend_options.get("rewrite_part", {"control_flow"})
     if isinstance(rewrite_part, str):
@@ -117,7 +133,9 @@ def _normalize_frontend_options(*, ast_rewrite, frontend_options):
         try:
             rewrite_parts = set(rewrite_part)
         except TypeError as exc:
-            raise TypeError("@pto.jit frontend_options['rewrite_part'] must be a string or iterable of strings") from exc
+            raise TypeError(
+                "@pto.jit frontend_options['rewrite_part'] must be a string or iterable of strings"
+            ) from exc
     unsupported_parts = rewrite_parts - _SUPPORTED_REWRITE_PARTS
     if unsupported_parts:
         raise ValueError(
@@ -125,13 +143,19 @@ def _normalize_frontend_options(*, ast_rewrite, frontend_options):
             f"{sorted(_SUPPORTED_REWRITE_PARTS)!r}; got unsupported parts: {sorted(unsupported_parts)!r}"
         )
     if enabled and "control_flow" not in rewrite_parts:
-        raise ValueError("@pto.jit ast_rewrite=True requires rewrite_part to include 'control_flow'")
+        raise ValueError(
+            "@pto.jit ast_rewrite=True requires rewrite_part to include 'control_flow'"
+        )
 
     dump_rewritten_source = frontend_options.get("dump_rewritten_source", False)
     if not isinstance(dump_rewritten_source, bool):
-        raise TypeError("@pto.jit frontend_options['dump_rewritten_source'] must be a bool")
+        raise TypeError(
+            "@pto.jit frontend_options['dump_rewritten_source'] must be a bool"
+        )
     if dump_rewritten_source:
-        raise ValueError("@pto.jit frontend_options['dump_rewritten_source']=True is reserved but not implemented yet")
+        raise ValueError(
+            "@pto.jit frontend_options['dump_rewritten_source']=True is reserved but not implemented yet"
+        )
     return enabled
 
 
@@ -271,7 +295,9 @@ def jit(
         normalized_backend = _normalize_backend(backend, fn=fn)
         if source is not None:
             if not isinstance(source, str):
-                raise TypeError("@pto.jit source must be a filesystem path string when provided")
+                raise TypeError(
+                    "@pto.jit source must be a filesystem path string when provided"
+                )
             if entry is False:
                 raise jit_source_entry_false_error(source, function_name=fn_name)
             if kernel_signature.constexpr_parameters:
@@ -286,7 +312,9 @@ def jit(
         except (OSError, TypeError):
             source_file = None
         kernel_kind_explicit = kernel_kind is not _DEFAULT_KERNEL_KIND_SENTINEL
-        effective_kernel_kind = kernel_kind if kernel_kind_explicit else _DEFAULT_KERNEL_KIND
+        effective_kernel_kind = (
+            kernel_kind if kernel_kind_explicit else _DEFAULT_KERNEL_KIND
+        )
         compiler = KernelCompiler(
             fn.__name__,
             KernelModuleSpec(

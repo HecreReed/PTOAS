@@ -45,12 +45,22 @@ def build():
 
                 arg_base, arg_exp, arg_dst = entry.arguments
 
-                tv_base = pto.MakeTensorViewOp(tv2_f32, arg_base, [c32, c32], [c32, c1]).result
-                tv_exp = pto.MakeTensorViewOp(tv2_f32, arg_exp, [c32, c32], [c32, c1]).result
-                tv_dst = pto.MakeTensorViewOp(tv2_f32, arg_dst, [c32, c32], [c32, c1]).result
+                tv_base = pto.MakeTensorViewOp(
+                    tv2_f32, arg_base, [c32, c32], [c32, c1]
+                ).result
+                tv_exp = pto.MakeTensorViewOp(
+                    tv2_f32, arg_exp, [c32, c32], [c32, c1]
+                ).result
+                tv_dst = pto.MakeTensorViewOp(
+                    tv2_f32, arg_dst, [c32, c32], [c32, c1]
+                ).result
 
-                sv_base = pto.PartitionViewOp(tile_view_32, tv_base, offsets=[c0, c0], sizes=[c32, c32]).result
-                sv_exp = pto.PartitionViewOp(tile_view_32, tv_exp, offsets=[c0, c0], sizes=[c32, c32]).result
+                sv_base = pto.PartitionViewOp(
+                    tile_view_32, tv_base, offsets=[c0, c0], sizes=[c32, c32]
+                ).result
+                sv_exp = pto.PartitionViewOp(
+                    tile_view_32, tv_exp, offsets=[c0, c0], sizes=[c32, c32]
+                ).result
 
                 tb_base = pto.AllocTileOp(tile_buf_32).result
                 tb_exp = pto.AllocTileOp(tile_buf_32).result
@@ -63,7 +73,9 @@ def build():
                 # Floating-point path requires tmp.
                 pto.TPowOp(tb_base, tb_exp, tb_dst, tmp=tb_tmp)
 
-                sv_dst = pto.PartitionViewOp(tile_view_32, tv_dst, offsets=[c0, c0], sizes=[c32, c32]).result
+                sv_dst = pto.PartitionViewOp(
+                    tile_view_32, tv_dst, offsets=[c0, c0], sizes=[c32, c32]
+                ).result
                 pto.TStoreOp(None, tb_dst, sv_dst)
 
                 func.ReturnOp([])

@@ -20,29 +20,30 @@
 
 using namespace PtoTestCommon;
 
-void LaunchTLOAD_ND_f32_16x64(float *src, float *dst, void *stream);
-void LaunchTLOAD_DN_f32_16x64(float *src, float *dst, void *stream);
-void LaunchTLOAD_ND_PAD_ZERO_f32_16x64(float *src, float *dst, void *stream);
-void LaunchTLOAD_DN_PAD_MAX_f32_16x64(float *src, float *dst, void *stream);
-void LaunchTLOAD_NZ_PAD_MIN_f32_128x128(float *src, float *dst, void *stream);
+void LaunchTLOAD_ND_f32_16x64(float* src, float* dst, void* stream);
+void LaunchTLOAD_DN_f32_16x64(float* src, float* dst, void* stream);
+void LaunchTLOAD_ND_PAD_ZERO_f32_16x64(float* src, float* dst, void* stream);
+void LaunchTLOAD_DN_PAD_MAX_f32_16x64(float* src, float* dst, void* stream);
+void LaunchTLOAD_NZ_PAD_MIN_f32_128x128(float* src, float* dst, void* stream);
 
-using LaunchFn = void (*)(float *, float *, void *);
+using LaunchFn = void (*)(float*, float*, void*);
 
 struct TestCase {
-    const char *name;
-    LaunchFn    launch;
-    size_t      rows;
-    size_t      cols;
-    size_t      elemSize;
+    const char* name;
+    LaunchFn launch;
+    size_t rows;
+    size_t cols;
+    size_t elemSize;
 };
 
 static const TestCase kCases[] = {
-{"nd_f32_16x64",    LaunchTLOAD_ND_f32_16x64,    16, 64,  sizeof(float)},
-{"dn_pad_max_f32_16x64", LaunchTLOAD_DN_PAD_MAX_f32_16x64, 16, 64, sizeof(float)},
+    {"nd_f32_16x64", LaunchTLOAD_ND_f32_16x64, 16, 64, sizeof(float)},
+    {"dn_pad_max_f32_16x64", LaunchTLOAD_DN_PAD_MAX_f32_16x64, 16, 64, sizeof(float)},
 };
 static constexpr size_t kNumCases = sizeof(kCases) / sizeof(kCases[0]);
 
-static int RunCase(const TestCase &tc, aclrtStream stream) {
+static int RunCase(const TestCase& tc, aclrtStream stream)
+{
     int rc = 0;
     const size_t elemCount = tc.rows * tc.cols;
     const size_t fileSize = elemCount * tc.elemSize;
@@ -52,15 +53,15 @@ static int RunCase(const TestCase &tc, aclrtStream stream) {
     std::string caseDir = std::string("./") + tc.name;
     size_t inputFileSize = fileSize;
 
-    float *srcHost = nullptr;
-    float *dstHost = nullptr;
-    float *srcDevice = nullptr;
-    float *dstDevice = nullptr;
+    float* srcHost = nullptr;
+    float* dstHost = nullptr;
+    float* srcDevice = nullptr;
+    float* dstDevice = nullptr;
 
-    aclrtMallocHost((void **)(&srcHost), fileSize);
-    aclrtMallocHost((void **)(&dstHost), fileSize);
-    aclrtMalloc((void **)&srcDevice, fileSize, ACL_MEM_MALLOC_HUGE_FIRST);
-    aclrtMalloc((void **)&dstDevice, fileSize, ACL_MEM_MALLOC_HUGE_FIRST);
+    aclrtMallocHost((void**)(&srcHost), fileSize);
+    aclrtMallocHost((void**)(&dstHost), fileSize);
+    aclrtMalloc((void**)&srcDevice, fileSize, ACL_MEM_MALLOC_HUGE_FIRST);
+    aclrtMalloc((void**)&dstDevice, fileSize, ACL_MEM_MALLOC_HUGE_FIRST);
 
     if (!ReadFile((caseDir + "/input.bin").c_str(), inputFileSize, srcHost, fileSize)) {
         std::fprintf(stderr, "[ERROR] failed to read %s/input.bin\n", caseDir.c_str());
@@ -93,8 +94,9 @@ static int RunCase(const TestCase &tc, aclrtStream stream) {
     return rc;
 }
 
-int main(int argc, char *argv[]) {
-    const char *caseFilter = (argc > 1) ? argv[1] : nullptr;
+int main(int argc, char* argv[])
+{
+    const char* caseFilter = (argc > 1) ? argv[1] : nullptr;
 
     int rc = 0;
     bool matchedCase = (caseFilter == nullptr);
@@ -102,7 +104,7 @@ int main(int argc, char *argv[]) {
     aclrtStream stream = nullptr;
 
     aclInit(nullptr);
-    if (const char *envDevice = std::getenv("ACL_DEVICE_ID")) {
+    if (const char* envDevice = std::getenv("ACL_DEVICE_ID")) {
         deviceId = std::atoi(envDevice);
     }
     aclrtSetDevice(deviceId);

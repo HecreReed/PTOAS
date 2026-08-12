@@ -16,8 +16,7 @@ namespace mlir::pto::python {
 
 /// Adds PTO dialect types, attributes, enums, and registration helpers to the
 /// project-owned ptoas._core extension module through PTOASCompiler.
-PTOAS_COMPILER_EXPORT void
-populatePTODialectBindings(pybind11::module_ &module);
+PTOAS_COMPILER_EXPORT void populatePTODialectBindings(pybind11::module_& module);
 
 } // namespace mlir::pto::python
 

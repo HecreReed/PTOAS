@@ -85,5 +85,3 @@ __global__ AICORE void gqa_qk_block(__gm__ float* v1, __gm__ float* v2, __gm__ f
   pipe_barrier(PIPE_ALL);
   return;
 }
-
-

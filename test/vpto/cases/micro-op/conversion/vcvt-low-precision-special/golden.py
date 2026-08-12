@@ -41,7 +41,7 @@ def decode_f8e4m3fn(byte):
     if byte in (0x7F, 0xFF):
         return np.float32(np.nan)
     if exp == 0:
-        return np.float32(sign * (mant / 8.0) * (2.0 ** -6))
+        return np.float32(sign * (mant / 8.0) * (2.0**-6))
     return np.float32(sign * (1.0 + mant / 8.0) * (2.0 ** (exp - 7)))
 
 
@@ -54,7 +54,7 @@ def decode_f8e5m2(byte):
             return np.float32(sign * np.inf)
         return np.float32(np.nan)
     if exp == 0:
-        return np.float32(sign * (mant / 4.0) * (2.0 ** -14))
+        return np.float32(sign * (mant / 4.0) * (2.0**-14))
     return np.float32(sign * (1.0 + mant / 4.0) * (2.0 ** (exp - 15)))
 
 
@@ -112,16 +112,44 @@ def decode_hif8(byte):
 
 FP4E1M2_TO_BF16 = np.array(
     [
-        0x0000, 0x3E80, 0x3F00, 0x3F40, 0x3F80, 0x3FA0, 0x3FC0, 0x3FE0,
-        0x8000, 0xBE80, 0xBF00, 0xBF40, 0xBF80, 0xBFA0, 0xBFC0, 0xBFE0,
+        0x0000,
+        0x3E80,
+        0x3F00,
+        0x3F40,
+        0x3F80,
+        0x3FA0,
+        0x3FC0,
+        0x3FE0,
+        0x8000,
+        0xBE80,
+        0xBF00,
+        0xBF40,
+        0xBF80,
+        0xBFA0,
+        0xBFC0,
+        0xBFE0,
     ],
     dtype=np.uint16,
 )
 
 FP4E2M1_TO_BF16 = np.array(
     [
-        0x0000, 0x3F00, 0x3F80, 0x3FC0, 0x4000, 0x4040, 0x4080, 0x40C0,
-        0x8000, 0xBF00, 0xBF80, 0xBFC0, 0xC000, 0xC040, 0xC080, 0xC0C0,
+        0x0000,
+        0x3F00,
+        0x3F80,
+        0x3FC0,
+        0x4000,
+        0x4040,
+        0x4080,
+        0x40C0,
+        0x8000,
+        0xBF00,
+        0xBF80,
+        0xBFC0,
+        0xC000,
+        0xC040,
+        0xC080,
+        0xC0C0,
     ],
     dtype=np.uint16,
 )
@@ -152,7 +180,9 @@ def expected_f4(data, table):
 
 def write_f32_quantize_case(output_dir, input_name, golden_name, pairs):
     values = np.resize(np.array([value for value, _ in pairs], dtype=np.float32), 64)
-    expected_bytes = np.resize(np.array([byte for _, byte in pairs], dtype=np.uint8), 64)
+    expected_bytes = np.resize(
+        np.array([byte for _, byte in pairs], dtype=np.uint8), 64
+    )
     input_values = np.tile(values, 4)
     expected = np.zeros(BYTES, dtype=np.uint8)
     for part in range(4):
@@ -163,9 +193,15 @@ def write_f32_quantize_case(output_dir, input_name, golden_name, pairs):
 
 
 def write_bf16_quantize_case(output_dir, input_name, golden_name, nibble_pairs):
-    values = np.resize(np.array([bits for bits, _ in nibble_pairs], dtype=np.uint16), 128)
-    nibbles = np.resize(np.array([nibble for _, nibble in nibble_pairs], dtype=np.uint8), 128)
-    packed = np.array([nibbles[i] | (nibbles[i + 1] << 4) for i in range(0, 128, 2)], dtype=np.uint8)
+    values = np.resize(
+        np.array([bits for bits, _ in nibble_pairs], dtype=np.uint16), 128
+    )
+    nibbles = np.resize(
+        np.array([nibble for _, nibble in nibble_pairs], dtype=np.uint8), 128
+    )
+    packed = np.array(
+        [nibbles[i] | (nibbles[i + 1] << 4) for i in range(0, 128, 2)], dtype=np.uint8
+    )
     input_values = np.tile(values, 4)
     expected = np.zeros(BYTES, dtype=np.uint8)
     for part in range(4):
@@ -176,7 +212,22 @@ def write_bf16_quantize_case(output_dir, input_name, golden_name, nibble_pairs):
 
 
 def f8e4_quantize_pairs():
-    exact = [0x00, 0x80, 0x01, 0x81, 0x07, 0x87, 0x08, 0x88, 0x38, 0xB8, 0x3C, 0xBC, 0x7E, 0xFE]
+    exact = [
+        0x00,
+        0x80,
+        0x01,
+        0x81,
+        0x07,
+        0x87,
+        0x08,
+        0x88,
+        0x38,
+        0xB8,
+        0x3C,
+        0xBC,
+        0x7E,
+        0xFE,
+    ]
     pairs = [(decode_f8e4m3fn(byte), byte) for byte in exact]
     # This kernel uses #sat=1. In V300 instruction-controlled saturation,
     # infinities/overflow clamp to max finite and NaN is saturated to zero.
@@ -197,7 +248,22 @@ def f8e4_quantize_pairs():
 
 
 def f8e5_quantize_pairs():
-    exact = [0x00, 0x80, 0x01, 0x81, 0x03, 0x83, 0x04, 0x84, 0x3C, 0xBC, 0x40, 0xC0, 0x7B, 0xFB]
+    exact = [
+        0x00,
+        0x80,
+        0x01,
+        0x81,
+        0x03,
+        0x83,
+        0x04,
+        0x84,
+        0x3C,
+        0xBC,
+        0x40,
+        0xC0,
+        0x7B,
+        0xFB,
+    ]
     pairs = [(decode_f8e5m2(byte), byte) for byte in exact]
     # This kernel uses #sat=1. In V300 instruction-controlled saturation,
     # infinities/overflow clamp to max finite and NaN is saturated to zero.
@@ -219,9 +285,30 @@ def f8e5_quantize_pairs():
 
 def hif8_quantize_pairs():
     exact = [
-        0x00, 0x80, 0x6F, 0xEF, 0x01, 0x81, 0x07, 0x87,
-        0x08, 0x88, 0x10, 0x90, 0x18, 0x98, 0x20, 0xA0,
-        0x40, 0xC0, 0x50, 0xD0, 0x60, 0xE0, 0x70, 0xF0,
+        0x00,
+        0x80,
+        0x6F,
+        0xEF,
+        0x01,
+        0x81,
+        0x07,
+        0x87,
+        0x08,
+        0x88,
+        0x10,
+        0x90,
+        0x18,
+        0x98,
+        0x20,
+        0xA0,
+        0x40,
+        0xC0,
+        0x50,
+        0xD0,
+        0x60,
+        0xE0,
+        0x70,
+        0xF0,
     ]
     return [(decode_hif8(byte), byte) for byte in exact]
 
@@ -260,35 +347,126 @@ def generate(output_dir):
     inputs = {
         "f8e4": tiled(
             [
-                0x00, 0x80, 0x01, 0x81, 0x07, 0x87, 0x08, 0x88,
-                0x38, 0xB8, 0x3C, 0xBC, 0x78, 0xF8, 0x7E, 0xFE,
-                0x7F, 0xFF, 0x10, 0x90, 0x20, 0xA0, 0x70, 0xF0,
+                0x00,
+                0x80,
+                0x01,
+                0x81,
+                0x07,
+                0x87,
+                0x08,
+                0x88,
+                0x38,
+                0xB8,
+                0x3C,
+                0xBC,
+                0x78,
+                0xF8,
+                0x7E,
+                0xFE,
+                0x7F,
+                0xFF,
+                0x10,
+                0x90,
+                0x20,
+                0xA0,
+                0x70,
+                0xF0,
             ]
         ),
         "f8e5": tiled(
             [
-                0x00, 0x80, 0x01, 0x81, 0x03, 0x83, 0x04, 0x84,
-                0x3C, 0xBC, 0x40, 0xC0, 0x7B, 0xFB, 0x7C, 0xFC,
-                0x7D, 0xFD, 0x7F, 0xFF, 0x10, 0x90, 0x70, 0xF0,
+                0x00,
+                0x80,
+                0x01,
+                0x81,
+                0x03,
+                0x83,
+                0x04,
+                0x84,
+                0x3C,
+                0xBC,
+                0x40,
+                0xC0,
+                0x7B,
+                0xFB,
+                0x7C,
+                0xFC,
+                0x7D,
+                0xFD,
+                0x7F,
+                0xFF,
+                0x10,
+                0x90,
+                0x70,
+                0xF0,
             ]
         ),
         "hif8": tiled(
             [
-                0x00, 0x80, 0x6F, 0xEF, 0x01, 0x81, 0x07, 0x87,
-                0x08, 0x88, 0x10, 0x90, 0x18, 0x98, 0x20, 0xA0,
-                0x40, 0xC0, 0x50, 0xD0, 0x60, 0xE0, 0x70, 0xF0,
+                0x00,
+                0x80,
+                0x6F,
+                0xEF,
+                0x01,
+                0x81,
+                0x07,
+                0x87,
+                0x08,
+                0x88,
+                0x10,
+                0x90,
+                0x18,
+                0x98,
+                0x20,
+                0xA0,
+                0x40,
+                0xC0,
+                0x50,
+                0xD0,
+                0x60,
+                0xE0,
+                0x70,
+                0xF0,
             ]
         ),
         "f4e1": tiled(
             [
-                0x10, 0x32, 0x54, 0x76, 0x98, 0xBA, 0xDC, 0xFE,
-                0x01, 0x23, 0x45, 0x67, 0x89, 0xAB, 0xCD, 0xEF,
+                0x10,
+                0x32,
+                0x54,
+                0x76,
+                0x98,
+                0xBA,
+                0xDC,
+                0xFE,
+                0x01,
+                0x23,
+                0x45,
+                0x67,
+                0x89,
+                0xAB,
+                0xCD,
+                0xEF,
             ]
         ),
         "f4e2": tiled(
             [
-                0x10, 0x32, 0x54, 0x76, 0x98, 0xBA, 0xDC, 0xFE,
-                0x01, 0x23, 0x45, 0x67, 0x89, 0xAB, 0xCD, 0xEF,
+                0x10,
+                0x32,
+                0x54,
+                0x76,
+                0x98,
+                0xBA,
+                0xDC,
+                0xFE,
+                0x01,
+                0x23,
+                0x45,
+                0x67,
+                0x89,
+                0xAB,
+                0xCD,
+                0xEF,
             ]
         ),
     }
@@ -306,26 +484,51 @@ def generate(output_dir):
     np.full(BYTES, 0xA5, dtype=np.uint8).tofile(output_dir / "v9_f4e1_bf16_out.bin")
     np.full(BYTES, 0xA5, dtype=np.uint8).tofile(output_dir / "v10_f4e2_bf16_out.bin")
 
-    expected_f8(inputs["f8e4"], decode_f8e4m3fn).tofile(output_dir / "golden_v6_f8e4_f32_out.bin")
-    expected_f8(inputs["f8e5"], decode_f8e5m2).tofile(output_dir / "golden_v7_f8e5_f32_out.bin")
-    expected_f8(inputs["hif8"], decode_hif8).tofile(output_dir / "golden_v8_hif8_f32_out.bin")
-    expected_f4(inputs["f4e1"], FP4E1M2_TO_BF16).tofile(output_dir / "golden_v9_f4e1_bf16_out.bin")
-    expected_f4(inputs["f4e2"], FP4E2M1_TO_BF16).tofile(output_dir / "golden_v10_f4e2_bf16_out.bin")
+    expected_f8(inputs["f8e4"], decode_f8e4m3fn).tofile(
+        output_dir / "golden_v6_f8e4_f32_out.bin"
+    )
+    expected_f8(inputs["f8e5"], decode_f8e5m2).tofile(
+        output_dir / "golden_v7_f8e5_f32_out.bin"
+    )
+    expected_f8(inputs["hif8"], decode_hif8).tofile(
+        output_dir / "golden_v8_hif8_f32_out.bin"
+    )
+    expected_f4(inputs["f4e1"], FP4E1M2_TO_BF16).tofile(
+        output_dir / "golden_v9_f4e1_bf16_out.bin"
+    )
+    expected_f4(inputs["f4e2"], FP4E2M1_TO_BF16).tofile(
+        output_dir / "golden_v10_f4e2_bf16_out.bin"
+    )
 
     write_f32_quantize_case(
-        output_dir, "v11_f8e4_f32_in.bin", "golden_v16_f8e4_out.bin", f8e4_quantize_pairs()
+        output_dir,
+        "v11_f8e4_f32_in.bin",
+        "golden_v16_f8e4_out.bin",
+        f8e4_quantize_pairs(),
     )
     write_f32_quantize_case(
-        output_dir, "v12_f8e5_f32_in.bin", "golden_v17_f8e5_out.bin", f8e5_quantize_pairs()
+        output_dir,
+        "v12_f8e5_f32_in.bin",
+        "golden_v17_f8e5_out.bin",
+        f8e5_quantize_pairs(),
     )
     write_f32_quantize_case(
-        output_dir, "v13_hif8_f32_in.bin", "golden_v18_hif8_out.bin", hif8_quantize_pairs()
+        output_dir,
+        "v13_hif8_f32_in.bin",
+        "golden_v18_hif8_out.bin",
+        hif8_quantize_pairs(),
     )
     write_bf16_quantize_case(
-        output_dir, "v14_f4e1_bf16_in.bin", "golden_v19_f4e1_out.bin", f4e1_quantize_pairs()
+        output_dir,
+        "v14_f4e1_bf16_in.bin",
+        "golden_v19_f4e1_out.bin",
+        f4e1_quantize_pairs(),
     )
     write_bf16_quantize_case(
-        output_dir, "v15_f4e2_bf16_in.bin", "golden_v20_f4e2_out.bin", f4e2_quantize_pairs()
+        output_dir,
+        "v15_f4e2_bf16_in.bin",
+        "golden_v20_f4e2_out.bin",
+        f4e2_quantize_pairs(),
     )
     for name in [
         "v16_f8e4_out.bin",

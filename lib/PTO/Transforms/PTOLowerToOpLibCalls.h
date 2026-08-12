@@ -16,8 +16,7 @@
 namespace mlir {
 namespace pto {
 
-FailureOr<bool> tryCloneOpLibInlineBridgeOp(OpBuilder &builder, Operation &op,
-                                            IRMapping &mapping);
+FailureOr<bool> tryCloneOpLibInlineBridgeOp(OpBuilder& builder, Operation& op, IRMapping& mapping);
 
 } // namespace pto
 } // namespace mlir

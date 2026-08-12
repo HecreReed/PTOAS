@@ -11,8 +11,6 @@
 from ptodsl import pto
 import ptodsl.tilelib as tilelib
 from ._common import NUMERIC_DTYPES
-from ._common import element_store_dist
-from ._row_arg import _scalar_literal
 
 
 def _axis_is_row(axis_value, **_):
@@ -39,7 +37,7 @@ def _dst_shape_le_indices_shape(dst_valid_shape=(), indices_valid_shape=(), **_)
 def gather_dtype_signatures(dtypes=NUMERIC_DTYPES):
     res = []
     for dtype in dtypes:
-        for dtype_indices in ('i16', 'ui16', "i32", "ui32"):
+        for dtype_indices in ("i16", "ui16", "i32", "ui32"):
             res.append((dtype, dtype, dtype_indices))
     return res
 
@@ -58,10 +56,7 @@ def gather_dtype_signatures(dtypes=NUMERIC_DTYPES):
     constraints=(_no_mask_pattern, _dst_shape_le_indices_shape),
     id=0,
 )
-def template_tgather(
-    src: pto.Tile,
-    dst: pto.Tile,
-    indices: pto.Tile):
+def template_tgather(src: pto.Tile, dst: pto.Tile, indices: pto.Tile):
     dtype = dst.element_type
     dtype_indices = indices.element_type
     elem_bytes = pto.bytewidth(dtype)
@@ -90,11 +85,20 @@ def template_tgather(
             indices_reg = pto.vlds(indices[row, col:])
             mask, remained = pto.make_mask(mask_elem, remained)
             if pto.const_expr(elem_bytes == 2 and elem_bytes_s1 == 4):
-                dst_reg = pto.vgather2_bc(src_ptr, pto.vbitcast(indices_reg, indices_type), mask)
+                dst_reg = pto.vgather2_bc(
+                    src_ptr, pto.vbitcast(indices_reg, indices_type), mask
+                )
             elif pto.const_expr(elem_bytes == 1):
-                dst_reg = pto.vgather2(src_ptr, pto.vbitcast(indices_reg, indices_type), mask, result_vreg_type=result_ty)
+                dst_reg = pto.vgather2(
+                    src_ptr,
+                    pto.vbitcast(indices_reg, indices_type),
+                    mask,
+                    result_vreg_type=result_ty,
+                )
             else:
-                dst_reg = pto.vgather2(src_ptr, pto.vbitcast(indices_reg, indices_type), mask)
+                dst_reg = pto.vgather2(
+                    src_ptr, pto.vbitcast(indices_reg, indices_type), mask
+                )
             if pto.const_expr(elem_bytes == 1):
                 pto.vsts(dst_reg, dst[row, col:], mask, dist=pto.VStoreDist.PK_B16)
             else:
@@ -155,8 +159,8 @@ def template_tgather_mask_row(src: pto.Tile, dst: pto.Tile):
                 mask, remained = pto.make_mask(dtype, remained)
                 pto.vsts(src_reg, dst[row, col:], mask)
             elif len(interleave_args) == 1:
-                reg0 = pto.vlds(src[row, col * times:])
-                reg1 = pto.vlds(src[row, col * times + lanes:])
+                reg0 = pto.vlds(src[row, col * times :])
+                reg1 = pto.vlds(src[row, col * times + lanes :])
                 res0, res1 = pto.vdintlv(reg0, reg1)
                 if interleave_args[0]:
                     dst_reg = res0
@@ -165,10 +169,10 @@ def template_tgather_mask_row(src: pto.Tile, dst: pto.Tile):
                 mask, remained = pto.make_mask(dtype, remained)
                 pto.vsts(dst_reg, dst[row, col:], mask)
             else:
-                reg0 = pto.vlds(src[row, col * times:])
-                reg1 = pto.vlds(src[row, col * times + lanes:])
-                reg2 = pto.vlds(src[row, col * times + lanes * 2:])
-                reg3 = pto.vlds(src[row, col * times + lanes * 3:])
+                reg0 = pto.vlds(src[row, col * times :])
+                reg1 = pto.vlds(src[row, col * times + lanes :])
+                reg2 = pto.vlds(src[row, col * times + lanes * 2 :])
+                reg3 = pto.vlds(src[row, col * times + lanes * 3 :])
                 r0_a, r0_b = pto.vdintlv(reg0, reg1)
                 r1_a, r1_b = pto.vdintlv(reg2, reg3)
                 if interleave_args[1]:
@@ -214,4 +218,3 @@ def template_tgather_mask_col(src: pto.Tile, dst: pto.Tile):
             src_reg = pto.vlds(src[row_src, col:])
             mask, remained = pto.make_mask(dtype, remained)
             pto.vsts(src_reg, dst[row, col:], mask)
-

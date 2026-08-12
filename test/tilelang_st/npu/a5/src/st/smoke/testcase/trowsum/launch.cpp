@@ -16,14 +16,15 @@
 // f32 kernels
 // ========================================================================
 
-extern "C" __global__ AICORE void TROWSUM_f32_15x192(__gm__ float *src, __gm__ float *dst);
-extern "C" __global__ AICORE void TROWSUM_i16_1x64_overflow(__gm__ int16_t *src, __gm__ int16_t *dst);
+extern "C" __global__ AICORE void TROWSUM_f32_15x192(__gm__ float* src, __gm__ float* dst);
+extern "C" __global__ AICORE void TROWSUM_i16_1x64_overflow(__gm__ int16_t* src, __gm__ int16_t* dst);
 
-void LaunchTROWSUM_f32_15x192(float *src, float *dst, void *stream) {
-    TROWSUM_f32_15x192<<<1, nullptr, stream>>>((__gm__ float *)src, (__gm__ float *)dst);
+void LaunchTROWSUM_f32_15x192(float* src, float* dst, void* stream)
+{
+    TROWSUM_f32_15x192<<<1, nullptr, stream>>>((__gm__ float*)src, (__gm__ float*)dst);
 }
 
-
-void LaunchTROWSUM_i16_1x64_overflow(int16_t *src, int16_t *dst, void *stream) {
-    TROWSUM_i16_1x64_overflow<<<1, nullptr, stream>>>((__gm__ int16_t *)src, (__gm__ int16_t *)dst);
+void LaunchTROWSUM_i16_1x64_overflow(int16_t* src, int16_t* dst, void* stream)
+{
+    TROWSUM_i16_1x64_overflow<<<1, nullptr, stream>>>((__gm__ int16_t*)src, (__gm__ int16_t*)dst);
 }

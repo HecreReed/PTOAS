@@ -16,13 +16,11 @@
 #include "acl/acl.h"
 #endif
 
-extern "C" __global__ [aicore] void vmi_vmull_pair_result_kernel(
-    __gm__ int32_t *lhs, __gm__ int32_t *rhs, __gm__ int32_t *low,
-    __gm__ int32_t *high);
+extern "C" __global__[aicore] void vmi_vmull_pair_result_kernel(
+    __gm__ int32_t* lhs, __gm__ int32_t* rhs, __gm__ int32_t* low, __gm__ int32_t* high);
 
-void LaunchVmiVmullPairResult(int32_t *lhs, int32_t *rhs, uint32_t *low,
-                              uint32_t *high, void *stream) {
-  vmi_vmull_pair_result_kernel<<<1, nullptr, stream>>>(
-      (__gm__ int32_t *)lhs, (__gm__ int32_t *)rhs, (__gm__ int32_t *)low,
-      (__gm__ int32_t *)high);
+void LaunchVmiVmullPairResult(int32_t* lhs, int32_t* rhs, uint32_t* low, uint32_t* high, void* stream)
+{
+    vmi_vmull_pair_result_kernel<<<1, nullptr, stream>>>(
+        (__gm__ int32_t*)lhs, (__gm__ int32_t*)rhs, (__gm__ int32_t*)low, (__gm__ int32_t*)high);
 }

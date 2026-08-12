@@ -34,15 +34,19 @@ def generate(output_dir: Path) -> None:
     row = np.arange(M, dtype=np.uint32).reshape(M, 1)
     col = np.arange(K, dtype=np.uint32).reshape(1, K)
     a_sign = ((row + col) & np.uint32(1)) << np.uint32(31)
-    a_mant = ((row * np.uint32(29) + col * np.uint32(37)) % np.uint32(512))
-    a_bits = a_sign | np.uint32(0x3F800000) | (a_mant << np.uint32(13)) | np.uint32(0x1000)
+    a_mant = (row * np.uint32(29) + col * np.uint32(37)) % np.uint32(512)
+    a_bits = (
+        a_sign | np.uint32(0x3F800000) | (a_mant << np.uint32(13)) | np.uint32(0x1000)
+    )
     a = a_bits.astype(np.uint32).view(np.float32)
 
     k_idx = np.arange(K, dtype=np.uint32).reshape(K, 1)
     n_idx = np.arange(N, dtype=np.uint32).reshape(1, N)
     b_sign = ((k_idx * np.uint32(3) + n_idx) & np.uint32(1)) << np.uint32(31)
-    b_mant = ((k_idx * np.uint32(41) + n_idx * np.uint32(11)) % np.uint32(512))
-    b_bits = b_sign | np.uint32(0x3F800000) | (b_mant << np.uint32(13)) | np.uint32(0x1000)
+    b_mant = (k_idx * np.uint32(41) + n_idx * np.uint32(11)) % np.uint32(512)
+    b_bits = (
+        b_sign | np.uint32(0x3F800000) | (b_mant << np.uint32(13)) | np.uint32(0x1000)
+    )
     b = b_bits.astype(np.uint32).view(np.float32)
     c = np.zeros((M, N), dtype=np.float32)
     golden_c = tf32_round_away(a) @ tf32_round_away(b)

@@ -24,7 +24,6 @@
 # so the case exercises every saturation branch, not just the trivial path.
 
 import argparse
-import struct
 from pathlib import Path
 
 import numpy as np
@@ -42,45 +41,41 @@ def f32(x):
 # gives a clean 8x-repeat schedule that survives Packed4 lane grouping.
 PROBE = [
     # --- in-range: RN round-half-to-even edges + typical values ---
-    f32(0.0),          # 0
-    f32(0.5),          # RN -> 0 (nearest-even)
-    f32(1.5),          # RN -> 2
-    f32(2.5),          # RN -> 2
-    f32(-0.5),         # RN -> 0
-    f32(-1.5),         # RN -> -2
-    f32(-2.5),         # RN -> -2
-    f32(1.0),          # 1
-    f32(-1.0),         # -1
-    f32(127.0),        # 127
-    f32(-128.0),       # -128
-    f32(32767.0),      # 32767
-    f32(-32768.0),     # -32768
-
+    f32(0.0),  # 0
+    f32(0.5),  # RN -> 0 (nearest-even)
+    f32(1.5),  # RN -> 2
+    f32(2.5),  # RN -> 2
+    f32(-0.5),  # RN -> 0
+    f32(-1.5),  # RN -> -2
+    f32(-2.5),  # RN -> -2
+    f32(1.0),  # 1
+    f32(-1.0),  # -1
+    f32(127.0),  # 127
+    f32(-128.0),  # -128
+    f32(32767.0),  # 32767
+    f32(-32768.0),  # -32768
     # --- out-of-range positive: must clamp to INT32_MAX ---
-    f32(2.147484e9),   # slightly above INT32_MAX (~2.147483648e9)
-    f32(1.0e10),       # far above INT32_MAX
-    f32(3.4e38),       # near f32 max
-    f32(float("inf")), # +inf
-
+    f32(2.147484e9),  # slightly above INT32_MAX (~2.147483648e9)
+    f32(1.0e10),  # far above INT32_MAX
+    f32(3.4e38),  # near f32 max
+    f32(float("inf")),  # +inf
     # --- out-of-range negative: must clamp to INT32_MIN ---
     f32(-2.147484e9),
     f32(-1.0e10),
     f32(-3.4e38),
     f32(float("-inf")),
-
     # --- NaN saturates to 0 under V300 SAT ---
     f32(float("nan")),
-
     # --- extra edge values to keep the probe balanced (32 entries) ---
     f32(-1.0),
-    f32(0.25),          # RN -> 0
-    f32(0.75),          # RN -> 1
+    f32(0.25),  # RN -> 0
+    f32(0.75),  # RN -> 1
     f32(1e6),
     f32(-1e6),
-    f32(1234567.5),     # RN -> 1234568
-    f32(-1234567.5),    # RN -> -1234568
-    f32(2.147483583e9), # just below INT32_MAX (~2^31 - 65 as f32), representable
-    f32(-2.147483648e9),# exactly -2^31 as f32 -> INT32_MIN
+    f32(1234567.5),  # RN -> 1234568
+    f32(-1234567.5),  # RN -> -1234568
+    f32(2.147483583e9),  # just below INT32_MAX (~2^31 - 65 as f32), representable
+    f32(-2.147483648e9),  # exactly -2^31 as f32 -> INT32_MIN
     f32(999999.0),
 ]
 

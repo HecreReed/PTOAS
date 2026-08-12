@@ -33,8 +33,12 @@ def build():
             fractal_ab_size = pto.TileConfig.fractalABSize
             cfg_row = pto.TileBufConfigAttr.get(bl_row, sl, fractal_ab_size, pd, ctx)
             cfg_col = pto.TileBufConfigAttr.get(bl_col, sl, fractal_ab_size, pd, ctx)
-            tile_buf_32_row = pto.TileBufType.get([32, 32], f32, vec, [32, 32], cfg_row, ctx)
-            tile_buf_32_col = pto.TileBufType.get([32, 32], f32, vec, [32, 32], cfg_col, ctx)
+            tile_buf_32_row = pto.TileBufType.get(
+                [32, 32], f32, vec, [32, 32], cfg_row, ctx
+            )
+            tile_buf_32_col = pto.TileBufType.get(
+                [32, 32], f32, vec, [32, 32], cfg_col, ctx
+            )
 
             fn_ty = func.FunctionType.get([ptr_f32, ptr_f32], [])
             with InsertionPoint(m.body):
@@ -58,8 +62,12 @@ def build():
                 ).result
 
                 # Replaced immediate numbers with constants c0 and c32
-                sv0 = pto.PartitionViewOp(tile_view_32, tv0, offsets=[c0, c0], sizes=[c32, c32]).result
-                sv1 = pto.PartitionViewOp(tile_view_32, tv1, offsets=[c0, c0], sizes=[c32, c32]).result
+                sv0 = pto.PartitionViewOp(
+                    tile_view_32, tv0, offsets=[c0, c0], sizes=[c32, c32]
+                ).result
+                sv1 = pto.PartitionViewOp(
+                    tile_view_32, tv1, offsets=[c0, c0], sizes=[c32, c32]
+                ).result
 
                 # %5/%6/%7 = pto.alloc_tile : <32x32xf32>
                 tb0 = pto.AllocTileOp(tile_buf_32_row).result
@@ -70,7 +78,9 @@ def build():
                 tb1 = pto.TReshapeOp(tile_buf_32_col, tb0).result
 
                 # %8 = subview on output tensor_view
-                sv2 = pto.PartitionViewOp(tile_view_32, tv1, offsets=[c0, c0], sizes=[c32, c32]).result
+                sv2 = pto.PartitionViewOp(
+                    tile_view_32, tv1, offsets=[c0, c0], sizes=[c32, c32]
+                ).result
 
                 # pto.store_dps_tb ins(%tb1) outs(%sv2)
                 pto.TStoreOp(None, tb1, sv2)

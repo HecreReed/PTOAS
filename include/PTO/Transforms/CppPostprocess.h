@@ -14,7 +14,7 @@
 namespace mlir {
 namespace pto {
 
-bool rewriteLastUseMarkersInCpp(std::string &cpp);
+bool rewriteLastUseMarkersInCpp(std::string& cpp);
 
 } // namespace pto
 } // namespace mlir

@@ -22,7 +22,6 @@
 # f32->bf16) -- the same bits the kernel consumes -- not on the original probe.
 
 import argparse
-import struct
 from pathlib import Path
 
 import numpy as np
@@ -56,46 +55,42 @@ def bf16_bits_to_f32(bits):
 # A 32-value probe. ELEMS = 256 = 8 * 32, giving a clean 8x-repeat schedule.
 PROBE = [
     # --- in-range: RN round-half-to-even edges + typical values ---
-    f32(0.0),          # 0
-    f32(0.5),          # RN -> 0
-    f32(1.5),          # RN -> 2
-    f32(2.5),          # RN -> 2
-    f32(-0.5),         # RN -> 0
-    f32(-1.5),         # RN -> -2
-    f32(-2.5),         # RN -> -2
-    f32(1.0),          # 1
-    f32(-1.0),         # -1
-    f32(127.0),        # 127
-    f32(-128.0),       # -128
-    f32(32767.0),      # 32767
-    f32(-32768.0),     # -32768
-    f32(1e6),          # bf16-representable ~1e6
+    f32(0.0),  # 0
+    f32(0.5),  # RN -> 0
+    f32(1.5),  # RN -> 2
+    f32(2.5),  # RN -> 2
+    f32(-0.5),  # RN -> 0
+    f32(-1.5),  # RN -> -2
+    f32(-2.5),  # RN -> -2
+    f32(1.0),  # 1
+    f32(-1.0),  # -1
+    f32(127.0),  # 127
+    f32(-128.0),  # -128
+    f32(32767.0),  # 32767
+    f32(-32768.0),  # -32768
+    f32(1e6),  # bf16-representable ~1e6
     f32(-1e6),
     f32(999999.0),
-    f32(1234567.5),    # rounds to nearest bf16, golden uses that exact value
+    f32(1234567.5),  # rounds to nearest bf16, golden uses that exact value
     f32(-1234567.5),
-
     # --- out-of-range positive: clamp to INT32_MAX ---
-    f32(2.147484e9),   # slightly above INT32_MAX
+    f32(2.147484e9),  # slightly above INT32_MAX
     f32(3.0e9),
     f32(1.0e10),
-    f32(3.4e38),       # near f32/bf16 max
-    f32(float("inf")), # +inf
-
+    f32(3.4e38),  # near f32/bf16 max
+    f32(float("inf")),  # +inf
     # --- out-of-range negative: clamp to INT32_MIN ---
     f32(-2.147484e9),
     f32(-3.0e9),
     f32(-1.0e10),
     f32(-3.4e38),
     f32(float("-inf")),
-
     # --- NaN saturates to 0 under V300 SAT ---
     f32(float("nan")),
-
     # --- extra RN edges ---
-    f32(0.25),         # RN -> 0
-    f32(0.75),         # RN -> 1
-    f32(-0.25),        # RN -> 0
+    f32(0.25),  # RN -> 0
+    f32(0.75),  # RN -> 1
+    f32(-0.25),  # RN -> 0
 ]
 
 assert len(PROBE) == 32, f"PROBE length must be 32, got {len(PROBE)}"

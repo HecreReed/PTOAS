@@ -11,12 +11,24 @@
 #endif
 
 #if defined(__CCE_AICORE__) && defined(__NPU_ARCH__) && (__NPU_ARCH__ == 2201)
-typedef struct { unsigned char v; } hifloat8_t;
-typedef struct { unsigned char v; } float8_e4m3_t;
-typedef struct { unsigned char v; } float8_e5m2_t;
-typedef struct { unsigned char v; } float8_e8m0_t;
-typedef struct { unsigned char v; } float4_e1m2x2_t;
-typedef struct { unsigned char v; } float4_e2m1x2_t;
+typedef struct {
+    unsigned char v;
+} hifloat8_t;
+typedef struct {
+    unsigned char v;
+} float8_e4m3_t;
+typedef struct {
+    unsigned char v;
+} float8_e5m2_t;
+typedef struct {
+    unsigned char v;
+} float8_e8m0_t;
+typedef struct {
+    unsigned char v;
+} float4_e1m2x2_t;
+typedef struct {
+    unsigned char v;
+} float4_e2m1x2_t;
 #endif
 #include <cstdint>
 
@@ -36,44 +48,16 @@ struct MrgSortExecutedNumList {
 #include "acl/acl.h"
 #endif
 
-extern "C" __global__ [aicore] void cube_load_frac_layouts_deep_merged_kernel(
-    __gm__ half * arg0,
-    __gm__ half * arg1,
-    __gm__ float * arg2,
-    __gm__ half * arg3,
-    __gm__ half * arg4,
-    __gm__ float * arg5,
-    __gm__ half * arg6,
-    __gm__ half * arg7,
-    __gm__ float * arg8,
-    __gm__ half * arg9,
-    __gm__ half * arg10,
-    __gm__ float * arg11,
-    __gm__ half * arg12,
-    __gm__ half * arg13,
-    __gm__ float * arg14,
-    __gm__ half * arg15,
-    __gm__ half * arg16,
-    __gm__ float * arg17);
+extern "C" __global__[aicore] void cube_load_frac_layouts_deep_merged_kernel(
+    __gm__ half* arg0, __gm__ half* arg1, __gm__ float* arg2, __gm__ half* arg3, __gm__ half* arg4, __gm__ float* arg5,
+    __gm__ half* arg6, __gm__ half* arg7, __gm__ float* arg8, __gm__ half* arg9, __gm__ half* arg10,
+    __gm__ float* arg11, __gm__ half* arg12, __gm__ half* arg13, __gm__ float* arg14, __gm__ half* arg15,
+    __gm__ half* arg16, __gm__ float* arg17);
 
-void LaunchCubeLoadFracLayoutsDeepMerged(__fp16 * p0, __fp16 * p1, float * p2, void *stream) {
-  cube_load_frac_layouts_deep_merged_kernel<<<1, nullptr, stream>>>(
-      (__gm__ half *)p0,
-      (__gm__ half *)p0,
-      (__gm__ float *)p0,
-      (__gm__ half *)p0,
-      (__gm__ half *)p0,
-      (__gm__ float *)p0,
-      (__gm__ half *)p0,
-      (__gm__ half *)p0,
-      (__gm__ float *)p0,
-      (__gm__ half *)p0,
-      (__gm__ half *)p0,
-      (__gm__ float *)p0,
-      (__gm__ half *)p0,
-      (__gm__ half *)p0,
-      (__gm__ float *)p0,
-      (__gm__ half *)p0,
-      (__gm__ half *)p1,
-      (__gm__ float *)p2);
+void LaunchCubeLoadFracLayoutsDeepMerged(__fp16* p0, __fp16* p1, float* p2, void* stream)
+{
+    cube_load_frac_layouts_deep_merged_kernel<<<1, nullptr, stream>>>(
+        (__gm__ half*)p0, (__gm__ half*)p0, (__gm__ float*)p0, (__gm__ half*)p0, (__gm__ half*)p0, (__gm__ float*)p0,
+        (__gm__ half*)p0, (__gm__ half*)p0, (__gm__ float*)p0, (__gm__ half*)p0, (__gm__ half*)p0, (__gm__ float*)p0,
+        (__gm__ half*)p0, (__gm__ half*)p0, (__gm__ float*)p0, (__gm__ half*)p0, (__gm__ half*)p1, (__gm__ float*)p2);
 }

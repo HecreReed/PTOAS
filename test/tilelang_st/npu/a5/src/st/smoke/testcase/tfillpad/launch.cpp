@@ -14,15 +14,15 @@
 
 // ========== Smoke case: float, 64x16, valid=64x7 ==========
 
-extern "C" __global__ AICORE void TFILLPAD_f32_64x16_pad_64x7(__gm__ float *src, __gm__ float *dst);
-extern "C" __global__ AICORE void TFILLPAD_f32_260x16_pad_260x7(__gm__ float *src, __gm__ float *dst);
+extern "C" __global__ AICORE void TFILLPAD_f32_64x16_pad_64x7(__gm__ float* src, __gm__ float* dst);
+extern "C" __global__ AICORE void TFILLPAD_f32_260x16_pad_260x7(__gm__ float* src, __gm__ float* dst);
 
-void LaunchTFILLPAD_f32_64x16_pad_64x7(float *src, float *dst, void *stream) {
-    TFILLPAD_f32_64x16_pad_64x7<<<1, nullptr, stream>>>((__gm__ float *)src, (__gm__ float *)dst);
+void LaunchTFILLPAD_f32_64x16_pad_64x7(float* src, float* dst, void* stream)
+{
+    TFILLPAD_f32_64x16_pad_64x7<<<1, nullptr, stream>>>((__gm__ float*)src, (__gm__ float*)dst);
 }
 
-
-
-void LaunchTFILLPAD_f32_260x16_pad_260x7(float *src, float *dst, void *stream) {
-    TFILLPAD_f32_260x16_pad_260x7<<<1, nullptr, stream>>>((__gm__ float *)src, (__gm__ float *)dst);
+void LaunchTFILLPAD_f32_260x16_pad_260x7(float* src, float* dst, void* stream)
+{
+    TFILLPAD_f32_260x16_pad_260x7<<<1, nullptr, stream>>>((__gm__ float*)src, (__gm__ float*)dst);
 }

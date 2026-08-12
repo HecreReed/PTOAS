@@ -99,6 +99,7 @@ def _block_valid_extent(total, block_index, block_size):
 #      compiled = flash_attention_kernel.compile(BLOCK_Q=128, BLOCK_KV=128, CAUSAL=True)
 #      mlir_text = compiled.mlir_text()
 
+
 def emit_flash_attention_mlir(
     *,
     head_dim=128,
@@ -120,6 +121,7 @@ def emit_flash_attention_mlir(
         CAUSAL=causal,
     )
     return compiled.mlir_text()
+
 
 @pto.jit(target="a5", mode="explicit")
 def flash_attention_kernel(
@@ -155,10 +157,18 @@ def flash_attention_kernel(
     kv_strides = [seq_k * heads * dim, heads * dim, dim, 1]
     o_strides = [seq_q * heads * dim, heads * dim, dim, 1]
 
-    q_view = pto.make_tensor_view(Q_ptr, shape=[batch, seq_q, heads, dim], strides=q_strides)
-    k_view = pto.make_tensor_view(K_ptr, shape=[batch, seq_k, heads, dim], strides=kv_strides)
-    v_view = pto.make_tensor_view(V_ptr, shape=[batch, seq_k, heads, dim], strides=kv_strides)
-    o_view = pto.make_tensor_view(O_ptr, shape=[batch, seq_q, heads, dim], strides=o_strides)
+    q_view = pto.make_tensor_view(
+        Q_ptr, shape=[batch, seq_q, heads, dim], strides=q_strides
+    )
+    k_view = pto.make_tensor_view(
+        K_ptr, shape=[batch, seq_k, heads, dim], strides=kv_strides
+    )
+    v_view = pto.make_tensor_view(
+        V_ptr, shape=[batch, seq_k, heads, dim], strides=kv_strides
+    )
+    o_view = pto.make_tensor_view(
+        O_ptr, shape=[batch, seq_q, heads, dim], strides=o_strides
+    )
 
     # Make the SPMD launch contract explicit in the authored surface.
     # This sketch uses one block per (batch, head) slice and does not further
@@ -239,15 +249,31 @@ def flash_attention_kernel(
         slayout="RowMajor",
     )
 
-    o_prev_tile = pto.alloc_tile(shape=[Br, D], dtype=pto.f32, valid_shape=[full_br, dim])
-    o_next_tile = pto.alloc_tile(shape=[Br, D], dtype=pto.f32, valid_shape=[full_br, dim])
-    m_prev_tile = pto.alloc_tile(shape=[Br, 1], dtype=pto.f32, valid_shape=[full_br, one], blayout="ColMajor")
-    m_next_tile = pto.alloc_tile(shape=[Br, 1], dtype=pto.f32, valid_shape=[full_br, one], blayout="ColMajor")
-    l_prev_tile = pto.alloc_tile(shape=[Br, 1], dtype=pto.f32, valid_shape=[full_br, one], blayout="ColMajor")
-    l_next_tile = pto.alloc_tile(shape=[Br, 1], dtype=pto.f32, valid_shape=[full_br, one], blayout="ColMajor")
+    o_prev_tile = pto.alloc_tile(
+        shape=[Br, D], dtype=pto.f32, valid_shape=[full_br, dim]
+    )
+    o_next_tile = pto.alloc_tile(
+        shape=[Br, D], dtype=pto.f32, valid_shape=[full_br, dim]
+    )
+    m_prev_tile = pto.alloc_tile(
+        shape=[Br, 1], dtype=pto.f32, valid_shape=[full_br, one], blayout="ColMajor"
+    )
+    m_next_tile = pto.alloc_tile(
+        shape=[Br, 1], dtype=pto.f32, valid_shape=[full_br, one], blayout="ColMajor"
+    )
+    l_prev_tile = pto.alloc_tile(
+        shape=[Br, 1], dtype=pto.f32, valid_shape=[full_br, one], blayout="ColMajor"
+    )
+    l_next_tile = pto.alloc_tile(
+        shape=[Br, 1], dtype=pto.f32, valid_shape=[full_br, one], blayout="ColMajor"
+    )
 
-    s_tile = pto.alloc_tile(shape=[Br, Bc], dtype=pto.f32, valid_shape=[full_br, full_bc])
-    p_tile = pto.alloc_tile(shape=[Br, Bc], dtype=pto.f32, valid_shape=[full_br, full_bc])
+    s_tile = pto.alloc_tile(
+        shape=[Br, Bc], dtype=pto.f32, valid_shape=[full_br, full_bc]
+    )
+    p_tile = pto.alloc_tile(
+        shape=[Br, Bc], dtype=pto.f32, valid_shape=[full_br, full_bc]
+    )
     p_mat = pto.alloc_tile(
         shape=[Br, Bc],
         dtype=pto.f32,
@@ -257,15 +283,44 @@ def flash_attention_kernel(
         slayout="RowMajor",
     )
     pv_tile = pto.alloc_tile(shape=[Br, D], dtype=pto.f32, valid_shape=[full_br, dim])
-    alpha_tile = pto.alloc_tile(shape=[Br, 1], dtype=pto.f32, valid_shape=[full_br, one], blayout="ColMajor")
-    beta_tile = pto.alloc_tile(shape=[Br, 1], dtype=pto.f32, valid_shape=[full_br, one], blayout="ColMajor")
+    alpha_tile = pto.alloc_tile(
+        shape=[Br, 1], dtype=pto.f32, valid_shape=[full_br, one], blayout="ColMajor"
+    )
+    beta_tile = pto.alloc_tile(
+        shape=[Br, 1], dtype=pto.f32, valid_shape=[full_br, one], blayout="ColMajor"
+    )
 
     # Cube-local scratch is explicit; it should not be conflated with UB tiles.
-    q_l0a = pto.alloc_tile(shape=[Br, D], dtype=pto.f32, memory_space=pto.MemorySpace.LEFT, valid_shape=[full_br, dim])
-    p_l0a = pto.alloc_tile(shape=[Br, Bc], dtype=pto.f32, memory_space=pto.MemorySpace.LEFT, valid_shape=[full_br, full_bc])
-    rhs_l0b = pto.alloc_tile(shape=[Bc, D], dtype=pto.f32, memory_space=pto.MemorySpace.RIGHT, valid_shape=[full_bc, dim])
-    qk_acc_tile = pto.alloc_tile(shape=[Br, Bc], dtype=pto.f32, memory_space=pto.MemorySpace.ACC, valid_shape=[full_br, full_bc])
-    pv_acc_tile = pto.alloc_tile(shape=[Br, D], dtype=pto.f32, memory_space=pto.MemorySpace.ACC, valid_shape=[full_br, dim])
+    q_l0a = pto.alloc_tile(
+        shape=[Br, D],
+        dtype=pto.f32,
+        memory_space=pto.MemorySpace.LEFT,
+        valid_shape=[full_br, dim],
+    )
+    p_l0a = pto.alloc_tile(
+        shape=[Br, Bc],
+        dtype=pto.f32,
+        memory_space=pto.MemorySpace.LEFT,
+        valid_shape=[full_br, full_bc],
+    )
+    rhs_l0b = pto.alloc_tile(
+        shape=[Bc, D],
+        dtype=pto.f32,
+        memory_space=pto.MemorySpace.RIGHT,
+        valid_shape=[full_bc, dim],
+    )
+    qk_acc_tile = pto.alloc_tile(
+        shape=[Br, Bc],
+        dtype=pto.f32,
+        memory_space=pto.MemorySpace.ACC,
+        valid_shape=[full_br, full_bc],
+    )
+    pv_acc_tile = pto.alloc_tile(
+        shape=[Br, D],
+        dtype=pto.f32,
+        memory_space=pto.MemorySpace.ACC,
+        valid_shape=[full_br, dim],
+    )
 
     # SIMT metadata buffer.  A tiny raw-pointer island is acceptable at the
     # explicit-orchestration boundary because this is scalar control data, not
@@ -275,8 +330,12 @@ def flash_attention_kernel(
 
     for qi in range(0, q_blocks, 1):
         q_rows = _block_valid_extent(seq_q, qi, Br)
-        q_part = pto.partition_view(q_head, offsets=[0, qi * Br, 0, 0], sizes=[1, q_rows, 1, dim])
-        o_part = pto.partition_view(o_head, offsets=[0, qi * Br, 0, 0], sizes=[1, q_rows, 1, dim])
+        q_part = pto.partition_view(
+            q_head, offsets=[0, qi * Br, 0, 0], sizes=[1, q_rows, 1, dim]
+        )
+        o_part = pto.partition_view(
+            o_head, offsets=[0, qi * Br, 0, 0], sizes=[1, q_rows, 1, dim]
+        )
 
         q_mat.valid_shape = [q_rows, dim]
         o_prev_tile.valid_shape = [q_rows, dim]
@@ -305,8 +364,12 @@ def flash_attention_kernel(
         o_cur = o_prev_tile
         for kj in range(0, kv_blocks, 1):
             kv_rows = _block_valid_extent(seq_k, kj, Bc)
-            k_part = pto.partition_view(k_head, offsets=[0, kj * Bc, 0, 0], sizes=[1, kv_rows, 1, dim])
-            v_part = pto.partition_view(v_head, offsets=[0, kj * Bc, 0, 0], sizes=[1, kv_rows, 1, dim])
+            k_part = pto.partition_view(
+                k_head, offsets=[0, kj * Bc, 0, 0], sizes=[1, kv_rows, 1, dim]
+            )
+            v_part = pto.partition_view(
+                v_head, offsets=[0, kj * Bc, 0, 0], sizes=[1, kv_rows, 1, dim]
+            )
 
             k_mat.valid_shape = [kv_rows, dim]
             v_mat.valid_shape = [kv_rows, dim]
@@ -367,9 +430,9 @@ def flash_attention_kernel(
 
 @pto.tileop
 def qk_matmul(
-    q_l0a: pto.Tile,       # LEFT scratch
-    k_l0b: pto.Tile,       # RIGHT scratch
-    s_acc: pto.Tile,       # ACC scratch
+    q_l0a: pto.Tile,  # LEFT scratch
+    k_l0b: pto.Tile,  # RIGHT scratch
+    s_acc: pto.Tile,  # ACC scratch
     m: pto.index,
     n: pto.index,
     k: pto.i32,
@@ -386,9 +449,9 @@ def qk_matmul(
 
 @pto.tileop
 def pv_matmul(
-    p_l0a: pto.Tile,       # LEFT scratch (reused)
-    v_l0b: pto.Tile,       # RIGHT scratch (reused)
-    pv_acc: pto.Tile,      # ACC scratch (reused)
+    p_l0a: pto.Tile,  # LEFT scratch (reused)
+    v_l0b: pto.Tile,  # RIGHT scratch (reused)
+    pv_acc: pto.Tile,  # ACC scratch (reused)
     m: pto.index,
     n: pto.i32,
     k: pto.index,
@@ -404,14 +467,14 @@ def pv_matmul(
 
 @pto.tileop
 def online_softmax_rows(
-    s_tile: pto.Tile,          # UB, [Br, Bc]
-    p_tile: pto.Tile,          # UB, [Br, Bc], output
-    m_prev_tile: pto.Tile,     # UB, [Br, 1]
-    l_prev_tile: pto.Tile,     # UB, [Br, 1]
-    m_next_tile: pto.Tile,     # UB, [Br, 1], output
-    l_next_tile: pto.Tile,     # UB, [Br, 1], output
-    alpha_tile: pto.Tile,      # UB, [Br, 1], output
-    beta_tile: pto.Tile,       # UB, [Br, 1], output
+    s_tile: pto.Tile,  # UB, [Br, Bc]
+    p_tile: pto.Tile,  # UB, [Br, Bc], output
+    m_prev_tile: pto.Tile,  # UB, [Br, 1]
+    l_prev_tile: pto.Tile,  # UB, [Br, 1]
+    m_next_tile: pto.Tile,  # UB, [Br, 1], output
+    l_next_tile: pto.Tile,  # UB, [Br, 1], output
+    alpha_tile: pto.Tile,  # UB, [Br, 1], output
+    beta_tile: pto.Tile,  # UB, [Br, 1], output
     row_start: pto.i32,
     row_stop: pto.i32,
     valid_cols: pto.i32,
@@ -460,11 +523,11 @@ def online_softmax_rows(
 
 @pto.simt
 def blend_output_rows(
-    o_prev_tile: pto.Tile,      # UB, [Br, dim]
-    pv_tile: pto.Tile,          # UB, [Br, dim]
-    alpha_tile: pto.Tile,       # UB, [Br, 1]
-    beta_tile: pto.Tile,        # UB, [Br, 1]
-    o_next_tile: pto.Tile,      # UB, [Br, dim], output
+    o_prev_tile: pto.Tile,  # UB, [Br, dim]
+    pv_tile: pto.Tile,  # UB, [Br, dim]
+    alpha_tile: pto.Tile,  # UB, [Br, 1]
+    beta_tile: pto.Tile,  # UB, [Br, 1]
+    o_next_tile: pto.Tile,  # UB, [Br, dim], output
     row_start: pto.i32,
     row_stop: pto.i32,
     valid_dim: pto.i32,
@@ -493,7 +556,9 @@ def blend_output_rows(
 
 @pto.simt
 def materialize_tile_bounds(
-    meta_ptr: pto.ptr(pto.i32, pto.MemorySpace.UB),   # [out] {row_start, row_stop, valid_cols}
+    meta_ptr: pto.ptr(
+        pto.i32, pto.MemorySpace.UB
+    ),  # [out] {row_start, row_stop, valid_cols}
     valid_rows: pto.i32,
     valid_cols: pto.i32,
 ):
@@ -514,28 +579,28 @@ def materialize_tile_bounds(
 
 
 def kv_block_process(
-    q_mat: pto.Tile,                 # MAT, reused across inner KV loop
-    k_part: pto.PartitionTensorView, # GM view for current K block
-    v_part: pto.PartitionTensorView, # GM view for current V block
-    k_mat: pto.Tile,                 # MAT scratch
-    v_mat: pto.Tile,                 # MAT scratch
-    o_prev_tile: pto.Tile,           # UB state
-    o_next_tile: pto.Tile,           # UB state
-    m_prev_tile: pto.Tile,           # UB state
-    l_prev_tile: pto.Tile,           # UB state
-    m_next_tile: pto.Tile,           # UB state
-    l_next_tile: pto.Tile,           # UB state
-    s_tile: pto.Tile,                # UB scratch for QK^T
-    p_tile: pto.Tile,                # UB scratch for probabilities
-    p_mat: pto.Tile,                 # MAT scratch for probabilities
-    pv_tile: pto.Tile,               # UB scratch for P@V
-    alpha_tile: pto.Tile,            # UB scratch
-    beta_tile: pto.Tile,             # UB scratch
-    q_l0a: pto.Tile,                 # LEFT scratch for Q
-    p_l0a: pto.Tile,                 # LEFT scratch for P
-    rhs_l0b: pto.Tile,               # RIGHT scratch, reused by K/V
-    qk_acc_tile: pto.Tile,           # ACC scratch for QK^T
-    pv_acc_tile: pto.Tile,           # ACC scratch for P@V
+    q_mat: pto.Tile,  # MAT, reused across inner KV loop
+    k_part: pto.PartitionTensorView,  # GM view for current K block
+    v_part: pto.PartitionTensorView,  # GM view for current V block
+    k_mat: pto.Tile,  # MAT scratch
+    v_mat: pto.Tile,  # MAT scratch
+    o_prev_tile: pto.Tile,  # UB state
+    o_next_tile: pto.Tile,  # UB state
+    m_prev_tile: pto.Tile,  # UB state
+    l_prev_tile: pto.Tile,  # UB state
+    m_next_tile: pto.Tile,  # UB state
+    l_next_tile: pto.Tile,  # UB state
+    s_tile: pto.Tile,  # UB scratch for QK^T
+    p_tile: pto.Tile,  # UB scratch for probabilities
+    p_mat: pto.Tile,  # MAT scratch for probabilities
+    pv_tile: pto.Tile,  # UB scratch for P@V
+    alpha_tile: pto.Tile,  # UB scratch
+    beta_tile: pto.Tile,  # UB scratch
+    q_l0a: pto.Tile,  # LEFT scratch for Q
+    p_l0a: pto.Tile,  # LEFT scratch for P
+    rhs_l0b: pto.Tile,  # RIGHT scratch, reused by K/V
+    qk_acc_tile: pto.Tile,  # ACC scratch for QK^T
+    pv_acc_tile: pto.Tile,  # ACC scratch for P@V
     meta_ptr: pto.ptr(pto.i32, pto.MemorySpace.UB),
 ):
     """

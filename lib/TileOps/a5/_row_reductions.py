@@ -24,7 +24,9 @@ def _single_output_col(dst_shape=(), dst_valid_shape=(), **_):
     )
 
 
-def _ub_or_vec_row_major(operand_memory_spaces, operand_b_layouts, operand_s_layouts, **_):
+def _ub_or_vec_row_major(
+    operand_memory_spaces, operand_b_layouts, operand_s_layouts, **_
+):
     return (
         all(space in {"ub", "vec"} for space in operand_memory_spaces)
         and all(layout == "row_major" for layout in operand_b_layouts)
@@ -32,7 +34,9 @@ def _ub_or_vec_row_major(operand_memory_spaces, operand_b_layouts, operand_s_lay
     )
 
 
-def _row_reduction_layout(src_config, tmp_config, dst_config, dst_shape=(), operand_memory_spaces=(), **_):
+def _row_reduction_layout(
+    src_config, tmp_config, dst_config, dst_shape=(), operand_memory_spaces=(), **_
+):
     if not all(space in {"ub", "vec"} for space in operand_memory_spaces):
         return False
     if not (src_config and tmp_config and dst_config):
@@ -44,16 +48,10 @@ def _row_reduction_layout(src_config, tmp_config, dst_config, dst_shape=(), oper
 
     dst_row_major = dst_config.b_layout == "row_major"
     dst_col_major_single_col = (
-        dst_config.b_layout == "col_major"
-        and len(dst_shape) == 2
-        and dst_shape[1] == 1
+        dst_config.b_layout == "col_major" and len(dst_shape) == 2 and dst_shape[1] == 1
     )
-    return (
-        (dst_row_major and dst_config.s_layout == "none_box")
-        or (
-            dst_col_major_single_col
-            and dst_config.s_layout in {"none_box", "row_major"}
-        )
+    return (dst_row_major and dst_config.s_layout == "none_box") or (
+        dst_col_major_single_col and dst_config.s_layout in {"none_box", "row_major"}
     )
 
 
@@ -143,7 +141,12 @@ def register_rowsum():
         op="pto.trowsum",
         target="a5",
         name="template_trowsum",
-        dtypes=[("f16", "f16", "f16"), ("f32", "f32", "f32"), ("i16", "i16", "i16"), ("i32", "i32", "i32")],
+        dtypes=[
+            ("f16", "f16", "f16"),
+            ("f32", "f32", "f32"),
+            ("i16", "i16", "i16"),
+            ("i32", "i32", "i32"),
+        ],
         iteration_axis="row",
         op_engine="vector",
         op_class="reduction",
@@ -187,7 +190,9 @@ def register_rowsum():
                     part=pto.VcvtPartMode.EVEN,
                 )
                 dst_addr = pto.addptr(dst_ptr, row * dst_cols)
-                pto.vsts(converted, dst_addr, 0, one_mask, dist=element_store_dist(dtype))
+                pto.vsts(
+                    converted, dst_addr, 0, one_mask, dist=element_store_dist(dtype)
+                )
         else:
             for row in range(0, valid_rows, 1):
                 remained = valid_cols
@@ -209,7 +214,12 @@ def register_rowprod():
         op="pto.trowprod",
         target="a5",
         name="template_trowprod",
-        dtypes=[("f16", "f16", "f16"), ("f32", "f32", "f32"), ("i16", "i16", "i16"), ("i32", "i32", "i32")],
+        dtypes=[
+            ("f16", "f16", "f16"),
+            ("f32", "f32", "f32"),
+            ("i16", "i16", "i16"),
+            ("i32", "i32", "i32"),
+        ],
         iteration_axis="row",
         op_engine="vector",
         op_class="reduction",

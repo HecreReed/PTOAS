@@ -112,4 +112,3 @@ __global__ AICORE void RunTEXTRACT(__gm__ float* v1, __gm__ float* v2, __gm__ fl
   TSTORE(v62, v57);
   return;
 }
-

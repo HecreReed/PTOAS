@@ -61,4 +61,3 @@ module {
 // LOWER: pto.vstsx2 %[[WIDE0]], %[[WIDE1]]
 // LOWER-NOT: pto.vmi.
 // LOWER-NOT: !pto.vmi.
-

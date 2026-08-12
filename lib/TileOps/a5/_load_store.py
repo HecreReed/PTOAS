@@ -22,7 +22,10 @@ INTEGER_LOAD_STORE_DTYPES = (
 )
 LOW_PRECISION_LOAD_STORE_DTYPES = ("f8e4m3", "f8e5m2", "hif8", "f4e1m2x2", "f4e2m1x2")
 LOAD_STORE_DTYPES = tuple(
-    (dtype, dtype) for dtype in NUMERIC_DTYPES + INTEGER_LOAD_STORE_DTYPES + LOW_PRECISION_LOAD_STORE_DTYPES
+    (dtype, dtype)
+    for dtype in NUMERIC_DTYPES
+    + INTEGER_LOAD_STORE_DTYPES
+    + LOW_PRECISION_LOAD_STORE_DTYPES
 )
 MAT_LOAD_DTYPES = (("f16", "f16"), ("bf16", "bf16"), ("f32", "f32"))
 ACC_STORE_DTYPES = (
@@ -72,10 +75,22 @@ def _is_tile_layout(config, *, row_major: bool, s_layout: str) -> bool:
     return config.b_layout != "row_major" and config.s_layout == s_layout
 
 
-def _check_load_bounds(src_shape, src_strides, dst_shape, dst_valid_shape, *, logical_rows, logical_cols=None, stride_axis=None, ranks=(5,)):
+def _check_load_bounds(
+    src_shape,
+    src_strides,
+    dst_shape,
+    dst_valid_shape,
+    *,
+    logical_rows,
+    logical_cols=None,
+    stride_axis=None,
+    ranks=(5,),
+):
     if _view_rank(src_shape) not in ranks:
         return False
-    if stride_axis is not None and not _known_eq(_stride_at(src_strides, stride_axis), 1):
+    if stride_axis is not None and not _known_eq(
+        _stride_at(src_strides, stride_axis), 1
+    ):
         return False
     if not _known_le(dst_valid_shape[0], logical_rows):
         return False
@@ -93,10 +108,22 @@ def _check_load_bounds(src_shape, src_strides, dst_shape, dst_valid_shape, *, lo
     return True
 
 
-def _check_store_bounds(src_shape, src_valid_shape, dst_shape, dst_strides, *, logical_rows, logical_cols, stride_axis=None, ranks=(5,)):
+def _check_store_bounds(
+    src_shape,
+    src_valid_shape,
+    dst_shape,
+    dst_strides,
+    *,
+    logical_rows,
+    logical_cols,
+    stride_axis=None,
+    ranks=(5,),
+):
     if _view_rank(dst_shape) not in ranks:
         return False
-    if stride_axis is not None and not _known_eq(_stride_at(dst_strides, stride_axis), 1):
+    if stride_axis is not None and not _known_eq(
+        _stride_at(dst_strides, stride_axis), 1
+    ):
         return False
     if not _known_eq(src_valid_shape[0], logical_rows):
         return False
@@ -109,8 +136,24 @@ def _check_store_bounds(src_shape, src_valid_shape, dst_shape, dst_strides, *, l
     return True
 
 
-def tload_nd2nd_constraint(src_kind, src_shape, src_strides, src_memory_space, dst_kind, dst_shape, dst_valid_shape, dst_memory_space, dst_config, **_):
-    if src_kind != "view" or dst_kind != "tile" or src_memory_space != "gm" or dst_memory_space not in {"ub", "vec"}:
+def tload_nd2nd_constraint(
+    src_kind,
+    src_shape,
+    src_strides,
+    src_memory_space,
+    dst_kind,
+    dst_shape,
+    dst_valid_shape,
+    dst_memory_space,
+    dst_config,
+    **_,
+):
+    if (
+        src_kind != "view"
+        or dst_kind != "tile"
+        or src_memory_space != "gm"
+        or dst_memory_space not in {"ub", "vec"}
+    ):
         return False
     if _view_rank(src_shape) == 2:
         logical_rows, logical_cols = src_shape
@@ -119,7 +162,9 @@ def tload_nd2nd_constraint(src_kind, src_shape, src_strides, src_memory_space, d
         logical_rows = _shape_size(src_shape[:4])
         logical_cols = src_shape[4]
         stride_axis = 4
-    return _is_tile_layout(dst_config, row_major=True, s_layout="none_box") and _check_load_bounds(
+    return _is_tile_layout(
+        dst_config, row_major=True, s_layout="none_box"
+    ) and _check_load_bounds(
         src_shape,
         src_strides,
         dst_shape,
@@ -131,17 +176,37 @@ def tload_nd2nd_constraint(src_kind, src_shape, src_strides, src_memory_space, d
     )
 
 
-def tload_dn2dn_constraint(src_kind, src_shape, src_strides, src_memory_space, dst_kind, dst_shape, dst_valid_shape, dst_memory_space, dst_config, **_):
-    if src_kind != "view" or dst_kind != "tile" or src_memory_space != "gm" or dst_memory_space not in {"ub", "vec"}:
+def tload_dn2dn_constraint(
+    src_kind,
+    src_shape,
+    src_strides,
+    src_memory_space,
+    dst_kind,
+    dst_shape,
+    dst_valid_shape,
+    dst_memory_space,
+    dst_config,
+    **_,
+):
+    if (
+        src_kind != "view"
+        or dst_kind != "tile"
+        or src_memory_space != "gm"
+        or dst_memory_space not in {"ub", "vec"}
+    ):
         return False
     if _view_rank(src_shape) == 2:
         logical_rows, logical_cols = src_shape
         stride_axis = 0
     else:
         logical_rows = src_shape[3]
-        logical_cols = _shape_size((src_shape[0], src_shape[1], src_shape[2], src_shape[4]))
+        logical_cols = _shape_size(
+            (src_shape[0], src_shape[1], src_shape[2], src_shape[4])
+        )
         stride_axis = 3
-    return _is_tile_layout(dst_config, row_major=False, s_layout="none_box") and _check_load_bounds(
+    return _is_tile_layout(
+        dst_config, row_major=False, s_layout="none_box"
+    ) and _check_load_bounds(
         src_shape,
         src_strides,
         dst_shape,
@@ -153,11 +218,28 @@ def tload_dn2dn_constraint(src_kind, src_shape, src_strides, src_memory_space, d
     )
 
 
-def tload_nz2nz_constraint(src_kind, src_shape, src_memory_space, dst_kind, dst_shape, dst_valid_shape, dst_memory_space, dst_config, **_):
-    if src_kind != "view" or dst_kind != "tile" or src_memory_space != "gm" or dst_memory_space not in {"ub", "vec"}:
+def tload_nz2nz_constraint(
+    src_kind,
+    src_shape,
+    src_memory_space,
+    dst_kind,
+    dst_shape,
+    dst_valid_shape,
+    dst_memory_space,
+    dst_config,
+    **_,
+):
+    if (
+        src_kind != "view"
+        or dst_kind != "tile"
+        or src_memory_space != "gm"
+        or dst_memory_space not in {"ub", "vec"}
+    ):
         return False
     logical_rows = src_shape[2]
-    return _is_tile_layout(dst_config, row_major=False, s_layout="row_major") and _check_load_bounds(
+    return _is_tile_layout(
+        dst_config, row_major=False, s_layout="row_major"
+    ) and _check_load_bounds(
         src_shape,
         None,
         dst_shape,
@@ -166,8 +248,24 @@ def tload_nz2nz_constraint(src_kind, src_shape, src_memory_space, dst_kind, dst_
     )
 
 
-def tstore_nd_constraint(src_kind, src_shape, src_valid_shape, src_memory_space, src_config, dst_kind, dst_shape, dst_strides, dst_memory_space, **_):
-    if src_kind != "tile" or dst_kind != "view" or src_memory_space not in {"ub", "vec"} or dst_memory_space != "gm":
+def tstore_nd_constraint(
+    src_kind,
+    src_shape,
+    src_valid_shape,
+    src_memory_space,
+    src_config,
+    dst_kind,
+    dst_shape,
+    dst_strides,
+    dst_memory_space,
+    **_,
+):
+    if (
+        src_kind != "tile"
+        or dst_kind != "view"
+        or src_memory_space not in {"ub", "vec"}
+        or dst_memory_space != "gm"
+    ):
         return False
     if _view_rank(dst_shape) == 2:
         logical_rows, logical_cols = dst_shape
@@ -176,7 +274,9 @@ def tstore_nd_constraint(src_kind, src_shape, src_valid_shape, src_memory_space,
         logical_rows = _shape_size(dst_shape[:4])
         logical_cols = dst_shape[4]
         stride_axis = 4
-    return _is_tile_layout(src_config, row_major=True, s_layout="none_box") and _check_store_bounds(
+    return _is_tile_layout(
+        src_config, row_major=True, s_layout="none_box"
+    ) and _check_store_bounds(
         src_shape,
         src_valid_shape,
         dst_shape,
@@ -188,12 +288,30 @@ def tstore_nd_constraint(src_kind, src_shape, src_valid_shape, src_memory_space,
     )
 
 
-def tstore_dn_constraint(src_kind, src_shape, src_valid_shape, src_memory_space, src_config, dst_kind, dst_shape, dst_strides, dst_memory_space, **_):
-    if src_kind != "tile" or dst_kind != "view" or src_memory_space not in {"ub", "vec"} or dst_memory_space != "gm":
+def tstore_dn_constraint(
+    src_kind,
+    src_shape,
+    src_valid_shape,
+    src_memory_space,
+    src_config,
+    dst_kind,
+    dst_shape,
+    dst_strides,
+    dst_memory_space,
+    **_,
+):
+    if (
+        src_kind != "tile"
+        or dst_kind != "view"
+        or src_memory_space not in {"ub", "vec"}
+        or dst_memory_space != "gm"
+    ):
         return False
     logical_rows = dst_shape[3]
     logical_cols = _shape_size((dst_shape[0], dst_shape[1], dst_shape[2], dst_shape[4]))
-    return _is_tile_layout(src_config, row_major=False, s_layout="none_box") and _check_store_bounds(
+    return _is_tile_layout(
+        src_config, row_major=False, s_layout="none_box"
+    ) and _check_store_bounds(
         src_shape,
         src_valid_shape,
         dst_shape,
@@ -204,12 +322,29 @@ def tstore_dn_constraint(src_kind, src_shape, src_valid_shape, src_memory_space,
     )
 
 
-def tstore_nz_constraint(src_kind, src_shape, src_valid_shape, src_memory_space, src_config, dst_kind, dst_shape, dst_memory_space, **_):
-    if src_kind != "tile" or dst_kind != "view" or src_memory_space not in {"ub", "vec"} or dst_memory_space != "gm":
+def tstore_nz_constraint(
+    src_kind,
+    src_shape,
+    src_valid_shape,
+    src_memory_space,
+    src_config,
+    dst_kind,
+    dst_shape,
+    dst_memory_space,
+    **_,
+):
+    if (
+        src_kind != "tile"
+        or dst_kind != "view"
+        or src_memory_space not in {"ub", "vec"}
+        or dst_memory_space != "gm"
+    ):
         return False
     logical_rows = dst_shape[2] * dst_shape[3]
     logical_cols = dst_shape[0] * dst_shape[1] * dst_shape[4]
-    return _is_tile_layout(src_config, row_major=False, s_layout="row_major") and _check_store_bounds(
+    return _is_tile_layout(
+        src_config, row_major=False, s_layout="row_major"
+    ) and _check_store_bounds(
         src_shape,
         src_valid_shape,
         dst_shape,
@@ -219,8 +354,23 @@ def tstore_nz_constraint(src_kind, src_shape, src_valid_shape, src_memory_space,
     )
 
 
-def tload_mat_nd2nz_constraint(src_kind, src_shape, src_memory_space, dst_kind, dst_shape, dst_memory_space, dst_config, dst_dtype, **_):
-    if src_kind != "view" or dst_kind != "tile" or src_memory_space != "gm" or dst_memory_space != "mat":
+def tload_mat_nd2nz_constraint(
+    src_kind,
+    src_shape,
+    src_memory_space,
+    dst_kind,
+    dst_shape,
+    dst_memory_space,
+    dst_config,
+    dst_dtype,
+    **_,
+):
+    if (
+        src_kind != "view"
+        or dst_kind != "tile"
+        or src_memory_space != "gm"
+        or dst_memory_space != "mat"
+    ):
         return False
     if dst_config.b_layout != "col_major" or dst_config.s_layout != "row_major":
         return False
@@ -231,8 +381,23 @@ def tload_mat_nd2nz_constraint(src_kind, src_shape, src_memory_space, dst_kind, 
     return _known_eq(src_shape[4], dst_shape[1])
 
 
-def tload_mat_dn2nz_constraint(src_kind, src_shape, src_memory_space, dst_kind, dst_shape, dst_memory_space, dst_config, dst_dtype, **_):
-    if src_kind != "view" or dst_kind != "tile" or src_memory_space != "gm" or dst_memory_space != "mat":
+def tload_mat_dn2nz_constraint(
+    src_kind,
+    src_shape,
+    src_memory_space,
+    dst_kind,
+    dst_shape,
+    dst_memory_space,
+    dst_config,
+    dst_dtype,
+    **_,
+):
+    if (
+        src_kind != "view"
+        or dst_kind != "tile"
+        or src_memory_space != "gm"
+        or dst_memory_space != "mat"
+    ):
         return False
     if dst_config.b_layout != "col_major" or dst_config.s_layout != "row_major":
         return False
@@ -243,7 +408,9 @@ def tload_mat_dn2nz_constraint(src_kind, src_shape, src_memory_space, dst_kind, 
     return _known_eq(src_shape[4], dst_shape[0])
 
 
-def tstore_acc_base(src_kind, src_memory_space, src_dtype, dst_kind, dst_memory_space, **_):
+def tstore_acc_base(
+    src_kind, src_memory_space, src_dtype, dst_kind, dst_memory_space, **_
+):
     return (
         src_kind == "tile"
         and dst_kind == "view"
@@ -271,7 +438,16 @@ def tstore_acc_nz2nz_constraint(dst_shape, dst_layout, **context):
     return dst_layout in {"nz", "fractal"}
 
 
-def tstore_fp_constraint(src_kind, src_memory_space, src_dtype, fp_kind, fp_memory_space, dst_kind, dst_memory_space, **_):
+def tstore_fp_constraint(
+    src_kind,
+    src_memory_space,
+    src_dtype,
+    fp_kind,
+    fp_memory_space,
+    dst_kind,
+    dst_memory_space,
+    **_,
+):
     return (
         src_kind == "tile"
         and fp_kind == "tile"

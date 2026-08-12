@@ -41,107 +41,103 @@ extern llvm::cl::opt<std::string> cannOutputVersion;
 extern llvm::cl::opt<VFSIMTSizeFixMode> vptoFixVFSIMTSize;
 
 enum class PTOBackend {
-  EmitC,
-  VPTO,
+    EmitC,
+    VPTO,
 };
 
 struct BackendInfo {
-  PTOBackend defaultBackend = PTOBackend::EmitC;
-  std::optional<PTOBackend> singleBackend;
-  bool cliBackendOverride = false;
-  bool requiresToolchain = false;
+    PTOBackend defaultBackend = PTOBackend::EmitC;
+    std::optional<PTOBackend> singleBackend;
+    bool cliBackendOverride = false;
+    bool requiresToolchain = false;
 };
 
 enum class PTOASCompileResultKind {
-  Text,
-  VPTOObject,
-  MixedObject,
+    Text,
+    VPTOObject,
+    MixedObject,
 };
 
 class PTOASContext {
 public:
-  PTOASContext(DialectRegistry &registry, llvm::StringRef outputPath, int argc,
-               char **argv);
-  ~PTOASContext();
+    PTOASContext(DialectRegistry& registry, llvm::StringRef outputPath, int argc, char** argv);
+    ~PTOASContext();
 
-  LogicalResult initializeEnvironment(bool requiresToolchain,
-                                      llvm::raw_ostream &diagOS);
-  void initializeMLIRContext();
+    LogicalResult initializeEnvironment(bool requiresToolchain, llvm::raw_ostream& diagOS);
+    void initializeMLIRContext();
 
-  MLIRContext &getMLIRContext();
+    MLIRContext& getMLIRContext();
 
-  void setArch(std::string value);
-  llvm::StringRef getArch() const;
+    void setArch(std::string value);
+    llvm::StringRef getArch() const;
 
-  void setBackendInfo(BackendInfo value);
-  const BackendInfo &getBackendInfo() const;
+    void setBackendInfo(BackendInfo value);
+    const BackendInfo& getBackendInfo() const;
 
-  void setVFSIMTSizeFixMode(VFSIMTSizeFixMode value);
-  VFSIMTSizeFixMode getVFSIMTSizeFixMode() const;
+    void setVFSIMTSizeFixMode(VFSIMTSizeFixMode value);
+    VFSIMTSizeFixMode getVFSIMTSizeFixMode() const;
 
-  int getArgc() const;
-  char **getArgv() const;
+    int getArgc() const;
+    char** getArgv() const;
 
-  llvm::StringRef getOutputPath() const;
-  std::string allocModuleId();
+    llvm::StringRef getOutputPath() const;
+    std::string allocModuleId();
 
-  const CANNToolchain *getToolchain(llvm::raw_ostream &diagOS) const;
-  CANNVersion getCANNVersionOrDefault() const;
+    const CANNToolchain* getToolchain(llvm::raw_ostream& diagOS) const;
+    CANNVersion getCANNVersionOrDefault() const;
 
-  void setOutputCANNVersionOverride(std::optional<CANNVersion> value);
-  TempFileRegistry &getTempFiles();
-  LogicalResult createTempPath(llvm::StringRef prefix, llvm::StringRef suffix,
-                               std::string &path);
+    void setOutputCANNVersionOverride(std::optional<CANNVersion> value);
+    TempFileRegistry& getTempFiles();
+    LogicalResult createTempPath(llvm::StringRef prefix, llvm::StringRef suffix, std::string& path);
 
 private:
-  MLIRContext mlirContext;
-  std::string outputPath;
-  std::string arch;
-  BackendInfo backendInfo;
-  VFSIMTSizeFixMode vfsimtSizeFixMode = VFSIMTSizeFixMode::Auto;
-  int argc = 0;
-  char **argv = nullptr;
-  CANNVersion cannVersion = CANNVersion{9, 0, 0, 1};
-  std::optional<CANNVersion> outputCANNVersionOverride;
-  std::optional<CANNToolchain> toolchain;
-  TempFileRegistry tempFiles;
+    MLIRContext mlirContext;
+    std::string outputPath;
+    std::string arch;
+    BackendInfo backendInfo;
+    VFSIMTSizeFixMode vfsimtSizeFixMode = VFSIMTSizeFixMode::Auto;
+    int argc = 0;
+    char** argv = nullptr;
+    CANNVersion cannVersion = CANNVersion{9, 0, 0, 1};
+    std::optional<CANNVersion> outputCANNVersionOverride;
+    std::optional<CANNToolchain> toolchain;
+    TempFileRegistry tempFiles;
 
-  LogicalResult initializeToolchain(llvm::raw_ostream &diagOS);
+    LogicalResult initializeToolchain(llvm::raw_ostream& diagOS);
 };
 
 struct PTOASCompileResult {
-  void reset() {
-    textOutput.clear();
-    vptoStubSource.clear();
-    vptoCubeModule.reset();
-    vptoVectorModule.reset();
-    kind = PTOASCompileResultKind::Text;
-  }
+    void reset()
+    {
+        textOutput.clear();
+        vptoStubSource.clear();
+        vptoCubeModule.reset();
+        vptoVectorModule.reset();
+        kind = PTOASCompileResultKind::Text;
+    }
 
-  PTOASCompileResultKind kind = PTOASCompileResultKind::Text;
-  std::string textOutput;
-  std::string vptoStubSource;
-  EmittedLLVMModule vptoCubeModule;
-  EmittedLLVMModule vptoVectorModule;
+    PTOASCompileResultKind kind = PTOASCompileResultKind::Text;
+    std::string textOutput;
+    std::string vptoStubSource;
+    EmittedLLVMModule vptoCubeModule;
+    EmittedLLVMModule vptoVectorModule;
 };
 
-int compilePTOASModule(OwningOpRef<ModuleOp> &module,
-                       PTOASContext &context, PTOBackend backend,
-                       PTOASCompileResult &result,
-                       bool emitVPTOHostStub = true);
-void registerPTOASDialects(DialectRegistry &registry);
+int compilePTOASModule(
+    OwningOpRef<ModuleOp>& module, PTOASContext& context, PTOBackend backend, PTOASCompileResult& result,
+    bool emitVPTOHostStub = true);
+void registerPTOASDialects(DialectRegistry& registry);
 void registerPTOASPassesAndCLOptions();
-void loadPTOASDialects(MLIRContext &context);
+void loadPTOASDialects(MLIRContext& context);
 
 // Reusable driver entry shared by the Python extension and standalone CLI.
-PTOAS_COMPILER_EXPORT int runPTOAS(int argc, char **argv);
+PTOAS_COMPILER_EXPORT int runPTOAS(int argc, char** argv);
 
 // Attach textual-.pto SSA name hints (function args, block args, op results)
 // to the parsed module's Locations as debug metadata. Called by the driver
 // right after parsing a textual .pto input so the names survive lowering.
 // No-op for non-textual (PTOBC) inputs or modules without recoverable names.
-void applyTextualNameHintsToModule(ModuleOp module,
-                                   const AsmParserState &parserState);
+void applyTextualNameHintsToModule(ModuleOp module, const AsmParserState& parserState);
 
 } // namespace mlir::pto
 

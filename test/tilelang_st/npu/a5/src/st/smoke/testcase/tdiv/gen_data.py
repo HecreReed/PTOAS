@@ -9,7 +9,6 @@
 # coding=utf-8
 
 import sys
-import os
 from pathlib import Path
 
 # Add current directory to path for standalone execution
@@ -52,7 +51,9 @@ def generate_precision_sensitive_data(shape, dtype):
     # Add variations: negative versions, different signs
     remaining_rows = rows - len(ratios) * section_size
     if remaining_rows > 0:
-        input1[-remaining_rows:, :] = np.random.choice([-1, 1], size=(remaining_rows, cols)).astype(dtype)
+        input1[-remaining_rows:, :] = np.random.choice(
+            [-1, 1], size=(remaining_rows, cols)
+        ).astype(dtype)
         input2[-remaining_rows:, :] = dtype(3)
 
     return input1, input2
@@ -79,12 +80,16 @@ def generate_subnormal_test_data(shape, dtype):
 
     if dtype == np.float32:
         tiny = np.finfo(np.float32).tiny
-        subnormal_max = np.frombuffer(np.array([0x007FFFFF], dtype=np.uint32), dtype=np.float32)[0]
+        subnormal_max = np.frombuffer(
+            np.array([0x007FFFFF], dtype=np.uint32), dtype=np.float32
+        )[0]
         subnormal_min = np.float32(1e-45)
         normal_min = tiny * np.float32(2.0)
     else:  # float16
         tiny = np.finfo(np.float16).tiny
-        subnormal_max = np.frombuffer(np.array([0x03FF], dtype=np.uint16), dtype=np.float16)[0]
+        subnormal_max = np.frombuffer(
+            np.array([0x03FF], dtype=np.uint16), dtype=np.float16
+        )[0]
         subnormal_min = np.float16(1e-8)
         normal_min = tiny * np.float16(2.0)
 
@@ -93,22 +98,30 @@ def generate_subnormal_test_data(shape, dtype):
     # Section 1: src0 = MAX_SUBNORMAL, src1 = normal
     # ratio ≈ 1e-38 / 10 ≈ 1e-39 (不 overflow)
     input1[:quarter, :] = subnormal_max
-    input2[:quarter, :] = np.random.uniform(normal_min, 100.0, size=(quarter, cols)).astype(dtype)
+    input2[:quarter, :] = np.random.uniform(
+        normal_min, 100.0, size=(quarter, cols)
+    ).astype(dtype)
 
     # Section 2: src0 = MAX_SUBNORMAL, src1 = smaller subnormal (ratio ≈ 1-10)
     # 确保 src1 在 subnormal 范围内: subnormal_min ~ subnormal_max
-    input1[quarter:2*quarter, :] = subnormal_max
-    input2[quarter:2*quarter, :] = np.random.uniform(subnormal_max * 0.1, subnormal_max,
-                                                      size=(quarter, cols)).astype(dtype)
+    input1[quarter : 2 * quarter, :] = subnormal_max
+    input2[quarter : 2 * quarter, :] = np.random.uniform(
+        subnormal_max * 0.1, subnormal_max, size=(quarter, cols)
+    ).astype(dtype)
 
     # Section 3: src0 = MAX_SUBNORMAL, src1 = very small subnormal (ratio ≈ 10-500)
-    input1[2*quarter:3*quarter, :] = subnormal_max
-    input2[2*quarter:3*quarter, :] = np.random.uniform(subnormal_min, subnormal_max * 0.1,
-                                                        size=(quarter, cols)).astype(dtype)
+    input1[2 * quarter : 3 * quarter, :] = subnormal_max
+    input2[2 * quarter : 3 * quarter, :] = np.random.uniform(
+        subnormal_min, subnormal_max * 0.1, size=(quarter, cols)
+    ).astype(dtype)
 
     # Section 4: normal reference
-    input1[3*quarter:, :] = np.random.uniform(0.1, 100.0, size=(rows-3*quarter, cols)).astype(dtype)
-    input2[3*quarter:, :] = np.random.uniform(0.1, 100.0, size=(rows-3*quarter, cols)).astype(dtype)
+    input1[3 * quarter :, :] = np.random.uniform(
+        0.1, 100.0, size=(rows - 3 * quarter, cols)
+    ).astype(dtype)
+    input2[3 * quarter :, :] = np.random.uniform(
+        0.1, 100.0, size=(rows - 3 * quarter, cols)
+    ).astype(dtype)
 
     return input1, input2
 
@@ -140,33 +153,40 @@ def generate_overflow_test_data(shape, dtype):
 
     # Section 1: Overflow scenarios
     quarter = rows // 4
-    input1[:quarter, :cols//2] = overflow_trigger
-    input2[:quarter, :cols//2] = tiny_val  # overflow_trigger / tiny_val -> Inf
+    input1[:quarter, : cols // 2] = overflow_trigger
+    input2[:quarter, : cols // 2] = tiny_val  # overflow_trigger / tiny_val -> Inf
 
-    input1[:quarter, cols//2:] = large_val
-    input2[:quarter, cols//2:] = np.random.uniform(1e-35 if dtype==np.float32 else 1e-7,
-                                                    tiny_val,
-                                                    size=(quarter, cols//2)).astype(dtype)
+    input1[:quarter, cols // 2 :] = large_val
+    input2[:quarter, cols // 2 :] = np.random.uniform(
+        1e-35 if dtype == np.float32 else 1e-7, tiny_val, size=(quarter, cols // 2)
+    ).astype(dtype)
 
     # Section 2: Underflow scenarios
-    input1[quarter:2*quarter, :cols//2] = underflow_trigger
-    input2[quarter:2*quarter, :cols//2] = large_val  # underflow_trigger / large_val -> 0
+    input1[quarter : 2 * quarter, : cols // 2] = underflow_trigger
+    input2[quarter : 2 * quarter, : cols // 2] = (
+        large_val  # underflow_trigger / large_val -> 0
+    )
 
-    input1[quarter:2*quarter, cols//2:] = tiny_val
-    input2[quarter:2*quarter, cols//2:] = np.random.uniform(large_val, max_normal,
-                                                             size=(quarter, cols//2)).astype(dtype)
+    input1[quarter : 2 * quarter, cols // 2 :] = tiny_val
+    input2[quarter : 2 * quarter, cols // 2 :] = np.random.uniform(
+        large_val, max_normal, size=(quarter, cols // 2)
+    ).astype(dtype)
 
     # Section 3: Near boundary (may or may not overflow)
-    input1[2*quarter:3*quarter, :] = np.random.uniform(large_val/10, max_normal,
-                                                        size=(quarter, cols)).astype(dtype)
-    input2[2*quarter:3*quarter, :] = np.random.uniform(tiny_val/10, tiny_val,
-                                                        size=(quarter, cols)).astype(dtype)
+    input1[2 * quarter : 3 * quarter, :] = np.random.uniform(
+        large_val / 10, max_normal, size=(quarter, cols)
+    ).astype(dtype)
+    input2[2 * quarter : 3 * quarter, :] = np.random.uniform(
+        tiny_val / 10, tiny_val, size=(quarter, cols)
+    ).astype(dtype)
 
     # Section 4: Normal values (control group)
-    input1[3*quarter:, :] = np.random.uniform(0.1, 100.0,
-                                               size=(rows-3*quarter, cols)).astype(dtype)
-    input2[3*quarter:, :] = np.random.uniform(0.1, 100.0,
-                                               size=(rows-3*quarter, cols)).astype(dtype)
+    input1[3 * quarter :, :] = np.random.uniform(
+        0.1, 100.0, size=(rows - 3 * quarter, cols)
+    ).astype(dtype)
+    input2[3 * quarter :, :] = np.random.uniform(
+        0.1, 100.0, size=(rows - 3 * quarter, cols)
+    ).astype(dtype)
 
     return input1, input2
 
@@ -207,32 +227,35 @@ def generate_nan_inf_test_data(shape, dtype):
     input1[0:eighth, :] = zero_val
     input2[0:eighth, :] = zero_val  # 0/0 -> NaN
 
-    input1[eighth:2*eighth, :] = pos_one
-    input2[eighth:2*eighth, :] = zero_val  # 1/0 -> Inf
+    input1[eighth : 2 * eighth, :] = pos_one
+    input2[eighth : 2 * eighth, :] = zero_val  # 1/0 -> Inf
 
-    input1[2*eighth:3*eighth, :] = neg_one
-    input2[2*eighth:3*eighth, :] = zero_val  # -1/0 -> -Inf
+    input1[2 * eighth : 3 * eighth, :] = neg_one
+    input2[2 * eighth : 3 * eighth, :] = zero_val  # -1/0 -> -Inf
 
     # Section 2: Inf/Inf -> NaN, Inf/x -> Inf, x/Inf -> 0
-    input1[3*eighth:4*eighth, :] = pos_inf
-    input2[3*eighth:4*eighth, :] = pos_inf  # Inf/Inf -> NaN
+    input1[3 * eighth : 4 * eighth, :] = pos_inf
+    input2[3 * eighth : 4 * eighth, :] = pos_inf  # Inf/Inf -> NaN
 
-    input1[4*eighth:5*eighth, :] = pos_inf
-    input2[4*eighth:5*eighth, :] = pos_one  # Inf/1 -> Inf
+    input1[4 * eighth : 5 * eighth, :] = pos_inf
+    input2[4 * eighth : 5 * eighth, :] = pos_one  # Inf/1 -> Inf
 
-    input1[5*eighth:6*eighth, :] = pos_one
-    input2[5*eighth:6*eighth, :] = pos_inf  # 1/Inf -> 0
+    input1[5 * eighth : 6 * eighth, :] = pos_one
+    input2[5 * eighth : 6 * eighth, :] = pos_inf  # 1/Inf -> 0
 
     # Section 3: NaN propagation
-    input1[6*eighth:7*eighth, :] = nan_val
-    input2[6*eighth:7*eighth, :] = np.random.uniform(0.1, 10.0,
-                                                      size=(eighth, cols)).astype(dtype)  # NaN/x -> NaN
+    input1[6 * eighth : 7 * eighth, :] = nan_val
+    input2[6 * eighth : 7 * eighth, :] = np.random.uniform(
+        0.1, 10.0, size=(eighth, cols)
+    ).astype(dtype)  # NaN/x -> NaN
 
-    input1[7*eighth:rows, :] = np.random.uniform(0.1, 10.0,
-                                                  size=(rows-7*eighth, cols)).astype(dtype)
-    input2[7*eighth:rows, :cols//2] = nan_val  # x/NaN -> NaN (half of remaining)
-    input2[7*eighth:rows, cols//2:] = np.random.uniform(0.1, 10.0,
-                                                        size=(rows-7*eighth, cols//2)).astype(dtype)
+    input1[7 * eighth : rows, :] = np.random.uniform(
+        0.1, 10.0, size=(rows - 7 * eighth, cols)
+    ).astype(dtype)
+    input2[7 * eighth : rows, : cols // 2] = nan_val  # x/NaN -> NaN (half of remaining)
+    input2[7 * eighth : rows, cols // 2 :] = np.random.uniform(
+        0.1, 10.0, size=(rows - 7 * eighth, cols // 2)
+    ).astype(dtype)
 
     return input1, input2
 
@@ -263,22 +286,25 @@ def generate_boundary_test_data(shape, dtype):
     # Section 1: Subnormal numbers (first half)
     half = rows // 2
     if dtype == np.float32:
-        input1[:half, :] = np.random.uniform(1e-40, subnormal_val,
-                                                  size=(half, cols)).astype(dtype)
+        input1[:half, :] = np.random.uniform(
+            1e-40, subnormal_val, size=(half, cols)
+        ).astype(dtype)
     else:
-        input1[:half, :] = np.random.uniform(1e-8, subnormal_val,
-                                                  size=(half, cols)).astype(dtype)
-    input2[:half, :] = np.random.uniform(1.0, 10.0,
-                                             size=(half, cols)).astype(dtype)
+        input1[:half, :] = np.random.uniform(
+            1e-8, subnormal_val, size=(half, cols)
+        ).astype(dtype)
+    input2[:half, :] = np.random.uniform(1.0, 10.0, size=(half, cols)).astype(dtype)
 
     # Section 2: Overflow boundary (second half)
-    input1[half:, :cols//2] = large_val
-    input2[half:, :cols//2] = tiny_val
+    input1[half:, : cols // 2] = large_val
+    input2[half:, : cols // 2] = tiny_val
 
-    input1[half:, cols//2:] = np.random.uniform(large_val/10, large_val,
-                                                   size=(half, cols//2)).astype(dtype)
-    input2[half:, cols//2:] = np.random.uniform(tiny_val/10, tiny_val,
-                                                   size=(half, cols//2)).astype(dtype)
+    input1[half:, cols // 2 :] = np.random.uniform(
+        large_val / 10, large_val, size=(half, cols // 2)
+    ).astype(dtype)
+    input2[half:, cols // 2 :] = np.random.uniform(
+        tiny_val / 10, tiny_val, size=(half, cols // 2)
+    ).astype(dtype)
 
     return input1, input2
 
@@ -292,6 +318,7 @@ def generate_normal_data(shape, dtype):
         input1 = np.random.uniform(0.1, 100.0, size=shape).astype(dtype)
         input2 = np.random.uniform(0.1, 100.0, size=shape).astype(dtype)
     return input1, input2
+
 
 for case in CASES:
     setup_case_rng(case)
@@ -319,9 +346,13 @@ for case in CASES:
     vr, vc = valid_shape
 
     # Suppress overflow/divide warnings for boundary tests (expected behavior)
-    with np.errstate(over='ignore', divide='ignore', invalid='ignore'):
-        golden[:vr, :vc] = (input1[:vr, :vc] / input2[:vr, :vc]).astype(dtype, copy=False)
+    with np.errstate(over="ignore", divide="ignore", invalid="ignore"):
+        golden[:vr, :vc] = (input1[:vr, :vc] / input2[:vr, :vc]).astype(
+            dtype, copy=False
+        )
 
     save_case_data(case["name"], {"input1": input1, "input2": input2, "golden": golden})
     precision_type = case.get("precision_type", "default")
-    print(f"[INFO] gen_data: {case['name']} shape={shape} valid_shape={valid_shape} dtype={dtype.__name__} test={test_pattern} precision={precision_type}")
+    print(
+        f"[INFO] gen_data: {case['name']} shape={shape} valid_shape={valid_shape} dtype={dtype.__name__} test={test_pattern} precision={precision_type}"
+    )

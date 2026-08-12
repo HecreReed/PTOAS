@@ -21,91 +21,89 @@ namespace mlir {
 namespace pto {
 
 enum class IterationDomainProof {
-  Proven,
-  Unproven,
+    Proven,
+    Unproven,
 };
 
 enum class IterationDomainUnprovenReason {
-  None,
-  MissingTileDomain,
-  DynamicShape,
-  InconsistentShape,
+    None,
+    MissingTileDomain,
+    DynamicShape,
+    InconsistentShape,
 };
 
 struct IterationDomainInfo {
-  int64_t vRow = ShapedType::kDynamic;
-  int64_t vCol = ShapedType::kDynamic;
-  IterationDomainProof proof = IterationDomainProof::Unproven;
-  IterationDomainUnprovenReason unprovenReason =
-      IterationDomainUnprovenReason::MissingTileDomain;
+    int64_t vRow = ShapedType::kDynamic;
+    int64_t vCol = ShapedType::kDynamic;
+    IterationDomainProof proof = IterationDomainProof::Unproven;
+    IterationDomainUnprovenReason unprovenReason = IterationDomainUnprovenReason::MissingTileDomain;
 };
 
 struct IterationDomainClass {
-  unsigned id = 0;
-  IterationDomainInfo info;
-  SmallVector<unsigned, 4> members;
+    unsigned id = 0;
+    IterationDomainInfo info;
+    SmallVector<unsigned, 4> members;
 };
 
 struct FusionDFGEdge {
-  unsigned producerNode = 0;
-  unsigned consumerNode = 0;
-  Value value;
+    unsigned producerNode = 0;
+    unsigned consumerNode = 0;
+    Value value;
 };
 
 struct FusionValueLiveness {
-  Value value;
-  std::optional<unsigned> producerNode;
-  SmallVector<unsigned, 4> consumerNodes;
-  SmallVector<unsigned, 2> writeInstances;
-  std::optional<unsigned> lastLocalConsumer;
-  bool hasExternalUsers = false;
-  bool escapesBlock = false;
-  bool hasLocalBoundaryUsers = false;
-  bool hasLocalHardBoundaryUsers = false;
+    Value value;
+    std::optional<unsigned> producerNode;
+    SmallVector<unsigned, 4> consumerNodes;
+    SmallVector<unsigned, 2> writeInstances;
+    std::optional<unsigned> lastLocalConsumer;
+    bool hasExternalUsers = false;
+    bool escapesBlock = false;
+    bool hasLocalBoundaryUsers = false;
+    bool hasLocalHardBoundaryUsers = false;
 };
 
 enum class FusionWriteInstanceEscapeClass {
-  Internal,
-  LocalBoundaryExternal,
-  HardExternal,
+    Internal,
+    LocalBoundaryExternal,
+    HardExternal,
 };
 
 struct FusionWriteInstanceLiveness {
-  unsigned id = 0;
-  Value value;
-  Value storageValue;
-  std::optional<unsigned> producerNode;
-  SmallVector<unsigned, 4> consumerNodes;
-  std::optional<unsigned> lastLocalConsumer;
-  FusionWriteInstanceEscapeClass escapeClass =
-      FusionWriteInstanceEscapeClass::Internal;
-  bool hasExternalUsers = false;
-  bool escapesBlock = false;
-  bool hasLocalBoundaryUsers = false;
-  bool hasLocalHardBoundaryUsers = false;
+    unsigned id = 0;
+    Value value;
+    Value storageValue;
+    std::optional<unsigned> producerNode;
+    SmallVector<unsigned, 4> consumerNodes;
+    std::optional<unsigned> lastLocalConsumer;
+    FusionWriteInstanceEscapeClass escapeClass = FusionWriteInstanceEscapeClass::Internal;
+    bool hasExternalUsers = false;
+    bool escapesBlock = false;
+    bool hasLocalBoundaryUsers = false;
+    bool hasLocalHardBoundaryUsers = false;
 };
 
 struct FusionComputeNode {
-  unsigned id = 0;
-  unsigned blockOrder = 0;
-  Operation *op = nullptr;
-  FusionOpSemantics semantics;
-  unsigned iterationDomainClass = 0;
-  SmallVector<unsigned, 4> incomingEdges;
-  SmallVector<unsigned, 4> outgoingEdges;
+    unsigned id = 0;
+    unsigned blockOrder = 0;
+    Operation* op = nullptr;
+    FusionOpSemantics semantics;
+    unsigned iterationDomainClass = 0;
+    SmallVector<unsigned, 4> incomingEdges;
+    SmallVector<unsigned, 4> outgoingEdges;
 };
 
 struct FusionBlockAnalysis {
-  Block *block = nullptr;
-  SmallVector<FusionComputeNode, 8> computeNodes;
-  SmallVector<IterationDomainClass, 4> iterationDomainClasses;
-  SmallVector<FusionDFGEdge, 8> edges;
-  SmallVector<FusionValueLiveness, 8> liveness;
-  SmallVector<FusionWriteInstanceLiveness, 8> writeInstances;
+    Block* block = nullptr;
+    SmallVector<FusionComputeNode, 8> computeNodes;
+    SmallVector<IterationDomainClass, 4> iterationDomainClasses;
+    SmallVector<FusionDFGEdge, 8> edges;
+    SmallVector<FusionValueLiveness, 8> liveness;
+    SmallVector<FusionWriteInstanceLiveness, 8> writeInstances;
 };
 
 struct PreFusionAnalysisResult {
-  SmallVector<FusionBlockAnalysis, 8> blocks;
+    SmallVector<FusionBlockAnalysis, 8> blocks;
 };
 
 /// Build the *shared* pre-fusion analysis: the tile dataflow graph
@@ -119,23 +117,20 @@ struct PreFusionAnalysisResult {
 /// This function is intentionally option-free so it can be cached by the MLIR
 /// analysis manager (PreFusionAnalysis) and shared by every pass that only
 /// consumes the dataflow structures (e.g. FusionRegionGen).
-FailureOr<PreFusionAnalysisResult>
-buildPreFusionAnalysisDFG(func::FuncOp func);
+FailureOr<PreFusionAnalysisResult> buildPreFusionAnalysisDFG(func::FuncOp func);
 
 /// Infer iteration-domain classes for every block of \p result.  When
 /// \p enableShapeInference is false, uses the conservative static/direct-bound
 /// inference; when true, uses the ShapeConstraintSolver.  This is the separable
 /// domain step that runs on top of the shared dataflow graph built by
 /// buildPreFusionAnalysisDFG.
-LogicalResult inferIterationDomainClasses(PreFusionAnalysisResult &result,
-                                         bool enableShapeInference);
+LogicalResult inferIterationDomainClasses(PreFusionAnalysisResult& result, bool enableShapeInference);
 
 /// Convenience: build the shared DFG and infer iteration-domain classes in one
 /// step.  Prefer calling buildPreFusionAnalysisDFG + inferIterationDomainClasses
 /// separately when the DFG can be shared across passes via the analysis
 /// manager.
-FailureOr<PreFusionAnalysisResult>
-buildPreFusionAnalysis(func::FuncOp func, bool enableShapeInference = false);
+FailureOr<PreFusionAnalysisResult> buildPreFusionAnalysis(func::FuncOp func, bool enableShapeInference = false);
 
 /// Analysis-manager-cached pre-fusion analysis.  Holds only the shared
 /// dataflow graph (no iteration-domain classes): iteration-domain inference
@@ -145,22 +140,23 @@ buildPreFusionAnalysis(func::FuncOp func, bool enableShapeInference = false);
 /// domain classes, so it can use the cached graph directly.
 class PreFusionAnalysis {
 public:
-  explicit PreFusionAnalysis(func::FuncOp func) {
-    FailureOr<PreFusionAnalysisResult> resultOr =
-        buildPreFusionAnalysisDFG(func);
-    if (succeeded(resultOr))
-      result = std::move(*resultOr);
-  }
+    explicit PreFusionAnalysis(func::FuncOp func)
+    {
+        FailureOr<PreFusionAnalysisResult> resultOr = buildPreFusionAnalysisDFG(func);
+        if (succeeded(resultOr))
+            result = std::move(*resultOr);
+    }
 
-  bool isValid() const { return result.has_value(); }
+    bool isValid() const { return result.has_value(); }
 
-  const PreFusionAnalysisResult &getResult() const {
-    assert(result && "expected valid pre-fusion analysis result");
-    return *result;
-  }
+    const PreFusionAnalysisResult& getResult() const
+    {
+        assert(result && "expected valid pre-fusion analysis result");
+        return *result;
+    }
 
 private:
-  std::optional<PreFusionAnalysisResult> result;
+    std::optional<PreFusionAnalysisResult> result;
 };
 
 } // namespace pto

@@ -33,7 +33,9 @@ def main():
             )
             if strict:
                 sys.exit(2)
-            print(f"[WARN] compare failed for first {CHECK_ELEMS} elements (non-gating)")
+            print(
+                f"[WARN] compare failed for first {CHECK_ELEMS} elements (non-gating)"
+            )
             return
         idxs = np.nonzero(golden_prefix != out_prefix)[0]
         idx = int(idxs[0]) if idxs.size else 0

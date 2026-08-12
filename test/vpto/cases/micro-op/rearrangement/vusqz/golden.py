@@ -32,7 +32,9 @@ def build_case() -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     out = np.zeros((BLOCKS, LANES), dtype=np.int32)
 
     for block in range(BLOCKS):
-        src[block] = np.arange(block * 100 - 31, block * 100 - 31 + LANES, dtype=np.int32)
+        src[block] = np.arange(
+            block * 100 - 31, block * 100 - 31 + LANES, dtype=np.int32
+        )
         mask_seed[block, :ACTIVE_PER_BLOCK] = 1.0
         active_count = 0
         out[block, 0] = 0
@@ -41,7 +43,11 @@ def build_case() -> tuple[np.ndarray, np.ndarray, np.ndarray]:
                 active_count += 1
             out[block, lane] = active_count
 
-    return src.reshape(ROWS, COLS), mask_seed.reshape(ROWS, COLS), out.reshape(ROWS, COLS)
+    return (
+        src.reshape(ROWS, COLS),
+        mask_seed.reshape(ROWS, COLS),
+        out.reshape(ROWS, COLS),
+    )
 
 
 def generate(output_dir: Path) -> None:
@@ -54,7 +60,9 @@ def generate(output_dir: Path) -> None:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Generate vusqz prefix-count inputs/golden.")
+    parser = argparse.ArgumentParser(
+        description="Generate vusqz prefix-count inputs/golden."
+    )
     parser.add_argument("--output-dir", type=Path, default=Path("."))
     parser.add_argument("--seed", type=int, default=SEED)
     args = parser.parse_args()

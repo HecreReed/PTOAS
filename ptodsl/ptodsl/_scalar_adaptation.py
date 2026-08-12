@@ -18,7 +18,15 @@ from ._types import (
 )
 
 from ptoas.mlir.dialects import arith
-from ptoas.mlir.ir import BF16Type, F16Type, F32Type, FloatAttr, IndexType, IntegerType, VectorType
+from ptoas.mlir.ir import (
+    BF16Type,
+    F16Type,
+    F32Type,
+    FloatAttr,
+    IndexType,
+    IntegerType,
+    VectorType,
+)
 
 
 def classify_runtime_scalar_type(type_obj):
@@ -32,7 +40,9 @@ def classify_runtime_scalar_type(type_obj):
         element_type = VectorType(type_obj).element_type
         if any(cls.isinstance(element_type) for cls in (BF16Type, F16Type, F32Type)):
             return "float"
-    raise TypeError(f"runtime scalar operators only support index/int/float values, got {type_obj}")
+    raise TypeError(
+        f"runtime scalar operators only support index/int/float values, got {type_obj}"
+    )
 
 
 def is_mlir_value(value) -> bool:
@@ -52,7 +62,9 @@ def materialize_scalar_literal(value, target_type, *, context: str):
         )
 
     if target_kind == "float":
-        return arith.ConstantOp(target_type, FloatAttr.get(target_type, float(value))).result
+        return arith.ConstantOp(
+            target_type, FloatAttr.get(target_type, float(value))
+        ).result
     if target_kind == "index":
         return arith.ConstantOp(target_type, int(value)).result
 
@@ -101,9 +113,13 @@ def coerce_runtime_index_value(value, *, context: str):
     if IndexType.isinstance(value_type):
         return value
     if IntegerType.isinstance(value_type):
-        return arith.IndexCastOp(IndexType.get(), _strip_integer_signedness(value)).result
+        return arith.IndexCastOp(
+            IndexType.get(), _strip_integer_signedness(value)
+        ).result
 
-    raise TypeError(f"{context} expects an index or integer runtime scalar, got {value_type}")
+    raise TypeError(
+        f"{context} expects an index or integer runtime scalar, got {value_type}"
+    )
 
 
 def coerce_runtime_integer_value(value, target_type, *, context: str):
@@ -131,11 +147,15 @@ def coerce_runtime_i1_value(value, *, context: str):
             raise ValueError(f"{context} expects a bool or 0/1 integer, got {value}")
         return _materialize_integer_literal(i1_type, value)
     if not hasattr(value, "type"):
-        raise TypeError(f"{context} expects a bool or integer-like scalar, got {value!r}")
+        raise TypeError(
+            f"{context} expects a bool or integer-like scalar, got {value!r}"
+        )
 
     kind = classify_runtime_scalar_type(value.type)
     if kind == "float":
-        raise TypeError(f"{context} expects a bool or integer-like scalar, got {value.type}")
+        raise TypeError(
+            f"{context} expects a bool or integer-like scalar, got {value.type}"
+        )
     return coerce_integer_like(value, i1_type)
 
 
@@ -144,7 +164,9 @@ def normalize_runtime_binary_operands(lhs, rhs):
     rhs_is_value = is_mlir_value(rhs)
 
     if not lhs_is_value and not rhs_is_value:
-        raise TypeError("runtime scalar operators require at least one traced runtime operand")
+        raise TypeError(
+            "runtime scalar operators require at least one traced runtime operand"
+        )
 
     if lhs_is_value and rhs_is_value:
         return reconcile_typed_runtime_binary_operands(lhs, rhs)
@@ -221,7 +243,9 @@ def _materialize_runtime_literal(value, anchor_type):
         )
 
     if kind == "float":
-        return arith.ConstantOp(anchor_type, FloatAttr.get(anchor_type, float(value))).result
+        return arith.ConstantOp(
+            anchor_type, FloatAttr.get(anchor_type, float(value))
+        ).result
     if kind == "index":
         return arith.ConstantOp(anchor_type, int(value)).result
 

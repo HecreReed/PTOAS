@@ -24,7 +24,9 @@ from kernel_test.registry import import_kernel_module
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description="Report cycle metrics for one kernel-test operator")
+    parser = argparse.ArgumentParser(
+        description="Report cycle metrics for one kernel-test operator"
+    )
     parser.add_argument(
         "--kernel-dir",
         help=(
@@ -34,13 +36,17 @@ def main(argv: list[str] | None = None) -> int:
         ),
     )
     parser.add_argument("--op", required=True, help="Kernel name")
-    parser.add_argument("--table", action="store_true", help="Print compact table output")
+    parser.add_argument(
+        "--table", action="store_true", help="Print compact table output"
+    )
     parser.add_argument("out_dirs", nargs="*", help="Per-case sim output directories")
     args = parser.parse_args(argv)
     kernel_dir = args.kernel_dir or os.environ.get("KERNEL_TEST_KERNEL_DIR")
 
     try:
-        module = import_kernel_module(args.op, kernel_dir=kernel_dir, submodule="cycle_metrics")
+        module = import_kernel_module(
+            args.op, kernel_dir=kernel_dir, submodule="cycle_metrics"
+        )
     except ModuleNotFoundError as exc:
         print(f"no cycle metrics analyzer for kernel {args.op}: {exc}", file=sys.stderr)
         return 1

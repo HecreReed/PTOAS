@@ -11,12 +11,24 @@
 #endif
 
 #if defined(__CCE_AICORE__) && defined(__NPU_ARCH__) && (__NPU_ARCH__ == 2201)
-typedef struct { unsigned char v; } hifloat8_t;
-typedef struct { unsigned char v; } float8_e4m3_t;
-typedef struct { unsigned char v; } float8_e5m2_t;
-typedef struct { unsigned char v; } float8_e8m0_t;
-typedef struct { unsigned char v; } float4_e1m2x2_t;
-typedef struct { unsigned char v; } float4_e2m1x2_t;
+typedef struct {
+    unsigned char v;
+} hifloat8_t;
+typedef struct {
+    unsigned char v;
+} float8_e4m3_t;
+typedef struct {
+    unsigned char v;
+} float8_e5m2_t;
+typedef struct {
+    unsigned char v;
+} float8_e8m0_t;
+typedef struct {
+    unsigned char v;
+} float4_e1m2x2_t;
+typedef struct {
+    unsigned char v;
+} float4_e2m1x2_t;
 #endif
 
 #include <cstdint>
@@ -27,10 +39,10 @@ typedef struct { unsigned char v; } float4_e2m1x2_t;
 
 #if !defined(__CCE_AICORE__) && !defined(TMRGSORT_HPP)
 struct MrgSortExecutedNumList {
-  uint16_t mrgSortList0;
-  uint16_t mrgSortList1;
-  uint16_t mrgSortList2;
-  uint16_t mrgSortList3;
+    uint16_t mrgSortList0;
+    uint16_t mrgSortList1;
+    uint16_t mrgSortList2;
+    uint16_t mrgSortList3;
 };
 #endif
 
@@ -38,19 +50,16 @@ struct MrgSortExecutedNumList {
 #include "acl/acl.h"
 #endif
 
-extern "C" __global__ [aicore] void fixpipe_acc_store_sat_f16_cv_kernel(
-    __gm__ __fp16 *src, __gm__ __fp16 *id, __gm__ uint32_t *fp,
-    __gm__ __fp16 *out_ub_sat, __gm__ __fp16 *out_ub_nosat,
-    __gm__ __fp16 *out_gm_sat, __gm__ __fp16 *out_gm_nosat,
-    __gm__ __fp16 *out_l1_sat, __gm__ __fp16 *out_l1_nosat);
+extern "C" __global__[aicore] void fixpipe_acc_store_sat_f16_cv_kernel(
+    __gm__ __fp16* src, __gm__ __fp16* id, __gm__ uint32_t* fp, __gm__ __fp16* out_ub_sat, __gm__ __fp16* out_ub_nosat,
+    __gm__ __fp16* out_gm_sat, __gm__ __fp16* out_gm_nosat, __gm__ __fp16* out_l1_sat, __gm__ __fp16* out_l1_nosat);
 
 void LaunchFixpipe_acc_store_sat_f16_cv_kernel(
-    __fp16 *src, __fp16 *id, uint32_t *fp, __fp16 *outUbSat,
-    __fp16 *outUbNosat, __fp16 *outGmSat, __fp16 *outGmNosat,
-    __fp16 *outL1Sat, __fp16 *outL1Nosat, void *stream) {
-  fixpipe_acc_store_sat_f16_cv_kernel<<<1, nullptr, stream>>>(
-      (__gm__ __fp16 *)src, (__gm__ __fp16 *)id, (__gm__ uint32_t *)fp,
-      (__gm__ __fp16 *)outUbSat, (__gm__ __fp16 *)outUbNosat,
-      (__gm__ __fp16 *)outGmSat, (__gm__ __fp16 *)outGmNosat,
-      (__gm__ __fp16 *)outL1Sat, (__gm__ __fp16 *)outL1Nosat);
+    __fp16* src, __fp16* id, uint32_t* fp, __fp16* outUbSat, __fp16* outUbNosat, __fp16* outGmSat, __fp16* outGmNosat,
+    __fp16* outL1Sat, __fp16* outL1Nosat, void* stream)
+{
+    fixpipe_acc_store_sat_f16_cv_kernel<<<1, nullptr, stream>>>(
+        (__gm__ __fp16*)src, (__gm__ __fp16*)id, (__gm__ uint32_t*)fp, (__gm__ __fp16*)outUbSat,
+        (__gm__ __fp16*)outUbNosat, (__gm__ __fp16*)outGmSat, (__gm__ __fp16*)outGmNosat, (__gm__ __fp16*)outL1Sat,
+        (__gm__ __fp16*)outL1Nosat);
 }

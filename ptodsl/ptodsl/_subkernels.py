@@ -128,14 +128,18 @@ class SubkernelTemplate:
         if not isinstance(dims, tuple):
             dims = (dims,)
         if len(dims) != 3:
-            raise TypeError("@pto.simt launch syntax expects helper[dim_x, dim_y, dim_z](...)")
+            raise TypeError(
+                "@pto.simt launch syntax expects helper[dim_x, dim_y, dim_z](...)"
+            )
         return _SimtLaunchTemplate(self, dims)
 
     def _validate_definition(self) -> None:
         if self.spec.role == KernelRole.SIMT:
             for param in self.signature.parameters.values():
                 if isinstance(param.annotation, TensorSpec):
-                    raise subkernel_signature_boundary_error(self.spec.role.value, param.name)
+                    raise subkernel_signature_boundary_error(
+                        self.spec.role.value, param.name
+                    )
                 annotation = _normalize_subkernel_annotation(param.annotation)
                 if isinstance(annotation, _StructDescriptor):
                     raise subkernel_illegal_annotation_error(
@@ -150,17 +154,25 @@ class SubkernelTemplate:
             if param.kind == inspect.Parameter.KEYWORD_ONLY:
                 if self.spec.role == KernelRole.SIMT:
                     continue
-                raise subkernel_illegal_parameter_kind_error(self.spec.role.value, param.name, param.kind)
+                raise subkernel_illegal_parameter_kind_error(
+                    self.spec.role.value, param.name, param.kind
+                )
             if param.kind not in {
                 inspect.Parameter.POSITIONAL_ONLY,
                 inspect.Parameter.POSITIONAL_OR_KEYWORD,
             }:
-                raise subkernel_illegal_parameter_kind_error(self.spec.role.value, param.name, param.kind)
+                raise subkernel_illegal_parameter_kind_error(
+                    self.spec.role.value, param.name, param.kind
+                )
             if param.annotation is inspect.Parameter.empty:
-                raise subkernel_missing_annotation_error(self.spec.role.value, param.name)
+                raise subkernel_missing_annotation_error(
+                    self.spec.role.value, param.name
+                )
             annotation = _normalize_subkernel_annotation(param.annotation)
             if isinstance(annotation, TensorSpec):
-                raise subkernel_signature_boundary_error(self.spec.role.value, param.name)
+                raise subkernel_signature_boundary_error(
+                    self.spec.role.value, param.name
+                )
             if not _is_supported_subkernel_annotation(self.spec.role, annotation):
                 raise subkernel_illegal_annotation_error(
                     self.spec.role.value,
@@ -170,7 +182,9 @@ class SubkernelTemplate:
                 )
 
         if self.spec.role == KernelRole.TILEOP:
-            result_annotation = _normalize_subkernel_annotation(self.signature.return_annotation)
+            result_annotation = _normalize_subkernel_annotation(
+                self.signature.return_annotation
+            )
             if result_annotation not in {inspect.Parameter.empty, None}:
                 raise tileop_return_annotation_error(self.signature.return_annotation)
 
@@ -273,9 +287,15 @@ def _find_transient_simd_escape(value):
 
 
 def _is_supported_runtime_scalar_annotation(annotation) -> bool:
-    return (
-        isinstance(annotation, _DType)
-        and not isinstance(annotation, (_PtrDescriptor, _StructDescriptor, _VecDescriptor, _VRegDescriptor, _MaskDescriptor))
+    return isinstance(annotation, _DType) and not isinstance(
+        annotation,
+        (
+            _PtrDescriptor,
+            _StructDescriptor,
+            _VecDescriptor,
+            _VRegDescriptor,
+            _MaskDescriptor,
+        ),
     )
 
 
@@ -336,9 +356,15 @@ def _normalize_subkernel_annotation(annotation):
     if text in _POSTPONED_DTYPE_ANNOTATIONS:
         return _POSTPONED_DTYPE_ANNOTATIONS[text]
     if text.startswith("pto.ptr(") and text.endswith(")"):
-        args = [part.strip() for part in text[len("pto.ptr("):-1].split(",")]
-        if len(args) == 2 and args[0] in _POSTPONED_DTYPE_ANNOTATIONS and args[1] in _POSTPONED_MEMORY_SPACES:
-            return ptr(_POSTPONED_DTYPE_ANNOTATIONS[args[0]], _POSTPONED_MEMORY_SPACES[args[1]])
+        args = [part.strip() for part in text[len("pto.ptr(") : -1].split(",")]
+        if (
+            len(args) == 2
+            and args[0] in _POSTPONED_DTYPE_ANNOTATIONS
+            and args[1] in _POSTPONED_MEMORY_SPACES
+        ):
+            return ptr(
+                _POSTPONED_DTYPE_ANNOTATIONS[args[0]], _POSTPONED_MEMORY_SPACES[args[1]]
+            )
     return annotation
 
 
@@ -385,7 +411,9 @@ def _normalize_subkernel_argument(role: KernelRole, name: str, annotation, value
     if annotation is Tile:
         if isinstance(value, Tile):
             return value
-        raise subkernel_argument_type_error(role.value, name, "a pto.Tile value", type(value).__name__)
+        raise subkernel_argument_type_error(
+            role.value, name, "a pto.Tile value", type(value).__name__
+        )
 
     if _is_supported_runtime_scalar_annotation(annotation):
         if isinstance(value, (bool, int, float)):
@@ -473,7 +501,9 @@ class _SubkernelSurface:
 
     def __call__(self, fn):
         if self._simt_inline_dims is not None:
-            raise TypeError("pto.simt(dim_x, dim_y, dim_z) is only supported as an inline context manager")
+            raise TypeError(
+                "pto.simt(dim_x, dim_y, dim_z) is only supported as an inline context manager"
+            )
         if self._role in {KernelRole.CUBE, KernelRole.SIMD}:
             raise legacy_subkernel_decorator_error(self._role.value)
         return SubkernelTemplate(
@@ -491,7 +521,9 @@ class _SubkernelSurface:
         if self._role in {KernelRole.CUBE, KernelRole.SIMD}:
             raise legacy_subkernel_decorator_error(self._role.value)
         if self._role == KernelRole.SIMT and self._simt_max_threads is not None:
-            raise TypeError("@pto.simt(max_threads=...) is only supported as a function decorator")
+            raise TypeError(
+                "@pto.simt(max_threads=...) is only supported as a function decorator"
+            )
         runtime = current_runtime()
         if runtime is None:
             raise RuntimeError(
@@ -566,22 +598,34 @@ def _decorate_subkernel(
     )
 
 
-def cube(fn=None, *, name: str | None = None, target: str = "a5", ast_rewrite: bool = True):
-    return _decorate_subkernel(KernelRole.CUBE, fn, name=name, target=target, ast_rewrite=ast_rewrite)
+def cube(
+    fn=None, *, name: str | None = None, target: str = "a5", ast_rewrite: bool = True
+):
+    return _decorate_subkernel(
+        KernelRole.CUBE, fn, name=name, target=target, ast_rewrite=ast_rewrite
+    )
 
 
-def simd(fn=None, *, name: str | None = None, target: str = "a5", ast_rewrite: bool = True):
-    return _decorate_subkernel(KernelRole.SIMD, fn, name=name, target=target, ast_rewrite=ast_rewrite)
+def simd(
+    fn=None, *, name: str | None = None, target: str = "a5", ast_rewrite: bool = True
+):
+    return _decorate_subkernel(
+        KernelRole.SIMD, fn, name=name, target=target, ast_rewrite=ast_rewrite
+    )
 
 
-def tileop(fn=None, *, name: str | None = None, target: str = "a5", ast_rewrite: bool = True):
+def tileop(
+    fn=None, *, name: str | None = None, target: str = "a5", ast_rewrite: bool = True
+):
     """Define a reusable single-core TileOp helper.
 
     TileOps accept only ``pto.Tile`` and PTO scalar ABI values. Their compute
     domain is inferred from the traced body by PTOAS rather than selected by
     the decorator.
     """
-    return _decorate_subkernel(KernelRole.TILEOP, fn, name=name, target=target, ast_rewrite=ast_rewrite)
+    return _decorate_subkernel(
+        KernelRole.TILEOP, fn, name=name, target=target, ast_rewrite=ast_rewrite
+    )
 
 
 def _validate_simt_resource_attr(name: str, value: int | None) -> int | None:
@@ -611,7 +655,9 @@ def simt(
         fn = None
     if dims:
         if len(dims) != 3:
-            raise TypeError("pto.simt(dim_x, dim_y, dim_z) expects exactly three launch dimensions")
+            raise TypeError(
+                "pto.simt(dim_x, dim_y, dim_z) expects exactly three launch dimensions"
+            )
         simt_inline_dims = tuple(dims)
     return _decorate_subkernel(
         KernelRole.SIMT,

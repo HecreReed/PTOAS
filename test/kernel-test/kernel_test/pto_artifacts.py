@@ -112,7 +112,9 @@ def materialize_artifact_plan(
             shutil.copyfile(src, dst)
             paths[f"root_{artifact_name.replace('.', '_')}"] = str(dst)
             if plan.alias_stem:
-                legacy_root_alias = plan.generated_dir / f"{plan.alias_stem}.{artifact_name}"
+                legacy_root_alias = (
+                    plan.generated_dir / f"{plan.alias_stem}.{artifact_name}"
+                )
                 if legacy_root_alias.exists():
                     legacy_root_alias.unlink()
 

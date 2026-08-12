@@ -13,10 +13,19 @@ import ptodsl.tilelib as tilelib
 from ._cube import MATMUL_DTYPES
 
 
-@tilelib.tile_template(op="pto.tmatmul", target="a5", name="template_tmatmul",
-                       dtypes=MATMUL_DTYPES, iteration_axis="none",
-                       op_engine="cube", op_class="other", id=0, loop_depth=1,
-                       is_post_update=False, tags=("cube", "matmul"))
+@tilelib.tile_template(
+    op="pto.tmatmul",
+    target="a5",
+    name="template_tmatmul",
+    dtypes=MATMUL_DTYPES,
+    iteration_axis="none",
+    op_engine="cube",
+    op_class="other",
+    id=0,
+    loop_depth=1,
+    is_post_update=False,
+    tags=("cube", "matmul"),
+)
 def template_tmatmul(lhs: pto.Tile, rhs: pto.Tile, acc: pto.Tile):
     m, k = lhs.valid_shape
     _, n = rhs.valid_shape

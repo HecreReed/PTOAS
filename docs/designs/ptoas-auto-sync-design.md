@@ -364,7 +364,7 @@ flowchart TD
 
 ## 5. 依赖识别：def/use + alias 是同一件事的两面
 
-`def/use` 分析不是直接比较 SSA 名字，而是落在 `BaseMemInfo` 上计算。  
+`def/use` 分析不是直接比较 SSA 名字，而是落在 `BaseMemInfo` 上计算。
 其中最关键的字段是 `rootBuffer`、`scope`、`baseAddresses`、`allocateSize`。
 
 hazard 判定按三类关系展开：
@@ -388,8 +388,8 @@ hazard 判定按三类关系展开：
 
 ### 5.2 例子：`[V][V][MTE3]`
 
-两个 `V` 在语义上可能写的是同一个 root 下的两个不重叠 subview。  
-如果静态阶段能拿到精确 offset/size，系统会判不重叠。  
+两个 `V` 在语义上可能写的是同一个 root 下的两个不重叠 subview。
+如果静态阶段能拿到精确 offset/size，系统会判不重叠。
 如果拿不到，会按“可能重叠”处理，此时 `MTE3` 会同时依赖这两个 `V`。
 
 这不是算法错误，而是保守策略带来的结果。
@@ -405,7 +405,7 @@ hazard 判定按三类关系展开：
 1. 外层：按顺序选当前指令 `now`。
 2. 内层：从 `now-1` 向前反扫 `front`。
 
-每次反扫都会维护按 pipe 索引的状态 `alreadySync`。  
+每次反扫都会维护按 pipe 索引的状态 `alreadySync`。
 它不是全局状态，而是“针对当前 `now`，该源 pipe 的依赖是否已经被某个同步对覆盖”。
 
 一旦 `front` 与 `now` 命中 hazard：
@@ -452,7 +452,7 @@ hazard 判定按三类关系展开：
 
 ### 6.2 先做一件事：把控制流“拉直”
 
-在同步分析前，`PTOIRTranslator` 会先把结构化控制流（`scf.if/scf.for/scf.while`）转换成一维 `SyncIR` 数组。  
+在同步分析前，`PTOIRTranslator` 会先把结构化控制流（`scf.if/scf.for/scf.while`）转换成一维 `SyncIR` 数组。
 这样做不是为了简化语义，而是为了统一扫描实现：核心算法是“对每个 `now` 做反向扫描”。
 
 但“拉直”不等于丢掉结构。`SyncIR` 里会保留结构节点来恢复语义边界：
@@ -530,8 +530,8 @@ if/else 不是拍平后线性扫完就结束，而是在遇到 `IF_END` 时递�
 
 #### 分支例子 A：双分支都命中同类 pipe
 
-假设 `if` 前有 `front(MTE2)`，then/else 内各有一个 `wait(MTE2->V)`，`now` 在 `if-end` 后。  
-如果简单做并集，会把“仅 then 成立”误当成“必然成立”，导致漏插。  
+假设 `if` 前有 `front(MTE2)`，then/else 内各有一个 `wait(MTE2->V)`，`now` 在 `if-end` 后。
+如果简单做并集，会把“仅 then 成立”误当成“必然成立”，导致漏插。
 做交集后，只有 then 和 else 都能覆盖时，才允许不再新增同步。
 
 #### 分支例子 B：为什么会有 set/wait 跨分支移动
@@ -541,7 +541,7 @@ if/else 不是拍平后线性扫完就结束，而是在遇到 `IF_END` 时递�
 1. `setA` 在 then 分支前（if 外），`waitA` 在 then 分支内。
 2. `setB` 在 else 分支内，`waitB` 在 if-end 后（if 外）。
 
-这类结构如果不做边界修正，会出现“同步对分散在不同控制流层级”的问题。  
+这类结构如果不做边界修正，会出现“同步对分散在不同控制流层级”的问题。
 `MoveSyncState` 的目标是把它规整成“边界可读”的形态：`waitA` 外提到 `IF_BEGIN` 前，`setB` 外提到 `IF_END` 后。
 
 ##### 外提之前（示意）
@@ -609,7 +609,7 @@ flowchart LR
 
 ### 6.4 loop 回边
 
-loop 的难点在于“跨迭代依赖”无法通过单次线性扫描直接识别。  
+loop 的难点在于“跨迭代依赖”无法通过单次线性扫描直接识别。
 当前实现在 `LOOP_END` 触发回边分析，大体分两步：
 
 1. 复制 loop body 切片做一次局部扫描；
@@ -626,12 +626,12 @@ loop 的难点在于“跨迭代依赖”无法通过单次线性扫描直接识
 
 边界修正关注的不是“有没有依赖”，而是“每条可执行路径上，配对是否可达”：
 
-- 对 `mte2 -> v` 这组，`wait` 留在 loop 体内会变成“每轮都等一次外部令牌”。  
+- 对 `mte2 -> v` 这组，`wait` 留在 loop 体内会变成“每轮都等一次外部令牌”。
   `MoveSyncState` 会把这类 `wait` 外提到 `LOOP_BEGIN` 之前，让它只在入环前生效一次。
-- 对 `v -> mte3` 这组，若 loop 可能零次执行，`mte3` 前的 `wait` 可能找不到 loop 内 `set`。  
+- 对 `v -> mte3` 这组，若 loop 可能零次执行，`mte3` 前的 `wait` 可能找不到 loop 内 `set`。
   后续会把这类跨边界同步做 loop 外补偿（在 loop 边界补一对可配对的 `set/wait`），保证零次执行路径也不死锁。
 
-所以这里说的“外提”，本质是把 body 内同步约束折算到 loop 边界，让同步对在控制流上可达且可配。  
+所以这里说的“外提”，本质是把 body 内同步约束折算到 loop 边界，让同步对在控制流上可达且可配。
 但只做外提还不够，`v -> mte3` 这组在 zero-trip 路径仍可能缺少可配对的 `set`，因此还需要补偿同步。
 
 ##### 补偿之前（仅完成外提，未加 comp_set/comp_wait）
@@ -739,7 +739,7 @@ flowchart LR
   E1 -. "回边路径: body_set 为下一轮 body_wait 提供令牌" .-> BW2
 ```
 
-这样既保证 loop 体内回边依赖可启动，也避免补偿令牌泄漏到 loop 外路径。  
+这样既保证 loop 体内回边依赖可启动，也避免补偿令牌泄漏到 loop 外路径。
 即使 loop 零次执行，`comp_set/comp_wait` 也会在 loop 外成对抵消，不会破坏外层时序。
 
 #### 循环例子 C：#533 中 `alreadySync` 与 `syncFinder` 的 zero-trip 差异
@@ -959,7 +959,7 @@ full-carry:
 
 ## 8. 线性序列的形式化证明（简版）
 
-设线性指令序列为 \(I_1,\dots,I_n\)，每条指令有读集 \(R_k\)、写集 \(W_k\)、pipe \(P(k)\)。  
+设线性指令序列为 \(I_1,\dots,I_n\)，每条指令有读集 \(R_k\)、写集 \(W_k\)、pipe \(P(k)\)。
 定义 hazard：
 
 \[

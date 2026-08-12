@@ -28,10 +28,12 @@ def main():
         M, N = case["M"], case["N"]
         c_dtype = case["c_dtype"]
         N_aligned = case.get("N_aligned", N)
-        golden = np.fromfile(os.path.join(case_dir, "golden.bin"),
-                             dtype=c_dtype).reshape(M, N_aligned)[:M, :N]
-        output = np.fromfile(os.path.join(case_dir, "output.bin"),
-                              dtype=c_dtype).reshape(M, N_aligned)[:M, :N]
+        golden = np.fromfile(
+            os.path.join(case_dir, "golden.bin"), dtype=c_dtype
+        ).reshape(M, N_aligned)[:M, :N]
+        output = np.fromfile(
+            os.path.join(case_dir, "output.bin"), dtype=c_dtype
+        ).reshape(M, N_aligned)[:M, :N]
 
         ok = result_cmp(golden, output, case["eps"])
         if ok:

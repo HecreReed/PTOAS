@@ -77,7 +77,9 @@ def main() -> None:
     except ValueError as exc:
         assert "size to be divisible by group" in str(exc)
     else:
-        raise AssertionError("grouped mask must reject a group that does not divide size")
+        raise AssertionError(
+            "grouped mask must reject a group that does not divide size"
+        )
 
     try:
         invalid_reduce_group_probe.compile()

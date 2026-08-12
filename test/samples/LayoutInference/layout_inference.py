@@ -74,6 +74,7 @@ def build_case(
         if is_col:
             return "DN"
         return "ND"
+
     with InsertionPoint(module.body):
         f = func.FuncOp(
             name,
@@ -100,14 +101,22 @@ def build_case(
     inferred = infer_layout(shape_ints, stride_ints, 4)  # f32
 
     if expect_layout is None:
-        assert layout_attr is None, f"{name}: expected no layout attr, got {layout_attr}"
+        assert layout_attr is None, (
+            f"{name}: expected no layout attr, got {layout_attr}"
+        )
         assert inferred == "ND", f"{name}: expected ND fallback, got {inferred}"
     else:
         if layout_attr is not None and hasattr(pto, "Layout"):
             got = pto.Layout(layout_attr.value)
-            assert got.name.lower() == expect_layout.lower(), f"{name}: expected {expect_layout}, got {got}"
-        assert inferred.lower() == expect_layout.lower(), f"{name}: expected {expect_layout}, got {inferred}"
-    sys.stderr.write(f"[OK] {name}: layout_attr={'none' if layout_attr is None else layout_attr}, python_infer={inferred}\n")
+            assert got.name.lower() == expect_layout.lower(), (
+                f"{name}: expected {expect_layout}, got {got}"
+            )
+        assert inferred.lower() == expect_layout.lower(), (
+            f"{name}: expected {expect_layout}, got {inferred}"
+        )
+    sys.stderr.write(
+        f"[OK] {name}: layout_attr={'none' if layout_attr is None else layout_attr}, python_infer={inferred}\n"
+    )
 
 
 def main():

@@ -31,7 +31,7 @@ def build():
 
             fractal_ab_size = pto.TileConfig.fractalABSize
             cfg = pto.TileBufConfigAttr.get(bl, sl, fractal_ab_size, pd, ctx)
-            tile_buf_32 = pto.TileBufType.get([32, 32], f32, vec,[32,32],cfg, ctx)
+            tile_buf_32 = pto.TileBufType.get([32, 32], f32, vec, [32, 32], cfg, ctx)
 
             fn_ty = func.FunctionType.get([ptr_f32, ptr_f32, ptr_f32], [])
             with InsertionPoint(m.body):
@@ -56,8 +56,12 @@ def build():
                 # ---------------------------------------------------------
                 # [修正点 1] 将 [32, 32] 替换为 [c32, c32]
                 # ---------------------------------------------------------
-                sv0 = pto.PartitionViewOp(tile_view_32, tv0, offsets=[c0, c0], sizes=[c32, c32]).result
-                sv1 = pto.PartitionViewOp(tile_view_32, tv1, offsets=[c0, c0], sizes=[c32, c32]).result
+                sv0 = pto.PartitionViewOp(
+                    tile_view_32, tv0, offsets=[c0, c0], sizes=[c32, c32]
+                ).result
+                sv1 = pto.PartitionViewOp(
+                    tile_view_32, tv1, offsets=[c0, c0], sizes=[c32, c32]
+                ).result
 
                 # alloc tiles
                 tb0 = pto.AllocTileOp(tile_buf_32).result
@@ -74,7 +78,9 @@ def build():
                 # ---------------------------------------------------------
                 # [修正点 2] 将 [32, 32] 替换为 [c32, c32]
                 # ---------------------------------------------------------
-                sv2 = pto.PartitionViewOp(tile_view_32, tv2, offsets=[c0, c0], sizes=[c32, c32]).result
+                sv2 = pto.PartitionViewOp(
+                    tile_view_32, tv2, offsets=[c0, c0], sizes=[c32, c32]
+                ).result
 
                 # store
                 pto.TStoreOp(None, tb2, sv2)

@@ -31,9 +31,9 @@ namespace pto {
 /// `kUnknown`, which the callers treat conservatively (i.e. fall back to
 /// the existing all-slots-may-overlap path).
 enum class SlotRelation {
-  kEqual,    // a(iv) == b(iv)  (mod N) for every iv
-  kDisjoint, // a(iv) != b(iv)  (mod N) for every iv
-  kUnknown,  // can neither prove equal nor disjoint
+    kEqual,    // a(iv) == b(iv)  (mod N) for every iv
+    kDisjoint, // a(iv) != b(iv)  (mod N) for every iv
+    kUnknown,  // can neither prove equal nor disjoint
 };
 
 /// Return the slot SSA value carried by `pto.multi_tile_get`. Returns null

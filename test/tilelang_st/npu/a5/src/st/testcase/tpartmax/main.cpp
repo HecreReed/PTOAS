@@ -22,96 +22,107 @@
 using namespace PtoTestCommon;
 
 // Kernel launch wrappers (defined in launch.cpp)
-void LaunchTPARTMAX_f32_64x64_full(float *a, float *b, float *c, void *stream);
-void LaunchTPARTMAX_f32_2x24_src1_col_less(float *a, float *b, float *c, void *stream);
-void LaunchTPARTMAX_f32_128x64_src1_row_less(float *a, float *b, float *c, void *stream);
-void LaunchTPARTMAX_f32_95x95_full(float *a, float *b, float *c, void *stream);
-void LaunchTPARTMAX_f32_122x123_complex(float *a, float *b, float *c, void *stream);
-void LaunchTPARTMAX_f16_122x123_complex(uint16_t *a, uint16_t *b, uint16_t *c, void *stream);
-void LaunchTPARTMAX_i16_122x123_complex(int16_t *a, int16_t *b, int16_t *c, void *stream);
-void LaunchTPARTMAX_i32_122x123_complex(int32_t *a, int32_t *b, int32_t *c, void *stream);
-void LaunchTPARTMAX_u16_122x123_complex(uint16_t *a, uint16_t *b, uint16_t *c, void *stream);
-void LaunchTPARTMAX_u32_122x123_complex(uint32_t *a, uint32_t *b, uint32_t *c, void *stream);
-void LaunchTPARTMAX_i8_122x123_complex(int8_t *a, int8_t *b, int8_t *c, void *stream);
-void LaunchTPARTMAX_u8_122x123_complex(uint8_t *a, uint8_t *b, uint8_t *c, void *stream);
+void LaunchTPARTMAX_f32_64x64_full(float* a, float* b, float* c, void* stream);
+void LaunchTPARTMAX_f32_2x24_src1_col_less(float* a, float* b, float* c, void* stream);
+void LaunchTPARTMAX_f32_128x64_src1_row_less(float* a, float* b, float* c, void* stream);
+void LaunchTPARTMAX_f32_95x95_full(float* a, float* b, float* c, void* stream);
+void LaunchTPARTMAX_f32_122x123_complex(float* a, float* b, float* c, void* stream);
+void LaunchTPARTMAX_f16_122x123_complex(uint16_t* a, uint16_t* b, uint16_t* c, void* stream);
+void LaunchTPARTMAX_i16_122x123_complex(int16_t* a, int16_t* b, int16_t* c, void* stream);
+void LaunchTPARTMAX_i32_122x123_complex(int32_t* a, int32_t* b, int32_t* c, void* stream);
+void LaunchTPARTMAX_u16_122x123_complex(uint16_t* a, uint16_t* b, uint16_t* c, void* stream);
+void LaunchTPARTMAX_u32_122x123_complex(uint32_t* a, uint32_t* b, uint32_t* c, void* stream);
+void LaunchTPARTMAX_i8_122x123_complex(int8_t* a, int8_t* b, int8_t* c, void* stream);
+void LaunchTPARTMAX_u8_122x123_complex(uint8_t* a, uint8_t* b, uint8_t* c, void* stream);
 
-using LaunchFn = void (*)(void *, void *, void *, void *);
+using LaunchFn = void (*)(void*, void*, void*, void*);
 
 struct TestCase {
-    const char *name;
-    LaunchFn    launch;
-    size_t      rows;        // allocated tile rows
-    size_t      cols;        // allocated tile cols (valid cols)
-    size_t      src0ValidRows;  // src0 effective rows
-    size_t      src0ValidCols;  // src0 effective cols
-    size_t      src1ValidRows;  // src1 effective rows
-    size_t      src1ValidCols;  // src1 effective cols
-    size_t      dstValidRows;   // dst effective rows
-    size_t      dstValidCols;   // dst effective cols
-    size_t      elemSize;    // bytes per element
+    const char* name;
+    LaunchFn launch;
+    size_t rows;          // allocated tile rows
+    size_t cols;          // allocated tile cols (valid cols)
+    size_t src0ValidRows; // src0 effective rows
+    size_t src0ValidCols; // src0 effective cols
+    size_t src1ValidRows; // src1 effective rows
+    size_t src1ValidCols; // src1 effective cols
+    size_t dstValidRows;  // dst effective rows
+    size_t dstValidCols;  // dst effective cols
+    size_t elemSize;      // bytes per element
 };
 
 static const TestCase kCases[] = {
-    {"f32_64x64_full",           reinterpret_cast<LaunchFn>(LaunchTPARTMAX_f32_64x64_full),           64, 64, 64, 64, 64, 64, 64, 64, sizeof(float)},
-    {"f32_2x24_src1_col_less",   reinterpret_cast<LaunchFn>(LaunchTPARTMAX_f32_2x24_src1_col_less),    2, 24,  2, 24,  2,  8,  2, 24, sizeof(float)},
-    {"f32_128x64_src1_row_less", reinterpret_cast<LaunchFn>(LaunchTPARTMAX_f32_128x64_src1_row_less), 128, 64,128, 64, 96, 64,128, 64, sizeof(float)},
-    {"f32_95x95_full",           reinterpret_cast<LaunchFn>(LaunchTPARTMAX_f32_95x95_full),           95, 95, 95, 95, 95, 95, 95, 95, sizeof(float)},
-    {"f32_122x123_complex",      reinterpret_cast<LaunchFn>(LaunchTPARTMAX_f32_122x123_complex),      122,123,104,123,122,110,122,123, sizeof(float)},
-    {"f16_122x123_complex",      reinterpret_cast<LaunchFn>(LaunchTPARTMAX_f16_122x123_complex),      122,123,104,123,122,110,122,123, sizeof(uint16_t)},
-    {"i16_122x123_complex",      reinterpret_cast<LaunchFn>(LaunchTPARTMAX_i16_122x123_complex),      122,123,104,123,122,110,122,123, sizeof(int16_t)},
-    {"i32_122x123_complex",      reinterpret_cast<LaunchFn>(LaunchTPARTMAX_i32_122x123_complex),      122,123,104,123,122,110,122,123, sizeof(int32_t)},
-    {"u16_122x123_complex",      reinterpret_cast<LaunchFn>(LaunchTPARTMAX_u16_122x123_complex),      122,123,104,123,122,110,122,123, sizeof(uint16_t)},
-    {"u32_122x123_complex",      reinterpret_cast<LaunchFn>(LaunchTPARTMAX_u32_122x123_complex),      122,123,104,123,122,110,122,123, sizeof(uint32_t)},
-    {"i8_122x123_complex",       reinterpret_cast<LaunchFn>(LaunchTPARTMAX_i8_122x123_complex),       122,123,104,123,122,110,122,123, sizeof(int8_t)},
-    {"u8_122x123_complex",       reinterpret_cast<LaunchFn>(LaunchTPARTMAX_u8_122x123_complex),       122,123,104,123,122,110,122,123, sizeof(uint8_t)},
+    {"f32_64x64_full", reinterpret_cast<LaunchFn>(LaunchTPARTMAX_f32_64x64_full), 64, 64, 64, 64, 64, 64, 64, 64,
+     sizeof(float)},
+    {"f32_2x24_src1_col_less", reinterpret_cast<LaunchFn>(LaunchTPARTMAX_f32_2x24_src1_col_less), 2, 24, 2, 24, 2, 8, 2,
+     24, sizeof(float)},
+    {"f32_128x64_src1_row_less", reinterpret_cast<LaunchFn>(LaunchTPARTMAX_f32_128x64_src1_row_less), 128, 64, 128, 64,
+     96, 64, 128, 64, sizeof(float)},
+    {"f32_95x95_full", reinterpret_cast<LaunchFn>(LaunchTPARTMAX_f32_95x95_full), 95, 95, 95, 95, 95, 95, 95, 95,
+     sizeof(float)},
+    {"f32_122x123_complex", reinterpret_cast<LaunchFn>(LaunchTPARTMAX_f32_122x123_complex), 122, 123, 104, 123, 122,
+     110, 122, 123, sizeof(float)},
+    {"f16_122x123_complex", reinterpret_cast<LaunchFn>(LaunchTPARTMAX_f16_122x123_complex), 122, 123, 104, 123, 122,
+     110, 122, 123, sizeof(uint16_t)},
+    {"i16_122x123_complex", reinterpret_cast<LaunchFn>(LaunchTPARTMAX_i16_122x123_complex), 122, 123, 104, 123, 122,
+     110, 122, 123, sizeof(int16_t)},
+    {"i32_122x123_complex", reinterpret_cast<LaunchFn>(LaunchTPARTMAX_i32_122x123_complex), 122, 123, 104, 123, 122,
+     110, 122, 123, sizeof(int32_t)},
+    {"u16_122x123_complex", reinterpret_cast<LaunchFn>(LaunchTPARTMAX_u16_122x123_complex), 122, 123, 104, 123, 122,
+     110, 122, 123, sizeof(uint16_t)},
+    {"u32_122x123_complex", reinterpret_cast<LaunchFn>(LaunchTPARTMAX_u32_122x123_complex), 122, 123, 104, 123, 122,
+     110, 122, 123, sizeof(uint32_t)},
+    {"i8_122x123_complex", reinterpret_cast<LaunchFn>(LaunchTPARTMAX_i8_122x123_complex), 122, 123, 104, 123, 122, 110,
+     122, 123, sizeof(int8_t)},
+    {"u8_122x123_complex", reinterpret_cast<LaunchFn>(LaunchTPARTMAX_u8_122x123_complex), 122, 123, 104, 123, 122, 110,
+     122, 123, sizeof(uint8_t)},
 };
 static constexpr size_t kNumCases = sizeof(kCases) / sizeof(kCases[0]);
 
 // Calculate aligned cols for 32-byte alignment
-static size_t CalcAlignedCols(size_t cols, size_t elemSize) {
+static size_t CalcAlignedCols(size_t cols, size_t elemSize)
+{
     size_t totalBytes = cols * elemSize;
     size_t alignedBytes = ((totalBytes + 31) / 32) * 32;
     return alignedBytes / elemSize;
 }
 
 // Helper to pad data with stride
-static void PadDataWithStride(const void *src, void *dst, size_t rows, size_t cols,
-                              size_t alignedCols, size_t elemSize) {
-    const char *srcPtr = static_cast<const char *>(src);
-    char *dstPtr = static_cast<char *>(dst);
+static void PadDataWithStride(const void* src, void* dst, size_t rows, size_t cols, size_t alignedCols, size_t elemSize)
+{
+    const char* srcPtr = static_cast<const char*>(src);
+    char* dstPtr = static_cast<char*>(dst);
     for (size_t r = 0; r < rows; ++r) {
-        memcpy(dstPtr + r * alignedCols * elemSize,
-               srcPtr + r * cols * elemSize,
-               cols * elemSize);
+        memcpy(dstPtr + r * alignedCols * elemSize, srcPtr + r * cols * elemSize, cols * elemSize);
         // Zero-fill padding region (optional, data will be overwritten by kernel)
-        memset(dstPtr + r * alignedCols * elemSize + cols * elemSize,
-               0,
-               (alignedCols - cols) * elemSize);
+        memset(dstPtr + r * alignedCols * elemSize + cols * elemSize, 0, (alignedCols - cols) * elemSize);
     }
 }
 
 // Helper to unpad data (extract valid cols)
-static void UnpadDataWithStride(const void *src, void *dst, size_t rows, size_t cols,
-                                size_t alignedCols, size_t elemSize) {
-    const char *srcPtr = static_cast<const char *>(src);
-    char *dstPtr = static_cast<char *>(dst);
+static void UnpadDataWithStride(
+    const void* src, void* dst, size_t rows, size_t cols, size_t alignedCols, size_t elemSize)
+{
+    const char* srcPtr = static_cast<const char*>(src);
+    char* dstPtr = static_cast<char*>(dst);
     for (size_t r = 0; r < rows; ++r) {
-        memcpy(dstPtr + r * cols * elemSize,
-               srcPtr + r * alignedCols * elemSize,
-               cols * elemSize);
+        memcpy(dstPtr + r * cols * elemSize, srcPtr + r * alignedCols * elemSize, cols * elemSize);
     }
 }
 
-static int RunCase(const TestCase &tc, int deviceId, aclrtStream stream) {
+static int RunCase(const TestCase& tc, int deviceId, aclrtStream stream)
+{
     int rc = 0;
     const size_t elemCount = tc.rows * tc.cols;
-    const size_t fileSize  = elemCount * tc.elemSize;
+    const size_t fileSize = elemCount * tc.elemSize;
     const size_t alignedCols = CalcAlignedCols(tc.cols, tc.elemSize);
     const size_t paddedSize = tc.rows * alignedCols * tc.elemSize;
 
-    std::printf("[INFO] === case: %s (shape=%zux%zu, src0_valid=%zux%zu, src1_valid=%zux%zu, dst_valid=%zux%zu, alignedCols=%zu) ===\n",
-                tc.name, tc.rows, tc.cols, tc.src0ValidRows, tc.src0ValidCols,
-                tc.src1ValidRows, tc.src1ValidCols, tc.dstValidRows, tc.dstValidCols, alignedCols);
+    std::printf(
+        "[INFO] === case: %s (shape=%zux%zu, src0_valid=%zux%zu, src1_valid=%zux%zu, dst_valid=%zux%zu, "
+        "alignedCols=%zu) ===\n",
+        tc.name, tc.rows, tc.cols, tc.src0ValidRows, tc.src0ValidCols, tc.src1ValidRows, tc.src1ValidCols,
+        tc.dstValidRows, tc.dstValidCols, alignedCols);
 
     // Per-case data directory
     std::string caseDir = std::string("./") + tc.name;
@@ -121,19 +132,19 @@ static int RunCase(const TestCase &tc, int deviceId, aclrtStream stream) {
     void *src0Device = nullptr, *src1Device = nullptr, *dstDevice = nullptr;
 
     // Allocate host buffers for original data (contiguous)
-    aclrtMallocHost((void **)(&src0HostOrig), fileSize);
-    aclrtMallocHost((void **)(&src1HostOrig), fileSize);
-    aclrtMallocHost((void **)(&dstHostOrig), fileSize);
+    aclrtMallocHost((void**)(&src0HostOrig), fileSize);
+    aclrtMallocHost((void**)(&src1HostOrig), fileSize);
+    aclrtMallocHost((void**)(&dstHostOrig), fileSize);
 
     // Allocate host buffers for padded data
-    aclrtMallocHost((void **)(&src0Host), paddedSize);
-    aclrtMallocHost((void **)(&src1Host), paddedSize);
-    aclrtMallocHost((void **)(&dstHost), paddedSize);
+    aclrtMallocHost((void**)(&src0Host), paddedSize);
+    aclrtMallocHost((void**)(&src1Host), paddedSize);
+    aclrtMallocHost((void**)(&dstHost), paddedSize);
 
     // Allocate device buffers with padded size
-    aclrtMalloc((void **)&src0Device, paddedSize, ACL_MEM_MALLOC_HUGE_FIRST);
-    aclrtMalloc((void **)&src1Device, paddedSize, ACL_MEM_MALLOC_HUGE_FIRST);
-    aclrtMalloc((void **)&dstDevice, paddedSize, ACL_MEM_MALLOC_HUGE_FIRST);
+    aclrtMalloc((void**)&src0Device, paddedSize, ACL_MEM_MALLOC_HUGE_FIRST);
+    aclrtMalloc((void**)&src1Device, paddedSize, ACL_MEM_MALLOC_HUGE_FIRST);
+    aclrtMalloc((void**)&dstDevice, paddedSize, ACL_MEM_MALLOC_HUGE_FIRST);
 
     if (rc == 0) {
         size_t src0FileSize = fileSize;
@@ -194,16 +205,17 @@ static int RunCase(const TestCase &tc, int deviceId, aclrtStream stream) {
     return rc;
 }
 
-int main(int argc, char *argv[]) {
+int main(int argc, char* argv[])
+{
     // Optional case filter: ./tpartmax [case_name]
-    const char *caseFilter = (argc > 1) ? argv[1] : nullptr;
+    const char* caseFilter = (argc > 1) ? argv[1] : nullptr;
 
     int rc = 0;
     int deviceId = 0;
     aclrtStream stream = nullptr;
 
     aclInit(nullptr);
-    if (const char *envDevice = std::getenv("ACL_DEVICE_ID")) {
+    if (const char* envDevice = std::getenv("ACL_DEVICE_ID")) {
         deviceId = std::atoi(envDevice);
     }
     aclrtSetDevice(deviceId);

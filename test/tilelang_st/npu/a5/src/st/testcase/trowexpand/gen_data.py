@@ -21,17 +21,26 @@ from cases import CASES
 from st_common import setup_case_rng, save_case_data
 
 # Inline validation for multi-input format (trowexpand uses src0/dst only)
-REQUIRED_KEYS = {"name", "dtype", "src0_shape", "src0_valid_shape", "dst_shape", "dst_valid_shape"}
+REQUIRED_KEYS = {
+    "name",
+    "dtype",
+    "src0_shape",
+    "src0_valid_shape",
+    "dst_shape",
+    "dst_valid_shape",
+}
 for i, case in enumerate(CASES):
     missing = REQUIRED_KEYS - case.keys()
     if missing:
-        raise ValueError(f"cases[{i}] ({case.get('name', '?')}) missing keys: {missing}")
+        raise ValueError(
+            f"cases[{i}] ({case.get('name', '?')}) missing keys: {missing}"
+        )
 
 for case in CASES:
     setup_case_rng(case)
 
     dtype = case["dtype"]
-    src0_shape = case["src0_shape"]          # Physical shape (rows, 8)
+    src0_shape = case["src0_shape"]  # Physical shape (rows, 8)
     src0_valid_shape = case["src0_valid_shape"]  # Valid shape (rows, 1)
     dst_shape = case["dst_shape"]
     dst_valid_shape = case["dst_valid_shape"]
@@ -46,7 +55,11 @@ for case in CASES:
     # dst[i, :] = src[i, 0] for all columns
     golden = np.zeros(dst_shape, dtype=dtype)
     dst_vr, dst_vc = dst_valid_shape
-    golden[:dst_vr, :dst_vc] = np.broadcast_to(input_data[:src_vr, 0:1], (dst_vr, dst_vc)).astype(dtype, copy=False)
+    golden[:dst_vr, :dst_vc] = np.broadcast_to(
+        input_data[:src_vr, 0:1], (dst_vr, dst_vc)
+    ).astype(dtype, copy=False)
 
     save_case_data(case["name"], {"input": input_data, "golden": golden})
-    print(f"[INFO] gen_data: {case['name']} src0_shape={src0_shape} dst_shape={dst_shape} dtype={dtype.__name__}")
+    print(
+        f"[INFO] gen_data: {case['name']} src0_shape={src0_shape} dst_shape={dst_shape} dtype={dtype.__name__}"
+    )

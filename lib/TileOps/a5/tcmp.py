@@ -10,7 +10,10 @@
 from ptodsl import pto
 import ptodsl.tilelib as tilelib
 
-def _ub_or_vec_row_major(operand_memory_spaces, operand_b_layouts, operand_s_layouts, **_):
+
+def _ub_or_vec_row_major(
+    operand_memory_spaces, operand_b_layouts, operand_s_layouts, **_
+):
     return (
         all(space in {"ub", "vec"} for space in operand_memory_spaces)
         and all(layout == "row_major" for layout in operand_b_layouts)
@@ -82,8 +85,8 @@ def template_tcmp(src0: pto.Tile, src1: pto.Tile, dst: pto.Tile):
             remained = valid_cols
             for col in range(0, iterations, 1):
                 mask, remained = pto.make_mask(dtype, remained)
-                lhs = pto.vlds(src0[row, col * lanes:])
-                rhs = pto.vlds(src1[row, col * lanes:])
+                lhs = pto.vlds(src0[row, col * lanes :])
+                rhs = pto.vlds(src1[row, col * lanes :])
                 cmp = pto.vcmp(lhs, rhs, mask, cmp_mode)
                 cmp_b8 = pto.pbitcast(cmp, pto.mask_b8)
                 store_offset = row * dst_stride + col * 16
@@ -95,8 +98,8 @@ def template_tcmp(src0: pto.Tile, src1: pto.Tile, dst: pto.Tile):
             remained = valid_cols
             for col in range(0, iterations, 1):
                 mask, remained = pto.make_mask(dtype, remained)
-                lhs = pto.vlds(src0[row, col * lanes:])
-                rhs = pto.vlds(src1[row, col * lanes:])
+                lhs = pto.vlds(src0[row, col * lanes :])
+                rhs = pto.vlds(src1[row, col * lanes :])
                 cmp = pto.vcmp(lhs, rhs, mask, cmp_mode)
                 store_offset = row * dst_stride + col * 32
                 pto.psts(cmp, dst_ptr, store_offset, dist=pto.PredicateDist.NORM)

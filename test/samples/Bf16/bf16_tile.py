@@ -59,7 +59,9 @@ def build():
             c128 = _idx_const(128)
 
             tv = pto.MakeTensorViewOp(tv2, a_ptr, [c16, c128], [c128, c1]).result
-            sv = pto.PartitionViewOp(tile_view, tv, offsets=[c0, c0], sizes=[c16, c128]).result
+            sv = pto.PartitionViewOp(
+                tile_view, tv, offsets=[c0, c0], sizes=[c16, c128]
+            ).result
 
             tile = pto.AllocTileOp(tile_buf).result
             pto.TLoadOp(None, sv, tile)

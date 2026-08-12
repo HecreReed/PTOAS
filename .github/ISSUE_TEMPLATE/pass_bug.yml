@@ -109,4 +109,3 @@ body:
       description: Anything else that helps (hardware, whether remote validation is involved, etc.)
     validations:
       required: false
-

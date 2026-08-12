@@ -18,14 +18,23 @@ from ._runtime_scalar_ops import (
     emit_runtime_bitwise_op,
     emit_runtime_compare,
 )
-from ._scalar_adaptation import coerce_runtime_index_value, normalize_runtime_binary_operands
+from ._scalar_adaptation import (
+    coerce_runtime_index_value,
+    normalize_runtime_binary_operands,
+)
 from ._surface_types import PartitionTensorView, TensorView, Tile
 from ._types import _normalize_address_space, _resolve, ptr
 
 from ptoas.mlir.dialects import arith
-from ptoas.mlir.dialects import memref
 from ptoas.mlir.dialects import pto as _pto
-from ptoas.mlir.ir import IndexType, IntegerAttr, IntegerType, MemRefType, ShapedType, StridedLayoutAttr, Type, VectorType
+from ptoas.mlir.ir import (
+    IndexType,
+    IntegerAttr,
+    MemRefType,
+    ShapedType,
+    Type,
+    VectorType,
+)
 
 
 def _validate_surface_value_access(value):
@@ -92,7 +101,9 @@ def _normalize_index(value):
         return coerce_runtime_index_value(raw_value, context="surface index value")
     except TypeError as exc:
         if hasattr(raw_value, "type"):
-            raise TypeError(f"expected an index-like value, got {raw_value.type}") from exc
+            raise TypeError(
+                f"expected an index-like value, got {raw_value.type}"
+            ) from exc
         raise
 
 
@@ -203,7 +214,10 @@ def wrap_surface_value(
             offsets=offsets,
             sizes=sizes,
         )
-    if _maybe_cast_mask_type(type_obj) is not None or _maybe_cast_vmi_mask_type(type_obj) is not None:
+    if (
+        _maybe_cast_mask_type(type_obj) is not None
+        or _maybe_cast_vmi_mask_type(type_obj) is not None
+    ):
         return MaskValue(value)
     if _maybe_cast_tile_buf_type(type_obj) is not None:
         return TileValue(value, **(tile_metadata or {}))
@@ -255,76 +269,124 @@ class RuntimeValue(_SurfaceValue):
         raise native_python_control_flow_error("int() coercion")
 
     def __add__(self, other):
-        return wrap_surface_value(emit_runtime_binary_op("add", self.value, unwrap_surface_value(other)))
+        return wrap_surface_value(
+            emit_runtime_binary_op("add", self.value, unwrap_surface_value(other))
+        )
 
     def __radd__(self, other):
-        return wrap_surface_value(emit_runtime_binary_op("add", unwrap_surface_value(other), self.value))
+        return wrap_surface_value(
+            emit_runtime_binary_op("add", unwrap_surface_value(other), self.value)
+        )
 
     def __sub__(self, other):
-        return wrap_surface_value(emit_runtime_binary_op("sub", self.value, unwrap_surface_value(other)))
+        return wrap_surface_value(
+            emit_runtime_binary_op("sub", self.value, unwrap_surface_value(other))
+        )
 
     def __rsub__(self, other):
-        return wrap_surface_value(emit_runtime_binary_op("sub", unwrap_surface_value(other), self.value))
+        return wrap_surface_value(
+            emit_runtime_binary_op("sub", unwrap_surface_value(other), self.value)
+        )
 
     def __mul__(self, other):
-        return wrap_surface_value(emit_runtime_binary_op("mul", self.value, unwrap_surface_value(other)))
+        return wrap_surface_value(
+            emit_runtime_binary_op("mul", self.value, unwrap_surface_value(other))
+        )
 
     def __rmul__(self, other):
-        return wrap_surface_value(emit_runtime_binary_op("mul", unwrap_surface_value(other), self.value))
+        return wrap_surface_value(
+            emit_runtime_binary_op("mul", unwrap_surface_value(other), self.value)
+        )
 
     def __truediv__(self, other):
-        return wrap_surface_value(emit_runtime_binary_op("truediv", self.value, unwrap_surface_value(other)))
+        return wrap_surface_value(
+            emit_runtime_binary_op("truediv", self.value, unwrap_surface_value(other))
+        )
 
     def __rtruediv__(self, other):
-        return wrap_surface_value(emit_runtime_binary_op("truediv", unwrap_surface_value(other), self.value))
+        return wrap_surface_value(
+            emit_runtime_binary_op("truediv", unwrap_surface_value(other), self.value)
+        )
 
     def __floordiv__(self, other):
-        return wrap_surface_value(emit_runtime_binary_op("floordiv", self.value, unwrap_surface_value(other)))
+        return wrap_surface_value(
+            emit_runtime_binary_op("floordiv", self.value, unwrap_surface_value(other))
+        )
 
     def __rfloordiv__(self, other):
-        return wrap_surface_value(emit_runtime_binary_op("floordiv", unwrap_surface_value(other), self.value))
+        return wrap_surface_value(
+            emit_runtime_binary_op("floordiv", unwrap_surface_value(other), self.value)
+        )
 
     def __mod__(self, other):
-        return wrap_surface_value(emit_runtime_binary_op("mod", self.value, unwrap_surface_value(other)))
+        return wrap_surface_value(
+            emit_runtime_binary_op("mod", self.value, unwrap_surface_value(other))
+        )
 
     def __rmod__(self, other):
-        return wrap_surface_value(emit_runtime_binary_op("mod", unwrap_surface_value(other), self.value))
+        return wrap_surface_value(
+            emit_runtime_binary_op("mod", unwrap_surface_value(other), self.value)
+        )
 
     def __lt__(self, other):
-        return wrap_surface_value(emit_runtime_compare("lt", self.value, unwrap_surface_value(other)))
+        return wrap_surface_value(
+            emit_runtime_compare("lt", self.value, unwrap_surface_value(other))
+        )
 
     def __le__(self, other):
-        return wrap_surface_value(emit_runtime_compare("le", self.value, unwrap_surface_value(other)))
+        return wrap_surface_value(
+            emit_runtime_compare("le", self.value, unwrap_surface_value(other))
+        )
 
     def __gt__(self, other):
-        return wrap_surface_value(emit_runtime_compare("gt", self.value, unwrap_surface_value(other)))
+        return wrap_surface_value(
+            emit_runtime_compare("gt", self.value, unwrap_surface_value(other))
+        )
 
     def __ge__(self, other):
-        return wrap_surface_value(emit_runtime_compare("ge", self.value, unwrap_surface_value(other)))
+        return wrap_surface_value(
+            emit_runtime_compare("ge", self.value, unwrap_surface_value(other))
+        )
 
     def __eq__(self, other):
-        return wrap_surface_value(emit_runtime_compare("eq", self.value, unwrap_surface_value(other)))
+        return wrap_surface_value(
+            emit_runtime_compare("eq", self.value, unwrap_surface_value(other))
+        )
 
     def __ne__(self, other):
-        return wrap_surface_value(emit_runtime_compare("ne", self.value, unwrap_surface_value(other)))
+        return wrap_surface_value(
+            emit_runtime_compare("ne", self.value, unwrap_surface_value(other))
+        )
 
     def __and__(self, other):
-        return wrap_surface_value(emit_runtime_bitwise_op("and", self.value, unwrap_surface_value(other)))
+        return wrap_surface_value(
+            emit_runtime_bitwise_op("and", self.value, unwrap_surface_value(other))
+        )
 
     def __rand__(self, other):
-        return wrap_surface_value(emit_runtime_bitwise_op("and", unwrap_surface_value(other), self.value))
+        return wrap_surface_value(
+            emit_runtime_bitwise_op("and", unwrap_surface_value(other), self.value)
+        )
 
     def __or__(self, other):
-        return wrap_surface_value(emit_runtime_bitwise_op("or", self.value, unwrap_surface_value(other)))
+        return wrap_surface_value(
+            emit_runtime_bitwise_op("or", self.value, unwrap_surface_value(other))
+        )
 
     def __ror__(self, other):
-        return wrap_surface_value(emit_runtime_bitwise_op("or", unwrap_surface_value(other), self.value))
+        return wrap_surface_value(
+            emit_runtime_bitwise_op("or", unwrap_surface_value(other), self.value)
+        )
 
     def __xor__(self, other):
-        return wrap_surface_value(emit_runtime_bitwise_op("xor", self.value, unwrap_surface_value(other)))
+        return wrap_surface_value(
+            emit_runtime_bitwise_op("xor", self.value, unwrap_surface_value(other))
+        )
 
     def __rxor__(self, other):
-        return wrap_surface_value(emit_runtime_bitwise_op("xor", unwrap_surface_value(other), self.value))
+        return wrap_surface_value(
+            emit_runtime_bitwise_op("xor", unwrap_surface_value(other), self.value)
+        )
 
 
 class VecValue(_SurfaceValue):
@@ -362,11 +424,15 @@ class VecValue(_SurfaceValue):
 def _emit_vec_binary_op(op_name: str, lhs, rhs):
     lhs_raw = unwrap_surface_value(lhs)
     rhs_raw = unwrap_surface_value(rhs)
-    if not (VectorType.isinstance(lhs_raw.type) and VectorType.isinstance(rhs_raw.type)):
+    if not (
+        VectorType.isinstance(lhs_raw.type) and VectorType.isinstance(rhs_raw.type)
+    ):
         raise TypeError("PTODSL VecValue arithmetic expects compatible vector operands")
     lhs_raw, rhs_raw, kind = normalize_runtime_binary_operands(lhs_raw, rhs_raw)
     if kind != "float":
-        raise TypeError(f"PTODSL VecValue operator '{op_name}' currently supports only floating-point vectors")
+        raise TypeError(
+            f"PTODSL VecValue operator '{op_name}' currently supports only floating-point vectors"
+        )
     return VecValue(emit_runtime_binary_op(op_name, lhs_raw, rhs_raw))
 
 
@@ -496,6 +562,7 @@ class TensorViewValue(_SurfaceValue, TensorView):
 
     def as_ptr(self):
         from ._ops import as_ptr
+
         return as_ptr(self)
 
 
@@ -512,6 +579,7 @@ class PartitionTensorViewValue(_SurfaceValue, PartitionTensorView):
 
     def as_ptr(self):
         from ._ops import as_ptr
+
         return as_ptr(self)
 
 
@@ -527,25 +595,39 @@ class _TileValidShapeView:
         allowed = {0} if logical_rank == 1 else {0, 1}
         if index not in allowed:
             if logical_rank == 1:
-                raise IndexError("PTODSL rank-1 tile.valid_shape currently supports only index 0")
-            raise IndexError("PTODSL tile.valid_shape currently supports indices 0 and 1")
+                raise IndexError(
+                    "PTODSL rank-1 tile.valid_shape currently supports only index 0"
+                )
+            raise IndexError(
+                "PTODSL tile.valid_shape currently supports indices 0 and 1"
+            )
         cached = self._cache.get(index)
         if cached is not None:
             return cached
         if self._tile.static_valid_shape is not None:
             dim = self._tile.static_valid_shape[index]
             if dim is not None:
-                value = _index_const(dim) if _is_python_index_literal(dim) else unwrap_surface_value(dim)
+                value = (
+                    _index_const(dim)
+                    if _is_python_index_literal(dim)
+                    else unwrap_surface_value(dim)
+                )
                 value = wrap_surface_value(value)
                 self._cache[index] = value
                 return value
         try:
             if logical_rank == 1:
-                value = wrap_surface_value(_pto.TileValidColsOp(self._tile.value).result)
+                value = wrap_surface_value(
+                    _pto.TileValidColsOp(self._tile.value).result
+                )
             elif index == 0:
-                value = wrap_surface_value(_pto.TileValidRowsOp(self._tile.value).result)
+                value = wrap_surface_value(
+                    _pto.TileValidRowsOp(self._tile.value).result
+                )
             else:
-                value = wrap_surface_value(_pto.TileValidColsOp(self._tile.value).result)
+                value = wrap_surface_value(
+                    _pto.TileValidColsOp(self._tile.value).result
+                )
         except Exception:
             static_dim = _fallback_static_valid_dim(self._tile.type, index)
             if static_dim is None:
@@ -574,22 +656,34 @@ class TileValue(_SurfaceValue, Tile):
     ):
         super().__init__(value)
         parsed = parse_tile_type_metadata(value.type)
-        self.shape = tuple(shape) if shape is not None else (
-            parsed["shape_dims"] if parsed is not None else None
+        self.shape = (
+            tuple(shape)
+            if shape is not None
+            else (parsed["shape_dims"] if parsed is not None else None)
         )
-        self.physical_shape = tuple(physical_shape) if physical_shape is not None else (
-            tuple(shape) if shape is not None else (
-                parsed["shape_dims"] if parsed is not None else None
+        self.physical_shape = (
+            tuple(physical_shape)
+            if physical_shape is not None
+            else (
+                tuple(shape)
+                if shape is not None
+                else (parsed["shape_dims"] if parsed is not None else None)
             )
         )
-        self.dtype = dtype if dtype is not None else (
-            parsed["element_type"] if parsed is not None else None
+        self.dtype = (
+            dtype
+            if dtype is not None
+            else (parsed["element_type"] if parsed is not None else None)
         )
-        self.memory_space = memory_space if memory_space is not None else (
-            parsed["memory_space"] if parsed is not None else None
+        self.memory_space = (
+            memory_space
+            if memory_space is not None
+            else (parsed["memory_space"] if parsed is not None else None)
         )
-        self.static_valid_shape = tuple(valid_shape) if valid_shape is not None else (
-            parsed["valid_dims"] if parsed is not None else None
+        self.static_valid_shape = (
+            tuple(valid_shape)
+            if valid_shape is not None
+            else (parsed["valid_dims"] if parsed is not None else None)
         )
         self._valid_shape = _TileValidShapeView(self)
 
@@ -617,10 +711,12 @@ class TileValue(_SurfaceValue, Tile):
 
     def as_ptr(self):
         from ._ops import as_ptr
+
         return as_ptr(self)
 
     def fill(self, value):
         from ._ops import fill_tile
+
         fill_tile(self, value)
 
     def __getitem__(self, key):
@@ -684,7 +780,10 @@ def wrap_like_surface_value(template, value):
 
 def extract_partition_spec(source) -> PartitionSpec | None:
     """Return the root tensor-view + composed slice metadata when available."""
-    if isinstance(source, PartitionTensorViewValue) and source.root_tensor_view is not None:
+    if (
+        isinstance(source, PartitionTensorViewValue)
+        and source.root_tensor_view is not None
+    ):
         return PartitionSpec(
             root_tensor_view=source.root_tensor_view,
             offsets=source.offsets or (),
@@ -748,23 +847,31 @@ def infer_ptr_type_from_surface_value(surface_value):
 
     tile_type = _maybe_cast_tile_buf_type(value_type)
     if tile_type is None:
-        raise TypeError("as_ptr() expects a Tile, TensorView, or PartitionTensorView surface value")
+        raise TypeError(
+            "as_ptr() expects a Tile, TensorView, or PartitionTensorView surface value"
+        )
 
     memory_space = getattr(tile_type, "memory_space", None)
     parsed = None
     if memory_space is None:
         parsed = parse_tile_type_metadata(value_type)
         if parsed is None:
-            raise RuntimeError("unable to infer tile pointer type: tile type is missing memory-space metadata")
+            raise RuntimeError(
+                "unable to infer tile pointer type: tile type is missing memory-space metadata"
+            )
         memory_space = parsed["memory_space"]
 
     space_enum = getattr(memory_space, "value", None)
     if space_enum is not None:
-        space_enum = _normalize_address_space(_ADDRESS_SPACE_VALUE_TO_KEYWORD.get(space_enum))
+        space_enum = _normalize_address_space(
+            _ADDRESS_SPACE_VALUE_TO_KEYWORD.get(space_enum)
+        )
     else:
         space_enum = _normalize_address_space(str(memory_space))
     if space_enum is None:
-        raise RuntimeError("unable to infer tile pointer type: unsupported tile memory space")
+        raise RuntimeError(
+            "unable to infer tile pointer type: unsupported tile memory space"
+        )
 
     try:
         return _resolve(ptr(tile_type.element_type, space_enum))
@@ -796,7 +903,9 @@ def emit_as_ptr(surface_value):
         return AddressValue(_pto.TensorViewAddrOp(result_type, value).result)
     if isinstance(surface_value, TileValue):
         return AddressValue(_pto.TileBufAddrOp(result_type, value).result)
-    raise TypeError("as_ptr() expects a Tile, TensorView, or PartitionTensorView surface value")
+    raise TypeError(
+        "as_ptr() expects a Tile, TensorView, or PartitionTensorView surface value"
+    )
 
 
 _TILE_TYPE_RE = re.compile(
@@ -868,12 +977,10 @@ def parse_tile_type_metadata(type_obj):
     if match is None:
         return None
     shape_dims = [
-        None if dim == "?" else int(dim)
-        for dim in match.group("shape").split("x")
+        None if dim == "?" else int(dim) for dim in match.group("shape").split("x")
     ]
     valid_dims = [
-        None if dim == "?" else int(dim)
-        for dim in match.group("valid").split("x")
+        None if dim == "?" else int(dim) for dim in match.group("valid").split("x")
     ]
     return {
         "memory_space": match.group("space"),
@@ -887,9 +994,13 @@ def infer_tile_element_type(tile):
     """Recover the tile element type from authored metadata or type text."""
     if isinstance(tile, TileValue) and tile.dtype is not None:
         return _resolve(tile.dtype)
-    parsed = parse_tile_type_metadata(tile.type if isinstance(tile, TileValue) else tile)
+    parsed = parse_tile_type_metadata(
+        tile.type if isinstance(tile, TileValue) else tile
+    )
     if parsed is None:
-        raise RuntimeError("unable to recover tile element type from tile surface value")
+        raise RuntimeError(
+            "unable to recover tile element type from tile surface value"
+        )
     return parsed["element_type"]
 
 
@@ -905,10 +1016,16 @@ def infer_memref_type_from_surface_value(surface_value):
 
     if isinstance(surface_value, TileValue):
         physical_shape = getattr(surface_value, "physical_shape", None)
-        if physical_shape is not None and surface_value.dtype is not None and surface_value.memory_space is not None:
+        if (
+            physical_shape is not None
+            and surface_value.dtype is not None
+            and surface_value.memory_space is not None
+        ):
             space_enum = _normalize_address_space(surface_value.memory_space)
             if space_enum is None:
-                raise RuntimeError("unsupported tile memory space for memref address view")
+                raise RuntimeError(
+                    "unsupported tile memory space for memref address view"
+                )
             return MemRefType.get(
                 list(physical_shape),
                 _resolve(surface_value.dtype),
@@ -935,7 +1052,9 @@ def infer_memref_type_from_surface_value(surface_value):
 
     tile_type = _maybe_cast_tile_buf_type(value_type)
     if tile_type is None:
-        raise TypeError("memref address inference expects a Tile, TensorView, or PartitionTensorView")
+        raise TypeError(
+            "memref address inference expects a Tile, TensorView, or PartitionTensorView"
+        )
 
     parsed = parse_tile_type_metadata(value_type)
     if parsed is None:
@@ -1004,7 +1123,9 @@ def _materialize_tile_slice(tile: TileValue, key):
 
 
 def _build_tile_slice_view(tile: TileValue, *, raw_offsets, shape):
-    return TileSliceValue(tile.value, tile=tile, offsets=tuple(raw_offsets), shape=shape)
+    return TileSliceValue(
+        tile.value, tile=tile, offsets=tuple(raw_offsets), shape=shape
+    )
 
 
 def _dynamic_extent(static_dim, start):

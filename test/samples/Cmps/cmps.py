@@ -53,8 +53,12 @@ def build():
                 c32 = arith.ConstantOp(IndexType.get(ctx), 32).result
 
                 # Add constants for subview offsets and sizes
-                subview_offset = arith.ConstantOp(IndexType.get(ctx), 0).result  # constant for offset
-                subview_size = arith.ConstantOp(IndexType.get(ctx), 32).result  # constant for size
+                subview_offset = arith.ConstantOp(
+                    IndexType.get(ctx), 0
+                ).result  # constant for offset
+                subview_size = arith.ConstantOp(
+                    IndexType.get(ctx), 32
+                ).result  # constant for size
 
                 # Create scalar constant value (f32)
                 scalar_val = arith.ConstantOp(f32, 1.0).result
@@ -65,7 +69,12 @@ def build():
                 tv2 = pto.MakeTensorViewOp(tv2_u8, arg1, [c32, c32], [c32, c1]).result
 
                 # Use constants for subview offsets and sizes
-                sv0 = pto.PartitionViewOp(tile_view_f32, tv0, offsets=[subview_offset, subview_offset], sizes=[subview_size, subview_size]).result
+                sv0 = pto.PartitionViewOp(
+                    tile_view_f32,
+                    tv0,
+                    offsets=[subview_offset, subview_offset],
+                    sizes=[subview_size, subview_size],
+                ).result
 
                 tb0 = pto.AllocTileOp(tile_buf_f32).result
                 tb2 = pto.AllocTileOp(tile_buf_u8).result
@@ -75,7 +84,12 @@ def build():
                 # TCmpSOp: compare scalar value against tile
                 pto.TCmpSOp(tb0, scalar_val, tb2, cmpMode=cmp)
 
-                sv2 = pto.PartitionViewOp(tile_view_u8, tv2, offsets=[subview_offset, subview_offset], sizes=[subview_size, subview_size]).result
+                sv2 = pto.PartitionViewOp(
+                    tile_view_u8,
+                    tv2,
+                    offsets=[subview_offset, subview_offset],
+                    sizes=[subview_size, subview_size],
+                ).result
 
                 pto.TStoreOp(None, tb2, sv2)
 

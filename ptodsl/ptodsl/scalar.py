@@ -42,17 +42,29 @@ from ptoas.mlir.dialects import pto as _pto
 
 def muli(lhs, rhs):
     """arith.muli"""
-    return wrap_surface_value(emit_runtime_binary_op("mul", unwrap_surface_value(lhs), unwrap_surface_value(rhs)))
+    return wrap_surface_value(
+        emit_runtime_binary_op(
+            "mul", unwrap_surface_value(lhs), unwrap_surface_value(rhs)
+        )
+    )
 
 
 def addi(lhs, rhs):
     """arith.addi"""
-    return wrap_surface_value(emit_runtime_binary_op("add", unwrap_surface_value(lhs), unwrap_surface_value(rhs)))
+    return wrap_surface_value(
+        emit_runtime_binary_op(
+            "add", unwrap_surface_value(lhs), unwrap_surface_value(rhs)
+        )
+    )
 
 
 def subi(lhs, rhs):
     """arith.subi"""
-    return wrap_surface_value(emit_runtime_binary_op("sub", unwrap_surface_value(lhs), unwrap_surface_value(rhs)))
+    return wrap_surface_value(
+        emit_runtime_binary_op(
+            "sub", unwrap_surface_value(lhs), unwrap_surface_value(rhs)
+        )
+    )
 
 
 def index_cast(type_or_val, val=None):
@@ -66,17 +78,23 @@ def index_cast(type_or_val, val=None):
     """
     if val is None:
         # 1-arg form: cast to index
-        return wrap_surface_value(arith.IndexCastOp(IndexType.get(), unwrap_surface_value(type_or_val)).result)
-    return wrap_surface_value(arith.IndexCastOp(_resolve(type_or_val), unwrap_surface_value(val)).result)
+        return wrap_surface_value(
+            arith.IndexCastOp(IndexType.get(), unwrap_surface_value(type_or_val)).result
+        )
+    return wrap_surface_value(
+        arith.IndexCastOp(_resolve(type_or_val), unwrap_surface_value(val)).result
+    )
 
 
 def select(cond, true_val, false_val):
     """arith.select"""
-    return wrap_surface_value(arith.SelectOp(
-        unwrap_surface_value(cond),
-        unwrap_surface_value(true_val),
-        unwrap_surface_value(false_val),
-    ).result)
+    return wrap_surface_value(
+        arith.SelectOp(
+            unwrap_surface_value(cond),
+            unwrap_surface_value(true_val),
+            unwrap_surface_value(false_val),
+        ).result
+    )
 
 
 def cast(value, dtype):
@@ -88,7 +106,9 @@ def cast(value, dtype):
     """
     raw_value = unwrap_surface_value(value)
     target_type = _resolve(dtype)
-    source_is_vector = hasattr(raw_value, "type") and VectorType.isinstance(raw_value.type)
+    source_is_vector = hasattr(raw_value, "type") and VectorType.isinstance(
+        raw_value.type
+    )
     target_is_vector = VectorType.isinstance(target_type)
 
     if source_is_vector:
@@ -116,18 +136,22 @@ def cast(value, dtype):
 
 def max(lhs, rhs):
     """Runtime scalar maximum across float / integer / index values."""
-    return wrap_surface_value(emit_runtime_max(
-        unwrap_surface_value(lhs),
-        unwrap_surface_value(rhs),
-    ))
+    return wrap_surface_value(
+        emit_runtime_max(
+            unwrap_surface_value(lhs),
+            unwrap_surface_value(rhs),
+        )
+    )
 
 
 def min(lhs, rhs):
     """Runtime scalar minimum across float / integer / index values."""
-    return wrap_surface_value(emit_runtime_min(
-        unwrap_surface_value(lhs),
-        unwrap_surface_value(rhs),
-    ))
+    return wrap_surface_value(
+        emit_runtime_min(
+            unwrap_surface_value(lhs),
+            unwrap_surface_value(rhs),
+        )
+    )
 
 
 def exp(value):
@@ -135,7 +159,9 @@ def exp(value):
     raw_value = unwrap_surface_value(value)
     kind = classify_runtime_scalar_type(raw_value.type)
     if kind != "float":
-        raise TypeError(f"scalar.exp(...) expects a floating-point runtime scalar, got {raw_value.type}")
+        raise TypeError(
+            f"scalar.exp(...) expects a floating-point runtime scalar, got {raw_value.type}"
+        )
     return wrap_surface_value(math.ExpOp(raw_value).result)
 
 
@@ -144,7 +170,9 @@ def log(value):
     raw_value = unwrap_surface_value(value)
     kind = classify_runtime_scalar_type(raw_value.type)
     if kind != "float":
-        raise TypeError(f"scalar.log(...) expects a floating-point runtime scalar, got {raw_value.type}")
+        raise TypeError(
+            f"scalar.log(...) expects a floating-point runtime scalar, got {raw_value.type}"
+        )
     return wrap_surface_value(math.LogOp(raw_value).result)
 
 
@@ -153,7 +181,9 @@ def sqrt(value):
     raw_value = unwrap_surface_value(value)
     kind = classify_runtime_scalar_type(raw_value.type)
     if kind != "float":
-        raise TypeError(f"scalar.sqrt(...) expects a floating-point runtime scalar, got {raw_value.type}")
+        raise TypeError(
+            f"scalar.sqrt(...) expects a floating-point runtime scalar, got {raw_value.type}"
+        )
     return wrap_surface_value(math.SqrtOp(raw_value).result)
 
 
@@ -167,28 +197,38 @@ def load(ptr_or_ref, offset=None, *, contiguous=None):
     width = _normalize_contiguous(contiguous, context="scalar.load(...)")
     allocated_buffer = _allocated_buffer_target(ptr_or_ref)
     buffer_value, index_value = resolve_address_access(ptr_or_ref, offset)
-    result_type = _infer_buffer_element_type(buffer_value.type, allocated_buffer=allocated_buffer)
+    result_type = _infer_buffer_element_type(
+        buffer_value.type, allocated_buffer=allocated_buffer
+    )
     if width > 1:
-        return VecValue(_emit_contiguous_load(buffer_value, index_value, result_type, width))
+        return VecValue(
+            _emit_contiguous_load(buffer_value, index_value, result_type, width)
+        )
     if allocated_buffer is not None:
         ptr_value = _emit_llvm_byte_pointer(buffer_value, index_value, result_type)
         return wrap_surface_value(llvm.LoadOp(result_type, ptr_value).res)
-    return wrap_surface_value(Operation.create(
-        "pto.load",
-        results=[result_type],
-        operands=[buffer_value, index_value],
-    ).results[0])
+    return wrap_surface_value(
+        Operation.create(
+            "pto.load",
+            results=[result_type],
+            operands=[buffer_value, index_value],
+        ).results[0]
+    )
 
 
 def store(value, ptr_or_ref, offset=None, *, contiguous=None):
     """Store one scalar element or a builtin vector to a PTODSL address view."""
     allocated_buffer = _allocated_buffer_target(ptr_or_ref)
     buffer_value, index_value = resolve_address_access(ptr_or_ref, offset)
-    elem_type = _infer_buffer_element_type(buffer_value.type, allocated_buffer=allocated_buffer)
+    elem_type = _infer_buffer_element_type(
+        buffer_value.type, allocated_buffer=allocated_buffer
+    )
     raw_value = unwrap_surface_value(value)
     if hasattr(raw_value, "type") and VectorType.isinstance(raw_value.type):
         vec_value = value if isinstance(value, VecValue) else VecValue(raw_value)
-        width = _normalize_contiguous(contiguous, context="scalar.store(...)", default=vec_value.size)
+        width = _normalize_contiguous(
+            contiguous, context="scalar.store(...)", default=vec_value.size
+        )
         if width != vec_value.size:
             raise ValueError(
                 f"scalar.store(..., contiguous={width}) does not match vector size {vec_value.size}"
@@ -203,7 +243,9 @@ def store(value, ptr_or_ref, offset=None, *, contiguous=None):
 
     width = _normalize_contiguous(contiguous, context="scalar.store(...)")
     if width > 1:
-        raise TypeError("scalar.store(scalar, ..., contiguous=N) is not supported; pass a vector value")
+        raise TypeError(
+            "scalar.store(scalar, ..., contiguous=N) is not supported; pass a vector value"
+        )
     coerced_value = coerce_scalar_to_type(value, elem_type, context="scalar.store(...)")
     if allocated_buffer is not None:
         ptr_value = _emit_llvm_byte_pointer(buffer_value, index_value, elem_type)
@@ -228,7 +270,9 @@ def _normalize_contiguous(contiguous, *, context: str, default: int = 1) -> int:
 def _allocated_buffer_target(target):
     if isinstance(target, AllocatedBufferValue):
         return target
-    if isinstance(target, AddressOffsetValue) and isinstance(target.base, AllocatedBufferValue):
+    if isinstance(target, AddressOffsetValue) and isinstance(
+        target.base, AllocatedBufferValue
+    ):
         return target.base
     return None
 
@@ -358,10 +402,18 @@ def _element_bytewidth(elem_type):
 
 
 __all__ = [
-    "muli", "addi", "subi",
+    "muli",
+    "addi",
+    "subi",
     "index_cast",
     "cast",
     "select",
-    "max", "min", "exp", "log", "sqrt", "abs",
-    "load", "store",
+    "max",
+    "min",
+    "exp",
+    "log",
+    "sqrt",
+    "abs",
+    "load",
+    "store",
 ]

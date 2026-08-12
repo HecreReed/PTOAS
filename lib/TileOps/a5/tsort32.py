@@ -79,8 +79,12 @@ def template_tsort32(src: pto.Tile, idx: pto.Tile, dst: pto.Tile):
     idx_ptr = idx.as_ptr()
 
     elem_bytes = pto.bytewidth(dtype)
-    dst_stride = ((dst.shape[1] * elem_bytes + BLOCK_SIZE - 1) // BLOCK_SIZE * BLOCK_SIZE) // elem_bytes
-    src_stride = ((src.shape[1] * elem_bytes + BLOCK_SIZE - 1) // BLOCK_SIZE * BLOCK_SIZE) // elem_bytes
+    dst_stride = (
+        (dst.shape[1] * elem_bytes + BLOCK_SIZE - 1) // BLOCK_SIZE * BLOCK_SIZE
+    ) // elem_bytes
+    src_stride = (
+        (src.shape[1] * elem_bytes + BLOCK_SIZE - 1) // BLOCK_SIZE * BLOCK_SIZE
+    ) // elem_bytes
     idx_stride = ((idx.shape[1] * 4 + BLOCK_SIZE - 1) // BLOCK_SIZE * BLOCK_SIZE) // 4
     if _static_valid_dim(idx, 0) == 1:
         idx_stride = 0
@@ -105,7 +109,8 @@ def template_tsort32(src: pto.Tile, idx: pto.Tile, dst: pto.Tile):
         for row in range(0, valid_rows, 1):
             for chunk in range(0, loop_num, 1):
                 dst_addr = pto.addptr(
-                    dst_ptr, row * dst_stride + chunk * REPEAT_MAX * BLOCK_SIZE * type_coef
+                    dst_ptr,
+                    row * dst_stride + chunk * REPEAT_MAX * BLOCK_SIZE * type_coef,
                 )
                 src_addr = pto.addptr(
                     src_ptr, row * src_stride + chunk * REPEAT_MAX * BLOCK_SIZE
@@ -123,7 +128,11 @@ def template_tsort32(src: pto.Tile, idx: pto.Tile, dst: pto.Tile):
     op="pto.tsort32",
     target="a5",
     name="template_tsort32_with_tmp",
-    dtypes=[("f16", "ui32", "f16", "f16"), ("bf16", "ui32", "bf16", "bf16"), ("f32", "ui32", "f32", "f32")],
+    dtypes=[
+        ("f16", "ui32", "f16", "f16"),
+        ("bf16", "ui32", "bf16", "bf16"),
+        ("f32", "ui32", "f32", "f32"),
+    ],
     iteration_axis="none",
     op_engine="vector",
     op_class="other",
@@ -133,7 +142,9 @@ def template_tsort32(src: pto.Tile, idx: pto.Tile, dst: pto.Tile):
     is_post_update=False,
     tags=("sort", "unaligned", "tmp"),
 )
-def template_tsort32_with_tmp(src: pto.Tile, idx: pto.Tile, tmp: pto.Tile, dst: pto.Tile):
+def template_tsort32_with_tmp(
+    src: pto.Tile, idx: pto.Tile, tmp: pto.Tile, dst: pto.Tile
+):
     dtype = dst.dtype
     valid_rows = _static_valid_dim(dst, 0)
     valid_cols = _static_valid_dim(src, 1)
@@ -144,8 +155,12 @@ def template_tsort32_with_tmp(src: pto.Tile, idx: pto.Tile, tmp: pto.Tile, dst: 
     tmp_ptr = tmp.as_ptr()
 
     elem_bytes = pto.bytewidth(dtype)
-    dst_stride = ((dst.shape[1] * elem_bytes + BLOCK_SIZE - 1) // BLOCK_SIZE * BLOCK_SIZE) // elem_bytes
-    src_stride = ((src.shape[1] * elem_bytes + BLOCK_SIZE - 1) // BLOCK_SIZE * BLOCK_SIZE) // elem_bytes
+    dst_stride = (
+        (dst.shape[1] * elem_bytes + BLOCK_SIZE - 1) // BLOCK_SIZE * BLOCK_SIZE
+    ) // elem_bytes
+    src_stride = (
+        (src.shape[1] * elem_bytes + BLOCK_SIZE - 1) // BLOCK_SIZE * BLOCK_SIZE
+    ) // elem_bytes
     idx_stride = ((idx.shape[1] * 4 + BLOCK_SIZE - 1) // BLOCK_SIZE * BLOCK_SIZE) // 4
     if _static_valid_dim(idx, 0) == 1:
         idx_stride = 0
@@ -189,10 +204,15 @@ def template_tsort32_with_tmp(src: pto.Tile, idx: pto.Tile, tmp: pto.Tile, dst: 
             if chunk < loop_num - 1:
                 pto.vbitsort(
                     pto.addptr(
-                        dst_ptr, row * dst_stride + chunk * REPEAT_MAX * BLOCK_SIZE * type_coef
+                        dst_ptr,
+                        row * dst_stride + chunk * REPEAT_MAX * BLOCK_SIZE * type_coef,
                     ),
-                    pto.addptr(src_ptr, row * src_stride + chunk * REPEAT_MAX * BLOCK_SIZE),
-                    pto.addptr(idx_ptr, row * idx_stride + chunk * REPEAT_MAX * BLOCK_SIZE),
+                    pto.addptr(
+                        src_ptr, row * src_stride + chunk * REPEAT_MAX * BLOCK_SIZE
+                    ),
+                    pto.addptr(
+                        idx_ptr, row * idx_stride + chunk * REPEAT_MAX * BLOCK_SIZE
+                    ),
                     REPEAT_MAX,
                 )
             else:
@@ -201,13 +221,16 @@ def template_tsort32_with_tmp(src: pto.Tile, idx: pto.Tile, tmp: pto.Tile, dst: 
                         pto.vbitsort(
                             pto.addptr(
                                 dst_ptr,
-                                row * dst_stride + chunk * REPEAT_MAX * BLOCK_SIZE * type_coef,
+                                row * dst_stride
+                                + chunk * REPEAT_MAX * BLOCK_SIZE * type_coef,
                             ),
                             pto.addptr(
-                                src_ptr, row * src_stride + chunk * REPEAT_MAX * BLOCK_SIZE
+                                src_ptr,
+                                row * src_stride + chunk * REPEAT_MAX * BLOCK_SIZE,
                             ),
                             pto.addptr(
-                                idx_ptr, row * idx_stride + chunk * REPEAT_MAX * BLOCK_SIZE
+                                idx_ptr,
+                                row * idx_stride + chunk * REPEAT_MAX * BLOCK_SIZE,
                             ),
                             src_tail_repeat_num - 1,
                         )
@@ -220,7 +243,9 @@ def template_tsort32_with_tmp(src: pto.Tile, idx: pto.Tile, tmp: pto.Tile, dst: 
                         * BLOCK_SIZE
                         * type_coef
                     )
-                    len_burst = (src_tail_per_row * elem_bytes + BLOCK_SIZE - 1) // BLOCK_SIZE
+                    len_burst = (
+                        src_tail_per_row * elem_bytes + BLOCK_SIZE - 1
+                    ) // BLOCK_SIZE
 
                     pto.mte_ub_ub(
                         pto.addptr(src_ptr, row * src_stride + tail_src_offset),

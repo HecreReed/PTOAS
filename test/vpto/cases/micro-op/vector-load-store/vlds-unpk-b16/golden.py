@@ -33,7 +33,9 @@ def generate(output_dir: Path, seed: int) -> None:
 
     for src_base in range(0, INPUT_ELEMS, SRC_CHUNK):
         dst_base = src_base * 2
-        golden[dst_base : dst_base + DST_CHUNK : 2] = src[src_base : src_base + SRC_CHUNK]
+        golden[dst_base : dst_base + DST_CHUNK : 2] = src[
+            src_base : src_base + SRC_CHUNK
+        ]
 
     output_dir.mkdir(parents=True, exist_ok=True)
     src.view(np.uint16).tofile(output_dir / "v1.bin")

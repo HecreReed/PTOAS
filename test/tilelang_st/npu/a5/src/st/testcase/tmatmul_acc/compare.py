@@ -28,14 +28,16 @@ def main():
         shape_c = case["shape_c"]
         # Golden and output may be padded to aligned dimensions; slice to
         # the valid region before comparison.
-        padded_shape = (case.get("M_aligned", shape_c[0]),
-                        case.get("N_aligned", shape_c[1]))
-        golden = (np.fromfile(os.path.join(case_dir, "golden.bin"),
-                              dtype=np.float32)
-                  .reshape(padded_shape)[:shape_c[0], :shape_c[1]])
-        output = (np.fromfile(os.path.join(case_dir, "output.bin"),
-                              dtype=np.float32)
-                  .reshape(padded_shape)[:shape_c[0], :shape_c[1]])
+        padded_shape = (
+            case.get("M_aligned", shape_c[0]),
+            case.get("N_aligned", shape_c[1]),
+        )
+        golden = np.fromfile(
+            os.path.join(case_dir, "golden.bin"), dtype=np.float32
+        ).reshape(padded_shape)[: shape_c[0], : shape_c[1]]
+        output = np.fromfile(
+            os.path.join(case_dir, "output.bin"), dtype=np.float32
+        ).reshape(padded_shape)[: shape_c[0], : shape_c[1]]
 
         ok = result_cmp(golden, output, case["eps"])
         if ok:

@@ -16,10 +16,14 @@ import numpy as np
 def generate(output_dir: Path) -> None:
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    lhs = (np.arange(40 * 50, dtype=np.float16).reshape(40, 50) * np.float16(0.5) +
-           np.float16(17)).astype(np.float16)
-    rhs = (np.arange(50 * 64, dtype=np.float16).reshape(50, 64) * np.float16(0.25) +
-           np.float16(3)).astype(np.float16)
+    lhs = (
+        np.arange(40 * 50, dtype=np.float16).reshape(40, 50) * np.float16(0.5)
+        + np.float16(17)
+    ).astype(np.float16)
+    rhs = (
+        np.arange(50 * 64, dtype=np.float16).reshape(50, 64) * np.float16(0.25)
+        + np.float16(3)
+    ).astype(np.float16)
     golden = lhs.astype(np.float32) @ rhs.astype(np.float32)
 
     lhs.reshape(-1).tofile(output_dir / "v1.bin")
@@ -31,7 +35,9 @@ def generate(output_dir: Path) -> None:
         6: golden[:, 32:],
     }
     for index, value in outputs.items():
-        np.zeros_like(value, dtype=np.float32).reshape(-1).tofile(output_dir / f"v{index}.bin")
+        np.zeros_like(value, dtype=np.float32).reshape(-1).tofile(
+            output_dir / f"v{index}.bin"
+        )
         value.astype(np.float32).reshape(-1).tofile(output_dir / f"golden_v{index}.bin")
 
 

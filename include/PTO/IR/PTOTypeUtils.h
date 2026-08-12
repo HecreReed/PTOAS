@@ -18,22 +18,23 @@ namespace mlir::pto {
 
 namespace detail {
 template <typename MemRefT>
-inline auto getPTOMemRefStridesAndOffsetImpl(
-    MemRefT memTy, SmallVectorImpl<int64_t> &strides, int64_t &offset, int)
-    -> decltype(memTy.getStridesAndOffset(strides, offset)) {
-  return memTy.getStridesAndOffset(strides, offset);
+inline auto getPTOMemRefStridesAndOffsetImpl(MemRefT memTy, SmallVectorImpl<int64_t>& strides, int64_t& offset, int)
+    -> decltype(memTy.getStridesAndOffset(strides, offset))
+{
+    return memTy.getStridesAndOffset(strides, offset);
 }
 
 template <typename MemRefT>
 inline LogicalResult getPTOMemRefStridesAndOffsetImpl(
-    MemRefT memTy, SmallVectorImpl<int64_t> &strides, int64_t &offset, long) {
-  return getStridesAndOffset(memTy, strides, offset);
+    MemRefT memTy, SmallVectorImpl<int64_t>& strides, int64_t& offset, long)
+{
+    return getStridesAndOffset(memTy, strides, offset);
 }
 } // namespace detail
 
-inline LogicalResult getPTOMemRefStridesAndOffset(
-    MemRefType memTy, SmallVectorImpl<int64_t> &strides, int64_t &offset) {
-  return detail::getPTOMemRefStridesAndOffsetImpl(memTy, strides, offset, 0);
+inline LogicalResult getPTOMemRefStridesAndOffset(MemRefType memTy, SmallVectorImpl<int64_t>& strides, int64_t& offset)
+{
+    return detail::getPTOMemRefStridesAndOffsetImpl(memTy, strides, offset, 0);
 }
 
 bool isPTOFloat8Type(Type t);

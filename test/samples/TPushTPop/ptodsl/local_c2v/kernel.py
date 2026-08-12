@@ -163,7 +163,9 @@ def _resolve_ptoas() -> Path:
 def verify_ptoas() -> str:
     mlir_text = emit_mlir()
     ptoas = _resolve_ptoas()
-    with tempfile.NamedTemporaryFile("w", suffix=".mlir", delete=False, encoding="utf-8") as handle:
+    with tempfile.NamedTemporaryFile(
+        "w", suffix=".mlir", delete=False, encoding="utf-8"
+    ) as handle:
         handle.write(mlir_text)
         input_path = Path(handle.name)
 
@@ -188,8 +190,12 @@ def verify_ptoas() -> str:
 
 def main(argv: Optional[List[str]] = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--emit-mlir", action="store_true", help="print the PTODSL-generated MLIR")
-    parser.add_argument("--verify-ptoas", action="store_true", help="run PTOAS frontend verification")
+    parser.add_argument(
+        "--emit-mlir", action="store_true", help="print the PTODSL-generated MLIR"
+    )
+    parser.add_argument(
+        "--verify-ptoas", action="store_true", help="run PTOAS frontend verification"
+    )
     args = parser.parse_args(argv)
 
     if args.emit_mlir:

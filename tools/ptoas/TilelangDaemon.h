@@ -21,20 +21,18 @@ namespace ptoas {
 
 class DaemonManager {
 public:
-  static std::string generateSocketPath();
+    static std::string generateSocketPath();
 
-  static bool start(const std::string &socketPath,
-                    const std::string &daemonModule,
-                    const std::string &pythonExe,
-                    const std::string &pkgPath,
-                    const std::string &templateDir = "");
+    static bool start(
+        const std::string& socketPath, const std::string& daemonModule, const std::string& pythonExe,
+        const std::string& pkgPath, const std::string& templateDir = "");
 
-  static void stop();
+    static void stop();
 
-  static bool isRunning();
+    static bool isRunning();
 
 private:
-  static std::optional<std::pair<int, std::string>> processInfo;
+    static std::optional<std::pair<int, std::string>> processInfo;
 };
 
 void registerDaemonCleanup();

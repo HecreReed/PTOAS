@@ -35,27 +35,27 @@ s = scalar  # arith shorthand alias
 
 @pto.jit(name="TADD", kernel_kind="vector", target="a5", mode="auto")
 def TADD():
-    c0_i64    = pto.const(0,    dtype=pto.int64)
-    c16       = pto.const(16,   dtype=pto.index)
+    c0_i64 = pto.const(0, dtype=pto.int64)
+    c16 = pto.const(16, dtype=pto.index)
     c4096_i64 = pto.const(4096, dtype=pto.int64)
-    c0        = pto.const(0)
-    c1        = pto.const(1)
-    c64_i32   = pto.const(64,   dtype=pto.int32)
-    c64       = pto.const(64)
+    c0 = pto.const(0)
+    c1 = pto.const(1)
+    c64_i32 = pto.const(64, dtype=pto.int32)
+    c64 = pto.const(64)
 
     with pto.tileop():
-        ptr_f32_ub   = pto.ptr(pto.float32, "ub")
-        vf32         = pto.vreg_type(64, pto.float32)
-        ptr_src      = pto.castptr(c4096_i64, ptr_f32_ub)
-        ptr_dst      = pto.castptr(c0_i64,    ptr_f32_ub)
+        ptr_f32_ub = pto.ptr(pto.float32, "ub")
+        vf32 = pto.vreg_type(64, pto.float32)
+        ptr_src = pto.castptr(c4096_i64, ptr_f32_ub)
+        ptr_dst = pto.castptr(c0_i64, ptr_f32_ub)
 
         for tile_idx in range(c0, c16, c1):
-            mask, _      = pto.plt_b32(c64_i32)
-            tile_off     = s.muli(tile_idx, c64)
-            va           = pto.vlds(pto.addptr(ptr_src, tile_off), c0, vf32)
+            mask, _ = pto.plt_b32(c64_i32)
+            tile_off = s.muli(tile_idx, c64)
+            va = pto.vlds(pto.addptr(ptr_src, tile_off), c0, vf32)
             ptr_dst_tile = pto.addptr(ptr_dst, tile_off)
-            vb           = pto.vlds(ptr_dst_tile, c0, vf32)
-            vc           = pto.vadd(va, vb, mask)
+            vb = pto.vlds(ptr_dst_tile, c0, vf32)
+            vc = pto.vadd(va, vb, mask)
             pto.vsts(vc, ptr_dst_tile, c0, mask)
 
 

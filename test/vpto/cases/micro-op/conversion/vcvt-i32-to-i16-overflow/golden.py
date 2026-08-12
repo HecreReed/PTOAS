@@ -27,11 +27,28 @@ I16_MAX = np.iinfo(np.int16).max
 def generate(output_dir: Path, seed: int) -> None:
     rng = np.random.default_rng(seed)
     data = rng.integers(-200000, 200000, size=ELEMS, dtype=np.int32)
-    edge = np.array([
-        -40000, -32769, -32768, -32767, -1, 0, 1, 32766,
-        32767, 32768, 40000, 70000, -70000, 65535, -65535, 123456,
-    ], dtype=np.int32)
-    data[:edge.size] = edge
+    edge = np.array(
+        [
+            -40000,
+            -32769,
+            -32768,
+            -32767,
+            -1,
+            0,
+            1,
+            32766,
+            32767,
+            32768,
+            40000,
+            70000,
+            -70000,
+            65535,
+            -65535,
+            123456,
+        ],
+        dtype=np.int32,
+    )
+    data[: edge.size] = edge
     clipped = np.clip(data, I16_MIN, I16_MAX).astype(np.int16)
     golden = np.zeros(ELEMS, dtype=np.int16)
     for offset in range(0, ELEMS, 128):

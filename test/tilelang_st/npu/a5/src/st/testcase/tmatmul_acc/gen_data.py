@@ -39,7 +39,9 @@ for case in CASES:
     golden_padded = np.zeros((M_aligned, N_aligned), dtype=np.float32)
     golden_padded[:M, :N] = golden
 
-    save_case_data(case["name"], {"input1": a_padded, "input2": b_padded, "golden": golden_padded})
+    save_case_data(
+        case["name"], {"input1": a_padded, "input2": b_padded, "golden": golden_padded}
+    )
     print(
         f"[INFO] gen_data: {case['name']} "
         f"A={M}x{K} B={K}x{N} C={M}x{N} dtype={dtype.__name__} BASEK={case['BASEK']} iter={K // case['BASEK']}"

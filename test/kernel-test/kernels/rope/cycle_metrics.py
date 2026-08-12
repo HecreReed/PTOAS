@@ -41,9 +41,7 @@ def default_cycle_out_dirs(sim_root: str | None = None) -> list[str]:
     except ImportError:
         pass
     return sorted(
-        path
-        for path in glob.glob(os.path.join(root, "*", "*"))
-        if os.path.isdir(path)
+        path for path in glob.glob(os.path.join(root, "*", "*")) if os.path.isdir(path)
     )
 
 

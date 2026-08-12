@@ -32,4 +32,6 @@ for case in CASES:
     golden[:vr, :vc] = (input1[:vr, :vc] - scalar_val).astype(dtype, copy=False)
 
     save_case_data(case["name"], {"input1": input1, "golden": golden})
-    print(f"[INFO] gen_data: {case['name']} shape={shape} valid_shape={valid_shape} dtype={dtype.__name__} scalar={SCALAR}")
+    print(
+        f"[INFO] gen_data: {case['name']} shape={shape} valid_shape={valid_shape} dtype={dtype.__name__} scalar={SCALAR}"
+    )

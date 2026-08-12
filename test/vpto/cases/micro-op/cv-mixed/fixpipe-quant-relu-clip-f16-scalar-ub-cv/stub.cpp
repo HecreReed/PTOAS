@@ -16,13 +16,11 @@
 #define __gm__
 #endif
 
-extern "C" __global__ [aicore] void
-fixpipe_quant_relu_clip_f16_scalar_ub_cv_kernel(__gm__ __fp16 *lhs,
-                                                __gm__ __fp16 *rhs,
-                                                __gm__ __fp16 *out_relu,
-                                                __gm__ __fp16 *out_clip) {
-  (void)lhs;
-  (void)rhs;
-  (void)out_relu;
-  (void)out_clip;
+extern "C" __global__[aicore] void fixpipe_quant_relu_clip_f16_scalar_ub_cv_kernel(
+    __gm__ __fp16* lhs, __gm__ __fp16* rhs, __gm__ __fp16* out_relu, __gm__ __fp16* out_clip)
+{
+    (void)lhs;
+    (void)rhs;
+    (void)out_relu;
+    (void)out_clip;
 }

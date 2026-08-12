@@ -12,15 +12,15 @@
 #define AICORE [aicore]
 #endif
 
-extern "C" __global__ AICORE void TROWARGMIN_uint32_float_8x1_8x8_8x8(__gm__ float *src, __gm__ uint32_t *dst);
-extern "C" __global__ AICORE void TROWARGMIN_int32_half_16x1_13x16_13x13(__gm__ uint16_t *src, __gm__ int32_t *dst);
+extern "C" __global__ AICORE void TROWARGMIN_uint32_float_8x1_8x8_8x8(__gm__ float* src, __gm__ uint32_t* dst);
+extern "C" __global__ AICORE void TROWARGMIN_int32_half_16x1_13x16_13x13(__gm__ uint16_t* src, __gm__ int32_t* dst);
 
-void LaunchTROWARGMIN_uint32_float_8x1_8x8_8x8(float *src, uint32_t *dst, void *stream) {
-    TROWARGMIN_uint32_float_8x1_8x8_8x8<<<1, nullptr, stream>>>((__gm__ float *)src, (__gm__ uint32_t *)dst);
+void LaunchTROWARGMIN_uint32_float_8x1_8x8_8x8(float* src, uint32_t* dst, void* stream)
+{
+    TROWARGMIN_uint32_float_8x1_8x8_8x8<<<1, nullptr, stream>>>((__gm__ float*)src, (__gm__ uint32_t*)dst);
 }
 
-
-
-void LaunchTROWARGMIN_int32_half_16x1_13x16_13x13(uint16_t *src, int32_t *dst, void *stream) {
-    TROWARGMIN_int32_half_16x1_13x16_13x13<<<1, nullptr, stream>>>((__gm__ uint16_t *)src, (__gm__ int32_t *)dst);
+void LaunchTROWARGMIN_int32_half_16x1_13x16_13x13(uint16_t* src, int32_t* dst, void* stream)
+{
+    TROWARGMIN_int32_half_16x1_13x16_13x13<<<1, nullptr, stream>>>((__gm__ uint16_t*)src, (__gm__ int32_t*)dst);
 }

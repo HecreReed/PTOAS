@@ -87,16 +87,36 @@ def build():
                 ctx,
             )
 
-            a_mat_ty = pto.TileBufType.get([32, 32], f32, mat, [32, 32], cfg_mat_f32, ctx)
-            b_mat_ty = pto.TileBufType.get([32, 32], f32, mat, [32, 32], cfg_mat_f32, ctx)
-            a_left_ty = pto.TileBufType.get([32, 32], f32, left, [32, 32], cfg_left_f32, ctx)
-            b_right_ty = pto.TileBufType.get([32, 32], f32, right, [32, 32], cfg_right_f32, ctx)
-            src_acc_ty = pto.TileBufType.get([32, 32], f32, acc, [32, 32], cfg_acc_f32, ctx)
-            dst_mat_ty = pto.TileBufType.get([32, 32], f16, mat, [32, 32], cfg_mat_f16, ctx)
-            out_left_ty = pto.TileBufType.get([32, 32], f16, left, [32, 32], cfg_left_f16, ctx)
-            i_mat_ty = pto.TileBufType.get([32, 32], f16, mat, [32, 32], cfg_mat_f16, ctx)
-            i_right_ty = pto.TileBufType.get([32, 32], f16, right, [32, 32], cfg_right_f16, ctx)
-            out_acc_ty = pto.TileBufType.get([32, 32], f32, acc, [32, 32], cfg_acc_f32, ctx)
+            a_mat_ty = pto.TileBufType.get(
+                [32, 32], f32, mat, [32, 32], cfg_mat_f32, ctx
+            )
+            b_mat_ty = pto.TileBufType.get(
+                [32, 32], f32, mat, [32, 32], cfg_mat_f32, ctx
+            )
+            a_left_ty = pto.TileBufType.get(
+                [32, 32], f32, left, [32, 32], cfg_left_f32, ctx
+            )
+            b_right_ty = pto.TileBufType.get(
+                [32, 32], f32, right, [32, 32], cfg_right_f32, ctx
+            )
+            src_acc_ty = pto.TileBufType.get(
+                [32, 32], f32, acc, [32, 32], cfg_acc_f32, ctx
+            )
+            dst_mat_ty = pto.TileBufType.get(
+                [32, 32], f16, mat, [32, 32], cfg_mat_f16, ctx
+            )
+            out_left_ty = pto.TileBufType.get(
+                [32, 32], f16, left, [32, 32], cfg_left_f16, ctx
+            )
+            i_mat_ty = pto.TileBufType.get(
+                [32, 32], f16, mat, [32, 32], cfg_mat_f16, ctx
+            )
+            i_right_ty = pto.TileBufType.get(
+                [32, 32], f16, right, [32, 32], cfg_right_f16, ctx
+            )
+            out_acc_ty = pto.TileBufType.get(
+                [32, 32], f32, acc, [32, 32], cfg_acc_f32, ctx
+            )
 
             fn_ty = func.FunctionType.get([ptr_f32, ptr_f32, ptr_f16, ptr_f32], [])
             with InsertionPoint(m.body):
@@ -111,15 +131,31 @@ def build():
 
                 arg_a, arg_b, arg_i, arg_out = entry.arguments
 
-                tv_a = pto.MakeTensorViewOp(tv2_f32, arg_a, [c32, c32], [c32, c1]).result
-                tv_b = pto.MakeTensorViewOp(tv2_f32, arg_b, [c32, c32], [c32, c1]).result
-                tv_i = pto.MakeTensorViewOp(tv2_f16, arg_i, [c32, c32], [c32, c1]).result
-                tv_out = pto.MakeTensorViewOp(tv2_f32, arg_out, [c32, c32], [c32, c1]).result
+                tv_a = pto.MakeTensorViewOp(
+                    tv2_f32, arg_a, [c32, c32], [c32, c1]
+                ).result
+                tv_b = pto.MakeTensorViewOp(
+                    tv2_f32, arg_b, [c32, c32], [c32, c1]
+                ).result
+                tv_i = pto.MakeTensorViewOp(
+                    tv2_f16, arg_i, [c32, c32], [c32, c1]
+                ).result
+                tv_out = pto.MakeTensorViewOp(
+                    tv2_f32, arg_out, [c32, c32], [c32, c1]
+                ).result
 
-                sv_a = pto.PartitionViewOp(tile_view_f32, tv_a, offsets=[c0, c0], sizes=[c32, c32]).result
-                sv_b = pto.PartitionViewOp(tile_view_f32, tv_b, offsets=[c0, c0], sizes=[c32, c32]).result
-                sv_i = pto.PartitionViewOp(tile_view_f16, tv_i, offsets=[c0, c0], sizes=[c32, c32]).result
-                sv_out = pto.PartitionViewOp(tile_view_f32, tv_out, offsets=[c0, c0], sizes=[c32, c32]).result
+                sv_a = pto.PartitionViewOp(
+                    tile_view_f32, tv_a, offsets=[c0, c0], sizes=[c32, c32]
+                ).result
+                sv_b = pto.PartitionViewOp(
+                    tile_view_f32, tv_b, offsets=[c0, c0], sizes=[c32, c32]
+                ).result
+                sv_i = pto.PartitionViewOp(
+                    tile_view_f16, tv_i, offsets=[c0, c0], sizes=[c32, c32]
+                ).result
+                sv_out = pto.PartitionViewOp(
+                    tile_view_f32, tv_out, offsets=[c0, c0], sizes=[c32, c32]
+                ).result
 
                 a_mat = pto.AllocTileOp(a_mat_ty).result
                 b_mat = pto.AllocTileOp(b_mat_ty).result

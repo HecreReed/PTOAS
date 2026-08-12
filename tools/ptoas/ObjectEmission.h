@@ -25,138 +25,112 @@ namespace llvm {
 class ToolOutputFile;
 class Module;
 class raw_ostream;
-}
+} // namespace llvm
 
 namespace mlir::pto {
 
 enum class ObjectEmissionDeviceTarget {
-  Vector,
-  Cube,
+    Vector,
+    Cube,
 };
 
 class CANNToolchain {
 public:
-  static std::optional<CANNToolchain> create(llvm::raw_ostream &diagOS);
+    static std::optional<CANNToolchain> create(llvm::raw_ostream& diagOS);
 
-  llvm::StringRef vptoPublicABISuffix(ObjectEmissionDeviceTarget target) const;
-  LogicalResult validate(llvm::raw_ostream &diagOS) const;
+    llvm::StringRef vptoPublicABISuffix(ObjectEmissionDeviceTarget target) const;
+    LogicalResult validate(llvm::raw_ostream& diagOS) const;
 
-  std::string ascendHomePath;
-  std::string bishengPath;
-  std::string bishengCc1Path;
-  std::string cceLdPath;
-  std::string ldLldPath;
-  std::string resourceDirPath;
-  std::string resourceIncludeDirPath;
-  std::string cceStubDirPath;
-  std::string bishengCompilerBinDirPath;
-  std::string ptoIsaPath;
-  std::string cannVersionString;
-  CANNVersion cannVersion = CANNVersion{9, 0, 0, 1};
-  std::vector<std::string> cppIncludeDirs;
+    std::string ascendHomePath;
+    std::string bishengPath;
+    std::string bishengCc1Path;
+    std::string cceLdPath;
+    std::string ldLldPath;
+    std::string resourceDirPath;
+    std::string resourceIncludeDirPath;
+    std::string cceStubDirPath;
+    std::string bishengCompilerBinDirPath;
+    std::string ptoIsaPath;
+    std::string cannVersionString;
+    CANNVersion cannVersion = CANNVersion{9, 0, 0, 1};
+    std::vector<std::string> cppIncludeDirs;
 };
 
 class TempFileRegistry {
 public:
-  TempFileRegistry() = default;
-  TempFileRegistry(const TempFileRegistry &) = delete;
-  TempFileRegistry &operator=(const TempFileRegistry &) = delete;
-  TempFileRegistry(TempFileRegistry &&) = delete;
-  TempFileRegistry &operator=(TempFileRegistry &&) = delete;
+    TempFileRegistry() = default;
+    TempFileRegistry(const TempFileRegistry&) = delete;
+    TempFileRegistry& operator=(const TempFileRegistry&) = delete;
+    TempFileRegistry(TempFileRegistry&&) = delete;
+    TempFileRegistry& operator=(TempFileRegistry&&) = delete;
 
-  ~TempFileRegistry();
+    ~TempFileRegistry();
 
-  void cleanup();
-  LogicalResult create(llvm::StringRef prefix, llvm::StringRef suffix,
-                       std::string &path, llvm::raw_ostream &diagOS);
+    void cleanup();
+    LogicalResult create(llvm::StringRef prefix, llvm::StringRef suffix, std::string& path, llvm::raw_ostream& diagOS);
 
 private:
-  llvm::SmallVector<std::string, 8> paths;
+    llvm::SmallVector<std::string, 8> paths;
 };
 
-LogicalResult writeLLVMModule(llvm::Module &module, llvm::StringRef path,
-                              llvm::raw_ostream &diagOS);
+LogicalResult writeLLVMModule(llvm::Module& module, llvm::StringRef path, llvm::raw_ostream& diagOS);
 
-LogicalResult writeCppSource(llvm::StringRef cppSource, llvm::StringRef path,
-                             llvm::raw_ostream &diagOS);
+LogicalResult writeCppSource(llvm::StringRef cppSource, llvm::StringRef path, llvm::raw_ostream& diagOS);
 
-LogicalResult writeHostStubSource(llvm::StringRef stubSource,
-                                  llvm::StringRef path,
-                                  llvm::raw_ostream &diagOS);
+LogicalResult writeHostStubSource(llvm::StringRef stubSource, llvm::StringRef path, llvm::raw_ostream& diagOS);
 
 LogicalResult compileCppToDeviceObject(
-    llvm::StringRef cppPath, llvm::StringRef outObjPath,
-    ObjectEmissionDeviceTarget target, const CANNToolchain &toolchain,
-    llvm::StringRef stderrPath, llvm::raw_ostream &diagOS);
+    llvm::StringRef cppPath, llvm::StringRef outObjPath, ObjectEmissionDeviceTarget target,
+    const CANNToolchain& toolchain, llvm::StringRef stderrPath, llvm::raw_ostream& diagOS);
 
 LogicalResult compileLLVMToDeviceObject(
-    llvm::StringRef llPath, llvm::StringRef outObjPath,
-    ObjectEmissionDeviceTarget target, const CANNToolchain &toolchain,
-    llvm::StringRef stderrPath, llvm::raw_ostream &diagOS);
+    llvm::StringRef llPath, llvm::StringRef outObjPath, ObjectEmissionDeviceTarget target,
+    const CANNToolchain& toolchain, llvm::StringRef stderrPath, llvm::raw_ostream& diagOS);
 
 LogicalResult emitCppVectorDeviceObject(
-    llvm::StringRef cppSource, llvm::StringRef cppPath,
-    llvm::StringRef outObjPath, const CANNToolchain &toolchain,
-    llvm::StringRef stderrPath, llvm::raw_ostream &diagOS);
+    llvm::StringRef cppSource, llvm::StringRef cppPath, llvm::StringRef outObjPath, const CANNToolchain& toolchain,
+    llvm::StringRef stderrPath, llvm::raw_ostream& diagOS);
 
 LogicalResult emitCppCubeDeviceObject(
-    llvm::StringRef cppSource, llvm::StringRef cppPath,
-    llvm::StringRef outObjPath, const CANNToolchain &toolchain,
-    llvm::StringRef stderrPath, llvm::raw_ostream &diagOS);
+    llvm::StringRef cppSource, llvm::StringRef cppPath, llvm::StringRef outObjPath, const CANNToolchain& toolchain,
+    llvm::StringRef stderrPath, llvm::raw_ostream& diagOS);
 
-LogicalResult emitCppFatobj(llvm::StringRef cppSource, llvm::StringRef cppPath,
-                            llvm::StringRef outObjPath,
-                            const CANNToolchain &toolchain,
-                            llvm::StringRef stderrPath,
-                            llvm::raw_ostream &diagOS);
+LogicalResult emitCppFatobj(
+    llvm::StringRef cppSource, llvm::StringRef cppPath, llvm::StringRef outObjPath, const CANNToolchain& toolchain,
+    llvm::StringRef stderrPath, llvm::raw_ostream& diagOS);
 
-LogicalResult emitFatobjCCE(llvm::StringRef cppSource,
-                            llvm::StringRef outputPath,
-                            const CANNToolchain &toolchain,
-                            TempFileRegistry &tempFiles,
-                            llvm::raw_ostream &diagOS);
+LogicalResult emitFatobjCCE(
+    llvm::StringRef cppSource, llvm::StringRef outputPath, const CANNToolchain& toolchain, TempFileRegistry& tempFiles,
+    llvm::raw_ostream& diagOS);
 
 LogicalResult emitVPTOVectorDeviceObject(
-    llvm::Module &module, llvm::StringRef llPath, llvm::StringRef outObjPath,
-    const CANNToolchain &toolchain, llvm::StringRef stderrPath,
-    llvm::raw_ostream &diagOS);
+    llvm::Module& module, llvm::StringRef llPath, llvm::StringRef outObjPath, const CANNToolchain& toolchain,
+    llvm::StringRef stderrPath, llvm::raw_ostream& diagOS);
 
 LogicalResult emitVPTOCubeDeviceObject(
-    llvm::Module &module, llvm::StringRef llPath, llvm::StringRef outObjPath,
-    const CANNToolchain &toolchain, llvm::StringRef stderrPath,
-    llvm::raw_ostream &diagOS);
+    llvm::Module& module, llvm::StringRef llPath, llvm::StringRef outObjPath, const CANNToolchain& toolchain,
+    llvm::StringRef stderrPath, llvm::raw_ostream& diagOS);
 
 LogicalResult emitFatobjLLVM(
-    llvm::Module *cubeModule, llvm::Module *vectorModule,
-    llvm::StringRef stubSource, llvm::StringRef outputPath,
-    llvm::StringRef moduleId, const CANNToolchain &toolchain,
-    TempFileRegistry &tempFiles, VFSIMTSizeFixMode vfsimtSizeFixMode,
-    llvm::raw_ostream &diagOS);
+    llvm::Module* cubeModule, llvm::Module* vectorModule, llvm::StringRef stubSource, llvm::StringRef outputPath,
+    llvm::StringRef moduleId, const CANNToolchain& toolchain, TempFileRegistry& tempFiles,
+    VFSIMTSizeFixMode vfsimtSizeFixMode, llvm::raw_ostream& diagOS);
 
-LogicalResult mergeDeviceObjects(llvm::ArrayRef<std::string> deviceObjPaths,
-                                 llvm::StringRef outObjPath,
-                                 const CANNToolchain &toolchain,
-                                 llvm::StringRef stderrPath,
-                                 llvm::raw_ostream &diagOS);
+LogicalResult mergeDeviceObjects(
+    llvm::ArrayRef<std::string> deviceObjPaths, llvm::StringRef outObjPath, const CANNToolchain& toolchain,
+    llvm::StringRef stderrPath, llvm::raw_ostream& diagOS);
 
 LogicalResult compileStubToFatobj(
-    llvm::StringRef stubPath, llvm::StringRef deviceObjPath,
-    llvm::StringRef outputPath, llvm::StringRef moduleId,
-    const CANNToolchain &toolchain, llvm::StringRef stderrPath,
-    llvm::raw_ostream &diagOS);
+    llvm::StringRef stubPath, llvm::StringRef deviceObjPath, llvm::StringRef outputPath, llvm::StringRef moduleId,
+    const CANNToolchain& toolchain, llvm::StringRef stderrPath, llvm::raw_ostream& diagOS);
 
-LogicalResult linkFatobjs(llvm::ArrayRef<std::string> fatobjPaths,
-                          llvm::StringRef outputPath,
-                          const CANNToolchain &toolchain,
-                          llvm::StringRef stderrPath,
-                          llvm::raw_ostream &diagOS);
+LogicalResult linkFatobjs(
+    llvm::ArrayRef<std::string> fatobjPaths, llvm::StringRef outputPath, const CANNToolchain& toolchain,
+    llvm::StringRef stderrPath, llvm::raw_ostream& diagOS);
 
-LogicalResult emitFatobjLLVMWithRuntime(llvm::Module *cubeModule,
-                                        llvm::Module *vectorModule,
-                                        llvm::StringRef stubSource,
-                                        llvm::ToolOutputFile &outputFile,
-                                        VFSIMTSizeFixMode vfsimtSizeFixMode,
-                                        llvm::raw_ostream &diagOS);
+LogicalResult emitFatobjLLVMWithRuntime(
+    llvm::Module* cubeModule, llvm::Module* vectorModule, llvm::StringRef stubSource, llvm::ToolOutputFile& outputFile,
+    VFSIMTSizeFixMode vfsimtSizeFixMode, llvm::raw_ostream& diagOS);
 
 } // namespace mlir::pto
 

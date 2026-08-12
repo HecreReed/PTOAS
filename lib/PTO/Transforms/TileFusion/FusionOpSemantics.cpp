@@ -14,109 +14,109 @@
 namespace mlir {
 namespace pto {
 
-static FusionComputeFamily getFusionComputeFamily(StringRef opName) {
-  return llvm::StringSwitch<FusionComputeFamily>(opName)
-      .Cases("tadd", "tsub", "tmul", "tdiv", "tmax", "tmin",
-             FusionComputeFamily::Elementwise)
-      .Cases("tadds", "tsubs", "tmuls", "tdivs", "tmaxs", "tmins",
-             FusionComputeFamily::Elementwise)
-      .Case("texp", FusionComputeFamily::Elementwise)
-      .Case("texpands", FusionComputeFamily::ScalarExpand)
-      .Cases("trowexpandsub", "trowexpandmul", "trowexpanddiv",
-             FusionComputeFamily::RowBroadcastBinary)
-      .Cases("trowsum", "trowmax", "trowmin", FusionComputeFamily::ReduceRow)
-      .Cases("tcolsum", "tcolmax", "tcolmin", FusionComputeFamily::ReduceCol)
-      .Default(FusionComputeFamily::Unknown);
+static FusionComputeFamily getFusionComputeFamily(StringRef opName)
+{
+    return llvm::StringSwitch<FusionComputeFamily>(opName)
+        .Cases("tadd", "tsub", "tmul", "tdiv", "tmax", "tmin", FusionComputeFamily::Elementwise)
+        .Cases("tadds", "tsubs", "tmuls", "tdivs", "tmaxs", "tmins", FusionComputeFamily::Elementwise)
+        .Case("texp", FusionComputeFamily::Elementwise)
+        .Case("texpands", FusionComputeFamily::ScalarExpand)
+        .Cases("trowexpandsub", "trowexpandmul", "trowexpanddiv", FusionComputeFamily::RowBroadcastBinary)
+        .Cases("trowsum", "trowmax", "trowmin", FusionComputeFamily::ReduceRow)
+        .Cases("tcolsum", "tcolmax", "tcolmin", FusionComputeFamily::ReduceCol)
+        .Default(FusionComputeFamily::Unknown);
 }
 
-bool isSupportedPreFusionComputeOp(StringRef opName) {
-  return getFusionComputeFamily(opName) != FusionComputeFamily::Unknown;
+bool isSupportedPreFusionComputeOp(StringRef opName)
+{
+    return getFusionComputeFamily(opName) != FusionComputeFamily::Unknown;
 }
 
-static bool isTileFusionTileValue(Value value) {
-  return isa<pto::TileBufType>(value.getType());
-}
+static bool isTileFusionTileValue(Value value) { return isa<pto::TileBufType>(value.getType()); }
 
-static SmallVector<Value, 2> collectNormalizedTileOutputs(Operation *op) {
-  SmallVector<Value, 2> outputs;
+static SmallVector<Value, 2> collectNormalizedTileOutputs(Operation* op)
+{
+    SmallVector<Value, 2> outputs;
 
-  if (auto dpsIface = dyn_cast<pto::PTO_DpsInitOpInterface>(op)) {
-    for (Value init : dpsIface.getDpsInits()) {
-      if (isTileFusionTileValue(init))
-        outputs.push_back(init);
+    if (auto dpsIface = dyn_cast<pto::PTO_DpsInitOpInterface>(op)) {
+        for (Value init : dpsIface.getDpsInits()) {
+            if (isTileFusionTileValue(init))
+                outputs.push_back(init);
+        }
+        if (!outputs.empty())
+            return outputs;
     }
-    if (!outputs.empty())
-      return outputs;
-  }
 
-  for (Value result : op->getResults()) {
-    if (isTileFusionTileValue(result))
-      outputs.push_back(result);
-  }
-  return outputs;
+    for (Value result : op->getResults()) {
+        if (isTileFusionTileValue(result))
+            outputs.push_back(result);
+    }
+    return outputs;
 }
 
-static StringRef getTileFusionOpName(Operation *op) {
-  StringRef opName = op->getName().getStringRef();
-  opName.consume_front("pto.");
-  return opName;
+static StringRef getTileFusionOpName(Operation* op)
+{
+    StringRef opName = op->getName().getStringRef();
+    opName.consume_front("pto.");
+    return opName;
 }
 
-FailureOr<FusionOpSemantics> getFusionOpSemantics(Operation *op) {
-  FusionOpSemantics semantics;
-  semantics.op = op;
-  semantics.opName = getTileFusionOpName(op).str();
+FailureOr<FusionOpSemantics> getFusionOpSemantics(Operation* op)
+{
+    FusionOpSemantics semantics;
+    semantics.op = op;
+    semantics.opName = getTileFusionOpName(op).str();
 
-  if (auto reshape = dyn_cast<pto::TReshapeOp>(op)) {
-    semantics.kind = FusionOpKind::LocalBoundary;
-    semantics.opName = "treshape";
-    semantics.tileInputs.push_back(reshape.getSrc());
-    semantics.tileOutputs.push_back(reshape.getResult());
-    return semantics;
-  }
+    if (auto reshape = dyn_cast<pto::TReshapeOp>(op)) {
+        semantics.kind = FusionOpKind::LocalBoundary;
+        semantics.opName = "treshape";
+        semantics.tileInputs.push_back(reshape.getSrc());
+        semantics.tileOutputs.push_back(reshape.getResult());
+        return semantics;
+    }
 
-  semantics.computeFamily = getFusionComputeFamily(semantics.opName);
-  if (semantics.computeFamily == FusionComputeFamily::Unknown) {
-    semantics.kind = FusionOpKind::HardBoundary;
-    return semantics;
-  }
+    semantics.computeFamily = getFusionComputeFamily(semantics.opName);
+    if (semantics.computeFamily == FusionComputeFamily::Unknown) {
+        semantics.kind = FusionOpKind::HardBoundary;
+        return semantics;
+    }
 
-  auto dpsIface = dyn_cast<pto::PTO_DpsInitOpInterface>(op);
-  if (!dpsIface && op->getNumResults() == 0) {
-    semantics.kind = FusionOpKind::HardBoundary;
-    return semantics;
-  }
+    auto dpsIface = dyn_cast<pto::PTO_DpsInitOpInterface>(op);
+    if (!dpsIface && op->getNumResults() == 0) {
+        semantics.kind = FusionOpKind::HardBoundary;
+        return semantics;
+    }
 
-  semantics.kind = FusionOpKind::Compute;
-  semantics.tileOutputs = collectNormalizedTileOutputs(op);
-  if (semantics.tileOutputs.empty())
-    return failure();
-
-  SmallVector<unsigned, 4> dpsInitOperandNumbers;
-  if (dpsIface) {
-    for (OpOperand &dpsInit : dpsIface.getDpsInitsMutable())
-      dpsInitOperandNumbers.push_back(dpsInit.getOperandNumber());
-  }
-
-  for (OpOperand &operand : op->getOpOperands()) {
-    if (llvm::is_contained(dpsInitOperandNumbers, operand.getOperandNumber()))
-      continue;
-
-    Value value = operand.get();
-    if (isTileFusionTileValue(value))
-      semantics.tileInputs.push_back(value);
-    else
-      semantics.scalarInputs.push_back(value);
-  }
-
-  if (semantics.tileInputs.empty()) {
-    for (Value output : semantics.tileOutputs) {
-      if (!isa<pto::TileBufType>(output.getType()))
+    semantics.kind = FusionOpKind::Compute;
+    semantics.tileOutputs = collectNormalizedTileOutputs(op);
+    if (semantics.tileOutputs.empty())
         return failure();
-    }
-  }
 
-  return semantics;
+    SmallVector<unsigned, 4> dpsInitOperandNumbers;
+    if (dpsIface) {
+        for (OpOperand& dpsInit : dpsIface.getDpsInitsMutable())
+            dpsInitOperandNumbers.push_back(dpsInit.getOperandNumber());
+    }
+
+    for (OpOperand& operand : op->getOpOperands()) {
+        if (llvm::is_contained(dpsInitOperandNumbers, operand.getOperandNumber()))
+            continue;
+
+        Value value = operand.get();
+        if (isTileFusionTileValue(value))
+            semantics.tileInputs.push_back(value);
+        else
+            semantics.scalarInputs.push_back(value);
+    }
+
+    if (semantics.tileInputs.empty()) {
+        for (Value output : semantics.tileOutputs) {
+            if (!isa<pto::TileBufType>(output.getType()))
+                return failure();
+        }
+    }
+
+    return semantics;
 }
 
 } // namespace pto

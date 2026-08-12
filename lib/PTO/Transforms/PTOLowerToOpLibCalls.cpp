@@ -15,28 +15,27 @@
 
 using namespace mlir;
 
-FailureOr<bool> mlir::pto::tryCloneOpLibInlineBridgeOp(OpBuilder &builder,
-                                                       Operation &op,
-                                                       IRMapping &mapping) {
-  if (auto cast = dyn_cast<UnrealizedConversionCastOp>(&op)) {
-    if (cast->getNumOperands() != 1 || cast->getNumResults() != 1)
-      return failure();
+FailureOr<bool> mlir::pto::tryCloneOpLibInlineBridgeOp(OpBuilder& builder, Operation& op, IRMapping& mapping)
+{
+    if (auto cast = dyn_cast<UnrealizedConversionCastOp>(&op)) {
+        if (cast->getNumOperands() != 1 || cast->getNumResults() != 1)
+            return failure();
 
-    Value mappedSrc = mapping.lookupOrNull(cast.getOperand(0));
-    if (!mappedSrc)
-      return failure();
+        Value mappedSrc = mapping.lookupOrNull(cast.getOperand(0));
+        if (!mappedSrc)
+            return failure();
 
-    Type dstTy = cast.getResult(0).getType();
-    if (mappedSrc.getType() == dstTy) {
-      mapping.map(cast.getResult(0), mappedSrc);
-      return true;
+        Type dstTy = cast.getResult(0).getType();
+        if (mappedSrc.getType() == dstTy) {
+            mapping.map(cast.getResult(0), mappedSrc);
+            return true;
+        }
+
+        auto clonedCast =
+            builder.create<UnrealizedConversionCastOp>(cast.getLoc(), TypeRange{dstTy}, ValueRange{mappedSrc});
+        mapping.map(cast.getResult(0), clonedCast.getResult(0));
+        return true;
     }
 
-    auto clonedCast = builder.create<UnrealizedConversionCastOp>(
-        cast.getLoc(), TypeRange{dstTy}, ValueRange{mappedSrc});
-    mapping.map(cast.getResult(0), clonedCast.getResult(0));
-    return true;
-  }
-
-  return false;
+    return false;
 }

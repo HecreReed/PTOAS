@@ -31,13 +31,10 @@ namespace pto {
 /// loops.
 class VMIControlFlowSupport {
 public:
-  using EquivalenceCallback =
-      llvm::function_ref<LogicalResult(Value, Value, Operation *)>;
+    using EquivalenceCallback = llvm::function_ref<LogicalResult(Value, Value, Operation*)>;
 
-  static LogicalResult addForConstraints(scf::ForOp forOp,
-                                         EquivalenceCallback addEquivalent);
-  static LogicalResult addWhileConstraints(
-      scf::WhileOp whileOp, EquivalenceCallback addEquivalent);
+    static LogicalResult addForConstraints(scf::ForOp forOp, EquivalenceCallback addEquivalent);
+    static LogicalResult addWhileConstraints(scf::WhileOp whileOp, EquivalenceCallback addEquivalent);
 };
 
 } // namespace pto

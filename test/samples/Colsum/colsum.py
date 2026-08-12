@@ -56,9 +56,15 @@ def build():
                 tv2 = pto.MakeTensorViewOp(tv2_f32, arg2, [c1, c32], [c32, c1]).result
 
                 # %3/%4/%8 = pto.subview %tv, offsets=[%c0,%c0], sizes=[32,32]
-                sv0 = pto.PartitionViewOp(tile_view_32, tv0, offsets=[c0, c0], sizes=[c32, c32]).result
-                sv1 = pto.PartitionViewOp(tile_view_32, tv1, offsets=[c0, c0], sizes=[c32, c32]).result
-                sv2 = pto.PartitionViewOp(tile_view_1_32, tv2, offsets=[c0, c0], sizes=[c1, c32]).result
+                sv0 = pto.PartitionViewOp(
+                    tile_view_32, tv0, offsets=[c0, c0], sizes=[c32, c32]
+                ).result
+                sv1 = pto.PartitionViewOp(
+                    tile_view_32, tv1, offsets=[c0, c0], sizes=[c32, c32]
+                ).result
+                sv2 = pto.PartitionViewOp(
+                    tile_view_1_32, tv2, offsets=[c0, c0], sizes=[c1, c32]
+                ).result
 
                 # %5/%6/%7 = pto.alloc_tile : <32x32xf32>
                 tb0 = pto.AllocTileOp(tile_buf_32).result
@@ -74,9 +80,11 @@ def build():
                 # pto-isa TCOLSUM requires an explicit tmp tile; keep only the
                 # supported form to ensure the generated C++ compiles on NPU.
                 pto.TColSumOp(tb0, tb2, tmp=tb1, isBinary=isBinary_attr)
-                
+
                 # %8 = subview on output tensor_view
-                sv2 = pto.PartitionViewOp(tile_view_1_32, tv2, offsets=[c0, c0], sizes=[c1, c32]).result
+                sv2 = pto.PartitionViewOp(
+                    tile_view_1_32, tv2, offsets=[c0, c0], sizes=[c1, c32]
+                ).result
 
                 # pto.store_dps_tb ins(%tb2) outs(%sv2)
                 pto.TStoreOp(None, tb2, sv2)

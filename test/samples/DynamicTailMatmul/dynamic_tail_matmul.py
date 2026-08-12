@@ -6,7 +6,17 @@
 # INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
 # See LICENSE in the root of the software repository for the full text of the License.
 
-from ptoas.mlir.ir import Context, Location, Module, InsertionPoint, IndexType, IntegerType, F16Type, F32Type, UnitAttr
+from ptoas.mlir.ir import (
+    Context,
+    Location,
+    Module,
+    InsertionPoint,
+    IndexType,
+    IntegerType,
+    F16Type,
+    F32Type,
+    UnitAttr,
+)
 from ptoas.mlir.dialects import func, arith, pto
 
 
@@ -69,8 +79,12 @@ def build():
             # Dynamic valid shape for tail blocks: m/k/n come from runtime arguments.
             a_mat_ty = pto.TileBufType.get([32, 32], f16, mat, [-1, -1], cfg_mat, ctx)
             b_mat_ty = pto.TileBufType.get([32, 32], f16, mat, [-1, -1], cfg_mat, ctx)
-            a_left_ty = pto.TileBufType.get([32, 32], f16, left, [-1, -1], cfg_left, ctx)
-            b_right_ty = pto.TileBufType.get([32, 32], f16, right, [-1, -1], cfg_right, ctx)
+            a_left_ty = pto.TileBufType.get(
+                [32, 32], f16, left, [-1, -1], cfg_left, ctx
+            )
+            b_right_ty = pto.TileBufType.get(
+                [32, 32], f16, right, [-1, -1], cfg_right, ctx
+            )
             c_acc_ty = pto.TileBufType.get([32, 32], f32, acc, [-1, -1], cfg_acc, ctx)
 
             # (A, B, C, validM, validK, validN)
@@ -95,9 +109,15 @@ def build():
                 tv_b = pto.MakeTensorViewOp(tv2_b, b_ptr, [c32, c32], [c32, c1]).result
                 tv_c = pto.MakeTensorViewOp(tv2_c, c_ptr, [c32, c32], [c32, c1]).result
 
-                sv_a = pto.PartitionViewOp(view_a, tv_a, offsets=[c0, c0], sizes=[c32, c32]).result
-                sv_b = pto.PartitionViewOp(view_b, tv_b, offsets=[c0, c0], sizes=[c32, c32]).result
-                sv_c = pto.PartitionViewOp(view_c, tv_c, offsets=[c0, c0], sizes=[c32, c32]).result
+                sv_a = pto.PartitionViewOp(
+                    view_a, tv_a, offsets=[c0, c0], sizes=[c32, c32]
+                ).result
+                sv_b = pto.PartitionViewOp(
+                    view_b, tv_b, offsets=[c0, c0], sizes=[c32, c32]
+                ).result
+                sv_c = pto.PartitionViewOp(
+                    view_c, tv_c, offsets=[c0, c0], sizes=[c32, c32]
+                ).result
 
                 a_mat = pto.AllocTileOp(a_mat_ty, valid_row=vm, valid_col=vk).result
                 b_mat = pto.AllocTileOp(b_mat_ty, valid_row=vk, valid_col=vn).result

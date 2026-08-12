@@ -14,15 +14,18 @@
 
 // Case 1: fp32_6_128_1_128
 
-extern "C" __global__ AICORE void TCOLEXPANDSUB_fp32_18_32_1_32(__gm__ float *src0, __gm__ float *src1, __gm__ float *dst);
-extern "C" __global__ AICORE void TCOLEXPANDSUB_int32_16_32_1_32(__gm__ int32_t *src0, __gm__ int32_t *src1, __gm__ int32_t *dst);
+extern "C" __global__ AICORE void TCOLEXPANDSUB_fp32_18_32_1_32(
+    __gm__ float* src0, __gm__ float* src1, __gm__ float* dst);
+extern "C" __global__ AICORE void TCOLEXPANDSUB_int32_16_32_1_32(
+    __gm__ int32_t* src0, __gm__ int32_t* src1, __gm__ int32_t* dst);
 
-void LaunchTCOLEXPANDSUB_fp32_18_32_1_32(float *src0, float *src1, float *dst, void *stream) {
-    TCOLEXPANDSUB_fp32_18_32_1_32<<<1, nullptr, stream>>>((__gm__ float *)src0, (__gm__ float *)src1, (__gm__ float *)dst);
+void LaunchTCOLEXPANDSUB_fp32_18_32_1_32(float* src0, float* src1, float* dst, void* stream)
+{
+    TCOLEXPANDSUB_fp32_18_32_1_32<<<1, nullptr, stream>>>((__gm__ float*)src0, (__gm__ float*)src1, (__gm__ float*)dst);
 }
 
-
-
-void LaunchTCOLEXPANDSUB_int32_16_32_1_32(int32_t *src0, int32_t *src1, int32_t *dst, void *stream) {
-    TCOLEXPANDSUB_int32_16_32_1_32<<<1, nullptr, stream>>>((__gm__ int32_t *)src0, (__gm__ int32_t *)src1, (__gm__ int32_t *)dst);
+void LaunchTCOLEXPANDSUB_int32_16_32_1_32(int32_t* src0, int32_t* src1, int32_t* dst, void* stream)
+{
+    TCOLEXPANDSUB_int32_16_32_1_32<<<1, nullptr, stream>>>(
+        (__gm__ int32_t*)src0, (__gm__ int32_t*)src1, (__gm__ int32_t*)dst);
 }

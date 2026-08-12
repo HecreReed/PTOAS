@@ -16,10 +16,9 @@
 #include "acl/acl.h"
 #endif
 
-extern "C" __global__[aicore] void
-vldsx2_vsldb_post_update_kernel(__gm__ float *input, __gm__ float *output);
+extern "C" __global__[aicore] void vldsx2_vsldb_post_update_kernel(__gm__ float* input, __gm__ float* output);
 
-void LaunchVldsx2VsldbPostUpdate(float *input, float *output, void *stream) {
-  vldsx2_vsldb_post_update_kernel<<<1, nullptr, stream>>>(
-      (__gm__ float *)input, (__gm__ float *)output);
+void LaunchVldsx2VsldbPostUpdate(float* input, float* output, void* stream)
+{
+    vldsx2_vsldb_post_update_kernel<<<1, nullptr, stream>>>((__gm__ float*)input, (__gm__ float*)output);
 }

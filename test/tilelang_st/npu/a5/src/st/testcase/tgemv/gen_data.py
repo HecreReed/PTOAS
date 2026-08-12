@@ -30,8 +30,9 @@ for case in CASES:
     if case.get("is_bias", False):
         bias_dtype = case["bias_dtype"]
         bias = np.random.uniform(-1.0, 1.0, size=(N,)).astype(bias_dtype)
-        golden = (np.matmul(a.astype(np.float64), b.astype(np.float64)).astype(c_dtype)
-                  + bias.astype(c_dtype))
+        golden = np.matmul(a.astype(np.float64), b.astype(np.float64)).astype(
+            c_dtype
+        ) + bias.astype(c_dtype)
     else:
         golden = np.matmul(a.astype(np.float64), b.astype(np.float64)).astype(c_dtype)
 
@@ -50,6 +51,8 @@ for case in CASES:
     data["golden"] = golden_save
 
     save_case_data(case["name"], data)
-    print(f"[INFO] gen_data: {case['name']} M={M} K={K} N={N} "
-          f"padded_A=({M}x{K_use}) padded_B=({K_use}x{N_aligned}) "
-          f"a={a_dtype.__name__} b={b_dtype.__name__} c={c_dtype.__name__}")
+    print(
+        f"[INFO] gen_data: {case['name']} M={M} K={K} N={N} "
+        f"padded_A=({M}x{K_use}) padded_B=({K_use}x{N_aligned}) "
+        f"a={a_dtype.__name__} b={b_dtype.__name__} c={c_dtype.__name__}"
+    )

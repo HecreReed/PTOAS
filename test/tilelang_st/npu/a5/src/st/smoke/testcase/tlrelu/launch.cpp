@@ -14,15 +14,15 @@
 
 // Case 0: f32 32x64 -> dst 32x128 (valid 32x64)
 
-extern "C" __global__ AICORE void TLRELU_f32_32x64_dst128(__gm__ float *src, __gm__ float *dst, float slope);
-extern "C" __global__ AICORE void TLRELU_f32_7x448_dst512(__gm__ float *src, __gm__ float *dst, float slope);
+extern "C" __global__ AICORE void TLRELU_f32_32x64_dst128(__gm__ float* src, __gm__ float* dst, float slope);
+extern "C" __global__ AICORE void TLRELU_f32_7x448_dst512(__gm__ float* src, __gm__ float* dst, float slope);
 
-void LaunchTLRELU_f32_7x448_dst512(float *src, float *dst, float slope, void *stream) {
-    TLRELU_f32_7x448_dst512<<<1, nullptr, stream>>>((__gm__ float *)src, (__gm__ float *)dst, slope);
+void LaunchTLRELU_f32_7x448_dst512(float* src, float* dst, float slope, void* stream)
+{
+    TLRELU_f32_7x448_dst512<<<1, nullptr, stream>>>((__gm__ float*)src, (__gm__ float*)dst, slope);
 }
 
-
-
-void LaunchTLRELU_f32_32x64_dst128(float *src, float *dst, float slope, void *stream) {
-    TLRELU_f32_32x64_dst128<<<1, nullptr, stream>>>((__gm__ float *)src, (__gm__ float *)dst, slope);
+void LaunchTLRELU_f32_32x64_dst128(float* src, float* dst, float slope, void* stream)
+{
+    TLRELU_f32_32x64_dst128<<<1, nullptr, stream>>>((__gm__ float*)src, (__gm__ float*)dst, slope);
 }

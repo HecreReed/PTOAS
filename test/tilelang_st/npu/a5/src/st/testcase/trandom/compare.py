@@ -42,16 +42,30 @@ def main():
         counter_file = os.path.join(case_dir, "counter.bin")
 
         if not os.path.exists(golden_file):
-            if os.path.exists(key_file) and os.path.exists(counter_file) and os.path.exists(output_file):
+            if (
+                os.path.exists(key_file)
+                and os.path.exists(counter_file)
+                and os.path.exists(output_file)
+            ):
                 key = np.fromfile(key_file, dtype=dtype)
                 counter = np.fromfile(counter_file, dtype=dtype)
                 rounds = case.get("rounds", 10)
-                golden = trandom_generate(key.view(np.uint32), counter.view(np.uint32),
-                                          vr, vc, dtype=dtype, rounds=rounds)
+                golden = trandom_generate(
+                    key.view(np.uint32),
+                    counter.view(np.uint32),
+                    vr,
+                    vc,
+                    dtype=dtype,
+                    rounds=rounds,
+                )
                 golden.astype(dtype).tofile(golden_file)
                 print(f"[INFO] {case['name']}: generated golden.bin")
             else:
-                print(style_fail(f"[ERROR] {case['name']}: golden.bin not found and cannot generate"))
+                print(
+                    style_fail(
+                        f"[ERROR] {case['name']}: golden.bin not found and cannot generate"
+                    )
+                )
                 all_passed = False
                 continue
 
@@ -67,8 +81,12 @@ def main():
         if ok:
             unique_count = len(np.unique(output[:vr, :vc]))
             total_count = vr * vc
-            print(style_pass(f"[INFO] {case['name']}: compare passed "
-                             f"(unique={unique_count}/{total_count})"))
+            print(
+                style_pass(
+                    f"[INFO] {case['name']}: compare passed "
+                    f"(unique={unique_count}/{total_count})"
+                )
+            )
         else:
             print(style_fail(f"[ERROR] {case['name']}: compare failed"))
             all_passed = False

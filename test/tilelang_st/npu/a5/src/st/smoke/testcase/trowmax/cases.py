@@ -147,7 +147,6 @@ CASES = [
         "valid_shape": (8, 1024),
         "eps": 1e-5,
     },
-
     # int32 cases (case19-case23 from pto-isa)
     {
         "name": "i32_127x64_valid127x63",
@@ -184,7 +183,6 @@ CASES = [
         "valid_shape": (7, 447),
         "eps": 0,
     },
-
     # int16 cases (case24-case28 from pto-isa)
     {
         "name": "i16_128x64",
@@ -223,9 +221,11 @@ CASES = [
     },
 ]
 
-_SMOKE_CASE_NAMES = ['f32_15x192', 'i32_7x448_valid7x447']
+_SMOKE_CASE_NAMES = ["f32_15x192", "i32_7x448_valid7x447"]
 _SMOKE_CASE_NAME_SET = set(_SMOKE_CASE_NAMES)
-_missing = [name for name in _SMOKE_CASE_NAMES if name not in {case["name"] for case in CASES}]
+_missing = [
+    name for name in _SMOKE_CASE_NAMES if name not in {case["name"] for case in CASES}
+]
 if _missing:
     raise RuntimeError("unknown smoke case(s): " + ", ".join(_missing))
 CASES = [case for case in CASES if case["name"] in _SMOKE_CASE_NAME_SET]

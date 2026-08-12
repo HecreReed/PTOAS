@@ -15,6 +15,7 @@ import numpy as np
 from cases import CASES
 from st_common import result_cmp, style_fail, style_pass, validate_cases
 
+
 def main():
     validate_cases(CASES)
     case_filter = sys.argv[1] if len(sys.argv) > 1 else None
@@ -28,8 +29,12 @@ def main():
         shape = case["shape"]
         vr, vc = case["valid_shape"]
 
-        golden = np.fromfile(os.path.join(case_dir, "golden.bin"), dtype=case["dtype"]).reshape(shape)
-        output = np.fromfile(os.path.join(case_dir, "output.bin"), dtype=case["dtype"]).reshape(shape)
+        golden = np.fromfile(
+            os.path.join(case_dir, "golden.bin"), dtype=case["dtype"]
+        ).reshape(shape)
+        output = np.fromfile(
+            os.path.join(case_dir, "output.bin"), dtype=case["dtype"]
+        ).reshape(shape)
 
         ok = result_cmp(golden[:vr, :vc], output[:vr, :vc], case["eps"])
         if ok:
@@ -41,6 +46,7 @@ def main():
     if not all_passed:
         sys.exit(2)
     print(style_pass("[INFO] all cases passed"))
+
 
 if __name__ == "__main__":
     main()

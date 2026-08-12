@@ -19,23 +19,19 @@
 namespace mlir::pto {
 
 inline constexpr StringLiteral kVMIDiagUnsupported = "VMI-UNSUPPORTED";
-inline constexpr StringLiteral kVMIDiagLayoutContract =
-    "VMI-LAYOUT-CONTRACT";
+inline constexpr StringLiteral kVMIDiagLayoutContract = "VMI-LAYOUT-CONTRACT";
 inline constexpr StringLiteral kVMIDiagPassInvariant = "VMI-PASS-INVARIANT";
 inline constexpr StringLiteral kVMIDiagResidualOp = "VMI-RESIDUAL-OP";
 
-inline constexpr StringLiteral kVMIDiagUnsupportedPrefix =
-    "VMI-UNSUPPORTED: ";
-inline constexpr StringLiteral kVMIDiagLayoutContractPrefix =
-    "VMI-LAYOUT-CONTRACT: ";
-inline constexpr StringLiteral kVMIDiagPassInvariantPrefix =
-    "VMI-PASS-INVARIANT: ";
+inline constexpr StringLiteral kVMIDiagUnsupportedPrefix = "VMI-UNSUPPORTED: ";
+inline constexpr StringLiteral kVMIDiagLayoutContractPrefix = "VMI-LAYOUT-CONTRACT: ";
+inline constexpr StringLiteral kVMIDiagPassInvariantPrefix = "VMI-PASS-INVARIANT: ";
 inline constexpr StringLiteral kVMIDiagResidualOpPrefix = "VMI-RESIDUAL-OP: ";
 
 struct VMIPhysicalLane {
-  int64_t part = 0;
-  int64_t chunk = 0;
-  int64_t lane = 0;
+    int64_t part = 0;
+    int64_t chunk = 0;
+    int64_t lane = 0;
 };
 
 // VMI lane layouts never change the data element type of a physical part.
@@ -46,12 +42,9 @@ FailureOr<int64_t> getDataLanesPerPart(Type elementType);
 FailureOr<int64_t> getMaskLanesPerPart(StringRef granularity);
 FailureOr<int64_t> getVMILayoutBlockElems(Type type);
 FailureOr<int64_t> getVMIPhysicalArity(Type type);
-FailureOr<VMIPhysicalLane> mapLogicalLaneToPhysical(Type type,
-                                                     int64_t logicalLane);
-FailureOr<int64_t> mapPhysicalLaneToLogical(Type type, int64_t part,
-                                             int64_t chunk, int64_t lane);
-FailureOr<bool> isPaddingLane(Type type, int64_t part, int64_t chunk,
-                              int64_t lane);
+FailureOr<VMIPhysicalLane> mapLogicalLaneToPhysical(Type type, int64_t logicalLane);
+FailureOr<int64_t> mapPhysicalLaneToLogical(Type type, int64_t part, int64_t chunk, int64_t lane);
+FailureOr<bool> isPaddingLane(Type type, int64_t part, int64_t chunk, int64_t lane);
 
 // ---------------------------------------------------------------------------
 // VMI FpToSi hardware contract (mirrored from VPTO lookupVcvtContract).
@@ -60,14 +53,13 @@ FailureOr<bool> isPaddingLane(Type type, int64_t part, int64_t chunk,
 // ---------------------------------------------------------------------------
 
 struct VMIFpToSiContract {
-  bool requiresSat;
-  bool requiresPart;
+    bool requiresSat;
+    bool requiresPart;
 };
 
 /// Returns the FpToSi contract for the given src→dst element type pair,
 /// or nullopt if this float→signed-int path is not supported by the hardware.
-std::optional<VMIFpToSiContract>
-lookupVMIFpToSiContract(Type srcElem, Type dstElem);
+std::optional<VMIFpToSiContract> lookupVMIFpToSiContract(Type srcElem, Type dstElem);
 
 // ---------------------------------------------------------------------------
 // VMI FpToUi hardware contract (mirrors VPTO lookupVcvtContract).
@@ -75,14 +67,13 @@ lookupVMIFpToSiContract(Type srcElem, Type dstElem);
 // ---------------------------------------------------------------------------
 
 struct VMIFpToUiContract {
-  bool requiresSat;
-  bool requiresPart;
+    bool requiresSat;
+    bool requiresPart;
 };
 
 /// Returns the FpToUi contract for the given src→dst element type pair,
 /// or nullopt if this float→unsigned-int path is not supported by the hardware.
-std::optional<VMIFpToUiContract>
-lookupVMIFpToUIContract(Type srcElem, Type dstElem);
+std::optional<VMIFpToUiContract> lookupVMIFpToUIContract(Type srcElem, Type dstElem);
 
 // ---------------------------------------------------------------------------
 // VMI FpToFp hardware contract (VMI-owned; may diverge from VPTO).
@@ -91,15 +82,14 @@ lookupVMIFpToUIContract(Type srcElem, Type dstElem);
 // ---------------------------------------------------------------------------
 
 struct VMIFpToFpContract {
-  bool requiresRnd;
-  bool requiresSat;
-  bool requiresPart;
+    bool requiresRnd;
+    bool requiresSat;
+    bool requiresPart;
 };
 
 /// Returns the FpToFp contract for the given src->dst element type pair,
 /// or nullopt if this fp-to-fp path is not supported by the VMI contract.
-std::optional<VMIFpToFpContract>
-lookupVMIFpToFpContract(Type srcElem, Type dstElem);
+std::optional<VMIFpToFpContract> lookupVMIFpToFpContract(Type srcElem, Type dstElem);
 
 } // namespace mlir::pto
 

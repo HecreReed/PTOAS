@@ -40,7 +40,15 @@ def _dst_is_right(dst_memory_space, **_):
     return dst_memory_space == "right"
 
 
-def _vec_to_vec_nd(src_memory_space, dst_memory_space, src_config, dst_config, src_dtype, dst_dtype, **_):
+def _vec_to_vec_nd(
+    src_memory_space,
+    dst_memory_space,
+    src_config,
+    dst_config,
+    src_dtype,
+    dst_dtype,
+    **_,
+):
     return (
         src_memory_space == "ub"
         and dst_memory_space == "ub"
@@ -75,8 +83,12 @@ def template_textract_mat2left(
 ):
     m, k = dst.valid_shape
     pto.mte_l1_l0a(
-        src.as_ptr(), dst.as_ptr(), m, k,
-        start_row=index_row, start_col=index_col,
+        src.as_ptr(),
+        dst.as_ptr(),
+        m,
+        k,
+        start_row=index_row,
+        start_col=index_col,
     )
 
 
@@ -103,8 +115,13 @@ def template_textract_mat2left_trans(
 ):
     m, k = dst.valid_shape
     pto.mte_l1_l0a(
-        src.as_ptr(), dst.as_ptr(), m, k,
-        start_row=index_row, start_col=index_col, transpose=True,
+        src.as_ptr(),
+        dst.as_ptr(),
+        m,
+        k,
+        start_row=index_row,
+        start_col=index_col,
+        transpose=True,
     )
 
 
@@ -131,8 +148,12 @@ def template_textract_mat2right(
 ):
     k, n = dst.valid_shape
     pto.mte_l1_l0b(
-        src.as_ptr(), dst.as_ptr(), k, n,
-        start_row=index_row, start_col=index_col,
+        src.as_ptr(),
+        dst.as_ptr(),
+        k,
+        n,
+        start_row=index_row,
+        start_col=index_col,
     )
 
 
@@ -159,8 +180,13 @@ def template_textract_mat2right_trans(
 ):
     k, n = dst.valid_shape
     pto.mte_l1_l0b(
-        src.as_ptr(), dst.as_ptr(), k, n,
-        start_row=index_row, start_col=index_col, transpose=True,
+        src.as_ptr(),
+        dst.as_ptr(),
+        k,
+        n,
+        start_row=index_row,
+        start_col=index_col,
+        transpose=True,
     )
 
 
@@ -192,5 +218,5 @@ def template_textract_vec2vec_nd(
         remained = valid_cols
         for col in range(0, valid_cols, lanes):
             mask, remained = pto.make_mask(dtype, remained)
-            data = pto.vlds(src[index_row + row, index_col + col:])
+            data = pto.vlds(src[index_row + row, index_col + col :])
             pto.vsts(data, dst[row, col:], mask)

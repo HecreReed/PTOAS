@@ -22,8 +22,13 @@ F32 = ScalarType("f32")
 
 def _specs(*, dst_valid=(1, 64), dst_blayout="row_major", dst_slayout="none_box"):
     src = TileSpec(shape=(8, 64), dtype=F32, valid_shape=(8, 64))
-    dst = TileSpec(shape=(8, 64), dtype=F32, valid_shape=dst_valid,
-                   b_layout=dst_blayout, s_layout=dst_slayout)
+    dst = TileSpec(
+        shape=(8, 64),
+        dtype=F32,
+        valid_shape=dst_valid,
+        b_layout=dst_blayout,
+        s_layout=dst_slayout,
+    )
     return {"src": src, "dst": dst}
 
 
@@ -47,8 +52,15 @@ class TileLibConstraintTest(unittest.TestCase):
     def test_legal_colmax_renders_structured_mlir(self):
         chosen = select("pto.tcolmax", "a5", _specs())
         mlir = chosen.specialize(**_specs()).mlir_text()
-        for op in ("pto.tile_valid_rows", "!pto.ptr<f32, ub>", "scf.for", "iter_args",
-                   "pto.vmax", "pto.vsts", "pto.tilelang.instance"):
+        for op in (
+            "pto.tile_valid_rows",
+            "!pto.ptr<f32, ub>",
+            "scf.for",
+            "iter_args",
+            "pto.vmax",
+            "pto.vsts",
+            "pto.tilelang.instance",
+        ):
             self.assertIn(op, mlir)
         self.assertNotIn("pto.castptr", mlir)
 

@@ -14,15 +14,15 @@
 
 // Case: f32 64x64 full
 
-extern "C" __global__ AICORE void TPARTMAX_f32_64x64_full(__gm__ float *a, __gm__ float *b, __gm__ float *c);
-extern "C" __global__ AICORE void TPARTMAX_f32_2x24_src1_col_less(__gm__ float *a, __gm__ float *b, __gm__ float *c);
+extern "C" __global__ AICORE void TPARTMAX_f32_64x64_full(__gm__ float* a, __gm__ float* b, __gm__ float* c);
+extern "C" __global__ AICORE void TPARTMAX_f32_2x24_src1_col_less(__gm__ float* a, __gm__ float* b, __gm__ float* c);
 
-void LaunchTPARTMAX_f32_2x24_src1_col_less(float *a, float *b, float *c, void *stream) {
-    TPARTMAX_f32_2x24_src1_col_less<<<1, nullptr, stream>>>((__gm__ float *)a, (__gm__ float *)b, (__gm__ float *)c);
+void LaunchTPARTMAX_f32_2x24_src1_col_less(float* a, float* b, float* c, void* stream)
+{
+    TPARTMAX_f32_2x24_src1_col_less<<<1, nullptr, stream>>>((__gm__ float*)a, (__gm__ float*)b, (__gm__ float*)c);
 }
 
-
-
-void LaunchTPARTMAX_f32_64x64_full(float *a, float *b, float *c, void *stream) {
-    TPARTMAX_f32_64x64_full<<<1, nullptr, stream>>>((__gm__ float *)a, (__gm__ float *)b, (__gm__ float *)c);
+void LaunchTPARTMAX_f32_64x64_full(float* a, float* b, float* c, void* stream)
+{
+    TPARTMAX_f32_64x64_full<<<1, nullptr, stream>>>((__gm__ float*)a, (__gm__ float*)b, (__gm__ float*)c);
 }

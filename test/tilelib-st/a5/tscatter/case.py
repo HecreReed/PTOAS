@@ -31,14 +31,14 @@ from ptodsl import pto
 
 
 PTO_TO_NP_DTYPE = {
-    pto.f32:  np.float32,
-    pto.f16:  np.float16,
-    pto.i32:  np.int32,
-    pto.i16:  np.int16,
-    pto.i8:   np.int8,
+    pto.f32: np.float32,
+    pto.f16: np.float16,
+    pto.i32: np.int32,
+    pto.i16: np.int16,
+    pto.i8: np.int8,
     pto.ui32: np.uint32,
     pto.ui16: np.uint16,
-    pto.ui8:  np.uint8,
+    pto.ui8: np.uint8,
 }
 
 
@@ -49,15 +49,15 @@ def npy_dtype(pto_type) -> np.dtype:
 # --- Indexed scatter cases ---
 # (name, src_dtype, idx_dtype, src_shape, idx_shape)
 INDEX_CASES = [
-    ("i8_uint16_256x32_256x32",    pto.i8,   pto.ui16, (256, 32), (256, 32)),
-    ("ui8_int16_256x32_256x32",    pto.ui8,  pto.i16,  (256, 32), (256, 32)),
-    ("i32_uint32_31x128_31x128",   pto.i32,  pto.ui32, (31, 128), (31, 128)),
-    ("ui32_int32_32x64_32x64",     pto.ui32, pto.i32,  (32, 64),  (32, 64)),
-    ("f32_uint32_7x448_7x448",     pto.f32,  pto.ui32,  (7, 448),  (7, 448)),
-    ("f32_uint32_32x64_32x64",     pto.f32,  pto.ui32, (32, 64),  (32, 64)),
-    ("i16_uint16_15x192_15x192",   pto.i16,  pto.ui16, (15, 192), (15, 192)),
-    ("ui16_int16_63x64_63x64",     pto.ui16, pto.i16,  (63, 64),  (63, 64)),
-    ("f16_uint16_63x64_63x64",     pto.f16,  pto.ui16, (63, 64),  (63, 64)),
+    ("i8_uint16_256x32_256x32", pto.i8, pto.ui16, (256, 32), (256, 32)),
+    ("ui8_int16_256x32_256x32", pto.ui8, pto.i16, (256, 32), (256, 32)),
+    ("i32_uint32_31x128_31x128", pto.i32, pto.ui32, (31, 128), (31, 128)),
+    ("ui32_int32_32x64_32x64", pto.ui32, pto.i32, (32, 64), (32, 64)),
+    ("f32_uint32_7x448_7x448", pto.f32, pto.ui32, (7, 448), (7, 448)),
+    ("f32_uint32_32x64_32x64", pto.f32, pto.ui32, (32, 64), (32, 64)),
+    ("i16_uint16_15x192_15x192", pto.i16, pto.ui16, (15, 192), (15, 192)),
+    ("ui16_int16_63x64_63x64", pto.ui16, pto.i16, (63, 64), (63, 64)),
+    ("f16_uint16_63x64_63x64", pto.f16, pto.ui16, (63, 64), (63, 64)),
 ]
 
 # --- Masked scatter cases (axis=0, row) ---
@@ -65,34 +65,34 @@ INDEX_CASES = [
 # src(R, C_src) -> dst(R, C_dst), C_dst >= C_src
 # (name, dtype, src_shape, dst_shape, pattern, axis)
 MASK_CASES_ROW = [
-    ("mask_row_f16_16x64_16x64_P1111",   pto.f16, (16, 64), (16, 64),  "P1111", "row"),
-    ("mask_row_f32_16x64_16x64_P1111",   pto.f32, (16, 64), (16, 64),  "P1111", "row"),
-    ("mask_row_i32_16x64_16x64_P1111",   pto.i32, (16, 64), (16, 64),  "P1111", "row"),
-    ("mask_row_i16_16x64_16x64_P1111",   pto.i16, (16, 64), (16, 64),  "P1111", "row"),
-    ("mask_row_f16_16x64_16x128_P1010",  pto.f16, (16, 64), (16, 128), "P1010", "row"),
-    ("mask_row_f16_16x64_16x128_P0101",  pto.f16, (16, 64), (16, 128), "P0101", "row"),
-    ("mask_row_f32_16x64_16x128_P1010",  pto.f32, (16, 64), (16, 128), "P1010", "row"),
-    ("mask_row_f32_16x64_16x128_P0101",  pto.f32, (16, 64), (16, 128), "P0101", "row"),
-    ("mask_row_i32_16x64_16x128_P1010",  pto.i32, (16, 64), (16, 128), "P1010", "row"),
-    ("mask_row_i32_16x64_16x128_P0101",  pto.i32, (16, 64), (16, 128), "P0101", "row"),
-    ("mask_row_i16_16x64_16x128_P1010",  pto.i16, (16, 64), (16, 128), "P1010", "row"),
-    ("mask_row_i16_16x64_16x128_P0101",  pto.i16, (16, 64), (16, 128), "P0101", "row"),
-    ("mask_row_f16_16x64_16x256_P1000",  pto.f16, (16, 64), (16, 256), "P1000", "row"),
-    ("mask_row_f16_16x64_16x256_P0100",  pto.f16, (16, 64), (16, 256), "P0100", "row"),
-    ("mask_row_f16_16x64_16x256_P0010",  pto.f16, (16, 64), (16, 256), "P0010", "row"),
-    ("mask_row_f16_16x64_16x256_P0001",  pto.f16, (16, 64), (16, 256), "P0001", "row"),
-    ("mask_row_f32_16x64_16x256_P1000",  pto.f32, (16, 64), (16, 256), "P1000", "row"),
-    ("mask_row_f32_16x64_16x256_P0100",  pto.f32, (16, 64), (16, 256), "P0100", "row"),
-    ("mask_row_f32_16x64_16x256_P0010",  pto.f32, (16, 64), (16, 256), "P0010", "row"),
-    ("mask_row_f32_16x64_16x256_P0001",  pto.f32, (16, 64), (16, 256), "P0001", "row"),
-    ("mask_row_i32_16x64_16x256_P1000",  pto.i32, (16, 64), (16, 256), "P1000", "row"),
-    ("mask_row_i32_16x64_16x256_P0100",  pto.i32, (16, 64), (16, 256), "P0100", "row"),
-    ("mask_row_i32_16x64_16x256_P0010",  pto.i32, (16, 64), (16, 256), "P0010", "row"),
-    ("mask_row_i32_16x64_16x256_P0001",  pto.i32, (16, 64), (16, 256), "P0001", "row"),
-    ("mask_row_i16_16x64_16x256_P1000",  pto.i16, (16, 64), (16, 256), "P1000", "row"),
-    ("mask_row_i16_16x64_16x256_P0100",  pto.i16, (16, 64), (16, 256), "P0100", "row"),
-    ("mask_row_i16_16x64_16x256_P0010",  pto.i16, (16, 64), (16, 256), "P0010", "row"),
-    ("mask_row_i16_16x64_16x256_P0001",  pto.i16, (16, 64), (16, 256), "P0001", "row"),
+    ("mask_row_f16_16x64_16x64_P1111", pto.f16, (16, 64), (16, 64), "P1111", "row"),
+    ("mask_row_f32_16x64_16x64_P1111", pto.f32, (16, 64), (16, 64), "P1111", "row"),
+    ("mask_row_i32_16x64_16x64_P1111", pto.i32, (16, 64), (16, 64), "P1111", "row"),
+    ("mask_row_i16_16x64_16x64_P1111", pto.i16, (16, 64), (16, 64), "P1111", "row"),
+    ("mask_row_f16_16x64_16x128_P1010", pto.f16, (16, 64), (16, 128), "P1010", "row"),
+    ("mask_row_f16_16x64_16x128_P0101", pto.f16, (16, 64), (16, 128), "P0101", "row"),
+    ("mask_row_f32_16x64_16x128_P1010", pto.f32, (16, 64), (16, 128), "P1010", "row"),
+    ("mask_row_f32_16x64_16x128_P0101", pto.f32, (16, 64), (16, 128), "P0101", "row"),
+    ("mask_row_i32_16x64_16x128_P1010", pto.i32, (16, 64), (16, 128), "P1010", "row"),
+    ("mask_row_i32_16x64_16x128_P0101", pto.i32, (16, 64), (16, 128), "P0101", "row"),
+    ("mask_row_i16_16x64_16x128_P1010", pto.i16, (16, 64), (16, 128), "P1010", "row"),
+    ("mask_row_i16_16x64_16x128_P0101", pto.i16, (16, 64), (16, 128), "P0101", "row"),
+    ("mask_row_f16_16x64_16x256_P1000", pto.f16, (16, 64), (16, 256), "P1000", "row"),
+    ("mask_row_f16_16x64_16x256_P0100", pto.f16, (16, 64), (16, 256), "P0100", "row"),
+    ("mask_row_f16_16x64_16x256_P0010", pto.f16, (16, 64), (16, 256), "P0010", "row"),
+    ("mask_row_f16_16x64_16x256_P0001", pto.f16, (16, 64), (16, 256), "P0001", "row"),
+    ("mask_row_f32_16x64_16x256_P1000", pto.f32, (16, 64), (16, 256), "P1000", "row"),
+    ("mask_row_f32_16x64_16x256_P0100", pto.f32, (16, 64), (16, 256), "P0100", "row"),
+    ("mask_row_f32_16x64_16x256_P0010", pto.f32, (16, 64), (16, 256), "P0010", "row"),
+    ("mask_row_f32_16x64_16x256_P0001", pto.f32, (16, 64), (16, 256), "P0001", "row"),
+    ("mask_row_i32_16x64_16x256_P1000", pto.i32, (16, 64), (16, 256), "P1000", "row"),
+    ("mask_row_i32_16x64_16x256_P0100", pto.i32, (16, 64), (16, 256), "P0100", "row"),
+    ("mask_row_i32_16x64_16x256_P0010", pto.i32, (16, 64), (16, 256), "P0010", "row"),
+    ("mask_row_i32_16x64_16x256_P0001", pto.i32, (16, 64), (16, 256), "P0001", "row"),
+    ("mask_row_i16_16x64_16x256_P1000", pto.i16, (16, 64), (16, 256), "P1000", "row"),
+    ("mask_row_i16_16x64_16x256_P0100", pto.i16, (16, 64), (16, 256), "P0100", "row"),
+    ("mask_row_i16_16x64_16x256_P0010", pto.i16, (16, 64), (16, 256), "P0010", "row"),
+    ("mask_row_i16_16x64_16x256_P0001", pto.i16, (16, 64), (16, 256), "P0001", "row"),
 ]
 
 # --- Masked scatter cases (axis=1, col) ---
@@ -100,34 +100,34 @@ MASK_CASES_ROW = [
 # src(R_src, C) -> dst(R_dst, C), R_dst >= R_src
 # (name, dtype, src_shape, dst_shape, pattern, axis)
 MASK_CASES_COL = [
-    ("mask_col_f16_16x64_16x64_P1111",   pto.f16, (16, 64), (16, 64),  "P1111", "col"),
-    ("mask_col_f32_16x64_16x64_P1111",   pto.f32, (16, 64), (16, 64),  "P1111", "col"),
-    ("mask_col_i32_16x64_16x64_P1111",   pto.i32, (16, 64), (16, 64),  "P1111", "col"),
-    ("mask_col_i16_16x64_16x64_P1111",   pto.i16, (16, 64), (16, 64),  "P1111", "col"),
-    ("mask_col_f16_16x64_32x64_P1010",   pto.f16, (16, 64), (32, 64),  "P1010", "col"),
-    ("mask_col_f16_16x64_32x64_P0101",   pto.f16, (16, 64), (32, 64),  "P0101", "col"),
-    ("mask_col_f32_16x64_32x64_P1010",   pto.f32, (16, 64), (32, 64),  "P1010", "col"),
-    ("mask_col_f32_16x64_32x64_P0101",   pto.f32, (16, 64), (32, 64),  "P0101", "col"),
-    ("mask_col_i32_16x64_32x64_P1010",   pto.i32, (16, 64), (32, 64),  "P1010", "col"),
-    ("mask_col_i32_16x64_32x64_P0101",   pto.i32, (16, 64), (32, 64),  "P0101", "col"),
-    ("mask_col_i16_16x64_32x64_P1010",   pto.i16, (16, 64), (32, 64),  "P1010", "col"),
-    ("mask_col_i16_16x64_32x64_P0101",   pto.i16, (16, 64), (32, 64),  "P0101", "col"),
-    ("mask_col_f16_16x64_64x64_P1000",   pto.f16, (16, 64), (64, 64),  "P1000", "col"),
-    ("mask_col_f16_16x64_64x64_P0100",   pto.f16, (16, 64), (64, 64),  "P0100", "col"),
-    ("mask_col_f16_16x64_64x64_P0010",   pto.f16, (16, 64), (64, 64),  "P0010", "col"),
-    ("mask_col_f16_16x64_64x64_P0001",   pto.f16, (16, 64), (64, 64),  "P0001", "col"),
-    ("mask_col_f32_16x64_64x64_P1000",   pto.f32, (16, 64), (64, 64),  "P1000", "col"),
-    ("mask_col_f32_16x64_64x64_P0100",   pto.f32, (16, 64), (64, 64),  "P0100", "col"),
-    ("mask_col_f32_16x64_64x64_P0010",   pto.f32, (16, 64), (64, 64),  "P0010", "col"),
-    ("mask_col_f32_16x64_64x64_P0001",   pto.f32, (16, 64), (64, 64),  "P0001", "col"),
-    ("mask_col_i32_16x64_64x64_P1000",   pto.i32, (16, 64), (64, 64),  "P1000", "col"),
-    ("mask_col_i32_16x64_64x64_P0100",   pto.i32, (16, 64), (64, 64),  "P0100", "col"),
-    ("mask_col_i32_16x64_64x64_P0010",   pto.i32, (16, 64), (64, 64),  "P0010", "col"),
-    ("mask_col_i32_16x64_64x64_P0001",   pto.i32, (16, 64), (64, 64),  "P0001", "col"),
-    ("mask_col_i16_16x64_64x64_P1000",   pto.i16, (16, 64), (64, 64),  "P1000", "col"),
-    ("mask_col_i16_16x64_64x64_P0100",   pto.i16, (16, 64), (64, 64),  "P0100", "col"),
-    ("mask_col_i16_16x64_64x64_P0010",   pto.i16, (16, 64), (64, 64),  "P0010", "col"),
-    ("mask_col_i16_16x64_64x64_P0001",   pto.i16, (16, 64), (64, 64),  "P0001", "col"),
+    ("mask_col_f16_16x64_16x64_P1111", pto.f16, (16, 64), (16, 64), "P1111", "col"),
+    ("mask_col_f32_16x64_16x64_P1111", pto.f32, (16, 64), (16, 64), "P1111", "col"),
+    ("mask_col_i32_16x64_16x64_P1111", pto.i32, (16, 64), (16, 64), "P1111", "col"),
+    ("mask_col_i16_16x64_16x64_P1111", pto.i16, (16, 64), (16, 64), "P1111", "col"),
+    ("mask_col_f16_16x64_32x64_P1010", pto.f16, (16, 64), (32, 64), "P1010", "col"),
+    ("mask_col_f16_16x64_32x64_P0101", pto.f16, (16, 64), (32, 64), "P0101", "col"),
+    ("mask_col_f32_16x64_32x64_P1010", pto.f32, (16, 64), (32, 64), "P1010", "col"),
+    ("mask_col_f32_16x64_32x64_P0101", pto.f32, (16, 64), (32, 64), "P0101", "col"),
+    ("mask_col_i32_16x64_32x64_P1010", pto.i32, (16, 64), (32, 64), "P1010", "col"),
+    ("mask_col_i32_16x64_32x64_P0101", pto.i32, (16, 64), (32, 64), "P0101", "col"),
+    ("mask_col_i16_16x64_32x64_P1010", pto.i16, (16, 64), (32, 64), "P1010", "col"),
+    ("mask_col_i16_16x64_32x64_P0101", pto.i16, (16, 64), (32, 64), "P0101", "col"),
+    ("mask_col_f16_16x64_64x64_P1000", pto.f16, (16, 64), (64, 64), "P1000", "col"),
+    ("mask_col_f16_16x64_64x64_P0100", pto.f16, (16, 64), (64, 64), "P0100", "col"),
+    ("mask_col_f16_16x64_64x64_P0010", pto.f16, (16, 64), (64, 64), "P0010", "col"),
+    ("mask_col_f16_16x64_64x64_P0001", pto.f16, (16, 64), (64, 64), "P0001", "col"),
+    ("mask_col_f32_16x64_64x64_P1000", pto.f32, (16, 64), (64, 64), "P1000", "col"),
+    ("mask_col_f32_16x64_64x64_P0100", pto.f32, (16, 64), (64, 64), "P0100", "col"),
+    ("mask_col_f32_16x64_64x64_P0010", pto.f32, (16, 64), (64, 64), "P0010", "col"),
+    ("mask_col_f32_16x64_64x64_P0001", pto.f32, (16, 64), (64, 64), "P0001", "col"),
+    ("mask_col_i32_16x64_64x64_P1000", pto.i32, (16, 64), (64, 64), "P1000", "col"),
+    ("mask_col_i32_16x64_64x64_P0100", pto.i32, (16, 64), (64, 64), "P0100", "col"),
+    ("mask_col_i32_16x64_64x64_P0010", pto.i32, (16, 64), (64, 64), "P0010", "col"),
+    ("mask_col_i32_16x64_64x64_P0001", pto.i32, (16, 64), (64, 64), "P0001", "col"),
+    ("mask_col_i16_16x64_64x64_P1000", pto.i16, (16, 64), (64, 64), "P1000", "col"),
+    ("mask_col_i16_16x64_64x64_P0100", pto.i16, (16, 64), (64, 64), "P0100", "col"),
+    ("mask_col_i16_16x64_64x64_P0010", pto.i16, (16, 64), (64, 64), "P0010", "col"),
+    ("mask_col_i16_16x64_64x64_P0001", pto.i16, (16, 64), (64, 64), "P0001", "col"),
 ]
 
 MASK_CASES = MASK_CASES_ROW + MASK_CASES_COL
@@ -137,14 +137,28 @@ MASK_CASES = MASK_CASES_ROW + MASK_CASES_COL
 # Kernel bodies
 # ---------------------------------------------------------------------------
 
-def _tscatter_index_body(src_ptr, idx_ptr, dst_ptr, *, src_rows, src_cols,
-                         idx_rows, idx_cols, dtype, idx_dtype):
-    src_view = pto.make_tensor_view(src_ptr, shape=[src_rows, src_cols],
-                                    strides=[src_cols, 1])
-    idx_view = pto.make_tensor_view(idx_ptr, shape=[idx_rows, idx_cols],
-                                    strides=[idx_cols, 1])
-    dst_view = pto.make_tensor_view(dst_ptr, shape=[src_rows, src_cols],
-                                    strides=[src_cols, 1])
+
+def _tscatter_index_body(
+    src_ptr,
+    idx_ptr,
+    dst_ptr,
+    *,
+    src_rows,
+    src_cols,
+    idx_rows,
+    idx_cols,
+    dtype,
+    idx_dtype,
+):
+    src_view = pto.make_tensor_view(
+        src_ptr, shape=[src_rows, src_cols], strides=[src_cols, 1]
+    )
+    idx_view = pto.make_tensor_view(
+        idx_ptr, shape=[idx_rows, idx_cols], strides=[idx_cols, 1]
+    )
+    dst_view = pto.make_tensor_view(
+        dst_ptr, shape=[src_rows, src_cols], strides=[src_cols, 1]
+    )
 
     src_tile = pto.alloc_tile(shape=[src_rows, src_cols], dtype=dtype)
     idx_tile = pto.alloc_tile(shape=[idx_rows, idx_cols], dtype=idx_dtype)
@@ -156,19 +170,21 @@ def _tscatter_index_body(src_ptr, idx_ptr, dst_ptr, *, src_rows, src_cols,
     pto.tile.store(dst_tile, dst_view)
 
 
-def _tscatter_mask_body(src_ptr, dst_ptr, *, src_rows, src_cols,
-                        dst_rows, dst_cols, dtype, pattern, axis):
-    src_view = pto.make_tensor_view(src_ptr, shape=[src_rows, src_cols],
-                                    strides=[src_cols, 1])
-    dst_view = pto.make_tensor_view(dst_ptr, shape=[dst_rows, dst_cols],
-                                    strides=[dst_cols, 1])
+def _tscatter_mask_body(
+    src_ptr, dst_ptr, *, src_rows, src_cols, dst_rows, dst_cols, dtype, pattern, axis
+):
+    src_view = pto.make_tensor_view(
+        src_ptr, shape=[src_rows, src_cols], strides=[src_cols, 1]
+    )
+    dst_view = pto.make_tensor_view(
+        dst_ptr, shape=[dst_rows, dst_cols], strides=[dst_cols, 1]
+    )
 
     src_tile = pto.alloc_tile(shape=[src_rows, src_cols], dtype=dtype)
     dst_tile = pto.alloc_tile(shape=[dst_rows, dst_cols], dtype=dtype)
 
     pto.tile.load(src_view, src_tile)
-    pto.tile.scatter(src_tile, dst_tile, mask_pattern=pattern,
-                     axis=axis)
+    pto.tile.scatter(src_tile, dst_tile, mask_pattern=pattern, axis=axis)
     pto.tile.store(dst_tile, dst_view)
 
 
@@ -181,8 +197,15 @@ for _name, _src_dtype, _idx_dtype, _src_shape, _idx_shape in INDEX_CASES:
     _sr, _sc = _src_shape
     _ir, _ic = _idx_shape
 
-    def _make_idx(sr=_sr, sc=_sc, ir=_ir, ic=_ic, src_dtype=_src_dtype,
-                  idx_dtype=_idx_dtype, kernel_name=f"tscatter_{_name}"):
+    def _make_idx(
+        sr=_sr,
+        sc=_sc,
+        ir=_ir,
+        ic=_ic,
+        src_dtype=_src_dtype,
+        idx_dtype=_idx_dtype,
+        kernel_name=f"tscatter_{_name}",
+    ):
         @pto.jit(name=kernel_name, target="a5")
         def _kernel(
             src_ptr: pto.ptr(src_dtype, "gm"),
@@ -190,10 +213,17 @@ for _name, _src_dtype, _idx_dtype, _src_shape, _idx_shape in INDEX_CASES:
             dst_ptr: pto.ptr(src_dtype, "gm"),
         ):
             _tscatter_index_body(
-                src_ptr, idx_ptr, dst_ptr,
-                src_rows=sr, src_cols=sc, idx_rows=ir, idx_cols=ic,
-                dtype=src_dtype, idx_dtype=idx_dtype,
+                src_ptr,
+                idx_ptr,
+                dst_ptr,
+                src_rows=sr,
+                src_cols=sc,
+                idx_rows=ir,
+                idx_cols=ic,
+                dtype=src_dtype,
+                idx_dtype=idx_dtype,
             )
+
         return _kernel
 
     _index_kernels[_name] = _make_idx()
@@ -204,19 +234,33 @@ for _name, _dtype, _src_shape, _dst_shape, _pattern, _axis in MASK_CASES:
     _sr, _sc = _src_shape
     _dr, _dc = _dst_shape
 
-    def _make_mask(sr=_sr, sc=_sc, dr=_dr, dc=_dc, dtype=_dtype,
-                   pattern=_pattern, axis=_axis,
-                   kernel_name=f"tscatter_{_name}"):
+    def _make_mask(
+        sr=_sr,
+        sc=_sc,
+        dr=_dr,
+        dc=_dc,
+        dtype=_dtype,
+        pattern=_pattern,
+        axis=_axis,
+        kernel_name=f"tscatter_{_name}",
+    ):
         @pto.jit(name=kernel_name, target="a5")
         def _kernel(
             src_ptr: pto.ptr(dtype, "gm"),
             dst_ptr: pto.ptr(dtype, "gm"),
         ):
             _tscatter_mask_body(
-                src_ptr, dst_ptr,
-                src_rows=sr, src_cols=sc, dst_rows=dr, dst_cols=dc,
-                dtype=dtype, pattern=pattern, axis=axis,
+                src_ptr,
+                dst_ptr,
+                src_rows=sr,
+                src_cols=sc,
+                dst_rows=dr,
+                dst_cols=dc,
+                dtype=dtype,
+                pattern=pattern,
+                axis=axis,
             )
+
         return _kernel
 
     _mask_kernels[_name] = _make_mask()
@@ -225,6 +269,7 @@ for _name, _dtype, _src_shape, _dst_shape, _pattern, _axis in MASK_CASES:
 # ---------------------------------------------------------------------------
 # Input generators and golden functions
 # ---------------------------------------------------------------------------
+
 
 def _scatter_index_golden(src, indices):
     dst = np.zeros_like(src).flatten()
@@ -311,8 +356,11 @@ for _name, _src_dtype, _idx_dtype, _src_shape, _idx_shape in INDEX_CASES:
         golden_output_case(
             "tscatter_" + _name,
             _index_kernels[_name],
-            inputs=lambda _n=_name, _sd=_src_dtype, _id=_idx_dtype, _ss=_src_shape, _is=_idx_shape:
-                _make_index_inputs(_n, _sd, _id, _ss, _is),
+            inputs=lambda _n=_name,
+            _sd=_src_dtype,
+            _id=_idx_dtype,
+            _ss=_src_shape,
+            _is=_idx_shape: _make_index_inputs(_n, _sd, _id, _ss, _is),
             expected=lambda src, idx: _scatter_index_golden(src, idx),
             rtol=1e-6,
             atol=1e-6,
@@ -320,16 +368,19 @@ for _name, _src_dtype, _idx_dtype, _src_shape, _idx_shape in INDEX_CASES:
     )
 
 for _name, _dtype, _src_shape, _dst_shape, _pattern, _axis in MASK_CASES:
-    _golden = (_scatter_mask_row_golden if _axis == "row"
-               else _scatter_mask_col_golden)
+    _golden = _scatter_mask_row_golden if _axis == "row" else _scatter_mask_col_golden
     CASES.append(
         golden_output_case(
             "tscatter_" + _name,
             _mask_kernels[_name],
-            inputs=lambda _n=_name, _d=_dtype, _ss=_src_shape:
-                _make_mask_inputs(_n, _d, _ss),
-            expected=lambda src, _dr=_dst_shape[0], _dc=_dst_shape[1], _p=_pattern, _g=_golden:
-                _g(src, _dr, _dc, _p),
+            inputs=lambda _n=_name, _d=_dtype, _ss=_src_shape: _make_mask_inputs(
+                _n, _d, _ss
+            ),
+            expected=lambda src,
+            _dr=_dst_shape[0],
+            _dc=_dst_shape[1],
+            _p=_pattern,
+            _g=_golden: _g(src, _dr, _dc, _p),
             rtol=1e-6,
             atol=1e-6,
         )

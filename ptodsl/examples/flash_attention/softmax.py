@@ -53,7 +53,11 @@ def softmax_init_reference(
     probs = np.exp(shifted, dtype=np.float32)
     running_sum = np.sum(probs, axis=1, keepdims=True, dtype=np.float32)
     p_nz_f16 = probs.astype(np.float16)
-    return p_nz_f16.copy(), running_max.astype(np.float32), running_sum.astype(np.float32)
+    return (
+        p_nz_f16.copy(),
+        running_max.astype(np.float32),
+        running_sum.astype(np.float32),
+    )
 
 
 def softmax_update_reference(
@@ -157,7 +161,13 @@ def fa_softmax_init_vpto_kernel(
             packed0 = _pack_f32_chunk_to_u16(exp0, active32)
             packed1 = _pack_f32_chunk_to_u16(exp1, active32)
             pto.vsts(packed0, p_nz_u16_ptr, row_base + col, active16, dist="NORM_B16")
-            pto.vsts(packed1, p_nz_u16_ptr, row_base + col + f32_lanes, active16, dist="NORM_B16")
+            pto.vsts(
+                packed1,
+                p_nz_u16_ptr,
+                row_base + col + f32_lanes,
+                active16,
+                dist="NORM_B16",
+            )
         pto.vsts(row_max, running_max_ptr, row, one32, dist="1PT_B32")
         pto.vsts(row_sum, running_sum_ptr, row, one32, dist="1PT_B32")
 
@@ -219,7 +229,13 @@ def fa_softmax_update_vpto_kernel(
             packed0 = _pack_f32_chunk_to_u16(exp0, active32)
             packed1 = _pack_f32_chunk_to_u16(exp1, active32)
             pto.vsts(packed0, p_nz_u16_ptr, row_base + col, active16, dist="NORM_B16")
-            pto.vsts(packed1, p_nz_u16_ptr, row_base + col + f32_lanes, active16, dist="NORM_B16")
+            pto.vsts(
+                packed1,
+                p_nz_u16_ptr,
+                row_base + col + f32_lanes,
+                active16,
+                dist="NORM_B16",
+            )
         pto.vsts(final_max, running_max_ptr, row, one32, dist="1PT_B32")
         pto.vsts(row_sum, running_sum_ptr, row, one32, dist="1PT_B32")
         pto.vsts(exp_scale, exp_scale_ptr, row, one32, dist="1PT_B32")
@@ -299,8 +315,12 @@ def fa_softmax_init_vpto_validate(
 
     qk = pto.alloc_tile(shape=[BR, BC], dtype=pto.f32, valid_shape=[BR, BC])
     p_nz = pto.alloc_tile(shape=[BR, BC], dtype=pto.f16, valid_shape=[BR, BC])
-    running_max = pto.alloc_tile(shape=[BR, 1], dtype=pto.f32, valid_shape=[BR, 1], blayout="ColMajor")
-    running_sum = pto.alloc_tile(shape=[BR, 1], dtype=pto.f32, valid_shape=[BR, 1], blayout="ColMajor")
+    running_max = pto.alloc_tile(
+        shape=[BR, 1], dtype=pto.f32, valid_shape=[BR, 1], blayout="ColMajor"
+    )
+    running_sum = pto.alloc_tile(
+        shape=[BR, 1], dtype=pto.f32, valid_shape=[BR, 1], blayout="ColMajor"
+    )
 
     pto.tile.load(
         pto.partition_view(qk_view, offsets=[0, 0, 0, 0, 0], sizes=[1, 1, 1, BR, BC]),
@@ -313,11 +333,15 @@ def fa_softmax_init_vpto_validate(
     )
     pto.tile.store(
         running_max,
-        pto.partition_view(running_max_view, offsets=[0, 0, 0, 0, 0], sizes=[1, 1, 1, BR, 1]),
+        pto.partition_view(
+            running_max_view, offsets=[0, 0, 0, 0, 0], sizes=[1, 1, 1, BR, 1]
+        ),
     )
     pto.tile.store(
         running_sum,
-        pto.partition_view(running_sum_view, offsets=[0, 0, 0, 0, 0], sizes=[1, 1, 1, BR, 1]),
+        pto.partition_view(
+            running_sum_view, offsets=[0, 0, 0, 0, 0], sizes=[1, 1, 1, BR, 1]
+        ),
     )
 
 
@@ -361,20 +385,30 @@ def fa_softmax_update_vpto_validate(
 
     qk = pto.alloc_tile(shape=[BR, BC], dtype=pto.f32, valid_shape=[BR, BC])
     p_nz = pto.alloc_tile(shape=[BR, BC], dtype=pto.f16, valid_shape=[BR, BC])
-    running_max = pto.alloc_tile(shape=[BR, 1], dtype=pto.f32, valid_shape=[BR, 1], blayout="ColMajor")
-    running_sum = pto.alloc_tile(shape=[BR, 1], dtype=pto.f32, valid_shape=[BR, 1], blayout="ColMajor")
-    exp_scale = pto.alloc_tile(shape=[BR, 1], dtype=pto.f32, valid_shape=[BR, 1], blayout="ColMajor")
+    running_max = pto.alloc_tile(
+        shape=[BR, 1], dtype=pto.f32, valid_shape=[BR, 1], blayout="ColMajor"
+    )
+    running_sum = pto.alloc_tile(
+        shape=[BR, 1], dtype=pto.f32, valid_shape=[BR, 1], blayout="ColMajor"
+    )
+    exp_scale = pto.alloc_tile(
+        shape=[BR, 1], dtype=pto.f32, valid_shape=[BR, 1], blayout="ColMajor"
+    )
 
     pto.tile.load(
         pto.partition_view(qk_view, offsets=[0, 0, 0, 0, 0], sizes=[1, 1, 1, BR, BC]),
         qk,
     )
     pto.tile.load(
-        pto.partition_view(running_max_view, offsets=[0, 0, 0, 0, 0], sizes=[1, 1, 1, BR, 1]),
+        pto.partition_view(
+            running_max_view, offsets=[0, 0, 0, 0, 0], sizes=[1, 1, 1, BR, 1]
+        ),
         running_max,
     )
     pto.tile.load(
-        pto.partition_view(running_sum_view, offsets=[0, 0, 0, 0, 0], sizes=[1, 1, 1, BR, 1]),
+        pto.partition_view(
+            running_sum_view, offsets=[0, 0, 0, 0, 0], sizes=[1, 1, 1, BR, 1]
+        ),
         running_sum,
     )
     fa_softmax_update_vpto(qk, p_nz, running_max, running_sum, exp_scale, scale)
@@ -384,15 +418,21 @@ def fa_softmax_update_vpto_validate(
     )
     pto.tile.store(
         running_max,
-        pto.partition_view(running_max_view, offsets=[0, 0, 0, 0, 0], sizes=[1, 1, 1, BR, 1]),
+        pto.partition_view(
+            running_max_view, offsets=[0, 0, 0, 0, 0], sizes=[1, 1, 1, BR, 1]
+        ),
     )
     pto.tile.store(
         running_sum,
-        pto.partition_view(running_sum_view, offsets=[0, 0, 0, 0, 0], sizes=[1, 1, 1, BR, 1]),
+        pto.partition_view(
+            running_sum_view, offsets=[0, 0, 0, 0, 0], sizes=[1, 1, 1, BR, 1]
+        ),
     )
     pto.tile.store(
         exp_scale,
-        pto.partition_view(exp_scale_view, offsets=[0, 0, 0, 0, 0], sizes=[1, 1, 1, BR, 1]),
+        pto.partition_view(
+            exp_scale_view, offsets=[0, 0, 0, 0, 0], sizes=[1, 1, 1, BR, 1]
+        ),
     )
 
 
@@ -408,8 +448,12 @@ def fa_softmax_vpto_probe(
 
     qk = pto.alloc_tile(shape=[BR, BC], dtype=pto.f32, valid_shape=[BR, BC])
     p_nz = pto.alloc_tile(shape=[BR, BC], dtype=pto.f16, valid_shape=[BR, BC])
-    running_max = pto.alloc_tile(shape=[BR, 1], dtype=pto.f32, valid_shape=[BR, 1], blayout="ColMajor")
-    running_sum = pto.alloc_tile(shape=[BR, 1], dtype=pto.f32, valid_shape=[BR, 1], blayout="ColMajor")
+    running_max = pto.alloc_tile(
+        shape=[BR, 1], dtype=pto.f32, valid_shape=[BR, 1], blayout="ColMajor"
+    )
+    running_sum = pto.alloc_tile(
+        shape=[BR, 1], dtype=pto.f32, valid_shape=[BR, 1], blayout="ColMajor"
+    )
 
     if INIT:
         fa_softmax_init_vpto(
@@ -420,7 +464,9 @@ def fa_softmax_vpto_probe(
             softmax_scale,
         )
     else:
-        exp_scale = pto.alloc_tile(shape=[BR, 1], dtype=pto.f32, valid_shape=[BR, 1], blayout="ColMajor")
+        exp_scale = pto.alloc_tile(
+            shape=[BR, 1], dtype=pto.f32, valid_shape=[BR, 1], blayout="ColMajor"
+        )
         fa_softmax_update_vpto(
             qk,
             p_nz,
@@ -429,6 +475,7 @@ def fa_softmax_vpto_probe(
             exp_scale,
             softmax_scale,
         )
+
 
 __all__ = [
     "fa_softmax_init_vpto_kernel",
@@ -487,7 +534,9 @@ def _to_device(torch, array: np.ndarray):
     return torch.from_numpy(np.ascontiguousarray(array)).to(_DEVICE)
 
 
-def _assert_close(name: str, got: np.ndarray, ref: np.ndarray, *, rtol: float, atol: float) -> None:
+def _assert_close(
+    name: str, got: np.ndarray, ref: np.ndarray, *, rtol: float, atol: float
+) -> None:
     try:
         np.testing.assert_allclose(got, ref, rtol=rtol, atol=atol)
     except AssertionError as exc:
@@ -514,7 +563,9 @@ def run_demo(
 
     if init:
         qk = rng.uniform(-4.0, 4.0, size=(br, bc)).astype(np.float32)
-        ref_p_nz, ref_running_max, ref_running_sum = softmax_init_reference(qk, scale=scale)
+        ref_p_nz, ref_running_max, ref_running_sum = softmax_init_reference(
+            qk, scale=scale
+        )
 
         qk_t = _to_device(torch, qk)
         p_nz_t = _to_device(torch, np.zeros((br, bc), dtype=np.float16))
@@ -543,19 +594,27 @@ def run_demo(
             rtol=2e-3,
             atol=2e-3,
         )
-        _assert_close("init.running_max", got_running_max, ref_running_max, rtol=1e-6, atol=1e-6)
-        _assert_close("init.running_sum", got_running_sum, ref_running_sum, rtol=2e-3, atol=2e-3)
-        print(f"PASS softmax-init br={br} bc={bc} compile={compile_s:.3f}s launch={launch_s:.3f}s")
+        _assert_close(
+            "init.running_max", got_running_max, ref_running_max, rtol=1e-6, atol=1e-6
+        )
+        _assert_close(
+            "init.running_sum", got_running_sum, ref_running_sum, rtol=2e-3, atol=2e-3
+        )
+        print(
+            f"PASS softmax-init br={br} bc={bc} compile={compile_s:.3f}s launch={launch_s:.3f}s"
+        )
         return
 
     prev_qk = rng.uniform(-4.0, 4.0, size=(br, bc)).astype(np.float32)
     qk = rng.uniform(-4.0, 4.0, size=(br, bc)).astype(np.float32)
     _, running_max, running_sum = softmax_init_reference(prev_qk, scale=scale)
-    ref_p_nz, ref_running_max, ref_running_sum, ref_exp_scale = softmax_update_reference(
-        qk,
-        running_max,
-        running_sum,
-        scale=scale,
+    ref_p_nz, ref_running_max, ref_running_sum, ref_exp_scale = (
+        softmax_update_reference(
+            qk,
+            running_max,
+            running_sum,
+            scale=scale,
+        )
     )
 
     qk_t = _to_device(torch, qk)
@@ -588,10 +647,18 @@ def run_demo(
         rtol=2e-3,
         atol=2e-3,
     )
-    _assert_close("update.running_max", got_running_max, ref_running_max, rtol=1e-6, atol=1e-6)
-    _assert_close("update.running_sum", got_running_sum, ref_running_sum, rtol=2e-3, atol=2e-3)
-    _assert_close("update.exp_scale", got_exp_scale, ref_exp_scale, rtol=2e-3, atol=2e-3)
-    print(f"PASS softmax-update br={br} bc={bc} compile={compile_s:.3f}s launch={launch_s:.3f}s")
+    _assert_close(
+        "update.running_max", got_running_max, ref_running_max, rtol=1e-6, atol=1e-6
+    )
+    _assert_close(
+        "update.running_sum", got_running_sum, ref_running_sum, rtol=2e-3, atol=2e-3
+    )
+    _assert_close(
+        "update.exp_scale", got_exp_scale, ref_exp_scale, rtol=2e-3, atol=2e-3
+    )
+    print(
+        f"PASS softmax-update br={br} bc={bc} compile={compile_s:.3f}s launch={launch_s:.3f}s"
+    )
 
 
 def build_arg_parser():
@@ -615,7 +682,9 @@ def build_arg_parser():
     parser.add_argument("--bc", type=int, default=256)
     parser.add_argument("--head-size", type=int, default=64)
     parser.add_argument("--seed", type=int, default=20260605)
-    parser.add_argument("-o", "--output", default="-", help="output MLIR path, or '-' for stdout")
+    parser.add_argument(
+        "-o", "--output", default="-", help="output MLIR path, or '-' for stdout"
+    )
     return parser
 
 

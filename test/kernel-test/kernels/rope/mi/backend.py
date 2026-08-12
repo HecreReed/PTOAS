@@ -56,10 +56,18 @@ def rope_mi_f16(
     row_bytes = SIM_D * 2
     cs_bytes = SIM_D * 2
 
-    cos_ptr = pto.castptr(pto.const(_UB_BASE_2B_COS, dtype=pto.ui64), pto.ptr(pto.f16, "ub"))
-    sin_ptr = pto.castptr(pto.const(_UB_BASE_2B_SIN, dtype=pto.ui64), pto.ptr(pto.f16, "ub"))
-    x_ptr = pto.castptr(pto.const(_UB_BASE_2B_X, dtype=pto.ui64), pto.ptr(pto.f16, "ub"))
-    y_ptr = pto.castptr(pto.const(_UB_BASE_2B_Y, dtype=pto.ui64), pto.ptr(pto.f16, "ub"))
+    cos_ptr = pto.castptr(
+        pto.const(_UB_BASE_2B_COS, dtype=pto.ui64), pto.ptr(pto.f16, "ub")
+    )
+    sin_ptr = pto.castptr(
+        pto.const(_UB_BASE_2B_SIN, dtype=pto.ui64), pto.ptr(pto.f16, "ub")
+    )
+    x_ptr = pto.castptr(
+        pto.const(_UB_BASE_2B_X, dtype=pto.ui64), pto.ptr(pto.f16, "ub")
+    )
+    y_ptr = pto.castptr(
+        pto.const(_UB_BASE_2B_Y, dtype=pto.ui64), pto.ptr(pto.f16, "ub")
+    )
 
     pto.mte_gm_ub(cos_gm, cos_ptr, 0, cs_bytes, nburst=(s_count, cs_bytes, cs_bytes))
     pto.mte_gm_ub(sin_gm, sin_ptr, 0, cs_bytes, nburst=(s_count, cs_bytes, cs_bytes))
@@ -175,10 +183,18 @@ def rope_mi_bf16(
     row_bytes = SIM_D * 2
     cs_bytes = SIM_D * 2
 
-    cos_ptr = pto.castptr(pto.const(_UB_BASE_2B_COS, dtype=pto.ui64), pto.ptr(pto.f16, "ub"))
-    sin_ptr = pto.castptr(pto.const(_UB_BASE_2B_SIN, dtype=pto.ui64), pto.ptr(pto.f16, "ub"))
-    x_ptr = pto.castptr(pto.const(_UB_BASE_2B_X, dtype=pto.ui64), pto.ptr(pto.bf16, "ub"))
-    y_ptr = pto.castptr(pto.const(_UB_BASE_2B_Y, dtype=pto.ui64), pto.ptr(pto.bf16, "ub"))
+    cos_ptr = pto.castptr(
+        pto.const(_UB_BASE_2B_COS, dtype=pto.ui64), pto.ptr(pto.f16, "ub")
+    )
+    sin_ptr = pto.castptr(
+        pto.const(_UB_BASE_2B_SIN, dtype=pto.ui64), pto.ptr(pto.f16, "ub")
+    )
+    x_ptr = pto.castptr(
+        pto.const(_UB_BASE_2B_X, dtype=pto.ui64), pto.ptr(pto.bf16, "ub")
+    )
+    y_ptr = pto.castptr(
+        pto.const(_UB_BASE_2B_Y, dtype=pto.ui64), pto.ptr(pto.bf16, "ub")
+    )
 
     pto.mte_gm_ub(cos_gm, cos_ptr, 0, cs_bytes, nburst=(s_count, cs_bytes, cs_bytes))
     pto.mte_gm_ub(sin_gm, sin_ptr, 0, cs_bytes, nburst=(s_count, cs_bytes, cs_bytes))
@@ -198,17 +214,47 @@ def rope_mi_bf16(
             cs_off = s * SIM_D
             cs_hi_off = cs_off + 32
 
-            cos_lo = pto.vcvt(pto.vlds(cos_ptr, cs_off, dist="UNPK_B16"), pto.f32, mask16_all, part="EVEN")
-            cos_hi = pto.vcvt(pto.vlds(cos_ptr, cs_hi_off, dist="UNPK_B16"), pto.f32, mask16_all, part="EVEN")
-            sin_lo = pto.vcvt(pto.vlds(sin_ptr, cs_off, dist="UNPK_B16"), pto.f32, mask16_all, part="EVEN")
-            sin_hi = pto.vcvt(pto.vlds(sin_ptr, cs_hi_off, dist="UNPK_B16"), pto.f32, mask16_all, part="EVEN")
+            cos_lo = pto.vcvt(
+                pto.vlds(cos_ptr, cs_off, dist="UNPK_B16"),
+                pto.f32,
+                mask16_all,
+                part="EVEN",
+            )
+            cos_hi = pto.vcvt(
+                pto.vlds(cos_ptr, cs_hi_off, dist="UNPK_B16"),
+                pto.f32,
+                mask16_all,
+                part="EVEN",
+            )
+            sin_lo = pto.vcvt(
+                pto.vlds(sin_ptr, cs_off, dist="UNPK_B16"),
+                pto.f32,
+                mask16_all,
+                part="EVEN",
+            )
+            sin_hi = pto.vcvt(
+                pto.vlds(sin_ptr, cs_hi_off, dist="UNPK_B16"),
+                pto.f32,
+                mask16_all,
+                part="EVEN",
+            )
 
             for n in range(0, n_count, 1):
                 row_off = x_s_off + n * SIM_D
                 x_hi_off = row_off + 32
 
-                x_lo = pto.vcvt(pto.vlds(x_ptr, row_off, dist="UNPK_B16"), pto.f32, mask16_all, part="EVEN")
-                x_hi = pto.vcvt(pto.vlds(x_ptr, x_hi_off, dist="UNPK_B16"), pto.f32, mask16_all, part="EVEN")
+                x_lo = pto.vcvt(
+                    pto.vlds(x_ptr, row_off, dist="UNPK_B16"),
+                    pto.f32,
+                    mask16_all,
+                    part="EVEN",
+                )
+                x_hi = pto.vcvt(
+                    pto.vlds(x_ptr, x_hi_off, dist="UNPK_B16"),
+                    pto.f32,
+                    mask16_all,
+                    part="EVEN",
+                )
 
                 y_lo = pto.vsub(
                     pto.vmul(cos_lo, x_lo, half_mask),
@@ -222,14 +268,18 @@ def rope_mi_bf16(
                 )
 
                 pto.vsts(
-                    pto.vcvt(y_lo, pto.bf16, half_mask, rnd="R", sat="SAT", part="EVEN"),
+                    pto.vcvt(
+                        y_lo, pto.bf16, half_mask, rnd="R", sat="SAT", part="EVEN"
+                    ),
                     y_ptr,
                     row_off,
                     half_mask,
                     dist=pto.VStoreDist.PK_B32,
                 )
                 pto.vsts(
-                    pto.vcvt(y_hi, pto.bf16, half_mask, rnd="R", sat="SAT", part="EVEN"),
+                    pto.vcvt(
+                        y_hi, pto.bf16, half_mask, rnd="R", sat="SAT", part="EVEN"
+                    ),
                     y_ptr,
                     x_hi_off,
                     half_mask,
@@ -240,12 +290,27 @@ def rope_mi_bf16(
             x_s_off = s * x_s_step
             cs_off = s * SIM_D
 
-            cos = pto.vcvt(pto.vlds(cos_ptr, cs_off, dist="UNPK_B16"), pto.f32, mask16_all, part="EVEN")
-            sin = pto.vcvt(pto.vlds(sin_ptr, cs_off, dist="UNPK_B16"), pto.f32, mask16_all, part="EVEN")
+            cos = pto.vcvt(
+                pto.vlds(cos_ptr, cs_off, dist="UNPK_B16"),
+                pto.f32,
+                mask16_all,
+                part="EVEN",
+            )
+            sin = pto.vcvt(
+                pto.vlds(sin_ptr, cs_off, dist="UNPK_B16"),
+                pto.f32,
+                mask16_all,
+                part="EVEN",
+            )
 
             for n in range(0, n_count, 1):
                 row_off = x_s_off + n * SIM_D
-                x = pto.vcvt(pto.vlds(x_ptr, row_off, dist="UNPK_B16"), pto.f32, mask16_all, part="EVEN")
+                x = pto.vcvt(
+                    pto.vlds(x_ptr, row_off, dist="UNPK_B16"),
+                    pto.f32,
+                    mask16_all,
+                    part="EVEN",
+                )
                 x_even, x_odd = pto.vdintlv(x, x)
                 rot, _ = pto.vintlv(pto.vneg(x_odd, half_mask), x_even)
                 y = pto.vadd(
@@ -290,10 +355,18 @@ def rope_mi_f32(
     row_bytes = SIM_D * 4
     cs_bytes = SIM_D * 4
 
-    cos_ptr = pto.castptr(pto.const(_UB_BASE_4B_COS, dtype=pto.ui64), pto.ptr(pto.f32, "ub"))
-    sin_ptr = pto.castptr(pto.const(_UB_BASE_4B_SIN, dtype=pto.ui64), pto.ptr(pto.f32, "ub"))
-    x_ptr = pto.castptr(pto.const(_UB_BASE_4B_X, dtype=pto.ui64), pto.ptr(pto.f32, "ub"))
-    y_ptr = pto.castptr(pto.const(_UB_BASE_4B_Y, dtype=pto.ui64), pto.ptr(pto.f32, "ub"))
+    cos_ptr = pto.castptr(
+        pto.const(_UB_BASE_4B_COS, dtype=pto.ui64), pto.ptr(pto.f32, "ub")
+    )
+    sin_ptr = pto.castptr(
+        pto.const(_UB_BASE_4B_SIN, dtype=pto.ui64), pto.ptr(pto.f32, "ub")
+    )
+    x_ptr = pto.castptr(
+        pto.const(_UB_BASE_4B_X, dtype=pto.ui64), pto.ptr(pto.f32, "ub")
+    )
+    y_ptr = pto.castptr(
+        pto.const(_UB_BASE_4B_Y, dtype=pto.ui64), pto.ptr(pto.f32, "ub")
+    )
 
     pto.mte_gm_ub(cos_gm, cos_ptr, 0, cs_bytes, nburst=(s_count, cs_bytes, cs_bytes))
     pto.mte_gm_ub(sin_gm, sin_ptr, 0, cs_bytes, nburst=(s_count, cs_bytes, cs_bytes))
@@ -462,9 +535,14 @@ class RopeMiBackend:
         "f32": rope_f32,
     }
 
-    def is_supported(self, case: object, *, purpose: RunPurpose) -> tuple[bool, str | None]:
+    def is_supported(
+        self, case: object, *, purpose: RunPurpose
+    ) -> tuple[bool, str | None]:
         del purpose
-        supported = case["dtype"] in {"f16", "bf16", "f32"} and case["mode"] in {"half", "interleave"}
+        supported = case["dtype"] in {"f16", "bf16", "f32"} and case["mode"] in {
+            "half",
+            "interleave",
+        }
         if supported:
             return True, None
         return False, "backend=mi not wired for this case"

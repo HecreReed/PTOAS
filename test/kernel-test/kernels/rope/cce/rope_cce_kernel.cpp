@@ -17,8 +17,7 @@ using namespace rope_cce;
 
 namespace {
 
-ROPE_CCE_INTERNAL void ReadTileParams(
-    __gm__ int32_t *params_g, int32_t &sCount, int32_t &nCount)
+ROPE_CCE_INTERNAL void ReadTileParams(__gm__ int32_t* params_g, int32_t& sCount, int32_t& nCount)
 {
     sCount = params_g[0];
     nCount = params_g[1];
@@ -26,11 +25,7 @@ ROPE_CCE_INTERNAL void ReadTileParams(
 
 template <int32_t kMode, int32_t kDtypeMode>
 ROPE_CCE_INTERNAL void RunRopeTile(
-    __gm__ uint16_t *x_g,
-    __gm__ uint16_t *cos_g,
-    __gm__ uint16_t *sin_g,
-    __gm__ uint16_t *y_g,
-    int32_t sCount,
+    __gm__ uint16_t* x_g, __gm__ uint16_t* cos_g, __gm__ uint16_t* sin_g, __gm__ uint16_t* y_g, int32_t sCount,
     int32_t nCount)
 {
     int32_t es = (kDtypeMode == 2) ? kEsF32 : kEsF16;
@@ -39,11 +34,11 @@ ROPE_CCE_INTERNAL void RunRopeTile(
     int32_t cosSinBytes = cosSinElems * es;
     int32_t xyBytes = xyElems * es;
 
-    __ubuf__ uint16_t *ub_base = (__ubuf__ uint16_t *)0x00000;
-    __ubuf__ uint16_t *cos_ub = ub_base;
-    __ubuf__ uint16_t *sin_ub = (__ubuf__ uint16_t *)((uintptr_t)cos_ub + cosSinBytes);
-    __ubuf__ uint16_t *x_ub = (__ubuf__ uint16_t *)((uintptr_t)sin_ub + cosSinBytes);
-    __ubuf__ uint16_t *y_ub = (__ubuf__ uint16_t *)((uintptr_t)x_ub + xyBytes);
+    __ubuf__ uint16_t* ub_base = (__ubuf__ uint16_t*)0x00000;
+    __ubuf__ uint16_t* cos_ub = ub_base;
+    __ubuf__ uint16_t* sin_ub = (__ubuf__ uint16_t*)((uintptr_t)cos_ub + cosSinBytes);
+    __ubuf__ uint16_t* x_ub = (__ubuf__ uint16_t*)((uintptr_t)sin_ub + cosSinBytes);
+    __ubuf__ uint16_t* y_ub = (__ubuf__ uint16_t*)((uintptr_t)x_ub + xyBytes);
 
     GmLoadContig(cos_ub, cos_g, (uint32_t)cosSinElems, es);
     GmLoadContig(sin_ub, sin_g, (uint32_t)cosSinElems, es);
@@ -54,31 +49,16 @@ ROPE_CCE_INTERNAL void RunRopeTile(
 
     if constexpr (kDtypeMode == 0) {
         ComputeF16(
-            x_ub, cos_ub, sin_ub, y_ub,
-            sCount, nCount,
-            kMaxD, kMaxDAlign,
-            nCount * kMaxDAlign, kMaxDAlign,
-            kMaxDAlign,
-            nCount * kMaxDAlign, kMaxDAlign,
-            kMode);
+            x_ub, cos_ub, sin_ub, y_ub, sCount, nCount, kMaxD, kMaxDAlign, nCount * kMaxDAlign, kMaxDAlign, kMaxDAlign,
+            nCount * kMaxDAlign, kMaxDAlign, kMode);
     } else if constexpr (kDtypeMode == 1) {
         ComputeBf16(
-            x_ub, cos_ub, sin_ub, y_ub,
-            sCount, nCount,
-            kMaxD, kMaxDAlign,
-            nCount * kMaxDAlign, kMaxDAlign,
-            kMaxDAlign,
-            nCount * kMaxDAlign, kMaxDAlign,
-            kMode);
+            x_ub, cos_ub, sin_ub, y_ub, sCount, nCount, kMaxD, kMaxDAlign, nCount * kMaxDAlign, kMaxDAlign, kMaxDAlign,
+            nCount * kMaxDAlign, kMaxDAlign, kMode);
     } else {
         ComputeF32(
-            x_ub, cos_ub, sin_ub, y_ub,
-            sCount, nCount,
-            kMaxD, kMaxDAlign,
-            nCount * kMaxDAlign, kMaxDAlign,
-            kMaxDAlign,
-            nCount * kMaxDAlign, kMaxDAlign,
-            kMode);
+            x_ub, cos_ub, sin_ub, y_ub, sCount, nCount, kMaxD, kMaxDAlign, nCount * kMaxDAlign, kMaxDAlign, kMaxDAlign,
+            nCount * kMaxDAlign, kMaxDAlign, kMode);
     }
 
     set_flag(PIPE_V, PIPE_MTE3, EVENT_ID0);
@@ -89,11 +69,8 @@ ROPE_CCE_INTERNAL void RunRopeTile(
 
 template <int32_t kMode, int32_t kDtypeMode>
 __global__ AICORE void rope_cce_sim_kernel(
-    __gm__ uint16_t *x_g,
-    __gm__ uint16_t *cos_g,
-    __gm__ uint16_t *sin_g,
-    __gm__ uint16_t *y_g,
-    __gm__ int32_t *params_g)
+    __gm__ uint16_t* x_g, __gm__ uint16_t* cos_g, __gm__ uint16_t* sin_g, __gm__ uint16_t* y_g,
+    __gm__ int32_t* params_g)
 {
 #if defined(__DAV_VEC__)
     int32_t sCount = 0;
@@ -105,11 +82,8 @@ __global__ AICORE void rope_cce_sim_kernel(
 
 template <int32_t kMode, int32_t kDtypeMode>
 __global__ AICORE void rope_cce_cycle_kernel(
-    __gm__ uint16_t *x_g,
-    __gm__ uint16_t *cos_g,
-    __gm__ uint16_t *sin_g,
-    __gm__ uint16_t *y_g,
-    __gm__ int32_t *params_g)
+    __gm__ uint16_t* x_g, __gm__ uint16_t* cos_g, __gm__ uint16_t* sin_g, __gm__ uint16_t* y_g,
+    __gm__ int32_t* params_g)
 {
 #if defined(__DAV_VEC__)
     int32_t sCount = 0;
@@ -121,28 +95,20 @@ __global__ AICORE void rope_cce_cycle_kernel(
 
 } // namespace
 
-#define ROPE_CCE_LAUNCH_SIM(mode, dtype_mode, suffix) \
-    void call_rope_cce_sim_##suffix( \
-        void *stream, void *x, void *cos, void *sin, void *y, void *params) \
-    { \
-        rope_cce_sim_kernel<mode, dtype_mode><<<1, nullptr, stream>>>( \
-            (__gm__ uint16_t *)x, \
-            (__gm__ uint16_t *)cos, \
-            (__gm__ uint16_t *)sin, \
-            (__gm__ uint16_t *)y, \
-            (__gm__ int32_t *)params); \
+#define ROPE_CCE_LAUNCH_SIM(mode, dtype_mode, suffix)                                                   \
+    void call_rope_cce_sim_##suffix(void* stream, void* x, void* cos, void* sin, void* y, void* params) \
+    {                                                                                                   \
+        rope_cce_sim_kernel<mode, dtype_mode><<<1, nullptr, stream>>>(                                  \
+            (__gm__ uint16_t*)x, (__gm__ uint16_t*)cos, (__gm__ uint16_t*)sin, (__gm__ uint16_t*)y,     \
+            (__gm__ int32_t*)params);                                                                   \
     }
 
-#define ROPE_CCE_LAUNCH_CYCLE(mode, dtype_mode, suffix) \
-    void call_rope_cce_cycle_##suffix( \
-        void *stream, void *x, void *cos, void *sin, void *y, void *params) \
-    { \
-        rope_cce_cycle_kernel<mode, dtype_mode><<<1, nullptr, stream>>>( \
-            (__gm__ uint16_t *)x, \
-            (__gm__ uint16_t *)cos, \
-            (__gm__ uint16_t *)sin, \
-            (__gm__ uint16_t *)y, \
-            (__gm__ int32_t *)params); \
+#define ROPE_CCE_LAUNCH_CYCLE(mode, dtype_mode, suffix)                                                   \
+    void call_rope_cce_cycle_##suffix(void* stream, void* x, void* cos, void* sin, void* y, void* params) \
+    {                                                                                                     \
+        rope_cce_cycle_kernel<mode, dtype_mode><<<1, nullptr, stream>>>(                                  \
+            (__gm__ uint16_t*)x, (__gm__ uint16_t*)cos, (__gm__ uint16_t*)sin, (__gm__ uint16_t*)y,       \
+            (__gm__ int32_t*)params);                                                                     \
     }
 
 extern "C" {
@@ -160,5 +126,4 @@ ROPE_CCE_LAUNCH_CYCLE(0, 1, half_bf16)
 ROPE_CCE_LAUNCH_CYCLE(1, 1, interleave_bf16)
 ROPE_CCE_LAUNCH_CYCLE(0, 2, half_f32)
 ROPE_CCE_LAUNCH_CYCLE(1, 2, interleave_f32)
-
 }

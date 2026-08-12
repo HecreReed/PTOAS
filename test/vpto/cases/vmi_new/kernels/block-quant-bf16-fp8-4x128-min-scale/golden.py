@@ -77,7 +77,9 @@ def f8e4m3fn_exact_bytes(values: np.ndarray) -> np.ndarray:
         decoded = decode_f8e4m3fn(byte)
         if not np.isnan(decoded):
             exact.setdefault(np.float32(decoded).item(), byte)
-    return np.array([exact[np.float32(value).item()] for value in values], dtype=np.uint8)
+    return np.array(
+        [exact[np.float32(value).item()] for value in values], dtype=np.uint8
+    )
 
 
 def f8e4m3fn_saturating_bytes(values: np.ndarray) -> np.ndarray:

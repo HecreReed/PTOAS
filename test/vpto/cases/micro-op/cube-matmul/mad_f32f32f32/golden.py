@@ -50,7 +50,7 @@ def generate(output_dir: Path) -> None:
     ).astype(np.float32)
     with np.errstate(invalid="ignore", over="ignore"):
         f32_max = np.finfo(np.float32).max
-        golden_sat = (saturated_a.astype(np.float64) @ saturated_b.astype(np.float64))
+        golden_sat = saturated_a.astype(np.float64) @ saturated_b.astype(np.float64)
         golden_sat = np.nan_to_num(
             np.clip(golden_sat, -f32_max, f32_max),
             nan=0.0,

@@ -30,36 +30,36 @@ struct MrgSortExecutedNumList {
 };
 #endif
 
-#define ACL_CHECK(expr)                                                                          \
-    do {                                                                                         \
-        const aclError _ret = (expr);                                                            \
-        if (_ret != ACL_SUCCESS) {                                                               \
+#define ACL_CHECK(expr)                                                                                    \
+    do {                                                                                                   \
+        const aclError _ret = (expr);                                                                      \
+        if (_ret != ACL_SUCCESS) {                                                                         \
             std::fprintf(stderr, "[ERROR] %s failed: %d (%s:%d)\n", #expr, (int)_ret, __FILE__, __LINE__); \
-            const char *_recent = aclGetRecentErrMsg();                                          \
-            if (_recent != nullptr && _recent[0] != '\0') {                                      \
-                std::fprintf(stderr, "[ERROR] RecentErrMsg: %s\n", _recent);                     \
-            }                                                                                    \
-            rc = 1;                                                                              \
-            goto cleanup;                                                                        \
-        }                                                                                        \
+            const char* _recent = aclGetRecentErrMsg();                                                    \
+            if (_recent != nullptr && _recent[0] != '\0') {                                                \
+                std::fprintf(stderr, "[ERROR] RecentErrMsg: %s\n", _recent);                               \
+            }                                                                                              \
+            rc = 1;                                                                                        \
+            goto cleanup;                                                                                  \
+        }                                                                                                  \
     } while (0)
 
-void LaunchVcvt_i64_to_f32_kernel(int64_t *v1, float *v2, int64_t *v3,
-                                  void *stream);
+void LaunchVcvt_i64_to_f32_kernel(int64_t* v1, float* v2, int64_t* v3, void* stream);
 
-int main() {
+int main()
+{
     size_t elemCount_v1 = 1024;
     size_t fileSize_v1 = elemCount_v1 * sizeof(int64_t);
     size_t elemCount_v2 = 512;
     size_t fileSize_v2 = elemCount_v2 * sizeof(float);
     size_t elemCount_v3 = 1024;
     size_t fileSize_v3 = elemCount_v3 * sizeof(int64_t);
-    int64_t *v1Host = nullptr;
-    int64_t *v1Device = nullptr;
-    float *v2Host = nullptr;
-    float *v2Device = nullptr;
-    int64_t *v3Host = nullptr;
-    int64_t *v3Device = nullptr;
+    int64_t* v1Host = nullptr;
+    int64_t* v1Device = nullptr;
+    float* v2Host = nullptr;
+    float* v2Device = nullptr;
+    int64_t* v3Host = nullptr;
+    int64_t* v3Device = nullptr;
 
     int rc = 0;
     bool aclInited = false;
@@ -69,19 +69,19 @@ int main() {
 
     ACL_CHECK(aclInit(nullptr));
     aclInited = true;
-    if (const char *envDevice = std::getenv("ACL_DEVICE_ID")) {
+    if (const char* envDevice = std::getenv("ACL_DEVICE_ID")) {
         deviceId = std::atoi(envDevice);
     }
     ACL_CHECK(aclrtSetDevice(deviceId));
     deviceSet = true;
     ACL_CHECK(aclrtCreateStream(&stream));
 
-    ACL_CHECK(aclrtMallocHost((void **)(&v1Host), fileSize_v1));
-    ACL_CHECK(aclrtMallocHost((void **)(&v2Host), fileSize_v2));
-    ACL_CHECK(aclrtMallocHost((void **)(&v3Host), fileSize_v3));
-    ACL_CHECK(aclrtMalloc((void **)&v1Device, fileSize_v1, ACL_MEM_MALLOC_HUGE_FIRST));
-    ACL_CHECK(aclrtMalloc((void **)&v2Device, fileSize_v2, ACL_MEM_MALLOC_HUGE_FIRST));
-    ACL_CHECK(aclrtMalloc((void **)&v3Device, fileSize_v3, ACL_MEM_MALLOC_HUGE_FIRST));
+    ACL_CHECK(aclrtMallocHost((void**)(&v1Host), fileSize_v1));
+    ACL_CHECK(aclrtMallocHost((void**)(&v2Host), fileSize_v2));
+    ACL_CHECK(aclrtMallocHost((void**)(&v3Host), fileSize_v3));
+    ACL_CHECK(aclrtMalloc((void**)&v1Device, fileSize_v1, ACL_MEM_MALLOC_HUGE_FIRST));
+    ACL_CHECK(aclrtMalloc((void**)&v2Device, fileSize_v2, ACL_MEM_MALLOC_HUGE_FIRST));
+    ACL_CHECK(aclrtMalloc((void**)&v3Device, fileSize_v3, ACL_MEM_MALLOC_HUGE_FIRST));
 
     ReadFile("./v1.bin", fileSize_v1, v1Host, fileSize_v1);
     ReadFile("./v2.bin", fileSize_v2, v2Host, fileSize_v2);
@@ -108,23 +108,22 @@ cleanup:
     if (stream != nullptr) {
         const aclError _ret = aclrtDestroyStream(stream);
         if (_ret != ACL_SUCCESS) {
-            std::fprintf(stderr, "[ERROR] %s failed: %d (%s:%d)\n",
-                         "aclrtDestroyStream(stream)", (int)_ret, __FILE__, __LINE__);
+            std::fprintf(
+                stderr, "[ERROR] %s failed: %d (%s:%d)\n", "aclrtDestroyStream(stream)", (int)_ret, __FILE__, __LINE__);
         }
         stream = nullptr;
     }
     if (deviceSet) {
         const aclError _ret = aclrtResetDevice(deviceId);
         if (_ret != ACL_SUCCESS) {
-            std::fprintf(stderr, "[ERROR] %s failed: %d (%s:%d)\n",
-                         "aclrtResetDevice(deviceId)", (int)_ret, __FILE__, __LINE__);
+            std::fprintf(
+                stderr, "[ERROR] %s failed: %d (%s:%d)\n", "aclrtResetDevice(deviceId)", (int)_ret, __FILE__, __LINE__);
         }
     }
     if (aclInited) {
         const aclError _ret = aclFinalize();
         if (_ret != ACL_SUCCESS) {
-            std::fprintf(stderr, "[ERROR] %s failed: %d (%s:%d)\n",
-                         "aclFinalize()", (int)_ret, __FILE__, __LINE__);
+            std::fprintf(stderr, "[ERROR] %s failed: %d (%s:%d)\n", "aclFinalize()", (int)_ret, __FILE__, __LINE__);
         }
     }
 

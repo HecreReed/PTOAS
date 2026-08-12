@@ -18,8 +18,7 @@ template <typename T, typename U>
 class AntiMxQuantTailAxis {
 public:
     __aicore__ inline AntiMxQuantTailAxis() {}
-    __aicore__ inline void Init(GM_ADDR x, GM_ADDR mxScale, GM_ADDR y,
-                                 const AntiMxQuantTilingData* tilingData);
+    __aicore__ inline void Init(GM_ADDR x, GM_ADDR mxScale, GM_ADDR y, const AntiMxQuantTilingData* tilingData);
     __aicore__ inline void Process();
 
 private:
@@ -27,18 +26,24 @@ private:
     __aicore__ inline void GetGmParams();
     __aicore__ inline void GetUbParams();
 
-    __aicore__ inline void CopyIn(int64_t rowLoopIdx, int64_t colLoopIdx,
-                                   int64_t ubFactorRowNum, int64_t ubFactorColNum, int64_t ubFactorColBlockNum);
-    __aicore__ inline void CopyOut(int64_t rowLoopIdx, int64_t colLoopIdx,
-                                    int64_t ubFactorRowNum, int64_t ubFactorColNum, int64_t ubFactorColBlockNum);
+    __aicore__ inline void CopyIn(
+        int64_t rowLoopIdx, int64_t colLoopIdx, int64_t ubFactorRowNum, int64_t ubFactorColNum,
+        int64_t ubFactorColBlockNum);
+    __aicore__ inline void CopyOut(
+        int64_t rowLoopIdx, int64_t colLoopIdx, int64_t ubFactorRowNum, int64_t ubFactorColNum,
+        int64_t ubFactorColBlockNum);
 
     __aicore__ inline void Compute(int64_t rowBlockNum, int64_t colBlockNum);
 
-    __aicore__ inline void ComputeScale(__ubuf__ uint8_t* scaleLocalAddr, __ubuf__ float* scaleBufAddr, int64_t scaleNum);
-    __aicore__ inline void ComputeScale(__ubuf__ uint8_t* scaleLocalAddr, __ubuf__ bfloat16_t* scaleBufAddr, int64_t scaleNum);
+    __aicore__ inline void ComputeScale(
+        __ubuf__ uint8_t* scaleLocalAddr, __ubuf__ float* scaleBufAddr, int64_t scaleNum);
+    __aicore__ inline void ComputeScale(
+        __ubuf__ uint8_t* scaleLocalAddr, __ubuf__ bfloat16_t* scaleBufAddr, int64_t scaleNum);
 
-    __aicore__ inline void ComputeData(__ubuf__ uint8_t* xLocalAddr, __ubuf__ float* scaleBufAddr, __ubuf__ U* yLocalAddr, uint16_t loopNum2VF);
-    __aicore__ inline void ComputeData(__ubuf__ uint8_t* xLocalAddr, __ubuf__ bfloat16_t* scaleBufAddr, __ubuf__ U* yLocalAddr, uint16_t loopNum2VF);
+    __aicore__ inline void ComputeData(
+        __ubuf__ uint8_t* xLocalAddr, __ubuf__ float* scaleBufAddr, __ubuf__ U* yLocalAddr, uint16_t loopNum2VF);
+    __aicore__ inline void ComputeData(
+        __ubuf__ uint8_t* xLocalAddr, __ubuf__ bfloat16_t* scaleBufAddr, __ubuf__ U* yLocalAddr, uint16_t loopNum2VF);
 
 private:
     TPipe pipe_;
@@ -232,20 +237,17 @@ __aicore__ inline void AntiMxQuantTailAxis<T, U>::CopyIn(
         int64_t scaleIsNotOdd = ubFactorColBlockNum % DIGIT_TWO;
         int64_t xPad = ((ubFactorColNum + UBBlockSize_ - 1) / UBBlockSize_) * UBBlockSize_ - ubFactorColNum;
         DataCopyExtParams copyInParamX = {
-            static_cast<uint16_t>(ubFactorRowNum),
-            static_cast<uint32_t>(ubFactorColNum * sizeof(uint8_t)),
-            static_cast<uint32_t>((colNum_ - ubFactorColNum) * sizeof(uint8_t)),
-            static_cast<uint32_t>(scaleIsNotOdd), 0};
+            static_cast<uint16_t>(ubFactorRowNum), static_cast<uint32_t>(ubFactorColNum * sizeof(uint8_t)),
+            static_cast<uint32_t>((colNum_ - ubFactorColNum) * sizeof(uint8_t)), static_cast<uint32_t>(scaleIsNotOdd),
+            0};
         DataCopyPadExtParams<uint8_t> xPadParams{true, 0, static_cast<uint8_t>(xPad), 0};
         DataCopyPad(xLocal, xGm_[xOffset], copyInParamX, xPadParams);
     } else {
         int64_t xBytes = ubFactorColNum / 2;
         int64_t xPadBytes = ((xBytes + UBBlockSize_ - 1) / UBBlockSize_) * UBBlockSize_ - xBytes;
         DataCopyExtParams copyInParamX = {
-            static_cast<uint16_t>(ubFactorRowNum),
-            static_cast<uint32_t>(xBytes),
-            static_cast<uint32_t>((colNum_ - ubFactorColNum) / 2),
-            0, 0};
+            static_cast<uint16_t>(ubFactorRowNum), static_cast<uint32_t>(xBytes),
+            static_cast<uint32_t>((colNum_ - ubFactorColNum) / 2), 0, 0};
         DataCopyPadExtParams<uint8_t> xPadParams{true, 0, static_cast<uint8_t>(xPadBytes), 0};
         DataCopyPad(xLocal, xGm_[xOffset], copyInParamX, xPadParams);
     }
@@ -256,10 +258,8 @@ __aicore__ inline void AntiMxQuantTailAxis<T, U>::CopyIn(
     int64_t scaleOffset = rowLoopIdx * ubFactorRowNormalNum_ * scaleColNum_ + colLoopIdx * ubFactorColNormalBlockNum_;
 
     DataCopyExtParams copyInParamScale = {
-        static_cast<uint16_t>(ubFactorRowNum),
-        static_cast<uint32_t>(scaleNum),
-        static_cast<uint32_t>((scaleColNum_ - scaleNum)),
-        0, 0};
+        static_cast<uint16_t>(ubFactorRowNum), static_cast<uint32_t>(scaleNum),
+        static_cast<uint32_t>((scaleColNum_ - scaleNum)), 0, 0};
     DataCopyPadExtParams<uint8_t> scalePadParams{false, 0, 0, 0};
     DataCopyPad<uint8_t, PaddingMode::Compact>(scaleLocal, mxScaleGm_[scaleOffset], copyInParamScale, scalePadParams);
     inQueueScale_.EnQue(scaleLocal);
@@ -278,10 +278,8 @@ __aicore__ inline void AntiMxQuantTailAxis<T, U>::CopyOut(
     int64_t yOffset = rowLoopIdx * ubFactorRowNormalNum_ * colNum_ + colLoopIdx * ubFactorColNormalLen_;
 
     DataCopyExtParams copyOutParamY = {
-        static_cast<uint16_t>(ubFactorRowNum),
-        static_cast<uint32_t>(ubFactorColNum * sizeof(U)),
-        static_cast<uint32_t>(srcStride),
-        static_cast<uint32_t>((colNum_ - ubFactorColNum) * sizeof(U)), 0};
+        static_cast<uint16_t>(ubFactorRowNum), static_cast<uint32_t>(ubFactorColNum * sizeof(U)),
+        static_cast<uint32_t>(srcStride), static_cast<uint32_t>((colNum_ - ubFactorColNum) * sizeof(U)), 0};
     DataCopyPad(yGm_[yOffset], yLocal, copyOutParamY);
     outQueueY_.FreeTensor(yLocal);
 }
@@ -293,7 +291,8 @@ __aicore__ inline void AntiMxQuantTailAxis<T, U>::Compute(int64_t rowBlockNum, i
     int64_t totalScaleNum = rowBlockNum * colBlockNum;
     uint32_t totalBlockNum = static_cast<uint32_t>(rowBlockNum * colBlockNum);
     uint16_t loopNum2VF = static_cast<uint16_t>(
-        (static_cast<int64_t>(totalBlockNum) + static_cast<int64_t>(DIGIT_SIXTEEN) - 1) / static_cast<int64_t>(DIGIT_SIXTEEN));
+        (static_cast<int64_t>(totalBlockNum) + static_cast<int64_t>(DIGIT_SIXTEEN) - 1) /
+        static_cast<int64_t>(DIGIT_SIXTEEN));
 
     LocalTensor<uint8_t> xLocal = inQueueX_.DeQue<uint8_t>();
     LocalTensor<uint8_t> scaleLocal = inQueueScale_.DeQue<uint8_t>();
@@ -338,8 +337,10 @@ __aicore__ inline void AntiMxQuantTailAxis<T, U>::ComputeScale(
             Reg::LoadAlign<uint8_t, Reg::PostLiteral::POST_MODE_UPDATE>(vdScale0, scaleLocalAddr, vfLen8);
             Reg::Interleave(vdScale0, vdScale1, vdScale0, vdu8_zero);
 
-            Reg::Cast<bfloat16_t, fp8_e8m0_t, castTraitFp8E8M0ToBf16_0>(vdScaleBf16_0, (Reg::RegTensor<fp8_e8m0_t>&)vdScale0, scaleMask);
-            Reg::Cast<bfloat16_t, fp8_e8m0_t, castTraitFp8E8M0ToBf16_0>(vdScaleBf16_1, (Reg::RegTensor<fp8_e8m0_t>&)vdScale1, scaleMask);
+            Reg::Cast<bfloat16_t, fp8_e8m0_t, castTraitFp8E8M0ToBf16_0>(
+                vdScaleBf16_0, (Reg::RegTensor<fp8_e8m0_t>&)vdScale0, scaleMask);
+            Reg::Cast<bfloat16_t, fp8_e8m0_t, castTraitFp8E8M0ToBf16_0>(
+                vdScaleBf16_1, (Reg::RegTensor<fp8_e8m0_t>&)vdScale1, scaleMask);
 
             Reg::Cast<float, bfloat16_t, castTraitBf16ToFp32_0>(vdScaleFp32_0_0, vdScaleBf16_0, scaleMask);
             Reg::Cast<float, bfloat16_t, castTraitBf16ToFp32_1>(vdScaleFp32_0_1, vdScaleBf16_0, scaleMask);
@@ -349,10 +350,14 @@ __aicore__ inline void AntiMxQuantTailAxis<T, U>::ComputeScale(
             Reg::Interleave(vdScaleFp32_0_0, vdScaleFp32_0_1, vdScaleFp32_0_0, vdScaleFp32_0_1);
             Reg::Interleave(vdScaleFp32_1_0, vdScaleFp32_1_1, vdScaleFp32_1_0, vdScaleFp32_1_1);
 
-            Reg::StoreAlign<float, Reg::PostLiteral::POST_MODE_UPDATE>(scaleBufAddr, vdScaleFp32_0_0, vfLen32, storeMask);
-            Reg::StoreAlign<float, Reg::PostLiteral::POST_MODE_UPDATE>(scaleBufAddr, vdScaleFp32_0_1, vfLen32, storeMask);
-            Reg::StoreAlign<float, Reg::PostLiteral::POST_MODE_UPDATE>(scaleBufAddr, vdScaleFp32_1_0, vfLen32, storeMask);
-            Reg::StoreAlign<float, Reg::PostLiteral::POST_MODE_UPDATE>(scaleBufAddr, vdScaleFp32_1_1, vfLen32, storeMask);
+            Reg::StoreAlign<float, Reg::PostLiteral::POST_MODE_UPDATE>(
+                scaleBufAddr, vdScaleFp32_0_0, vfLen32, storeMask);
+            Reg::StoreAlign<float, Reg::PostLiteral::POST_MODE_UPDATE>(
+                scaleBufAddr, vdScaleFp32_0_1, vfLen32, storeMask);
+            Reg::StoreAlign<float, Reg::PostLiteral::POST_MODE_UPDATE>(
+                scaleBufAddr, vdScaleFp32_1_0, vfLen32, storeMask);
+            Reg::StoreAlign<float, Reg::PostLiteral::POST_MODE_UPDATE>(
+                scaleBufAddr, vdScaleFp32_1_1, vfLen32, storeMask);
         }
     }
 }
@@ -375,11 +380,15 @@ __aicore__ inline void AntiMxQuantTailAxis<T, U>::ComputeScale(
             Reg::LoadAlign<uint8_t, Reg::PostLiteral::POST_MODE_UPDATE>(vdScale0, scaleLocalAddr, vfLen8);
             Reg::Interleave(vdScale0, vdScale1, vdScale0, vdu8_zero);
 
-            Reg::Cast<bfloat16_t, fp8_e8m0_t, castTraitFp8E8M0ToBf16_0>(vdScaleBf16_0, (Reg::RegTensor<fp8_e8m0_t>&)vdScale0, scaleMask);
-            Reg::Cast<bfloat16_t, fp8_e8m0_t, castTraitFp8E8M0ToBf16_0>(vdScaleBf16_1, (Reg::RegTensor<fp8_e8m0_t>&)vdScale1, scaleMask);
+            Reg::Cast<bfloat16_t, fp8_e8m0_t, castTraitFp8E8M0ToBf16_0>(
+                vdScaleBf16_0, (Reg::RegTensor<fp8_e8m0_t>&)vdScale0, scaleMask);
+            Reg::Cast<bfloat16_t, fp8_e8m0_t, castTraitFp8E8M0ToBf16_0>(
+                vdScaleBf16_1, (Reg::RegTensor<fp8_e8m0_t>&)vdScale1, scaleMask);
 
-            Reg::StoreAlign<bfloat16_t, Reg::PostLiteral::POST_MODE_UPDATE>(scaleBufAddr, vdScaleBf16_0, vfLen16, storeMask);
-            Reg::StoreAlign<bfloat16_t, Reg::PostLiteral::POST_MODE_UPDATE>(scaleBufAddr, vdScaleBf16_1, vfLen16, storeMask);
+            Reg::StoreAlign<bfloat16_t, Reg::PostLiteral::POST_MODE_UPDATE>(
+                scaleBufAddr, vdScaleBf16_0, vfLen16, storeMask);
+            Reg::StoreAlign<bfloat16_t, Reg::PostLiteral::POST_MODE_UPDATE>(
+                scaleBufAddr, vdScaleBf16_1, vfLen16, storeMask);
         }
     }
 }
@@ -400,7 +409,8 @@ __aicore__ inline void AntiMxQuantTailAxis<T, U>::ComputeData(
         Reg::RegTensor<float> vdScale_0, vdScale_1;
 
         for (uint16_t i = 0; i < loopNum2VF; i++) {
-            Reg::LoadAlign<uint8_t, Reg::PostLiteral::POST_MODE_UPDATE, Reg::LoadDist::DIST_DINTLV_B8>(vdFp8_0, vdFp8_1, xLocalAddr, vfLen8Double);
+            Reg::LoadAlign<uint8_t, Reg::PostLiteral::POST_MODE_UPDATE, Reg::LoadDist::DIST_DINTLV_B8>(
+                vdFp8_0, vdFp8_1, xLocalAddr, vfLen8Double);
 
             Reg::Interleave(vdFp8_0, vdFp8_1, vdFp8_0, vdFp8_1);
             Reg::Cast<float, T, castTraitFp8ToFp32_0>(vdFp32_0_0, (Reg::RegTensor<T>&)vdFp8_0, maskFp8);
@@ -412,8 +422,10 @@ __aicore__ inline void AntiMxQuantTailAxis<T, U>::ComputeData(
             Reg::Cast<float, T, castTraitFp8ToFp32_2>(vdFp32_1_2, (Reg::RegTensor<T>&)vdFp8_1, maskFp8);
             Reg::Cast<float, T, castTraitFp8ToFp32_3>(vdFp32_1_3, (Reg::RegTensor<T>&)vdFp8_1, maskFp8);
 
-            Reg::LoadAlign<float, Reg::PostLiteral::POST_MODE_UPDATE, Reg::LoadDist::DIST_E2B_B32>(vdScale_0, scaleBufAddr, elementAfterReduce_);
-            Reg::LoadAlign<float, Reg::PostLiteral::POST_MODE_UPDATE, Reg::LoadDist::DIST_E2B_B32>(vdScale_1, scaleBufAddr, elementAfterReduce_);
+            Reg::LoadAlign<float, Reg::PostLiteral::POST_MODE_UPDATE, Reg::LoadDist::DIST_E2B_B32>(
+                vdScale_0, scaleBufAddr, elementAfterReduce_);
+            Reg::LoadAlign<float, Reg::PostLiteral::POST_MODE_UPDATE, Reg::LoadDist::DIST_E2B_B32>(
+                vdScale_1, scaleBufAddr, elementAfterReduce_);
 
             Reg::Mul(vdFp32_0_0, vdFp32_0_0, vdScale_0, maskFp32);
             Reg::Mul(vdFp32_0_1, vdFp32_0_1, vdScale_0, maskFp32);
@@ -435,14 +447,22 @@ __aicore__ inline void AntiMxQuantTailAxis<T, U>::ComputeData(
                 Reg::Interleave(vdFp32_1_0, vdFp32_1_1, vdFp32_1_0, vdFp32_1_1);
                 Reg::Interleave(vdFp32_1_2, vdFp32_1_3, vdFp32_1_2, vdFp32_1_3);
 
-                Reg::StoreAlign<float, Reg::PostLiteral::POST_MODE_UPDATE, Reg::StoreDist::DIST_NORM_B32>(yLocalAddr, vdFp32_0_0, vfLen32, maskFp32);
-                Reg::StoreAlign<float, Reg::PostLiteral::POST_MODE_UPDATE, Reg::StoreDist::DIST_NORM_B32>(yLocalAddr, vdFp32_0_1, vfLen32, maskFp32);
-                Reg::StoreAlign<float, Reg::PostLiteral::POST_MODE_UPDATE, Reg::StoreDist::DIST_NORM_B32>(yLocalAddr, vdFp32_0_2, vfLen32, maskFp32);
-                Reg::StoreAlign<float, Reg::PostLiteral::POST_MODE_UPDATE, Reg::StoreDist::DIST_NORM_B32>(yLocalAddr, vdFp32_0_3, vfLen32, maskFp32);
-                Reg::StoreAlign<float, Reg::PostLiteral::POST_MODE_UPDATE, Reg::StoreDist::DIST_NORM_B32>(yLocalAddr, vdFp32_1_0, vfLen32, maskFp32);
-                Reg::StoreAlign<float, Reg::PostLiteral::POST_MODE_UPDATE, Reg::StoreDist::DIST_NORM_B32>(yLocalAddr, vdFp32_1_1, vfLen32, maskFp32);
-                Reg::StoreAlign<float, Reg::PostLiteral::POST_MODE_UPDATE, Reg::StoreDist::DIST_NORM_B32>(yLocalAddr, vdFp32_1_2, vfLen32, maskFp32);
-                Reg::StoreAlign<float, Reg::PostLiteral::POST_MODE_UPDATE, Reg::StoreDist::DIST_NORM_B32>(yLocalAddr, vdFp32_1_3, vfLen32, maskFp32);
+                Reg::StoreAlign<float, Reg::PostLiteral::POST_MODE_UPDATE, Reg::StoreDist::DIST_NORM_B32>(
+                    yLocalAddr, vdFp32_0_0, vfLen32, maskFp32);
+                Reg::StoreAlign<float, Reg::PostLiteral::POST_MODE_UPDATE, Reg::StoreDist::DIST_NORM_B32>(
+                    yLocalAddr, vdFp32_0_1, vfLen32, maskFp32);
+                Reg::StoreAlign<float, Reg::PostLiteral::POST_MODE_UPDATE, Reg::StoreDist::DIST_NORM_B32>(
+                    yLocalAddr, vdFp32_0_2, vfLen32, maskFp32);
+                Reg::StoreAlign<float, Reg::PostLiteral::POST_MODE_UPDATE, Reg::StoreDist::DIST_NORM_B32>(
+                    yLocalAddr, vdFp32_0_3, vfLen32, maskFp32);
+                Reg::StoreAlign<float, Reg::PostLiteral::POST_MODE_UPDATE, Reg::StoreDist::DIST_NORM_B32>(
+                    yLocalAddr, vdFp32_1_0, vfLen32, maskFp32);
+                Reg::StoreAlign<float, Reg::PostLiteral::POST_MODE_UPDATE, Reg::StoreDist::DIST_NORM_B32>(
+                    yLocalAddr, vdFp32_1_1, vfLen32, maskFp32);
+                Reg::StoreAlign<float, Reg::PostLiteral::POST_MODE_UPDATE, Reg::StoreDist::DIST_NORM_B32>(
+                    yLocalAddr, vdFp32_1_2, vfLen32, maskFp32);
+                Reg::StoreAlign<float, Reg::PostLiteral::POST_MODE_UPDATE, Reg::StoreDist::DIST_NORM_B32>(
+                    yLocalAddr, vdFp32_1_3, vfLen32, maskFp32);
             } else if constexpr (IsBf16Type<U>()) {
                 Reg::RegTensor<bfloat16_t> vdBf16_0_z, vdBf16_0_o;
                 Reg::RegTensor<bfloat16_t> vdBf16_1_z, vdBf16_1_o;
@@ -452,22 +472,26 @@ __aicore__ inline void AntiMxQuantTailAxis<T, U>::ComputeData(
                 Reg::Cast<bfloat16_t, float, castTraitFp32ToBf16_0>(vdBf16_0_z, vdFp32_0_0, maskAll);
                 Reg::Cast<bfloat16_t, float, castTraitFp32ToBf16_1>(vdBf16_0_o, vdFp32_0_1, maskAll);
                 Reg::Add(vdBf16_0_z, vdBf16_0_z, vdBf16_0_o, maskAll);
-                Reg::StoreAlign<bfloat16_t, Reg::PostLiteral::POST_MODE_UPDATE, Reg::StoreDist::DIST_NORM_B16>(yLocalAddr, vdBf16_0_z, vfLen16, maskAll);
+                Reg::StoreAlign<bfloat16_t, Reg::PostLiteral::POST_MODE_UPDATE, Reg::StoreDist::DIST_NORM_B16>(
+                    yLocalAddr, vdBf16_0_z, vfLen16, maskAll);
 
                 Reg::Cast<bfloat16_t, float, castTraitFp32ToBf16_0>(vdBf16_1_z, vdFp32_0_2, maskAll);
                 Reg::Cast<bfloat16_t, float, castTraitFp32ToBf16_1>(vdBf16_1_o, vdFp32_0_3, maskAll);
                 Reg::Add(vdBf16_1_z, vdBf16_1_z, vdBf16_1_o, maskAll);
-                Reg::StoreAlign<bfloat16_t, Reg::PostLiteral::POST_MODE_UPDATE, Reg::StoreDist::DIST_NORM_B16>(yLocalAddr, vdBf16_1_z, vfLen16, maskAll);
+                Reg::StoreAlign<bfloat16_t, Reg::PostLiteral::POST_MODE_UPDATE, Reg::StoreDist::DIST_NORM_B16>(
+                    yLocalAddr, vdBf16_1_z, vfLen16, maskAll);
 
                 Reg::Cast<bfloat16_t, float, castTraitFp32ToBf16_0>(vdBf16_2_z, vdFp32_1_0, maskAll);
                 Reg::Cast<bfloat16_t, float, castTraitFp32ToBf16_1>(vdBf16_2_o, vdFp32_1_1, maskAll);
                 Reg::Add(vdBf16_2_z, vdBf16_2_z, vdBf16_2_o, maskAll);
-                Reg::StoreAlign<bfloat16_t, Reg::PostLiteral::POST_MODE_UPDATE, Reg::StoreDist::DIST_NORM_B16>(yLocalAddr, vdBf16_2_z, vfLen16, maskAll);
+                Reg::StoreAlign<bfloat16_t, Reg::PostLiteral::POST_MODE_UPDATE, Reg::StoreDist::DIST_NORM_B16>(
+                    yLocalAddr, vdBf16_2_z, vfLen16, maskAll);
 
                 Reg::Cast<bfloat16_t, float, castTraitFp32ToBf16_0>(vdBf16_3_z, vdFp32_1_2, maskAll);
                 Reg::Cast<bfloat16_t, float, castTraitFp32ToBf16_1>(vdBf16_3_o, vdFp32_1_3, maskAll);
                 Reg::Add(vdBf16_3_z, vdBf16_3_z, vdBf16_3_o, maskAll);
-                Reg::StoreAlign<bfloat16_t, Reg::PostLiteral::POST_MODE_UPDATE, Reg::StoreDist::DIST_NORM_B16>(yLocalAddr, vdBf16_3_z, vfLen16, maskAll);
+                Reg::StoreAlign<bfloat16_t, Reg::PostLiteral::POST_MODE_UPDATE, Reg::StoreDist::DIST_NORM_B16>(
+                    yLocalAddr, vdBf16_3_z, vfLen16, maskAll);
             } else {
                 Reg::RegTensor<half> vdFp16_0_z, vdFp16_0_o;
                 Reg::RegTensor<half> vdFp16_1_z, vdFp16_1_o;
@@ -477,22 +501,26 @@ __aicore__ inline void AntiMxQuantTailAxis<T, U>::ComputeData(
                 Reg::Cast<half, float, castTraitFp32ToFp16_0>(vdFp16_0_z, vdFp32_0_0, maskAll);
                 Reg::Cast<half, float, castTraitFp32ToFp16_1>(vdFp16_0_o, vdFp32_0_1, maskAll);
                 Reg::Add(vdFp16_0_z, vdFp16_0_z, vdFp16_0_o, maskAll);
-                Reg::StoreAlign<half, Reg::PostLiteral::POST_MODE_UPDATE, Reg::StoreDist::DIST_NORM_B16>(yLocalAddr, vdFp16_0_z, vfLen16, maskAll);
+                Reg::StoreAlign<half, Reg::PostLiteral::POST_MODE_UPDATE, Reg::StoreDist::DIST_NORM_B16>(
+                    yLocalAddr, vdFp16_0_z, vfLen16, maskAll);
 
                 Reg::Cast<half, float, castTraitFp32ToFp16_0>(vdFp16_1_z, vdFp32_0_2, maskAll);
                 Reg::Cast<half, float, castTraitFp32ToFp16_1>(vdFp16_1_o, vdFp32_0_3, maskAll);
                 Reg::Add(vdFp16_1_z, vdFp16_1_z, vdFp16_1_o, maskAll);
-                Reg::StoreAlign<half, Reg::PostLiteral::POST_MODE_UPDATE, Reg::StoreDist::DIST_NORM_B16>(yLocalAddr, vdFp16_1_z, vfLen16, maskAll);
+                Reg::StoreAlign<half, Reg::PostLiteral::POST_MODE_UPDATE, Reg::StoreDist::DIST_NORM_B16>(
+                    yLocalAddr, vdFp16_1_z, vfLen16, maskAll);
 
                 Reg::Cast<half, float, castTraitFp32ToFp16_0>(vdFp16_2_z, vdFp32_1_0, maskAll);
                 Reg::Cast<half, float, castTraitFp32ToFp16_1>(vdFp16_2_o, vdFp32_1_1, maskAll);
                 Reg::Add(vdFp16_2_z, vdFp16_2_z, vdFp16_2_o, maskAll);
-                Reg::StoreAlign<half, Reg::PostLiteral::POST_MODE_UPDATE, Reg::StoreDist::DIST_NORM_B16>(yLocalAddr, vdFp16_2_z, vfLen16, maskAll);
+                Reg::StoreAlign<half, Reg::PostLiteral::POST_MODE_UPDATE, Reg::StoreDist::DIST_NORM_B16>(
+                    yLocalAddr, vdFp16_2_z, vfLen16, maskAll);
 
                 Reg::Cast<half, float, castTraitFp32ToFp16_0>(vdFp16_3_z, vdFp32_1_2, maskAll);
                 Reg::Cast<half, float, castTraitFp32ToFp16_1>(vdFp16_3_o, vdFp32_1_3, maskAll);
                 Reg::Add(vdFp16_3_z, vdFp16_3_z, vdFp16_3_o, maskAll);
-                Reg::StoreAlign<half, Reg::PostLiteral::POST_MODE_UPDATE, Reg::StoreDist::DIST_NORM_B16>(yLocalAddr, vdFp16_3_z, vfLen16, maskAll);
+                Reg::StoreAlign<half, Reg::PostLiteral::POST_MODE_UPDATE, Reg::StoreDist::DIST_NORM_B16>(
+                    yLocalAddr, vdFp16_3_z, vfLen16, maskAll);
             }
         }
     }
@@ -513,18 +541,24 @@ __aicore__ inline void AntiMxQuantTailAxis<T, U>::ComputeData(
         Reg::RegTensor<bfloat16_t> vdScaleTmp0, vdScaleTmp1;
 
         for (uint16_t i = 0; i < loopNum2VF; i++) {
-            Reg::LoadAlign<uint8_t, Reg::PostLiteral::POST_MODE_UPDATE, Reg::LoadDist::DIST_UNPACK4_B8>(vdFp4U8_0, xLocalAddr, vfLen32);
-            Reg::LoadAlign<uint8_t, Reg::PostLiteral::POST_MODE_UPDATE, Reg::LoadDist::DIST_UNPACK4_B8>(vdFp4U8_1, xLocalAddr, vfLen32);
-            Reg::LoadAlign<uint8_t, Reg::PostLiteral::POST_MODE_UPDATE, Reg::LoadDist::DIST_UNPACK4_B8>(vdFp4U8_2, xLocalAddr, vfLen32);
-            Reg::LoadAlign<uint8_t, Reg::PostLiteral::POST_MODE_UPDATE, Reg::LoadDist::DIST_UNPACK4_B8>(vdFp4U8_3, xLocalAddr, vfLen32);
+            Reg::LoadAlign<uint8_t, Reg::PostLiteral::POST_MODE_UPDATE, Reg::LoadDist::DIST_UNPACK4_B8>(
+                vdFp4U8_0, xLocalAddr, vfLen32);
+            Reg::LoadAlign<uint8_t, Reg::PostLiteral::POST_MODE_UPDATE, Reg::LoadDist::DIST_UNPACK4_B8>(
+                vdFp4U8_1, xLocalAddr, vfLen32);
+            Reg::LoadAlign<uint8_t, Reg::PostLiteral::POST_MODE_UPDATE, Reg::LoadDist::DIST_UNPACK4_B8>(
+                vdFp4U8_2, xLocalAddr, vfLen32);
+            Reg::LoadAlign<uint8_t, Reg::PostLiteral::POST_MODE_UPDATE, Reg::LoadDist::DIST_UNPACK4_B8>(
+                vdFp4U8_3, xLocalAddr, vfLen32);
 
             Reg::Cast<bfloat16_t, T, castTraitFp4ToBf16>(vdMerged0, (Reg::RegTensor<T>&)vdFp4U8_0, maskU8);
             Reg::Cast<bfloat16_t, T, castTraitFp4ToBf16>(vdMerged1, (Reg::RegTensor<T>&)vdFp4U8_1, maskU8);
             Reg::Cast<bfloat16_t, T, castTraitFp4ToBf16>(vdMerged2, (Reg::RegTensor<T>&)vdFp4U8_2, maskU8);
             Reg::Cast<bfloat16_t, T, castTraitFp4ToBf16>(vdMerged3, (Reg::RegTensor<T>&)vdFp4U8_3, maskU8);
 
-            Reg::LoadAlign<bfloat16_t, Reg::PostLiteral::POST_MODE_UPDATE, Reg::LoadDist::DIST_E2B_B16>(vdScaleTmp0, scaleBufAddr, elementAfterReduce_);
-            Reg::LoadAlign<bfloat16_t, Reg::PostLiteral::POST_MODE_UPDATE, Reg::LoadDist::DIST_E2B_B16>(vdScaleTmp1, scaleBufAddr, elementAfterReduce_);
+            Reg::LoadAlign<bfloat16_t, Reg::PostLiteral::POST_MODE_UPDATE, Reg::LoadDist::DIST_E2B_B16>(
+                vdScaleTmp0, scaleBufAddr, elementAfterReduce_);
+            Reg::LoadAlign<bfloat16_t, Reg::PostLiteral::POST_MODE_UPDATE, Reg::LoadDist::DIST_E2B_B16>(
+                vdScaleTmp1, scaleBufAddr, elementAfterReduce_);
 
             Reg::Interleave(vdScale0, vdScale1, vdScaleTmp0, vdScaleTmp0);
             Reg::Interleave(vdScale2, vdScale3, vdScaleTmp1, vdScaleTmp1);
@@ -543,44 +577,60 @@ __aicore__ inline void AntiMxQuantTailAxis<T, U>::ComputeData(
                 Reg::Cast<float, bfloat16_t, castTraitBf16ToFp32_0>(vdFp32_0_0, vdMerged0, maskAll16);
                 Reg::Cast<float, bfloat16_t, castTraitBf16ToFp32_1>(vdFp32_0_1, vdMerged0, maskAll16);
                 Reg::Interleave(vdFp32_0_0, vdFp32_0_1, vdFp32_0_0, vdFp32_0_1);
-                Reg::StoreAlign<float, Reg::PostLiteral::POST_MODE_UPDATE, Reg::StoreDist::DIST_NORM_B32>(yLocalAddr, vdFp32_0_0, vfLen32, maskAll16);
-                Reg::StoreAlign<float, Reg::PostLiteral::POST_MODE_UPDATE, Reg::StoreDist::DIST_NORM_B32>(yLocalAddr, vdFp32_0_1, vfLen32, maskAll16);
+                Reg::StoreAlign<float, Reg::PostLiteral::POST_MODE_UPDATE, Reg::StoreDist::DIST_NORM_B32>(
+                    yLocalAddr, vdFp32_0_0, vfLen32, maskAll16);
+                Reg::StoreAlign<float, Reg::PostLiteral::POST_MODE_UPDATE, Reg::StoreDist::DIST_NORM_B32>(
+                    yLocalAddr, vdFp32_0_1, vfLen32, maskAll16);
 
                 Reg::Cast<float, bfloat16_t, castTraitBf16ToFp32_0>(vdFp32_1_0, vdMerged1, maskAll16);
                 Reg::Cast<float, bfloat16_t, castTraitBf16ToFp32_1>(vdFp32_1_1, vdMerged1, maskAll16);
                 Reg::Interleave(vdFp32_1_0, vdFp32_1_1, vdFp32_1_0, vdFp32_1_1);
-                Reg::StoreAlign<float, Reg::PostLiteral::POST_MODE_UPDATE, Reg::StoreDist::DIST_NORM_B32>(yLocalAddr, vdFp32_1_0, vfLen32, maskAll16);
-                Reg::StoreAlign<float, Reg::PostLiteral::POST_MODE_UPDATE, Reg::StoreDist::DIST_NORM_B32>(yLocalAddr, vdFp32_1_1, vfLen32, maskAll16);
+                Reg::StoreAlign<float, Reg::PostLiteral::POST_MODE_UPDATE, Reg::StoreDist::DIST_NORM_B32>(
+                    yLocalAddr, vdFp32_1_0, vfLen32, maskAll16);
+                Reg::StoreAlign<float, Reg::PostLiteral::POST_MODE_UPDATE, Reg::StoreDist::DIST_NORM_B32>(
+                    yLocalAddr, vdFp32_1_1, vfLen32, maskAll16);
 
                 Reg::Cast<float, bfloat16_t, castTraitBf16ToFp32_0>(vdFp32_2_0, vdMerged2, maskAll16);
                 Reg::Cast<float, bfloat16_t, castTraitBf16ToFp32_1>(vdFp32_2_1, vdMerged2, maskAll16);
                 Reg::Interleave(vdFp32_2_0, vdFp32_2_1, vdFp32_2_0, vdFp32_2_1);
-                Reg::StoreAlign<float, Reg::PostLiteral::POST_MODE_UPDATE, Reg::StoreDist::DIST_NORM_B32>(yLocalAddr, vdFp32_2_0, vfLen32, maskAll16);
-                Reg::StoreAlign<float, Reg::PostLiteral::POST_MODE_UPDATE, Reg::StoreDist::DIST_NORM_B32>(yLocalAddr, vdFp32_2_1, vfLen32, maskAll16);
+                Reg::StoreAlign<float, Reg::PostLiteral::POST_MODE_UPDATE, Reg::StoreDist::DIST_NORM_B32>(
+                    yLocalAddr, vdFp32_2_0, vfLen32, maskAll16);
+                Reg::StoreAlign<float, Reg::PostLiteral::POST_MODE_UPDATE, Reg::StoreDist::DIST_NORM_B32>(
+                    yLocalAddr, vdFp32_2_1, vfLen32, maskAll16);
 
                 Reg::Cast<float, bfloat16_t, castTraitBf16ToFp32_0>(vdFp32_3_0, vdMerged3, maskAll16);
                 Reg::Cast<float, bfloat16_t, castTraitBf16ToFp32_1>(vdFp32_3_1, vdMerged3, maskAll16);
                 Reg::Interleave(vdFp32_3_0, vdFp32_3_1, vdFp32_3_0, vdFp32_3_1);
-                Reg::StoreAlign<float, Reg::PostLiteral::POST_MODE_UPDATE, Reg::StoreDist::DIST_NORM_B32>(yLocalAddr, vdFp32_3_0, vfLen32, maskAll16);
-                Reg::StoreAlign<float, Reg::PostLiteral::POST_MODE_UPDATE, Reg::StoreDist::DIST_NORM_B32>(yLocalAddr, vdFp32_3_1, vfLen32, maskAll16);
+                Reg::StoreAlign<float, Reg::PostLiteral::POST_MODE_UPDATE, Reg::StoreDist::DIST_NORM_B32>(
+                    yLocalAddr, vdFp32_3_0, vfLen32, maskAll16);
+                Reg::StoreAlign<float, Reg::PostLiteral::POST_MODE_UPDATE, Reg::StoreDist::DIST_NORM_B32>(
+                    yLocalAddr, vdFp32_3_1, vfLen32, maskAll16);
             } else if constexpr (IsBf16Type<U>()) {
-                Reg::StoreAlign<bfloat16_t, Reg::PostLiteral::POST_MODE_UPDATE, Reg::StoreDist::DIST_NORM_B16>(yLocalAddr, vdMerged0, vfLen16, maskAll16);
-                Reg::StoreAlign<bfloat16_t, Reg::PostLiteral::POST_MODE_UPDATE, Reg::StoreDist::DIST_NORM_B16>(yLocalAddr, vdMerged1, vfLen16, maskAll16);
-                Reg::StoreAlign<bfloat16_t, Reg::PostLiteral::POST_MODE_UPDATE, Reg::StoreDist::DIST_NORM_B16>(yLocalAddr, vdMerged2, vfLen16, maskAll16);
-                Reg::StoreAlign<bfloat16_t, Reg::PostLiteral::POST_MODE_UPDATE, Reg::StoreDist::DIST_NORM_B16>(yLocalAddr, vdMerged3, vfLen16, maskAll16);
+                Reg::StoreAlign<bfloat16_t, Reg::PostLiteral::POST_MODE_UPDATE, Reg::StoreDist::DIST_NORM_B16>(
+                    yLocalAddr, vdMerged0, vfLen16, maskAll16);
+                Reg::StoreAlign<bfloat16_t, Reg::PostLiteral::POST_MODE_UPDATE, Reg::StoreDist::DIST_NORM_B16>(
+                    yLocalAddr, vdMerged1, vfLen16, maskAll16);
+                Reg::StoreAlign<bfloat16_t, Reg::PostLiteral::POST_MODE_UPDATE, Reg::StoreDist::DIST_NORM_B16>(
+                    yLocalAddr, vdMerged2, vfLen16, maskAll16);
+                Reg::StoreAlign<bfloat16_t, Reg::PostLiteral::POST_MODE_UPDATE, Reg::StoreDist::DIST_NORM_B16>(
+                    yLocalAddr, vdMerged3, vfLen16, maskAll16);
             } else {
                 Reg::RegTensor<half> vdFp16_0, vdFp16_1;
                 Reg::RegTensor<half> vdFp16_2, vdFp16_3;
 
                 Reg::Cast<half, bfloat16_t, castTraitBf16ToFp16>(vdFp16_0, vdMerged0, maskAll16);
                 Reg::Cast<half, bfloat16_t, castTraitBf16ToFp16>(vdFp16_1, vdMerged1, maskAll16);
-                Reg::StoreAlign<half, Reg::PostLiteral::POST_MODE_UPDATE, Reg::StoreDist::DIST_NORM_B16>(yLocalAddr, vdFp16_0, vfLen16, maskAll16);
-                Reg::StoreAlign<half, Reg::PostLiteral::POST_MODE_UPDATE, Reg::StoreDist::DIST_NORM_B16>(yLocalAddr, vdFp16_1, vfLen16, maskAll16);
+                Reg::StoreAlign<half, Reg::PostLiteral::POST_MODE_UPDATE, Reg::StoreDist::DIST_NORM_B16>(
+                    yLocalAddr, vdFp16_0, vfLen16, maskAll16);
+                Reg::StoreAlign<half, Reg::PostLiteral::POST_MODE_UPDATE, Reg::StoreDist::DIST_NORM_B16>(
+                    yLocalAddr, vdFp16_1, vfLen16, maskAll16);
 
                 Reg::Cast<half, bfloat16_t, castTraitBf16ToFp16>(vdFp16_2, vdMerged2, maskAll16);
                 Reg::Cast<half, bfloat16_t, castTraitBf16ToFp16>(vdFp16_3, vdMerged3, maskAll16);
-                Reg::StoreAlign<half, Reg::PostLiteral::POST_MODE_UPDATE, Reg::StoreDist::DIST_NORM_B16>(yLocalAddr, vdFp16_2, vfLen16, maskAll16);
-                Reg::StoreAlign<half, Reg::PostLiteral::POST_MODE_UPDATE, Reg::StoreDist::DIST_NORM_B16>(yLocalAddr, vdFp16_3, vfLen16, maskAll16);
+                Reg::StoreAlign<half, Reg::PostLiteral::POST_MODE_UPDATE, Reg::StoreDist::DIST_NORM_B16>(
+                    yLocalAddr, vdFp16_2, vfLen16, maskAll16);
+                Reg::StoreAlign<half, Reg::PostLiteral::POST_MODE_UPDATE, Reg::StoreDist::DIST_NORM_B16>(
+                    yLocalAddr, vdFp16_3, vfLen16, maskAll16);
             }
         }
     }

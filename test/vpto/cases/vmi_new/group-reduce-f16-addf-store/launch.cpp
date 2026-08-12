@@ -12,21 +12,19 @@
 #include <cstdint>
 #if !defined(__CCE_AICORE__) && !defined(TMRGSORT_HPP)
 struct MrgSortExecutedNumList {
-  uint16_t mrgSortList0;
-  uint16_t mrgSortList1;
-  uint16_t mrgSortList2;
-  uint16_t mrgSortList3;
+    uint16_t mrgSortList0;
+    uint16_t mrgSortList1;
+    uint16_t mrgSortList2;
+    uint16_t mrgSortList3;
 };
 #endif
 #ifndef __CPU_SIM
 #include "acl/acl.h"
 #endif
 
-extern "C" __global__ [aicore] void
-vmi_group_reduce_f16_addf_store_kernel(__gm__ half *src, __gm__ half *dst);
+extern "C" __global__[aicore] void vmi_group_reduce_f16_addf_store_kernel(__gm__ half* src, __gm__ half* dst);
 
-void LaunchVmi_group_reduce_f16_addf_store_kernel(uint16_t *src, uint16_t *dst,
-                                                  void *stream) {
-  vmi_group_reduce_f16_addf_store_kernel<<<1, nullptr, stream>>>(
-      (__gm__ half *)src, (__gm__ half *)dst);
+void LaunchVmi_group_reduce_f16_addf_store_kernel(uint16_t* src, uint16_t* dst, void* stream)
+{
+    vmi_group_reduce_f16_addf_store_kernel<<<1, nullptr, stream>>>((__gm__ half*)src, (__gm__ half*)dst);
 }

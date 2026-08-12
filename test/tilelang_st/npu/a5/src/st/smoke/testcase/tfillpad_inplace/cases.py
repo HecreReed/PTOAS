@@ -34,22 +34,23 @@ CASES = [
         "eps": 1e-6,
     },
     # ========== Case: float, src_valid == dst_valid (no expansion) ==========
-
     {
         "name": "f32_260x16_noexpand",
         "dtype": np.float32,
-        "src_shape": (260, 16),         # src physical
-        "src_valid": (260, 16),         # src valid = dst valid (no expansion)
-        "dst_shape": (260, 16),         # dst physical
-        "dst_valid": (260, 16),         # dst valid = full output
-        "fill_padval": "Max",           # FillPadVal (not used since no expansion)
+        "src_shape": (260, 16),  # src physical
+        "src_valid": (260, 16),  # src valid = dst valid (no expansion)
+        "dst_shape": (260, 16),  # dst physical
+        "dst_valid": (260, 16),  # dst valid = full output
+        "fill_padval": "Max",  # FillPadVal (not used since no expansion)
         "eps": 1e-6,
     },
 ]
 
-_SMOKE_CASE_NAMES = ['f32_64x16_noexpand', 'f32_260x16_noexpand']
+_SMOKE_CASE_NAMES = ["f32_64x16_noexpand", "f32_260x16_noexpand"]
 _SMOKE_CASE_NAME_SET = set(_SMOKE_CASE_NAMES)
-_missing = [name for name in _SMOKE_CASE_NAMES if name not in {case["name"] for case in CASES}]
+_missing = [
+    name for name in _SMOKE_CASE_NAMES if name not in {case["name"] for case in CASES}
+]
 if _missing:
     raise RuntimeError("unknown smoke case(s): " + ", ".join(_missing))
 CASES = [case for case in CASES if case["name"] in _SMOKE_CASE_NAME_SET]

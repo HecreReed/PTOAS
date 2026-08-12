@@ -44,7 +44,9 @@ def generate(output_dir: Path) -> None:
     golden_fp8 = np.transpose(fp8_nd.reshape(ROWS, COLS // 32, 32), [1, 0, 2]).flatten()
 
     e8m0_nd = np.full((ROWS, COLS // 32), np.uint8(0x77), dtype=np.uint8)
-    e8m0_zz = np.transpose(e8m0_nd.reshape(ROWS // 16, 16, (COLS // 32) // 2, 2), [0, 2, 1, 3]).flatten()
+    e8m0_zz = np.transpose(
+        e8m0_nd.reshape(ROWS // 16, 16, (COLS // 32) // 2, 2), [0, 2, 1, 3]
+    ).flatten()
     golden_e8m0 = np.full(E8M0_BYTES, SENTINEL_U8, dtype=np.uint8)
     golden_e8m0[:GROUPS] = e8m0_zz
 

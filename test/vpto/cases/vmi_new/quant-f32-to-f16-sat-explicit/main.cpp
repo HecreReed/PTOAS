@@ -14,65 +14,64 @@
 
 using namespace PtoTestCommon;
 
-#define ACL_CHECK(expr)                                                          \
-  do {                                                                           \
-    const aclError _ret = (expr);                                                \
-    if (_ret != ACL_SUCCESS) {                                                   \
-      std::fprintf(stderr, "[ERROR] %s failed: %d (%s:%d)\n", #expr,             \
-                   (int)_ret, __FILE__, __LINE__);                               \
-      rc = 1;                                                                    \
-      goto cleanup;                                                              \
-    }                                                                            \
-  } while (0)
+#define ACL_CHECK(expr)                                                                                    \
+    do {                                                                                                   \
+        const aclError _ret = (expr);                                                                      \
+        if (_ret != ACL_SUCCESS) {                                                                         \
+            std::fprintf(stderr, "[ERROR] %s failed: %d (%s:%d)\n", #expr, (int)_ret, __FILE__, __LINE__); \
+            rc = 1;                                                                                        \
+            goto cleanup;                                                                                  \
+        }                                                                                                  \
+    } while (0)
 
-void LaunchVmi_quant_f32_to_f16_sat_explicit_kernel(float *src, uint16_t *dst,
-                                            void *stream);
+void LaunchVmi_quant_f32_to_f16_sat_explicit_kernel(float* src, uint16_t* dst, void* stream);
 
-int main() {
-  constexpr size_t kElems = 1024;
-  size_t srcBytes = kElems * sizeof(float);
-  size_t dstBytes = kElems * sizeof(uint16_t);
-  float *srcHost = nullptr;
-  float *srcDevice = nullptr;
-  uint16_t *dstHost = nullptr;
-  uint16_t *dstDevice = nullptr;
-  int rc = 0;
-  bool aclInited = false;
-  bool deviceSet = false;
-  int deviceId = 0;
-  aclrtStream stream = nullptr;
+int main()
+{
+    constexpr size_t kElems = 1024;
+    size_t srcBytes = kElems * sizeof(float);
+    size_t dstBytes = kElems * sizeof(uint16_t);
+    float* srcHost = nullptr;
+    float* srcDevice = nullptr;
+    uint16_t* dstHost = nullptr;
+    uint16_t* dstDevice = nullptr;
+    int rc = 0;
+    bool aclInited = false;
+    bool deviceSet = false;
+    int deviceId = 0;
+    aclrtStream stream = nullptr;
 
-  ACL_CHECK(aclInit(nullptr));
-  aclInited = true;
-  if (const char *envDevice = std::getenv("ACL_DEVICE_ID"))
-    deviceId = std::atoi(envDevice);
-  ACL_CHECK(aclrtSetDevice(deviceId));
-  deviceSet = true;
-  ACL_CHECK(aclrtCreateStream(&stream));
-  ACL_CHECK(aclrtMallocHost((void **)(&srcHost), srcBytes));
-  ACL_CHECK(aclrtMallocHost((void **)(&dstHost), dstBytes));
-  ACL_CHECK(aclrtMalloc((void **)&srcDevice, srcBytes, ACL_MEM_MALLOC_HUGE_FIRST));
-  ACL_CHECK(aclrtMalloc((void **)&dstDevice, dstBytes, ACL_MEM_MALLOC_HUGE_FIRST));
+    ACL_CHECK(aclInit(nullptr));
+    aclInited = true;
+    if (const char* envDevice = std::getenv("ACL_DEVICE_ID"))
+        deviceId = std::atoi(envDevice);
+    ACL_CHECK(aclrtSetDevice(deviceId));
+    deviceSet = true;
+    ACL_CHECK(aclrtCreateStream(&stream));
+    ACL_CHECK(aclrtMallocHost((void**)(&srcHost), srcBytes));
+    ACL_CHECK(aclrtMallocHost((void**)(&dstHost), dstBytes));
+    ACL_CHECK(aclrtMalloc((void**)&srcDevice, srcBytes, ACL_MEM_MALLOC_HUGE_FIRST));
+    ACL_CHECK(aclrtMalloc((void**)&dstDevice, dstBytes, ACL_MEM_MALLOC_HUGE_FIRST));
 
-  ReadFile("./v1.bin", srcBytes, srcHost, srcBytes);
-  ReadFile("./v2.bin", dstBytes, dstHost, dstBytes);
-  ACL_CHECK(aclrtMemcpy(srcDevice, srcBytes, srcHost, srcBytes, ACL_MEMCPY_HOST_TO_DEVICE));
-  ACL_CHECK(aclrtMemcpy(dstDevice, dstBytes, dstHost, dstBytes, ACL_MEMCPY_HOST_TO_DEVICE));
-  LaunchVmi_quant_f32_to_f16_sat_explicit_kernel(srcDevice, dstDevice, stream);
-  ACL_CHECK(aclrtSynchronizeStream(stream));
-  ACL_CHECK(aclrtMemcpy(dstHost, dstBytes, dstDevice, dstBytes, ACL_MEMCPY_DEVICE_TO_HOST));
-  WriteFile("./v2.bin", dstHost, dstBytes);
+    ReadFile("./v1.bin", srcBytes, srcHost, srcBytes);
+    ReadFile("./v2.bin", dstBytes, dstHost, dstBytes);
+    ACL_CHECK(aclrtMemcpy(srcDevice, srcBytes, srcHost, srcBytes, ACL_MEMCPY_HOST_TO_DEVICE));
+    ACL_CHECK(aclrtMemcpy(dstDevice, dstBytes, dstHost, dstBytes, ACL_MEMCPY_HOST_TO_DEVICE));
+    LaunchVmi_quant_f32_to_f16_sat_explicit_kernel(srcDevice, dstDevice, stream);
+    ACL_CHECK(aclrtSynchronizeStream(stream));
+    ACL_CHECK(aclrtMemcpy(dstHost, dstBytes, dstDevice, dstBytes, ACL_MEMCPY_DEVICE_TO_HOST));
+    WriteFile("./v2.bin", dstHost, dstBytes);
 
 cleanup:
-  aclrtFree(srcDevice);
-  aclrtFree(dstDevice);
-  aclrtFreeHost(srcHost);
-  aclrtFreeHost(dstHost);
-  if (stream)
-    aclrtDestroyStream(stream);
-  if (deviceSet)
-    aclrtResetDevice(deviceId);
-  if (aclInited)
-    aclFinalize();
-  return rc;
+    aclrtFree(srcDevice);
+    aclrtFree(dstDevice);
+    aclrtFreeHost(srcHost);
+    aclrtFreeHost(dstHost);
+    if (stream)
+        aclrtDestroyStream(stream);
+    if (deviceSet)
+        aclrtResetDevice(deviceId);
+    if (aclInited)
+        aclFinalize();
+    return rc;
 }

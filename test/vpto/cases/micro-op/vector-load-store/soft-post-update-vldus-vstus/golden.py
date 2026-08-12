@@ -17,12 +17,8 @@ ELEMENTS = 1024
 
 
 def generate(output_dir: Path) -> None:
-    input_data = (np.arange(ELEMENTS, dtype=np.float32) + 1024.25).astype(
-        np.float32
-    )
-    initial = (-16384.0 - np.arange(ELEMENTS, dtype=np.float32)).astype(
-        np.float32
-    )
+    input_data = (np.arange(ELEMENTS, dtype=np.float32) + 1024.25).astype(np.float32)
+    initial = (-16384.0 - np.arange(ELEMENTS, dtype=np.float32)).astype(np.float32)
 
     output_dir.mkdir(parents=True, exist_ok=True)
     input_data.tofile(output_dir / "input.bin")

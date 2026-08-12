@@ -44,18 +44,14 @@ def main() -> None:
 
     expected_load = input_data[LOAD_INPUT_BEGIN : LOAD_INPUT_BEGIN + LOAD_END]
     if not np.array_equal(explicit[LOAD_BEGIN:LOAD_END], expected_load):
-        mismatch = np.flatnonzero(
-            explicit[LOAD_BEGIN:LOAD_END] != expected_load
-        )
+        mismatch = np.flatnonzero(explicit[LOAD_BEGIN:LOAD_END] != expected_load)
         idx = int(mismatch[0]) if mismatch.size else LOAD_BEGIN
         fail(
             f"vldus load result mismatch at index {idx}: "
             f"expected={expected_load[idx]}, output={explicit[idx]}"
         )
 
-    store_changes = np.flatnonzero(
-        explicit[STORE_BEGIN:] != initial[STORE_BEGIN:]
-    )
+    store_changes = np.flatnonzero(explicit[STORE_BEGIN:] != initial[STORE_BEGIN:])
     if not store_changes.size:
         fail("vstus/vstar did not change the store probe region")
     if int(store_changes[0]) != 0:

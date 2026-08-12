@@ -90,9 +90,12 @@ def main():
     ok = compare_bin("golden_v4.bin", "v4.bin", np.float32, 1e-4) and ok
     ok = compare_bin("golden_v5.bin", "v5.bin", np.float32, 1e-4) and ok
     ok = compare_bin("golden_v6.bin", "v6.bin", np.float32, 1e-4) and ok
-    ok = compare_matrix_valid(
-        "golden_v7.bin", "v7.bin", rows, 128, seq, np.float32, 1e-4
-    ) and ok
+    ok = (
+        compare_matrix_valid(
+            "golden_v7.bin", "v7.bin", rows, 128, seq, np.float32, 1e-4
+        )
+        and ok
+    )
     if not ok:
         print("[ERROR] compare failed")
         sys.exit(2)
