@@ -37,6 +37,14 @@ export LLVM_SOURCE_VERSION="19.1.7"
 # mirror must be used.
 export LLVM_GIT_URL="${LLVM_GIT_URL:-https://github.com/vpto-dev/llvm-project.git}"
 export LLVM_GIT_REF="${LLVM_GIT_REF:-feature-vpto}"
+# The vpto calling conventions (SimtEntry, float8) can also be produced by
+# applying the feature-vpto patch to the upstream llvmorg-19.1.7 source that
+# the CI cache (ASCEND_3RD_LIB_PATH) and cann-cmake download. When the cached
+# source lacks SimtEntry we fetch the patch from the gitcode release asset and
+# apply it with patch -p1, matching the PATCH_COMMAND added to cann-cmake's
+# third_party/llvm.cmake.
+export LLVM_VPTO_PATCH_URL="${LLVM_VPTO_PATCH_URL:-https://gitcode.com/cann-src-third-party/llvm/releases/download/19.1.7-h0/feature-vpto-last3.patch}"
+export LLVM_VPTO_PATCH_SHA256="${LLVM_VPTO_PATCH_SHA256:-a49c1d3dd8ab78e93264712bc0d46deb536196a54abb2c2ee02abd914cd385e2}"
 # Prefer ASCEND_3RD_LIB_PATH when it points to a valid LLVM source cache
 # (CI images set this to /home/jenkins/opensource). Fall back to the in-tree
 # third_party directory for local builds where it is unset.
@@ -99,18 +107,72 @@ prepare_llvm_cache_layout() {
   export LLVM_BUILD_DIR="${CANN_3RD_LIB_PATH}/lib_cache/llvm_${LLVM_SOURCE_VERSION}/build-shared"
 }
 
+# Check whether the LLVM source carries the vpto custom calling conventions
+# (llvm::CallingConv::SimtEntry). Upstream llvmorg-19.1.7 does not; the vpto
+# fork and a patched upstream tree do.
+llvm_has_simt_entry() {
+  [ -f "${LLVM_SOURCE_DIR}/llvm/include/llvm/IR/CallingConv.h" ] \
+    && grep -q "SimtEntry" "${LLVM_SOURCE_DIR}/llvm/include/llvm/IR/CallingConv.h"
+}
+
+# Download the feature-vpto patch and apply it to the upstream LLVM source so
+# the tree gains the vpto calling conventions. The patch is a git-format-patch
+# series rooted at llvm/, so patch -p1 is the correct strip level (the same
+# PATCH_COMMAND used by cann-cmake's third_party/llvm.cmake).
+apply_vpto_patch() {
+  echo "${dotted_line}"
+  echo "Applying feature-vpto patch to upstream LLVM source"
+  local patch_file="${CANN_3RD_LIB_PATH}/pkg/feature-vpto-last3.patch"
+  if [ -f "${CANN_3RD_LIB_PATH}/feature-vpto-last3.patch" ]; then
+    patch_file="${CANN_3RD_LIB_PATH}/feature-vpto-last3.patch"
+  elif [ -f "${CANN_3RD_LIB_PATH}/pkg/feature-vpto-last3.patch" ]; then
+    patch_file="${CANN_3RD_LIB_PATH}/pkg/feature-vpto-last3.patch"
+  else
+    mkdir -p "${CANN_3RD_LIB_PATH}/pkg"
+    echo "Downloading vpto patch from ${LLVM_VPTO_PATCH_URL}"
+    curl -fL --retry 3 -o "${patch_file}" "${LLVM_VPTO_PATCH_URL}" || {
+      echo "ERROR: failed to download vpto patch" >&2
+      exit 1
+    }
+    local actual_sha
+    actual_sha="$(sha256sum "${patch_file}" | cut -d' ' -f1)"
+    if [ "${actual_sha}" != "${LLVM_VPTO_PATCH_SHA256}" ]; then
+      echo "ERROR: vpto patch SHA256 mismatch: ${actual_sha}" >&2
+      exit 1
+    fi
+  fi
+
+  (cd "${LLVM_SOURCE_DIR}" && patch -p1 < "${patch_file}") || {
+    echo "ERROR: failed to apply vpto patch to ${LLVM_SOURCE_DIR}" >&2
+    exit 1
+  }
+  echo "Applied vpto patch: ${patch_file}"
+}
+
 # Ensure the LLVM 19 source (vpto "feature-vpto" branch) is present under
 # ${LLVM_SOURCE_DIR}. Accepts an already-populated source tree (the usual CI
 # cache layout where llvm-19/llvm holds the top-level CMakeLists.txt) or
-# clones the vpto branch from ${LLVM_GIT_URL}.
+# clones the vpto branch from ${LLVM_GIT_URL}. When the cached source is the
+# upstream (unpatched) snapshot, apply the vpto patch so SimtEntry/float8
+# resolve during the PTOAS build.
 ensure_llvm_source() {
   if [ -f "${LLVM_SOURCE_DIR}/llvm/CMakeLists.txt" ]; then
     # Git checkout layout: the project root is ${LLVM_SOURCE_DIR}/llvm.
     export LLVM_CMAKE_SOURCE_DIR="${LLVM_SOURCE_DIR}/llvm"
+    if ! llvm_has_simt_entry; then
+      echo "${dotted_line}"
+      echo "Cached LLVM source lacks SimtEntry; applying feature-vpto patch"
+      apply_vpto_patch
+    fi
     return 0
   fi
   if [ -f "${LLVM_SOURCE_DIR}/CMakeLists.txt" ]; then
     export LLVM_CMAKE_SOURCE_DIR="${LLVM_SOURCE_DIR}"
+    if ! llvm_has_simt_entry; then
+      echo "${dotted_line}"
+      echo "Cached LLVM source lacks SimtEntry; applying feature-vpto patch"
+      apply_vpto_patch
+    fi
     return 0
   fi
 
@@ -128,11 +190,29 @@ ensure_llvm_source() {
 ensure_llvm_build() {
   ensure_llvm_source
 
-  if [ -f "${LLVM_BUILD_DIR}/lib/cmake/llvm/LLVMConfig.cmake" ] \
+  # The vpto patch changes CallingConv.h; a build-shared tree built from the
+  # unpatched upstream source must be rebuilt so SimtEntry is present in the
+  # installed headers (otherwise the PTOAS build fails at link/compile time).
+  local rebuild_llvm=FALSE
+  if llvm_has_simt_entry \
+     && [ -f "${LLVM_BUILD_DIR}/include/llvm/IR/CallingConv.h" ] \
+     && ! grep -q "SimtEntry" "${LLVM_BUILD_DIR}/include/llvm/IR/CallingConv.h"; then
+    echo "${dotted_line}"
+    echo "LLVM source was patched but cached build lacks SimtEntry; rebuilding"
+    rebuild_llvm=TRUE
+  fi
+
+  if [ "$rebuild_llvm" == "FALSE" ] \
+     && [ -f "${LLVM_BUILD_DIR}/lib/cmake/llvm/LLVMConfig.cmake" ] \
      && [ -f "${LLVM_BUILD_DIR}/lib/cmake/mlir/MLIRConfig.cmake" ]; then
     echo "${dotted_line}"
     echo "Reusing cached LLVM/MLIR build at ${LLVM_BUILD_DIR}"
     return 0
+  fi
+
+  if [ "$rebuild_llvm" == "TRUE" ]; then
+    echo "Removing stale LLVM build tree ${LLVM_BUILD_DIR}"
+    rm -rf "${LLVM_BUILD_DIR}"
   fi
 
   echo "${dotted_line}"
