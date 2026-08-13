@@ -185,6 +185,22 @@ ensure_llvm_source() {
   export LLVM_CMAKE_SOURCE_DIR="${LLVM_SOURCE_DIR}"
 }
 
+# The PTOAS tree is built with the default libstdc++ ABI new string layout
+# (_GLIBCXX_USE_CXX11_ABI=1). Cached LLVM/MLIR builds created on RHEL7 /
+# devtoolset-7 toolchains are compiled with the old ABI and export Twine::str as
+# the non-[abi:cxx11] mangled symbol; linking against them fails with
+# "undefined reference to llvm::Twine::str[abi:cxx11]". Detect that by probing
+# the shared lib symbol table and rebuild with the current toolchain instead of
+# reusing the incompatible cache.
+llvm_build_is_abi_compatible() {
+  local support_lib="${LLVM_BUILD_DIR}/lib/libLLVMSupport.so.19.1"
+  [ -f "${support_lib}" ] || return 1
+  # _ZNK4llvm5Twine3strB5cxx11Ev  -> new ABI (this build)
+  # _ZNK4llvm5Twine3strEv          -> old libstdc++ ABI (RHEL7/devtoolset cache)
+  nm -D --defined-only "${support_lib}" 2>/dev/null \
+    | grep -q "_ZNK4llvm5Twine3strB5cxx11Ev"
+}
+
 # Build LLVM/MLIR 19 (shared libs + MLIR Python bindings) if the cached build
 # tree is not usable, mirroring the PTOAS development workflow.
 ensure_llvm_build() {
@@ -199,6 +215,16 @@ ensure_llvm_build() {
      && ! grep -q "SimtEntry" "${LLVM_BUILD_DIR}/include/llvm/IR/CallingConv.h"; then
     echo "${dotted_line}"
     echo "LLVM source was patched but cached build lacks SimtEntry; rebuilding"
+    rebuild_llvm=TRUE
+  fi
+
+  if [ "$rebuild_llvm" == "FALSE" ] \
+     && [ -f "${LLVM_BUILD_DIR}/lib/cmake/llvm/LLVMConfig.cmake" ] \
+     && [ -f "${LLVM_BUILD_DIR}/lib/cmake/mlir/MLIRConfig.cmake" ] \
+     && ! llvm_build_is_abi_compatible; then
+    echo "${dotted_line}"
+    echo "Cached LLVM/MLIR build was compiled with an incompatible libstdc++ ABI"
+    echo "(lacks llvm::Twine::str[abi:cxx11]); rebuilding with the current toolchain"
     rebuild_llvm=TRUE
   fi
 
