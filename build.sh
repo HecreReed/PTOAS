@@ -421,6 +421,11 @@ package() {
   mkdir -p "${BUILD_OUT_PATH}"
   make_ptoas_run
   echo "package staged under ${BUILD_OUT_PATH}"
+  # Diagnostics: the OBS uploader reads build_out via the host path
+  # /opt/cloud/slavespace/.../x86build/build_out; print what we actually
+  # ~created so a path mismatch is visible in the CI log.
+  echo "BUILD_OUT absolute: $(cd "${BUILD_OUT_PATH}" && pwd -P)"
+  ls -la "${BUILD_OUT_PATH}"
 }
 
 main() {
