@@ -386,14 +386,21 @@ build_only() {
 # with --full / --uninstall to verify the package, so the payload is the whole
 # install tree produced by cmake --install.
 make_ptoas_run() {
-  local run_file="${BUILD_OUT_PATH}/cann-pto-as-${PTOAS_PACKAGE_VERSION}_linux-$(uname -m).run"
+  local arch
+  arch="$(uname -m)"
+  # The pipeline's package_name parameter is the unversioned
+  # cann-pto-as_linux-<arch>.run, so emit both the versioned name and the
+  # unversioned alias the OBS uploader expects.
+  local run_file="${BUILD_OUT_PATH}/cann-pto-as-${PTOAS_PACKAGE_VERSION}_linux-${arch}.run"
+  local alias_file="${BUILD_OUT_PATH}/cann-pto-as_linux-${arch}.run"
   bash "${BASE_PATH}/scripts/package/make_ptoas_run.sh" \
     "${BASE_PATH}" \
     "${INSTALL_PATH}" \
     "${run_file}" \
     "${PTOAS_PACKAGE_VERSION}" \
     "ptoas"
-  echo "run package: ${run_file}"
+  cp -a "${run_file}" "${alias_file}"
+  echo "run package: ${run_file} (alias: ${alias_file})"
 }
 
 package() {
@@ -404,9 +411,10 @@ package() {
   cmake --build "${BUILD_PATH}" -- -j "${JOBS}"
   cmake --install "${BUILD_PATH}"
 
-  # Distill the version from the installed PTOASConfig.cmake/project version
-  # (matching the CMakeLists project(ptoas VERSION ...) value).
-  PTOAS_PACKAGE_VERSION="${PTOAS_PACKAGE_VERSION:-$(grep -oE "^project\(ptoas VERSION [0-9.]+" CMakeLists.txt | sed 's/.*VERSION //')}"
+  # Distill the version used for the .run package name. The CANN product version
+  # (9.2.0 for this release train) differs from project(ptoas VERSION 0.57), so
+  # default to the packaging version and allow an explicit override.
+  PTOAS_PACKAGE_VERSION="${PTOAS_PACKAGE_VERSION:-9.2.0}"
 
   # Stage the .run installer(s) under build_out for the pipeline to consume.
   rm -rf "${BUILD_OUT_PATH}"
