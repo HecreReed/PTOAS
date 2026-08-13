@@ -381,6 +381,21 @@ build_only() {
   echo "execute samples success"
 }
 
+# Stage the installed PTOAS tree into a self-extracting .run installer under
+# build_out. The gitcode smoke pipeline looks for build_out/*.run and drives it
+# with --full / --uninstall to verify the package, so the payload is the whole
+# install tree produced by cmake --install.
+make_ptoas_run() {
+  local run_file="${BUILD_OUT_PATH}/cann-pto-as-${PTOAS_PACKAGE_VERSION}_linux-$(uname -m).run"
+  bash "${BASE_PATH}/scripts/package/make_ptoas_run.sh" \
+    "${BASE_PATH}" \
+    "${INSTALL_PATH}" \
+    "${run_file}" \
+    "${PTOAS_PACKAGE_VERSION}" \
+    "ptoas"
+  echo "run package: ${run_file}"
+}
+
 package() {
   echo $dotted_line
   echo "package ptoas"
@@ -389,10 +404,14 @@ package() {
   cmake --build "${BUILD_PATH}" -- -j "${JOBS}"
   cmake --install "${BUILD_PATH}"
 
-  # Stage a runnable install tree under build_out for the pipeline to consume.
+  # Distill the version from the installed PTOASConfig.cmake/project version
+  # (matching the CMakeLists project(ptoas VERSION ...) value).
+  PTOAS_PACKAGE_VERSION="${PTOAS_PACKAGE_VERSION:-$(grep -oE "^project\(ptoas VERSION [0-9.]+" CMakeLists.txt | sed 's/.*VERSION //')}"
+
+  # Stage the .run installer(s) under build_out for the pipeline to consume.
   rm -rf "${BUILD_OUT_PATH}"
   mkdir -p "${BUILD_OUT_PATH}"
-  cp -a "${INSTALL_PATH}/." "${BUILD_OUT_PATH}/"
+  make_ptoas_run
   echo "package staged under ${BUILD_OUT_PATH}"
 }
 
