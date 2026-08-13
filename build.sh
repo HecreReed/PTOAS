@@ -388,19 +388,19 @@ build_only() {
 make_ptoas_run() {
   local arch
   arch="$(uname -m)"
-  # The pipeline's package_name parameter is the unversioned
-  # cann-pto-as_linux-<arch>.run, so emit both the versioned name and the
-  # unversioned alias the OBS uploader expects.
-  local run_file="${BUILD_OUT_PATH}/cann-pto-as-${PTOAS_PACKAGE_VERSION}_linux-${arch}.run"
-  local alias_file="${BUILD_OUT_PATH}/cann-pto-as_linux-${arch}.run"
+  # The OBS uploader parses the artifact name as cann-pto-as_<ver>_linux-<arch>.run
+  # (underscore before the version, like master's CPack/makeself output), then
+  # strips the version and uploads it as cann-pto-as_linux-<arch>.run. Keep the
+  # underscore form so the uploader can resolve the package; the versioned file
+  # is the one the pipeline's pto-as_compile.sh drives with --full/--uninstall.
+  local run_file="${BUILD_OUT_PATH}/cann-pto-as_${PTOAS_PACKAGE_VERSION}_linux-${arch}.run"
   bash "${BASE_PATH}/scripts/package/make_ptoas_run.sh" \
     "${BASE_PATH}" \
     "${INSTALL_PATH}" \
     "${run_file}" \
     "${PTOAS_PACKAGE_VERSION}" \
     "ptoas"
-  cp -a "${run_file}" "${alias_file}"
-  echo "run package: ${run_file} (alias: ${alias_file})"
+  echo "run package: ${run_file}"
 }
 
 package() {
