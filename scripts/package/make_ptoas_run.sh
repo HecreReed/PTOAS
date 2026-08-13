@@ -164,6 +164,9 @@ echo "#__PTOAS_ARCHIVE_MARKER__" >> "${OUTPUT_RUN}"
   tar czf - .
 ) >> "${OUTPUT_RUN}"
 
-chmod +x "${OUTPUT_RUN}"
+# Explicit 755: the OBS uploader opens the artifact from the host workspace as
+# a non-root user; a 711 mode (execute only) makes that open fail with "File
+# does not exist". Keep read permission for group/other.
+chmod 755 "${OUTPUT_RUN}"
 
 echo "Built ${OUTPUT_RUN} ($(du -h "${OUTPUT_RUN}" | cut -f1))"
