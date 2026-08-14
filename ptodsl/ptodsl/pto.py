@@ -147,7 +147,7 @@ from ._ops import (             # noqa: F401
     atomic_and, atomic_or, atomic_xor, atomic_cas,
     prmt, mulhi, mul_i32toi64,
     absf, sqrt, exp, log, sin, cos, pow, ceil, floor, rint, round,
-    fmin, fmax, fma, convert,
+    fmin, fmax, fma, fdiv_hp, convert,
     syncthreads, threadfence, threadfence_block, trap, keep, resume,
     pipe_barrier,
     get_buf, rls_buf,

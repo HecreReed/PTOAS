@@ -6541,6 +6541,17 @@ def fma(lhs, rhs, acc):
     return _same_type_ternary(_pto.FmaOp, lhs, rhs, acc, context="fma(lhs, rhs, acc)")
 
 
+def fdiv_hp(lhs, rhs):
+    """pto.fdiv_hp - A5 SIMT scalar FP32 correctly-rounded division.
+
+    IEEE-754 round-to-nearest-even FP32 division implemented as an integer
+    expansion (guard/round/sticky), independent of the target fdiv precision.
+    A5 / scalar f32 only; special inputs (NaN, Inf, zero, zero divisor) follow
+    the backend arith.divf behavior.
+    """
+    return _same_type_binary(_pto.FDivHPOp, lhs, rhs, context="fdiv_hp(lhs, rhs)")
+
+
 def convert(src, dst_type, *, rounding, saturation, signedness=None):
     """``pto.convert`` – SIMT scalar or packed conversion."""
     raw_src = unwrap_surface_value(src)

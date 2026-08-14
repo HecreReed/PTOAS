@@ -2100,7 +2100,264 @@ struct ExpandSimtLaunchPattern : public OpRewritePattern<pto::SimtLaunchOp> {
   }
 };
 
+// ===----------------------------------------------------------------------===//
+// pto.fdiv_hp (A5 SIMT scalar FP32 correctly-rounded division)
+// ===----------------------------------------------------------------------===//
+//
+// Expands pto.fdiv_hp into a pure arith integer sequence implementing IEEE-754
+// FP32 division with round-to-nearest-even (issue #1117):
+//   1. Bit-cast both f32 operands to i32 and split sign / 8-bit exponent /
+//      23-bit fraction fields.
+//   2. NaN, Inf, zero dividend and zero divisor fall back to arith.divf so the
+//      target backend keeps its native special-value behavior.
+//   3. Finite non-zero operands become exact integers value = M * 2^E:
+//        normal    -> M = 0x800000 | fraction, E = exponent - 127 - 23
+//        subnormal -> M = fraction, E = -149, then M is normalized to bit 23
+//                     with a 16/8/4/2/1 compare-shift CLZ while E is adjusted.
+//   4. The exact quotient raw = floor(Ma * 2^26 / Mb) (Ma/Mb in [1, 2)) and its
+//      remainder are computed with an unrolled base-2^7 long division; every
+//      intermediate fits in 32 bits, so only i32 arith ops are used (no i64
+//      division dependency).
+//   5. Round-to-nearest-even on the 27-bit raw quotient:
+//        sig = raw >> 3; guard = (raw >> 2) & 1; round = (raw >> 1) & 1;
+//        sticky = (raw & 1) || rem != 0; inc = guard && (round || sticky || (sig & 1));
+//        sig += inc; a carry to 1 << 24 shifts sig right and bumps the exponent.
+//      The same raw quotient serves the subnormal path through exact right
+//      shifts: q = (Ma * 2^shift) / Mb with shift = e + 152 equals raw >> s with
+//      s = 26 - shift, and the remainder sticky for that division is
+//      (raw & (2^s - 1)) != 0 || rem != 0 (plus the quotient LSB, bit s of raw).
+//   6. Assemble sign/exponent/fraction and bit-cast back to f32, handling
+//      overflow (to +/-Inf), subnormal output (with carry to the minimum
+//      normal 2^-126) and underflow (to signed zero).
+//
+// Notes:
+// - math.ctlz lowering on A5 SIMT could not be verified in this environment, so
+//   the 16/8/4/2/1 compare-shift CLZ (pure arith) is used instead. It only
+//   depends on shifts/compares/selects that the SIMT pipeline already lowers.
+// - arith.divui (i32 unsigned division) is the same op PTODSL already emits
+//   for runtime scalar unsigned division; the remainder comes from the same
+//   long division, so no additional division op is introduced.
+struct ExpandFDivHpPattern : public OpRewritePattern<pto::FDivHPOp> {
+  using OpRewritePattern<pto::FDivHPOp>::OpRewritePattern;
+
+  LogicalResult matchAndRewrite(pto::FDivHPOp op,
+                                PatternRewriter &rewriter) const override {
+    Location loc = op.getLoc();
+    MLIRContext *ctx = rewriter.getContext();
+    Type i32Ty = IntegerType::get(ctx, 32);
+    Type f32Ty = FloatType::getF32(ctx);
+
+    auto cst = [&](int32_t v) -> Value {
+      return rewriter.create<arith::ConstantOp>(
+          loc, i32Ty, rewriter.getI32IntegerAttr(v));
+    };
+    auto andi = [&](Value a, Value b) -> Value {
+      return rewriter.create<arith::AndIOp>(loc, a, b).getResult();
+    };
+    auto ori = [&](Value a, Value b) -> Value {
+      return rewriter.create<arith::OrIOp>(loc, a, b).getResult();
+    };
+    auto xori = [&](Value a, Value b) -> Value {
+      return rewriter.create<arith::XOrIOp>(loc, a, b).getResult();
+    };
+    auto addi = [&](Value a, Value b) -> Value {
+      return rewriter.create<arith::AddIOp>(loc, a, b).getResult();
+    };
+    auto subi = [&](Value a, Value b) -> Value {
+      return rewriter.create<arith::SubIOp>(loc, a, b).getResult();
+    };
+    auto muli = [&](Value a, Value b) -> Value {
+      return rewriter.create<arith::MulIOp>(loc, a, b).getResult();
+    };
+    auto divui = [&](Value a, Value b) -> Value {
+      return rewriter.create<arith::DivUIOp>(loc, a, b).getResult();
+    };
+    auto shliOp = [&](Value v, Value s) -> Value {
+      return rewriter.create<arith::ShLIOp>(loc, v, s).getResult();
+    };
+    auto shruiOp = [&](Value v, Value s) -> Value {
+      return rewriter.create<arith::ShRUIOp>(loc, v, s).getResult();
+    };
+    auto cmpi = [&](arith::CmpIPredicate pred, Value a, Value b) -> Value {
+      return rewriter.create<arith::CmpIOp>(loc, pred, a, b).getResult();
+    };
+    auto eq = [&](Value a, Value b) -> Value {
+      return cmpi(arith::CmpIPredicate::eq, a, b);
+    };
+    auto ne = [&](Value a, Value b) -> Value {
+      return cmpi(arith::CmpIPredicate::ne, a, b);
+    };
+    auto ult = [&](Value a, Value b) -> Value {
+      return cmpi(arith::CmpIPredicate::ult, a, b);
+    };
+    auto sge = [&](Value a, Value b) -> Value {
+      return cmpi(arith::CmpIPredicate::sge, a, b);
+    };
+    auto slt = [&](Value a, Value b) -> Value {
+      return cmpi(arith::CmpIPredicate::slt, a, b);
+    };
+    auto sel = [&](Value cond, Value t, Value f) -> Value {
+      return rewriter.create<arith::SelectOp>(loc, cond, t, f).getResult();
+    };
+    auto bitcast = [&](Value v, Type ty) -> Value {
+      return rewriter.create<arith::BitcastOp>(loc, ty, v).getResult();
+    };
+
+    // CLZ on a 32-bit unsigned value. The running x is re-checked at bit
+    // positions 16/24/28/30/31 (not 16/8/4/2/1: only the first check examines
+    // the original x) and shifted by 16/8/4/2/1 when zero, so the loop adds up
+    // to 31 for x != 0. Called with a 23-bit fraction, so the result spans
+    // [9, 32).
+    auto clz32 = [&](Value x) -> Value {
+      Value outN = cst(0);
+      Value outX = x;
+      auto step = [&](Value checkAmt, Value shiftAmt, Value addAmt, Value nIn,
+                      Value xIn) -> std::pair<Value, Value> {
+        Value isZero = eq(shruiOp(xIn, checkAmt), cst(0));
+        Value nOut = sel(isZero, addi(nIn, addAmt), nIn);
+        Value xOut = sel(isZero, shliOp(xIn, shiftAmt), xIn);
+        return {nOut, xOut};
+      };
+      std::tie(outN, outX) = step(cst(16), cst(16), cst(16), outN, outX);
+      std::tie(outN, outX) = step(cst(24), cst(8), cst(8), outN, outX);
+      std::tie(outN, outX) = step(cst(28), cst(4), cst(4), outN, outX);
+      std::tie(outN, outX) = step(cst(30), cst(2), cst(2), outN, outX);
+      std::tie(outN, outX) = step(cst(31), cst(1), cst(1), outN, outX);
+      return outN;
+    };
+
+    Value lhsBits = bitcast(op.getLhs(), i32Ty);
+    Value rhsBits = bitcast(op.getRhs(), i32Ty);
+
+    // Exponent and fraction fields (unsigned).
+    Value ea = andi(shruiOp(lhsBits, cst(23)), cst(0xFF));
+    Value eb = andi(shruiOp(rhsBits, cst(23)), cst(0xFF));
+    Value fa = andi(lhsBits, cst(0x7FFFFF));
+    Value fb = andi(rhsBits, cst(0x7FFFFF));
+
+    // Special input routing: any NaN/Inf operand, zero dividend or zero
+    // divisor falls back to arith.divf at the end.
+    Value special = ori(eq(ea, cst(255)), eq(eb, cst(255)));
+    special = ori(special, eq(ori(ea, fa), cst(0)));
+    special = ori(special, eq(ori(eb, fb), cst(0)));
+
+    // Result sign: XOR of the operand sign bits.
+    Value signBits = andi(xori(lhsBits, rhsBits), cst(0x80000000));
+
+    // Exact representation value = M * 2^E. Subnormal operands are
+    // normalized to bit 23 (M in [2^23, 2^24)) via CLZ while E is adjusted:
+    //   E = -149 - l, l = clz32(fraction) - 8  ->  E = -(141 + clz32).
+    Value clzA = clz32(fa);
+    Value subA = andi(eq(ea, cst(0)), ne(fa, cst(0)));
+    Value ma = sel(subA, shliOp(fa, subi(clzA, cst(8))),
+                   ori(cst(0x800000), fa));
+    Value eaExp = sel(subA, subi(cst(0), addi(clzA, cst(141))),
+                      subi(ea, cst(150)));
+    // rhs. A zero divisor is special and only feeds the (selected-away)
+    // integer path; keeping it non-zero avoids a runtime div-by-zero in the
+    // arithmetic that still executes.
+    Value clzB = clz32(fb);
+    Value subB = andi(eq(eb, cst(0)), ne(fb, cst(0)));
+    Value mb = sel(subB, shliOp(fb, subi(clzB, cst(8))),
+                   ori(cst(0x800000), fb));
+    Value ebExp = sel(subB, subi(cst(0), addi(clzB, cst(141))),
+                      subi(eb, cst(150)));
+
+    // Normalize Ma/Mb into [1, 2): if Ma < Mb then Ma <<= 1 and e -= 1.
+    Value e0 = subi(eaExp, ebExp);
+    Value less = ult(ma, mb);
+    Value e = sel(less, subi(e0, cst(1)), e0);
+    Value maAdj = sel(less, shliOp(ma, cst(1)), ma);
+
+    // raw = (maAdj << 26) / mb, rem = (maAdj << 26) % mb with an unrolled
+    // base-2^7 long division. After the ratio normalization shift (Ma <<= 1
+    // when Ma < Mb) maAdj can be 25 bits, so the numerator takes 9 digits;
+    // digit i holds N bits [7i, 7i+6] = maAdj bits [7i-26, 7i+6-26].
+    // Every intermediate stays below 2^31 and the accumulator is at most
+    // raw < 2^27 (the true quotient), so only i32 ops are needed.
+    Value digits[9] = {
+        cst(0),                                  // i = 8: maAdj bits [30..36]
+        andi(shruiOp(maAdj, cst(23)), cst(0x7F)),// i = 7: bits [23..29]
+        andi(shruiOp(maAdj, cst(16)), cst(0x7F)),// i = 6: bits [16..22]
+        andi(shruiOp(maAdj, cst(9)), cst(0x7F)), // i = 5: bits [9..15]
+        andi(shruiOp(maAdj, cst(2)), cst(0x7F)), // i = 4: bits [2..8]
+        andi(shliOp(maAdj, cst(5)), cst(0x60)),  // i = 3: bits [0..1]
+        cst(0), cst(0), cst(0)};                  // i = 2..0: none
+    Value raw = cst(0);
+    Value r = cst(0);
+    for (int i = 0; i < 9; ++i) {
+      r = ori(shliOp(r, cst(7)), digits[i]);
+      Value q = divui(r, mb);
+      r = subi(r, muli(q, mb));
+      raw = ori(shliOp(raw, cst(7)), q);
+    }
+    Value rem = r;
+
+    // Round-to-nearest-even on the 27-bit raw quotient (normal result path).
+    Value sig = shruiOp(raw, cst(3)); // in [2^23, 2^24)
+    Value guard = andi(shruiOp(raw, cst(2)), cst(1));
+    Value round = andi(shruiOp(raw, cst(1)), cst(1));
+    Value sticky = ori(andi(raw, cst(1)), ne(rem, cst(0)));
+    Value inc = andi(guard, ori(ori(round, sticky), andi(sig, cst(1))));
+    sig = addi(sig, inc);
+    // Carry: sig == 1 << 24 -> shift right and bump the exponent.
+    Value carry = eq(sig, cst(0x1000000));
+    sig = sel(carry, shruiOp(sig, cst(1)), sig);
+    e = sel(carry, addi(e, cst(1)), e);
+
+    // Normal result: value = sig * 2^(e - 23) with sig in [2^23, 2^24).
+    // Exponent field = 127 + (e - 23) + 23 = e + 127; normal iff e >= -126.
+    // e >= 128 overflows to +/-Inf.
+    Value field = addi(e, cst(127));
+    Value normalBits =
+        ori(signBits, ori(shliOp(field, cst(23)), andi(sig, cst(0x7FFFFF))));
+    Value infBits = ori(signBits, cst(0x7F800000));
+
+    // Subnormal / underflow: exact fraction = (Ma/Mb) * 2^(e + 149) with
+    // 26 significant bits comes from q = (Ma << shift) / Mb, shift = e + 152.
+    // With raw = (Ma << 26) / Mb and s = 26 - shift, q == raw >> s and the
+    // remainder sticky for that division is (raw & (2^s - 1)) != 0 || rem != 0,
+    // plus the quotient LSB (bit s of raw). e < -151 underflows to zero.
+    Value shift = addi(e, cst(152));
+    Value s = subi(cst(26), shift);
+    Value sigSub = shruiOp(raw, addi(s, cst(3))); // < 2^23
+    Value guardSub = andi(shruiOp(raw, addi(s, cst(2))), cst(1));
+    Value roundSub = andi(shruiOp(raw, addi(s, cst(1))), cst(1));
+    Value maskSub = subi(shliOp(cst(1), s), cst(1));
+    Value stickySub = ori(ne(andi(raw, maskSub), cst(0)), ne(rem, cst(0)));
+    stickySub = ori(stickySub, andi(shruiOp(raw, s), cst(1)));
+    Value incSub =
+        andi(guardSub, ori(ori(roundSub, stickySub), andi(sigSub, cst(1))));
+    sigSub = addi(sigSub, incSub);
+    // Carry past 23 fraction bits -> the minimum normal 2^-126.
+    Value subCarry = eq(sigSub, cst(0x800000));
+    sigSub = sel(subCarry, cst(0), sigSub);
+    Value minNormalBits = ori(signBits, shliOp(cst(1), cst(23)));
+    Value subBits = sel(subCarry, minNormalBits, ori(signBits, sigSub));
+
+    // Final branch selection:
+    //   e >= 128         -> +/-Inf
+    //   -126 <= e < 128  -> normal (field = e + 127)
+    //   -151 <= e < -126 -> subnormal fraction
+    //   e < -151         -> signed zero
+    Value overflowCond = sge(e, cst(128));
+    Value normalCond = sge(e, cst(-126));
+    Value subnormalCond = andi(sge(e, cst(-151)), slt(e, cst(-126)));
+    Value mainBits = sel(overflowCond, infBits, normalBits);
+    Value lowBits = sel(subnormalCond, subBits, signBits);
+    Value resultBits = sel(normalCond, mainBits, lowBits);
+
+    Value computed = bitcast(resultBits, f32Ty);
+    Value divfFallback =
+        rewriter.create<arith::DivFOp>(loc, op.getLhs(), op.getRhs())
+            .getResult();
+    rewriter.replaceOp(op, sel(special, divfFallback, computed));
+    return success();
+  }
+};
+
 struct AtomicCtrlUpdate {
+
   uint64_t mask;
   uint64_t value;
 };
@@ -2181,6 +2438,7 @@ struct VPTOExpandWrapperOpsPass
                  ExpandAccStoreGmPattern,
                  ExpandAccStoreUbPattern,
                  ExpandSimtLaunchPattern,
+                 ExpandFDivHpPattern,
                  ExpandAtomicConfigPattern<pto::SetAtomicAddOp>,
                  ExpandAtomicConfigPattern<pto::SetAtomicMaxOp>,
                  ExpandAtomicConfigPattern<pto::SetAtomicMinOp>,

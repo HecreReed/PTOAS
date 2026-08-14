@@ -987,6 +987,36 @@ def PTO_FmaOp
   }];
 }
 
+def PTO_FDivHPOp
+    : PTO_SimtOp<"fdiv_hp", [Pure, AllTypesMatch<["lhs", "rhs", "result"]>]> {
+  let summary = "A5 SIMT scalar FP32 correctly-rounded (round-to-nearest-even) division.";
+  let description = [{
+    Perform IEEE-754 FP32 division with correct rounding (round-to-nearest-even)
+    on the A5 SIMT scalar pipeline. The operation is expanded by
+    ``vpto-expand-wrapper-ops`` into a pure ``arith`` integer sequence that
+    bit-casts the operands, reconstructs the exact quotient, and applies
+    guard/round/sticky round-to-nearest-even rounding; therefore it is
+    independent of the target's native ``fdiv`` precision.
+
+    Special inputs (NaN, Inf, zero divisor, zero dividend) fall back to the
+    raw ``arith.divf`` result so that the target backend's special-value
+    behavior is preserved bit-for-bit.
+
+    Constraints and limitations:
+    - A5 target only; FP32 scalar operands only. f16, bf16, packed vectors and
+      other targets are not supported in this first version.
+    - Expansion is a long integer sequence (~200 ops), so this operation is
+      significantly slower than plain ``arith.divf``.
+  }];
+
+  let arguments = (ins F32:$lhs, F32:$rhs);
+  let results = (outs F32:$result);
+
+  let assemblyFormat = [{
+    $lhs `,` $rhs attr-dict `:` type($lhs) `,` type($rhs) `->` type($result)
+  }];
+}
+
 def PTO_ConvertOp : PTO_SimtOp<"convert", [Pure]> {
   let arguments = (ins
     PTO_SimtConvertValueType:$src,

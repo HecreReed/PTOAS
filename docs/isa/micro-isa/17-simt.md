@@ -920,6 +920,32 @@ else:
   `vector<2xf16>`, or `vector<2xbf16>`. For vector types, fused multiply-add is
   computed element-wise.
 
+### `pto.fdiv_hp`
+
+- **syntax:** `%r = pto.fdiv_hp %a, %b : f32, f32 -> f32`
+- **semantics:** Return `%a / %b` with IEEE-754 correct rounding
+  (round-to-nearest-even) on the A5 SIMT scalar pipeline. Unlike `arith.divf`
+  (and plain Python `/` in PTODSL, which still lowers to `arith.divf`), the
+  result does not inherit the precision of the target's native scalar `fdiv`.
+  The operation is expanded by `vpto-expand-wrapper-ops` into a pure
+  `arith` integer sequence that bit-casts both operands, reconstructs the
+  exact quotient, and applies guard/round/sticky round-to-nearest-even
+  rounding, so the result is correctly rounded regardless of the backend
+  `fdiv` implementation.
+- **special values:** NaN, ±Inf, ±0 and zero-divisor inputs fall back to the
+  raw `arith.divf` result, preserving the target backend's special-value
+  behavior bit-for-bit (for example, 0/0 → NaN and x/0 → ±Inf follow the
+  native implementation).
+- **inputs:** `%a` and `%b` are `f32` scalars.
+- **outputs:** One `f32` scalar.
+- **constraints and limitations:** A5 target only, scalar `f32` operands
+  only. `f16`, `bf16`, packed vector operands and non-A5 targets are not
+  supported in this first version. The expansion is a long integer sequence
+  (~200 ops, including an unrolled 32-bit long division), so `pto.fdiv_hp`
+  is significantly slower than `arith.divf`; use it only where correctly
+  rounded FP32 division matters (for example, matching a reference
+  implementation bit-for-bit).
+
 ---
 
 ## SIMT Conversion Op
