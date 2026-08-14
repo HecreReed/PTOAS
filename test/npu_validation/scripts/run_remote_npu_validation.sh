@@ -15,7 +15,7 @@ SOC_VERSION="${SOC_VERSION:-Ascend910}"
 GOLDEN_MODE="${GOLDEN_MODE:-npu}"  # sim|npu|skip
 PTO_ISA_REPO="${PTO_ISA_REPO:-https://gitcode.com/cann/pto-isa.git}"
 PTO_ISA_COMMIT="${PTO_ISA_COMMIT:-27386d906e8fdcbd93aec84197939bc0b2c6caea}"
-DEVICE_ID="${DEVICE_ID:-0}"
+DEVICE_ID="${DEVICE_ID:-}"
 SKIP_CASES="${SKIP_CASES:-}"          # comma/space separated testcase names
 RUN_ONLY_CASES="${RUN_ONLY_CASES:-}"  # comma/space separated testcase names or model groups
 
@@ -224,7 +224,7 @@ discover_cann_host_include_dirs() {
 log "=== Remote NPU Validation ==="
 log "STAGE=${STAGE} RUN_MODE=${RUN_MODE} SOC_VERSION=${SOC_VERSION}"
 log "GOLDEN_MODE=${GOLDEN_MODE}"
-log "DEVICE_ID=${DEVICE_ID}"
+log "DEVICE_ID=${DEVICE_ID:-auto}"
 log "PTO_ISA_REPO=${PTO_ISA_REPO}"
 log "PTO_ISA_COMMIT=${PTO_ISA_COMMIT}"
 log "ROOT_DIR=${ROOT_DIR}"
@@ -514,12 +514,57 @@ if [[ "${STAGE}" == "run" && "${RUN_MODE}" == "npu" ]]; then
   log "=== NPU Device Check ==="
   id || true
   ls -l /dev/davinci* 2>/dev/null || true
-  devnode="/dev/davinci${DEVICE_ID}"
-  [[ -e "${devnode}" ]] || { log "ERROR: ${devnode} not found"; exit 1; }
-  [[ -r "${devnode}" && -w "${devnode}" ]] || {
-    log "ERROR: no access to ${devnode} (need HwHiAiUser group)";
-    exit 1;
+  available_devnodes=()
+  visible_phys_ids=()
+  shopt -s nullglob
+  for devnode in /dev/davinci[0-9]*; do
+    [[ -r "${devnode}" && -w "${devnode}" ]] || {
+      log "WARN: skip ${devnode} (need read/write access)"
+      continue
+    }
+    available_devnodes+=("${devnode}")
+  done
+  shopt -u nullglob
+  [[ ${#available_devnodes[@]} -gt 0 ]] || {
+    log "ERROR: no accessible /dev/davinciN device found"
+    exit 1
   }
+
+  # The device node suffix is a physical id, while ACL_DEVICE_ID is logical
+  # inside a container. For example, ASCEND_VISIBLE_DEVICES=7 exposes
+  # /dev/davinci7 but the process must select logical device 0.
+  if [[ -n "${ASCEND_VISIBLE_DEVICES:-}" ]]; then
+    IFS=',' read -r -a _visible_devices <<< "${ASCEND_VISIBLE_DEVICES}"
+    unset IFS
+    for physical_id in "${_visible_devices[@]}"; do
+      physical_id="${physical_id//[[:space:]]/}"
+      [[ "${physical_id}" =~ ^[0-9]+$ ]] || continue
+      visible_phys_ids+=("${physical_id}")
+    done
+  fi
+
+  if [[ ${#visible_phys_ids[@]} -gt 0 ]]; then
+    logical_count=${#visible_phys_ids[@]}
+    log "ASCEND_VISIBLE_DEVICES=${ASCEND_VISIBLE_DEVICES} (logical count=${logical_count})"
+  else
+    logical_count=${#available_devnodes[@]}
+    log "ASCEND_VISIBLE_DEVICES not set; fallback logical count from /dev nodes=${logical_count}"
+  fi
+
+  if [[ -z "${DEVICE_ID}" ]]; then
+    DEVICE_ID=0
+    log "Auto-select logical DEVICE_ID=${DEVICE_ID}"
+  else
+    [[ "${DEVICE_ID}" =~ ^[0-9]+$ ]] || {
+      log "ERROR: DEVICE_ID must be a non-negative integer, got: ${DEVICE_ID}"
+      exit 1
+    }
+    if [[ ${#visible_phys_ids[@]} -gt 0 ]] \
+       && (( DEVICE_ID >= logical_count )); then
+      log "ERROR: DEVICE_ID=${DEVICE_ID} out of logical range [0, ${logical_count}) under ASCEND_VISIBLE_DEVICES=${ASCEND_VISIBLE_DEVICES}"
+      exit 1
+    fi
+  fi
   python3 -c "import numpy as np; print('numpy', np.__version__)" >/dev/null
 fi
 
