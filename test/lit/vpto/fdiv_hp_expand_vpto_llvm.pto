@@ -25,9 +25,14 @@ module attributes {"pto.target_arch" = "a5", pto.kernel_kind = #pto.kernel_kind<
   }
 
   func.func @fdiv_hp_simt(%lhs: !pto.ptr<f32, gm>, %rhs: !pto.ptr<f32, gm>, %dst: !pto.ptr<f32, gm>) attributes {pto.simt_entry} {
-    %c1 = arith.constant 1.000000e+00 : f32
-    %c7 = arith.constant 7.000000e+00 : f32
-    %q = pto.fdiv_hp %c1, %c7 : f32, f32 -> f32
+    // The result is stored back to memory so it stays live through the
+    // canonicalization/SCCP passes that run before vpto-expand-wrapper-ops
+    // (an unused pto.fdiv_hp is pure and would be dead-code eliminated).
+    %c0 = arith.constant 0 : index
+    %l = pto.ldg %lhs[%c0] : !pto.ptr<f32, gm> -> f32
+    %r = pto.ldg %rhs[%c0] : !pto.ptr<f32, gm> -> f32
+    %q = pto.fdiv_hp %l, %r : f32, f32 -> f32
+    pto.stg %q, %dst[%c0] : !pto.ptr<f32, gm>, f32
     return
   }
 }
