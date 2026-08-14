@@ -409,11 +409,16 @@ stage_ptoas_wheel() {
     "${PACKAGE_STAGE_PATH}/tools/ptoas/wheels"
 
   echo "Building PTOAS wheel"
+  "${python_bin}" -m pip install --no-cache-dir \
+    numpy \
+    'pybind11<3' \
+    'scikit-build-core>=0.12.2,<2'
   CMAKE_BUILD_PARALLEL_LEVEL="${JOBS}" \
   SKBUILD_BUILD_DIR="${BUILD_PATH}" \
   LLVM_BUILD_DIR="${LLVM_BUILD_DIR}" \
     "${python_bin}" -m pip wheel "${BASE_PATH}" \
       --use-feature=in-tree-build \
+      --no-build-isolation \
       --no-deps \
       --wheel-dir "${wheel_dist}"
   "${python_bin}" "${BASE_PATH}/docker/validate_wheel_payload.py" \
