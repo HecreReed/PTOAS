@@ -382,33 +382,67 @@ build_only() {
   echo "execute samples success"
 }
 
-# Stage the PTOAS executable and its runtime dependencies under the CANN package
-# layout. The smoke image already puts /usr/local/Ascend/tools/ptoas/bin on
-# PATH; installing the raw CMake tree would instead place ptoas in
-# /usr/local/Ascend/bin, where test/samples/runop.sh cannot find it.
-stage_ptoas_runtime() {
-  local staged_bin="${PACKAGE_STAGE_PATH}/tools/ptoas/bin/ptoas"
-  local staged_lib_dir="${PACKAGE_STAGE_PATH}/tools/ptoas/lib"
+# Build the Python distribution used by the installed ptoas console entry.
+# The current tree intentionally does not ship a native _runtime/bin/ptoas:
+# pyproject.toml exposes ptoas._cli:main and the wheel owns the Python package,
+# native extensions, TileOps resources, and console script as one unit.
+stage_ptoas_wheel() {
+  local python_bin
+  python_bin="$(command -v python3 || command -v python)"
+  local wheel_dist="${BUILD_PATH}/wheel-dist"
+  local wheelhouse="${BUILD_PATH}/wheelhouse"
+  local python_scripts
+  python_scripts="$("${python_bin}" -c 'import sysconfig; print(sysconfig.get_path("scripts"))')"
+  local wheel_arch
 
-  rm -rf "${PACKAGE_STAGE_PATH}"
-  mkdir -p "$(dirname "${staged_bin}")" "${staged_lib_dir}"
-  PTO_INSTALL_DIR="${INSTALL_PATH}" \
-  LLVM_RUNTIME_LIB_DIR="${LLVM_BUILD_DIR}/lib" \
-  LLVM_STRIP_BIN="${LLVM_BUILD_DIR}/bin/llvm-strip" \
-    bash "${BASE_PATH}/scripts/package/collect_ptoas_runtime_deps.sh" \
-      "${BASE_PATH}" \
-      "${INSTALL_PATH}/bin/ptoas" \
-      "${staged_bin}" \
-      "${staged_lib_dir}"
+  case "$(uname -m)" in
+    aarch64|arm64) wheel_arch="aarch64" ;;
+    x86_64|amd64) wheel_arch="x86_64" ;;
+    *)
+      echo "ERROR: unsupported wheel architecture: $(uname -m)" >&2
+      exit 1
+      ;;
+  esac
 
-  test -x "${staged_bin}"
-  test -x "${staged_bin}.real"
-  echo "staged ptoas runtime: ${staged_bin}"
+  rm -rf "${wheel_dist}" "${wheelhouse}" "${PACKAGE_STAGE_PATH}"
+  mkdir -p "${wheel_dist}" "${wheelhouse}" \
+    "${PACKAGE_STAGE_PATH}/tools/ptoas/wheels"
+
+  echo "Building PTOAS wheel"
+  CMAKE_BUILD_PARALLEL_LEVEL="${JOBS}" \
+  SKBUILD_BUILD_DIR="${BUILD_PATH}" \
+  LLVM_BUILD_DIR="${LLVM_BUILD_DIR}" \
+    "${python_bin}" -m pip wheel "${BASE_PATH}" \
+      --no-deps \
+      --wheel-dir "${wheel_dist}"
+  "${python_bin}" "${BASE_PATH}/docker/validate_wheel_payload.py" \
+    "${wheel_dist}"
+
+  # The GitCode build uses the cached shared LLVM tree. Repairing the wheel
+  # makes those DSOs package-relative so the smoke job does not depend on the
+  # build cache still being mounted when the .run artifact is installed.
+  if [ ! -x "${python_scripts}/auditwheel" ] \
+     || ! PATH="${python_scripts}:${PATH}" command -v patchelf >/dev/null 2>&1; then
+    "${python_bin}" -m pip install --no-cache-dir auditwheel patchelf
+  fi
+  PATH="${python_scripts}:${PATH}" \
+  LD_LIBRARY_PATH="${LLVM_BUILD_DIR}/lib${LD_LIBRARY_PATH:+:${LD_LIBRARY_PATH}}" \
+    "${python_scripts}/auditwheel" repair \
+      --plat "manylinux_2_34_${wheel_arch}" \
+      --wheel-dir "${wheelhouse}" \
+      "${wheel_dist}"/ptoas*.whl
+  "${python_bin}" "${BASE_PATH}/docker/validate_wheel_payload.py" \
+    "${wheelhouse}"
+
+  cp "${wheelhouse}"/ptoas*.whl \
+    "${PACKAGE_STAGE_PATH}/tools/ptoas/wheels/"
+  echo "staged ptoas wheel: $(basename "${PACKAGE_STAGE_PATH}"/tools/ptoas/wheels/ptoas*.whl)"
 }
 
-# Package the CANN-compatible runtime tree into a self-extracting .run
-# installer under build_out. The gitcode smoke pipeline looks for
-# build_out/*.run and drives it with --full / --uninstall.
+# Package the wheel into a self-extracting .run installer under build_out. The
+# GitCode smoke pipeline invokes the artifact with --full / --uninstall. Keep
+# the wheel installer here because the legacy install-tree helper only extracts
+# files and cannot create the Python console entry required by runop.sh.
 make_ptoas_run() {
   local arch
   arch="$(uname -m)"
@@ -418,12 +452,142 @@ make_ptoas_run() {
   # underscore form so the uploader can resolve the package; the versioned file
   # is the one the pipeline's pto-as_compile.sh drives with --full/--uninstall.
   local run_file="${BUILD_OUT_PATH}/cann-pto-as_${PTOAS_PACKAGE_VERSION}_linux-${arch}.run"
-  bash "${BASE_PATH}/scripts/package/make_ptoas_run.sh" \
-    "${BASE_PATH}" \
-    "${PACKAGE_STAGE_PATH}" \
-    "${run_file}" \
-    "${PTOAS_PACKAGE_VERSION}" \
-    "ptoas"
+  local stub_file
+  stub_file="$(mktemp)"
+
+  cat > "${stub_file}" <<'STUB'
+#!/bin/bash
+set -e
+
+VERSION="@VERSION_AT_PACKAGE_TIME@"
+PACKAGE="ptoas"
+INSTALL_PATH=""
+ACTION=""
+
+usage() {
+  echo "Usage: $0 [--full|--install] [--uninstall] [--check] [--help] [--install-path=<dir>]"
+  echo "  --full, --install    Install the bundled PTOAS wheel"
+  echo "  --uninstall          Uninstall the PTOAS wheel"
+  echo "  --check              Verify the archive payload integrity"
+  echo "  --install-path=<dir> Store the bundled wheel under this directory"
+}
+
+for arg in "$@"; do
+  case "${arg}" in
+    --full|--install) ACTION="install" ;;
+    --uninstall) ACTION="uninstall" ;;
+    --check|--verify) ACTION="check" ;;
+    --install-path=*) INSTALL_PATH="${arg#--install-path=}" ;;
+    --quiet) ;;
+    --help|-h) usage; exit 0 ;;
+    *) echo "Warning: ignoring unknown argument: ${arg}" >&2 ;;
+  esac
+done
+
+[ -z "${INSTALL_PATH}" ] && INSTALL_PATH="/usr/local/Ascend/${PACKAGE}-${VERSION}"
+RECORD_DIR="${INSTALL_PATH}/tools/ptoas/.wheel-install"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SCRIPT_NAME="$(basename "${BASH_SOURCE[0]}")"
+PAYLOAD_START="$(awk '/^#__PTOAS_ARCHIVE_MARKER__$/ { print NR + 1; exit }' "${SCRIPT_DIR}/${SCRIPT_NAME}")"
+
+if [ -z "${PAYLOAD_START}" ]; then
+  echo "ERROR: archive payload marker not found" >&2
+  exit 1
+fi
+
+resolve_python() {
+  if [ -n "${PTOAS_PYTHON:-}" ]; then
+    command -v "${PTOAS_PYTHON}"
+  else
+    command -v python3 || command -v python
+  fi
+}
+
+case "${ACTION}" in
+  install)
+    python_bin="$(resolve_python)"
+    mkdir -p "${INSTALL_PATH}"
+    tail -n +"${PAYLOAD_START}" "${SCRIPT_DIR}/${SCRIPT_NAME}" \
+      | tar xzf - -C "${INSTALL_PATH}"
+
+    shopt -s nullglob
+    wheels=("${INSTALL_PATH}"/tools/ptoas/wheels/ptoas*.whl)
+    shopt -u nullglob
+    if [ "${#wheels[@]}" -ne 1 ]; then
+      echo "ERROR: expected one bundled ptoas wheel, found ${#wheels[@]}" >&2
+      exit 1
+    fi
+
+    "${python_bin}" -m pip install --no-deps --force-reinstall "${wheels[0]}"
+    scripts_dir="$("${python_bin}" -c 'import sysconfig; print(sysconfig.get_path("scripts"))')"
+    entrypoint="${scripts_dir}/ptoas"
+    if [ ! -x "${entrypoint}" ]; then
+      echo "ERROR: pip did not create the ptoas console entry: ${entrypoint}" >&2
+      exit 1
+    fi
+
+    mkdir -p "${RECORD_DIR}"
+    printf '%s\n' "${python_bin}" > "${RECORD_DIR}/python"
+    resolved_entry="$(command -v ptoas 2>/dev/null || true)"
+    if [ "${resolved_entry}" != "${entrypoint}" ]; then
+      link_dir=""
+      if [[ ":${PATH}:" == *":/usr/local/bin:"* ]] && [ -w /usr/local/bin ]; then
+        link_dir="/usr/local/bin"
+      else
+        old_ifs="${IFS}"
+        IFS=':'
+        for path_dir in ${PATH}; do
+          if [ -n "${path_dir}" ] && [ -d "${path_dir}" ] && [ -w "${path_dir}" ]; then
+            link_dir="${path_dir}"
+            break
+          fi
+        done
+        IFS="${old_ifs}"
+      fi
+      if [ -z "${link_dir}" ]; then
+        echo "ERROR: ptoas was installed outside PATH and no writable PATH directory exists" >&2
+        exit 1
+      fi
+      ln -sfn "${entrypoint}" "${link_dir}/ptoas"
+      printf '%s\n' "${link_dir}/ptoas" > "${RECORD_DIR}/console-link"
+    fi
+
+    command -v ptoas >/dev/null
+    ptoas --version
+    echo "Install succeeded: ${INSTALL_PATH}"
+    ;;
+  uninstall)
+    python_bin="$(resolve_python)"
+    if [ -f "${RECORD_DIR}/python" ]; then
+      recorded_python="$(head -n 1 "${RECORD_DIR}/python")"
+      [ -x "${recorded_python}" ] && python_bin="${recorded_python}"
+    fi
+    if [ -f "${RECORD_DIR}/console-link" ]; then
+      console_link="$(head -n 1 "${RECORD_DIR}/console-link")"
+      [ -L "${console_link}" ] && rm -f "${console_link}"
+    fi
+    "${python_bin}" -m pip uninstall -y ptoas
+    rm -rf "${INSTALL_PATH}/tools/ptoas/wheels" "${RECORD_DIR}"
+    echo "Uninstall succeeded: ptoas wheel removed"
+    ;;
+  check|*)
+    if tail -n +"${PAYLOAD_START}" "${SCRIPT_DIR}/${SCRIPT_NAME}" | tar tzf - >/dev/null; then
+      echo "Payload OK"
+    else
+      echo "ERROR: payload integrity check failed" >&2
+      exit 1
+    fi
+    ;;
+esac
+STUB
+
+  sed "s|@VERSION_AT_PACKAGE_TIME@|${PTOAS_PACKAGE_VERSION}|g" \
+    "${stub_file}" > "${run_file}"
+  rm -f "${stub_file}"
+  echo "#__PTOAS_ARCHIVE_MARKER__" >> "${run_file}"
+  tar czf - -C "${PACKAGE_STAGE_PATH}" . >> "${run_file}"
+  chmod 755 "${run_file}"
+  echo "Built ${run_file} ($(du -h "${run_file}" | cut -f1))"
   echo "run package: ${run_file}"
 }
 
@@ -433,7 +597,6 @@ package() {
   ensure_llvm_build
   configure_ptoas
   cmake --build "${BUILD_PATH}" -- -j "${JOBS}"
-  cmake --install "${BUILD_PATH}"
 
   # Distill the version used for the .run package name. The CANN product version
   # (9.2.0 for this release train) differs from project(ptoas VERSION 0.57), so
@@ -443,7 +606,7 @@ package() {
   # Stage the .run installer(s) under build_out for the pipeline to consume.
   rm -rf "${BUILD_OUT_PATH}"
   mkdir -p "${BUILD_OUT_PATH}"
-  stage_ptoas_runtime
+  stage_ptoas_wheel
   make_ptoas_run
   echo "package staged under ${BUILD_OUT_PATH}"
   # Diagnostics: the OBS uploader reads build_out via the host path
