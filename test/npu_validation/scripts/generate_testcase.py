@@ -2427,6 +2427,20 @@ endif()
             kernel_info["aiv_text"],
         )
 
+    kernel_definition = next(
+        (
+            function
+            for function in _extract_aicore_functions(kernel_text_out)
+            if function["name"] == kernel_name and function["is_global"]
+        ),
+        None,
+    )
+    kernel_linkage = (
+        'extern "C" '
+        if kernel_definition is not None and kernel_definition["is_extern_c"]
+        else ""
+    )
+
     kernel_out = output_dir / f"{testcase}_kernel.cpp"
     kernel_out.write_text(_replace_includes(kernel_text_out), encoding="utf-8")
 
@@ -2449,9 +2463,9 @@ endif()
         INCLUDE_REPLACEMENT
         + "\n"
         "#if defined(__CCE_AICORE__)\n"
-        f"extern \"C\" __global__ AICORE void {kernel_name}({', '.join(raw_params)});\n"
+        f"{kernel_linkage}__global__ AICORE void {kernel_name}({', '.join(raw_params)});\n"
         "#else\n"
-        f"extern \"C\" __global__ AICORE void {kernel_name}({', '.join(raw_params_host)});\n"
+        f"{kernel_linkage}__global__ AICORE void {kernel_name}({', '.join(raw_params_host)});\n"
         "#endif\n\n"
         f"extern \"C\" void {launch_name}({launch_fn_params}) {{\n"
         "#if defined(__CCE_AICORE__)\n"

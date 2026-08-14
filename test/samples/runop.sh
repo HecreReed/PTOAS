@@ -1434,6 +1434,21 @@ PY
         fi
       fi
 
+      # The A3 TPRELU runtime contract requires both TLOAD->TPRELU and
+      # TPRELU->TSTORE handshakes. Keep this direct PTO sample explicit because
+      # it is part of the board smoke payload and silent omission is
+      # nondeterministic on hardware.
+      if [[ "$base" == "prelu-pto" ]]; then
+        if ! grep -Fq "set_flag(PIPE_MTE2, PIPE_V, EVENT_ID0);" "$cpp" || \
+           ! grep -Fq "wait_flag(PIPE_MTE2, PIPE_V, EVENT_ID0);" "$cpp" || \
+           ! grep -Fq "set_flag(PIPE_V, PIPE_MTE3, EVENT_ID0);" "$cpp" || \
+           ! grep -Fq "wait_flag(PIPE_V, PIPE_MTE3, EVENT_ID0);" "$cpp"; then
+          echo -e "${A}(${base}.pto)\tFAIL\tmissing required A3 TPRELU pipe synchronization"
+          overall=1
+          continue
+        fi
+      fi
+
       # Regression guard: intra-pipe dependencies must be serialized by a
       # per-pipe barrier (PyPTO expects `bar_v` / `bar_m` behavior).
       if [[ "$base" == "test_inject_sync_intra_pipe_barrier" ]]; then
