@@ -394,6 +394,8 @@ stage_ptoas_wheel() {
   local python_scripts
   python_scripts="$("${python_bin}" -c 'import sysconfig; print(sysconfig.get_path("scripts"))')"
   local wheel_arch
+  local repair_plat
+  local repair_succeeded=false
 
   case "$(uname -m)" in
     aarch64|arm64) wheel_arch="aarch64" ;;
@@ -431,12 +433,33 @@ stage_ptoas_wheel() {
      || ! PATH="${python_scripts}:${PATH}" command -v patchelf >/dev/null 2>&1; then
     "${python_bin}" -m pip install --no-cache-dir auditwheel patchelf
   fi
-  PATH="${python_scripts}:${PATH}" \
-  LD_LIBRARY_PATH="${LLVM_BUILD_DIR}/lib${LD_LIBRARY_PATH:+:${LD_LIBRARY_PATH}}" \
-    "${python_scripts}/auditwheel" repair \
-      --plat "manylinux_2_34_${wheel_arch}" \
-      --wheel-dir "${wheelhouse}" \
-      "${wheel_dist}"/ptoas*.whl
+  # The shared LLVM cache is built by the GitCode image rather than the
+  # manylinux_2_34 container used by the release workflow. Its versioned
+  # symbols can therefore require a newer PEP 600 policy. Try supported
+  # policies in compatibility order and keep the oldest one auditwheel can
+  # honestly assign to this wheel.
+  for repair_plat in \
+    "manylinux_2_34_${wheel_arch}" \
+    "manylinux_2_35_${wheel_arch}" \
+    "manylinux_2_36_${wheel_arch}" \
+    "manylinux_2_37_${wheel_arch}" \
+    "manylinux_2_38_${wheel_arch}" \
+    "manylinux_2_39_${wheel_arch}"; do
+    echo "Trying auditwheel platform: ${repair_plat}"
+    if PATH="${python_scripts}:${PATH}" \
+       LD_LIBRARY_PATH="${LLVM_BUILD_DIR}/lib${LD_LIBRARY_PATH:+:${LD_LIBRARY_PATH}}" \
+         "${python_scripts}/auditwheel" repair \
+           --plat "${repair_plat}" \
+           --wheel-dir "${wheelhouse}" \
+           "${wheel_dist}"/ptoas*.whl; then
+      repair_succeeded=true
+      break
+    fi
+  done
+  if [ "${repair_succeeded}" != true ]; then
+    echo "ERROR: auditwheel could not repair the PTOAS wheel with a supported policy" >&2
+    exit 1
+  fi
   "${python_bin}" "${BASE_PATH}/docker/validate_wheel_payload.py" \
     "${wheelhouse}"
 
