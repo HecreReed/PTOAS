@@ -47,7 +47,6 @@ module attributes {"pto.target_arch" = "a5", pto.kernel_kind = #pto.kernel_kind<
 // EXPAND-LABEL: func.func @fdiv_hp_kernel(
 // EXPAND-NOT: pto.fdiv_hp
 // EXPAND: pto.ldg
-// EXPAND: pto.stg
 // EXPAND: arith.bitcast
 // EXPAND: arith.divf
 // EXPAND: arith.divui
@@ -55,6 +54,7 @@ module attributes {"pto.target_arch" = "a5", pto.kernel_kind = #pto.kernel_kind<
 // EXPAND: arith.select
 // EXPAND-DAG: arith.constant 152 : i32
 // EXPAND-DAG: arith.constant -126 : i32
+// EXPAND: pto.stg
 // EXPAND-NOT: pto.fdiv_hp
 
 // The expanded integer sequence must survive conversion to LLVM IR:
