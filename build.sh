@@ -597,6 +597,9 @@ case "${ACTION}" in
     fi
     "${python_bin}" -m pip uninstall -y ptoas
     rm -rf "${INSTALL_PATH}/tools/ptoas/wheels" "${RECORD_DIR}"
+    rmdir "${INSTALL_PATH}/tools/ptoas" 2>/dev/null || true
+    rmdir "${INSTALL_PATH}/tools" 2>/dev/null || true
+    rmdir "${INSTALL_PATH}" 2>/dev/null || true
     echo "Uninstall succeeded: ptoas wheel removed"
     ;;
   check|*)
@@ -608,6 +611,7 @@ case "${ACTION}" in
     fi
     ;;
 esac
+exit 0
 STUB
 
   sed "s|@VERSION_AT_PACKAGE_TIME@|${PTOAS_PACKAGE_VERSION}|g" \
