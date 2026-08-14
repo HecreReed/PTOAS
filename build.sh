@@ -394,6 +394,7 @@ stage_ptoas_wheel() {
   local python_scripts
   python_scripts="$("${python_bin}" -c 'import sysconfig; print(sysconfig.get_path("scripts"))')"
   local wheel_arch
+  local wheel_feature_args=()
   local repair_plat
   local repair_succeeded=false
 
@@ -415,11 +416,18 @@ stage_ptoas_wheel() {
     numpy \
     'pybind11<3' \
     'scikit-build-core>=0.12.2,<2'
+  # pip 21.2 copies local projects out of tree unless this transitional
+  # feature is enabled, which conflicts with the existing CMake cache. Newer
+  # pip builds in tree by default and has removed the feature flag entirely.
+  if "${python_bin}" -m pip wheel \
+       --use-feature=in-tree-build --help >/dev/null 2>&1; then
+    wheel_feature_args+=(--use-feature=in-tree-build)
+  fi
   CMAKE_BUILD_PARALLEL_LEVEL="${JOBS}" \
   SKBUILD_BUILD_DIR="${BUILD_PATH}" \
   LLVM_BUILD_DIR="${LLVM_BUILD_DIR}" \
     "${python_bin}" -m pip wheel "${BASE_PATH}" \
-      --use-feature=in-tree-build \
+      "${wheel_feature_args[@]}" \
       --no-build-isolation \
       --no-deps \
       --wheel-dir "${wheel_dist}"
