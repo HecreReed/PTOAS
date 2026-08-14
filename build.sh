@@ -30,6 +30,7 @@ export BASE_PATH=$(
 export BUILD_PATH="${BASE_PATH}/build"
 export BUILD_OUT_PATH="${BASE_PATH}/build_out"
 export INSTALL_PATH="${BASE_PATH}/install"
+export PACKAGE_STAGE_PATH="${BUILD_PATH}/package_runtime"
 export LLVM_SOURCE_VERSION="19.1.7"
 # The PTOAS tree is built against the vpto-dev LLVM/MLIR 19 "feature-vpto"
 # branch (source of custom calling conventions such as SimtEntry). Source it
@@ -381,10 +382,33 @@ build_only() {
   echo "execute samples success"
 }
 
-# Stage the installed PTOAS tree into a self-extracting .run installer under
-# build_out. The gitcode smoke pipeline looks for build_out/*.run and drives it
-# with --full / --uninstall to verify the package, so the payload is the whole
-# install tree produced by cmake --install.
+# Stage the PTOAS executable and its runtime dependencies under the CANN package
+# layout. The smoke image already puts /usr/local/Ascend/tools/ptoas/bin on
+# PATH; installing the raw CMake tree would instead place ptoas in
+# /usr/local/Ascend/bin, where test/samples/runop.sh cannot find it.
+stage_ptoas_runtime() {
+  local staged_bin="${PACKAGE_STAGE_PATH}/tools/ptoas/bin/ptoas"
+  local staged_lib_dir="${PACKAGE_STAGE_PATH}/tools/ptoas/lib"
+
+  rm -rf "${PACKAGE_STAGE_PATH}"
+  mkdir -p "$(dirname "${staged_bin}")" "${staged_lib_dir}"
+  PTO_INSTALL_DIR="${INSTALL_PATH}" \
+  LLVM_RUNTIME_LIB_DIR="${LLVM_BUILD_DIR}/lib" \
+  LLVM_STRIP_BIN="${LLVM_BUILD_DIR}/bin/llvm-strip" \
+    bash "${BASE_PATH}/scripts/package/collect_ptoas_runtime_deps.sh" \
+      "${BASE_PATH}" \
+      "${INSTALL_PATH}/bin/ptoas" \
+      "${staged_bin}" \
+      "${staged_lib_dir}"
+
+  test -x "${staged_bin}"
+  test -x "${staged_bin}.real"
+  echo "staged ptoas runtime: ${staged_bin}"
+}
+
+# Package the CANN-compatible runtime tree into a self-extracting .run
+# installer under build_out. The gitcode smoke pipeline looks for
+# build_out/*.run and drives it with --full / --uninstall.
 make_ptoas_run() {
   local arch
   arch="$(uname -m)"
@@ -396,7 +420,7 @@ make_ptoas_run() {
   local run_file="${BUILD_OUT_PATH}/cann-pto-as_${PTOAS_PACKAGE_VERSION}_linux-${arch}.run"
   bash "${BASE_PATH}/scripts/package/make_ptoas_run.sh" \
     "${BASE_PATH}" \
-    "${INSTALL_PATH}" \
+    "${PACKAGE_STAGE_PATH}" \
     "${run_file}" \
     "${PTOAS_PACKAGE_VERSION}" \
     "ptoas"
@@ -419,6 +443,7 @@ package() {
   # Stage the .run installer(s) under build_out for the pipeline to consume.
   rm -rf "${BUILD_OUT_PATH}"
   mkdir -p "${BUILD_OUT_PATH}"
+  stage_ptoas_runtime
   make_ptoas_run
   echo "package staged under ${BUILD_OUT_PATH}"
   # Diagnostics: the OBS uploader reads build_out via the host path
