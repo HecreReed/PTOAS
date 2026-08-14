@@ -266,15 +266,10 @@ def _issue1117_vectors(torch):
     return lhs_host.numpy(), rhs_host.numpy()
 
 
-def _bits_of(f32arr):
-    return f32arr.astype(np.float32).view(np.uint32).astype(np.int64)
-
-
 def _run_board(torch, target_arch):
     if target_arch != "a5":
         pytest.skip("pto.fdiv_hp is an A5-only op")
     # assemble the full corpus
-    fixed = np.array([x for x, y in _coverage_pairs()], dtype=np.float32)
     pairs = _coverage_pairs()
     a_fixed = np.array([x for x, y in pairs], dtype=np.uint32).view(np.float32)
     b_fixed = np.array([y for x, y in pairs], dtype=np.uint32).view(np.float32)

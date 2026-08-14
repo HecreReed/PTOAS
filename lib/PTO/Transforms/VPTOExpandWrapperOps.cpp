@@ -2202,6 +2202,21 @@ struct ExpandFDivHpPattern : public OpRewritePattern<pto::FDivHPOp> {
     auto bitcast = [&](Value v, Type ty) -> Value {
       return rewriter.create<arith::BitcastOp>(loc, ty, v).getResult();
     };
+    // Lift an i1 predicate to an i32 0-or-1 flag so bit flags can be combined
+    // with arith.andi/ori (which require identical operand types).
+    auto flag = [&](Value cond) -> Value {
+      return sel(cond, cst(1), cst(0));
+    };
+    // Clamp a shift amount to [0, 31]. Right shifts by >= 32 bits are poison
+    // in LLVM semantics; the deep-subnormal/degenerate cases that produce such
+    // amounts are selected away anyway, so clamping keeps the executed (and
+    // the garbage) values safe and identical.
+    auto uge = [&](Value a, Value b) -> Value {
+      return cmpi(arith::CmpIPredicate::uge, a, b);
+    };
+    auto safeShift = [&](Value amount) -> Value {
+      return sel(uge(amount, cst(31)), cst(31), amount);
+    };
 
     // CLZ on a 32-bit unsigned value. The running x is re-checked at bit
     // positions 16/24/28/30/31 (not 16/8/4/2/1: only the first check examines
@@ -2297,7 +2312,9 @@ struct ExpandFDivHpPattern : public OpRewritePattern<pto::FDivHPOp> {
     Value sig = shruiOp(raw, cst(3)); // in [2^23, 2^24)
     Value guard = andi(shruiOp(raw, cst(2)), cst(1));
     Value round = andi(shruiOp(raw, cst(1)), cst(1));
-    Value sticky = ori(andi(raw, cst(1)), ne(rem, cst(0)));
+    // All flag arithmetic stays in i32: guard/round/sig&1 are extracted as
+    // 32-bit bit masks, and the remainder predicate is lifted with flag().
+    Value sticky = ori(andi(raw, cst(1)), flag(ne(rem, cst(0))));
     Value inc = andi(guard, ori(ori(round, sticky), andi(sig, cst(1))));
     sig = addi(sig, inc);
     // Carry: sig == 1 << 24 -> shift right and bump the exponent.
@@ -2320,12 +2337,16 @@ struct ExpandFDivHpPattern : public OpRewritePattern<pto::FDivHPOp> {
     // plus the quotient LSB (bit s of raw). e < -151 underflows to zero.
     Value shift = addi(e, cst(152));
     Value s = subi(cst(26), shift);
-    Value sigSub = shruiOp(raw, addi(s, cst(3))); // < 2^23
-    Value guardSub = andi(shruiOp(raw, addi(s, cst(2))), cst(1));
-    Value roundSub = andi(shruiOp(raw, addi(s, cst(1))), cst(1));
-    Value maskSub = subi(shliOp(cst(1), s), cst(1));
-    Value stickySub = ori(ne(andi(raw, maskSub), cst(0)), ne(rem, cst(0)));
-    stickySub = ori(stickySub, andi(shruiOp(raw, s), cst(1)));
+    // The active subnormal range has s in [1, 25]; larger values only occur in
+    // the (selected-away) degenerate branches, so clamp every shift amount to
+    // [0, 31] to keep them well-defined for the backend.
+    Value sigSub = shruiOp(raw, safeShift(addi(s, cst(3)))); // < 2^23
+    Value guardSub = andi(shruiOp(raw, safeShift(addi(s, cst(2)))), cst(1));
+    Value roundSub = andi(shruiOp(raw, safeShift(addi(s, cst(1)))), cst(1));
+    Value maskSub = subi(shliOp(cst(1), safeShift(s)), cst(1));
+    Value stickySub = ori(flag(ne(andi(raw, maskSub), cst(0))),
+                          flag(ne(rem, cst(0))));
+    stickySub = ori(stickySub, andi(shruiOp(raw, safeShift(s)), cst(1)));
     Value incSub =
         andi(guardSub, ori(ori(roundSub, stickySub), andi(sigSub, cst(1))));
     sigSub = addi(sigSub, incSub);

@@ -24,7 +24,9 @@ specified for the A5 board validation (positive/negative normals, 1/7, 7/3,
 min/max normal, subnormals, rounding midpoints/ties, underflow, overflow,
 special values) and randomized + exhaustive significand sweeps.
 
-Run: pytest ptodsl/tests/test_fdiv_hp_algorithm.py   (no NPU required)
+Runs standalone (no NPU required), as a pytest, or as the ctest target
+ptodsl_fdiv_hp_algorithm (the repo's add_ptodsl_python_test runs test_*.py
+as scripts).
 """
 
 from fractions import Fraction
@@ -321,7 +323,6 @@ def main():
     # Sweep subnormal result paths: 1 / 2^k for k = 127..151 and 3/2^k.
     for k in range(126, 152):
         b = _frac_to_f32(Fraction(1, 1 << k))
-        b |= 0x3F800000 & 0  # keep b as-is (already f32 bits)
         cases.append((0x3F800000, b))
         b3 = _frac_to_f32(Fraction(3, 1 << k))
         if k >= 127:

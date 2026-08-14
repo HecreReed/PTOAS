@@ -41,15 +41,20 @@ module attributes {"pto.target_arch" = "a5", pto.kernel_kind = #pto.kernel_kind<
   }
 }
 
-// EXPAND-LABEL: func.func @fdiv_hp_simt(
+// Earlier pipeline passes may rename the pto.simt_entry function (cf. the
+// _mix_aiv suffixes used by other vpto lit tests), so anchor on the launcher
+// and the op contents rather than the simt function name.
+// EXPAND-LABEL: func.func @fdiv_hp_kernel(
 // EXPAND-NOT: pto.fdiv_hp
+// EXPAND: pto.ldg
+// EXPAND: pto.stg
 // EXPAND: arith.bitcast
 // EXPAND: arith.divf
 // EXPAND: arith.divui
 // EXPAND: arith.cmpi
 // EXPAND: arith.select
 // EXPAND-DAG: arith.constant 152 : i32
-// EXPAND-DAG: arith.constant -150 : i32
+// EXPAND-DAG: arith.constant -126 : i32
 // EXPAND-NOT: pto.fdiv_hp
 
 // The expanded integer sequence must survive conversion to LLVM IR:
