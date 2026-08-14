@@ -157,13 +157,17 @@ def _coverage_pairs():
         (0x3DCCCCCD, 0x3E4CCCCD),
         (0x3EAAAAAB, 0x3F800000),
         (0x3FC90FDB, 0x3F800000),
-        # underflow sweep: 1 / 2^k for k = 127..152 and 3 / 2^k
     ]
+    # Underflow sweep: tiny dividend / 1.0, so the QUOTIENT 2^-k lands in the
+    # subnormal range (k = 127..149), hits the half-ulp tie (k = 150), and
+    # rounds to zero (k >= 151). The reverse pair 1.0 / 2^-k would compute
+    # 2^k (large normals/overflow) instead, which the overflow cases above
+    # already cover.
     for k in range(127, 153):
         two_pow = Fraction(1, 1 << k)
         b = _frac_to_f32(two_pow)
         if b:
-            pairs.append((0x3F800000, b))
+            pairs.append((b, 0x3F800000))
     pairs.append((0x00000001, 0x00000002))   # subnormal / subnormal
     pairs.append((0x00000002, 0x00000004))
     pairs.append((0x007FFFFF, 0x00000001))   # max subnormal / min subnormal
@@ -277,6 +281,17 @@ def _run_board(torch, target_arch):
     a_all = np.concatenate([a_fixed, a_iss.astype(np.float32)])
     b_all = np.concatenate([b_fixed, b_iss.astype(np.float32)])
 
+    # The kernels launch a fixed _MAX_THREADS grid and every thread executes
+    # ldg/stg unconditionally, so the inputs must be padded to the full grid;
+    # only the first n_valid elements are real and are compared below.
+    n_valid = a_all.shape[0]
+    assert n_valid <= _MAX_THREADS, (
+        f"corpus size {n_valid} exceeds the {_MAX_THREADS}-thread grid")
+    pad = _MAX_THREADS - n_valid
+    if pad:
+        a_all = np.concatenate([a_all, np.ones(pad, dtype=np.float32)])
+        b_all = np.concatenate([b_all, np.ones(pad, dtype=np.float32)])
+
     a_bits = a_all.view(np.uint32).astype(np.int64)
     b_bits = b_all.view(np.uint32).astype(np.int64)
 
@@ -285,7 +300,7 @@ def _run_board(torch, target_arch):
 
     mismatches = []
     special_mismatches = []
-    for i in range(a_bits.shape[0]):
+    for i in range(n_valid):
         got_bits = int(fdiv_hp_out[i])
         want = golden_bits(int(a_bits[i]), int(b_bits[i]))
         if want is None:

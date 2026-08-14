@@ -63,22 +63,24 @@ def native_div_bits(a, b):
     ax, ay = abs(x), abs(y)
     inf = float("inf")
     nan = float("nan")
+    # IEEE 754 result sign is the XOR of the operand signs. copysign handles
+    # +/-0 and +/-Inf correctly, where a plain product would collapse to a
+    # signed zero or NaN and lose the sign.
+    neg = (math.copysign(1.0, x) * math.copysign(1.0, y)) < 0
     if (x != x) or (y != y):
         return f32_bits(nan)
-    if ax == inf or ay == inf:
-        if ax == inf and ay == inf:
-            return f32_bits(nan)
-        if ax == inf:
-            return f32_bits(inf if (x * y > 0) else -inf)
-        return f32_bits(0.0 if (x * y > 0) else -0.0)
+    if ax == inf and ay == inf:
+        return f32_bits(nan)
+    if ax == inf:
+        return f32_bits(inf if not neg else -inf)
+    if ay == inf:
+        return f32_bits(0.0 if not neg else -0.0)
     if ay == 0.0:
         if ax == 0.0:
             return f32_bits(nan)
-        return f32_bits(inf if (x * y > 0) else -inf)
+        return f32_bits(inf if not neg else -inf)
     if ax == 0.0:
-        # IEEE: result sign is XOR of operand signs (also for +/-0)
-        neg = (math.copysign(1.0, x) * math.copysign(1.0, y)) < 0
-        return f32_bits(-0.0 if neg else 0.0)
+        return f32_bits(0.0 if not neg else -0.0)
     d = x / y
     if d > 3.4028234663852886e38 or d < -3.4028234663852886e38:
         return f32_bits(inf if d > 0 else -inf)
@@ -320,13 +322,15 @@ def main():
         cases.append((x, cy))
         cases.append((cx, cy))
 
-    # Sweep subnormal result paths: 1 / 2^k for k = 127..151 and 3/2^k.
+    # Sweep subnormal result paths: tiny dividend / 1.0 (and / 3.0) so the
+    # QUOTIENT lands in the subnormal range: 2^-k for k = 127..151 (k >= 150
+    # exercises the half-ulp tie and the round-to-zero path).
     for k in range(126, 152):
         b = _frac_to_f32(Fraction(1, 1 << k))
-        cases.append((0x3F800000, b))
+        cases.append((b, 0x3F800000))
         b3 = _frac_to_f32(Fraction(3, 1 << k))
         if k >= 127:
-            cases.append((0x40400000, b3))
+            cases.append((b3, 0x40400000))
     # Sweep overflow edge: max_normal / 2^-k
     for k in range(0, 5):
         b = _frac_to_f32(Fraction(1, 1 << k))
@@ -404,17 +408,25 @@ def main():
                 print("ORACLE MISMATCH", hex(a), hex(b), hex(got), hex(want))
     print("oracle vs host FPU: checked", cc, "mismatches", oracle_bad)
 
-    # Also verify division-by-zero / zero behavior of the model matches native.
+    # Verify the special-input fallback against the IEEE special-value table
+    # with FULL bit patterns (sign of zero and of infinity included); only the
+    # NaN payload is device-defined, so NaN-producing cases check the exponent.
     special_ok = True
     for a, b, want in [
-        (0x3F800000, 0x00000000, None),   # 1/0 -> +Inf
-        (0xBF800000, 0x00000000, None),   # -1/0 -> -Inf
-        (0x00000000, 0x3F800000, 0x00000000),  # 0/1 -> +0
+        (0x3F800000, 0x00000000, 0x7F800000),  # 1/+0 -> +Inf
+        (0xBF800000, 0x00000000, 0xFF800000),  # -1/+0 -> -Inf
+        (0x3F800000, 0x80000000, 0xFF800000),  # 1/-0 -> -Inf
+        (0xBF800000, 0x80000000, 0x7F800000),  # -1/-0 -> +Inf
+        (0x00000000, 0x3F800000, 0x00000000),  # +0/1 -> +0
         (0x80000000, 0x3F800000, 0x80000000),  # -0/1 -> -0
-        (0x7F800000, 0x3F800000, 0x7F800000),  # Inf/1 -> +Inf
+        (0x80000000, 0xBF800000, 0x00000000),  # -0/-1 -> +0
+        (0x7F800000, 0x3F800000, 0x7F800000),  # +Inf/1 -> +Inf
         (0xFF800000, 0x3F800000, 0xFF800000),  # -Inf/1 -> -Inf
-        (0x3F800000, 0x7F800000, 0x00000000),  # 1/Inf -> +0
+        (0x3F800000, 0x7F800000, 0x00000000),  # 1/+Inf -> +0
         (0x3F800000, 0xFF800000, 0x80000000),  # 1/-Inf -> -0
+        (0xBF800000, 0xFF800000, 0x00000000),  # -1/-Inf -> +0
+        (0x7F800000, 0x00000000, 0x7F800000),  # +Inf/+0 -> +Inf
+        (0x00000000, 0x00000000, None),        # 0/0 -> NaN
         (0x7F800000, 0x7F800000, None),        # Inf/Inf -> NaN
         (0x7FC00000, 0x3F800000, None),        # NaN/1 -> NaN
     ]:
