@@ -413,6 +413,7 @@ stage_ptoas_wheel() {
   SKBUILD_BUILD_DIR="${BUILD_PATH}" \
   LLVM_BUILD_DIR="${LLVM_BUILD_DIR}" \
     "${python_bin}" -m pip wheel "${BASE_PATH}" \
+      --use-feature=in-tree-build \
       --no-deps \
       --wheel-dir "${wheel_dist}"
   "${python_bin}" "${BASE_PATH}/docker/validate_wheel_payload.py" \
