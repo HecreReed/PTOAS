@@ -943,4 +943,8 @@ elif [[ -n "${EXPECTED_CASE_COUNT}" ]]; then
 fi
 log "RESULTS_TSV=${RESULTS_TSV}"
 
+if [[ ${fail_count} -eq 0 ]]; then
+  log "execute samples success"
+fi
+
 exit "${status}"
