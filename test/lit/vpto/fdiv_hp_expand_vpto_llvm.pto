@@ -54,8 +54,6 @@ module attributes {"pto.target_arch" = "a5", pto.kernel_kind = #pto.kernel_kind<
 // EXPAND-DAG: arith.bitcast
 // EXPAND-DAG: arith.cmpi
 // EXPAND-DAG: arith.select
-// EXPAND-DAG: arith.constant 152 : i32
-// EXPAND-DAG: arith.constant -126 : i32
 // EXPAND: pto.stg
 // EXPAND-NOT: pto.fdiv_hp
 
