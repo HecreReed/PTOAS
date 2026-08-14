@@ -47,11 +47,13 @@ module attributes {"pto.target_arch" = "a5", pto.kernel_kind = #pto.kernel_kind<
 // EXPAND-LABEL: func.func @fdiv_hp_kernel(
 // EXPAND-NOT: pto.fdiv_hp
 // EXPAND: pto.ldg
-// EXPAND: arith.bitcast
-// EXPAND: arith.divf
-// EXPAND: arith.divui
-// EXPAND: arith.cmpi
-// EXPAND: arith.select
+// The expansion body (everything between the ldg prologue and the stg
+// epilogue) is not a fixed op order, so match it with CHECK-DAG.
+// EXPAND-DAG: arith.divui
+// EXPAND-DAG: arith.divf
+// EXPAND-DAG: arith.bitcast
+// EXPAND-DAG: arith.cmpi
+// EXPAND-DAG: arith.select
 // EXPAND-DAG: arith.constant 152 : i32
 // EXPAND-DAG: arith.constant -126 : i32
 // EXPAND: pto.stg
