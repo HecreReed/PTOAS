@@ -13,7 +13,6 @@
 // https://discourse.llvm.org/t/matchandrewrite-hiding-virtual-functions/84933/8
 
 #include <cassert>
-#include <climits>
 
 #include "PTO/IR/PTO.h"
 #include "PTO/IR/PTOTypeUtils.h"
@@ -3210,11 +3209,51 @@ buildIntegralAddressFromTileLike(Location loc, Value sourceValue,
   return rewriter.create<emitc::CastOp>(loc, u64Ty, rawPtr).getResult();
 }
 
+static LogicalResult
+adjustStaticTileValidRows(SmallVectorImpl<std::string> &parts,
+                          uint32_t validRowIncrement) {
+  if (parts.size() < 7)
+    return failure();
+  if (validRowIncrement == 0 || StringRef(parts[5]).trim() == "-1")
+    return success();
+
+  uint64_t validRows = 0;
+  uint64_t physicalRows = 0;
+  if (StringRef(parts[5]).trim().getAsInteger(10, validRows) ||
+      StringRef(parts[2]).trim().getAsInteger(10, physicalRows))
+    return failure();
+  if (validRows > physicalRows)
+    return failure();
+  if (validRowIncrement > physicalRows - validRows)
+    return failure();
+
+  parts[5] = std::to_string(validRows + validRowIncrement);
+  return success();
+}
+
+static Value buildAdjustedDynamicValidRow(
+    Location loc, Value exemplar, Type rowType,
+    ConversionPatternRewriter &rewriter, uint32_t validRowIncrement) {
+  auto *ctx = rewriter.getContext();
+  Value validRow = rewriter
+                       .create<emitc::CallOpaqueOp>(
+                           loc, rowType, "PTOAS__TILE_GET_VALID_ROW",
+                           ArrayAttr{}, ArrayAttr{}, ValueRange{exemplar})
+                       .getResult(0);
+  if (validRowIncrement == 0)
+    return validRow;
+
+  Value increment = rewriter.create<emitc::ConstantOp>(
+      loc, rowType,
+      emitc::OpaqueAttr::get(ctx, std::to_string(validRowIncrement)));
+  return rewriter.create<emitc::AddOp>(loc, rowType, validRow, increment);
+}
+
 static FailureOr<Value>
 createSiblingTileWithElementType(Location loc, Value exemplar,
                                  StringRef elemTypeTok,
                                  ConversionPatternRewriter &rewriter,
-                                 int64_t validRowIncrement = 0) {
+                                 uint32_t validRowIncrement = 0) {
   SmallVector<std::string, 12> parts;
   if (failed(parseEmitCTileType(exemplar, parts)))
     return failure();
@@ -3223,18 +3262,8 @@ createSiblingTileWithElementType(Location loc, Value exemplar,
   bool rowIsDynamic = StringRef(parts[5]).trim() == "-1";
   bool colIsDynamic = StringRef(parts[6]).trim() == "-1";
 
-  if (validRowIncrement < 0)
+  if (failed(adjustStaticTileValidRows(parts, validRowIncrement)))
     return failure();
-  if (validRowIncrement != 0 && !rowIsDynamic) {
-    int64_t validRows = 0;
-    int64_t physicalRows = 0;
-    if (StringRef(parts[5]).trim().getAsInteger(10, validRows) ||
-        StringRef(parts[2]).trim().getAsInteger(10, physicalRows) ||
-        validRows > INT64_MAX - validRowIncrement ||
-        validRows + validRowIncrement > physicalRows)
-      return failure();
-    parts[5] = std::to_string(validRows + validRowIncrement);
-  }
 
   std::string rebuilt = "Tile<";
   for (size_t i = 0; i < parts.size(); ++i) {
@@ -3254,21 +3283,9 @@ createSiblingTileWithElementType(Location loc, Value exemplar,
 
   auto u32Ty = emitc::OpaqueType::get(ctx, "unsigned");
   SmallVector<Value, 2> ctorArgs;
-  if (rowIsDynamic) {
-    Value validRow = rewriter
-                         .create<emitc::CallOpaqueOp>(
-                             loc, u32Ty, "PTOAS__TILE_GET_VALID_ROW",
-                             ArrayAttr{}, ArrayAttr{}, ValueRange{exemplar})
-                         .getResult(0);
-    if (validRowIncrement != 0) {
-      Value increment = rewriter.create<emitc::ConstantOp>(
-          loc, u32Ty, emitc::OpaqueAttr::get(ctx,
-                                             std::to_string(validRowIncrement)));
-      validRow = rewriter.create<emitc::AddOp>(loc, u32Ty, validRow,
-                                               increment);
-    }
-    ctorArgs.push_back(validRow);
-  }
+  if (rowIsDynamic)
+    ctorArgs.push_back(buildAdjustedDynamicValidRow(
+        loc, exemplar, u32Ty, rewriter, validRowIncrement));
   if (colIsDynamic)
     ctorArgs.push_back(rewriter
                            .create<emitc::CallOpaqueOp>(
