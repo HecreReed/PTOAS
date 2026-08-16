@@ -64,7 +64,11 @@ extern "C" __global__ AICORE void prelu_kernel_2d(__gm__ float* v1, __gm__ float
   TASSIGN(v26, v27);
   TLOAD(v20, v13);
   TLOAD(v22, v16);
+  set_flag(PIPE_MTE2, PIPE_V, EVENT_ID0);
+  wait_flag(PIPE_MTE2, PIPE_V, EVENT_ID0);
   TPRELU(v24, v20, v22, v26);
+  set_flag(PIPE_V, PIPE_MTE3, EVENT_ID0);
+  wait_flag(PIPE_V, PIPE_MTE3, EVENT_ID0);
   TSTORE(v19, v24);
   #endif // __DAV_VEC__
 
