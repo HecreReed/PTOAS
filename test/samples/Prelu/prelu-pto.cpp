@@ -59,7 +59,7 @@ extern "C" __global__ AICORE void prelu_kernel_2d(__gm__ float* v1, __gm__ float
   Tile<TileType::Vec, float, 32, 32, BLayout::RowMajor, 32, 32, SLayout::NoneBox, 512, PadValue::Null, CompactMode::Null> v24;
   uint64_t v25 = (uint64_t) v9;
   TASSIGN(v24, v25);
-  Tile<TileType::Vec, uint8_t, 33, 32, BLayout::RowMajor, 32, 4, SLayout::NoneBox, 512, PadValue::Null, CompactMode::Null> v26;
+  Tile<TileType::Vec, uint8_t, 33, 32, BLayout::RowMajor, 33, 4, SLayout::NoneBox, 512, PadValue::Null, CompactMode::Null> v26;
   uint64_t v27 = (uint64_t) v10;
   TASSIGN(v26, v27);
   TLOAD(v20, v13);

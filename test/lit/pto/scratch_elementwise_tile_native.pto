@@ -33,6 +33,7 @@ module {
 // NATIVE-NOT: memref<
 
 // EMITC-LABEL: tprelu_arg(
+// EMITC: Tile<TileType::Vec, uint8_t, 17, 32, BLayout::RowMajor, 17, 8,
 // EMITC: TPRELU(
 // EMITC-LABEL: trem_arg(
 // EMITC: TREM(

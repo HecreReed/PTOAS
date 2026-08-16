@@ -3086,8 +3086,10 @@ static emitc::OpaqueType getWiderUnsignedIntOpaqueType(MLIRContext *ctx,
 
 // TPRELU's A2/A3 scratch is a byte tile with storage dimensions that are
 // intentionally different from the f32 input/output tiles. Keep the
-// dimensions and valid-shape metadata from the IR scratch when materializing
-// the EmitC value, rather than trying to reinterpret a data tile as scratch.
+// physical dimensions and valid-shape metadata from the IR scratch when
+// materializing the EmitC value, rather than trying to reinterpret a data tile
+// as scratch. Callers can adjust a valid dimension when the target ISA needs
+// extra metadata space beyond the source operation's logical extent.
 static LogicalResult parseEmitCTileType(Value exemplar,
                                         SmallVectorImpl<std::string> &parts) {
   auto tileTy = dyn_cast<emitc::OpaqueType>(exemplar.getType());
@@ -3211,7 +3213,8 @@ buildIntegralAddressFromTileLike(Location loc, Value sourceValue,
 static FailureOr<Value>
 createSiblingTileWithElementType(Location loc, Value exemplar,
                                  StringRef elemTypeTok,
-                                 ConversionPatternRewriter &rewriter) {
+                                 ConversionPatternRewriter &rewriter,
+                                 int64_t validRowIncrement = 0) {
   SmallVector<std::string, 12> parts;
   if (failed(parseEmitCTileType(exemplar, parts)))
     return failure();
@@ -3219,6 +3222,19 @@ createSiblingTileWithElementType(Location loc, Value exemplar,
   parts[1] = elemTypeTok.str();
   bool rowIsDynamic = StringRef(parts[5]).trim() == "-1";
   bool colIsDynamic = StringRef(parts[6]).trim() == "-1";
+
+  if (validRowIncrement < 0)
+    return failure();
+  if (validRowIncrement != 0 && !rowIsDynamic) {
+    int64_t validRows = 0;
+    int64_t physicalRows = 0;
+    if (StringRef(parts[5]).trim().getAsInteger(10, validRows) ||
+        StringRef(parts[2]).trim().getAsInteger(10, physicalRows) ||
+        validRows > INT64_MAX - validRowIncrement ||
+        validRows + validRowIncrement > physicalRows)
+      return failure();
+    parts[5] = std::to_string(validRows + validRowIncrement);
+  }
 
   std::string rebuilt = "Tile<";
   for (size_t i = 0; i < parts.size(); ++i) {
@@ -3238,12 +3254,21 @@ createSiblingTileWithElementType(Location loc, Value exemplar,
 
   auto u32Ty = emitc::OpaqueType::get(ctx, "unsigned");
   SmallVector<Value, 2> ctorArgs;
-  if (rowIsDynamic)
-    ctorArgs.push_back(rewriter
-                           .create<emitc::CallOpaqueOp>(
-                               loc, u32Ty, "PTOAS__TILE_GET_VALID_ROW",
-                               ArrayAttr{}, ArrayAttr{}, ValueRange{exemplar})
-                           .getResult(0));
+  if (rowIsDynamic) {
+    Value validRow = rewriter
+                         .create<emitc::CallOpaqueOp>(
+                             loc, u32Ty, "PTOAS__TILE_GET_VALID_ROW",
+                             ArrayAttr{}, ArrayAttr{}, ValueRange{exemplar})
+                         .getResult(0);
+    if (validRowIncrement != 0) {
+      Value increment = rewriter.create<emitc::ConstantOp>(
+          loc, u32Ty, emitc::OpaqueAttr::get(ctx,
+                                             std::to_string(validRowIncrement)));
+      validRow = rewriter.create<emitc::AddOp>(loc, u32Ty, validRow,
+                                               increment);
+    }
+    ctorArgs.push_back(validRow);
+  }
   if (colIsDynamic)
     ctorArgs.push_back(rewriter
                            .create<emitc::CallOpaqueOp>(
@@ -11181,9 +11206,11 @@ struct PTOPreluToEmitC : public OpConversionPattern<pto::TPReluOp> {
     // Do not reuse the planner-owned tmp handle here. On A2/A3 TPRELU writes
     // a byte scratch tile and then reads a subview one row below the output;
     // materializing a fresh handle makes its storage independent of planner
-    // liveness/alias decisions while preserving the IR scratch dimensions.
+    // liveness/alias decisions while preserving the IR scratch storage and
+    // column dimensions.
     auto tmpOr =
-        createSiblingTileWithElementType(loc, tmp, "uint8_t", rewriter);
+        createSiblingTileWithElementType(loc, tmp, "uint8_t", rewriter,
+                                         /*validRowIncrement=*/1);
     if (failed(tmpOr))
       return rewriter.notifyMatchFailure(
           op, "failed to materialize independent TPRELU scratch tile");
