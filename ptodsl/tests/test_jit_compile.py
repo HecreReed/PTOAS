@@ -233,6 +233,40 @@ def ast_for_iv_bound_partial_liveout_probe(rows: pto.i32, cols: pto.i32, cond: p
         pto.wait_flag(pto.Pipe.V, pto.Pipe.MTE2, event_id=value)
 
 
+@pto.jit(target='a5', backend='vpto', mode='explicit')
+def ast_for_iv_augassign_probe(rows: pto.i32):
+    # Augmenting the induction variable must not infer it as a loop carry (it
+    # is re-bound at the top of every iteration) and must not read it before
+    # the loop is entered.
+    for value in range(rows):
+        value += 1
+        pto.wait_flag(pto.Pipe.V, pto.Pipe.MTE2, event_id=value)
+
+
+@pto.jit(target='a5', backend='vpto', mode='explicit')
+def ast_static_range_empty_orelse_partial_probe(rows: pto.i32, cond: pto.i1):
+    # An empty static range jumps straight to the else clause with the target
+    # unbound; the inner partial live-out must keep the explicit diagnostics.
+    for value in pto.static_range(0):
+        pass
+    else:
+        for replacement in range(rows):
+            if cond:
+                value = replacement
+        pto.wait_flag(pto.Pipe.V, pto.Pipe.MTE2, event_id=value)
+
+
+@pto.jit(target='a5', backend='vpto', mode='explicit')
+def ast_static_range_subscript_target_probe(rows: pto.i32):
+    # Non-Name static_range targets keep their trace-time semantics and must
+    # not crash the rewrite with an AttributeError.
+    zero = pto.const(0, dtype=pto.i32)
+    values = [zero]
+    for values[0] in pto.static_range(1):
+        pto.wait_flag(pto.Pipe.V, pto.Pipe.MTE2, event_id=values[0])
+    _ = values[0]
+
+
 def _all_operations(operation):
     yield operation
     for region in operation.regions:
@@ -416,6 +450,18 @@ def _assert_ast_rewrite_nested_partial_assign_ssa_identity():
             'innermost else of the slot probe must not yield the sibling branch q2 value',
         )
 
+    # Augmenting the induction variable must not invent a carry for it.
+    iv_augassign_text = ast_for_iv_augassign_probe.compile().mlir_text()
+    expect_parse_roundtrip_and_verify(iv_augassign_text, 'AST-rewritten induction-variable augment-assignment')
+    expect(
+        'iter_args(' not in iv_augassign_text,
+        'augmenting the induction variable should not infer a spurious loop carry',
+    )
+
+    # Non-Name static_range targets keep trace-time semantics (no scf.for).
+    subscript_target_text = ast_static_range_subscript_target_probe.compile().mlir_text()
+    expect_parse_roundtrip_and_verify(subscript_target_text, 'AST-rewritten static-range subscript target')
+
     # Unbound partial live-outs must stay on the explicit diagnostics path.
     expect_raises(
         PTODSLAstRewriteError,
@@ -425,6 +471,11 @@ def _assert_ast_rewrite_nested_partial_assign_ssa_identity():
     expect_raises(
         PTODSLAstRewriteError,
         lambda: ast_unbound_partial_liveout_controlled_loop_probe.compile(),
+        'last-iteration-only',
+    )
+    expect_raises(
+        PTODSLAstRewriteError,
+        lambda: ast_static_range_empty_orelse_partial_probe.compile(),
         'last-iteration-only',
     )
 

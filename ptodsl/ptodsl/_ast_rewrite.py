@@ -1759,6 +1759,16 @@ class _ControlFlowRewriter:
                     next_static_iters[stmt.target.id] = values
             saved_control_stack = self._loop_control_stack
             self._loop_control_stack = []
+            name_target = stmt.target.id if isinstance(stmt.target, ast.Name) else None
+            entry_with_iv = set(bound_before or ())
+            if name_target is not None:
+                entry_with_iv.add(name_target)
+            orelse_with_iv = set(bound_before or ())
+            # The induction target is only definitely bound in the else clause
+            # when the static range is known non-empty; an empty static range
+            # jumps straight to the else clause with the target unbound.
+            if name_target is not None and values is not None and len(values) > 0:
+                orelse_with_iv.add(name_target)
             try:
                 stmt.body = self.rewrite_block(
                     stmt.body,
@@ -1766,7 +1776,7 @@ class _ControlFlowRewriter:
                     live_after_slots=live_after_slots,
                     allow_loop_control=True,
                     static_iters=next_static_iters,
-                    bound_on_entry=set(bound_before or ()) | {stmt.target.id},
+                    bound_on_entry=entry_with_iv,
                 )
                 stmt.orelse = self.rewrite_block(
                     stmt.orelse,
@@ -1774,7 +1784,7 @@ class _ControlFlowRewriter:
                     live_after_slots=live_after_slots,
                     allow_loop_control=True,
                     static_iters=static_iters,
-                    bound_on_entry=set(bound_before or ()) | {stmt.target.id},
+                    bound_on_entry=orelse_with_iv,
                 )
             finally:
                 self._loop_control_stack = saved_control_stack
@@ -1824,7 +1834,14 @@ class _ControlFlowRewriter:
         safe_reads = reads_before_raw | {
             name for name in implicit_reads if name in (bound_before or set())
         }
-        loop_carried = tuple(sorted(body_info.stores & safe_reads))
+        # The induction variable is re-bound at the top of every iteration and
+        # must never be inferred as a carried name, otherwise the carry init
+        # would read it before the loop (unbound) or shadow the fresh binding.
+        loop_carried = tuple(
+            name
+            for name in sorted(body_info.stores & safe_reads)
+            if name != stmt.target.id
+        )
         slot_reads_raw = _read_before_assignment_slots(stmt.body, self._static_env, static_iters)
         slot_reads = _read_before_assignment_slots(
             stmt.body, self._static_env, static_iters, live_after=assigned_slots_live_after
