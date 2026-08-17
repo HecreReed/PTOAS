@@ -186,6 +186,27 @@ ensure_llvm_source() {
   export LLVM_CMAKE_SOURCE_DIR="${LLVM_SOURCE_DIR}"
 }
 
+# The internal feature-vpto patch makes LLVMVectorize use llvm::Triple, whose
+# implementation lives in LLVMTargetParser, without updating the component's
+# CMake dependency. Inject the missing link edge before configuring LLVM. Keep
+# this idempotent because CI reuses the patched LLVM source directory.
+inject_llvm_vectorize_target_parser() {
+  local vectorize_cmake="${LLVM_CMAKE_SOURCE_DIR}/lib/Transforms/Vectorize/CMakeLists.txt"
+  if [ ! -f "${vectorize_cmake}" ]; then
+    echo "ERROR: LLVMVectorize CMakeLists.txt not found: ${vectorize_cmake}" >&2
+    exit 1
+  fi
+
+  if grep -Eq '^[[:space:]]*(LLVM)?TargetParser([[:space:]]|$)' "${vectorize_cmake}" \
+     || grep -Eq 'target_link_libraries\([[:space:]]*LLVMVectorize[^)]*LLVMTargetParser' "${vectorize_cmake}"; then
+    return 0
+  fi
+
+  printf '\n# PTOAS internal LLVM 19 compatibility: LoopVectorizePrepare uses llvm::Triple.\n' >> "${vectorize_cmake}"
+  printf 'target_link_libraries(LLVMVectorize PRIVATE LLVMTargetParser)\n' >> "${vectorize_cmake}"
+  echo "Injected LLVMTargetParser into ${vectorize_cmake}"
+}
+
 # The PTOAS tree is built with the default libstdc++ ABI new string layout
 # (_GLIBCXX_USE_CXX11_ABI=1). Cached LLVM/MLIR builds created on RHEL7 /
 # devtoolset-7 toolchains are compiled with the old ABI and export Twine::str as
@@ -216,6 +237,7 @@ llvm_build_has_bspub_npu_data_type() {
 # tree is not usable, mirroring the PTOAS development workflow.
 ensure_llvm_build() {
   ensure_llvm_source
+  inject_llvm_vectorize_target_parser
 
   # The vpto patch changes CallingConv.h; a build-shared tree built from the
   # unpatched upstream source must be rebuilt so SimtEntry is present in the
@@ -245,6 +267,15 @@ ensure_llvm_build() {
      && ! llvm_build_has_bspub_npu_data_type; then
     echo "${dotted_line}"
     echo "Cached LLVM/MLIR build lacks BSPUB NPU data type support; rebuilding"
+    rebuild_llvm=TRUE
+  fi
+
+  if [ "$rebuild_llvm" == "FALSE" ] \
+     && [ -f "${LLVM_BUILD_DIR}/lib/cmake/llvm/LLVMConfig.cmake" ] \
+     && [ -f "${LLVM_BUILD_DIR}/lib/cmake/mlir/MLIRConfig.cmake" ] \
+     && [ ! -f "${LLVM_BUILD_DIR}/.ptoas-vectorize-target-parser" ]; then
+    echo "${dotted_line}"
+    echo "Cached LLVM/MLIR build predates the LLVMTargetParser link fix; rebuilding"
     rebuild_llvm=TRUE
   fi
 
@@ -305,6 +336,7 @@ ensure_llvm_build() {
     cmake "${cmake_args[@]}"
   fi
   cmake --build "${LLVM_BUILD_DIR}" -- -j "${JOBS}"
+  touch "${LLVM_BUILD_DIR}/.ptoas-vectorize-target-parser"
 }
 
 # ---------------------------------------------------------------------------
