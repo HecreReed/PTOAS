@@ -128,6 +128,64 @@ def ast_unbound_partial_liveout_loop_probe(rows: pto.i32, cond: pto.i1):
     _ = value
 
 
+@pto.jit(target='a5')
+def ast_unbound_partial_liveout_controlled_loop_probe(rows: pto.i32, cond: pto.i1, stop: pto.i1):
+    # break/continue/for-else loops must apply the same definite-binding gate.
+    one = pto.const(1, dtype=pto.i32)
+    for _ in range(rows):
+        if cond:
+            value = one
+        if stop:
+            break
+    _ = value
+
+
+@pto.jit(target='a5')
+def ast_param_bound_partial_liveout_loop_probe(rows: pto.i32, cond: pto.i1, value: pto.i32):
+    one = pto.const(1, dtype=pto.i32)
+    for _ in range(rows):
+        if cond:
+            value = one
+    _ = value
+
+
+@pto.jit(target='a5')
+def ast_outer_bound_partial_liveout_loop_probe(rows: pto.i32, cond: pto.i1, outer: pto.i1):
+    one = pto.const(1, dtype=pto.i32)
+    zero = pto.const(0, dtype=pto.i32)
+    value = zero
+    if outer:
+        for _ in range(rows):
+            if cond:
+                value = one
+    _ = value
+
+
+@pto.jit(target='a5')
+def ast_both_branch_bound_partial_liveout_loop_probe(rows: pto.i32, cond: pto.i1, choose: pto.i1):
+    one = pto.const(1, dtype=pto.i32)
+    zero = pto.const(0, dtype=pto.i32)
+    if choose:
+        value = zero
+    else:
+        value = one
+    for _ in range(rows):
+        if cond:
+            value = one
+    _ = value
+
+
+@pto.jit(target='a5')
+def ast_slot_partial_assign_loop_carry_probe(rows: pto.i32, cond: pto.i1):
+    zero = pto.const(0, dtype=pto.ui32)
+    one = pto.const(1, dtype=pto.ui32)
+    values = [zero]
+    for _ in range(rows):
+        if cond:
+            values[0] = one
+    _ = values[0]
+
+
 def _all_operations(operation):
     yield operation
     for region in operation.regions:
@@ -317,6 +375,22 @@ def _assert_ast_rewrite_nested_partial_assign_ssa_identity():
         lambda: ast_unbound_partial_liveout_loop_probe.compile(),
         'last-iteration-only',
     )
+    expect_raises(
+        PTODSLAstRewriteError,
+        lambda: ast_unbound_partial_liveout_controlled_loop_probe.compile(),
+        'last-iteration-only',
+    )
+
+    # Definitely-bound partial live-outs (parameters, outer blocks, both branches
+    # of a prior conditional, and static subscript slots) are loop carries.
+    for probe_text, label in (
+        (ast_param_bound_partial_liveout_loop_probe.compile().mlir_text(), 'parameter-bound partial live-out'),
+        (ast_outer_bound_partial_liveout_loop_probe.compile().mlir_text(), 'outer-block-bound partial live-out'),
+        (ast_both_branch_bound_partial_liveout_loop_probe.compile().mlir_text(), 'both-branches-bound partial live-out'),
+        (ast_slot_partial_assign_loop_carry_probe.compile().mlir_text(), 'loop static-subscript partial assignment'),
+    ):
+        expect_parse_roundtrip_and_verify(probe_text, 'AST-rewritten ' + label)
+        expect('iter_args(' in probe_text, label + ' should lower through scf.for iter_args')
 
 
 def expect(condition: bool, message: str) -> None:
