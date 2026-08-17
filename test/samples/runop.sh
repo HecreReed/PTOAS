@@ -1504,15 +1504,16 @@ PY
       fi
 
       # The A3 TPRELU runtime contract requires both TLOAD->TPRELU and
-      # TPRELU->TSTORE handshakes. Keep this direct PTO sample explicit because
-      # it is part of the board smoke payload and silent omission is
-      # nondeterministic on hardware.
+      # TPRELU->TSTORE handshakes. The board runner consumes the checked-in C++
+      # sample directly, so verify its explicit tail drain separately from the
+      # generated PTO output.
       if [[ "$base" == "prelu-pto" ]]; then
         if ! grep -Fq "set_flag(PIPE_MTE2, PIPE_V, EVENT_ID0);" "$cpp" || \
            ! grep -Fq "wait_flag(PIPE_MTE2, PIPE_V, EVENT_ID0);" "$cpp" || \
            ! grep -Fq "set_flag(PIPE_V, PIPE_MTE3, EVENT_ID0);" "$cpp" || \
            ! grep -Fq "wait_flag(PIPE_V, PIPE_MTE3, EVENT_ID0);" "$cpp" || \
-           ! grep -Fq "ptoas_auto_sync_tail(PTOAutoSyncTailMode::kBarrierAll);" "$cpp"; then
+           ! grep -Fq "ptoas_auto_sync_tail(PTOAutoSyncTailMode::kBarrierAll);" \
+             "${dir}/prelu-pto.cpp"; then
           echo -e "${A}(${base}.pto)\tFAIL\tmissing required A3 TPRELU pipe synchronization"
           overall=1
           continue

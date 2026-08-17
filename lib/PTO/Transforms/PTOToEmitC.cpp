@@ -3183,8 +3183,7 @@ buildIntegralAddressFromTileLike(Location loc, Value sourceValue,
       else
         return failure();
 
-      auto rawPtrTy = emitc::OpaqueType::get(
-          ctx, qualifier.str() + " " + elemTok.str() + "*");
+      auto rawPtrTy = getEmitCPointerType(ctx, qualifier, elemTok);
       rawPtr = rewriter
                    .create<emitc::CallOpaqueOp>(loc, rawPtrTy,
                                                 "PTOAS__TILE_DATA", ArrayAttr{},
