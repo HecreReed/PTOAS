@@ -97,6 +97,37 @@ def ast_nested_partial_assign_loop_carry_probe(
     _ = lo_bits
 
 
+@pto.jit(target='a5')
+def ast_nested_partial_assign_slot_entry_isolated_probe(cond3: pto.i1, cond1: pto.i1):
+    # Static-subscript analogue of the entry isolation probe: the slot value is
+    # rewritten into a shared Python temporary, so the same sibling pollution
+    # would leak unless the temporary is restored at each branch entry.
+    zero = pto.const(0, dtype=pto.ui32)
+    q1_bits = pto.const(0x10000000, dtype=pto.ui32)
+    q2_bits = pto.const(0x20000000, dtype=pto.ui32)
+
+    values = [zero]
+    if cond3:
+        values[0] = q2_bits
+    else:
+        if cond1:
+            values[0] = q1_bits
+        # else: values[0] must remain at its pre-if value.
+
+    out = values[0]
+    _ = out
+
+
+@pto.jit(target='a5')
+def ast_unbound_partial_liveout_loop_probe(rows: pto.i32, cond: pto.i1):
+    # value is never bound before the loop, so it must stay on the
+    # last-iteration-only diagnostics path instead of becoming an implicit carry.
+    for _ in range(rows):
+        if cond:
+            value = 0
+    _ = value
+
+
 def _all_operations(operation):
     yield operation
     for region in operation.regions:
@@ -192,8 +223,9 @@ def _assert_ast_rewrite_nested_partial_assign_ssa_identity():
             _same_ssa(yield_operands[1], zero_value),
             'innermost else must yield the pre-if lo_bits value, not the sibling branch rebinding',
         )
+        q2_cast = [_cast_result_of_const(q) for q in q2_consts]
         expect(
-            not any(_same_ssa(yield_operands[1], q) for q in q2_consts),
+            not any(_same_ssa(yield_operands[1], q) for q in q2_cast),
             'innermost else must not yield the sibling branch q2 value',
         )
 
@@ -230,8 +262,9 @@ def _assert_ast_rewrite_nested_partial_assign_ssa_identity():
             'innermost else must yield the lo_bits loop-carried block argument',
         )
         q2_consts = _ui32_const_results(loop_module.operation, 0x20000000)
+        q2_cast = [_cast_result_of_const(q) for q in q2_consts]
         expect(
-            not any(_same_ssa(yield_operands[1], q) for q in q2_consts),
+            not any(_same_ssa(yield_operands[1], q) for q in q2_cast),
             'innermost else must not yield the sibling branch q2 constant',
         )
         init_operands = list(for_op.operands)[3:]
@@ -246,6 +279,44 @@ def _assert_ast_rewrite_nested_partial_assign_ssa_identity():
             lo_consts and _same_ssa(init_operands[1], _cast_result_of_const(lo_consts[0])),
             'second iter_arg should be lo_bits initialized to 0',
         )
+
+    # Focused probe 3: static-subscript partial assignment keeps the entry slot.
+    slot_text = ast_nested_partial_assign_slot_entry_isolated_probe.compile().mlir_text()
+    expect_parse_roundtrip_and_verify(
+        slot_text,
+        'AST-rewritten nested static-subscript partial assignment isolation',
+    )
+    with make_context() as ctx:
+        slot_module = Module.parse(slot_text, ctx)
+        slot_func = _find_op_anywhere(slot_module.operation, 'func.func')
+        expect(slot_func is not None, 'slot isolation probe should contain a func.func op')
+        slot_block = slot_func.regions[0].blocks[0]
+        zero_consts = _ui32_const_results(slot_module.operation, 0)
+        expect(len(zero_consts) >= 1, 'slot isolation probe should materialize the entry 0 constant')
+        zero_value = _cast_result_of_const(zero_consts[0])
+        q2_consts = _ui32_const_results(slot_module.operation, 0x20000000)
+        q2_cast = [_cast_result_of_const(q) for q in q2_consts]
+        expect(
+            _scf_if_count(slot_block) == 2,
+            'slot isolation probe should contain two nested scf.if ops',
+        )
+        slot_yield = _innermost_else_yield_operands(slot_block)
+        expect(len(slot_yield) == 1, 'innermost else of the slot probe should yield one value')
+        expect(
+            _same_ssa(slot_yield[0], zero_value),
+            'innermost else of the slot probe must yield the entry slot value',
+        )
+        expect(
+            not any(_same_ssa(slot_yield[0], q) for q in q2_cast),
+            'innermost else of the slot probe must not yield the sibling branch q2 value',
+        )
+
+    # Unbound partial live-outs must stay on the explicit diagnostics path.
+    expect_raises(
+        PTODSLAstRewriteError,
+        lambda: ast_unbound_partial_liveout_loop_probe.compile(),
+        'last-iteration-only',
+    )
 
 
 def expect(condition: bool, message: str) -> None:

@@ -661,6 +661,23 @@ def _simple_name_targets(target) -> set[str]:
     return set()
 
 
+def _definite_stores(stmt) -> set[str]:
+    """Names definitely (unconditionally) bound by one statement.
+
+    Conservative on purpose: names assigned inside conditionals or loop bodies
+    are not treated as definite, so implicit loop carries are only inferred for
+    names that are provably bound before the loop statement.
+    """
+    if isinstance(stmt, ast.Assign):
+        names = set()
+        for target in stmt.targets:
+            names.update(_simple_name_targets(target))
+        return names
+    if isinstance(stmt, ast.AnnAssign) and stmt.value is not None:
+        return _simple_name_targets(stmt.target)
+    return set()
+
+
 def _resolve_subscript_slots(node, static_env, static_iters, *, require_static) -> set[_SubscriptSlot]:
     if not isinstance(node.value, ast.Name):
         return set()
@@ -1175,6 +1192,13 @@ class _ControlFlowRewriter:
         live = set(live_after)
         live_slots = set(live_after_slots or ())
         static_iters = dict(static_iters or {})
+        # Names definitely bound by earlier sibling statements, per position.
+        # Used to avoid turning unbound partial live-outs into loop carries.
+        bound_before_by_stmt = {}
+        bound_so_far = set()
+        for preceding in stmts:
+            bound_before_by_stmt[id(preceding)] = set(bound_so_far)
+            bound_so_far |= _definite_stores(preceding)
         for stmt in reversed(stmts):
             # Compute liveness from the authored AST before rewrite_stmt mutates
             # sibling statements in-place, otherwise later rewrites can pollute
@@ -1187,6 +1211,7 @@ class _ControlFlowRewriter:
                 live_after_slots=live_slots,
                 allow_loop_control=allow_loop_control,
                 static_iters=static_iters,
+                bound_before=bound_before_by_stmt.get(id(stmt), set()),
             )
             rewritten_reversed[:0] = rewritten
             live = live_before
@@ -1227,7 +1252,7 @@ class _ControlFlowRewriter:
             live_slots = live_before_slots
         return rewritten_reversed
 
-    def rewrite_stmt(self, stmt, *, live_after, live_after_slots=None, allow_loop_control=False, static_iters=None):
+    def rewrite_stmt(self, stmt, *, live_after, live_after_slots=None, allow_loop_control=False, static_iters=None, bound_before=None):
         live_after_slots = set(live_after_slots or ())
         static_iters = dict(static_iters or {})
         if isinstance(stmt, ast.If):
@@ -1245,6 +1270,7 @@ class _ControlFlowRewriter:
                 live_after_slots=live_after_slots,
                 allow_loop_control=allow_loop_control,
                 static_iters=static_iters,
+                bound_before=bound_before,
             )
         if isinstance(stmt, ast.While):
             return self._rewrite_while(
@@ -1443,16 +1469,25 @@ class _ControlFlowRewriter:
         }
         dynamic_then_body = copy.deepcopy(then_body)
         dynamic_else_body = copy.deepcopy(else_body)
-        if if_entry_names:
+        if if_entry_names or old_slot_value_names:
             # The restore assignments below emit no IR: they only reset the
-            # trace-time Python binding so every dynamic branch starts from the
-            # same entering SSA environment.
+            # trace-time Python bindings so every dynamic branch starts from the
+            # same entering SSA environment. Slot temporaries are shared between
+            # sibling branches as well, so restore them from their entry copies
+            # too; otherwise a nested conditional inside one branch captures the
+            # other branch's slot value.
             entry_restores = [
                 ast.Assign(
                     targets=[_name(name, ast.Store())],
                     value=_name(if_entry_names[name]),
                 )
                 for name in sorted(if_entry_names)
+            ] + [
+                ast.Assign(
+                    targets=[_name(slot_value_names[slot], ast.Store())],
+                    value=_name(old_slot_value_names[slot]),
+                )
+                for slot in sorted(merge_slots)
             ]
             dynamic_then_body = copy.deepcopy(entry_restores) + dynamic_then_body
             dynamic_else_body = copy.deepcopy(entry_restores) + dynamic_else_body
@@ -1652,7 +1687,7 @@ class _ControlFlowRewriter:
             )
         )
 
-    def _rewrite_for(self, stmt, *, live_after, live_after_slots=None, allow_loop_control=False, static_iters=None):
+    def _rewrite_for(self, stmt, *, live_after, live_after_slots=None, allow_loop_control=False, static_iters=None, bound_before=None):
         live_after_slots = set(live_after_slots or ())
         static_iters = dict(static_iters or {})
         if _is_pto_attr_call(stmt.iter, "static_range"):
@@ -1714,8 +1749,17 @@ class _ControlFlowRewriter:
         # Seed backward liveness with the body stores that are live after the
         # loop so that a partial assignment whose default path keeps the previous
         # value is recognized as a live-in and therefore a loop-carried iter_arg.
+        # Only the implicit (default-path) reads are additionally gated on a
+        # definite binding before the loop: carrying an unbound name would read
+        # an unbound Python local when the loop is entered, instead of the clear
+        # last-iteration-only diagnostics below.
+        reads_before_raw = _read_before_assignment_names(stmt.body)
         reads_before = _read_before_assignment_names(stmt.body, live_after=assigned_live_after)
-        loop_carried = tuple(sorted(body_info.stores & reads_before))
+        implicit_reads = reads_before - reads_before_raw
+        safe_reads = reads_before_raw | {
+            name for name in implicit_reads if name in (bound_before or set())
+        }
+        loop_carried = tuple(sorted(body_info.stores & safe_reads))
         loop_carried_slots = tuple(sorted(body_slot_info.stores & slot_reads_before))
         unsupported_last_values = sorted(assigned_live_after - set(loop_carried))
         if unsupported_last_values:
