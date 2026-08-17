@@ -848,9 +848,11 @@ PTOAS 当前三个 pin 都早于 8 月 14 日功能提交：
 PTOAS 新增独立 testcase，不复用 PTO-ISA ST 二进制。golden 对两个 window 分别切片并转换
 ND-to-NZ，两个输出独立比较。测试按第 3.2.1 节分成两组：
 
-- full-store group：两个 destination 都是 full-valid；使用 canonical physical NZ
+- full-store group：两个 destination 都是 full-valid；plain NZ 使用 canonical physical NZ
   GlobalTensor shape，经过 `TLOAD -> TEXTRACT -> two TSTORE`，debug build 必须保持
-  assertion enabled，并比较两块完整 physical GM output。
+  assertion enabled，并比较两块完整 physical GM output。A5 `RowPlusOne` 只有在 adapter
+  明确定义 gap 的写回值并通过设备 golden 后才允许比较 gap；否则该 compact mode 仍停在
+  support gate，不能借 full-valid 名义扩大 coverage。
 - partial-valid group：harness 先清零两块完整 physical UB destination，再执行 TEXTRACT；
   通过 simulator UB dump 或 test-only raw physical copy 观察结果，不能把 partial tile 直接
   传给 generic TSTORE。golden 只比较 valid logical coordinates，未定义 padding 不比较，
