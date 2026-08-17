@@ -267,6 +267,30 @@ def ast_static_range_subscript_target_probe(rows: pto.i32):
     _ = values[0]
 
 
+def ast_static_range_nonempty_definite_gate_fn(rows, cond):
+    # Source-only helper for the rewrite-level gate assertion: the static_range
+    # target must be credited as definitely bound once it has run, so the later
+    # partial loop can carry the value without being rejected.
+    for value in pto.static_range(1):
+        pass
+    for replacement in range(rows):
+        if cond:
+            value = replacement
+    _ = value
+
+
+@pto.jit(target='a5', backend='vpto', mode='explicit')
+def ast_del_then_partial_liveout_probe(rows: pto.i32, cond: pto.i1):
+    zero = pto.const(0, dtype=pto.i32)
+    one = pto.const(1, dtype=pto.i32)
+    value = zero
+    del value
+    for _ in range(rows):
+        if cond:
+            value = one
+    _ = value
+
+
 def _all_operations(operation):
     yield operation
     for region in operation.regions:
@@ -462,6 +486,31 @@ def _assert_ast_rewrite_nested_partial_assign_ssa_identity():
     subscript_target_text = ast_static_range_subscript_target_probe.compile().mlir_text()
     expect_parse_roundtrip_and_verify(subscript_target_text, 'AST-rewritten static-range subscript target')
 
+    # A known non-empty static_range definitely binds its target afterwards, so
+    # the rewrite gate must credit it for a later implicit loop carry instead of
+    # rejecting it as last-iteration-only (verified at the rewrite level).
+    import ast as _ast
+    import inspect as _inspect
+    import textwrap as _textwrap
+    from ptodsl._ast_rewrite import _ControlFlowRewriter as _CFR
+    gate_src = _textwrap.dedent(_inspect.getsource(ast_static_range_nonempty_definite_gate_fn))
+    gate_tree = _ast.parse(gate_src)
+    gate_fn = next(
+        n
+        for n in _ast.walk(gate_tree)
+        if isinstance(n, _ast.FunctionDef) and n.name == 'ast_static_range_nonempty_definite_gate_fn'
+    )
+    gate_rewriter = _CFR(static_env={})
+    gate_body = gate_rewriter.rewrite_block(gate_fn.body, live_after={'value'})
+    gate_module = _ast.Module(body=gate_body, type_ignores=[])
+    _ast.fix_missing_locations(gate_module)
+    gate_text = _ast.unparse(gate_module)
+    expect(
+        'carry(value=value)' in gate_text,
+        'known non-empty static_range target should be credited as bound for an implicit carry',
+    )
+    del _ast, _inspect, _textwrap, _CFR
+
     # Unbound partial live-outs must stay on the explicit diagnostics path.
     expect_raises(
         PTODSLAstRewriteError,
@@ -476,6 +525,11 @@ def _assert_ast_rewrite_nested_partial_assign_ssa_identity():
     expect_raises(
         PTODSLAstRewriteError,
         lambda: ast_static_range_empty_orelse_partial_probe.compile(),
+        'last-iteration-only',
+    )
+    expect_raises(
+        PTODSLAstRewriteError,
+        lambda: ast_del_then_partial_liveout_probe.compile(),
         'last-iteration-only',
     )
 

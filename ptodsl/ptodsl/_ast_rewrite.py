@@ -687,27 +687,44 @@ def _definite_stores(stmt) -> set[str]:
     return set()
 
 
-def _definite_out_stmt(stmt, bound_in) -> set[str]:
+def _definite_out_stmt(stmt, bound_in, static_env=None, static_iters=None) -> set[str]:
     """Definite-assignment dataflow through one statement (not a block)."""
     if isinstance(stmt, ast.Assign) or (isinstance(stmt, ast.AnnAssign) and stmt.value is not None):
         return set(bound_in) | _definite_stores(stmt)
+    if isinstance(stmt, ast.Delete):
+        out = set(bound_in)
+        for target in stmt.targets:
+            out -= _simple_name_targets(target)
+        return out
     if isinstance(stmt, ast.If):
-        return _definite_out_block(stmt.body, bound_in) & _definite_out_block(stmt.orelse, bound_in)
+        return _definite_out_block(stmt.body, bound_in, static_env, static_iters) & _definite_out_block(
+            stmt.orelse, bound_in, static_env, static_iters
+        )
     if isinstance(stmt, ast.With):
         out = set(bound_in)
         for item in stmt.items:
             if item.optional_vars is not None:
                 out |= _simple_name_targets(item.optional_vars)
-        return _definite_out_block(stmt.body, out)
-    # Loops (and everything else) do not definitely bind names: a loop body or
-    # branch may never execute, and the loop variable is unbound for empty ranges.
+        return _definite_out_block(stmt.body, out, static_env, static_iters)
+    if isinstance(stmt, ast.For):
+        # Runtime loop bodies or targets are not definite (the loop may not
+        # run), but a known non-empty static_range definitely binds a simple
+        # Name target after the loop.
+        out = set(bound_in)
+        if isinstance(stmt.target, ast.Name) and _is_pto_attr_call(stmt.iter, "static_range"):
+            values = _try_eval_static_range(stmt.iter, static_env or {}, static_iters or {})
+            if values is not None and len(values) > 0:
+                out.add(stmt.target.id)
+        return out
+    # Everything else does not definitely bind names: loop bodies may not run
+    # and the loop variable is unbound for empty ranges.
     return set(bound_in)
 
 
-def _definite_out_block(stmts, bound_in) -> set[str]:
+def _definite_out_block(stmts, bound_in, static_env=None, static_iters=None) -> set[str]:
     out = set(bound_in)
     for stmt in stmts:
-        out = _definite_out_stmt(stmt, out)
+        out = _definite_out_stmt(stmt, out, static_env, static_iters)
     return out
 
 
@@ -1233,7 +1250,7 @@ class _ControlFlowRewriter:
         bound_before_by_stmt = {}
         for preceding in stmts:
             bound_before_by_stmt[id(preceding)] = set(definite_in)
-            definite_in = _definite_out_stmt(preceding, definite_in)
+            definite_in = _definite_out_stmt(preceding, definite_in, self._static_env, static_iters)
         for stmt in reversed(stmts):
             # Compute liveness from the authored AST before rewrite_stmt mutates
             # sibling statements in-place, otherwise later rewrites can pollute
@@ -1271,7 +1288,7 @@ class _ControlFlowRewriter:
         bound_before_by_stmt = {}
         for preceding in stmts:
             bound_before_by_stmt[id(preceding)] = set(definite_in)
-            definite_in = _definite_out_stmt(preceding, definite_in)
+            definite_in = _definite_out_stmt(preceding, definite_in, self._static_env, static_iters)
         for stmt in reversed(stmts):
             live_before = _live_before_stmt(stmt, live)
             live_before_slots = _slot_live_before_stmt(stmt, live_slots, self._static_env, static_iters)
