@@ -188,8 +188,9 @@ ensure_llvm_source() {
 
 # The internal feature-vpto patch makes LLVMVectorize use llvm::Triple, whose
 # implementation lives in LLVMTargetParser, without updating the component's
-# CMake dependency. Inject the missing link edge before configuring LLVM. Keep
-# this idempotent because CI reuses the patched LLVM source directory.
+# CMake dependency. Inject TargetParser into LLVMVectorize's LINK_COMPONENTS
+# before configuring LLVM. Keep this idempotent because CI reuses the patched
+# LLVM source directory.
 inject_llvm_vectorize_target_parser() {
   local vectorize_cmake="${LLVM_CMAKE_SOURCE_DIR}/lib/Transforms/Vectorize/CMakeLists.txt"
   if [ ! -f "${vectorize_cmake}" ]; then
@@ -197,14 +198,33 @@ inject_llvm_vectorize_target_parser() {
     exit 1
   fi
 
-  if grep -Eq '^[[:space:]]*(LLVM)?TargetParser([[:space:]]|$)' "${vectorize_cmake}" \
-     || grep -Eq 'target_link_libraries\([[:space:]]*LLVMVectorize[^)]*LLVMTargetParser' "${vectorize_cmake}"; then
+  if grep -Eq '^[[:space:]]*TargetParser[[:space:]]*$' "${vectorize_cmake}"; then
     return 0
   fi
 
-  printf '\n# PTOAS internal LLVM 19 compatibility: LoopVectorizePrepare uses llvm::Triple.\n' >> "${vectorize_cmake}"
-  printf 'target_link_libraries(LLVMVectorize PRIVATE LLVMTargetParser)\n' >> "${vectorize_cmake}"
-  echo "Injected LLVMTargetParser into ${vectorize_cmake}"
+  local patched_cmake="${vectorize_cmake}.ptoas.$$"
+  if ! awk '
+    $0 == "# PTOAS internal LLVM 19 compatibility: LoopVectorizePrepare uses llvm::Triple." { next }
+    $0 == "target_link_libraries(LLVMVectorize PRIVATE LLVMTargetParser)" { next }
+    /^add_llvm_component_library\(LLVMVectorize([[:space:]]|$)/ { in_vectorize = 1 }
+    in_vectorize && /^[[:space:]]*LINK_COMPONENTS[[:space:]]*$/ { in_link_components = 1 }
+    in_link_components && /^[[:space:]]*Support[[:space:]]*$/ {
+      print
+      print "  TargetParser"
+      inserted = 1
+      next
+    }
+    { print }
+    END { if (!inserted) exit 42 }
+  ' "${vectorize_cmake}" > "${patched_cmake}"; then
+    rm -f "${patched_cmake}"
+    echo "ERROR: failed to find LLVMVectorize LINK_COMPONENTS in ${vectorize_cmake}" >&2
+    exit 1
+  fi
+
+  cp "${patched_cmake}" "${vectorize_cmake}"
+  rm -f "${patched_cmake}"
+  echo "Injected TargetParser into LLVMVectorize LINK_COMPONENTS in ${vectorize_cmake}"
 }
 
 # The PTOAS tree is built with the default libstdc++ ABI new string layout
@@ -273,9 +293,9 @@ ensure_llvm_build() {
   if [ "$rebuild_llvm" == "FALSE" ] \
      && [ -f "${LLVM_BUILD_DIR}/lib/cmake/llvm/LLVMConfig.cmake" ] \
      && [ -f "${LLVM_BUILD_DIR}/lib/cmake/mlir/MLIRConfig.cmake" ] \
-     && [ ! -f "${LLVM_BUILD_DIR}/.ptoas-vectorize-target-parser" ]; then
+     && [ ! -f "${LLVM_BUILD_DIR}/.ptoas-vectorize-target-parser-component" ]; then
     echo "${dotted_line}"
-    echo "Cached LLVM/MLIR build predates the LLVMTargetParser link fix; rebuilding"
+    echo "Cached LLVM/MLIR build predates the TargetParser component fix; rebuilding"
     rebuild_llvm=TRUE
   fi
 
@@ -336,7 +356,7 @@ ensure_llvm_build() {
     cmake "${cmake_args[@]}"
   fi
   cmake --build "${LLVM_BUILD_DIR}" -- -j "${JOBS}"
-  touch "${LLVM_BUILD_DIR}/.ptoas-vectorize-target-parser"
+  touch "${LLVM_BUILD_DIR}/.ptoas-vectorize-target-parser-component"
 }
 
 # ---------------------------------------------------------------------------
