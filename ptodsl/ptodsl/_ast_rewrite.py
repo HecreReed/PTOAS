@@ -904,8 +904,14 @@ def _live_before_stmt(stmt, live_after) -> set[str]:
     return (set(live_after) - info.stores) | info.loads
 
 
-def _read_before_assignment_names(stmts):
-    return _live_before_block(stmts, set())
+def _read_before_assignment_names(stmts, live_after=None):
+    """Return the names read (or implicitly relied on) before assignment.
+
+    live_after seeds backward liveness. Without a seed only explicit reads are
+    visible; with a seed, the partial-assignment default paths of nested
+    conditionals surface their implicit reads of the entering value.
+    """
+    return _live_before_block(stmts, set(live_after or ()))
 
 
 def _is_pto_attr_call(node, name: str) -> bool:
@@ -1381,6 +1387,21 @@ class _ControlFlowRewriter:
 
         branch_live_after = set(live_after) | set(merge_names)
         branch_live_after_slots = set(live_after_slots) | set(merge_slots)
+        # Variables not assigned on one side need their entering value at branch
+        # merge time, and variables read inside a branch need a clean entering
+        # environment. Snapshot the entering SSA value of exactly those names and
+        # restore the Python binding at the top of each dynamic branch so sibling
+        # branch tracing never observes the other branch's rebindings.
+        branch_entry_names = set(old_value_names) | (
+            assigned_any
+            & (
+                _live_before_block(stmt.body, branch_live_after)
+                | _live_before_block(stmt.orelse, branch_live_after)
+            )
+        )
+        if_entry_names = {
+            name: self._fresh(f'if_entry_{name}') for name in sorted(branch_entry_names)
+        }
         then_body = self.rewrite_block(
             stmt.body,
             live_after=branch_live_after,
@@ -1422,6 +1443,19 @@ class _ControlFlowRewriter:
         }
         dynamic_then_body = copy.deepcopy(then_body)
         dynamic_else_body = copy.deepcopy(else_body)
+        if if_entry_names:
+            # The restore assignments below emit no IR: they only reset the
+            # trace-time Python binding so every dynamic branch starts from the
+            # same entering SSA environment.
+            entry_restores = [
+                ast.Assign(
+                    targets=[_name(name, ast.Store())],
+                    value=_name(if_entry_names[name]),
+                )
+                for name in sorted(if_entry_names)
+            ]
+            dynamic_then_body = copy.deepcopy(entry_restores) + dynamic_then_body
+            dynamic_else_body = copy.deepcopy(entry_restores) + dynamic_else_body
         if slot_value_names:
             dynamic_then_body = [
                 _SlotValueRewriter(slot_value_names, self._static_env, static_iters).visit(stmt)
@@ -1447,7 +1481,7 @@ class _ControlFlowRewriter:
                 self._branch_assign(
                     branch_name,
                     merge_names,
-                    old_value_names=old_value_names,
+                    entry_names=if_entry_names,
                     assigned_names=then_assigned,
                     slot_value_names=slot_value_names,
                     old_slot_value_names=old_slot_value_names,
@@ -1458,7 +1492,7 @@ class _ControlFlowRewriter:
                 self._branch_assign(
                     branch_name,
                     merge_names,
-                    old_value_names=old_value_names,
+                    entry_names=if_entry_names,
                     assigned_names=else_assigned,
                     slot_value_names=slot_value_names,
                     old_slot_value_names=old_slot_value_names,
@@ -1511,7 +1545,14 @@ class _ControlFlowRewriter:
                     type_comment=None,
                 )
             )
-        dynamic_body = [with_stmt]
+        dynamic_body = [
+            ast.Assign(
+                targets=[_name(if_entry_names[name], ast.Store())],
+                value=self._current_value(name),
+            )
+            for name in sorted(if_entry_names)
+        ]
+        dynamic_body.append(with_stmt)
         dynamic_body.extend(
             ast.Assign(
                 targets=[_name(name, ast.Store())],
@@ -1547,13 +1588,6 @@ class _ControlFlowRewriter:
         ]
         result.extend(
             ast.Assign(
-                targets=[_name(old_name, ast.Store())],
-                value=self._current_value(name),
-            )
-            for name, old_name in old_value_names.items()
-        )
-        result.extend(
-            ast.Assign(
                 targets=[_name(value_name, ast.Store())],
                 value=_slot_subscript(slot),
             )
@@ -1587,7 +1621,7 @@ class _ControlFlowRewriter:
         branch_name,
         names,
         *,
-        old_value_names,
+        entry_names,
         assigned_names,
         slot_value_names=None,
         old_slot_value_names=None,
@@ -1599,7 +1633,7 @@ class _ControlFlowRewriter:
         keywords = [
             ast.keyword(
                 arg=name,
-                value=_name(name if name in assigned_names else old_value_names[name]),
+                value=_name(name if name in assigned_names else entry_names[name]),
             )
             for name in names
         ]
@@ -1674,10 +1708,13 @@ class _ControlFlowRewriter:
         body_slot_info = _slot_info(stmt.body, self._static_env, static_iters)
         if body_slot_info.invalid_stores:
             raise PTODSLAstRewriteError(body_slot_info.invalid_stores[0])
-        reads_before = _read_before_assignment_names(stmt.body)
         slot_reads_before = _read_before_assignment_slots(stmt.body, self._static_env, static_iters)
         assigned_live_after = body_info.stores & set(live_after)
         assigned_slots_live_after = body_slot_info.stores & set(live_after_slots)
+        # Seed backward liveness with the body stores that are live after the
+        # loop so that a partial assignment whose default path keeps the previous
+        # value is recognized as a live-in and therefore a loop-carried iter_arg.
+        reads_before = _read_before_assignment_names(stmt.body, live_after=assigned_live_after)
         loop_carried = tuple(sorted(body_info.stores & reads_before))
         loop_carried_slots = tuple(sorted(body_slot_info.stores & slot_reads_before))
         unsupported_last_values = sorted(assigned_live_after - set(loop_carried))
@@ -1862,10 +1899,10 @@ class _ControlFlowRewriter:
             targets=[_name(old_names[name], ast.Store())], value=_name(name))
             for name in merge_names]
         then_body = list(body) + [self._branch_assign(
-            branch_name, merge_names, old_value_names=old_names,
+            branch_name, merge_names, entry_names=old_names,
             assigned_names=assigned_names)] if merge_names else list(body)
         else_body = [self._branch_assign(
-            branch_name, merge_names, old_value_names=old_names,
+            branch_name, merge_names, entry_names=old_names,
             assigned_names=set())] if merge_names else [ast.Pass()]
         result = prefix + [ast.With(
             items=[ast.withitem(

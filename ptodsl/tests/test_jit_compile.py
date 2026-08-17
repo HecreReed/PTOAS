@@ -39,6 +39,215 @@ from ptodsl._tracing import current_session
 from ptoas.mlir.ir import InsertionPoint, Location, Module
 
 
+@pto.jit(target='a5')
+def ast_nested_partial_assign_entry_isolated_probe(cond3: pto.i1, cond1: pto.i1):
+    # Sibling branch isolation: the outer then-branch rebinds lo_bits before the
+    # inner conditional is traced, so the inner else (which never assigns lo_bits)
+    # must still fall back to the value captured before the outer if.
+    lo_bits = pto.const(0, dtype=pto.ui32)
+    hi_bits = pto.const(0x40000000, dtype=pto.ui32)
+
+    q1_bits = pto.const(0x10000000, dtype=pto.ui32)
+    q2_bits = pto.const(0x20000000, dtype=pto.ui32)
+
+    if cond3:
+        lo_bits = q2_bits
+    else:
+        if cond1:
+            lo_bits = q1_bits
+            hi_bits = q2_bits
+        # else: lo_bits/hi_bits must remain at their pre-if values.
+
+    _ = hi_bits
+    _ = lo_bits
+
+
+@pto.jit(target='a5')
+def ast_nested_partial_assign_loop_carry_probe(
+    rows: pto.i32,
+    cond3: pto.i1,
+    cond2: pto.i1,
+    cond1: pto.i1,
+):
+    # Issue 1252 structure: three nested conditionals inside a runtime loop,
+    # where the innermost else only assigns hi_bits. On that path lo_bits must
+    # remain the loop-carried value from the previous iteration.
+    lo_bits = pto.const(0, dtype=pto.ui32)
+    hi_bits = pto.const(0x40000000, dtype=pto.ui32)
+
+    q1_bits = pto.const(0x10000000, dtype=pto.ui32)
+    q2_bits = pto.const(0x20000000, dtype=pto.ui32)
+    q3_bits = pto.const(0x30000000, dtype=pto.ui32)
+
+    for _ in range(rows):
+        if cond3:
+            lo_bits = q3_bits
+        else:
+            if cond2:
+                lo_bits = q2_bits
+                hi_bits = q3_bits
+            else:
+                if cond1:
+                    lo_bits = q1_bits
+                    hi_bits = q2_bits
+                else:
+                    hi_bits = q1_bits  # lo_bits must remain unchanged
+
+    _ = hi_bits
+    _ = lo_bits
+
+
+def _all_operations(operation):
+    yield operation
+    for region in operation.regions:
+        for block in region.blocks:
+            for nested in block.operations:
+                yield from _all_operations(nested)
+
+
+def _ui32_const_results(operation, value):
+    # The frontend materializes ui32 scalars as i32 constants wrapped in
+    # builtin.unrealized_conversion_cast ops, so match constants by value only.
+    results = []
+    for op in _all_operations(operation):
+        if op.operation.name == 'arith.constant':
+            attr = op.attributes['value']
+            if attr.value == value:
+                results.append(op.results[0])
+    return results
+
+
+def _cast_result_of_const(const_result):
+    # Resolve the ui32 value of a constant through its feeding conversion cast.
+    for use in const_result.uses:
+        user = getattr(use, 'owner', None)
+        if user is not None and user.operation.name == 'builtin.unrealized_conversion_cast':
+            return user.results[0]
+    return const_result
+
+
+def _same_ssa(a, b):
+    try:
+        return a == b
+    except Exception:
+        return str(a) == str(b)
+
+
+def _scf_if_count(block):
+    if_ops = [op for op in block.operations if op.operation.name == 'scf.if']
+    if not if_ops:
+        return 0
+    return 1 + _scf_if_count(if_ops[0].regions[1].blocks[0])
+
+
+def _innermost_else_yield_operands(block):
+    if_ops = [op for op in block.operations if op.operation.name == 'scf.if']
+    if not if_ops:
+        for op in block.operations:
+            if op.operation.name == 'scf.yield':
+                return list(op.operands)
+        return []
+    return _innermost_else_yield_operands(if_ops[0].regions[1].blocks[0])
+
+
+def _find_op(region, name):
+    for block in region.blocks:
+        for op in block.operations:
+            if op.operation.name == name:
+                return op
+    return None
+
+
+def _find_op_anywhere(operation, name):
+    for op in _all_operations(operation):
+        if op.operation.name == name:
+            return op
+    return None
+
+
+def _assert_ast_rewrite_nested_partial_assign_ssa_identity():
+    # Focused probe 1: sibling-tracing isolation without a loop.
+    isolated_text = ast_nested_partial_assign_entry_isolated_probe.compile().mlir_text()
+    expect_parse_roundtrip_and_verify(
+        isolated_text,
+        'AST-rewritten nested partial assignment entry isolation',
+    )
+    with make_context() as ctx:
+        isolated_module = Module.parse(isolated_text, ctx)
+        isolated_func = _find_op_anywhere(isolated_module.operation, 'func.func')
+        expect(isolated_func is not None, 'entry isolation probe should contain a func.func op')
+        func_block = isolated_func.regions[0].blocks[0]
+        zero_consts = _ui32_const_results(isolated_module.operation, 0)
+        expect(len(zero_consts) >= 1, 'entry isolation probe should materialize the pre-if 0 constant')
+        zero_value = _cast_result_of_const(zero_consts[0])
+        q2_consts = _ui32_const_results(isolated_module.operation, 0x20000000)
+        expect(len(q2_consts) >= 1, 'entry isolation probe should materialize the q2 constant')
+        expect(
+            _scf_if_count(func_block) == 2,
+            'entry isolation probe should contain two nested scf.if ops',
+        )
+        yield_operands = _innermost_else_yield_operands(func_block)
+        expect(len(yield_operands) == 2, 'innermost else should yield two values')
+        expect(
+            _same_ssa(yield_operands[1], zero_value),
+            'innermost else must yield the pre-if lo_bits value, not the sibling branch rebinding',
+        )
+        expect(
+            not any(_same_ssa(yield_operands[1], q) for q in q2_consts),
+            'innermost else must not yield the sibling branch q2 value',
+        )
+
+    # Focused probe 2: the issue-1252 runtime loop structure.
+    loop_text = ast_nested_partial_assign_loop_carry_probe.compile().mlir_text()
+    expect_parse_roundtrip_and_verify(
+        loop_text,
+        'AST-rewritten issue-1252 nested partial assignment loop',
+    )
+    with make_context() as ctx:
+        loop_module = Module.parse(loop_text, ctx)
+        loop_func = _find_op_anywhere(loop_module.operation, 'func.func')
+        expect(loop_func is not None, 'issue-1252 probe should contain a func.func op')
+        for_op = _find_op(loop_func.regions[0], 'scf.for')
+        expect(for_op is not None, 'issue-1252 probe should lower to a runtime scf.for')
+        loop_body = for_op.regions[0].blocks[0]
+        arguments = list(loop_body.arguments)
+        expect(
+            len(arguments) == 3,
+            'scf.for should carry the induction variable plus two ui32 iter_args',
+        )
+        expect(
+            str(arguments[1].type) == 'ui32' and str(arguments[2].type) == 'ui32',
+            'both loop iter_args should be ui32',
+        )
+        expect(
+            _scf_if_count(loop_body) == 3,
+            'issue-1252 probe should contain three nested scf.if ops',
+        )
+        yield_operands = _innermost_else_yield_operands(loop_body)
+        expect(len(yield_operands) == 2, 'innermost else should yield two values')
+        expect(
+            _same_ssa(yield_operands[1], arguments[2]),
+            'innermost else must yield the lo_bits loop-carried block argument',
+        )
+        q2_consts = _ui32_const_results(loop_module.operation, 0x20000000)
+        expect(
+            not any(_same_ssa(yield_operands[1], q) for q in q2_consts),
+            'innermost else must not yield the sibling branch q2 constant',
+        )
+        init_operands = list(for_op.operands)[3:]
+        expect(len(init_operands) == 2, 'scf.for should have exactly two iter_arg init operands')
+        hi_consts = _ui32_const_results(loop_module.operation, 0x40000000)
+        lo_consts = _ui32_const_results(loop_module.operation, 0)
+        expect(
+            hi_consts and _same_ssa(init_operands[0], _cast_result_of_const(hi_consts[0])),
+            'first iter_arg should be hi_bits initialized to 0x40000000',
+        )
+        expect(
+            lo_consts and _same_ssa(init_operands[1], _cast_result_of_const(lo_consts[0])),
+            'second iter_arg should be lo_bits initialized to 0',
+        )
+
+
 def expect(condition: bool, message: str) -> None:
     if not condition:
         raise AssertionError(message)
@@ -7931,6 +8140,9 @@ def main() -> None:
 
     print("ptodsl_jit_compile: PASS")
     os._exit(0)
+
+
+_assert_ast_rewrite_nested_partial_assign_ssa_identity()
 
 
 if __name__ == "__main__":
