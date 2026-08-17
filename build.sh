@@ -202,6 +202,16 @@ llvm_build_is_abi_compatible() {
     | grep -q "_ZNK4llvm5Twine3strB5cxx11Ev"
 }
 
+# BSPUB changes LLVM data types at compile time, so a cache produced without
+# the matching C/C++ definitions and LLVM option cannot be reused safely.
+llvm_build_has_bspub_npu_data_type() {
+  local cache_file="${LLVM_BUILD_DIR}/CMakeCache.txt"
+  [ -f "${cache_file}" ] || return 1
+  grep -Eq '^LLVM_BSPUB_NPU_DATA_TYPE:(BOOL|UNINITIALIZED)=ON$' "${cache_file}" \
+    && grep -Eq '^CMAKE_C_FLAGS:[^=]*=.*-DBSPUB_NPU_DATA_TYPE([[:space:]]|$)' "${cache_file}" \
+    && grep -Eq '^CMAKE_CXX_FLAGS:[^=]*=.*-DBSPUB_NPU_DATA_TYPE([[:space:]]|$)' "${cache_file}"
+}
+
 # Build LLVM/MLIR 19 (shared libs + MLIR Python bindings) if the cached build
 # tree is not usable, mirroring the PTOAS development workflow.
 ensure_llvm_build() {
@@ -226,6 +236,15 @@ ensure_llvm_build() {
     echo "${dotted_line}"
     echo "Cached LLVM/MLIR build was compiled with an incompatible libstdc++ ABI"
     echo "(lacks llvm::Twine::str[abi:cxx11]); rebuilding with the current toolchain"
+    rebuild_llvm=TRUE
+  fi
+
+  if [ "$rebuild_llvm" == "FALSE" ] \
+     && [ -f "${LLVM_BUILD_DIR}/lib/cmake/llvm/LLVMConfig.cmake" ] \
+     && [ -f "${LLVM_BUILD_DIR}/lib/cmake/mlir/MLIRConfig.cmake" ] \
+     && ! llvm_build_has_bspub_npu_data_type; then
+    echo "${dotted_line}"
+    echo "Cached LLVM/MLIR build lacks BSPUB NPU data type support; rebuilding"
     rebuild_llvm=TRUE
   fi
 
@@ -257,6 +276,9 @@ ensure_llvm_build() {
     -S "${LLVM_CMAKE_SOURCE_DIR}"
     -B "${LLVM_BUILD_DIR}"
     -DLLVM_ENABLE_PROJECTS="mlir;clang"
+    -DCMAKE_CXX_FLAGS="-DBSPUB_NPU_DATA_TYPE"
+    -DCMAKE_C_FLAGS="-DBSPUB_NPU_DATA_TYPE"
+    -DLLVM_BSPUB_NPU_DATA_TYPE=ON
     -DBUILD_SHARED_LIBS=ON
     -DLLVM_ENABLE_ASSERTIONS=ON
     -DMLIR_ENABLE_BINDINGS_PYTHON=ON
@@ -276,7 +298,9 @@ ensure_llvm_build() {
   fi
 
   if [ -f "${HARDENING_CACHE_FILE}" ]; then
-    cmake -C "${HARDENING_CACHE_FILE}" "${cmake_args[@]}"
+    # Process the BSPUB flags before the preload cache so the cache appends,
+    # rather than loses, the delivery hardening flags.
+    cmake "${cmake_args[@]}" -C "${HARDENING_CACHE_FILE}"
   else
     cmake "${cmake_args[@]}"
   fi
@@ -346,6 +370,7 @@ configure_ptoas() {
     -DPTO_ENABLE_PYTHON_BINDING=ON
     -DBUILD_TESTING=ON
     -DCMAKE_BUILD_TYPE=Release
+    -DCMAKE_CXX_FLAGS="-DBSPUB_NPU_DATA_TYPE"
     -DCMAKE_INSTALL_PREFIX="${INSTALL_PATH}"
     -DCMAKE_C_COMPILER="$(command -v clang || command -v clang-15 || command -v gcc)"
     -DCMAKE_CXX_COMPILER="$(command -v clang++ || command -v clang++-15 || command -v g++)"
@@ -365,7 +390,9 @@ configure_ptoas() {
   fi
 
   if [ -f "${HARDENING_CACHE_FILE}" ]; then
-    cmake -C "${HARDENING_CACHE_FILE}" "${ptoas_cmake_args[@]}"
+    # Keep the PTOAS BSPUB definition together with the delivery hardening
+    # flags from the preload cache.
+    cmake "${ptoas_cmake_args[@]}" -C "${HARDENING_CACHE_FILE}"
   else
     cmake "${ptoas_cmake_args[@]}"
   fi
