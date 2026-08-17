@@ -698,7 +698,7 @@ def _definite_out_stmt(stmt, bound_in) -> set[str]:
         for item in stmt.items:
             if item.optional_vars is not None:
                 out |= _simple_name_targets(item.optional_vars)
-        return out
+        return _definite_out_block(stmt.body, out)
     # Loops (and everything else) do not definitely bind names: a loop body or
     # branch may never execute, and the loop variable is unbound for empty ranges.
     return set(bound_in)
@@ -1347,6 +1347,7 @@ class _ControlFlowRewriter:
                 live_after_slots=live_after_slots,
                 allow_loop_control=allow_loop_control,
                 static_iters=static_iters,
+                bound_before=bound_before,
             )
         ]
 
@@ -1389,6 +1390,7 @@ class _ControlFlowRewriter:
                     live_after_slots=live_after_slots,
                     allow_loop_control=allow_loop_control,
                     static_iters=static_iters,
+                    bound_before=bound_before,
                 )
             elif isinstance(value, list):
                 for item in value:
@@ -1399,6 +1401,7 @@ class _ControlFlowRewriter:
                             live_after_slots=live_after_slots,
                             allow_loop_control=allow_loop_control,
                             static_iters=static_iters,
+                            bound_before=bound_before,
                         )
         return stmt
 

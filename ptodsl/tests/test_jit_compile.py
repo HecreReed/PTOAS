@@ -186,6 +186,31 @@ def ast_slot_partial_assign_loop_carry_probe(rows: pto.i32, cond: pto.i1):
     _ = values[0]
 
 
+@pto.jit(target='a5', backend='vpto', mode='explicit')
+def ast_with_entry_bound_partial_liveout_probe(rows: pto.i32, cond: pto.i1, value: pto.i32):
+    # A function parameter must remain definitely bound inside a vecscope body.
+    one = pto.const(1, dtype=pto.i32)
+    with pto.vecscope():
+        for _ in range(rows):
+            if cond:
+                value = one
+        _ = value
+    _ = value
+
+
+@pto.jit(target='a5', backend='vpto', mode='explicit')
+def ast_with_body_bound_partial_liveout_probe(rows: pto.i32, cond: pto.i1):
+    # A name bound inside the with body is definite after the with statement.
+    one = pto.const(1, dtype=pto.i32)
+    zero = pto.const(0, dtype=pto.i32)
+    with pto.vecscope():
+        value = zero
+    for _ in range(rows):
+        if cond:
+            value = one
+    _ = value
+
+
 def _all_operations(operation):
     yield operation
     for region in operation.regions:
@@ -388,6 +413,8 @@ def _assert_ast_rewrite_nested_partial_assign_ssa_identity():
         (ast_outer_bound_partial_liveout_loop_probe.compile().mlir_text(), 'outer-block-bound partial live-out'),
         (ast_both_branch_bound_partial_liveout_loop_probe.compile().mlir_text(), 'both-branches-bound partial live-out'),
         (ast_slot_partial_assign_loop_carry_probe.compile().mlir_text(), 'loop static-subscript partial assignment'),
+        (ast_with_entry_bound_partial_liveout_probe.compile().mlir_text(), 'with-entry-bound partial live-out'),
+        (ast_with_body_bound_partial_liveout_probe.compile().mlir_text(), 'with-body-bound partial live-out'),
     ):
         expect_parse_roundtrip_and_verify(probe_text, 'AST-rewritten ' + label)
         expect('iter_args(' in probe_text, label + ' should lower through scf.for iter_args')
