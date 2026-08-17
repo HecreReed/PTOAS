@@ -211,6 +211,28 @@ def ast_with_body_bound_partial_liveout_probe(rows: pto.i32, cond: pto.i1):
     _ = value
 
 
+@pto.jit(target='a5', backend='vpto', mode='explicit')
+def ast_with_as_bound_partial_liveout_probe(rows: pto.i32, cols: pto.i32, cond: pto.i1):
+    # The with-as target is definitely bound inside the body; an inner runtime
+    # loop that partially rebinds it must see it as a valid partial carry.
+    with pto.for_(0, rows, step=1) as value:
+        for replacement in range(cols):
+            if cond:
+                value = replacement
+        pto.wait_flag(pto.Pipe.V, pto.Pipe.MTE2, event_id=value)
+
+
+@pto.jit(target='a5', backend='vpto', mode='explicit')
+def ast_for_iv_bound_partial_liveout_probe(rows: pto.i32, cols: pto.i32, cond: pto.i1):
+    # The runtime for induction variable is bound at the top of its own body;
+    # an inner loop that partially rebinds it must see it as a valid carry.
+    for value in range(rows):
+        for replacement in range(cols):
+            if cond:
+                value = replacement
+        pto.wait_flag(pto.Pipe.V, pto.Pipe.MTE2, event_id=value)
+
+
 def _all_operations(operation):
     yield operation
     for region in operation.regions:
@@ -415,6 +437,8 @@ def _assert_ast_rewrite_nested_partial_assign_ssa_identity():
         (ast_slot_partial_assign_loop_carry_probe.compile().mlir_text(), 'loop static-subscript partial assignment'),
         (ast_with_entry_bound_partial_liveout_probe.compile().mlir_text(), 'with-entry-bound partial live-out'),
         (ast_with_body_bound_partial_liveout_probe.compile().mlir_text(), 'with-body-bound partial live-out'),
+        (ast_with_as_bound_partial_liveout_probe.compile().mlir_text(), 'with-as-bound partial live-out'),
+        (ast_for_iv_bound_partial_liveout_probe.compile().mlir_text(), 'for-induction-variable-bound partial live-out'),
     ):
         expect_parse_roundtrip_and_verify(probe_text, 'AST-rewritten ' + label)
         expect('iter_args(' in probe_text, label + ' should lower through scf.for iter_args')

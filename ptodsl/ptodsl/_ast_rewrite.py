@@ -1371,6 +1371,12 @@ class _ControlFlowRewriter:
             return stmt
         for field, value in ast.iter_fields(stmt):
             if field in {"body", "orelse", "finalbody"} and isinstance(value, list):
+                entry_bindings = set(bound_before or ())
+                if field == "body" and isinstance(stmt, ast.With):
+                    # The with-as targets are definitely bound inside the body.
+                    for item in stmt.items:
+                        if item.optional_vars is not None:
+                            entry_bindings |= _simple_name_targets(item.optional_vars)
                 setattr(
                     stmt,
                     field,
@@ -1380,7 +1386,7 @@ class _ControlFlowRewriter:
                         live_after_slots=live_after_slots,
                         allow_loop_control=allow_loop_control,
                         static_iters=static_iters,
-                        bound_on_entry=bound_before,
+                        bound_on_entry=entry_bindings,
                     ),
                 )
             elif isinstance(value, ast.AST):
@@ -1760,7 +1766,7 @@ class _ControlFlowRewriter:
                     live_after_slots=live_after_slots,
                     allow_loop_control=True,
                     static_iters=next_static_iters,
-                    bound_on_entry=bound_before,
+                    bound_on_entry=set(bound_before or ()) | {stmt.target.id},
                 )
                 stmt.orelse = self.rewrite_block(
                     stmt.orelse,
@@ -1768,7 +1774,7 @@ class _ControlFlowRewriter:
                     live_after_slots=live_after_slots,
                     allow_loop_control=True,
                     static_iters=static_iters,
-                    bound_on_entry=bound_before,
+                    bound_on_entry=set(bound_before or ()) | {stmt.target.id},
                 )
             finally:
                 self._loop_control_stack = saved_control_stack
@@ -1850,7 +1856,12 @@ class _ControlFlowRewriter:
             live_after=loop_live_after,
             live_after_slots=loop_live_after_slots,
             static_iters=static_iters,
-            bound_on_entry=set(bound_before or ()) | set(loop_carried) | {slot.base for slot in loop_carried_slots},
+            bound_on_entry=(
+                set(bound_before or ())
+                | {stmt.target.id}
+                | set(loop_carried)
+                | {slot.base for slot in loop_carried_slots}
+            ),
         )
 
         slot_carry_names = {
