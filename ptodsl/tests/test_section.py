@@ -239,6 +239,27 @@ def lexical_section_uninitialized_conditional_probe():
 
 
 @pto.jit(target="a5", mode="explicit")
+def lexical_section_conditional_loop_carry_probe():
+    base = pto.const(0, dtype=pto.ui64)
+    one = pto.const(1, dtype=pto.i32)
+    with pto.section("vector"):
+        if pto.get_block_idx() < one:
+            with pto.vecscope():
+                dst_ptr = pto.castptr(base, pto.ptr(pto.f32, "ub"))
+                mask = pto.pset_b32(pto.MaskPattern.ALL)
+                value = pto.vlds(dst_ptr, pto.const(0))
+                for _ in range(2):
+                    dst_ptr = pto.vsstb(
+                        value,
+                        dst_ptr,
+                        pto.i16(32),
+                        pto.i16(0),
+                        mask,
+                        post_update=pto.PostUpdate.ON,
+                    )
+
+
+@pto.jit(target="a5", mode="explicit")
 def lexical_section_nested_conditional_rebinding_probe():
     one = pto.const(1, dtype=pto.i32)
     value = pto.const(0, dtype=pto.i32)
@@ -411,6 +432,10 @@ def main() -> None:
         lambda: lexical_section_uninitialized_conditional_probe.compile(),
         "reads a section-local value before it is initialized",
     )
+
+    conditional_loop_carry_text = lexical_section_conditional_loop_carry_probe.compile().mlir_text()
+    assert conditional_loop_carry_text.count("pto.section.vector {") == 1
+    assert "scf.for" in conditional_loop_carry_text
 
     loop_carry_text = lexical_section_loop_carry_probe.compile().mlir_text()
     assert loop_carry_text.count("pto.section.cube {") == 1

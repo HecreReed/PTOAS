@@ -86,7 +86,8 @@ static bool isRawSectionCarrierOp(Operation *op) {
   }
   return op &&
          isa<VectorMicroOpInterface, CubeMicroOpInterface, MteOpInterface,
-             SetFlagOp, WaitFlagOp, SyncSetOp, SyncWaitOp>(op);
+             SetFlagOp, WaitFlagOp, SyncSetOp, SyncWaitOp, SetCrossBlockOp,
+             WaitCrossBlockOp, SetIntraBlockOp, WaitIntraBlockOp>(op);
 }
 
 static std::optional<InferredSectionKind>
@@ -198,6 +199,18 @@ classifyRawSectionCarrierOp(Operation *op) {
   }
   if (auto syncWait = dyn_cast<SyncWaitOp>(op)) {
     return classifySyncPipe(syncWait.getPipe().getPipe());
+  }
+  if (auto crossSet = dyn_cast<SetCrossBlockOp>(op)) {
+    return classifySyncPipe(crossSet.getPipe().getPipe());
+  }
+  if (auto crossWait = dyn_cast<WaitCrossBlockOp>(op)) {
+    return classifySyncPipe(crossWait.getPipe().getPipe());
+  }
+  if (auto intraSet = dyn_cast<SetIntraBlockOp>(op)) {
+    return classifySyncPipe(intraSet.getPipe().getPipe());
+  }
+  if (auto intraWait = dyn_cast<WaitIntraBlockOp>(op)) {
+    return classifySyncPipe(intraWait.getPipe().getPipe());
   }
   return std::nullopt;
 }

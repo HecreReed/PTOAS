@@ -67,7 +67,8 @@ static bool isForbiddenPipeOperation(Operation *op) {
              AivInitializePipeOp, InitializeL2G2LPipeOp, InitializeL2LPipeOp,
              DeclareEventIdArrayOp, EventIdArrayGetOp, EventIdArraySetOp,
              SetFlagOp, WaitFlagOp, SetFlagDynOp, WaitFlagDynOp, GetBufOp,
-             RlsBufOp, SyncSetOp, SyncWaitOp, BarrierOp, FenceBarrierAllOp,
+             RlsBufOp, SyncSetOp, SyncWaitOp, SetCrossBlockOp, WaitCrossBlockOp,
+             SetIntraBlockOp, WaitIntraBlockOp, BarrierOp, FenceBarrierAllOp,
              TSyncOp, SyncAllOp, DsbOp>(op);
 }
 

@@ -72,6 +72,14 @@ lcfirst() {
   printf '%s%s\n' "$(printf '%s' "$first" | tr '[:upper:]' '[:lower:]')" "$rest"
 }
 
+# Declare directory-wide requirements here so `all` can filter before counting cases.
+sample_dir_arch() {
+  case "$1" in
+    Qwen*A3|Deepseek*A3) printf 'a3\n' ;;
+    Qwen*A5|Deepseek*A5|TquantMx|TquantMxDn) printf 'a5\n' ;;
+  esac
+}
+
 resolve_ptoas_bin() {
   if [[ -n "${PTOAS_BIN}" ]]; then
     local override
@@ -165,13 +173,14 @@ direct_pto_files() {
 process_one_dir() {
   local A="$1" # folder name (e.g. Abs)
   local out_dir="$2"
-  local dir ptoas ptobc python out_subdir model_arch=""
+  local dir ptoas ptobc python out_subdir model_arch="" required_arch
   dir="${BASE_DIR}/${A}"
   out_subdir="${out_dir}/${A}"
   case "${A}" in
     Qwen*A3|Deepseek*A3) model_arch="a3" ;;
     Qwen*A5|Deepseek*A5) model_arch="a5" ;;
   esac
+  required_arch="$(sample_dir_arch "${A}")"
   mkdir -p "${out_subdir}"
   copy_validation_assets "${dir}" "${out_dir}" "${out_subdir}"
 
@@ -221,15 +230,15 @@ process_one_dir() {
       fi
     done
   fi
-  if [[ "${model_arch}" == "a5" ]]; then
+  if [[ "${required_arch}" == "a5" ]]; then
     if [[ $has_pto_arch_override -eq 0 ]]; then
       ptoas_flags+=(--pto-arch a5)
       target_arch="a5"
     fi
-    if [[ $has_pto_level_override -eq 0 ]]; then
+    if [[ "${model_arch}" == "a5" && $has_pto_level_override -eq 0 ]]; then
       ptoas_flags+=(--pto-level=level3)
     fi
-  elif [[ "${model_arch}" == "a3" ]]; then
+  elif [[ "${required_arch}" == "a3" ]]; then
     if [[ $has_pto_level_override -eq 0 ]]; then
       ptoas_flags+=(--pto-level=level3)
     fi
@@ -267,28 +276,28 @@ process_one_dir() {
     echo -e "${A}\tSKIP\tMissing dir: $dir"
     return 0
   fi
-  if [[ "${model_arch}" == "a3" && "${target_arch_lc}" != "a3" ]]; then
+  if [[ "${required_arch}" == "a3" && "${target_arch_lc}" != "a3" ]]; then
     local direct_case
     while IFS= read -r -d '' direct_case; do
       echo -e "${A}($(basename "$direct_case"))\tSKIP\trequires --pto-arch=a3"
     done < <(direct_pto_files "$dir")
     return 0
   fi
-  if [[ "${model_arch}" == "a3" && -n "${soc_lc}" && ( "${soc_lc}" == *"a5"* || "${soc_lc}" == *"950"* ) ]]; then
+  if [[ "${required_arch}" == "a3" && -n "${soc_lc}" && ( "${soc_lc}" == *"a5"* || "${soc_lc}" == *"950"* ) ]]; then
     local direct_case
     while IFS= read -r -d '' direct_case; do
       echo -e "${A}($(basename "$direct_case"))\tSKIP\trequires A3 target SOC"
     done < <(direct_pto_files "$dir")
     return 0
   fi
-  if [[ "${model_arch}" == "a5" && "$(printf '%s' "$target_arch" | tr '[:upper:]' '[:lower:]')" != "a5" ]]; then
+  if [[ "${required_arch}" == "a5" && "${target_arch_lc}" != "a5" ]]; then
     local direct_case
     while IFS= read -r -d '' direct_case; do
       echo -e "${A}($(basename "$direct_case"))\tSKIP\trequires --pto-arch=a5"
     done < <(direct_pto_files "$dir")
     return 0
   fi
-  if [[ "${model_arch}" == "a5" && -n "${soc_lc}" && "${soc_lc}" != *"a5"* && "${soc_lc}" != *"950"* ]]; then
+  if [[ "${required_arch}" == "a5" && -n "${soc_lc}" && "${soc_lc}" != *"a5"* && "${soc_lc}" != *"950"* ]]; then
     local direct_case
     while IFS= read -r -d '' direct_case; do
       echo -e "${A}($(basename "$direct_case"))\tSKIP\trequires A5 target SOC"
@@ -1570,7 +1579,7 @@ write_board_case_manifest() {
 }
 
 run_all() {
-  local results tmp out_dir summary_rc
+  local tmp out_dir summary_rc soc_arch="" dir_name dir_arch
   out_dir="${PTOAS_OUT_DIR}"
   if [[ -z "${out_dir}" ]]; then
     out_dir="$(mktemp -d -t ptoas.samples.XXXXXX)"
@@ -1581,9 +1590,23 @@ run_all() {
   echo "PTOAS_OUT_DIR=${out_dir}"
 
   tmp="$(mktemp -t ptoas.runop.XXXXXX)"
+  if [[ -n "${SOC_VERSION:-}" ]]; then
+    local soc_lc
+    soc_lc="$(printf '%s' "${SOC_VERSION}" | tr '[:upper:]' '[:lower:]')"
+    if [[ "${soc_lc}" == *"a5"* || "${soc_lc}" == *"950"* ]]; then
+      soc_arch="a5"
+    else
+      soc_arch="a3"
+    fi
+  fi
   for d in "${BASE_DIR}"/*/; do
     [[ -d "$d" ]] || continue
-    process_one_dir "$(basename "$d")" "$out_dir" >>"$tmp"
+    dir_name="$(basename "$d")"
+    dir_arch="$(sample_dir_arch "${dir_name}")"
+    if [[ -n "${soc_arch}" && -n "${dir_arch}" && "${dir_arch}" != "${soc_arch}" ]]; then
+      continue
+    fi
+    process_one_dir "${dir_name}" "$out_dir" >>"$tmp"
   done
 
   echo "========== SUMMARY =========="

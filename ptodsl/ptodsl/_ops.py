@@ -6710,52 +6710,64 @@ def _flag_event_id_operand(event_id, *, context: str):
     return _coerce_index(event_id, context=context), False
 
 
-def set_cross_flag(pipe, event_id):
-    """``pto.set_cross_flag(pipe, event_id)`` – cross-core sync facade for ``pto.sync.set``."""
-    _validate_sync_pipe(pipe, context="set_cross_flag(pipe, event_id)", allowed=("PIPE_FIX",))
-    event_operand = _sync_event_id_operand(event_id, context="set_cross_flag(..., event_id=...)")
-    _pto.sync_set(_pipe_attr(pipe), event_operand)
-
-
-def wait_cross_flag(pipe, event_id):
-    """``pto.wait_cross_flag(pipe, event_id)`` – cross-core sync facade for ``pto.sync.wait``."""
-    _validate_sync_pipe(pipe, context="wait_cross_flag(pipe, event_id)", allowed=("PIPE_FIX",))
-    event_operand = _sync_event_id_operand(event_id, context="wait_cross_flag(..., event_id=...)")
-    _pto.sync_wait(_pipe_attr(pipe), event_operand)
-
-
-def set_intra_flag(pipe, event_id):
-    """``pto.set_intra_flag(pipe, event_id)`` – intra-block sync facade for ``pto.sync.set``."""
+def set_cross_block(pipe, event_id):
+    """``pto.set_cross_block(pipe, event_id)`` – emits ``pto.set_cross_block``."""
     _validate_sync_pipe(
         pipe,
-        context="set_intra_flag(pipe, event_id)",
+        context="set_cross_block(pipe, event_id)",
+        allowed=("PIPE_FIX", "PIPE_MTE1", "PIPE_MTE2", "PIPE_MTE3", "PIPE_V"),
+    )
+    event_operand = _sync_event_id_operand_in_range(
+        event_id, context="set_cross_block(..., event_id=...)", lo=0, hi=15
+    )
+    _pto.set_cross_block(_pipe_attr(pipe), event_operand)
+
+
+def wait_cross_block(pipe, event_id):
+    """``pto.wait_cross_block(pipe, event_id)`` – emits ``pto.wait_cross_block``."""
+    _validate_sync_pipe(
+        pipe,
+        context="wait_cross_block(pipe, event_id)",
+        allowed=("PIPE_FIX", "PIPE_MTE1", "PIPE_MTE2", "PIPE_MTE3", "PIPE_V"),
+    )
+    event_operand = _sync_event_id_operand_in_range(
+        event_id, context="wait_cross_block(..., event_id=...)", lo=0, hi=15
+    )
+    _pto.wait_cross_block(_pipe_attr(pipe), event_operand)
+
+
+def set_intra_block(pipe, event_id):
+    """``pto.set_intra_block(pipe, event_id)`` – emits ``pto.set_intra_block``."""
+    _validate_sync_pipe(
+        pipe,
+        context="set_intra_block(pipe, event_id)",
         allowed=("PIPE_FIX", "PIPE_MTE1", "PIPE_MTE2", "PIPE_MTE3", "PIPE_V"),
     )
     event_operand = _sync_event_id_operand_in_range(
         event_id,
-        context="set_intra_flag(..., event_id=...)",
+        context="set_intra_block(..., event_id=...)",
         lo=0,
         hi=31,
         meaning="physical event_id",
     )
-    _pto.sync_set(_pipe_attr(pipe), event_operand)
+    _pto.set_intra_block(_pipe_attr(pipe), event_operand)
 
 
-def wait_intra_flag(pipe, event_id):
-    """``pto.wait_intra_flag(pipe, event_id)`` – intra-block sync facade for ``pto.sync.wait``."""
+def wait_intra_block(pipe, event_id):
+    """``pto.wait_intra_block(pipe, event_id)`` – emits ``pto.wait_intra_block``."""
     _validate_sync_pipe(
         pipe,
-        context="wait_intra_flag(pipe, event_id)",
+        context="wait_intra_block(pipe, event_id)",
         allowed=("PIPE_FIX", "PIPE_MTE1", "PIPE_MTE2", "PIPE_MTE3", "PIPE_V"),
     )
     event_operand = _sync_event_id_operand_in_range(
         event_id,
-        context="wait_intra_flag(..., event_id=...)",
+        context="wait_intra_block(..., event_id=...)",
         lo=0,
         hi=31,
         meaning="physical event_id",
     )
-    _pto.sync_wait(_pipe_attr(pipe), event_operand)
+    _pto.wait_intra_block(_pipe_attr(pipe), event_operand)
 
 
 def set_flag(src: str, dst: str, *, event_id: int = 0):
@@ -6904,7 +6916,7 @@ __all__ = [
     "fmin", "fmax", "fma", "convert",
     "syncthreads", "threadfence", "threadfence_block", "trap", "keep", "resume",
     "pipe_barrier", "get_buf", "rls_buf",
-    "set_cross_flag", "wait_cross_flag", "set_intra_flag", "wait_intra_flag",
+    "set_cross_block", "wait_cross_block", "set_intra_block", "wait_intra_block",
     "set_flag", "wait_flag",
     "reserve_buffer", "import_reserved_buffer",
 ]

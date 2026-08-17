@@ -2846,9 +2846,9 @@ def SyncSetOp : PTO_Op<"sync.set"> {
   let summary = "Set a synchronization signal (trigger) between cube and vector.";
   let description = [{
     Sets a synchronization signal on the specified pipeline stage.
-    Corresponds to `ffts_cross_core_sync` (A3) or `set_intra_block` (A5).
-    On A3, the optional `ffts_mode` attribute selects the first argument passed
-    to `getFFTSMsg`; if omitted, the legacy `FFTS_MODE_VAL` path is preserved.
+    Corresponds to `ffts_cross_core_sync` on both A3 and A5.  The optional
+    `ffts_mode` selects FFTS mode 0 (inter), 1 (subblock), or 2 (block);
+    if omitted, block mode (2) is used for backward compatibility.
   }];
 
   let arguments = (ins
@@ -2866,15 +2866,59 @@ def SyncWaitOp : PTO_Op<"sync.wait"> {
   let summary = "Wait for a synchronization signal (barrier) between cube and vector.";
   let description = [{
     Waits for a synchronization signal on the specified pipeline stage.
-    Corresponds to `wait_flag_dev` (A3) or `wait_intra_block` (A5).
+    Corresponds to `wait_flag_dev` on both A3 and A5.  `ffts_mode` records
+    the matching set-side FFTS mode (0, 1, or 2).
   }];
 
   let arguments = (ins
     PTO_PipeAttr:$pipe,
     OptionalAttr<I32Attr>:$event_id,
+    OptionalAttr<I32Attr>:$ffts_mode,
     Optional<Index>:$event_id_dyn
   );
 
+  let hasVerifier = 1;
+  let hasCustomAssemblyFormat = 1;
+}
+
+// Named cross-/intra-block synchronization operations.  Cross-core operations
+// are canonicalized to sync.set/sync.wait with FFTS mode 0 in the VPTO path;
+// intra-block operations lower directly to their CCE builtins.
+def SetCrossBlockOp : PTO_Op<"set_cross_block"> {
+  let summary = "Signal a cross-block synchronization flag";
+  let description = [{
+    Canonicalizes to `pto.sync.set` with FFTS mode 0.
+  }];
+  let arguments = (ins PTO_PipeAttr:$pipe, OptionalAttr<I32Attr>:$event_id,
+                       DefaultValuedAttr<I32Attr, "0">:$ffts_mode,
+                       Optional<Index>:$event_id_dyn);
+  let hasVerifier = 1;
+  let hasCustomAssemblyFormat = 1;
+}
+
+def WaitCrossBlockOp : PTO_Op<"wait_cross_block"> {
+  let summary = "Wait for a cross-block synchronization flag";
+  let description = [{ Canonicalizes to `pto.sync.wait` with FFTS mode 0. }];
+  let arguments = (ins PTO_PipeAttr:$pipe, OptionalAttr<I32Attr>:$event_id,
+                       Optional<Index>:$event_id_dyn);
+  let hasVerifier = 1;
+  let hasCustomAssemblyFormat = 1;
+}
+
+def SetIntraBlockOp : PTO_Op<"set_intra_block"> {
+  let summary = "Signal an intra-block synchronization flag";
+  let description = [{ Lowers to `__builtin_cce_set_intra_block`. }];
+  let arguments = (ins PTO_PipeAttr:$pipe, OptionalAttr<I32Attr>:$event_id,
+                       Optional<Index>:$event_id_dyn);
+  let hasVerifier = 1;
+  let hasCustomAssemblyFormat = 1;
+}
+
+def WaitIntraBlockOp : PTO_Op<"wait_intra_block"> {
+  let summary = "Wait for an intra-block synchronization flag";
+  let description = [{ Lowers to `__builtin_cce_wait_intra_block`. }];
+  let arguments = (ins PTO_PipeAttr:$pipe, OptionalAttr<I32Attr>:$event_id,
+                       Optional<Index>:$event_id_dyn);
   let hasVerifier = 1;
   let hasCustomAssemblyFormat = 1;
 }

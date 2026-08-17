@@ -137,8 +137,8 @@ Read `10-sync-ops.md` for:
 - `pto.pipe_barrier(pto.Pipe.ALL)`
 - `pto.mem_bar(pto.BarrierType.VV_ALL)` and other barrier types.
 - `pto.get_buf` / `pto.rls_buf` for double buffering.
-- `pto.set_cross_flag` / `pto.wait_cross_flag`.
-- `pto.set_intra_flag` / `pto.wait_intra_flag`.
+- `pto.set_cross_block` / `pto.wait_cross_block`.
+- `pto.set_intra_block` / `pto.wait_intra_block`.
 
 Common explicit-mode pairs:
 

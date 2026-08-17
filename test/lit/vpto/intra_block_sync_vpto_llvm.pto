@@ -9,29 +9,30 @@
 // RUN: ( mkdir -p %T && ptoas --pto-arch=a5 --pto-backend=vpto %s -o %t --mlir-print-ir-after=convert-func-to-llvm 2>&1 || true ) | FileCheck %s
 
 module attributes {pto.target_arch = "a5", pto.kernel_kind = #pto.kernel_kind<vector>} {
-  func.func @intra_block_sync_static_dynamic(%event_id: index) attributes {pto.kernel} {
-    pto.sync.set <PIPE_FIX>, 0
-    pto.sync.wait <PIPE_MTE3>, 0
-    pto.sync.set <PIPE_FIX>, %event_id
-    pto.sync.wait <PIPE_MTE3>, %event_id
+  func.func @sync_static_dynamic(%event_id: index) attributes {pto.kernel} {
+    pto.sync.set <PIPE_FIX>, 0 {ffts_mode = 0 : i32}
+    pto.sync.wait <PIPE_MTE3>, 0 {ffts_mode = 0 : i32}
+    pto.sync.set <PIPE_FIX>, %event_id {ffts_mode = 1 : i32}
+    pto.sync.wait <PIPE_MTE3>, %event_id {ffts_mode = 1 : i32}
     return
   }
 
   func.func @intra_block_sync_mte_pipes() attributes {pto.kernel} {
-    pto.sync.set <PIPE_MTE1>, 17
-    pto.sync.wait <PIPE_MTE2>, 17
+    pto.set_intra_block <PIPE_MTE1>, 17
+    pto.wait_intra_block <PIPE_MTE2>, 17
     return
   }
 
   func.func @intra_block_sync_v_dynamic(%event_id: index) attributes {pto.kernel} {
-    pto.sync.set <PIPE_V>, %event_id
+    pto.set_intra_block <PIPE_V>, %event_id
     return
   }
 }
 
-// CHECK-LABEL: llvm.func @intra_block_sync_static_dynamic_mix_aiv
-// CHECK: llvm.call @llvm.hivm.SET.INTRA.BLOCK.mode
-// CHECK: llvm.call @llvm.hivm.WAIT.INTRA.BLOCK.mode
+// CHECK-LABEL: llvm.func @sync_static_dynamic_mix_aiv
+// CHECK: llvm.call @llvm.hivm.SET.CROSS.CORE
+// CHECK: llvm.call @llvm.hivm.WAIT.FLAG.DEV.PIPE.IMM
+// CHECK: llvm.call @llvm.hivm.WAIT.FLAG.DEV.PIPE.REG
 
 // CHECK-LABEL: llvm.func @intra_block_sync_mte_pipes_mix_aiv
 // CHECK: llvm.mlir.constant(3 : i64) : i64

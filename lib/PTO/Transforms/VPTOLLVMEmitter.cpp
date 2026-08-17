@@ -5329,11 +5329,21 @@ StringRef buildSyncCallee<pto::BarrierOp>(MLIRContext *context) {
 
 template <>
 StringRef buildSyncCallee<pto::SyncSetOp>(MLIRContext *context) {
-  return StringAttr::get(context, "llvm.hivm.SET.INTRA.BLOCK.mode").getValue();
+  return StringAttr::get(context, "llvm.hivm.SET.CROSS.CORE").getValue();
 }
 
 template <>
 StringRef buildSyncCallee<pto::SyncWaitOp>(MLIRContext *context) {
+  return StringAttr::get(context, "llvm.hivm.WAIT.FLAG.DEV.REG").getValue();
+}
+
+template <>
+StringRef buildSyncCallee<pto::SetIntraBlockOp>(MLIRContext *context) {
+  return StringAttr::get(context, "llvm.hivm.SET.INTRA.BLOCK.mode").getValue();
+}
+
+template <>
+StringRef buildSyncCallee<pto::WaitIntraBlockOp>(MLIRContext *context) {
   return StringAttr::get(context, "llvm.hivm.WAIT.INTRA.BLOCK.mode").getValue();
 }
 
@@ -11132,6 +11142,43 @@ private:
 };
 
 template <typename SyncOp>
+class LowerNamedSyncOpPattern final : public OpConversionPattern<SyncOp> {
+public:
+  explicit LowerNamedSyncOpPattern(TypeConverter &tc, MLIRContext *ctx,
+                                   LoweringState &state)
+      : OpConversionPattern<SyncOp>(tc, ctx), state(state) {}
+  LogicalResult matchAndRewrite(
+      SyncOp op, typename SyncOp::Adaptor adaptor,
+      ConversionPatternRewriter &rewriter) const override {
+    auto pipe = parsePipeImmediate(stringifyPIPE(op.getPipe().getPipe()));
+    if (!pipe) {
+      return rewriter.notifyMatchFailure(op, "unsupported sync pipe");
+    }
+    Value pipeValue = getI64Constant(rewriter, op.getLoc(), *pipe);
+    Value eventValue;
+    if (IntegerAttr attr = op.getEventIdAttr()) {
+      eventValue = getI64Constant(rewriter, op.getLoc(), attr.getInt());
+    } else {
+      eventValue = castIntegerLikeTo(op, adaptor.getEventIdDyn(),
+                                     rewriter.getI64Type());
+      if (!eventValue) {
+        return rewriter.notifyMatchFailure(op, "missing event-id operand");
+      }
+    }
+    StringRef callee = buildSyncCallee<SyncOp>(op.getContext());
+    auto fnTy = rewriter.getFunctionType(
+        TypeRange{rewriter.getI64Type(), rewriter.getI64Type()}, TypeRange{});
+    rewriter.create<func::CallOp>(op.getLoc(), callee, TypeRange{},
+                                  ValueRange{pipeValue, eventValue});
+    state.plannedDecls.push_back(PlannedDecl{callee.str(), fnTy});
+    rewriter.eraseOp(op);
+    return success();
+  }
+private:
+  LoweringState &state;
+};
+
+template <typename SyncOp>
 class LowerPipeEventDynSyncOpPattern final : public OpConversionPattern<SyncOp> {
 public:
   explicit LowerPipeEventDynSyncOpPattern(TypeConverter &typeConverter,
@@ -11235,10 +11282,39 @@ public:
     }
 
     StringRef calleeName = buildSyncCallee<SyncOp>(op.getContext());
+    SmallVector<Value> args{pipeValue, eventValue};
+    if constexpr (std::is_same_v<SyncOp, pto::SyncSetOp>) {
+      int64_t mode = 2;
+      if (IntegerAttr attr = op.getFftsModeAttr()) {
+        mode = attr.getInt();
+      }
+      Value modeValue = getI64Constant(rewriter, op.getLoc(), mode);
+      Value one = getI64Constant(rewriter, op.getLoc(), 1);
+      Value modeMask = getI64Constant(rewriter, op.getLoc(), 0x3);
+      Value eventMask = getI64Constant(rewriter, op.getLoc(), 0xf);
+      modeValue = rewriter.create<arith::AndIOp>(op.getLoc(), modeValue,
+                                                  modeMask);
+      eventValue = rewriter.create<arith::AndIOp>(op.getLoc(), eventValue,
+                                                   eventMask);
+      Value modeShift = rewriter.create<arith::ShLIOp>(op.getLoc(), modeValue,
+          getI64Constant(rewriter, op.getLoc(), 4));
+      Value eventShift = rewriter.create<arith::ShLIOp>(op.getLoc(), eventValue,
+          getI64Constant(rewriter, op.getLoc(), 8));
+      Value msg = rewriter.create<arith::OrIOp>(op.getLoc(), one, modeShift);
+      msg = rewriter.create<arith::OrIOp>(op.getLoc(), msg, eventShift);
+      args = {pipeValue, msg};
+    } else if constexpr (std::is_same_v<SyncOp, pto::SyncWaitOp>) {
+      calleeName = op.getEventIdAttr()
+                       ? StringAttr::get(op.getContext(),
+                                         "llvm.hivm.WAIT.FLAG.DEV.PIPE.IMM")
+                             .getValue()
+                       : StringAttr::get(op.getContext(),
+                                         "llvm.hivm.WAIT.FLAG.DEV.PIPE.REG")
+                             .getValue();
+    }
     auto funcType = rewriter.getFunctionType(
-        TypeRange{rewriter.getI64Type(), rewriter.getI64Type()}, TypeRange{});
-    rewriter.create<func::CallOp>(op.getLoc(), calleeName, TypeRange{},
-                                  ValueRange{pipeValue, eventValue});
+        TypeRange{args[0].getType(), args[1].getType()}, TypeRange{});
+    rewriter.create<func::CallOp>(op.getLoc(), calleeName, TypeRange{}, args);
     state.plannedDecls.push_back(PlannedDecl{calleeName.str(), funcType});
     rewriter.eraseOp(op);
     return success();
@@ -13294,6 +13370,8 @@ static void populateVPTOOpLoweringPatterns(VPTOTypeConverter &typeConverter,
                LowerPstuOpPattern, LowerVstusOpPattern, LowerVsturOpPattern,
                LowerInterCoreSyncOpPattern<pto::SyncSetOp>,
                LowerInterCoreSyncOpPattern<pto::SyncWaitOp>,
+               LowerNamedSyncOpPattern<pto::SetIntraBlockOp>,
+               LowerNamedSyncOpPattern<pto::WaitIntraBlockOp>,
                LowerCopyGmToCbufOpPattern, LowerLoadCbufToCaOpPattern,
                LowerLoadCbufToCbOpPattern,
                LowerLoadCbufToS4OpPattern<pto::LoadCbufToCaS4Op>,
@@ -13393,7 +13471,8 @@ static void configureVPTOOpLoweringTarget(ConversionTarget &target,
                !hasVPTOConvertibleType(op->getResultTypes());
       });
   target.addIllegalOp<pto::SetFlagOp, pto::WaitFlagOp, pto::SetFlagDynOp, pto::WaitFlagDynOp, pto::SyncSetOp,
-                      pto::SyncWaitOp, pto::BarrierOp, pto::MemBarOp,
+                      pto::SyncWaitOp, pto::SetIntraBlockOp, pto::WaitIntraBlockOp,
+                      pto::BarrierOp, pto::MemBarOp,
                       pto::CmoCacheInvalidOp, pto::FenceBarrierAllOp,
                       pto::DsbOp, pto::DcciOp,
                       pto::GetBufOp, pto::RlsBufOp,

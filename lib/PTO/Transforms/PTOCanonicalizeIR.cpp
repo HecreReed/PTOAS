@@ -391,6 +391,43 @@ struct PTOCanonicalizeIRPass
       }
     }
 
+    // VPTO consumes the shared FFTS sync representation.  Normalize named
+    // cross-block ops to mode 0 and A2/A3 intra-block ops to mode 2; A5 keeps
+    // named intra ops for dedicated lowering.
+    SmallVector<SetCrossBlockOp> crossSets;
+    SmallVector<WaitCrossBlockOp> crossWaits;
+    SmallVector<SetIntraBlockOp> intraSets;
+    SmallVector<WaitIntraBlockOp> intraWaits;
+    func.walk([&](SetCrossBlockOp op) { crossSets.push_back(op); });
+    func.walk([&](WaitCrossBlockOp op) { crossWaits.push_back(op); });
+    PTOArch targetArch = getTargetArch(func);
+    if (targetArch != PTOArch::A5) {
+      func.walk([&](SetIntraBlockOp op) { intraSets.push_back(op); });
+      func.walk([&](WaitIntraBlockOp op) { intraWaits.push_back(op); });
+    }
+    auto mode0 = IntegerAttr::get(IntegerType::get(func.getContext(), 32), 0);
+    auto mode2 = IntegerAttr::get(IntegerType::get(func.getContext(), 32), 2);
+    for (SetCrossBlockOp op : crossSets) {
+      rewriter.setInsertionPoint(op);
+      rewriter.replaceOpWithNewOp<SyncSetOp>(
+          op, op.getPipe(), op.getEventIdAttr(), mode0, op.getEventIdDyn());
+    }
+    for (WaitCrossBlockOp op : crossWaits) {
+      rewriter.setInsertionPoint(op);
+      rewriter.replaceOpWithNewOp<SyncWaitOp>(
+          op, op.getPipe(), op.getEventIdAttr(), mode0, op.getEventIdDyn());
+    }
+    for (SetIntraBlockOp op : intraSets) {
+      rewriter.setInsertionPoint(op);
+      rewriter.replaceOpWithNewOp<SyncSetOp>(
+          op, op.getPipe(), op.getEventIdAttr(), mode2, op.getEventIdDyn());
+    }
+    for (WaitIntraBlockOp op : intraWaits) {
+      rewriter.setInsertionPoint(op);
+      rewriter.replaceOpWithNewOp<SyncWaitOp>(
+          op, op.getPipe(), op.getEventIdAttr(), mode2, op.getEventIdDyn());
+    }
+
     // Post-canonicalization verification: ensure no low-rank view types
     // survived. If any do, it means an op with rank-dependent operands
     // was not given a structural rewrite.

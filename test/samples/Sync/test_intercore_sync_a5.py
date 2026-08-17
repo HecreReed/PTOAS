@@ -15,6 +15,7 @@ from ptoas.mlir.ir import (
     InsertionPoint,
     Location,
     Module,
+    StringAttr,
 )
 from ptoas.mlir.dialects import arith, func, pto
 
@@ -24,6 +25,7 @@ def build():
         pto.register_dialect(ctx, load=True)
         with Location.unknown(ctx):
             module = Module.create()
+            module.operation.attributes["pto.target_arch"] = StringAttr.get("a5")
             f32 = F32Type.get(ctx)
             idx = IndexType.get(ctx)
             ptr_f32 = pto.PtrType.get(f32, ctx)
@@ -47,12 +49,12 @@ def build():
 
                 sec_cube = pto.SectionCubeOp()
                 with InsertionPoint(sec_cube.body.blocks.append()):
-                    pto.sync_set(pipe_fix, evt)
-                    pto.sync_set(pipe_fix, evt + 16)
+                    pto.set_intra_block(pipe_fix, evt)
+                    pto.set_intra_block(pipe_fix, evt + 16)
 
                 sec_vec = pto.SectionVectorOp()
                 with InsertionPoint(sec_vec.body.blocks.append()):
-                    pto.sync_wait(pipe_mte3, evt)
+                    pto.wait_intra_block(pipe_mte3, evt)
                     pto.store_scalar(out, c0, two)
 
                 func.ReturnOp([])

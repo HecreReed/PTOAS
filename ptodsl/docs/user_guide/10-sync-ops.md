@@ -353,22 +353,22 @@ def flash_attention_block(
 
 Section 10.2 covers the general pipe-to-pipe sync mechanism (`set_flag`/`wait_flag`). This section covers two additional sync domains that the pipe-flag mechanism does not address: **cross-core** communication between separate NPU cores, and **intra-block** synchronization between the Cube and Vector units within a block.
 
-### 10.5.1 Cross-core sync: `set_cross_flag`, `wait_cross_flag`
+### 10.5.1 Cross-core sync: `set_cross_block`, `wait_cross_block`
 
-When a kernel spans multiple cores, cores need to coordinate through shared resources. `set_cross_flag` sends a signal to another core; `wait_cross_flag` blocks the calling core until the expected signal arrives.
+When a kernel spans multiple cores, cores need to coordinate through shared resources. `set_cross_block` sends a signal to another core; `wait_cross_block` blocks the calling core until the expected signal arrives.
 
-These are core-level (SU) operations — `wait_cross_flag` stalls the entire core, not just a single pipeline. Use them sparingly: splitting work so that each core operates independently for as long as possible minimises cross-core sync overhead.
+These are core-level (SU) operations — `wait_cross_block` stalls the entire core, not just a single pipeline. Use them sparingly: splitting work so that each core operates independently for as long as possible minimises cross-core sync overhead.
 
-#### `pto.set_cross_flag(pipe, event_id)`
+#### `pto.set_cross_block(pipe, event_id)`
 
-**Description**: Signal an event on a synchronization endpoint. In the current PTODSL surface this is authored with a `Pipe`; the backend maps it to the architecture-specific cross-core / intra-block builtin during lowering.
+**Description**: Signal a cross-block event on a synchronization endpoint.
 
 **Parameters**:
 
 | Parameter | Type | Description |
 |-----------|------|-------------|
-| `pipe` | `Pipe` | Producing endpoint for the synchronization event. The public DSL accepts `Pipe.FIX` here. |
-| `event_id` | `int` | Cross-core event identifier (`0`–`7`) |
+| `pipe` | `Pipe` | Producing endpoint: `Pipe.FIX`, `Pipe.MTE1`, `Pipe.MTE2`, `Pipe.MTE3`, or `Pipe.V`. |
+| `event_id` | `int` | Cross-core event identifier (`0`–`15`) |
 
 **Returns**: None (side-effect operation).
 
@@ -377,19 +377,19 @@ These are core-level (SU) operations — `wait_cross_flag` stalls the entire cor
 <!-- ptodsl-doc-test: {"mode":"compile_fragment","fixture":"sync_ops.basic","symbol":"sync_ops_basic_probe","compile":{}} -->
 ```python
 # Signal from the FIX/Cube-side endpoint
-pto.set_cross_flag(pto.Pipe.FIX, 0)
+pto.set_cross_block(pto.Pipe.FIX, 0)
 ```
 
-#### `pto.wait_cross_flag(pipe, event_id)`
+#### `pto.wait_cross_block(pipe, event_id)`
 
-**Description**: Wait for an event on a synchronization endpoint. On architectures that lower this surface to the backend `sync.wait` primitive, the wait is core-level (SU) blocking.
+**Description**: Wait for a cross-block event.
 
 **Parameters**:
 
 | Parameter | Type | Description |
 |-----------|------|-------------|
-| `pipe` | `Pipe` | Waiting endpoint for the synchronization event. The public DSL accepts `Pipe.FIX` here. |
-| `event_id` | `int` | Event identifier to wait on (`0`–`7`) |
+| `pipe` | `Pipe` | Waiting endpoint: `Pipe.FIX`, `Pipe.MTE1`, `Pipe.MTE2`, `Pipe.MTE3`, or `Pipe.V`. |
+| `event_id` | `int` | Event identifier to wait on (`0`–`15`) |
 
 **Returns**: None (side-effect operation).
 
@@ -398,19 +398,19 @@ pto.set_cross_flag(pto.Pipe.FIX, 0)
 <!-- ptodsl-doc-test: {"mode":"compile_fragment","fixture":"sync_ops.basic","symbol":"sync_ops_basic_probe","compile":{}} -->
 ```python
 # Wait on the FIX/Cube-side endpoint
-pto.wait_cross_flag(pto.Pipe.FIX, 0)
+pto.wait_cross_block(pto.Pipe.FIX, 0)
 ```
 
-### 10.5.2 Intra-block sync: `set_intra_flag`, `wait_intra_flag`
+### 10.5.2 Intra-block sync: `set_intra_block`, `wait_intra_block`
 
-The intra-block sync channel is separate from the standard pipe-flag mechanism used by cross-core sync. `set_intra_flag` and `wait_intra_flag` synchronize the relevant producer/consumer pipes within the same block, ensuring that shared UB tile data is not accessed before the producer finishes.
+The intra-block sync channel is separate from the standard pipe-flag mechanism used by cross-core sync. `set_intra_block` and `wait_intra_block` synchronize the relevant producer/consumer pipes within the same block, ensuring that shared UB tile data is not accessed before the producer finishes.
 
-Cross-core flags use the public `0`-`7` event range. A5 intra-block sync uses a separate
-physical event range, described below.
+Cross-block event IDs use the public `0`-`15` range. Static intra-block event IDs use
+`0`-`31` on A5 and `0`-`15` on A2 and A3.
 
-Unlike `wait_cross_flag`, `wait_intra_flag` only stalls the specified pipeline — the SU and other pipelines continue executing.
+Unlike `wait_cross_block`, `wait_intra_block` only stalls the specified pipeline — the SU and other pipelines continue executing.
 
-#### `pto.set_intra_flag(pipe, event_id)`
+#### `pto.set_intra_block(pipe, event_id)`
 
 **Description**: Signal a synchronization event within a block. The current PTODSL surface authors the trigger endpoint explicitly as a `Pipe`.
 
@@ -431,10 +431,10 @@ explicitly: one for the base event ID and one for `base_id + 16`.
 <!-- ptodsl-doc-test: {"mode":"compile_fragment","fixture":"sync_ops.basic","symbol":"sync_ops_basic_probe","compile":{}} -->
 ```python
 # Signal event ID0 from the MTE3-side endpoint.
-pto.set_intra_flag(pto.Pipe.MTE3, 0)
+pto.set_intra_block(pto.Pipe.MTE3, 0)
 ```
 
-#### `pto.wait_intra_flag(pipe, event_id)`
+#### `pto.wait_intra_block(pipe, event_id)`
 
 **Description**: Wait for an intra-block event. Only the specified pipeline stalls — the SU and other pipelines continue executing independently.
 
@@ -456,7 +456,7 @@ the base event ID and `base_id + 16`.
 ```python
 # MTE3 waits for the Cube-to-UB handoff for each AIV subblock.
 with pto.for_(0, 2, step=1) as sid:
-    pto.wait_intra_flag(pto.Pipe.MTE3, sid * 16 + 6)
+    pto.wait_intra_block(pto.Pipe.MTE3, sid * 16 + 6)
 ```
 
 ## 10.6 Synchronization in the authoring model
@@ -488,7 +488,7 @@ In auto mode, users can still write sync operations directly — `set_flag`/`wai
 | Full pipeline sync point | `pipe_barrier(Pipe.ALL)` |
 | Double-buffer handoff (compute → DMA) | `rls_buf(V, id)` + `get_buf(MTE2, id)` |
 | Double-buffer handoff (DMA → compute) | `rls_buf(MTE2, id)` + `get_buf(V, id)` |
-| Core A notifies core B | `set_cross_flag(B, id)` + `wait_cross_flag(A, id)` |
+| Core A notifies core B | `set_cross_block(B, id)` + `wait_cross_block(A, id)` |
 
 ## 10.7 Device-side trap
 

@@ -61,5 +61,7 @@ module attributes {pto.target_arch = "a5"} {
 // CHECK: goto [[CUBE_HEADER:label[0-9]+]];
 // CHECK: [[CUBE_HEADER]]:
 // CHECK: [[CUBE_BODY:label[0-9]+]]:
-// CHECK: set_intra_block(PIPE_MTE1, 0);
+// CHECK: getFFTSMsg(FFTS_MODE_VAL, {{.*}})
+// CHECK-NEXT: __builtin_cce_ffts_cross_core_sync(PIPE_MTE1, {{.*}});
+// CHECK-NOT: __builtin_cce_set_intra_block
 // CHECK: goto [[CUBE_HEADER]];

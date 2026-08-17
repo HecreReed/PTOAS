@@ -386,12 +386,12 @@ class VectorCubeSurfaceTest(unittest.TestCase):
 
     def test_sync_flag_names_are_exposed_without_legacy_aliases(self):
         preferred_names = [
-            "set_cross_flag", "wait_cross_flag",
-            "set_intra_flag", "wait_intra_flag",
+            "set_cross_block", "wait_cross_block",
+            "set_intra_block", "wait_intra_block",
         ]
         legacy_names = [
-            "set_cross_core", "wait_flag_dev",
-            "set_intra_block", "wait_intra_core",
+            "set_cross_flag", "wait_cross_flag",
+            "set_intra_flag", "wait_intra_flag",
         ]
 
         for name in preferred_names:
@@ -401,6 +401,10 @@ class VectorCubeSurfaceTest(unittest.TestCase):
         for name in legacy_names:
             with self.subTest(name=name):
                 self.assertFalse(hasattr(pto, name), name)
+
+    def test_cross_block_sync_rejects_ffts_mode(self):
+        with self.assertRaises(TypeError):
+            _ops.set_cross_block(pto.Pipe.FIX, 0, ffts_mode=2)
 
     def test_direct_vector_wrappers_dispatch_to_generated_ops(self):
         lhs = SimpleNamespace(type="vec_ty")
@@ -1265,13 +1269,13 @@ class VectorCubeSurfaceTest(unittest.TestCase):
         cases = [
             (_ops.set_flag, ("MTE2", "V"), {"event_id": 8}, "set_flag(..., event_id=...)"),
             (_ops.wait_flag, ("MTE2", "V"), {"event_id": -1}, "wait_flag(..., event_id=...)"),
-            (_ops.set_cross_flag, (pto.Pipe.FIX, 8), {}, "set_cross_flag(..., event_id=...)"),
-            (_ops.wait_cross_flag, (pto.Pipe.FIX, -1), {}, "wait_cross_flag(..., event_id=...)"),
-            (_ops.set_intra_flag, (pto.Pipe.FIX, 32), {}, "set_intra_flag(..., event_id=...)", "[0, 31]"),
-            (_ops.set_intra_flag, (pto.Pipe.MTE3, 32), {}, "set_intra_flag(..., event_id=...)", "[0, 31]"),
-            (_ops.wait_intra_flag, (pto.Pipe.V, -2), {}, "wait_intra_flag(..., event_id=...)", "[0, 31]"),
-            (_ops.wait_intra_flag, (pto.Pipe.FIX, 32), {}, "wait_intra_flag(..., event_id=...)", "[0, 31]"),
-            (_ops.wait_intra_flag, (pto.Pipe.MTE3, 32), {}, "wait_intra_flag(..., event_id=...)", "[0, 31]"),
+            (_ops.set_cross_block, (pto.Pipe.FIX, 16), {}, "set_cross_block(..., event_id=...)", "[0, 15]"),
+            (_ops.wait_cross_block, (pto.Pipe.FIX, -1), {}, "wait_cross_block(..., event_id=...)", "[0, 15]"),
+            (_ops.set_intra_block, (pto.Pipe.FIX, 32), {}, "set_intra_block(..., event_id=...)", "[0, 31]"),
+            (_ops.set_intra_block, (pto.Pipe.MTE3, 32), {}, "set_intra_block(..., event_id=...)", "[0, 31]"),
+            (_ops.wait_intra_block, (pto.Pipe.V, -2), {}, "wait_intra_block(..., event_id=...)", "[0, 31]"),
+            (_ops.wait_intra_block, (pto.Pipe.FIX, 32), {}, "wait_intra_block(..., event_id=...)", "[0, 31]"),
+            (_ops.wait_intra_block, (pto.Pipe.MTE3, 32), {}, "wait_intra_block(..., event_id=...)", "[0, 31]"),
         ]
 
         with patch.object(_ops._pto, "set_flag") as set_flag_op, \
@@ -1298,10 +1302,34 @@ class VectorCubeSurfaceTest(unittest.TestCase):
 
     def test_sync_facades_reject_illegal_pipe_endpoints(self):
         cases = [
-            (_ops.set_cross_flag, (pto.Pipe.V, 0), "set_cross_flag(pipe, event_id)", "<PIPE_FIX>", "<PIPE_V>"),
-            (_ops.wait_cross_flag, (pto.Pipe.MTE3, 0), "wait_cross_flag(pipe, event_id)", "<PIPE_FIX>", "<PIPE_MTE3>"),
-            (_ops.set_intra_flag, ("M", 0), "set_intra_flag(pipe, event_id)", "<PIPE_FIX>, <PIPE_MTE1>, <PIPE_MTE2>, <PIPE_MTE3>, <PIPE_V>", "<PIPE_M>"),
-            (_ops.wait_intra_flag, (pto.Pipe.M, 0), "wait_intra_flag(pipe, event_id)", "<PIPE_FIX>, <PIPE_MTE1>, <PIPE_MTE2>, <PIPE_MTE3>, <PIPE_V>", "<PIPE_M>"),
+            (
+                _ops.set_cross_block,
+                ("M", 0),
+                "set_cross_block(pipe, event_id)",
+                "<PIPE_FIX>, <PIPE_MTE1>, <PIPE_MTE2>, <PIPE_MTE3>, <PIPE_V>",
+                "<PIPE_M>",
+            ),
+            (
+                _ops.wait_cross_block,
+                (pto.Pipe.M, 0),
+                "wait_cross_block(pipe, event_id)",
+                "<PIPE_FIX>, <PIPE_MTE1>, <PIPE_MTE2>, <PIPE_MTE3>, <PIPE_V>",
+                "<PIPE_M>",
+            ),
+            (
+                _ops.set_intra_block,
+                ("M", 0),
+                "set_intra_block(pipe, event_id)",
+                "<PIPE_FIX>, <PIPE_MTE1>, <PIPE_MTE2>, <PIPE_MTE3>, <PIPE_V>",
+                "<PIPE_M>",
+            ),
+            (
+                _ops.wait_intra_block,
+                (pto.Pipe.M, 0),
+                "wait_intra_block(pipe, event_id)",
+                "<PIPE_FIX>, <PIPE_MTE1>, <PIPE_MTE2>, <PIPE_MTE3>, <PIPE_V>",
+                "<PIPE_M>",
+            ),
         ]
 
         with patch.object(_ops._pto, "sync_set") as sync_set_op, \
@@ -1323,18 +1351,18 @@ class VectorCubeSurfaceTest(unittest.TestCase):
         dynamic_event_operand = object()
         with patch.object(_ops, "_pipe_attr", side_effect=lambda pipe: f"pipe:{pipe}") as pipe_attr, \
              patch.object(_ops, "unwrap_surface_value", return_value=dynamic_event_operand) as unwrap_surface_value, \
-             patch.object(_ops._pto, "sync_set") as sync_set_op, \
-             patch.object(_ops._pto, "sync_wait") as sync_wait_op:
-            _ops.set_intra_flag(pto.Pipe.FIX, 31)
-            _ops.set_intra_flag(pto.Pipe.MTE3, 31)
-            _ops.wait_intra_flag(pto.Pipe.FIX, 16)
-            _ops.wait_intra_flag(pto.Pipe.V, 31)
-            _ops.wait_intra_flag(pto.Pipe.MTE3, 31)
-            _ops.wait_intra_flag(pto.Pipe.MTE3, dynamic_event)
+             patch.object(_ops._pto, "set_intra_block") as set_intra_block_op, \
+             patch.object(_ops._pto, "wait_intra_block") as wait_intra_block_op:
+            _ops.set_intra_block(pto.Pipe.FIX, 31)
+            _ops.set_intra_block(pto.Pipe.MTE3, 31)
+            _ops.wait_intra_block(pto.Pipe.FIX, 16)
+            _ops.wait_intra_block(pto.Pipe.V, 31)
+            _ops.wait_intra_block(pto.Pipe.MTE3, 31)
+            _ops.wait_intra_block(pto.Pipe.MTE3, dynamic_event)
 
         self.assertEqual(pipe_attr.call_count, 6)
-        self.assertEqual(sync_set_op.call_count, 2)
-        sync_wait_op.assert_has_calls([
+        self.assertEqual(set_intra_block_op.call_count, 2)
+        wait_intra_block_op.assert_has_calls([
             call(f"pipe:{pto.Pipe.FIX}", 16),
             call(f"pipe:{pto.Pipe.V}", 31),
             call(f"pipe:{pto.Pipe.MTE3}", 31),

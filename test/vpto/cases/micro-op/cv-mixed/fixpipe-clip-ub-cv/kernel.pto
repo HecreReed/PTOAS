@@ -11,7 +11,7 @@
 // family: cv-mixed
 // target_ops: pto.mte_gm_l1_frac, pto.mte_l1_l0a, pto.mte_l1_l0b, pto.mad,
 //   pto.mte_l0c_ub, pto.mte_l0c_gm, pto.mte_l0c_l1, pto.mte_l1_ub,
-//   pto.mte_ub_gm, pto.sync.set, pto.sync.wait
+//   pto.mte_ub_gm, pto.set_intra_block, pto.wait_intra_block
 // scenarios: nd2nz-functional-load, cc-store-ub-gm-l1, standalone-clip, ub-to-gm
 // -----------------------------------------------------------------------------
 
@@ -114,7 +114,7 @@ module attributes {pto.target_arch = "a5"} {
 
       pto.set_flag["PIPE_MTE1", "PIPE_FIX", "EVENT_ID0"]
       pto.wait_flag["PIPE_MTE1", "PIPE_FIX", "EVENT_ID0"]
-      pto.sync.set <PIPE_FIX>, 1
+      pto.set_intra_block <PIPE_FIX>, 1
     }
 
     pto.section.vector {
@@ -122,7 +122,7 @@ module attributes {pto.target_arch = "a5"} {
       %is_subblock0 = arith.cmpi eq, %subblock, %c0_i64 : i64
 
       scf.if %is_subblock0 {
-        pto.sync.wait <PIPE_MTE3>, 1
+        pto.wait_intra_block <PIPE_MTE3>, 1
         pto.mte_ub_gm %ub_clip, %out_ub_clip_gm, %c128_i64
           nburst(%c40_i64, %c128_i64, %c128_i64)
           : !pto.ptr<f16, ub>, !pto.ptr<f16, gm>, i64, i64, i64, i64
