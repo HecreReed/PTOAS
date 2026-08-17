@@ -72,5 +72,9 @@ extern "C" __global__ AICORE void prelu_kernel_2d(__gm__ float* v1, __gm__ float
   TSTORE(v19, v24);
   #endif // __DAV_VEC__
 
+  // Keep the final MTE3 write ordered before the host-side stream completion
+  // check. The insert-sync lowering emits this tail barrier for the .pto
+  // source; keep the checked-in direct sample in lockstep with that output.
+  ptoas_auto_sync_tail(PTOAutoSyncTailMode::kBarrierAll);
   return;
 }

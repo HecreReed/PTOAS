@@ -1442,7 +1442,8 @@ PY
         if ! grep -Fq "set_flag(PIPE_MTE2, PIPE_V, EVENT_ID0);" "$cpp" || \
            ! grep -Fq "wait_flag(PIPE_MTE2, PIPE_V, EVENT_ID0);" "$cpp" || \
            ! grep -Fq "set_flag(PIPE_V, PIPE_MTE3, EVENT_ID0);" "$cpp" || \
-           ! grep -Fq "wait_flag(PIPE_V, PIPE_MTE3, EVENT_ID0);" "$cpp"; then
+           ! grep -Fq "wait_flag(PIPE_V, PIPE_MTE3, EVENT_ID0);" "$cpp" || \
+           ! grep -Fq "ptoas_auto_sync_tail(PTOAutoSyncTailMode::kBarrierAll);" "$cpp"; then
           echo -e "${A}(${base}.pto)\tFAIL\tmissing required A3 TPRELU pipe synchronization"
           overall=1
           continue
