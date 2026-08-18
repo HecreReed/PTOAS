@@ -1289,6 +1289,13 @@ pto.TExtractOp.build_nd_to_2xnz(
    `build_nd_to_2xnz` 仍返回同一 `TExtractOp` class，且 `.indices`/`.dsts` 保留四项/两项 range。
 3. smoke 必须检查 `pto.textract.__signature__`（或等价的 `inspect.signature`）仍接受旧的
    `index_row/index_col/dst` 参数，不能只检查生成 module 中的 private range-form builder。
+4. 单独覆盖 parser 路径：完成 facade 的
+   `register_operation(_Dialect, replace=True)` 注册后，用 canonical 文本解析一个包含
+   `pto.textract` 的 module；从解析得到的 `Operation` 读取 `op.opview`，断言它是
+   `pto.TExtractOp`（而不是 `_pto_ops_gen.TExtractOp`），并分别访问
+   `op.opview.indexRow`、`op.opview.indexCol`、`op.opview.dst`，确认它们与文本中的三个
+   legacy operand 一致。该测试不能由直接调用 `pto.TExtractOp(...)` 替代，因为后者不会
+   覆盖 parser 在 operation registration 替换前后选择 opview class 的回归。
 
 这里的 `ptodsl` 是 PTODSL micro-op surface，不能用来构造该 IR op。实现 PR
 证明 legacy constructor、legacy free function 和新 factory 都打印为 `pto.textract`、
@@ -1394,7 +1401,9 @@ PTOAS 当前三个 pin 都早于 8 月 14 日功能提交：
   block offset 为 `32*c0`；A5 partial-valid 必须在 template/verifier gate 稳定拒绝，不能生成
   `16*c0`；`physicalRows=16, validRows=13` 作为 A5 positive control；
 - generated Python range-form free function 不得覆盖 legacy facade；位置/关键字
-  `pto.textract`、位置/关键字 `pto.TExtractOp` 以及 `.indexRow/.indexCol/.dst` 各有正向 smoke。
+  `pto.textract`、位置/关键字 `pto.TExtractOp` 以及 `.indexRow/.indexCol/.dst` 各有正向 smoke；
+  parser 在 facade registration 后得到的 `op.opview` 也必须是 `pto.TExtractOp`，并通过三个
+  legacy properties 回归。
 - production StoreUse pass 分别拒绝 partial descriptor 的直接/view TSTORE 和同址不同 SSA
   full-valid `alloc_tile` alias TSTORE；部分重叠 alias 也必须拒绝；
 - 输入 IR 手写任何 test-only module attribute 不能放行 alias TSTORE；未启用
