@@ -186,6 +186,47 @@ ensure_llvm_source() {
   export LLVM_CMAKE_SOURCE_DIR="${LLVM_SOURCE_DIR}"
 }
 
+# The internal feature-vpto patch makes LLVMVectorize use llvm::Triple, whose
+# implementation lives in LLVMTargetParser, without updating the component's
+# CMake dependency. Inject TargetParser into LLVMVectorize's LINK_COMPONENTS
+# before configuring LLVM. Keep this idempotent because CI reuses the patched
+# LLVM source directory.
+inject_llvm_vectorize_target_parser() {
+  local vectorize_cmake="${LLVM_CMAKE_SOURCE_DIR}/lib/Transforms/Vectorize/CMakeLists.txt"
+  if [ ! -f "${vectorize_cmake}" ]; then
+    echo "ERROR: LLVMVectorize CMakeLists.txt not found: ${vectorize_cmake}" >&2
+    exit 1
+  fi
+
+  if grep -Eq '^[[:space:]]*TargetParser[[:space:]]*$' "${vectorize_cmake}"; then
+    return 0
+  fi
+
+  local patched_cmake="${vectorize_cmake}.ptoas.$$"
+  if ! awk '
+    $0 == "# PTOAS internal LLVM 19 compatibility: LoopVectorizePrepare uses llvm::Triple." { next }
+    $0 == "target_link_libraries(LLVMVectorize PRIVATE LLVMTargetParser)" { next }
+    /^add_llvm_component_library\(LLVMVectorize([[:space:]]|$)/ { in_vectorize = 1 }
+    in_vectorize && /^[[:space:]]*LINK_COMPONENTS[[:space:]]*$/ { in_link_components = 1 }
+    in_link_components && /^[[:space:]]*Support[[:space:]]*$/ {
+      print
+      print "  TargetParser"
+      inserted = 1
+      next
+    }
+    { print }
+    END { if (!inserted) exit 42 }
+  ' "${vectorize_cmake}" > "${patched_cmake}"; then
+    rm -f "${patched_cmake}"
+    echo "ERROR: failed to find LLVMVectorize LINK_COMPONENTS in ${vectorize_cmake}" >&2
+    exit 1
+  fi
+
+  cp "${patched_cmake}" "${vectorize_cmake}"
+  rm -f "${patched_cmake}"
+  echo "Injected TargetParser into LLVMVectorize LINK_COMPONENTS in ${vectorize_cmake}"
+}
+
 # The PTOAS tree is built with the default libstdc++ ABI new string layout
 # (_GLIBCXX_USE_CXX11_ABI=1). Cached LLVM/MLIR builds created on RHEL7 /
 # devtoolset-7 toolchains are compiled with the old ABI and export Twine::str as
@@ -202,10 +243,21 @@ llvm_build_is_abi_compatible() {
     | grep -q "_ZNK4llvm5Twine3strB5cxx11Ev"
 }
 
+# BSPUB changes LLVM data types at compile time, so a cache produced without
+# the matching C/C++ definitions and LLVM option cannot be reused safely.
+llvm_build_has_bspub_npu_data_type() {
+  local cache_file="${LLVM_BUILD_DIR}/CMakeCache.txt"
+  [ -f "${cache_file}" ] || return 1
+  grep -Eq '^LLVM_BSPUB_NPU_DATA_TYPE:(BOOL|UNINITIALIZED)=ON$' "${cache_file}" \
+    && grep -Eq '^CMAKE_C_FLAGS:[^=]*=.*-DBSPUB_NPU_DATA_TYPE([[:space:]]|$)' "${cache_file}" \
+    && grep -Eq '^CMAKE_CXX_FLAGS:[^=]*=.*-DBSPUB_NPU_DATA_TYPE([[:space:]]|$)' "${cache_file}"
+}
+
 # Build LLVM/MLIR 19 (shared libs + MLIR Python bindings) if the cached build
 # tree is not usable, mirroring the PTOAS development workflow.
 ensure_llvm_build() {
   ensure_llvm_source
+  inject_llvm_vectorize_target_parser
 
   # The vpto patch changes CallingConv.h; a build-shared tree built from the
   # unpatched upstream source must be rebuilt so SimtEntry is present in the
@@ -226,6 +278,24 @@ ensure_llvm_build() {
     echo "${dotted_line}"
     echo "Cached LLVM/MLIR build was compiled with an incompatible libstdc++ ABI"
     echo "(lacks llvm::Twine::str[abi:cxx11]); rebuilding with the current toolchain"
+    rebuild_llvm=TRUE
+  fi
+
+  if [ "$rebuild_llvm" == "FALSE" ] \
+     && [ -f "${LLVM_BUILD_DIR}/lib/cmake/llvm/LLVMConfig.cmake" ] \
+     && [ -f "${LLVM_BUILD_DIR}/lib/cmake/mlir/MLIRConfig.cmake" ] \
+     && ! llvm_build_has_bspub_npu_data_type; then
+    echo "${dotted_line}"
+    echo "Cached LLVM/MLIR build lacks BSPUB NPU data type support; rebuilding"
+    rebuild_llvm=TRUE
+  fi
+
+  if [ "$rebuild_llvm" == "FALSE" ] \
+     && [ -f "${LLVM_BUILD_DIR}/lib/cmake/llvm/LLVMConfig.cmake" ] \
+     && [ -f "${LLVM_BUILD_DIR}/lib/cmake/mlir/MLIRConfig.cmake" ] \
+     && [ ! -f "${LLVM_BUILD_DIR}/.ptoas-vectorize-target-parser-component" ]; then
+    echo "${dotted_line}"
+    echo "Cached LLVM/MLIR build predates the TargetParser component fix; rebuilding"
     rebuild_llvm=TRUE
   fi
 
@@ -256,7 +326,13 @@ ensure_llvm_build() {
     -G Ninja
     -S "${LLVM_CMAKE_SOURCE_DIR}"
     -B "${LLVM_BUILD_DIR}"
-    -DLLVM_ENABLE_PROJECTS="mlir;clang"
+    # PTOAS consumes LLVM/MLIR through CMake; Clang is not a PTOAS dependency.
+    # Keeping it out avoids building clangInterpreter, which is incompatible
+    # with the GCC 7 libstdc++ headers used by the ARM CI image.
+    -DLLVM_ENABLE_PROJECTS="mlir"
+    -DCMAKE_CXX_FLAGS="-DBSPUB_NPU_DATA_TYPE"
+    -DCMAKE_C_FLAGS="-DBSPUB_NPU_DATA_TYPE"
+    -DLLVM_BSPUB_NPU_DATA_TYPE=ON
     -DBUILD_SHARED_LIBS=ON
     -DLLVM_ENABLE_ASSERTIONS=ON
     -DMLIR_ENABLE_BINDINGS_PYTHON=ON
@@ -276,11 +352,14 @@ ensure_llvm_build() {
   fi
 
   if [ -f "${HARDENING_CACHE_FILE}" ]; then
-    cmake -C "${HARDENING_CACHE_FILE}" "${cmake_args[@]}"
+    # Process the BSPUB flags before the preload cache so the cache appends,
+    # rather than loses, the delivery hardening flags.
+    cmake "${cmake_args[@]}" -C "${HARDENING_CACHE_FILE}"
   else
     cmake "${cmake_args[@]}"
   fi
   cmake --build "${LLVM_BUILD_DIR}" -- -j "${JOBS}"
+  touch "${LLVM_BUILD_DIR}/.ptoas-vectorize-target-parser-component"
 }
 
 # ---------------------------------------------------------------------------
@@ -346,6 +425,7 @@ configure_ptoas() {
     -DPTO_ENABLE_PYTHON_BINDING=ON
     -DBUILD_TESTING=ON
     -DCMAKE_BUILD_TYPE=Release
+    -DCMAKE_CXX_FLAGS="-DBSPUB_NPU_DATA_TYPE -D_GLIBCXX_USE_CXX11_ABI=0 -Wno-error=deprecated-declarations"
     -DCMAKE_INSTALL_PREFIX="${INSTALL_PATH}"
     -DCMAKE_C_COMPILER="$(command -v clang || command -v clang-15 || command -v gcc)"
     -DCMAKE_CXX_COMPILER="$(command -v clang++ || command -v clang++-15 || command -v g++)"
@@ -365,7 +445,9 @@ configure_ptoas() {
   fi
 
   if [ -f "${HARDENING_CACHE_FILE}" ]; then
-    cmake -C "${HARDENING_CACHE_FILE}" "${ptoas_cmake_args[@]}"
+    # Keep the PTOAS BSPUB definition together with the delivery hardening
+    # flags from the preload cache.
+    cmake "${ptoas_cmake_args[@]}" -C "${HARDENING_CACHE_FILE}"
   else
     cmake "${ptoas_cmake_args[@]}"
   fi
