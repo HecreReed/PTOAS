@@ -18,10 +18,10 @@ See LICENSE in the root of the software repository for the full text of the Lice
 
 本文是设计文档，不包含功能实现。
 
-核对时间为 2026-08-17，使用的最新版基线如下：
+核对时间为 2026-08-18，使用的最新版基线如下：
 
-- PTOAS：`hw-native-sys/PTOAS main@39c601fe386fa423098abbaddf4ab7b584179510`。
-- PTO-ISA GitCode：`cann/pto-isa master@bb69abb8a3f71192a125bf14f909133c41f3a519`。
+- PTOAS：`hw-native-sys/PTOAS main@fe5594af84793c48487d4309d8092c3b6b44a0e9`。
+- PTO-ISA GitCode：`cann/pto-isa master@285b913f538553ea206c3704aa5103dcc6896582`。
 - PTO-ISA GitHub mirror：
   `hw-native-sys/pto-isa main@52d4ad3228ff69ea6e2d4a68305b95e51c81be2d`。
 - 原始功能提交：
@@ -30,8 +30,8 @@ See LICENSE in the root of the software repository for the full text of the Lice
   - 提交时间为 2026-08-14 18:02:50 +0800；
   - 标题为 `textract nd->2x nz vf operators a2a3 and a5 NZ and NZ+1`。
 
-最新版 PTO-ISA 的 A2/A3、A5 头文件和两套 NPU ST 仍包含该接口；8 月 17 日的最新
-`TEXTRACT` 变更只修改 GEMV sub-fractal 单输出路径，没有移除或改变本 overload。
+最新版 PTO-ISA 的 A2/A3、A5 头文件和两套 NPU ST 仍包含该接口；8 月 18 日新增的
+`TREM` 性能优化没有移除或改变本 overload。
 CPU backend 当前没有 `TEXTRACT_ND2XNZ_IMPL`，cost-model 的独立 `pto_instr.hpp` 也没有
 七参数 overload；不能把 common header 中公开 overload 的存在等同于所有 backend 都可实例化。
 
@@ -40,18 +40,22 @@ lowering、verifier、TileLib template 或回归测试，因此缺口仍然存�
 
 ## 2. 最终决策
 
-1. 新增独立的 `TExtractNd2xNzOp`，文本名为 `pto.textract.nd2xnz`。它是
-   `TEXTRACT` 指令族下的固定双输出语义形态，不修改现有 `TExtractOp`。
-2. op 固定携带一个 ND source、两组独立 index 和两个 NZ DPS destination；两个
-   destination 可以有不同 physical/valid shape，但 element type 必须与 source 相同。
-3. op 实现 `PTO_DpsInitOpInterface`，两个 destination 都是 DPS init；不增加 SSA result。
-4. op 的 pipe 固定为 `PIPE_V`；内存效应为 `Read(src)`、`Write(dst0)`、`Write(dst1)`。
+1. 不新增 MLIR operation 或 dotted mnemonic。扩展现有 `TExtractOp`，文本名继续为
+   `pto.textract`；由 index 段、DPS destination 段和 tile layout 推断单输出或 ND-to-2xNZ
+   overload，不增加 `kind`/`mode` 属性。
+2. 现有 form 固定为一个 source、两项 index 和一个 DPS destination；新增 form 固定为
+   一个 ND source、四项 index 和两个 NZ DPS destination。两个 destination 可以有不同
+   physical/valid shape，但 element type 必须与 source 相同。除这两组 arity 外全部拒绝。
+3. `TExtractOp` 继续实现 `PTO_DpsInitOpInterface` 且不增加 SSA result；单输出 form 返回一个
+   DPS init，双输出 form 返回两个连续的 DPS init。
+4. 双输出 form 的 pipe 固定为 `PIPE_V`；内存效应为 `Read(src)`、`Write(dst0)`、
+   `Write(dst1)`。单输出 form 保持现有 pipe/effects 分派。
 5. `src`、`dst0`、`dst1` 三者必须两两不重叠。legacy 和 modern PlanMemory 都必须执行
-   该 no-alias 契约；level3 的显式地址必须通过独立的静态地址 gate。
+   双输出 form 的 no-alias 契约；level3 的显式地址必须通过独立的静态地址 gate。
 6. 首版不支持 runtime-bound tile provenance。`DeclareTileOp`、`TAssignOp`、`TPopOp`/
    `TPopFromAicOp`/`TPopFromAivOp` 绑定或产生的 tile，以及它们的 view/subview/cast 派生值，
    在所有 level 都必须在 PlanMemory 之前被拒绝；只有 planner-owned `alloc_tile` 或已物化的
-   `alloc_multi_tile` slot 才能作为该 op 的 local tile provenance；level1/2 的地址由 planner
+   `alloc_multi_tile` slot 才能作为该 form 的 local tile provenance；level1/2 的地址由 planner
    产生，level3 则要求调用方提供可静态证明的地址。这样 no-alias 契约不会依赖
    planner 对 runtime handle 的猜测。
 7. EmitC 精确生成七参数公开 API：
@@ -68,10 +72,13 @@ lowering、verifier、TileLib template 或回归测试，因此缺口仍然存�
     支持；production StoreUse validation 按静态 physical range 而不是 SSA use chain 拒绝
     partial destination 的所有 alias TSTORE。测试所需的 full-valid dump alias 只由编译期关闭的
     test hook 放行，不构成 production materialization 语义。
-12. CPU-sim、cost-model 和其他 optional backend 的 unsupported 判断必须来自 driver 注入的
+12. CPU-sim、cost-model 和其他 optional backend 对该 overload 的 unsupported 判断必须来自 driver 注入的
     capability manifest，并在最终 backend lowering 前失败，不能依赖后期 C++ 实例化。
 13. GraphSyncSolver 必须为普通 `AllocTileOp` 建立基于静态 `addr`、physical footprint 和
     address space 的单地址模型；不同 SSA allocation root 使用同一地址时仍必须产生 hazard。
+14. 既有 `pto.textract` 文本、C++/Python builder 调用和 PTOBC v0 单输出 wire schema 保持兼容；
+    新双输出 form 使用同一 op class 的新 builder，并以新的 PTOBC generic record 承载，不能复用
+    已发布的四/五 operand fixed-width opcode。
 
 ## 3. PTO-ISA 真实契约
 
@@ -171,8 +178,8 @@ source 或使两个可观察输出互相覆盖。
 同址 full-valid `alloc_tile` 后 TSTORE，都必须在 production PTOAS 阶段报错：
 
 ```text
-pto.textract.nd2xnz partial-valid destination physical range aliases a TSTORE source;
-undefined NZ padding cannot be stored
+pto.textract ND-to-2xNZ form has a partial-valid destination whose physical range
+aliases a TSTORE source; undefined NZ padding cannot be stored
 ```
 
 NPU ST 的 full-valid alias 必须有 production binary 无法打开的受控入口。实现新增
@@ -344,7 +351,7 @@ driver 注入的 codegen environment/capability contract：
       "include_root": "/abs/path/to/pto-isa/include",
       "include_tree_sha256": "sha256:<probe-input-digest>",
       "capabilities": {
-        "textract.nd2xnz": {
+        "textract.nd_to_2xnz": {
           "supported": false,
           "probe": "missing pto::TEXTRACT_ND2XNZ_IMPL"
         }
@@ -369,7 +376,8 @@ driver 注入的 codegen environment/capability contract：
   不能手写 IR 自行宣称 capability。manifest 缺失时，`--emit-pto-ir` 可保留
   `unknown` 并输出 IR；任何 EmitC/VPTO strict final-codegen path 都必须要求该文件并失败。
 - 在 generic `mlir::verify` 之后、EmitC/VPTO 最终 lowering 之前运行
-  `PTOValidateCodegenCapabilitiesPass`。该 pass 对每个 `pto.textract.nd2xnz` 查已注入 entry；
+  `PTOValidateCodegenCapabilitiesPass`。该 pass 只对被 `TExtractOp` form classifier 判定为
+  ND-to-2xNZ 的 `pto.textract` 查询已注入 entry；
   environment unknown、entry 缺失或 capability 为 false 时，报告 backend、environment、
   arch、required capability、PTO-ISA revision、manifest path 和 probe 诊断，不把错误延迟到
   C++ 模板实例化。
@@ -377,7 +385,8 @@ driver 注入的 codegen environment/capability contract：
   `TEXTRACT_ND2XNZ_IMPL`/七参数 wrapper，并写入 `false` capability。只有 probe 成功且对应
   pin 同时包含 implementation 与（cost-model 所需的）latency model，才能放行。
 
-这套 contract 也适用于未来其他 optional PTO-ISA overload；普通 op verifier 仍只校验
+capability key `textract.nd_to_2xnz` 描述的是 `pto.textract` 的特定 overload，不是新的 IR
+operation 名。该 contract 也适用于未来其他 optional PTO-ISA overload；普通 op verifier 仍只校验
 IR 结构和硬件共同契约，不读取最终 include 路径。
 
 PTODSL micro-op surface 不是当前缺口。PTOAS 基线的 `ptodsl/ptodsl/pto.py` 已公开导出
@@ -389,53 +398,100 @@ PTODSL micro-op surface 不是当前缺口。PTOAS 基线的 `ptodsl/ptodsl/pto.
 
 ### 4.1 ODS
 
-建议 ODS 形态如下：
+不定义 `TExtractNd2xNzOp`。现有 `TExtractOp` 把坐标和 destination 改为分段 range；示意 ODS
+如下，具体 builder 声明按仓库生成绑定的方式落地：
 
 ```tablegen
-def TExtractNd2xNzOp : PTO_TOp<"textract.nd2xnz", [
+def TExtractOp : PTO_TOp<"textract", [
+  AttrSizedOperandSegments,
   PTO_DpsInitOpInterface,
   OpPipeInterface,
   DeclareOpInterfaceMethods<MemoryEffectsOpInterface>
 ]> {
-  let summary = "Extract two ND windows into two NZ destinations";
+  let summary = "Extract source windows into DPS destinations";
 
   let arguments = (ins
     PTODpsType:$src,
-    Index:$indexRow0,
-    Index:$indexCol0,
-    Index:$indexRow1,
-    Index:$indexCol1,
-    PTODpsType:$dst0,
-    PTODpsType:$dst1
+    Variadic<Index>:$indices,
+    Variadic<PTODpsType>:$dsts,
+    Optional<PTODpsType>:$fp,
+    Optional<I64>:$preQuantScalar,
+    OptionalAttr<PTO_AccToVecModeAttr>:$accToVecMode,
+    DefaultValuedAttr<PTO_ReluPreModeAttr,
+      "::mlir::pto::ReluPreMode::NoRelu">:$reluPreMode
   );
 
   let results = (outs);
   let hasVerifier = 1;
 
-  let assemblyFormat = [{
-    `ins` `(` $src `,` $indexRow0 `,` $indexCol0 `,`
-                $indexRow1 `,` $indexCol1 `:`
-                qualified(type($src)) `,` type($indexRow0) `,`
-                type($indexCol0) `,` type($indexRow1) `,`
-                type($indexCol1) `)`
-    `outs` `(` $dst0 `,` $dst1 `:`
-                 qualified(type($dst0)) `,` qualified(type($dst1)) `)`
-    attr-dict
-  }];
-
   let extraClassDeclaration = [{
-    ::mlir::pto::PIPE getPipe() { return ::mlir::pto::PIPE::PIPE_V; }
-    ::mlir::MutableOperandRange getDpsInitsMutable() {
-      return ::mlir::MutableOperandRange(getOperation(), 5, 2);
-    }
+    enum class Form { Invalid, SingleOutput, NdTo2xNz };
+    Form classifyForm();
+    bool isSingleOutputForm();
+    bool isNdTo2xNzForm();
+
+    // Legacy convenience accessors remain source-compatible. They may only be
+    // used after isSingleOutputForm(); range-aware code uses getIndices/getDsts.
+    ::mlir::Value getIndexRow();
+    ::mlir::Value getIndexCol();
+    ::mlir::Value getDst();
+
+    ::mlir::MutableOperandRange getDpsInitsMutable() { return getDstsMutable(); }
+    ::mlir::pto::PIPE getPipe();
+    void print(::mlir::OpAsmPrinter &p);
+    static ::mlir::ParseResult parse(
+        ::mlir::OpAsmParser &parser, ::mlir::OperationState &result);
   }];
 }
 ```
 
-全部 operand 固定存在，不需要 `AttrSizedOperandSegments`，两个 DPS init 在 operand list
-中连续，符合 `PTO_DpsInitOpInterface` 的单一 `MutableOperandRange` 契约。
+flattened operand 顺序固定为 `src, indices..., dsts..., fp?, preQuantScalar?`。对旧 form，这仍是
+`src, indexRow, indexCol, dst, fp?, preQuantScalar?`，因此既有 lowering 中可观察的 operand
+顺序不变；双输出 form 则是 `src, row0, col0, row1, col1, dst0, dst1`。两个 DPS init 连续，
+符合 `PTO_DpsInitOpInterface` 的单一 `MutableOperandRange` 契约。
 
-### 4.2 汇编示例
+现有 declarative `assemblyFormat` 无法同时稳定表达 legacy optional operand 和两个 variadic
+range，改为 custom parser/printer。printer 对单输出 form 必须逐字符保持现有 canonical 语法；
+双输出 form 只增加第二组坐标和第二个 `outs` operand，不引入 suffix mnemonic。
+
+### 4.2 form 推断与非法组合
+
+`classifyForm()` 返回 `SingleOutput`、`NdTo2xNz` 或 `Invalid`，只读取分段后的 range，不按总
+operand 数量猜测；这样旧 form 的 `fp` 或
+`preQuantScalar` 不会被误判为第二路输出：
+
+| `indices.size()` | `dsts.size()` | 推断结果 |
+|---:|---:|---|
+| 2 | 1 | 现有单输出 form |
+| 4 | 2 | ND-to-2xNZ 双输出 form |
+| 其他 | 其他 | 非法 IR，verifier 拒绝 |
+
+双输出 form 还必须由类型二次确认：source 是 `loc=vec` 的 ND，两个 destination 都是
+`loc=vec` 的 NZ；否则不能仅因 arity 相同就选择七参数 PTO-ISA overload。该 form 禁止 `fp`、
+`preQuantScalar`、非默认 `reluPreMode` 和 `accToVecMode`。单输出 form 继续走现有 MAT/ACC/VEC、
+FP、pre-quant、relu 和 acc-to-vec verifier 分支，其合法集合不因本功能扩大。
+
+所有 interface 都必须对 `Invalid` fail-safe：`getPipe()` 在 verifier 报错前返回 `PIPE_V`，
+effects 只迭代实际存在的 ranges，任何 legacy convenience accessor 在 debug build 断言
+`SingleOutput`。generic assembly 即使构造畸形 segments，也不能在 verifier 诊断前越界访问。
+
+这里推断的是 **TEXTRACT overload/form**，不是凭 source 自动创建 destination type。DPS
+destination 已由 allocation 决定，所以两个 NZ destination 的 physical shape、valid shape 和
+compact mode 仍显式存在于 operand type 中；这正是允许两路 shape 不同所必需的。
+
+### 4.3 汇编示例
+
+现有单输出文本不变：
+
+```mlir
+pto.textract
+  ins(%src, %r0, %c0 : !pto.tile_buf<vec, 64x128xf16,
+                           blayout=row_major, slayout=none_box>, index, index)
+  outs(%dst : !pto.tile_buf<vec, 32x64xf16,
+                            blayout=row_major, slayout=none_box>)
+```
+
+新增双输出文本为：
 
 ```mlir
 %src = pto.alloc_tile
@@ -448,7 +504,7 @@ def TExtractNd2xNzOp : PTO_TOp<"textract.nd2xnz", [
   : !pto.tile_buf<vec, 16x32xf16, valid=13x29,
                   blayout=col_major, slayout=row_major>
 
-pto.textract.nd2xnz
+pto.textract
   ins(%src, %r0, %c0, %r1, %c1 :
       !pto.tile_buf<vec, 64x128xf16,
                     blayout=row_major, slayout=none_box>,
@@ -462,33 +518,55 @@ pto.textract.nd2xnz
 
 该例刻意使用不同的 destination shape，以固定“两路不是同型数组”的接口语义。
 
-### 4.3 为什么不扩展现有 `TExtractOp`
+### 4.4 builder、accessor 与 PTOBC 兼容
 
-现有 `TExtractOp` 已同时承载 base、FP、preQuantScalar、relu 和 accToVecMode 形态。把它改成
-可选第二输出会产生以下问题：
+ODS range 化会改变自动生成的 builder/accessor，不能把“文本兼容”误写成“生成 API 自动
+兼容”。实现 PR 必须显式提供以下兼容层：
 
-- `$dst`、`$fp`、`$preQuantScalar` 已形成稳定的 ODS operand segment 和生成 accessor；
-- 双输出要求第二组 index 和第二个 DPS init 同时出现，任意 optional 组合都会产生大量
-  无语义状态；
-- 两个 DPS init 必须是连续 `MutableOperandRange`，插入第二个 dst 会改变现有 operand
-  layout 和自动生成 builder；
-- 需要 custom parser/printer 才能在一个 mnemonic 下稳定区分单输出、FP、preQuant 和
-  双输出格式；
-- 单输出 verifier 已按 MAT/ACC/VEC 多种 loc pair 分派，继续嵌入 ND-to-2xNZ 会扩大回归面。
+- C++ 保留现有 `build(src, indexRow, indexCol, dst, fp?, preQuantScalar?, ...)` overload；内部
+  组装 `indices={row,col}`、`dsts={dst}`。现有 `getIndexRow()`、`getIndexCol()`、`getDst()` 和
+  mutable accessor 作为 legacy wrapper 保留，且只能在单输出 form 中调用。
+- 新增同一 class 上的命名 builder `buildNdTo2xNz(src, row0, col0, row1, col1, dst0, dst1)`；
+  它不是新 op。range-aware verifier、effects、planning 和 lowering 使用 `getIndices()`/
+  `getDsts()`，不得只取 `.front()`。
+- Python 保留当前 `pto.TExtractOp(src, row, col, dst, fp=...)` 调用；新增
+  `pto.TExtractOp.build_nd_to_2xnz(src, row0, col0, row1, col1, dst0, dst1)` convenience factory，
+  返回的仍是 `TExtractOp`。若 generated binding 不支持 classmethod，则在 dialect Python module
+  提供同名薄封装，不能暴露 `TExtractNd2xNzOp` class。
 
-独立的 dotted mnemonic 与现有 `pto.tmatmul.mx`、`pto.tquant.mx` 风格一致，同时保持
-`textract` 指令族关系。最终生成的 PTO-ISA C++ 名字仍然是 `TEXTRACT`，没有 ABI 分叉。
+`AttrSizedOperandSegments` 的 segment schema 会从六个 fixed/optional 字段变成
+`[src, indices, dsts, fp, preQuantScalar]`。普通文本由 custom parser 重建新 schema；MLIR
+generic form 测试必须使用新 schema。PTOBC v0 已发布的 `pto.textract` fixed-width wire opcode
+必须保持如下兼容策略：
 
-被拒绝的另一方案是新增完全无关联的 `pto.textract2`。该名字没有表达 ND-to-NZ 约束，
-也不利于后续文档和 template 注册按指令族组织。
+- 旧四 operand 单输出和旧五 operand FP record 的 opcode、operand 顺序与解码结果不变；decoder
+  为解出的单输出 op 生成新的 segment sizes。
+- 双输出七 operand form 在 `shouldEncodeViaGenericV0CompatibilityShim()` 中强制走 generic v0
+  record，不能复用四/五 operand opcode，也不能改变旧 opcode 的 operand count。
+- 增加旧 `.ptobc` fixture decode、单输出/FP encode-decode 和双输出 generic round-trip；未证明
+  这些测试通过前，不能宣称 bytecode 兼容。
+
+### 4.5 为什么复用 `TExtractOp`
+
+PTO-ISA 对外提供的是同名 `TEXTRACT` overload，现有 PTOAS `TExtractOp` 也已经通过 operand、
+attribute 和 layout 承载 base、FP、preQuant、relu、acc-to-vec 等多种形态。ND-to-2xNZ 的
+`2 indices + 1 dst` 与 `4 indices + 2 dsts` 组合可唯一分类，再由 ND/NZ layout 唯一确认；
+增加 dotted mnemonic 只会制造一套与 ISA 不一致的 public surface。
+
+复用的代价是 custom parser/printer、兼容 builder/accessor 和 bytecode shim，但这些成本都能以
+明确测试封闭。verifier 和 lowering 必须先调用统一 form classifier，再进入现有单输出或新增
+双输出 helper，避免把新增规则散落进旧分支。被拒绝的方案包括 `pto.textract.nd2xnz` 和
+`pto.textract2`；二者都不提供额外语义信息，也会迫使 TileLib、manual 和 Python binding 暴露
+不必要的新 op 名。
 
 ## 5. Verifier 设计
 
 ### 5.1 公共校验顺序
 
-`TExtractNd2xNzOp::verify()` 负责以下结构和硬件共同契约中的 1-10 项，诊断中必须带
-`src`、`dst0` 或 `dst1` 名称。frontend lowering 完成后，backend-boundary validation 再按
-同一顺序执行 11-13 项；这些项不能被误解为依赖 planner 的 late check：
+`TExtractOp::verify()` 首先按第 4.2 节分类 form：单输出调用未经语义修改的现有 verifier helper；
+双输出调用新的 `verifyNdTo2xNzForm()`，负责以下结构和硬件共同契约中的 1-10 项，诊断中
+必须带 `src`、`dst0` 或 `dst1` 名称。frontend lowering 完成后，backend-boundary validation
+再按同一顺序执行 11-13 项；这些项不能被误解为依赖 planner 的 late check：
 
 1. 对三个 tile 调用 `verifyTileBufCommon`；A2/A3 禁止 low precision，A5 允许。
 2. 要求三个 operand 都是 rank-2 `!pto.tile_buf`。
@@ -514,7 +592,7 @@ pto.textract.nd2xnz
 12. runtime-bound provenance 的固定诊断为：
 
     ```text
-    pto.textract.nd2xnz does not support runtime-bound tile provenance for
+    pto.textract ND-to-2xNZ form does not support runtime-bound tile provenance for
     src|dst0|dst1; use alloc_tile with planner-owned or statically known level3 address
     ```
 
@@ -561,14 +639,15 @@ golden，才能无条件放行动态/非对齐 index。FP4 未通过第 3.5 节�
 - static bounds 的加法使用 checked arithmetic，避免超大常量溢出后误判为合法。
 
 首版的完整 TSTORE eligibility 由独立的 `PTOValidateNd2xNzStoreUsePass` 在
-backend-boundary 检查，而不是由 `TExtractNd2xNzOp::verify()` 假定。该 pass 不能只沿两个 DPS
+backend-boundary 检查，而不是由 `TExtractOp::verify()` 假定。该 pass 只把 classifier 确认的
+双输出 form 当作 producer，且不能只沿两个 DPS
 destination 的 SSA view/use chain；它必须执行 alias-aware physical-definedness dataflow：
 
 1. pass 在 `PTOResolveBufferSelect` 和 level1/2 memory planning 之后、TSTORE/EmitC/VPTO 最终
    lowering 之前运行。level1/2 使用 planner 物化地址，level3 已经由第 7.1 节 gate 保证静态
    地址；multi-buffer slot 也已经 materialize。所有 range 使用 physical byte footprint，不能
    使用 valid shape。
-2. 每次 partial-valid `pto.textract.nd2xnz` 写 destination 时，将该 static physical range 标记为
+2. 每次 partial-valid ND-to-2xNZ `pto.textract` 写 destination 时，将该 static physical range 标记为
    “logical valid region 之外未定义”。标记以 `(address space, absolute begin, byte size)` 为键，
    不以 allocation SSA root 为键，所以另一个同址 `alloc_tile`、view/subview/cast 或 full-valid
    descriptor 都命中同一 range。
@@ -603,7 +682,7 @@ destination 的 `Tile::Rows` 显式构造成 `align16(rows) + 1`，而 `TSTORE` 
 rows 表示带 gap 的 virtual rows，而 valid rows 仍是 logical rows；planner/sync/semantic range
 继续按 PTOAS 的 implicit-gap footprint 计算，不能再重复加一。该转换应进入共享 emitted
 dimension helper，并补全 `TEXTRACT -> TSTORE` 的混合 plain/NZ+1 设备测试。若无法在不改变
-既有 RowPlusOne 用户语义的前提下完成，则第一版 verifier 必须拒绝本 op 的 RowPlusOne，
+既有 RowPlusOne 用户语义的前提下完成，则第一版 verifier 必须拒绝双输出 form 的 RowPlusOne，
 不能只检查 `CompactMode::RowPlusOne` token 已输出。
 
 ### 5.5 不增加的限制
@@ -621,8 +700,8 @@ dimension helper，并补全 `TEXTRACT -> TSTORE` 的混合 plain/NZ+1 设备测
 
 ### 6.1 DPS
 
-`getDpsInitsMutable()` 必须同时返回 `dst0` 和 `dst1`。现有以下消费者已经按 range 迭代，
-设计上无需新增特判，但必须增加双输出回归：
+`getDpsInitsMutable()` 对单输出返回一个 destination、对双输出返回 `dst0` 和 `dst1`。现有
+以下消费者已经按 range 迭代，设计上无需按 op 名新增特判，但必须增加双输出回归：
 
 - legacy `PTOPlanMemory`；
 - `PTOPlanMemoryModern`；
@@ -630,27 +709,32 @@ dimension helper，并补全 `TEXTRACT -> TSTORE` 的混合 plain/NZ+1 设备测
 - TileFusion liveness/region generation；
 - `PTOMarkLastUse`。
 
-TileFusion 当前只把白名单中的 elementwise/reduction op 视为可融合 compute，单输出
-`textract` 本身也不是白名单成员。首版将 `pto.textract.nd2xnz` 保持为 hard boundary，
-不在本功能中引入 multi-output fusion 策略。
+TileFusion 当前只把白名单中的 elementwise/reduction op 视为可融合 compute，`pto.textract`
+本身不是白名单成员。双输出 form 延续这个 hard boundary，不在本功能中引入 multi-output
+fusion 策略，也不能因为 op 名与单输出相同而被错误加入单输出 fusion 路径。
 
 ### 6.2 MemoryEffects
 
 ```cpp
-void TExtractNd2xNzOp::getEffects(
+void TExtractOp::getEffects(
     SmallVectorImpl<SideEffects::EffectInstance<MemoryEffects::Effect>>& effects) {
   addEffect(effects, &getSrcMutable(), MemoryEffects::Read::get());
-  addEffect(effects, &getDst0Mutable(), MemoryEffects::Write::get());
-  addEffect(effects, &getDst1Mutable(), MemoryEffects::Write::get());
+  if (auto fp = getFpMutable(); !fp.empty())
+    addEffect(effects, &*fp.begin(), MemoryEffects::Read::get());
+  for (OpOperand &dst : getDstsMutable())
+    addEffect(effects, &dst, MemoryEffects::Write::get());
 }
 ```
 
-source 不声明 Write。A2/A3 odd-i8 路径使用固定 tmp UB scratch，但不修改 source；该内部
-scratch 由 PTO-ISA 保留区管理，不作为 PTO IR operand。
+实际实现仍是 `TExtractOp::getEffects()`；上面用 range 强调两种 form 共用逻辑。source 不声明
+Write。A2/A3 odd-i8 路径使用固定 tmp UB scratch，但不修改 source；该内部 scratch 由 PTO-ISA
+保留区管理，不作为 PTO IR operand。既有单输出 FP read effect 必须保留。
 
 ### 6.3 pipe 与自动同步
 
-本 overload 的外部执行类别固定为 `PIPE_V`：
+`TExtractOp::getPipe()` 先分类 form：双输出 overload 的外部执行类别固定为 `PIPE_V`，单输出
+继续按现有 source/destination address space 返回 `PIPE_MTE1`、`PIPE_FIX` 或 `PIPE_V`。双输出
+固定 `PIPE_V` 的依据是：
 
 - A5 主路径完全是 vector frontend；
 - A2/A3 vector 路径使用 `vcopy`/`vconv`；
@@ -699,7 +783,7 @@ fixture 中为 redzone 顺序插入的显式 barrier。
 
 ## 7. No-alias 与内存规划
 
-`getSemanticNoAliasPairs()` 为该 op 返回：
+当 classifier 判定 `TExtractOp` 为双输出 form 时，`getSemanticNoAliasPairs()` 返回：
 
 ```text
 (src, dst0)
@@ -740,14 +824,14 @@ allocation root 只有在双方都有 absolute address 时才比较，因此两�
 - 在 driver 已解析 `effectiveLevel`、backend 和 capability environment 后运行
   `PTOValidateNd2xNzAddressPass`；对 level1/level2 不改变现有 planner 行为，但 provenance
   gate 仍然生效。
-- 当 module 含 `pto.textract.nd2xnz` 且 level3 生效时，沿 `src`、`dst0`、`dst1` 各自的
+- 当 module 含 ND-to-2xNZ form 的 `pto.textract` 且 level3 生效时，沿 `src`、`dst0`、`dst1` 各自的
   view chain traceback 到 `pto.alloc_tile`。每个 local allocation 的 `addr` 必须是可
   折叠为非负整数的静态常量；canonicalizer 能折叠的 `arith.addi`/index cast 常量表达式
   可以接受，含 block argument、函数参数或动态 `%base` 的地址一律拒绝。
 - 诊断固定为：
 
   ```text
-  pto.textract.nd2xnz requires statically known level3 addresses for
+  pto.textract ND-to-2xNZ form requires statically known level3 addresses for
   semantic no-alias verification (src|dst0|dst1)
   ```
 
@@ -779,25 +863,29 @@ partial-valid RowPlusOne case 只进入 UB-only 测试。
 
 ## 8. EmitC lowering
 
-新增独立 conversion pattern：
+不新增 conversion pattern。现有 `PTOExtractToEmitC` 先调用 `isNdTo2xNzForm()`，双输出
+分支只读取 range 并发射七参数调用；单输出分支继续使用现有 legacy accessor 路径：
 
 ```cpp
-struct PTOExtractNd2xNzToEmitC
-    : public OpConversionPattern<pto::TExtractNd2xNzOp> {
-  using OpConversionPattern::OpConversionPattern;
-
-  LogicalResult matchAndRewrite(
-      pto::TExtractNd2xNzOp op, OpAdaptor adaptor,
-      ConversionPatternRewriter& rewriter) const override {
+LogicalResult PTOExtractToEmitC::matchAndRewrite(
+    pto::TExtractOp op, OpAdaptor adaptor,
+    ConversionPatternRewriter &rewriter) const {
+  if (op.isNdTo2xNzForm()) {
+    auto dsts = adaptor.getDsts();
+    auto indices = adaptor.getIndices();
+    if (dsts.size() != 2 || indices.size() != 4)
+      return rewriter.notifyMatchFailure(op, "malformed ND-to-2xNZ operand segments");
     SmallVector<Value, 7> operands{
-        adaptor.getDst0(), adaptor.getDst1(), adaptor.getSrc(),
-        adaptor.getIndexRow0(), adaptor.getIndexCol0(),
-        adaptor.getIndexRow1(), adaptor.getIndexCol1()};
+        dsts[0], dsts[1], adaptor.getSrc(), indices[0], indices[1],
+        indices[2], indices[3]};
     rewriter.replaceOpWithNewOp<emitc::CallOpaqueOp>(
         op, TypeRange{}, "TEXTRACT", nullptr, nullptr, operands);
     return success();
   }
-};
+
+  // Existing single-output/FP/pre-quant/acc-to-vec lowering remains unchanged.
+  return lowerLegacyTExtractForm(op, adaptor, rewriter);
+}
 ```
 
 具体 builder 参数按仓库当前 MLIR EmitC API 调整，但最终调用必须固定为：
@@ -806,24 +894,28 @@ struct PTOExtractNd2xNzToEmitC
 TEXTRACT(dst0, dst1, src, indexRow0, indexCol0, indexRow1, indexCol1);
 ```
 
-不生成 template argument，不生成 `TEXTRACT_ND2XNZ`，也不拆成两次单输出 `TEXTRACT`。
+双输出分支不生成 template argument，不生成 `TEXTRACT_ND2XNZ`，也不拆成两次单输出
+`TEXTRACT`。
 拆分会选择普通 Vec-to-Vec path，既不能表达 ND-to-NZ layout conversion，也不能保证与
 双输出 overload 的 backend dispatch 一致。
 
-pattern 加入主 conversion pattern set。EmitC 测试分别使用 A3/A5，并把两个 dst 的
-类型和四个静态 index 设为可区分值，避免只检查 `TEXTRACT(` 而漏掉参数交换。
+该 pattern 继续使用主 conversion pattern set。EmitC 测试分别使用 A3/A5，并把两个 dst 的
+类型和四个静态 index 设为可区分值，避免只检查 `TEXTRACT(` 而漏掉参数交换；同时保留
+legacy 单输出、FP、pre-quant 和 acc-to-vec 的原有 FileCheck。
 
 ## 9. TileLib / VPTO 设计
 
 ### 9.1 注册
 
-新增 `lib/TileOps/a5/textract_nd2xnz.py`，并在 `lib/TileOps/__init__.py` 注册：
+新增 `lib/TileOps/a5/textract_nd2xnz.py`，但挂到现有 `pto.textract` registry，不新增 op 名：
 
 ```text
-("a5", "pto.textract.nd2xnz") -> ".a5.textract_nd2xnz"
+("a5", "pto.textract") -> (
+    ".a5.textract", ".a5.textract_fp", ".a5.textract_nd2xnz")
 ```
 
-template 参数顺序与 ODS operand 顺序一致：
+TileLib 选择器先按现有 `pto.textract` op 名加载全部模块，再按 operand arity/layout constraint
+选择双输出 template。template 参数顺序与双输出 range 顺序一致：
 
 ```python
 def template_textract_nd2xnz(
@@ -870,29 +962,34 @@ NZ+1 stride。aligned、unaligned、FP4、1x1 分支都要经过 VPTO-to-LLVM in
 ### 9.3 A2/A3
 
 仓库当前只有 `lib/TileOps/a5`，没有 A2/A3 TileLib template tree。本功能不借机新增整套
-A2/A3 TileLib 基础设施。A2/A3 的 `pto.textract.nd2xnz` 通过 tile-level EmitC 调用
+A2/A3 TileLib 基础设施。A2/A3 的 ND-to-2xNZ `pto.textract` 通过 tile-level EmitC 调用
 PTO-ISA，后续若引入 A2/A3 TileLib，再单独实现与原生 scalar/widen fallback 等价的模板。
 
 ## 10. Python builder 与文档接口
 
-ODS 自动生成 Python op class 后，推荐使用：
+继续使用现有 Python op class。旧调用保持不变，新调用使用同一 class 上的命名 factory：
 
 ```python
 from ptoas.mlir.dialects import arith, func, pto
 
-pto.TExtractNd2xNzOp(
+# Existing form remains source-compatible.
+pto.TExtractOp(src, index_row, index_col, dst, fp=fp)
+
+# New form; this still constructs an operation named "pto.textract".
+pto.TExtractOp.build_nd_to_2xnz(
     src, index_row0, index_col0, index_row1, index_col1, dst0, dst1)
 ```
 
 这里的 `pto` 明确指 PTOAS ODS-generated low-level dialect binding；
 `from ptodsl import pto` 是 PTODSL micro-op surface，不能用来构造该 IR op。实现 PR
-增加最小 Python builder/sample smoke，证明 import、argument 顺序和文本汇编一致。
+增加 legacy constructor 与新 factory 的 Python smoke，证明二者都打印为 `pto.textract`、
+argument 顺序和文本汇编一致，且 binding 中不存在 `TExtractNd2xNzOp`。
 
 需要同步更新：
 
 - `docs/PTO_IR_manual.md`：语义、汇编、shape/layout/dtype/compact 表；
 - `docs/release/PTO-tile-Instruction-SPEC-v0.4.md`：新增双输出形态；
-- `ReleaseNotes.md`：记录 `pto.textract.nd2xnz` 和架构差异；
+- `ReleaseNotes.md`：记录 `pto.textract` 新增 ND-to-2xNZ 双输出 form 和架构差异；
 - TileLib template 列表或生成文档（若实现 PR 修改对应索引）。
 
 ## 11. PTO-ISA pin 方案
@@ -920,14 +1017,14 @@ PTOAS 当前三个 pin 都早于 8 月 14 日功能提交：
 3. 分别检查 candidate 中公开 API、A2/A3/A5/CPU implementation 和测试目录，不能只按
    提交标题判断。
 4. GitCode NPU target 分别编译最小七参数调用。GitHub target 先检查公共 API；只有 candidate
-   同时新增 CPU implementation 时，才编译并执行 CPU-sim 数值 smoke。否则把该 op 标记为
+   同时新增 CPU implementation 时，才编译并执行 CPU-sim 数值 smoke。否则把该 overload 标记为
    CPU-sim unsupported，并链接对应 upstream dependency。
 5. CANN 9.0 dev target 必须用实际镜像编译验证。若最新版头文件与该工具链不兼容，不能静默
-   保持旧 pin 并宣称该 target 支持新 op；应在实现 PR 中明确解决兼容 pin 或标注 target gate。
+   保持旧 pin 并宣称该 target 支持新 overload；应在实现 PR 中明确解决兼容 pin 或标注 target gate。
 6. 使用现有 `.github/scripts/update_pto_isa_pin.py` 更新，不新建第二套 updater。
 7. GitCode SHA 和 GitHub SHA 是不同 commit identity，只在各自 remote 内做 ancestry 检查。
 
-本设计核对时可用的 latest candidate 是 GitCode `bb69abb` 和 GitHub `52d4ad3`，但实现 PR
+本设计核对时可用的 latest candidate 是 GitCode `285b913` 和 GitHub `52d4ad3`，但实现 PR
 不得把本文 SHA 当成永久常量；应选择 rebase 当日经完整验证的最新 descendant。
 
 ## 12. 测试方案
@@ -936,17 +1033,21 @@ PTOAS 当前三个 pin 都早于 8 月 14 日功能提交：
 
 正向（FP4 与 RowPlusOne 仅在对应 support gate 已满足时启用）：
 
+- 既有单输出、FP、preQuant、relu、acc-to-vec 文本 parse-print-parse 不变；
 - 两路相同 shape；
 - 两路不同 physical/valid shape 和不同 index；
 - A2/A3 `i8/i32/f16/bf16/f32`；
 - A5 support gate 已启用的 low-precision 集合；
 - A5 plain + plain、plain + RowPlusOne、RowPlusOne + RowPlusOne；
 - `1x1`、非 c0 index、非 c0 validCol、A2/A3 odd-i8 validCol；
-- parse-print-parse 保持两个 destination 与 index 配对。
+- 双输出 parse-print-parse 保持两个 destination 与 index 配对，打印名称始终是 `pto.textract`；
+- generic form 的 `[src, indices, dsts, fp, preQuantScalar]` segment sizes round-trip。
 
 负向：
 
 - 非 tile、非 rank-2、非 index；
+- `(indices,dsts)` 为 `(2,2)`、`(4,1)`、`(3,1)`、`(4,3)` 等未定义 arity；
+- 双输出 form 携带 `fp`、`preQuantScalar`、非默认 relu 或 `accToVecMode`；
 - dynamic valid shape 或 dynamic index（首版）；静态 0 valid row/col；
 - source/destination loc 错误；
 - ND/NZ layout 或 fractal size 错误；
@@ -962,7 +1063,7 @@ PTOAS 当前三个 pin 都早于 8 月 14 日功能提交：
   在 planner 前得到 runtime-bound provenance 诊断；
 - level3 下任一 operand 的 `alloc_tile.addr` 含动态 root；
 - 最终 codegen 时 environment unknown、capability manifest 缺失或
-  `textract.nd2xnz=false`；
+  `textract.nd_to_2xnz=false`；
 - support gate 未满足时使用 FP4 或 RowPlusOne；
 - FP4 gate 打开后，覆盖 raw dimension 合法但 emitted dimension 非法，以及反向边界。
 - production StoreUse pass 分别拒绝 partial descriptor 的直接/view TSTORE 和同址不同 SSA
@@ -974,6 +1075,7 @@ PTOAS 当前三个 pin 都早于 8 月 14 日功能提交：
 ### 12.2 EmitC 与 C++ compile
 
 - A3/A5 FileCheck 精确匹配七参数顺序；
+- 同一 `PTOExtractToEmitC` pattern 的 legacy 单输出/FP/preQuant/relu/acc-to-vec FileCheck 全部保留；
 - dynamic index 的 verifier 诊断，确保 EmitC 与 VPTO 不出现后端分叉；
 - 两个 dst 使用不同 opaque Tile type，确保 lowering 没有误用 dst0 type；
 - A5 RowPlusOne 的 destination Tile type 包含正确 `CompactMode::RowPlusOne`；
@@ -993,6 +1095,14 @@ PTOAS 当前三个 pin 都早于 8 月 14 日功能提交：
   codegen 必须失败；
 - GitHub CPU backend 未补齐时，记录 compile probe 的缺失符号和 upstream dependency；补齐后
   再启用 CPU-sim 两输出 byte-exact comparison。
+
+PTOBC v0 兼容测试单列，不并入普通 MLIR bytecode 假设：
+
+- 已发布四 operand 单输出和五 operand FP fixture 继续 decode 为单输出 `pto.textract`；
+- 单输出/FP 重新 encode 时仍使用原 fixed-width opcode 和 operand count；
+- 双输出强制使用 generic v0 record，encode-decode 后保留四项 index、两个 destination 及类型；
+- 更新后的 v0 decoder 按 generic record 规则处理双输出，不能把七 operand payload 误认成
+  原四 operand schema；不承诺旧 PTOAS binary 向前识别新增 form。
 
 ### 12.3 effects、sync 与 PlanMemory
 
@@ -1089,6 +1199,7 @@ full-store group 必须经过完整链路，partial-valid group 必须保留明�
 
 - `test/lit/pto/textract_*` 全部通过；
 - `test/lit/vpto/*textract*` 全部通过；
+- PTOBC v0 legacy TEXTRACT fixture 与双输出 generic round-trip 全部通过；
 - PTOAS unit/lit 全量通过；
 - A3/A5 compile-only；
 - production/test 构建各跑一次 StoreUse gate：production binary 没有 hidden option且拒绝同址
@@ -1107,7 +1218,7 @@ full-store group 必须经过完整链路，partial-valid group 必须保留明�
 | 阶段 | 内容 | 完成标准 |
 |---|---|---|
 | 0 | rebase、逐 target pin/backend 探测、CMake manifest 生成与 driver 注入 | NPU probe 生成正向 capability；CPU/cost-model 失败生成稳定负向 capability；manifest path/root/revision 校验可执行 |
-| 1 | ODS、assembly、DPS、pipe、effects | parse/print/effects 基础 lit 通过 |
+| 1 | 扩展 `TExtractOp` ODS ranges、form classifier、custom assembly、兼容 builder/accessor、DPS、pipe、effects、PTOBC shim | legacy/new parse-print、binding、effects 和 v0 bytecode 兼容测试通过，且没有新增 op 名 |
 | 2 | shared emitted-dimension helper、IR verifier、runtime provenance、alias-aware StoreUse dataflow 与 test-hook wiring | 架构矩阵、bounds、production direct/alias TSTORE、canonical test escape、provenance/capability gate lit 通过 |
 | 3 | no-alias、level3 address gate、GraphSync `AllocTileOp` single-address model 与 planner/GSS 回归 | 三组 alias 被拒绝，declared/tpop provenance 在 planner 前失败，动态 level3 地址失败，双输出 liveness 正确，同址/overlap/disjoint/address-space GSS edge 正确 |
 | 4 | EmitC pattern | A3/A5 精确文本与 pin compile-only 通过 |
@@ -1117,12 +1228,21 @@ full-store group 必须经过完整链路，partial-valid group 必须保留明�
 
 ## 14. 兼容性与完成条件
 
-现有 `pto.textract` 的文本、ODS class、builder、accessor、verifier 和生成 C++ 不发生变化。
-新 op 没有历史 IR，因此不需要 bytecode migration 或 deprecated alias。
+现有 `pto.textract` 的 op 名、单输出 canonical 文本、语义和生成 C++ 不变，但同一个 ODS class
+内部从 fixed fields 改成 `indices`/`dsts` ranges。自动生成的 storage accessor/builder 形态会变化，
+必须由第 4.4 节的 wrapper 保持源码兼容，不能声称 ODS API 天然零变化。没有新 op，也不提供
+deprecated alias。
+
+PTOBC v0 不迁移已发布的单输出 wire schema：旧 fixed-width record 继续可解码，新双输出 form
+走 generic record。MLIR generic assembly 中手写的旧六项 `operandSegmentSizes` 不是 canonical
+public syntax；实现只承诺 canonical `pto.textract ins(...) outs(...)` 文本和上述 PTOBC fixture
+兼容。若仓库存在直接持久化 generic assembly 的用户，ReleaseNotes 必须给出新五段 schema。
 
 实现合入必须同时满足：
 
 - PTO IR 能表达两个不同 shape 的 NZ destination 和两组 index；
+- `TExtractOp` classifier 对 `(2 indices, 1 dst)` 与 `(4 indices, 2 dsts)` 唯一分派，其他组合和
+  双输出附带 legacy optional operand 均稳定失败；
 - verifier 的合法集合不宽于目标 PTO-ISA，且不误拒绝其 unaligned/odd/1x1 路径；
 - 两个 DPS init 在 effects、sync、fusion boundary 和两套 PlanMemory 中都不丢失；
 - 三 tile 两两 no-alias；
@@ -1130,7 +1250,7 @@ full-store group 必须经过完整链路，partial-valid group 必须保留明�
   不同 SSA root，并有独立 `_gss` edge 回归；
 - `DeclareTileOp`、`TAssignOp`、`TPopOp`/frontend pop 绑定及其 view chain 在两个 planner 前均被
   runtime-bound provenance gate 拒绝；正向 operand 必须来自 planner-owned allocation；
-- level3 中该 op 的三个 local allocation 都有可静态证明的地址；
+- level3 中该双输出 form 的三个 local allocation 都有可静态证明的地址；
 - EmitC 只生成一次、参数顺序精确的公开 `TEXTRACT`；
 - 所有宣称支持的实际编译 target，其 PTO-ISA pin 同时包含公开 overload 和对应 backend
   implementation，且 CMake probe 生成的 manifest 已通过 path/include-root/revision/digest
@@ -1144,4 +1264,5 @@ full-store group 必须经过完整链路，partial-valid group 必须保留明�
   紧贴 physical footprint 的 pre/post UB redzone，只有 GM guard 或没有可编译观测 helper 的设备
   只能计 compile-only/simulator coverage；A5 的 FP4/NZ+1 只有通过各自 support gate 后才进入
   verifier 支持集合；
-- 既有单输出 `pto.textract` 行为和测试零变化。
+- 既有单输出 `pto.textract` canonical 文本、Python/C++ 调用、PTOBC v0 fixture、verifier、pipe、
+  effects 和 EmitC 行为通过兼容回归；Python/ODS surface 中不存在新 op class 或 mnemonic。
