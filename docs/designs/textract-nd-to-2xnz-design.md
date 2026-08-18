@@ -45,7 +45,9 @@ lowering、verifier、TileLib template 或回归测试，因此缺口仍然存�
    overload，不增加 `kind`/`mode` 属性。
 2. 现有 form 固定为一个 source、两项 index 和一个 DPS destination；新增 form 固定为
    一个 ND source、四项 index 和两个 NZ DPS destination。两个 destination 可以有不同
-   physical/valid shape，但 element type 必须与 source 相同。除这两组 arity 外全部拒绝。
+   physical/valid shape，但 element type 必须与 source 相同。classifier 必须先验证完整
+   `[src, indices, dsts, fp, preQuantScalar]` segment schema，特别是 `src == 1` 和 optional segment
+   为 `0/1`；不能只按 index/destination arity 推断。
 3. `TExtractOp` 继续实现 `PTO_DpsInitOpInterface` 且不增加 SSA result；单输出 form 返回一个
    DPS init，双输出 form 返回两个连续的 DPS init。
 4. 双输出 form 的 pipe 固定为 `PIPE_V`；内存效应为 `Read(src)`、`Write(dst0)`、
@@ -426,7 +428,7 @@ def TExtractOp : PTO_TOp<"textract", [
 
   let extraClassDeclaration = [{
     enum class Form { Invalid, SingleOutput, NdTo2xNz };
-    Form classifyForm();
+    Form classifyForm() const;
     bool isSingleOutputForm();
     bool isNdTo2xNzForm();
 
@@ -436,7 +438,7 @@ def TExtractOp : PTO_TOp<"textract", [
     ::mlir::Value getIndexCol();
     ::mlir::Value getDst();
 
-    ::mlir::MutableOperandRange getDpsInitsMutable() { return getDstsMutable(); }
+    ::mlir::MutableOperandRange getDpsInitsMutable();
     ::mlir::pto::PIPE getPipe();
     void print(::mlir::OpAsmPrinter &p);
     static ::mlir::ParseResult parse(
@@ -456,24 +458,41 @@ range，改为 custom parser/printer。printer 对单输出 form 必须逐字符
 
 ### 4.2 form 推断与非法组合
 
-`classifyForm()` 返回 `SingleOutput`、`NdTo2xNz` 或 `Invalid`，只读取分段后的 range，不按总
-operand 数量猜测；这样旧 form 的 `fp` 或
-`preQuantScalar` 不会被误判为第二路输出：
+`classifyForm()` 返回 `SingleOutput`、`NdTo2xNz` 或 `Invalid`。它不能先调用任何 generated
+accessor，包括 `getSrc()`、`getIndices()`、`getDsts()`、`getFp()`；这些 accessor 会信任
+segment offset，并可能在畸形 generic IR 上解引用空 range。实现先从 operation raw attribute
+读取 `DenseI32ArrayAttr operandSegmentSizes`，并一次性验证：
 
-| `indices.size()` | `dsts.size()` | 推断结果 |
-|---:|---:|---|
-| 2 | 1 | 现有单输出 form |
-| 4 | 2 | ND-to-2xNZ 双输出 form |
-| 其他 | 其他 | 非法 IR，verifier 拒绝 |
+1. attribute 存在且恰好有五项，顺序为
+   `[src, indices, dsts, fp, preQuantScalar]`；每项非负，五项之和等于 raw operand 数量。
+2. `src == 1`，`fp` 和 `preQuantScalar` 各自只能为 `0` 或 `1`。
+3. 只有以下两个完整 schema 可以分类，不能只看 `indices`/`dsts` 两段：
+
+   | form | 完整 `operandSegmentSizes` |
+   |---|---|
+   | `SingleOutput` | `[1, 2, 1, fp, preQuantScalar]`，其中两个 optional size 各为 `0/1` |
+   | `NdTo2xNz` | `[1, 4, 2, 0, 0]` |
+
+其他 schema 一律为 `Invalid`。例如 `[0, 2, 1, 1, 0]` 不能因为 index/dst arity 看似是
+单输出就调用 `getSrc()`；`[2, 2, 1, 0, 0]` 也不能把第二个 source 留在 effects 之外。
+custom parser 和所有 builder 只生成上述 canonical schema，generic assembly 则由 verifier
+给出包含实际五段值和期望 schema 的稳定诊断。
+
+上述逻辑只实现一份内部 raw-schema helper；`classifyForm()` 把 helper failure 映射为 `Invalid`，
+`verify()` 使用同一 failure detail 发诊断，`getDpsInitsMutable()`、`getPipe()` 和 MemoryEffects
+复用同一结果。不能分别重写五段判断，也不能依赖 `AttrSizedOperandSegments` trait 代替该 helper，
+因为 trait 的总数检查不证明固定/optional segment 的本 op 语义。
 
 双输出 form 还必须由类型二次确认：source 是 `loc=vec` 的 ND，两个 destination 都是
 `loc=vec` 的 NZ；否则不能仅因 arity 相同就选择七参数 PTO-ISA overload。该 form 禁止 `fp`、
 `preQuantScalar`、非默认 `reluPreMode` 和 `accToVecMode`。单输出 form 继续走现有 MAT/ACC/VEC、
 FP、pre-quant、relu 和 acc-to-vec verifier 分支，其合法集合不因本功能扩大。
 
-所有 interface 都必须对 `Invalid` fail-safe：`getPipe()` 在 verifier 报错前返回 `PIPE_V`，
-effects 只迭代实际存在的 ranges，任何 legacy convenience accessor 在 debug build 断言
-`SingleOutput`。generic assembly 即使构造畸形 segments，也不能在 verifier 诊断前越界访问。
+所有 interface 都必须对 `Invalid` fail-safe：`getPipe()` 在 verifier 报错前返回 `PIPE_V`；
+`getDpsInitsMutable()` 用同一 raw-schema helper 计算 offset，schema 非法时返回空 range，不能
+调用 generated `getDstsMutable()`；MemoryEffects 按第 6.2 节保守处理 raw operands。任何 legacy
+convenience accessor 在 debug build 断言 `SingleOutput`。generic assembly 即使构造畸形
+segments，也不能在 verifier 诊断前越界访问或产生未建模的 tile operand。
 
 这里推断的是 **TEXTRACT overload/form**，不是凭 source 自动创建 destination type。DPS
 destination 已由 allocation 决定，所以两个 NZ destination 的 physical shape、valid shape 和
@@ -563,10 +582,13 @@ attribute 和 layout 承载 base、FP、preQuant、relu、acc-to-vec 等多种�
 
 ### 5.1 公共校验顺序
 
-`TExtractOp::verify()` 首先按第 4.2 节分类 form：单输出调用未经语义修改的现有 verifier helper；
-双输出调用新的 `verifyNdTo2xNzForm()`，负责以下结构和硬件共同契约中的 1-10 项，诊断中
-必须带 `src`、`dst0` 或 `dst1` 名称。frontend lowering 完成后，backend-boundary validation
-再按同一顺序执行 11-13 项；这些项不能被误解为依赖 planner 的 late check：
+`TExtractOp::verify()` 的第一步必须调用第 4.2 节的 raw-schema validator。只有确认
+`operandSegmentSizes` 是完整 `SingleOutput` 或 `NdTo2xNz` schema 后，才允许调用 generated
+accessor。`Invalid` 直接报告 actual/expected segments 和 raw operand count，不进入现有 verifier。
+单输出随后调用语义不变的现有 verifier helper；双输出调用新的 `verifyNdTo2xNzForm()`，负责
+以下结构和硬件共同契约中的 1-10 项，诊断中必须带 `src`、`dst0` 或 `dst1` 名称。frontend
+lowering 完成后，backend-boundary validation 再按同一顺序执行 11-13 项；这些项不能被误解为
+依赖 planner 的 late check：
 
 1. 对三个 tile 调用 `verifyTileBufCommon`；A2/A3 禁止 low precision，A5 允许。
 2. 要求三个 operand 都是 rank-2 `!pto.tile_buf`。
@@ -718,15 +740,28 @@ fusion 策略，也不能因为 op 名与单输出相同而被错误加入单输
 ```cpp
 void TExtractOp::getEffects(
     SmallVectorImpl<SideEffects::EffectInstance<MemoryEffects::Effect>>& effects) {
-  addEffect(effects, &getSrcMutable(), MemoryEffects::Read::get());
+  Form form = classifyForm(); // Raw operandSegmentSizes only.
+  if (form == Form::Invalid) {
+    for (OpOperand &operand : getOperation()->getOpOperands()) {
+      if (!isPTODpsType(operand.get().getType()))
+        continue;
+      addEffect(effects, &operand, MemoryEffects::Read::get());
+      addEffect(effects, &operand, MemoryEffects::Write::get());
+    }
+    return;
+  }
+
+  addEffect(effects, &getOperation()->getOpOperand(0), MemoryEffects::Read::get());
   if (auto fp = getFpMutable(); !fp.empty())
     addEffect(effects, &*fp.begin(), MemoryEffects::Read::get());
-  for (OpOperand &dst : getDstsMutable())
+  for (OpOperand &dst : getDpsInitsMutable())
     addEffect(effects, &dst, MemoryEffects::Write::get());
 }
 ```
 
-实际实现仍是 `TExtractOp::getEffects()`；上面用 range 强调两种 form 共用逻辑。source 不声明
+`isPTODpsType` 在上面是共享 type predicate 的示意名，实际实现复用 PTO type utility。Invalid
+fallback 必须覆盖所有 raw memory-carrying operand 的 Read+Write，不能悄悄忽略多出来的 source；
+正常 schema 仍是 source Read、optional FP Read 和全部 DPS destinations Write。source 不声明
 Write。A2/A3 odd-i8 路径使用固定 tmp UB scratch，但不修改 source；该内部 scratch 由 PTO-ISA
 保留区管理，不作为 PTO IR operand。既有单输出 FP read effect 必须保留。
 
@@ -863,30 +898,41 @@ partial-valid RowPlusOne case 只进入 UB-only 测试。
 
 ## 8. EmitC lowering
 
-不新增 conversion pattern。现有 `PTOExtractToEmitC` 先调用 `isNdTo2xNzForm()`，双输出
-分支只读取 range 并发射七参数调用；单输出分支继续使用现有 legacy accessor 路径：
+不新增 conversion pattern。ODS 改为 `indices`/`dsts` 后，generated `OpAdaptor` 只提供
+`getIndices()`/`getDsts()`，不会继承 `TExtractOp` 在 `extraClassDeclaration` 中添加的 legacy
+wrapper。因此现有 `PTOExtractToEmitC` 的两条分支都必须从 adaptor ranges 取坐标和 destination；
+保持不变的是单输出的生成语义，不是旧 accessor 调用：
 
 ```cpp
 LogicalResult PTOExtractToEmitC::matchAndRewrite(
     pto::TExtractOp op, OpAdaptor adaptor,
     ConversionPatternRewriter &rewriter) const {
-  if (op.isNdTo2xNzForm()) {
-    auto dsts = adaptor.getDsts();
-    auto indices = adaptor.getIndices();
-    if (dsts.size() != 2 || indices.size() != 4)
-      return rewriter.notifyMatchFailure(op, "malformed ND-to-2xNZ operand segments");
+  auto form = op.classifyForm(); // Validates raw segments before getSrc().
+  if (form == pto::TExtractOp::Form::Invalid)
+    return rewriter.notifyMatchFailure(op, "malformed TEXTRACT operand segments");
+
+  auto indices = adaptor.getIndices();
+  auto dsts = adaptor.getDsts();
+  Value src = adaptor.getSrc();
+
+  if (form == pto::TExtractOp::Form::NdTo2xNz) {
     SmallVector<Value, 7> operands{
-        dsts[0], dsts[1], adaptor.getSrc(), indices[0], indices[1],
+        dsts[0], dsts[1], src, indices[0], indices[1],
         indices[2], indices[3]};
     rewriter.replaceOpWithNewOp<emitc::CallOpaqueOp>(
         op, TypeRange{}, "TEXTRACT", nullptr, nullptr, operands);
     return success();
   }
 
-  // Existing single-output/FP/pre-quant/acc-to-vec lowering remains unchanged.
-  return lowerLegacyTExtractForm(op, adaptor, rewriter);
+  // The existing body is factored to accept range-derived core operands.
+  return lowerSingleOutputTExtractForm(
+      op, adaptor, src, dsts[0], indices[0], indices[1], rewriter);
 }
 ```
+
+`lowerSingleOutputTExtractForm` 可以继续从 adaptor 读取仍然存在的 optional
+`getFp()`/`getPreQuantScalar()`，但其 `src/dst/indexRow/indexCol` 必须使用显式参数。实现中不能出现
+`adaptor.getDst()`、`adaptor.getIndexRow()` 或 `adaptor.getIndexCol()`；这些方法在新 ODS 下不会生成。
 
 具体 builder 参数按仓库当前 MLIR EmitC API 调整，但最终调用必须固定为：
 
@@ -1041,12 +1087,17 @@ PTOAS 当前三个 pin 都早于 8 月 14 日功能提交：
 - A5 plain + plain、plain + RowPlusOne、RowPlusOne + RowPlusOne；
 - `1x1`、非 c0 index、非 c0 validCol、A2/A3 odd-i8 validCol；
 - 双输出 parse-print-parse 保持两个 destination 与 index 配对，打印名称始终是 `pto.textract`；
-- generic form 的 `[src, indices, dsts, fp, preQuantScalar]` segment sizes round-trip。
+- generic form 的 canonical `[src, indices, dsts, fp, preQuantScalar]` segment sizes round-trip。
 
 负向：
 
 - 非 tile、非 rank-2、非 index；
 - `(indices,dsts)` 为 `(2,2)`、`(4,1)`、`(3,1)`、`(4,3)` 等未定义 arity；
+- generic assembly 的 source segment 分别为 0 和 2：至少固定覆盖
+  `[0, 2, 1, 1, 0]` 与 `[2, 2, 1, 0, 0]`，二者都必须在任何 generated accessor 解引用前
+  得到稳定诊断，不能 crash；
+- segment attribute 缺失、不是五项、总和与 operand 数不符，以及 `fp`/`preQuantScalar` segment
+  为 2；
 - 双输出 form 携带 `fp`、`preQuantScalar`、非默认 relu 或 `accToVecMode`；
 - dynamic valid shape 或 dynamic index（首版）；静态 0 valid row/col；
 - source/destination loc 错误；
@@ -1076,6 +1127,8 @@ PTOAS 当前三个 pin 都早于 8 月 14 日功能提交：
 
 - A3/A5 FileCheck 精确匹配七参数顺序；
 - 同一 `PTOExtractToEmitC` pattern 的 legacy 单输出/FP/preQuant/relu/acc-to-vec FileCheck 全部保留；
+  编译回归必须证明 core operands 来自 `adaptor.getIndices()/getDsts()`，源码中不再引用不存在的
+  `adaptor.getDst()/getIndexRow()/getIndexCol()`；
 - dynamic index 的 verifier 诊断，确保 EmitC 与 VPTO 不出现后端分叉；
 - 两个 dst 使用不同 opaque Tile type，确保 lowering 没有误用 dst0 type；
 - A5 RowPlusOne 的 destination Tile type 包含正确 `CompactMode::RowPlusOne`；
@@ -1107,6 +1160,8 @@ PTOBC v0 兼容测试单列，不并入普通 MLIR bytecode 假设：
 ### 12.3 effects、sync 与 PlanMemory
 
 - effects 测试看到一个 Read、两个 Write；
+- 对 `[2, 2, 1, 0, 0]` 等 Invalid schema 直接查询 MemoryEffects 不崩溃，并把两个 raw source
+  tile 及其他 memory-carrying operands 保守建模为 Read+Write；
 - full-valid case 的 `TLOAD -> ND2XNZ -> 2xTSTORE` 自动同步覆盖两路；
 - 两个 dst 的 consumer 位于不同 block/loop 时 liveness 都正确；
 - legacy/modern planner 都为两个 live destination 分配不重叠范围；
@@ -1218,7 +1273,7 @@ full-store group 必须经过完整链路，partial-valid group 必须保留明�
 | 阶段 | 内容 | 完成标准 |
 |---|---|---|
 | 0 | rebase、逐 target pin/backend 探测、CMake manifest 生成与 driver 注入 | NPU probe 生成正向 capability；CPU/cost-model 失败生成稳定负向 capability；manifest path/root/revision 校验可执行 |
-| 1 | 扩展 `TExtractOp` ODS ranges、form classifier、custom assembly、兼容 builder/accessor、DPS、pipe、effects、PTOBC shim | legacy/new parse-print、binding、effects 和 v0 bytecode 兼容测试通过，且没有新增 op 名 |
+| 1 | 扩展 `TExtractOp` ODS ranges、raw segment validator/form classifier、custom assembly、兼容 builder/accessor、DPS、pipe、effects、PTOBC shim | src=0/2 等 malformed generic IR 稳定失败且 effects 保守；legacy/new parse-print、binding、v0 bytecode 兼容和 range-based adaptor 编译测试通过，且没有新增 op 名 |
 | 2 | shared emitted-dimension helper、IR verifier、runtime provenance、alias-aware StoreUse dataflow 与 test-hook wiring | 架构矩阵、bounds、production direct/alias TSTORE、canonical test escape、provenance/capability gate lit 通过 |
 | 3 | no-alias、level3 address gate、GraphSync `AllocTileOp` single-address model 与 planner/GSS 回归 | 三组 alias 被拒绝，declared/tpop provenance 在 planner 前失败，动态 level3 地址失败，双输出 liveness 正确，同址/overlap/disjoint/address-space GSS edge 正确 |
 | 4 | EmitC pattern | A3/A5 精确文本与 pin compile-only 通过 |
@@ -1241,10 +1296,13 @@ public syntax；实现只承诺 canonical `pto.textract ins(...) outs(...)` 文�
 实现合入必须同时满足：
 
 - PTO IR 能表达两个不同 shape 的 NZ destination 和两组 index；
-- `TExtractOp` classifier 对 `(2 indices, 1 dst)` 与 `(4 indices, 2 dsts)` 唯一分派，其他组合和
-  双输出附带 legacy optional operand 均稳定失败；
+- `TExtractOp` classifier 在任何 generated accessor 前验证完整五段 schema，要求 `src == 1`、
+  optional segment 为 `0/1`，再对 `(2 indices, 1 dst)` 与 `(4 indices, 2 dsts)` 唯一分派；
+  src=0/2、其他组合和双输出附带 legacy optional operand 均稳定失败且不崩溃；
 - verifier 的合法集合不宽于目标 PTO-ISA，且不误拒绝其 unaligned/odd/1x1 路径；
 - 两个 DPS init 在 effects、sync、fusion boundary 和两套 PlanMemory 中都不丢失；
+- Invalid segment schema 的 interfaces fail-safe，MemoryEffects 对所有 raw memory-carrying operands
+  保守给出 Read+Write，不存在额外 source 绕过依赖建模的路径；
 - 三 tile 两两 no-alias；
 - GraphSync 对普通 `AllocTileOp` 使用 address-space-aware physical range，能识别同址或部分重叠的
   不同 SSA root，并有独立 `_gss` edge 回归；
@@ -1252,6 +1310,8 @@ public syntax；实现只承诺 canonical `pto.textract ins(...) outs(...)` 文�
   runtime-bound provenance gate 拒绝；正向 operand 必须来自 planner-owned allocation；
 - level3 中该双输出 form 的三个 local allocation 都有可静态证明的地址；
 - EmitC 只生成一次、参数顺序精确的公开 `TEXTRACT`；
+- EmitC 的单/双输出分支都从 adaptor `indices`/`dsts` ranges 取 core operands，不依赖 ODS
+  range 化后不存在的 legacy adaptor accessor；
 - 所有宣称支持的实际编译 target，其 PTO-ISA pin 同时包含公开 overload 和对应 backend
   implementation，且 CMake probe 生成的 manifest 已通过 path/include-root/revision/digest
   校验并由 driver 注入；CPU/cost-model backend 缺失时
