@@ -32,6 +32,9 @@ export BUILD_OUT_PATH="${BASE_PATH}/build_out"
 export INSTALL_PATH="${BASE_PATH}/install"
 export PACKAGE_STAGE_PATH="${BUILD_PATH}/package_runtime"
 export LLVM_SOURCE_VERSION="19.1.7"
+export PTOAS_GLIBCXX_ABI="${PTOAS_GLIBCXX_ABI:-0}"
+export PTOAS_CC="${PTOAS_CC:-/opt/buildtools/llvm-15.0.4/bin/clang}"
+export PTOAS_CXX="${PTOAS_CXX:-/opt/buildtools/llvm-15.0.4/bin/clang++}"
 # The PTOAS tree is built against the vpto-dev LLVM/MLIR 19 "feature-vpto"
 # branch (source of custom calling conventions such as SimtEntry). Source it
 # from GitHub by default; override with LLVM_GIT_URL / LLVM_GIT_REF when a
@@ -227,20 +230,14 @@ inject_llvm_vectorize_target_parser() {
   echo "Injected TargetParser into LLVMVectorize LINK_COMPONENTS in ${vectorize_cmake}"
 }
 
-# The PTOAS tree is built with the default libstdc++ ABI new string layout
-# (_GLIBCXX_USE_CXX11_ABI=1). Cached LLVM/MLIR builds created on RHEL7 /
-# devtoolset-7 toolchains are compiled with the old ABI and export Twine::str as
-# the non-[abi:cxx11] mangled symbol; linking against them fails with
-# "undefined reference to llvm::Twine::str[abi:cxx11]". Detect that by probing
-# the shared lib symbol table and rebuild with the current toolchain instead of
-# reusing the incompatible cache.
+# LLVM/MLIR and PTOAS are both built with the old libstdc++ ABI. Reject a
+# cached LLVM tree that exports the new-ABI Twine::str symbol.
 llvm_build_is_abi_compatible() {
   local support_lib="${LLVM_BUILD_DIR}/lib/libLLVMSupport.so.19.1"
   [ -f "${support_lib}" ] || return 1
-  # _ZNK4llvm5Twine3strB5cxx11Ev  -> new ABI (this build)
-  # _ZNK4llvm5Twine3strEv          -> old libstdc++ ABI (RHEL7/devtoolset cache)
+  # _ZNK4llvm5Twine3strEv -> _GLIBCXX_USE_CXX11_ABI=0
   nm -D --defined-only "${support_lib}" 2>/dev/null \
-    | grep -q "_ZNK4llvm5Twine3strB5cxx11Ev"
+    | grep -q "_ZNK4llvm5Twine3strEv"
 }
 
 # BSPUB changes LLVM data types at compile time, so a cache produced without
@@ -277,7 +274,7 @@ ensure_llvm_build() {
      && ! llvm_build_is_abi_compatible; then
     echo "${dotted_line}"
     echo "Cached LLVM/MLIR build was compiled with an incompatible libstdc++ ABI"
-    echo "(lacks llvm::Twine::str[abi:cxx11]); rebuilding with the current toolchain"
+    echo "(expected _GLIBCXX_USE_CXX11_ABI=0); rebuilding with the current toolchain"
     rebuild_llvm=TRUE
   fi
 
@@ -330,7 +327,7 @@ ensure_llvm_build() {
     # Keeping it out avoids building clangInterpreter, which is incompatible
     # with the GCC 7 libstdc++ headers used by the ARM CI image.
     -DLLVM_ENABLE_PROJECTS="mlir"
-    -DCMAKE_CXX_FLAGS="-DBSPUB_NPU_DATA_TYPE"
+    -DCMAKE_CXX_FLAGS="-DBSPUB_NPU_DATA_TYPE -D_GLIBCXX_USE_CXX11_ABI=0"
     -DCMAKE_C_FLAGS="-DBSPUB_NPU_DATA_TYPE"
     -DLLVM_BSPUB_NPU_DATA_TYPE=ON
     -DBUILD_SHARED_LIBS=ON
@@ -342,8 +339,8 @@ ensure_llvm_build() {
     -DLLVM_INCLUDE_TESTS=OFF
     -DLLVM_INCLUDE_BENCHMARKS=OFF
     -DLLVM_INCLUDE_EXAMPLES=OFF
-    -DCMAKE_C_COMPILER="$(command -v clang || command -v clang-15 || command -v gcc)"
-    -DCMAKE_CXX_COMPILER="$(command -v clang++ || command -v clang++-15 || command -v g++)"
+    -DCMAKE_C_COMPILER="${PTOAS_CC}"
+    -DCMAKE_CXX_COMPILER="${PTOAS_CXX}"
     -DPython3_EXECUTABLE="${python_bin}"
     -DPython_EXECUTABLE="${python_bin}"
   )
@@ -427,8 +424,8 @@ configure_ptoas() {
     -DCMAKE_BUILD_TYPE=Release
     -DCMAKE_CXX_FLAGS="-DBSPUB_NPU_DATA_TYPE -D_GLIBCXX_USE_CXX11_ABI=0 -Wno-error=deprecated-declarations"
     -DCMAKE_INSTALL_PREFIX="${INSTALL_PATH}"
-    -DCMAKE_C_COMPILER="$(command -v clang || command -v clang-15 || command -v gcc)"
-    -DCMAKE_CXX_COMPILER="$(command -v clang++ || command -v clang++-15 || command -v g++)"
+    -DCMAKE_C_COMPILER="${PTOAS_CC}"
+    -DCMAKE_CXX_COMPILER="${PTOAS_CXX}"
   )
 
   # Inject compiler-rt for __muloti4 (aarch64 -ftrapv __int128) into the
