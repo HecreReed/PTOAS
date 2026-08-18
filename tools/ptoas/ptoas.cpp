@@ -3348,6 +3348,10 @@ int mlir::pto::compilePTOASModule(
     llvm::errs() << "Error: input module verification failed.\n";
     return 1;
   }
+  if (failed(pto::validateTExtractNd2xNzInputProvenance(*module))) {
+    llvm::errs() << "Error: ND-to-2xNZ TEXTRACT input validation failed.\n";
+    return 1;
+  }
 
   const bool requestedEnableOpFusion = enableOpFusion == llvm::cl::BOU_TRUE;
   const bool opFusionEnabled = requestedEnableOpFusion;
@@ -3712,6 +3716,11 @@ int mlir::pto::compilePTOASModule(
       llvm::errs() << "Error: Pass execution failed.\n";
       return 1;
     }
+    if (failed(pto::validateTExtractNd2xNzPostPlanningSafety(*module))) {
+      llvm::errs()
+          << "Error: ND-to-2xNZ TEXTRACT memory safety validation failed.\n";
+      return 1;
+    }
     result.kind = PTOASCompileResultKind::Text;
     llvm::raw_string_ostream os(result.textOutput);
     module->print(os);
@@ -3736,6 +3745,11 @@ int mlir::pto::compilePTOASModule(
       llvm::errs() << "Error: Pass execution failed.\n";
       return 1;
     }
+    if (failed(pto::validateTExtractNd2xNzPostPlanningSafety(*module))) {
+      llvm::errs()
+          << "Error: ND-to-2xNZ TEXTRACT memory safety validation failed.\n";
+      return 1;
+    }
 
     if (ptoPrintSeamIR) {
       printSharedPreBackendSeamIR(*module);
@@ -3757,6 +3771,11 @@ int mlir::pto::compilePTOASModule(
 
   if (failed(pm.run(*module))) {
     llvm::errs() << "Error: Pass execution failed.\n";
+    return 1;
+  }
+  if (failed(pto::validateTExtractNd2xNzPostPlanningSafety(*module))) {
+    llvm::errs()
+        << "Error: ND-to-2xNZ TEXTRACT memory safety validation failed.\n";
     return 1;
   }
 

@@ -9,7 +9,7 @@
 //===- Passes.h - Pass Entrypoints ------------------------------*- C++ -*-===//
 //===----------------------------------------------------------------------===//
 //
-// Pass factory declarations for PTO transform pipelines.
+// Pass factory and driver-boundary validation declarations for PTO pipelines.
 //
 //===----------------------------------------------------------------------===//
 
@@ -92,6 +92,8 @@ std::unique_ptr<Pass> createPTOMarkLastUsePass();
 std::unique_ptr<Pass> createPTOFusionRegionGenPass();
 
 LogicalResult validateIntToPtrUses(func::FuncOp func);
+LogicalResult validateTExtractNd2xNzInputProvenance(ModuleOp module);
+LogicalResult validateTExtractNd2xNzPostPlanningSafety(ModuleOp module);
 
 std::unique_ptr<Pass> createPTOUnrollSIMTForPass();
 std::unique_ptr<Pass> createPTONarrowVPTOLoopCountersPass();

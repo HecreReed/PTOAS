@@ -13,6 +13,7 @@ from ptoas.mlir import ir as _ods_ir
 
 from . import _pto_ops_gen as _pto_ops_gen
 from ._ods_common import (
+    _cext as _ods_cext,
     get_default_loc_context as _ods_get_default_loc_context,
     get_op_result_or_value as _get_op_result_or_value,
     get_op_results_or_values as _get_op_results_or_values,
@@ -937,6 +938,7 @@ _GeneratedTExtractOp = TExtractOp
 _TEXTRACT_UNSET = object()
 
 
+@_ods_cext.register_operation(_pto_ops_gen._Dialect, replace=True)
 class TExtractOp(_GeneratedTExtractOp):
     """Facade preserving the legacy single-output textract interface.
 

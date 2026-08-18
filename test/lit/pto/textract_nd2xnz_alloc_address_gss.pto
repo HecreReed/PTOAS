@@ -1,0 +1,43 @@
+// Copyright (c) 2026 Huawei Technologies Co., Ltd.
+// This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+// CANN Open Software License Agreement Version 2.0 (the "License").
+// Please refer to the License for details. You may not use this file except in compliance with the License.
+// THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+// INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+// See LICENSE in the root of the software repository for the full text of the License.
+
+// RUN: ptoas --pto-arch=a5 --pto-level=level3 --enable-graph-sync-solver \
+// RUN:   --graph-sync-solver-event-id-max=64 %s | FileCheck %s
+
+module attributes {"pto.target_arch" = "a5"} {
+  func.func @nd2xnz_same_address_different_alloc_roots(
+      %in : !pto.partition_tensor_view<64x128xf16>,
+      %out : !pto.partition_tensor_view<1x4x2x16x16xf16>) {
+    %c0 = arith.constant 0 : index
+    %addr0 = arith.constant 0 : i64
+    %addr1 = arith.constant 16384 : i64
+    %addr2 = arith.constant 20480 : i64
+
+    %load_alias = pto.alloc_tile addr = %addr0 : !pto.tile_buf<loc=vec, dtype=f16, rows=64, cols=128, v_row=64, v_col=128, blayout=row_major, slayout=none_box, fractal=512, pad=0>
+    %src = pto.alloc_tile addr = %addr0 : !pto.tile_buf<loc=vec, dtype=f16, rows=64, cols=128, v_row=64, v_col=128, blayout=row_major, slayout=none_box, fractal=512, pad=0>
+    %dst0 = pto.alloc_tile addr = %addr1 : !pto.tile_buf<loc=vec, dtype=f16, rows=32, cols=64, v_row=32, v_col=64, blayout=col_major, slayout=row_major, fractal=512, pad=0>
+    %store_alias = pto.alloc_tile addr = %addr1 : !pto.tile_buf<loc=vec, dtype=f16, rows=32, cols=64, v_row=32, v_col=64, blayout=col_major, slayout=row_major, fractal=512, pad=0>
+    %dst1 = pto.alloc_tile addr = %addr2 : !pto.tile_buf<loc=vec, dtype=f16, rows=16, cols=32, v_row=16, v_col=32, blayout=col_major, slayout=row_major, fractal=512, pad=0>
+
+    pto.tload ins(%in : !pto.partition_tensor_view<64x128xf16>)
+              outs(%load_alias : !pto.tile_buf<loc=vec, dtype=f16, rows=64, cols=128, v_row=64, v_col=128, blayout=row_major, slayout=none_box, fractal=512, pad=0>)
+    pto.textract ins(%src, %c0, %c0, %c0, %c0 : !pto.tile_buf<loc=vec, dtype=f16, rows=64, cols=128, v_row=64, v_col=128, blayout=row_major, slayout=none_box, fractal=512, pad=0>, index, index, index, index)
+                 outs(%dst0, %dst1 : !pto.tile_buf<loc=vec, dtype=f16, rows=32, cols=64, v_row=32, v_col=64, blayout=col_major, slayout=row_major, fractal=512, pad=0>, !pto.tile_buf<loc=vec, dtype=f16, rows=16, cols=32, v_row=16, v_col=32, blayout=col_major, slayout=row_major, fractal=512, pad=0>)
+    pto.tstore ins(%store_alias : !pto.tile_buf<loc=vec, dtype=f16, rows=32, cols=64, v_row=32, v_col=64, blayout=col_major, slayout=row_major, fractal=512, pad=0>)
+               outs(%out : !pto.partition_tensor_view<1x4x2x16x16xf16>) {layout = #pto.layout<nz>}
+    return
+  }
+}
+
+// CHECK-LABEL: AICORE void nd2xnz_same_address_different_alloc_roots(
+// CHECK: set_flag(PIPE_MTE2, PIPE_V, EVENT_ID[[LOAD:[0-9]+]]);
+// CHECK: wait_flag(PIPE_MTE2, PIPE_V, EVENT_ID[[LOAD]]);
+// CHECK: TEXTRACT(
+// CHECK: set_flag(PIPE_V, PIPE_MTE3, EVENT_ID[[STORE:[0-9]+]]);
+// CHECK: wait_flag(PIPE_V, PIPE_MTE3, EVENT_ID[[STORE]]);
+// CHECK: TSTORE(

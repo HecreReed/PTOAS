@@ -63,6 +63,8 @@ namespace pto {
   SmallVector<std::pair<Value, Value>, 15>
   getSemanticNoAliasPairs(Operation *op);
   LogicalResult verifySemanticNoAliasRanges(func::FuncOp func);
+  LogicalResult validateTExtractNd2xNzInputProvenance(ModuleOp module);
+  LogicalResult validateTExtractNd2xNzPostPlanningSafety(ModuleOp module);
   std::optional<AddressSpaceAttr> GetBufferSpaceAttr(Value operand);
   bool isLocalBuffer(std::optional<AddressSpaceAttr> memorySpaceAttr);
   Value tracebackMemRef(Value memrefVal);

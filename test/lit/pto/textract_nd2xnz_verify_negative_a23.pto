@@ -1,5 +1,18 @@
-// RUN: not ptoas --pto-arch a3 %s 2>&1 | FileCheck %s
+// Copyright (c) 2026 Huawei Technologies Co., Ltd.
+// This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+// CANN Open Software License Agreement Version 2.0 (the "License").
+// Please refer to the License for details. You may not use this file except in compliance with the License.
+// THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+// INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+// See LICENSE in the root of the software repository for the full text of the License.
 
+// RUN: split-file %s %t
+// RUN: not ptoas --pto-arch a3 %t/dtype.pto 2>&1 \
+// RUN:   | FileCheck %s --check-prefix=DTYPE
+// RUN: not ptoas --pto-arch a3 %t/rowplusone.pto 2>&1 \
+// RUN:   | FileCheck %s --check-prefix=ROWPLUSONE
+
+//--- dtype.pto
 module {
   // fp8 on A3 must be rejected (A2/A3 dtype set excludes fp8).
   func.func @nd2xnz_fp8_a23() {
@@ -12,7 +25,10 @@ module {
                  outs(%dst0, %dst1 : !pto.tile_buf<loc=vec, dtype=f8E4M3FN, rows=32, cols=64, v_row=32, v_col=64, blayout=col_major, slayout=row_major, fractal=512, pad=0>, !pto.tile_buf<loc=vec, dtype=f8E4M3FN, rows=32, cols=64, v_row=32, v_col=64, blayout=col_major, slayout=row_major, fractal=512, pad=0>)
     return
   }
+}
 
+//--- rowplusone.pto
+module {
   // RowPlusOne on A3 must be rejected (A2/A3 has no NZ+1 support).
   func.func @nd2xnz_rowplusone_a3() {
     %c0 = arith.constant 0 : index
@@ -26,5 +42,5 @@ module {
   }
 }
 
-// CHECK: dtype 'f8E4M3FN' is not supported by this op yet
-// CHECK: ND-to-2xNZ RowPlusOne only on A5
+// DTYPE: dtype 'f8E4M3FN' is not supported by this op yet
+// ROWPLUSONE: ND-to-2xNZ RowPlusOne only on A5

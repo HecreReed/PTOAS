@@ -1,5 +1,20 @@
-// RUN: not ptoas --pto-arch a5 %s 2>&1 | FileCheck %s
+// Copyright (c) 2026 Huawei Technologies Co., Ltd.
+// This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+// CANN Open Software License Agreement Version 2.0 (the "License").
+// Please refer to the License for details. You may not use this file except in compliance with the License.
+// THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+// INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+// See LICENSE in the root of the software repository for the full text of the License.
 
+// RUN: split-file %s %t
+// RUN: not ptoas --pto-arch a5 %t/stride.pto 2>&1 \
+// RUN:   | FileCheck %s --check-prefix=STRIDE
+// RUN: not ptoas --pto-arch a5 %t/fp4.pto 2>&1 \
+// RUN:   | FileCheck %s --check-prefix=FP4
+// RUN: not ptoas --pto-arch a5 %t/rowplusone.pto 2>&1 \
+// RUN:   | FileCheck %s --check-prefix=ROWPLUSONE
+
+//--- stride.pto
 module attributes {"pto.device-spec" = "Ascend950"} {
   // A5 partial-valid stride gate: physicalRows=32 with validRows=13 must be
   // rejected (a 16*c0 second-block offset would diverge from A2/A3's 32*c0).
@@ -13,7 +28,10 @@ module attributes {"pto.device-spec" = "Ascend950"} {
                  outs(%dst0, %dst1 : !pto.tile_buf<loc=vec, dtype=f16, rows=32, cols=32, v_row=13, v_col=32, blayout=col_major, slayout=row_major, fractal=512, pad=0>, !pto.tile_buf<loc=vec, dtype=f16, rows=16, cols=32, v_row=13, v_col=32, blayout=col_major, slayout=row_major, fractal=512, pad=0>)
     return
   }
+}
 
+//--- fp4.pto
+module attributes {"pto.device-spec" = "Ascend950"} {
   // FP4 is gated on A5 until the packed-axis path is verified.
   func.func @nd2xnz_fp4_gate_a5() {
     %c0 = arith.constant 0 : index
@@ -25,7 +43,10 @@ module attributes {"pto.device-spec" = "Ascend950"} {
                  outs(%dst0, %dst1 : !pto.tile_buf<loc=vec, dtype=!pto.f4E2M1x2, rows=32, cols=64, v_row=32, v_col=64, blayout=col_major, slayout=row_major, fractal=512, pad=0>, !pto.tile_buf<loc=vec, dtype=!pto.f4E2M1x2, rows=32, cols=64, v_row=32, v_col=64, blayout=col_major, slayout=row_major, fractal=512, pad=0>)
     return
   }
+}
 
+//--- rowplusone.pto
+module attributes {"pto.device-spec" = "Ascend950"} {
   // RowPlusOne on A5 is still gated until the virtual-row adapter lands.
   func.func @nd2xnz_rowplusone_gate_a5() {
     %c0 = arith.constant 0 : index
@@ -39,6 +60,6 @@ module attributes {"pto.device-spec" = "Ascend950"} {
   }
 }
 
-// CHECK: A5 partial-valid ND-to-2xNZ requires physicalRows == align16(validRows) for dst0
-// CHECK: ND-to-2xNZ FP4 path is not yet verified
-// CHECK: ND-to-2xNZ RowPlusOne requires
+// STRIDE: A5 partial-valid ND-to-2xNZ requires physicalRows == align16(validRows) for dst0
+// FP4: ND-to-2xNZ FP4 path is not yet verified
+// ROWPLUSONE: ND-to-2xNZ RowPlusOne requires

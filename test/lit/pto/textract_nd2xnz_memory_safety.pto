@@ -1,0 +1,216 @@
+// Copyright (c) 2026 Huawei Technologies Co., Ltd.
+// This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+// CANN Open Software License Agreement Version 2.0 (the "License").
+// Please refer to the License for details. You may not use this file except in compliance with the License.
+// THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+// INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+// See LICENSE in the root of the software repository for the full text of the License.
+
+// RUN: split-file %s %t
+// RUN: not ptoas --pto-arch=a5 --emit-pto-ir %t/declared.pto -o /dev/null 2>&1 \
+// RUN:   | FileCheck %s --check-prefix=PROVENANCE
+// RUN: not ptoas --pto-arch=a5 --pto-level=level3 --emit-pto-ir \
+// RUN:   %t/tassign.pto -o /dev/null 2>&1 | FileCheck %s --check-prefix=TASSIGN
+// RUN: not ptoas --pto-arch=a5 --pto-level=level3 --emit-pto-ir \
+// RUN:   %t/dynamic_addr.pto -o /dev/null 2>&1 | FileCheck %s --check-prefix=DYNAMIC
+// RUN: ptoas --pto-arch=a5 --pto-level=level3 --emit-pto-ir \
+// RUN:   %t/static_non_overlap.pto -o /dev/null
+// RUN: ptoas --pto-arch=a5 --pto-level=level3 --emit-pto-ir \
+// RUN:   %t/static_multi_tile.pto -o /dev/null
+// RUN: not ptoas --pto-arch=a5 --pto-level=level3 --emit-pto-ir \
+// RUN:   %t/static_overlap.pto -o /dev/null 2>&1 \
+// RUN:   | FileCheck %s --check-prefix=OVERLAP
+// RUN: not ptoas --pto-arch=a5 --pto-level=level3 --emit-pto-ir \
+// RUN:   %t/partial_direct_store.pto -o /dev/null 2>&1 \
+// RUN:   | FileCheck %s --check-prefix=PARTIAL-DIRECT
+// RUN: not ptoas --pto-arch=a5 --pto-level=level3 --emit-pto-ir \
+// RUN:   %t/partial_alias_store.pto -o /dev/null 2>&1 \
+// RUN:   | FileCheck %s --check-prefix=PARTIAL-ALIAS
+// RUN: not ptoas --pto-arch=a5 --pto-level=level3 --emit-pto-ir \
+// RUN:   %t/partial_overlap_store.pto -o /dev/null 2>&1 \
+// RUN:   | FileCheck %s --check-prefix=PARTIAL-OVERLAP
+// RUN: not ptoas --pto-arch=a5 --pto-level=level3 --emit-pto-ir \
+// RUN:   %t/partial_unknown_store.pto -o /dev/null 2>&1 \
+// RUN:   | FileCheck %s --check-prefix=PARTIAL-UNKNOWN
+
+// PROVENANCE: ND-to-2xNZ src must be allocation-backed by pto.alloc_tile or pto.multi_tile_get
+// PROVENANCE: unsupported provenance root is pto.declare_tile
+// TASSIGN: ND-to-2xNZ src must be allocation-backed by pto.alloc_tile or pto.multi_tile_get
+// TASSIGN: unsupported provenance root is pto.tassign
+// DYNAMIC: ND-to-2xNZ src must resolve to a static allocation-backed physical byte range after memory planning
+// OVERLAP: PlanMemory semantic no-alias violation: operand byte ranges overlap
+// PARTIAL-DIRECT: source physical byte range aliases a partial-valid ND-to-2xNZ destination
+// PARTIAL-ALIAS: source physical byte range aliases a partial-valid ND-to-2xNZ destination
+// PARTIAL-ALIAS: undefined NZ padding cannot be stored
+// PARTIAL-OVERLAP: source physical byte range aliases a partial-valid ND-to-2xNZ destination
+// PARTIAL-UNKNOWN: cannot prove that TSTORE source is disjoint from a partial-valid ND-to-2xNZ destination
+
+//--- declared.pto
+module {
+  func.func @declared_provenance() {
+    %c0 = arith.constant 0 : index
+    %src = pto.declare_tile -> !pto.tile_buf<loc=vec, dtype=f16, rows=64, cols=128, v_row=64, v_col=128, blayout=row_major, slayout=none_box, fractal=512, pad=0>
+    %dst0 = pto.alloc_tile : !pto.tile_buf<loc=vec, dtype=f16, rows=32, cols=64, v_row=32, v_col=64, blayout=col_major, slayout=row_major, fractal=512, pad=0>
+    %dst1 = pto.alloc_tile : !pto.tile_buf<loc=vec, dtype=f16, rows=16, cols=32, v_row=16, v_col=32, blayout=col_major, slayout=row_major, fractal=512, pad=0>
+    pto.textract ins(%src, %c0, %c0, %c0, %c0 : !pto.tile_buf<loc=vec, dtype=f16, rows=64, cols=128, v_row=64, v_col=128, blayout=row_major, slayout=none_box, fractal=512, pad=0>, index, index, index, index)
+                 outs(%dst0, %dst1 : !pto.tile_buf<loc=vec, dtype=f16, rows=32, cols=64, v_row=32, v_col=64, blayout=col_major, slayout=row_major, fractal=512, pad=0>, !pto.tile_buf<loc=vec, dtype=f16, rows=16, cols=32, v_row=16, v_col=32, blayout=col_major, slayout=row_major, fractal=512, pad=0>)
+    return
+  }
+}
+
+//--- tassign.pto
+module {
+  func.func @tassign_provenance() {
+    %c0 = arith.constant 0 : index
+    %addr0 = arith.constant 0 : i64
+    %addr1 = arith.constant 16384 : i64
+    %addr2 = arith.constant 20480 : i64
+    %declared = pto.declare_tile -> !pto.tile_buf<loc=vec, dtype=f16, rows=64, cols=128, v_row=64, v_col=128, blayout=row_major, slayout=none_box, fractal=512, pad=0>
+    %src = pto.tassign %declared, %addr0 : !pto.tile_buf<loc=vec, dtype=f16, rows=64, cols=128, v_row=64, v_col=128, blayout=row_major, slayout=none_box, fractal=512, pad=0> -> !pto.tile_buf<loc=vec, dtype=f16, rows=64, cols=128, v_row=64, v_col=128, blayout=row_major, slayout=none_box, fractal=512, pad=0>
+    %dst0 = pto.alloc_tile addr = %addr1 : !pto.tile_buf<loc=vec, dtype=f16, rows=32, cols=64, v_row=32, v_col=64, blayout=col_major, slayout=row_major, fractal=512, pad=0>
+    %dst1 = pto.alloc_tile addr = %addr2 : !pto.tile_buf<loc=vec, dtype=f16, rows=16, cols=32, v_row=16, v_col=32, blayout=col_major, slayout=row_major, fractal=512, pad=0>
+    pto.textract ins(%src, %c0, %c0, %c0, %c0 : !pto.tile_buf<loc=vec, dtype=f16, rows=64, cols=128, v_row=64, v_col=128, blayout=row_major, slayout=none_box, fractal=512, pad=0>, index, index, index, index)
+                 outs(%dst0, %dst1 : !pto.tile_buf<loc=vec, dtype=f16, rows=32, cols=64, v_row=32, v_col=64, blayout=col_major, slayout=row_major, fractal=512, pad=0>, !pto.tile_buf<loc=vec, dtype=f16, rows=16, cols=32, v_row=16, v_col=32, blayout=col_major, slayout=row_major, fractal=512, pad=0>)
+    return
+  }
+}
+
+//--- dynamic_addr.pto
+module {
+  func.func @dynamic_address(%base : i64) {
+    %c0 = arith.constant 0 : index
+    %src = pto.alloc_tile addr = %base : !pto.tile_buf<loc=vec, dtype=f16, rows=64, cols=128, v_row=64, v_col=128, blayout=row_major, slayout=none_box, fractal=512, pad=0>
+    %dst0 = pto.alloc_tile addr = %base : !pto.tile_buf<loc=vec, dtype=f16, rows=32, cols=64, v_row=32, v_col=64, blayout=col_major, slayout=row_major, fractal=512, pad=0>
+    %dst1 = pto.alloc_tile addr = %base : !pto.tile_buf<loc=vec, dtype=f16, rows=16, cols=32, v_row=16, v_col=32, blayout=col_major, slayout=row_major, fractal=512, pad=0>
+    pto.textract ins(%src, %c0, %c0, %c0, %c0 : !pto.tile_buf<loc=vec, dtype=f16, rows=64, cols=128, v_row=64, v_col=128, blayout=row_major, slayout=none_box, fractal=512, pad=0>, index, index, index, index)
+                 outs(%dst0, %dst1 : !pto.tile_buf<loc=vec, dtype=f16, rows=32, cols=64, v_row=32, v_col=64, blayout=col_major, slayout=row_major, fractal=512, pad=0>, !pto.tile_buf<loc=vec, dtype=f16, rows=16, cols=32, v_row=16, v_col=32, blayout=col_major, slayout=row_major, fractal=512, pad=0>)
+    return
+  }
+}
+
+//--- static_non_overlap.pto
+module {
+  func.func @static_non_overlap() {
+    %c0 = arith.constant 0 : index
+    %addr0 = arith.constant 0 : i64
+    %addr1 = arith.constant 16384 : i64
+    %addr2 = arith.constant 20480 : i64
+    %src = pto.alloc_tile addr = %addr0 : !pto.tile_buf<loc=vec, dtype=f16, rows=64, cols=128, v_row=64, v_col=128, blayout=row_major, slayout=none_box, fractal=512, pad=0>
+    %dst0 = pto.alloc_tile addr = %addr1 : !pto.tile_buf<loc=vec, dtype=f16, rows=32, cols=64, v_row=32, v_col=64, blayout=col_major, slayout=row_major, fractal=512, pad=0>
+    %dst1 = pto.alloc_tile addr = %addr2 : !pto.tile_buf<loc=vec, dtype=f16, rows=16, cols=32, v_row=16, v_col=32, blayout=col_major, slayout=row_major, fractal=512, pad=0>
+    pto.textract ins(%src, %c0, %c0, %c0, %c0 : !pto.tile_buf<loc=vec, dtype=f16, rows=64, cols=128, v_row=64, v_col=128, blayout=row_major, slayout=none_box, fractal=512, pad=0>, index, index, index, index)
+                 outs(%dst0, %dst1 : !pto.tile_buf<loc=vec, dtype=f16, rows=32, cols=64, v_row=32, v_col=64, blayout=col_major, slayout=row_major, fractal=512, pad=0>, !pto.tile_buf<loc=vec, dtype=f16, rows=16, cols=32, v_row=16, v_col=32, blayout=col_major, slayout=row_major, fractal=512, pad=0>)
+    return
+  }
+}
+
+//--- partial_alias_store.pto
+module {
+  func.func @partial_alias_store(%out : !pto.partition_tensor_view<1x4x2x16x16xf16>) {
+    %c0 = arith.constant 0 : index
+    %addr0 = arith.constant 0 : i64
+    %addr1 = arith.constant 16384 : i64
+    %addr2 = arith.constant 20480 : i64
+    %src = pto.alloc_tile addr = %addr0 : !pto.tile_buf<loc=vec, dtype=f16, rows=64, cols=128, v_row=64, v_col=128, blayout=row_major, slayout=none_box, fractal=512, pad=0>
+    %partial = pto.alloc_tile addr = %addr1 : !pto.tile_buf<loc=vec, dtype=f16, rows=32, cols=64, v_row=32, v_col=63, blayout=col_major, slayout=row_major, fractal=512, pad=0>
+    %dump_alias = pto.alloc_tile addr = %addr1 : !pto.tile_buf<loc=vec, dtype=f16, rows=32, cols=64, v_row=32, v_col=64, blayout=col_major, slayout=row_major, fractal=512, pad=0>
+    %dst1 = pto.alloc_tile addr = %addr2 : !pto.tile_buf<loc=vec, dtype=f16, rows=16, cols=32, v_row=16, v_col=32, blayout=col_major, slayout=row_major, fractal=512, pad=0>
+    pto.textract ins(%src, %c0, %c0, %c0, %c0 : !pto.tile_buf<loc=vec, dtype=f16, rows=64, cols=128, v_row=64, v_col=128, blayout=row_major, slayout=none_box, fractal=512, pad=0>, index, index, index, index)
+                 outs(%partial, %dst1 : !pto.tile_buf<loc=vec, dtype=f16, rows=32, cols=64, v_row=32, v_col=63, blayout=col_major, slayout=row_major, fractal=512, pad=0>, !pto.tile_buf<loc=vec, dtype=f16, rows=16, cols=32, v_row=16, v_col=32, blayout=col_major, slayout=row_major, fractal=512, pad=0>)
+    pto.tstore ins(%dump_alias : !pto.tile_buf<loc=vec, dtype=f16, rows=32, cols=64, v_row=32, v_col=64, blayout=col_major, slayout=row_major, fractal=512, pad=0>)
+               outs(%out : !pto.partition_tensor_view<1x4x2x16x16xf16>) {layout = #pto.layout<nz>}
+    return
+  }
+}
+
+//--- static_multi_tile.pto
+module {
+  func.func @static_multi_tile() {
+    %c0 = arith.constant 0 : index
+    %addr0 = arith.constant 0 : i64
+    %addr1 = arith.constant 16384 : i64
+    %addr2 = arith.constant 20480 : i64
+    %src_multi = pto.alloc_multi_tile addr = %addr0 : !pto.multi_tile_buf<!pto.tile_buf<loc=vec, dtype=f16, rows=64, cols=128, v_row=64, v_col=128, blayout=row_major, slayout=none_box, fractal=512, pad=0>, count=2>
+    %dst0_multi = pto.alloc_multi_tile addr = %addr1 : !pto.multi_tile_buf<!pto.tile_buf<loc=vec, dtype=f16, rows=32, cols=64, v_row=32, v_col=64, blayout=col_major, slayout=row_major, fractal=512, pad=0>, count=2>
+    %dst1_multi = pto.alloc_multi_tile addr = %addr2 : !pto.multi_tile_buf<!pto.tile_buf<loc=vec, dtype=f16, rows=16, cols=32, v_row=16, v_col=32, blayout=col_major, slayout=row_major, fractal=512, pad=0>, count=2>
+    %src = pto.multi_tile_get %src_multi[%c0] : !pto.multi_tile_buf<!pto.tile_buf<loc=vec, dtype=f16, rows=64, cols=128, v_row=64, v_col=128, blayout=row_major, slayout=none_box, fractal=512, pad=0>, count=2> -> !pto.tile_buf<loc=vec, dtype=f16, rows=64, cols=128, v_row=64, v_col=128, blayout=row_major, slayout=none_box, fractal=512, pad=0>
+    %dst0 = pto.multi_tile_get %dst0_multi[%c0] : !pto.multi_tile_buf<!pto.tile_buf<loc=vec, dtype=f16, rows=32, cols=64, v_row=32, v_col=64, blayout=col_major, slayout=row_major, fractal=512, pad=0>, count=2> -> !pto.tile_buf<loc=vec, dtype=f16, rows=32, cols=64, v_row=32, v_col=64, blayout=col_major, slayout=row_major, fractal=512, pad=0>
+    %dst1 = pto.multi_tile_get %dst1_multi[%c0] : !pto.multi_tile_buf<!pto.tile_buf<loc=vec, dtype=f16, rows=16, cols=32, v_row=16, v_col=32, blayout=col_major, slayout=row_major, fractal=512, pad=0>, count=2> -> !pto.tile_buf<loc=vec, dtype=f16, rows=16, cols=32, v_row=16, v_col=32, blayout=col_major, slayout=row_major, fractal=512, pad=0>
+    pto.textract ins(%src, %c0, %c0, %c0, %c0 : !pto.tile_buf<loc=vec, dtype=f16, rows=64, cols=128, v_row=64, v_col=128, blayout=row_major, slayout=none_box, fractal=512, pad=0>, index, index, index, index)
+                 outs(%dst0, %dst1 : !pto.tile_buf<loc=vec, dtype=f16, rows=32, cols=64, v_row=32, v_col=64, blayout=col_major, slayout=row_major, fractal=512, pad=0>, !pto.tile_buf<loc=vec, dtype=f16, rows=16, cols=32, v_row=16, v_col=32, blayout=col_major, slayout=row_major, fractal=512, pad=0>)
+    return
+  }
+}
+
+//--- static_overlap.pto
+module {
+  func.func @static_overlap() {
+    %c0 = arith.constant 0 : index
+    %addr0 = arith.constant 0 : i64
+    %addr1 = arith.constant 8192 : i64
+    %addr2 = arith.constant 20480 : i64
+    %src = pto.alloc_tile addr = %addr0 : !pto.tile_buf<loc=vec, dtype=f16, rows=64, cols=128, v_row=64, v_col=128, blayout=row_major, slayout=none_box, fractal=512, pad=0>
+    %dst0 = pto.alloc_tile addr = %addr1 : !pto.tile_buf<loc=vec, dtype=f16, rows=32, cols=64, v_row=32, v_col=64, blayout=col_major, slayout=row_major, fractal=512, pad=0>
+    %dst1 = pto.alloc_tile addr = %addr2 : !pto.tile_buf<loc=vec, dtype=f16, rows=16, cols=32, v_row=16, v_col=32, blayout=col_major, slayout=row_major, fractal=512, pad=0>
+    pto.textract ins(%src, %c0, %c0, %c0, %c0 : !pto.tile_buf<loc=vec, dtype=f16, rows=64, cols=128, v_row=64, v_col=128, blayout=row_major, slayout=none_box, fractal=512, pad=0>, index, index, index, index)
+                 outs(%dst0, %dst1 : !pto.tile_buf<loc=vec, dtype=f16, rows=32, cols=64, v_row=32, v_col=64, blayout=col_major, slayout=row_major, fractal=512, pad=0>, !pto.tile_buf<loc=vec, dtype=f16, rows=16, cols=32, v_row=16, v_col=32, blayout=col_major, slayout=row_major, fractal=512, pad=0>)
+    return
+  }
+}
+
+//--- partial_overlap_store.pto
+module {
+  func.func @partial_overlap_store(%out : !pto.partition_tensor_view<1x4x2x16x16xf16>) {
+    %c0 = arith.constant 0 : index
+    %addr0 = arith.constant 0 : i64
+    %addr1 = arith.constant 16384 : i64
+    %overlap = arith.constant 18432 : i64
+    %addr2 = arith.constant 24576 : i64
+    %src = pto.alloc_tile addr = %addr0 : !pto.tile_buf<loc=vec, dtype=f16, rows=64, cols=128, v_row=64, v_col=128, blayout=row_major, slayout=none_box, fractal=512, pad=0>
+    %partial = pto.alloc_tile addr = %addr1 : !pto.tile_buf<loc=vec, dtype=f16, rows=32, cols=64, v_row=32, v_col=63, blayout=col_major, slayout=row_major, fractal=512, pad=0>
+    %overlap_alias = pto.alloc_tile addr = %overlap : !pto.tile_buf<loc=vec, dtype=f16, rows=32, cols=64, v_row=32, v_col=64, blayout=col_major, slayout=row_major, fractal=512, pad=0>
+    %dst1 = pto.alloc_tile addr = %addr2 : !pto.tile_buf<loc=vec, dtype=f16, rows=16, cols=32, v_row=16, v_col=32, blayout=col_major, slayout=row_major, fractal=512, pad=0>
+    pto.textract ins(%src, %c0, %c0, %c0, %c0 : !pto.tile_buf<loc=vec, dtype=f16, rows=64, cols=128, v_row=64, v_col=128, blayout=row_major, slayout=none_box, fractal=512, pad=0>, index, index, index, index)
+                 outs(%partial, %dst1 : !pto.tile_buf<loc=vec, dtype=f16, rows=32, cols=64, v_row=32, v_col=63, blayout=col_major, slayout=row_major, fractal=512, pad=0>, !pto.tile_buf<loc=vec, dtype=f16, rows=16, cols=32, v_row=16, v_col=32, blayout=col_major, slayout=row_major, fractal=512, pad=0>)
+    pto.tstore ins(%overlap_alias : !pto.tile_buf<loc=vec, dtype=f16, rows=32, cols=64, v_row=32, v_col=64, blayout=col_major, slayout=row_major, fractal=512, pad=0>)
+               outs(%out : !pto.partition_tensor_view<1x4x2x16x16xf16>) {layout = #pto.layout<nz>}
+    return
+  }
+}
+
+//--- partial_unknown_store.pto
+module {
+  func.func @partial_unknown_store(%out : !pto.partition_tensor_view<1x4x2x16x16xf16>) {
+    %c0 = arith.constant 0 : index
+    %addr0 = arith.constant 0 : i64
+    %addr1 = arith.constant 16384 : i64
+    %addr2 = arith.constant 20480 : i64
+    %src = pto.alloc_tile addr = %addr0 : !pto.tile_buf<loc=vec, dtype=f16, rows=64, cols=128, v_row=64, v_col=128, blayout=row_major, slayout=none_box, fractal=512, pad=0>
+    %partial = pto.alloc_tile addr = %addr1 : !pto.tile_buf<loc=vec, dtype=f16, rows=32, cols=64, v_row=32, v_col=63, blayout=col_major, slayout=row_major, fractal=512, pad=0>
+    %dst1 = pto.alloc_tile addr = %addr2 : !pto.tile_buf<loc=vec, dtype=f16, rows=16, cols=32, v_row=16, v_col=32, blayout=col_major, slayout=row_major, fractal=512, pad=0>
+    %unknown = pto.declare_tile -> !pto.tile_buf<loc=vec, dtype=f16, rows=32, cols=64, v_row=32, v_col=64, blayout=col_major, slayout=row_major, fractal=512, pad=0>
+    pto.textract ins(%src, %c0, %c0, %c0, %c0 : !pto.tile_buf<loc=vec, dtype=f16, rows=64, cols=128, v_row=64, v_col=128, blayout=row_major, slayout=none_box, fractal=512, pad=0>, index, index, index, index)
+                 outs(%partial, %dst1 : !pto.tile_buf<loc=vec, dtype=f16, rows=32, cols=64, v_row=32, v_col=63, blayout=col_major, slayout=row_major, fractal=512, pad=0>, !pto.tile_buf<loc=vec, dtype=f16, rows=16, cols=32, v_row=16, v_col=32, blayout=col_major, slayout=row_major, fractal=512, pad=0>)
+    pto.tstore ins(%unknown : !pto.tile_buf<loc=vec, dtype=f16, rows=32, cols=64, v_row=32, v_col=64, blayout=col_major, slayout=row_major, fractal=512, pad=0>)
+               outs(%out : !pto.partition_tensor_view<1x4x2x16x16xf16>) {layout = #pto.layout<nz>}
+    return
+  }
+}
+
+//--- partial_direct_store.pto
+module {
+  func.func @partial_direct_store(%out : !pto.partition_tensor_view<32x63xf16>) {
+    %c0 = arith.constant 0 : index
+    %addr0 = arith.constant 0 : i64
+    %addr1 = arith.constant 16384 : i64
+    %addr2 = arith.constant 20480 : i64
+    %src = pto.alloc_tile addr = %addr0 : !pto.tile_buf<loc=vec, dtype=f16, rows=64, cols=128, v_row=64, v_col=128, blayout=row_major, slayout=none_box, fractal=512, pad=0>
+    %partial = pto.alloc_tile addr = %addr1 : !pto.tile_buf<loc=vec, dtype=f16, rows=32, cols=64, v_row=32, v_col=63, blayout=col_major, slayout=row_major, fractal=512, pad=0>
+    %dst1 = pto.alloc_tile addr = %addr2 : !pto.tile_buf<loc=vec, dtype=f16, rows=16, cols=32, v_row=16, v_col=32, blayout=col_major, slayout=row_major, fractal=512, pad=0>
+    pto.textract ins(%src, %c0, %c0, %c0, %c0 : !pto.tile_buf<loc=vec, dtype=f16, rows=64, cols=128, v_row=64, v_col=128, blayout=row_major, slayout=none_box, fractal=512, pad=0>, index, index, index, index)
+                 outs(%partial, %dst1 : !pto.tile_buf<loc=vec, dtype=f16, rows=32, cols=64, v_row=32, v_col=63, blayout=col_major, slayout=row_major, fractal=512, pad=0>, !pto.tile_buf<loc=vec, dtype=f16, rows=16, cols=32, v_row=16, v_col=32, blayout=col_major, slayout=row_major, fractal=512, pad=0>)
+    pto.tstore ins(%partial : !pto.tile_buf<loc=vec, dtype=f16, rows=32, cols=64, v_row=32, v_col=63, blayout=col_major, slayout=row_major, fractal=512, pad=0>)
+               outs(%out : !pto.partition_tensor_view<32x63xf16>) {layout = #pto.layout<nz>}
+    return
+  }
+}

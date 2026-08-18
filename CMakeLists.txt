@@ -215,6 +215,13 @@ add_subdirectory(tools)
 # =========================================================
 if(BUILD_TESTING)
   enable_testing()
+  add_executable(pto_textract_cpp_compat
+    test/compile_cpp/textract_legacy_api.cpp
+  )
+  target_link_libraries(pto_textract_cpp_compat PRIVATE PTOIR)
+  add_test(NAME pto_textract_cpp_compat COMMAND pto_textract_cpp_compat)
+  set_tests_properties(pto_textract_cpp_compat PROPERTIES LABELS "PTO")
+
   if(PTO_ENABLE_PYTHON_BINDING)
     get_filename_component(_pto_python_bin_dir "${Python3_EXECUTABLE}" DIRECTORY)
     set(_pto_python_test_pythonpath
@@ -234,6 +241,15 @@ if(BUILD_TESTING)
               "${CMAKE_CURRENT_SOURCE_DIR}/test/python/memory_consistency_bindings.py"
     )
     set_tests_properties(pto_memory_consistency_bindings PROPERTIES
+      LABELS "PTO"
+      ENVIRONMENT "${_pto_python_test_env}"
+    )
+    add_test(
+      NAME pto_textract_bindings
+      COMMAND "${Python3_EXECUTABLE}"
+              "${CMAKE_CURRENT_SOURCE_DIR}/test/python/textract_bindings.py"
+    )
+    set_tests_properties(pto_textract_bindings PROPERTIES
       LABELS "PTO"
       ENVIRONMENT "${_pto_python_test_env}"
     )

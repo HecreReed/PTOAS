@@ -444,15 +444,37 @@ static std::optional<uint64_t> getStaticTileBytes(TileBufType type) {
   return elements * elemBytes;
 }
 
-static std::optional<uint64_t> getConstantAddress(Value value) {
-  IntegerAttr attr;
-  if (!value || !matchPattern(value, m_Constant(&attr)) || attr.getInt() < 0)
+static std::optional<uint64_t> getConstantAddress(Value value,
+                                                  unsigned depth = 0) {
+  if (!value || depth >= 16)
     return std::nullopt;
-  return static_cast<uint64_t>(attr.getInt());
+  IntegerAttr attr;
+  if (matchPattern(value, m_Constant(&attr))) {
+    if (attr.getInt() < 0)
+      return std::nullopt;
+    return static_cast<uint64_t>(attr.getInt());
+  }
+
+  Operation *def = value.getDefiningOp();
+  if (!def)
+    return std::nullopt;
+  if (auto cast = dyn_cast<arith::IndexCastOp>(def))
+    return getConstantAddress(cast.getIn(), depth + 1);
+  if (auto cast = dyn_cast<arith::IndexCastUIOp>(def))
+    return getConstantAddress(cast.getIn(), depth + 1);
+  if (auto cast = dyn_cast<arith::ExtUIOp>(def))
+    return getConstantAddress(cast.getIn(), depth + 1);
+  if (auto add = dyn_cast<arith::AddIOp>(def)) {
+    auto lhs = getConstantAddress(add.getLhs(), depth + 1);
+    auto rhs = getConstantAddress(add.getRhs(), depth + 1);
+    if (!lhs || !rhs || *lhs > std::numeric_limits<uint64_t>::max() - *rhs)
+      return std::nullopt;
+    return *lhs + *rhs;
+  }
+  return std::nullopt;
 }
 
-static std::optional<StaticTileStrides>
-getStaticTileStrides(TileBufType type) {
+static std::optional<StaticTileStrides> getStaticTileStrides(TileBufType type) {
   ArrayRef<int64_t> shape = type.getShape();
   unsigned elemBytes = getPTOStorageElemByteSize(type.getElementType());
   if (shape.size() != 2 || elemBytes == 0 ||
@@ -688,6 +710,42 @@ static bool rangesOverlap(const SemanticRange &lhs, const SemanticRange &rhs) {
                                *rhs.absoluteBegin, rhs.bytes);
 }
 
+static Value peelNd2xNzAllocationViews(Value value) {
+  constexpr unsigned kMaxDepth = 32;
+  for (unsigned depth = 0; value && depth < kMaxDepth; ++depth) {
+    Operation *def = value.getDefiningOp();
+    if (!def || isa<AllocTileOp, MultiTileGetOp>(def))
+      return value;
+    if (auto subview = dyn_cast<SubViewOp>(def)) {
+      value = subview.getSource();
+      continue;
+    }
+    if (auto bitcast = dyn_cast<BitcastOp>(def)) {
+      value = bitcast.getSrc();
+      continue;
+    }
+    if (auto reshape = dyn_cast<TReshapeOp>(def)) {
+      value = reshape.getSrc();
+      continue;
+    }
+    if (auto cast = dyn_cast<UnrealizedConversionCastOp>(def)) {
+      if (cast.getNumOperands() == 1 && cast.getNumResults() == 1) {
+        value = cast.getOperand(0);
+        continue;
+      }
+    }
+    return value;
+  }
+  return value;
+}
+
+static bool hasPartialValidShape(Value value) {
+  auto type = dyn_cast<TileBufType>(value.getType());
+  if (!type || type.getShape().size() != type.getValidShape().size())
+    return true;
+  return !llvm::equal(type.getShape(), type.getValidShape());
+}
+
 } // namespace
 
 LogicalResult verifySemanticNoAliasRanges(func::FuncOp func) {
@@ -700,10 +758,126 @@ LogicalResult verifySemanticNoAliasRanges(func::FuncOp func) {
       auto rhsRange = resolveSemanticRange(rhs);
       if (!lhsRange || !rhsRange || !rangesOverlap(*lhsRange, *rhsRange))
         continue;
-      op->emitError("PlanMemory semantic no-alias violation: operand byte ranges overlap");
+      op->emitError("PlanMemory semantic no-alias violation: operand byte "
+                    "ranges overlap");
       result = failure();
       return;
     }
+  });
+  return result;
+}
+
+LogicalResult validateTExtractNd2xNzInputProvenance(ModuleOp module) {
+  LogicalResult result = success();
+  module.walk([&](TExtractOp op) {
+    if (failed(result) || !op.isNdTo2xNzForm())
+      return;
+
+    SmallVector<std::pair<StringRef, Value>, 3> operands;
+    operands.emplace_back("src", op.getSrc());
+    auto dsts = op.getDsts();
+    operands.emplace_back("dst0", dsts[0]);
+    operands.emplace_back("dst1", dsts[1]);
+    for (auto [name, operand] : operands) {
+      Value root = peelNd2xNzAllocationViews(operand);
+      Operation *rootOp = root ? root.getDefiningOp() : nullptr;
+      if (isa_and_nonnull<AllocTileOp>(rootOp))
+        continue;
+      if (auto multiGet = dyn_cast_or_null<MultiTileGetOp>(rootOp)) {
+        rootOp = multiGet.getSource().getDefiningOp();
+        if (isa_and_nonnull<AllocMultiTileOp>(rootOp))
+          continue;
+      }
+
+      auto diag = op.emitOpError()
+                  << "ND-to-2xNZ " << name
+                  << " must be allocation-backed by pto.alloc_tile or "
+                     "pto.multi_tile_get; runtime-bound or unknown tile "
+                     "provenance is not supported";
+      if (rootOp)
+        diag << "; unsupported provenance root is "
+             << rootOp->getName().getStringRef();
+      result = failure();
+      return;
+    }
+  });
+  return result;
+}
+
+LogicalResult validateTExtractNd2xNzPostPlanningSafety(ModuleOp module) {
+  LogicalResult result = success();
+  module.walk([&](func::FuncOp func) {
+    if (failed(result))
+      return;
+
+    SmallVector<TStoreOp> stores;
+    func.walk([&](TStoreOp store) { stores.push_back(store); });
+    func.walk([&](TExtractOp op) {
+      if (failed(result) || !op.isNdTo2xNzForm())
+        return;
+
+      SmallVector<std::pair<StringRef, Value>, 3> operands;
+      operands.emplace_back("src", op.getSrc());
+      auto dsts = op.getDsts();
+      operands.emplace_back("dst0", dsts[0]);
+      operands.emplace_back("dst1", dsts[1]);
+
+      SmallVector<SemanticRange, 3> ranges;
+      for (auto [name, operand] : operands) {
+        auto range = resolveSemanticRange(operand);
+        if (!range || !range->absoluteBegin || !range->addressSpace) {
+          op.emitOpError()
+              << "ND-to-2xNZ " << name
+              << " must resolve to a static allocation-backed physical byte "
+                 "range after memory planning";
+          result = failure();
+          return;
+        }
+        ranges.push_back(*range);
+      }
+      if (failed(result))
+        return;
+
+      static constexpr std::pair<unsigned, unsigned> kPairs[] = {
+          {0, 1}, {0, 2}, {1, 2}};
+      for (auto [lhs, rhs] : kPairs) {
+        if (!rangesOverlap(ranges[lhs], ranges[rhs]))
+          continue;
+        op.emitOpError()
+            << "ND-to-2xNZ requires src, dst0 and dst1 physical byte ranges "
+               "to be pairwise non-overlapping ("
+            << operands[lhs].first << " overlaps " << operands[rhs].first
+            << ")";
+        result = failure();
+        return;
+      }
+
+      for (unsigned dstIndex = 0; dstIndex < dsts.size(); ++dstIndex) {
+        if (!hasPartialValidShape(dsts[dstIndex]))
+          continue;
+        const SemanticRange &partialRange = ranges[dstIndex + 1];
+        for (TStoreOp store : stores) {
+          auto storeRange = resolveSemanticRange(store.getSrc());
+          if (!storeRange || !storeRange->absoluteBegin ||
+              !storeRange->addressSpace) {
+            store.emitOpError(
+                "cannot prove that TSTORE source is disjoint from a "
+                "partial-valid ND-to-2xNZ destination; the source must "
+                "resolve to a static allocation-backed physical byte range");
+            result = failure();
+            return;
+          }
+          if (!rangesOverlap(partialRange, *storeRange))
+            continue;
+          store.emitOpError(
+              "source physical byte range aliases a partial-valid "
+              "ND-to-2xNZ destination; undefined NZ padding cannot be "
+              "stored");
+          result = failure();
+          return;
+        }
+      }
+    });
   });
   return result;
 }

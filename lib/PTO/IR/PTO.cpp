@@ -7885,9 +7885,9 @@ static LogicalResult verifyNd2xNzWindowBounds(Operation &op, Value indexRow,
 }
 
 // IR + hardware common contract for the ND-to-2xNZ form (design §5.1, 1-10).
-// The runtime-bound provenance gate (11), StoreUse definedness pass and the
-// level3 static-address gate are enforced by dedicated validation passes at
-// the backend boundary, not here.
+// Runtime-bound provenance is checked at the driver input boundary. Static
+// physical ranges, pairwise no-alias and partial-valid TSTORE safety are
+// checked by the driver's post-planning helper, not by op-local verification.
 static LogicalResult verifyNdTo2xNzForm(pto::TExtractOp op) {
   auto srcIdx = op.getIndices();
   auto dsts = op.getDsts();
@@ -8201,10 +8201,10 @@ bool mlir::pto::TExtractOp::isNdTo2xNzForm() {
   return ::llvm::cast<::mlir::TypedValue<::mlir::IndexType>>(getIndices()[1]);
 }
 
-::mlir::Value mlir::pto::TExtractOp::getDst() {
+::mlir::TypedValue<::mlir::Type> mlir::pto::TExtractOp::getDst() {
   assert(isSingleOutputForm() &&
          "getDst requires the single-output textract form");
-  return getDsts()[0];
+  return ::llvm::cast<::mlir::TypedValue<::mlir::Type>>(getDsts()[0]);
 }
 
 ::mlir::OpOperand &mlir::pto::TExtractOp::getIndexRowMutable() {
