@@ -442,8 +442,12 @@ resolve_compiler_rt() {
   fi
 
   # Fall back to the system LLVM clang runtime.
-  local sys_rt
-  sys_rt="$(find /usr/lib/llvm-*/lib/clang -name "libclang_rt.builtins-${_rt_arch}.a" 2>/dev/null | sort -V | tail -1)"
+  local sys_rt=""
+  sys_rt="$(
+    find /usr/lib/llvm-*/lib/clang \
+      -name "libclang_rt.builtins-${_rt_arch}.a" 2>/dev/null \
+      | sort -V | tail -1 || true
+  )"
   if [ -n "${sys_rt}" ]; then
     PTOAS_COMPILER_RT="${sys_rt}"
     echo "Using system compiler-rt: ${PTOAS_COMPILER_RT}"
