@@ -78,7 +78,8 @@ lowering、verifier、TileLib template 或回归测试，因此缺口仍然存�
     capability manifest，并在最终 backend lowering 前失败，不能依赖后期 C++ 实例化。
 13. GraphSyncSolver 必须为普通 `AllocTileOp` 建立基于静态 `addr`、physical footprint 和
     address space 的单地址模型；不同 SSA allocation root 使用同一地址时仍必须产生 hazard。
-14. 既有 `pto.textract` 文本、C++/Python builder 调用和 PTOBC v0 单输出 wire schema 保持兼容；
+14. 既有 `pto.textract` 文本、Python `TExtractOp`/`pto.textract` 调用、legacy
+    `.indexRow`/`.indexCol`/`.dst` properties 和 PTOBC v0 单输出 wire schema 保持兼容；
     新双输出 form 使用同一 op class 的新 builder，并以新的 PTOBC generic record 承载，不能复用
     已发布的四/五 operand fixed-width opcode。
 
@@ -132,6 +133,14 @@ dstOffset = floor(c / c0) * dstPhysicalRows * c0
           + (c % c0)
 ```
 
+这里的 `dstPhysicalRows` 是 destination type 的 physical row extent，不能替换成
+`align16(validRows)`。A2/A3 和 VPTO 的 block stride 都必须从该 physical extent 计算。
+A5 首版还没有经过 PTO-ISA/TileLib 验证的任意 partial-valid stride 语义，因此增加一个
+backend gate：对 A5 partial-valid plain NZ 和 NZ+1，必须满足
+`physicalRows == align16(validRows)`；不满足时在 A5 backend-boundary verifier 阶段拒绝，不能
+让 TileLib 静默使用 `align16(validRows)` 生成另一种布局。通过该 gate 后，plain NZ 的 block
+stride 为 `physicalRows`，NZ+1 的 emitted virtual stride 为 `physicalRows + 1`。
+
 A5 `RowPlusOne` 在相邻 NZ column block 之间增加一行 bank-conflict padding；padding
 不是逻辑输出，`valid_shape` 不随之增大。destination 的 valid 区域之外不定义新值，
 调用方不能依赖未写 padding 的内容。
@@ -171,6 +180,8 @@ source 或使两个可观察输出互相覆盖。
    也不把未定义区作为 production 输出写回 GM。后文受控的 test-only full-valid dump alias
    只用于 NPU 观测。golden 只比较两个 destination 各自的 valid logical region；预初始化值
    只用于避免读取未初始化内存，未定义区不参与数值比较。
+   A5 partial-valid UB-only codegen 仍受第 3.4 节 physical-stride gate 约束；例如
+   `physicalRows=32, validRows=13` 不能因为不经过 TSTORE 就绕过 gate。
 
 当前 PTOAS 没有一个能把静态 partial tile 安全地改成 full-valid tile 的现有操作：
 `pto.set_validshape` 仅接受 `v_row=?/v_col=?` 的本地动态 tile，并且只修改运行时元数据。
@@ -265,6 +276,12 @@ GlobalTensor/TSTORE 链路承载；这是完整存储链路约束，不是上述
 `CheckTExtractNdToNz` static assert。PTO-ISA 已覆盖 `1x1`、非对齐 index，以及 A2/A3
 `int8` odd validCol；PTOAS verifier 不得添加这些上游不存在的限制。
 
+上述“不要求相等”是 IR/common contract；A5 的 partial-valid backend gate 是额外的
+可执行约束：`physicalRows != align16(validRows)` 的形态在 A2/A3/VPTO 可以按 physical stride
+表达，但 A5 首版必须拒绝。这样 `physicalRows=32, validRows=13, validCols >= 2*c0` 不会
+在 A5 产生第二个 block 写入 `16*c0`、而 A2/A3 写入 `32*c0` 的跨后端分歧。A5 要支持该形态，
+必须先升级并 pin 同时包含修正后的 PTO-ISA/TileLib 实现，再移除 gate。
+
 ### 3.4 架构差异
 
 | 约束 | A2/A3 | A5 |
@@ -272,6 +289,7 @@ GlobalTensor/TSTORE 链路承载；这是完整存储链路约束，不是上述
 | header dtype 集合 | `i8`, `i32`, `f16`, `bf16`, `f32` | A2/A3 集合，加 `hif8`, `f8E4M3`, `f8E5M2`, `f8E8M0`, `f4E2M1x2`, `f4E1M2x2` |
 | plain NZ | 支持 | 支持 |
 | NZ+1 / `RowPlusOne` | 不支持 | 支持 |
+| partial-valid NZ block stride | physical rows；VPTO 同样 | 首版要求 `physicalRows == align16(validRows)`，plain 为 physical rows，NZ+1 为 physical rows + 1 |
 | 非 32B source base | scalar fallback | SIMD unaligned path |
 | `1x1` | scalar path | scalar path |
 | `i8` odd validCol | f16 widen/reshape/narrow | 原生 byte SIMD |
@@ -708,10 +726,53 @@ ODS range 化会改变自动生成的 builder/accessor，不能把“文本兼�
 - 新增同一 class 上的命名 builder `buildNdTo2xNz(src, row0, col0, row1, col1, dst0, dst1)`；
   它不是新 op。range-aware verifier、effects、planning 和 lowering 使用 `getIndices()`/
   `getDsts()`，不得只取 `.front()`。
-- Python 保留当前 `pto.TExtractOp(src, row, col, dst, fp=...)` 调用；新增
-  `pto.TExtractOp.build_nd_to_2xnz(src, row0, col0, row1, col1, dst0, dst1)` convenience factory，
-  返回的仍是 `TExtractOp`。若 generated binding 不支持 classmethod，则在 dialect Python module
-  提供同名薄封装，不能暴露 `TExtractNd2xNzOp` class。
+- Python 兼容层必须覆盖 generated free-function builder 和 generated OpView properties，不能只
+  测试 `TExtractOp` 构造器。`python/pto/dialects/pto.py` 在
+  `_export_generated_symbols()` 之后保存 `_GeneratedTExtractOp` 和生成的
+  `_generated_textract`，再导出同名 facade：
+
+  ```python
+  class TExtractOp(_GeneratedTExtractOp):
+      # Accept the old positional/keyword constructor and delegate to the
+      # generated range constructor with indices=[row, col], dsts=[dst].
+      ...
+
+      @property
+      def indexRow(self):
+          return self.indices[0]
+
+      @property
+      def indexCol(self):
+          return self.indices[1]
+
+      @property
+      def dst(self):
+          return self.dsts[0]
+
+      @classmethod
+      def build_nd_to_2xnz(cls, src, row0, col0, row1, col1, dst0, dst1,
+                           *, loc=None, ip=None):
+          return cls(
+              src=src, indices=[row0, col0, row1, col1], dsts=[dst0, dst1],
+              loc=loc, ip=ip)
+
+  def textract(src, index_row, index_col, dst, *, fp=None,
+               pre_quant_scalar=None, acc_to_vec_mode=None,
+               relu_pre_mode=None, loc=None, ip=None):
+      return TExtractOp(
+          src, index_row, index_col, dst, fp=fp,
+          preQuantScalar=pre_quant_scalar, accToVecMode=acc_to_vec_mode,
+          reluPreMode=relu_pre_mode, loc=loc, ip=ip)
+  ```
+
+  省略号部分必须按现有 `PartitionViewOp`/`TScatterOp` facade 模式实现：facade constructor
+  同时接受旧的四个 positional/keyword operands 和供 `build_nd_to_2xnz` 使用的
+  `indices`/`dsts` ranges；不能把生成 class 或生成的 range-form `textract(src, indices, dsts, ...)`
+  直接重新导出。旧的
+  `pto.textract(src, row, col, dst, ...)` 位置参数和 `pto.textract(src=..., index_row=...,
+  index_col=..., dst=..., ...)` 关键字参数都必须保留；`TExtractOp.indexRow`、`.indexCol`、
+  `.dst` 继续分别映射到 `indices[0]`、`indices[1]`、`dsts[0]`。新双输出只通过同一
+  `TExtractOp` facade 的 `build_nd_to_2xnz` factory 构造，不能暴露 `TExtractNd2xNzOp` class。
 
 `AttrSizedOperandSegments` 的 segment schema 会从六个 fixed/optional 字段变成
 `[src, indices, dsts, fp, preQuantScalar]`。普通文本由 custom parser 重建新 schema；MLIR
@@ -771,7 +832,9 @@ single-value accessor。单输出随后调用语义不变的现有 verifier help
 5. 要求 `src loc=vec`、ND layout；两个 dst 都是 `loc=vec`、NZ layout，fractal size 为
    512 bits。
 6. 要求 `srcElem == dst0Elem == dst1Elem`。
-7. 按 target arch 校验 dtype 和 compact mode。
+7. 按 target arch 校验 dtype 和 compact mode；A5 partial-valid plain NZ/NZ+1 额外要求
+   `physicalRows == align16(validRows)`，并把 block/emitted virtual stride 固定为
+   `physicalRows`/`physicalRows + 1`；不满足时在 backend-boundary gate 失败。
 8. 校验 source row-stride bytes 32B 对齐、每个 dst 的 plain-NZ logical physical rows
    16 对齐、emitted physical cols c0 对齐。
 9. 首版要求两个 dst 的 valid shape 静态且非零；确保归一化后的 valid extent 不超过
@@ -829,8 +892,9 @@ golden，才能无条件放行动态/非对齐 index。FP4 未通过第 3.5 节�
   且必须在窄化前检查 `[0, UINT16_MAX]` 和 window bounds。
 - `validRows` 和 `validCols` 必须大于 0；空 window 不是已定义的 no-op。
 - A5 的 aligned TileLib path 还要证明 `block_stride`、`repeat_stride` 及其 RowPlusOne 变体
-  均落在 16-bit hardware control field 内。不能只检查 raw physical rows 小于等于
-  `UINT16_MAX`，因为 `align16(validRows) + 1` 可能跨过边界。
+  均落在 16-bit hardware control field 内。plain 使用 `physicalRows`，NZ+1 使用
+  `physicalRows + 1`；在 A5 partial-valid gate 通过后再做该范围检查，不能把
+  `align16(validRows) + 1` 当成独立 stride 来源。
 - static bounds 的加法使用 checked arithmetic，避免超大常量溢出后误判为合法。
 
 首版的完整 TSTORE eligibility 由独立的 `PTOValidateNd2xNzStoreUsePass` 在
@@ -868,10 +932,10 @@ assertion，也不能通过复制一个同址 full-valid allocation 绕过 produ
   NZ+1，因为二者是独立 template parameter。
 
 PTOAS 当前把 `tile_buf.shape` 保持为不含 gap 的 logical physical extent，用
-`compact=RowPlusOne` 在 planner/sync 中把 major stride 增加 1。PTO-ISA 新 ST 则把 A5 NZ+1
-destination 的 `Tile::Rows` 显式构造成 `align16(rows) + 1`，而 `TSTORE` 也从
-`TileData::Rows` 取得 NZ source stride。直接把 PTOAS raw rows 原样 EmitC 会让 TEXTRACT 按
-`align16(validRows)+1` 写、TSTORE 却按 raw rows 读，不能接受。
+`compact=RowPlusOne` 在 planner/sync 中把 major stride 增加 1。实现必须让 A5 representation
+adapter 同时把 destination 的 emitted `Tile::Rows` 和 `TSTORE` source stride materialize 为
+`physicalRows + 1`；不能让 TEXTRACT 使用 `align16(validRows)+1`、TSTORE 使用 raw rows，或让
+两者各自推导 stride。
 
 实现需要统一修正 Tile type materialization：对 ColMajor `RowPlusOne`，emitted physical
 rows 表示带 gap 的 virtual rows，而 valid rows 仍是 logical rows；planner/sync/semantic range
@@ -1168,8 +1232,10 @@ template 复用一个 compile-time specialized window helper，两次调用分�
 3. `1x1` 走 scalar load/store。
 4. c0-aligned source base 使用 `vlds` + `vsstb`。
 5. sub-c0 base 使用 `vldas` + `vldus` + exact masked store。
-6. destination block stride 从该 destination 的 valid rows 和 compact mode 独立计算：
-   plain 为 aligned rows，NZ+1 为 aligned rows + 1。
+6. destination block stride 从该 destination 的 **physical rows** 和 compact mode 独立计算：
+   plain 为 `physicalRows`，NZ+1 为 `physicalRows + 1`；禁止从 `validRows` 重新计算
+   `align16(validRows)` 作为 stride。A5 partial-valid template 先执行第 3.4 节 gate，只有
+   `physicalRows == align16(validRows)` 才能展开；A2/A3/VPTO 直接使用 physical rows。
 7. 尾列 predicate 只允许写 valid element，不能污染下一个 NZ block 或另一 destination。
 8. 所有 `vsstb` control field 在构造 `i16` 前完成静态 range proof；失败时 template 不匹配，
    由 tile op verifier 给出面向 shape 的诊断。
@@ -1177,6 +1243,13 @@ template 复用一个 compile-time specialized window helper，两次调用分�
 TileLib template 的目标不是逐行复刻 PTO-ISA C++，而是保证同一 logical mapping、tail 和
 NZ+1 stride。aligned、unaligned、FP4、1x1 分支都要经过 VPTO-to-LLVM intrinsic 检查和
 设备 golden，未验证的 dtype 不能被宽泛 `NUMERIC_DTYPES` 提前注册。
+
+固定反例必须保留在 template/verifier 回归中：`physicalRows=32`、`validRows=13`、
+`validCols >= 2*c0` 时，A2/A3 和非 A5 VPTO 的第二个 block offset 必须为 `32*c0`；A5
+partial-valid 必须在模板匹配前以稳定 gate diagnostic 拒绝，而不是产生 `16*c0`。对应的
+A5 positive control 使用 `physicalRows=16, validRows=13`，验证 plain stride 为 `16*c0`；
+NZ+1 再加一行 virtual padding。只有 PTO-ISA/TileLib 升级并增加设备 golden 后，A5 才能
+放开 `32/13` 形态。
 
 ### 9.3 A2/A3
 
@@ -1186,31 +1259,51 @@ PTO-ISA，后续若引入 A2/A3 TileLib，再单独实现与原生 scalar/widen 
 
 ## 10. Python builder 与文档接口
 
-继续使用现有 Python op class。旧调用保持不变，新调用使用同一 class 上的命名 factory：
+继续使用现有 Python op class 和 free-function builder。旧调用保持不变，新调用使用同一 class
+上的命名 factory：
 
 ```python
 from ptoas.mlir.dialects import arith, func, pto
 
 # Existing form remains source-compatible.
 pto.TExtractOp(src, index_row, index_col, dst, fp=fp)
+pto.textract(src, index_row, index_col, dst, fp=fp)
+
+# The keyword spelling remains source-compatible as well.
+pto.textract(src=src, index_row=index_row, index_col=index_col, dst=dst,
+             pre_quant_scalar=pre_quant_scalar)
 
 # New form; this still constructs an operation named "pto.textract".
 pto.TExtractOp.build_nd_to_2xnz(
     src, index_row0, index_col0, index_row1, index_col1, dst0, dst1)
 ```
 
-这里的 `pto` 明确指 PTOAS ODS-generated low-level dialect binding；
-`from ptodsl import pto` 是 PTODSL micro-op surface，不能用来构造该 IR op。实现 PR
-增加 legacy constructor 与新 factory 的 Python smoke，证明二者都打印为 `pto.textract`、
-argument 顺序和文本汇编一致，且 binding 中不存在 `TExtractNd2xNzOp`。
+这里的 `pto` 明确指 PTOAS ODS-generated low-level dialect binding；`pto.py` facade 必须覆盖
+`_pto_ops_gen.py` 生成的 `textract(src, indices, dsts, ...)`，不能让它取代旧的
+`textract(src, index_row, index_col, dst, ...)`。实现 PR 增加以下 Python smoke：
+
+1. 位置参数 `pto.textract(src, row, col, dst)` 和关键字参数
+   `pto.textract(src=src, index_row=row, index_col=col, dst=dst, fp=fp)` 都构造
+   `pto.textract`，并断言返回 op 的 `.indexRow`、`.indexCol`、`.dst` 与传入 SSA value 相同。
+2. `pto.TExtractOp(src, row, col, dst, ...)` 和对应关键字构造都通过同一个 facade；双输出
+   `build_nd_to_2xnz` 仍返回同一 `TExtractOp` class，且 `.indices`/`.dsts` 保留四项/两项 range。
+3. smoke 必须检查 `pto.textract.__signature__`（或等价的 `inspect.signature`）仍接受旧的
+   `index_row/index_col/dst` 参数，不能只检查生成 module 中的 private range-form builder。
+
+这里的 `ptodsl` 是 PTODSL micro-op surface，不能用来构造该 IR op。实现 PR
+证明 legacy constructor、legacy free function 和新 factory 都打印为 `pto.textract`、
+argument 顺序和文本汇编一致，且 binding 中不存在 `TExtractNd2xNzOp`。`.indexRow`、
+`.indexCol`、`.dst` 的 wrapper properties 也必须纳入 smoke，不能把它们视为 generated
+range API 的内部细节。
 
 需要同步更新：
 
 - `docs/PTO_IR_manual.md`：语义、汇编、shape/layout/dtype/compact 表；
 - `docs/release/PTO-tile-Instruction-SPEC-v0.4.md`：新增双输出形态；
 - `ReleaseNotes.md`：记录 `pto.textract` 新增 ND-to-2xNZ 双输出 form、架构差异，以及 public
-  getter/builder 兼容但 `Properties::operandSegmentSizes`、`getODSOperands()` 和旧 adaptor
-  fixed-field accessor 不兼容的边界；
+  C++/Python getter、builder、free-function 和 property facade 兼容，但
+  `Properties::operandSegmentSizes`、`getODSOperands()` 和旧 adaptor fixed-field accessor
+  不兼容的边界；
 - TileLib template 列表或生成文档（若实现 PR 修改对应索引）。
 
 ## 11. PTO-ISA pin 方案
@@ -1262,7 +1355,9 @@ PTOAS 当前三个 pin 都早于 8 月 14 日功能提交：
 - A5 plain + plain、plain + RowPlusOne、RowPlusOne + RowPlusOne；
 - `1x1`、非 c0 index、非 c0 validCol、A2/A3 odd-i8 validCol；
 - 双输出 parse-print-parse 保持两个 destination 与 index 配对，打印名称始终是 `pto.textract`；
-- generic form 的 canonical `[src, indices, dsts, fp, preQuantScalar]` segment sizes round-trip。
+- generic form 的 canonical `[src, indices, dsts, fp, preQuantScalar]` segment sizes round-trip；
+- A5 partial-valid 只有在 `physicalRows == align16(validRows)` 时进入正向集合，plain/NZ+1
+  分别使用 `physicalRows`/`physicalRows + 1` stride。
 
 负向：
 
@@ -1294,7 +1389,12 @@ PTOAS 当前三个 pin 都早于 8 月 14 日功能提交：
 - 最终 codegen 时 environment unknown、capability manifest 缺失或
   `textract.nd_to_2xnz=false`；
 - support gate 未满足时使用 FP4 或 RowPlusOne；
-- FP4 gate 打开后，覆盖 raw dimension 合法但 emitted dimension 非法，以及反向边界。
+- FP4 gate 打开后，覆盖 raw dimension 合法但 emitted dimension 非法，以及反向边界；
+- `physicalRows=32, validRows=13, validCols >= 2*c0`：A2/A3 与非 A5 VPTO 正向检查第二个
+  block offset 为 `32*c0`；A5 partial-valid 必须在 template/verifier gate 稳定拒绝，不能生成
+  `16*c0`；`physicalRows=16, validRows=13` 作为 A5 positive control；
+- generated Python range-form free function 不得覆盖 legacy facade；位置/关键字
+  `pto.textract`、位置/关键字 `pto.TExtractOp` 以及 `.indexRow/.indexCol/.dst` 各有正向 smoke。
 - production StoreUse pass 分别拒绝 partial descriptor 的直接/view TSTORE 和同址不同 SSA
   full-valid `alloc_tile` alias TSTORE；部分重叠 alias 也必须拒绝；
 - 输入 IR 手写任何 test-only module attribute 不能放行 alias TSTORE；未启用
@@ -1375,7 +1475,9 @@ PTOBC v0 兼容测试单列，不并入普通 MLIR bytecode 假设：
 - 两路不同 shape/index；
 - tail validCol mask；
 - `1x1`；
-- A5 NZ+1 block stride；
+- A5 NZ+1 block stride 使用 `physicalRows + 1`，并覆盖 `32/13` gate rejection 与 `16/13`
+  positive control；
+- A3/VPTO `physicalRows=32, validRows=13, validCols >= 2*c0` 的第二 block offset `32*c0`；
 - hif8/fp8 检查正确 vreg/intrinsic type，并至少覆盖一个 1-byte low-precision sub-c0 window；
   FP4 support gate 打开后再增加 FP4 检查；
 - `vsstb` control field 最大合法值和首个非法值；
@@ -1412,6 +1514,8 @@ A2/A3 最小集合：
 - i32；
 - `1x1`；
 - 两路不同 valid shape。
+- A3/VPTO partial-valid `physicalRows=32, validRows=13, validCols >= 2*c0` 的 physical-stride
+  golden；A5 同形状的 gate-negative，以及 `physicalRows=16, validRows=13` positive control。
 
 A5 必选最小集合：
 
@@ -1421,6 +1525,8 @@ A5 必选最小集合：
   至少覆盖 aligned byte-exact case；
 - `1x1`；
 - 两路不同 valid shape。
+- partial-valid `physicalRows=32, validRows=13` 必须是 gate-negative；
+  `physicalRows=16, validRows=13` 是 plain/NZ+1 stride 的 positive control。
 
 A5 support-gate 集合：
 
@@ -1438,6 +1544,8 @@ full-store group 必须经过完整链路，partial-valid group 必须保留明�
 
 - `test/lit/pto/textract_*` 全部通过；
 - `test/lit/vpto/*textract*` 全部通过；
+- A3/A5/VPTO stride counterexample matrix 通过：A3/VPTO physical stride 正向、A5 `32/13`
+  gate-negative、A5 `16/13` positive；
 - PTOBC v0 legacy TEXTRACT fixture 与双输出 generic round-trip 全部通过；
 - PTOAS unit/lit 全量通过；
 - A3/A5 compile-only；
@@ -1458,10 +1566,10 @@ full-store group 必须经过完整链路，partial-valid group 必须保留明�
 |---|---|---|
 | 0 | rebase、逐 target pin/backend 探测、CMake manifest 生成与 driver 注入 | NPU probe 生成正向 capability；CPU/cost-model 失败生成稳定负向 capability；manifest path/root/revision 校验可执行 |
 | 1 | 扩展 `TExtractOp` ODS ranges、inherent-property schema validator/form classifier、custom assembly、精确兼容 builder/accessor、DPS、pipe、effects、PTOBC shim | property conversion、generated invariants、custom verifier 各阶段负向测试不崩溃；src=0/2 等可到达 classifier 的 schema 稳定失败且 effects 保守；旧 C++ API compile-only、legacy/new parse-print、binding、v0 bytecode 兼容和 range-based adaptor 编译测试通过，且没有新增 op 名 |
-| 2 | shared emitted-dimension helper、IR verifier、runtime provenance、alias-aware StoreUse dataflow 与 test-hook wiring | 架构矩阵、bounds、production direct/alias TSTORE、canonical test escape、provenance/capability gate lit 通过 |
+| 2 | shared emitted-dimension helper、A5 partial-valid physical-stride gate、IR verifier、runtime provenance、alias-aware StoreUse dataflow 与 test-hook wiring | 架构矩阵包含 A3/A5/VPTO `32/13` counterexample；A5 gate diagnostic 可执行；bounds、production direct/alias TSTORE、canonical test escape、provenance/capability gate lit 通过 |
 | 3 | no-alias、level3 address gate、GraphSync `AllocTileOp` single-address model 与 planner/GSS 回归 | 三组 alias 被拒绝，declared/tpop provenance 在 planner 前失败，动态 level3 地址失败，双输出 liveness 正确，同址/overlap/disjoint/address-space GSS edge 正确 |
 | 4 | EmitC pattern | A3/A5 精确文本与 pin compile-only 通过 |
-| 5 | A5 TileLib/VPTO template | aligned/unaligned/tail/enabled-lowp 展开通过；NZ+1/FP4 随 gate 开启 |
+| 5 | A5 TileLib/VPTO template 与 Python facade | physical-stride/stride gate、aligned/unaligned/tail/enabled-lowp 展开通过；legacy free function/property/constructor smoke 通过；NZ+1/FP4 随 gate 开启 |
 | 6 | A3/A5 NPU ST、UB sentinel/raw-buffer harness；可用时 CPU-sim | 必选组合两路 byte-exact；partial case 实际导出 UB redzone；optional gate 有真实 backend 证据 |
 | 7 | manual、SPEC、ReleaseNotes | 文档与实际 verifier/EmitC 一致 |
 
@@ -1489,7 +1597,9 @@ public syntax；实现只承诺 canonical `pto.textract ins(...) outs(...)` 文�
   malformed input 共享 actual/expected schema 诊断；
 - 第 4.4 节列出的 typed getter/mutable/build/create public C++ surface 有 compile-only 回归；
   ReleaseNotes 明确 `Properties` 五段布局和其他 generated internal API 不兼容；
-- verifier 的合法集合不宽于目标 PTO-ISA，且不误拒绝其 unaligned/odd/1x1 路径；
+- verifier 的合法集合不宽于目标 PTO-ISA，且在对应 support gate 已通过时不误拒绝其
+  unaligned/odd/1x1 路径；A5 `physicalRows != align16(validRows)` 的 partial-valid 形态属于
+  首版明确拒绝的 backend stride gate，不是隐式的 dtype/layout 限制；
 - 两个 DPS init 在 effects、sync、fusion boundary 和两套 PlanMemory 中都不丢失；
 - Invalid segment schema 的 interfaces fail-safe，MemoryEffects 对所有 raw memory-carrying operands
   保守给出 Read+Write，不存在额外 source 绕过依赖建模的路径；
@@ -1502,6 +1612,12 @@ public syntax；实现只承诺 canonical `pto.textract ins(...) outs(...)` 文�
 - EmitC 只生成一次、参数顺序精确的公开 `TEXTRACT`；
 - EmitC 的单/双输出分支都从 adaptor `indices`/`dsts` ranges 取 core operands，不依赖 ODS
   range 化后不存在的 legacy adaptor accessor；
+- Python `pto.py` 在 generated symbol export 后重新提供 legacy `TExtractOp` facade 和
+  `textract(src, index_row, index_col, dst, ...)` wrapper；位置/关键字调用、
+  `.indexRow/.indexCol/.dst` properties 和 `build_nd_to_2xnz` 均有 smoke；
+- A5 partial-valid 的 `physicalRows != align16(validRows)` 在 backend-boundary/template gate
+  稳定拒绝；A2/A3/VPTO 的 block stride 始终使用 physical rows；A3/A5/VPTO counterexample
+  matrix 和 `16/13` positive control 通过；
 - 所有宣称支持的实际编译 target，其 PTO-ISA pin 同时包含公开 overload 和对应 backend
   implementation，且 CMake probe 生成的 manifest 已通过 path/include-root/revision/digest
   校验并由 driver 注入；CPU/cost-model backend 缺失时
