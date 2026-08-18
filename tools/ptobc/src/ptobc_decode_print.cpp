@@ -594,9 +594,11 @@ getUnifiedOperandSegments(uint16_t opcode,
                           llvm::ArrayRef<mlir::Value> operands) {
   switch (opcode) {
   case kTExtractOpcode:
-    return llvm::SmallVector<int32_t, mlir::pto::kValue6>{1, 1, 1, 1, 0, 0};
+    // Segments are [src, indices, dsts, fp, preQuantScalar] after the
+    // range-based TExtractOp ODS (design docs).
+    return llvm::SmallVector<int32_t, mlir::pto::kValue6>{1, 2, 1, 0, 0};
   case kTExtractFpWireOpcode:
-    return llvm::SmallVector<int32_t, mlir::pto::kValue6>{1, 1, 1, 1, 1, 0};
+    return llvm::SmallVector<int32_t, mlir::pto::kValue6>{1, 2, 1, 1, 0};
   case kTInsertOpcode:
     return llvm::SmallVector<int32_t, mlir::pto::kValue6>{1, 1, 1, 1, 0, 0};
   case kTInsertFpWireOpcode:

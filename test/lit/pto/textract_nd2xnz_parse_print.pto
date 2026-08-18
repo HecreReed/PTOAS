@@ -1,0 +1,21 @@
+// RUN: ptoas --pto-arch=a5 --emit-pto-ir %s 2>&1 | FileCheck %s
+
+module attributes {"pto.device-spec" = "Ascend950"} {
+  func.func @nd2xnz_parse_print() {
+    %c0 = arith.constant 0 : index
+    %c1 = arith.constant 1 : index
+    %src = pto.alloc_tile : !pto.tile_buf<loc=vec, dtype=f16, rows=64, cols=128, v_row=64, v_col=128, blayout=row_major, slayout=none_box, fractal=512, pad=0>
+    %dst0 = pto.alloc_tile : !pto.tile_buf<loc=vec, dtype=f16, rows=32, cols=64, v_row=32, v_col=64, blayout=col_major, slayout=row_major, fractal=512, pad=0>
+    %dst1 = pto.alloc_tile : !pto.tile_buf<loc=vec, dtype=f16, rows=16, cols=32, v_row=16, v_col=32, blayout=col_major, slayout=row_major, fractal=512, pad=0>
+
+    pto.textract ins(%src, %c0, %c0, %c1, %c1 : !pto.tile_buf<loc=vec, dtype=f16, rows=64, cols=128, v_row=64, v_col=128, blayout=row_major, slayout=none_box, fractal=512, pad=0>, index, index, index, index)
+                 outs(%dst0, %dst1 : !pto.tile_buf<loc=vec, dtype=f16, rows=32, cols=64, v_row=32, v_col=64, blayout=col_major, slayout=row_major, fractal=512, pad=0>, !pto.tile_buf<loc=vec, dtype=f16, rows=16, cols=32, v_row=16, v_col=32, blayout=col_major, slayout=row_major, fractal=512, pad=0>)
+    return
+  }
+}
+
+// The dual-output form keeps the single mnemonic `pto.textract` and prints
+// four indices followed by two destinations.
+// CHECK-LABEL: func.func @nd2xnz_parse_print
+// CHECK: pto.textract ins({{.*}} : !pto.tile_buf<vec, 64x128xf16>, index, index, index, index)
+// CHECK-SAME: outs({{.*}} : !pto.tile_buf<vec, 32x64xf16, blayout=col_major, slayout=row_major>, !pto.tile_buf<vec, 16x32xf16, blayout=col_major, slayout=row_major>)

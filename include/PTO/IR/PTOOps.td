@@ -4561,13 +4561,20 @@ def TExtractOp : PTO_TOp<"textract", [
   OpPipeInterface,
   DeclareOpInterfaceMethods<MemoryEffectsOpInterface>
 ]> {
-  let summary = "Extract sub-tile window from src into dst (tilebuf, DPS)";
+  let summary = "Extract source windows into DPS destinations";
 
+  // Two forms share this op class, discriminated by the complete
+  // [src, indices, dsts, fp, preQuantScalar] operand-segment schema:
+  //   - SingleOutput: src + 2 indices + 1 dst (+ optional fp/preQuantScalar)
+  //   - NdTo2xNz     : src + 4 indices + 2 NZ dsts, no fp/preQuantScalar
+  // The ND-to-2xNZ form lowers to the PTO-ISA seven-argument
+  // TEXTRACT(dst0, dst1, src, indexRow0, indexCol0, indexRow1, indexCol1)
+  // overload. Flattened operand order is:
+  //   src, indices..., dsts..., fp?, preQuantScalar?
   let arguments = (ins
     PTODpsType:$src,
-    Index:$indexRow,
-    Index:$indexCol,
-    PTODpsType:$dst,
+    Variadic<Index>:$indices,
+    Variadic<PTODpsType>:$dsts,
     Optional<PTODpsType>:$fp,
     Optional<I64>:$preQuantScalar,
     OptionalAttr<PTO_AccToVecModeAttr>:$accToVecMode,
@@ -4577,67 +4584,33 @@ def TExtractOp : PTO_TOp<"textract", [
   let results = (outs);
 
   let hasVerifier = 1;
-
-  let assemblyFormat = [{
-    `ins` `(` $src `,` $indexRow `,` $indexCol
-    (`,` $preQuantScalar^)? `:` qualified(type($src)) `,` type($indexRow) `,` type($indexCol)
-    (`,` type($preQuantScalar)^)?
-    (`fp` $fp^ `:` qualified(type($fp)))? `)`
-    `outs` `(` $dst `:` qualified(type($dst) ) `)`
-    attr-dict
-  }];
+  let hasCustomAssemblyFormat = 1;
 
   let extraClassDeclaration = [{
-    ::mlir::pto::PIPE getPipe() {
-      // Align with pto-isa TEXTRACT op classes:
-      //   - TEXTRACT_M2LR : MAT -> LEFT/RIGHT (and scaling-like targets) (MTE1)
-      //   - TEXTRACT_V2M  : VEC -> MAT       (FIX)
-      //   - TEXTRACT_A2M  : ACC -> MAT       (FIX)
-      // For pure UB slices (VEC -> VEC), treat as vector pipe.
-      auto getASFromType = [](Type ty)
-          -> std::optional<::mlir::pto::AddressSpace> {
-        if (auto tb = llvm::dyn_cast<::mlir::pto::TileBufType>(ty)) {
-          if (auto as = llvm::dyn_cast_or_null<::mlir::pto::AddressSpaceAttr>(
-                  tb.getMemorySpace()))
-            return as.getAddressSpace();
-          return std::nullopt;
-        }
-        return std::nullopt;
-      };
+    enum class Form { Invalid, SingleOutput, NdTo2xNz };
 
-      auto sOpt = getASFromType(getSrc().getType());
-      auto dOpt = getASFromType(getDst().getType());
-      if (!sOpt.has_value() || !dOpt.has_value())
-        return ::mlir::pto::PIPE::PIPE_V;
+    // Classify this op from the complete operand-segment schema. This MUST
+    // run before any generated accessor that depends on segment offsets
+    // (getSrc/getIndices/getDsts/getFp) on possibly-malformed operations.
+    Form classifyForm();
+    bool isSingleOutputForm();
+    bool isNdTo2xNzForm();
 
-      const auto s = sOpt.value();
-      const auto d = dOpt.value();
+    // Legacy single-output convenience accessors (preserve the exact
+    // generated return types). May only be used after classifyForm()
+    // returns SingleOutput; range-aware code should use getIndices() and
+    // getDsts() which are valid for both forms.
+    ::mlir::TypedValue<::mlir::IndexType> getIndexRow();
+    ::mlir::TypedValue<::mlir::IndexType> getIndexCol();
+    ::mlir::Value getDst();
+    ::mlir::OpOperand &getIndexRowMutable();
+    ::mlir::OpOperand &getIndexColMutable();
+    ::mlir::OpOperand &getDstMutable();
 
-      if (s == ::mlir::pto::AddressSpace::MAT &&
-          (d == ::mlir::pto::AddressSpace::LEFT ||
-           d == ::mlir::pto::AddressSpace::RIGHT ||
-           d == ::mlir::pto::AddressSpace::BIAS ||
-           d == ::mlir::pto::AddressSpace::SCALING)) {
-        return ::mlir::pto::PIPE::PIPE_MTE1;
-      }
-
-      if ((s == ::mlir::pto::AddressSpace::VEC &&
-           d == ::mlir::pto::AddressSpace::MAT) ||
-          (s == ::mlir::pto::AddressSpace::ACC &&
-           (d == ::mlir::pto::AddressSpace::MAT ||
-            d == ::mlir::pto::AddressSpace::VEC))) {
-        return ::mlir::pto::PIPE::PIPE_FIX;
-      }
-
-      if (s == ::mlir::pto::AddressSpace::VEC &&
-          d == ::mlir::pto::AddressSpace::VEC) {
-        return ::mlir::pto::PIPE::PIPE_V;
-      }
-
-      // Default to vector pipe for unmatched combinations.
-      return ::mlir::pto::PIPE::PIPE_V;
-    }
-    ::mlir::MutableOperandRange getDpsInitsMutable() { return getDstMutable(); }
+    // Form-aware DPS init range: one destination for the legacy form, two
+    // contiguous destinations for the ND-to-2xNZ form.
+    ::mlir::MutableOperandRange getDpsInitsMutable();
+    ::mlir::pto::PIPE getPipe();
   }];
 }
 

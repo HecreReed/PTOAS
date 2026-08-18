@@ -372,6 +372,19 @@ getSemanticNoAliasPairs(Operation *op) {
     for (unsigned lhs = 0; lhs < tiles.size(); ++lhs)
       for (unsigned rhs = lhs + 1; rhs < tiles.size(); ++rhs)
         pairs.emplace_back(tiles[lhs], tiles[rhs]);
+    return pairs;
+  }
+
+  if (auto textract = dyn_cast<TExtractOp>(op)) {
+    // ND-to-2xNZ form: src, dst0 and dst1 must be pairwise non-overlapping.
+    if (textract.isNdTo2xNzForm()) {
+      Value src = textract.getSrc();
+      auto dsts = textract.getDsts();
+      pairs.emplace_back(src, dsts[0]);
+      pairs.emplace_back(src, dsts[1]);
+      pairs.emplace_back(dsts[0], dsts[1]);
+    }
+    return pairs;
   }
   return pairs;
 }

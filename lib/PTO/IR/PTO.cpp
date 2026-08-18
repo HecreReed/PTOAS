@@ -7834,7 +7834,661 @@ mlir::LogicalResult mlir::pto::TExpandsOp::verify() {
   return dispatchVerifierByArch(getOperation(), verifyA2A3, verifyA5);
 }
 
+// =============================================================================
+// TExtractOp ND-to-2xNZ dual-output support.
+//
+// The legacy single-output form ([src=1, indices=2, dsts=1, fp=0/1,
+// preQuantScalar=0/1]) and the ND-to-2xNZ form ([src=1, indices=4, dsts=2,
+// fp=0, preQuantScalar=0]) share one op class and are discriminated by the
+// complete operand-segment schema. See docs/designs/textract-nd-to-2xnz-design.md.
+// =============================================================================
+
+namespace {
+
+bool isA2A3Nd2xNzElemType(Type ty) {
+  return ty.isInteger(8) || ty.isInteger(32) || ty.isF16() || ty.isBF16() ||
+         ty.isF32();
+}
+
+bool isA5LowpCandidateNd2xNzElemType(Type ty) {
+  return isA2A3Nd2xNzElemType(ty) || isPTOHiFloat8Type(ty) ||
+         isPTOFloat8Type(ty);
+}
+
+bool isA5AllCandidateNd2xNzElemType(Type ty) {
+  return isA5LowpCandidateNd2xNzElemType(ty) || isPTOFloat4PackedType(ty);
+}
+
+// Window bounds use the destination VALID extent against the source PHYSICAL
+// extent (PTO-ISA: indexRow_k + dst_k.validRows <= src.rows).
+static LogicalResult verifyNd2xNzWindowBounds(Operation &op, Value indexRow,
+                                              Value indexCol, Type srcTy,
+                                              Type dstTy, bool constFold) {
+  auto row = getConstantIntegerValueEx(indexRow, constFold);
+  auto col = getConstantIntegerValueEx(indexCol, constFold);
+  auto srcShape = getShapeVec(srcTy);
+  auto dstValid = getValidShapeVec(dstTy);
+  if (srcShape.size() != 2 || dstValid.size() != 2) {
+    return op.emitOpError("expects src and dst to be rank-2 tile_buf");
+  }
+  if (row && srcShape[0] != ShapedType::kDynamic &&
+      dstValid[0] != ShapedType::kDynamic &&
+      *row + dstValid[0] > srcShape[0]) {
+    return op.emitOpError("expects indexRow + dst.validRows <= src.rows");
+  }
+  if (col && srcShape[1] != ShapedType::kDynamic &&
+      dstValid[1] != ShapedType::kDynamic &&
+      *col + dstValid[1] > srcShape[1]) {
+    return op.emitOpError("expects indexCol + dst.validCols <= src.cols");
+  }
+  return success();
+}
+
+// IR + hardware common contract for the ND-to-2xNZ form (design §5.1, 1-10).
+// The runtime-bound provenance gate (11), StoreUse definedness pass and the
+// level3 static-address gate are enforced by dedicated validation passes at
+// the backend boundary, not here.
+static LogicalResult verifyNdTo2xNzForm(pto::TExtractOp op) {
+  auto srcIdx = op.getIndices();
+  auto dsts = op.getDsts();
+  if (srcIdx.size() != 4 || dsts.size() != 2) {
+    return op.emitOpError(
+        "ND-to-2xNZ form expects 4 indices and 2 destinations");
+  }
+
+  Operation *opBase = op.getOperation();
+  const bool isA5 = isTargetArchA5(opBase);
+  const bool allowLowPrecision = isA5;
+
+  Type srcTy = op.getSrc().getType();
+  Type dst0Ty = dsts[0].getType();
+  Type dst1Ty = dsts[1].getType();
+  auto srcTb = dyn_cast<pto::TileBufType>(srcTy);
+  auto dst0Tb = dyn_cast<pto::TileBufType>(dst0Ty);
+  auto dst1Tb = dyn_cast<pto::TileBufType>(dst1Ty);
+  if (!srcTb || !dst0Tb || !dst1Tb) {
+    return op.emitOpError("expects src, dst0 and dst1 to be !pto.tile_buf");
+  }
+
+  // 1. common tile checks (rank-2, layout/domain conformance, element bytes).
+  if (failed(verifyTileBufCommon(opBase, srcTy, "src", allowLowPrecision)) ||
+      failed(verifyTileBufCommon(opBase, dst0Ty, "dst0", allowLowPrecision)) ||
+      failed(verifyTileBufCommon(opBase, dst1Ty, "dst1", allowLowPrecision))) {
+    return failure();
+  }
+  auto srcShape = getShapeVec(srcTy);
+  auto dst0Shape = getShapeVec(dst0Ty);
+  auto dst1Shape = getShapeVec(dst1Ty);
+  if (srcShape.size() != 2 || dst0Shape.size() != 2 ||
+      dst1Shape.size() != 2) {
+    return op.emitOpError(
+        "expects src, dst0 and dst1 to be rank-2 tile_buf");
+  }
+
+  // 3. indices: index type, foldable constants, non-negative, uint16 range.
+  for (unsigned i = 0; i < srcIdx.size(); ++i) {
+    Value idx = srcIdx[i];
+    if (!idx.getType().isIndex()) {
+      return op.emitOpError(
+          "expects ND-to-2xNZ indices to be index type");
+    }
+    auto c = getConstantIntegerValueEx(idx, /*includeIndexAndIntOpsInConstFold=*/false);
+    if (!c) {
+      return op.emitOpError(
+          "expects ND-to-2xNZ indices to be foldable constants");
+    }
+    if (*c < 0) {
+      return op.emitOpError(
+          "expects ND-to-2xNZ indices to be non-negative");
+    }
+    if (*c > std::numeric_limits<uint16_t>::max()) {
+      return op.emitOpError(
+          "expects ND-to-2xNZ indices to fit in uint16_t");
+    }
+  }
+
+  // 5. locations and layouts: src vec-ND; dsts vec-NZ with 512-bit fractal.
+  auto srcSpace = getPTOMemorySpaceEnum(srcTy);
+  auto dst0Space = getPTOMemorySpaceEnum(dst0Ty);
+  auto dst1Space = getPTOMemorySpaceEnum(dst1Ty);
+  if (!srcSpace || *srcSpace != pto::AddressSpace::VEC) {
+    return op.emitOpError("expects ND-to-2xNZ src to use loc=vec");
+  }
+  if (!dst0Space || *dst0Space != pto::AddressSpace::VEC ||
+      !dst1Space || *dst1Space != pto::AddressSpace::VEC) {
+    return op.emitOpError(
+        "expects ND-to-2xNZ dst0/dst1 to use loc=vec");
+  }
+  if (srcTb.getBLayoutValueI32() != static_cast<int32_t>(pto::BLayout::RowMajor) ||
+      srcTb.getSLayoutValueI32() != static_cast<int32_t>(pto::SLayout::NoneBox)) {
+    return op.emitOpError(
+        "expects ND-to-2xNZ src to be ND (row_major, none_box)");
+  }
+  auto isNzDest = [](pto::TileBufType tb) {
+    return tb.getBLayoutValueI32() ==
+               static_cast<int32_t>(pto::BLayout::ColMajor) &&
+           tb.getSLayoutValueI32() ==
+               static_cast<int32_t>(pto::SLayout::RowMajor) &&
+           tb.getSFractalSizeI32() == 512;
+  };
+  if (!isNzDest(dst0Tb) || !isNzDest(dst1Tb)) {
+    return op.emitOpError(
+        "expects ND-to-2xNZ dst0/dst1 to be NZ (col_major, row_major, "
+        "fractal 512)");
+  }
+
+  // 6. element type equality.
+  Type srcElem = getElemTy(srcTy);
+  Type dst0Elem = getElemTy(dst0Ty);
+  Type dst1Elem = getElemTy(dst1Ty);
+  if (!srcElem || !dst0Elem || !dst1Elem) {
+    return op.emitOpError(
+        "expects src, dst0 and dst1 to have element types");
+  }
+  if (srcElem != dst0Elem || srcElem != dst1Elem) {
+    return op.emitOpError(
+        "expects src, dst0 and dst1 to have the same element type");
+  }
+
+  // 7. dtype and compact mode per target arch.
+  if (isA5) {
+    if (!isA5AllCandidateNd2xNzElemType(srcElem)) {
+      return op.emitOpError(
+          "expects A5 ND-to-2xNZ element type to be i8/i32/f16/bf16/f32/"
+          "hif8/fp8/fp4");
+    }
+    // FP4 support gate (design §3.5): keep rejected until the packed-axis
+    // compile probe and byte-exact NPU golden land on the selected pin.
+    if (isPTOFloat4PackedType(srcElem)) {
+      return op.emitOpError(
+          "ND-to-2xNZ FP4 path is not yet verified for the target PTO-ISA "
+          "revision");
+    }
+  } else {
+    if (!isA2A3Nd2xNzElemType(srcElem)) {
+      return op.emitOpError(
+          "expects A2/A3 ND-to-2xNZ element type to be i8/i32/f16/bf16/f32");
+    }
+  }
+
+  int32_t c0Compact0 = dst0Tb.getCompactModeI32();
+  int32_t c0Compact1 = dst1Tb.getCompactModeI32();
+  bool rowPlusOne = c0Compact0 ==
+                        static_cast<int32_t>(pto::CompactMode::RowPlusOne) ||
+                    c0Compact1 ==
+                        static_cast<int32_t>(pto::CompactMode::RowPlusOne);
+  if (rowPlusOne && !isA5) {
+    return op.emitOpError(
+        "expects ND-to-2xNZ RowPlusOne only on A5");
+  }
+  if (rowPlusOne) {
+    // Support gate (design §5.4): needs the emitted virtual-row adapter and
+    // full TLOAD -> TEXTRACT -> TSTORE device golden before enabling.
+    return op.emitOpError(
+        "ND-to-2xNZ RowPlusOne requires the emitted virtual-row adapter and "
+        "device golden; not yet enabled");
+  }
+
+  // 8. alignment: src row-stride bytes 32B aligned; dst physical rows 16
+  // aligned (plain NZ); dst emitted physical cols c0 aligned.
+  unsigned elemBytes = getPTOStorageElemByteSize(srcElem);
+  if (elemBytes == 0) {
+    return op.emitOpError(
+        "expects ND-to-2xNZ element type to have a byte size");
+  }
+  const int64_t c0 = 32 / static_cast<int64_t>(elemBytes);
+  if (srcShape[0] != ShapedType::kDynamic &&
+      srcShape[1] != ShapedType::kDynamic &&
+      (srcShape[1] * static_cast<int64_t>(elemBytes)) % 32 != 0) {
+    return op.emitOpError(
+        "expects ND-to-2xNZ src row stride to be 32-byte aligned");
+  }
+  auto verifyDstAlign = [&](pto::TileBufType tb, StringRef name)
+      -> LogicalResult {
+    auto shape = getShapeVec(tb);
+    if (shape.size() != 2) {
+      return failure();
+    }
+    if (shape[0] != ShapedType::kDynamic && shape[0] % 16 != 0) {
+      return op.emitOpError(
+          "expects " + name +
+          " physical rows to be 16-aligned for plain NZ");
+    }
+    if (shape[1] != ShapedType::kDynamic && shape[1] % c0 != 0) {
+      return op.emitOpError(
+          "expects " + name + " physical cols to be c0-aligned");
+    }
+    return success();
+  };
+  if (failed(verifyDstAlign(dst0Tb, "dst0")) ||
+      failed(verifyDstAlign(dst1Tb, "dst1"))) {
+    return failure();
+  }
+
+  // 9. valid shape: static, positive, fits uint16, within physical extent.
+  auto verifyValidShape = [&](Type ty, StringRef name) -> LogicalResult {
+    auto v = getValidShapeVec(ty);
+    auto p = getShapeVec(ty);
+    if (v.size() != 2 || p.size() != 2) {
+      return failure();
+    }
+    if (v[0] == ShapedType::kDynamic || v[1] == ShapedType::kDynamic) {
+      return op.emitOpError(
+          "expects " + name +
+          " valid shape to be static in the ND-to-2xNZ form");
+    }
+    if (v[0] <= 0 || v[1] <= 0) {
+      return op.emitOpError(
+          "expects " + name + " valid rows/cols to be positive");
+    }
+    if (v[0] > static_cast<int64_t>(std::numeric_limits<uint16_t>::max()) ||
+        v[1] > static_cast<int64_t>(std::numeric_limits<uint16_t>::max())) {
+      return op.emitOpError(
+          "expects " + name + " valid extent to fit in uint16_t");
+    }
+    if (p[0] != ShapedType::kDynamic && v[0] > p[0]) {
+      return op.emitOpError(
+          "expects " + name + " valid rows <= physical rows");
+    }
+    if (p[1] != ShapedType::kDynamic && v[1] > p[1]) {
+      return op.emitOpError(
+          "expects " + name + " valid cols <= physical cols");
+    }
+    return success();
+  };
+  if (failed(verifyValidShape(dst0Ty, "dst0")) ||
+      failed(verifyValidShape(dst1Ty, "dst1"))) {
+    return failure();
+  }
+
+  // A5 partial-valid physical-stride gate (design §3.4, §5.1-7): the
+  // NZ block stride must come from physicalRows, and A5's first
+  // implementation has no verified arbitrary partial-valid stride semantics.
+  // physicalRows=32, validRows=13 must be rejected instead of silently
+  // producing a 16*c0 second-block offset; physicalRows=16, validRows=13 is
+  // the positive control. A2/A3 and VPTO use physical rows directly.
+  if (isA5) {
+    auto checkPartialGate = [&](const SmallVector<int64_t, 4> &vv,
+                                const SmallVector<int64_t, 4> &pp,
+                                StringRef name) -> LogicalResult {
+      if (pp.size() != 2 || vv.size() != 2) {
+        return failure();
+      }
+      bool partial = (pp[0] != ShapedType::kDynamic &&
+                      vv[0] != ShapedType::kDynamic &&
+                      (vv[0] != pp[0] || vv[1] != pp[1]));
+      if (!partial) {
+        return success();
+      }
+      int64_t align16 = (vv[0] + 15) / 16 * 16;
+      if (pp[0] != align16) {
+        return op.emitOpError(
+            "A5 partial-valid ND-to-2xNZ requires physicalRows == "
+            "align16(validRows) for " +
+            name);
+      }
+      return success();
+    };
+    if (failed(checkPartialGate(getValidShapeVec(dst0Ty), getShapeVec(dst0Ty),
+                                "dst0")) ||
+        failed(checkPartialGate(getValidShapeVec(dst1Ty), getShapeVec(dst1Ty),
+                                "dst1"))) {
+      return failure();
+    }
+  }
+
+  // 10. per-window constant bounds checks (valid dst extent).
+  if (failed(verifyNd2xNzWindowBounds(
+          *opBase, srcIdx[0], srcIdx[1], srcTy, dst0Ty,
+          /*constFold=*/true)) ||
+      failed(verifyNd2xNzWindowBounds(
+          *opBase, srcIdx[2], srcIdx[3], srcTy, dst1Ty,
+          /*constFold=*/true))) {
+    return failure();
+  }
+
+  // The dual-output form carries no fp/preQuantScalar/relu/acc-to-vec modes.
+  if (op.getFp() || op.getPreQuantScalar()) {
+    return op.emitOpError(
+        "expects ND-to-2xNZ form without fp or preQuantScalar");
+  }
+  if (op.getReluPreMode() != pto::ReluPreMode::NoRelu ||
+      static_cast<bool>(op.getAccToVecModeAttr())) {
+    return op.emitOpError(
+        "expects ND-to-2xNZ form without reluPreMode or accToVecMode");
+  }
+  return success();
+}
+
+} // namespace
+
+mlir::pto::TExtractOp::Form mlir::pto::TExtractOp::classifyForm() {
+  const auto &segments = getProperties().operandSegmentSizes;
+  int32_t nSrc = segments[0];
+  int32_t nIdx = segments[1];
+  int32_t nDst = segments[2];
+  int32_t nFp = segments[3];
+  int32_t nPre = segments[4];
+  if (nSrc != 1 || nFp < 0 || nFp > 1 || nPre < 0 || nPre > 1) {
+    return Form::Invalid;
+  }
+  if (nIdx == 2 && nDst == 1) {
+    return Form::SingleOutput;
+  }
+  if (nIdx == 4 && nDst == 2 && nFp == 0 && nPre == 0) {
+    return Form::NdTo2xNz;
+  }
+  return Form::Invalid;
+}
+
+bool mlir::pto::TExtractOp::isSingleOutputForm() {
+  return classifyForm() == Form::SingleOutput;
+}
+
+bool mlir::pto::TExtractOp::isNdTo2xNzForm() {
+  return classifyForm() == Form::NdTo2xNz;
+}
+
+::mlir::TypedValue<::mlir::IndexType> mlir::pto::TExtractOp::getIndexRow() {
+  assert(isSingleOutputForm() &&
+         "getIndexRow requires the single-output textract form");
+  return ::llvm::cast<::mlir::TypedValue<::mlir::IndexType>>(getIndices()[0]);
+}
+
+::mlir::TypedValue<::mlir::IndexType> mlir::pto::TExtractOp::getIndexCol() {
+  assert(isSingleOutputForm() &&
+         "getIndexCol requires the single-output textract form");
+  return ::llvm::cast<::mlir::TypedValue<::mlir::IndexType>>(getIndices()[1]);
+}
+
+::mlir::Value mlir::pto::TExtractOp::getDst() {
+  assert(isSingleOutputForm() &&
+         "getDst requires the single-output textract form");
+  return getDsts()[0];
+}
+
+::mlir::OpOperand &mlir::pto::TExtractOp::getIndexRowMutable() {
+  return getOperation()->getOpOperand(1);
+}
+
+::mlir::OpOperand &mlir::pto::TExtractOp::getIndexColMutable() {
+  return getOperation()->getOpOperand(2);
+}
+
+::mlir::OpOperand &mlir::pto::TExtractOp::getDstMutable() {
+  // Flattened operand order: src, indices..., dsts..., fp?, preQuantScalar?.
+  return getOperation()->getOpOperand(
+      1 + getProperties().operandSegmentSizes[1]);
+}
+
+::mlir::MutableOperandRange mlir::pto::TExtractOp::getDpsInitsMutable() {
+  Form form = classifyForm();
+  if (form != Form::SingleOutput && form != Form::NdTo2xNz) {
+    // Fail-safe for malformed segment schemas: never let a partial range
+    // mask an extra destination.
+    return ::mlir::MutableOperandRange(getOperation(), 0, 0);
+  }
+  const auto &segments = getProperties().operandSegmentSizes;
+  return ::mlir::MutableOperandRange(getOperation(), 1 + segments[1],
+                                     segments[2]);
+}
+
+::mlir::pto::PIPE mlir::pto::TExtractOp::getPipe() {
+  switch (classifyForm()) {
+  case Form::NdTo2xNz:
+    // The dual-output overload is a pure vector-frontend op on every target.
+    return ::mlir::pto::PIPE::PIPE_V;
+  case Form::Invalid:
+    return ::mlir::pto::PIPE::PIPE_V;
+  case Form::SingleOutput:
+    break;
+  }
+
+  // Legacy single-output pipe selection by (src, dst) address-space pair.
+  // Align with pto-isa TEXTRACT op classes:
+  //   - TEXTRACT_M2LR : MAT -> LEFT/RIGHT (and scaling-like targets) (MTE1)
+  //   - TEXTRACT_V2M  : VEC -> MAT       (FIX)
+  //   - TEXTRACT_A2M  : ACC -> MAT       (FIX)
+  // For pure UB slices (VEC -> VEC), treat as vector pipe.
+  auto getASFromType = [](Type ty)
+      -> std::optional<::mlir::pto::AddressSpace> {
+    if (auto tb = llvm::dyn_cast<::mlir::pto::TileBufType>(ty)) {
+      if (auto as = llvm::dyn_cast_or_null<::mlir::pto::AddressSpaceAttr>(
+              tb.getMemorySpace()))
+        return as.getAddressSpace();
+    }
+    return std::nullopt;
+  };
+
+  auto sOpt = getASFromType(getSrc().getType());
+  auto dOpt = getASFromType(getDst().getType());
+  if (!sOpt.has_value() || !dOpt.has_value()) {
+    return ::mlir::pto::PIPE::PIPE_V;
+  }
+
+  const auto s = sOpt.value();
+  const auto d = dOpt.value();
+
+  if (s == ::mlir::pto::AddressSpace::MAT &&
+      (d == ::mlir::pto::AddressSpace::LEFT ||
+       d == ::mlir::pto::AddressSpace::RIGHT ||
+       d == ::mlir::pto::AddressSpace::BIAS ||
+       d == ::mlir::pto::AddressSpace::SCALING)) {
+    return ::mlir::pto::PIPE::PIPE_MTE1;
+  }
+
+  if ((s == ::mlir::pto::AddressSpace::VEC &&
+       d == ::mlir::pto::AddressSpace::MAT) ||
+      (s == ::mlir::pto::AddressSpace::ACC &&
+       (d == ::mlir::pto::AddressSpace::MAT ||
+        d == ::mlir::pto::AddressSpace::VEC))) {
+    return ::mlir::pto::PIPE::PIPE_FIX;
+  }
+
+  if (s == ::mlir::pto::AddressSpace::VEC &&
+      d == ::mlir::pto::AddressSpace::VEC) {
+    return ::mlir::pto::PIPE::PIPE_V;
+  }
+
+  // Default to vector pipe for unmatched combinations.
+  return ::mlir::pto::PIPE::PIPE_V;
+}
+
+static ::mlir::ParseResult parseTExtractOperands(
+    ::mlir::OpAsmParser &parser, ::mlir::OperationState &result) {
+  ::mlir::Builder &builder = parser.getBuilder();
+
+  if (parser.parseKeyword("ins") || parser.parseLParen()) {
+    return failure();
+  }
+
+  ::mlir::OpAsmParser::UnresolvedOperand srcOp;
+  if (parser.parseOperand(srcOp)) {
+    return failure();
+  }
+
+  // Extra ins operands (indices plus an optional trailing preQuantScalar).
+  SmallVector<::mlir::OpAsmParser::UnresolvedOperand, 5> extraOps;
+  while (succeeded(parser.parseOptionalComma())) {
+    ::mlir::OpAsmParser::UnresolvedOperand op;
+    if (parser.parseOperand(op)) {
+      return failure();
+    }
+    extraOps.push_back(op);
+  }
+
+  if (parser.parseColon()) {
+    return failure();
+  }
+
+  SmallVector<Type, 6> insTypes(extraOps.size() + 1);
+  if (parser.parseType(insTypes[0])) {
+    return failure();
+  }
+  for (unsigned i = 0; i < extraOps.size(); ++i) {
+    if (parser.parseComma() || parser.parseType(insTypes[i + 1])) {
+      return failure();
+    }
+  }
+
+  // Optional legacy fp operand (after the type list, single-output only).
+  ::mlir::OpAsmParser::UnresolvedOperand fpOp;
+  Type fpType;
+  bool hasFp = false;
+  if (succeeded(parser.parseOptionalKeyword("fp"))) {
+    hasFp = true;
+    if (parser.parseOperand(fpOp) || parser.parseColon() ||
+        parser.parseType(fpType)) {
+      return failure();
+    }
+  }
+
+  if (parser.parseRParen() || parser.parseKeyword("outs") ||
+      parser.parseLParen()) {
+    return failure();
+  }
+
+  SmallVector<::mlir::OpAsmParser::UnresolvedOperand, 2> dstOps;
+  if (parser.parseOperand(dstOps.emplace_back())) {
+    return failure();
+  }
+  while (succeeded(parser.parseOptionalComma())) {
+    if (parser.parseOperand(dstOps.emplace_back())) {
+      return failure();
+    }
+  }
+
+  if (parser.parseColon()) {
+    return failure();
+  }
+  SmallVector<Type, 2> dstTypes(dstOps.size());
+  if (parser.parseType(dstTypes[0])) {
+    return failure();
+  }
+  for (unsigned i = 1; i < dstOps.size(); ++i) {
+    if (parser.parseComma() || parser.parseType(dstTypes[i])) {
+      return failure();
+    }
+  }
+  if (parser.parseRParen() || parser.parseOptionalAttrDict(result.attributes)) {
+    return failure();
+  }
+
+  // Classify by counts: an i64-typed extra ins operand is the legacy
+  // preQuantScalar; everything else is an index.
+  const unsigned nExtras = extraOps.size();
+  const bool hasPre = (nExtras == 3) &&
+                      llvm::isa<mlir::IntegerType>(insTypes.back());
+  const unsigned nIndices = nExtras - (hasPre ? 1 : 0);
+
+  result.addAttribute(
+      "operandSegmentSizes",
+      builder.getDenseI32ArrayAttr(
+          {1, static_cast<int32_t>(nIndices),
+           static_cast<int32_t>(dstOps.size()), hasFp ? 1 : 0,
+           hasPre ? 1 : 0}));
+
+  // Resolve operands in the flattened order
+  // src, indices..., dsts..., fp?, preQuantScalar?. resolveOperand appends
+  // directly into result.operands.
+  if (parser.resolveOperand(srcOp, insTypes[0], result.operands)) {
+    return failure();
+  }
+  for (unsigned i = 0; i < nIndices; ++i) {
+    if (parser.resolveOperand(extraOps[i], insTypes[i + 1],
+                              result.operands)) {
+      return failure();
+    }
+  }
+  for (unsigned i = 0; i < dstOps.size(); ++i) {
+    if (parser.resolveOperand(dstOps[i], dstTypes[i], result.operands)) {
+      return failure();
+    }
+  }
+  if (hasFp) {
+    if (parser.resolveOperand(fpOp, fpType, result.operands)) {
+      return failure();
+    }
+  }
+  if (hasPre) {
+    if (parser.resolveOperand(extraOps.back(), insTypes.back(),
+                              result.operands)) {
+      return failure();
+    }
+  }
+  return success();
+}
+
+void mlir::pto::TExtractOp::print(::mlir::OpAsmPrinter &p) {
+  // The assembly framework emits the op name (e.g. "pto.textract") without a
+  // trailing space; mirror declarative printers by starting with a space.
+  p << ' ';
+  p << "ins(";
+  p.printOperand(getSrc());
+  for (Value idx : getIndices()) {
+    p << ", ";
+    p.printOperand(idx);
+  }
+  if (getPreQuantScalar()) {
+    p << ", ";
+    p.printOperand(getPreQuantScalar());
+  }
+  p << " : ";
+  p.printType(getSrc().getType());
+  for (Value idx : getIndices()) {
+    p << ", ";
+    p.printType(idx.getType());
+  }
+  if (getPreQuantScalar()) {
+    p << ", ";
+    p.printType(getPreQuantScalar().getType());
+  }
+  if (getFp()) {
+    p << " fp ";
+    p.printOperand(getFp());
+    p << " : ";
+    p.printType(getFp().getType());
+  }
+  p << ")";
+  p << " outs(";
+  bool first = true;
+  for (Value d : getDsts()) {
+    if (!first) {
+      p << ", ";
+    }
+    first = false;
+    p.printOperand(d);
+  }
+  p << " : ";
+  first = true;
+  for (Value d : getDsts()) {
+    if (!first) {
+      p << ", ";
+    }
+    first = false;
+    p.printType(d.getType());
+  }
+  p << ")";
+  p.printOptionalAttrDict((*this)->getAttrs(), {"operandSegmentSizes"});
+}
+
+::mlir::ParseResult mlir::pto::TExtractOp::parse(
+    ::mlir::OpAsmParser &parser, ::mlir::OperationState &result) {
+  return parseTExtractOperands(parser, result);
+}
+
 mlir::LogicalResult mlir::pto::TExtractOp::verify() {
+  Form form = classifyForm();
+  if (form == Form::Invalid) {
+    return emitOpError(
+        "malformed TEXTRACT operand segments; expected "
+        "[src=1, indices=2, dsts=1, fp=0/1, preQuantScalar=0/1] or "
+        "[src=1, indices=4, dsts=2, fp=0, preQuantScalar=0]");
+  }
+  if (form == Form::NdTo2xNz) {
+    return verifyNdTo2xNzForm(*this);
+  }
+
   auto isA2A3AccCastExtractTypePair = [&](Type srcElem, Type dstElem) -> bool {
     return srcElem.isF32() && (dstElem.isF16() || dstElem.isBF16());
   };
@@ -17501,15 +18155,31 @@ void TExpandsOp::getEffects(
   PTO_ADD_WRITE(getDstMutable());
 }
 
-// TEXTRACT: Read(src) -> Write(dst)
+// TEXTRACT: Read(src [, fp]) -> Write(dsts).
+// The ND-to-2xNZ form models one read and two writes; malformed segment
+// schemas conservatively mark every memory-carrying operand Read+Write so an
+// extra source or destination can never slip outside the dependency model.
 void TExtractOp::getEffects(
     SmallVectorImpl<SideEffects::EffectInstance<MemoryEffects::Effect>> &effects) {
+  Form form = classifyForm();
+  if (form == Form::Invalid) {
+    for (OpOperand &operand : getOperation()->getOpOperands()) {
+      if (!llvm::isa<pto::TileBufType>(operand.get().getType())) {
+        continue;
+      }
+      addEffect(effects, &operand, MemoryEffects::Read::get());
+      addEffect(effects, &operand, MemoryEffects::Write::get());
+    }
+    return;
+  }
   addEffect(effects, &getSrcMutable(), MemoryEffects::Read::get());
   auto fpRange = getFpMutable();
   if (!fpRange.empty()) {
     addEffect(effects, &*fpRange.begin(), MemoryEffects::Read::get());
   }
-  addEffect(effects, &getDstMutable(), MemoryEffects::Write::get());
+  for (OpOperand &dst : getDpsInitsMutable()) {
+    addEffect(effects, &dst, MemoryEffects::Write::get());
+  }
 }
 
 // TINSERT: Read(src) -> Write(dst)

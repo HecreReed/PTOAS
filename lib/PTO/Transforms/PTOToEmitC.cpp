@@ -9747,10 +9747,34 @@ struct PTOExtractToEmitC : public OpConversionPattern<pto::TExtractOp> {
     auto loc = op.getLoc();
     auto *ctx = rewriter.getContext();
 
+    auto form = op.classifyForm();
+    if (form == pto::TExtractOp::Form::Invalid) {
+      return rewriter.notifyMatchFailure(op,
+                                         "malformed TEXTRACT operand segments");
+    }
+
+    // The range-based ODS no longer generates fixed-field adaptor accessors;
+    // both branches read core operands from the ranges.
+    auto indices = adaptor.getIndices();
+    auto dsts = adaptor.getDsts();
     Value src = adaptor.getSrc();
-    Value dst = adaptor.getDst();
-    Value r0 = adaptor.getIndexRow();
-    Value c0 = adaptor.getIndexCol();
+
+    if (form == pto::TExtractOp::Form::NdTo2xNz) {
+      // Exactly one public seven-argument TEXTRACT call. Never split into two
+      // single-output calls: that would select the Vec->Vec path and lose the
+      // ND-to-NZ layout conversion and the matching backend dispatch.
+      SmallVector<Value, 7> operands{
+          dsts[0], dsts[1], src, indices[0], indices[1], indices[2],
+          indices[3]};
+      rewriter.create<emitc::CallOpaqueOp>(
+          loc, TypeRange{}, "TEXTRACT", ArrayAttr{}, ArrayAttr{}, operands);
+      rewriter.eraseOp(op);
+      return success();
+    }
+
+    Value dst = dsts[0];
+    Value r0 = indices[0];
+    Value c0 = indices[1];
     Value preQuantScalar;
     if (op.getPreQuantScalar())
       preQuantScalar = adaptor.getPreQuantScalar();

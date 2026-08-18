@@ -173,6 +173,32 @@ static PointerLikeInfo getPointerLikeInfo(pto::AllocMultiTileOp alloc) {
   return info;
 }
 
+// Single-address model for plain allocations: the static byte address folded
+// from pto.alloc_tile.addr is the only address of the allocation. Different
+// SSA allocation roots that fold to the same (or overlapping) address still
+// conflict, which is what the ND-to-2xNZ partial-dump fixture relies on
+// (WAW/RAW through same-address AllocTileOps). A non-foldable address keeps a
+// kDynamic entry so same-address-space allocations stay conservatively
+// conflicting instead of being treated as disjoint.
+static PointerLikeInfo getPointerLikeInfo(pto::AllocTileOp alloc) {
+  PointerLikeInfo info(alloc);
+  info.allocateSize = getBufferBitSize(alloc.getResult());
+  auto tileType = alloc.getResult().getType();
+  if (auto space = dyn_cast_or_null<pto::AddressSpaceAttr>(
+          tileType.getMemorySpace())) {
+    info.addressSpace = space.getAddressSpace();
+  }
+  if (auto base = getConstantI64(alloc.getAddr())) {
+    info.addresses.push_back(*base * pto::kBitsToByte);
+  } else {
+    info.addresses.push_back(ShapedType::kDynamic);
+  }
+  if (auto loop = alloc->getParentOfType<LoopLikeOpInterface>()) {
+    info.parentLoop = loop;
+  }
+  return info;
+}
+
 static MemInfo getMemInfoForMultiTileGet(pto::MultiTileGetOp get) {
   auto alloc = get.getSource().getDefiningOp<pto::AllocMultiTileOp>();
   if (!alloc) {
@@ -202,6 +228,9 @@ MemInfo getMemInfo(Value val) {
     }
     if (auto allocMulti = llvm::dyn_cast<pto::AllocMultiTileOp>(defOp)) {
       return MemInfo(val, getPointerLikeInfo(allocMulti));
+    }
+    if (auto allocTile = llvm::dyn_cast<pto::AllocTileOp>(defOp)) {
+      return MemInfo(val, getPointerLikeInfo(allocTile));
     }
     if (auto multiGet = llvm::dyn_cast<pto::MultiTileGetOp>(defOp)) {
       return getMemInfoForMultiTileGet(multiGet);

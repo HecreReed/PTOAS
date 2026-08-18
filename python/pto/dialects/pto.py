@@ -933,6 +933,100 @@ def partition_view(*args, **kwargs) -> _ods_ir.Value:
 PartitionView = PartitionViewOp
 
 
+_GeneratedTExtractOp = TExtractOp
+_TEXTRACT_UNSET = object()
+
+
+class TExtractOp(_GeneratedTExtractOp):
+    """Facade preserving the legacy single-output textract interface.
+
+    The range-based ODS builds TExtractOp(src, indices, dsts, ...). This
+    facade keeps the old positional/keyword form
+    TExtractOp(src, index_row, index_col, dst, *, fp=..., ...) source
+    compatible by delegating to the generated range constructor with
+    indices=[row, col] and dsts=[dst]. The ND-to-2xNZ dual-output form
+    is constructed through build_nd_to_2xnz on the same class; no separate
+    op class or mnemonic is exposed.
+    """
+
+    @classmethod
+    def build_nd_to_2xnz(cls, src, row0, col0, row1, col1, dst0, dst1, *, loc=None, ip=None):
+        return cls(
+            src=src,
+            indices=[row0, col0, row1, col1],
+            dsts=[dst0, dst1],
+            loc=loc,
+            ip=ip,
+        )
+
+    def __init__(self, src, *args, indices=_TEXTRACT_UNSET, dsts=_TEXTRACT_UNSET,
+                 index_row=_TEXTRACT_UNSET, index_col=_TEXTRACT_UNSET,
+                 dst=_TEXTRACT_UNSET, fp=None, preQuantScalar=None,
+                 accToVecMode=None, reluPreMode=None, loc=None, ip=None):
+        if indices is not _TEXTRACT_UNSET or dsts is not _TEXTRACT_UNSET:
+            if args or index_row is not _TEXTRACT_UNSET or index_col is not _TEXTRACT_UNSET or dst is not _TEXTRACT_UNSET:
+                raise TypeError(
+                    "TExtractOp range form cannot be combined with legacy "
+                    "positional index/dst arguments"
+                )
+            super().__init__(src, indices=indices, dsts=dsts, fp=fp,
+                             preQuantScalar=preQuantScalar,
+                             accToVecMode=accToVecMode,
+                             reluPreMode=reluPreMode, loc=loc, ip=ip)
+            return
+
+        if args:
+            if index_row is not _TEXTRACT_UNSET or index_col is not _TEXTRACT_UNSET or dst is not _TEXTRACT_UNSET:
+                raise TypeError(
+                    "TExtractOp legacy positional form cannot be combined "
+                    "with index_row/index_col/dst keywords"
+                )
+            if len(args) != 3:
+                raise TypeError(
+                    "TExtractOp legacy form expects (src, index_row, index_col, dst)"
+                )
+            index_row, index_col, dst = args
+
+        if index_row is _TEXTRACT_UNSET or index_col is _TEXTRACT_UNSET or dst is _TEXTRACT_UNSET:
+            raise TypeError("missing required arguments: index_row, index_col, dst")
+        super().__init__(src, [index_row, index_col], [dst], fp=fp,
+                         preQuantScalar=preQuantScalar,
+                         accToVecMode=accToVecMode,
+                         reluPreMode=reluPreMode, loc=loc, ip=ip)
+
+    @property
+    def indexRow(self):
+        return self.indices[0]
+
+    @property
+    def indexCol(self):
+        return self.indices[1]
+
+    @property
+    def dst(self):
+        return self.dsts[0]
+
+
+TExtract = TExtractOp
+
+
+def textract(src, index_row, index_col, dst, *, fp=None,
+             pre_quant_scalar=None, acc_to_vec_mode=None,
+             relu_pre_mode=None, loc=None, ip=None):
+    """Legacy textract free function wrapper.
+
+    Shadows the generated range-form textract(src, indices, dsts, ...) so
+    existing callers keep the old positional signature.
+    """
+    return TExtractOp(
+        src, index_row, index_col, dst, fp=fp,
+        preQuantScalar=pre_quant_scalar,
+        accToVecMode=acc_to_vec_mode, reluPreMode=relu_pre_mode,
+        loc=loc, ip=ip,
+    )
+
+
+
 _GeneratedTScatterOp = TScatterOp
 
 
