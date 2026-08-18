@@ -65,10 +65,13 @@ lowering、verifier、TileLib template 或回归测试，因此缺口仍然存�
    implementation 的后继提交。pin 更新必须逐 remote 做 ancestry、API 和编译验证，不允许
    跨 remote 比较 SHA；只含公开 API、缺少 CPU implementation 的 revision 不能宣称 CPU-sim 支持。
 11. partial-valid/odd/`1x1` 是定义明确的 TEXTRACT/UB-only 支持，不自动获得 NZ TSTORE
-    支持；完整 TSTORE 只对 full-valid destination 宣称，除非另有经过验证的
-    full-valid materialization。
+    支持；production StoreUse validation 按静态 physical range 而不是 SSA use chain 拒绝
+    partial destination 的所有 alias TSTORE。测试所需的 full-valid dump alias 只由编译期关闭的
+    test hook 放行，不构成 production materialization 语义。
 12. CPU-sim、cost-model 和其他 optional backend 的 unsupported 判断必须来自 driver 注入的
     capability manifest，并在最终 backend lowering 前失败，不能依赖后期 C++ 实例化。
+13. GraphSyncSolver 必须为普通 `AllocTileOp` 建立基于静态 `addr`、physical footprint 和
+    address space 的单地址模型；不同 SSA allocation root 使用同一地址时仍必须产生 hazard。
 
 ## 3. PTO-ISA 真实契约
 
@@ -155,46 +158,71 @@ source 或使两个可观察输出互相覆盖。
    测试 harness 在 TEXTRACT 前显式把两个 destination 的完整物理 UB footprint 初始化为
    固定字节模式（默认 zero）；该初始化是 harness/codegen helper 的前置动作，不是
    TEXTRACT 的隐式语义，也不能用 `TFILLPAD` 代替对整个物理 footprint 的清零。该模式
-   不把 partial descriptor 直接传给 TSTORE，也不把未定义区作为 production 输出写回 GM；
-   后文 test-only full-valid dump alias 可以单独执行观测 TSTORE。golden 只比较两个
-   destination 各自的 valid logical region。预初始化值只用于避免读取未初始化内存和诊断
-   越界写，未定义区不参与数值比较。
+   不把 partial descriptor 或它的任意 physical-range alias 作为 production TSTORE source，
+   也不把未定义区作为 production 输出写回 GM。后文受控的 test-only full-valid dump alias
+   只用于 NPU 观测。golden 只比较两个 destination 各自的 valid logical region；预初始化值
+   只用于避免读取未初始化内存，未定义区不参与数值比较。
 
 当前 PTOAS 没有一个能把静态 partial tile 安全地改成 full-valid tile 的现有操作：
 `pto.set_validshape` 仅接受 `v_row=?/v_col=?` 的本地动态 tile，并且只修改运行时元数据。
 因此首版不把同一个 partial descriptor 伪装成 full-valid，也不在 generic `TSTORE` 中放宽契约。
-对于 partial-valid destination，若调用方强行把它直接接入 TSTORE，新增的链路验证必须在
-PTOAS 阶段报错：
+`PTOValidateNd2xNzStoreUsePass` 必须按第 5.3 节的静态 physical-range definedness 检查覆盖
+同址但不同 SSA root 的 alias；直接使用 partial descriptor、经 view 派生后使用，或者另建
+同址 full-valid `alloc_tile` 后 TSTORE，都必须在 production PTOAS 阶段报错：
 
 ```text
-pto.textract.nd2xnz partial-valid destination is not eligible for NZ TSTORE;
-use UB-only validation or provide a proven full-valid materialization
+pto.textract.nd2xnz partial-valid destination physical range aliases a TSTORE source;
+undefined NZ padding cannot be stored
 ```
 
-NPU ST 需要一个可编译的 UB 观测路径，但不能依赖目前并不存在的 raw-UB dump API。实现 PR
-在 NPU testcase support 中增加 test-only helper `prepareAndDumpPartialNzForTest`，固定使用
-level3 静态地址和现有公开指令，流程如下：
+NPU ST 的 full-valid alias 必须有 production binary 无法打开的受控入口。实现新增
+`PTOAS_ENABLE_TEST_HOOKS` CMake option，默认 `OFF`，release/wheel 构建保持关闭；只有显式
+打开该 option 的 lit/NPU test build 才注册 `llvm::cl::ReallyHidden` 选项
+`--pto-test-only-allow-nd2xnz-physical-dump`。driver 将该 bool 通过 pipeline/pass option 显式
+传给 StoreUse pass，不能使用进程全局状态，也不能接受输入 IR 自行写 module attribute。
+production binary 中该选项不存在，普通 full-valid alias 路径仍得到上面的稳定诊断。
 
-1. 对每个 partial destination 同时建立 `partial descriptor` 和 `full-valid dump alias`；二者
-   physical shape、dtype、layout、compact mode 完全相同，且两个 `pto.alloc_tile` 使用同一个
-   非负静态 UB address。partial descriptor 保留测试所需 valid shape，dump alias 的
-   `validRows/validCols` 则等于 physical extent。两个 destination 各用一组互不重叠的地址。
-2. 用 canonical physical-size NZ GlobalTensor 和 `TLOAD` 把 full-size zero GM tensor 载入
-   dump alias，从而初始化该 destination 的完整物理 UB footprint。不能用 `TASSIGN` 构造这条
-   alias，因为 runtime-bound provenance gate 会且应该拒绝它。
-3. 用 partial descriptor 执行一次双输出 `TEXTRACT`。InsertSync/GraphSync 必须从两组 alias 的
-   相同静态 absolute range 推导 `TLOAD -> TEXTRACT` 的 WAW 依赖；fixture 不能依赖源码顺序
-   恰好生效。
-4. 用 full-valid dump alias 执行 generic `TSTORE` 到独立的 physical-size GM output。传给
-   TSTORE 的 descriptor 是 full-valid，因此 PTO-ISA debug assertion 保持开启也成立；
-   `PTOValidateNd2xNzStoreUsePass` 仍会拒绝 partial descriptor 自身的直接 TSTORE use。
-5. host golden 只从 physical GM output 解码和比较 partial descriptor 的 valid logical
-   coordinates。valid 区外、NZ tail 和 `RowPlusOne` gap 均不比较；GM output 两侧的 guard bytes
-   单独验证，以发现越界写。
+test hook 也不是无条件跳过 pass。它只接受 `prepareAndDumpPartialNzForTest` 生成的 canonical
+fixture：level3 静态地址；partial descriptor 与 dump alias 的 physical range 完全相同；
+dtype/layout/compact/physical shape 相同；dump alias full-valid；完整 footprint 初始化支配
+TEXTRACT；TSTORE 写入独立、精确 physical-size 的 GM output；相邻 sentinel redzone、显式 barrier
+和 dump 操作齐全；这些 allocation 没有 fixture 之外的 alias use。任一条件不满足仍按 production
+规则拒绝。hook 只豁免该 canonical dump TSTORE，不改变其他 op 或后续 TSTORE 的 definedness。
 
-该 helper 生成普通、可在 A2/A3/A5 编译执行的 `TLOAD/TEXTRACT/TSTORE` kernel，不要求
-simulator 特权接口。full-valid alias 只属于测试 fixture 的观测适配器，不扩大 production
-partial-valid TSTORE 语义，也不把清零后的 padding 当作 TEXTRACT 输出。
+实现 PR 在 NPU testcase support 中增加 test-only helper `prepareAndDumpPartialNzForTest`。每个
+destination 固定使用 level3 静态地址，并使用第 6.3 节要求抽出的 shared physical-footprint
+helper 计算真实 byte size（包括 `RowPlusOne` implicit gap），流程如下：
+
+1. UB 地址布局固定为
+   `[32B pre-redzone][physical destination][32B post-redzone]`。destination base 至少为 32B，
+   两个 destination 连同 redzone 两两不重叠；physical footprint 的前后边界必须满足目标架构
+   的公开 tile load/store alignment。
+2. 对 physical destination 同时建立 `partial descriptor` 和 `full-valid dump alias`；二者
+   physical shape、dtype、layout、compact mode 完全相同，且两个普通 `pto.alloc_tile` 使用
+   同一个非负静态 UB address。partial descriptor 保留测试 valid shape，dump alias 的
+   `validRows/validCols` 等于 physical extent。不能用 `TASSIGN` 构造 alias，因为 runtime-bound
+   provenance gate 会且应该拒绝它。
+3. pre/post redzone 分别用 full-valid `i8` ND sentinel tile 表示，固定为 `rows=1, cols=32,
+   v_row=1, v_col=32, row_major/none_box`。先以 `TLOAD` 从 GM 写入不同的 32B pattern，例如
+   `0xA5`/`0x5A`；再用 canonical physical-size NZ GlobalTensor 和 `TLOAD` 把 full-size zero
+   tensor 载入 dump alias，初始化 destination 的完整 footprint。
+4. 初始化后插入显式 `pto.barrier <PIPE_ALL>`，再用 partial descriptor 执行一次双输出
+   `TEXTRACT`。TEXTRACT 后再插入显式 `pto.barrier <PIPE_ALL>`，防止不在合法 MemoryEffects
+   range 内的越界写与 redzone dump 被硬件重排。该 NPU fixture 不承担证明 alias 自动同步的
+   职责；GraphSync 的 WAW/RAW 由第 6.3、12.3 节的独立 `_gss` 回归验证。
+5. 用 full-valid dump alias 执行 generic `TSTORE` 到独立的 physical-size GM output，并把四个
+   sentinel tile 分别 TSTORE 到独立的 32B GM output。传给所有 TSTORE 的 descriptor 都是
+   full-valid，PTO-ISA debug assertion 必须保持开启。
+6. host golden 只从 physical GM output 解码和比较 partial descriptor 的 valid logical
+   coordinates；valid 区外、NZ tail 和 `RowPlusOne` gap 均不比较。四个 redzone output 必须逐
+   byte 保持原 sentinel，physical GM output 自身两侧的 host guard bytes 也必须保持不变。
+
+上述 `1x32xi8` sentinel TLOAD/TSTORE 必须先对 implementation PR 选定的 A2/A3/A5 PTO-ISA pin
+逐架构 compile-probe，并在设备上验证。若某架构的公开 tile 指令不能观测紧贴 footprint 的
+redzone，该架构的 partial NPU ST 不得计为通过；保留独立 `test/npu_validation` raw-buffer
+harness，使用 backend-native UB-to-GM byte copy 导出 redzone。在 raw harness 落地前，该架构
+只能计 compile-only/simulator coverage。full-valid alias 只属于受控测试 fixture，不扩大
+production partial-valid TSTORE 语义，也不把清零后的 padding 当作 TEXTRACT 输出。
 
 后续若要支持 partial-valid 的完整写回，必须先增加一个经过 backend 验证的
 full-valid materialization（动态 valid tile、物理 extent 和 `SetValidShape` 的顺序均需
@@ -533,13 +561,29 @@ golden，才能无条件放行动态/非对齐 index。FP4 未通过第 3.5 节�
 - static bounds 的加法使用 checked arithmetic，避免超大常量溢出后误判为合法。
 
 首版的完整 TSTORE eligibility 由独立的 `PTOValidateNd2xNzStoreUsePass` 在
-backend-boundary 检查，而不是由 `TExtractNd2xNzOp::verify()` 假定。该 pass 沿着两个 DPS
-destination 的 view/use chain 到后续 `TSTORE`，要求 plain NZ 的 valid shape 等于 physical
-shape；发现 partial-valid destination 时给出第 3.2.1 节的稳定诊断。它在
-`PTOResolveBufferSelect` 之后、TSTORE/EmitC/VPTO 最终 lowering 之前运行，因而也能看到
-multi-buffer materialization。这样 partial-valid op 本身仍可用于 UB-only 测试，但不会在
-debug PTO-ISA 上晚期触发 TSTORE assertion；test-only full-valid dump alias 不属于该
-destination view/use chain。
+backend-boundary 检查，而不是由 `TExtractNd2xNzOp::verify()` 假定。该 pass 不能只沿两个 DPS
+destination 的 SSA view/use chain；它必须执行 alias-aware physical-definedness dataflow：
+
+1. pass 在 `PTOResolveBufferSelect` 和 level1/2 memory planning 之后、TSTORE/EmitC/VPTO 最终
+   lowering 之前运行。level1/2 使用 planner 物化地址，level3 已经由第 7.1 节 gate 保证静态
+   地址；multi-buffer slot 也已经 materialize。所有 range 使用 physical byte footprint，不能
+   使用 valid shape。
+2. 每次 partial-valid `pto.textract.nd2xnz` 写 destination 时，将该 static physical range 标记为
+   “logical valid region 之外未定义”。标记以 `(address space, absolute begin, byte size)` 为键，
+   不以 allocation SSA root 为键，所以另一个同址 `alloc_tile`、view/subview/cast 或 full-valid
+   descriptor 都命中同一 range。
+3. dataflow 按程序顺序传播；控制流 join 对 live marked ranges 取并集，loop 做 fixed point。
+   只有白名单中可证明覆盖整个 physical range 的 write 才清除标记，首版至少包含 full-valid
+   `TLOAD` 的 exact/superset overwrite。partial write、未知 MemoryEffects 或只覆盖 valid region
+   的 op 都不能清除；不能把任意 Write effect 当成完整定义。
+4. 任一后续 `TStoreOp.src` 的 static physical range 与 live marked range 相交即给出第 3.2.1 节
+   诊断。若同 address space 中存在可能 alias、但 pass 无法解析的 TSTORE source range，也必须
+   保守拒绝，不能退化为 SSA 不同即放行。
+5. test build 的 hidden flag 只对第 3.2.1 节 canonical fixture 的单个 physical dump TSTORE
+   建立窄豁免；该 TSTORE 之后的标记仍然存活。普通构建没有此 pass option。
+
+这样 partial-valid op 本身仍可用于 UB-only 测试，不会在 debug PTO-ISA 上晚期触发 TSTORE
+assertion，也不能通过复制一个同址 full-valid allocation 绕过 production 限制。
 
 ### 5.4 compact mode
 
@@ -626,6 +670,33 @@ full-valid 测试既要证明 MTE2-to-V 依赖存在，也要证明两个 destin
 都被看到；partial-valid UB-only 测试只验证 TEXTRACT 的 V-side producer 和两个 destination
 的 liveness，不把 partial descriptor 直接传给 NZ TSTORE。两类测试都不能只检查第一个 DPS init。
 
+当前 GraphSync 的 traceback 会在普通 `AllocTileOp` 停止，但 `MemInfo::getMemInfo(Value)` 只为
+`AllocMultiTileOp`/`MultiTileGetOp` 构造 `PointerLikeInfo`；普通 allocation 最终退化为 SSA
+Value 相等。实现 PR 必须在 `lib/PTO/Transforms/GraphSyncSolver/MemInfo.cpp` 增加单地址模型：
+
+```cpp
+static PointerLikeInfo getPointerLikeInfo(pto::AllocTileOp alloc);
+```
+
+该 helper 使用 `getBufferBitSize(alloc.getResult())` 填 `allocateSize`，从 tile memory space 填
+`addressSpace`，把静态 byte `addr` 乘 `kBitsToByte` 后作为唯一 `addresses` 元素，并记录
+`parentLoop`。地址不可折叠时写入 `ShapedType::kDynamic`，在同 address space 中保持保守冲突，
+不能留下空 addresses 后把 UB allocation 当成不冲突。`getMemInfo(Value)` 必须显式 dispatch
+`AllocTileOp`；已有 `AllocMultiTileOp`/slot 行为保持不变。
+
+当前 legacy planner、modern planner、semantic range 和 GraphSync 各自维护相近的 tile footprint
+公式。实现不能为 StoreUse/redzone 再复制一套；应把 checked physical-footprint 计算抽到共享
+PTO type/transform utility，并让上述消费者统一调用。该 helper 对 dynamic/negative shape 和
+算术溢出返回 failure，同时唯一地定义 plain/`RowPlusOne` byte size；GraphSync 的
+`getBufferBitSize` 可以作为 bit-unit adapter。这样 alias conflict、no-alias、StoreUse taint 和
+sentinel 的 post-redzone 起点使用同一个 half-open physical range。
+
+因此 test-only fixture 中 `TLOAD(full-valid alias)` 与 `TEXTRACT(partial descriptor)` 的同址
+不同 SSA root 会形成 MTE2-to-V WAW，`TEXTRACT` 与 `TSTORE(full-valid alias)` 会形成
+V-to-MTE3 RAW。该能力由独立的
+`test/lit/pto/textract_nd2xnz_partial_dump_alias_gss.pto` companion 回归锁定，不依赖 NPU
+fixture 中为 redzone 顺序插入的显式 barrier。
+
 ## 7. No-alias 与内存规划
 
 `getSemanticNoAliasPairs()` 为该 op 返回：
@@ -644,6 +715,11 @@ full-valid 测试既要证明 MTE2-to-V 依赖存在，也要证明两个 destin
 
 不能只比较 SSA Value 是否相同。`subview`、`bitcast`、`treshape`、multi-buffer slot 和显式
 地址可能以不同 Value 指向重叠范围，必须复用现有 semantic range 解析。
+
+这里有三套目的不同、都必须实现的 range 消费者：semantic no-alias verifier 证明同一次
+TEXTRACT 的三个 operand 不重叠；GraphSync `PointerLikeInfo` 为不同 pipe 的读写建立 hazard；
+StoreUse definedness 防止 partial destination 的未定义 padding 被 alias TSTORE 导出。前一套
+通过不代表后两套自动成立，不能用其中任一套替代另两套。
 
 runtime-bound gate 是 no-alias 契约的前置条件，而不是 range resolver 的可选优化。当前
 legacy planner 会跳过 `DeclareTileOp`，InsertSync 也只能把 declared tile 自身作为没有绝对
@@ -889,6 +965,11 @@ PTOAS 当前三个 pin 都早于 8 月 14 日功能提交：
   `textract.nd2xnz=false`；
 - support gate 未满足时使用 FP4 或 RowPlusOne；
 - FP4 gate 打开后，覆盖 raw dimension 合法但 emitted dimension 非法，以及反向边界。
+- production StoreUse pass 分别拒绝 partial descriptor 的直接/view TSTORE 和同址不同 SSA
+  full-valid `alloc_tile` alias TSTORE；部分重叠 alias 也必须拒绝；
+- 输入 IR 手写任何 test-only module attribute 不能放行 alias TSTORE；未启用
+  `PTOAS_ENABLE_TEST_HOOKS` 的 binary 不注册 hidden dump option；test build 即使打开 option，
+  非 canonical fixture 仍被拒绝。
 
 ### 12.2 EmitC 与 C++ compile
 
@@ -906,6 +987,8 @@ PTOAS 当前三个 pin 都早于 8 月 14 日功能提交：
   `PTOValidateCodegenCapabilitiesPass` 给出稳定诊断；
 - manifest 选择出的 include root 必须被后续 C++ compile harness 复用；故意替换 include root
   或 PTO-ISA revision 的 probe/compile split 必须失败；
+- A2/A3/A5 分别 compile-probe full-valid `1x32xi8` ND sentinel 的 TLOAD/TSTORE；失败的架构必须
+  走 raw-buffer harness gate，不能继续宣称 tile helper 可观测 allocation redzone；
 - `--emit-pto-ir` 在 capability unknown 时仍可输出 IR，但相同输入进入 EmitC/VPTO 最终
   codegen 必须失败；
 - GitHub CPU backend 未补齐时，记录 compile probe 的缺失符号和 upstream dependency；补齐后
@@ -923,9 +1006,15 @@ PTOAS 当前三个 pin 都早于 8 月 14 日功能提交：
   对应 planner；
 - level3 三组 pair 分别使用同一动态 `%base` 时拒绝，`%base + constant` 的动态派生地址也
   拒绝；三个静态非重叠常量地址通过，静态重叠地址继续由 range verifier 拒绝；
-- level3 static full-valid dump alias 与 partial descriptor 共用同一 UB address 时，
-  `TLOAD -> TEXTRACT -> TSTORE` 的 range/effect 顺序可验证，且不触发 TEXTRACT 三 tile no-alias
-  误报；
+- production StoreUse dataflow 覆盖 direct/view/same-address allocation/partial-overlap TSTORE，
+  branch join 与 loop fixed point 后仍拒绝；full-valid exact overwrite 后允许正常 TSTORE，非完整
+  overwrite 不清除 marked range；
+- test hook 开启时 canonical level3 full-valid dump alias 与 partial descriptor 共用同一 UB address
+  可以通过，关闭 hook 或去掉 initialization/redzone/barrier/dedicated GM dump 中任一项时失败；
+- 独立 `textract_nd2xnz_partial_dump_alias_gss.pto` 在 GraphSync pipeline 下覆盖：同址不同
+  `AllocTileOp` root 产生 MTE2-to-V WAW 和 V-to-MTE3 RAW；静态 physical range 部分重叠也产生
+  同步；不重叠 range 不产生误同步；相同数字地址但不同 address space 不冲突。该 test 必须
+  FileCheck 实际 flag/wait 或 barrier edge，不能只 smoke-test 编译；
 - plain 与 RowPlusOne 混合时使用各自 footprint；
 - 已有单输出 `textract` sync/plan-memory tests 全部保持不变。
 
@@ -953,11 +1042,18 @@ ND-to-NZ，两个输出独立比较。测试按第 3.2.1 节分成两组：
   assertion enabled，并比较两块完整 physical GM output。A5 `RowPlusOne` 只有在 adapter
   明确定义 gap 的写回值并通过设备 golden 后才允许比较 gap；否则该 compact mode 仍停在
   support gate，不能借 full-valid 名义扩大 coverage。
-- partial-valid group：使用 `prepareAndDumpPartialNzForTest` 的 full-valid dump alias 路径；
-  先以 `TLOAD` 清零与 partial descriptor 同地址的完整 physical UB footprint，再执行 TEXTRACT，
-  以 full-valid alias 经过 generic TSTORE 写到 physical-size GM output。不能把 partial tile
-  直接传给 generic TSTORE，也不依赖 simulator UB dump/raw-UB 私有接口。golden 只比较 valid
-  logical coordinates，未定义 padding 不比较，allocation/GM guard bytes 单独检查是否越界。
+- partial-valid group：test build 必须显式打开 compile-time hook 和 hidden dump flag，并使用
+  `prepareAndDumpPartialNzForTest` 的 canonical fixture。每个 destination 的 32B pre/post UB
+  sentinel 先初始化，完整 physical footprint 以 full-valid alias TLOAD 清零；显式 `PIPE_ALL`
+  barrier 后执行 TEXTRACT，再 barrier，然后分别导出 physical footprint 和四个 redzone。
+  golden 只比较 valid logical coordinates，未定义 padding 不比较；四个 UB sentinel 和 physical
+  GM output 两侧 host guard 必须逐 byte 比较。full-valid alias 的 generic TSTORE 只由该 test hook
+  豁免，production 同址 alias 必须失败。
+
+若某架构的公开 `1x32xi8` tile TLOAD/TSTORE compile probe 或设备测试失败，必须使用独立
+raw-buffer NPU harness 通过 backend-native UB-to-GM byte copy 导出相同 pre/post redzone；raw
+harness 落地前，该架构的 odd-valid/`1x1` case 只能计 compile-only/simulator coverage，不能计
+NPU ST。GM guard 只能证明 GM dump 没有越界，不能代替 UB allocation redzone 观测。
 
 A2/A3 最小集合：
 
@@ -995,6 +1091,9 @@ full-store group 必须经过完整链路，partial-valid group 必须保留明�
 - `test/lit/vpto/*textract*` 全部通过；
 - PTOAS unit/lit 全量通过；
 - A3/A5 compile-only；
+- production/test 构建各跑一次 StoreUse gate：production binary 没有 hidden option且拒绝同址
+  dump alias；test binary 只放行 canonical fixture；GraphSync `_gss` exact/overlap/disjoint/
+  different-address-space 回归通过；
 - capability validation 的正负向 lit 全部通过；CPU backend 存在时执行 CPU-sim 双输出
   数值测试，缺失时 manifest 明确标记 unsupported 并链接 upstream dependency，不伪造
   simulator coverage；cost-model 同理；
@@ -1009,11 +1108,11 @@ full-store group 必须经过完整链路，partial-valid group 必须保留明�
 |---|---|---|
 | 0 | rebase、逐 target pin/backend 探测、CMake manifest 生成与 driver 注入 | NPU probe 生成正向 capability；CPU/cost-model 失败生成稳定负向 capability；manifest path/root/revision 校验可执行 |
 | 1 | ODS、assembly、DPS、pipe、effects | parse/print/effects 基础 lit 通过 |
-| 2 | shared emitted-dimension helper、IR verifier、runtime provenance 与 backend-boundary validation | 架构矩阵、bounds、TSTORE eligibility、provenance/capability gate lit 通过 |
-| 3 | no-alias、level3 address gate 与 legacy/modern planner 回归 | 三组 alias 被拒绝，declared/tpop provenance 在 planner 前失败，动态 level3 地址失败，双输出 liveness 正确 |
+| 2 | shared emitted-dimension helper、IR verifier、runtime provenance、alias-aware StoreUse dataflow 与 test-hook wiring | 架构矩阵、bounds、production direct/alias TSTORE、canonical test escape、provenance/capability gate lit 通过 |
+| 3 | no-alias、level3 address gate、GraphSync `AllocTileOp` single-address model 与 planner/GSS 回归 | 三组 alias 被拒绝，declared/tpop provenance 在 planner 前失败，动态 level3 地址失败，双输出 liveness 正确，同址/overlap/disjoint/address-space GSS edge 正确 |
 | 4 | EmitC pattern | A3/A5 精确文本与 pin compile-only 通过 |
 | 5 | A5 TileLib/VPTO template | aligned/unaligned/tail/enabled-lowp 展开通过；NZ+1/FP4 随 gate 开启 |
-| 6 | A3/A5 NPU ST；可用时 CPU-sim | 必选组合两路 byte-exact；optional gate 有真实 backend 证据 |
+| 6 | A3/A5 NPU ST、UB sentinel/raw-buffer harness；可用时 CPU-sim | 必选组合两路 byte-exact；partial case 实际导出 UB redzone；optional gate 有真实 backend 证据 |
 | 7 | manual、SPEC、ReleaseNotes | 文档与实际 verifier/EmitC 一致 |
 
 ## 14. 兼容性与完成条件
@@ -1027,6 +1126,8 @@ full-store group 必须经过完整链路，partial-valid group 必须保留明�
 - verifier 的合法集合不宽于目标 PTO-ISA，且不误拒绝其 unaligned/odd/1x1 路径；
 - 两个 DPS init 在 effects、sync、fusion boundary 和两套 PlanMemory 中都不丢失；
 - 三 tile 两两 no-alias；
+- GraphSync 对普通 `AllocTileOp` 使用 address-space-aware physical range，能识别同址或部分重叠的
+  不同 SSA root，并有独立 `_gss` edge 回归；
 - `DeclareTileOp`、`TAssignOp`、`TPopOp`/frontend pop 绑定及其 view chain 在两个 planner 前均被
   runtime-bound provenance gate 拒绝；正向 operand 必须来自 planner-owned allocation；
 - level3 中该 op 的三个 local allocation 都有可静态证明的地址；
@@ -1035,8 +1136,12 @@ full-store group 必须经过完整链路，partial-valid group 必须保留明�
   implementation，且 CMake probe 生成的 manifest 已通过 path/include-root/revision/digest
   校验并由 driver 注入；CPU/cost-model backend 缺失时
   不得宣称对应模拟或性能模型支持；
+- production StoreUse definedness 能拒绝 direct、view 和同址/重叠 allocation alias 的 partial
+  TSTORE；test-only escape 在 release/wheel 中不存在，test build 也只放行 canonical fixture；
 - A3/A5 至少各有一条 full-valid 端到端双输出数值链路；partial-valid/odd/`1x1` 只计入
-  通过 `prepareAndDumpPartialNzForTest` 观测的 UB-only TEXTRACT coverage，不能直接进入
-  generic NZ TSTORE；没有该可编译 helper 的设备只能计 compile-only/simulator coverage；A5
-  的 FP4/NZ+1 只有通过各自 support gate 后才进入 verifier 支持集合；
+  通过 `prepareAndDumpPartialNzForTest` 或独立 raw-buffer harness 观测的 UB-only TEXTRACT
+  coverage，不能直接进入 generic NZ TSTORE；NPU partial coverage 必须实际导出并逐 byte 比较
+  紧贴 physical footprint 的 pre/post UB redzone，只有 GM guard 或没有可编译观测 helper 的设备
+  只能计 compile-only/simulator coverage；A5 的 FP4/NZ+1 只有通过各自 support gate 后才进入
+  verifier 支持集合；
 - 既有单输出 `pto.textract` 行为和测试零变化。
