@@ -432,11 +432,15 @@ def TExtractOp : PTO_TOp<"textract", [
     bool isSingleOutputForm();
     bool isNdTo2xNzForm();
 
-    // Legacy convenience accessors remain source-compatible. They may only be
-    // used after isSingleOutputForm(); range-aware code uses getIndices/getDsts.
-    ::mlir::Value getIndexRow();
-    ::mlir::Value getIndexCol();
-    ::mlir::Value getDst();
+    // Legacy convenience accessors keep their exact generated return types.
+    // They may only be used after isSingleOutputForm(); range-aware code uses
+    // getIndices/getDsts.
+    ::mlir::TypedValue<::mlir::IndexType> getIndexRow();
+    ::mlir::TypedValue<::mlir::IndexType> getIndexCol();
+    ::mlir::TypedValue<::mlir::Type> getDst();
+    ::mlir::OpOperand &getIndexRowMutable();
+    ::mlir::OpOperand &getIndexColMutable();
+    ::mlir::OpOperand &getDstMutable();
 
     ::mlir::MutableOperandRange getDpsInitsMutable();
     ::mlir::pto::PIPE getPipe();
@@ -458,13 +462,27 @@ range，改为 custom parser/printer。printer 对单输出 form 必须逐字符
 
 ### 4.2 form 推断与非法组合
 
-`classifyForm()` 返回 `SingleOutput`、`NdTo2xNz` 或 `Invalid`。它不能先调用任何 generated
-accessor，包括 `getSrc()`、`getIndices()`、`getDsts()`、`getFp()`；这些 accessor 会信任
-segment offset，并可能在畸形 generic IR 上解引用空 range。实现先从 operation raw attribute
-读取 `DenseI32ArrayAttr operandSegmentSizes`，并一次性验证：
+`classifyForm()` 返回 `SingleOutput`、`NdTo2xNz` 或 `Invalid`。它不能先调用任何依赖 segment
+offset 的 generated operand accessor，包括 `getSrc()`、`getIndices()`、`getDsts()`、`getFp()`。
+MLIR 21 把 `operandSegmentSizes` 存储在 inherent properties 中，`Operation::getRawDictionaryAttrs()`
+明确不包含它。本 op 的 schema helper 固定从 typed property 读取：
 
-1. attribute 存在且恰好有五项，顺序为
-   `[src, indices, dsts, fp, preQuantScalar]`；每项非负，五项之和等于 raw operand 数量。
+```cpp
+const std::array<int32_t, 5> &segments =
+    op.getProperties().operandSegmentSizes;
+```
+
+不得从 `getRawDictionaryAttrs()` 查找该值。若某个 operation-generic 工具确实不能使用 typed
+property，只能调用会经过 `getInherentAttr()` 的
+`op->getAttrOfType<DenseI32ArrayAttr>("operandSegmentSizes")`。两条路径不能各自实现一套分类规则。
+
+新 ODS 的 property 类型是固定长度 `std::array<int32_t, 5>`，因此长度不是五项的文本在
+property conversion/parser 阶段失败，尚未形成可交给 classifier 的 `TExtractOp`；文本中省略
+property 则得到默认的全零数组，不存在可由 classifier 区分的“missing attribute”状态。对已构造
+operation，schema helper 一次性验证：
+
+1. 五项顺序为 `[src, indices, dsts, fp, preQuantScalar]`；每项非负，五项之和等于 raw operand
+   数量。
 2. `src == 1`，`fp` 和 `preQuantScalar` 各自只能为 `0` 或 `1`。
 3. 只有以下两个完整 schema 可以分类，不能只看 `indices`/`dsts` 两段：
 
@@ -475,10 +493,12 @@ segment offset，并可能在畸形 generic IR 上解引用空 range。实现先
 
 其他 schema 一律为 `Invalid`。例如 `[0, 2, 1, 1, 0]` 不能因为 index/dst arity 看似是
 单输出就调用 `getSrc()`；`[2, 2, 1, 0, 0]` 也不能把第二个 source 留在 effects 之外。
-custom parser 和所有 builder 只生成上述 canonical schema，generic assembly 则由 verifier
-给出包含实际五段值和期望 schema 的稳定诊断。
+custom parser 和所有 typed builder 只生成上述 canonical schema。对于已成功完成 property
+conversion 且 generated invariants 也通过的非法五段值，custom verifier 给出包含实际五段值和
+期望 schema 的诊断；property cardinality/conversion 错误和先被 generated invariant 捕获的错误
+保留对应阶段的 MLIR 诊断，不承诺统一进入 classifier。
 
-上述逻辑只实现一份内部 raw-schema helper；`classifyForm()` 把 helper failure 映射为 `Invalid`，
+上述逻辑只实现一份内部 property-schema helper；`classifyForm()` 把 helper failure 映射为 `Invalid`，
 `verify()` 使用同一 failure detail 发诊断，`getDpsInitsMutable()`、`getPipe()` 和 MemoryEffects
 复用同一结果。不能分别重写五段判断，也不能依赖 `AttrSizedOperandSegments` trait 代替该 helper，
 因为 trait 的总数检查不证明固定/optional segment 的本 op 语义。
@@ -489,10 +509,10 @@ custom parser 和所有 builder 只生成上述 canonical schema，generic assem
 FP、pre-quant、relu 和 acc-to-vec verifier 分支，其合法集合不因本功能扩大。
 
 所有 interface 都必须对 `Invalid` fail-safe：`getPipe()` 在 verifier 报错前返回 `PIPE_V`；
-`getDpsInitsMutable()` 用同一 raw-schema helper 计算 offset，schema 非法时返回空 range，不能
+`getDpsInitsMutable()` 用同一 property-schema helper 计算 offset，schema 非法时返回空 range，不能
 调用 generated `getDstsMutable()`；MemoryEffects 按第 6.2 节保守处理 raw operands。任何 legacy
 convenience accessor 在 debug build 断言 `SingleOutput`。generic assembly 即使构造畸形
-segments，也不能在 verifier 诊断前越界访问或产生未建模的 tile operand。
+segments，classifier 和这些 custom interface 也不能越界访问或产生未建模的 tile operand。
 
 这里推断的是 **TEXTRACT overload/form**，不是凭 source 自动创建 destination type。DPS
 destination 已由 allocation 决定，所以两个 NZ destination 的 physical shape、valid shape 和
@@ -542,9 +562,149 @@ pto.textract
 ODS range 化会改变自动生成的 builder/accessor，不能把“文本兼容”误写成“生成 API 自动
 兼容”。实现 PR 必须显式提供以下兼容层：
 
-- C++ 保留现有 `build(src, indexRow, indexCol, dst, fp?, preQuantScalar?, ...)` overload；内部
-  组装 `indices={row,col}`、`dsts={dst}`。现有 `getIndexRow()`、`getIndexCol()`、`getDst()` 和
-  mutable accessor 作为 legacy wrapper 保留，且只能在单输出 form 中调用。
+- C++ operand API 保留当前生成头文件的精确返回类型。`getSrc()`、`getFp()`、
+  `getPreQuantScalar()` 及对应 mutable accessor 由未改名的字段继续生成；range 化后消失的三个
+  getter 和 mutable accessor 由 legacy wrapper 补回。完整兼容集合为：
+
+  ```cpp
+  ::mlir::TypedValue<::mlir::Type> getSrc();
+  ::mlir::TypedValue<::mlir::IndexType> getIndexRow();
+  ::mlir::TypedValue<::mlir::IndexType> getIndexCol();
+  ::mlir::TypedValue<::mlir::Type> getDst();
+  ::mlir::TypedValue<::mlir::Type> getFp();
+  ::mlir::TypedValue<::mlir::IntegerType> getPreQuantScalar();
+
+  ::mlir::OpOperand &getSrcMutable();
+  ::mlir::OpOperand &getIndexRowMutable();
+  ::mlir::OpOperand &getIndexColMutable();
+  ::mlir::OpOperand &getDstMutable();
+  ::mlir::MutableOperandRange getFpMutable();
+  ::mlir::MutableOperandRange getPreQuantScalarMutable();
+  ::mlir::MutableOperandRange getDpsInitsMutable();
+  ```
+
+  `getIndexRow()`、`getIndexCol()`、`getDst()` 及其 mutable wrapper 只能在
+  `SingleOutput` form 中调用；它们不能退化为返回 `mlir::Value`，否则显式接收
+  `TypedValue<IndexType>`/`TypedValue<Type>` 的既有源码会编译失败。
+- C++ 保留当前全部 typed `build`/`create` overload。以下签名中的参数顺序、类型、
+  `TypeRange` 变体和 `ReluPreMode::NoRelu` 默认值都是兼容契约；实现内部把
+  `indexRow,indexCol` 组装为 `indices={...}`，把 `dst` 组装为 `dsts={...}`：
+
+  ```cpp
+  static void build(
+      ::mlir::OpBuilder &, ::mlir::OperationState &, ::mlir::Value src,
+      ::mlir::Value indexRow, ::mlir::Value indexCol, ::mlir::Value dst,
+      ::mlir::Value fp, ::mlir::Value preQuantScalar,
+      ::mlir::pto::AccToVecModeAttr accToVecMode,
+      ::mlir::pto::ReluPreModeAttr reluPreMode);
+  static TExtractOp create(
+      ::mlir::OpBuilder &, ::mlir::Location, ::mlir::Value src,
+      ::mlir::Value indexRow, ::mlir::Value indexCol, ::mlir::Value dst,
+      ::mlir::Value fp, ::mlir::Value preQuantScalar,
+      ::mlir::pto::AccToVecModeAttr accToVecMode,
+      ::mlir::pto::ReluPreModeAttr reluPreMode);
+  static TExtractOp create(
+      ::mlir::ImplicitLocOpBuilder &, ::mlir::Value src,
+      ::mlir::Value indexRow, ::mlir::Value indexCol, ::mlir::Value dst,
+      ::mlir::Value fp, ::mlir::Value preQuantScalar,
+      ::mlir::pto::AccToVecModeAttr accToVecMode,
+      ::mlir::pto::ReluPreModeAttr reluPreMode);
+
+  static void build(
+      ::mlir::OpBuilder &, ::mlir::OperationState &, ::mlir::TypeRange resultTypes,
+      ::mlir::Value src, ::mlir::Value indexRow, ::mlir::Value indexCol,
+      ::mlir::Value dst, ::mlir::Value fp, ::mlir::Value preQuantScalar,
+      ::mlir::pto::AccToVecModeAttr accToVecMode,
+      ::mlir::pto::ReluPreModeAttr reluPreMode);
+  static TExtractOp create(
+      ::mlir::OpBuilder &, ::mlir::Location, ::mlir::TypeRange resultTypes,
+      ::mlir::Value src, ::mlir::Value indexRow, ::mlir::Value indexCol,
+      ::mlir::Value dst, ::mlir::Value fp, ::mlir::Value preQuantScalar,
+      ::mlir::pto::AccToVecModeAttr accToVecMode,
+      ::mlir::pto::ReluPreModeAttr reluPreMode);
+  static TExtractOp create(
+      ::mlir::ImplicitLocOpBuilder &, ::mlir::TypeRange resultTypes,
+      ::mlir::Value src, ::mlir::Value indexRow, ::mlir::Value indexCol,
+      ::mlir::Value dst, ::mlir::Value fp, ::mlir::Value preQuantScalar,
+      ::mlir::pto::AccToVecModeAttr accToVecMode,
+      ::mlir::pto::ReluPreModeAttr reluPreMode);
+
+  static void build(
+      ::mlir::OpBuilder &, ::mlir::OperationState &, ::mlir::Value src,
+      ::mlir::Value indexRow, ::mlir::Value indexCol, ::mlir::Value dst,
+      ::mlir::Value fp, ::mlir::Value preQuantScalar,
+      ::mlir::pto::AccToVecModeAttr accToVecMode,
+      ::mlir::pto::ReluPreMode reluPreMode =
+          ::mlir::pto::ReluPreMode::NoRelu);
+  static TExtractOp create(
+      ::mlir::OpBuilder &, ::mlir::Location, ::mlir::Value src,
+      ::mlir::Value indexRow, ::mlir::Value indexCol, ::mlir::Value dst,
+      ::mlir::Value fp, ::mlir::Value preQuantScalar,
+      ::mlir::pto::AccToVecModeAttr accToVecMode,
+      ::mlir::pto::ReluPreMode reluPreMode =
+          ::mlir::pto::ReluPreMode::NoRelu);
+  static TExtractOp create(
+      ::mlir::ImplicitLocOpBuilder &, ::mlir::Value src,
+      ::mlir::Value indexRow, ::mlir::Value indexCol, ::mlir::Value dst,
+      ::mlir::Value fp, ::mlir::Value preQuantScalar,
+      ::mlir::pto::AccToVecModeAttr accToVecMode,
+      ::mlir::pto::ReluPreMode reluPreMode =
+          ::mlir::pto::ReluPreMode::NoRelu);
+
+  static void build(
+      ::mlir::OpBuilder &, ::mlir::OperationState &, ::mlir::TypeRange resultTypes,
+      ::mlir::Value src, ::mlir::Value indexRow, ::mlir::Value indexCol,
+      ::mlir::Value dst, ::mlir::Value fp, ::mlir::Value preQuantScalar,
+      ::mlir::pto::AccToVecModeAttr accToVecMode,
+      ::mlir::pto::ReluPreMode reluPreMode =
+          ::mlir::pto::ReluPreMode::NoRelu);
+  static TExtractOp create(
+      ::mlir::OpBuilder &, ::mlir::Location, ::mlir::TypeRange resultTypes,
+      ::mlir::Value src, ::mlir::Value indexRow, ::mlir::Value indexCol,
+      ::mlir::Value dst, ::mlir::Value fp, ::mlir::Value preQuantScalar,
+      ::mlir::pto::AccToVecModeAttr accToVecMode,
+      ::mlir::pto::ReluPreMode reluPreMode =
+          ::mlir::pto::ReluPreMode::NoRelu);
+  static TExtractOp create(
+      ::mlir::ImplicitLocOpBuilder &, ::mlir::TypeRange resultTypes,
+      ::mlir::Value src, ::mlir::Value indexRow, ::mlir::Value indexCol,
+      ::mlir::Value dst, ::mlir::Value fp, ::mlir::Value preQuantScalar,
+      ::mlir::pto::AccToVecModeAttr accToVecMode,
+      ::mlir::pto::ReluPreMode reluPreMode =
+          ::mlir::pto::ReluPreMode::NoRelu);
+  ```
+- 当前两组 generic overload 也保留：
+
+  ```cpp
+  static void build(
+      ::mlir::OpBuilder &, ::mlir::OperationState &, ::mlir::TypeRange,
+      ::mlir::ValueRange, ::llvm::ArrayRef<::mlir::NamedAttribute> = {});
+  static TExtractOp create(
+      ::mlir::OpBuilder &, ::mlir::Location, ::mlir::TypeRange,
+      ::mlir::ValueRange, ::llvm::ArrayRef<::mlir::NamedAttribute> = {});
+  static TExtractOp create(
+      ::mlir::ImplicitLocOpBuilder &, ::mlir::TypeRange,
+      ::mlir::ValueRange, ::llvm::ArrayRef<::mlir::NamedAttribute> = {});
+
+  static void build(
+      ::mlir::OpBuilder &, ::mlir::OperationState &, ::mlir::TypeRange,
+      ::mlir::ValueRange, const Properties &,
+      ::llvm::ArrayRef<::mlir::NamedAttribute> = {});
+  static TExtractOp create(
+      ::mlir::OpBuilder &, ::mlir::Location, ::mlir::TypeRange,
+      ::mlir::ValueRange, const Properties &,
+      ::llvm::ArrayRef<::mlir::NamedAttribute> = {});
+  static TExtractOp create(
+      ::mlir::ImplicitLocOpBuilder &, ::mlir::TypeRange,
+      ::mlir::ValueRange, const Properties &,
+      ::llvm::ArrayRef<::mlir::NamedAttribute> = {});
+  ```
+
+  这里的函数 surface 保持不变不等于 generated internals 完全源码兼容：
+  `Properties::operandSegmentSizes` 从 `std::array<int32_t, 6>` 变为
+  `std::array<int32_t, 5>`，直接初始化/访问该字段的源码必须迁移；`getODSOperands()`、index
+  constants 和 adaptor 的 fixed-field accessor 也不属于兼容承诺。`ReleaseNotes.md` 必须明确这条
+  边界以及 generic assembly 的五段 schema。
 - 新增同一 class 上的命名 builder `buildNdTo2xNz(src, row0, col0, row1, col1, dst0, dst1)`；
   它不是新 op。range-aware verifier、effects、planning 和 lowering 使用 `getIndices()`/
   `getDsts()`，不得只取 `.front()`。
@@ -582,13 +742,26 @@ attribute 和 layout 承载 base、FP、preQuant、relu、acc-to-vec 等多种�
 
 ### 5.1 公共校验顺序
 
-`TExtractOp::verify()` 的第一步必须调用第 4.2 节的 raw-schema validator。只有确认
-`operandSegmentSizes` 是完整 `SingleOutput` 或 `NdTo2xNz` schema 后，才允许调用 generated
-accessor。`Invalid` 直接报告 actual/expected segments 和 raw operand count，不进入现有 verifier。
-单输出随后调用语义不变的现有 verifier helper；双输出调用新的 `verifyNdTo2xNzForm()`，负责
-以下结构和硬件共同契约中的 1-10 项，诊断中必须带 `src`、`dst0` 或 `dst1` 名称。frontend
-lowering 完成后，backend-boundary validation 再按同一顺序执行 11-13 项；这些项不能被误解为
-依赖 planner 的 late check：
+不能承诺 `TExtractOp::verify()` 在所有 generated accessor 之前执行。MLIR 21 的真实验证顺序是：
+
+1. parser/`setPropertiesFromParsedAttr()`/`setPropertiesFromAttr()` 把文本 property 转换为固定长度
+   `Properties::operandSegmentSizes`；长度错误在此失败。
+2. `OpDefinition` 先执行 traits，其中 `OpInvariants` 调用 TableGen 生成的
+   `verifyInvariantsImpl()`；该函数已经通过 `getODSOperands()` 做各段类型检查。
+3. traits 成功后才调用用户定义的 `TExtractOp::verify()`。
+
+本设计不为统一错误文案新增一个排在 `OpInvariants` 前的 structural trait。因而 malformed generic
+IR 可能先得到 property conversion、`AttrSizedOperandSegments` 或 ODS segment/type diagnostic；
+这些都属于稳定失败。实现承诺的是解析/验证不崩溃、classifier 和 custom interfaces 对
+`Invalid` fail-safe，以及通过 generated invariants 的非法五段 schema 由 custom verifier 报出
+actual/expected segments，而不是所有非法输入共享同一诊断顺序和文案。
+
+`TExtractOp::verify()` 自身的第一步仍调用第 4.2 节的 property-schema validator。在它返回
+`SingleOutput` 或 `NdTo2xNz` 前，custom verifier 不得调用依赖 segment offset 的 generated
+single-value accessor。单输出随后调用语义不变的现有 verifier helper；双输出调用新的
+`verifyNdTo2xNzForm()`，负责以下结构和硬件共同契约中的 1-10 项，诊断中必须带 `src`、
+`dst0` 或 `dst1` 名称。frontend lowering 完成后，backend-boundary validation 再按同一顺序
+执行 11-13 项；这些项不能被误解为依赖 planner 的 late check：
 
 1. 对三个 tile 调用 `verifyTileBufCommon`；A2/A3 禁止 low precision，A5 允许。
 2. 要求三个 operand 都是 rank-2 `!pto.tile_buf`。
@@ -740,7 +913,7 @@ fusion 策略，也不能因为 op 名与单输出相同而被错误加入单输
 ```cpp
 void TExtractOp::getEffects(
     SmallVectorImpl<SideEffects::EffectInstance<MemoryEffects::Effect>>& effects) {
-  Form form = classifyForm(); // Raw operandSegmentSizes only.
+  Form form = classifyForm(); // Typed operandSegmentSizes property only.
   if (form == Form::Invalid) {
     for (OpOperand &operand : getOperation()->getOpOperands()) {
       if (!isPTODpsType(operand.get().getType()))
@@ -907,7 +1080,7 @@ wrapper。因此现有 `PTOExtractToEmitC` 的两条分支都必须从 adaptor r
 LogicalResult PTOExtractToEmitC::matchAndRewrite(
     pto::TExtractOp op, OpAdaptor adaptor,
     ConversionPatternRewriter &rewriter) const {
-  auto form = op.classifyForm(); // Validates raw segments before getSrc().
+  auto form = op.classifyForm(); // Validates the typed property before getSrc().
   if (form == pto::TExtractOp::Form::Invalid)
     return rewriter.notifyMatchFailure(op, "malformed TEXTRACT operand segments");
 
@@ -1035,7 +1208,9 @@ argument 顺序和文本汇编一致，且 binding 中不存在 `TExtractNd2xNzO
 
 - `docs/PTO_IR_manual.md`：语义、汇编、shape/layout/dtype/compact 表；
 - `docs/release/PTO-tile-Instruction-SPEC-v0.4.md`：新增双输出形态；
-- `ReleaseNotes.md`：记录 `pto.textract` 新增 ND-to-2xNZ 双输出 form 和架构差异；
+- `ReleaseNotes.md`：记录 `pto.textract` 新增 ND-to-2xNZ 双输出 form、架构差异，以及 public
+  getter/builder 兼容但 `Properties::operandSegmentSizes`、`getODSOperands()` 和旧 adaptor
+  fixed-field accessor 不兼容的边界；
 - TileLib template 列表或生成文档（若实现 PR 修改对应索引）。
 
 ## 11. PTO-ISA pin 方案
@@ -1094,10 +1269,13 @@ PTOAS 当前三个 pin 都早于 8 月 14 日功能提交：
 - 非 tile、非 rank-2、非 index；
 - `(indices,dsts)` 为 `(2,2)`、`(4,1)`、`(3,1)`、`(4,3)` 等未定义 arity；
 - generic assembly 的 source segment 分别为 0 和 2：至少固定覆盖
-  `[0, 2, 1, 1, 0]` 与 `[2, 2, 1, 0, 0]`，二者都必须在任何 generated accessor 解引用前
-  得到稳定诊断，不能 crash；
-- segment attribute 缺失、不是五项、总和与 operand 数不符，以及 `fp`/`preQuantScalar` segment
-  为 2；
+  `[0, 2, 1, 1, 0]` 与 `[2, 2, 1, 0, 0]`；二者通过 property conversion 和 generated type
+  invariants 后，由 custom verifier 给出实际五段值与期望 schema，且不能 crash；
+- `operandSegmentSizes` property 不是五项时，断言 parser/property conversion diagnostic，不要求
+  进入 classifier；文本省略该 property 时断言默认全零 property 最终验证失败，但允许
+  `AttrSizedOperandSegments`/`OpInvariants` 先诊断；
+- 五段总和与 operand 数不符，以及 `fp`/`preQuantScalar` segment 为 2；按真实验证阶段分别匹配
+  generated trait/invariant 或 custom classifier diagnostic，不统一要求 actual/expected 文案；
 - 双输出 form 携带 `fp`、`preQuantScalar`、非默认 relu 或 `accToVecMode`；
 - dynamic valid shape 或 dynamic index（首版）；静态 0 valid row/col；
 - source/destination loc 错误；
@@ -1125,6 +1303,12 @@ PTOAS 当前三个 pin 都早于 8 月 14 日功能提交：
 
 ### 12.2 EmitC 与 C++ compile
 
+- 增加一个只包含/编译旧 `TExtractOp` C++ 调用面的 compile-only translation unit，逐项覆盖第
+  4.4 节列出的 typed getter、mutable accessor、`ReluPreModeAttr`/`ReluPreMode`、带/不带
+  `TypeRange`、`OpBuilder`/`ImplicitLocOpBuilder` 和两组 generic `build`/`create` overload；尤其
+  用显式 `TypedValue<IndexType>`/`TypedValue<Type>` 接收 legacy getter，防止返回类型退化；
+- 同一 compile-only 回归明确不把 `Properties::operandSegmentSizes` 的旧六项数组布局、
+  `getODSOperands()` 或旧 adaptor accessor 当作兼容 API；ReleaseNotes 检查固定记录这些迁移边界；
 - A3/A5 FileCheck 精确匹配七参数顺序；
 - 同一 `PTOExtractToEmitC` pattern 的 legacy 单输出/FP/preQuant/relu/acc-to-vec FileCheck 全部保留；
   编译回归必须证明 core operands 来自 `adaptor.getIndices()/getDsts()`，源码中不再引用不存在的
@@ -1273,7 +1457,7 @@ full-store group 必须经过完整链路，partial-valid group 必须保留明�
 | 阶段 | 内容 | 完成标准 |
 |---|---|---|
 | 0 | rebase、逐 target pin/backend 探测、CMake manifest 生成与 driver 注入 | NPU probe 生成正向 capability；CPU/cost-model 失败生成稳定负向 capability；manifest path/root/revision 校验可执行 |
-| 1 | 扩展 `TExtractOp` ODS ranges、raw segment validator/form classifier、custom assembly、兼容 builder/accessor、DPS、pipe、effects、PTOBC shim | src=0/2 等 malformed generic IR 稳定失败且 effects 保守；legacy/new parse-print、binding、v0 bytecode 兼容和 range-based adaptor 编译测试通过，且没有新增 op 名 |
+| 1 | 扩展 `TExtractOp` ODS ranges、inherent-property schema validator/form classifier、custom assembly、精确兼容 builder/accessor、DPS、pipe、effects、PTOBC shim | property conversion、generated invariants、custom verifier 各阶段负向测试不崩溃；src=0/2 等可到达 classifier 的 schema 稳定失败且 effects 保守；旧 C++ API compile-only、legacy/new parse-print、binding、v0 bytecode 兼容和 range-based adaptor 编译测试通过，且没有新增 op 名 |
 | 2 | shared emitted-dimension helper、IR verifier、runtime provenance、alias-aware StoreUse dataflow 与 test-hook wiring | 架构矩阵、bounds、production direct/alias TSTORE、canonical test escape、provenance/capability gate lit 通过 |
 | 3 | no-alias、level3 address gate、GraphSync `AllocTileOp` single-address model 与 planner/GSS 回归 | 三组 alias 被拒绝，declared/tpop provenance 在 planner 前失败，动态 level3 地址失败，双输出 liveness 正确，同址/overlap/disjoint/address-space GSS edge 正确 |
 | 4 | EmitC pattern | A3/A5 精确文本与 pin compile-only 通过 |
@@ -1285,8 +1469,9 @@ full-store group 必须经过完整链路，partial-valid group 必须保留明�
 
 现有 `pto.textract` 的 op 名、单输出 canonical 文本、语义和生成 C++ 不变，但同一个 ODS class
 内部从 fixed fields 改成 `indices`/`dsts` ranges。自动生成的 storage accessor/builder 形态会变化，
-必须由第 4.4 节的 wrapper 保持源码兼容，不能声称 ODS API 天然零变化。没有新 op，也不提供
-deprecated alias。
+必须由第 4.4 节的 wrapper 和 overload 保持已列出的 public C++ source surface，不能声称 ODS
+API 天然零变化。`Properties::operandSegmentSizes` 布局、`getODSOperands()` 和 adaptor fixed-field
+accessor 等 generated internals 明确不在兼容范围内。没有新 op，也不提供 deprecated alias。
 
 PTOBC v0 不迁移已发布的单输出 wire schema：旧 fixed-width record 继续可解码，新双输出 form
 走 generic record。MLIR generic assembly 中手写的旧六项 `operandSegmentSizes` 不是 canonical
@@ -1296,9 +1481,14 @@ public syntax；实现只承诺 canonical `pto.textract ins(...) outs(...)` 文�
 实现合入必须同时满足：
 
 - PTO IR 能表达两个不同 shape 的 NZ destination 和两组 index；
-- `TExtractOp` classifier 在任何 generated accessor 前验证完整五段 schema，要求 `src == 1`、
-  optional segment 为 `0/1`，再对 `(2 indices, 1 dst)` 与 `(4 indices, 2 dsts)` 唯一分派；
-  src=0/2、其他组合和双输出附带 legacy optional operand 均稳定失败且不崩溃；
+- `TExtractOp` classifier 从 typed inherent property 而非 raw dictionary 读取完整五段 schema，要求
+  `src == 1`、optional segment 为 `0/1`，再对 `(2 indices, 1 dst)` 与
+  `(4 indices, 2 dsts)` 唯一分派；
+- property conversion、generated traits/OpInvariants 和 custom verifier 的真实顺序有分层回归；
+  src=0/2、其他组合和双输出附带 legacy optional operand 均稳定失败且不崩溃，但不承诺所有
+  malformed input 共享 actual/expected schema 诊断；
+- 第 4.4 节列出的 typed getter/mutable/build/create public C++ surface 有 compile-only 回归；
+  ReleaseNotes 明确 `Properties` 五段布局和其他 generated internal API 不兼容；
 - verifier 的合法集合不宽于目标 PTO-ISA，且不误拒绝其 unaligned/odd/1x1 路径；
 - 两个 DPS init 在 effects、sync、fusion boundary 和两套 PlanMemory 中都不丢失；
 - Invalid segment schema 的 interfaces fail-safe，MemoryEffects 对所有 raw memory-carrying operands
