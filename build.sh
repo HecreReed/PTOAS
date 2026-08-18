@@ -429,8 +429,7 @@ resolve_compiler_rt() {
   esac
 
   # Search the active clang's resource dir first, then the system LLVM.
-  local clang_bin
-  clang_bin="$(command -v clang || command -v clang-15 || true)"
+  local clang_bin="${PTOAS_CC}"
   if [ -n "${clang_bin}" ]; then
     local clang_res
     clang_res="$("${clang_bin}" -print-resource-dir 2>/dev/null || true)"
