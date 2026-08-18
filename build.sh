@@ -326,7 +326,10 @@ ensure_llvm_build() {
     -G Ninja
     -S "${LLVM_CMAKE_SOURCE_DIR}"
     -B "${LLVM_BUILD_DIR}"
-    -DLLVM_ENABLE_PROJECTS="mlir;clang"
+    # PTOAS consumes LLVM/MLIR through CMake; Clang is not a PTOAS dependency.
+    # Keeping it out avoids building clangInterpreter, which is incompatible
+    # with the GCC 7 libstdc++ headers used by the ARM CI image.
+    -DLLVM_ENABLE_PROJECTS="mlir"
     -DCMAKE_CXX_FLAGS="-DBSPUB_NPU_DATA_TYPE"
     -DCMAKE_C_FLAGS="-DBSPUB_NPU_DATA_TYPE"
     -DLLVM_BSPUB_NPU_DATA_TYPE=ON
