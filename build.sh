@@ -458,20 +458,8 @@ configure_ptoas() {
   local pybind_dir
   pybind_dir="$("${python_bin}" -m pybind11 --cmakedir 2>/dev/null || true)"
 
-  if [ -f "${BUILD_PATH}/CMakeCache.txt" ]; then
-    local old_generator
-    local old_cxx
-    old_generator="$(sed -n 's/^CMAKE_GENERATOR:INTERNAL=//p' "${BUILD_PATH}/CMakeCache.txt")"
-    old_cxx="$(sed -n 's/^CMAKE_CXX_COMPILER:FILEPATH=//p' "${BUILD_PATH}/CMakeCache.txt")"
-    if [ "${old_generator}" != "Ninja" ] || [ "${old_cxx}" != "${PTOAS_CXX}" ]; then
-      echo "Removing incompatible PTOAS build cache"
-      echo "  generator=${old_generator}"
-      echo "  CXX=${old_cxx}"
-      echo "  expected CXX=${PTOAS_CXX}"
-      rm -rf "${BUILD_PATH}"
-    fi
-  fi
-
+  echo "Resetting PTOAS build tree: ${BUILD_PATH}"
+  rm -rf "${BUILD_PATH}"
   mkdir -p "${BUILD_PATH}"
   local ptoas_cmake_args=(
     -G Ninja
