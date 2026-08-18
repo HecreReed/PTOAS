@@ -229,47 +229,6 @@ ensure_llvm_source() {
   export LLVM_CMAKE_SOURCE_DIR="${LLVM_SOURCE_DIR}"
 }
 
-# The internal feature-vpto patch makes LLVMVectorize use llvm::Triple, whose
-# implementation lives in LLVMTargetParser, without updating the component's
-# CMake dependency. Inject TargetParser into LLVMVectorize's LINK_COMPONENTS
-# before configuring LLVM. Keep this idempotent because CI reuses the patched
-# LLVM source directory.
-inject_llvm_vectorize_target_parser() {
-  local vectorize_cmake="${LLVM_CMAKE_SOURCE_DIR}/lib/Transforms/Vectorize/CMakeLists.txt"
-  if [ ! -f "${vectorize_cmake}" ]; then
-    echo "ERROR: LLVMVectorize CMakeLists.txt not found: ${vectorize_cmake}" >&2
-    exit 1
-  fi
-
-  if grep -Eq '^[[:space:]]*TargetParser[[:space:]]*$' "${vectorize_cmake}"; then
-    return 0
-  fi
-
-  local patched_cmake="${vectorize_cmake}.ptoas.$$"
-  if ! awk '
-    $0 == "# PTOAS internal LLVM 19 compatibility: LoopVectorizePrepare uses llvm::Triple." { next }
-    $0 == "target_link_libraries(LLVMVectorize PRIVATE LLVMTargetParser)" { next }
-    /^add_llvm_component_library\(LLVMVectorize([[:space:]]|$)/ { in_vectorize = 1 }
-    in_vectorize && /^[[:space:]]*LINK_COMPONENTS[[:space:]]*$/ { in_link_components = 1 }
-    in_link_components && /^[[:space:]]*Support[[:space:]]*$/ {
-      print
-      print "  TargetParser"
-      inserted = 1
-      next
-    }
-    { print }
-    END { if (!inserted) exit 42 }
-  ' "${vectorize_cmake}" > "${patched_cmake}"; then
-    rm -f "${patched_cmake}"
-    echo "ERROR: failed to find LLVMVectorize LINK_COMPONENTS in ${vectorize_cmake}" >&2
-    exit 1
-  fi
-
-  cp "${patched_cmake}" "${vectorize_cmake}"
-  rm -f "${patched_cmake}"
-  echo "Injected TargetParser into LLVMVectorize LINK_COMPONENTS in ${vectorize_cmake}"
-}
-
 # LLVM/MLIR and PTOAS are both built with the old libstdc++ ABI. Reject a
 # cached LLVM tree that exports the new-ABI Twine::str symbol.
 llvm_build_is_abi_compatible() {
@@ -290,11 +249,41 @@ llvm_build_has_bspub_npu_data_type() {
     && grep -Eq '^CMAKE_CXX_FLAGS:[^=]*=.*-DBSPUB_NPU_DATA_TYPE([[:space:]]|$)' "${cache_file}"
 }
 
-# Build LLVM/MLIR 19 (shared libs + MLIR Python bindings) if the cached build
+# PTOAS links LLVM and MLIR component targets directly. Keep those components
+# shared so the Python runtime loads one copy of LLVM's command-line registry.
+# A monolithic libLLVM alongside component DSOs can register options twice.
+llvm_build_uses_shared_components() {
+  local cache_file="${LLVM_BUILD_DIR}/CMakeCache.txt"
+  [ -f "${cache_file}" ] || return 1
+  grep -Eq '^BUILD_SHARED_LIBS:(BOOL|UNINITIALIZED)=ON$' "${cache_file}" \
+    && grep -Eq '^LLVM_BUILD_LLVM_DYLIB:(BOOL|UNINITIALIZED)=OFF$' "${cache_file}" \
+    && grep -Eq '^LLVM_LINK_LLVM_DYLIB:(BOOL|UNINITIALIZED)=OFF$' "${cache_file}"
+}
+
+# The BSPUB backport makes LLVMVectorize call llvm::Triple, but its LLVM 19
+# component metadata omits TargetParser. Add that DSO through LLVM's
+# target-specific linker-flags cache entry without modifying LLVM sources.
+llvm_build_links_vectorize_target_parser() {
+  local cache_file="${LLVM_BUILD_DIR}/CMakeCache.txt"
+  [ -f "${cache_file}" ] || return 1
+  grep -Eq '^LLVM_LLVMVectorize_LINKER_FLAGS:[^=]*=.*-lLLVMTargetParser([;[:space:]]|$)' \
+    "${cache_file}"
+}
+
+llvm_vectorize_has_target_parser_dependency() {
+  local vectorize_lib="${LLVM_BUILD_DIR}/lib/libLLVMVectorize.so.19.1"
+  local readelf_bin
+  [ -f "${vectorize_lib}" ] || return 1
+  readelf_bin="$(command -v readelf || command -v llvm-readelf || true)"
+  [ -n "${readelf_bin}" ] || return 1
+  "${readelf_bin}" -d "${vectorize_lib}" 2>/dev/null \
+    | grep -q 'libLLVMTargetParser\.so'
+}
+
+# Build LLVM/MLIR 19 (shared components + MLIR Python bindings) if the cached build
 # tree is not usable, mirroring the PTOAS development workflow.
 ensure_llvm_build() {
   ensure_llvm_source
-  inject_llvm_vectorize_target_parser
 
   # The vpto patch changes CallingConv.h; a build-shared tree built from the
   # unpatched upstream source must be rebuilt so SimtEntry is present in the
@@ -330,9 +319,19 @@ ensure_llvm_build() {
   if [ "$rebuild_llvm" == "FALSE" ] \
      && [ -f "${LLVM_BUILD_DIR}/lib/cmake/llvm/LLVMConfig.cmake" ] \
      && [ -f "${LLVM_BUILD_DIR}/lib/cmake/mlir/MLIRConfig.cmake" ] \
-     && [ ! -f "${LLVM_BUILD_DIR}/.ptoas-vectorize-target-parser-component" ]; then
+     && ! llvm_build_uses_shared_components; then
     echo "${dotted_line}"
-    echo "Cached LLVM/MLIR build predates the TargetParser component fix; rebuilding"
+    echo "Cached LLVM/MLIR build does not use shared components; rebuilding"
+    rebuild_llvm=TRUE
+  fi
+
+  if [ "$rebuild_llvm" == "FALSE" ] \
+     && [ -f "${LLVM_BUILD_DIR}/lib/cmake/llvm/LLVMConfig.cmake" ] \
+     && [ -f "${LLVM_BUILD_DIR}/lib/cmake/mlir/MLIRConfig.cmake" ] \
+     && { ! llvm_build_links_vectorize_target_parser \
+          || ! llvm_vectorize_has_target_parser_dependency; }; then
+    echo "${dotted_line}"
+    echo "Cached LLVM/MLIR build does not link LLVMVectorize with TargetParser; rebuilding"
     rebuild_llvm=TRUE
   fi
 
@@ -371,6 +370,9 @@ ensure_llvm_build() {
     -DCMAKE_C_FLAGS="-DBSPUB_NPU_DATA_TYPE"
     -DLLVM_BSPUB_NPU_DATA_TYPE=ON
     -DBUILD_SHARED_LIBS=ON
+    -DLLVM_BUILD_LLVM_DYLIB=OFF
+    -DLLVM_LINK_LLVM_DYLIB=OFF
+    -DLLVM_LLVMVectorize_LINKER_FLAGS="-L${LLVM_BUILD_DIR}/lib;-Wl,--no-as-needed;-lLLVMTargetParser;-Wl,--as-needed"
     -DLLVM_ENABLE_ASSERTIONS=ON
     -DMLIR_ENABLE_BINDINGS_PYTHON=ON
     -DCMAKE_BUILD_TYPE=Release
@@ -395,8 +397,14 @@ ensure_llvm_build() {
   else
     cmake "${cmake_args[@]}"
   fi
+  # The linker-flags cache entry adds a linker input but not a Ninja target
+  # edge, so materialize TargetParser before the parallel Vectorize link.
+  cmake --build "${LLVM_BUILD_DIR}" --target LLVMTargetParser -- -j "${JOBS}"
   cmake --build "${LLVM_BUILD_DIR}" -- -j "${JOBS}"
-  touch "${LLVM_BUILD_DIR}/.ptoas-vectorize-target-parser-component"
+  if ! llvm_vectorize_has_target_parser_dependency; then
+    echo "ERROR: LLVMVectorize was built without a dependency on LLVMTargetParser" >&2
+    exit 1
+  fi
 }
 
 # ---------------------------------------------------------------------------
