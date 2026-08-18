@@ -33,8 +33,6 @@ export INSTALL_PATH="${BASE_PATH}/install"
 export PACKAGE_STAGE_PATH="${BUILD_PATH}/package_runtime"
 export LLVM_SOURCE_VERSION="19.1.7"
 export PTOAS_GLIBCXX_ABI="${PTOAS_GLIBCXX_ABI:-0}"
-export PTOAS_CC="${PTOAS_CC:-/opt/buildtools/llvm-15.0.4/bin/clang}"
-export PTOAS_CXX="${PTOAS_CXX:-/opt/buildtools/llvm-15.0.4/bin/clang++}"
 # The PTOAS tree is built against the vpto-dev LLVM/MLIR 19 "feature-vpto"
 # branch (source of custom calling conventions such as SimtEntry). Source it
 # from GitHub by default; override with LLVM_GIT_URL / LLVM_GIT_REF when a
@@ -68,6 +66,48 @@ if [ -d "/opt/rh/devtoolset-7/root" ]; then
 else
   DEVTOOLSET_TOOLCHAIN_FLAGS=""
 fi
+
+# Internal builds provide a pinned clang-15 toolchain under /opt/buildtools,
+# while gitcode images provide clang-15 through PATH. Keep the internal
+# toolchain as the first choice, but require both drivers to exist before
+# selecting it so the same entry point works in both environments.
+resolve_ptoas_toolchain() {
+  local default_cc=""
+  local default_cxx=""
+  local internal_cc="/opt/buildtools/llvm-15.0.4/bin/clang"
+  local internal_cxx="/opt/buildtools/llvm-15.0.4/bin/clang++"
+
+  if [ -x "${internal_cc}" ] && [ -x "${internal_cxx}" ]; then
+    default_cc="${internal_cc}"
+    default_cxx="${internal_cxx}"
+  elif command -v clang >/dev/null 2>&1 \
+       && command -v clang++ >/dev/null 2>&1; then
+    default_cc="$(command -v clang)"
+    default_cxx="$(command -v clang++)"
+  elif command -v clang-15 >/dev/null 2>&1 \
+       && command -v clang++-15 >/dev/null 2>&1; then
+    default_cc="$(command -v clang-15)"
+    default_cxx="$(command -v clang++-15)"
+  elif command -v gcc >/dev/null 2>&1 \
+       && command -v g++ >/dev/null 2>&1; then
+    default_cc="$(command -v gcc)"
+    default_cxx="$(command -v g++)"
+  fi
+
+  PTOAS_CC="${PTOAS_CC:-${default_cc}}"
+  PTOAS_CXX="${PTOAS_CXX:-${default_cxx}}"
+  PTOAS_CC="$(command -v "${PTOAS_CC}" 2>/dev/null || true)"
+  PTOAS_CXX="$(command -v "${PTOAS_CXX}" 2>/dev/null || true)"
+
+  if [ -z "${PTOAS_CC}" ] || [ -z "${PTOAS_CXX}" ]; then
+    echo "ERROR: no usable C/C++ compiler pair found" >&2
+    echo "Set PTOAS_CC and PTOAS_CXX to executable compiler paths." >&2
+    exit 1
+  fi
+
+  export PTOAS_CC PTOAS_CXX
+  echo "Using PTOAS toolchain: CC=${PTOAS_CC}, CXX=${PTOAS_CXX}"
+}
 
 print_success() {
   echo
@@ -791,6 +831,10 @@ main() {
         ;;
     esac
   done
+
+  if [ "$ENABLE_BUILD_ONLY" == "TRUE" ] || [ "$ENABLE_PACKAGE" == "TRUE" ]; then
+    resolve_ptoas_toolchain
+  fi
 
   prepare_llvm_cache_layout
 
