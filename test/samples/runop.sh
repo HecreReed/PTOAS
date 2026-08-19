@@ -20,6 +20,8 @@ PTOAS_OUT_DIR="${PTOAS_OUT_DIR:-}"
 PTO_BUILD_DIR="${PTO_BUILD_DIR:-}"
 PTOAS_ENABLE_INSERT_SYNC="${PTOAS_ENABLE_INSERT_SYNC:-1}"
 PTOAS_FLAGS="${PTOAS_FLAGS:-}"
+PTOAS_SKIP_CASES="${PTOAS_SKIP_CASES:-}"
+PTOAS_SKIP_CASES_NORM="$(printf '%s\n' "${PTOAS_SKIP_CASES}" | tr ',[:space:]' '\n' | awk 'NF')"
 MODEL_PTO_DIRS=""
 for model_path in "${BASE_DIR}"/Qwen* "${BASE_DIR}"/Deepseek*; do
   [[ -d "${model_path}" ]] || continue
@@ -50,6 +52,7 @@ Env:
   PTO_BUILD_DIR  # build directory root that contains tools/ptobc (optional)
   PTOAS_FLAGS  # extra flags passed to ptoas (e.g. --enable-insert-sync)
   PTOAS_ENABLE_INSERT_SYNC  # 1 to append --enable-insert-sync to PTOAS_FLAGS (default: 1)
+  PTOAS_SKIP_CASES  # comma/space-separated testcase basenames to skip while generating outputs
   PTO_PTO_DIRS  # space-separated dirs to run .pto directly (default: Sync, every Qwen*/Deepseek* A3/A5 model dir, and the legacy direct-PTO dirs)
 
 Flags:
@@ -78,6 +81,16 @@ sample_dir_arch() {
     Qwen*A3|Deepseek*A3) printf 'a3\n' ;;
     Qwen*A5|Deepseek*A5|TquantMx|TquantMxDn) printf 'a5\n' ;;
   esac
+}
+
+generation_case_is_skipped() {
+  local testcase="${1%-pto}"
+  local item
+
+  while IFS= read -r item; do
+    [[ -n "${item}" && "${item}" == "${testcase}" ]] && return 0
+  done <<< "${PTOAS_SKIP_CASES_NORM}"
+  return 1
 }
 
 resolve_ptoas_bin() {
@@ -315,6 +328,10 @@ process_one_dir() {
         ;;
     esac
     base="$(basename "$f" .py)"
+    if generation_case_is_skipped "${base}"; then
+      echo -e "${A}(${base}.py)\tSKIP\tlisted in PTOAS_SKIP_CASES"
+      continue
+    fi
     if [[ -f "${dir}/${base}-pto.pto" ]]; then
       echo -e "${A}(${base}.py)\tSKIP\tprefer checked-in direct PTO sample: ${base}-pto.pto"
       continue
@@ -1311,6 +1328,10 @@ PY
   if [[ $allow_pto -eq 1 ]]; then
     while IFS= read -r -d '' f; do
       base="$(basename "$f" .pto)"
+      if generation_case_is_skipped "${base}"; then
+        echo -e "${A}(${base}.pto)\tSKIP\tlisted in PTOAS_SKIP_CASES"
+        continue
+      fi
       local expect_fail=0
       local case_target_arch_lc="${target_arch_lc}"
       local -a case_ptoas_cmd_base=("${ptoas_cmd_base[@]}")

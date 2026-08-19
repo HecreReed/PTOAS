@@ -40,6 +40,8 @@ def rewrite_jit_function(
     """
     try:
         source = inspect.getsource(fn)
+        _, source_start_index = inspect.findsource(fn)
+        source_start_line = source_start_index + 1
     except (OSError, TypeError) as exc:
         # Dynamically-created functions from exec/REPL/notebook contexts may
         # not have retrievable source. Keep existing tracing behavior for those
@@ -54,6 +56,11 @@ def rewrite_jit_function(
     if function_def is None:
         return fn
 
+    # Preserve the first decorator line as the rewritten function's co_firstlineno.
+    function_first_lineno = min(
+        [function_def.lineno]
+        + [decorator.lineno for decorator in function_def.decorator_list]
+    )
     function_def.decorator_list = []
     closure_vars = inspect.getclosurevars(fn)
     static_env = dict(fn.__globals__)
@@ -81,8 +88,10 @@ def rewrite_jit_function(
         function_def.body = rewriter.rewrite_block(
             function_def.body, live_after=set(), bound_on_entry=entry_params
         )
+    function_def.lineno = function_first_lineno
     tree = ast.Module(body=[function_def], type_ignores=[])
     ast.fix_missing_locations(tree)
+    ast.increment_lineno(tree, source_start_line - 1)
 
     locals_ns = {}
     try:
@@ -1041,6 +1050,76 @@ def _loop_control_flags(stmts):
     return result
 
 
+def _stmt_always_transfers(stmt):
+    """True when *stmt* cannot complete normally in the current iteration.
+
+    A bare break/continue, or a compound statement whose every path exits
+    the iteration: an ``if`` whose both branches always transfer, a ``with``
+    whose body always transfers, or a ``try`` whose body and caught handlers
+    transfer (or whose ``finally`` transfers).  Nested loops belong to
+    themselves: a break inside one says nothing about the outer iteration.
+    """
+    if isinstance(stmt, (ast.Break, ast.Continue)):
+        return True
+    if isinstance(stmt, ast.If):
+        return (
+            bool(stmt.orelse)
+            and _block_always_transfers(stmt.body)
+            and _block_always_transfers(stmt.orelse)
+        )
+    if isinstance(stmt, (ast.With, ast.AsyncWith)):
+        return _block_always_transfers(stmt.body)
+    if isinstance(stmt, ast.Try) or type(stmt).__name__ == "TryStar":
+        # A transfer in the try body does not cover an exception path caught
+        # by a handler.  A finally transfer, on the other hand, overrides
+        # every normal or exceptional path through the statement.
+        if _block_always_transfers(stmt.finalbody):
+            return True
+        return (
+            _block_always_transfers(stmt.body)
+            and all(_block_always_transfers(handler.body) for handler in stmt.handlers)
+        )
+    return False
+
+
+def _block_always_transfers(stmts):
+    # _drop_unreachable_tails has already removed everything after the first
+    # guaranteed transfer in each child block.  Looking only at the final
+    # reachable statement keeps this helper correct when called independently
+    # and avoids treating an earlier conditional transfer as unconditional.
+    return bool(stmts) and _stmt_always_transfers(stmts[-1])
+
+
+def _drop_unreachable_tails(stmts):
+    """Truncate each statement list after a guaranteed transfer and recurse.
+
+    Statements following a statement that always exits the current iteration
+    (bare break/continue, both-branches-transfer if, transfer-bodied
+    with/try) are unreachable in Python semantics.  Dropping them before
+    name/slot analysis keeps dead names out of the carry computation and,
+    more importantly, keeps the tracer from executing bodies that reference
+    locals Python itself would never bind (``while ...: break; dead = dead +
+    1`` is legal Python yet raised UnboundLocalError when the dead tail was
+    still analyzed/traced).
+
+    The recursion stops at nested loops' own statements only in the sense of
+    ownership: their bodies are cleaned too, since each list is truncated at
+    its own control transfers.
+    """
+    cleaned = []
+    for stmt in stmts:
+        cleaned.append(stmt)
+        for field in ("body", "orelse", "finalbody"):
+            value = getattr(stmt, field, None)
+            if isinstance(value, list) and value and isinstance(value[0], ast.stmt):
+                setattr(stmt, field, _drop_unreachable_tails(value))
+        for handler in getattr(stmt, "handlers", []):
+            handler.body = _drop_unreachable_tails(handler.body)
+        if _stmt_always_transfers(stmt):
+            return cleaned
+    return cleaned
+
+
 def _loop_has_return(stmts):
     """Check returns in the current loop body, excluding nested functions."""
     class Visitor(ast.NodeVisitor):
@@ -1251,12 +1330,17 @@ class _ControlFlowRewriter:
         for preceding in stmts:
             bound_before_by_stmt[id(preceding)] = set(definite_in)
             definite_in = _definite_out_stmt(preceding, definite_in, self._static_env, static_iters)
+        control = self._loop_control_stack[-1] if self._loop_control_stack else None
+        tail_assigned = set()
+        tail_flags = {"break": False, "continue": False}
         for stmt in reversed(stmts):
             # Compute liveness from the authored AST before rewrite_stmt mutates
             # sibling statements in-place, otherwise later rewrites can pollute
             # earlier live-after analysis.
             live_before = _live_before_stmt(stmt, live)
             live_before_slots = _slot_live_before_stmt(stmt, live_slots, self._static_env, static_iters)
+            stmt_stores = _name_info(stmt).stores
+            stmt_flags = _loop_control_flags([stmt]) if control is not None else None
             rewritten = self.rewrite_stmt(
                 stmt,
                 live_after=live,
@@ -1265,10 +1349,78 @@ class _ControlFlowRewriter:
                 static_iters=static_iters,
                 bound_before=bound_before_by_stmt.get(id(stmt), set()),
             )
-            rewritten_reversed[:0] = rewritten
+            # When this statement can stop the current iteration (top-level
+            # break/continue, or a dynamic if containing one), the already-
+            # rewritten tail must run only while the loop is still active.
+            guarded_tail = self._guard_control_tail(
+                stmt, control=control, tail=rewritten_reversed,
+                tail_assigned=tail_assigned, tail_flags=tail_flags, live=live,
+            )
+            if guarded_tail is not None:
+                # The tail now lives inside the guard: replace the
+                # accumulator instead of prepending, or the tail nodes
+                # would be shared by the guard and the block.
+                rewritten_reversed = rewritten + guarded_tail
+            else:
+                rewritten_reversed[:0] = rewritten
+            tail_assigned |= stmt_stores
+            if stmt_flags is not None:
+                tail_flags["break"] |= stmt_flags["break"]
+                tail_flags["continue"] |= stmt_flags["continue"]
             live = live_before
             live_slots = live_before_slots
         return rewritten_reversed
+
+    def _guard_control_tail(self, stmt, *, control, tail, tail_assigned, tail_flags, live):
+        """Guard the already-rewritten tail of a break/continue statement.
+
+        When ``stmt`` can stop the current iteration (a top-level break/continue,
+        or a dynamic if whose branches contain one, per ``_loop_control_flags``),
+        every statement after it may only run while the loop is still active.
+        The tail therefore executes under a ``pto.if_(active)`` guard whose
+        condition is the merged active flag from the preceding statements, so
+        statements after the transfer are skipped for that iteration.
+
+        ``tail_assigned`` holds the names the tail assigns; names that are also
+        live after the guard point are merged through the guard so later
+        statements and the loop ``update`` keep consistent values.  ``tail_flags``
+        records whether the tail itself contains control transfers: a tail that
+        assigns ``active``/``did_break`` (they are not ``ast.Assign`` stores, so
+        they never appear in ``tail_assigned``) must also merge them out, or the
+        loop ``update`` would read flags whose SSA values are defined inside the
+        guard region.  Controlled loops reject static subscript stores up front,
+        so slots never need to participate here.  ``rewrite_block`` and
+        ``_rewrite_loop_body`` share this segmentation; nested branch bodies pick
+        up the current loop's control from the stack top automatically.
+
+        Complexity note: a block with N control-transfer points produces N
+        nested guards (each transfer's guard wraps the already-guarded tail
+        behind it), with per-guard merge sets bounded by the names live at
+        that point.  This nesting is inherent to predicating the tail: once an
+        earlier transfer has fired, a later transfer statement must not even
+        evaluate its condition, so the guards cannot be flattened into sibling
+        regions without redesigning flag updates as data-flow (e.g.
+        ``did_break |= cond & active``).  Typical kernels have very few
+        transfer points per block, so the nesting is accepted deliberately
+        rather than capped or merged.
+        """
+        if control is None or not tail:
+            return None
+        flags = _loop_control_flags([stmt])
+        if not (flags["break"] or flags["continue"]):
+            return None
+        flag_names = set()
+        if tail_flags["break"] or tail_flags["continue"]:
+            flag_names.add(control["active"])
+        if tail_flags["break"]:
+            flag_names.add(control["did_break"])
+        merge_names = sorted((set(tail_assigned) | flag_names) & set(live))
+        return self._guard_block(
+            _name(control["active"]),
+            tail,
+            merge_names=merge_names,
+            assigned_names=set(tail_assigned) | flag_names,
+        )
 
     def _rewrite_loop_body(self, stmts, *, live_after, live_after_slots=None, static_iters=None, control=None, bound_on_entry=None):
         """Rewrite loop statements while keeping each authored statement atomic.
@@ -1289,12 +1441,16 @@ class _ControlFlowRewriter:
         for preceding in stmts:
             bound_before_by_stmt[id(preceding)] = set(definite_in)
             definite_in = _definite_out_stmt(preceding, definite_in, self._static_env, static_iters)
+        tail_assigned = set()
+        tail_flags = {"break": False, "continue": False}
         for stmt in reversed(stmts):
             live_before = _live_before_stmt(stmt, live)
             live_before_slots = _slot_live_before_stmt(stmt, live_slots, self._static_env, static_iters)
             rewrite_live = live
             if control is not None:
                 rewrite_live = set(rewrite_live) | {control["active"], control["did_break"]}
+            stmt_stores = _name_info(stmt).stores
+            stmt_flags = _loop_control_flags([stmt]) if control is not None else None
             group = self.rewrite_stmt(
                 stmt,
                 live_after=rewrite_live,
@@ -1303,7 +1459,23 @@ class _ControlFlowRewriter:
                 static_iters=static_iters,
                 bound_before=bound_before_by_stmt.get(id(stmt), set()),
             )
-            rewritten_reversed[:0] = group
+            # Segment the already-rewritten tail on the merged active value
+            # when this statement can stop the current iteration.
+            guarded_tail = self._guard_control_tail(
+                stmt, control=control, tail=rewritten_reversed,
+                tail_assigned=tail_assigned, tail_flags=tail_flags, live=live,
+            )
+            if guarded_tail is not None:
+                # The tail now lives inside the guard: replace the
+                # accumulator instead of prepending, or the tail nodes
+                # would be shared by the guard and the block.
+                rewritten_reversed = group + guarded_tail
+            else:
+                rewritten_reversed[:0] = group
+            tail_assigned |= stmt_stores
+            if stmt_flags is not None:
+                tail_flags["break"] |= stmt_flags["break"]
+                tail_flags["continue"] |= stmt_flags["continue"]
             live = set(live_before)
             if control is not None:
                 live |= {control["active"], control["did_break"]}
@@ -1768,6 +1940,9 @@ class _ControlFlowRewriter:
     def _rewrite_for(self, stmt, *, live_after, live_after_slots=None, allow_loop_control=False, static_iters=None, bound_before=None):
         live_after_slots = set(live_after_slots or ())
         static_iters = dict(static_iters or {})
+        # Drop statically dead tails of unconditional break/continue before
+        # any analysis or tracing (they are unreachable in Python semantics).
+        stmt.body = _drop_unreachable_tails(stmt.body)
         if _is_pto_attr_call(stmt.iter, "static_range"):
             next_static_iters = dict(static_iters)
             if isinstance(stmt.target, ast.Name):
@@ -2208,24 +2383,21 @@ class _ControlFlowRewriter:
             for name in state_names
         ]
         # active is per-iteration execution state; did_break remains sticky.
+        # The body is segmented by _guard_control_tail on the merged active
+        # value, so no whole-body guard is needed here.
         prologue.append(ast.Assign(targets=[_name(skip_name, ast.Store())], value=_flag_const(True)))
-        guarded_body = self._guard_block(
-            _name(skip_name), body,
-            merge_names=state_names,
-            assigned_names=state_names,
-        )
         updates = [
             ast.keyword(arg=iv_name, value=ast.BinOp(left=_name(iv_name), op=ast.Add(), right=copy.deepcopy(step))),
             *[ast.keyword(arg=name, value=_name(name)) for name in sorted(loop_carried)],
             ast.keyword(arg=skip_name, value=_name(skip_name)),
             ast.keyword(arg=did_break_name, value=_name(did_break_name)),
         ]
-        guarded_body.append(ast.Expr(value=ast.Call(
+        body.append(ast.Expr(value=ast.Call(
             func=ast.Attribute(value=_name(loop_name), attr="update", ctx=ast.Load()),
             args=[], keywords=updates)))
         with_stmt = ast.With(
             items=[ast.withitem(context_expr=_name(loop_name), optional_vars=None)],
-            body=prologue + guarded_body,
+            body=prologue + body,
             type_comment=None,
         )
         result = [ast.copy_location(setup, stmt), ast.copy_location(with_stmt, stmt)]
@@ -2256,6 +2428,10 @@ class _ControlFlowRewriter:
     def _rewrite_while(self, stmt, *, live_after, live_after_slots=None,
                        allow_loop_control=False, static_iters=None, bound_before=None):
         """Lower runtime ``while`` using named state and explicit control flags."""
+        # Drop statically dead tails of unconditional break/continue before
+        # any analysis or tracing (they are unreachable in Python semantics),
+        # so dead names never enter the carry computation or get traced.
+        stmt.body = _drop_unreachable_tails(stmt.body)
         if _loop_has_return(stmt.body):
             raise PTODSLAstRewriteError(
                 "ast_rewrite=True does not support dynamic return inside runtime while"
@@ -2274,16 +2450,29 @@ class _ControlFlowRewriter:
             )
         test_info = _name_info(stmt.test)
         control = _loop_control_flags(stmt.body)
-        if (control["break"] or control["continue"] or stmt.orelse) and not (
-            body_info.stores & (test_info.loads | body_info.loads | set(live_after))
-        ):
+        # A loop-carried name must be one whose pre-iteration value is needed:
+        # it is read by the test before each iteration, it is read before any
+        # assignment inside the body (so it depends on the previous iteration's
+        # value), or it stays live after the loop.  ``body_info.loads`` is
+        # deliberately not used here: it includes loop-local temporaries that
+        # are written before they are read each iteration (e.g.
+        # ``col = base + index``), which are not live across iterations and
+        # would be read while still unbound at the pto._while(...) setup.
+        # This mirrors the loop_carried criterion used by ``_rewrite_for``.
+        reads_before = _read_before_assignment_names(stmt.body)
+        required_carries = test_info.loads | reads_before | set(live_after)
+        # A controlled loop (break/continue/else) may legitimately need no
+        # user-level carry: its test reads only loop-invariant names and every
+        # body store is a loop-local temporary.  The active/did_break control
+        # flags then provide the loop-carried state themselves.  Only a
+        # completely store-less body is rejected, since it cannot carry the
+        # control transfer at all.
+        if (control["break"] or control["continue"] or stmt.orelse) and not body_info.stores:
             raise PTODSLAstRewriteError(
                 "ast_rewrite=True runtime while break/continue requires explicit control-state lowering"
             )
-        carry_names = tuple(sorted(
-            body_info.stores & (test_info.loads | body_info.loads | set(live_after))
-        ))
-        if not carry_names:
+        carry_names = tuple(sorted(body_info.stores & required_carries))
+        if not carry_names and not (control["break"] or control["continue"] or stmt.orelse):
             raise PTODSLAstRewriteError(
                 "ast_rewrite=True runtime while requires at least one loop-carried value"
             )
@@ -2303,6 +2492,16 @@ class _ControlFlowRewriter:
                                       ctx=ast.Load()), node)
                 return node
 
+        class _ConditionLiteralRewriter(ast.NodeTransformer):
+            # A literal test condition (``while True:`` / ``while False:``)
+            # must be materialized as an i1 constant, not a Python bool: the
+            # controlled condition is combined with ``and``, whose runtime
+            # scalar operator would otherwise reject the bool literal.
+            def visit_Constant(inner, node):
+                if isinstance(node.value, bool):
+                    return ast.copy_location(_flag_const(node.value), node)
+                return node
+
         condition = _ConditionStateRewriter().visit(copy.deepcopy(stmt.test))
         if controlled:
             condition = ast.BinOp(
@@ -2314,6 +2513,7 @@ class _ControlFlowRewriter:
                 ),
             )
             condition = _ConditionStateRewriter().visit(condition)
+        condition = _ConditionLiteralRewriter().visit(condition)
         ast.fix_missing_locations(condition)
         condition_fn = ast.Lambda(
             args=ast.arguments(
@@ -2364,13 +2564,10 @@ class _ControlFlowRewriter:
             # ``active`` is an iteration-local execution flag.  A continue
             # clears it for the remainder of this body, then the next body
             # entry re-enables it.  ``did_break`` is sticky across iterations.
+            # The body is segmented by _guard_control_tail on the merged
+            # active value, so no whole-body guard is needed here.
             prologue.append(ast.Assign(
                 targets=[_name(active_name, ast.Store())], value=_flag_const(True)))
-            body = self._guard_block(
-                _name(active_name), body,
-                merge_names=state_names,
-                assigned_names=state_names,
-            )
         update = ast.Expr(
             value=ast.Call(
                 func=ast.Attribute(value=_name(loop_name), attr="update",

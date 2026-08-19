@@ -14078,8 +14078,8 @@ static AICORE inline void PTOAS__DCCI_SINGLE_CACHE_LINE(Ptr ptr) {
 
       // IndexType is lowered to int64_t for EmitC. SCF structural conversion
       // can still materialize temporary index<->int64_t bridges; keeping them
-      // as emitc.cast leaves illegal index-typed EmitC IR for LLVM 21's C++
-      // emitter, so fold the bridge back to the lowered value.
+      // as emitc.cast leaves illegal index-typed EmitC IR for the C++ emitter,
+      // so fold the bridge back to the lowered value.
       if ((isa<IndexType>(inTy) && isLoweredIndexType(outTy)) ||
           (isLoweredIndexType(inTy) && isa<IndexType>(outTy))) {
         output.replaceAllUsesWith(input);

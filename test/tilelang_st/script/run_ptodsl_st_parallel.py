@@ -32,7 +32,7 @@ def _timestamp():
 
 
 def _default_ptoas_bin(repo_root):
-    candidate = repo_root / "build-llvm21" / "tools" / "ptoas" / "ptoas"
+    candidate = repo_root / "build" / "tools" / "ptoas" / "ptoas"
     if candidate.is_file():
         return candidate
     found = run_st.find_ptoas_bin()
@@ -55,7 +55,7 @@ def _target_dir_from_testcase_root(testcase_root):
 def _log_dir(repo_root, requested):
     if requested:
         return Path(requested).resolve()
-    return repo_root / "build-llvm21" / "tilelang_st_ptodsl_logs" / _timestamp()
+    return repo_root / "build" / "tilelang_st_ptodsl_logs" / _timestamp()
 
 
 def _write_json(path, payload):

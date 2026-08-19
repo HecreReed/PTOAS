@@ -216,7 +216,7 @@ for (int i = 0; i < N; i++)
 
 ### `pto.vshl`
 
-- **syntax:** `%result = pto.vshl %lhs, %rhs, %mask : !pto.vreg<NxT>, !pto.vreg<NxT>, !pto.mask<G> -> !pto.vreg<NxT>`
+- **syntax:** `%result = pto.vshl %lhs, %rhs, %mask : !pto.vreg<NxT>, !pto.vreg<NxsiW>, !pto.mask<G> -> !pto.vreg<NxT>` where `W` is the bit width of `T`
 - **A5 types:** all integer types
 
 ```c
@@ -227,27 +227,31 @@ for (int i = 0; i < N; i++)
 - **inputs:** `%lhs` supplies the shifted value, `%rhs` supplies the per-lane
   shift amount, and `%mask` selects active lanes.
 - **outputs:** `%result` is the shifted vector.
-- **constraints and limitations:** Integer element types only. Shift counts
-  SHOULD stay within `[0, bitwidth(T) - 1]`; out-of-range behavior is target-
-  defined unless the verifier narrows it further.
+- **constraints and limitations:** Integer element types only. `%rhs` must use
+  signed `siW` elements with the same lane count and bit width as `%lhs`; the
+  result type must exactly match `%lhs`. Shift counts SHOULD stay within
+  `[0, bitwidth(T) - 1]`; out-of-range behavior is target-defined unless the
+  verifier narrows it further.
 
 ---
 
 ### `pto.vshr`
 
-- **syntax:** `%result = pto.vshr %lhs, %rhs, %mask : !pto.vreg<NxT>, !pto.vreg<NxT>, !pto.mask<G> -> !pto.vreg<NxT>`
+- **syntax:** `%result = pto.vshr %lhs, %rhs, %mask : !pto.vreg<NxT>, !pto.vreg<NxsiW>, !pto.mask<G> -> !pto.vreg<NxT>` where `W` is the bit width of `T`
 - **A5 types:** all integer types
 
 ```c
 for (int i = 0; i < N; i++)
-    dst[i] = src0[i] >> src1[i];  // arithmetic for signed, logical for unsigned
+    dst[i] = src0[i] >> src1[i];
 ```
 
 - **inputs:** `%lhs` supplies the shifted value, `%rhs` supplies the per-lane
   shift amount, and `%mask` selects active lanes.
 - **outputs:** `%result` is the shifted vector.
-- **constraints and limitations:** Integer element types only. Signedness of the
-  element type determines arithmetic vs logical behavior.
+- **constraints and limitations:** Integer element types only. `%rhs` must use
+  signed `siW` elements with the same lane count and bit width as `%lhs`; the
+  result type must exactly match `%lhs`. The current VPTO contract does not
+  define arithmetic versus logical right-shift behavior.
 
 ---
 

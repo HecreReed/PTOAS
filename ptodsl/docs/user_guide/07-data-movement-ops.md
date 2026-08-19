@@ -154,6 +154,10 @@ this chapter documents the underlying canonical operations.
 - `nburst` is always required.
 - `loop` groups are ordered from inner (wrapping `nburst`) to outer.
 - If `pad` specifies either left or right count, both must be provided.
+- `pad_value` may be an 8/16/32-bit integer scalar (signless, signed, or
+  unsigned) or an `f16`/`bf16`/`f32` scalar. Signed/unsigned integer pads are
+  normalized to their signless bit pattern when the op is built; the pad value
+  is encoded into `SET.MOV.PAD.VAL` as raw bits, so signedness carries no meaning.
 
 **Example** — load a 32×32 f32 tile from contiguous GM into contiguous UB:
 

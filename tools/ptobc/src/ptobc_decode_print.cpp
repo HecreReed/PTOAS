@@ -785,9 +785,9 @@ static mlir::Operation *buildKnownOpFromReader(BuildCtx &bc, Reader &r,
   }
 
   mlir::Operation *op = mlir::Operation::create(state);
-  // In MLIR 21, AttrSizedOperandSegments is stored as an inherent property.
+  // AttrSizedOperandSegments uses generated inherent property storage.
   // OperationState's generic attribute list does not initialize it, so update
-  // the generated property storage directly after creating the registered op.
+  // that storage directly after creating the registered op.
   if (unifiedOperandSegments) {
     setUnifiedOperandSegmentProperty(op, opcode, *unifiedOperandSegments);
   }

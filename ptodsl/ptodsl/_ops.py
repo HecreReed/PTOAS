@@ -64,6 +64,7 @@ from ._types import (
     _materialize_integer_literal,
     _normalize_address_space,
     _resolve,
+    _strip_integer_signedness,
     mask_type,
     part_tensor_view_type,
     part_tensor_view_type_from_dims,
@@ -1858,6 +1859,37 @@ def _emit_binary_vec_op(op_ctor, lhs, rhs, mask):
     )
 
 
+def _normalize_shift_count_vector(rhs, *, context: str):
+    """Reinterpret an integer shift-count vector as its signed type."""
+    raw_type = unwrap_surface_value(rhs).type
+    # Preserve generated-wrapper dispatch tests, which intentionally use mock
+    # values instead of MLIR SSA values. Real PTODSL values always carry Type.
+    if not isinstance(raw_type, Type):
+        return rhs
+    _, element_type = _infer_vreg_metadata(rhs)
+    if not IntegerType.isinstance(element_type):
+        raise TypeError(f"{context} requires an integer shift-count vector")
+    integer_type = IntegerType(element_type)
+    signed_type = IntegerType.get_signed(integer_type.width)
+    if element_type == signed_type:
+        return rhs
+    return vbitcast(rhs, signed_type)
+
+
+def _emit_shift_vec_op(op_ctor, lhs, rhs, mask):
+    context = f"pto.{_surface_name_for_op_ctor(op_ctor)}(...)"
+    _reject_low_precision_vreg_operands(lhs, rhs, context=context)
+    normalized_rhs = _normalize_shift_count_vector(rhs, context=context)
+    return wrap_surface_value(
+        op_ctor(
+            unwrap_surface_value(lhs).type,
+            unwrap_surface_value(lhs),
+            unwrap_surface_value(normalized_rhs),
+            unwrap_surface_value(mask),
+        ).result
+    )
+
+
 def _emit_vec_scalar_masked_op(op_ctor, inp, scalar, mask, *, context: str):
     _reject_low_precision_vreg_operands(inp, context=f"pto.{context}(...)")
     scalar_value = _coerce_scalar_like_vector_element(inp, scalar, context=context)
@@ -1940,12 +1972,12 @@ def vtrc(inp, mask, *, rnd="Z"):
 
 def vshl(lhs, rhs, mask):
     """``pto.vshl`` – element-wise shift left."""
-    return _emit_binary_vec_op(_pto.VshlOp, lhs, rhs, mask)
+    return _emit_shift_vec_op(_pto.VshlOp, lhs, rhs, mask)
 
 
 def vshr(lhs, rhs, mask):
     """``pto.vshr`` – element-wise shift right."""
-    return _emit_binary_vec_op(_pto.VshrOp, lhs, rhs, mask)
+    return _emit_shift_vec_op(_pto.VshrOp, lhs, rhs, mask)
 
 
 def vcmax(v, mask):
@@ -5187,9 +5219,18 @@ def _normalize_dma_pad(pad, *, context: str):
         pad_value, left_count, right_count = pad
     else:
         raise TypeError(f"{context} expects pad to have length 1 or 3")
+    if hasattr(pad_value, "type"):
+        # The pad value is encoded as a raw bit pattern into SET.MOV.PAD.VAL,
+        # so signedness is irrelevant to the backend. Normalize explicit
+        # signed/unsigned integer pads (ui8/si8/...) to the signless
+        # counterpart the IR verifier accepts, preserving the bit pattern.
+        pad_value = _strip_integer_signedness(unwrap_surface_value(pad_value))
+    else:
+        pad_value = materialize_scalar_literal(
+            pad_value, F32Type.get(), context=f"{context} pad[0]"
+        )
     return (
-        materialize_scalar_literal(pad_value, F32Type.get(), context=f"{context} pad[0]")
-        if not hasattr(pad_value, "type") else unwrap_surface_value(pad_value),
+        pad_value,
         _coerce_i64(left_count, context=f"{context} pad[1]"),
         _coerce_i64(right_count, context=f"{context} pad[2]"),
     )

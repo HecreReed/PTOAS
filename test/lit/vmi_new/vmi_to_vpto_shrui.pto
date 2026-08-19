@@ -30,8 +30,10 @@ module {
 // LOWER-SAME: %[[AMOUNT0:[^,]+]]: !pto.vreg<128xui16>
 // LOWER-SAME: %[[AMOUNT1:[^)]+]]: !pto.vreg<128xui16>
 // LOWER-SAME: -> (!pto.vreg<128xui16>, !pto.vreg<128xui16>)
-// LOWER-DAG: %[[SHR0:.*]] = pto.vshr %[[VALUE0]], %[[AMOUNT0]], {{.*}} : !pto.vreg<128xui16>, !pto.vreg<128xui16>, !pto.mask<b16> -> !pto.vreg<128xui16>
-// LOWER-DAG: %[[SHR1:.*]] = pto.vshr %[[VALUE1]], %[[AMOUNT1]], {{.*}} : !pto.vreg<128xui16>, !pto.vreg<128xui16>, !pto.mask<b16> -> !pto.vreg<128xui16>
+// LOWER-DAG: %[[COUNT0:.*]] = pto.vbitcast %[[AMOUNT0]] : !pto.vreg<128xui16> -> !pto.vreg<128xsi16>
+// LOWER-DAG: %[[COUNT1:.*]] = pto.vbitcast %[[AMOUNT1]] : !pto.vreg<128xui16> -> !pto.vreg<128xsi16>
+// LOWER-DAG: %[[SHR0:.*]] = pto.vshr %[[VALUE0]], %[[COUNT0]], {{.*}} : !pto.vreg<128xui16>, !pto.vreg<128xsi16>, !pto.mask<b16> -> !pto.vreg<128xui16>
+// LOWER-DAG: %[[SHR1:.*]] = pto.vshr %[[VALUE1]], %[[COUNT1]], {{.*}} : !pto.vreg<128xui16>, !pto.vreg<128xsi16>, !pto.mask<b16> -> !pto.vreg<128xui16>
 // LOWER: return %[[SHR0]], %[[SHR1]]
 // LOWER-NOT: pto.vmi.
 // LOWER-NOT: !pto.vmi.

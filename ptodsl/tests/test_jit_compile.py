@@ -4127,6 +4127,16 @@ def ast_runtime_index_bitwise_event_probe():
 
 
 @pto.jit(target="a5", mode="explicit")
+def ui8_pad_surface_probe():
+    """Explicit ui8 pointer + ui8 pad value must compile (issue #1245)."""
+    zero = pto.const(0, dtype=pto.i64)
+    gm_src = pto.castptr(zero, pto.ptr(pto.ui8, "gm"))
+    ub_dst = pto.castptr(zero, pto.ptr(pto.ui8, "ub"))
+    pad_value = pto.const(0, dtype=pto.ui8)
+    pto.mte_gm_ub(gm_src, ub_dst, 0, 3, nburst=(1, 3, 32), pad=(pad_value, 0, 29))
+
+
+@pto.jit(target="a5", mode="explicit")
 def public_data_movement_surface_probe():
     zero_u64 = pto.const(0, dtype=pto.ui64)
     gm_src = pto.castptr(zero_u64, pto.ptr(pto.f16, "gm"))
@@ -4943,6 +4953,7 @@ def main() -> None:
     explicit_runtime_index_integer_bitwise_event_probe.verify()
     ast_runtime_index_bitwise_event_probe.verify()
     public_data_movement_surface_probe.verify()
+    ui8_pad_surface_probe.verify()
     fixed_width_integer_specialization_probe.verify()
     public_vector_conversion_surface_probe.verify()
     vdup_surface_probe.verify()
@@ -7650,6 +7661,8 @@ def main() -> None:
         "AST runtime index bitwise event specialization",
     )
     data_movement_surface_text = public_data_movement_surface_probe.compile().mlir_text()
+    ui8_pad_surface_text = ui8_pad_surface_probe.compile().mlir_text()
+    expect_parse_roundtrip_and_verify(ui8_pad_surface_text, "ui8 pad value specialization")
     expect_parse_roundtrip_and_verify(data_movement_surface_text, "public data movement surface specialization")
     vector_conversion_surface_text = public_vector_conversion_surface_probe.compile().mlir_text()
     expect_parse_roundtrip_and_verify(vector_conversion_surface_text, "public vector conversion surface specialization")
@@ -8169,6 +8182,10 @@ def main() -> None:
     expect(
         re.search(r"pto\.mte_ub_gm [^\n]+ nburst\([^)]+\) l2_cache_ctl\(%c15[^)\n]*\)", data_movement_surface_text) is not None,
         "mte_ub_gm(..., l2_cache='wtsred') should map to the l2_cache_ctl group",
+    )
+    expect(
+        re.search(r"pto\.mte_gm_ub [^\n]+ pad\([^)]*\) [^\n]*pad i8", ui8_pad_surface_text) is not None,
+        "ui8 pad value should be normalized to a signless i8 scalar for SET.MOV.PAD.VAL encoding (issue #1245)",
     )
     expect("pto.mte_ub_ub" in data_movement_surface_text, "public grouped UB->UB wrapper should lower to pto.mte_ub_ub")
     expect("pto.mte_ub_l1" in data_movement_surface_text, "public grouped UB->L1 wrapper should lower to pto.mte_ub_l1")

@@ -32,6 +32,60 @@ def expect_raises(callback, exc_type, *message_fragments: str) -> None:
         raise AssertionError(f"expected {exc_type.__name__} to be raised")
 
 
+def expect_traceback_line(
+    callback,
+    exc_type,
+    function_name: str,
+    marker: str,
+    first_line_marker: str,
+) -> None:
+    source_path = Path(__file__).resolve()
+    source_lines = source_path.read_text(encoding="utf-8").splitlines()
+
+    def marker_line(source_marker: str) -> int:
+        marker_lines = [
+            line_number
+            for line_number, line in enumerate(source_lines, start=1)
+            if f"# {source_marker}" in line
+        ]
+        expect(
+            len(marker_lines) == 1,
+            f"expected exactly one source marker {source_marker!r}, got {marker_lines}",
+        )
+        return marker_lines[0]
+
+    expected_line = marker_line(marker)
+    expected_first_line = marker_line(first_line_marker)
+
+    try:
+        callback()
+    except exc_type as exc:
+        matching_frames = []
+        current = exc.__traceback__
+        while current is not None:
+            frame = current.tb_frame
+            if (
+                Path(frame.f_code.co_filename).resolve() == source_path
+                and frame.f_code.co_name == function_name
+            ):
+                matching_frames.append(current)
+            current = current.tb_next
+        expect(matching_frames, f"expected a traceback frame for {function_name}")
+        rewritten_frame = matching_frames[-1]
+        expect(
+            rewritten_frame.tb_lineno == expected_line,
+            f"expected {function_name} traceback line {expected_line}, "
+            f"got {rewritten_frame.tb_lineno}",
+        )
+        expect(
+            rewritten_frame.tb_frame.f_code.co_firstlineno == expected_first_line,
+            f"expected {function_name} first line {expected_first_line}, "
+            f"got {rewritten_frame.tb_frame.f_code.co_firstlineno}",
+        )
+    else:
+        raise AssertionError(f"expected {exc_type.__name__} to be raised")
+
+
 @pto.jit(target="a5", ast_rewrite=False)
 def native_python_if_runtime_const_probe():
     if pto.const(1):
@@ -648,6 +702,17 @@ def taddrelu_a5_probe():
     rhs = pto.alloc_tile(shape=[1, 64], dtype=pto.f32)
     dst = pto.alloc_tile(shape=[1, 64], dtype=pto.f32)
     pto.tile.addrelu(lhs, rhs, dst)
+
+
+def define_ast_rewrite_traceback_line_probe():
+    @pto.jit(  # AST_REWRITE_FIRST_LINE_MARKER
+        target="a5",
+    )
+    def ast_rewrite_traceback_line_probe():
+        runtime_value = pto.const(1, dtype=pto.i32)
+        _ = not runtime_value  # AST_REWRITE_TRACEBACK_LINE_MARKER
+
+    return ast_rewrite_traceback_line_probe
 
 
 def main() -> None:
@@ -1297,6 +1362,14 @@ def main() -> None:
         TypeError,
         "host tensor metadata is incomplete or unsupported",
         "data_ptr must return an integer-like data handle",
+    )
+    ast_rewrite_traceback_line_probe = define_ast_rewrite_traceback_line_probe()
+    expect_traceback_line(
+        ast_rewrite_traceback_line_probe.compile,
+        TypeError,
+        "ast_rewrite_traceback_line_probe",
+        "AST_REWRITE_TRACEBACK_LINE_MARKER",
+        "AST_REWRITE_FIRST_LINE_MARKER",
     )
     print("ptodsl_jit_diagnostics: PASS")
 

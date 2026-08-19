@@ -1701,6 +1701,12 @@ exp_vec = pto.vexp(s_row, col_mask)
 | `pto.vshl(vec, shift, mask) -> VRegType` | `vec << shift` (per-element) |
 | `pto.vshr(vec, shift, mask) -> VRegType` | `vec >> shift` (per-element) |
 
+For `pto.vshl` and `pto.vshr`, `vec` must use an integer element type. The
+`shift` vector must have the same lane count and element bit width as `vec`.
+PTODSL normalizes `shift` to signed `siW`, where `W` is the element bit width;
+the result has the same type as `vec`. The right-shift mode of `pto.vshr` is
+not defined by the current contract.
+
 ---
 
 ### 8.2.3 Vector-scalar ops

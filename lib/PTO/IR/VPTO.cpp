@@ -6357,26 +6357,66 @@ LogicalResult VmaddOp::verify() {
   }
   return success();
 }
-LogicalResult VshlOp::verify() {
-  if (failed(verifyBinaryVecOp(*this))) {
+// Shared verifier for vshl/vshr. Shift counts use a signed integer vreg.
+// DSL frontends must bitcast signless or unsigned count vectors to this
+// canonical form.
+template <typename BinaryOp>
+static LogicalResult verifyShiftVecOp(BinaryOp op) {
+  const bool hasInvalidOperandType =
+      failed(verifyVRegTypeLike(op, op.getLhs().getType(), "lhs type")) ||
+      failed(verifyVRegTypeLike(op, op.getRhs().getType(), "rhs type")) ||
+      failed(verifyMaskTypeLike(op, op.getMask().getType(), "mask type")) ||
+      failed(verifyVRegTypeLike(op, op.getResult().getType(), "result type"));
+  if (hasInvalidOperandType) {
     return failure();
   }
-  auto lhsType = cast<VRegType>(getLhs().getType());
+  if (failed(verifyNonLowPrecisionVRegElementTypeLike(
+          op.getOperation(), op.getLhs().getType(), "lhs type"))) {
+    return failure();
+  }
+
+  auto lhsType = cast<VRegType>(op.getLhs().getType());
+  auto rhsType = cast<VRegType>(op.getRhs().getType());
+  auto resultType = cast<VRegType>(op.getResult().getType());
+
+  // Shifting is only meaningful for integer vectors.
   if (!isa<IntegerType>(lhsType.getElementType())) {
-    return emitOpError("requires integer vector element type");
+    return op.emitOpError("requires integer vector element type");
+  }
+
+  // Result type must match lhs exactly.
+  if (lhsType != resultType) {
+    return op.emitOpError("requires matching result register vector shape");
+  }
+
+  // Shift count must have the same lane count and element bitwidth as the
+  // shifted data.
+  const bool hasMismatchedLaneCount =
+      lhsType.getElementCount() != rhsType.getElementCount();
+  if (hasMismatchedLaneCount) {
+    return op.emitOpError("requires matching lane count for shift count");
+  }
+  auto lhsElem = cast<IntegerType>(lhsType.getElementType());
+  auto rhsElem = dyn_cast<IntegerType>(rhsType.getElementType());
+  if (!rhsElem) {
+    return op.emitOpError(
+        "requires integer vector element type for shift count");
+  }
+  const bool hasMismatchedElementBitwidth =
+      rhsElem.getWidth() != lhsElem.getWidth();
+  if (hasMismatchedElementBitwidth) {
+    return op.emitOpError(
+        "requires shift count with matching element bitwidth");
+  }
+  if (!rhsElem.isSigned()) {
+    return op.emitOpError(
+        "requires shift count to use a signed integer element type");
   }
   return success();
 }
-LogicalResult VshrOp::verify() {
-  if (failed(verifyBinaryVecOp(*this))) {
-    return failure();
-  }
-  auto lhsType = cast<VRegType>(getLhs().getType());
-  if (!isa<IntegerType>(lhsType.getElementType())) {
-    return emitOpError("requires integer vector element type");
-  }
-  return success();
-}
+
+LogicalResult VshlOp::verify() { return verifyShiftVecOp(*this); }
+LogicalResult VshrOp::verify() { return verifyShiftVecOp(*this); }
 LogicalResult VaddcOp::verify() { return verifyCarryVecOp(*this); }
 LogicalResult VsubcOp::verify() { return verifyCarryVecOp(*this); }
 LogicalResult VaddcsOp::verify() { return verifyCarryVecOpWithInput(*this); }

@@ -1,0 +1,64 @@
+// Copyright (c) 2026 Huawei Technologies Co., Ltd.
+// This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+// CANN Open Software License Agreement Version 2.0 (the "License").
+// Please refer to the License for details. You may not use this file except in compliance with the License.
+// THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+// INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+// See LICENSE in the root of the software repository for the full text of the License.
+
+// Guard the vshl/vshr shift-count contract: rhs is always signed, while lhs
+// and result retain their data types.
+// RUN: split-file %s %t
+// RUN: ptoas --pto-arch=a5 --emit-pto-ir %t/signed_rhs.pto -o - 2>&1 | FileCheck %s --check-prefix=SIGNED
+// RUN: not ptoas --pto-arch=a5 --emit-pto-ir %t/signless_rhs.pto -o - 2>&1 | FileCheck %s --check-prefix=SIGNLESS
+// RUN: not ptoas --pto-arch=a5 --emit-pto-ir %t/unsigned_rhs.pto -o - 2>&1 | FileCheck %s --check-prefix=UNSIGNED
+
+// SIGNED: pto.vshr
+// SIGNED: pto.vshl
+
+//--- signed_rhs.pto
+module {
+  func.func @signed_shift_counts(
+      %ui_lhs: !pto.vreg<64xui32>,
+      %si_lhs: !pto.vreg<64xsi32>,
+      %count: !pto.vreg<64xsi32>,
+      %mask: !pto.mask<b32>) -> (!pto.vreg<64xui32>, !pto.vreg<64xsi32>) {
+    %shr = pto.vshr %ui_lhs, %count, %mask
+        : !pto.vreg<64xui32>, !pto.vreg<64xsi32>, !pto.mask<b32>
+        -> !pto.vreg<64xui32>
+    %shl = pto.vshl %si_lhs, %count, %mask
+        : !pto.vreg<64xsi32>, !pto.vreg<64xsi32>, !pto.mask<b32>
+        -> !pto.vreg<64xsi32>
+    return %shr, %shl : !pto.vreg<64xui32>, !pto.vreg<64xsi32>
+  }
+}
+
+//--- signless_rhs.pto
+module {
+  func.func @reject_signless_count(
+      %lhs: !pto.vreg<64xui32>,
+      %rhs: !pto.vreg<64xi32>,
+      %mask: !pto.mask<b32>) -> !pto.vreg<64xui32> {
+    %result = pto.vshr %lhs, %rhs, %mask
+        : !pto.vreg<64xui32>, !pto.vreg<64xi32>, !pto.mask<b32>
+        -> !pto.vreg<64xui32>
+    return %result : !pto.vreg<64xui32>
+  }
+}
+
+// SIGNLESS: error: 'pto.vshr' op requires shift count to use a signed integer element type
+
+//--- unsigned_rhs.pto
+module {
+  func.func @reject_unsigned_count_for_signed_data(
+      %lhs: !pto.vreg<64xsi32>,
+      %rhs: !pto.vreg<64xui32>,
+      %mask: !pto.mask<b32>) -> !pto.vreg<64xsi32> {
+    %result = pto.vshl %lhs, %rhs, %mask
+        : !pto.vreg<64xsi32>, !pto.vreg<64xui32>, !pto.mask<b32>
+        -> !pto.vreg<64xsi32>
+    return %result : !pto.vreg<64xsi32>
+  }
+}
+
+// UNSIGNED: error: 'pto.vshl' op requires shift count to use a signed integer element type

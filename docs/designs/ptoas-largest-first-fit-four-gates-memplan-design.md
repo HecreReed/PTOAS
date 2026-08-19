@@ -857,8 +857,9 @@ struct ConflictFacts {
 ```bash
 cmake --build build --target ptoas -j8
 
-PATH=/Users/fangrui/workspace/huawei/llvm21-workspace/llvm-project/llvm/build-assert/bin:$PATH \
-  /Users/fangrui/workspace/huawei/llvm21-workspace/llvm-project/llvm/build-assert/bin/llvm-lit \
+export LLVM_BUILD_DIR=/path/to/llvm19/build-assert
+PATH="$LLVM_BUILD_DIR/bin:$PATH" \
+  "$LLVM_BUILD_DIR/bin/llvm-lit" \
   -sv build/test/lit \
   --filter 'plan_memory'
 

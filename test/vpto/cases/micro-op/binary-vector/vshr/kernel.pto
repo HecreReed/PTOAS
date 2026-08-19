@@ -32,7 +32,8 @@ module attributes {pto.target_arch = "a5", pto.kernel_kind = #pto.kernel_kind<ve
       scf.for %offset_m0 = %c0_m0 to %c1024_m0 step %c128_m0 {
         %lhs_m0 = pto.vlds %ub_lhs_m0[%offset_m0] : !pto.ptr<ui16, ub> -> !pto.vreg<128xui16>
         %rhs_m0 = pto.vlds %ub_rhs_m0[%offset_m0] : !pto.ptr<ui16, ub> -> !pto.vreg<128xui16>
-        %out_m0 = pto.vshr %lhs_m0, %rhs_m0, %mask_m0 : !pto.vreg<128xui16>, !pto.vreg<128xui16>, !pto.mask<b16> -> !pto.vreg<128xui16>
+        %rhs_signed_m0 = pto.vbitcast %rhs_m0 : !pto.vreg<128xui16> -> !pto.vreg<128xsi16>
+        %out_m0 = pto.vshr %lhs_m0, %rhs_signed_m0, %mask_m0 : !pto.vreg<128xui16>, !pto.vreg<128xsi16>, !pto.mask<b16> -> !pto.vreg<128xui16>
         pto.vsts %out_m0, %ub_out_m0[%offset_m0], %mask_m0 : !pto.vreg<128xui16>, !pto.ptr<ui16, ub>, !pto.mask<b16>
       }
     }
@@ -120,7 +121,8 @@ module attributes {pto.target_arch = "a5", pto.kernel_kind = #pto.kernel_kind<ve
       scf.for %offset_m2 = %c0_m2 to %c1024_m2 step %c128_m2 {
         %lhs_m2 = pto.vlds %ub_lhs_m2[%offset_m2] : !pto.ptr<ui16, ub> -> !pto.vreg<128xui16>
         %rhs_m2 = pto.vlds %ub_rhs_m2[%offset_m2] : !pto.ptr<ui16, ub> -> !pto.vreg<128xui16>
-        %out_m2 = pto.vshr %lhs_m2, %rhs_m2, %mask_m2 : !pto.vreg<128xui16>, !pto.vreg<128xui16>, !pto.mask<b16> -> !pto.vreg<128xui16>
+        %rhs_signed_m2 = pto.vbitcast %rhs_m2 : !pto.vreg<128xui16> -> !pto.vreg<128xsi16>
+        %out_m2 = pto.vshr %lhs_m2, %rhs_signed_m2, %mask_m2 : !pto.vreg<128xui16>, !pto.vreg<128xsi16>, !pto.mask<b16> -> !pto.vreg<128xui16>
         pto.vsts %out_m2, %ub_out_m2[%offset_m2], %mask_m2 : !pto.vreg<128xui16>, !pto.ptr<ui16, ub>, !pto.mask<b16>
       }
     }

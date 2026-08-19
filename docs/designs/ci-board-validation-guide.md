@@ -2,11 +2,12 @@
 
 ## 1. 文档目的
 
-本文说明 PTOAS 当前与开发者最相关的 3 条验证链路：
+本文说明 PTOAS 当前与开发者最相关的 4 条验证链路：
 
 1. 本地最小复现：`build -> runop -> 生成 pto/cpp`
 2. GitHub Actions：`Build Wheel` 与 `CI`
-3. PR 评论触发的 A3/A5 手动板测
+3. A5 self-hosted runner 每日板测
+4. PR 评论触发的 A3/A5 手动板测
 
 本文只描述当前仓库已经存在、并且日常开发会直接用到的流程，不展开板测机器人内部实现。
 
@@ -52,7 +53,20 @@
 - `push` / `pull_request`：只跑 GitHub runner 上的构建和样例生成
 - `workflow_dispatch` / `schedule`：除上述步骤外，还会跑远端板测 job `remote-npu-validation`
 
-### 2.3 评论触发板测
+### 2.3 `A5 Nightly Board`
+
+对应 workflow：`.github/workflows/ci_a5.yml`
+
+用途：
+
+- 每天北京时间 `03:00` 在 A5 self-hosted runner 上构建 `main`
+- 生成全量 A5 payload，并通过 `task-submit` 排队执行 NPU 板测
+- 在 GitHub Actions Summary 中展示 `OK / FAIL / SKIP` 汇总并上传结果 artifact
+- 配置 `A5_FEISHU_WEBHOOK_URL` secret 后，同步发送飞书结果卡片
+
+该 workflow 直接在 A5 主机运行，不使用 SSH secret，也不依赖板测监测器的私有脚本。runner 尚未在线时，定时任务会保持排队状态。
+
+### 2.4 评论触发板测
 
 这部分不在本仓库内实现，但当前开发流程依赖它。
 
@@ -252,6 +266,45 @@ gh workflow run ci.yml \
 - `pto_isa_repo` / `pto_isa_commit`：指定板测使用的 `pto-isa`
 - `remote_host` / `remote_user` / `remote_port`：指定远端板机
 
+### 4.4 配置和触发 A5 每日板测
+
+A5 runner 需要注册到 `hw-native-sys/PTOAS`，并具有以下标签：
+
+- `self-hosted`
+- `Linux`
+- `ARM64`
+- `ptoas-a5`
+
+runner 用户需要能够执行 `task-submit`，并能读取预编译 LLVM、CANN 和 Python 环境。建议把 runner service 放入现有 `ptoasboard.slice`，让 runner 侧构建继续受 `35 CPU / 48 GiB` 资源上限约束。`task-submit` 会复用板机任务队列，因此它能和评论板测机器人共享设备而不直接抢卡。
+
+workflow 支持以下 repository variables；未设置时使用 A5 板机当前默认值：
+
+- `PTOAS_A5_LLVM_BUILD_DIR`：预编译 LLVM/MLIR build 目录
+- `PTOAS_A5_PYTHON`：能导入 `numpy`、`pybind11` 和该 LLVM Python binding 的 Python
+- `PTOAS_A5_BUILD_JOBS`：PTOAS 并行编译数，默认 `4`
+- `PTOAS_A5_DEVICE_ID`：传给 `task-submit --device` 的设备号，默认 `1`
+
+飞书通知是可选能力。需要时新增 repository secret `A5_FEISHU_WEBHOOK_URL`；不配置不会影响板测和 GitHub Summary。
+
+手动触发全量 A5 板测：
+
+```bash
+gh workflow run ci_a5.yml \
+  --repo hw-native-sys/PTOAS \
+  --ref main
+```
+
+只跑指定 case：
+
+```bash
+gh workflow run ci_a5.yml \
+  --repo hw-native-sys/PTOAS \
+  --ref main \
+  -f run_only_cases='qwen3_decode_layer_incore_0,qwen3_decode_layer_incore_1'
+```
+
+定时任务固定使用默认分支；GitHub cron 使用 UTC，因此配置为 `0 19 * * *`，对应北京时间次日 `03:00`。同一时间只允许一个 A5 nightly job，新的运行会排队且不会取消正在进行的板测。
+
 ## 5. PR 评论触发板测
 
 ### 5.1 触发前检查
@@ -343,7 +396,7 @@ A5 多 case：
 
 ### 6.3 A3 / A5 分流
 
-如果 case 只适用于某个架构，需要同步更新 `.github/workflows/ci.yml` 中的分流列表：
+如果 case 只适用于某个架构，需要同步更新 `.github/workflows/ci.yml` 和 `.github/workflows/ci_a5.yml` 中的分流列表：
 
 - `A3_ONLY_CASES`
 - `A5_ONLY_CASES`
@@ -385,6 +438,8 @@ A5 多 case：
 
 - `.github/workflows/build_wheel.yml`
 - `.github/workflows/ci.yml`
+- `.github/workflows/ci_a5.yml`
+- `.github/scripts/report_a5_board_results.py`
 - `test/samples/runop.sh`
 - `test/npu_validation/scripts/run_remote_npu_validation.sh`
 - `test/npu_validation/scripts/generate_testcase.py`

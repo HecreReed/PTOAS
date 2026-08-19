@@ -12,13 +12,13 @@ usually live in different layers.
 Build PTOAS after C++ or TableGen changes:
 
 ```bash
-cmake --build build-llvm21 --target PTOASPythonCore
+cmake --build build --target PTOASPythonCore
 ```
 
 Stage PTODSL after Python package changes:
 
 ```bash
-ninja -C build-llvm21 PTODSLPackage
+ninja -C build PTODSLPackage
 ```
 
 Run one smoke ST:
@@ -26,7 +26,7 @@ Run one smoke ST:
 ```bash
 python3 test/tilelang_st/script/run_all_st.py \
   -r sim -v a5 \
-  -p build-llvm21/tools/ptoas/ptoas \
+  -p build/tools/ptoas/ptoas \
   -t <tileop> --smoke -j 1
 ```
 
@@ -35,7 +35,7 @@ Run one non-smoke ST:
 ```bash
 python3 test/tilelang_st/script/run_all_st.py \
   -r sim -v a5 \
-  -p build-llvm21/tools/ptoas/ptoas \
+  -p build/tools/ptoas/ptoas \
   -t <tileop> -j 1
 ```
 
@@ -44,7 +44,7 @@ Run one named ST case when supported by `run_st.py`:
 ```bash
 python3 test/tilelang_st/script/run_st.py \
   -r sim -v a5 \
-  -p build-llvm21/tools/ptoas/ptoas \
+  -p build/tools/ptoas/ptoas \
   -t <tileop> \
   -c <case_name>
 ```
@@ -96,7 +96,7 @@ If legality appears correct but `ExpandTileOp` cannot expand:
 Useful compiler-only command:
 
 ```bash
-build-llvm21/tools/ptoas/ptoas \
+build/tools/ptoas/ptoas \
   --pto-arch=a5 --pto-backend=vpto --emit-vpto \
   --enable-insert-sync \
   --mlir-print-ir-after=pto-expand-tile-op \
@@ -127,7 +127,7 @@ Recommended sequence:
 Compiler-only dump:
 
 ```bash
-build-llvm21/tools/ptoas/ptoas \
+build/tools/ptoas/ptoas \
   --pto-arch=a5 --pto-backend=vpto --emit-vpto \
   --enable-insert-sync \
   test/tilelang_st/npu/a5/src/st/testcase/<tileop>/<tileop>.pto \

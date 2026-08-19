@@ -8225,8 +8225,17 @@ struct OneToNVMIGroupBroadcastLoadOpPattern
 
     if (succeeded(directFact) &&
         directFact->kind == VMIGroupBroadcastLoadDirectKind::BRC) {
+      if (numGroups <= 0 ||
+          static_cast<int64_t>(resultTypes.size()) % numGroups != 0)
+        return rewriter.notifyMatchFailure(
+            op, "group_broadcast_load BRC result arity is not divisible by "
+                "num_groups");
+      // BRC duplicates the scalar independently into every physical result
+      // chunk. Derive the chunk count from the assigned result arity so
+      // deinterleaved scalar-broadcast layouts (d2/d4) remain valid even
+      // when their logical group size is only one full part.
       int64_t chunksPerGroup =
-          directFact->layout.groupSize / directFact->layout.lanesPerPart;
+          static_cast<int64_t>(resultTypes.size()) / numGroups;
       std::optional<StringRef> brcDist = getBRCDist();
       if (!brcDist)
         return rewriter.notifyMatchFailure(
@@ -8571,6 +8580,79 @@ struct OneToNVMIBinaryOpPattern : OneToNOpConversionPattern<SourceOp> {
     }
 
     replaceOpWithFlatConvertedValues(rewriter, op, results, *this->getTypeConverter());
+    return success();
+  }
+};
+
+// VPTO vector shifts require a signed shift-count carrier regardless of the
+// signedness of the value being shifted. Preserve the count bits with a
+// bitcast before creating the physical shift operation.
+template <typename SourceOp, typename TargetOp>
+struct OneToNVMIShiftOpPattern : OneToNOpConversionPattern<SourceOp> {
+  using OneToNOpConversionPattern<SourceOp>::OneToNOpConversionPattern;
+
+  LogicalResult matchAndRewrite(
+      SourceOp op,
+      typename OneToNOpConversionPattern<SourceOp>::OpAdaptor adaptor,
+      OneToNPatternRewriter &rewriter) const override {
+    ValueRange lhsParts = adaptor.getLhs();
+    ValueRange rhsParts = adaptor.getRhs();
+    FailureOr<SmallVector<Type>> maybeResultTypes =
+        getConvertedResultTypes(op, 0, *this->getTypeConverter());
+    if (failed(maybeResultTypes)) {
+      return failure();
+    }
+    SmallVector<Type> resultTypes = std::move(*maybeResultTypes);
+    const bool hasMismatchedPhysicalArity =
+        lhsParts.size() != rhsParts.size() ||
+        lhsParts.size() != resultTypes.size();
+    if (hasMismatchedPhysicalArity) {
+      return rewriter.notifyMatchFailure(op, "physical shift arity mismatch");
+    }
+
+    SmallVector<Value> results;
+    results.reserve(resultTypes.size());
+    for (auto [lhs, rhs, resultType] :
+         llvm::zip_equal(lhsParts, rhsParts, resultTypes)) {
+      auto resultVRegType = dyn_cast<VRegType>(resultType);
+      auto rhsVRegType = dyn_cast<VRegType>(rhs.getType());
+      auto rhsElementType =
+          rhsVRegType ? dyn_cast<IntegerType>(rhsVRegType.getElementType())
+                      : IntegerType();
+      const bool hasInvalidPhysicalPart =
+          !resultVRegType || lhs.getType() != resultType || !rhsElementType;
+      if (hasInvalidPhysicalPart) {
+        return rewriter.notifyMatchFailure(
+            op, "physical shift part type mismatch");
+      }
+
+      auto signedElementType = IntegerType::get(
+          rewriter.getContext(), rhsElementType.getWidth(),
+          IntegerType::SignednessSemantics::Signed);
+      auto signedRhsType = VRegType::get(
+          rewriter.getContext(), rhsVRegType.getElementCount(),
+          signedElementType);
+      FailureOr<Value> signedRhs =
+          bitcastVReg(op.getLoc(), rhs, signedRhsType, rewriter);
+      if (failed(signedRhs)) {
+        return rewriter.notifyMatchFailure(
+            op, "unable to normalize physical shift-count type");
+      }
+
+      FailureOr<Value> mask =
+          createAllTrueMaskForVReg(op.getLoc(), resultVRegType, rewriter);
+      if (failed(mask)) {
+        return rewriter.notifyMatchFailure(
+            op, "unsupported element type for all-true shift mask");
+      }
+      results.push_back(
+          rewriter
+              .create<TargetOp>(op.getLoc(), resultType, lhs, *signedRhs, *mask)
+              .getResult());
+    }
+
+    replaceOpWithFlatConvertedValues(rewriter, op, results,
+                                     *this->getTypeConverter());
     return success();
   }
 };
@@ -10935,6 +11017,99 @@ struct OneToNVMIExtIOpPattern : OneToNOpConversionPattern<OpT> {
           pto::getPTOStorageElemBitWidth(sourceVMIType.getElementType());
       unsigned resultBits =
           pto::getPTOStorageElemBitWidth(resultVMIType.getElementType());
+      auto sourceIntegerType =
+          dyn_cast<IntegerType>(sourceVMIType.getElementType());
+      auto resultIntegerType =
+          dyn_cast<IntegerType>(resultVMIType.getElementType());
+      int64_t slots = sourceLayout.getSlots();
+      // Unpack preserves lane order only for compact group-slot carriers.
+      // Non-unit lane strides and dense-split layouts use the vcvt fallback.
+      bool denseGroupSlotExtension =
+          sourceIntegerType && resultIntegerType &&
+          sourceLayout.getNumGroups() == resultLayout.getNumGroups() &&
+          sourceLayout.getLaneStride() == 1 &&
+          resultLayout.getLaneStride() == 1 &&
+          sourceLayout.getSlots() == resultLayout.getSlots() &&
+          (slots == 2 || slots == 4 || slots == 8) && sourceBits > 0 &&
+          resultBits > sourceBits && resultBits % sourceBits == 0 &&
+          (resultBits / sourceBits == 2 || resultBits / sourceBits == 4) &&
+          sourceParts.size() == resultTypes.size();
+      if (denseGroupSlotExtension) {
+        FailureOr<int64_t> sourceLanes =
+            getDataLanesPerPart(sourceVMIType.getElementType());
+        FailureOr<int64_t> resultLanes =
+            getDataLanesPerPart(resultVMIType.getElementType());
+        bool carrierShapeMismatch =
+            failed(sourceLanes) || failed(resultLanes) ||
+            *sourceLanes != *resultLanes *
+                                static_cast<int64_t>(resultBits / sourceBits);
+        if (carrierShapeMismatch) {
+          return rewriter.notifyMatchFailure(
+              op, "unsupported dense group-slot integer extension carrier shape");
+        }
+
+        SmallVector<Value> results;
+        results.reserve(resultTypes.size());
+        for (auto [sourcePart, resultType] :
+             llvm::zip_equal(sourceParts, resultTypes)) {
+          auto physicalResultType = dyn_cast<VRegType>(resultType);
+          if (!physicalResultType ||
+              physicalResultType.getElementCount() != *resultLanes ||
+              pto::getPTOStorageElemBitWidth(
+                  physicalResultType.getElementType()) != resultBits) {
+            return rewriter.notifyMatchFailure(
+                op, "unsupported dense group-slot integer extension result type");
+          }
+
+          Value current = sourcePart;
+          unsigned currentBits = sourceBits;
+          while (currentBits < resultBits) {
+            unsigned nextBits = currentBits * 2;
+            auto nextElementType = IntegerType::get(
+                rewriter.getContext(), nextBits,
+                resultIntegerType.getSignedness());
+            FailureOr<int64_t> nextLanes =
+                getDataLanesPerPart(nextElementType);
+            if (failed(nextLanes)) {
+              return rewriter.notifyMatchFailure(
+                  op, "failed to derive dense group-slot unpack result lanes");
+            }
+            auto nextType =
+                VRegType::get(rewriter.getContext(), *nextLanes, nextElementType);
+            bool unpackLaneMismatch =
+                cast<VRegType>(current.getType()).getElementCount() !=
+                *nextLanes * 2;
+            if (unpackLaneMismatch) {
+              return rewriter.notifyMatchFailure(
+                  op, "dense group-slot unpack source/result lane mismatch");
+            }
+            Value part =
+                rewriter.create<arith::ConstantIndexOp>(op.getLoc(), 0);
+            if constexpr (std::is_same_v<OpT, VMIExtSIOp>) {
+              current = rewriter
+                            .create<VsunpackOp>(op.getLoc(), nextType, current,
+                                               part)
+                            .getResult();
+            } else {
+              current = rewriter
+                            .create<VzunpackOp>(op.getLoc(), nextType, current,
+                                               part)
+                            .getResult();
+            }
+            currentBits = nextBits;
+          }
+          FailureOr<Value> result =
+              bitcastVReg(op.getLoc(), current, physicalResultType, rewriter);
+          if (failed(result)) {
+            return rewriter.notifyMatchFailure(
+                op, "failed to materialize dense group-slot unpack result");
+          }
+          results.push_back(*result);
+        }
+        replaceOpWithFlatConvertedValues(rewriter, op, results,
+                                         *this->getTypeConverter());
+        return success();
+      }
       if (sourceLayout.getNumGroups() != resultLayout.getNumGroups() ||
           sourceLayout.getSlots() != resultLayout.getSlots() ||
           (sourceLayout.getSlots() != 1 && sourceLayout.getSlots() != 8) ||
@@ -11015,6 +11190,7 @@ struct OneToNVMIExtIOpPattern : OneToNOpConversionPattern<OpT> {
         pto::getPTOStorageElemBitWidth(sourceType.getElementType());
     unsigned resultBits = pto::getPTOStorageElemBitWidth(
         resultVRegTypes.front().getElementType());
+
     if (sourceLayout && resultLayout && sourceLayout.isContiguous() &&
         resultLayout.isContiguous() && resultLayout.getLaneStride() == 1 &&
         ((resultBits == sourceBits * 2 && sourceLayout.getLaneStride() == 2) ||
@@ -12388,9 +12564,9 @@ void populateVMIConversionPatterns(
       OneToNVMIBinaryOpPattern<VMIAndIOp, VandOp>,
       OneToNVMIBinaryOpPattern<VMIOrIOp, VorOp>,
       OneToNVMIBinaryOpPattern<VMIXOrIOp, VxorOp>,
-      OneToNVMIBinaryOpPattern<VMIShLIOp, VshlOp>,
-      OneToNVMIBinaryOpPattern<VMIShRUIOp, VshrOp>,
-      OneToNVMIBinaryOpPattern<VMIShRSIOp, VshrOp>,
+      OneToNVMIShiftOpPattern<VMIShLIOp, VshlOp>,
+      OneToNVMIShiftOpPattern<VMIShRUIOp, VshrOp>,
+      OneToNVMIShiftOpPattern<VMIShRSIOp, VshrOp>,
       OneToNVMIUnaryOpPattern<VMINotOp, VnotOp>,
       OneToNVMICmpOpPattern<VMICmpFOp>, OneToNVMICmpOpPattern<VMICmpIOp>,
       OneToNVMISelectOpPattern, OneToNVMIVselrOpPattern,
