@@ -410,6 +410,87 @@ ensure_llvm_build() {
 # ---------------------------------------------------------------------------
 # PTOAS build + install
 # ---------------------------------------------------------------------------
+compiler_rt_has_muloti4() {
+  local runtime_archive="$1"
+  local nm_bin="${LLVM_BUILD_DIR}/bin/llvm-nm"
+
+  [ -f "${runtime_archive}" ] || return 1
+  if [ ! -x "${nm_bin}" ]; then
+    nm_bin="$(command -v llvm-nm || command -v nm || true)"
+  fi
+  [ -n "${nm_bin}" ] || return 1
+  "${nm_bin}" -g --defined-only "${runtime_archive}" 2>/dev/null \
+    | grep -E '(^|[[:space:]])__muloti4$' >/dev/null
+}
+
+# Some internal aarch64 images ship clang without compiler-rt. Build only the
+# builtins archive from the matching LLVM source tree as a cached fallback.
+build_aarch64_compiler_rt() {
+  local compiler_rt_src="${LLVM_SOURCE_DIR}/compiler-rt"
+  local builtins_src="${compiler_rt_src}/lib/builtins"
+  local compiler_rt_build="${CANN_3RD_LIB_PATH}/lib_cache/compiler_rt_${LLVM_SOURCE_VERSION}/build-aarch64"
+  local compiler_target
+
+  if [ ! -f "${builtins_src}/CMakeLists.txt" ]; then
+    echo "ERROR: compiler-rt builtins source not found: ${builtins_src}" >&2
+    exit 1
+  fi
+
+  compiler_target="$("${PTOAS_CC}" -print-target-triple 2>/dev/null || true)"
+  if [ -z "${compiler_target}" ]; then
+    compiler_target="$("${PTOAS_CC}" -dumpmachine 2>/dev/null || true)"
+  fi
+  case "${compiler_target}" in
+    aarch64-*|arm64-*) ;;
+    *)
+      echo "ERROR: ${PTOAS_CC} reported non-aarch64 target: ${compiler_target:-unknown}" >&2
+      exit 1
+      ;;
+  esac
+
+  if [ -d "${compiler_rt_build}" ]; then
+    PTOAS_COMPILER_RT="$(
+      find "${compiler_rt_build}" -name 'libclang_rt.builtins-aarch64.a' \
+        -type f 2>/dev/null | head -1 || true
+    )"
+    if compiler_rt_has_muloti4 "${PTOAS_COMPILER_RT}"; then
+      export PTOAS_COMPILER_RT
+      echo "Reusing LLVM compiler-rt: ${PTOAS_COMPILER_RT}"
+      return 0
+    fi
+  fi
+
+  echo "${dotted_line}"
+  echo "Building compiler-rt builtins for ${compiler_target}"
+  mkdir -p "${compiler_rt_build}"
+  cmake \
+    -G Ninja \
+    -S "${builtins_src}" \
+    -B "${compiler_rt_build}" \
+    -DLLVM_CMAKE_DIR="${LLVM_BUILD_DIR}/lib/cmake/llvm" \
+    -DLLVM_MAIN_SRC_DIR="${LLVM_SOURCE_DIR}/llvm" \
+    -DCMAKE_C_COMPILER="${PTOAS_CC}" \
+    -DCMAKE_ASM_COMPILER="${PTOAS_CC}" \
+    -DCMAKE_C_COMPILER_TARGET="${compiler_target}" \
+    -DCMAKE_ASM_COMPILER_TARGET="${compiler_target}" \
+    -DCMAKE_BUILD_TYPE=Release \
+    -DLLVM_ENABLE_PER_TARGET_RUNTIME_DIR=OFF \
+    -DCOMPILER_RT_DEFAULT_TARGET_ONLY=ON
+  cmake --build "${compiler_rt_build}" --target builtins -- -j "${JOBS}"
+
+  PTOAS_COMPILER_RT="$(
+    find "${compiler_rt_build}" -name 'libclang_rt.builtins-aarch64.a' \
+      -type f 2>/dev/null | head -1 || true
+  )"
+  if ! compiler_rt_has_muloti4 "${PTOAS_COMPILER_RT}"; then
+    echo "ERROR: compiler-rt build did not produce an aarch64 archive with __muloti4" >&2
+    exit 1
+  fi
+
+  export PTOAS_COMPILER_RT
+  echo "Built LLVM compiler-rt: ${PTOAS_COMPILER_RT}"
+}
+
 # On aarch64, -ftrapv lowers __int128 multiplication to __muloti4 (compiler-rt).
 # Link the matching compiler-rt builtins so the PTOAS executables/libraries
 # resolve it. Accepts an explicit override via PTOAS_COMPILER_RT.
@@ -449,9 +530,8 @@ resolve_compiler_rt() {
         )"
       fi
       if [ -z "${PTOAS_COMPILER_RT}" ] || [ ! -f "${PTOAS_COMPILER_RT}" ]; then
-        echo "ERROR: libclang_rt.builtins-aarch64.a not found on this host" >&2
-        echo "Searched ${clang_res}, /opt/buildtools, /usr, and /usr/local" >&2
-        exit 1
+        echo "compiler-rt not found on host; building from ${LLVM_SOURCE_DIR}/compiler-rt"
+        build_aarch64_compiler_rt
       fi
 
       export PTOAS_COMPILER_RT
