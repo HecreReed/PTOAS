@@ -2453,14 +2453,22 @@ class _ControlFlowRewriter:
         # A loop-carried name must be one whose pre-iteration value is needed:
         # it is read by the test before each iteration, it is read before any
         # assignment inside the body (so it depends on the previous iteration's
-        # value), or it stays live after the loop.  ``body_info.loads`` is
-        # deliberately not used here: it includes loop-local temporaries that
-        # are written before they are read each iteration (e.g.
-        # ``col = base + index``), which are not live across iterations and
-        # would be read while still unbound at the pto._while(...) setup.
-        # This mirrors the loop_carried criterion used by ``_rewrite_for``.
-        reads_before = _read_before_assignment_names(stmt.body)
-        required_carries = test_info.loads | reads_before | set(live_after)
+        # value), or it is an assigned live-out whose partial-assignment default
+        # path keeps the entering value.  Seed backward liveness with assigned
+        # live-outs so nested conditionals expose that implicit read, then gate
+        # only those implicit reads on a definite binding before the loop.  An
+        # unbound implicit read must take the same last-iteration-only diagnostic
+        # as runtime for-loops instead of being evaluated by pto._while(...)
+        # setup.  This mirrors _rewrite_for while retaining explicit reads from
+        # the authored body and test.
+        assigned_live_after = body_info.stores & set(live_after)
+        reads_before_raw = _read_before_assignment_names(stmt.body)
+        reads_before = _read_before_assignment_names(stmt.body, live_after=assigned_live_after)
+        implicit_reads = reads_before - reads_before_raw
+        safe_reads = reads_before_raw | {
+            name for name in implicit_reads if name in (bound_before or set())
+        }
+        required_carries = test_info.loads | safe_reads
         # A controlled loop (break/continue/else) may legitimately need no
         # user-level carry: its test reads only loop-invariant names and every
         # body store is a loop-local temporary.  The active/did_break control
@@ -2472,6 +2480,12 @@ class _ControlFlowRewriter:
                 "ast_rewrite=True runtime while break/continue requires explicit control-state lowering"
             )
         carry_names = tuple(sorted(body_info.stores & required_carries))
+        unsupported_last_values = sorted(assigned_live_after - set(carry_names))
+        if unsupported_last_values:
+            raise PTODSLAstRewriteError(
+                "ast_rewrite=True runtime while cannot expose last-iteration-only values yet; "
+                f"use explicit pto.while_(...).carry(...) for {unsupported_last_values}"
+            )
         if not carry_names and not (control["break"] or control["continue"] or stmt.orelse):
             raise PTODSLAstRewriteError(
                 "ast_rewrite=True runtime while requires at least one loop-carried value"

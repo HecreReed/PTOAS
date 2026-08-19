@@ -209,6 +209,29 @@ def issue_1256_while_conditional_carry(limit: pto.i32):
 
 
 @pto.jit(target="a5")
+def while_unbound_partial_liveout(limit: pto.i32, cond: pto.i1):
+    index = pto.const(0, dtype=pto.i32)
+    one = pto.const(1, dtype=pto.i32)
+    while index < limit:
+        if cond:
+            value = one
+        index = index + one
+    _ = value
+
+
+@pto.jit(target="a5")
+def while_bound_partial_liveout(limit: pto.i32, cond: pto.i1):
+    index = pto.const(0, dtype=pto.i32)
+    value = pto.const(0, dtype=pto.i32)
+    one = pto.const(1, dtype=pto.i32)
+    while index < limit:
+        if cond:
+            value = one
+        index = index + one
+    _ = value
+
+
+@pto.jit(target="a5")
 def issue_1256_while_break_flags_only(limit: pto.i32, running: pto.i32, probe: pto.i32):
     # Controlled loop with no user-level carry: the test only reads
     # loop-invariant names and the body store is a loop-local temporary,
@@ -527,6 +550,19 @@ def main():
             f"{fn.__name__}: expected {expected_carries} loop-carried slots, got {actual}; "
             "loop-local temporaries must not enter the carry state")
 
+    # While-loop partial live-outs use the same definite-binding rule as
+    # runtime for-loops: an unbound default path is diagnosed explicitly,
+    # while a value initialized before the loop becomes an ordinary carry.
+    try:
+        while_unbound_partial_liveout.compile()
+    except Exception as exc:
+        assert "last-iteration-only" in str(exc), str(exc)
+    else:
+        raise AssertionError("unbound partial while live-out must be diagnosed")
+    bound_text = while_bound_partial_liveout.compile().mlir_text()
+    assert "scf.while" in bound_text
+    assert _while_iter_arg_count(bound_text) == 2
+
     # Break/continue tail predication: the statement after a control transfer
     # must sit inside a region guarded by the merged active flag.
     # issue_1256_exact_while_true_break is the reporter's kernel: the addi
@@ -634,9 +670,9 @@ def main():
     else:
         raise AssertionError("while subscript carry must be diagnosed")
 
-    # Issue #1256 reverse regression: a loop-local name used after the loop
-    # without an outer initialization must still fail to trace (no
-    # over-exclusion).  Native Python would report the same unbound name.
+    # A loop-local name used after the loop without an outer initialization
+    # must stay on the explicit last-iteration-only diagnostics path rather
+    # than being evaluated as an unbound carry at while setup.
     def issue_1256_unbound_live_after(limit: pto.i32):
         value = pto.const(0, dtype=pto.i32)
         while value < limit:
@@ -646,10 +682,10 @@ def main():
 
     try:
         pto.jit(target="a5")(issue_1256_unbound_live_after).compile()
-    except UnboundLocalError:
-        pass
+    except Exception as exc:
+        assert "last-iteration-only" in str(exc), str(exc)
     else:
-        raise AssertionError("unbound loop-local used after while must not compile")
+        raise AssertionError("unbound loop-local used after while must be diagnosed")
 
     # Negative fixtures for the checker itself: a tail that merely sits
     # inside an *unrelated* dynamic scf.if (condition is a block argument or
