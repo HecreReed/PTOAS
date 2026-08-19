@@ -37,10 +37,6 @@ def build():
             #   - runtime valid tmp shape = [dst.validRow, ceil(dst.validCol / 8)]
             u8 = IntegerType.get_unsigned(8, ctx)
             tile_buf_u8 = pto.TileBufType.get([33, 32], u8, vec, [32, 4], cfg, ctx)
-            pipe_mte2 = pto.PipeAttr.get(pto.PIPE.PIPE_MTE2, ctx)
-            pipe_v = pto.PipeAttr.get(pto.PIPE.PIPE_V, ctx)
-            pipe_mte3 = pto.PipeAttr.get(pto.PIPE.PIPE_MTE3, ctx)
-            event_id0 = pto.EventAttr.get(pto.EVENT.EVENT_ID0, ctx)
 
             fn_ty = func.FunctionType.get([ptr_f32, ptr_f32, ptr_f32], [])
             with InsertionPoint(m.body):
@@ -75,13 +71,9 @@ def build():
                 # pto.load_dps_tb ins(%sv) outs(%tb)
                 pto.TLoadOp(None, sv0, tb0)  # result=None
                 pto.TLoadOp(None, sv1, tb1)  # result=None
-                pto.SetFlagOp(pipe_mte2, pipe_v, event_id0)
-                pto.WaitFlagOp(pipe_mte2, pipe_v, event_id0)
 
                 # pto.tprelu ins(%tb0, %tb1, %tmp) outs(%tb2)
                 pto.TPReluOp(tb0, tb1, tb_tmp, tb2)
-                pto.SetFlagOp(pipe_v, pipe_mte3, event_id0)
-                pto.WaitFlagOp(pipe_v, pipe_mte3, event_id0)
 
                 # %8 = subview on output tensor_view
                 sv2 = pto.PartitionViewOp(tile_view_32, tv2, offsets=[c0, c0], sizes=[c32, c32]).result

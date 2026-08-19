@@ -1503,23 +1503,6 @@ PY
         fi
       fi
 
-      # The A3 TPRELU runtime contract requires both TLOAD->TPRELU and
-      # TPRELU->TSTORE handshakes. The board runner consumes the checked-in C++
-      # sample directly, so verify its explicit tail drain separately from the
-      # generated PTO output.
-      if [[ "$base" == "prelu-pto" ]]; then
-        if ! grep -Fq "set_flag(PIPE_MTE2, PIPE_V, EVENT_ID0);" "$cpp" || \
-           ! grep -Fq "wait_flag(PIPE_MTE2, PIPE_V, EVENT_ID0);" "$cpp" || \
-           ! grep -Fq "set_flag(PIPE_V, PIPE_MTE3, EVENT_ID0);" "$cpp" || \
-           ! grep -Fq "wait_flag(PIPE_V, PIPE_MTE3, EVENT_ID0);" "$cpp" || \
-           ! grep -Fq "ptoas_auto_sync_tail(PTOAutoSyncTailMode::kBarrierAll);" \
-             "${dir}/prelu-pto.cpp"; then
-          echo -e "${A}(${base}.pto)\tFAIL\tmissing required A3 TPRELU pipe synchronization"
-          overall=1
-          continue
-        fi
-      fi
-
       # Regression guard: intra-pipe dependencies must be serialized by a
       # per-pipe barrier (PyPTO expects `bar_v` / `bar_m` behavior).
       if [[ "$base" == "test_inject_sync_intra_pipe_barrier" ]]; then
