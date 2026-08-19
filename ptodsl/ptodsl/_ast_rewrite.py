@@ -2484,7 +2484,7 @@ class _ControlFlowRewriter:
         if unsupported_last_values:
             raise PTODSLAstRewriteError(
                 "ast_rewrite=True runtime while cannot expose last-iteration-only values yet; "
-                f"use explicit pto.while_(...).carry(...) for {unsupported_last_values}"
+                f"use explicit pto.while_(...) state for {unsupported_last_values}"
             )
         if not carry_names and not (control["break"] or control["continue"] or stmt.orelse):
             raise PTODSLAstRewriteError(
