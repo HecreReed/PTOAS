@@ -414,45 +414,64 @@ ensure_llvm_build() {
 # Link the matching compiler-rt builtins so the PTOAS executables/libraries
 # resolve it. Accepts an explicit override via PTOAS_COMPILER_RT.
 resolve_compiler_rt() {
-  if [ -n "${PTOAS_COMPILER_RT:-}" ]; then
-    if [ -f "${PTOAS_COMPILER_RT}" ]; then
-      echo "Using PTOAS_COMPILER_RT=${PTOAS_COMPILER_RT}"
-      return 0
-    fi
-    echo "PTOAS_COMPILER_RT set but not found: ${PTOAS_COMPILER_RT}" >&2
-  fi
-
   case "$(uname -m)" in
-    aarch64|arm64) _rt_arch="aarch64" ;;
-    x86_64|amd64)  _rt_arch="x86_64" ;;
-    *) return 0 ;;
-  esac
+    aarch64|arm64)
+      if [ -n "${PTOAS_COMPILER_RT:-}" ] && [ -f "${PTOAS_COMPILER_RT}" ]; then
+        export PTOAS_COMPILER_RT
+        echo "Using PTOAS_COMPILER_RT=${PTOAS_COMPILER_RT}"
+        return 0
+      fi
 
-  # Search the active clang's resource dir first, then the system LLVM.
-  local clang_bin="${PTOAS_CC}"
-  if [ -n "${clang_bin}" ]; then
-    local clang_res
-    clang_res="$("${clang_bin}" -print-resource-dir 2>/dev/null || true)"
-    if [ -n "${clang_res}" ] && [ -f "${clang_res}/lib/linux/libclang_rt.builtins-${_rt_arch}.a" ]; then
-      PTOAS_COMPILER_RT="${clang_res}/lib/linux/libclang_rt.builtins-${_rt_arch}.a"
+      local clang_res
+      clang_res="$("${PTOAS_CC}" -print-resource-dir 2>/dev/null || true)"
+      if [ -z "${clang_res}" ]; then
+        echo "ERROR: failed to query compiler resource directory from ${PTOAS_CC}" >&2
+        exit 1
+      fi
+
+      PTOAS_COMPILER_RT="${clang_res}/lib/linux/libclang_rt.builtins-aarch64.a"
+      if [ ! -f "${PTOAS_COMPILER_RT}" ] && [ -d "${clang_res}" ]; then
+        PTOAS_COMPILER_RT="$(
+          find "${clang_res}" -name 'libclang_rt.builtins-aarch64.a' -type f 2>/dev/null \
+            | head -1 || true
+        )"
+      fi
+      if [ -z "${PTOAS_COMPILER_RT}" ] || [ ! -f "${PTOAS_COMPILER_RT}" ]; then
+        echo "ERROR: libclang_rt.builtins-aarch64.a not found under ${clang_res}" >&2
+        exit 1
+      fi
+
+      export PTOAS_COMPILER_RT
       echo "Using LLVM compiler-rt: ${PTOAS_COMPILER_RT}"
+      ;;
+    *)
+      unset PTOAS_COMPILER_RT
       return 0
-    fi
+  esac
+}
+
+pip_install_runtime_deps() {
+  local python_bin="$1"
+  shift
+  local index_url="${PTOAS_PIP_INDEX_URL:-}"
+  local trusted_host="${PTOAS_PIP_TRUSTED_HOST:-}"
+
+  # Internal CI selects its pinned compiler from /opt/buildtools and cannot
+  # reach public PyPI. GitCode selects /usr/bin/clang and keeps pip defaults.
+  if [ -z "${index_url}" ] && [[ "${PTOAS_CC}" == /opt/buildtools/* ]]; then
+    index_url="http://mirrors.tools.huawei.com/pypi/simple"
+    trusted_host="mirrors.tools.huawei.com"
   fi
 
-  # Fall back to the system LLVM clang runtime.
-  local sys_rt=""
-  sys_rt="$(
-    find /usr/lib/llvm-*/lib/clang \
-      -name "libclang_rt.builtins-${_rt_arch}.a" 2>/dev/null \
-      | sort -V | tail -1 || true
-  )"
-  if [ -n "${sys_rt}" ]; then
-    PTOAS_COMPILER_RT="${sys_rt}"
-    echo "Using system compiler-rt: ${PTOAS_COMPILER_RT}"
-    return 0
+  if [ -n "${index_url}" ]; then
+    local index_args=(-i "${index_url}")
+    if [ -n "${trusted_host}" ]; then
+      index_args+=(--trusted-host "${trusted_host}")
+    fi
+    "${python_bin}" -m pip install --no-cache-dir "${index_args[@]}" "$@"
+  else
+    "${python_bin}" -m pip install --no-cache-dir "$@"
   fi
-  echo "WARNING: compiler-rt not found; __muloti4 may be unresolved on aarch64" >&2
 }
 
 configure_ptoas() {
@@ -486,6 +505,7 @@ configure_ptoas() {
   # pulled in even though linker flags precede the object files: force the
   # symbol with -Wl,-u so the linker extracts __muloti4 from the archive.
   resolve_compiler_rt
+  echo "PTOAS_COMPILER_RT=${PTOAS_COMPILER_RT:-NOT_USED}"
   if [ -n "${PTOAS_COMPILER_RT:-}" ]; then
     ptoas_cmake_args+=(
       -DCMAKE_EXE_LINKER_FLAGS="${CMAKE_EXE_LINKER_FLAGS:-} -Wl,-u,__muloti4 ${PTOAS_COMPILER_RT}"
@@ -544,7 +564,7 @@ stage_ptoas_wheel() {
     "${PACKAGE_STAGE_PATH}/tools/ptoas/wheels"
 
   echo "Building PTOAS wheel"
-  "${python_bin}" -m pip install --no-cache-dir \
+  pip_install_runtime_deps "${python_bin}" \
     numpy \
     'pybind11<3' \
     'scikit-build-core>=0.12.2,<2'
@@ -571,7 +591,7 @@ stage_ptoas_wheel() {
   # build cache still being mounted when the .run artifact is installed.
   if [ ! -x "${python_scripts}/auditwheel" ] \
      || ! PATH="${python_scripts}:${PATH}" command -v patchelf >/dev/null 2>&1; then
-    "${python_bin}" -m pip install --no-cache-dir auditwheel patchelf
+    pip_install_runtime_deps "${python_bin}" auditwheel patchelf
   fi
   # The shared LLVM cache is built by the GitCode image rather than the
   # manylinux_2_34 container used by the release workflow. Its versioned
