@@ -696,6 +696,36 @@ def _definite_stores(stmt) -> set[str]:
     return set()
 
 
+def _deleted_names(node) -> set[str]:
+    """Names whose local bindings may be deleted while executing node."""
+    deleted = set()
+
+    class Visitor(ast.NodeVisitor):
+        def visit_Delete(self, delete):
+            for target in delete.targets:
+                deleted.update(_simple_name_targets(target))
+
+        def visit_FunctionDef(self, function):
+            return
+
+        def visit_AsyncFunctionDef(self, function):
+            return
+
+        def visit_Lambda(self, function):
+            return
+
+        def visit_ClassDef(self, class_def):
+            return
+
+    visitor = Visitor()
+    if isinstance(node, list):
+        for item in node:
+            visitor.visit(item)
+    else:
+        visitor.visit(node)
+    return deleted
+
+
 def _definite_out_stmt(stmt, bound_in, static_env=None, static_iters=None) -> set[str]:
     """Definite-assignment dataflow through one statement (not a block)."""
     if isinstance(stmt, ast.Assign) or (isinstance(stmt, ast.AnnAssign) and stmt.value is not None):
@@ -716,15 +746,52 @@ def _definite_out_stmt(stmt, bound_in, static_env=None, static_iters=None) -> se
                 out |= _simple_name_targets(item.optional_vars)
         return _definite_out_block(stmt.body, out, static_env, static_iters)
     if isinstance(stmt, ast.For):
-        # Runtime loop bodies or targets are not definite (the loop may not
-        # run), but a known non-empty static_range definitely binds a simple
-        # Name target after the loop.
-        out = set(bound_in)
-        if isinstance(stmt.target, ast.Name) and _is_pto_attr_call(stmt.iter, "static_range"):
+        # Runtime loop bodies or targets are not definite because the loop may
+        # not run. A known static_range, however, executes at trace time, so its
+        # body and normal-completion else clause update bindings exactly like a
+        # Python for-loop.
+        if _is_pto_attr_call(stmt.iter, "static_range"):
             values = _try_eval_static_range(stmt.iter, static_env or {}, static_iters or {})
-            if values is not None and len(values) > 0:
-                out.add(stmt.target.id)
-        return out
+            if values is not None:
+                out = set(bound_in)
+                if not values:
+                    return _definite_out_block(
+                        stmt.orelse, out, static_env, static_iters
+                    )
+
+                target_names = _simple_name_targets(stmt.target)
+                control = _loop_control_flags(stmt.body)
+                if control["break"] or control["continue"]:
+                    # Do not credit body assignments that a transfer may skip.
+                    # The target is rebound before every entered iteration, but
+                    # a body deletion can still leave it (or another incoming
+                    # name) unbound on the final/breaking path.
+                    out |= target_names
+                    out -= _deleted_names(stmt.body)
+                    if control["break"]:
+                        # The else clause is optional when a break is possible:
+                        # keep no additions from it, and remove bindings it may
+                        # delete on the normal-completion path.
+                        return out - _deleted_names(stmt.orelse)
+                    return _definite_out_block(
+                        stmt.orelse, out, static_env, static_iters
+                    )
+
+                loop_static_iters = dict(static_iters or {})
+                for value in values:
+                    iteration_static_iters = dict(loop_static_iters)
+                    if isinstance(stmt.target, ast.Name):
+                        iteration_static_iters[stmt.target.id] = (value,)
+                    out |= target_names
+                    out = _definite_out_block(
+                        stmt.body, out, static_env, iteration_static_iters
+                    )
+                if isinstance(stmt.target, ast.Name):
+                    loop_static_iters[stmt.target.id] = (values[-1],)
+                return _definite_out_block(
+                    stmt.orelse, out, static_env, loop_static_iters
+                )
+        return set(bound_in)
     # Everything else does not definitely bind names: loop bodies may not run
     # and the loop variable is unbound for empty ranges.
     return set(bound_in)

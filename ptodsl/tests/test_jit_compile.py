@@ -279,6 +279,48 @@ def ast_static_range_nonempty_definite_gate_fn(rows, cond):
     _ = value
 
 
+def ast_static_range_body_init_definite_gate_fn(rows, cond, seed):
+    for _ in pto.static_range(1):
+        value = seed
+    for replacement in range(rows):
+        if cond:
+            value = replacement
+    _ = value
+
+
+def ast_static_range_delete_target_gate_fn(rows, cond, seed):
+    value = seed
+    for value in pto.static_range(1):
+        del value
+    for replacement in range(rows):
+        if cond:
+            value = replacement
+    _ = value
+
+
+def ast_static_range_empty_orelse_init_gate_fn(rows, cond, seed):
+    for _ in pto.static_range(0):
+        pass
+    else:
+        value = seed
+    for replacement in range(rows):
+        if cond:
+            value = replacement
+    _ = value
+
+
+def ast_static_range_orelse_delete_gate_fn(rows, cond, seed):
+    value = seed
+    for _ in pto.static_range(1):
+        pass
+    else:
+        del value
+    for replacement in range(rows):
+        if cond:
+            value = replacement
+    _ = value
+
+
 @pto.jit(target='a5', backend='vpto', mode='explicit')
 def ast_del_then_partial_liveout_probe(rows: pto.i32, cond: pto.i1):
     zero = pto.const(0, dtype=pto.i32)
@@ -493,21 +535,48 @@ def _assert_ast_rewrite_nested_partial_assign_ssa_identity():
     import inspect as _inspect
     import textwrap as _textwrap
     from ptodsl._ast_rewrite import _ControlFlowRewriter as _CFR
-    gate_src = _textwrap.dedent(_inspect.getsource(ast_static_range_nonempty_definite_gate_fn))
-    gate_tree = _ast.parse(gate_src)
-    gate_fn = next(
-        n
-        for n in _ast.walk(gate_tree)
-        if isinstance(n, _ast.FunctionDef) and n.name == 'ast_static_range_nonempty_definite_gate_fn'
-    )
-    gate_rewriter = _CFR(static_env={})
-    gate_body = gate_rewriter.rewrite_block(gate_fn.body, live_after={'value'})
-    gate_module = _ast.Module(body=gate_body, type_ignores=[])
-    _ast.fix_missing_locations(gate_module)
-    gate_text = _ast.unparse(gate_module)
+    def rewrite_gate(fn):
+        gate_src = _textwrap.dedent(_inspect.getsource(fn))
+        gate_tree = _ast.parse(gate_src)
+        gate_fn = next(
+            n
+            for n in _ast.walk(gate_tree)
+            if isinstance(n, _ast.FunctionDef) and n.name == fn.__name__
+        )
+        gate_rewriter = _CFR(static_env={})
+        gate_body = gate_rewriter.rewrite_block(
+            gate_fn.body,
+            live_after={'value'},
+            bound_on_entry={arg.arg for arg in gate_fn.args.args},
+        )
+        gate_module = _ast.Module(body=gate_body, type_ignores=[])
+        _ast.fix_missing_locations(gate_module)
+        return _ast.unparse(gate_module)
+
+    gate_text = rewrite_gate(ast_static_range_nonempty_definite_gate_fn)
     expect(
         'carry(value=value)' in gate_text,
         'known non-empty static_range target should be credited as bound for an implicit carry',
+    )
+    body_init_text = rewrite_gate(ast_static_range_body_init_definite_gate_fn)
+    expect(
+        'carry(value=value)' in body_init_text,
+        'known non-empty static_range body initialization should make an implicit carry safe',
+    )
+    empty_orelse_text = rewrite_gate(ast_static_range_empty_orelse_init_gate_fn)
+    expect(
+        'carry(value=value)' in empty_orelse_text,
+        'known empty static_range else initialization should make an implicit carry safe',
+    )
+    expect_raises(
+        PTODSLAstRewriteError,
+        lambda: rewrite_gate(ast_static_range_delete_target_gate_fn),
+        'last-iteration-only',
+    )
+    expect_raises(
+        PTODSLAstRewriteError,
+        lambda: rewrite_gate(ast_static_range_orelse_delete_gate_fn),
+        'last-iteration-only',
     )
     del _ast, _inspect, _textwrap, _CFR
 

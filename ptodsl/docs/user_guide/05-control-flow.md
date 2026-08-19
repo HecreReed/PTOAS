@@ -454,8 +454,10 @@ def ast_rewrite_static_loop_kernel():
         pto.pipe_barrier(pto.Pipe.ALL)
 ```
 
-`pto.static_range(...)` keeps Python `for` semantics. The loop target remains
-available after the loop:
+`pto.static_range(...)` keeps Python `for` semantics. Bindings created or
+deleted by the unrolled body and `else` clause remain in effect after tracing.
+The loop target remains available after a non-empty loop unless the body
+deletes it:
 
 <!-- ptodsl-doc-test: {"mode":"compile","symbol":"ast_rewrite_static_loop_target_kernel","compile":{}} -->
 ```python
