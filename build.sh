@@ -545,6 +545,9 @@ stage_ptoas_wheel() {
   local wheelhouse="${BUILD_PATH}/wheelhouse"
   local python_scripts
   python_scripts="$("${python_bin}" -c 'import sysconfig; print(sysconfig.get_path("scripts"))')"
+  local user_scripts
+  user_scripts="$("${python_bin}" -c 'import os, sysconfig; print(sysconfig.get_path("scripts", scheme=os.name + "_user"))')"
+  local python_tool_path="${python_scripts}:${user_scripts}:${PATH}"
   local wheel_arch
   local wheel_feature_args=()
   local repair_plat
@@ -589,9 +592,17 @@ stage_ptoas_wheel() {
   # The GitCode build uses the cached shared LLVM tree. Repairing the wheel
   # makes those DSOs package-relative so the smoke job does not depend on the
   # build cache still being mounted when the .run artifact is installed.
-  if [ ! -x "${python_scripts}/auditwheel" ] \
-     || ! PATH="${python_scripts}:${PATH}" command -v patchelf >/dev/null 2>&1; then
+  if ! "${python_bin}" -c 'import auditwheel' >/dev/null 2>&1 \
+     || ! PATH="${python_tool_path}" command -v patchelf >/dev/null 2>&1; then
     pip_install_runtime_deps "${python_bin}" auditwheel patchelf
+  fi
+  if ! "${python_bin}" -c 'import auditwheel' >/dev/null 2>&1; then
+    echo "ERROR: auditwheel is not importable by ${python_bin}" >&2
+    exit 1
+  fi
+  if ! PATH="${python_tool_path}" command -v patchelf >/dev/null 2>&1; then
+    echo "ERROR: patchelf not found in ${python_scripts} or ${user_scripts}" >&2
+    exit 1
   fi
   # The shared LLVM cache is built by the GitCode image rather than the
   # manylinux_2_34 container used by the release workflow. Its versioned
@@ -606,9 +617,9 @@ stage_ptoas_wheel() {
     "manylinux_2_38_${wheel_arch}" \
     "manylinux_2_39_${wheel_arch}"; do
     echo "Trying auditwheel platform: ${repair_plat}"
-    if PATH="${python_scripts}:${PATH}" \
+    if PATH="${python_tool_path}" \
        LD_LIBRARY_PATH="${LLVM_BUILD_DIR}/lib${LD_LIBRARY_PATH:+:${LD_LIBRARY_PATH}}" \
-         "${python_scripts}/auditwheel" repair \
+         "${python_bin}" -m auditwheel repair \
            --plat "${repair_plat}" \
            --wheel-dir "${wheelhouse}" \
            "${wheel_dist}"/ptoas*.whl; then
