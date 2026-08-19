@@ -437,7 +437,20 @@ resolve_compiler_rt() {
         )"
       fi
       if [ -z "${PTOAS_COMPILER_RT}" ] || [ ! -f "${PTOAS_COMPILER_RT}" ]; then
-        echo "ERROR: libclang_rt.builtins-aarch64.a not found under ${clang_res}" >&2
+        local runtime_search_roots=()
+        local runtime_root
+        for runtime_root in /opt/buildtools /usr /usr/local; do
+          [ -d "${runtime_root}" ] && runtime_search_roots+=("${runtime_root}")
+        done
+        PTOAS_COMPILER_RT="$(
+          find "${runtime_search_roots[@]}" \
+            -name 'libclang_rt.builtins-aarch64.a' -type f 2>/dev/null \
+            | head -1 || true
+        )"
+      fi
+      if [ -z "${PTOAS_COMPILER_RT}" ] || [ ! -f "${PTOAS_COMPILER_RT}" ]; then
+        echo "ERROR: libclang_rt.builtins-aarch64.a not found on this host" >&2
+        echo "Searched ${clang_res}, /opt/buildtools, /usr, and /usr/local" >&2
         exit 1
       fi
 
