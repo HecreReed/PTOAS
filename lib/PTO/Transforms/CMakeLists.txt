@@ -168,6 +168,7 @@ add_mlir_dialect_library(PTOTransforms
   PUBLIC
   PTOAnalysis
   PTOIR
+  MLIRAnalysis
   MLIRIR
   MLIRPass
   MLIRFuncDialect
