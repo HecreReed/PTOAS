@@ -3777,12 +3777,40 @@ int mlir::pto::compilePTOASModule(
       "pto.target_arch",
       mlir::StringAttr::get(module->getContext(), arch));
 
-  // applyPassManagerCLOptions(preInlinePlanningPM) above already registered
-  // the MLIR printer instrumentation (--mlir-print-ir-*). This project's
-  // applyConfiguredPassManagerCLOptions re-applies that instrumentation, so it
-  // must be applied exactly once per pass manager: registering it here again
-  // would print every IR dump twice and break FileCheck-based lit tests. The
-  // post-validation pass manager below gets its own single registration.
+  // The --emit-pto-ir path mirrors upstream's single-registration behavior:
+  // applyPassManagerCLOptions above installed the --mlir-print-ir-* printer
+  // once, we run the pre-inline planning PM, pass the post-planning safety
+  // checkpoint, and return the IR text.
+  if (emitMlirIR) {
+    if (failed(preInlinePlanningPM.run(*module))) {
+      llvm::errs() << "Error: Pass execution failed.\n";
+      return 1;
+    }
+    // Post-planning safety helper (design doc 5.3.1): runs after
+    // PTOResolveBufferSelect materialized planner addresses and before
+    // PTOInlineBackendHelpersPass. Ordinary codegen and --emit-pto-ir share
+    // this exact checkpoint between the two pass-manager runs.
+    if (failed(pto::validateTExtractNd2xNzPostPlanningSafety(*module))) {
+      llvm::errs() << "Error: ND-to-2xNz TEXTRACT post-planning safety ";
+      llvm::errs() << "validation failed.\n";
+      return 1;
+    }
+    result.kind = PTOASCompileResultKind::Text;
+    llvm::raw_string_ostream os(result.textOutput);
+    module->print(os);
+    os.flush();
+    return 0;
+  }
+
+  // Ordinary codegen path: reproduce upstream's full-pipeline print semantics
+  // (the single pass manager applied this repo's configured options before the
+  // final run, i.e. the --mlir-print-ir-* printer was registered twice). Apply
+  // the configured options to the pre-inline planning PM once more before its
+  // run so planning-stage IR dumps print exactly as they did upstream.
+  if (failed(applyConfiguredPassManagerCLOptions(
+          preInlinePlanningPM, "pre-inline planning PTOAS pipeline"))) {
+    return 1;
+  }
   if (failed(preInlinePlanningPM.run(*module))) {
     llvm::errs() << "Error: Pass execution failed.\n";
     return 1;
@@ -3790,20 +3818,11 @@ int mlir::pto::compilePTOASModule(
 
   // Post-planning safety helper (design doc 5.3.1): runs after
   // PTOResolveBufferSelect materialized planner addresses and before
-  // PTOInlineBackendHelpersPass. Ordinary codegen and --emit-pto-ir share
-  // this exact checkpoint between the two pass-manager runs.
+  // PTOInlineBackendHelpersPass.
   if (failed(pto::validateTExtractNd2xNzPostPlanningSafety(*module))) {
     llvm::errs() << "Error: ND-to-2xNz TEXTRACT post-planning safety ";
     llvm::errs() << "validation failed.\n";
     return 1;
-  }
-
-  if (emitMlirIR) {
-    result.kind = PTOASCompileResultKind::Text;
-    llvm::raw_string_ostream os(result.textOutput);
-    module->print(os);
-    os.flush();
-    return 0;
   }
 
   PassManager postValidationPM(module->getContext());
