@@ -898,6 +898,51 @@ def PTOConvertSCFToCFWithLoopHints : Pass<"pto-convert-scf-to-cf-with-loop-hints
   ];
 }
 
+def PTOPromotePersistentFragmentLoops
+    : Pass<"pto-promote-persistent-fragment-loops", "func::FuncOp"> {
+  let summary =
+      "Promote loops accessing persistent SIMT fragment buffers to forced "
+      "full unrolling";
+  let description = [{
+    Persistent fragment materialization requires every loop touching a
+    persistent buffer to be fully unrolled so that each access resolves to a
+    stable resident slot.  This pass is the discovery half of that pipeline:
+    it finds the loops and marks them for `pto-unroll-loops`; it does not do
+    slot assignment, keep/resume generation, SIMT outlining, or LLVM
+    metadata lowering.
+
+    Every `llvm.alloca` carrying `{pto.persistent}` is an explicit entry
+    point.  The pass walks the alloca's use graph and collects every
+    enclosing `scf.for` of every related op (all nesting layers, including
+    kernel-level loops wrapping `pto.section.simt`).  Each collected loop is
+    promoted to `{pto.unroll = "full"}` (`"enable"` and no-hint are
+    overridden, an existing `"full"` is kept) and additionally marked with
+    `{pto.persistent_unroll}` so that `pto-unroll-loops` fails hard instead
+    of dropping the hint when the loop cannot be unrolled natively - a
+    surviving persistent loop would break fragment materialization.
+
+    Fail-fast (hard errors): a fixed `pto.unroll_factor` on a persistent
+    loop, a persistent access nested under `scf.while`, or a statically
+    known trip count above `max-persistent-unroll-trip-count`.
+  }];
+  let constructor =
+      "mlir::pto::createPTOPromotePersistentFragmentLoopsPass()";
+  let dependentDialects = [
+    "mlir::func::FuncDialect",
+    "mlir::scf::SCFDialect",
+    "mlir::LLVM::LLVMDialect",
+    "mlir::pto::PTODialect"
+  ];
+  let options = [
+    Option<"maxPersistentUnrollTripCount",
+           "max-persistent-unroll-trip-count", "int64_t",
+           /*default=*/"128",
+           "Fail when a persistent fragment loop with a statically known "
+           "trip count exceeds this threshold.  A negative value disables "
+           "the guardrail.">,
+  ];
+}
+
 def PTONarrowVPTOLoopCounters
     : Pass<"pto-narrow-vpto-loop-counters", "func::FuncOp"> {
   let summary =

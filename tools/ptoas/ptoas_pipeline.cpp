@@ -771,6 +771,10 @@ static void prepareVPTOForEmission(PassManager &pm) {
   // backend checks catch any illegal barrier that still leaks through.
   kernelModulePM.addNestedPass<func::FuncOp>(
       pto::createLoweringSyncToPipePass());
+  // Persistent fragment loops must be fully unrolled before fragment
+  // analysis/materialization; promote them ahead of the unroll pass.
+  kernelModulePM.addNestedPass<func::FuncOp>(
+      pto::createPTOPromotePersistentFragmentLoopsPass());
   kernelModulePM.addNestedPass<func::FuncOp>(
       pto::createPTOUnrollLoopsPass());
   kernelModulePM.addPass(createSCCPPass());

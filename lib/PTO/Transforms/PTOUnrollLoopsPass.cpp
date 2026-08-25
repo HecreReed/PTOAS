@@ -131,6 +131,14 @@ struct PTOUnrollLoopsImpl {
   UnrollOutcome tryFullUnroll(scf::ForOp forOp) const {
     std::optional<int64_t> tripCount = getStaticTripCount(forOp);
     if (!tripCount) {
+      // A loop promoted by pto-promote-persistent-fragment-loops must not
+      // silently survive: fragment materialization depends on the unroll.
+      if (forOp->hasAttr(pto::kPersistentUnrollMarkerAttrName)) {
+        forOp.emitError()
+            << "persistent fragment loop requires full unroll but has no "
+               "constant trip count";
+        return UnrollOutcome::Error;
+      }
       forOp.emitRemark()
           << "'" << pto::kUnrollAttrName
           << " = \"full\"' loop has no constant trip count; cannot unroll "
@@ -148,8 +156,14 @@ struct PTOUnrollLoopsImpl {
     // warning beforehand.
     Location loc = forOp.getLoc();
     if (failed(
-            loopUnrollByFactor(forOp, static_cast<uint64_t>(*tripCount))))
+            loopUnrollByFactor(forOp, static_cast<uint64_t>(*tripCount)))) {
+      if (forOp->hasAttr(pto::kPersistentUnrollMarkerAttrName)) {
+        forOp.emitError()
+            << "persistent fragment loop could not be fully unrolled";
+        return UnrollOutcome::Error;
+      }
       return UnrollOutcome::Unchanged;
+    }
 
     if (maxFullUnrollTripCount >= 0 && *tripCount > maxFullUnrollTripCount)
       mlir::emitWarning(loc)
@@ -323,6 +337,14 @@ struct PTOUnrollLoopsImpl {
     // changing them, which would make the fixpoint below loop forever.
     // Drop the hint on such loops instead.
     if (llvm::hasSingleElement(forOp.getBody()->getOperations())) {
+      // A loop promoted by pto-promote-persistent-fragment-loops must not
+      // silently lose its hint: fragment materialization depends on the
+      // unroll actually happening.
+      if (forOp->hasAttr(pto::kPersistentUnrollMarkerAttrName)) {
+        forOp.emitError() << "persistent fragment loop requires full unroll "
+                             "but has an empty body";
+        return UnrollOutcome::Error;
+      }
       forOp.emitRemark() << "loop with a native unroll hint has an empty "
                             "body; dropping the hint";
       forOp->removeAttr(pto::kUnrollAttrName);
@@ -338,6 +360,13 @@ struct PTOUnrollLoopsImpl {
     // the verifier.  Only index loops can be unrolled natively; anything
     // else keeps its loop and drops the hint.
     if (!forOp.getInductionVar().getType().isIndex()) {
+      if (forOp->hasAttr(pto::kPersistentUnrollMarkerAttrName)) {
+        forOp.emitError()
+            << "persistent fragment loop requires full unroll but has a "
+               "non-index induction variable ("
+            << forOp.getInductionVar().getType() << ")";
+        return UnrollOutcome::Error;
+      }
       forOp.emitRemark()
           << "loop with a native unroll hint has a non-index induction "
              "variable ("

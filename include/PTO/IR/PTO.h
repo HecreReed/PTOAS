@@ -231,6 +231,18 @@ inline constexpr llvm::StringLiteral kPTODSLLogicalNameAttrName =
 ///   cap; otherwise the hint is dropped with a remark.  Malformed hints
 ///   (unknown pto.unroll value, both attributes on one loop, out-of-contract
 ///   factor) are hard errors reported by `pto-unroll-loops`.
+/// Unit attribute marking an `llvm.alloca` as a persistent SIMT fragment
+/// buffer.  Shared by the persistent-fragment analysis and the loop
+/// promotion pass (used as the discovery entry point).
+inline constexpr llvm::StringLiteral kPersistentAttrName = "pto.persistent";
+
+/// Internal marker set by pto-promote-persistent-fragment-loops on loops it
+/// promoted to {pto.unroll = "full"}: pto-unroll-loops turns its
+/// drop-with-remark fallback into a hard error for marked loops, because a
+/// persistent loop that survives unrolling breaks fragment materialization.
+inline constexpr llvm::StringLiteral kPersistentUnrollMarkerAttrName =
+    "pto.persistent_unroll";
+
 inline constexpr llvm::StringLiteral kUnrollAttrName = "pto.unroll";
 inline constexpr llvm::StringLiteral kUnrollEnableValue = "enable";
 inline constexpr llvm::StringLiteral kUnrollFullValue = "full";

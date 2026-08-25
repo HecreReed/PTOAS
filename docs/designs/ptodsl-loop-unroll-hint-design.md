@@ -23,6 +23,15 @@
 > 力，`enable`/`disable` 随之删除。v3 重新评估后部分回退了该决定（仅
 > 恢复 `enable`）。
 >
+> **修订记录（v5）**：新增 `pto-promote-persistent-fragment-loops`——
+> persistent fragment materialization 要求访问 persistent buffer 的循环
+> 被完全展开，此前依赖调用方手写 `full`；该 pass 自动识别
+> `llvm.alloca {pto.persistent}` 的 use graph 并把相关循环提升为
+> `full`（覆盖 `enable`），附 `pto.persistent_unroll` marker 让 Pass A
+> 的丢弃兜底升级为硬错误。详见
+> `docs/designs/ptoas_persistent_simt_fragment_plan.md` 的「自动提升」一
+> 节。
+
 > 关联 Issue：
 > - [Issue #1242](https://github.com/hw-native-sys/PTOAS/issues/1242) Requirement 2 —— `pto.for_` loop-unroll hint（`unroll="enable"` 经 `pto-convert-scf-to-cf-with-loop-hints` 转为 `llvm.loop.unroll.enable`）
 > - [Issue #1000](https://github.com/hw-native-sys/PTOAS/issues/1000) —— 支持 Loop Unroll Hint（含 `pto.range`、factor unroll、两阶段计划）
@@ -379,6 +388,16 @@ v2 曾整体移除该 pass;v3 为满足 #1242 Req2 的 enable 验收标准恢复
 > metadata.  After review, stage 1 was removed and `enable`/`disable` with
 > it.  v3 partially reverted that decision (restoring only `enable`).
 >
+> **Revision history (v5)**: adds `pto-promote-persistent-fragment-loops` -
+> persistent fragment materialization requires loops touching a persistent
+> buffer to be fully unrolled, which previously relied on authors writing
+> `full` by hand.  The pass discovers loops via the use graph of
+> `llvm.alloca {pto.persistent}` and promotes them to `full` (overriding
+> `enable`), attaching a `pto.persistent_unroll` marker that upgrades Pass
+> A's drop-with-remark fallback into a hard error.  See the "automatic
+> promotion" section of
+> `docs/designs/ptoas_persistent_simt_fragment_plan.md`.
+
 > Related issues:
 > - [Issue #1242](https://github.com/hw-native-sys/PTOAS/issues/1242) Requirement 2 — `pto.for_` loop-unroll hint (v1's `unroll="enable"` was removed with stage 1; the interface need is covered by `unroll="full"` / `unroll_factor=N`)
 > - [Issue #1000](https://github.com/hw-native-sys/PTOAS/issues/1000) — Loop Unroll Hint support (incl. `pto.range`, factor unroll, two-phase plan)
