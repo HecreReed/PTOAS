@@ -593,10 +593,15 @@ static std::optional<llvm::SmallVector<int32_t, mlir::pto::kValue6>>
 getUnifiedOperandSegments(uint16_t opcode,
                           llvm::ArrayRef<mlir::Value> operands) {
   switch (opcode) {
+  // TExtractOp was range-ized to the five-segment schema
+  // [src, indices, dsts, fp, preQuantScalar]: the single-output opcode
+  // decodes to [1, 2, 1, 0, 0], the fp wire opcode to [1, 2, 1, 1, 0]
+  // (design doc 4.4). Dual-output forms never use these fixed-width
+  // opcodes; they ride generic v0 records.
   case kTExtractOpcode:
-    return llvm::SmallVector<int32_t, mlir::pto::kValue6>{1, 1, 1, 1, 0, 0};
+    return llvm::SmallVector<int32_t, mlir::pto::kValue6>{1, 2, 1, 0, 0};
   case kTExtractFpWireOpcode:
-    return llvm::SmallVector<int32_t, mlir::pto::kValue6>{1, 1, 1, 1, 1, 0};
+    return llvm::SmallVector<int32_t, mlir::pto::kValue6>{1, 2, 1, 1, 0};
   case kTInsertOpcode:
     return llvm::SmallVector<int32_t, mlir::pto::kValue6>{1, 1, 1, 1, 0, 0};
   case kTInsertFpWireOpcode:
