@@ -9,12 +9,16 @@ module attributes {"pto.target_arch" = "a5"} {
     %c0 = arith.constant 0 : index
     %a0 = arith.constant 0 : i64
     %src = pto.alloc_tile addr=%a0 : !pto.tile_buf<loc=vec, dtype=f16, rows=32, cols=32, v_row=32, v_col=32, blayout=row_major, slayout=none_box, fractal=512, pad=0>
-    // dst1 is partial-valid (16x16 valid within 32x32 physical) at addr 4096.
+    // dst0 uses its own range; dst1 is partial (valid 17x16 within 32x32)
+    // at addr 4096. The TSTORE below aliases dst1's range.
     %a1 = arith.constant 4096 : i64
-    %d0 = pto.alloc_tile addr=%a1 : !pto.tile_buf<loc=vec, dtype=f16, rows=16, cols=16, v_row=16, v_col=16, blayout=col_major, slayout=row_major, fractal=512, pad=0>
-    %d1 = pto.alloc_tile addr=%a1 : !pto.tile_buf<loc=vec, dtype=f16, rows=32, cols=32, v_row=16, v_col=16, blayout=col_major, slayout=row_major, fractal=512, pad=0>
+    %a3 = arith.constant 8192 : i64
+    %d0 = pto.alloc_tile addr=%a3 : !pto.tile_buf<loc=vec, dtype=f16, rows=16, cols=16, v_row=16, v_col=16, blayout=col_major, slayout=row_major, fractal=512, pad=0>
+    // dst1: partial (valid 17x16 within 32x32); A5 gate requires
+    // physicalRows == align16(validRows): align16(17) == 32.
+    %d1 = pto.alloc_tile addr=%a1 : !pto.tile_buf<loc=vec, dtype=f16, rows=32, cols=32, v_row=17, v_col=16, blayout=col_major, slayout=row_major, fractal=512, pad=0>
     pto.textract ins(%src, %c0, %c0, %c0, %c0 : !pto.tile_buf<loc=vec, dtype=f16, rows=32, cols=32, v_row=32, v_col=32, blayout=row_major, slayout=none_box, fractal=512, pad=0>, index, index, index, index)
-                outs(%d0, %d1 : !pto.tile_buf<loc=vec, dtype=f16, rows=16, cols=16, v_row=16, v_col=16, blayout=col_major, slayout=row_major, fractal=512, pad=0>, !pto.tile_buf<loc=vec, dtype=f16, rows=32, cols=32, v_row=16, v_col=16, blayout=col_major, slayout=row_major, fractal=512, pad=0>)
+                outs(%d0, %d1 : !pto.tile_buf<loc=vec, dtype=f16, rows=16, cols=16, v_row=16, v_col=16, blayout=col_major, slayout=row_major, fractal=512, pad=0>, !pto.tile_buf<loc=vec, dtype=f16, rows=32, cols=32, v_row=17, v_col=16, blayout=col_major, slayout=row_major, fractal=512, pad=0>)
     // TSTORE from a distinct allocation at the same numeric address.
     %a2 = arith.constant 4096 : i64
     %st = pto.alloc_tile addr=%a2 : !pto.tile_buf<loc=vec, dtype=f16, rows=16, cols=16, v_row=16, v_col=16, blayout=row_major, slayout=none_box, fractal=512, pad=0>

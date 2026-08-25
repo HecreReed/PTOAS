@@ -276,6 +276,44 @@ mlir::pto::validateTExtractNd2xNzPostPlanningSafety(mlir::Operation *module) {
     return success();
 
   bool failedModule = false;
+
+  // Pairwise no-alias recheck (design doc 5.3.1 item 2): src/dst0/dst1 must
+  // resolve to non-negative static absolute ranges and stay pairwise disjoint
+  // in the same address space. Runs unconditionally for every dual-output op,
+  // including explicit-address level3 shapes where PlanMemory is skipped.
+  mod.walk([&](pto::TExtractOp op) {
+    if (failedModule || !op.isNdTo2xNzForm())
+      return;
+    SmallVector<ByteRange, 3> ranges;
+    SmallVector<StringRef, 3> names{"src", "dst0", "dst1"};
+    SmallVector<Value, 3> operands{op.getSrc(), op.getDsts()[0],
+                                   op.getDsts()[1]};
+    for (unsigned i = 0; i < 3; ++i) {
+      ByteRange range = resolveAllocationByteRange(operands[i]);
+      if (!range.resolved) {
+        op.emitOpError() << "cannot resolve static absolute physical range of "
+                         << names[i]
+                         << " for pairwise no-alias recheck";
+        failedModule = true;
+        return;
+      }
+      ranges.push_back(range);
+    }
+    for (unsigned i = 0; i < 3 && !failedModule; ++i) {
+      for (unsigned j = i + 1; j < 3; ++j) {
+        if (rangesInteract(ranges[i], ranges[j])) {
+          op.emitOpError()
+              << "ND-to-2xNz " << names[i] << "/" << names[j]
+              << " physical ranges alias in the same address space "
+                 "(no-alias contract)";
+          failedModule = true;
+        }
+      }
+    }
+  });
+  if (failedModule)
+    return failure();
+
   struct PartialDest {
     func::FuncOp func;
     ByteRange range;
