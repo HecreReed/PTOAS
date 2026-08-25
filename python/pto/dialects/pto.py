@@ -1921,29 +1921,45 @@ def vkernel(py_fn=None, *, target="a5", name=None, verify=True):
 
 _GeneratedTExtractOp = _pto_ops_gen.TExtractOp
 
+_UNSET = object()
+
 
 class TExtractOp(_GeneratedTExtractOp):
     """Legacy facade for pto.textract.
 
-    Accepts the pre-range positional/keyword constructor
-    TExtractOp(src, index_row, index_col, dst, ...) and delegates to the
-    generated range constructor with indices=[row, col] and
-    dsts=[dst]. .indexRow / .indexCol / .dst map back to the range slices
-    for legacy callers. The ND-to-2xNZ dual-output form is built with the
+    The ODS range-ization replaced the fixed indexRow/indexCol/dst fields
+    with the indices/dsts ranges. This facade keeps the single-output
+    surface source compatible (design doc 4.4/10): both the old camelCase
+    generated-binder keywords (indexRow=, indexCol=, preQuantScalar=,
+    accToVecMode=, reluPreMode=) and the snake_case spellings are accepted,
+    and the legacy .indexRow/.indexCol/.dst properties map back to the range
+    slices. The ND-to-2xNZ dual-output form is built with the
     build_nd_to_2xnz classmethod on this same class.
     """
 
-    def __init__(self, src, index_row, index_col, dst, *, fp=None,
-                 pre_quant_scalar=None, acc_to_vec_mode=None,
-                 relu_pre_mode=None, loc=None, ip=None):
+    def __init__(self, src, index_row=_UNSET, index_col=_UNSET, dst=_UNSET,
+                 *, indexRow=_UNSET, indexCol=_UNSET,
+                 fp=None, pre_quant_scalar=_UNSET, preQuantScalar=_UNSET,
+                 acc_to_vec_mode=_UNSET, accToVecMode=_UNSET,
+                 relu_pre_mode=_UNSET, reluPreMode=_UNSET,
+                 loc=None, ip=None):
+        row = index_row if index_row is not _UNSET else indexRow
+        col = index_col if index_col is not _UNSET else indexCol
+        if row is _UNSET or col is _UNSET or dst is _UNSET:
+            raise TypeError(
+                "TExtractOp requires index_row/indexRow, index_col/indexCol "
+                "and dst for the single-output form")
+        pqs = pre_quant_scalar if pre_quant_scalar is not _UNSET else preQuantScalar
+        acc = acc_to_vec_mode if acc_to_vec_mode is not _UNSET else accToVecMode
+        relu = relu_pre_mode if relu_pre_mode is not _UNSET else reluPreMode
         super().__init__(
             src,
-            indices=[index_row, index_col],
+            indices=[row, col],
             dsts=[dst],
             fp=fp,
-            preQuantScalar=pre_quant_scalar,
-            accToVecMode=acc_to_vec_mode,
-            reluPreMode=relu_pre_mode,
+            preQuantScalar=pqs,
+            accToVecMode=acc,
+            reluPreMode=relu,
             loc=loc,
             ip=ip,
         )
@@ -1963,14 +1979,55 @@ class TExtractOp(_GeneratedTExtractOp):
     @classmethod
     def build_nd_to_2xnz(cls, src, row0, col0, row1, col1, dst0, dst1,
                          *, loc=None, ip=None):
-        """Build the ND-to-2xNZ dual-output form on pto.textract."""
-        return _GeneratedTExtractOp(
+        """Build the ND-to-2xNZ dual-output form as a pto.TExtractOp facade
+        instance (bypasses the single-output facade __init__)."""
+        op = cls.__new__(cls)
+        _GeneratedTExtractOp.__init__(
+            op,
             src=src,
             indices=[row0, col0, row1, col1],
             dsts=[dst0, dst1],
             loc=loc,
             ip=ip,
         )
+        return op
+
+
+def _register_facade_opview():
+    """Point the parser's opview lookup for pto.textract at the facade.
+
+    The generated op class is what Operation.opview instantiates unless it is
+    replaced in the MLIR python op-view registry; without this, a parsed
+    pto.textract result would lack the legacy .indexRow/.indexCol/.dst
+    surface (design doc 4.4/10 parser requirement).
+    """
+    try:
+        from ._ods_common import _cext as _ods_cext
+    except Exception:
+        return
+    # Preferred path: the public register_operation(dialect, *, replace=True)
+    # class decorator (MLIR python bindings). The dialect class is available on
+    # the generated module in most versions.
+    dialect = getattr(_pto_ops_gen, "_Dialect", None) or getattr(
+        _pto_ops_gen, "Dialect", None)
+    if dialect is not None:
+        try:
+            _ods_cext.register_operation(dialect, replace=True)(TExtractOp)
+            return
+        except Exception:
+            pass
+    # Fallback: the stable _register_operation_impl hook takes the operation
+    # name directly.
+    try:
+        _ods_cext._register_operation_impl("pto.textract", TExtractOp,
+                                           replace=True)
+    except Exception:
+        # Without a replaceable registry the parser keeps the generated
+        # opview; the builder-level facade surface is unaffected.
+        pass
+
+
+_register_facade_opview()
 
 
 def textract(src, index_row, index_col, dst, *, fp=None,

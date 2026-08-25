@@ -8547,15 +8547,14 @@ static LogicalResult verifyNdTo2xNzForm(Operation *op) {
           "i8/i32/f16/bf16/f32");
     }
   } else {
-    auto isA5VerifiedNd2xNzElemType = [&](Type t) {
-      if (isPTOFloat8Type(t) || isPTOHiFloat8Type(t))
-        return true;
-      return isA2A3Nd2xNzElemType(t);
-    };
-    if (!isA5VerifiedNd2xNzElemType(srcElem)) {
+    // A5 first-version gate: the TileLib candidate for the dual-output form
+    // registers f16 only (lib/TileOps/a5/textract_nd2xnz.py); design doc 9.1
+    // forbids widening the registered dtype set before device goldens land,
+    // so the verifier must not accept dtypes the template layer cannot select.
+    if (!srcElem.isF16()) {
       return op->emitOpError(
-          "expects A5 ND-to-2xNZ TEXTRACT element type to be an "
-          "i8/i32/f16/bf16/f32 or fp8/hif8 family type");
+          "expects A5 ND-to-2xNZ TEXTRACT element type to be f16 in the "
+          "first version; other dtypes await device goldens (design 9.1)");
     }
   }
 

@@ -13,6 +13,9 @@ a5.textract / a5.textract_fp / a5.textract_nd2xnz). The selection layer
 distinguishes them by operand arity plus layout/dtype constraints: the
 dual-output form always carries seven operands
 (src, row0, col0, row1, col1, dst0, dst1).
+
+The first version registers f16 only (design doc 9.1: unverified dtypes
+must not be registered); the A5 verifier enforces the same set.
 """
 
 from ptodsl import pto
@@ -30,13 +33,16 @@ def _elem_bytes(dst):
 
 def _nd2xnz_constraint(src_kind, src_memory_space, dst0_kind, dst0_memory_space,
                        dst1_kind, dst1_memory_space, **_):
+    # InsertTemplateAttributes/ExpandTileOp normalize the VEC address space
+    # to the string "ub" (see InsertTemplateAttributes.cpp
+    # stringifyMemorySpace), so candidates must declare "ub" here.
     return (
         src_kind == "tile"
         and dst0_kind == "tile"
         and dst1_kind == "tile"
-        and src_memory_space == "vec"
-        and dst0_memory_space == "vec"
-        and dst1_memory_space == "vec"
+        and src_memory_space == "ub"
+        and dst0_memory_space == "ub"
+        and dst1_memory_space == "ub"
     )
 
 
@@ -45,23 +51,34 @@ def _expand_window(src, row0, col0, dst):
 
     Window element mapping (design doc 3.2):
         window[r, c] = src[row0 + r, col0 + c]
-    written to the NZ layout of dst. First-version coverage: c0-aligned
-    full-valid window rows via vldas/vldus/vsstb with the destination block
-    stride taken from the destination physical rows (plain NZ). Unaligned
-    sub-c0 offsets, 1x1, FP4 and RowPlusOne stay gated until device goldens
-    land.
+    written to the NZ layout of dst: NZ offset = floor(c/c0)*physRows*c0
+    + r*c0 + (c%c0), c0 = 32/elemBytes. We walk column blocks of c0 (one
+    vreg width), and for each block row use vldus (unaligned) and vsstb with
+    the destination physical-row block stride. The trailing block uses an
+    exact PAT_VL mask so validCols % c0 pads stay untouched; row padding
+    beyond validRows is not written (undefined by the TEXTRACT contract,
+    design 3.2.1). 1x1 windows naturally fall out as m=1, n=1 with a
+    PAT_VL1 tail. pto.addptr advances by element offset (not bytes).
     """
     m, n = dst.valid_shape
     c0 = 32 // _elem_bytes(dst)
     block_stride = dst.shape[0]  # storageRows (plain NZ); design doc 3.2
     src_ptr = src.as_ptr()
+    dst_ptr = dst.as_ptr()
     base_elems = row0 * src.shape[1] + col0
+    nblocks = (n + c0 - 1) // c0
     align = pto.vldas(src_ptr)
-    for r in range(m):
-        row_addr = base_elems + r * src.shape[1]
-        value, align = pto.vldus(src_ptr + row_addr * _elem_bytes(dst), align)
-        offset = r * c0
-        pto.vsstb(value, dst.as_ptr() + offset, block_stride, 0, mask="PAT_ALL")
+    for cb in range(nblocks):
+        cols_this = n - cb * c0
+        if cols_this > c0:
+            cols_this = c0
+        mask = "PAT_ALL" if cols_this == c0 else "PAT_VL%d" % cols_this
+        for r in range(m):
+            src_elem = base_elems + r * src.shape[1] + cb * c0
+            value, align = pto.vldus(pto.addptr(src_ptr, src_elem), align)
+            dst_elem = cb * block_stride * c0 + r * c0
+            pto.vsstb(value, pto.addptr(dst_ptr, dst_elem),
+                      block_stride, 0, mask=mask)
 
 
 @tilelib.tile_template(
@@ -76,7 +93,7 @@ def _expand_window(src, row0, col0, dst):
     id=100,
     loop_depth=1,
     is_post_update=False,
-    tags=("extract", "vec", "nd2xnz"),
+    tags=("extract", "ub", "nd2xnz"),
 )
 def template_textract_nd2xnz(
     src: pto.Tile,

@@ -167,25 +167,45 @@ bool isPartialValidTile(Type ty) {
          (valid[0] != shape[0] || valid[1] != shape[1]);
 }
 
-// Direct internal call component of a function: all fun	ions reachable from
-// it through direct func.call edges to internal (body-bearing) definitions.
-// This approximates the weakly-connected component for the conservative
-// first-version checks (design doc 5.3.1 item 3/6).
+// Direct internal call component of a function: all functions reachable from
+// it through direct func.call edges (both directions) to internal
+// (body-bearing) definitions. Following only caller->callee edges from a
+// partial producer misses aliasing TSTORE ops in callers that call into the
+// producer's function (post-planning design doc 5.3.1 item 3/6), so we build
+// the undirected reachability closure: an edge a->b puts both a and b in the
+// same component regardless of entry side.
 void collectCallComponent(func::FuncOp entry, ModuleOp module,
                           llvm::SmallVectorImpl<func::FuncOp> &out) {
+  // Gather every internal function and every direct internal call edge.
+  llvm::SmallPtrSet<func::FuncOp, 16> funcs;
+  llvm::DenseMap<func::FuncOp, SmallVector<func::FuncOp, 4>> callees;
+  llvm::DenseMap<func::FuncOp, SmallVector<func::FuncOp, 4>> callers;
+  module.walk([&](func::FuncOp f) { funcs.insert(f); });
+  module.walk([&](func::CallOp call) {
+    func::FuncOp parentFunc = call->getParentOfType<func::FuncOp>();
+    if (!parentFunc)
+      return;
+    auto callee = module.lookupSymbol<func::FuncOp>(call.getCallee());
+    if (!callee || callee.isDeclaration() || !funcs.count(callee))
+      return;
+    callees[parentFunc].push_back(callee);
+    callers[callee].push_back(parentFunc);
+  });
+
   llvm::SmallPtrSet<func::FuncOp, 8> visited;
   llvm::SmallVector<func::FuncOp, 16> worklist{entry};
   visited.insert(entry);
   while (!worklist.empty()) {
     func::FuncOp cur = worklist.pop_back_val();
     out.push_back(cur);
-    cur.walk([&](func::CallOp call) {
-      auto callee = module.lookupSymbol<func::FuncOp>(call.getCallee());
-      if (!callee || callee.isDeclaration())
-        return;
-      if (visited.insert(callee).second)
-        worklist.push_back(callee);
-    });
+    auto pushEdge = [&](func::FuncOp other) {
+      if (other && visited.insert(other).second)
+        worklist.push_back(other);
+    };
+    for (func::FuncOp c : callees[cur])
+      pushEdge(c);
+    for (func::FuncOp c : callers[cur])
+      pushEdge(c);
   }
 }
 
@@ -446,19 +466,25 @@ mlir::pto::validateTExtractNd2xNzPrePartition(mlir::Operation *module) {
     return success();
   }
 
-  // Fixed-depth structure guard: the root body may only contain immediate
-  // backend child ModuleOps (and, for the non-partitioned shape, top-level
-  // funcs); descendants must not nest further ModuleOps.
+  // Fixed-depth structure guard: the design allows root Module -> immediate
+  // backend child Module -> func (the mixed-backend driver splits the outer
+  // module into exactly such child compile units). Only a ModuleOp nested
+  // deeper than one level under the root (a child containing another module,
+  // or a function-scoped module) is rejected.
   bool hasNestedModule = false;
   mod.walk([&](ModuleOp m) {
-    if (m.getOperation() != mod.getOperation()) {
+    if (m.getOperation() == mod.getOperation())
+      return;
+    unsigned depth = 0;
+    for (Operation *cur = m.getOperation(); cur; cur = cur->getParentOp())
+      ++depth;
+    if (depth > 1)
       hasNestedModule = true;
-    }
   });
   if (hasNestedModule) {
     mod->emitOpError()
         << "backend-partitioned ND-to-2xNz validation does not support "
-           "nested module/function scope";
+           "module scopes nested below the immediate backend children";
     return failure();
   }
 
@@ -479,7 +505,13 @@ mlir::pto::validateTExtractNd2xNzPrePartition(mlir::Operation *module) {
       return;
     }
     auto *callerParent = caller->getParentOp();
-    auto callee = mod.lookupSymbol<func::FuncOp>(call.getCallee());
+    // Resolve the callee against the symbol table the caller lives in: with
+    // backend children, a direct call inside child A must resolve among A's
+    // direct funcs (root lookupSymbol does not see into child modules).
+    auto callerMod = caller->getParentOfType<ModuleOp>();
+    auto callee =
+        callerMod ? callerMod.lookupSymbol<func::FuncOp>(call.getCallee())
+                  : mod.lookupSymbol<func::FuncOp>(call.getCallee());
     if (!callee) {
       call->emitOpError()
           << "call surface not closed: unresolved direct callee in a "

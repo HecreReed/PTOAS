@@ -1,0 +1,18 @@
+// RUN: not ptoas --pto-arch=a5 %s 2>&1 | FileCheck %s
+// Verify the A5 first-version dtype gate (design 9.1): the TileLib
+// candidate registers f16 only, so the verifier must reject other element
+// types for the dual-output form instead of letting template selection fail.
+
+module attributes {"pto.target_arch" = "a5"} {
+  func.func @textract_nd2xnz_non_f16_dtype() {
+    %c0 = arith.constant 0 : index
+    %src = pto.alloc_tile : !pto.tile_buf<loc=vec, dtype=f32, rows=32, cols=32, v_row=32, v_col=32, blayout=row_major, slayout=none_box, fractal=512, pad=0>
+    %dst0 = pto.alloc_tile : !pto.tile_buf<loc=vec, dtype=f32, rows=16, cols=16, v_row=16, v_col=16, blayout=col_major, slayout=row_major, fractal=512, pad=0>
+    %dst1 = pto.alloc_tile : !pto.tile_buf<loc=vec, dtype=f32, rows=16, cols=16, v_row=16, v_col=16, blayout=col_major, slayout=row_major, fractal=512, pad=0>
+    pto.textract ins(%src, %c0, %c0, %c0, %c0 : !pto.tile_buf<loc=vec, dtype=f32, rows=32, cols=32, v_row=32, v_col=32, blayout=row_major, slayout=none_box, fractal=512, pad=0>, index, index, index, index)
+                outs(%dst0, %dst1 : !pto.tile_buf<loc=vec, dtype=f32, rows=16, cols=16, v_row=16, v_col=16, blayout=col_major, slayout=row_major, fractal=512, pad=0>, !pto.tile_buf<loc=vec, dtype=f32, rows=16, cols=16, v_row=16, v_col=16, blayout=col_major, slayout=row_major, fractal=512, pad=0>)
+    return
+  }
+}
+
+// CHECK: expects A5 ND-to-2xNZ TEXTRACT element type to be f16

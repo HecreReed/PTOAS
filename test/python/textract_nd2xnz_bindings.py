@@ -71,11 +71,25 @@ def main() -> None:
             assert_true(legacy.indexRow is not None and legacy.indexCol is not None,
                         "legacy .indexRow/.indexCol must exist")
             assert_true(legacy.dst is not None, "legacy .dst must exist")
+            # The old generated-binder camelCase keywords must keep working.
+            legacy_camel = pto.TExtractOp(
+                src,
+                indexRow=8,
+                indexCol=16,
+                dst=dst0,
+                preQuantScalar=None,
+                accToVecMode=None,
+                reluPreMode=None,
+            )
+            assert_true(legacy_camel.dst is not None,
+                        "camelCase keyword construction must work")
             # Free function keeps the old signature.
             legacy_fn = pto.textract(src, 8, 16, dst0)
             assert_true(legacy_fn.dst is not None, "textract() .dst must exist")
-            # Dual-output factory on the same op class.
+            # Dual-output factory returns a facade instance on the same class.
             dual = pto.TExtractOp.build_nd_to_2xnz(src, 8, 16, 24, 48, dst0, dst1)
+            assert_true(isinstance(dual, pto.TExtractOp),
+                        "build_nd_to_2xnz must return pto.TExtractOp")
             assert_true(len(dual.indices) == 4, "dual form must carry four indices")
             assert_true(len(dual.dsts) == 2, "dual form must carry two destinations")
         text = str(module)
@@ -84,6 +98,17 @@ def main() -> None:
         parsed = Module.parse(text, context=ctx)
         parsed_text = str(parsed)
         assert_true("pto.textract" in parsed_text, "parse must keep pto.textract")
+        # The parser's opview must be the facade (legacy property surface).
+        parsed_ops = list(parsed.body.operations)
+        flawed = [op for op in parsed_ops
+                  if op.operation.name == "pto.textract"
+                  and not isinstance(op, pto.TExtractOp)]
+        missing = [op for op in parsed_ops
+                   if op.operation.name == "pto.textract"
+                   and not hasattr(op, "indexRow")]
+        assert_true(not flawed, "parsed pto.textract opview must be the facade")
+        assert_true(not missing,
+                    "parsed pto.textract opview must expose legacy properties")
 
     print("textract_nd2xnz bindings smoke OK")
 
