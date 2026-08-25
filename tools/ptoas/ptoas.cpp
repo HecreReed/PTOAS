@@ -12,6 +12,7 @@
 #include "PTO/IR/PTOMultiBuffer.h"
 #include "PTO/Transforms/VPTOLLVMEmitter.h"
 #include "PTO/Transforms/Passes.h"
+#include "PTO/Transforms/TExtractNd2xNzValidation.h"
 #include "PTO/Transforms/BufferizableOpInterfaceImpl.h"
 #include "VPTOHostStubEmission.h"
 #include "PTO/Transforms/CppPostprocess.h"
@@ -3409,6 +3410,15 @@ int mlir::pto::compilePTOASModule(
     return 1;
   }
 
+  // Runtime-bound tile provenance gate for the ND-to-2xNz form: runs after
+  // generic verification and before any planning/sync pass manager (design
+  // doc 5.1 item 11). No new pass is registered.
+  if (failed(pto::validateTExtractNd2xNzInputProvenance(*module))) {
+    llvm::errs() << "Error: ND-to-2xNz TEXTRACT input provenance validation "
+                    "failed.\n";
+    return 1;
+  }
+
   const bool requestedEnableOpFusion = enableOpFusion == llvm::cl::BOU_TRUE;
   const bool opFusionEnabled = requestedEnableOpFusion;
 
@@ -3620,9 +3630,9 @@ int mlir::pto::compilePTOASModule(
   }
 
   // Main PassManager
-  PassManager pm(module->getContext());
+  PassManager preInlinePlanningPM(module->getContext());
 
-  if (failed(applyPassManagerCLOptions(pm))) {
+  if (failed(applyPassManagerCLOptions(preInlinePlanningPM))) {
     return 1;
   }
 
@@ -3633,30 +3643,30 @@ int mlir::pto::compilePTOASModule(
   // validation is complete and the pass is proven stable, the gate can be
   // lifted to make it unconditional for all backends.
   if (effectiveBackend == PTOBackend::VPTO) {
-    pm.addNestedPass<mlir::func::FuncOp>(pto::createPTOCanonicalizeIRPass());
+    preInlinePlanningPM.addNestedPass<mlir::func::FuncOp>(pto::createPTOCanonicalizeIRPass());
   }
-  pm.addPass(createSerialFrontendPipeLoweringPass());
-  //pm.addNestedPass<mlir::func::FuncOp>(pto::createPTOVerifyTFreePass());
-  pm.addPass(pto::createPTOInferValidatePipeInitPass());
-  pm.addNestedPass<mlir::func::FuncOp>(pto::createLoweringSyncToPipePass());
+  preInlinePlanningPM.addPass(createSerialFrontendPipeLoweringPass());
+  //preInlinePlanningPM.addNestedPass<mlir::func::FuncOp>(pto::createPTOVerifyTFreePass());
+  preInlinePlanningPM.addPass(pto::createPTOInferValidatePipeInitPass());
+  preInlinePlanningPM.addNestedPass<mlir::func::FuncOp>(pto::createLoweringSyncToPipePass());
   if (!disableInferLayout) {
-    pm.addNestedPass<mlir::func::FuncOp>(pto::createInferPTOLayoutPass());
+    preInlinePlanningPM.addNestedPass<mlir::func::FuncOp>(pto::createInferPTOLayoutPass());
   }
   // PTOViewToMemref is generic view lowering required by both backends; keep it
   // outside the local-memory planning gate so default A2/A3 EmitC still lowers
   // pto.make_tensor_view before backend legalization.
   const bool isA2A3 = isA2A3Arch(arch);
   if (!isA2A3) {
-    pm.addNestedPass<mlir::func::FuncOp>(pto::createPTOA5NormalizeTMovPass());
+    preInlinePlanningPM.addNestedPass<mlir::func::FuncOp>(pto::createPTOA5NormalizeTMovPass());
   }
-  pm.addNestedPass<mlir::func::FuncOp>(
+  preInlinePlanningPM.addNestedPass<mlir::func::FuncOp>(
       pto::createPTOValidateIntToPtrUsesPass());
 
   // PTODSL legality discovery happens on tile-native PTO IR before fusion.
   // Fusion may later filter the ordered `candidates` array; ExpandTileOp
   // consumes the first candidate that remains.
   if (!isA2A3 && effectiveBackend == PTOBackend::VPTO && hasTileOpsToExpand) {
-    pm.addPass(pto::createInsertTemplateAttributesPass());
+    preInlinePlanningPM.addPass(pto::createInsertTemplateAttributesPass());
   }
 
   // Keep frontend fusion on tile-native PTO IR and annotate last_use directly
@@ -3673,21 +3683,21 @@ int mlir::pto::compilePTOASModule(
       enableVfSimCostmodelOptimization;
   fusionPlanOpts.dumpVfSimUnrollTest = dumpVfSimUnrollTest;
   if (!isA2A3 && enableA5EmitCFusionPath) {
-    pm.addNestedPass<mlir::func::FuncOp>(
+    preInlinePlanningPM.addNestedPass<mlir::func::FuncOp>(
         pto::createFusionPlanPass(fusionPlanOpts));
-    pm.addNestedPass<mlir::func::FuncOp>(pto::createOpSchedulingPass());
-    pm.addNestedPass<mlir::func::FuncOp>(pto::createPTOMarkLastUsePass());
+    preInlinePlanningPM.addNestedPass<mlir::func::FuncOp>(pto::createOpSchedulingPass());
+    preInlinePlanningPM.addNestedPass<mlir::func::FuncOp>(pto::createPTOMarkLastUsePass());
   } else if (!isA2A3 && enableA5VPTOFusionPath) {
-    pm.addNestedPass<mlir::func::FuncOp>(
+    preInlinePlanningPM.addNestedPass<mlir::func::FuncOp>(
         pto::createFusionPlanPass(fusionPlanOpts));
-    pm.addNestedPass<mlir::func::FuncOp>(pto::createOpSchedulingPass());
-    pm.addNestedPass<mlir::func::FuncOp>(pto::createPTOFusionRegionGenPass());
+    preInlinePlanningPM.addNestedPass<mlir::func::FuncOp>(pto::createOpSchedulingPass());
+    preInlinePlanningPM.addNestedPass<mlir::func::FuncOp>(pto::createPTOFusionRegionGenPass());
   }
 
-  pm.addNestedPass<mlir::func::FuncOp>(
+  preInlinePlanningPM.addNestedPass<mlir::func::FuncOp>(
       pto::createPTOMaterializeImplicitTmpPass(
           effectiveLevel == PTOBuildLevel::Level3));
-  pm.addNestedPass<mlir::func::FuncOp>(
+  preInlinePlanningPM.addNestedPass<mlir::func::FuncOp>(
       pto::createPTORematerializeFixpipeVectorQuantPass());
 
   if (planMemoryImpl != "legacy" && planMemoryImpl != "modern") {
@@ -3706,13 +3716,13 @@ int mlir::pto::compilePTOASModule(
     }
     planMemoryOptions.orderBySize = effectivePlanMemoryOrderBySize;
     if (planMemoryImpl == "legacy") {
-      pm.addPass(pto::createPlanMemoryPass(planMemoryOptions));
+      preInlinePlanningPM.addPass(pto::createPlanMemoryPass(planMemoryOptions));
     } else {
-      pm.addPass(pto::createPlanMemoryModernPass(planMemoryOptions));
+      preInlinePlanningPM.addPass(pto::createPlanMemoryModernPass(planMemoryOptions));
     }
   }
-  pm.addPass(pto::createPTOResolveReservedBuffersPass());
-  pm.addNestedPass<mlir::func::FuncOp>(pto::createPTORemoveIdentityTMovPass());
+  preInlinePlanningPM.addPass(pto::createPTOResolveReservedBuffersPass());
+  preInlinePlanningPM.addNestedPass<mlir::func::FuncOp>(pto::createPTORemoveIdentityTMovPass());
 
   // Conditionally add one automatic synchronization mode. Barrier-all is a
   // conservative standalone pass; InsertSync and GraphSyncSolver are set/wait
@@ -3722,56 +3732,72 @@ int mlir::pto::compilePTOASModule(
   // solvers, while BufidSync is A5-only get_buf/rls_buf synchronization.
   if (enableInsertSync) {
     if (emitMlirIR)
-      pm.addPass(std::make_unique<SerialAutoSyncPass>(
+      preInlinePlanningPM.addPass(std::make_unique<SerialAutoSyncPass>(
           SerialAutoSyncPass::Mode::InsertSync, false, 0));
     else
-      pm.addNestedPass<func::FuncOp>(pto::createPTOInsertSyncPass());
+      preInlinePlanningPM.addNestedPass<func::FuncOp>(pto::createPTOInsertSyncPass());
   }
   else if (enableBufidSync) {
     if (emitMlirIR) {
-      pm.addPass(std::make_unique<SerialAutoSyncPass>(
+      preInlinePlanningPM.addPass(std::make_unique<SerialAutoSyncPass>(
           SerialAutoSyncPass::Mode::Bufid, enableBufidSyncDebug, 0));
     } else {
       PTOBufidSyncOptions options;
       options.enableBufidSyncDebug = enableBufidSyncDebug;
-      pm.addNestedPass<func::FuncOp>(pto::createPTOBufidSyncPass(options));
+      preInlinePlanningPM.addNestedPass<func::FuncOp>(pto::createPTOBufidSyncPass(options));
     }
   } else if (enableInjectBarrierAllSync) {
     if (emitMlirIR)
-      pm.addPass(std::make_unique<SerialAutoSyncPass>(
+      preInlinePlanningPM.addPass(std::make_unique<SerialAutoSyncPass>(
           SerialAutoSyncPass::Mode::BarrierAll, false, 0));
     else
-      pm.addNestedPass<func::FuncOp>(
+      preInlinePlanningPM.addNestedPass<func::FuncOp>(
           pto::createPTOInjectBarrierAllSyncPass());
   } else if (enableGraphSyncSolver) {
     if (emitMlirIR) {
-      pm.addPass(std::make_unique<SerialAutoSyncPass>(
+      preInlinePlanningPM.addPass(std::make_unique<SerialAutoSyncPass>(
           SerialAutoSyncPass::Mode::GraphSolver, false,
           graphSyncSolverEventIdMax));
     } else {
       PTOGraphSyncSolverOptions options;
       options.eventIdNumMax = graphSyncSolverEventIdMax;
-      pm.addNestedPass<func::FuncOp>(
+      preInlinePlanningPM.addNestedPass<func::FuncOp>(
           pto::createPTOGraphSyncSolverPass(options));
     }
   }
 
   // Materialize each `pto.multi_tile_get` as an addressed `pto.alloc_tile`;
   // dynamic selections use an `arith.select` chain over planned addresses.
-  pm.addPass(pto::createPTOResolveBufferSelectPass());
+  preInlinePlanningPM.addPass(pto::createPTOResolveBufferSelectPass());
   if (effectiveBackend == PTOBackend::EmitC) {
-    pm.addPass(createNarrowUnusedMultiResultProvenancePass());
+    preInlinePlanningPM.addPass(createNarrowUnusedMultiResultProvenancePass());
   }
 
   module->getOperation()->setAttr(
       "pto.target_arch",
       mlir::StringAttr::get(module->getContext(), arch));
 
+  if (failed(applyConfiguredPassManagerCLOptions(
+          preInlinePlanningPM, "pre-inline planning PTOAS pipeline"))) {
+    return 1;
+  }
+
+  if (failed(preInlinePlanningPM.run(*module))) {
+    llvm::errs() << "Error: Pass execution failed.\n";
+    return 1;
+  }
+
+  // Post-planning safety helper (design doc 5.3.1): runs after
+  // PTOResolveBufferSelect materialized planner addresses and before
+  // PTOInlineBackendHelpersPass. Ordinary codegen and --emit-pto-ir share
+  // this exact checkpoint between the two pass-manager runs.
+  if (failed(pto::validateTExtractNd2xNzPostPlanningSafety(*module))) {
+    llvm::errs() << "Error: ND-to-2xNz TEXTRACT post-planning safety ";
+    llvm::errs() << "validation failed.\n";
+    return 1;
+  }
+
   if (emitMlirIR) {
-    if (failed(pm.run(*module))) {
-      llvm::errs() << "Error: Pass execution failed.\n";
-      return 1;
-    }
     result.kind = PTOASCompileResultKind::Text;
     llvm::raw_string_ostream os(result.textOutput);
     module->print(os);
@@ -3779,20 +3805,23 @@ int mlir::pto::compilePTOASModule(
     return 0;
   }
 
-  pm.addPass(createCSEPass());
+  PassManager postValidationPM(module->getContext());
+  postValidationPM.enableVerifier();
+  postValidationPM.addPass(createCSEPass());
   // PTODSL backend helpers already use the tile-native ABI.
-  pm.addPass(pto::createPTOInlineBackendHelpersPass());
+  postValidationPM.addPass(pto::createPTOInlineBackendHelpersPass());
   if (effectiveBackend == PTOBackend::EmitC) {
-    pm.addPass(createNarrowUnusedMultiResultProvenancePass());
+    postValidationPM.addPass(createNarrowUnusedMultiResultProvenancePass());
   }
-  pm.addPass(createCanonicalizerPass());
-  pm.addPass(createCSEPass());
-  if (failed(applyConfiguredPassManagerCLOptions(pm, "main PTOAS pipeline"))) {
+  postValidationPM.addPass(createCanonicalizerPass());
+  postValidationPM.addPass(createCSEPass());
+  if (failed(applyConfiguredPassManagerCLOptions(
+          postValidationPM, "post-validation PTOAS pipeline"))) {
     return 1;
   }
 
   if (effectiveBackend == PTOBackend::VPTO) {
-    if (failed(pm.run(*module))) {
+    if (failed(postValidationPM.run(*module))) {
       llvm::errs() << "Error: Pass execution failed.\n";
       return 1;
     }
@@ -3815,7 +3844,7 @@ int mlir::pto::compilePTOASModule(
                                  context.getCANNVersionOrDefault());
   }
 
-  if (failed(pm.run(*module))) {
+  if (failed(postValidationPM.run(*module))) {
     llvm::errs() << "Error: Pass execution failed.\n";
     return 1;
   }

@@ -116,7 +116,8 @@ add_mlir_dialect_library(PTOTransforms
   PTOAssignDefaultFrontendPipeIdPass.cpp
   PTOLowerFrontendPipeOpsPass.cpp
   PTOInferValidatePipeInitPass.cpp
-  PTOResolveBufferSelect.cpp
+    PTOResolveBufferSelect.cpp
+  TExtractNd2xNzValidation.cpp
   PTOResolveReservedBuffersPass.cpp
   SlotAffineAnalysis.cpp
   PTOWrapFunctionsInSectionsPass.cpp
