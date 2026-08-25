@@ -228,6 +228,173 @@ static bool canLower(Operation *op, const TileShapeMap &tileShapes) {
 }
 
 //===----------------------------------------------------------------------===//
+// ND-to-2xNZ dual-output TEXTRACT expansion (A2/A3 VPTO)
+//===----------------------------------------------------------------------===//
+// Design doc section 9.3: A2/A3 VPTO cannot reuse the EmitC path. LowerPTOToUbOps
+// materializes AllocTileOps to !pto.ptr<..., ub> before any op conversion, so a
+// pointer-form pto.textract would otherwise survive into VPTO LLVM emission and
+// fail. We snapshot every dual-output TExtractOp *before* allocation
+// materialization (tile types are still available), then expand each into two
+// scalar loop nests of the existing load_scalar/store_scalar ops with a
+// registered V<->S hidden-event barrier (design doc 6.3.1).
+
+struct PendingTExtractNd2xNz {
+  pto::TExtractOp op;
+  SmallVector<int64_t, 4> indices;      // [row0, col0, row1, col1]
+  int64_t elemBytes = 0;
+  int64_t srcRowStrideElems = 0;
+  int64_t srcPhysicalRows = 0;
+  int64_t srcPhysicalCols = 0;
+  SmallVector<int64_t, 4> dstPhysical;  // [r0, c0, r1, c1]
+  SmallVector<int64_t, 4> dstValid;     // [r0, c0, r1, c1]
+};
+
+static std::optional<PendingTExtractNd2xNz> snapshotTExtractNd2xNz(pto::TExtractOp op) {
+  if (!op.isNdTo2xNzForm()) {
+    return std::nullopt;
+  }
+  PendingTExtractNd2xNz pd;
+  pd.op = op;
+  auto indices = op.getIndices();
+  if (indices.size() != 4) {
+    return std::nullopt;
+  }
+  for (Value idx : indices) {
+    auto c = getConstantIntValue(idx);
+    if (!c) {
+      return std::nullopt;
+    }
+    pd.indices.push_back(*c);
+  }
+  auto srcTy = dyn_cast<pto::TileBufType>(op.getSrc().getType());
+  if (!srcTy) {
+    return std::nullopt;
+  }
+  pd.elemBytes = mlir::pto::getPTOStorageElemByteSize(srcTy.getElementType());
+  if (pd.elemBytes == 0 || 32 % pd.elemBytes != 0) {
+    return std::nullopt;
+  }
+  auto srcShape = srcTy.getShape();
+  if (srcShape.size() != 2) {
+    return std::nullopt;
+  }
+  pd.srcPhysicalRows = srcShape[0];
+  pd.srcPhysicalCols = srcShape[1];
+  pd.srcRowStrideElems = srcShape[1];
+  for (Value dst : op.getDsts()) {
+    auto dstTy = dyn_cast<pto::TileBufType>(dst.getType());
+    if (!dstTy) {
+      return std::nullopt;
+    }
+    auto shape = dstTy.getShape();
+    auto valid = dstTy.getValidShape();
+    if (shape.size() != 2 || valid.size() != 2) {
+      return std::nullopt;
+    }
+    pd.dstPhysical.push_back(shape[0]);
+    pd.dstPhysical.push_back(shape[1]);
+    pd.dstValid.push_back(valid[0]);
+    pd.dstValid.push_back(valid[1]);
+  }
+  if (pd.dstPhysical.size() != 4 || pd.dstValid.size() != 4) {
+    return std::nullopt;
+  }
+  return pd;
+}
+
+static Value buildNd2xNzIndex(OpBuilder &b, Location loc, int64_t v) {
+  return b.create<arith::ConstantIndexOp>(loc, v);
+}
+
+// Load src[row][col] and store dst[valid coordinate] using scalar pointer ops.
+static LogicalResult expandTExtractNd2xNzWindow(
+    OpBuilder &builder, Location loc, const PendingTExtractNd2xNz &pd,
+    unsigned window, Value srcPtr, Value dstPtr) {
+  const int64_t c0 = 32 / pd.elemBytes;
+  const int64_t rBase = pd.indices[window * 2];
+  const int64_t cBase = pd.indices[window * 2 + 1];
+  const int64_t validRows = pd.dstValid[window * 2];
+  const int64_t validCols = pd.dstValid[window * 2 + 1];
+  const int64_t physRows = pd.dstPhysical[window * 2];
+  if (validRows <= 0 || validCols <= 0) {
+    return failure();
+  }
+
+  auto cst = [&](OpBuilder &b, Location l, int64_t v) {
+    return buildNd2xNzIndex(b, l, v);
+  };
+  auto srcTy = cast<pto::PtrType>(srcPtr.getType());
+  auto elemTy = srcTy.getElementType();
+
+  // Build a single flat loop over validRows*validCols elements, computing
+  // row/col via div/rem; keeps the expansion to two scalar loop nests over
+  // the existing load_scalar/store_scalar pointer ops (design doc 9.3).
+  int64_t total = validRows * validCols;
+  auto flat = builder.create<scf::ForOp>(
+      loc, cst(builder, loc, 0), cst(builder, loc, total),
+      cst(builder, loc, 1), ValueRange{});
+  builder.setInsertionPointToStart(flat.getBody());
+  {
+    OpBuilder::InsertionGuard guard(builder);
+    Value flatIdx = flat.getInductionVar();
+    // r = flat / validCols; c = flat % validCols
+    Value cIdx = builder.create<arith::RemUIOp>(loc, flatIdx, cst(builder, loc, validCols));
+    Value rIdx = builder.create<arith::DivUIOp>(loc, flatIdx, cst(builder, loc, validCols));
+    // srcOff = (rBase + r) * srcRowStrideElems + cBase + c
+    Value rPlus = builder.create<arith::AddIOp>(loc, cst(builder, loc, rBase), rIdx);
+    Value srcRowOff = builder.create<arith::MulIOp>(
+        loc, rPlus, cst(builder, loc, pd.srcRowStrideElems));
+    Value cPlus = builder.create<arith::AddIOp>(loc, cst(builder, loc, cBase), cIdx);
+    Value srcOff = builder.create<arith::AddIOp>(loc, srcRowOff, cPlus);
+    // dstOff = (c / c0) * physRows * c0 + r * c0 + (c % c0)
+    Value cDiv = builder.create<arith::DivUIOp>(loc, cIdx, cst(builder, loc, c0));
+    Value blockOff = builder.create<arith::MulIOp>(
+        loc, cDiv, cst(builder, loc, physRows * c0));
+    Value rBlock = builder.create<arith::MulIOp>(loc, rIdx, cst(builder, loc, c0));
+    Value cRem = builder.create<arith::RemUIOp>(loc, cIdx, cst(builder, loc, c0));
+    Value dstOff = builder.create<arith::AddIOp>(
+        loc, builder.create<arith::AddIOp>(loc, blockOff, rBlock), cRem);
+    Value loaded = builder.create<pto::LoadScalarOp>(loc, elemTy, srcPtr, srcOff);
+    builder.create<pto::StoreScalarOp>(loc, dstPtr, dstOff, loaded);
+  }
+  builder.setInsertionPointAfter(flat);
+  return success();
+}
+
+static LogicalResult expandTExtractNd2xNz(
+    OpBuilder &builder, MLIRContext *ctx, const PendingTExtractNd2xNz &pd) {
+  Operation *rawOp = pd.op;
+  Location loc = rawOp->getLoc();
+  // After allocation materialization the operands are !pto.ptr<..., ub>;
+  // access them by raw operand position (design doc 9.3 step 2).
+  Value srcPtr = rawOp->getOperand(0);
+  Value dst0Ptr = rawOp->getOperand(5);
+  Value dst1Ptr = rawOp->getOperand(6);
+
+  // Registered hidden-event barrier around the scalar expansion (design doc
+  // 6.3.1): the events were reserved by TExtractOp's SyncMacroModel before
+  // event-id allocation; lowering only materializes that reservation.
+  builder.setInsertionPoint(rawOp);
+  auto pipeV = pto::PipeAttr::get(ctx, pto::PIPE::PIPE_V);
+  auto pipeS = pto::PipeAttr::get(ctx, pto::PIPE::PIPE_S);
+  auto event0 = pto::EventAttr::get(ctx, pto::EVENT::EVENT_ID0);
+  builder.create<pto::SetFlagOp>(loc, pipeV, pipeS, event0);
+  builder.create<pto::WaitFlagOp>(loc, pipeV, pipeS, event0);
+
+  if (failed(expandTExtractNd2xNzWindow(builder, loc, pd, 0, srcPtr, dst0Ptr)) ||
+      failed(expandTExtractNd2xNzWindow(builder, loc, pd, 1, srcPtr, dst1Ptr))) {
+    return failure();
+  }
+
+  builder.setInsertionPoint(rawOp);
+  builder.create<pto::SetFlagOp>(loc, pipeS, pipeV, event0);
+  builder.create<pto::WaitFlagOp>(loc, pipeS, pipeV, event0);
+
+  rawOp->erase();
+  return success();
+}
+
+//===----------------------------------------------------------------------===//
 // Pass
 //===----------------------------------------------------------------------===//
 
@@ -252,6 +419,19 @@ struct LowerPTOToUBufOpsPass
 
     MLIRContext *ctx = &getContext();
     OpBuilder builder(ctx);
+
+    // Snapshot dual-output TEXTRACT before allocation materialization loses
+    // the tile types (design doc 9.3 step 1).
+    SmallVector<PendingTExtractNd2xNz, 4> pendingNd2xNz;
+    {
+      SmallVector<pto::TExtractOp> extractOps;
+      func.walk([&](pto::TExtractOp op) { extractOps.push_back(op); });
+      for (pto::TExtractOp op : extractOps) {
+        if (auto snapshot = snapshotTExtractNd2xNz(op)) {
+          pendingNd2xNz.push_back(*snapshot);
+        }
+      }
+    }
 
     // A2/A3: consume planned addresses from PTOPlanMemory / PTOMaterializeTileHandles.
     // Each alloc_tile must carry a planned addr operand.
@@ -292,6 +472,26 @@ struct LowerPTOToUBufOpsPass
         op.erase();
       }
     }
+
+    // Expands dual-output TEXTRACT into scalar loop nests after allocation
+    // materialization (design doc 9.3 steps 2-5): operands are now
+    // !pto.ptr<..., ub>; the expansion consumes the op's registered hidden
+    // event reservation and erases the op. Any leftover pointer-form
+    // ND-to-2xNz TEXTRACT is rejected at the end of the pass.
+    for (auto &pending : pendingNd2xNz) {
+      if (failed(expandTExtractNd2xNz(builder, ctx, pending))) {
+        pending.op.emitError("failed to expand ND-to-2xNz TEXTRACT for A2/A3 VPTO");
+        signalPassFailure();
+        return;
+      }
+    }
+    func.walk([&](pto::TExtractOp op) {
+      if (op.isNdTo2xNzForm()) {
+        op.emitError("ND-to-2xNz TEXTRACT must be expanded before A2/A3 VPTO "
+                     "LLVM emission; pointer-form pto.textract cannot survive");
+        signalPassFailure();
+      }
+    });
 
     // ---- tadd → pto.ub.vadd ----
     {
