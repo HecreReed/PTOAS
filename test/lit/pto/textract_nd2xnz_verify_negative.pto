@@ -1,0 +1,19 @@
+// RUN: not ptoas --pto-arch=a5 %s 2>&1 | FileCheck %s
+
+module attributes {"pto.target_arch" = "a5"} {
+  func.func @textract_nd2xnz_reads_undefined_padding() {
+    %c0 = arith.constant 0 : index
+    %c1 = arith.constant 1 : index
+    // Source is partial-valid: physical 32x64 but valid only 16x32. Window 1
+    // (indexRow=16, validRows=16) stays inside the physical extent but reads
+    // into the source undefined padding.
+    %src = pto.alloc_tile : !pto.tile_buf<loc=vec, dtype=f16, rows=32, cols=64, v_row=16, v_col=32, blayout=row_major, slayout=none_box, fractal=512, pad=0>
+    %dst0 = pto.alloc_tile : !pto.tile_buf<loc=vec, dtype=f16, rows=16, cols=16, v_row=16, v_col=16, blayout=col_major, slayout=row_major, fractal=512, pad=0>
+    %dst1 = pto.alloc_tile : !pto.tile_buf<loc=vec, dtype=f16, rows=16, cols=16, v_row=16, v_col=16, blayout=col_major, slayout=row_major, fractal=512, pad=0>
+    pto.textract ins(%src, %c0, %c0, %c1, %c0 : !pto.tile_buf<loc=vec, dtype=f16, rows=32, cols=64, v_row=16, v_col=32, blayout=row_major, slayout=none_box, fractal=512, pad=0>, index, index, index, index)
+                outs(%dst0, %dst1 : !pto.tile_buf<loc=vec, dtype=f16, rows=16, cols=16, v_row=16, v_col=16, blayout=col_major, slayout=row_major, fractal=512, pad=0>, !pto.tile_buf<loc=vec, dtype=f16, rows=16, cols=16, v_row=16, v_col=16, blayout=col_major, slayout=row_major, fractal=512, pad=0>)
+    return
+  }
+}
+
+// CHECK: window reads source undefined padding

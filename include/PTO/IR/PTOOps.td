@@ -4561,35 +4561,46 @@ def TExtractOp : PTO_TOp<"textract", [
   OpPipeInterface,
   DeclareOpInterfaceMethods<MemoryEffectsOpInterface>
 ]> {
-  let summary = "Extract sub-tile window from src into dst (tilebuf, DPS)";
+  let summary = "Extract source windows into DPS destinations";
 
   let arguments = (ins
     PTODpsType:$src,
-    Index:$indexRow,
-    Index:$indexCol,
-    PTODpsType:$dst,
+    Variadic<Index>:$indices,
+    Variadic<PTODpsType>:$dsts,
     Optional<PTODpsType>:$fp,
     Optional<I64>:$preQuantScalar,
     OptionalAttr<PTO_AccToVecModeAttr>:$accToVecMode,
-    DefaultValuedAttr<PTO_ReluPreModeAttr, "::mlir::pto::ReluPreMode::NoRelu">:$reluPreMode
+    DefaultValuedAttr<PTO_ReluPreModeAttr,
+      "::mlir::pto::ReluPreMode::NoRelu">:$reluPreMode
   );
 
   let results = (outs);
 
   let hasVerifier = 1;
-
-  let assemblyFormat = [{
-    `ins` `(` $src `,` $indexRow `,` $indexCol
-    (`,` $preQuantScalar^)? `:` qualified(type($src)) `,` type($indexRow) `,` type($indexCol)
-    (`,` type($preQuantScalar)^)?
-    (`fp` $fp^ `:` qualified(type($fp)))? `)`
-    `outs` `(` $dst `:` qualified(type($dst) ) `)`
-    attr-dict
-  }];
+  let hasCustomAssemblyFormat = 1;
 
   let extraClassDeclaration = [{
+    enum class Form { Invalid, SingleOutput, NdTo2xNz };
+    Form classifyForm();
+    bool isSingleOutputForm();
+    bool isNdTo2xNzForm();
+
+    // Legacy convenience accessors keep their exact generated return types.
+    // They may only be used after isSingleOutputForm(); range-aware code uses
+    // getIndices/getDsts.
+    ::mlir::TypedValue<::mlir::IndexType> getIndexRow();
+    ::mlir::TypedValue<::mlir::IndexType> getIndexCol();
+    ::mlir::TypedValue<::mlir::Type> getDst();
+    ::mlir::OpOperand &getIndexRowMutable();
+    ::mlir::OpOperand &getIndexColMutable();
+    ::mlir::OpOperand &getDstMutable();
+
+    ::mlir::MutableOperandRange getDpsInitsMutable();
     ::mlir::pto::PIPE getPipe() {
-      // Align with pto-isa TEXTRACT op classes:
+      // ND-to-2xNZ dual-output form is always a V-pipe op.
+      if (classifyForm() == Form::NdTo2xNz)
+        return ::mlir::pto::PIPE::PIPE_V;
+      // Single-output: align with pto-isa TEXTRACT op classes:
       //   - TEXTRACT_M2LR : MAT -> LEFT/RIGHT (and scaling-like targets) (MTE1)
       //   - TEXTRACT_V2M  : VEC -> MAT       (FIX)
       //   - TEXTRACT_A2M  : ACC -> MAT       (FIX)
@@ -4637,7 +4648,6 @@ def TExtractOp : PTO_TOp<"textract", [
       // Default to vector pipe for unmatched combinations.
       return ::mlir::pto::PIPE::PIPE_V;
     }
-    ::mlir::MutableOperandRange getDpsInitsMutable() { return getDstMutable(); }
   }];
 }
 

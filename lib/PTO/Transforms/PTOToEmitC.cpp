@@ -9747,10 +9747,33 @@ struct PTOExtractToEmitC : public OpConversionPattern<pto::TExtractOp> {
     auto loc = op.getLoc();
     auto *ctx = rewriter.getContext();
 
+    auto form = op.classifyForm();
+    if (form == pto::TExtractOp::Form::Invalid) {
+      return rewriter.notifyMatchFailure(op,
+                                         "malformed TEXTRACT operand segments");
+    }
+
+    auto indices = adaptor.getIndices();
+    auto dsts = adaptor.getDsts();
     Value src = adaptor.getSrc();
-    Value dst = adaptor.getDst();
-    Value r0 = adaptor.getIndexRow();
-    Value c0 = adaptor.getIndexCol();
+
+    // ND-to-2xNZ dual-output form: emit the public seven-operand TEXTRACT
+    // overload exactly once, in PTO-ISA argument order:
+    //   TEXTRACT(dst0, dst1, src, row0, col0, row1, col1)
+    // Never split into two single-output calls: that would select the plain
+    // Vec-to-Vec path and lose the ND-to-NZ layout conversion.
+    if (form == pto::TExtractOp::Form::NdTo2xNz) {
+      SmallVector<Value, 7> operands{dsts[0], dsts[1], src, indices[0],
+                                     indices[1], indices[2], indices[3]};
+      rewriter.create<emitc::CallOpaqueOp>(
+          loc, TypeRange{}, "TEXTRACT", ArrayAttr{}, ArrayAttr{}, operands);
+      rewriter.eraseOp(op);
+      return success();
+    }
+
+    Value dst = dsts[0];
+    Value r0 = indices[0];
+    Value c0 = indices[1];
     Value preQuantScalar;
     if (op.getPreQuantScalar())
       preQuantScalar = adaptor.getPreQuantScalar();

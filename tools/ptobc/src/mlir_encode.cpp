@@ -117,6 +117,10 @@ static bool shouldEncodeViaGenericV0CompatibilityShim(mlir::Operation &op) {
   // operands. Keep the shipped fixed payloads unchanged and use the generic
   // opcode for forms that cannot be represented by those schemas.
   if (auto textract = llvm::dyn_cast<mlir::pto::TExtractOp>(&op)) {
+    // The ND-to-2xNZ dual-output form must be carried by a generic v0 record:
+    // it cannot reuse the shipped four/five-operand fixed-width opcodes.
+    if (textract.isNdTo2xNzForm())
+      return true;
     return static_cast<bool>(textract.getPreQuantScalar());
   }
   if (auto tinsert = llvm::dyn_cast<mlir::pto::TInsertOp>(&op)) {

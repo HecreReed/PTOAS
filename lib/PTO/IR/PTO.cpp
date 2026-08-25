@@ -129,6 +129,8 @@ static LogicalResult verifyTileBufCommon(Operation *op, Type ty, StringRef name,
 static LogicalResult verifyTmpCapacityAtLeast(Operation *op, Type tmpTy,
                                               uint64_t requiredBytes,
                                               StringRef tmpName = "tmp");
+static std::optional<int64_t> getConstIndexLike(Value v);
+static std::optional<int64_t> getElemBytes(Type elemTy);
 
 namespace {
 struct PTOInlinerInterface : public DialectInlinerInterface {
@@ -1353,6 +1355,205 @@ void mlir::pto::TScatterOp::print(OpAsmPrinter &p) {
   p << ") outs(" << getDst() << " : " << getDst().getType() << ")";
   p.printOptionalAttrDict((*this)->getAttrs(),
                           /*elidedAttrs=*/{"maskPattern", "axis"});
+}
+
+//===----------------------------------------------------------------------===//
+// TExtractOp custom assembly (single-output canonical text preserved; the
+// ND-to-2xNZ dual-output form adds one index pair and one outs operand).
+//===----------------------------------------------------------------------===//
+ParseResult mlir::pto::TExtractOp::parse(OpAsmParser &parser,
+                                         OperationState &result) {
+  OpAsmParser::UnresolvedOperand src;
+  SmallVector<std::pair<OpAsmParser::UnresolvedOperand, Type>, 4> indices;
+  SmallVector<OpAsmParser::UnresolvedOperand, 3> dstOps;
+  SmallVector<Type, 3> dstTypes;
+  Type srcTy;
+  bool hasPqs = false;
+  OpAsmParser::UnresolvedOperand pqsOpnd;
+  Type pqsTy;
+  bool hasFp = false;
+  OpAsmParser::UnresolvedOperand fpOpnd;
+  Type fpTy;
+
+  if (parser.parseKeyword("ins") || parser.parseLParen() ||
+      parser.parseOperand(src)) {
+    return failure();
+  }
+
+  SmallVector<OpAsmParser::UnresolvedOperand, 6> insOps;
+  while (succeeded(parser.parseOptionalComma())) {
+    OpAsmParser::UnresolvedOperand opnd;
+    if (parser.parseOperand(opnd)) {
+      return failure();
+    }
+    insOps.push_back(opnd);
+  }
+
+  if (parser.parseColon() || parser.parseType(srcTy)) {
+    return failure();
+  }
+  SmallVector<Type, 6> insTypes;
+  for (size_t i = 0; i < insOps.size(); ++i) {
+    Type ty;
+    if (parser.parseComma() || parser.parseType(ty)) {
+      return failure();
+    }
+    insTypes.push_back(ty);
+  }
+
+  if (succeeded(parser.parseOptionalKeyword("fp"))) {
+    if (parser.parseOperand(fpOpnd) || parser.parseColon() ||
+        parser.parseType(fpTy)) {
+      return failure();
+    }
+    hasFp = true;
+  }
+  if (parser.parseRParen()) {
+    return failure();
+  }
+
+  if (parser.parseKeyword("outs") || parser.parseLParen()) {
+    return failure();
+  }
+  {
+    OpAsmParser::UnresolvedOperand d;
+    if (parser.parseOperand(d)) {
+      return failure();
+    }
+    dstOps.push_back(d);
+  }
+  while (succeeded(parser.parseOptionalComma())) {
+    OpAsmParser::UnresolvedOperand d;
+    if (parser.parseOperand(d)) {
+      return failure();
+    }
+    dstOps.push_back(d);
+  }
+  if (parser.parseColon()) {
+    return failure();
+  }
+  for (size_t i = 0; i < dstOps.size(); ++i) {
+    Type ty;
+    if (parser.parseType(ty)) {
+      return failure();
+    }
+    dstTypes.push_back(ty);
+    if (i + 1 < dstOps.size() && parser.parseComma()) {
+      return failure();
+    }
+  }
+  if (parser.parseRParen()) {
+    return failure();
+  }
+  if (parser.parseOptionalAttrDict(result.attributes)) {
+    return failure();
+  }
+
+  if (insOps.size() != insTypes.size()) {
+    return parser.emitError(parser.getCurrentLocation(),
+                            "expected one type per textract ins operand");
+  }
+
+  for (size_t i = 0; i < insOps.size(); ++i) {
+    Type ty = insTypes[i];
+    if (mlir::isa<IndexType>(ty)) {
+      indices.push_back({insOps[i], ty});
+      continue;
+    }
+    if (auto it = mlir::dyn_cast<IntegerType>(ty);
+        it && it.getWidth() == 64) {
+      if (i != insOps.size() - 1) {
+        return parser.emitError(
+            parser.getCurrentLocation(),
+            "textract preQuantScalar must be the trailing ins operand");
+      }
+      hasPqs = true;
+      pqsOpnd = insOps[i];
+      pqsTy = ty;
+      continue;
+    }
+    return parser.emitError(
+        parser.getCurrentLocation(),
+        "textract ins operand types must be index or a trailing i64 "
+        "preQuantScalar");
+  }
+
+  if (indices.size() != 2 && indices.size() != 4) {
+    return parser.emitError(
+        parser.getCurrentLocation(),
+        "expected 2 (single-output) or 4 (ND-to-2xNZ) textract indices");
+  }
+  if (dstOps.size() != 1 && dstOps.size() != 2) {
+    return parser.emitError(
+        parser.getCurrentLocation(),
+        "expected 1 (single-output) or 2 (ND-to-2xNZ) textract outs operands");
+  }
+  if (hasFp && indices.size() != 2) {
+    return parser.emitError(
+        parser.getCurrentLocation(),
+        "textract fp form only applies to the single-output form");
+  }
+  if (hasPqs && indices.size() != 2) {
+    return parser.emitError(
+        parser.getCurrentLocation(),
+        "textract preQuantScalar only applies to the single-output form");
+  }
+
+  if (parser.resolveOperand(src, srcTy, result.operands)) {
+    return failure();
+  }
+  for (auto &pr : indices) {
+    if (parser.resolveOperand(pr.first, pr.second, result.operands)) {
+      return failure();
+    }
+  }
+  for (size_t i = 0; i < dstOps.size(); ++i) {
+    if (parser.resolveOperand(dstOps[i], dstTypes[i], result.operands)) {
+      return failure();
+    }
+  }
+  if (hasFp && parser.resolveOperand(fpOpnd, fpTy, result.operands)) {
+    return failure();
+  }
+  if (hasPqs && parser.resolveOperand(pqsOpnd, pqsTy, result.operands)) {
+    return failure();
+  }
+
+  result.addAttribute("operandSegmentSizes",
+                      parser.getBuilder().getDenseI32ArrayAttr(
+                          {1, static_cast<int32_t>(indices.size()),
+                           static_cast<int32_t>(dstOps.size()), hasFp ? 1 : 0,
+                           hasPqs ? 1 : 0}));
+  return success();
+}
+
+void mlir::pto::TExtractOp::print(OpAsmPrinter &p) {
+  p << " ins(";
+  p << getSrc();
+  for (Value idx : getIndices()) {
+    p << ", " << idx;
+  }
+  if (Value pqs = getPreQuantScalar()) {
+    p << ", " << pqs;
+  }
+  p << " : " << getSrc().getType();
+  for (Value idx : getIndices()) {
+    p << ", " << idx.getType();
+  }
+  if (Value pqs = getPreQuantScalar()) {
+    p << ", " << pqs.getType();
+  }
+  if (Value fp = getFp()) {
+    p << " fp " << fp << " : " << fp.getType();
+  }
+  p << ") outs(";
+  SmallVector<Value, 2> dstVals(getDsts().begin(), getDsts().end());
+  llvm::interleaveComma(dstVals, p, [&](Value v) { p << v; });
+  p << " : ";
+  llvm::interleaveComma(dstVals, p, [&](Value v) { p << v.getType(); });
+  p << ")";
+  p.printOptionalAttrDict((*this)->getAttrs(),
+                          /*elidedAttrs=*/{"operandSegmentSizes"});
 }
 
 namespace {
@@ -7834,7 +8035,109 @@ mlir::LogicalResult mlir::pto::TExpandsOp::verify() {
   return dispatchVerifierByArch(getOperation(), verifyA2A3, verifyA5);
 }
 
+//===----------------------------------------------------------------------===//
+// TExtractOp: operand-segment schema classification, legacy accessors.
+// The schema is the fixed five-tuple [src, indices, dsts, fp, preQuantScalar].
+//===----------------------------------------------------------------------===//
+
+TExtractOp::Form TExtractOp::classifyForm() {
+  // operandSegmentSizes lives in typed inherent properties (MLIR/LLVM 19);
+  // Operation::getRawDictionaryAttrs() does not contain it. Always read the
+  // typed property here; never re-derive segment offsets from the raw dict.
+  const std::array<int32_t, 5> &segments = getProperties().operandSegmentSizes;
+  int32_t total = 0;
+  for (int32_t s : segments) {
+    if (s < 0)
+      return Form::Invalid;
+    total += s;
+  }
+  if (total != static_cast<int32_t>(getOperation()->getNumOperands()))
+    return Form::Invalid;
+  // src must be exactly one; the optional trailing segments are 0 or 1.
+  if (segments[0] != 1)
+    return Form::Invalid;
+  if (segments[3] != 0 && segments[3] != 1)
+    return Form::Invalid;
+  if (segments[4] != 0 && segments[4] != 1)
+    return Form::Invalid;
+
+  // Only the two canonical complete schemas are classifiable:
+  //   SingleOutput: [1, 2, 1, {0,1}, {0,1}]
+  //   NdTo2xNz    : [1, 4, 2, 0, 0]
+  if (segments[1] == 2 && segments[2] == 1)
+    return Form::SingleOutput;
+  if (segments[1] == 4 && segments[2] == 2 && segments[3] == 0 &&
+      segments[4] == 0)
+    return Form::NdTo2xNz;
+  return Form::Invalid;
+}
+
+bool TExtractOp::isSingleOutputForm() { return classifyForm() == Form::SingleOutput; }
+bool TExtractOp::isNdTo2xNzForm() { return classifyForm() == Form::NdTo2xNz; }
+
+::mlir::TypedValue<::mlir::IndexType> TExtractOp::getIndexRow() {
+  assert(isSingleOutputForm() &&
+         "legacy getIndexRow() may only be used on the single-output form");
+  return ::llvm::cast<::mlir::TypedValue<::mlir::IndexType>>(*getIndices().begin());
+}
+
+::mlir::TypedValue<::mlir::IndexType> TExtractOp::getIndexCol() {
+  assert(isSingleOutputForm() &&
+         "legacy getIndexCol() may only be used on the single-output form");
+  return ::llvm::cast<::mlir::TypedValue<::mlir::IndexType>>(
+      *std::next(getIndices().begin()));
+}
+
+::mlir::TypedValue<::mlir::Type> TExtractOp::getDst() {
+  assert(isSingleOutputForm() &&
+         "legacy getDst() may only be used on the single-output form");
+  return ::llvm::cast<::mlir::TypedValue<::mlir::Type>>(*getDsts().begin());
+}
+
+::mlir::OpOperand &TExtractOp::getIndexRowMutable() {
+  assert(isSingleOutputForm());
+  return getOperation()->getOpOperand(getProperties().operandSegmentSizes[0]);
+}
+
+::mlir::OpOperand &TExtractOp::getIndexColMutable() {
+  assert(isSingleOutputForm());
+  return getOperation()->getOpOperand(getProperties().operandSegmentSizes[0] + 1);
+}
+
+::mlir::OpOperand &TExtractOp::getDstMutable() {
+  assert(isSingleOutputForm());
+  const std::array<int32_t, 5> &segments = getProperties().operandSegmentSizes;
+  return getOperation()->getOpOperand(segments[0] + segments[1]);
+}
+
+::mlir::MutableOperandRange TExtractOp::getDpsInitsMutable() {
+  Form form = classifyForm();
+  if (form == Form::Invalid)
+    return ::mlir::MutableOperandRange(getOperation(), 0, 0);
+  // DPS destinations are the contiguous dsts segment starting right after
+  // [src, indices...].
+  const std::array<int32_t, 5> &segments = getProperties().operandSegmentSizes;
+  unsigned dstsBegin = static_cast<unsigned>(segments[0] + segments[1]);
+  unsigned dstsCount = static_cast<unsigned>(segments[2]);
+  return ::mlir::MutableOperandRange(getOperation(), dstsBegin, dstsCount);
+}
+
+static LogicalResult verifyNdTo2xNzForm(Operation *op);
+
 mlir::LogicalResult mlir::pto::TExtractOp::verify() {
+  // Classify the complete operand-segment schema before touching any
+  // segment-offset dependent generated accessor. Malformed schemas fail here;
+  // the dual-output form is handled by verifyNdTo2xNzForm().
+  Form extractForm = classifyForm();
+  if (extractForm == Form::Invalid) {
+    return emitOpError(
+        "malformed TEXTRACT operand segments: expected schema "
+        "[1, 2, 1, {0,1}, {0,1}] (single-output) or [1, 4, 2, 0, 0] "
+        "(ND-to-2xNZ)");
+  }
+  if (extractForm == Form::NdTo2xNz)
+    return verifyNdTo2xNzForm(this->getOperation());
+
   auto isA2A3AccCastExtractTypePair = [&](Type srcElem, Type dstElem) -> bool {
     return srcElem.isF32() && (dstElem.isF16() || dstElem.isBF16());
   };
@@ -8153,6 +8456,295 @@ mlir::LogicalResult mlir::pto::TExtractOp::verify() {
   };
   return dispatchVerifierByArch(getOperation(), verifyA2A3, verifyA5);
 }
+
+//===----------------------------------------------------------------------===//
+// ND-to-2xNZ dual-output TEXTRACT verifier.
+// Covers design doc section 5.1 items 1-10 (IR/shape/layout/bounds). The
+// driver-level checks (11-13: provenance, post-planning alias, partition
+// precheck) are separate driver helpers and are not part of this verifier.
+//===----------------------------------------------------------------------===//
+static LogicalResult verifyNdTo2xNzForm(Operation *op) {
+  auto tex = cast<pto::TExtractOp>(op);
+  // Reachable only when classifyForm() == NdTo2xNz: indices.size()==4,
+  // dsts.size()==2, fp/preQuantScalar absent.
+  auto indices = tex.getIndices();
+  auto dsts = tex.getDsts();
+  Value src = tex.getSrc();
+  auto srcTy = dyn_cast<pto::TileBufType>(src.getType());
+  auto dst0Ty = dyn_cast<pto::TileBufType>(dsts[0].getType());
+  auto dst1Ty = dyn_cast<pto::TileBufType>(dsts[1].getType());
+  if (!srcTy || !dst0Ty || !dst1Ty) {
+    return op->emitOpError("expects src/dst0/dst1 to be !pto.tile_buf");
+  }
+
+  VerifierTargetArch arch = getVerifierTargetArch(op);
+  const bool isA5 = arch == VerifierTargetArch::A5;
+
+  // 1. verifyTileBufCommon: low precision forbidden on A2/A3, allowed on A5.
+  const bool allowLowPrecision = isA5;
+  if (failed(verifyTileBufCommon(op, srcTy, "src", allowLowPrecision)) ||
+      failed(verifyTileBufCommon(op, dst0Ty, "dst0", allowLowPrecision)) ||
+      failed(verifyTileBufCommon(op, dst1Ty, "dst1", allowLowPrecision))) {
+    return failure();
+  }
+
+  // 2. All three operands must be rank-2.
+  auto srcShape = getShapeVec(srcTy);
+  auto dst0Shape = getShapeVec(dst0Ty);
+  auto dst1Shape = getShapeVec(dst1Ty);
+  if (srcShape.size() != 2 || dst0Shape.size() != 2 || dst1Shape.size() != 2) {
+    return op->emitOpError("expects src/dst0/dst1 to be rank-2 !pto.tile_buf");
+  }
+
+  // 3. Four index operands: index type, foldable constant, within
+  //    [0, UINT16_MAX]. The first version requires static foldable indices;
+  //    dynamic indices are rejected (see design doc 5.3).
+  for (unsigned k = 0; k < 4; ++k) {
+    Value idx = indices[k];
+    if (!idx.getType().isIndex()) {
+      return op->emitOpError("expects ND-to-2xNZ TEXTRACT indices to have index type");
+    }
+    auto c = getConstIndexLike(idx);
+    if (!c) {
+      return op->emitOpError(
+          "expects ND-to-2xNZ TEXTRACT indices to be foldable constants "
+          "(dynamic indices are not supported in the first version)");
+    }
+    if (*c < 0 || *c > 65535) {
+      return op->emitOpError(
+          "expects ND-to-2xNZ TEXTRACT index to be within [0, UINT16_MAX]");
+    }
+  }
+
+  // 6. Element type must be identical across src/dst0/dst1.
+  Type srcElem = getElemTy(srcTy);
+  Type dst0Elem = getElemTy(dst0Ty);
+  Type dst1Elem = getElemTy(dst1Ty);
+  if (!srcElem || !dst0Elem || !dst1Elem) {
+    return op->emitOpError("expects src/dst0/dst1 to have element types");
+  }
+  if (srcElem != dst0Elem || srcElem != dst1Elem) {
+    return op->emitOpError(
+        "expects src/dst0/dst1 to have the same element type in the "
+        "ND-to-2xNZ TEXTRACT form");
+  }
+
+  // 7. Per-arch dtype support (design doc 3.3/5.2). FP4 is not verified yet
+  //    and stays rejected (design doc 3.5).
+  auto isA2A3Nd2xNzElemType = [](Type t) {
+    return t.isInteger(8) || t.isInteger(32) || t.isF16() || t.isBF16() ||
+           t.isF32();
+  };
+  if (isPTOFloat4PackedType(srcElem)) {
+    return op->emitOpError(
+        "ND-to-2xNZ FP4 path is not verified yet; rejected in the first "
+        "version");
+  }
+  if (!isA5) {
+    if (!isA2A3Nd2xNzElemType(srcElem)) {
+      return op->emitOpError(
+          "expects A2/A3 ND-to-2xNZ TEXTRACT element type to be "
+          "i8/i32/f16/bf16/f32");
+    }
+  } else {
+    auto isA5VerifiedNd2xNzElemType = [&](Type t) {
+      if (isPTOFloat8Type(t) || isPTOHiFloat8Type(t))
+        return true;
+      return isA2A3Nd2xNzElemType(t);
+    };
+    if (!isA5VerifiedNd2xNzElemType(srcElem)) {
+      return op->emitOpError(
+          "expects A5 ND-to-2xNZ TEXTRACT element type to be an "
+          "i8/i32/f16/bf16/f32 or fp8/hif8 family type");
+    }
+  }
+
+  // 5. Layouts: src must be ND (row_major/none_box) in loc=vec; each dst must
+  //    be NZ (col_major/row_major) in loc=vec with fractal size 512 bits.
+  auto srcSpace = getPTOMemorySpaceEnum(srcTy);
+  if (!srcSpace || *srcSpace != pto::AddressSpace::VEC) {
+    return op->emitOpError("expects ND-to-2xNZ TEXTRACT src to use loc=vec");
+  }
+  if (srcTy.getBLayoutValueI32() != static_cast<int32_t>(pto::BLayout::RowMajor) ||
+      srcTy.getSLayoutValueI32() != static_cast<int32_t>(pto::SLayout::NoneBox)) {
+    return op->emitOpError(
+        "expects ND-to-2xNZ TEXTRACT src to use an ND layout "
+        "(blayout=row_major, slayout=none_box)");
+  }
+
+  // 8. Storage element bytes and c0 = 32 / sizeof(T). Require divisibility so
+  //    c0 is well-defined.
+  std::optional<int64_t> elemBytesOpt = getElemBytes(srcElem);
+  if (!elemBytesOpt || *elemBytesOpt <= 0 || 32 % *elemBytesOpt != 0) {
+    return op->emitOpError(
+        "expects ND-to-2xNZ TEXTRACT element type to have a supported storage "
+        "width dividing 32 bytes");
+  }
+  const int64_t elemBytes = *elemBytesOpt;
+  const int64_t c0 = 32 / elemBytes;
+
+  for (unsigned i = 0; i < 2; ++i) {
+    auto dstTy = (i == 0) ? dst0Ty : dst1Ty;
+    StringRef dstName = (i == 0) ? "dst0" : "dst1";
+    auto dSpace = getPTOMemorySpaceEnum(dstTy);
+    if (!dSpace || *dSpace != pto::AddressSpace::VEC) {
+      return op->emitOpError("expects ND-to-2xNZ TEXTRACT " + dstName +
+                             " to use loc=vec");
+    }
+    if (dstTy.getBLayoutValueI32() !=
+            static_cast<int32_t>(pto::BLayout::ColMajor) ||
+        dstTy.getSLayoutValueI32() !=
+            static_cast<int32_t>(pto::SLayout::RowMajor)) {
+      return op->emitOpError(
+          "expects ND-to-2xNZ TEXTRACT " + dstName +
+          " to use an NZ layout (blayout=col_major, slayout=row_major)");
+    }
+    if (dstTy.getSFractalSizeI32() != 512) {
+      return op->emitOpError(
+          "expects ND-to-2xNZ TEXTRACT " + dstName +
+          " fractal size to be 512 bits");
+    }
+
+    // RowPlusOne is rejected in the first version on both A2/A3 and A5
+    // (design doc 5.4: A5 RowPlusOne stays gated until the shared
+    // physical-layout/access helper and device goldens land).
+    if (dstTy.getCompactModeI32() ==
+        static_cast<int32_t>(pto::CompactMode::RowPlusOne)) {
+      return op->emitOpError(
+          "ND-to-2xNZ TEXTRACT rejects CompactMode::RowPlusOne destinations "
+          "in the first version");
+    }
+  }
+
+  // 8 (cont). Source row-stride bytes must be 32B-aligned; plain-NZ dst
+  //    physical rows must be 16-aligned; emitted physical cols must be c0
+  //    aligned. Physical shapes must be static for the ND-to-2xNZ form.
+  if (srcShape[0] == ShapedType::kDynamic || srcShape[1] == ShapedType::kDynamic ||
+      dst0Shape[0] == ShapedType::kDynamic || dst0Shape[1] == ShapedType::kDynamic ||
+      dst1Shape[0] == ShapedType::kDynamic || dst1Shape[1] == ShapedType::kDynamic) {
+    return op->emitOpError(
+        "expects ND-to-2xNZ TEXTRACT operands to have static physical shapes");
+  }
+  int64_t srcRowStrideBytes = srcShape[1] * elemBytes;
+  if (srcRowStrideBytes % 32 != 0) {
+    return op->emitOpError(
+        "expects ND-to-2xNZ TEXTRACT source row stride to be 32B aligned");
+  }
+  for (unsigned i = 0; i < 2; ++i) {
+    auto dstTy = (i == 0) ? dst0Ty : dst1Ty;
+    StringRef dstName = (i == 0) ? "dst0" : "dst1";
+    auto dstShape = (i == 0) ? dst0Shape : dst1Shape;
+    if (dstShape[0] % 16 != 0) {
+      return op->emitOpError(
+          "expects ND-to-2xNZ TEXTRACT " + dstName +
+          " plain-NZ physical rows to be 16-aligned");
+    }
+    if (dstShape[1] % c0 != 0) {
+      return op->emitOpError(
+          "expects ND-to-2xNZ TEXTRACT " + dstName +
+          " emitted physical cols to be c0-aligned");
+    }
+    // A5 partial-valid plain-NZ stride gate (design doc 3.4): require
+    // physicalRows == align16(validRows) until verified upstream semantics.
+    auto validShape = getValidShapeVec(dstTy);
+    if (validShape.size() == 2) {
+      int64_t validRows = validShape[0];
+      if (validRows != ShapedType::kDynamic && isA5) {
+        int64_t aligned = ((validRows + 15) / 16) * 16;
+        if (dstShape[0] != aligned) {
+          return op->emitOpError(
+              "expects A5 ND-to-2xNZ partial-valid " + dstName +
+              " physicalRows == align16(validRows); " +
+              "physicalRows " + Twine(dstShape[0]) + " vs align16(" +
+              Twine(validRows) + ") = " + Twine(aligned));
+        }
+      }
+    }
+  }
+
+  // 9. Valid shapes must be static, non-zero, no larger than physical, and
+  //    their normalized extent must fit UINT16_MAX. The first version also
+  //    requires the source valid shape to be provable (design doc 3.3/5.1
+  //    item 9): a source without a static valid shape is only acceptable as
+  //    an explicit valid == physical full-valid source.
+  auto srcValid = getValidShapeVec(srcTy);
+  auto dst0Valid = getValidShapeVec(dst0Ty);
+  auto dst1Valid = getValidShapeVec(dst1Ty);
+  auto checkValidShape = [&](ArrayRef<int64_t> valid, ArrayRef<int64_t> physical,
+                             StringRef name) -> LogicalResult {
+    if (valid.size() != 2) {
+      return op->emitOpError("expects " + name + " to have a rank-2 valid shape");
+    }
+    for (unsigned d = 0; d < 2; ++d) {
+      int64_t v = valid[d];
+      if (v == ShapedType::kDynamic) {
+        return op->emitOpError(
+            "expects ND-to-2xNZ TEXTRACT " + name +
+            " valid shape to be static in the first version");
+      }
+      if (v <= 0) {
+        return op->emitOpError(
+            "expects ND-to-2xNZ TEXTRACT " + name + " valid " +
+            (d == 0 ? "rows" : "cols") + " to be non-zero");
+      }
+      if (v > 65535) {
+        return op->emitOpError(
+            "expects ND-to-2xNZ TEXTRACT " + name + " valid extent within "
+            "UINT16_MAX");
+      }
+      if (v > physical[d]) {
+        return op->emitOpError(
+            "expects ND-to-2xNZ TEXTRACT " + name +
+            " valid extent not to exceed the physical extent");
+      }
+    }
+    return success();
+  };
+  if (failed(checkValidShape(srcValid, srcShape, "src")) ||
+      failed(checkValidShape(dst0Valid, dst0Shape, "dst0")) ||
+      failed(checkValidShape(dst1Valid, dst1Shape, "dst1"))) {
+    return failure();
+  }
+
+  // 10. Per-window constant bounds against BOTH the source physical shape and
+  //     the source valid shape (design doc 3.3 items). Reading beyond the
+  //     source valid extent would expose undefined padding.
+  auto indexRow0 = getConstIndexLike(indices[0]);
+  auto indexCol0 = getConstIndexLike(indices[1]);
+  auto indexRow1 = getConstIndexLike(indices[2]);
+  auto indexCol1 = getConstIndexLike(indices[3]);
+  auto checkWindow = [&](int64_t row, int64_t col, ArrayRef<int64_t> valid,
+                         StringRef dstName) -> LogicalResult {
+    // Bounds against the source allocation.
+    if (row + valid[0] > srcShape[0]) {
+      return op->emitOpError(
+          "expects indexRow + " + dstName + ".validRows <= src.physicalRows");
+    }
+    if (col + valid[1] > srcShape[1]) {
+      return op->emitOpError(
+          "expects indexCol + " + dstName + ".validCols <= src.physicalCols");
+    }
+    // Bounds against the source valid extent (undefined padding protection).
+    if (row + valid[0] > srcValid[0]) {
+      return op->emitOpError(
+          "window reads source undefined padding: indexRow + " + dstName +
+          ".validRows exceeds src.validRows");
+    }
+    if (col + valid[1] > srcValid[1]) {
+      return op->emitOpError(
+          "window reads source undefined padding: indexCol + " + dstName +
+          ".validCols exceeds src.validCols");
+    }
+    return success();
+  };
+  if (failed(checkWindow(*indexRow0, *indexCol0, dst0Valid, "dst0")) ||
+      failed(checkWindow(*indexRow1, *indexCol1, dst1Valid, "dst1"))) {
+    return failure();
+  }
+
+  return success();
+}
+
 static bool isA5VectorPreQuantTypePair(Type srcElem, Type dstElem);
 mlir::LogicalResult mlir::pto::TInsertOp::verify() {
   auto isA2A3AccCastInsertTypePair = [&](Type srcElem, Type dstElem) -> bool {
@@ -17502,15 +18094,31 @@ void TExpandsOp::getEffects(
   PTO_ADD_WRITE(getDstMutable());
 }
 
-// TEXTRACT: Read(src) -> Write(dst)
+// TEXTRACT:
+//   single-output form: Read(src) + (Read(fp))? + Write(dst)
+//   ND-to-2xNZ form   : Read(src) + Write(dst0) + Write(dst1)
+//   Invalid schema    : conservative Read+Write on every memory-carrying
+//                       raw operand so extra sources cannot bypass modeling.
 void TExtractOp::getEffects(
     SmallVectorImpl<SideEffects::EffectInstance<MemoryEffects::Effect>> &effects) {
+  auto form = classifyForm();
+  if (form == Form::Invalid) {
+    for (OpOperand &operand : getOperation()->getOpOperands()) {
+      if (!isTileLikeType(operand.get().getType()))
+        continue;
+      addEffect(effects, &operand, MemoryEffects::Read::get());
+      addEffect(effects, &operand, MemoryEffects::Write::get());
+    }
+    return;
+  }
   addEffect(effects, &getSrcMutable(), MemoryEffects::Read::get());
   auto fpRange = getFpMutable();
   if (!fpRange.empty()) {
     addEffect(effects, &*fpRange.begin(), MemoryEffects::Read::get());
   }
-  addEffect(effects, &getDstMutable(), MemoryEffects::Write::get());
+  for (OpOperand &dst : getDpsInitsMutable()) {
+    addEffect(effects, &dst, MemoryEffects::Write::get());
+  }
 }
 
 // TINSERT: Read(src) -> Write(dst)
