@@ -1937,25 +1937,28 @@ class TExtractOp(_GeneratedTExtractOp):
     build_nd_to_2xnz classmethod on this same class.
     """
 
-    def __init__(self, src, index_row=_UNSET, index_col=_UNSET, dst=_UNSET,
-                 *, indexRow=_UNSET, indexCol=_UNSET,
-                 fp=None, pre_quant_scalar=_UNSET, preQuantScalar=_UNSET,
-                 acc_to_vec_mode=_UNSET, accToVecMode=_UNSET,
-                 relu_pre_mode=_UNSET, reluPreMode=_UNSET,
+    def __init__(self, src, index_row=None, index_col=None, dst=None,
+                 *, indexRow=None, indexCol=None,
+                 fp=None, pre_quant_scalar=None, preQuantScalar=None,
+                 acc_to_vec_mode=None, accToVecMode=None,
+                 relu_pre_mode=None, reluPreMode=None,
                  loc=None, ip=None):
-        row = index_row if index_row is not _UNSET else indexRow
-        col = index_col if index_col is not _UNSET else indexCol
-        if row is _UNSET or col is _UNSET or dst is _UNSET:
+        # Both the legacy snake_case spellings and the old generated-binder
+        # camelCase keywords are accepted; the snake_case value wins when both
+        # are provided.
+        row = index_row if index_row is not None else indexRow
+        col = index_col if index_col is not None else indexCol
+        if row is None or col is None or dst is None:
             raise TypeError(
                 "TExtractOp requires index_row/indexRow, index_col/indexCol "
                 "and dst for the single-output form")
-        pqs = pre_quant_scalar if pre_quant_scalar is not _UNSET else preQuantScalar
-        acc = acc_to_vec_mode if acc_to_vec_mode is not _UNSET else accToVecMode
-        relu = relu_pre_mode if relu_pre_mode is not _UNSET else reluPreMode
-        # Never pass None for the optional operands: the generated binder
-        # appends `_get_op_result_or_value(x) if x is not None else None`, so
-        # an explicit None lands in the operand list and trips the Value
-        # assertion in _ods_common.get_op_result_or_value.
+        pqs = pre_quant_scalar if pre_quant_scalar is not None else preQuantScalar
+        acc = acc_to_vec_mode if acc_to_vec_mode is not None else accToVecMode
+        relu = relu_pre_mode if relu_pre_mode is not None else reluPreMode
+        # Only forward optional operands when the caller provided a value:
+        # the generated binder builds the operand list positionally from
+        # these, and neither an explicit None nor any other non-Value object
+        # belongs in it.
         kwargs = {}
         if fp is not None:
             kwargs["fp"] = fp
