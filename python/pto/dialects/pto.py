@@ -1952,16 +1952,26 @@ class TExtractOp(_GeneratedTExtractOp):
         pqs = pre_quant_scalar if pre_quant_scalar is not _UNSET else preQuantScalar
         acc = acc_to_vec_mode if acc_to_vec_mode is not _UNSET else accToVecMode
         relu = relu_pre_mode if relu_pre_mode is not _UNSET else reluPreMode
+        # Never pass None for the optional operands: the generated binder
+        # appends `_get_op_result_or_value(x) if x is not None else None`, so
+        # an explicit None lands in the operand list and trips the Value
+        # assertion in _ods_common.get_op_result_or_value.
+        kwargs = {}
+        if fp is not None:
+            kwargs["fp"] = fp
+        if pqs is not None:
+            kwargs["preQuantScalar"] = pqs
+        if acc is not None:
+            kwargs["accToVecMode"] = acc
+        if relu is not None:
+            kwargs["reluPreMode"] = relu
         super().__init__(
             src,
             indices=[row, col],
             dsts=[dst],
-            fp=fp,
-            preQuantScalar=pqs,
-            accToVecMode=acc,
-            reluPreMode=relu,
             loc=loc,
             ip=ip,
+            **kwargs,
         )
 
     @property
