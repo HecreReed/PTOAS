@@ -176,6 +176,44 @@ std::optional<SyncMacroModel> getTScatterSyncMacroModel(pto::TScatterOp op) {
   return model;
 }
 
+std::optional<SyncMacroModel> getTExtractSyncMacroModel(pto::TExtractOp op) {
+  if (!op.isNdTo2xNzForm())
+    return std::nullopt;
+  // The scalar hidden-event model covers the A2/A3 scalar correctness
+  // lowering (design doc 9.3) and the A5 1x1 scalar path. The ordinary A5
+  // vector template stays a pure PIPE_V op with no hidden events; the
+  // exception must be selected by shape, not by op name (design doc 6.3.1).
+  bool scalarPath = false;
+  if (getTargetArch(op.getOperation()) == PTOArch::A3) {
+    scalarPath = true;
+  } else {
+    for (Value dst : op.getDsts()) {
+      if (auto tb = dyn_cast<pto::TileBufType>(dst.getType())) {
+        auto valid = tb.getValidShape();
+        if (valid.size() == 2 && valid[0] == 1 && valid[1] == 1) {
+          scalarPath = true;
+          break;
+        }
+      }
+    }
+  }
+  if (!scalarPath)
+    return std::nullopt;
+
+  SyncMacroModel model;
+  // One externally-visible PIPE_V phase (def: both destinations) and one
+  // internal PIPE_S phase (use: source read, def: destinations), with
+  // bidirectional hidden events so event-id allocation reserves both
+  // V->S and S->V before lowering emits set/wait.
+  SmallVector<Value, 2> dsts(op.getDsts().begin(), op.getDsts().end());
+  addPhase(model, PipelineType::PIPE_V, dsts, ValueRange{});
+  addPhase(model, PipelineType::PIPE_S, dsts, ValueRange{op.getSrc()});
+  addBidirectionalHiddenEvent(model, PipelineType::PIPE_V,
+                              PipelineType::PIPE_S,
+                              ArrayRef<unsigned>{0});
+  return model;
+}
+
 std::optional<SyncMacroModel> getTGatherSyncMacroModel(pto::TGatherOp op) {
   if (!op.hasCompareForm() || getTargetArch(op.getOperation()) == PTOArch::A5) {
     return std::nullopt;
@@ -415,6 +453,9 @@ std::optional<SyncMacroModel> mlir::pto::getSyncMacroModel(Operation *op) {
   }
   if (auto tscatter = dyn_cast<pto::TScatterOp>(op)) {
     return getTScatterSyncMacroModel(tscatter);
+  }
+  if (auto textract = dyn_cast<pto::TExtractOp>(op)) {
+    return getTExtractSyncMacroModel(textract);
   }
   if (auto tgather = dyn_cast<pto::TGatherOp>(op)) {
     return getTGatherSyncMacroModel(tgather);

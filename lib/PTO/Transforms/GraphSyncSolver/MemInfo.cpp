@@ -173,6 +173,30 @@ static PointerLikeInfo getPointerLikeInfo(pto::AllocMultiTileOp alloc) {
   return info;
 }
 
+static PointerLikeInfo getPointerLikeInfo(pto::AllocTileOp alloc) {
+  PointerLikeInfo info(alloc);
+  info.allocateSize = getBufferBitSize(alloc.getResult());
+  if (auto tileType = dyn_cast<pto::TileBufType>(alloc.getResult().getType())) {
+    if (auto space = dyn_cast_or_null<pto::AddressSpaceAttr>(
+            tileType.getMemorySpace())) {
+      info.addressSpace = space.getAddressSpace();
+    }
+  }
+  // Single-address model: the static byte addr (materialized by the planner,
+  // or caller-provided at level3) is the sole address. Unfoldable addresses
+  // keep a dynamic entry so the allocation stays conservative within its
+  // address space instead of looking disjoint (design doc section 6.3).
+  if (auto base = getConstantI64(alloc.getAddr())) {
+    info.addresses.push_back(*base * pto::kBitsToByte);
+  } else {
+    info.addresses.push_back(ShapedType::kDynamic);
+  }
+  if (auto loop = alloc->getParentOfType<LoopLikeOpInterface>()) {
+    info.parentLoop = loop;
+  }
+  return info;
+}
+
 static MemInfo getMemInfoForMultiTileGet(pto::MultiTileGetOp get) {
   auto alloc = get.getSource().getDefiningOp<pto::AllocMultiTileOp>();
   if (!alloc) {
@@ -202,6 +226,9 @@ MemInfo getMemInfo(Value val) {
     }
     if (auto allocMulti = llvm::dyn_cast<pto::AllocMultiTileOp>(defOp)) {
       return MemInfo(val, getPointerLikeInfo(allocMulti));
+    }
+    if (auto allocTile = llvm::dyn_cast<pto::AllocTileOp>(defOp)) {
+      return MemInfo(val, getPointerLikeInfo(allocTile));
     }
     if (auto multiGet = llvm::dyn_cast<pto::MultiTileGetOp>(defOp)) {
       return getMemInfoForMultiTileGet(multiGet);

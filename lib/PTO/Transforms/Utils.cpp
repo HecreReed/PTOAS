@@ -354,6 +354,18 @@ std::optional<std::pair<Value, Value>> getOperationAliasInfo(Operation *op) {
 SmallVector<std::pair<Value, Value>, 15>
 getSemanticNoAliasPairs(Operation *op) {
   SmallVector<std::pair<Value, Value>, 15> pairs;
+  // ND-to-2xNZ dual-output TEXTRACT: src/dst0/dst1 must be pairwise disjoint
+  // (design doc section 7). All three pairs flow into legacy/modern
+  // PlanMemory and the semantic no-alias verifier.
+  if (auto tex = dyn_cast<TExtractOp>(op)) {
+    if (tex.isNdTo2xNzForm()) {
+      auto dsts = tex.getDsts();
+      pairs.emplace_back(tex.getSrc(), dsts[0]);
+      pairs.emplace_back(tex.getSrc(), dsts[1]);
+      pairs.emplace_back(dsts[0], dsts[1]);
+    }
+    return pairs;
+  }
   if (auto tmov = dyn_cast<TMovOp>(op)) {
     if (classifyTMovForm(tmov.getFp()) == TMovForm::XToZz) {
       pairs.emplace_back(tmov.getSrc(), tmov.getDst());
