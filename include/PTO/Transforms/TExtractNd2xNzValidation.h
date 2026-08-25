@@ -32,6 +32,13 @@ validateTExtractNd2xNzInputProvenance(mlir::Operation *module);
 mlir::LogicalResult
 validateTExtractNd2xNzPostPlanningSafety(mlir::Operation *module);
 
+// Runs before backend-partitioned child splitting (driver, collectChildJobs):
+// fixed-depth structure guard plus cross-child direct-call and peer-import
+// rejection while any partial-valid ND-to-2xNz producer exists (design doc
+// 5.3.2).
+mlir::LogicalResult
+validateTExtractNd2xNzPrePartition(mlir::Operation *module);
+
 } // namespace pto
 } // namespace mlir
 

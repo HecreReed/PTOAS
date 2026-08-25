@@ -372,3 +372,106 @@ mlir::pto::validateTExtractNd2xNzPostPlanningSafety(mlir::Operation *module) {
   (void)checkedFuncs;
   return failedModule ? failure() : success();
 }
+
+//===----------------------------------------------------------------------===//
+// validateTExtractNd2xNzPrePartition
+//===----------------------------------------------------------------------===//
+// Design doc 5.3.2: the mixed-backend driver splits the outer module into
+// child compile units and clones cross-child callees into declarations. This
+// plain precheck runs before collectChildJobs()/child cloning:
+//   - fixed-depth structure guard: while any ND-to-2xNz form exists, no
+//     nested ModuleOp/function scope is allowed (design doc 5.3.2 item 1);
+//   - while any partial-valid producer exists, every direct func.call must
+//     stay within one immediate child and peer imports
+//     (pto.import_reserved_buffer) are rejected outright (items 4/5).
+mlir::LogicalResult
+mlir::pto::validateTExtractNd2xNzPrePartition(mlir::Operation *module) {
+  auto mod = dyn_cast<ModuleOp>(module);
+  if (!mod) {
+    return success();
+  }
+
+  bool hasNd2xNz = false;
+  bool hasPartialProducer = false;
+  mod.walk([&](pto::TExtractOp op) {
+    if (!op.isNdTo2xNzForm()) {
+      return;
+    }
+    hasNd2xNz = true;
+    for (Value dst : op.getDsts()) {
+      if (isPartialValidTile(dst.getType())) {
+        hasPartialProducer = true;
+      }
+    }
+  });
+  if (!hasNd2xNz) {
+    return success();
+  }
+
+  // Fixed-depth structure guard: the root body may only contain immediate
+  // backend child ModuleOps (and, for the non-partitioned shape, top-level
+  // funcs); descendants must not nest further ModuleOps.
+  bool hasNestedModule = false;
+  mod.walk([&](ModuleOp m) {
+    if (m.getOperation() != mod.getOperation()) {
+      hasNestedModule = true;
+    }
+  });
+  if (hasNestedModule) {
+    mod->emitOpError()
+        << "backend-partitioned ND-to-2xNz validation does not support "
+           "nested module/function scope";
+    return failure();
+  }
+
+  if (!hasPartialProducer) {
+    return success();
+  }
+
+  // With any partial producer, the whole outer module must be partition-safe:
+  // reject cross-child direct calls (even full-valid and disconnected) and any
+  // peer import before child cloning (design doc 5.3.2 items 4/5).
+  bool partitionUnsafe = false;
+  mod.walk([&](func::CallOp call) {
+    if (partitionUnsafe) {
+      return;
+    }
+    auto caller = call->getParentOfType<func::FuncOp>();
+    if (!caller) {
+      return;
+    }
+    auto *callerParent = caller->getParentOp();
+    auto callee = mod.lookupSymbol<func::FuncOp>(call.getCallee());
+    if (!callee) {
+      call->emitOpError()
+          << "call surface not closed: unresolved direct callee in a "
+             "backend-partitioned module with a partial-valid ND-to-2xNZ "
+             "producer";
+      partitionUnsafe = true;
+      return;
+    }
+    if (callee->getParentOp() != callerParent) {
+      call->emitOpError()
+          << "backend-partitioned module with partial-valid ND-to-2xNZ does "
+             "not permit cross-child direct calls";
+      partitionUnsafe = true;
+    }
+  });
+  if (partitionUnsafe) {
+    return failure();
+  }
+
+  mod.walk([&](pto::ImportReservedBufferOp importOp) {
+    if (!partitionUnsafe) {
+      importOp->emitOpError()
+          << "backend-partitioned module with partial-valid ND-to-2xNZ does "
+             "not permit peer imports (pto.import_reserved_buffer)";
+      partitionUnsafe = true;
+    }
+  });
+  if (partitionUnsafe) {
+    return failure();
+  }
+
+  return success();
+}

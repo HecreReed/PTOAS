@@ -16,6 +16,7 @@
 #include "PTO/IR/PTO.h"
 #include "PTO/Support/CodeConstants.h"
 #include "PTO/Transforms/Passes.h"
+#include "PTO/Transforms/TExtractNd2xNzValidation.h"
 #include "VPTOHostStubEmission.h"
 #include "ptoas.h"
 #include "ptobc/ptobc_decode.h"
@@ -1306,6 +1307,13 @@ static LogicalResult runPTOASJobs(OwningOpRef<ModuleOp> &module,
     }
     VPTOBackendJob singleJob(module, result);
     return singleJob.run(context);
+  }
+
+  // ND-to-2xNz partition precheck: runs before collectChildJobs()/child
+  // cloning so a partial producer cannot cross compile-unit boundaries
+  // (design doc 5.3.2).
+  if (failed(pto::validateTExtractNd2xNzPrePartition(module.get()))) {
+    return failure();
   }
 
   SmallVector<std::unique_ptr<BackendChildJob>, mlir::pto::kValue4> backendJobs;
