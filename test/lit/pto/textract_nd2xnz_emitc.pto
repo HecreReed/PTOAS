@@ -17,4 +17,6 @@ module attributes {"pto.target_arch" = "a3"} {
 }
 
 // CHECK-LABEL: AICORE void textract_nd2xnz_emitc(
-// CHECK: TEXTRACT({{.*}}[[DST0:[^, ]+]], {{.*}}[[DST1:[^, ]+]], {{.*}}[[SRC:[^, ]+]], {{.*}}[[R0:[^, ]+]], {{.*}}[[C0:[^, ]+]], {{.*}}[[R1:[^, ]+]], {{.*}}[[C1:[^)]+]]);
+// The dual-output form emits exactly one seven-operand public TEXTRACT call
+// in PTO-ISA argument order: dst0, dst1, src, row0, col0, row1, col1.
+// CHECK: TEXTRACT([[DST0:[^, ]+]], [[DST1:[^, ]+]], [[SRC:[^, ]+]], [[R0:[^, ]+]], [[C0:[^, ]+]], [[R1:[^, ]+]], [[C1:[^)]+]]);
