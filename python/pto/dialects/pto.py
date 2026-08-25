@@ -1912,8 +1912,88 @@ def vkernel(py_fn=None, *, target="a5", name=None, verify=True):
     return wrap(py_fn)
 
 
+#===----------------------------------------------------------------------===//
+# TExtractOp legacy facade + ND-to-2xNZ factory (design doc 4.4/10)
+#===----------------------------------------------------------------------===//
+# The ODS range-ization replaced the fixed indexRow/indexCol/dst fields with
+# indices/dsts ranges. Keep the public single-output surface source
+# compatible and expose the dual-output form through the same op class.
+
+_GeneratedTExtractOp = _pto_ops_gen.TExtractOp
+
+
+class TExtractOp(_GeneratedTExtractOp):
+    """Legacy facade for pto.textract.
+
+    Accepts the pre-range positional/keyword constructor
+    TExtractOp(src, index_row, index_col, dst, ...) and delegates to the
+    generated range constructor with indices=[row, col] and
+    dsts=[dst]. .indexRow / .indexCol / .dst map back to the range slices
+    for legacy callers. The ND-to-2xNZ dual-output form is built with the
+    build_nd_to_2xnz classmethod on this same class.
+    """
+
+    def __init__(self, src, index_row, index_col, dst, *, fp=None,
+                 pre_quant_scalar=None, acc_to_vec_mode=None,
+                 relu_pre_mode=None, loc=None, ip=None):
+        super().__init__(
+            src,
+            indices=[index_row, index_col],
+            dsts=[dst],
+            fp=fp,
+            preQuantScalar=pre_quant_scalar,
+            accToVecMode=acc_to_vec_mode,
+            reluPreMode=relu_pre_mode,
+            loc=loc,
+            ip=ip,
+        )
+
+    @property
+    def indexRow(self):
+        return self.indices[0]
+
+    @property
+    def indexCol(self):
+        return self.indices[1]
+
+    @property
+    def dst(self):
+        return self.dsts[0]
+
+    @classmethod
+    def build_nd_to_2xnz(cls, src, row0, col0, row1, col1, dst0, dst1,
+                         *, loc=None, ip=None):
+        """Build the ND-to-2xNZ dual-output form on pto.textract."""
+        return _GeneratedTExtractOp(
+            src=src,
+            indices=[row0, col0, row1, col1],
+            dsts=[dst0, dst1],
+            loc=loc,
+            ip=ip,
+        )
+
+
+def textract(src, index_row, index_col, dst, *, fp=None,
+             pre_quant_scalar=None, acc_to_vec_mode=None,
+             relu_pre_mode=None, loc=None, ip=None):
+    """Legacy free-function builder for pto.textract (single-output)."""
+    return TExtractOp(
+        src,
+        index_row,
+        index_col,
+        dst,
+        fp=fp,
+        pre_quant_scalar=pre_quant_scalar,
+        acc_to_vec_mode=acc_to_vec_mode,
+        relu_pre_mode=relu_pre_mode,
+        loc=loc,
+        ip=ip,
+    )
+
 __all__.extend([
     "vkernel",
+    "TExtractOp",
+    "textract",
     "VKernelHandle",
     "struct",
     "Tile",

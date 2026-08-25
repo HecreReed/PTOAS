@@ -41,7 +41,11 @@ _TEMPLATE_MODULES = {
     ("a5", "pto.tdequant"): ".a5.tdequant",
     ("a5", "pto.texp"): ".a5.texp",
     ("a5", "pto.texpands"): ".a5.texpand",
-    ("a5", "pto.textract"): (".a5.textract", ".a5.textract_fp"),
+    ("a5", "pto.textract"): (
+        ".a5.textract",
+        ".a5.textract_fp",
+        ".a5.textract_nd2xnz",
+    ),
     ("a5", "pto.tfmod"): ".a5.tfmod",
     ("a5", "pto.tfmods"): ".a5.tfmods",
     ("a5", "pto.tfillpad"): ".a5.tfillpad",
