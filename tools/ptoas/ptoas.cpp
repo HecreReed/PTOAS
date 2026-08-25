@@ -3777,11 +3777,12 @@ int mlir::pto::compilePTOASModule(
       "pto.target_arch",
       mlir::StringAttr::get(module->getContext(), arch));
 
-  if (failed(applyConfiguredPassManagerCLOptions(
-          preInlinePlanningPM, "pre-inline planning PTOAS pipeline"))) {
-    return 1;
-  }
-
+  // applyPassManagerCLOptions(preInlinePlanningPM) above already registered
+  // the MLIR printer instrumentation (--mlir-print-ir-*). This project's
+  // applyConfiguredPassManagerCLOptions re-applies that instrumentation, so it
+  // must be applied exactly once per pass manager: registering it here again
+  // would print every IR dump twice and break FileCheck-based lit tests. The
+  // post-validation pass manager below gets its own single registration.
   if (failed(preInlinePlanningPM.run(*module))) {
     llvm::errs() << "Error: Pass execution failed.\n";
     return 1;
