@@ -1,0 +1,4 @@
+interface:
+  display_name: "PTOAS Code Compliance"
+  short_description: "Apply scoped secure-coding and quality gates to PTOAS changes"
+  default_prompt: "Use $enforce-ptoas-code-compliance to review this PTOAS change."

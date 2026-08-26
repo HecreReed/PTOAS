@@ -24,67 +24,123 @@ extern "C" {
 MLIR_DECLARE_CAPI_DIALECT_REGISTRATION(PTO, pto);
 
 // ---- !pto.ptr<elem> ----
-bool mlirPTOTypeIsAPtrType(MlirType type);
-MlirType mlirPTOPtrTypeGet(MlirContext ctx, MlirType elementType);
-MlirType mlirPTOPtrTypeGetWithMemorySpace(MlirContext ctx, MlirType elementType,
+MLIR_CAPI_EXPORTED bool mlirPTOTypeIsAPtrType(MlirType type);
+MLIR_CAPI_EXPORTED MlirType mlirPTOPtrTypeGet(MlirContext ctx, MlirType elementType);
+MLIR_CAPI_EXPORTED MlirType mlirPTOPtrTypeGetWithMemorySpace(MlirContext ctx, MlirType elementType,
                                           MlirAttribute memorySpace);
-MlirType mlirPTOPtrTypeGetElementType(MlirType type);
-MlirAttribute mlirPTOPtrTypeGetMemorySpace(MlirType type);
+MLIR_CAPI_EXPORTED MlirType mlirPTOPtrTypeGetElementType(MlirType type);
+MLIR_CAPI_EXPORTED MlirAttribute mlirPTOPtrTypeGetMemorySpace(MlirType type);
 
 // ---- !pto.async_session / !pto.async_event ----
-bool mlirPTOTypeIsAAsyncSessionType(MlirType type);
-MlirType mlirPTOAsyncSessionTypeGet(MlirContext ctx);
-bool mlirPTOTypeIsAAsyncEventType(MlirType type);
-MlirType mlirPTOAsyncEventTypeGet(MlirContext ctx);
-bool mlirPTOTypeIsAPrefetchAsyncContextType(MlirType type);
-MlirType mlirPTOPrefetchAsyncContextTypeGet(MlirContext ctx);
+MLIR_CAPI_EXPORTED bool mlirPTOTypeIsAAsyncSessionType(MlirType type);
+MLIR_CAPI_EXPORTED MlirType mlirPTOAsyncSessionTypeGet(MlirContext ctx);
+MLIR_CAPI_EXPORTED bool mlirPTOTypeIsAAsyncEventType(MlirType type);
+MLIR_CAPI_EXPORTED MlirType mlirPTOAsyncEventTypeGet(MlirContext ctx);
+MLIR_CAPI_EXPORTED bool mlirPTOTypeIsAPrefetchAsyncContextType(MlirType type);
+MLIR_CAPI_EXPORTED MlirType mlirPTOPrefetchAsyncContextTypeGet(MlirContext ctx);
 
 // ---- !pto.hif8 / !pto.f8E8M0 / !pto.hif8x2 / !pto.f4E1M2x2 / !pto.f4E2M1x2 ----
-bool mlirPTOTypeIsAHiF8Type(MlirType type);
-MlirType mlirPTOHiF8TypeGet(MlirContext ctx);
-bool mlirPTOTypeIsAF8E8M0Type(MlirType type);
-MlirType mlirPTOF8E8M0TypeGet(MlirContext ctx);
-bool mlirPTOTypeIsAHiF8x2Type(MlirType type);
-MlirType mlirPTOHiF8x2TypeGet(MlirContext ctx);
-bool mlirPTOTypeIsAF4E1M2x2Type(MlirType type);
-MlirType mlirPTOF4E1M2x2TypeGet(MlirContext ctx);
-bool mlirPTOTypeIsAF4E2M1x2Type(MlirType type);
-MlirType mlirPTOF4E2M1x2TypeGet(MlirContext ctx);
+MLIR_CAPI_EXPORTED bool mlirPTOTypeIsAHiF8Type(MlirType type);
+MLIR_CAPI_EXPORTED MlirType mlirPTOHiF8TypeGet(MlirContext ctx);
+MLIR_CAPI_EXPORTED bool mlirPTOTypeIsAF8E8M0Type(MlirType type);
+MLIR_CAPI_EXPORTED MlirType mlirPTOF8E8M0TypeGet(MlirContext ctx);
+MLIR_CAPI_EXPORTED bool mlirPTOTypeIsAHiF8x2Type(MlirType type);
+MLIR_CAPI_EXPORTED MlirType mlirPTOHiF8x2TypeGet(MlirContext ctx);
+MLIR_CAPI_EXPORTED bool mlirPTOTypeIsAF4E1M2x2Type(MlirType type);
+MLIR_CAPI_EXPORTED MlirType mlirPTOF4E1M2x2TypeGet(MlirContext ctx);
+MLIR_CAPI_EXPORTED bool mlirPTOTypeIsAF4E2M1x2Type(MlirType type);
+MLIR_CAPI_EXPORTED MlirType mlirPTOF4E2M1x2TypeGet(MlirContext ctx);
+MLIR_CAPI_EXPORTED bool mlirPTOTypeIsABF16x2Type(MlirType type);
+MLIR_CAPI_EXPORTED MlirType mlirPTOBF16x2TypeGet(MlirContext ctx);
 
 // ---- #pto.address_space<...> ----
-bool mlirPTOAttrIsAAddressSpaceAttr(MlirAttribute attr);
+MLIR_CAPI_EXPORTED bool mlirPTOAttrIsAAddressSpaceAttr(MlirAttribute attr);
 
 // Create: #pto.address_space<ub/gm/...>
-MlirAttribute mlirPTOAddressSpaceAttrGet(MlirContext ctx, int32_t value);
+MLIR_CAPI_EXPORTED MlirAttribute mlirPTOAddressSpaceAttrGet(MlirContext ctx, int32_t value);
 
 // Read back enum value (0..6)
-int32_t mlirPTOAddressSpaceAttrGetValue(MlirAttribute attr);
+MLIR_CAPI_EXPORTED int32_t mlirPTOAddressSpaceAttrGetValue(MlirAttribute attr);
 
 // ---- !pto.tensor_view<shape x elem> ----
-bool mlirPTOTypeIsATensorViewType(MlirType type);
-MlirType mlirPTOTensorViewTypeGet(MlirContext ctx, intptr_t rank,
+MLIR_CAPI_EXPORTED bool mlirPTOTypeIsATensorViewType(MlirType type);
+MLIR_CAPI_EXPORTED MlirType mlirPTOTensorViewTypeGet(MlirContext ctx, intptr_t rank,
                                   const int64_t *shape, MlirType elementType);
-intptr_t mlirPTOTensorViewTypeGetRank(MlirType type);
-MlirType mlirPTOTensorViewTypeGetElementType(MlirType type);
+MLIR_CAPI_EXPORTED intptr_t mlirPTOTensorViewTypeGetRank(MlirType type);
+MLIR_CAPI_EXPORTED MlirType mlirPTOTensorViewTypeGetElementType(MlirType type);
 // 返回内部 shape 数组指针（只读）；numDimsOut 返回维度数
-const int64_t *mlirPTOTensorViewTypeGetShape(MlirType type, intptr_t *numDimsOut);
+MLIR_CAPI_EXPORTED const int64_t *mlirPTOTensorViewTypeGetShape(MlirType type, intptr_t *numDimsOut);
 
 // ---- !pto.partition_tensor_view<shape x elem> ----
-bool mlirPTOTypeIsAPartitionTensorViewType(MlirType type);
-MlirType mlirPTOPartitionTensorViewTypeGet(MlirContext ctx, intptr_t rank,
+MLIR_CAPI_EXPORTED bool mlirPTOTypeIsAPartitionTensorViewType(MlirType type);
+MLIR_CAPI_EXPORTED MlirType mlirPTOPartitionTensorViewTypeGet(MlirContext ctx, intptr_t rank,
                                            const int64_t *shape, MlirType elementType);
-intptr_t mlirPTOPartitionTensorViewTypeGetRank(MlirType type);
-MlirType mlirPTOPartitionTensorViewTypeGetElementType(MlirType type);
+MLIR_CAPI_EXPORTED intptr_t mlirPTOPartitionTensorViewTypeGetRank(MlirType type);
+MLIR_CAPI_EXPORTED MlirType mlirPTOPartitionTensorViewTypeGetElementType(MlirType type);
 // 返回内部 shape 数组指针（只读）；numDimsOut 返回维度数
-const int64_t *mlirPTOPartitionTensorViewTypeGetShape(MlirType type, intptr_t *numDimsOut);
+MLIR_CAPI_EXPORTED const int64_t *mlirPTOPartitionTensorViewTypeGetShape(MlirType type, intptr_t *numDimsOut);
 
 // ---- !pto.tile<shape x elem> ----
-bool mlirPTOTypeIsATileType(MlirType type);
-MlirType mlirPTOTileTypeGet(MlirContext ctx, intptr_t rank,
+MLIR_CAPI_EXPORTED bool mlirPTOTypeIsATileType(MlirType type);
+MLIR_CAPI_EXPORTED MlirType mlirPTOTileTypeGet(MlirContext ctx, intptr_t rank,
                             const int64_t *shape, MlirType elementType);
-intptr_t mlirPTOTileTypeGetRank(MlirType type);
-MlirType mlirPTOTileTypeGetElementType(MlirType type);
-const int64_t *mlirPTOTileTypeGetShape(MlirType type, intptr_t *numDimsOut);
+MLIR_CAPI_EXPORTED intptr_t mlirPTOTileTypeGetRank(MlirType type);
+MLIR_CAPI_EXPORTED MlirType mlirPTOTileTypeGetElementType(MlirType type);
+MLIR_CAPI_EXPORTED const int64_t *mlirPTOTileTypeGetShape(MlirType type, intptr_t *numDimsOut);
+
+// ---- !pto.vreg<count x elem> ----
+MLIR_CAPI_EXPORTED bool     mlirPTOTypeIsAVRegType(MlirType type);
+MLIR_CAPI_EXPORTED MlirType mlirPTOVRegTypeGet(MlirContext ctx, int64_t elementCount, MlirType elementType);
+MLIR_CAPI_EXPORTED int64_t  mlirPTOVRegTypeGetElementCount(MlirType type);
+MLIR_CAPI_EXPORTED MlirType mlirPTOVRegTypeGetElementType(MlirType type);
+
+// ---- !pto.mask<granularity> ----
+MLIR_CAPI_EXPORTED bool          mlirPTOTypeIsAMaskType(MlirType type);
+MLIR_CAPI_EXPORTED MlirType      mlirPTOMaskTypeGet(MlirContext ctx, MlirStringRef granularity);
+MLIR_CAPI_EXPORTED MlirStringRef mlirPTOMaskTypeGetGranularity(MlirType type);
+
+// ---- !pto.vmivreg<count x elem, layout?> ----
+MLIR_CAPI_EXPORTED bool          mlirPTOTypeIsAVMIVRegType(MlirType type);
+MLIR_CAPI_EXPORTED MlirType      mlirPTOVMIVRegTypeGet(MlirContext ctx, int64_t elementCount,
+                                    MlirType elementType, MlirAttribute layout /*may be null*/);
+MLIR_CAPI_EXPORTED int64_t       mlirPTOVMIVRegTypeGetElementCount(MlirType type);
+MLIR_CAPI_EXPORTED MlirType      mlirPTOVMIVRegTypeGetElementType(MlirType type);
+MLIR_CAPI_EXPORTED MlirAttribute mlirPTOVMIVRegTypeGetLayout(MlirType type); // null attr if absent
+
+// ---- !pto.vmimask<count x granularity, layout?> ----
+MLIR_CAPI_EXPORTED bool          mlirPTOTypeIsAVMIMaskType(MlirType type);
+MLIR_CAPI_EXPORTED MlirType      mlirPTOVMIMaskTypeGet(MlirContext ctx, int64_t elementCount,
+                                    MlirStringRef granularity, MlirAttribute layout /*may be null*/);
+MLIR_CAPI_EXPORTED int64_t       mlirPTOVMIMaskTypeGetElementCount(MlirType type);
+MLIR_CAPI_EXPORTED MlirStringRef mlirPTOVMIMaskTypeGetGranularity(MlirType type);
+MLIR_CAPI_EXPORTED MlirAttribute mlirPTOVMIMaskTypeGetLayout(MlirType type); // null attr if absent
+
+// ---- !pto.align ----
+MLIR_CAPI_EXPORTED bool     mlirPTOTypeIsAAlignType(MlirType type);
+MLIR_CAPI_EXPORTED MlirType mlirPTOAlignTypeGet(MlirContext ctx);
+
+// ---- !pto.struct<fields...> ----
+MLIR_CAPI_EXPORTED bool     mlirPTOTypeIsAStructType(MlirType type);
+// Null type (mlirTypeIsNull) if field types are invalid; emits a diagnostic
+// on an UnknownLoc, mirroring StructType::getChecked.
+MLIR_CAPI_EXPORTED MlirType mlirPTOStructTypeGet(MlirContext ctx, intptr_t numFieldTypes,
+                              MlirType const *fieldTypes);
+MLIR_CAPI_EXPORTED intptr_t mlirPTOStructTypeGetNumFieldTypes(MlirType type);
+MLIR_CAPI_EXPORTED MlirType mlirPTOStructTypeGetFieldType(MlirType type, intptr_t index);
+
+// ---- TileBufType getters（Get 已有 CAPI，仅补属性读取） ----
+MLIR_CAPI_EXPORTED intptr_t       mlirPTOTileBufTypeGetRank(MlirType type);
+MLIR_CAPI_EXPORTED MlirType       mlirPTOTileBufTypeGetElementType(MlirType type);
+MLIR_CAPI_EXPORTED MlirAttribute  mlirPTOTileBufTypeGetMemorySpace(MlirType type);
+MLIR_CAPI_EXPORTED const int64_t *mlirPTOTileBufTypeGetShape(MlirType type, intptr_t *numDimsOut);
+MLIR_CAPI_EXPORTED const int64_t *mlirPTOTileBufTypeGetValidShape(MlirType type, intptr_t *numDimsOut);
+MLIR_CAPI_EXPORTED MlirAttribute  mlirPTOTileBufTypeGetBLayoutAttr(MlirType type);
+MLIR_CAPI_EXPORTED MlirAttribute  mlirPTOTileBufTypeGetSLayoutAttr(MlirType type);
+MLIR_CAPI_EXPORTED int32_t        mlirPTOTileBufTypeGetBLayoutValue(MlirType type);
+MLIR_CAPI_EXPORTED int32_t        mlirPTOTileBufTypeGetSLayoutValue(MlirType type);
+MLIR_CAPI_EXPORTED int32_t        mlirPTOTileBufTypeGetPadValue(MlirType type);
+MLIR_CAPI_EXPORTED int32_t        mlirPTOTileBufTypeGetCompactMode(MlirType type);
+MLIR_CAPI_EXPORTED int32_t        mlirPTOTileBufTypeGetSFractalSize(MlirType type);
 
 // ---- TileBufType ----
 MLIR_CAPI_EXPORTED bool mlirPTOTypeIsATileBufType(MlirType type);
@@ -253,6 +309,9 @@ MLIR_CAPI_EXPORTED int32_t mlirPTOQuantTypeAttrGetValue(MlirAttribute attr);
 MLIR_CAPI_EXPORTED MlirAttribute mlirPTOQuantScaleAlgAttrGet(MlirContext ctx, int32_t value);
 MLIR_CAPI_EXPORTED bool mlirPTOAttrIsAQuantScaleAlgAttr(MlirAttribute attr);
 MLIR_CAPI_EXPORTED int32_t mlirPTOQuantScaleAlgAttrGetValue(MlirAttribute attr);
+MLIR_CAPI_EXPORTED MlirAttribute mlirPTOMxGroupAxisAttrGet(MlirContext ctx, int32_t value);
+MLIR_CAPI_EXPORTED bool mlirPTOAttrIsAMxGroupAxisAttr(MlirAttribute attr);
+MLIR_CAPI_EXPORTED int32_t mlirPTOMxGroupAxisAttrGetValue(MlirAttribute attr);
 MLIR_CAPI_EXPORTED MlirAttribute mlirPTOVecStoreModeAttrGet(MlirContext ctx, int32_t value);
 MLIR_CAPI_EXPORTED bool mlirPTOAttrIsAVecStoreModeAttr(MlirAttribute attr);
 MLIR_CAPI_EXPORTED int32_t mlirPTOVecStoreModeAttrGetValue(MlirAttribute attr);

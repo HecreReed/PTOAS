@@ -36,6 +36,8 @@ from ptoas.mlir.ir import (
     VectorType,
 )
 
+from ._context import make_context
+
 # ── Address-space name → AddressSpace enum ───────────────────────────────────
 _ADDR_SPACE = {
     "ub":  _pto.AddressSpace.VEC,  # UB == unified buffer == VEC in PTO
@@ -78,6 +80,10 @@ class _DType:
         if kind == "integer":
             return _materialize_integer_literal(target_type, value)
         raise TypeError(f"unsupported eager constructor target type {target_type}")
+
+    def __ptodsl_cache_signature__(self):
+        with make_context():
+            return ("dtype", str(self.resolve()))
 
     def __repr__(self):
         return f"<pto.dtype {self._factory}>"
@@ -150,7 +156,6 @@ class _MaskDescriptor(_DType):
     def __repr__(self):
         return f"<pto.mask {self._bits}>"
 
-
 class _StructDescriptor(_DType):
     """Deferred ``!pto.struct<...>`` type assembled from scalar fields."""
 
@@ -178,9 +183,19 @@ class _StructDescriptor(_DType):
         fields = ", ".join(repr(field) for field in self._field_descriptors)
         return f"<pto.struct {fields}>"
 
+# Legal logical lane counts for VMI vreg/mask types on the formal PTODSL
+# surface: compact/group-slot flows use the first four values, full logical
+# vectors use 64/128/256.  The IR layer intentionally accepts additional
+# positive lane counts for internal compatibility.
+VMI_LANE_COUNTS = (1, 2, 4, 8, 64, 128, 256)
 
 class _VMIVRegDescriptor(_DType):
     def __init__(self, lanes: int, elem):
+        if lanes not in VMI_LANE_COUNTS:
+            raise ValueError(
+                "pto.vmi.vreg(...) requires lanes to be one of "
+                "1, 2, 4, 8, 64, 128, 256"
+            )
         self._lanes = lanes
         self._elem = elem
 
@@ -200,6 +215,11 @@ class _VMIVRegDescriptor(_DType):
 
 class _VMIMaskDescriptor(_DType):
     def __init__(self, lanes: int):
+        if lanes not in VMI_LANE_COUNTS:
+            raise ValueError(
+                "pto.vmi.mask(...) requires lanes to be one of "
+                "1, 2, 4, 8, 64, 128, 256"
+            )
         self._lanes = lanes
         self._granularity = "pred"
 
@@ -307,7 +327,17 @@ def _classify_storage_dtype(type_obj):
         return "compute"
     if Float8E4M3FNType.isinstance(type_obj) or Float8E5M2Type.isinstance(type_obj):
         return "storage_only"
-    if any(_isinstance_pto_type(type_obj, name) for name in ("HiF8Type", "HiF8x2Type", "F4E1M2x2Type", "F4E2M1x2Type")):
+    if any(
+        _isinstance_pto_type(type_obj, name)
+        for name in (
+            "BF16x2Type",
+            "F8E8M0Type",
+            "HiF8Type",
+            "HiF8x2Type",
+            "F4E1M2x2Type",
+            "F4E2M1x2Type",
+        )
+    ):
         return "storage_only"
     if VectorType.isinstance(type_obj):
         vec_elem = VectorType(type_obj).element_type
@@ -490,12 +520,14 @@ float16 = _DType(F16Type.get)
 bf16    = _DType(BF16Type.get)
 f8e4m3  = _DType(Float8E4M3FNType.get)
 f8e5m2  = _DType(Float8E5M2Type.get)
+f8e8m0  = _DType(lambda: _pto.F8E8M0Type.get())
 hif8    = _DType(lambda: _pto.HiF8Type.get())
 f4e1m2x2 = _DType(lambda: _pto.F4E1M2x2Type.get())
 f4e2m1x2 = _DType(lambda: _pto.F4E2M1x2Type.get())
 _STORAGE_ONLY_DTYPE_DESCRIPTORS = (
     f8e4m3,
     f8e5m2,
+    f8e8m0,
     hif8,
     f4e1m2x2,
     f4e2m1x2,
@@ -530,6 +562,11 @@ hif8x2 = _DType(lambda: _pto.HiF8x2Type.get())
 i8x2   = _DType(lambda: VectorType.get([2], IntegerType.get_signless(8)))
 i16x2  = _DType(lambda: VectorType.get([2], IntegerType.get_signless(16)))
 i32x2  = _DType(lambda: VectorType.get([2], IntegerType.get_signless(32)))
+
+# ``pto.bf16x2`` is the existing builtin/SIMT vector carrier.  VMI uses a
+# distinct packed carrier type so that its logical lane count remains the
+# number of bf16 pairs rather than the number of scalar bf16 lanes.
+_vmi_bf16x2 = _DType(lambda: _pto.BF16x2Type.get())
 
 
 # ── Type constructor functions ────────────────────────────────────────────────
@@ -576,7 +613,8 @@ def tile_buf_type(shape, dtype, valid_shape=None, *,
                   address_space: str = "ub",
                   slayout: str = "NoneBox",
                   fractal_size: int = 512,
-                  pad: str = "Null") -> Type:
+                  pad: str = "Null",
+                  compact_mode: str | int = "Null") -> Type:
     """
     Construct a ``!pto.tile_buf<…>`` type via the Python bindings.
 
@@ -599,6 +637,7 @@ def tile_buf_type(shape, dtype, valid_shape=None, *,
         _pto.SLayoutAttr.get(getattr(_pto.SLayout, slayout)),
         fractal_size,
         _pto.PadValueAttr.get(getattr(_pto.PadValue, pad)),
+        compact_mode=_compact_mode_token(compact_mode),
     )
     if valid_shape is None and cfg is None:
         return _pto.TileBufType.get(shape, elem, space_attr)
@@ -607,6 +646,30 @@ def tile_buf_type(shape, dtype, valid_shape=None, *,
     if cfg is None:
         return _pto.TileBufType.get(shape, elem, space_attr, valid_shape=valid_shape)
     return _pto.TileBufType.get(shape, elem, space_attr, valid_shape=valid_shape, config=cfg)
+
+
+def _normalize_compact_mode(value: str | int):
+    if isinstance(value, int):
+        return value
+    aliases = {
+        "null": "Null",
+        "normal": "Normal",
+        "row_plus_one": "RowPlusOne",
+        "Null": "Null",
+        "Normal": "Normal",
+        "RowPlusOne": "RowPlusOne",
+    }
+    return aliases.get(str(value), str(value))
+
+
+def _compact_mode_token(value: str | int):
+    token = _normalize_compact_mode(value)
+    if isinstance(token, int):
+        return token
+    try:
+        return getattr(_pto.CompactMode, token)
+    except AttributeError as exc:
+        raise ValueError(f"Unknown compact_mode {value!r}") from exc
 
 
 def tensor_view_type(rank: int, elem) -> Type:
@@ -646,7 +709,7 @@ __all__ = [
     "f8e4m3x2", "f8e4m3x4", "f8e4m3x8",
     "f8e5m2x2", "f8e5m2x4", "f8e5m2x8", "hif8x2",
     "i8x2", "i16x2", "i32x2",
-    "f8e4m3", "f8e5m2", "hif8", "f4e1m2x2", "f4e2m1x2",
+    "f8e4m3", "f8e5m2", "f8e8m0", "hif8", "f4e1m2x2", "f4e2m1x2",
     "int1", "int8", "int16", "int32", "int64",
     "si8", "si16", "si32", "si64",
     "ui8", "ui16", "ui32", "ui64",

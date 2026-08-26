@@ -6,6 +6,7 @@
 // INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
 // See LICENSE in the root of the software repository for the full text of the License.
 
+#include "PTO/Support/CodeConstants.h"
 #include "PTO/Transforms/TileFusion/FusionAnalysis.h"
 #include "PTO/Transforms/TileFusion/FusionOpSemantics.h"
 
@@ -54,13 +55,14 @@ struct GroupMember {
 struct ScheduledGroup {
   int64_t groupId = 0;
   unsigned firstOriginalIndex = 0;
-  SmallVector<GroupMember, 8> members;
+  SmallVector<GroupMember, mlir::pto::kValue8> members;
 };
 
 static std::optional<int64_t> getRequiredI64Attr(Operation *op,
                                                  StringRef attrName) {
-  if (auto attr = op->getAttrOfType<IntegerAttr>(attrName))
+  if (auto attr = op->getAttrOfType<IntegerAttr>(attrName)) {
     return attr.getInt();
+  }
   return std::nullopt;
 }
 
@@ -71,19 +73,24 @@ static bool hasIncompleteFusionMetadata(Operation *op) {
 }
 
 static bool sharesAnyValue(ArrayRef<Value> lhs, ArrayRef<Value> rhs) {
-  for (Value value : lhs)
-    if (llvm::is_contained(rhs, value))
+  for (Value value : lhs) {
+    if (llvm::is_contained(rhs, value)) {
       return true;
+    }
+  }
   return false;
 }
 
 static SchedulingBarrierKind classifySchedulingBarrier(Operation *op) {
-  if (op->hasTrait<OpTrait::IsTerminator>() || !op->getRegions().empty())
+  if (op->hasTrait<OpTrait::IsTerminator>() || !op->getRegions().empty()) {
     return SchedulingBarrierKind::HardBoundary;
-  if (isa<CallOpInterface>(op))
+  }
+  if (isa<CallOpInterface>(op)) {
     return SchedulingBarrierKind::HardBoundary;
-  if (isa<pto::AllocTileOp>(op))
+  }
+  if (isa<pto::AllocTileOp>(op)) {
     return SchedulingBarrierKind::Movable;
+  }
 
   FailureOr<pto::FusionOpSemantics> semanticsOr = pto::getFusionOpSemantics(op);
   if (succeeded(semanticsOr)) {
@@ -96,21 +103,24 @@ static SchedulingBarrierKind classifySchedulingBarrier(Operation *op) {
       return SchedulingBarrierKind::HardBoundary;
     }
   }
-  if (!isMemoryEffectFree(op))
+  if (!isMemoryEffectFree(op)) {
     return SchedulingBarrierKind::HardBoundary;
+  }
   return SchedulingBarrierKind::Movable;
 }
 
 static bool hasTileDependency(Operation *opA, Operation *opB) {
   // alloc_tile is a pure buffer allocation with no tile-level data dependency
   // on any compute op — it does not consume or produce tile data.
-  if (isa<pto::AllocTileOp>(opA) || isa<pto::AllocTileOp>(opB))
+  if (isa<pto::AllocTileOp>(opA) || isa<pto::AllocTileOp>(opB)) {
     return false;
+  }
 
   FailureOr<pto::FusionOpSemantics> aSemOr = pto::getFusionOpSemantics(opA);
   FailureOr<pto::FusionOpSemantics> bSemOr = pto::getFusionOpSemantics(opB);
-  if (failed(aSemOr) || failed(bSemOr))
+  if (failed(aSemOr) || failed(bSemOr)) {
     return true;
+  }
 
   const pto::FusionOpSemantics &a = *aSemOr;
   const pto::FusionOpSemantics &b = *bSemOr;
@@ -123,15 +133,17 @@ static bool hasTileDependency(Operation *opA, Operation *opB) {
 static bool crossesOperandDefinition(Operation *movingOp, Operation *candidate) {
   for (Value operand : movingOp->getOperands()) {
     Operation *defOp = operand.getDefiningOp();
-    if (defOp == candidate)
+    if (defOp == candidate) {
       return true;
+    }
   }
   return false;
 }
 
 static bool canMoveEarlierAcross(Operation *movingOp, Operation *candidate) {
-  if (crossesOperandDefinition(movingOp, candidate))
+  if (crossesOperandDefinition(movingOp, candidate)) {
     return false;
+  }
 
   switch (classifySchedulingBarrier(candidate)) {
   case SchedulingBarrierKind::Movable:
@@ -146,8 +158,9 @@ static bool canMoveEarlierAcross(Operation *movingOp, Operation *candidate) {
 static bool canMoveLaterAcross(Operation *movingOp, Operation *candidate) {
   for (Value operand : candidate->getOperands()) {
     Operation *defOp = operand.getDefiningOp();
-    if (defOp == movingOp)
+    if (defOp == movingOp) {
       return false;
+    }
   }
 
   switch (classifySchedulingBarrier(candidate)) {
@@ -161,15 +174,18 @@ static bool canMoveLaterAcross(Operation *movingOp, Operation *candidate) {
 }
 
 static bool canMoveAfter(Operation *movingOp, Operation *anchorOp) {
-  if (!movingOp || !anchorOp || movingOp == anchorOp)
+  if (!movingOp || !anchorOp || movingOp == anchorOp) {
     return false;
-  if (movingOp->getBlock() != anchorOp->getBlock())
+  }
+  if (movingOp->getBlock() != anchorOp->getBlock()) {
     return false;
+  }
 
   Operation *cursor = anchorOp->getNextNode();
   while (cursor && cursor != movingOp) {
-    if (!canMoveEarlierAcross(movingOp, cursor))
+    if (!canMoveEarlierAcross(movingOp, cursor)) {
       return false;
+    }
     cursor = cursor->getNextNode();
   }
   return cursor == movingOp;
@@ -214,15 +230,17 @@ collectScheduledGroups(Block &block, SmallVectorImpl<ScheduledGroup> &groups) {
   }
 
   llvm::sort(groups, [](const ScheduledGroup &lhs, const ScheduledGroup &rhs) {
-    if (lhs.firstOriginalIndex != rhs.firstOriginalIndex)
+    if (lhs.firstOriginalIndex != rhs.firstOriginalIndex) {
       return lhs.firstOriginalIndex < rhs.firstOriginalIndex;
+    }
     return lhs.groupId < rhs.groupId;
   });
 
   for (ScheduledGroup &group : groups) {
     llvm::sort(group.members, [](const GroupMember &lhs, const GroupMember &rhs) {
-      if (lhs.order != rhs.order)
+      if (lhs.order != rhs.order) {
         return lhs.order < rhs.order;
+      }
       return lhs.originalIndex < rhs.originalIndex;
     });
 
@@ -249,10 +267,12 @@ collectScheduledGroups(Block &block, SmallVectorImpl<ScheduledGroup> &groups) {
 static bool canPrefixMoveLaterAcross(
     ArrayRef<GroupMember> members, Operation *placement, Operation *barrier) {
   for (const GroupMember &prevMember : members) {
-    if (!canMoveLaterAcross(prevMember.op, barrier))
+    if (!canMoveLaterAcross(prevMember.op, barrier)) {
       return false;
-    if (prevMember.op == placement)
+    }
+    if (prevMember.op == placement) {
       break;
+    }
   }
   return true;
 }
@@ -264,14 +284,16 @@ static void movePrefixPastBarrier(ArrayRef<GroupMember> members,
   for (const GroupMember &prevMember : members) {
     prevMember.op->moveAfter(anchor);
     anchor = prevMember.op;
-    if (prevMember.op == placement)
+    if (prevMember.op == placement) {
       break;
+    }
   }
 }
 
 static void scheduleGroup(ScheduledGroup &group) {
-  if (group.members.size() < 2)
+  if (group.members.size() < mlir::pto::kValue2) {
     return;
+  }
 
   Operation *placement = group.members.front().op;
   for (GroupMember &member : llvm::drop_begin(group.members)) {
@@ -284,11 +306,13 @@ static void scheduleGroup(ScheduledGroup &group) {
 
       Operation *blockingOp = placement->getNextNode();
       if (!blockingOp || blockingOp == op ||
-          !canMoveLaterAcross(placement, blockingOp))
+          !canMoveLaterAcross(placement, blockingOp)) {
         break;
+      }
 
-      if (!canPrefixMoveLaterAcross(group.members, placement, blockingOp))
+      if (!canPrefixMoveLaterAcross(group.members, placement, blockingOp)) {
         break;
+      }
 
       movePrefixPastBarrier(group.members, placement, blockingOp);
     }
@@ -298,16 +322,21 @@ static void scheduleGroup(ScheduledGroup &group) {
 
 static LogicalResult scheduleRegion(Region &region) {
   for (Block &block : region.getBlocks()) {
-    SmallVector<ScheduledGroup, 8> groups;
-    if (failed(collectScheduledGroups(block, groups)))
+    SmallVector<ScheduledGroup, mlir::pto::kValue8> groups;
+    if (failed(collectScheduledGroups(block, groups))) {
       return failure();
-    for (ScheduledGroup &group : groups)
+    }
+    for (ScheduledGroup &group : groups) {
       scheduleGroup(group);
+    }
 
-    for (Operation &op : block)
-      for (Region &nestedRegion : op.getRegions())
-        if (failed(scheduleRegion(nestedRegion)))
+    for (Operation &op : block) {
+      for (Region &nestedRegion : op.getRegions()) {
+        if (failed(scheduleRegion(nestedRegion))) {
           return failure();
+        }
+      }
+    }
   }
   return success();
 }
@@ -333,7 +362,7 @@ static LogicalResult scheduleRegion(Region &region) {
 
 struct FusionSpan {
   int64_t originalGroupId = 0;
-  SmallVector<Operation *, 8> members;
+  SmallVector<Operation *, mlir::pto::kValue8> members;
 };
 
 // Collect the physically contiguous spans of fusion metadata in `block`, in
@@ -350,9 +379,10 @@ collectPhysicalFusionSpans(Block &block,
   FusionSpan current;
   bool hasCurrent = false;
 
-  auto flush = [&]() {
-    if (!hasCurrent)
+  auto flush = [&current, &hasCurrent, &spans]() {
+    if (!hasCurrent) {
       return;
+    }
     spans.push_back(std::move(current));
     current = FusionSpan{};
     hasCurrent = false;
@@ -393,9 +423,10 @@ collectPhysicalFusionSpans(Block &block,
 static LogicalResult
 normalizeBlockFusionMetadata(Block &block, MLIRContext *context,
                             int64_t &nextGroupId) {
-  SmallVector<FusionSpan, 8> spans;
-  if (failed(collectPhysicalFusionSpans(block, spans)))
+  SmallVector<FusionSpan, mlir::pto::kValue8> spans;
+  if (failed(collectPhysicalFusionSpans(block, spans))) {
     return failure();
+  }
 
   // Remove all old metadata before assigning canonical groups, so that
   // surviving span ids never collide with stale ids left on singleton or
@@ -407,8 +438,9 @@ normalizeBlockFusionMetadata(Block &block, MLIRContext *context,
 
   const IntegerType i64 = IntegerType::get(context, 64);
   for (FusionSpan &span : spans) {
-    if (span.members.size() < 2)
+    if (span.members.size() < mlir::pto::kValue2) {
       continue;
+    }
 
     const int64_t newGroupId = nextGroupId++;
     for (auto [order, op] : llvm::enumerate(span.members)) {
@@ -425,16 +457,20 @@ static LogicalResult
 normalizeScheduledFusionMetadata(Region &region, MLIRContext *context,
                                  int64_t &nextGroupId) {
   for (Block &block : region.getBlocks()) {
-    if (failed(normalizeBlockFusionMetadata(block, context, nextGroupId)))
+    if (failed(normalizeBlockFusionMetadata(block, context, nextGroupId))) {
       return failure();
+    }
 
     // Recurse into nested regions in the same pre-order walk used by
     // scheduleRegion, so the function-wide id counter stays deterministic.
-    for (Operation &op : block)
-      for (Region &nestedRegion : op.getRegions())
+    for (Operation &op : block) {
+      for (Region &nestedRegion : op.getRegions()) {
         if (failed(normalizeScheduledFusionMetadata(nestedRegion, context,
-                                                    nextGroupId)))
+                                                    nextGroupId))) {
           return failure();
+        }
+      }
+    }
   }
   return success();
 }
@@ -445,8 +481,9 @@ struct OpSchedulingPass
 
   void runOnOperation() override {
     func::FuncOp func = getOperation();
-    if (func.isExternal())
+    if (func.isExternal()) {
       return;
+    }
 
     if (failed(scheduleRegion(func.getRegion()))) {
       signalPassFailure();

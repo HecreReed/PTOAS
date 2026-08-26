@@ -42,7 +42,7 @@ module attributes {pto.target_arch = "a5", pto.kernel_kind = #pto.kernel_kind<ve
         %scale_vec = pto.vmi.vbrc %scale : f32 -> !pto.vmi.vreg<128xf32>
         %out = pto.vmi.vmul %wide, %scale_vec
             : !pto.vmi.vreg<128xf32>, !pto.vmi.vreg<128xf32> -> !pto.vmi.vreg<128xf32>
-        pto.vmi.vstore %out, %ub_dst[%offset], %mask {pmode = "merge"}
+        pto.vmi.vstore %out, %ub_dst[%offset], %mask
             : !pto.vmi.vreg<128xf32>, !pto.ptr<f32, ub>, !pto.vmi.mask<128xpred>
         %next = arith.subi %rem, %c128 : index
         scf.yield %next : index

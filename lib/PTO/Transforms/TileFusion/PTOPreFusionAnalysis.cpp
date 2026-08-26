@@ -31,8 +31,9 @@ struct PreFusionAnalysisPass
 
   void runOnOperation() override {
     func::FuncOp func = getOperation();
-    if (func.isExternal())
+    if (func.isExternal()) {
       return;
+    }
 
     const auto &analysis = getAnalysis<pto::PreFusionAnalysis>();
     if (!analysis.isValid()) {

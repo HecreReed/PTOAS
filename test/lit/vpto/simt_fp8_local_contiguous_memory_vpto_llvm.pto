@@ -1,0 +1,71 @@
+// Copyright (c) 2026 Huawei Technologies Co., Ltd.
+// This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+// CANN Open Software License Agreement Version 2.0 (the "License").
+// Please refer to the License for details. You may not use this file except in compliance with the License.
+// THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+// INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+// See LICENSE in the root of the software repository for the full text of the License.
+
+// RUN: ptoas --pto-arch=a5 --pto-backend=vpto --emit-vpto-llvm-ir %s -o - 2>&1 | FileCheck %s
+// RUN: ptoas --cann-output-version=9.0.0 --pto-arch=a5 --pto-backend=vpto --emit-vpto-llvm-ir %s -o - 2>&1 | FileCheck %s
+
+module attributes {pto.target_arch = "a5", pto.kernel_kind = #pto.kernel_kind<vector>} {
+  func.func @simt_fp8_local_contiguous_memory(
+      %src: !pto.ptr<f32, ub>,
+      %dst_e4: !pto.ptr<f8E4M3FN, ub>,
+      %dst_e5: !pto.ptr<f8E5M2, ub>) attributes {pto.entry} {
+    pto.section.simt<<<32, 1, 1>>> {
+      %c8_i32 = arith.constant 8 : i32
+      %local_e4 = llvm.alloca %c8_i32 x f8E4M3FN : (i32) -> !llvm.ptr
+      %local_e5 = llvm.alloca %c8_i32 x f8E5M2 : (i32) -> !llvm.ptr
+
+      %src_addr = pto.castptr %src : !pto.ptr<f32, ub> -> i64
+      %src_ptr = llvm.inttoptr %src_addr : i64 to !llvm.ptr<6>
+      %src_pair = llvm.load %src_ptr : !llvm.ptr<6> -> vector<2xf32>
+      %e4_pair = pto.convert %src_pair round(r) sat : vector<2xf32> -> vector<2xf8E4M3FN>
+      %e5_pair = pto.convert %src_pair round(r) sat : vector<2xf32> -> vector<2xf8E5M2>
+      llvm.store %e4_pair, %local_e4 : vector<2xf8E4M3FN>, !llvm.ptr
+      llvm.store %e5_pair, %local_e5 : vector<2xf8E5M2>, !llvm.ptr
+
+      %local_e4_second = llvm.getelementptr %local_e4[2] : (!llvm.ptr) -> !llvm.ptr, f8E4M3FN
+      %local_e5_second = llvm.getelementptr %local_e5[2] : (!llvm.ptr) -> !llvm.ptr, f8E5M2
+      llvm.store %e4_pair, %local_e4_second : vector<2xf8E4M3FN>, !llvm.ptr
+      llvm.store %e5_pair, %local_e5_second : vector<2xf8E5M2>, !llvm.ptr
+
+      %e4_quad = llvm.load %local_e4 : !llvm.ptr -> vector<4xf8E4M3FN>
+      %e5_quad = llvm.load %local_e5 : !llvm.ptr -> vector<4xf8E5M2>
+      %e4_oct = llvm.load %local_e4 : !llvm.ptr -> vector<8xf8E4M3FN>
+      %e5_oct = llvm.load %local_e5 : !llvm.ptr -> vector<8xf8E5M2>
+
+      %dst_e4_addr = pto.castptr %dst_e4 : !pto.ptr<f8E4M3FN, ub> -> i64
+      %dst_e5_addr = pto.castptr %dst_e5 : !pto.ptr<f8E5M2, ub> -> i64
+      %dst_e4_ptr = llvm.inttoptr %dst_e4_addr : i64 to !llvm.ptr<6>
+      %dst_e5_ptr = llvm.inttoptr %dst_e5_addr : i64 to !llvm.ptr<6>
+      llvm.store %e4_quad, %dst_e4_ptr : vector<4xf8E4M3FN>, !llvm.ptr<6>
+      llvm.store %e5_quad, %dst_e5_ptr : vector<4xf8E5M2>, !llvm.ptr<6>
+      llvm.store %e4_oct, %dst_e4_ptr : vector<8xf8E4M3FN>, !llvm.ptr<6>
+      llvm.store %e5_oct, %dst_e5_ptr : vector<8xf8E5M2>, !llvm.ptr<6>
+    }
+    return
+  }
+}
+
+// CHECK-LABEL: define linkonce_odr simt_entry void @simt_fp8_local_contiguous_memory_simt_0
+// CHECK: alloca float8e4m3, i32 8
+// CHECK: alloca float8e5m2, i32 8
+// CHECK: call <2 x float8e4m3> @llvm.hivm.f32x2.to.f8e4m3x2
+// CHECK: call <2 x float8e5m2> @llvm.hivm.f32x2.to.f8e5m2x2
+// CHECK: store <2 x float8e4m3>
+// CHECK: store <2 x float8e5m2>
+// CHECK: getelementptr float8e4m3, ptr {{.*}}, i32 2
+// CHECK: getelementptr float8e5m2, ptr {{.*}}, i32 2
+// CHECK: load <4 x float8e4m3>
+// CHECK: load <4 x float8e5m2>
+// CHECK: load <8 x float8e4m3>
+// CHECK: load <8 x float8e5m2>
+// CHECK: store <4 x float8e4m3> {{.*}} ptr addrspace(6)
+// CHECK: store <4 x float8e5m2> {{.*}} ptr addrspace(6)
+// CHECK: store <8 x float8e4m3> {{.*}} ptr addrspace(6)
+// CHECK: store <8 x float8e5m2> {{.*}} ptr addrspace(6)
+// CHECK-NOT: f8E4M3FN
+// CHECK-NOT: f8E5M2

@@ -28,7 +28,7 @@ from ._tracing import (
     current_runtime,
 )
 
-from ptoas.mlir.ir import InsertionPoint, WalkResult
+from ptoas.mlir.ir import InsertionPoint, Module, WalkResult
 
 
 _MODULE_ATTRS = ("pto.target_arch", "pto.backend")
@@ -166,6 +166,7 @@ def merge_jit_modules(*kernels: KernelHandle):
         direct_function_symbols(merged) if not merged_is_partitioned else set()
     )
 
+    target_context = merged.context
     for kernel in kernels[1:]:
         module = kernel.build()
         actual_attrs = _module_attr_map(module)
@@ -191,6 +192,13 @@ def merge_jit_modules(*kernels: KernelHandle):
                     f"{sorted(duplicates)!r}"
                 )
             merged_symbols.update(module_symbols)
+
+        # Kernel modules are built in independent MLIR contexts.  Cloning an
+        # operation directly across contexts leaves its types and attributes
+        # owned by the source context, which may be destroyed before the
+        # merged module.  Reparse the source text in the target context before
+        # cloning so every operation in the merged module has one owner.
+        module = Module.parse(str(module), target_context)
         with InsertionPoint(merged.body):
             for op in module.body.operations:
                 op.operation.clone()

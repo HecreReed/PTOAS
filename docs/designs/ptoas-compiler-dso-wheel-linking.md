@@ -109,8 +109,7 @@ _core
 │   ├── ptoas.cpp
 │   ├── driver.cpp
 │   ├── VPTOHostStubEmission.cpp
-│   ├── ObjectEmission.cpp
-│   └── TilelangDaemon.cpp
+│   └── ObjectEmission.cpp
 ├── PTOCAPI
 └── PTOASPythonCAPI
 ```
@@ -241,7 +240,7 @@ mode switch:
 -DMLIR_INSTALL_AGGREGATE_OBJECTS=ON
 ```
 
-The pinned LLVM 21 tree defines these options; `LLVM_ENABLE_PIC` and
+The pinned LLVM 19 tree defines these options; `LLVM_ENABLE_PIC` and
 `MLIR_INSTALL_AGGREGATE_OBJECTS` already default to `ON`, but wheel workflows
 set them explicitly because they are part of the distribution contract. The
 required contract is: LLVM/MLIR component targets are static and
@@ -257,7 +256,7 @@ dependencies on the external LLVM build tree.
 
 Static and shared LLVM SDKs must use separate build directories and cache keys.
 Before enabling the profile, both wheel workflows must bump
-`LLVM_CACHE_FLAVOR`, for example to `llvm21-vpto-wheel-static-v1`. Reusing a
+`LLVM_CACHE_FLAVOR`, for example to `llvm19-vpto-wheel-static-v1`. Reusing a
 cache produced with `BUILD_SHARED_LIBS=ON` is invalid even when the source SHA
 is identical.
 

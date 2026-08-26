@@ -1,0 +1,37 @@
+// Copyright (c) 2026 Huawei Technologies Co., Ltd.
+// This program is free software; you can redistribute it and/or modify it under the terms of
+// the CANN Open Software License Agreement Version 2.0 (the "License").
+// Please refer to the License for the specific language governing permissions and limitations under the License.
+
+// Keep vstus callees type-specific so different element types can coexist in
+// one kernel without conflicting LLVM declarations.
+// RUN: ptoas --pto-arch=a5 --pto-backend=vpto --emit-vpto-llvm-ir %s -o - 2>&1 | FileCheck %s --check-prefix=DEFAULT
+// RUN: ptoas --cann-output-version=9.0.0 --pto-arch=a5 --pto-backend=vpto --emit-vpto-llvm-ir %s -o - 2>&1 | FileCheck %s --check-prefix=CANN900
+
+module attributes {pto.target_arch = "a5", pto.kernel_kind = #pto.kernel_kind<vector>} {
+  func.func @vstus_mixed_types(%f32_dst: !pto.ptr<f32, ub>,
+                               %u8_dst: !pto.ptr<ui8, ub>,
+                               %f32_value: !pto.vreg<64xf32>,
+                               %u8_value: !pto.vreg<256xui8>) attributes {pto.kernel} {
+    %c0_i32 = arith.constant 0 : i32
+    pto.vecscope {
+      %f32_align = pto.init_align : !pto.align
+      %f32_align_out = pto.vstus %f32_align, %c0_i32, %f32_value, %f32_dst :
+        !pto.align, i32, !pto.vreg<64xf32>, !pto.ptr<f32, ub> -> !pto.align
+      pto.vstas %f32_align_out, %f32_dst, %c0_i32 : !pto.align, !pto.ptr<f32, ub>, i32
+      %u8_align = pto.init_align : !pto.align
+      %u8_align_out = pto.vstus %u8_align, %c0_i32, %u8_value, %u8_dst :
+        !pto.align, i32, !pto.vreg<256xui8>, !pto.ptr<ui8, ub> -> !pto.align
+      pto.vstas %u8_align_out, %u8_dst, %c0_i32 : !pto.align, !pto.ptr<ui8, ub>, i32
+    }
+    return
+  }
+}
+
+// DEFAULT-LABEL: define void @vstus_mixed_types_mix_aiv
+// DEFAULT: call <32 x i8> @llvm.hivm.vstus.v64f32
+// DEFAULT: call <32 x i8> @llvm.hivm.vstus.v256i8
+
+// CANN900-LABEL: define void @vstus_mixed_types_mix_aiv
+// CANN900: call <32 x i8> @llvm.hivm.vstus.v64f32
+// CANN900: call <32 x i8> @llvm.hivm.vstus.v256i8

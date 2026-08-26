@@ -35,8 +35,9 @@ static TFreeOp findMatchingTFree(TPopOp tpopOp) {
   for (auto it = std::next(tpopOp->getIterator()), end = block->end();
        it != end; ++it) {
     if (auto tfreeOp = dyn_cast<TFreeOp>(&*it)) {
-      if (tfreeOp.getPipeHandle() == pipeHandle)
+      if (tfreeOp.getPipeHandle() == pipeHandle) {
         return tfreeOp;
+      }
     }
   }
   return {};
@@ -46,8 +47,9 @@ static Operation *getTopLevelAncestorInBlock(Operation *op, Block *block) {
   Operation *current = op;
   while (current && current->getBlock() != block) {
     Region *parentRegion = current->getParentRegion();
-    if (!parentRegion)
+    if (!parentRegion) {
       return nullptr;
+    }
     current = parentRegion->getParentOp();
   }
   return current;
@@ -57,8 +59,9 @@ static bool hasSamePipeTPopInRegion(Operation *op, Value pipeHandle,
                                     TPopOp current) {
   bool found = false;
   op->walk([&](TPopOp nestedTpop) {
-    if (nestedTpop == current)
+    if (nestedTpop == current) {
       return WalkResult::advance();
+    }
     if (nestedTpop.getPipeHandle() == pipeHandle) {
       found = true;
       return WalkResult::interrupt();
@@ -70,8 +73,9 @@ static bool hasSamePipeTPopInRegion(Operation *op, Value pipeHandle,
 
 static LogicalResult verifySingleOutstandingUntil(TPopOp tpopOp,
                                                   Operation *freeBoundary) {
-  if (!freeBoundary || freeBoundary == tpopOp.getOperation())
+  if (!freeBoundary || freeBoundary == tpopOp.getOperation()) {
     return success();
+  }
 
   Value pipeHandle = tpopOp.getPipeHandle();
   Block *block = tpopOp->getBlock();
@@ -82,8 +86,9 @@ static LogicalResult verifySingleOutstandingUntil(TPopOp tpopOp,
       return tpopOp.emitOpError(
           "multiple outstanding pops on the same pipe are not supported");
     }
-    if (op == freeBoundary)
+    if (op == freeBoundary) {
       break;
+    }
   }
 
   return success();
@@ -111,8 +116,9 @@ static LogicalResult verifyNoTileUsesAfterTFree(TPopOp tpopOp,
 
 static bool isInsideSectionOrAttributedKernel(TPopOp tpopOp, func::FuncOp funcOp) {
   if (tpopOp->getParentOfType<SectionCubeOp>() ||
-      tpopOp->getParentOfType<SectionVectorOp>())
+      tpopOp->getParentOfType<SectionVectorOp>()) {
     return true;
+  }
   return funcOp &&
          funcOp->hasAttr(FunctionKernelKindAttr::name);
 }
@@ -126,8 +132,9 @@ struct PTOVerifyTFreePass
     funcOp.walk([&](TPopOp op) { tpops.push_back(op); });
 
     for (TPopOp tpopOp : tpops) {
-      if (!isInsideSectionOrAttributedKernel(tpopOp, funcOp))
+      if (!isInsideSectionOrAttributedKernel(tpopOp, funcOp)) {
         continue;
+      }
 
       TFreeOp existingTFree = findMatchingTFree(tpopOp);
       if (!existingTFree) {

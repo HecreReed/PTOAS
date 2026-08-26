@@ -37,6 +37,12 @@
 
 namespace mlir {
 namespace pto {
+  enum class TFillPadLoweringKind {
+    Normal,
+    InPlace,
+    Expand,
+  };
+
   enum class PhysicalSectionKind {
     Vector,
     Cube,
@@ -45,11 +51,18 @@ namespace pto {
   std::optional<PhysicalSectionKind>
   inferPhysicalSectionKindFromPipe(Operation *op);
 
+  FailureOr<bool> hasTFillPadExpandedPhysicalShape(TFillPadOp op);
+  FailureOr<TFillPadLoweringKind>
+  inferTFillPadLoweringKindAfterMemoryPlanning(TFillPadOp op);
+
   const std::set<pto::AddressSpace> LocalBufferSpace{
     pto::AddressSpace::VEC, pto::AddressSpace::MAT, pto::AddressSpace::ACC, pto::AddressSpace::LEFT, pto::AddressSpace::RIGHT, pto::AddressSpace::BIAS, pto::AddressSpace::SCALING};
   constexpr const uint8_t kBitsToByte = 8;
   func::ReturnOp getAssumedUniqueReturnOp(func::FuncOp funcOp);
   std::optional<std::pair<Value, Value>> getOperationAliasInfo(Operation *op);
+  SmallVector<std::pair<Value, Value>, 15>
+  getSemanticNoAliasPairs(Operation *op);
+  LogicalResult verifySemanticNoAliasRanges(func::FuncOp func);
   std::optional<AddressSpaceAttr> GetBufferSpaceAttr(Value operand);
   bool isLocalBuffer(std::optional<AddressSpaceAttr> memorySpaceAttr);
   Value tracebackMemRef(Value memrefVal);

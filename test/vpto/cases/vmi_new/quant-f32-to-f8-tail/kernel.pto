@@ -38,7 +38,7 @@ module attributes {pto.target_arch = "a5", pto.kernel_kind = #pto.kernel_kind<ve
         %mask = pto.vmi.create_mask %rem : index -> !pto.vmi.mask<256xpred>
         %wide = pto.vmi.vload %ub_src[%offset] : !pto.ptr<f32, ub> -> !pto.vmi.vreg<256xf32>
         %packed = pto.vmi.vcvt %wide {saturate = "SAT"} : !pto.vmi.vreg<256xf32> -> !pto.vmi.vreg<256xf8E4M3FN>
-        pto.vmi.vstore %packed, %ub_dst_f8[%offset], %mask {pmode = "merge"}
+        pto.vmi.vstore %packed, %ub_dst_f8[%offset], %mask
             : !pto.vmi.vreg<256xf8E4M3FN>, !pto.ptr<f8E4M3FN, ub>, !pto.vmi.mask<256xpred>
         %next = arith.subi %rem, %c256 : index
         scf.yield %next : index

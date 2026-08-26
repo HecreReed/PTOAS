@@ -232,44 +232,51 @@ When the hardware format requires scratch storage, pass `tmp`.
 block length. Multi-list forms can pass `src`/`dst` sequences together with
 `tmp` and `excuted`.
 
-#### `pto.tile.gather(src: Tile, dst: Tile, *, mask_pattern: str | None = None, indices: Tile | None = None, tmp: Tile | None = None, cdst: Tile | None = None, k_value: ScalarType | None = None, cmp_mode: CmpMode | str | None = None, offset: int | None = None) -> None`
+#### `pto.tile.gather(src: Tile, dst: Tile, *, mask_pattern: str | None = None, axis: str | None = None, indices: Tile | None = None, tmp: Tile | None = None, cdst: Tile | None = None, k_value: ScalarType | None = None, cmp_mode: CmpMode | str | None = None, offset: int | None = None) -> None`
 
 **Description**: Gathers/selects tile elements. For TopK extraction from an
 interleaved `(score, index)` sort buffer, use `mask_pattern="P0101"` for score
 slots and `mask_pattern="P1010"` for index slots. Supported tile mask patterns
 are `P0101`, `P1010`, `P0001`, `P0010`, `P0100`, `P1000`, and `P1111`.
+When using `mask_pattern`, `axis` must be specified as `"row"` or `"col"` to
+indicate the direction of mask expansion.
 
 **Example**:
 
 ```python
 pto.tile.sort32(src_tile, index_tile, sort_tile)
 pto.tile.mrgsort(sort_tile, tmp_sort_tile, pto.const(64, dtype=pto.i32))
-pto.tile.gather(tmp_sort_tile, top_scores, mask_pattern="P0101")
-pto.tile.gather(tmp_sort_tile, top_indices, mask_pattern="P1010")
+pto.tile.gather(tmp_sort_tile, top_scores, mask_pattern="P0101", axis="row")
+pto.tile.gather(tmp_sort_tile, top_indices, mask_pattern="P1010", axis="row")
 ```
 
 #### `pto.tile.gatherb(src: Tile, offsets: Tile, dst: Tile) -> None`
 
-**Description**: Gathers elements from a source tile into a destination tile
-using byte offsets. Each element of `offsets` is a byte address into the flat
-byte representation of `src`; the element (or block of elements starting at that
-byte position) is written into the corresponding position of `dst`.
+**Description**: Gathers 32-byte source blocks into a destination tile. Each
+element of `offsets` is a 32-byte-aligned byte address relative to the source UB
+base and selects one complete block. Use `pto.tile.gather` for arbitrary scalar
+element indices.
 
 **Parameters**:
 
 | Parameter | Type | Description |
 |-----------|------|-------------|
 | `src` | `Tile` | Source tile containing the data to gather from |
-| `offsets` | `Tile` | Byte offset tile (`ui32` dtype) specifying byte positions in `src` |
-| `dst` | `Tile` | Destination tile (must use row-major layout; element size 1, 2, or 4 bytes) |
+| `offsets` | `Tile` | Compact 32-bit integer tile containing source block addresses |
+| `dst` | `Tile` | Destination tile |
 
 **Returns**: None
 
 **Constraints**:
 
-- `offsets` must have `ui32` dtype.
-- `dst` must use row-major layout.
-- `dst` element size must be 1, 2, or 4 bytes.
+- On A2/A3, `src` and `dst` must have the same valid shape.
+- On A2/A3, `dst` and `offsets` must use row-major layout and `dst` elements
+  must be 2 or 4 bytes.
+- `offsets` must have a 32-bit integer dtype.
+- On A2/A3, `offsets.v_row` equals `dst.v_row`. Its valid column count is
+  `ceil(dst.v_col / (32 / sizeof(dst element)))`, rounded up to a multiple of
+  eight addresses.
+- Allocated row widths are physical strides and may exceed valid widths.
 
 **Example**:
 
@@ -1541,6 +1548,7 @@ pto.tile.store(dst_tile, out_view)
 | Windowing | `tile.extract`, `tile.insert` |
 | Tile movement | `tile.mov`, `tile.concat` |
 | Dequantize | `tile.dequant` |
+| Debug print | `tile.print` |
 | Tile matmul | `tile.matmul`, `tile.matmul_acc`, `tile.matmul_mx`, `tile.matmul_mx_acc`, `tile.matmul_mx_bias` |
 | Tile gemv | `tile.gemv_mx`, `tile.gemv_mx_acc`, `tile.gemv_mx_bias` |
 
@@ -1581,6 +1589,38 @@ then the broadcast offset is subtracted and the broadcast scale multiplied per v
 ```python
 # src: i16 [rows, cols]; scale/offset: f32 [rows, 1]; dst: f32 [rows, cols]
 pto.tile.dequant(src_tile, scale_tile, offset_tile, dst_tile)
+```
+
+---
+
+### 8.1.19 Debug Print
+
+#### `pto.tile.print(src: Tile, tmp: PartitionTensorView | None = None, *, print_format: str | None = None) -> None`
+
+**Description**: Print tile contents from device code for debugging. This maps to `pto.tprint`
+and has no tensor result; its observable behavior is device stdout output. `tprint`
+is currently supported only by the EmitC backend.
+
+**Parameters**:
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `src` | `Tile` | Source tile to print |
+| `tmp` | `PartitionTensorView`, optional | Scratch GM view for ISA overload compatibility |
+| `print_format` | `str`, optional | `width8_precision4` (default), `width8_precision2`, or `width10_precision6` |
+
+**Constraints**:
+
+- A5 TileLib currently supports `loc=vec` row-major tiles with `none_box` storage layout.
+- Supported element types: `f16`, `f32`, `i8`, `i16`, `i32`, `ui8`, `ui16`, `ui32`.
+- `tmp`, when supplied, must match the source tile shape and dtype.
+- `tprint` is not supported by the VPTO backend; use `@pto.jit(..., backend="emitc")`.
+
+**Example**:
+
+```python
+pto.tile.print(src_tile)
+pto.tile.print(src_tile, print_format="width10_precision6")
 ```
 
 ---
@@ -1665,6 +1705,12 @@ exp_vec = pto.vexp(s_row, col_mask)
 | `pto.vxor(v0, v1, mask) -> VRegType` | `v0 ^ v1` |
 | `pto.vshl(vec, shift, mask) -> VRegType` | `vec << shift` (per-element) |
 | `pto.vshr(vec, shift, mask) -> VRegType` | `vec >> shift` (per-element) |
+
+For `pto.vshl` and `pto.vshr`, `vec` must use an integer element type. The
+`shift` vector must have the same lane count and element bit width as `vec`.
+PTODSL normalizes `shift` to signed `siW`, where `W` is the element bit width;
+the result has the same type as `vec`. The right-shift mode of `pto.vshr` is
+not defined by the current contract.
 
 ---
 

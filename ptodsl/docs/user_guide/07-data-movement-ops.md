@@ -154,6 +154,10 @@ this chapter documents the underlying canonical operations.
 - `nburst` is always required.
 - `loop` groups are ordered from inner (wrapping `nburst`) to outer.
 - If `pad` specifies either left or right count, both must be provided.
+- `pad_value` may be an 8/16/32-bit integer scalar (signless, signed, or
+  unsigned) or an `f16`/`bf16`/`f32` scalar. Signed/unsigned integer pads are
+  normalized to their signless bit pattern when the op is built; the pad value
+  is encoded into `SET.MOV.PAD.VAL` as raw bits, so signedness carries no meaning.
 
 **Example** — load a 32×32 f32 tile from contiguous GM into contiguous UB:
 
@@ -899,6 +903,52 @@ Cube compute step; it does not issue those transfers itself.
 
 ---
 
+#### `pto.raw_fill_l1(dst: PtrType, byte_offset: int, raw_value: int, *, repeat_times: int, block_num_32b: int, dst_gap_32b: int, fill_word_bits: int) -> None`
+
+**Description**: Fill a strided region in the L1 (MAT) buffer with one raw
+16-bit or 32-bit word pattern. This is the explicit PTO surface used for
+padding and tail regions, including the final strided repetition.
+
+All parameters from `repeat_times` onward are keyword-only.
+
+**Parameters**:
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `dst` | `PtrType` (L1/MAT) | Destination L1 buffer |
+| `byte_offset` | `int` | Non-negative byte offset to the first filled word; must be a multiple of 32 bytes |
+| `raw_value` | `int` | Raw pattern; low 16 bits are repeated for a 16-bit fill, all 32 bits are used for a 32-bit fill |
+| `repeat_times` | `int` | Number of fill repetitions; all values must be at most `32767` |
+| `block_num_32b` | `int` | Number of contiguous 32-byte blocks per repetition; all values must be at most `32767` |
+| `dst_gap_32b` | `int` | Gap between repetitions in 32-byte blocks; all values must be at most `32767` |
+| `fill_word_bits` | `int` | Static view width, exactly `16` or `32`; must be a Python `int` |
+
+**Constraints**: `dst` must be in the L1/MAT address space. Offsets and
+geometry values must be non-negative. `repeat_times`, `block_num_32b`, and
+`dst_gap_32b` must be at most `32767`, including when dynamically computed;
+PTODSL diagnoses static Python `int` violations up front, and PTOAS diagnoses
+known constant violations for dynamically computed values. `fill_word_bits`
+must be a static `16` or `32` value and is recorded as an IR attribute. The
+effective destination address `dst + byte_offset` must be 32-byte aligned;
+PTODSL rejects non-aligned static Python `int` offsets, while dynamic offset
+alignment is a caller precondition.
+
+**Example**:
+
+```python
+pto.raw_fill_l1(
+    l1_dst,
+    byte_offset=32,
+    raw_value=0,
+    repeat_times=4,
+    block_num_32b=2,
+    dst_gap_32b=6,
+    fill_word_bits=16,
+)
+```
+
+---
+
 #### `pto.mte_gm_l1_frac(src: PtrType, dst: PtrType, mode: pto.FractalMode, *, shape: tuple[int, int], src_layout: tuple[int] | tuple[int, int], dst_group: tuple[int, int, int, int], ctrl: tuple[int, bool]) -> None`
 
 **Description**: Fractal GM-to-L1 load for specialized layouts (`ND2NZ`, `DN2NZ`).
@@ -938,6 +988,39 @@ Cube compute step; it does not issue those transfers itself.
 ---
 
 ### Operand loading: L1 → L0A / L0B
+
+#### `pto.mte_l1_l0a(src: PtrType, dst: PtrType, *, m_start: int, k_start: int, m_step: int, k_step: int, src_stride: int, dst_stride: int, transpose: bool = False) -> None`
+#### `pto.mte_l1_l0b(src: PtrType, dst: PtrType, *, m_start: int, k_start: int, m_step: int, k_step: int, src_stride: int, dst_stride: int, transpose: bool = False) -> None`
+
+**Description**: Explicit-control L1-to-L0A/L0B loads. This overload preserves
+the authored fractal-block control fields and does not infer strides from a
+logical tile shape. PTODSL emits the same `mte_l1_l0a` / `mte_l1_l0b` wrapper
+IR as the structured overload; PTOAS selects packed-S4 staging for
+`f4e1m2x2` and `f4e2m1x2`, and the regular L1-to-L0 load for other supported
+element types.
+
+**Parameters**:
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `src` | `PtrType` (L1/MAT) | L1 source pointer; parent-allocation matrix offsets are represented by the control fields below. |
+| `dst` | `PtrType` (L0A/L0B) | L0 destination pointer; stage/version offsets belong in this pointer. |
+| `m_start`, `k_start` | `int` in `0..65535` | Source fractal-block coordinates at which the load begins. |
+| `m_step`, `k_step` | `int` in `1..255` | Number of fractal blocks transferred along the two source axes. |
+| `src_stride`, `dst_stride` | `int` in `1..65535` | Physical outer strides of the complete L1 and L0 allocations, in fractal-block units. They are independent of the transferred region extents. |
+| `transpose` | `bool` | Final hardware transpose attribute. |
+
+**Returns**: None (side-effect operation).
+
+Use this overload when a source/destination subregion has layout control that
+cannot be reconstructed from a canonical `m`/`k`/`n` tile shape. The pointer
+order is always `src, dst`. For packed FP4 sources, `k_start` is a packed
+`f4x2` source coordinate (one byte, or two logical FP4 values), while `k_step`
+is a 32-byte S4 K-block (64 logical FP4 values). PTODSL preserves all six
+controls in the wrapper IR exactly; callers must not pre-scale the K controls
+to compensate for the structured form's shape conversion.
+
+---
 
 #### `pto.mte_l1_l0a(src: PtrType, dst: PtrType, m: int, k: int, *, start_row: int, start_col: int, transpose: bool = False) -> None`
 
@@ -979,10 +1062,29 @@ Cube compute step; it does not issue those transfers itself.
 
 ---
 
-#### `pto.mte_l1_l0a_mx(src: PtrType, dst: PtrType, m: int, k: int, *, start_row: int = 0, start_col: int = 0) -> None`
-#### `pto.mte_l1_l0b_mx(src: PtrType, dst: PtrType, k: int, n: int, *, start_row: int = 0, start_col: int = 0) -> None`
+#### `pto.mte_l1_l0a_mx(src: PtrType, dst: PtrType, m: int | None = None, k: int | None = None, *, start_row: int | None = None, start_col: int | None = None, x_start: int | None = None, y_start: int | None = None, x_step: int | None = None, y_step: int | None = None, src_stride: int | None = None, dst_stride: int | None = None) -> None`
+#### `pto.mte_l1_l0b_mx(src: PtrType, dst: PtrType, k: int | None = None, n: int | None = None, *, start_row: int | None = None, start_col: int | None = None, x_start: int | None = None, y_start: int | None = None, x_step: int | None = None, y_step: int | None = None, src_stride: int | None = None, dst_stride: int | None = None) -> None`
 
-**Description**: MX-mode variants of `mte_l1_l0a` and `mte_l1_l0b` for MX-capable dtypes. Parameters match their non-MX counterparts.
+**Description**: MX-mode variants of `mte_l1_l0a` and `mte_l1_l0b`. Every control field is independently optional, but a PTODSL call must provide exactly one complete group: either the shape-derived fields or the full MX fields. The shape-derived group preserves existing behavior. Use the full group when scale traversal cannot be inferred from matrix shape; every supplied value is preserved.
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `src` | `PtrType` (L1) | 32-byte-aligned MX scale source pointer. `pto.f8e8m0` is supported as a storage element type. |
+| `dst` | `PtrType` (L0A or L0B) | 16-byte-aligned real staged L0 destination pointer. Pass the actual L0 address; do not divide or otherwise encode it in PTODSL. |
+| `m`, `k` or `k`, `n` | `int | None` | Shape-derived dimensions. Supply both dimensions and do not combine them with full MX fields. |
+| `start_row`, `start_col` | `int | None` | Shape-derived source offsets. They default to `0` when the shape-derived group is used. With full MX fields they must be omitted, except explicit literal `0` remains accepted for compatibility. |
+| `x_start`, `y_start` | `int | None` | Start coordinates in the MX scale-fragment grid. |
+| `x_step`, `y_step` | `int | None` | Traversal extents in MX scale-fragment grid units. |
+| `src_stride` | `int | None` | Distance between source traversal rows in MX scale-fragment grid units. |
+| `dst_stride` | `int | None` | Distance between destination traversal rows in MX scale-fragment grid units. |
+
+The full group is `x_start`, `y_start`, `x_step`, `y_step`, `src_stride`, and
+`dst_stride`; all six values are required together. Its values are MX
+scale-fragment grid coordinates or strides, not logical element counts or byte
+offsets. A partial group or a mixture of shape-derived and full fields raises
+`TypeError`.
+
+**Returns**: None (side-effect operation).
 
 ---
 
@@ -1153,8 +1255,11 @@ pto.mte_l0c_gm(
 | Data Flow | Operation | Src Space | Dst Space |
 |-----------|-----------|-----------|-----------|
 | GM → L1 | `mte_gm_l1` | gm | l1 |
+| L1 raw fill | `raw_fill_l1` | -- | l1 |
 | GM → L1 (fractal) | `mte_gm_l1_frac` | gm | l1 |
 | L1 → UB | `mte_l1_ub` | l1 | ub |
+| L1 → L0A (explicit control) | `mte_l1_l0a` | l1 | l0a |
+| L1 → L0B (explicit control) | `mte_l1_l0b` | l1 | l0b |
 | L1 → L0A | `mte_l1_l0a` | l1 | l0a |
 | L1 → L0B | `mte_l1_l0b` | l1 | l0b |
 | L1 → L0A (MX) | `mte_l1_l0a_mx` | l1 | l0a |

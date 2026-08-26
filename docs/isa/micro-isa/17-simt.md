@@ -44,7 +44,7 @@ The current PTO SIMT surface supports these operation families:
 | Lane collectives | `pto.vote_all`, `pto.vote_any`, `pto.vote_uni`, `pto.vote_ballot`, `pto.shuffle_idx`, `pto.shuffle_up`, `pto.shuffle_down`, `pto.shuffle_bfly`, `pto.redux_add`, `pto.redux_max`, `pto.redux_min` |
 | Scalar memory | `pto.load`, `pto.store`, `pto.ldg`, `pto.stg` |
 | Atomic memory | `pto.atomic_exch`, `pto.atomic_add`, `pto.atomic_sub`, `pto.atomic_min`, `pto.atomic_max`, `pto.atomic_and`, `pto.atomic_or`, `pto.atomic_xor`, `pto.atomic_cas` |
-| Scalar math | `pto.prmt`, `pto.mulhi`, `pto.mul_i32toi64`, `pto.absf`, `pto.sqrt`, `pto.exp`, `pto.log`, `pto.pow`, `pto.ceil`, `pto.floor`, `pto.rint`, `pto.round`, `pto.fmin`, `pto.fmax`, `pto.fma` |
+| Scalar math | `pto.prmt`, `pto.mulhi`, `pto.mul_i32toi64`, `pto.absf`, `pto.sqrt`, `pto.exp`, `pto.log`, `pto.sin`, `pto.cos`, `pto.pow`, `pto.ceil`, `pto.floor`, `pto.rint`, `pto.round`, `pto.fmin`, `pto.fmax`, `pto.fma` |
 | Conversion | `pto.convert` |
 | Entry synchronization and state | `pto.syncthreads`, `pto.threadfence`, `pto.threadfence_block`, `pto.keep`, `pto.resume` |
 
@@ -791,10 +791,11 @@ else:
 - **syntax:** `%r = pto.absf %x : T -> T`
 - **semantics:** Return `abs(x)`. For `vector<2xT>`, absolute value is applied
   independently to each element.
-- **inputs:** `%x` is an `f32` scalar, `vector<2xf16>`, or `vector<2xbf16>`.
+- **inputs:** `%x` is an `f16` or `f32` scalar, `vector<2xf16>`, or
+  `vector<2xbf16>`.
 - **outputs:** One value with the same type as `%x`.
-- **constraints and limitations:** Scalar `f16` and scalar `bf16` are not
-  accepted by this op; use the packed form only for `vector<2xT>`.
+- **constraints and limitations:** Scalar `bf16` is not accepted by this op;
+  use the packed form for `vector<2xbf16>`.
 
 ### `pto.sqrt`
 
@@ -826,6 +827,19 @@ else:
 - **constraints and limitations:** `T` is `f16`, `f32`, or `vector<2xf16>`.
   For real-number semantics, each element should be positive; non-positive
   inputs follow the target floating-point rules.
+
+### `pto.sin` / `pto.cos`
+
+- **syntax:** `%r = pto.sin %x : f32 -> f32` or `%r = pto.cos %x : f32 -> f32`
+- **semantics:** Return the sine or cosine of `%x`, where `%x` is expressed in
+  radians.
+- **inputs:** `%x` is an `f32` scalar in a `pto.simt_entry` function.
+- **outputs:** One `f32` scalar.
+- **constraints and limitations:** These operations are available on A5 and
+  use the PTOAS software implementation. The implementation is intended for
+  finite f32 inputs such as the angle range used by Box–Muller transforms;
+  accuracy decreases for very large-magnitude inputs, and exceptional inputs
+  follow the software implementation's floating-point behavior.
 
 ### `pto.pow`
 
@@ -880,9 +894,10 @@ else:
 - **semantics:** Return the floating minimum of `%a` and `%b`.
 - **inputs:** `%a` and `%b` have the same type.
 - **outputs:** One value with the same type as the inputs.
-- **constraints and limitations:** `T` is `f32`, `bf16`, `vector<2xf16>`, or
-  `vector<2xbf16>`. For vector types, the minimum is computed element-wise. NaN
-  handling follows the target floating-point minimum rule.
+- **constraints and limitations:** `T` is `f16`, `f32`, `bf16`,
+  `vector<2xf16>`, or `vector<2xbf16>`. For vector types, the minimum is
+  computed element-wise. NaN handling follows the target floating-point
+  minimum rule.
 
 ### `pto.fmax`
 
@@ -890,9 +905,10 @@ else:
 - **semantics:** Return the floating maximum of `%a` and `%b`.
 - **inputs:** `%a` and `%b` have the same type.
 - **outputs:** One value with the same type as the inputs.
-- **constraints and limitations:** `T` is `f32`, `bf16`, `vector<2xf16>`, or
-  `vector<2xbf16>`. For vector types, the maximum is computed element-wise. NaN
-  handling follows the target floating-point maximum rule.
+- **constraints and limitations:** `T` is `f16`, `f32`, `bf16`,
+  `vector<2xf16>`, or `vector<2xbf16>`. For vector types, the maximum is
+  computed element-wise. NaN handling follows the target floating-point
+  maximum rule.
 
 ### `pto.fma`
 

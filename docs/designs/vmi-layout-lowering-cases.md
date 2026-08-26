@@ -2383,6 +2383,14 @@ for g = 0..7:
   out[group_off + g] = rhs_base[rhs_off + g]
 ```
 
+The single-group unit-stride case is special. A `group_slot_load` with
+`num_groups = 1` has only one semantic scalar slot, so it lowers through
+`pto.vlds {dist = "BRC_B*"}` rather than `pto.vsldb`. `vsldb` requires its
+source base operand to be 32B aligned, while the scalar effective address only
+needs the natural alignment of its element type. The broadcast load preserves
+the physical vreg shape; only lane 0 is semantically live for the one-slot
+layout.
+
 If `source_group_stride != 1`, this packed `slots = 8` layout requires a
 strided/gather group-slot load materializer. Until that support exists,
 `group_slot_load` with `slots = 8` and non-unit stride must diagnose instead of

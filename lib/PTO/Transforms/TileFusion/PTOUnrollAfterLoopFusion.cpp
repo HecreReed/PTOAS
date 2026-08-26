@@ -6,6 +6,7 @@
 // INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
 // See LICENSE in the root of the software repository for the full text of the License.
 
+#include "PTO/Support/CodeConstants.h"
 #include "PTO/Transforms/Passes.h"
 
 #include "PTO/IR/PTO.h" // FusionRegionOp
@@ -51,8 +52,9 @@ static int64_t getEffectiveFactor(pto::FusionRegionOp region,
                                   llvm::StringRef attrName) {
   if (auto attr = region->getAttrOfType<IntegerAttr>(attrName)) {
     int64_t v = attr.getInt();
-    if (v > 1)
+    if (v > 1) {
       return v;
+    }
   }
   return 0;
 }
@@ -74,8 +76,9 @@ static std::optional<int64_t> getConstantTripCount(scf::ForOp forOp) {
   std::optional<int64_t> lb = getConstantIntValue(forOp.getLowerBound());
   std::optional<int64_t> ub = getConstantIntValue(forOp.getUpperBound());
   std::optional<int64_t> step = getConstantIntValue(forOp.getStep());
-  if (!lb || !ub || !step || *step <= 0 || *ub <= *lb)
+  if (!lb || !ub || !step || *step <= 0 || *ub <= *lb) {
     return std::nullopt;
+  }
   return (*ub - *lb + *step - 1) / *step; // ceilDiv
 }
 
@@ -177,11 +180,12 @@ struct PTOUnrollAfterLoopFusion
     // Gather all scf.for in post-order (innermost first). The walk callback
     // only collects; every mutation happens in the loop below, after the walk
     // completes, so we never walk IR being rewritten under us.
-    SmallVector<scf::ForOp, 4> candidates;
+    SmallVector<scf::ForOp, mlir::pto::kValue4> candidates;
     func.walk([&](scf::ForOp forOp) { candidates.push_back(forOp); });
 
-    for (scf::ForOp forOp : candidates)
+    for (scf::ForOp forOp : candidates) {
       (void)tryUnrollLeafForOp(forOp);
+    }
   }
 };
 

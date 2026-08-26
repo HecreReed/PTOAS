@@ -8,6 +8,7 @@
 > (per-group scalar fan-back) has no single native instruction and is a
 > cost-model decision.
 
+
 ---
 
 ## `pto.vmi.vbrc`

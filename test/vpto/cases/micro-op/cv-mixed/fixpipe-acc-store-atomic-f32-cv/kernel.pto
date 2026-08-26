@@ -10,7 +10,7 @@
 // case: micro-op/cv-mixed/fixpipe-acc-store-atomic-f32-cv
 // family: cv-mixed
 // target_ops: pto.mte_gm_l1_frac, pto.mte_l1_l0a, pto.mte_l1_l0b, pto.mad,
-//   pto.mte_l0c_gm, pto.sync.set, pto.sync.wait
+//   pto.mte_l0c_gm, pto.set_intra_block, pto.wait_intra_block
 // scenarios: acc-store-gm-atomic-add-max-min, f32, nz2nd, strict-matmul-golden
 // -----------------------------------------------------------------------------
 

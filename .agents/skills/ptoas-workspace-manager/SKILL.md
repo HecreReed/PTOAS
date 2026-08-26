@@ -27,7 +27,32 @@ developer-selected LLVM build and base Python environment.
 ## Create a workspace
 
 From any checkout of PTOAS, choose a workspace root and the existing LLVM
-build. The base Python can be conda, a system Python, or another compatible
+build. Before creating a workspace, update the main repository's local
+`main` branch from its configured upstream remote:
+
+```bash
+git -C /path/to/PTOAS fetch <remote> main
+git -C /path/to/PTOAS switch main
+git -C /path/to/PTOAS merge --ff-only FETCH_HEAD
+```
+
+Use the canonical PTOAS remote, `https://github.com/hw-native-sys/PTOAS`
+(normally configured locally as `official`, with either HTTPS or SSH URL).
+Do not use a pull/rebase that could rewrite local commits.
+If `main` is checked out in another worktree, update that main worktree rather
+than switching the current checkout. If the main worktree has staged or
+unstaged modifications to tracked files, the fetch may proceed but the
+fast-forward update must stop and the workspace must not be created until the
+user resolves those modifications. Untracked files do not block the
+fast-forward update or workspace creation.
+
+This synchronization is required for every new workspace unless the user
+explicitly specifies the checkout base, for example `--base-ref release-branch`
+or “create it from branch feature-x”. In that explicit-base case, preserve the
+requested base and do not update `main` merely as a side effect. A requested
+new workspace branch (`--branch`) alone is not an explicit checkout base.
+
+The base Python can be conda, a system Python, or another compatible
 interpreter:
 
 ```bash
@@ -42,8 +67,10 @@ python3 .agents/skills/ptoas-workspace-manager/scripts/ptoas_workspace.py create
   --cann-env /usr/local/Ascend/cann/set_env.sh
 ```
 
-The command creates branch `codex/feature-a` by default, unless `--branch`
-is supplied. It writes `.ptoas-workspace.json` and `env.sh` inside the
+The command creates branch `feature/feature-a` by default, unless `--branch`
+is supplied. With no explicit `--base-ref`, pass the updated local `main` as
+the base ref (for example `--base-ref main`). It writes `.ptoas-workspace.json`
+and `env.sh` inside the
 workspace, creates a venv with `--system-site-packages`, and runs the repo's
 `quick_install.sh` with an isolated `PTO_BUILD_DIR`. Use `--skip-install` when
 only the worktree and venv should be prepared.
@@ -108,10 +135,16 @@ current working directory or a path that is not a registered Git worktree.
 ## Agent procedure
 
 When the user asks to create a workspace, first resolve the repository path,
-feature name, base ref, workspace/build roots, `LLVM_BUILD_DIR`, and base
-Python from local context or explicit arguments. Do not silently select a
-different LLVM build or Python ABI. Run `create`, then report the generated
-workspace path and `env.sh`.
+feature name, workspace/build roots, `LLVM_BUILD_DIR`, and base Python from
+local context or explicit arguments. Determine whether the user explicitly
+provided a checkout base. If not, locate the main worktree, fetch its
+configured upstream `main`, fast-forward local `main`, and use `main` as the
+workspace's `--base-ref`; abort before `create` if tracked files have staged
+or unstaged modifications, or if the update cannot be done safely. Ignore
+untracked files for this pre-creation check. If the user explicitly provided
+a base, use exactly that base and skip the main synchronization. Do not
+silently select a different LLVM build or Python ABI. Run `create`, then
+report the generated workspace path and `env.sh`.
 
 When the user asks to clean up or destroy one, run `status` or a dry-run
 `destroy` first. Never bypass either gate and never recursively delete a

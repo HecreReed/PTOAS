@@ -1,0 +1,35 @@
+// Copyright (c) 2026 Huawei Technologies Co., Ltd.
+// This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+// CANN Open Software License Agreement Version 2.0 (the "License").
+// Please refer to the License for details. You may not use this file except in compliance with the License.
+// THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+// INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+// See LICENSE in the root of the software repository for the full text of the License.
+
+// Regression test for issue 1241: an A5 integer pto.vdiv whose element type is
+// not materialized by the Software Library (unsigned variants, non-matching
+// masks) must fail at compile time instead of lowering to the unsupported
+// integer HiVM VDIV intrinsic and hanging the device at runtime.  The SoftLib
+// materializes only signed or signless 16/32-bit integer vdiv; unsigned
+// variants of the same widths (ui16/ui32) and other integer widths (e.g. i8,
+// whose vregs are legal) are rejected here.  This case uses the unsigned ui16
+// variant.
+
+// RUN: ! ptoas --pto-arch=a5 --pto-backend=vpto %s 2>&1 | FileCheck %s
+
+// CHECK: error: A5 integer pto.vdiv is not supported for '!pto.vreg<128xui16>' with mask '!pto.mask<b16>'
+// CHECK: only signed or signless i16 vectors with a b16 mask and i32 vectors with a b32 mask
+
+module attributes {pto.target_arch = "a5", pto.kernel_kind = #pto.kernel_kind<vector>} {
+  func.func @issue_1241_vdiv_ui16(%lhs: !pto.vreg<128xui16>,
+                                 %rhs: !pto.vreg<128xui16>,
+                                 %dst: !pto.ptr<ui16, ub>,
+                                 %mask: !pto.mask<b16>) attributes {pto.kernel} {
+    %c0 = arith.constant 0 : index
+    %quotient = pto.vdiv %lhs, %rhs, %mask :
+      !pto.vreg<128xui16>, !pto.vreg<128xui16>, !pto.mask<b16> -> !pto.vreg<128xui16>
+    pto.vsts %quotient, %dst[%c0], %mask :
+      !pto.vreg<128xui16>, !pto.ptr<ui16, ub>, !pto.mask<b16>
+    return
+  }
+}

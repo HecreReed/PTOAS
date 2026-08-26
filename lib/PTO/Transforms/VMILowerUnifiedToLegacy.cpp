@@ -71,18 +71,20 @@
 //   vgather  → gather   (pmode="zero": passthru = zero constant)
 //   vscatter → scatter
 //
-// Category C9 — fused activation / softmax, decomposed to legacy chains (3 ops):
-//   vexpdif → [extf] + subf + exp   (widen f16 x to f32 when needed)
+// Category C9 — fused activation / softmax (3 ops):
+//   vexpdif → kept unified for direct VMI-to-VPTO fused lowering
 //   vlrelu  → maxf + minf + broadcast + mulf + addf
 //   vprelu  → maxf + minf + mulf + addf
-//   Category C7/C8/C9 bypass mask/pmode synthesis here and skip pmode="merge".
+//   Lowered Category C7/C8/C9 ops bypass mask/pmode synthesis here and skip
+//   pmode="merge".
 //
-// Category D — no legacy equivalent (explicitly skipped, 11 ops):
+// Category D — no legacy equivalent (explicitly skipped, 13 ops):
 //   vadds/vmuls/vmaxs/vmins/vshls/vshrs
-//   vintlv vdintlv vselr vgatherb vmull
+//   vaddc vaddcs vintlv vdintlv vselr vgatherb vmull
 //
 //===----------------------------------------------------------------------===//
 
+#include "PTO/Support/CodeConstants.h"
 #include "PTO/IR/PTO.h"
 #include "PTO/IR/PTOTypeUtils.h"
 #include "PTO/Transforms/Passes.h"
@@ -105,14 +107,21 @@ namespace pto {
 using namespace mlir;
 using namespace mlir::pto;
 
+namespace {
+constexpr unsigned kIndexBitWidth = 64;
+constexpr int64_t kSingleGroupCount = 1;
+constexpr int64_t kDecimalRadix = 10;
+}
+
 //===----------------------------------------------------------------------===//
 // Helpers
 //===----------------------------------------------------------------------===//
 
 /// Returns the string name of a predicate mode, defaulting to "zero".
 static StringRef getPmodeOrDefault(Operation *op, StringRef attrName = "pmode") {
-  if (auto attr = op->getAttrOfType<StringAttr>(attrName))
+  if (auto attr = op->getAttrOfType<StringAttr>(attrName)) {
     return attr.getValue();
+  }
   return "zero";
 }
 
@@ -144,48 +153,6 @@ static Value createZeroConstant(OpBuilder &builder, Location loc,
 }
 
 
-/// Create a 1-lane VMIConstantOp with the neutral element for reduction:
-///   add:  0    (int and float)
-///   max: -INF  (float), INT_MIN (int)
-///   min: +INF  (float), INT_MAX (int)
-static Value createReduceNeutralInit(OpBuilder &builder, Location loc,
-                                     Type elemType, bool isAdd, bool isMax,
-                                     Attribute layout = Attribute()) {
-  auto oneLaneType =
-      VMIVRegType::get(builder.getContext(), 1, elemType, layout);
-  auto shapedType = RankedTensorType::get({1}, elemType);
-  DenseElementsAttr attr;
-  if (auto floatTy = dyn_cast<FloatType>(elemType)) {
-    if (isAdd)
-      attr = DenseElementsAttr::get(
-          shapedType, APFloat::getZero(floatTy.getFloatSemantics()));
-    else if (isMax)
-      attr = DenseElementsAttr::get(
-          shapedType,
-          APFloat::getInf(floatTy.getFloatSemantics(), /*Negative=*/true));
-    else
-      attr = DenseElementsAttr::get(
-          shapedType,
-          APFloat::getInf(floatTy.getFloatSemantics(), /*Negative=*/false));
-  } else {
-    auto intTy = cast<IntegerType>(elemType);
-    if (isAdd)
-      attr = DenseElementsAttr::get(shapedType,
-                                    APInt::getZero(intTy.getWidth()));
-    else if (isMax)
-      attr = DenseElementsAttr::get(
-          shapedType, intTy.isUnsigned()
-                          ? APInt::getZero(intTy.getWidth())
-                          : APInt::getSignedMinValue(intTy.getWidth()));
-    else
-      attr = DenseElementsAttr::get(
-          shapedType, intTy.isUnsigned()
-                          ? APInt::getMaxValue(intTy.getWidth())
-                          : APInt::getSignedMaxValue(intTy.getWidth()));
-  }
-  return builder.create<VMIConstantOp>(loc, oneLaneType, attr).getResult();
-}
-
 /// Map a unified vcmp `cmp` mode to the predicate string for legacy
 /// cmpf/cmpi. Float operands use ordered predicates (olt, oeq, ...);
 /// integer operands select signedness from the element type.
@@ -193,19 +160,23 @@ static std::string mapCmpPredicate(StringRef cmp, Type elemType,
                                    bool isFloat) {
   if (isFloat) {
     // Already ordered/unordered — pass through.
-    if (cmp.starts_with("o") || cmp.starts_with("u"))
+    if (cmp.starts_with("o") || cmp.starts_with("u")) {
       return cmp.str();
+    }
     return ("o" + cmp).str(); // e.g. "lt" → "olt"
   }
   // Integer.
-  if (cmp.starts_with("s") || cmp.starts_with("u"))
+  if (cmp.starts_with("s") || cmp.starts_with("u")) {
     return cmp.str();
+  }
   // eq/ne are valid for both fp and int without prefix.
-  if (cmp == "eq" || cmp == "ne")
+  if (cmp == "eq" || cmp == "ne") {
     return cmp.str();
+  }
   auto intType = dyn_cast<IntegerType>(elemType);
-  if (intType && intType.isUnsigned())
+  if (intType && !intType.isSigned()) {
     return ("u" + cmp).str(); // e.g. "lt" -> "ult"
+  }
   return ("s" + cmp).str();   // e.g. "lt" -> "slt"
 }
 
@@ -223,27 +194,37 @@ static Type getVMIElementType(Value v) {
 
 /// Return the storage bit width for VMI element types (float / float-like / int).
 static unsigned getVMIElementBitWidth(Type type) {
-  if (isa<IndexType>(type))
-    return 64;
+  if (isa<IndexType>(type)) {
+    return kIndexBitWidth;
+  }
   return pto::getPTOStorageElemBitWidth(type);
 }
 
 /// Inspect the source and result element types of a vcvt and classify the
 /// conversion direction.  Returns one of:
-///   "widen_fp", "narrow_fp", "fptosi", "sitofp",
-///   "widen_int", "narrow_int"
+///   "widen_fp", "narrow_fp", "fptosi", "fptoui",
+///   "sitofp", "widen_int", "narrow_int"
 static StringRef classifyCvtDirection(Type srcElem, Type dstElem) {
   bool srcFp = isFloatType(srcElem);
   bool dstFp = isFloatType(dstElem);
   unsigned srcBits = getVMIElementBitWidth(srcElem);
   unsigned dstBits = getVMIElementBitWidth(dstElem);
 
-  if (srcFp && dstFp)
+  if (srcFp && dstFp) {
     return dstBits > srcBits ? "widen_fp" : "narrow_fp";
-  if (srcFp && !dstFp)
+  }
+  if (srcFp && !dstFp) {
+    if (auto intTy = dyn_cast<IntegerType>(dstElem))
+      return intTy.isSigned() ? "fptosi" : "fptoui";
     return "fptosi";
-  if (!srcFp && dstFp)
+  }
+  if (!srcFp && dstFp) {
+    auto intTy = dyn_cast<IntegerType>(srcElem);
+    if (!intTy || !intTy.isSigned()) {
+      return "unsupported";
+    }
     return "sitofp";
+  }
   // int → int
   return dstBits > srcBits ? "widen_int" : "narrow_int";
 }
@@ -262,8 +243,9 @@ static LogicalResult
 lowerBinaryIgnoringMask(
     UnifiedOp op,
     function_ref<Value(Location, Type, Value, Value)> createLegacy) {
-  if (hasMergePmode(op))
+  if (hasMergePmode(op)) {
     return failure();
+  }
   Location loc = op.getLoc();
   Type resultType = op.getResult().getType();
   Value lhs = op.getLhs();
@@ -280,8 +262,9 @@ template <typename UnifiedOp>
 static LogicalResult
 lowerMaskedUnary(UnifiedOp op, OpBuilder &builder,
                  function_ref<Value(Location, Type, Value)> createLegacy) {
-  if (hasMergePmode(op))
+  if (hasMergePmode(op)) {
     return failure();
+  }
 
   Location loc = op.getLoc();
   Type resultType = op.getResult().getType();
@@ -303,27 +286,33 @@ lowerMaskedUnary(UnifiedOp op, OpBuilder &builder,
 /// active_lanes is a constant >= the mask lane count.
 static bool isAllActiveSeed(Value seed) {
   Operation *def = seed.getDefiningOp();
-  if (!def)
+  if (!def) {
     return false;
-  if (isa<VMIPsetOp>(def))
+  }
+  if (isa<VMIPsetOp>(def)) {
     return true;
+  }
   if (auto cm = dyn_cast<VMICreateMaskOp>(def)) {
     auto maskTy = cast<VMIMaskType>(cm.getResult().getType());
-    if (auto cst = cm.getActiveLanes().getDefiningOp<arith::ConstantOp>())
-      if (auto ia = dyn_cast<IntegerAttr>(cst.getValue()))
+    if (auto cst = cm.getActiveLanes().getDefiningOp<arith::ConstantOp>()) {
+      if (auto ia = dyn_cast<IntegerAttr>(cst.getValue())) {
         return ia.getInt() >= maskTy.getElementCount();
+      }
+    }
   }
   return false;
 }
 
 static bool isCompactGroupCount(int64_t count) {
-  return count == 1 || count == 2 || count == 4 || count == 8;
+  return count == kSingleGroupCount || count == mlir::pto::kValue2 ||
+         count == mlir::pto::kValue4 || count == mlir::pto::kValue8;
 }
 
 /// Lower vcmp to cmpf/cmpi + mask_and.
 static LogicalResult lowerVCmp(VMIVcmpOp op, OpBuilder &builder) {
-  if (hasMergePmode(op))
+  if (hasMergePmode(op)) {
     return failure();
+  }
 
   Location loc = op.getLoc();
   Type elemType = getVMIElementType(op.getLhs());
@@ -349,11 +338,12 @@ static LogicalResult lowerVCmp(VMIVcmpOp op, OpBuilder &builder) {
 
   // mask_and with seed — skipped when the seed is all-active (identity AND).
   Value result = rawMask;
-  if (!isAllActiveSeed(op.getSeed()))
+  if (!isAllActiveSeed(op.getSeed())) {
     result = builder
                  .create<VMIMaskAndOp>(loc, op.getResult().getType(), rawMask,
                                        op.getSeed())
                  .getResult();
+  }
 
   op.getResult().replaceAllUsesWith(result);
   op->erase();
@@ -362,8 +352,9 @@ static LogicalResult lowerVCmp(VMIVcmpOp op, OpBuilder &builder) {
 
 /// Lower vcmps to broadcast scalar + cmpf/cmpi + mask_and.
 static LogicalResult lowerVCmps(VMIVcmpsOp op, OpBuilder &builder) {
-  if (hasMergePmode(op))
+  if (hasMergePmode(op)) {
     return failure();
+  }
 
   Location loc = op.getLoc();
   Type srcVmiType = op.getSrc().getType();
@@ -395,11 +386,12 @@ static LogicalResult lowerVCmps(VMIVcmpsOp op, OpBuilder &builder) {
 
   // 3. mask_and with seed — skipped when the seed is all-active (identity AND).
   Value result = rawMask;
-  if (!isAllActiveSeed(op.getSeed()))
+  if (!isAllActiveSeed(op.getSeed())) {
     result = builder
                  .create<VMIMaskAndOp>(loc, op.getResult().getType(), rawMask,
                                        op.getSeed())
                  .getResult();
+  }
 
   op.getResult().replaceAllUsesWith(result);
   op->erase();
@@ -412,8 +404,9 @@ static LogicalResult lowerVCmps(VMIVcmpsOp op, OpBuilder &builder) {
 
 /// Lower vcvt by dispatching on src→dst element types.
 static LogicalResult lowerVCvt(VMICvtOp op, OpBuilder &builder) {
-  if (hasMergePmode(op))
+  if (hasMergePmode(op)) {
     return failure();
+  }
 
   Type srcElem = getVMIElementType(op.getSource());
   Type dstElem = getVMIElementType(op.getResult());
@@ -435,7 +428,15 @@ static LogicalResult lowerVCvt(VMICvtOp op, OpBuilder &builder) {
             .getResult();
   } else if (direction == "fptosi") {
     result =
-        builder.create<VMIFPToSIOp>(loc, resultType, source, saturateAttr)
+        builder
+            .create<VMIFPToSIOp>(loc, resultType, source,
+                                 op.getRoundingAttr(), saturateAttr)
+            .getResult();
+  } else if (direction == "fptoui") {
+    result =
+        builder
+            .create<VMIFPToUIOp>(loc, resultType, source,
+                                 op.getRoundingAttr(), saturateAttr)
             .getResult();
   } else if (direction == "sitofp") {
     result =
@@ -446,12 +447,13 @@ static LogicalResult lowerVCvt(VMICvtOp op, OpBuilder &builder) {
     if (auto intTy = dyn_cast<IntegerType>(srcElem)) {
       useSigned = intTy.isSigned();
     }
-    if (useSigned)
+    if (useSigned) {
       result =
           builder.create<VMIExtSIOp>(loc, resultType, source).getResult();
-    else
+    } else {
       result =
           builder.create<VMIExtUIOp>(loc, resultType, source).getResult();
+}
   } else if (direction == "narrow_int") {
     result =
         builder.create<VMITruncIOp>(loc, resultType, source, saturateAttr)
@@ -501,7 +503,7 @@ static LogicalResult lowerVLoad(VMIvLoadOp op, OpBuilder &builder) {
     return success();
   }
 
-  // Block-stride mode: vload {block_stride, repeat_stride} → stride_load
+  // Block-stride mode: vload {block_stride} → stride_load
   if (op.getBlockStride()) {
     auto resultType = op.getResults().front().getType();
     // Create default all-active mask via create_mask with proper granularity
@@ -511,10 +513,11 @@ static LogicalResult lowerVLoad(VMIvLoadOp op, OpBuilder &builder) {
     auto resultVMIType = cast<VMIVRegType>(resultType);
     auto elemType = resultVMIType.getElementType();
     unsigned bits = 32;
-    if (auto it = dyn_cast<IntegerType>(elemType))
+    if (auto it = dyn_cast<IntegerType>(elemType)) {
       bits = it.getWidth();
-    else if (auto ft = dyn_cast<FloatType>(elemType))
+    } else if (auto ft = dyn_cast<FloatType>(elemType)) {
       bits = ft.getWidth();
+    }
     auto gran = StringAttr::get(builder.getContext(),
                                 bits <= 8 ? "b8" : bits <= 16 ? "b16" : "b32");
     auto maskType = VMIMaskType::get(builder.getContext(),
@@ -525,9 +528,8 @@ static LogicalResult lowerVLoad(VMIvLoadOp op, OpBuilder &builder) {
     auto mask = builder.create<VMICreateMaskOp>(op->getLoc(), maskType,
                                                 fullLanes.getResult());
     Value bs = op.getBlockStride();
-    Value rs = op.getRepeatStride();
     auto strideLoad = builder.create<VMIStrideLoadOp>(
-        op->getLoc(), resultType, op.getSource(), op.getOffset(), bs, rs,
+        op->getLoc(), resultType, op.getSource(), op.getOffset(), bs,
         mask.getResult());
     op.getResults().front().replaceAllUsesWith(strideLoad.getResult());
     op->erase();
@@ -535,8 +537,9 @@ static LogicalResult lowerVLoad(VMIvLoadOp op, OpBuilder &builder) {
   }
 
   // pmode="merge" cannot be expressed by legacy load + select — skip.
-  if (hasMergePmode(op))
+  if (hasMergePmode(op)) {
     return failure();
+  }
 
   StringAttr distModeAttr = op.getDistModeAttr();
   StringRef distMode =
@@ -597,6 +600,13 @@ static LogicalResult lowerVLoad(VMIvLoadOp op, OpBuilder &builder) {
 
 /// Lower vstore by dispatching on dist_mode.
 static LogicalResult lowerVStore(VMIvStoreOp op, OpBuilder &builder) {
+  // pmode="merge" (inactive lanes retain the prior destination contents)
+  // cannot be expressed by the legacy store family, whose writes are governed
+  // purely by the mask. Skip instead of silently dropping the attribute.
+  if (hasMergePmode(op)) {
+    return failure();
+  }
+
   // Group mode: vstore {group=C} → group_store
   if (op.getGroupAttr()) {
     builder.create<VMIGroupStoreOp>(
@@ -606,7 +616,7 @@ static LogicalResult lowerVStore(VMIvStoreOp op, OpBuilder &builder) {
     return success();
   }
 
-  // Block-stride mode: vstore {block_stride, repeat_stride} → stride_store
+  // Block-stride mode: vstore {block_stride} → stride_store
   if (op.getBlockStride()) {
     auto valueType = cast<VMIVRegType>(op.getValues()[0].getType());
     // Use existing mask or create default all-active via create_mask
@@ -617,10 +627,11 @@ static LogicalResult lowerVStore(VMIvStoreOp op, OpBuilder &builder) {
     } else {
       auto elemType = valueType.getElementType();
       unsigned bits = 32;
-      if (auto it = dyn_cast<IntegerType>(elemType))
+      if (auto it = dyn_cast<IntegerType>(elemType)) {
         bits = it.getWidth();
-      else if (auto ft = dyn_cast<FloatType>(elemType))
+      } else if (auto ft = dyn_cast<FloatType>(elemType)) {
         bits = ft.getWidth();
+      }
       auto gran = StringAttr::get(builder.getContext(),
                                   bits <= 8 ? "b8" : bits <= 16 ? "b16" : "b32");
       auto maskType = VMIMaskType::get(builder.getContext(),
@@ -633,9 +644,8 @@ static LogicalResult lowerVStore(VMIvStoreOp op, OpBuilder &builder) {
                  .getResult();
     }
     Value bs = op.getBlockStride();
-    Value rs = op.getRepeatStride();
     builder.create<VMIStrideStoreOp>(op->getLoc(), op.getValues()[0],
-                                    op.getDestination(), op.getOffset(), bs, rs,
+                                    op.getDestination(), op.getOffset(), bs,
                                     mask);
     op->erase();
     return success();
@@ -651,8 +661,9 @@ static LogicalResult lowerVStore(VMIvStoreOp op, OpBuilder &builder) {
   auto values = op.getValues();
 
   if (distMode == "continuous") {
-    if (values.empty())
+    if (values.empty()) {
       return failure();
+    }
     Value mask = op.getMask().empty() ? Value() : op.getMask().front();
     auto valueType = cast<VMIVRegType>(values[0].getType());
     int64_t numGroups = valueType.getElementCount();
@@ -662,7 +673,6 @@ static LogicalResult lowerVStore(VMIvStoreOp op, OpBuilder &builder) {
     // group_store currently has no dynamic predication operand.
     bool allActive = !mask || isAllActiveSeed(mask);
     bool compact = isCompactGroupCount(numGroups);
-
     if (compact && allActive) {
       Value unitStride = builder.create<arith::ConstantIndexOp>(loc, 1);
       builder.create<VMIGroupStoreOp>(loc, values[0], dest, offset, unitStride,
@@ -677,8 +687,9 @@ static LogicalResult lowerVStore(VMIvStoreOp op, OpBuilder &builder) {
       builder.create<VMIStoreOp>(loc, values[0], dest, offset);
     }
   } else if (distMode == "dintlv") {
-    if (values.size() < 2)
+    if (values.size() < mlir::pto::kValue2) {
       return failure();
+    }
     builder.create<VMIInterleaveStoreOp>(loc, values[0], values[1], dest,
                                          offset);
   } else {
@@ -726,12 +737,14 @@ static LogicalResult lowerPge(VMIPgeOp op, OpBuilder &builder) {
     if (!numStr.empty()) {
       int64_t parsed = 0;
       for (char c : numStr) {
-        if (c < '0' || c > '9')
+        if (c < '0' || c > '9') {
           break;
-        parsed = parsed * 10 + (c - '0');
+        }
+        parsed = parsed * kDecimalRadix + (c - '0');
       }
-      if (parsed > 0)
+      if (parsed > 0) {
         numLanes = parsed;
+      }
     }
   }
 
@@ -768,14 +781,16 @@ static LogicalResult lowerPge(VMIPgeOp op, OpBuilder &builder) {
 
 template <typename ReductionOp>
 static std::optional<int64_t> getReductionNumGroups(ReductionOp op) {
-  if (auto groupAttr = op.getGroupAttr())
+  if (auto groupAttr = op.getGroupAttr()) {
     return groupAttr.getInt();
+  }
 
   // A full reduction is one logical group. Keep the alias decision local to
   // the reduction instead of relying on a downstream store to mutate it.
   auto resultType = cast<VMIVRegType>(op.getResult().getType());
-  if (!resultType.getLayoutAttr())
+  if (!resultType.getLayoutAttr()) {
     return 1;
+  }
   return std::nullopt;
 }
 
@@ -783,8 +798,9 @@ static std::optional<int64_t> getReductionNumGroups(ReductionOp op) {
 /// group_reduce_addf/group_reduce_addi.  Always succeeds for valid input
 /// (vcadd verifier guarantees reassoc for float, and group 整除 source lanes).
 static LogicalResult lowerVCadd(VMIvcaddOp op, OpBuilder &builder) {
-  if (hasMergePmode(op))
+  if (hasMergePmode(op)) {
     return failure();
+  }
 
   auto sourceType = cast<VMIVRegType>(op.getSource().getType());
   Type elemType = sourceType.getElementType();
@@ -797,37 +813,36 @@ static LogicalResult lowerVCadd(VMIvcaddOp op, OpBuilder &builder) {
   if (std::optional<int64_t> numGroups = getReductionNumGroups(op)) {
     // Group reduce path
     Value result;
-    if (isFloat)
+    if (isFloat) {
       result =
           builder
               .create<VMIGroupReduceAddFOp>(loc, resultType, source, mask,
                                             builder.getI64IntegerAttr(*numGroups),
                                             op.getReassocAttr())
               .getResult();
-    else
+    } else {
       result =
           builder
               .create<VMIGroupReduceAddIOp>(loc, resultType, source, mask,
                                             builder.getI64IntegerAttr(*numGroups))
               .getResult();
+}
     op.getResult().replaceAllUsesWith(result);
   } else {
     // Full reduce path
-    Value init = createReduceNeutralInit(builder, loc, elemType,
-                                         /*isAdd=*/true, /*isMax=*/false,
-                                         sourceType.getLayout());
     Value result;
-    if (isFloat)
+    if (isFloat) {
       result =
           builder
-              .create<VMIReduceAddFOp>(loc, resultType, source, init, mask,
+              .create<VMIReduceAddFOp>(loc, resultType, source, mask,
                                        op.getReassocAttr())
               .getResult();
-    else
+    } else {
       result =
           builder
-              .create<VMIReduceAddIOp>(loc, resultType, source, init, mask)
+              .create<VMIReduceAddIOp>(loc, resultType, source, mask)
               .getResult();
+}
     op.getResult().replaceAllUsesWith(result);
   }
   op->erase();
@@ -836,8 +851,9 @@ static LogicalResult lowerVCadd(VMIvcaddOp op, OpBuilder &builder) {
 
 /// Lower vcmax to legacy full or grouped float/integer maximum reduction.
 static LogicalResult lowerVcmax(VMIvcmaxOp op, OpBuilder &builder) {
-  if (hasMergePmode(op))
+  if (hasMergePmode(op)) {
     return failure();
+  }
 
   auto sourceType = cast<VMIVRegType>(op.getSource().getType());
   Type elemType = sourceType.getElementType();
@@ -850,35 +866,34 @@ static LogicalResult lowerVcmax(VMIvcmaxOp op, OpBuilder &builder) {
   if (std::optional<int64_t> numGroups = getReductionNumGroups(op)) {
     // Group reduce path
     Value result;
-    if (isFloat)
+    if (isFloat) {
       result =
           builder
               .create<VMIGroupReduceMaxFOp>(loc, resultType, source, mask,
                                             builder.getI64IntegerAttr(*numGroups))
               .getResult();
-    else
+    } else {
       result =
           builder
               .create<VMIGroupReduceMaxIOp>(loc, resultType, source, mask,
                                             builder.getI64IntegerAttr(*numGroups))
               .getResult();
+}
     op.getResult().replaceAllUsesWith(result);
     op->erase();
     return success();
   }
 
-  Value init = createReduceNeutralInit(builder, loc, elemType,
-                                       /*isAdd=*/false, /*isMax=*/true,
-                                       sourceType.getLayout());
   Value result;
-  if (isFloat)
+  if (isFloat) {
     result = builder
-                 .create<VMIReduceMaxFOp>(loc, resultType, source, init, mask)
+                 .create<VMIReduceMaxFOp>(loc, resultType, source, mask)
                  .getResult();
-  else
+  } else {
     result = builder
-                 .create<VMIReduceMaxIOp>(loc, resultType, source, init, mask)
+                 .create<VMIReduceMaxIOp>(loc, resultType, source, mask)
                  .getResult();
+}
   op.getResult().replaceAllUsesWith(result);
   op->erase();
   return success();
@@ -886,8 +901,9 @@ static LogicalResult lowerVcmax(VMIvcmaxOp op, OpBuilder &builder) {
 
 /// Lower vcmin to legacy full or grouped float/integer minimum reduction.
 static LogicalResult lowerVcmin(VMIvcminOp op, OpBuilder &builder) {
-  if (hasMergePmode(op))
+  if (hasMergePmode(op)) {
     return failure();
+  }
 
   auto sourceType = cast<VMIVRegType>(op.getSource().getType());
   Type elemType = sourceType.getElementType();
@@ -899,35 +915,34 @@ static LogicalResult lowerVcmin(VMIvcminOp op, OpBuilder &builder) {
 
   if (std::optional<int64_t> numGroups = getReductionNumGroups(op)) {
     Value result;
-    if (isFloat)
+    if (isFloat) {
       result = builder
                    .create<VMIGroupReduceMinFOp>(
                        loc, resultType, source, mask,
                        builder.getI64IntegerAttr(*numGroups))
                    .getResult();
-    else
+    } else {
       result = builder
                    .create<VMIGroupReduceMinIOp>(
                        loc, resultType, source, mask,
                        builder.getI64IntegerAttr(*numGroups))
                    .getResult();
+}
     op.getResult().replaceAllUsesWith(result);
     op->erase();
     return success();
   }
 
-  Value init = createReduceNeutralInit(builder, loc, elemType,
-                                       /*isAdd=*/false, /*isMax=*/false,
-                                       sourceType.getLayout());
   Value result;
-  if (isFloat)
+  if (isFloat) {
     result = builder
-                 .create<VMIReduceMinFOp>(loc, resultType, source, init, mask)
+                 .create<VMIReduceMinFOp>(loc, resultType, source, mask)
                  .getResult();
-  else
+  } else {
     result = builder
-                 .create<VMIReduceMinIOp>(loc, resultType, source, init, mask)
+                 .create<VMIReduceMinIOp>(loc, resultType, source, mask)
                  .getResult();
+}
   op.getResult().replaceAllUsesWith(result);
   op->erase();
   return success();
@@ -942,13 +957,15 @@ static LogicalResult lowerVcmin(VMIvcminOp op, OpBuilder &builder) {
 /// Legacy fma is floating-point only; integer vmula has no legacy equivalent
 /// and is skipped (falls through to VMIToVPTO).
 static LogicalResult lowerVmula(VMIVmulaOp op, OpBuilder &builder) {
-  if (hasMergePmode(op))
+  if (hasMergePmode(op)) {
     return failure();
+  }
 
   Type resultType = op.getResult().getType();
   auto vmiType = cast<VMIVRegType>(resultType);
-  if (!isFloatType(vmiType.getElementType()))
+  if (!isFloatType(vmiType.getElementType())) {
     return failure();
+  }
 
   Location loc = op.getLoc();
   // fma computes lhs*rhs + acc, matching vmula's acc + lhs*rhs.
@@ -964,13 +981,15 @@ static LogicalResult lowerVmula(VMIVmulaOp op, OpBuilder &builder) {
 /// Lower vaxpy (alpha*x + y) to broadcast(alpha) + legacy fma.
 /// alpha is a scalar float, broadcast to a vector before the fma.
 static LogicalResult lowerVaxpy(VMIVaxpyOp op, OpBuilder &builder) {
-  if (hasMergePmode(op))
+  if (hasMergePmode(op)) {
     return failure();
+  }
 
   Type resultType = op.getResult().getType();
   auto vmiType = cast<VMIVRegType>(resultType);
-  if (!isFloatType(vmiType.getElementType()))
+  if (!isFloatType(vmiType.getElementType())) {
     return failure();
+  }
 
   Location loc = op.getLoc();
   Value alphaVec = builder
@@ -1019,8 +1038,9 @@ static LogicalResult lowerPlt(VMIPltOp op, OpBuilder &builder) {
 /// operand for inactive lanes; pmode="zero" is modelled with a zero passthru.
 /// pmode="merge" (preserve OLD_DEST) has no SSA passthru and is skipped.
 static LogicalResult lowerVgather(VMIVgatherOp op, OpBuilder &builder) {
-  if (hasMergePmode(op))
+  if (hasMergePmode(op)) {
     return failure();
+  }
 
   Location loc = op.getLoc();
   auto resultType = cast<VMIVRegType>(op.getResult().getType());
@@ -1043,8 +1063,9 @@ static LogicalResult lowerVgather(VMIVgatherOp op, OpBuilder &builder) {
 /// Lower vscatter to legacy scatter.  Legacy scatter only writes active lanes
 /// (mask-governed), matching vscatter's default/zero pmode; merge is skipped.
 static LogicalResult lowerVscatter(VMIVscatterOp op, OpBuilder &builder) {
-  if (hasMergePmode(op))
+  if (hasMergePmode(op)) {
     return failure();
+  }
 
   Location loc = op.getLoc();
   builder.create<VMIScatterOp>(loc, op.getValue(), op.getDestination(),
@@ -1054,38 +1075,15 @@ static LogicalResult lowerVscatter(VMIVscatterOp op, OpBuilder &builder) {
 }
 
 //===----------------------------------------------------------------------===//
-// Category C9 helpers: vexpdif / vlrelu / vprelu (fused → legacy chains)
+// Category C9 helpers: vlrelu / vprelu (fused → legacy chains)
 //===----------------------------------------------------------------------===//
-
-/// Lower vexpdif (exp(x - max)) to [extf] + subf + exp.
-/// x may be f16 while max and result are always f32 — widen x first when its
-/// element type differs from the result type.
-static LogicalResult lowerVexpdif(VMIVexpdifOp op, OpBuilder &builder) {
-  if (hasMergePmode(op))
-    return failure();
-
-  Location loc = op.getLoc();
-  Type resultType = op.getResult().getType();
-  auto vmiType = cast<VMIVRegType>(resultType);
-  Type resElem = vmiType.getElementType();
-
-  Value x = op.getX();
-  if (getVMIElementType(x) != resElem)
-    x = builder.create<VMIExtFOp>(loc, resultType, x).getResult();
-
-  Value diff =
-      builder.create<VMISubFOp>(loc, resultType, x, op.getMax()).getResult();
-  Value raw = builder.create<VMIExpOp>(loc, resultType, diff).getResult();
-  op.getResult().replaceAllUsesWith(raw);
-  op->erase();
-  return success();
-}
 
 /// Lower vlrelu (x>0 ? x : slope*x) to max(x,0) + slope*min(x,0).
 /// slope is a scalar float broadcast to a vector.
 static LogicalResult lowerVlrelu(VMIVlreluOp op, OpBuilder &builder) {
-  if (hasMergePmode(op))
+  if (hasMergePmode(op)) {
     return failure();
+  }
 
   Location loc = op.getLoc();
   Type resultType = op.getResult().getType();
@@ -1112,8 +1110,9 @@ static LogicalResult lowerVlrelu(VMIVlreluOp op, OpBuilder &builder) {
 /// Lower vprelu (max(x,0) + alpha*min(x,0)) to legacy max/min/mul/add.
 /// alpha is a per-lane vector (no broadcast needed).
 static LogicalResult lowerVprelu(VMIVpreluOp op, OpBuilder &builder) {
-  if (hasMergePmode(op))
+  if (hasMergePmode(op)) {
     return failure();
+  }
 
   Location loc = op.getLoc();
   Type resultType = op.getResult().getType();
@@ -1156,7 +1155,7 @@ struct VMILowerUnifiedToLegacyPass
 
 void VMILowerUnifiedToLegacyPass::runOnOperation() {
   ModuleOp module = getOperation();
-  SmallVector<Operation *, 128> worklist;
+  SmallVector<Operation *, mlir::pto::kValue128> worklist;
 
   // Collect all unified VMI ops (walk encounters them in IR order).
   module.walk([&](Operation *op) {
@@ -1173,7 +1172,7 @@ void VMILowerUnifiedToLegacyPass::runOnOperation() {
         // Category C2
         isa<VMICvtOp>(op) ||
         // Category C3
-        isa<VMIvLoadOp, VMIvStoreOp>(op) ||
+        isa<VMIvLoadOp, VMIvStoreOp, VMIVsstbOp>(op) ||
         // Category C4
         isa<VMIPsetOp, VMIPgeOp, VMIPltOp>(op) ||
         // Category C6 — unified reduce (partial coverage)
@@ -1183,14 +1182,17 @@ void VMILowerUnifiedToLegacyPass::runOnOperation() {
         // Category C8 — indexed gather / scatter
         isa<VMIVgatherOp, VMIVscatterOp>(op) ||
         // Category C9 — fused activation / softmax (legacy chains)
-        isa<VMIVexpdifOp, VMIVlreluOp, VMIVpreluOp>(op))
+        isa<VMIVlreluOp, VMIVpreluOp>(op)) {
       worklist.push_back(op);
+    }
 
     // Category D — no legacy equivalent (require direct VMIToVPTO lowering):
-    //   plt, vector-scalar ops, vintlv, vdintlv, vselr, vgatherb, vmull
+    //   plt, vector-scalar ops, vaddc/vaddcs, vintlv, vdintlv, vselr,
+    //   vgatherb, vmull
     // These are intentionally NOT added to the worklist — they flow through
     // to VMIToVPTO which must provide direct 1:N lowering patterns.
     if (isa<VMIAddSOp, VMIMulSOp, VMIMaxSOp, VMIMinSOp, VMIShlSOp, VMIShrSOp,
+            VMIVaddcOp, VMIVaddcsOp,
             VMIVintlvOp, VMIVdintlvOp, VMIVselrOp, VMIVgatherbOp, VMIVmullOp>(
             op)) {
       op->emitRemark("VMI unified op has no legacy equivalent — "
@@ -1200,24 +1202,62 @@ void VMILowerUnifiedToLegacyPass::runOnOperation() {
 
   // Process consumers before producers to avoid stale producer uses.
   for (Operation *op : llvm::reverse(worklist)) {
-    if (!op->getBlock())
+    if (!op->getBlock()) {
       continue;
+    }
     OpBuilder builder(op);
 
     // ---- Category A: pure syntactic renames ----
 
     if (auto vop = dyn_cast<VMIVciOp>(op)) {
-      // vci -> iota
+      // Public vci without grouping (or group=1) is ordinary continuous iota.
+      // group>1 lowers to the internal contiguous-only group_iota producer.
       builder.setInsertionPoint(op);
       StringAttr orderAttr;
-      if (auto order = vop.getOrder())
+      if (auto order = vop.getOrder()) {
         orderAttr = builder.getStringAttr(*order);
-      Value result =
+      }
+
+      Type resultType = vop.getResult().getType();
+      IntegerAttr groupAttr = vop.getGroupAttr();
+      if (groupAttr && groupAttr.getInt() > 1) {
+        if (auto vmiTy = dyn_cast<VMIVRegType>(resultType)) {
+          VMILayoutAttr layout = vmiTy.getLayoutAttr();
+          if (layout && !layout.isContiguous()) {
+            Type contigType = VMIVRegType::get(
+                op->getContext(), vmiTy.getElementCount(),
+                vmiTy.getElementType(),
+                VMILayoutAttr::getContiguous(op->getContext()));
+            Value contig =
+                builder
+                    .create<VMIGroupIotaOp>(op->getLoc(), contigType,
+                                            vop.getBase(), orderAttr, groupAttr)
+                    .getResult();
+            Value converted =
+                builder
+                    .create<VMIEnsureLayoutOp>(op->getLoc(), vmiTy, contig)
+                    .getResult();
+            vop.getResult().replaceAllUsesWith(converted);
+            op->erase();
+            continue;
+          }
+        }
+        Value grouped =
+            builder
+                .create<VMIGroupIotaOp>(op->getLoc(), resultType, vop.getBase(),
+                                        orderAttr, groupAttr)
+                .getResult();
+        vop.getResult().replaceAllUsesWith(grouped);
+        op->erase();
+        continue;
+      }
+
+      Value iota =
           builder
-              .create<VMIIotaOp>(op->getLoc(), vop.getResult().getType(),
-                                 vop.getBase(), orderAttr)
+              .create<VMIIotaOp>(op->getLoc(), resultType, vop.getBase(),
+                                 orderAttr)
               .getResult();
-      vop.getResult().replaceAllUsesWith(result);
+      vop.getResult().replaceAllUsesWith(iota);
       op->erase();
       continue;
     }
@@ -1319,6 +1359,20 @@ void VMILowerUnifiedToLegacyPass::runOnOperation() {
       continue;
     }
 
+    if (auto vop = dyn_cast<VMIVsstbOp>(op)) {
+      // pmode="merge" cannot be expressed by the legacy stride store; leave
+      // the op for VMIToVPTO (which has no vsstb pattern) so the conversion
+      // fails loudly instead of silently dropping the attribute.
+      if (hasMergePmode(vop)) {
+        continue;
+      }
+      builder.create<VMIStrideStoreOp>(
+          vop.getLoc(), vop.getValue(), vop.getDestination(), vop.getOffset(),
+          vop.getBlockStride(), vop.getMask());
+      vop->erase();
+      continue;
+    }
+
     // ---- Category C6: unified reduce ----
 
     if (auto vop = dyn_cast<VMIvcaddOp>(op)) {
@@ -1362,11 +1416,6 @@ void VMILowerUnifiedToLegacyPass::runOnOperation() {
 
     // ---- Category C9: fused activation / softmax ----
 
-    if (auto vop = dyn_cast<VMIVexpdifOp>(op)) {
-      (void)lowerVexpdif(vop, builder);
-      continue;
-    }
-
     if (auto vop = dyn_cast<VMIVlreluOp>(op)) {
       (void)lowerVlrelu(vop, builder);
       continue;
@@ -1382,8 +1431,9 @@ void VMILowerUnifiedToLegacyPass::runOnOperation() {
     if (auto vop = dyn_cast<VMIVaddOp>(op)) {
       Type elemType = getVMIElementType(vop.getResult());
       auto createLegacy = [&](Location loc, Type ty, Value lhs, Value rhs) -> Value {
-        if (isFloatType(elemType))
+        if (isFloatType(elemType)) {
           return builder.create<VMIAddFOp>(loc, ty, lhs, rhs).getResult();
+        }
         return builder.create<VMIAddIOp>(loc, ty, lhs, rhs).getResult();
       };
       (void)lowerBinaryIgnoringMask(vop, createLegacy);
@@ -1393,8 +1443,9 @@ void VMILowerUnifiedToLegacyPass::runOnOperation() {
     if (auto vop = dyn_cast<VMIVsubOp>(op)) {
       Type elemType = getVMIElementType(vop.getResult());
       auto createLegacy = [&](Location loc, Type ty, Value lhs, Value rhs) -> Value {
-        if (isFloatType(elemType))
+        if (isFloatType(elemType)) {
           return builder.create<VMISubFOp>(loc, ty, lhs, rhs).getResult();
+        }
         return builder.create<VMISubIOp>(loc, ty, lhs, rhs).getResult();
       };
       (void)lowerBinaryIgnoringMask(vop, createLegacy);
@@ -1404,8 +1455,9 @@ void VMILowerUnifiedToLegacyPass::runOnOperation() {
     if (auto vop = dyn_cast<VMIVmulOp>(op)) {
       Type elemType = getVMIElementType(vop.getResult());
       auto createLegacy = [&](Location loc, Type ty, Value lhs, Value rhs) -> Value {
-        if (isFloatType(elemType))
+        if (isFloatType(elemType)) {
           return builder.create<VMIMulFOp>(loc, ty, lhs, rhs).getResult();
+        }
         return builder.create<VMIMulIOp>(loc, ty, lhs, rhs).getResult();
       };
       (void)lowerBinaryIgnoringMask(vop, createLegacy);
@@ -1423,18 +1475,26 @@ void VMILowerUnifiedToLegacyPass::runOnOperation() {
     }
 
     if (auto vop = dyn_cast<VMIVminOp>(op)) {
+      Type elemType = getVMIElementType(vop.getResult());
       auto createLegacy = [&](Location loc, Type ty, Value lhs,
                               Value rhs) -> Value {
-        return builder.create<VMIMinFOp>(loc, ty, lhs, rhs).getResult();
+        if (isFloatType(elemType)) {
+          return builder.create<VMIMinFOp>(loc, ty, lhs, rhs).getResult();
+        }
+        return builder.create<VMIMinIOp>(loc, ty, lhs, rhs).getResult();
       };
       (void)lowerBinaryIgnoringMask(vop, createLegacy);
       continue;
     }
 
     if (auto vop = dyn_cast<VMIVmaxOp>(op)) {
+      Type elemType = getVMIElementType(vop.getResult());
       auto createLegacy = [&](Location loc, Type ty, Value lhs,
                               Value rhs) -> Value {
-        return builder.create<VMIMaxFOp>(loc, ty, lhs, rhs).getResult();
+        if (isFloatType(elemType)) {
+          return builder.create<VMIMaxFOp>(loc, ty, lhs, rhs).getResult();
+        }
+        return builder.create<VMIMaxIOp>(loc, ty, lhs, rhs).getResult();
       };
       (void)lowerBinaryIgnoringMask(vop, createLegacy);
       continue;
@@ -1511,8 +1571,9 @@ void VMILowerUnifiedToLegacyPass::runOnOperation() {
       auto createLegacy = [&](Location loc, Type ty, Value lhs,
                               Value rhs) -> Value {
         auto intType = cast<IntegerType>(elemType);
-        if (!intType.isSigned())
+        if (!intType.isSigned()) {
           return builder.create<VMIShRUIOp>(loc, ty, lhs, rhs).getResult();
+        }
         return builder.create<VMIShRSIOp>(loc, ty, lhs, rhs).getResult();
       };
       (void)lowerBinaryIgnoringMask(vop, createLegacy);
@@ -1522,8 +1583,12 @@ void VMILowerUnifiedToLegacyPass::runOnOperation() {
     // ---- Category B: masked elementwise — unary ----
 
     if (auto vop = dyn_cast<VMIVnegOp>(op)) {
+      Type elemType = getVMIElementType(vop.getResult());
       auto createLegacy = [&](Location loc, Type ty, Value src) -> Value {
-        return builder.create<VMINegFOp>(loc, ty, src).getResult();
+        if (isFloatType(elemType)) {
+          return builder.create<VMINegFOp>(loc, ty, src).getResult();
+        }
+        return builder.create<VMINegIOp>(loc, ty, src).getResult();
       };
       (void)lowerMaskedUnary(vop, builder, createLegacy);
       continue;
@@ -1532,8 +1597,25 @@ void VMILowerUnifiedToLegacyPass::runOnOperation() {
     if (auto vop = dyn_cast<VMIVabsOp>(op)) {
       Type elemType = getVMIElementType(vop.getResult());
       auto createLegacy = [&](Location loc, Type ty, Value src) -> Value {
-        if (isFloatType(elemType))
+        // bf16 has no vector absf; clear the sign bit (ASC: vand with 0x7FFF).
+        if (elemType.isBF16()) {
+          auto srcTy = cast<VMIVRegType>(src.getType());
+          Type i16 = builder.getIntegerType(16);
+          auto iTy = VMIVRegType::get(builder.getContext(),
+                                      srcTy.getElementCount(), i16,
+                                      srcTy.getLayout());
+          Value asI = builder.create<VMIBitcastOp>(loc, iTy, src);
+          Value c = builder.create<arith::ConstantOp>(
+              loc, i16, builder.getIntegerAttr(i16, 0x7FFF));
+          Value maskVec =
+              builder.create<VMIBroadcastOp>(loc, iTy, c).getResult();
+          Value cleared =
+              builder.create<VMIAndIOp>(loc, iTy, asI, maskVec).getResult();
+          return builder.create<VMIBitcastOp>(loc, ty, cleared).getResult();
+        }
+        if (isFloatType(elemType)) {
           return builder.create<VMIAbsFOp>(loc, ty, src).getResult();
+        }
         return builder.create<VMIAbsIOp>(loc, ty, src).getResult();
       };
       (void)lowerMaskedUnary(vop, builder, createLegacy);

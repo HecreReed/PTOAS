@@ -36,26 +36,19 @@ bisheng 内部将候选指令分为两个处理分支：
 | 分支 | PTOAS Op | 非 Post intrinsic | Post intrinsic |
 |------|----------|-------------------|----------------|
 | Auto | `pto.vlds` | `llvm.hivm.vldsx1.v{N}{ty}` | `llvm.hivm.vldsx1.post.v{N}{ty}` |
+| Auto | `pto.vldsx2` | `llvm.hivm.vldsx2.v{N}{llvmTy}` | `llvm.hivm.vldsx2.post.v{N}{llvmTy}` |
+| Auto | `pto.plds` | `llvm.hivm.plds.b8` | `llvm.hivm.plds.post.b8` |
+| Auto | `pto.pldi` | `llvm.hivm.pldi.b8` | `llvm.hivm.pldi.post.b8` |
 | Auto | `pto.vsts` | `llvm.hivm.vstsx1.v{N}{ty}` | `llvm.hivm.vstsx1.post.v{N}{ty}` |
-| Auto | `pto.vsstb` | `llvm.hivm.vsstb` | `llvm.hivm.vsstb.post` |
+| Auto | `pto.vsstb` | `llvm.hivm.vsstb.v{N}{llvmTy}` | `llvm.hivm.vsstb.post.v{N}{llvmTy}` |
+| Auto | `pto.psts` | `llvm.hivm.psts.b8` | `llvm.hivm.psts.post.b8` |
+| Auto | `pto.psti` | `llvm.hivm.psti.b8` | `llvm.hivm.psti.post.b8` |
+| Auto | `pto.sprsts` | `llvm.hivm.sprsts` | `llvm.hivm.sprsts.post` |
+| Auto | `pto.sprsti` | `llvm.hivm.sprsti` | `llvm.hivm.sprsti.post` |
+| Auto | `pto.vstas` | `llvm.hivm.vstas` | `llvm.hivm.vstas.post` |
+| Auto | `pto.vsldb` | `llvm.hivm.vsldb.v{N}{llvmTy}` | `llvm.hivm.vsldb.post.v{N}{llvmTy}` |
 
 LLVM lowering 时根据 op 是否有 `updated_base` 结果来选择生成 post 或非 post intrinsic。
-
-### 2.2 PTOAS 有 Op 但尚未实现 Post variant 的指令
-
-这些指令结构上可支持 `updated_base`，但当前 ODS 定义中没有该可选返回值。
-
-| 分支 | PTOAS Op | 当前 Intrinsic | 备注 |
-|------|----------|---------------|------|
-| Auto | `pto.vldsx2` | `llvm.hivm.vldsx2.v{N}{ty}` | `vlds` 的双向量变体 |
-| Auto | `pto.vsldb` | `llvm.hivm.vsldb` | `vsstb` 的加载对称体（块步长加载） |
-| Auto | `pto.plds` | `llvm.hivm.plds.b8` | predicate mask 加载（strided） |
-| Auto | `pto.pldi` | `llvm.hivm.pldi.b8` | predicate mask 加载（interleaved） |
-| Auto | `pto.psts` | `llvm.hivm.psts.b8` | predicate mask 存储（strided） |
-| Auto | `pto.psti` | `llvm.hivm.psti.b8` | predicate mask 存储（interleaved） |
-| Auto | `pto.vstas` | `llvm.hivm.vstas` | align 存储（带 offset） |
-| Auto | `pto.sprsts` | `llvm.hivm.sprsts` | 标量 predicate 寄存器存储（strided） |
-| Auto | `pto.sprsti` | `llvm.hivm.sprsti` | 标量 predicate 寄存器存储（interleaved） |
 
 ### 2.3 Stateful Post-Update 指令（Mechanism B：align 状态穿针）
 
@@ -134,7 +127,7 @@ pass 的驱动分为两个阶段。两个阶段都通过 `PostUpdateTable`（sta
 
 循环路径对 base 和 strideOperand **各自独立**分析：每个操作数先试 **累加器分析**（优先），未命中再退到 **delta 分析**（兜底），两者的结果最后按 4.2.1 的公式合并为 `stride_new`。前者处理该操作数已通过 `iter_args` 显式累加的场景（stride 可以是任意已计算的值），后者处理从 IV 全新计算、无累加器的场景（stride 须为循环不变量）。因此同一条指令的 base 走累加器、strideOperand 走 delta 是允许的组合。
 
-两类指令（vlds/vsts 与 vsstb/vsldb）的分析和改写通过统一的地址描述符抽象，共享同一套分析流程。
+各类内存指令的分析和改写通过统一的地址描述符抽象，共享同一套分析流程。
 
 无论走哪条路径，分析都只产出**符号表达式**，不触碰 IR；确认候选可行后才在单一插入点物化（见 4.2.2）。
 
@@ -143,7 +136,7 @@ pass 的驱动分为两个阶段。两个阶段都通过 `PostUpdateTable`（sta
 每个候选 op 由 `PostUpdateOpInfo` 描述：base 与 strideOperand 的操作数下标，以及 strideOperand 的**单位**。
 
 ```
-enum class StrideUnit { Element, Block, Byte };
+enum class StrideUnit { Element, Block, Alignment, Byte };
 struct PostUpdateOpInfo {
   int baseOperandIdx;
   int strideOperandIdx;
@@ -160,10 +153,17 @@ struct PostUpdateOpInfo {
 | 指令 | base | strideOperand | strideUnit | unitBytes | 有效地址 |
 |------|------|---------------|-----------|-----------|---------|
 | vlds/vsts | source/destination | offset (Index) | Element | elemBytes | base + offset |
+| vldsx2（Step 4） | source | offset (Index) | Element | elemBytes | base + offset |
 | vsstb/vsldb | destination/source | repeat_stride (I16) | Block | 32 | dest + (32/elemBytes)·repeat_stride |
-| sprsts/sprsti（Step 4） | destination | offset (I32) | Byte | 1 | dest + offset/elemBytes |
+| plds/psts（Step 4） | source/destination | offset (Index) | Byte | 1 | base + offset/elemBytes |
+| pldi（Step 4） | source | offset (Index) | Alignment | NORM: VL/8；US: VL/16；DS: min(32, VL/4) | base + (unitBytes/elemBytes)·offset |
+| psti（Step 4） | destination | offset (Index) | Alignment | NORM: VL/8；PK: VL/16 | base + (unitBytes/elemBytes)·offset |
+| sprsts（Step 4） | destination | offset (I32) | Byte | 1 | dest + offset/elemBytes |
+| sprsti（Step 4） | destination | offset (I32) | Alignment | AR: 4 | dest + (4/elemBytes)·offset |
+| vstas（Step 4） | destination | offset (I32) | Element | elemBytes | dest + offset |
 
-> 新增指令时判断单位的方法：看它在 `VPTOLLVMEmitter.cpp` 的 lowering pattern 里，strideOperand 是否过 `convertElementOffsetToBytes`（→ Element），是否经 `packBlockRepeatStride` 透传控制字（→ Block），还是原样透传且 ISA 文档标注为字节（→ Byte）。
+> intrinsic 参数原样透传不能单独证明硬件地址单位；Step 4 的 immediate/scalar 差异以 CANN 9.1 SIM 的实际更新地址为准。
+> 上表中的 VL 以字节计；A5 的 VL 为 256 bytes，因此 pldi 的 NORM/US/DS 分别为 32/16/32 bytes，psti 的 NORM/PK 分别为 32/16 bytes。其他目标必须提供自己的查询结果，否则该候选不改写。
 
 分析和改写的核心公式统一以字节表达：
 
@@ -313,9 +313,9 @@ delta 分析同样是纯符号的：表中每一行返回 `StrideExpr`，结果�
 
 改写步骤对所有指令统一：
 
-1. **物化 stride。** 叶子全部循环不变时发射到循环外，否则发射到候选 op 之前。常量按 `(值, 类型)` 在同一循环内复用同一个 SSA 值——4.2.7 的分组按 `(base, stride_new)` 的 **Value 同一性** 判定，重复创建等值常量会把本可共享 `iter_arg` 的 op 拆成多组。
+1. **物化 stride。** 叶子全部循环不变时发射到循环外，否则发射到候选 op 之前。常量按 `(值, 类型)` 在同一循环内复用同一个 SSA 值——4.2.7 的分组按 stride 的 **Value 同一性** 判定，重复创建等值常量会把本可共享 `iter_arg` 的 op 拆成多组。
 
-2. 计算初始指针 `init_ptr = pto.addptr(base_0, (unitBytes/elemBytes)·strideOperand_0)`（见 4.2.1；若偏移为零则直接用 `base_0`）。
+2. 计算初始指针 `init_ptr = pto.addptr(base_0, (unitBytes/elemBytes)·strideOperand_0)`（见 4.2.1；若偏移为零则直接用 `base_0`）。传给 `pto.addptr` 前将最终偏移规范为 `index`；Block 单位保持无符号扩展，其他单位使用有符号扩展，避免丢失 `sprsti` 负立即数的语义。
 3. 新增指针类型的 `iter_arg`，初始值为 `init_ptr`。
 4. 创建 Post-Update op：将 `strideOperand` 替换为 `stride_new`，base 替换为 iter_arg 的 block argument。其余操作数（block_stride、mask、dist 等）不变。
 5. 将 `updated_base` 通过 `scf.yield` 传出。
@@ -345,9 +345,9 @@ Post-Update 模式下 `repeat_stride` 从地址偏移变为指针前进量，因
 
 #### 4.2.7 同一循环中的多个 Op
 
-两个 op 能共享同一个 `iter_arg`，当且仅当它们走**同一条地址序列**——起点 `init_ptr`（由 `base_0` 与 `strideOperand_0` 决定，见 4.2.1）相同，且步长 `stride_new` 相同。
+两个 op 能共享同一个 `iter_arg`，当且仅当它们走**同一条地址序列**——起点 `init_ptr`（由 `base_0`、`strideOperand_0` 和 `unitBytes` 决定，见 4.2.1）相同，且以字节计的步长相同。
 
-理想的分组键是 `(init_ptr, stride_new)`。但 `init_ptr` 不适合直接入键：分组按 **Value 同一性** 比较，而 `computeInitialPtr` 可能为每个候选各自物化一个 `pto.addptr`，起点数值相同也未必是同一个 SSA 值。因此改用决定 `init_ptr` 的**原始操作数**：分组键取 `(base, strideOperand, stride_new)`。操作数相同必然起点相同，这是一个充分条件——可能把本可合并的组拆开，但绝不会合并本应分开的组。
+理想的分组键是 `(init_ptr, byte_stride)`。但 `init_ptr` 不适合直接入键：分组按 **Value 同一性** 比较，而 `computeInitialPtr` 可能为每个候选各自物化一个 `pto.addptr`，起点数值相同也未必是同一个 SSA 值。因此改用决定地址序列的原始量：分组键取 `(base, strideOperand, stride_new, unitBytes)`。加入 `unitBytes` 可防止 f32 上数值相同的 Element 与 Byte stride 被误合并；该键可能把本可合并的组拆开，但不会合并字节递推不同的组。
 
 同组的 op 共享一个 `iter_arg`，所有 op 使用同一个 pre-update 指针（block argument），不链式传递 `updated_base`。原因：同一迭代内同组 op 访问相同地址，链式传递会使后续 op 的地址偏移一个 stride。每组只需 yield 一个 `updated_base`。
 
@@ -529,6 +529,9 @@ LowerVPTOOpsPass
 
 `PTOInferVPTOVecScope` 以整 op 方式把 `scf.for` 搬入 `pto.vecscope`（`wrapCluster` 用 `splice` 移动整个 op），循环体内部结构不变，因此 4.2.5 检查 2「op 直接位于循环体内」的判定不受影响。
 
+该优化在 `ptoas` 的 VPTO pipeline 中默认开启。需要对比或回退到未优化行为时，可显式传入
+`--enable-vpto-soft-postupdate=false` 关闭。
+
 ### 5.2 Pass 注册
 
 ```tablegen
@@ -539,50 +542,3 @@ def VPTOSoftPostUpdate : Pass<"vpto-soft-postupdate", "ModuleOp"> {
                            "arith::ArithDialect"];
 }
 ```
-
-## 6. 实施计划
-
-### ~~Step 1：pass 框架与循环 delta 分析~~（已完成）
-
-1. ~~搭建 pass 框架：PostUpdateSet、遍历逻辑、pipeline 集成、CLI 开关。~~
-2. ~~实现 delta 递归分析（4.2.4）。~~
-3. ~~实现 delta 路径的合法性检查和改写（新增 iter_arg）。~~
-4. ~~支持同一循环中多个 op。~~
-5. ~~支持 `pto.vlds`、`pto.vsts`、`pto.vsstb`。~~
-6. ~~添加 delta 路径的 lit 测试和反向测试。~~
-
-### ~~Step 2：循环累加器分析~~（已完成）
-
-7. ~~实现 `getIterArgIncrement` helper。~~
-8. ~~实现累加器分析（4.2.3）：base/offset 统一检测与 stride 合并。~~
-9. ~~实现累加器路径的改写（4.2.6）。~~
-10. ~~在遍历逻辑中将累加器分析置于 delta 分析之前。~~
-11. ~~添加累加器路径的 lit 测试（含非常量 stride、base 和 offset 都是 iter_arg 等场景）。~~
-12. ~~实现 `StrideExpr` 符号表达式与常量折叠（4.2.2），使 `decomposeLinear` / `getIterArgIncrement` / `computeDelta` 成为纯函数并按 `Value` 缓存。~~
-13. ~~实现 `getIterArgIncrement` 的三态返回（`NotIterArg` / `Failed` / `Ok`）。~~
-14. ~~实现物化阶段：类型一致性检查、叶子可用性检查（必要时克隆 pure 定义链）、常量按 `(值, 类型)` 复用。~~
-15. ~~补充回归测试：增量定义在消费者之后、多增量组合、weight=32 非常量增量的负向用例。~~
-
-### ~~Step 3：顺序路径~~（已完成）
-
-16. ~~抽取循环与顺序路径共享的 helper：精确 elemBytes/unitBytes 换算、`combineStride`、初始指针计算和 post-update op 泛型构造。~~
-17. ~~实现 base 归一化：沿 `pto.addptr` 得到 `(rootBase, baseOffset)`；复用 `StrideExpr` 构造规则，并增加仿射规范化、相等比较和按系数精确缩放，使两条路径都能证明 `8*k` 一类非常量表达式的单位整除性；顺序路径仅在保留 cast 后能按目标 stride 类型精确物化时改写。~~
-18. ~~调整驱动为两阶段：先内到外完成全部循环路径，再重新收集所有 block（包括 `scf.for` body）和剩余非 Post-Update op。~~
-19. ~~实现有序分桶与线性 `SequentialRun` 检测：按 `(op 类型, rootBase)` 分桶，允许不同桶物理交错；接受的 `SequentialRun` 互不重叠，被拒 `SequentialRun` 从 `end - 1` 保留一个尾候选重试。~~
-20. ~~复用循环路径的类型、精确换算、可用性和 pure 克隆检查，在整条 `SequentialRun` 通过后物化 step 并链式改写。~~
-21. ~~更新 `Passes.td` 中 pass 描述，使其同时覆盖循环递推和 block 内顺序访问。~~
-22. ~~添加 `test/lit/vpto` 回归测试：固定 base 常量序列、变化 base 与 offset 抵消、非常量仿射 step、Block 类 `8*k` 单位精确缩放及宽动态结果无法安全写入 i16 的负向用例、for-body 循环路径未命中后转顺序路径、不同桶交错、多个最大 `SequentialRun`、公差破坏、零步长及无法精确换算的负向用例。~~
-23. ~~将尾指令改为使用当前指针和同类型零 stride 的 normal 形式，避免产生无人使用的最终 `updated_base`。~~
-24. ~~增加独立收益性检查：接受能够删除足量动态多层 `pto.addptr` 的常量-step run，以及任意合法长度的 direct symbolic-leaf run；规则统一适用于当前支持的全部 op。~~
-
-### Step 4：扩展指令覆盖
-
-25. 为 2.2 中的指令（`vldsx2`、`vsldb`、`plds`、`pldi` 等）添加 ODS `updated_base` 定义。
-26. 扩展 `PostUpdateTable`，为每条新指令按 4.2.1 的方法确定 `StrideUnit`（Element / Block / Byte）。
-27. 补充对应的 LLVM lowering（post intrinsic callee）和 lit 测试。
-
-### Step 5：验证与开启
-
-28. 端到端验证：用 ptoas 编译，与 bisheng Post-Update 输出对比已知 kernel。
-29. NPU 验证：在硬件上运行 Post-Update kernel（通过现有 `test/vpto/cases/micro-op/vector-load-store/` 框架）。
-30. 将默认值切换为开启。

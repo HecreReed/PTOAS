@@ -118,8 +118,9 @@ struct NarrowVecScopeLoopCounterPattern : public OpRewritePattern<scf::ForOp> {
 
     Block *oldBody = forOp.getBody();
     Block *newBody = newFor.getBody();
-    if (!newBody->empty())
+    if (!newBody->empty()) {
       rewriter.eraseOp(newBody->getTerminator());
+    }
 
     rewriter.setInsertionPointToStart(newBody);
     Value restoredInductionVar = restoreInductionVariableType(
@@ -145,7 +146,7 @@ struct PTONarrowVPTOLoopCounters
   void runOnOperation() override {
     RewritePatternSet patterns(&getContext());
     patterns.add<NarrowVecScopeLoopCounterPattern>(&getContext());
-    if (failed(applyPatternsGreedily(getOperation(), std::move(patterns))))
+    if (failed(applyPatternsAndFoldGreedily(getOperation(), std::move(patterns))))
       signalPassFailure();
   }
 };

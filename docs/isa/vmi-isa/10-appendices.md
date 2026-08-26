@@ -37,7 +37,7 @@
 | 29 | `pto.vmi.vcmp` | 3: Eltwise | A | Elementwise compare → mask |
 | 30 | `pto.vmi.vcmps` | 3: Eltwise | A | Vector-scalar compare → mask |
 | 31 | `pto.vmi.vsel` | 3: Eltwise | A | Predicate select |
-| 32 | `pto.vmi.vselr` | 3: Eltwise | A | Dynamic lane permute |
+| 32 | `pto.vmi.vselr` | 3: Eltwise | C | Dynamic lane select; contiguous, supported logical shape |
 | 33 | `pto.vmi.vbrc` | 4: Broadcast | A/B | Broadcast scalar/group-slot |
 | 34 | `pto.vmi.vcadd` | 5: Reduce | B | Add-reduction |
 | 35 | `pto.vmi.vcmax` | 5: Reduce | B | Max-reduction |
@@ -59,6 +59,8 @@
 | 51 | `pto.vmi.create_group_mask` | 8: Predicate | gen | Grouped predicate mask |
 | 52 | `pto.vmi.vintlv` | 9: Rearrange | A | Interleave two vectors |
 | 53 | `pto.vmi.vdintlv` | 9: Rearrange | A | Deinterleave two vectors |
+| 54 | `pto.vmi.vaddc` | 3: Eltwise | A | 32-bit integer add with per-lane carry output |
+| 55 | `pto.vmi.vaddcs` | 3: Eltwise | A | 32-bit integer add with carry input and output |
 
 ---
 

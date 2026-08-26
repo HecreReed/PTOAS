@@ -9,14 +9,14 @@
 > ops (including `vmull`, whose 64-bit product is split into a pair of `i32`
 > results at the VMI surface) are Category A `vreg→vreg`.
 
+
 ---
 
 ## 7.1 Fused Arithmetic
 
 ### `pto.vmi.vexpdif`
 
-- **semantics:** Fused `exp(x − max)` for softmax numerical stability. Single
-  hardware instruction.
+- **semantics:** Fused `exp(x − max)` for softmax numerical stability.
 
   ```c
   for (int i = 0; i < L; i++)
@@ -25,14 +25,14 @@
 
 - **syntax:**
   ```mlir
-  %e = pto.vmi.vexpdif %x, %max, %mask : !pto.vmi.vreg<L×T_x>, !pto.vmi.vreg<L×f32>, !pto.vmi.mask<L> -> !pto.vmi.vreg<L×f32>
+  %e = pto.vmi.vexpdif %x, %max, %mask : !pto.vmi.vreg<L×T>, !pto.vmi.vreg<L×T>, !pto.vmi.mask<L> -> !pto.vmi.vreg<L×f32>
   ```
 - **operands:**
 
   | Operand | Type | Description |
   |---|---|---|
-  | `x` | `!pto.vmi.vreg<L×T_x>` | Input (`f16` or `f32`) |
-  | `max` | `!pto.vmi.vreg<L×f32>` | Subtracted max (always `f32`) |
+  | `x` | `!pto.vmi.vreg<L×T>` | Input (`f16` or `f32`) |
+  | `max` | `!pto.vmi.vreg<L×T>` | Subtracted max with the same type as `x` |
   | `mask` | `!pto.vmi.mask<L>` | Governing predicate |
 
 - **results:**
@@ -41,13 +41,14 @@
   |---|---|---|
   | `result` | `!pto.vmi.vreg<L×f32>` | `exp(x − max)` (always `f32`) |
 
-- **attributes:** `pmode` (`"zero"` / `"merge"`)
-- **datatypes:** Input `x`: `f16`, `f32`; `max` and result: always `f32`
+- **attributes:** `pmode` (`"zero"` / `"merge"`), default `"zero"`
+- **datatypes:** `x` and `max`: matching `f16` or `f32`; result: `f32`
 - **lowering to `pto.mi`:**
   ```
-  K × pto.vexpdif
+  f32: K × pto.vexpdif
+  f16: 2K × pto.vexpdif
   ```
-  `#mi = K`, `dep = 1`. Fuses `vsub` + `vexp`.
+  Fuses `vsub` + `vexp`.
 
 - **example:**
   ```mlir
@@ -249,6 +250,7 @@
         !pto.vmi.mask<64> -> !pto.vmi.vreg<64×f32>
   ```
 
+
 ---
 
 ## 7.2 Histogram
@@ -400,6 +402,7 @@
       : !pto.vmi.vreg<256×i16>, !pto.vmi.vreg<256×i8>, !pto.vmi.mask<256>
      -> !pto.vmi.vreg<256×i16>
   ```
+
 
 ---
 

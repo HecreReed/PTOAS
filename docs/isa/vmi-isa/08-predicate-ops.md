@@ -20,6 +20,7 @@
 %next = arith.subi %rem, %act   // rem - min(rem, L)
 ```
 
+
 ---
 
 ## `pto.vmi.create_mask`
@@ -57,6 +58,7 @@
   // First-N tail mask (N = 64)
   %tail = pto.vmi.create_mask %c64 : index -> !pto.vmi.mask<128×b32>
   ```
+
 
 ---
 
@@ -109,13 +111,29 @@
       : index -> !pto.vmi.mask<256×b32>
   ```
 
+`num_groups` is logically legal for any positive divisor of the result mask
+lane count. A backend may impose a narrower materialization limit separately.
 
-> **Mask Boolean Ops (`vand` / `vor` / `vxor` / `vnot` on masks):**
->
-> There is **no dedicated predicate-logic op** (e.g. `pand`/`por`/`pxor`/`pnot`).
-> Mask (predicate) boolean operations are **not yet supported**, but are planned.
-> The planned approach is to **reuse the elementwise bitwise ops** `pto.vmi.vand` /
-> `vor` / `vxor` / `vnot` directly on mask operands — their implementations will be
-> extended to accept mask types (treated as a per-lane bit-wise boolean op on the
-> predicate). This also covers the `pnot`-style predicate complement needed by MERGE
-> emulation (see [Appendix C](10-appendices.md)).
+
+---
+
+## Mask Boolean Ops (`vand` / `vor` / `vxor` / `vnot` on masks)
+
+The elementwise bitwise ops are reused directly on mask operands, treated as a
+per-lane bit-wise boolean op on the predicate.
+
+- **example:**
+  ```mlir
+  // Predicate boolean ops on masks
+  %and = pto.vmi.vand %lt, %gt
+      : !pto.vmi.mask<128xpred>, !pto.vmi.mask<128xpred>
+      -> !pto.vmi.mask<128xpred>
+  %or = pto.vmi.vor %lt, %gt
+      : !pto.vmi.mask<128xpred>, !pto.vmi.mask<128xpred>
+      -> !pto.vmi.mask<128xpred>
+  %xor = pto.vmi.vxor %lt, %gt
+      : !pto.vmi.mask<128xpred>, !pto.vmi.mask<128xpred>
+      -> !pto.vmi.mask<128xpred>
+  %not = pto.vmi.vnot %lt
+      : !pto.vmi.mask<128xpred> -> !pto.vmi.mask<128xpred>
+  ```

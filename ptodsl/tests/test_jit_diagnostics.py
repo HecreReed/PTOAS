@@ -32,6 +32,60 @@ def expect_raises(callback, exc_type, *message_fragments: str) -> None:
         raise AssertionError(f"expected {exc_type.__name__} to be raised")
 
 
+def expect_traceback_line(
+    callback,
+    exc_type,
+    function_name: str,
+    marker: str,
+    first_line_marker: str,
+) -> None:
+    source_path = Path(__file__).resolve()
+    source_lines = source_path.read_text(encoding="utf-8").splitlines()
+
+    def marker_line(source_marker: str) -> int:
+        marker_lines = [
+            line_number
+            for line_number, line in enumerate(source_lines, start=1)
+            if f"# {source_marker}" in line
+        ]
+        expect(
+            len(marker_lines) == 1,
+            f"expected exactly one source marker {source_marker!r}, got {marker_lines}",
+        )
+        return marker_lines[0]
+
+    expected_line = marker_line(marker)
+    expected_first_line = marker_line(first_line_marker)
+
+    try:
+        callback()
+    except exc_type as exc:
+        matching_frames = []
+        current = exc.__traceback__
+        while current is not None:
+            frame = current.tb_frame
+            if (
+                Path(frame.f_code.co_filename).resolve() == source_path
+                and frame.f_code.co_name == function_name
+            ):
+                matching_frames.append(current)
+            current = current.tb_next
+        expect(matching_frames, f"expected a traceback frame for {function_name}")
+        rewritten_frame = matching_frames[-1]
+        expect(
+            rewritten_frame.tb_lineno == expected_line,
+            f"expected {function_name} traceback line {expected_line}, "
+            f"got {rewritten_frame.tb_lineno}",
+        )
+        expect(
+            rewritten_frame.tb_frame.f_code.co_firstlineno == expected_first_line,
+            f"expected {function_name} first line {expected_first_line}, "
+            f"got {rewritten_frame.tb_frame.f_code.co_firstlineno}",
+        )
+    else:
+        raise AssertionError(f"expected {exc_type.__name__} to be raised")
+
+
 @pto.jit(target="a5", ast_rewrite=False)
 def native_python_if_runtime_const_probe():
     if pto.const(1):
@@ -301,6 +355,26 @@ def define_emitc_ub_ptr_entry_annotation_probe():
         pto.pipe_barrier(pto.Pipe.ALL)
 
     return bad_probe
+
+
+def define_tprint_vpto_rejected_probe():
+    @pto.jit(target="a5", backend="vpto", mode="explicit")
+    def bad_probe():
+        tile = pto.alloc_tile(shape=[1, 8], dtype=pto.f32)
+        pto.tile.print(tile, print_format="width10_precision6")
+
+    return bad_probe
+
+
+def define_tprint_emitc_allowed_probe():
+    @pto.jit(target="a5", backend="emitc")
+    def good_probe(src: pto.ptr(pto.f32, "gm")):
+        view = pto.make_tensor_view(src, shape=[1, 8], strides=[8, 1])
+        tile = pto.alloc_tile(shape=[1, 8], dtype=pto.f32)
+        pto.tile.load(view, tile)
+        pto.tile.print(tile, print_format="width10_precision6")
+
+    return good_probe
 
 
 def define_frontend_options_conflict_probe():
@@ -630,6 +704,17 @@ def taddrelu_a5_probe():
     pto.tile.addrelu(lhs, rhs, dst)
 
 
+def define_ast_rewrite_traceback_line_probe():
+    @pto.jit(  # AST_REWRITE_FIRST_LINE_MARKER
+        target="a5",
+    )
+    def ast_rewrite_traceback_line_probe():
+        runtime_value = pto.const(1, dtype=pto.i32)
+        _ = not runtime_value  # AST_REWRITE_TRACEBACK_LINE_MARKER
+
+    return ast_rewrite_traceback_line_probe
+
+
 def main() -> None:
     expect_raises(
         native_python_if_runtime_const_probe.compile,
@@ -898,10 +983,9 @@ def main() -> None:
         NameError,
         "value",
     )
-    expect_raises(
-        lambda: define_ast_for_else_probe().compile(),
-        PTODSLAstRewriteError,
-        "does not support for-else",
+    expect(
+        "scf.while" in define_ast_for_else_probe().compile().mlir_text(),
+        "runtime for-else must lower through scf.while",
     )
     expect_raises(
         lambda: define_ast_for_non_range_probe().compile(),
@@ -913,16 +997,11 @@ def main() -> None:
         PTODSLAstRewriteError,
         "runtime for-loops require a simple name target",
     )
-    expect_raises(
-        lambda: define_ast_for_break_probe().compile(),
-        PTODSLAstRewriteError,
-        "does not support break/continue",
-    )
-    expect_raises(
-        lambda: define_ast_runtime_for_constexpr_break_probe().compile(),
-        PTODSLAstRewriteError,
-        "does not support break/continue",
-    )
+    for probe in (define_ast_for_break_probe, define_ast_runtime_for_constexpr_break_probe):
+        expect(
+            "scf.while" in probe().compile().mlir_text(),
+            "runtime for-break must lower through scf.while",
+        )
     expect_raises(
         lambda: define_ast_for_last_value_probe().compile(),
         PTODSLAstRewriteError,
@@ -1265,6 +1344,14 @@ def main() -> None:
         "target='a5'",
     )
     expect_raises(
+        define_tprint_vpto_rejected_probe().compile,
+        ValueError,
+        "pto.tprint is supported only by the EmitC backend",
+    )
+    tprint_emitc_text = define_tprint_emitc_allowed_probe().compile().mlir_text()
+    expect("pto.tprint" in tprint_emitc_text, "tprint should compile under the EmitC backend")
+    expect("width10_precision6" in tprint_emitc_text, "tprint EmitC probe should preserve printFormat")
+    expect_raises(
         lambda: inspect_host_tensor_metadata(MissingDTypeTensor()),
         TypeError,
         "host tensor metadata is incomplete or unsupported",
@@ -1275,6 +1362,14 @@ def main() -> None:
         TypeError,
         "host tensor metadata is incomplete or unsupported",
         "data_ptr must return an integer-like data handle",
+    )
+    ast_rewrite_traceback_line_probe = define_ast_rewrite_traceback_line_probe()
+    expect_traceback_line(
+        ast_rewrite_traceback_line_probe.compile,
+        TypeError,
+        "ast_rewrite_traceback_line_probe",
+        "AST_REWRITE_TRACEBACK_LINE_MARKER",
+        "AST_REWRITE_FIRST_LINE_MARKER",
     )
     print("ptodsl_jit_diagnostics: PASS")
 

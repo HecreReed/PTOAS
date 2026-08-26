@@ -2,10 +2,7 @@
 
 ## Background
 
-PTOAS currently supports two TileLib backends for VPTO tile-op expansion:
-
-- `tilelang`, the legacy TileLangDSL template implementation.
-- `ptodsl`, the PTODSL-native template implementation.
+PTOAS uses the PTODSL-native TileLib implementation for VPTO tile-op expansion.
 
 A tile op may have several legal implementations for the same op
 name. Those implementations can differ by dtype, layout, memory space,
@@ -42,7 +39,7 @@ in the ISA and user guide documents, not here.
 
 ## Pipeline
 
-The PTODSL TileLib path has two compiler interactions with the Python daemon.
+The PTODSL TileLib path has two interactions with the in-process Python service.
 
 ```text
 TileOp in MLIR
@@ -50,7 +47,7 @@ TileOp in MLIR
   | InsertTemplateAttributes
   |   - reconstruct operand specs from MLIR
   |   - collect context attributes
-  |   - ask the PTODSL daemon for legal candidates
+  |   - ask the PTODSL service for legal candidates
   |   - store compact candidate metadata on the TileOp
   v
 TileOp with candidates attr
@@ -58,8 +55,8 @@ TileOp with candidates attr
   | ExpandTileOp
   |   - build a specialization key from current MLIR operands and attrs
   |   - choose candidate 0 from the compact candidates attr
-  |   - ask the daemon to render that candidate
-  |   - clone the generated helper and replace the TileOp with func.call
+  |   - ask the service to materialize that candidate in the shared context
+  |   - import the generated entry/helpers and replace the TileOp with func.call
   v
 VPTO-facing IR
 ```
@@ -68,6 +65,20 @@ The two-stage flow is intentional. `InsertTemplateAttributes` performs legality
 before later passes can make candidate information harder to reconstruct.
 `ExpandTileOp` still renders from the current MLIR operands so the helper body
 matches the actual operand types and view metadata that survived to expansion.
+
+Both stages are ordinary registered MLIR passes. They are default-constructible
+and obtain the current `MLIRContext` from the operation being transformed. A
+process-wide `TileLibRuntime` provides the host `TileLibService`; it owns no
+compilation context and receives the current context explicitly for every
+materialization. `PTOASContext` continues to own or borrow the context for one
+compilation session, so different invocations may use different contexts while
+sharing one Python runtime.
+
+The Python entry keeps the corresponding Python `Context` owner alive for the
+complete native compilation call. Compiler materialization requires that
+explicit context and never falls back to creating another one. This preserves
+normal pass registration, textual pipelines, targeted IR printing, cloning,
+and reproducer behavior without storing Python objects in pass instances.
 
 ## Template Metadata
 
@@ -102,12 +113,12 @@ remain in Python metadata for selection, diagnostics, and future tooling.
 ## Operand Specs
 
 Both `InsertTemplateAttributes` and `ExpandTileOp` reconstruct operand specs
-from MLIR. The JSON shape sent to the daemon is deliberately close to
+from MLIR. The JSON shape sent to the Python service is deliberately close to
 `TileSpec`, `ViewSpec`, `ScalarSpec`, and `VectorSpec`.
 
 | Operand kind | Required metadata |
 |---|---|
-| tile | dtype, shape, valid shape, memory space, block layout, sub-layout, fractal size, pad value |
+| tile | dtype, shape, valid shape, memory space, block layout, sub-layout, fractal size, pad value, compact mode |
 | view | dtype, shape, strides when known, memory space, optional layout |
 | vector | dtype and vector shape |
 | scalar | dtype and static integer value when recoverable |
@@ -129,6 +140,7 @@ context attrs. Current examples include:
 | `cmp_mode` | `tcmp`, `tcmps` |
 | `mask_pattern` | gather-side paths |
 | `precisionType` | high-precision math families |
+| `acc_to_vec_mode`, `relu_pre_mode` | `tinsert` accumulator writeback paths |
 
 When a new TileLangDSL version depends on an op attribute, the PTODSL migration
 should first decide whether the attribute is a real context attr. If it changes
@@ -137,7 +149,7 @@ template is considered ported.
 
 ## Candidate Legality And Ranking
 
-The daemon loads only the template module for the requested op and target. It
+The service loads only the template module for the requested op and target. It
 then evaluates each registered candidate:
 
 1. Bind positional MLIR operands to the template parameter names.
@@ -147,21 +159,36 @@ then evaluates each registered candidate:
 5. Check layout and memory-space metadata.
 6. Merge context attributes.
 7. Run custom constraint predicates.
-8. Sort legal candidates by descending priority.
+8. Sort legal candidates by descending priority, using name only to make
+   equal-priority reporting deterministic.
 
-If no candidate is legal, the daemon reports a `NoMatchingTemplate` error with
+If no candidate is legal, the service reports a `NoMatchingTemplate` error with
 per-candidate reasons. If multiple candidates tie for the highest priority and
-no explicit candidate is requested, the registry reports ambiguity rather than
-silently picking one.
+no explicit candidate is requested, both normal selection and metadata
+insertion report ambiguity rather than silently picking one.
 
-For multi-candidate ops, candidate `id` values must be unique. The C++ pass
-sorts persisted candidate metadata by `id` and then by name, so ids should be
-stable and intentionally assigned.
+Constraint predicates may depend on concrete operand metadata, so general
+overlap cannot be proven when templates are merely registered. In-tree catalog
+selection tests catch ties for their representative operand forms before
+compiler integration runs; metadata insertion retains the concrete check for
+forms that a catalog cannot exhaustively enumerate. The ambiguity diagnostic
+directs authors to assign distinct priorities or make the constraints mutually
+exclusive.
+
+For multi-candidate ops, candidate `id` values must be unique and stable. IDs
+identify versions; they do not rank them.
+
+The service returns legal candidates as a JSON array in Python ranking order.
+Each wire entry includes priority so `InsertTemplateAttributes` can defensively
+normalize the result by descending priority and reject a highest-priority tie.
+This protects selection across the compiler/service boundary if a response is
+unsorted. Candidate ID, JSON object order, registration order, and import order
+do not participate in ranking.
 
 ## Compact Candidate Attribute
 
-`InsertTemplateAttributes` stores a compact `candidates` array attribute on the
-TileOp. Each entry contains:
+`InsertTemplateAttributes` stores the normalized candidates as a compact
+`candidates` array attribute on the TileOp. Each entry contains:
 
 - `id`
 - `name`
@@ -170,9 +197,11 @@ TileOp. Each entry contains:
 - `tail`
 
 This attribute is intentionally not a copy of the full Python metadata object.
-Legality has already happened in the daemon. The IR only needs a stable list of
-legal render targets and the small amount of metadata consumed by downstream
-passes.
+Legality has already happened in the service. Priority is consumed while
+validating and ordering the wire response; it is not persisted. The IR only
+needs a stable list of legal render targets and the small amount of metadata
+consumed by downstream passes. Array position is meaningful: candidate zero is
+the selected version.
 
 Do not add fields to the IR candidate payload simply because they exist in
 Python metadata. Add a field only when a C++ pass or IR-level test consumes it.
@@ -180,8 +209,9 @@ Python metadata. Add a field only when a C++ pass or IR-level test consumes it.
 ## Expansion And Specialization
 
 `ExpandTileOp` uses the first candidate in the compact candidate list. For
-PTODSL, it passes the selected candidate name back to the daemon so rendering
-cannot accidentally choose a different legal template after the metadata pass.
+PTODSL, it passes the selected candidate name back to the service so
+materialization cannot accidentally choose a different legal template after the
+metadata pass.
 
 The specialization key deduplicates generated helpers inside one module. It
 must include every input that can change the rendered helper body:
@@ -189,7 +219,7 @@ must include every input that can change the rendered helper body:
 - op name
 - target architecture
 - tile operand dtype, shape, valid shape, memory space, layouts, fractal size,
-  and pad value
+  pad value, and compact mode
 - view operand dtype, shape, strides, memory space, and layout
 - vector operand dtype and shape
 - scalar operand dtype and static value when known
@@ -207,6 +237,9 @@ faster to inspect.
   enough to accept ST-proven TileLangDSL forms.
 - Forward context attrs before porting a version that depends on them.
 - Use stable candidate ids for multi-candidate ops.
+- Treat candidate ids as identity only; use priority for preference.
+- Reject equal top-priority candidates instead of adding an incidental
+  tie-breaker.
 - Put all helper-code-affecting operand metadata in the specialization key.
 - Add a focused regression for each backend-selection bug.
 - Treat full ST status files as snapshots, not design documentation.

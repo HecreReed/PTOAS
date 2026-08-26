@@ -20,8 +20,11 @@
 //
 //===----------------------------------------------------------------------===//
 
+#include "PTO/Support/CodeConstants.h"
 #include "PTO/IR/PTO.h"
+#include "PTO/IR/PTOTypeUtils.h"
 
+#include "mlir/Dialect/Arith/IR/Arith.h"
 #include "mlir/Dialect/Func/IR/FuncOps.h"
 #include "mlir/Dialect/MemRef/IR/MemRef.h"
 #include "mlir/Dialect/SCF/IR/SCF.h"
@@ -49,37 +52,45 @@ LogicalResult validateVPTOEmissionIR(ModuleOp module,
 namespace detail {
 
 static Operation *getFirstNonConstantLikeOp(Block *block) {
-  if (!block)
+  if (!block) {
     return nullptr;
+  }
   for (Operation &op : *block) {
-    if (!op.hasTrait<OpTrait::ConstantLike>())
+    if (!op.hasTrait<OpTrait::ConstantLike>()) {
       return &op;
+    }
   }
   return nullptr;
 }
 
 static bool isOpInRange(Operation *op, Operation *first, Operation *last) {
   for (Operation *cur = first; cur; cur = cur->getNextNode()) {
-    if (cur == op)
+    if (cur == op) {
       return true;
-    if (cur == last)
+    }
+    if (cur == last) {
       return false;
+    }
   }
   return false;
 }
 
 static constexpr int64_t kSimtKeepResumeSlotLimit = 123;
+static constexpr unsigned kWideValueRegisterCount = 2;
 
 static std::optional<unsigned> getSimtKeepResumeRegisterCount(Type type) {
   if (auto intType = dyn_cast<IntegerType>(type)) {
-    if (intType.getWidth() <= 32)
+    if (intType.getWidth() <= mlir::pto::kValue32) {
       return 1;
-    if (intType.getWidth() == 64)
-      return 2;
+    }
+    if (intType.getWidth() == mlir::pto::kValue64) {
+      return kWideValueRegisterCount;
+    }
     return std::nullopt;
   }
-  if (type.isF16() || type.isBF16() || type.isF32())
+  if (type.isF16() || type.isBF16() || type.isF32()) {
     return 1;
+  }
   return std::nullopt;
 }
 
@@ -100,22 +111,26 @@ template <typename OpT>
 static LogicalResult verifySimtKeepResumeSlotRange(OpT op) {
   std::optional<unsigned> registerCount =
       getSimtKeepResumeRegisterCount(getSimtKeepResumeValueType(op));
-  if (!registerCount)
+  if (!registerCount) {
     return success();
+  }
   int64_t slot = op.getSlot();
-  if (slot < 0 || slot >= kSimtKeepResumeSlotLimit)
+  if (slot < 0 || slot >= kSimtKeepResumeSlotLimit) {
     return op.emitOpError()
            << "requires slot in range [0, "
            << (kSimtKeepResumeSlotLimit - 1) << "]";
-  if (*registerCount == 2) {
-    if ((slot % 2) != 0)
+  }
+  if (*registerCount == mlir::pto::kValue2) {
+    if ((slot % kWideValueRegisterCount) != 0) {
       return op.emitOpError()
              << "requires an even slot for 64-bit keep/resume values";
-    if (slot + 1 >= kSimtKeepResumeSlotLimit)
+    }
+    if (slot + 1 >= kSimtKeepResumeSlotLimit) {
       return op.emitOpError()
              << "requires slot in range [0, "
-             << (kSimtKeepResumeSlotLimit - 2)
+             << (kSimtKeepResumeSlotLimit - mlir::pto::kValue2)
              << "] for 64-bit keep/resume values";
+    }
   }
   return success();
 }
@@ -125,30 +140,35 @@ static bool overlapsEarlierSimtKeepResumeSlotUse(OpT op,
                                                  SmallVectorImpl<int64_t> &used) {
   std::optional<unsigned> registerCount =
       getSimtKeepResumeRegisterCount(getSimtKeepResumeValueType(op));
-  if (!registerCount)
+  if (!registerCount) {
     return false;
+  }
   int64_t slot = op.getSlot();
   for (int64_t word = slot; word < slot + *registerCount; ++word) {
-    if (llvm::is_contained(used, word))
+    if (llvm::is_contained(used, word)) {
       return true;
+    }
   }
-  for (int64_t word = slot; word < slot + *registerCount; ++word)
+  for (int64_t word = slot; word < slot + *registerCount; ++word) {
     used.push_back(word);
+  }
   return false;
 }
 
 static LogicalResult verifyUniqueResumeGroupSlots(ResumeOp current,
                                                   Operation *first) {
-  SmallVector<int64_t, 4> slots;
+  SmallVector<int64_t, mlir::pto::kValue4> slots;
   for (Operation *cur = first; cur; cur = cur->getNextNode()) {
     auto resume = dyn_cast<ResumeOp>(cur);
-    if (!resume)
+    if (!resume) {
       break;
+    }
     if (overlapsEarlierSimtKeepResumeSlotUse(resume, slots) &&
-        resume.getOperation() == current.getOperation())
+        resume.getOperation() == current.getOperation()) {
       return current.emitOpError()
              << "duplicates an earlier slot " << resume.getSlot()
              << " in the SIMT resume prologue group";
+    }
   }
   return success();
 }
@@ -156,18 +176,21 @@ static LogicalResult verifyUniqueResumeGroupSlots(ResumeOp current,
 static LogicalResult verifyUniqueKeepGroupSlots(KeepOp current,
                                                 Operation *first,
                                                 Operation *last) {
-  SmallVector<int64_t, 4> slots;
+  SmallVector<int64_t, mlir::pto::kValue4> slots;
   for (Operation *cur = first; cur; cur = cur->getNextNode()) {
     auto keep = dyn_cast<KeepOp>(cur);
-    if (!keep)
+    if (!keep) {
       break;
+    }
     if (overlapsEarlierSimtKeepResumeSlotUse(keep, slots) &&
-        keep.getOperation() == current.getOperation())
+        keep.getOperation() == current.getOperation()) {
       return current.emitOpError()
              << "duplicates an earlier slot " << keep.getSlot()
              << " in the SIMT keep epilogue group";
-    if (cur == last)
+    }
+    if (cur == last) {
       break;
+    }
   }
   return success();
 }
@@ -201,8 +224,9 @@ public:
 
   SmallVector<func::FuncOp> getFunctions() {
     SmallVector<func::FuncOp> funcs;
-    for (func::FuncOp func : module.getOps<func::FuncOp>())
+    for (func::FuncOp func : module.getOps<func::FuncOp>()) {
       funcs.push_back(func);
+    }
     return funcs;
   }
 
@@ -215,8 +239,9 @@ public:
   }
 
   static bool requiresVecScope(Operation *op) {
-    if (!isPTOp(op))
+    if (!isPTOp(op)) {
       return false;
+    }
 
     return llvm::any_of(op->getOperandTypes(), isLegalityTypedValue) ||
            llvm::any_of(op->getResultTypes(), isLegalityTypedValue);
@@ -231,34 +256,40 @@ public:
   }
 
   static bool isAnyVectorScopeCarrier(Operation *op) {
-    if (auto loop = dyn_cast_or_null<scf::ForOp>(op))
+    if (auto loop = dyn_cast_or_null<scf::ForOp>(op)) {
       return isAIVectorScopeCarrier(loop);
+    }
     return isDedicatedVecScopeCarrier(op);
   }
 
   static Operation *getEnclosingVectorScopeCarrier(Operation *op) {
     for (Operation *parent = op ? op->getParentOp() : nullptr; parent;
          parent = parent->getParentOp()) {
-      if (isAnyVectorScopeCarrier(parent))
+      if (isAnyVectorScopeCarrier(parent)) {
         return parent;
+      }
     }
     return nullptr;
   }
 
   static std::optional<VPTOMaskGranularity> getMaskGranularity(Type type) {
     auto maskType = dyn_cast<MaskType>(type);
-    if (!maskType)
+    if (!maskType) {
       return std::nullopt;
+    }
     return getMaskGranularity(maskType);
   }
 
   static std::optional<VPTOMaskGranularity> getMaskGranularity(MaskType type) {
-    if (type.isB8())
+    if (type.isB8()) {
       return VPTOMaskGranularity::B8;
-    if (type.isB16())
+    }
+    if (type.isB16()) {
       return VPTOMaskGranularity::B16;
-    if (type.isB32())
+    }
+    if (type.isB32()) {
       return VPTOMaskGranularity::B32;
+    }
     return std::nullopt;
   }
 
@@ -276,24 +307,28 @@ public:
 
   static std::optional<VPTOMaskGranularity>
   inferMaskGranularityFromType(Type type) {
-    if (auto vregType = dyn_cast<VRegType>(type))
+    if (auto vregType = dyn_cast<VRegType>(type)) {
       type = vregType.getElementType();
+    }
 
-    if (type.isF32())
+    if (type.isF32()) {
       return VPTOMaskGranularity::B32;
-    if (type.isF16() || type.isBF16())
+    }
+    if (type.isF16() || type.isBF16()) {
       return VPTOMaskGranularity::B16;
+    }
 
     auto intType = dyn_cast<IntegerType>(type);
-    if (!intType)
+    if (!intType) {
       return std::nullopt;
+    }
 
     switch (intType.getWidth()) {
-    case 8:
+    case mlir::pto::kValue8:
       return VPTOMaskGranularity::B8;
-    case 16:
+    case mlir::pto::kValue16:
       return VPTOMaskGranularity::B16;
-    case 32:
+    case mlir::pto::kValue32:
       return VPTOMaskGranularity::B32;
     default:
       return std::nullopt;
@@ -303,36 +338,44 @@ public:
   static std::optional<VPTOMaskGranularity>
   inferMaskGranularityFromFamily(Operation *op) {
     StringRef mnemonic = getPTOpMnemonic(op);
-    if (mnemonic.empty())
+    if (mnemonic.empty()) {
       return std::nullopt;
+    }
 
-    if (mnemonic.ends_with("_b8"))
+    if (mnemonic.ends_with("_b8")) {
       return VPTOMaskGranularity::B8;
-    if (mnemonic.ends_with("_b16"))
+    }
+    if (mnemonic.ends_with("_b16")) {
       return VPTOMaskGranularity::B16;
-    if (mnemonic.ends_with("_b32"))
+    }
+    if (mnemonic.ends_with("_b32")) {
       return VPTOMaskGranularity::B32;
+    }
     return std::nullopt;
   }
 
   static VPTOBufferAddressFamily classifyBufferAddressFamily(Operation *op) {
-    if (!op)
+    if (!op) {
       return VPTOBufferAddressFamily::None;
+    }
 
     if (isa<CopyGmToUbufOp, CopyUbufToUbufOp, CopyUbufToGmOp,
-            CopyCbufToUbufOp, CopyUbufToCbufOp>(op))
+            CopyCbufToUbufOp, CopyUbufToCbufOp>(op)) {
       return VPTOBufferAddressFamily::Copy;
+    }
 
     if (isa<VldasOp, VldusOp, PstuOp, VstusOp, VsturOp, MadOp, MadMxOp,
             CopyGmToCbufOp, LoadCbufToCaOp,
-            LoadCbufToCbOp, CopyMatrixCcToGmOp>(op))
+            LoadCbufToCbOp, CopyMatrixCcToGmOp>(op)) {
       return VPTOBufferAddressFamily::PtrOnly;
+    }
 
     if (isa<VldsOp, UvldOp, PldsOp, PldiOp, VstsOp, PstiOp, PstsOp,
             VbitsortOp, Vmrgsort4Op, Vgather2Op,
             VgatherbOp, Vgather2BcOp, VscatterOp, Vldsx2Op, Vstsx2Op, VsldbOp,
-            VsstbOp, VstasOp, VstarOp>(op))
+            VsstbOp, VstasOp, VstarOp>(op)) {
       return VPTOBufferAddressFamily::BufferLike;
+    }
 
     return VPTOBufferAddressFamily::None;
   }
@@ -351,8 +394,9 @@ public:
   static SmallVector<OpOperand *> collectBufferOperands(Operation *op) {
     SmallVector<OpOperand *> bufferOperands;
     for (OpOperand &operand : op->getOpOperands()) {
-      if (isBufferLikeValue(operand.get().getType()))
+      if (isBufferLikeValue(operand.get().getType())) {
         bufferOperands.push_back(&operand);
+      }
     }
     return bufferOperands;
   }
@@ -363,8 +407,9 @@ private:
   }
 
   static StringRef getPTOpMnemonic(Operation *op) {
-    if (!isPTOp(op))
+    if (!isPTOp(op)) {
       return {};
+    }
     StringRef mnemonic = op->getName().getStringRef();
     (void)mnemonic.consume_front("pto.");
     return mnemonic;
@@ -391,30 +436,36 @@ public:
       return failure();
     }
 
-    if (failed(validateAuthoringRules()))
+    if (failed(validateAuthoringRules())) {
       return failure();
+    }
 
     if (stage == VPTOLegalityStage::Emission &&
-        failed(validateEmissionRules()))
+        failed(validateEmissionRules())) {
       return failure();
+    }
 
     return success();
   }
 
 private:
   LogicalResult validateAuthoringRules() {
-    if (failed(validateAuthoringFunctionSurface()))
+    if (failed(validateAuthoringFunctionSurface())) {
       return failure();
-    if (failed(validateAuthoringOperationSurface()))
+    }
+    if (failed(validateAuthoringOperationSurface())) {
       return failure();
+    }
     return success();
   }
 
   LogicalResult validateEmissionRules() {
-    if (failed(validateEmissionFunctionSurface()))
+    if (failed(validateEmissionFunctionSurface())) {
       return failure();
-    if (failed(validateEmissionOperationSurface()))
+    }
+    if (failed(validateEmissionOperationSurface())) {
       return failure();
+    }
     return success();
   }
 
@@ -433,8 +484,9 @@ private:
                                                        StringRef vectorRole) {
     auto actual = VPTOLegalityHelper::getMaskGranularity(maskType);
     auto expected = VPTOLegalityHelper::inferMaskGranularityFromType(vectorType);
-    if (!actual || !expected || *actual == *expected)
+    if (!actual || !expected || *actual == *expected) {
       return success();
+    }
 
     return op->emitOpError()
            << maskRole << " " << maskType << " does not match " << vectorRole
@@ -445,18 +497,21 @@ private:
   static std::optional<VPTOMaskGranularity>
   inferVstsMaskGranularityOverride(Operation *op) {
     Value value;
-    if (auto vsts = dyn_cast<VstsOp>(op))
+    if (auto vsts = dyn_cast<VstsOp>(op)) {
       value = vsts.getValue();
-    else
+    } else {
       return std::nullopt;
+    }
 
     auto valueType = dyn_cast<VRegType>(value.getType());
-    if (!valueType)
+    if (!valueType) {
       return std::nullopt;
+    }
 
     auto distAttr = op->getAttrOfType<StringAttr>("dist");
-    if (!distAttr)
+    if (!distAttr) {
       return std::nullopt;
+    }
 
     StringRef dist = distAttr.getValue();
     auto elementType = valueType.getElementType();
@@ -464,48 +519,55 @@ private:
     if (auto elementIntType = dyn_cast<IntegerType>(elementType)) {
       width = elementIntType.getWidth();
     } else if (elementType.isF16() || elementType.isBF16()) {
-      width = 16;
+      width = mlir::pto::kValue16;
     } else if (elementType.isF32()) {
-      width = 32;
+      width = mlir::pto::kValue32;
     } else if (elementType.isF64()) {
-      width = 64;
+      width = mlir::pto::kValue64;
     } else {
       return std::nullopt;
     }
 
     if (dist == "PK_B16") {
-      if (width == 8)
+      if (width == mlir::pto::kValue8) {
         return VPTOMaskGranularity::B16;
+      }
       return std::nullopt;
     }
     if (dist == "PK_B32") {
-      if (width == 16)
+      if (width == mlir::pto::kValue16) {
         return VPTOMaskGranularity::B32;
+      }
       return std::nullopt;
     }
     if (dist == "PK_B64") {
-      if (width == 32)
+      if (width == mlir::pto::kValue32) {
         return VPTOMaskGranularity::B32;
+      }
       return std::nullopt;
     }
     if (dist == "PK4_B32") {
-      if (width == 8)
+      if (width == mlir::pto::kValue8) {
         return VPTOMaskGranularity::B32;
+      }
       return std::nullopt;
     }
     if (dist == "MRG4CHN_B8") {
-      if (width == 8)
+      if (width == mlir::pto::kValue8) {
         return VPTOMaskGranularity::B32;
+      }
       return std::nullopt;
     }
     if (dist == "MRG2CHN_B8") {
-      if (width == 8)
+      if (width == mlir::pto::kValue8) {
         return VPTOMaskGranularity::B16;
+      }
       return std::nullopt;
     }
     if (dist == "MRG2CHN_B16") {
-      if (width == 16)
+      if (width == mlir::pto::kValue16) {
         return VPTOMaskGranularity::B32;
+      }
     }
     return std::nullopt;
   }
@@ -516,8 +578,9 @@ private:
                                                    StringRef rhsRole) {
     auto lhs = VPTOLegalityHelper::getMaskGranularity(lhsType);
     auto rhs = VPTOLegalityHelper::getMaskGranularity(rhsType);
-    if (!lhs || !rhs || *lhs == *rhs)
+    if (!lhs || !rhs || *lhs == *rhs) {
       return success();
+    }
 
     return op->emitOpError() << lhsRole << " " << lhsType << " does not match "
                              << rhsRole << " " << rhsType;
@@ -543,8 +606,9 @@ private:
     auto input = VPTOLegalityHelper::getMaskGranularity(op.getInput().getType());
     auto result = VPTOLegalityHelper::getMaskGranularity(op.getResult().getType());
     if (!input || !result || *input == *result ||
-        isAdjacentMaskGranularityNarrowing(*input, *result))
+        isAdjacentMaskGranularityNarrowing(*input, *result)) {
       return success();
+    }
 
     return op.emitOpError()
            << "input mask type " << op.getInput().getType()
@@ -556,8 +620,9 @@ private:
     auto input = VPTOLegalityHelper::getMaskGranularity(op.getInput().getType());
     auto result = VPTOLegalityHelper::getMaskGranularity(op.getResult().getType());
     if (!input || !result || *input == *result ||
-        isAdjacentMaskGranularityWidening(*input, *result))
+        isAdjacentMaskGranularityWidening(*input, *result)) {
       return success();
+    }
 
     return op.emitOpError()
            << "input mask type " << op.getInput().getType()
@@ -587,8 +652,9 @@ private:
               inferVstsMaskGranularityOverride(op.getOperation())) {
         auto actual =
             VPTOLegalityHelper::getMaskGranularity(op.getMask().getType());
-        if (!actual || *actual == *expected)
+        if (!actual || *actual == *expected) {
           return success();
+        }
         return op.emitOpError()
                << "mask type " << op.getMask().getType()
                << " does not match value vector type "
@@ -602,18 +668,20 @@ private:
   }
 
   void emitHardwareSupportWarnings(Operation *op) const {
-    auto emitForStore = [&](auto storeOp) {
+    auto emitForStore = [this](auto storeOp) {
       Operation *store = storeOp.getOperation();
       auto distAttr = store->getAttrOfType<StringAttr>("dist");
-      if (!distAttr)
+      if (!distAttr) {
         return;
+      }
 
       StringRef dist = distAttr.getValue();
-      if (dist == "MRG4CHN_B8" || dist == "MRG2CHN_B8" || dist == "MRG2CHN_B16")
+      if (dist == "MRG4CHN_B8" || dist == "MRG2CHN_B8" || dist == "MRG2CHN_B16") {
         writeDiagnostic((Twine("warning: ") + store->getName().getStringRef() +
                          " dist " + dist +
                          " is not supported on the current hardware\n")
                             .str());
+      }
     };
 
     if (auto vsts = dyn_cast<VstsOp>(op)) {
@@ -639,8 +707,9 @@ private:
         failed(validateSameMaskGranularity(op, op.getMask().getType(),
                                            "mask type",
                                            op.getCarry().getType(),
-                                           "carry type")))
+                                           "carry type"))) {
       return failure();
+    }
 
     if constexpr (std::is_same_v<CarryOp, VaddcsOp> ||
                   std::is_same_v<CarryOp, VsubcsOp>) {
@@ -651,8 +720,9 @@ private:
           failed(validateSameMaskGranularity(op, op.getCarryIn().getType(),
                                              "carry_in type",
                                              op.getCarry().getType(),
-                                             "carry type")))
+                                             "carry type"))) {
         return failure();
+      }
     }
 
     return success();
@@ -669,8 +739,9 @@ private:
         failed(validateSameMaskGranularity(op, op.getMask().getType(),
                                            "seed mask type",
                                            op.getResult().getType(),
-                                           "result mask type")))
+                                           "result mask type"))) {
       return failure();
+    }
     return success();
   }
 
@@ -690,8 +761,9 @@ private:
         failed(validateSameMaskGranularity(op, op.getInput().getType(),
                                            "input mask type",
                                            op.getResult().getType(),
-                                           "result mask type")))
+                                           "result mask type"))) {
       return failure();
+    }
     return success();
   }
 
@@ -707,8 +779,9 @@ private:
         failed(validateSameMaskGranularity(op, op.getSrc0().getType(),
                                            "src0 mask type",
                                            op.getResult().getType(),
-                                           "result mask type")))
+                                           "result mask type"))) {
       return failure();
+    }
     return success();
   }
 
@@ -716,8 +789,9 @@ private:
   static LogicalResult validatePredicateMovementContract(
       PredicateMovementOp op) {
     auto expected = VPTOLegalityHelper::inferMaskGranularityFromFamily(op);
-    if (!expected)
+    if (!expected) {
       return success();
+    }
 
     if (failed(validateSameMaskGranularity(op, op.getLhs().getType(),
                                            "lhs mask type",
@@ -730,12 +804,14 @@ private:
         failed(validateSameMaskGranularity(op, op.getLhs().getType(),
                                            "lhs mask type",
                                            op.getHigh().getType(),
-                                           "high mask type")))
+                                           "high mask type"))) {
       return failure();
+    }
 
     auto lhs = VPTOLegalityHelper::getMaskGranularity(op.getLhs().getType());
-    if (!lhs || *lhs == *expected)
+    if (!lhs || *lhs == *expected) {
       return success();
+    }
 
     return op.emitOpError()
            << "predicate movement family requires "
@@ -748,8 +824,9 @@ private:
                                                       StringRef resultRole) {
     auto expected = VPTOLegalityHelper::inferMaskGranularityFromFamily(op);
     auto actual = VPTOLegalityHelper::getMaskGranularity(resultType);
-    if (!expected || !actual || *expected == *actual)
+    if (!expected || !actual || *expected == *actual) {
       return success();
+    }
 
     return op->emitOpError()
            << "family suffix requires " << resultRole << " to be "
@@ -775,13 +852,15 @@ private:
     return llvm::TypeSwitch<Operation *, LogicalResult>(op)
         .Case<VreluOp>([](VreluOp concreteOp) {
           auto vecType = dyn_cast<VRegType>(concreteOp.getInput().getType());
-          if (!vecType)
+          if (!vecType) {
             return success();
+          }
 
           Type elemType = vecType.getElementType();
           if (auto intType = dyn_cast<IntegerType>(elemType)) {
-            if (intType.getWidth() == 32 && !intType.isUnsigned())
+            if (intType.getWidth() == mlir::pto::kValue32 && !intType.isUnsigned()) {
               return success();
+            }
           } else if (elemType.isF16() || elemType.isF32()) {
             return success();
           }
@@ -864,41 +943,47 @@ private:
           [&](StringRef attrName, int64_t upperBound,
               StringRef description) -> LogicalResult {
         Attribute attr = func->getAttr(attrName);
-        if (!attr)
+        if (!attr) {
           return success();
+        }
 
         auto intAttr = dyn_cast<IntegerAttr>(attr);
-        if (!intAttr || !intAttr.getType().isSignlessInteger(32))
+        if (!intAttr || !intAttr.getType().isSignlessInteger(32)) {
           return func.emitError()
                  << "'" << attrName
                  << "' must be a signless i32 integer attribute";
+        }
 
-        if (intAttr.getInt() <= 0)
+        if (intAttr.getInt() <= 0) {
           return func.emitError()
                  << "'" << attrName << "' must be a positive integer, got "
                  << intAttr.getInt();
+        }
 
-        if (intAttr.getInt() > upperBound)
+        if (intAttr.getInt() > upperBound) {
           return func.emitError()
                  << "'" << attrName << "' must be in range [1, "
                  << upperBound << "] for " << description;
+        }
 
-        if (!func->hasAttr(pto::kPTOSimtEntryAttrName))
+        if (!func->hasAttr(pto::kPTOSimtEntryAttrName)) {
           return func.emitError()
                  << "'" << attrName << "' is only allowed on functions marked '"
                  << pto::kPTOSimtEntryAttrName << "'";
+        }
 
         return success();
       };
-
       if (failed(validatePositiveI32FuncAttr(pto::kPTOSimtMaxThreadsAttrName,
-                                             2048, "SIMT max threads")) ||
+                                             mlir::pto::kValue2048, "SIMT max threads")) ||
           failed(validatePositiveI32FuncAttr(pto::kPTOSimtMaxRegistersAttrName,
-                                             128, "SIMT max registers")))
+                                             mlir::pto::kValue128, "SIMT max registers"))) {
         return failure();
+      }
 
-      if (!func->hasAttr(pto::kPTOSimtEntryAttrName))
+      if (!func->hasAttr(pto::kPTOSimtEntryAttrName)) {
         continue;
+      }
 
       WalkResult walkResult = func.walk([&](StoreVfSimtInfoOp op) {
         op.emitOpError()
@@ -908,13 +993,15 @@ private:
                "instead";
         return WalkResult::interrupt();
       });
-      if (walkResult.wasInterrupted())
+      if (walkResult.wasInterrupted()) {
         return failure();
+      }
     }
 
     WalkResult keepResumeWalk = helper.getModule().walk([&](Operation *op) {
-      if (!isa<KeepOp, ResumeOp, SyncthreadsOp>(op))
+      if (!isa<KeepOp, ResumeOp, SyncthreadsOp>(op)) {
         return WalkResult::advance();
+      }
       func::FuncOp func = op->getParentOfType<func::FuncOp>();
       if (!func || !func->hasAttr(pto::kPTOSimtEntryAttrName)) {
         op->emitOpError()
@@ -924,8 +1011,9 @@ private:
       }
       Block *block = op->getBlock();
       if (auto resume = dyn_cast<ResumeOp>(op)) {
-        if (failed(verifySimtKeepResumeSlotRange(resume)))
+        if (failed(verifySimtKeepResumeSlotRange(resume))) {
           return WalkResult::interrupt();
+        }
         Operation *first = getFirstNonConstantLikeOp(block);
         if (!first || !isa<ResumeOp>(first)) {
           op->emitOpError()
@@ -935,8 +1023,9 @@ private:
         }
         bool found = false;
         for (Operation *cur = first; cur; cur = cur->getNextNode()) {
-          if (!isa<ResumeOp>(cur))
+          if (!isa<ResumeOp>(cur)) {
             break;
+          }
           if (cur == op) {
             found = true;
             break;
@@ -948,12 +1037,14 @@ private:
                  "constant-like operations";
           return WalkResult::interrupt();
         }
-        if (failed(verifyUniqueResumeGroupSlots(resume, first)))
+        if (failed(verifyUniqueResumeGroupSlots(resume, first))) {
           return WalkResult::interrupt();
+        }
       }
       if (auto keep = dyn_cast<KeepOp>(op)) {
-        if (failed(verifySimtKeepResumeSlotRange(keep)))
+        if (failed(verifySimtKeepResumeSlotRange(keep))) {
           return WalkResult::interrupt();
+        }
         Operation *terminator = block ? block->getTerminator() : nullptr;
         if (!terminator || !isa<func::ReturnOp>(terminator)) {
           op->emitOpError()
@@ -962,8 +1053,9 @@ private:
         }
 
         Operation *cur = terminator->getPrevNode();
-        while (cur && isa<SyncthreadsOp>(cur))
+        while (cur && isa<SyncthreadsOp>(cur)) {
           cur = cur->getPrevNode();
+        }
         Operation *lastKeep = cur;
         if (!lastKeep || !isa<KeepOp>(lastKeep)) {
           op->emitOpError()
@@ -975,8 +1067,9 @@ private:
 
         Operation *firstKeep = lastKeep;
         while (Operation *prev = firstKeep->getPrevNode()) {
-          if (!isa<KeepOp>(prev))
+          if (!isa<KeepOp>(prev)) {
             break;
+          }
           firstKeep = prev;
         }
         if (!isOpInRange(op, firstKeep, lastKeep)) {
@@ -992,20 +1085,43 @@ private:
       }
       return WalkResult::advance();
     });
-    if (keepResumeWalk.wasInterrupted())
+    if (keepResumeWalk.wasInterrupted()) {
       return failure();
+    }
     return success();
   }
 
   LogicalResult validateAuthoringOperationSurface() {
+    WalkResult constantWalkResult =
+        helper.getModule().walk([&](arith::ConstantOp constant) {
+          Type resultType = constant.getType();
+          Type elementType = resultType;
+          if (auto vectorType = dyn_cast<VectorType>(resultType)) {
+            elementType = vectorType.getElementType();
+          }
+          if (!pto::isPTOFloat8Type(elementType)) {
+            return WalkResult::advance();
+          }
+
+          constant.emitOpError()
+              << "does not support directly constructed FP8 constants in "
+                 "the VPTO backend; produce FP8 values with pto.convert";
+          return WalkResult::interrupt();
+        });
+    if (constantWalkResult.wasInterrupted()) {
+      return failure();
+    }
+
     WalkResult loopWalkResult = helper.getModule().walk([&](scf::ForOp loop) {
-      if (!VPTOLegalityHelper::isAIVectorScopeCarrier(loop))
+      if (!VPTOLegalityHelper::isAIVectorScopeCarrier(loop)) {
         return WalkResult::advance();
+      }
 
       Operation *parentScope =
           VPTOLegalityHelper::getEnclosingVectorScopeCarrier(loop);
-      if (!parentScope)
+      if (!parentScope) {
         return WalkResult::advance();
+      }
 
       if (isa<scf::ForOp>(parentScope)) {
         loop.emitOpError() << "does not allow nested scf.for with '"
@@ -1018,35 +1134,41 @@ private:
              "pto.vecscope/pto.strict_vecscope";
       return WalkResult::interrupt();
     });
-    if (loopWalkResult.wasInterrupted())
+    if (loopWalkResult.wasInterrupted()) {
       return failure();
+    }
 
     WalkResult vecScopeWalkResult = helper.getModule().walk([&](Operation *op) {
-      if (!VPTOLegalityHelper::isDedicatedVecScopeCarrier(op))
+      if (!VPTOLegalityHelper::isDedicatedVecScopeCarrier(op)) {
         return WalkResult::advance();
+      }
 
-      if (!VPTOLegalityHelper::getEnclosingVectorScopeCarrier(op))
+      if (!VPTOLegalityHelper::getEnclosingVectorScopeCarrier(op)) {
         return WalkResult::advance();
+      }
 
       op->emitOpError()
           << "does not allow nested dedicated pto.vecscope/pto.strict_vecscope";
       return WalkResult::interrupt();
     });
-    if (vecScopeWalkResult.wasInterrupted())
+    if (vecScopeWalkResult.wasInterrupted()) {
       return failure();
+    }
 
     WalkResult opWalkResult = helper.getModule().walk([&](Operation *op) {
       (void)VPTOLegalityHelper::inferMaskGranularityFromFamily(op);
       (void)VPTOLegalityHelper::classifyBufferAddressFamily(op);
 
-      if (!VPTOLegalityHelper::requiresVecScope(op))
+      if (!VPTOLegalityHelper::requiresVecScope(op)) {
         return WalkResult::advance();
+      }
 
       if (VPTOLegalityHelper::getEnclosingVectorScopeCarrier(op)) {
         if (failed(validateFamilySuffixMaskContracts(op)) ||
             failed(validateUnaryElementTypeContracts(op)) ||
-            failed(validateMaskGranularityContracts(op)))
+            failed(validateMaskGranularityContracts(op))) {
           return WalkResult::interrupt();
+        }
         emitHardwareSupportWarnings(op);
         return WalkResult::advance();
       }
@@ -1066,16 +1188,18 @@ private:
       FunctionType functionType = func.getFunctionType();
 
       for (auto [idx, inputType] : llvm::enumerate(functionType.getInputs())) {
-        if (!isa<BaseMemRefType>(inputType))
+        if (!isa<BaseMemRefType>(inputType)) {
           continue;
+        }
         return func.emitError()
                << "emission-stage VPTO legality rejects memref argument #"
                << idx << ": " << inputType;
       }
 
       for (auto [idx, resultType] : llvm::enumerate(functionType.getResults())) {
-        if (!isa<BaseMemRefType>(resultType))
+        if (!isa<BaseMemRefType>(resultType)) {
           continue;
+        }
         return func.emitError()
                << "emission-stage VPTO legality rejects memref result #"
                << idx << ": " << resultType;
@@ -1096,12 +1220,12 @@ private:
 
       VPTOBufferAddressFamily family =
           VPTOLegalityHelper::classifyBufferAddressFamily(op);
-
       if (family == VPTOBufferAddressFamily::BufferLike) {
         for (OpOperand *operand : VPTOLegalityHelper::collectBufferOperands(op)) {
           Type operandType = operand->get().getType();
-          if (!isa<BaseMemRefType>(operandType))
+          if (!isa<BaseMemRefType>(operandType)) {
             continue;
+          }
 
           op->emitOpError()
               << "emission-stage VPTO legality rejects memref-form buffer "
@@ -1124,8 +1248,9 @@ private:
   }
 
   void writeDiagnostic(StringRef message) const {
-    if (diagOS)
+    if (diagOS) {
       *diagOS << message;
+    }
   }
 
   VPTOLegalityHelper helper;
@@ -1149,8 +1274,9 @@ struct PTOValidateVPTOIRPass
 
   void runOnOperation() override {
     ModuleOp module = getOperation();
-    if (failed(validateVPTOAuthoringIR(module, &llvm::errs())))
+    if (failed(validateVPTOAuthoringIR(module, &llvm::errs()))) {
       signalPassFailure();
+    }
   }
 };
 
@@ -1169,8 +1295,9 @@ struct PTOValidateVPTOEmissionIRPass
 
   void runOnOperation() override {
     ModuleOp module = getOperation();
-    if (failed(validateVPTOEmissionIR(module, &llvm::errs())))
+    if (failed(validateVPTOEmissionIR(module, &llvm::errs()))) {
       signalPassFailure();
+    }
   }
 };
 

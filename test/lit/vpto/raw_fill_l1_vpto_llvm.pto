@@ -1,0 +1,48 @@
+// Copyright (c) 2026 Huawei Technologies Co., Ltd.
+// This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+// CANN Open Software License Agreement Version 2.0 (the "License").
+// Please refer to the License for details. You may not use this file except in compliance with the License.
+// THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+// INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+// See LICENSE in the root of the software repository for the full text of the License.
+
+// RUN: ptoas --pto-arch=a5 --pto-backend=vpto --emit-vpto-llvm-ir %s -o - | FileCheck %s
+// RUN: ptoas --cann-output-version=9.0.0 --pto-arch=a5 --pto-backend=vpto \
+// RUN:   --emit-vpto-llvm-ir %s -o - | FileCheck %s
+
+module attributes {pto.target_arch = "a5", pto.kernel_kind = #pto.kernel_kind<cube>} {
+  func.func @raw_fill_l1_views_and_tail(
+      %dst16: !pto.ptr<ui16, mat>,
+      %dst32: !pto.ptr<ui32, mat>,
+      %dst16_memref: memref<?xui16, #pto.address_space<mat>>) attributes {pto.kernel} {
+    %c32_i64 = arith.constant 32 : i64
+    %c64_i64 = arith.constant 64 : i64
+    %c3_i64 = arith.constant 3 : i64
+    %c5_i64 = arith.constant 5 : i64
+    %c7_i64 = arith.constant 7 : i64
+    %c9_i64 = arith.constant 9 : i64
+    %c11_i64 = arith.constant 11 : i64
+    %c16_i64 = arith.constant 16 : i64
+    %c32_word_i64 = arith.constant 32 : i64
+    %c32767_i64 = arith.constant 32767 : i64
+    %c2_i64 = arith.constant 2 : i64
+    %c4660_i32 = arith.constant 4660 : i32
+    %c305419896_i32 = arith.constant 305419896 : i32
+    %c65535_i32 = arith.constant 65535 : i32
+
+    pto.raw_fill_l1 %dst16, %c32_i64, %c4660_i32, %c3_i64, %c7_i64,
+      %c11_i64 {fill_word_bits = 16 : i64} : !pto.ptr<ui16, mat>, i64, i32, i64, i64, i64
+    pto.raw_fill_l1 %dst32, %c64_i64, %c305419896_i32, %c5_i64, %c2_i64,
+      %c9_i64 {fill_word_bits = 32 : i64} : !pto.ptr<ui32, mat>, i64, i32, i64, i64, i64
+    pto.raw_fill_l1 %dst16_memref, %c32_i64, %c65535_i32, %c32767_i64,
+      %c32767_i64, %c32767_i64 {fill_word_bits = 16 : i64} : memref<?xui16, #pto.address_space<mat>>, i64, i32, i64, i64, i64
+    return
+  }
+}
+
+// CHECK: declare void @llvm.hivm.CREATE.CBUF.MATRIX.v3.u16.h(ptr addrspace(2), i64, half)
+// CHECK: declare void @llvm.hivm.CREATE.CBUF.MATRIX.v3.u32(ptr addrspace(2), i64, i64)
+// CHECK-LABEL: define void @raw_fill_l1_views_and_tail_mix_aic
+// CHECK: call void @llvm.hivm.CREATE.CBUF.MATRIX.v3.u16.h(ptr addrspace(2) {{.*}}, i64 47245099011, half {{.*}})
+// CHECK: call void @llvm.hivm.CREATE.CBUF.MATRIX.v3.u32(ptr addrspace(2) {{.*}}, i64 38654836741, i64 305419896)
+// CHECK: call void @llvm.hivm.CREATE.CBUF.MATRIX.v3.u16.h(ptr addrspace(2) {{.*}}, i64 140735340838911, half {{.*}})

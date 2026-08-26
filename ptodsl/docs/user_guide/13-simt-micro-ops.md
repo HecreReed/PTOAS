@@ -461,7 +461,11 @@ def simt_ops_integer_math_probe(dst: pto.ptr(pto.i32, "gm")):
 **Description**: Performs SIMT floating-point math. These functions are VPTO
 SIMT micro-ops and are distinct from the generic scalar helpers in Chapter 6.
 
-**Parameters**: PTO floating-point scalar operands.
+`pto.fmin` and `pto.fmax` accept `f16`, `f32`, `bf16`, `vector<2xf16>`, and
+`vector<2xbf16>` operands.
+
+**Parameters**: PTO floating-point scalar or packed operands supported by the
+selected operation.
 
 **Returns**: PTO scalar with the same type as the input value.
 

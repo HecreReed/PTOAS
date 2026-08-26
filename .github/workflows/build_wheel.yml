@@ -32,13 +32,18 @@ permissions:
   contents: read
 
 concurrency:
-  group: build-wheel-${{ github.event.pull_request.number || github.ref }}
+  # Linux and macOS publish to the same rolling release. The schedules are
+  # offset by 30 minutes; this non-canceling group prevents asset upload races.
+  # GitHub keeps at most one pending run in a group, so a run that spans the
+  # next daily schedule may replace an older pending run by design. Manual
+  # workflow_dispatch runs are dry-runs and do not publish the nightly release.
+  group: ${{ github.event_name == 'schedule' && 'nightly-wheel-publish' || format('build-wheel-{0}', github.event.pull_request.number || github.ref) }}
   cancel-in-progress: ${{ github.event_name == 'push' || github.event_name == 'pull_request' }}
 
 env:
   LLVM_REPO: https://github.com/vpto-dev/llvm-project.git
-  LLVM_REF: feature-vpto-llvm21
-  LLVM_CACHE_FLAVOR: llvm21-vpto-wheel-static-pic-utils-v3
+  LLVM_REF: feature-vpto
+  LLVM_CACHE_FLAVOR: llvm19-vpto-wheel-static-pic-utils-v3
 
 jobs:
   build_wheel:
@@ -62,6 +67,8 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Set Python version
         run: |
@@ -87,7 +94,7 @@ jobs:
         run: |
           # LLVM/MLIR Python bindings are not yet compatible with pybind11 3.x
           # (see pybind11 static_assert on def_property + keep_alive).
-          pip install --no-cache-dir numpy 'pybind11<3' nanobind 'scikit-build-core>=0.12.2,<2' auditwheel
+          pip install --no-cache-dir numpy 'pybind11<3' 'scikit-build-core>=0.12.2,<2' auditwheel
 
       - name: Resolve PTOAS distribution version
         run: |
@@ -203,7 +210,6 @@ jobs:
             -DPython3_EXECUTABLE=${PY_PATH}/bin/python \
             -DPython_EXECUTABLE=${PY_PATH}/bin/python \
             -Dpybind11_DIR="$(${PY_PATH}/bin/python -m pybind11 --cmakedir)" \
-            -Dnanobind_DIR="$(${PY_PATH}/bin/python -m nanobind --cmake_dir)" \
             -DCMAKE_BUILD_TYPE=Release \
             -DLLVM_TARGETS_TO_BUILD=host \
             -DLLVM_INSTALL_UTILS=ON \
@@ -231,6 +237,10 @@ jobs:
         env:
           CMAKE_BUILD_PARALLEL_LEVEL: "2"
         run: |
+          # checkout runs outside the manylinux container, so its safe.directory
+          # setting is not visible to Git invoked inside this step.
+          git config --global --add safe.directory "${PTO_SOURCE_DIR}"
+          git -C "${PTO_SOURCE_DIR}" rev-parse --verify 'HEAD^{commit}' >/dev/null
           if [ "${PTOAS_PYTHON_PACKAGE_NAME}" = "ptoas-vmi" ]; then
             PTOAS_WHEEL_SOURCE_DIR="${PTO_SOURCE_DIR}/.work/ptoas-vmi-source"
             python packaging/ptoas-vmi/prepare_source.py \
@@ -308,6 +318,7 @@ jobs:
           test -f "$TEST_DIR/extracted/ptoas/mlir/ir.py"
           test -f "$TEST_DIR/extracted/ptodsl/__init__.py"
           test -d "$TEST_DIR/extracted/ptoas/_runtime/share/ptoas/TileOps"
+          test -d "$TEST_DIR/extracted/ptoas/_runtime/share/ptoas/SoftOps"
           test "$(cat "$TEST_DIR/extracted/.ptoas-python-version")" = "3.11"
           compgen -G "$TEST_DIR/extracted/ptoas/_core*.so" >/dev/null
           compgen -G "$TEST_DIR/extracted/ptoas/mlir/_mlir_libs/libPTOASCompiler*" >/dev/null
@@ -398,6 +409,34 @@ jobs:
           mv "release-artifacts/ptoas-bin-aarch64/ptoas-bin-aarch64.tar.gz" \
             "release-artifacts/ptoas-bin-aarch64.tar.gz"
 
+      - name: Create nightly build manifest
+        if: github.event_name == 'schedule'
+        env:
+          MANIFEST_PATH: release-artifacts/nightly-manifest-linux.json
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json
+          import os
+          from datetime import datetime, timezone
+          from pathlib import Path
+
+          root = Path("release-artifacts")
+          assets = sorted(path.name for path in root.iterdir() if path.is_file())
+          manifest = {
+              "platform": "linux",
+              "source_commit": os.environ["GITHUB_SHA"],
+              "workflow": os.environ["GITHUB_WORKFLOW"],
+              "run_id": os.environ["GITHUB_RUN_ID"],
+              "run_url": f"{os.environ['GITHUB_SERVER_URL']}/{os.environ['GITHUB_REPOSITORY']}/actions/runs/{os.environ['GITHUB_RUN_ID']}",
+              "generated_at_utc": datetime.now(timezone.utc).isoformat(),
+              "assets": assets,
+          }
+          Path(os.environ["MANIFEST_PATH"]).write_text(
+              json.dumps(manifest, indent=2) + "\n", encoding="utf-8"
+          )
+          PY
+
       - name: Upload wheel assets to GitHub Release
         uses: softprops/action-gh-release@v2
         with:
@@ -421,6 +460,19 @@ jobs:
           body: ${{ env.RELEASE_BODY }}
           overwrite_files: true
           files: release-artifacts/*.tar.gz
+
+      - name: Upload nightly build manifest
+        if: github.event_name == 'schedule'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ env.RELEASE_TAG }}
+          name: ${{ env.RELEASE_NAME }}
+          target_commitish: ${{ github.sha }}
+          prerelease: ${{ env.RELEASE_PRERELEASE }}
+          make_latest: ${{ env.RELEASE_MAKE_LATEST }}
+          body: ${{ env.RELEASE_BODY }}
+          overwrite_files: true
+          files: release-artifacts/nightly-manifest-linux.json
 
   bump_base_version:
     name: Bump base version after release
@@ -455,4 +507,39 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add CMakeLists.txt
           git commit -m "chore(release): bump base version to v${{ steps.bump.outputs.next_base_version }}"
+          git push origin HEAD:${{ github.event.repository.default_branch }}
+
+  bump_vmi_version:
+    name: Bump VMI version after release
+    if: github.event_name == 'release' && github.event.action == 'released' && startsWith(github.ref_name, 'vmi-v')
+    needs: upload_release_assets
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout default branch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+
+      - name: Update VMI package version
+        id: bump
+        run: |
+          next_vmi_version="$(python3 .github/scripts/update_vmi_version.py \
+            --version "${GITHUB_REF_NAME}" \
+            --next)"
+          echo "next_vmi_version=${next_vmi_version}" >> "$GITHUB_OUTPUT"
+
+      - name: Commit version bump
+        run: |
+          if git diff --quiet -- packaging/ptoas-vmi/pyproject.toml.patch; then
+            echo "VMI metadata already matches the next version."
+            exit 0
+          fi
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add packaging/ptoas-vmi/pyproject.toml.patch
+          git commit -m "chore(release): bump VMI version to v${{ steps.bump.outputs.next_vmi_version }}"
           git push origin HEAD:${{ github.event.repository.default_branch }}

@@ -43,8 +43,9 @@ struct SimplifyAllTruePredicateReorder : public OpRewritePattern<OpTy> {
 
   LogicalResult matchAndRewrite(OpTy op,
                                 PatternRewriter &rewriter) const override {
-    if (!isAllTrueMask(op.getLhs()) || !isAllTrueMask(op.getRhs()))
+    if (!isAllTrueMask(op.getLhs()) || !isAllTrueMask(op.getRhs())) {
       return failure();
+    }
 
     rewriter.replaceOp(op, {op.getLhs(), op.getRhs()});
     return success();
@@ -62,7 +63,7 @@ struct VPTOMaskSimplifyPass
                  SimplifyAllTruePredicateReorder<PdintlvB16Op>,
                  SimplifyAllTruePredicateReorder<PdintlvB32Op>>(&getContext());
 
-    if (failed(applyPatternsGreedily(getOperation(), std::move(patterns))))
+    if (failed(applyPatternsAndFoldGreedily(getOperation(), std::move(patterns))))
       signalPassFailure();
   }
 };

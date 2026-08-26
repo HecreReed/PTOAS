@@ -118,15 +118,11 @@ def _run_one(job, args, ptoas_bin, output_root, base_env):
     build_dir = job_root / "build"
     tmp_dir = job_root / "tmp"
     log_path = output_root / "logs" / f"{job_name}.log"
-    socket_path = Path("/tmp") / f"ptoas_st_{kind}_{testcase}_{os.getpid()}.sock"
     started = time.time()
 
     env = base_env.copy()
     env["TMPDIR"] = str(tmp_dir)
     env["PTODSL_CACHE_DIR"] = str(job_root / "ptodsl-cache")
-    env["PTOAS_DAEMON_SOCKET_PATH"] = str(socket_path)
-    if args.tile_lib_backend:
-        env["PTOAS_TILE_LIB_BACKEND"] = args.tile_lib_backend
 
     tmp_dir.mkdir(parents=True, exist_ok=True)
     (output_root / "logs").mkdir(parents=True, exist_ok=True)
@@ -139,69 +135,56 @@ def _run_one(job, args, ptoas_bin, output_root, base_env):
         "seconds": 0.0,
         "log": str(log_path),
         "build_dir": str(build_dir),
-        "socket": str(socket_path),
     }
 
-    try:
-        with log_path.open("w", encoding="utf-8") as log_handle:
-            log_handle.write(f"# kind: {kind}\n")
-            log_handle.write(f"# testcase: {testcase}\n")
-            log_handle.write(f"# source: {job['target_dir']}\n")
-            log_handle.write(f"# build: {build_dir}\n")
-            log_handle.write(f"# PTOAS_DAEMON_SOCKET_PATH={socket_path}\n")
-            log_handle.write(f"# PTODSL_CACHE_DIR={env['PTODSL_CACHE_DIR']}\n")
-            if args.tile_lib_backend:
-                log_handle.write(f"# PTOAS_TILE_LIB_BACKEND={args.tile_lib_backend}\n")
-            log_handle.write("\n")
+    with log_path.open("w", encoding="utf-8") as log_handle:
+        log_handle.write(f"# kind: {kind}\n")
+        log_handle.write(f"# testcase: {testcase}\n")
+        log_handle.write(f"# source: {job['target_dir']}\n")
+        log_handle.write(f"# build: {build_dir}\n")
+        log_handle.write(f"# PTODSL_CACHE_DIR={env['PTODSL_CACHE_DIR']}\n")
+        log_handle.write("\n")
 
-            cmake_cmd = [
-                "cmake",
-                "-S",
-                job["target_dir"],
-                "-B",
-                build_dir,
-                f"-DRUN_MODE={args.run_mode}",
-                f"-DSOC_VERSION={DEFAULT_SOC_VERSION}",
-                f"-DTEST_CASE={testcase}",
-                f"-DPTOAS_BIN={ptoas_bin}",
-                f"-DPTOAS_DAEMON_SOCKET_PATH={socket_path}",
-            ]
-            if args.tile_lib_backend:
-                cmake_cmd.append(f"-DPTOAS_TILE_LIB_BACKEND={args.tile_lib_backend}")
+        cmake_cmd = [
+            "cmake",
+            "-S",
+            job["target_dir"],
+            "-B",
+            build_dir,
+            f"-DRUN_MODE={args.run_mode}",
+            f"-DSOC_VERSION={DEFAULT_SOC_VERSION}",
+            f"-DTEST_CASE={testcase}",
+            f"-DPTOAS_BIN={ptoas_bin}",
+        ]
 
-            rc = _run_logged(cmake_cmd, log_handle, output_root, env)
-            if rc == 0:
-                rc = _run_logged(
-                    ["cmake", "--build", build_dir, "--parallel", str(args.build_jobs)],
-                    log_handle,
-                    output_root,
-                    env,
-                )
+        rc = _run_logged(cmake_cmd, log_handle, output_root, env)
+        if rc == 0:
+            rc = _run_logged(
+                ["cmake", "--build", build_dir, "--parallel", str(args.build_jobs)],
+                log_handle,
+                output_root,
+                env,
+            )
 
+        if rc != 0:
+            result["returncode"] = rc
+            result["phase"] = "build"
+            result["seconds"] = time.time() - started
+            return result
+
+        case_work_dir = build_dir / "testcase" / testcase
+        _copy_case_scripts(job["testcase_root"], testcase, case_work_dir)
+
+        for phase, command in (
+            ("gen_data", [sys.executable, "gen_data.py"]),
+            ("run", [build_dir / "bin" / testcase]),
+            ("compare", [sys.executable, "compare.py"]),
+        ):
+            rc = _run_logged(command, log_handle, case_work_dir, env)
             if rc != 0:
                 result["returncode"] = rc
-                result["phase"] = "build"
-                result["seconds"] = time.time() - started
-                return result
-
-            case_work_dir = build_dir / "testcase" / testcase
-            _copy_case_scripts(job["testcase_root"], testcase, case_work_dir)
-
-            for phase, command in (
-                ("gen_data", [sys.executable, "gen_data.py"]),
-                ("run", [build_dir / "bin" / testcase]),
-                ("compare", [sys.executable, "compare.py"]),
-            ):
-                rc = _run_logged(command, log_handle, case_work_dir, env)
-                if rc != 0:
-                    result["returncode"] = rc
-                    result["phase"] = phase
-                    break
-    finally:
-        try:
-            socket_path.unlink(missing_ok=True)
-        except OSError:
-            pass
+                result["phase"] = phase
+                break
 
     result["seconds"] = time.time() - started
     return result
@@ -270,11 +253,6 @@ def _parse_args():
         default=str(_default_output_root(repo_root)),
         help="Directory for logs, summaries, and per-testcase build trees.",
     )
-    parser.add_argument(
-        "--tile-lib-backend",
-        default=os.environ.get("PTOAS_TILE_LIB_BACKEND", ""),
-        help="Optional PTOAS tile-lib backend, for example ptodsl.",
-    )
     parser.add_argument("--full-only", action="store_true", help="Run only non-smoke ST cases.")
     parser.add_argument("--smoke-only", action="store_true", help="Run only smoke ST cases.")
     parser.add_argument("--list", action="store_true", help="List selected jobs and exit.")
@@ -339,9 +317,7 @@ def main():
     print(f"[INFO] run_mode={args.run_mode} soc={SOC_VERSION} ({DEFAULT_SOC_VERSION})")
     print(f"[INFO] ptoas={ptoas_bin}")
     print(f"[INFO] output_root={output_root}")
-    if args.tile_lib_backend:
-        print(f"[INFO] PTOAS_TILE_LIB_BACKEND={args.tile_lib_backend}")
-    print("[INFO] each testcase uses its own build dir, PTODSL cache, TMPDIR, and daemon socket")
+    print("[INFO] each testcase uses its own build dir, PTODSL cache, and TMPDIR")
 
     results = []
     max_workers = min(args.jobs, len(jobs))

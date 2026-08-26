@@ -39,39 +39,45 @@ namespace {
 
 static pto::AddressSpaceAttr getPointerMemorySpace(Attribute memorySpace,
                                                    MLIRContext *ctx) {
-  if (auto addrSpace = dyn_cast_or_null<pto::AddressSpaceAttr>(memorySpace))
+  if (auto addrSpace = dyn_cast_or_null<pto::AddressSpaceAttr>(memorySpace)) {
     return addrSpace;
-  if (auto intAttr = dyn_cast_or_null<IntegerAttr>(memorySpace))
+  }
+  if (auto intAttr = dyn_cast_or_null<IntegerAttr>(memorySpace)) {
     return pto::AddressSpaceAttr::get(
         ctx, static_cast<pto::AddressSpace>(intAttr.getInt()));
+  }
   return {};
 }
 
 static bool needsSubviewPtrConversion(memref::SubViewOp op) {
   auto resultType = dyn_cast<MemRefType>(op.getType());
-  if (!resultType)
+  if (!resultType) {
     return false;
+  }
   return static_cast<bool>(
       getPointerMemorySpace(resultType.getMemorySpace(), op.getContext()));
 }
 
 static Type convertSubviewResultType(Type type) {
   auto memrefType = dyn_cast<MemRefType>(type);
-  if (!memrefType)
+  if (!memrefType) {
     return type;
+  }
 
   auto memorySpace =
       getPointerMemorySpace(memrefType.getMemorySpace(), type.getContext());
-  if (!memorySpace)
+  if (!memorySpace) {
     return type;
+  }
 
   return pto::PtrType::get(type.getContext(), memrefType.getElementType(),
                            memorySpace);
 }
 
 static bool hasPtrNormalizeConvertibleType(Type type) {
-  if (isa<pto::PtrType>(type))
+  if (isa<pto::PtrType>(type)) {
     return true;
+  }
   auto memrefType = dyn_cast<MemRefType>(type);
   return memrefType && static_cast<bool>(getPointerMemorySpace(
                            memrefType.getMemorySpace(), type.getContext()));
@@ -94,8 +100,9 @@ static bool hasPtrNormalizeMemRefType(TypeRange types) {
 }
 
 static bool isTransientPtrMemRefBridge(Value value) {
-  if (!isa<pto::PtrType>(value.getType()))
+  if (!isa<pto::PtrType>(value.getType())) {
     return false;
+  }
   auto cast = value.getDefiningOp<UnrealizedConversionCastOp>();
   return cast && cast->getNumOperands() == 1 && cast->getNumResults() == 1 &&
          isa<BaseMemRefType>(cast.getOperand(0).getType());
@@ -104,8 +111,9 @@ static bool isTransientPtrMemRefBridge(Value value) {
 static FailureOr<SmallVector<Type>>
 convertTypes(const TypeConverter &typeConverter, TypeRange types) {
   SmallVector<Type> convertedTypes;
-  if (failed(typeConverter.convertTypes(types, convertedTypes)))
+  if (failed(typeConverter.convertTypes(types, convertedTypes))) {
     return failure();
+  }
   return convertedTypes;
 }
 
@@ -113,8 +121,9 @@ static bool isMemRefType(Type type) { return isa<BaseMemRefType>(type); }
 
 static Value materializeUnrealizedCast(OpBuilder &builder, Type resultType,
                                        ValueRange inputs, Location loc) {
-  if (inputs.size() != 1)
+  if (inputs.size() != 1) {
     return {};
+  }
   return builder
       .create<UnrealizedConversionCastOp>(loc, TypeRange{resultType}, inputs)
       .getResult(0);
@@ -124,44 +133,52 @@ static LogicalResult computeSubviewElementOffset(memref::SubViewOp op,
                                                  PatternRewriter &rewriter,
                                                  Value &offset) {
   auto sourceType = dyn_cast<MemRefType>(op.getSource().getType());
-  if (!sourceType)
+  if (!sourceType) {
     return failure();
+  }
 
   SmallVector<int64_t> strides;
   int64_t baseOffset = 0;
   if (failed(mlir::pto::getPTOMemRefStridesAndOffset(sourceType, strides,
-                                                     baseOffset)))
+                                                     baseOffset))) {
     return failure();
+  }
   // The SSA source already names the base address after ptr-boundary
   // normalization. A dynamic memref layout offset here is metadata we can
   // ignore for ptr normalization and model as zero.
-  if (baseOffset == ShapedType::kDynamic)
+  if (baseOffset == ShapedType::kDynamic) {
     baseOffset = 0;
+  }
 
   Location loc = op.getLoc();
   Value total = rewriter.create<arith::ConstantIndexOp>(loc, baseOffset);
   ArrayRef<int64_t> staticOffsets = op.getStaticOffsets();
   ValueRange dynamicOffsets = op.getOffsets();
-  if (staticOffsets.size() != strides.size())
+  if (staticOffsets.size() != strides.size()) {
     return failure();
+  }
 
   unsigned dynamicIndex = 0;
   for (auto [staticOffset, stride] : llvm::zip(staticOffsets, strides)) {
-    if (stride == 0)
+    if (stride == 0) {
       continue;
-    if (stride == ShapedType::kDynamic)
+    }
+    if (stride == ShapedType::kDynamic) {
       return failure();
+    }
 
     Value idx;
     if (ShapedType::isDynamic(staticOffset)) {
-      if (dynamicIndex >= dynamicOffsets.size())
+      if (dynamicIndex >= dynamicOffsets.size()) {
         return failure();
+      }
       idx = dynamicOffsets[dynamicIndex++];
     } else {
       idx = rewriter.create<arith::ConstantIndexOp>(loc, staticOffset);
     }
-    if (!idx.getType().isIndex())
+    if (!idx.getType().isIndex()) {
       return failure();
+    }
 
     if (stride != 1) {
       Value strideValue =
@@ -170,8 +187,9 @@ static LogicalResult computeSubviewElementOffset(memref::SubViewOp op,
     }
     total = rewriter.create<arith::AddIOp>(loc, total, idx);
   }
-  if (dynamicIndex != dynamicOffsets.size())
+  if (dynamicIndex != dynamicOffsets.size()) {
     return failure();
+  }
 
   offset = total;
   return success();
@@ -179,19 +197,23 @@ static LogicalResult computeSubviewElementOffset(memref::SubViewOp op,
 
 static Value materializeSubviewInputPtr(Value source, PatternRewriter &rewriter,
                                         Location loc) {
-  if (!source)
+  if (!source) {
     return {};
-  if (isa<pto::PtrType>(source.getType()))
+  }
+  if (isa<pto::PtrType>(source.getType())) {
     return source;
+  }
 
   auto memrefType = dyn_cast<MemRefType>(source.getType());
-  if (!memrefType)
+  if (!memrefType) {
     return {};
+  }
 
   auto memorySpace =
       getPointerMemorySpace(memrefType.getMemorySpace(), rewriter.getContext());
-  if (!memorySpace)
+  if (!memorySpace) {
     return {};
+  }
 
   auto ptrType = pto::PtrType::get(rewriter.getContext(),
                                    memrefType.getElementType(), memorySpace);
@@ -200,78 +222,96 @@ static Value materializeSubviewInputPtr(Value source, PatternRewriter &rewriter,
 
 static Value materializeScalarAccessPtr(Value source, PatternRewriter &rewriter,
                                         Location loc) {
-  if (!source)
+  if (!source) {
     return {};
+  }
 
   if (auto cast = source.getDefiningOp<UnrealizedConversionCastOp>()) {
-    if (cast->getNumOperands() != 1 || cast->getNumResults() != 1)
+    if (cast->getNumOperands() != 1 || cast->getNumResults() != 1) {
       return {};
+    }
     Value input = cast.getOperands().front();
     Value ptr = materializeScalarAccessPtr(input, rewriter, loc);
-    if (!ptr)
+    if (!ptr) {
       return {};
+    }
     auto resultType = dyn_cast<pto::PtrType>(source.getType());
-    if (!resultType)
+    if (!resultType) {
       return ptr;
-    if (ptr.getType() == resultType)
+    }
+    if (ptr.getType() == resultType) {
       return ptr;
+    }
     return rewriter.create<pto::CastPtrOp>(loc, resultType, ptr);
   }
 
-  if (isa<pto::PtrType>(source.getType()))
+  if (isa<pto::PtrType>(source.getType())) {
     return source;
+  }
 
-  if (auto cast = source.getDefiningOp<memref::CastOp>())
+  if (auto cast = source.getDefiningOp<memref::CastOp>()) {
     return materializeScalarAccessPtr(cast.getSource(), rewriter, loc);
+  }
 
   if (auto reinterpret = source.getDefiningOp<memref::ReinterpretCastOp>()) {
     auto ptrType = dyn_cast<pto::PtrType>(convertSubviewResultType(source.getType()));
-    if (!ptrType)
+    if (!ptrType) {
       return {};
+    }
 
     Value basePtr =
         materializeScalarAccessPtr(reinterpret.getSource(), rewriter, loc);
-    if (!basePtr)
+    if (!basePtr) {
       return {};
-    if (basePtr.getType() != ptrType)
+    }
+    if (basePtr.getType() != ptrType) {
       basePtr = rewriter.create<pto::CastPtrOp>(loc, ptrType, basePtr);
+    }
 
     ArrayRef<int64_t> staticOffsets = reinterpret.getStaticOffsets();
-    if (staticOffsets.size() != 1)
+    if (staticOffsets.size() != 1) {
       return {};
+    }
     int64_t staticOffset = staticOffsets.front();
     if (!ShapedType::isDynamic(staticOffset)) {
-      if (staticOffset == 0)
+      if (staticOffset == 0) {
         return basePtr;
+      }
       Value offset = rewriter.create<arith::ConstantIndexOp>(loc, staticOffset);
       return rewriter.create<pto::AddPtrOp>(loc, ptrType, basePtr, offset);
     }
 
     ValueRange dynamicOffsets = reinterpret.getOffsets();
-    if (dynamicOffsets.size() != 1 || !dynamicOffsets.front().getType().isIndex())
+    if (dynamicOffsets.size() != 1 || !dynamicOffsets.front().getType().isIndex()) {
       return {};
+    }
     return rewriter.create<pto::AddPtrOp>(loc, ptrType, basePtr,
                                           dynamicOffsets.front());
   }
 
   if (auto subview = source.getDefiningOp<memref::SubViewOp>()) {
-    if (!needsSubviewPtrConversion(subview))
+    if (!needsSubviewPtrConversion(subview)) {
       return {};
+    }
 
     Value basePtr =
         materializeScalarAccessPtr(subview.getSource(), rewriter, loc);
-    if (!basePtr)
+    if (!basePtr) {
       return {};
+    }
 
     Value offset;
-    if (failed(computeSubviewElementOffset(subview, rewriter, offset)))
+    if (failed(computeSubviewElementOffset(subview, rewriter, offset))) {
       return {};
+    }
 
     auto ptrType = dyn_cast<pto::PtrType>(convertSubviewResultType(source.getType()));
-    if (!ptrType)
+    if (!ptrType) {
       return {};
-    if (basePtr.getType() != ptrType)
+    }
+    if (basePtr.getType() != ptrType) {
       basePtr = rewriter.create<pto::CastPtrOp>(loc, ptrType, basePtr);
+    }
     return rewriter.create<pto::AddPtrOp>(loc, ptrType, basePtr, offset);
   }
 
@@ -284,10 +324,12 @@ static Value materializeScalarAccessPtr(Value source, PatternRewriter &rewriter,
 static Value materializeBoundaryOperandPtr(Value source,
                                            PatternRewriter &rewriter,
                                            Location loc) {
-  if (!source)
+  if (!source) {
     return {};
-  if (isa<pto::PtrType>(source.getType()))
+  }
+  if (isa<pto::PtrType>(source.getType())) {
     return source;
+  }
   return materializeScalarAccessPtr(source, rewriter, loc);
 }
 
@@ -297,21 +339,25 @@ static LogicalResult rewriteBufferLikeBoundaryOp(
     StringRef sourceRole, StringRef destinationRole) {
   Value source =
       materializeBoundaryOperandPtr(adaptor.getOperands()[0], rewriter, op.getLoc());
-  if (!source)
+  if (!source) {
     return rewriter.notifyMatchFailure(
         op, (Twine("failed to materialize ") + sourceRole + " ptr").str());
-  if (!isa<pto::PtrType>(source.getType()))
+  }
+  if (!isa<pto::PtrType>(source.getType())) {
     return rewriter.notifyMatchFailure(
         op, (Twine("expected ptr-form ") + sourceRole).str());
+  }
 
   Value destination = materializeBoundaryOperandPtr(adaptor.getOperands()[1],
                                                     rewriter, op.getLoc());
-  if (!destination)
+  if (!destination) {
     return rewriter.notifyMatchFailure(
         op, (Twine("failed to materialize ") + destinationRole + " ptr").str());
-  if (!isa<pto::PtrType>(destination.getType()))
+  }
+  if (!isa<pto::PtrType>(destination.getType())) {
     return rewriter.notifyMatchFailure(
         op, (Twine("expected ptr-form ") + destinationRole).str());
+  }
 
   SmallVector<Value> operands(adaptor.getOperands().begin(),
                               adaptor.getOperands().end());
@@ -336,8 +382,9 @@ struct ConvertTileBufAddrToPtrPattern
   matchAndRewrite(pto::TileBufAddrOp op, OpAdaptor adaptor,
                   ConversionPatternRewriter &rewriter) const override {
     Type convertedType = getTypeConverter()->convertType(op.getDst().getType());
-    if (!isa<pto::PtrType>(convertedType))
+    if (!isa<pto::PtrType>(convertedType)) {
       return failure();
+    }
 
     rewriter.replaceOpWithNewOp<pto::TileBufAddrOp>(op, convertedType,
                                                     adaptor.getSrc());
@@ -354,8 +401,9 @@ struct ConvertIntToPtrToCastPtrPattern
                   ConversionPatternRewriter &rewriter) const override {
     Type convertedType =
         getTypeConverter()->convertType(op.getResult().getType());
-    if (!isa<pto::PtrType>(convertedType))
+    if (!isa<pto::PtrType>(convertedType)) {
       return rewriter.notifyMatchFailure(op, "expected pointer result type");
+    }
 
     rewriter.replaceOpWithNewOp<pto::CastPtrOp>(op, convertedType,
                                                 adaptor.getAddr());
@@ -371,10 +419,12 @@ struct ConvertPtrToIntToCastPtrPattern
   matchAndRewrite(pto::PtrToIntOp op, OpAdaptor adaptor,
                   ConversionPatternRewriter &rewriter) const override {
     Type convertedType = getTypeConverter()->convertType(op.getResult().getType());
-    if (!isa<IntegerType>(convertedType))
+    if (!isa<IntegerType>(convertedType)) {
       return rewriter.notifyMatchFailure(op, "expected integer result type");
-    if (!isa<pto::PtrType>(adaptor.getPtr().getType()))
+    }
+    if (!isa<pto::PtrType>(adaptor.getPtr().getType())) {
       return rewriter.notifyMatchFailure(op, "expected pointer input type");
+    }
 
     rewriter.replaceOpWithNewOp<pto::CastPtrOp>(op, convertedType,
                                                 adaptor.getPtr());
@@ -390,19 +440,22 @@ struct ConvertCastPtrPattern : public OpConversionPattern<pto::CastPtrOp> {
                   ConversionPatternRewriter &rewriter) const override {
     Type convertedResultType =
         getTypeConverter()->convertType(op.getResult().getType());
-    if (!convertedResultType)
+    if (!convertedResultType) {
       return failure();
+    }
 
     Value input = adaptor.getInput();
     Type inputType = input.getType();
-    if (isMemRefType(inputType) || isMemRefType(convertedResultType))
+    if (isMemRefType(inputType) || isMemRefType(convertedResultType)) {
       return rewriter.notifyMatchFailure(op,
                                          "memref castptr must be eliminated");
+    }
 
     if (!isa<pto::PtrType, IntegerType>(inputType) ||
-        !isa<pto::PtrType, IntegerType>(convertedResultType))
+        !isa<pto::PtrType, IntegerType>(convertedResultType)) {
       return rewriter.notifyMatchFailure(op,
                                          "expected ptr/int castptr operands");
+    }
 
     if (inputType == convertedResultType) {
       rewriter.replaceOp(op, input);
@@ -421,24 +474,28 @@ struct ConvertSubviewToAddPtrPattern
   LogicalResult
   matchAndRewrite(memref::SubViewOp op, OpAdaptor adaptor,
                   ConversionPatternRewriter &rewriter) const override {
-    if (!needsSubviewPtrConversion(op))
+    if (!needsSubviewPtrConversion(op)) {
       return failure();
+    }
 
     auto ptrType =
         dyn_cast<pto::PtrType>(getTypeConverter()->convertType(op.getType()));
-    if (!ptrType)
+    if (!ptrType) {
       return rewriter.notifyMatchFailure(op, "expected ptr result type");
+    }
 
     Value basePtr =
         materializeSubviewInputPtr(adaptor.getSource(), rewriter, op.getLoc());
-    if (!basePtr)
+    if (!basePtr) {
       return rewriter.notifyMatchFailure(op,
                                          "failed to materialize subview input ptr");
+    }
 
     Value offset;
-    if (failed(computeSubviewElementOffset(op, rewriter, offset)))
+    if (failed(computeSubviewElementOffset(op, rewriter, offset))) {
       return rewriter.notifyMatchFailure(op,
                                          "failed to compute subview element offset");
+    }
 
     rewriter.replaceOpWithNewOp<pto::AddPtrOp>(op, ptrType, basePtr, offset);
     return success();
@@ -451,15 +508,17 @@ struct ConvertVldsSubviewOperandPattern : public OpConversionPattern<pto::VldsOp
   LogicalResult
   matchAndRewrite(pto::VldsOp op, OpAdaptor adaptor,
                   ConversionPatternRewriter &rewriter) const override {
-    if (!isa<pto::PtrType>(adaptor.getSource().getType()))
+    if (!isa<pto::PtrType>(adaptor.getSource().getType())) {
       return failure();
+    }
 
     OperationState state(op.getLoc(), op->getName().getStringRef());
     state.addOperands({adaptor.getSource(), adaptor.getOffset()});
     FailureOr<SmallVector<Type>> resultTypes =
         convertTypes(*getTypeConverter(), op->getResultTypes());
-    if (failed(resultTypes))
+    if (failed(resultTypes)) {
       return failure();
+    }
     state.addTypes(*resultTypes);
     state.addAttributes(op->getAttrs());
     Operation *newOp = rewriter.create(state);
@@ -474,8 +533,9 @@ struct ConvertVstsSubviewOperandPattern : public OpConversionPattern<pto::VstsOp
   LogicalResult
   matchAndRewrite(pto::VstsOp op, OpAdaptor adaptor,
                   ConversionPatternRewriter &rewriter) const override {
-    if (!isa<pto::PtrType>(adaptor.getDestination().getType()))
+    if (!isa<pto::PtrType>(adaptor.getDestination().getType())) {
       return failure();
+    }
 
     OperationState state(op.getLoc(), op->getName().getStringRef());
     state.addOperands(
@@ -483,8 +543,9 @@ struct ConvertVstsSubviewOperandPattern : public OpConversionPattern<pto::VstsOp
          adaptor.getMask()});
     FailureOr<SmallVector<Type>> resultTypes =
         convertTypes(*getTypeConverter(), op->getResultTypes());
-    if (failed(resultTypes))
+    if (failed(resultTypes)) {
       return failure();
+    }
     state.addTypes(*resultTypes);
     state.addAttributes(op->getAttrs());
     Operation *newOp = rewriter.create(state);
@@ -500,8 +561,9 @@ struct ConvertVsstbSubviewOperandPattern
   LogicalResult
   matchAndRewrite(pto::VsstbOp op, OpAdaptor adaptor,
                   ConversionPatternRewriter &rewriter) const override {
-    if (!isa<pto::PtrType>(adaptor.getDestination().getType()))
+    if (!isa<pto::PtrType>(adaptor.getDestination().getType())) {
       return failure();
+    }
 
     OperationState state(op.getLoc(), op->getName().getStringRef());
     state.addOperands({adaptor.getValue(), adaptor.getDestination(),
@@ -509,8 +571,9 @@ struct ConvertVsstbSubviewOperandPattern
                        adaptor.getMask()});
     FailureOr<SmallVector<Type>> resultTypes =
         convertTypes(*getTypeConverter(), op->getResultTypes());
-    if (failed(resultTypes))
+    if (failed(resultTypes)) {
       return failure();
+    }
     state.addTypes(*resultTypes);
     state.addAttributes(op->getAttrs());
     Operation *newOp = rewriter.create(state);
@@ -527,11 +590,13 @@ struct ConvertLoadScalarOperandToPtrPattern
   matchAndRewrite(pto::LoadScalarOp op, OpAdaptor adaptor,
                   ConversionPatternRewriter &rewriter) const override {
     Value ptr = materializeScalarAccessPtr(adaptor.getPtr(), rewriter, op.getLoc());
-    if (!ptr)
+    if (!ptr) {
       return rewriter.notifyMatchFailure(op,
                                          "failed to materialize load_scalar ptr");
-    if (!isa<pto::PtrType>(ptr.getType()))
+    }
+    if (!isa<pto::PtrType>(ptr.getType())) {
       return rewriter.notifyMatchFailure(op, "expected ptr-form load_scalar input");
+    }
 
     rewriter.replaceOpWithNewOp<pto::LoadScalarOp>(op, op.getValue().getType(),
                                                    ptr, adaptor.getOffset());
@@ -547,11 +612,13 @@ struct ConvertStoreScalarOperandToPtrPattern
   matchAndRewrite(pto::StoreScalarOp op, OpAdaptor adaptor,
                   ConversionPatternRewriter &rewriter) const override {
     Value ptr = materializeScalarAccessPtr(adaptor.getPtr(), rewriter, op.getLoc());
-    if (!ptr)
+    if (!ptr) {
       return rewriter.notifyMatchFailure(op,
                                          "failed to materialize store_scalar ptr");
-    if (!isa<pto::PtrType>(ptr.getType()))
+    }
+    if (!isa<pto::PtrType>(ptr.getType())) {
       return rewriter.notifyMatchFailure(op, "expected ptr-form store_scalar input");
+    }
 
     rewriter.replaceOpWithNewOp<pto::StoreScalarOp>(op, ptr,
                                                     adaptor.getOffset(),
@@ -593,6 +660,37 @@ struct ConvertCubeLoadOperandPattern
                   ConversionPatternRewriter &rewriter) const override {
     return rewriteBufferLikeBoundaryOp(op, adaptor, rewriter, "mte_gm_l1 source",
                                        "mte_gm_l1 destination");
+  }
+};
+
+struct ConvertRawFillL1OperandPattern
+    : public OpConversionPattern<pto::RawFillL1Op> {
+  using OpConversionPattern::OpConversionPattern;
+
+  LogicalResult
+  matchAndRewrite(pto::RawFillL1Op op, OpAdaptor adaptor,
+                  ConversionPatternRewriter &rewriter) const override {
+    Value dst =
+        materializeBoundaryOperandPtr(adaptor.getDst(), rewriter, op.getLoc());
+    if (!dst) {
+      return rewriter.notifyMatchFailure(op, "failed to materialize dst ptr");
+    }
+    if (!isa<pto::PtrType>(dst.getType())) {
+      return rewriter.notifyMatchFailure(op, "expected ptr-form dst");
+    }
+
+    SmallVector<Value> operands(adaptor.getOperands().begin(),
+                                adaptor.getOperands().end());
+    operands[0] = dst;
+
+    OperationState state(op.getLoc(), op->getName().getStringRef());
+    state.addOperands(operands);
+    state.addTypes(op->getResultTypes());
+    state.addAttributes(op->getAttrs());
+    state.propertiesAttr = op->getPropertiesAsAttribute();
+    Operation *newOp = rewriter.create(state);
+    rewriter.replaceOp(op, newOp->getResults());
+    return success();
   }
 };
 
@@ -741,10 +839,12 @@ struct ConvertLoadOperandToPtrPattern : public OpConversionPattern<pto::PTOLoadO
   matchAndRewrite(pto::PTOLoadOp op, OpAdaptor adaptor,
                   ConversionPatternRewriter &rewriter) const override {
     Value ptr = materializeScalarAccessPtr(adaptor.getPtr(), rewriter, op.getLoc());
-    if (!ptr)
+    if (!ptr) {
       return rewriter.notifyMatchFailure(op, "failed to materialize load ptr");
-    if (!isa<pto::PtrType>(ptr.getType()))
+    }
+    if (!isa<pto::PtrType>(ptr.getType())) {
       return rewriter.notifyMatchFailure(op, "expected ptr-form load input");
+    }
 
     rewriter.replaceOpWithNewOp<pto::PTOLoadOp>(
         op, op.getValue().getType(), ptr, adaptor.getOffset());
@@ -760,10 +860,12 @@ struct ConvertStoreOperandToPtrPattern
   matchAndRewrite(pto::PTOStoreOp op, OpAdaptor adaptor,
                   ConversionPatternRewriter &rewriter) const override {
     Value ptr = materializeScalarAccessPtr(adaptor.getPtr(), rewriter, op.getLoc());
-    if (!ptr)
+    if (!ptr) {
       return rewriter.notifyMatchFailure(op, "failed to materialize store ptr");
-    if (!isa<pto::PtrType>(ptr.getType()))
+    }
+    if (!isa<pto::PtrType>(ptr.getType())) {
       return rewriter.notifyMatchFailure(op, "expected ptr-form store input");
+    }
 
     rewriter.replaceOpWithNewOp<pto::PTOStoreOp>(
         op, ptr, adaptor.getOffset(), adaptor.getValue());
@@ -789,9 +891,10 @@ struct ConvertSimtLaunchOp final : public OpConversionPattern<pto::SimtLaunchOp>
         // emission validation.
         if (Value normalized =
                 materializeScalarAccessPtr(originalArg, rewriter, op.getLoc())) {
-          if (normalized.getType() != ptrType)
+          if (normalized.getType() != ptrType) {
             normalized =
                 rewriter.create<pto::CastPtrOp>(op.getLoc(), ptrType, normalized);
+          }
           arg = normalized;
         }
       }
@@ -816,27 +919,33 @@ struct ConvertPtrNormalizeUnrealizedCastOp final
   LogicalResult
   matchAndRewrite(UnrealizedConversionCastOp op, OpAdaptor adaptor,
                   ConversionPatternRewriter &rewriter) const override {
-    if (op->getNumOperands() != 1 || op->getNumResults() != 1)
+    if (op->getNumOperands() != 1 || op->getNumResults() != 1) {
       return failure();
+    }
     if (!hasPtrNormalizeConvertibleType(op->getOperandTypes()) &&
-        !hasPtrNormalizeConvertibleType(op->getResultTypes()))
+        !hasPtrNormalizeConvertibleType(op->getResultTypes())) {
       return failure();
+    }
 
     Type convertedResultType =
         getTypeConverter()->convertType(op.getResult(0).getType());
-    if (!convertedResultType)
+    if (!convertedResultType) {
       return failure();
+    }
 
     Value input = adaptor.getOperands().front();
     if (input.getType() != convertedResultType) {
       auto ptrType = dyn_cast<pto::PtrType>(convertedResultType);
-      if (!ptrType)
+      if (!ptrType) {
         return failure();
+      }
       input = materializeScalarAccessPtr(input, rewriter, op.getLoc());
-      if (!input)
+      if (!input) {
         return failure();
-      if (input.getType() != ptrType)
+      }
+      if (input.getType() != ptrType) {
         input = rewriter.create<pto::CastPtrOp>(op.getLoc(), ptrType, input);
+      }
     }
 
     rewriter.replaceOp(op, input);
@@ -852,12 +961,14 @@ struct ConvertPtrNormalizeMemRefCastOp final
   matchAndRewrite(memref::CastOp op, OpAdaptor adaptor,
                   ConversionPatternRewriter &rewriter) const override {
     if (!hasPtrNormalizeConvertibleType(op.getSource().getType()) &&
-        !hasPtrNormalizeConvertibleType(op.getType()))
+        !hasPtrNormalizeConvertibleType(op.getType())) {
       return failure();
+    }
 
     Type convertedResultType = getTypeConverter()->convertType(op.getType());
-    if (!convertedResultType)
+    if (!convertedResultType) {
       return failure();
+    }
 
     Value source = adaptor.getSource();
     if (source.getType() == convertedResultType) {
@@ -866,9 +977,10 @@ struct ConvertPtrNormalizeMemRefCastOp final
     }
 
     if (!isa<pto::PtrType, IntegerType>(source.getType()) ||
-        !isa<pto::PtrType, IntegerType>(convertedResultType))
+        !isa<pto::PtrType, IntegerType>(convertedResultType)) {
       return rewriter.notifyMatchFailure(
           op, "expected ptr/int memref.cast after ptr normalization");
+    }
 
     rewriter.replaceOpWithNewOp<pto::CastPtrOp>(op, convertedResultType,
                                                 source);
@@ -948,6 +1060,9 @@ struct VPTOPtrNormalizePass
     target.addDynamicallyLegalOp<pto::MteUbUbOp>([](pto::MteUbUbOp op) {
       return isa<pto::PtrType>(op.getSource().getType()) &&
              isa<pto::PtrType>(op.getDestination().getType());
+    });
+    target.addDynamicallyLegalOp<pto::RawFillL1Op>([](pto::RawFillL1Op op) {
+      return isa<pto::PtrType>(op.getDst().getType());
     });
     target.addDynamicallyLegalOp<pto::MteUbL1Op>([](pto::MteUbL1Op op) {
       return isa<pto::PtrType>(op.getSource().getType()) &&
@@ -1031,6 +1146,7 @@ struct VPTOPtrNormalizePass
                  ConvertMteUbUbOperandPattern,
                  ConvertMteUbL1OperandPattern,
                  ConvertCubeLoadOperandPattern,
+                 ConvertRawFillL1OperandPattern,
                  ConvertCubeStoreOperandPattern,
                  ConvertBiasLoadOperandPattern,
                  ConvertCubeLoadFracOperandPattern,
@@ -1049,8 +1165,9 @@ struct VPTOPtrNormalizePass
                  ConvertPtrNormalizeMemRefCastOp>(
         typeConverter, context);
 
-    if (failed(applyPartialConversion(module, target, std::move(patterns))))
+    if (failed(applyPartialConversion(module, target, std::move(patterns)))) {
       signalPassFailure();
+    }
   }
 };
 

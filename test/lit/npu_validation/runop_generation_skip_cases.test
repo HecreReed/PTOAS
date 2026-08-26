@@ -1,0 +1,17 @@
+# Copyright (c) 2026 Huawei Technologies Co., Ltd.
+# This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+# CANN Open Software License Agreement Version 2.0 (the "License").
+# Please refer to the License for details. You may not use this file except in compliance with the License.
+# THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+# INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+# See LICENSE in the root of the software repository for the full text of the License.
+
+# RUN: rm -rf %t
+# RUN: env PTOAS_BIN=/usr/bin/true PYTHON_BIN=/usr/bin/true PTOAS_OUT_DIR=%t/out PTOAS_FLAGS='--pto-arch a5' PTOAS_SKIP_CASES=partition5d,partition5d_dynamic bash %S/../../samples/runop.sh -t Partition5D | FileCheck %s
+
+# CHECK-NOT: FAIL
+# CHECK-DAG: Partition5D(partition5d.py) SKIP listed in PTOAS_SKIP_CASES
+# CHECK-DAG: Partition5D(partition5d_dynamic.py) SKIP listed in PTOAS_SKIP_CASES
+# CHECK-DAG: Partition5D(partition5d_a5.py) OK generated: partition5d_a5-pto.cpp
+# CHECK-DAG: Partition5D(partition5d_dynamic_a5.py) OK generated: partition5d_dynamic_a5-pto.cpp
+# CHECK-NOT: FAIL

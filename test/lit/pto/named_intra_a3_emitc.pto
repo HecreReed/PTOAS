@@ -1,0 +1,28 @@
+// Copyright (c) 2026 Huawei Technologies Co., Ltd.
+// This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+// CANN Open Software License Agreement Version 2.0 (the "License").
+// Please refer to the License for details. You may not use this file except in compliance with the License.
+// THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+// INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+// See LICENSE in the root of the software repository for the full text of the License.
+
+// RUN: ptoas --pto-arch=a3 %s 2>&1 | FileCheck %s
+
+module attributes {
+  pto.kernel_kind = #pto.kernel_kind<vector>,
+  pto.target_arch = "a3"
+} {
+  func.func @named_intra_a3_emitc(%ffts : !pto.ptr<i64>) attributes {pto.kernel} {
+    pto.set_ffts %ffts : !pto.ptr<i64>
+    pto.set_intra_block <PIPE_MTE1>, 15
+    pto.wait_intra_block <PIPE_V>, 15
+    return
+  }
+}
+
+// CHECK-LABEL: extern "C" __global__ AICORE void named_intra_a3_emitc({{.*}}) {
+// CHECK: getFFTSMsg(FFTS_MODE_VAL, {{.*}})
+// CHECK-NEXT: __builtin_cce_ffts_cross_core_sync(PIPE_MTE1, {{.*}});
+// CHECK-NEXT: __builtin_cce_wait_flag_dev(15);
+// CHECK-NOT: __builtin_cce_set_intra_block
+// CHECK-NOT: __builtin_cce_wait_intra_block

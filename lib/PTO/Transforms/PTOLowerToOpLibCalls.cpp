@@ -19,12 +19,14 @@ FailureOr<bool> mlir::pto::tryCloneOpLibInlineBridgeOp(OpBuilder &builder,
                                                        Operation &op,
                                                        IRMapping &mapping) {
   if (auto cast = dyn_cast<UnrealizedConversionCastOp>(&op)) {
-    if (cast->getNumOperands() != 1 || cast->getNumResults() != 1)
+    if (cast->getNumOperands() != 1 || cast->getNumResults() != 1) {
       return failure();
+    }
 
     Value mappedSrc = mapping.lookupOrNull(cast.getOperand(0));
-    if (!mappedSrc)
+    if (!mappedSrc) {
       return failure();
+    }
 
     Type dstTy = cast.getResult(0).getType();
     if (mappedSrc.getType() == dstTy) {

@@ -366,6 +366,57 @@ pto.mte_gm_l1 %bias_gm, %l1_bias, %c32_i64
 
 ---
 
+### `pto.raw_fill_l1`
+
+- **syntax:**
+```mlir
+pto.raw_fill_l1 %dst, %byte_offset, %raw_value, %repeat_times,
+  %block_num_32b, %dst_gap_32b {fill_word_bits = 16 : i64}
+  : !pto.ptr<T, mat>, i64, i32, i64, i64, i64
+```
+- **semantics:** Fill a strided L1 matrix region beginning at `%dst +
+  %byte_offset` with the selected raw word pattern. Each repetition writes
+  `%block_num_32b` contiguous 32-byte blocks, and `%dst_gap_32b` gives the
+  destination gap between repetitions in 32-byte blocks. For a 16-bit fill,
+  the low 16 bits of `%raw_value` are repeated in every 16-bit word; for a
+  32-bit fill, all 32 bits of `%raw_value` are used. No fill range is omitted
+  when the final repetition is a tail region.
+
+**Parameter Table:**
+
+| Parameter | Width | Description |
+|-----------|-------|-------------|
+| `%dst` | ptr or memref | Destination buffer in the `mat` L1 address space; accepts `!pto.ptr<T, mat>` or a `memref` with `#pto.address_space<mat>` |
+| `%byte_offset` | i64 | Non-negative byte offset from `%dst` to the first filled word; must be a multiple of 32 bytes |
+| `%raw_value` | i32 | Raw pattern; low 16 bits are repeated for a 16-bit fill, all 32 bits are used for a 32-bit fill |
+| `%repeat_times` | i64 | Number of strided fill repetitions |
+| `%block_num_32b` | i64 | Number of 32-byte blocks written by each repetition |
+| `%dst_gap_32b` | i64 | Destination gap between repetitions, measured in 32-byte blocks |
+| `fill_word_bits` | i64 attribute | Static fill-word width: exactly `16` or `32` |
+
+**Constraints:**
+
+- `%dst` must have the `mat` L1 address space.
+- `%byte_offset`, `%repeat_times`, `%block_num_32b`, and `%dst_gap_32b` must
+  be non-negative. PTOAS diagnoses known constant violations.
+- The effective destination address `%dst + %byte_offset` must be 32-byte
+  aligned. PTOAS rejects known constant offsets that are not multiples of 32;
+  alignment of dynamically computed offsets is a caller precondition.
+- `%repeat_times`, `%block_num_32b`, and `%dst_gap_32b` must each be at most
+  `32767`, including dynamically computed values. PTOAS diagnoses known
+  constant violations; dynamic values are a caller precondition.
+- `fill_word_bits` is a static i64 attribute; it must be exactly `16` or `32`.
+
+**Example:**
+
+```mlir
+pto.raw_fill_l1 %l1_dst, %c32_i64, %zero_i32, %c4_i64, %c2_i64,
+  %c6_i64 {fill_word_bits = 16 : i64}
+  : !pto.ptr<ui16, mat>, i64, i32, i64, i64, i64
+```
+
+---
+
 ### `pto.mte_l1_ub`
 
 - **syntax:**
@@ -672,6 +723,90 @@ pto.mte_l1_l0b %l1_b, %l0b, %c32_i64, %c16_i64, %c0_i64, %c0_i64
 
 ---
 
+### Full-control L1 to L0 Loads
+
+`pto.mte_l1_l0a` and `pto.mte_l1_l0b` each accept either their shape-derived
+form above or a full-control form. The full-control form preserves authored
+start, extent, and stride controls instead of deriving them from a logical
+matrix shape.
+
+- **syntax:**
+```mlir
+pto.mte_l1_l0a %src, %dst, %m_start, %k_start, %m_step,
+  %k_step, %src_stride, %dst_stride
+  : !pto.ptr<T, l1>, !pto.ptr<T, l0a>, i64, i64, i64, i64, i64, i64
+
+pto.mte_l1_l0b %src, %dst, %m_start, %k_start, %m_step,
+  %k_step, %src_stride, %dst_stride
+  : !pto.ptr<T, l1>, !pto.ptr<T, l0b>, i64, i64, i64, i64, i64, i64
+```
+
+The shape-derived and full-control groups are mutually exclusive. A partial
+group is invalid. The named field spelling is available when an incomplete or
+mixed operation must be diagnosed; complete groups print in the compact
+positional spelling shown above.
+
+**Parameter Table:**
+
+| Parameter | Width | Description |
+|-----------|-------|-------------|
+| `%src` | ptr | L1 source in `l1` |
+| `%dst` | ptr | Destination in `l0a` for the left form or `l0b` for the right form |
+| `%m_start` | unsigned 16-bit | First source block on the M axis |
+| `%k_start` | unsigned 16-bit | First source block on the K axis |
+| `%m_step` | unsigned 8-bit | Number of source blocks transferred on the M axis; must be nonzero |
+| `%k_step` | unsigned 8-bit | Number of source blocks transferred on the K axis; must be nonzero |
+| `%src_stride` | unsigned 16-bit | Source outer stride in fractal-block units; must be nonzero |
+| `%dst_stride` | unsigned 16-bit | Destination outer stride in fractal-block units; must be nonzero |
+| `transpose` | attr | Optional boolean source-tile transpose before destination placement |
+
+For packed `!pto.f4E1M2x2` and `!pto.f4E2M1x2`, PTOAS expands the same
+`mte_l1_l0a/b` wrapper to its internal S4 load operation. The K controls use
+different units: `%k_start` is a packed `f4x2` source coordinate, so one unit
+is one byte containing two logical FP4 values; `%k_step` is a 32-byte S4
+K-block, so one unit covers 64 logical FP4 values. Full-control values are
+forwarded unchanged. Shape-derived forms convert the logical K coordinates by
+dividing `%start_col` by two for `%k_start` and rounding the K extent up to
+64-value blocks for `%k_step`.
+
+Conceptually, with transposition disabled, the full-control form selects the
+following block region:
+
+```text
+for m_block in 0 .. m_step:
+  for k_block in 0 .. k_step:
+    dst_block[m_block, k_block; dst_stride] =
+        src_block[m_start + m_block, k_start + k_block; src_stride]
+```
+
+When `transpose` is `true`, the selected source region is placed using the
+transposed Cube operand layout.
+
+**Constraints:**
+
+- `%src` must be in `l1`; the left destination must be in `l0a`, and the right
+  destination must be in `l0b`.
+- Start and stride values must fit their 16-bit fields. Step values must be in
+  `1..255`.
+- Packed FP4 source and destination types must match when PTOAS selects the S4
+  expansion.
+
+**Example:**
+
+```mlir
+pto.mte_l1_l0a %l1_a, %l0a, %c0_i64, %c4_i64, %c16_i64,
+  %c4_i64, %c16_i64, %c16_i64 {transpose = false}
+  : !pto.ptr<!pto.f4E2M1x2, l1>, !pto.ptr<!pto.f4E2M1x2, l0a>,
+    i64, i64, i64, i64, i64, i64
+
+pto.mte_l1_l0b %l1_b, %l0b, %c0_i64, %c4_i64, %c16_i64,
+  %c4_i64, %c16_i64, %c16_i64 {transpose = true}
+  : !pto.ptr<!pto.f4E2M1x2, l1>, !pto.ptr<!pto.f4E2M1x2, l0b>,
+    i64, i64, i64, i64, i64, i64
+```
+
+---
+
 ### MX Scale Load Model
 
 MX scale loads prepare the scale payloads consumed by `pto.mad_mx*`. Each scale
@@ -681,6 +816,39 @@ entry applies to one 32-element K group.
 - Right scale logical shape: `[ceil(K / 32), N]`.
 - L1 source data is organized as 32B scale fragments in the same logical order
   as the associated data tile.
+
+### MX Scale Load Operands
+
+`pto.mte_l1_l0a_mx` and `pto.mte_l1_l0b_mx` store the following operands as
+independently optional fields, but a valid operation supplies exactly one
+complete operand group:
+
+- **Shape-derived group:** `m`, `k`, `start_row`, `start_col` for L0A, or
+  `k`, `n`, `start_row`, `start_col` for L0B. PTOAS derives the MX traversal
+  from the matrix shape and element type.
+- **Full MX group:** `x_start`, `y_start`, `x_step`, `y_step`, `src_stride`,
+  `dst_stride`. Use this group when the scale source has an explicit physical
+  layout that cannot be derived from the logical matrix shape.
+
+The two groups are mutually exclusive. A partial group is invalid. `x_start`
+and `y_start` are MX scale-fragment grid coordinates; `x_step` and `y_step`
+are grid traversal extents; `src_stride` and `dst_stride` are grid-row strides.
+The full MX values are not logical element counts or byte offsets.
+
+The named field spelling is available when an incomplete or mixed operation
+must be diagnosed. Complete groups print in the compact positional spelling
+used by the examples below.
+
+```mlir
+pto.mte_l1_l0a_mx %src, %dst,
+  x_start(%x_start), y_start(%y_start), x_step(%x_step), y_step(%y_step),
+  src_stride(%src_stride), dst_stride(%dst_stride)
+  : !pto.ptr<T, l1>, !pto.ptr<T, l0a>, i64, i64, i64, i64, i64, i64
+```
+
+`%src` must be in `l1` and address a 32-byte-aligned MX scale fragment.
+`%dst` must be in the matching `l0a` or `l0b` space. It is always the real
+staged L0 byte pointer and must be 16-byte aligned.
 
 ### `pto.mte_l1_l0a_mx`
 
@@ -706,7 +874,10 @@ pto.mte_l1_l0a_mx %src, %dst, %m, %k, %start_row, %start_col
 **Constraints:**
 
 - `%src` must be in `l1`, `%dst` must be in `l0a`.
-- `%src` and `%dst` must satisfy 32B MX scale-fragment alignment.
+- `%src` must be 32-byte aligned to an MX scale fragment; `%dst` must be
+  16-byte aligned for the MX destination address unit.
+- Use either the complete shape-derived group or the complete full MX group
+  from [MX Scale Load Operands](#mx-scale-load-operands).
 
 **Example:**
 
@@ -741,7 +912,10 @@ pto.mte_l1_l0b_mx %src, %dst, %k, %n, %start_row, %start_col
 **Constraints:**
 
 - `%src` must be in `l1`, `%dst` must be in `l0b`.
-- `%src` and `%dst` must satisfy 32B MX scale-fragment alignment.
+- `%src` must be 32-byte aligned to an MX scale fragment; `%dst` must be
+  16-byte aligned for the MX destination address unit.
+- Use either the complete shape-derived group or the complete full MX group
+  from [MX Scale Load Operands](#mx-scale-load-operands).
 
 **Example:**
 

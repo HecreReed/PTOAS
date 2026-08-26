@@ -349,7 +349,7 @@ Chapter 11 walks through this example in full detail.
 |---------------|---------------|
 | New to PTODSL | Chapter 2 (Quick Start), then Chapter 3 (Kernel Entries & Modules) |
 | Writing your first kernel | Chapter 2 → Chapter 4 (Type System) → Chapter 5 (Control Flow) |
-| Looking up a specific operation | Chapters 6–10, Chapter 13, and Chapter 14 (organized by topic) |
+| Looking up a specific operation | Chapters 6–10, Chapters 13–15 (organized by topic) |
 | Understanding the flash attention reference | Chapter 11 |
 
 **Chapter overview:**
@@ -370,3 +370,4 @@ Chapter 11 walks through this example in full detail.
 | 12 | Additional examples |
 | 13 | SIMT micro-ops |
 | 14 | The Virtual Micro-instruction Set (VMI): logical vector instructions, masks, and type-directed authoring |
+| 15 | Special scalar memory access: scalar-pipeline loads/stores, L1-bypassing GM access, and SIMT scalar access |

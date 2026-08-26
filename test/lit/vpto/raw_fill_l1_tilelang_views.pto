@@ -1,0 +1,55 @@
+// Copyright (c) 2026 Huawei Technologies Co., Ltd.
+// This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+// CANN Open Software License Agreement Version 2.0 (the "License").
+// Please refer to the License for details. You may not use this file except in compliance with the License.
+// THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+// INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+// See LICENSE in the root of the software repository for the full text of the License.
+
+// TileLang passes its data element view to the wrapper; expansion owns the raw
+// ui16/ui32 fill view after byte-address calculation.
+// RUN: ptoas --pto-arch=a5 --pto-backend=vpto --emit-vpto \
+// RUN:   --mlir-print-ir-after=vpto-expand-wrapper-ops %s -o /dev/null 2>&1 \
+// RUN:   | FileCheck %s
+
+module attributes {pto.target_arch = "a5", pto.kernel_kind = #pto.kernel_kind<cube>} {
+  func.func @raw_fill_l1_tilelang_views(
+      %bf16_dst: !pto.ptr<bf16, mat>,
+      %fp8_dst: !pto.ptr<f8E4M3FN, mat>,
+      %f32_dst: !pto.ptr<f32, mat>) attributes {pto.kernel} {
+    %c32_i64 = arith.constant 32 : i64
+    %c64_i64 = arith.constant 64 : i64
+    %c96_i64 = arith.constant 96 : i64
+    %c1_i64 = arith.constant 1 : i64
+    %c2_i64 = arith.constant 2 : i64
+    %c0_i64 = arith.constant 0 : i64
+    %zero_i32 = arith.constant 0 : i32
+    %c16_i64 = arith.constant 16 : i64
+    %c32_word_i64 = arith.constant 32 : i64
+
+    pto.raw_fill_l1 %bf16_dst, %c32_i64, %zero_i32, %c1_i64, %c2_i64,
+      %c0_i64 {fill_word_bits = 16 : i64} : !pto.ptr<bf16, mat>, i64, i32, i64, i64, i64
+    pto.raw_fill_l1 %fp8_dst, %c64_i64, %zero_i32, %c1_i64, %c2_i64,
+      %c0_i64 {fill_word_bits = 16 : i64} : !pto.ptr<f8E4M3FN, mat>, i64, i32, i64, i64, i64
+    pto.raw_fill_l1 %f32_dst, %c96_i64, %zero_i32, %c1_i64, %c2_i64,
+      %c0_i64 {fill_word_bits = 32 : i64} : !pto.ptr<f32, mat>, i64, i32, i64, i64, i64
+    return
+  }
+}
+
+// CHECK-LABEL: func.func @raw_fill_l1_tilelang_views(
+// CHECK: %[[BF16_BYTES:.*]] = pto.castptr %{{.*}} : !pto.ptr<bf16, l1> -> !pto.ptr<i8, l1>
+// CHECK: %[[BF16_ADVANCED:.*]] = pto.addptr %[[BF16_BYTES]], %{{.*}}
+// CHECK: %[[BF16_BASE:.*]] = pto.castptr %[[BF16_ADVANCED]] : !pto.ptr<i8, l1> -> !pto.ptr<bf16, l1>
+// CHECK: %[[BF16_VIEW:.*]] = pto.castptr %[[BF16_BASE]] : !pto.ptr<bf16, l1> -> !pto.ptr<ui16, l1>
+// CHECK: pto.create_cbuf_matrix %[[BF16_VIEW]]
+// CHECK: %[[FP8_BYTES:.*]] = pto.castptr %{{.*}} : !pto.ptr<f8E4M3FN, l1> -> !pto.ptr<i8, l1>
+// CHECK: %[[FP8_ADVANCED:.*]] = pto.addptr %[[FP8_BYTES]], %{{.*}}
+// CHECK: %[[FP8_BASE:.*]] = pto.castptr %[[FP8_ADVANCED]] : !pto.ptr<i8, l1> -> !pto.ptr<f8E4M3FN, l1>
+// CHECK: %[[FP8_VIEW:.*]] = pto.castptr %[[FP8_BASE]] : !pto.ptr<f8E4M3FN, l1> -> !pto.ptr<ui16, l1>
+// CHECK: pto.create_cbuf_matrix %[[FP8_VIEW]]
+// CHECK: %[[F32_BYTES:.*]] = pto.castptr %{{.*}} : !pto.ptr<f32, l1> -> !pto.ptr<i8, l1>
+// CHECK: %[[F32_ADVANCED:.*]] = pto.addptr %[[F32_BYTES]], %{{.*}}
+// CHECK: %[[F32_BASE:.*]] = pto.castptr %[[F32_ADVANCED]] : !pto.ptr<i8, l1> -> !pto.ptr<f32, l1>
+// CHECK: %[[F32_VIEW:.*]] = pto.castptr %[[F32_BASE]] : !pto.ptr<f32, l1> -> !pto.ptr<ui32, l1>
+// CHECK: pto.create_cbuf_matrix %[[F32_VIEW]]

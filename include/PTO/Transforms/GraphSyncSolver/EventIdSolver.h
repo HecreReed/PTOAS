@@ -35,7 +35,7 @@ class Action {
 public:
   const ACTION_TYPE actionType;
   Action() = delete;
-  Action(ACTION_TYPE actionType) : actionType(actionType) {};
+  explicit Action(ACTION_TYPE actionType) : actionType(actionType) {};
   virtual ~Action() = default;
   virtual std::string str() const = 0;
 };
@@ -52,7 +52,8 @@ public:
 class ActionAddNode : public Action {
 public:
   EventIdNode *const node;
-  ActionAddNode(EventIdNode *node) : Action(ACTION_TYPE::ADD_NODE), node(node) {
+  explicit ActionAddNode(EventIdNode *node)
+      : Action(ACTION_TYPE::ADD_NODE), node(node) {
     assert(node != nullptr);
   }
   static bool classof(const Action *e) {
@@ -151,7 +152,6 @@ public:
 };
 
 class EventIdSolver {
-
 private:
   int64_t eventIdsNumMax{-1};
   bool needRecalculateEventIds{false};

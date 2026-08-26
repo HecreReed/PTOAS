@@ -93,7 +93,6 @@ def write_env(workspace: Path, metadata: dict[str, Any]) -> None:
         lines.append(f"export CCACHE_DIR={quote(metadata['ccache_dir'])}")
     if metadata.get("cann_env"):
         lines.append(f"source {quote(metadata['cann_env'])}")
-    lines.append('export LD_LIBRARY_PATH="$LLVM_BUILD_DIR/lib:${LD_LIBRARY_PATH:-}"')
     lines.append('export PTOAS_WORKSPACE_METADATA="$PTO_SOURCE_DIR/.ptoas-workspace.json"')
     path = workspace / "env.sh"
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
@@ -134,7 +133,7 @@ def create(args: argparse.Namespace) -> int:
     ccache_dir = Path(args.ccache_dir).expanduser().resolve() if args.ccache_dir else None
     if ccache_dir:
         ccache_dir.mkdir(parents=True, exist_ok=True)
-    branch = args.branch or f"codex/{args.name}"
+    branch = args.branch or f"feature/{args.name}"
     workspace_root.mkdir(parents=True, exist_ok=True)
     build_root.mkdir(parents=True, exist_ok=True)
 

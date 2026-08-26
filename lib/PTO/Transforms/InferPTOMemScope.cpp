@@ -39,9 +39,10 @@ namespace {
 static std::optional<memref::AllocOp> requireRootAlloc(Operation *op, Value value,
                                                        StringRef valueName) {
   auto alloc = tracebackMemRefToAlloc(value);
-  if (!alloc.has_value())
+  if (!alloc.has_value()) {
     emitError(op->getLoc()) << "Cannot find root memref.alloc for " << valueName
                             << " of this op.";
+  }
   return alloc;
 }
 
@@ -50,11 +51,13 @@ static LogicalResult propagateAllocScope(Operation *op, Value value,
                                          const AddressSpaceAttr &targetScope,
                                          MemScopeInferAndPropagateHelper &helper) {
   auto alloc = requireRootAlloc(op, value, valueName);
-  if (!alloc.has_value())
+  if (!alloc.has_value()) {
     return failure();
-  if (failed(helper.Run(*alloc, targetScope)))
+  }
+  if (failed(helper.Run(*alloc, targetScope))) {
     return op->emitOpError()
            << "Failed to infer/propagate memory scope for " << valueName;
+  }
   return success();
 }
 
@@ -91,6 +94,37 @@ static LogicalResult propagateForScope(MemScopeInferAndPropagateHelper &helper,
                  helper.Run(result, memrefScope).succeeded());
 }
 
+static LogicalResult propagateWhileScope(
+    MemScopeInferAndPropagateHelper &helper,
+    const AddressSpaceAttr &memrefScope, OpOperand &user) {
+  auto op = cast<scf::WhileOp>(user.getOwner());
+  unsigned index = user.getOperandNumber();
+  if (index >= op.getInits().size() || index >= op.getBeforeArguments().size() ||
+      index >= op.getResults().size())
+    return failure();
+  return success(helper.Run(op.getBeforeArguments()[index], memrefScope)
+                     .succeeded() &&
+                 helper.Run(op.getResults()[index], memrefScope).succeeded());
+}
+
+static LogicalResult propagateWhileConditionScope(
+    MemScopeInferAndPropagateHelper &helper,
+    const AddressSpaceAttr &memrefScope, OpOperand &user) {
+  auto op = cast<scf::ConditionOp>(user.getOwner());
+  unsigned index = user.getOperandNumber();
+  if (index == 0)
+    return success();
+  --index;
+  auto whileOp = cast<scf::WhileOp>(op->getParentOp());
+  auto conditionArgs = whileOp.getConditionOp().getArgs();
+  if (index >= conditionArgs.size() || index >= whileOp.getAfterArguments().size() ||
+      index >= whileOp.getResults().size())
+    return failure();
+  return success(helper.Run(whileOp.getAfterArguments()[index], memrefScope)
+                     .succeeded() &&
+                 helper.Run(whileOp.getResults()[index], memrefScope).succeeded());
+}
+
 static LogicalResult
 propagateViewLikeScope(MemScopeInferAndPropagateHelper &helper,
                        const AddressSpaceAttr &memrefScope, Operation *op) {
@@ -109,6 +143,12 @@ propagateMemScopeToUser(MemScopeInferAndPropagateHelper &helper, Value val,
       .Case<scf::ForOp>([&](scf::ForOp) {
         return propagateForScope(helper, memrefScope, user);
       })
+      .Case<scf::WhileOp>([&](scf::WhileOp) {
+        return propagateWhileScope(helper, memrefScope, user);
+      })
+      .Case<scf::ConditionOp>([&](scf::ConditionOp) {
+        return propagateWhileConditionScope(helper, memrefScope, user);
+      })
       .Case<memref::SubViewOp, memref::ViewOp, memref::ReinterpretCastOp,
             memref::CastOp, memref::CollapseShapeOp, memref::ExpandShapeOp,
             memref::ReshapeOp, memref::TransposeOp,
@@ -117,8 +157,9 @@ propagateMemScopeToUser(MemScopeInferAndPropagateHelper &helper, Value val,
       })
       .Case<func::CallOp, gpu::LaunchFuncOp>([&](auto) { return success(); })
       .Default([&](Operation *op) {
-        if (op->getNumResults() == 0 || !hasMemRefResults(op))
+        if (op->getNumResults() == 0 || !hasMemRefResults(op)) {
           return success();
+        }
         op->emitOpError("Unsupported user for root alloc op.");
         return failure();
       });
@@ -189,27 +230,32 @@ static LogicalResult propagateOperandScopes(
     ArrayRef<std::tuple<Value, StringRef, AddressSpaceAttr>> specs) {
   MemScopeInferAndPropagateHelper helper;
   for (const auto &[value, valueName, targetScope] : specs) {
-    if (failed(propagateAllocScope(op, value, valueName, targetScope, helper)))
+    if (failed(propagateAllocScope(op, value, valueName, targetScope, helper))) {
       return failure();
+    }
   }
   return success();
 }
 
 LogicalResult pto::inferAndPropagateMemScopeForMovDps(pto::TMovOp op) {
-  if (failed(ensureDpsOnlyOp(op)))
+  if (failed(ensureDpsOnlyOp(op))) {
     return failure();
+  }
 
   auto dstAlloc = requireRootAlloc(op, op.getDst(), "mB");
-  if (!dstAlloc.has_value())
+  if (!dstAlloc.has_value()) {
     return failure();
+  }
 
   auto memRefType = dyn_cast<BaseMemRefType>(dstAlloc->getType());
-  if (!memRefType)
+  if (!memRefType) {
     return op->emitOpError("Failed to infer/propagate memory scope for mA");
+  }
 
   auto memSpace = memRefType.getMemorySpace();
-  if (!memSpace)
+  if (!memSpace) {
     return success();
+  }
 
   auto l0aSpaceAttr =
       getMemScopeAttr(op->getContext(), pto::AddressSpace::LEFT);
@@ -221,10 +267,12 @@ LogicalResult pto::inferAndPropagateMemScopeForMovDps(pto::TMovOp op) {
   auto ubSpaceAttr = getMemScopeAttr(op->getContext(), pto::AddressSpace::VEC);
   auto biasSpaceAttr =
       getMemScopeAttr(op->getContext(), pto::AddressSpace::BIAS);
-  if (memSpace == ubSpaceAttr)
+  if (memSpace == ubSpaceAttr) {
     return propagateOperandScopes(op, {{op.getSrc(), "mA", ubSpaceAttr}});
-  if (memSpace == l1SpaceAttr)
+  }
+  if (memSpace == l1SpaceAttr) {
     return propagateOperandScopes(op, {{op.getSrc(), "mA", l0cSpaceAttr}});
+  }
   if (memSpace == l0aSpaceAttr || memSpace == l0bSpaceAttr ||
       memSpace == biasSpaceAttr) {
     return propagateOperandScopes(op, {{op.getSrc(), "mA", l1SpaceAttr}});
@@ -233,8 +281,9 @@ LogicalResult pto::inferAndPropagateMemScopeForMovDps(pto::TMovOp op) {
 }
 
 LogicalResult pto::inferAndPropagateMemScopeForMatmulAccDps(pto::TMatmulAccOp op) {
-  if (failed(ensureDpsOnlyOp(op)))
+  if (failed(ensureDpsOnlyOp(op))) {
     return failure();
+  }
 
   return propagateOperandScopes(
       op, {{op.getAccIn(), "mAcc",
@@ -249,8 +298,9 @@ LogicalResult pto::inferAndPropagateMemScopeForMatmulAccDps(pto::TMatmulAccOp op
 
 
 LogicalResult pto::inferAndPropagateMemScopeForMatmulBiasDps(pto::TMatmulBiasOp op) {
-  if (failed(ensureDpsOnlyOp(op)))
+  if (failed(ensureDpsOnlyOp(op))) {
     return failure();
+  }
 
   return propagateOperandScopes(
       op, {{op.getA(), "mA",
@@ -264,8 +314,9 @@ LogicalResult pto::inferAndPropagateMemScopeForMatmulBiasDps(pto::TMatmulBiasOp 
 }
 
 LogicalResult pto::inferAndPropagateMemScopeForMatmulDps(pto::TMatmulOp op) {
-  if (failed(ensureDpsOnlyOp(op)))
+  if (failed(ensureDpsOnlyOp(op))) {
     return failure();
+  }
 
   return propagateOperandScopes(
       op, {{op.getLhs(), "mA",
@@ -284,12 +335,14 @@ LogicalResult InferPTOMemScopePass::fixDeviceCallSite(func::FuncOp op) {
     func::CallOp call = cast<func::CallOp>(use.getUser());
     // propagate call operand's memory scope
     for (auto [idx, callOperand] : llvm::enumerate(call.getArgOperands())) {
-      if (!isa<BaseMemRefType>(callOperand.getType()))
+      if (!isa<BaseMemRefType>(callOperand.getType())) {
         continue;
+      }
 
       auto funcOperandType = op.getFunctionType().getInput(idx);
-      if (!isa<BaseMemRefType>(funcOperandType))
+      if (!isa<BaseMemRefType>(funcOperandType)) {
         continue;
+      }
 
       LDBG("call operand: " << callOperand);
       if (failed(helper.Run(tracebackMemRef(callOperand),
@@ -302,12 +355,14 @@ LogicalResult InferPTOMemScopePass::fixDeviceCallSite(func::FuncOp op) {
     }
     // propagate call return value memory scope
     for (auto [idx, returnValue] : llvm::enumerate(call->getResults())) {
-      if (!isa<BaseMemRefType>(returnValue.getType()))
+      if (!isa<BaseMemRefType>(returnValue.getType())) {
         continue;
+      }
 
       auto funcReturnType = op.getFunctionType().getResult(idx);
-      if (!isa<BaseMemRefType>(funcReturnType))
+      if (!isa<BaseMemRefType>(funcReturnType)) {
         continue;
+      }
 
       if (failed(helper.Run(returnValue,
                             getPTOAddressSpaceAttr(funcReturnType)))) {
@@ -326,12 +381,14 @@ LogicalResult InferPTOMemScopePass::fixDeviceCallSite(func::FuncOp op) {
 /// information to update the function's type.
 [[maybe_unused]] LogicalResult InferPTOMemScopePass::fixHostFuncSignature(func::FuncOp op) {
   // Skip external host functions because we know nothing about it.
-  if (op.isExternal())
+  if (op.isExternal()) {
     return success();
+  }
 
   func::ReturnOp returnOp = getAssumedUniqueReturnOp(op);
-  if (!returnOp)
+  if (!returnOp) {
     return failure();
+  }
 
   SmallVector<Type> newArgsType(llvm::map_to_vector(
       op.getArguments(), [](const BlockArgument &ba) { return ba.getType(); }));
@@ -342,9 +399,10 @@ LogicalResult InferPTOMemScopePass::fixDeviceCallSite(func::FuncOp op) {
   return success();
 }
 
-LogicalResult inferAndPropagateMemScopeForExternFunc(func::FuncOp op) {
-  if (!op.isExternal())
+static LogicalResult inferAndPropagateMemScopeForExternFunc(func::FuncOp op) {
+  if (!op.isExternal()) {
     return failure();
+  }
 
   auto gmSpaceAttr =
       AddressSpaceAttr::get(op->getContext(), pto::AddressSpace::GM);
@@ -354,8 +412,9 @@ LogicalResult inferAndPropagateMemScopeForExternFunc(func::FuncOp op) {
   for (auto &argType : newArgTypes) {
     // If not base memref and already has memspace then skip
     if (auto memrefType = dyn_cast<BaseMemRefType>(argType)) {
-      if (memrefType.getMemorySpace())
+      if (memrefType.getMemorySpace()) {
         continue;
+      }
       argType = getBaseMemRefTypeWithNewScope(memrefType, gmSpaceAttr);
     }
   }
@@ -365,8 +424,9 @@ LogicalResult inferAndPropagateMemScopeForExternFunc(func::FuncOp op) {
   for (auto &resultType : newReturnTypes) {
     // If not base memref and already has memspace then skip
     if (auto memrefType = dyn_cast<BaseMemRefType>(resultType)) {
-      if (memrefType.getMemorySpace())
+      if (memrefType.getMemorySpace()) {
         continue;
+      }
       resultType = getBaseMemRefTypeWithNewScope(memrefType, gmSpaceAttr);
     }
   }
@@ -376,8 +436,9 @@ LogicalResult inferAndPropagateMemScopeForExternFunc(func::FuncOp op) {
 }
 
 LogicalResult pto::inferAndPropagateMemScopeForFunc(func::FuncOp op) {
-  if (op.isExternal())
+  if (op.isExternal()) {
     return inferAndPropagateMemScopeForExternFunc(op);
+  }
 
   LDBG("Begin infer and propagate memory scope for func" << op.getSymName());
   MemScopeInferAndPropagateHelper helper;
@@ -392,10 +453,11 @@ LogicalResult pto::inferAndPropagateMemScopeForFunc(func::FuncOp op) {
     }
 
     if (op->hasAttr(pto::VectorFunctionAttr::name)) {
-      if (failed(helper.Run(arg, ubSpaceAttr)))
+      if (failed(helper.Run(arg, ubSpaceAttr))) {
         return op->emitOpError()
                << "Failed to propagate UB memory scope for argument # in VF"
                << arg.getArgNumber();
+      }
     } else if (failed(helper.Run(arg, gmSpaceAttr))) {
       return op->emitOpError()
              << "Failed to propagate memory scope for argument #"
@@ -407,9 +469,10 @@ LogicalResult pto::inferAndPropagateMemScopeForFunc(func::FuncOp op) {
         op.getBody().front().getArgumentTypes(), op.getResultTypes());
     op.setFunctionType(newFt);
   }
-  if (op->getNumResults() > 0)
+  if (op->getNumResults() > 0) {
     op.emitWarning()
         << "non-externl function has return value after bufferization!";
+  }
 
   return success();
 }
@@ -446,8 +509,9 @@ LogicalResult pto::inferAndPropagateMemScopeForGpuFunc(gpu::GPUFuncOp op) {
 LogicalResult pto::inferAndPropagateUbufMemScope(memref::AllocOp op) {
   LDBG("Begin infer and propagate memory scope for: " << *op);
   auto memorySpace = op.getType().getMemorySpace();
-  if (memorySpace)
+  if (memorySpace) {
     return success();
+  }
 
   MemScopeInferAndPropagateHelper helper;
   auto ubSpaceAttr =
@@ -473,47 +537,55 @@ void InferPTOMemScopePass::runOnOperation() {
   });
 
   for (auto func : gpuFuncList) {
-    if (failed(inferAndPropagateMemScopeForGpuFunc(func)))
+    if (failed(inferAndPropagateMemScopeForGpuFunc(func))) {
       signalPassFailure();
+    }
   }
 
   // Infer and propagate memory scope for device functions.
   for (auto func : deviceFuncList) {
     // Set the memory scope of values related to `pto::MmadL1Op` to L1 or L0C.
     func->walk([&](mlir::pto::TMatmulOp op) {
-      if (failed(pto::inferAndPropagateMemScopeForMatmulDps(op)))
+      if (failed(pto::inferAndPropagateMemScopeForMatmulDps(op))) {
         signalPassFailure();
+      }
     });
 
     func->walk([&](mlir::pto::TMatmulAccOp op) {
-      if (failed(pto::inferAndPropagateMemScopeForMatmulAccDps(op)))
+      if (failed(pto::inferAndPropagateMemScopeForMatmulAccDps(op))) {
         signalPassFailure();
+      }
     });
 
     func->walk([&](mlir::pto::TMatmulBiasOp op) {
-      if (failed(pto::inferAndPropagateMemScopeForMatmulBiasDps(op)))
+      if (failed(pto::inferAndPropagateMemScopeForMatmulBiasDps(op))) {
         signalPassFailure();
+      }
     });
 
     func->walk([&](mlir::pto::TMovOp op) {
-      if (failed(pto::inferAndPropagateMemScopeForMovDps(op)))
+      if (failed(pto::inferAndPropagateMemScopeForMovDps(op))) {
         signalPassFailure();
+      }
     });
 
     // Set device function arguments' memory scope to GM.
-    if (failed(pto::inferAndPropagateMemScopeForFunc(func)))
+    if (failed(pto::inferAndPropagateMemScopeForFunc(func))) {
       signalPassFailure();
+    }
 
     // Finally, set the remaining memory scope in the device kernel to UB.
     func->walk([&](memref::AllocOp op) {
-      if (failed(pto::inferAndPropagateUbufMemScope(op)))
+      if (failed(pto::inferAndPropagateUbufMemScope(op))) {
         signalPassFailure();
+      }
     });
   }
 
   for (auto func : deviceFuncList) {
-    if (failed(fixDeviceCallSite(func)))
+    if (failed(fixDeviceCallSite(func))) {
       signalPassFailure();
+    }
   }
 }
 

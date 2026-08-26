@@ -6,6 +6,7 @@
 > the access pattern**, defaulting to `continuous` (contiguous); the optional
 > modes are `unpack` (widening unpack) and `brc` (broadcast).
 
+
 ---
 
 ## `pto.vmi.vload`
@@ -142,6 +143,7 @@ declaring the memory access pattern. Default is `"continuous"`.
     block-stride mode and invalid otherwise. `vload` has no mask operand in
     any mode (A5 loads are unpredicated).
 
+
 ---
 
 ## `pto.vmi.vstore`
@@ -237,6 +239,7 @@ declaring the memory access pattern. Default is `"continuous"`.
       : !pto.vmi.vreg<64×f32>, !pto.ptr<f32, ub>, i16, !pto.vmi.mask<64>
   // → block-strided store (block=8), governed by mask
   ```
+
 
 ---
 

@@ -61,11 +61,16 @@ E_v = 32 / sizeof(T) : lanes per VLane     (f32 → 8, f16/bf16 → 16, i8 → 3
 
 Logical vector register. `L` is the logical lane count; `T` is the element type.
 
-| T | bits | E_v (lanes per physical vreg) | Legal L multiples |
+| T | bits | E_v (lanes per physical vreg) | Legal L |
 |---|---|---|---|
-| `f32` / `i32` / `ui32` / `si32` | 32 | 64 | 64 |
-| `f16` / `bf16` / `i16` / `ui16` / `si16` | 16 | 128 | 64 |
-| `i8` / `ui8` / `si8` / `fp8_e4m3` / `fp8_e5m2` | 8 | 256 | 64 |
+| `f32` / `i32` / `ui32` / `si32` | 32 | 64 | `1, 2, 4, 8, 64, 128, 256` |
+| `f16` / `bf16` / `i16` / `ui16` / `si16` | 16 | 128 | `1, 2, 4, 8, 64, 128, 256` |
+| `i8` / `ui8` / `si8` / `fp8_e4m3` / `fp8_e5m2` | 8 | 256 | `1, 2, 4, 8, 64, 128, 256` |
+
+These are the legal lane counts on the formal public VMI/PTODSL surface.
+PTOAS currently accepts additional positive lane counts in internal VMI IR for
+lowering intermediates and compatibility tests; those are not public PTODSL
+type-construction choices.
 
 - **Full vector**: `L · bitwidth(T) == N · 2048` (integer multiple of 256B).
 - **Compact/partial vector**: `L · bitwidth(T) < 2048` — still backed by one
@@ -117,6 +122,13 @@ Every VMI op belongs to one of three lowering categories that determine how
 
 All compute ops accept an optional governing mask operand `[pmode]`. The mask
 is a `!pto.vmi.mask<L>` with the same `L` as the data operand.
+
+**Mask shape and granularity:**
+
+- A mask has the same logical lane count `L` as every governed data value.
+- `pred` is an abstract per-lane mask and carries no layout.
+- Concrete `b8`, `b16`, and `b32` granularities must match the governed
+  element width; layout-assigned masks must match the governed data layout.
 
 **`pmode` values:**
 

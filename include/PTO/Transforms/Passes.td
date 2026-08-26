@@ -192,6 +192,22 @@ def PTORematerializeFixpipeVectorQuant
   let dependentDialects = ["mlir::pto::PTODialect", "mlir::func::FuncDialect"];
 }
 
+def PTOMaterializeImplicitTmp
+    : Pass<"pto-materialize-implicit-tmp", "func::FuncOp"> {
+  let summary = "Materialize implicit tmp tiles for PTO ops before memplan";
+  let description = [{
+    Rewrites PTO ops with optional tmp operands into explicit tmp forms when
+    the backend tmp-aware overload is required. The synthesized tmp is emitted
+    as tile-native `pto.alloc_tile(no addr)` so PlanMemory can assign its local
+    address together with other tile buffers.
+  }];
+  let constructor = "mlir::pto::createPTOMaterializeImplicitTmpPass()";
+  let dependentDialects = [
+    "mlir::pto::PTODialect",
+    "mlir::func::FuncDialect"
+  ];
+}
+
 def PlanMemory : Pass<"pto-plan-memory", "ModuleOp"> {
  let summary = "Plan memory for PTO Ops";
   let constructor = "mlir::pto::createPlanMemoryPass()";
@@ -356,6 +372,28 @@ def PTONormalizeUncoveredTileSections
   ];
 }
 
+def PTOValidatePhysicalSectionBoundaries
+    : Pass<"pto-validate-physical-section-boundaries", "ModuleOp"> {
+  let summary = "Verify SSA isolation at physical section boundaries";
+  let description = [{
+    Verifies that values defined inside a `pto.section.cube` or
+    `pto.section.vector` remain inside that lexical physical section. Values
+    defined outside a section may be captured by it, but values cannot be
+    passed implicitly between sibling sections or from a section to its
+    enclosing function. This validation is run after inferred sections are
+    materialized, so explicit and automatically inferred sections obey the
+    same boundary rules.
+  }];
+
+  let constructor =
+      "mlir::pto::createPTOValidatePhysicalSectionBoundariesPass()";
+
+  let dependentDialects = [
+    "mlir::pto::PTODialect",
+    "mlir::func::FuncDialect"
+  ];
+}
+
 def PTOMaterializeTileOpSections
     : Pass<"pto-materialize-tileop-sections", "ModuleOp"> {
   let summary = "Verify PTODSL tileop helpers and materialize their single compute section";
@@ -511,40 +549,26 @@ def InsertTemplateAttributes
     : Pass<"pto-insert-template-attributes", "ModuleOp"> {
   let summary = "Attach legal PTODSL template candidates to tile operations";
   let description = [{
-    Queries the PTODSL TileLib daemon for legal template candidates and stores
-    the compact candidate list on each tile operation as the `candidates`
-    attribute. Each candidate contains only id, name, loop_depth, postupdate,
-    and tail metadata.
+    Queries the process-wide PTODSL TileLib runtime for legal template
+    candidates and stores the compact candidate list on each tile operation as
+    the `candidates` attribute. Each candidate contains only id, name,
+    loop_depth, postupdate, and tail metadata.
   }];
   let constructor = "mlir::pto::createInsertTemplateAttributesPass()";
   let dependentDialects = [
     "mlir::pto::PTODialect",
     "mlir::func::FuncDialect"
   ];
-  let options = [
-    Option<"pythonExe", "python-exe", "std::string",
-           /*default=*/"\"python3\"",
-           "Python executable for TileLib metadata invocation">,
-    Option<"daemonSocketPath", "daemon-socket-path", "std::string",
-           /*default=*/"\"\"",
-           "Path to the PTODSL TileLib daemon Unix socket">,
-    Option<"tileLibPkgPath", "tile-lib-pkg-path", "std::string",
-           /*default=*/"\"\"",
-           "PYTHONPATH root for PTODSL">,
-    Option<"daemonHelperModule", "daemon-helper-module", "std::string",
-           /*default=*/"\"ptodsl.tilelib.serving.helper\"",
-           "Python module used for daemon metadata RPC calls">
-  ];
 }
 
 def ExpandTileOp : Pass<"pto-expand-tile-op", "ModuleOp"> {
   let summary = "Expand tile ops into calls to TileLib template functions";
   let description = [{
-    Expands tile-level operations (pto.tadd, pto.tsub, etc.) by invoking the
-    selected Python TileLib backend to instantiate template libraries. The
-    generated template functions use tile_buf parameters and contain
-    vector-level implementations (pto.vecscope, pto.vlds, pto.vadd,
-    pto.vsts, etc.).
+    Expands tile-level operations (pto.tadd, pto.tsub, etc.) by asking the
+    process-wide PTODSL TileLib runtime to instantiate template libraries in
+    the current operation's MLIRContext. The generated template functions use
+    tile_buf parameters and contain vector-level implementations (pto.vecscope,
+    pto.vlds, pto.vadd, pto.vsts, etc.).
 
     Each tile op is replaced by a func.call to the generated template function,
     with tile_buf operands passed directly (no type bridging).
@@ -562,29 +586,12 @@ def ExpandTileOp : Pass<"pto-expand-tile-op", "ModuleOp"> {
     "mlir::scf::SCFDialect",
     "mlir::vector::VectorDialect"
   ];
-  let options = [
-    Option<"pythonExe", "python-exe", "std::string",
-           /*default=*/"\"python3\"",
-           "Python executable for TileLib invocation">,
-    Option<"daemonSocketPath", "daemon-socket-path", "std::string",
-           /*default=*/"\"\"",
-           "Path to Unix domain socket for daemon RPC">,
-    Option<"tileLibBackend", "tile-lib-backend", "std::string",
-           /*default=*/"\"ptodsl\"",
-           "TileLib backend: ptodsl">,
-    Option<"tileLibPkgPath", "tile-lib-pkg-path", "std::string",
-           /*default=*/"\"\"",
-           "PYTHONPATH root for the selected TileLib backend">,
-    Option<"daemonHelperModule", "daemon-helper-module", "std::string",
-           /*default=*/"\"ptodsl.tilelib.serving.helper\"",
-           "Python module used for daemon helper RPC calls">
-  ];
 }
 
 def FoldTileBufIntrinsics : Pass<"pto-fold-tile-buf-intrinsics", "mlir::func::FuncOp"> {
   let summary = "Fold structured-view intrinsics after template inlining";
   let description = [{
-    After TileLang DSL template functions are inlined, the IR contains
+    After PTODSL template functions are inlined, the IR contains
     structured-view intrinsics whose operands are now bound to concrete values.
 
     This pass resolves them:
@@ -739,9 +746,13 @@ def PTOValidateIntToPtrUses : Pass<"pto-validate-inttoptr-uses", "func::FuncOp">
 }
 
 def PTOResolveBufferSelect : Pass<"pto-resolve-buffer-select", "ModuleOp"> {
-  let summary = "Resolve multi-buffer slot selections to addressed tile handles";
+  let summary = "Resolve tile views and multi-buffer selections to addressed handles";
   let description = [{
-    Primarily consumes tile-native `pto.multi_tile_get %src[%k]` operations.
+    Consumes tile-native `pto.subview` operations rooted at an addressed
+    `pto.alloc_tile` or a runtime-bound `pto.declare_tile`, and
+    `pto.multi_tile_get %src[%k]` operations. Subviews become zero-copy
+    addressed `pto.alloc_tile` handles after folding their physical offset.
+
     The source `pto.alloc_multi_tile` carries either planner-assigned physical
     slot addresses or a level3 base address. Each selection is replaced by a
     `pto.alloc_tile` carrying the selected address; constant slots select one
@@ -760,25 +771,69 @@ def PTOResolveBufferSelect : Pass<"pto-resolve-buffer-select", "ModuleOp"> {
   ];
 }
 
-def PTOUnrollSIMTFor : Pass<"pto-unroll-simt-for", "func::FuncOp"> {
+def PTOUnrollLoops : Pass<"pto-unroll-loops", "func::FuncOp"> {
   let summary =
-      "Unroll explicitly annotated scf.for loops in SIMT contexts";
+      "Unroll explicitly annotated scf.for loops";
   let description = [{
-    Walks functions with the `pto.simt_entry` attribute or inline
-    `pto.section.simt` regions and fully unrolls `scf.for` loops that carry the
-    `{pto.unroll = "full"}` attribute. Annotated loops outside an inline SIMT
-    section in an ordinary function are left unchanged.
+    Fully or partially unrolls `scf.for` loops that carry an explicit unroll
+    annotation, regardless of whether they are inside a SIMT context:
 
-    Only loops with constant lower bound, upper bound, and positive step are
-    unrolled.  The annotation is opt-in: loops without the attribute are
-    left unchanged regardless of trip count.
+    - `{pto.unroll = "full"}`: fully unrolled via `loopUnrollByFactor` with
+      the trip count as the factor (single-iteration promotion removes the
+      resulting loop shell).  Only loops with a constant trip count are
+      unrolled; other loops keep the loop and drop the hint with a remark.
+    - `{pto.unroll_factor = N}`: unrolled by N via `loopUnrollByFactor`,
+      which supports dynamic upper bounds and generates an epilogue
+      (remainder) loop that threads live-out loop-carried values.  Only
+      loops with a statically known positive step are unrolled; a no-op
+      factor (1), a dynamic step, or a factor above `max-unroll-factor`
+      keeps the loop and drops the hint with a remark.
+
+    Malformed hints are hard errors: an unknown `pto.unroll` value, both
+    attributes on one loop, or an out-of-contract factor (not a signless
+    i32, or non-positive).
+
+    The annotation is opt-in: loops without an attribute are left unchanged
+    regardless of trip count.
 
     Full unrolling enables subsequent canonicalize/sccp/cse to constant-fold
-    induction-variable-dependent conditionals (e.g. `scf.if i < 10`), eliminating
-    divergent branches inside SIMTVF kernels.
+    induction-variable-dependent conditionals (e.g. `scf.if i < 10`),
+    eliminating divergent branches inside SIMTVF kernels.
 
     This pass must run before `createConvertSCFToCFPass` (i.e. before LLVM
-    lowering) so that the unrolled structured control flow can be canonicalized.
+    lowering) so that the unrolled structured control flow can be
+    canonicalized.
+  }];
+  let constructor = "mlir::pto::createPTOUnrollLoopsPass()";
+  let dependentDialects = [
+    "mlir::func::FuncDialect",
+    "mlir::scf::SCFDialect",
+    "mlir::pto::PTODialect",
+    "mlir::arith::ArithDialect"
+  ];
+  let options = [
+    Option<"maxFullUnrollTripCount", "max-full-unroll-trip-count", "int64_t",
+           /*default=*/"1024",
+           "Emit a warning when fully unrolling a loop whose static trip "
+           "count exceeds this threshold.  The loop is still unrolled.">,
+    Option<"maxUnrollFactor", "max-unroll-factor", "int64_t",
+           /*default=*/"1024",
+           "Do not natively unroll by a factor larger than this; the loop "
+           "is kept and the hint is dropped with a remark instead.  "
+           "A negative value disables the cap.">,
+  ];
+}
+
+// Legacy alias for PTOUnrollLoops.  Kept so existing pipelines and tests
+// that reference "pto-unroll-simt-for" keep working; the behavior is
+// identical to "pto-unroll-loops".
+def PTOUnrollSIMTFor : Pass<"pto-unroll-simt-for", "func::FuncOp"> {
+  let summary =
+      "Alias of pto-unroll-loops kept for backward compatibility";
+  let description = [{
+    Behaves exactly like `pto-unroll-loops`.  Historically this pass only
+    unrolled `{pto.unroll = "full"}` loops inside SIMT contexts; the SIMT
+    restriction has been lifted because the annotation is always explicit.
   }];
   let constructor = "mlir::pto::createPTOUnrollSIMTForPass()";
   let dependentDialects = [
@@ -786,6 +841,60 @@ def PTOUnrollSIMTFor : Pass<"pto-unroll-simt-for", "func::FuncOp"> {
     "mlir::scf::SCFDialect",
     "mlir::pto::PTODialect",
     "mlir::arith::ArithDialect"
+  ];
+  let options = [
+    Option<"maxFullUnrollTripCount", "max-full-unroll-trip-count", "int64_t",
+           /*default=*/"1024",
+           "Emit a warning when fully unrolling a loop whose static trip "
+           "count exceeds this threshold.  The loop is still unrolled.">,
+    Option<"maxUnrollFactor", "max-unroll-factor", "int64_t",
+           /*default=*/"1024",
+           "Do not natively unroll by a factor larger than this; the loop "
+           "is kept and the hint is dropped with a remark instead.  "
+           "A negative value disables the cap.">,
+  ];
+}
+
+def PTOConvertSCFToCFWithLoopHints : Pass<"pto-convert-scf-to-cf-with-loop-hints", "func::FuncOp"> {
+  let summary =
+      "Convert SCF to CF, preserving the enable loop hint as an LLVM loop "
+      "annotation";
+  let description = [{
+    Translates `{pto.unroll = "enable"}` attributes on `scf.for` into
+    `#llvm.loop_annotation<unroll = <disable = false>>` attributes so that
+    the `!llvm.loop.unroll.enable` metadata reaches the emitted LLVM IR and
+    the downstream compiler's cost model decides whether and how to unroll
+    (LLVM's ForceEnable semantics).  All other unroll hints are owned by
+    `pto-unroll-loops` and are left untouched.
+
+    An existing `llvm.loop_annotation` attribute on the loop is merged rather
+    than overwritten (a pre-existing unroll entry is replaced with a
+    warning).
+
+    The stock LLVM 19 `convert-scf-to-cf` does not propagate
+    `llvm.loop_annotation` from `scf.for` to the loop latch, so this pass
+    owns the SCF-to-CF conversion for the function: it runs the upstream
+    conversion patterns together with a higher-benefit pattern that lowers
+    annotated `scf.for` loops (mirroring `ForLowering`) and attaches the
+    annotation to the latch `cf.br`.
+
+    Converting the whole function is required for correctness - lowering an
+    annotated loop in isolation would leave several blocks inside whatever
+    enclosing single-block region held it (an outer `scf.for`, an `scf.if`,
+    ...) and fail that op's verifier.
+
+    Consequently this pass **replaces** `createConvertSCFToCFPass` in the
+    pipelines that run it; it must sit at the same position, after every
+    structured-loop transformation, so no later pass can clone a loop and
+    lose its hint.
+  }];
+  let constructor = "mlir::pto::createPTOConvertSCFToCFWithLoopHintsPass()";
+  let dependentDialects = [
+    "mlir::func::FuncDialect",
+    "mlir::scf::SCFDialect",
+    "mlir::arith::ArithDialect",
+    "mlir::cf::ControlFlowDialect",
+    "mlir::LLVM::LLVMDialect"
   ];
 }
 
@@ -997,6 +1106,23 @@ def VMILayoutAssignment : Pass<"vmi-layout-assignment", "ModuleOp"> {
                            "mlir::scf::SCFDialect"];
 }
 
+def VMILayoutRematerializeWeakProducers
+    : Pass<"vmi-layout-rematerialize-weak-producers", "ModuleOp"> {
+  let summary = "Rematerialize weak layout producers before layout assignment";
+  let description = [{
+    Clones pure layout-polymorphic producers at their multiple uses before
+    layout assignment. This keeps independent consumer dataflows from being
+    connected only by a shared rematerializable SSA value. Strong dataflow
+    layout propagation remains the responsibility of vmi-layout-assignment.
+  }];
+  let constructor = "mlir::pto::createVMILayoutRematerializeWeakProducersPass()";
+  let dependentDialects = ["mlir::cf::ControlFlowDialect",
+                           "mlir::func::FuncDialect",
+                           "mlir::pto::PTODialect",
+                           "mlir::memref::MemRefDialect",
+                           "mlir::scf::SCFDialect"];
+}
+
 def VMIMaskGranularityAssignment
     : Pass<"vmi-mask-granularity-assignment", "ModuleOp"> {
   let summary = "Assign concrete VMI mask granularities";
@@ -1155,6 +1281,23 @@ def VMIToVPTO : Pass<"vmi-to-vpto", "ModuleOp"> {
                            "mlir::scf::SCFDialect"];
 }
 
+def PTOExpandSoftLib : Pass<"pto-expand-soft-lib", "ModuleOp"> {
+  let summary = "Expand VPTO operations that lack native target support";
+  let description = [{
+    Materializes matching PTODSL SoftOps implementations for f32 SIMT
+    `pto.sin`/`pto.cos` at the final VPTO emission boundary. The generated
+    helpers are then inlined by PTOInlineLibCall. A5 `pto.vdiv`, including its
+    supported integer forms, remains on the native emitter path. The A2/A3
+    `pto.ub.vdiv` operation is a different operation and is intentionally not
+    handled by this pass. Trigonometric helpers use the PTODSL software
+    approximation authored in `lib/SoftOps`.
+  }];
+  let constructor = "mlir::pto::createPTOExpandSoftLibPass()";
+  let dependentDialects = ["mlir::pto::PTODialect",
+                           "mlir::arith::ArithDialect",
+                           "mlir::func::FuncDialect"];
+}
+
 def PTOValidateVPTOEmissionIR
     : Pass<"pto-validate-vpto-emission-ir", "ModuleOp"> {
   let summary =
@@ -1170,6 +1313,32 @@ def PTOValidateVPTOEmissionIR
                            "mlir::pto::PTODialect",
                            "mlir::memref::MemRefDialect",
                            "mlir::scf::SCFDialect"];
+}
+
+def VPTOScheduler : Pass<"pto-vpto-scheduler", "ModuleOp"> {
+  let summary = "Analyze emission-ready VPTO scheduling regions";
+  let description = [{
+    Builds block-local scheduling regions, typed dependency DAGs, target
+    resource timelines, and register-pressure summaries for operations inside
+    dedicated `pto.vecscope` and `pto.strict_vecscope` regions.
+    The target model supports A5 vector kernel modules only:
+    normalized cube kernel modules are skipped, while modules without an
+    explicit kernel kind remain available for standalone pass testing. The
+    module must declare `pto.target_arch = "a5"` directly or inherit it from
+    an enclosing module; a missing or different target is rejected.
+    `off` is an exact no-op. `analyze` emits a deterministic report without
+    mutating IR.
+  }];
+  let constructor = "mlir::pto::createVPTOSchedulerPass()";
+  let options = [
+    Option<"mode", "mode", "std::string", "\"off\"",
+           "Scheduler mode: off, analyze, or on">
+  ];
+  let dependentDialects = ["mlir::func::FuncDialect",
+                           "mlir::pto::PTODialect",
+                           "mlir::memref::MemRefDialect",
+                           "mlir::scf::SCFDialect",
+                           "mlir::arith::ArithDialect"];
 }
 
 def VPTOExpandWrapperOps
@@ -1193,22 +1362,36 @@ def VPTOSoftPostUpdate
     : Pass<"vpto-soft-postupdate", "ModuleOp"> {
   let summary = "Convert fixed-stride VPTO memory ops to post-update form";
   let description = [{
-    Identifies VPTO load/store operations (vlds, vsts, vsstb) whose effective
-    address advances by a fixed symbolic stride. Loop-carried accesses use
-    scf.for iter_args. Remaining arithmetic runs within each block, including
-    loop bodies, are rewritten only when a conservative structural
-    profitability check predicts address-computation savings. For an accepted
-    sequential run, all but the last operation form an updated_base pointer
-    chain, while the last operation uses the current pointer in normal
-    zero-offset form. Loop-varying integer addresses extended to `index` are
-    consumed only from the canonical i16 address domain, and only when a
-    direct constant recurrence proves that the source cannot wrap. Other
-    integer widths and unproven recurrences are left for a dedicated address
-    normalization pass. Loop-aware liveness removes software accumulator
-    recurrences made obsolete by new pointer chains while retaining
-    accumulators with observable uses.
+    Uses VPTOAddressSemanticsOpInterface and the function-scoped
+    PTOAddressAnalysis to identify eligible VPTO memory operations whose
+    effective address advances by an exactly representable symbolic stride.
+    Loop-carried accesses use scf.for iter_args. Typed i8, i16, i32, and index
+    recurrences are accepted only when their real signed/unsigned cast and
+    no-wrap semantics are proven; unsupported or inexact queries remain in
+    normal form. Remaining arithmetic runs within each block are rewritten
+    only when a conservative structural profitability check predicts address
+    computation savings. For an accepted sequential run, all but the last
+    operation form an updated_base pointer chain, while the last operation
+    uses the current pointer in normal zero-offset form. Loop-aware liveness
+    removes software accumulator recurrences made obsolete by new pointer
+    chains while retaining accumulators with observable uses.
   }];
   let constructor = "mlir::pto::createVPTOSoftPostUpdatePass()";
+  let dependentDialects = ["mlir::func::FuncDialect",
+                           "mlir::pto::PTODialect",
+                           "mlir::arith::ArithDialect",
+                           "mlir::scf::SCFDialect"];
+}
+
+def PTOPrintAddressAnalysis
+    : Pass<"pto-print-address-analysis", "func::FuncOp"> {
+  let summary = "Print cached PTO value-evolution and VPTO address facts";
+  let description = [{
+    Test/debug-only printer for PTOValueEvolutionAnalysis and
+    PTOAddressAnalysis. It owns no analysis logic and is not required by any
+    production pipeline.
+  }];
+  let constructor = "mlir::pto::createPTOPrintAddressAnalysisPass()";
   let dependentDialects = ["mlir::func::FuncDialect",
                            "mlir::pto::PTODialect",
                            "mlir::arith::ArithDialect",
@@ -1285,6 +1468,18 @@ def PTOFusionLoadStoreElision
                            "mlir::scf::SCFDialect"];
 }
 
+def PTOVexpdifFusion : Pass<"pto-vexpdif-fusion", "func::FuncOp"> {
+  let summary = "Fuse VPTO vsub and vexp into vexpdif";
+  let description = [{
+    Performs fusion after TileOp expansion and fusion-local load/store
+    elimination. The pass rewrites an f32 `vsub` followed by an f32 `vexp`
+    with the same mask into `vexpdif`.
+  }];
+  let constructor = "mlir::pto::createPTOVexpdifFusionPass()";
+  let dependentDialects = ["mlir::func::FuncDialect",
+                           "mlir::pto::PTODialect"];
+}
+
 def PTOUnrollAfterLoopFusion
     : Pass<"pto-unroll-after-loop-fusion", "func::FuncOp"> {
   let summary = "Partial-unroll the innermost scf.for inside pto.fusion_region "
@@ -1358,6 +1553,20 @@ def VPTOOptimizeVcvt
     pass can then merge duplicate conversions and remove dead masks.
   }];
   let constructor = "mlir::pto::createVPTOOptimizeVcvtPass()";
+  let dependentDialects = ["mlir::pto::PTODialect"];
+}
+
+def VPTOCombineReductions
+    : Pass<"vpto-combine-reductions", "ModuleOp"> {
+  let summary = "Combine VPTO reduction trees with equivalent masks";
+  let description = [{
+    Reassociates conservative physical reduction trees emitted by VMI-to-VPTO
+    lowering. When every chunk reduction uses an equivalent mask, the pass
+    combines the source chunks first and emits one vcadd/vcmax/vcmin or
+    vcgadd/vcgmax/vcgmin operation. Run this after mask simplification, LICM,
+    and CSE so equivalent predicates have stable VPTO producers.
+  }];
+  let constructor = "mlir::pto::createVPTOCombineReductionsPass()";
   let dependentDialects = ["mlir::pto::PTODialect"];
 }
 

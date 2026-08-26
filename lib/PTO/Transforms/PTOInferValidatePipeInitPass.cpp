@@ -77,8 +77,9 @@ template <typename InitOpT> static Value getLocalAddrOperand(InitOpT op) {
 
 template <typename InitOpT>
 static std::optional<bool> getNoSplitAttr(InitOpT op) {
-  if (auto attr = op.getNosplitAttr())
+  if (auto attr = op.getNosplitAttr()) {
     return attr.getValue();
+  }
   return std::nullopt;
 }
 
@@ -105,19 +106,23 @@ static PipeSplitUsage classifyPipeUsage(Value pipe) {
       continue;
     }
 
-    if (split == 0)
+    if (split == 0) {
       sawNoSplit = true;
-    else
+    } else {
       sawSplit = true;
+    }
 
-    if (sawNoSplit && sawSplit)
+    if (sawNoSplit && sawSplit) {
       return PipeSplitUsage::Mixed;
+    }
   }
 
-  if (sawNoSplit)
+  if (sawNoSplit) {
     return PipeSplitUsage::NoSplitOnly;
-  if (sawSplit)
+  }
+  if (sawSplit) {
     return PipeSplitUsage::SplitOnly;
+  }
   return PipeSplitUsage::Unknown;
 }
 
@@ -141,10 +146,11 @@ static std::string getFuncSymbol(func::FuncOp funcOp) {
 
 static PipePeerKey getGlobalTensorPipeKey(Operation *op, int8_t dirMask) {
   std::string id = "unknown";
-  if (auto idAttr = op->getAttrOfType<IntegerAttr>(kFrontendPipeIdAttrName))
+  if (auto idAttr = op->getAttrOfType<IntegerAttr>(kFrontendPipeIdAttrName)) {
     id = std::to_string(idAttr.getInt());
-  else
+  } else {
     id = std::to_string(reinterpret_cast<uintptr_t>(op));
+  }
   return PipePeerKey{"__pto_globaltensor_pipe", "id_" + id, dirMask};
 }
 
@@ -176,8 +182,9 @@ resolveNoSplitComponent(ArrayRef<PipeInitInfo *> component, OpBuilder &builder) 
           "same logical pipe");
     }
 
-    if (!info->explicitNoSplit)
+    if (!info->explicitNoSplit) {
       continue;
+    }
     if (explicitNoSplit && *explicitNoSplit != *info->explicitNoSplit) {
       return info->op->emitOpError(
           "conflicting explicit 'nosplit' across peer pipe init ops");
@@ -187,8 +194,9 @@ resolveNoSplitComponent(ArrayRef<PipeInitInfo *> component, OpBuilder &builder) 
 
   for (PipeInitInfo *info : component) {
     auto usageNoSplit = getUsageNoSplit(info->usage);
-    if (!usageNoSplit)
+    if (!usageNoSplit) {
       continue;
+    }
     if (inferredNoSplit && *inferredNoSplit != *usageNoSplit) {
       return info->op->emitOpError(
           "conflicting pipe split usage across peer pipe init ops");
@@ -198,8 +206,9 @@ resolveNoSplitComponent(ArrayRef<PipeInitInfo *> component, OpBuilder &builder) 
 
   if (explicitNoSplit && inferredNoSplit && *explicitNoSplit != *inferredNoSplit) {
     for (PipeInitInfo *info : component) {
-      if (!info->explicitNoSplit || *info->explicitNoSplit == *inferredNoSplit)
+      if (!info->explicitNoSplit || *info->explicitNoSplit == *inferredNoSplit) {
         continue;
+      }
       if (*info->explicitNoSplit) {
         return info->op->emitOpError(
             "explicit 'nosplit = true' conflicts with downstream users that "
@@ -216,14 +225,16 @@ resolveNoSplitComponent(ArrayRef<PipeInitInfo *> component, OpBuilder &builder) 
   auto noSplitAttr = builder.getBoolAttr(finalNoSplit);
   for (PipeInitInfo *info : component) {
     if (auto initOp = dyn_cast<InitializeL2LPipeOp>(info->op)) {
-      if (!initOp.getNosplitAttr())
+      if (!initOp.getNosplitAttr()) {
         setNoSplitAttr(initOp, noSplitAttr);
+      }
       continue;
     }
 
     auto initOp = cast<InitializeL2G2LPipeOp>(info->op);
-    if (!initOp.getNosplitAttr())
+    if (!initOp.getNosplitAttr()) {
       setNoSplitAttr(initOp, noSplitAttr);
+    }
   }
 
   return success();
@@ -238,7 +249,7 @@ struct PTOInferValidatePipeInitPass
     llvm::DenseMap<Operation *, SmallVector<Operation *>> adjacency;
     std::map<PipePeerKey, SmallVector<Operation *>> keyedInits;
 
-    auto collectInit = [&](auto initOp) {
+    auto collectInit = [&adjacency, &initInfos, &keyedInits](auto initOp) {
       PipeInitInfo &info = initInfos.emplace_back();
       info.op = initOp.getOperation();
       info.funcOp = initOp->template getParentOfType<func::FuncOp>();
@@ -247,17 +258,21 @@ struct PTOInferValidatePipeInitPass
       info.explicitNoSplit = getNoSplitAttr(initOp);
       adjacency[info.op];
 
-      auto recordAddr = [&](Value addr, int8_t effectiveDirMask) {
-        if (!addr)
+      auto recordAddr = [&info, &keyedInits](Value addr,
+                                              int8_t effectiveDirMask) {
+        if (!addr) {
           return;
+        }
         auto key = getPipePeerKey(addr, info.funcOp);
-        if (!key)
+        if (!key) {
           return;
+        }
         key->dirMask = effectiveDirMask;
         keyedInits[*key].push_back(info.op);
       };
 
-      auto recordGlobalTensor = [&](int8_t effectiveDirMask) {
+      auto recordGlobalTensor = [&info, &keyedInits](
+                                   int8_t effectiveDirMask) {
         keyedInits[getGlobalTensorPipeKey(info.op, effectiveDirMask)].push_back(
             info.op);
       };
@@ -275,8 +290,9 @@ struct PTOInferValidatePipeInitPass
 
       if (info.dirMask == kBidirectionalDirMask) {
         recordAddr(getLocalAddrOperand(initOp), kC2VDirMask);
-        if (Value peerAddr = initOp.getPeerLocalAddr())
+        if (Value peerAddr = initOp.getPeerLocalAddr()) {
           recordAddr(peerAddr, kV2CDirMask);
+        }
         return;
       }
 
@@ -289,11 +305,13 @@ struct PTOInferValidatePipeInitPass
     for (const auto &it : keyedInits) {
       SmallVector<Operation *> uniqueOps;
       for (Operation *op : it.second) {
-        if (std::find(uniqueOps.begin(), uniqueOps.end(), op) == uniqueOps.end())
+        if (std::find(uniqueOps.begin(), uniqueOps.end(), op) == uniqueOps.end()) {
           uniqueOps.push_back(op);
+        }
       }
-      if (uniqueOps.size() < kMinPeerPipeInitCount)
+      if (uniqueOps.size() < kMinPeerPipeInitCount) {
         continue;
+      }
 
       for (size_t i = 0; i < uniqueOps.size(); ++i) {
         for (size_t j = i + 1; j < uniqueOps.size(); ++j) {
@@ -304,14 +322,16 @@ struct PTOInferValidatePipeInitPass
     }
 
     llvm::DenseMap<Operation *, PipeInitInfo *> infoByOp;
-    for (PipeInitInfo &info : initInfos)
+    for (PipeInitInfo &info : initInfos) {
       infoByOp[info.op] = &info;
+    }
 
     OpBuilder builder(moduleOp.getContext());
     llvm::SmallPtrSet<Operation *, kVisitedInitReserveSize> visited;
     for (PipeInitInfo &rootInfo : initInfos) {
-      if (!visited.insert(rootInfo.op).second)
+      if (!visited.insert(rootInfo.op).second) {
         continue;
+      }
 
       SmallVector<Operation *> stack{rootInfo.op};
       SmallVector<PipeInitInfo *> component;
@@ -319,8 +339,9 @@ struct PTOInferValidatePipeInitPass
         Operation *current = stack.pop_back_val();
         component.push_back(infoByOp[current]);
         for (Operation *neighbor : adjacency[current]) {
-          if (visited.insert(neighbor).second)
+          if (visited.insert(neighbor).second) {
             stack.push_back(neighbor);
+          }
         }
       }
 

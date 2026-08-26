@@ -6,6 +6,7 @@
 // INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
 // See LICENSE in the root of the software repository for the full text of the License.
 
+#include "PTO/Support/CodeConstants.h"
 #include "PTO/IR/PTO.h"
 #include "PTO/Transforms/Passes.h"
 
@@ -28,24 +29,28 @@ namespace {
 static LogicalResult flattenFusionRegion(pto::FusionRegionOp fusionRegion) {
   Block &body = fusionRegion.getBody().front();
   auto yieldOp = dyn_cast<pto::YieldOp>(body.getTerminator());
-  if (!yieldOp)
+  if (!yieldOp) {
     return fusionRegion.emitOpError("expects body to terminate with pto.yield");
+  }
 
-  SmallVector<Value, 8> yieldedValues(yieldOp.getValues().begin(),
+  SmallVector<Value, mlir::pto::kValue8> yieldedValues(yieldOp.getValues().begin(),
                                       yieldOp.getValues().end());
 
   Operation *anchor = fusionRegion.getOperation();
-  SmallVector<Operation *, 16> opsToMove;
+  SmallVector<Operation *, mlir::pto::kValue16> opsToMove;
   opsToMove.reserve(body.getOperations().size());
-  for (Operation &op : body.without_terminator())
+  for (Operation &op : body.without_terminator()) {
     opsToMove.push_back(&op);
+  }
 
-  for (Operation *op : opsToMove)
+  for (Operation *op : opsToMove) {
     op->moveBefore(anchor);
+  }
 
   for (auto [result, replacement] :
-       llvm::zip(anchor->getResults(), yieldedValues))
+       llvm::zip(anchor->getResults(), yieldedValues)) {
     result.replaceAllUsesWith(replacement);
+  }
 
   yieldOp.erase();
   anchor->erase();
@@ -60,10 +65,11 @@ struct PTOFlattenFusionRegionPass
 
   void runOnOperation() override {
     func::FuncOp func = getOperation();
-    if (func.isExternal())
+    if (func.isExternal()) {
       return;
+    }
 
-    SmallVector<pto::FusionRegionOp, 8> fusionRegions;
+    SmallVector<pto::FusionRegionOp, mlir::pto::kValue8> fusionRegions;
     func.walk<WalkOrder::PostOrder>([&](pto::FusionRegionOp fusionRegion) {
       fusionRegions.push_back(fusionRegion);
     });

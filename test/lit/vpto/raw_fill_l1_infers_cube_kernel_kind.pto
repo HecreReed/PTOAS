@@ -1,0 +1,32 @@
+// Copyright (c) 2026 Huawei Technologies Co., Ltd.
+// This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+// CANN Open Software License Agreement Version 2.0 (the "License").
+// Please refer to the License for details. You may not use this file except in compliance with the License.
+// THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+// INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+// See LICENSE in the root of the software repository for the full text of the License.
+
+// RUN: ptoas --pto-arch=a5 --pto-backend=vpto --emit-vpto %s -o - | FileCheck %s
+
+// L1 raw fill is an MTE1/Cube operation. Without an explicit kernel kind,
+// section normalization must infer and retain a Cube-only module.
+
+module attributes {pto.target_arch = "a5"} {
+  module attributes {pto.backend = "vpto", pto.target_arch = "a5"} {
+    func.func @raw_fill_l1_infers_cube_kind(
+        %dst: !pto.ptr<ui16, mat>) attributes {pto.entry} {
+      %c0_i64 = arith.constant 0 : i64
+      %c1_i64 = arith.constant 1 : i64
+      %c16_i64 = arith.constant 16 : i64
+      %zero_i32 = arith.constant 0 : i32
+      pto.raw_fill_l1 %dst, %c0_i64, %zero_i32, %c1_i64, %c1_i64,
+        %c0_i64 {fill_word_bits = 16 : i64} : !pto.ptr<ui16, mat>, i64, i32, i64, i64, i64
+      return
+    }
+  }
+}
+
+// CHECK: module attributes {pto.backend = "vpto", pto.kernel_kind = #pto.kernel_kind<cube>
+// CHECK: func.func @raw_fill_l1_infers_cube_kind
+// CHECK: pto.create_cbuf_matrix
+// CHECK-NOT: pto.kernel_kind = #pto.kernel_kind<vector>

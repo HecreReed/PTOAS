@@ -44,8 +44,9 @@ static LogicalResult verifyNormalizedVPTOContainer(ModuleOp module) {
     }
   }
 
-  if (hasChildModules)
+  if (hasChildModules) {
     return success();
+  }
 
   return module.emitError()
          << "expected VPTO input to be a kernel submodule with "
@@ -60,10 +61,12 @@ struct VPTONormalizeContainerPass
     if (isVPTOKernelSubmodule(module)) {
       MLIRContext *context = module.getContext();
       SmallVector<NamedAttribute> outerAttrs;
-      for (NamedAttribute attr : module->getAttrs())
+      for (NamedAttribute attr : module->getAttrs()) {
         if (attr.getName() != SymbolTable::getSymbolAttrName() &&
-            attr.getName() != FunctionKernelKindAttr::name)
+            attr.getName() != FunctionKernelKindAttr::name) {
           outerAttrs.push_back(attr);
+        }
+      }
 
       auto child = ModuleOp::create(module.getLoc());
       child->setAttrs(module->getAttrDictionary());
@@ -74,8 +77,9 @@ struct VPTONormalizeContainerPass
       module.getBodyRegion().front().push_back(child.getOperation());
     }
 
-    if (failed(verifyNormalizedVPTOContainer(module)))
+    if (failed(verifyNormalizedVPTOContainer(module))) {
       signalPassFailure();
+    }
   }
 };
 

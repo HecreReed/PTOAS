@@ -6,6 +6,7 @@
 // INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
 // See LICENSE in the root of the software repository for the full text of the License.
 
+#include "PTO/Support/CodeConstants.h"
 #include "ptobc/canonical_printer.h"
 
 #include <mlir/Dialect/Arith/IR/Arith.h>
@@ -62,7 +63,9 @@ static std::string joinLines(const std::vector<std::string> &lines) {
   std::string out;
   for (size_t i = 0; i < lines.size(); ++i) {
     out += lines[i];
-    if (i + 1 < lines.size()) out.push_back('\n');
+    if (i + 1 < lines.size()) {
+      out.push_back('\n');
+    }
   }
   return out;
 }
@@ -93,7 +96,9 @@ static std::string hexFloatLiteral(mlir::FloatAttr a) {
 static void sortAttributesLexicographically(mlir::ModuleOp module) {
   module.walk([&](mlir::Operation *op) {
     auto attrs = op->getAttrs();
-    if (attrs.size() <= 1) return;
+    if (attrs.size() <= 1) {
+      return;
+    }
 
     NamedAttributeVector sorted(attrs.begin(), attrs.end());
     llvm::sort(sorted, [](const mlir::NamedAttribute &a, const mlir::NamedAttribute &b) {
@@ -130,7 +135,9 @@ static std::string renameSSAInText(const std::string &text,
 
     // Parse SSA identifier after '%'.
     size_t j = i + 1;
-    while (j < text.size() && isSSAIdentChar(text[j])) ++j;
+    while (j < text.size() && isSSAIdentChar(text[j])) {
+      ++j;
+    }
     if (j == i + 1) {
       out.push_back('%');
       continue;
@@ -157,15 +164,25 @@ static void collectSSADefsFromSignature(const std::string &line,
   // Collect `%name:` occurrences within (...) in `func.func` or `^bb` lines.
   // This is a lightweight heuristic but works for standard MLIR assembly.
   size_t lpar = line.find('(');
-  if (lpar == std::string::npos) return;
+  if (lpar == std::string::npos) {
+    return;
+  }
   size_t rpar = line.find(')', lpar + 1);
-  if (rpar == std::string::npos) return;
+  if (rpar == std::string::npos) {
+    return;
+  }
 
   for (size_t i = lpar + 1; i < rpar; ++i) {
-    if (line[i] != '%') continue;
+    if (line[i] != '%') {
+      continue;
+    }
     size_t j = i + 1;
-    while (j < rpar && isSSAIdentChar(line[j])) ++j;
-    if (j == i + 1) continue;
+    while (j < rpar && isSSAIdentChar(line[j])) {
+      ++j;
+    }
+    if (j == i + 1) {
+      continue;
+    }
     // Must be followed by ':' to be an arg/blkarg.
     if (j < rpar && line[j] == ':') {
       out.push_back(line.substr(i + 1, j - (i + 1)));
@@ -179,9 +196,11 @@ static bool parseConstantLine(const std::string &line, std::string &imm, std::st
   // We don't try to parse attributes on constants.
   static const std::regex re(R"(^[ \t]*%[-a-zA-Z$._0-9]+[ \t]*=[ \t]*arith\.constant[ \t]+(.+?)[ \t]*:[ \t]*([^ \t]+)(?:[ \t]+loc\(.+\))?[ \t]*$)");
   std::smatch m;
-  if (!std::regex_match(line, m, re)) return false;
+  if (!std::regex_match(line, m, re)) {
+    return false;
+  }
   imm = m[1].str();
-  ty = m[2].str();
+  ty = m[mlir::pto::kValue2].str();
   return true;
 }
 
@@ -204,18 +223,23 @@ static bool findConstantDefinition(const std::vector<std::string> &lines,
                                    const std::string &name, std::string &imm,
                                    std::string &ty) {
   for (const auto &line : lines) {
-    if (line.find('%' + name) == std::string::npos)
+    if (line.find('%' + name) == std::string::npos) {
       continue;
-    if (line.find("= arith.constant") == std::string::npos)
+    }
+    if (line.find("= arith.constant") == std::string::npos) {
       continue;
+    }
     size_t pos = line.find('%');
-    if (pos == std::string::npos)
+    if (pos == std::string::npos) {
       continue;
+    }
     size_t end = pos + 1;
-    while (end < line.size() && isSSAIdentChar(line[end]))
+    while (end < line.size() && isSSAIdentChar(line[end])) {
       ++end;
-    if (line.substr(pos + 1, end - (pos + 1)) != name)
+    }
+    if (line.substr(pos + 1, end - (pos + 1)) != name) {
       continue;
+    }
     return parseConstantLine(line, imm, ty);
   }
   return false;
@@ -227,14 +251,16 @@ static std::string getCanonicalSSAName(const std::vector<std::string> &lines,
                                        uint64_t &nextNonConst) {
   std::string imm;
   std::string ty;
-  if (!findConstantDefinition(lines, oldName, imm, ty))
+  if (!findConstantDefinition(lines, oldName, imm, ty)) {
     return std::to_string(nextNonConst++);
+  }
 
   std::string base = canonicalConstBaseName(imm, ty);
   int &count = constCounts[base];
   std::string newName = base;
-  if (count > 0)
+  if (count > 0) {
     newName += "_" + std::to_string(count);
+  }
   ++count;
   return newName;
 }
@@ -257,14 +283,22 @@ static std::string canonicalizeSSANames(const std::string &printed) {
     // Op results at start of line.
     // e.g. "  %12 = ..." or "  %c0 = ..." or "%0:2 = ...".
     size_t pos = ln.find('%');
-    if (pos == std::string::npos) continue;
+    if (pos == std::string::npos) {
+      continue;
+    }
     // Require this to be a definition: '%' must appear before '='.
     size_t eq = ln.find('=');
-    if (eq == std::string::npos || pos > eq) continue;
+    if (eq == std::string::npos || pos > eq) {
+      continue;
+    }
 
     size_t j = pos + 1;
-    while (j < ln.size() && isSSAIdentChar(ln[j])) ++j;
-    if (j == pos + 1) continue;
+    while (j < ln.size() && isSSAIdentChar(ln[j])) {
+      ++j;
+    }
+    if (j == pos + 1) {
+      continue;
+    }
     defs.push_back(ln.substr(pos + 1, j - (pos + 1)));
   }
 
@@ -273,8 +307,9 @@ static std::string canonicalizeSSANames(const std::string &printed) {
 
   std::unordered_map<std::string, int> constCounts;
   uint64_t nextNonConst = 0;
-  for (const auto &old : defs)
+  for (const auto &old : defs) {
     ren.emplace(old, getCanonicalSSAName(lines, old, constCounts, nextNonConst));
+  }
 
   return renameSSAInText(printed, ren);
 }
@@ -288,21 +323,33 @@ static void canonicalizeScalarFloatConstants(mlir::ModuleOp module,
 
   module.walk([&](mlir::Operation *op) {
     auto cst = llvm::dyn_cast<mlir::arith::ConstantOp>(op);
-    if (!cst) return;
+    if (!cst) {
+      return;
+    }
 
     auto f = llvm::dyn_cast<mlir::FloatAttr>(cst.getValue());
-    if (!f) return;
+    if (!f) {
+      return;
+    }
 
     // Only canonicalize scalar float constants.
-    if (!llvm::isa<mlir::FloatType>(cst.getType())) return;
+    if (!llvm::isa<mlir::FloatType>(cst.getType())) {
+      return;
+    }
 
     auto it = locMap.find(op);
-    if (it == locMap.end()) return;
+    if (it == locMap.end()) {
+      return;
+    }
 
     unsigned lineNo = it->second.first;
-    if (lineNo == 0) return;
+    if (lineNo == 0) {
+      return;
+    }
     size_t idx = size_t(lineNo - 1);
-    if (idx >= lines.size()) return;
+    if (idx >= lines.size()) {
+      return;
+    }
 
     std::smatch m;
     if (!std::regex_match(lines[idx], m, re)) {
@@ -312,7 +359,7 @@ static void canonicalizeScalarFloatConstants(mlir::ModuleOp module,
     }
 
     std::string lit = hexFloatLiteral(f);
-    lines[idx] = m[1].str() + lit + m[3].str();
+    lines[idx] = m[1].str() + lit + m[mlir::pto::kValue3].str();
   });
 }
 
@@ -324,8 +371,12 @@ std::string printModuleCanonical(mlir::ModuleOp module,
   mlir::OpPrintingFlags flags;
   flags.useLocalScope();
   flags.assumeVerified();
-  if (opt.generic) flags.printGenericOpForm();
-  if (opt.printDebugInfo) flags.enableDebugInfo(true, /*prettyForm=*/false);
+  if (opt.generic) {
+    flags.printGenericOpForm();
+  }
+  if (opt.printDebugInfo) {
+    flags.enableDebugInfo(true, /*prettyForm=*/false);
+  }
 
   mlir::AsmState::LocationMap locMap;
   mlir::AsmState state(module.getOperation(), flags, &locMap);

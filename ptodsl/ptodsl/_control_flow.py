@@ -16,22 +16,29 @@ Public API
 ``vecscope()``            – ``pto.vecscope { … }``
 ``for_(lo, hi, step)``
                           – ``scf.for`` with optional named carry state via ``.carry(...)``
+                          and an optional loop-unroll hint (``unroll=`` / ``unroll_factor=``)
 ``if_(cond)``             – ``scf.if`` via explicit branch handle + automatic named merge
 ``yield_(*vals)``         – ``scf.yield``
 ``static_range(...)``     – trace-time ``range(...)`` escape hatch for AST rewrite
+``range(...)``            – AST-rewrite marker carrying loop-unroll hints for native ``for``
 ``const_expr(value)``     – trace-time ``if`` escape hatch for AST rewrite
 """
 
+import builtins
+import warnings
+
 from ._diagnostics import explicit_mode_required_with_context_error
 from ._runtime_index_ops import coerce_runtime_index
+from ._scalar_adaptation import coerce_runtime_integer_to_i1
 from ._scalar_coercion import coerce_scalar_to_type
 from ._surface_types import const_expr
 from ._tracing.active import current_session, require_active_session
+from ._tracing.control_flow import apply_unroll_hint, normalize_unroll_hint
 from ._surface_values import unwrap_surface_value, wrap_like_surface_value, wrap_surface_value
 from ._types import _StructDescriptor
 
-from ptoas.mlir.dialects import pto as _pto, scf
-from ptoas.mlir.ir import InsertionPoint
+from ptoas.mlir.dialects import arith, pto as _pto, scf
+from ptoas.mlir.ir import IndexType, InsertionPoint, IntegerType
 
 
 # ── vecscope ──────────────────────────────────────────────────────────────────
@@ -95,7 +102,41 @@ def section(kind: str) -> _SectionCM:
 
 def static_range(*args):
     """Return ``range(*args)`` for trace-time unrolling under AST rewrite."""
-    return range(*args)
+    return builtins.range(*args)
+
+
+class _PtoRangeMarker:
+    """Marker for ``for i in pto.range(...)`` loops under AST rewrite.
+
+    The AST rewriter recognizes ``pto.range(...)`` as a native-``for`` loop
+    iterable that may carry a loop-unroll hint and rewrites the whole loop to
+    ``pto.for_(..., unroll=..., unroll_factor=...)``.  The call itself is
+    never evaluated in that flow; reaching this marker at runtime means the
+    enclosing kernel was not AST-rewritten (or the marker was used outside a
+    ``for`` statement).
+    """
+
+    def __init__(self, args, kwargs):
+        self._args = args
+        self._kwargs = kwargs
+
+    def __iter__(self):
+        raise RuntimeError(
+            "pto.range(...) may only be used as the iterable of a 'for' loop "
+            "inside an AST-rewritten kernel; use 'with pto.for_(...)' for "
+            "explicitly authored loops"
+        )
+
+
+def range(*args, **kwargs):
+    """AST-rewrite marker: ``for i in pto.range(start, stop[, step], unroll=...)``.
+
+    Accepts the same positional start/stop/step arguments as the builtin
+    ``range`` plus optional ``unroll=`` / ``unroll_factor=`` hints with the
+    same semantics as ``pto.for_``.  The enclosing loop must be processed by
+    the PTODSL AST rewriter; the marker itself is not a runtime iterable.
+    """
+    return _PtoRangeMarker(args, kwargs)
 
 # ── for_ ──────────────────────────────────────────────────────────────────────
 
@@ -134,10 +175,12 @@ class LoopHandle:
 
 
 class _ForCM:
-    def __init__(self, start, stop, step, iter_args):
+    def __init__(self, start, stop, step, iter_args, unroll=None, unroll_factor=None):
         self._start = start
         self._stop = stop
         self._step = step
+        self._unroll = unroll
+        self._unroll_factor = unroll_factor
         self._iter_arg_templates = tuple(iter_args) if iter_args is not None else ()
         self._iter_args = [unwrap_surface_value(value) for value in self._iter_arg_templates]
         self._for_op = None
@@ -150,6 +193,7 @@ class _ForCM:
             _coerce_index(self._step),
             self._iter_args if self._iter_args else None,
         )
+        apply_unroll_hint(self._for_op, self._unroll, self._unroll_factor)
         self._ip = InsertionPoint(self._for_op.body)
         self._ip.__enter__()
         if not self._iter_args:
@@ -162,7 +206,7 @@ class _ForCM:
         self._ip.__exit__(*exc)
 
 
-def for_(start, stop, *, step):
+def for_(start, stop, *, step, unroll=None, unroll_factor=None):
     """
     ``scf.for`` context manager.
 
@@ -178,8 +222,143 @@ def for_(start, stop, *, step):
             cur = loop.acc
             loop.update(acc=cur)
         out = loop.final("acc")
+
+    An optional loop-unroll hint is forwarded to the compiler::
+
+        with pto.for_(c0, c16, step=c1, unroll="enable") as i:
+            ...
+
+    ``unroll="enable"`` keeps the loop and forwards
+    ``llvm.loop.unroll.enable`` metadata, letting the compiler's cost model
+    decide whether and how to unroll (equivalent to a no-factor
+    ``#pragma unroll``).  ``unroll="full"`` asks PTOAS to unroll the loop
+    completely when the trip count is a compile-time constant (otherwise the
+    hint is dropped with a remark).  ``unroll_factor=N`` asks PTOAS to
+    unroll by ``N`` (an epilogue loop handles the remainder; dynamic upper
+    bounds are supported).  The two arguments are mutually exclusive.
+    Loops without a hint are unchanged.
     """
-    return _ForBuilder(start, stop, step)
+    normalize_unroll_hint(unroll, unroll_factor, context="pto.for_(...)")
+    return _ForBuilder(start, stop, step, unroll=unroll, unroll_factor=unroll_factor)
+
+
+class _WhileStateView:
+    def __init__(self, names, values, templates):
+        self._values = {
+            name: wrap_like_surface_value(template, value)
+            for name, template, value in zip(names, templates, values)
+        }
+
+    def __getattr__(self, name):
+        try:
+            return self._values[name]
+        except KeyError as exc:
+            raise AttributeError(name) from exc
+
+
+class _WhileCM:
+    """Internal builder for one ``scf.while`` with named loop-carried state."""
+
+    def __init__(self, condition, state_items):
+        self._condition = condition
+        self._state_items = tuple(state_items)
+        self._state_names = tuple(name for name, _ in self._state_items)
+        self._templates = tuple(value for _, value in self._state_items)
+        self._inits = [_materialize_carry_init(value) for value in self._templates]
+        self._op = None
+        self._ip = None
+        self._yield_values = None
+        self._after_state = None
+
+    def __enter__(self):
+        result_types = [value.type for value in self._inits]
+        self._op = scf.WhileOp(result_types, self._inits)
+        before = self._op.before.blocks.append(*result_types)
+        with InsertionPoint(before):
+            state = _WhileStateView(self._state_names, before.arguments, self._templates)
+            condition = unwrap_surface_value(self._condition(state))
+            scf.ConditionOp(condition, list(before.arguments))
+        after = self._op.after.blocks.append(*result_types)
+        self._after_state = _WhileStateView(self._state_names, after.arguments, self._templates)
+        self._ip = InsertionPoint(after)
+        self._ip.__enter__()
+        return self
+
+    def __exit__(self, exc_type, exc, tb):
+        try:
+            if exc_type is None:
+                if self._yield_values is None:
+                    self.update(**{name: getattr(self._after_state, name) for name in self._state_names})
+                scf.YieldOp(self._yield_values)
+        finally:
+            self._ip.__exit__(exc_type, exc, tb)
+
+    def __getattr__(self, name):
+        if name in self._state_names:
+            return getattr(self._after_state, name)
+        raise AttributeError(name)
+
+    def update(self, **kwargs):
+        missing = [name for name in self._state_names if name not in kwargs]
+        extra = [name for name in kwargs if name not in self._state_names]
+        if missing or extra:
+            pieces = []
+            if missing:
+                pieces.append(f"missing: {', '.join(missing)}")
+            if extra:
+                pieces.append(f"unexpected: {', '.join(extra)}")
+            raise RuntimeError("while.update(...) must match carry names exactly; " + "; ".join(pieces))
+        if self._yield_values is not None:
+            raise RuntimeError("while.update(...) may only be called once per loop body")
+        self._yield_values = [unwrap_surface_value(kwargs[name]) for name in self._state_names]
+
+    def final(self, name):
+        try:
+            index = self._state_names.index(name)
+        except ValueError as exc:
+            raise RuntimeError(f"unknown while carry state {name!r}") from exc
+        return wrap_like_surface_value(self._templates[index], self._op.results[index])
+
+
+class _WhileBuilder:
+    def __init__(self, condition, state_items):
+        self._condition = condition
+        self._state_items = tuple(state_items)
+
+    def __enter__(self):
+        self._cm = _WhileCM(self._condition, self._state_items)
+        return self._cm.__enter__()
+
+    def __exit__(self, *exc):
+        return self._cm.__exit__(*exc)
+
+    def __getattr__(self, name):
+        # AST-rewritten loops use hygienic state names for hidden control
+        # flags.  They are private by convention, but still valid named
+        # carries and must be visible through the loop handle.
+        cm = self.__dict__.get("_cm")
+        if cm is None:
+            raise AttributeError(name)
+        if name.startswith("_") and name not in getattr(cm, "_state_names", ()):
+            raise AttributeError(name)
+        return getattr(cm, name)
+
+
+def _while(condition, **kwargs):
+    if not callable(condition):
+        raise TypeError("internal while builder expects condition(state)")
+    if not kwargs:
+        raise ValueError("internal while builder requires at least one named carry value")
+    return _WhileBuilder(condition, tuple(kwargs.items()))
+
+
+def while_(condition, **kwargs):
+    warnings.warn(
+        "pto.while_ is a low-level compatibility API; prefer native Python while",
+        DeprecationWarning,
+        stacklevel=2,
+    )
+    return _while(condition, **kwargs)
 
 
 class _CarryLoopStateView:
@@ -195,13 +374,14 @@ class _CarryLoopStateView:
 
 
 class _CarryForCM(_ForCM):
-    def __init__(self, start, stop, step, state_items):
+    def __init__(self, start, stop, step, state_items, unroll=None, unroll_factor=None):
         self._state_items = tuple(state_items)
         self._state_names = tuple(name for name, _ in self._state_items)
         self._state_templates = tuple(value for _, value in self._state_items)
         self._session = None
         self._session_frame = None
-        super().__init__(start, stop, step, self._state_templates)
+        super().__init__(start, stop, step, self._state_templates,
+                         unroll=unroll, unroll_factor=unroll_factor)
         self._yield_values = None
         self._entered = False
 
@@ -213,6 +393,8 @@ class _CarryForCM(_ForCM):
                 self._stop,
                 self._step,
                 self._state_items,
+                unroll=self._unroll,
+                unroll_factor=self._unroll_factor,
             )
             self._for_op = self._session_frame.for_op
             handle = LoopHandle(self._for_op, iter_arg_templates=self._state_templates)
@@ -290,13 +472,16 @@ class _CarryForCM(_ForCM):
 
 
 class _ForBuilder:
-    def __init__(self, start, stop, step):
+    def __init__(self, start, stop, step, unroll=None, unroll_factor=None):
         self._start = start
         self._stop = stop
         self._step = step
+        self._unroll = unroll
+        self._unroll_factor = unroll_factor
 
     def __enter__(self):
-        self._cm = _ForCM(self._start, self._stop, self._step, None)
+        self._cm = _ForCM(self._start, self._stop, self._step, None,
+                          unroll=self._unroll, unroll_factor=self._unroll_factor)
         return self._cm.__enter__()
 
     def __exit__(self, *exc):
@@ -313,12 +498,26 @@ class _ForBuilder:
                     "pto.for_(...).carry(...) does not accept pto.struct_type(...) descriptors; "
                     "declare the struct outside the loop and mutate it in place inside the loop body"
                 )
-        return _CarryForCM(self._start, self._stop, self._step, tuple(kwargs.items()))
+        return _CarryForCM(self._start, self._stop, self._step, tuple(kwargs.items()),
+                           unroll=self._unroll, unroll_factor=self._unroll_factor)
 
 
 def _coerce_index(value):
     raw_value = unwrap_surface_value(value)
     return coerce_runtime_index(raw_value, context="pto.for_(...) loop bound")
+
+
+def _materialize_carry_init(value):
+    raw_value = unwrap_surface_value(value)
+    if isinstance(raw_value, bool):
+        raise TypeError("while loop-carried values do not accept Python bool literals")
+    if isinstance(raw_value, int):
+        from ptoas.mlir.ir import IntegerType
+
+        return arith.ConstantOp(IntegerType.get_signless(32), raw_value).result
+    if not hasattr(raw_value, "type"):
+        raise TypeError("while loop-carried values must be typed SSA values")
+    return raw_value
 
 
 # ── if_ ───────────────────────────────────────────────────────────────────────
@@ -390,6 +589,17 @@ class BranchHandle:
     def assign(self, **kwargs):
         self._owner._assign_branch_values(kwargs)
 
+    def get(self, name: str):
+        """Return a merged value by name, including generated names.
+
+        The AST rewriter uses generated names such as ``__pto_section_0_x``
+        for lexical section bindings.  Keep those names out of the attribute
+        namespace, but provide an explicit lookup path for the rewriter.
+        """
+        if not isinstance(name, str):
+            raise TypeError("br.get(...) expects a string name")
+        return self._owner._get_merged_value(name)
+
     def __getattr__(self, name):
         if name.startswith("_"):
             raise AttributeError(name)
@@ -412,6 +622,11 @@ class _IfCM:
 
     def __enter__(self):
         self._cond_value = unwrap_surface_value(self._cond)
+        if not _is_i1_type(self._cond_value.type) and _is_integer_like_type(self._cond_value.type):
+            self._cond_value = coerce_runtime_integer_to_i1(
+                self._cond_value,
+                context="pto.if_(...) condition",
+            )
         self._tmp_if = scf.IfOp(self._cond_value, hasElse=True)
         self._parent_block = _find_parent_block(self._tmp_if)
         self._handle = BranchHandle(self)
@@ -544,6 +759,8 @@ class _IfCM:
                 name,
                 then_value,
                 else_value,
+                then_block=self._tmp_if.then_block,
+                else_block=self._tmp_if.else_block,
             )
             if then_value.type != else_value.type:
                 raise RuntimeError(
@@ -638,11 +855,39 @@ def _is_branch_assign_literal(value) -> bool:
     return isinstance(value, (int, float)) and not isinstance(value, bool)
 
 
-def _reconcile_branch_assignment_values(name, then_value, else_value):
+def _is_i1_type(type_obj) -> bool:
+    return IntegerType.isinstance(type_obj) and IntegerType(type_obj).width == 1
+
+
+def _is_integer_like_type(type_obj) -> bool:
+    return IndexType.isinstance(type_obj) or IntegerType.isinstance(type_obj)
+
+
+def _coerce_integer_to_i1_at(value, *, block, context):
+    with InsertionPoint(block):
+        return coerce_runtime_integer_to_i1(value, context=context)
+
+
+def _reconcile_branch_assignment_values(name, then_value, else_value, *, then_block=None, else_block=None):
     then_is_typed = hasattr(then_value, "type")
     else_is_typed = hasattr(else_value, "type")
 
     if then_is_typed and else_is_typed:
+        then_is_i1 = _is_i1_type(then_value.type)
+        else_is_i1 = _is_i1_type(else_value.type)
+        if then_is_i1 != else_is_i1:
+            if then_is_i1 and _is_integer_like_type(else_value.type):
+                else_value = _coerce_integer_to_i1_at(
+                    else_value,
+                    block=else_block,
+                    context=f"br.assign(...) else branch value for '{name}'",
+                )
+            elif else_is_i1 and _is_integer_like_type(then_value.type):
+                then_value = _coerce_integer_to_i1_at(
+                    then_value,
+                    block=then_block,
+                    context=f"br.assign(...) then branch value for '{name}'",
+                )
         return then_value, else_value
     if then_is_typed:
         return then_value, coerce_scalar_to_type(
@@ -671,6 +916,6 @@ def yield_(*vals):
 
 
 __all__ = [
-    "section", "vecscope", "static_range", "const_expr", "LoopHandle", "BranchHandle",
-    "for_", "if_", "yield_",
+    "section", "vecscope", "static_range", "range", "const_expr", "LoopHandle", "BranchHandle",
+    "for_", "while_", "_while", "if_", "yield_",
 ]

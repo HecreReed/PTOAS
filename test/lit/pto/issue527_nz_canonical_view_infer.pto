@@ -20,6 +20,7 @@
 // RUN: not ptoas --pto-arch=a5 %t/invalid_d4_partition.pto 2>&1 | FileCheck %s --check-prefix=BAD-D4
 // RUN: not ptoas --pto-arch=a5 %t/dynamic_inner_partition.pto 2>&1 | FileCheck %s --check-prefix=DYNAMIC-INNER
 // RUN: not ptoas --pto-arch=a5 %t/invalid_memref_subview.pto 2>&1 | FileCheck %s --check-prefix=BAD-MEMREF
+// RUN: not ptoas --pto-arch=a5 %t/invalid_memref_subview_step.pto 2>&1 | FileCheck %s --check-prefix=BAD-MEMREF-STEP
 // RUN: not ptoas --pto-arch=a5 %t/partition_layout_mismatch.pto 2>&1 | FileCheck %s --check-prefix=PARTITION-MISMATCH
 // RUN: not ptoas --pto-arch=a5 %t/subview_layout_mismatch.pto 2>&1 | FileCheck %s --check-prefix=SUBVIEW-MISMATCH
 // RUN: ptoas --pto-arch=a5 --emit-pto-ir --mlir-print-ir-after=pto-infer-layout %t/explicit_false_inferred_attr.pto -o /dev/null 2>&1 | FileCheck %s --check-prefix=FALSE-INFERRED
@@ -52,6 +53,9 @@
 // EMITC: pto::Shape<1, 2, 8, 16, 8>
 // EMITC: pto::Stride<16384, 2048, 128, 8, 1>
 // EMITC: GlobalTensor<float, pto::Shape<1, 2, 8, 16, 8>, pto::Stride<16384, 2048, 128, 8, 1>, pto::Layout::NZ>
+// EMITC-LABEL: AICORE void dynamic_nested_partition_emitc(
+// EMITC: GetStride
+// EMITC: PTOAS__GLOBAL_TENSOR_DATA
 
 // BAD-SHAPE: user-specified layout=nz is incompatible with shape/stride: expected shape[3]==16 (got 8)
 // BAD-RANK: user-specified layout=nz requires a rank-5 view, got rank 4
@@ -61,6 +65,7 @@
 // BAD-D4: NZ view cannot be partitioned inside a fractal: d4 must keep offset=0 and size=8 (got offset=1, size=7)
 // DYNAMIC-INNER: NZ partition must prove that d3 remains complete at compile time
 // BAD-MEMREF: NZ view cannot be partitioned inside a fractal: d4 must keep offset=0 and size=8 (got offset=1, size=7)
+// BAD-MEMREF-STEP: NZ subview requires unit steps in every dimension
 // PARTITION-MISMATCH: partition layout=nd does not match source layout=nz
 // SUBVIEW-MISMATCH: subview layout=nd does not match source layout=nz
 // FALSE-INFERRED: memref.subview {{.*}} {layout = #pto.layout<nz>}
@@ -372,6 +377,38 @@ module {
       outs(%tile : !pto.tile_buf<loc=vec, dtype=f32, rows=128, cols=16, v_row=128, v_col=16, blayout=col_major, slayout=row_major, fractal=512, pad=0>)
     return
   }
+
+  func.func @dynamic_nested_partition_emitc(
+      %ptr: !pto.ptr<f32>, %d1: index, %d2: index,
+      %stride0: index, %stride1: index,
+      %outerOffset1: index, %outerOffset2: index,
+      %outerSize1: index, %outerSize2: index,
+      %innerOffset1: index, %innerOffset2: index,
+      %innerSize1: index, %innerSize2: index) {
+    %c0 = arith.constant 0 : index
+    %c1 = arith.constant 1 : index
+    %c8 = arith.constant 8 : index
+    %c16 = arith.constant 16 : index
+    %c128 = arith.constant 128 : index
+    %root = pto.make_tensor_view %ptr,
+      shape = [%c1, %d1, %d2, %c16, %c8],
+      strides = [%stride0, %stride1, %c128, %c8, %c1]
+      {layout = #pto.layout<nz>}
+      : !pto.tensor_view<1x?x?x16x8xf32>
+    %outer = pto.partition_view %root,
+      offsets = [%c0, %outerOffset1, %outerOffset2, %c0, %c0],
+      sizes = [%c1, %outerSize1, %outerSize2, %c16, %c8]
+      : !pto.tensor_view<1x?x?x16x8xf32>
+        -> !pto.partition_tensor_view<1x?x?x16x8xf32>
+    %nested = pto.partition_view %outer,
+      offsets = [%c0, %innerOffset1, %innerOffset2, %c0, %c0],
+      sizes = [%c1, %innerSize1, %innerSize2, %c16, %c8]
+      : !pto.partition_tensor_view<1x?x?x16x8xf32>
+        -> !pto.partition_tensor_view<1x?x?x16x8xf32>
+    %tile = pto.alloc_tile : !pto.tile_buf<loc=vec, dtype=f32, rows=16, cols=8, v_row=16, v_col=8, blayout=col_major, slayout=row_major, fractal=512, pad=0>
+    pto.tstore ins(%tile : !pto.tile_buf<loc=vec, dtype=f32, rows=16, cols=8, v_row=16, v_col=8, blayout=col_major, slayout=row_major, fractal=512, pad=0>) outs(%nested : !pto.partition_tensor_view<1x?x?x16x8xf32>)
+    return
+  }
 }
 
 //--- nd_fallback.pto
@@ -560,6 +597,34 @@ module {
     return %bad : memref<1x8x8x16x7xf32,
                          strided<[8192, 1024, 128, 8, 1], offset: 1>,
                          #pto.address_space<gm>>
+  }
+}
+
+//--- invalid_memref_subview_step.pto
+module {
+  func.func @invalid_memref_subview_step(
+      %base: memref<?xf32, #pto.address_space<gm>>)
+      -> memref<1x8x8x16x4xf32,
+                strided<[8192, 1024, 256, 8, 1], offset: 0>,
+                #pto.address_space<gm>> {
+    %root = memref.reinterpret_cast %base to
+      offset: [0],
+      sizes: [1, 8, 8, 16, 8],
+      strides: [8192, 1024, 128, 8, 1]
+      {layout = #pto.layout<nz>}
+      : memref<?xf32, #pto.address_space<gm>>
+        to memref<1x8x8x16x8xf32,
+                  strided<[8192, 1024, 128, 8, 1]>,
+                  #pto.address_space<gm>>
+    %bad = memref.subview %root[0, 0, 0, 0, 0]
+      [1, 8, 8, 16, 4] [1, 1, 2, 1, 1]
+      : memref<1x8x8x16x8xf32,
+               strided<[8192, 1024, 128, 8, 1]>, #pto.address_space<gm>>
+        to memref<1x8x8x16x4xf32,
+                  strided<[8192, 1024, 256, 8, 1]>, #pto.address_space<gm>>
+    return %bad : memref<1x8x8x16x4xf32,
+                          strided<[8192, 1024, 256, 8, 1]>,
+                          #pto.address_space<gm>>
   }
 }
 

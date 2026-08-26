@@ -33,13 +33,18 @@ permissions:
   contents: read
 
 concurrency:
-  group: build-wheel-macos-${{ github.event.pull_request.number || github.ref }}
+  # Linux and macOS publish to the same rolling release. The schedules are
+  # offset by 30 minutes; this non-canceling group prevents asset upload races.
+  # GitHub keeps at most one pending run in a group, so a run that spans the
+  # next daily schedule may replace an older pending run by design. Manual
+  # workflow_dispatch runs are dry-runs and do not publish the nightly release.
+  group: ${{ github.event_name == 'schedule' && 'nightly-wheel-publish' || format('build-wheel-macos-{0}', github.event.pull_request.number || github.ref) }}
   cancel-in-progress: ${{ github.event_name == 'push' || github.event_name == 'pull_request' }}
 
 env:
   LLVM_REPO: https://github.com/vpto-dev/llvm-project.git
-  LLVM_REF: feature-vpto-llvm21
-  LLVM_CACHE_FLAVOR: llvm21-vpto-wheel-static-pic-utils-v3
+  LLVM_REF: feature-vpto
+  LLVM_CACHE_FLAVOR: llvm19-vpto-wheel-static-pic-utils-v3
 
 jobs:
   build_wheel:
@@ -60,6 +65,8 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Select runner metadata
         id: runner-meta
@@ -87,7 +94,7 @@ jobs:
         run: |
           # LLVM/MLIR Python bindings are not yet compatible with pybind11 3.x
           # (see pybind11 static_assert on def_property + keep_alive).
-          pip install --no-cache-dir numpy 'pybind11<3' nanobind 'scikit-build-core>=0.12.2,<2' delocate
+          pip install --no-cache-dir numpy 'pybind11<3' 'scikit-build-core>=0.12.2,<2' delocate
 
       - name: Resolve PTOAS distribution version
         run: |
@@ -203,7 +210,6 @@ jobs:
             -DPython3_EXECUTABLE=$(which python) \
             -DPython_EXECUTABLE=$(which python) \
             -Dpybind11_DIR="$(python -m pybind11 --cmakedir)" \
-            -Dnanobind_DIR="$(python -m nanobind --cmake_dir)" \
             -DCMAKE_BUILD_TYPE=Release \
             -DLLVM_TARGETS_TO_BUILD="host" \
             -DLLVM_INSTALL_UTILS=ON \
@@ -229,6 +235,10 @@ jobs:
 
       - name: Build PTOAS
         run: |
+          # Keep Git usable in the build environment even when checkout ran
+          # with a different HOME or outside the job container.
+          git config --global --add safe.directory "${PTO_SOURCE_DIR}"
+          git -C "${PTO_SOURCE_DIR}" rev-parse --verify 'HEAD^{commit}' >/dev/null
           if [ "${PTOAS_PYTHON_PACKAGE_NAME}" = "ptoas-vmi" ]; then
             PTOAS_WHEEL_SOURCE_DIR="${PTO_SOURCE_DIR}/.work/ptoas-vmi-source"
             python packaging/ptoas-vmi/prepare_source.py \
@@ -384,6 +394,7 @@ jobs:
           test -f "$TEST_DIR/extracted/ptoas/mlir/ir.py"
           test -f "$TEST_DIR/extracted/ptodsl/__init__.py"
           test -d "$TEST_DIR/extracted/ptoas/_runtime/share/ptoas/TileOps"
+          test -d "$TEST_DIR/extracted/ptoas/_runtime/share/ptoas/SoftOps"
           test "$(cat "$TEST_DIR/extracted/.ptoas-python-version")" = "3.11"
           compgen -G "$TEST_DIR/extracted/ptoas/_core*.so" >/dev/null
           compgen -G "$TEST_DIR/extracted/ptoas/mlir/_mlir_libs/libPTOASCompiler*" >/dev/null
@@ -474,6 +485,34 @@ jobs:
           mv "release-artifacts/ptoas-bin-macos-aarch64/ptoas-bin-macos-aarch64.tar.gz" \
             "release-artifacts/ptoas-bin-macos-aarch64.tar.gz"
 
+      - name: Create nightly build manifest
+        if: github.event_name == 'schedule'
+        env:
+          MANIFEST_PATH: release-artifacts/nightly-manifest-macos.json
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json
+          import os
+          from datetime import datetime, timezone
+          from pathlib import Path
+
+          root = Path("release-artifacts")
+          assets = sorted(path.name for path in root.iterdir() if path.is_file())
+          manifest = {
+              "platform": "macos",
+              "source_commit": os.environ["GITHUB_SHA"],
+              "workflow": os.environ["GITHUB_WORKFLOW"],
+              "run_id": os.environ["GITHUB_RUN_ID"],
+              "run_url": f"{os.environ['GITHUB_SERVER_URL']}/{os.environ['GITHUB_REPOSITORY']}/actions/runs/{os.environ['GITHUB_RUN_ID']}",
+              "generated_at_utc": datetime.now(timezone.utc).isoformat(),
+              "assets": assets,
+          }
+          Path(os.environ["MANIFEST_PATH"]).write_text(
+              json.dumps(manifest, indent=2) + "\n", encoding="utf-8"
+          )
+          PY
+
       - name: Upload assets to GitHub Release
         uses: softprops/action-gh-release@v2
         with:
@@ -487,3 +526,16 @@ jobs:
           files: |
             release-artifacts/*.whl
             release-artifacts/*.tar.gz
+
+      - name: Upload nightly build manifest
+        if: github.event_name == 'schedule'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ env.RELEASE_TAG }}
+          name: ${{ env.RELEASE_NAME }}
+          target_commitish: ${{ github.sha }}
+          prerelease: ${{ env.RELEASE_PRERELEASE }}
+          make_latest: ${{ env.RELEASE_MAKE_LATEST }}
+          body: ${{ env.RELEASE_BODY }}
+          overwrite_files: true
+          files: release-artifacts/nightly-manifest-macos.json

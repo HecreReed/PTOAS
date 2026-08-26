@@ -34,9 +34,9 @@ module attributes {pto.target_arch = "a5"} {
       pto.copy_ubuf_to_cbuf %ub0, %l1_rt, %c1_i64, %c1_i64, %c16_i64, %c0_i64, %c0_i64
         : !pto.ptr<i16, ub>, !pto.ptr<i16, l1>, i64, i64, i64, i64, i64
 
-      pto.sync.set <PIPE_MTE3>, 0
+      pto.set_intra_block <PIPE_MTE3>, 0
 
-      pto.sync.wait <PIPE_MTE3>, 1
+      pto.wait_intra_block <PIPE_MTE3>, 1
 
       %subblock = pto.get_subblock_idx
       %is_subblock0 = arith.cmpi eq, %subblock, %c0_i64 : i64
@@ -52,8 +52,8 @@ module attributes {pto.target_arch = "a5"} {
     pto.section.cube {
       // Follow the working PTO-ISA tmov_ub2l1 handoff:
       // vec produces L1, cube waits on MTE1 before reading cbuf.
-      pto.sync.wait <PIPE_MTE1>, 0
-      pto.sync.wait <PIPE_MTE1>, 16
+      pto.wait_intra_block <PIPE_MTE1>, 0
+      pto.wait_intra_block <PIPE_MTE1>, 16
 
       pto.copy_cbuf_to_ubuf %l1_rt, %ub1, %c0_i64, %c1_i64, %c16_i64, %c0_i64, %c0_i64
         : !pto.ptr<i16, l1>, !pto.ptr<i16, ub>, i64, i64, i64, i64, i64
@@ -61,8 +61,8 @@ module attributes {pto.target_arch = "a5"} {
         : !pto.ptr<i16, l1>, !pto.ptr<i16, ub>, i64, i64, i64, i64, i64
 
       // cube produces UB, vec waits on MTE3 for the return handoff.
-      pto.sync.set <PIPE_FIX>, 1
-      pto.sync.set <PIPE_FIX>, 17
+      pto.set_intra_block <PIPE_FIX>, 1
+      pto.set_intra_block <PIPE_FIX>, 17
     }
     return
   }

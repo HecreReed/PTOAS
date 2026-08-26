@@ -41,26 +41,32 @@ static bool isColMajorNoneBox(pto::TileBufType type) {
 }
 
 static bool isA5RiskyVecVecColMajorTMov(pto::TMovOp op) {
+  if (pto::classifyTMovForm(op.getFp()) == pto::TMovForm::XToZz)
+    return false;
   auto srcTb = dyn_cast<pto::TileBufType>(op.getSrc().getType());
   auto dstTb = dyn_cast<pto::TileBufType>(op.getDst().getType());
-  if (!srcTb || !dstTb)
+  if (!srcTb || !dstTb) {
     return false;
-  if (!isVecTileType(srcTb) || !isVecTileType(dstTb))
+  }
+  if (!isVecTileType(srcTb) || !isVecTileType(dstTb)) {
     return false;
+  }
   return isColMajorNoneBox(srcTb) && isColMajorNoneBox(dstTb);
 }
 
 static std::optional<pto::AddressSpace> getAddressSpaceFromValueType(Type type) {
   if (auto tb = dyn_cast<pto::TileBufType>(type)) {
     if (auto as =
-            dyn_cast_or_null<pto::AddressSpaceAttr>(tb.getMemorySpace()))
+            dyn_cast_or_null<pto::AddressSpaceAttr>(tb.getMemorySpace())) {
       return as.getAddressSpace();
+    }
     return std::nullopt;
   }
   if (auto mr = dyn_cast<MemRefType>(type)) {
     if (auto ms = mr.getMemorySpace()) {
-      if (auto as = dyn_cast<pto::AddressSpaceAttr>(ms))
+      if (auto as = dyn_cast<pto::AddressSpaceAttr>(ms)) {
         return as.getAddressSpace();
+      }
     }
   }
   return std::nullopt;
@@ -78,8 +84,9 @@ static bool hasInterveningUsesOfDst(Operation *start, Operation *end,
   for (Operation *cursor = start->getNextNode(); cursor && cursor != end;
        cursor = cursor->getNextNode()) {
     for (Value operand : cursor->getOperands()) {
-      if (operand == dst)
+      if (operand == dst) {
         return true;
+      }
     }
   }
   return false;
@@ -89,10 +96,12 @@ static pto::TMovOp findMatchingScaleTileTMov(pto::TGetScaleAddrOp op) {
   Value dst = op.getDst();
   for (Operation *cursor = op->getPrevNode(); cursor; cursor = cursor->getPrevNode()) {
     auto mov = dyn_cast<pto::TMovOp>(cursor);
-    if (!mov || mov.getDst() != dst || !isA5ScaleTileTMov(mov))
+    if (!mov || mov.getDst() != dst || !isA5ScaleTileTMov(mov)) {
       continue;
-    if (hasInterveningUsesOfDst(mov, op, dst))
+    }
+    if (hasInterveningUsesOfDst(mov, op, dst)) {
       return {};
+    }
     return mov;
   }
   return {};
@@ -128,11 +137,13 @@ static pto::TileBufConfigAttr buildRowMajorConfig(MLIRContext *ctx,
 static FailureOr<pto::TileBufType>
 buildRowMajorReinterpretType(MLIRContext *ctx, pto::TileBufType srcType) {
   ArrayRef<int64_t> shape = srcType.getShape();
-  if (shape.size() != kTileRank2D)
+  if (shape.size() != kTileRank2D) {
     return failure();
+  }
   if (shape[kFirstTileDim] == ShapedType::kDynamic ||
-      shape[kSecondTileDim] == ShapedType::kDynamic)
+      shape[kSecondTileDim] == ShapedType::kDynamic) {
     return failure();
+  }
 
   SmallVector<int64_t, kTileRank2D> swappedShape{shape[kSecondTileDim],
                                                  shape[kFirstTileDim]};
@@ -149,8 +160,9 @@ buildRowMajorReinterpretType(MLIRContext *ctx, pto::TileBufType srcType) {
   }
 
   auto cfg = srcType.getConfigAttr();
-  if (!cfg)
+  if (!cfg) {
     cfg = pto::TileBufConfigAttr::getDefault(ctx);
+  }
   auto newCfg = buildRowMajorConfig(ctx, cfg);
 
   return pto::TileBufType::get(ctx, swappedShape, srcType.getElementType(),
@@ -160,8 +172,9 @@ buildRowMajorReinterpretType(MLIRContext *ctx, pto::TileBufType srcType) {
 static void setSwappedDynamicValidShapeIfNeeded(
     IRRewriter &rewriter, Location loc, Value sourceTile, Value reshapedTile,
     pto::TileBufType reshapedType) {
-  if (!reshapedType.hasDynamicValid())
+  if (!reshapedType.hasDynamicValid()) {
     return;
+  }
 
   auto validShape = rewriter.create<pto::GetValidShapeOp>(loc, sourceTile);
   rewriter.create<pto::SetValidShapeOp>(
@@ -172,22 +185,25 @@ struct PTOA5NormalizeTMovPass
     : public mlir::pto::impl::PTOA5NormalizeTMovBase<PTOA5NormalizeTMovPass> {
   void runOnOperation() override {
     func::FuncOp func = getOperation();
-    if (!isTargetArchA5(func.getOperation()))
+    if (!isTargetArchA5(func.getOperation())) {
       return;
+    }
 
     SmallVector<pto::TGetScaleAddrOp, kRiskyOpReserveSize> scaleAddrOps;
     func.walk([&](pto::TGetScaleAddrOp op) { scaleAddrOps.push_back(op); });
     for (pto::TGetScaleAddrOp op : scaleAddrOps) {
       auto matchingTMov = findMatchingScaleTileTMov(op);
-      if (!matchingTMov)
+      if (!matchingTMov) {
         continue;
+      }
       op->moveBefore(matchingTMov);
     }
 
     SmallVector<pto::TMovOp, kRiskyOpReserveSize> riskyOps;
     func.walk([&](pto::TMovOp op) {
-      if (isA5RiskyVecVecColMajorTMov(op))
+      if (isA5RiskyVecVecColMajorTMov(op)) {
         riskyOps.push_back(op);
+      }
     });
 
     IRRewriter rewriter(func.getContext());
@@ -238,16 +254,18 @@ struct PTOA5NormalizeTMovPass
 
     bool hasResidualRisk = false;
     func.walk([&](pto::TMovOp op) {
-      if (!isA5RiskyVecVecColMajorTMov(op))
+      if (!isA5RiskyVecVecColMajorTMov(op)) {
         return WalkResult::advance();
+      }
       op.emitOpError(
           "A5 vec->vec TMOV on col_major/none_box tile is unsupported; "
           "expected normalization to row_major via pto.treshape");
       hasResidualRisk = true;
       return WalkResult::interrupt();
     });
-    if (hasResidualRisk)
+    if (hasResidualRisk) {
       signalPassFailure();
+    }
   }
 };
 

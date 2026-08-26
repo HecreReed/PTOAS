@@ -137,8 +137,8 @@ mode families:
 - `dist_mode`: the regular logical memory surface. This covers the default
   contiguous case plus other access patterns selected by `dist_mode`.
 - `group`: grouped row-strided load/store.
-- `block_stride`: block-strided load/store using paired
-  `block_stride` / `repeat_stride` operands.
+- `block_stride`: block-strided load/store. The VMI contract exposes only the
+  logical block stride; lowering fixes the physical repeat stride to zero.
 
 Pick exactly one family per call. Do not mix `dist_mode`, `group`, and
 `block_stride` parameters in the same `vload` / `vstore`.
@@ -149,7 +149,7 @@ Pick exactly one family per call. Do not mix `dist_mode`, `group`, and
 ### `pto.vmi.vload(source, offset, *, size, dist_mode="dintlv") -> (VRegType, VRegType)`
 ### `pto.vmi.vload(source, offset, *, size, group, stride) -> VRegType`
 ### `pto.vmi.vload(source, offset, *, size, group, stride, dist_mode="brc") -> VRegType`
-### `pto.vmi.vload(source, offset, *, size, block_stride, repeat_stride) -> VRegType`
+### `pto.vmi.vload(source, offset, *, size, block_stride) -> VRegType`
 
 **Description**: Loads a logical VMI vector from a UB pointer. The element
 type is derived from the source pointer; `size` determines the logical lane
@@ -216,7 +216,6 @@ Use this family for block-strided accesses.
 | Parameter | Type | Description |
 |-----------|------|-------------|
 | `block_stride` | `int` | 16-bit block stride operand |
-| `repeat_stride` | `int` | 16-bit repeat stride operand |
 
 **Returns**:
 
@@ -290,7 +289,6 @@ blocks = pto.vmi.vload(
     offset,
     size=64,
     block_stride=pto.i16(8),
-    repeat_stride=pto.i16(0),
 )
 ```
 
@@ -302,7 +300,6 @@ blocks = pto.vmi.vload(
   spelled as `group=...`, `stride=...`, `dist_mode="brc"`.
 - `to_dtype` is only accepted when `dist_mode="unpack"`.
 - `stride` is only accepted when `group` is provided.
-- `block_stride` and `repeat_stride` must be provided together.
 - The unpack form widens by exactly one adjacent bit-width step.
 
 ---
@@ -312,7 +309,7 @@ blocks = pto.vmi.vload(
 ### `pto.vmi.vstore(values, destination, offset, mask=None, *, dist_mode=None, pmode=None) -> None`
 ### `pto.vmi.vstore((even, odd), destination, offset, mask=None, *, dist_mode="dintlv", pmode=None) -> None`
 ### `pto.vmi.vstore(values, destination, offset, *, group, stride, pmode=None) -> None`
-### `pto.vmi.vstore(values, destination, offset, mask=None, *, block_stride, repeat_stride, pmode=None) -> None`
+### `pto.vmi.vstore(values, destination, offset, mask=None, *, block_stride, pmode=None) -> None`
 
 **Description**: Writes one logical VMI vector, or a deinterleaved pair, back
 to a UB pointer. As with `vload`, the PTODSL surface is organized into the same
@@ -365,7 +362,6 @@ group-mode store does not take a mask operand.
 |-----------|------|-------------|
 | `mask` | VMI mask or `None` | Optional store mask; omitting it means all lanes are active |
 | `block_stride` | `int` | 16-bit block stride operand |
-| `repeat_stride` | `int` | 16-bit repeat stride operand |
 
 **Returns**: None (side-effect operation).
 
@@ -398,7 +394,6 @@ pto.vmi.vstore(
     offset,
     mask,
     block_stride=pto.i16(8),
-    repeat_stride=pto.i16(0),
 )
 ```
 
@@ -408,7 +403,54 @@ pto.vmi.vstore(
   exclusive.
 - `dist_mode="dintlv"` requires `values` to be an `(even, odd)` pair.
 - Group mode requires `group` and `stride`, and does not accept `mask`.
-- `block_stride` and `repeat_stride` must be provided together.
+- Block-stride lowering fixes the physical repeat stride to zero.
+
+---
+
+### `vsstb`
+
+### `pto.vmi.vsstb(value, destination, offset, block_stride, mask, *, pmode=None) -> None`
+
+**Description**: Performs the dedicated zero-repeat-stride block store. It
+writes a logical VMI vector to UB in 32-byte blocks using the supplied dynamic
+16-bit `block_stride`. The physical `repeat_stride` is fixed to zero and is not
+an argument on this API. Unlike the general block-stride `vstore` form,
+`vsstb` requires an explicit mask.
+
+**Parameters**:
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `value` | `VRegType` | Logical VMI vector to store |
+| `destination` | `PtrType` (ub) | UB destination pointer; its element type must match `value` |
+| `offset` | `IndexLike` | Element offset into the destination buffer |
+| `block_stride` | `int` or scalar value convertible to `i16` | Dynamic 32-byte-block stride |
+| `mask` | VMI mask | Required predicate mask; its lane count must match `value` |
+| `pmode` | `str` or `None` | Optional inactive-lane mode: `"zero"` or `"merge"` |
+
+**Returns**: None (side-effect operation).
+
+**Example**:
+
+```python
+pto.vmi.vsstb(
+    vec,
+    dst_ptr,
+    offset,
+    pto.i16(8),
+    mask,
+)
+```
+
+This lowers to the physical block-stride store with an `i16` zero supplied as
+its `repeat_stride`.
+
+**Constraints**:
+
+- `destination` must refer to UB memory.
+- `block_stride` must be representable as an `i16` scalar operand.
+- `mask` is required and must match the vector's logical lane count.
+- `vsstb` does not accept `repeat_stride`, `dist_mode`, `group`, or `stride`.
 
 ---
 
@@ -417,11 +459,14 @@ pto.vmi.vstore(
 These instructions produce a new logical vector from a scalar seed — either as
 a lane-wise ramp or a uniform broadcast.
 
-### `pto.vmi.vci(base, *, size, order=None) -> VRegType`
+### `pto.vmi.vci(base, *, size, order=None, group=None) -> VRegType`
 
 **Description**: Builds a logical lane-wise index ramp starting from a scalar
 base value. Use it when you need an index vector for lane addressing,
-gather/scatter offsets, or dynamic lane selection.
+gather/scatter offsets, or dynamic lane selection. With `group=C`, the logical
+vector is split into C equal groups and the ramp restarts from `base` in every
+group. `group=1` is exactly equivalent to omitting `group`, including logical
+tails that do not evenly tile the physical vector length.
 
 **Parameters**:
 
@@ -430,6 +475,7 @@ gather/scatter offsets, or dynamic lane selection.
 | `base` | `ScalarType` | Typed scalar starting value for the ramp |
 | `size` | `int` | Logical lane count of the result vector |
 | `order` | `str` or `None` | Ramp order: `"ASC"` for ascending (default if omitted), or `"DESC"` for descending |
+| `group` | `int` or `None` | Optional number of equal groups. Values greater than one produce a group-periodic ramp; `1` is equivalent to no grouping. |
 
 **Returns**:
 
@@ -442,6 +488,14 @@ gather/scatter offsets, or dynamic lane selection.
 ```python
 idx = pto.vmi.vci(pto.i32(0), size=64, order="ASC")
 out = pto.vmi.vselr(src, idx)
+```
+
+```python
+# [0..31 | 0..31]
+idx = pto.vmi.vci(pto.i32(0), size=64, group=2)
+
+# Identical to an ungrouped 100-lane continuous ramp: [0..99].
+tail = pto.vmi.vci(pto.i32(0), size=100, group=1)
 ```
 
 **Constraints**:
@@ -511,15 +565,22 @@ operands. They form the arithmetic core of VMI SIMD kernels.
 #### `pto.vmi.vshl(lhs, rhs, mask=None, *, pmode=None) -> VRegType`
 #### `pto.vmi.vshr(lhs, rhs, mask=None, *, pmode=None) -> VRegType`
 
-**Description**: Element-wise binary operation: `result[i] = lhs[i] <op> rhs[i]`
-for lanes where `mask[i]` is true (or all lanes when `mask` is omitted).
+**Description**: These are element-wise binary operations. For `pto.vmi.vadd`,
+when `rhs` is a VMI vector, `result[i] = lhs[i] + rhs[i]` and the VMI `vadd`
+operation is emitted. When `rhs` is a scalar, the scalar is applied to every
+lane and the VMI `vadds` operation is emitted. For commutative operations
+(`vadd`, `vmul`, `vmax`, and `vmin`), a scalar `lhs` with a vector `rhs` is also
+accepted and normalized to the corresponding vector-scalar operation. The
+other operations require a VMI vector `rhs`. Operations are restricted to lanes where `mask[i]` is true
+(or all lanes when `mask` is omitted and the selected form permits an omitted
+mask).
 
 **Parameters**:
 
 | Parameter | Type | Description |
 |-----------|------|-------------|
 | `lhs` | `VRegType` | First operand vector |
-| `rhs` | `VRegType` | Second operand vector |
+| `rhs` | `VRegType` or `ScalarType` | Second vector operand or scalar addend |
 | `mask` | VMI mask or `None` | Optional predicate mask gating lane participation |
 | `pmode` | `str` or `None` | Optional predicate mode: `"merge"` keeps predicate-inactive lanes at their prior value; `"zero"` writes 0 |
 
@@ -537,7 +598,9 @@ out = pto.vmi.vmul(scale, data, full_mask)
 ```
 
 **Constraints**:
-- `lhs` and `rhs` must have compatible shapes and element types.
+- For vector-vector form, `lhs` and `rhs` must have compatible shapes and
+  element types.
+- For vector-scalar form, the scalar is coerced to the element type of `lhs`.
 - The result type is inferred from `lhs`.
 - For bitwise ops (`vand`, `vor`, `vxor`, `vshl`, `vshr`), integer element
   types are expected. Floating-point usage is rejected.
@@ -587,12 +650,20 @@ inverted = pto.vmi.vnot(int_vec)
 
 Formal `pto.vmi` vector-scalar ops in VMI v0.1:
 
-#### `pto.vmi.vadds(source, scalar, mask, *, pmode=None) -> VRegType`
-#### `pto.vmi.vmuls(source, scalar, mask, *, pmode=None) -> VRegType`
-#### `pto.vmi.vmaxs(source, scalar, mask, *, pmode=None) -> VRegType`
-#### `pto.vmi.vmins(source, scalar, mask, *, pmode=None) -> VRegType`
-#### `pto.vmi.vshls(source, scalar, mask, *, pmode=None) -> VRegType`
-#### `pto.vmi.vshrs(source, scalar, mask, *, pmode=None) -> VRegType`
+#### `pto.vmi.vadds(source, scalar, mask, *, pmode=None) -> VRegType` (deprecated)
+#### `pto.vmi.vmuls(source, scalar, mask, *, pmode=None) -> VRegType` (deprecated)
+#### `pto.vmi.vmaxs(source, scalar, mask, *, pmode=None) -> VRegType` (deprecated)
+#### `pto.vmi.vmins(source, scalar, mask, *, pmode=None) -> VRegType` (deprecated)
+#### `pto.vmi.vshls(source, scalar, mask, *, pmode=None) -> VRegType` (deprecated)
+#### `pto.vmi.vshrs(source, scalar, mask, *, pmode=None) -> VRegType` (deprecated)
+
+These `*s` functions remain available as compatibility entry points and emit a
+`PTODSLDeprecationWarning`. Use the matching unified entry point for new
+PTODSL code, for example `pto.vmi.vmul(source, scalar, mask)` or
+`pto.vmi.vshr(source, scalar, mask)`. The warning applies only to the Python
+compatibility entry points; the underlying VMI `vadds`, `vmuls`, `vmaxs`,
+`vmins`, `vshls`, and `vshrs` operations remain part of the instruction set
+and are unchanged.
 
 The following are **PTODSL syntax sugar** — convenience wrappers provided by the
 PTODSL authoring layer. They have **no corresponding VMI instruction**; PTODSL lowers
@@ -747,6 +818,12 @@ out = pto.vmi.vselr(src, idx)
 **Constraints**:
 - The result type is inferred directly from `source`.
 - `index` must be an integer-typed VMI vector.
+- Source and index element storage widths must match and be 8, 16, or 32 bits.
+- Source, index, and result must use contiguous layout. The supported shapes
+  are exactly 256 lanes for 8-bit elements, 128 lanes for 16-bit elements, or
+  64 lanes for 32-bit elements.
+- Every index value must identify a valid lane in `source`; out-of-range index
+  behavior is unspecified.
 
 ---
 
@@ -807,8 +884,8 @@ group_max = pto.vmi.vcmax(
 - `reassoc` is only meaningful for `vcadd` on floating-point data.
 - Floating-point `vcadd` must spell `reassoc` explicitly at the PTODSL surface.
 - `reassoc=None` is rejected by PTODSL; use `reassoc=True` or `reassoc=False`.
-- The current VMI op encoding remains presence-based, so `reassoc=False`
-  lowers to the same no-attribute form as legacy callers.
+- The current VMI op encoding remains presence-based, so PTODSL preserves the
+  `reassoc` attribute for both `reassoc=True` and `reassoc=False`.
 
 ---
 
@@ -830,7 +907,7 @@ For int→int widening, the source element type must carry signedness
 | `source` | `VRegType` | Input vector (source element type) |
 | `to_dtype` | `DType` | Target element type. PTODSL derives the result vector type from the source lane count/layout and this dtype |
 | `rounding` | rounding mode or `None` | Optional rounding mode token |
-| `saturate` | saturate mode or `None` | Optional saturation mode token |
+| `saturate` | `"SAT"`, `"NOSAT"`, or `None` | Saturation mode. For fp-narrow, int-narrow, and fp-to-int, `None` defaults to `"SAT"` |
 | `pmode` | `str` or `None` | Optional predicate mode: `"merge"` keeps predicate-inactive lanes at their prior value; `"zero"` writes 0 |
 
 **Returns**:
@@ -847,7 +924,11 @@ narrow = pto.vmi.vcvt(src_f32, pto.f16)
 ```
 
 **Constraints**:
-- The masked form of `vcvt` is not currently supported on this surface.
+- The masked form of `vcvt` is not yet supported by the current PTODSL/IR
+  implementation. It remains part of the VMI ISA contract for future support.
+- Authored VMI IR requires explicit `"SAT"` or `"NOSAT"` for fp-narrow,
+  int-narrow, and fp-to-int. PTODSL uses `"SAT"` when `saturate` is omitted
+  for these directions.
 - The source and target dtype pair must be legal for the target backend.
 - For `f32 -> f8e4m3/f8e5m2`, PTODSL accepts `rounding="R"`, `"A"`, `"H"`,
   and `"Z"`; other low-level rounding tokens remain rejected on the VMI
@@ -878,6 +959,7 @@ annotation changes. This is a reinterpretation, not a numeric conversion.
 
 ```python
 as_i32 = pto.vmi.vinterpret_cast(src, pto.i32)
+as_f16 = pto.vmi.vinterpret_cast(src, pto.f16)  # 64xf32 -> 128xf16
 ```
 
 **Constraints**:
@@ -903,15 +985,15 @@ stable softmax numerator.
 
 | Parameter | Type | Description |
 |-----------|------|-------------|
-| `x` | `VRegType` | Input vector |
-| `max_value` | `VRegType` | Maximum value vector to subtract before exponentiation |
+| `x` | `VRegType` | Input vector with `f16` or `f32` elements |
+| `max_value` | `VRegType` | Maximum value vector with the same type as `x` |
 | `mask` | VMI mask | **Required.** Predicate mask gating lane participation |
-| `pmode` | `str` or `None` | Optional predicate mode: `"merge"` keeps predicate-inactive lanes at their prior value; `"zero"` writes 0 |
+| `pmode` | `str` or `None` | Optional predicate mode: `"zero"` zeros inactive lanes; `"merge"` preserves their prior values. Defaults to `"zero"`. |
 **Returns**:
 
 | Return Value | Type | Description |
 |--------------|------|-------------|
-| `result` | `VRegType` | `exp(x - max_value)` |
+| `result` | `VRegType` | `exp(x - max_value)` with the same logical lane count and `f32` elements |
 
 ---
 
@@ -1384,11 +1466,11 @@ def vmi_elementwise(
 | Category | Instructions |
 |----------|-------------|
 | Types | `vreg`, `mask` |
-| Load / Store | `vload`, `vstore` |
+| Load / Store | `vload`, `vstore`, `vsstb` |
 | Index / Broadcast | `vci`, `vbrc` |
 | Binary vector-vector | `vadd`, `vsub`, `vmul`, `vdiv`, `vmax`, `vmin`, `vand`, `vor`, `vxor`, `vshl`, `vshr` |
 | Unary vector | `vabs`, `vneg`, `vrelu`, `vexp`, `vln`, `vsqrt`, `vnot` |
-| Vector-scalar | formal `pto.vmi`: `vadds`, `vmuls`, `vmaxs`, `vmins`, `vshls`, `vshrs`; DSL convenience: `vsubs`, `vands`, `vors`, `vxors` |
+| Vector-scalar | `pto.vmi.vadd(vector, scalar, mask)` emits `vadds`; other formal `pto.vmi` helpers are `vmuls`, `vmaxs`, `vmins`, `vshls`, `vshrs`; DSL convenience: `vsubs`, `vands`, `vors`, `vxors` |
 | Compare / Select | `vcmp`, `vcmps`, `vsel`, `vselr` |
 | Reduction | `vcadd`, `vcmax`, `vcmin` |
 | Conversion | `vcvt`, `vinterpret_cast` |

@@ -1,0 +1,55 @@
+// Copyright (c) 2026 Huawei Technologies Co., Ltd.
+// This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+// CANN Open Software License Agreement Version 2.0 (the "License").
+// Please refer to the License for details. You may not use this file except in compliance with the License.
+// THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+// INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+// See LICENSE in the root of the software repository for the full text of the License.
+
+// RUN: not pto-test-opt %s -split-input-file 2>&1 | FileCheck %s
+
+module {
+  func.func @create_cbuf_matrix_rejects_word_width_mismatch(
+      %dst: !pto.ptr<ui16, mat>) {
+    %c1_i64 = arith.constant 1 : i64
+    %c0_i64 = arith.constant 0 : i64
+    %zero_i32 = arith.constant 0 : i32
+    %c32_i64 = arith.constant 32 : i64
+    pto.create_cbuf_matrix %dst, %zero_i32, %c1_i64, %c1_i64, %c0_i64 {fill_word_bits = 32 : i64} : !pto.ptr<ui16, mat>, i32, i64, i64, i64
+    return
+  }
+}
+
+// CHECK: 'pto.create_cbuf_matrix' op fill_word_bits 32 does not match the 16-bit destination view
+
+// -----
+
+module {
+  func.func @create_cbuf_matrix_rejects_signless_view(
+      %dst: !pto.ptr<i16, mat>) {
+    %c1_i64 = arith.constant 1 : i64
+    %c0_i64 = arith.constant 0 : i64
+    %zero_i32 = arith.constant 0 : i32
+    %c16_i64 = arith.constant 16 : i64
+    pto.create_cbuf_matrix %dst, %zero_i32, %c1_i64, %c1_i64, %c0_i64 {fill_word_bits = 16 : i64} : !pto.ptr<i16, mat>, i32, i64, i64, i64
+    return
+  }
+}
+
+// CHECK: 'pto.create_cbuf_matrix' op requires a ui16 or ui32 destination view, got element type 'i16'
+
+// -----
+
+module {
+  func.func @create_cbuf_matrix_rejects_noncanonical_width(
+      %dst: !pto.ptr<ui8, mat>) {
+    %c1_i64 = arith.constant 1 : i64
+    %c0_i64 = arith.constant 0 : i64
+    %zero_i32 = arith.constant 0 : i32
+    %c16_i64 = arith.constant 16 : i64
+    pto.create_cbuf_matrix %dst, %zero_i32, %c1_i64, %c1_i64, %c0_i64 {fill_word_bits = 16 : i64} : !pto.ptr<ui8, mat>, i32, i64, i64, i64
+    return
+  }
+}
+
+// CHECK: 'pto.create_cbuf_matrix' op requires a ui16 or ui32 destination view, got element type 'ui8'

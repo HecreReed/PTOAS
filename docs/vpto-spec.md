@@ -738,45 +738,10 @@ At the PTO micro Instruction level, these runtime-query ops are pure scalar prod
 
 In this pattern, all blocks execute the same kernel body, but each block sees a different `%block` value and therefore computes a different GM window.
 
-#### `pto.get_block_idx`
-
-- **syntax:** `%block = pto.get_block_idx`
-- **result:** `i64`
-- **semantics:** Return the current block ID in the range `[0, pto.get_block_num())`.
-
-```c
-block = block_idx();
-```
-
-#### `pto.get_subblock_idx`
-
-- **syntax:** `%subblock = pto.get_subblock_idx`
-- **result:** `i64`
-- **semantics:** Return the current subblock ID in the range `[0, pto.get_subblock_num())`.
-
-```c
-subblock = subblock_idx();
-```
-
-#### `pto.get_block_num`
-
-- **syntax:** `%block_num = pto.get_block_num`
-- **result:** `i64`
-- **semantics:** Return the total number of launched blocks visible to the current kernel instance.
-
-```c
-block_num = block_num();
-```
-
-#### `pto.get_subblock_num`
-
-- **syntax:** `%subblock_num = pto.get_subblock_num`
-- **result:** `i64`
-- **semantics:** Return the total number of visible subblocks for the current execution instance.
-
-```c
-subblock_num = subblock_num();
-```
+The complete syntax, result types, constraints, semantics, pseudocode, and
+partitioning example for `pto.get_block_idx`, `pto.get_subblock_idx`,
+`pto.get_block_num`, and `pto.get_subblock_num` are documented in
+[Special Scalar Operations](isa/micro-isa/18-special-scalar.md#kernel-execution-query-operations).
 
 #### `pto.store_vfsimt_info`
 
@@ -974,64 +939,9 @@ Typical examples:
 
 ### Pointer Operations
 
-#### `pto.castptr`
-
-- **syntax:** `%result = pto.castptr %addr : i64 -> !pto.ptr<T, space>`
-- **semantics:** Reinterpret a scalar address value as a typed PTO pointer in the target memory space.
-
-```c
-result = (ptr<T, space>)addr;
-```
-
-`pto.castptr` is a pointer-construction operation. It does not perform data movement and does not by itself imply any load/store side effect.
-
-#### `pto.addptr`
-
-- **syntax:** `%result = pto.addptr %ptr, %offset : !pto.ptr<T, space> -> !pto.ptr<T, space>`
-- **semantics:** Compute a new pointer by advancing the base pointer by an element offset.
-
-```c
-result = ptr + offset;  // offset counted in elements, not bytes
-```
-
-`pto.addptr` preserves both the element type `T` and the memory-space tag `space`.
-
-#### `pto.load_scalar`
-
-- **syntax:** `%value = pto.load_scalar %ptr[%offset] : !pto.ptr<T, space> -> T`
-- **semantics:** Load one scalar element from a pointer-like operand.
-
-```c
-value = ptr[offset];
-```
-
-- **inputs:**
-  `%ptr` is a typed PTO pointer `!pto.ptr<T, space>`, and `%offset` is an
-  `index` displacement counted in elements.
-- **outputs:**
-  `%value` is the loaded scalar element.
-- **constraints and limitations:**
-  The result type MUST match the element type of `%ptr`. This op is a scalar
-  memory helper; unlike `pto.vlds`, it does not produce a `vreg` result and
-  does not participate in vector load `dist` families.
-
-#### `pto.store_scalar`
-
-- **syntax:** `pto.store_scalar %value, %ptr[%offset] : !pto.ptr<T, space>, T`
-- **semantics:** Store one scalar element to a pointer-like operand.
-
-```c
-ptr[offset] = value;
-```
-
-- **inputs:**
-  `%value` is the scalar value to store. `%ptr` is a typed PTO pointer
-  `!pto.ptr<T, space>`, and `%offset` is an `index` displacement counted in
-  elements.
-- **constraints and limitations:**
-  The stored value type MUST match the element type of `%ptr`. This op is a
-  scalar memory helper; unlike `pto.vsts`, it does not consume a mask and does
-  not target vector-store `dist` families.
+The complete contracts for `pto.castptr`, `pto.addptr`, `pto.load_scalar`, and
+`pto.store_scalar` are documented in
+[Special Scalar Operations](isa/micro-isa/18-special-scalar.md#typed-pointer-and-address-operations).
 
 #### `pto.load`
 
@@ -1069,6 +979,11 @@ ptr[offset] = value;
 - **constraints and limitations:**
   The stored value type MUST match the element type of `%ptr`. This is the
   preferred scalar memory op for VPTO/SIMT authoring.
+
+The complete syntax, type restrictions, execution-scope rules, cache behavior,
+target availability, and examples for `pto.ld_dev` and `pto.st_dev` are
+documented in
+[Special Scalar Operations](isa/micro-isa/18-special-scalar.md#aicore-scalar-gm-l1-bypass-operations).
 
 #### Pointer-Based Vector Access Example
 
@@ -1162,11 +1077,22 @@ dst[i] = mask[i] ? op(src0[i], src1[i]) : 0    // ZEROING mode
 ```mlir
 %align = pto.vldas %ub : !pto.ptr<f32, ub> -> !pto.align
 %vec, %align_out = pto.vldus %ub, %align : !pto.ptr<f32, ub>, !pto.align -> !pto.vreg<64xf32>, !pto.align
+%vec2, %align_out2, %next_ub = pto.vldus %ub, %align_out, %increment
+    : !pto.ptr<f32, ub>, !pto.align, index
+    -> !pto.vreg<64xf32>, !pto.align, !pto.ptr<f32, ub>
 
 %store_align = pto.init_align : !pto.align
 %next_align = pto.vstus %store_align, %offset, %vec, %ub
     : !pto.align, i32, !pto.vreg<64xf32>, !pto.ptr<f32, ub> -> !pto.align
+%next_align2, %next_store_ub = pto.vstus %next_align, %offset, %vec2, %ub
+    : !pto.align, i32, !pto.vreg<64xf32>, !pto.ptr<f32, ub>
+    -> !pto.align, !pto.ptr<f32, ub>
 ```
+
+In the post-update forms, the base result advances by the load increment or
+store offset in pointer-element units. The `!pto.align` result remains the
+existing independent alignment-state update; base post-update does not alter
+its meaning.
 
 ---
 
@@ -1214,6 +1140,7 @@ pto.vsts %value, %destination[%offset] {dist = "DIST"} : !pto.vreg<NxT>, !pto.pt
 
 ```mlir
 %low, %high = pto.vldsx2 %source[%offset], "DIST" : !pto.ptr<T, ub>, index -> !pto.vreg<NxT>, !pto.vreg<NxT>
+%low, %high, %updated_base = pto.vldsx2 %source[%offset], "DIST" : !pto.ptr<T, ub>, index -> !pto.vreg<NxT>, !pto.vreg<NxT>, !pto.ptr<T, ub>
 ```
 
 **Dual Store (two inputs, one interleaved store):**
@@ -1406,8 +1333,9 @@ This section provides a categorized overview of all PTO micro Instruction operat
 | 13 | [DSA/SFU Ops](isa/micro-isa/13-dsa-sfu-ops.md) | Specialized ops, index generation, and sorting helpers | 11 | `pto.vlrelu`, `pto.vprelu`, `pto.vexpdif`, `pto.vaxpy`, `pto.vmulscvt`, `pto.vmull`, `pto.vmula`, `pto.vci`, `pto.vbitsort`, `pto.vmrgsort4`, `pto.get_vms4_sr` |
 | 14 | [Arith (Shared MLIR Dialect)](isa/micro-isa/14-shared-arith.md) | Full scalar `arith` surface used around PTO ops; the companion page lists categories and representative examples | all scalar ops | `arith.constant`, `arith.addi`, `arith.addf`, `arith.cmpi`, `arith.cmpf`, `arith.select`, `arith.index_cast`, `arith.extsi`, `arith.trunci`, `arith.andi`, `arith.shli`, etc. |
 | 15 | [SCF (Shared MLIR Dialect)](isa/micro-isa/15-shared-scf.md) | Structured loops, branches, and loop-carried state around PTO regions | 5 | `scf.for`, `scf.if`, `scf.while`, `scf.condition`, `scf.yield` |
-| 16 | [Cube Matrix Multiply](isa/micro-isa/16-cube-matmul.md) | GM↔L1 (`l1`/cbuf) staging, L1 (`l1`)↔UB/BT/FB side moves, L1→L0A/L0B loads, L0C (`l0c`) matmul, and FIXPIPE MTE writeback | 19 | `pto.mte_gm_l1`, `pto.mte_l1_ub`, `pto.mte_gm_l1_frac`, `pto.mte_l1_bt`, `pto.mte_l1_fb`, `pto.mte_l1_l0a`, `pto.mte_l1_l0b`, `pto.mte_l1_l0a_mx`, `pto.mte_l1_l0b_mx`, `pto.mad`, `pto.mad_acc`, `pto.mad_bias`, `pto.mad_mx`, `pto.mad_mx_acc`, `pto.mad_mx_bias`, `pto.mte_l0c_l1`, `pto.mte_l0c_gm`, `pto.mte_l0c_ub` |
+| 16 | [Cube Matrix Multiply](isa/micro-isa/16-cube-matmul.md) | GM↔L1 (`l1`/cbuf) staging, L1 raw fill and L1 (`l1`)↔UB/BT/FB side moves, L1→L0A/L0B loads, L0C (`l0c`) matmul, and FIXPIPE MTE writeback | 20 | `pto.mte_gm_l1`, `pto.raw_fill_l1`, `pto.mte_l1_ub`, `pto.mte_gm_l1_frac`, `pto.mte_l1_bt`, `pto.mte_l1_fb`, `pto.mte_l1_l0a`, `pto.mte_l1_l0b`, `pto.mte_l1_l0a_mx`, `pto.mte_l1_l0b_mx`, `pto.mad`, `pto.mad_acc`, `pto.mad_bias`, `pto.mad_mx`, `pto.mad_mx_acc`, `pto.mad_mx_bias`, `pto.mte_l0c_l1`, `pto.mte_l0c_gm`, `pto.mte_l0c_ub` |
 | 17 | [SIMT Ops](isa/micro-isa/17-simt.md) | SIMT launch, thread/lane queries, vote/shuffle/redux, scalar memory, atomics, scalar math, conversion, entry synchronization, and state preservation | ~65 | `pto.store_vfsimt_info`, `pto.simt_launch`, `pto.get_tid_x`, `pto.get_laneid`, `pto.vote_*`, `pto.shuffle_*`, `pto.redux_*`, `pto.load`, `pto.store`, `pto.atomic_*`, `pto.convert`, `pto.syncthreads`, `pto.keep`, `pto.resume`, etc. |
+| 18 | [Special Scalar Operations](isa/micro-isa/18-special-scalar.md) | PTO scalar kernel queries, typed pointer/address calculation, scalar-pipeline memory, and ordinary AICore GM L1-bypass access | 10 | `pto.get_block_idx`, `pto.get_subblock_idx`, `pto.get_block_num`, `pto.get_subblock_num`, `pto.castptr`, `pto.addptr`, `pto.load_scalar`, `pto.store_scalar`, `pto.ld_dev`, `pto.st_dev` |
 
 ---
 
@@ -1421,6 +1349,7 @@ This section provides a categorized overview of all PTO micro Instruction operat
 | UB→GM DMA | 2 | `pto.mte_ub_gm` |
 | UB→UB / UB→L1 copy | 2 | `pto.mte_ub_ub`, `pto.mte_ub_l1` |
 | GM→L1 | 16 | `pto.mte_gm_l1`, `pto.mte_gm_l1_frac` |
+| L1 raw fill | 16 | `pto.raw_fill_l1` |
 | L1→UB | 16 | `pto.mte_l1_ub` |
 | L1→BT | 16 | `pto.mte_l1_bt` |
 | L1→FB | 16 | `pto.mte_l1_fb` |
@@ -1431,6 +1360,7 @@ This section provides a categorized overview of all PTO micro Instruction operat
 | Gather | 3 | `pto.vgather2`, `pto.vgatherb` |
 | Contiguous Store | 3 | `pto.vsts` with `NORM_B8` / `NORM_B16` / `NORM_B32` dist |
 | Scatter | 3 | `pto.vscatter` |
+| Scalar GM access bypassing local L1 data cache | 18 | `pto.ld_dev`, `pto.st_dev` |
 
 ### Compute Operations
 
@@ -1462,7 +1392,10 @@ This section provides a categorized overview of all PTO micro Instruction operat
 
 ### Scalar & Control Operations
 
-Group 14 covers the full scalar `arith` surface. The rows below list common PTO micro Instruction patterns rather than an exhaustive partition of `arith` ops.
+Group 14 covers shared MLIR scalar arithmetic. Group 18 catalogs PTO scalar
+queries, pointer/address operations, and scalar-memory operations. SIMT scalar
+operations remain in Group 17, while
+shared structured-control semantics remain in Group 15.
 
 | Operation | Group | Description |
 |-----------|-------|-------------|
@@ -1472,6 +1405,12 @@ Group 14 covers the full scalar `arith` surface. The rows below list common PTO 
 | Scalar Compare & Select | 14 | `arith.cmpi`, `arith.cmpf`, `arith.select` |
 | Scalar Casts / Width Changes | 14 | `arith.index_cast`, `arith.index_castui`, `arith.extsi`, `arith.extui`, `arith.trunci`, `arith.sitofp`, etc. |
 | Scalar Bitwise / Shift Ops | 14 | `arith.andi`, `arith.ori`, `arith.xori`, `arith.shli`, `arith.shrsi`, `arith.shrui`, etc. |
+| Kernel Execution Queries | 18 | `pto.get_block_idx`, `pto.get_subblock_idx`, `pto.get_block_num`, `pto.get_subblock_num` |
+| Typed Pointer / Address Operations | 18 | `pto.castptr`, `pto.addptr` |
+| Scalar-Pipeline Memory | 18 | `pto.load_scalar`, `pto.store_scalar` |
+| AICore Scalar GM L1-Bypass | 18 | `pto.ld_dev`, `pto.st_dev` |
+| SIMT Scalar Memory / Atomics | 17 | `pto.load`, `pto.store`, `pto.ldg`, `pto.stg`, `pto.atomic_*` |
+| SIMT Scalar Math / Conversion | 17 | `pto.prmt`, `pto.mulhi`, `pto.sqrt`, `pto.exp`, `pto.fma`, `pto.convert`, etc. |
 | Counted Loops | 15 | `scf.for` |
 | Conditional Regions | 15 | `scf.if`, `scf.yield` |
 | Break-like Structured Loops | 15 | `scf.while`, `scf.condition`, `scf.yield` |
@@ -1481,6 +1420,7 @@ Group 14 covers the full scalar `arith` surface. The rows below list common PTO 
 - `pto.mte_l1_bt`
 - `pto.mte_l1_fb`
 - `pto.mte_gm_l1`
+- `pto.raw_fill_l1`
 - `pto.mte_gm_l1_frac`
 - `pto.mte_l1_ub`
 - `pto.mte_l1_l0a`

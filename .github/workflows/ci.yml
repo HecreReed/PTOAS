@@ -9,10 +9,10 @@ on:
   push:
     branches:
       - main
-  # Nightly remote-board validation (GitHub cron is UTC).
-  # 22:00 CST (UTC+8) == 14:00 UTC.
+  # Nightly A3 board validation (GitHub cron is UTC).
+  # 19:00 UTC is 03:00 the next day in Beijing (UTC+8).
   schedule:
-    - cron: "0 14 * * *"
+    - cron: "0 19 * * *"
   workflow_dispatch:
     inputs:
       stage:
@@ -45,26 +45,14 @@ on:
         type: string
         default: ""
       pto_isa_repo:
-        description: "pto-isa repo URL on remote"
+        description: "pto-isa repository URL used by the A3 runner"
         type: string
         default: https://gitcode.com/cann/pto-isa.git
       pto_isa_commit:
-        description: "pto-isa ref (commit/tag/branch; empty = repo-pinned weekly commit)"
+        description: "pto-isa ref (commit/tag/branch; empty = repository CI pin)"
         type: string
         # NOTE: Pin a known-good GitCode commit for deterministic runs.
-        default: ce3262e3825a235f951917eeada30e52910b6a84
-      remote_host:
-        description: "SSH host/IP for the NPU machine"
-        type: string
-        default: 101.245.68.6
-      remote_user:
-        description: "SSH user for the NPU machine"
-        type: string
-        default: zhongxuan
-      remote_port:
-        description: "SSH port"
-        type: string
-        default: "22"
+        default: 5649f0522ba9987fd22cbf18923b729b97c5f2ff
 
 permissions:
   contents: read
@@ -72,6 +60,24 @@ permissions:
   pull-requests: read
 
 jobs:
+  vmi-source-patch-check:
+    if: ${{ github.event_name == 'pull_request' }}
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Validate VMI source patch
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 packaging/ptoas-vmi/prepare_source.py \
+            --output-dir .work/ptoas-vmi-source-check \
+            --revision HEAD
+
   license-header-check:
     if: ${{ github.event_name == 'pull_request' }}
     runs-on: ubuntu-22.04
@@ -101,12 +107,12 @@ jobs:
     env:
       PTOAS_CLANG_MAJOR: "15"
       LLVM_REPO: https://github.com/vpto-dev/llvm-project.git
-      LLVM_REF: feature-vpto-llvm21
+      LLVM_REF: feature-vpto
       LLVM_BUILD_DIR: ${{ github.workspace }}/llvm-project/llvm/build-assert
       LLVM_DIR: ${{ github.workspace }}/llvm-project/llvm/build-assert
       PTO_BUILD_DIR: ${{ github.workspace }}/build-assert
       PTOAS_VENV: ${{ github.workspace }}/.venv-ptoas-assert
-      LLVM_CACHE_FLAVOR: llvm21-assert-shared-mlirpy-hardening-v2
+      LLVM_CACHE_FLAVOR: llvm19-assert-shared-mlirpy-hardening-v2
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -137,7 +143,7 @@ jobs:
           # LLVM/MLIR Python bindings are not yet compatible with pybind11 3.x.
           "${PTOAS_VENV}/bin/pip" install \
             'scikit-build-core>=0.12.2,<2' 'pybind11<3' \
-            nanobind numpy ml-dtypes
+            numpy ml-dtypes
 
       - name: Define payload paths
         shell: bash
@@ -247,7 +253,6 @@ jobs:
             -DPython3_EXECUTABLE="${PTOAS_VENV}/bin/python" \
             -DPython_EXECUTABLE="${PTOAS_VENV}/bin/python" \
             -Dpybind11_DIR="$("${PTOAS_VENV}/bin/python" -m pybind11 --cmakedir)" \
-            -Dnanobind_DIR="$("${PTOAS_VENV}/bin/python" -m nanobind --cmake_dir)" \
             -DCMAKE_BUILD_TYPE=Release \
             -DCMAKE_C_COMPILER="${PTOAS_CMAKE_C_COMPILER}" \
             -DCMAKE_CXX_COMPILER="${PTOAS_CMAKE_CXX_COMPILER}" \
@@ -277,7 +282,7 @@ jobs:
           rm -rf "${cmake4_venv}" "${cmake4_build}"
           python3 -m venv "${cmake4_venv}"
           "${cmake4_venv}/bin/python" -m pip install --upgrade pip
-          "${cmake4_venv}/bin/pip" install "cmake==4.1.3" 'pybind11<3' nanobind
+          "${cmake4_venv}/bin/pip" install "cmake==4.1.3" 'pybind11<3' numpy ml-dtypes
           cmake4_bin="${cmake4_venv}/bin/cmake"
           "${cmake4_bin}" --version
           "${cmake4_bin}" -C "${GITHUB_WORKSPACE}/cmake/LinuxHardeningCache.cmake" \
@@ -289,7 +294,6 @@ jobs:
             -DPython3_EXECUTABLE="${cmake4_venv}/bin/python" \
             -DPython3_FIND_STRATEGY=LOCATION \
             -Dpybind11_DIR="$("${cmake4_venv}/bin/python" -m pybind11 --cmakedir)" \
-            -Dnanobind_DIR="$("${cmake4_venv}/bin/python" -m nanobind --cmake_dir)" \
             -DMLIR_ENABLE_BINDINGS_PYTHON=ON \
             -DPTO_ENABLE_PYTHON_BINDING=ON \
             -DBUILD_TESTING=ON \
@@ -325,6 +329,56 @@ jobs:
         run: |
           export PATH="${PTOAS_VENV}/bin:${LLVM_DIR}/bin:${PATH}"
           ctest --test-dir "${PTO_BUILD_DIR}" --output-on-failure -L PTODSL
+
+      - name: Run PTO-BC tests
+        shell: bash
+        env:
+          LLVM_DIR: ${{ env.LLVM_DIR }}
+        run: |
+          export PATH="${PTOAS_VENV}/bin:${LLVM_DIR}/bin:${PATH}"
+          ctest --test-dir "${PTO_BUILD_DIR}" --output-on-failure -R '^ptobc_'
+
+      - name: Verify PTO-BC v0 against the pre-unification reader
+        shell: bash
+        env:
+          PTOBC_V0_LEGACY_COMMIT: 1960e865ae374db958a63e52dac54c815d5af770
+        run: |
+          set -euo pipefail
+          legacy_root="${RUNNER_TEMP:-${GITHUB_WORKSPACE}/.tmp}/ptoas-v0-legacy"
+          legacy_src="${legacy_root}/src"
+          legacy_build="${legacy_root}/build"
+          rm -rf "${legacy_root}"
+          git fetch --no-tags --depth=1 \
+            https://github.com/hw-native-sys/PTOAS.git \
+            "${PTOBC_V0_LEGACY_COMMIT}"
+          git worktree add --detach "${legacy_src}" FETCH_HEAD
+
+          cmake -C "${legacy_src}/cmake/LinuxHardeningCache.cmake" \
+            -G Ninja \
+            -S "${legacy_src}" \
+            -B "${legacy_build}" \
+            -DLLVM_DIR="${LLVM_DIR}/lib/cmake/llvm" \
+            -DMLIR_DIR="${LLVM_DIR}/lib/cmake/mlir" \
+            -DPython3_EXECUTABLE="${PTOAS_VENV}/bin/python" \
+            -DPython_EXECUTABLE="${PTOAS_VENV}/bin/python" \
+            -DPython3_FIND_STRATEGY=LOCATION \
+            -Dpybind11_DIR="$("${PTOAS_VENV}/bin/python" -m pybind11 --cmakedir)" \
+            -Dnanobind_DIR="$("${PTOAS_VENV}/bin/python" -m nanobind --cmake_dir)" \
+            -DMLIR_ENABLE_BINDINGS_PYTHON=ON \
+            -DPTO_ENABLE_PYTHON_BINDING=ON \
+            -DBUILD_TESTING=OFF \
+            -DCMAKE_C_COMPILER="${PTOAS_CMAKE_C_COMPILER}" \
+            -DCMAKE_CXX_COMPILER="${PTOAS_CMAKE_CXX_COMPILER}"
+          cmake --build "${legacy_build}" --target PTOASPythonPackage ptobc
+
+          PTOBC_BIN="${PTO_BUILD_DIR}/tools/ptobc/ptobc" \
+          PTOAS_BIN="${PTO_BUILD_DIR}/tools/ptoas/ptoas" \
+          PYTHON_EXECUTABLE="${PTOAS_VENV}/bin/python" \
+          TESTDATA_DIR="${GITHUB_WORKSPACE}/tools/ptobc/testdata" \
+          LEGACY_PTOBC_BIN="${legacy_build}/tools/ptobc/ptobc" \
+          LEGACY_PTOAS_BIN="${legacy_build}/tools/ptoas/ptoas" \
+          OUT_DIR="${legacy_root}/cross-version-output" \
+            bash tools/ptobc/tests/fp_extended_v0_compatibility.sh
 
       - name: Run lit tests
         shell: bash
@@ -398,20 +452,20 @@ jobs:
 
   remote-npu-validation:
     needs: build-and-test
-    runs-on: ubuntu-22.04
-    timeout-minutes: 180
+    runs-on: [self-hosted, Linux, ARM64, ptoas-a3]
+    timeout-minutes: 480
     concurrency:
-      group: remote-npu-validation
+      group: a3-nightly-board
       cancel-in-progress: false
-    # Ordering: `needs: build-and-test` enforces "CI -> remote".
+    # Ordering: `needs: build-and-test` enforces payload generation before the
+    # A3 runner downloads it and submits board work through TaskQueue.
     if: >-
       ${{
+        github.repository == 'hw-native-sys/PTOAS' &&
         (github.event_name == 'workflow_dispatch' ||
          github.event_name == 'schedule')
       }}
     env:
-      PAYLOAD_DOWNLOAD_DIR: ${{ github.workspace }}/_payload
-      PAYLOAD_TGZ: ${{ github.workspace }}/_payload/ptoas_payload.tgz
       # Temporary CI gate: skip cases that still error/flap on the remote NPU.
       # Update this list as we fix the underlying issues.
       DEFAULT_SKIP_CASES: >-
@@ -427,10 +481,7 @@ jobs:
           SKIP_CASES: ${{ github.event.inputs.skip_cases || '' }}
           RUN_ONLY_CASES: ${{ github.event.inputs.run_only_cases || '' }}
           PTO_ISA_REPO: ${{ github.event.inputs.pto_isa_repo || 'https://gitcode.com/cann/pto-isa.git' }}
-          PTO_ISA_COMMIT: ${{ github.event.inputs.pto_isa_commit || 'ce3262e3825a235f951917eeada30e52910b6a84' }}
-          REMOTE_HOST: ${{ github.event.inputs.remote_host || '101.245.68.6' }}
-          REMOTE_USER: ${{ github.event.inputs.remote_user || 'zhongxuan' }}
-          REMOTE_PORT: ${{ github.event.inputs.remote_port || '22' }}
+          PTO_ISA_COMMIT: ${{ github.event.inputs.pto_isa_commit || '5649f0522ba9987fd22cbf18923b729b97c5f2ff' }}
         run: |
           set -euo pipefail
           # For scheduled runs, default to DEFAULT_SKIP_CASES (known-bad/flaky).
@@ -448,7 +499,7 @@ jobs:
           # RUN_ONLY_CASES requests, so remote validation does not try to force
           # A5-only cases through an A3 flow or vice versa.
           A3_ONLY_CASES="partition5d,partition5d_dynamic,mrgsort,tmatmulk_autosync,movfp_fixpipe_reuse_a3"
-          A5_ONLY_CASES="partition5d_a5,partition5d_dynamic_a5,mrgsort_a5,tmatmulk_autosync_a5,tpack,matmul_mx_low_precision,gemvmx,tquant_mx,movfp_fixpipe_reuse"
+          A5_ONLY_CASES="partition5d_a5,partition5d_dynamic_a5,mrgsort_a5,tmatmulk_autosync_a5,tpack,matmul_mx_low_precision,gemvmx,movfp_fixpipe_reuse"
 
           sv_lc="$(printf '%s' "${SOC_VERSION}" | tr '[:upper:]' '[:lower:]')"
           is_a5=0
@@ -470,32 +521,54 @@ jobs:
           echo "RUN_ONLY_CASES=${RUN_ONLY_CASES}" >> "${GITHUB_ENV}"
           echo "PTO_ISA_REPO=${PTO_ISA_REPO}" >> "${GITHUB_ENV}"
           echo "PTO_ISA_COMMIT=${PTO_ISA_COMMIT}" >> "${GITHUB_ENV}"
-          echo "REMOTE_HOST=${REMOTE_HOST}" >> "${GITHUB_ENV}"
-          echo "REMOTE_USER=${REMOTE_USER}" >> "${GITHUB_ENV}"
-          echo "REMOTE_PORT=${REMOTE_PORT}" >> "${GITHUB_ENV}"
 
-      - name: Setup SSH
+      - name: Check A3 runner environment
         shell: bash
-        env:
-          SSH_KEY: ${{ secrets.SSH_KEY }}
-          SSH_KNOWN_HOSTS: ${{ secrets.SSH_KNOWN_HOSTS }}
         run: |
           set -euo pipefail
-          if [[ -z "${SSH_KEY}" ]]; then
-            echo "ERROR: secrets.SSH_KEY is not set"
-            exit 1
-          fi
-          if [[ -z "${SSH_KNOWN_HOSTS}" ]]; then
-            echo "ERROR: secrets.SSH_KNOWN_HOSTS is not set"
-            exit 1
-          fi
 
-          mkdir -p ~/.ssh
-          chmod 700 ~/.ssh
-          printf '%s\n' "${SSH_KEY}" > ~/.ssh/id_ed25519
-          chmod 600 ~/.ssh/id_ed25519
-          printf '%s\n' "${SSH_KNOWN_HOSTS}" > ~/.ssh/known_hosts
-          chmod 644 ~/.ssh/known_hosts
+          [[ "$(uname -m)" == "aarch64" ]] || {
+            echo "ERROR: A3 runner must be aarch64" >&2
+            exit 1
+          }
+          for command in bash cmake git make python3 tar task-submit; do
+            command -v "${command}" >/dev/null || {
+              echo "ERROR: required command is missing: ${command}" >&2
+              exit 1
+            }
+          done
+          python3 - <<'PY'
+          import numpy
+
+          print("numpy", numpy.__version__)
+          PY
+
+      - name: Prepare isolated work directory
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ -n "${RUNNER_TEMP:-}" ]] || {
+            echo "ERROR: RUNNER_TEMP is empty" >&2
+            exit 1
+          }
+          work_root="${RUNNER_TEMP}/ptoas-a3-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          case "${work_root}" in
+            "${RUNNER_TEMP}"/ptoas-a3-*) ;;
+            *) echo "ERROR: unsafe work root: ${work_root}" >&2; exit 1 ;;
+          esac
+          rm -rf -- "${work_root}"
+          mkdir -p "${work_root}/download" "${work_root}/payload"
+
+          {
+            echo "WORK_ROOT=${work_root}"
+            echo "PAYLOAD_DOWNLOAD_DIR=${work_root}/download"
+            echo "PAYLOAD_TGZ=${work_root}/download/ptoas_payload.tgz"
+            echo "PAYLOAD_DIR=${work_root}/payload"
+            echo "PTO_ISA_SOURCE_DIR=${work_root}/pto-isa-source"
+            echo "OUTPUT_ROOT=${work_root}/npu-validation"
+            echo "RESULTS_TSV=${work_root}/remote_npu_validation_results.tsv"
+            echo "BOARD_LOG=${work_root}/board-validation.log"
+          } >> "${GITHUB_ENV}"
 
       - name: Download payload artifact
         uses: actions/download-artifact@v4
@@ -503,78 +576,136 @@ jobs:
           name: ptoas_payload
           path: ${{ env.PAYLOAD_DOWNLOAD_DIR }}
 
-      - name: Vendor pto-isa into payload (offline remote)
+      - name: Extract payload and vendor pto-isa
         shell: bash
         run: |
           set -euo pipefail
-          tmp_root="${RUNNER_TEMP:-${GITHUB_WORKSPACE}/.tmp}"
-          work="$(mktemp -d "${tmp_root}/ptoas_payload_unpack.XXXXXX")"
-          tar -xzf "${PAYLOAD_TGZ}" -C "${work}"
+          [[ -f "${PAYLOAD_TGZ}" ]] || {
+            echo "ERROR: payload tarball not found: ${PAYLOAD_TGZ}" >&2
+            exit 1
+          }
+          tar -xzf "${PAYLOAD_TGZ}" -C "${PAYLOAD_DIR}"
 
-          rm -rf "${work}/pto-isa"
-          git clone "${PTO_ISA_REPO}" "${work}/pto-isa"
+          git clone "${PTO_ISA_REPO}" "${PTO_ISA_SOURCE_DIR}"
           if [[ -n "${PTO_ISA_COMMIT}" ]]; then
-            git -C "${work}/pto-isa" checkout -f "${PTO_ISA_COMMIT}"
+            git -C "${PTO_ISA_SOURCE_DIR}" checkout -f "${PTO_ISA_COMMIT}"
           else
-            git -C "${work}/pto-isa" checkout -f origin/HEAD || true
+            git -C "${PTO_ISA_SOURCE_DIR}" checkout -f origin/HEAD
           fi
-          # Ship a working tree only; remote should not need outbound network.
-          rm -rf "${work}/pto-isa/.git"
+          mv "${PTO_ISA_SOURCE_DIR}" "${PAYLOAD_DIR}/pto-isa"
+          rm -rf -- "${PAYLOAD_DIR}/pto-isa/.git"
+          echo "Vendored pto-isa ${PTO_ISA_COMMIT:-origin/HEAD}"
 
-          tar -czf "${PAYLOAD_TGZ}" -C "${work}" .
-
-      - name: Copy payload to remote
+      - name: Run A3 board validation through TaskQueue
+        id: board
         shell: bash
         run: |
           set -euo pipefail
-          if [[ ! -f "${PAYLOAD_TGZ}" ]]; then
-            echo "ERROR: payload tarball not found: ${PAYLOAD_TGZ}"
+          device_id="${DEVICE_ID:-auto}"
+          env_file="${WORK_ROOT}/board-validation.env"
+          printf '%s\n' \
+            "STAGE=${STAGE}" \
+            "RUN_MODE=${RUN_MODE}" \
+            "SOC_VERSION=${SOC_VERSION}" \
+            "GOLDEN_MODE=npu" \
+            "SKIP_CASES=${SKIP_CASES}" \
+            "RUN_ONLY_CASES=${RUN_ONLY_CASES}" \
+            "EXPECTED_CASES_FILTER=${RUN_ONLY_CASES}" \
+            "PTO_ISA_REPO=${PTO_ISA_REPO}" \
+            "PTO_ISA_COMMIT=${PTO_ISA_COMMIT}" \
+            "OUTPUT_ROOT=${OUTPUT_ROOT}" \
+            "RESULTS_TSV=${RESULTS_TSV}" \
+            > "${env_file}"
+
+          # shellcheck disable=SC2016 # TASK_DEVICE expands inside TaskQueue.
+          printf -v board_command \
+            'cd %q && export DEVICE_ID="${TASK_DEVICE:-%s}" && bash ./test/npu_validation/scripts/run_remote_npu_validation.sh' \
+            "${PAYLOAD_DIR}" "${device_id}"
+          set +e
+          submit_output="$(task-submit \
+            --device "${device_id}" \
+            --max-time 0 \
+            --env-file "${env_file}" \
+            "${board_command}" 2>&1)"
+          submit_rc=$?
+          set -e
+          printf '%s\n' "${submit_output}" | tee "${BOARD_LOG}"
+          if [[ "${submit_rc}" -ne 0 ]]; then
+            echo "ERROR: task-submit failed (exit ${submit_rc})" | tee -a "${BOARD_LOG}" >&2
+            exit "${submit_rc}"
+          fi
+          task_id="$(printf '%s\n' "${submit_output}" | awk '
+            match($0, /task_[0-9]{8}_[0-9]{6}_[0-9]+/) {
+              id = substr($0, RSTART, RLENGTH)
+            }
+            END { print id }
+          ')"
+          [[ -n "${task_id}" ]] || {
+            echo "ERROR: task-submit did not return a task id" | tee -a "${BOARD_LOG}" >&2
+            exit 1
+          }
+
+          # shellcheck disable=SC2329 # Invoked by the signal trap below.
+          cancel_task() {
+            echo "Cancelling TaskQueue task ${task_id}" | tee -a "${BOARD_LOG}"
+            task-submit --kill "${task_id}" >/dev/null 2>&1 || true
+          }
+          trap cancel_task INT TERM
+
+          set +e
+          task-submit --timeout 0 --wait "${task_id}" 2>&1 | tee -a "${BOARD_LOG}"
+          wait_rc="${PIPESTATUS[0]}"
+          set -e
+          trap - INT TERM
+
+          set +e
+          status_output="$(task-submit --status "${task_id}" 2>&1)"
+          status_rc=$?
+          set -e
+          printf '%s\n' "${status_output}" | tee -a "${BOARD_LOG}"
+          if [[ "${status_rc}" -ne 0 ]]; then
+            echo "ERROR: task-submit --status failed (exit ${status_rc})" | tee -a "${BOARD_LOG}" >&2
+            exit "${status_rc}"
+          fi
+          if [[ "${status_output}" =~ exit=([0-9]+) ]]; then
+            task_rc="${BASH_REMATCH[1]}"
+          else
+            echo "ERROR: TaskQueue status has no exit code (wait rc=${wait_rc})" | tee -a "${BOARD_LOG}" >&2
             exit 1
           fi
-          REMOTE_DIR="/tmp/ptoas_npu_validation/${GITHUB_REPOSITORY}/${GITHUB_RUN_ID}"
-          echo "REMOTE_DIR=${REMOTE_DIR}" >> "${GITHUB_ENV}"
-          ssh -p "${REMOTE_PORT}" "${REMOTE_USER}@${REMOTE_HOST}" "rm -rf '${REMOTE_DIR}' && mkdir -p '${REMOTE_DIR}'"
-          scp -P "${REMOTE_PORT}" "${PAYLOAD_TGZ}" "${REMOTE_USER}@${REMOTE_HOST}:${REMOTE_DIR}/payload.tgz"
-
-      - name: Run remote validation
-        shell: bash
-        run: |
-          set -euo pipefail
-          if [[ -z "${DEVICE_ID}" ]]; then
-            DEVICE_ID="auto"
+          if [[ "${wait_rc}" -ne "${task_rc}" ]]; then
+            echo "WARNING: task wait rc=${wait_rc}, recorded task rc=${task_rc}" | tee -a "${BOARD_LOG}" >&2
           fi
-          ssh -p "${REMOTE_PORT}" "${REMOTE_USER}@${REMOTE_HOST}" \
-            "set -euo pipefail; \
-             cd '${REMOTE_DIR}'; \
-             tar -xzf payload.tgz; \
-             command -v task-submit >/dev/null 2>&1 || { echo 'ERROR: task-submit not found on remote host'; exit 1; }; \
-             task-submit --device '${DEVICE_ID}' --timeout 0 --max-time 0 \
-               --run \"cd '${REMOTE_DIR}' && STAGE='${STAGE}' RUN_MODE='${RUN_MODE}' SOC_VERSION='${SOC_VERSION}' PTO_ISA_REPO='${PTO_ISA_REPO}' PTO_ISA_COMMIT='${PTO_ISA_COMMIT}' DEVICE_ID=\\\${TASK_DEVICE:-${DEVICE_ID}} SKIP_CASES='${SKIP_CASES}' RUN_ONLY_CASES='${RUN_ONLY_CASES}' bash ./test/npu_validation/scripts/run_remote_npu_validation.sh\""
+          exit "${task_rc}"
 
-      - name: Fetch results
-        if: always()
-        shell: bash
-        run: |
-          set -euo pipefail
-          if [[ -z "${REMOTE_DIR:-}" ]]; then
-            echo "REMOTE_DIR is not set; skipping results fetch."
-            exit 0
-          fi
-          scp -P "${REMOTE_PORT}" "${REMOTE_USER}@${REMOTE_HOST}:${REMOTE_DIR}/remote_npu_validation_results.tsv" ./remote_npu_validation_results.tsv || true
-
-      - name: Upload results artifact
+      - name: Upload A3 board artifacts
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: remote_npu_validation_results
-          path: remote_npu_validation_results.tsv
+          name: a3-nightly-board-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            ${{ env.RESULTS_TSV }}
+            ${{ env.BOARD_LOG }}
+            ${{ env.PAYLOAD_DIR }}/test/samples/expected_npu_validation_cases.txt
           if-no-files-found: warn
+          retention-days: 14
 
-      - name: Cleanup remote
+      - name: Clean isolated work directory
         if: always()
         shell: bash
         run: |
           set -euo pipefail
-          if [[ -n "${REMOTE_DIR:-}" ]]; then
-            ssh -p "${REMOTE_PORT}" "${REMOTE_USER}@${REMOTE_HOST}" "rm -rf '${REMOTE_DIR}'" || true
+          if [[ -z "${WORK_ROOT:-}" || -z "${RUNNER_TEMP:-}" ]]; then
+            echo "Work directory was not initialized; nothing to clean."
+            exit 0
           fi
+          case "${WORK_ROOT}" in
+            "${RUNNER_TEMP}"/ptoas-a3-*) ;;
+            *) echo "ERROR: refusing to clean unsafe path: ${WORK_ROOT}" >&2; exit 1 ;;
+          esac
+
+          printf -v cleanup_command 'rm -rf -- %q' "${WORK_ROOT}"
+          task-submit --max-time 300 --run "${cleanup_command}" || {
+            echo "WARNING: TaskQueue cleanup failed; trying as the runner user" >&2
+            rm -rf -- "${WORK_ROOT}"
+          }

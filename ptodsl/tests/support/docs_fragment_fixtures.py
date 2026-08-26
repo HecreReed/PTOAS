@@ -1354,6 +1354,13 @@ FRAGMENT_FIXTURES = {
             {SNIPPET_PLACEHOLDER}
         """
     ),
+    "sync_ops.trap": _fixture(
+        f"""
+        @pto.jit(target="a5")
+        def sync_ops_trap_probe():
+            {SNIPPET_PLACEHOLDER}
+        """
+    ),
     "flash_attention.l1_tensor_views": _fixture(
         f"""
         @pto.jit(target="a5")

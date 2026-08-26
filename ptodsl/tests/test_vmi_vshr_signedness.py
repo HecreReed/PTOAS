@@ -25,7 +25,7 @@ def vmi_vshr_signed_probe():
     lhs = pto.vmi.vload(lhs_tile.as_ptr(), offset, size=128)
     rhs = pto.vmi.vload(rhs_tile.as_ptr(), offset, size=128)
     shifted = pto.vmi.vshr(lhs, rhs, mask)
-    shifted_scalar = pto.vmi.vshrs(lhs, pto.si32(3), mask)
+    shifted_scalar = pto.vmi.vshr(lhs, pto.si32(3), mask)
     _ = shifted
     _ = shifted_scalar
 
@@ -40,7 +40,7 @@ def vmi_vshr_unsigned_probe():
     lhs = pto.vmi.vload(lhs_tile.as_ptr(), offset, size=128)
     rhs = pto.vmi.vload(rhs_tile.as_ptr(), offset, size=128)
     shifted = pto.vmi.vshr(lhs, rhs, mask)
-    shifted_scalar = pto.vmi.vshrs(lhs, pto.ui32(3), mask)
+    shifted_scalar = pto.vmi.vshr(lhs, pto.ui32(3), mask)
     _ = shifted
     _ = shifted_scalar
 

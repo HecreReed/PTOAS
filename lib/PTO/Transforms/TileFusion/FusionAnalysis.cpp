@@ -6,6 +6,7 @@
 // INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
 // See LICENSE in the root of the software repository for the full text of the License.
 
+#include "PTO/Support/CodeConstants.h"
 #include "PTO/Transforms/TileFusion/FusionAnalysis.h"
 
 #include "PTO/IR/PTO.h"
@@ -23,22 +24,25 @@ namespace pto {
 namespace {
 
 static int64_t getConstantIndexOrDynamic(Value value) {
-  if (!value)
+  if (!value) {
     return ShapedType::kDynamic;
-  if (auto cst = value.getDefiningOp<arith::ConstantIndexOp>())
+  }
+  if (auto cst = value.getDefiningOp<arith::ConstantIndexOp>()) {
     return cst.value();
-  if (auto cst = value.getDefiningOp<arith::ConstantIntOp>())
+  }
+  if (auto cst = value.getDefiningOp<arith::ConstantIntOp>()) {
     return cst.value();
+  }
   return ShapedType::kDynamic;
 }
 
-static SmallVector<int64_t, 4> getValidShapeVec(Type type) {
+static SmallVector<int64_t, mlir::pto::kValue4> getValidShapeVec(Type type) {
   if (auto tileType = dyn_cast<pto::TileBufType>(type)) {
-    return SmallVector<int64_t, 4>(tileType.getValidShape().begin(),
+    return SmallVector<int64_t, mlir::pto::kValue4>(tileType.getValidShape().begin(),
                                    tileType.getValidShape().end());
   }
   if (auto shapedType = dyn_cast<ShapedType>(type)) {
-    return SmallVector<int64_t, 4>(shapedType.getShape().begin(),
+    return SmallVector<int64_t, mlir::pto::kValue4>(shapedType.getShape().begin(),
                                    shapedType.getShape().end());
   }
   return {};
@@ -50,14 +54,18 @@ static SmallVector<int64_t, 4> getValidShapeVec(Type type) {
 /// result, so that two such ops with the same name, attributes and equivalent
 /// operands are guaranteed to produce the same value.
 static bool isShapeComputableOp(Operation *op) {
-  if (!op)
+  if (!op) {
     return false;
-  if (op->getNumRegions() != 0)
+  }
+  if (op->getNumRegions() != 0) {
     return false;
-  if (op->getNumResults() != 1)
+  }
+  if (op->getNumResults() != 1) {
     return false;
-  if (!isMemoryEffectFree(op))
+  }
+  if (!isMemoryEffectFree(op)) {
     return false;
+  }
 
   // Only allow arith ops that appear in typical valid-shape computations
   // (minsi, maxsi, cmpi, select, addi, subi, muli, divsi, divui,
@@ -83,17 +91,21 @@ class StructuralSignatureMap {
 public:
   struct Key {
     void *opNamePtr; // OperationName::getAsOpaquePointer()
-    SmallVector<Value, 4> operands;
+    SmallVector<Value, mlir::pto::kValue4> operands;
     Attribute attrs;
 
     bool operator==(const Key &rhs) const {
-      if (opNamePtr != rhs.opNamePtr)
+      if (opNamePtr != rhs.opNamePtr) {
         return false;
-      if (operands.size() != rhs.operands.size())
+      }
+      if (operands.size() != rhs.operands.size()) {
         return false;
-      for (auto [l, r] : llvm::zip(operands, rhs.operands))
-        if (l != r)
+      }
+      for (auto [l, r] : llvm::zip(operands, rhs.operands)) {
+        if (l != r) {
           return false;
+        }
+      }
       return attrs == rhs.attrs;
     }
   };
@@ -107,8 +119,9 @@ public:
     }
     static unsigned getHashValue(const Key &key) {
       unsigned h = DenseMapInfo<void *>::getHashValue(key.opNamePtr);
-      for (Value v : key.operands)
+      for (Value v : key.operands) {
         h = llvm::hash_combine(h, DenseMapInfo<Value>::getHashValue(v));
+      }
       h = llvm::hash_combine(h, DenseMapInfo<Attribute>::getHashValue(key.attrs));
       return h;
     }
@@ -133,12 +146,14 @@ private:
 static Value canonicalizeValue(Value value,
                                DenseMap<Value, Value> &canonicalByValue,
                                StructuralSignatureMap &signatureMap) {
-  if (!value)
+  if (!value) {
     return value;
+  }
 
   auto cachedIt = canonicalByValue.find(value);
-  if (cachedIt != canonicalByValue.end())
+  if (cachedIt != canonicalByValue.end()) {
     return cachedIt->second;
+  }
 
   // BlockArguments are their own canonical form.
   if (auto arg = dyn_cast<BlockArgument>(value)) {
@@ -165,11 +180,12 @@ static Value canonicalizeValue(Value value,
   }
 
   // Recursively canonicalize all operands.
-  SmallVector<Value, 4> canonicalOperands;
+  SmallVector<Value, mlir::pto::kValue4> canonicalOperands;
   canonicalOperands.reserve(op->getNumOperands());
-  for (Value operand : op->getOperands())
+  for (Value operand : op->getOperands()) {
     canonicalOperands.push_back(
         canonicalizeValue(operand, canonicalByValue, signatureMap));
+  }
 
   // Build structural key and look up / create representative.
   StructuralSignatureMap::Key key;
@@ -182,7 +198,7 @@ static Value canonicalizeValue(Value value,
   return representative;
 }
 
-static constexpr unsigned kInvalidShapeDim = ~0u;
+static constexpr unsigned kInvalidShapeDim = ~0U;
 
 struct ShapeValueDims {
   unsigned rows = kInvalidShapeDim;
@@ -206,55 +222,65 @@ public:
 
   unsigned find(unsigned dim) {
     assert(dim < parent.size() && "shape dim out of range");
-    if (parent[dim] == dim)
+    if (parent[dim] == dim) {
       return dim;
+    }
     parent[dim] = find(parent[dim]);
     return parent[dim];
   }
 
   void merge(unsigned lhs, unsigned rhs) {
-    if (lhs == kInvalidShapeDim || rhs == kInvalidShapeDim)
+    if (lhs == kInvalidShapeDim || rhs == kInvalidShapeDim) {
       return;
+    }
 
     unsigned lhsRoot = find(lhs);
     unsigned rhsRoot = find(rhs);
-    if (lhsRoot == rhsRoot)
+    if (lhsRoot == rhsRoot) {
       return;
+    }
 
-    if (rank[lhsRoot] < rank[rhsRoot])
+    if (rank[lhsRoot] < rank[rhsRoot]) {
       std::swap(lhsRoot, rhsRoot);
+    }
     parent[rhsRoot] = lhsRoot;
-    if (rank[lhsRoot] == rank[rhsRoot])
+    if (rank[lhsRoot] == rank[rhsRoot]) {
       ++rank[lhsRoot];
+    }
 
     conflicts[lhsRoot] = conflicts[lhsRoot] || conflicts[rhsRoot];
     if (constants[lhsRoot] && constants[rhsRoot] &&
-        *constants[lhsRoot] != *constants[rhsRoot])
+        *constants[lhsRoot] != *constants[rhsRoot]) {
       conflicts[lhsRoot] = true;
-    else if (!constants[lhsRoot])
+    } else if (!constants[lhsRoot]) {
       constants[lhsRoot] = constants[rhsRoot];
+    }
   }
 
   void bindConstant(unsigned dim, int64_t value) {
-    if (dim == kInvalidShapeDim || value == ShapedType::kDynamic)
+    if (dim == kInvalidShapeDim || value == ShapedType::kDynamic) {
       return;
+    }
 
     unsigned root = find(dim);
-    if (constants[root] && *constants[root] != value)
+    if (constants[root] && *constants[root] != value) {
       conflicts[root] = true;
-    else
+    } else {
       constants[root] = value;
+    }
   }
 
   bool hasConflict(unsigned dim) {
-    if (dim == kInvalidShapeDim)
+    if (dim == kInvalidShapeDim) {
       return true;
+    }
     return conflicts[find(dim)];
   }
 
   std::optional<int64_t> getConstant(unsigned dim) {
-    if (dim == kInvalidShapeDim)
+    if (dim == kInvalidShapeDim) {
       return std::nullopt;
+    }
     return constants[find(dim)];
   }
 
@@ -262,16 +288,17 @@ public:
   /// buildIterationDomainInfo from proving a consistent shape.  Used when a
   /// runtime set_validshape invalidates alloc-time shape assumptions.
   void markConflict(unsigned dim) {
-    if (dim == kInvalidShapeDim)
+    if (dim == kInvalidShapeDim) {
       return;
+    }
     conflicts[find(dim)] = true;
   }
 
 private:
-  SmallVector<unsigned, 32> parent;
-  SmallVector<unsigned, 32> rank;
-  SmallVector<std::optional<int64_t>, 32> constants;
-  SmallVector<bool, 32> conflicts;
+  SmallVector<unsigned, mlir::pto::kValue32> parent;
+  SmallVector<unsigned, mlir::pto::kValue32> rank;
+  SmallVector<std::optional<int64_t>, mlir::pto::kValue32> constants;
+  SmallVector<bool, mlir::pto::kValue32> conflicts;
 };
 
 static void bindDimToValue(ShapeConstraintSolver &solver,
@@ -279,8 +306,9 @@ static void bindDimToValue(ShapeConstraintSolver &solver,
                            DenseMap<Value, Value> &canonicalByValue,
                            StructuralSignatureMap &signatureMap,
                            unsigned dim, Value value) {
-  if (!value || dim == kInvalidShapeDim)
+  if (!value || dim == kInvalidShapeDim) {
     return;
+  }
 
   int64_t constant = getConstantIndexOrDynamic(value);
   if (constant != ShapedType::kDynamic) {
@@ -294,8 +322,9 @@ static void bindDimToValue(ShapeConstraintSolver &solver,
       canonicalizeValue(value, canonicalByValue, signatureMap);
   auto [it, inserted] =
       symbolDimByValue.try_emplace(canonical, kInvalidShapeDim);
-  if (inserted)
+  if (inserted) {
     it->second = solver.createDim();
+  }
   solver.merge(dim, it->second);
 }
 
@@ -341,18 +370,21 @@ static ShapeValueDims getValueDims(
     DenseMap<Value, Value> &canonicalByValue,
     StructuralSignatureMap &signatureMap, Value value) {
   auto existing = dimsByValue.find(value);
-  if (existing != dimsByValue.end())
+  if (existing != dimsByValue.end()) {
     return existing->second;
+  }
 
   ShapeValueDims dims;
-  SmallVector<int64_t, 4> validShape = getValidShapeVec(value.getType());
-  if (validShape.size() >= 2) {
+  SmallVector<int64_t, mlir::pto::kValue4> validShape = getValidShapeVec(value.getType());
+  if (validShape.size() >= mlir::pto::kValue2) {
     dims.rows = solver.createDim();
     dims.cols = solver.createDim();
-    if (!ShapedType::isDynamic(validShape[0]))
+    if (!ShapedType::isDynamic(validShape[0])) {
       solver.bindConstant(dims.rows, validShape[0]);
-    if (!ShapedType::isDynamic(validShape[1]))
+    }
+    if (!ShapedType::isDynamic(validShape[1])) {
       solver.bindConstant(dims.cols, validShape[1]);
+    }
     bindExplicitValidDims(solver, symbolDimByValue, canonicalByValue,
                          signatureMap, value, dims);
   }
@@ -382,15 +414,17 @@ static void mergeAllShapes(
     DenseMap<Value, unsigned> &symbolDimByValue,
     DenseMap<Value, Value> &canonicalByValue,
     StructuralSignatureMap &signatureMap, ArrayRef<Value> values) {
-  if (values.empty())
+  if (values.empty()) {
     return;
+  }
   ShapeValueDims anchor = getValueDims(solver, dimsByValue, symbolDimByValue,
                                         canonicalByValue, signatureMap,
                                         values.front());
-  for (Value value : values.drop_front())
+  for (Value value : values.drop_front()) {
     mergeShapes(solver, anchor,
                 getValueDims(solver, dimsByValue, symbolDimByValue,
                              canonicalByValue, signatureMap, value));
+  }
 }
 
 static void applyShapeConstraintsForNode(
@@ -402,7 +436,7 @@ static void applyShapeConstraintsForNode(
   const FusionOpSemantics &semantics = node.semantics;
   switch (semantics.computeFamily) {
   case FusionComputeFamily::Elementwise: {
-    SmallVector<Value, 6> values;
+    SmallVector<Value, mlir::pto::kValue6> values;
     values.append(semantics.tileInputs.begin(), semantics.tileInputs.end());
     values.append(semantics.tileOutputs.begin(), semantics.tileOutputs.end());
     mergeAllShapes(solver, dimsByValue, symbolDimByValue, canonicalByValue,
@@ -414,36 +448,40 @@ static void applyShapeConstraintsForNode(
                    signatureMap, semantics.tileOutputs);
     return;
   case FusionComputeFamily::RowBroadcastBinary: {
-    if (semantics.tileOutputs.empty())
+    if (semantics.tileOutputs.empty()) {
       return;
+    }
     ShapeValueDims output = getValueDims(
         solver, dimsByValue, symbolDimByValue, canonicalByValue, signatureMap,
         semantics.tileOutputs.front());
-    if (!semantics.tileInputs.empty())
+    if (!semantics.tileInputs.empty()) {
       mergeShapes(solver,
                   getValueDims(solver, dimsByValue, symbolDimByValue,
                                canonicalByValue, signatureMap,
                                semantics.tileInputs[0]),
                   output);
-    if (semantics.tileInputs.size() >= 2) {
+    }
+    if (semantics.tileInputs.size() >= mlir::pto::kValue2) {
       ShapeValueDims rowInput = getValueDims(
           solver, dimsByValue, symbolDimByValue, canonicalByValue, signatureMap,
           semantics.tileInputs[1]);
       mergeRows(solver, rowInput, output);
       solver.bindConstant(rowInput.cols, 1);
     }
-    for (Value extraOutput : ArrayRef<Value>(semantics.tileOutputs).drop_front())
+    for (Value extraOutput : ArrayRef<Value>(semantics.tileOutputs).drop_front()) {
       mergeShapes(solver, output,
                   getValueDims(solver, dimsByValue, symbolDimByValue,
                                canonicalByValue, signatureMap, extraOutput));
+    }
     return;
   }
   case FusionComputeFamily::ReduceRow:
   case FusionComputeFamily::ReduceCol: {
     mergeAllShapes(solver, dimsByValue, symbolDimByValue, canonicalByValue,
                    signatureMap, semantics.tileInputs);
-    if (semantics.tileInputs.empty() || semantics.tileOutputs.empty())
+    if (semantics.tileInputs.empty() || semantics.tileOutputs.empty()) {
       return;
+    }
     ShapeValueDims input = getValueDims(
         solver, dimsByValue, symbolDimByValue, canonicalByValue, signatureMap,
         semantics.tileInputs.front());
@@ -457,10 +495,11 @@ static void applyShapeConstraintsForNode(
       solver.bindConstant(output.rows, 1);
       mergeCols(solver, input, output);
     }
-    for (Value extraOutput : ArrayRef<Value>(semantics.tileOutputs).drop_front())
+    for (Value extraOutput : ArrayRef<Value>(semantics.tileOutputs).drop_front()) {
       mergeShapes(solver, output,
                   getValueDims(solver, dimsByValue, symbolDimByValue,
                                canonicalByValue, signatureMap, extraOutput));
+    }
     return;
   }
   case FusionComputeFamily::Unknown:
@@ -479,21 +518,24 @@ static ShapeValueDims getIterationDomainDimsForNode(
   case FusionComputeFamily::Elementwise:
   case FusionComputeFamily::ScalarExpand:
   case FusionComputeFamily::RowBroadcastBinary:
-    if (!semantics.tileOutputs.empty())
+    if (!semantics.tileOutputs.empty()) {
       return getValueDims(solver, dimsByValue, symbolDimByValue,
                           canonicalByValue, signatureMap,
                           semantics.tileOutputs.front());
-    if (!semantics.tileInputs.empty())
+    }
+    if (!semantics.tileInputs.empty()) {
       return getValueDims(solver, dimsByValue, symbolDimByValue,
                           canonicalByValue, signatureMap,
                           semantics.tileInputs.front());
+    }
     break;
   case FusionComputeFamily::ReduceRow:
   case FusionComputeFamily::ReduceCol:
-    if (!semantics.tileInputs.empty())
+    if (!semantics.tileInputs.empty()) {
       return getValueDims(solver, dimsByValue, symbolDimByValue,
                           canonicalByValue, signatureMap,
                           semantics.tileInputs.front());
+    }
     break;
   case FusionComputeFamily::Unknown:
     break;
@@ -504,8 +546,9 @@ static ShapeValueDims getIterationDomainDimsForNode(
 static IterationDomainInfo
 buildIterationDomainInfo(ShapeConstraintSolver &solver, ShapeValueDims dims) {
   IterationDomainInfo info;
-  if (!dims.isValid())
+  if (!dims.isValid()) {
     return info;
+  }
   if (solver.hasConflict(dims.rows) || solver.hasConflict(dims.cols)) {
     info.unprovenReason = IterationDomainUnprovenReason::InconsistentShape;
     return info;
@@ -513,10 +556,12 @@ buildIterationDomainInfo(ShapeConstraintSolver &solver, ShapeValueDims dims) {
 
   info.proof = IterationDomainProof::Proven;
   info.unprovenReason = IterationDomainUnprovenReason::None;
-  if (std::optional<int64_t> row = solver.getConstant(dims.rows))
+  if (std::optional<int64_t> row = solver.getConstant(dims.rows)) {
     info.vRow = *row;
-  if (std::optional<int64_t> col = solver.getConstant(dims.cols))
+  }
+  if (std::optional<int64_t> col = solver.getConstant(dims.cols)) {
     info.vCol = *col;
+  }
   return info;
 }
 
@@ -571,9 +616,10 @@ struct Rank2IterationSpace {
 };
 
 static std::optional<Rank2IterationSpace> getRank2IterationSpace(Value value) {
-  SmallVector<int64_t, 4> validShape = getValidShapeVec(value.getType());
-  if (validShape.size() < 2)
+  SmallVector<int64_t, mlir::pto::kValue4> validShape = getValidShapeVec(value.getType());
+  if (validShape.size() < mlir::pto::kValue2) {
     return std::nullopt;
+  }
   return Rank2IterationSpace{validShape[0], validShape[1]};
 }
 
@@ -581,8 +627,9 @@ static void mergeIterationDim(int64_t &mergedDim, int64_t dim,
                               IterationDomainInfo &info) {
   if (mergedDim == ShapedType::kDynamic || dim == ShapedType::kDynamic) {
     mergedDim = ShapedType::kDynamic;
-    if (info.unprovenReason == IterationDomainUnprovenReason::None)
+    if (info.unprovenReason == IterationDomainUnprovenReason::None) {
       info.unprovenReason = IterationDomainUnprovenReason::DynamicShape;
+    }
     return;
   }
 
@@ -597,19 +644,22 @@ inferConsensusIterationDomain(ArrayRef<Value> anchorValues) {
   IterationDomainInfo info;
   info.unprovenReason = IterationDomainUnprovenReason::None;
 
-  if (anchorValues.empty())
+  if (anchorValues.empty()) {
     return info;
+  }
 
   std::optional<Rank2IterationSpace> firstSpace =
       getRank2IterationSpace(anchorValues.front());
-  if (!firstSpace)
+  if (!firstSpace) {
     return info;
+  }
 
   info.vRow = firstSpace->rows;
   info.vCol = firstSpace->cols;
 
-  if (info.vRow == ShapedType::kDynamic || info.vCol == ShapedType::kDynamic)
+  if (info.vRow == ShapedType::kDynamic || info.vCol == ShapedType::kDynamic) {
     info.unprovenReason = IterationDomainUnprovenReason::DynamicShape;
+  }
 
   for (Value value : ArrayRef<Value>(anchorValues).drop_front()) {
     std::optional<Rank2IterationSpace> space = getRank2IterationSpace(value);
@@ -629,8 +679,9 @@ inferConsensusIterationDomain(ArrayRef<Value> anchorValues) {
     return info;
   }
 
-  if (info.unprovenReason == IterationDomainUnprovenReason::None)
+  if (info.unprovenReason == IterationDomainUnprovenReason::None) {
     info.unprovenReason = IterationDomainUnprovenReason::DynamicShape;
+  }
   return info;
 }
 
@@ -638,7 +689,7 @@ static IterationDomainInfo
 inferIterationDomainInfo(const FusionOpSemantics &semantics) {
   switch (semantics.computeFamily) {
   case FusionComputeFamily::Elementwise: {
-    SmallVector<Value, 6> anchors;
+    SmallVector<Value, mlir::pto::kValue6> anchors;
     anchors.append(semantics.tileInputs.begin(), semantics.tileInputs.end());
     anchors.append(semantics.tileOutputs.begin(), semantics.tileOutputs.end());
     return inferConsensusIterationDomain(anchors);
@@ -708,17 +759,20 @@ static LogicalResult inferDynamicIterationDomain(FusionBlockAnalysis &analysis) 
   StructuralSignatureMap signatureMap;
 
   for (const FusionComputeNode &node : analysis.computeNodes) {
-    for (Value input : node.semantics.tileInputs)
+    for (Value input : node.semantics.tileInputs) {
       (void)getValueDims(solver, dimsByValue, symbolDimByValue,
-                          canonicalByValue, signatureMap, input);
-    for (Value output : node.semantics.tileOutputs)
+                         canonicalByValue, signatureMap, input);
+    }
+    for (Value output : node.semantics.tileOutputs) {
       (void)getValueDims(solver, dimsByValue, symbolDimByValue,
-                          canonicalByValue, signatureMap, output);
+                         canonicalByValue, signatureMap, output);
+    }
   }
 
-  for (const FusionComputeNode &node : analysis.computeNodes)
+  for (const FusionComputeNode &node : analysis.computeNodes) {
     applyShapeConstraintsForNode(solver, dimsByValue, symbolDimByValue,
                                  canonicalByValue, signatureMap, node);
+  }
 
   // pto.set_validshape mutates runtime valid-row/valid-col metadata in-place
   // on a tile_buf.  If a set_validshape modifies a tile that participates in
@@ -730,8 +784,9 @@ static LogicalResult inferDynamicIterationDomain(FusionBlockAnalysis &analysis) 
   if (analysis.block) {
     for (Operation &op : *analysis.block) {
       auto setVS = dyn_cast<pto::SetValidShapeOp>(op);
-      if (!setVS)
+      if (!setVS) {
         continue;
+      }
       Value source = setVS.getSource();
       auto dimsIt = dimsByValue.find(source);
       if (dimsIt != dimsByValue.end()) {
@@ -770,8 +825,9 @@ static FusionWriteInstanceEscapeClass classifyEscapeClass(
       live.hasLocalHardBoundaryUsers) {
     return FusionWriteInstanceEscapeClass::HardExternal;
   }
-  if (live.hasLocalBoundaryUsers)
+  if (live.hasLocalBoundaryUsers) {
     return FusionWriteInstanceEscapeClass::LocalBoundaryExternal;
+  }
   return FusionWriteInstanceEscapeClass::Internal;
 }
 
@@ -780,10 +836,12 @@ static Value getWriteInstanceStorageValue(Operation *op, unsigned outputIndex,
   if (auto dpsIface = dyn_cast<pto::PTO_DpsInitOpInterface>(op)) {
     unsigned tileOutputIndex = 0;
     for (Value init : dpsIface.getDpsInits()) {
-      if (!isa<pto::TileBufType>(init.getType()))
+      if (!isa<pto::TileBufType>(init.getType())) {
         continue;
-      if (tileOutputIndex == outputIndex)
+      }
+      if (tileOutputIndex == outputIndex) {
         return init;
+      }
       ++tileOutputIndex;
     }
   }
@@ -803,14 +861,16 @@ static unsigned getOrCreateLivenessSlot(DenseMap<Value, unsigned> &slotByValue,
 }
 
 static void appendUniqueNode(SmallVectorImpl<unsigned> &nodes, unsigned nodeId) {
-  if (!llvm::is_contained(nodes, nodeId))
+  if (!llvm::is_contained(nodes, nodeId)) {
     nodes.push_back(nodeId);
+  }
 }
 
 static void recordLastLocalConsumer(std::optional<unsigned> &lastLocalConsumer,
                                     unsigned consumerId) {
-  if (!lastLocalConsumer || consumerId > *lastLocalConsumer)
+  if (!lastLocalConsumer || consumerId > *lastLocalConsumer) {
     lastLocalConsumer = consumerId;
+  }
 }
 
 static void finalizeBlockLiveness(
@@ -827,17 +887,20 @@ static void finalizeBlockLiveness(
       }
 
       auto kindIt = kindByOp.find(user);
-      if (kindIt == kindByOp.end())
+      if (kindIt == kindByOp.end()) {
         continue;
+      }
 
-      if (user->hasTrait<OpTrait::IsTerminator>())
+      if (user->hasTrait<OpTrait::IsTerminator>()) {
         state.live.escapesBlock = true;
+      }
 
       switch (kindIt->second) {
       case FusionOpKind::Compute: {
         auto nodeIt = computeNodeByOp.find(user);
-        if (nodeIt == computeNodeByOp.end())
+        if (nodeIt == computeNodeByOp.end()) {
           continue;
+        }
         unsigned consumerId = nodeIt->second;
         appendUniqueNode(state.live.consumerNodes, consumerId);
         recordLastLocalConsumer(state.live.lastLocalConsumer, consumerId);
@@ -858,28 +921,34 @@ static std::optional<unsigned> findReachingWriteInstance(
     ArrayRef<unsigned> writeInstanceIds,
     ArrayRef<MutableWriteInstance> mutableWriteInstances,
     std::optional<unsigned> userBlockOrder) {
-  if (writeInstanceIds.empty())
+  if (writeInstanceIds.empty()) {
     return std::nullopt;
+  }
 
-  if (!userBlockOrder)
+  if (!userBlockOrder) {
     return writeInstanceIds.back();
+  }
 
   for (unsigned writeInstanceId : llvm::reverse(writeInstanceIds)) {
     if (mutableWriteInstances[writeInstanceId].producerBlockOrder <
-        *userBlockOrder)
+        *userBlockOrder) {
       return writeInstanceId;
+    }
   }
   return std::nullopt;
 }
 
 static bool isDpsInitOperandUse(OpOperand &use) {
   auto dpsIface = dyn_cast<pto::PTO_DpsInitOpInterface>(use.getOwner());
-  if (!dpsIface)
+  if (!dpsIface) {
     return false;
+  }
 
-  for (OpOperand &dpsInit : dpsIface.getDpsInitsMutable())
-    if (&dpsInit == &use)
+  for (OpOperand &dpsInit : dpsIface.getDpsInitsMutable()) {
+    if (&dpsInit == &use) {
       return true;
+    }
+  }
   return false;
 }
 
@@ -890,27 +959,31 @@ static void finalizeWriteInstances(
     ArrayRef<MutableLiveness> mutableLiveness,
     SmallVectorImpl<MutableWriteInstance> &mutableWriteInstances) {
   for (const MutableLiveness &storageState : mutableLiveness) {
-    if (storageState.live.writeInstances.empty())
+    if (storageState.live.writeInstances.empty()) {
       continue;
+    }
 
     for (OpOperand &use : storageState.live.value.getUses()) {
-      if (isDpsInitOperandUse(use))
+      if (isDpsInitOperandUse(use)) {
         continue;
+      }
 
       Operation *user = use.getOwner();
       bool isInBlock = user->getBlock() == &block;
       std::optional<unsigned> userBlockOrder;
       if (isInBlock) {
         auto orderIt = blockOrderByOp.find(user);
-        if (orderIt != blockOrderByOp.end())
+        if (orderIt != blockOrderByOp.end()) {
           userBlockOrder = orderIt->second;
+        }
       }
 
       std::optional<unsigned> writeInstanceId = findReachingWriteInstance(
           storageState.live.writeInstances, mutableWriteInstances,
           userBlockOrder);
-      if (!writeInstanceId)
+      if (!writeInstanceId) {
         continue;
+      }
 
       FusionWriteInstanceLiveness &writeLive =
           mutableWriteInstances[*writeInstanceId].live;
@@ -922,17 +995,20 @@ static void finalizeWriteInstances(
       }
 
       auto kindIt = kindByOp.find(user);
-      if (kindIt == kindByOp.end())
+      if (kindIt == kindByOp.end()) {
         continue;
+      }
 
-      if (user->hasTrait<OpTrait::IsTerminator>())
+      if (user->hasTrait<OpTrait::IsTerminator>()) {
         writeLive.escapesBlock = true;
+      }
 
       switch (kindIt->second) {
       case FusionOpKind::Compute: {
         auto nodeIt = computeNodeByOp.find(user);
-        if (nodeIt == computeNodeByOp.end())
+        if (nodeIt == computeNodeByOp.end()) {
           continue;
+        }
         unsigned consumerId = nodeIt->second;
         appendUniqueNode(writeLive.consumerNodes, consumerId);
         recordLastLocalConsumer(writeLive.lastLocalConsumer, consumerId);
@@ -948,8 +1024,9 @@ static void finalizeWriteInstances(
     }
   }
 
-  for (MutableWriteInstance &state : mutableWriteInstances)
+  for (MutableWriteInstance &state : mutableWriteInstances) {
     state.live.escapeClass = classifyEscapeClass(state.live);
+  }
 }
 
 /// Build the shared dataflow graph (compute nodes, DFG edges, value liveness,
@@ -963,8 +1040,8 @@ static FailureOr<FusionBlockAnalysis> analyzeBlockDFG(Block &block) {
 
   DenseMap<Value, unsigned> producerByValue;
   DenseMap<Value, unsigned> livenessSlotByValue;
-  SmallVector<MutableLiveness, 8> mutableLiveness;
-  SmallVector<MutableWriteInstance, 8> mutableWriteInstances;
+  SmallVector<MutableLiveness, mlir::pto::kValue8> mutableLiveness;
+  SmallVector<MutableWriteInstance, mlir::pto::kValue8> mutableWriteInstances;
   DenseMap<Operation *, FusionOpKind> kindByOp;
   DenseMap<Operation *, unsigned> computeNodeByOp;
   DenseMap<Operation *, unsigned> blockOrderByOp;
@@ -980,10 +1057,12 @@ static FailureOr<FusionBlockAnalysis> analyzeBlockDFG(Block &block) {
     kindByOp[&op] = semanticsOr->kind;
 
     if (semanticsOr->kind == FusionOpKind::LocalBoundary) {
-      for (Value input : semanticsOr->tileInputs)
+      for (Value input : semanticsOr->tileInputs) {
         getOrCreateLivenessSlot(livenessSlotByValue, mutableLiveness, input);
-      for (Value output : semanticsOr->tileOutputs)
+      }
+      for (Value output : semanticsOr->tileOutputs) {
         getOrCreateLivenessSlot(livenessSlotByValue, mutableLiveness, output);
+      }
       ++blockOrder;
       continue;
     }
@@ -1026,8 +1105,9 @@ static FailureOr<FusionBlockAnalysis> analyzeBlockDFG(Block &block) {
                               node.id);
 
       auto producerIt = producerByValue.find(input);
-      if (producerIt == producerByValue.end())
+      if (producerIt == producerByValue.end()) {
         continue;
+      }
 
       FusionDFGEdge edge;
       edge.producerNode = producerIt->second;
@@ -1037,8 +1117,9 @@ static FailureOr<FusionBlockAnalysis> analyzeBlockDFG(Block &block) {
       unsigned edgeId = analysis.edges.size();
       analysis.edges.push_back(edge);
       node.incomingEdges.push_back(edgeId);
-      if (edge.producerNode < analysis.computeNodes.size())
+      if (edge.producerNode < analysis.computeNodes.size()) {
         analysis.computeNodes[edge.producerNode].outgoingEdges.push_back(edgeId);
+      }
     }
 
     analysis.computeNodes.push_back(std::move(node));
@@ -1050,11 +1131,13 @@ static FailureOr<FusionBlockAnalysis> analyzeBlockDFG(Block &block) {
                          mutableLiveness, mutableWriteInstances);
 
   analysis.liveness.reserve(mutableLiveness.size());
-  for (MutableLiveness &state : mutableLiveness)
+  for (MutableLiveness &state : mutableLiveness) {
     analysis.liveness.push_back(std::move(state.live));
+  }
   analysis.writeInstances.reserve(mutableWriteInstances.size());
-  for (MutableWriteInstance &state : mutableWriteInstances)
+  for (MutableWriteInstance &state : mutableWriteInstances) {
     analysis.writeInstances.push_back(std::move(state.live));
+  }
 
   return std::move(analysis);
 }
@@ -1063,13 +1146,17 @@ static LogicalResult analyzeRegionDFG(Region &region,
                                       SmallVectorImpl<FusionBlockAnalysis> &blocks) {
   for (Block &block : region.getBlocks()) {
     FailureOr<FusionBlockAnalysis> blockAnalysis = analyzeBlockDFG(block);
-    if (failed(blockAnalysis))
+    if (failed(blockAnalysis)) {
       return failure();
+    }
     blocks.push_back(std::move(*blockAnalysis));
-    for (Operation &op : block)
-      for (Region &nested : op.getRegions())
-        if (failed(analyzeRegionDFG(nested, blocks)))
+    for (Operation &op : block) {
+      for (Region &nested : op.getRegions()) {
+        if (failed(analyzeRegionDFG(nested, blocks))) {
           return failure();
+        }
+      }
+    }
   }
   return success();
 }
@@ -1079,8 +1166,9 @@ static LogicalResult analyzeRegionDFG(Region &region,
 FailureOr<PreFusionAnalysisResult>
 buildPreFusionAnalysisDFG(func::FuncOp func) {
   PreFusionAnalysisResult result;
-  if (failed(analyzeRegionDFG(func.getRegion(), result.blocks)))
+  if (failed(analyzeRegionDFG(func.getRegion(), result.blocks))) {
     return failure();
+  }
   return std::move(result);
 }
 
@@ -1088,11 +1176,13 @@ LogicalResult inferIterationDomainClasses(PreFusionAnalysisResult &result,
                                           bool enableShapeInference) {
   for (FusionBlockAnalysis &block : result.blocks) {
     if (enableShapeInference) {
-      if (failed(inferDynamicIterationDomain(block)))
+      if (failed(inferDynamicIterationDomain(block))) {
         return failure();
+      }
     } else {
-      if (failed(inferStaticIterationDomain(block)))
+      if (failed(inferStaticIterationDomain(block))) {
         return failure();
+      }
     }
   }
   return success();
@@ -1101,10 +1191,12 @@ LogicalResult inferIterationDomainClasses(PreFusionAnalysisResult &result,
 FailureOr<PreFusionAnalysisResult>
 buildPreFusionAnalysis(func::FuncOp func, bool enableShapeInference) {
   FailureOr<PreFusionAnalysisResult> result = buildPreFusionAnalysisDFG(func);
-  if (failed(result))
+  if (failed(result)) {
     return failure();
-  if (failed(inferIterationDomainClasses(*result, enableShapeInference)))
+  }
+  if (failed(inferIterationDomainClasses(*result, enableShapeInference))) {
     return failure();
+  }
   return std::move(*result);
 }
 

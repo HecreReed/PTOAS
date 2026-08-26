@@ -8,6 +8,7 @@
 
 #include "PTO/IR/PTO.h"
 #include "PTO/Transforms/Passes.h"
+#include "Utils.h"
 
 #include "mlir/Dialect/Arith/IR/Arith.h"
 #include "mlir/Dialect/Func/IR/FuncOps.h"
@@ -18,6 +19,7 @@
 #include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/SmallPtrSet.h"
 #include "llvm/ADT/StringRef.h"
+#include "llvm/Support/raw_ostream.h"
 
 #include <algorithm>
 #include <map>
@@ -130,8 +132,9 @@ static std::optional<PipePeerKey> getPipePeerKey(Value localAddr,
     auto peerFunc =
         lookupPeerFuncAcrossContainer(importOp.getOperation(),
                                       importOp.getPeerFuncAttr());
-    if (!peerFunc)
+    if (!peerFunc) {
       return std::nullopt;
+    }
     return PipePeerKey{getFuncSymbol(peerFunc), importOp.getName().str(), 0};
   }
 
@@ -147,8 +150,9 @@ static PipeInitInfo buildPipeInitInfo(InitOpT initOp) {
   info.slotSize = initOp.getSlotSize();
   info.slotNum = initOp.getSlotNum();
   if constexpr (std::is_same_v<InitOpT, InitializeL2G2LPipeOp>) {
-    if (auto attr = initOp.getLocalSlotNumAttr())
+    if (auto attr = initOp.getLocalSlotNumAttr()) {
       info.localSlotNum = attr.getInt();
+    }
     info.globalOnly = !initOp.getLocalAddr();
   }
   return info;
@@ -157,10 +161,13 @@ static PipeInitInfo buildPipeInitInfo(InitOpT initOp) {
 static PipePeerKey getGlobalTensorPipeKey(const PipeInitInfo &info) {
   std::string id = "unknown";
   if (auto idAttr =
-          info.op->getAttrOfType<IntegerAttr>(kFrontendPipeIdAttrName))
+          info.op->getAttrOfType<IntegerAttr>(kFrontendPipeIdAttrName)) {
     id = std::to_string(idAttr.getInt());
-  else
-    id = std::to_string(reinterpret_cast<uintptr_t>(info.op));
+  } else {
+    llvm::raw_string_ostream stream(id);
+    stream << info.op;
+    stream.flush();
+  }
   return PipePeerKey{"__pto_globaltensor_pipe", "id_" + id, info.dirMask};
 }
 
@@ -175,12 +182,15 @@ static LogicalResult collectPeerAwareInit(InitOpT initOp,
     return success();
   }
 
-  auto recordAddr = [&](Value addr, int8_t effectiveDirMask) {
-    if (!addr)
+  auto recordAddr = [&info, &keyedInits](Value addr,
+                                         int8_t effectiveDirMask) {
+    if (!addr) {
       return false;
+    }
     auto key = getPipePeerKey(addr, info.funcOp);
-    if (!key)
+    if (!key) {
       return false;
+    }
     key->dirMask = effectiveDirMask;
     keyedInits[*key].push_back(info.op);
     return true;
@@ -195,10 +205,12 @@ static LogicalResult collectPeerAwareInit(InitOpT initOp,
     recorded = recordAddr(getLocalAddrOperand(initOp), info.dirMask);
   }
 
-  if (recorded)
+  if (recorded) {
     initInfos.push_back(info);
-  if (recorded || getFlagBaseAttr(initOp))
+  }
+  if (recorded || getFlagBaseAttr(initOp)) {
     return success();
+  }
 
   return initOp.emitOpError(
       "requires local_addr to come from pto.reserve_buffer or "
@@ -206,25 +218,29 @@ static LogicalResult collectPeerAwareInit(InitOpT initOp,
 }
 
 static IntegerAttr getFlagBaseAttr(Operation *op) {
-  if (auto initOp = dyn_cast<InitializeL2LPipeOp>(op))
+  if (auto initOp = dyn_cast<InitializeL2LPipeOp>(op)) {
     return initOp.getFlagBaseAttr();
+  }
   return cast<InitializeL2G2LPipeOp>(op).getFlagBaseAttr();
 }
 
 static void setFlagBaseAttr(Operation *op, IntegerAttr attr) {
   if (auto initOp = dyn_cast<InitializeL2LPipeOp>(op)) {
-    if (!initOp.getFlagBaseAttr())
+    if (!initOp.getFlagBaseAttr()) {
       setFlagBaseAttr(initOp, attr);
+    }
     return;
   }
   auto initOp = cast<InitializeL2G2LPipeOp>(op);
-  if (!initOp.getFlagBaseAttr())
+  if (!initOp.getFlagBaseAttr()) {
     setFlagBaseAttr(initOp, attr);
+  }
 }
 
 static std::optional<int32_t> getFrontendPipeId(Operation *op) {
-  if (auto attr = op->getAttrOfType<IntegerAttr>(kFrontendPipeIdAttrName))
+  if (auto attr = op->getAttrOfType<IntegerAttr>(kFrontendPipeIdAttrName)) {
     return attr.getInt();
+  }
   return std::nullopt;
 }
 
@@ -249,8 +265,9 @@ buildPeerAwareComponents(const SmallVectorImpl<PipeInitInfo> &initInfos,
   for (const auto &it : keyedInits) {
     SmallVector<Operation *> uniqueOps;
     for (Operation *op : it.second) {
-      if (std::find(uniqueOps.begin(), uniqueOps.end(), op) == uniqueOps.end())
+      if (std::find(uniqueOps.begin(), uniqueOps.end(), op) == uniqueOps.end()) {
         uniqueOps.push_back(op);
+      }
     }
     for (size_t i = 0; i < uniqueOps.size(); ++i) {
       for (size_t j = i + 1; j < uniqueOps.size(); ++j) {
@@ -263,8 +280,9 @@ buildPeerAwareComponents(const SmallVectorImpl<PipeInitInfo> &initInfos,
   SmallVector<PipeComponent> components;
   llvm::SmallPtrSet<Operation *, kVisitedInitReserveSize> visited;
   for (const PipeInitInfo &rootInfo : initInfos) {
-    if (!visited.insert(rootInfo.op).second)
+    if (!visited.insert(rootInfo.op).second) {
       continue;
+    }
 
     SmallVector<Operation *> stack{rootInfo.op};
     PipeComponent component;
@@ -272,8 +290,9 @@ buildPeerAwareComponents(const SmallVectorImpl<PipeInitInfo> &initInfos,
       Operation *current = stack.pop_back_val();
       component.ops.push_back(current);
       for (Operation *neighbor : adjacency[current]) {
-        if (visited.insert(neighbor).second)
+        if (visited.insert(neighbor).second) {
           stack.push_back(neighbor);
+        }
       }
     }
 
@@ -327,10 +346,11 @@ buildPeerAwareComponents(const SmallVectorImpl<PipeInitInfo> &initInfos,
         // producer/consumer functions. Keep the smallest observed id only as a
         // stable component sort key; cross-function pairing is determined by
         // the peer buffer contract instead of frontend id equality.
-        if (component.frontendId)
+        if (component.frontendId) {
           component.frontendId = std::min(*component.frontendId, *frontendId);
-        else
+        } else {
           component.frontendId = *frontendId;
+        }
       }
     }
 
@@ -340,9 +360,10 @@ buildPeerAwareComponents(const SmallVectorImpl<PipeInitInfo> &initInfos,
   llvm::stable_sort(components, [](const PipeComponent &lhs,
                                    const PipeComponent &rhs) {
     auto sortKey = [](const PipeComponent &component) {
-      if (component.frontendId)
+      if (component.frontendId) {
         return std::tuple(0, *component.frontendId, component.dirMask,
                           component.creationOrder);
+      }
       return std::tuple(1, 0, int8_t{0}, component.creationOrder);
     };
     return sortKey(lhs) < sortKey(rhs);
@@ -370,15 +391,17 @@ static LogicalResult reserveComponentFlagBase(const PipeComponent &component,
   }
   for (const std::string &funcName : component.participants) {
     for (const FlagInterval &used : usedByFunc[funcName]) {
-      if (!overlaps(interval, used))
+      if (!overlaps(interval, used)) {
         continue;
+      }
       return component.ops.front()->emitOpError(
           "conflicting flag_base across peer pipe init components in the same function");
     }
   }
 
-  for (const std::string &funcName : component.participants)
+  for (const std::string &funcName : component.participants) {
     usedByFunc[funcName].push_back(interval);
+  }
   return success();
 }
 
@@ -402,19 +425,22 @@ static FailureOr<int32_t> chooseFlagBaseForComponent(const PipeComponent &compon
     int32_t nextCandidate = candidateBase + 2;
     for (const std::string &funcName : component.participants) {
       for (const FlagInterval &used : usedByFunc[funcName]) {
-        if (!overlaps(candidate, used))
+        if (!overlaps(candidate, used)) {
           continue;
+        }
         conflict = true;
         nextCandidate = std::max(nextCandidate, alignToEven(used.end));
       }
     }
-    if (!conflict)
+    if (!conflict) {
       break;
+    }
     candidateBase = nextCandidate;
   }
 
-  if (failed(reserveComponentFlagBase(component, candidateBase, usedByFunc)))
+  if (failed(reserveComponentFlagBase(component, candidateBase, usedByFunc))) {
     return failure();
+  }
   return candidateBase;
 }
 
@@ -429,30 +455,35 @@ struct PTOResolveReservedBuffersPass
     PipeInitGroups keyedInits;
     LogicalResult status = success();
 
-    auto collectInit = [&](auto initOp) {
-      if (failed(status))
+    auto collectInit = [&initInfos, &keyedInits, &status](auto initOp) {
+      if (failed(status)) {
         return;
+      }
       status = collectPeerAwareInit(initOp, initInfos, keyedInits);
     };
 
     moduleOp.walk([&](InitializeL2LPipeOp initOp) { collectInit(initOp); });
     moduleOp.walk([&](InitializeL2G2LPipeOp initOp) { collectInit(initOp); });
-    if (failed(status))
+    if (failed(status)) {
       return failure();
+    }
 
     auto componentsOr = buildPeerAwareComponents(initInfos, keyedInits);
-    if (failed(componentsOr))
+    if (failed(componentsOr)) {
       return failure();
+    }
 
     OpBuilder builder(moduleOp.getContext());
     PipeFlagUsage usedByFunc;
     for (const PipeComponent &component : *componentsOr) {
       auto chosenBaseOr = chooseFlagBaseForComponent(component, usedByFunc);
-      if (failed(chosenBaseOr))
+      if (failed(chosenBaseOr)) {
         return failure();
+      }
       auto flagBaseAttr = builder.getI32IntegerAttr(*chosenBaseOr);
-      for (Operation *op : component.ops)
+      for (Operation *op : component.ops) {
         setFlagBaseAttr(op, flagBaseAttr);
+      }
     }
 
     return success();
@@ -502,9 +533,10 @@ struct PTOResolveReservedBuffersPass
 
         auto peerReserve =
             findReserveBufferByName(peerFunc, importOp.getName());
-        if (!peerReserve)
+        if (!peerReserve) {
           return importOp.emitOpError(
               "expects matching peer reserve_buffer to exist");
+        }
 
         auto baseAttr = peerReserve.getBaseAttr();
         if (!baseAttr) {
@@ -523,8 +555,9 @@ struct PTOResolveReservedBuffersPass
       }
     }
 
-    for (Operation *op : eraseOps)
+    for (Operation *op : eraseOps) {
       op->erase();
+    }
 
     return success();
   }
@@ -534,7 +567,16 @@ struct PTOResolveReservedBuffersPass
     if (failed(assignPeerAwareFlagBases(moduleOp)) ||
         failed(materializeResolvedAddresses(moduleOp))) {
       signalPassFailure();
+      return;
     }
+
+    LogicalResult noAliasStatus = success();
+    moduleOp.walk([&](func::FuncOp func) {
+      if (succeeded(noAliasStatus) && failed(verifySemanticNoAliasRanges(func)))
+        noAliasStatus = failure();
+    });
+    if (failed(noAliasStatus))
+      signalPassFailure();
   }
 };
 

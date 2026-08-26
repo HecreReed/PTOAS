@@ -1,0 +1,106 @@
+// Copyright (c) 2026 Huawei Technologies Co., Ltd.
+// This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+// CANN Open Software License Agreement Version 2.0 (the "License").
+// Please refer to the License for details. You may not use this file except in compliance with the License.
+// THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+// INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+// See LICENSE in the root of the software repository for the full text of the License.
+
+// RUN: ptoas --enable-insert-sync --pto-level=level2 --pto-arch a3 --mlir-print-ir-after=pto-insert-sync %s 2>&1 1>/dev/null | FileCheck %s
+
+// Companion to multi_tile_same_region_two_gets_sync.pto, covering the other
+// half of the issue #1118 blast radius: TWO DISTINCT `pto.alloc_multi_tile`
+// regions, one dynamic-slot get each, both consumed by one vector op.
+//
+// Each region's back edge is unambiguous on its own (the tload's slot and the
+// tadd's read of that same slot are the same SSA value), so each keeps its
+// per-slot dyn event pair -- both regions stay double-buffered. The two pairs
+// are independent: they guard different memory and different event lanes.
+//
+// The bug this pins: a slot-keyed pair rendezvouses per event lane, so it does
+// NOT serialize its (src, dst) pipe pair. Before the fix, region A's pair was
+// treated as whole-pipe coverage for region B's -- by the `alreadySync`
+// transitive elimination in InsertSyncAnalysis, and then by
+// RemoveRedundantSync::CanMatchedSync -- and region B's tload shipped with no
+// WAR guard at all against the previous iteration's tadd.
+
+module {
+  func.func @two_regions_two_gets(
+      %a : !pto.partition_tensor_view<64x64xf32>,
+      %b : !pto.partition_tensor_view<64x64xf32>,
+      %out : !pto.partition_tensor_view<64x64xf32>) {
+    %c0 = arith.constant 0 : index
+    %c1 = arith.constant 1 : index
+    %c2 = arith.constant 2 : index
+    %c4 = arith.constant 4 : index
+
+    %mbA = pto.alloc_multi_tile
+        : !pto.multi_tile_buf<vec, 64x64xf32, count=2>
+    %mbB = pto.alloc_multi_tile
+        : !pto.multi_tile_buf<vec, 64x64xf32, count=2>
+    %sum = pto.alloc_tile : !pto.tile_buf<vec, 64x64xf32>
+
+    scf.for %i = %c0 to %c4 step %c1 {
+      %lo_idx = arith.remsi %i, %c2 : index
+      %lo = pto.multi_tile_get %mbA[%lo_idx]
+          : !pto.multi_tile_buf<vec, 64x64xf32, count=2>
+         -> !pto.tile_buf<vec, 64x64xf32>
+      pto.tload ins(%a : !pto.partition_tensor_view<64x64xf32>)
+                outs(%lo : !pto.tile_buf<vec, 64x64xf32>)
+
+      %next = arith.addi %i, %c1 : index
+      %hi_idx = arith.remsi %next, %c2 : index
+      %hi = pto.multi_tile_get %mbB[%hi_idx]
+          : !pto.multi_tile_buf<vec, 64x64xf32, count=2>
+         -> !pto.tile_buf<vec, 64x64xf32>
+      pto.tload ins(%b : !pto.partition_tensor_view<64x64xf32>)
+                outs(%hi : !pto.tile_buf<vec, 64x64xf32>)
+
+      pto.tadd ins(%lo, %hi : !pto.tile_buf<vec, 64x64xf32>,
+                              !pto.tile_buf<vec, 64x64xf32>)
+               outs(%sum : !pto.tile_buf<vec, 64x64xf32>)
+      pto.tstore ins(%sum : !pto.tile_buf<vec, 64x64xf32>)
+                 outs(%out : !pto.partition_tensor_view<64x64xf32>)
+    }
+    return
+  }
+}
+
+// CHECK-LABEL: func.func @two_regions_two_gets
+// Two independent lane groups are primed before the loop: 2 event ids per
+// region. EVENT_ID2/EVENT_ID3 only exist if the second region kept its own
+// dyn pair instead of being folded into the first one's.
+// CHECK: pto.set_flag[<PIPE_V>, <PIPE_MTE2>, <EVENT_ID0>]
+// CHECK: pto.set_flag[<PIPE_V>, <PIPE_MTE2>, <EVENT_ID1>]
+// CHECK: pto.set_flag[<PIPE_V>, <PIPE_MTE2>, <EVENT_ID2>]
+// CHECK: pto.set_flag[<PIPE_V>, <PIPE_MTE2>, <EVENT_ID3>]
+// CHECK: scf.for
+//
+// Region A: the wait is keyed on region A's own slot value.
+// CHECK: %[[A_SLOT:[0-9a-zA-Z_]+]] = arith.remsi %arg3, %c2
+// CHECK: pto.multi_tile_get %[[MB_A:[0-9a-zA-Z_]+]][%[[A_SLOT]]]
+// CHECK: arith.remui %[[A_SLOT]],
+// CHECK: %[[A_LANE:[0-9a-zA-Z_]+]] = arith.select
+// CHECK: pto.wait_flag_dyn[<PIPE_V>, <PIPE_MTE2>, %[[A_LANE]]]
+// CHECK: pto.tload
+//
+// Region B must get its OWN guard before its OWN tload -- this is the edge the
+// bug dropped. Anchoring the lane on region B's slot means a missing pair, or a
+// pair mis-keyed to region A's slot, fails here.
+// CHECK: %[[NEXT:[0-9a-zA-Z_]+]] = arith.addi %arg3, %c1
+// CHECK: %[[B_SLOT:[0-9a-zA-Z_]+]] = arith.remsi %[[NEXT]], %c2
+// CHECK: pto.multi_tile_get %[[MB_B:[0-9a-zA-Z_]+]][%[[B_SLOT]]]
+// CHECK: arith.remui %[[B_SLOT]],
+// CHECK: %[[B_LANE:[0-9a-zA-Z_]+]] = arith.select
+// CHECK: pto.wait_flag_dyn[<PIPE_V>, <PIPE_MTE2>, %[[B_LANE]]]
+// CHECK: pto.tload
+//
+// CHECK: pto.tadd
+// Both releases land after the shared consumer, one per region.
+// CHECK: pto.set_flag_dyn[<PIPE_V>, <PIPE_MTE2>,
+// CHECK: pto.set_flag_dyn[<PIPE_V>, <PIPE_MTE2>,
+// Post-loop drains both lane groups.
+// CHECK: pto.wait_flag[<PIPE_V>, <PIPE_MTE2>, <EVENT_ID0>]
+// CHECK: pto.wait_flag[<PIPE_V>, <PIPE_MTE2>, <EVENT_ID1>]
+// CHECK: pto.wait_flag[<PIPE_V>, <PIPE_MTE2>, <EVENT_ID2>]
+// CHECK: pto.wait_flag[<PIPE_V>, <PIPE_MTE2>, <EVENT_ID3>]

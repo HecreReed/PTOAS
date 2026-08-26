@@ -87,8 +87,9 @@ static StringRef stringifyWriteInstanceEscapeClass(
 static void appendIndexList(llvm::raw_ostream &os, ArrayRef<unsigned> values) {
   os << "[";
   for (auto [idx, value] : llvm::enumerate(values)) {
-    if (idx)
+    if (idx) {
       os << ", ";
+    }
     os << value;
   }
   os << "]";
@@ -105,11 +106,12 @@ static void appendOptionalIndex(llvm::raw_ostream &os,
 
 static void appendDomain(llvm::raw_ostream &os,
                          const pto::IterationDomainInfo &info) {
-  auto printDim = [&](int64_t dim) {
-    if (dim == ShapedType::kDynamic)
+  auto printDim = [&os](int64_t dim) {
+    if (dim == ShapedType::kDynamic) {
       os << "?";
-    else
+    } else {
       os << dim;
+    }
   };
 
   os << "(";
@@ -134,33 +136,41 @@ buildValueLabels(Block &block, const pto::FusionBlockAnalysis &analysis) {
   unsigned boundaryOrdinal = 0;
 
   for (const pto::FusionComputeNode &node : analysis.computeNodes) {
-    for (auto [idx, output] : llvm::enumerate(node.semantics.tileOutputs))
+    for (auto [idx, output] : llvm::enumerate(node.semantics.tileOutputs)) {
       labels.try_emplace(
           output,
           (llvm::Twine("node") + llvm::Twine(node.id) + ".out" +
            llvm::Twine(idx))
               .str());
+    }
   }
 
   for (Operation &op : block) {
     FailureOr<pto::FusionOpSemantics> semanticsOr =
         pto::getFusionOpSemantics(&op);
-    if (failed(semanticsOr))
-      continue;
-
-    if (semanticsOr->kind == pto::FusionOpKind::LocalBoundary) {
-      for (Value input : semanticsOr->tileInputs)
-        if (!labels.count(input))
-          labels.try_emplace(input, makeExternalValueLabel(externalOrdinal++));
-      for (Value output : semanticsOr->tileOutputs)
-        if (!labels.count(output))
-          labels.try_emplace(output, makeBoundaryValueLabel(boundaryOrdinal++));
+    if (failed(semanticsOr)) {
       continue;
     }
 
-    for (Value input : semanticsOr->tileInputs)
-      if (!labels.count(input))
+    if (semanticsOr->kind == pto::FusionOpKind::LocalBoundary) {
+      for (Value input : semanticsOr->tileInputs) {
+        if (!labels.count(input)) {
+          labels.try_emplace(input, makeExternalValueLabel(externalOrdinal++));
+        }
+      }
+      for (Value output : semanticsOr->tileOutputs) {
+        if (!labels.count(output)) {
+          labels.try_emplace(output, makeBoundaryValueLabel(boundaryOrdinal++));
+        }
+      }
+      continue;
+    }
+
+    for (Value input : semanticsOr->tileInputs) {
+      if (!labels.count(input)) {
         labels.try_emplace(input, makeExternalValueLabel(externalOrdinal++));
+      }
+    }
   }
 
   return labels;
@@ -173,20 +183,23 @@ static void printLocalBoundaries(llvm::raw_ostream &os, Block &block,
     FailureOr<pto::FusionOpSemantics> semanticsOr =
         pto::getFusionOpSemantics(&op);
     if (failed(semanticsOr) ||
-        semanticsOr->kind != pto::FusionOpKind::LocalBoundary)
+        semanticsOr->kind != pto::FusionOpKind::LocalBoundary) {
       continue;
+    }
 
     os << "    local_boundary[" << boundaryId++ << "] op="
        << semanticsOr->opName << " inputs=[";
     for (auto [idx, input] : llvm::enumerate(semanticsOr->tileInputs)) {
-      if (idx)
+      if (idx) {
         os << ", ";
+      }
       os << valueLabels.lookup(input);
     }
     os << "] outputs=[";
     for (auto [idx, output] : llvm::enumerate(semanticsOr->tileOutputs)) {
-      if (idx)
+      if (idx) {
         os << ", ";
+      }
       os << valueLabels.lookup(output);
     }
     os << "]\n";
@@ -201,8 +214,9 @@ struct PrintPreFusionAnalysisPass
 
   void runOnOperation() override {
     func::FuncOp func = getOperation();
-    if (func.isExternal())
+    if (func.isExternal()) {
       return;
+    }
 
     const auto &analysis = getAnalysis<pto::PreFusionAnalysis>();
     if (!analysis.isValid()) {
@@ -238,14 +252,16 @@ struct PrintPreFusionAnalysisPass
            << stringifyComputeFamily(node.semantics.computeFamily)
            << " domain_class=" << node.iterationDomainClass << " inputs=[";
         for (auto [idx, input] : llvm::enumerate(node.semantics.tileInputs)) {
-          if (idx)
+          if (idx) {
             os << ", ";
+          }
           os << valueLabels.lookup(input);
         }
         os << "] outputs=[";
         for (auto [idx, output] : llvm::enumerate(node.semantics.tileOutputs)) {
-          if (idx)
+          if (idx) {
             os << ", ";
+          }
           os << valueLabels.lookup(output);
         }
         os << "] incoming=";

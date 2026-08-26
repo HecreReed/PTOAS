@@ -25,8 +25,10 @@ module {
 // CHECK-SAME: %[[AMOUNT0:[^,]+]]: !pto.vreg<128xi16>
 // CHECK-SAME: %[[AMOUNT1:[^)]+]]: !pto.vreg<128xi16>
 // CHECK-SAME: -> (!pto.vreg<128xi16>, !pto.vreg<128xi16>)
-// CHECK-DAG: %[[SHL0:.*]] = pto.vshl %[[VALUE0]], %[[AMOUNT0]], {{.*}} : !pto.vreg<128xi16>, !pto.vreg<128xi16>, !pto.mask<b16> -> !pto.vreg<128xi16>
-// CHECK-DAG: %[[SHL1:.*]] = pto.vshl %[[VALUE1]], %[[AMOUNT1]], {{.*}} : !pto.vreg<128xi16>, !pto.vreg<128xi16>, !pto.mask<b16> -> !pto.vreg<128xi16>
+// CHECK-DAG: %[[COUNT0:.*]] = pto.vbitcast %[[AMOUNT0]] : !pto.vreg<128xi16> -> !pto.vreg<128xsi16>
+// CHECK-DAG: %[[COUNT1:.*]] = pto.vbitcast %[[AMOUNT1]] : !pto.vreg<128xi16> -> !pto.vreg<128xsi16>
+// CHECK-DAG: %[[SHL0:.*]] = pto.vshl %[[VALUE0]], %[[COUNT0]], {{.*}} : !pto.vreg<128xi16>, !pto.vreg<128xsi16>, !pto.mask<b16> -> !pto.vreg<128xi16>
+// CHECK-DAG: %[[SHL1:.*]] = pto.vshl %[[VALUE1]], %[[COUNT1]], {{.*}} : !pto.vreg<128xi16>, !pto.vreg<128xsi16>, !pto.mask<b16> -> !pto.vreg<128xi16>
 // CHECK: return %[[SHL0]], %[[SHL1]]
 // CHECK-NOT: pto.vmi.
 // CHECK-NOT: !pto.vmi.

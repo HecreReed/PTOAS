@@ -211,8 +211,8 @@ Prerequisites:
   Python used to launch the ST cases.
 
 Use the LLVM/MLIR version documented in the repository root `README.md`. At the
-time of writing that is LLVM 21 from the VPTO branch
-`vpto-dev/llvm-project:feature-vpto-llvm21`. If unsure, check
+time of writing that is LLVM 19 from the VPTO branch
+`vpto-dev/llvm-project:feature-vpto`. If unsure, check
 `.github/workflows/ci_sim.yml` and use its current `LLVM_REPO` / `LLVM_REF`.
 PTOAS CMake also verifies the LLVM major version and will reject an
 incompatible LLVM build.

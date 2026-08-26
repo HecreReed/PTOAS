@@ -23,6 +23,11 @@ def generate(output_dir: Path) -> None:
         [3, 2, 2, 1, 2, 2, 0, 16, 16, 1, 2, 2, 2, 6, 6, 6, -4, 4],
         dtype=np.int32,
     )
+    values = np.arange(-16, 16, dtype=np.float16)
+    three = np.float16(3)
+    golden_v1[32:64] = np.minimum(values, three).view(np.uint16).astype(np.int32)
+    golden_v1[64:96] = np.maximum(values, three).view(np.uint16).astype(np.int32)
+    golden_v1[96:128] = np.abs(np.arange(-16, 16, dtype=np.float16)).view(np.uint16)
     v1.tofile(output_dir / "v1.bin")
     golden_v1.tofile(output_dir / "golden_v1.bin")
 

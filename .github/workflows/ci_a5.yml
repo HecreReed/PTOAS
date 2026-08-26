@@ -1,0 +1,414 @@
+# Copyright (c) 2026 Huawei Technologies Co., Ltd.
+# This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+# CANN Open Software License Agreement Version 2.0 (the "License").
+# Please refer to the License for details. You may not use this file except in compliance with the License.
+# THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+# INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+# See LICENSE in the root of the software repository for the full text of the License.
+
+name: A5 Nightly Board
+
+on:
+  # GitHub cron is UTC. 19:00 UTC is 03:00 the next day in Beijing (UTC+8).
+  schedule:
+    - cron: "0 19 * * *"
+  workflow_dispatch:
+    inputs:
+      device_id:
+        description: "A5 device requested from task-submit"
+        type: string
+        default: "1"
+      skip_cases:
+        description: "Comma/space separated testcase names to skip"
+        type: string
+        default: "mix_kernel,vadd_validshape,vadd_validshape_dynamic,print,storefp"
+      run_only_cases:
+        description: "Comma/space separated testcase names to run (empty = all A5 cases)"
+        type: string
+        default: ""
+      ptoas_extra_flags:
+        description: "Additional ptoas flags used while generating the payload"
+        type: string
+        default: ""
+      pto_isa_repo:
+        description: "pto-isa repository URL"
+        type: string
+        default: https://gitcode.com/cann/pto-isa.git
+      pto_isa_commit:
+        description: "pto-isa ref (empty = repository CI pin)"
+        type: string
+        default: ""
+
+permissions:
+  contents: read
+
+concurrency:
+  group: a5-nightly-board
+  cancel-in-progress: false
+
+jobs:
+  board-validation:
+    if: github.repository == 'hw-native-sys/PTOAS'
+    runs-on: [self-hosted, Linux, ARM64, ptoas-a5]
+    timeout-minutes: 480
+    env:
+      SOC_VERSION: Ascend950
+      RUN_MODE: npu
+      GOLDEN_MODE: npu
+      DEFAULT_SKIP_CASES: mix_kernel,vadd_validshape,vadd_validshape_dynamic,print,storefp
+      A3_ONLY_CASES: partition5d,partition5d_dynamic,mrgsort,tmatmulk_autosync,movfp_fixpipe_reuse_a3
+      A5_INCOMPATIBLE_LEVEL3_CASES: decode_projection_incore_0,rmsnorm_incore_0,test_tmov_col_major_16x1_align_a5,test_tmov_row_major_1x16_control_a5
+      LLVM_BUILD_DIR: ${{ vars.PTOAS_A5_LLVM_BUILD_DIR || '/home/ptoas-board-monitor-a5/llvm-project-vpto-feature/build-shared' }}
+      BOARD_PYTHON: ${{ vars.PTOAS_A5_PYTHON || '/home/anaconda3/bin/python3' }}
+      PTOAS_BUILD_JOBS: ${{ vars.PTOAS_A5_BUILD_JOBS || '4' }}
+      INPUT_DEVICE_ID: ${{ inputs.device_id || vars.PTOAS_A5_DEVICE_ID || '1' }}
+      INPUT_SKIP_CASES: ${{ inputs.skip_cases || '' }}
+      RUN_ONLY_CASES: ${{ inputs.run_only_cases || '' }}
+      PTOAS_EXTRA_FLAGS: ${{ inputs.ptoas_extra_flags || '' }}
+      PTO_ISA_REPO: ${{ inputs.pto_isa_repo || 'https://gitcode.com/cann/pto-isa.git' }}
+      INPUT_PTO_ISA_COMMIT: ${{ inputs.pto_isa_commit || '' }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Resolve validation parameters
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [[ -n "${INPUT_PTO_ISA_COMMIT}" ]]; then
+            pto_isa_commit="${INPUT_PTO_ISA_COMMIT}"
+          else
+            pto_isa_commit="$("${BOARD_PYTHON}" - <<'PY'
+          import pathlib
+          import re
+
+          text = pathlib.Path(
+              "test/npu_validation/scripts/run_remote_npu_validation.sh"
+          ).read_text(encoding="utf-8")
+          match = re.search(
+              r'^PTO_ISA_COMMIT="\$\{PTO_ISA_COMMIT:-([0-9a-f]{40})\}"$',
+              text,
+              re.MULTILINE,
+          )
+          if match is None:
+              raise SystemExit("failed to resolve the repository pto-isa pin")
+          print(match.group(1))
+          PY
+            )"
+          fi
+
+          skip_cases="${INPUT_SKIP_CASES:-${DEFAULT_SKIP_CASES}}"
+          skip_cases="${skip_cases:+${skip_cases},}${A3_ONLY_CASES}"
+          ptoas_flags="--pto-arch a5 --enable-insert-sync"
+          if [[ -n "${PTOAS_EXTRA_FLAGS}" ]]; then
+            ptoas_flags+=" ${PTOAS_EXTRA_FLAGS}"
+          fi
+
+          {
+            echo "DEVICE_ID=${INPUT_DEVICE_ID}"
+            echo "SKIP_CASES=${skip_cases}"
+            echo "PTOAS_FLAGS=${ptoas_flags}"
+            echo "PTO_ISA_COMMIT=${pto_isa_commit}"
+          } >> "${GITHUB_ENV}"
+
+          echo "SOC_VERSION=${SOC_VERSION}"
+          echo "DEVICE_ID=${INPUT_DEVICE_ID}"
+          echo "SKIP_CASES=${skip_cases}"
+          echo "RUN_ONLY_CASES=${RUN_ONLY_CASES:-<all>}"
+          echo "PTOAS_FLAGS=${ptoas_flags}"
+          echo "PTO_ISA_REPO=${PTO_ISA_REPO}"
+          echo "PTO_ISA_COMMIT=${pto_isa_commit}"
+
+      - name: Check A5 runner environment
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          [[ "$(uname -m)" == "aarch64" ]] || {
+            echo "ERROR: A5 runner must be aarch64" >&2
+            exit 1
+          }
+          for command in cmake git ninja task-submit; do
+            command -v "${command}" >/dev/null || {
+              echo "ERROR: required command is missing: ${command}" >&2
+              exit 1
+            }
+          done
+          [[ -x "${BOARD_PYTHON}" ]] || {
+            echo "ERROR: BOARD_PYTHON is not executable: ${BOARD_PYTHON}" >&2
+            exit 1
+          }
+          for path in \
+            "${LLVM_BUILD_DIR}/bin/llvm-config" \
+            "${LLVM_BUILD_DIR}/lib/cmake/llvm/LLVMConfig.cmake" \
+            "${LLVM_BUILD_DIR}/lib/cmake/mlir/MLIRConfig.cmake"; do
+            [[ -e "${path}" ]] || {
+              echo "ERROR: prebuilt LLVM is missing: ${path}" >&2
+              exit 1
+            }
+          done
+
+          mlir_python_root="${LLVM_BUILD_DIR}/tools/mlir/python_packages/mlir_core"
+          PYTHONPATH="${mlir_python_root}:${PYTHONPATH:-}" \
+          LD_LIBRARY_PATH="${LLVM_BUILD_DIR}/lib:${LD_LIBRARY_PATH:-}" \
+            "${BOARD_PYTHON}" - <<'PY'
+          import numpy
+          import pybind11
+          from mlir.ir import Context
+
+          Context()
+          print("numpy", numpy.__version__)
+          print("pybind11", pybind11.__version__)
+          print("mlir_python_ok")
+          PY
+
+      - name: Prepare isolated work directories
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ -n "${RUNNER_TEMP:-}" ]] || {
+            echo "ERROR: RUNNER_TEMP is empty" >&2
+            exit 1
+          }
+          work_root="${RUNNER_TEMP}/ptoas-a5-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          case "${work_root}" in
+            "${RUNNER_TEMP}"/ptoas-a5-*) ;;
+            *) echo "ERROR: unsafe work root: ${work_root}" >&2; exit 1 ;;
+          esac
+          rm -rf -- "${work_root}"
+          mkdir -p \
+            "${work_root}/payload/test/samples" \
+            "${work_root}/payload/test/npu_validation/scripts" \
+            "${work_root}/payload/test/npu_validation/templates"
+
+          {
+            echo "WORK_ROOT=${work_root}"
+            echo "PTO_BUILD_DIR=${work_root}/build"
+            echo "PTO_INSTALL_DIR=${work_root}/install"
+            echo "PAYLOAD_DIR=${work_root}/payload"
+            echo "PTO_ISA_SOURCE_DIR=${work_root}/pto-isa-source"
+            echo "OUTPUT_ROOT=${work_root}/npu-validation"
+            echo "RESULTS_TSV=${work_root}/remote_npu_validation_results.tsv"
+            echo "SAMPLE_BUILD_LOG=${work_root}/sample-build.log"
+            echo "BOARD_LOG=${work_root}/board-validation.log"
+            echo "MLIR_PYTHON_ROOT=${LLVM_BUILD_DIR}/tools/mlir/python_packages/mlir_core"
+          } >> "${GITHUB_ENV}"
+
+      - name: Configure ccache
+        shell: bash
+        run: |
+          set -euo pipefail
+          if ! command -v ccache >/dev/null 2>&1; then
+            echo "ccache is unavailable; continuing without a compiler cache"
+            exit 0
+          fi
+          cache_root="${RUNNER_TOOL_CACHE:-${RUNNER_TEMP}}/ptoas-a5-ccache"
+          mkdir -p "${cache_root}"
+          {
+            echo "CCACHE_DIR=${cache_root}"
+            echo "CCACHE_BASEDIR=${GITHUB_WORKSPACE}"
+            echo "CCACHE_COMPILERCHECK=content"
+            echo "CCACHE_NOHASHDIR=true"
+            echo "CMAKE_C_COMPILER_LAUNCHER=ccache"
+            echo "CMAKE_CXX_COMPILER_LAUNCHER=ccache"
+          } >> "${GITHUB_ENV}"
+          CCACHE_DIR="${cache_root}" ccache --max-size=2G
+          CCACHE_DIR="${cache_root}" ccache --zero-stats
+
+      - name: Build and install PTOAS
+        shell: bash
+        run: |
+          set -euo pipefail
+          python_dir="$(dirname "${BOARD_PYTHON}")"
+          export PATH="${python_dir}:${PATH}"
+          export PYTHONPATH="${MLIR_PYTHON_ROOT}:${PYTHONPATH:-}"
+          export LD_LIBRARY_PATH="${LLVM_BUILD_DIR}/lib:${LD_LIBRARY_PATH:-}"
+
+          cmake_args=(
+            -G Ninja
+            -S "${GITHUB_WORKSPACE}"
+            -B "${PTO_BUILD_DIR}"
+            -DLLVM_DIR="${LLVM_BUILD_DIR}/lib/cmake/llvm"
+            -DMLIR_DIR="${LLVM_BUILD_DIR}/lib/cmake/mlir"
+            -DPython3_EXECUTABLE="${BOARD_PYTHON}"
+            -DPython3_FIND_STRATEGY=LOCATION
+            -DPython_EXECUTABLE="${BOARD_PYTHON}"
+            -DPython_FIND_STRATEGY=LOCATION
+            -Dpybind11_DIR="$(${BOARD_PYTHON} -m pybind11 --cmakedir)"
+            -DMLIR_ENABLE_BINDINGS_PYTHON=ON
+            -DMLIR_PYTHON_PACKAGE_DIR="${PTO_INSTALL_DIR}"
+            -DCMAKE_INSTALL_PREFIX="${PTO_INSTALL_DIR}"
+            -DCMAKE_BUILD_TYPE=Release
+          )
+          if command -v ccache >/dev/null 2>&1; then
+            cmake_args+=(
+              -DCMAKE_C_COMPILER_LAUNCHER=ccache
+              -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
+            )
+          fi
+          cmake "${cmake_args[@]}"
+          cmake --build "${PTO_BUILD_DIR}" \
+            --target install --parallel "${PTOAS_BUILD_JOBS}"
+          test -x "${PTO_BUILD_DIR}/tools/ptoas/ptoas"
+          test -x "${PTO_BUILD_DIR}/tools/ptobc/ptobc"
+
+      - name: Generate A5 board payload
+        shell: bash
+        run: |
+          set -euo pipefail
+          python_dir="$(dirname "${BOARD_PYTHON}")"
+          export PATH="${python_dir}:${PATH}"
+          export PTOAS_BIN="${PTO_BUILD_DIR}/tools/ptoas/ptoas"
+          export PTOBC_BIN="${PTO_BUILD_DIR}/tools/ptobc/ptobc"
+          export PYTHON_BIN="${BOARD_PYTHON}"
+          export PTO_PYTHON_ROOT="${PTO_INSTALL_DIR}/"
+          export PTOAS_OUT_DIR="${PAYLOAD_DIR}/test/samples"
+          export PYTHONPATH="${PTO_INSTALL_DIR}:${MLIR_PYTHON_ROOT}:${PYTHONPATH:-}"
+          export LD_LIBRARY_PATH="${LLVM_BUILD_DIR}/lib:${PTO_INSTALL_DIR}/lib:${LD_LIBRARY_PATH:-}"
+
+          PTOAS_SKIP_CASES="${A3_ONLY_CASES},${A5_INCOMPATIBLE_LEVEL3_CASES}" \
+            bash test/samples/runop.sh --enablebc all 2>&1 | tee "${SAMPLE_BUILD_LOG}"
+          cp test/npu_validation/scripts/generate_testcase.py \
+            "${PAYLOAD_DIR}/test/npu_validation/scripts/"
+          cp test/npu_validation/scripts/run_remote_npu_validation.sh \
+            "${PAYLOAD_DIR}/test/npu_validation/scripts/"
+          cp test/npu_validation/templates/* \
+            "${PAYLOAD_DIR}/test/npu_validation/templates/"
+          chmod +x "${PAYLOAD_DIR}/test/npu_validation/scripts/run_remote_npu_validation.sh"
+
+      - name: Vendor pinned pto-isa
+        shell: bash
+        run: |
+          set -euo pipefail
+          git clone "${PTO_ISA_REPO}" "${PTO_ISA_SOURCE_DIR}"
+          git -C "${PTO_ISA_SOURCE_DIR}" checkout -f "${PTO_ISA_COMMIT}"
+          mkdir -p "${PAYLOAD_DIR}/pto-isa"
+          cp -a "${PTO_ISA_SOURCE_DIR}/." "${PAYLOAD_DIR}/pto-isa/"
+          rm -rf -- "${PAYLOAD_DIR}/pto-isa/.git"
+          echo "Vendored pto-isa $(git -C "${PTO_ISA_SOURCE_DIR}" rev-parse HEAD)"
+
+      - name: Run A5 board validation through TaskQueue
+        id: board
+        shell: bash
+        run: |
+          set -euo pipefail
+          env_file="${WORK_ROOT}/board-validation.env"
+          printf '%s\n' \
+            "STAGE=run" \
+            "RUN_MODE=${RUN_MODE}" \
+            "SOC_VERSION=${SOC_VERSION}" \
+            "GOLDEN_MODE=${GOLDEN_MODE}" \
+            "SKIP_CASES=${SKIP_CASES}" \
+            "RUN_ONLY_CASES=${RUN_ONLY_CASES}" \
+            "EXPECTED_CASES_FILTER=${RUN_ONLY_CASES}" \
+            "PTO_ISA_REPO=${PTO_ISA_REPO}" \
+            "PTO_ISA_COMMIT=${PTO_ISA_COMMIT}" \
+            "OUTPUT_ROOT=${OUTPUT_ROOT}" \
+            "RESULTS_TSV=${RESULTS_TSV}" \
+            > "${env_file}"
+
+          # shellcheck disable=SC2016 # TASK_DEVICE expands inside TaskQueue.
+          printf -v board_command \
+            'cd %q && export DEVICE_ID="${TASK_DEVICE:-%s}" && bash ./test/npu_validation/scripts/run_remote_npu_validation.sh' \
+            "${PAYLOAD_DIR}" "${DEVICE_ID}"
+          submit_output="$(task-submit \
+            --device "${DEVICE_ID}" \
+            --max-time 0 \
+            --env-file "${env_file}" \
+            "${board_command}")"
+          printf '%s\n' "${submit_output}" | tee "${BOARD_LOG}"
+          task_id="$(printf '%s\n' "${submit_output}" | awk '/^task_[0-9]{8}_[0-9]{6}_[0-9]+$/ { id=$0 } END { print id }')"
+          [[ -n "${task_id}" ]] || {
+            echo "ERROR: task-submit did not return a task id" | tee -a "${BOARD_LOG}" >&2
+            exit 1
+          }
+
+          # shellcheck disable=SC2329 # Invoked by the signal trap below.
+          cancel_task() {
+            echo "Cancelling TaskQueue task ${task_id}" | tee -a "${BOARD_LOG}"
+            task-submit --kill "${task_id}" >/dev/null 2>&1 || true
+          }
+          trap cancel_task INT TERM
+
+          set +e
+          task-submit --timeout 0 --wait "${task_id}" 2>&1 | tee -a "${BOARD_LOG}"
+          wait_rc="${PIPESTATUS[0]}"
+          set -e
+          trap - INT TERM
+
+          status_output="$(task-submit --status "${task_id}" 2>&1)"
+          printf '%s\n' "${status_output}" | tee -a "${BOARD_LOG}"
+          if [[ "${status_output}" =~ exit=([0-9]+) ]]; then
+            task_rc="${BASH_REMATCH[1]}"
+          else
+            echo "ERROR: TaskQueue status has no exit code (wait rc=${wait_rc})" | tee -a "${BOARD_LOG}" >&2
+            exit 1
+          fi
+          if [[ "${wait_rc}" -ne "${task_rc}" ]]; then
+            echo "WARNING: task wait rc=${wait_rc}, recorded task rc=${task_rc}" | tee -a "${BOARD_LOG}" >&2
+          fi
+          exit "${task_rc}"
+
+      - name: Publish board summary and notify Feishu
+        if: always()
+        env:
+          A5_FEISHU_WEBHOOK_URL: ${{ secrets.A5_FEISHU_WEBHOOK_URL }}
+          BOARD_CONCLUSION: ${{ steps.board.outcome || 'failure' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ -n "${BOARD_PYTHON:-}" && -x "${BOARD_PYTHON}" ]]; then
+            report_python="${BOARD_PYTHON}"
+          elif report_python="$(command -v python3 2>/dev/null)" && [[ -x "${report_python}" ]]; then
+            echo "BOARD_PYTHON is unavailable; using ${report_python} for failure reporting"
+          else
+            echo "ERROR: no executable Python is available for failure reporting" >&2
+            exit 1
+          fi
+          results_tsv="${RESULTS_TSV:-${RUNNER_TEMP}/a5-board-results-missing.tsv}"
+          "${report_python}" .github/scripts/report_a5_board_results.py \
+            --results "${results_tsv}" \
+            --conclusion "${BOARD_CONCLUSION}" \
+            --run-url "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}" \
+            --sha "${GITHUB_SHA}"
+
+      - name: Upload A5 board artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: a5-nightly-board-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            ${{ env.RESULTS_TSV }}
+            ${{ env.SAMPLE_BUILD_LOG }}
+            ${{ env.BOARD_LOG }}
+            ${{ env.PAYLOAD_DIR }}/test/samples/expected_npu_validation_cases.txt
+            ${{ env.PAYLOAD_DIR }}/test/samples/**/*-ptoas.log
+          if-no-files-found: warn
+          retention-days: 14
+
+      - name: Show ccache statistics
+        if: always()
+        shell: bash
+        run: |
+          if command -v ccache >/dev/null 2>&1; then
+            ccache --show-stats || true
+          fi
+
+      - name: Clean isolated work directories
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ -z "${WORK_ROOT:-}" || -z "${RUNNER_TEMP:-}" ]]; then
+            echo "Work directory was not initialized; nothing to clean."
+            exit 0
+          fi
+          case "${WORK_ROOT}" in
+            "${RUNNER_TEMP}"/ptoas-a5-*) rm -rf -- "${WORK_ROOT}" ;;
+            *) echo "ERROR: refusing to clean unsafe path: ${WORK_ROOT}" >&2; exit 1 ;;
+          esac

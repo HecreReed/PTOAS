@@ -124,8 +124,9 @@ def PTO_SimtUnaryFloatValueType : AnyTypeOf<[F16, F32, BF16, PTO_V2F16Type, PTO_
                                            "f16, f32, bf16, vector<2xf16> or vector<2xbf16>">;
 def PTO_SimtUnaryF16F32ValueType : AnyTypeOf<[F16, F32, PTO_V2F16Type],
                                             "f16, f32 or vector<2xf16>">;
-def PTO_SimtBinaryF32BF16ValueType : AnyTypeOf<[F32, BF16, PTO_V2F16Type, PTO_V2BF16Type],
-                                              "f32, bf16, vector<2xf16> or vector<2xbf16>">;
+def PTO_SimtBinaryFloatValueType : AnyTypeOf<
+  [F16, F32, BF16, PTO_V2F16Type, PTO_V2BF16Type],
+  "f16, f32, bf16, vector<2xf16> or vector<2xbf16>">;
 def PTO_SimtBinaryF16F32ValueType : AnyTypeOf<[F16, F32, PTO_V2F16Type],
                                              "f16, f32 or vector<2xf16>">;
 def PTO_SimtConvertValueType : AnyTypeOf<[I32, I64, F16, BF16, F32,
@@ -135,9 +136,12 @@ def PTO_SimtConvertValueType : AnyTypeOf<[I32, I64, F16, BF16, F32,
                                          "standard scalar, low-precision scalar payload, or supported vector<2xT> conversion type">;
 def PTO_AtomicValueType : AnyTypeOf<[I32, I64, F16, BF16, F32, PTO_V2F16Type, PTO_V2BF16Type],
                                     "i32, i64, f16, bf16, f32, vector<2xf16> or vector<2xbf16>">;
+def PTO_DevScalarValueType : AnyTypeOf<[I8, I16, I32, I64],
+                                       "i8, i16, i32 or i64">;
 
 class PTO_MicroOp<string mnemonic, list<Trait> traits = []>
-    : PTO_Op<mnemonic, !listconcat(traits, [MicroOpInterface])>;
+    : PTO_Op<mnemonic, !listconcat(traits, [MicroOpInterface,
+                                            VPTOSchedulingOpInterface])>;
 
 class PTO_VectorMicroOp<string mnemonic, list<Trait> traits = []>
     : PTO_MicroOp<mnemonic,
@@ -258,6 +262,67 @@ def PTOStgOp : PTO_SimtOp<"stg", [
   }];
 }
 
+def PTOLdDevOp : PTO_MicroOp<"ld_dev", [
+    OpPipeInterface,
+    DeclareOpInterfaceMethods<MemoryEffectsOpInterface>
+  ]> {
+  let summary = "Load one scalar GM element while bypassing the local L1 data cache.";
+  let description = [{
+    Load one integer scalar element from GM through the AICore device-memory
+    path while bypassing the local L1 data cache.  The offset operand is an
+    element offset, not a byte offset.  The operation does not provide
+    atomicity, synchronization, memory-ordering, or L2 cache-policy semantics.
+  }];
+
+  let arguments = (ins
+    PTO_BufferType:$ptr,
+    Index:$offset
+  );
+
+  let results = (outs PTO_DevScalarValueType:$value);
+
+  let hasVerifier = 1;
+
+  let assemblyFormat = [{
+    $ptr `[` $offset `]` attr-dict `:` type($ptr) `->` type($value)
+  }];
+
+  let extraClassDeclaration = [{
+    ::mlir::pto::PIPE getPipe() { return ::mlir::pto::PIPE::PIPE_S; }
+  }];
+}
+
+def PTOStDevOp : PTO_MicroOp<"st_dev", [
+    OpPipeInterface,
+    DeclareOpInterfaceMethods<MemoryEffectsOpInterface>
+  ]> {
+  let summary = "Store one scalar GM element while bypassing the local L1 data cache.";
+  let description = [{
+    Store one integer scalar element to GM through the AICore device-memory
+    path while bypassing the local L1 data cache.  The offset operand is an
+    element offset, not a byte offset.  The operation does not provide
+    atomicity, synchronization, memory-ordering, or L2 cache-policy semantics.
+  }];
+
+  let arguments = (ins
+    PTO_DevScalarValueType:$value,
+    PTO_BufferType:$ptr,
+    Index:$offset
+  );
+
+  let results = (outs);
+
+  let hasVerifier = 1;
+
+  let assemblyFormat = [{
+    $value `,` $ptr `[` $offset `]` attr-dict `:` type($ptr) `,` type($value)
+  }];
+
+  let extraClassDeclaration = [{
+    ::mlir::pto::PIPE getPipe() { return ::mlir::pto::PIPE::PIPE_S; }
+  }];
+}
+
 def TensorViewAddrOp : PTO_Op<"tensor_view_addr", [Pure]> {
   let summary = "Extract address from a tensor view.";
   let description = [{
@@ -313,7 +378,10 @@ def VecScopeOp : PTO_Op<"vecscope", [SingleBlock, NoTerminator,
     `pto.vecscope` marks a structured vector-scope interval without overloading
     a dummy carrier loop with scope metadata. Lowering and emission passes may
     use the region boundary to preserve loop shape while treating the enclosed
-    body as one VPTO vector interval.
+    body as one VPTO vector interval. Pipeline, system, cache, SIMT, and
+    cross-core synchronization operations delimit vector scopes and must remain
+    outside the region. `pto.mem_bar` is the exception: it orders vector memory
+    operations within the region.
   }];
 
   let regions = (region SizedRegion<1>:$body);
@@ -329,7 +397,7 @@ def StrictVecScopeOp : PTO_Op<"strict_vecscope", [SingleBlock, NoTerminator,
     `pto.strict_vecscope` is the strict form of `pto.vecscope`. Values used by
     the body must be passed explicitly through op operands and corresponding
     block arguments; implicit SSA capture from the surrounding scope is
-    rejected.
+    rejected. It has the same synchronization boundary rules as `pto.vecscope`.
   }];
 
   let arguments = (ins Variadic<AnyType>:$captures);
@@ -353,7 +421,7 @@ def PTO_MemBarOp : PTO_MicroOp<"mem_bar"> {
   let hasCustomAssemblyFormat = 1;
 }
 
-def DsbOp : PTO_MicroOp<"dsb"> {
+def DsbOp : PTO_Op<"dsb", [MicroOpInterface]> {
   let summary = "Issue a low-level DSB memory barrier";
   let description = [{
     Lowers to `llvm.hivm.DSB(i64)`. The memory domain maps directly to the CCE
@@ -368,7 +436,7 @@ def DsbOp : PTO_MicroOp<"dsb"> {
   }];
 }
 
-def DcciOp : PTO_MicroOp<"dcci"> {
+def DcciOp : PTO_Op<"dcci", [MicroOpInterface]> {
   let summary = "Issue a low-level DCCI cache maintenance operation";
   let description = [{
     Lowers to the `llvm.hivm.DCCI*` intrinsic family. The pointer address space
@@ -418,7 +486,8 @@ class PTO_BinaryI64PureOp<string mnemonic> : PTO_Op<mnemonic, [Pure]> {
   }];
 }
 
-class PTO_UnaryI64ConfigOp<string mnemonic> : PTO_Op<mnemonic> {
+class PTO_UnaryI64ConfigOp<string mnemonic, list<Trait> traits = []>
+    : PTO_Op<mnemonic, traits> {
   let arguments = (ins I64:$value);
   let results = (outs);
 
@@ -497,7 +566,7 @@ def PTO_SetMte2NzParaOp : PTO_UnaryI64ConfigOp<"set_mte2_nz_para">;
 def PTO_SetPadValOutToL1Op : PTO_UnaryI64ConfigOp<"set_pad_val_outtol1">;
 // Reading CTRL is ordered with respect to set_ctrl. It must not be modeled as
 // Pure, otherwise CSE can reuse a value read before an intervening write.
-def PTO_GetCtrlOp : PTO_Op<"get_ctrl"> {
+def PTO_GetCtrlOp : PTO_Op<"get_ctrl", [VPTOSchedulingOpInterface]> {
   let arguments = (ins);
   let results = (outs I64:$result);
   let assemblyFormat = [{ attr-dict `:` type($result) }];
@@ -510,7 +579,8 @@ def PTO_GetVms4SrOp : PTO_Op<"get_vms4_sr", [Pure]> {
     attr-dict `:` type($list0) `,` type($list1) `,` type($list2) `,` type($list3)
   }];
 }
-def PTO_SetCtrlOp : PTO_UnaryI64ConfigOp<"set_ctrl">;
+def PTO_SetCtrlOp : PTO_UnaryI64ConfigOp<
+    "set_ctrl", [VPTOSchedulingOpInterface]>;
 def PTO_SetStoreAtomicCfgOp : PTO_UnaryI64ConfigOp<"set_store_atomic_cfg">;
 def PTO_StoreVfSimtInfoOp : PTO_SimtOp<"store_vfsimt_info"> {
   let summary = "Configure SIMT VF launch dimensions";
@@ -834,10 +904,10 @@ class PTO_BinaryFloatScalarOp<string mnemonic>
 
 def PTO_AbsFOp
     : PTO_SimtOp<"absf", [Pure, AllTypesMatch<["value", "result"]>]> {
-  let arguments = (ins AnyTypeOf<[F32, PTO_V2F16Type, PTO_V2BF16Type],
-                                 "f32, vector<2xf16> or vector<2xbf16>">:$value);
-  let results = (outs AnyTypeOf<[F32, PTO_V2F16Type, PTO_V2BF16Type],
-                                "f32, vector<2xf16> or vector<2xbf16>">:$result);
+  let arguments = (ins AnyTypeOf<[F16, F32, PTO_V2F16Type, PTO_V2BF16Type],
+                                 "f16, f32, vector<2xf16> or vector<2xbf16>">:$value);
+  let results = (outs AnyTypeOf<[F16, F32, PTO_V2F16Type, PTO_V2BF16Type],
+                                "f16, f32, vector<2xf16> or vector<2xbf16>">:$result);
 
   let assemblyFormat = [{
     $value attr-dict `:` type($value) `->` type($result)
@@ -854,20 +924,32 @@ class PTO_UnaryF16F32ScalarOp<string mnemonic>
   }];
 }
 
+class PTO_UnaryF32ScalarOp<string mnemonic>
+    : PTO_SimtOp<mnemonic, [Pure, AllTypesMatch<["value", "result"]>]> {
+  let arguments = (ins F32:$value);
+  let results = (outs F32:$result);
+
+  let assemblyFormat = [{
+    $value attr-dict `:` type($value) `->` type($result)
+  }];
+}
+
 def PTO_ExpOp : PTO_UnaryF16F32ScalarOp<"exp">;
 def PTO_LogOp : PTO_UnaryF16F32ScalarOp<"log">;
+def PTO_SinOp : PTO_UnaryF32ScalarOp<"sin">;
+def PTO_CosOp : PTO_UnaryF32ScalarOp<"cos">;
 def PTO_CeilOp : PTO_UnaryFloatScalarOp<"ceil">;
 def PTO_FloorOp : PTO_UnaryFloatScalarOp<"floor">;
 def PTO_RintOp : PTO_UnaryFloatScalarOp<"rint">;
 def PTO_RoundOp : PTO_UnaryFloatScalarOp<"round">;
 
-class PTO_BinaryF32BF16ScalarOp<string mnemonic>
+class PTO_BinaryFloatValueOp<string mnemonic>
     : PTO_SimtOp<mnemonic, [Pure, AllTypesMatch<["lhs", "rhs", "result"]>]> {
   let arguments = (ins
-    PTO_SimtBinaryF32BF16ValueType:$lhs,
-    PTO_SimtBinaryF32BF16ValueType:$rhs
+    PTO_SimtBinaryFloatValueType:$lhs,
+    PTO_SimtBinaryFloatValueType:$rhs
   );
-  let results = (outs PTO_SimtBinaryF32BF16ValueType:$result);
+  let results = (outs PTO_SimtBinaryFloatValueType:$result);
 
   let assemblyFormat = [{
     $lhs `,` $rhs attr-dict `:` type($lhs) `,` type($rhs) `->` type($result)
@@ -887,8 +969,8 @@ class PTO_BinaryF16F32ScalarOp<string mnemonic>
   }];
 }
 
-def PTO_FMinOp : PTO_BinaryF32BF16ScalarOp<"fmin">;
-def PTO_FMaxOp : PTO_BinaryF32BF16ScalarOp<"fmax">;
+def PTO_FMinOp : PTO_BinaryFloatValueOp<"fmin">;
+def PTO_FMaxOp : PTO_BinaryFloatValueOp<"fmax">;
 def PTO_PowOp : PTO_BinaryF16F32ScalarOp<"pow">;
 
 def PTO_FmaOp
@@ -922,7 +1004,9 @@ def PTO_ConvertOp : PTO_SimtOp<"convert", [Pure]> {
   }];
 }
 
-def PTO_SyncthreadsOp : PTO_SimtOp<"syncthreads", [
+def PTO_SyncthreadsOp : PTO_Op<"syncthreads", [
+    MicroOpInterface,
+    SimtOpInterface,
     DeclareOpInterfaceMethods<MemoryEffectsOpInterface>
   ]> {
   let summary = "Synchronize all workitems in a SIMT VF entry";
@@ -933,7 +1017,9 @@ def PTO_SyncthreadsOp : PTO_SimtOp<"syncthreads", [
   let assemblyFormat = [{ attr-dict }];
 }
 
-def PTO_ThreadfenceOp : PTO_SimtOp<"threadfence", [
+def PTO_ThreadfenceOp : PTO_Op<"threadfence", [
+    MicroOpInterface,
+    SimtOpInterface,
     DeclareOpInterfaceMethods<MemoryEffectsOpInterface>
   ]> {
   let summary = "Issue a SIMT workitem memory fence";
@@ -944,7 +1030,9 @@ def PTO_ThreadfenceOp : PTO_SimtOp<"threadfence", [
   let assemblyFormat = [{ attr-dict }];
 }
 
-def PTO_ThreadfenceBlockOp : PTO_SimtOp<"threadfence_block", [
+def PTO_ThreadfenceBlockOp : PTO_Op<"threadfence_block", [
+    MicroOpInterface,
+    SimtOpInterface,
     DeclareOpInterfaceMethods<MemoryEffectsOpInterface>
   ]> {
   let summary = "Issue a SIMT block-scoped workitem memory fence";
@@ -1298,6 +1386,7 @@ def PTO_LoadCbufToCaOp : PTO_MteOp<"load_cbuf_to_ca"> {
   );
 
   let results = (outs);
+  let hasVerifier = 1;
 
   let assemblyFormat = [{
     $source `,` $destination `,` $m_start `,` $k_start `,` $m_step `,`
@@ -1322,6 +1411,7 @@ def PTO_LoadCbufToCaS4Op : PTO_MteOp<"load_cbuf_to_ca_s4"> {
   );
 
   let results = (outs);
+  let hasVerifier = 1;
 
   let assemblyFormat = [{
     $source `,` $destination `,` $m_start `,` $k_start `,` $m_step `,`
@@ -1346,6 +1436,7 @@ def PTO_LoadCbufToCbOp : PTO_MteOp<"load_cbuf_to_cb"> {
   );
 
   let results = (outs);
+  let hasVerifier = 1;
 
   let assemblyFormat = [{
     $source `,` $destination `,` $m_start `,` $k_start `,` $m_step `,`
@@ -1370,6 +1461,7 @@ def PTO_LoadCbufToCbS4Op : PTO_MteOp<"load_cbuf_to_cb_s4"> {
   );
 
   let results = (outs);
+  let hasVerifier = 1;
 
   let assemblyFormat = [{
     $source `,` $destination `,` $m_start `,` $k_start `,` $m_step `,`
@@ -1394,6 +1486,8 @@ def PTO_LoadCbufToCaMxOp : PTO_MteOp<"load_cbuf_to_ca_mx"> {
 
   let results = (outs);
 
+  let hasVerifier = 1;
+
   let assemblyFormat = [{
     $source `,` $destination `,` $x_start_position `,` $y_start_position `,`
     $x_step `,` $y_step `,` $src_stride `,` $dst_stride attr-dict `:`
@@ -1416,6 +1510,8 @@ def PTO_LoadCbufToCbMxOp : PTO_MteOp<"load_cbuf_to_cb_mx"> {
   );
 
   let results = (outs);
+
+  let hasVerifier = 1;
 
   let assemblyFormat = [{
     $source `,` $destination `,` $x_start_position `,` $y_start_position `,`
@@ -1474,7 +1570,8 @@ def PTO_CopyMatrixCcToUbOp : PTO_MteOp<"copy_matrix_cc_to_ub"> {
 }
 
 def PTO_VldsOp : PTO_VectorMicroOp<"vlds", [
-    DeclareOpInterfaceMethods<MemoryEffectsOpInterface>
+    DeclareOpInterfaceMethods<MemoryEffectsOpInterface>,
+    VPTOAddressSemanticsOpInterface
   ]> {
   let arguments = (ins
     PTO_BufferLikeType:$source,
@@ -1494,19 +1591,23 @@ def PTO_VldsOp : PTO_VectorMicroOp<"vlds", [
 }
 
 def PTO_Vldsx2Op : PTO_VectorMicroOp<"vldsx2", [
-    DeclareOpInterfaceMethods<MemoryEffectsOpInterface>
+    DeclareOpInterfaceMethods<MemoryEffectsOpInterface>,
+    VPTOAddressSemanticsOpInterface
   ]> {
   let arguments = (ins
     PTO_BufferLikeType:$source,
     Index:$offset,
     StrAttr:$dist
   );
-  let results = (outs PTO_VectorType:$low, PTO_VectorType:$high);
+  let results = (outs PTO_VectorType:$low,
+                      PTO_VectorType:$high,
+                      Optional<PTO_BufferLikeType>:$updated_base);
 
   let hasVerifier = 1;
 
   let assemblyFormat = [{
     $source `[` $offset `]` `,` $dist attr-dict `:` type($source) `,` type($offset) `->` type($low) `,` type($high)
+    (`,` type($updated_base)^)?
   }];
 }
 
@@ -1551,7 +1652,8 @@ def PTO_SprclrOp : PTO_VectorMicroOp<"sprclr", []> {
 }
 
 def PTO_SprstiOp : PTO_VectorMicroOp<"sprsti", [
-    DeclareOpInterfaceMethods<MemoryEffectsOpInterface>
+    DeclareOpInterfaceMethods<MemoryEffectsOpInterface>,
+    VPTOAddressSemanticsOpInterface
   ]> {
   let arguments = (ins
     StrAttr:$spr,
@@ -1559,17 +1661,19 @@ def PTO_SprstiOp : PTO_VectorMicroOp<"sprsti", [
     I32:$offset
   );
 
-  let results = (outs);
+  let results = (outs Optional<PTO_BufferType>:$updated_base);
 
   let hasVerifier = 1;
 
   let assemblyFormat = [{
     $spr `,` $destination `[` $offset `]` attr-dict `:` type($destination) `,` type($offset)
+    (`->` type($updated_base)^)?
   }];
 }
 
 def PTO_SprstsOp : PTO_VectorMicroOp<"sprsts", [
-    DeclareOpInterfaceMethods<MemoryEffectsOpInterface>
+    DeclareOpInterfaceMethods<MemoryEffectsOpInterface>,
+    VPTOAddressSemanticsOpInterface
   ]> {
   let arguments = (ins
     StrAttr:$spr,
@@ -1577,32 +1681,38 @@ def PTO_SprstsOp : PTO_VectorMicroOp<"sprsts", [
     I32:$offset
   );
 
-  let results = (outs);
+  let results = (outs Optional<PTO_BufferType>:$updated_base);
 
   let hasVerifier = 1;
 
   let assemblyFormat = [{
     $spr `,` $destination `[` $offset `]` attr-dict `:` type($destination) `,` type($offset)
+    (`->` type($updated_base)^)?
   }];
 }
 
 def PTO_VldusOp : PTO_VectorMicroOp<"vldus", [
-    DeclareOpInterfaceMethods<MemoryEffectsOpInterface>
+    DeclareOpInterfaceMethods<MemoryEffectsOpInterface>,
+    VPTOAddressSemanticsOpInterface
   ]> {
   let arguments = (ins
     PTO_BufferType:$source,
-    PTO_AlignTypeConstraint:$align
+    PTO_AlignTypeConstraint:$align,
+    Optional<Index>:$increment
   );
 
   let results = (outs
     PTO_VectorType:$result,
-    PTO_AlignTypeConstraint:$updated_align
+    PTO_AlignTypeConstraint:$updated_align,
+    Optional<PTO_BufferType>:$updated_base
   );
 
   let hasVerifier = 1;
 
   let assemblyFormat = [{
-    $source `,` $align attr-dict `:` type($source) `,` type($align) `->` type($result) `,` type($updated_align)
+    $source `,` $align (`,` $increment^)? attr-dict `:` type($source) `,` type($align)
+    (`,` type($increment)^)? `->` type($result) `,` type($updated_align)
+    (`,` type($updated_base)^)?
   }];
 }
 
@@ -1887,41 +1997,48 @@ def PTO_PxorOp : PTO_VectorMicroOp<"pxor", [Pure]> {
 }
 
 def PTO_PldsOp : PTO_VectorMicroOp<"plds", [
-    DeclareOpInterfaceMethods<MemoryEffectsOpInterface>
+    DeclareOpInterfaceMethods<MemoryEffectsOpInterface>,
+    VPTOAddressSemanticsOpInterface
   ]> {
   let arguments = (ins
     PTO_BufferLikeType:$source,
     Index:$offset,
     StrAttr:$dist
   );
-  let results = (outs PTO_MaskTypeConstraint:$result);
+  let results = (outs PTO_MaskTypeConstraint:$result,
+                      Optional<PTO_BufferLikeType>:$updated_base);
 
   let hasVerifier = 1;
 
   let assemblyFormat = [{
     $source `[` $offset `]` `,` $dist attr-dict `:` type($source) `,` type($offset) `->` type($result)
+    (`,` type($updated_base)^)?
   }];
 }
 
 def PTO_PldiOp : PTO_VectorMicroOp<"pldi", [
-    DeclareOpInterfaceMethods<MemoryEffectsOpInterface>
+    DeclareOpInterfaceMethods<MemoryEffectsOpInterface>,
+    VPTOAddressSemanticsOpInterface
   ]> {
   let arguments = (ins
     PTO_BufferLikeType:$source,
     Index:$offset,
     StrAttr:$dist
   );
-  let results = (outs PTO_MaskTypeConstraint:$result);
+  let results = (outs PTO_MaskTypeConstraint:$result,
+                      Optional<PTO_BufferLikeType>:$updated_base);
 
   let hasVerifier = 1;
 
   let assemblyFormat = [{
     $source `[` $offset `]` `,` $dist attr-dict `:` type($source) `,` type($offset) `->` type($result)
+    (`,` type($updated_base)^)?
   }];
 }
 
 def PTO_PstiOp : PTO_VectorMicroOp<"psti", [
-    DeclareOpInterfaceMethods<MemoryEffectsOpInterface>
+    DeclareOpInterfaceMethods<MemoryEffectsOpInterface>,
+    VPTOAddressSemanticsOpInterface
   ]> {
   let arguments = (ins
     PTO_MaskTypeConstraint:$value,
@@ -1929,12 +2046,13 @@ def PTO_PstiOp : PTO_VectorMicroOp<"psti", [
     Index:$offset,
     StrAttr:$dist
   );
-  let results = (outs);
+  let results = (outs Optional<PTO_BufferLikeType>:$updated_base);
 
   let hasVerifier = 1;
 
   let assemblyFormat = [{
     $value `,` $destination `[` $offset `]` `,` $dist attr-dict `:` type($value) `,` type($destination) `,` type($offset)
+    (`->` type($updated_base)^)?
   }];
 }
 
@@ -2666,7 +2784,8 @@ def PTO_VshlsOp : PTO_VecScalarMaskedOp<"vshls">;
 def PTO_VshrsOp : PTO_VecScalarMaskedOp<"vshrs">;
 
 def PTO_VstsOp : PTO_VectorMicroOp<"vsts", [
-    DeclareOpInterfaceMethods<MemoryEffectsOpInterface>
+    DeclareOpInterfaceMethods<MemoryEffectsOpInterface>,
+    VPTOAddressSemanticsOpInterface
   ]> {
   let arguments = (ins
     PTO_VectorType:$value,
@@ -2706,7 +2825,8 @@ def PTO_VscatterOp : PTO_VectorMicroOp<"vscatter", [
 }
 
 def PTO_PstsOp : PTO_VectorMicroOp<"psts", [
-    DeclareOpInterfaceMethods<MemoryEffectsOpInterface>
+    DeclareOpInterfaceMethods<MemoryEffectsOpInterface>,
+    VPTOAddressSemanticsOpInterface
   ]> {
   let arguments = (ins
     PTO_MaskTypeConstraint:$value,
@@ -2715,12 +2835,13 @@ def PTO_PstsOp : PTO_VectorMicroOp<"psts", [
     StrAttr:$dist
   );
 
-  let results = (outs);
+  let results = (outs Optional<PTO_BufferLikeType>:$updated_base);
 
   let hasVerifier = 1;
 
   let assemblyFormat = [{
     $value `,` $destination `[` $offset `]` `,` $dist attr-dict `:` type($value) `,` type($destination) `,` type($offset)
+    (`->` type($updated_base)^)?
   }];
 }
 
@@ -2968,17 +3089,47 @@ def PTO_MteGmL1FracOp : PTO_MteOp<"mte_gm_l1_frac", [
   ];
 }
 
-def PTO_MteL1L0aOp : PTO_MteOp<"mte_l1_l0a", [
+def PTO_RawFillL1Op : PTO_MicroOp<"raw_fill_l1", [
+    CubeMicroOpInterface,
     DeclareOpInterfaceMethods<MemoryEffectsOpInterface>
   ]> {
+  let summary = "Fill a strided L1/MAT region with a raw bit pattern";
+  let description = [{
+    Public wrapper for filling a strided L1 matrix-buffer region with a raw
+    bit pattern. `dst` may be a memref or `!pto.ptr` buffer-like value and is
+    expanded to the canonical `pto.create_cbuf_matrix` micro-op by the
+    wrapper-expansion pass.
+
+    Fields (in order):
+    - `dst`: destination buffer; after expansion must resolve to the MAT/L1
+      address space.
+    - `byte_offset`: non-negative byte distance applied to `dst` before the
+      fill; it must be a multiple of 32 bytes.
+    - `raw_value`: raw fill pattern. For a 16-bit fill, the low 16 bits are
+      repeated in every 16-bit word; for a 32-bit fill, all 32 bits are used.
+    - `repeat_times`: number of fill repetitions.
+    - `block_num_32b`: number of 32-byte blocks per repeat.
+    - `dst_gap_32b`: destination gap between repeats, in 32-byte blocks.
+    - `fill_word_bits`: static i64 attribute selecting the compile-time fill
+      word width, exactly 16 or 32.
+
+    `repeat_times`, `block_num_32b`, and `dst_gap_32b` must each be in the
+    inclusive range [0, 32767], including when dynamically computed. The
+    verifier diagnoses known constants outside that range.
+
+    The effective destination address (`dst + byte_offset`) must be aligned to
+    32 bytes. The verifier diagnoses known constant offsets that are not
+    multiples of 32; dynamic offsets are a caller precondition.
+  }];
+
   let arguments = (ins
-    PTO_BufferLikeType:$source,
-    PTO_BufferLikeType:$destination,
-    I64:$m,
-    I64:$k,
-    I64:$start_row,
-    I64:$start_col,
-    DefaultValuedAttr<BoolAttr, "false">:$transpose
+    PTO_BufferLikeType:$dst,
+    I64:$byte_offset,
+    I32:$raw_value,
+    I64:$repeat_times,
+    I64:$block_num_32b,
+    I64:$dst_gap_32b,
+    I64Attr:$fill_word_bits
   );
 
   let results = (outs);
@@ -2986,80 +3137,152 @@ def PTO_MteL1L0aOp : PTO_MteOp<"mte_l1_l0a", [
   let hasVerifier = 1;
 
   let assemblyFormat = [{
-    $source `,` $destination `,` $m `,` $k `,` $start_row `,` $start_col
-    attr-dict `:` type($source) `,` type($destination) `,` type($m) `,`
-    type($k) `,` type($start_row) `,` type($start_col)
+    $dst `,` $byte_offset `,` $raw_value `,` $repeat_times `,` $block_num_32b `,`
+    $dst_gap_32b attr-dict `:` type($dst) `,` type($byte_offset) `,`
+    type($raw_value) `,` type($repeat_times) `,` type($block_num_32b) `,`
+    type($dst_gap_32b)
   }];
+}
+
+def PTO_CreateCbufMatrixOp : PTO_CubeMicroOp<"create_cbuf_matrix", [
+    DeclareOpInterfaceMethods<MemoryEffectsOpInterface>
+  ]> {
+  let summary = "Canonical L1 raw-pattern fill micro-op";
+  let description = [{
+    Canonical micro-op for filling a strided L1/CBUF matrix region with a raw
+    bit pattern. Produced by the `pto.raw_fill_l1` wrapper expansion.
+
+    `dst` must be a 32-byte-aligned
+    `!pto.ptr<ui16|ui32, #pto.address_space<mat>>` pointer that already
+    includes `byte_offset`. For a 16-bit fill, the low 16 bits of
+    `raw_value` are repeated in every 16-bit word; for a 32-bit fill, all 32
+    bits are used. The static `fill_word_bits` i64 attribute selects the fill
+    word width, exactly 16 or 32, and must match the destination view width.
+    `repeat_times` counts repetitions; `block_num_32b` and `dst_gap_32b`
+    count 32-byte blocks. All three geometry operands must be in the
+    inclusive range [0, 32767].
+  }];
+
+  let arguments = (ins
+    PTO_BufferType:$dst,
+    I32:$raw_value,
+    I64:$repeat_times,
+    I64:$block_num_32b,
+    I64:$dst_gap_32b,
+    I64Attr:$fill_word_bits
+  );
+
+  let results = (outs);
+
+  let hasVerifier = 1;
+
+  let assemblyFormat = [{
+    $dst `,` $raw_value `,` $repeat_times `,` $block_num_32b `,`
+    $dst_gap_32b attr-dict `:` type($dst) `,` type($raw_value) `,`
+    type($repeat_times) `,` type($block_num_32b) `,` type($dst_gap_32b)
+  }];
+}
+
+def PTO_MteL1L0aOp : PTO_MteOp<"mte_l1_l0a", [
+    AttrSizedOperandSegments,
+    DeclareOpInterfaceMethods<MemoryEffectsOpInterface>
+  ]> {
+  let arguments = (ins
+    PTO_BufferLikeType:$source,
+    PTO_BufferLikeType:$destination,
+    Optional<I64>:$m,
+    Optional<I64>:$k,
+    Optional<I64>:$start_row,
+    Optional<I64>:$start_col,
+    Optional<I64>:$m_start,
+    Optional<I64>:$k_start,
+    Optional<I64>:$m_step,
+    Optional<I64>:$k_step,
+    Optional<I64>:$src_stride,
+    Optional<I64>:$dst_stride,
+    DefaultValuedAttr<BoolAttr, "false">:$transpose
+  );
+
+  let results = (outs);
+
+  let hasVerifier = 1;
+  let hasCustomAssemblyFormat = 1;
 }
 
 def PTO_MteL1L0bOp : PTO_MteOp<"mte_l1_l0b", [
+    AttrSizedOperandSegments,
     DeclareOpInterfaceMethods<MemoryEffectsOpInterface>
   ]> {
   let arguments = (ins
     PTO_BufferLikeType:$source,
     PTO_BufferLikeType:$destination,
-    I64:$k,
-    I64:$n,
-    I64:$start_row,
-    I64:$start_col,
+    Optional<I64>:$k,
+    Optional<I64>:$n,
+    Optional<I64>:$start_row,
+    Optional<I64>:$start_col,
+    Optional<I64>:$m_start,
+    Optional<I64>:$k_start,
+    Optional<I64>:$m_step,
+    Optional<I64>:$k_step,
+    Optional<I64>:$src_stride,
+    Optional<I64>:$dst_stride,
     DefaultValuedAttr<BoolAttr, "false">:$transpose
   );
 
   let results = (outs);
 
   let hasVerifier = 1;
-
-  let assemblyFormat = [{
-    $source `,` $destination `,` $k `,` $n `,` $start_row `,` $start_col
-    attr-dict `:` type($source) `,` type($destination) `,` type($k) `,`
-    type($n) `,` type($start_row) `,` type($start_col)
-  }];
+  let hasCustomAssemblyFormat = 1;
 }
 
 def PTO_MteL1L0aMxOp : PTO_MteOp<"mte_l1_l0a_mx", [
+    AttrSizedOperandSegments,
     DeclareOpInterfaceMethods<MemoryEffectsOpInterface>
   ]> {
   let arguments = (ins
     PTO_BufferLikeType:$source,
     PTO_BufferLikeType:$destination,
-    I64:$m,
-    I64:$k,
-    I64:$start_row,
-    I64:$start_col
+    Optional<I64>:$m,
+    Optional<I64>:$k,
+    Optional<I64>:$start_row,
+    Optional<I64>:$start_col,
+    Optional<I64>:$x_start,
+    Optional<I64>:$y_start,
+    Optional<I64>:$x_step,
+    Optional<I64>:$y_step,
+    Optional<I64>:$src_stride,
+    Optional<I64>:$dst_stride
   );
 
   let results = (outs);
 
   let hasVerifier = 1;
-
-  let assemblyFormat = [{
-    $source `,` $destination `,` $m `,` $k `,` $start_row `,` $start_col
-    attr-dict `:` type($source) `,` type($destination) `,` type($m) `,`
-    type($k) `,` type($start_row) `,` type($start_col)
-  }];
+  let hasCustomAssemblyFormat = 1;
 }
 
 def PTO_MteL1L0bMxOp : PTO_MteOp<"mte_l1_l0b_mx", [
+    AttrSizedOperandSegments,
     DeclareOpInterfaceMethods<MemoryEffectsOpInterface>
   ]> {
   let arguments = (ins
     PTO_BufferLikeType:$source,
     PTO_BufferLikeType:$destination,
-    I64:$k,
-    I64:$n,
-    I64:$start_row,
-    I64:$start_col
+    Optional<I64>:$k,
+    Optional<I64>:$n,
+    Optional<I64>:$start_row,
+    Optional<I64>:$start_col,
+    Optional<I64>:$x_start,
+    Optional<I64>:$y_start,
+    Optional<I64>:$x_step,
+    Optional<I64>:$y_step,
+    Optional<I64>:$src_stride,
+    Optional<I64>:$dst_stride
   );
 
   let results = (outs);
 
   let hasVerifier = 1;
-
-  let assemblyFormat = [{
-    $source `,` $destination `,` $k `,` $n `,` $start_row `,` $start_col
-    attr-dict `:` type($source) `,` type($destination) `,` type($k) `,`
-    type($n) `,` type($start_row) `,` type($start_col)
-  }];
+  let hasCustomAssemblyFormat = 1;
 }
 
 def PTO_MteL0cL1Op : PTO_MteOp<"mte_l0c_l1", [
@@ -3456,7 +3679,8 @@ def PTO_Vstsx2Op : PTO_VectorMicroOp<"vstsx2", [
 }
 
 def PTO_VsldbOp : PTO_VectorMicroOp<"vsldb", [
-    DeclareOpInterfaceMethods<MemoryEffectsOpInterface>
+    DeclareOpInterfaceMethods<MemoryEffectsOpInterface>,
+    VPTOAddressSemanticsOpInterface
   ]> {
   let arguments = (ins
     PTO_BufferLikeType:$source,
@@ -3464,17 +3688,20 @@ def PTO_VsldbOp : PTO_VectorMicroOp<"vsldb", [
     I16:$repeat_stride,
     PTO_MaskTypeConstraint:$mask
   );
-  let results = (outs PTO_VectorType:$result);
+  let results = (outs PTO_VectorType:$result,
+                      Optional<PTO_BufferLikeType>:$updated_base);
 
   let hasVerifier = 1;
 
   let assemblyFormat = [{
     $source `,` $block_stride `,` $repeat_stride `,` $mask attr-dict `:` type($source) `,` type($block_stride) `,` type($repeat_stride) `,` type($mask) `->` type($result)
+    (`,` type($updated_base)^)?
   }];
 }
 
 def PTO_VsstbOp : PTO_VectorMicroOp<"vsstb", [
-    DeclareOpInterfaceMethods<MemoryEffectsOpInterface>
+    DeclareOpInterfaceMethods<MemoryEffectsOpInterface>,
+    VPTOAddressSemanticsOpInterface
   ]> {
   let arguments = (ins
     PTO_VectorType:$value,
@@ -3494,19 +3721,21 @@ def PTO_VsstbOp : PTO_VectorMicroOp<"vsstb", [
 }
 
 def PTO_VstasOp : PTO_VectorMicroOp<"vstas", [
-    DeclareOpInterfaceMethods<MemoryEffectsOpInterface>
+    DeclareOpInterfaceMethods<MemoryEffectsOpInterface>,
+    VPTOAddressSemanticsOpInterface
   ]> {
   let arguments = (ins
     PTO_AlignTypeConstraint:$value,
     PTO_BufferLikeType:$destination,
     I32:$offset
   );
-  let results = (outs);
+  let results = (outs Optional<PTO_BufferLikeType>:$updated_base);
 
   let hasVerifier = 1;
 
   let assemblyFormat = [{
     $value `,` $destination `,` $offset attr-dict `:` type($value) `,` type($destination) `,` type($offset)
+    (`->` type($updated_base)^)?
   }];
 }
 
@@ -3549,7 +3778,8 @@ def PTO_PstuOp : PTO_VectorMicroOp<"pstu", [
 }
 
 def PTO_VstusOp : PTO_VectorMicroOp<"vstus", [
-    DeclareOpInterfaceMethods<MemoryEffectsOpInterface>
+    DeclareOpInterfaceMethods<MemoryEffectsOpInterface>,
+    VPTOAddressSemanticsOpInterface
   ]> {
   let arguments = (ins
     PTO_AlignTypeConstraint:$align_in,
@@ -3557,12 +3787,14 @@ def PTO_VstusOp : PTO_VectorMicroOp<"vstus", [
     PTO_VectorType:$value,
     PTO_BufferType:$base
   );
-  let results = (outs PTO_AlignTypeConstraint:$align_out);
+  let results = (outs PTO_AlignTypeConstraint:$align_out,
+                      Optional<PTO_BufferType>:$base_out);
 
   let hasVerifier = 1;
 
   let assemblyFormat = [{
     $align_in `,` $offset `,` $value `,` $base attr-dict `:` type($align_in) `,` type($offset) `,` type($value) `,` type($base) `->` type($align_out)
+    (`,` type($base_out)^)?
   }];
 }
 

@@ -25,8 +25,9 @@ namespace {
 
 template <typename OpT>
 static void assignDefaultIdIfMissing(OpT op, IntegerAttr zeroAttr) {
-  if (!op.getIdAttr())
+  if (!op.getIdAttr()) {
     op.setIdAttr(zeroAttr);
+  }
 }
 
 struct PTOAssignDefaultFrontendPipeIdPass

@@ -17,9 +17,11 @@
 // https://discourse.llvm.org/t/matchandrewrite-hiding-virtual-functions/84933/8
 #pragma GCC diagnostic ignored "-Woverloaded-virtual"
 
+#include "PTO/Support/CodeConstants.h"
 #include "PTO/Transforms/VPTOLLVMEmitterHelper.h"
 
 #include "PTO/IR/PTO.h"
+#include "PTO/IR/PTOTypeUtils.h"
 
 #include "mlir/Dialect/Arith/IR/Arith.h"
 #include "mlir/Dialect/ControlFlow/IR/ControlFlowOps.h"
@@ -32,6 +34,7 @@
 #include "mlir/Conversion/LLVMCommon/TypeConverter.h"
 #include "mlir/IR/BuiltinOps.h"
 #include "mlir/IR/Builders.h"
+#include "mlir/IR/Matchers.h"
 #include "mlir/IR/SymbolTable.h"
 #include "mlir/Target/LLVMIR/Export.h"
 #include "mlir/Transforms/DialectConversion.h"
@@ -69,11 +72,13 @@ struct QueriedTargetAttrs {
 };
 
 static bool hasPtoMemRefMemorySpace(Type type) {
-  if (auto memRefType = dyn_cast<MemRefType>(type))
+  if (auto memRefType = dyn_cast<MemRefType>(type)) {
     return isa<pto::AddressSpaceAttr>(memRefType.getMemorySpace());
-  if (auto functionType = dyn_cast<FunctionType>(type))
+  }
+  if (auto functionType = dyn_cast<FunctionType>(type)) {
     return llvm::any_of(functionType.getInputs(), hasPtoMemRefMemorySpace) ||
            llvm::any_of(functionType.getResults(), hasPtoMemRefMemorySpace);
+  }
   return false;
 }
 
@@ -92,16 +97,19 @@ struct ConvertPtoMemRefSpaceCarrierOp final : ConversionPattern {
   matchAndRewrite(Operation *op, ArrayRef<Value> operands,
                   ConversionPatternRewriter &rewriter) const override {
     if (!hasPtoMemRefMemorySpace(op->getOperandTypes()) &&
-        !hasPtoMemRefMemorySpace(op->getResultTypes()))
+        !hasPtoMemRefMemorySpace(op->getResultTypes())) {
       return failure();
-    if (op->getNumRegions() != 0)
+    }
+    if (op->getNumRegions() != 0) {
       return rewriter.notifyMatchFailure(
           op, "region ops with PTO memref spaces are handled structurally");
+    }
 
     FailureOr<Operation *> converted =
         convertOpResultTypes(op, operands, *typeConverter, rewriter);
-    if (failed(converted))
+    if (failed(converted)) {
       return failure();
+    }
     return success();
   }
 };
@@ -115,8 +123,9 @@ struct ConvertMemRefReinterpretCastSpaceOp final
                   ConversionPatternRewriter &rewriter) const override {
     Type convertedResultType = getTypeConverter()->convertType(op.getType());
     auto memRefResultType = dyn_cast_or_null<MemRefType>(convertedResultType);
-    if (!memRefResultType)
+    if (!memRefResultType) {
       return rewriter.notifyMatchFailure(op, "expected memref result type");
+    }
 
     rewriter.replaceOpWithNewOp<memref::ReinterpretCastOp>(
         op, memRefResultType, adaptor.getSource(), adaptor.getOffsets(),
@@ -135,8 +144,9 @@ struct ConvertMemRefSubViewSpaceOp final
                   ConversionPatternRewriter &rewriter) const override {
     Type convertedResultType = getTypeConverter()->convertType(op.getType());
     auto memRefResultType = dyn_cast_or_null<MemRefType>(convertedResultType);
-    if (!memRefResultType)
+    if (!memRefResultType) {
       return rewriter.notifyMatchFailure(op, "expected memref result type");
+    }
 
     rewriter.replaceOpWithNewOp<memref::SubViewOp>(
         op, memRefResultType, adaptor.getSource(), op.getMixedOffsets(),
@@ -152,16 +162,19 @@ struct ConvertMemRefSpaceUnrealizedCastOp final
   LogicalResult
   matchAndRewrite(UnrealizedConversionCastOp op, OpAdaptor adaptor,
                   ConversionPatternRewriter &rewriter) const override {
-    if (op->getNumOperands() != 1 || op->getNumResults() != 1)
+    if (op->getNumOperands() != 1 || op->getNumResults() != 1) {
       return failure();
+    }
     if (!hasPtoMemRefMemorySpace(op->getOperandTypes()) &&
-        !hasPtoMemRefMemorySpace(op->getResultTypes()))
+        !hasPtoMemRefMemorySpace(op->getResultTypes())) {
       return failure();
+    }
 
     Type convertedResultType =
         getTypeConverter()->convertType(op.getResult(0).getType());
-    if (!convertedResultType)
+    if (!convertedResultType) {
       return failure();
+    }
 
     Value input = adaptor.getOperands().front();
     if (input.getType() == convertedResultType) {
@@ -174,8 +187,9 @@ struct ConvertMemRefSpaceUnrealizedCastOp final
 
 static void ensureAIVScopeDummyDecl(ModuleOp module) {
   SymbolTable symbolTable(module);
-  if (symbolTable.lookup<func::FuncOp>(kAIVScopeDummyCallee))
+  if (symbolTable.lookup<func::FuncOp>(kAIVScopeDummyCallee)) {
     return;
+  }
 
   OpBuilder builder(module.getBodyRegion());
   builder.setInsertionPointToStart(module.getBody());
@@ -187,12 +201,14 @@ static void ensureAIVScopeDummyDecl(ModuleOp module) {
 
 static bool satisfiesAIVectorScopeLatchPostcondition(llvm::Loop *loop) {
   llvm::BasicBlock *latch = loop->getLoopLatch();
-  if (!latch)
+  if (!latch) {
     return false;
+  }
 
-  llvm::SmallVector<llvm::BasicBlock *, 4> preds(llvm::predecessors(latch));
-  if (preds.size() != 1)
+  llvm::SmallVector<llvm::BasicBlock *, mlir::pto::kValue4> preds(llvm::predecessors(latch));
+  if (preds.size() != 1) {
     return false;
+  }
 
   auto *predTerm = preds.front()->getTerminator();
   return predTerm && predTerm->getNumSuccessors() == 1 &&
@@ -201,8 +217,9 @@ static bool satisfiesAIVectorScopeLatchPostcondition(llvm::Loop *loop) {
 
 static LogicalResult ensureDummyPredForAIVectorScopeLatch(
     llvm::Loop *loop, llvm::raw_ostream &diagOS) {
-  if (satisfiesAIVectorScopeLatchPostcondition(loop))
+  if (satisfiesAIVectorScopeLatchPostcondition(loop)) {
     return success();
+  }
 
   llvm::BasicBlock *latch = loop->getLoopLatch();
   if (!latch) {
@@ -210,7 +227,7 @@ static LogicalResult ensureDummyPredForAIVectorScopeLatch(
     return failure();
   }
 
-  llvm::SmallVector<llvm::BasicBlock *, 4> preds(llvm::predecessors(latch));
+  llvm::SmallVector<llvm::BasicBlock *, mlir::pto::kValue4> preds(llvm::predecessors(latch));
   if (preds.empty()) {
     diagOS << "VPTO LLVM emission failed: aivscope latch has no predecessor\n";
     return failure();
@@ -239,12 +256,14 @@ static FailureOr<std::string> extractQuotedLLVMFnAttr(llvm::StringRef ir,
   pattern += key.str();
   pattern += "\"=\"";
   size_t start = ir.find(pattern);
-  if (start == llvm::StringRef::npos)
+  if (start == llvm::StringRef::npos) {
     return failure();
+  }
   start += pattern.size();
   size_t end = ir.find('"', start);
-  if (end == llvm::StringRef::npos || end <= start)
+  if (end == llvm::StringRef::npos || end <= start) {
     return failure();
+  }
   return ir.slice(start, end).str();
 }
 
@@ -261,8 +280,9 @@ queryDefaultTargetAttrs(const VPTOEmissionOptions &options,
 
   std::string cacheKey =
       options.targetTriple + "|" + options.march + "|" + options.aicoreArch;
-  if (auto it = cache.find(cacheKey); it != cache.end())
+  if (auto it = cache.find(cacheKey); it != cache.end()) {
     return it->second;
+  }
 
   auto bisheng = llvm::sys::findProgramByName("bisheng");
   if (!bisheng) {
@@ -271,8 +291,8 @@ queryDefaultTargetAttrs(const VPTOEmissionOptions &options,
   }
   const std::string &bishengPath = *bisheng;
 
-  llvm::SmallString<64> inputPath;
-  llvm::SmallString<64> outputPath;
+  llvm::SmallString<mlir::pto::kValue64> inputPath;
+  llvm::SmallString<mlir::pto::kValue64> outputPath;
   int inputFD = -1;
   int outputFD = -1;
   if (auto ec = llvm::sys::fs::createTemporaryFile("ptoas-vpto-target-query",
@@ -302,7 +322,7 @@ queryDefaultTargetAttrs(const VPTOEmissionOptions &options,
   llvm::sys::Process::SafelyCloseFileDescriptor(inputFD);
   llvm::sys::Process::SafelyCloseFileDescriptor(outputFD);
 
-  llvm::SmallString<128> stderrPath;
+  llvm::SmallString<mlir::pto::kValue128> stderrPath;
   int stderrFD = -1;
   if (auto ec = llvm::sys::fs::createTemporaryFile("ptoas-vpto-target-query",
                                                    "stderr", stderrFD,
@@ -332,8 +352,9 @@ queryDefaultTargetAttrs(const VPTOEmissionOptions &options,
   };
   llvm::SmallVector<llvm::StringRef> args;
   args.reserve(argStorage.size());
-  for (const std::string &arg : argStorage)
+  for (const std::string &arg : argStorage) {
     args.push_back(arg);
+  }
 
   std::string execErr;
   bool execFailed = false;
@@ -349,13 +370,16 @@ queryDefaultTargetAttrs(const VPTOEmissionOptions &options,
   if (execFailed || rc != 0) {
     diagOS << "VPTO LLVM emission failed: bisheng target query failed\n";
     diagOS << "Command:";
-    for (llvm::StringRef arg : args)
+    for (llvm::StringRef arg : args) {
       diagOS << " " << arg;
+    }
     diagOS << "\n";
-    if (!execErr.empty())
+    if (!execErr.empty()) {
       diagOS << execErr << "\n";
-    if (!stderrText.empty())
+    }
+    if (!stderrText.empty()) {
       diagOS << stderrText << "\n";
+    }
     return failure();
   }
 
@@ -380,7 +404,111 @@ queryDefaultTargetAttrs(const VPTOEmissionOptions &options,
   return attrs;
 }
 
+static std::optional<int64_t>
+getI32EncodedIndexOffset(Value offset, int64_t intrinsicScale) {
+  std::optional<int64_t> constant = getConstantIntValue(offset);
+  if (!constant) {
+    return std::nullopt;
+  }
+  llvm::APInt scaled =
+      llvm::APInt(64, static_cast<uint64_t>(*constant), true).sext(128);
+  scaled *= llvm::APInt(128, static_cast<uint64_t>(intrinsicScale));
+  if (!scaled.isSignedIntN(32)) {
+    return std::nullopt;
+  }
+  return scaled.getSExtValue();
+}
+
+static Value materializeFullIndexAddress(
+    Location loc, Value base, Value offset, int64_t addressUnitBytes,
+    LLVM::LLVMPointerType baseType, ConversionPatternRewriter &rewriter) {
+  Value offsetI64 = rewriter.create<arith::IndexCastOp>(
+      loc, rewriter.getI64Type(), offset);
+  Value scaleI64 =
+      rewriter.create<arith::ConstantIntOp>(loc, addressUnitBytes, 64);
+  Value byteOffset = rewriter.create<arith::MulIOp>(loc, offsetI64, scaleI64);
+  return rewriter.create<LLVM::GEPOp>(
+      loc, baseType, rewriter.getI8Type(), base, ValueRange{byteOffset});
+}
+
+static FailureOr<VPTOLoweredAddressOffset> lowerVPTOIndexOffsetForIntrinsic(
+    Operation *anchor, Value base, Value offset, int64_t addressUnitBytes,
+    int64_t intrinsicScale, bool isPostUpdate,
+    ConversionPatternRewriter &rewriter) {
+  auto baseType = dyn_cast<LLVM::LLVMPointerType>(base.getType());
+  bool hasValidTypesAndScales =
+      baseType && offset.getType().isIndex() && addressUnitBytes > 0 &&
+      intrinsicScale > 0;
+  if (!hasValidTypesAndScales) {
+    return failure();
+  }
+
+  Location loc = anchor->getLoc();
+  if (std::optional<int64_t> encoded =
+          getI32EncodedIndexOffset(offset, intrinsicScale)) {
+    Value encodedValue =
+        rewriter.create<arith::ConstantIntOp>(loc, *encoded, 32);
+    return VPTOLoweredAddressOffset{base, encodedValue, Value()};
+  }
+
+  Value adjustedBase = materializeFullIndexAddress(
+      loc, base, offset, addressUnitBytes, baseType, rewriter);
+  Value encodedZero = rewriter.create<arith::ConstantIntOp>(loc, 0, 32);
+  if (isPostUpdate) {
+    return VPTOLoweredAddressOffset{base, encodedZero, adjustedBase};
+  }
+  return VPTOLoweredAddressOffset{adjustedBase, encodedZero, Value()};
+}
+
 } // namespace
+
+FailureOr<VPTOLoweredAddressOffset>
+lowerVPTOElementOffsetForIntrinsic(
+    Operation *anchor, Value base, Value elementOffset, Type elementType,
+    bool isPostUpdate, ConversionPatternRewriter &rewriter) {
+  auto baseType = dyn_cast<LLVM::LLVMPointerType>(base.getType());
+  unsigned elementBits = getPTOStorageElemBitWidth(elementType);
+  if (!baseType || elementBits == 0 || elementBits % 8 != 0) {
+    return failure();
+  }
+
+  Location loc = anchor->getLoc();
+  int64_t elementBytes = elementBits / 8;
+  if (!elementOffset.getType().isIndex()) {
+    if (!elementOffset.getType().isInteger(32)) {
+      return failure();
+    }
+    Value scale = rewriter.create<arith::ConstantIntOp>(loc, elementBytes, 32);
+    Value encoded =
+        rewriter.create<arith::MulIOp>(loc, elementOffset, scale);
+    return VPTOLoweredAddressOffset{base, encoded, Value()};
+  }
+
+  return lowerVPTOIndexOffsetForIntrinsic(
+      anchor, base, elementOffset, elementBytes, elementBytes, isPostUpdate,
+      rewriter);
+}
+
+FailureOr<VPTOLoweredAddressOffset>
+lowerVPTOPredicateOffsetForIntrinsic(
+    Operation *anchor, Value base, Value offset, bool isPostUpdate,
+    ConversionPatternRewriter &rewriter) {
+  int64_t addressUnitBytes = 1;
+  if (isa<PldiOp, PstiOp>(anchor)) {
+    std::optional<int64_t> alignmentBytes =
+        getLoadStoreVecAlignmentSize(anchor);
+    if (!alignmentBytes) {
+      return failure();
+    }
+    addressUnitBytes = *alignmentBytes;
+  } else if (!isa<PldsOp, PstsOp>(anchor)) {
+    return failure();
+  }
+
+  return lowerVPTOIndexOffsetForIntrinsic(
+      anchor, base, offset, addressUnitBytes, /*intrinsicScale=*/1,
+      isPostUpdate, rewriter);
+}
 
 void materializeVecScopeCarrierLoops(ModuleOp module) {
   MLIRContext *ctx = module.getContext();
@@ -388,13 +516,14 @@ void materializeVecScopeCarrierLoops(ModuleOp module) {
   (void)ctx->getOrLoadDialect<scf::SCFDialect>();
   ensureAIVScopeDummyDecl(module);
 
-  SmallVector<pto::VecScopeOp, 16> scopes;
+  SmallVector<pto::VecScopeOp, mlir::pto::kValue16> scopes;
   module.walk([&](pto::VecScopeOp vecScope) { scopes.push_back(vecScope); });
 
   IRRewriter rewriter(module.getContext());
   for (pto::VecScopeOp vecScope : llvm::reverse(scopes)) {
-    if (!vecScope || vecScope.getBody().empty())
+    if (!vecScope || vecScope.getBody().empty()) {
       continue;
+    }
 
     rewriter.setInsertionPoint(vecScope);
     auto loc = vecScope.getLoc();
@@ -415,14 +544,15 @@ void materializeVecScopeCarrierLoops(ModuleOp module) {
     rewriter.eraseOp(vecScope);
   }
 
-  SmallVector<pto::StrictVecScopeOp, 16> strictScopes;
+  SmallVector<pto::StrictVecScopeOp, mlir::pto::kValue16> strictScopes;
   module.walk([&](pto::StrictVecScopeOp strictVecScope) {
     strictScopes.push_back(strictVecScope);
   });
 
   for (pto::StrictVecScopeOp strictVecScope : llvm::reverse(strictScopes)) {
-    if (!strictVecScope || strictVecScope.getBody().empty())
+    if (!strictVecScope || strictVecScope.getBody().empty()) {
       continue;
+    }
 
     rewriter.setInsertionPoint(strictVecScope);
     auto loc = strictVecScope.getLoc();
@@ -436,12 +566,14 @@ void materializeVecScopeCarrierLoops(ModuleOp module) {
 
     IRMapping mapping;
     for (auto [blockArg, capture] :
-         llvm::zip(strictBody.getArguments(), strictVecScope.getCaptures()))
+         llvm::zip(strictBody.getArguments(), strictVecScope.getCaptures())) {
       mapping.map(blockArg, capture);
+    }
 
     rewriter.setInsertionPoint(yield);
-    for (Operation &nested : strictBody.getOperations())
+    for (Operation &nested : strictBody.getOperations()) {
       rewriter.clone(nested, mapping);
+    }
     rewriter.create<func::CallOp>(loc, kAIVScopeDummyCallee, TypeRange{},
                                   ValueRange{});
 
@@ -452,21 +584,24 @@ void materializeVecScopeCarrierLoops(ModuleOp module) {
 LogicalResult attachAIVectorScopeMetadata(llvm::Module &llvmModule,
                                           llvm::raw_ostream &diagOS) {
   llvm::Function *dummyCallee = llvmModule.getFunction(kAIVScopeDummyCallee);
-  if (!dummyCallee)
+  if (!dummyCallee) {
     return success();
+  }
 
   for (llvm::Function &function : llvmModule) {
-    if (function.isDeclaration())
+    if (function.isDeclaration()) {
       continue;
+    }
     llvm::DominatorTree dt(function);
     llvm::LoopInfo loopInfo(dt);
 
-    llvm::SmallVector<llvm::CallInst *, 4> dummyCalls;
+    llvm::SmallVector<llvm::CallInst *, mlir::pto::kValue4> dummyCalls;
     for (llvm::BasicBlock &block : function) {
       for (llvm::Instruction &inst : block) {
         auto *call = dyn_cast<llvm::CallInst>(&inst);
-        if (call && call->getCalledFunction() == dummyCallee)
+        if (call && call->getCalledFunction() == dummyCallee) {
           dummyCalls.push_back(call);
+        }
       }
     }
 
@@ -495,8 +630,9 @@ LogicalResult attachAIVectorScopeMetadata(llvm::Module &llvmModule,
         }
       }
 
-      if (failed(ensureDummyPredForAIVectorScopeLatch(loop, diagOS)))
+      if (failed(ensureDummyPredForAIVectorScopeLatch(loop, diagOS))) {
         return failure();
+      }
 
       dt.recalculate(function);
       loopInfo.releaseMemory();
@@ -529,19 +665,28 @@ LogicalResult attachAIVectorScopeMetadata(llvm::Module &llvmModule,
     }
   }
 
-  if (dummyCallee->use_empty())
+  if (dummyCallee->use_empty()) {
     dummyCallee->eraseFromParent();
+  }
   return success();
 }
 
 constexpr uint32_t getSimtMaxRegistersForThreads(uint32_t maxThreads) {
-  if (maxThreads > 1024)
-    return 16;
-  if (maxThreads > 512)
-    return 32;
-  if (maxThreads > 256)
-    return 64;
-  return 128;
+  constexpr uint32_t kThreadsPerRegisterTier = 256;
+  constexpr uint32_t kSmallestSimtRegisterBudget = 16;
+  constexpr uint32_t kSmallSimtRegisterBudget = 32;
+  constexpr uint32_t kMediumSimtRegisterBudget = 64;
+  constexpr uint32_t kLargestSimtRegisterBudget = 128;
+  if (maxThreads > 4 * kThreadsPerRegisterTier) {
+    return kSmallestSimtRegisterBudget;
+  }
+  if (maxThreads > 2 * kThreadsPerRegisterTier) {
+    return kSmallSimtRegisterBudget;
+  }
+  if (maxThreads > kThreadsPerRegisterTier) {
+    return kMediumSimtRegisterBudget;
+  }
+  return kLargestSimtRegisterBudget;
 }
 
 void attachHIVMKernelAnnotations(llvm::Module &llvmModule,
@@ -550,8 +695,8 @@ void attachHIVMKernelAnnotations(llvm::Module &llvmModule,
 
   llvm::NamedMDNode *annotations =
       llvmModule.getOrInsertNamedMetadata("hivm.annotations");
-  llvm::LLVMContext &ctx = llvmModule.getContext();
-  llvm::Type *i32Ty = llvm::Type::getInt32Ty(ctx);
+  llvm::LLVMContext *ctx = &llvmModule.getContext();
+  llvm::Type *i32Ty = llvm::Type::getInt32Ty(*ctx);
   llvm::Constant *one = llvm::ConstantInt::get(i32Ty, 1);
 
   llvm::StringMap<uint32_t> simtMaxThreadsByName;
@@ -563,13 +708,15 @@ void attachHIVMKernelAnnotations(llvm::Module &llvmModule,
       ptoEntryFunctions.insert(symName);
     }
 
-    if (!funcOp->hasAttr(pto::kPTOSimtEntryAttrName))
+    if (!funcOp->hasAttr(pto::kPTOSimtEntryAttrName)) {
       return;
+    }
 
     uint32_t maxThreads = kDefaultSimtMaxThreads;
     if (auto attr =
-            funcOp->getAttrOfType<IntegerAttr>(pto::kPTOSimtMaxThreadsAttrName))
+            funcOp->getAttrOfType<IntegerAttr>(pto::kPTOSimtMaxThreadsAttrName)) {
       maxThreads = static_cast<uint32_t>(attr.getInt());
+    }
 
     simtMaxThreadsByName[symName] = maxThreads;
   });
@@ -578,47 +725,54 @@ void attachHIVMKernelAnnotations(llvm::Module &llvmModule,
     for (llvm::BasicBlock &block : function) {
       for (llvm::Instruction &inst : block) {
         auto *call = llvm::dyn_cast<llvm::CallBase>(&inst);
-        if (!call)
+        if (!call) {
           continue;
-        if (call->getCallingConv() == llvm::CallingConv::SimtEntry)
+        }
+        if (call->getCallingConv() == llvm::CallingConv::SimtEntry) {
           return true;
+        }
       }
     }
     return false;
   };
 
-  auto addAnnotation = [&](llvm::Function &function, llvm::StringRef kind) {
+  auto addAnnotation = [annotations, ctx, one](llvm::Function &function,
+                                                llvm::StringRef kind) {
     llvm::Metadata *ops[] = {
         llvm::ValueAsMetadata::get(&function),
-        llvm::MDString::get(ctx, kind),
+        llvm::MDString::get(*ctx, kind),
         llvm::ConstantAsMetadata::get(one)};
-    annotations->addOperand(llvm::MDNode::get(ctx, ops));
+    annotations->addOperand(llvm::MDNode::get(*ctx, ops));
   };
 
-  auto addHIVMModuleI32Annotation = [&](llvm::StringRef kind, uint32_t value) {
+  auto addHIVMModuleI32Annotation = [annotations, ctx, i32Ty](
+                                            llvm::StringRef kind,
+                                            uint32_t value) {
     llvm::Metadata *ops[] = {
-        nullptr, llvm::MDString::get(ctx, kind),
+        nullptr, llvm::MDString::get(*ctx, kind),
         llvm::ConstantAsMetadata::get(llvm::ConstantInt::get(i32Ty, value))};
-    annotations->addOperand(llvm::MDNode::getDistinct(ctx, ops));
+    annotations->addOperand(llvm::MDNode::getDistinct(*ctx, ops));
   };
 
-  auto addLLVMFunctionI32Annotation = [&](llvm::Function &function,
-                                          llvm::StringRef kind,
-                                          uint32_t value) {
+  auto addLLVMFunctionI32Annotation = [ctx, i32Ty](llvm::Function &function,
+                                                    llvm::StringRef kind,
+                                                    uint32_t value) {
     llvm::Metadata *ops[] = {
-        llvm::MDString::get(ctx, kind),
+        llvm::MDString::get(*ctx, kind),
         llvm::ConstantAsMetadata::get(llvm::ConstantInt::get(i32Ty, value))};
-    function.addMetadata("annotation", *llvm::MDNode::get(ctx, ops));
+    function.addMetadata("annotation", *llvm::MDNode::get(*ctx, ops));
   };
 
   for (llvm::Function &function : llvmModule) {
-    if (function.isDeclaration())
+    if (function.isDeclaration()) {
       continue;
+    }
     if (function.getCallingConv() == llvm::CallingConv::SimtEntry) {
       uint32_t maxThreads = kDefaultSimtMaxThreads;
       if (auto it = simtMaxThreadsByName.find(function.getName());
-          it != simtMaxThreadsByName.end())
+          it != simtMaxThreadsByName.end()) {
         maxThreads = it->second;
+      }
       uint32_t maxRegisters = getSimtMaxRegistersForThreads(maxThreads);
 
       addLLVMFunctionI32Annotation(function, "simt-max-threads", maxThreads);
@@ -628,21 +782,24 @@ void attachHIVMKernelAnnotations(llvm::Module &llvmModule,
       addHIVMModuleI32Annotation("simt-max-registers", maxRegisters);
       continue;
     }
-    if (function.getLinkage() != llvm::GlobalValue::ExternalLinkage)
+    if (function.getLinkage() != llvm::GlobalValue::ExternalLinkage) {
       continue;
+    }
 
     llvm::StringRef name = function.getName();
-    if (!ptoEntryFunctions.contains(name))
+    if (!ptoEntryFunctions.contains(name)) {
       continue;
-    if (name.contains(".extracted") || name.contains(".vector.thread"))
+    }
+    if (name.contains(".extracted") || name.contains(".vector.thread")) {
       continue;
+    }
 
     addAnnotation(function, "kernel");
     addAnnotation(function, "kernel_with_simd");
-    if (callsSimtEntry(function))
+    if (callsSimtEntry(function)) {
       addAnnotation(function, "kernel_with_simt");
+    }
   }
-
 }
 
 LogicalResult
@@ -651,8 +808,9 @@ applyQueriedTargetAttrs(ModuleOp module, const VPTOEmissionOptions &options,
   FailureOr<QueriedTargetAttrs> attrs = queryDefaultTargetAttrs(options, diagOS);
   if (failed(attrs)) {
     if (options.defaultTargetCPU.empty() ||
-        options.defaultTargetFeatures.empty())
+        options.defaultTargetFeatures.empty()) {
       return failure();
+    }
     diagOS << "VPTO LLVM emission: falling back to configured default target "
               "attributes\n";
     attrs = QueriedTargetAttrs{options.defaultTargetCPU,

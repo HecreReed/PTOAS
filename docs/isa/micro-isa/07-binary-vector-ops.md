@@ -85,7 +85,8 @@ for (int i = 0; i < N; i++)
 ### `pto.vdiv`
 
 - **syntax:** `%result = pto.vdiv %lhs, %rhs, %mask : !pto.vreg<NxT>, !pto.vreg<NxT>, !pto.mask<G> -> !pto.vreg<NxT>`
-- **A5 types:** f16, f32 only (no integer division)
+- **A5 types:** f16, f32; only signed or signless i16/i32 are materialized
+  through the A5 software library.
 
 ```c
 for (int i = 0; i < N; i++)
@@ -95,9 +96,17 @@ for (int i = 0; i < N; i++)
 - **inputs:** `%lhs` is the numerator, `%rhs` is the denominator, and `%mask`
   selects active lanes.
 - **outputs:** `%result` is the lane-wise quotient.
-- **constraints and limitations:** Floating-point element types only. Active
-  denominators containing `+0` or `-0` follow the target's exceptional
-  behavior.
+- **constraints and limitations:** i16 and i32 division is rounded toward zero
+  and is exact for every nonzero denominator, including values outside f32's
+  exact range. It is expanded late to a PTODSL SoftOps implementation because
+  the released BiSheng toolchain cannot lower the integer HiVM intrinsic
+  reliably; unsigned integer variants (ui16/ui32) and other integer element
+  widths are rejected at compile time on A5 rather than reaching the
+  unsupported integer HiVM path. The overflowing
+  pairs `INT16_MIN / -1` and `INT32_MIN / -1` follow the target's
+  two's-complement result representation. Division by zero is undefined.
+  Active floating-point denominators containing `+0` or `-0` follow the
+  target's exceptional behavior.
 
 ---
 
@@ -207,7 +216,7 @@ for (int i = 0; i < N; i++)
 
 ### `pto.vshl`
 
-- **syntax:** `%result = pto.vshl %lhs, %rhs, %mask : !pto.vreg<NxT>, !pto.vreg<NxT>, !pto.mask<G> -> !pto.vreg<NxT>`
+- **syntax:** `%result = pto.vshl %lhs, %rhs, %mask : !pto.vreg<NxT>, !pto.vreg<NxsiW>, !pto.mask<G> -> !pto.vreg<NxT>` where `W` is the bit width of `T`
 - **A5 types:** all integer types
 
 ```c
@@ -218,27 +227,31 @@ for (int i = 0; i < N; i++)
 - **inputs:** `%lhs` supplies the shifted value, `%rhs` supplies the per-lane
   shift amount, and `%mask` selects active lanes.
 - **outputs:** `%result` is the shifted vector.
-- **constraints and limitations:** Integer element types only. Shift counts
-  SHOULD stay within `[0, bitwidth(T) - 1]`; out-of-range behavior is target-
-  defined unless the verifier narrows it further.
+- **constraints and limitations:** Integer element types only. `%rhs` must use
+  signed `siW` elements with the same lane count and bit width as `%lhs`; the
+  result type must exactly match `%lhs`. Shift counts SHOULD stay within
+  `[0, bitwidth(T) - 1]`; out-of-range behavior is target-defined unless the
+  verifier narrows it further.
 
 ---
 
 ### `pto.vshr`
 
-- **syntax:** `%result = pto.vshr %lhs, %rhs, %mask : !pto.vreg<NxT>, !pto.vreg<NxT>, !pto.mask<G> -> !pto.vreg<NxT>`
+- **syntax:** `%result = pto.vshr %lhs, %rhs, %mask : !pto.vreg<NxT>, !pto.vreg<NxsiW>, !pto.mask<G> -> !pto.vreg<NxT>` where `W` is the bit width of `T`
 - **A5 types:** all integer types
 
 ```c
 for (int i = 0; i < N; i++)
-    dst[i] = src0[i] >> src1[i];  // arithmetic for signed, logical for unsigned
+    dst[i] = src0[i] >> src1[i];
 ```
 
 - **inputs:** `%lhs` supplies the shifted value, `%rhs` supplies the per-lane
   shift amount, and `%mask` selects active lanes.
 - **outputs:** `%result` is the shifted vector.
-- **constraints and limitations:** Integer element types only. Signedness of the
-  element type determines arithmetic vs logical behavior.
+- **constraints and limitations:** Integer element types only. `%rhs` must use
+  signed `siW` elements with the same lane count and bit width as `%lhs`; the
+  result type must exactly match `%lhs`. The current VPTO contract does not
+  define arithmetic versus logical right-shift behavior.
 
 ---
 

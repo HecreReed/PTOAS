@@ -121,6 +121,26 @@ def coerce_runtime_integer_value(value, target_type, *, context: str):
     return coerce_integer_like(value, target_type)
 
 
+def coerce_runtime_integer_to_i1(value, *, context: str):
+    """Convert one runtime integer-like value to ``i1`` using nonzero truthiness."""
+    if not hasattr(value, "type"):
+        raise TypeError(f"{context} expects an integer-like runtime scalar, got {value!r}")
+
+    if IndexType.isinstance(value.type):
+        zero = arith.ConstantOp(IndexType.get(), 0).result
+        return arith.CmpIOp(arith.CmpIPredicate.ne, value, zero).result
+
+    if not IntegerType.isinstance(value.type):
+        raise TypeError(f"{context} expects an integer-like runtime scalar, got {value.type}")
+
+    signless_type = _signless_integer_type(value.type)
+    signless_value = _strip_integer_signedness(value)
+    if IntegerType(signless_type).width == 1:
+        return signless_value
+    zero = arith.ConstantOp(signless_type, 0).result
+    return arith.CmpIOp(arith.CmpIPredicate.ne, signless_value, zero).result
+
+
 def coerce_runtime_i1_value(value, *, context: str):
     """Normalize one authored bool/integer-like value/literal to signless i1."""
     i1_type = IntegerType.get_signless(1)
@@ -136,7 +156,7 @@ def coerce_runtime_i1_value(value, *, context: str):
     kind = classify_runtime_scalar_type(value.type)
     if kind == "float":
         raise TypeError(f"{context} expects a bool or integer-like scalar, got {value.type}")
-    return coerce_integer_like(value, i1_type)
+    return coerce_runtime_integer_to_i1(value, context=context)
 
 
 def normalize_runtime_binary_operands(lhs, rhs):
@@ -198,7 +218,8 @@ def coerce_integer_like(value, target_type):
 
     if source_width < target_width:
         source_signedness = _integer_signedness(source_type)
-        if source_signedness == "unsigned":
+        # i1 carries boolean truth values; widening must preserve 0/1 storage.
+        if source_width == 1 or source_signedness == "unsigned":
             widened = arith.ExtUIOp(signless_target, signless_source).result
         else:
             widened = arith.ExtSIOp(signless_target, signless_source).result
@@ -272,6 +293,7 @@ __all__ = [
     "classify_runtime_scalar_type",
     "coerce_integer_like",
     "coerce_runtime_i1_value",
+    "coerce_runtime_integer_to_i1",
     "coerce_runtime_index_value",
     "coerce_runtime_integer_value",
     "coerce_scalar_value_to_type",

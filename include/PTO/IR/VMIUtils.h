@@ -53,6 +53,55 @@ FailureOr<int64_t> mapPhysicalLaneToLogical(Type type, int64_t part,
 FailureOr<bool> isPaddingLane(Type type, int64_t part, int64_t chunk,
                               int64_t lane);
 
+// ---------------------------------------------------------------------------
+// VMI FpToSi hardware contract (mirrored from VPTO lookupVcvtContract).
+// Used by VMI verifiers and VMIToVPTO lowering to agree on requiresSat /
+// requiresPart without duplicating the logic.
+// ---------------------------------------------------------------------------
+
+struct VMIFpToSiContract {
+  bool requiresSat = false;
+  bool requiresPart = false;
+};
+
+/// Returns the FpToSi contract for the given src→dst element type pair,
+/// or nullopt if this float→signed-int path is not supported by the hardware.
+std::optional<VMIFpToSiContract>
+lookupVMIFpToSiContract(Type srcElem, Type dstElem);
+
+// ---------------------------------------------------------------------------
+// VMI FpToUi hardware contract (mirrors VPTO lookupVcvtContract).
+// Symmetric to FpToSi but for float→unsigned-int paths.
+// ---------------------------------------------------------------------------
+
+struct VMIFpToUiContract {
+  bool requiresSat = false;
+  bool requiresPart = false;
+};
+
+/// Returns the FpToUi contract for the given src→dst element type pair,
+/// or nullopt if this float→unsigned-int path is not supported by the hardware.
+std::optional<VMIFpToUiContract>
+lookupVMIFpToUIContract(Type srcElem, Type dstElem);
+
+// ---------------------------------------------------------------------------
+// VMI FpToFp hardware contract (VMI-owned; may diverge from VPTO).
+// Enumerates same-width fp->fp whitelist pairs plus the fp->fp narrow paths
+// whose sat semantics differ from the truncf default (e.g. bf16x2->f4x2).
+// ---------------------------------------------------------------------------
+
+struct VMIFpToFpContract {
+  bool requiresRnd = false;
+  bool requiresSat = false;
+  bool requiresPart = false;
+  StringRef allowedRndModes = StringRef();
+};
+
+/// Returns the FpToFp contract for the given src->dst element type pair,
+/// or nullopt if this fp-to-fp path is not supported by the VMI contract.
+std::optional<VMIFpToFpContract>
+lookupVMIFpToFpContract(Type srcElem, Type dstElem);
+
 } // namespace mlir::pto
 
 #endif // PTO_IR_VMIUTILS_H

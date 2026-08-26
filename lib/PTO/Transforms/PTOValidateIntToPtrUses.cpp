@@ -27,8 +27,9 @@ using namespace mlir::pto;
 
 static bool isAllowedIntToPtrUse(Value ptr, OpOperand &use) {
   Operation *user = use.getOwner();
-  if (isa<LoadScalarOp, StoreScalarOp>(user))
+  if (isa<LoadScalarOp, StoreScalarOp>(user)) {
     return use.getOperandNumber() == 0 && user->getOperand(0) == ptr;
+  }
   return false;
 }
 
@@ -36,8 +37,9 @@ LogicalResult mlir::pto::validateIntToPtrUses(func::FuncOp func) {
   WalkResult walkResult = func.walk([&](IntToPtrOp op) -> WalkResult {
     Value ptr = op.getResult();
     for (OpOperand &use : ptr.getUses()) {
-      if (isAllowedIntToPtrUse(ptr, use))
+      if (isAllowedIntToPtrUse(ptr, use)) {
         continue;
+      }
 
       Operation *user = use.getOwner();
       InFlightDiagnostic diag =
@@ -61,8 +63,9 @@ struct PTOValidateIntToPtrUsesPass
   MLIR_DEFINE_EXPLICIT_INTERNAL_INLINE_TYPE_ID(PTOValidateIntToPtrUsesPass)
 
   void runOnOperation() override {
-    if (failed(validateIntToPtrUses(getOperation())))
+    if (failed(validateIntToPtrUses(getOperation()))) {
       signalPassFailure();
+    }
   }
 };
 } // namespace

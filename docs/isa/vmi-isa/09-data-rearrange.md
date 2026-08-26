@@ -7,6 +7,7 @@
 > has the same `L` and `T` as the inputs. Commonly used for real+imaginary and
 > value+index interleaving within a single vector register.
 
+
 ---
 
 ## `pto.vmi.vintlv`
@@ -57,6 +58,7 @@
       : !pto.vmi.vreg<64×f32>, !pto.vmi.vreg<64×f32>, !pto.vmi.mask<64>
       -> !pto.vmi.vreg<64×f32>, !pto.vmi.vreg<64×f32>
   ```
+
 
 ---
 

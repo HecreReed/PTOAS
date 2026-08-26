@@ -43,12 +43,14 @@ using namespace mlir;
 namespace {
 
 static bool isDefinedInside(Operation *scope, Value value) {
-  if (Operation *defOp = value.getDefiningOp())
+  if (Operation *defOp = value.getDefiningOp()) {
     return scope->isAncestor(defOp);
+  }
 
   auto blockArg = dyn_cast<BlockArgument>(value);
-  if (!blockArg)
+  if (!blockArg) {
     return false;
+  }
 
   Operation *owner = blockArg.getOwner()->getParentOp();
   return owner && scope->isAncestor(owner);
@@ -61,14 +63,17 @@ static LogicalResult collectCaptures(pto::SectionSimtOp sectionOp,
 
   sectionOp.getBody().walk([&](Operation *op) {
     for (Value operand : op->getOperands()) {
-      if (isDefinedInside(scope, operand))
+      if (isDefinedInside(scope, operand)) {
         continue;
-      if (Operation *defOp = operand.getDefiningOp()) {
-        if (defOp->hasTrait<OpTrait::ConstantLike>())
-          continue;
       }
-      if (seen.insert(operand).second)
+      if (Operation *defOp = operand.getDefiningOp()) {
+        if (defOp->hasTrait<OpTrait::ConstantLike>()) {
+          continue;
+        }
+      }
+      if (seen.insert(operand).second) {
         captures.push_back(operand);
+      }
     }
   });
 
@@ -85,21 +90,25 @@ static void cloneExternalConstants(pto::SectionSimtOp sectionOp,
     for (Value operand : op->getOperands()) {
       Operation *defOp = operand.getDefiningOp();
       if (!defOp || isDefinedInside(scope, operand) ||
-          !defOp->hasTrait<OpTrait::ConstantLike>())
+          !defOp->hasTrait<OpTrait::ConstantLike>()) {
         continue;
-      if (seen.insert(defOp).second)
+      }
+      if (seen.insert(defOp).second) {
         constants.push_back(defOp);
+      }
     }
   });
 
-  for (Operation *constant : constants)
+  for (Operation *constant : constants) {
     builder.clone(*constant, mapping);
+  }
 }
 
 static LogicalResult verifySectionCanBeOutlined(pto::SectionSimtOp sectionOp) {
   func::FuncOp parentFunc = sectionOp->getParentOfType<func::FuncOp>();
-  if (!parentFunc)
+  if (!parentFunc) {
     return sectionOp.emitOpError("must be nested in a func.func");
+  }
 
   if (parentFunc->hasAttr(pto::kPTOSimtEntryAttrName)) {
     return sectionOp.emitOpError()
@@ -107,11 +116,13 @@ static LogicalResult verifySectionCanBeOutlined(pto::SectionSimtOp sectionOp) {
            << pto::kPTOSimtEntryAttrName << "'";
   }
 
-  if (!sectionOp.getBody().hasOneBlock())
+  if (!sectionOp.getBody().hasOneBlock()) {
     return sectionOp.emitOpError("requires a single-block body");
+  }
 
-  if (sectionOp.getBody().front().getNumArguments() != 0)
+  if (sectionOp.getBody().front().getNumArguments() != 0) {
     return sectionOp.emitOpError("does not support region block arguments");
+  }
 
   bool hasNestedSection = false;
   sectionOp.getBody().walk([&](pto::SectionSimtOp nested) {
@@ -121,15 +132,17 @@ static LogicalResult verifySectionCanBeOutlined(pto::SectionSimtOp sectionOp) {
     }
     return WalkResult::advance();
   });
-  if (hasNestedSection)
+  if (hasNestedSection) {
     return sectionOp.emitOpError("does not support nested pto.section.simt");
+  }
 
   Operation *scope = sectionOp.getOperation();
   WalkResult escapeCheck = sectionOp.getBody().walk([&](Operation *op) {
     for (Value result : op->getResults()) {
       for (Operation *user : result.getUsers()) {
-        if (!scope->isAncestor(user))
+        if (!scope->isAncestor(user)) {
           return WalkResult::interrupt();
+        }
       }
     }
     return WalkResult::advance();
@@ -149,8 +162,9 @@ static std::string getUniqueHelperName(ModuleOp module, func::FuncOp parentFunc,
   do {
     std::string candidate =
         (Twine(parentName) + "_simt_" + Twine(outlineIndex++)).str();
-    if (!module.lookupSymbol<func::FuncOp>(candidate))
+    if (!module.lookupSymbol<func::FuncOp>(candidate)) {
       return candidate;
+    }
   } while (true);
 }
 
@@ -185,8 +199,9 @@ static func::FuncOp createOutlinedHelper(ModuleOp module,
 
   SmallVector<Type> argTypes;
   argTypes.reserve(captures.size());
-  for (Value capture : captures)
+  for (Value capture : captures) {
     argTypes.push_back(capture.getType());
+  }
 
   OpBuilder moduleBuilder(module.getBodyRegion());
   moduleBuilder.setInsertionPointToEnd(&module.getBodyRegion().front());
@@ -203,13 +218,15 @@ static func::FuncOp createOutlinedHelper(ModuleOp module,
 
   Block *entry = helper.addEntryBlock();
   IRMapping mapping;
-  for (auto [capture, arg] : llvm::zip(captures, entry->getArguments()))
+  for (auto [capture, arg] : llvm::zip(captures, entry->getArguments())) {
     mapping.map(capture, arg);
+  }
 
   OpBuilder bodyBuilder = OpBuilder::atBlockEnd(entry);
   cloneExternalConstants(sectionOp, bodyBuilder, mapping);
-  for (Operation &op : sectionOp.getBody().front())
+  for (Operation &op : sectionOp.getBody().front()) {
     bodyBuilder.clone(op, mapping);
+  }
   bodyBuilder.create<func::ReturnOp>(loc);
 
   return helper;
@@ -234,16 +251,19 @@ static void replaceSectionWithLaunch(pto::SectionSimtOp sectionOp,
 static LogicalResult outlineSection(ModuleOp module,
                                     pto::SectionSimtOp sectionOp,
                                     unsigned &outlineIndex) {
-  if (failed(verifySectionCanBeOutlined(sectionOp)))
+  if (failed(verifySectionCanBeOutlined(sectionOp))) {
     return failure();
+  }
 
   FailureOr<int64_t> maxThreads = getSimtThreadCount(sectionOp);
-  if (failed(maxThreads))
+  if (failed(maxThreads)) {
     return failure();
+  }
 
   SmallVector<Value> captures;
-  if (failed(collectCaptures(sectionOp, captures)))
+  if (failed(collectCaptures(sectionOp, captures))) {
     return failure();
+  }
 
   func::FuncOp parentFunc = sectionOp->getParentOfType<func::FuncOp>();
   std::string helperName =

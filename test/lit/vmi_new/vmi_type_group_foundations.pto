@@ -1,0 +1,20 @@
+// RUN: pto-test-opt %s -verify-diagnostics -split-input-file
+
+// Compact logical vectors and legal compact groups are accepted when the
+// group count evenly divides the logical lane count.
+module {
+  func.func @compact_group(%src: !pto.vmi.vreg<8xf32>, %mask: !pto.vmi.mask<8xb32>) {
+    %r = pto.vmi.vcmax %src, %mask {group = 2} : !pto.vmi.vreg<8xf32>, !pto.vmi.mask<8xb32> -> !pto.vmi.vreg<2xf32>
+    return
+  }
+}
+
+// -----
+
+module {
+  func.func @mask_lane_mismatch(%src: !pto.vmi.vreg<8xf32>, %mask: !pto.vmi.mask<4xb32>) {
+    // expected-error@+1 {{requires mask logical lane count to match data lane count}}
+    %r = pto.vmi.vadd %src, %src, %mask : !pto.vmi.vreg<8xf32>, !pto.vmi.vreg<8xf32>, !pto.vmi.mask<4xb32> -> !pto.vmi.vreg<8xf32>
+    return
+  }
+}

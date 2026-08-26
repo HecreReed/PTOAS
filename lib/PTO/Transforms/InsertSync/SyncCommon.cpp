@@ -11,17 +11,18 @@
 // INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
 // See LICENSE in the root of the software repository for the full text of the License.
 
-#include "PTO/Transforms/InsertSync/SyncCommon.h"
+#include <map>
+#include <memory>
+#include <utility>
 #include "PTO/IR/PTO.h"
+#include "PTO/Transforms/InsertSync/SyncCommon.h"
 #include "mlir/Dialect/Arith/IR/Arith.h"
 #include "mlir/Dialect/SCF/IR/SCF.h"
 #include "mlir/IR/Value.h"
 #include "mlir/Support/LLVM.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/Support/ErrorHandling.h"
-#include <memory>
-#include <utility>
-#include <map>
+
 
 #define DEBUG_TYPE "pto-inject-sync"
 
@@ -40,8 +41,9 @@ mlir::pto::canonicalizeSyncDepRoots(const SmallVector<Value> &roots) {
   SmallVector<const void *> result;
   result.reserve(roots.size());
   for (Value value : roots) {
-    if (!value)
+    if (!value) {
       continue;
+    }
     result.push_back(value.getAsOpaquePointer());
   }
   llvm::sort(result);
@@ -51,10 +53,12 @@ mlir::pto::canonicalizeSyncDepRoots(const SmallVector<Value> &roots) {
 
 bool mlir::pto::hasSameSyncDepRoots(const SyncOperation *lhs,
                                     const SyncOperation *rhs) {
-  if (!lhs || !rhs)
+  if (!lhs || !rhs) {
     return false;
-  if (lhs->depRootBuffers.empty() || rhs->depRootBuffers.empty())
+  }
+  if (lhs->depRootBuffers.empty() || rhs->depRootBuffers.empty()) {
     return false;
+  }
   return canonicalizeSyncDepRoots(lhs->depRootBuffers) ==
          canonicalizeSyncDepRoots(rhs->depRootBuffers);
 }
@@ -267,8 +271,8 @@ UNIT_FLAG CompoundInstanceElement::getUnitFlagMode() const {
   return it->second;
 }
 
-Value getIsNotDeadLoopValue(scf::ForOp forOp, Location loc,
-                            OpBuilder &rewriter) {
+static Value getIsNotDeadLoopValue(scf::ForOp forOp, Location loc,
+                                   OpBuilder &rewriter) {
   Value upperBound = forOp.getUpperBound();
   Value lowerBound = forOp.getLowerBound();
   return rewriter.create<arith::CmpIOp>(loc, arith::CmpIPredicate::slt,
@@ -321,6 +325,9 @@ CompoundInstanceElement::getUnitFlagCond(Location loc, OpBuilder &rewriter) {
 namespace mlir::pto {
 
 bool checkAllParentLoopsAreForLoops(Operation *op) {
+  // This helper guards counted-loop-only unit-flag logic. Generic while
+  // synchronization is handled by the loop translator and must not enter
+  // this IV-based path.
   while ((op = op->getParentOfType<LoopLikeOpInterface>())) {
     if (!isa<scf::ForOp>(op)) {
       return false;

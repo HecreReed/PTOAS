@@ -53,8 +53,9 @@ struct PTORematerializeFixpipeVectorQuantPass
     auto processBlock = [&](auto &&self, Block &block) -> LogicalResult {
       llvm::DenseMap<int32_t, SetQuantVectorOp> activeVectorById;
       SmallVector<Operation *> originalOps;
-      for (Operation &op : block)
+      for (Operation &op : block) {
         originalOps.push_back(&op);
+      }
 
       for (Operation *op : originalOps) {
         if (auto setQuantVector = dyn_cast<SetQuantVectorOp>(op)) {
@@ -76,8 +77,9 @@ struct PTORematerializeFixpipeVectorQuantPass
 
         for (Region &region : op->getRegions()) {
           for (Block &nestedBlock : region) {
-            if (failed(self(self, nestedBlock)))
+            if (failed(self(self, nestedBlock))) {
               return failure();
+            }
           }
         }
       }
@@ -91,8 +93,9 @@ struct PTORematerializeFixpipeVectorQuantPass
       }
     }
 
-    for (Operation *op : eraseList)
+    for (Operation *op : eraseList) {
       op->erase();
+    }
   }
 };
 

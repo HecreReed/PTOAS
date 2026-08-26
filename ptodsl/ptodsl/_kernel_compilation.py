@@ -9,9 +9,8 @@
 
 from __future__ import annotations
 
-import inspect
-
 from ._ast_rewrite import rewrite_jit_function
+from ._cache_signature import closure_cache_signature
 from ._diagnostics import (
     jit_source_compile_constexpr_error,
     kernel_module_compile_error,
@@ -87,15 +86,18 @@ class KernelCompiler:
         self._compiled_cache = {}
 
     def tracing_callback(self, constexpr_bindings=None):
-        if not self._ast_rewrite:
-            return self._callback
         cache_key = tuple(
             (name, constexpr_bindings[name])
             for name in sorted(constexpr_bindings or {})
         )
+        cache_key = (self._ast_rewrite, cache_key)
         cached = self._trace_callback_cache.get(cache_key)
         if cached is None:
-            cached = rewrite_jit_function(self._callback, static_bindings=constexpr_bindings)
+            cached = rewrite_jit_function(
+                self._callback,
+                static_bindings=constexpr_bindings,
+                rewrite_control_flow=self._ast_rewrite,
+            )
             self._trace_callback_cache[cache_key] = cached
         return cached
 
@@ -109,7 +111,7 @@ class KernelCompiler:
         if self._ast_rewrite:
             kernel_identity = (
                 kernel_identity,
-                _closure_cache_signature(self._callback),
+                closure_cache_signature(self._callback),
             )
         specialization_key = self._kernel_signature.specialization_key(
             kernel_identity,
@@ -171,52 +173,6 @@ class KernelCompiler:
 
     def cached_specializations(self):
         return tuple(self._compiled_cache.values())
-
-
-def _closure_cache_signature(fn):
-    try:
-        closure_vars = inspect.getclosurevars(fn)
-    except TypeError:
-        return ()
-    return tuple(
-        (name, _cache_signature_atom(value))
-        for name, value in sorted(closure_vars.nonlocals.items())
-    )
-
-
-def _cache_signature_atom(value):
-    cache_signature = getattr(value, "__ptodsl_cache_signature__", None)
-    if callable(cache_signature):
-        return ("ptodsl-cache-signature", _cache_signature_atom(cache_signature()))
-    try:
-        hash(value)
-    except TypeError:
-        if isinstance(value, dict):
-            items = (
-                (_cache_signature_atom(key), _cache_signature_atom(item))
-                for key, item in value.items()
-            )
-            return (
-                "dict",
-                tuple(sorted(items, key=repr)),
-            )
-        if isinstance(value, (list, tuple)):
-            return (
-                type(value).__name__,
-                tuple(_cache_signature_atom(item) for item in value),
-            )
-        if isinstance(value, set):
-            return (
-                "set",
-                tuple(
-                    sorted(
-                        (_cache_signature_atom(item) for item in value),
-                        key=repr,
-                    )
-                ),
-            )
-        return (type(value).__name__, repr(value))
-    return value
 
 
 __all__ = [

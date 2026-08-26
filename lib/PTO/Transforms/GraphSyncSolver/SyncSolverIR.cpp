@@ -5,16 +5,32 @@
 // THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
 // INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
 // See LICENSE in the root of the software repository for the full text of the License.
+//
+// This file is derived from the HIVM GraphSyncSolver in AscendNPU-IR/bishengir
+// (https://github.com/AscendNPU-IR/bishengir), licensed under the Apache
+// License, Version 2.0.  Upstream copyright and license notice:
+//   Copyright (c) Huawei Technologies Co., Ltd. 2025. All rights reserved.
+//   Licensed under the Apache License, Version 2.0 (the "License");
+//   you may not use this file except in compliance with the License.
+//   You may obtain a copy of the License at
+//       http://www.apache.org/licenses/LICENSE-2.0
+//   Unless required by applicable law or agreed to in writing, software
+//   distributed under the License is distributed on an "AS IS" BASIS,
+//   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+//   See the License for the specific language governing permissions and
+//   limitations under the License.
 
 //===---------- SyncSolverIR.cpp ---- Graph Sync Solver -------------------===//
 //===----------------------------------------------------------------------===//
 
-#include "PTO/Transforms/GraphSyncSolver/SyncSolverIR.h"
+#include <string>
 #include "PTO/IR/PTO.h"
+#include "PTO/Support/CodeConstants.h"
 #include "PTO/Transforms/GraphSyncSolver/MemInfo.h"
+#include "PTO/Transforms/GraphSyncSolver/SyncSolverIR.h"
 #include "PTO/Transforms/GraphSyncSolver/Utility.h"
 #include "llvm/ADT/StringExtras.h"
-#include <string>
+
 
 using namespace mlir;
 using namespace pto::syncsolver;
@@ -143,7 +159,7 @@ std::string Scope::str(int indent, bool recursive) const {
   if (recursive) {
     ret += " {\n";
     for (auto &op : body) {
-      ret += op->str(indent + 2, true) + "\n";
+      ret += op->str(indent + mlir::pto::kValue2, true) + "\n";
     }
     ret += std::string(indent, ' ') + "}";
   }
@@ -165,7 +181,7 @@ std::string Loop::str(int indent, bool recursive) const {
   if (recursive) {
     ret += " {\n";
     for (auto &op : body) {
-      ret += op->str(indent + 2, true) + "\n";
+      ret += op->str(indent + mlir::pto::kValue2, true) + "\n";
     }
     ret += std::string(indent, ' ') + "}";
   }
@@ -184,11 +200,11 @@ std::string Condition::str(int indent, bool recursive) const {
     ret += " {\n";
     for (auto &op : body) {
       if (op.get() == getTrueScope()) {
-        ret += std::string(indent + 2, ' ') + "(trueScope)\n";
+        ret += std::string(indent + mlir::pto::kValue2, ' ') + "(trueScope)\n";
       } else if (op.get() == getFalseScope()) {
-        ret += std::string(indent + 2, ' ') + "(falseScope)\n";
+        ret += std::string(indent + mlir::pto::kValue2, ' ') + "(falseScope)\n";
       }
-      ret += op->str(indent + 2, true) + "\n";
+      ret += op->str(indent + mlir::pto::kValue2, true) + "\n";
     }
     ret += std::string(indent, ' ') + "}";
   }
@@ -236,10 +252,10 @@ std::string RWOperation::str(int indent, bool recursive) const {
          " " + unitFlag + "\n";
   if (indent) {
     for (auto memInfo : this->readMemInfo) {
-      ret += std::string(indent + 2, ' ') + "read: " + memInfo.str() + "\n";
+      ret += std::string(indent + mlir::pto::kValue2, ' ') + "read: " + memInfo.str() + "\n";
     }
     for (auto memInfo : this->writeMemInfo) {
-      ret += std::string(indent + 2, ' ') + "write: " + memInfo.str() + "\n";
+      ret += std::string(indent + mlir::pto::kValue2, ' ') + "write: " + memInfo.str() + "\n";
     }
   }
   ret.pop_back();
@@ -356,10 +372,10 @@ std::string ConflictPair::str() const {
 
   ret += "\n";
   if (this->op1 != nullptr) {
-    ret += this->op1->str(2, false) + '\n';
+    ret += this->op1->str(mlir::pto::kValue2, false) + '\n';
   }
   if (this->op2 != nullptr) {
-    ret += this->op2->str(2, false) + '\n';
+    ret += this->op2->str(mlir::pto::kValue2, false) + '\n';
   }
   // ret += this->opSet->str(0, false) + '\n';
   // ret += this->opWait->str(0, false) + '\n';

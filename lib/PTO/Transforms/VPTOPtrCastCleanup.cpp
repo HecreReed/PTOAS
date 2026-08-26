@@ -31,32 +31,39 @@ struct CollapsePtrMemRefPtrBridgePattern
 
   LogicalResult matchAndRewrite(UnrealizedConversionCastOp op,
                                 PatternRewriter &rewriter) const override {
-    if (op->getNumOperands() != 1 || op->getNumResults() != 1)
+    if (op->getNumOperands() != 1 || op->getNumResults() != 1) {
       return failure();
+    }
 
     auto resultPtrType = dyn_cast<pto::PtrType>(op.getResult(0).getType());
-    if (!resultPtrType)
+    if (!resultPtrType) {
       return failure();
+    }
 
     auto castOp = op.getOperand(0).getDefiningOp<memref::CastOp>();
-    if (!castOp || castOp->getNumOperands() != 1)
+    if (!castOp || castOp->getNumOperands() != 1) {
       return failure();
+    }
 
     auto innerCast =
         castOp.getSource().getDefiningOp<UnrealizedConversionCastOp>();
     if (!innerCast || innerCast->getNumOperands() != 1 ||
-        innerCast->getNumResults() != 1)
+        innerCast->getNumResults() != 1) {
       return failure();
+    }
 
     Value basePtr = innerCast.getOperand(0);
-    if (basePtr.getType() != resultPtrType)
+    if (basePtr.getType() != resultPtrType) {
       return failure();
+    }
 
     rewriter.replaceOp(op, basePtr);
-    if (castOp->use_empty())
+    if (castOp->use_empty()) {
       rewriter.eraseOp(castOp);
-    if (innerCast->use_empty())
+    }
+    if (innerCast->use_empty()) {
       rewriter.eraseOp(innerCast);
+    }
     return success();
   }
 };
@@ -69,7 +76,7 @@ struct VPTOPtrCastCleanupPass
   void runOnOperation() override {
     RewritePatternSet patterns(&getContext());
     patterns.add<CollapsePtrMemRefPtrBridgePattern>(&getContext());
-    if (failed(applyPatternsGreedily(getOperation(), std::move(patterns))))
+    if (failed(applyPatternsAndFoldGreedily(getOperation(), std::move(patterns))))
       signalPassFailure();
   }
 };

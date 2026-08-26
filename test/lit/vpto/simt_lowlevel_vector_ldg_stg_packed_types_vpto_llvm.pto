@@ -21,6 +21,7 @@ module attributes {pto.target_arch = "a5", pto.kernel_kind = #pto.kernel_kind<ve
       %gm_i16: !pto.ptr<vector<2xi16>, gm>,
       %gm_i32: !pto.ptr<vector<2xi32>, gm>
   ) attributes {pto.aicore} {
+    pto.section.simt<<<1, 1, 1>>> {
     %c0 = arith.constant 0 : index
     %c1 = arith.constant 1 : index
 
@@ -58,6 +59,7 @@ module attributes {pto.target_arch = "a5", pto.kernel_kind = #pto.kernel_kind<ve
     %v_i32 = pto.ldg %gm_i32[%c0] : !pto.ptr<vector<2xi32>, gm> -> vector<2xi32>
     pto.stg %v_i32, %gm_i32[%c1] : !pto.ptr<vector<2xi32>, gm>, vector<2xi32>
 
+    }
     return
   }
 }
@@ -75,8 +77,12 @@ module attributes {pto.target_arch = "a5", pto.kernel_kind = #pto.kernel_kind<ve
 // CHECK-DAG: llvm.bitcast {{.*}} : i16 to vector<2xi8>
 // CHECK-DAG: llvm.bitcast {{.*}} : i32 to vector<2xi16>
 // CHECK-DAG: llvm.bitcast {{.*}} : i64 to vector<2xi32>
-// fp8 x4/x8 load bitcasts lock the lowered LLVM packed payload types.
-// CHECK-DAG: llvm.bitcast {{.*}} : i32 to vector<4x!llvm.float8e4m3>
-// CHECK-DAG: llvm.bitcast {{.*}} : i64 to vector<8x!llvm.float8e4m3>
-// CHECK-DAG: llvm.bitcast {{.*}} : i32 to vector<4x!llvm.float8e5m2>
-// CHECK-DAG: llvm.bitcast {{.*}} : i64 to vector<8x!llvm.float8e5m2>
+// fp8 load bitcasts use LLVM dialect vectors because LLVM 19's builtin
+// vector type does not accept the target-specific fp8 element types.
+// CHECK-DAG: llvm.bitcast {{.*}} : i16 to !llvm.vec<2 x float8e4m3>
+// CHECK-DAG: llvm.bitcast {{.*}} : i16 to !llvm.vec<2 x float8e5m2>
+// CHECK-DAG: llvm.bitcast {{.*}} : i16 to !llvm.vec<2 x hifloat8>
+// CHECK-DAG: llvm.bitcast {{.*}} : i32 to !llvm.vec<4 x float8e4m3>
+// CHECK-DAG: llvm.bitcast {{.*}} : i64 to !llvm.vec<8 x float8e4m3>
+// CHECK-DAG: llvm.bitcast {{.*}} : i32 to !llvm.vec<4 x float8e5m2>
+// CHECK-DAG: llvm.bitcast {{.*}} : i64 to !llvm.vec<8 x float8e5m2>

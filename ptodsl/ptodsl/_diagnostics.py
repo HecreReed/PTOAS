@@ -9,6 +9,54 @@
 
 from __future__ import annotations
 
+import warnings
+from functools import wraps
+from typing import Callable, ParamSpec, TypeVar
+
+
+P = ParamSpec("P")
+R = TypeVar("R")
+
+
+class PTODSLDeprecationWarning(UserWarning):
+    """Warning emitted when a deprecated PTODSL interface is called."""
+
+
+def deprecated(reason: str) -> Callable[[Callable[P, R]], Callable[P, R]]:
+    """Mark a PTODSL callable as deprecated and warn when it is called.
+
+    ``reason`` should describe the replacement or migration path, for example::
+
+        @deprecated("use pto.vadd(vector, scalar, mask) instead")
+        def vadds(vector, scalar, mask):
+            ...
+
+    The wrapper preserves the decorated callable's metadata and exposes a
+    ``__deprecated__`` marker for tooling.  ``stacklevel=2`` points the warning
+    at the caller of the deprecated interface rather than at this wrapper.
+    """
+
+    if not isinstance(reason, str) or not reason.strip():
+        raise TypeError("deprecated() requires a non-empty string reason")
+
+    def decorate(function: Callable[P, R]) -> Callable[P, R]:
+        if not callable(function):
+            raise TypeError("deprecated() can only decorate a callable")
+
+        @wraps(function)
+        def wrapper(*args: P.args, **kwargs: P.kwargs) -> R:
+            warnings.warn(
+                f"{function.__qualname__} is deprecated; {reason}",
+                PTODSLDeprecationWarning,
+                stacklevel=2,
+            )
+            return function(*args, **kwargs)
+
+        wrapper.__deprecated__ = reason
+        return wrapper
+
+    return decorate
+
 
 class PTODSLTracingMisuseError(TypeError):
     """Raised when authored Python misuses PTODSL runtime values during tracing."""
@@ -373,6 +421,16 @@ def inline_subkernel_value_escape_error(role: str, type_text: str) -> RuntimeErr
     )
 
 
+def physical_section_value_escape_error(source_kind: str, type_text: str) -> RuntimeError:
+    """Return a diagnostic for a value escaping a physical section."""
+    return RuntimeError(
+        f"cannot use a value defined in pto.section.{source_kind} outside that physical section "
+        f"(got {type_text}). Physical sections have lexical SSA scope; pass shared data "
+        "through a GM/UB buffer with explicit synchronization, or recompute the value "
+        "from section-entry inputs."
+    )
+
+
 def simd_value_escape_error(type_text: str) -> RuntimeError:
     """Return one diagnostic for transient SIMD values escaping a simd subkernel boundary."""
     return RuntimeError(
@@ -530,7 +588,9 @@ def unsupported_public_surface_error(name: str) -> AttributeError:
 
 
 __all__ = [
+    "PTODSLDeprecationWarning",
     "PTODSLTracingMisuseError",
+    "deprecated",
     "explicit_mode_required_error",
     "explicit_mode_required_with_context_error",
     "host_tensor_metadata_error",
@@ -542,6 +602,7 @@ __all__ = [
     "jit_missing_annotation_error",
     "jit_non_gm_ptr_entry_error",
     "inline_subkernel_value_escape_error",
+    "physical_section_value_escape_error",
     "make_tensor_view_missing_metadata_error",
     "illegal_inline_subkernel_placement_error",
     "illegal_subkernel_placement_error",

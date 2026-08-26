@@ -57,6 +57,10 @@ static bool isTilelangTemplateFunc(func::FuncOp fn) {
   return fn->hasAttr("pto.tilelang.instance") && fn.isPrivate();
 }
 
+static bool isSoftLibFunc(func::FuncOp fn) {
+  return fn->hasAttr("pto.softlib.instance") && fn.isPrivate();
+}
+
 static bool isInlineableBackendHelperFunc(func::FuncOp fn) {
   return isTileOpHelperFunc(fn);
 }
@@ -65,8 +69,9 @@ static bool isInlineableLibFunc(func::FuncOp fn) {
   // Keep OP-Lib behavior unchanged while TileLang private template helpers are
   // still handled on the VPTO tile-op expansion path, together with
   // TileLang inline_proc helpers that only become meaningful after ExpandTileOp.
-  if (isInstanceFunc(fn) || isTilelangInlineProcFunc(fn))
+  if (isInstanceFunc(fn) || isTilelangInlineProcFunc(fn) || isSoftLibFunc(fn)) {
     return true;
+  }
   return isTilelangTemplateFunc(fn);
 }
 
@@ -87,11 +92,13 @@ static Operation *cloneOpForInlineWithFix(OpBuilder &builder, Operation &op,
                                           IRMapping &mapping) {
   if (auto alloc = dyn_cast<pto::AllocTileOp>(&op)) {
     auto mapOperand = [&](Value operand, Type expectedType) -> Value {
-      if (!operand)
+      if (!operand) {
         return Value();
+      }
       Value mapped = mapping.lookupOrNull(operand);
-      if (!mapped)
+      if (!mapped) {
         mapped = operand;
+      }
       return maybeUnwrapCastToExpected(mapped, expectedType);
     };
 
@@ -121,39 +128,48 @@ static void eraseDeadBridgeCasts(func::FuncOp func) {
 
     SmallVector<UnrealizedConversionCastOp, 8> deadUnrealized;
     func.walk([&](UnrealizedConversionCastOp cast) {
-      if (cast->use_empty())
+      if (cast->use_empty()) {
         deadUnrealized.push_back(cast);
+      }
     });
 
     SmallVector<memref::CastOp, 8> deadMemrefCasts;
     func.walk([&](memref::CastOp cast) {
-      if (cast->use_empty())
+      if (cast->use_empty()) {
         deadMemrefCasts.push_back(cast);
+      }
     });
 
-    if (deadUnrealized.empty() && deadMemrefCasts.empty())
+    if (deadUnrealized.empty() && deadMemrefCasts.empty()) {
       break;
+    }
 
-    for (UnrealizedConversionCastOp cast : llvm::reverse(deadUnrealized))
+    for (UnrealizedConversionCastOp cast : llvm::reverse(deadUnrealized)) {
       cast.erase();
-    for (memref::CastOp cast : llvm::reverse(deadMemrefCasts))
+    }
+    for (memref::CastOp cast : llvm::reverse(deadMemrefCasts)) {
       cast.erase();
+    }
     changed = true;
   }
 }
 
 static LogicalResult inlineCall(func::CallOp call, func::FuncOp callee) {
-  if (callee.isExternal())
+  if (callee.isExternal()) {
     return call.emitOpError("callee must have a body before inlining");
+  }
 
   Block &entry = callee.getBody().front();
-  if (entry.getNumArguments() != call.getNumOperands())
+  if (entry.getNumArguments() != call.getNumOperands()) {
     return call.emitOpError("callee argument count mismatch during inlining");
+  }
   auto returnOp = dyn_cast<func::ReturnOp>(entry.getTerminator());
-  if (!returnOp)
+  if (!returnOp) {
     return call.emitOpError("callee must terminate with func.return");
-  if (returnOp.getNumOperands() != call.getNumResults())
+  }
+  if (returnOp.getNumOperands() != call.getNumResults()) {
     return call.emitOpError("callee return/result arity mismatch during inlining");
+  }
 
   OpBuilder builder(call);
   IRMapping mapping;
@@ -164,10 +180,12 @@ static LogicalResult inlineCall(func::CallOp call, func::FuncOp callee) {
   for (Operation &op : entry.without_terminator()) {
     FailureOr<bool> handledOr =
         pto::tryCloneOpLibInlineBridgeOp(builder, op, mapping);
-    if (failed(handledOr))
+    if (failed(handledOr)) {
       return call.emitOpError("failed to remap OP-Lib inline bridge op");
-    if (*handledOr)
+    }
+    if (*handledOr) {
       continue;
+    }
 
     Operation *newOp = cloneOpForInlineWithFix(builder, op, mapping);
     for (auto [oldRes, newRes] :
@@ -178,8 +196,9 @@ static LogicalResult inlineCall(func::CallOp call, func::FuncOp callee) {
   for (auto [callResult, returnOperand] :
        llvm::zip(call.getResults(), returnOp.getOperands())) {
     Value mapped = mapping.lookupOrNull(returnOperand);
-    if (!mapped)
+    if (!mapped) {
       mapped = returnOperand;
+    }
     callResult.replaceAllUsesWith(mapped);
   }
 
@@ -218,25 +237,29 @@ static LogicalResult validateInlineableCalleesHaveBodies(
     ModuleOp module, InlinePredicate &&shouldInline) {
   for (ModuleOp funcModule : collectFuncModules(module)) {
     for (func::FuncOp func : funcModule.getOps<func::FuncOp>()) {
-      if (func.isExternal() || func.empty())
+      if (func.isExternal() || func.empty()) {
         continue;
+      }
 
       bool failed = false;
       func.walk([&](func::CallOp call) {
         auto calleeAttr = call.getCalleeAttr();
-        if (!calleeAttr)
+        if (!calleeAttr) {
           return;
+        }
 
         func::FuncOp callee =
             funcModule.lookupSymbol<func::FuncOp>(calleeAttr.getValue());
-        if (!callee || !shouldInline(callee) || !callee.isExternal())
+        if (!callee || !shouldInline(callee) || !callee.isExternal()) {
           return;
+        }
 
         emitMissingInstanceBodyError(call, callee);
         failed = true;
       });
-      if (failed)
+      if (failed) {
         return failure();
+      }
     }
   }
 
@@ -249,12 +272,15 @@ static LogicalResult inlineMatchingCalls(
     llvm::StringRef debugTag, int &inlinedCalls, int &touchedFuncs) {
   for (ModuleOp funcModule : collectFuncModules(module)) {
     for (func::FuncOp func : funcModule.getOps<func::FuncOp>()) {
-      if (func.isExternal())
+      if (func.isExternal()) {
         continue;
-      if (isInstanceFunc(func))
+      }
+      if (isInstanceFunc(func)) {
         continue;
-      if (func.empty())
+      }
+      if (func.empty()) {
         continue;
+      }
 
       bool changedThisFunc = false;
       bool madeProgress = true;
@@ -265,17 +291,20 @@ static LogicalResult inlineMatchingCalls(
         func.walk([&](func::CallOp call) { calls.push_back(call); });
 
         for (func::CallOp oldCall : calls) {
-          if (!oldCall || !oldCall->getBlock())
+          if (!oldCall || !oldCall->getBlock()) {
             continue;
+          }
 
           auto calleeAttr = oldCall.getCalleeAttr();
-          if (!calleeAttr)
+          if (!calleeAttr) {
             continue;
+          }
 
           func::FuncOp callee =
               funcModule.lookupSymbol<func::FuncOp>(calleeAttr.getValue());
-          if (!callee || !shouldInline(callee))
+          if (!callee || !shouldInline(callee)) {
             continue;
+          }
 
           if (callee.isExternal()) {
             oldCall.emitOpError("callee must have a body before inlining");
@@ -304,8 +333,9 @@ static LogicalResult inlineMatchingCalls(
             oldResult.replaceAllUsesWith(newResult);
           call.erase();
 
-          if (failed(inlineCall(newCall, callee)))
+          if (failed(inlineCall(newCall, callee))) {
             return failure();
+          }
 
           ++inlinedCalls;
           changedThisFunc = true;
@@ -334,16 +364,20 @@ static void eraseDeadMatchingPrivateFuncs(ModuleOp module,
     SymbolTable symbolTable(funcModule);
     SmallVector<func::FuncOp, 8> deadFuncs;
     for (func::FuncOp func : funcModule.getOps<func::FuncOp>()) {
-      if (!predicate(func))
+      if (!predicate(func)) {
         continue;
-      if (func.isPublic())
+      }
+      if (func.isPublic()) {
         continue;
+      }
       auto uses = symbolTable.getSymbolUses(func, funcModule);
-      if (uses && uses->empty())
+      if (uses && uses->empty()) {
         deadFuncs.push_back(func);
+      }
     }
-    for (func::FuncOp func : deadFuncs)
+    for (func::FuncOp func : deadFuncs) {
       func.erase();
+    }
   }
 }
 

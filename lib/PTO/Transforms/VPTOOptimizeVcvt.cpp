@@ -6,6 +6,7 @@
 // INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
 // See LICENSE in the root of the software repository for the full text of the License.
 
+#include "PTO/Support/CodeConstants.h"
 #include "PTO/IR/PTO.h"
 #include "PTO/IR/PTOTypeUtils.h"
 #include "PTO/Transforms/Passes.h"
@@ -31,12 +32,15 @@ static bool isOddPart(StringRef part) {
 }
 
 static bool isAllTrueMask(Value mask) {
-  if (auto op = mask.getDefiningOp<PsetB8Op>())
+  if (auto op = mask.getDefiningOp<PsetB8Op>()) {
     return op.getPattern() == "PAT_ALL";
-  if (auto op = mask.getDefiningOp<PsetB16Op>())
+  }
+  if (auto op = mask.getDefiningOp<PsetB16Op>()) {
     return op.getPattern() == "PAT_ALL";
-  if (auto op = mask.getDefiningOp<PsetB32Op>())
+  }
+  if (auto op = mask.getDefiningOp<PsetB32Op>()) {
     return op.getPattern() == "PAT_ALL";
+  }
   return false;
 }
 
@@ -47,12 +51,14 @@ static bool isPairEquivalentLoadDist(StringRef dist) {
 }
 
 static bool hasEvenOddEquivalentLanes(Value value) {
-  if (value.getDefiningOp<VbrOp>())
+  if (value.getDefiningOp<VbrOp>()) {
     return true;
+  }
 
   auto load = value.getDefiningOp<VldsOp>();
-  if (!load || value != load.getResult())
+  if (!load || value != load.getResult()) {
     return false;
+  }
 
   std::optional<StringRef> dist = load.getDist();
   return dist && isPairEquivalentLoadDist(*dist);
@@ -61,8 +67,9 @@ static bool hasEvenOddEquivalentLanes(Value value) {
 static bool isNarrowToWideVcvt(VcvtOp op) {
   auto inputType = dyn_cast<VRegType>(op.getInput().getType());
   auto resultType = dyn_cast<VRegType>(op.getResult().getType());
-  if (!inputType || !resultType)
+  if (!inputType || !resultType) {
     return false;
+  }
 
   unsigned inputBits = getPTOStorageElemBitWidth(inputType.getElementType());
   unsigned resultBits = getPTOStorageElemBitWidth(resultType.getElementType());
@@ -70,8 +77,9 @@ static bool isNarrowToWideVcvt(VcvtOp op) {
 }
 
 static Value stripVbitcasts(Value value) {
-  while (auto bitcast = value.getDefiningOp<VbitcastOp>())
+  while (auto bitcast = value.getDefiningOp<VbitcastOp>()) {
     value = bitcast.getInput();
+  }
   return value;
 }
 
@@ -82,35 +90,42 @@ struct AlignedUnsignedWidening {
 
 static bool isZeroGapLoad(Value value, AlignedUnsignedWidening widening) {
   auto load = stripVbitcasts(value).getDefiningOp<VldsOp>();
-  if (!load)
+  if (!load) {
     return false;
+  }
 
   auto loadType = dyn_cast<VRegType>(load.getResult().getType());
   std::optional<StringRef> dist = load.getDist();
   if (!loadType || !dist ||
       getPTOStorageElemBitWidth(loadType.getElementType()) !=
-          widening.payloadBits)
+          widening.payloadBits) {
     return false;
+  }
 
-  if (widening.payloadBits == 8 && widening.carrierBits == 16)
+  if (widening.payloadBits == mlir::pto::kValue8 && widening.carrierBits == 16) {
     return *dist == "UNPK_B8";
-  if (widening.payloadBits == 16 && widening.carrierBits == 32)
+  }
+  if (widening.payloadBits == mlir::pto::kValue16 && widening.carrierBits == 32) {
     return *dist == "UNPK_B16";
-  if (widening.payloadBits == 8 && widening.carrierBits == 32)
+  }
+  if (widening.payloadBits == mlir::pto::kValue8 && widening.carrierBits == 32) {
     return *dist == "UNPK4";
+  }
   return false;
 }
 
 static bool isZeroGapNarrowingVcvt(Value value,
                                    AlignedUnsignedWidening widening) {
   auto cvt = value.getDefiningOp<VcvtOp>();
-  if (!cvt || !isAllTrueMask(cvt.getMask()))
+  if (!cvt || !isAllTrueMask(cvt.getMask())) {
     return false;
+  }
 
   auto inputType = dyn_cast<VRegType>(cvt.getInput().getType());
   auto resultType = dyn_cast<VRegType>(cvt.getResult().getType());
-  if (!inputType || !resultType)
+  if (!inputType || !resultType) {
     return false;
+  }
 
   unsigned inputBits = getPTOStorageElemBitWidth(inputType.getElementType());
   unsigned resultBits = getPTOStorageElemBitWidth(resultType.getElementType());
@@ -118,14 +133,16 @@ static bool isZeroGapNarrowingVcvt(Value value,
       resultBits != widening.payloadBits ||
       inputBits <= resultBits ||
       inputType.getElementCount() * inputBits !=
-          resultType.getElementCount() * resultBits)
+          resultType.getElementCount() * resultBits) {
     return false;
+  }
 
   std::optional<StringRef> part = cvt.getPart();
-  if (!part)
+  if (!part) {
     return false;
-  return (inputBits == resultBits * 2 && *part == "EVEN") ||
-         (inputBits == resultBits * 4 && *part == "P0");
+  }
+  return (inputBits == resultBits * mlir::pto::kValue2 && *part == "EVEN") ||
+         (inputBits == resultBits * mlir::pto::kValue4 && *part == "P0");
 }
 
 // Deliberately admit only instructions that construct a carrier by zero
@@ -134,29 +151,35 @@ static bool isZeroGapNarrowingVcvt(Value value,
 static bool isCanonicalZeroGapCarrier(Value value,
                                       AlignedUnsignedWidening widening) {
   value = stripVbitcasts(value);
-  if (isZeroGapLoad(value, widening))
+  if (isZeroGapLoad(value, widening)) {
     return true;
-  if (isZeroGapNarrowingVcvt(value, widening))
+  }
+  if (isZeroGapNarrowingVcvt(value, widening)) {
     return true;
+  }
 
   auto unpack = value.getDefiningOp<VzunpackOp>();
-  if (!unpack)
+  if (!unpack) {
     return false;
+  }
   auto sourceType = dyn_cast<VRegType>(unpack.getSrc().getType());
   auto resultType = dyn_cast<VRegType>(unpack.getResult().getType());
-  if (!sourceType || !resultType)
+  if (!sourceType || !resultType) {
     return false;
+  }
 
   unsigned sourceBits =
       getPTOStorageElemBitWidth(sourceType.getElementType());
   unsigned resultBits =
       getPTOStorageElemBitWidth(resultType.getElementType());
   if (sourceBits == 0 || resultBits != widening.carrierBits ||
-      resultBits != sourceBits * 2 || widening.payloadBits > sourceBits)
+      resultBits != sourceBits * mlir::pto::kValue2 || widening.payloadBits > sourceBits) {
     return false;
+  }
 
-  if (widening.payloadBits == sourceBits)
+  if (widening.payloadBits == sourceBits) {
     return true;
+  }
   return isCanonicalZeroGapCarrier(
       unpack.getSrc(), {widening.payloadBits, sourceBits});
 }
@@ -166,29 +189,34 @@ matchAlignedUnsignedWidening(VcvtOp op) {
   auto inputType = dyn_cast<VRegType>(op.getInput().getType());
   auto resultType = dyn_cast<VRegType>(op.getResult().getType());
   if (!inputType || !resultType || op.getRndAttr() || op.getSatAttr() ||
-      !isAllTrueMask(op.getMask()))
+      !isAllTrueMask(op.getMask())) {
     return std::nullopt;
+  }
 
   auto inputElementType = dyn_cast<IntegerType>(inputType.getElementType());
   auto resultElementType = dyn_cast<IntegerType>(resultType.getElementType());
   if (!inputElementType || !resultElementType ||
-      !inputElementType.isUnsigned() || !resultElementType.isUnsigned())
+      !inputElementType.isUnsigned() || !resultElementType.isUnsigned()) {
     return std::nullopt;
+  }
 
   unsigned inputBits = inputElementType.getWidth();
   unsigned resultBits = resultElementType.getWidth();
   if (inputBits >= resultBits ||
       inputType.getElementCount() * inputBits !=
-          resultType.getElementCount() * resultBits)
+          resultType.getElementCount() * resultBits) {
     return std::nullopt;
+  }
 
   std::optional<StringRef> part = op.getPart();
-  if (!part)
+  if (!part) {
     return std::nullopt;
-  if ((resultBits == inputBits * 2 && *part != "EVEN") ||
-      (resultBits == inputBits * 4 && *part != "P0") ||
-      (resultBits != inputBits * 2 && resultBits != inputBits * 4))
+  }
+  if ((resultBits == inputBits * mlir::pto::kValue2 && *part != "EVEN") ||
+      (resultBits == inputBits * mlir::pto::kValue4 && *part != "P0") ||
+      (resultBits != inputBits * mlir::pto::kValue2 && resultBits != inputBits * 4)) {
     return std::nullopt;
+  }
 
   return AlignedUnsignedWidening{inputBits, resultBits};
 }
@@ -201,8 +229,9 @@ struct CanonicalizeEquivalentPartPattern : public OpRewritePattern<VcvtOp> {
     std::optional<StringRef> part = op.getPart();
     if (!part || !isOddPart(*part) || !isNarrowToWideVcvt(op) ||
         !isAllTrueMask(op.getMask()) ||
-        !hasEvenOddEquivalentLanes(op.getInput()))
+        !hasEvenOddEquivalentLanes(op.getInput())) {
       return failure();
+    }
 
     rewriter.modifyOpInPlace(
         op, [&] { op.setPartAttr(rewriter.getStringAttr("EVEN")); });
@@ -217,8 +246,9 @@ struct FoldZeroGapExtensionPattern : public OpRewritePattern<VcvtOp> {
                                 PatternRewriter &rewriter) const override {
     std::optional<AlignedUnsignedWidening> widening =
         matchAlignedUnsignedWidening(op);
-    if (!widening || !isCanonicalZeroGapCarrier(op.getInput(), *widening))
+    if (!widening || !isCanonicalZeroGapCarrier(op.getInput(), *widening)) {
       return failure();
+    }
 
     Value carrier = stripVbitcasts(op.getInput());
     Value result = carrier.getType() == op.getResult().getType()
@@ -239,7 +269,7 @@ struct VPTOOptimizeVcvtPass
     RewritePatternSet patterns(&getContext());
     patterns.add<CanonicalizeEquivalentPartPattern,
                  FoldZeroGapExtensionPattern>(&getContext());
-    if (failed(applyPatternsGreedily(getOperation(), std::move(patterns))))
+    if (failed(applyPatternsAndFoldGreedily(getOperation(), std::move(patterns))))
       signalPassFailure();
   }
 };

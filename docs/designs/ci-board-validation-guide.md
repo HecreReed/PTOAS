@@ -2,11 +2,12 @@
 
 ## 1. 文档目的
 
-本文说明 PTOAS 当前与开发者最相关的 3 条验证链路：
+本文说明 PTOAS 当前与开发者最相关的 4 条验证链路：
 
 1. 本地最小复现：`build -> runop -> 生成 pto/cpp`
 2. GitHub Actions：`Build Wheel` 与 `CI`
-3. PR 评论触发的 A3/A5 手动板测
+3. A3/A5 self-hosted runner 每日板测
+4. PR 评论触发的 A3/A5 手动板测
 
 本文只描述当前仓库已经存在、并且日常开发会直接用到的流程，不展开板测机器人内部实现。
 
@@ -45,14 +46,27 @@
 
 - 在 GitHub runner 上构建 LLVM/MLIR 与 PTOAS
 - 执行 `test/samples/runop.sh --enablebc all`
-- 在 `workflow_dispatch` / `schedule` 时打包 payload，并把样例和脚本发到远端板机执行 `run_remote_npu_validation.sh`
+- 在 `workflow_dispatch` / `schedule` 时打包 payload，由 A3 self-hosted runner 通过 `task-submit` 执行 `run_remote_npu_validation.sh`
 
 触发差异：
 
-- `push` / `pull_request`：只跑 GitHub runner 上的构建和样例生成
-- `workflow_dispatch` / `schedule`：除上述步骤外，还会跑远端板测 job `remote-npu-validation`
+- `push` / `pull_request`：只跑 GitHub runner 上的构建和样例生成，不会把 PR-controlled workflow 调度到 A3 runner
+- `workflow_dispatch` / `schedule`：除上述步骤外，还会在 A3 runner 跑板测 job `remote-npu-validation`
 
-### 2.3 评论触发板测
+### 2.3 `A5 Nightly Board`
+
+对应 workflow：`.github/workflows/ci_a5.yml`
+
+用途：
+
+- 每天北京时间 `03:00` 在 A5 self-hosted runner 上构建 `main`
+- 生成全量 A5 payload，并通过 `task-submit` 排队执行 NPU 板测
+- 在 GitHub Actions Summary 中展示 `OK / FAIL / SKIP` 汇总并上传结果 artifact
+- 配置 `A5_FEISHU_WEBHOOK_URL` secret 后，同步发送飞书结果卡片
+
+该 workflow 直接在 A5 主机运行，不使用 SSH secret，也不依赖板测监测器的私有脚本。runner 尚未在线时，定时任务会保持排队状态。
+
+### 2.4 评论触发板测
 
 这部分不在本仓库内实现，但当前开发流程依赖它。
 
@@ -83,7 +97,7 @@
 ```bash
 git clone https://github.com/vpto-dev/llvm-project.git
 cd llvm-project
-git checkout feature-vpto-llvm21
+git checkout feature-vpto
 
 cmake -G Ninja -S llvm -B llvm/build-shared \
   -DLLVM_ENABLE_PROJECTS="mlir;clang" \
@@ -103,7 +117,7 @@ ninja -C llvm/build-shared
 ```bash
 export LLVM_DIR=$PWD/llvm-project/llvm/build-shared
 export PTO_INSTALL_DIR=$PWD/install
-python3 -m pip install 'pybind11<3' 'nanobind>=2.4'
+python3 -m pip install 'pybind11<3'
 
 cmake -G Ninja -S . -B build \
   -DLLVM_DIR="$LLVM_DIR/lib/cmake/llvm" \
@@ -210,9 +224,27 @@ gh workflow run build_wheel.yml \
 gh run list --repo hw-native-sys/PTOAS --workflow 'Build Wheel' --limit 5
 ```
 
-### 4.3 手动触发 `CI` 远端板测
+### 4.3 配置和触发 A3 每日板测
 
 `CI` 的 `remote-npu-validation` 只会在 `workflow_dispatch` 或定时任务下执行。
+它固定使用以下 self-hosted runner 标签：
+
+- `self-hosted`
+- `Linux`
+- `ARM64`
+- `ptoas-a3`
+
+runner 用户需要能够执行 `task-submit`，并提供 `cmake`、`git`、`make`、
+`python3`、`tar` 和 Python `numpy`。workflow 不再使用 `SSH_KEY`、
+`SSH_KNOWN_HOSTS` 或远端主机参数；payload 会下载到 A3 runner 的临时目录，
+通过 TaskQueue 获取设备后在本机执行。默认 `device_id=auto`，由 TaskQueue
+选择空闲卡并通过 `TASK_DEVICE` 传给板测脚本。
+
+需要单独检查 A3 runner 的异步 TaskQueue 接口时，手动触发
+`.github/workflows/a3_taskqueue_smoke.yml`。该 workflow 不 checkout 源码、
+不申请 NPU，只验证 `task-submit --env-file`、任务 ID 解析、`--wait`、
+`--status` 和退出码传播。它不接受 `pull_request` 事件，避免 PR-controlled
+workflow 在持久化 self-hosted runner 上执行。
 
 命令行例子：
 
@@ -222,35 +254,70 @@ gh workflow run ci.yml \
   --ref main \
   -f stage=run \
   -f run_mode=npu \
-  -f soc_version=Ascend910B1 \
-  -f device_id=2 \
+  -f soc_version=Ascend910 \
+  -f device_id=auto \
   -f skip_cases='mix_kernel,vadd_validshape,vadd_validshape_dynamic,print,storefp' \
   -f run_only_cases=''
-```
-
-A5 例子：
-
-```bash
-gh workflow run ci.yml \
-  --repo hw-native-sys/PTOAS \
-  --ref main \
-  -f stage=run \
-  -f run_mode=npu \
-  -f soc_version=Ascend950 \
-  -f device_id=1 \
-  -f run_only_cases='qwen3_decode_layer_incore_0,qwen3_decode_layer_incore_1'
 ```
 
 关键输入解释：
 
 - `stage`：`build` 或 `run`
 - `run_mode`：`npu` 或 `sim`
-- `soc_version`：例如 `Ascend910B1`、`Ascend950`
-- `device_id`：远端 `aclrtSetDevice` 的 device id
+- `soc_version`：A3 编译目标，默认 `Ascend910`
+- `device_id`：传给 `task-submit --device` 的选择器，默认 `auto`
 - `skip_cases`：跳过列表
 - `run_only_cases`：只跑列表
 - `pto_isa_repo` / `pto_isa_commit`：指定板测使用的 `pto-isa`
-- `remote_host` / `remote_user` / `remote_port`：指定远端板机
+
+定时任务固定使用默认分支；GitHub cron 使用 UTC，因此配置为 `0 19 * * *`，
+对应北京时间次日 `03:00`。同一时间只允许一个 A3 nightly job，新的运行会排队且不会取消正在进行的板测。
+
+### 4.4 配置和触发 A5 每日板测
+
+A5 runner 需要注册到 `hw-native-sys/PTOAS`，并具有以下标签：
+
+- `self-hosted`
+- `Linux`
+- `ARM64`
+- `ptoas-a5`
+
+runner 用户需要能够执行 `task-submit`，并能读取预编译 LLVM、CANN 和 Python 环境。建议把 runner service 放入现有 `ptoasboard.slice`，让 runner 侧构建继续受 `35 CPU / 48 GiB` 资源上限约束。`task-submit` 会复用板机任务队列，因此它能和评论板测机器人共享设备而不直接抢卡。
+
+workflow 支持以下 repository variables；未设置时使用 A5 板机当前默认值：
+
+- `PTOAS_A5_LLVM_BUILD_DIR`：预编译 LLVM/MLIR build 目录
+- `PTOAS_A5_PYTHON`：能导入 `numpy`、`pybind11` 和该 LLVM Python binding 的 Python
+- `PTOAS_A5_BUILD_JOBS`：PTOAS 并行编译数，默认 `4`
+- `PTOAS_A5_DEVICE_ID`：传给 `task-submit --device` 的设备号，默认 `1`
+
+飞书通知是可选能力。需要时新增 repository secret `A5_FEISHU_WEBHOOK_URL`；不配置不会影响板测和 GitHub Summary。
+
+payload 生成阶段暂时排除以下使用显式本地内存地址的 Level-3 repro：
+`decode_projection_incore_0`、`rmsnorm_incore_0`、
+`test_tmov_col_major_16x1_align_a5` 和
+`test_tmov_row_major_1x16_control_a5`。这些快照尚未适配当前 Level-3
+VPTO/TMOV 输入契约，不应阻断其余 A5 常规板测；完成迁移后应从
+`A5_INCOMPATIBLE_LEVEL3_CASES` 中移除并重新纳入 nightly。
+
+手动触发全量 A5 板测：
+
+```bash
+gh workflow run ci_a5.yml \
+  --repo hw-native-sys/PTOAS \
+  --ref main
+```
+
+只跑指定 case：
+
+```bash
+gh workflow run ci_a5.yml \
+  --repo hw-native-sys/PTOAS \
+  --ref main \
+  -f run_only_cases='qwen3_decode_layer_incore_0,qwen3_decode_layer_incore_1'
+```
+
+定时任务固定使用默认分支；GitHub cron 使用 UTC，因此配置为 `0 19 * * *`，对应北京时间次日 `03:00`。同一时间只允许一个 A5 nightly job，新的运行会排队且不会取消正在进行的板测。
 
 ## 5. PR 评论触发板测
 
@@ -343,7 +410,7 @@ A5 多 case：
 
 ### 6.3 A3 / A5 分流
 
-如果 case 只适用于某个架构，需要同步更新 `.github/workflows/ci.yml` 中的分流列表：
+如果 case 只适用于某个架构，需要同步更新 `.github/workflows/ci.yml` 和 `.github/workflows/ci_a5.yml` 中的分流列表：
 
 - `A3_ONLY_CASES`
 - `A5_ONLY_CASES`
@@ -385,6 +452,8 @@ A5 多 case：
 
 - `.github/workflows/build_wheel.yml`
 - `.github/workflows/ci.yml`
+- `.github/workflows/ci_a5.yml`
+- `.github/scripts/report_a5_board_results.py`
 - `test/samples/runop.sh`
 - `test/npu_validation/scripts/run_remote_npu_validation.sh`
 - `test/npu_validation/scripts/generate_testcase.py`

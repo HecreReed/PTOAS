@@ -54,6 +54,7 @@ PrefetchAsyncContextType = _export_optional_cext_symbol("PrefetchAsyncContextTyp
 HiF8Type = _pto_mod.HiF8Type
 HiF8x2Type = _pto_mod.HiF8x2Type
 F8E8M0Type = _pto_mod.F8E8M0Type
+BF16x2Type = _pto_mod.BF16x2Type
 F4E1M2x2Type = _pto_mod.F4E1M2x2Type
 F4E2M1x2Type = _pto_mod.F4E2M1x2Type
 TensorViewType = _pto_mod.TensorViewType
@@ -125,6 +126,8 @@ QuantType = _pto_mod.QuantType
 QuantTypeAttr = _pto_mod.QuantTypeAttr
 QuantScaleAlg = _pto_mod.QuantScaleAlg
 QuantScaleAlgAttr = _pto_mod.QuantScaleAlgAttr
+MxGroupAxis = _pto_mod.MxGroupAxis
+MxGroupAxisAttr = _pto_mod.MxGroupAxisAttr
 VecStoreMode = _pto_mod.VecStoreMode
 VecStoreModeAttr = _pto_mod.VecStoreModeAttr
 
@@ -234,6 +237,7 @@ __all__ = [
     "HiF8Type",
     "HiF8x2Type",
     "F8E8M0Type",
+    "BF16x2Type",
     "F4E1M2x2Type",
     "F4E2M1x2Type",
     "TensorViewType",
@@ -304,6 +308,8 @@ __all__ = [
     "QuantTypeAttr",
     "QuantScaleAlg",
     "QuantScaleAlgAttr",
+    "MxGroupAxis",
+    "MxGroupAxisAttr",
     "VecStoreMode",
     "VecStoreModeAttr",
     "TileBufConfigAttr",
@@ -605,13 +611,14 @@ def sync_set(pipe, event_id, ffts_mode=2, *, loc=None, ip=None):
     return sync_set_dyn(pipe_attr, event_id, ffts_mode=ffts_mode, loc=loc, ip=ip)
 
 
-def sync_wait_dyn(pipe, event_id, *, loc=None, ip=None):
+def sync_wait_dyn(pipe, event_id, ffts_mode=2, *, loc=None, ip=None):
     ctx = loc.context if loc else _ods_ir.Context.current
     pipe_attr = _ensure_pipe_attr(pipe, ctx)
     event_val = get_op_result_or_value(event_id)
     try:
+        mode_attr = None if ffts_mode == 2 else _ensure_i32_attr(ffts_mode, "ffts_mode", ctx)
         return _pto_ops_gen.sync_wait(
-            pipe_attr, event_id=None, event_id_dyn=event_val, loc=loc, ip=ip
+            pipe_attr, event_id=None, ffts_mode=mode_attr, event_id_dyn=event_val, loc=loc, ip=ip
         )
     except TypeError:
         if hasattr(_pto_ops_gen, "sync_wait_dyn"):
@@ -619,23 +626,68 @@ def sync_wait_dyn(pipe, event_id, *, loc=None, ip=None):
         raise
 
 
-def sync_wait(pipe, event_id, *, loc=None, ip=None):
+def sync_wait(pipe, event_id, ffts_mode=2, *, loc=None, ip=None):
     ctx = loc.context if loc else _ods_ir.Context.current
     pipe_attr = _ensure_pipe_attr(pipe, ctx)
     if _is_static_i32_event_id(event_id):
         event_attr = _ensure_i32_attr(event_id, "event_id", ctx)
         try:
+            mode_attr = None if ffts_mode == 2 else _ensure_i32_attr(ffts_mode, "ffts_mode", ctx)
             return _pto_ops_gen.sync_wait(
-                pipe_attr, event_id=event_attr, event_id_dyn=None, loc=loc, ip=ip
+                pipe_attr, event_id=event_attr, ffts_mode=mode_attr, event_id_dyn=None, loc=loc, ip=ip
             )
         except TypeError:
             return _ods_ir.Operation.create(
                 "pto.sync.wait",
-                attributes={"pipe": pipe_attr, "event_id": event_attr},
+                attributes={
+                    "pipe": pipe_attr,
+                    "event_id": event_attr,
+                    **(
+                        {}
+                        if ffts_mode == 2
+                        else {"ffts_mode": _ensure_i32_attr(ffts_mode, "ffts_mode", ctx)}
+                    ),
+                },
                 loc=loc,
                 ip=ip,
             )
-    return sync_wait_dyn(pipe_attr, event_id, loc=loc, ip=ip)
+    return sync_wait_dyn(pipe_attr, event_id, ffts_mode=ffts_mode, loc=loc, ip=ip)
+
+
+# -----------------------------------------------------------------------------
+# Named cross-/intra-block synchronization instructions.
+# -----------------------------------------------------------------------------
+
+def _named_sync_event_op(name, pipe, event_id, *, loc=None, ip=None):
+    ctx = loc.context if loc else _ods_ir.Context.current
+    pipe_attr = _ensure_pipe_attr(pipe, ctx)
+    attrs = {"pipe": pipe_attr}
+    if _is_static_i32_event_id(event_id):
+        attrs["event_id"] = _ensure_i32_attr(event_id, "event_id", ctx)
+        return _ods_ir.Operation.create(name, attributes=attrs, loc=loc, ip=ip)
+    return _ods_ir.Operation.create(
+        name, attributes=attrs, operands=[get_op_result_or_value(event_id)], loc=loc, ip=ip
+    )
+
+
+def set_cross_block(pipe, event_id, *, loc=None, ip=None):
+    """Emit ``pto.set_cross_block`` (FFTS cross-block signal)."""
+    return _named_sync_event_op("pto.set_cross_block", pipe, event_id, loc=loc, ip=ip)
+
+
+def wait_cross_block(pipe, event_id, *, loc=None, ip=None):
+    """Emit ``pto.wait_cross_block`` (FFTS cross-block wait)."""
+    return _named_sync_event_op("pto.wait_cross_block", pipe, event_id, loc=loc, ip=ip)
+
+
+def set_intra_block(pipe, event_id, *, loc=None, ip=None):
+    """Emit ``pto.set_intra_block`` (intra-block signal)."""
+    return _named_sync_event_op("pto.set_intra_block", pipe, event_id, loc=loc, ip=ip)
+
+
+def wait_intra_block(pipe, event_id, *, loc=None, ip=None):
+    """Emit ``pto.wait_intra_block`` (intra-block wait)."""
+    return _named_sync_event_op("pto.wait_intra_block", pipe, event_id, loc=loc, ip=ip)
 
 
 def set_ffts(ffts, *, loc=None, ip=None):

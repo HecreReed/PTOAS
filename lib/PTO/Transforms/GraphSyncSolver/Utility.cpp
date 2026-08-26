@@ -5,20 +5,36 @@
 // THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
 // INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
 // See LICENSE in the root of the software repository for the full text of the License.
+//
+// This file is derived from the HIVM GraphSyncSolver in AscendNPU-IR/bishengir
+// (https://github.com/AscendNPU-IR/bishengir), licensed under the Apache
+// License, Version 2.0.  Upstream copyright and license notice:
+//   Copyright (c) Huawei Technologies Co., Ltd. 2025. All rights reserved.
+//   Licensed under the Apache License, Version 2.0 (the "License");
+//   you may not use this file except in compliance with the License.
+//   You may obtain a copy of the License at
+//       http://www.apache.org/licenses/LICENSE-2.0
+//   Unless required by applicable law or agreed to in writing, software
+//   distributed under the License is distributed on an "AS IS" BASIS,
+//   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+//   See the License for the specific language governing permissions and
+//   limitations under the License.
 
 //===------------- Utility.cpp ---- Graph Sync Solver ---------------------===//
 //===----------------------------------------------------------------------===//
 
-#include "PTO/Transforms/GraphSyncSolver/Utility.h"
-#include "PTO/IR/PTO.h"
-#include "PTO/Transforms/GraphSyncSolver/SyncSolverIR.h"
-#include "mlir/IR/Value.h"
-#include "llvm/Support/ErrorHandling.h"
 #include <cstdint>
 #include <numeric>
 #include <tuple>
 #include <utility>
 #include <vector>
+#include "PTO/IR/PTO.h"
+#include "PTO/Support/CodeConstants.h"
+#include "PTO/Transforms/GraphSyncSolver/SyncSolverIR.h"
+#include "PTO/Transforms/GraphSyncSolver/Utility.h"
+#include "mlir/IR/Value.h"
+#include "llvm/Support/ErrorHandling.h"
+
 
 using namespace mlir;
 using namespace pto::syncsolver;
@@ -243,7 +259,6 @@ namespace mlir::pto::syncsolver {
 
 // Check if two integer ranges intersect (half-open semantics: [l, r) )
 bool checkRangesIntersect(int l1, int r1, int l2, int r2) {
-  // return !(r1 <= l2 || r2 <= l1);
   return r1 > l2 && r2 > l1;
 }
 
@@ -270,22 +285,22 @@ int64_t getHWAvailableEventIdNum(SyncMode syncMode, pto::PIPE setPipe,
         {{pto::PIPE::PIPE_M, pto::PIPE::PIPE_FIX}, 1},
         {{pto::PIPE::PIPE_FIX, pto::PIPE::PIPE_M}, 1},
     };
-    int64_t eventIdNum = INTRA_CORE_EVENT_ID_NUM;
-    eventIdNum -= reservedIntraCoreEventIdNum;
+    int64_t eventIdNum = kIntraCoreEventIdCount;
+    eventIdNum -= kReservedIntraCoreEventIdCount;
     auto it = reservedEventIdNum.find({setPipe, waitPipe});
     if (it != reservedEventIdNum.end()) {
       eventIdNum -= it->second;
     }
     return eventIdNum;
   } else if (syncMode == SyncMode::CROSS_CORE_SYNC) {
-    int64_t eventIdNum = CROSS_CORE_EVENT_ID_NUM;
-    eventIdNum -= reservedCrossCoreEventIdNum;
+    int64_t eventIdNum = kCrossCoreEventIdCount;
+    eventIdNum -= kReservedCrossCoreEventIdCount;
     return eventIdNum;
   } else if (syncMode == SyncMode::TEST_INTRA_CORE_MODE) {
-    int64_t eventIdNum = TEST_INTRA_CORE_EVENT_ID_NUM;
+    int64_t eventIdNum = kTestIntraCoreEventIdCount;
     return eventIdNum;
   } else if (syncMode == SyncMode::TEST_CROSS_CORE_MODE) {
-    int64_t eventIdNum = TEST_CROSS_CORE_EVENT_ID_NUM;
+    int64_t eventIdNum = kTestCrossCoreEventIdCount;
     return eventIdNum;
   }
   llvm_unreachable("getHWAvailableEventIdNum: unhandled SyncMode");
@@ -301,8 +316,8 @@ SmallVector<int64_t> getHWAvailableEventIds(SyncMode syncMode,
         {{pto::PIPE::PIPE_M, pto::PIPE::PIPE_FIX}, 1},
         {{pto::PIPE::PIPE_FIX, pto::PIPE::PIPE_M}, 1},
     };
-    int64_t eventIdNum = INTRA_CORE_EVENT_ID_NUM;
-    eventIdNum -= reservedIntraCoreEventIdNum;
+    int64_t eventIdNum = kIntraCoreEventIdCount;
+    eventIdNum -= kReservedIntraCoreEventIdCount;
     auto it = reservedEventIdNum.find({setPipe, waitPipe});
     if (it != reservedEventIdNum.end()) {
       eventIdNum -= it->second;
@@ -312,20 +327,20 @@ SmallVector<int64_t> getHWAvailableEventIds(SyncMode syncMode,
               static_cast<int64_t>(0));
     return hwAvailableEventIds;
   } else if (syncMode == SyncMode::CROSS_CORE_SYNC) {
-    int64_t eventIdNum = CROSS_CORE_EVENT_ID_NUM;
-    eventIdNum -= reservedCrossCoreEventIdNum;
+    int64_t eventIdNum = kCrossCoreEventIdCount;
+    eventIdNum -= kReservedCrossCoreEventIdCount;
     SmallVector<int64_t> hwAvailableEventIds(eventIdNum);
     std::iota(hwAvailableEventIds.begin(), hwAvailableEventIds.end(),
               static_cast<int64_t>(0));
     return hwAvailableEventIds;
   } else if (syncMode == SyncMode::TEST_INTRA_CORE_MODE) {
-    int64_t eventIdNum = TEST_INTRA_CORE_EVENT_ID_NUM;
+    int64_t eventIdNum = kTestIntraCoreEventIdCount;
     SmallVector<int64_t> availableEventIds(eventIdNum);
     std::iota(availableEventIds.begin(), availableEventIds.end(),
               static_cast<int64_t>(0));
     return availableEventIds;
   } else if (syncMode == SyncMode::TEST_CROSS_CORE_MODE) {
-    int64_t eventIdNum = TEST_CROSS_CORE_EVENT_ID_NUM;
+    int64_t eventIdNum = kTestCrossCoreEventIdCount;
     SmallVector<int64_t> availableEventIds(eventIdNum);
     std::iota(availableEventIds.begin(), availableEventIds.end(),
               static_cast<int64_t>(0));
@@ -378,8 +393,9 @@ std::string op2str(Operation *op) {
   return os.str();
 }
 
-// Verify that all loop-like parents of `op` are SCF ForOps. Used to ensure
-// certain multi-buffer/loop transformations are safe to apply.
+// Verify that all loop-like parents of `op` are SCF ForOps. Used only by
+// counted-loop multi-buffer transformations; scf.while is intentionally
+// rejected so callers can fall back to ordinary synchronization.
 bool checkAllParentLoopsAreForLoops(Operation *op) {
   while (op != nullptr) {
     auto parLoop = op->getParentOfType<LoopLikeOpInterface>();
@@ -395,12 +411,12 @@ Value getValueOrCreateCastToI64(IRRewriter &rewriter, Location loc, Value val) {
   assert(isa<OpResult>(val));
   OpBuilder::InsertionGuard guard(rewriter);
   rewriter.setInsertionPointAfterValue(val);
-  if (!val.getType().isInteger(64)) {
+  if (!val.getType().isInteger(mlir::pto::kValue64)) {
     if (val.getType().isIndex()) {
       val = rewriter.create<arith::IndexCastOp>(
-          loc, rewriter.getIntegerType(64), val);
+          loc, rewriter.getIntegerType(mlir::pto::kValue64), val);
     } else if (val.getType().isInteger()) {
-      val = rewriter.create<arith::ExtSIOp>(loc, rewriter.getIntegerType(64),
+      val = rewriter.create<arith::ExtSIOp>(loc, rewriter.getIntegerType(mlir::pto::kValue64),
                                             val);
     } else {
       llvm_unreachable("unhandled casting type");

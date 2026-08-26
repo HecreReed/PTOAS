@@ -1,22 +1,25 @@
 # 3. Eltwise Compute
 
-> **Category:** A (layout-passthrough). **Mask:** `Pg` (optional governing predicate, except `vselr` which has none).
+> **Category:** A (layout-passthrough) for ordinary per-lane operations;
+> `vselr` is classified separately as Category C below. **Mask:** `Pg`
+> (optional governing predicate, except `vselr` which has none).
 >
 > Pure per-lane ops. Layout passes through unchanged. An operand whose
 > cardinality along an axis is 1 becomes a broadcast (replicate-read, never
 > expanded to `K` copies). Under the `K ≤ 4` core profile these fan out as
 > fully-unrolled straight-line code.
 
+
 ---
 
 ## 3.1 Binary Arithmetic
 
-### `pto.vmi.vadd` / `pto.vmi.vsub` / `pto.vmi.vmul`
+### `pto.vmi.vadd` / `pto.vmi.vsub`
 
-- **semantics:** Unified fp/int elementwise add / subtract / multiply.
+- **semantics:** Unified fp/int elementwise add / subtract.
 
   ```c
-  for (int i = 0; i < L; i++)
+  for (int i = 0; i < N; i++)
       dst[i] = mask[i] ? lhs[i] + rhs[i] : (pmode_merge ? dst_old[i] : 0);
   ```
 
@@ -47,9 +50,18 @@
 - **datatypes:** `i8`–`i32`, `f16`, `bf16`, `f32`
 - **lowering to `pto.mi`:**
   ```
-  K × pto.vadd / pto.vsub / pto.vmul  (+ mask per reg, ppack/punpack if needed)
+  K × pto.vadd / pto.vsub  (+ mask per reg, ppack/punpack if needed)
   ```
   `#mi = K`, `dep = 1`, util = 100%.
+
+### `pto.vmi.vmul`
+
+- **semantics:** Unified floating-point/integer elementwise multiply.
+- **syntax:** Same operand, mask, result, and `pmode` model as
+  `pto.vmi.vadd` / `pto.vmi.vsub`.
+- **datatypes:** `i16`, `i32`, `f16`, `bf16`, `f32`. The A5 vector multiply
+  family has no 8-bit integer form.
+- **lowering to `pto.mi`:** `K × pto.vmul`.
 
 - **example:**
   ```mlir
@@ -64,6 +76,26 @@
   %s = pto.vmi.vadd %a, %b, %mask {pmode = "merge"}
       : !pto.vmi.vreg<64×f32>, !pto.vmi.vreg<64×f32>, !pto.vmi.mask<64> -> !pto.vmi.vreg<64×f32>
   ```
+
+### `pto.vmi.vaddc` / `pto.vmi.vaddcs`
+
+Carry-chain integer adds are exposed as multi-result VMI operations so the
+frontend can preserve the hardware carry instruction instead of expanding the
+operation into an add/compare/select sequence.
+
+```mlir
+%sum, %carry = pto.vmi.vaddc %lhs, %rhs, %mask
+    : !pto.vmi.vreg<Lxui32>, !pto.vmi.vreg<Lxui32>, !pto.vmi.mask<L>
+    -> !pto.vmi.vreg<Lxui32>, !pto.vmi.mask<L>
+%next, %carry2 = pto.vmi.vaddcs %lhs, %rhs, %carry, %mask
+    : !pto.vmi.vreg<Lxui32>, !pto.vmi.vreg<Lxui32>, !pto.vmi.mask<L>, !pto.vmi.mask<L>
+    -> !pto.vmi.vreg<Lxui32>, !pto.vmi.mask<L>
+```
+
+Both operations require matching 32-bit integer data values. The execution
+mask, carry-in (for `vaddcs`), and carry-out use the same logical lane count,
+layout, and `b32` physical mask granularity as the data ports. They lower
+one-to-N to `pto.vaddc` and `pto.vaddcs` respectively.
 
 ### `pto.vmi.vdiv`
 
@@ -105,6 +137,7 @@
   ```
   `#mi = K`, `dep = 1`.
 
+
 ---
 
 ## 3.2 Unary Arithmetic & Activation
@@ -122,12 +155,14 @@
   ```mlir
   %r = pto.vmi.vabs %src, %mask {pmode = "zero"} : !pto.vmi.vreg<L×T>, !pto.vmi.mask<L> -> !pto.vmi.vreg<L×T>
   ```
-- **datatypes:** `i8`–`i32`, `f16`, `bf16`, `f32`
+- **datatypes:** `si8`, `si16`, `si32`, `f16`, `bf16`, `f32`
 - **lowering to `pto.mi`:**
   ```
-  K × pto.vabs
+  K × pto.vabs (si8/si16/si32/f16/f32)
+  K × sign-bit clear (bf16)
   ```
-  `#mi = K`, `dep = 1`.
+  BF16 has no direct A5 vector-absolute instruction, so VMI implements it by
+  clearing each element's sign bit. `dep = 1`.
 
 ### `pto.vmi.vneg`
 
@@ -142,10 +177,10 @@
   ```mlir
   %r = pto.vmi.vneg %src, %mask : !pto.vmi.vreg<L×T>, !pto.vmi.mask<L> -> !pto.vmi.vreg<L×T>
   ```
-- **datatypes:** `i8`–`i32`, `f16`, `bf16`, `f32`
+- **datatypes:** `i8`–`i32`, `f16`, `f32`
 - **lowering to `pto.mi`:**
   ```
-  K × pto.vneg (fp) or K × (vsub 0, src) (int)
+  K × pto.vneg
   ```
   `#mi = K`, `dep = 1`.
 
@@ -162,7 +197,7 @@
   ```mlir
   %r = pto.vmi.vrelu %src, %mask : !pto.vmi.vreg<L×T>, !pto.vmi.mask<L> -> !pto.vmi.vreg<L×T>
   ```
-- **datatypes:** `i8`–`i32`, `f16`, `bf16`, `f32`
+- **datatypes:** `si32`, `f16`, `f32`
 - **lowering to `pto.mi`:**
   ```
   K × pto.vrelu
@@ -193,6 +228,7 @@
   ```
   `#mi = K`, `dep = 1`.
 
+
 ---
 
 ## 3.3 Bitwise Ops
@@ -200,9 +236,10 @@
 ### `pto.vmi.vand` / `pto.vmi.vor` / `pto.vmi.vxor`
 
 - **semantics:** Elementwise bitwise AND / OR / XOR. Operands and result are
-  vregs by default; will also support mask-typed operands, performing a per-lane
-  predicate boolean op and yielding a mask (the data operands themselves are
-  masks, distinct from the governing `mask`).
+  vregs by default. These ops also accept mask-typed operands, performing a
+  per-lane predicate boolean op and yielding a mask. When the operands are
+  masks (predicate type), no governing `mask` operand may be given — a mask
+  operand would be ambiguous with the predicate data operands themselves.
 
   ```c
   for (int i = 0; i < L; i++)
@@ -211,9 +248,14 @@
 
 - **syntax:**
   ```mlir
+  // vreg operands (optional governing mask)
   %r = pto.vmi.vand %lhs, %rhs, %mask : !pto.vmi.vreg<L×T>, !pto.vmi.vreg<L×T>, !pto.vmi.mask<L> -> !pto.vmi.vreg<L×T>
+
+  // mask operands (no governing mask)
+  %r = pto.vmi.vand %lhs, %rhs : !pto.vmi.mask<L>, !pto.vmi.mask<L> -> !pto.vmi.mask<L>
+  %r = pto.vmi.vxor %lhs, %rhs : !pto.vmi.mask<L>, !pto.vmi.mask<L> -> !pto.vmi.mask<L>
   ```
-- **datatypes:** `i8`–`i32` (integer bitwise)
+- **datatypes:** `i8`–`i32` (integer bitwise); `pred` (per-lane boolean op)
 - **lowering to `pto.mi`:**
   ```
   K × pto.vand / pto.vor / pto.vxor
@@ -223,9 +265,10 @@
 ### `pto.vmi.vnot`
 
 - **semantics:** Elementwise bitwise NOT. Operand and result are vregs by
-  default; will also support a mask-typed operand, performing a per-lane predicate
-  complement and yielding a mask (the data operand itself is a mask, distinct
-  from the governing `mask`).
+  default. This op also accepts a mask-typed operand, performing a per-lane
+  predicate complement and yielding a mask. When the operand is a mask
+  (predicate type), no governing `mask` operand may be given — a mask operand
+  would be ambiguous with the predicate data operand itself.
 
   ```c
   for (int i = 0; i < L; i++)
@@ -234,14 +277,19 @@
 
 - **syntax:**
   ```mlir
+  // vreg operand (optional governing mask)
   %r = pto.vmi.vnot %src, %mask : !pto.vmi.vreg<L×T>, !pto.vmi.mask<L> -> !pto.vmi.vreg<L×T>
+
+  // mask operand (no governing mask)
+  %r = pto.vmi.vnot %src : !pto.vmi.mask<L> -> !pto.vmi.mask<L>
   ```
-- **datatypes:** `i8`–`i32`
+- **datatypes:** `i8`–`i32`; `pred` (predicate complement)
 - **lowering to `pto.mi`:**
   ```
   K × pto.vnot
   ```
   `#mi = K`, `dep = 1`.
+
 
 ---
 
@@ -269,6 +317,7 @@
   ```
   `#mi = K`, `dep = 1`.
 
+
 ---
 
 ## 3.5 Vec-Scalar Ops
@@ -276,9 +325,9 @@
 Vec-scalar ops broadcast a scalar to all lanes (R6 implicit broadcast). The
 scalar type must match the vector element type.
 
-### `pto.vmi.vadds` / `pto.vmi.vmuls` / `pto.vmi.vmaxs` / `pto.vmi.vmins`
+### `pto.vmi.vadds` / `pto.vmi.vmaxs` / `pto.vmi.vmins`
 
-- **semantics:** Elementwise vector-scalar add / multiply / max / min.
+- **semantics:** Elementwise vector-scalar add / max / min.
 
   ```c
   for (int i = 0; i < L; i++)
@@ -306,10 +355,22 @@ scalar type must match the vector element type.
 - **datatypes:** `i8`–`i32`, `f16`, `bf16`, `f32`
 - **lowering to `pto.mi`:**
   ```
-  K × pto.vadds / pto.vmuls / pto.vmaxs / pto.vmins
+  K × pto.vadds / pto.vmaxs / pto.vmins
   ```
   `#mi = K`, `dep = 1`. No extra reg for scalar.
 
+- **example:**
+  ```mlir
+  %shifted = pto.vmi.vadds %x, %bias, %mask
+      : !pto.vmi.vreg<64×f32>, f32, !pto.vmi.mask<64> -> !pto.vmi.vreg<64×f32>
+  ```
+
+### `pto.vmi.vmuls`
+
+- **semantics:** Elementwise vector-scalar multiply with the same scalar
+  broadcast, mask, and `pmode` model as the other vector-scalar operations.
+- **datatypes:** `i16`, `i32`, `f16`, `f32`.
+- **lowering to `pto.mi`:** `K × pto.vmuls`.
 - **example:**
   ```mlir
   %scaled = pto.vmi.vmuls %x, %scale, %mask
@@ -340,6 +401,7 @@ scalar type must match the vector element type.
   K × pto.vshls / pto.vshrs
   ```
   `#mi = K`, `dep = 1`.
+
 
 ---
 
@@ -378,13 +440,13 @@ scalar type must match the vector element type.
 
   | Attribute | Values | Default | Description |
   |---|---|---|---|
-  | `cmp` | `eq`, `ne`, `lt`, `le`, `gt`, `ge` | *(required)* | Comparison mode (fp unordered / integer; integer signedness comes from the element type: `iN` vs `uiN`) |
+  | `cmp` | `eq`, `ne`, `lt`, `le`, `gt`, `ge` | *(required)* | Comparison mode (fp unordered / integer; integer signedness comes from the element type: `siN` vs `iN`/`uiN`) |
   | | `oeq`, `one`, `olt`, `ole`, `ogt`, `oge` | | FP ordered forms |
   | `pmode` | `"zero"`, `"merge"` | `"zero"` | Inactive-lane behavior |
 
 - **datatypes:** `i8`/`si8`/`ui8` – `i32`/`si32`/`ui32`, `f16`, `bf16`, `f32`.
   Integer signedness is taken from the element type; signless `iN` is treated
-  as signed (equivalent to `siN`).
+  as unsigned (equivalent to `uiN`).
 - **lowering to `pto.mi`:**
   ```
   K × pto.vcmp {cmp_mode}
@@ -401,7 +463,7 @@ scalar type must match the vector element type.
       -> !pto.vmi.mask<128×b32>
   // → pto.as: 2 × pto.vcmp "lt" (EVEN/ODD), each with per-reg seed mask
 
-  // i32 signed greater-than-or-equal (signedness carried by the `i32` element type)
+  // i32 unsigned greater-than-or-equal (signless integers use unsigned semantics)
   %ge = pto.vmi.vcmp %a, %b, %seed {cmp = "ge"}
       : !pto.vmi.vreg<128×i32>, !pto.vmi.vreg<128×i32>, !pto.vmi.mask<128×b32>
       -> !pto.vmi.mask<128×b32>
@@ -449,7 +511,7 @@ scalar type must match the vector element type.
 - **attributes:** Same `cmp` / `pmode` as `vcmp`.
 - **datatypes:** `i8`/`si8`/`ui8` – `i32`/`si32`/`ui32`, `f16`, `bf16`, `f32`.
   Integer signedness is taken from the element type; signless `iN` is treated
-  as signed (equivalent to `siN`). The scalar operand's element type must
+  as unsigned (equivalent to `uiN`). The scalar operand's element type must
   match the vector's, so signedness is consistent on both operands.
 - **lowering to `pto.mi`:**
   ```
@@ -512,48 +574,57 @@ scalar type must match the vector element type.
 
 ### `pto.vmi.vselr`
 
+- **layout contract:** Category C (contiguous-required). Source, index, and
+  result use contiguous layout; an arbitrary input layout is not passed through
+  this operation. Compilation may materialize a contiguous representation at
+  this boundary. IR that reaches this operation with an assigned
+  non-contiguous layout is unsupported.
+
 - **semantics:** Dynamic lane permutation: `result[i] = source[index[i]]`.
 
   ```c
-  for (int i = 0; i < L; i++)
+  for (int i = 0; i < N; i++)
       dst[i] = src[index[i]];
   ```
 
 - **syntax:**
   ```mlir
-  %r = pto.vmi.vselr %source, %index : !pto.vmi.vreg<L×T>, !pto.vmi.vreg<L×index_T> -> !pto.vmi.vreg<L×T>
+  %r = pto.vmi.vselr %source, %index : !pto.vmi.vreg<N×T>, !pto.vmi.vreg<N×index_T> -> !pto.vmi.vreg<N×T>
   ```
 - **operands:**
 
   | Operand | Type | Description |
   |---|---|---|
-  | `source` | `!pto.vmi.vreg<L×T>` | Source vector to permute from |
-  | `index` | `!pto.vmi.vreg<L×index_T>` | Per-lane source lane index |
+  | `source` | `!pto.vmi.vreg<N×T>` | Source vector to select from |
+  | `index` | `!pto.vmi.vreg<N×index_T>` | Per-lane source lane index |
 
 - **results:**
 
   | Result | Type | Description |
   |---|---|---|
-  | `result` | `!pto.vmi.vreg<L×T>` | Permuted result |
+  | `result` | `!pto.vmi.vreg<N×T>` | Permuted result |
 
-- **datatypes:** `i8`–`i32`, `f16`, `bf16`, `f32`
-- **lowering to `pto.mi:**
-  ```
-  K × pto.vselr (+ index reg setup)
-  ```
-  `#mi = K`, `dep = 1` (+1 for index setup). +1 index vreg.
+- **datatypes:** 8-, 16-, and 32-bit integer or floating-point source/result
+  elements; `index_T` must be an integer type with the same storage width as
+  `T`.
+- **constraints:** Source, index, and result have the same lane count. The
+  supported lane counts are `N ∈ {64, 128, 256}` for 8-bit elements,
+  `N ∈ {64, 128}` for 16-bit elements, and `N = 64` for 32-bit elements.
+  Every `index[i]` must identify a valid logical source lane; behavior is
+  unspecified for an out-of-range index.
 
 - **notes:**
   - This is the permute/gather class — it is the register-resident realization
     of a grouped broadcast.
   - `vselr` takes no mask; the index vector encodes the permutation directly.
-  - Not A5-native `vselrv2` (that form is not available on A5).
+  - `vselrv2` is not available on A5 and does not add other supported shapes.
 
 - **example:**
   ```mlir
   %r = pto.vmi.vselr %src, %idx
-      : !pto.vmi.vreg<64×f16>, !pto.vmi.vreg<4×i16> -> !pto.vmi.vreg<4×f16>
+      : !pto.vmi.vreg<128×f16>, !pto.vmi.vreg<128×i16> -> !pto.vmi.vreg<128×f16>
   ```
+
 
 ---
 

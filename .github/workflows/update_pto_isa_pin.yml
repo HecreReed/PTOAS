@@ -50,8 +50,9 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          sha="$(python .github/scripts/update_pto_isa_pin.py)"
-          python .github/scripts/update_pto_isa_pin.py --commit "${sha}" --check
+          sha="$(python .github/scripts/update_pto_isa_pin.py --target gitcode-default)"
+          python .github/scripts/update_pto_isa_pin.py --target gitcode-default \
+            --commit "${sha}" --check
           echo "pto_isa_commit=${sha}" >> "${GITHUB_OUTPUT}"
           echo "pto_isa_short=${sha:0:12}" >> "${GITHUB_OUTPUT}"
 
@@ -60,7 +61,11 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          if git diff --quiet -- .github/workflows/ci.yml docker/Dockerfile; then
+          if git diff --quiet -- \
+            .github/workflows/ci.yml \
+            docker/Dockerfile \
+            docs/no_npu_compile_only_guide_zh.md \
+            test/npu_validation/scripts/run_remote_npu_validation.sh; then
             echo "pto-isa pin already up to date."
             echo "created_commit=false" >> "${GITHUB_OUTPUT}"
             exit 0
@@ -68,7 +73,11 @@ jobs:
 
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add .github/workflows/ci.yml docker/Dockerfile
+          git add \
+            .github/workflows/ci.yml \
+            docker/Dockerfile \
+            docs/no_npu_compile_only_guide_zh.md \
+            test/npu_validation/scripts/run_remote_npu_validation.sh
           git commit -m "chore(ci): bump pto-isa pin to ${{ steps.update.outputs.pto_isa_short }}"
           echo "created_commit=true" >> "${GITHUB_OUTPUT}"
 

@@ -11,10 +11,10 @@
 #
 # Semantics per lane (NOSAT):
 #   valid lane   [0 .. 999]:  dst = int8_t(src[i] & 0xFF)
-#   invalid lane [1000 .. 1023]: dst = sentinel 0xA5 (pmode="merge" preserves it)
+#   invalid lane [1000 .. 1023]: dst = sentinel 0xA5 (masked store preserves it)
 #
 # The kernel iterates 4 x 256 lanes.  The last iteration writes only 232
-# lanes (256 - 24) via a create_mask + merge store.  The compare check runs
+# lanes (256 - 24) via a create_mask + masked store.  The compare check runs
 # on the full 1024-byte buffer so both the payload and the sentinel tail
 # get verified.
 #

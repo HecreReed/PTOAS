@@ -55,6 +55,9 @@ def TensorViewOrPartitionView :
 def ScalarType :
   AnyTypeOf<[AnySignlessInteger, AnyFloat], "numeric (integer/float)">;
 
+def PrintScalarType :
+  AnyTypeOf<[AnyInteger, AnyFloat], "integer/float printable scalar">;
+
 //===----------------------------------------------------------------------===//
 // Op Class
 //===----------------------------------------------------------------------===//
@@ -790,6 +793,7 @@ def TPrefetchAsyncOp : PTO_Op<"tprefetch_async"> {
 }
 
 def TStoreOp: PTO_TOp<"tstore", [
+  AttrSizedOperandSegments,
   PTO_DpsInitOpInterface,
   OpPipeInterface,
   DeclareOpInterfaceMethods<MemoryEffectsOpInterface>
@@ -805,6 +809,7 @@ def TStoreOp: PTO_TOp<"tstore", [
   let arguments = (ins
     PTODpsType:$src,
     PTODpsType:$dst,
+    Optional<PTODpsType>:$fp,
     Optional<I64>:$preQuantScalar,
     DefaultValuedAttr<PTO_STPhaseAttr, "::mlir::pto::STPhase::Unspecified">:$stPhase,
     DefaultValuedAttr<PTO_AtomicTypeAttr, "::mlir::pto::AtomicType::AtomicNone">:$atomicType,
@@ -819,6 +824,7 @@ def TStoreOp: PTO_TOp<"tstore", [
 
   let assemblyFormat = [{
     `ins` `(` $src `:` qualified(type($src))
+           (`fp` $fp^ `:` qualified(type($fp)))?
            (`,` $preQuantScalar^ `:` type($preQuantScalar))? `)`
     `outs` `(` $dst `:` qualified(type($dst) ) `)`
     attr-dict
@@ -865,16 +871,12 @@ def TTransOp : PTO_TOp<"ttrans", [
   }];
   let arguments = (ins
     PTODpsType:$src,
-    PTODpsType:$tmp,
+    Optional<PTODpsType>:$tmp,
     PTODpsType:$dst
   );
   let results = (outs);
 
-  let assemblyFormat = [{
-    `ins` `(` $src `,` $tmp `:` qualified(type($src)) `,` qualified(type($tmp)) `)`
-    `outs` `(` $dst `:` qualified(type($dst) ) `)`
-    attr-dict
-  }];
+  let hasCustomAssemblyFormat = 1;
 
   let hasVerifier = 1;
 
@@ -1329,7 +1331,8 @@ def TMovOp  : PTO_TOp<"tmov", [
     Optional<PTODpsType>:$fp,
     Optional<I64>:$preQuantScalar,
     OptionalAttr<PTO_AccToVecModeAttr>:$accToVecMode,
-    DefaultValuedAttr<PTO_ReluPreModeAttr, "::mlir::pto::ReluPreMode::NoRelu">:$reluPreMode
+    DefaultValuedAttr<PTO_ReluPreModeAttr, "::mlir::pto::ReluPreMode::NoRelu">:$reluPreMode,
+    OptionalAttr<PTO_MxGroupAxisAttr>:$grpAxis
   );
 
   let results = (outs
@@ -2847,9 +2850,9 @@ def SyncSetOp : PTO_Op<"sync.set"> {
   let summary = "Set a synchronization signal (trigger) between cube and vector.";
   let description = [{
     Sets a synchronization signal on the specified pipeline stage.
-    Corresponds to `ffts_cross_core_sync` (A3) or `set_intra_block` (A5).
-    On A3, the optional `ffts_mode` attribute selects the first argument passed
-    to `getFFTSMsg`; if omitted, the legacy `FFTS_MODE_VAL` path is preserved.
+    Corresponds to `ffts_cross_core_sync` on both A3 and A5.  The optional
+    `ffts_mode` selects FFTS mode 0 (inter), 1 (subblock), or 2 (block);
+    if omitted, block mode (2) is used for backward compatibility.
   }];
 
   let arguments = (ins
@@ -2867,15 +2870,59 @@ def SyncWaitOp : PTO_Op<"sync.wait"> {
   let summary = "Wait for a synchronization signal (barrier) between cube and vector.";
   let description = [{
     Waits for a synchronization signal on the specified pipeline stage.
-    Corresponds to `wait_flag_dev` (A3) or `wait_intra_block` (A5).
+    Corresponds to `wait_flag_dev` on both A3 and A5.  `ffts_mode` records
+    the matching set-side FFTS mode (0, 1, or 2).
   }];
 
   let arguments = (ins
     PTO_PipeAttr:$pipe,
     OptionalAttr<I32Attr>:$event_id,
+    OptionalAttr<I32Attr>:$ffts_mode,
     Optional<Index>:$event_id_dyn
   );
 
+  let hasVerifier = 1;
+  let hasCustomAssemblyFormat = 1;
+}
+
+// Named cross-/intra-block synchronization operations.  Cross-core operations
+// are canonicalized to sync.set/sync.wait with FFTS mode 0 in the VPTO path;
+// intra-block operations lower directly to their CCE builtins.
+def SetCrossBlockOp : PTO_Op<"set_cross_block"> {
+  let summary = "Signal a cross-block synchronization flag";
+  let description = [{
+    Canonicalizes to `pto.sync.set` with FFTS mode 0.
+  }];
+  let arguments = (ins PTO_PipeAttr:$pipe, OptionalAttr<I32Attr>:$event_id,
+                       DefaultValuedAttr<I32Attr, "0">:$ffts_mode,
+                       Optional<Index>:$event_id_dyn);
+  let hasVerifier = 1;
+  let hasCustomAssemblyFormat = 1;
+}
+
+def WaitCrossBlockOp : PTO_Op<"wait_cross_block"> {
+  let summary = "Wait for a cross-block synchronization flag";
+  let description = [{ Canonicalizes to `pto.sync.wait` with FFTS mode 0. }];
+  let arguments = (ins PTO_PipeAttr:$pipe, OptionalAttr<I32Attr>:$event_id,
+                       Optional<Index>:$event_id_dyn);
+  let hasVerifier = 1;
+  let hasCustomAssemblyFormat = 1;
+}
+
+def SetIntraBlockOp : PTO_Op<"set_intra_block"> {
+  let summary = "Signal an intra-block synchronization flag";
+  let description = [{ Lowers to `__builtin_cce_set_intra_block`. }];
+  let arguments = (ins PTO_PipeAttr:$pipe, OptionalAttr<I32Attr>:$event_id,
+                       Optional<Index>:$event_id_dyn);
+  let hasVerifier = 1;
+  let hasCustomAssemblyFormat = 1;
+}
+
+def WaitIntraBlockOp : PTO_Op<"wait_intra_block"> {
+  let summary = "Wait for an intra-block synchronization flag";
+  let description = [{ Lowers to `__builtin_cce_wait_intra_block`. }];
+  let arguments = (ins PTO_PipeAttr:$pipe, OptionalAttr<I32Attr>:$event_id,
+                       Optional<Index>:$event_id_dyn);
   let hasVerifier = 1;
   let hasCustomAssemblyFormat = 1;
 }
@@ -3034,7 +3081,7 @@ def PrintOp : PTO_Op<"print", [MemoryEffects<[MemRead, MemWrite]>]> {
     Debug print op. First argument is the format string (string attribute), second is a scalar value.
     Format in IR: `pto.print ins("format", %scalar : type(%scalar))`
   }];
-  let arguments = (ins StrAttr:$format, ScalarType:$scalar);
+  let arguments = (ins StrAttr:$format, PrintScalarType:$scalar);
   let results = (outs);
   let assemblyFormat = [{
     `ins` `(` $format `,` $scalar `:` type($scalar) `)`
@@ -4074,7 +4121,7 @@ def TColArgMaxOp : PTO_TOp<"tcolargmax", [
 
   let arguments = (ins
     PTODpsType:$src,
-    PTODpsType:$tmp,
+    Optional<PTODpsType>:$tmp,
     PTODpsType:$dst
   );
 
@@ -4087,11 +4134,7 @@ def TColArgMaxOp : PTO_TOp<"tcolargmax", [
     ::mlir::MutableOperandRange getDpsInitsMutable() { return getDstMutable(); }
   }];
 
-  let assemblyFormat = [{
-    `ins` `(` $src `,` $tmp `:` qualified(type($src)) `,` qualified(type($tmp)) `)`
-    `outs` `(` $dst `:` qualified(type($dst) ) `)`
-    attr-dict
-  }];
+  let hasCustomAssemblyFormat = 1;
 }
 
 def TColMinOp : PTO_TOp<"tcolmin", [
@@ -4131,7 +4174,7 @@ def TColArgMinOp : PTO_TOp<"tcolargmin", [
 
   let arguments = (ins
     PTODpsType:$src,
-    PTODpsType:$tmp,
+    Optional<PTODpsType>:$tmp,
     PTODpsType:$dst
   );
 
@@ -4144,11 +4187,7 @@ def TColArgMinOp : PTO_TOp<"tcolargmin", [
     ::mlir::MutableOperandRange getDpsInitsMutable() { return getDstMutable(); }
   }];
 
-  let assemblyFormat = [{
-    `ins` `(` $src `,` $tmp `:` qualified(type($src)) `,` qualified(type($tmp)) `)`
-    `outs` `(` $dst `:` qualified(type($dst) ) `)`
-    attr-dict
-  }];
+  let hasCustomAssemblyFormat = 1;
 }
 
 def TColSumOp : PTO_TOp<"tcolsum", [
@@ -4218,6 +4257,7 @@ def TCvtOp : PTO_TOp<"tcvt", [
 
   let arguments = (ins
     PTODpsType:$src,
+    Optional<PTODpsType>:$tmp,
     PTODpsType:$dst,
     DefaultValuedAttr<PTO_RoundModeAttr, "::mlir::pto::RoundMode::CAST_RINT">:$rmode,
     DefaultValuedAttr<PTO_SaturationModeAttr, "::mlir::pto::SaturationMode::OFF">:$sat_mode
@@ -4520,6 +4560,7 @@ def TExpandsOp : PTO_TOp<"texpands", [
 }
 
 def TExtractOp : PTO_TOp<"textract", [
+  AttrSizedOperandSegments,
   PTO_DpsInitOpInterface,
   OpPipeInterface,
   DeclareOpInterfaceMethods<MemoryEffectsOpInterface>
@@ -4530,8 +4571,9 @@ def TExtractOp : PTO_TOp<"textract", [
     PTODpsType:$src,
     Index:$indexRow,
     Index:$indexCol,
-    Optional<I64>:$preQuantScalar,
     PTODpsType:$dst,
+    Optional<PTODpsType>:$fp,
+    Optional<I64>:$preQuantScalar,
     OptionalAttr<PTO_AccToVecModeAttr>:$accToVecMode,
     DefaultValuedAttr<PTO_ReluPreModeAttr, "::mlir::pto::ReluPreMode::NoRelu">:$reluPreMode
   );
@@ -4541,7 +4583,10 @@ def TExtractOp : PTO_TOp<"textract", [
   let hasVerifier = 1;
 
   let assemblyFormat = [{
-    `ins` `(` $src `,` $indexRow `,` $indexCol (`,` $preQuantScalar^)? `:` qualified(type($src)) `,` type($indexRow) `,` type($indexCol) (`,` type($preQuantScalar)^)? `)`
+    `ins` `(` $src `,` $indexRow `,` $indexCol
+    (`,` $preQuantScalar^)? `:` qualified(type($src)) `,` type($indexRow) `,` type($indexCol)
+    (`,` type($preQuantScalar)^)?
+    (`fp` $fp^ `:` qualified(type($fp)))? `)`
     `outs` `(` $dst `:` qualified(type($dst) ) `)`
     attr-dict
   }];
@@ -4583,7 +4628,8 @@ def TExtractOp : PTO_TOp<"textract", [
       if ((s == ::mlir::pto::AddressSpace::VEC &&
            d == ::mlir::pto::AddressSpace::MAT) ||
           (s == ::mlir::pto::AddressSpace::ACC &&
-           d == ::mlir::pto::AddressSpace::MAT)) {
+           (d == ::mlir::pto::AddressSpace::MAT ||
+            d == ::mlir::pto::AddressSpace::VEC))) {
         return ::mlir::pto::PIPE::PIPE_FIX;
       }
 
@@ -4595,39 +4641,6 @@ def TExtractOp : PTO_TOp<"textract", [
       // Default to vector pipe for unmatched combinations.
       return ::mlir::pto::PIPE::PIPE_V;
     }
-    ::mlir::MutableOperandRange getDpsInitsMutable() { return getDstMutable(); }
-  }];
-}
-
-def TExtractFPOp : PTO_TOp<"textract_fp", [
-  PTO_DpsInitOpInterface,
-  OpPipeInterface,
-  DeclareOpInterfaceMethods<MemoryEffectsOpInterface>
-]> {
-  let summary = "Extract acc tile window into dst using fp/scaling tile (tilebuf, DPS)";
-
-  let arguments = (ins
-    PTODpsType:$src,
-    PTODpsType:$fp,
-    Index:$indexRow,
-    Index:$indexCol,
-    PTODpsType:$dst,
-    OptionalAttr<PTO_AccToVecModeAttr>:$accToVecMode,
-    DefaultValuedAttr<PTO_ReluPreModeAttr, "::mlir::pto::ReluPreMode::NoRelu">:$reluPreMode
-  );
-
-  let results = (outs);
-
-  let hasVerifier = 1;
-
-  let assemblyFormat = [{
-    `ins` `(` $src `,` $fp `,` $indexRow `,` $indexCol `:` qualified(type($src)) `,` qualified(type($fp)) `,` type($indexRow) `,` type($indexCol) `)`
-    `outs` `(` $dst `:` qualified(type($dst) ) `)`
-    attr-dict
-  }];
-
-  let extraClassDeclaration = [{
-    ::mlir::pto::PIPE getPipe() { return ::mlir::pto::PIPE::PIPE_FIX; }
     ::mlir::MutableOperandRange getDpsInitsMutable() { return getDstMutable(); }
   }];
 }
@@ -4720,45 +4733,12 @@ def TInsertOp : PTO_TOp<"tinsert", [
   }];
 }
 
-def TInsertFPOp : PTO_TOp<"tinsert_fp", [
-  PTO_DpsInitOpInterface,
-  OpPipeInterface,
-  DeclareOpInterfaceMethods<MemoryEffectsOpInterface>
-]> {
-  let summary = "Insert acc tile window into dst using fp/scaling tile (tilebuf, DPS)";
-
-  let arguments = (ins
-    PTODpsType:$src,
-    PTODpsType:$fp,
-    Index:$indexRow,
-    Index:$indexCol,
-    PTODpsType:$dst,
-    OptionalAttr<PTO_AccToVecModeAttr>:$accToVecMode,
-    DefaultValuedAttr<PTO_ReluPreModeAttr, "::mlir::pto::ReluPreMode::NoRelu">:$reluPreMode
-  );
-
-  let results = (outs);
-
-  let hasVerifier = 1;
-
-  let assemblyFormat = [{
-    `ins` `(` $src `,` $fp `,` $indexRow `,` $indexCol `:` qualified(type($src)) `,` qualified(type($fp)) `,` type($indexRow) `,` type($indexCol) `)`
-    `outs` `(` $dst `:` qualified(type($dst) ) `)`
-    attr-dict
-  }];
-
-  let extraClassDeclaration = [{
-    ::mlir::pto::PIPE getPipe() { return ::mlir::pto::PIPE::PIPE_FIX; }
-    ::mlir::MutableOperandRange getDpsInitsMutable() { return getDstMutable(); }
-  }];
-}
-
 def TFillPadOp : PTO_TOp<"tfillpad", [
   PTO_DpsInitOpInterface,
   OpPipeInterface,
   DeclareOpInterfaceMethods<MemoryEffectsOpInterface>
 ]> {
-  let summary = "Copy src into dst and fill padded elements using dst PadVal (tilebuf, DPS)";
+  let summary = "Fill padding with compiler-inferred lowering semantics (tilebuf, DPS)";
 
   let arguments = (ins
     PTODpsType:$src,
@@ -4801,62 +4781,6 @@ def TFillPadOp : PTO_TOp<"tfillpad", [
   }];
 }
 
-def TFillPadExpandOp : PTO_TOp<"tfillpad_expand", [
-  PTO_DpsInitOpInterface,
-  OpPipeInterface,
-  DeclareOpInterfaceMethods<MemoryEffectsOpInterface>
-]> {
-  let summary = "Copy src into dst and fill padded elements using dst PadVal, allowing dst to be larger (tilebuf, DPS)";
-
-  let arguments = (ins
-    PTODpsType:$src,
-    PTODpsType:$dst
-  );
-
-  let results = (outs);
-
-  let hasVerifier = 1;
-
-  let assemblyFormat = [{
-    `ins`  `(` $src `:` qualified(type($src)) `)`
-    `outs` `(` $dst `:` qualified(type($dst) ) `)`
-    attr-dict
-  }];
-
-  let extraClassDeclaration = [{
-    ::mlir::pto::PIPE getPipe() { return ::mlir::pto::PIPE::PIPE_V; }
-    ::mlir::MutableOperandRange getDpsInitsMutable() { return getDstMutable(); }
-  }];
-}
-
-def TFillPadInplaceOp : PTO_TOp<"tfillpad_inplace", [
-  PTO_DpsInitOpInterface,
-  OpPipeInterface,
-  DeclareOpInterfaceMethods<MemoryEffectsOpInterface>
-]> {
-  let summary = "In-place fill padding on shared backing storage: src supplies valid-region bounds, dst supplies target pad bounds (tilebuf, DPS)";
-
-  let arguments = (ins
-    PTODpsType:$src,
-    PTODpsType:$dst
-  );
-
-  let results = (outs);
-
-  let hasVerifier = 1;
-
-  let assemblyFormat = [{
-    `ins`  `(` $src `:` qualified(type($src)) `)`
-    `outs` `(` $dst `:` qualified(type($dst) ) `)`
-    attr-dict
-  }];
-
-  let extraClassDeclaration = [{
-    ::mlir::pto::PIPE getPipe() { return ::mlir::pto::PIPE::PIPE_V; }
-    ::mlir::MutableOperandRange getDpsInitsMutable() { return getDstMutable(); }
-  }];
-}
-
 def TGatherOp : PTO_TOp<"tgather", [
   AttrSizedOperandSegments,
   PTO_DpsInitOpInterface,
@@ -4873,6 +4797,7 @@ def TGatherOp : PTO_TOp<"tgather", [
     Optional<PTODpsType>:$tmp,
     Optional<ScalarType>:$kValue,
     OptionalAttr<PTO_MaskPatternAttr>:$maskPattern,
+    OptionalAttr<StrAttr>:$axis,
     OptionalAttr<PTO_CmpModeAttr>:$cmpMode,
     OptionalAttr<I32Attr>:$offset
   );
@@ -4886,6 +4811,7 @@ def TGatherOp : PTO_TOp<"tgather", [
     bool hasCompareForm() { return static_cast<bool>(getCdst()) || static_cast<bool>(getKValue()); }
     bool hasIndexForm() { return static_cast<bool>(getIndices()); }
     bool hasMaskForm() { return static_cast<bool>(getMaskPatternAttr()); }
+    bool hasAxis() { return static_cast<bool>(getAxisAttr()); }
     ::mlir::pto::PIPE getPipe() { return ::mlir::pto::PIPE::PIPE_V; }
     ::mlir::MutableOperandRange getDpsInitsMutable() {
       return ::mlir::MutableOperandRange(getOperation(), 1, 1 + (getCdst() ? 1 : 0));
@@ -4898,7 +4824,7 @@ def TGatherBOp : PTO_TOp<"tgatherb", [
   OpPipeInterface,
   DeclareOpInterfaceMethods<MemoryEffectsOpInterface>
 ]> {
-  let summary = "Gather elements using byte offsets (tilebuf, DPS)";
+  let summary = "Gather 32-byte blocks using byte addresses (tilebuf, DPS)";
 
   let arguments = (ins
     PTODpsType:$src,
@@ -5096,37 +5022,6 @@ def TMinSOp : PTO_TOp<"tmins", [
   }];
 }
 
-def TMovFPOp : PTO_TOp<"tmov.fp", [
-  PTO_DpsInitOpInterface,
-  OpPipeInterface,
-  DeclareOpInterfaceMethods<MemoryEffectsOpInterface>
-]> {
-  let summary = "TMOV_FP: move/convert using fp (scaling) tile (tilebuf, DPS)";
-
-  let arguments = (ins
-    PTODpsType:$src,
-    PTODpsType:$fp,
-    PTODpsType:$dst
-  );
-
-  let results = (outs);
-
-  let hasVerifier = 1;
-
-  let assemblyFormat = [{
-    `ins` `(` $src `,` $fp `:` qualified(type($src)) `,` qualified(type($fp)) `)`
-    `outs` `(` $dst `:` qualified(type($dst) ) `)`
-    attr-dict
-  }];
-
-  let extraClassDeclaration = [{
-    // TMOV_FP is an ACC->MAT move (Cc->Cb) with vector quant parameters in
-    // SCALING (fbuf). Treat it as a data-movement op for sync insertion.
-    ::mlir::pto::PIPE getPipe() { return ::mlir::pto::PIPE::PIPE_MTE1; }
-    ::mlir::MutableOperandRange getDpsInitsMutable() { return getDstMutable(); }
-  }];
-}
-
 def TMrgSortOp: PTO_TOp<"tmrgsort", [
   AttrSizedOperandSegments,
   PTO_DpsInitOpInterface,
@@ -5151,6 +5046,7 @@ def TMrgSortOp: PTO_TOp<"tmrgsort", [
   let extraClassDeclaration = [{
     bool isFormat1() { return getSrcs().size() == 1u && getBlockLen() && getDsts().size() == 1u; }
     bool isFormat2() { return getSrcs().size() >= 2u && getSrcs().size() <= 4u && getTmp() && getDsts().size() == 1u && getExcuted(); }
+    bool isFormat2WithoutTmp() { return getSrcs().size() >= 2u && getSrcs().size() <= 4u && !getTmp() && !getBlockLen() && getDsts().size() == 1u && getExcuted(); }
     Value getSrc() { return getSrcs().front(); }
     Value getDst() { return getDsts().front(); }
     ::mlir::MutableOperandRange getDpsInitsMutable() { return getDstsMutable(); }
@@ -5567,7 +5463,7 @@ def TPReluOp: PTO_TOp<"tprelu", [
   let arguments = (ins
     PTODpsType:$src0,
     PTODpsType:$src1,
-    PTODpsType:$tmp,
+    Optional<PTODpsType>:$tmp,
     PTODpsType:$dst
   );
 
@@ -5575,11 +5471,7 @@ def TPReluOp: PTO_TOp<"tprelu", [
 
   let hasVerifier = 1;
 
-  let assemblyFormat = [{
-    `ins` `(` $src0 `,` $src1 `,` $tmp `:` qualified(type($src0)) `,` qualified(type($src1)) `,` qualified(type($tmp)) `)`
-    `outs` `(` $dst `:` qualified(type($dst) ) `)`
-    attr-dict
-  }];
+  let hasCustomAssemblyFormat = 1;
 
   let extraClassDeclaration = [{
     ::mlir::pto::PIPE getPipe() { return ::mlir::pto::PIPE::PIPE_V; }
@@ -5659,6 +5551,10 @@ def TQuantMxOp : PTO_TOp<"tquant.mx", [
     materializes the auxiliary `exp`, `max`, and `scaling` tiles required by
     PTO-ISA MX quantization.
 
+    The legacy fused form with `exp_zz` and `storeMode` is deprecated. Use a
+    separate `pto.tmov` with a non-scaling X-to-ZZ temporary tile when an
+    exponent layout conversion is required.
+
     DPS form:
       pto.tquant.mx ins(%src : <src_type>)
                     outs(%dst, %exp, %max, %scaling : <dst_type>, <exp_type>, <max_type>, <scaling_type>)
@@ -5677,7 +5573,9 @@ def TQuantMxOp : PTO_TOp<"tquant.mx", [
     Optional<PTODpsType>:$exp_zz,
     PTO_QuantTypeAttr:$quant_type,
     DefaultValuedAttr<PTO_QuantScaleAlgAttr, "::mlir::pto::QuantScaleAlg::OCP">:$quantScaleAlg,
-    OptionalAttr<PTO_VecStoreModeAttr>:$storeMode
+    OptionalAttr<PTO_VecStoreModeAttr>:$storeMode,
+    DefaultValuedAttr<PTO_MxGroupAxisAttr, "::mlir::pto::MxGroupAxis::Axis1">:$grpAxis,
+    DefaultValuedAttr<BoolAttr, "false">:$interleave
   );
 
   let results = (outs);
@@ -5817,7 +5715,7 @@ def TRemOp: PTO_TOp<"trem", [
   let arguments = (ins
     PTODpsType:$src0,
     PTODpsType:$src1,
-    PTODpsType:$tmp,
+    Optional<PTODpsType>:$tmp,
     PTODpsType:$dst,
     DefaultValuedAttr<PTO_RemPrecisionAttr, "::mlir::pto::RemPrecision::Default">:$precisionType
   );
@@ -5826,11 +5724,7 @@ def TRemOp: PTO_TOp<"trem", [
 
   let hasVerifier = 1;
 
-  let assemblyFormat = [{
-    `ins` `(` $src0 `,` $src1 `,` $tmp `:` qualified(type($src0)) `,` qualified(type($src1)) `,` qualified(type($tmp)) `)`
-    `outs` `(` $dst `:` qualified(type($dst) ) `)`
-    attr-dict
-  }];
+  let hasCustomAssemblyFormat = 1;
 
   let extraClassDeclaration = [{
     ::mlir::pto::PIPE getPipe() { return ::mlir::pto::PIPE::PIPE_V; }
@@ -5851,7 +5745,7 @@ def TRemSOp: PTO_TOp<"trems", [
   let arguments = (ins
     PTODpsType:$src,
     ScalarType:$scalar,
-    PTODpsType:$tmp,
+    Optional<PTODpsType>:$tmp,
     PTODpsType:$dst
   );
 
@@ -5859,11 +5753,7 @@ def TRemSOp: PTO_TOp<"trems", [
 
   let hasVerifier = 1;
 
-  let assemblyFormat = [{
-    `ins` `(` $src `,` $scalar `,` $tmp `:` qualified(type($src)) `,` type($scalar) `,` qualified(type($tmp)) `)`
-    `outs` `(` $dst `:` qualified(type($dst) ) `)`
-    attr-dict
-  }];
+  let hasCustomAssemblyFormat = 1;
 
   let extraClassDeclaration = [{
     ::mlir::pto::PIPE getPipe() { return ::mlir::pto::PIPE::PIPE_V; }
@@ -6156,7 +6046,7 @@ def TRowMaxOp: PTO_TOp<"trowmax", [
 
   let arguments = (ins
     PTODpsType:$src,
-    PTODpsType:$tmp,
+    Optional<PTODpsType>:$tmp,
     PTODpsType:$dst
   );
 
@@ -6164,11 +6054,7 @@ def TRowMaxOp: PTO_TOp<"trowmax", [
 
   let hasVerifier = 1;
 
-  let assemblyFormat = [{
-    `ins` `(` $src `,` $tmp `:` qualified(type($src)) `,` qualified(type($tmp)) `)`
-    `outs` `(` $dst `:` qualified(type($dst) ) `)`
-    attr-dict
-  }];
+  let hasCustomAssemblyFormat = 1;
 
   let extraClassDeclaration = [{
     ::mlir::pto::PIPE getPipe() { return ::mlir::pto::PIPE::PIPE_V; }
@@ -6185,7 +6071,7 @@ def TRowArgMaxOp: PTO_TOp<"trowargmax", [
 
   let arguments = (ins
     PTODpsType:$src,
-    PTODpsType:$tmp,
+    Optional<PTODpsType>:$tmp,
     PTODpsType:$dst
   );
 
@@ -6193,11 +6079,7 @@ def TRowArgMaxOp: PTO_TOp<"trowargmax", [
 
   let hasVerifier = 1;
 
-  let assemblyFormat = [{
-    `ins` `(` $src `,` $tmp `:` qualified(type($src)) `,` qualified(type($tmp)) `)`
-    `outs` `(` $dst `:` qualified(type($dst) ) `)`
-    attr-dict
-  }];
+  let hasCustomAssemblyFormat = 1;
 
   let extraClassDeclaration = [{
     ::mlir::pto::PIPE getPipe() { return ::mlir::pto::PIPE::PIPE_V; }
@@ -6217,7 +6099,7 @@ def TRowMinOp: PTO_TOp<"trowmin", [
 
   let arguments = (ins
     PTODpsType:$src,
-    PTODpsType:$tmp,
+    Optional<PTODpsType>:$tmp,
     PTODpsType:$dst
   );
 
@@ -6225,11 +6107,7 @@ def TRowMinOp: PTO_TOp<"trowmin", [
 
   let hasVerifier = 1;
 
-  let assemblyFormat = [{
-    `ins` `(` $src `,` $tmp `:` qualified(type($src)) `,` qualified(type($tmp)) `)`
-    `outs` `(` $dst `:` qualified(type($dst) ) `)`
-    attr-dict
-  }];
+  let hasCustomAssemblyFormat = 1;
 
   let extraClassDeclaration = [{
     ::mlir::pto::PIPE getPipe() { return ::mlir::pto::PIPE::PIPE_V; }
@@ -6246,7 +6124,7 @@ def TRowArgMinOp: PTO_TOp<"trowargmin", [
 
   let arguments = (ins
     PTODpsType:$src,
-    PTODpsType:$tmp,
+    Optional<PTODpsType>:$tmp,
     PTODpsType:$dst
   );
 
@@ -6254,11 +6132,7 @@ def TRowArgMinOp: PTO_TOp<"trowargmin", [
 
   let hasVerifier = 1;
 
-  let assemblyFormat = [{
-    `ins` `(` $src `,` $tmp `:` qualified(type($src)) `,` qualified(type($tmp)) `)`
-    `outs` `(` $dst `:` qualified(type($dst) ) `)`
-    attr-dict
-  }];
+  let hasCustomAssemblyFormat = 1;
 
   let extraClassDeclaration = [{
     ::mlir::pto::PIPE getPipe() { return ::mlir::pto::PIPE::PIPE_V; }
@@ -6278,7 +6152,7 @@ def TRowSumOp: PTO_TOp<"trowsum", [
 
   let arguments = (ins
     PTODpsType:$src,
-    PTODpsType:$tmp,
+    Optional<PTODpsType>:$tmp,
     PTODpsType:$dst
   );
 
@@ -6286,11 +6160,7 @@ def TRowSumOp: PTO_TOp<"trowsum", [
 
   let hasVerifier = 1;
 
-  let assemblyFormat = [{
-    `ins` `(` $src `,` $tmp `:` qualified(type($src)) `,` qualified(type($tmp)) `)`
-    `outs` `(` $dst `:` qualified(type($dst) ) `)`
-    attr-dict
-  }];
+  let hasCustomAssemblyFormat = 1;
 
   let extraClassDeclaration = [{
     ::mlir::pto::PIPE getPipe() { return ::mlir::pto::PIPE::PIPE_V; }
@@ -6307,7 +6177,7 @@ def TRowProdOp: PTO_TOp<"trowprod", [
 
   let arguments = (ins
     PTODpsType:$src,
-    PTODpsType:$tmp,
+    Optional<PTODpsType>:$tmp,
     PTODpsType:$dst
   );
 
@@ -6315,11 +6185,7 @@ def TRowProdOp: PTO_TOp<"trowprod", [
 
   let hasVerifier = 1;
 
-  let assemblyFormat = [{
-    `ins` `(` $src `,` $tmp `:` qualified(type($src)) `,` qualified(type($tmp)) `)`
-    `outs` `(` $dst `:` qualified(type($dst) ) `)`
-    attr-dict
-  }];
+  let hasCustomAssemblyFormat = 1;
 
   let extraClassDeclaration = [{
     ::mlir::pto::PIPE getPipe() { return ::mlir::pto::PIPE::PIPE_V; }
@@ -6435,7 +6301,7 @@ def TSelOp: PTO_TOp<"tsel", [
     PTODpsType:$mask,
     PTODpsType:$src0,
     PTODpsType:$src1,
-    PTODpsType:$tmp,
+    Optional<PTODpsType>:$tmp,
     PTODpsType:$dst
   );
 
@@ -6443,11 +6309,7 @@ def TSelOp: PTO_TOp<"tsel", [
 
   let hasVerifier = 1;
 
-  let assemblyFormat = [{
-    `ins` `(` $mask `,` $src0 `,` $src1 `,` $tmp `:` qualified(type($mask)) `,` qualified(type($src0)) `,` qualified(type($src1)) `,` qualified(type($tmp)) `)`
-    `outs` `(` $dst `:` qualified(type($dst) ) `)`
-    attr-dict
-  }];
+  let hasCustomAssemblyFormat = 1;
 
   let extraClassDeclaration = [{
     ::mlir::pto::PIPE getPipe() { return ::mlir::pto::PIPE::PIPE_V; }
@@ -6471,7 +6333,7 @@ def TSelSOp: PTO_TOp<"tsels", [
   let arguments = (ins
     PTODpsType:$mask,
     PTODpsType:$src,
-    PTODpsType:$tmp,
+    Optional<PTODpsType>:$tmp,
     ScalarType:$scalar,
     PTODpsType:$dst
   );
@@ -6480,11 +6342,7 @@ def TSelSOp: PTO_TOp<"tsels", [
 
   let hasVerifier = 1;
 
-  let assemblyFormat = [{
-    `ins` `(` $mask `,` $src `,` $tmp `,` $scalar `:` qualified(type($mask)) `,` qualified(type($src)) `,` qualified(type($tmp)) `,` type($scalar) `)`
-    `outs` `(` $dst `:` qualified(type($dst) ) `)`
-    attr-dict
-  }];
+  let hasCustomAssemblyFormat = 1;
 
   let extraClassDeclaration = [{
     ::mlir::pto::PIPE getPipe() { return ::mlir::pto::PIPE::PIPE_V; }
@@ -6673,41 +6531,6 @@ def TSqrtOp: PTO_TOp<"tsqrt", [
   }];
 }
 
-//===----------------------------------------------------------------------===//
-// PTOOps.td  (add TSTORE_FP TBDPS/tile buffer op)
-//===----------------------------------------------------------------------===//
-
-def TStoreFPOp: PTO_TOp<"tstore_fp", [
-  PTO_DpsInitOpInterface,
-  OpPipeInterface,
-  DeclareOpInterfaceMethods<MemoryEffectsOpInterface>,
-]> {
-  let summary = "TSTORE_FP: Store an accumulator tile into global memory using a scaling (fp) tile for vector quantization parameters.";
-
-  let arguments = (ins
-    PTODpsType:$src,
-    PTODpsType:$fp,
-    PTODpsType:$dst
-  );
-
-  let results = (outs);
-
-  let hasVerifier = 1;
-
-  let assemblyFormat = [{
-    `ins` `(` $src `,` $fp `:` qualified(type($src)) `,` qualified(type($fp)) `)`
-    `outs` `(` $dst `:` qualified(type($dst) ) `)`
-    attr-dict
-  }];
-  let extraClassDeclaration = [{
-    ::mlir::pto::PIPE getPipe() { return ::mlir::pto::PIPE::PIPE_FIX; }
-    ::mlir::MutableOperandRange getDpsInitsMutable() { return getDstMutable(); }
-  }];
-}
-//===----------------------------------------------------------------------===//
-// PTOOps.td  (add TSUB TBDPS/tile buffer op)
-//===----------------------------------------------------------------------===//
-
 def TSubOp: PTO_TOp<"tsub", [
   PTO_DpsInitOpInterface,
   OpPipeInterface,
@@ -6859,7 +6682,7 @@ def TXorSOp: PTO_TOp<"txors", [
   let arguments = (ins
     PTODpsType:$src,
     AnySignlessInteger:$scalar,
-    PTODpsType:$tmp,
+    Optional<PTODpsType>:$tmp,
     PTODpsType:$dst
   );
 
@@ -6867,11 +6690,7 @@ def TXorSOp: PTO_TOp<"txors", [
 
   let hasVerifier = 1;
 
-  let assemblyFormat = [{
-    `ins` `(` $src `,` $scalar `,` $tmp `:` qualified(type($src)) `,` type($scalar) `,` qualified(type($tmp)) `)`
-    `outs` `(` $dst `:` qualified(type($dst) ) `)`
-    attr-dict
-  }];
+  let hasCustomAssemblyFormat = 1;
 
   let extraClassDeclaration = [{
     ::mlir::pto::PIPE getPipe() { return ::mlir::pto::PIPE::PIPE_V; }
@@ -6898,7 +6717,7 @@ def TXorOp: PTO_TOp<"txor", [
   let arguments = (ins
     PTODpsType:$src0,
     PTODpsType:$src1,
-    PTODpsType:$tmp,
+    Optional<PTODpsType>:$tmp,
     PTODpsType:$dst
   );
 
@@ -6906,11 +6725,7 @@ def TXorOp: PTO_TOp<"txor", [
 
   let hasVerifier = 1;
 
-  let assemblyFormat = [{
-    `ins` `(` $src0 `,` $src1  `,` $tmp `:` qualified(type($src0)) `,` qualified(type($src1)) `,` qualified(type($tmp)) `)`
-    `outs` `(` $dst `:` qualified(type($dst) ) `)`
-    attr-dict
-  }];
+  let hasCustomAssemblyFormat = 1;
 
   let extraClassDeclaration = [{
     ::mlir::pto::PIPE getPipe() { return ::mlir::pto::PIPE::PIPE_V; }

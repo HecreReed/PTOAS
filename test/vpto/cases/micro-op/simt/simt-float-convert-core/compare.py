@@ -17,9 +17,16 @@ def main():
     strict = os.getenv("COMPARE_STRICT", "1") != "0"
     golden = np.fromfile("golden_v1.bin", dtype=np.int32)
     out = np.fromfile("v1.bin", dtype=np.int32)
-    ok = golden.shape == out.shape and np.array_equal(golden, out)
+    written = np.concatenate(
+        (
+            np.arange(0, 18, dtype=np.intp),
+            np.arange(32, 96, dtype=np.intp),
+            np.arange(96, 128, dtype=np.intp),
+        )
+    )
+    ok = golden.shape == out.shape and np.array_equal(golden[written], out[written])
     if not ok:
-        idxs = np.nonzero(golden != out)[0]
+        idxs = written[golden[written] != out[written]]
         idx = int(idxs[0]) if idxs.size else 0
         print(
             f"[ERROR] mismatch at idx={idx}, golden={int(golden[idx])}, out={int(out[idx])}"

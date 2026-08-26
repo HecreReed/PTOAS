@@ -11,14 +11,15 @@
 #ifndef PTO_PLAN_MEMORY_H
 #define PTO_PLAN_MEMORY_H
 
-#include "PTO/IR/PTO.h"
+#include <list>
 #include "OptMemPlanForPipeline.h"
+#include "PTO/IR/PTO.h"
 #include "PTO/Transforms/Passes.h"
-#include "mlir/Dialect/SCF/IR/SCF.h"
 #include "mlir/Analysis/Liveness.h"
 #include "mlir/Dialect/Func/IR/FuncOps.h"
+#include "mlir/Dialect/SCF/IR/SCF.h"
 #include "llvm/ADT/SmallSet.h"
-#include <list>
+
 
 namespace mlir {
 namespace pto {
@@ -37,7 +38,7 @@ struct ValueComparator {
 using StableValueOrderMap = DenseMap<Value, uint32_t>;
 
 /// Various states when collecting gen-kill.
-enum BufferStatus { UNDEFFINED = 0, DEFFINED, GENED, KILLED };
+enum class BufferStatus { UNDEFFINED = 0, DEFFINED, GENED, KILLED };
 
 /// Pair of inplace Value.
 using ValuePair = std::pair<Value, Value>;
@@ -48,7 +49,7 @@ enum class MemPlanMode {
 };
 
 /// Result status after plan memory.
-enum PlanStatus {
+enum class PlanStatus {
   PLAN_SUCCESS = 0,
   RESTART_NEW_PLAN,
   CONTINUE_PLAN,
@@ -116,7 +117,7 @@ struct GenKillEntry {
 struct BufferLife {
   BufferLife(Value buffer, int64_t start, int64_t end)
       : buffer(buffer), allocTime(start), freeTime(end) {}
-  BufferLife(Value buffer) : buffer(buffer) {}
+  explicit BufferLife(Value buffer) : buffer(buffer) {}
   /// buffer value.
   Value buffer;
   /// the buffer allocate time.
@@ -316,7 +317,7 @@ private:
   void RecursionIR(Region *region, Liveness live);
 
   /// Get the buffer used within the loop and defined outside the loop.
-  SmallVector<Value> GetLiveBuffersInLoop(scf::ForOp forOp, Liveness live);
+  SmallVector<Value> GetLiveBuffersInLoop(Operation *loopOp, Liveness live);
 
   /// Update for Op tensor init args and tensor result args alias info.
   void UpdateInitAndResAlias(DestinationStyleOpInterface dstStyleOp);
@@ -324,11 +325,17 @@ private:
   /// Recursive operation for.
   void RecursiveForOp(scf::ForOp forOp, Liveness live);
 
+  /// Recursive operation for a generic scf.while loop.
+  void RecursiveWhileOp(scf::WhileOp whileOp, Liveness live);
+
   /// Update for Op init args region iter args alias info.
   void UpdateForOpInitArgsAlias(scf::ForOp forOp);
 
   /// Update forOp result buffer/region iter arg/yielded buffer args alias info.
   void UpdateForOpBufferAlias(scf::ForOp forOp);
+
+  /// Update aliases crossing both regions of an scf.while loop.
+  void UpdateWhileOpBufferAlias(scf::WhileOp whileOp);
 
   /// Recursive operation if.
   void RecursiveIfOp(scf::IfOp ifOp, Liveness live);
@@ -805,7 +812,6 @@ private:
 
   /// The device's SCALING storage size
   int scalingSpaceSize{0};
-
 };
 } // namespace pto
 } // namespace mlir

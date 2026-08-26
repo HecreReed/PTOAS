@@ -14,7 +14,7 @@ module attributes {pto.target_arch = "a5", pto.kernel_kind = #pto.kernel_kind<ve
   //   1000 lanes are valid; the last iteration writes 232 lanes and merges
   //   the remaining 24 back to the destination sentinel 0xA5.
   //
-  // This case exercises pto.vmi.create_mask + pto.vmi.vstore {pmode="merge"}
+  // This case exercises pto.vmi.create_mask + masked vstore tail handling.
   // on the NOSAT s32->s8 path, ensuring tail special-cases do not
   // re-introduce the sat attr on the physical vcvt sequence.
   func.func @vmi_trunci_s32_to_s8_nosat_tail_kernel(
@@ -49,7 +49,7 @@ module attributes {pto.target_arch = "a5", pto.kernel_kind = #pto.kernel_kind<ve
             : !pto.ptr<si32, ub> -> !pto.vmi.vreg<256xsi32>
         %narrow = pto.vmi.vcvt %wide {saturate = "NOSAT"}
             : !pto.vmi.vreg<256xsi32> -> !pto.vmi.vreg<256xsi8>
-        pto.vmi.vstore %narrow, %ub_dst[%offset], %mask {pmode = "merge"}
+        pto.vmi.vstore %narrow, %ub_dst[%offset], %mask
             : !pto.vmi.vreg<256xsi8>, !pto.ptr<si8, ub>, !pto.vmi.mask<256xpred>
         %next = arith.subi %rem, %c256 : index
         scf.yield %next : index

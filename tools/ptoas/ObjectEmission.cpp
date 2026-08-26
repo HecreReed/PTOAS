@@ -6,6 +6,7 @@
 // INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
 // See LICENSE in the root of the software repository for the full text of the License.
 
+#include "PTO/Support/CodeConstants.h"
 #include "ObjectEmission.h"
 
 #include "PTO/Transforms/VPTOLLVMEmitter.h"
@@ -48,6 +49,12 @@ static llvm::cl::opt<bool> enableBishengVecMISched(
     llvm::cl::desc("Use Bisheng's default vector MI scheduler behavior for "
                    "VPTO device compilation instead of explicitly disabling "
                    "the scheduler"),
+    llvm::cl::init(false));
+
+static llvm::cl::opt<bool> enableSimtFastMath(
+    "simt-fastmath",
+    llvm::cl::desc("Enable Bisheng SIMT floating-point contraction and fast "
+                   "math combining for VPTO device compilation"),
     llvm::cl::init(false));
 
 static llvm::cl::opt<BishengVFAutoSyncMode> bishengVFAutoSyncMode(
@@ -125,54 +132,63 @@ static std::string sanitizeModuleId(llvm::StringRef raw) {
   std::string out;
   out.reserve(raw.size());
   for (char c : raw) {
-    if (std::isalnum(static_cast<unsigned char>(c)) || c == '_')
+    if (std::isalnum(static_cast<unsigned char>(c)) || c == '_') {
       out.push_back(c);
-    else
+    }
+    else {
       out.push_back('_');
+    }
   }
-  if (out.empty())
+  if (out.empty()) {
     out = "ptoas_fatobj";
+  }
   return out;
 }
 
 static std::optional<std::string> getAscendHomePath() {
   const char *env = std::getenv("ASCEND_HOME_PATH");
-  if (!env || !*env)
+  if (!env || !*env) {
     return std::nullopt;
+  }
   return std::string(env);
 }
 
 static std::optional<std::string> getEnvPath(llvm::StringRef name) {
   const char *env = std::getenv(name.str().c_str());
-  if (!env || !*env)
+  if (!env || !*env) {
     return std::nullopt;
+  }
   return std::string(env);
 }
 
 static std::string joinPath(llvm::StringRef lhs, llvm::StringRef rhs) {
-  llvm::SmallString<256> joined(lhs);
+  llvm::SmallString<mlir::pto::kValue256> joined(lhs);
   llvm::sys::path::append(joined, rhs);
   return std::string(joined.str());
 }
 
 static std::optional<std::string> parseCANNVersionInfo(llvm::StringRef path) {
   auto buffer = llvm::MemoryBuffer::getFile(path);
-  if (!buffer)
+  if (!buffer) {
     return std::nullopt;
+  }
   llvm::StringRef content = buffer.get()->getBuffer();
-  llvm::SmallVector<llvm::StringRef, 16> lines;
+  llvm::SmallVector<llvm::StringRef, mlir::pto::kValue16> lines;
   content.split(lines, '\n');
   for (llvm::StringRef line : lines) {
     line = line.trim();
     llvm::StringRef keys[] = {"Version=", "version="};
     for (llvm::StringRef key : keys) {
-      if (!line.starts_with(key))
+      if (!line.starts_with(key)) {
         continue;
+      }
       llvm::StringRef value = line.drop_front(key.size()).trim();
-      if (value.consume_front("\""))
+      if (value.consume_front("\"")) {
         value.consume_back("\"");
-      if (!value.empty())
+      }
+      if (!value.empty()) {
         return value.str();
+      }
     }
   }
   return std::nullopt;
@@ -188,18 +204,21 @@ discoverCANNVersion(llvm::StringRef ascendHome) {
         "aarch64-linux/ascend_all_cann_install.info",
         "ascend_toolkit_install.info", "ascend_all_cann_install.info",
         "opp/version.info"}) {
-    if (auto version = parseCANNVersionInfo(joinPath(ascendHome, relPath)))
+    if (auto version = parseCANNVersionInfo(joinPath(ascendHome, relPath))) {
       return version;
+    }
   }
   return std::nullopt;
 }
 
 static std::optional<std::string> locateProgram(llvm::StringRef envPath,
                                                 llvm::StringRef fallbackName) {
-  if (!envPath.empty() && llvm::sys::fs::exists(envPath))
+  if (!envPath.empty() && llvm::sys::fs::exists(envPath)) {
     return envPath.str();
-  if (auto found = llvm::sys::findProgramByName(fallbackName))
+  }
+  if (auto found = llvm::sys::findProgramByName(fallbackName)) {
     return *found;
+  }
   return std::nullopt;
 }
 
@@ -209,35 +228,41 @@ static bool hasPTOISAHeader(llvm::StringRef includeDir) {
 
 static void addExistingIncludeDir(llvm::SmallVectorImpl<std::string> &dirs,
                                   llvm::StringRef path) {
-  if (path.empty() || !llvm::sys::fs::is_directory(path))
+  if (path.empty() || !llvm::sys::fs::is_directory(path)) {
     return;
-  if (llvm::is_contained(dirs, path))
+  }
+  if (llvm::is_contained(dirs, path)) {
     return;
+  }
   dirs.push_back(path.str());
 }
 
 static void addPTOISAIncludeDirs(llvm::SmallVectorImpl<std::string> &dirs,
                                  llvm::StringRef ptoIsaPath) {
-  if (ptoIsaPath.empty() || !llvm::sys::fs::is_directory(ptoIsaPath))
+  if (ptoIsaPath.empty() || !llvm::sys::fs::is_directory(ptoIsaPath)) {
     return;
+  }
   std::string includeDir = joinPath(ptoIsaPath, "include");
-  if (hasPTOISAHeader(includeDir))
+  if (hasPTOISAHeader(includeDir)) {
     addExistingIncludeDir(dirs, includeDir);
+  }
   std::string commonDir = joinPath(ptoIsaPath, "tests/common");
   addExistingIncludeDir(dirs, commonDir);
-  if (hasPTOISAHeader(ptoIsaPath))
+  if (hasPTOISAHeader(ptoIsaPath)) {
     addExistingIncludeDir(dirs, ptoIsaPath);
+  }
 }
 
-static llvm::SmallVector<std::string, 8>
+static llvm::SmallVector<std::string, mlir::pto::kValue8>
 discoverCppIncludeDirs(llvm::StringRef ascendHome,
                        llvm::raw_ostream &diagOS,
                        std::string &ptoIsaPath) {
-  llvm::SmallVector<std::string, 8> includeDirs;
-  if (auto env = getEnvPath("PTO_ISA_PATH"))
+  llvm::SmallVector<std::string, mlir::pto::kValue8> includeDirs;
+  if (auto env = getEnvPath("PTO_ISA_PATH")) {
     ptoIsaPath = *env;
-  else if (auto env = getEnvPath("PTO_ISA_ROOT"))
+  } else if (auto env = getEnvPath("PTO_ISA_ROOT")) {
     ptoIsaPath = *env;
+  }
 
   addPTOISAIncludeDirs(includeDirs, ptoIsaPath);
   addExistingIncludeDir(includeDirs, joinPath(ascendHome, "include"));
@@ -292,8 +317,9 @@ static std::string resolveTargetCPU(llvm::Module &module,
   for (llvm::Function &f : module) {
     if (f.hasFnAttribute("target-cpu")) {
       std::string cpu = f.getFnAttribute("target-cpu").getValueAsString().str();
-      if (!cpu.empty())
+      if (!cpu.empty()) {
         return cpu;
+      }
     }
   }
   return getTargetCPU(fallback).str();
@@ -305,28 +331,34 @@ public:
       : tempFiles(tempFiles) {}
 
   bool emitStubSource(StringRef stubSource, llvm::raw_ostream &diagOS) {
-    if (failed(tempFiles.create("ptoas-host-stub", ".cpp", stubPath, diagOS)))
+    if (failed(tempFiles.create("ptoas-host-stub", ".cpp", stubPath, diagOS))) {
       return false;
-    if (!writeTextFile(stubPath, stubSource, diagOS))
+    }
+    if (!writeTextFile(stubPath, stubSource, diagOS)) {
       return false;
+    }
     return true;
   }
 
   bool initCommandLogs(llvm::raw_ostream &diagOS) {
-    if (failed(tempFiles.create("ptoas-stderr", ".log", stderrPath, diagOS)))
+    if (failed(tempFiles.create("ptoas-stderr", ".log", stderrPath, diagOS))) {
       return false;
+    }
     return true;
   }
 
   bool emitCubeObject(llvm::Module *module,
                       const mlir::pto::CANNToolchain &toolchain,
                       llvm::raw_ostream &diagOS) {
-    if (!module)
+    if (!module) {
       return true;
-    if (failed(tempFiles.create("ptoas-device", ".ll", cubeLLPath, diagOS)))
+    }
+    if (failed(tempFiles.create("ptoas-device", ".ll", cubeLLPath, diagOS))) {
       return false;
-    if (failed(tempFiles.create("ptoas-device", ".o", cubeObjPath, diagOS)))
+    }
+    if (failed(tempFiles.create("ptoas-device", ".o", cubeObjPath, diagOS))) {
       return false;
+    }
     return succeeded(mlir::pto::emitVPTOCubeDeviceObject(
         *module, cubeLLPath, cubeObjPath, toolchain, stderrPath, diagOS));
   }
@@ -335,18 +367,22 @@ public:
                         const mlir::pto::CANNToolchain &toolchain,
                         mlir::pto::VFSIMTSizeFixMode vfsimtSizeFixMode,
                         llvm::raw_ostream &diagOS) {
-    if (!module)
+    if (!module) {
       return true;
-    if (failed(tempFiles.create("ptoas-device", ".ll", vectorLLPath, diagOS)))
+    }
+    if (failed(tempFiles.create("ptoas-device", ".ll", vectorLLPath, diagOS))) {
       return false;
+    }
     std::string rawVectorObjPath;
     if (failed(tempFiles.create("ptoas-device-vector-raw", ".o",
-                                rawVectorObjPath, diagOS)))
+                                rawVectorObjPath, diagOS))) {
       return false;
+    }
     if (failed(mlir::pto::emitVPTOVectorDeviceObject(
             *module, vectorLLPath, rawVectorObjPath, toolchain, stderrPath,
-            diagOS)))
+            diagOS))) {
       return false;
+    }
     if (vfsimtSizeFixMode == mlir::pto::VFSIMTSizeFixMode::Off) {
       vectorObjPath = std::move(rawVectorObjPath);
       return true;
@@ -354,32 +390,37 @@ public:
 
     std::string patchedVectorObjPath;
     if (failed(tempFiles.create("ptoas-device-vector-patched", ".o",
-                                patchedVectorObjPath, diagOS)))
+                                patchedVectorObjPath, diagOS))) {
       return false;
+    }
     mlir::FailureOr<mlir::pto::VFSIMTSizePatchResult> result =
         mlir::pto::verifyAndPatchVFSIMTSize(
             *module, rawVectorObjPath, patchedVectorObjPath,
             vfsimtSizeFixMode, diagOS);
-    if (failed(result))
+    if (failed(result)) {
       return false;
+    }
     vectorObjPath = std::move(result->objectPath);
     return true;
   }
 
   bool mergeDeviceObjects(const mlir::pto::CANNToolchain &toolchain,
                           llvm::raw_ostream &diagOS) {
-    llvm::SmallVector<std::string, 2> deviceObjPaths;
-    if (!cubeObjPath.empty())
+    llvm::SmallVector<std::string, mlir::pto::kValue2> deviceObjPaths;
+    if (!cubeObjPath.empty()) {
       deviceObjPaths.push_back(cubeObjPath);
-    if (!vectorObjPath.empty())
+    }
+    if (!vectorObjPath.empty()) {
       deviceObjPaths.push_back(vectorObjPath);
+    }
     if (deviceObjPaths.empty()) {
       diagOS << "Error: VPTO fatobj emission requires at least one device module.\n";
       return false;
     }
     if (failed(tempFiles.create("ptoas-device-merged", ".o",
-                                mergedDeviceObjPath, diagOS)))
+                                mergedDeviceObjPath, diagOS))) {
       return false;
+    }
     return ::mergeDeviceObjects(deviceObjPaths, mergedDeviceObjPath,
                                 toolchain.ldLldPath, stderrPath, diagOS);
   }
@@ -389,8 +430,9 @@ public:
                        llvm::StringRef targetCPU,
                        llvm::raw_ostream &diagOS) {
     if (failed(tempFiles.create("ptoas-host-stub", ".o", hostStubObjPath,
-                                diagOS)))
+                                diagOS))) {
       return false;
+    }
     return compileHostStubToObject(stubPath, hostStubObjPath, moduleId,
                                    targetCPU, toolchain, mergedDeviceObjPath,
                                    stderrPath, diagOS);
@@ -409,7 +451,7 @@ public:
   bool repackFatObj(const mlir::pto::CANNToolchain &toolchain,
                     llvm::StringRef moduleId, llvm::StringRef targetCPU,
                     llvm::StringRef outPath, llvm::raw_ostream &diagOS) {
-    llvm::SmallVector<std::string, 16> args = {
+    llvm::SmallVector<std::string, mlir::pto::kValue16> args = {
         toolchain.cceLdPath,
         toolchain.ldLldPath,
         "-x",
@@ -452,29 +494,34 @@ static bool runCommandWithStderr(llvm::StringRef program,
                                  llvm::raw_ostream &diagOS,
                                  llvm::StringRef what,
                                  std::optional<llvm::StringRef> stdinPath) {
-  llvm::SmallVector<llvm::StringRef, 16> args;
+  llvm::SmallVector<llvm::StringRef, mlir::pto::kValue16> args;
   args.reserve(ownedArgs.size());
-  for (const std::string &arg : ownedArgs)
+  for (const std::string &arg : ownedArgs) {
     args.push_back(arg);
-  llvm::SmallVector<std::optional<llvm::StringRef>, 3> redirects = {
+  }
+  llvm::SmallVector<std::optional<llvm::StringRef>, mlir::pto::kValue3> redirects = {
       stdinPath, stderrPath, stderrPath};
 
   std::string execErr;
   bool execFailed = false;
   int rc = llvm::sys::ExecuteAndWait(program, args, std::nullopt, redirects, 0,
                                      0, &execErr, &execFailed);
-  if (!execFailed && rc == 0)
+  if (!execFailed && rc == 0) {
     return true;
+  }
 
   diagOS << "Error: " << what << " failed\n";
   diagOS << "Command:";
-  for (llvm::StringRef arg : args)
+  for (llvm::StringRef arg : args) {
     diagOS << " " << arg;
+  }
   diagOS << "\n";
-  if (!execErr.empty())
+  if (!execErr.empty()) {
     diagOS << execErr << "\n";
-  if (auto buffer = llvm::MemoryBuffer::getFile(stderrPath))
+  }
+  if (auto buffer = llvm::MemoryBuffer::getFile(stderrPath)) {
     diagOS << buffer.get()->getBuffer() << "\n";
+  }
   return false;
 }
 
@@ -484,7 +531,7 @@ static bool compileDeviceLLVMToObject(llvm::StringRef llPath,
                                       llvm::StringRef bishengPath,
                                       llvm::StringRef stderrPath,
                                       llvm::raw_ostream &diagOS) {
-  llvm::SmallVector<std::string, 24> args = {
+  llvm::SmallVector<std::string, mlir::pto::kValue24> args = {
       bishengPath.str(),
       std::string("--cce-aicore-arch=") + targetCPU.str(),
       "--cce-aicore-only",
@@ -520,6 +567,9 @@ static bool compileDeviceLLVMToObject(llvm::StringRef llPath,
     args.push_back("-mllvm");
     args.push_back("--cce-aicore-vec-misched=0");
   }
+  args.push_back("-mllvm");
+  args.push_back(std::string("--cce-simt-fpmath-combine=") +
+                 (enableSimtFastMath ? "true" : "false"));
   args.push_back("-c");
   args.push_back("-x");
   args.push_back("ir");
@@ -534,7 +584,7 @@ static bool compileCppDeviceSourceToObject(
     llvm::StringRef cppPath, llvm::StringRef outObjPath,
     llvm::StringRef targetCPU, const mlir::pto::CANNToolchain &toolchain,
     llvm::StringRef stderrPath, llvm::raw_ostream &diagOS) {
-  llvm::SmallVector<std::string, 32> args = {
+  llvm::SmallVector<std::string, mlir::pto::kValue32> args = {
       toolchain.bishengPath,
       "-xcce",
       "-fenable-matrix",
@@ -558,8 +608,9 @@ static bool compileCppDeviceSourceToObject(
       "-std=c++17",
       "-dc",
   };
-  for (const std::string &includeDir : toolchain.cppIncludeDirs)
+  for (const std::string &includeDir : toolchain.cppIncludeDirs) {
     args.push_back("-I" + includeDir);
+  }
   args.push_back("-c");
   args.push_back(cppPath.str());
   args.push_back("-o");
@@ -573,7 +624,7 @@ static bool compileCppDeviceSourceToFatobj(
     llvm::StringRef cppPath, llvm::StringRef outObjPath,
     const mlir::pto::CANNToolchain &toolchain,
     llvm::StringRef stderrPath, llvm::raw_ostream &diagOS) {
-  llvm::SmallVector<std::string, 32> args = {
+  llvm::SmallVector<std::string, mlir::pto::kValue32> args = {
       toolchain.bishengPath,
       "-xcce",
       "-fenable-matrix",
@@ -598,8 +649,9 @@ static bool compileCppDeviceSourceToFatobj(
       "-dc",
       "-c",
   };
-  for (const std::string &includeDir : toolchain.cppIncludeDirs)
+  for (const std::string &includeDir : toolchain.cppIncludeDirs) {
     args.push_back("-I" + includeDir);
+  }
   args.push_back(cppPath.str());
   args.push_back("-o");
   args.push_back(outObjPath.str());
@@ -610,14 +662,17 @@ static bool compileCppDeviceSourceToFatobj(
 
 static std::string resolveHostTargetCPU() {
   if (const char *envCPU = std::getenv("PTOAS_HOST_TARGET_CPU")) {
-    if (envCPU[0] != '\0')
+    if (envCPU[0] != '\0') {
       return std::string(envCPU);
+    }
   }
   std::string hostCPU = llvm::sys::getHostCPUName().str();
-  if (hostCPU == "cortex-x925")
+  if (hostCPU == "cortex-x925") {
     return "tsv200m";
-  if (hostCPU == "znver4" || hostCPU == "znver5")
+  }
+  if (hostCPU == "znver4" || hostCPU == "znver5") {
     return "znver3";
+  }
   return hostCPU;
 }
 
@@ -634,7 +689,7 @@ static bool compileHostStubToObject(llvm::StringRef stubPath,
   std::string hostTriple = llvm::sys::getProcessTriple();
   std::string hostTargetCPU = resolveHostTargetCPU();
 
-  llvm::SmallVector<std::string, 32> args = {
+  llvm::SmallVector<std::string, mlir::pto::kValue32> args = {
       toolchain.bishengCc1Path,
       "-cc1",
       "-triple",
@@ -730,18 +785,20 @@ static bool mergeDeviceObjects(llvm::ArrayRef<std::string> deviceObjPaths,
                                llvm::StringRef ldLldPath,
                                llvm::StringRef stderrPath,
                                llvm::raw_ostream &diagOS) {
-  if (deviceObjPaths.empty())
+  if (deviceObjPaths.empty()) {
     return false;
+  }
 
-  llvm::SmallVector<std::string, 16> args = {
+  llvm::SmallVector<std::string, mlir::pto::kValue16> args = {
       ldLldPath.str(),
       "-m",
       "aicorelinux",
       "-Ttext",
       "0",
   };
-  for (const std::string &path : deviceObjPaths)
+  for (const std::string &path : deviceObjPaths) {
     args.push_back(path);
+  }
   args.push_back("-o");
   args.push_back(outObjPath.str());
   args.push_back("-r");
@@ -755,10 +812,11 @@ static bool linkFatobjFiles(llvm::ArrayRef<std::string> fatobjPaths,
                             const mlir::pto::CANNToolchain &toolchain,
                             llvm::StringRef stderrPath,
                             llvm::raw_ostream &diagOS) {
-  if (fatobjPaths.empty())
+  if (fatobjPaths.empty()) {
     return false;
+  }
 
-  llvm::SmallVector<std::string, 32> args = {
+  llvm::SmallVector<std::string, mlir::pto::kValue32> args = {
       toolchain.bishengPath,
       "--cce-fatobj-link",
       "--cce-aicore-arch=dav-c310",
@@ -766,8 +824,9 @@ static bool linkFatobjFiles(llvm::ArrayRef<std::string> fatobjPaths,
       "-o",
       outObjPath.str(),
   };
-  for (const std::string &path : fatobjPaths)
+  for (const std::string &path : fatobjPaths) {
     args.push_back(path);
+  }
 
   return runCommandWithStderr(toolchain.bishengPath, args, stderrPath, diagOS,
                               "fatobj link");
@@ -778,8 +837,9 @@ static bool linkFatobjFiles(llvm::ArrayRef<std::string> fatobjPaths,
 mlir::pto::TempFileRegistry::~TempFileRegistry() { cleanup(); }
 
 void mlir::pto::TempFileRegistry::cleanup() {
-  for (const std::string &path : paths)
+  for (const std::string &path : paths) {
     llvm::sys::fs::remove(path);
+  }
   paths.clear();
 }
 
@@ -787,7 +847,7 @@ mlir::LogicalResult
 mlir::pto::TempFileRegistry::create(llvm::StringRef prefix,
                                     llvm::StringRef suffix, std::string &path,
                                     llvm::raw_ostream &diagOS) {
-  llvm::SmallString<128> tempPath;
+  llvm::SmallString<mlir::pto::kValue128> tempPath;
   int fd = -1;
   std::error_code ec =
       llvm::sys::fs::createTemporaryFile(prefix, suffix, fd, tempPath);
@@ -829,12 +889,13 @@ mlir::pto::CANNToolchain::create(llvm::raw_ostream &diagOS) {
       joinPath(toolchain.ascendHomePath, "tools/bisheng_compiler/bin");
   toolchain.cannVersionString =
       discoverCANNVersion(toolchain.ascendHomePath).value_or("9.0.0-beta.1");
-  llvm::SmallVector<std::string, 8> cppIncludeDirs = discoverCppIncludeDirs(
+  llvm::SmallVector<std::string, mlir::pto::kValue8> cppIncludeDirs = discoverCppIncludeDirs(
       toolchain.ascendHomePath, diagOS, toolchain.ptoIsaPath);
   toolchain.cppIncludeDirs.assign(cppIncludeDirs.begin(),
                                   cppIncludeDirs.end());
-  if (failed(toolchain.validate(diagOS)))
+  if (failed(toolchain.validate(diagOS))) {
     return std::nullopt;
+  }
   return toolchain;
 }
 
@@ -862,7 +923,7 @@ mlir::pto::CANNToolchain::validate(llvm::raw_ostream &diagOS) const {
 
 llvm::StringRef mlir::pto::CANNToolchain::vptoPublicABISuffix(
     ObjectEmissionDeviceTarget target) const {
-  const bool usesNewABI = cannVersion >= CANNVersion{9, 0, 0, 2};
+  const bool usesNewABI = cannVersion >= kCANN900Beta2Version;
   switch (target) {
   case ObjectEmissionDeviceTarget::Vector:
     return usesNewABI ? llvm::StringRef(".vector") : llvm::StringRef("_mix_aiv");
@@ -915,8 +976,9 @@ mlir::LogicalResult mlir::pto::emitCppVectorDeviceObject(
     llvm::StringRef cppSource, llvm::StringRef cppPath,
     llvm::StringRef outObjPath, const CANNToolchain &toolchain,
     llvm::StringRef stderrPath, llvm::raw_ostream &diagOS) {
-  if (failed(writeCppSource(cppSource, cppPath, diagOS)))
+  if (failed(writeCppSource(cppSource, cppPath, diagOS))) {
     return failure();
+  }
   return compileCppToDeviceObject(cppPath, outObjPath,
                                   ObjectEmissionDeviceTarget::Vector,
                                   toolchain, stderrPath, diagOS);
@@ -926,8 +988,9 @@ mlir::LogicalResult mlir::pto::emitCppCubeDeviceObject(
     llvm::StringRef cppSource, llvm::StringRef cppPath,
     llvm::StringRef outObjPath, const CANNToolchain &toolchain,
     llvm::StringRef stderrPath, llvm::raw_ostream &diagOS) {
-  if (failed(writeCppSource(cppSource, cppPath, diagOS)))
+  if (failed(writeCppSource(cppSource, cppPath, diagOS))) {
     return failure();
+  }
   return compileCppToDeviceObject(cppPath, outObjPath,
                                   ObjectEmissionDeviceTarget::Cube,
                                   toolchain, stderrPath, diagOS);
@@ -937,8 +1000,9 @@ mlir::LogicalResult mlir::pto::emitCppFatobj(
     llvm::StringRef cppSource, llvm::StringRef cppPath,
     llvm::StringRef outObjPath, const CANNToolchain &toolchain,
     llvm::StringRef stderrPath, llvm::raw_ostream &diagOS) {
-  if (failed(writeCppSource(cppSource, cppPath, diagOS)))
+  if (failed(writeCppSource(cppSource, cppPath, diagOS))) {
     return failure();
+  }
   return compileCppDeviceSourceToFatobj(cppPath, outObjPath, toolchain,
                                         stderrPath, diagOS)
              ? success()
@@ -953,8 +1017,9 @@ mlir::LogicalResult mlir::pto::emitFatobjCCE(
   std::string stderrPath;
   if (failed(tempFiles.create("ptoas-emitc", ".cpp", cppPath, diagOS)) ||
       failed(tempFiles.create("ptoas-emitc-fatobj", ".log", stderrPath,
-                              diagOS)))
+                              diagOS))) {
     return failure();
+  }
   return emitCppFatobj(cppSource, cppPath, outputPath, toolchain, stderrPath,
                        diagOS);
 }
@@ -971,11 +1036,13 @@ static mlir::LogicalResult renameLLVMFunction(llvm::Module &module,
                                               llvm::StringRef sourceName,
                                               llvm::StringRef abiName,
                                               llvm::raw_ostream &diagOS) {
-  if (sourceName == abiName)
+  if (sourceName == abiName) {
     return mlir::success();
+  }
   llvm::Function *function = module.getFunction(sourceName);
-  if (!function)
+  if (!function) {
     return mlir::success();
+  }
   if (llvm::Function *existing = module.getFunction(abiName);
       existing && existing != function) {
     diagOS << "Error: cannot rename LLVM symbol '" << sourceName << "' to '"
@@ -990,14 +1057,17 @@ static mlir::LogicalResult applyVPTOLLVMABINames(llvm::Module &module,
                                                  llvm::StringRef suffix,
                                                  llvm::raw_ostream &diagOS) {
   for (llvm::Function &function : module) {
-    if (function.isDeclaration() || !function.hasExternalLinkage())
+    if (function.isDeclaration() || !function.hasExternalLinkage()) {
       continue;
+    }
     llvm::StringRef name = function.getName();
     if (name.empty() || isVPTOKernelABISymbol(name) ||
-        isLegacyVPTOPublicABISymbol(name))
+        isLegacyVPTOPublicABISymbol(name)) {
       continue;
-    if (failed(renameLLVMFunction(module, name, (name + suffix).str(), diagOS)))
+    }
+    if (failed(renameLLVMFunction(module, name, (name + suffix).str(), diagOS))) {
       return mlir::failure();
+    }
   }
   return mlir::success();
 }
@@ -1009,10 +1079,12 @@ mlir::LogicalResult mlir::pto::emitVPTOVectorDeviceObject(
   if (failed(applyVPTOLLVMABINames(
           module,
           toolchain.vptoPublicABISuffix(ObjectEmissionDeviceTarget::Vector),
-          diagOS)))
+          diagOS))) {
     return failure();
-  if (failed(writeLLVMModule(module, llPath, diagOS)))
+  }
+  if (failed(writeLLVMModule(module, llPath, diagOS))) {
     return failure();
+  }
   return compileDeviceLLVMToObject(llPath, outObjPath,
                                    resolveTargetCPU(module,
                                                     ObjectEmissionDeviceTarget::Vector),
@@ -1028,10 +1100,12 @@ mlir::LogicalResult mlir::pto::emitVPTOCubeDeviceObject(
   if (failed(applyVPTOLLVMABINames(
           module,
           toolchain.vptoPublicABISuffix(ObjectEmissionDeviceTarget::Cube),
-          diagOS)))
+          diagOS))) {
     return failure();
-  if (failed(writeLLVMModule(module, llPath, diagOS)))
+  }
+  if (failed(writeLLVMModule(module, llPath, diagOS))) {
     return failure();
+  }
   return compileDeviceLLVMToObject(llPath, outObjPath,
                                    resolveTargetCPU(module,
                                                     ObjectEmissionDeviceTarget::Cube),
@@ -1052,22 +1126,28 @@ mlir::LogicalResult mlir::pto::emitFatobjLLVM(
   }
 
   VPTOFatobjArtifacts artifacts(tempFiles);
-  if (!artifacts.emitStubSource(stubSource, diagOS))
+  if (!artifacts.emitStubSource(stubSource, diagOS)) {
     return failure();
-  if (!artifacts.initCommandLogs(diagOS))
+  }
+  if (!artifacts.initCommandLogs(diagOS)) {
     return failure();
-  if (!artifacts.emitCubeObject(cubeModule, toolchain, diagOS))
+  }
+  if (!artifacts.emitCubeObject(cubeModule, toolchain, diagOS)) {
     return failure();
+  }
   if (!artifacts.emitVectorObject(vectorModule, toolchain,
-                                  vfsimtSizeFixMode, diagOS))
+                                  vfsimtSizeFixMode, diagOS)) {
     return failure();
-  if (!artifacts.mergeDeviceObjects(toolchain, diagOS))
+  }
+  if (!artifacts.mergeDeviceObjects(toolchain, diagOS)) {
     return failure();
+  }
 
   constexpr llvm::StringLiteral targetCPU = "dav-c310";
   if (!artifacts.compileHostStubToFatobj(toolchain, moduleId, targetCPU,
-                                         outputPath, diagOS))
+                                         outputPath, diagOS)) {
     return failure();
+  }
   return success();
 }
 
@@ -1114,33 +1194,41 @@ mlir::LogicalResult mlir::pto::emitFatobjLLVMWithRuntime(
   }
 
   std::optional<CANNToolchain> toolchain = CANNToolchain::create(diagOS);
-  if (!toolchain)
+  if (!toolchain) {
     return failure();
+  }
 
   TempFileRegistry tempFiles;
   VPTOFatobjArtifacts artifacts(tempFiles);
-  if (!artifacts.emitStubSource(stubSource, diagOS))
+  if (!artifacts.emitStubSource(stubSource, diagOS)) {
     return failure();
-  if (!artifacts.initCommandLogs(diagOS))
+  }
+  if (!artifacts.initCommandLogs(diagOS)) {
     return failure();
+  }
 
-  if (!artifacts.emitCubeObject(cubeModule, *toolchain, diagOS))
+  if (!artifacts.emitCubeObject(cubeModule, *toolchain, diagOS)) {
     return failure();
+  }
   if (!artifacts.emitVectorObject(vectorModule, *toolchain,
-                                  vfsimtSizeFixMode, diagOS))
+                                  vfsimtSizeFixMode, diagOS)) {
     return failure();
+  }
 
-  if (!artifacts.mergeDeviceObjects(*toolchain, diagOS))
+  if (!artifacts.mergeDeviceObjects(*toolchain, diagOS)) {
     return failure();
+  }
 
   std::string moduleId = sanitizeModuleId(outputFile.getFilename());
   constexpr llvm::StringLiteral hostTargetCPU = "dav-c310";
-  if (!artifacts.compileHostStub(*toolchain, moduleId, hostTargetCPU, diagOS))
+  if (!artifacts.compileHostStub(*toolchain, moduleId, hostTargetCPU, diagOS)) {
     return failure();
+  }
 
   if (!artifacts.repackFatObj(*toolchain, moduleId, hostTargetCPU,
-                              outputFile.getFilename(), diagOS))
+                              outputFile.getFilename(), diagOS)) {
     return failure();
+  }
   outputFile.keep();
   return success();
 }

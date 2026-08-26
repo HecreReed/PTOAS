@@ -6,6 +6,7 @@
 // INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
 // See LICENSE in the root of the software repository for the full text of the License.
 
+#include "PTO/Support/CodeConstants.h"
 #include "PTO/IR/PTO.h"
 #include "PTO/Transforms/Passes.h"
 
@@ -34,7 +35,7 @@ namespace {
 struct TrackedStore {
   Operation *op = nullptr;
   Value base;
-  SmallVector<Value, 2> indices;
+  SmallVector<Value, mlir::pto::kValue2> indices;
   Value mask;
   Value value;
 };
@@ -55,20 +56,27 @@ static bool areEquivalentValueRanges(ArrayRef<Value> lhs, ArrayRef<Value> rhs) {
 }
 
 static bool areEquivalentOperations(Operation *lhs, Operation *rhs) {
-  if (!lhs || !rhs)
+  if (!lhs || !rhs) {
     return false;
-  if (lhs->getName() != rhs->getName())
+  }
+  if (lhs->getName() != rhs->getName()) {
     return false;
-  if (lhs->getNumRegions() != 0 || rhs->getNumRegions() != 0)
+  }
+  if (lhs->getNumRegions() != 0 || rhs->getNumRegions() != 0) {
     return false;
-  if (lhs->getNumResults() != rhs->getNumResults())
+  }
+  if (lhs->getNumResults() != rhs->getNumResults()) {
     return false;
-  if (lhs->getNumOperands() != rhs->getNumOperands())
+  }
+  if (lhs->getNumOperands() != rhs->getNumOperands()) {
     return false;
-  if (lhs->getAttrDictionary() != rhs->getAttrDictionary())
+  }
+  if (lhs->getAttrDictionary() != rhs->getAttrDictionary()) {
     return false;
-  if (!llvm::equal(lhs->getResultTypes(), rhs->getResultTypes()))
+  }
+  if (!llvm::equal(lhs->getResultTypes(), rhs->getResultTypes())) {
     return false;
+  }
 
   if (auto lhsDim = dyn_cast<memref::DimOp>(lhs)) {
     auto rhsDim = cast<memref::DimOp>(rhs);
@@ -78,19 +86,23 @@ static bool areEquivalentOperations(Operation *lhs, Operation *rhs) {
 
   for (auto [lhsOperand, rhsOperand] :
        llvm::zip(lhs->getOperands(), rhs->getOperands())) {
-    if (!areEquivalentValues(lhsOperand, rhsOperand))
+    if (!areEquivalentValues(lhsOperand, rhsOperand)) {
       return false;
+    }
   }
   return true;
 }
 
 static bool areEquivalentValues(Value lhs, Value rhs) {
-  if (lhs == rhs)
+  if (lhs == rhs) {
     return true;
-  if (!lhs || !rhs)
+  }
+  if (!lhs || !rhs) {
     return false;
-  if (lhs.getType() != rhs.getType())
+  }
+  if (lhs.getType() != rhs.getType()) {
     return false;
+  }
 
   auto lhsArg = dyn_cast<BlockArgument>(lhs);
   auto rhsArg = dyn_cast<BlockArgument>(rhs);
@@ -111,22 +123,25 @@ static bool isPureNoRegionOp(Operation *op) {
 }
 
 static bool isSupportedLoopPreludeOp(Operation *op) {
-  if (isa<pto::UvldOp>(op))
+  if (isa<pto::UvldOp>(op)) {
     return true;
+  }
   return isPureNoRegionOp(op);
 }
 
 static bool isSupportedLeafOp(Operation *op) {
-  if (isa<pto::VldsOp, pto::VstsOp>(op))
+  if (isa<pto::VldsOp, pto::VstsOp>(op)) {
     return true;
+  }
   return isPureNoRegionOp(op);
 }
 
 static Value getCanonicalTrackedValue(Value value) {
   while (value) {
     Operation *def = value.getDefiningOp();
-    if (!def)
+    if (!def) {
       break;
+    }
 
     if (auto tileBufAddr = dyn_cast<pto::TileBufAddrOp>(def)) {
       value = tileBufAddr.getSrc();
@@ -177,8 +192,9 @@ static Value getCanonicalTrackedValue(Value value) {
       continue;
     }
     if (auto cast = dyn_cast<UnrealizedConversionCastOp>(def)) {
-      if (cast.getInputs().empty())
+      if (cast.getInputs().empty()) {
         break;
+      }
       if (auto result = dyn_cast<OpResult>(value)) {
         unsigned resultNumber = result.getResultNumber();
         if (resultNumber < cast.getInputs().size()) {
@@ -197,36 +213,43 @@ static Value getCanonicalTrackedValue(Value value) {
 }
 
 static Operation *getTopLevelAncestorInBlock(Operation *op, Block *block) {
-  for (Operation *cur = op; cur; cur = cur->getParentOp())
-    if (cur->getBlock() == block)
+  for (Operation *cur = op; cur; cur = cur->getParentOp()) {
+    if (cur->getBlock() == block) {
       return cur;
+    }
+  }
   return nullptr;
 }
 
 static Region *getDirectRegionUnderAncestor(Operation *op, Operation *ancestor) {
   for (Operation *cur = op; cur; cur = cur->getParentOp()) {
     Operation *parent = cur->getParentOp();
-    if (parent == ancestor)
+    if (parent == ancestor) {
       return cur->getBlock() ? cur->getBlock()->getParent() : nullptr;
+    }
   }
   return nullptr;
 }
 
 static bool areMutuallyExclusiveByIfRegion(Operation *lhs, Operation *rhs) {
-  if (!lhs || !rhs)
+  if (!lhs || !rhs) {
     return false;
+  }
 
   for (Operation *ancestor = lhs; ancestor; ancestor = ancestor->getParentOp()) {
     auto ifOp = dyn_cast<scf::IfOp>(ancestor);
-    if (!ifOp)
+    if (!ifOp) {
       continue;
+    }
 
     Region *lhsRegion = getDirectRegionUnderAncestor(lhs, ifOp);
     Region *rhsRegion = getDirectRegionUnderAncestor(rhs, ifOp);
-    if (!lhsRegion || !rhsRegion)
+    if (!lhsRegion || !rhsRegion) {
       continue;
-    if (lhsRegion != rhsRegion)
+    }
+    if (lhsRegion != rhsRegion) {
       return true;
+    }
   }
 
   return false;
@@ -236,8 +259,9 @@ static std::optional<FusionRegionStoreContext>
 buildFusionRegionStoreContext(pto::FusionRegionOp fusionRegion) {
   Block &body = fusionRegion.getBody().front();
   auto yieldOp = dyn_cast<pto::YieldOp>(body.getTerminator());
-  if (!yieldOp)
+  if (!yieldOp) {
     return std::nullopt;
+  }
 
   FusionRegionStoreContext context;
   context.body = &body;
@@ -246,44 +270,51 @@ buildFusionRegionStoreContext(pto::FusionRegionOp fusionRegion) {
 
   for (Value yielded : yieldOp.getValues()) {
     Value canonical = getCanonicalTrackedValue(yielded);
-    if (canonical)
+    if (canonical) {
       context.yieldedValues.insert(canonical);
+    }
   }
 
   return context;
 }
 
 static bool isSupportedLoopRoot(scf::ForOp loop) {
-  if (!loop)
+  if (!loop) {
     return false;
+  }
   return isa<pto::FusionRegionOp, pto::VecScopeOp, pto::StrictVecScopeOp>(
       loop->getParentOp());
 }
 
 static Block *getLeafLoopBody(scf::ForOp carrierLoop) {
-  if (!carrierLoop)
+  if (!carrierLoop) {
     return nullptr;
+  }
 
   scf::ForOp currentLoop = carrierLoop;
   while (currentLoop) {
-    SmallVector<Operation *, 8> bodyOps;
+    SmallVector<Operation *, mlir::pto::kValue8> bodyOps;
     scf::ForOp innerLoop;
     for (Operation &op : currentLoop.getBody()->without_terminator()) {
       bodyOps.push_back(&op);
       if (auto loop = dyn_cast<scf::ForOp>(op)) {
-        if (innerLoop)
+        if (innerLoop) {
           return nullptr;
+        }
         innerLoop = loop;
       }
     }
 
     if (!innerLoop) {
       Block *leafBody = currentLoop.getBody();
-      if (!leafBody)
+      if (!leafBody) {
         return nullptr;
-      for (Operation &op : leafBody->without_terminator())
-        if (!isSupportedLeafOp(&op))
+      }
+      for (Operation &op : leafBody->without_terminator()) {
+        if (!isSupportedLeafOp(&op)) {
           return nullptr;
+        }
+      }
       return leafBody;
     }
 
@@ -293,8 +324,9 @@ static Block *getLeafLoopBody(scf::ForOp carrierLoop) {
         seenInnerLoop = true;
         continue;
       }
-      if (seenInnerLoop || !isSupportedLoopPreludeOp(op))
+      if (seenInnerLoop || !isSupportedLoopPreludeOp(op)) {
         return nullptr;
+      }
     }
 
     currentLoop = innerLoop;
@@ -304,9 +336,11 @@ static Block *getLeafLoopBody(scf::ForOp carrierLoop) {
 }
 
 static bool isSupportedStraightLineBlock(Block &body) {
-  for (Operation &op : body.without_terminator())
-    if (!isSupportedLeafOp(&op))
+  for (Operation &op : body.without_terminator()) {
+    if (!isSupportedLeafOp(&op)) {
       return false;
+    }
+  }
   return true;
 }
 
@@ -314,26 +348,31 @@ static Value inferVPTOLoadUserMask(pto::VldsOp load) {
   Value inferredMask;
   for (OpOperand &use : load.getResult().getUses()) {
     Operation *owner = use.getOwner();
-    if (!owner || owner->getNumRegions() != 0)
+    if (!owner || owner->getNumRegions() != 0) {
       return Value();
+    }
 
     Value ownerMask;
     for (Value operand : owner->getOperands()) {
-      if (!isa<pto::MaskType>(operand.getType()))
+      if (!isa<pto::MaskType>(operand.getType())) {
         continue;
-      if (!ownerMask)
+      }
+      if (!ownerMask) {
         ownerMask = operand;
-      else if (!areEquivalentMaskValues(ownerMask, operand))
+      } else if (!areEquivalentMaskValues(ownerMask, operand)) {
         return Value();
+      }
     }
 
-    if (!ownerMask)
+    if (!ownerMask) {
       return Value();
+    }
 
-    if (!inferredMask)
+    if (!inferredMask) {
       inferredMask = ownerMask;
-    else if (!areEquivalentMaskValues(inferredMask, ownerMask))
+    } else if (!areEquivalentMaskValues(inferredMask, ownerMask)) {
       return Value();
+    }
   }
   return inferredMask;
 }
@@ -367,20 +406,24 @@ static bool shouldElideTailStore(
     Operation *scopeOp,
     const llvm::SmallPtrSetImpl<Operation *> &scheduledForErase) {
   Value canonicalBase = getCanonicalTrackedValue(store.base);
-  if (!canonicalBase)
+  if (!canonicalBase) {
     return false;
+  }
   Operation *localScopeOp = scopeOp ? scopeOp : store.op;
-  if (!localScopeOp)
+  if (!localScopeOp) {
     return false;
+  }
   // Yielded frontier is still region-observable in v1, so its final
   // materializing store must be preserved even if there is no reload.
-  if (context.yieldedValues.contains(canonicalBase))
+  if (context.yieldedValues.contains(canonicalBase)) {
     return false;
+  }
 
   for (OpOperand &use : canonicalBase.getUses()) {
     Operation *owner = use.getOwner();
-    if (!owner || scheduledForErase.contains(owner))
+    if (!owner || scheduledForErase.contains(owner)) {
       continue;
+    }
     if (context.regionOp->isProperAncestor(owner)) {
       // Uses nested under the current carrier loop are fine: erasing the tail
       // store only affects memory materialization, while SSA users still
@@ -388,15 +431,19 @@ static bool shouldElideTailStore(
       // fusion region may still require the buffer to stay materialized, so
       // keep the store.
       Operation *topLevelUser = getTopLevelAncestorInBlock(owner, context.body);
-      if (!topLevelUser)
+      if (!topLevelUser) {
         return false;
-      if (scheduledForErase.contains(topLevelUser))
+      }
+      if (scheduledForErase.contains(topLevelUser)) {
         continue;
-      if (topLevelUser == localScopeOp)
+      }
+      if (topLevelUser == localScopeOp) {
         continue;
+      }
       if (localScopeOp->getBlock() == topLevelUser->getBlock() &&
-          localScopeOp->isBeforeInBlock(topLevelUser))
+          localScopeOp->isBeforeInBlock(topLevelUser)) {
         return false;
+      }
       continue;
     }
 
@@ -405,30 +452,35 @@ static bool shouldElideTailStore(
     Operation *topLevelUser =
         getTopLevelAncestorInBlock(owner, context.parentBlock);
     if (!topLevelUser) {
-      if (areMutuallyExclusiveByIfRegion(localScopeOp, owner))
+      if (areMutuallyExclusiveByIfRegion(localScopeOp, owner)) {
         continue;
+      }
       return false;
     }
-    if (scheduledForErase.contains(topLevelUser))
+    if (scheduledForErase.contains(topLevelUser)) {
       continue;
-    if (topLevelUser == context.regionOp)
+    }
+    if (topLevelUser == context.regionOp) {
       continue;
-    if (context.regionOp->isBeforeInBlock(topLevelUser))
+    }
+    if (context.regionOp->isBeforeInBlock(topLevelUser)) {
       return false;
+    }
   }
   return true;
 }
 
 static bool elideLoadStoreRoundTripsInLeafBody(
     Block &body, const FusionRegionStoreContext *context, Operation *scopeOp) {
-  SmallVector<Operation *, 8> eraseOrder;
-  llvm::SmallPtrSet<Operation *, 8> scheduledForErase;
-  SmallVector<TrackedStore, 8> trackedStores;
+  SmallVector<Operation *, mlir::pto::kValue8> eraseOrder;
+  llvm::SmallPtrSet<Operation *, mlir::pto::kValue8> scheduledForErase;
+  SmallVector<TrackedStore, mlir::pto::kValue8> trackedStores;
   bool changed = false;
 
-  auto scheduleErase = [&](Operation *op) {
-    if (scheduledForErase.insert(op).second)
+  auto scheduleErase = [&eraseOrder, &scheduledForErase](Operation *op) {
+    if (scheduledForErase.insert(op).second) {
       eraseOrder.push_back(op);
+    }
   };
 
   for (Operation &op : body.without_terminator()) {
@@ -444,7 +496,7 @@ static bool elideLoadStoreRoundTripsInLeafBody(
 
       Value base = load.getSource();
       Value offset = load.getOffset();
-      SmallVector<Value, 4> loadIndices{offset};
+      SmallVector<Value, mlir::pto::kValue4> loadIndices{offset};
       int matchIndex =
           findTrackedStoreIndex(trackedStores, base, loadIndices, inferredMask);
       if (matchIndex >= 0) {
@@ -461,7 +513,7 @@ static bool elideLoadStoreRoundTripsInLeafBody(
       Value base = store.getDestination();
       Value offset = store.getOffset();
       Value mask = store.getMask();
-      SmallVector<Value, 4> storeIndices{offset};
+      SmallVector<Value, mlir::pto::kValue4> storeIndices{offset};
       int matchIndex =
           findTrackedStoreIndex(trackedStores, base, storeIndices, mask);
       if (matchIndex >= 0) {
@@ -480,21 +532,24 @@ static bool elideLoadStoreRoundTripsInLeafBody(
       continue;
     }
 
-    if (!isPureNoRegionOp(&op))
+    if (!isPureNoRegionOp(&op)) {
       trackedStores.clear();
+    }
   }
 
   if (context) {
     for (const TrackedStore &store : trackedStores) {
-      if (!shouldElideTailStore(store, *context, scopeOp, scheduledForErase))
+      if (!shouldElideTailStore(store, *context, scopeOp, scheduledForErase)) {
         continue;
+      }
       scheduleErase(store.op);
       changed = true;
     }
   }
 
-  for (Operation *op : eraseOrder)
+  for (Operation *op : eraseOrder) {
     op->erase();
+  }
   return changed;
 }
 
@@ -506,8 +561,9 @@ struct PTOFusionLoadStoreElisionPass
 
   void runOnOperation() override {
     func::FuncOp func = getOperation();
-    if (func.isExternal())
+    if (func.isExternal()) {
       return;
+    }
 
     bool changed = false;
 
@@ -515,32 +571,38 @@ struct PTOFusionLoadStoreElisionPass
     func.walk([&](pto::FusionRegionOp fusionRegion) {
       std::optional<FusionRegionStoreContext> context =
           buildFusionRegionStoreContext(fusionRegion);
-      if (!context)
+      if (!context) {
         return;
+      }
       regionContexts.try_emplace(fusionRegion.getOperation(),
                                  std::move(*context));
     });
 
     func.walk([&](pto::FusionRegionOp fusionRegion) {
       auto it = regionContexts.find(fusionRegion.getOperation());
-      if (it == regionContexts.end())
+      if (it == regionContexts.end()) {
         return;
+      }
 
       Block &body = fusionRegion.getBody().front();
-      if (!isSupportedStraightLineBlock(body))
+      if (!isSupportedStraightLineBlock(body)) {
         return;
+      }
 
       changed |= elideLoadStoreRoundTripsInLeafBody(body, &it->second, nullptr);
     });
 
-    auto runElisionForLeafBody = [&](Block *leafBody, Operation *scopeOp,
-                                     pto::FusionRegionOp fusionRegion) {
-      if (!leafBody || !fusionRegion)
+    auto runElisionForLeafBody = [&changed, &regionContexts](
+                                        Block *leafBody, Operation *scopeOp,
+                                        pto::FusionRegionOp fusionRegion) {
+      if (!leafBody || !fusionRegion) {
         return;
+      }
 
       auto it = regionContexts.find(fusionRegion.getOperation());
-      if (it == regionContexts.end())
+      if (it == regionContexts.end()) {
         return;
+      }
 
       changed |=
           elideLoadStoreRoundTripsInLeafBody(*leafBody, &it->second, scopeOp);
@@ -548,28 +610,32 @@ struct PTOFusionLoadStoreElisionPass
 
     func.walk([&](pto::VecScopeOp vecscope) {
       if (auto fusionRegion = vecscope->getParentOfType<pto::FusionRegionOp>()) {
-        if (isSupportedStraightLineBlock(vecscope.getBody().front()))
+        if (isSupportedStraightLineBlock(vecscope.getBody().front())) {
           runElisionForLeafBody(&vecscope.getBody().front(), vecscope,
                                 fusionRegion);
+        }
       }
     });
     func.walk([&](pto::StrictVecScopeOp vecscope) {
       if (auto fusionRegion = vecscope->getParentOfType<pto::FusionRegionOp>()) {
-        if (isSupportedStraightLineBlock(vecscope.getBody().front()))
+        if (isSupportedStraightLineBlock(vecscope.getBody().front())) {
           runElisionForLeafBody(&vecscope.getBody().front(), vecscope,
                                 fusionRegion);
+        }
       }
     });
 
     func.walk([&](scf::ForOp loop) {
-      if (!isSupportedLoopRoot(loop))
+      if (!isSupportedLoopRoot(loop)) {
         return;
+      }
       runElisionForLeafBody(getLeafLoopBody(loop), loop.getOperation(),
                             loop->getParentOfType<pto::FusionRegionOp>());
     });
 
-    if (!changed)
+    if (!changed) {
       markAllAnalysesPreserved();
+    }
   }
 };
 

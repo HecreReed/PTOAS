@@ -6,6 +6,7 @@
 // INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
 // See LICENSE in the root of the software repository for the full text of the License.
 
+#include "PTO/Support/CodeConstants.h"
 #include "PTO/IR/PTO.h"
 #include "PTO/Transforms/Passes.h"
 
@@ -47,7 +48,7 @@ struct GroupSpanMember {
 struct GroupSpan {
   Block *block = nullptr;
   int64_t groupId = -1;
-  SmallVector<GroupSpanMember, 8> members;
+  SmallVector<GroupSpanMember, mlir::pto::kValue8> members;
 };
 
 static bool isTileType(Type type) {
@@ -58,8 +59,9 @@ static bool isDpsInitOperand(OpOperand &operand) {
   Operation *owner = operand.getOwner();
   if (auto dpsIface = dyn_cast<pto::PTO_DpsInitOpInterface>(owner)) {
     for (OpOperand &init : dpsIface.getDpsInitsMutable()) {
-      if (&init == &operand)
+      if (&init == &operand) {
         return true;
+      }
     }
   }
   return false;
@@ -76,19 +78,21 @@ static bool isTileInputOperand(OpOperand &operand) {
 // The last-use mask is indexed by tile operand slots only, in source operand
 // order after filtering out scalar operands. DPS init/output tile slots are
 // preserved and always materialize as 0.
-static SmallVector<OpOperand *, 4> collectTileOperands(Operation *op) {
-  SmallVector<OpOperand *, 4> tileOperands;
+static SmallVector<OpOperand *, mlir::pto::kValue4> collectTileOperands(Operation *op) {
+  SmallVector<OpOperand *, mlir::pto::kValue4> tileOperands;
   for (OpOperand &operand : op->getOpOperands()) {
-    if (isTileOperand(operand))
+    if (isTileOperand(operand)) {
       tileOperands.push_back(&operand);
+    }
   }
   return tileOperands;
 }
 
 static std::optional<int64_t> getRequiredI64Attr(Operation *op,
                                                  StringRef attrName) {
-  if (auto attr = op->getAttrOfType<IntegerAttr>(attrName))
+  if (auto attr = op->getAttrOfType<IntegerAttr>(attrName)) {
     return attr.getInt();
+  }
   return std::nullopt;
 }
 
@@ -105,8 +109,9 @@ collectGroupSpansInBlock(Block &block, SmallVectorImpl<GroupSpan> &spans) {
   GroupSpan current;
 
   auto flush = [&]() -> LogicalResult {
-    if (current.members.empty())
+    if (current.members.empty()) {
       return success();
+    }
 
     current.block = &block;
     auto [it, inserted] =
@@ -138,8 +143,9 @@ collectGroupSpansInBlock(Block &block, SmallVectorImpl<GroupSpan> &spans) {
         // different group.
         continue;
       }
-      if (failed(flush()))
+      if (failed(flush())) {
         return failure();
+      }
       continue;
     }
 
@@ -156,8 +162,9 @@ collectGroupSpansInBlock(Block &block, SmallVectorImpl<GroupSpan> &spans) {
     }
 
     if (current.groupId != *groupId) {
-      if (failed(flush()))
+      if (failed(flush())) {
         return failure();
+      }
       current.groupId = *groupId;
     }
 
@@ -175,17 +182,21 @@ collectGroupSpansInBlock(Block &block, SmallVectorImpl<GroupSpan> &spans) {
 
 static bool isSpanLocalLastUseCandidate(Value value, Operation *currentOp,
                                         Block *block) {
-  if (!value)
+  if (!value) {
     return false;
+  }
 
   for (OpOperand &use : value.getUses()) {
     Operation *user = use.getOwner();
-    if (user == currentOp)
+    if (user == currentOp) {
       continue;
-    if (user->getBlock() != block)
+    }
+    if (user->getBlock() != block) {
       return false;
-    if (currentOp->isBeforeInBlock(user))
+    }
+    if (currentOp->isBeforeInBlock(user)) {
       return false;
+    }
   }
   return true;
 }
@@ -193,55 +204,63 @@ static bool isSpanLocalLastUseCandidate(Value value, Operation *currentOp,
 static bool hasLaterUseAfterSpan(Value value, Operation *spanEnd, Block *block) {
   for (OpOperand &use : value.getUses()) {
     Operation *user = use.getOwner();
-    if (user->getBlock() != block)
+    if (user->getBlock() != block) {
       return true;
-    if (spanEnd->isBeforeInBlock(user))
+    }
+    if (spanEnd->isBeforeInBlock(user)) {
       return true;
+    }
   }
   return false;
 }
 
 static bool isHardSpanBarrier(Operation *op) {
-  if (op->hasTrait<OpTrait::IsTerminator>() || !op->getRegions().empty())
+  if (op->hasTrait<OpTrait::IsTerminator>() || !op->getRegions().empty()) {
     return true;
-  if (isa<CallOpInterface>(op))
+  }
+  if (isa<CallOpInterface>(op)) {
     return true;
+  }
   return false;
 }
 
 static bool hasHardBarrierInSpan(const GroupSpan &span) {
-  if (span.members.size() < 2)
+  if (span.members.size() < mlir::pto::kValue2) {
     return false;
+  }
   for (size_t i = 0; i + 1 < span.members.size(); ++i) {
     Operation *cur = span.members[i].op;
     Operation *next = span.members[i + 1].op;
     for (Operation *cursor = cur->getNextNode(); cursor && cursor != next;
          cursor = cursor->getNextNode()) {
-      if (isHardSpanBarrier(cursor))
+      if (isHardSpanBarrier(cursor)) {
         return true;
+      }
     }
   }
   return false;
 }
 
 static void markGroupSpanLastUse(const GroupSpan &span) {
-  if (span.members.empty())
+  if (span.members.empty()) {
     return;
+  }
 
-  if (hasHardBarrierInSpan(span))
+  if (hasHardBarrierInSpan(span)) {
     return;
+  }
 
   Block &block = *span.block;
   Operation *spanEnd = span.members.back().op;
   for (const GroupSpanMember &member : span.members) {
     Operation &op = *member.op;
-    SmallVector<OpOperand *, 4> tileOperands = collectTileOperands(&op);
+    SmallVector<OpOperand *, mlir::pto::kValue4> tileOperands = collectTileOperands(&op);
     if (tileOperands.empty()) {
       op.removeAttr(kLastUseAttrName);
       continue;
     }
 
-    SmallVector<int64_t, 8> lastUseMask;
+    SmallVector<int64_t, mlir::pto::kValue8> lastUseMask;
     lastUseMask.reserve(tileOperands.size());
     for (OpOperand *operand : tileOperands) {
       if (!isTileInputOperand(*operand)) {
@@ -264,16 +283,21 @@ static void markGroupSpanLastUse(const GroupSpan &span) {
 
 static LogicalResult markRegionLastUse(Region &region) {
   for (Block &block : region.getBlocks()) {
-    SmallVector<GroupSpan, 8> spans;
-    if (failed(collectGroupSpansInBlock(block, spans)))
+    SmallVector<GroupSpan, mlir::pto::kValue8> spans;
+    if (failed(collectGroupSpansInBlock(block, spans))) {
       return failure();
-    for (const GroupSpan &span : spans)
+    }
+    for (const GroupSpan &span : spans) {
       markGroupSpanLastUse(span);
+    }
 
-    for (Operation &op : block)
-      for (Region &nestedRegion : op.getRegions())
-        if (failed(markRegionLastUse(nestedRegion)))
+    for (Operation &op : block) {
+      for (Region &nestedRegion : op.getRegions()) {
+        if (failed(markRegionLastUse(nestedRegion))) {
           return failure();
+        }
+      }
+    }
   }
   return success();
 }
@@ -285,8 +309,9 @@ struct PTOMarkLastUsePass
 
   void runOnOperation() override {
     func::FuncOp func = getOperation();
-    if (func.isExternal())
+    if (func.isExternal()) {
       return;
+    }
 
     if (failed(markRegionLastUse(func.getRegion()))) {
       signalPassFailure();

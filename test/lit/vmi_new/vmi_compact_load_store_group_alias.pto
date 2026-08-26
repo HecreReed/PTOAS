@@ -19,6 +19,17 @@ module {
     return
   }
 
+  func.func @compact_1_after_addptr(%src: !pto.ptr<f32, ub>, %dst: !pto.ptr<f32, ub>,
+                                    %element: index) {
+    %zero = arith.constant 0 : index
+    %src_element = pto.addptr %src, %element : !pto.ptr<f32, ub> -> !pto.ptr<f32, ub>
+    %value = pto.vmi.vload %src_element[%zero]
+        : !pto.ptr<f32, ub> -> !pto.vmi.vreg<1xf32>
+    pto.vmi.vstore %value, %dst[%element]
+        : !pto.vmi.vreg<1xf32>, !pto.ptr<f32, ub>
+    return
+  }
+
   func.func @compact_2(%src: !pto.ptr<f32, ub>, %dst: !pto.ptr<f32, ub>,
                        %off: index) {
     %value = pto.vmi.vload %src[%off]
@@ -96,9 +107,17 @@ module {
 // LEGACY-SAME: {num_groups = 1 : i64}
 
 // LOWER-LABEL: func.func @compact_1(
-// LOWER: pto.pset_b32 "PAT_VL1"
-// LOWER: pto.vsldb
-// LOWER: pto.vsts
+// LOWER: pto.vlds {{.*}} {dist = "BRC_B32"}
+// LOWER: pto.pset_b32 "PAT_VL1" : !pto.mask<b32>
+// LOWER: pto.vsts {{.*}} {dist = "1PT_B32"} : !pto.vreg<64xf32>, !pto.ptr<f32, ub>, !pto.mask<b32>
+// LOWER-NOT: pto.vmi.
+
+// LOWER-LABEL: func.func @compact_1_after_addptr(
+// LOWER: %[[SRC_ELEMENT:.*]] = pto.addptr %arg0, %arg2
+// LOWER: pto.vlds %[[SRC_ELEMENT]][%{{.*}}] {dist = "BRC_B32"}
+// LOWER-NOT: pto.vsldb
+// LOWER: pto.pset_b32 "PAT_VL1" : !pto.mask<b32>
+// LOWER: pto.vsts {{.*}} {dist = "1PT_B32"} : !pto.vreg<64xf32>, !pto.ptr<f32, ub>, !pto.mask<b32>
 // LOWER-NOT: pto.vmi.
 
 
@@ -123,5 +142,6 @@ module {
 // LOWER-LABEL: func.func @compact_reduce_through_elementwise(
 // LOWER: pto.vcmax
 // LOWER: pto.vdiv
-// LOWER: pto.vsts
+// LOWER: pto.pset_b32 "PAT_VL1" : !pto.mask<b32>
+// LOWER: pto.vsts {{.*}} {dist = "1PT_B32"} : !pto.vreg<64xf32>, !pto.ptr<f32, ub>, !pto.mask<b32>
 // LOWER-NOT: pto.vmi.

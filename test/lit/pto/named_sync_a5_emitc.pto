@@ -1,0 +1,29 @@
+// Copyright (c) 2026 Huawei Technologies Co., Ltd.
+// This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+// CANN Open Software License Agreement Version 2.0 (the "License").
+// Please refer to the License for details. You may not use this file except in compliance with the License.
+// THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+// INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+// See LICENSE in the root of the software repository for the full text of the License.
+
+// RUN: ptoas --pto-arch=a5 %s 2>&1 | FileCheck %s
+
+module attributes {
+  pto.kernel_kind = #pto.kernel_kind<vector>,
+  pto.target_arch = "a5"
+} {
+  func.func @named_sync_a5_emitc() attributes {pto.kernel} {
+    pto.set_cross_block <PIPE_FIX>, 0
+    pto.wait_cross_block <PIPE_MTE3>, 0
+    pto.set_intra_block <PIPE_MTE1>, 17
+    pto.wait_intra_block <PIPE_V>, 17
+    return
+  }
+}
+
+// CHECK-LABEL: extern "C" __global__ AICORE void named_sync_a5_emitc() {
+// CHECK: getFFTSMsg(0, {{.*}})
+// CHECK: __builtin_cce_ffts_cross_core_sync(PIPE_FIX, {{.*}});
+// CHECK-NEXT: __builtin_cce_wait_flag_dev(0);
+// CHECK-NEXT: __builtin_cce_set_intra_block(PIPE_MTE1, 17);
+// CHECK-NEXT: __builtin_cce_wait_intra_block(PIPE_V, 17);

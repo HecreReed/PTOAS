@@ -31,6 +31,17 @@ class AmbiguousTemplate(Exception):
     pass
 
 
+def candidate_sort_key(descriptor):
+    """Return the deterministic legal-candidate reporting order.
+
+    Priority is the only selection rank. Name is a stable tie ordering for
+    diagnostics and non-winning candidates; a top-priority tie is still an
+    ambiguity and is rejected by ``select``.
+    """
+
+    return (-descriptor.metadata.priority, descriptor.name)
+
+
 class TileTemplateRegistry:
     def __init__(self):
         self._descriptors: list = []
@@ -82,7 +93,7 @@ class TileTemplateRegistry:
                 f"no legal template for op={op!r} target={target!r}; {reasons}"
             )
 
-        legal.sort(key=lambda d: d.metadata.priority, reverse=True)
+        legal.sort(key=candidate_sort_key)
         return legal
 
     def select(self, op: str, target: str, tile_specs: dict,
@@ -106,7 +117,9 @@ class TileTemplateRegistry:
         if len(winners) > 1:
             names = ", ".join(d.name for d in winners)
             raise AmbiguousTemplate(
-                f"multiple templates tie at priority {top_priority} for op={op!r} target={target!r}: {names}"
+                f"multiple templates tie at priority {top_priority} for op={op!r} "
+                f"target={target!r}: {names}; assign distinct priorities or make "
+                "their constraints mutually exclusive"
             )
         return legal[0]
 
@@ -127,7 +140,7 @@ def _load_default_templates(op: str, target: str) -> None:
     # Import lazily to avoid a registry/templates import cycle during package
     # initialization. The loader is cached and registers descriptors as a
     # module-import side effect.
-    from TileOps import load_template
+    from ._template_package import load_template
 
     load_template(op, target)
 
@@ -148,6 +161,7 @@ __all__ = [
     "TileTemplateRegistry",
     "NoMatchingTemplate",
     "AmbiguousTemplate",
+    "candidate_sort_key",
     "default_registry",
     "legal_candidates",
     "register",

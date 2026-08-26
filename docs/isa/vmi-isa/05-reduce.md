@@ -8,6 +8,7 @@
 > `vcadd` treats inactive as 0; `vcmax`/`vcmin` treat inactive as `-∞`/`+∞`
 > (fp) or type min/max (int).
 
+
 ---
 
 ## `pto.vmi.vcadd`
@@ -78,6 +79,7 @@
   %sums = pto.vmi.vcadd %x, %mask {group = 8}
       : !pto.vmi.vreg<256×f16>, !pto.vmi.mask<256> -> !pto.vmi.vreg<8×f16>
   ```
+
 
 ---
 

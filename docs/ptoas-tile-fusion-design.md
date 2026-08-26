@@ -199,11 +199,12 @@ PTO 指令在 Davinci 架构上以 Unified Buffer（UB）中驻留的数据块�
 
 #### 4.2.1 生效条件
 
-融合仅在 `tools/ptoas/ptoas.cpp` 的 A5 VPTO 后端主线上生效，需同时满足以下全部条件：
+融合仅在 `tools/ptoas/ptoas.cpp` 的 A5 EmitC 或 VPTO 后端主线上生效，需同时满足以下全部条件：
 
-- `--pto-backend=vpto`
+- `--pto-backend=emitc` 或 `--pto-backend=vpto`
 - `--pto-arch=a5`
-- `--enable-op-fusion` 未显式设置时默认开启；可通过 `--enable-op-fusion=false` 关闭
+- `--pto-level=level2` 或 `--pto-level=level3`
+- 显式传入 `--enable-op-fusion=true`；未设置或传入 `false` 时均保持关闭
 
 迭代域推导由 `--enable-shape-inference` 开关控制（同样作用于 EmitC 后端的
 `FusionPlan`）：
@@ -279,8 +280,7 @@ pipeline/input，不在 `RegionGen` 中静默修复。
 
 #### 4.2.4 非目标路径
 
-- EmitC 后端会忽略 `--enable-op-fusion`。
-- 显式传入 `--enable-op-fusion=false` 时，普通 VPTO 路径不会形成 `pto.fusion_region`，也不会进入 post-lowering 融合生命周期。
+- 未显式传入 `--enable-op-fusion=true` 时，EmitC 不生成 `pto.last_use`，VPTO 不形成 `pto.fusion_region`，两条路径均不进入 TileOp fusion 生命周期。
 - 后端分界线已固定为 `ExpandTileOp`；原有的 `View2Memref` / `PTOToA5VM` 主线已移除。
 
 ---

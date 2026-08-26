@@ -57,7 +57,7 @@ def build():
 
                 pto.TLoadOp(None, sv0, tb0)
                 mp = pto.MaskPatternAttr.get(pto.MaskPattern.P1111, ctx)
-                pto.TGatherOp(tb0, tb1, maskPattern=mp)
+                pto.TGatherOp(tb0, tb1, maskPattern=mp, axis="row")
 
                 sv1 = pto.PartitionViewOp(tile_view_f32, tv1, offsets=[c0, c0], sizes=[c32, c32]).result
                 pto.TStoreOp(None, tb1, sv1)

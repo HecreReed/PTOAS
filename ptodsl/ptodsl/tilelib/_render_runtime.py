@@ -69,7 +69,7 @@ class _TemplateTile(TileValue):
         )
         # Force the dynamic valid-shape ops to match the tilelang render.
         self.static_valid_shape = None
-        self._valid_shape._cache.clear()
+        self._valid_shape_cache.clear()
         self._template_static_valid_shape = tuple(spec.valid_shape or spec.shape)
         self._template_config = _TemplateTileConfig(
             b_layout=spec.b_layout,
@@ -176,9 +176,15 @@ class _TemplateTrace(TracingRuntime):
         rewritten(*args)
 
     # Custom golden-shaped container: single module(target_arch) + func(instance, kernel_kind).
-    def build_module(self):
-        ctx = make_context()
-        with ctx, Location.unknown():
+    def build_standalone_module(self):
+        """Build a module in a fresh context for standalone PTODSL use."""
+        return self.build_module_in_context(make_context())
+
+    def build_module_in_context(self, context):
+        """Build a compiler-owned source module in the explicit context."""
+        if context is None:
+            raise TypeError("compiler materialization requires an explicit context")
+        with context, Location.unknown():
             arg_types = list(self.compute_argument_types())
             module, ir_fn = self._create_instance_module(arg_types)
             session = self.create_session(module, ir_fn)
@@ -192,6 +198,10 @@ class _TemplateTrace(TracingRuntime):
                 self.finalize_session(session)
                 session.validate_final_state()
             self.verify_module(module)
+            if module.context is not context:
+                raise RuntimeError(
+                    "TileLib materialization returned a module from a different context"
+                )
             return module
 
     def _create_instance_module(self, arg_types):

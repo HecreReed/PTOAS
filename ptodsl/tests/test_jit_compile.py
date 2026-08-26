@@ -9,20 +9,27 @@
 
 from dataclasses import replace
 from pathlib import Path
+import inspect
 import os
 import re
+import subprocess
 import sys
 from tempfile import TemporaryDirectory
 from importlib.util import module_from_spec, spec_from_file_location
 from typing import Optional
 from unittest import mock
 
+# Prefer the build-tree MLIR Python bindings during CMake/CTest runs.  An
+# editable scikit-build install otherwise redirects ptoas.mlir imports to the
+# previously installed generated bindings, which can miss newly added ops.
+sys.meta_path[:] = [finder for finder in sys.meta_path if "editable" not in repr(finder).lower()]
 
 from ptodsl import pto, scalar
 from ptodsl import _types as pto_types
 import ptodsl._vmi_namespace as vmi_namespace
 from ptodsl._ast_rewrite import PTODSLAstRewriteError
 from ptodsl._context import make_context
+from ptodsl._cache_signature import cache_signature_atom
 from ptodsl._kernel_signature import DeviceParameterSpec, HelperMarkerParameterSpec, RuntimeScalarParameterSpec
 from ptodsl._tracing.runtime import SignatureTracingRuntime
 from ptodsl._runtime import native_build as native_build_runtime
@@ -31,6 +38,585 @@ from ptodsl._runtime.codegen import generate_launch_cpp
 from ptodsl._runtime.launch import _marshal_launch_args
 from ptodsl._tracing import current_session
 from ptoas.mlir.ir import InsertionPoint, Location, Module
+
+
+@pto.jit(target='a5')
+def ast_nested_partial_assign_entry_isolated_probe(cond3: pto.i1, cond1: pto.i1):
+    # Sibling branch isolation: the outer then-branch rebinds lo_bits before the
+    # inner conditional is traced, so the inner else (which never assigns lo_bits)
+    # must still fall back to the value captured before the outer if.
+    lo_bits = pto.const(0, dtype=pto.ui32)
+    hi_bits = pto.const(0x40000000, dtype=pto.ui32)
+
+    q1_bits = pto.const(0x10000000, dtype=pto.ui32)
+    q2_bits = pto.const(0x20000000, dtype=pto.ui32)
+
+    if cond3:
+        lo_bits = q2_bits
+    else:
+        if cond1:
+            lo_bits = q1_bits
+            hi_bits = q2_bits
+        # else: lo_bits/hi_bits must remain at their pre-if values.
+
+    _ = hi_bits
+    _ = lo_bits
+
+
+@pto.jit(target='a5')
+def ast_nested_partial_assign_loop_carry_probe(
+    rows: pto.i32,
+    cond3: pto.i1,
+    cond2: pto.i1,
+    cond1: pto.i1,
+):
+    # Issue 1252 structure: three nested conditionals inside a runtime loop,
+    # where the innermost else only assigns hi_bits. On that path lo_bits must
+    # remain the loop-carried value from the previous iteration.
+    lo_bits = pto.const(0, dtype=pto.ui32)
+    hi_bits = pto.const(0x40000000, dtype=pto.ui32)
+
+    q1_bits = pto.const(0x10000000, dtype=pto.ui32)
+    q2_bits = pto.const(0x20000000, dtype=pto.ui32)
+    q3_bits = pto.const(0x30000000, dtype=pto.ui32)
+
+    for _ in range(rows):
+        if cond3:
+            lo_bits = q3_bits
+        else:
+            if cond2:
+                lo_bits = q2_bits
+                hi_bits = q3_bits
+            else:
+                if cond1:
+                    lo_bits = q1_bits
+                    hi_bits = q2_bits
+                else:
+                    hi_bits = q1_bits  # lo_bits must remain unchanged
+
+    _ = hi_bits
+    _ = lo_bits
+
+
+@pto.jit(target='a5')
+def ast_nested_partial_assign_slot_entry_isolated_probe(cond3: pto.i1, cond1: pto.i1):
+    # Static-subscript analogue of the entry isolation probe: the slot value is
+    # rewritten into a shared Python temporary, so the same sibling pollution
+    # would leak unless the temporary is restored at each branch entry.
+    zero = pto.const(0, dtype=pto.ui32)
+    q1_bits = pto.const(0x10000000, dtype=pto.ui32)
+    q2_bits = pto.const(0x20000000, dtype=pto.ui32)
+
+    values = [zero]
+    if cond3:
+        values[0] = q2_bits
+    else:
+        if cond1:
+            values[0] = q1_bits
+        # else: values[0] must remain at its pre-if value.
+
+    out = values[0]
+    _ = out
+
+
+@pto.jit(target='a5')
+def ast_unbound_partial_liveout_loop_probe(rows: pto.i32, cond: pto.i1):
+    # value is never bound before the loop, so it must stay on the
+    # last-iteration-only diagnostics path instead of becoming an implicit carry.
+    for _ in range(rows):
+        if cond:
+            value = 0
+    _ = value
+
+
+@pto.jit(target='a5')
+def ast_unbound_partial_liveout_controlled_loop_probe(rows: pto.i32, cond: pto.i1, stop: pto.i1):
+    # break/continue/for-else loops must apply the same definite-binding gate.
+    one = pto.const(1, dtype=pto.i32)
+    for _ in range(rows):
+        if cond:
+            value = one
+        if stop:
+            break
+    _ = value
+
+
+@pto.jit(target='a5')
+def ast_param_bound_partial_liveout_loop_probe(rows: pto.i32, cond: pto.i1, value: pto.i32):
+    one = pto.const(1, dtype=pto.i32)
+    for _ in range(rows):
+        if cond:
+            value = one
+    _ = value
+
+
+@pto.jit(target='a5')
+def ast_outer_bound_partial_liveout_loop_probe(rows: pto.i32, cond: pto.i1, outer: pto.i1):
+    one = pto.const(1, dtype=pto.i32)
+    zero = pto.const(0, dtype=pto.i32)
+    value = zero
+    if outer:
+        for _ in range(rows):
+            if cond:
+                value = one
+    _ = value
+
+
+@pto.jit(target='a5')
+def ast_both_branch_bound_partial_liveout_loop_probe(rows: pto.i32, cond: pto.i1, choose: pto.i1):
+    one = pto.const(1, dtype=pto.i32)
+    zero = pto.const(0, dtype=pto.i32)
+    if choose:
+        value = zero
+    else:
+        value = one
+    for _ in range(rows):
+        if cond:
+            value = one
+    _ = value
+
+
+@pto.jit(target='a5')
+def ast_slot_partial_assign_loop_carry_probe(rows: pto.i32, cond: pto.i1):
+    zero = pto.const(0, dtype=pto.ui32)
+    one = pto.const(1, dtype=pto.ui32)
+    values = [zero]
+    for _ in range(rows):
+        if cond:
+            values[0] = one
+    _ = values[0]
+
+
+@pto.jit(target='a5', backend='vpto', mode='explicit')
+def ast_with_entry_bound_partial_liveout_probe(rows: pto.i32, cond: pto.i1, value: pto.i32):
+    # A function parameter must remain definitely bound inside a vecscope body.
+    one = pto.const(1, dtype=pto.i32)
+    with pto.vecscope():
+        for _ in range(rows):
+            if cond:
+                value = one
+        _ = value
+    _ = value
+
+
+@pto.jit(target='a5', backend='vpto', mode='explicit')
+def ast_with_body_bound_partial_liveout_probe(rows: pto.i32, cond: pto.i1):
+    # A name bound inside the with body is definite after the with statement.
+    one = pto.const(1, dtype=pto.i32)
+    zero = pto.const(0, dtype=pto.i32)
+    with pto.vecscope():
+        value = zero
+    for _ in range(rows):
+        if cond:
+            value = one
+    _ = value
+
+
+@pto.jit(target='a5', backend='vpto', mode='explicit')
+def ast_with_as_bound_partial_liveout_probe(rows: pto.i32, cols: pto.i32, cond: pto.i1):
+    # The with-as target is definitely bound inside the body; an inner runtime
+    # loop that partially rebinds it must see it as a valid partial carry.
+    with pto.for_(0, rows, step=1) as value:
+        for replacement in range(cols):
+            if cond:
+                value = replacement
+        pto.wait_flag(pto.Pipe.V, pto.Pipe.MTE2, event_id=value)
+
+
+@pto.jit(target='a5', backend='vpto', mode='explicit')
+def ast_for_iv_bound_partial_liveout_probe(rows: pto.i32, cols: pto.i32, cond: pto.i1):
+    # The runtime for induction variable is bound at the top of its own body;
+    # an inner loop that partially rebinds it must see it as a valid carry.
+    for value in range(rows):
+        for replacement in range(cols):
+            if cond:
+                value = replacement
+        pto.wait_flag(pto.Pipe.V, pto.Pipe.MTE2, event_id=value)
+
+
+@pto.jit(target='a5', backend='vpto', mode='explicit')
+def ast_for_iv_augassign_probe(rows: pto.i32):
+    # Augmenting the induction variable must not infer it as a loop carry (it
+    # is re-bound at the top of every iteration) and must not read it before
+    # the loop is entered.
+    for value in range(rows):
+        value += 1
+        pto.wait_flag(pto.Pipe.V, pto.Pipe.MTE2, event_id=value)
+
+
+@pto.jit(target='a5', backend='vpto', mode='explicit')
+def ast_static_range_empty_orelse_partial_probe(rows: pto.i32, cond: pto.i1):
+    # An empty static range jumps straight to the else clause with the target
+    # unbound; the inner partial live-out must keep the explicit diagnostics.
+    for value in pto.static_range(0):
+        pass
+    else:
+        for replacement in range(rows):
+            if cond:
+                value = replacement
+        pto.wait_flag(pto.Pipe.V, pto.Pipe.MTE2, event_id=value)
+
+
+@pto.jit(target='a5', backend='vpto', mode='explicit')
+def ast_static_range_subscript_target_probe(rows: pto.i32):
+    # Non-Name static_range targets keep their trace-time semantics and must
+    # not crash the rewrite with an AttributeError.
+    zero = pto.const(0, dtype=pto.i32)
+    values = [zero]
+    for values[0] in pto.static_range(1):
+        pto.wait_flag(pto.Pipe.V, pto.Pipe.MTE2, event_id=values[0])
+    _ = values[0]
+
+
+def ast_static_range_nonempty_definite_gate_fn(rows, cond):
+    # Source-only helper for the rewrite-level gate assertion: the static_range
+    # target must be credited as definitely bound once it has run, so the later
+    # partial loop can carry the value without being rejected.
+    for value in pto.static_range(1):
+        pass
+    for replacement in range(rows):
+        if cond:
+            value = replacement
+    _ = value
+
+
+def ast_static_range_body_init_definite_gate_fn(rows, cond, seed):
+    for _ in pto.static_range(1):
+        value = seed
+    for replacement in range(rows):
+        if cond:
+            value = replacement
+    _ = value
+
+
+def ast_static_range_delete_target_gate_fn(rows, cond, seed):
+    value = seed
+    for value in pto.static_range(1):
+        del value
+    for replacement in range(rows):
+        if cond:
+            value = replacement
+    _ = value
+
+
+def ast_static_range_empty_orelse_init_gate_fn(rows, cond, seed):
+    for _ in pto.static_range(0):
+        pass
+    else:
+        value = seed
+    for replacement in range(rows):
+        if cond:
+            value = replacement
+    _ = value
+
+
+def ast_static_range_orelse_delete_gate_fn(rows, cond, seed):
+    value = seed
+    for _ in pto.static_range(1):
+        pass
+    else:
+        del value
+    for replacement in range(rows):
+        if cond:
+            value = replacement
+    _ = value
+
+
+@pto.jit(target='a5', backend='vpto', mode='explicit')
+def ast_del_then_partial_liveout_probe(rows: pto.i32, cond: pto.i1):
+    zero = pto.const(0, dtype=pto.i32)
+    one = pto.const(1, dtype=pto.i32)
+    value = zero
+    del value
+    for _ in range(rows):
+        if cond:
+            value = one
+    _ = value
+
+
+def _all_operations(operation):
+    yield operation
+    for region in operation.regions:
+        for block in region.blocks:
+            for nested in block.operations:
+                yield from _all_operations(nested)
+
+
+def _ui32_const_results(operation, value):
+    # The frontend materializes ui32 scalars as i32 constants wrapped in
+    # builtin.unrealized_conversion_cast ops, so match constants by value only.
+    results = []
+    for op in _all_operations(operation):
+        if op.operation.name == 'arith.constant':
+            attr = op.attributes['value']
+            if attr.value == value:
+                results.append(op.results[0])
+    return results
+
+
+def _cast_result_of_const(const_result):
+    # Resolve the ui32 value of a constant through its feeding conversion cast.
+    for use in const_result.uses:
+        user = getattr(use, 'owner', None)
+        if user is not None and user.operation.name == 'builtin.unrealized_conversion_cast':
+            return user.results[0]
+    return const_result
+
+
+def _same_ssa(a, b):
+    try:
+        return a == b
+    except Exception:
+        return str(a) == str(b)
+
+
+def _scf_if_count(block):
+    if_ops = [op for op in block.operations if op.operation.name == 'scf.if']
+    if not if_ops:
+        return 0
+    return 1 + _scf_if_count(if_ops[0].regions[1].blocks[0])
+
+
+def _innermost_else_yield_operands(block):
+    if_ops = [op for op in block.operations if op.operation.name == 'scf.if']
+    if not if_ops:
+        for op in block.operations:
+            if op.operation.name == 'scf.yield':
+                return list(op.operands)
+        return []
+    return _innermost_else_yield_operands(if_ops[0].regions[1].blocks[0])
+
+
+def _find_op(region, name):
+    for block in region.blocks:
+        for op in block.operations:
+            if op.operation.name == name:
+                return op
+    return None
+
+
+def _find_op_anywhere(operation, name):
+    for op in _all_operations(operation):
+        if op.operation.name == name:
+            return op
+    return None
+
+
+def _assert_ast_rewrite_nested_partial_assign_ssa_identity():
+    # Focused probe 1: sibling-tracing isolation without a loop.
+    isolated_text = ast_nested_partial_assign_entry_isolated_probe.compile().mlir_text()
+    expect_parse_roundtrip_and_verify(
+        isolated_text,
+        'AST-rewritten nested partial assignment entry isolation',
+    )
+    with make_context() as ctx:
+        isolated_module = Module.parse(isolated_text, ctx)
+        isolated_func = _find_op_anywhere(isolated_module.operation, 'func.func')
+        expect(isolated_func is not None, 'entry isolation probe should contain a func.func op')
+        func_block = isolated_func.regions[0].blocks[0]
+        zero_consts = _ui32_const_results(isolated_module.operation, 0)
+        expect(len(zero_consts) >= 1, 'entry isolation probe should materialize the pre-if 0 constant')
+        zero_value = _cast_result_of_const(zero_consts[0])
+        q2_consts = _ui32_const_results(isolated_module.operation, 0x20000000)
+        expect(len(q2_consts) >= 1, 'entry isolation probe should materialize the q2 constant')
+        expect(
+            _scf_if_count(func_block) == 2,
+            'entry isolation probe should contain two nested scf.if ops',
+        )
+        yield_operands = _innermost_else_yield_operands(func_block)
+        expect(len(yield_operands) == 2, 'innermost else should yield two values')
+        expect(
+            _same_ssa(yield_operands[1], zero_value),
+            'innermost else must yield the pre-if lo_bits value, not the sibling branch rebinding',
+        )
+        q2_cast = [_cast_result_of_const(q) for q in q2_consts]
+        expect(
+            not any(_same_ssa(yield_operands[1], q) for q in q2_cast),
+            'innermost else must not yield the sibling branch q2 value',
+        )
+
+    # Focused probe 2: the issue-1252 runtime loop structure.
+    loop_text = ast_nested_partial_assign_loop_carry_probe.compile().mlir_text()
+    expect_parse_roundtrip_and_verify(
+        loop_text,
+        'AST-rewritten issue-1252 nested partial assignment loop',
+    )
+    with make_context() as ctx:
+        loop_module = Module.parse(loop_text, ctx)
+        loop_func = _find_op_anywhere(loop_module.operation, 'func.func')
+        expect(loop_func is not None, 'issue-1252 probe should contain a func.func op')
+        for_op = _find_op(loop_func.regions[0], 'scf.for')
+        expect(for_op is not None, 'issue-1252 probe should lower to a runtime scf.for')
+        loop_body = for_op.regions[0].blocks[0]
+        arguments = list(loop_body.arguments)
+        expect(
+            len(arguments) == 3,
+            'scf.for should carry the induction variable plus two ui32 iter_args',
+        )
+        expect(
+            str(arguments[1].type) == 'ui32' and str(arguments[2].type) == 'ui32',
+            'both loop iter_args should be ui32',
+        )
+        expect(
+            _scf_if_count(loop_body) == 3,
+            'issue-1252 probe should contain three nested scf.if ops',
+        )
+        yield_operands = _innermost_else_yield_operands(loop_body)
+        expect(len(yield_operands) == 2, 'innermost else should yield two values')
+        expect(
+            _same_ssa(yield_operands[1], arguments[2]),
+            'innermost else must yield the lo_bits loop-carried block argument',
+        )
+        q2_consts = _ui32_const_results(loop_module.operation, 0x20000000)
+        q2_cast = [_cast_result_of_const(q) for q in q2_consts]
+        expect(
+            not any(_same_ssa(yield_operands[1], q) for q in q2_cast),
+            'innermost else must not yield the sibling branch q2 constant',
+        )
+        init_operands = list(for_op.operands)[3:]
+        expect(len(init_operands) == 2, 'scf.for should have exactly two iter_arg init operands')
+        hi_consts = _ui32_const_results(loop_module.operation, 0x40000000)
+        lo_consts = _ui32_const_results(loop_module.operation, 0)
+        expect(
+            hi_consts and _same_ssa(init_operands[0], _cast_result_of_const(hi_consts[0])),
+            'first iter_arg should be hi_bits initialized to 0x40000000',
+        )
+        expect(
+            lo_consts and _same_ssa(init_operands[1], _cast_result_of_const(lo_consts[0])),
+            'second iter_arg should be lo_bits initialized to 0',
+        )
+
+    # Focused probe 3: static-subscript partial assignment keeps the entry slot.
+    slot_text = ast_nested_partial_assign_slot_entry_isolated_probe.compile().mlir_text()
+    expect_parse_roundtrip_and_verify(
+        slot_text,
+        'AST-rewritten nested static-subscript partial assignment isolation',
+    )
+    with make_context() as ctx:
+        slot_module = Module.parse(slot_text, ctx)
+        slot_func = _find_op_anywhere(slot_module.operation, 'func.func')
+        expect(slot_func is not None, 'slot isolation probe should contain a func.func op')
+        slot_block = slot_func.regions[0].blocks[0]
+        zero_consts = _ui32_const_results(slot_module.operation, 0)
+        expect(len(zero_consts) >= 1, 'slot isolation probe should materialize the entry 0 constant')
+        zero_value = _cast_result_of_const(zero_consts[0])
+        q2_consts = _ui32_const_results(slot_module.operation, 0x20000000)
+        q2_cast = [_cast_result_of_const(q) for q in q2_consts]
+        expect(
+            _scf_if_count(slot_block) == 2,
+            'slot isolation probe should contain two nested scf.if ops',
+        )
+        slot_yield = _innermost_else_yield_operands(slot_block)
+        expect(len(slot_yield) == 1, 'innermost else of the slot probe should yield one value')
+        expect(
+            _same_ssa(slot_yield[0], zero_value),
+            'innermost else of the slot probe must yield the entry slot value',
+        )
+        expect(
+            not any(_same_ssa(slot_yield[0], q) for q in q2_cast),
+            'innermost else of the slot probe must not yield the sibling branch q2 value',
+        )
+
+    # Augmenting the induction variable must not invent a carry for it.
+    iv_augassign_text = ast_for_iv_augassign_probe.compile().mlir_text()
+    expect_parse_roundtrip_and_verify(iv_augassign_text, 'AST-rewritten induction-variable augment-assignment')
+    expect(
+        'iter_args(' not in iv_augassign_text,
+        'augmenting the induction variable should not infer a spurious loop carry',
+    )
+
+    # Non-Name static_range targets keep trace-time semantics (no scf.for).
+    subscript_target_text = ast_static_range_subscript_target_probe.compile().mlir_text()
+    expect_parse_roundtrip_and_verify(subscript_target_text, 'AST-rewritten static-range subscript target')
+
+    # A known non-empty static_range definitely binds its target afterwards, so
+    # the rewrite gate must credit it for a later implicit loop carry instead of
+    # rejecting it as last-iteration-only (verified at the rewrite level).
+    import ast as _ast
+    import inspect as _inspect
+    import textwrap as _textwrap
+    from ptodsl._ast_rewrite import _ControlFlowRewriter as _CFR
+    def rewrite_gate(fn):
+        gate_src = _textwrap.dedent(_inspect.getsource(fn))
+        gate_tree = _ast.parse(gate_src)
+        gate_fn = next(
+            n
+            for n in _ast.walk(gate_tree)
+            if isinstance(n, _ast.FunctionDef) and n.name == fn.__name__
+        )
+        gate_rewriter = _CFR(static_env={})
+        gate_body = gate_rewriter.rewrite_block(
+            gate_fn.body,
+            live_after={'value'},
+            bound_on_entry={arg.arg for arg in gate_fn.args.args},
+        )
+        gate_module = _ast.Module(body=gate_body, type_ignores=[])
+        _ast.fix_missing_locations(gate_module)
+        return _ast.unparse(gate_module)
+
+    gate_text = rewrite_gate(ast_static_range_nonempty_definite_gate_fn)
+    expect(
+        'carry(value=value)' in gate_text,
+        'known non-empty static_range target should be credited as bound for an implicit carry',
+    )
+    body_init_text = rewrite_gate(ast_static_range_body_init_definite_gate_fn)
+    expect(
+        'carry(value=value)' in body_init_text,
+        'known non-empty static_range body initialization should make an implicit carry safe',
+    )
+    empty_orelse_text = rewrite_gate(ast_static_range_empty_orelse_init_gate_fn)
+    expect(
+        'carry(value=value)' in empty_orelse_text,
+        'known empty static_range else initialization should make an implicit carry safe',
+    )
+    expect_raises(
+        PTODSLAstRewriteError,
+        lambda: rewrite_gate(ast_static_range_delete_target_gate_fn),
+        'last-iteration-only',
+    )
+    expect_raises(
+        PTODSLAstRewriteError,
+        lambda: rewrite_gate(ast_static_range_orelse_delete_gate_fn),
+        'last-iteration-only',
+    )
+    del _ast, _inspect, _textwrap, _CFR
+
+    # Unbound partial live-outs must stay on the explicit diagnostics path.
+    expect_raises(
+        PTODSLAstRewriteError,
+        lambda: ast_unbound_partial_liveout_loop_probe.compile(),
+        'last-iteration-only',
+    )
+    expect_raises(
+        PTODSLAstRewriteError,
+        lambda: ast_unbound_partial_liveout_controlled_loop_probe.compile(),
+        'last-iteration-only',
+    )
+    expect_raises(
+        PTODSLAstRewriteError,
+        lambda: ast_static_range_empty_orelse_partial_probe.compile(),
+        'last-iteration-only',
+    )
+    expect_raises(
+        PTODSLAstRewriteError,
+        lambda: ast_del_then_partial_liveout_probe.compile(),
+        'last-iteration-only',
+    )
+
+    # Definitely-bound partial live-outs (parameters, outer blocks, both branches
+    # of a prior conditional, and static subscript slots) are loop carries.
+    for probe_text, label in (
+        (ast_param_bound_partial_liveout_loop_probe.compile().mlir_text(), 'parameter-bound partial live-out'),
+        (ast_outer_bound_partial_liveout_loop_probe.compile().mlir_text(), 'outer-block-bound partial live-out'),
+        (ast_both_branch_bound_partial_liveout_loop_probe.compile().mlir_text(), 'both-branches-bound partial live-out'),
+        (ast_slot_partial_assign_loop_carry_probe.compile().mlir_text(), 'loop static-subscript partial assignment'),
+        (ast_with_entry_bound_partial_liveout_probe.compile().mlir_text(), 'with-entry-bound partial live-out'),
+        (ast_with_body_bound_partial_liveout_probe.compile().mlir_text(), 'with-body-bound partial live-out'),
+        (ast_with_as_bound_partial_liveout_probe.compile().mlir_text(), 'with-as-bound partial live-out'),
+        (ast_for_iv_bound_partial_liveout_probe.compile().mlir_text(), 'for-induction-variable-bound partial live-out'),
+    ):
+        expect_parse_roundtrip_and_verify(probe_text, 'AST-rewritten ' + label)
+        expect('iter_args(' in probe_text, label + ' should lower through scf.for iter_args')
 
 
 def expect(condition: bool, message: str) -> None:
@@ -73,6 +659,43 @@ def mlir_op_sequence(text: str) -> list[str]:
         if match is not None:
             ops.append(match.group(1))
     return ops
+
+
+def run_python_snippet(source: str) -> str:
+    env = dict(os.environ)
+    if "PYTHONPYCACHEPREFIX" not in env:
+        env["PYTHONPYCACHEPREFIX"] = "/tmp/ptoas-pycache"
+    result = subprocess.run(
+        [sys.executable, "-c", source],
+        check=True,
+        env=env,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
+    return result.stdout.strip()
+
+
+def ptodsl_func_stable_symbol_from_subprocess() -> str:
+    source = r'''
+import re
+from ptodsl import pto
+
+@pto.func(returns=pto.i32)
+def stable_dtype_return_helper(x: pto.i32):
+    return x
+
+@pto.jit(target="a5")
+def stable_dtype_symbol_probe(x: pto.i32):
+    _ = stable_dtype_return_helper(x)
+
+text = stable_dtype_symbol_probe.compile().mlir_text()
+match = re.search(r"func\.func @(stable_dtype_return_helper__ptodsl_[0-9a-f]+)\(", text)
+if match is None:
+    raise RuntimeError(text)
+print(match.group(1))
+'''
+    return run_python_snippet(source)
 
 
 expect_raises(
@@ -131,6 +754,30 @@ def host_vec_copy(
     out = pto.partition_view(o_view, offsets=[0, 0], sizes=[rows, cols])
     pto.tile.load(part, a_tile)
     pto.tile.store(o_tile, out)
+
+
+@pto.jit(target="a5", backend="vpto", mode="explicit")
+def scalar_pipeline_access_modes_probe(
+    src: pto.ptr(pto.i32, "gm"),
+    dst: pto.ptr(pto.i32, "gm"),
+):
+    normal = pto.load_scalar(src, 1)
+    pto.store_scalar(dst, 2, normal)
+    bypass = pto.load_scalar(src, 3, bypass_l1=True)
+    pto.store_scalar(dst, 4, bypass, bypass_l1=True)
+
+
+@pto.jit(target="a5", backend="vpto", mode="explicit")
+def scalar_pipeline_bypass_ub_invalid_probe():
+    src = pto.castptr(pto.const(0, dtype=pto.i64), pto.ptr(pto.i32, "ub"))
+    pto.load_scalar(src, 0, bypass_l1=True)
+
+
+@pto.jit(target="a5", backend="vpto", mode="explicit")
+def scalar_pipeline_bypass_float_invalid_probe(
+    src: pto.ptr(pto.f32, "gm"),
+):
+    pto.load_scalar(src, 0, bypass_l1=True)
 
 
 @pto.jit(target="a5", mode="explicit")
@@ -605,8 +1252,8 @@ def tile_sort_gather_surface_probe():
 
     pto.tile.sort32(src, idx, sort)
     pto.tile.mrgsort(sort, tmp, pto.const(64, dtype=pto.i32))
-    pto.tile.gather(tmp, gather_scores, mask_pattern="P0101")
-    pto.tgather(tmp, gather_indices, mask_pattern="P1010")
+    pto.tile.gather(tmp, gather_scores, mask_pattern="P0101", axis="row")
+    pto.tgather(tmp, gather_indices, mask_pattern="P1010", axis="row")
 
 
 @pto.jit(target="a5")
@@ -867,11 +1514,14 @@ def simt_collective_math_probe():
     pto.mul_i32toi64(lane, lane, signedness="unsigned")
 
     as_f32 = pto.convert(lane, pto.f32, rounding="r", saturation="nosat", signedness="signed")
+    as_f16 = pto.const(1.0, dtype=pto.f16)
     pto.convert(as_f32, pto.i32, rounding="z", saturation="sat", signedness="signed")
     pto.absf(as_f32)
     pto.sqrt(as_f32)
     pto.exp(as_f32)
     pto.log(as_f32)
+    pto.sin(as_f32)
+    pto.cos(as_f32)
     pto.pow(as_f32, as_f32)
     pto.ceil(as_f32)
     pto.floor(as_f32)
@@ -879,6 +1529,8 @@ def simt_collective_math_probe():
     pto.round(as_f32)
     pto.fmin(as_f32, as_f32)
     pto.fmax(as_f32, as_f32)
+    pto.fmin(as_f16, as_f16)
+    pto.fmax(as_f16, as_f16)
     pto.fma(as_f32, as_f32, as_f32)
 
 
@@ -1250,6 +1902,49 @@ def ast_if_old_value_merge_probe():
 
 
 @pto.jit(target="a5")
+def ast_if_static_subscript_slot_merge_probe():
+    done = [None]
+    done[0] = pto.const(0, dtype=pto.i32)
+    condition = pto.const(1, dtype=pto.i1)
+
+    if condition:
+        done[0] = pto.const(1, dtype=pto.i32)
+
+    if done[0]:
+        pto.pipe_barrier(pto.Pipe.ALL)
+
+
+_AST_BRANCH_SLOT_INDEX = 1
+
+
+@pto.jit(target="a5")
+def ast_if_static_subscript_expression_merge_probe(*, SLOT: pto.const_expr = 1):
+    values = [
+        pto.const(0, dtype=pto.i1),
+        pto.const(0, dtype=pto.i1),
+    ]
+    condition = pto.const(1, dtype=pto.i1)
+
+    if condition:
+        values[_AST_BRANCH_SLOT_INDEX + (SLOT - SLOT)] = pto.const(1, dtype=pto.i1)
+
+    if values[SLOT]:
+        pto.pipe_barrier(pto.Pipe.ALL)
+
+
+@pto.jit(target="a5")
+def ast_if_static_subscript_negative_index_merge_probe():
+    values = [pto.const(0, dtype=pto.i1)]
+    condition = pto.const(1, dtype=pto.i1)
+
+    if condition:
+        values[-1] = pto.const(1, dtype=pto.i1)
+
+    if values[-1]:
+        pto.pipe_barrier(pto.Pipe.ALL)
+
+
+@pto.jit(target="a5")
 def ast_if_branch_local_temp_liveness_probe():
     c0 = pto.const(0, dtype=pto.i1)
     c1 = pto.const(1, dtype=pto.i1)
@@ -1287,6 +1982,28 @@ def ast_nested_with_if_merge_probe():
 def ast_runtime_for_probe(rows: pto.i32):
     for row in range(0, rows, 1):
         _ = row
+        pto.pipe_barrier(pto.Pipe.ALL)
+
+
+@pto.jit(target="a5", mode="explicit")
+def ast_nested_runtime_for_induction_scope_probe(rows: pto.i32):
+    for outer in range(rows):
+        _ = outer
+        with pto.vecscope():
+            for lane in range(4):
+                _ = lane
+                pto.mem_bar(pto.BarrierType.VST_VLD)
+
+
+@pto.jit(target="a5", mode="explicit")
+def ast_nested_runtime_for_local_temp_scope_probe(rows: pto.i32):
+    for outer in range(rows):
+        _ = outer
+        with pto.vecscope():
+            for row in range(4):
+                for col in range(2):
+                    ob = row + col
+                    _ = ob
         pto.pipe_barrier(pto.Pipe.ALL)
 
 
@@ -1498,6 +2215,187 @@ def ast_nested_helper_ast_rewrite_probe(rows: pto.i32):
     _ = value
 
 
+@pto.func(returns=pto.i32)
+def func_runtime_for_return_helper(limit: pto.i32, initial: pto.i32):
+    one = pto.const(1, dtype=pto.i32)
+    total = initial
+    for _ in range(limit):
+        total = total + one
+    return total
+
+
+@pto.func(returns=pto.i32)
+def func_runtime_if_return_helper(lhs: pto.i32, rhs: pto.i32):
+    if lhs > rhs:
+        total = lhs + rhs
+    else:
+        total = rhs + lhs
+    return total
+
+
+@pto.func(returns=pto.i32)
+def func_runtime_if_early_return_helper(lhs: pto.i32, rhs: pto.i32):
+    if lhs > rhs:
+        return lhs
+    return rhs
+
+
+@pto.func(returns=pto.i32)
+def func_runtime_for_early_return_helper(limit: pto.i32, initial: pto.i32):
+    for _ in range(limit):
+        return initial
+    return initial
+
+
+@pto.func(returns=None)
+def func_runtime_if_yield_helper(lhs: pto.i32, rhs: pto.i32):
+    if lhs > rhs:
+        yield lhs
+
+
+@pto.func(returns=(pto.i32, pto.i32))
+def func_multi_return_helper(value: pto.i32):
+    one = pto.const(1, dtype=pto.i32)
+    return value, value + one
+
+
+@pto.func(returns=None)
+def func_void_helper():
+    pto.pipe_barrier(pto.Pipe.ALL)
+
+
+@pto.func(returns=None)
+def func_i32_argument_helper(value: pto.i32):
+    _ = value
+
+
+@pto.func(returns=pto.i32)
+def func_partition_metadata_helper(part: pto.PartitionTensorView, cols: pto.i32):
+    return part.sizes[0] + cols
+
+
+@pto.func(returns=pto.i32)
+def func_constexpr_static_helper(value: pto.i32, *, BLOCK: pto.const_expr = 2):
+    total = value
+    one = pto.const(1, dtype=pto.i32)
+    for _ in pto.static_range(BLOCK):
+        total = total + one
+    return total
+
+
+def _make_future_annotations_ptodsl_func_helpers():
+    namespace = {"pto": pto}
+    exec(
+        """
+from __future__ import annotations
+
+@pto.func
+def func_future_i32_return_helper(x: pto.i32) -> pto.i32:
+    return x + pto.const(1, dtype=pto.i32)
+
+@pto.func
+def func_future_i64_literal_helper(x: pto.i64) -> pto.i64:
+    return x + pto.const(1, dtype=pto.i64)
+
+@pto.func
+def func_future_void_helper(x: pto.i32) -> None:
+    _ = x
+    pto.pipe_barrier(pto.Pipe.ALL)
+""",
+        namespace,
+    )
+    return (
+        namespace["func_future_i32_return_helper"],
+        namespace["func_future_i64_literal_helper"],
+        namespace["func_future_void_helper"],
+    )
+
+
+(
+    func_future_i32_return_helper,
+    func_future_i64_literal_helper,
+    func_future_void_helper,
+) = _make_future_annotations_ptodsl_func_helpers()
+
+
+@pto.jit(target="a5")
+def ptodsl_func_call_probe(rows: pto.i32):
+    init = pto.const(0, dtype=pto.i32)
+    total = func_runtime_for_return_helper(rows, init)
+    merged = func_runtime_if_return_helper(total, init)
+    first, second = func_multi_return_helper(merged)
+    _ = first + second
+    func_void_helper()
+    func_void_helper()
+
+
+@pto.jit(target="a5")
+def ptodsl_func_partition_metadata_probe(
+    A_ptr: pto.ptr(pto.f32, "gm"),
+    cols: pto.i32,
+):
+    a_view = pto.make_tensor_view(A_ptr, shape=[1, 16], strides=[16, 1])
+    part = pto.partition_view(a_view, offsets=[0, 0], sizes=[1, 16])
+    _ = func_partition_metadata_helper(part, cols)
+
+
+@pto.jit(target="a5")
+def ptodsl_func_future_annotations_probe(rows: pto.i32):
+    i32_value = func_future_i32_return_helper(rows)
+    i64_value = func_future_i64_literal_helper(1)
+    func_future_void_helper(i32_value)
+    _ = i64_value
+
+
+@pto.jit(target="a5")
+def ptodsl_func_constexpr_probe(rows: pto.i32):
+    first = func_constexpr_static_helper(rows, BLOCK=2)
+    second = func_constexpr_static_helper(rows, BLOCK=4)
+    _ = first + second
+
+
+@pto.jit(target="a5")
+def ptodsl_func_constexpr_runtime_value_probe(rows: pto.i32):
+    _ = func_constexpr_static_helper(rows, BLOCK=rows)
+
+
+@pto.jit(target="a5")
+def ptodsl_func_traced_argument_coercion_probe(value: pto.i64):
+    func_i32_argument_helper(value)
+
+
+@pto.jit(target="a5")
+def ptodsl_func_traced_argument_type_error_probe(value: pto.f32):
+    func_i32_argument_helper(value)
+
+
+@pto.jit(target="a5")
+def ptodsl_func_runtime_closure_capture_probe(value: pto.i32):
+    @pto.func(returns=None)
+    def helper():
+        _ = value
+
+    helper()
+
+
+@pto.jit(target="a5")
+def ptodsl_func_if_early_return_probe(rows: pto.i32):
+    init = pto.const(0, dtype=pto.i32)
+    _ = func_runtime_if_early_return_helper(rows, init)
+
+
+@pto.jit(target="a5")
+def ptodsl_func_for_early_return_probe(rows: pto.i32):
+    init = pto.const(0, dtype=pto.i32)
+    _ = func_runtime_for_early_return_helper(rows, init)
+
+
+@pto.jit(target="a5")
+def ptodsl_func_if_yield_probe(rows: pto.i32):
+    init = pto.const(0, dtype=pto.i32)
+    func_runtime_if_yield_helper(rows, init)
+
+
 @pto.jit(target="a5")
 def ast_nested_helper_freevar_if_merge_probe():
     lhs = pto.const(4, dtype=pto.i32)
@@ -1690,6 +2588,29 @@ def sourceless_subkernel_helper():
 
 
 sourceless_subkernel_entry_probe = make_sourceless_subkernel_entry()
+
+
+def make_sourceless_ptodsl_func_probe():
+    namespace = {"pto": pto}
+    exec(
+        """
+@pto.func(returns=None)
+def sourceless_ptodsl_func_helper():
+    if True:
+        pto.pipe_barrier(pto.Pipe.ALL)
+""",
+        namespace,
+    )
+    helper = namespace["sourceless_ptodsl_func_helper"]
+
+    @pto.jit(target="a5")
+    def sourceless_ptodsl_func_probe(*, TRACE_TOKEN: pto.const_expr = 0):
+        helper()
+
+    return sourceless_ptodsl_func_probe
+
+
+sourceless_ptodsl_func_probe = make_sourceless_ptodsl_func_probe()
 
 
 def make_entry_closure_kernel_module_probe():
@@ -1990,6 +2911,119 @@ def scalar_contiguous_scalar_store_probe():
     scalar.store(1.0, data_ptr, 0, contiguous=4)
 
 
+@pto.simt
+def per_element_vec_f32_simt_body(data_ptr):
+    base = pto.get_tid_x() * 2
+    v0 = scalar.load(data_ptr, base)
+    v1 = scalar.load(data_ptr, base + 1)
+    pair = pto.Vec(pto.f32, 2, init=(v0, v1))
+    scalar.store(pair, data_ptr, 16 + base)
+
+
+@pto.jit(target="a5", mode="explicit")
+def per_element_vec_f32_probe():
+    per_element_vec_f32_simt_body[1, 1, 1](
+        pto.castptr(pto.const(0, dtype=pto.ui64), pto.ptr(pto.f32, "ub"))
+    )
+    pto.pipe_barrier(pto.Pipe.ALL)
+
+
+@pto.simt
+def per_element_vec_i32_simt_body(data_ptr):
+    base = pto.get_tid_x() * 2
+    v0 = scalar.load(data_ptr, base)
+    v1 = scalar.load(data_ptr, base + 1)
+    pair = pto.Vec(pto.i32, 2, init=(v0, v1))
+    scalar.store(pair, data_ptr, 16 + base)
+
+
+@pto.jit(target="a5", mode="explicit")
+def per_element_vec_i32_probe():
+    per_element_vec_i32_simt_body[1, 1, 1](
+        pto.castptr(pto.const(0, dtype=pto.ui64), pto.ptr(pto.i32, "ub"))
+    )
+    pto.pipe_barrier(pto.Pipe.ALL)
+
+
+@pto.simt
+def per_element_vec_ui32_simt_body(data_ptr):
+    base = pto.get_tid_x() * 2
+    v0 = scalar.load(data_ptr, base)
+    v1 = scalar.load(data_ptr, base + 1)
+    pair = pto.Vec(pto.ui32, 2, init=(v0, v1))
+    scalar.store(pair, data_ptr, 16 + base)
+
+
+@pto.jit(target="a5", mode="explicit")
+def per_element_vec_ui32_probe():
+    per_element_vec_ui32_simt_body[1, 1, 1](
+        pto.castptr(pto.const(0, dtype=pto.ui64), pto.ptr(pto.ui32, "ub"))
+    )
+    pto.pipe_barrier(pto.Pipe.ALL)
+
+
+@pto.jit(target="a5")
+def vec_init_size_mismatch_probe():
+    data_tile = pto.alloc_tile(shape=[1, 16], dtype=pto.f32, valid_shape=[1, 16])
+    data_ptr = data_tile.as_ptr()
+    pair = pto.Vec(pto.f32, 2, init=(1.0, 2.0, 3.0))
+    scalar.store(pair, data_ptr, 0)
+
+
+@pto.jit(target="a5")
+def vec_init_str_probe():
+    data_tile = pto.alloc_tile(shape=[1, 16], dtype=pto.f32, valid_shape=[1, 16])
+    data_ptr = data_tile.as_ptr()
+    pair = pto.Vec(pto.f32, 2, init="ab")
+    scalar.store(pair, data_ptr, 0)
+
+
+@pto.jit(target="a5")
+def vec_init_literals_probe():
+    signed_tile = pto.alloc_tile(shape=[1, 16], dtype=pto.si32, valid_shape=[1, 16])
+    unsigned_tile = pto.alloc_tile(shape=[1, 16], dtype=pto.ui32, valid_shape=[1, 16])
+    signed_ptr = signed_tile.as_ptr()
+    unsigned_ptr = unsigned_tile.as_ptr()
+    signed_pair = pto.Vec(pto.si32, 2, init=(-1, 2))
+    unsigned_pair = pto.Vec(pto.ui32, 2, init=(-1, 2))
+    scalar.store(signed_pair, signed_ptr, 0)
+    scalar.store(unsigned_pair, unsigned_ptr, 0)
+
+
+@pto.jit(target="a5")
+def vec_init_mapping_probe():
+    data_tile = pto.alloc_tile(shape=[1, 16], dtype=pto.f32, valid_shape=[1, 16])
+    data_ptr = data_tile.as_ptr()
+    pair = pto.Vec(pto.f32, 2, init={0: 1.0, 1: 2.0})
+    scalar.store(pair, data_ptr, 0)
+
+
+@pto.jit(target="a5")
+def vec_broadcast_unsigned_probe():
+    unsigned_tile = pto.alloc_tile(shape=[1, 16], dtype=pto.ui32, valid_shape=[1, 16])
+    unsigned_ptr = unsigned_tile.as_ptr()
+    broadcast = pto.Vec(pto.ui32, 2, init=7)
+    scalar.store(broadcast, unsigned_ptr, 0)
+
+
+@pto.jit(target="a5")
+def vec_init_16b_probe():
+    f16_tile = pto.alloc_tile(shape=[1, 16], dtype=pto.f16, valid_shape=[1, 16])
+    i16_tile = pto.alloc_tile(shape=[1, 16], dtype=pto.i16, valid_shape=[1, 16])
+    ui16_tile = pto.alloc_tile(shape=[1, 16], dtype=pto.ui16, valid_shape=[1, 16])
+    f16_ptr = f16_tile.as_ptr()
+    i16_ptr = i16_tile.as_ptr()
+    ui16_ptr = ui16_tile.as_ptr()
+    pair_f16 = pto.Vec(pto.f16, 2, init=(1.5, -2.25))
+    quad_f16 = pto.Vec(pto.f16, 4, init=(1.5, -2.25, 3.0, 4.5))
+    quad_i16 = pto.Vec(pto.i16, 4, init=(-1, 2, 3, -4))
+    quad_ui16 = pto.Vec(pto.ui16, 4, init=(1, 2, 3, 4))
+    scalar.store(pair_f16, f16_ptr, 0)
+    scalar.store(quad_f16, f16_ptr, 2)
+    scalar.store(quad_i16, i16_ptr, 0)
+    scalar.store(quad_ui16, ui16_ptr, 0)
+
+
 @pto.jit(target="a5")
 def addptr_surface_probe():
     meta_tile = pto.alloc_tile(shape=[1, 8], dtype=pto.i32, valid_shape=[1, 4])
@@ -2120,16 +3154,16 @@ def public_cube_surface_probe(
     pto.mte_l1_l0a(
         lhs_tile.as_ptr(),
         lhs_l0a.as_ptr(),
-        m,
-        k,
+        m=m,
+        k=k,
         start_row=start_row,
         start_col=start_col,
     )
     pto.mte_l1_l0b(
         rhs_tile.as_ptr(),
         rhs_l0b.as_ptr(),
-        k,
-        n,
+        k=k,
+        n=n,
         start_row=start_col,
         start_col=start_row,
         transpose=True,
@@ -2369,6 +3403,28 @@ def public_surface_exports_probe(
         memory_space=pto.MemorySpace.RIGHT,
         valid_shape=[16, 16],
     )
+    pto.mte_l1_l0a(
+        lhs_tile.as_ptr(),
+        lhs_l0a.as_ptr(),
+        m_start=4,
+        k_start=0,
+        m_step=4,
+        k_step=16,
+        src_stride=16,
+        dst_stride=4,
+        transpose=True,
+    )
+    pto.mte_l1_l0b(
+        rhs_tile.as_ptr(),
+        rhs_l0b.as_ptr(),
+        m_start=4,
+        k_start=0,
+        m_step=4,
+        k_step=16,
+        src_stride=16,
+        dst_stride=4,
+        transpose=True,
+    )
     lhs_l0a_mx = pto.alloc_tile(
         shape=[16, 32],
         dtype=pto.f8e4m3,
@@ -2577,6 +3633,8 @@ def vmi_wrapper_dispatch_probe():
     int_other_tile = pto.alloc_tile(shape=[1, 64], dtype=pto.i32)
     hist_acc_tile = pto.alloc_tile(shape=[1, 256], dtype=pto.ui16)
     hist_src_tile = pto.alloc_tile(shape=[1, 256], dtype=pto.ui8)
+    half_src_tile = pto.alloc_tile(shape=[1, 128], dtype=pto.f16)
+    half_max_tile = pto.alloc_tile(shape=[1, 128], dtype=pto.f16)
 
     src_ptr = src_tile.as_ptr()
     other_ptr = other_tile.as_ptr()
@@ -2585,6 +3643,8 @@ def vmi_wrapper_dispatch_probe():
     int_other_ptr = int_other_tile.as_ptr()
     hist_acc_ptr = hist_acc_tile.as_ptr()
     hist_src_ptr = hist_src_tile.as_ptr()
+    half_src_ptr = half_src_tile.as_ptr()
+    half_max_ptr = half_max_tile.as_ptr()
 
     offset = pto.const(0, dtype=pto.index)
     active_lanes = pto.const(64, dtype=pto.index)
@@ -2607,37 +3667,87 @@ def vmi_wrapper_dispatch_probe():
     expanded = pto.vmi.vbrc(compact, size=64, group=8)
     hist_acc = pto.vmi.vload(hist_acc_ptr, offset, size=256)
     hist_src = pto.vmi.vload(hist_src_ptr, offset, size=256)
+    int_lhs = pto.vmi.vload(int_src_ptr, offset, size=64)
+    int_rhs = pto.vmi.vload(int_other_ptr, offset, size=64)
     hist_mask = pto.vmi.create_mask(pto.const(256, dtype=pto.index), size=256)
+    half_mask = pto.vmi.create_mask(pto.const(128, dtype=pto.index), size=128)
+    half_lhs = pto.vmi.vload(half_src_ptr, offset, size=128)
+    half_max = pto.vmi.vload(half_max_ptr, offset, size=128)
     added = pto.vmi.vadd(lhs, rhs, mask)
+    carry_sum, carry = pto.vmi.vaddc(int_lhs, int_rhs, mask)
+    carry_next, carry_out = pto.vmi.vaddcs(carry_sum, int_rhs, carry, mask)
+    subtracted = pto.vmi.vsub(lhs, rhs, mask)
+    multiplied = pto.vmi.vmul(lhs, rhs, mask)
+    divided = pto.vmi.vdiv(lhs, rhs, mask)
+    maximum = pto.vmi.vmax(lhs, rhs, mask)
+    minimum = pto.vmi.vmin(lhs, rhs, mask)
+    absolute = pto.vmi.vabs(lhs, mask)
+    negated = pto.vmi.vneg(lhs, mask)
     relu = pto.vmi.vrelu(added, mask)
-    scaled = pto.vmi.vadd(pto.vmi.vmuls(relu, 2.0, mask), bias, mask)
+    exponent = pto.vmi.vexp(lhs, mask)
+    logarithm = pto.vmi.vln(lhs, mask)
+    square_root = pto.vmi.vsqrt(lhs, mask)
+    int_and = pto.vmi.vand(int_lhs, int_rhs, mask)
+    int_or = pto.vmi.vor(int_lhs, int_rhs, mask)
+    int_xor = pto.vmi.vxor(int_lhs, int_rhs, mask)
+    int_not = pto.vmi.vnot(int_lhs, mask)
+    int_shl = pto.vmi.vshl(int_lhs, int_rhs, mask)
+    int_shr = pto.vmi.vshr(int_lhs, int_rhs, mask)
+    scalar_added = pto.vmi.vadd(relu, 1.0, mask)
+    scalar_multiplied = pto.vmi.vmul(relu, 2.0, mask)
+    scalar_maximum = pto.vmi.vmax(relu, 1.0, mask)
+    scalar_minimum = pto.vmi.vmin(relu, 1.0, mask)
+    scalar_shl = pto.vmi.vshl(int_lhs, pto.i32(1), mask)
+    scalar_shr = pto.vmi.vshr(int_lhs, pto.i32(1), mask)
+    scaled = pto.vmi.vadd(scalar_multiplied, bias, mask)
     pred = pto.vmi.vcmp(scaled, lhs, mask, "ogt")
+    scalar_pred = pto.vmi.vcmps(scaled, 0.0, mask, "ogt")
     selected = pto.vmi.vsel(pred, scaled, expanded)
     shuffled = pto.vmi.vselr(selected, idx)
-    total = pto.vmi.vcadd(shuffled, mask, reassoc=True)
+    total = pto.vmi.vcadd(shuffled, mask, reassoc=False)
+    explicit_total = pto.vmi.vcadd(shuffled, mask, group=1, reassoc=False)
     peak = pto.vmi.vcmax(shuffled, mask)
+    explicit_peak = pto.vmi.vcmax(shuffled, mask, group=1)
     floor = pto.vmi.vcmin(shuffled, mask)
+    explicit_floor = pto.vmi.vcmin(shuffled, mask, group=1)
     group_peak = pto.vmi.vcmax(shuffled, group_mask, group=8)
     gather = pto.vmi.vgather(src_ptr, idx, mask)
     gatherb = pto.vmi.vgatherb(src_ptr, idx, mask)
     hist = pto.vmi.vdhist(hist_acc, hist_src, hist_mask)
     cumul = pto.vmi.vchist(hist_acc, hist_src, hist_mask)
-    int_lhs = pto.vmi.vload(int_src_ptr, offset, size=64)
-    int_rhs = pto.vmi.vload(int_other_ptr, offset, size=64)
+    exp_difference = pto.vmi.vexpdif(lhs, rhs, mask)
+    half_exp_difference = pto.vmi.vexpdif(half_lhs, half_max, half_mask)
+    axpy = pto.vmi.vaxpy(lhs, rhs, 2.0, mask)
+    leaky_relu = pto.vmi.vlrelu(lhs, 0.125, mask)
+    parametric_relu = pto.vmi.vprelu(lhs, rhs, mask)
     low, high = pto.vmi.vmull(int_lhs, int_rhs, mask)
+    multiply_accumulate = pto.vmi.vmula(lhs, lhs, rhs, mask)
     widened = pto.vmi.vadd(low, high, mask)
     casted = pto.vmi.vcvt(shuffled, pto.f16)
+    casted_r = pto.vmi.vcvt(shuffled, pto.f16, rounding="R", saturate="SAT")
+    casted_a = pto.vmi.vcvt(shuffled, pto.f16, rounding="A", saturate="SAT")
+    casted_h = pto.vmi.vcvt(shuffled, pto.f16, rounding="H", saturate="SAT")
+    casted_z = pto.vmi.vcvt(shuffled, pto.f16, rounding="Z", saturate="SAT")
     recast = pto.vmi.vinterpret_cast(
         lhs,
         pto.i32,
     )
+    recast_narrow = pto.vmi.vinterpret_cast(lhs, pto.f16)
     lo, hi = pto.vmi.vintlv(selected, shuffled, mask)
+    even, odd = pto.vmi.vdintlv(lo, hi, mask)
+    pto.vmi.vscatter(selected, dst_ptr, idx, mask)
     pto.vmi.vstore(lo, dst_ptr, offset, mask)
+    pto.vmi.vsstb(hi, dst_ptr, offset, pto.i16(8), mask)
 
     _ = group_mask
+    _ = carry_next
+    _ = carry_out
     _ = total
+    _ = explicit_total
     _ = peak
+    _ = explicit_peak
     _ = floor
+    _ = explicit_floor
     _ = group_peak
     _ = gather
     _ = gatherb
@@ -2645,8 +3755,15 @@ def vmi_wrapper_dispatch_probe():
     _ = cumul
     _ = widened
     _ = casted
+    _ = (casted_r, casted_a, casted_h, casted_z)
     _ = recast
+    _ = recast_narrow
     _ = hi
+    _ = (subtracted, multiplied, divided, maximum, minimum, absolute, negated)
+    _ = (exponent, logarithm, square_root, int_and, int_or, int_xor, int_not)
+    _ = (int_shl, int_shr, scalar_added, scalar_maximum, scalar_minimum)
+    _ = (scalar_shl, scalar_shr, scalar_pred, exp_difference, axpy)
+    _ = (leaky_relu, parametric_relu, multiply_accumulate, even, odd)
 
 
 @pto.jit(target="a5", backend="vpto", mode="explicit")
@@ -2757,6 +3874,116 @@ def vmi_round_r_vcvt_probe():
 
 
 @pto.jit(target="a5", backend="vpto", mode="explicit")
+def vmi_bf16x2_to_f4x2_vcvt_probe():
+    src_tile = pto.alloc_tile(shape=[1, 256], dtype=pto.bf16)
+    src_ptr = src_tile.as_ptr()
+    offset = pto.const(0, dtype=pto.index)
+
+    wide = pto.vmi.vload(src_ptr, offset, size=256)
+    pair = pto.vmi.vinterpret_cast(wide, to_dtype=pto.vmi.bf16x2)
+    default_e1 = pto.vmi.vcvt(pair, pto.f4e1m2x2)
+    default_e2 = pto.vmi.vcvt(pair, pto.f4e2m1x2)
+    round_r = pto.vmi.vcvt(pair, pto.f4e1m2x2, rounding=pto.VcvtRoundMode.R)
+    round_a = pto.vmi.vcvt(pair, pto.f4e1m2x2, rounding=pto.VcvtRoundMode.A)
+    round_f = pto.vmi.vcvt(pair, pto.f4e1m2x2, rounding=pto.VcvtRoundMode.F)
+    round_z = pto.vmi.vcvt(pair, pto.f4e2m1x2, rounding=pto.VcvtRoundMode.Z)
+    round_c = pto.vmi.vcvt(pair, pto.f4e2m1x2, rounding=pto.VcvtRoundMode.C)
+
+    _ = (default_e1, default_e2, round_r, round_a, round_f, round_z, round_c)
+
+
+@pto.jit(target="a5", backend="vpto", mode="explicit")
+def vmi_bf16x2_to_f4x2_vstore_probe():
+    src_tile = pto.alloc_tile(shape=[1, 512], dtype=pto.bf16)
+    dst_e1_tile = pto.alloc_tile(shape=[1, 128], dtype=pto.f4e1m2x2)
+    dst_e2_tile = pto.alloc_tile(shape=[1, 128], dtype=pto.f4e2m1x2)
+    src_offset = pto.const(64, dtype=pto.index)
+    dst_offset = pto.const(16, dtype=pto.index)
+
+    wide = pto.vmi.vload(src_tile.as_ptr(), src_offset, size=128)
+    pair = pto.vmi.vinterpret_cast(wide, to_dtype=pto.vmi.bf16x2)
+    out_e1 = pto.vmi.vcvt(pair, pto.f4e1m2x2)
+    out_e2 = pto.vmi.vcvt(pair, pto.f4e2m1x2)
+
+    pto.vmi.vstore(out_e1, dst_e1_tile.as_ptr(), dst_offset)
+    pto.vmi.vstore(out_e2, dst_e2_tile.as_ptr(), dst_offset)
+
+
+@pto.jit(target="a5", backend="vpto", mode="explicit")
+def vmi_bf16x2_to_f4x2_invalid_rounding_probe():
+    src_tile = pto.alloc_tile(shape=[1, 256], dtype=pto.bf16)
+    src_ptr = src_tile.as_ptr()
+    offset = pto.const(0, dtype=pto.index)
+
+    wide = pto.vmi.vload(src_ptr, offset, size=256)
+    pair = pto.vmi.vinterpret_cast(wide, to_dtype=pto.vmi.bf16x2)
+    _ = pto.vmi.vcvt(pair, pto.f4e1m2x2, rounding=pto.VcvtRoundMode.H)
+
+
+@pto.jit(target="a5", backend="vpto", mode="explicit")
+def vmi_bf16x2_to_f4x2_sat_probe():
+    src_tile = pto.alloc_tile(shape=[1, 256], dtype=pto.bf16)
+    src_ptr = src_tile.as_ptr()
+    offset = pto.const(0, dtype=pto.index)
+
+    wide = pto.vmi.vload(src_ptr, offset, size=256)
+    pair = pto.vmi.vinterpret_cast(wide, to_dtype=pto.vmi.bf16x2)
+    _ = pto.vmi.vcvt(pair, pto.f4e1m2x2, saturate=pto.VcvtSatMode.SAT)
+
+
+@pto.jit(target="a5", backend="vpto", mode="explicit")
+def vmi_bf16x2_to_f4x2_nosat_probe():
+    src_tile = pto.alloc_tile(shape=[1, 256], dtype=pto.bf16)
+    src_ptr = src_tile.as_ptr()
+    offset = pto.const(0, dtype=pto.index)
+
+    wide = pto.vmi.vload(src_ptr, offset, size=256)
+    pair = pto.vmi.vinterpret_cast(wide, to_dtype=pto.vmi.bf16x2)
+    _ = pto.vmi.vcvt(pair, pto.f4e1m2x2, saturate=pto.VcvtSatMode.NOSAT)
+
+
+@pto.jit(target="a5", backend="vpto", mode="explicit")
+def vmi_bf16x2_unsupported_pair_probe():
+    src_tile = pto.alloc_tile(shape=[1, 256], dtype=pto.bf16)
+    src_ptr = src_tile.as_ptr()
+    offset = pto.const(0, dtype=pto.index)
+
+    wide = pto.vmi.vload(src_ptr, offset, size=256)
+    pair = pto.vmi.vinterpret_cast(wide, to_dtype=pto.vmi.bf16x2)
+    _ = pto.vmi.vcvt(pair, pto.f16)
+
+
+@pto.jit(target="a5", backend="vpto", mode="explicit")
+def vmi_f4x2_to_bf16x2_vcvt_probe():
+    src_tile = pto.alloc_tile(shape=[1, 128], dtype=pto.f4e1m2x2)
+    src_ptr = src_tile.as_ptr()
+    offset = pto.const(0, dtype=pto.index)
+
+    packed = pto.vmi.vload(src_ptr, offset, size=128)
+    _ = pto.vmi.vcvt(packed, pto.vmi.bf16x2)
+
+
+@pto.jit(target="a5", backend="vpto", mode="explicit")
+def vmi_f4x2_to_bf16x2_rounding_probe():
+    src_tile = pto.alloc_tile(shape=[1, 128], dtype=pto.f4e1m2x2)
+    src_ptr = src_tile.as_ptr()
+    offset = pto.const(0, dtype=pto.index)
+
+    packed = pto.vmi.vload(src_ptr, offset, size=128)
+    _ = pto.vmi.vcvt(packed, pto.vmi.bf16x2, rounding=pto.VcvtRoundMode.R)
+
+
+@pto.jit(target="a5", backend="vpto", mode="explicit")
+def vmi_f4x2_to_bf16x2_sat_probe():
+    src_tile = pto.alloc_tile(shape=[1, 128], dtype=pto.f4e1m2x2)
+    src_ptr = src_tile.as_ptr()
+    offset = pto.const(0, dtype=pto.index)
+
+    packed = pto.vmi.vload(src_ptr, offset, size=128)
+    _ = pto.vmi.vcvt(packed, pto.vmi.bf16x2, saturate=pto.VcvtSatMode.SAT)
+
+
+@pto.jit(target="a5", backend="vpto", mode="explicit")
 def vmi_unpack_vload_probe():
     src_tile = pto.alloc_tile(shape=[1, 128], dtype=pto.i8)
     src_ptr = src_tile.as_ptr()
@@ -2799,6 +4026,20 @@ def vmi_group_brc_vload_probe():
         group=8,
         stride=row_stride,
         dist_mode="brc",
+    )
+
+
+@pto.jit(target="a5", backend="vpto", mode="explicit")
+def vmi_block_stride_memory_probe():
+    src_tile = pto.alloc_tile(shape=[1, 64], dtype=pto.f32)
+    dst_tile = pto.alloc_tile(shape=[1, 64], dtype=pto.f32)
+    offset = pto.const(0, dtype=pto.index)
+
+    value = pto.vmi.vload(
+        src_tile.as_ptr(), offset, size=64, block_stride=pto.i16(2)
+    )
+    pto.vmi.vstore(
+        value, dst_tile.as_ptr(), offset, block_stride=pto.i16(2)
     )
 
 
@@ -3029,14 +4270,19 @@ def public_sync_surface_probe():
     pto.wait_flag(pto.Pipe.MTE2, pto.Pipe.V, event_id=0)
     pto.set_flag(pto.Pipe.V, pto.Pipe.MTE3, event_id=dynamic_event)
     pto.wait_flag(pto.Pipe.V, pto.Pipe.MTE3, event_id=dynamic_event)
-    pto.set_cross_flag(pto.Pipe.FIX, 0)
-    pto.set_intra_flag(pto.Pipe.MTE3, dynamic_event)
-    pto.set_intra_flag(pto.Pipe.FIX, 4)
-    pto.wait_cross_flag(pto.Pipe.FIX, 0)
-    pto.wait_intra_flag(pto.Pipe.V, dynamic_event)
-    pto.wait_intra_flag(pto.Pipe.FIX, 20)
-    pto.wait_intra_flag(pto.Pipe.MTE3, dynamic_event)
-    pto.wait_intra_flag(pto.Pipe.MTE3, 31)
+    pto.set_cross_block(pto.Pipe.FIX, 0)
+    pto.set_intra_block(pto.Pipe.MTE3, dynamic_event)
+    pto.set_intra_block(pto.Pipe.FIX, 4)
+    pto.wait_cross_block(pto.Pipe.FIX, 0)
+    pto.wait_intra_block(pto.Pipe.V, dynamic_event)
+    pto.wait_intra_block(pto.Pipe.FIX, 20)
+    pto.wait_intra_block(pto.Pipe.MTE3, dynamic_event)
+    pto.wait_intra_block(pto.Pipe.MTE3, 31)
+
+
+@pto.jit(target="a5")
+def public_trap_surface_probe():
+    pto.trap()
 
 
 @pto.jit(target="a5")
@@ -3078,6 +4324,16 @@ def ast_runtime_index_bitwise_event_probe():
 
 
 @pto.jit(target="a5", mode="explicit")
+def ui8_pad_surface_probe():
+    """Explicit ui8 pointer + ui8 pad value must compile (issue #1245)."""
+    zero = pto.const(0, dtype=pto.i64)
+    gm_src = pto.castptr(zero, pto.ptr(pto.ui8, "gm"))
+    ub_dst = pto.castptr(zero, pto.ptr(pto.ui8, "ub"))
+    pad_value = pto.const(0, dtype=pto.ui8)
+    pto.mte_gm_ub(gm_src, ub_dst, 0, 3, nburst=(1, 3, 32), pad=(pad_value, 0, 29))
+
+
+@pto.jit(target="a5", mode="explicit")
 def public_data_movement_surface_probe():
     zero_u64 = pto.const(0, dtype=pto.ui64)
     gm_src = pto.castptr(zero_u64, pto.ptr(pto.f16, "gm"))
@@ -3110,6 +4366,15 @@ def public_data_movement_surface_probe():
     pto.mte_ub_ub(ub_src, ub_dst, 8, nburst=(16, 0, 4))
     pto.mte_ub_l1(ub_src, l1_dst, 8, nburst=(16, 0, 4))
     pto.mte_gm_l1(gm_src, l1_dst, 256, nburst=(8, 256, 256), loops=[(2, 2048, 2048)])
+    pto.raw_fill_l1(
+        l1_dst,
+        byte_offset=32,
+        raw_value=0,
+        repeat_times=4,
+        block_num_32b=2,
+        dst_gap_32b=6,
+        fill_word_bits=16,
+    )
     pto.mte_l1_ub(l1_dst, ub_dst, 256, nburst=(8, 256, 256), loops=[(2, 2048, 2048)])
     pto.mte_gm_l1_frac(
         gm_src,
@@ -3156,6 +4421,45 @@ def public_data_movement_surface_probe():
     _ = gather1
     _ = gatherb
     _ = blocked
+
+
+@pto.jit(target="a5", mode="explicit")
+def explicit_mx_scale_staging_surface_probe():
+    zero_u64 = pto.const(0, dtype=pto.ui64)
+    stage1_u64 = pto.const(32768, dtype=pto.ui64)
+    a_scale_l1 = pto.castptr(zero_u64, pto.ptr(pto.f8e8m0, "mat"))
+    b_scale_l1 = pto.castptr(zero_u64, pto.ptr(pto.f8e8m0, "mat"))
+    a_stage1_l0 = pto.castptr(stage1_u64, pto.ptr(pto.f8e4m3, "left"))
+    b_stage1_l0 = pto.castptr(stage1_u64, pto.ptr(pto.f8e4m3, "right"))
+
+    pto.mte_l1_l0a_mx(
+        a_scale_l1, a_stage1_l0,
+        x_start=3, y_start=5, x_step=16, y_step=2, src_stride=8, dst_stride=2,
+    )
+    pto.mte_l1_l0b_mx(
+        b_scale_l1, b_stage1_l0,
+        x_start=3, y_start=5, x_step=16, y_step=2, src_stride=8, dst_stride=2,
+    )
+
+
+@pto.jit(target="a5", mode="explicit")
+def explicit_fp4_s4_staging_surface_probe():
+    zero_u64 = pto.const(0, dtype=pto.ui64)
+    a_l1 = pto.castptr(zero_u64, pto.ptr(pto.f4e1m2x2, "mat"))
+    a_l0 = pto.castptr(zero_u64, pto.ptr(pto.f4e1m2x2, "left"))
+    b_l1 = pto.castptr(zero_u64, pto.ptr(pto.f4e2m1x2, "mat"))
+    b_l0 = pto.castptr(zero_u64, pto.ptr(pto.f4e2m1x2, "right"))
+
+    pto.mte_l1_l0a(
+        a_l1, a_l0,
+        m_start=0, k_start=4, m_step=16, k_step=4,
+        src_stride=16, dst_stride=16,
+    )
+    pto.mte_l1_l0b(
+        b_l1, b_l0,
+        m_start=0, k_start=4, m_step=16, k_step=4,
+        src_stride=16, dst_stride=16, transpose=True,
+    )
 
 
 @pto.jit(target="a5", mode="explicit")
@@ -3654,15 +4958,16 @@ def main() -> None:
         "pipe_barrier",
         "get_buf",
         "rls_buf",
-        "set_cross_flag",
-        "wait_cross_flag",
-        "set_intra_flag",
-        "wait_intra_flag",
+        "set_cross_block",
+        "wait_cross_block",
+        "set_intra_block",
+        "wait_intra_block",
         "mte_gm_ub",
         "mte_ub_gm",
         "mte_ub_ub",
         "mte_ub_l1",
         "mte_gm_l1",
+        "raw_fill_l1",
         "mte_l1_ub",
         "mte_gm_l1_frac",
         "mte_l1_bt",
@@ -3704,6 +5009,14 @@ def main() -> None:
     expect(isinstance(fake_empty, _FakeTensor), "pto.empty_like(...) should preserve host tensor factory type")
     expect(fake_empty.shape == fake_tensor.shape, "pto.empty_like(...) should preserve the logical tensor shape")
     expect(not hasattr(pto, "scalar"), "pto.scalar should not remain in the public pto namespace")
+    expect(
+        not hasattr(pto, "load_cbuf_to_ca"),
+        "pto.load_cbuf_to_ca should not be exported; use pto.mte_l1_l0a(...) explicit control",
+    )
+    expect(
+        not hasattr(pto, "load_cbuf_to_cb"),
+        "pto.load_cbuf_to_cb should not be exported; use pto.mte_l1_l0b(...) explicit control",
+    )
     expect(hasattr(pto, "tile"), "pto.tile should be exported from the public namespace")
     expect(hasattr(pto, "vmi"), "pto.vmi should be exported from the public namespace")
     expect(hasattr(pto.tile, "load"), "pto.tile.load should be exported from the public tile namespace")
@@ -3819,6 +5132,9 @@ def main() -> None:
     scalar_pointer_offset_probe.verify()
     scalar_contiguous_vector_probe.verify()
     scalar_contiguous_vector_arith_probe.verify()
+    per_element_vec_f32_probe.verify()
+    per_element_vec_i32_probe.verify()
+    per_element_vec_ui32_probe.verify()
     addptr_surface_probe.verify()
     simt_pointer_offset_probe.verify()
     scalar_store_element_coercion_probe.verify()
@@ -3832,10 +5148,12 @@ def main() -> None:
     public_mask_bitcast_probe.verify()
     public_mask_surface_probe.verify()
     public_sync_surface_probe.verify()
+    public_trap_surface_probe.verify()
     explicit_runtime_index_bitwise_event_probe.verify()
     explicit_runtime_index_integer_bitwise_event_probe.verify()
     ast_runtime_index_bitwise_event_probe.verify()
     public_data_movement_surface_probe.verify()
+    ui8_pad_surface_probe.verify()
     fixed_width_integer_specialization_probe.verify()
     public_vector_conversion_surface_probe.verify()
     vdup_surface_probe.verify()
@@ -3912,6 +5230,22 @@ def main() -> None:
             "pto.f8e5m2x8 should resolve to vector<8xf8E5M2>",
         )
         expect(
+            str(pto.f8e8m0.resolve()) == "!pto.f8E8M0",
+            "pto.f8e8m0 should resolve to the public E8M0 scale type",
+        )
+        expect(
+            str(pto.bf16x2.resolve()) == "vector<2xbf16>",
+            "pto.bf16x2 should remain the builtin two-lane bf16 vector type",
+        )
+        expect(
+            str(pto.vmi.bf16x2.resolve()) == "!pto.bf16x2",
+            "pto.vmi.bf16x2 should resolve to the VMI packed bf16 pair carrier",
+        )
+        expect(
+            hasattr(pto_types._pto, "BF16x2Type"),
+            "PTO Python dialect bindings should export BF16x2Type",
+        )
+        expect(
             "hif8" in str(pto.hif8.resolve()),
             "pto.hif8 should resolve to the public HiF8 type",
         )
@@ -3965,6 +5299,10 @@ def main() -> None:
             "low-precision pointer types should be valid for device storage",
         )
         expect(
+            "!pto.ptr<!pto.f8E8M0, l1>" == str(pto.ptr(pto.f8e8m0, "mat").resolve()),
+            "f8e8m0 pointers should be valid for L1 scale storage",
+        )
+        expect(
             str(pto.vreg_type(256, pto.f8e4m3).resolve()) == "!pto.vreg<256xf8E4M3FN>",
             "low-precision vreg types should be valid for vector micro-ops",
         )
@@ -3976,6 +5314,11 @@ def main() -> None:
         expect_raises(
             TypeError,
             lambda: pto.f8e4m3(1.0),
+            "unsupported eager constructor target type",
+        )
+        expect_raises(
+            TypeError,
+            lambda: pto.f8e8m0(1.0),
             "unsupported eager constructor target type",
         )
 
@@ -4001,6 +5344,32 @@ def main() -> None:
     default_compiled = host_vec_copy.compile()
     explicit_default = host_vec_copy.compile(BLOCK=128)
     block64 = host_vec_copy.compile(BLOCK=64)
+
+    scalar_pipeline_text = scalar_pipeline_access_modes_probe.compile().mlir_text()
+    expect_parse_roundtrip_and_verify(
+        scalar_pipeline_text,
+        "scalar pipeline access mode specialization",
+    )
+    expect(
+        scalar_pipeline_text.count("pto.load_scalar") == 1
+        and scalar_pipeline_text.count("pto.store_scalar") == 1,
+        "default scalar pipeline accesses should remain load_scalar/store_scalar",
+    )
+    expect(
+        scalar_pipeline_text.count("pto.ld_dev") == 1
+        and scalar_pipeline_text.count("pto.st_dev") == 1,
+        "bypass_l1 scalar pipeline accesses should lower to ld_dev/st_dev",
+    )
+    expect_raises(
+        TypeError,
+        lambda: scalar_pipeline_bypass_ub_invalid_probe.compile().mlir_text(),
+        "requires a GM pointer",
+    )
+    expect_raises(
+        TypeError,
+        lambda: scalar_pipeline_bypass_float_invalid_probe.compile().mlir_text(),
+        "supports only i8, i16, i32 or i64",
+    )
 
     expect(default_compiled is explicit_default, "default constexpr compile should hit specialization cache")
     expect(default_compiled is not block64, "different constexpr values should materialize different specializations")
@@ -5430,6 +6799,8 @@ def main() -> None:
         "pto.sqrt",
         "pto.exp",
         "pto.log",
+        "pto.sin",
+        "pto.cos",
         "pto.pow",
         "pto.ceil",
         "pto.floor",
@@ -5446,6 +6817,14 @@ def main() -> None:
         "pto.resume",
     ):
         expect(op_name in simt_full_text, f"full SIMT surface should contain {op_name}")
+    expect(
+        re.search(r"pto\.fmin .* : f16, f16 -> f16", simt_full_text) is not None,
+        "full SIMT surface should accept scalar f16 pto.fmin",
+    )
+    expect(
+        re.search(r"pto\.fmax .* : f16, f16 -> f16", simt_full_text) is not None,
+        "full SIMT surface should accept scalar f16 pto.fmax",
+    )
     for fp8_vec in (
         "vector<4xf8E4M3FN>",
         "vector<8xf8E4M3FN>",
@@ -5566,6 +6945,48 @@ def main() -> None:
         "ast_rewrite=True old-value if merge should yield from both branches",
     )
 
+    ast_if_static_subscript_slot_merge_text = ast_if_static_subscript_slot_merge_probe.compile().mlir_text()
+    expect_parse_roundtrip_and_verify(
+        ast_if_static_subscript_slot_merge_text,
+        "AST-rewritten static subscript slot if-merge specialization",
+    )
+    expect(
+        ast_if_static_subscript_slot_merge_text.count("scf.if") == 2,
+        "AST-rewritten static subscript slot branch merge should preserve both runtime conditionals",
+    )
+    expect(
+        "-> (i32)" in ast_if_static_subscript_slot_merge_text,
+        "AST-rewritten static subscript slot merge should return the merged slot value",
+    )
+    expect(
+        "pto.barrier <PIPE_ALL>" in ast_if_static_subscript_slot_merge_text,
+        "static subscript slot values should remain usable after the branch merge",
+    )
+
+    ast_if_static_subscript_expression_merge_text = (
+        ast_if_static_subscript_expression_merge_probe.compile(SLOT=1).mlir_text()
+    )
+    expect_parse_roundtrip_and_verify(
+        ast_if_static_subscript_expression_merge_text,
+        "AST-rewritten static subscript expression if-merge specialization",
+    )
+    expect(
+        ast_if_static_subscript_expression_merge_text.count("scf.if") == 2,
+        "static-expression and constexpr subscript indices should participate in branch merging",
+    )
+
+    ast_if_static_subscript_negative_index_merge_text = (
+        ast_if_static_subscript_negative_index_merge_probe.compile().mlir_text()
+    )
+    expect_parse_roundtrip_and_verify(
+        ast_if_static_subscript_negative_index_merge_text,
+        "AST-rewritten negative static subscript if-merge specialization",
+    )
+    expect(
+        ast_if_static_subscript_negative_index_merge_text.count("scf.if") == 2,
+        "negative static subscript indices should participate in branch merging",
+    )
+
     ast_if_branch_local_temp_liveness_text = ast_if_branch_local_temp_liveness_probe.compile().mlir_text()
     expect_parse_roundtrip_and_verify(
         ast_if_branch_local_temp_liveness_text,
@@ -5588,6 +7009,26 @@ def main() -> None:
     expect(
         ast_runtime_for_text.count("scf.for") == 1,
         "ast_rewrite=True Python range(...) should lower to one scf.for",
+    )
+
+    ast_nested_runtime_for_induction_scope_text = ast_nested_runtime_for_induction_scope_probe.compile().mlir_text()
+    expect_parse_roundtrip_and_verify(
+        ast_nested_runtime_for_induction_scope_text,
+        "AST-rewritten nested runtime induction scope specialization",
+    )
+    expect(
+        ast_nested_runtime_for_induction_scope_text.count("scf.for") == 2,
+        "nested runtime loop induction variables should remain local to their loops",
+    )
+
+    ast_nested_runtime_for_local_temp_scope_text = ast_nested_runtime_for_local_temp_scope_probe.compile().mlir_text()
+    expect_parse_roundtrip_and_verify(
+        ast_nested_runtime_for_local_temp_scope_text,
+        "AST-rewritten nested runtime local temp scope specialization",
+    )
+    expect(
+        ast_nested_runtime_for_local_temp_scope_text.count("scf.for") == 3,
+        "nested runtime loop temporaries consumed in-loop should not become live-outs",
     )
 
     ast_runtime_for_carry_text = ast_runtime_for_carry_probe.compile().mlir_text()
@@ -5756,6 +7197,158 @@ def main() -> None:
         "rewritten nested helpers should preserve loop-carried and branch live-out values",
     )
 
+    ptodsl_func_call_text = ptodsl_func_call_probe.compile().mlir_text()
+    expect_parse_roundtrip_and_verify(ptodsl_func_call_text, "@pto.func helper call specialization")
+    expect(
+        re.search(r"func\.func @func_runtime_for_return_helper__ptodsl_[0-9a-f]+\(.*\) -> i32", ptodsl_func_call_text)
+        is not None,
+        "@pto.func helpers that return one runtime value should materialize a typed helper result",
+    )
+    expect(
+        re.search(r"func\.func @func_multi_return_helper__ptodsl_[0-9a-f]+\(.*\) -> \(i32, i32\)", ptodsl_func_call_text)
+        is not None,
+        "@pto.func helpers should support multiple returned runtime values",
+    )
+    expect(
+        ptodsl_func_call_text.count("scf.for") >= 1 and ptodsl_func_call_text.count("scf.if") >= 1,
+        "@pto.func helper bodies should use native control-flow AST rewrite",
+    )
+    expect(
+        len(re.findall(r"func\.func @func_void_helper__ptodsl_[0-9a-f]+", ptodsl_func_call_text)) == 1
+        and len(re.findall(r"call @func_void_helper__ptodsl_[0-9a-f]+", ptodsl_func_call_text)) == 2,
+        "repeated @pto.func calls should reuse one materialized helper artifact",
+    )
+    ptodsl_func_partition_metadata_text = ptodsl_func_partition_metadata_probe.compile().mlir_text()
+    expect_parse_roundtrip_and_verify(
+        ptodsl_func_partition_metadata_text,
+        "@pto.func partition metadata specialization",
+    )
+    expect(
+        re.search(r"func\.func @func_partition_metadata_helper__ptodsl_[0-9a-f]+", ptodsl_func_partition_metadata_text)
+        is not None
+        and re.search(r"func\.func @func_partition_metadata_helper__ptodsl_[0-9a-f]+\(.*\) -> i32", ptodsl_func_partition_metadata_text)
+        is not None
+        and re.search(r"%c1_i32 = arith\.constant 1 : i32", ptodsl_func_partition_metadata_text) is not None,
+        "@pto.func should preserve partition metadata across the helper boundary",
+    )
+    ptodsl_func_future_annotations_text = ptodsl_func_future_annotations_probe.compile().mlir_text()
+    expect_parse_roundtrip_and_verify(
+        ptodsl_func_future_annotations_text,
+        "@pto.func future annotations specialization",
+    )
+    expect(
+        re.search(
+            r"func\.func @func_future_i32_return_helper__ptodsl_[0-9a-f]+\(.*i32.*\) -> i32",
+            ptodsl_func_future_annotations_text,
+        )
+        is not None,
+        "@pto.func should resolve PEP 563 string return annotations to PTO result types",
+    )
+    expect(
+        re.search(
+            r"func\.func @func_future_i64_literal_helper__ptodsl_[0-9a-f]+\(.*i64.*\) -> i64",
+            ptodsl_func_future_annotations_text,
+        )
+        is not None,
+        "@pto.func should resolve PEP 563 string parameter annotations before materializing literals",
+    )
+    expect(
+        re.search(
+            r"func\.func @func_future_void_helper__ptodsl_[0-9a-f]+\(.*i32.*\) attributes",
+            ptodsl_func_future_annotations_text,
+        )
+        is not None,
+        "@pto.func should resolve PEP 563 -> None annotations as void helpers",
+    )
+    i32_cache_signature = cache_signature_atom(pto.i32)
+    i64_cache_signature = cache_signature_atom(pto.i64)
+    ptr_cache_signature = cache_signature_atom(pto.ptr(pto.f32, "gm"))
+    expect(
+        i32_cache_signature != i64_cache_signature,
+        "dtype cache signatures should distinguish different MLIR scalar types",
+    )
+    expect(
+        "0x" not in repr(i32_cache_signature)
+        and "0x" not in repr(ptr_cache_signature)
+        and "function" not in repr(i32_cache_signature),
+        "dtype cache signatures should not include Python factory reprs or memory addresses",
+    )
+    first_stable_symbol = ptodsl_func_stable_symbol_from_subprocess()
+    second_stable_symbol = ptodsl_func_stable_symbol_from_subprocess()
+    expect(
+        first_stable_symbol == second_stable_symbol,
+        "@pto.func helper symbols should stay stable across Python processes",
+    )
+    ptodsl_func_constexpr_text = ptodsl_func_constexpr_probe.compile().mlir_text()
+    expect_parse_roundtrip_and_verify(
+        ptodsl_func_constexpr_text,
+        "@pto.func const_expr specialization",
+    )
+    constexpr_helper_names = re.findall(
+        r"func\.func @(func_constexpr_static_helper__ptodsl_[0-9a-f]+)\(%arg0: i32\) -> i32",
+        ptodsl_func_constexpr_text,
+    )
+    expect(
+        len(set(constexpr_helper_names)) == 2,
+        "@pto.func const_expr parameters should specialize helpers without entering the runtime ABI",
+    )
+    expect(
+        ptodsl_func_constexpr_text.count("call @func_constexpr_static_helper__ptodsl_") == 2
+        and ptodsl_func_constexpr_text.count("arith.addi") >= 6,
+        "@pto.func const_expr values should remain available for static_range unrolling",
+    )
+    expect_raises(
+        TypeError,
+        lambda: ptodsl_func_constexpr_runtime_value_probe.compile().mlir_text(),
+        "const_expr parameter 'BLOCK' expects a compile-time Python value",
+    )
+    ptodsl_func_traced_argument_coercion_text = (
+        ptodsl_func_traced_argument_coercion_probe.compile().mlir_text()
+    )
+    expect_parse_roundtrip_and_verify(
+        ptodsl_func_traced_argument_coercion_text,
+        "@pto.func traced argument annotation coercion",
+    )
+    expect(
+        "arith.trunci" in ptodsl_func_traced_argument_coercion_text
+        and re.search(
+            r"func\.func @func_i32_argument_helper__ptodsl_[0-9a-f]+\(%arg0: i32\)",
+            ptodsl_func_traced_argument_coercion_text,
+        )
+        is not None,
+        "@pto.func should adapt traced SSA arguments to their declared parameter type",
+    )
+    expect_raises(
+        TypeError,
+        lambda: ptodsl_func_traced_argument_type_error_probe.compile().mlir_text(),
+        "@pto.func parameter 'value' cannot coerce",
+    )
+    expect_raises(
+        TypeError,
+        lambda: ptodsl_func_runtime_closure_capture_probe.compile().mlir_text(),
+        "captures runtime value 'value'",
+    )
+    expect_raises(
+        PTODSLAstRewriteError,
+        lambda: ptodsl_func_if_early_return_probe.compile().mlir_text(),
+        "return/yield inside rewritten if branches",
+    )
+    expect_raises(
+        PTODSLAstRewriteError,
+        lambda: ptodsl_func_for_early_return_probe.compile().mlir_text(),
+        "return/yield inside rewritten for-loop bodies",
+    )
+    expect_raises(
+        PTODSLAstRewriteError,
+        lambda: ptodsl_func_if_yield_probe.compile().mlir_text(),
+        "return/yield inside rewritten if branches",
+    )
+    expect_raises(
+        TypeError,
+        lambda: pto.func(lambda value: value),
+        "must explicitly declare return types",
+    )
+
     ast_nested_helper_freevar_if_merge_text = ast_nested_helper_freevar_if_merge_probe.compile().mlir_text()
     expect_parse_roundtrip_and_verify(
         ast_nested_helper_freevar_if_merge_text,
@@ -5877,6 +7470,16 @@ def main() -> None:
     expect(
         sourceless_subkernel_text.count("pto.simt_launch @tileop_noop_simt_probe__simt_") == 1,
         "source-less subkernels should fall back to original trace-time Python execution",
+    )
+
+    sourceless_ptodsl_func_text = sourceless_ptodsl_func_probe.compile(TRACE_TOKEN=1).mlir_text()
+    expect_parse_roundtrip_and_verify(
+        sourceless_ptodsl_func_text,
+        "source-less @pto.func AST rewrite fallback specialization",
+    )
+    expect(
+        sourceless_ptodsl_func_text.count("pto.barrier <PIPE_ALL>") == 1,
+        "source-less @pto.func helpers should fall back to original trace-time Python execution",
     )
 
     ast_python_bool_guard_enabled_text = ast_python_bool_guard_probe.compile().mlir_text()
@@ -6088,6 +7691,156 @@ def main() -> None:
         "scalar.store(scalar, ..., contiguous=N) is not supported",
     )
 
+    per_element_vec_text = per_element_vec_f32_probe.compile().mlir_text()
+    expect_parse_roundtrip_and_verify(per_element_vec_text, "per-element Vec init= specialization")
+    expect("vector<2xf32>" in per_element_vec_text, "pto.Vec(..., init=...) over f32 should produce vector<2xf32>")
+    # NOTE: the exact `count("llvm.insertelement" / "llvm.store") == N` assertions in this
+    # section are white-box snapshot checks of the traced MLIR. Unrelated pipeline changes
+    # (canonicalization, constant folding of the undef/insertelement chain, etc.) can shift
+    # the counts without any behavioral regression; update the expected numbers when that
+    # happens. The behavioral guards are the distinct-SSA-value check below, the absence of
+    # numeric conversion ops, and the dsl-st golden cases on A5.
+    expect(
+        per_element_vec_text.count("llvm.insertelement") == 2,
+        "pto.Vec(..., init=...) should emit exactly two llvm.insertelement ops",
+    )
+    inserted_values = re.findall(
+        r"llvm\.insertelement\s+(%[\w.\-]+)",
+        per_element_vec_text,
+    )
+    expect(
+        len(inserted_values) == 2 and inserted_values[0] != inserted_values[1],
+        "pto.Vec(..., init=(v0, v1)) should insert two distinct SSA values, not broadcast",
+    )
+    expect(
+        per_element_vec_text.count("llvm.store") == 1,
+        "scalar.store(vector, ...) built from init= should emit exactly one llvm.store",
+    )
+    expect(
+        "pto.store" not in per_element_vec_text,
+        "per-element Vec store should not lower through scalar pto.store",
+    )
+
+    per_element_vec_i32_text = per_element_vec_i32_probe.compile().mlir_text()
+    expect_parse_roundtrip_and_verify(per_element_vec_i32_text, "per-element Vec init= i32 specialization")
+    per_element_vec_ui32_text = per_element_vec_ui32_probe.compile().mlir_text()
+    expect_parse_roundtrip_and_verify(per_element_vec_ui32_text, "per-element Vec init= ui32 specialization")
+    for int_label, int_text in (("i32", per_element_vec_i32_text), ("ui32", per_element_vec_ui32_text)):
+        expect(
+            int_text.count("llvm.insertelement") == 2,
+            f"pto.Vec(pto.{int_label}, 2, init=...) should emit exactly two llvm.insertelement ops",
+        )
+        expect(
+            int_text.count("llvm.store") == 1,
+            f"pto.Vec(pto.{int_label}, 2, init=...) store should emit exactly one llvm.store",
+        )
+        expect(
+            "arith.fpext" not in int_text
+            and "arith.fptosi" not in int_text
+            and "arith.sitofp" not in int_text
+            and "arith.uitofp" not in int_text
+            and "arith.fptrunc" not in int_text,
+            f"pto.Vec(pto.{int_label}, 2, init=...) should keep element bit patterns without scalar conversions",
+        )
+    expect(
+        "vector<2xi32>" in per_element_vec_ui32_text,
+        "pto.Vec(pto.ui32, 2, init=...) should build a signless vector<2xi32> keeping the bit pattern",
+    )
+
+    vec_literals_text = vec_init_literals_probe.compile().mlir_text()
+    expect_parse_roundtrip_and_verify(vec_literals_text, "per-element Vec init= Python literal specialization")
+    expect("vector<2xi32>" in vec_literals_text, "si32/ui32 Python literals should build signless vector<2xi32>")
+    expect(
+        vec_literals_text.count("llvm.insertelement") == 4,
+        "two two-element Vec init= builders over literals should emit exactly four llvm.insertelement ops",
+    )
+    expect(
+        vec_literals_text.count("llvm.store") == 2,
+        "each literal-built vector should be stored with exactly one llvm.store",
+    )
+    expect(
+        "pto.store" not in vec_literals_text,
+        "literal-built vector stores should not lower through scalar pto.store",
+    )
+    expect(
+        "arith.constant -1" in vec_literals_text,
+        "a negative Python literal should keep the two-complement bit pattern",
+    )
+    expect(
+        "arith.fpext" not in vec_literals_text
+        and "arith.fptosi" not in vec_literals_text
+        and "arith.sitofp" not in vec_literals_text
+        and "arith.uitofp" not in vec_literals_text
+        and "arith.trunci" not in vec_literals_text
+        and "arith.extsi" not in vec_literals_text
+        and "arith.extui" not in vec_literals_text,
+        "Python literal elements should reach insertelement without any numeric widening/truncation casts",
+    )
+
+    expect_raises(
+        TypeError,
+        lambda: vec_init_mapping_probe.compile(),
+        "expects a scalar, a builtin vector, or a sequence of scalars",
+    )
+
+    vec_broadcast_unsigned_text = vec_broadcast_unsigned_probe.compile().mlir_text()
+    expect_parse_roundtrip_and_verify(
+        vec_broadcast_unsigned_text,
+        "pto.Vec ui32 init= broadcast specialization",
+    )
+    expect(
+        "vector<2xi32>" in vec_broadcast_unsigned_text,
+        "pto.Vec(pto.ui32, 2, init=scalar) should build a signless vector<2xi32> instead of failing verification",
+    )
+    expect(
+        vec_broadcast_unsigned_text.count("llvm.insertelement") == 2
+        and vec_broadcast_unsigned_text.count("llvm.store") == 1,
+        "unsigned broadcast should lower through two insertelements and one llvm.store",
+    )
+
+    vec_16b_text = vec_init_16b_probe.compile().mlir_text()
+    expect_parse_roundtrip_and_verify(vec_16b_text, "per-element Vec init= 16-bit specialization")
+    for vec_type, label in (("vector<2xf16>", "f16 x 2"), ("vector<4xf16>", "f16 x 4"), ("vector<4xi16>", "i16 x 4")):
+        expect(
+            vec_type in vec_16b_text,
+            f"pto.Vec(..., init=...) should build {vec_type} for {label} packs",
+        )
+    # Snapshot-style count (see the NOTE above the f32 probe assertions): 2+4+4+4 packed
+    # elements across the four 16-bit stores. Update if the pipeline folds the chain.
+    expect(
+        vec_16b_text.count("llvm.insertelement") == 14,
+        "16-bit packs (2+4+4+4 elements) should emit exactly fourteen llvm.insertelement ops",
+    )
+    expect(
+        vec_16b_text.count("llvm.store") == 4,
+        "each 16-bit vector should be stored with exactly one llvm.store",
+    )
+    expect(
+        "pto.store" not in vec_16b_text,
+        "16-bit vector stores should not lower through scalar pto.store",
+    )
+    expect(
+        "arith.fpext" not in vec_16b_text
+        and "arith.fptosi" not in vec_16b_text
+        and "arith.sitofp" not in vec_16b_text
+        and "arith.uitofp" not in vec_16b_text
+        and "arith.trunci" not in vec_16b_text
+        and "arith.extsi" not in vec_16b_text
+        and "arith.extui" not in vec_16b_text,
+        "16-bit literal elements should reach insertelement without any numeric widening or truncation casts",
+    )
+
+    expect_raises(
+        ValueError,
+        lambda: vec_init_size_mismatch_probe.compile(),
+        "expects exactly 2 element(s), got 3",
+    )
+    expect_raises(
+        TypeError,
+        lambda: vec_init_str_probe.compile(),
+        "expects a scalar, a builtin vector, or a sequence of scalars",
+    )
+
     vec_arith_text = scalar_contiguous_vector_arith_probe.compile().mlir_text()
     expect_parse_roundtrip_and_verify(vec_arith_text, "scalar contiguous vector arithmetic specialization")
     expect(
@@ -6196,6 +7949,16 @@ def main() -> None:
 
     public_surface_text = public_surface_exports_probe.compile().mlir_text()
     expect_parse_roundtrip_and_verify(public_surface_text, "public surface export specialization")
+    explicit_mx_scale_staging_text = explicit_mx_scale_staging_surface_probe.compile().mlir_text()
+    expect_parse_roundtrip_and_verify(
+        explicit_mx_scale_staging_text,
+        "explicit MX scale staging specialization",
+    )
+    explicit_fp4_s4_staging_text = explicit_fp4_s4_staging_surface_probe.compile().mlir_text()
+    expect_parse_roundtrip_and_verify(
+        explicit_fp4_s4_staging_text,
+        "explicit FP4 S4 staging specialization",
+    )
     acc_store_pre_quant_text = acc_store_pre_quant_surface_probe.compile().mlir_text()
     expect_parse_roundtrip_and_verify(acc_store_pre_quant_text, "acc-store pre_quant public mode specialization")
     expect(
@@ -6226,6 +7989,8 @@ def main() -> None:
     expect_parse_roundtrip_and_verify(mask_surface_text, "public mask surface specialization")
     sync_surface_text = public_sync_surface_probe.compile().mlir_text()
     expect_parse_roundtrip_and_verify(sync_surface_text, "public sync surface specialization")
+    trap_surface_text = public_trap_surface_probe.compile().mlir_text()
+    expect_parse_roundtrip_and_verify(trap_surface_text, "public trap surface specialization")
     dynamic_buf_sync_text = public_dynamic_buf_sync_surface_probe.compile().mlir_text()
     expect_parse_roundtrip_and_verify(dynamic_buf_sync_text, "dynamic buf sync surface specialization")
     explicit_runtime_index_bitwise_event_text = explicit_runtime_index_bitwise_event_probe.compile().mlir_text()
@@ -6246,6 +8011,8 @@ def main() -> None:
         "AST runtime index bitwise event specialization",
     )
     data_movement_surface_text = public_data_movement_surface_probe.compile().mlir_text()
+    ui8_pad_surface_text = ui8_pad_surface_probe.compile().mlir_text()
+    expect_parse_roundtrip_and_verify(ui8_pad_surface_text, "ui8 pad value specialization")
     expect_parse_roundtrip_and_verify(data_movement_surface_text, "public data movement surface specialization")
     vector_conversion_surface_text = public_vector_conversion_surface_probe.compile().mlir_text()
     expect_parse_roundtrip_and_verify(vector_conversion_surface_text, "public vector conversion surface specialization")
@@ -6326,6 +8093,20 @@ def main() -> None:
         'dist_mode = "brc"' in vmi_group_brc_vload_text and "group = 8" in vmi_group_brc_vload_text,
         "pto.vmi.vload should allow the grouped brc form exposed by the VMI IR contract",
     )
+    vmi_block_stride_memory_text = vmi_block_stride_memory_probe.compile().mlir_text()
+    expect_parse_roundtrip_and_verify(
+        vmi_block_stride_memory_text, "public VMI block-stride memory specialization"
+    )
+    expect(
+        vmi_block_stride_memory_text.count("pto.vmi.vload") == 1
+        and vmi_block_stride_memory_text.count("pto.vmi.vstore") == 1,
+        "VMI block-stride memory forms should compile with block_stride alone",
+    )
+    expect(
+        "repeat_stride" not in inspect.signature(pto.vmi.vload).parameters
+        and "repeat_stride" not in inspect.signature(pto.vmi.vstore).parameters,
+        "VMI load/store Python signatures must not expose repeat_stride",
+    )
     fixed_width_integer_text = fixed_width_integer_specialization_probe.compile().mlir_text()
     expect_parse_roundtrip_and_verify(fixed_width_integer_text, "fixed-width integer specialization")
     with mock.patch.object(vmi_namespace._pto, "vmi_vadd", None):
@@ -6362,6 +8143,119 @@ def main() -> None:
         'rounding = "R"' in vmi_round_r_vcvt_text,
         "pto.vmi.vcvt should preserve the authored R rounding token for fp32->fp8",
     )
+    vmi_bf16x2_to_f4x2_text = vmi_bf16x2_to_f4x2_vcvt_probe.compile().mlir_text()
+    expect_parse_roundtrip_and_verify(
+        vmi_bf16x2_to_f4x2_text,
+        "VMI bf16x2-to-f4x2 vcvt specialization",
+    )
+    expect(
+        "!pto.vmi.vreg<256xbf16>" in vmi_bf16x2_to_f4x2_text,
+        "VMI bf16x2 vcvt probe should load the source as 256 scalar bf16 lanes",
+    )
+    expect(
+        "!pto.vmi.vreg<128x!pto.bf16x2>" in vmi_bf16x2_to_f4x2_text,
+        "VMI vinterpret_cast should form 128 logical bf16x2 lanes",
+    )
+    expect(
+        "!pto.vmi.vreg<128x!pto.f4E1M2x2>" in vmi_bf16x2_to_f4x2_text
+        and "!pto.vmi.vreg<128x!pto.f4E2M1x2>" in vmi_bf16x2_to_f4x2_text,
+        "VMI bf16x2 vcvt should preserve both packed fp4 result element types",
+    )
+    expect(
+        vmi_bf16x2_to_f4x2_text.count('rounding = "R"') >= 2,
+        "omitted rounding for bf16x2-to-f4x2 should materialize deterministic R rounding",
+    )
+    for rounding in ("R", "A", "F", "Z", "C"):
+        expect(
+            f'rounding = "{rounding}"' in vmi_bf16x2_to_f4x2_text,
+            f"bf16x2-to-f4x2 should accept and preserve {rounding} rounding",
+        )
+    expect(
+        'saturate =' not in vmi_bf16x2_to_f4x2_text,
+        "bf16x2-to-f4x2 VMI vcvt must not emit a saturate attribute",
+    )
+    vmi_bf16x2_to_f4x2_vstore_text = vmi_bf16x2_to_f4x2_vstore_probe.compile().mlir_text()
+    expect_parse_roundtrip_and_verify(
+        vmi_bf16x2_to_f4x2_vstore_text,
+        "VMI bf16x2-to-f4x2 vcvt/vstore specialization",
+    )
+    expect(
+        vmi_bf16x2_to_f4x2_vstore_text.count("pto.vmi.vstore") == 2,
+        "bf16x2-to-f4x2 conversion results should be storable through VMI vstore",
+    )
+    expect(
+        "pto.vmi.vstore" in vmi_bf16x2_to_f4x2_vstore_text
+        and "f4E1M2x2" in vmi_bf16x2_to_f4x2_vstore_text
+        and "f4E2M1x2" in vmi_bf16x2_to_f4x2_vstore_text,
+        "VMI vstore should preserve both packed fp4 destination element types",
+    )
+    expect(
+        "!pto.bf16x2" in vmi_bf16x2_to_f4x2_vstore_text
+        and "!pto.f4E1M2x2" in vmi_bf16x2_to_f4x2_vstore_text
+        and "!pto.f4E2M1x2" in vmi_bf16x2_to_f4x2_vstore_text,
+        "size=128 should preserve the packed bf16x2 and fp4x2 element types",
+    )
+    expect(
+        vmi_bf16x2_to_f4x2_vstore_text.count('rounding = "R"') == 2,
+        "bf16x2-to-f4x2 vstore results should use explicit default R rounding",
+    )
+    expect(
+        "saturate =" not in vmi_bf16x2_to_f4x2_vstore_text,
+        "bf16x2-to-f4x2 vcvt/vstore must not emit a saturate attribute",
+    )
+    expect_raises(
+        ValueError,
+        vmi_bf16x2_to_f4x2_invalid_rounding_probe.compile,
+        "expected one of A, C, F, R, Z",
+    )
+    for invalid_probe in (
+        vmi_bf16x2_to_f4x2_sat_probe,
+        vmi_bf16x2_to_f4x2_nosat_probe,
+    ):
+        expect_raises(
+            ValueError,
+            invalid_probe.compile,
+            "does not support saturate for bf16x2",
+        )
+    for invalid_probe in (
+        vmi_bf16x2_unsupported_pair_probe,
+    ):
+        expect_raises(
+            TypeError,
+            invalid_probe.compile,
+            "supports bf16x2 only for bf16x2 <->",
+        )
+    vmi_f4x2_to_bf16x2_text = vmi_f4x2_to_bf16x2_vcvt_probe.compile().mlir_text()
+    expect_parse_roundtrip_and_verify(
+        vmi_f4x2_to_bf16x2_text,
+        "VMI f4x2-to-bf16x2 vcvt specialization",
+    )
+    expect(
+        "!pto.vmi.vreg<128x!pto.f4E1M2x2>" in vmi_f4x2_to_bf16x2_text,
+        "VMI f4x2 vcvt probe should load the source as 128 packed f4 lanes",
+    )
+    expect(
+        "!pto.vmi.vreg<128x!pto.bf16x2>" in vmi_f4x2_to_bf16x2_text,
+        "VMI f4x2-to-bf16x2 vcvt should widen to 128 logical bf16x2 lanes",
+    )
+    expect(
+        'rounding =' not in vmi_f4x2_to_bf16x2_text,
+        "f4x2-to-bf16x2 VMI vcvt must not emit a rounding attribute",
+    )
+    expect(
+        "saturate =" not in vmi_f4x2_to_bf16x2_text,
+        "f4x2-to-bf16x2 VMI vcvt must not emit a saturate attribute",
+    )
+    expect_raises(
+        ValueError,
+        vmi_f4x2_to_bf16x2_rounding_probe.compile,
+        "does not support rounding for",
+    )
+    expect_raises(
+        ValueError,
+        vmi_f4x2_to_bf16x2_sat_probe.compile,
+        "does not support saturate for",
+    )
     unpack_missing_dtype_error = expect_raises(
         TypeError,
         vmi_unpack_vload_missing_dtype_probe.compile,
@@ -6373,36 +8267,87 @@ def main() -> None:
     )
 
     expected_vmi_ops = [
-        "pto.vmi.create_mask",
-        "pto.vmi.create_group_mask",
         "pto.vmi.vload",
+        "pto.vmi.vstore",
+        "pto.vmi.vsstb",
         "pto.vmi.vci",
         "pto.vmi.vadd",
+        "pto.vmi.vaddc",
+        "pto.vmi.vaddcs",
+        "pto.vmi.vsub",
+        "pto.vmi.vmul",
+        "pto.vmi.vdiv",
+        "pto.vmi.vmax",
+        "pto.vmi.vmin",
+        "pto.vmi.vabs",
+        "pto.vmi.vneg",
         "pto.vmi.vrelu",
+        "pto.vmi.vexp",
+        "pto.vmi.vln",
+        "pto.vmi.vsqrt",
+        "pto.vmi.vand",
+        "pto.vmi.vor",
+        "pto.vmi.vxor",
+        "pto.vmi.vnot",
+        "pto.vmi.vshl",
+        "pto.vmi.vshr",
+        "pto.vmi.vadds",
         "pto.vmi.vmuls",
+        "pto.vmi.vmaxs",
+        "pto.vmi.vmins",
+        "pto.vmi.vshls",
+        "pto.vmi.vshrs",
         "pto.vmi.vcmp",
+        "pto.vmi.vcmps",
         "pto.vmi.vsel",
         "pto.vmi.vselr",
+        "pto.vmi.vbrc",
         "pto.vmi.vcadd",
         "pto.vmi.vcmax",
         "pto.vmi.vcmin",
-        "pto.vmi.vdhist",
-        "pto.vmi.vchist",
-        "pto.vmi.vmull",
-        "pto.vmi.vgather",
         "pto.vmi.vcvt",
         "pto.vmi.vinterpret_cast",
+        "pto.vmi.vexpdif",
+        "pto.vmi.vaxpy",
+        "pto.vmi.vlrelu",
+        "pto.vmi.vprelu",
+        "pto.vmi.vmull",
+        "pto.vmi.vmula",
+        "pto.vmi.vchist",
+        "pto.vmi.vdhist",
+        "pto.vmi.vgather",
+        "pto.vmi.vgatherb",
+        "pto.vmi.vscatter",
+        "pto.vmi.create_mask",
+        "pto.vmi.create_group_mask",
         "pto.vmi.vintlv",
-        "pto.vmi.vstore",
+        "pto.vmi.vdintlv",
     ]
     for op_name in expected_vmi_ops:
         expect(
             op_name in vmi_wrapper_dispatch_text,
             f"representative {op_name} wrapper dispatch should emit the matching generated VMI op",
         )
+    for op_name, expected_count in (("vcadd", 2), ("vcmax", 3), ("vcmin", 2)):
+        expect(
+            vmi_wrapper_dispatch_text.count(f"pto.vmi.{op_name}") == expected_count,
+            f"pto.vmi.{op_name} should emit both omitted-group and explicit-group probes",
+        )
     expect(
-        vmi_wrapper_dispatch_text.count("pto.vmi.vload") == 7,
-        "vmi wrapper dispatch probe should lower seven explicit VMI loads",
+        vmi_wrapper_dispatch_text.count("pto.vmi.vexpdif") == 2,
+        "VMI wrapper dispatch should cover both f32 and f16 vexpdif forms",
+    )
+    expect(
+        "!pto.vmi.vreg<128xf32>" in vmi_wrapper_dispatch_text,
+        "f16 vexpdif should produce a logical f32 result",
+    )
+    expect(
+        vmi_wrapper_dispatch_text.count("group = 1") >= 6,
+        "VMI reductions should make the omitted group equivalent to group=1",
+    )
+    expect(
+        vmi_wrapper_dispatch_text.count("pto.vmi.vload") == 9,
+        "vmi wrapper dispatch probe should lower nine explicit VMI loads",
     )
     expect(
         "pto.backend = \"vpto\"" in vmi_wrapper_dispatch_text,
@@ -6420,9 +8365,22 @@ def main() -> None:
         "!pto.vmi.vreg<64xf16>" in vmi_wrapper_dispatch_text,
         "PTODSL VMI conversion probes should materialize converted logical VMI vector result types in MLIR",
     )
+    for rounding in ("R", "A", "H", "Z"):
+        expect(
+            f'rounding = "{rounding}"' in vmi_wrapper_dispatch_text,
+            f"PTODSL vcvt should preserve canonical {rounding} rounding",
+        )
+    expect(
+        vmi_wrapper_dispatch_text.count('saturate = "SAT"') >= 5,
+        "PTODSL vcvt should preserve explicit SAT and default omitted narrowing saturation to SAT",
+    )
     expect(
         "!pto.vmi.vreg<64xi32>" in vmi_wrapper_dispatch_text,
         "PTODSL VMI index/reinterpret probes should materialize integer logical VMI vector result types in MLIR",
+    )
+    expect(
+        "!pto.vmi.vreg<128xf16>" in vmi_wrapper_dispatch_text,
+        "PTODSL vinterpret_cast should infer lane count by conserving total bits",
     )
     expect(
         "!pto.vmi.mask<64xpred>" in vmi_wrapper_dispatch_text,
@@ -6448,6 +8406,7 @@ def main() -> None:
     )
     expect(public_surface_text.count("pto.mem_bar") >= 1, "mem_bar(...) should still lower explicit memory barriers")
     expect("pto.barrier <PIPE_ALL>" in public_surface_text, "pipe_barrier(Pipe.ALL) should lower to pto.barrier")
+    expect("pto.trap" in trap_surface_text, "pto.trap() should lower to the public pto.trap operation")
     expect("pto.vexp" in public_surface_text, "vexp(...) should lower to pto.vexp")
     expect("pto.vcgmax" in public_surface_text, "vcgmax(...) should lower to pto.vcgmax")
     expect("pto.vcgadd" in public_surface_text, "vcgadd(...) should lower to pto.vcgadd")
@@ -6518,19 +8477,46 @@ def main() -> None:
         explicit_runtime_index_integer_bitwise_event_text.count("pto.set_flag_dyn") == 1,
         "index/integer bitwise event ids should lower sets to pto.set_flag_dyn",
     )
-    expect("arith.andi" in ast_runtime_index_bitwise_event_text, "AST rewritten range loop index & event id should lower to arith.andi")
+    expect(
+        "arith.andi" in ast_runtime_index_bitwise_event_text,
+        "AST rewritten range loop index & event id should lower to arith.andi",
+    )
     expect(
         ast_runtime_index_bitwise_event_text.count("pto.wait_flag_dyn") == 1,
         "AST rewritten range loop index bitwise event id should lower to pto.wait_flag_dyn",
     )
-    expect("pto.sync.set <PIPE_FIX>, 0" in sync_surface_text, "set_cross_flag(Pipe.FIX, 0) should lower to pto.sync.set")
-    expect("pto.sync.wait <PIPE_FIX>, 0" in sync_surface_text, "wait_cross_flag(Pipe.FIX, 0) should lower to pto.sync.wait")
-    expect("pto.sync.set <PIPE_MTE3>, %c3" in sync_surface_text, "set_intra_flag(Pipe.MTE3, dynamic_event) should lower dynamic event ids through pto.sync.set")
-    expect("pto.sync.set <PIPE_FIX>, 4" in sync_surface_text, "set_intra_flag(Pipe.FIX, 4) should lower physical event ids through pto.sync.set")
-    expect("pto.sync.wait <PIPE_V>, %c3" in sync_surface_text, "wait_intra_flag(Pipe.V, dynamic_event) should lower dynamic event ids through pto.sync.wait")
-    expect("pto.sync.wait <PIPE_FIX>, 20" in sync_surface_text, "wait_intra_flag(Pipe.FIX, 20) should lower physical event ids through pto.sync.wait")
-    expect("pto.sync.wait <PIPE_MTE3>, %c3" in sync_surface_text, "wait_intra_flag(Pipe.MTE3, dynamic_event) should lower dynamic event ids through pto.sync.wait")
-    expect("pto.sync.wait <PIPE_MTE3>, 31" in sync_surface_text, "wait_intra_flag(Pipe.MTE3, 31) should lower the static physical event id through pto.sync.wait")
+    expect(
+        "pto.set_cross_block <PIPE_FIX>, 0" in sync_surface_text,
+        "set_cross_block(Pipe.FIX, 0) should lower to pto.set_cross_block",
+    )
+    expect(
+        "pto.wait_cross_block <PIPE_FIX>, 0" in sync_surface_text,
+        "wait_cross_block(Pipe.FIX, 0) should lower to pto.wait_cross_block",
+    )
+    expect(
+        "pto.set_intra_block <PIPE_MTE3>, %c3" in sync_surface_text,
+        "set_intra_block(Pipe.MTE3, dynamic_event) should lower to pto.set_intra_block",
+    )
+    expect(
+        "pto.set_intra_block <PIPE_FIX>, 4" in sync_surface_text,
+        "set_intra_block(Pipe.FIX, 4) should preserve physical event ids",
+    )
+    expect(
+        "pto.wait_intra_block <PIPE_V>, %c3" in sync_surface_text,
+        "wait_intra_block(Pipe.V, dynamic_event) should lower to pto.wait_intra_block",
+    )
+    expect(
+        "pto.wait_intra_block <PIPE_FIX>, 20" in sync_surface_text,
+        "wait_intra_block(Pipe.FIX, 20) should preserve physical event ids",
+    )
+    expect(
+        "pto.wait_intra_block <PIPE_MTE3>, %c3" in sync_surface_text,
+        "wait_intra_block(Pipe.MTE3, dynamic_event) should lower to pto.wait_intra_block",
+    )
+    expect(
+        "pto.wait_intra_block <PIPE_MTE3>, 31" in sync_surface_text,
+        "wait_intra_block(Pipe.MTE3, 31) should preserve static physical event ids",
+    )
     expect(data_movement_surface_text.count("pto.mte_gm_ub") == 2, "public grouped GM->UB wrappers should lower to pto.mte_gm_ub")
     expect("pto.mte_ub_gm" in data_movement_surface_text, "public grouped UB->GM wrapper should lower to pto.mte_ub_gm")
     expect(
@@ -6561,9 +8547,17 @@ def main() -> None:
         re.search(r"pto\.mte_ub_gm [^\n]+ nburst\([^)]+\) l2_cache_ctl\(%c15[^)\n]*\)", data_movement_surface_text) is not None,
         "mte_ub_gm(..., l2_cache='wtsred') should map to the l2_cache_ctl group",
     )
+    expect(
+        re.search(r"pto\.mte_gm_ub [^\n]+ pad\([^)]*\) [^\n]*pad i8", ui8_pad_surface_text) is not None,
+        "ui8 pad value should be normalized to a signless i8 scalar for SET.MOV.PAD.VAL encoding (issue #1245)",
+    )
     expect("pto.mte_ub_ub" in data_movement_surface_text, "public grouped UB->UB wrapper should lower to pto.mte_ub_ub")
     expect("pto.mte_ub_l1" in data_movement_surface_text, "public grouped UB->L1 wrapper should lower to pto.mte_ub_l1")
     expect("pto.mte_gm_l1" in data_movement_surface_text, "public grouped GM->L1 wrapper should lower to pto.mte_gm_l1")
+    expect(
+        "pto.raw_fill_l1" in data_movement_surface_text,
+        "public L1 raw-fill wrapper should lower to pto.raw_fill_l1",
+    )
     expect("pto.mte_l1_ub" in data_movement_surface_text, "public grouped L1->UB wrapper should lower to pto.mte_l1_ub")
     expect("pto.mte_gm_l1_frac" in data_movement_surface_text, "public GM->L1 frac wrapper should lower to pto.mte_gm_l1_frac")
     expect("pto.mte_l1_bt" in data_movement_surface_text, "public L1->BT wrapper should lower to pto.mte_l1_bt")
@@ -6631,8 +8625,51 @@ def main() -> None:
     expect("pto.vsstb" in vsstb_post_update_surface_text, "vsstb(..., post_update=ON) should still lower through pto.vsstb on the current VPTO IR")
     expect("-> !pto.ptr<f32, ub>" in vsstb_post_update_surface_text, "vsstb(..., post_update=ON) should request the updated destination pointer result")
     expect("pto.mte_l1_l0b" in public_surface_text, "mte_l1_l0b(...) should lower to pto.mte_l1_l0b")
+    expect(
+        public_surface_text.count("pto.mte_l1_l0a") >= 2,
+        "explicit mte_l1_l0a(...) should remain on the public wrapper op",
+    )
+    expect(
+        public_surface_text.count("pto.mte_l1_l0b") >= 2,
+        "explicit mte_l1_l0b(...) should remain on the public wrapper op",
+    )
+    expect(
+        explicit_fp4_s4_staging_text.count("pto.mte_l1_l0a") == 1,
+        "FP4 explicit mte_l1_l0a(...) should trace through pto.mte_l1_l0a",
+    )
+    expect(
+        explicit_fp4_s4_staging_text.count("pto.mte_l1_l0b") == 1,
+        "FP4 explicit mte_l1_l0b(...) should trace through pto.mte_l1_l0b",
+    )
+    expect(
+        "pto.load_cbuf_to_ca_s4" not in explicit_fp4_s4_staging_text and
+        "pto.load_cbuf_to_cb_s4" not in explicit_fp4_s4_staging_text,
+        "PTODSL must not expose internal raw S4 load operations",
+    )
+    explicit_ca_controls = (
+        r"pto\.mte_l1_l0a .*%c4_i64(?:_\d+)?, %c0_i64(?:_\d+)?, "
+        r"%c4_i64(?:_\d+)?, %c16_i64(?:_\d+)?, "
+        r"%c16_i64(?:_\d+)?, %c4_i64(?:_\d+)? \{transpose = true\}"
+    )
+    expect(
+        re.search(explicit_ca_controls, public_surface_text) is not None,
+        "explicit mte_l1_l0a controls should remain on the public wrapper",
+    )
     expect("pto.mte_l1_l0a_mx" in public_surface_text, "mte_l1_l0a_mx(...) should lower to pto.mte_l1_l0a_mx")
     expect("pto.mte_l1_l0b_mx" in public_surface_text, "mte_l1_l0b_mx(...) should lower to pto.mte_l1_l0b_mx")
+    expect(
+        explicit_mx_scale_staging_text.count("!pto.ptr<!pto.f8E8M0, l1>") >= 2,
+        "explicit MX staging should preserve E8M0 L1 source pointers",
+    )
+    for op_name in ("mte_l1_l0a_mx", "mte_l1_l0b_mx"):
+        expect(
+            re.search(
+                rf"pto\.{op_name} %\d+, %\d+, %c3_i64(?:_\d+)?, %c5_i64(?:_\d+)?, "
+                r"%c16_i64(?:_\d+)?, %c2_i64(?:_\d+)?, %c8_i64(?:_\d+)?, %c2_i64(?:_\d+)",
+                explicit_mx_scale_staging_text,
+            ) is not None,
+            f"{op_name}(...) should preserve every explicit MX control operand",
+        )
     expect("pto.tmatmul.mx" in public_surface_text, "pto.tile.matmul_mx should lower to pto.tmatmul.mx")
     expect("pto.tmatmul.mx.acc" in public_surface_text, "pto.tile.matmul_mx_acc should lower to pto.tmatmul.mx.acc")
     expect("pto.tmatmul.mx.bias" in public_surface_text, "pto.tile.matmul_mx_bias should lower to pto.tmatmul.mx.bias")
@@ -6812,6 +8849,9 @@ def main() -> None:
 
     print("ptodsl_jit_compile: PASS")
     os._exit(0)
+
+
+_assert_ast_rewrite_nested_partial_assign_ssa_identity()
 
 
 if __name__ == "__main__":

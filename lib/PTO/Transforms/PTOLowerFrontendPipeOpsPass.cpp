@@ -6,16 +6,17 @@
 // INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
 // See LICENSE in the root of the software repository for the full text of the License.
 
+#include <optional>
 #include "PTO/IR/PTO.h"
 #include "PTO/Transforms/Passes.h"
 #include "mlir/Dialect/Arith/IR/Arith.h"
 #include "mlir/Dialect/Func/IR/FuncOps.h"
 #include "mlir/IR/BuiltinAttributes.h"
 #include "mlir/IR/Dominance.h"
-#include "mlir/Pass/Pass.h"
 #include "mlir/IR/PatternMatch.h"
+#include "mlir/Pass/Pass.h"
 #include "llvm/ADT/DenseMap.h"
-#include <optional>
+
 
 namespace mlir {
 namespace pto {
@@ -56,16 +57,18 @@ using FrontendPipeHandleMap = llvm::DenseMap<int32_t, FrontendPipeHandles>;
 
 template <typename InitOpT>
 static LogicalResult requireFrontendGmSlotBuffer(InitOpT initOp) {
-  if (initOp.getGmSlotBuffer())
+  if (initOp.getGmSlotBuffer()) {
     return success();
+  }
   return initOp.emitOpError("requires 'gm_slot_buffer' when lowering to a2/a3");
 }
 
 template <typename InitOpT>
 static void propagateFrontendIdAttr(InitOpT initOp, Operation *pipeOp,
                                     IRRewriter &rewriter) {
-  if (!pipeOp)
+  if (!pipeOp) {
     return;
+  }
   pipeOp->setAttr(kFrontendPipeIdAttrName,
                   rewriter.getI32IntegerAttr(initOp.getId()));
 }
@@ -74,15 +77,17 @@ template <typename InitOpT>
 static void propagateFixpipePeerKeyAttrs(InitOpT initOp, Operation *pipeOp,
                                          IRRewriter &rewriter) {
   if (!pipeOp || !initOp.getAccPushEpilogueAttr() ||
-      initOp.getDirMask() != kC2VDirMask || !initOp.getC2vConsumerBuf())
+      initOp.getDirMask() != kC2VDirMask || !initOp.getC2vConsumerBuf()) {
     return;
+  }
 
   auto currentFunc = initOp->template getParentOfType<func::FuncOp>();
-  if (!currentFunc)
+  if (!currentFunc) {
     return;
+  }
 
-  auto setPeerKeyAttrs = [&](FlatSymbolRefAttr ownerFuncAttr,
-                             StringRef reserveName) {
+  auto setPeerKeyAttrs = [&rewriter, pipeOp](FlatSymbolRefAttr ownerFuncAttr,
+                                              StringRef reserveName) {
     pipeOp->setAttr(kPipePeerOwnerFuncAttrName, ownerFuncAttr);
     pipeOp->setAttr(kPipePeerReserveNameAttrName,
                     rewriter.getStringAttr(reserveName));
@@ -100,50 +105,58 @@ static void propagateFixpipePeerKeyAttrs(InitOpT initOp, Operation *pipeOp,
                           .template getDefiningOp<ImportReservedBufferOp>()) {
     auto peerFunc = lookupPeerFuncAcrossContainer(importOp.getOperation(),
                                                   importOp.getPeerFuncAttr());
-    if (!peerFunc)
+    if (!peerFunc) {
       return;
+    }
     setPeerKeyAttrs(FlatSymbolRefAttr::get(peerFunc), importOp.getName());
   }
 }
 
 template <typename InitOpT>
 static int32_t getFrontendSlotNum(InitOpT initOp) {
-  if (auto slotNumAttr = initOp.getSlotNumAttr())
+  if (auto slotNumAttr = initOp.getSlotNumAttr()) {
     return slotNumAttr.getInt();
+  }
   return initOp.getDirMask() == kBidirectionalDirMask
              ? kBidirectionalSlotNum
              : kSingleDirectionSlotNum;
 }
 
 static std::optional<int64_t> getStaticIndexLikeValue(Value value) {
-  if (auto cst = value.getDefiningOp<arith::ConstantIndexOp>())
+  if (auto cst = value.getDefiningOp<arith::ConstantIndexOp>()) {
     return cst.value();
+  }
   if (auto cst = value.getDefiningOp<arith::ConstantOp>()) {
-    if (auto intAttr = dyn_cast<IntegerAttr>(cst.getValue()))
+    if (auto intAttr = dyn_cast<IntegerAttr>(cst.getValue())) {
       return intAttr.getInt();
+    }
   }
   return std::nullopt;
 }
 
 static SmallVector<int64_t> getStaticTensorViewStrides(Value tensor) {
   SmallVector<int64_t> strides;
-  if (!tensor)
+  if (!tensor) {
     return strides;
+  }
 
   auto makeView = tensor.getDefiningOp<MakeTensorViewOp>();
-  if (!makeView)
+  if (!makeView) {
     return strides;
+  }
 
   auto tvTy = dyn_cast<TensorViewType>(makeView.getResult().getType());
   if (!tvTy ||
-      makeView.getStrides().size() != static_cast<size_t>(tvTy.getRank()))
+      makeView.getStrides().size() != static_cast<size_t>(tvTy.getRank())) {
     return {};
+  }
 
   strides.reserve(makeView.getStrides().size());
   for (Value stride : makeView.getStrides()) {
     auto staticStride = getStaticIndexLikeValue(stride);
-    if (!staticStride)
+    if (!staticStride) {
       return {};
+    }
     strides.push_back(*staticStride);
   }
   return strides;
@@ -152,8 +165,9 @@ static SmallVector<int64_t> getStaticTensorViewStrides(Value tensor) {
 static void propagateGlobalTensorStrides(DeclareGlobalOp decl,
                                          ArrayRef<int64_t> strides,
                                          IRRewriter &rewriter) {
-  if (strides.empty())
+  if (strides.empty()) {
     return;
+  }
   decl->setAttr(kGlobalTensorStridesAttrName,
                 rewriter.getDenseI64ArrayAttr(strides));
 }
@@ -176,8 +190,9 @@ static FailureOr<Value> createFrontendGlobalTensorPipe(InitOpT initOp,
   IntegerAttr localSlotNumAttr;
   if (localAddr) {
     localSlotNumAttr = initOp.getLocalSlotNumAttr();
-    if (!localSlotNumAttr)
+    if (!localSlotNumAttr) {
       localSlotNumAttr = rewriter.getI32IntegerAttr(slotNum);
+    }
   }
   auto pipe = rewriter.create<InitializeL2G2LPipeOp>(
       loc, pipeTy, dirAttr, slotSizeAttr, slotNumAttr, localSlotNumAttr,
@@ -204,9 +219,10 @@ static FailureOr<Value> createFrontendLocalPipe(InitOpT initOp,
   auto accPushEpilogueAttr = initOp.getAccPushEpilogueAttr();
 
   if (arch == PTOArch::A5) {
-    if (!localAddr)
+    if (!localAddr) {
       return initOp.emitOpError(
           "requires local consumer buffer operands when lowering to a5");
+    }
     auto pipe = rewriter.create<InitializeL2LPipeOp>(
         loc, pipeTy, dirAttr, slotSizeAttr, slotNumAttr, IntegerAttr{},
         noSplitAttr, accPushEpilogueAttr, localAddr, peerLocalAddr);
@@ -215,15 +231,18 @@ static FailureOr<Value> createFrontendLocalPipe(InitOpT initOp,
     return pipe.getPipe();
   }
 
-  if (failed(requireFrontendGmSlotBuffer(initOp)))
+  if (failed(requireFrontendGmSlotBuffer(initOp))) {
     return failure();
-  if (!localAddr)
+  }
+  if (!localAddr) {
     return initOp.emitOpError(
         "requires local consumer buffer operands for local FIFO pipe lowering");
+  }
 
   IntegerAttr localSlotNumAttr = initOp.getLocalSlotNumAttr();
-  if (!localSlotNumAttr)
+  if (!localSlotNumAttr) {
     localSlotNumAttr = rewriter.getI32IntegerAttr(slotNum);
+  }
   auto pipe = rewriter.create<InitializeL2G2LPipeOp>(
       loc, pipeTy, dirAttr, slotSizeAttr, slotNumAttr, localSlotNumAttr,
       IntegerAttr{}, noSplitAttr, accPushEpilogueAttr, initOp.getGmSlotBuffer(),
@@ -245,8 +264,9 @@ lowerSingleDirectionFrontendInit(InitOpT initOp, IRRewriter &rewriter,
                                                      localAddr)
                     : createFrontendLocalPipe(initOp, rewriter, arch, pipeTy,
                                               dirMask, slotNum, localAddr);
-  if (failed(pipeOr))
+  if (failed(pipeOr)) {
     return failure();
+  }
 
   FrontendPipeHandles handles;
   SmallVector<int64_t> slotStrides =
@@ -276,8 +296,9 @@ lowerBidirectionalFrontendInit(InitOpT initOp, IRRewriter &rewriter,
                                               kBidirectionalDirMask, slotNum,
                                               initOp.getC2vConsumerBuf(),
                                               initOp.getV2cConsumerBuf());
-  if (failed(pipeOr))
+  if (failed(pipeOr)) {
     return failure();
+  }
 
   FrontendPipeHandles handles;
   handles.c2vPipe = *pipeOr;
@@ -317,21 +338,25 @@ template <typename InitOpT>
 static void propagateFrontendNoSplitAttr(InitOpT initOp,
                                          const FrontendPipeHandles &handles) {
   auto noSplitAttr = initOp.getNosplitAttr();
-  if (!noSplitAttr)
+  if (!noSplitAttr) {
     return;
+  }
 
-  if (handles.anchorOp)
+  if (handles.anchorOp) {
     handles.anchorOp->setAttr("nosplit", noSplitAttr);
+  }
 
   Operation *c2vOp =
       handles.c2vPipe ? handles.c2vPipe.getDefiningOp() : nullptr;
   Operation *v2cOp =
       handles.v2cPipe ? handles.v2cPipe.getDefiningOp() : nullptr;
 
-  if (c2vOp && c2vOp != handles.anchorOp)
+  if (c2vOp && c2vOp != handles.anchorOp) {
     c2vOp->setAttr("nosplit", noSplitAttr);
-  if (v2cOp && v2cOp != handles.anchorOp && v2cOp != c2vOp)
+  }
+  if (v2cOp && v2cOp != handles.anchorOp && v2cOp != c2vOp) {
     v2cOp->setAttr("nosplit", noSplitAttr);
+  }
 }
 
 template <typename InitOpT>
@@ -339,8 +364,9 @@ static FailureOr<FrontendPipeHandles> lowerAndEraseFrontendInit(InitOpT initOp,
                                                                 IRRewriter &rewriter) {
   rewriter.setInsertionPoint(initOp);
   auto loweredOr = lowerFrontendInitOp(initOp, rewriter);
-  if (failed(loweredOr))
+  if (failed(loweredOr)) {
     return failure();
+  }
   propagateFrontendNoSplitAttr(initOp, *loweredOr);
   rewriter.eraseOp(initOp);
   return *loweredOr;
@@ -383,8 +409,9 @@ static FailureOr<FrontendPipeHandleMap> lowerInitIfPresent(func::FuncOp funcOp,
     return WalkResult::advance();
   });
 
-  if (hasDuplicateId)
+  if (hasDuplicateId) {
     return failure();
+  }
 
   if (hasAicInit && hasAivInit) {
     funcOp.emitOpError("cannot mix pto.aic_initialize_pipe and "
@@ -396,8 +423,9 @@ static FailureOr<FrontendPipeHandleMap> lowerInitIfPresent(func::FuncOp funcOp,
     if (auto init = dyn_cast<AicInitializePipeOp>(op)) {
       int32_t id = init.getId();
       auto loweredOr = lowerAndEraseFrontendInit(init, rewriter);
-      if (failed(loweredOr))
+      if (failed(loweredOr)) {
         return failure();
+      }
       handlesById.try_emplace(id, *loweredOr);
       continue;
     }
@@ -405,8 +433,9 @@ static FailureOr<FrontendPipeHandleMap> lowerInitIfPresent(func::FuncOp funcOp,
     auto init = cast<AivInitializePipeOp>(op);
     int32_t id = init.getId();
     auto loweredOr = lowerAndEraseFrontendInit(init, rewriter);
-    if (failed(loweredOr))
+    if (failed(loweredOr)) {
       return failure();
+    }
     handlesById.try_emplace(id, *loweredOr);
   }
 
@@ -434,8 +463,9 @@ static LogicalResult lowerFrontendDataOps(func::FuncOp funcOp,
   SmallVector<Operation *> frontendOps;
   funcOp.walk([&](Operation *op) {
     if (isa<TAllocToAivOp, TAllocToAicOp, TPushToAivOp, TPushToAicOp,
-            TPopFromAicOp, TPopFromAivOp, TFreeFromAicOp, TFreeFromAivOp>(op))
+            TPopFromAicOp, TPopFromAivOp, TFreeFromAicOp, TFreeFromAivOp>(op)) {
       frontendOps.push_back(op);
+    }
   });
 
   auto lookupHandles = [&](Operation *op, int32_t id)
@@ -461,8 +491,9 @@ static LogicalResult lowerFrontendDataOps(func::FuncOp funcOp,
 
     if (auto alloc = dyn_cast<TAllocToAivOp>(op)) {
       auto handlesOr = lookupHandles(op, alloc.getId());
-      if (failed(handlesOr))
+      if (failed(handlesOr)) {
         return failure();
+      }
       const FrontendPipeHandles &handles = **handlesOr;
       if (!handles.c2vPipe) {
         op->emitOpError() << "requires initialize_pipe(id = " << alloc.getId()
@@ -480,8 +511,9 @@ static LogicalResult lowerFrontendDataOps(func::FuncOp funcOp,
 
     if (auto alloc = dyn_cast<TAllocToAicOp>(op)) {
       auto handlesOr = lookupHandles(op, alloc.getId());
-      if (failed(handlesOr))
+      if (failed(handlesOr)) {
         return failure();
+      }
       const FrontendPipeHandles &handles = **handlesOr;
       if (!handles.v2cPipe) {
         op->emitOpError() << "requires initialize_pipe(id = " << alloc.getId()
@@ -499,8 +531,9 @@ static LogicalResult lowerFrontendDataOps(func::FuncOp funcOp,
 
     if (auto push = dyn_cast<TPushToAivOp>(op)) {
       auto handlesOr = lookupHandles(op, push.getId());
-      if (failed(handlesOr))
+      if (failed(handlesOr)) {
         return failure();
+      }
       const FrontendPipeHandles &handles = **handlesOr;
       if (!handles.c2vPipe) {
         op->emitOpError() << "requires initialize_pipe(id = " << push.getId()
@@ -514,8 +547,9 @@ static LogicalResult lowerFrontendDataOps(func::FuncOp funcOp,
 
     if (auto push = dyn_cast<TPushToAicOp>(op)) {
       auto handlesOr = lookupHandles(op, push.getId());
-      if (failed(handlesOr))
+      if (failed(handlesOr)) {
         return failure();
+      }
       const FrontendPipeHandles &handles = **handlesOr;
       if (!handles.v2cPipe) {
         op->emitOpError() << "requires initialize_pipe(id = " << push.getId()
@@ -530,8 +564,9 @@ static LogicalResult lowerFrontendDataOps(func::FuncOp funcOp,
 
     if (auto pop = dyn_cast<TPopFromAicOp>(op)) {
       auto handlesOr = lookupHandles(op, pop.getId());
-      if (failed(handlesOr))
+      if (failed(handlesOr)) {
         return failure();
+      }
       const FrontendPipeHandles &handles = **handlesOr;
       if (!handles.c2vPipe) {
         op->emitOpError() << "requires initialize_pipe(id = " << pop.getId()
@@ -561,8 +596,9 @@ static LogicalResult lowerFrontendDataOps(func::FuncOp funcOp,
 
     if (auto pop = dyn_cast<TPopFromAivOp>(op)) {
       auto handlesOr = lookupHandles(op, pop.getId());
-      if (failed(handlesOr))
+      if (failed(handlesOr)) {
         return failure();
+      }
       const FrontendPipeHandles &handles = **handlesOr;
       if (!handles.v2cPipe) {
         op->emitOpError() << "requires initialize_pipe(id = " << pop.getId()
@@ -592,8 +628,9 @@ static LogicalResult lowerFrontendDataOps(func::FuncOp funcOp,
 
     if (auto free = dyn_cast<TFreeFromAicOp>(op)) {
       auto handlesOr = lookupHandles(op, free.getId());
-      if (failed(handlesOr))
+      if (failed(handlesOr)) {
         return failure();
+      }
       const FrontendPipeHandles &handles = **handlesOr;
       if (!handles.c2vPipe) {
         op->emitOpError() << "requires initialize_pipe(id = " << free.getId()
@@ -608,8 +645,9 @@ static LogicalResult lowerFrontendDataOps(func::FuncOp funcOp,
 
     auto free = cast<TFreeFromAivOp>(op);
     auto handlesOr = lookupHandles(op, free.getId());
-    if (failed(handlesOr))
+    if (failed(handlesOr)) {
       return failure();
+    }
     const FrontendPipeHandles &handles = **handlesOr;
     if (!handles.v2cPipe) {
       op->emitOpError() << "requires initialize_pipe(id = " << free.getId()
@@ -629,8 +667,9 @@ struct PTOLowerFrontendPipeOpsPass
           PTOLowerFrontendPipeOpsPass> {
   void runOnOperation() override {
     func::FuncOp funcOp = getOperation();
-    if (!hasFrontendPipeOps(funcOp))
+    if (!hasFrontendPipeOps(funcOp)) {
       return;
+    }
 
     IRRewriter rewriter(funcOp.getContext());
     auto loweredOr = lowerInitIfPresent(funcOp, rewriter);
@@ -639,8 +678,9 @@ struct PTOLowerFrontendPipeOpsPass
       return;
     }
 
-    if (failed(lowerFrontendDataOps(funcOp, *loweredOr, rewriter)))
+    if (failed(lowerFrontendDataOps(funcOp, *loweredOr, rewriter))) {
       signalPassFailure();
+    }
   }
 };
 

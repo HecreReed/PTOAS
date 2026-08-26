@@ -1,0 +1,116 @@
+# Copyright (c) 2026 Huawei Technologies Co., Ltd.
+# This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+# CANN Open Software License Agreement Version 2.0 (the "License").
+# Please refer to the License for details. You may not use this file except in compliance with the License.
+# THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+# INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+# See LICENSE in the root of the software repository for the full text of the License.
+
+name: A3 TaskQueue Smoke
+
+on:
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: a3-taskqueue-smoke
+  cancel-in-progress: false
+
+jobs:
+  taskqueue-smoke:
+    if: github.repository == 'hw-native-sys/PTOAS'
+    runs-on: [self-hosted, Linux, ARM64, ptoas-a3]
+    timeout-minutes: 10
+    steps:
+      - name: Validate asynchronous TaskQueue flow
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          [[ "$(uname -m)" == "aarch64" ]] || {
+            echo "ERROR: A3 runner must be aarch64" >&2
+            exit 1
+          }
+          command -v task-submit >/dev/null || {
+            echo "ERROR: required command is missing: task-submit" >&2
+            exit 1
+          }
+          [[ -n "${RUNNER_TEMP:-}" ]] || {
+            echo "ERROR: RUNNER_TEMP is empty" >&2
+            exit 1
+          }
+
+          smoke_root="${RUNNER_TEMP}/ptoas-a3-taskqueue-smoke-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          case "${smoke_root}" in
+            "${RUNNER_TEMP}"/ptoas-a3-taskqueue-smoke-*) ;;
+            *) echo "ERROR: unsafe smoke root: ${smoke_root}" >&2; exit 1 ;;
+          esac
+          mkdir -p "${smoke_root}"
+          env_file="${smoke_root}/smoke.env"
+          cleanup() {
+            [[ ! -e "${env_file}" ]] || unlink "${env_file}"
+            rmdir "${smoke_root}" 2>/dev/null || true
+          }
+          trap cleanup EXIT
+
+          printf '%s\n' 'A3_TASKQUEUE_SMOKE=github-actions' > "${env_file}"
+          # shellcheck disable=SC2016 # Expanded inside TaskQueue.
+          smoke_command='test "${A3_TASKQUEUE_SMOKE:-}" = "github-actions" && printf "%s\n" "A3_TASKQUEUE_SMOKE_OK"'
+          set +e
+          submit_output="$(task-submit \
+            --max-time 60 \
+            --env-file "${env_file}" \
+            "${smoke_command}" 2>&1)"
+          submit_rc=$?
+          set -e
+          printf '%s\n' "${submit_output}"
+          if [[ "${submit_rc}" -ne 0 ]]; then
+            echo "ERROR: task-submit failed (exit ${submit_rc})" >&2
+            exit "${submit_rc}"
+          fi
+          task_id="$(printf '%s\n' "${submit_output}" | awk '
+            match($0, /task_[0-9]{8}_[0-9]{6}_[0-9]+/) {
+              id = substr($0, RSTART, RLENGTH)
+            }
+            END { print id }
+          ')"
+          [[ -n "${task_id}" ]] || {
+            echo "ERROR: task-submit did not return a task id" >&2
+            exit 1
+          }
+
+          # shellcheck disable=SC2329 # Invoked by the signal trap below.
+          cancel_task() {
+            echo "Cancelling TaskQueue smoke task ${task_id}"
+            task-submit --kill "${task_id}" >/dev/null 2>&1 || true
+          }
+          trap cancel_task INT TERM
+
+          set +e
+          task-submit --timeout 60 --wait "${task_id}"
+          wait_rc=$?
+          set -e
+          trap - INT TERM
+
+          set +e
+          status_output="$(task-submit --status "${task_id}" 2>&1)"
+          status_rc=$?
+          set -e
+          printf '%s\n' "${status_output}"
+          if [[ "${status_rc}" -ne 0 ]]; then
+            echo "ERROR: task-submit --status failed (exit ${status_rc})" >&2
+            exit "${status_rc}"
+          fi
+          if [[ "${status_output}" =~ exit=([0-9]+) ]]; then
+            task_rc="${BASH_REMATCH[1]}"
+          else
+            echo "ERROR: TaskQueue status has no exit code (wait rc=${wait_rc})" >&2
+            exit 1
+          fi
+          [[ "${wait_rc}" -eq "${task_rc}" ]] || {
+            echo "ERROR: task wait rc=${wait_rc}, recorded task rc=${task_rc}" >&2
+            exit 1
+          }
+          [[ "${task_rc}" -eq 0 ]] || exit "${task_rc}"
+          echo "A3 asynchronous TaskQueue smoke test passed"

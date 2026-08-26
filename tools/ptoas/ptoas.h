@@ -9,6 +9,9 @@
 #ifndef PTOAS_H
 #define PTOAS_H
 
+#include <memory>
+#include <optional>
+#include <string>
 #include "ObjectEmission.h"
 #include "PTO/Compiler/CompilerApi.h"
 #include "PTO/Transforms/VPTOLLVMEmitter.h"
@@ -18,9 +21,7 @@
 #include "mlir/Support/LogicalResult.h"
 #include "llvm/ADT/StringRef.h"
 #include "llvm/Support/CommandLine.h"
-#include <memory>
-#include <optional>
-#include <string>
+
 
 namespace mlir {
 class AsmParserState;
@@ -62,6 +63,8 @@ class PTOASContext {
 public:
   PTOASContext(DialectRegistry &registry, llvm::StringRef outputPath, int argc,
                char **argv);
+  PTOASContext(MLIRContext &borrowedContext, llvm::StringRef outputPath,
+               int argc, char **argv);
   ~PTOASContext();
 
   LogicalResult initializeEnvironment(bool requiresToolchain,
@@ -94,14 +97,15 @@ public:
                                std::string &path);
 
 private:
-  MLIRContext mlirContext;
+  std::unique_ptr<MLIRContext> ownedMlirContext;
+  MLIRContext *mlirContext = nullptr;
   std::string outputPath;
   std::string arch;
   BackendInfo backendInfo;
   VFSIMTSizeFixMode vfsimtSizeFixMode = VFSIMTSizeFixMode::Auto;
   int argc = 0;
   char **argv = nullptr;
-  CANNVersion cannVersion = CANNVersion{9, 0, 0, 1};
+  CANNVersion cannVersion = kDefaultCANNVersion;
   std::optional<CANNVersion> outputCANNVersionOverride;
   std::optional<CANNToolchain> toolchain;
   TempFileRegistry tempFiles;
@@ -135,6 +139,8 @@ void loadPTOASDialects(MLIRContext &context);
 
 // Reusable driver entry shared by the Python extension and standalone CLI.
 PTOAS_COMPILER_EXPORT int runPTOAS(int argc, char **argv);
+PTOAS_COMPILER_EXPORT int
+runPTOAS(int argc, char **argv, MLIRContext &borrowedContext);
 
 // Attach textual-.pto SSA name hints (function args, block args, op results)
 // to the parsed module's Locations as debug metadata. Called by the driver

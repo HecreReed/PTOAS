@@ -16,6 +16,8 @@
 #ifndef MLIR_DIALECT_PTO_IR_PTO_H_
 #define MLIR_DIALECT_PTO_IR_PTO_H_
 
+#include "PTO/Support/CodeConstants.h"
+
 #include "mlir/Dialect/Arith/IR/Arith.h"
 #include "mlir/Dialect/Func/IR/FuncOps.h"
 #include "mlir/Dialect/LLVMIR/LLVMDialect.h"
@@ -35,6 +37,8 @@
 //===----------------------------------------------------------------------===//
 
 #include "PTO/IR/PTODialect.h"
+#include "PTO/IR/VPTOAddressSemantics.h"
+#include "PTO/IR/VPTOScheduling.h"
 
 //===----------------------------------------------------------------------===//
 // PTO Enums
@@ -147,6 +151,17 @@ enum class PTOArch {
   A5,
 };
 
+/// The semantic form selected by the optional third tile of pto.tmov.  The
+/// public operand remains named `fp` for API compatibility; address space is
+/// the sole discriminator between legacy FP and exponent X-to-ZZ lowering.
+enum class TMovForm {
+  NoTileAux,
+  Fp,
+  XToZz,
+};
+
+TMovForm classifyTMovForm(Value fp);
+
 /// Resolve the effective PTO target architecture from module-level IR state.
 PTOArch getTargetArch(ModuleOp module);
 PTOArch getTargetArch(Operation *op);
@@ -175,6 +190,10 @@ private:
   PTOParserTargetArch previousArch;
 };
 
+/// Return the target-specific alignment size in bytes for a supported
+/// load/store vector op. Unsupported operations, modes, and targets return
+/// std::nullopt.
+std::optional<int64_t> getLoadStoreVecAlignmentSize(Operation *op);
 
 /// Function attributes that mark an explicit PTO kernel entry.
 inline constexpr llvm::StringLiteral kPTOEntryAttrName = "pto.entry";
@@ -192,14 +211,50 @@ inline constexpr llvm::StringLiteral kPTOVisibilityExternalValue = "external";
 inline constexpr llvm::StringLiteral kPTODSLLogicalNameAttrName =
     "pto.ptodsl.logical_name";
 
+/// Loop-unroll hint attributes carried on `scf.for` as discardable attrs.
+///
+/// `pto.unroll` is a string attribute; "full" and "enable" are supported.
+/// `pto.unroll_factor` is an integer attribute holding a positive unroll
+/// factor.  The two attributes are mutually exclusive on one loop.
+///
+/// Consumption contract:
+/// - "full": `pto-unroll-loops` unrolls natively when the trip count is a
+///   positive constant; otherwise the hint is dropped with a remark and the
+///   loop is kept.
+/// - "enable": never unrolled natively.  `pto-convert-scf-to-cf-with-loop-hints` translates
+///   it into an llvm.loop_annotation that becomes !llvm.loop.unroll.enable
+///   metadata, delegating the unroll decision to the compiler's cost model
+///   (LLVM's ForceEnable semantics).
+/// - `pto.unroll_factor`: unrolled natively by `pto-unroll-loops` when the
+///   value satisfies `isValidUnrollFactorAttr`, the step is a positive
+///   constant, and the factor does not exceed the pass's max-unroll-factor
+///   cap; otherwise the hint is dropped with a remark.  Malformed hints
+///   (unknown pto.unroll value, both attributes on one loop, out-of-contract
+///   factor) are hard errors reported by `pto-unroll-loops`.
+inline constexpr llvm::StringLiteral kUnrollAttrName = "pto.unroll";
+inline constexpr llvm::StringLiteral kUnrollEnableValue = "enable";
+inline constexpr llvm::StringLiteral kUnrollFullValue = "full";
+inline constexpr llvm::StringLiteral kUnrollFactorAttrName =
+    "pto.unroll_factor";
+
+/// Check whether a `pto.unroll_factor` attribute value satisfies the
+/// contract: a signless i32 holding a positive factor.  The factor is read
+/// back as a signed value, so anything wider or non-positive would silently
+/// truncate (e.g. an i64 2**31 becomes a negative factor).
+inline bool isValidUnrollFactorAttr(IntegerAttr attr) {
+  return attr && attr.getType().isSignlessInteger(32) && attr.getInt() >= 1;
+}
+
 /// Return the PTODSL logical function name when present, otherwise fall back to
 /// the current symbol name. PTODSL uses this to mark ABI-specialized helper and
 /// kernel-module symbols without relying on symbol-name parsing.
 inline StringRef getPTODSLLogicalNameOrSymbolName(func::FuncOp func) {
-  if (!func)
+  if (!func) {
     return {};
-  if (auto attr = func->getAttrOfType<StringAttr>(kPTODSLLogicalNameAttrName))
+  }
+  if (auto attr = func->getAttrOfType<StringAttr>(kPTODSLLogicalNameAttrName)) {
     return attr.getValue();
+  }
   return func.getSymName();
 }
 

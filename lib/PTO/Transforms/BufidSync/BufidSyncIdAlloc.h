@@ -9,8 +9,9 @@
 #ifndef MLIR_DIALECT_PTO_TRANSFORMS_BUFIDSYNC_BUFIDSYNCIDALLOC_H
 #define MLIR_DIALECT_PTO_TRANSFORMS_BUFIDSYNC_BUFIDSYNCIDALLOC_H
 
-#include "BufidSyncAnalysis.h"
 #include <string>
+#include "BufidSyncAnalysis.h"
+
 
 namespace mlir {
 namespace pto {
@@ -27,7 +28,7 @@ public:
 
   void computeLifeIntervals();
   void linearScanAllocate();
-  bool needsReuse() const { return maxPhysicalIdUsed_ >= (int)physicalBufIdCount_; }
+  bool needsReuse() const { return maxPhysicalIdUsed_ >= static_cast<int>(physicalBufIdCount_); }
   void reuseIds();
   void compactPhysicalIds();
   bool validateNoSamePhysicalIdNesting(std::string *error = nullptr) const;

@@ -27,6 +27,14 @@ REPOSITORY_ROOT = SCRIPT_PATH.parents[2]
 METADATA_PATCH = SCRIPT_PATH.with_name("pyproject.toml.patch")
 DEFAULT_OUTPUT_DIR = REPOSITORY_ROOT / ".work" / "ptoas-vmi-source"
 VERSION_PATTERN = re.compile(r'^\+version = "([0-9]+\.[0-9]+\.[0-9]+)"$', re.M)
+# Agent instructions and compatibility discovery links are development-only
+# configuration, not part of the VMI source tree. Source packaging continues
+# to reject symbolic links everywhere else in the repository.
+ARCHIVE_EXCLUDES = (
+    ":(exclude).agents",
+    ":(exclude).claude",
+    ":(exclude).codex",
+)
 
 
 def parse_args() -> argparse.Namespace:
@@ -90,19 +98,36 @@ def prepare_source(output_dir: Path, revision: str) -> dict[str, str]:
     )
     archive_path: Path | None = None
     try:
-        resolved_revision = subprocess.run(
-            [
-                "git",
-                "-C",
-                str(REPOSITORY_ROOT),
-                "rev-parse",
-                "--verify",
-                f"{revision}^{{commit}}",
-            ],
-            check=True,
-            capture_output=True,
-            text=True,
-        ).stdout.strip()
+        try:
+            resolved_revision = subprocess.run(
+                [
+                    "git",
+                    "-C",
+                    str(REPOSITORY_ROOT),
+                    "rev-parse",
+                    "--verify",
+                    f"{revision}^{{commit}}",
+                ],
+                check=True,
+                capture_output=True,
+                text=True,
+            ).stdout.strip()
+        except subprocess.CalledProcessError:
+            # Shallow clone fallback: HEAD^{commit} may fail when the
+            # commit object is not fully resolved (e.g. fetch-depth: 1).
+            resolved_revision = subprocess.run(
+                [
+                    "git",
+                    "-C",
+                    str(REPOSITORY_ROOT),
+                    "rev-parse",
+                    "--verify",
+                    revision,
+                ],
+                check=True,
+                capture_output=True,
+                text=True,
+            ).stdout.strip()
         with tempfile.NamedTemporaryFile(
             prefix="ptoas-vmi-source-",
             suffix=".tar",
@@ -120,6 +145,8 @@ def prepare_source(output_dir: Path, revision: str) -> dict[str, str]:
                 "--format=tar",
                 f"--output={archive_path}",
                 resolved_revision,
+                "--",
+                *ARCHIVE_EXCLUDES,
             ],
             check=True,
         )

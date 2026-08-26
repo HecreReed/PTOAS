@@ -6,21 +6,22 @@
 // INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
 // See LICENSE in the root of the software repository for the full text of the License.
 
+#include <memory>
 #include "PTO/IR/PTO.h"
 #include "mlir/Dialect/Func/IR/FuncOps.h"
-#include "mlir/Dialect/SCF/IR/SCF.h" 
+#include "mlir/Dialect/SCF/IR/SCF.h"
 #include "mlir/Pass/Pass.h"
-#include "llvm/ADT/DenseSet.h"
 #include "llvm/ADT/DenseMap.h"
+#include "llvm/ADT/DenseSet.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/StringRef.h"
-#include <memory>
- 
+
+
 using namespace mlir;
 using namespace mlir::pto;
- 
+
 namespace {
- 
+
 // ==========================================================
 // 更严格的活跃性分析
 // ==========================================================
@@ -29,12 +30,15 @@ namespace {
 // Wait 和 Set 不算作实质性操作。
 // 只有真正消耗计算或带宽的指令才算"活跃"。
 bool isResourceOp(Operation *op, Attribute targetPipe) {
-    if (auto loadOp = dyn_cast<pto::TLoadOp>(op)) 
+    if (auto loadOp = dyn_cast<pto::TLoadOp>(op)) {
         return pto::PipeAttr::get(op->getContext(), pto::PIPE::PIPE_MTE2) == targetPipe;
-    if (auto storeOp = dyn_cast<pto::TStoreOp>(op)) 
+    }
+    if (auto storeOp = dyn_cast<pto::TStoreOp>(op)) {
         return pto::PipeAttr::get(op->getContext(), pto::PIPE::PIPE_MTE3) == targetPipe;
-    if (auto addfOp = dyn_cast<pto::TAddOp>(op)) 
+    }
+    if (auto addfOp = dyn_cast<pto::TAddOp>(op)) {
         return pto::PipeAttr::get(op->getContext(), pto::PIPE::PIPE_V) == targetPipe;
+    }
     return false;
 }
  
@@ -44,11 +48,15 @@ bool isPipeUsedInRegion(Region &region, Attribute targetPipe) {
     for (Block &block : region) {
         for (Operation &op : block) {
             // 1. 如果是实质性操作，返回 True
-            if (isResourceOp(&op, targetPipe)) return true;
-            
+            if (isResourceOp(&op, targetPipe)) {
+              return true;
+            }
+
             // 2. 递归检查嵌套 (if/for)
             for (Region &nestedRegion : op.getRegions()) {
-                if (isPipeUsedInRegion(nestedRegion, targetPipe)) return true;
+                if (isPipeUsedInRegion(nestedRegion, targetPipe)) {
+                  return true;
+                }
             }
         }
     }
@@ -60,15 +68,19 @@ bool isPipeUsedInRegion(Region &region, Attribute targetPipe) {
 // 如果一个 Pipe 后面只剩 Wait，说明它已经完成了工作，发给它的信号是多余的。
 static bool hasPipelineActivityAfterOp(Operation *parentOp, Attribute targetPipe) {
     Block *parentBlock = parentOp ? parentOp->getBlock() : nullptr;
-    if (!parentBlock)
+    if (!parentBlock) {
       return false;
+    }
     for (auto it = std::next(parentOp->getIterator()); it != parentBlock->end(); ++it) {
-        if (isResourceOp(&*it, targetPipe))
+        if (isResourceOp(&*it, targetPipe)) {
           return true;
-        if (it->getNumRegions() > 0)
+        }
+        if (it->getNumRegions() > 0) {
           return true;
-        if (isa<func::ReturnOp>(&*it))
+        }
+        if (isa<func::ReturnOp>(&*it)) {
           return false;
+        }
     }
     return false;
 }
@@ -76,34 +88,40 @@ static bool hasPipelineActivityAfterOp(Operation *parentOp, Attribute targetPipe
 bool isPipelineActiveFuture(Block *block, Block::iterator startIt, Attribute targetPipe) {
     for (auto it = startIt; it != block->end(); ++it) {
         Operation *op = &*it;
-        
-        // 1. 遇到实质性操作 -> 活跃
-        if (isResourceOp(op, targetPipe)) return true;
- 
+
+// 1. 遇到实质性操作 -> 活跃
+        if (isResourceOp(op, targetPipe)) {
+          return true;
+        }
+
         // [注意] 这里故意跳过了 WaitOp 的检查。
         // WaitOp 只是同步原语，不代表该 Pipeline 在"干活"。
- 
+
         // 2. 递归检查嵌套区域 (scf.if, scf.for)
         for (Region &region : op->getRegions()) {
-            if (isPipeUsedInRegion(region, targetPipe)) return true;
+            if (isPipeUsedInRegion(region, targetPipe)) {
+              return true;
+            }
         }
- 
+
         // 3. 处理 Terminator (跨 Block 检查)
         if (op->hasTrait<OpTrait::IsTerminator>()) {
             // 如果是 Return，肯定死了
-            if (isa<func::ReturnOp>(op)) return false;
+            if (isa<func::ReturnOp>(op)) {
+              return false;
+            }
             return hasPipelineActivityAfterOp(block->getParentOp(), targetPipe);
         }
     }
     return false;
 }
- 
+
 // ==========================================================
 // Pass 实现
 // ==========================================================
 struct PTORemoveRedundantBarrierPass : public PassWrapper<PTORemoveRedundantBarrierPass, OperationPass<func::FuncOp>> {
   MLIR_DEFINE_EXPLICIT_INTERNAL_INLINE_TYPE_ID(PTORemoveRedundantBarrierPass)
- 
+
   void runOnOperation() override {
     func::FuncOp func = getOperation();
     MLIRContext *ctx = &getContext();
@@ -111,11 +129,17 @@ struct PTORemoveRedundantBarrierPass : public PassWrapper<PTORemoveRedundantBarr
     Attribute attrMTE2 = pto::PipeAttr::get(ctx, pto::PIPE::PIPE_MTE2);
     Attribute attrMTE3 = pto::PipeAttr::get(ctx, pto::PIPE::PIPE_MTE3);
     Attribute attrVec  = pto::PipeAttr::get(ctx, pto::PIPE::PIPE_V);
- 
+
     auto getOpPipe = [&](Operation *op) -> Attribute {
-      if (isa<pto::TLoadOp>(op)) return attrMTE2;
-      if (isa<pto::TStoreOp>(op)) return attrMTE3;
-      if (isa<pto::TAddOp>(op)) return attrVec;
+      if (isa<pto::TLoadOp>(op)) {
+        return attrMTE2;
+      }
+      if (isa<pto::TStoreOp>(op)) {
+        return attrMTE3;
+      }
+      if (isa<pto::TAddOp>(op)) {
+        return attrVec;
+      }
       return {};
     };
 
@@ -130,8 +154,9 @@ struct PTORemoveRedundantBarrierPass : public PassWrapper<PTORemoveRedundantBarr
       if (opName == "pto.set_flag_dyn" || opName == "pto.set_flag_d") {
         auto srcAttr = op->getAttrOfType<pto::PipeAttr>("src_pipe");
         auto dstAttr = op->getAttrOfType<pto::PipeAttr>("dst_pipe");
-        if (!srcAttr || !dstAttr)
+        if (!srcAttr || !dstAttr) {
           return false;
+        }
         src = srcAttr;
         dst = dstAttr;
         return true;
@@ -147,35 +172,34 @@ struct PTORemoveRedundantBarrierPass : public PassWrapper<PTORemoveRedundantBarr
       StringRef opName = op->getName().getStringRef();
       if (opName == "pto.wait_flag_dyn" || opName == "pto.wait_flag_d") {
         auto dstAttr = op->getAttrOfType<pto::PipeAttr>("dst_pipe");
-        if (!dstAttr)
+        if (!dstAttr) {
           return false;
+        }
         dst = dstAttr;
         return true;
       }
       return false;
     };
- 
+
     llvm::SmallVector<Operation*> opsToErase;
- 
+
     func.walk([&](Block *block) {
       // 记录 Block 内脏状态 (Intra-Block Dirty State)
       // 用于判断是否需要发广播
       llvm::DenseSet<Attribute> intraPipeDirtySet;
- 
+
       for (auto it = block->begin(); it != block->end(); ++it) {
         Operation *op = &*it;
         Attribute pipe = getOpPipe(op);
- 
         // === 1. 状态更新 ===
         if (pipe) {
             intraPipeDirtySet.insert(pipe);
             continue; 
         }
- 
+
         // === 2. Barrier 消除 ===
         if (auto barrierOp = dyn_cast<pto::BarrierOp>(op)) {
             Attribute bPipe = barrierOp.getPipe();
-            
             // 规则 A: Dead Pipeline
             // 后面没活干了 -> 删除 (保护空气没有意义)
             if (!isPipelineActiveFuture(block, std::next(it), bPipe)) {
@@ -203,7 +227,7 @@ struct PTORemoveRedundantBarrierPass : public PassWrapper<PTORemoveRedundantBarr
             // 如果 Barrier 留下了，管线变干净
             intraPipeDirtySet.erase(bPipe);
         }
- 
+
         // === 3. Wait 消除 (幽灵 Wait 消除) ===
         Attribute waitDst;
         if (getWaitSyncDst(op, waitDst)) {
@@ -215,13 +239,12 @@ struct PTORemoveRedundantBarrierPass : public PassWrapper<PTORemoveRedundantBarr
                 continue;
             }
         }
- 
+
         // === 4. Set 消除 (死信 & 陈旧广播消除) ===
         Attribute setSrc;
         Attribute setDst;
         if (getSetSyncPipes(op, setSrc, setDst)) {
- 
-            // 规则 A: Dead Receiver (死信)
+          // 规则 A: Dead Receiver (死信)
             // 如果 dst 后面没有 Resource Op，发信号也没人用。
             // 注意：因为 isPipelineActiveFuture 忽略了 WaitOp，
             // 所以如果后面只有 Wait <Src, Dst> 而没有 Dst 的实质操作，这里也会判定为 Dead，
@@ -242,7 +265,9 @@ struct PTORemoveRedundantBarrierPass : public PassWrapper<PTORemoveRedundantBarr
       }
     });
  
-    for (Operation *op : opsToErase) op->erase();
+    for (Operation *op : opsToErase) {
+      op->erase();
+    }
   }
 };
  
