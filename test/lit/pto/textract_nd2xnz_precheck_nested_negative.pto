@@ -1,10 +1,11 @@
-// RUN: not ptoas --pto-arch=a5 --emit-pto-ir %s -o /dev/null 2>&1 | FileCheck %s
+// RUN: not ptoas --pto-arch=a5 %s -o /dev/null 2>&1 | FileCheck %s
 // Negative: module scopes nested below the immediate backend child are
-// rejected (design 5.3.2 fixed-depth structure guard).
+// rejected (design 5.3.2 fixed-depth structure guard). Two children force
+// the mixed-backend path so the precheck runs.
 
 module attributes {"pto.target_arch" = "a5"} {
-  module @parent {
-    module @nested {
+  module @child_nested {
+    module @grandchild {
       func.func @textract_nd2xnz_nested() {
         %c0 = arith.constant 0 : index
         %src = pto.alloc_tile : !pto.tile_buf<loc=vec, dtype=f16, rows=32, cols=32, v_row=32, v_col=32, blayout=row_major, slayout=none_box, fractal=512, pad=0>
@@ -14,6 +15,17 @@ module attributes {"pto.target_arch" = "a5"} {
                     outs(%d0, %d1 : !pto.tile_buf<loc=vec, dtype=f16, rows=16, cols=16, v_row=16, v_col=16, blayout=col_major, slayout=row_major, fractal=512, pad=0>, !pto.tile_buf<loc=vec, dtype=f16, rows=16, cols=16, v_row=16, v_col=16, blayout=col_major, slayout=row_major, fractal=512, pad=0>)
         return
       }
+    }
+  }
+  module @child_plain {
+    func.func @textract_nd2xnz_plain() {
+      %c0 = arith.constant 0 : index
+      %src = pto.alloc_tile : !pto.tile_buf<loc=vec, dtype=f16, rows=32, cols=32, v_row=32, v_col=32, blayout=row_major, slayout=none_box, fractal=512, pad=0>
+      %d0 = pto.alloc_tile : !pto.tile_buf<loc=vec, dtype=f16, rows=16, cols=16, v_row=16, v_col=16, blayout=col_major, slayout=row_major, fractal=512, pad=0>
+      %d1 = pto.alloc_tile : !pto.tile_buf<loc=vec, dtype=f16, rows=16, cols=16, v_row=16, v_col=16, blayout=col_major, slayout=row_major, fractal=512, pad=0>
+      pto.textract ins(%src, %c0, %c0, %c0, %c0 : !pto.tile_buf<loc=vec, dtype=f16, rows=32, cols=32, v_row=32, v_col=32, blayout=row_major, slayout=none_box, fractal=512, pad=0>, index, index, index, index)
+                  outs(%d0, %d1 : !pto.tile_buf<loc=vec, dtype=f16, rows=16, cols=16, v_row=16, v_col=16, blayout=col_major, slayout=row_major, fractal=512, pad=0>, !pto.tile_buf<loc=vec, dtype=f16, rows=16, cols=16, v_row=16, v_col=16, blayout=col_major, slayout=row_major, fractal=512, pad=0>)
+      return
     }
   }
 }
