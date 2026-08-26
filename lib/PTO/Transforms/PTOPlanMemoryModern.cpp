@@ -212,37 +212,11 @@ static MemSpec getMemSpec(PTOArch arch, AddressSpace space) {
 
 static FailureOr<uint64_t> computeStaticBufferBytes(Value value) {
   auto computeTileBytes = [](TileBufType type) -> FailureOr<uint64_t> {
-    ArrayRef<int64_t> shape = type.getShape();
-    uint64_t elemBytes = getPTOStorageElemByteSize(type.getElementType());
-    if (elemBytes == 0) {
+    // Shared physical-storage sizing (design doc 12) with checked arithmetic.
+    auto bytes = getTileBufStorageByteSize(type);
+    if (!bytes)
       return failure();
-    }
-
-    if (type.getCompactModeI32() ==
-        static_cast<int32_t>(CompactMode::RowPlusOne)) {
-      if (shape.size() != 2 ||
-          llvm::is_contained(shape, ShapedType::kDynamic)) {
-        return failure();
-      }
-
-      bool rowMajor = type.getBLayoutValueI32() ==
-                      static_cast<int32_t>(BLayout::RowMajor);
-      uint64_t major = static_cast<uint64_t>(rowMajor ? shape[0] : shape[1]);
-      uint64_t minor = static_cast<uint64_t>(rowMajor ? shape[1] : shape[0]);
-      if (major == 0 || minor == 0) {
-        return uint64_t{0};
-      }
-      return ((major - 1) * (minor + 1) + minor) * elemBytes;
-    }
-
-    uint64_t numel = 1;
-    for (int64_t dim : shape) {
-      if (dim == ShapedType::kDynamic) {
-        return failure();
-      }
-      numel *= static_cast<uint64_t>(dim);
-    }
-    return numel * elemBytes;
+    return static_cast<uint64_t>(*bytes);
   };
 
   if (auto tileType = dyn_cast<TileBufType>(value.getType())) {

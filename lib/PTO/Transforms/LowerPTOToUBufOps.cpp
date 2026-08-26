@@ -329,7 +329,15 @@ static LogicalResult expandTExtractNd2xNzWindow(
   // Build a single flat loop over validRows*validCols elements, computing
   // row/col via div/rem; keeps the expansion to two scalar loop nests over
   // the existing load_scalar/store_scalar pointer ops (design doc 9.3).
-  int64_t total = validRows * validCols;
+  // Static loop-bound/offset products must be checked (overflow would wrap
+  // the footprint and corrupt loads/stores).
+  int64_t total = 0;
+  if (__builtin_mul_overflow(validRows, validCols, &total) || total <= 0)
+    return failure();
+  int64_t physRowsTimesC0 = 0;
+  if (__builtin_mul_overflow(physRows, c0, &physRowsTimesC0) ||
+      physRowsTimesC0 <= 0)
+    return failure();
   auto flat = builder.create<scf::ForOp>(
       loc, cst(builder, loc, 0), cst(builder, loc, total),
       cst(builder, loc, 1), ValueRange{});
@@ -349,7 +357,7 @@ static LogicalResult expandTExtractNd2xNzWindow(
     // dstOff = (c / c0) * physRows * c0 + r * c0 + (c % c0)
     Value cDiv = builder.create<arith::DivUIOp>(loc, cIdx, cst(builder, loc, c0));
     Value blockOff = builder.create<arith::MulIOp>(
-        loc, cDiv, cst(builder, loc, physRows * c0));
+        loc, cDiv, cst(builder, loc, physRowsTimesC0));
     Value rBlock = builder.create<arith::MulIOp>(loc, rIdx, cst(builder, loc, c0));
     Value cRem = builder.create<arith::RemUIOp>(loc, cIdx, cst(builder, loc, c0));
     Value dstOff = builder.create<arith::AddIOp>(
@@ -365,10 +373,14 @@ static LogicalResult expandTExtractNd2xNzWindow(
 // ND-to-2xNz scalar expansion. TExtractOp's SyncMacroModel reserves event 0
 // (design doc 6.3.1); when the event-id allocator ran (InsertSync), 0 is
 // free for us because it is reserved. When it did not run, choose the first
-// id not already used by explicit set_flag/wait_flag ops in the enclosing
-// scope so the expansion never aliases a user literal event.
-static unsigned selectUnusedHiddenEventId(Operation *anchor,
-                                          MLIRContext *ctx) {
+// id not already used by explicit set_flag/wait_flag ops in the whole
+// enclosing function (not just the immediate region, so a nested scf.for
+// sees every explicit event in the function). Only EVENT_ID0..7 are legal
+// compiler event ids (SyncEventIdAllocation::kTotalEventIdNum == 8; 14/15
+// are hardware block-sync ids); if all eight are in use this expansion must
+// fail rather than silently reuse a reserved/literal event.
+static std::optional<unsigned> selectUnusedHiddenEventId(Operation *anchor,
+                                                         MLIRContext *ctx) {
   llvm::SmallDenseSet<int32_t, 8> used;
   auto scan = [&](Operation *scope) {
     scope->walk([&](Operation *inner) {
@@ -381,21 +393,20 @@ static unsigned selectUnusedHiddenEventId(Operation *anchor,
       }
     });
   };
-  // Scan the enclosing function/module (exclude the op being expanded; it has
-  // no flags yet).
-  Operation *funcScope = anchor->getParentOp();
-  if (funcScope)
-    scan(funcScope);
+  func::FuncOp func = anchor->getParentOfType<func::FuncOp>();
+  if (func)
+    scan(func);
   else
-    scan(anchor);
-  // kHiddenEventIdNum bounds the hidden-event id space; a straightforward
-  // linear scan keeps determinism.
-  constexpr unsigned kHiddenEventIdNum = 16;
-  for (unsigned id = 0; id < kHiddenEventIdNum; ++id) {
+    scan(anchor->getParentOp() ? anchor->getParentOp() : anchor);
+  // kTotalEventIdNum == 8 bounds the legal compiler event-id space
+  // (SyncEventIdAllocation.h); a straightforward linear scan keeps
+  // determinism.
+  constexpr unsigned kCompilerEventIdNum = 8;
+  for (unsigned id = 0; id < kCompilerEventIdNum; ++id) {
     if (!used.count(static_cast<int32_t>(id)))
       return id;
   }
-  return kHiddenEventIdNum - 1;
+  return std::nullopt;
 }
 
 static LogicalResult expandTExtractNd2xNz(
@@ -418,8 +429,15 @@ static LogicalResult expandTExtractNd2xNz(
   builder.setInsertionPoint(rawOp);
   auto pipeV = pto::PipeAttr::get(ctx, pto::PIPE::PIPE_V);
   auto pipeS = pto::PipeAttr::get(ctx, pto::PIPE::PIPE_S);
-  auto eventId =
-      static_cast<pto::EVENT>(selectUnusedHiddenEventId(rawOp, ctx));
+  auto eventIdOpt = selectUnusedHiddenEventId(rawOp, ctx);
+  if (!eventIdOpt) {
+    rawOp->emitOpError()
+        << "all eight compiler event ids are in use; cannot materialize the "
+           "ND-to-2xNz hidden V<->S barrier without aliasing an explicit "
+           "event";
+    return failure();
+  }
+  auto eventId = static_cast<pto::EVENT>(*eventIdOpt);
   auto event0 = pto::EventAttr::get(ctx, eventId);
   builder.create<pto::SetFlagOp>(loc, pipeV, pipeS, event0);
   builder.create<pto::WaitFlagOp>(loc, pipeV, pipeS, event0);

@@ -8661,7 +8661,13 @@ static LogicalResult verifyNdTo2xNzForm(Operation *op) {
     return op->emitOpError(
         "expects ND-to-2xNZ TEXTRACT operands to have static physical shapes");
   }
-  int64_t srcRowStrideBytes = srcShape[1] * elemBytes;
+  int64_t srcRowStrideProduct = 0;
+  if (__builtin_mul_overflow(srcShape[1], elemBytes, &srcRowStrideProduct)) {
+    return op->emitOpError(
+        "expects ND-to-2xNZ TEXTRACT source row-stride bytes to be "
+        "representable (shape x element-size overflow)");
+  }
+  int64_t srcRowStrideBytes = srcRowStrideProduct;
   if (srcRowStrideBytes % 32 != 0) {
     return op->emitOpError(
         "expects ND-to-2xNZ TEXTRACT source row stride to be 32B aligned");
@@ -8676,14 +8682,16 @@ static LogicalResult verifyNdTo2xNzForm(Operation *op) {
           " plain-NZ physical rows to be 16-aligned");
     }
     // The A5 TileLib template passes the destination physical rows as the
-    // vsstb block stride, a signed 16-bit field (design doc 9.2): the
-    // verifier must prove the range statically before the wrapper materializes
-    // the i16 constant (an oversized stride would silently truncate).
-    if (dstShape[0] > (int64_t)std::numeric_limits<int16_t>::max()) {
+    // vsstb block stride, a signless 16-bit field (design doc 9.2): the whole
+    // signless bit pattern 0..65535 is encodable. A2/A3 scalar expansion does
+    // not use vsstb at all, so the gate is A5-only. The verifier must prove
+    // the range statically before the wrapper materializes the i16 constant
+    // (an oversized stride would silently truncate).
+    if (isA5 && dstShape[0] > (int64_t)std::numeric_limits<uint16_t>::max()) {
       return op->emitOpError(
           "expects ND-to-2xNZ TEXTRACT " + dstName +
           " physical rows to fit the A5 vsstb 16-bit block stride "
-          "(<= INT16_MAX)");
+          "(<= 65535)");
     }
     if (dstShape[1] % c0 != 0) {
       return op->emitOpError(

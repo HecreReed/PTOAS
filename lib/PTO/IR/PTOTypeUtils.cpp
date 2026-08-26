@@ -122,6 +122,23 @@ unsigned mlir::pto::getPTOStorageElemByteSize(Type t) {
   return bitWidth == 0 ? 0 : bitWidth / kBitsPerByte;
 }
 
+// Checked fixed-point arithmetic for static layout sizing (design doc 12):
+// every shape product / stride computation in the shared helper must prove
+// overflow-free before producing bytes, otherwise a wrapped footprint would
+// corrupt range checks / alias decisions.
+static std::optional<int64_t> checkedMul(int64_t a, int64_t b) {
+  int64_t out = 0;
+  if (__builtin_mul_overflow(a, b, &out))
+    return std::nullopt;
+  return out;
+}
+static std::optional<int64_t> checkedAdd(int64_t a, int64_t b) {
+  int64_t out = 0;
+  if (__builtin_add_overflow(a, b, &out))
+    return std::nullopt;
+  return out;
+}
+
 std::optional<int64_t> mlir::pto::getTileBufStorageByteSize(Type tileBufType) {
   auto tb = dyn_cast<pto::TileBufType>(tileBufType);
   if (!tb)
@@ -130,7 +147,7 @@ std::optional<int64_t> mlir::pto::getTileBufStorageByteSize(Type tileBufType) {
   if (bitWidth == 0)
     return std::nullopt;
   ArrayRef<int64_t> shape = tb.getShape();
-  int64_t bits = 0;
+  std::optional<int64_t> bits;
   if (tb.getCompactModeI32() ==
       static_cast<int32_t>(pto::CompactMode::RowPlusOne)) {
     if (shape.size() != kValue2 || llvm::is_contained(shape, ShapedType::kDynamic))
@@ -141,15 +158,28 @@ std::optional<int64_t> mlir::pto::getTileBufStorageByteSize(Type tileBufType) {
     int64_t minor = rowMajor ? shape[1] : shape[0];
     if (major == 0 || minor == 0)
       return 0;
-    bits = ((major - 1) * (minor + 1) + minor) * static_cast<int64_t>(bitWidth);
+    auto majorMinus1 = checkedAdd(major, -1);
+    auto minorPlus1 = checkedAdd(minor, 1);
+    if (!majorMinus1 || !minorPlus1)
+      return std::nullopt;
+    auto rows = checkedMul(*majorMinus1, *minorPlus1);
+    auto elems = checkedAdd(rows ? *rows : 0, minor);
+    if (!rows || !elems)
+      return std::nullopt;
+    bits = checkedMul(*elems, static_cast<int64_t>(bitWidth));
   } else {
     int64_t numElements = 1;
     for (int64_t dim : shape) {
       if (dim == ShapedType::kDynamic)
         return std::nullopt;
-      numElements *= dim;
+      auto prod = checkedMul(numElements, dim);
+      if (!prod)
+        return std::nullopt;
+      numElements = *prod;
     }
-    bits = numElements * static_cast<int64_t>(bitWidth);
+    bits = checkedMul(numElements, static_cast<int64_t>(bitWidth));
   }
-  return bits / kBitsPerByte;
+  if (!bits)
+    return std::nullopt;
+  return *bits / kBitsPerByte;
 }

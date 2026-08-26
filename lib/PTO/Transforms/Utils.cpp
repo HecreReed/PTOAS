@@ -408,39 +408,12 @@ struct StaticTileStrides {
 };
 
 static std::optional<uint64_t> getStaticTileBytes(TileBufType type) {
-  unsigned elemBytes = getPTOStorageElemByteSize(type.getElementType());
-  if (elemBytes == 0)
+  // Shared physical-storage sizing (design doc 12) with checked arithmetic:
+  // keep planner/GraphSync/post-planning footprints identical.
+  auto bytes = getTileBufStorageByteSize(type);
+  if (!bytes)
     return std::nullopt;
-  ArrayRef<int64_t> shape = type.getShape();
-  uint64_t elements = 1;
-  if (type.getCompactModeI32() ==
-      static_cast<int32_t>(CompactMode::RowPlusOne)) {
-    if (shape.size() != 2 || llvm::is_contained(shape, ShapedType::kDynamic))
-      return std::nullopt;
-    bool rowMajor = type.getBLayoutValueI32() ==
-                    static_cast<int32_t>(BLayout::RowMajor);
-    uint64_t major = static_cast<uint64_t>(rowMajor ? shape[0] : shape[1]);
-    uint64_t minor = static_cast<uint64_t>(rowMajor ? shape[1] : shape[0]);
-    if (major == 0 || minor == 0)
-      return uint64_t{0};
-    if (minor == std::numeric_limits<uint64_t>::max() ||
-        major - 1 > std::numeric_limits<uint64_t>::max() / (minor + 1))
-      return std::nullopt;
-    elements = (major - 1) * (minor + 1);
-    if (minor > std::numeric_limits<uint64_t>::max() - elements)
-      return std::nullopt;
-    elements += minor;
-  } else {
-    for (int64_t dim : shape) {
-      if (dim < 0 || elements > std::numeric_limits<uint64_t>::max() /
-                                  static_cast<uint64_t>(dim))
-        return std::nullopt;
-      elements *= static_cast<uint64_t>(dim);
-    }
-  }
-  if (elements > std::numeric_limits<uint64_t>::max() / elemBytes)
-    return std::nullopt;
-  return elements * elemBytes;
+  return static_cast<uint64_t>(*bytes);
 }
 
 static std::optional<uint64_t> getConstantAddress(Value value) {

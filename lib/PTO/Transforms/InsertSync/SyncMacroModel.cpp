@@ -180,11 +180,13 @@ std::optional<SyncMacroModel> getTExtractSyncMacroModel(pto::TExtractOp op) {
   if (!op.isNdTo2xNzForm())
     return std::nullopt;
   // The scalar hidden-event model covers the A2/A3 scalar correctness
-  // lowering (design doc 9.3) and the A5 1x1 scalar path. The ordinary A5
+  // lowering (design doc 9.3, both archs expand in LowerPTOToUBufOps with a
+  // registered V<->S barrier) and the A5 1x1 scalar path. The ordinary A5
   // vector template stays a pure PIPE_V op with no hidden events; the
   // exception must be selected by shape, not by op name (design doc 6.3.1).
+  PTOArch arch = getTargetArch(op.getOperation());
   bool scalarPath = false;
-  if (getTargetArch(op.getOperation()) == PTOArch::A3) {
+  if (arch == PTOArch::A2 || arch == PTOArch::A3) {
     scalarPath = true;
   } else {
     for (Value dst : op.getDsts()) {

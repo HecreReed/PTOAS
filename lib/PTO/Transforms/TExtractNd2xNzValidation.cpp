@@ -116,9 +116,12 @@ ByteRange resolveAllocationByteRange(Value v) {
   if (!bytesOpt || *bytesOpt <= 0)
     return out;
   int64_t bytes = *bytesOpt;
+  int64_t end = 0;
+  if (__builtin_add_overflow(*baseOpt, bytes, &end))
+    return out; // wrapped range would corrupt the alias analysis
   out.space = space;
   out.base = *baseOpt;
-  out.end = *baseOpt + bytes;
+  out.end = end;
   out.resolved = true;
   return out;
 }

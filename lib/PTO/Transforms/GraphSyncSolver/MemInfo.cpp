@@ -50,7 +50,10 @@ static std::optional<int64_t> getTileBufferBitSize(pto::TileBufType type) {
   auto bytes = getTileBufStorageByteSize(type);
   if (!bytes)
     return ShapedType::kDynamic;
-  return *bytes * 8;
+  int64_t bits = 0;
+  if (__builtin_mul_overflow(*bytes, 8, &bits))
+    return ShapedType::kDynamic;
+  return bits;
 }
 
 static std::optional<int64_t> getBufferBitSize(Value value) {

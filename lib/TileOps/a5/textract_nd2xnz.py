@@ -75,10 +75,17 @@ def _expand_window(src, row0, col0, dst):
     dst_ptr = dst.as_ptr()
     base_elems = row0 * src.shape[1] + col0
     if m == 1 and n == 1:
-        # Scalar path (design doc 9.2): exactly one element, consistent with
-        # the 1x1 scalar hidden-event model in SyncMacroModel.
+        # Scalar path (design doc 9.2): exactly one element. Consistent with
+        # the 1x1 scalar hidden-event model (SyncMacroModel reserves a
+        # bidirectional V<->S pair on event 0), the scalar S-pipe access is
+        # bracketed by an explicit set/wait barrier so the S read of src is
+        # ordered against the outer V pipe (design doc 6.3.1).
+        pto.set_flag("V", "S", event_id=0)
+        pto.wait_flag("V", "S", event_id=0)
         value = pto.load_scalar(src_ptr, base_elems)
         pto.store_scalar(dst_ptr, 0, value)
+        pto.set_flag("S", "V", event_id=0)
+        pto.wait_flag("S", "V", event_id=0)
         return
     c0 = 32 // _elem_bytes(dst)
     block_stride = dst.shape[0]  # storageRows (plain NZ); design doc 3.2
