@@ -31,6 +31,10 @@
 //   - kernel-level loops wrapping whole pto.section.simt regions;
 //   - every layer of multiply nested loops.
 //
+// If any loop on an access's enclosing chain is statically zero-trip
+// (ub <= lb), the access never executes and the whole chain is left
+// unpromoted - there is no materialization precondition to enforce.
+//
 // Promotion rules for each collected loop:
 //
 //   | original state          | result                                |
@@ -39,6 +43,7 @@
 //   | pto.unroll = "enable"   | replaced with pto.unroll = "full"     |
 //   | pto.unroll = "full"     | unchanged                             |
 //   | pto.unroll_factor = N   | hard error                            |
+//   | malformed hint attr     | hard error (never silently repaired)  |
 //
 // Every promoted loop additionally gets the internal marker
 // {pto.persistent_unroll}: pto-unroll-loops turns its usual
@@ -55,6 +60,7 @@
 //===----------------------------------------------------------------------===//
 
 #include "PTO/IR/PTO.h"
+#include "PTO/Transforms/LoopUnrollUtils.h"
 #include "PTO/Transforms/Passes.h"
 
 #include "mlir/Dialect/Func/IR/FuncOps.h"
@@ -85,22 +91,6 @@ using namespace mlir;
 #define DEBUG_TYPE "pto-promote-persistent-loops"
 
 namespace {
-
-/// Compute the constant trip count of *forOp*, or std::nullopt when any of
-/// the bounds/step is not a compile-time constant.
-static std::optional<int64_t> getStaticTripCount(scf::ForOp forOp) {
-  std::optional<int64_t> lb = getConstantIntValue(forOp.getLowerBound());
-  std::optional<int64_t> ub = getConstantIntValue(forOp.getUpperBound());
-  std::optional<int64_t> step = getConstantIntValue(forOp.getStep());
-  if (!lb || !ub || !step || *step <= 0 || *ub <= *lb) {
-    return std::nullopt;
-  }
-  int64_t tripCount = (*ub - *lb + *step - 1) / *step;
-  if (tripCount <= 0) {
-    return std::nullopt;
-  }
-  return tripCount;
-}
 
 /// Return true when the loop's bounds and step are all compile-time
 /// constants and the loop body never executes (upper bound <= lower bound).
@@ -172,7 +162,7 @@ struct PTOPromotePersistentFragmentLoops
     // fails once: the function pass adaptor may stop scheduling functions
     // after the first failure, so per-function completeness keeps the
     // emitted set deterministic under parallel scheduling.
-    bool failed = false;
+    bool hadError = false;
     // relatedOps iterates in discovery order (see step 1), and repeated
     // diagnostics for the same scf.while are deduplicated, so the emitted
     // set is deterministic.
@@ -186,33 +176,49 @@ struct PTOPromotePersistentFragmentLoops
               << "persistent fragment buffer is accessed inside scf.while, "
                  "which cannot be fully unrolled; persistent fragment loops "
                  "must use scf.for";
-          failed = true;
+          hadError = true;
         }
       }
       Operation *cur = op;
+      // Collect the whole enclosing-loop chain first: if any loop on the
+      // chain is statically zero-trip, the access never executes, so no
+      // loop on that chain needs promotion (marking e.g. a dynamic outer
+      // loop would only produce a spurious "no constant trip count" hard
+      // error downstream).
+      SmallVector<Operation *, 4> chain;
+      bool chainIsDead = false;
       while (auto forOp = cur->getParentOfType<scf::ForOp>()) {
-        if (seenLoopOps.insert(forOp.getOperation()).second) {
-          loopOps.push_back(forOp.getOperation());
-        }
+        chain.push_back(forOp.getOperation());
+        chainIsDead = chainIsDead || isStaticallyZeroTrip(forOp);
         cur = forOp.getOperation();
+      }
+      if (chainIsDead) {
+        continue;
+      }
+      for (Operation *loopOp : chain) {
+        if (seenLoopOps.insert(loopOp).second) {
+          loopOps.push_back(loopOp);
+        }
       }
     }
 
     // Step 3: promote every collected loop to forced full unrolling.
     for (Operation *loopOp : loopOps) {
       auto forOp = cast<scf::ForOp>(loopOp);
-      // A statically zero-trip loop never executes its accesses, so it has
-      // no materialization precondition and needs no promotion.  Skipping
-      // it also avoids a misleading downstream "no constant trip count"
-      // hard error for what is actually a constant zero trip count.
-      if (isStaticallyZeroTrip(forOp)) {
+      // A malformed hint must stay a hard error: promotion would otherwise
+      // silently overwrite it with "full" before pto-unroll-loops ever gets
+      // to validate it.
+      bool carriesHint = forOp->hasAttr(pto::kUnrollAttrName) ||
+                         forOp->hasAttr(pto::kUnrollFactorAttrName);
+      if (carriesHint && failed(pto::validateLoopUnrollHint(forOp))) {
+        hadError = true;
         continue;
       }
       if (forOp->hasAttr(pto::kUnrollFactorAttrName)) {
         forOp.emitError()
             << "persistent fragment loop requires full unroll; a fixed '"
             << pto::kUnrollFactorAttrName << "' is not supported";
-        failed = true;
+        hadError = true;
         continue;
       }
 
@@ -221,7 +227,7 @@ struct PTOPromotePersistentFragmentLoops
       // persistent-specific error for it via the marker below.
       int64_t tripCountCap = maxPersistentUnrollTripCount.getValue();
       if (tripCountCap >= 0) {
-        if (std::optional<int64_t> tripCount = getStaticTripCount(forOp);
+        if (std::optional<int64_t> tripCount = pto::getStaticTripCount(forOp);
             tripCount && *tripCount > tripCountCap) {
           auto diag = forOp.emitError()
                       << "persistent fragment loop in '" << func.getSymName()
@@ -232,7 +238,7 @@ struct PTOPromotePersistentFragmentLoops
             diag.attachNote(allocaOp.getLoc())
                 << "persistent fragment allocation";
           }
-          failed = true;
+          hadError = true;
           continue;
         }
       }
@@ -251,7 +257,7 @@ struct PTOPromotePersistentFragmentLoops
       forOp->setAttr(pto::kPersistentUnrollMarkerAttrName,
                      UnitAttr::get(ctx));
     }
-    if (failed) {
+    if (hadError) {
       signalPassFailure();
     }
   }

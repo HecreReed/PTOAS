@@ -27,8 +27,10 @@
 //      the pointer flow) -> untouched
 //   9. a statically zero-trip persistent loop -> untouched (never executes,
 //      so no promotion and no downstream error)
-//  10. (RUN-LINE-2) promoted loops unroll away with no leftover attrs
-//  11. (RUN-LINE-3) an overridden enable hint produces no unroll metadata
+//  10. a zero-trip inner loop also shields its dynamic outer loop from
+//      promotion (the access never executes on that chain)
+//  11. (RUN-LINE-2) promoted loops unroll away with no leftover attrs
+//  12. (RUN-LINE-3) an overridden enable hint produces no unroll metadata
 
 // RUN: pto-test-opt --pto-promote-persistent-fragment-loops %s 2>&1 | FileCheck %s
 // RUN: pto-test-opt --pto-promote-persistent-fragment-loops --pto-unroll-loops %s 2>&1 | FileCheck %s --check-prefix=UNROLL
@@ -264,6 +266,34 @@ module {
       %i64 = arith.index_cast %i : index to i64
       %element = llvm.getelementptr %frag[%i64] : (!llvm.ptr, i64) -> !llvm.ptr, f32
       llvm.store %zero, %element : f32, !llvm.ptr
+    }
+    return
+  }
+
+  // Case 10: an access under a statically zero-trip inner loop never
+  // executes, so the whole enclosing chain - including the dynamic outer
+  // loop - is left alone.  Marking the outer loop would produce a spurious
+  // "no constant trip count" hard error in pto-unroll-loops.
+  // CHECK-LABEL: func.func @zero_trip_inner_chain_untouched
+  // CHECK-COUNT-2: scf.for
+  // CHECK-NOT: pto.unroll
+  // CHECK-NOT: pto.persistent_unroll
+  // UNROLL-LABEL: func.func @zero_trip_inner_chain_untouched
+  // UNROLL-COUNT-2: scf.for
+  // UNROLL-NOT: pto.unroll
+  // UNROLL-NOT: pto.persistent_unroll
+  func.func @zero_trip_inner_chain_untouched(%n: index) {
+    %c2_i32 = arith.constant 2 : i32
+    %frag = llvm.alloca %c2_i32 x f32 {pto.persistent} : (i32) -> !llvm.ptr
+    %zero = arith.constant 0.000000e+00 : f32
+    %c0 = arith.constant 0 : index
+    %c1 = arith.constant 1 : index
+    scf.for %t = %c0 to %n step %c1 {
+      scf.for %i = %c0 to %c0 step %c1 {
+        %i64 = arith.index_cast %i : index to i64
+        %element = llvm.getelementptr %frag[%i64] : (!llvm.ptr, i64) -> !llvm.ptr, f32
+        llvm.store %zero, %element : f32, !llvm.ptr
+      }
     }
     return
   }

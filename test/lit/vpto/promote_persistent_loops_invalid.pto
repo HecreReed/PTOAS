@@ -27,6 +27,9 @@ module {
   // intent, so it is rejected outright.
   // CHECK: error: persistent fragment loop requires full unroll; a fixed 'pto.unroll_factor' is not supported
   // CHECK: error: persistent fragment loop in 'bad_persistent_loops' has trip count 200, which exceeds max-persistent-unroll-trip-count=128
+  // A malformed hint must stay a hard error; the promotion must not
+  // silently overwrite it with "full".
+  // CHECK: error: unknown 'pto.unroll' value 'bogus'; expected "full" (native full unroll) or "enable" (forwarded to the compiler's cost model by pto-convert-scf-to-cf-with-loop-hints)
   func.func @bad_persistent_loops(%n: index) {
     %c2_i32 = arith.constant 2 : i32
     %fragA = llvm.alloca %c2_i32 x f32 {pto.persistent} : (i32) -> !llvm.ptr
@@ -74,6 +77,20 @@ module {
         %element = llvm.getelementptr %fragC[%i64] : (!llvm.ptr, i64) -> !llvm.ptr, f32
         llvm.store %zero, %element : f32, !llvm.ptr
       }
+    }
+    // A malformed hint on a persistent loop must not be silently repaired
+    // by the promotion overwriting it with "full".
+    %fragD = llvm.alloca %c2_i32 x f32 {pto.persistent} : (i32) -> !llvm.ptr
+    pto.section.simt<<<32, 1, 1>>> {
+      %zero = arith.constant 0.000000e+00 : f32
+      %c0 = arith.constant 0 : index
+      %c4 = arith.constant 4 : index
+      %c1 = arith.constant 1 : index
+      scf.for %i = %c0 to %c4 step %c1 {
+        %i64 = arith.index_cast %i : index to i64
+        %element = llvm.getelementptr %fragD[%i64] : (!llvm.ptr, i64) -> !llvm.ptr, f32
+        llvm.store %zero, %element : f32, !llvm.ptr
+      } {pto.unroll = "bogus"}
     }
     return
   }

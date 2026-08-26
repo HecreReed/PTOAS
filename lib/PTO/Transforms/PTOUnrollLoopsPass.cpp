@@ -56,6 +56,7 @@
 //===----------------------------------------------------------------------===//
 
 #include "PTO/IR/PTO.h"
+#include "PTO/Transforms/LoopUnrollUtils.h"
 #include "PTO/Transforms/Passes.h"
 
 #include "mlir/Dialect/Arith/IR/Arith.h"
@@ -93,21 +94,6 @@ using namespace mlir;
 
 namespace {
 
-/// Compute the constant trip count of *forOp*, or std::nullopt when any of
-/// the bounds/step is not a compile-time constant.  Mirrors the arithmetic of
-/// the historical pto-unroll-simt-for pass.
-static std::optional<int64_t> getStaticTripCount(scf::ForOp forOp) {
-  std::optional<int64_t> lb = getConstantIntValue(forOp.getLowerBound());
-  std::optional<int64_t> ub = getConstantIntValue(forOp.getUpperBound());
-  std::optional<int64_t> step = getConstantIntValue(forOp.getStep());
-  if (!lb || !ub || !step || *step <= 0 || *ub <= *lb)
-    return std::nullopt;
-  int64_t tripCount = (*ub - *lb + *step - 1) / *step;
-  if (tripCount <= 0)
-    return std::nullopt;
-  return tripCount;
-}
-
 /// Outcome of handling one annotated loop.
 enum class UnrollOutcome {
   Unchanged, //< no unroll happened (hint dropped or not applicable)
@@ -129,7 +115,7 @@ struct PTOUnrollLoopsImpl {
   /// trip count is not constant the loop cannot be unrolled natively: drop
   /// the attribute with a remark and keep the loop.
   UnrollOutcome tryFullUnroll(scf::ForOp forOp) const {
-    std::optional<int64_t> tripCount = getStaticTripCount(forOp);
+    std::optional<int64_t> tripCount = pto::getStaticTripCount(forOp);
     if (!tripCount) {
       // A loop promoted by pto-promote-persistent-fragment-loops must not
       // silently survive: fragment materialization depends on the unroll.
@@ -257,59 +243,7 @@ struct PTOUnrollLoopsImpl {
   /// anything malformed: a wrongly typed attribute, an unknown `pto.unroll`
   /// value, both attributes on one loop, or an out-of-contract factor.
   LogicalResult validateHint(scf::ForOp forOp) const {
-    Attribute unrollRaw = forOp->getAttr(pto::kUnrollAttrName);
-    Attribute factorRaw = forOp->getAttr(pto::kUnrollFactorAttrName);
-
-    // Wrong attribute *types* must not slip through as "no hint": the typed
-    // getters below would return null and the loop would silently keep a
-    // malformed annotation all the way down the pipeline.
-    auto unrollAttr = dyn_cast_if_present<StringAttr>(unrollRaw);
-    if (unrollRaw && !unrollAttr) {
-      forOp.emitError() << "'" << pto::kUnrollAttrName
-                        << "' must be a string attribute, got " << unrollRaw;
-      return failure();
-    }
-    auto factorAttr = dyn_cast_if_present<IntegerAttr>(factorRaw);
-    if (factorRaw && !factorAttr) {
-      forOp.emitError() << "'" << pto::kUnrollFactorAttrName
-                        << "' must be a signless i32 attribute, got "
-                        << factorRaw;
-      return failure();
-    }
-
-    if (unrollAttr && factorAttr) {
-      forOp.emitError()
-          << "'" << pto::kUnrollAttrName << "' and '"
-          << pto::kUnrollFactorAttrName
-          << "' are mutually exclusive on one loop";
-      return failure();
-    }
-
-    StringRef unrollValue = unrollAttr ? unrollAttr.getValue() : "";
-    if (unrollAttr && unrollValue != pto::kUnrollFullValue &&
-        unrollValue != pto::kUnrollEnableValue) {
-      forOp.emitError() << "unknown '" << pto::kUnrollAttrName << "' value '"
-                        << unrollAttr.getValue()
-                        << "'; expected \"full\" (native full unroll) or "
-                           "\"enable\" (forwarded to the compiler's cost "
-                           "model by pto-convert-scf-to-cf-with-loop-hints)";
-      return failure();
-    }
-
-    if (factorAttr && !pto::isValidUnrollFactorAttr(factorAttr)) {
-      if (!factorAttr.getType().isSignlessInteger(32)) {
-        forOp.emitError() << "'" << pto::kUnrollFactorAttrName
-                          << "' must be a signless i32 attribute, got "
-                          << factorAttr.getType();
-      } else {
-        forOp.emitError() << "'" << pto::kUnrollFactorAttrName
-                          << "' must be a positive integer, got "
-                          << factorAttr.getInt();
-      }
-      return failure();
-    }
-
-    return success();
+    return pto::validateLoopUnrollHint(forOp);
   }
 
   /// Handle one annotated loop (hints are pre-validated by validateHint).
