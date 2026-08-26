@@ -184,9 +184,12 @@ std::optional<SyncMacroModel> getTExtractSyncMacroModel(pto::TExtractOp op) {
   // registered V<->S barrier) and the A5 1x1 scalar path. The ordinary A5
   // vector template stays a pure PIPE_V op with no hidden events; the
   // exception must be selected by shape, not by op name (design doc 6.3.1).
+  // PTOArch collapses A2/A3 into a single A3 value; the scalar expander
+  // (LowerPTOToUBufOps) handles both, so any non-A5 target takes the scalar
+  // hidden-event model. A5 takes it only for the 1x1 scalar path.
   PTOArch arch = getTargetArch(op.getOperation());
   bool scalarPath = false;
-  if (arch == PTOArch::A2 || arch == PTOArch::A3) {
+  if (arch != PTOArch::A5) {
     scalarPath = true;
   } else {
     for (Value dst : op.getDsts()) {
