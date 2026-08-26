@@ -20,8 +20,12 @@
 //
 // Discovery: every llvm.alloca carrying {pto.persistent} is an explicit
 // entry point (no structural re-inference of persistence).  The pass walks
-// the alloca's use graph (getelementptr -> load/store, plus any other
-// users) and collects every enclosing scf.for of every related op:
+// the alloca's pointer use graph - getelementptr chains are followed,
+// load/store (and any other direct consumer) are terminal accesses - and
+// collects every enclosing scf.for of every related op.  A load's data
+// result is deliberately NOT followed: materialization only requires every
+// access to resolve to a stable resident slot, so a loop that merely
+// consumes a loaded value is unrelated to the buffer:
 //
 //   - loops directly wrapping an access inside a SIMT section;
 //   - kernel-level loops wrapping whole pto.section.simt regions;
@@ -63,6 +67,7 @@
 
 #include "llvm/ADT/SmallPtrSet.h"
 #include "llvm/ADT/SmallVector.h"
+#include "llvm/ADT/SetVector.h"
 #include "llvm/Support/Debug.h"
 
 #include <cstdint>
@@ -97,6 +102,15 @@ static std::optional<int64_t> getStaticTripCount(scf::ForOp forOp) {
   return tripCount;
 }
 
+/// Return true when the loop's bounds and step are all compile-time
+/// constants and the loop body never executes (upper bound <= lower bound).
+static bool isStaticallyZeroTrip(scf::ForOp forOp) {
+  std::optional<int64_t> lb = getConstantIntValue(forOp.getLowerBound());
+  std::optional<int64_t> ub = getConstantIntValue(forOp.getUpperBound());
+  std::optional<int64_t> step = getConstantIntValue(forOp.getStep());
+  return lb && ub && step && *step > 0 && *ub <= *lb;
+}
+
 struct PTOPromotePersistentFragmentLoops
     : public pto::impl::PTOPromotePersistentFragmentLoopsBase<
           PTOPromotePersistentFragmentLoops> {
@@ -108,10 +122,13 @@ struct PTOPromotePersistentFragmentLoops
     MLIRContext *ctx = &getContext();
 
     // Step 1: collect every op related to a persistent fragment buffer by
-    // walking each persistent alloca's use graph.  The alloca itself is
-    // included so kernel-level loops wrapping both the allocation and the
-    // sections are discovered too.
-    llvm::SmallPtrSet<Operation *, 32> relatedOps;
+    // walking each persistent alloca's pointer use graph.  The alloca
+    // itself is included so kernel-level loops wrapping both the allocation
+    // and the sections are discovered too.  A SmallSetVector keeps the
+    // insertion (discovery) order unconditionally, so the diagnostics
+    // emitted below have a stable order regardless of how many ops are
+    // related.
+    llvm::SmallSetVector<Operation *, 32> relatedOps;
     SmallVector<LLVM::AllocaOp, 4> persistentAllocas;
     bool foundPersistent = false;
     func.walk([&](LLVM::AllocaOp allocaOp) {
@@ -121,15 +138,24 @@ struct PTOPromotePersistentFragmentLoops
       }
       foundPersistent = true;
       persistentAllocas.push_back(allocaOp);
-      SmallVector<Operation *> worklist{allocaOp.getOperation()};
+      relatedOps.insert(allocaOp.getOperation());
+      // The worklist holds only pointer-producing ops (the alloca and GEPs
+      // derived from it), so every `cur` has exactly one result: the
+      // pointer.  GEP users extend the pointer flow; every other user is a
+      // terminal access - it is related (its enclosing loops are promoted)
+      // but its results are not part of the pointer flow.  In particular a
+      // load's data result is not followed, so loops that merely consume a
+      // loaded value are never pulled in.
+      SmallVector<Operation *, 8> worklist{allocaOp.getOperation()};
       while (!worklist.empty()) {
         Operation *cur = worklist.pop_back_val();
-        bool newlySeen = relatedOps.insert(cur).second;
-        if (!newlySeen) {
-          continue;
-        }
         for (Operation *user : cur->getUsers()) {
-          worklist.push_back(user);
+          if (!relatedOps.insert(user)) {
+            continue;
+          }
+          if (isa<LLVM::GEPOp>(user)) {
+            worklist.push_back(user);
+          }
         }
       }
     });
@@ -147,17 +173,21 @@ struct PTOPromotePersistentFragmentLoops
     // after the first failure, so per-function completeness keeps the
     // emitted set deterministic under parallel scheduling.
     bool failed = false;
-    // Discovery order (function order) is kept so that the emitted
-    // diagnostics have a stable order.
+    // relatedOps iterates in discovery order (see step 1), and repeated
+    // diagnostics for the same scf.while are deduplicated, so the emitted
+    // set is deterministic.
+    llvm::SmallPtrSet<Operation *, 4> seenWhileOps;
     llvm::SmallPtrSet<Operation *, 8> seenLoopOps;
     SmallVector<Operation *, 8> loopOps;
     for (Operation *op : relatedOps) {
       if (auto whileOp = op->getParentOfType<scf::WhileOp>()) {
-        whileOp.emitError()
-            << "persistent fragment buffer is accessed inside scf.while, "
-               "which cannot be fully unrolled; persistent fragment loops "
-               "must use scf.for";
-        failed = true;
+        if (seenWhileOps.insert(whileOp.getOperation()).second) {
+          whileOp.emitError()
+              << "persistent fragment buffer is accessed inside scf.while, "
+                 "which cannot be fully unrolled; persistent fragment loops "
+                 "must use scf.for";
+          failed = true;
+        }
       }
       Operation *cur = op;
       while (auto forOp = cur->getParentOfType<scf::ForOp>()) {
@@ -171,6 +201,13 @@ struct PTOPromotePersistentFragmentLoops
     // Step 3: promote every collected loop to forced full unrolling.
     for (Operation *loopOp : loopOps) {
       auto forOp = cast<scf::ForOp>(loopOp);
+      // A statically zero-trip loop never executes its accesses, so it has
+      // no materialization precondition and needs no promotion.  Skipping
+      // it also avoids a misleading downstream "no constant trip count"
+      // hard error for what is actually a constant zero trip count.
+      if (isStaticallyZeroTrip(forOp)) {
+        continue;
+      }
       if (forOp->hasAttr(pto::kUnrollFactorAttrName)) {
         forOp.emitError()
             << "persistent fragment loop requires full unroll; a fixed '"

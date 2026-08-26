@@ -231,6 +231,12 @@ inline constexpr llvm::StringLiteral kPTODSLLogicalNameAttrName =
 ///   cap; otherwise the hint is dropped with a remark.  Malformed hints
 ///   (unknown pto.unroll value, both attributes on one loop, out-of-contract
 ///   factor) are hard errors reported by `pto-unroll-loops`.
+inline constexpr llvm::StringLiteral kUnrollAttrName = "pto.unroll";
+inline constexpr llvm::StringLiteral kUnrollEnableValue = "enable";
+inline constexpr llvm::StringLiteral kUnrollFullValue = "full";
+inline constexpr llvm::StringLiteral kUnrollFactorAttrName =
+    "pto.unroll_factor";
+
 /// Unit attribute marking an `llvm.alloca` as a persistent SIMT fragment
 /// buffer.  Shared by the persistent-fragment analysis and the loop
 /// promotion pass (used as the discovery entry point).
@@ -242,12 +248,6 @@ inline constexpr llvm::StringLiteral kPersistentAttrName = "pto.persistent";
 /// persistent loop that survives unrolling breaks fragment materialization.
 inline constexpr llvm::StringLiteral kPersistentUnrollMarkerAttrName =
     "pto.persistent_unroll";
-
-inline constexpr llvm::StringLiteral kUnrollAttrName = "pto.unroll";
-inline constexpr llvm::StringLiteral kUnrollEnableValue = "enable";
-inline constexpr llvm::StringLiteral kUnrollFullValue = "full";
-inline constexpr llvm::StringLiteral kUnrollFactorAttrName =
-    "pto.unroll_factor";
 
 /// Check whether a `pto.unroll_factor` attribute value satisfies the
 /// contract: a signless i32 holding a positive factor.  The factor is read

@@ -18,8 +18,11 @@
 
 module {
   // The while check runs during discovery (step 2), before the per-loop
-  // checks (step 3), so its diagnostic prints first.
+  // checks (step 3), so its diagnostic prints first.  The while body below
+  // holds TWO related accesses (a direct store and a GEP+store pair); the
+  // error must still be emitted exactly once per scf.while.
   // CHECK: error: persistent fragment buffer is accessed inside scf.while, which cannot be fully unrolled; persistent fragment loops must use scf.for
+  // CHECK-NOT: error: persistent fragment buffer is accessed inside scf.while
   // A fixed factor on a persistent loop silently changes explicit user
   // intent, so it is rejected outright.
   // CHECK: error: persistent fragment loop requires full unroll; a fixed 'pto.unroll_factor' is not supported
@@ -51,6 +54,8 @@ module {
         scf.condition(%cond) %cur : index
       } do {
       ^bb0(%cur: index):
+        %gB = llvm.getelementptr %fragB[0] : (!llvm.ptr) -> !llvm.ptr, f32
+        llvm.store %zero, %gB : f32, !llvm.ptr
         llvm.store %zero, %fragB : f32, !llvm.ptr
         %next = arith.addi %cur, %c1 : index
         scf.yield %next : index

@@ -23,8 +23,12 @@
 //   6. a kernel-level loop wrapping pto.section.simt -> promoted too
 //   7. a persistent loop with iter_args -> promoted and unrolled with the
 //      live-out value threaded correctly
-//   8. (RUN-LINE-2) promoted loops unroll away with no leftover attrs
-//   9. (RUN-LINE-3) an overridden enable hint produces no unroll metadata
+//   8. a loop merely consuming a value loaded from the buffer (not part of
+//      the pointer flow) -> untouched
+//   9. a statically zero-trip persistent loop -> untouched (never executes,
+//      so no promotion and no downstream error)
+//  10. (RUN-LINE-2) promoted loops unroll away with no leftover attrs
+//  11. (RUN-LINE-3) an overridden enable hint produces no unroll metadata
 
 // RUN: pto-test-opt --pto-promote-persistent-fragment-loops %s 2>&1 | FileCheck %s
 // RUN: pto-test-opt --pto-promote-persistent-fragment-loops --pto-unroll-loops %s 2>&1 | FileCheck %s --check-prefix=UNROLL
@@ -207,6 +211,61 @@ module {
       scf.yield %next : index
     }
     return %sum : index
+  }
+
+  // Case 8: a loop that merely consumes a value loaded from a persistent
+  // buffer is untouched: only the pointer flow (alloca/GEP/load/store)
+  // ties an op to the buffer, not the loaded data.  The dynamic trip count
+  // additionally proves no marker was added - a marked dynamic loop would
+  // fail in pto-unroll-loops with the persistent-unroll hard error.  (The
+  // loop sits at function level because RUN-LINE-3 converts SCF to CF,
+  // which a single-block pto.section.simt region cannot host.)
+  // CHECK-LABEL: func.func @load_result_consumers_untouched
+  // CHECK: scf.for
+  // CHECK-NOT: pto.unroll
+  // CHECK-NOT: pto.persistent_unroll
+  // UNROLL-LABEL: func.func @load_result_consumers_untouched
+  // UNROLL: scf.for
+  // UNROLL-NOT: pto.unroll
+  // UNROLL-NOT: pto.persistent_unroll
+  func.func @load_result_consumers_untouched(%n: index) {
+    %c2_i32 = arith.constant 2 : i32
+    %frag = llvm.alloca %c2_i32 x f32 {pto.persistent} : (i32) -> !llvm.ptr
+    %buf = memref.alloc() : memref<4xf32>
+    %c0 = arith.constant 0 : index
+    %c1 = arith.constant 1 : index
+    %g = llvm.getelementptr %frag[0] : (!llvm.ptr) -> !llvm.ptr, f32
+    %v = llvm.load %g : !llvm.ptr -> f32
+    scf.for %k = %c0 to %n step %c1 {
+      %w = arith.mulf %v, %v : f32
+      memref.store %w, %buf[%c0] : memref<4xf32>
+    }
+    return
+  }
+
+  // Case 9: a statically zero-trip loop never executes its access, so it is
+  // left alone instead of being promoted and then rejected downstream for
+  // "no constant trip count" (its trip count is the constant zero).
+  // CHECK-LABEL: func.func @zero_trip_loop_untouched
+  // CHECK: scf.for
+  // CHECK-NOT: pto.unroll
+  // CHECK-NOT: pto.persistent_unroll
+  // UNROLL-LABEL: func.func @zero_trip_loop_untouched
+  // UNROLL: scf.for
+  // UNROLL-NOT: pto.unroll
+  // UNROLL-NOT: pto.persistent_unroll
+  func.func @zero_trip_loop_untouched() {
+    %c2_i32 = arith.constant 2 : i32
+    %frag = llvm.alloca %c2_i32 x f32 {pto.persistent} : (i32) -> !llvm.ptr
+    %zero = arith.constant 0.000000e+00 : f32
+    %c0 = arith.constant 0 : index
+    %c1 = arith.constant 1 : index
+    scf.for %i = %c0 to %c0 step %c1 {
+      %i64 = arith.index_cast %i : index to i64
+      %element = llvm.getelementptr %frag[%i64] : (!llvm.ptr, i64) -> !llvm.ptr, f32
+      llvm.store %zero, %element : f32, !llvm.ptr
+    }
+    return
   }
 
 }
