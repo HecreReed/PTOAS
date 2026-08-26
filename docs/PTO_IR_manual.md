@@ -8123,6 +8123,72 @@ pto.textract ins(%src, %row, %col : !pto.tile_buf<...>, index, index) outs(%dst 
 pto.textract ins(%src, %row, %col : !pto.tile_buf<...>, index, index fp %fp : !pto.tile_buf<scaling, ...>) outs(%dst : !pto.tile_buf<...>)
 ```
 
+##### `pto.textract` ND-to-2xNZ dual-output overload
+
+**Summary:** One ND (row-major) source is sliced into **two independent NZ**
+(ColMajor, fractal-512) destinations in a single op. Same `pto.textract`
+op and mnemonic; the five-segment operand schema
+`[src, indices, dsts, fp, preQuantScalar]` distinguishes the overloads
+(design `docs/designs/textract-nd-to-2xnz-design.md`).
+
+**Semantics:** Two independent windows
+
+```
+window_k[r, c] = src[indexRow_k + r, indexCol_k + c]   (k = 0, 1)
+```
+
+written to the NZ physical layout of each destination (NZ offset =
+`floor(c / c0) * physicalRows * c0 + r * c0 + (c % c0)`, `c0 = 32 / elemBytes`).
+
+**Arguments / schema:**
+
+| Segment | Count | Description |
+|---------|-------|-------------|
+| `src` | 1 | ND source, `loc=vec`, row_major/none_box |
+| `indices` | 4 | `row0, col0, row1, col1` (foldable constants in `[0, UINT16_MAX]`) |
+| `dsts` | 2 | Independent NZ destinations, `loc=vec` |
+| `fp` / `preQuantScalar` | 0 | Absent for this form |
+| attrs | — | `accToVecMode` and non-default `reluPreMode` are rejected |
+
+**Constraints & Verification (design 5.1):**
+
+- Element types identical across src/dst0/dst1; **A5 first version: f16 only**
+  (other dtypes await device goldens, design 9.1); A2/A3 support
+  i8/i32/f16/bf16/f32 via scalar expansion.
+- src ND: row_major + none_box, `loc=vec`, fractal-512, 32B-aligned row
+  stride; dsts NZ: col_major + row_major, `loc=vec`, 16-aligned physical
+  rows, c0-aligned physical cols.
+- Indices foldable and within `[0, UINT16_MAX]`.
+- Window bounds checked against **both** src physical and src valid extents
+  (undefined-padding protection); A5 rejects sub-c0 source columns whose
+  vldas/vldus read footprint crosses the row end.
+- A5 partial-valid destination requires `physicalRows == align16(validRows)`;
+  destination physical rows must fit the A5 vsstb signless 16-bit block
+  stride (0..65535); RowPlusOne buffer layouts are rejected in the first
+  version.
+- DPS: two destinations are the DPS init operands; memory effects are
+  `Read(src) + Write(dst0) + Write(dst1)`; pipe is fixed `PIPE_V` (with a
+  registered V<->S hidden-event pair for the A2/A3 scalar expansion and the
+  A5 1x1 scalar path).
+
+**Hardware Mapping (EmitC):** exactly one public seven-operand call in
+PTO-ISA argument order, never split into two single-output TEXTRACTs:
+
+```cpp
+TEXTRACT(dst0, dst1, src, row0, col0, row1, col1);
+```
+
+**A5 TileLib:** the candidate `a5.textract_nd2xnz` is registered on the
+`pto.textract` registry; the 1x1 window uses the scalar load/store path,
+sub-c0 columns use vldas + vldus with exact trailing-block masks, and the
+c0-aligned vlds path stays gated behind device goldens (design 9.1).
+
+**Compatibility:** legacy C++ builders
+(`build(..., src, indexRow, indexCol, dst, ...)`) and Python
+`TExtractOp(src, index_row, index_col, dst)` / `pto.textract(...)` keep
+their single-output surface; the dual form is built with
+`TExtractOp.build_nd_to_2xnz(...)`.
+
 ---
 
 ##### `pto.tfillpad` - Fill Padding Region

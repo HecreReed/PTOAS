@@ -1988,3 +1988,52 @@ pto.tmov ins(%exp : !pto.tile_buf<vec, 2x16xui8>,
          outs(%exp_zz : !pto.tile_buf<vec, 2x16xui8, slayout=row_major>)
          {grpAxis = #pto<mx_group_axis axis0>}
 ```
+
+## 14. TEXTRACT ND-to-2xNZ Dual-Output Overload
+
+The PTO-ISA `TEXTRACT` seven-operand overload slices one ND (row-major)
+source into **two independent NZ** (ColMajor) destinations:
+
+```text
+TEXTRACT(dst0, dst1, src, row0, col0, row1, col1)
+window_k[r, c] = src[indexRow_k + r, indexCol_k + c]   (k = 0, 1)
+```
+
+### 14.1 Schema boundary (PTO IR)
+
+PTO IR carries this overload on the same `pto.textract` op using the
+five-segment operand schema `[src, indices, dsts, fp, preQuantScalar]`:
+single-output is `[1, 2, 1, {0,1}, {0,1}]`, dual-output is `[1, 4, 2, 0, 0]`.
+Any other combination is rejected as malformed (no new op / mnemonic).
+
+### 14.2 Layout & dtype table
+
+| Operand | Layout | Notes |
+|---------|--------|-------|
+| `src` | ND row_major + none_box, `loc=vec`, fractal-512 | 32B-aligned row stride |
+| `dst0` / `dst1` | NZ col_major + row_major, `loc=vec`, fractal-512 | may differ in physical/valid shape |
+
+Element types must be identical across all operands. **A5 first version**:
+`f16` only (design 9.1 - unverified dtypes are not registered). A2/A3
+scalar expansion supports `i8/i32/f16/bf16/f32`. `fp`/`preQuantScalar` are
+absent; `accToVecMode` and non-default `reluPreMode` are rejected. A5
+partial-valid destinations additionally require
+`physicalRows == align16(validRows)`; RowPlusOne compact layouts are
+rejected in the first version.
+
+### 14.3 EmitC mapping
+
+PTOAS EmitC emits exactly one public seven-operand call in PTO-ISA
+argument order (`dst0, dst1, src, row0, col0, row1, col1`); it never splits
+the dual form into two single-output `TEXTRACT` calls, which would lose the
+ND-to-NZ layout conversion. PTOBC v0 encodes legacy single-output opcodes
+unchanged; the dual form rides a generic v0 record.
+
+### 14.4 A5 TileLib template
+
+The `a5.textract_nd2xnz` candidate (f16, `loc=ub`) is registered on the
+`pto.textract` registry: 1x1 windows use the scalar load/store path with an
+explicit V<->S barrier; sub-c0 source columns use `vldas` + `vldus` with
+exact trailing-block `PAT_VL` masks (the verifier statically rejects
+sub-c0 windows whose read footprint crosses the source row end); the
+c0-aligned `vlds` optimization path is gated behind device goldens.
