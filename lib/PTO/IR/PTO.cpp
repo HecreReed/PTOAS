@@ -8122,6 +8122,29 @@ bool TExtractOp::isNdTo2xNzForm() { return classifyForm() == Form::NdTo2xNz; }
   return ::mlir::MutableOperandRange(getOperation(), dstsBegin, dstsCount);
 }
 
+// Pre-range compatibility builders (design doc 4.4/11.2): forward the fixed
+// typed overloads to the generated range builders.
+void TExtractOp::build(::mlir::OpBuilder &odsBuilder,
+                       ::mlir::OperationState &odsState, ::mlir::Value src,
+                       ::mlir::Value indexRow, ::mlir::Value indexCol,
+                       ::mlir::Value dst, ::mlir::Value fp,
+                       ::mlir::Value preQuantScalar) {
+  build(odsBuilder, odsState, src, ValueRange{indexRow, indexCol},
+        ValueRange{dst}, fp, preQuantScalar, /*accToVecMode=*/{},
+        /*reluPreMode=*/::mlir::pto::ReluPreMode::NoRelu);
+}
+
+void TExtractOp::build(::mlir::OpBuilder &odsBuilder,
+                       ::mlir::OperationState &odsState,
+                       ::mlir::TypeRange resultTypes, ::mlir::Value src,
+                       ::mlir::Value indexRow, ::mlir::Value indexCol,
+                       ::mlir::Value dst, ::mlir::Value fp,
+                       ::mlir::Value preQuantScalar) {
+  build(odsBuilder, odsState, resultTypes, src, ValueRange{indexRow, indexCol},
+        ValueRange{dst}, fp, preQuantScalar, /*accToVecMode=*/{},
+        /*reluPreMode=*/::mlir::pto::ReluPreMode::NoRelu);
+}
+
 static LogicalResult verifyNdTo2xNzForm(Operation *op);
 
 mlir::LogicalResult mlir::pto::TExtractOp::verify() {
@@ -8480,6 +8503,20 @@ static LogicalResult verifyNdTo2xNzForm(Operation *op) {
   VerifierTargetArch arch = getVerifierTargetArch(op);
   const bool isA5 = arch == VerifierTargetArch::A5;
 
+  // 0. Dual-output form forbids acc-conversion and post-scaling modes (design
+  //    doc 5.2): EmitC emits the plain seven-operand TEXTRACT and would
+  //    silently drop these inherent properties.
+  if (tex.getAccToVecModeAttr()) {
+    return op->emitOpError(
+        "ND-to-2xNZ dual-output TEXTRACT does not support acc_to_vec mode");
+  }
+  if (auto relu = tex.getReluPreModeAttr();
+      relu && relu.getValue() != ::mlir::pto::ReluPreMode::NoRelu) {
+    return op->emitOpError(
+        "ND-to-2xNZ dual-output TEXTRACT does not support relu pre modes "
+        "(only no_relu)");
+  }
+
   // 1. verifyTileBufCommon: low precision forbidden on A2/A3, allowed on A5.
   const bool allowLowPrecision = isA5;
   if (failed(verifyTileBufCommon(op, srcTy, "src", allowLowPrecision)) ||
@@ -8638,6 +8675,16 @@ static LogicalResult verifyNdTo2xNzForm(Operation *op) {
           "expects ND-to-2xNZ TEXTRACT " + dstName +
           " plain-NZ physical rows to be 16-aligned");
     }
+    // The A5 TileLib template passes the destination physical rows as the
+    // vsstb block stride, a signed 16-bit field (design doc 9.2): the
+    // verifier must prove the range statically before the wrapper materializes
+    // the i16 constant (an oversized stride would silently truncate).
+    if (dstShape[0] > (int64_t)std::numeric_limits<int16_t>::max()) {
+      return op->emitOpError(
+          "expects ND-to-2xNZ TEXTRACT " + dstName +
+          " physical rows to fit the A5 vsstb 16-bit block stride "
+          "(<= INT16_MAX)");
+    }
     if (dstShape[1] % c0 != 0) {
       return op->emitOpError(
           "expects ND-to-2xNZ TEXTRACT " + dstName +
@@ -8739,6 +8786,33 @@ static LogicalResult verifyNdTo2xNzForm(Operation *op) {
   if (failed(checkWindow(*indexRow0, *indexCol0, dst0Valid, "dst0")) ||
       failed(checkWindow(*indexRow1, *indexCol1, dst1Valid, "dst1"))) {
     return failure();
+  }
+
+  // 11. A5 sub-c0 vector read footprint (design doc 9.2): the template
+  //     reads whole c0-element vregs per source row (vldas+vldus). For a
+  //     sub-c0 source column the block-aligned read may cross the row end;
+  //     on the last row that would read past the source allocation. The
+  //     c0-aligned equivalent never crosses (both bounds and physCols are
+  //     c0 multiples). Reject the sub-c0 crossing statically.
+  if (isA5) {
+    auto checkReadFootprint = [&](int64_t col, ArrayRef<int64_t> valid,
+                                  int64_t indexOrdinal) -> LogicalResult {
+      if (col % c0 != 0 && valid[1] > 0) {
+        int64_t nblocks = (valid[1] + c0 - 1) / c0;
+        if (col + nblocks * c0 > srcShape[1]) {
+          return op->emitOpError(
+              "expects sub-c0 ND-to-2xNZ TEXTRACT window indexCol" +
+              Twine(indexOrdinal) +
+              " kept within the row: the vldas/vldus footprint would read "
+              "past the source row end on A5");
+        }
+      }
+      return success();
+    };
+    if (failed(checkReadFootprint(*indexCol0, dst0Valid, 0)) ||
+        failed(checkReadFootprint(*indexCol1, dst1Valid, 1))) {
+      return failure();
+    }
   }
 
   return success();

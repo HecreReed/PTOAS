@@ -52,20 +52,36 @@ def _expand_window(src, row0, col0, dst):
     Window element mapping (design doc 3.2):
         window[r, c] = src[row0 + r, col0 + c]
     written to the NZ layout of dst: NZ offset = floor(c/c0)*physRows*c0
-    + r*c0 + (c%c0), c0 = 32/elemBytes. We walk column blocks of c0 (one
-    vreg width), and for each block row use vldus (unaligned) and vsstb with
-    the destination physical-row block stride. The trailing block uses an
-    exact PAT_VL mask so validCols % c0 pads stay untouched; row padding
-    beyond validRows is not written (undefined by the TEXTRACT contract,
-    design 3.2.1). 1x1 windows naturally fall out as m=1, n=1 with a
-    PAT_VL1 tail. pto.addptr advances by element offset (not bytes).
+    + r*c0 + (c%c0), c0 = 32/elemBytes.
+
+    Three access paths per design doc 9.2:
+    - 1x1 windows use the scalar load/store path so the SyncMacroModel's A5
+      1x1 scalar hidden-event model stays consistent with the lowering and no
+      vector read footprint is touched;
+    - sub-c0 source offsets use vldas + vldus (unaligned); the verifier
+      statically rejects sub-c0 windows whose vldus footprint would cross the
+      source row end;
+    - c0-aligned sources may use vlds; that optimized path stays gated behind
+      device goldens (design doc 9.1) and currently reuses vldas + vldus,
+      which is functionally correct for aligned windows as well.
+
+    Column blocks of c0 are walked with an exact PAT_VL{tail} mask for the
+    trailing block, so validCols % c0 pads stay untouched; row padding beyond
+    validRows is not written (undefined by the TEXTRACT contract, design
+    3.2.1). pto.addptr advances by element offset (not bytes).
     """
     m, n = dst.valid_shape
-    c0 = 32 // _elem_bytes(dst)
-    block_stride = dst.shape[0]  # storageRows (plain NZ); design doc 3.2
     src_ptr = src.as_ptr()
     dst_ptr = dst.as_ptr()
     base_elems = row0 * src.shape[1] + col0
+    if m == 1 and n == 1:
+        # Scalar path (design doc 9.2): exactly one element, consistent with
+        # the 1x1 scalar hidden-event model in SyncMacroModel.
+        value = pto.load_scalar(src_ptr, base_elems)
+        pto.store_scalar(dst_ptr, 0, value)
+        return
+    c0 = 32 // _elem_bytes(dst)
+    block_stride = dst.shape[0]  # storageRows (plain NZ); design doc 3.2
     nblocks = (n + c0 - 1) // c0
     align = pto.vldas(src_ptr)
     for cb in range(nblocks):

@@ -51,6 +51,13 @@ unsigned getPTOStorageElemBitWidth(Type t);
 unsigned getPTOStorageElemByteSize(Type t);
 unsigned getPTOPackedLdgStgTotalBits(Type t);
 
+// Shared physical-storage sizing for tile buffers (design doc 5.4/12): the
+// authoritative allocation size used by the post-planning range checks and
+// GraphSync alike. Handles the plain rectangular footprint as well as the
+// RowPlusOne compact layout. Returns nullopt when the type is not a tile buf
+// or the footprint cannot be computed statically.
+std::optional<int64_t> getTileBufStorageByteSize(Type tileBufType);
+
 } // namespace mlir::pto
 
 #endif // PTO_IR_PTOTYPEUTILS_H

@@ -361,6 +361,43 @@ static LogicalResult expandTExtractNd2xNzWindow(
   return success();
 }
 
+// Pick the synchronization event id for the hidden V<->S barrier of one
+// ND-to-2xNz scalar expansion. TExtractOp's SyncMacroModel reserves event 0
+// (design doc 6.3.1); when the event-id allocator ran (InsertSync), 0 is
+// free for us because it is reserved. When it did not run, choose the first
+// id not already used by explicit set_flag/wait_flag ops in the enclosing
+// scope so the expansion never aliases a user literal event.
+static unsigned selectUnusedHiddenEventId(Operation *anchor,
+                                          MLIRContext *ctx) {
+  llvm::SmallDenseSet<int32_t, 8> used;
+  auto scan = [&](Operation *scope) {
+    scope->walk([&](Operation *inner) {
+      if (auto sf = dyn_cast<pto::SetFlagOp>(inner)) {
+        if (auto ev = sf.getEventIdAttr())
+          used.insert(static_cast<int32_t>(ev.getEvent()));
+      } else if (auto wf = dyn_cast<pto::WaitFlagOp>(inner)) {
+        if (auto ev = wf.getEventIdAttr())
+          used.insert(static_cast<int32_t>(ev.getEvent()));
+      }
+    });
+  };
+  // Scan the enclosing function/module (exclude the op being expanded; it has
+  // no flags yet).
+  Operation *funcScope = anchor->getParentOp();
+  if (funcScope)
+    scan(funcScope);
+  else
+    scan(anchor);
+  // kHiddenEventIdNum bounds the hidden-event id space; a straightforward
+  // linear scan keeps determinism.
+  constexpr unsigned kHiddenEventIdNum = 16;
+  for (unsigned id = 0; id < kHiddenEventIdNum; ++id) {
+    if (!used.count(static_cast<int32_t>(id)))
+      return id;
+  }
+  return kHiddenEventIdNum - 1;
+}
+
 static LogicalResult expandTExtractNd2xNz(
     OpBuilder &builder, MLIRContext *ctx, const PendingTExtractNd2xNz &pd) {
   Operation *rawOp = pd.op;
@@ -372,12 +409,18 @@ static LogicalResult expandTExtractNd2xNz(
   Value dst1Ptr = rawOp->getOperand(6);
 
   // Registered hidden-event barrier around the scalar expansion (design doc
-  // 6.3.1): the events were reserved by TExtractOp's SyncMacroModel before
-  // event-id allocation; lowering only materializes that reservation.
+  // 6.3.1): TExtractOp's SyncMacroModel reserves event 0 for the V<->S hidden
+  // pair during event-id allocation (InsertSync path). When the allocator did
+  // not run (e.g. default VPTO lowering), pick the first event id not already
+  // used explicitly in the enclosing scope so we never collide with a user
+  // literal event (design doc 6.3.1: lowering must not register a conflicting
+  // literal event).
   builder.setInsertionPoint(rawOp);
   auto pipeV = pto::PipeAttr::get(ctx, pto::PIPE::PIPE_V);
   auto pipeS = pto::PipeAttr::get(ctx, pto::PIPE::PIPE_S);
-  auto event0 = pto::EventAttr::get(ctx, pto::EVENT::EVENT_ID0);
+  auto eventId =
+      static_cast<pto::EVENT>(selectUnusedHiddenEventId(rawOp, ctx));
+  auto event0 = pto::EventAttr::get(ctx, eventId);
   builder.create<pto::SetFlagOp>(loc, pipeV, pipeS, event0);
   builder.create<pto::WaitFlagOp>(loc, pipeV, pipeS, event0);
 

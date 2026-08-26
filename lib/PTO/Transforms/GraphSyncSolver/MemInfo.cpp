@@ -44,37 +44,13 @@ using namespace pto::syncsolver;
 namespace mlir::pto::syncsolver {
 
 static std::optional<int64_t> getTileBufferBitSize(pto::TileBufType type) {
-  auto bitWidth = getPTOStorageElemBitWidth(type.getElementType());
-  if (bitWidth == 0) {
+  // Route through the shared physical-storage sizing helper (design doc
+  // 5.4/12) so GraphSync and the post-planning ND-to-2xNz range checks agree
+  // on the allocation footprint (plain and RowPlusOne compact layouts).
+  auto bytes = getTileBufStorageByteSize(type);
+  if (!bytes)
     return ShapedType::kDynamic;
-  }
-
-  ArrayRef<int64_t> shape = type.getShape();
-  if (type.getCompactModeI32() ==
-      static_cast<int32_t>(pto::CompactMode::RowPlusOne)) {
-    if (shape.size() != mlir::pto::kValue2 || llvm::is_contained(shape, ShapedType::kDynamic)) {
-      return ShapedType::kDynamic;
-    }
-
-    bool rowMajor = type.getBLayoutValueI32() ==
-                    static_cast<int32_t>(pto::BLayout::RowMajor);
-    int64_t major = rowMajor ? shape[0] : shape[1];
-    int64_t minor = rowMajor ? shape[1] : shape[0];
-    if (major == 0 || minor == 0) {
-      return 0;
-    }
-    return ((major - 1) * (minor + 1) + minor) *
-           static_cast<int64_t>(bitWidth);
-  }
-
-  int64_t numElements = 1;
-  for (int64_t dim : shape) {
-    if (dim == ShapedType::kDynamic) {
-      return ShapedType::kDynamic;
-    }
-    numElements *= dim;
-  }
-  return numElements * bitWidth;
+  return *bytes * 8;
 }
 
 static std::optional<int64_t> getBufferBitSize(Value value) {

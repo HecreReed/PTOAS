@@ -121,3 +121,35 @@ unsigned mlir::pto::getPTOStorageElemByteSize(Type t) {
   unsigned bitWidth = getPTOStorageElemBitWidth(t);
   return bitWidth == 0 ? 0 : bitWidth / kBitsPerByte;
 }
+
+std::optional<int64_t> mlir::pto::getTileBufStorageByteSize(Type tileBufType) {
+  auto tb = dyn_cast<pto::TileBufType>(tileBufType);
+  if (!tb)
+    return std::nullopt;
+  unsigned bitWidth = getPTOStorageElemBitWidth(tb.getElementType());
+  if (bitWidth == 0)
+    return std::nullopt;
+  ArrayRef<int64_t> shape = tb.getShape();
+  int64_t bits = 0;
+  if (tb.getCompactModeI32() ==
+      static_cast<int32_t>(pto::CompactMode::RowPlusOne)) {
+    if (shape.size() != kValue2 || llvm::is_contained(shape, ShapedType::kDynamic))
+      return std::nullopt;
+    bool rowMajor = tb.getBLayoutValueI32() ==
+                    static_cast<int32_t>(pto::BLayout::RowMajor);
+    int64_t major = rowMajor ? shape[0] : shape[1];
+    int64_t minor = rowMajor ? shape[1] : shape[0];
+    if (major == 0 || minor == 0)
+      return 0;
+    bits = ((major - 1) * (minor + 1) + minor) * static_cast<int64_t>(bitWidth);
+  } else {
+    int64_t numElements = 1;
+    for (int64_t dim : shape) {
+      if (dim == ShapedType::kDynamic)
+        return std::nullopt;
+      numElements *= dim;
+    }
+    bits = numElements * static_cast<int64_t>(bitWidth);
+  }
+  return bits / kBitsPerByte;
+}

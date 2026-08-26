@@ -4596,9 +4596,31 @@ def TExtractOp : PTO_TOp<"textract", [
     ::mlir::OpOperand &getDstMutable();
 
     ::mlir::MutableOperandRange getDpsInitsMutable();
+
+    // Pre-range compatibility builders (design doc 4.4/11.2): old C++ call
+    // sites used fixed typed overloads (indexRow/indexCol/dst); forward them
+    // to the generated range builders so existing callers keep compiling.
+    static void build(::mlir::OpBuilder &odsBuilder,
+                      ::mlir::OperationState &odsState, ::mlir::Value src,
+                      ::mlir::Value indexRow, ::mlir::Value indexCol,
+                      ::mlir::Value dst,
+                      ::mlir::Value fp = ::mlir::Value(),
+                      ::mlir::Value preQuantScalar = ::mlir::Value());
+    static void build(::mlir::OpBuilder &odsBuilder,
+                      ::mlir::OperationState &odsState,
+                      ::mlir::TypeRange resultTypes, ::mlir::Value src,
+                      ::mlir::Value indexRow, ::mlir::Value indexCol,
+                      ::mlir::Value dst,
+                      ::mlir::Value fp = ::mlir::Value(),
+                      ::mlir::Value preQuantScalar = ::mlir::Value());
+
     ::mlir::pto::PIPE getPipe() {
-      // ND-to-2xNZ dual-output form is always a V-pipe op.
-      if (classifyForm() == Form::NdTo2xNz)
+      // Invalid/malformed schemas must stay fail-safe: never consult the
+      // legacy accessors (they assert isSingleOutputForm()) before the
+      // verifier has run. Only the confirmed single-output form inspects
+      // source/destination address spaces.
+      Form form = classifyForm();
+      if (form != Form::SingleOutput)
         return ::mlir::pto::PIPE::PIPE_V;
       // Single-output: align with pto-isa TEXTRACT op classes:
       //   - TEXTRACT_M2LR : MAT -> LEFT/RIGHT (and scaling-like targets) (MTE1)

@@ -36,27 +36,6 @@ struct ByteRange {
   bool resolved = false;
 };
 
-// Element storage bytes for a tile element type.
-std::optional<int64_t> storageElemBytes(Type ty) {
-  if (isPTOFloat8Type(ty) || isPTOHiFloat8Type(ty))
-    return 1;
-  if (isPTOFloat4PackedType(ty))
-    return 1; // rejected by the verifier in this feature; conservative value
-  if (auto it = dyn_cast<IntegerType>(ty)) {
-    unsigned w = it.getWidth();
-    if (w != 0 && w % 8 == 0)
-      return w / 8;
-    return std::nullopt;
-  }
-  if (auto ft = dyn_cast<FloatType>(ty)) {
-    unsigned w = ft.getWidth();
-    if (w != 0 && w % 8 == 0)
-      return w / 8;
-    return std::nullopt;
-  }
-  return std::nullopt;
-}
-
 // Skip single-input view/cast chains that preserve the underlying buffer:
 // subview, bitcast, treshape, and single-input unrealized_conversion_cast.
 Value skipViews(Value v) {
@@ -130,17 +109,13 @@ ByteRange resolveAllocationByteRange(Value v) {
   auto space = tileAddressSpace(ty);
   if (!space)
     return out;
-  auto shape = ty.getShape();
-  if (shape.size() != 2)
+  // Shared physical-storage sizing (design doc 5.4): plain rectangular
+  // footprints and RowPlusOne compact layouts both go through the single
+  // helper so post-planning alias checks agree with GraphSync sizing.
+  auto bytesOpt = getTileBufStorageByteSize(ty);
+  if (!bytesOpt || *bytesOpt <= 0)
     return out;
-  if (shape[0] == ShapedType::kDynamic || shape[1] == ShapedType::kDynamic)
-    return out;
-  auto eb = storageElemBytes(ty.getElementType());
-  if (!eb)
-    return out;
-  int64_t bytes = shape[0] * shape[1] * *eb;
-  if (bytes <= 0)
-    return out;
+  int64_t bytes = *bytesOpt;
   out.space = space;
   out.base = *baseOpt;
   out.end = *baseOpt + bytes;
@@ -466,25 +441,47 @@ mlir::pto::validateTExtractNd2xNzPrePartition(mlir::Operation *module) {
     return success();
   }
 
-  // Fixed-depth structure guard: the design allows root Module -> immediate
-  // backend child Module -> func (the mixed-backend driver splits the outer
-  // module into exactly such child compile units). Only a ModuleOp nested
-  // deeper than one level under the root (a child containing another module,
-  // or a function-scoped module) is rejected.
+  // Fixed-depth structure guard (design doc 5.3.2): the mixed-backend driver
+  // splits the outer module into exactly one level of backend child ModuleOps
+  // (root Module -> child Module -> func.func). Count ModuleOp ancestors, so
+  // an immediate child has depth 1 and only a module nested below a child
+  // (depth >= 2), or a module not under the root at all, is rejected.
   bool hasNestedModule = false;
   mod.walk([&](ModuleOp m) {
     if (m.getOperation() == mod.getOperation())
       return;
-    unsigned depth = 0;
-    for (Operation *cur = m.getOperation(); cur; cur = cur->getParentOp())
-      ++depth;
-    if (depth > 1)
+    unsigned moduleDepth = 0;
+    for (Operation *cur = m.getOperation()->getParentOp(); cur;
+         cur = cur->getParentOp()) {
+      if (isa<ModuleOp>(cur))
+        ++moduleDepth;
+    }
+    if (moduleDepth > 1)
       hasNestedModule = true;
   });
   if (hasNestedModule) {
     mod->emitOpError()
         << "backend-partitioned ND-to-2xNz validation does not support "
            "module scopes nested below the immediate backend children";
+    return failure();
+  }
+
+  // Root body structure: the design allows either top-level funcs
+  // (non-partitioned) or exactly immediate backend child modules
+  // (partitioned); mixing both is rejected.
+  bool rootHasModuleChild = false;
+  bool rootHasTopFunc = false;
+  for (Operation &rootOp : *mod.getBody()) {
+    if (isa<ModuleOp>(rootOp))
+      rootHasModuleChild = true;
+    if (isa<func::FuncOp>(rootOp))
+      rootHasTopFunc = true;
+  }
+  if (rootHasModuleChild && rootHasTopFunc) {
+    mod->emitOpError()
+        << "backend-partitioned ND-to-2xNz validation does not allow the "
+           "root body to mix immediate backend child modules with top-level "
+           "functions";
     return failure();
   }
 
