@@ -157,8 +157,12 @@ mlir::pto::getNZViewCompatibilityError(ArrayRef<int64_t> shape5D,
             Twine(storageElemBytes))
         .str();
 
-  if (!matchesKnown(shape5D[0], 1))
-    return expectedActual("shape[0]", 1, shape5D[0]);
+  // The leading dimension is the outer batch/expert axis in the pto-isa
+  // canonical form [E, K/C0, N/16, 16, C0].  It is not part of the NZ
+  // fractal, so an explicit NZ annotation remains valid for E > 1 as well as
+  // the historical E == 1 form.
+  if (!isDynamic(shape5D[0]) && shape5D[0] <= 0)
+    return "NZ layout requires shape[0] to be positive";
   if (!matchesKnown(shape5D[3], kNZInnerRows))
     return expectedActual("shape[3]", kNZInnerRows, shape5D[3]);
   if (!matchesKnown(shape5D[4], *c0))
@@ -215,7 +219,10 @@ mlir::pto::getNZSubviewCompatibilityError(ArrayRef<int64_t> sourceShape5D,
       offsets5D.size() != kPTOLayoutRank || sizes5D.size() != kPTOLayoutRank)
     return "NZ partition requires rank-5 source, offsets, and sizes";
 
-  for (int64_t index : {0, 3, 4}) {
+  // d0 is the outer batch/expert axis in the canonical descriptor and can be
+  // sliced independently.  Only the two dimensions that make up the NZ
+  // fractal must remain complete in a subview.
+  for (int64_t index : {3, 4}) {
     int64_t expectedSize = sourceShape5D[index];
     if (isDynamic(offsets5D[index]) || isDynamic(sizes5D[index]) ||
         isDynamic(expectedSize))
@@ -284,6 +291,9 @@ mlir::pto::inferLayout5D(ArrayRef<int64_t> shape, ArrayRef<int64_t> stride,
 
   if (shape.size() == kPTOLayoutRank &&
       isCanonicalNZRoot5D(padded->shape, padded->stride, storageElemBytes) &&
+      // Keep inference conservative for E > 1: blocked ND and NZ have the
+      // same shape/stride structure, so only an explicit layout can disambiguate
+      // a batched/expert view.
       padded->shape[0] == 1 && (padded->shape[1] > 1 || padded->shape[2] > 1))
     return Layout::NZ;
 
