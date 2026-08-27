@@ -8153,20 +8153,12 @@ void TExtractOp::build(::mlir::OpBuilder &odsBuilder,
     ::mlir::Value fp, ::mlir::Value preQuantScalar,
     ::mlir::pto::AccToVecModeAttr accToVecMode,
     ::mlir::pto::ReluPreModeAttr reluPreMode) {
-  return create(builder, location, src, ValueRange{indexRow, indexCol},
-                ValueRange{dst}, fp, preQuantScalar, accToVecMode,
-                reluPreMode);
-}
-
-::mlir::pto::TExtractOp TExtractOp::create(
-    ::mlir::ImplicitLocOpBuilder &builder, ::mlir::Value src,
-    ::mlir::Value indexRow, ::mlir::Value indexCol, ::mlir::Value dst,
-    ::mlir::Value fp, ::mlir::Value preQuantScalar,
-    ::mlir::pto::AccToVecModeAttr accToVecMode,
-    ::mlir::pto::ReluPreModeAttr reluPreMode) {
-  return create(builder, src, ValueRange{indexRow, indexCol},
-                ValueRange{dst}, fp, preQuantScalar, accToVecMode,
-                reluPreMode);
+  // Via the typed build overload to avoid ambiguity against the generated
+  // ValueRange overloads.
+  ::mlir::OperationState odsState(location, TExtractOp::getOperationName());
+  build(builder, odsState, src, indexRow, indexCol, dst, fp, preQuantScalar,
+        accToVecMode, reluPreMode);
+  return ::llvm::cast<TExtractOp>(builder.create(odsState));
 }
 
 static LogicalResult verifyNdTo2xNzForm(Operation *op);

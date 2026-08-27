@@ -4619,15 +4619,12 @@ def TExtractOp : PTO_TOp<"textract", [
                       ::mlir::Value preQuantScalar = ::mlir::Value(),
                       ::mlir::pto::AccToVecModeAttr accToVecMode = {},
                       ::mlir::pto::ReluPreModeAttr reluPreMode = {});
+    // The ImplicitLocOpBuilder create variant is intentionally not declared:
+    // the generated op header does not include mlir/IR/Builders.h, so the type
+    // is unavailable there; the OpBuilder+Location create below covers the
+    // legacy call sites (design doc 4.4/11.2).
     static ::mlir::pto::TExtractOp create(
         ::mlir::OpBuilder &builder, ::mlir::Location location, ::mlir::Value src,
-        ::mlir::Value indexRow, ::mlir::Value indexCol, ::mlir::Value dst,
-        ::mlir::Value fp = ::mlir::Value(),
-        ::mlir::Value preQuantScalar = ::mlir::Value(),
-        ::mlir::pto::AccToVecModeAttr accToVecMode = {},
-        ::mlir::pto::ReluPreModeAttr reluPreMode = {});
-    static ::mlir::pto::TExtractOp create(
-        ::mlir::ImplicitLocOpBuilder &builder, ::mlir::Value src,
         ::mlir::Value indexRow, ::mlir::Value indexCol, ::mlir::Value dst,
         ::mlir::Value fp = ::mlir::Value(),
         ::mlir::Value preQuantScalar = ::mlir::Value(),
