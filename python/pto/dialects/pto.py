@@ -1938,20 +1938,34 @@ class TExtractOp(_GeneratedTExtractOp):
     """
 
     def __init__(self, src, index_row=None, index_col=None, dst=None,
-                 *, indexRow=None, indexCol=None,
+                 *, indices=None, dsts=None,
+                 indexRow=None, indexCol=None,
                  fp=None, pre_quant_scalar=None, preQuantScalar=None,
                  acc_to_vec_mode=None, accToVecMode=None,
                  relu_pre_mode=None, reluPreMode=None,
                  loc=None, ip=None):
-        # Both the legacy snake_case spellings and the old generated-binder
-        # camelCase keywords are accepted; the snake_case value wins when both
-        # are provided.
-        row = index_row if index_row is not None else indexRow
-        col = index_col if index_col is not None else indexCol
-        if row is None or col is None or dst is None:
-            raise TypeError(
-                "TExtractOp requires index_row/indexRow, index_col/indexCol "
-                "and dst for the single-output form")
+        # Range-form constructor (design doc 4.4/10): TExtractOp(src,
+        # indices=[...], dsts=[...]) builds the raw range operand list, e.g.
+        # the ND-to-2xNZ dual-output form with four indices / two dsts.
+        if indices is not None or dsts is not None:
+            if (index_row is not None or index_col is not None or
+                    dst is not None or indexRow is not None or indexCol is not None):
+                raise TypeError(
+                    "TExtractOp range-form (indices/dsts) cannot be mixed "
+                    "with legacy index column/dst arguments")
+            inds = list(indices) if indices is not None else []
+            dss = list(dsts) if dsts is not None else []
+        else:
+            # Legacy single-output form: snake_case wins over camelCase when
+            # both spellings are provided.
+            row = index_row if index_row is not None else indexRow
+            col = index_col if index_col is not None else indexCol
+            if row is None or col is None or dst is None:
+                raise TypeError(
+                    "TExtractOp requires index_row/indexRow, index_col/indexCol "
+                    "and dst for the single-output form")
+            inds = [row, col]
+            dss = [dst]
         pqs = pre_quant_scalar if pre_quant_scalar is not None else preQuantScalar
         acc = acc_to_vec_mode if acc_to_vec_mode is not None else accToVecMode
         relu = relu_pre_mode if relu_pre_mode is not None else reluPreMode
@@ -1970,8 +1984,8 @@ class TExtractOp(_GeneratedTExtractOp):
             kwargs["reluPreMode"] = relu
         super().__init__(
             src,
-            indices=[row, col],
-            dsts=[dst],
+            indices=inds,
+            dsts=dss,
             loc=loc,
             ip=ip,
             **kwargs,
@@ -1992,18 +2006,15 @@ class TExtractOp(_GeneratedTExtractOp):
     @classmethod
     def build_nd_to_2xnz(cls, src, row0, col0, row1, col1, dst0, dst1,
                          *, loc=None, ip=None):
-        """Build the ND-to-2xNZ dual-output form as a pto.TExtractOp facade
-        instance (bypasses the single-output facade __init__)."""
-        op = cls.__new__(cls)
-        _GeneratedTExtractOp.__init__(
-            op,
-            src=src,
+        """Build the ND-to-2xNZ dual-output form through the facade's
+        range-form constructor."""
+        return cls(
+            src,
             indices=[row0, col0, row1, col1],
             dsts=[dst0, dst1],
             loc=loc,
             ip=ip,
         )
-        return op
 
 
 def _register_facade_opview():

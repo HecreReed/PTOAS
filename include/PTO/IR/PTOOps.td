@@ -4597,22 +4597,42 @@ def TExtractOp : PTO_TOp<"textract", [
 
     ::mlir::MutableOperandRange getDpsInitsMutable();
 
-    // Pre-range compatibility builders (design doc 4.4/11.2): old C++ call
-    // sites used fixed typed overloads (indexRow/indexCol/dst); forward them
-    // to the generated range builders so existing callers keep compiling.
+    // Pre-range compatibility builders/creators (design doc 4.4/11.2): old
+    // C++ call sites used fixed typed overloads (indexRow/indexCol/dst,
+    // optional fp / preQuantScalar / accToVecMode / reluPreMode); forward
+    // them to the generated range builders/creators so existing callers keep
+    // compiling.
     static void build(::mlir::OpBuilder &odsBuilder,
                       ::mlir::OperationState &odsState, ::mlir::Value src,
                       ::mlir::Value indexRow, ::mlir::Value indexCol,
                       ::mlir::Value dst,
                       ::mlir::Value fp = ::mlir::Value(),
-                      ::mlir::Value preQuantScalar = ::mlir::Value());
+                      ::mlir::Value preQuantScalar = ::mlir::Value(),
+                      ::mlir::pto::AccToVecModeAttr accToVecMode = {},
+                      ::mlir::pto::ReluPreModeAttr reluPreMode = {});
     static void build(::mlir::OpBuilder &odsBuilder,
                       ::mlir::OperationState &odsState,
                       ::mlir::TypeRange resultTypes, ::mlir::Value src,
                       ::mlir::Value indexRow, ::mlir::Value indexCol,
                       ::mlir::Value dst,
                       ::mlir::Value fp = ::mlir::Value(),
-                      ::mlir::Value preQuantScalar = ::mlir::Value());
+                      ::mlir::Value preQuantScalar = ::mlir::Value(),
+                      ::mlir::pto::AccToVecModeAttr accToVecMode = {},
+                      ::mlir::pto::ReluPreModeAttr reluPreMode = {});
+    static ::mlir::pto::TExtractOp create(
+        ::mlir::OpBuilder &builder, ::mlir::Location location, ::mlir::Value src,
+        ::mlir::Value indexRow, ::mlir::Value indexCol, ::mlir::Value dst,
+        ::mlir::Value fp = ::mlir::Value(),
+        ::mlir::Value preQuantScalar = ::mlir::Value(),
+        ::mlir::pto::AccToVecModeAttr accToVecMode = {},
+        ::mlir::pto::ReluPreModeAttr reluPreMode = {});
+    static ::mlir::pto::TExtractOp create(
+        ::mlir::ImplicitLocOpBuilder &builder, ::mlir::Value src,
+        ::mlir::Value indexRow, ::mlir::Value indexCol, ::mlir::Value dst,
+        ::mlir::Value fp = ::mlir::Value(),
+        ::mlir::Value preQuantScalar = ::mlir::Value(),
+        ::mlir::pto::AccToVecModeAttr accToVecMode = {},
+        ::mlir::pto::ReluPreModeAttr reluPreMode = {});
 
     ::mlir::pto::PIPE getPipe() {
       // Invalid/malformed schemas must stay fail-safe: never consult the

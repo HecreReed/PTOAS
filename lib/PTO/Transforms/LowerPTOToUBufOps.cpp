@@ -410,7 +410,8 @@ static std::optional<unsigned> selectUnusedHiddenEventId(Operation *anchor,
 }
 
 static LogicalResult expandTExtractNd2xNz(
-    OpBuilder &builder, MLIRContext *ctx, const PendingTExtractNd2xNz &pd) {
+    OpBuilder &builder, MLIRContext *ctx, const PendingTExtractNd2xNz &pd,
+    pto::EVENT eventId) {
   Operation *rawOp = pd.op;
   Location loc = rawOp->getLoc();
   // After allocation materialization the operands are !pto.ptr<..., ub>;
@@ -429,15 +430,9 @@ static LogicalResult expandTExtractNd2xNz(
   builder.setInsertionPoint(rawOp);
   auto pipeV = pto::PipeAttr::get(ctx, pto::PIPE::PIPE_V);
   auto pipeS = pto::PipeAttr::get(ctx, pto::PIPE::PIPE_S);
-  auto eventIdOpt = selectUnusedHiddenEventId(rawOp, ctx);
-  if (!eventIdOpt) {
-    rawOp->emitOpError()
-        << "all eight compiler event ids are in use; cannot materialize the "
-           "ND-to-2xNz hidden V<->S barrier without aliasing an explicit "
-           "event";
-    return failure();
-  }
-  auto eventId = static_cast<pto::EVENT>(*eventIdOpt);
+  // One event id is chosen per function (see the caller): sequential barrier
+  // pairs on a shared id are safe because every set is matched by wait before
+  // the next op's set, and the id avoids ids used by explicit user flags.
   auto event0 = pto::EventAttr::get(ctx, eventId);
   builder.create<pto::SetFlagOp>(loc, pipeV, pipeS, event0);
   builder.create<pto::WaitFlagOp>(loc, pipeV, pipeS, event0);
@@ -539,8 +534,21 @@ struct LowerPTOToUBufOpsPass
     // !pto.ptr<..., ub>; the expansion consumes the op's registered hidden
     // event reservation and erases the op. Any leftover pointer-form
     // ND-to-2xNz TEXTRACT is rejected at the end of the pass.
+    // Choose one hidden-event id for the whole function (design doc 6.3.1:
+    // the SyncMacroModel reservation is per op, but sequential barrier pairs
+    // on a shared id are safe; reusing it keeps the 0..7 compiler id space
+    // from exhausting on long chains of dual-output ops).
+    auto eventIdOpt = selectUnusedHiddenEventId(func.getOperation(), ctx);
+    if (!eventIdOpt) {
+      func.emitError(
+          "all eight compiler event ids are in use by explicit set_flag/"
+          "wait_flag; cannot materialize the ND-to-2xNz hidden V<->S barrier");
+      signalPassFailure();
+      return;
+    }
+    auto eventId = static_cast<pto::EVENT>(*eventIdOpt);
     for (auto &pending : pendingNd2xNz) {
-      if (failed(expandTExtractNd2xNz(builder, ctx, pending))) {
+      if (failed(expandTExtractNd2xNz(builder, ctx, pending, eventId))) {
         pending.op.emitError("failed to expand ND-to-2xNz TEXTRACT for A2/A3 VPTO");
         signalPassFailure();
         return;

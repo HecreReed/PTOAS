@@ -8122,16 +8122,17 @@ bool TExtractOp::isNdTo2xNzForm() { return classifyForm() == Form::NdTo2xNz; }
   return ::mlir::MutableOperandRange(getOperation(), dstsBegin, dstsCount);
 }
 
-// Pre-range compatibility builders (design doc 4.4/11.2): forward the fixed
-// typed overloads to the generated range builders.
+// Pre-range compatibility builders/creators (design doc 4.4/11.2): forward
+// the fixed typed overloads to the generated range builders/creators.
 void TExtractOp::build(::mlir::OpBuilder &odsBuilder,
                        ::mlir::OperationState &odsState, ::mlir::Value src,
                        ::mlir::Value indexRow, ::mlir::Value indexCol,
                        ::mlir::Value dst, ::mlir::Value fp,
-                       ::mlir::Value preQuantScalar) {
+                       ::mlir::Value preQuantScalar,
+                       ::mlir::pto::AccToVecModeAttr accToVecMode,
+                       ::mlir::pto::ReluPreModeAttr reluPreMode) {
   build(odsBuilder, odsState, src, ValueRange{indexRow, indexCol},
-        ValueRange{dst}, fp, preQuantScalar, /*accToVecMode=*/{},
-        /*reluPreMode=*/::mlir::pto::ReluPreMode::NoRelu);
+        ValueRange{dst}, fp, preQuantScalar, accToVecMode, reluPreMode);
 }
 
 void TExtractOp::build(::mlir::OpBuilder &odsBuilder,
@@ -8139,10 +8140,33 @@ void TExtractOp::build(::mlir::OpBuilder &odsBuilder,
                        ::mlir::TypeRange resultTypes, ::mlir::Value src,
                        ::mlir::Value indexRow, ::mlir::Value indexCol,
                        ::mlir::Value dst, ::mlir::Value fp,
-                       ::mlir::Value preQuantScalar) {
+                       ::mlir::Value preQuantScalar,
+                       ::mlir::pto::AccToVecModeAttr accToVecMode,
+                       ::mlir::pto::ReluPreModeAttr reluPreMode) {
   build(odsBuilder, odsState, resultTypes, src, ValueRange{indexRow, indexCol},
-        ValueRange{dst}, fp, preQuantScalar, /*accToVecMode=*/{},
-        /*reluPreMode=*/::mlir::pto::ReluPreMode::NoRelu);
+        ValueRange{dst}, fp, preQuantScalar, accToVecMode, reluPreMode);
+}
+
+::mlir::pto::TExtractOp TExtractOp::create(
+    ::mlir::OpBuilder &builder, ::mlir::Location location, ::mlir::Value src,
+    ::mlir::Value indexRow, ::mlir::Value indexCol, ::mlir::Value dst,
+    ::mlir::Value fp, ::mlir::Value preQuantScalar,
+    ::mlir::pto::AccToVecModeAttr accToVecMode,
+    ::mlir::pto::ReluPreModeAttr reluPreMode) {
+  return create(builder, location, src, ValueRange{indexRow, indexCol},
+                ValueRange{dst}, fp, preQuantScalar, accToVecMode,
+                reluPreMode);
+}
+
+::mlir::pto::TExtractOp TExtractOp::create(
+    ::mlir::ImplicitLocOpBuilder &builder, ::mlir::Value src,
+    ::mlir::Value indexRow, ::mlir::Value indexCol, ::mlir::Value dst,
+    ::mlir::Value fp, ::mlir::Value preQuantScalar,
+    ::mlir::pto::AccToVecModeAttr accToVecMode,
+    ::mlir::pto::ReluPreModeAttr reluPreMode) {
+  return create(builder, src, ValueRange{indexRow, indexCol},
+                ValueRange{dst}, fp, preQuantScalar, accToVecMode,
+                reluPreMode);
 }
 
 static LogicalResult verifyNdTo2xNzForm(Operation *op);
@@ -8606,6 +8630,13 @@ static LogicalResult verifyNdTo2xNzForm(Operation *op) {
     return op->emitOpError(
         "expects ND-to-2xNZ TEXTRACT src to use an ND layout "
         "(blayout=row_major, slayout=none_box)");
+  }
+  // Design doc 5.1: the ND source is also fractal-512 (the fractal attribute
+  // is a physical-format property, not layout); neither the generic tile
+  // verifier nor the ND layout check above covers it.
+  if (srcTy.getSFractalSizeI32() != 512) {
+    return op->emitOpError(
+        "expects ND-to-2xNZ TEXTRACT src to use fractal size 512 bits");
   }
 
   // 8. Storage element bytes and c0 = 32 / sizeof(T). Require divisibility so

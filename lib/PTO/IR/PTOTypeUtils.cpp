@@ -152,19 +152,21 @@ std::optional<int64_t> mlir::pto::getTileBufStorageByteSize(Type tileBufType) {
       static_cast<int32_t>(pto::CompactMode::RowPlusOne)) {
     if (shape.size() != kValue2 || llvm::is_contained(shape, ShapedType::kDynamic))
       return std::nullopt;
+    // RowPlusOne compact allocation (design doc 5.4): every row carries a
+    // trailing gap element, so the linear footprint is
+    // rowMajor: rows * (cols + 1), colMajor: cols * (rows + 1).
+    // e.g. ColMajor NZ f16 16x32 => 32 * (16 + 1) * 2 = 1088 bytes
+    // (allocation reservation; the narrower access envelope is a device
+    // concern and stays out of the allocation size).
     bool rowMajor = tb.getBLayoutValueI32() ==
                     static_cast<int32_t>(pto::BLayout::RowMajor);
     int64_t major = rowMajor ? shape[0] : shape[1];
     int64_t minor = rowMajor ? shape[1] : shape[0];
     if (major == 0 || minor == 0)
       return 0;
-    auto majorMinus1 = checkedAdd(major, -1);
     auto minorPlus1 = checkedAdd(minor, 1);
-    if (!majorMinus1 || !minorPlus1)
-      return std::nullopt;
-    auto rows = checkedMul(*majorMinus1, *minorPlus1);
-    auto elems = checkedAdd(rows ? *rows : 0, minor);
-    if (!rows || !elems)
+    auto elems = minorPlus1 ? checkedMul(major, *minorPlus1) : std::nullopt;
+    if (!elems)
       return std::nullopt;
     bits = checkedMul(*elems, static_cast<int64_t>(bitWidth));
   } else {

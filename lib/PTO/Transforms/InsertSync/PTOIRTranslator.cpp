@@ -57,28 +57,15 @@ static uint64_t getStaticBufferSizeInBytes(ArrayRef<int64_t> shape,
 }
 
 static uint64_t getTileBufferFootprintBytes(pto::TileBufType type) {
-  ArrayRef<int64_t> shape = type.getShape();
-  uint64_t elemBytes = pto::getPTOStorageElemByteSize(type.getElementType());
-  if (elemBytes == 0) {
+  // Shared physical-storage sizing (design doc 5.4/12): the RowPlusOne
+  // compact allocation formula (every row carries a trailing gap element,
+  // e.g. ColMajor NZ f16 16x32 => 32*(16+1)*2 = 1088 bytes) lives only in
+  // getTileBufStorageByteSize so InsertSync, GraphSync, the planners and the
+  // post-planning ND-to-2xNz checks all agree.
+  auto bytes = pto::getTileBufStorageByteSize(type);
+  if (!bytes)
     return 0;
-  }
-  if (type.getCompactModeI32() !=
-      static_cast<int32_t>(pto::CompactMode::RowPlusOne)) {
-    return getStaticBufferSizeInBytes(shape, type.getElementType());
-  }
-  if (shape.size() != kTileRank2D ||
-      llvm::is_contained(shape, ShapedType::kDynamic)) {
-    return 0;
-  }
-
-  bool rowMajor =
-      type.getBLayoutValueI32() == static_cast<int32_t>(pto::BLayout::RowMajor);
-  uint64_t major = static_cast<uint64_t>(rowMajor ? shape[0] : shape[1]);
-  uint64_t minor = static_cast<uint64_t>(rowMajor ? shape[1] : shape[0]);
-  if (major == 0 || minor == 0) {
-    return 0;
-  }
-  return ((major - 1) * (minor + 1) + minor) * elemBytes;
+  return static_cast<uint64_t>(*bytes);
 }
 
 static pto::AddressSpace getTileAddressSpace(pto::TileBufType type) {
