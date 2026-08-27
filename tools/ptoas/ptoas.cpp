@@ -3157,7 +3157,7 @@ static void prepareVPTOForEmission(PassManager &pm,
   // scheduler sees the final MI instruction set and dependencies.
   kernelModulePM.addPass(pto::createVPTOCombineReductionsPass());
   kernelModulePM.addPass(createCSEPass());
-  if (vptoSchedulerMode != VPTOSchedulerCLIMode::Off) {
+  if (schedulerMode != VPTOSchedulerCLIMode::Off) {
     pto::VPTOSchedulerOptions schedulerOptions;
     schedulerOptions.mode =
         schedulerMode == VPTOSchedulerCLIMode::Analyze ? "analyze" : "on";
