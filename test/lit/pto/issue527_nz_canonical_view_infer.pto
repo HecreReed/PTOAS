@@ -494,7 +494,7 @@ module {
 //--- dynamic_memref_subview.pto
 module {
   func.func @dynamic_memref_nz_subview(
-      %base: memref<?xf32, #pto.address_space<gm>>)
+      %base: memref<?xf32, #pto.address_space<gm>>, %d1: index, %d2: index)
       -> memref<?x?x?x?x?xf32,
                 strided<[8192, 1024, 128, 8, 1], offset: ?>,
                 #pto.address_space<gm>> {
@@ -507,7 +507,7 @@ module {
     %c8192 = arith.constant 8192 : index
     %root = memref.reinterpret_cast %base to
       offset: [0],
-      sizes: [%c1, %c8, %c8, %c16, %c8],
+      sizes: [%c1, %d1, %d2, %c16, %c8],
       strides: [8192, 1024, 128, 8, 1]
       {layout = #pto.layout<nz>}
       : memref<?xf32, #pto.address_space<gm>>
@@ -520,7 +520,7 @@ module {
                   strided<[8192, 1024, 128, 8, 1], offset: ?>,
                   #pto.address_space<gm>>
     %part = memref.subview %cast[%c0, %c0, %c0, %c0, %c0]
-      [%c1, %c8, %c8, %c16, %c8] [1, 1, 1, 1, 1]
+      [%c1, %d1, %d2, %c16, %c8] [1, 1, 1, 1, 1]
       : memref<?x?x?x?x?xf32,
                 strided<[8192, 1024, 128, 8, 1], offset: ?>,
                 #pto.address_space<gm>>
