@@ -1684,7 +1684,29 @@ Solver::getEventIdSolverRef(pto::PIPE pipeSrc, pto::PIPE pipeDst) {
       eventIdNumMax = std::min(eventIdNumMax, options.eventIdNumMax.value());
       eventIdNumMax = std::max<int64_t>(eventIdNumMax, 1);
     }
-    eventIdSolver[key] = std::make_unique<EventIdSolver>(eventIdNumMax);
+    // The A5 1x1 ND-to-2xNZ TileLib path materializes the V<->S barrier with
+    // a literal event 0 (matching the SyncMacroModel reservation that the
+    // InsertSync allocator honors; design doc 6.3.1). GraphSync never runs
+    // that allocator, so when the kernel carries such an op the separately
+    // generated V/S syncs must start at event 1 to keep from aliasing the
+    // template's literal event 0 (wrong rendezvous / data race / deadlock).
+    int64_t startEventId = 0;
+    if (funcOp &&
+        ((pipeSrc == pto::PIPE::PIPE_V && pipeDst == pto::PIPE::PIPE_S) ||
+         (pipeSrc == pto::PIPE::PIPE_S && pipeDst == pto::PIPE::PIPE_V))) {
+      bool hasNd2xNz = false;
+      funcOp->walk([&](pto::TExtractOp tex) {
+        if (tex.isNdTo2xNzForm()) {
+          hasNd2xNz = true;
+          return WalkResult::interrupt();
+        }
+        return WalkResult::advance();
+      });
+      if (hasNd2xNz)
+        startEventId = 1;
+    }
+    eventIdSolver[key] =
+        std::make_unique<EventIdSolver>(eventIdNumMax, startEventId);
   }
   return eventIdSolver[key];
 }

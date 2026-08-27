@@ -154,6 +154,12 @@ public:
 class EventIdSolver {
 private:
   int64_t eventIdsNumMax{-1};
+  // First event id that may be handed out (default 0). The A5 1x1
+  // ND-to-2xNZ TileLib path hard-codes the V<->S barrier to event 0 to match
+  // the SyncMacroModel reservation (design doc 6.3.1); when such an op is
+  // present in the kernel, the GraphSync allocator must start at 1 so the
+  // generated V/S sync never aliases the template's literal event.
+  int64_t startEventId{0};
   bool needRecalculateEventIds{false};
   llvm::SmallVector<std::unique_ptr<EventIdNode>> nodes;
   llvm::DenseMap<EventIdNode *, llvm::DenseMap<EventIdNode *, int64_t>> adjList;
@@ -162,7 +168,8 @@ private:
   std::stack<std::unique_ptr<Action>> actionsStack;
 
 public:
-  EventIdSolver(int64_t eventIdNumMax) : eventIdsNumMax(eventIdNumMax) {}
+  EventIdSolver(int64_t eventIdNumMax, int64_t startEventId = 0)
+      : eventIdsNumMax(eventIdNumMax), startEventId(startEventId) {}
   ~EventIdSolver() = default;
 
   bool isColorable();

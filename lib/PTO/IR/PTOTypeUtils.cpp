@@ -204,16 +204,50 @@ std::optional<int64_t> mlir::pto::getTileBufAccessEndByteSize(Type tileBufType) 
   if (shape.size() != 2 || llvm::is_contained(shape, ShapedType::kDynamic)) {
     return std::nullopt;
   }
-  // RowPlusOne reserves one trailing gap element per row; the gap after the
-  // last row is never accessed, so the access envelope ends one minor stride
-  // earlier (e.g. ColMajor NZ f16 16x32: 1088 - 16*2 = 1056 B).
-  bool rowMajor = tb.getBLayoutValueI32() ==
-                  static_cast<int32_t>(pto::BLayout::RowMajor);
-  int64_t minor = rowMajor ? shape[1] : shape[0];
-  if (minor <= 0)
+  const bool isNoneBox = tb.getSLayoutValueI32() ==
+                         static_cast<int32_t>(pto::SLayout::NoneBox);
+  if (isNoneBox) {
+    // Ordinary linear RowPlusOne: every row has a trailing gap element and
+    // only the gap after the last row is never accessed, so the envelope is
+    // the reservation minus one element
+    // (e.g. 16x16xf32 rowMajor: 16*17*4 - 4 = 1084 B; the previous
+    // minor-stride formula under-counted plain layouts).
+    int64_t end = 0;
+    if (__builtin_sub_overflow(*allocation, static_cast<int64_t>(byteWidth),
+                               &end)) {
+      return std::nullopt;
+    }
+    if (end < 0)
+      return std::nullopt;
+    return end;
+  }
+  // NZ (fractal block) RowPlusOne: each c0-column block occupies a block
+  // stride of physicalRows * (c0 + 1) elements and accesses physicalRows * c0
+  // of them; the envelope ends at the last accessed block interval
+  // (e.g. ColMajor NZ f16 16x32: nblocks=2, payload=16*16=256, stride=16*17
+  // =272 -> (1*272+256)*2 = 1056 B).
+  int64_t physicalRows = shape[0];
+  int64_t cols = shape[1];
+  if (physicalRows <= 0 || cols <= 0 || byteWidth == 0 || 32 % byteWidth != 0)
+    return std::nullopt;
+  int64_t c0 = 32 / static_cast<int64_t>(byteWidth);
+  int64_t nblocks = (cols + c0 - 1) / c0;
+  int64_t payload = 0;
+  int64_t stride = 0;
+  if (__builtin_mul_overflow(physicalRows, c0, &payload) || payload <= 0)
+    return std::nullopt;
+  if (__builtin_mul_overflow(physicalRows, c0 + 1, &stride) || stride <= 0)
+    return std::nullopt;
+  int64_t lastBlockStart = 0;
+  if (nblocks > 1 &&
+      __builtin_mul_overflow(nblocks - 1, stride, &lastBlockStart)) {
+    return std::nullopt;
+  }
+  int64_t endElems = 0;
+  if (__builtin_add_overflow(lastBlockStart, payload, &endElems))
     return std::nullopt;
   int64_t end = 0;
-  if (__builtin_sub_overflow(*allocation, minor * static_cast<int64_t>(byteWidth), &end))
+  if (__builtin_mul_overflow(endElems, static_cast<int64_t>(byteWidth), &end))
     return std::nullopt;
   return end;
 }

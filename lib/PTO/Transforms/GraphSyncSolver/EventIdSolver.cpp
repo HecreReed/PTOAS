@@ -254,7 +254,7 @@ EventIdSolver::getChosenEventIds(EventIdNode *node, int64_t eventIdMax) {
   llvm::SmallVector<int64_t> chosenEventIds;
   llvm::SmallVector<int64_t> usedEventIds = getAdjNodesUsedEventIds(node);
   if (!node->reversePriority) {
-    int64_t curEventId = 0;
+    int64_t curEventId = startEventId;
     auto *it = usedEventIds.begin();
     while (static_cast<int64_t>(chosenEventIds.size()) < node->eventIdNum) {
       while ((it != usedEventIds.end()) && ((*it) < curEventId)) {
