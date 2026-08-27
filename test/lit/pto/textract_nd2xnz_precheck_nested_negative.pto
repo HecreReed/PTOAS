@@ -30,4 +30,4 @@ module attributes {"pto.target_arch" = "a5"} {
   }
 }
 
-// CHECK: module scopes nested below the immediate backend children
+// CHECK: requires every descendant module to be an immediate child of the root
