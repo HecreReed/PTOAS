@@ -534,6 +534,50 @@ static bool getResolvedViewShape(Value value, SmallVectorImpl<int64_t> &shape) {
     return true;
   }
 
+  if (auto memrefType = dyn_cast<MemRefType>(value.getType())) {
+    shape.assign(memrefType.getShape().begin(), memrefType.getShape().end());
+
+    auto mergeKnownShape = [&shape](ArrayRef<int64_t> knownShape) {
+      if (knownShape.size() != shape.size())
+        return;
+      for (size_t index = 0; index < shape.size(); ++index) {
+        if (shape[index] == ShapedType::kDynamic &&
+            knownShape[index] != ShapedType::kDynamic)
+          shape[index] = knownShape[index];
+      }
+    };
+
+    if (auto reinterpret = value.getDefiningOp<memref::ReinterpretCastOp>()) {
+      SmallVector<int64_t> mixedShape;
+      getFoldResultsOrDynamic(reinterpret.getMixedSizes(), mixedShape);
+      mergeKnownShape(mixedShape);
+      return true;
+    }
+
+    if (auto subview = value.getDefiningOp<memref::SubViewOp>()) {
+      SmallVector<int64_t> mixedShape;
+      getFoldResultsOrDynamic(subview.getMixedSizes(), mixedShape);
+      mergeKnownShape(mixedShape);
+      return true;
+    }
+
+    if (auto cast = value.getDefiningOp<memref::CastOp>()) {
+      SmallVector<int64_t> sourceShape;
+      if (getResolvedViewShape(cast.getSource(), sourceShape))
+        mergeKnownShape(sourceShape);
+      return true;
+    }
+
+    if (auto cast = value.getDefiningOp<memref::MemorySpaceCastOp>()) {
+      SmallVector<int64_t> sourceShape;
+      if (getResolvedViewShape(cast.getSource(), sourceShape))
+        mergeKnownShape(sourceShape);
+      return true;
+    }
+
+    return true;
+  }
+
   return false;
 }
 
@@ -576,8 +620,13 @@ static bool verifyNZMemRefSubview(memref::SubViewOp op) {
     op.emitError("NZ subview requires unit steps in every dimension");
     return false;
   }
-  if (auto error = getNZSubviewCompatibilityError(sourceType.getShape(),
-                                                  offsets, sizes)) {
+  SmallVector<int64_t> sourceShape;
+  if (!getResolvedViewShape(op.getSource(), sourceShape) ||
+      sourceShape.size() != static_cast<size_t>(kPTOLayoutRank)) {
+    op.emitError("cannot resolve the source shape needed to validate NZ subview");
+    return false;
+  }
+  if (auto error = getNZSubviewCompatibilityError(sourceShape, offsets, sizes)) {
     op.emitError(*error);
     return false;
   }

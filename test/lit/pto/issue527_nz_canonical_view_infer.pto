@@ -24,6 +24,7 @@
 // RUN: not ptoas --pto-arch=a5 %t/partition_layout_mismatch.pto 2>&1 | FileCheck %s --check-prefix=PARTITION-MISMATCH
 // RUN: not ptoas --pto-arch=a5 %t/subview_layout_mismatch.pto 2>&1 | FileCheck %s --check-prefix=SUBVIEW-MISMATCH
 // RUN: ptoas --pto-arch=a5 --emit-pto-ir --mlir-print-ir-after=pto-infer-layout %t/explicit_false_inferred_attr.pto -o /dev/null 2>&1 | FileCheck %s --check-prefix=FALSE-INFERRED
+// RUN: ptoas --pto-arch=a5 --emit-pto-ir --mlir-print-ir-after=pto-infer-layout %t/dynamic_memref_subview.pto -o /dev/null 2>&1 | FileCheck %s --check-prefix=DYNAMIC-MEMREF
 
 // INFER-DAG: pto.make_tensor_view {{.*}} shape = {{.*}} {layout = #pto.layout<nz>, pto.inferred_layout = true} : !pto.tensor_view<1x8x8x16x8xf32>
 // INFER-DAG: pto.make_tensor_view {{.*}} shape = {{.*}} {layout = #pto.layout<nz>, pto.inferred_layout = true} : !pto.tensor_view<1x4x8x16x16xf16>
@@ -74,6 +75,9 @@
 // SUBVIEW-MISMATCH: subview layout=nd does not match source layout=nz
 // FALSE-INFERRED: memref.subview {{.*}} {layout = #pto.layout<nz>}
 // FALSE-INFERRED-NOT: pto.inferred_layout
+
+// DYNAMIC-MEMREF: memref.reinterpret_cast {{.*}} {layout = #pto.layout<nz>}
+// DYNAMIC-MEMREF: memref.subview {{.*}} {layout = #pto.layout<nz>}
 
 //--- positive.pto
 module {
@@ -484,6 +488,48 @@ module {
       strides = [%c128, %c16, %c-1]
       : !pto.tensor_view<4x8x16xf32>
     return %view : !pto.tensor_view<4x8x16xf32>
+  }
+}
+
+//--- dynamic_memref_subview.pto
+module {
+  func.func @dynamic_memref_nz_subview(
+      %base: memref<?xf32, #pto.address_space<gm>>)
+      -> memref<?x?x?x?x?xf32,
+                strided<[8192, 1024, 128, 8, 1], offset: ?>,
+                #pto.address_space<gm>> {
+    %c0 = arith.constant 0 : index
+    %c1 = arith.constant 1 : index
+    %c8 = arith.constant 8 : index
+    %c16 = arith.constant 16 : index
+    %c128 = arith.constant 128 : index
+    %c1024 = arith.constant 1024 : index
+    %c8192 = arith.constant 8192 : index
+    %root = memref.reinterpret_cast %base to
+      offset: [0],
+      sizes: [%c1, %c8, %c8, %c16, %c8],
+      strides: [8192, 1024, 128, 8, 1]
+      {layout = #pto.layout<nz>}
+      : memref<?xf32, #pto.address_space<gm>>
+        to memref<?x?x?x?x?xf32,
+                  strided<[8192, 1024, 128, 8, 1], offset: ?>,
+                  #pto.address_space<gm>>
+    %cast = memref.cast %root : memref<?x?x?x?x?xf32,
+                  strided<[8192, 1024, 128, 8, 1], offset: ?>,
+                  #pto.address_space<gm>> to memref<?x?x?x?x?xf32,
+                  strided<[8192, 1024, 128, 8, 1], offset: ?>,
+                  #pto.address_space<gm>>
+    %part = memref.subview %cast[%c0, %c0, %c0, %c0, %c0]
+      [%c1, %c8, %c8, %c16, %c8] [1, 1, 1, 1, 1]
+      : memref<?x?x?x?x?xf32,
+                strided<[8192, 1024, 128, 8, 1], offset: ?>,
+                #pto.address_space<gm>>
+        to memref<?x?x?x?x?xf32,
+                  strided<[8192, 1024, 128, 8, 1], offset: ?>,
+                  #pto.address_space<gm>>
+    return %part : memref<?x?x?x?x?xf32,
+                           strided<[8192, 1024, 128, 8, 1], offset: ?>,
+                           #pto.address_space<gm>>
   }
 }
 
