@@ -77,6 +77,7 @@
 // FALSE-INFERRED-NOT: pto.inferred_layout
 
 // DYNAMIC-MEMREF: memref.reinterpret_cast {{.*}} {layout = #pto.layout<nz>}
+// DYNAMIC-MEMREF: memref.cast
 // DYNAMIC-MEMREF: memref.subview {{.*}} {layout = #pto.layout<nz>}
 
 //--- positive.pto
@@ -496,7 +497,7 @@ module {
   func.func @dynamic_memref_nz_subview(
       %base: memref<?xf32, #pto.address_space<gm>>, %d1: index, %d2: index)
       -> memref<?x?x?x?x?xf32,
-                strided<[8192, 1024, 128, 8, 1], offset: ?>,
+                strided<[?, ?, ?, ?, ?], offset: ?>,
                 #pto.address_space<gm>> {
     %c0 = arith.constant 0 : index
     %c1 = arith.constant 1 : index
@@ -517,18 +518,18 @@ module {
     %cast = memref.cast %root : memref<?x?x?x?x?xf32,
                   strided<[8192, 1024, 128, 8, 1], offset: ?>,
                   #pto.address_space<gm>> to memref<?x?x?x?x?xf32,
-                  strided<[8192, 1024, 128, 8, 1], offset: ?>,
+                  strided<[?, ?, ?, ?, ?], offset: ?>,
                   #pto.address_space<gm>>
     %part = memref.subview %cast[%c0, %c0, %c0, %c0, %c0]
       [%c1, %d1, %d2, %c16, %c8] [1, 1, 1, 1, 1]
       : memref<?x?x?x?x?xf32,
-                strided<[8192, 1024, 128, 8, 1], offset: ?>,
+                strided<[?, ?, ?, ?, ?], offset: ?>,
                 #pto.address_space<gm>>
         to memref<?x?x?x?x?xf32,
-                  strided<[8192, 1024, 128, 8, 1], offset: ?>,
+                  strided<[?, ?, ?, ?, ?], offset: ?>,
                   #pto.address_space<gm>>
     return %part : memref<?x?x?x?x?xf32,
-                           strided<[8192, 1024, 128, 8, 1], offset: ?>,
+                           strided<[?, ?, ?, ?, ?], offset: ?>,
                            #pto.address_space<gm>>
   }
 }
