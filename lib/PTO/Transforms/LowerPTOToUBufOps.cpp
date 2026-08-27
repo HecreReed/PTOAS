@@ -260,7 +260,7 @@ static std::optional<PendingTExtractNd2xNz> snapshotTExtractNd2xNz(pto::TExtract
     return std::nullopt;
   }
   for (Value idx : indices) {
-    auto c = getConstantIntValue(idx);
+    auto c = mlir::pto::getPTOConstantIntLike(idx);
     if (!c) {
       return std::nullopt;
     }
@@ -382,14 +382,34 @@ static LogicalResult expandTExtractNd2xNzWindow(
 static std::optional<unsigned> selectUnusedHiddenEventId(Operation *anchor,
                                                          MLIRContext *ctx) {
   llvm::SmallDenseSet<int32_t, 8> used;
+  // Dynamic set/wait flags take a runtime event id; a constant dynamic id
+  // folds into `used`, while a genuinely runtime id could take any legal
+  // value, so we can no longer prove a static id is safe.
+  bool hasUnknownDynEvent = false;
   auto scan = [&](Operation *scope) {
     scope->walk([&](Operation *inner) {
       if (auto sf = dyn_cast<pto::SetFlagOp>(inner)) {
         if (auto ev = sf.getEventIdAttr())
           used.insert(static_cast<int32_t>(ev.getEvent()));
-      } else if (auto wf = dyn_cast<pto::WaitFlagOp>(inner)) {
+        return;
+      }
+      if (auto wf = dyn_cast<pto::WaitFlagOp>(inner)) {
         if (auto ev = wf.getEventIdAttr())
           used.insert(static_cast<int32_t>(ev.getEvent()));
+        return;
+      }
+      if (auto sd = dyn_cast<pto::SetFlagDynOp>(inner)) {
+        if (auto c = mlir::pto::getPTOConstantIntLike(sd.getEventId()))
+          used.insert(static_cast<int32_t>(*c));
+        else
+          hasUnknownDynEvent = true;
+        return;
+      }
+      if (auto wd = dyn_cast<pto::WaitFlagDynOp>(inner)) {
+        if (auto c = mlir::pto::getPTOConstantIntLike(wd.getEventId()))
+          used.insert(static_cast<int32_t>(*c));
+        else
+          hasUnknownDynEvent = true;
       }
     });
   };
@@ -400,8 +420,13 @@ static std::optional<unsigned> selectUnusedHiddenEventId(Operation *anchor,
     scan(anchor->getParentOp() ? anchor->getParentOp() : anchor);
   // kTotalEventIdNum == 8 bounds the legal compiler event-id space
   // (SyncEventIdAllocation.h); a straightforward linear scan keeps
-  // determinism.
+  // determinism. With an unresolvable dynamic event id in the function we
+  // cannot prove any static id is disjoint (a runtime id may take 0..7), so
+  // expansion refuses to guess (design doc 6.3.1: do not emit unregistered
+  // literal events).
   constexpr unsigned kCompilerEventIdNum = 8;
+  if (hasUnknownDynEvent)
+    return std::nullopt;
   for (unsigned id = 0; id < kCompilerEventIdNum; ++id) {
     if (!used.count(static_cast<int32_t>(id)))
       return id;

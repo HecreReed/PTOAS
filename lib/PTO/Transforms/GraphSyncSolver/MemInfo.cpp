@@ -44,10 +44,9 @@ using namespace pto::syncsolver;
 namespace mlir::pto::syncsolver {
 
 static std::optional<int64_t> getTileBufferBitSize(pto::TileBufType type) {
-  // Route through the shared physical-storage sizing helper (design doc
-  // 5.4/12) so GraphSync and the post-planning ND-to-2xNz range checks agree
-  // on the allocation footprint (plain and RowPlusOne compact layouts).
-  auto bytes = getTileBufStorageByteSize(type);
+  // GraphSync models live/accessed bytes, so use the shared access-envelope
+  // sizing (design doc 5.4): RowPlusOne trailing gaps are not accessed.
+  auto bytes = getTileBufAccessEndByteSize(type);
   if (!bytes)
     return ShapedType::kDynamic;
   int64_t bits = 0;

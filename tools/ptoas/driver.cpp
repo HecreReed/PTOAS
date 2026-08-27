@@ -1300,6 +1300,15 @@ static LogicalResult runPTOASJobs(OwningOpRef<ModuleOp> &module,
                                   PTOASContext &context,
                                   mlir::pto::PTOASCompileResult &result) {
   const mlir::pto::BackendInfo &backendInfo = context.getBackendInfo();
+
+  // ND-to-2xNZ partition precheck (design doc 5.3.2): runs before the
+  // backend routing and any single-child normalization so a partitioned
+  // module with a single child cannot bypass the fixed-depth / call-boundary /
+  // partial-producer checks. It is a no-op walk when no ND-to-2xNz form is
+  // present.
+  if (failed(pto::validateTExtractNd2xNzPrePartition(module.get()))) {
+    return failure();
+  }
   if (backendInfo.singleBackend) {
     if (*backendInfo.singleBackend == mlir::pto::PTOBackend::EmitC) {
       EmitCBackendJob singleJob(module, result);
@@ -1307,13 +1316,6 @@ static LogicalResult runPTOASJobs(OwningOpRef<ModuleOp> &module,
     }
     VPTOBackendJob singleJob(module, result);
     return singleJob.run(context);
-  }
-
-  // ND-to-2xNz partition precheck: runs before collectChildJobs()/child
-  // cloning so a partial producer cannot cross compile-unit boundaries
-  // (design doc 5.3.2).
-  if (failed(pto::validateTExtractNd2xNzPrePartition(module.get()))) {
-    return failure();
   }
 
   SmallVector<std::unique_ptr<BackendChildJob>, mlir::pto::kValue4> backendJobs;

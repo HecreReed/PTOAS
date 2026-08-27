@@ -99,7 +99,7 @@ ByteRange resolveAllocationByteRange(Value v) {
   auto addr = alloc.getAddr();
   if (!addr)
     return out;
-  auto baseOpt = getConstantIntValue(addr);
+  auto baseOpt = getPTOConstantIntLike(addr);
   if (!baseOpt || *baseOpt < 0)
     return out;
 
@@ -109,15 +109,16 @@ ByteRange resolveAllocationByteRange(Value v) {
   auto space = tileAddressSpace(ty);
   if (!space)
     return out;
-  // Shared physical-storage sizing (design doc 5.4): plain rectangular
-  // footprints and RowPlusOne compact layouts both go through the single
-  // helper so post-planning alias checks agree with GraphSync sizing.
-  auto bytesOpt = getTileBufStorageByteSize(ty);
-  if (!bytesOpt || *bytesOpt <= 0)
+  // Shared access-envelope sizing (design doc 5.4): alias checks use
+  // getTileBufAccessEndByteSize (the last accessible byte) rather than the
+  // allocation reservation, so RowPlusOne trailing gaps are not treated as
+  // accessed. The base address folds constant casts / addi chains via the
+  // shared resolver, matching the verifier's index folding.
+  auto endBytesOpt = getTileBufAccessEndByteSize(ty);
+  if (!endBytesOpt || *endBytesOpt <= 0)
     return out;
-  int64_t bytes = *bytesOpt;
   int64_t end = 0;
-  if (__builtin_add_overflow(*baseOpt, bytes, &end))
+  if (__builtin_add_overflow(*baseOpt, *endBytesOpt, &end))
     return out; // wrapped range would corrupt the alias analysis
   out.space = space;
   out.base = *baseOpt;
@@ -444,47 +445,52 @@ mlir::pto::validateTExtractNd2xNzPrePartition(mlir::Operation *module) {
     return success();
   }
 
-  // Fixed-depth structure guard (design doc 5.3.2): the mixed-backend driver
+  // Fixed-depth ownership guard (design doc 5.3.2): the mixed-backend driver
   // splits the outer module into exactly one level of backend child ModuleOps
-  // (root Module -> child Module -> func.func). Count ModuleOp ancestors, so
-  // an immediate child has depth 1 and only a module nested below a child
-  // (depth >= 2), or a module not under the root at all, is rejected.
+  // (root Module -> child Module -> func.func). Every descendant ModuleOp
+  // must be an immediate child of the root (its parent is the root, not a
+  // sibling child or a function), and each child body must contain only
+  // func.func ops directly (no further module scopes, no stray ops).
   bool hasNestedModule = false;
   mod.walk([&](ModuleOp m) {
     if (m.getOperation() == mod.getOperation())
       return;
-    unsigned moduleDepth = 0;
-    for (Operation *cur = m.getOperation()->getParentOp(); cur;
-         cur = cur->getParentOp()) {
-      if (isa<ModuleOp>(cur))
-        ++moduleDepth;
-    }
-    if (moduleDepth > 1)
+    if (m.getOperation()->getParentOp() != mod.getOperation()) {
       hasNestedModule = true;
+      return;
+    }
+    for (Operation &childOp : *m.getBody()) {
+      if (!isa<func::FuncOp>(childOp)) {
+        hasNestedModule = true;
+        return;
+      }
+    }
   });
   if (hasNestedModule) {
     mod->emitOpError()
-        << "backend-partitioned ND-to-2xNz validation does not support "
-           "module scopes nested below the immediate backend children";
+        << "backend-partitioned ND-to-2xNz validation requires every "
+           "descendant module to be an immediate child of the root whose body "
+           "contains only functions directly";
     return failure();
   }
 
   // Root body structure: the design allows either top-level funcs
   // (non-partitioned) or exactly immediate backend child modules
-  // (partitioned); mixing both is rejected.
+  // (partitioned); once partitioned, the root body must contain ONLY child
+  // modules (any other top-level op is rejected).
   bool rootHasModuleChild = false;
-  bool rootHasTopFunc = false;
+  bool rootHasNonModuleTopOp = false;
   for (Operation &rootOp : *mod.getBody()) {
-    if (isa<ModuleOp>(rootOp))
+    if (isa<ModuleOp>(rootOp)) {
       rootHasModuleChild = true;
-    if (isa<func::FuncOp>(rootOp))
-      rootHasTopFunc = true;
+    } else {
+      rootHasNonModuleTopOp = true;
+    }
   }
-  if (rootHasModuleChild && rootHasTopFunc) {
+  if (rootHasModuleChild && rootHasNonModuleTopOp) {
     mod->emitOpError()
-        << "backend-partitioned ND-to-2xNz validation does not allow the "
-           "root body to mix immediate backend child modules with top-level "
-           "functions";
+        << "backend-partitioned ND-to-2xNz validation requires the root body "
+           "to contain only immediate backend child modules when partitioned";
     return failure();
   }
 

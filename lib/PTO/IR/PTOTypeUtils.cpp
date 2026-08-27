@@ -185,3 +185,74 @@ std::optional<int64_t> mlir::pto::getTileBufStorageByteSize(Type tileBufType) {
     return std::nullopt;
   return *bits / kBitsPerByte;
 }
+
+std::optional<int64_t> mlir::pto::getTileBufAccessEndByteSize(Type tileBufType) {
+  auto tb = dyn_cast<pto::TileBufType>(tileBufType);
+  if (!tb)
+    return std::nullopt;
+  auto allocation = getTileBufStorageByteSize(tileBufType);
+  if (!allocation)
+    return std::nullopt;
+  unsigned byteWidth = getPTOStorageElemByteSize(tb.getElementType());
+  if (byteWidth == 0)
+    return std::nullopt;
+  if (tb.getCompactModeI32() !=
+      static_cast<int32_t>(pto::CompactMode::RowPlusOne)) {
+    return *allocation;
+  }
+  auto shape = tb.getShape();
+  if (shape.size() != 2 || llvm::is_contained(shape, ShapedType::kDynamic)) {
+    return std::nullopt;
+  }
+  // RowPlusOne reserves one trailing gap element per row; the gap after the
+  // last row is never accessed, so the access envelope ends one minor stride
+  // earlier (e.g. ColMajor NZ f16 16x32: 1088 - 16*2 = 1056 B).
+  bool rowMajor = tb.getBLayoutValueI32() ==
+                  static_cast<int32_t>(pto::BLayout::RowMajor);
+  int64_t minor = rowMajor ? shape[1] : shape[0];
+  if (minor <= 0)
+    return std::nullopt;
+  int64_t end = 0;
+  if (__builtin_sub_overflow(*allocation, minor * static_cast<int64_t>(byteWidth), &end))
+    return std::nullopt;
+  return end;
+}
+
+std::optional<int64_t> mlir::pto::getPTOConstantIntLike(Value value) {
+  if (!value)
+    return std::nullopt;
+  if (auto cOp = value.getDefiningOp<arith::ConstantIndexOp>())
+    return cOp.value();
+  if (auto cInt = value.getDefiningOp<arith::ConstantIntOp>())
+    return cInt.value();
+  if (auto cOp = value.getDefiningOp<arith::ConstantOp>()) {
+    if (auto ia = dyn_cast<IntegerAttr>(cOp.getValue()))
+      return ia.getInt();
+    return std::nullopt;
+  }
+  // Constant casts preserve the folded value.
+  if (auto castOp = value.getDefiningOp<arith::IndexCastOp>())
+    return getPTOConstantIntLike(castOp.getIn());
+  if (auto extOp = value.getDefiningOp<arith::ExtSIOp>())
+    return getPTOConstantIntLike(extOp.getIn());
+  if (auto extOp = value.getDefiningOp<arith::ExtUIOp>())
+    return getPTOConstantIntLike(extOp.getIn());
+  if (auto truncOp = value.getDefiningOp<arith::TruncIOp>())
+    return getPTOConstantIntLike(truncOp.getIn());
+  // Pure constant arithmetic.
+  if (auto addOp = value.getDefiningOp<arith::AddIOp>()) {
+    auto lhs = getPTOConstantIntLike(addOp.getLhs());
+    auto rhs = getPTOConstantIntLike(addOp.getRhs());
+    if (lhs && rhs)
+      return *lhs + *rhs;
+    return std::nullopt;
+  }
+  if (auto subOp = value.getDefiningOp<arith::SubIOp>()) {
+    auto lhs = getPTOConstantIntLike(subOp.getLhs());
+    auto rhs = getPTOConstantIntLike(subOp.getRhs());
+    if (lhs && rhs)
+      return *lhs - *rhs;
+    return std::nullopt;
+  }
+  return std::nullopt;
+}

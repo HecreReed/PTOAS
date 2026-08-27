@@ -57,12 +57,11 @@ static uint64_t getStaticBufferSizeInBytes(ArrayRef<int64_t> shape,
 }
 
 static uint64_t getTileBufferFootprintBytes(pto::TileBufType type) {
-  // Shared physical-storage sizing (design doc 5.4/12): the RowPlusOne
-  // compact allocation formula (every row carries a trailing gap element,
-  // e.g. ColMajor NZ f16 16x32 => 32*(16+1)*2 = 1088 bytes) lives only in
-  // getTileBufStorageByteSize so InsertSync, GraphSync, the planners and the
-  // post-planning ND-to-2xNz checks all agree.
-  auto bytes = pto::getTileBufStorageByteSize(type);
+  // Shared access-envelope sizing (design doc 5.4/12): InsertSync liveness
+  // models accessed bytes, so RowPlusOne trailing gaps (reservation minus
+  // envelope) are excluded; the formula lives only in
+  // getTileBufAccessEndByteSize / getTileBufStorageByteSize.
+  auto bytes = pto::getTileBufAccessEndByteSize(type);
   if (!bytes)
     return 0;
   return static_cast<uint64_t>(*bytes);
