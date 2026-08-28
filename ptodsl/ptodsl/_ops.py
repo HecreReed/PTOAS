@@ -23,8 +23,10 @@ Design rules:
 """
 
 from functools import wraps
+import warnings
 
 from ._diagnostics import (
+    PTODSLDeprecationWarning,
     explicit_mode_required_with_context_error,
     make_tensor_view_invalid_layout_error,
     make_tensor_view_missing_metadata_error,
@@ -640,14 +642,36 @@ def _normalize_vcvt_part_mode(mode, *, context: str):
 def _normalize_enum_attr(value, *, enum_cls, attr_cls, context: str):
     if value is None or isinstance(value, Attribute):
         return value
-    if isinstance(value, str):
-        token = value.strip().upper()
-        try:
-            value = getattr(enum_cls, token)
-        except AttributeError as exc:
-            allowed = ", ".join(name for name in dir(enum_cls) if name.isupper())
-            raise ValueError(f"{context} does not support {value!r}; expected one of {allowed}") from exc
+    token = value if isinstance(value, str) else getattr(value, "name", None)
+    if token is not None:
+        normalized = "".join(ch for ch in str(token) if ch.isalnum()).lower()
+        candidates = [
+            name for name in dir(enum_cls)
+            if not name.startswith("_")
+            and "".join(ch for ch in name if ch.isalnum()).lower() == normalized
+        ]
+        if not candidates:
+            allowed = ", ".join(name for name in dir(enum_cls) if not name.startswith("_"))
+            raise ValueError(f"{context} does not support {value!r}; expected one of {allowed}")
+        value = getattr(enum_cls, candidates[0])
     return attr_cls.get(value)
+
+
+_UNSET = object()
+
+
+def _resolve_precision_argument(precision, legacy_precision, *, legacy_name: str, context: str):
+    """Normalize a deprecated operation-specific precision keyword."""
+    if legacy_precision is _UNSET:
+        return precision
+    if precision is not None:
+        raise TypeError(f"{context} accepts either precision or {legacy_name}, not both")
+    warnings.warn(
+        f"{legacy_name} is deprecated; use precision instead",
+        PTODSLDeprecationWarning,
+        stacklevel=3,
+    )
+    return legacy_precision
 
 
 def _normalize_vpack_part(part, *, context: str):
@@ -3290,6 +3314,40 @@ def tmatmul_mx_bias(lhs, lhs_scale, rhs, rhs_scale, bias, dst):
     )
 
 
+def tgemv(lhs, rhs, dst, *, acc_phase=None):
+    """``pto.tgemv ins(lhs, rhs) outs(dst)``."""
+    _pto.TGemvOp(
+        None,
+        unwrap_surface_value(lhs),
+        unwrap_surface_value(rhs),
+        unwrap_surface_value(dst),
+        accPhase=acc_phase,
+    )
+
+
+def tgemv_acc(acc_in, lhs, rhs, dst, *, acc_phase=None):
+    """``pto.tgemv.acc ins(acc_in, lhs, rhs) outs(dst)``."""
+    _pto.TGemvAccOp(
+        None,
+        unwrap_surface_value(acc_in),
+        unwrap_surface_value(lhs),
+        unwrap_surface_value(rhs),
+        unwrap_surface_value(dst),
+        accPhase=acc_phase,
+    )
+
+
+def tgemv_bias(lhs, rhs, bias, dst):
+    """``pto.tgemv.bias ins(lhs, rhs, bias) outs(dst)``."""
+    _pto.TGemvBiasOp(
+        None,
+        unwrap_surface_value(lhs),
+        unwrap_surface_value(rhs),
+        unwrap_surface_value(bias),
+        unwrap_surface_value(dst),
+    )
+
+
 def tgemv_mx(lhs, lhs_scale, rhs, rhs_scale, dst, *, acc_phase=None):
     """``pto.tgemv.mx ins(lhs, lhs_scale, rhs, rhs_scale) outs(dst)``."""
     _pto.TGemvMxOp(
@@ -3371,13 +3429,80 @@ def tmul(src0, src1, dst):
     )
 
 
-def tdiv(src0, src1, dst, *, div_precision=None):
+def tdiv(src0, src1, dst, *, precision=None, div_precision=_UNSET):
     """``pto.tdiv ins(src0, src1) outs(dst)``."""
+    precision = _resolve_precision_argument(
+        precision, div_precision, legacy_name="div_precision", context="pto.tdiv"
+    )
     _pto.tdiv(
         unwrap_surface_value(src0),
         unwrap_surface_value(src1),
         unwrap_surface_value(dst),
-        precision_type=div_precision,
+        precision_type=_normalize_enum_attr(
+            precision,
+            enum_cls=_pto.DivPrecision,
+            attr_cls=_pto.DivPrecisionAttr,
+            context="tdiv precision",
+        ),
+    )
+
+
+def trem(src0, src1, dst, *, tmp=None, precision=None):
+    """``pto.trem ins(src0, src1[, tmp]) outs(dst)``."""
+    tmp = _resolve_a5_mandatory_tmp(dst, tmp, context="trem")
+    kwargs = {
+        "precision_type": _normalize_enum_attr(
+            precision,
+            enum_cls=_pto.RemPrecision,
+            attr_cls=_pto.RemPrecisionAttr,
+            context="trem precision",
+        ),
+    }
+    if tmp is not None:
+        kwargs["tmp"] = unwrap_surface_value(tmp)
+    _pto.trem(
+        unwrap_surface_value(src0),
+        unwrap_surface_value(src1),
+        unwrap_surface_value(dst),
+        **kwargs,
+    )
+
+
+def trems(src, scalar, dst, *, tmp=None):
+    """``pto.trems ins(src, scalar[, tmp]) outs(dst)``."""
+    tmp = _resolve_a5_mandatory_tmp(dst, tmp, context="trems")
+    kwargs = {}
+    if tmp is not None:
+        kwargs["tmp"] = unwrap_surface_value(tmp)
+    _pto.trems(
+        unwrap_surface_value(src),
+        _coerce_tile_scalar_operand(src, scalar, context="trems"),
+        unwrap_surface_value(dst),
+        **kwargs,
+    )
+
+
+def tfmod(src0, src1, dst, *, precision=None):
+    """``pto.tfmod ins(src0, src1) outs(dst)``."""
+    _pto.tfmod(
+        unwrap_surface_value(src0),
+        unwrap_surface_value(src1),
+        unwrap_surface_value(dst),
+        precision_type=_normalize_enum_attr(
+            precision,
+            enum_cls=_pto.FmodPrecision,
+            attr_cls=_pto.FmodPrecisionAttr,
+            context="tfmod precision",
+        ),
+    )
+
+
+def tfmods(src, scalar, dst):
+    """``pto.tfmods ins(src, scalar) outs(dst)``."""
+    _pto.tfmods(
+        unwrap_surface_value(src),
+        _coerce_tile_scalar_operand(src, scalar, context="tfmods"),
+        unwrap_surface_value(dst),
     )
 
 
@@ -3426,26 +3551,35 @@ def tmuls(src, scalar, dst):
     )
 
 
-def tdivs(src, scalar, dst, *, div_precision=None):
+def tdivs(src, scalar, dst, *, precision=None, div_precision=_UNSET):
     """``pto.tdivs ins(src, scalar) outs(dst)``.
 
     Accepts both ``(tile, scalar, dst)`` and ``(scalar, tile, dst)`` operand
     orders; the scalar-lhs form mirrors the A5 TileLib ``scalar_tile``
     templates.
     """
+    precision = _resolve_precision_argument(
+        precision, div_precision, legacy_name="div_precision", context="pto.tdivs"
+    )
+    precision_attr = _normalize_enum_attr(
+        precision,
+        enum_cls=_pto.DivPrecision,
+        attr_cls=_pto.DivPrecisionAttr,
+        context="tdivs precision",
+    )
     if is_runtime_scalar_ir_type(getattr(src, "type", None)):
         _pto.tdivs(
             unwrap_surface_value(src),
             unwrap_surface_value(scalar),
             unwrap_surface_value(dst),
-            precision_type=div_precision,
+            precision_type=precision_attr,
         )
     else:
         _pto.tdivs(
             unwrap_surface_value(src),
             _coerce_tile_scalar_operand(src, scalar, context="tdivs"),
             unwrap_surface_value(dst),
-            precision_type=div_precision,
+            precision_type=precision_attr,
         )
 
 
@@ -3467,49 +3601,89 @@ def tmins(src, scalar, dst):
     )
 
 
-def texp(src, dst, *, exp_precision=None):
+def texp(src, dst, *, precision=None, exp_precision=_UNSET):
     """``pto.texp ins(src) outs(dst)``."""
+    precision = _resolve_precision_argument(
+        precision, exp_precision, legacy_name="exp_precision", context="pto.texp"
+    )
     _pto.texp(
         unwrap_surface_value(src),
         unwrap_surface_value(dst),
-        precision_type=exp_precision,
+        precision_type=_normalize_enum_attr(
+            precision,
+            enum_cls=_pto.ExpPrecision,
+            attr_cls=_pto.ExpPrecisionAttr,
+            context="texp precision",
+        ),
     )
 
 
-def tlog(src, dst, *, log_precision=None):
+def tlog(src, dst, *, precision=None, log_precision=_UNSET):
     """``pto.tlog ins(src) outs(dst)``."""
+    precision = _resolve_precision_argument(
+        precision, log_precision, legacy_name="log_precision", context="pto.tlog"
+    )
     _pto.tlog(
         unwrap_surface_value(src),
         unwrap_surface_value(dst),
-        precision_type=log_precision,
+        precision_type=_normalize_enum_attr(
+            precision,
+            enum_cls=_pto.LogPrecision,
+            attr_cls=_pto.LogPrecisionAttr,
+            context="tlog precision",
+        ),
     )
 
 
-def tsqrt(src, dst, *, sqrt_precision=None):
+def tsqrt(src, dst, *, precision=None, sqrt_precision=_UNSET):
     """``pto.tsqrt ins(src) outs(dst)``."""
+    precision = _resolve_precision_argument(
+        precision, sqrt_precision, legacy_name="sqrt_precision", context="pto.tsqrt"
+    )
     _pto.tsqrt(
         unwrap_surface_value(src),
         unwrap_surface_value(dst),
-        precision_type=sqrt_precision,
+        precision_type=_normalize_enum_attr(
+            precision,
+            enum_cls=_pto.SqrtPrecision,
+            attr_cls=_pto.SqrtPrecisionAttr,
+            context="tsqrt precision",
+        ),
     )
 
 
-def trsqrt(src, dst, *, tmp=None, rsqrt_precision=None):
+def trsqrt(src, dst, *, tmp=None, precision=None, rsqrt_precision=_UNSET):
     """``pto.trsqrt ins(src, tmp?) outs(dst)``."""
+    precision = _resolve_precision_argument(
+        precision, rsqrt_precision, legacy_name="rsqrt_precision", context="pto.trsqrt"
+    )
     _pto.trsqrt(
         unwrap_surface_value(src),
         unwrap_surface_value(dst),
         tmp=None if tmp is None else unwrap_surface_value(tmp),
-        precision_type=rsqrt_precision,
+        precision_type=_normalize_enum_attr(
+            precision,
+            enum_cls=_pto.RsqrtPrecision,
+            attr_cls=_pto.RsqrtPrecisionAttr,
+            context="trsqrt precision",
+        ),
     )
 
 
-def trecip(src, dst, *, recip_precision=None):
+def trecip(src, dst, *, precision=None, recip_precision=_UNSET):
     """``pto.trecip ins(src) outs(dst)``."""
+    precision = _resolve_precision_argument(
+        precision, recip_precision, legacy_name="recip_precision", context="pto.trecip"
+    )
     _pto.trecip(
         unwrap_surface_value(src),
         unwrap_surface_value(dst),
-        precision_type=recip_precision,
+        precision_type=_normalize_enum_attr(
+            precision,
+            enum_cls=_pto.RecipPrecision,
+            attr_cls=_pto.RecipPrecisionAttr,
+            context="trecip precision",
+        ),
     )
 
 
@@ -3602,6 +3776,59 @@ def trelu(src, dst):
     _pto.trelu(
         unwrap_surface_value(src),
         unwrap_surface_value(dst),
+    )
+
+
+def tprelu(src0, src1, dst, *, tmp=None):
+    """``pto.tprelu ins(src0, src1[, tmp]) outs(dst)``."""
+    tmp = _resolve_a5_mandatory_tmp(dst, tmp, context="tprelu")
+    kwargs = {}
+    if tmp is not None:
+        kwargs["tmp"] = unwrap_surface_value(tmp)
+    _pto.TPReluOp(
+        unwrap_surface_value(src0),
+        unwrap_surface_value(src1),
+        unwrap_surface_value(dst),
+        **kwargs,
+    )
+
+
+def _require_trandom_i32_scalar(value, *, name: str):
+    """Return one signless i32 runtime scalar accepted by ``pto.trandom``."""
+    raw_value = unwrap_surface_value(value)
+    value_type = getattr(raw_value, "type", None)
+    if (
+        not isinstance(value_type, Type)
+        or not IntegerType.isinstance(value_type)
+        or IntegerType(value_type).width != 32
+        or IntegerType(value_type).is_signed
+        or IntegerType(value_type).is_unsigned
+    ):
+        raise TypeError(
+            f"pto.trandom {name} must be a signless i32 runtime scalar, got {value_type}"
+        )
+    return raw_value
+
+
+def trandom(key0, key1, counter0, counter1, counter2, counter3, dst, *, rounds=10):
+    """``pto.trandom`` – generate A5 Philox random words into ``dst``.
+
+    The six scalar operands are 32-bit key/counter words.  ``rounds`` is the
+    compile-time Philox round count supported by the A5 operation (7 or 10).
+    """
+    if not isinstance(rounds, int) or isinstance(rounds, bool):
+        raise TypeError("pto.trandom rounds must be a Python integer")
+    if rounds not in (7, 10):
+        raise ValueError(f"pto.trandom rounds must be 7 or 10, got {rounds}")
+    _pto.TRandomOp(
+        _require_trandom_i32_scalar(key0, name="key0"),
+        _require_trandom_i32_scalar(key1, name="key1"),
+        _require_trandom_i32_scalar(counter0, name="counter0"),
+        _require_trandom_i32_scalar(counter1, name="counter1"),
+        _require_trandom_i32_scalar(counter2, name="counter2"),
+        _require_trandom_i32_scalar(counter3, name="counter3"),
+        unwrap_surface_value(dst),
+        rounds=rounds,
     )
 
 
@@ -3855,14 +4082,22 @@ def trowexpandmul(src0, src1, dst, *, tmp=None):
     )
 
 
-def trowexpanddiv(src0, src1, dst, *, tmp=None, div_precision=None):
+def trowexpanddiv(src0, src1, dst, *, tmp=None, precision=None, div_precision=_UNSET):
     """``pto.trowexpanddiv ins(src0, src1, tmp?) outs(dst)``."""
+    precision = _resolve_precision_argument(
+        precision, div_precision, legacy_name="div_precision", context="pto.trowexpanddiv"
+    )
     _pto.trowexpanddiv(
         unwrap_surface_value(src0),
         unwrap_surface_value(src1),
         unwrap_surface_value(dst),
         tmp=None if tmp is None else unwrap_surface_value(tmp),
-        precision_type=div_precision,
+        precision_type=_normalize_enum_attr(
+            precision,
+            enum_cls=_pto.DivPrecision,
+            attr_cls=_pto.DivPrecisionAttr,
+            context="trowexpanddiv precision",
+        ),
     )
 
 
@@ -3923,13 +4158,21 @@ def tcolexpandmul(src0, src1, dst):
     )
 
 
-def tcolexpanddiv(src0, src1, dst, *, div_precision=None):
+def tcolexpanddiv(src0, src1, dst, *, precision=None, div_precision=_UNSET):
     """``pto.tcolexpanddiv ins(src0, src1) outs(dst)``."""
+    precision = _resolve_precision_argument(
+        precision, div_precision, legacy_name="div_precision", context="pto.tcolexpanddiv"
+    )
     _pto.tcolexpanddiv(
         unwrap_surface_value(src0),
         unwrap_surface_value(src1),
         unwrap_surface_value(dst),
-        precision_type=div_precision,
+        precision_type=_normalize_enum_attr(
+            precision,
+            enum_cls=_pto.DivPrecision,
+            attr_cls=_pto.DivPrecisionAttr,
+            context="tcolexpanddiv precision",
+        ),
     )
 
 
@@ -3975,6 +4218,31 @@ def _resolve_selection_tmp(dst, tmp, *, context: str):
         return dst
 
     return alloc_tile(tile_type=unwrap_surface_value(dst).type)
+
+
+def _resolve_a5_mandatory_tmp(dst, tmp, *, context: str):
+    """Supply an A5-only metadata placeholder for mandatory tmp operands.
+
+    TileLib candidate selection runs before the compiler pass that materializes
+    implicit scratch tiles.  A5 templates still bind a four-operand callable,
+    although their template bodies do not consume the temporary.  Passing the
+    destination as a placeholder preserves that selection contract; A2/A3
+    continue to emit the implicit three-operand form for compiler-side
+    scratch-size materialization.
+    """
+    if tmp is not None:
+        return tmp
+
+    session = None
+    try:
+        from ._tracing.active import current_session
+        session = current_session()
+    except Exception:
+        session = None
+
+    if session is not None and getattr(session.module_spec, "target_arch", None) == "a5":
+        return dst
+    return None
 
 
 def tsort32(src, idx, dst, *, tmp=None):
@@ -4112,7 +4380,7 @@ def tthistogram(src, idx, dst, *, byte=None):
     )
 
 def tgatherb(src, offsets, dst):
-    """``pto.tgatherb`` – tile gather using byte offsets (DPS)."""
+    """``pto.tgatherb`` - gather 32-byte blocks using byte addresses (DPS)."""
     _pto.tgatherb(
         unwrap_surface_value(src),
         unwrap_surface_value(offsets),
@@ -6909,11 +7177,14 @@ __all__ = [
     "alloc_buffer", "alloc_tile",
     "tload", "tstore", "tmov", "tinsert", "tconcat",
     "tmatmul", "tmatmul_acc", "tmatmul_mx", "tmatmul_mx_acc", "tmatmul_mx_bias",
+    "tgemv", "tgemv_acc", "tgemv_bias",
     "tgemv_mx", "tgemv_mx_acc", "tgemv_mx_bias",
     "tadd", "taddrelu", "tsub", "tmul", "tdiv", "tmax", "tmin",
+    "trem", "trems", "tfmod", "tfmods",
     "tadds", "tsubs", "tmuls", "tdivs", "tmaxs", "tmins",
     "texp", "tlog", "tsqrt", "trsqrt", "trecip", "tabs", "tneg", "tdequant", "tprint", "print",
-    "trelu", "tlrelu",
+    "trelu", "tprelu", "tlrelu",
+    "trandom",
     "trowsum", "trowmax", "trowmin", "trowprod", "trowargmax", "trowargmin",
     "tcolsum", "tcolmax", "tcolmin", "tcolprod", "tcolargmax", "tcolargmin",
     "tcmp", "tcmps",

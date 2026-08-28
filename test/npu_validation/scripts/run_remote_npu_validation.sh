@@ -14,7 +14,7 @@ RUN_MODE="${RUN_MODE:-npu}"   # npu|sim
 SOC_VERSION="${SOC_VERSION:-Ascend910}"
 GOLDEN_MODE="${GOLDEN_MODE:-npu}"  # sim|npu|skip
 PTO_ISA_REPO="${PTO_ISA_REPO:-https://gitcode.com/cann/pto-isa.git}"
-PTO_ISA_COMMIT="${PTO_ISA_COMMIT:-27386d906e8fdcbd93aec84197939bc0b2c6caea}"
+PTO_ISA_COMMIT="${PTO_ISA_COMMIT:-5649f0522ba9987fd22cbf18923b729b97c5f2ff}"
 DEVICE_ID="${DEVICE_ID:-0}"
 SKIP_CASES="${SKIP_CASES:-}"          # comma/space separated testcase names
 RUN_ONLY_CASES="${RUN_ONLY_CASES:-}"  # comma/space separated testcase names or model groups
@@ -353,6 +353,15 @@ source_rc() {
   set -euo pipefail
   set -o pipefail
 }
+
+# TaskQueue workers may sanitize HOME from the submitted environment. Resolve
+# the current user's home before profile discovery so `set -u` cannot abort.
+if [[ -z "${HOME:-}" ]]; then
+  HOME="$(getent passwd "$(id -u)" 2>/dev/null | cut -d: -f6 || true)"
+  [[ -n "${HOME}" ]] || HOME="/root"
+  export HOME
+  log "HOME was unset; defaulting to ${HOME} for shell profile discovery"
+fi
 
 for f in "$HOME/.bash_profile" "$HOME/.bashrc"; do
   source_rc "$f"

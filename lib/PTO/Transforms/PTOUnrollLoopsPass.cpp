@@ -26,10 +26,16 @@
 //                               attribute is removed with a remark in those
 //                               cases.
 //
-// Anything malformed is a hard error reported here (this pass is the only
-// consumer of the hint attributes): an unknown pto.unroll value ("enable" and
-// "disable" are not supported), both attributes on one loop, or an
-// out-of-contract factor (wrong type/width, non-positive) all fail the pass.
+// {pto.unroll = "enable"} is never unrolled here; it is left untouched for
+// pto-convert-scf-to-cf-with-loop-hints, which forwards it to the compiler's cost model as
+// !llvm.loop.unroll.enable metadata.  It is recognized before every
+// native-unroll guard (empty body, non-index induction variable, ...):
+// those guards exist because loopUnrollByFactor cannot handle such loops,
+// which is irrelevant for a hint that only becomes metadata.
+//
+// Anything malformed is a hard error reported here: an unknown pto.unroll
+// value, both attributes on one loop, or an out-of-contract factor (wrong
+// type/width, non-positive) all fail the pass.
 //
 // Loops without any unroll annotation are never modified.
 //
@@ -265,13 +271,14 @@ struct PTOUnrollLoopsImpl {
       return failure();
     }
 
-    if (unrollAttr && unrollAttr.getValue() != pto::kUnrollFullValue) {
+    StringRef unrollValue = unrollAttr ? unrollAttr.getValue() : "";
+    if (unrollAttr && unrollValue != pto::kUnrollFullValue &&
+        unrollValue != pto::kUnrollEnableValue) {
       forOp.emitError() << "unknown '" << pto::kUnrollAttrName << "' value '"
                         << unrollAttr.getValue()
-                        << "'; only \"full\" is supported (hint metadata "
-                           "forwarding was removed; use '"
-                        << pto::kUnrollFactorAttrName << "' to ask for an "
-                           "explicit unroll factor)";
+                        << "'; expected \"full\" (native full unroll) or "
+                           "\"enable\" (forwarded to the compiler's cost "
+                           "model by pto-convert-scf-to-cf-with-loop-hints)";
       return failure();
     }
 
@@ -299,12 +306,25 @@ struct PTOUnrollLoopsImpl {
     auto factorAttr =
         forOp->getAttrOfType<IntegerAttr>(pto::kUnrollFactorAttrName);
 
+    // "enable" is the metadata hint owned by pto-convert-scf-to-cf-with-loop-hints: it never
+    // reaches the native-unroll utility, so none of the guards below apply
+    // to it.  This check must come first - dropping the hint on an
+    // empty-body or non-index loop would break the "enable is consumed only
+    // by the metadata pass" contract and silently lose the annotation.
+    StringRef unrollValue = unrollAttr ? unrollAttr.getValue() : "";
+    if (unrollValue == pto::kUnrollEnableValue) {
+      return UnrollOutcome::Unchanged;
+    }
+
+    // Everything below only concerns the native-unroll hints ("full" and
+    // pto.unroll_factor), so only those attributes are dropped.
+
     // loopUnrollByFactor reports success on empty-body loops without
     // changing them, which would make the fixpoint below loop forever.
     // Drop the hint on such loops instead.
     if (llvm::hasSingleElement(forOp.getBody()->getOperations())) {
-      forOp.emitRemark()
-          << "loop with an unroll hint has an empty body; dropping the hint";
+      forOp.emitRemark() << "loop with a native unroll hint has an empty "
+                            "body; dropping the hint";
       forOp->removeAttr(pto::kUnrollAttrName);
       forOp->removeAttr(pto::kUnrollFactorAttrName);
       return UnrollOutcome::Unchanged;
@@ -315,11 +335,12 @@ struct PTOUnrollLoopsImpl {
     // arith::ConstantIndexOp unconditionally.  Unrolling an i16/i32 loop
     // would therefore emit mixed-type ops (e.g. arith.muli(i16, index)) and
     // an scf.for whose step no longer matches its bounds, both of which fail
-    // the verifier.  Only index loops can be unrolled here; anything else
-    // keeps its loop and drops the hint.
+    // the verifier.  Only index loops can be unrolled natively; anything
+    // else keeps its loop and drops the hint.
     if (!forOp.getInductionVar().getType().isIndex()) {
       forOp.emitRemark()
-          << "loop with an unroll hint has a non-index induction variable ("
+          << "loop with a native unroll hint has a non-index induction "
+             "variable ("
           << forOp.getInductionVar().getType()
           << "); native unrolling only supports index loops, dropping the "
              "hint";
@@ -328,8 +349,9 @@ struct PTOUnrollLoopsImpl {
       return UnrollOutcome::Unchanged;
     }
 
-    if (unrollAttr)
+    if (unrollAttr) {
       return tryFullUnroll(forOp);
+    }
 
     if (factorAttr) {
       if (factorAttr.getInt() == 1) {
@@ -386,9 +408,15 @@ struct PTOUnrollLoopsImpl {
         return success();
 
       bool changed = false;
-      for (scf::ForOp forOp : annotated)
-        if (tryUnrollAnnotated(forOp) == UnrollOutcome::Changed)
+      for (scf::ForOp forOp : annotated) {
+        UnrollOutcome outcome = tryUnrollAnnotated(forOp);
+        if (outcome == UnrollOutcome::Error) {
+          return failure();
+        }
+        if (outcome == UnrollOutcome::Changed) {
           changed = true;
+        }
+      }
       if (!changed)
         return success();
     }

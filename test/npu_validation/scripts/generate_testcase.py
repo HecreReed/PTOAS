@@ -149,6 +149,10 @@ SAMPLE_CASE_INT_SCALAR_DEFAULTS = {
         },
         "kv_proj": {"v6": 0, "v7": 5_120, "v8": 0, "v9": 1},
         "out_proj_aic": {"v4": 0, "v5": 5_120, "v6": 0, "v7": 1},
+        # The AIV projection uses one 64-row output tile.  Keep validation on
+        # the first row/block; the generic scalar fallback of 1 selects a
+        # shifted window and leaves the runtime output nondeterministic.
+        "out_proj_aiv": {"v4": 0, "v5": 64, "v6": 0, "v7": 1},
         "q_proj": {"v4": 0, "v5": 5_120, "v6": 0, "v7": 1},
         "lm_head": {"v4": 1, "v5": 1, "v6": 0, "v7": 1},
         "qk_pv_skew_probe": {

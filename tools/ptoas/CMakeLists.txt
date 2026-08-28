@@ -115,7 +115,6 @@ add_mlir_library(PTOASCompilerImplementation
   PARTIAL_SOURCES_INTENDED
 
   ${PTOAS_RUNTIME_SOURCES}
-  "${CMAKE_SOURCE_DIR}/lib/Bindings/Python/PTOModule.cpp"
 
   LINK_LIBS PUBLIC
   ${PTOAS_RUNTIME_LINK_LIBS}
@@ -128,25 +127,7 @@ target_compile_definitions(obj.PTOASCompilerImplementation PRIVATE
 target_include_directories(PTOASCompilerImplementation PRIVATE
   "${CMAKE_SOURCE_DIR}/lib/Bindings/Python"
 )
-target_link_libraries(obj.PTOASCompilerImplementation PRIVATE pybind11::module)
 
-# LLVM normally disables RTTI and exceptions. Retain the Python binding
-# contract only for its translation unit while leaving compiler sources on the
-# standard LLVM flags.
-if(MSVC)
-  set_property(SOURCE "${CMAKE_SOURCE_DIR}/lib/Bindings/Python/PTOModule.cpp"
-    APPEND PROPERTY COMPILE_OPTIONS /EHsc /GR)
-elseif(LLVM_COMPILER_IS_GCC_COMPATIBLE OR CLANG_CL)
-  set_property(SOURCE "${CMAKE_SOURCE_DIR}/lib/Bindings/Python/PTOModule.cpp"
-    APPEND PROPERTY COMPILE_OPTIONS -frtti -fexceptions)
-endif()
-
-# PTOModule.cpp references the CPython API. As with a regular extension, those
-# symbols are supplied by the interpreter at load time rather than libpython.
-target_link_libraries(PTOASCompiler PRIVATE pybind11::module)
-if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND NOT LLVM_USE_SANITIZER)
-  target_link_options(PTOASCompiler PRIVATE "LINKER:-z,undefs")
-endif()
 set_target_properties(PTOASCompiler PROPERTIES
   CXX_VISIBILITY_PRESET hidden
   VISIBILITY_INLINES_HIDDEN YES
@@ -161,12 +142,18 @@ add_mlir_python_extension(PTOASPythonCore _core
   OUTPUT_DIRECTORY "${PTOAS_BUILD_PYTHON_PACKAGE_DIR}"
   SOURCES
     NativeModule.cpp
+    "${CMAKE_SOURCE_DIR}/lib/Bindings/Python/PTOModule.cpp"
   LINK_LIBS
     PTOASCompiler
 )
 target_compile_definitions(PTOASPythonCore PRIVATE
   "MLIR_PYTHON_PACKAGE_PREFIX=ptoas.mlir."
 )
+# PTOModule.cpp now defines populatePTODialectBindings inside _core itself
+# rather than importing it from the DSO, so mark the defining TU as the
+# library-building side (dllexport on Windows; default visibility elsewhere).
+set_property(SOURCE "${CMAKE_SOURCE_DIR}/lib/Bindings/Python/PTOModule.cpp"
+  APPEND PROPERTY COMPILE_DEFINITIONS PTOAS_COMPILER_BUILDING_LIBRARY=1)
 target_include_directories(PTOASPythonCore PRIVATE
   "${CMAKE_SOURCE_DIR}/lib/Bindings/Python"
 )

@@ -106,6 +106,12 @@ A3_BOARD_FAILURE_MINIMUMS = {
 }
 
 A3_MIXED_SCALAR_DEFAULTS = {
+    ("Qwen3_14BPrefillA3", "out_proj_aiv"): {
+        "v4": 0,
+        "v5": 64,
+        "v6": 0,
+        "v7": 1,
+    },
     ("DeepseekV4DecodeA3", "gate"): {"v7": 0, "v8": 1},
     ("DeepseekV4DecodeA3", "qk_pv"): {"v8": 0, "v9": 1},
     ("DeepseekV4DecodeA3", "score"): {"v11": 1, "v12": 0, "v13": 1},

@@ -1,0 +1,346 @@
+// Copyright (c) 2026 Huawei Technologies Co., Ltd.
+// This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+// CANN Open Software License Agreement Version 2.0 (the "License").
+// Please refer to the License for details. You may not use this file except in compliance with the License.
+// THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+// INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+// See LICENSE in the root of the software repository for the full text of the License.
+
+// The generic MLIR LICM only inspects top-level scf.for body operations, so
+// a loop-invariant base address chain computed inside an scf.if guard is
+// never hoisted.  VPTOGuardedLICM extracts pure, speculatable scalar/address
+// subexpressions of the guard and moves them in dependency order in front of
+// the loop, while IV-dependent arithmetic, side-effecting operations and
+// non-scalar (vector/float) computations stay inside the guard.
+//
+// RUN: pto-test-opt --vpto-guarded-licm %s -o - | FileCheck %s
+
+module attributes {pto.target_arch = "a5"} {
+
+  // The base chain (extsi %lane -> muli -> addi) is loop-invariant and must
+  // be hoisted in front of scf.for; the IV-dependent offset chain and the
+  // guarded load/store must remain inside the scf.if.  The f32 addf result
+  // is not an address-like scalar and must stay inside the guard as well.
+  func.func @guarded_licm_basic(%buf: !pto.ptr<f32, ub>, %lane: i32,
+                                %count: index) {
+    %c0 = arith.constant 0 : index
+    %c1 = arith.constant 1 : index
+    %c1000 = arith.constant 1000 : index
+    %c32_i64 = arith.constant 32 : i64
+    %c128_i64 = arith.constant 128 : i64
+    %c65536_i64 = arith.constant 65536 : i64
+    scf.for %iv = %c0 to %count step %c1 {
+      %in_bounds = arith.cmpi slt, %iv, %c1000 : index
+      scf.if %in_bounds {
+        %w64 = arith.extsi %lane : i32 to i64
+        %slot = arith.muli %w64, %c32_i64 : i64
+        %range_base = arith.addi %slot, %c65536_i64 : i64
+        %iv64 = arith.index_cast %iv : index to i64
+        %dynamic = arith.muli %iv64, %c128_i64 : i64
+        %offset64 = arith.addi %range_base, %dynamic : i64
+        %addr = arith.index_cast %offset64 : i64 to index
+        %v = pto.load_scalar %buf[%addr] : !pto.ptr<f32, ub> -> f32
+        %v2 = arith.addf %v, %v : f32
+        pto.store_scalar %v2, %buf[%addr] : !pto.ptr<f32, ub>, f32
+      }
+    }
+    return
+  }
+
+  // CHECK-LABEL: func.func @guarded_licm_basic
+  // CHECK: %[[W64:.*]] = arith.extsi %[[LANE:.*]] : i32 to i64
+  // CHECK: %[[SLOT:.*]] = arith.muli %[[W64]], %{{.*}} : i64
+  // CHECK: %[[RANGEBASE:.*]] = arith.addi %[[SLOT]], %{{.*}} : i64
+  // CHECK-NOT: arith.index_cast
+  // CHECK: scf.for
+  // CHECK:   arith.cmpi
+  // CHECK:   scf.if
+  // CHECK:     %[[IV64:.*]] = arith.index_cast %[[IV:.*]] : index to i64
+  // CHECK:     %[[DYN:.*]] = arith.muli %[[IV64]], %{{.*}} : i64
+  // CHECK:     %[[OFF:.*]] = arith.addi %[[RANGEBASE]], %[[DYN]] : i64
+  // CHECK:     %[[ADDR:.*]] = arith.index_cast %[[OFF]] : i64 to index
+  // CHECK:     pto.load_scalar
+  // CHECK:     arith.addf
+  // CHECK:     pto.store_scalar
+
+  // An unsigned index<->integer cast (arith.index_castui) must also be
+  // hoistable: VPTO soft post-update emits this form for unsigned offset and
+  // block computations, so it can appear in the guarded invariant base chain.
+  // The invariant chain (including the index_castui) moves in front of the
+  // loop; the IV-dependent unsigned offset chain stays inside the guard.
+  func.func @guarded_licm_index_castui(%buf: !pto.ptr<i32, ub>, %lane: i32,
+                                       %count: index) {
+    %c0 = arith.constant 0 : index
+    %c1 = arith.constant 1 : index
+    %c1000 = arith.constant 1000 : index
+    %c32_i64 = arith.constant 32 : i64
+    %c128_i64 = arith.constant 128 : i64
+    %c65536_i64 = arith.constant 65536 : i64
+    %c0_i32 = arith.constant 0 : i32
+    scf.for %iv = %c0 to %count step %c1 {
+      %in_bounds = arith.cmpi slt, %iv, %c1000 : index
+      scf.if %in_bounds {
+        %w64 = arith.extsi %lane : i32 to i64
+        %slot = arith.muli %w64, %c32_i64 : i64
+        %base64 = arith.addi %slot, %c65536_i64 : i64
+        %base = arith.index_castui %base64 : i64 to index
+        %iv64 = arith.index_castui %iv : index to i64
+        %dynamic = arith.muli %iv64, %c128_i64 : i64
+        %dyn_index = arith.index_cast %dynamic : i64 to index
+        %addr = arith.addi %base, %dyn_index : index
+        pto.store_scalar %c0_i32, %buf[%addr] : !pto.ptr<i32, ub>, i32
+      }
+    }
+    return
+  }
+
+  // CHECK-LABEL: func.func @guarded_licm_index_castui
+  // CHECK: %[[W64:.*]] = arith.extsi %{{.*}} : i32 to i64
+  // CHECK: %[[SLOT:.*]] = arith.muli %[[W64]], %{{.*}} : i64
+  // CHECK: %[[BASE64:.*]] = arith.addi %[[SLOT]], %{{.*}} : i64
+  // CHECK: %[[BASE:.*]] = arith.index_castui %[[BASE64]] : i64 to index
+  // CHECK: scf.for
+  // CHECK:   arith.cmpi
+  // CHECK:   scf.if
+  // CHECK:     %[[IV64:.*]] = arith.index_castui %[[IV:.*]] : index to i64
+  // CHECK:     %[[DYN:.*]] = arith.muli %[[IV64]], %{{.*}} : i64
+  // CHECK:     %[[DYNIDX:.*]] = arith.index_cast %[[DYN]] : i64 to index
+  // CHECK:     %[[ADDR:.*]] = arith.addi %[[BASE]], %[[DYNIDX]] : index
+  // CHECK:     pto.store_scalar
+
+  // Invariants must climb out of nested scf.if guards as well.
+  func.func @guarded_licm_nested_if(%buf: !pto.ptr<f32, ub>, %lane: i32,
+                                    %count: index) {
+    %c0 = arith.constant 0 : index
+    %c1 = arith.constant 1 : index
+    %c1000 = arith.constant 1000 : index
+    %c32_i64 = arith.constant 32 : i64
+    %c128_i64 = arith.constant 128 : i64
+    %c65536_i64 = arith.constant 65536 : i64
+    scf.for %iv = %c0 to %count step %c1 {
+      %outer_cond = arith.cmpi slt, %iv, %c1000 : index
+      scf.if %outer_cond {
+        %inner_cond = arith.cmpi sge, %iv, %c0 : index
+        scf.if %inner_cond {
+          %w64 = arith.extsi %lane : i32 to i64
+          %slot = arith.muli %w64, %c32_i64 : i64
+          %range_base = arith.addi %slot, %c65536_i64 : i64
+          %iv64 = arith.index_cast %iv : index to i64
+          %dynamic = arith.muli %iv64, %c128_i64 : i64
+          %offset64 = arith.addi %range_base, %dynamic : i64
+          %addr = arith.index_cast %offset64 : i64 to index
+          %v = pto.load_scalar %buf[%addr] : !pto.ptr<f32, ub> -> f32
+          pto.store_scalar %v, %buf[%addr] : !pto.ptr<f32, ub>, f32
+        }
+      }
+    }
+    return
+  }
+
+  // CHECK-LABEL: func.func @guarded_licm_nested_if
+  // CHECK: %[[W64:.*]] = arith.extsi %[[LANE:.*]] : i32 to i64
+  // CHECK: %[[SLOT:.*]] = arith.muli %[[W64]], %{{.*}} : i64
+  // CHECK: %[[RANGEBASE:.*]] = arith.addi %[[SLOT]], %{{.*}} : i64
+  // CHECK: scf.for
+  // CHECK:   arith.cmpi
+  // CHECK:   scf.if
+  // CHECK:     arith.cmpi
+  // CHECK:     scf.if
+  // CHECK:       %[[IV64:.*]] = arith.index_cast %[[IV:.*]] : index to i64
+  // CHECK:       %[[DYN:.*]] = arith.muli %[[IV64]], %{{.*}} : i64
+  // CHECK:       %[[OFF:.*]] = arith.addi %[[RANGEBASE]], %[[DYN]] : i64
+  // CHECK:       pto.load_scalar
+  // CHECK:       pto.store_scalar
+
+  // Innermost-first processing: the inner loop sits inside an outer guard.  The
+  // invariant chain must climb from the inner loop's guard, out of the outer
+  // guard, all the way in front of the outer loop; the inner-IV-dependent
+  // offset stays inside the inner guard.
+  func.func @guarded_licm_nested_loops(%buf: !pto.ptr<f32, ub>, %lane: i32,
+                                       %outer_count: index, %inner_count: index) {
+    %c0 = arith.constant 0 : index
+    %c1 = arith.constant 1 : index
+    %c1000 = arith.constant 1000 : index
+    %c32_i64 = arith.constant 32 : i64
+    %c128_i64 = arith.constant 128 : i64
+    %c65536_i64 = arith.constant 65536 : i64
+    scf.for %o = %c0 to %outer_count step %c1 {
+      %outer_cond = arith.cmpi slt, %o, %c1000 : index
+      scf.if %outer_cond {
+        scf.for %i = %c0 to %inner_count step %c1 {
+          %active = arith.cmpi slt, %i, %c1000 : index
+          scf.if %active {
+            %w64 = arith.extsi %lane : i32 to i64
+            %slot = arith.muli %w64, %c32_i64 : i64
+            %range_base = arith.addi %slot, %c65536_i64 : i64
+            %iv64 = arith.index_cast %i : index to i64
+            %dynamic = arith.muli %iv64, %c128_i64 : i64
+            %offset64 = arith.addi %range_base, %dynamic : i64
+            %addr = arith.index_cast %offset64 : i64 to index
+            %v = pto.load_scalar %buf[%addr] : !pto.ptr<f32, ub> -> f32
+            pto.store_scalar %v, %buf[%addr] : !pto.ptr<f32, ub>, f32
+          }
+        }
+      }
+    }
+    return
+  }
+
+  // CHECK-LABEL: func.func @guarded_licm_nested_loops
+  // CHECK: %[[W64:.*]] = arith.extsi %{{.*}} : i32 to i64
+  // CHECK: %[[SLOT:.*]] = arith.muli %[[W64]], %{{.*}} : i64
+  // CHECK: %[[RANGEBASE:.*]] = arith.addi %[[SLOT]], %{{.*}} : i64
+  // CHECK: scf.for
+  // CHECK:   arith.cmpi
+  // CHECK:   scf.if
+  // CHECK:     scf.for
+  // CHECK:       arith.cmpi
+  // CHECK:       scf.if
+  // CHECK:         %[[IV64:.*]] = arith.index_cast %[[IV:.*]] : index to i64
+  // CHECK:         %[[DYN:.*]] = arith.muli %[[IV64]], %{{.*}} : i64
+  // CHECK:         %[[OFF:.*]] = arith.addi %[[RANGEBASE]], %[[DYN]] : i64
+  // CHECK:         pto.load_scalar
+  // CHECK:         pto.store_scalar
+
+  // Negative (IV-dependent): every address expression transitively depends
+  // on the induction variable, so nothing may be hoisted in front of the loop.
+  func.func @guarded_licm_negative_iv(%buf: !pto.ptr<f32, ub>,
+                                      %count: index) {
+    %c0 = arith.constant 0 : index
+    %c1 = arith.constant 1 : index
+    %c1000 = arith.constant 1000 : index
+    %c32_i64 = arith.constant 32 : i64
+    %c128_i64 = arith.constant 128 : i64
+    scf.for %iv = %c0 to %count step %c1 {
+      %in_bounds = arith.cmpi slt, %iv, %c1000 : index
+      scf.if %in_bounds {
+        %iv64 = arith.index_cast %iv : index to i64
+        %slot = arith.muli %iv64, %c32_i64 : i64
+        %dynamic = arith.muli %iv64, %c128_i64 : i64
+        %combined = arith.addi %slot, %dynamic : i64
+        %addr = arith.index_cast %combined : i64 to index
+        %v = pto.load_scalar %buf[%addr] : !pto.ptr<f32, ub> -> f32
+        pto.store_scalar %v, %buf[%addr] : !pto.ptr<f32, ub>, f32
+      }
+    }
+    return
+  }
+
+  // CHECK-LABEL: func.func @guarded_licm_negative_iv
+  // CHECK-NOT: arith.index_cast
+  // CHECK-NOT: arith.muli
+  // CHECK-NOT: arith.addi
+  // CHECK: scf.for
+  // CHECK:   arith.cmpi
+  // CHECK:   scf.if
+  // CHECK:     arith.index_cast
+  // CHECK:     arith.muli
+  // CHECK:     arith.addi
+  // CHECK:     pto.load_scalar
+  // CHECK:     pto.store_scalar
+
+  // Negative (non-speculatable): the divsi divisor is an unknown function
+  // argument, so even though its operands are loop-invariant and hoistable,
+  // the division itself must stay inside the guard.
+  func.func @guarded_licm_negative_div(%buf: !pto.ptr<f32, ub>, %lane: i32,
+                                       %count: index, %divisor: i64) {
+    %c0 = arith.constant 0 : index
+    %c1 = arith.constant 1 : index
+    %c1000 = arith.constant 1000 : index
+    %c32_i64 = arith.constant 32 : i64
+    %c128_i64 = arith.constant 128 : i64
+    scf.for %iv = %c0 to %count step %c1 {
+      %in_bounds = arith.cmpi slt, %iv, %c1000 : index
+      scf.if %in_bounds {
+        %w64 = arith.extsi %lane : i32 to i64
+        %slot = arith.muli %w64, %c32_i64 : i64
+        %quotient = arith.divsi %slot, %divisor : i64
+        %addr = arith.index_cast %slot : i64 to index
+        %v = pto.load_scalar %buf[%addr] : !pto.ptr<f32, ub> -> f32
+        pto.store_scalar %v, %buf[%addr] : !pto.ptr<f32, ub>, f32
+      }
+    }
+    return
+  }
+
+  // CHECK-LABEL: func.func @guarded_licm_negative_div
+  // CHECK: %[[W64:.*]] = arith.extsi %[[LANE:.*]] : i32 to i64
+  // CHECK: %[[SLOT:.*]] = arith.muli %[[W64]], %{{.*}} : i64
+  // CHECK: scf.for
+  // CHECK:   arith.cmpi
+  // CHECK:   scf.if
+  // CHECK:     %[[QUOTIENT:.*]] = arith.divsi %[[SLOT]], %{{.*}} : i64
+  // CHECK:     pto.load_scalar
+  // CHECK:     pto.store_scalar
+
+  // Negative (SIMT referential transparency): pto.get_clock32 reads the
+  // clock, pto.get_vms4_sr reads the VMS4 status register, and
+  // pto.vote_ballot / pto.shuffle_idx are active-lane collectives.  Although
+  // these ops are marked pure, hoisting any of them out of the guard changes
+  // the value observed inside the guard, so none may move even though every
+  // operand is defined outside the loop.
+  func.func @guarded_licm_negative_simt(%buf: !pto.ptr<i32, ub>, %v: i32,
+                                        %count: index) {
+    %c0 = arith.constant 0 : index
+    %c1 = arith.constant 1 : index
+    %c1_i32 = arith.constant 1 : i32
+    %c1000 = arith.constant 1000 : index
+    %pred = arith.cmpi eq, %v, %v : i32
+    scf.for %iv = %c0 to %count step %c1 {
+      %in_bounds = arith.cmpi slt, %iv, %c1000 : index
+      scf.if %in_bounds {
+        %clock = pto.get_clock32 : i32
+        %s0, %s1, %s2, %s3 = pto.get_vms4_sr : i16, i16, i16, i16
+        %ballot = pto.vote_ballot %pred : i1 -> i32
+        %shuf = pto.shuffle_idx %v, %c1_i32 : i32, i32 -> i32
+        %c0_i32 = arith.constant 0 : i32
+        pto.store_scalar %c0_i32, %buf[%iv] : !pto.ptr<i32, ub>, i32
+      }
+    }
+    return
+  }
+
+  // CHECK-LABEL: func.func @guarded_licm_negative_simt
+  // CHECK-NOT: pto.get_clock32
+  // CHECK-NOT: pto.get_vms4_sr
+  // CHECK-NOT: pto.vote_ballot
+  // CHECK-NOT: pto.shuffle_idx
+  // CHECK: scf.for
+  // CHECK:   arith.cmpi
+  // CHECK:   scf.if
+  // CHECK:     pto.get_clock32
+  // CHECK:     pto.get_vms4_sr
+  // CHECK:     pto.vote_ballot
+  // CHECK:     pto.shuffle_idx
+  // CHECK:     pto.store_scalar
+
+  // Negative (non-speculatable "total" div): arith.floordivsi is in the total
+  // integer-binary family without ConditionallySpeculatable, yet dividing by
+  // zero (or INT_MIN / -1) is still undefined behavior.  Even though its
+  // operands are loop-invariant, the division must stay inside the guard.
+  func.func @guarded_licm_negative_floordiv(%buf: !pto.ptr<i32, ub>,
+                                            %count: index, %x: i64,
+                                            %divisor: i64) {
+    %c0 = arith.constant 0 : index
+    %c1 = arith.constant 1 : index
+    %c1000 = arith.constant 1000 : index
+    %c0_i32 = arith.constant 0 : i32
+    scf.for %iv = %c0 to %count step %c1 {
+      %in_bounds = arith.cmpi slt, %iv, %c1000 : index
+      scf.if %in_bounds {
+        %quotient = arith.floordivsi %x, %divisor : i64
+        %addr = arith.index_cast %quotient : i64 to index
+        pto.store_scalar %c0_i32, %buf[%addr] : !pto.ptr<i32, ub>, i32
+      }
+    }
+    return
+  }
+
+  // CHECK-LABEL: func.func @guarded_licm_negative_floordiv
+  // CHECK-NOT: arith.floordivsi
+  // CHECK: scf.for
+  // CHECK:   arith.cmpi
+  // CHECK:   scf.if
+  // CHECK:     %[[QUOTIENT:.*]] = arith.floordivsi %{{.*}}, %{{.*}} : i64
+  // CHECK:     pto.store_scalar
+}

@@ -9563,6 +9563,15 @@ llvm::LogicalResult mlir::pto::TGatherOp::verify() {
     }
 
     if (!allowA5ElemTypes) {
+      if (failed(verifyTileBufSameValidShape(*this, dstTy, idxTy, "dst",
+                                             "indices"))) {
+        return failure();
+      }
+      if (!isRowMajorTileBuf(dstTy) || !isRowMajorTileBuf(idxTy) ||
+          !isRowMajorTileBuf(getTmp().getType())) {
+        return emitOpError(
+            "expects A2/A3 index-form dst, indices, and tmp to use row-major layout");
+      }
       Type tmpElem = getElemTy(getTmp().getType());
       if (tmpElem != idxElem) {
         return emitOpError("expects tmp and indices to have the same element type");
@@ -9715,14 +9724,48 @@ mlir::LogicalResult mlir::pto::TGatherBOp::verify() {
     if (failed(elems)) {
       return failure();
     }
+    Type srcTy = getSrc().getType();
+    Type offTy = getOffsets().getType();
     Type dstTy = getDst().getType();
     Type dstElemTy = elems->second;
-    if (!isRowMajorTileBuf(dstTy)) {
-      return emitOpError() << "expects dst to use row-major layout";
+    if (failed(
+            verifyTileBufSameValidShape(*this, srcTy, dstTy, "src", "dst"))) {
+      return failure();
+    }
+    if (!isRowMajorTileBuf(dstTy) || !isRowMajorTileBuf(offTy)) {
+      return emitOpError()
+             << "expects dst and offsets to use row-major layout";
     }
     auto dstBytes = getElemBytes(dstElemTy);
-    if (!dstBytes || (*dstBytes != 1 && *dstBytes != 2 && *dstBytes != 4)) {
-      return emitOpError() << "expects dst element size to be 1, 2, or 4 bytes";
+    if (!dstBytes || (*dstBytes != 2 && *dstBytes != 4)) {
+      return emitOpError()
+             << "expects A2/A3 dst element size to be 2 or 4 bytes";
+    }
+    Type offElemTy = getElemTy(offTy);
+    if (!offElemTy.isInteger(32)) {
+      return emitOpError() << "expects offsets element type to be i32";
+    }
+
+    auto dstValid = getValidShapeVec(dstTy);
+    auto offValid = getValidShapeVec(offTy);
+    if (dstValid.size() != 2 || offValid.size() != 2) {
+      return emitOpError() << "expects rank-2 src/offsets/dst tile buffers";
+    }
+    if (dstValid[0] != ShapedType::kDynamic &&
+        offValid[0] != ShapedType::kDynamic && dstValid[0] != offValid[0]) {
+      return emitOpError() << "expects offsets valid rows to match dst valid rows";
+    }
+    if (dstValid[1] != ShapedType::kDynamic &&
+        offValid[1] != ShapedType::kDynamic) {
+      int64_t blockElems = 32 / *dstBytes;
+      int64_t blocks = (dstValid[1] + blockElems - 1) / blockElems;
+      int64_t expectedOffsetCols = ((blocks + 7) / 8) * 8;
+      if (offValid[1] != expectedOffsetCols) {
+        return emitOpError()
+               << "expects offsets valid cols to be compact 32B block address "
+                  "count padded to 8 entries; expected "
+               << expectedOffsetCols << ", got " << offValid[1];
+      }
     }
     return mlir::success();
   };

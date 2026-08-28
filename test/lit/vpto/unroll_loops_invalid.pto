@@ -24,18 +24,14 @@ module {
     %c0 = arith.constant 0 : index
     %c1 = arith.constant 1 : index
 
-    // CHECK: error: unknown 'pto.unroll' value 'sometimes'; only "full" is supported
+    // CHECK: error: unknown 'pto.unroll' value 'sometimes'; expected "full" (native full unroll) or "enable"
     scf.for %i = %c0 to %n step %c1 {
       memref.store %i, %buf[%c0] : memref<1xindex>
     } {pto.unroll = "sometimes"}
 
-    // "enable" was removed together with the metadata forwarding path.
-    // CHECK: error: unknown 'pto.unroll' value 'enable'; only "full" is supported
-    scf.for %i = %c0 to %n step %c1 {
-      memref.store %i, %buf[%c0] : memref<1xindex>
-    } {pto.unroll = "enable"}
-
-    // CHECK: error: unknown 'pto.unroll' value 'disable'; only "full" is supported
+    // "disable" remains unsupported ("enable" is legal and owned by
+    // pto-convert-scf-to-cf-with-loop-hints).
+    // CHECK: error: unknown 'pto.unroll' value 'disable'; expected "full" (native full unroll) or "enable"
     scf.for %i = %c0 to %n step %c1 {
       memref.store %i, %buf[%c0] : memref<1xindex>
     } {pto.unroll = "disable"}

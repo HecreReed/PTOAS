@@ -16,7 +16,10 @@ Exercises the native-unroll hint paths with checkable numerics:
   native main loop + epilogue (pto-unroll-loops).
 - out[2]: pto.range(..., unroll_factor=3) with an odd factor -> another
   main loop + epilogue combination; the loop must still compute correctly.
-- out[3]: nested unroll="full" -> unrolling the outer loop clones the inner
+- out[3]: pto.range(..., unroll="enable") -> the loop is kept and forwarded
+  as llvm.loop.unroll.enable metadata (pto-convert-scf-to-cf-with-loop-hints); it must still
+  execute correctly.
+- out[4]: nested unroll="full" -> unrolling the outer loop clones the inner
   one; the clones must be consumed as well (review fix).
 """
 
@@ -43,13 +46,18 @@ def unroll_hint_body(output_ptr: pto.ptr(pto.i32, "gm")) -> None:
         odd = odd + scalar.index_cast(pto.i32, i)
     scalar.store(odd, output_ptr, 2)
 
+    meta = pto.const(0, dtype=pto.i32)
+    for i in pto.range(8, unroll="enable"):
+        meta = meta + scalar.index_cast(pto.i32, i)
+    scalar.store(meta, output_ptr, 3)
+
     nested = pto.const(0, dtype=pto.i32)
     ten = pto.const(10, dtype=pto.i32)
     for i in pto.range(2, unroll="full"):
         i32 = scalar.index_cast(pto.i32, i)
         for j in pto.range(3, unroll="full"):
             nested = nested + i32 * ten + scalar.index_cast(pto.i32, j)
-    scalar.store(nested, output_ptr, 3)
+    scalar.store(nested, output_ptr, 4)
 
 
 @pto.jit(
@@ -71,8 +79,8 @@ CASES = [
         "unroll_hint_numeric",
         unroll_hint_numeric,
         inputs=lambda: [],
-        expected=np.array([6, 45, 28, 36], dtype=np.int32),
-        output_shape=(4,),
+        expected=np.array([6, 45, 28, 28, 36], dtype=np.int32),
+        output_shape=(5,),
         output_dtype=np.int32,
     )
 ]

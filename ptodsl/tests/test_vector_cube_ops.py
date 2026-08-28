@@ -14,8 +14,11 @@ from unittest.mock import ANY, MagicMock, call, patch
 import ptodsl._ops as _ops
 import ptodsl._pipe_namespace as _pipe_namespace
 from ptodsl._context import make_context
+from ptodsl._diagnostics import PTODSLDeprecationWarning
 from ptodsl import pto
-from ptoas.mlir.ir import F32Type, Type
+from ptoas.mlir.ir import F32Type, IntegerType, Type
+
+
 def _identity(value):
     return value
 
@@ -673,6 +676,9 @@ class VectorCubeSurfaceTest(unittest.TestCase):
                     self.assertEqual(op_ctor.call_args.args, expected_call)
 
         mx_tileop_cases = [
+            ("tgemv", "TGemvOp", (lhs, rhs, dst), (None, lhs, rhs, dst)),
+            ("tgemv_acc", "TGemvAccOp", (acc_in, lhs, rhs, dst), (None, acc_in, lhs, rhs, dst)),
+            ("tgemv_bias", "TGemvBiasOp", (lhs, rhs, bias, dst), (None, lhs, rhs, bias, dst)),
             ("tmatmul_mx", "TMatmulMxOp", (lhs, lhs_scale, rhs, rhs_scale, dst), (None, lhs, lhs_scale, rhs, rhs_scale, dst)),
             ("tmatmul_mx_acc", "TMatmulMxAccOp", (acc_in, lhs, lhs_scale, rhs, rhs_scale, dst), (None, acc_in, lhs, lhs_scale, rhs, rhs_scale, dst)),
             ("tmatmul_mx_bias", "TMatmulMxBiasOp", (lhs, lhs_scale, rhs, rhs_scale, bias, dst), (None, lhs, lhs_scale, rhs, rhs_scale, bias, dst)),
@@ -1092,6 +1098,175 @@ class VectorCubeSurfaceTest(unittest.TestCase):
                 self.assertEqual(list(signature.parameters.keys()), expected)
                 self.assertEqual(signature.parameters["tmp"].kind, inspect.Parameter.KEYWORD_ONLY)
                 self.assertIsNone(signature.parameters["tmp"].default)
+
+    def test_tile_remainder_surface_exposes_optional_tmp(self):
+        for func, expected in [
+            (pto.tile.rem, ["src0", "src1", "dst", "tmp", "precision"]),
+            (pto.tile.rems, ["src", "scalar", "dst", "tmp"]),
+        ]:
+            with self.subTest(func=func):
+                signature = inspect.signature(func)
+                self.assertEqual(list(signature.parameters), expected)
+                self.assertEqual(signature.parameters["tmp"].kind, inspect.Parameter.KEYWORD_ONLY)
+                self.assertIsNone(signature.parameters["tmp"].default)
+
+    def test_tile_prelu_surface_exposes_explicit_tmp(self):
+        self.assertEqual(
+            list(inspect.signature(pto.tile.prelu).parameters),
+            ["src0", "src1", "dst", "tmp"],
+        )
+        self.assertEqual(
+            inspect.signature(pto.tile.prelu).parameters["tmp"].kind,
+            inspect.Parameter.KEYWORD_ONLY,
+        )
+
+        src0, src1, dst, tmp = object(), object(), object(), object()
+        with patch.object(_ops, "tprelu") as tprelu_op:
+            pto.tile.prelu(src0, src1, dst, tmp=tmp)
+        tprelu_op.assert_called_once_with(src0, src1, dst, tmp=tmp)
+
+        with patch.object(_ops, "tprelu") as tprelu_op:
+            pto.tile.prelu(src0, src1, dst)
+        tprelu_op.assert_called_once_with(src0, src1, dst, tmp=None)
+
+    def test_tile_precision_surfaces_use_common_precision_parameter(self):
+        self.assertIs(pto.Precision, pto.DivPrecision)
+        self.assertIs(pto.Precision, pto.RemPrecision)
+        legacy_keywords = {
+            pto.tile.div: "div_precision",
+            pto.tile.divs: "div_precision",
+            pto.tile.exp: "exp_precision",
+            pto.tile.log: "log_precision",
+            pto.tile.sqrt: "sqrt_precision",
+            pto.tile.rsqrt: "rsqrt_precision",
+            pto.tile.recip: "recip_precision",
+            pto.tile.rowexpanddiv: "div_precision",
+            pto.tile.colexpanddiv: "div_precision",
+        }
+        for func, legacy_keyword in legacy_keywords.items():
+            with self.subTest(func=func):
+                self.assertIn("precision", inspect.signature(func).parameters)
+                self.assertIn(legacy_keyword, inspect.signature(func).parameters)
+                self.assertIs(
+                    inspect.signature(func).parameters[legacy_keyword].default,
+                    _ops._UNSET,
+                )
+
+    def test_legacy_precision_keyword_warns_and_forwards(self):
+        src0, src1, dst = object(), object(), object()
+        with patch.object(_ops, "unwrap_surface_value", side_effect=_identity), \
+             patch.object(_ops, "_normalize_enum_attr", return_value="high_precision") as normalize, \
+             patch.object(_ops._pto, "tdiv") as tdiv_op:
+            with self.assertWarns(PTODSLDeprecationWarning):
+                pto.tile.div(src0, src1, dst, div_precision="high_precision")
+
+        normalize.assert_called_once_with(
+            "high_precision",
+            enum_cls=_ops._pto.DivPrecision,
+            attr_cls=_ops._pto.DivPrecisionAttr,
+            context="tdiv precision",
+        )
+        tdiv_op.assert_called_once_with(src0, src1, dst, precision_type="high_precision")
+
+    def test_legacy_precision_keyword_cannot_be_combined_with_precision(self):
+        with self.assertRaisesRegex(TypeError, "either precision or div_precision"):
+            pto.tile.div(object(), object(), object(), precision="default", div_precision="default")
+
+    def test_tprelu_is_exported(self):
+        self.assertIn("tprelu", _ops.__all__)
+
+    def test_trandom_requires_i32_runtime_scalars(self):
+        operands = [object()] * 6
+        with patch.object(_ops, "unwrap_surface_value", side_effect=_identity):
+            with self.assertRaisesRegex(TypeError, "key0 must be a signless i32 runtime scalar"):
+                _ops.trandom(*operands, object())
+
+        with make_context():
+            i16 = SimpleNamespace(type=IntegerType.get_signless(16))
+            f32 = SimpleNamespace(type=F32Type.get())
+            i32 = IntegerType.get_signless(32)
+            si32 = IntegerType.get_signed(32)
+            ui32 = IntegerType.get_unsigned(32)
+            valid_operands = [SimpleNamespace(type=i32) for _ in range(6)]
+            with patch.object(_ops, "unwrap_surface_value", side_effect=_identity):
+                for name, invalid_operand in (
+                    ("key0", i16),
+                    ("key1", f32),
+                    ("counter0", SimpleNamespace(type=si32)),
+                    ("counter1", SimpleNamespace(type=ui32)),
+                ):
+                    operands = list(valid_operands)
+                    operand_index = ("key0", "key1", "counter0", "counter1").index(name)
+                    operands[operand_index] = invalid_operand
+                    with self.subTest(name=name):
+                        with self.assertRaisesRegex(
+                            TypeError, f"{name} must be a signless i32 runtime scalar"
+                        ):
+                            _ops.trandom(*operands, object())
+
+    def test_trandom_forwards_valid_i32_runtime_scalars(self):
+        with make_context():
+            scalar = SimpleNamespace(type=IntegerType.get_signless(32))
+        dst = object()
+        with patch.object(_ops, "unwrap_surface_value", side_effect=_identity), \
+             patch.object(_ops._pto, "TRandomOp") as trandom_op:
+            _ops.trandom(scalar, scalar, scalar, scalar, scalar, scalar, dst, rounds=7)
+        trandom_op.assert_called_once_with(
+            scalar, scalar, scalar, scalar, scalar, scalar, dst, rounds=7
+        )
+
+    def test_tile_fmod_surfaces_expose_public_precision_contract(self):
+        self.assertEqual(
+            list(inspect.signature(pto.tile.fmod).parameters),
+            ["src0", "src1", "dst", "precision"],
+        )
+        self.assertEqual(
+            list(inspect.signature(pto.tile.fmods).parameters),
+            ["src", "scalar", "dst"],
+        )
+
+        src0, src1, dst = object(), object(), object()
+        with patch.object(_ops, "tfmod") as tfmod_op:
+            pto.tile.fmod(src0, src1, dst, precision="high_precision")
+        tfmod_op.assert_called_once_with(src0, src1, dst, precision="high_precision")
+
+        src, scalar, dst = object(), 3.0, object()
+        with patch.object(_ops, "tfmods") as tfmods_op:
+            pto.tile.fmods(src, scalar, dst)
+        tfmods_op.assert_called_once_with(src, scalar, dst)
+
+    def test_tile_remainder_wrappers_forward_tmp_scalar_and_precision(self):
+        src0 = object()
+        src1 = object()
+        dst = object()
+        tmp = object()
+        scalar = 3.0
+        with patch.object(_ops, "trem") as trem_op:
+            pto.tile.rem(src0, src1, dst, tmp=tmp, precision="high_precision")
+        trem_op.assert_called_once_with(src0, src1, dst, tmp=tmp, precision="high_precision")
+
+        with patch.object(_ops, "trems") as trems_op:
+            pto.tile.rems(src0, scalar, dst)
+        trems_op.assert_called_once_with(src0, scalar, dst, tmp=None)
+
+    def test_tile_remainder_wrappers_omit_implicit_tmp(self):
+        src0, src1, dst, scalar = object(), object(), object(), object()
+        with patch.object(_ops, "unwrap_surface_value", side_effect=_identity), \
+             patch.object(_ops._pto, "trem") as trem_op, \
+             patch.object(_ops, "_normalize_enum_attr", return_value="default"):
+            _ops.trem(src0, src1, dst)
+        trem_op.assert_called_once_with(src0, src1, dst, precision_type="default")
+
+        with patch.object(_ops, "unwrap_surface_value", side_effect=_identity), \
+             patch.object(_ops._pto, "trems") as trems_op, \
+             patch.object(_ops, "_coerce_tile_scalar_operand", return_value=scalar):
+            _ops.trems(src0, scalar, dst)
+        trems_op.assert_called_once_with(src0, scalar, dst)
+
+        with patch.object(_ops, "unwrap_surface_value", side_effect=_identity), \
+             patch.object(_ops._pto, "TPReluOp") as tprelu_op:
+            _ops.tprelu(src0, src1, dst)
+        tprelu_op.assert_called_once_with(src0, src1, dst)
 
     def test_tile_selection_wrappers_use_explicit_tmp_or_synthesize_one(self):
         mask = object()

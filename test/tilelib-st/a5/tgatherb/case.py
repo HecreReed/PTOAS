@@ -9,10 +9,8 @@
 
 # PTODSL rewrite of test/tilelang_st/npu/a5/src/st/testcase/tgatherb.
 #
-# tgatherb gathers elements from a source tile into a destination tile using
-# byte offsets.  Each element of *offset* is a byte address into the flat byte
-# representation of *src*; the element at that byte position is written into
-# the corresponding position of *dst*.
+# tgatherb gathers 32-byte source blocks into a destination tile. Each element
+# of *offset* is the byte address of one source block.
 
 from pathlib import Path
 import sys

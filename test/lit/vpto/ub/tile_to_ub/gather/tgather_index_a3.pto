@@ -1,0 +1,33 @@
+// Copyright (c) 2026 Huawei Technologies Co., Ltd.
+// This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+// CANN Open Software License Agreement Version 2.0 (the "License").
+// Please refer to the License for details. You may not use this file except in compliance with the License.
+// THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+// INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY OR FITNESS FOR A PARTICULAR PURPOSE.
+// See LICENSE in the software repository for the full text of the License.
+
+// Index-form f16 gather uses the destination width for its 128-element repeat
+// and advances dst, indices, and padded tmp rows by their physical strides.
+// It lowers through index-to-byte-offset decomposition (vmuls + vgather with srcAddr
+// packed as offsetAddr), matching the pto-isa a2a3/TGather.hpp conversion.
+
+// RUN: ptoas --pto-arch=a3 --pto-backend=vpto --emit-vpto-llvm-ir %s -o %t --mlir-print-ir-after=pto-lower-to-ubuf-ops 2>&1 | FileCheck %s
+// RUN: ptoas --pto-arch=a3 --pto-backend=vpto --emit-vpto-llvm-ir %s -o %t --mlir-print-ir-after=pto-lower-to-ubuf-ops 2>&1 | FileCheck %s --check-prefix=COUNT
+
+module attributes {pto.target_arch = "a3", pto.kernel_kind = #pto.kernel_kind<vector>} {
+  // CHECK-LABEL: func.func @lower_tgather_index_a3()
+  // COUNT-LABEL: func.func @lower_tgather_index_a3()
+  // COUNT-COUNT-2: pto.ub.vgather
+  func.func @lower_tgather_index_a3() attributes {pto.aicore} {
+    %src = pto.alloc_tile : !pto.tile_buf<loc=vec, dtype=f16, rows=2, cols=128, v_row=2, v_col=128, blayout=row_major, slayout=none_box, fractal=512, pad=0>
+    %indices = pto.alloc_tile : !pto.tile_buf<loc=vec, dtype=i32, rows=2, cols=128, v_row=2, v_col=128, blayout=row_major, slayout=none_box, fractal=512, pad=0>
+    %tmp = pto.alloc_tile : !pto.tile_buf<loc=vec, dtype=i32, rows=2, cols=192, v_row=2, v_col=128, blayout=row_major, slayout=none_box, fractal=512, pad=0>
+    %dst = pto.alloc_tile : !pto.tile_buf<loc=vec, dtype=f16, rows=2, cols=128, v_row=2, v_col=128, blayout=row_major, slayout=none_box, fractal=512, pad=0>
+    // CHECK: arith.constant 192 : index
+    // CHECK: arith.constant 128 : index
+    // CHECK: arith.constant 128 : index
+    // CHECK-NOT: pto.tgather
+    pto.tgather ins(%src, %indices, %tmp : !pto.tile_buf<loc=vec, dtype=f16, rows=2, cols=128, v_row=2, v_col=128, blayout=row_major, slayout=none_box, fractal=512, pad=0>, !pto.tile_buf<loc=vec, dtype=i32, rows=2, cols=128, v_row=2, v_col=128, blayout=row_major, slayout=none_box, fractal=512, pad=0>, !pto.tile_buf<loc=vec, dtype=i32, rows=2, cols=192, v_row=2, v_col=128, blayout=row_major, slayout=none_box, fractal=512, pad=0>) outs(%dst : !pto.tile_buf<loc=vec, dtype=f16, rows=2, cols=128, v_row=2, v_col=128, blayout=row_major, slayout=none_box, fractal=512, pad=0>)
+    return
+  }
+}

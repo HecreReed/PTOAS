@@ -26,6 +26,7 @@
 #include "mlir/CAPI/IR.h"
 
 #include "mlir/CAPI/Registration.h"
+#include "mlir/CAPI/Support.h"
 #include "llvm/ADT/SmallVector.h"
 
 // IMPORTANT: include the C++ dialect header that declares PtrType/TensorViewType.
@@ -927,4 +928,196 @@ MlirType mlirPTOGMTypeGet(MlirContext ctx, intptr_t rank, const int64_t *shape,
   auto memSpace = mlir::pto::AddressSpaceAttr::get(c, mlir::pto::AddressSpace::GM);
 
   return wrap(MemRefType::get(shp, elemTy, layout, memSpace));
+}
+
+//===----------------------------------------------------------------------===//
+// !pto.vreg<count x elem>
+//===----------------------------------------------------------------------===//
+
+bool mlirPTOTypeIsAVRegType(MlirType type) {
+  return isa<mlir::pto::VRegType>(unwrap(type));
+}
+
+MlirType mlirPTOVRegTypeGet(MlirContext ctx, int64_t elementCount,
+                            MlirType elementType) {
+  return wrap(mlir::pto::VRegType::get(unwrap(ctx), elementCount,
+                                       unwrap(elementType)));
+}
+
+int64_t mlirPTOVRegTypeGetElementCount(MlirType type) {
+  return cast<mlir::pto::VRegType>(unwrap(type)).getElementCount();
+}
+
+MlirType mlirPTOVRegTypeGetElementType(MlirType type) {
+  return wrap(cast<mlir::pto::VRegType>(unwrap(type)).getElementType());
+}
+
+//===----------------------------------------------------------------------===//
+// !pto.mask<granularity>
+//===----------------------------------------------------------------------===//
+
+bool mlirPTOTypeIsAMaskType(MlirType type) {
+  return isa<mlir::pto::MaskType>(unwrap(type));
+}
+
+MlirType mlirPTOMaskTypeGet(MlirContext ctx, MlirStringRef granularity) {
+  return wrap(mlir::pto::MaskType::get(unwrap(ctx), unwrap(granularity)));
+}
+
+MlirStringRef mlirPTOMaskTypeGetGranularity(MlirType type) {
+  return wrap(cast<mlir::pto::MaskType>(unwrap(type)).getGranularity());
+}
+
+//===----------------------------------------------------------------------===//
+// !pto.vmivreg<count x elem, layout?>
+//===----------------------------------------------------------------------===//
+
+bool mlirPTOTypeIsAVMIVRegType(MlirType type) {
+  return isa<mlir::pto::VMIVRegType>(unwrap(type));
+}
+
+MlirType mlirPTOVMIVRegTypeGet(MlirContext ctx, int64_t elementCount,
+                               MlirType elementType, MlirAttribute layout) {
+  return wrap(mlir::pto::VMIVRegType::get(unwrap(ctx), elementCount,
+                                          unwrap(elementType), unwrap(layout)));
+}
+
+int64_t mlirPTOVMIVRegTypeGetElementCount(MlirType type) {
+  return cast<mlir::pto::VMIVRegType>(unwrap(type)).getElementCount();
+}
+
+MlirType mlirPTOVMIVRegTypeGetElementType(MlirType type) {
+  return wrap(cast<mlir::pto::VMIVRegType>(unwrap(type)).getElementType());
+}
+
+MlirAttribute mlirPTOVMIVRegTypeGetLayout(MlirType type) {
+  return wrap(cast<mlir::pto::VMIVRegType>(unwrap(type)).getLayout());
+}
+
+//===----------------------------------------------------------------------===//
+// !pto.vmimask<count x granularity, layout?>
+//===----------------------------------------------------------------------===//
+
+bool mlirPTOTypeIsAVMIMaskType(MlirType type) {
+  return isa<mlir::pto::VMIMaskType>(unwrap(type));
+}
+
+MlirType mlirPTOVMIMaskTypeGet(MlirContext ctx, int64_t elementCount,
+                               MlirStringRef granularity, MlirAttribute layout) {
+  return wrap(mlir::pto::VMIMaskType::get(unwrap(ctx), elementCount,
+                                          unwrap(granularity), unwrap(layout)));
+}
+
+int64_t mlirPTOVMIMaskTypeGetElementCount(MlirType type) {
+  return cast<mlir::pto::VMIMaskType>(unwrap(type)).getElementCount();
+}
+
+MlirStringRef mlirPTOVMIMaskTypeGetGranularity(MlirType type) {
+  return wrap(cast<mlir::pto::VMIMaskType>(unwrap(type)).getGranularity());
+}
+
+MlirAttribute mlirPTOVMIMaskTypeGetLayout(MlirType type) {
+  return wrap(cast<mlir::pto::VMIMaskType>(unwrap(type)).getLayout());
+}
+
+//===----------------------------------------------------------------------===//
+// !pto.align
+//===----------------------------------------------------------------------===//
+
+bool mlirPTOTypeIsAAlignType(MlirType type) {
+  return isa<mlir::pto::AlignType>(unwrap(type));
+}
+
+MlirType mlirPTOAlignTypeGet(MlirContext ctx) {
+  return wrap(mlir::pto::AlignType::get(unwrap(ctx)));
+}
+
+//===----------------------------------------------------------------------===//
+// !pto.struct<fields...>
+//===----------------------------------------------------------------------===//
+
+bool mlirPTOTypeIsAStructType(MlirType type) {
+  return isa<mlir::pto::StructType>(unwrap(type));
+}
+
+MlirType mlirPTOStructTypeGet(MlirContext ctx, intptr_t numFieldTypes,
+                              MlirType const *fieldTypes) {
+  MLIRContext *c = unwrap(ctx);
+  llvm::SmallVector<mlir::Type> fields;
+  fields.reserve(static_cast<size_t>(numFieldTypes));
+  for (intptr_t i = 0; i < numFieldTypes; ++i) {
+    fields.push_back(unwrap(fieldTypes[i]));
+  }
+  auto structType = mlir::pto::StructType::getChecked(
+      [&]() { return mlir::emitError(mlir::UnknownLoc::get(c)); }, c,
+      llvm::ArrayRef<mlir::Type>(fields));
+  return wrap(structType);
+}
+
+intptr_t mlirPTOStructTypeGetNumFieldTypes(MlirType type) {
+  return static_cast<intptr_t>(
+      cast<mlir::pto::StructType>(unwrap(type)).getFieldTypes().size());
+}
+
+MlirType mlirPTOStructTypeGetFieldType(MlirType type, intptr_t index) {
+  return wrap(cast<mlir::pto::StructType>(unwrap(type))
+                  .getFieldTypes()[static_cast<size_t>(index)]);
+}
+
+//===----------------------------------------------------------------------===//
+// TileBufType getters
+//===----------------------------------------------------------------------===//
+
+intptr_t mlirPTOTileBufTypeGetRank(MlirType type) {
+  return static_cast<intptr_t>(
+      cast<mlir::pto::TileBufType>(unwrap(type)).getRank());
+}
+
+MlirType mlirPTOTileBufTypeGetElementType(MlirType type) {
+  return wrap(cast<mlir::pto::TileBufType>(unwrap(type)).getElementType());
+}
+
+MlirAttribute mlirPTOTileBufTypeGetMemorySpace(MlirType type) {
+  return wrap(cast<mlir::pto::TileBufType>(unwrap(type)).getMemorySpace());
+}
+
+const int64_t *mlirPTOTileBufTypeGetShape(MlirType type, intptr_t *numDimsOut) {
+  auto shape = cast<mlir::pto::TileBufType>(unwrap(type)).getShape();
+  *numDimsOut = static_cast<intptr_t>(shape.size());
+  return shape.data();
+}
+
+const int64_t *mlirPTOTileBufTypeGetValidShape(MlirType type,
+                                               intptr_t *numDimsOut) {
+  auto validShape = cast<mlir::pto::TileBufType>(unwrap(type)).getValidShape();
+  *numDimsOut = static_cast<intptr_t>(validShape.size());
+  return validShape.data();
+}
+
+MlirAttribute mlirPTOTileBufTypeGetBLayoutAttr(MlirType type) {
+  return wrap(cast<mlir::pto::TileBufType>(unwrap(type)).getBLayoutAttr());
+}
+
+MlirAttribute mlirPTOTileBufTypeGetSLayoutAttr(MlirType type) {
+  return wrap(cast<mlir::pto::TileBufType>(unwrap(type)).getSLayoutAttr());
+}
+
+int32_t mlirPTOTileBufTypeGetBLayoutValue(MlirType type) {
+  return cast<mlir::pto::TileBufType>(unwrap(type)).getBLayoutValueI32();
+}
+
+int32_t mlirPTOTileBufTypeGetSLayoutValue(MlirType type) {
+  return cast<mlir::pto::TileBufType>(unwrap(type)).getSLayoutValueI32();
+}
+
+int32_t mlirPTOTileBufTypeGetPadValue(MlirType type) {
+  return cast<mlir::pto::TileBufType>(unwrap(type)).getPadValueI32();
+}
+
+int32_t mlirPTOTileBufTypeGetCompactMode(MlirType type) {
+  return cast<mlir::pto::TileBufType>(unwrap(type)).getCompactModeI32();
+}
+
+int32_t mlirPTOTileBufTypeGetSFractalSize(MlirType type) {
+  return cast<mlir::pto::TileBufType>(unwrap(type)).getSFractalSizeI32();
 }

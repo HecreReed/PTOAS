@@ -96,6 +96,7 @@ LogicalResult validateIntToPtrUses(func::FuncOp func);
 std::unique_ptr<Pass> createPTOUnrollLoopsPass();
 /// Backward-compatible alias of createPTOUnrollLoopsPass().
 std::unique_ptr<Pass> createPTOUnrollSIMTForPass();
+std::unique_ptr<Pass> createPTOConvertSCFToCFWithLoopHintsPass();
 std::unique_ptr<Pass> createPTONarrowVPTOLoopCountersPass();
 std::unique_ptr<Pass> createPTOAnalyzeSIMTPersistentFragmentPass();
 std::unique_ptr<Pass> createPTOMaterializeSIMTPersistentFragmentPass();
@@ -103,6 +104,7 @@ std::unique_ptr<Pass> createPTOOutlineSIMTSectionsPass();
 std::unique_ptr<Pass> createPTOInferVPTOVecScopePass();
 std::unique_ptr<Pass> createVPTOExpandWrapperOpsPass();
 std::unique_ptr<Pass> createVPTOSoftPostUpdatePass();
+std::unique_ptr<Pass> createVPTOGuardedLICMPass();
 std::unique_ptr<Pass> createPTOPrintAddressAnalysisPass();
 std::unique_ptr<Pass> createPTOVPTOPtrBoundaryPass();
 std::unique_ptr<Pass>

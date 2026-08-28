@@ -29,8 +29,10 @@ def rewrite_jit_function(
 ):
     """Return a function with PTODSL lexical sections lowered safely.
 
-    ``pto.section`` is a physical SSA region, not a Python ``with`` hint.  The
-    section body therefore gets a small source-level lexical rewrite even when
+    ``rewrite_control_flow`` controls both runtime statement rewriting and the
+    ``and``/``or`` short-circuit rewrite.  ``pto.section`` is a physical SSA
+    region, not a Python ``with`` hint.  Its body therefore gets a small
+    source-level lexical rewrite even when
     the optional control-flow rewrite is disabled.  This keeps Python's
     function-local assignment rules from leaking a section-local SSA value into
     a sibling physical section.
@@ -68,6 +70,8 @@ def rewrite_jit_function(
     static_env.update(static_bindings or {})
     _inject_closure_defaults(function_def, closure_vars.nonlocals)
     _sanitize_signature_for_exec(function_def)
+    if rewrite_control_flow:
+        function_def = _BoolOpRewriter().visit(function_def)
     function_def = _ConditionalExpressionNormalizer().visit(function_def)
     section_rewriter = _SectionLexicalRewriter()
     function_def = section_rewriter.visit(function_def)
@@ -381,6 +385,77 @@ class _ConditionalExpressionNormalizer(ast.NodeTransformer):
         return ast.copy_location(self.generic_visit(if_stmt), stmt)
 
 
+def _zero_arg_lambda(body):
+    return ast.Lambda(
+        args=ast.arguments(
+            posonlyargs=[],
+            args=[],
+            vararg=None,
+            kwonlyargs=[],
+            kw_defaults=[],
+            kwarg=None,
+            defaults=[],
+        ),
+        body=body,
+    )
+
+
+class _BoolOpRewriter(ast.NodeTransformer):
+    """Rewrite Python ``and``/``or`` into device-side short-circuit helpers.
+
+    Python ``and``/``or`` are not overloadable operators: evaluating ``a and b``
+    forces a truth check on ``a``, which calls ``__bool__`` on a PTODSL runtime
+    value during tracing and raises.  This pass replaces every ``ast.BoolOp``
+    with a right-nested lazy helper call so the RHS is only traced inside a
+    device-side ``scf.if`` region::
+
+        a and b and c  ->  pto._short_circuit_and(a, lambda: pto._short_circuit_and(b, lambda: c))
+        a or  b or  c  ->  pto._short_circuit_or(a,  lambda: pto._short_circuit_or(b,  lambda: c))
+
+    The transformation is purely syntactic and composes with every expression
+    context: assignments, call arguments, ``return``, and ``if``/``while``
+    conditions.  Nested function bodies are rewritten as well, mirroring the
+    control-flow rewriter.  Statically-known ``bool``/``int`` operands are
+    short-circuited at trace time by the helpers themselves, so the RHS is not
+    traced at all when Python semantics would skip it.
+    """
+
+    @staticmethod
+    def _reject_rhs_assignment_expressions(node):
+        """Reject walrus expressions that would move into a generated lambda."""
+        if any(
+            isinstance(child, ast.NamedExpr)
+            for value in node.values[1:]
+            for child in ast.walk(value)
+        ):
+            raise PTODSLAstRewriteError(
+                "ast_rewrite=True cannot rewrite an and/or expression containing "
+                "an assignment expression (walrus operator) on the RHS; the "
+                "assignment would bind inside the generated helper lambda"
+            )
+
+    def visit_BoolOp(self, node):
+        self._reject_rhs_assignment_expressions(node)
+        node = self.generic_visit(node)
+        if isinstance(node.op, ast.And):
+            helper = "_short_circuit_and"
+        elif isinstance(node.op, ast.Or):
+            helper = "_short_circuit_or"
+        else:
+            return node
+        values = list(node.values)
+        if len(values) < 2:
+            return values[0] if values else node
+        result = values[-1]
+        for value in reversed(values[:-1]):
+            result = ast.Call(
+                func=_pto_attr(helper),
+                args=[value, _zero_arg_lambda(result)],
+                keywords=[],
+            )
+        return result
+
+
 @dataclass(frozen=True)
 class _NameInfo:
     loads: set[str]
@@ -601,6 +676,19 @@ def _slot_live_before_block(stmts, live_after, static_env, static_iters=None) ->
 
 
 def _slot_live_before_stmt(stmt, live_after, static_env, static_iters) -> set[_SubscriptSlot]:
+    if isinstance(stmt, (ast.With, ast.AsyncWith)):
+        live = _slot_live_before_block(stmt.body, live_after, static_env, static_iters)
+        # Python evaluates with-items from left to right and binds each
+        # optional_vars immediately.  Reverse the sequence for liveness so a
+        # context expression can use a binding produced by an earlier item
+        # without incorrectly turning that use into a live-in.
+        for item in reversed(stmt.items):
+            if item.optional_vars is not None:
+                live = _kill_slots_for_with_target(
+                    live, item.optional_vars, static_env, static_iters
+                )
+            live |= _slot_info(item.context_expr, static_env, static_iters).loads
+        return live
     if isinstance(stmt, ast.If):
         test_info = _slot_info(stmt.test, static_env, static_iters)
         return (
@@ -646,6 +734,37 @@ def _kill_slots_for_assigned_bases(slots, stmt) -> set[_SubscriptSlot]:
         for slot in slots
         if slot.base not in assigned_bases
     }
+
+
+def _kill_slots_for_with_target(
+    slots, target, static_env, static_iters
+) -> set[_SubscriptSlot]:
+    target_info = _slot_info(target, static_env, static_iters)
+    bound_bases = _simple_name_targets(target)
+    dynamic_subscript_bases = set()
+    for subscript in _target_subscripts(target):
+        if not _resolve_subscript_slots(
+            subscript, static_env, static_iters, require_static=True
+        ) and isinstance(subscript.value, ast.Name):
+            dynamic_subscript_bases.add(subscript.value.id)
+    killed_bases = bound_bases | dynamic_subscript_bases
+    return {
+        slot
+        for slot in slots
+        if slot.base not in killed_bases and slot not in target_info.stores
+    }
+
+
+def _target_subscripts(target):
+    if isinstance(target, ast.Subscript):
+        yield target
+        return
+    if isinstance(target, (ast.Tuple, ast.List)):
+        for element in target.elts:
+            yield from _target_subscripts(element)
+        return
+    if isinstance(target, ast.Starred):
+        yield from _target_subscripts(target.value)
 
 
 def _assigned_name_targets(stmt) -> set[str]:

@@ -53,6 +53,12 @@
 //  17. Loops over a signless integer induction variable are left alone:
 //      loopUnrollByFactor builds index-typed arithmetic unconditionally and
 //      would emit verifier-invalid mixed-type IR.  Both hint kinds drop.
+//  18. pto.unroll="enable" is never unrolled here: the loop and the
+//      attribute are left untouched for pto-convert-scf-to-cf-with-loop-hints, including on
+//      loops the native-unroll guards would reject (empty body, non-index
+//      induction variable) - those guards only exist because
+//      loopUnrollByFactor cannot handle such loops, which is irrelevant for
+//      a hint that only becomes metadata.
 
 // RUN: pto-test-opt --pto-unroll-loops %s 2>&1 | FileCheck %s
 
@@ -61,7 +67,7 @@
 // CHECK:      remark: 'pto.unroll = "full"' loop has no constant trip count
 // CHECK:      remark: 'pto.unroll_factor' = 1 is a no-op; dropping the hint
 // CHECK-COUNT-2: remark: 'pto.unroll_factor' loop never iterates; dropping the hint
-// CHECK-COUNT-2: remark: loop with an unroll hint has a non-index induction variable
+// CHECK-COUNT-2: remark: loop with a native unroll hint has a non-index induction variable
 
 module {
   // Case 1: divisible constant trip count -> single unrolled loop, 4 stores.
@@ -434,6 +440,53 @@ module {
     scf.for %i = %c0 to %c4 step %c1 : i32 {
       memref.store %i, %buf[%idx0] : memref<4xi32>
     } {pto.unroll = "full"}
+    return
+  }
+
+  // Case 18: pto.unroll="enable" is the metadata hint owned by
+  // pto-convert-scf-to-cf-with-loop-hints; this pass must leave the loop and the attribute
+  // completely untouched.
+  // CHECK-LABEL: func.func @enable_untouched
+  // CHECK:         scf.for
+  // CHECK:         pto.unroll = "enable"
+  func.func @enable_untouched(%n: index) {
+    %buf = memref.alloc() : memref<1xindex>
+    %c0 = arith.constant 0 : index
+    %c1 = arith.constant 1 : index
+    scf.for %i = %c0 to %n step %c1 {
+      memref.store %i, %buf[%c0] : memref<1xindex>
+    } {pto.unroll = "enable"}
+    return
+  }
+
+  // Case 19: an empty-body loop with the enable hint.  The native-unroll
+  // guard for empty bodies must not fire here: the hint never reaches
+  // loopUnrollByFactor, so it stays for pto-convert-scf-to-cf-with-loop-hints.
+  // CHECK-LABEL: func.func @enable_empty_body_untouched
+  // CHECK:         scf.for
+  // CHECK:         pto.unroll = "enable"
+  func.func @enable_empty_body_untouched(%n: index) {
+    %c0 = arith.constant 0 : index
+    %c1 = arith.constant 1 : index
+    scf.for %i = %c0 to %n step %c1 {
+    } {pto.unroll = "enable"}
+    return
+  }
+
+  // Case 20: a non-index (i32) loop with the enable hint.  Same reasoning:
+  // the index-only restriction belongs to native unrolling, not to the
+  // metadata hint.
+  // CHECK-LABEL: func.func @enable_non_index_untouched
+  // CHECK:         scf.for %{{.*}} = %{{.*}} to %{{.*}} step %{{.*}} : i32
+  // CHECK:         pto.unroll = "enable"
+  func.func @enable_non_index_untouched(%buf: memref<4xi32>) {
+    %idx0 = arith.constant 0 : index
+    %c0 = arith.constant 0 : i32
+    %c4 = arith.constant 4 : i32
+    %c1 = arith.constant 1 : i32
+    scf.for %i = %c0 to %c4 step %c1 : i32 {
+      memref.store %i, %buf[%idx0] : memref<4xi32>
+    } {pto.unroll = "enable"}
     return
   }
 }

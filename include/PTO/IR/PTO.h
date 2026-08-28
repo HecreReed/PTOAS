@@ -213,20 +213,26 @@ inline constexpr llvm::StringLiteral kPTODSLLogicalNameAttrName =
 
 /// Loop-unroll hint attributes carried on `scf.for` as discardable attrs.
 ///
-/// `pto.unroll` is a string attribute; only "full" is supported.
+/// `pto.unroll` is a string attribute; "full" and "enable" are supported.
 /// `pto.unroll_factor` is an integer attribute holding a positive unroll
 /// factor.  The two attributes are mutually exclusive on one loop.
 ///
-/// Consumption contract (`pto-unroll-loops` is the only consumer):
-/// - "full": unrolled natively when the trip count is a positive constant;
-///   otherwise the hint is dropped with a remark and the loop is kept.
-/// - `pto.unroll_factor`: unrolled natively when the value satisfies
-///   `isValidUnrollFactorAttr`, the step is a positive constant, and the
-///   factor does not exceed the pass's max-unroll-factor cap; otherwise the
-///   hint is dropped with a remark.  Malformed hints (unknown pto.unroll
-///   value, both attributes on one loop, out-of-contract factor) are hard
-///   errors reported by the pass.
+/// Consumption contract:
+/// - "full": `pto-unroll-loops` unrolls natively when the trip count is a
+///   positive constant; otherwise the hint is dropped with a remark and the
+///   loop is kept.
+/// - "enable": never unrolled natively.  `pto-convert-scf-to-cf-with-loop-hints` translates
+///   it into an llvm.loop_annotation that becomes !llvm.loop.unroll.enable
+///   metadata, delegating the unroll decision to the compiler's cost model
+///   (LLVM's ForceEnable semantics).
+/// - `pto.unroll_factor`: unrolled natively by `pto-unroll-loops` when the
+///   value satisfies `isValidUnrollFactorAttr`, the step is a positive
+///   constant, and the factor does not exceed the pass's max-unroll-factor
+///   cap; otherwise the hint is dropped with a remark.  Malformed hints
+///   (unknown pto.unroll value, both attributes on one loop, out-of-contract
+///   factor) are hard errors reported by `pto-unroll-loops`.
 inline constexpr llvm::StringLiteral kUnrollAttrName = "pto.unroll";
+inline constexpr llvm::StringLiteral kUnrollEnableValue = "enable";
 inline constexpr llvm::StringLiteral kUnrollFullValue = "full";
 inline constexpr llvm::StringLiteral kUnrollFactorAttrName =
     "pto.unroll_factor";

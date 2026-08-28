@@ -33,9 +33,9 @@ module {
 
   func.func private @tgatherb_arg(
       %src: !pto.tile_buf<vec, 1x32xf16>,
-      %offsets: !pto.tile_buf<vec, 1x32xi32>,
+      %offsets: !pto.tile_buf<vec, 1x8xi32>,
       %dst: !pto.tile_buf<vec, 1x32xf16>) {
-    pto.tgatherb ins(%src, %offsets : !pto.tile_buf<vec, 1x32xf16>, !pto.tile_buf<vec, 1x32xi32>)
+    pto.tgatherb ins(%src, %offsets : !pto.tile_buf<vec, 1x32xf16>, !pto.tile_buf<vec, 1x8xi32>)
                   outs(%dst : !pto.tile_buf<vec, 1x32xf16>)
     return
   }

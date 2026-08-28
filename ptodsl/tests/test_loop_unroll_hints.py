@@ -42,6 +42,14 @@ def range_hint_full():
 
 
 @pto.jit(target="a5")
+def range_hint_enable():
+    acc = pto.const(0, dtype=pto.i32)
+    for i in pto.range(4, unroll="enable"):
+        acc = acc + pto.const(1, dtype=pto.i32)
+    _ = acc
+
+
+@pto.jit(target="a5")
 def range_hint_factor():
     acc = pto.const(0, dtype=pto.i32)
     for i in pto.range(0, 8, 2, unroll_factor=4):
@@ -208,6 +216,10 @@ def main():
     text = range_hint_full.compile().mlir_text()
     _assert_loop_attr(text, r'pto\.unroll\s*=\s*"full"', "pto.range unroll=full")
 
+    # 1b. pto.range(unroll="enable") (metadata hint owned by pto-convert-scf-to-cf-with-loop-hints).
+    text = range_hint_enable.compile().mlir_text()
+    _assert_loop_attr(text, r'pto\.unroll\s*=\s*"enable"', "pto.range unroll=enable")
+
     # 2. pto.range(0, 8, 2, unroll_factor=4).
     text = range_hint_factor.compile().mlir_text()
     _assert_loop_attr(text, r"pto\.unroll_factor\s*=\s*4", "pto.range unroll_factor=4")
@@ -320,19 +332,13 @@ def main():
     text = plain_range_true_step.compile().mlir_text()
     _assert_loop_attr(text, r"scf\.for", "plain range step=True compiles")
 
-    # 11b. "enable"/"disable" were removed with the metadata forwarding path;
-    # only "full" remains a valid unroll= value.
-    _expect_raises(
-        (ValueError,),
-        lambda: pto.for_(0, 4, step=1, unroll="enable"),
-        "unroll= expects one of",
-        "removed enable hint",
-    )
+    # 11b. "disable" remains unsupported ("enable" was restored with the
+    # metadata forwarding pass).
     _expect_raises(
         (ValueError,),
         lambda: pto.for_(0, 4, step=1, unroll="disable"),
         "unroll= expects one of",
-        "removed disable hint",
+        "unsupported disable hint",
     )
 
     # 12. Type traps at eager validation: bool is an int subclass and must not

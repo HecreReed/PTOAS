@@ -4869,7 +4869,7 @@ def TGatherBOp : PTO_TOp<"tgatherb", [
   OpPipeInterface,
   DeclareOpInterfaceMethods<MemoryEffectsOpInterface>
 ]> {
-  let summary = "Gather elements using byte offsets (tilebuf, DPS)";
+  let summary = "Gather 32-byte blocks using byte addresses (tilebuf, DPS)";
 
   let arguments = (ins
     PTODpsType:$src,

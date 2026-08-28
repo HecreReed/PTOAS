@@ -11920,7 +11920,13 @@ static LogicalResult runPipeline(ModuleOp module, llvm::raw_ostream &diagOS,
   kernelModulePM.addPass(
       std::make_unique<NormalizeFuncSignaturesForLLVMLoweringPass>());
   kernelModulePM.addPass(arith::createArithExpandOpsPass());
-  kernelModulePM.addPass(createConvertSCFToCFPass());
+  // pto-convert-scf-to-cf-with-loop-hints performs the SCF-to-CF conversion for this pipeline:
+  // it runs the upstream conversion patterns plus a higher-benefit lowering
+  // for {pto.unroll = "enable"} loops that attaches llvm.loop_annotation to
+  // the latch, so the !llvm.loop.unroll.enable metadata survives into the
+  // emitted LLVM IR.  It replaces createConvertSCFToCFPass here; running both
+  // would be redundant.
+  kernelModulePM.addNestedPass<func::FuncOp>(pto::createPTOConvertSCFToCFWithLoopHintsPass());
   kernelModulePM.addPass(createArithToLLVMConversionPass());
   kernelModulePM.addPass(createConvertIndexToLLVMPass());
   kernelModulePM.addPass(createFinalizeMemRefToLLVMConversionPass());

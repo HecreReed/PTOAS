@@ -7621,7 +7621,10 @@ pto.tgather ins(%src, {maskPattern = #pto.mask_pattern<Pxxxx>} : !pto.tile_buf<.
   - `src` and `dst` element types must match and be one of `i16/i32/f16/f32`.
   - `indices` element type must be `i32`.
   - `tmp` is required; `tmp` element type must match `indices`.
-  - `indices` and `tmp` must have the same valid shape.
+  - `dst`, `indices`, and `tmp` must use row-major layout.
+  - `dst` and `indices` must have the same valid shape.
+  - `indices` and `tmp` must have the same valid shape; their allocated row
+    widths may differ and are used as independent physical strides.
 - **Index gather: implementation checks (A5)**:
   - `src` and `dst` element types must match and be one of `i8/i16/i32/f16/f32`, or a target-supported fp8 type (`f8E4M3*`/`f8E5M2*`).
   - `indices` element type must be `i16` or `i32`.
@@ -7669,31 +7672,41 @@ pto.tgather ins(%src, {maskPattern = #pto.mask_pattern<P1111>} : !pto.tile_buf<.
 
 ---
 
-##### `pto.tgatherb` - Gather by Byte Offsets
+##### `pto.tgatherb` - Gather 32-Byte Blocks
 
-**Summary:** Gathers elements using per-element byte offsets.
+**Summary:** Gathers 32-byte source blocks using byte addresses.
 
 **Semantics:**
 
-```
-dst[i, j] = src[byte_offsets[i, j]]
-```
+Each `offsets[i, k]` is a 32-byte-aligned byte address relative to the source
+UB base. It selects one complete 32-byte source block, which is copied to the
+corresponding output block. This is not a scalar per-element gather; use the
+index form of `pto.tgather` for arbitrary element indices.
 
 **Arguments:**
 
 | Name | Type | Description |
 |------|------|-------------|
 | `src` | `pto.tile_buf` | Source tile |
-| `offsets` | `pto.tile_buf` | Byte offset tile |
+| `offsets` | `pto.tile_buf` | Compact 32-bit source block-address tile |
 | `dst` | `pto.tile_buf` | Destination tile |
 
 **Results:** None. Writes into `dst` via DPS pattern.
 
 **Constraints & Verification:**
 
-- **Implementation checks (A2A3)**
-  - `dst` must use row-major layout (`blayout=row_major`).
-  - `dst` element size must be `1`, `2`, or `4` bytes.
+- **Implementation checks (A2/A3)**
+  - `src` and `dst` must have the same valid shape.
+  - `dst` and `offsets` must use row-major layout (`blayout=row_major`).
+  - `dst` element size must be `2` or `4` bytes.
+  - `offsets` must use a 32-bit integer element type.
+  - `offsets.v_row` must equal `dst.v_row`.
+  - For destination element size `E`, each row needs
+    `ceil(dst.v_col / (32 / E))` block addresses. `offsets.v_col` is this
+    count rounded up to a multiple of eight because each hardware repeat
+    consumes eight addresses.
+  - Allocated `dst.cols` and `offsets.cols` are their independent physical row
+    strides and may exceed their valid widths.
 - **Implementation checks (A5)**
   - Destination element size must be `1`, `2`, or `4` bytes.
 
