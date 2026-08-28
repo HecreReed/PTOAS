@@ -22,14 +22,26 @@
 // entry point (no structural re-inference of persistence).  The pass walks
 // the alloca's pointer use graph - getelementptr chains are followed,
 // load/store (and any other direct consumer) are terminal accesses - and
-// collects every enclosing scf.for of every related op.  A load's data
+// collects the enclosing scf.for loops of every related op.  A load's data
 // result is deliberately NOT followed: materialization only requires every
 // access to resolve to a stable resident slot, so a loop that merely
 // consumes a loaded value is unrelated to the buffer:
 //
 //   - loops directly wrapping an access inside a SIMT section;
-//   - kernel-level loops wrapping whole pto.section.simt regions;
-//   - every layer of multiply nested loops.
+//   - every layer of multiply nested loops;
+//   - EXCEPT loops whose body contains a pto.section.simt region AND whose
+//     induction variable is not used by any persistent GEP inside the loop:
+//     those are left alone (see the promotion skip in the pass body).
+//     Fully unrolling such a loop clones the section once per iteration,
+//     SIMT outlining emits one outlined entry function per clone, and those
+//     single-callsite linkonce_odr clones get folded/inlined by BiSheng so
+//     their `_simt_entry` ELF symbols go missing - VPTO fatobj emission
+//     then fails in the VF_SIMT size patch.  Materialization only needs
+//     the accesses inside the section to be static; a section-wrapping loop
+//     whose induction variable never reaches a persistent GEP does not
+//     affect that.  When the induction variable DOES select the fragment
+//     slot, unrolling is the only way to statically resolve the access, so
+//     the loop is promoted (each clone then reads its own resident slot).
 //
 // If any loop on an access's enclosing chain is statically zero-trip
 // (ub <= lb), the access never executes and the whole chain is left
@@ -63,6 +75,7 @@
 #include "PTO/Transforms/LoopUnrollUtils.h"
 #include "PTO/Transforms/Passes.h"
 
+#include "mlir/Dialect/Arith/IR/Arith.h"
 #include "mlir/Dialect/Func/IR/FuncOps.h"
 #include "mlir/Dialect/LLVMIR/LLVMDialect.h"
 #include "mlir/Dialect/SCF/IR/SCF.h"
@@ -71,6 +84,7 @@
 #include "mlir/Pass/Pass.h"
 #include "mlir/Support/LLVM.h"
 
+#include "llvm/ADT/DenseSet.h"
 #include "llvm/ADT/SmallPtrSet.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/SetVector.h"
@@ -99,6 +113,68 @@ static bool isStaticallyZeroTrip(scf::ForOp forOp) {
   std::optional<int64_t> ub = getConstantIntValue(forOp.getUpperBound());
   std::optional<int64_t> step = getConstantIntValue(forOp.getStep());
   return lb && ub && step && *step > 0 && *ub <= *lb;
+}
+
+/// Return true when `loopVar` is reachable from `index` through pure
+/// integer arithmetic definitions (the iv*stride+offset shapes a persistent
+/// GEP index is built from).  Anything else (loads, calls, block arguments
+/// of other regions) stops the walk, so a false negative can only leave an
+/// unpromoted loop that materialization then rejects with its own
+/// non-constant-index diagnostic - never a wrong promotion.
+static bool indexDependsOnLoopVar(Value index, Value loopVar) {
+  if (index == loopVar) {
+    return true;
+  }
+  DenseSet<Value> visited;
+  SmallVector<Value, 8> worklist{index};
+  while (!worklist.empty()) {
+    Value value = worklist.pop_back_val();
+    if (!visited.insert(value).second) {
+      continue;
+    }
+    if (value == loopVar) {
+      return true;
+    }
+    Operation *def = value.getDefiningOp();
+    if (!def) {
+      continue;
+    }
+    if (!isa<arith::AddIOp, arith::SubIOp, arith::MulIOp, arith::DivSIOp,
+             arith::RemSIOp, arith::IndexCastOp, arith::ExtSIOp,
+             arith::TruncIOp>(def)) {
+      continue;
+    }
+    for (Value operand : def->getOperands()) {
+      worklist.push_back(operand);
+    }
+  }
+  return false;
+}
+
+/// Return true when any persistent-fragment GEP inside `forOp`'s body has an
+/// index that depends on `forOp`'s induction variable.  Unrolling such a
+/// loop is the only way to statically resolve those accesses for
+/// materialization, so the loop must be promoted even though unrolling it
+/// clones the section it wraps.
+static bool persistentGepDependsOnLoop(
+    scf::ForOp forOp, const llvm::SmallSetVector<Operation *, 32> &relatedOps) {
+  Value iv = forOp.getInductionVar();
+  for (Operation *op : relatedOps) {
+    auto gep = dyn_cast<LLVM::GEPOp>(op);
+    if (!gep || !forOp->isAncestor(gep)) {
+      continue;
+    }
+    for (auto index : gep.getIndices()) {
+      // Constant indices never depend on the loop; only the Value ones can.
+      if (!index.template is<Value>()) {
+        continue;
+      }
+      if (indexDependsOnLoopVar(index.template get<Value>(), iv)) {
+        return true;
+      }
+    }
+  }
+  return false;
 }
 
 struct PTOPromotePersistentFragmentLoops
@@ -196,6 +272,31 @@ struct PTOPromotePersistentFragmentLoops
         continue;
       }
       for (Operation *loopOp : chain) {
+        // A loop whose body contains a pto.section.simt region is only
+        // promoted when a persistent GEP inside it actually depends on the
+        // loop's induction variable:
+        //
+        //  - no dependency (e.g. a tile loop that only moves data while the
+        //    fragment is indexed by lane constants, the RMSNorm shape):
+        //    unrolling would clone the whole section once per iteration, the
+        //    SIMT outlining emits one single-callsite linkonce_odr entry
+        //    function per clone, BiSheng folds a subset of them, the
+        //    `_simt_entry` ELF symbols go missing, and VPTO fatobj emission
+        //    fails in the VF_SIMT size patch - for zero benefit, because
+        //    materialization only needs the in-section accesses static,
+        //    which this loop does not affect.
+        //
+        //  - dependency (fragment slot selected per iteration): unrolling is
+        //    the only way to statically resolve those accesses, so the loop
+        //    must be promoted; the dep shape is verified to materialize
+        //    correctly (each clone reads its own resident slot).
+        if (loopOp->walk([](pto::SectionSimtOp) { return WalkResult::interrupt(); })
+                .wasInterrupted()) {
+          auto forOp = cast<scf::ForOp>(loopOp);
+          if (!persistentGepDependsOnLoop(forOp, relatedOps)) {
+            continue;
+          }
+        }
         if (seenLoopOps.insert(loopOp).second) {
           loopOps.push_back(loopOp);
         }
