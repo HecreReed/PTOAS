@@ -48,51 +48,19 @@ def _nd2xnz_constraint(src_kind, src_memory_space, dst0_kind, dst0_memory_space,
 
 
 @rewrite_jit_function
-def _expand_window(src, row0, col0, dst):
-    """Expand one ND window into one NZ destination (design doc 9.2).
+def _expand_vector(src, dst, src_ptr, dst_ptr, row0, col0, m, n):
+    """Vector path for non-1x1 windows (design doc 9.2).
 
-    Window element mapping (design doc 3.2):
-        window[r, c] = src[row0 + r, col0 + c]
-    written to the NZ layout of dst: NZ offset = floor(c/c0)*physRows*c0
-    + r*c0 + (c%c0), c0 = 32/elemBytes.
-
-    Three access paths per design doc 9.2:
-    - 1x1 windows use the scalar load/store path so the SyncMacroModel's A5
-      1x1 scalar hidden-event model stays consistent with the lowering and no
-      vector read footprint is touched;
-    - sub-c0 source offsets use vldas + vldus (unaligned); the verifier
-      statically rejects sub-c0 windows whose vldus footprint would cross the
-      source row end;
-    - c0-aligned sources may use vlds; that optimized path stays gated behind
-      device goldens (design doc 9.1) and currently reuses vldas + vldus,
-      which is functionally correct for aligned windows as well.
-
-    Column blocks of c0 are walked with an exact PAT_VL{tail} mask for the
-    trailing block, so validCols % c0 pads stay untouched; row padding beyond
-    validRows is not written (undefined by the TEXTRACT contract, design
-    3.2.1). pto.addptr advances by element offset (not bytes).
+    Column blocks of c0 are walked with an exact trailing-block mask so
+    validCols % c0 pads stay untouched; row padding beyond validRows is not
+    written (undefined by the TEXTRACT contract, design 3.2.1). pto.addptr
+    advances by element offset (not bytes).
     """
-    m, n = dst.valid_shape
-    src_ptr = src.as_ptr()
-    dst_ptr = dst.as_ptr()
-    base_elems = row0 * src.shape[1] + col0
-    if m == 1 and n == 1:
-        # Scalar path (design doc 9.2): exactly one element. Consistent with
-        # the 1x1 scalar hidden-event model (SyncMacroModel reserves a
-        # bidirectional V<->S pair on event 0), the scalar S-pipe access is
-        # bracketed by an explicit set/wait barrier so the S read of src is
-        # ordered against the outer V pipe (design doc 6.3.1).
-        pto.set_flag("V", "S", event_id=0)
-        pto.wait_flag("V", "S", event_id=0)
-        value = pto.load_scalar(src_ptr, base_elems)
-        pto.store_scalar(dst_ptr, 0, value)
-        pto.set_flag("S", "V", event_id=0)
-        pto.wait_flag("S", "V", event_id=0)
-        return
     c0 = 32 // _elem_bytes(dst)
     block_stride = dst.shape[0]  # storageRows (plain NZ); design doc 3.2
     nblocks = (n + c0 - 1) // c0
     align = pto.vldas(src_ptr)
+    base_elems = row0 * src.shape[1] + col0
     for cb in range(nblocks):
         cols_this = n - cb * c0
         if cols_this > c0:
@@ -107,6 +75,53 @@ def _expand_window(src, row0, col0, dst):
             dst_elem = cb * block_stride * c0 + r * c0
             pto.vsstb(value, pto.addptr(dst_ptr, dst_elem),
                       block_stride, 0, mask=mask)
+
+
+@rewrite_jit_function
+def _expand_window(src, row0, col0, dst):
+    """Expand one ND window into one NZ destination (design doc 9.2).
+
+    Window element mapping (design doc 3.2):
+        window[r, c] = src[row0 + r, col0 + c]
+    written to the NZ layout of dst: NZ offset = floor(c/c0)*physRows*c0
+    + r*c0 + (c%c0), c0 = 32/elemBytes.
+
+    Access paths per design doc 9.2:
+    - 1x1 windows use the scalar load/store path so the SyncMacroModel's A5
+      1x1 scalar hidden-event model stays consistent with the lowering and
+      no vector read footprint is touched;
+    - other windows use vldas + vldus (unaligned); the verifier statically
+      rejects sub-c0 windows whose vldus footprint would cross the source
+      row end; the c0-aligned vlds optimization stays gated behind device
+      goldens (design doc 9.1) and currently reuses vldas + vldus, which is
+      functionally correct for aligned windows as well.
+
+    The scalar/vector split must be structured if/else: runtime-conditional
+    branches cannot use native Python `and` (the rewrite pass does not lower
+    BoolOp) and must not `return` early (that would stop tracing before the
+    vector path is emitted).
+    """
+    m, n = dst.valid_shape
+    src_ptr = src.as_ptr()
+    dst_ptr = dst.as_ptr()
+    base_elems = row0 * src.shape[1] + col0
+    if m == 1:
+        if n == 1:
+            # Scalar path (design doc 9.2): exactly one element. Consistent
+            # with the 1x1 scalar hidden-event model (SyncMacroModel reserves
+            # a bidirectional V<->S pair on event 0), the scalar S-pipe access
+            # is bracketed by an explicit set/wait barrier so the S read of
+            # src is ordered against the outer V pipe (design doc 6.3.1).
+            pto.set_flag("V", "S", event_id=0)
+            pto.wait_flag("V", "S", event_id=0)
+            value = pto.load_scalar(src_ptr, base_elems)
+            pto.store_scalar(dst_ptr, 0, value)
+            pto.set_flag("S", "V", event_id=0)
+            pto.wait_flag("S", "V", event_id=0)
+        else:
+            _expand_vector(src, dst, src_ptr, dst_ptr, row0, col0, m, n)
+    else:
+        _expand_vector(src, dst, src_ptr, dst_ptr, row0, col0, m, n)
 
 
 @tilelib.tile_template(
