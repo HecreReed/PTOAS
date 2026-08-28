@@ -834,8 +834,6 @@ static bool linkFatobjFiles(llvm::ArrayRef<std::string> fatobjPaths,
 
 } // namespace
 
-bool mlir::pto::isBishengVecMISchedEnabled() { return enableBishengVecMISched; }
-
 mlir::pto::TempFileRegistry::~TempFileRegistry() { cleanup(); }
 
 void mlir::pto::TempFileRegistry::cleanup() {

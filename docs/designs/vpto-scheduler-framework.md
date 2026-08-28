@@ -99,7 +99,7 @@ Pass 自身默认 `off`。`ptoas` driver 的默认行为是：
 
 `on` 默认只报告跳过调度的情况。`--vpto-scheduler-trace` 或 Pass 选项 `trace=true` 会先输出与 `analyze` 相同的静态分析报告，再输出最终顺序、逻辑周期、峰值压力和工作量计数；trace 只能配合 `on`。
 
-`on` 与 `--enable-bisheng-vec-misched` 互斥，避免两个调度器连续重排同一组 vector 指令。`analyze` 不修改 IR，可以与 Bisheng vector MISched 同时配置。
+`--vpto-scheduler=on` 与 `--enable-bisheng-vec-misched` 可以同时配置：前者在 VPTO IR 层应用调度结果，后者在 device object 编译阶段保留 Bisheng 默认的 vector MI scheduler 行为。`analyze` 不修改 IR，也可以与 Bisheng vector MISched 同时配置。
 
 ## 整体结构
 
