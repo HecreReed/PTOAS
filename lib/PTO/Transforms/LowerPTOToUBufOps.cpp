@@ -570,22 +570,21 @@ struct LowerPTOToUBufOpsPass
         pendingNd2xNz.empty()
             ? std::optional<unsigned>(std::nullopt)
             : selectUnusedHiddenEventId(func.getOperation(), ctx);
-    if (pendingNd2xNz.empty()) {
-      return;
-    }
-    if (!eventIdOpt) {
-      func.emitError(
-          "all eight compiler event ids are in use by explicit set_flag/"
-          "wait_flag; cannot materialize the ND-to-2xNz hidden V<->S barrier");
-      signalPassFailure();
-      return;
-    }
-    auto eventId = static_cast<pto::EVENT>(*eventIdOpt);
-    for (auto &pending : pendingNd2xNz) {
-      if (failed(expandTExtractNd2xNz(builder, ctx, pending, eventId))) {
-        pending.op.emitError("failed to expand ND-to-2xNz TEXTRACT for A2/A3 VPTO");
+    if (!pendingNd2xNz.empty()) {
+      if (!eventIdOpt) {
+        func.emitError(
+            "all eight compiler event ids are in use by explicit set_flag/"
+            "wait_flag; cannot materialize the ND-to-2xNz hidden V<->S barrier");
         signalPassFailure();
         return;
+      }
+      auto eventId = static_cast<pto::EVENT>(*eventIdOpt);
+      for (auto &pending : pendingNd2xNz) {
+        if (failed(expandTExtractNd2xNz(builder, ctx, pending, eventId))) {
+          pending.op.emitError("failed to expand ND-to-2xNz TEXTRACT for A2/A3 VPTO");
+          signalPassFailure();
+          return;
+        }
       }
     }
     func.walk([&](pto::TExtractOp op) {
