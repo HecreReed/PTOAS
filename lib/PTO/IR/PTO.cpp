@@ -1528,6 +1528,14 @@ ParseResult mlir::pto::TExtractOp::parse(OpAsmParser &parser,
 }
 
 void mlir::pto::TExtractOp::print(OpAsmPrinter &p) {
+  // A programmatically-built op with a malformed operandSegmentSizes must
+  // not reach segment-offset accessors (they would assert / read OOB during
+  // IR dump or diagnostics). Fall back to generic printing so the verifier
+  // error is what the user sees.
+  if (classifyForm() == Form::Invalid) {
+    p.printGenericOp(*this);
+    return;
+  }
   p << " ins(";
   p << getSrc();
   for (Value idx : getIndices()) {

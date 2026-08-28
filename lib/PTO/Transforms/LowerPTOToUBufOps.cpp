@@ -562,8 +562,17 @@ struct LowerPTOToUBufOpsPass
     // Choose one hidden-event id for the whole function (design doc 6.3.1:
     // the SyncMacroModel reservation is per op, but sequential barrier pairs
     // on a shared id are safe; reusing it keeps the 0..7 compiler id space
-    // from exhausting on long chains of dual-output ops).
-    auto eventIdOpt = selectUnusedHiddenEventId(func.getOperation(), ctx);
+    // from exhausting on long chains of dual-output ops). Only needed when
+    // the function actually carries ND-to-2xNz dual-output ops: a plain
+    // A2/A3 function whose explicit flags happen to occupy all eight ids
+    // must not fail here.
+    auto eventIdOpt =
+        pendingNd2xNz.empty()
+            ? std::optional<unsigned>(std::nullopt)
+            : selectUnusedHiddenEventId(func.getOperation(), ctx);
+    if (pendingNd2xNz.empty()) {
+      return;
+    }
     if (!eventIdOpt) {
       func.emitError(
           "all eight compiler event ids are in use by explicit set_flag/"

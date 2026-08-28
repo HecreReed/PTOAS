@@ -20,6 +20,7 @@ must not be registered); the A5 verifier enforces the same set.
 
 from ptodsl import pto
 import ptodsl.tilelib as tilelib
+from ptodsl._ast_rewrite import rewrite_jit_function
 
 
 def _elem_bytes(dst):
@@ -46,6 +47,7 @@ def _nd2xnz_constraint(src_kind, src_memory_space, dst0_kind, dst0_memory_space,
     )
 
 
+@rewrite_jit_function
 def _expand_window(src, row0, col0, dst):
     """Expand one ND window into one NZ destination (design doc 9.2).
 
@@ -95,7 +97,10 @@ def _expand_window(src, row0, col0, dst):
         cols_this = n - cb * c0
         if cols_this > c0:
             cols_this = c0
-        mask = "PAT_ALL" if cols_this == c0 else "PAT_VL%d" % cols_this
+        # vsstb takes a !pto.mask SSA value; build it with make_mask so the
+        # exact trailing-block width folds to a runtime predicate when n is
+        # dynamic and to a constant pattern otherwise (design doc 9.2).
+        mask = pto.make_mask(str(dst.dtype), cols_this)
         for r in range(m):
             src_elem = base_elems + r * src.shape[1] + cb * c0
             value, align = pto.vldus(pto.addptr(src_ptr, src_elem), align)
