@@ -446,9 +446,11 @@ struct StaticTileStrides {
 
 
 static std::optional<uint64_t> getStaticTileBytes(TileBufType type) {
-  // Shared physical-storage sizing (design doc 12) with checked arithmetic:
-  // keep planner/GraphSync/post-planning footprints identical.
-  auto bytes = getTileBufStorageByteSize(type);
+  // Shared access-envelope sizing (design doc 12): this feeds alias ranges
+  // and multi-buffer slot strides, both of which model accessed bytes (the
+  // reservation's trailing RowPlusOne gap is not accessed). Route through
+  // the shared helper so the value stays identical to GraphSync/InsertSync.
+  auto bytes = getTileBufAccessEndByteSize(type);
   if (!bytes)
     return std::nullopt;
   return static_cast<uint64_t>(*bytes);
