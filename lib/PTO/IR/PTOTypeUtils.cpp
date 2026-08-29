@@ -10,6 +10,7 @@
 #include "PTO/IR/PTOTypeUtils.h"
 
 #include "PTO/IR/PTO.h"
+#include "llvm/ADT/APInt.h"
 
 using namespace mlir;
 using namespace mlir::pto;
@@ -252,41 +253,122 @@ std::optional<int64_t> mlir::pto::getTileBufAccessEndByteSize(Type tileBufType) 
   return end;
 }
 
-std::optional<int64_t> mlir::pto::getPTOConstantIntLike(Value value) {
-  if (!value)
-    return std::nullopt;
-  if (auto cOp = value.getDefiningOp<arith::ConstantIndexOp>())
-    return cOp.value();
-  if (auto cInt = value.getDefiningOp<arith::ConstantIntOp>())
-    return cInt.value();
-  if (auto cOp = value.getDefiningOp<arith::ConstantOp>()) {
-    if (auto ia = dyn_cast<IntegerAttr>(cOp.getValue()))
-      return ia.getInt();
-    return std::nullopt;
-  }
-  // Constant casts preserve the folded value.
-  if (auto castOp = value.getDefiningOp<arith::IndexCastOp>())
-    return getPTOConstantIntLike(castOp.getIn());
-  if (auto extOp = value.getDefiningOp<arith::ExtSIOp>())
-    return getPTOConstantIntLike(extOp.getIn());
-  if (auto extOp = value.getDefiningOp<arith::ExtUIOp>())
-    return getPTOConstantIntLike(extOp.getIn());
-  if (auto truncOp = value.getDefiningOp<arith::TruncIOp>())
-    return getPTOConstantIntLike(truncOp.getIn());
-  // Pure constant arithmetic.
-  if (auto addOp = value.getDefiningOp<arith::AddIOp>()) {
-    auto lhs = getPTOConstantIntLike(addOp.getLhs());
-    auto rhs = getPTOConstantIntLike(addOp.getRhs());
-    if (lhs && rhs)
-      return *lhs + *rhs;
-    return std::nullopt;
-  }
-  if (auto subOp = value.getDefiningOp<arith::SubIOp>()) {
-    auto lhs = getPTOConstantIntLike(subOp.getLhs());
-    auto rhs = getPTOConstantIntLike(subOp.getRhs());
-    if (lhs && rhs)
-      return *lhs - *rhs;
+namespace {
+// A folded integer carries both the value and the bit width its two's
+// complement representation is interpreted in, so ExtUI/Trunc/IAdd behave
+// exactly like the corresponding arith ops (design doc 5.1: the verifier and
+// the post-planning resolver must agree on index folding).
+struct PTOFoldedInt {
+  int64_t value;
+  unsigned bitWidth;
+};
+
+unsigned ptoIntLikeWidth(Type ty) {
+  if (ty.isIndex())
+    return 64;
+  if (auto it = dyn_cast<IntegerType>(ty))
+    return it.getWidth();
+  return 0;
+}
+
+std::optional<PTOFoldedInt> ptoFoldIntLike(Value v);
+
+std::optional<PTOFoldedInt> ptoExtendOrTrunc(const PTOFoldedInt &in,
+                                             unsigned dstWidth,
+                                             bool isSigned,
+                                             bool isTrunc) {
+  if (dstWidth == 0 || dstWidth > 64 || in.bitWidth == 0 ||
+      in.bitWidth > 64) {
     return std::nullopt;
   }
+  llvm::APInt a(in.bitWidth, static_cast<uint64_t>(in.value), isSigned);
+  if (isTrunc) {
+    if (dstWidth >= in.bitWidth) {
+      return PTOFoldedInt{a.getSExtValue(), in.bitWidth};
+    }
+    return PTOFoldedInt{a.trunc(dstWidth).getSExtValue(), dstWidth};
+  }
+  if (dstWidth >= in.bitWidth) {
+    llvm::APInt out = isSigned ? a.sext(dstWidth) : a.zext(dstWidth);
+    return PTOFoldedInt{out.getSExtValue(), dstWidth};
+  }
+  return PTOFoldedInt{a.trunc(dstWidth).getSExtValue(), dstWidth};
+}
+
+std::optional<PTOFoldedInt> ptoFoldIntLike(Value v) {
+  if (!v)
+    return std::nullopt;
+  if (auto cOp = v.getDefiningOp<arith::ConstantIndexOp>())
+    return PTOFoldedInt{cOp.value(), 64};
+  if (auto cInt = v.getDefiningOp<arith::ConstantIntOp>()) {
+    unsigned w = ptoIntLikeWidth(cInt.getType());
+    if (w == 0 || w > 64)
+      return std::nullopt;
+    return PTOFoldedInt{cInt.value(), w};
+  }
+  if (auto cOp = v.getDefiningOp<arith::ConstantOp>()) {
+    if (auto ia = dyn_cast<IntegerAttr>(cOp.getValue())) {
+      unsigned w = ptoIntLikeWidth(ia.getType());
+      if (w == 0 || w > 64)
+        return std::nullopt;
+      return PTOFoldedInt{ia.getInt(), w};
+    }
+    return std::nullopt;
+  }
+  if (auto castOp = v.getDefiningOp<arith::IndexCastOp>()) {
+    auto in = ptoFoldIntLike(castOp.getIn());
+    if (!in)
+      return std::nullopt;
+    return ptoExtendOrTrunc(*in, ptoIntLikeWidth(castOp.getType()),
+                            /*isSigned=*/true, /*isTrunc=*/false);
+  }
+  if (auto extOp = v.getDefiningOp<arith::ExtSIOp>()) {
+    auto in = ptoFoldIntLike(extOp.getIn());
+    if (!in)
+      return std::nullopt;
+    return ptoExtendOrTrunc(*in, ptoIntLikeWidth(extOp.getType()),
+                            /*isSigned=*/true, /*isTrunc=*/false);
+  }
+  if (auto extOp = v.getDefiningOp<arith::ExtUIOp>()) {
+    auto in = ptoFoldIntLike(extOp.getIn());
+    if (!in)
+      return std::nullopt;
+    return ptoExtendOrTrunc(*in, ptoIntLikeWidth(extOp.getType()),
+                            /*isSigned=*/false, /*isTrunc=*/false);
+  }
+  if (auto truncOp = v.getDefiningOp<arith::TruncIOp>()) {
+    auto in = ptoFoldIntLike(truncOp.getIn());
+    if (!in)
+      return std::nullopt;
+    return ptoExtendOrTrunc(*in, ptoIntLikeWidth(truncOp.getType()),
+                            /*isSigned=*/false, /*isTrunc=*/true);
+  }
+  // Pure constant arithmetic: wrap at the result width with APInt (no UB on
+  // int64 overflow), exactly like arith.addi / arith.subi.
+  auto foldBinArith = [](Value v, bool isAdd) -> std::optional<PTOFoldedInt> {
+    auto lhs = ptoFoldIntLike(v.getDefiningOp()->getOperand(0));
+    auto rhs = ptoFoldIntLike(v.getDefiningOp()->getOperand(1));
+    if (!lhs || !rhs)
+      return std::nullopt;
+    unsigned w = ptoIntLikeWidth(v.getType());
+    if (w == 0 || w > 64)
+      return std::nullopt;
+    llvm::APInt a(w, static_cast<uint64_t>(lhs->value), /*isSigned=*/true);
+    llvm::APInt b(w, static_cast<uint64_t>(rhs->value), /*isSigned=*/true);
+    llvm::APInt out = isAdd ? (a + b) : (a - b);
+    return PTOFoldedInt{out.getSExtValue(), w};
+  };
+  if (v.getDefiningOp<arith::AddIOp>())
+    return foldBinArith(v, /*isAdd=*/true);
+  if (v.getDefiningOp<arith::SubIOp>())
+    return foldBinArith(v, /*isAdd=*/false);
   return std::nullopt;
+}
+} // namespace
+
+std::optional<int64_t> mlir::pto::getPTOConstantIntLike(Value value) {
+  auto folded = ptoFoldIntLike(value);
+  if (!folded)
+    return std::nullopt;
+  return folded->value;
 }

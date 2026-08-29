@@ -526,6 +526,36 @@ mlir::pto::validateTExtractNd2xNzPrePartition(mlir::Operation *module) {
       partitionUnsafe = true;
       return;
     }
+    if (callee.isDeclaration()) {
+      // A local declaration is not a definition: resolve it to the exact
+      // final-link symbol (a unique public definition among all children /
+      // the root). Zero or more than one match is ambiguous and must be
+      // rejected - a private declaration in child B that is eventually
+      // defined publicly in sibling child C must still be flagged as a
+      // cross-child call (design doc 5.3.2 item 4).
+      func::FuncOp finalDef = nullptr;
+      mod.walk([&](func::FuncOp fn) {
+        if (fn.isDeclaration() || fn.isPrivate())
+          return WalkResult::advance();
+        if (fn.getSymName() != call.getCallee())
+          return WalkResult::advance();
+        if (finalDef) {
+          finalDef = nullptr;
+          return WalkResult::interrupt();
+        }
+        finalDef = fn;
+        return WalkResult::advance();
+      });
+      if (!finalDef) {
+        call->emitOpError()
+            << "call surface not closed: ambiguous or missing final-link "
+               "definition for declared callee in a backend-partitioned "
+               "module with a partial-valid ND-to-2xNZ producer";
+        partitionUnsafe = true;
+        return;
+      }
+      callee = finalDef;
+    }
     if (callee->getParentOp() != callerParent) {
       call->emitOpError()
           << "backend-partitioned module with partial-valid ND-to-2xNZ does "

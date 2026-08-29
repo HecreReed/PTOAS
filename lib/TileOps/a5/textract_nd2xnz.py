@@ -68,7 +68,10 @@ def _expand_vector(src, dst, src_ptr, dst_ptr, row0, col0, m, n):
         # vsstb takes a !pto.mask SSA value; build it with make_mask so the
         # exact trailing-block width folds to a runtime predicate when n is
         # dynamic and to a constant pattern otherwise (design doc 9.2).
-        mask = pto.make_mask(str(dst.dtype), cols_this)
+        # dst.dtype is already an MLIR Type on the traced tile; pass it
+        # directly so make_mask can resolve the element width (a plain
+        # 'f16' string is not a valid dtype descriptor).
+        mask = pto.make_mask(dst.dtype, cols_this)
         for r in range(m):
             src_elem = base_elems + r * src.shape[1] + cb * c0
             value, align = pto.vldus(pto.addptr(src_ptr, src_elem), align)

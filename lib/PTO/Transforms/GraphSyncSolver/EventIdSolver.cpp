@@ -270,7 +270,11 @@ EventIdSolver::getChosenEventIds(EventIdNode *node, int64_t eventIdMax) {
   } else {
     int64_t curEventId = std::max(eventIdMax, this->eventIdsNumMax - 1);
     auto it = usedEventIds.rbegin();
-    while ((curEventId >= 0) &&
+    // The reverse-priority scan must respect the same lower bound as
+    // the forward scan: with startEventId == 1 the A5 1x1 template's
+    // literal V<->S event 0 stays reserved even when high ids are
+    // taken by adjacent conflicts (design doc 6.3.1).
+    while ((curEventId >= startEventId) &&
            (static_cast<int64_t>(chosenEventIds.size()) < node->eventIdNum)) {
       while ((it != usedEventIds.rend()) && ((*it) > curEventId)) {
         it++;
