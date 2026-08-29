@@ -21,6 +21,7 @@
 #include "PTO/Transforms/BufferizableOpInterfaceImpl.h"
 #include "PTO/Transforms/CppPostprocess.h"
 #include "PTO/Transforms/Passes.h"
+#include "PTO/Transforms/TExtractNd2xNzValidation.h"
 #include "PTO/Transforms/VPTOLLVMEmitter.h"
 #include "VPTOHostStubEmission.h"
 #include "mlir/AsmParser/AsmParserState.h"
@@ -1495,6 +1496,12 @@ static LogicalResult runMainLoweringPipeline(
       llvm::errs() << "Error: Pass execution failed.\n";
       return failure();
     }
+    // Post-planning ND-to-2xNz safety (design doc 5.3.1): the shared
+    // pipeline above already ran the planners, so planned addresses are
+    // final here.
+    if (failed(pto::validateTExtractNd2xNzPostPlanningSafety(module.get()))) {
+      return failure();
+    }
     result.kind = PTOASCompileResultKind::Text;
     llvm::raw_string_ostream os(result.textOutput);
     module->print(os);
@@ -1519,6 +1526,9 @@ static LogicalResult runMainLoweringPipeline(
   if (effectiveBackend == PTOBackend::VPTO) {
     if (failed(pm.run(*module))) {
       llvm::errs() << "Error: Pass execution failed.\n";
+      return failure();
+    }
+    if (failed(pto::validateTExtractNd2xNzPostPlanningSafety(module.get()))) {
       return failure();
     }
 
@@ -1546,6 +1556,10 @@ static LogicalResult runMainLoweringPipeline(
     llvm::errs() << "Error: Pass execution failed.\n";
     return failure();
   }
+  // Post-planning ND-to-2xNz safety (design doc 5.3.1) for the EmitC path.
+  if (failed(pto::validateTExtractNd2xNzPostPlanningSafety(module.get()))) {
+    return failure();
+  }
   return success();
 }
 
@@ -1565,6 +1579,11 @@ int mlir::pto::compilePTOASModule(
     return 1;
   }
   if (failed(runPreBackendNormalization(*module))) {
+    return 1;
+  }
+  // ND-to-2xNz input-provenance validation (design doc 5.1 item 11): runs
+  // after generic verification, before the planners consume tile types.
+  if (failed(pto::validateTExtractNd2xNzInputProvenance(module.get()))) {
     return 1;
   }
   state.hasTileOpsToExpand = hasUnexpandedTileOps(*module);
