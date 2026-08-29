@@ -6,17 +6,20 @@
 // INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
 // See LICENSE in the root of the software repository for the full text of the License.
 
+#pragma once
 
-#include "VPTOCANN900LLVMEmitterInternal.h"
+#include "ptobc/ptobc_format.h"
 
-namespace mlir::pto {
+#include <mlir/IR/BuiltinOps.h>
+#include <mlir/IR/MLIRContext.h>
 
-LogicalResult lowerVPTOModuleToLLVMModulesCANN900(
-    ModuleOp module, const VPTOEmissionOptions &options,
-    EmittedLLVMModule &cubeModule, EmittedLLVMModule &vectorModule,
-    llvm::raw_ostream &diagOS) {
-  return detail::lowerCANN900Module(module, options, cubeModule, vectorModule,
-                                    diagOS);
-}
+#include <string>
 
-} // namespace mlir::pto
+namespace ptobc {
+
+mlir::OwningOpRef<mlir::ModuleOp> parsePTOFile(mlir::MLIRContext &ctx,
+                                               const std::string &path);
+PTOBCFile encodeFromMLIRModule(mlir::ModuleOp module);
+void decodeFileToPTO(const std::string &inPath, const std::string &outPath);
+
+} // namespace ptobc

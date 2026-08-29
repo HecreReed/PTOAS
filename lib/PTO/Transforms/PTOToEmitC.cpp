@@ -7926,10 +7926,11 @@ static FailureOr<Value> buildGlobalTensorViewFromPointer(
                            strideType, ArrayAttr{}, ArrayAttr{}, ValueRange{})
                        .getResult(0);
 
+  // Keep the GlobalTensor template descriptors identical to the constructor
+  // arguments, including the specialized MX shape and stride types.
   std::string gtTypeStr =
-      getGlobalTensorTypeStringFromShapeAndStrides(elemTy, shape,
-                                                   effectiveStrides,
-                                                   layoutEnum);
+      "GlobalTensor<" + getElemTypeStringForGT(elemTy) + ", " + shapeType +
+      ", " + strideType + ", " + layoutEnum.str() + ">";
   auto gtType = emitc::OpaqueType::get(ctx, gtTypeStr);
   auto gt = rewriter.create<emitc::CallOpaqueOp>(
       loc, gtType, gtTypeStr, ArrayAttr{}, ArrayAttr{},
