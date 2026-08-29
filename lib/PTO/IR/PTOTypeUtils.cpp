@@ -281,7 +281,11 @@ std::optional<PTOFoldedInt> ptoExtendOrTrunc(const PTOFoldedInt &in,
       in.bitWidth > 64) {
     return std::nullopt;
   }
-  llvm::APInt a(in.bitWidth, static_cast<uint64_t>(in.value), isSigned);
+  // Build from the raw two's-complement bit pattern (implicit trunc to
+  // in.bitWidth): in.value is a signed int64 that may not fit the source
+  // width as an unsigned literal (e.g. -1 : i8), which would trip the APInt
+  // range assertion in assert builds.
+  llvm::APInt a(in.bitWidth, static_cast<uint64_t>(in.value));
   if (isTrunc) {
     if (dstWidth >= in.bitWidth) {
       return PTOFoldedInt{a.getSExtValue(), in.bitWidth};
@@ -353,8 +357,11 @@ std::optional<PTOFoldedInt> ptoFoldIntLike(Value v) {
     unsigned w = ptoIntLikeWidth(v.getType());
     if (w == 0 || w > 64)
       return std::nullopt;
-    llvm::APInt a(w, static_cast<uint64_t>(lhs->value), /*isSigned=*/true);
-    llvm::APInt b(w, static_cast<uint64_t>(rhs->value), /*isSigned=*/true);
+    // Wrapping two's-complement arithmetic at the result width; construct
+    // from the raw bit pattern (implicit trunc) so negative literals of any
+    // source width are safe.
+    llvm::APInt a(w, static_cast<uint64_t>(lhs->value));
+    llvm::APInt b(w, static_cast<uint64_t>(rhs->value));
     llvm::APInt out = isAdd ? (a + b) : (a - b);
     return PTOFoldedInt{out.getSExtValue(), w};
   };

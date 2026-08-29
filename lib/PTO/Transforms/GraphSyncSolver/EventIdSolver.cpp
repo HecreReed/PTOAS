@@ -268,12 +268,15 @@ EventIdSolver::getChosenEventIds(EventIdNode *node, int64_t eventIdMax) {
       curEventId++;
     }
   } else {
-    int64_t curEventId = std::max(eventIdMax, this->eventIdsNumMax - 1);
+    // Reverse priority: scan from the high end down to startEventId. The
+    // upper bound is the hardware-available maximum (startEventId shifts
+    // the usable window, it does not extend it), and the lower bound keeps
+    // the A5 1x1 template's literal V<->S event 0 reserved (design doc
+    // 6.3.1). A node that needs more ids than the window contains gets a
+    // short, but never duplicated, set.
+    int64_t upperBound = std::max<int64_t>(eventIdsNumMax - 1, startEventId);
+    int64_t curEventId = upperBound;
     auto it = usedEventIds.rbegin();
-    // The reverse-priority scan must respect the same lower bound as
-    // the forward scan: with startEventId == 1 the A5 1x1 template's
-    // literal V<->S event 0 stays reserved even when high ids are
-    // taken by adjacent conflicts (design doc 6.3.1).
     while ((curEventId >= startEventId) &&
            (static_cast<int64_t>(chosenEventIds.size()) < node->eventIdNum)) {
       while ((it != usedEventIds.rend()) && ((*it) > curEventId)) {
@@ -287,11 +290,20 @@ EventIdSolver::getChosenEventIds(EventIdNode *node, int64_t eventIdMax) {
       curEventId--;
     }
     std::reverse(chosenEventIds.begin(), chosenEventIds.end());
+    // Fallback for the remaining slots: take the lowest ids inside the
+    // window that are neither used by neighbors nor already chosen. Never
+    // duplicate and never exceed the hardware-available upper bound.
     if (int64_t rem =
             node->eventIdNum - static_cast<int64_t>(chosenEventIds.size());
         rem > 0) {
-      for (int64_t i = 0; i < rem; i++) {
-        chosenEventIds.push_back(eventIdMax + i + 1);
+      int64_t fill = startEventId;
+      while (rem > 0 && fill <= upperBound) {
+        if (!llvm::is_contained(usedEventIds, fill) &&
+            !llvm::is_contained(chosenEventIds, fill)) {
+          chosenEventIds.push_back(fill);
+          rem--;
+        }
+        fill++;
       }
     }
   }
