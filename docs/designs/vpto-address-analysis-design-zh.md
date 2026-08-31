@@ -99,7 +99,7 @@ ValueEvolution、把 pointer root/`addptr` 组合留在 AddressAnalysis，但最
 
 - 不新增强制运行的 address normalization transform pass。
 - 不把分析结果物化成固定 i16/i32 IR。
-- 不在地址分析中判断 alias、no-alias、disjointness、memory dependence 或
+- 不在地址分析中判断 alias、no-alias、non-overlap、memory dependence 或
   memory effects。
 - 不由公共分析决定某条指令是否值得或允许转换成 post-update。
 - 首期不承诺支持任意非线性表达式、不规则 CFG loop 或未知边界 recurrence。
@@ -568,7 +568,7 @@ typed operand，并从具名 updated-base accessor 取得结果。
 | lane stride / contiguity | 可查询 AddressExpr 随 lane id 的 delta |
 | known alignment | 可由 root alignment、offset range/divisibility 组合 |
 | divisibility | 可作为 TypedExpr 的附加数学事实 |
-| alias/disjointness | 外部 analysis 消费 root + offset/range，不放入本分析 |
+| alias/non-overlap | 外部 analysis 消费 root + offset/range，不放入本分析 |
 | memory dependence | 外部 analysis 组合 memory effects、alias 和控制流 |
 
 在没有明确 consumer 之前，公共 API 可以暂不暴露对应方法，或返回 Unknown；但新增
@@ -630,4 +630,4 @@ typed operand，并从具名 updated-base accessor 取得结果。
 - **Unknown 是合法结果。** 无法证明时保守放弃，不通过 normalization 或默认步长
   猜测结论。
 - **地址事实不等于 alias 结论。** root/base symbol 用于表达和 delta 比较，alias、
-  disjointness 和 dependence 由外部分析负责。
+  non-overlap 和 dependence 由外部分析负责。
