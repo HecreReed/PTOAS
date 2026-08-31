@@ -172,7 +172,8 @@ EventIdNode *EventIdSolver::getNode(ConflictPair *conflictPair) {
 }
 
 std::unique_ptr<EventIdSolver> EventIdSolver::clone() {
-  auto clonedEventIdSolver = std::make_unique<EventIdSolver>(eventIdsNumMax);
+  auto clonedEventIdSolver =
+      std::make_unique<EventIdSolver>(eventIdsNumMax, startEventId);
   llvm::DenseMap<EventIdNode *, EventIdNode *> mp;
   for (auto &node : nodes) {
     auto clonedNode = node->clone();
@@ -253,10 +254,18 @@ llvm::SmallVector<int64_t>
 EventIdSolver::getChosenEventIds(EventIdNode *node, int64_t eventIdMax) {
   llvm::SmallVector<int64_t> chosenEventIds;
   llvm::SmallVector<int64_t> usedEventIds = getAdjNodesUsedEventIds(node);
+  // eventIdsNumMax is the WINDOW SIZE: the usable ids are the inclusive
+  // range [startEventId, upperBound] with
+  //   upperBound = startEventId + eventIdsNumMax - 1.
+  // Both priority directions scan the same window; a node requesting more
+  // ids than the window contains gets a short - never duplicated, never
+  // overrunning the hardware maximum - set (design doc 6.3.1).
+  const int64_t upperBound = startEventId + this->eventIdsNumMax - 1;
   if (!node->reversePriority) {
     int64_t curEventId = startEventId;
     auto *it = usedEventIds.begin();
-    while (static_cast<int64_t>(chosenEventIds.size()) < node->eventIdNum) {
+    while ((curEventId <= upperBound) &&
+           (static_cast<int64_t>(chosenEventIds.size()) < node->eventIdNum)) {
       while ((it != usedEventIds.end()) && ((*it) < curEventId)) {
         it++;
       }
@@ -268,13 +277,10 @@ EventIdSolver::getChosenEventIds(EventIdNode *node, int64_t eventIdMax) {
       curEventId++;
     }
   } else {
-    // Reverse priority: scan from the high end down to startEventId. The
-    // upper bound is the hardware-available maximum (startEventId shifts
-    // the usable window, it does not extend it), and the lower bound keeps
-    // the A5 1x1 template's literal V<->S event 0 reserved (design doc
-    // 6.3.1). A node that needs more ids than the window contains gets a
-    // short, but never duplicated, set.
-    int64_t upperBound = std::max<int64_t>(eventIdsNumMax - 1, startEventId);
+    // Reverse priority: scan from the high end down to startEventId; the
+    // lower bound keeps the A5 1x1 template's literal V<->S event 0
+    // reserved even after a shrink (the window size keeps the start
+    // offset, so [startEventId, ...] never collapses onto it).
     int64_t curEventId = upperBound;
     auto it = usedEventIds.rbegin();
     while ((curEventId >= startEventId) &&

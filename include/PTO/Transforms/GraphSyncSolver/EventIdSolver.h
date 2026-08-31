@@ -153,6 +153,12 @@ public:
 
 class EventIdSolver {
 private:
+  // eventIdsNumMax is the SIZE of the usable id window, not a raw id: the
+  // window is [startEventId, startEventId + eventIdsNumMax - 1] (inclusive)
+  // and never exceeds the hardware-available maximum. Keeping the offset in
+  // the size (ctor subtracts startEventId from the hardware count) means
+  // shrinkEventIdMaxToEventIdNum() keeps reserving the lower ids instead of
+  // re-introducing them or leaving the window too small (design doc 6.3.1).
   int64_t eventIdsNumMax{-1};
   // First event id that may be handed out (default 0). The A5 1x1
   // ND-to-2xNZ TileLib path hard-codes the V<->S barrier to event 0 to match
@@ -169,7 +175,8 @@ private:
 
 public:
   EventIdSolver(int64_t eventIdNumMax, int64_t startEventId = 0)
-      : eventIdsNumMax(eventIdNumMax), startEventId(startEventId) {}
+      : eventIdsNumMax(std::max<int64_t>(eventIdNumMax - startEventId, 1)),
+        startEventId(startEventId) {}
   ~EventIdSolver() = default;
 
   bool isColorable();
