@@ -1,0 +1,13 @@
+# Paths owned by the GitCode packaging/build integration.
+# Keep one repository-relative path per line. Directories protect all descendants.
+build.sh
+cmake/fetch_cann_cmake.cmake
+cmake/func.cmake
+cmake/package.cmake
+cmake/superbuild/CMakeLists.txt
+scripts/package
+OAT.xml
+.gitcode
+tools/sync_github_to_gitcode.sh
+tools/sync_github_to_gitcode.paths
+.github/workflows/sync_github_to_gitcode.yml

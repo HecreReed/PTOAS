@@ -1,0 +1,60 @@
+# Copyright (c) 2026 Huawei Technologies Co., Ltd.
+# This program is free software; you can redistribute it and/or modify it under the terms and conditions of
+# CANN Open Software License Agreement Version 2.0 (the "License").
+# Please refer to the License for details. You may not use this file except in compliance with the License.
+
+name: Sync GitHub main to GitCode
+
+on:
+  schedule:
+    - cron: "17 2 */2 * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  sync:
+    # Configure GITCODE_TOKEN as a repository secret. The repository variables
+    # below are needed only for the first run against a legacy squash branch.
+    if: github.repository == 'HecreReed/PTOAS'
+    runs-on: ubuntu-latest
+    env:
+      GITCODE_TOKEN: ${{ secrets.GITCODE_TOKEN }}
+      PTOAS_SYNC_BRANCH: ${{ vars.PTOAS_SYNC_BRANCH || 'codex/sync-github-main-20260829' }}
+      PTOAS_SYNC_GITHUB_BASE: ${{ vars.PTOAS_SYNC_GITHUB_BASE || '1296b260af8a35c75432603e4de7446869d730ce' }}
+      PTOAS_SYNC_PREVIOUS_GITHUB_HEAD: ${{ vars.PTOAS_SYNC_PREVIOUS_GITHUB_HEAD || '718934c6b3608d15d616d1f7a08766a283a2e683' }}
+
+    steps:
+      - name: Checkout sync script
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Configure remotes and GitCode credentials
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "${GITCODE_TOKEN}" || {
+            echo "GITCODE_TOKEN repository secret is required" >&2
+            exit 1
+          }
+          git remote add hwupstream https://github.com/hw-native-sys/PTOAS.git
+          git remote add gitcode https://gitcode.com/cann/pto-as.git
+          git remote add gitcodefork https://gitcode.com/hecrereed/pto-as.git
+
+          askpass="${RUNNER_TEMP}/gitcode-askpass"
+          cat > "${askpass}" <<'EOF'
+          #!/bin/sh
+          case "$1" in
+            *Username*) printf '%s\n' 'hecrereed' ;;
+            *) printf '%s\n' "${GITCODE_TOKEN}" ;;
+          esac
+          EOF
+          chmod 700 "${askpass}"
+          echo "GIT_ASKPASS=${askpass}" >> "${GITHUB_ENV}"
+          echo "GIT_TERMINAL_PROMPT=0" >> "${GITHUB_ENV}"
+
+      - name: Synchronize and update GitCode PR branch
+        shell: bash
+        run: tools/sync_github_to_gitcode.sh --push
