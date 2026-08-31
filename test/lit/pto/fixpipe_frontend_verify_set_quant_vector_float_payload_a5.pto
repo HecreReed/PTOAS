@@ -6,7 +6,17 @@
 // INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
 // See LICENSE in the root of the software repository for the full text of the License.
 //
-// RUN: ptoas --pto-arch=a5 %s 2>&1 | FileCheck %s --check-prefix=A5
+// Verify that floating-point payloads are rejected for every public A5 vector
+// quantization mode. The placeholder is substituted in each RUN line so the
+// same frontend fixture covers f16, bf16, and f32 without duplicating it.
+//
+// RUN: mkdir -p %t
+// RUN: sed 's/FLOAT_PAYLOAD/f16/g' %s > %t/f16.pto
+// RUN: not ptoas --pto-arch=a5 %t/f16.pto 2>&1 | FileCheck %s --check-prefix=F16
+// RUN: sed 's/FLOAT_PAYLOAD/bf16/g' %s > %t/bf16.pto
+// RUN: not ptoas --pto-arch=a5 %t/bf16.pto 2>&1 | FileCheck %s --check-prefix=BF16
+// RUN: sed 's/FLOAT_PAYLOAD/f32/g' %s > %t/f32.pto
+// RUN: not ptoas --pto-arch=a5 %t/f32.pto 2>&1 | FileCheck %s --check-prefix=F32
 
 module {
   func.func @cube_kernel() attributes {pto.kernel_kind = #pto.kernel_kind<cube>} {
@@ -27,11 +37,8 @@ module {
       (c2v_consumer_buf = %c2v_import : i32,
        v2c_consumer_buf = %c0_i32 : i32)
 
-    %fp = pto.alloc_tile : !pto.tile_buf<loc=scaling, dtype=ui64, rows=1, cols=32, v_row=1, v_col=32, blayout=row_major, slayout=none_box, fractal=512, pad=0>
-    %acc_tile = pto.alloc_tile : !pto.tile_buf<loc=acc, dtype=i32, rows=16, cols=16, v_row=16, v_col=16, blayout=col_major, slayout=row_major, fractal=1024, pad=0>
-
-    pto.set_quant_vector(%fp : !pto.tile_buf<loc=scaling, dtype=ui64, rows=1, cols=32, v_row=1, v_col=32, blayout=row_major, slayout=none_box, fractal=512, pad=0>) {id = 0}
-    pto.tpush_to_aiv(%acc_tile : !pto.tile_buf<loc=acc, dtype=i32, rows=16, cols=16, v_row=16, v_col=16, blayout=col_major, slayout=row_major, fractal=1024, pad=0>) {id = 0, split = 0}
+    %fp = pto.alloc_tile : !pto.tile_buf<loc=scaling, dtype=FLOAT_PAYLOAD, rows=1, cols=32, v_row=1, v_col=32, blayout=row_major, slayout=none_box, fractal=512, pad=0>
+    pto.set_quant_vector(%fp : !pto.tile_buf<loc=scaling, dtype=FLOAT_PAYLOAD, rows=1, cols=32, v_row=1, v_col=32, blayout=row_major, slayout=none_box, fractal=512, pad=0>) {id = 0}
     return
   }
 
@@ -62,10 +69,6 @@ module {
   }
 }
 
-// A5-LABEL: AICORE void cube_kernel(
-// A5: using Pipe0FixpipeConfig = FixpipeParams<LayoutMode_t::NZ2ND, QuantMode_t::VDEQF16, ReluPreMode::NoRelu>;
-// A5: SET_QUANT_VECTOR(
-// A5-NEXT: TPUSH<{{.*}}, Pipe0FixpipeConfig>(
-// A5-LABEL: AICORE void vector_kernel(
-// A5: #if defined(__DAV_VEC__)
-// A5: if (get_subblockid() == 0) {
+// F16: error: 'pto.set_quant_vector' op expects 'scaling_tile' element type to be packed i64/ui64/si64 on A5
+// BF16: error: 'pto.set_quant_vector' op expects 'scaling_tile' element type to be packed i64/ui64/si64 on A5
+// F32: error: 'pto.set_quant_vector' op expects 'scaling_tile' element type to be packed i64/ui64/si64 on A5

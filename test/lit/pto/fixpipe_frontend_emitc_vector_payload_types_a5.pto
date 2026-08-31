@@ -42,15 +42,15 @@ module {
       (c2v_consumer_buf = %c2v_import1 : i32,
        v2c_consumer_buf = %c0_i32 : i32)
 
-    %fp_bf16 = pto.alloc_tile : !pto.tile_buf<loc=scaling, dtype=bf16, rows=1, cols=32, v_row=1, v_col=32, blayout=row_major, slayout=none_box, fractal=512, pad=0>
-    %fp_f32 = pto.alloc_tile : !pto.tile_buf<loc=scaling, dtype=f32, rows=1, cols=32, v_row=1, v_col=32, blayout=row_major, slayout=none_box, fractal=512, pad=0>
+    %fp_i64 = pto.alloc_tile : !pto.tile_buf<loc=scaling, dtype=i64, rows=1, cols=32, v_row=1, v_col=32, blayout=row_major, slayout=none_box, fractal=512, pad=0>
+    %fp_ui64 = pto.alloc_tile : !pto.tile_buf<loc=scaling, dtype=ui64, rows=1, cols=32, v_row=1, v_col=32, blayout=row_major, slayout=none_box, fractal=512, pad=0>
     %acc0 = pto.alloc_tile : !pto.tile_buf<loc=acc, dtype=i32, rows=16, cols=32, v_row=16, v_col=32, blayout=col_major, slayout=row_major, fractal=1024, pad=0>
     %acc1 = pto.alloc_tile : !pto.tile_buf<loc=acc, dtype=i32, rows=16, cols=32, v_row=16, v_col=32, blayout=col_major, slayout=row_major, fractal=1024, pad=0>
 
-    pto.set_quant_vector(%fp_bf16 : !pto.tile_buf<loc=scaling, dtype=bf16, rows=1, cols=32, v_row=1, v_col=32, blayout=row_major, slayout=none_box, fractal=512, pad=0>) {id = 0}
+    pto.set_quant_vector(%fp_i64 : !pto.tile_buf<loc=scaling, dtype=i64, rows=1, cols=32, v_row=1, v_col=32, blayout=row_major, slayout=none_box, fractal=512, pad=0>) {id = 0}
     pto.tpush_to_aiv(%acc0 : !pto.tile_buf<loc=acc, dtype=i32, rows=16, cols=32, v_row=16, v_col=32, blayout=col_major, slayout=row_major, fractal=1024, pad=0>) {id = 0, split = 0}
 
-    pto.set_quant_vector(%fp_f32 : !pto.tile_buf<loc=scaling, dtype=f32, rows=1, cols=32, v_row=1, v_col=32, blayout=row_major, slayout=none_box, fractal=512, pad=0>) {id = 1}
+    pto.set_quant_vector(%fp_ui64 : !pto.tile_buf<loc=scaling, dtype=ui64, rows=1, cols=32, v_row=1, v_col=32, blayout=row_major, slayout=none_box, fractal=512, pad=0>) {id = 1}
     pto.tpush_to_aiv(%acc1 : !pto.tile_buf<loc=acc, dtype=i32, rows=16, cols=32, v_row=16, v_col=32, blayout=col_major, slayout=row_major, fractal=1024, pad=0>) {id = 1, split = 0}
     return
   }
@@ -105,8 +105,8 @@ module {
 // A5-LABEL: AICORE void cube_kernel(
 // A5: using Pipe0FixpipeConfig = FixpipeParams<LayoutMode_t::NZ2ND, QuantMode_t::VDEQF16, ReluPreMode::NoRelu>;
 // A5: using Pipe1FixpipeConfig = FixpipeParams<LayoutMode_t::NZ2ND, QuantMode_t::VREQ8, ReluPreMode::NoRelu>;
-// A5: Tile<TileType::Scaling, bfloat16_t, 1, 32
-// A5: Tile<TileType::Scaling, float, 1, 32
+// A5: Tile<TileType::Scaling, int64_t, 1, 32
+// A5: Tile<TileType::Scaling, uint64_t, 1, 32
 // A5: SET_QUANT_VECTOR(
 // A5-NEXT: TPUSH<{{.*}}, Pipe0FixpipeConfig>(
 // A5: SET_QUANT_VECTOR(

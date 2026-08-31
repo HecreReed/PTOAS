@@ -199,12 +199,12 @@ module {
   func.func @cube_kernel() attributes {pto.kernel_kind = #pto.kernel_kind<cube>} {
     %c0_i32 = arith.constant 0 : i32
     %c2v_import = pto.import_reserved_buffer {name = "c2v_fifo", peer_func = @vector_kernel} -> i32
-    %fp = pto.alloc_tile : !pto.tile_buf<loc=scaling, dtype=f16, rows=1, cols=32, v_row=1, v_col=32, blayout=row_major, slayout=none_box, fractal=512, pad=0>
+    %fp = pto.alloc_tile : !pto.tile_buf<loc=scaling, dtype=ui64, rows=1, cols=32, v_row=1, v_col=32, blayout=row_major, slayout=none_box, fractal=512, pad=0>
     pto.aic_initialize_pipe {id = 0, dir_mask = 1, slot_size = 256, nosplit = true,
       acc_push_epilogue = #pto.acc_push_epilogue<layout = nz2nd, quant = req8_vec, relu = no_relu>}
       (c2v_consumer_buf = %c2v_import : i32, v2c_consumer_buf = %c0_i32 : i32)
     %acc = pto.alloc_tile : !pto.tile_buf<loc=acc, dtype=f32, rows=16, cols=16, v_row=16, v_col=16, blayout=col_major, slayout=row_major, fractal=1024, pad=0>
-    pto.set_quant_vector(%fp : !pto.tile_buf<loc=scaling, dtype=f16, rows=1, cols=32, v_row=1, v_col=32, blayout=row_major, slayout=none_box, fractal=512, pad=0>) {id = 0}
+    pto.set_quant_vector(%fp : !pto.tile_buf<loc=scaling, dtype=ui64, rows=1, cols=32, v_row=1, v_col=32, blayout=row_major, slayout=none_box, fractal=512, pad=0>) {id = 0}
     pto.tpush_to_aiv(%acc : !pto.tile_buf<loc=acc, dtype=f32, rows=16, cols=16, v_row=16, v_col=16, blayout=col_major, slayout=row_major, fractal=1024, pad=0>) {id = 0, split = 0}
     return
   }
@@ -259,12 +259,12 @@ module {
   func.func @cube_kernel() attributes {pto.kernel_kind = #pto.kernel_kind<cube>} {
     %c0_i32 = arith.constant 0 : i32
     %c2v_import = pto.import_reserved_buffer {name = "c2v_fifo", peer_func = @vector_kernel} -> i32
-    %fp = pto.alloc_tile : !pto.tile_buf<loc=scaling, dtype=f16, rows=1, cols=32, v_row=1, v_col=32, blayout=row_major, slayout=none_box, fractal=512, pad=0>
+    %fp = pto.alloc_tile : !pto.tile_buf<loc=scaling, dtype=ui64, rows=1, cols=32, v_row=1, v_col=32, blayout=row_major, slayout=none_box, fractal=512, pad=0>
     pto.aic_initialize_pipe {id = 0, dir_mask = 1, slot_size = 256, nosplit = true,
       acc_push_epilogue = #pto.acc_push_epilogue<layout = nz2nd, quant = qf322b8_pre_vec, relu = no_relu>}
       (c2v_consumer_buf = %c2v_import : i32, v2c_consumer_buf = %c0_i32 : i32)
     %acc = pto.alloc_tile : !pto.tile_buf<loc=acc, dtype=i32, rows=16, cols=16, v_row=16, v_col=16, blayout=col_major, slayout=row_major, fractal=1024, pad=0>
-    pto.set_quant_vector(%fp : !pto.tile_buf<loc=scaling, dtype=f16, rows=1, cols=32, v_row=1, v_col=32, blayout=row_major, slayout=none_box, fractal=512, pad=0>) {id = 0}
+    pto.set_quant_vector(%fp : !pto.tile_buf<loc=scaling, dtype=ui64, rows=1, cols=32, v_row=1, v_col=32, blayout=row_major, slayout=none_box, fractal=512, pad=0>) {id = 0}
     pto.tpush_to_aiv(%acc : !pto.tile_buf<loc=acc, dtype=i32, rows=16, cols=16, v_row=16, v_col=16, blayout=col_major, slayout=row_major, fractal=1024, pad=0>) {id = 0, split = 0}
     return
   }
@@ -349,12 +349,12 @@ module {
   func.func @cube_kernel() attributes {pto.kernel_kind = #pto.kernel_kind<cube>} {
     %c0_i32 = arith.constant 0 : i32
     %c2v_import = pto.import_reserved_buffer {name = "c2v_fifo", peer_func = @vector_kernel} -> i32
-    %fp = pto.alloc_tile : !pto.tile_buf<loc=scaling, dtype=f16, rows=1, cols=32, v_row=1, v_col=32, blayout=row_major, slayout=none_box, fractal=512, pad=0>
+    %fp = pto.alloc_tile : !pto.tile_buf<loc=scaling, dtype=ui64, rows=1, cols=32, v_row=1, v_col=32, blayout=row_major, slayout=none_box, fractal=512, pad=0>
     pto.aic_initialize_pipe {id = 0, dir_mask = 1, slot_size = 512, nosplit = true,
       acc_push_epilogue = #pto.acc_push_epilogue<layout = nz2nd, quant = qs322bf16_pre_vec, relu = no_relu>}
       (c2v_consumer_buf = %c2v_import : i32, v2c_consumer_buf = %c0_i32 : i32)
     %acc = pto.alloc_tile : !pto.tile_buf<loc=acc, dtype=f32, rows=16, cols=16, v_row=16, v_col=16, blayout=col_major, slayout=row_major, fractal=1024, pad=0>
-    pto.set_quant_vector(%fp : !pto.tile_buf<loc=scaling, dtype=f16, rows=1, cols=32, v_row=1, v_col=32, blayout=row_major, slayout=none_box, fractal=512, pad=0>) {id = 0}
+    pto.set_quant_vector(%fp : !pto.tile_buf<loc=scaling, dtype=ui64, rows=1, cols=32, v_row=1, v_col=32, blayout=row_major, slayout=none_box, fractal=512, pad=0>) {id = 0}
     pto.tpush_to_aiv(%acc : !pto.tile_buf<loc=acc, dtype=f32, rows=16, cols=16, v_row=16, v_col=16, blayout=col_major, slayout=row_major, fractal=1024, pad=0>) {id = 0, split = 0}
     return
   }

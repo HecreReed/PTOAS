@@ -59,4 +59,4 @@ module {
   }
 }
 
-// CHECK: error: 'pto.set_quant_vector' op expects 'scaling_tile' element type to be f16, bf16, f32, or packed i64/ui64 on A5
+// CHECK: error: 'pto.set_quant_vector' op expects 'scaling_tile' element type to be packed i64/ui64/si64 on A5

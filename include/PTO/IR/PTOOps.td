@@ -1860,11 +1860,12 @@ def SetQuantVectorOp : PTO_Op<"set_quant_vector", [
   let description = [{
     Producer-side vector quantization configuration for fixpipe TPUSH.
     Binds a vector quant payload (scaling tile) to a logical pipe id.
-    The input tile must have loc=scaling. A5 accepts direct scaling payloads
-    in the f16/bf16/f32 family and packed 64-bit integer payloads (i64/ui64),
-    including the packed VDEQF16 format used by pto-isa. A3 consumes packed
-    64-bit integer payloads. This binding persists until overwritten by
-    another set_quant_vector with the same id.
+    The input tile must have loc=scaling and use a packed 64-bit integer
+    payload (i64/ui64/si64), including the packed VDEQF16 format used by
+    pto-isa. SET_QUANT_VECTOR passes each column directly as a hardware
+    control word; floating-point payloads are not converted to this format.
+    This binding persists until overwritten by another set_quant_vector with
+    the same id.
     Used by vector quant modes: deqf16_vec, req8_vec, qf322b8_pre_vec,
     qs322bf16_pre_vec.
   }];
