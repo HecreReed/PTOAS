@@ -30,20 +30,33 @@ public:
 
 private:
   SyncMap syncMapBefore, syncMapAfter;
+  // Set when the solver could not satisfy the event-id window; keeps codegen
+  // from emitting partial sync for some multibuffer lanes.
+  bool syncMapsFailed{false};
 
 public:
   CodeGenerator() = delete;
 
   explicit CodeGenerator(std::unique_ptr<Solver> solver)
       : options(solver->options) {
-    auto [syncBefore, syncAfter] = solver->getBeforeAfterSyncMaps();
-    syncMapBefore = std::move(syncBefore);
-    syncMapAfter = std::move(syncAfter);
+    auto beforeAfter = solver->getBeforeAfterSyncMaps();
+    if (failed(beforeAfter)) {
+      // Event-id capacity could not be satisfied: keep the maps empty so
+      // generateResultOps() fails the pass instead of emitting partial sync
+      // (see Solver::calcAllEventIds diagnostic).
+      syncMapsFailed = true;
+      funcOp = solver->funcOp;
+      funcIr = std::move(solver->funcIr);
+      return;
+    }
+    SyncBeforeAfterMap &maps = *beforeAfter;
+    syncMapBefore = std::move(maps.first);
+    syncMapAfter = std::move(maps.second);
     funcOp = solver->funcOp;
     funcIr = std::move(solver->funcIr);
   }
 
-  void generateResultOps();
+  llvm::LogicalResult generateResultOps();
 
 private:
   Operation *resolveSyncAnchor(OperationBase *opBase);

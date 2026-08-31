@@ -42,6 +42,8 @@ jobs:
           git remote add hwupstream https://github.com/hw-native-sys/PTOAS.git
           git remote add gitcode https://gitcode.com/cann/pto-as.git
           git remote add gitcodefork https://gitcode.com/hecrereed/pto-as.git
+          git config user.name 'hecrereed'
+          git config user.email '821896444@qq.com'
 
           askpass="${RUNNER_TEMP}/gitcode-askpass"
           cat > "${askpass}" <<'EOF'

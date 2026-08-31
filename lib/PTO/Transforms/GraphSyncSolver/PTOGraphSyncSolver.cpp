@@ -88,7 +88,14 @@ struct PTOGraphSyncSolverPass
     solver->solve();
 
     CodeGenerator codegen(std::move(solver));
-    codegen.generateResultOps();
+    if (failed(codegen.generateResultOps())) {
+      func.emitError(
+          "GraphSync could not materialize synchronization: event-id "
+          "capacity exhausted inside the usable window; raise "
+          "--graph-sync-solver-event-id-max or reduce multibuffer lanes");
+      signalPassFailure();
+      return;
+    }
   }
 };
 

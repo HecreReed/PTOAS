@@ -194,8 +194,14 @@ void CodeGenerator::emitSyncMap(IRRewriter &rewriter, SyncMap &syncMap,
   }
 }
 
-void CodeGenerator::generateResultOps() {
+llvm::LogicalResult CodeGenerator::generateResultOps() {
+  if (syncMapsFailed) {
+    llvm::errs() << "PTO GraphSync: cannot materialize synchronization - "
+                    "event-id capacity exhausted inside the usable window\n";
+    return failure();
+  }
   IRRewriter rewriter(funcOp.getContext());
   emitSyncMap(rewriter, syncMapBefore, /*insertAfter=*/false);
   emitSyncMap(rewriter, syncMapAfter, /*insertAfter=*/true);
+  return success();
 }
