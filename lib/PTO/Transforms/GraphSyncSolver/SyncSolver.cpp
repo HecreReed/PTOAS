@@ -1684,25 +1684,42 @@ Solver::getEventIdSolverRef(pto::PIPE pipeSrc, pto::PIPE pipeDst) {
       eventIdNumMax = std::min(eventIdNumMax, options.eventIdNumMax.value());
       eventIdNumMax = std::max<int64_t>(eventIdNumMax, 1);
     }
-    // The A5 1x1 ND-to-2xNZ TileLib path materializes the V<->S barrier with
-    // a literal event 0 (matching the SyncMacroModel reservation that the
-    // InsertSync allocator honors; design doc 6.3.1). GraphSync never runs
-    // that allocator, so when the kernel carries such an op the separately
-    // generated V/S syncs must start at event 1 to keep from aliasing the
-    // template's literal event 0 (wrong rendezvous / data race / deadlock).
+    // The A2/A3 scalar expansion and the A5 1x1 TileLib path materialize
+    // the V<->S barrier with a literal event 0 (matching the SyncMacroModel
+    // reservation that the InsertSync allocator honors; design doc 6.3.1).
+    // GraphSync never runs that allocator, so when such ops are present the
+    // separately generated V/S syncs must start at event 1 to keep from
+    // aliasing the literal event 0. Plain A5 vector dual-output windows have
+    // NO hidden event (SyncMacroModel: only A2/A3 and the A5 1x1 scalar path
+    // reserve one), so they must not shrink the usable window.
     int64_t startEventId = 0;
     if (funcOp &&
         ((pipeSrc == pto::PIPE::PIPE_V && pipeDst == pto::PIPE::PIPE_S) ||
          (pipeSrc == pto::PIPE::PIPE_S && pipeDst == pto::PIPE::PIPE_V))) {
-      bool hasNd2xNz = false;
+      const bool isA5 = options.isRegBasedArch;
+      bool needsReservedEvent0 = false;
       funcOp->walk([&](pto::TExtractOp tex) {
-        if (tex.isNdTo2xNzForm()) {
-          hasNd2xNz = true;
+        if (!tex.isNdTo2xNzForm())
+          return WalkResult::advance();
+        // Non-A5 (A2/A3) scalar expansion always emits the literal barrier.
+        if (!isA5) {
+          needsReservedEvent0 = true;
           return WalkResult::interrupt();
+        }
+        // A5: only a 1x1 destination window takes the scalar path; vector
+        // windows have no hidden event.
+        for (Value dst : tex.getDsts()) {
+          if (auto tb = dyn_cast<pto::TileBufType>(dst.getType())) {
+            auto valid = tb.getValidShape();
+            if (valid.size() == 2 && valid[0] == 1 && valid[1] == 1) {
+              needsReservedEvent0 = true;
+              return WalkResult::interrupt();
+            }
+          }
         }
         return WalkResult::advance();
       });
-      if (hasNd2xNz)
+      if (needsReservedEvent0)
         startEventId = 1;
     }
     eventIdSolver[key] =
@@ -2084,15 +2101,23 @@ void Solver::handleConflict(Occurrence *occ1, Occurrence *occ2,
   }
 }
 
-void Solver::calcAllEventIds() {
+llvm::LogicalResult Solver::calcAllEventIds() {
   for (auto &[pipes, eventIdSolver] : eventIdSolver) {
     assert(eventIdSolver != nullptr);
-
-    [[maybe_unused]] auto result =
-        eventIdSolver->shrinkEventIdMaxToEventIdNum();
-    assert(llvm::succeeded(result));
+    // shrinkEventIdMaxToEventIdNum() fails when a node cannot be satisfied
+    // inside the usable window; that must propagate instead of hitting the
+    // "still colorable" assert / handing a partial event set to codegen.
+    if (failed(eventIdSolver->shrinkEventIdMaxToEventIdNum())) {
+      eventIdSolver->debugPrint();
+      llvm::errs() << "PTO GraphSync: event-id capacity exhausted for pipe "
+                      "pair (not enough usable ids inside the window; "
+                      "consider raising --graph-sync-solver-event-id-max or "
+                      "reducing the multibuffer lane count)\n";
+      return llvm::failure();
+    }
     assert(eventIdSolver->isColorable());
   }
+  return llvm::success();
 }
 
 void Solver::collectBackwardSyncEventIds() {
@@ -2386,8 +2411,10 @@ void Solver::mergeBackwardSyncPairs(SyncMap &syncMapBefore,
   }
 }
 
-SyncBeforeAfterMap Solver::getBeforeAfterSyncMaps() {
-  calcAllEventIds();
+llvm::FailureOr<SyncBeforeAfterMap> Solver::getBeforeAfterSyncMaps() {
+  if (failed(calcAllEventIds())) {
+    return llvm::failure();
+  }
   SyncMap syncMapBefore, syncMapAfter;
   std::vector<ConflictPair *> conflictPairs;
   for (auto &conflictPair : chosenConflictedPairs) {
@@ -2501,7 +2528,7 @@ SyncBeforeAfterMap Solver::getBeforeAfterSyncMaps() {
       syncMapAfter[scopeOp].push_front(std::move(waitOp));
     }
   }
-  return std::make_pair(std::move(syncMapBefore), std::move(syncMapAfter));
+  return SyncBeforeAfterMap(std::move(syncMapBefore), std::move(syncMapAfter));
 }
 
 void Solver::processConflict(Occurrence *occ1, Occurrence *occ2,
@@ -2720,7 +2747,9 @@ llvm::LogicalResult Solver::runSolver(bool enableOpts1, bool enableOpts2) {
 
     if (enableOpts1) {
       if (options.considerOuterBackwardSyncPairs) {
-        getBeforeAfterSyncMaps();
+        if (failed(getBeforeAfterSyncMaps())) {
+          return llvm::failure();
+        }
         if (llvm::succeeded(considerOuterBackwardSyncPairs())) {
           continue;
         }

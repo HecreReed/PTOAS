@@ -165,7 +165,7 @@ public:
   void solve();
 
   // Build before/after maps of sync ops computed from chosen conflicts.
-  SyncBeforeAfterMap getBeforeAfterSyncMaps();
+  llvm::FailureOr<SyncBeforeAfterMap> getBeforeAfterSyncMaps();
 
 protected:
   void init(std::unique_ptr<IRTranslator> irTranslator) {
@@ -373,7 +373,7 @@ protected:
 
   void pickAndInsertABarrierAll();
 
-  void calcAllEventIds();
+  llvm::LogicalResult calcAllEventIds();
 
   void collectBackwardSyncEventIds();
 

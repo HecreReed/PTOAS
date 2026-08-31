@@ -44,7 +44,9 @@ using namespace pto::syncsolver;
 
 int64_t EventIdSolver::getEventIdsNum(bool dontCalcEventIds) {
   if (!dontCalcEventIds) {
-    calcEventIds();
+    if (failed(calcEventIds())) {
+      return -1;
+    }
   }
   assert(!needRecalculateEventIds);
   llvm::DenseSet<int64_t> usedEventIds;
@@ -60,15 +62,21 @@ llvm::LogicalResult EventIdSolver::shrinkEventIdMaxToEventIdNum() {
   if (needRecalculateEventIds || !actionsStack.empty() || !isColorable()) {
     return llvm::failure();
   }
-  this->eventIdsNumMax = getEventIdsNum();
-  calcEventIds();
+  int64_t usedCount = getEventIdsNum();
+  if (usedCount < 0) {
+    return llvm::failure();
+  }
+  this->eventIdsNumMax = usedCount;
+  if (failed(calcEventIds())) {
+    return llvm::failure();
+  }
   clearActionStack();
   return llvm::success();
 }
 
 bool EventIdSolver::isColorable() {
-  if (needRecalculateEventIds) {
-    calcEventIds();
+  if (needRecalculateEventIds && failed(calcEventIds())) {
+    return false;
   }
   return getEventIdsNum(/*dontCalcEventIds=*/true) <= eventIdsNumMax;
 }
@@ -276,6 +284,11 @@ EventIdSolver::getChosenEventIds(EventIdNode *node, int64_t eventIdMax) {
       }
       curEventId++;
     }
+    // The window cannot satisfy the node: return an empty vector so the
+    // failure propagates instead of handing a short id set to codegen.
+    if (static_cast<int64_t>(chosenEventIds.size()) < node->eventIdNum) {
+      return {};
+    }
   } else {
     // Reverse priority: scan from the high end down to startEventId; the
     // lower bound keeps the A5 1x1 template's literal V<->S event 0
@@ -312,6 +325,9 @@ EventIdSolver::getChosenEventIds(EventIdNode *node, int64_t eventIdMax) {
         fill++;
       }
     }
+    if (static_cast<int64_t>(chosenEventIds.size()) < node->eventIdNum) {
+      return {};
+    }
   }
   LLVM_DEBUG({
     llvm::dbgs() << "chosen-event-ids: ";
@@ -325,7 +341,7 @@ EventIdSolver::getChosenEventIds(EventIdNode *node, int64_t eventIdMax) {
   return chosenEventIds;
 }
 
-void EventIdSolver::calcEventIds() {
+llvm::LogicalResult EventIdSolver::calcEventIds() {
   auto cmp = [](const std::pair<int64_t, EventIdNode *> &a,
                 const std::pair<int64_t, EventIdNode *> &b) {
     if (a.first != b.first) {
@@ -365,13 +381,19 @@ void EventIdSolver::calcEventIds() {
   int64_t eventIdMax = 0;
   for (auto *node : llvm::reverse(orderedNodes)) {
     auto chosenEventIds = getChosenEventIds(node, eventIdMax);
-    assert(!chosenEventIds.empty());
+    if (chosenEventIds.empty()) {
+      // One node could not be satisfied: keep the invalid state flagged and
+      // propagate the failure instead of assigning a partial event set.
+      assignNeedRecalc(true);
+      return failure();
+    }
     assignEventIds(node, chosenEventIds);
     eventIdMax = std::max(eventIdMax, chosenEventIds.back());
     LLVM_DEBUG({ llvm::dbgs() << node->str(false) << '\n'; });
   }
 
   assignNeedRecalc(false);
+  return success();
 }
 
 void EventIdSolver::debugPrint() {

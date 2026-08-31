@@ -191,7 +191,7 @@ public:
   void addConflicts(ConflictPair *conflictPairSrc,
                     const std::vector<ConflictPair *> &conflictPairsDst);
 
-  void calcEventIds();
+  llvm::LogicalResult calcEventIds();
 
   void pushActionNone() { actionsStack.push(std::make_unique<ActionNone>()); }
 
