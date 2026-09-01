@@ -9037,7 +9037,8 @@ static LogicalResult verifyNdTo2xNzForm(Operation *op) {
   }
   Nd2xNzVerifyContext ctx{op, tex, srcTy, dst0Ty, dst1Ty,
                           getVerifierTargetArch(op) ==
-                              VerifierTargetArch::A5};
+                              VerifierTargetArch::A5,
+                          {}, {}, {}, {}, {}, {}, {}, {}, 0, 0};
   ctx.indices.reserve(indices.size());
   const bool nd2xNzVerificationFailed =
       failed(verifyNd2xNzBase(ctx)) ||
