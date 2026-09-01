@@ -19,6 +19,7 @@
 #define MLIR_DIALECT_PTO_TRANSFORMS_VPTOSCHEDULER_VPTOSCHEDBOUNDARY_H
 
 #include "PTO/Transforms/VPTOScheduler/VPTOSchedDAG.h"
+#include "PTO/Transforms/VPTOScheduler/VPTOSchedModel.h"
 
 #include "mlir/Support/LogicalResult.h"
 #include "llvm/ADT/ArrayRef.h"
@@ -34,7 +35,8 @@ namespace mlir::pto {
 
 enum class VPTOSchedDirection { Top, Bottom };
 
-class VPTOSchedModel;
+// These trackers include this header back (to reach VPTOSchedBoundary), so they
+// must stay forward-declared here to break the include cycle.
 class VPTOResourceTracker;
 class VPTORegPressureTracker;
 struct VPTORegPressureEvaluation;

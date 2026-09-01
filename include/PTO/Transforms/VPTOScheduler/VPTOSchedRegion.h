@@ -36,7 +36,7 @@ class Liveness;
 namespace mlir::pto {
 
 struct VPTOSchedulingCoverage {
-  std::array<unsigned, 4> classCounts{};
+  std::array<unsigned, kNumVPTOSchedulingClasses> classCounts{};
   llvm::StringMap<unsigned> boundaryReasons;
   llvm::StringMap<unsigned> unsupportedOps;
   llvm::StringMap<unsigned> unclassifiedOps;

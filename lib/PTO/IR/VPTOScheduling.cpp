@@ -22,6 +22,9 @@ using namespace mlir;
 using namespace mlir::pto;
 
 namespace {
+constexpr unsigned kBitsPerByte = 8;
+constexpr unsigned kInt64BitWidth = 64;
+
 static std::optional<PIPE> getExecutionPipe(Operation *op) {
   if (auto pipeOp = dyn_cast<OpPipeInterface>(op))
     return pipeOp.getPipe();
@@ -74,11 +77,11 @@ static std::optional<int64_t> getElementByteSize(Value pointer) {
   if (!elementType.isIntOrFloat())
     return std::nullopt;
   unsigned bitWidth = elementType.getIntOrFloatBitWidth();
-  if (bitWidth == 0 || bitWidth % 8 != 0)
+  if (bitWidth == 0 || bitWidth % kBitsPerByte != 0)
     return std::nullopt;
 
   int64_t byteSize;
-  if (llvm::MulOverflow(elementCount, static_cast<int64_t>(bitWidth / 8),
+  if (llvm::MulOverflow(elementCount, static_cast<int64_t>(bitWidth / kBitsPerByte),
                         byteSize))
     return std::nullopt;
   return byteSize;
@@ -86,22 +89,25 @@ static std::optional<int64_t> getElementByteSize(Value pointer) {
 
 static std::optional<int64_t> getConstantOffset(Value offset) {
   APInt value;
-  if (!matchPattern(offset, m_ConstantInt(&value)) || !value.isSignedIntN(64))
+  if (!matchPattern(offset, m_ConstantInt(&value)) || !value.isSignedIntN(kInt64BitWidth))
     return std::nullopt;
   return value.getSExtValue();
 }
 
 template <typename OpTy>
 static void setStaticIndexedRange(OpTy op, VPTOMemoryAccess &access) {
-  if (access.address != op.getPtr())
+  if (access.address != op.getPtr()) {
     return;
+  }
   std::optional<int64_t> elementOffset = getConstantOffset(op.getOffset());
   std::optional<int64_t> elementByteSize = getElementByteSize(access.address);
-  if (!elementOffset || !elementByteSize)
+  if (!elementOffset || !elementByteSize) {
     return;
+  }
   int64_t byteOffset;
-  if (llvm::MulOverflow(*elementOffset, *elementByteSize, byteOffset))
+  if (llvm::MulOverflow(*elementOffset, *elementByteSize, byteOffset)) {
     return;
+  }
   access.byteOffset = byteOffset;
   access.byteSize = *elementByteSize;
 }
