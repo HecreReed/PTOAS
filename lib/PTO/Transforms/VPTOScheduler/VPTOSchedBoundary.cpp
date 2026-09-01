@@ -157,6 +157,26 @@ static LogicalResult prepayCommitWork(ArrayRef<DependencyUpdate> updates,
   }
   return success();
 }
+
+static void
+invalidateOperandPressureEvaluations(Operation *operation,
+                                     const VPTORegPressureTracker &tracker,
+                                     VPTOPressureEvaluationCache &cache) {
+  DenseSet<Value> consumedRepresentatives;
+  for (Value operand : operation->getOperands()) {
+    Value representative = tracker.getPressureRepresentative(operand);
+    if (!consumedRepresentatives.insert(representative).second) {
+      continue;
+    }
+    auto found = cache.usersByRepresentative.find(representative);
+    if (found == cache.usersByRepresentative.end()) {
+      continue;
+    }
+    for (unsigned affected : found->second) {
+      cache.valid[affected] = 0;
+    }
+  }
+}
 } // namespace
 
 VPTOSchedBoundary::VPTOSchedBoundary(const VPTOSchedDAG &dag,
@@ -404,22 +424,8 @@ LogicalResult VPTOSchedBoundary::commit(VPTOSUnit &unit, unsigned issueCycle,
     return mlir::failure();
   }
   if (direction == VPTOSchedDirection::Top) {
-    DenseSet<Value> consumedRepresentatives;
-    for (Value operand : unit.getOperation()->getOperands()) {
-      Value representative =
-          pressureTracker->getPressureRepresentative(operand);
-      if (!consumedRepresentatives.insert(representative).second) {
-        continue;
-      }
-      auto found =
-          pressureEvaluationCache->usersByRepresentative.find(representative);
-      if (found == pressureEvaluationCache->usersByRepresentative.end()) {
-        continue;
-      }
-      for (unsigned affected : found->second) {
-        pressureEvaluationCache->valid[affected] = 0;
-      }
-    }
+    invalidateOperandPressureEvaluations(unit.getOperation(), *pressureTracker,
+                                         *pressureEvaluationCache);
   }
 
   eraseAvailable(&unit);

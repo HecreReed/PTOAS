@@ -175,11 +175,11 @@ static void printCoverage(llvm::raw_ostream &os,
        << '\n';
 }
 
-static void printScheduleResult(llvm::raw_ostream &os, unsigned blockIndex,
-                                const VPTOSchedRegion &region,
-                                const VPTOScheduleResult &result,
-                                const VPTOSchedModel &model,
-                                uint64_t workUnits) {
+static void printScheduleSummary(llvm::raw_ostream &os, unsigned blockIndex,
+                                 const VPTOSchedRegion &region,
+                                 const VPTOScheduleResult &result,
+                                 const VPTOSchedModel &model,
+                                 uint64_t workUnits) {
   os << "vpto-scheduler: schedule-result block=" << blockIndex
      << " region=" << region.index << " nodes=" << result.entries.size()
      << " work-units=" << workUnits
@@ -189,6 +189,10 @@ static void printScheduleResult(llvm::raw_ostream &os, unsigned blockIndex,
         });
   printPressureVector(os, "peak", result.peakPressure, model);
   os << '\n';
+}
+
+static void printScheduleEntries(llvm::raw_ostream &os,
+                                 const VPTOScheduleResult &result) {
   for (auto [position, entry] : llvm::enumerate(result.entries)) {
     os << "vpto-scheduler: result-position=" << position
        << " node=" << entry.unit->getId()
@@ -201,6 +205,55 @@ static void printScheduleResult(llvm::raw_ostream &os, unsigned blockIndex,
        << " recovery-idle=" << (entry.recoveryDrivenIdle ? "true" : "false")
        << '\n';
   }
+}
+
+static void printClosureDiagnostic(llvm::raw_ostream &os,
+                                   const VPTOScheduleDiagnostic &diagnostic,
+                                   const VPTOSchedModel &model) {
+  if (!diagnostic.closurePressureSet) {
+    os << " closure-set=none";
+    return;
+  }
+  os << " closure-set=" << *diagnostic.closurePressureSet
+     << " closure-bundle={";
+  llvm::interleaveComma(diagnostic.closureBundleOriginalIndices, os);
+  os << "} closure-target=" << diagnostic.closureTargetOriginalIndex.value_or(0)
+     << " closure-size=" << diagnostic.closureGroupSize
+     << " closure-steps=" << diagnostic.closureSteps
+     << " closure-support=" << diagnostic.closureSupportPressure
+     << " closure-effective-end=" << diagnostic.closureEffectiveEnd
+     << " closure-net-relief=" << diagnostic.closureNetRelief;
+  printPressureVector(os, "closure-peak", diagnostic.closurePeak, model);
+  printPressureVector(os, "closure-end", diagnostic.closureEnd, model);
+}
+
+static void printCandidateDiagnostic(llvm::raw_ostream &os,
+                                     const VPTOScheduleDiagnostic &diagnostic,
+                                     const VPTOSchedModel &model) {
+  os << " selected-cp=" << diagnostic.selectedCriticalPath
+     << " selected-closure="
+     << (diagnostic.selectedAdvancesClosure ? "true" : "false");
+  printPressureVector(os, "selected-projected",
+                      diagnostic.selectedProjectedPressure, model);
+  printPressureVector(os, "selected-released",
+                      diagnostic.selectedReleasedPressure, model);
+  if (!diagnostic.safeAlternativeOriginalIndex) {
+    os << " safe-alt=none";
+    return;
+  }
+  os << " safe-alt=" << *diagnostic.safeAlternativeOriginalIndex
+     << " safe-alt-cp=" << diagnostic.safeAlternativeCriticalPath
+     << " safe-alt-opens-frontier="
+     << (diagnostic.safeAlternativeOpensPressureFrontier ? "true" : "false");
+  printPressureVector(os, "safe-alt-projected",
+                      diagnostic.safeAlternativeProjectedPressure, model);
+  printPressureVector(os, "safe-alt-released",
+                      diagnostic.safeAlternativeReleasedPressure, model);
+}
+
+static void printScheduleDiagnostics(llvm::raw_ostream &os,
+                                     const VPTOScheduleResult &result,
+                                     const VPTOSchedModel &model) {
   for (auto [position, diagnosticValue] :
        llvm::enumerate(result.diagnostics)) {
     if (!diagnosticValue) {
@@ -210,44 +263,20 @@ static void printScheduleResult(llvm::raw_ostream &os, unsigned blockIndex,
     os << "vpto-scheduler: decision-detail position=" << position
        << " candidates=" << diagnostic.candidateCount;
     printPressureVector(os, "current", diagnostic.currentPressure, model);
-    if (diagnostic.closurePressureSet) {
-      os << " closure-set=" << *diagnostic.closurePressureSet
-         << " closure-bundle={";
-      llvm::interleaveComma(diagnostic.closureBundleOriginalIndices, os);
-      os << "} closure-target="
-         << diagnostic.closureTargetOriginalIndex.value_or(0)
-         << " closure-size=" << diagnostic.closureGroupSize
-         << " closure-steps=" << diagnostic.closureSteps
-         << " closure-support=" << diagnostic.closureSupportPressure
-         << " closure-effective-end=" << diagnostic.closureEffectiveEnd
-         << " closure-net-relief=" << diagnostic.closureNetRelief;
-      printPressureVector(os, "closure-peak", diagnostic.closurePeak, model);
-      printPressureVector(os, "closure-end", diagnostic.closureEnd, model);
-    } else {
-      os << " closure-set=none";
-    }
-    os << " selected-cp=" << diagnostic.selectedCriticalPath
-       << " selected-closure="
-       << (diagnostic.selectedAdvancesClosure ? "true" : "false");
-    printPressureVector(os, "selected-projected",
-                        diagnostic.selectedProjectedPressure, model);
-    printPressureVector(os, "selected-released",
-                        diagnostic.selectedReleasedPressure, model);
-    if (diagnostic.safeAlternativeOriginalIndex) {
-      os << " safe-alt=" << *diagnostic.safeAlternativeOriginalIndex
-         << " safe-alt-cp=" << diagnostic.safeAlternativeCriticalPath
-         << " safe-alt-opens-frontier="
-         << (diagnostic.safeAlternativeOpensPressureFrontier ? "true"
-                                                             : "false");
-      printPressureVector(os, "safe-alt-projected",
-                          diagnostic.safeAlternativeProjectedPressure, model);
-      printPressureVector(os, "safe-alt-released",
-                          diagnostic.safeAlternativeReleasedPressure, model);
-    } else {
-      os << " safe-alt=none";
-    }
+    printClosureDiagnostic(os, diagnostic, model);
+    printCandidateDiagnostic(os, diagnostic, model);
     os << '\n';
   }
+}
+
+static void printScheduleResult(llvm::raw_ostream &os, unsigned blockIndex,
+                                const VPTOSchedRegion &region,
+                                const VPTOScheduleResult &result,
+                                const VPTOSchedModel &model,
+                                uint64_t workUnits) {
+  printScheduleSummary(os, blockIndex, region, result, model, workUnits);
+  printScheduleEntries(os, result);
+  printScheduleDiagnostics(os, result, model);
 }
 
 static void emitRegionFailure(func::FuncOp func, unsigned blockIndex,
@@ -352,6 +381,87 @@ static void scheduleRegion(func::FuncOp func, llvm::raw_ostream &os,
   }
 }
 
+class FunctionSchedulerRunner {
+public:
+  FunctionSchedulerRunner(func::FuncOp func, llvm::raw_ostream &os,
+                          const VPTOSchedModel &model, StringRef mode,
+                          bool trace)
+      : func(func), os(os), model(model), mode(mode), trace(trace),
+        liveness(func) {}
+
+  void run(ArrayRef<Operation *> vecScopes) {
+    for (Operation *vecScope : vecScopes) {
+      processRegion(vecScope->getRegion(0));
+    }
+  }
+
+  const VPTOSchedulingCoverage &getCoverage() const { return coverage; }
+
+private:
+  void processRegion(Region &parentRegion);
+  void processBlock(Block &block);
+  void processSchedulingRegion(unsigned currentBlockIndex,
+                               const VPTOSchedRegion &region);
+
+  func::FuncOp func;
+  llvm::raw_ostream &os;
+  const VPTOSchedModel &model;
+  StringRef mode;
+  bool trace;
+  VPTOSchedulingCoverage coverage;
+  Liveness liveness;
+  unsigned blockIndex = 0;
+};
+
+void FunctionSchedulerRunner::processSchedulingRegion(
+    unsigned currentBlockIndex, const VPTOSchedRegion &region) {
+  VPTOSchedulerLimits limits;
+  VPTOSchedulingBudget schedulingBudget(limits.maxWorkUnits);
+  VPTOScheduleFailure failure;
+  VPTOSchedDAGBuilder dagBuilder(&model, limits, schedulingBudget);
+  FailureOr<std::unique_ptr<VPTOSchedDAG>> dag =
+      dagBuilder.build(region, failure);
+  if (failed(dag)) {
+    emitRegionFailure(func, currentBlockIndex, region, failure);
+    return;
+  }
+  if (mode == "analyze" || trace) {
+    VPTOSchedulingBudget reportBudget(limits.maxWorkUnits);
+    printRegionReport(os, region, **dag, model, reportBudget);
+  }
+  if (mode != "analyze") {
+    scheduleRegion(func, os, currentBlockIndex, region, **dag, model, limits,
+                   schedulingBudget, trace);
+  }
+}
+
+void FunctionSchedulerRunner::processBlock(Block &block) {
+  unsigned currentBlockIndex = blockIndex++;
+  VPTOSchedRegionBuilder regionBuilder(&coverage, &liveness);
+  SmallVector<VPTOSchedRegion> regions = regionBuilder.build(block);
+  if (mode == "analyze" || trace) {
+    os << "vpto-scheduler: block=" << currentBlockIndex
+       << " regions=" << regions.size() << '\n';
+  }
+  for (const VPTOSchedRegion &region : regions) {
+    processSchedulingRegion(currentBlockIndex, region);
+  }
+  for (Operation &op : block) {
+    if (isa<VecScopeOp, StrictVecScopeOp>(op)) {
+      continue;
+    }
+    for (Region &nestedRegion : op.getRegions()) {
+      processRegion(nestedRegion);
+    }
+  }
+}
+
+void FunctionSchedulerRunner::processRegion(Region &parentRegion) {
+  for (Block &block : parentRegion) {
+    processBlock(block);
+  }
+}
+
 static void runFunction(func::FuncOp func, llvm::raw_ostream &os,
                         const VPTOSchedModel &model, StringRef mode,
                         bool trace) {
@@ -370,55 +480,10 @@ static void runFunction(func::FuncOp func, llvm::raw_ostream &os,
     os << "vpto-scheduler: function=" << func.getSymName() << " mode=" << mode
        << " target=" << machine.target << " model=" << machine.version << '\n';
   }
-
-  VPTOSchedulingCoverage coverage;
-  Liveness liveness(func);
-  unsigned blockIndex = 0;
-  std::function<void(Region &)> processRegion = [&](Region &parentRegion) {
-    for (Block &block : parentRegion) {
-      unsigned currentBlockIndex = blockIndex++;
-      VPTOSchedRegionBuilder regionBuilder(&coverage, &liveness);
-      SmallVector<VPTOSchedRegion> regions = regionBuilder.build(block);
-      if (mode == "analyze" || trace) {
-        os << "vpto-scheduler: block=" << currentBlockIndex
-           << " regions=" << regions.size() << '\n';
-      }
-      for (const VPTOSchedRegion &region : regions) {
-        VPTOSchedulerLimits limits;
-        VPTOSchedulingBudget schedulingBudget(limits.maxWorkUnits);
-        VPTOScheduleFailure failure;
-        VPTOSchedDAGBuilder dagBuilder(&model, limits, schedulingBudget);
-        FailureOr<std::unique_ptr<VPTOSchedDAG>> dag =
-            dagBuilder.build(region, failure);
-        if (failed(dag)) {
-          emitRegionFailure(func, currentBlockIndex, region, failure);
-          continue;
-        }
-        if (mode == "analyze" || trace) {
-          VPTOSchedulingBudget reportBudget(limits.maxWorkUnits);
-          printRegionReport(os, region, **dag, model, reportBudget);
-        }
-        if (mode == "analyze") {
-          continue;
-        }
-        scheduleRegion(func, os, currentBlockIndex, region, **dag, model,
-                       limits, schedulingBudget, trace);
-      }
-      for (Operation &op : block) {
-        if (isa<VecScopeOp, StrictVecScopeOp>(op)) {
-          continue;
-        }
-        for (Region &nestedRegion : op.getRegions()) {
-          processRegion(nestedRegion);
-        }
-      }
-    }
-  };
-  for (Operation *vecScope : vecScopes) {
-    processRegion(vecScope->getRegion(0));
-  }
+  FunctionSchedulerRunner runner(func, os, model, mode, trace);
+  runner.run(vecScopes);
   if (mode == "analyze" || trace) {
-    printCoverage(os, coverage);
+    printCoverage(os, runner.getCoverage());
   }
 }
 

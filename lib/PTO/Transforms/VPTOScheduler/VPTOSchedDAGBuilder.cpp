@@ -122,6 +122,11 @@ struct ResolvedMemoryAccess {
   std::optional<PTOAddressExpr> addressExpression;
 };
 
+struct FrontierAccess {
+  VPTOSUnit *unit = nullptr;
+  ResolvedMemoryAccess access;
+};
+
 static std::optional<int64_t> getConstantInteger(Value value) {
   IntegerAttr constant;
   bool invalidConstant = !value ||
@@ -133,8 +138,44 @@ static std::optional<int64_t> getConstantInteger(Value value) {
   return constant.getValue().getSExtValue();
 }
 
+static std::optional<ConstantIntRanges> getIntegerRanges(Value value,
+                                                         unsigned depth = 0);
+
 static std::optional<ConstantIntRanges>
-getIntegerRanges(Value value, unsigned depth = 0) {
+getLoopInductionRange(BlockArgument argument, unsigned bitWidth) {
+  auto forOp = dyn_cast_or_null<scf::ForOp>(argument.getOwner()->getParentOp());
+  bool isLoopInduction = forOp && forOp.getInductionVar() == argument;
+  if (!isLoopInduction) {
+    return std::nullopt;
+  }
+  std::optional<int64_t> lower = getConstantIntValue(forOp.getLowerBound());
+  std::optional<int64_t> step = getConstantIntValue(forOp.getStep());
+  if (!lower || !step || *lower < 0 || *step <= 0) {
+    return std::nullopt;
+  }
+  APInt lowerBound(bitWidth, static_cast<uint64_t>(*lower),
+                   /*isSigned=*/true);
+  return ConstantIntRanges::fromSigned(lowerBound,
+                                       APInt::getSignedMaxValue(bitWidth));
+}
+
+static std::optional<SmallVector<ConstantIntRanges>>
+getOperandRanges(Operation &operation, unsigned depth) {
+  SmallVector<ConstantIntRanges> ranges;
+  ranges.reserve(operation.getNumOperands());
+  for (Value operand : operation.getOperands()) {
+    std::optional<ConstantIntRanges> range =
+        getIntegerRanges(operand, depth + 1);
+    if (!range) {
+      return std::nullopt;
+    }
+    ranges.push_back(std::move(*range));
+  }
+  return ranges;
+}
+
+static std::optional<ConstantIntRanges> getIntegerRanges(Value value,
+                                                         unsigned depth) {
   constexpr unsigned maxDepth = 32;
   if (!value || depth > maxDepth) {
     return std::nullopt;
@@ -143,51 +184,26 @@ getIntegerRanges(Value value, unsigned depth = 0) {
   if (matchPattern(value, m_Constant(&constant))) {
     return ConstantIntRanges::constant(constant.getValue());
   }
-
-  unsigned bitWidth =
-      ConstantIntRanges::getStorageBitwidth(value.getType());
+  unsigned bitWidth = ConstantIntRanges::getStorageBitwidth(value.getType());
   if (bitWidth == 0) {
     return std::nullopt;
   }
-  if (auto blockArgument = dyn_cast<BlockArgument>(value)) {
-    auto forOp = dyn_cast_or_null<scf::ForOp>(
-        blockArgument.getOwner()->getParentOp());
-    bool invalidLoopArgument = !forOp || forOp.getInductionVar() != value;
-    if (invalidLoopArgument) {
-      return std::nullopt;
-    }
-    std::optional<int64_t> lower =
-        getConstantIntValue(forOp.getLowerBound());
-    std::optional<int64_t> step = getConstantIntValue(forOp.getStep());
-    if (!lower || !step || *lower < 0 || *step <= 0) {
-      return std::nullopt;
-    }
-    APInt lowerBound(bitWidth, static_cast<uint64_t>(*lower),
-                     /*isSigned=*/true);
-    return ConstantIntRanges::fromSigned(
-        lowerBound, APInt::getSignedMaxValue(bitWidth));
+  if (auto argument = dyn_cast<BlockArgument>(value)) {
+    return getLoopInductionRange(argument, bitWidth);
   }
-
   Operation *definingOp = value.getDefiningOp();
   auto rangeInterface = dyn_cast_or_null<InferIntRangeInterface>(definingOp);
   if (!rangeInterface) {
     return std::nullopt;
   }
-  SmallVector<ConstantIntRanges> operandRanges;
-  operandRanges.reserve(definingOp->getNumOperands());
-  for (Value operand : definingOp->getOperands()) {
-    std::optional<ConstantIntRanges> operandRange =
-        getIntegerRanges(operand, depth + 1);
-    if (!operandRange) {
-      return std::nullopt;
-    }
-    operandRanges.push_back(std::move(*operandRange));
+  std::optional<SmallVector<ConstantIntRanges>> ranges =
+      getOperandRanges(*definingOp, depth);
+  if (!ranges) {
+    return std::nullopt;
   }
-
   std::optional<ConstantIntRanges> result;
   rangeInterface.inferResultRanges(
-      operandRanges,
-      [&](Value resultValue, const ConstantIntRanges &range) {
+      *ranges, [&](Value resultValue, const ConstantIntRanges &range) {
         if (resultValue == value) {
           result = range;
         }
@@ -354,6 +370,53 @@ getExactByteDifference(const ResolvedMemoryAccess &from,
 /// Resolve a conservative byte-address range for pointer-producing operations
 /// explicit at the VPTO scheduling boundary. Unknown transforms and possible
 /// integer overflow deliberately fall back to may-alias.
+static std::optional<IntegerRange>
+addDisplacement(int64_t address, const IntegerRange &displacement) {
+  IntegerRange result;
+  if (llvm::AddOverflow(address, displacement.lowerInclusive,
+                        result.lowerInclusive) ||
+      llvm::AddOverflow(address, displacement.upperInclusive,
+                        result.upperInclusive)) {
+    return std::nullopt;
+  }
+  return result;
+}
+
+static std::optional<int64_t> getAddPtrElementByteSize(AddPtrOp addPtr) {
+  auto pointerType = dyn_cast<PtrType>(addPtr.getPtr().getType());
+  if (!pointerType) {
+    return std::nullopt;
+  }
+  Type elementType = pointerType.getElementType();
+  bool invalidElementType = !elementType.isIntOrFloat() ||
+                            elementType.getIntOrFloatBitWidth() % 8 != 0;
+  if (invalidElementType) {
+    return std::nullopt;
+  }
+  return static_cast<int64_t>(elementType.getIntOrFloatBitWidth() / 8);
+}
+
+static LogicalResult accumulateAddPtrDisplacement(AddPtrOp addPtr,
+                                                  IntegerRange &displacement) {
+  std::optional<IntegerRange> elementOffset =
+      getIntegerRange(addPtr.getOffset());
+  std::optional<int64_t> elementByteSize = getAddPtrElementByteSize(addPtr);
+  if (!elementOffset || !elementByteSize) {
+    return failure();
+  }
+  int64_t minimumByteOffset = 0;
+  int64_t maximumByteOffset = 0;
+  return failure(
+      llvm::MulOverflow(elementOffset->lowerInclusive, *elementByteSize,
+                        minimumByteOffset) ||
+      llvm::MulOverflow(elementOffset->upperInclusive, *elementByteSize,
+                        maximumByteOffset) ||
+      llvm::AddOverflow(displacement.lowerInclusive, minimumByteOffset,
+                        displacement.lowerInclusive) ||
+      llvm::AddOverflow(displacement.upperInclusive, maximumByteOffset,
+                        displacement.upperInclusive));
+}
+
 static std::optional<IntegerRange> getPointerAddressRange(Value value) {
   SmallPtrSet<Operation *, 8> visited;
   IntegerRange displacement;
@@ -364,14 +427,7 @@ static std::optional<IntegerRange> getPointerAddressRange(Value value) {
     if (auto cast = dyn_cast<CastPtrOp>(definingOp)) {
       Value input = cast.getInput();
       if (std::optional<int64_t> address = getConstantInteger(input)) {
-        IntegerRange absoluteAddress;
-        if (llvm::AddOverflow(*address, displacement.lowerInclusive,
-                              absoluteAddress.lowerInclusive) ||
-            llvm::AddOverflow(*address, displacement.upperInclusive,
-                              absoluteAddress.upperInclusive)) {
-          return std::nullopt;
-        }
-        return absoluteAddress;
+        return addDisplacement(*address, displacement);
       }
       if (!isa<PtrType>(input.getType())) {
         return std::nullopt;
@@ -384,41 +440,10 @@ static std::optional<IntegerRange> getPointerAddressRange(Value value) {
       if (!address) {
         return std::nullopt;
       }
-      IntegerRange absoluteAddress;
-      if (llvm::AddOverflow(*address, displacement.lowerInclusive,
-                            absoluteAddress.lowerInclusive) ||
-          llvm::AddOverflow(*address, displacement.upperInclusive,
-                            absoluteAddress.upperInclusive)) {
-        return std::nullopt;
-      }
-      return absoluteAddress;
+      return addDisplacement(*address, displacement);
     }
     if (auto addPtr = dyn_cast<AddPtrOp>(definingOp)) {
-      std::optional<IntegerRange> elementOffset =
-          getIntegerRange(addPtr.getOffset());
-      auto pointerType = dyn_cast<PtrType>(addPtr.getPtr().getType());
-      if (!elementOffset || !pointerType) {
-        return std::nullopt;
-      }
-      Type elementType = pointerType.getElementType();
-      bool invalidElementType = !elementType.isIntOrFloat() ||
-                                elementType.getIntOrFloatBitWidth() % 8 != 0;
-      if (invalidElementType) {
-        return std::nullopt;
-      }
-      int64_t minimumByteOffset;
-      int64_t maximumByteOffset;
-      int64_t elementByteSize =
-          static_cast<int64_t>(elementType.getIntOrFloatBitWidth() / 8);
-      if (llvm::MulOverflow(
-              elementOffset->lowerInclusive, elementByteSize,
-              minimumByteOffset) ||
-          llvm::MulOverflow(elementOffset->upperInclusive, elementByteSize,
-                            maximumByteOffset) ||
-          llvm::AddOverflow(displacement.lowerInclusive, minimumByteOffset,
-                            displacement.lowerInclusive) ||
-          llvm::AddOverflow(displacement.upperInclusive, maximumByteOffset,
-                            displacement.upperInclusive)) {
+      if (failed(accumulateAddPtrDisplacement(addPtr, displacement))) {
         return std::nullopt;
       }
       value = addPtr.getPtr();
@@ -443,6 +468,64 @@ static Value getAliasRoot(Value value) {
   return value;
 }
 
+static const PTOAddressExpr *
+findUniqueAddressExpression(Value address,
+                            ArrayRef<PTOAddressExpr> expressions) {
+  const PTOAddressExpr *matching = nullptr;
+  for (const PTOAddressExpr &expression : expressions) {
+    if (expression.currentBase != address) {
+      continue;
+    }
+    if (matching) {
+      return nullptr;
+    }
+    matching = &expression;
+  }
+  return matching;
+}
+
+static void resolveAbsoluteByteRange(ResolvedMemoryAccess &access) {
+  std::optional<IntegerRange> pointerRange =
+      getPointerAddressRange(access.semantics.address);
+  if (!pointerRange || !access.semantics.byteOffset) {
+    return;
+  }
+  IntegerRange byteRange;
+  bool overflow =
+      llvm::AddOverflow(pointerRange->lowerInclusive,
+                        *access.semantics.byteOffset,
+                        byteRange.lowerInclusive) ||
+      llvm::AddOverflow(pointerRange->upperInclusive,
+                        *access.semantics.byteOffset, byteRange.upperInclusive);
+  if (overflow) {
+    return;
+  }
+  access.absoluteByteRange = byteRange;
+  if (byteRange.lowerInclusive == byteRange.upperInclusive) {
+    access.absoluteByteOffset = byteRange.lowerInclusive;
+  }
+}
+
+static ResolvedMemoryAccess
+resolveMemoryAccess(const VPTOMemoryAccess &memoryAccess,
+                    ArrayRef<PTOAddressExpr> addressExpressions) {
+  ResolvedMemoryAccess access{
+      memoryAccess, {}, std::nullopt, std::nullopt, std::nullopt};
+  if (!access.semantics.address) {
+    return access;
+  }
+  if (const PTOAddressExpr *expression = findUniqueAddressExpression(
+          access.semantics.address, addressExpressions)) {
+    access.addressExpression = *expression;
+  }
+  resolveAbsoluteByteRange(access);
+  access.aliasRoot = getAliasRoot(access.semantics.address);
+  if (access.aliasRoot != access.semantics.address) {
+    access.semantics.byteOffset.reset();
+  }
+  return access;
+}
+
 static SmallVector<ResolvedMemoryAccess>
 resolveMemoryAccesses(Operation *operation,
                       const VPTOSchedulingSemantics &semantics,
@@ -457,100 +540,91 @@ resolveMemoryAccesses(Operation *operation,
   SmallVector<ResolvedMemoryAccess> accesses;
   accesses.reserve(semantics.memoryAccesses.size());
   for (const VPTOMemoryAccess &memoryAccess : semantics.memoryAccesses) {
-    ResolvedMemoryAccess access{memoryAccess, {}, std::nullopt, std::nullopt,
-                                std::nullopt};
-    if (access.semantics.address) {
-      const PTOAddressExpr *matchingExpression = nullptr;
-      for (const PTOAddressExpr &expression : addressExpressions) {
-        if (expression.currentBase != access.semantics.address) {
-          continue;
-        }
-        matchingExpression = matchingExpression ? nullptr : &expression;
-        if (!matchingExpression) {
-          break;
-        }
-      }
-      if (matchingExpression) {
-        access.addressExpression = *matchingExpression;
-      }
-      std::optional<IntegerRange> pointerRange =
-          getPointerAddressRange(access.semantics.address);
-      if (pointerRange && access.semantics.byteOffset) {
-        IntegerRange byteRange;
-        if (!llvm::AddOverflow(pointerRange->lowerInclusive,
-                               *access.semantics.byteOffset,
-                               byteRange.lowerInclusive) &&
-            !llvm::AddOverflow(pointerRange->upperInclusive,
-                               *access.semantics.byteOffset,
-                               byteRange.upperInclusive)) {
-          access.absoluteByteRange = byteRange;
-          if (byteRange.lowerInclusive == byteRange.upperInclusive) {
-            access.absoluteByteOffset = byteRange.lowerInclusive;
-          }
-        }
-      }
-      access.aliasRoot = getAliasRoot(access.semantics.address);
-      if (access.aliasRoot != access.semantics.address) {
-        access.semantics.byteOffset.reset();
-      }
-    }
-    accesses.push_back(std::move(access));
+    accesses.push_back(resolveMemoryAccess(memoryAccess, addressExpressions));
   }
   return accesses;
 }
 
+static std::optional<bool>
+getExactDifferenceOverlap(const ResolvedMemoryAccess &lhs,
+                          const ResolvedMemoryAccess &rhs) {
+  bool hasPositiveSizes = lhs.semantics.byteSize &&
+                          *lhs.semantics.byteSize > 0 &&
+                          rhs.semantics.byteSize && *rhs.semantics.byteSize > 0;
+  if (!hasPositiveSizes) {
+    return std::nullopt;
+  }
+  std::optional<int64_t> rhsBegin = getExactByteDifference(lhs, rhs);
+  int64_t rhsEnd = 0;
+  if (!rhsBegin ||
+      llvm::AddOverflow(*rhsBegin, *rhs.semantics.byteSize, rhsEnd)) {
+    return std::nullopt;
+  }
+  return *rhsBegin < *lhs.semantics.byteSize && rhsEnd > 0;
+}
+
+static bool hasDisjointAbsoluteRanges(const ResolvedMemoryAccess &lhs,
+                                      const ResolvedMemoryAccess &rhs) {
+  if (!lhs.absoluteByteRange || !lhs.semantics.byteSize ||
+      !rhs.absoluteByteRange || !rhs.semantics.byteSize) {
+    return false;
+  }
+  int64_t lhsLatestEnd = 0;
+  int64_t rhsLatestEnd = 0;
+  bool overflow = llvm::AddOverflow(lhs.absoluteByteRange->upperInclusive,
+                                    *lhs.semantics.byteSize, lhsLatestEnd) ||
+                  llvm::AddOverflow(rhs.absoluteByteRange->upperInclusive,
+                                    *rhs.semantics.byteSize, rhsLatestEnd);
+  return !overflow && (lhsLatestEnd <= rhs.absoluteByteRange->lowerInclusive ||
+                       rhsLatestEnd <= lhs.absoluteByteRange->lowerInclusive);
+}
+
+static std::optional<bool> getOffsetOverlap(std::optional<int64_t> lhsOffset,
+                                            std::optional<int64_t> lhsSize,
+                                            std::optional<int64_t> rhsOffset,
+                                            std::optional<int64_t> rhsSize) {
+  if (!lhsOffset || !lhsSize || !rhsOffset || !rhsSize) {
+    return std::nullopt;
+  }
+  int64_t lhsEnd = 0;
+  int64_t rhsEnd = 0;
+  bool overflow = llvm::AddOverflow(*lhsOffset, *lhsSize, lhsEnd) ||
+                  llvm::AddOverflow(*rhsOffset, *rhsSize, rhsEnd);
+  if (overflow) {
+    return std::nullopt;
+  }
+  return *lhsOffset < rhsEnd && *rhsOffset < lhsEnd;
+}
+
 static bool mayAlias(const ResolvedMemoryAccess &lhs,
                      const ResolvedMemoryAccess &rhs) {
-  if (lhs.semantics.addressSpace && rhs.semantics.addressSpace &&
-      lhs.semantics.addressSpace != rhs.semantics.addressSpace)
+  bool differentAddressSpaces =
+      lhs.semantics.addressSpace && rhs.semantics.addressSpace &&
+      lhs.semantics.addressSpace != rhs.semantics.addressSpace;
+  if (differentAddressSpaces) {
     return false;
-  if (!lhs.semantics.address || !rhs.semantics.address)
+  }
+  if (!lhs.semantics.address || !rhs.semantics.address) {
     return true;
-  if (lhs.semantics.byteSize && *lhs.semantics.byteSize > 0 &&
-      rhs.semantics.byteSize && *rhs.semantics.byteSize > 0) {
-    if (std::optional<int64_t> rhsBegin =
-            getExactByteDifference(lhs, rhs)) {
-      int64_t rhsEnd;
-      if (!llvm::AddOverflow(*rhsBegin, *rhs.semantics.byteSize, rhsEnd)) {
-        return *rhsBegin < *lhs.semantics.byteSize && rhsEnd > 0;
-      }
+  }
+  if (std::optional<bool> overlap = getExactDifferenceOverlap(lhs, rhs)) {
+    return *overlap;
+  }
+  if (hasDisjointAbsoluteRanges(lhs, rhs)) {
+    return false;
+  }
+  if (std::optional<bool> overlap =
+          getOffsetOverlap(lhs.absoluteByteOffset, lhs.semantics.byteSize,
+                           rhs.absoluteByteOffset, rhs.semantics.byteSize)) {
+    return *overlap;
+  }
+  bool hasSameAliasRoot = lhs.aliasRoot == rhs.aliasRoot;
+  if (hasSameAliasRoot) {
+    if (std::optional<bool> overlap = getOffsetOverlap(
+            lhs.semantics.byteOffset, lhs.semantics.byteSize,
+            rhs.semantics.byteOffset, rhs.semantics.byteSize)) {
+      return *overlap;
     }
-  }
-  if (lhs.absoluteByteRange && lhs.semantics.byteSize &&
-      rhs.absoluteByteRange && rhs.semantics.byteSize) {
-    int64_t lhsLatestEnd;
-    int64_t rhsLatestEnd;
-    if (!llvm::AddOverflow(lhs.absoluteByteRange->upperInclusive,
-                           *lhs.semantics.byteSize, lhsLatestEnd) &&
-        !llvm::AddOverflow(rhs.absoluteByteRange->upperInclusive,
-                           *rhs.semantics.byteSize, rhsLatestEnd) &&
-        (lhsLatestEnd <= rhs.absoluteByteRange->lowerInclusive ||
-         rhsLatestEnd <= lhs.absoluteByteRange->lowerInclusive)) {
-      return false;
-    }
-  }
-  if (lhs.absoluteByteOffset && lhs.semantics.byteSize &&
-      rhs.absoluteByteOffset && rhs.semantics.byteSize) {
-    int64_t lhsEnd;
-    int64_t rhsEnd;
-    if (!llvm::AddOverflow(*lhs.absoluteByteOffset, *lhs.semantics.byteSize,
-                           lhsEnd) &&
-        !llvm::AddOverflow(*rhs.absoluteByteOffset, *rhs.semantics.byteSize,
-                           rhsEnd))
-      return *lhs.absoluteByteOffset < rhsEnd &&
-             *rhs.absoluteByteOffset < lhsEnd;
-  }
-  if (lhs.aliasRoot == rhs.aliasRoot && lhs.semantics.byteOffset &&
-      lhs.semantics.byteSize && rhs.semantics.byteOffset &&
-      rhs.semantics.byteSize) {
-    int64_t lhsEnd;
-    int64_t rhsEnd;
-    if (!llvm::AddOverflow(*lhs.semantics.byteOffset, *lhs.semantics.byteSize,
-                           lhsEnd) &&
-        !llvm::AddOverflow(*rhs.semantics.byteOffset, *rhs.semantics.byteSize,
-                           rhsEnd))
-      return *lhs.semantics.byteOffset < rhsEnd &&
-             *rhs.semantics.byteOffset < lhsEnd;
   }
   // Different roots in the same physical space remain conservative: memory
   // planning may have assigned overlapping ranges to distinct SSA roots.
@@ -674,6 +748,197 @@ static bool isPostUpdateAddress(const VPTOSUnit &producer, Value value) {
       });
 }
 
+template <typename ConsumeWork>
+static LogicalResult
+collectMemoryPredecessors(ArrayRef<FrontierAccess> frontier,
+                          ArrayRef<ResolvedMemoryAccess> currentAccesses,
+                          ConsumeWork &&consumeWork,
+                          SmallPtrSetImpl<VPTOSUnit *> &predecessors) {
+  for (const FrontierAccess &prior : frontier) {
+    for (const ResolvedMemoryAccess &current : currentAccesses) {
+      if (failed(consumeWork())) {
+        return mlir::failure();
+      }
+      if (needsMemoryOrder(prior.access, current)) {
+        predecessors.insert(prior.unit);
+        break;
+      }
+    }
+  }
+  return success();
+}
+
+template <typename ConsumeWork>
+static FailureOr<SmallVector<SmallVector<ResolvedMemoryAccess>>>
+collectResolvedMemoryAccesses(const VPTOSchedDAG &dag,
+                              PTOAddressAnalysis *addressAnalysis,
+                              ConsumeWork &&consumeWork) {
+  SmallVector<SmallVector<ResolvedMemoryAccess>> accesses;
+  accesses.reserve(dag.getUnits().size());
+  for (const std::unique_ptr<VPTOSUnit> &unit : dag.getUnits()) {
+    if (failed(consumeWork(unit->getSemantics().memoryAccesses.size()))) {
+      return failure();
+    }
+    accesses.push_back(resolveMemoryAccesses(
+        unit->getOperation(), unit->getSemantics(), addressAnalysis));
+  }
+  return accesses;
+}
+
+static void
+updateMemoryFrontier(SmallVectorImpl<FrontierAccess> &frontier, VPTOSUnit &unit,
+                     ArrayRef<ResolvedMemoryAccess> currentAccesses) {
+  llvm::erase_if(frontier, [&](const FrontierAccess &prior) {
+    return llvm::any_of(
+        currentAccesses, [&](const ResolvedMemoryAccess &current) {
+          return subsumesMemoryFrontierAccess(prior.access, current);
+        });
+  });
+  for (const ResolvedMemoryAccess &current : currentAccesses) {
+    frontier.push_back({&unit, current});
+  }
+}
+
+template <typename AddEdge>
+static LogicalResult addBarrierPredecessors(const VPTOSchedDAG &dag,
+                                            VPTOSUnit &barrier,
+                                            AddEdge &&addEdge) {
+  for (const std::unique_ptr<VPTOSUnit> &prior : dag.getUnits()) {
+    bool reachedBarrier =
+        prior->getOriginalIndex() >= barrier.getOriginalIndex();
+    if (reachedBarrier) {
+      break;
+    }
+    if (failed(addEdge(*prior, barrier, VPTOSchedEdgeKind::Sync, 0,
+                       "before scheduling barrier"))) {
+      return mlir::failure();
+    }
+  }
+  return success();
+}
+
+template <typename AddEdge>
+static LogicalResult
+addImplicitReadEdge(const VPTOSchedulingEffect &effect, VPTOSUnit &unit,
+                    llvm::StringMap<VPTOSUnit *> &lastWrite,
+                    llvm::StringMap<SmallVector<VPTOSUnit *>> &readsSinceWrite,
+                    AddEdge &&addEdge) {
+  if (VPTOSUnit *writer = lastWrite.lookup(effect.resource)) {
+    if (failed(addEdge(*writer, unit, VPTOSchedEdgeKind::Data, 1,
+                       Twine("implicit read of ") + effect.resource))) {
+      return mlir::failure();
+    }
+  }
+  readsSinceWrite[effect.resource].push_back(&unit);
+  return success();
+}
+
+template <typename AddEdge>
+static LogicalResult addImplicitWriteEdges(
+    const VPTOSchedulingEffect &effect, VPTOSUnit &unit,
+    llvm::StringMap<VPTOSUnit *> &lastWrite,
+    llvm::StringMap<SmallVector<VPTOSUnit *>> &readsSinceWrite,
+    AddEdge &&addEdge) {
+  if (VPTOSUnit *writer = lastWrite.lookup(effect.resource)) {
+    if (failed(addEdge(*writer, unit, VPTOSchedEdgeKind::Output, 0,
+                       Twine("implicit write of ") + effect.resource))) {
+      return mlir::failure();
+    }
+  }
+  for (VPTOSUnit *reader : readsSinceWrite[effect.resource]) {
+    if (failed(
+            addEdge(*reader, unit, VPTOSchedEdgeKind::Anti, 0,
+                    Twine("implicit anti-dependence on ") + effect.resource))) {
+      return mlir::failure();
+    }
+  }
+  readsSinceWrite[effect.resource].clear();
+  lastWrite[effect.resource] = &unit;
+  return success();
+}
+
+template <typename ConsumeWork>
+static FailureOr<bool>
+liveInEscapesRegion(const VPTOSchedDAG &dag, Operation &lastRegionOperation,
+                    Value value, ConsumeWork &&consumeWork) {
+  for (Operation *user : value.getUsers()) {
+    if (failed(consumeWork())) {
+      return failure();
+    }
+    if (dag.lookup(user)) {
+      continue;
+    }
+    bool isInAnotherBlock = user->getBlock() != dag.getRegion().block;
+    bool isAfterRegion =
+        !isInAnotherBlock && lastRegionOperation.isBeforeInBlock(user);
+    if (isInAnotherBlock || isAfterRegion) {
+      return true;
+    }
+  }
+  return false;
+}
+
+template <typename ConsumeWork, typename AddEdge>
+static LogicalResult
+addSSAOperandEdges(VPTOSchedDAG &dag, VPTOSUnit &unit,
+                   const VPTOSchedModel *model, Operation &lastRegionOperation,
+                   DenseSet<Value> &checkedLiveIns, ConsumeWork &&consumeWork,
+                   AddEdge &&addEdge) {
+  for (auto [operandIndex, operand] :
+       llvm::enumerate(unit.getOperation()->getOperands())) {
+    if (failed(consumeWork())) {
+      return mlir::failure();
+    }
+    Operation *definingOp = operand.getDefiningOp();
+    VPTOSUnit *predecessor = definingOp ? dag.lookup(definingOp) : nullptr;
+    if (!predecessor) {
+      dag.addLiveIn(operand);
+      if (!checkedLiveIns.insert(operand).second) {
+        continue;
+      }
+      FailureOr<bool> escapes =
+          liveInEscapesRegion(dag, lastRegionOperation, operand, consumeWork);
+      if (failed(escapes)) {
+        return mlir::failure();
+      }
+      if (*escapes) {
+        dag.addLiveOut(operand);
+      }
+      continue;
+    }
+    unsigned latency =
+        model ? model->getSchedParameters(predecessor->getOperation())
+                    .writeLatency
+              : 1;
+    std::string reason =
+        (isPostUpdateAddress(*predecessor, operand)
+             ? Twine("post-update address operand #") + Twine(operandIndex)
+             : Twine("ssa operand #") + Twine(operandIndex))
+            .str();
+    if (failed(addEdge(*predecessor, unit, latency, reason))) {
+      return mlir::failure();
+    }
+  }
+  return success();
+}
+
+template <typename ConsumeWork>
+static LogicalResult addSSAResultLiveOuts(VPTOSchedDAG &dag, VPTOSUnit &unit,
+                                          ConsumeWork &&consumeWork) {
+  for (Value result : unit.getOperation()->getResults()) {
+    for (Operation *user : result.getUsers()) {
+      if (failed(consumeWork())) {
+        return mlir::failure();
+      }
+      if (!dag.lookup(user)) {
+        dag.addLiveOut(result);
+        break;
+      }
+    }
+  }
+  return success();
+}
+
 } // namespace
 
 LogicalResult VPTOSchedDAGBuilder::buildMemoryEdges(
@@ -691,23 +956,15 @@ LogicalResult VPTOSchedDAGBuilder::buildMemoryEdges(
     }
   }
 
-  SmallVector<SmallVector<ResolvedMemoryAccess>> accesses;
-  accesses.reserve(dag.getUnits().size());
-  for (const std::unique_ptr<VPTOSUnit> &unit : dag.getUnits()) {
-    if (failed(consumeWork(failure,
-                           unit->getSemantics().memoryAccesses.size()))) {
-      return mlir::failure();
-    }
-    accesses.push_back(resolveMemoryAccesses(
-        unit->getOperation(), unit->getSemantics(), addressAnalysis.get()));
+  auto consume = [&](uint64_t amount) { return consumeWork(failure, amount); };
+  auto resolved =
+      collectResolvedMemoryAccesses(dag, addressAnalysis.get(), consume);
+  if (failed(resolved)) {
+    return mlir::failure();
   }
 
-  struct FrontierAccess {
-    VPTOSUnit *unit = nullptr;
-    ResolvedMemoryAccess access;
-  };
   SmallVector<FrontierAccess> frontier;
-  for (auto indexedAccesses : llvm::enumerate(accesses)) {
+  for (auto indexedAccesses : llvm::enumerate(*resolved)) {
     size_t unitIndex = indexedAccesses.index();
     ArrayRef<ResolvedMemoryAccess> currentAccesses = indexedAccesses.value();
     if (currentAccesses.empty()) {
@@ -715,16 +972,10 @@ LogicalResult VPTOSchedDAGBuilder::buildMemoryEdges(
     }
     VPTOSUnit *unit = dag.getUnits()[unitIndex].get();
     SmallPtrSet<VPTOSUnit *, 8> predecessors;
-    for (const FrontierAccess &prior : frontier) {
-      for (const ResolvedMemoryAccess &current : currentAccesses) {
-        if (failed(consumeWork(failure))) {
-          return mlir::failure();
-        }
-        if (needsMemoryOrder(prior.access, current)) {
-          predecessors.insert(prior.unit);
-          break;
-        }
-      }
+    auto consumeOne = [&]() { return consumeWork(failure); };
+    if (failed(collectMemoryPredecessors(frontier, currentAccesses, consumeOne,
+                                         predecessors))) {
+      return mlir::failure();
     }
     for (VPTOSUnit *predecessor : predecessors) {
       if (failed(addEdge(dag, *predecessor, *unit,
@@ -742,16 +993,7 @@ LogicalResult VPTOSchedDAGBuilder::buildMemoryEdges(
     // an edge but cannot remove the old entry: a future access may touch only
     // the uncovered portion. Read-only accesses remain side by side until a
     // later closing access safely subsumes them.
-    llvm::erase_if(frontier, [&](const FrontierAccess &prior) {
-      return llvm::any_of(currentAccesses,
-                          [&](const ResolvedMemoryAccess &current) {
-                            return subsumesMemoryFrontierAccess(prior.access,
-                                                               current);
-                          });
-    });
-    for (const ResolvedMemoryAccess &current : currentAccesses) {
-      frontier.push_back({unit, current});
-    }
+    updateMemoryFrontier(frontier, *unit, currentAccesses);
   }
   return success();
 }
@@ -764,10 +1006,14 @@ LogicalResult VPTOSchedDAGBuilder::buildImplicitAndSyncEdges(
 
   for (const std::unique_ptr<VPTOSUnit> &unitOwner : dag.getUnits()) {
     VPTOSUnit &unit = *unitOwner;
+    auto add = [&](VPTOSUnit &predecessor, VPTOSUnit &successor,
+                   VPTOSchedEdgeKind kind, unsigned latency, Twine reason) {
+      return addEdge(dag, predecessor, successor, kind,
+                     VPTOSchedEdgeStrength::Must, latency, reason, failure);
+    };
     if (lastBarrier && lastBarrier != &unit &&
-        failed(addEdge(dag, *lastBarrier, unit, VPTOSchedEdgeKind::Sync,
-                       VPTOSchedEdgeStrength::Must, 0,
-                       "after scheduling barrier", failure))) {
+        failed(add(*lastBarrier, unit, VPTOSchedEdgeKind::Sync, 0,
+                   "after scheduling barrier"))) {
       return mlir::failure();
     }
 
@@ -776,53 +1022,29 @@ LogicalResult VPTOSchedDAGBuilder::buildImplicitAndSyncEdges(
         return mlir::failure();
       }
       if (effect.kind == VPTOSchedulingEffectKind::Barrier) {
-        for (const std::unique_ptr<VPTOSUnit> &prior : dag.getUnits()) {
-          if (prior->getOriginalIndex() >= unit.getOriginalIndex())
-            break;
-          if (failed(addEdge(dag, *prior, unit, VPTOSchedEdgeKind::Sync,
-                             VPTOSchedEdgeStrength::Must, 0,
-                             "before scheduling barrier", failure))) {
-            return mlir::failure();
-          }
+        if (failed(addBarrierPredecessors(dag, unit, add))) {
+          return mlir::failure();
         }
         lastBarrier = &unit;
         continue;
       }
-      if (effect.resource.empty())
+      if (effect.resource.empty()) {
         continue;
+      }
       if (effect.kind == VPTOSchedulingEffectKind::ImplicitRead) {
-        if (VPTOSUnit *writer = lastWrite.lookup(effect.resource)) {
-          if (failed(addEdge(dag, *writer, unit, VPTOSchedEdgeKind::Data,
-                             VPTOSchedEdgeStrength::Must, 1,
-                             Twine("implicit read of ") + effect.resource,
-                             failure))) {
-            return mlir::failure();
-          }
-        }
-        readsSinceWrite[effect.resource].push_back(&unit);
-        continue;
-      }
-      if (effect.kind != VPTOSchedulingEffectKind::ImplicitWrite)
-        continue;
-      if (VPTOSUnit *writer = lastWrite.lookup(effect.resource)) {
-        if (failed(addEdge(dag, *writer, unit, VPTOSchedEdgeKind::Output,
-                           VPTOSchedEdgeStrength::Must, 0,
-                           Twine("implicit write of ") + effect.resource,
-                           failure))) {
+        if (failed(addImplicitReadEdge(effect, unit, lastWrite, readsSinceWrite,
+                                       add))) {
           return mlir::failure();
         }
+        continue;
       }
-      for (VPTOSUnit *reader : readsSinceWrite[effect.resource]) {
-        if (failed(addEdge(dag, *reader, unit, VPTOSchedEdgeKind::Anti,
-                           VPTOSchedEdgeStrength::Must, 0,
-                           Twine("implicit anti-dependence on ") +
-                               effect.resource,
-                           failure))) {
-          return mlir::failure();
-        }
+      if (effect.kind != VPTOSchedulingEffectKind::ImplicitWrite) {
+        continue;
       }
-      readsSinceWrite[effect.resource].clear();
-      lastWrite[effect.resource] = &unit;
+      if (failed(addImplicitWriteEdges(effect, unit, lastWrite, readsSinceWrite,
+                                       add))) {
+        return mlir::failure();
+      }
     }
   }
   return success();
@@ -842,66 +1064,16 @@ LogicalResult VPTOSchedDAGBuilder::buildSSAEdges(
   Operation *lastRegionOperation = dag.getRegion().operations.back();
   for (const std::unique_ptr<VPTOSUnit> &unitOwner : dag.getUnits()) {
     VPTOSUnit &unit = *unitOwner;
-    Operation *op = unit.getOperation();
-
-    for (auto [operandIndex, operand] : llvm::enumerate(op->getOperands())) {
-      if (failed(consumeWork(failure))) {
-        return mlir::failure();
-      }
-      Operation *definingOp = operand.getDefiningOp();
-      VPTOSUnit *predecessor = definingOp ? dag.lookup(definingOp) : nullptr;
-      if (!predecessor) {
-        dag.addLiveIn(operand);
-        if (!checkedLiveIns.insert(operand).second) {
-          continue;
-        }
-        for (Operation *user : operand.getUsers()) {
-          if (failed(consumeWork(failure))) {
-            return mlir::failure();
-          }
-          if (dag.lookup(user)) {
-            continue;
-          }
-          bool isInAnotherBlock = user->getBlock() != dag.getRegion().block;
-          bool isAfterRegion = !isInAnotherBlock &&
-                               lastRegionOperation->isBeforeInBlock(user);
-          if (isInAnotherBlock || isAfterRegion) {
-            dag.addLiveOut(operand);
-            break;
-          }
-        }
-        continue;
-      }
-      unsigned latency =
-          model ? model->getSchedParameters(predecessor->getOperation())
-                      .writeLatency
-                : 1;
-      std::string reason =
-          (isPostUpdateAddress(*predecessor, operand)
-               ? Twine("post-update address operand #") + Twine(operandIndex)
-               : Twine("ssa operand #") + Twine(operandIndex))
-              .str();
-      if (failed(addEdge(dag, *predecessor, unit, VPTOSchedEdgeKind::Data,
-                         VPTOSchedEdgeStrength::Must, latency, reason,
-                         failure))) {
-        return mlir::failure();
-      }
-    }
-
-    for (Value result : op->getResults()) {
-      bool hasExternalUser = false;
-      for (Operation *user : result.getUsers()) {
-        if (failed(consumeWork(failure))) {
-          return mlir::failure();
-        }
-        if (!dag.lookup(user)) {
-          hasExternalUser = true;
-          break;
-        }
-      }
-      if (hasExternalUser) {
-        dag.addLiveOut(result);
-      }
+    auto consume = [&]() { return consumeWork(failure); };
+    auto add = [&](VPTOSUnit &predecessor, VPTOSUnit &successor,
+                   unsigned latency, Twine reason) {
+      return addEdge(dag, predecessor, successor, VPTOSchedEdgeKind::Data,
+                     VPTOSchedEdgeStrength::Must, latency, reason, failure);
+    };
+    if (failed(addSSAOperandEdges(dag, unit, model, *lastRegionOperation,
+                                  checkedLiveIns, consume, add)) ||
+        failed(addSSAResultLiveOuts(dag, unit, consume))) {
+      return mlir::failure();
     }
   }
   return success();

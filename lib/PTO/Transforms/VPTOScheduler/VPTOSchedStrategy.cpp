@@ -14,6 +14,7 @@
 #include "llvm/Support/MathExtras.h"
 
 #include <algorithm>
+#include <optional>
 
 using namespace mlir;
 using namespace mlir::pto;
@@ -75,6 +76,66 @@ static bool hasCompletePressureResult(const VPTOScheduleContext &context,
          candidate.lookaheadEnd.size() == pressureSetCount;
 }
 
+static LogicalResult
+validateCandidateContext(const VPTOScheduleContext &context,
+                         const VPTOSchedCandidate &candidate,
+                         std::string &detail) {
+  bool invalidCandidate = !candidate.unit ||
+                          candidate.direction != context.direction ||
+                          candidate.issueCycle != context.issueCycle ||
+                          !hasCompletePressureResult(context, candidate);
+  if (invalidCandidate) {
+    detail = "candidate does not match the current scheduling context";
+    return failure();
+  }
+  if (!context.model.getSchedClass(candidate.unit->getOperation()).known) {
+    detail = "candidate has an unknown scheduling class";
+    return failure();
+  }
+  return success();
+}
+
+static void updateCriticalPathContext(const VPTOScheduleContext &context,
+                                      const VPTOSchedCandidate &candidate,
+                                      RankingContext &rankingContext) {
+  VPTOSchedParameters parameters =
+      context.model.getSchedParameters(candidate.unit->getOperation());
+  if (candidate.criticalPath > rankingContext.longestCriticalPath) {
+    rankingContext.longestCriticalPath = candidate.criticalPath;
+    rankingContext.urgentSlack = parameters.writeLatency;
+    return;
+  }
+  if (candidate.criticalPath == rankingContext.longestCriticalPath) {
+    rankingContext.urgentSlack =
+        std::max(rankingContext.urgentSlack, parameters.writeLatency);
+  }
+}
+
+static LogicalResult populatePressureBands(const VPTOScheduleContext &context,
+                                           RankingContext &rankingContext,
+                                           std::string &detail) {
+  for (auto [index, pressureSet] :
+       llvm::enumerate(context.model.getPressureSets())) {
+    if (context.currentPressure[index] < 0) {
+      detail = "current pressure contains a negative value";
+      return failure();
+    }
+    if (!pressureSet.limit) {
+      continue;
+    }
+    int64_t limit = static_cast<int64_t>(*pressureSet.limit);
+    // Redirect producer-heavy frontiers before the next instruction would
+    // spill, while leaving room for equally safe critical-path candidates.
+    bool nearLimit = context.currentPressure[index] * 2 >= limit;
+    bool highPressure = context.currentPressure[index] * 3 >= limit * 2;
+    rankingContext.nearLimitPressureSets[index] = nearLimit;
+    rankingContext.highPressureSets[index] = highPressure;
+    rankingContext.hasNearLimitPressure |= nearLimit;
+    rankingContext.hasHighPressure |= highPressure;
+  }
+  return success();
+}
+
 static FailureOr<RankingContext>
 buildRankingContext(const VPTOScheduleContext &context,
                     ArrayRef<VPTOSchedCandidate> candidates,
@@ -96,49 +157,157 @@ buildRankingContext(const VPTOScheduleContext &context,
   rankingContext.nearLimitPressureSets.assign(pressureSets.size(), false);
   rankingContext.highPressureSets.assign(pressureSets.size(), false);
   for (const VPTOSchedCandidate &candidate : candidates) {
-    if (!candidate.unit || candidate.direction != context.direction ||
-        candidate.issueCycle != context.issueCycle ||
-        !hasCompletePressureResult(context, candidate)) {
-      detail = "candidate does not match the current scheduling context";
+    if (failed(validateCandidateContext(context, candidate, detail))) {
       return failure();
     }
-    Operation *op = candidate.unit->getOperation();
-    const VPTOSchedClass &schedClass = context.model.getSchedClass(op);
-    VPTOSchedParameters parameters = context.model.getSchedParameters(op);
-    if (!schedClass.known) {
-      detail = "candidate has an unknown scheduling class";
-      return failure();
-    }
-    if (candidate.criticalPath > rankingContext.longestCriticalPath) {
-      rankingContext.longestCriticalPath = candidate.criticalPath;
-      rankingContext.urgentSlack = parameters.writeLatency;
-    } else if (candidate.criticalPath == rankingContext.longestCriticalPath) {
-      rankingContext.urgentSlack =
-          std::max(rankingContext.urgentSlack, parameters.writeLatency);
-    }
+    updateCriticalPathContext(context, candidate, rankingContext);
   }
-
-  for (auto [index, pressureSet] : llvm::enumerate(pressureSets)) {
-    if (context.currentPressure[index] < 0) {
-      detail = "current pressure contains a negative value";
-      return failure();
-    }
-    if (!pressureSet.limit) {
-      continue;
-    }
-    int64_t limit = static_cast<int64_t>(*pressureSet.limit);
-    // Enter the pressure-critical state at half capacity. This is early
-    // enough to redirect a producer-heavy frontier before the next single
-    // instruction would spill, while risk bands still leave room for an
-    // urgent critical-path candidate when alternatives are equally safe.
-    bool nearLimit = context.currentPressure[index] * 2 >= limit;
-    bool highPressure = context.currentPressure[index] * 3 >= limit * 2;
-    rankingContext.nearLimitPressureSets[index] = nearLimit;
-    rankingContext.highPressureSets[index] = highPressure;
-    rankingContext.hasNearLimitPressure |= nearLimit;
-    rankingContext.hasHighPressure |= highPressure;
+  if (failed(populatePressureBands(context, rankingContext, detail))) {
+    return failure();
   }
   return rankingContext;
+}
+
+struct PressureScoreState {
+  int64_t currentExcess = 0;
+  int64_t projectedExcess = 0;
+};
+
+static FailureOr<PressureScoreState>
+validatePressureScoreState(const VPTOScheduleContext &context,
+                           const VPTOSchedCandidate &candidate,
+                           const VPTORegPressureSet &pressureSet,
+                           unsigned index, std::string &detail) {
+  bool invalid = pressureSet.weight < 0 || pressureSet.spillCost < 0 ||
+                 context.currentPressure[index] < 0 ||
+                 candidate.pressure.released[index] < 0 ||
+                 candidate.pressure.introduced[index] < 0 ||
+                 candidate.pressure.projected[index] < 0 ||
+                 candidate.pressure.projectedExcess[index] < 0;
+  if (invalid) {
+    detail = "pressure set or candidate contains an invalid scoring parameter";
+    return failure();
+  }
+  int64_t expectedDelta = 0;
+  int64_t expectedProjected = 0;
+  bool inconsistent =
+      llvm::SubOverflow(candidate.pressure.introduced[index],
+                        candidate.pressure.released[index], expectedDelta) ||
+      llvm::AddOverflow(context.currentPressure[index],
+                        candidate.pressure.delta[index], expectedProjected) ||
+      expectedDelta != candidate.pressure.delta[index] ||
+      expectedProjected != candidate.pressure.projected[index];
+  if (inconsistent) {
+    detail = "candidate pressure snapshot is inconsistent or overflows";
+    return failure();
+  }
+  PressureScoreState state;
+  if (!pressureSet.limit) {
+    if (candidate.pressure.projectedExcess[index] != 0) {
+      detail = "unbounded pressure set has projected excess";
+      return failure();
+    }
+    return state;
+  }
+  state.currentExcess =
+      std::max<int64_t>(0, context.currentPressure[index] - *pressureSet.limit);
+  state.projectedExcess = candidate.pressure.projectedExcess[index];
+  int64_t expectedExcess = std::max<int64_t>(
+      0, expectedProjected - static_cast<int64_t>(*pressureSet.limit));
+  if (state.projectedExcess != expectedExcess) {
+    detail = "candidate projected pressure excess is inconsistent";
+    return failure();
+  }
+  return state;
+}
+
+static LogicalResult
+accumulateBasePressureCosts(const VPTORegPressureSet &pressureSet,
+                            const VPTOSchedCandidate &candidate, unsigned index,
+                            const PressureScoreState &state,
+                            RankedCandidate &rank, std::string &detail) {
+  int64_t excessGrowth =
+      std::max<int64_t>(0, state.projectedExcess - state.currentExcess);
+  bool overflow =
+      !checkedMultiplyAdd(pressureSet.spillCost, excessGrowth,
+                          rank.excessGrowthCost) ||
+      !checkedMultiplyAdd(pressureSet.spillCost, state.projectedExcess,
+                          rank.projectedExcessCost) ||
+      !checkedMultiplyAdd(pressureSet.weight, candidate.pressure.delta[index],
+                          rank.pressureDeltaCost);
+  if (overflow) {
+    detail = "candidate pressure score overflow";
+    return failure();
+  }
+  rank.exceedsLimit |= state.projectedExcess > 0;
+  return success();
+}
+
+static LogicalResult
+accumulatePressureBandCosts(const RankingContext &context,
+                            const VPTORegPressureSet &pressureSet,
+                            const VPTOSchedCandidate &candidate, unsigned index,
+                            RankedCandidate &rank, std::string &detail) {
+  if (context.nearLimitPressureSets[index]) {
+    bool overflow = !checkedMultiplyAdd(pressureSet.spillCost,
+                                        candidate.pressure.projected[index],
+                                        rank.nearLimitProjectedCost) ||
+                    !checkedMultiplyAdd(pressureSet.spillCost,
+                                        candidate.pressure.released[index],
+                                        rank.nearLimitReleaseCredit);
+    if (overflow) {
+      detail = "candidate near-limit pressure score overflow";
+      return failure();
+    }
+  }
+  if (context.highPressureSets[index]) {
+    bool overflow = !checkedMultiplyAdd(pressureSet.spillCost,
+                                        candidate.pressure.projected[index],
+                                        rank.highPressureProjectedCost) ||
+                    !checkedMultiplyAdd(pressureSet.spillCost,
+                                        candidate.pressure.released[index],
+                                        rank.highPressureReleaseCredit);
+    if (overflow) {
+      detail = "candidate high-pressure score overflow";
+      return failure();
+    }
+  }
+  return success();
+}
+
+static LogicalResult
+accumulateLookaheadCosts(const RankingContext &context,
+                         const VPTORegPressureSet &pressureSet,
+                         const VPTOSchedCandidate &candidate, unsigned index,
+                         RankedCandidate &rank, std::string &detail) {
+  if (!context.nearLimitPressureSets[index]) {
+    return success();
+  }
+  int64_t limit = static_cast<int64_t>(*pressureSet.limit);
+  int64_t criticalThreshold = (limit + 1) / 2;
+  int64_t bandWidth = std::max<int64_t>(1, (limit - criticalThreshold + 3) / 4);
+  int64_t lookaheadPeak = candidate.lookaheadPeak[index];
+  int64_t lookaheadEnd = candidate.lookaheadEnd[index];
+  if (lookaheadPeak < 0 || lookaheadEnd < 0) {
+    detail = "candidate contains negative lookahead pressure";
+    return failure();
+  }
+  int64_t lookaheadExcess = std::max<int64_t>(0, lookaheadPeak - limit);
+  int64_t lookaheadRisk =
+      std::max<int64_t>(0, candidate.pressure.projected[index] -
+                               criticalThreshold) /
+      bandWidth;
+  bool overflow = !checkedMultiplyAdd(pressureSet.spillCost, lookaheadExcess,
+                                      rank.lookaheadExcessCost) ||
+                  !checkedMultiplyAdd(pressureSet.weight, lookaheadRisk,
+                                      rank.lookaheadRiskCost) ||
+                  !checkedMultiplyAdd(pressureSet.weight, lookaheadEnd,
+                                      rank.lookaheadEndCost);
+  if (overflow) {
+    detail = "candidate lookahead pressure score overflow";
+    return failure();
+  }
+  return success();
 }
 
 static FailureOr<RankedCandidate>
@@ -150,115 +319,32 @@ rankCandidate(const VPTOScheduleContext &context,
     detail = "candidate does not match the current scheduling context";
     return failure();
   }
-
-  ArrayRef<VPTORegPressureSet> pressureSets = context.model.getPressureSets();
-  bool hasCompletePressure = hasCompletePressureResult(context, candidate);
-  if (!hasCompletePressure) {
+  if (!hasCompletePressureResult(context, candidate)) {
     detail = "candidate pressure does not match target pressure sets";
     return failure();
   }
-
+  if (!context.model.getSchedClass(candidate.unit->getOperation()).known) {
+    detail = "candidate has an unknown scheduling class";
+    return failure();
+  }
   RankedCandidate rank;
   rank.candidate = &candidate;
   rank.opensPressureFrontier = candidate.opensPressureFrontier;
   rank.advancesPressureClosure = candidate.advancesPressureClosure;
-  for (auto [index, pressureSet] : llvm::enumerate(pressureSets)) {
-    if (pressureSet.weight < 0 || pressureSet.spillCost < 0 ||
-        context.currentPressure[index] < 0 ||
-        candidate.pressure.released[index] < 0 ||
-        candidate.pressure.introduced[index] < 0 ||
-        candidate.pressure.projected[index] < 0 ||
-        candidate.pressure.projectedExcess[index] < 0) {
-      detail =
-          "pressure set or candidate contains an invalid scoring parameter";
+  for (auto [index, pressureSet] :
+       llvm::enumerate(context.model.getPressureSets())) {
+    FailureOr<PressureScoreState> state = validatePressureScoreState(
+        context, candidate, pressureSet, index, detail);
+    bool invalidScore =
+        failed(state) ||
+        failed(accumulateBasePressureCosts(pressureSet, candidate, index,
+                                           *state, rank, detail)) ||
+        failed(accumulatePressureBandCosts(rankingContext, pressureSet,
+                                           candidate, index, rank, detail)) ||
+        failed(accumulateLookaheadCosts(rankingContext, pressureSet, candidate,
+                                        index, rank, detail));
+    if (invalidScore) {
       return failure();
-    }
-    int64_t expectedDelta = 0;
-    int64_t expectedProjected = 0;
-    if (llvm::SubOverflow(candidate.pressure.introduced[index],
-                          candidate.pressure.released[index], expectedDelta) ||
-        llvm::AddOverflow(context.currentPressure[index],
-                          candidate.pressure.delta[index],
-                          expectedProjected) ||
-        expectedDelta != candidate.pressure.delta[index] ||
-        expectedProjected != candidate.pressure.projected[index]) {
-      detail = "candidate pressure snapshot is inconsistent or overflows";
-      return failure();
-    }
-    int64_t currentExcess = 0;
-    int64_t projectedExcess = 0;
-    if (pressureSet.limit) {
-      currentExcess = std::max<int64_t>(0, context.currentPressure[index] -
-                                               *pressureSet.limit);
-      projectedExcess = candidate.pressure.projectedExcess[index];
-      int64_t expectedExcess = std::max<int64_t>(
-          0, expectedProjected - static_cast<int64_t>(*pressureSet.limit));
-      if (projectedExcess != expectedExcess) {
-        detail = "candidate projected pressure excess is inconsistent";
-        return failure();
-      }
-      rank.exceedsLimit |= projectedExcess > 0;
-    } else if (candidate.pressure.projectedExcess[index] != 0) {
-      detail = "unbounded pressure set has projected excess";
-      return failure();
-    }
-    int64_t excessGrowth =
-        std::max<int64_t>(0, projectedExcess - currentExcess);
-    if (!checkedMultiplyAdd(pressureSet.spillCost, excessGrowth,
-                            rank.excessGrowthCost) ||
-        !checkedMultiplyAdd(pressureSet.spillCost, projectedExcess,
-                            rank.projectedExcessCost) ||
-        !checkedMultiplyAdd(pressureSet.weight, candidate.pressure.delta[index],
-                            rank.pressureDeltaCost)) {
-      detail = "candidate pressure score overflow";
-      return failure();
-    }
-    if (rankingContext.nearLimitPressureSets[index] &&
-        (!checkedMultiplyAdd(pressureSet.spillCost,
-                             candidate.pressure.projected[index],
-                             rank.nearLimitProjectedCost) ||
-         !checkedMultiplyAdd(pressureSet.spillCost,
-                             candidate.pressure.released[index],
-                             rank.nearLimitReleaseCredit))) {
-      detail = "candidate near-limit pressure score overflow";
-      return failure();
-    }
-    if (rankingContext.highPressureSets[index] &&
-        (!checkedMultiplyAdd(pressureSet.spillCost,
-                             candidate.pressure.projected[index],
-                             rank.highPressureProjectedCost) ||
-         !checkedMultiplyAdd(pressureSet.spillCost,
-                             candidate.pressure.released[index],
-                             rank.highPressureReleaseCredit))) {
-      detail = "candidate high-pressure score overflow";
-      return failure();
-    }
-    if (rankingContext.nearLimitPressureSets[index]) {
-      int64_t limit = static_cast<int64_t>(*pressureSet.limit);
-      int64_t criticalThreshold = (limit + 1) / 2;
-      int64_t bandWidth =
-          std::max<int64_t>(1, (limit - criticalThreshold + 3) / 4);
-      int64_t lookaheadPeak = candidate.lookaheadPeak[index];
-      int64_t lookaheadEnd = candidate.lookaheadEnd[index];
-      if (lookaheadPeak < 0 || lookaheadEnd < 0) {
-        detail = "candidate contains negative lookahead pressure";
-        return failure();
-      }
-      int64_t lookaheadExcess =
-          std::max<int64_t>(0, lookaheadPeak - limit);
-      int64_t lookaheadRisk =
-          std::max<int64_t>(0, candidate.pressure.projected[index] -
-                                   criticalThreshold) /
-          bandWidth;
-      if (!checkedMultiplyAdd(pressureSet.spillCost, lookaheadExcess,
-                              rank.lookaheadExcessCost) ||
-          !checkedMultiplyAdd(pressureSet.weight, lookaheadRisk,
-                              rank.lookaheadRiskCost) ||
-          !checkedMultiplyAdd(pressureSet.weight, lookaheadEnd,
-                              rank.lookaheadEndCost)) {
-        detail = "candidate lookahead pressure score overflow";
-        return failure();
-      }
     }
   }
   unsigned criticalPathSlack =
@@ -272,60 +358,99 @@ rankCandidate(const VPTOScheduleContext &context,
   return rank;
 }
 
+template <typename T> static std::optional<bool> preferLower(T lhs, T rhs) {
+  if (lhs == rhs) {
+    return std::nullopt;
+  }
+  return lhs < rhs;
+}
+
+template <typename T> static std::optional<bool> preferHigher(T lhs, T rhs) {
+  if (lhs == rhs) {
+    return std::nullopt;
+  }
+  return lhs > rhs;
+}
+
+static std::optional<bool> compareBasePressure(const RankedCandidate &lhs,
+                                               const RankedCandidate &rhs) {
+  if (lhs.exceedsLimit != rhs.exceedsLimit) {
+    return !lhs.exceedsLimit;
+  }
+  if (auto result = preferLower(lhs.excessGrowthCost, rhs.excessGrowthCost)) {
+    return result;
+  }
+  return preferLower(lhs.projectedExcessCost, rhs.projectedExcessCost);
+}
+
+static std::optional<bool> comparePressureClosure(const RankedCandidate &lhs,
+                                                  const RankedCandidate &rhs) {
+  if (lhs.advancesPressureClosure != rhs.advancesPressureClosure) {
+    return lhs.advancesPressureClosure;
+  }
+  if (auto result = preferLower(lhs.closureProjected, rhs.closureProjected)) {
+    return result;
+  }
+  return preferHigher(lhs.closureReleaseCredit, rhs.closureReleaseCredit);
+}
+
+static std::optional<bool> compareHighPressure(const RankedCandidate &lhs,
+                                               const RankedCandidate &rhs) {
+  if (auto result = preferLower(lhs.highPressureProjectedCost,
+                                rhs.highPressureProjectedCost)) {
+    return result;
+  }
+  return preferHigher(lhs.highPressureReleaseCredit,
+                      rhs.highPressureReleaseCredit);
+}
+
+static std::optional<bool>
+compareNearLimitPressure(const RankedCandidate &lhs,
+                         const RankedCandidate &rhs) {
+  if (auto result =
+          preferLower(lhs.lookaheadExcessCost, rhs.lookaheadExcessCost)) {
+    return result;
+  }
+  if (auto result = preferLower(lhs.lookaheadRiskCost, rhs.lookaheadRiskCost)) {
+    return result;
+  }
+  if (lhs.urgentCriticalPath != rhs.urgentCriticalPath) {
+    return lhs.urgentCriticalPath;
+  }
+  if (lhs.opensPressureFrontier != rhs.opensPressureFrontier) {
+    return !lhs.opensPressureFrontier;
+  }
+  if (auto result = preferLower(lhs.lookaheadEndCost, rhs.lookaheadEndCost)) {
+    return result;
+  }
+  if (auto result =
+          preferLower(lhs.nearLimitProjectedCost, rhs.nearLimitProjectedCost)) {
+    return result;
+  }
+  return preferHigher(lhs.nearLimitReleaseCredit, rhs.nearLimitReleaseCredit);
+}
+
 static bool isBetterCandidate(const RankedCandidate &lhs,
                               const RankedCandidate &rhs,
                               bool hasNearLimitPressure,
                               bool hasHighPressure,
                               bool hasPressureClosure) {
-  if (lhs.exceedsLimit != rhs.exceedsLimit) {
-    return !lhs.exceedsLimit;
-  }
-  if (lhs.excessGrowthCost != rhs.excessGrowthCost) {
-    return lhs.excessGrowthCost < rhs.excessGrowthCost;
-  }
-  if (lhs.projectedExcessCost != rhs.projectedExcessCost) {
-    return lhs.projectedExcessCost < rhs.projectedExcessCost;
+  if (auto result = compareBasePressure(lhs, rhs)) {
+    return *result;
   }
   if (hasPressureClosure) {
-    if (lhs.advancesPressureClosure != rhs.advancesPressureClosure) {
-      return lhs.advancesPressureClosure;
-    }
-    if (lhs.closureProjected != rhs.closureProjected) {
-      return lhs.closureProjected < rhs.closureProjected;
-    }
-    if (lhs.closureReleaseCredit != rhs.closureReleaseCredit) {
-      return lhs.closureReleaseCredit > rhs.closureReleaseCredit;
+    if (auto result = comparePressureClosure(lhs, rhs)) {
+      return *result;
     }
   }
   if (hasHighPressure) {
-    if (lhs.highPressureProjectedCost != rhs.highPressureProjectedCost) {
-      return lhs.highPressureProjectedCost < rhs.highPressureProjectedCost;
-    }
-    if (lhs.highPressureReleaseCredit != rhs.highPressureReleaseCredit) {
-      return lhs.highPressureReleaseCredit > rhs.highPressureReleaseCredit;
+    if (auto result = compareHighPressure(lhs, rhs)) {
+      return *result;
     }
   }
   if (hasNearLimitPressure) {
-    if (lhs.lookaheadExcessCost != rhs.lookaheadExcessCost) {
-      return lhs.lookaheadExcessCost < rhs.lookaheadExcessCost;
-    }
-    if (lhs.lookaheadRiskCost != rhs.lookaheadRiskCost) {
-      return lhs.lookaheadRiskCost < rhs.lookaheadRiskCost;
-    }
-    if (lhs.urgentCriticalPath != rhs.urgentCriticalPath) {
-      return lhs.urgentCriticalPath;
-    }
-    if (lhs.opensPressureFrontier != rhs.opensPressureFrontier) {
-      return !lhs.opensPressureFrontier;
-    }
-    if (lhs.lookaheadEndCost != rhs.lookaheadEndCost) {
-      return lhs.lookaheadEndCost < rhs.lookaheadEndCost;
-    }
-    if (lhs.nearLimitProjectedCost != rhs.nearLimitProjectedCost) {
-      return lhs.nearLimitProjectedCost < rhs.nearLimitProjectedCost;
-    }
-    if (lhs.nearLimitReleaseCredit != rhs.nearLimitReleaseCredit) {
-      return lhs.nearLimitReleaseCredit > rhs.nearLimitReleaseCredit;
+    if (auto result = compareNearLimitPressure(lhs, rhs)) {
+      return *result;
     }
   }
   if (lhs.candidate->criticalPath != rhs.candidate->criticalPath) {
@@ -337,11 +462,8 @@ static bool isBetterCandidate(const RankedCandidate &lhs,
   return lhs.candidate->originalIndex < rhs.candidate->originalIndex;
 }
 
-static StringRef getDecisionReason(const RankedCandidate &selected,
-                                   const RankedCandidate &runnerUp,
-                                   bool hasNearLimitPressure,
-                                   bool hasHighPressure,
-                                   bool hasPressureClosure) {
+static StringRef getBasePressureReason(const RankedCandidate &selected,
+                                       const RankedCandidate &runnerUp) {
   if (selected.exceedsLimit != runnerUp.exceedsLimit) {
     return "pressure-safe-candidate";
   }
@@ -351,54 +473,90 @@ static StringRef getDecisionReason(const RankedCandidate &selected,
   if (selected.projectedExcessCost != runnerUp.projectedExcessCost) {
     return "lower-projected-excess";
   }
+  return {};
+}
+
+static StringRef getClosureReason(const RankedCandidate &selected,
+                                  const RankedCandidate &runnerUp) {
+  if (selected.advancesPressureClosure != runnerUp.advancesPressureClosure) {
+    return "advance-pressure-closure";
+  }
+  if (selected.closureProjected != runnerUp.closureProjected) {
+    return "closure-pressure-preserving";
+  }
+  if (selected.closureReleaseCredit != runnerUp.closureReleaseCredit) {
+    return "closure-live-range-closing";
+  }
+  return {};
+}
+
+static StringRef getHighPressureReason(const RankedCandidate &selected,
+                                       const RankedCandidate &runnerUp) {
+  if (selected.highPressureProjectedCost !=
+      runnerUp.highPressureProjectedCost) {
+    return "high-pressure-preserving";
+  }
+  if (selected.highPressureReleaseCredit !=
+      runnerUp.highPressureReleaseCredit) {
+    return "high-pressure-live-range-closing";
+  }
+  return {};
+}
+
+static StringRef getNearLimitReason(const RankedCandidate &selected,
+                                    const RankedCandidate &runnerUp) {
+  if (selected.lookaheadExcessCost != runnerUp.lookaheadExcessCost) {
+    return "bounded-lookahead-avoids-excess";
+  }
+  if (selected.lookaheadRiskCost != runnerUp.lookaheadRiskCost) {
+    return "bounded-lookahead-lower-risk";
+  }
+  if (selected.urgentCriticalPath != runnerUp.urgentCriticalPath) {
+    return "urgent-critical-path";
+  }
+  if (selected.opensPressureFrontier != runnerUp.opensPressureFrontier) {
+    return "continue-open-pressure-frontier";
+  }
+  if (selected.lookaheadEndCost != runnerUp.lookaheadEndCost) {
+    return "bounded-lookahead-lower-ending-pressure";
+  }
+  if (selected.nearLimitProjectedCost != runnerUp.nearLimitProjectedCost) {
+    if (selected.nearLimitReleaseCredit > runnerUp.nearLimitReleaseCredit) {
+      return "near-limit-live-range-closing";
+    }
+    return "near-limit-pressure-preserving";
+  }
+  if (selected.nearLimitReleaseCredit != runnerUp.nearLimitReleaseCredit) {
+    return "near-limit-live-range-closing";
+  }
+  return {};
+}
+
+static StringRef getDecisionReason(const RankedCandidate &selected,
+                                   const RankedCandidate &runnerUp,
+                                   bool hasNearLimitPressure,
+                                   bool hasHighPressure,
+                                   bool hasPressureClosure) {
+  if (StringRef reason = getBasePressureReason(selected, runnerUp);
+      !reason.empty()) {
+    return reason;
+  }
   if (hasPressureClosure) {
-    if (selected.advancesPressureClosure !=
-        runnerUp.advancesPressureClosure) {
-      return "advance-pressure-closure";
-    }
-    if (selected.closureProjected != runnerUp.closureProjected) {
-      return "closure-pressure-preserving";
-    }
-    if (selected.closureReleaseCredit != runnerUp.closureReleaseCredit) {
-      return "closure-live-range-closing";
+    if (StringRef reason = getClosureReason(selected, runnerUp);
+        !reason.empty()) {
+      return reason;
     }
   }
   if (hasHighPressure) {
-    if (selected.highPressureProjectedCost !=
-        runnerUp.highPressureProjectedCost) {
-      return "high-pressure-preserving";
-    }
-    if (selected.highPressureReleaseCredit !=
-        runnerUp.highPressureReleaseCredit) {
-      return "high-pressure-live-range-closing";
+    if (StringRef reason = getHighPressureReason(selected, runnerUp);
+        !reason.empty()) {
+      return reason;
     }
   }
   if (hasNearLimitPressure) {
-    if (selected.lookaheadExcessCost != runnerUp.lookaheadExcessCost) {
-      return "bounded-lookahead-avoids-excess";
-    }
-    if (selected.lookaheadRiskCost != runnerUp.lookaheadRiskCost) {
-      return "bounded-lookahead-lower-risk";
-    }
-    if (selected.urgentCriticalPath != runnerUp.urgentCriticalPath) {
-      return "urgent-critical-path";
-    }
-    if (selected.opensPressureFrontier != runnerUp.opensPressureFrontier) {
-      return "continue-open-pressure-frontier";
-    }
-    if (selected.lookaheadEndCost != runnerUp.lookaheadEndCost) {
-      return "bounded-lookahead-lower-ending-pressure";
-    }
-    if (selected.nearLimitProjectedCost != runnerUp.nearLimitProjectedCost) {
-      if (selected.nearLimitReleaseCredit >
-          runnerUp.nearLimitReleaseCredit) {
-        return "near-limit-live-range-closing";
-      }
-      return "near-limit-pressure-preserving";
-    }
-    if (selected.nearLimitReleaseCredit !=
-        runnerUp.nearLimitReleaseCredit) {
-      return "near-limit-live-range-closing";
+    if (StringRef reason = getNearLimitReason(selected, runnerUp);
+        !reason.empty()) {
+      return reason;
     }
   }
   if (selected.candidate->criticalPath != runnerUp.candidate->criticalPath) {
