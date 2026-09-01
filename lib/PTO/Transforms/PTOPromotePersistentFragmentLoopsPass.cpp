@@ -31,7 +31,7 @@
 //   - every layer of multiply nested loops;
 //   - EXCEPT loops whose body contains a pto.section.simt region AND whose
 //     induction variable is not used by any persistent GEP inside the loop:
-//     those are left alone (see the promotion skip in the pass body).
+//     those are left alone (see sectionLoopSkipsPromotion below).
 //     Fully unrolling such a loop clones the section once per iteration,
 //     SIMT outlining emits one outlined entry function per clone, and those
 //     single-callsite linkonce_odr clones get folded/inlined by BiSheng so
@@ -177,6 +177,134 @@ static bool persistentGepDependsOnLoop(
   return false;
 }
 
+/// Collect every op related to a persistent fragment buffer by walking each
+/// persistent alloca's pointer use graph.  The alloca itself is included so
+/// kernel-level loops wrapping both the allocation and the sections are
+/// discovered too.  A SmallSetVector keeps the insertion (discovery) order
+/// unconditionally, so the diagnostics emitted by the caller have a stable
+/// order regardless of how many ops are related.
+///
+/// The worklist holds only pointer-producing ops (the alloca and GEPs
+/// derived from it), so every `cur` has exactly one result: the pointer.
+/// GEP users extend the pointer flow; every other user is a terminal
+/// access - it is related (its enclosing loops are promoted) but its
+/// results are not part of the pointer flow.  In particular a load's data
+/// result is not followed, so loops that merely consume a loaded value are
+/// never pulled in.
+///
+/// Returns false when the function has no persistent alloca at all.
+static bool collectPersistentRelatedOps(
+    func::FuncOp func, llvm::SmallSetVector<Operation *, 32> &relatedOps,
+    SmallVector<LLVM::AllocaOp, 4> &persistentAllocas) {
+  bool foundPersistent = false;
+  func.walk([&](LLVM::AllocaOp allocaOp) {
+    if (!allocaOp->hasAttr(pto::kPersistentAttrName)) {
+      return;
+    }
+    foundPersistent = true;
+    persistentAllocas.push_back(allocaOp);
+    relatedOps.insert(allocaOp.getOperation());
+    SmallVector<Operation *, 8> worklist{allocaOp.getOperation()};
+    while (!worklist.empty()) {
+      Operation *cur = worklist.pop_back_val();
+      for (Operation *user : cur->getUsers()) {
+        if (!relatedOps.insert(user)) {
+          continue;
+        }
+        if (isa<LLVM::GEPOp>(user)) {
+          worklist.push_back(user);
+        }
+      }
+    }
+  });
+  return foundPersistent;
+}
+
+/// A loop whose body contains a pto.section.simt region is only promoted
+/// when a persistent GEP inside it actually depends on the loop's induction
+/// variable:
+///
+///  - no dependency (e.g. a tile loop that only moves data while the
+///    fragment is indexed by lane constants, the RMSNorm shape): unrolling
+///    would clone the whole section once per iteration, the SIMT outlining
+///    emits one single-callsite linkonce_odr entry function per clone,
+///    BiSheng folds a subset of them, the `_simt_entry` ELF symbols go
+///    missing, and VPTO fatobj emission fails in the VF_SIMT size patch -
+///    for zero benefit, because materialization only needs the in-section
+///    accesses static, which this loop does not affect.
+///
+///  - dependency (fragment slot selected per iteration): unrolling is the
+///    only way to statically resolve those accesses, so the loop must be
+///    promoted; the dep shape is verified to materialize correctly (each
+///    clone reads its own resident slot).
+static bool sectionLoopSkipsPromotion(
+    Operation *loopOp, const llvm::SmallSetVector<Operation *, 32> &relatedOps) {
+  bool wrapsSection =
+      loopOp->walk([](pto::SectionSimtOp) { return WalkResult::interrupt(); })
+          .wasInterrupted();
+  return wrapsSection &&
+         !persistentGepDependsOnLoop(cast<scf::ForOp>(loopOp), relatedOps);
+}
+
+/// Collect every enclosing scf.for of every related op (all nesting layers,
+/// including kernel-level loops wrapping pto.section.simt).  A persistent
+/// access nested under scf.while is unsupported control flow: the loop
+/// structure cannot carry a full-unroll hint, and silently skipping it
+/// would break materialization downstream.  Diagnostics are collected
+/// across the whole function before the pass fails once: the function pass
+/// adaptor may stop scheduling functions after the first failure, so
+/// per-function completeness keeps the emitted set deterministic under
+/// parallel scheduling.
+///
+/// relatedOps iterates in discovery order (see
+/// collectPersistentRelatedOps), and repeated diagnostics for the same
+/// scf.while are deduplicated, so the emitted set is deterministic.
+///
+/// Returns true when a fail-fast diagnostic was emitted.
+static bool collectLoopsToPromote(
+    const llvm::SmallSetVector<Operation *, 32> &relatedOps,
+    SmallVector<Operation *, 8> &loopOps) {
+  bool hadError = false;
+  llvm::SmallPtrSet<Operation *, 4> seenWhileOps;
+  llvm::SmallPtrSet<Operation *, 8> seenLoopOps;
+  for (Operation *op : relatedOps) {
+    if (auto whileOp = op->getParentOfType<scf::WhileOp>()) {
+      if (seenWhileOps.insert(whileOp.getOperation()).second) {
+        whileOp.emitError()
+            << "persistent fragment buffer is accessed inside scf.while, "
+               "which cannot be fully unrolled; persistent fragment loops "
+               "must use scf.for";
+        hadError = true;
+      }
+    }
+    // Collect the whole enclosing-loop chain first: if any loop on the
+    // chain is statically zero-trip, the access never executes, so no loop
+    // on that chain needs promotion (marking e.g. a dynamic outer loop
+    // would only produce a spurious "no constant trip count" hard error
+    // downstream).
+    Operation *cur = op;
+    SmallVector<Operation *, 4> chain;
+    bool chainIsDead = false;
+    while (auto forOp = cur->getParentOfType<scf::ForOp>()) {
+      chain.push_back(forOp.getOperation());
+      chainIsDead = chainIsDead || isStaticallyZeroTrip(forOp);
+      cur = forOp.getOperation();
+    }
+    if (chainIsDead) {
+      continue;
+    }
+    for (Operation *loopOp : chain) {
+      if (sectionLoopSkipsPromotion(loopOp, relatedOps)) {
+        continue;
+      }
+      if (seenLoopOps.insert(loopOp).second) {
+        loopOps.push_back(loopOp);
+      }
+    }
+  }
+  return hadError;
+}
+
 struct PTOPromotePersistentFragmentLoops
     : public pto::impl::PTOPromotePersistentFragmentLoopsBase<
           PTOPromotePersistentFragmentLoops> {
@@ -185,182 +313,79 @@ struct PTOPromotePersistentFragmentLoops
 
   void runOnOperation() override {
     func::FuncOp func = getOperation();
-    MLIRContext *ctx = &getContext();
-
-    // Step 1: collect every op related to a persistent fragment buffer by
-    // walking each persistent alloca's pointer use graph.  The alloca
-    // itself is included so kernel-level loops wrapping both the allocation
-    // and the sections are discovered too.  A SmallSetVector keeps the
-    // insertion (discovery) order unconditionally, so the diagnostics
-    // emitted below have a stable order regardless of how many ops are
-    // related.
     llvm::SmallSetVector<Operation *, 32> relatedOps;
     SmallVector<LLVM::AllocaOp, 4> persistentAllocas;
-    bool foundPersistent = false;
-    func.walk([&](LLVM::AllocaOp allocaOp) {
-      bool isPersistentAlloca = allocaOp->hasAttr(pto::kPersistentAttrName);
-      if (!isPersistentAlloca) {
-        return;
-      }
-      foundPersistent = true;
-      persistentAllocas.push_back(allocaOp);
-      relatedOps.insert(allocaOp.getOperation());
-      // The worklist holds only pointer-producing ops (the alloca and GEPs
-      // derived from it), so every `cur` has exactly one result: the
-      // pointer.  GEP users extend the pointer flow; every other user is a
-      // terminal access - it is related (its enclosing loops are promoted)
-      // but its results are not part of the pointer flow.  In particular a
-      // load's data result is not followed, so loops that merely consume a
-      // loaded value are never pulled in.
-      SmallVector<Operation *, 8> worklist{allocaOp.getOperation()};
-      while (!worklist.empty()) {
-        Operation *cur = worklist.pop_back_val();
-        for (Operation *user : cur->getUsers()) {
-          if (!relatedOps.insert(user)) {
-            continue;
-          }
-          if (isa<LLVM::GEPOp>(user)) {
-            worklist.push_back(user);
-          }
-        }
-      }
-    });
-    if (!foundPersistent) {
+    if (!collectPersistentRelatedOps(func, relatedOps, persistentAllocas)) {
       return;
     }
-
-    // Step 2: collect every enclosing scf.for of every related op (all
-    // nesting layers, including kernel-level loops wrapping
-    // pto.section.simt).  A persistent access nested under scf.while is
-    // unsupported control flow: the loop structure cannot carry a full-unroll
-    // hint, and silently skipping it would break materialization downstream.
-    // Diagnostics are collected across the whole function before the pass
-    // fails once: the function pass adaptor may stop scheduling functions
-    // after the first failure, so per-function completeness keeps the
-    // emitted set deterministic under parallel scheduling.
-    bool hadError = false;
-    // relatedOps iterates in discovery order (see step 1), and repeated
-    // diagnostics for the same scf.while are deduplicated, so the emitted
-    // set is deterministic.
-    llvm::SmallPtrSet<Operation *, 4> seenWhileOps;
-    llvm::SmallPtrSet<Operation *, 8> seenLoopOps;
     SmallVector<Operation *, 8> loopOps;
-    for (Operation *op : relatedOps) {
-      if (auto whileOp = op->getParentOfType<scf::WhileOp>()) {
-        if (seenWhileOps.insert(whileOp.getOperation()).second) {
-          whileOp.emitError()
-              << "persistent fragment buffer is accessed inside scf.while, "
-                 "which cannot be fully unrolled; persistent fragment loops "
-                 "must use scf.for";
-          hadError = true;
-        }
-      }
-      Operation *cur = op;
-      // Collect the whole enclosing-loop chain first: if any loop on the
-      // chain is statically zero-trip, the access never executes, so no
-      // loop on that chain needs promotion (marking e.g. a dynamic outer
-      // loop would only produce a spurious "no constant trip count" hard
-      // error downstream).
-      SmallVector<Operation *, 4> chain;
-      bool chainIsDead = false;
-      while (auto forOp = cur->getParentOfType<scf::ForOp>()) {
-        chain.push_back(forOp.getOperation());
-        chainIsDead = chainIsDead || isStaticallyZeroTrip(forOp);
-        cur = forOp.getOperation();
-      }
-      if (chainIsDead) {
-        continue;
-      }
-      for (Operation *loopOp : chain) {
-        // A loop whose body contains a pto.section.simt region is only
-        // promoted when a persistent GEP inside it actually depends on the
-        // loop's induction variable:
-        //
-        //  - no dependency (e.g. a tile loop that only moves data while the
-        //    fragment is indexed by lane constants, the RMSNorm shape):
-        //    unrolling would clone the whole section once per iteration, the
-        //    SIMT outlining emits one single-callsite linkonce_odr entry
-        //    function per clone, BiSheng folds a subset of them, the
-        //    `_simt_entry` ELF symbols go missing, and VPTO fatobj emission
-        //    fails in the VF_SIMT size patch - for zero benefit, because
-        //    materialization only needs the in-section accesses static,
-        //    which this loop does not affect.
-        //
-        //  - dependency (fragment slot selected per iteration): unrolling is
-        //    the only way to statically resolve those accesses, so the loop
-        //    must be promoted; the dep shape is verified to materialize
-        //    correctly (each clone reads its own resident slot).
-        if (loopOp->walk([](pto::SectionSimtOp) { return WalkResult::interrupt(); })
-                .wasInterrupted()) {
-          auto forOp = cast<scf::ForOp>(loopOp);
-          if (!persistentGepDependsOnLoop(forOp, relatedOps)) {
-            continue;
-          }
-        }
-        if (seenLoopOps.insert(loopOp).second) {
-          loopOps.push_back(loopOp);
-        }
-      }
-    }
-
-    // Step 3: promote every collected loop to forced full unrolling.
+    bool hadError = collectLoopsToPromote(relatedOps, loopOps);
     for (Operation *loopOp : loopOps) {
-      auto forOp = cast<scf::ForOp>(loopOp);
-      // A malformed hint must stay a hard error: promotion would otherwise
-      // silently overwrite it with "full" before pto-unroll-loops ever gets
-      // to validate it.
-      bool carriesHint = forOp->hasAttr(pto::kUnrollAttrName) ||
-                         forOp->hasAttr(pto::kUnrollFactorAttrName);
-      if (carriesHint && failed(pto::validateLoopUnrollHint(forOp))) {
+      // No short-circuit: every collected loop must be diagnosed/promoted
+      // even when an earlier loop already failed.
+      if (!promoteOneLoop(cast<scf::ForOp>(loopOp), func, persistentAllocas)) {
         hadError = true;
-        continue;
       }
-      if (forOp->hasAttr(pto::kUnrollFactorAttrName)) {
-        forOp.emitError()
-            << "persistent fragment loop requires full unroll; a fixed '"
-            << pto::kUnrollFactorAttrName << "' is not supported";
-        hadError = true;
-        continue;
-      }
-
-      // Guardrail: bound the code expansion of the forced unroll.  A dynamic
-      // trip count cannot be checked here; pto-unroll-loops reports a
-      // persistent-specific error for it via the marker below.
-      int64_t tripCountCap = maxPersistentUnrollTripCount.getValue();
-      if (tripCountCap >= 0) {
-        if (std::optional<int64_t> tripCount = pto::getStaticTripCount(forOp);
-            tripCount && *tripCount > tripCountCap) {
-          auto diag = forOp.emitError()
-                      << "persistent fragment loop in '" << func.getSymName()
-                      << "' has trip count " << *tripCount
-                      << ", which exceeds max-persistent-unroll-trip-count="
-                      << tripCountCap;
-          for (LLVM::AllocaOp allocaOp : persistentAllocas) {
-            diag.attachNote(allocaOp.getLoc())
-                << "persistent fragment allocation";
-          }
-          hadError = true;
-          continue;
-        }
-      }
-
-      LLVM_DEBUG(llvm::dbgs()
-                 << "PTOPromotePersistentLoops: promoting scf.for at "
-                 << forOp.getLoc() << " to full unroll\n");
-
-      // "full" is idempotent; "enable" and no-hint are both overridden.
-      forOp->setAttr(pto::kUnrollAttrName,
-                     StringAttr::get(ctx, pto::kUnrollFullValue));
-      // The marker makes pto-unroll-loops fail (instead of dropping the
-      // hint) when this loop cannot be unrolled natively.  It is added on
-      // already-"full" loops too so their failure path is likewise a hard
-      // error, per the fail-fast contract.
-      forOp->setAttr(pto::kPersistentUnrollMarkerAttrName,
-                     UnitAttr::get(ctx));
     }
     if (hadError) {
       signalPassFailure();
     }
+  }
+
+private:
+  /// Promote one collected loop to forced full unrolling.  Returns false
+  /// when a fail-fast diagnostic was emitted for this loop.
+  bool promoteOneLoop(scf::ForOp forOp, func::FuncOp func,
+                      ArrayRef<LLVM::AllocaOp> persistentAllocas) {
+    // A malformed hint must stay a hard error: promotion would otherwise
+    // silently overwrite it with "full" before pto-unroll-loops ever gets
+    // to validate it.
+    bool carriesHint = forOp->hasAttr(pto::kUnrollAttrName) ||
+                       forOp->hasAttr(pto::kUnrollFactorAttrName);
+    if (carriesHint && failed(pto::validateLoopUnrollHint(forOp))) {
+      return false;
+    }
+    if (forOp->hasAttr(pto::kUnrollFactorAttrName)) {
+      forOp.emitError()
+          << "persistent fragment loop requires full unroll; a fixed '"
+          << pto::kUnrollFactorAttrName << "' is not supported";
+      return false;
+    }
+
+    // Guardrail: bound the code expansion of the forced unroll.  A dynamic
+    // trip count cannot be checked here; pto-unroll-loops reports a
+    // persistent-specific error for it via the marker below.
+    int64_t tripCountCap = maxPersistentUnrollTripCount.getValue();
+    if (tripCountCap >= 0) {
+      if (std::optional<int64_t> tripCount = pto::getStaticTripCount(forOp);
+          tripCount && *tripCount > tripCountCap) {
+        auto diag = forOp.emitError()
+                    << "persistent fragment loop in '" << func.getSymName()
+                    << "' has trip count " << *tripCount
+                    << ", which exceeds max-persistent-unroll-trip-count="
+                    << tripCountCap;
+        for (LLVM::AllocaOp allocaOp : persistentAllocas) {
+          diag.attachNote(allocaOp.getLoc())
+              << "persistent fragment allocation";
+        }
+        return false;
+      }
+    }
+
+    LLVM_DEBUG(llvm::dbgs() << "PTOPromotePersistentLoops: promoting scf.for "
+                            << "at " << forOp.getLoc()
+                            << " to full unroll\n");
+
+    // "full" is idempotent; "enable" and no-hint are both overridden.
+    forOp->setAttr(pto::kUnrollAttrName,
+                   StringAttr::get(forOp->getContext(), pto::kUnrollFullValue));
+    // The marker makes pto-unroll-loops fail (instead of dropping the hint)
+    // when this loop cannot be unrolled natively.  It is added on
+    // already-"full" loops too so their failure path is likewise a hard
+    // error, per the fail-fast contract.
+    forOp->setAttr(pto::kPersistentUnrollMarkerAttrName,
+                   UnitAttr::get(forOp->getContext()));
+    return true;
   }
 };
 

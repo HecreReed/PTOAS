@@ -246,6 +246,17 @@ struct PTOUnrollLoopsImpl {
     return pto::validateLoopUnrollHint(forOp);
   }
 
+  /// Drop the native unroll attributes with `remark` attached.  Only the
+  /// native hints ("full" / pto.unroll_factor) ever reach this path:
+  /// "enable" is owned by the metadata pass and is never dropped here.
+  UnrollOutcome dropNativeUnrollHint(scf::ForOp forOp,
+                                      const Twine &remark) const {
+    forOp.emitRemark() << remark;
+    forOp->removeAttr(pto::kUnrollAttrName);
+    forOp->removeAttr(pto::kUnrollFactorAttrName);
+    return UnrollOutcome::Unchanged;
+  }
+
   /// Handle one annotated loop (hints are pre-validated by validateHint).
   /// Hints that cannot be unrolled natively are dropped with a remark (no
   /// metadata degradation path exists anymore).
@@ -279,19 +290,17 @@ struct PTOUnrollLoopsImpl {
                              "but has an empty body";
         return UnrollOutcome::Error;
       }
-      forOp.emitRemark() << "loop with a native unroll hint has an empty "
-                            "body; dropping the hint";
-      forOp->removeAttr(pto::kUnrollAttrName);
-      forOp->removeAttr(pto::kUnrollFactorAttrName);
-      return UnrollOutcome::Unchanged;
+      return dropNativeUnrollHint(
+          forOp, "loop with a native unroll hint has an empty body; "
+                 "dropping the hint");
     }
 
     // scf.for also accepts signless integer induction variables, but
     // loopUnrollByFactor builds its bounds/step arithmetic with
     // arith::ConstantIndexOp unconditionally.  Unrolling an i16/i32 loop
     // would therefore emit mixed-type ops (e.g. arith.muli(i16, index)) and
-    // an scf.for whose step no longer matches its bounds, both of which fail
-    // the verifier.  Only index loops can be unrolled natively; anything
+    // an scf.for whose step no longer matches its bounds, both of which
+    // fail the verifier.  Only index loops can be unrolled natively; anything
     // else keeps its loop and drops the hint.
     if (!forOp.getInductionVar().getType().isIndex()) {
       if (forOp->hasAttr(pto::kPersistentUnrollMarkerAttrName)) {
@@ -301,15 +310,10 @@ struct PTOUnrollLoopsImpl {
             << forOp.getInductionVar().getType() << ")";
         return UnrollOutcome::Error;
       }
-      forOp.emitRemark()
-          << "loop with a native unroll hint has a non-index induction "
-             "variable ("
-          << forOp.getInductionVar().getType()
-          << "); native unrolling only supports index loops, dropping the "
-             "hint";
-      forOp->removeAttr(pto::kUnrollAttrName);
-      forOp->removeAttr(pto::kUnrollFactorAttrName);
-      return UnrollOutcome::Unchanged;
+      return dropNativeUnrollHint(
+          forOp, "loop with a native unroll hint has a non-index induction "
+                 "variable; native unrolling only supports index loops, "
+                 "dropping the hint");
     }
 
     if (unrollAttr) {
@@ -318,11 +322,9 @@ struct PTOUnrollLoopsImpl {
 
     if (factorAttr) {
       if (factorAttr.getInt() == 1) {
-        forOp.emitRemark()
-            << "'" << pto::kUnrollFactorAttrName
-            << "' = 1 is a no-op; dropping the hint";
-        forOp->removeAttr(pto::kUnrollFactorAttrName);
-        return UnrollOutcome::Unchanged;
+        return dropNativeUnrollHint(
+            forOp, Twine("'") + pto::kUnrollFactorAttrName +
+                       Twine("' = 1 is a no-op; dropping the hint"));
       }
       return tryFactorUnroll(forOp, factorAttr.getInt());
     }
