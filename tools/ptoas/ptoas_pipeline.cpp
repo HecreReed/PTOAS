@@ -13,6 +13,86 @@
 
 #include "ptoas_internal.h"
 
+#include "ptoas.h"
+
+#include "PTO/IR/PTO.h"
+#include "PTO/IR/PTOMultiBuffer.h"
+#include "PTO/IR/VMIUtils.h"
+#include "PTO/Transforms/BufferizableOpInterfaceImpl.h"
+#include "PTO/Transforms/CppPostprocess.h"
+#include "PTO/Transforms/Passes.h"
+#include "PTO/Transforms/VPTOLLVMEmitter.h"
+#include "VPTOHostStubEmission.h"
+#include "mlir/AsmParser/AsmParserState.h"
+#include "mlir/Conversion/Passes.h"
+#include "mlir/Dialect/Affine/IR/AffineOps.h"
+#include "mlir/Dialect/Arith/IR/Arith.h"
+#include "mlir/Dialect/Arith/Transforms/BufferizableOpInterfaceImpl.h"
+#include "mlir/Dialect/Arith/Transforms/Passes.h"
+#include "mlir/Dialect/Bufferization/IR/Bufferization.h"
+#include "mlir/Dialect/Bufferization/Transforms/OneShotAnalysis.h"
+#include "mlir/Dialect/ControlFlow/IR/ControlFlowOps.h"
+#include "mlir/Dialect/EmitC/IR/EmitC.h"
+#include "mlir/Dialect/EmitC/Transforms/Transforms.h"
+#include "mlir/Dialect/Func/IR/FuncOps.h"
+#include "mlir/Dialect/Func/Transforms/Passes.h"
+#include "mlir/Dialect/LLVMIR/LLVMDialect.h"
+#include "mlir/Dialect/Math/IR/Math.h"
+#include "mlir/Dialect/Math/Transforms/Passes.h"
+#include "mlir/Dialect/MemRef/IR/MemRef.h"
+#include "mlir/Dialect/MemRef/Transforms/Passes.h"
+#include "mlir/Dialect/SCF/IR/SCF.h"
+#include "mlir/Dialect/SCF/Transforms/Passes.h"
+#include "mlir/Dialect/Tensor/IR/Tensor.h"
+#include "mlir/Dialect/Tensor/Transforms/BufferizableOpInterfaceImpl.h"
+#include "mlir/Dialect/Tensor/Transforms/Passes.h"
+#include "mlir/Dialect/Utils/StaticValueUtils.h"
+#include "mlir/IR/BuiltinOps.h"
+#include "mlir/IR/Diagnostics.h"
+#include "mlir/IR/DialectInterface.h"
+#include "mlir/IR/IRMapping.h"
+#include "mlir/IR/MLIRContext.h"
+#include "mlir/IR/PatternMatch.h"
+#include "mlir/IR/Verifier.h"
+#include "mlir/Parser/Parser.h"
+#include "mlir/Pass/PassManager.h"
+#include "mlir/Target/Cpp/CppEmitter.h"
+#include "mlir/Transforms/InliningUtils.h"
+#include "mlir/Transforms/Passes.h"
+#include "llvm/ADT/DenseMap.h"
+#include "llvm/ADT/SmallPtrSet.h"
+#include "llvm/ADT/SmallString.h"
+#include "llvm/ADT/SmallVector.h"
+#include "llvm/ADT/StringMap.h"
+#include "llvm/ADT/StringRef.h"
+#include "llvm/ADT/StringSwitch.h"
+#include "llvm/Support/CommandLine.h"
+#include "llvm/Support/FileSystem.h"
+#include "llvm/Support/MemoryBuffer.h"
+#include "llvm/Support/Path.h"
+#include "llvm/Support/Program.h"
+#include "llvm/Support/Regex.h"
+#include "llvm/Support/SourceMgr.h"
+#include "llvm/Support/ToolOutputFile.h"
+#include "llvm/Support/raw_ostream.h"
+#include "ptobc/ptobc_decode.h"
+
+#include <algorithm>
+#include <cctype>
+#include <chrono>
+#include <csignal>
+#include <cstdlib>
+#include <cstring>
+#include <memory>
+#include <optional>
+#include <set>
+#include <string>
+#include <thread>
+
+#include <sys/types.h>
+#include <unistd.h>
+
+
 using namespace mlir;
 using namespace pto;
 
@@ -106,7 +186,7 @@ struct FormEmitCExpressionsCompatPass final
   void runOnOperation() final {
     ModuleOp module = getOperation();
     OpBuilder builder(&getContext());
-    module.walk([&](Operation *op) {
+    module.walk([&builder](Operation *op) {
       const bool isTopLevelSingleResultExpression =
           op->hasTrait<OpTrait::emitc::CExpression>() &&
           !op->getParentOfType<emitc::ExpressionOp>() &&
@@ -120,9 +200,12 @@ struct FormEmitCExpressionsCompatPass final
     bool changed;
     do {
       changed = false;
-      module.walk<WalkOrder::PostOrder>([&](emitc::ExpressionOp expression) {
-        changed |= foldExpression(expression, rewriter);
-      });
+      module.walk<WalkOrder::PostOrder>(
+          [&changed, &rewriter](emitc::ExpressionOp expression) {
+            if (foldExpression(expression, rewriter)) {
+              changed = true;
+            }
+          });
     } while (changed);
   }
 };
@@ -443,7 +526,7 @@ static bool validateReserveBufferLevelRules(ModuleOp module,
                                             PTOBuildLevel level) {
   bool failed = false;
   PTOArch arch = getTargetArch(module);
-  module.walk([&](pto::ReserveBufferOp op) {
+  module.walk([&arch, level, &failed](pto::ReserveBufferOp op) {
     if (level != PTOBuildLevel::Level3) {
       if (op.getAutoAlloc()) {
         if (op.getBaseAttr()) {
@@ -535,7 +618,7 @@ static void printSharedPreBackendSeamIR(ModuleOp module) {
 
 static bool hasUnexpandedTileOps(ModuleOp module) {
   bool found = false;
-  module.walk([&](Operation *op) {
+  module.walk([&found](Operation *op) {
     if (found) {
       return;
     }
@@ -580,7 +663,7 @@ static SmallVector<func::FuncOp> collectSharedPipelineFunctions(ModuleOp module)
   // Preserve recursive traversal only for user-visible IR modes, which retain
   // the authored container shape for debugging.
   if (emitMlirIR) {
-    module.walk([&](func::FuncOp funcOp) { functions.push_back(funcOp); });
+    module.walk([&functions](func::FuncOp funcOp) { functions.push_back(funcOp); });
   } else {
     llvm::append_range(functions, module.getOps<func::FuncOp>());
   }
@@ -770,8 +853,9 @@ static void lowerPTOToVPTOBackend(PassManager &pm, ModuleOp module) {
   auto moduleArchAttr =
       module->getAttrOfType<mlir::StringAttr>("pto.target_arch");
   const bool isA2A3 = moduleArchAttr && isA2A3Arch(moduleArchAttr.getValue());
+  const bool opFusionEnabled = enableOpFusion == llvm::cl::BOU_TRUE;
   const bool enableA5VPTOPostLoweringFusionLifecycle =
-      enableOpFusion && moduleArchAttr && moduleArchAttr.getValue() == "a5";
+      opFusionEnabled && moduleArchAttr && moduleArchAttr.getValue() == "a5";
 
   kernelModulePM.addNestedPass<mlir::func::FuncOp>(
       pto::createLowerPTOToUBufOpsPass());
@@ -1308,9 +1392,32 @@ static void appendAutoSyncPasses(PassManager &pm) {
   }
 }
 
-static LogicalResult appendMainFrontendPasses(
-    PassManager &pm, const CompilePipelineState &state,
-    PTOBackend effectiveBackend) {
+static LogicalResult runMainLoweringPipeline(
+    OwningOpRef<ModuleOp> &module, PTOASContext &context,
+    PTOBackend effectiveBackend, const CompilePipelineState &state,
+    PTOASCompileResult &result, bool emitVPTOHostStub, bool &handled,
+    int &exitCode) {
+  handled = false;
+  exitCode = 0;
+  const bool enableA5EmitCFusionPath = state.enableA5EmitCFusionPath;
+  const bool enableA5VPTOFusionPath = state.enableA5VPTOFusionPath;
+  const bool isA2A3 = state.isA2A3;
+  const bool hasTileOpsToExpand = state.hasTileOpsToExpand;
+  const PTOBuildLevel effectiveLevel = state.level;
+
+  // Main PassManager
+  PassManager pm(module->getContext());
+
+  if (failed(applyPassManagerCLOptions(pm))) {
+    return failure();
+  }
+
+  // Rank-2 → rank-5 view canonicalization is currently gated on the VPTO
+  // backend to limit blast radius.  A3/A5 EmitC codegen already pads strides
+  // to rank-5 via InferPTOLayout and buildGlobalTensorShapeAndStride, so it
+  // does not need the canonicalization pass at the IR level.  When VPTO
+  // validation is complete and the pass is proven stable, the gate can be
+  // lifted to make it unconditional for all backends.
   if (effectiveBackend == PTOBackend::VPTO) {
     pm.addNestedPass<mlir::func::FuncOp>(pto::createPTOCanonicalizeIRPass());
   }
@@ -1320,199 +1427,160 @@ static LogicalResult appendMainFrontendPasses(
   if (!disableInferLayout) {
     pm.addNestedPass<mlir::func::FuncOp>(pto::createInferPTOLayoutPass());
   }
-  if (!state.isA2A3) {
-    pm.addNestedPass<mlir::func::FuncOp>(
-        pto::createPTOA5NormalizeTMovPass());
+  // PTOViewToMemref is generic view lowering required by both backends; keep it
+  // outside the local-memory planning gate so default A2/A3 EmitC still lowers
+  // pto.make_tensor_view before backend legalization.
+  if (!isA2A3) {
+    pm.addNestedPass<mlir::func::FuncOp>(pto::createPTOA5NormalizeTMovPass());
   }
   pm.addNestedPass<mlir::func::FuncOp>(
       pto::createPTOValidateIntToPtrUsesPass());
-  if (!state.isA2A3 && effectiveBackend == PTOBackend::VPTO &&
-      state.hasTileOpsToExpand) {
+
+  // PTODSL legality discovery happens on tile-native PTO IR before fusion.
+  // Fusion may later filter the ordered `candidates` array; ExpandTileOp
+  // consumes the first candidate that remains.
+  if (!isA2A3 && effectiveBackend == PTOBackend::VPTO && hasTileOpsToExpand) {
     pm.addPass(pto::createInsertTemplateAttributesPass());
   }
-  return appendFusionFrontendPasses(
-      pm, state.isA2A3, state.enableA5EmitCFusionPath,
-      state.enableA5VPTOFusionPath);
-}
 
-static LogicalResult appendMainPlanningPasses(
-    PassManager &pm, PTOBuildLevel effectiveLevel) {
+  if (failed(appendFusionFrontendPasses(pm, isA2A3, enableA5EmitCFusionPath,
+                                         enableA5VPTOFusionPath))) {
+    return failure();
+  }
+
   pm.addNestedPass<mlir::func::FuncOp>(
-      pto::createPTOMaterializeImplicitTmpPass(effectiveLevel ==
-                                               PTOBuildLevel::Level3));
+      pto::createPTOMaterializeImplicitTmpPass(
+          effectiveLevel == PTOBuildLevel::Level3));
   pm.addNestedPass<mlir::func::FuncOp>(
       pto::createPTORematerializeFixpipeVectorQuantPass());
+
   if (failed(appendPlanMemoryPasses(pm, effectiveLevel))) {
     return failure();
   }
   pm.addPass(pto::createPTOResolveReservedBuffersPass());
   pm.addNestedPass<mlir::func::FuncOp>(pto::createPTORemoveIdentityTMovPass());
-  appendAutoSyncPasses(pm);
-  pm.addPass(pto::createPTOResolveBufferSelectPass());
-  return success();
-}
 
-static LogicalResult appendMainPipelinePasses(
-    PassManager &pm, const CompilePipelineState &state,
-    PTOBackend effectiveBackend) {
-  if (failed(appendMainPlanningPasses(pm, state.level))) {
-    return failure();
-  }
+  appendAutoSyncPasses(pm);
+
+  // Materialize each `pto.multi_tile_get` as an addressed `pto.alloc_tile`;
+  // dynamic selections use an `arith.select` chain over planned addresses.
+  pm.addPass(pto::createPTOResolveBufferSelectPass());
   if (effectiveBackend == PTOBackend::EmitC) {
     pm.addPass(createNarrowUnusedMultiResultProvenancePass());
   }
-  return success();
-}
 
-static LogicalResult appendBackendPreparationPasses(
-    PassManager &pm, PTOBackend effectiveBackend) {
+  if (emitMlirIR) {
+    if (failed(pm.run(*module))) {
+      llvm::errs() << "Error: Pass execution failed.\n";
+      return failure();
+    }
+    if (failed(pto::validateTExtractNd2xNzPostPlanningSafety(module.get()))) {
+      return failure();
+    }
+    result.kind = PTOASCompileResultKind::Text;
+    llvm::raw_string_ostream os(result.textOutput);
+    module->print(os);
+    os.flush();
+    handled = true;
+    exitCode = 0;
+    return success();
+  }
+
   pm.addPass(createCSEPass());
+  // PTODSL backend helpers already use the tile-native ABI.
   pm.addPass(pto::createPTOInlineBackendHelpersPass());
   if (effectiveBackend == PTOBackend::EmitC) {
     pm.addPass(createNarrowUnusedMultiResultProvenancePass());
   }
   pm.addPass(createCanonicalizerPass());
   pm.addPass(createCSEPass());
-  return applyConfiguredPassManagerCLOptions(pm, "main PTOAS pipeline");
-}
+  if (failed(applyConfiguredPassManagerCLOptions(pm, "main PTOAS pipeline"))) {
+    return failure();
+  }
 
-static LogicalResult runEmitMlirPipeline(
-    PassManager &pm, OwningOpRef<ModuleOp> &module, PTOASCompileResult &result,
-    bool &handled, int &exitCode) {
-  if (failed(pm.run(*module))) {
-    llvm::errs() << "Error: Pass execution failed.\n";
-    return failure();
-  }
-  if (failed(pto::validateTExtractNd2xNzPostPlanningSafety(module.get()))) {
-    return failure();
-  }
-  result.kind = PTOASCompileResultKind::Text;
-  llvm::raw_string_ostream os(result.textOutput);
-  module->print(os);
-  os.flush();
-  handled = true;
-  exitCode = 0;
-  return success();
-}
-
-static LogicalResult runVptoMainPipeline(
-    PassManager &pm, OwningOpRef<ModuleOp> &module, bool hasTileOpsToExpand,
-    PTOASContext &context, PTOASCompileResult &result, bool emitVPTOHostStub,
-    bool &handled, int &exitCode) {
-  if (failed(pm.run(*module))) {
-    llvm::errs() << "Error: Pass execution failed.\n";
-    return failure();
-  }
-  if (failed(pto::validateTExtractNd2xNzPostPlanningSafety(module.get()))) {
-    return failure();
-  }
-  if (ptoPrintSeamIR) {
-    printSharedPreBackendSeamIR(*module);
-  }
-  if (ptoPrintSeamIR) {
-    module->print(llvm::errs());
-    llvm::errs() << "\n";
-  }
-  if (failed(emitSharedPreBackendSeamIR(*module, ptoSeamIRFile))) {
-    return failure();
-  }
-  if (failed(runVPTOBackendPipeline(module, hasTileOpsToExpand))) {
-    return failure();
-  }
-  handled = true;
-  exitCode = emitVPTOBackendResult(
-      *module, result, emitVPTOHostStub, context.getCANNVersionOrDefault());
-  return success();
-}
-
-static LogicalResult runEmitCMainPipeline(PassManager &pm,
-                                          OwningOpRef<ModuleOp> &module) {
-  if (failed(pm.run(*module))) {
-    llvm::errs() << "Error: Pass execution failed.\n";
-    return failure();
-  }
-  return pto::validateTExtractNd2xNzPostPlanningSafety(module.get());
-}
-
-static LogicalResult runMainLoweringPipeline(
-    OwningOpRef<ModuleOp> &module, PTOASContext &context,
-    PTOBackend effectiveBackend, const CompilePipelineState &state,
-    PTOASCompileResult &result, bool emitVPTOHostStub, bool &handled,
-    int &exitCode) {
-  handled = false;
-  exitCode = 0;
-  PassManager pm(module->getContext());
-  if (failed(applyPassManagerCLOptions(pm))) {
-    return failure();
-  }
-  if (failed(appendMainFrontendPasses(pm, state, effectiveBackend))) {
-    return failure();
-  }
-  if (failed(appendMainPipelinePasses(pm, state, effectiveBackend))) {
-    return failure();
-  }
-  if (emitMlirIR) {
-    return runEmitMlirPipeline(pm, module, result, handled, exitCode);
-  }
-  if (failed(appendBackendPreparationPasses(pm, effectiveBackend))) {
-    return failure();
-  }
   if (effectiveBackend == PTOBackend::VPTO) {
-    return runVptoMainPipeline(pm, module, state.hasTileOpsToExpand,
-                               context, result, emitVPTOHostStub, handled,
-                               exitCode);
+    if (failed(pm.run(*module))) {
+      llvm::errs() << "Error: Pass execution failed.\n";
+      return failure();
+    }
+    if (failed(pto::validateTExtractNd2xNzPostPlanningSafety(module.get()))) {
+      return failure();
+    }
+
+    if (ptoPrintSeamIR) {
+      printSharedPreBackendSeamIR(*module);
+    }
+    if (ptoPrintSeamIR) {
+      module->print(llvm::errs());
+      llvm::errs() << "\n";
+    }
+    if (failed(emitSharedPreBackendSeamIR(*module, ptoSeamIRFile))) {
+      return failure();
+    }
+
+    if (failed(runVPTOBackendPipeline(module, hasTileOpsToExpand))) {
+      return failure();
+    }
+    handled = true;
+    exitCode = emitVPTOBackendResult(*module, result, emitVPTOHostStub,
+                                     context.getCANNVersionOrDefault());
+    return success();
   }
-  return runEmitCMainPipeline(pm, module);
+
+  if (failed(pm.run(*module))) {
+    llvm::errs() << "Error: Pass execution failed.\n";
+    return failure();
+  }
+  if (failed(pto::validateTExtractNd2xNzPostPlanningSafety(module.get()))) {
+    return failure();
+  }
+  return success();
 }
-static int runFastVptoBackend(OwningOpRef<ModuleOp> &module,
-                              PTOASContext &context, PTOASCompileResult &result,
-                              bool emitVPTOHostStub) {
+
+// VPTO fast path: when no TileOp expansion is needed the shared mainline
+// pipeline can be skipped entirely.
+static int runVPTOSkipMainlinePipeline(OwningOpRef<ModuleOp> &module,
+                                       PTOASContext &context,
+                                       const CompilePipelineState &state,
+                                       PTOASCompileResult &result,
+                                       bool emitVPTOHostStub) {
   if (ptoPrintSeamIR || !ptoSeamIRFile.empty()) {
     llvm::errs() << "Error: shared pre-backend seam IR is unavailable when "
                     "skipping the shared PTO-to-VPTO lowering pipeline.\n";
     return 1;
   }
-  if (failed(runVPTOBackendPipeline(module, false))) {
+  if (failed(runVPTOBackendPipeline(module, state.hasTileOpsToExpand))) {
     return 1;
   }
   return emitVPTOBackendResult(*module, result, emitVPTOHostStub,
                                context.getCANNVersionOrDefault());
 }
 
-static LogicalResult prepareEmitCPasses(PassManager &pm, StringRef arch) {
-  pm.addPass(pto::createEmitPTOManualPass(
-      isA2A3Arch(arch) ? pto::PTOArch::A3 : pto::PTOArch::A5));
-  pm.addPass(std::make_unique<FormEmitCExpressionsCompatPass>());
-  pm.addPass(mlir::createCSEPass());
-  return applyConfiguredPassManagerCLOptions(pm, "EmitC backend pipeline");
-}
-
-static LogicalResult finalizeEmitCModule(
-    OwningOpRef<ModuleOp> &module,
-    const FunctionBlockArgHintMap &functionBlockArgHints) {
-  applyFunctionBlockArgNameHintsToEmitC(*module, functionBlockArgHints);
-  splitDerivedSingleResultProvenanceLocs(module.get());
-  dropEmptyEmitCExpressions(module.get());
-  materializeControlFlowOperands(module.get());
-  normalizeEmitCIntegerAttrsForCppEmission(module.get());
-  if (failed(reorderEmitCFunctions(module.get()))) {
-    llvm::errs() << "Error: Failed to order emitted functions for C++ emission.\n";
+static LogicalResult runEmitCPreparationPipeline(OwningOpRef<ModuleOp> &module,
+                                                 llvm::StringRef arch) {
+  PassManager emitcPM(module->getContext());
+  emitcPM.enableVerifier();
+  if (isA2A3Arch(arch)) {
+    emitcPM.addPass(pto::createEmitPTOManualPass(pto::PTOArch::A3));
+  } else {
+    emitcPM.addPass(pto::createEmitPTOManualPass(pto::PTOArch::A5));
+  }
+  emitcPM.addPass(std::make_unique<FormEmitCExpressionsCompatPass>());
+  emitcPM.addPass(mlir::createCSEPass());
+  if (failed(applyConfiguredPassManagerCLOptions(
+          emitcPM, "EmitC backend pipeline"))) {
     return failure();
   }
-  annotateEmitCProvenanceHints(*module);
+  if (failed(emitcPM.run(*module))) {
+    llvm::errs() << "Error: Pass execution failed.\n";
+    return failure();
+  }
   return success();
 }
 
-static LogicalResult emitCppOutput(OwningOpRef<ModuleOp> &module,
-                                   std::string &cppOutput) {
-  llvm::raw_string_ostream cppOS(cppOutput);
-  bool declareVariablesAtTop = shouldDeclareVariablesAtTop(*module);
-  if (failed(emitc::translateToCpp(
-          *module, cppOS, /*declareVariablesAtTop=*/declareVariablesAtTop))) {
-    llvm::errs() << "Error: Failed to emit C++.\n";
-    return failure();
-  }
-  cppOS.flush();
+// Post-process the emitted C++ text. Markers, provenance comments, and scalar
+// constant hoisting must run in this fixed order.
+static void runCppPostRewrites(std::string &cppOutput) {
   rewriteTileGetSetValueMarkers(cppOutput);
   rewriteAsyncEventMarkers(cppOutput);
   rewritePtrScalarMarkers(cppOutput);
@@ -1525,37 +1593,51 @@ static LogicalResult emitCppOutput(OwningOpRef<ModuleOp> &module,
   rewriteScalarConstantDecls(cppOutput);
   rewriteHoistedGlobalTensorDecls(cppOutput);
   rewriteNameHintMarkers(cppOutput);
-  return success();
 }
 
-static int runEmitCBackend(OwningOpRef<ModuleOp> &module,
-                           const CompilePipelineState &state,
-                           PTOASCompileResult &result) {
+static int runEmitCTextEmission(OwningOpRef<ModuleOp> &module,
+                                const CompilePipelineState &state,
+                                PTOASCompileResult &result) {
   if (ptoPrintSeamIR) {
     printSharedPreBackendSeamIR(*module);
   }
   if (failed(emitSharedPreBackendSeamIR(*module, ptoSeamIRFile))) {
     return 1;
   }
+
   narrowUnusedMultiResultProvenanceLocs(module.get());
   splitDerivedSingleResultProvenanceLocs(module.get());
 
-  PassManager emitcPM(module->getContext());
-  emitcPM.enableVerifier();
-  if (failed(prepareEmitCPasses(emitcPM, state.arch))) {
+  if (failed(runEmitCPreparationPipeline(module, state.arch))) {
     return 1;
   }
-  if (failed(emitcPM.run(*module))) {
-    llvm::errs() << "Error: Pass execution failed.\n";
+
+  applyFunctionBlockArgNameHintsToEmitC(*module, state.functionBlockArgHints);
+  splitDerivedSingleResultProvenanceLocs(module.get());
+  dropEmptyEmitCExpressions(module.get());
+  materializeControlFlowOperands(module.get());
+  normalizeEmitCIntegerAttrsForCppEmission(module.get());
+  if (failed(reorderEmitCFunctions(module.get()))) {
+    llvm::errs() << "Error: Failed to order emitted functions for C++ emission.\n";
     return 1;
   }
-  if (failed(finalizeEmitCModule(module, state.functionBlockArgHints))) {
-    return 1;
-  }
+  annotateEmitCProvenanceHints(*module);
+
+  // Emit C++ to string, then post-process, then hand the text to the caller.
   std::string cppOutput;
-  if (failed(emitCppOutput(module, cppOutput))) {
+  llvm::raw_string_ostream cppOS(cppOutput);
+  // CFG-style lowering (e.g. scf.while -> cf.br/cf.cond_br) may introduce
+  // multiple blocks, requiring variables to be declared at the top for valid
+  // C++ emission.
+  const bool declareVariablesAtTop = shouldDeclareVariablesAtTop(*module);
+  if (failed(emitc::translateToCpp(*module, cppOS,
+                                   /*declareVariablesAtTop=*/declareVariablesAtTop))) {
+    llvm::errs() << "Error: Failed to emit C++.\n";
     return 1;
   }
+  cppOS.flush();
+  runCppPostRewrites(cppOutput);
+
   result.kind = PTOASCompileResultKind::Text;
   result.textOutput = std::move(cppOutput);
   return 0;
@@ -1573,16 +1655,22 @@ int mlir::pto::compilePTOASModule(
     return 1;
   }
   setFusionPipelineFlags(state, effectiveBackend);
-  const bool preBackendValidationFailed =
-      failed(validateCompileOptions(*module, state.level)) ||
-      failed(runPreBackendNormalization(*module)) ||
-      failed(pto::validateTExtractNd2xNzInputProvenance(module.get()));
-  if (preBackendValidationFailed) {
+  if (failed(validateCompileOptions(*module, state.level))) {
+    return 1;
+  }
+  if (failed(runPreBackendNormalization(*module))) {
+    return 1;
+  }
+  if (failed(pto::validateTExtractNd2xNzInputProvenance(module.get()))) {
     return 1;
   }
   state.hasTileOpsToExpand = hasUnexpandedTileOps(*module);
+
+  // The state is assembled and validated once above, so backend branches
+  // cannot observe partially validated option combinations.
   if (effectiveBackend == PTOBackend::VPTO && !state.hasTileOpsToExpand) {
-    return runFastVptoBackend(module, context, result, emitVPTOHostStub);
+    return runVPTOSkipMainlinePipeline(module, context, state, result,
+                                       emitVPTOHostStub);
   }
 
   bool mainPipelineHandled = false;
@@ -1599,5 +1687,5 @@ int mlir::pto::compilePTOASModule(
   if (effectiveBackend == PTOBackend::VPTO) {
     return 0;
   }
-  return runEmitCBackend(module, state, result);
+  return runEmitCTextEmission(module, state, result);
 }
