@@ -3865,14 +3865,16 @@ struct SubviewToEmitCPattern : public OpConversionPattern<memref::SubViewOp> {
   resolveSourceStrides(Value source, PatternRewriter &rewriter,
                        SmallVectorImpl<OpFoldResult> &strides) const {
     auto sourceType = dyn_cast<MemRefType>(source.getType());
-    if (!sourceType)
+    if (!sourceType) {
       return failure();
+    }
     int64_t rank = sourceType.getRank();
     if (auto reinterpretCast =
             source.getDefiningOp<memref::ReinterpretCastOp>()) {
       auto mixedStrides = reinterpretCast.getMixedStrides();
-      if (mixedStrides.size() != static_cast<size_t>(rank))
+      if (mixedStrides.size() != static_cast<size_t>(rank)) {
         return failure();
+      }
       strides.assign(mixedStrides.begin(), mixedStrides.end());
       return success();
     }
