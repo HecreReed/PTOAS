@@ -170,6 +170,9 @@ getNZInnerStructureError(ArrayRef<int64_t> shape5D,
 static std::optional<std::string>
 getNZOuterStrideError(ArrayRef<int64_t> shape5D,
                       ArrayRef<int64_t> stride5D, int64_t index, int64_t c0) {
+  if (c0 == 0) {
+    return "NZ layout requires a non-zero C0";
+  }
   if (isDynamic(stride5D[index])) {
     return std::nullopt;
   }
