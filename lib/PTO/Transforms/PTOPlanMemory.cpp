@@ -66,8 +66,8 @@ struct LocalMemSpec {
 static std::optional<int64_t> getTileBufferFootprintBytes(TileBufType type) {
   // Shared physical-storage sizing (design doc 12): plain rectangular and
   // RowPlusOne compact layouts go through getTileBufStorageByteSize so the
-  // planner, GraphSync and the post-planning ND-to-2xNz checks all agree on
-  // the footprint (checked arithmetic).
+  // planner and the post-planning ND-to-2xNz checks agree on the footprint
+  // (checked arithmetic).
   return getTileBufStorageByteSize(type);
 }
 
@@ -1218,7 +1218,7 @@ void MemPlan::EmitPlanMemoryFailureInfo() {
     AddressSpace space = iter.first;
     func_.emitError() << stringifyEnum(space) << " overflow, requires "
                       << iter.second << " bits while "
-                      << GetBufferSpaceInfo(space).second << " bits avaliable!";
+                      << GetBufferSpaceInfo(space).second << " bits available!";
   }
 }
 

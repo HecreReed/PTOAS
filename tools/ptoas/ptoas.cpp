@@ -244,21 +244,6 @@ llvm::cl::opt<bool> enableInjectBarrierAllSync(
                    "pto.barrier PIPE_ALL before memory-effecting PTO pipe ops"),
     llvm::cl::init(false));
 
-llvm::cl::opt<bool> enableGraphSyncSolver(
-    "enable-graph-sync-solver",
-    llvm::cl::desc("Enable the graph-based intra-core sync solver "
-                   "(experimental). Mutually exclusive with "
-                   "--enable-insert-sync, --enable-bufid_sync, and "
-                   "--enable-inject-barrier-all-sync."),
-    llvm::cl::init(false));
-
-llvm::cl::opt<int> graphSyncSolverEventIdMax(
-    "graph-sync-solver-event-id-max",
-    llvm::cl::desc(
-        "Maximum EVENT_ID slots for the graph sync solver (default 8). "
-        "Lower values exercise the PIPE_ALL coloring fallback sooner."),
-    llvm::cl::init(kDefaultGraphSyncSolverEventIdMax));
-
 static llvm::cl::opt<bool> enableTileOpExpand(
     "enable-tile-op-expand",
     llvm::cl::desc(

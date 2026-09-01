@@ -35,7 +35,7 @@ for model_path in "${BASE_DIR}"/Qwen* "${BASE_DIR}"/Deepseek*; do
       ;;
   esac
 done
-PTO_PTO_DIRS="${PTO_PTO_DIRS:-Sync${MODEL_PTO_DIRS} CommSync Prelu Rem Rems Gemvmx MatmulMxLowPrecision TquantMx TquantMxDn Movfp}"
+PTO_PTO_DIRS="${PTO_PTO_DIRS:-Sync${MODEL_PTO_DIRS} CommSync Prelu Rem Rems Gemvmx MatmulMxLowPrecision TquantMx TquantMxDn Movfp Interleave DeInterleave PairReduceSum}"
 ENABLE_BC=0
 
 usage() {
@@ -82,7 +82,7 @@ sample_dir_arch() {
   case "$1" in
     TPipe|TAxpy|TColArgMax|TColArgMin|TConcatIdx|\
       TRowArgMax|TRowArgMin|Qwen*A3|Deepseek*A3) printf 'a3\n' ;;
-    Qwen*A5|Deepseek*A5|TquantMx|TquantMxDn) printf 'a5\n' ;;
+    Qwen*A5|Deepseek*A5|TquantMx|TquantMxDn|Interleave|DeInterleave|PairReduceSum) printf 'a5\n' ;;
   esac
 }
 

@@ -672,12 +672,10 @@ struct SerialAutoSyncPass
     : public PassWrapper<SerialAutoSyncPass, OperationPass<ModuleOp>> {
   MLIR_DEFINE_EXPLICIT_INTERNAL_INLINE_TYPE_ID(SerialAutoSyncPass)
 
-  enum class Mode { InsertSync, Bufid, BarrierAll, GraphSolver };
+  enum class Mode { InsertSync, Bufid, BarrierAll };
 
-  SerialAutoSyncPass(Mode mode, bool enableBufidDebug,
-                     int64_t graphEventIdMax)
-      : mode(mode), enableBufidDebug(enableBufidDebug),
-        graphEventIdMax(graphEventIdMax) {}
+  SerialAutoSyncPass(Mode mode, bool enableBufidDebug)
+      : mode(mode), enableBufidDebug(enableBufidDebug) {}
 
   void runOnOperation() override {
     OpPassManager functionPM(func::FuncOp::getOperationName());
@@ -694,12 +692,6 @@ struct SerialAutoSyncPass
     case Mode::BarrierAll:
       functionPM.addPass(pto::createPTOInjectBarrierAllSyncPass());
       break;
-    case Mode::GraphSolver: {
-      PTOGraphSyncSolverOptions options;
-      options.eventIdNumMax = graphEventIdMax;
-      functionPM.addPass(pto::createPTOGraphSyncSolverPass(options));
-      break;
-    }
     }
 
     for (func::FuncOp funcOp :
@@ -714,7 +706,6 @@ struct SerialAutoSyncPass
 private:
   Mode mode;
   bool enableBufidDebug;
-  int64_t graphEventIdMax;
 };
 } // namespace
 
@@ -1017,6 +1008,7 @@ static void appendVMISemanticPipeline(OpPassManager &pm) {
   pm.addPass(pto::createVMILegalizeArithSelectPass());
   pm.addPass(pto::createPTOValidateVMILayoutIRPass());
   pm.addPass(pto::createVMIToVPTOPass());
+  pm.addPass(pto::createVPTOStatefulStreamFusionPass());
 }
 
 /// Reject statically invalid scf.for steps at the PTOAS input boundary.
@@ -1201,22 +1193,16 @@ static LogicalResult validateTAssignConfiguration(ModuleOp module,
   }
   const int enabledAutoSyncModes =
       (enableInsertSync ? 1 : 0) + (enableBufidSync ? 1 : 0) +
-      (enableInjectBarrierAllSync ? 1 : 0) +
-      (enableGraphSyncSolver ? 1 : 0);
+      (enableInjectBarrierAllSync ? 1 : 0);
   if (enabledAutoSyncModes > 1) {
     llvm::errs() << "Error: --enable-insert-sync, --enable-bufid_sync, "
-                    "--enable-inject-barrier-all-sync, and "
-                    "--enable-graph-sync-solver are mutually exclusive.\n";
+                    "and --enable-inject-barrier-all-sync are mutually "
+                    "exclusive.\n";
     return failure();
   }
   if (hasTAssign && enableInjectBarrierAllSync) {
     llvm::errs() << "Error: pto.tassign requires "
                     "--enable-inject-barrier-all-sync to be disabled.\n";
-    return failure();
-  }
-  if (hasTAssign && enableGraphSyncSolver) {
-    llvm::errs() << "Error: pto.tassign requires --enable-graph-sync-solver "
-                    "to be disabled.\n";
     return failure();
   }
   if (hasTAssign && enableBufidSync) {
@@ -1370,15 +1356,15 @@ static LogicalResult appendPlanMemoryPasses(PassManager &pm,
 }
 
 /// Conditionally add one automatic synchronization mode. Barrier-all is a
-/// conservative standalone pass; InsertSync and GraphSyncSolver are set/wait
-/// solvers, while BufidSync is A5-only get_buf/rls_buf synchronization. Sync
+/// conservative standalone pass; InsertSync is a set/wait solver, while
+/// BufidSync is A5-only get_buf/rls_buf synchronization. Sync
 /// runs BEFORE PTOResolveBufferSelect so it sees per-use `pto.multi_tile_get`
 /// operations and keeps their slot identity for alias and event-id analysis.
 static void appendAutoSyncPasses(PassManager &pm) {
   if (enableInsertSync) {
     if (emitMlirIR) {
       pm.addPass(std::make_unique<SerialAutoSyncPass>(
-          SerialAutoSyncPass::Mode::InsertSync, false, 0));
+          SerialAutoSyncPass::Mode::InsertSync, false));
     } else {
       pm.addNestedPass<func::FuncOp>(pto::createPTOInsertSyncPass());
     }
@@ -1386,7 +1372,7 @@ static void appendAutoSyncPasses(PassManager &pm) {
   else if (enableBufidSync) {
     if (emitMlirIR) {
       pm.addPass(std::make_unique<SerialAutoSyncPass>(
-          SerialAutoSyncPass::Mode::Bufid, enableBufidSyncDebug, 0));
+          SerialAutoSyncPass::Mode::Bufid, enableBufidSyncDebug));
     } else {
       PTOBufidSyncOptions options;
       options.enableBufidSyncDebug = enableBufidSyncDebug;
@@ -1395,21 +1381,10 @@ static void appendAutoSyncPasses(PassManager &pm) {
   } else if (enableInjectBarrierAllSync) {
     if (emitMlirIR) {
       pm.addPass(std::make_unique<SerialAutoSyncPass>(
-          SerialAutoSyncPass::Mode::BarrierAll, false, 0));
+          SerialAutoSyncPass::Mode::BarrierAll, false));
     } else {
       pm.addNestedPass<func::FuncOp>(
           pto::createPTOInjectBarrierAllSyncPass());
-    }
-  } else if (enableGraphSyncSolver) {
-    if (emitMlirIR) {
-      pm.addPass(std::make_unique<SerialAutoSyncPass>(
-          SerialAutoSyncPass::Mode::GraphSolver, false,
-          graphSyncSolverEventIdMax));
-    } else {
-      PTOGraphSyncSolverOptions options;
-      options.eventIdNumMax = graphSyncSolverEventIdMax;
-      pm.addNestedPass<func::FuncOp>(
-          pto::createPTOGraphSyncSolverPass(options));
     }
   }
 }

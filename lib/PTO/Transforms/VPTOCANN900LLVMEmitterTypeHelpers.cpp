@@ -1280,6 +1280,7 @@ constexpr VcvtContractEntry kVcvtContractEntries[] = {
     {VcvtElemKind::F16, VcvtElemKind::F8E5M2, {"llvm.hivm.vcvtff.f162f8e5m2.x", true, true, true, 16, false}},
     {VcvtElemKind::F16, VcvtElemKind::HiF8, {"llvm.hivm.vcvtff.f162hif8.x", true, true, true, 16, false}},
     {VcvtElemKind::F16, VcvtElemKind::F32, {"llvm.hivm.vcvtff.f162f32.x", false, false, true, 16, false}},
+    {VcvtElemKind::F16, VcvtElemKind::BF16, {"llvm.hivm.vcvtff.f162bf16.x", true, false, false, 16, false}},
     {VcvtElemKind::F16, VcvtElemKind::S32, {"llvm.hivm.vcvtfi.f162s32.x", true, false, true, 16, false}},
     {VcvtElemKind::F16, VcvtElemKind::S16, {"llvm.hivm.vcvtfi.f162s16.x", true, true, false, 16, false}},
     {VcvtElemKind::F16, VcvtElemKind::S8, {"llvm.hivm.vcvtfi.f162s8.x", true, true, true, 16, false}},
@@ -1346,27 +1347,10 @@ uint64_t determineVsqzStoreHint(pto::VsqzOp vsqz) {
 }
 
 std::optional<uint64_t> parseLoadDistImmediate(StringRef dist, Type elementType) {
-  if (dist.empty() || dist == "NORM") {
-    return 0;
-  }
-  static constexpr std::pair<StringLiteral, uint64_t> kModes[] = {
-      {"BRC_B8", 1},   {"BRC_B16", 2},  {"BRC_B32", 3},  {"US_B8", 6},        {"US_B16", 7},
-      {"DS_B8", 8},    {"DS_B16", 9},   {"UNPK_B8", 13}, {"UNPK_B16", 14},    {"UNPK_B32", 18},
-      {"BRC_BLK", 15}, {"E2B_B16", 16}, {"E2B_B32", 17}, {"SPLT2CHN_B8", 22}, {"SPLT2CHN_B16", 23},
-  };
-  for (const auto &[name, value] : kModes) {
-    if (dist == name) {
-      return value;
-    }
-  }
-  if (dist == "UNPK4" || dist == "SPLT4CHN") {
-    auto width = getDistElementWidth(elementType);
-    if (!width || *width != 8) {
-      return std::nullopt;
-    }
-    return dist == "UNPK4" ? 20 : 21;
-  }
-  return std::nullopt;
+  const auto *contract = lookupVPTOMemoryDist(VPTOMemoryOpFamily::Load, dist,
+                                              getDistElementWidth(elementType));
+  return contract ? std::optional<uint64_t>(contract->a5Immediate)
+                  : std::nullopt;
 }
 
 } // namespace mlir::pto::detail

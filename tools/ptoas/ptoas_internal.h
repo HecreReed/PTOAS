@@ -25,7 +25,6 @@
 
 // Shared inline capacities and marker sizes (moved verbatim from ptoas.cpp).
 constexpr unsigned kSeenCalleeInlineCapacity = 8;
-constexpr int kDefaultGraphSyncSolverEventIdMax = 8;
 constexpr unsigned kStringRefInlineCapacity = 4;
 constexpr unsigned kEmptyExpressionInlineCapacity = 8;
 constexpr unsigned kBranchInlineCapacity = 16;
@@ -63,8 +62,6 @@ extern llvm::cl::opt<bool> enableInsertSync;
 extern llvm::cl::opt<bool> enableBufidSync;
 extern llvm::cl::opt<bool> enableBufidSyncDebug;
 extern llvm::cl::opt<bool> enableInjectBarrierAllSync;
-extern llvm::cl::opt<bool> enableGraphSyncSolver;
-extern llvm::cl::opt<int> graphSyncSolverEventIdMax;
 extern llvm::cl::opt<llvm::cl::boolOrDefault> enableOpFusion;
 extern llvm::cl::opt<bool> enableUnrollAfterLoopFusion;
 extern llvm::cl::opt<bool> enableVexpdifFusion;

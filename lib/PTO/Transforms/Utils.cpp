@@ -449,7 +449,7 @@ static std::optional<uint64_t> getStaticTileBytes(TileBufType type) {
   // Shared access-envelope sizing (design doc 12): this feeds alias ranges
   // and multi-buffer slot strides, both of which model accessed bytes (the
   // reservation's trailing RowPlusOne gap is not accessed). Route through
-  // the shared helper so the value stays identical to GraphSync/InsertSync.
+  // the shared helper so the value stays identical to InsertSync.
   auto bytes = getTileBufAccessEndByteSize(type);
   if (!bytes)
     return std::nullopt;

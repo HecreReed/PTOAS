@@ -63,8 +63,8 @@ std::optional<int64_t> getTileBufStorageByteSize(Type tileBufType);
 // RowPlusOne compact layouts the trailing per-row gap after the last row is
 // not accessed, so the envelope is narrower than the reservation
 // (e.g. ColMajor NZ f16 16x32: reservation 1088 B, envelope 1056 B). Alias /
-// liveness consumers (GraphSync, InsertSync, post-planning ranges) must use
-// this; reservations use getTileBufStorageByteSize.
+// liveness consumers (InsertSync and post-planning ranges) must use this;
+// reservations use getTileBufStorageByteSize.
 std::optional<int64_t> getTileBufAccessEndByteSize(Type tileBufType);
 
 // Fold a value to a compile-time integer when it is a constant or a chain of

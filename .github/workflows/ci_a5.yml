@@ -380,6 +380,7 @@ jobs:
           results_tsv="${RESULTS_TSV:-${RUNNER_TEMP}/a5-board-results-missing.tsv}"
           "${report_python}" .github/scripts/report_a5_board_results.py \
             --results "${results_tsv}" \
+            --log "${BOARD_LOG:-}" \
             --conclusion "${BOARD_CONCLUSION}" \
             --run-url "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}" \
             --sha "${GITHUB_SHA}"

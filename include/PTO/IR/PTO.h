@@ -27,6 +27,7 @@
 #include "mlir/IR/BuiltinOps.h"
 #include "mlir/IR/BuiltinTypes.h"
 #include "mlir/IR/Dialect.h"
+#include "mlir/IR/MLIRContext.h"
 #include "mlir/IR/OpDefinition.h"
 #include "mlir/Interfaces/DestinationStyleOpInterface.h"
 #include "mlir/Interfaces/InferTypeOpInterface.h"
@@ -134,8 +135,6 @@ struct CubeLoadFracCtrlConfig {
 #include "PTO/IR/PTOOps.h.inc"
 
 namespace mlir {
-class MLIRContext;
-class TypeConverter;
 
 namespace pto {
 
@@ -242,7 +241,7 @@ inline constexpr llvm::StringLiteral kUnrollFactorAttrName =
 /// back as a signed value, so anything wider or non-positive would silently
 /// truncate (e.g. an i64 2**31 becomes a negative factor).
 inline bool isValidUnrollFactorAttr(IntegerAttr attr) {
-  return attr && attr.getType().isSignlessInteger(32) && attr.getInt() >= 1;
+  return attr && attr.getType().isSignlessInteger(kValue32) && attr.getInt() >= 1;
 }
 
 /// Return the PTODSL logical function name when present, otherwise fall back to
