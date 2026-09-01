@@ -17,6 +17,7 @@
 #include "PTO/Support/CodeConstants.h"
 #include "PTO/IR/PTO.h"
 #include "PTO/IR/PTOTypeUtils.h"
+#include "PTO/Transforms/LowerPTOToUBufOpsNd2xNz.h"
 #include "PTO/Transforms/Passes.h"
 
 #include "mlir/Dialect/Arith/IR/Arith.h"
@@ -238,243 +239,6 @@ static bool canLower(Operation *op, const TileShapeMap &tileShapes) {
 // scalar loop nests of the existing load_scalar/store_scalar ops with a
 // registered V<->S hidden-event barrier (design doc 6.3.1).
 
-struct PendingTExtractNd2xNz {
-  pto::TExtractOp op;
-  SmallVector<int64_t, 4> indices;      // [row0, col0, row1, col1]
-  int64_t elemBytes = 0;
-  int64_t srcRowStrideElems = 0;
-  int64_t srcPhysicalRows = 0;
-  int64_t srcPhysicalCols = 0;
-  SmallVector<int64_t, 4> dstPhysical;  // [r0, c0, r1, c1]
-  SmallVector<int64_t, 4> dstValid;     // [r0, c0, r1, c1]
-};
-
-static std::optional<PendingTExtractNd2xNz> snapshotTExtractNd2xNz(pto::TExtractOp op) {
-  if (!op.isNdTo2xNzForm()) {
-    return std::nullopt;
-  }
-  PendingTExtractNd2xNz pd;
-  pd.op = op;
-  auto indices = op.getIndices();
-  if (indices.size() != 4) {
-    return std::nullopt;
-  }
-  for (Value idx : indices) {
-    auto c = mlir::pto::getPTOConstantIntLike(idx);
-    if (!c) {
-      return std::nullopt;
-    }
-    pd.indices.push_back(*c);
-  }
-  auto srcTy = dyn_cast<pto::TileBufType>(op.getSrc().getType());
-  if (!srcTy) {
-    return std::nullopt;
-  }
-  pd.elemBytes = mlir::pto::getPTOStorageElemByteSize(srcTy.getElementType());
-  if (pd.elemBytes == 0 || 32 % pd.elemBytes != 0) {
-    return std::nullopt;
-  }
-  auto srcShape = srcTy.getShape();
-  if (srcShape.size() != 2) {
-    return std::nullopt;
-  }
-  pd.srcPhysicalRows = srcShape[0];
-  pd.srcPhysicalCols = srcShape[1];
-  pd.srcRowStrideElems = srcShape[1];
-  for (Value dst : op.getDsts()) {
-    auto dstTy = dyn_cast<pto::TileBufType>(dst.getType());
-    if (!dstTy) {
-      return std::nullopt;
-    }
-    auto shape = dstTy.getShape();
-    auto valid = dstTy.getValidShape();
-    if (shape.size() != 2 || valid.size() != 2) {
-      return std::nullopt;
-    }
-    pd.dstPhysical.push_back(shape[0]);
-    pd.dstPhysical.push_back(shape[1]);
-    pd.dstValid.push_back(valid[0]);
-    pd.dstValid.push_back(valid[1]);
-  }
-  if (pd.dstPhysical.size() != 4 || pd.dstValid.size() != 4) {
-    return std::nullopt;
-  }
-  return pd;
-}
-
-static Value buildNd2xNzIndex(OpBuilder &b, Location loc, int64_t v) {
-  return b.create<arith::ConstantIndexOp>(loc, v);
-}
-
-// Load src[row][col] and store dst[valid coordinate] using scalar pointer ops.
-static LogicalResult expandTExtractNd2xNzWindow(
-    OpBuilder &builder, Location loc, const PendingTExtractNd2xNz &pd,
-    unsigned window, Value srcPtr, Value dstPtr) {
-  const int64_t c0 = 32 / pd.elemBytes;
-  const int64_t rBase = pd.indices[window * 2];
-  const int64_t cBase = pd.indices[window * 2 + 1];
-  const int64_t validRows = pd.dstValid[window * 2];
-  const int64_t validCols = pd.dstValid[window * 2 + 1];
-  const int64_t physRows = pd.dstPhysical[window * 2];
-  if (validRows <= 0 || validCols <= 0) {
-    return failure();
-  }
-
-  auto cst = [&](OpBuilder &b, Location l, int64_t v) {
-    return buildNd2xNzIndex(b, l, v);
-  };
-  auto srcTy = cast<pto::PtrType>(srcPtr.getType());
-  auto elemTy = srcTy.getElementType();
-
-  // Build a single flat loop over validRows*validCols elements, computing
-  // row/col via div/rem; keeps the expansion to two scalar loop nests over
-  // the existing load_scalar/store_scalar pointer ops (design doc 9.3).
-  // Static loop-bound/offset products must be checked (overflow would wrap
-  // the footprint and corrupt loads/stores).
-  int64_t total = 0;
-  if (__builtin_mul_overflow(validRows, validCols, &total) || total <= 0)
-    return failure();
-  int64_t physRowsTimesC0 = 0;
-  if (__builtin_mul_overflow(physRows, c0, &physRowsTimesC0) ||
-      physRowsTimesC0 <= 0)
-    return failure();
-  auto flat = builder.create<scf::ForOp>(
-      loc, cst(builder, loc, 0), cst(builder, loc, total),
-      cst(builder, loc, 1), ValueRange{});
-  builder.setInsertionPointToStart(flat.getBody());
-  {
-    OpBuilder::InsertionGuard guard(builder);
-    Value flatIdx = flat.getInductionVar();
-    // r = flat / validCols; c = flat % validCols
-    Value cIdx = builder.create<arith::RemUIOp>(loc, flatIdx, cst(builder, loc, validCols));
-    Value rIdx = builder.create<arith::DivUIOp>(loc, flatIdx, cst(builder, loc, validCols));
-    // srcOff = (rBase + r) * srcRowStrideElems + cBase + c
-    Value rPlus = builder.create<arith::AddIOp>(loc, cst(builder, loc, rBase), rIdx);
-    Value srcRowOff = builder.create<arith::MulIOp>(
-        loc, rPlus, cst(builder, loc, pd.srcRowStrideElems));
-    Value cPlus = builder.create<arith::AddIOp>(loc, cst(builder, loc, cBase), cIdx);
-    Value srcOff = builder.create<arith::AddIOp>(loc, srcRowOff, cPlus);
-    // dstOff = (c / c0) * physRows * c0 + r * c0 + (c % c0)
-    Value cDiv = builder.create<arith::DivUIOp>(loc, cIdx, cst(builder, loc, c0));
-    Value blockOff = builder.create<arith::MulIOp>(
-        loc, cDiv, cst(builder, loc, physRowsTimesC0));
-    Value rBlock = builder.create<arith::MulIOp>(loc, rIdx, cst(builder, loc, c0));
-    Value cRem = builder.create<arith::RemUIOp>(loc, cIdx, cst(builder, loc, c0));
-    Value dstOff = builder.create<arith::AddIOp>(
-        loc, builder.create<arith::AddIOp>(loc, blockOff, rBlock), cRem);
-    Value loaded = builder.create<pto::LoadScalarOp>(loc, elemTy, srcPtr, srcOff);
-    builder.create<pto::StoreScalarOp>(loc, dstPtr, dstOff, loaded);
-  }
-  builder.setInsertionPointAfter(flat);
-  return success();
-}
-
-// Pick the synchronization event id for the hidden V<->S barrier of one
-// ND-to-2xNz scalar expansion. TExtractOp's SyncMacroModel reserves event 0
-// (design doc 6.3.1); when the event-id allocator ran (InsertSync), 0 is
-// free for us because it is reserved. When it did not run, choose the first
-// id not already used by explicit set_flag/wait_flag ops in the whole
-// enclosing function (not just the immediate region, so a nested scf.for
-// sees every explicit event in the function). Only EVENT_ID0..7 are legal
-// compiler event ids (SyncEventIdAllocation::kTotalEventIdNum == 8; 14/15
-// are hardware block-sync ids); if all eight are in use this expansion must
-// fail rather than silently reuse a reserved/literal event.
-static std::optional<unsigned> selectUnusedHiddenEventId(Operation *anchor,
-                                                         MLIRContext *ctx) {
-  llvm::SmallDenseSet<int32_t, 8> used;
-  // Dynamic set/wait flags take a runtime event id; a constant dynamic id
-  // folds into `used`, while a genuinely runtime id could take any legal
-  // value, so we can no longer prove a static id is safe.
-  bool hasUnknownDynEvent = false;
-  auto scan = [&](Operation *scope) {
-    scope->walk([&](Operation *inner) {
-      if (auto sf = dyn_cast<pto::SetFlagOp>(inner)) {
-        if (auto ev = sf.getEventIdAttr())
-          used.insert(static_cast<int32_t>(ev.getEvent()));
-        return;
-      }
-      if (auto wf = dyn_cast<pto::WaitFlagOp>(inner)) {
-        if (auto ev = wf.getEventIdAttr())
-          used.insert(static_cast<int32_t>(ev.getEvent()));
-        return;
-      }
-      if (auto sd = dyn_cast<pto::SetFlagDynOp>(inner)) {
-        if (auto c = mlir::pto::getPTOConstantIntLike(sd.getEventId()))
-          used.insert(static_cast<int32_t>(*c));
-        else
-          hasUnknownDynEvent = true;
-        return;
-      }
-      if (auto wd = dyn_cast<pto::WaitFlagDynOp>(inner)) {
-        if (auto c = mlir::pto::getPTOConstantIntLike(wd.getEventId()))
-          used.insert(static_cast<int32_t>(*c));
-        else
-          hasUnknownDynEvent = true;
-      }
-    });
-  };
-  func::FuncOp func = anchor->getParentOfType<func::FuncOp>();
-  if (func)
-    scan(func);
-  else
-    scan(anchor->getParentOp() ? anchor->getParentOp() : anchor);
-  // kTotalEventIdNum == 8 bounds the legal compiler event-id space
-  // (SyncEventIdAllocation.h); a straightforward linear scan keeps
-  // determinism. With an unresolvable dynamic event id in the function we
-  // cannot prove any static id is disjoint (a runtime id may take 0..7), so
-  // expansion refuses to guess (design doc 6.3.1: do not emit unregistered
-  // literal events).
-  constexpr unsigned kCompilerEventIdNum = 8;
-  if (hasUnknownDynEvent)
-    return std::nullopt;
-  for (unsigned id = 0; id < kCompilerEventIdNum; ++id) {
-    if (!used.count(static_cast<int32_t>(id)))
-      return id;
-  }
-  return std::nullopt;
-}
-
-static LogicalResult expandTExtractNd2xNz(
-    OpBuilder &builder, MLIRContext *ctx, const PendingTExtractNd2xNz &pd,
-    pto::EVENT eventId) {
-  Operation *rawOp = pd.op;
-  Location loc = rawOp->getLoc();
-  // After allocation materialization the operands are !pto.ptr<..., ub>;
-  // access them by raw operand position (design doc 9.3 step 2).
-  Value srcPtr = rawOp->getOperand(0);
-  Value dst0Ptr = rawOp->getOperand(5);
-  Value dst1Ptr = rawOp->getOperand(6);
-
-  // Registered hidden-event barrier around the scalar expansion (design doc
-  // 6.3.1): TExtractOp's SyncMacroModel reserves event 0 for the V<->S hidden
-  // pair during event-id allocation (InsertSync path). When the allocator did
-  // not run (e.g. default VPTO lowering), pick the first event id not already
-  // used explicitly in the enclosing scope so we never collide with a user
-  // literal event (design doc 6.3.1: lowering must not register a conflicting
-  // literal event).
-  builder.setInsertionPoint(rawOp);
-  auto pipeV = pto::PipeAttr::get(ctx, pto::PIPE::PIPE_V);
-  auto pipeS = pto::PipeAttr::get(ctx, pto::PIPE::PIPE_S);
-  // One event id is chosen per function (see the caller): sequential barrier
-  // pairs on a shared id are safe because every set is matched by wait before
-  // the next op's set, and the id avoids ids used by explicit user flags.
-  auto event0 = pto::EventAttr::get(ctx, eventId);
-  builder.create<pto::SetFlagOp>(loc, pipeV, pipeS, event0);
-  builder.create<pto::WaitFlagOp>(loc, pipeV, pipeS, event0);
-
-  if (failed(expandTExtractNd2xNzWindow(builder, loc, pd, 0, srcPtr, dst0Ptr)) ||
-      failed(expandTExtractNd2xNzWindow(builder, loc, pd, 1, srcPtr, dst1Ptr))) {
-    return failure();
-  }
-
-  builder.setInsertionPoint(rawOp);
-  builder.create<pto::SetFlagOp>(loc, pipeS, pipeV, event0);
-  builder.create<pto::WaitFlagOp>(loc, pipeS, pipeV, event0);
-
-  rawOp->erase();
-  return success();
-}
-
 //===----------------------------------------------------------------------===//
 // Pass
 //===----------------------------------------------------------------------===//
@@ -503,12 +267,12 @@ struct LowerPTOToUBufOpsPass
 
     // Snapshot dual-output TEXTRACT before allocation materialization loses
     // the tile types (design doc 9.3 step 1).
-    SmallVector<PendingTExtractNd2xNz, 4> pendingNd2xNz;
+    SmallVector<mlir::pto::detail::PendingTExtractNd2xNz, 4> pendingNd2xNz;
     {
       SmallVector<pto::TExtractOp> extractOps;
       func.walk([&](pto::TExtractOp op) { extractOps.push_back(op); });
       for (pto::TExtractOp op : extractOps) {
-        if (auto snapshot = snapshotTExtractNd2xNz(op)) {
+        if (auto snapshot = mlir::pto::detail::snapshotTExtractNd2xNz(op)) {
           pendingNd2xNz.push_back(*snapshot);
         }
       }
@@ -569,7 +333,7 @@ struct LowerPTOToUBufOpsPass
     auto eventIdOpt =
         pendingNd2xNz.empty()
             ? std::optional<unsigned>(std::nullopt)
-            : selectUnusedHiddenEventId(func.getOperation(), ctx);
+            : mlir::pto::detail::selectUnusedHiddenEventId(func.getOperation(), ctx);
     if (!pendingNd2xNz.empty()) {
       if (!eventIdOpt) {
         func.emitError(
@@ -580,7 +344,8 @@ struct LowerPTOToUBufOpsPass
       }
       auto eventId = static_cast<pto::EVENT>(*eventIdOpt);
       for (auto &pending : pendingNd2xNz) {
-        if (failed(expandTExtractNd2xNz(builder, ctx, pending, eventId))) {
+        if (failed(mlir::pto::detail::expandTExtractNd2xNz(builder, ctx, pending,
+                                                           eventId))) {
           pending.op.emitError("failed to expand ND-to-2xNz TEXTRACT for A2/A3 VPTO");
           signalPassFailure();
           return;

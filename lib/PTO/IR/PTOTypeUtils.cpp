@@ -190,87 +190,94 @@ std::optional<int64_t> mlir::pto::getTileBufStorageByteSize(Type tileBufType) {
   return *bits / kBitsPerByte;
 }
 
-std::optional<int64_t> mlir::pto::getTileBufAccessEndByteSize(Type tileBufType) {
-  auto tb = dyn_cast<pto::TileBufType>(tileBufType);
-  if (!tb)
-    return std::nullopt;
-  auto allocation = getTileBufStorageByteSize(tileBufType);
-  if (!allocation)
-    return std::nullopt;
-  unsigned byteWidth = getPTOStorageElemByteSize(tb.getElementType());
-  if (byteWidth == 0)
-    return std::nullopt;
-  if (tb.getCompactModeI32() !=
-      static_cast<int32_t>(pto::CompactMode::RowPlusOne)) {
-    return *allocation;
-  }
-  auto shape = tb.getShape();
-  if (shape.size() != 2 || llvm::is_contained(shape, ShapedType::kDynamic)) {
+namespace {
+static std::optional<int64_t> getNoneBoxRowPlusOneEnd(int64_t allocation,
+                                                       unsigned byteWidth) {
+  int64_t end = 0;
+  if (__builtin_sub_overflow(allocation, static_cast<int64_t>(byteWidth),
+                             &end) ||
+      end < 0) {
     return std::nullopt;
   }
-  const bool isNoneBox = tb.getSLayoutValueI32() ==
-                         static_cast<int32_t>(pto::SLayout::NoneBox);
-  if (isNoneBox) {
-    // Ordinary linear RowPlusOne: every row has a trailing gap element and
-    // only the gap after the last row is never accessed, so the envelope is
-    // the reservation minus one element
-    // (e.g. 16x16xf32 rowMajor: 16*17*4 - 4 = 1084 B; the previous
-    // minor-stride formula under-counted plain layouts).
-    int64_t end = 0;
-    if (__builtin_sub_overflow(*allocation, static_cast<int64_t>(byteWidth),
-                               &end)) {
-      return std::nullopt;
-    }
-    if (end < 0)
-      return std::nullopt;
-    return end;
-  }
-  // NZ (fractal block) RowPlusOne: each c0-column block occupies a block
-  // stride of physicalRows * (c0 + 1) elements and accesses physicalRows * c0
-  // of them; the envelope ends at the last accessed block interval
-  // (e.g. ColMajor NZ f16 16x32: nblocks=2, payload=16*16=256, stride=16*17
-  // =272 -> (1*272+256)*2 = 1056 B).
+  return end;
+}
+
+static std::optional<int64_t> getNzRowPlusOneEnd(ArrayRef<int64_t> shape,
+                                                  unsigned byteWidth) {
   int64_t physicalRows = shape[0];
   int64_t cols = shape[1];
-  if (physicalRows <= 0 || cols <= 0 || byteWidth == 0 || 32 % byteWidth != 0)
+  if (physicalRows <= 0 || cols <= 0 || 32 % byteWidth != 0) {
     return std::nullopt;
+  }
   int64_t c0 = 32 / static_cast<int64_t>(byteWidth);
   int64_t nblocks = (cols + c0 - 1) / c0;
   int64_t payload = 0;
   int64_t stride = 0;
-  if (__builtin_mul_overflow(physicalRows, c0, &payload) || payload <= 0)
+  bool payloadOverflow = __builtin_mul_overflow(physicalRows, c0, &payload);
+  bool strideOverflow =
+      __builtin_mul_overflow(physicalRows, c0 + 1, &stride);
+  if (payloadOverflow || payload <= 0 || strideOverflow || stride <= 0) {
     return std::nullopt;
-  if (__builtin_mul_overflow(physicalRows, c0 + 1, &stride) || stride <= 0)
-    return std::nullopt;
+  }
   int64_t lastBlockStart = 0;
   if (nblocks > 1 &&
       __builtin_mul_overflow(nblocks - 1, stride, &lastBlockStart)) {
     return std::nullopt;
   }
   int64_t endElems = 0;
-  if (__builtin_add_overflow(lastBlockStart, payload, &endElems))
+  if (__builtin_add_overflow(lastBlockStart, payload, &endElems)) {
     return std::nullopt;
+  }
   int64_t end = 0;
-  if (__builtin_mul_overflow(endElems, static_cast<int64_t>(byteWidth), &end))
+  if (__builtin_mul_overflow(endElems, static_cast<int64_t>(byteWidth), &end)) {
     return std::nullopt;
+  }
   return end;
+}
+} // namespace
+
+std::optional<int64_t> mlir::pto::getTileBufAccessEndByteSize(Type tileBufType) {
+  auto tb = dyn_cast<pto::TileBufType>(tileBufType);
+  auto allocation = getTileBufStorageByteSize(tileBufType);
+  if (!tb || !allocation) {
+    return std::nullopt;
+  }
+  unsigned byteWidth = getPTOStorageElemByteSize(tb.getElementType());
+  if (byteWidth == 0) {
+    return std::nullopt;
+  }
+  bool rowPlusOne = tb.getCompactModeI32() ==
+                    static_cast<int32_t>(pto::CompactMode::RowPlusOne);
+  if (!rowPlusOne) {
+    return *allocation;
+  }
+  auto shape = tb.getShape();
+  bool invalidShape =
+      shape.size() != 2 || llvm::is_contained(shape, ShapedType::kDynamic);
+  if (invalidShape) {
+    return std::nullopt;
+  }
+  bool isNoneBox = tb.getSLayoutValueI32() ==
+                   static_cast<int32_t>(pto::SLayout::NoneBox);
+  if (isNoneBox) {
+    return getNoneBoxRowPlusOneEnd(*allocation, byteWidth);
+  }
+  return getNzRowPlusOneEnd(shape, byteWidth);
 }
 
 namespace {
-// A folded integer carries both the value and the bit width its two's
-// complement representation is interpreted in, so ExtUI/Trunc/IAdd behave
-// exactly like the corresponding arith ops (design doc 5.1: the verifier and
-// the post-planning resolver must agree on index folding).
 struct PTOFoldedInt {
   int64_t value;
   unsigned bitWidth;
 };
 
 unsigned ptoIntLikeWidth(Type ty) {
-  if (ty.isIndex())
+  if (ty.isIndex()) {
     return 64;
-  if (auto it = dyn_cast<IntegerType>(ty))
+  }
+  if (auto it = dyn_cast<IntegerType>(ty)) {
     return it.getWidth();
+  }
   return 0;
 }
 
@@ -302,76 +309,85 @@ std::optional<PTOFoldedInt> ptoExtendOrTrunc(const PTOFoldedInt &in,
   return PTOFoldedInt{a.trunc(dstWidth).getSExtValue(), dstWidth};
 }
 
-std::optional<PTOFoldedInt> ptoFoldIntLike(Value v) {
-  if (!v)
-    return std::nullopt;
-  if (auto cOp = v.getDefiningOp<arith::ConstantIndexOp>())
+static std::optional<PTOFoldedInt> ptoFoldConstant(Value v) {
+  if (auto cOp = v.getDefiningOp<arith::ConstantIndexOp>()) {
     return PTOFoldedInt{cOp.value(), 64};
+  }
   if (auto cInt = v.getDefiningOp<arith::ConstantIntOp>()) {
-    unsigned w = ptoIntLikeWidth(cInt.getType());
-    if (w == 0 || w > 64)
+    unsigned width = ptoIntLikeWidth(cInt.getType());
+    if (width == 0 || width > 64) {
       return std::nullopt;
-    return PTOFoldedInt{cInt.value(), w};
+    }
+    return PTOFoldedInt{cInt.value(), width};
   }
   if (auto cOp = v.getDefiningOp<arith::ConstantOp>()) {
-    if (auto ia = dyn_cast<IntegerAttr>(cOp.getValue())) {
-      unsigned w = ptoIntLikeWidth(ia.getType());
-      if (w == 0 || w > 64)
-        return std::nullopt;
-      return PTOFoldedInt{ia.getInt(), w};
+    auto integerAttr = dyn_cast<IntegerAttr>(cOp.getValue());
+    if (!integerAttr) {
+      return std::nullopt;
     }
+    unsigned width = ptoIntLikeWidth(integerAttr.getType());
+    if (width == 0 || width > 64) {
+      return std::nullopt;
+    }
+    return PTOFoldedInt{integerAttr.getInt(), width};
+  }
+  return std::nullopt;
+}
+
+static std::optional<PTOFoldedInt> ptoFoldCast(Value v) {
+  auto fold = [&](Value input, Type resultType, bool isSigned, bool isTrunc) {
+    auto folded = ptoFoldIntLike(input);
+    if (!folded) {
+      return std::optional<PTOFoldedInt>();
+    }
+    return ptoExtendOrTrunc(*folded, ptoIntLikeWidth(resultType), isSigned,
+                            isTrunc);
+  };
+  if (auto op = v.getDefiningOp<arith::IndexCastOp>()) {
+    return fold(op.getIn(), op.getType(), true, false);
+  }
+  if (auto op = v.getDefiningOp<arith::ExtSIOp>()) {
+    return fold(op.getIn(), op.getType(), true, false);
+  }
+  if (auto op = v.getDefiningOp<arith::ExtUIOp>()) {
+    return fold(op.getIn(), op.getType(), false, false);
+  }
+  if (auto op = v.getDefiningOp<arith::TruncIOp>()) {
+    return fold(op.getIn(), op.getType(), false, true);
+  }
+  return std::nullopt;
+}
+
+static std::optional<PTOFoldedInt> ptoFoldBinary(Value v, bool isAdd) {
+  auto *definingOp = v.getDefiningOp();
+  auto lhs = ptoFoldIntLike(definingOp->getOperand(0));
+  auto rhs = ptoFoldIntLike(definingOp->getOperand(1));
+  unsigned width = ptoIntLikeWidth(v.getType());
+  if (!lhs || !rhs || width == 0 || width > 64) {
     return std::nullopt;
   }
-  if (auto castOp = v.getDefiningOp<arith::IndexCastOp>()) {
-    auto in = ptoFoldIntLike(castOp.getIn());
-    if (!in)
-      return std::nullopt;
-    return ptoExtendOrTrunc(*in, ptoIntLikeWidth(castOp.getType()),
-                            /*isSigned=*/true, /*isTrunc=*/false);
+  llvm::APInt a(width, static_cast<uint64_t>(lhs->value));
+  llvm::APInt b(width, static_cast<uint64_t>(rhs->value));
+  llvm::APInt result = isAdd ? (a + b) : (a - b);
+  return PTOFoldedInt{result.getSExtValue(), width};
+}
+
+std::optional<PTOFoldedInt> ptoFoldIntLike(Value v) {
+  if (!v) {
+    return std::nullopt;
   }
-  if (auto extOp = v.getDefiningOp<arith::ExtSIOp>()) {
-    auto in = ptoFoldIntLike(extOp.getIn());
-    if (!in)
-      return std::nullopt;
-    return ptoExtendOrTrunc(*in, ptoIntLikeWidth(extOp.getType()),
-                            /*isSigned=*/true, /*isTrunc=*/false);
+  if (auto constant = ptoFoldConstant(v)) {
+    return constant;
   }
-  if (auto extOp = v.getDefiningOp<arith::ExtUIOp>()) {
-    auto in = ptoFoldIntLike(extOp.getIn());
-    if (!in)
-      return std::nullopt;
-    return ptoExtendOrTrunc(*in, ptoIntLikeWidth(extOp.getType()),
-                            /*isSigned=*/false, /*isTrunc=*/false);
+  if (auto cast = ptoFoldCast(v)) {
+    return cast;
   }
-  if (auto truncOp = v.getDefiningOp<arith::TruncIOp>()) {
-    auto in = ptoFoldIntLike(truncOp.getIn());
-    if (!in)
-      return std::nullopt;
-    return ptoExtendOrTrunc(*in, ptoIntLikeWidth(truncOp.getType()),
-                            /*isSigned=*/false, /*isTrunc=*/true);
+  if (v.getDefiningOp<arith::AddIOp>()) {
+    return ptoFoldBinary(v, true);
   }
-  // Pure constant arithmetic: wrap at the result width with APInt (no UB on
-  // int64 overflow), exactly like arith.addi / arith.subi.
-  auto foldBinArith = [](Value v, bool isAdd) -> std::optional<PTOFoldedInt> {
-    auto lhs = ptoFoldIntLike(v.getDefiningOp()->getOperand(0));
-    auto rhs = ptoFoldIntLike(v.getDefiningOp()->getOperand(1));
-    if (!lhs || !rhs)
-      return std::nullopt;
-    unsigned w = ptoIntLikeWidth(v.getType());
-    if (w == 0 || w > 64)
-      return std::nullopt;
-    // Wrapping two's-complement arithmetic at the result width; construct
-    // from the raw bit pattern (implicit trunc) so negative literals of any
-    // source width are safe.
-    llvm::APInt a(w, static_cast<uint64_t>(lhs->value));
-    llvm::APInt b(w, static_cast<uint64_t>(rhs->value));
-    llvm::APInt out = isAdd ? (a + b) : (a - b);
-    return PTOFoldedInt{out.getSExtValue(), w};
-  };
-  if (v.getDefiningOp<arith::AddIOp>())
-    return foldBinArith(v, /*isAdd=*/true);
-  if (v.getDefiningOp<arith::SubIOp>())
-    return foldBinArith(v, /*isAdd=*/false);
+  if (v.getDefiningOp<arith::SubIOp>()) {
+    return ptoFoldBinary(v, false);
+  }
   return std::nullopt;
 }
 } // namespace

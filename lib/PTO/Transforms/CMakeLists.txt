@@ -109,6 +109,7 @@ add_mlir_dialect_library(PTOTransforms
   ExpandTileOp.cpp
   FoldTileBufIntrinsics.cpp
   LowerPTOToUBufOps.cpp
+  LowerPTOToUBufOpsNd2xNz.cpp
   PTOLowerToOpLibCalls.cpp
   PTOInstantiateAndInlineOpLib.cpp
   PTOToEmitC.cpp

@@ -18,6 +18,8 @@ The first version registers f16 only (design doc 9.1: unverified dtypes
 must not be registered); the A5 verifier enforces the same set.
 """
 
+import inspect
+
 from ptodsl import pto
 import ptodsl.tilelib as tilelib
 from ptodsl._ast_rewrite import rewrite_jit_function
@@ -32,23 +34,23 @@ def _elem_bytes(dst):
     return width // 8
 
 
-def _nd2xnz_constraint(src_kind, src_memory_space, dst0_kind, dst0_memory_space,
-                       dst1_kind, dst1_memory_space, **_):
+def _nd2xnz_constraint(**context):
     # InsertTemplateAttributes/ExpandTileOp normalize the VEC address space
     # to the string "ub" (see InsertTemplateAttributes.cpp
     # stringifyMemorySpace), so candidates must declare "ub" here.
-    return (
-        src_kind == "tile"
-        and dst0_kind == "tile"
-        and dst1_kind == "tile"
-        and src_memory_space == "ub"
-        and dst0_memory_space == "ub"
-        and dst1_memory_space == "ub"
-    )
+    required = {
+        "src_kind": "tile",
+        "dst0_kind": "tile",
+        "dst1_kind": "tile",
+        "src_memory_space": "ub",
+        "dst0_memory_space": "ub",
+        "dst1_memory_space": "ub",
+    }
+    return all(context.get(name) == value for name, value in required.items())
 
 
 @rewrite_jit_function
-def _expand_vector(src, dst, src_ptr, dst_ptr, row0, col0, m, n):
+def _expand_vector(src, dst, row0, col0):
     """Vector path for non-1x1 windows (design doc 9.2).
 
     Column blocks of c0 are walked with an exact trailing-block mask so
@@ -56,6 +58,9 @@ def _expand_vector(src, dst, src_ptr, dst_ptr, row0, col0, m, n):
     written (undefined by the TEXTRACT contract, design 3.2.1). pto.addptr
     advances by element offset (not bytes).
     """
+    src_ptr = src.as_ptr()
+    dst_ptr = dst.as_ptr()
+    m, n = dst.valid_shape
     c0 = 32 // _elem_bytes(dst)
     block_stride = dst.shape[0]  # storageRows (plain NZ); design doc 3.2
     nblocks = (n + c0 - 1) // c0
@@ -122,12 +127,36 @@ def _expand_window(src, row0, col0, dst):
             pto.set_flag("S", "V", event_id=0)
             pto.wait_flag("S", "V", event_id=0)
         else:
-            _expand_vector(src, dst, src_ptr, dst_ptr, row0, col0, m, n)
+            _expand_vector(src, dst, row0, col0)
     else:
-        _expand_vector(src, dst, src_ptr, dst_ptr, row0, col0, m, n)
+        _expand_vector(src, dst, row0, col0)
 
 
-@tilelib.tile_template(
+def template_textract_nd2xnz(*operands):
+    """Dual-output ND-to-2xNZ TEXTRACT: expand two independent windows."""
+    if len(operands) != 7:
+        raise TypeError("template_textract_nd2xnz expects seven operands")
+    src, index_row0, index_col0, index_row1, index_col1, dst0, dst1 = operands
+    _expand_window(src, index_row0, index_col0, dst0)
+    _expand_window(src, index_row1, index_col1, dst1)
+
+
+template_textract_nd2xnz.__signature__ = inspect.Signature(
+    inspect.Parameter(name, inspect.Parameter.POSITIONAL_OR_KEYWORD,
+                      annotation=annotation)
+    for name, annotation in (
+        ("src", pto.Tile),
+        ("index_row0", pto.i32),
+        ("index_col0", pto.i32),
+        ("index_row1", pto.i32),
+        ("index_col1", pto.i32),
+        ("dst0", pto.Tile),
+        ("dst1", pto.Tile),
+    )
+)
+
+
+template_textract_nd2xnz = tilelib.tile_template(
     op="pto.textract",
     target="a5",
     name="template_textract_nd2xnz",
@@ -140,16 +169,4 @@ def _expand_window(src, row0, col0, dst):
     loop_depth=1,
     is_post_update=False,
     tags=("extract", "ub", "nd2xnz"),
-)
-def template_textract_nd2xnz(
-    src: pto.Tile,
-    index_row0: pto.i32,
-    index_col0: pto.i32,
-    index_row1: pto.i32,
-    index_col1: pto.i32,
-    dst0: pto.Tile,
-    dst1: pto.Tile,
-):
-    """Dual-output ND-to-2xNZ TEXTRACT: expand two independent windows."""
-    _expand_window(src, index_row0, index_col0, dst0)
-    _expand_window(src, index_row1, index_col1, dst1)
+)(template_textract_nd2xnz)

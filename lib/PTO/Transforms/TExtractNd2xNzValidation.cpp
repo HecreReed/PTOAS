@@ -198,91 +198,81 @@ void collectCallComponent(func::FuncOp entry, ModuleOp module,
 // MultiTileGetOp of an AllocMultiTileOp for non-RowPlusOne operands.
 // DeclareTileOp / TAssignOp / TPopOp / TPopFromAicOp / TPopFromAivOp and their
 // views, block arguments, and unknown roots are rejected.
+namespace {
+static void validateNd2xNzProvenanceOperand(pto::TExtractOp op, Value value,
+                                            StringRef name, bool &failedModule) {
+  if (failedModule) {
+    return;
+  }
+  Value root = skipViews(value);
+  Operation *rootOp = root.getDefiningOp();
+  bool rowPlusOne = isRowPlusOneTile(root.getType());
+  if (!rootOp) {
+    op.emitOpError() << "ND-to-2xNz TEXTRACT " << name
+                     << " is a block argument or function operand; "
+                        "runtime-bound tile provenance is not supported "
+                        "(use alloc_tile with planner-owned or statically "
+                        "known level3 address)";
+    failedModule = true;
+    return;
+  }
+  if (isa<pto::AllocTileOp>(rootOp)) {
+    return;
+  }
+  if (auto get = dyn_cast<pto::MultiTileGetOp>(rootOp)) {
+    if (!rowPlusOne) {
+      return;
+    }
+    rootOp->emitOpError()
+        << "supplies RowPlusOne ND-to-2xNz " << name
+        << " from multi-buffer provenance; a single pto.alloc_tile is "
+           "required";
+    failedModule = true;
+    return;
+  }
+  if (isa<pto::DeclareTileOp, pto::TAssignOp, pto::TPopOp,
+          pto::TPopFromAicOp, pto::TPopFromAivOp>(rootOp)) {
+    rootOp->emitOpError()
+        << "is runtime-bound tile provenance for ND-to-2xNz " << name
+        << " (root op " << rootOp->getName()
+        << "); only alloc_tile (or non-RowPlusOne alloc_multi_tile slots) "
+           "are supported";
+    failedModule = true;
+    return;
+  }
+  rootOp->emitOpError() << "is unsupported tile provenance for "
+                        << "ND-to-2xNz " << name << " (root op "
+                        << rootOp->getName()
+                        << "); use alloc_tile with planner-owned or "
+                           "statically known level3 address";
+  failedModule = true;
+}
+} // namespace
+
 mlir::LogicalResult
 mlir::pto::validateTExtractNd2xNzInputProvenance(mlir::Operation *module) {
   auto mod = dyn_cast<ModuleOp>(module);
-  if (!mod)
+  if (!mod) {
     return success();
-
+  }
   bool failedModule = false;
   mod.walk([&](pto::TExtractOp op) {
-    if (!op.isNdTo2xNzForm())
+    if (!op.isNdTo2xNzForm()) {
       return;
-    auto checkOperand = [&](Value v, StringRef name) {
-      if (failedModule)
-        return;
-      Value root = skipViews(v);
-      Operation *rootOp = root.getDefiningOp();
-      bool rowPlusOne = isRowPlusOneTile(root.getType());
-      if (!rootOp) {
-        op.emitOpError() << "ND-to-2xNz TEXTRACT " << name
-                         << " is a block argument or function operand; "
-                            "runtime-bound tile provenance is not supported "
-                            "(use alloc_tile with planner-owned or statically "
-                            "known level3 address)";
-        failedModule = true;
-        return;
-      }
-      if (isa<pto::AllocTileOp>(rootOp))
-        return;
-      if (auto get = dyn_cast<pto::MultiTileGetOp>(rootOp)) {
-        if (!rowPlusOne)
-          return;
-        rootOp->emitOpError()
-            << "supplies RowPlusOne ND-to-2xNz " << name
-            << " from multi-buffer provenance; a single pto.alloc_tile is "
-               "required";
-        failedModule = true;
-        return;
-      }
-      if (isa<pto::DeclareTileOp, pto::TAssignOp, pto::TPopOp,
-              pto::TPopFromAicOp, pto::TPopFromAivOp>(rootOp)) {
-        rootOp->emitOpError()
-            << "is runtime-bound tile provenance for ND-to-2xNz " << name
-            << " (root op " << rootOp->getName()
-            << "); only alloc_tile (or non-RowPlusOne alloc_multi_tile slots) "
-               "are supported";
-        failedModule = true;
-        return;
-      }
-      rootOp->emitOpError() << "is unsupported tile provenance for "
-                            << "ND-to-2xNz " << name << " (root op "
-                            << rootOp->getName()
-                            << "); use alloc_tile with planner-owned or "
-                               "statically known level3 address";
-      failedModule = true;
-    };
-    checkOperand(op.getSrc(), "src");
-    checkOperand(op.getDsts()[0], "dst0");
-    checkOperand(op.getDsts()[1], "dst1");
+    }
+    validateNd2xNzProvenanceOperand(op, op.getSrc(), "src", failedModule);
+    validateNd2xNzProvenanceOperand(op, op.getDsts()[0], "dst0", failedModule);
+    validateNd2xNzProvenanceOperand(op, op.getDsts()[1], "dst1", failedModule);
   });
   return failedModule ? failure() : success();
 }
 
-//===----------------------------------------------------------------------===//
-// validateTExtractNd2xNzPostPlanningSafety
-//===----------------------------------------------------------------------===//
-// Design doc 5.3.1: after PTOResolveBufferSelect and before
-// PTOInlineBackendHelpersPass, reject any generic TSTORE whose source physical
-// range (same address space) aliases a partial-valid ND-to-2xNz destination
-// inside the same direct-call component. When any partial producer exists, the
-// call surface must also be closed: call_indirect / external / unresolved
-// direct callees / other opaque CallOpInterface ops reject the whole unit.
-mlir::LogicalResult
-mlir::pto::validateTExtractNd2xNzPostPlanningSafety(mlir::Operation *module) {
-  auto mod = dyn_cast<ModuleOp>(module);
-  if (!mod)
-    return success();
-
-  bool failedModule = false;
-
-  // Pairwise no-alias recheck (design doc 5.3.1 item 2): src/dst0/dst1 must
-  // resolve to non-negative static absolute ranges and stay pairwise disjoint
-  // in the same address space. Runs unconditionally for every dual-output op,
-  // including explicit-address level3 shapes where PlanMemory is skipped.
+namespace {
+static void checkNd2xNzPairwiseAliases(ModuleOp mod, bool &failedModule) {
   mod.walk([&](pto::TExtractOp op) {
-    if (failedModule || !op.isNdTo2xNzForm())
+    if (failedModule || !op.isNdTo2xNzForm()) {
       return;
+    }
     SmallVector<ByteRange, 3> ranges;
     SmallVector<StringRef, 3> names{"src", "dst0", "dst1"};
     SmallVector<Value, 3> operands{op.getSrc(), op.getDsts()[0],
@@ -300,31 +290,36 @@ mlir::pto::validateTExtractNd2xNzPostPlanningSafety(mlir::Operation *module) {
     }
     for (unsigned i = 0; i < 3 && !failedModule; ++i) {
       for (unsigned j = i + 1; j < 3; ++j) {
-        if (rangesInteract(ranges[i], ranges[j])) {
-          op.emitOpError()
-              << "ND-to-2xNz " << names[i] << "/" << names[j]
-              << " physical ranges alias in the same address space "
-                 "(no-alias contract)";
-          failedModule = true;
+        if (!rangesInteract(ranges[i], ranges[j])) {
+          continue;
         }
+        op.emitOpError()
+            << "ND-to-2xNz " << names[i] << "/" << names[j]
+            << " physical ranges alias in the same address space "
+               "(no-alias contract)";
+        failedModule = true;
       }
     }
   });
-  if (failedModule)
-    return failure();
+}
 
-  struct PartialDest {
-    func::FuncOp func;
-    ByteRange range;
-  };
-  llvm::SmallVector<PartialDest, 8> partials;
+struct PartialDest {
+  func::FuncOp func;
+  ByteRange range;
+};
+
+static SmallVector<PartialDest, 8>
+collectNd2xNzPartialDestinations(ModuleOp mod, bool &failedModule) {
+  SmallVector<PartialDest, 8> partials;
   mod.walk([&](pto::TExtractOp op) {
-    if (!op.isNdTo2xNzForm())
+    if (!op.isNdTo2xNzForm()) {
       return;
+    }
     auto func = op->getParentOfType<func::FuncOp>();
     for (Value dst : op.getDsts()) {
-      if (!isPartialValidTile(dst.getType()))
+      if (!isPartialValidTile(dst.getType())) {
         continue;
+      }
       ByteRange range = resolveAllocationByteRange(dst);
       if (!range.resolved) {
         op.emitOpError() << "cannot resolve static absolute physical range of "
@@ -335,28 +330,27 @@ mlir::pto::validateTExtractNd2xNzPostPlanningSafety(mlir::Operation *module) {
       partials.push_back({func, range});
     }
   });
-  if (failedModule || partials.empty())
-    return failedModule ? failure() : success();
+  return partials;
+}
 
-  // Call-surface closure: with any partial producer, every direct func.call
-  // must resolve to an internal definition and no opaque call-like op may be
-  // present anywhere in the compile unit.
+static void validateNd2xNzCallSurface(ModuleOp mod, bool &failedModule) {
   mod.walk([&](func::CallOp call) {
-    if (failedModule)
+    if (failedModule) {
       return;
+    }
     auto callee = mod.lookupSymbol<func::FuncOp>(call.getCallee());
-    if (callee && !callee.isDeclaration())
+    if (callee && !callee.isDeclaration()) {
       return;
+    }
     call->emitOpError()
         << "call surface not closed: indirect/external/unresolved direct "
            "callee in a compile unit with a partial-valid ND-to-2xNZ producer";
     failedModule = true;
   });
   mod.walk([&](Operation *op) {
-    if (failedModule)
+    if (failedModule || isa<func::CallOp>(op)) {
       return;
-    if (isa<func::CallOp>(op))
-      return;
+    }
     if (isa<func::CallIndirectOp>(op)) {
       op->emitOpError()
           << "call surface not closed: func.call_indirect in a compile unit "
@@ -371,21 +365,21 @@ mlir::pto::validateTExtractNd2xNzPostPlanningSafety(mlir::Operation *module) {
       failedModule = true;
     }
   });
-  if (failedModule)
-    return failure();
+}
 
-  // Component-wide alias check over direct-call components containing any
-  // partial producer.
-  llvm::SmallPtrSet<func::FuncOp, 8> checkedFuncs;
-  for (auto &pd : partials) {
-    if (!pd.func || failedModule)
+static void validateNd2xNzComponentStores(
+    ModuleOp mod, ArrayRef<PartialDest> partials, bool &failedModule) {
+  for (const auto &partial : partials) {
+    if (!partial.func || failedModule) {
       continue;
-    llvm::SmallVector<func::FuncOp, 8> component;
-    collectCallComponent(pd.func, mod, component);
-    for (func::FuncOp f : component) {
-      f.walk([&](pto::TStoreOp store) {
-        if (failedModule)
+    }
+    SmallVector<func::FuncOp, 8> component;
+    collectCallComponent(partial.func, mod, component);
+    for (func::FuncOp func : component) {
+      func.walk([&](pto::TStoreOp store) {
+        if (failedModule) {
           return;
+        }
         ByteRange srcRange = resolveAllocationByteRange(store.getSrc());
         if (!srcRange.resolved) {
           store->emitOpError()
@@ -395,7 +389,7 @@ mlir::pto::validateTExtractNd2xNzPostPlanningSafety(mlir::Operation *module) {
           failedModule = true;
           return;
         }
-        if (rangesInteract(srcRange, pd.range)) {
+        if (rangesInteract(srcRange, partial.range)) {
           store->emitOpError()
               << "pto.tstore source physical range aliases a partial-valid "
                  "ND-to-2xNZ destination in the same address space and call "
@@ -404,9 +398,30 @@ mlir::pto::validateTExtractNd2xNzPostPlanningSafety(mlir::Operation *module) {
         }
       });
     }
-    checkedFuncs.insert(component.begin(), component.end());
   }
-  (void)checkedFuncs;
+}
+} // namespace
+
+mlir::LogicalResult
+mlir::pto::validateTExtractNd2xNzPostPlanningSafety(mlir::Operation *module) {
+  auto mod = dyn_cast<ModuleOp>(module);
+  if (!mod) {
+    return success();
+  }
+  bool failedModule = false;
+  checkNd2xNzPairwiseAliases(mod, failedModule);
+  if (failedModule) {
+    return failure();
+  }
+  auto partials = collectNd2xNzPartialDestinations(mod, failedModule);
+  if (failedModule || partials.empty()) {
+    return failedModule ? failure() : success();
+  }
+  validateNd2xNzCallSurface(mod, failedModule);
+  if (failedModule) {
+    return failure();
+  }
+  validateNd2xNzComponentStores(mod, partials, failedModule);
   return failedModule ? failure() : success();
 }
 
@@ -421,15 +436,9 @@ mlir::pto::validateTExtractNd2xNzPostPlanningSafety(mlir::Operation *module) {
 //   - while any partial-valid producer exists, every direct func.call must
 //     stay within one immediate child and peer imports
 //     (pto.import_reserved_buffer) are rejected outright (items 4/5).
-mlir::LogicalResult
-mlir::pto::validateTExtractNd2xNzPrePartition(mlir::Operation *module) {
-  auto mod = dyn_cast<ModuleOp>(module);
-  if (!mod) {
-    return success();
-  }
-
-  bool hasNd2xNz = false;
-  bool hasPartialProducer = false;
+namespace {
+static void scanNd2xNzProducers(ModuleOp mod, bool &hasNd2xNz,
+                                 bool &hasPartialProducer) {
   mod.walk([&](pto::TExtractOp op) {
     if (!op.isNdTo2xNzForm()) {
       return;
@@ -441,143 +450,158 @@ mlir::pto::validateTExtractNd2xNzPrePartition(mlir::Operation *module) {
       }
     }
   });
+}
+
+static LogicalResult validateNd2xNzModuleHierarchy(ModuleOp mod) {
+  bool invalid = false;
+  mod.walk([&](ModuleOp child) {
+    const bool isRootModule = child.getOperation() == mod.getOperation();
+    if (isRootModule) {
+      return;
+    }
+    const bool hasUnexpectedParent =
+        child.getOperation()->getParentOp() != mod.getOperation();
+    if (hasUnexpectedParent) {
+      invalid = true;
+      return;
+    }
+    for (Operation &op : *child.getBody()) {
+      if (!isa<func::FuncOp>(op)) {
+        invalid = true;
+        return;
+      }
+    }
+  });
+  if (!invalid) {
+    return success();
+  }
+  return mod->emitOpError()
+         << "backend-partitioned ND-to-2xNz validation requires every "
+            "descendant module to be an immediate child of the root whose body "
+            "contains only functions directly";
+}
+
+static LogicalResult validateNd2xNzRootBody(ModuleOp mod) {
+  bool hasModule = false;
+  bool hasOther = false;
+  for (Operation &op : *mod.getBody()) {
+    hasModule |= isa<ModuleOp>(op);
+    hasOther |= !isa<ModuleOp>(op);
+  }
+  if (hasModule && hasOther) {
+    return mod->emitOpError()
+           << "backend-partitioned ND-to-2xNz validation requires the root "
+              "body to contain only immediate backend child modules when "
+              "partitioned";
+  }
+  return success();
+}
+
+static func::FuncOp findUniqueFinalDefinition(ModuleOp mod, StringRef name) {
+  func::FuncOp definition = nullptr;
+  mod.walk([&](func::FuncOp fn) {
+    const bool isNotUniqueDefinition =
+        fn.isDeclaration() || fn.isPrivate() || fn.getSymName() != name;
+    if (isNotUniqueDefinition) {
+      return WalkResult::advance();
+    }
+    if (definition) {
+      definition = nullptr;
+      return WalkResult::interrupt();
+    }
+    definition = fn;
+    return WalkResult::advance();
+  });
+  return definition;
+}
+
+static bool validateNd2xNzPartitionCall(func::CallOp call, ModuleOp mod) {
+  auto caller = call->getParentOfType<func::FuncOp>();
+  if (!caller) {
+    return true;
+  }
+  auto *callerParent = caller->getParentOp();
+  auto callerMod = caller->getParentOfType<ModuleOp>();
+  auto callee =
+      callerMod ? callerMod.lookupSymbol<func::FuncOp>(call.getCallee())
+                : mod.lookupSymbol<func::FuncOp>(call.getCallee());
+  if (!callee) {
+    call->emitOpError()
+        << "call surface not closed: unresolved direct callee in a "
+           "backend-partitioned module with a partial-valid ND-to-2xNz "
+           "producer";
+    return false;
+  }
+  if (callee.isDeclaration()) {
+    callee = findUniqueFinalDefinition(mod, call.getCallee());
+    if (!callee) {
+      call->emitOpError()
+          << "call surface not closed: ambiguous or missing final-link "
+             "definition for declared callee in a backend-partitioned "
+             "module with a partial-valid ND-to-2xNz producer";
+      return false;
+    }
+  }
+  const bool isCrossChildCall = callee->getParentOp() != callerParent;
+  if (isCrossChildCall) {
+    call->emitOpError()
+        << "backend-partitioned module with partial-valid ND-to-2xNz does "
+           "not permit cross-child direct calls";
+    return false;
+  }
+  return true;
+}
+
+static LogicalResult validateNd2xNzPartitionCalls(ModuleOp mod) {
+  bool invalid = false;
+  mod.walk([&](func::CallOp call) {
+    if (!invalid) {
+      invalid = !validateNd2xNzPartitionCall(call, mod);
+    }
+  });
+  return invalid ? failure() : success();
+}
+
+static LogicalResult validateNd2xNzPeerImports(ModuleOp mod) {
+  bool invalid = false;
+  mod.walk([&](pto::ImportReservedBufferOp importOp) {
+    if (invalid) {
+      return;
+    }
+    importOp->emitOpError()
+        << "backend-partitioned module with partial-valid ND-to-2xNz does "
+           "not permit peer imports (pto.import_reserved_buffer)";
+    invalid = true;
+  });
+  return invalid ? failure() : success();
+}
+} // namespace
+
+mlir::LogicalResult
+mlir::pto::validateTExtractNd2xNzPrePartition(mlir::Operation *module) {
+  auto mod = dyn_cast<ModuleOp>(module);
+  if (!mod) {
+    return success();
+  }
+  bool hasNd2xNz = false;
+  bool hasPartialProducer = false;
+  scanNd2xNzProducers(mod, hasNd2xNz, hasPartialProducer);
   if (!hasNd2xNz) {
     return success();
   }
-
-  // Fixed-depth ownership guard (design doc 5.3.2): the mixed-backend driver
-  // splits the outer module into exactly one level of backend child ModuleOps
-  // (root Module -> child Module -> func.func). Every descendant ModuleOp
-  // must be an immediate child of the root (its parent is the root, not a
-  // sibling child or a function), and each child body must contain only
-  // func.func ops directly (no further module scopes, no stray ops).
-  bool hasNestedModule = false;
-  mod.walk([&](ModuleOp m) {
-    if (m.getOperation() == mod.getOperation())
-      return;
-    if (m.getOperation()->getParentOp() != mod.getOperation()) {
-      hasNestedModule = true;
-      return;
-    }
-    for (Operation &childOp : *m.getBody()) {
-      if (!isa<func::FuncOp>(childOp)) {
-        hasNestedModule = true;
-        return;
-      }
-    }
-  });
-  if (hasNestedModule) {
-    mod->emitOpError()
-        << "backend-partitioned ND-to-2xNz validation requires every "
-           "descendant module to be an immediate child of the root whose body "
-           "contains only functions directly";
+  const bool invalidHierarchy = failed(validateNd2xNzModuleHierarchy(mod)) ||
+                                failed(validateNd2xNzRootBody(mod));
+  if (invalidHierarchy) {
     return failure();
   }
-
-  // Root body structure: the design allows either top-level funcs
-  // (non-partitioned) or exactly immediate backend child modules
-  // (partitioned); once partitioned, the root body must contain ONLY child
-  // modules (any other top-level op is rejected).
-  bool rootHasModuleChild = false;
-  bool rootHasNonModuleTopOp = false;
-  for (Operation &rootOp : *mod.getBody()) {
-    if (isa<ModuleOp>(rootOp)) {
-      rootHasModuleChild = true;
-    } else {
-      rootHasNonModuleTopOp = true;
-    }
-  }
-  if (rootHasModuleChild && rootHasNonModuleTopOp) {
-    mod->emitOpError()
-        << "backend-partitioned ND-to-2xNz validation requires the root body "
-           "to contain only immediate backend child modules when partitioned";
-    return failure();
-  }
-
   if (!hasPartialProducer) {
     return success();
   }
-
-  // With any partial producer, the whole outer module must be partition-safe:
-  // reject cross-child direct calls (even full-valid and disconnected) and any
-  // peer import before child cloning (design doc 5.3.2 items 4/5).
-  bool partitionUnsafe = false;
-  mod.walk([&](func::CallOp call) {
-    if (partitionUnsafe) {
-      return;
-    }
-    auto caller = call->getParentOfType<func::FuncOp>();
-    if (!caller) {
-      return;
-    }
-    auto *callerParent = caller->getParentOp();
-    // Resolve the callee against the symbol table the caller lives in: with
-    // backend children, a direct call inside child A must resolve among A's
-    // direct funcs (root lookupSymbol does not see into child modules).
-    auto callerMod = caller->getParentOfType<ModuleOp>();
-    auto callee =
-        callerMod ? callerMod.lookupSymbol<func::FuncOp>(call.getCallee())
-                  : mod.lookupSymbol<func::FuncOp>(call.getCallee());
-    if (!callee) {
-      call->emitOpError()
-          << "call surface not closed: unresolved direct callee in a "
-             "backend-partitioned module with a partial-valid ND-to-2xNZ "
-             "producer";
-      partitionUnsafe = true;
-      return;
-    }
-    if (callee.isDeclaration()) {
-      // A local declaration is not a definition: resolve it to the exact
-      // final-link symbol (a unique public definition among all children /
-      // the root). Zero or more than one match is ambiguous and must be
-      // rejected - a private declaration in child B that is eventually
-      // defined publicly in sibling child C must still be flagged as a
-      // cross-child call (design doc 5.3.2 item 4).
-      func::FuncOp finalDef = nullptr;
-      mod.walk([&](func::FuncOp fn) {
-        if (fn.isDeclaration() || fn.isPrivate())
-          return WalkResult::advance();
-        if (fn.getSymName() != call.getCallee())
-          return WalkResult::advance();
-        if (finalDef) {
-          finalDef = nullptr;
-          return WalkResult::interrupt();
-        }
-        finalDef = fn;
-        return WalkResult::advance();
-      });
-      if (!finalDef) {
-        call->emitOpError()
-            << "call surface not closed: ambiguous or missing final-link "
-               "definition for declared callee in a backend-partitioned "
-               "module with a partial-valid ND-to-2xNZ producer";
-        partitionUnsafe = true;
-        return;
-      }
-      callee = finalDef;
-    }
-    if (callee->getParentOp() != callerParent) {
-      call->emitOpError()
-          << "backend-partitioned module with partial-valid ND-to-2xNZ does "
-             "not permit cross-child direct calls";
-      partitionUnsafe = true;
-    }
-  });
-  if (partitionUnsafe) {
+  const bool invalidPartitionSurface =
+      failed(validateNd2xNzPartitionCalls(mod)) ||
+      failed(validateNd2xNzPeerImports(mod));
+  if (invalidPartitionSurface) {
     return failure();
   }
-
-  mod.walk([&](pto::ImportReservedBufferOp importOp) {
-    if (!partitionUnsafe) {
-      importOp->emitOpError()
-          << "backend-partitioned module with partial-valid ND-to-2xNZ does "
-             "not permit peer imports (pto.import_reserved_buffer)";
-      partitionUnsafe = true;
-    }
-  });
-  if (partitionUnsafe) {
-    return failure();
-  }
-
   return success();
 }
