@@ -47,6 +47,7 @@
 #include "mlir/Transforms/GreedyPatternRewriteDriver.h"
 #include "llvm/ADT/SetVector.h"
 #include "llvm/ADT/StringRef.h"
+#include "llvm/Support/MathExtras.h"
 #include "llvm/Support/raw_ostream.h"
 #include "mlir/Dialect/Func/Transforms/FuncConversions.h"
 #include "mlir/Dialect/SCF/IR/SCF.h"                   
@@ -3776,8 +3777,9 @@ struct SubviewToEmitCPattern : public OpConversionPattern<memref::SubViewOp> {
   std::optional<int64_t> extractStaticInt(OpFoldResult ofr) const {
     if (isa<Attribute>(ofr)) {
       Attribute attr = cast<Attribute>(ofr);
-      if (auto intAttr = dyn_cast<IntegerAttr>(attr))
+      if (auto intAttr = dyn_cast<IntegerAttr>(attr)) {
         return getIntegerAttrSignedValue(intAttr);
+      }
     } else {
       Value v = cast<Value>(ofr);
       if (auto cOp = v.getDefiningOp<arith::ConstantOp>()) {
@@ -3790,6 +3792,75 @@ struct SubviewToEmitCPattern : public OpConversionPattern<memref::SubViewOp> {
     return std::nullopt;
   }
 
+  LogicalResult appendComposedStride(
+      OpFoldResult parentStride, OpFoldResult step,
+      PatternRewriter &rewriter,
+      SmallVectorImpl<OpFoldResult> &strides) const {
+    auto parentStatic = extractStaticInt(parentStride);
+    auto stepStatic = extractStaticInt(step);
+    if (parentStatic && stepStatic) {
+      int64_t product = 0;
+      if (llvm::MulOverflow(*parentStatic, *stepStatic, product)) {
+        return failure();
+      }
+      strides.push_back(rewriter.getIndexAttr(product));
+      return success();
+    }
+    if (stepStatic && *stepStatic == 1) {
+      strides.push_back(parentStride);
+      return success();
+    }
+    if (parentStatic && *parentStatic == 1) {
+      strides.push_back(step);
+      return success();
+    }
+    return failure();
+  }
+
+  LogicalResult resolveSubviewStrides(
+      memref::SubViewOp subview, int64_t rank, PatternRewriter &rewriter,
+      SmallVectorImpl<OpFoldResult> &strides) const {
+    SmallVector<OpFoldResult> parentStrides;
+    if (failed(resolveSourceStrides(subview.getSource(), rewriter,
+                                    parentStrides))) {
+      return failure();
+    }
+    auto steps = subview.getMixedStrides();
+    if (parentStrides.size() != static_cast<size_t>(rank) ||
+        steps.size() != static_cast<size_t>(rank)) {
+      return failure();
+    }
+
+    strides.reserve(rank);
+    for (auto [parentStride, step] :
+         llvm::zip_equal(parentStrides, steps)) {
+      if (failed(
+              appendComposedStride(parentStride, step, rewriter, strides))) {
+        return failure();
+      }
+    }
+    return success();
+  }
+
+  LogicalResult resolveStaticTypeStrides(
+      MemRefType sourceType, PatternRewriter &rewriter,
+      SmallVectorImpl<OpFoldResult> &strides) const {
+    SmallVector<int64_t> typeStrides;
+    int64_t offset = ShapedType::kDynamic;
+    if (failed(mlir::pto::getPTOMemRefStridesAndOffset(
+            sourceType, typeStrides, offset)) ||
+        typeStrides.size() != static_cast<size_t>(sourceType.getRank()) ||
+        llvm::any_of(typeStrides, [](int64_t stride) {
+          return stride == ShapedType::kDynamic;
+        })) {
+      return failure();
+    }
+    for (int64_t stride : typeStrides) {
+      strides.push_back(rewriter.getIndexAttr(stride));
+    }
+    return success();
+  }
+
   LogicalResult
   resolveSourceStrides(Value source, PatternRewriter &rewriter,
                        SmallVectorImpl<OpFoldResult> &strides) const {
@@ -3797,7 +3868,6 @@ struct SubviewToEmitCPattern : public OpConversionPattern<memref::SubViewOp> {
     if (!sourceType)
       return failure();
     int64_t rank = sourceType.getRank();
-
     if (auto reinterpretCast =
             source.getDefiningOp<memref::ReinterpretCastOp>()) {
       auto mixedStrides = reinterpretCast.getMixedStrides();
@@ -3806,56 +3876,13 @@ struct SubviewToEmitCPattern : public OpConversionPattern<memref::SubViewOp> {
       strides.assign(mixedStrides.begin(), mixedStrides.end());
       return success();
     }
-
     if (auto subview = source.getDefiningOp<memref::SubViewOp>()) {
-      SmallVector<OpFoldResult> parentStrides;
-      if (failed(resolveSourceStrides(subview.getSource(), rewriter,
-                                      parentStrides)))
-        return failure();
-      auto steps = subview.getMixedStrides();
-      if (parentStrides.size() != static_cast<size_t>(rank) ||
-          steps.size() != static_cast<size_t>(rank))
-        return failure();
-
-      strides.reserve(rank);
-      for (auto [parentStride, step] :
-           llvm::zip_equal(parentStrides, steps)) {
-        auto parentStatic = extractStaticInt(parentStride);
-        auto stepStatic = extractStaticInt(step);
-        if (parentStatic && stepStatic) {
-          strides.push_back(
-              rewriter.getIndexAttr((*parentStatic) * (*stepStatic)));
-          continue;
-        }
-        if (stepStatic && *stepStatic == 1) {
-          strides.push_back(parentStride);
-          continue;
-        }
-        if (parentStatic && *parentStatic == 1) {
-          strides.push_back(step);
-          continue;
-        }
-        return failure();
-      }
-      return success();
+      return resolveSubviewStrides(subview, rank, rewriter, strides);
     }
-
-    if (auto cast = source.getDefiningOp<memref::CastOp>())
+    if (auto cast = source.getDefiningOp<memref::CastOp>()) {
       return resolveSourceStrides(cast.getSource(), rewriter, strides);
-
-    SmallVector<int64_t> typeStrides;
-    int64_t offset = ShapedType::kDynamic;
-    if (failed(mlir::pto::getPTOMemRefStridesAndOffset(
-            sourceType, typeStrides, offset)) ||
-        typeStrides.size() != static_cast<size_t>(rank) ||
-        llvm::any_of(typeStrides, [](int64_t stride) {
-          return stride == ShapedType::kDynamic;
-        }))
-      return failure();
-
-    for (int64_t stride : typeStrides)
-      strides.push_back(rewriter.getIndexAttr(stride));
-    return success();
+    }
+    return resolveStaticTypeStrides(sourceType, rewriter, strides);
   }
 
   LogicalResult matchAndRewrite(memref::SubViewOp op, OpAdaptor adaptor,
@@ -4097,7 +4124,11 @@ struct SubviewToEmitCPattern : public OpConversionPattern<memref::SubViewOp> {
       auto srcStatic = extractStaticInt(srcStrideOfr);
       auto stepStatic = extractStaticInt(stepOfr);
       if (srcStatic && stepStatic) {
-        int64_t finalStride = (*srcStatic) * (*stepStatic);
+        int64_t finalStride = 0;
+        if (llvm::MulOverflow(*srcStatic, *stepStatic, finalStride)) {
+          return rewriter.notifyMatchFailure(
+              op, "source stride and subview step product overflows");
+        }
         strideTemplateVec.push_back(finalStride);
         strideValues.push_back(mkIndex(finalStride));
         continue;

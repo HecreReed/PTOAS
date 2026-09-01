@@ -143,6 +143,57 @@ getNZC0StorageElems(unsigned storageElemBytes) {
   return kNZBlockBytes / storageElemBytes;
 }
 
+static std::optional<std::string>
+getNZInnerStructureError(ArrayRef<int64_t> shape5D,
+                         ArrayRef<int64_t> stride5D, int64_t c0) {
+  if (!isDynamic(shape5D[0]) && shape5D[0] <= 0) {
+    return "NZ layout requires shape[0] to be positive";
+  }
+  if (!matchesKnown(shape5D[3], kNZInnerRows)) {
+    return expectedActual("shape[3]", kNZInnerRows, shape5D[3]);
+  }
+  if (!matchesKnown(shape5D[4], c0)) {
+    return expectedActual("shape[4]", c0, shape5D[4]);
+  }
+  if (!matchesKnown(stride5D[4], 1)) {
+    return expectedActual("stride[4]", 1, stride5D[4]);
+  }
+  if (!matchesKnown(stride5D[3], c0)) {
+    return expectedActual("stride[3]", c0, stride5D[3]);
+  }
+  if (!matchesKnown(stride5D[2], kNZInnerRows * c0)) {
+    return expectedActual("stride[2]", kNZInnerRows * c0, stride5D[2]);
+  }
+  return std::nullopt;
+}
+
+static std::optional<std::string>
+getNZOuterStrideError(ArrayRef<int64_t> shape5D,
+                      ArrayRef<int64_t> stride5D, int64_t index, int64_t c0) {
+  if (isDynamic(stride5D[index])) {
+    return std::nullopt;
+  }
+  if (stride5D[index] % c0 != 0) {
+    return ("expected stride[" + Twine(index) + "] to be C0-aligned (" +
+            Twine(c0) + "), got " + Twine(stride5D[index]))
+        .str();
+  }
+
+  auto minimum = checkedMultiply(shape5D[index + 1], stride5D[index + 1]);
+  if (!minimum) {
+    return ("shape[" + Twine(index + 1) + "] * stride[" +
+            Twine(index + 1) + "] overflows")
+        .str();
+  }
+  if (!isDynamic(*minimum) && stride5D[index] < *minimum) {
+    return ("expected stride[" + Twine(index) + "] >= shape[" +
+            Twine(index + 1) + "] * stride[" + Twine(index + 1) + "] (" +
+            Twine(*minimum) + "), got " + Twine(stride5D[index]))
+        .str();
+  }
+  return std::nullopt;
+}
+
 std::optional<std::string>
 mlir::pto::getNZViewCompatibilityError(ArrayRef<int64_t> shape5D,
                                        ArrayRef<int64_t> stride5D,
@@ -158,51 +209,14 @@ mlir::pto::getNZViewCompatibilityError(ArrayRef<int64_t> shape5D,
         .str();
 
   // The leading dimension is the outer batch/expert axis in the pto-isa
-  // canonical form [E, K/C0, N/16, 16, C0].  It is not part of the NZ
-  // fractal, so an explicit NZ annotation remains valid for E > 1 as well as
-  // the historical E == 1 form.
-  if (!isDynamic(shape5D[0]) && shape5D[0] <= 0)
-    return "NZ layout requires shape[0] to be positive";
-  if (!matchesKnown(shape5D[3], kNZInnerRows))
-    return expectedActual("shape[3]", kNZInnerRows, shape5D[3]);
-  if (!matchesKnown(shape5D[4], *c0))
-    return expectedActual("shape[4]", *c0, shape5D[4]);
-  if (!matchesKnown(stride5D[4], 1))
-    return expectedActual("stride[4]", 1, stride5D[4]);
-  if (!matchesKnown(stride5D[3], *c0))
-    return expectedActual("stride[3]", *c0, stride5D[3]);
-  if (!matchesKnown(stride5D[2], kNZInnerRows * *c0))
-    return expectedActual("stride[2]", kNZInnerRows * *c0, stride5D[2]);
-
-  if (!isDynamic(stride5D[1])) {
-    if (stride5D[1] % *c0 != 0)
-      return ("expected stride[1] to be C0-aligned (" + Twine(*c0) + "), got " +
-              Twine(stride5D[1]))
-          .str();
-    auto minimum = checkedMultiply(shape5D[2], stride5D[2]);
-    if (!minimum)
-      return "shape[2] * stride[2] overflows";
-    if (!isDynamic(*minimum) && stride5D[1] < *minimum)
-      return ("expected stride[1] >= shape[2] * stride[2] (" + Twine(*minimum) +
-              "), got " + Twine(stride5D[1]))
-          .str();
+  // canonical form [E, K/C0, N/16, 16, C0]. It is independent of the fractal.
+  if (auto error = getNZInnerStructureError(shape5D, stride5D, *c0)) {
+    return error;
   }
-
-  if (!isDynamic(stride5D[0])) {
-    if (stride5D[0] % *c0 != 0)
-      return ("expected stride[0] to be C0-aligned (" + Twine(*c0) + "), got " +
-              Twine(stride5D[0]))
-          .str();
-    auto minimum = checkedMultiply(shape5D[1], stride5D[1]);
-    if (!minimum)
-      return "shape[1] * stride[1] overflows";
-    if (!isDynamic(*minimum) && stride5D[0] < *minimum)
-      return ("expected stride[0] >= shape[1] * stride[1] (" + Twine(*minimum) +
-              "), got " + Twine(stride5D[0]))
-          .str();
+  if (auto error = getNZOuterStrideError(shape5D, stride5D, 1, *c0)) {
+    return error;
   }
-
-  return std::nullopt;
+  return getNZOuterStrideError(shape5D, stride5D, 0, *c0);
 }
 
 static bool isNZViewCompatible5D(ArrayRef<int64_t> shape5D,

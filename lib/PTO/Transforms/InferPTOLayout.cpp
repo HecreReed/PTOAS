@@ -504,77 +504,100 @@ static void getFoldResultsOrDynamic(ArrayRef<OpFoldResult> values,
     result.push_back(getConstInt(value).value_or(ShapedType::kDynamic));
 }
 
-static bool getResolvedViewShape(Value value, SmallVectorImpl<int64_t> &shape) {
+static void resolveDynamicShape(ValueRange values,
+                                SmallVectorImpl<int64_t> &shape) {
+  for (auto [index, value] : llvm::enumerate(values)) {
+    if (shape[index] != ShapedType::kDynamic) {
+      continue;
+    }
+    if (auto constant = getConstInt(value)) {
+      shape[index] = *constant;
+    }
+  }
+}
+
+static void mergeKnownShape(ArrayRef<int64_t> knownShape,
+                            SmallVectorImpl<int64_t> &shape) {
+  if (knownShape.size() != shape.size()) {
+    return;
+  }
+  for (size_t index = 0; index < shape.size(); ++index) {
+    if (shape[index] == ShapedType::kDynamic &&
+        knownShape[index] != ShapedType::kDynamic) {
+      shape[index] = knownShape[index];
+    }
+  }
+}
+
+static bool getResolvedPTOViewShape(Value value,
+                                    SmallVectorImpl<int64_t> &shape) {
+  ArrayRef<int64_t> typeShape;
+  ValueRange dynamicShape;
   if (auto make = value.getDefiningOp<MakeTensorViewOp>()) {
     auto type = dyn_cast<TensorViewType>(make.getResult().getType());
-    if (!type)
+    if (!type) {
       return false;
-    shape.assign(type.getShape().begin(), type.getShape().end());
-    for (auto [index, operand] : llvm::enumerate(make.getShape())) {
-      if (shape[index] == ShapedType::kDynamic) {
-        if (auto constant = getConstInt(operand))
-          shape[index] = *constant;
-      }
     }
-    return true;
-  }
-
-  if (auto partition = value.getDefiningOp<PartitionViewOp>()) {
+    typeShape = type.getShape();
+    dynamicShape = make.getShape();
+  } else if (auto partition = value.getDefiningOp<PartitionViewOp>()) {
     auto type =
         dyn_cast<PartitionTensorViewType>(partition.getResult().getType());
-    if (!type)
+    if (!type) {
       return false;
-    shape.assign(type.getShape().begin(), type.getShape().end());
-    for (auto [index, operand] : llvm::enumerate(partition.getSizes())) {
-      if (shape[index] == ShapedType::kDynamic) {
-        if (auto constant = getConstInt(operand))
-          shape[index] = *constant;
-      }
     }
+    typeShape = type.getShape();
+    dynamicShape = partition.getSizes();
+  } else {
+    return false;
+  }
+
+  shape.assign(typeShape.begin(), typeShape.end());
+  resolveDynamicShape(dynamicShape, shape);
+  return true;
+}
+
+static bool getMixedMemRefShape(Value value,
+                                SmallVectorImpl<int64_t> &shape) {
+  if (auto reinterpret = value.getDefiningOp<memref::ReinterpretCastOp>()) {
+    getFoldResultsOrDynamic(reinterpret.getMixedSizes(), shape);
+    return true;
+  }
+  if (auto subview = value.getDefiningOp<memref::SubViewOp>()) {
+    getFoldResultsOrDynamic(subview.getMixedSizes(), shape);
+    return true;
+  }
+  return false;
+}
+
+static Value getMemRefCastSource(Value value) {
+  if (auto cast = value.getDefiningOp<memref::CastOp>()) {
+    return cast.getSource();
+  }
+  if (auto cast = value.getDefiningOp<memref::MemorySpaceCastOp>()) {
+    return cast.getSource();
+  }
+  return Value();
+}
+
+static bool getResolvedViewShape(Value value, SmallVectorImpl<int64_t> &shape) {
+  if (getResolvedPTOViewShape(value, shape)) {
     return true;
   }
 
   if (auto memrefType = dyn_cast<MemRefType>(value.getType())) {
     shape.assign(memrefType.getShape().begin(), memrefType.getShape().end());
 
-    auto mergeKnownShape = [&shape](ArrayRef<int64_t> knownShape) {
-      if (knownShape.size() != shape.size())
-        return;
-      for (size_t index = 0; index < shape.size(); ++index) {
-        if (shape[index] == ShapedType::kDynamic &&
-            knownShape[index] != ShapedType::kDynamic)
-          shape[index] = knownShape[index];
-      }
-    };
-
-    if (auto reinterpret = value.getDefiningOp<memref::ReinterpretCastOp>()) {
-      SmallVector<int64_t> mixedShape;
-      getFoldResultsOrDynamic(reinterpret.getMixedSizes(), mixedShape);
-      mergeKnownShape(mixedShape);
+    SmallVector<int64_t> knownShape;
+    if (getMixedMemRefShape(value, knownShape)) {
+      mergeKnownShape(knownShape, shape);
       return true;
     }
 
-    if (auto subview = value.getDefiningOp<memref::SubViewOp>()) {
-      SmallVector<int64_t> mixedShape;
-      getFoldResultsOrDynamic(subview.getMixedSizes(), mixedShape);
-      mergeKnownShape(mixedShape);
-      return true;
+    Value castSource = getMemRefCastSource(value);
+    if (castSource && getResolvedViewShape(castSource, knownShape)) {
+      mergeKnownShape(knownShape, shape);
     }
-
-    if (auto cast = value.getDefiningOp<memref::CastOp>()) {
-      SmallVector<int64_t> sourceShape;
-      if (getResolvedViewShape(cast.getSource(), sourceShape))
-        mergeKnownShape(sourceShape);
-      return true;
-    }
-
-    if (auto cast = value.getDefiningOp<memref::MemorySpaceCastOp>()) {
-      SmallVector<int64_t> sourceShape;
-      if (getResolvedViewShape(cast.getSource(), sourceShape))
-        mergeKnownShape(sourceShape);
-      return true;
-    }
-
     return true;
   }
 

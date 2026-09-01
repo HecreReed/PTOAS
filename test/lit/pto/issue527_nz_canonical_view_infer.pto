@@ -18,6 +18,7 @@
 // RUN: not ptoas --pto-arch=a5 %t/invalid_outer_gap.pto 2>&1 | FileCheck %s --check-prefix=BAD-GAP
 // RUN: not ptoas --pto-arch=a5 %t/invalid_d3_partition.pto 2>&1 | FileCheck %s --check-prefix=BAD-D3
 // RUN: not ptoas --pto-arch=a5 %t/invalid_d4_partition.pto 2>&1 | FileCheck %s --check-prefix=BAD-D4
+// RUN: not ptoas --pto-arch=a5 %t/partition_offset_overflow.pto 2>&1 | FileCheck %s --check-prefix=OFFSET-OVERFLOW
 // RUN: not ptoas --pto-arch=a5 %t/dynamic_inner_partition.pto 2>&1 | FileCheck %s --check-prefix=DYNAMIC-INNER
 // RUN: not ptoas --pto-arch=a5 %t/invalid_memref_subview.pto 2>&1 | FileCheck %s --check-prefix=BAD-MEMREF
 // RUN: not ptoas --pto-arch=a5 %t/invalid_memref_subview_step.pto 2>&1 | FileCheck %s --check-prefix=BAD-MEMREF-STEP
@@ -60,7 +61,10 @@
 // EMITC: GetStride
 // EMITC: PTOAS__GLOBAL_TENSOR_DATA
 // EMITC-LABEL: AICORE void batched_nz_tload(
+// EMITC: PTOAS__GLOBAL_TENSOR_DATA
+// EMITC: unsigned [[NZ_OFFSET:v[0-9]+]] = 512
 // EMITC: GlobalTensor<int8_t, pto::Shape<1, 1, 1, 16, 32>, pto::Stride<512, 512, 512, 32, 1>, pto::Layout::NZ>
+// EMITC-SAME: {{.*}} + [[NZ_OFFSET]]
 
 // BAD-SHAPE: user-specified layout=nz is incompatible with shape/stride: expected shape[3]==16 (got 8)
 // BAD-RANK: user-specified layout=nz requires a rank-5 view, got rank 4
@@ -68,6 +72,7 @@
 // BAD-GAP: user-specified layout=nz is incompatible with shape/stride: expected stride[1] >= shape[2] * stride[2] (1024), got 512
 // BAD-D3: NZ view cannot be partitioned inside a fractal: d3 must keep offset=0 and size=16 (got offset=1, size=15)
 // BAD-D4: NZ view cannot be partitioned inside a fractal: d4 must keep offset=0 and size=8 (got offset=1, size=7)
+// OFFSET-OVERFLOW: offset+size at dim 0 overflows
 // DYNAMIC-INNER: NZ partition must prove that d3 remains complete at compile time
 // BAD-MEMREF: NZ view cannot be partitioned inside a fractal: d4 must keep offset=0 and size=8 (got offset=1, size=7)
 // BAD-MEMREF-STEP: NZ subview requires unit steps in every dimension
@@ -680,6 +685,31 @@ module {
       : !pto.tensor_view<1x8x8x16x8xf32>
         -> !pto.partition_tensor_view<1x8x8x?x8xf32>
     return %bad : !pto.partition_tensor_view<1x8x8x?x8xf32>
+  }
+}
+
+//--- partition_offset_overflow.pto
+module {
+  func.func @partition_offset_overflow(%ptr: !pto.ptr<f32>)
+      -> !pto.partition_tensor_view<1x8x8x16x8xf32> {
+    %c0 = arith.constant 0 : index
+    %c1 = arith.constant 1 : index
+    %c8 = arith.constant 8 : index
+    %c16 = arith.constant 16 : index
+    %c128 = arith.constant 128 : index
+    %c1024 = arith.constant 1024 : index
+    %c8192 = arith.constant 8192 : index
+    %cmax = arith.constant 9223372036854775807 : index
+    %root = pto.make_tensor_view %ptr,
+      shape = [%c1, %c8, %c8, %c16, %c8],
+      strides = [%c8192, %c1024, %c128, %c8, %c1]
+      : !pto.tensor_view<1x8x8x16x8xf32>
+    %bad = pto.partition_view %root,
+      offsets = [%cmax, %c0, %c0, %c0, %c0],
+      sizes = [%c1, %c8, %c8, %c16, %c8]
+      : !pto.tensor_view<1x8x8x16x8xf32>
+        -> !pto.partition_tensor_view<1x8x8x16x8xf32>
+    return %bad : !pto.partition_tensor_view<1x8x8x16x8xf32>
   }
 }
 

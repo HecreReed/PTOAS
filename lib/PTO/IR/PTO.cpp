@@ -2908,6 +2908,65 @@ LogicalResult mlir::pto::YieldOp::verify() {
   return success();
 }
 
+static SmallVector<int64_t> getConstantOrDynamicValues(ValueRange values) {
+  SmallVector<int64_t> result;
+  result.reserve(values.size());
+  for (Value value : values) {
+    result.push_back(
+        getConstIndexValue(value).value_or(ShapedType::kDynamic));
+  }
+  return result;
+}
+
+static SmallVector<int64_t>
+getResolvedMakeTensorViewShape(mlir::pto::MakeTensorViewOp op,
+                               mlir::pto::TensorViewType resultType) {
+  SmallVector<int64_t> shape(resultType.getShape());
+  for (auto [index, dim] : llvm::enumerate(shape)) {
+    if (dim != ShapedType::kDynamic) {
+      continue;
+    }
+    if (auto constant = getConstIndexValue(op.getShape()[index])) {
+      shape[index] = *constant;
+    }
+  }
+  return shape;
+}
+
+static LogicalResult
+verifyMakeTensorViewLayout(mlir::pto::MakeTensorViewOp op,
+                           mlir::pto::TensorViewType resultType) {
+  auto layoutAttr = op.getLayoutAttr();
+  if (!layoutAttr) {
+    return success();
+  }
+
+  SmallVector<int64_t> shape =
+      getResolvedMakeTensorViewShape(op, resultType);
+  SmallVector<int64_t> strides = getConstantOrDynamicValues(op.getStrides());
+  Layout layout = layoutAttr.getLayout();
+  unsigned storageElemBytes = getElemByteSize(resultType.getElementType());
+  if (isLayoutCompatible5D(layout, shape, strides, storageElemBytes)) {
+    return success();
+  }
+  if (layout != Layout::NZ) {
+    return op.emitOpError()
+           << "user-specified layout=" << stringifyLayout(layout)
+           << " is incompatible with the view shape/stride";
+  }
+  if (resultType.getRank() != static_cast<int64_t>(kPTOLayoutRank)) {
+    return op.emitOpError()
+           << "user-specified layout=nz requires a rank-5 view, got rank "
+           << resultType.getRank();
+  }
+
+  auto error =
+      getNZViewCompatibilityError(shape, strides, storageElemBytes);
+  return op.emitOpError()
+         << "user-specified layout=nz is incompatible with shape/stride: "
+         << error.value_or("unknown NZ layout mismatch");
+}
+
 LogicalResult mlir::pto::MakeTensorViewOp::verify() {
   auto tvTy = dyn_cast<mlir::pto::TensorViewType>(getResult().getType());
   if (!tvTy) {
@@ -2927,163 +2986,161 @@ LogicalResult mlir::pto::MakeTensorViewOp::verify() {
   }
 
   int64_t rank = tvTy.getRank();
+  if (static_cast<int64_t>(getShape().size()) != rank ||
+      static_cast<int64_t>(getStrides().size()) != rank) {
+    return emitOpError()
+           << "shape/strides operand counts must match tensor_view rank="
+           << rank;
+  }
+  return verifyMakeTensorViewLayout(*this, tvTy);
+}
 
-  if ((int64_t)getShape().size() != rank || (int64_t)getStrides().size() != rank) {
-    return emitOpError() << "shape/strides operand counts must match tensor_view rank="
-                         << rank;
+struct PartitionSourceInfo {
+  Type elementType;
+  int64_t rank;
+  SmallVector<int64_t> shape;
+};
+
+static FailureOr<PartitionSourceInfo>
+getPartitionSourceInfo(mlir::pto::PartitionViewOp op) {
+  PartitionSourceInfo info;
+  if (auto tensorView =
+          dyn_cast<mlir::pto::TensorViewType>(op.getSource().getType())) {
+    info.elementType = tensorView.getElementType();
+    info.rank = tensorView.getRank();
+    info.shape.assign(tensorView.getShape().begin(), tensorView.getShape().end());
+  } else if (auto partitionView =
+                 dyn_cast<mlir::pto::PartitionTensorViewType>(
+                     op.getSource().getType())) {
+    info.elementType = partitionView.getElementType();
+    info.rank = partitionView.getRank();
+    info.shape.assign(partitionView.getShape().begin(),
+                      partitionView.getShape().end());
+  } else {
+    op.emitOpError("expects tensor_view or partition_tensor_view source");
+    return failure();
   }
 
-  auto layoutAttr = getLayoutAttr();
-  if (!layoutAttr)
+  SmallVector<int64_t> logicalShape;
+  if (getLogicalViewShape(op.getSource(), logicalShape)) {
+    info.shape = std::move(logicalShape);
+  }
+  return info;
+}
+
+static LogicalResult verifyPartitionSignature(
+    mlir::pto::PartitionViewOp op,
+    mlir::pto::PartitionTensorViewType resultType,
+    const PartitionSourceInfo &source) {
+  if (source.elementType != resultType.getElementType()) {
+    return op.emitOpError()
+           << "element type mismatch between source and result: src="
+           << source.elementType << " result=" << resultType.getElementType();
+  }
+  if (static_cast<int64_t>(op.getOffsets().size()) != source.rank) {
+    return op.emitOpError()
+           << "offset count (" << op.getOffsets().size()
+           << ") must match source rank (" << source.rank << ")";
+  }
+  if (static_cast<int64_t>(op.getSizes().size()) != source.rank) {
+    return op.emitOpError()
+           << "size count (" << op.getSizes().size()
+           << ") must match source rank (" << source.rank << ")";
+  }
+  return success();
+}
+
+static LogicalResult verifyPartitionDimension(
+    mlir::pto::PartitionViewOp op, int64_t index, int64_t sourceDim,
+    std::optional<int64_t> resultDim) {
+  auto offset = getConstIndexValue(op.getOffsets()[index]);
+  auto size = getConstIndexValue(op.getSizes()[index]);
+  if (offset && *offset < 0) {
+    return op.emitOpError() << "offset at dim " << index
+                            << " must be non-negative, got " << *offset;
+  }
+  if (size && *size <= 0) {
+    return op.emitOpError() << "size at dim " << index
+                            << " must be positive, got " << *size;
+  }
+  if (resultDim && size && *resultDim != ShapedType::kDynamic &&
+      *size != *resultDim) {
+    return op.emitOpError() << "size/result mismatch at dim " << index
+                            << ": size operand=" << *size
+                            << " result type dim=" << *resultDim;
+  }
+  if (sourceDim == ShapedType::kDynamic) {
     return success();
+  }
+  if (size && *size > sourceDim) {
+    return op.emitOpError() << "size at dim " << index << " (" << *size
+                            << ") exceeds static source dim (" << sourceDim
+                            << ")";
+  }
+  if (!offset || !size) {
+    return success();
+  }
 
-  SmallVector<int64_t> shapeInts;
-  shapeInts.reserve(rank);
-  for (int64_t index = 0; index < rank; ++index) {
-    int64_t dim = tvTy.getShape()[index];
-    if (dim == ShapedType::kDynamic) {
-      if (auto constant = getConstIndexValue(getShape()[index]))
-        dim = *constant;
+  int64_t end = 0;
+  if (llvm::AddOverflow(*offset, *size, end)) {
+    return op.emitOpError() << "offset+size at dim " << index << " overflows";
+  }
+  if (end > sourceDim) {
+    return op.emitOpError() << "offset+size at dim " << index << " (" << end
+                            << ") exceeds static source dim (" << sourceDim
+                            << ")";
+  }
+  return success();
+}
+
+static LogicalResult verifyPartitionBounds(
+    mlir::pto::PartitionViewOp op,
+    mlir::pto::PartitionTensorViewType resultType,
+    const PartitionSourceInfo &source) {
+  bool sameRank = resultType.getRank() == source.rank;
+  for (int64_t index = 0; index < source.rank; ++index) {
+    std::optional<int64_t> resultDim;
+    if (sameRank) {
+      resultDim = resultType.getShape()[index];
     }
-    shapeInts.push_back(dim);
-  }
-
-  SmallVector<int64_t> strideInts;
-  strideInts.reserve(rank);
-  for (Value s : getStrides()) {
-    auto val = getConstIndexValue(s);
-    strideInts.push_back(val.value_or(ShapedType::kDynamic));
-  }
-
-  Layout layout = layoutAttr.getLayout();
-  unsigned storageElemBytes = getElemByteSize(tvTy.getElementType());
-  if (!isLayoutCompatible5D(layout, shapeInts, strideInts, storageElemBytes)) {
-    if (layout == Layout::NZ) {
-      if (rank != static_cast<int64_t>(kPTOLayoutRank))
-        return emitOpError()
-               << "user-specified layout=nz requires a rank-5 view, got rank "
-               << rank;
-      auto error =
-          getNZViewCompatibilityError(shapeInts, strideInts, storageElemBytes);
-      return emitOpError()
-             << "user-specified layout=nz is incompatible with shape/stride: "
-             << error.value_or("unknown NZ layout mismatch");
+    if (failed(
+            verifyPartitionDimension(op, index, source.shape[index], resultDim))) {
+      return failure();
     }
-    return emitOpError() << "user-specified layout=" << stringifyLayout(layout)
-                         << " is incompatible with the view shape/stride";
   }
+  return success();
+}
 
+static LogicalResult verifyNZPartition(mlir::pto::PartitionViewOp op,
+                                       const PartitionSourceInfo &source) {
+  if (getLogicalViewLayout(op.getSource()) != Layout::NZ) {
+    return success();
+  }
+  SmallVector<int64_t> offsets =
+      getConstantOrDynamicValues(op.getOffsets());
+  SmallVector<int64_t> sizes = getConstantOrDynamicValues(op.getSizes());
+  if (auto error =
+          getNZSubviewCompatibilityError(source.shape, offsets, sizes)) {
+    return op.emitOpError(*error);
+  }
   return success();
 }
 
 LogicalResult mlir::pto::PartitionViewOp::verify() {
-  auto resTy = dyn_cast<mlir::pto::PartitionTensorViewType>(getResult().getType());
-  if (!resTy) {
+  auto resultType =
+      dyn_cast<mlir::pto::PartitionTensorViewType>(getResult().getType());
+  if (!resultType) {
     return emitOpError("expects partition_tensor_view result");
   }
-
-  Type srcElementType;
-  int64_t srcRank = 0;
-  if (auto tensorView =
-          dyn_cast<mlir::pto::TensorViewType>(getSource().getType())) {
-    srcElementType = tensorView.getElementType();
-    srcRank = tensorView.getRank();
-  } else if (auto partitionView = dyn_cast<mlir::pto::PartitionTensorViewType>(
-                 getSource().getType())) {
-    srcElementType = partitionView.getElementType();
-    srcRank = partitionView.getRank();
-  } else {
-    return emitOpError("expects tensor_view or partition_tensor_view source");
+  FailureOr<PartitionSourceInfo> source = getPartitionSourceInfo(*this);
+  if (failed(source)) {
+    return failure();
   }
-
-  if (srcElementType != resTy.getElementType()) {
-    return emitOpError()
-           << "element type mismatch between source and result: src="
-           << srcElementType << " result=" << resTy.getElementType();
+  if (failed(verifyPartitionSignature(*this, resultType, *source)) ||
+      failed(verifyPartitionBounds(*this, resultType, *source))) {
+    return failure();
   }
-
-  if ((int64_t)getOffsets().size() != srcRank) {
-    return emitOpError() << "offset count (" << getOffsets().size()
-                         << ") must match source rank (" << srcRank << ")";
-  }
-
-  if ((int64_t)getSizes().size() != srcRank) {
-    return emitOpError() << "size count (" << getSizes().size()
-                         << ") must match source rank (" << srcRank << ")";
-  }
-
-  SmallVector<int64_t> logicalSourceShape;
-  if (!getLogicalViewShape(getSource(), logicalSourceShape)) {
-    if (auto tensorView =
-            dyn_cast<mlir::pto::TensorViewType>(getSource().getType()))
-      logicalSourceShape.assign(tensorView.getShape().begin(),
-                                tensorView.getShape().end());
-    else {
-      auto partitionView =
-          cast<mlir::pto::PartitionTensorViewType>(getSource().getType());
-      logicalSourceShape.assign(partitionView.getShape().begin(),
-                                partitionView.getShape().end());
-    }
-  }
-  ArrayRef<int64_t> srcShape = logicalSourceShape;
-  ArrayRef<int64_t> resShape = resTy.getShape();
-  bool sameRank = resTy.getRank() == srcRank;
-
-  for (int64_t i = 0; i < srcRank; ++i) {
-    auto offVal = getConstIndexValue(getOffsets()[i]);
-    auto sizeVal = getConstIndexValue(getSizes()[i]);
-
-    if (offVal && *offVal < 0) {
-      return emitOpError() << "offset at dim " << i
-                           << " must be non-negative, got " << *offVal;
-    }
-
-    if (sizeVal && *sizeVal <= 0) {
-      return emitOpError() << "size at dim " << i
-                           << " must be positive, got " << *sizeVal;
-    }
-
-    if (sameRank && sizeVal) {
-      int64_t resDim = resShape[i];
-      if (resDim != ShapedType::kDynamic && *sizeVal != resDim) {
-        return emitOpError() << "size/result mismatch at dim " << i
-                             << ": size operand=" << *sizeVal
-                             << " result type dim=" << resDim;
-      }
-    }
-
-    int64_t srcDim = srcShape[i];
-    if (srcDim == ShapedType::kDynamic) {
-      continue;
-    }
-
-    if (sizeVal && *sizeVal > srcDim) {
-      return emitOpError() << "size at dim " << i << " (" << *sizeVal
-                           << ") exceeds static source dim (" << srcDim << ")";
-    }
-
-    if (offVal && sizeVal && (*offVal + *sizeVal > srcDim)) {
-      return emitOpError() << "offset+size at dim " << i << " ("
-                           << (*offVal + *sizeVal)
-                           << ") exceeds static source dim (" << srcDim << ")";
-    }
-  }
-
-  if (getLogicalViewLayout(getSource()) == Layout::NZ) {
-    SmallVector<int64_t> offsets;
-    SmallVector<int64_t> sizes;
-    offsets.reserve(srcRank);
-    sizes.reserve(srcRank);
-    for (Value offset : getOffsets())
-      offsets.push_back(
-          getConstIndexValue(offset).value_or(ShapedType::kDynamic));
-    for (Value size : getSizes())
-      sizes.push_back(getConstIndexValue(size).value_or(ShapedType::kDynamic));
-    if (auto error = getNZSubviewCompatibilityError(srcShape, offsets, sizes))
-      return emitOpError(*error);
-  }
-
-  return success();
+  return verifyNZPartition(*this, *source);
 }
 
 LogicalResult mlir::pto::AddPtrOp::verify() {
