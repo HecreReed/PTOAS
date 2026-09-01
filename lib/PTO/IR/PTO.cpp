@@ -8787,6 +8787,37 @@ static LogicalResult verifyNd2xNzElementTypes(Nd2xNzVerifyContext &ctx) {
   return success();
 }
 
+static LogicalResult verifyNd2xNzDestinationLayout(Operation *op,
+                                                   TileBufType dstTy,
+                                                   StringRef dstName) {
+  auto dSpace = getPTOMemorySpaceEnum(dstTy);
+  if (!dSpace || *dSpace != pto::AddressSpace::VEC) {
+    return op->emitOpError("expects ND-to-2xNZ TEXTRACT " + dstName +
+                           " to use loc=vec");
+  }
+  const bool nzLayout =
+      dstTy.getBLayoutValueI32() ==
+          static_cast<int32_t>(pto::BLayout::ColMajor) &&
+      dstTy.getSLayoutValueI32() ==
+          static_cast<int32_t>(pto::SLayout::RowMajor);
+  if (!nzLayout) {
+    return op->emitOpError(
+        "expects ND-to-2xNZ TEXTRACT " + dstName +
+        " to use an NZ layout (blayout=col_major, slayout=row_major)");
+  }
+  if (dstTy.getSFractalSizeI32() != 512) {
+    return op->emitOpError("expects ND-to-2xNZ TEXTRACT " + dstName +
+                           " fractal size to be 512 bits");
+  }
+  if (dstTy.getCompactModeI32() ==
+      static_cast<int32_t>(pto::CompactMode::RowPlusOne)) {
+    return op->emitOpError(
+        "ND-to-2xNZ TEXTRACT rejects CompactMode::RowPlusOne destinations "
+        "in the first version");
+  }
+  return success();
+}
+
 static LogicalResult verifyNd2xNzLayouts(Nd2xNzVerifyContext &ctx) {
   auto srcSpace = getPTOMemorySpaceEnum(ctx.srcTy);
   if (!srcSpace || *srcSpace != pto::AddressSpace::VEC) {
@@ -8809,33 +8840,10 @@ static LogicalResult verifyNd2xNzLayouts(Nd2xNzVerifyContext &ctx) {
         "expects ND-to-2xNZ TEXTRACT src to use fractal size 512 bits");
   }
   for (unsigned i = 0; i < 2; ++i) {
-    auto dstTy = i == 0 ? ctx.dst0Ty : ctx.dst1Ty;
+    TileBufType dstTy = i == 0 ? ctx.dst0Ty : ctx.dst1Ty;
     StringRef dstName = i == 0 ? "dst0" : "dst1";
-    auto dSpace = getPTOMemorySpaceEnum(dstTy);
-    if (!dSpace || *dSpace != pto::AddressSpace::VEC) {
-      return ctx.op->emitOpError("expects ND-to-2xNZ TEXTRACT " + dstName +
-                                 " to use loc=vec");
-    }
-    bool nzLayout =
-        dstTy.getBLayoutValueI32() ==
-            static_cast<int32_t>(pto::BLayout::ColMajor) &&
-        dstTy.getSLayoutValueI32() ==
-            static_cast<int32_t>(pto::SLayout::RowMajor);
-    if (!nzLayout) {
-      return ctx.op->emitOpError(
-          "expects ND-to-2xNZ TEXTRACT " + dstName +
-          " to use an NZ layout (blayout=col_major, slayout=row_major)");
-    }
-    if (dstTy.getSFractalSizeI32() != 512) {
-      return ctx.op->emitOpError(
-          "expects ND-to-2xNZ TEXTRACT " + dstName +
-          " fractal size to be 512 bits");
-    }
-    if (dstTy.getCompactModeI32() ==
-        static_cast<int32_t>(pto::CompactMode::RowPlusOne)) {
-      return ctx.op->emitOpError(
-          "ND-to-2xNZ TEXTRACT rejects CompactMode::RowPlusOne destinations "
-          "in the first version");
+    if (failed(verifyNd2xNzDestinationLayout(ctx.op, dstTy, dstName))) {
+      return failure();
     }
   }
   return success();

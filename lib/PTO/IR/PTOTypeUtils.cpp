@@ -206,7 +206,8 @@ static std::optional<int64_t> getNzRowPlusOneEnd(ArrayRef<int64_t> shape,
                                                   unsigned byteWidth) {
   int64_t physicalRows = shape[0];
   int64_t cols = shape[1];
-  if (physicalRows <= 0 || cols <= 0 || 32 % byteWidth != 0) {
+  if (physicalRows <= 0 || cols <= 0 || byteWidth == 0 ||
+      32 % byteWidth != 0) {
     return std::nullopt;
   }
   int64_t c0 = 32 / static_cast<int64_t>(byteWidth);

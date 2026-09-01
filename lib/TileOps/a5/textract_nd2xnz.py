@@ -141,10 +141,8 @@ def template_textract_nd2xnz(*operands):
     _expand_window(src, index_row1, index_col1, dst1)
 
 
-template_textract_nd2xnz.__signature__ = inspect.Signature(
-    inspect.Parameter(name, inspect.Parameter.POSITIONAL_OR_KEYWORD,
-                      annotation=annotation)
-    for name, annotation in (
+signature_parameters = []
+for name, annotation in (
         ("src", pto.Tile),
         ("index_row0", pto.i32),
         ("index_col0", pto.i32),
@@ -152,8 +150,11 @@ template_textract_nd2xnz.__signature__ = inspect.Signature(
         ("index_col1", pto.i32),
         ("dst0", pto.Tile),
         ("dst1", pto.Tile),
-    )
-)
+):
+    signature_parameters.append(
+        inspect.Parameter(name, inspect.Parameter.POSITIONAL_OR_KEYWORD,
+                          annotation=annotation))
+template_textract_nd2xnz.__signature__ = inspect.Signature(signature_parameters)
 
 
 template_textract_nd2xnz = tilelib.tile_template(

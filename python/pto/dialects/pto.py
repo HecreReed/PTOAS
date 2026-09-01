@@ -1997,6 +1997,41 @@ _GeneratedTExtractOp = _pto_ops_gen.TExtractOp
 _UNSET = object()
 
 
+def _prefer(value, legacy_value):
+    return value if value is not None else legacy_value
+
+
+def _optional_operands(fp, pre_quant_scalar, acc_to_vec_mode, relu_pre_mode):
+    values = {
+        "fp": fp,
+        "preQuantScalar": pre_quant_scalar,
+        "accToVecMode": acc_to_vec_mode,
+        "reluPreMode": relu_pre_mode,
+    }
+    return {name: value for name, value in values.items() if value is not None}
+
+
+def _resolve_t_extract_operands(
+        index_row, index_col, dst, indices, dsts, indexRow, indexCol):
+    legacy_args = (index_row, index_col, dst, indexRow, indexCol)
+    has_range_form = indices is not None or dsts is not None
+    if has_range_form:
+        if any(value is not None for value in legacy_args):
+            raise TypeError(
+                "TExtractOp range-form (indices/dsts) cannot be mixed "
+                "with legacy index column/dst arguments")
+        return (list(indices) if indices is not None else [],
+                list(dsts) if dsts is not None else [])
+
+    row = _prefer(index_row, indexRow)
+    col = _prefer(index_col, indexCol)
+    if row is None or col is None or dst is None:
+        raise TypeError(
+            "TExtractOp requires index_row/indexRow, index_col/indexCol "
+            "and dst for the single-output form")
+    return [row, col], [dst]
+
+
 class TExtractOp(_GeneratedTExtractOp):
     """Legacy facade for pto.textract.
 
@@ -2011,34 +2046,16 @@ class TExtractOp(_GeneratedTExtractOp):
     """
 
     def __init__(self, src, index_row=None, index_col=None, dst=None,
-                 *, indices=None, dsts=None,
+        *, indices=None, dsts=None,
                  indexRow=None, indexCol=None,
                  fp=None, pre_quant_scalar=None, preQuantScalar=None,
                  acc_to_vec_mode=None, accToVecMode=None,
                  relu_pre_mode=None, reluPreMode=None,
                  loc=None, ip=None):
-        # Range-form constructor (design doc 4.4/10): TExtractOp(src,
-        # indices=[...], dsts=[...]) builds the raw range operand list, e.g.
-        # the ND-to-2xNZ dual-output form with four indices / two dsts.
-        legacy_args = (index_row, index_col, dst, indexRow, indexCol)
-        if indices is not None or dsts is not None:
-            if any(value is not None for value in legacy_args):
-                raise TypeError(
-                    "TExtractOp range-form (indices/dsts) cannot be mixed "
-                    "with legacy index column/dst arguments")
-            inds = list(indices) if indices is not None else []
-            dss = list(dsts) if dsts is not None else []
-        else:
-            # Legacy single-output form: snake_case wins over camelCase when
-            # both spellings are provided.
-            row = index_row if index_row is not None else indexRow
-            col = index_col if index_col is not None else indexCol
-            if row is None or col is None or dst is None:
-                raise TypeError(
-                    "TExtractOp requires index_row/indexRow, index_col/indexCol "
-                    "and dst for the single-output form")
-            inds = [row, col]
-            dss = [dst]
+        # Range-form constructor (design doc 4.4/10) also covers the
+        # ND-to-2xNZ dual-output form with four indices and two destinations.
+        inds, dss = _resolve_t_extract_operands(
+            index_row, index_col, dst, indices, dsts, indexRow, indexCol)
         pqs = _prefer(pre_quant_scalar, preQuantScalar)
         acc = _prefer(acc_to_vec_mode, accToVecMode)
         relu = _prefer(relu_pre_mode, reluPreMode)
@@ -2070,8 +2087,7 @@ class TExtractOp(_GeneratedTExtractOp):
 
     @classmethod
     def build_nd_to_2xnz(cls, src, *operands, loc=None, ip=None):
-        """Build the ND-to-2xNZ dual-output form through the facade's
-        range-form constructor."""
+        """Build ND-to-2xNZ through the facade range-form constructor."""
         if len(operands) != 6:
             raise TypeError("build_nd_to_2xnz expects four indices and two destinations")
         row0, col0, row1, col1, dst0, dst1 = operands
@@ -2082,20 +2098,6 @@ class TExtractOp(_GeneratedTExtractOp):
             loc=loc,
             ip=ip,
         )
-
-
-def _prefer(value, legacy_value):
-    return value if value is not None else legacy_value
-
-
-def _optional_operands(fp, pre_quant_scalar, acc_to_vec_mode, relu_pre_mode):
-    values = {
-        "fp": fp,
-        "preQuantScalar": pre_quant_scalar,
-        "accToVecMode": acc_to_vec_mode,
-        "reluPreMode": relu_pre_mode,
-    }
-    return {name: value for name, value in values.items() if value is not None}
 
 
 def _register_facade_opview():

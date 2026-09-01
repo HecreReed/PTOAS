@@ -101,6 +101,39 @@ static Value buildNd2xNzIndex(OpBuilder &b, Location loc, int64_t v) {
   return b.create<arith::ConstantIndexOp>(loc, v);
 }
 
+static LogicalResult emitTExtractNd2xNzElement(
+    OpBuilder &builder, Location loc, const PendingTExtractNd2xNz &pd,
+    int64_t rBase, int64_t cBase, int64_t validCols, int64_t c0,
+    int64_t physRowsTimesC0, Type elemTy, Value srcPtr, Value dstPtr,
+    Value flatIdx) {
+  Value cIdx = builder.create<arith::RemUIOp>(
+      loc, flatIdx, buildNd2xNzIndex(builder, loc, validCols));
+  Value rIdx = builder.create<arith::DivUIOp>(
+      loc, flatIdx, buildNd2xNzIndex(builder, loc, validCols));
+  Value rPlus = builder.create<arith::AddIOp>(
+      loc, buildNd2xNzIndex(builder, loc, rBase), rIdx);
+  Value srcRowOff = builder.create<arith::MulIOp>(
+      loc, rPlus, buildNd2xNzIndex(builder, loc, pd.srcRowStrideElems));
+  Value cPlus = builder.create<arith::AddIOp>(
+      loc, buildNd2xNzIndex(builder, loc, cBase), cIdx);
+  Value srcOff = builder.create<arith::AddIOp>(loc, srcRowOff, cPlus);
+
+  Value cDiv = builder.create<arith::DivUIOp>(
+      loc, cIdx, buildNd2xNzIndex(builder, loc, c0));
+  Value blockOff = builder.create<arith::MulIOp>(
+      loc, cDiv, buildNd2xNzIndex(builder, loc, physRowsTimesC0));
+  Value rBlock = builder.create<arith::MulIOp>(
+      loc, rIdx, buildNd2xNzIndex(builder, loc, c0));
+  Value cRem = builder.create<arith::RemUIOp>(
+      loc, cIdx, buildNd2xNzIndex(builder, loc, c0));
+  Value dstOff = builder.create<arith::AddIOp>(
+      loc, builder.create<arith::AddIOp>(loc, blockOff, rBlock), cRem);
+  Value loaded = builder.create<pto::LoadScalarOp>(
+      loc, elemTy, srcPtr, srcOff);
+  builder.create<pto::StoreScalarOp>(loc, dstPtr, dstOff, loaded);
+  return success();
+}
+
 // Load src[row][col] and store dst[valid coordinate] using scalar pointer ops.
 static LogicalResult expandTExtractNd2xNzWindow(
     OpBuilder &builder, Location loc, const PendingTExtractNd2xNz &pd,
@@ -115,9 +148,6 @@ static LogicalResult expandTExtractNd2xNzWindow(
     return failure();
   }
 
-  auto cst = [&](OpBuilder &b, Location l, int64_t v) {
-    return buildNd2xNzIndex(b, l, v);
-  };
   auto srcTy = cast<pto::PtrType>(srcPtr.getType());
   auto elemTy = srcTy.getElementType();
 
@@ -138,31 +168,18 @@ static LogicalResult expandTExtractNd2xNzWindow(
     return failure();
   }
   auto flat = builder.create<scf::ForOp>(
-      loc, cst(builder, loc, 0), cst(builder, loc, total),
-      cst(builder, loc, 1), ValueRange{});
+      loc, buildNd2xNzIndex(builder, loc, 0),
+      buildNd2xNzIndex(builder, loc, total),
+      buildNd2xNzIndex(builder, loc, 1), ValueRange{});
   builder.setInsertionPointToStart(flat.getBody());
   {
     OpBuilder::InsertionGuard guard(builder);
-    Value flatIdx = flat.getInductionVar();
-    // r = flat / validCols; c = flat % validCols
-    Value cIdx = builder.create<arith::RemUIOp>(loc, flatIdx, cst(builder, loc, validCols));
-    Value rIdx = builder.create<arith::DivUIOp>(loc, flatIdx, cst(builder, loc, validCols));
-    // srcOff = (rBase + r) * srcRowStrideElems + cBase + c
-    Value rPlus = builder.create<arith::AddIOp>(loc, cst(builder, loc, rBase), rIdx);
-    Value srcRowOff = builder.create<arith::MulIOp>(
-        loc, rPlus, cst(builder, loc, pd.srcRowStrideElems));
-    Value cPlus = builder.create<arith::AddIOp>(loc, cst(builder, loc, cBase), cIdx);
-    Value srcOff = builder.create<arith::AddIOp>(loc, srcRowOff, cPlus);
-    // dstOff = (c / c0) * physRows * c0 + r * c0 + (c % c0)
-    Value cDiv = builder.create<arith::DivUIOp>(loc, cIdx, cst(builder, loc, c0));
-    Value blockOff = builder.create<arith::MulIOp>(
-        loc, cDiv, cst(builder, loc, physRowsTimesC0));
-    Value rBlock = builder.create<arith::MulIOp>(loc, rIdx, cst(builder, loc, c0));
-    Value cRem = builder.create<arith::RemUIOp>(loc, cIdx, cst(builder, loc, c0));
-    Value dstOff = builder.create<arith::AddIOp>(
-        loc, builder.create<arith::AddIOp>(loc, blockOff, rBlock), cRem);
-    Value loaded = builder.create<pto::LoadScalarOp>(loc, elemTy, srcPtr, srcOff);
-    builder.create<pto::StoreScalarOp>(loc, dstPtr, dstOff, loaded);
+    if (failed(emitTExtractNd2xNzElement(
+            builder, loc, pd, rBase, cBase, validCols, c0,
+            physRowsTimesC0, elemTy, srcPtr, dstPtr,
+            flat.getInductionVar()))) {
+      return failure();
+    }
   }
   builder.setInsertionPointAfter(flat);
   return success();
