@@ -64,11 +64,34 @@ struct LocalMemSpec {
 };
 
 static std::optional<int64_t> getTileBufferFootprintBytes(TileBufType type) {
-  // Shared physical-storage sizing (design doc 12): plain rectangular and
-  // RowPlusOne compact layouts go through getTileBufStorageByteSize so the
-  // planner and the post-planning ND-to-2xNz checks agree on the footprint
-  // (checked arithmetic).
-  return getTileBufStorageByteSize(type);
+  ArrayRef<int64_t> shape = type.getShape();
+  unsigned elemBytes = getPTOStorageElemByteSize(type.getElementType());
+  if (elemBytes == 0) {
+    return std::nullopt;
+  }
+
+  if (type.getCompactModeI32() !=
+      static_cast<int32_t>(pto::CompactMode::RowPlusOne)) {
+    std::optional<int64_t> totalStaticSize = getStaticTotalSize(shape);
+    if (!totalStaticSize.has_value()) {
+      return std::nullopt;
+    }
+    return totalStaticSize.value() * static_cast<int64_t>(elemBytes);
+  }
+
+  if (shape.size() != mlir::pto::kValue2 || llvm::is_contained(shape, ShapedType::kDynamic)) {
+    return std::nullopt;
+  }
+
+  bool rowMajor =
+      type.getBLayoutValueI32() == static_cast<int32_t>(pto::BLayout::RowMajor);
+  int64_t major = rowMajor ? shape[0] : shape[1];
+  int64_t minor = rowMajor ? shape[1] : shape[0];
+  if (major == 0 || minor == 0) {
+    return 0;
+  }
+  return ((major - 1) * (minor + 1) + minor) *
+         static_cast<int64_t>(elemBytes);
 }
 
 static int64_t ceilDivBitsToBytes(int64_t bits) {
