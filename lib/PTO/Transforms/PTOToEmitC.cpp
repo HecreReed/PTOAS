@@ -351,18 +351,42 @@ static Value maybeWrapGlobalMemrefAsGlobalTensor(
     Type originalType, Operation *anchor, StringRef tag = {});
 
 static std::optional<mlir::pto::Layout> getLayoutAttrFromOp(Operation *op) {
-  if (!op)
+  if (!op) {
     return std::nullopt;
-  if (auto attr = op->getAttrOfType<mlir::pto::LayoutAttr>("layout"))
+  }
+  if (auto attr = op->getAttrOfType<mlir::pto::LayoutAttr>("layout")) {
     return attr.getLayout();
+  }
+  return std::nullopt;
+}
+
+static std::optional<mlir::pto::Layout> getLayoutAttrFromViewType(Type type) {
+  if (auto tensorView = dyn_cast<pto::TensorViewType>(type)) {
+    if (auto layout = tensorView.getLayoutAttr()) {
+      return layout.getLayout();
+    }
+  }
+  if (auto partitionView = dyn_cast<pto::PartitionTensorViewType>(type)) {
+    if (auto layout = partitionView.getLayoutAttr()) {
+      return layout.getLayout();
+    }
+  }
   return std::nullopt;
 }
 
 static std::optional<mlir::pto::Layout> resolveLayoutFromValueChain(Value v) {
   v = peelUnrealized(v);
-  while (Operation *def = v.getDefiningOp()) {
-    if (auto layout = getLayoutAttrFromOp(def))
+  while (v) {
+    if (auto layout = getLayoutAttrFromViewType(v.getType())) {
       return layout;
+    }
+    Operation *def = v.getDefiningOp();
+    if (!def) {
+      break;
+    }
+    if (auto layout = getLayoutAttrFromOp(def)) {
+      return layout;
+    }
     if (auto partition = dyn_cast<pto::PartitionViewOp>(def)) {
       v = peelUnrealized(partition.getSource());
       continue;
@@ -1017,13 +1041,21 @@ public:
     });
 
     addConversion([Ctx](pto::TensorViewType type) -> Type {
+      std::string layout = type.getLayoutAttr()
+                               ? layoutToEmitCString(
+                                     type.getLayoutAttr().getLayout())
+                               : "pto::Layout::ND";
       return getRuntimeGlobalTensorOpaqueType(Ctx, type.getElementType(),
-                                              type.getShape());
+                                              type.getShape(), layout);
     });
 
     addConversion([Ctx](pto::PartitionTensorViewType type) -> Type {
+      std::string layout = type.getLayoutAttr()
+                               ? layoutToEmitCString(
+                                     type.getLayoutAttr().getLayout())
+                               : "pto::Layout::ND";
       return getRuntimeGlobalTensorOpaqueType(Ctx, type.getElementType(),
-                                              type.getShape());
+                                              type.getShape(), layout);
     });
 
     addConversion([Ctx](pto::TileBufType type) -> std::optional<Type> {
@@ -8185,9 +8217,12 @@ struct PTOMakeTensorViewToEmitC
     auto resultType = dyn_cast<pto::TensorViewType>(op.getResult().getType());
     if (!resultType)
       return rewriter.notifyMatchFailure(op, "expected tensor_view result");
-    auto layout = op.getLayoutAttr()
-                      ? layoutToEmitCString(op.getLayoutAttr().getLayout())
-                      : "pto::Layout::ND";
+    std::string layout = "pto::Layout::ND";
+    if (auto attr = op.getLayoutAttr()) {
+      layout = layoutToEmitCString(attr.getLayout());
+    } else if (auto attr = resultType.getLayoutAttr()) {
+      layout = layoutToEmitCString(attr.getLayout());
+    }
     auto result = buildRuntimeGlobalTensor(
         rewriter, op.getLoc(), adaptor.getPtr(),
         resultType.getElementType(), resultType.getShape(), adaptor.getShape(),

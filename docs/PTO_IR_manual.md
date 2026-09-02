@@ -120,7 +120,7 @@ the same PTO memory space.
 
 ---
 
-### 2.3 `!pto.tensor_view<d0 x d1 x elementType>`
+### 2.3 `!pto.tensor_view<d0 x d1 x elementType[, layout]>`
 
 A descriptor for a global memory tensor. Does not own data - represents a view with shape and stride information.
 
@@ -128,12 +128,14 @@ A descriptor for a global memory tensor. Does not own data - represents a view w
 |-----------|------|-------------|
 | `shape` | `ArrayRef<i64>` | Tensor shape `[d0, d1]` (each dim may be `?` for dynamic) |
 | `elementType` | `element-type(i1/i8/i16/i32/f16/f32/bf16...)` | Element data type |
+| `layout` | `#pto.layout<...>` | Optional resolved GM layout; omission allows construction-time resolution and defaults to ND when no stronger fact exists |
 
-**Syntax:** `!pto.tensor_view<1024x512xf16>`
+**Syntax:** `!pto.tensor_view<1024x512xf16>` or
+`!pto.tensor_view<1x8x8x16x8xf32, #pto.layout<nz>>`
 
 ---
 
-### 2.4 `!pto.partition_tensor_view<d0 x d1 x elementType>`
+### 2.4 `!pto.partition_tensor_view<d0 x d1 x elementType[, layout]>`
 
 A logical partition (slice) of a `tensor_view`. Holds shape and stride information for a tile-sized region but does not own data.
 
@@ -141,8 +143,10 @@ A logical partition (slice) of a `tensor_view`. Holds shape and stride informati
 |-----------|------|-------------|
 | `shape` | `ArrayRef<i64>` | Partition shape `[d0, d1]` |
 | `elementType` | `element-type(i1/i8/i16/i32/f16/f32/bf16...)` | Element data type |
+| `layout` | `#pto.layout<...>` | Optional resolved GM layout inherited from the source view |
 
-**Syntax:** `!pto.partition_tensor_view<16x16xf16>`
+**Syntax:** `!pto.partition_tensor_view<16x16xf16>` or
+`!pto.partition_tensor_view<1x4x8x16x8xf32, #pto.layout<nz>>`
 
 ---
 
@@ -478,7 +482,11 @@ Composite attribute and component enums for tile buffer configuration.
 
 ### 3.5 Layout
 
-Global tensor layout inference for [`tensor_view` (Section 2.3)](#23-ptotensor_viewd0-x-d1-x-elementtype)/[`partition_tensor_view` (Section 2.4)](#24-ptopartition_tensor_viewd0-x-d1-x-elementtype). Tile buffers additionally use **Tile Buf config** (see 3.4) to describe physical/fractal layout.
+Global tensor layout inference for
+[`tensor_view` (Section 2.3)](#23-ptotensor_viewd0-x-d1-x-elementtype-layout) /
+[`partition_tensor_view` (Section 2.4)](#24-ptopartition_tensor_viewd0-x-d1-x-elementtype-layout).
+Tile buffers additionally use **Tile Buf config** (see 3.4) to describe
+physical/fractal layout.
 
 | Value | Int | Mnemonic | Description |
 |-------|-----|----------|-------------|
@@ -500,6 +508,12 @@ stride = [n1*m1*16*C0, m1*16*C0, 16*C0, C0, 1]
 
 An unannotated single-fractal `[1,1,1,16,C0]` view remains ND. Use an explicit
 `#pto.layout<nz>` when its logical meaning is NZ.
+
+A resolved layout remains part of the view contract across structured control
+flow, control-flow block arguments, and direct internal function calls and
+returns. All incoming values at a merge must agree: NZ merged with NZ remains
+NZ, while NZ merged with ND is rejected. View-typed indirect calls are not
+supported because their layout contract cannot be resolved statically.
 
 ---
 

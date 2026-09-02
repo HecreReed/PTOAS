@@ -59,9 +59,15 @@ static LogicalResult parseShapeAndElem(AsmParser &parser,
                                        SmallVectorImpl<int64_t> &shape,
                                        Type &elementType,
                                        bool allowDynamic = true);
+static LogicalResult parseViewShapeElemAndLayout(
+    AsmParser &parser, SmallVectorImpl<int64_t> &shape, Type &elementType,
+    Attribute &layout, bool allowDynamic = true);
 static void printShapeAndElem(AsmPrinter &printer,
                               ArrayRef<int64_t> shape,
                               Type elementType);
+static void printViewShapeElemAndLayout(AsmPrinter &printer,
+                                        ArrayRef<int64_t> shape,
+                                        Type elementType, Attribute layout);
 } // namespace pto
 } // namespace mlir
 
@@ -874,14 +880,17 @@ static void printSyncEventOpCommon(OpAsmPrinter &p, Operation *op,
 mlir::Type TensorViewType::parse(::mlir::AsmParser &parser) {
   SmallVector<int64_t, 4> shape;
   Type elementType;
-  if (failed(parseShapeAndElem(parser, shape, elementType, /*allowDynamic=*/true))) {
+  Attribute layout;
+  if (failed(parseViewShapeElemAndLayout(
+          parser, shape, elementType, layout, /*allowDynamic=*/true))) {
     return Type();
   }
-  return TensorViewType::get(parser.getContext(), shape, elementType);
+  return TensorViewType::get(parser.getContext(), shape, elementType, layout);
 }
 
 void TensorViewType::print(::mlir::AsmPrinter &printer) const {
-  printShapeAndElem(printer, getShape(), getElementType());
+  printViewShapeElemAndLayout(printer, getShape(), getElementType(),
+                              getLayout());
 }
 
 mlir::Type PtrType::parse(::mlir::AsmParser &parser) {
@@ -1763,13 +1772,16 @@ static FailureOr<mlir::pto::PartitionTensorViewType>
 inferPartitionViewResultTypeFromSizes(Type sourceType, ValueRange sizes) {
   int64_t sourceRank = 0;
   Type elementType;
+  Attribute layout;
   if (auto tensorView = dyn_cast<mlir::pto::TensorViewType>(sourceType)) {
     sourceRank = tensorView.getRank();
     elementType = tensorView.getElementType();
+    layout = tensorView.getLayout();
   } else if (auto partitionView =
                  dyn_cast<mlir::pto::PartitionTensorViewType>(sourceType)) {
     sourceRank = partitionView.getRank();
     elementType = partitionView.getElementType();
+    layout = partitionView.getLayout();
   } else {
     return failure();
   }
@@ -1790,7 +1802,7 @@ inferPartitionViewResultTypeFromSizes(Type sourceType, ValueRange sizes) {
   }
 
   return mlir::pto::PartitionTensorViewType::get(sourceType.getContext(), shape,
-                                                 elementType);
+                                                 elementType, layout);
 }
 
 ParseResult mlir::pto::PartitionViewOp::parse(OpAsmParser &parser,
@@ -2147,6 +2159,16 @@ static bool isSupportedGatherElemTypeA5(Type ty) {
 static std::optional<pto::Layout> getLogicalViewLayout(Value value) {
   if (!value) {
     return std::nullopt;
+  }
+  if (auto type = dyn_cast<pto::TensorViewType>(value.getType())) {
+    if (auto layout = type.getLayoutAttr()) {
+      return layout.getLayout();
+    }
+  } else if (auto type =
+                 dyn_cast<pto::PartitionTensorViewType>(value.getType())) {
+    if (auto layout = type.getLayoutAttr()) {
+      return layout.getLayout();
+    }
   }
   if (auto part = value.getDefiningOp<pto::PartitionViewOp>()) {
     return getLogicalViewLayout(part.getSource());
@@ -2936,7 +2958,15 @@ getResolvedMakeTensorViewShape(mlir::pto::MakeTensorViewOp op,
 static LogicalResult
 verifyMakeTensorViewLayout(mlir::pto::MakeTensorViewOp op,
                            mlir::pto::TensorViewType resultType) {
-  auto layoutAttr = op.getLayoutAttr();
+  auto opLayoutAttr = op.getLayoutAttr();
+  auto typeLayoutAttr = resultType.getLayoutAttr();
+  if (opLayoutAttr && typeLayoutAttr && opLayoutAttr != typeLayoutAttr) {
+    return op.emitOpError()
+           << "layout attribute " << opLayoutAttr
+           << " does not match result type layout " << typeLayoutAttr;
+  }
+
+  auto layoutAttr = opLayoutAttr ? opLayoutAttr : typeLayoutAttr;
   if (!layoutAttr) {
     return success();
   }
@@ -16384,6 +16414,45 @@ static void printShapeAndElem(AsmPrinter &printer,
   printer << ">";
 }
 
+static LogicalResult parseViewShapeElemAndLayout(
+    AsmParser &parser, SmallVectorImpl<int64_t> &shape, Type &elementType,
+    Attribute &layout, bool allowDynamic) {
+  bool parseFailed =
+      parser.parseLess() || parser.parseDimensionList(shape, allowDynamic) ||
+      parser.parseType(elementType);
+  if (parseFailed) {
+    return failure();
+  }
+  if (succeeded(parser.parseOptionalComma())) {
+    LayoutAttr layoutAttr;
+    if (parser.parseAttribute(layoutAttr)) {
+      return failure();
+    }
+    layout = layoutAttr;
+  }
+  return parser.parseGreater();
+}
+
+static void printViewShapeElemAndLayout(AsmPrinter &printer,
+                                        ArrayRef<int64_t> shape,
+                                        Type elementType, Attribute layout) {
+  printer << "<";
+  for (int64_t dim : shape) {
+    if (dim == ShapedType::kDynamic) {
+      printer << "?";
+    } else {
+      printer << dim;
+    }
+    printer << "x";
+  }
+  printer.printType(elementType);
+  if (layout) {
+    printer << ", ";
+    printer.printAttribute(layout);
+  }
+  printer << ">";
+}
+
 // =============================================================================
 // PartitionTensorViewType Implementation
 // =============================================================================
@@ -16391,15 +16460,19 @@ static void printShapeAndElem(AsmPrinter &printer,
 Type PartitionTensorViewType::parse(AsmParser &parser) {
   SmallVector<int64_t, 4> shape;
   Type elemTy;
-  if (failed(parseShapeAndElem(parser, shape, elemTy, /*allowDynamic=*/true))) {
+  Attribute layout;
+  if (failed(parseViewShapeElemAndLayout(
+          parser, shape, elemTy, layout, /*allowDynamic=*/true))) {
     return Type();
   }
 
-  return PartitionTensorViewType::get(parser.getContext(), shape, elemTy);
+  return PartitionTensorViewType::get(parser.getContext(), shape, elemTy,
+                                      layout);
 }
 
 void PartitionTensorViewType::print(AsmPrinter &printer) const {
-  printShapeAndElem(printer, getShape(), getElementType());
+  printViewShapeElemAndLayout(printer, getShape(), getElementType(),
+                              getLayout());
 }
 
 // ---- TileType ----

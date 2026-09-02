@@ -164,7 +164,8 @@ static Type canonicalViewType(Type type) {
     if (viewType.getRank() > 0 && viewType.getRank() < kCanonicalRank5) {
       return TensorViewType::get(type.getContext(),
                                  rightAlignShapeToRank5(viewType.getShape()),
-                                 viewType.getElementType());
+                                 viewType.getElementType(),
+                                 viewType.getLayout());
     }
     return type;
   }
@@ -172,7 +173,7 @@ static Type canonicalViewType(Type type) {
     if (viewType.getRank() > 0 && viewType.getRank() < kCanonicalRank5) {
       return PartitionTensorViewType::get(
           type.getContext(), rightAlignShapeToRank5(viewType.getShape()),
-          viewType.getElementType());
+          viewType.getElementType(), viewType.getLayout());
     }
     return type;
   }

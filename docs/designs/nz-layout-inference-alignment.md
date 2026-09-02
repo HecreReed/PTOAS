@@ -257,6 +257,34 @@ layout = nd
 legacy 开关。旧规则命中的非标准形属于误判，继续兼容会固定错误的
 `GlobalTensor<..., Layout::NZ>` 模板参数。
 
+### 4.8 控制流和函数边界传播
+
+layout 传播使用模块级等价关系，并按以下 lattice 合并：
+
+```text
+Unknown
+ND / DN / NZ / MX_A_ZZ / MX_B_NN
+Conflict
+```
+
+`partition_view`、`arith.select`、`scf.if`、`scf.for`、`scf.while`、
+`scf.execute_region`、`scf.index_switch`、CF block argument、直接
+`func.call` 和 `func.return` 都建立 layout 等价约束。两个已知且不同的 layout 进入
+同一等价集合时立即报告 conflict；不能在 merge 后默认成 ND。
+
+`TensorViewType` 和 `PartitionTensorViewType` 增加可选 layout 参数。无参数形式保持原有
+文本兼容，表示尚未解析或默认 ND；非 ND 解析结果写入类型，例如：
+
+```mlir
+!pto.tensor_view<1x8x8x16x8xf32, #pto.layout<nz>>
+!pto.partition_tensor_view<1x4x8x16x8xf32, #pto.layout<nz>>
+```
+
+因此结构化控制流转换和函数签名转换可以直接从类型得到 layout，不再依赖 defining-op
+回溯。direct internal helper 的参数、返回值和所有调用点必须形成一致契约；外部声明按
+其显式类型 layout 解析，未写 layout 时使用 ND。view-typed indirect call 因无法静态
+解析 callee 契约而拒绝。
+
 ## 5. 示例
 
 以下示例省略 `arith.constant` 定义，常量名与数值一致。
@@ -402,6 +430,8 @@ PR #1027 在现有设计提交之后继续完成以下内容：
 - 实现显式 layout 全优先；
 - 替换旧 NZ 规则；
 - 实现 NZ partition/subview 的 source-relative 校验和传播；
+- 实现跨 SCF/CF merge 与函数参数、返回值、调用点的 layout 等价传播和冲突诊断；
+- 在 view 类型中携带已解析的非 ND layout，供结构化转换和 EmitC ABI 使用；
 - 补齐静态、动态、packed storage element 和跨调用点一致性测试；
 - 更新用户文档及 Python `make_tensor_view` 的显式 layout 示例。
 
@@ -426,7 +456,10 @@ PR #1027 在现有设计提交之后继续完成以下内容：
 12. FP4 packed-pair 按一字节 storage element 计算 C0；
 13. verifier、pass 和 EmitC 对同一 view 得到一致 layout；
 14. mgather/mscatter 的 ND-only 路径不覆盖显式 ND；
-15. 带外层 gap 的根 view 经过嵌套 partition 后仍保留原 stride，并累计两级 offset。
+15. 带外层 gap 的根 view 经过嵌套 partition 后仍保留原 stride，并累计两级 offset；
+16. `scf.if(NZ, NZ)` 经过 helper、`scf.for`、`scf.while` 后仍生成 NZ；
+17. `scf.if(NZ, ND)` 在 merge 点报告 layout conflict；
+18. direct helper 的参数与返回值使用同一 NZ `GlobalTensor` ABI。
 
 同时更新 `globaltensor_layout_bytewidth_emitc.pto` 中固化旧错位规则的期望值，并增加
 A3/A5 编译覆盖。具备板卡资源时运行一条 NZ load/store E2E 数据比对，确认生成的

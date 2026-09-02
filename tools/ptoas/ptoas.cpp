@@ -3640,7 +3640,7 @@ int mlir::pto::compilePTOASModule(
   pm.addPass(pto::createPTOInferValidatePipeInitPass());
   pm.addNestedPass<mlir::func::FuncOp>(pto::createLoweringSyncToPipePass());
   if (!disableInferLayout) {
-    pm.addNestedPass<mlir::func::FuncOp>(pto::createInferPTOLayoutPass());
+    pm.addPass(pto::createInferPTOLayoutPass());
   }
   // PTOViewToMemref is generic view lowering required by both backends; keep it
   // outside the local-memory planning gate so default A2/A3 EmitC still lowers

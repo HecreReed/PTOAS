@@ -27,21 +27,21 @@
 // RUN: ptoas --pto-arch=a5 --emit-pto-ir --mlir-print-ir-after=pto-infer-layout %t/explicit_false_inferred_attr.pto -o /dev/null 2>&1 | FileCheck %s --check-prefix=FALSE-INFERRED
 // RUN: ptoas --pto-arch=a5 --emit-pto-ir --mlir-print-ir-after=pto-infer-layout %t/dynamic_memref_subview.pto -o /dev/null 2>&1 | FileCheck %s --check-prefix=DYNAMIC-MEMREF
 
-// INFER-DAG: pto.make_tensor_view {{.*}} shape = {{.*}} {layout = #pto.layout<nz>, pto.inferred_layout = true} : !pto.tensor_view<1x8x8x16x8xf32>
-// INFER-DAG: pto.make_tensor_view {{.*}} shape = {{.*}} {layout = #pto.layout<nz>, pto.inferred_layout = true} : !pto.tensor_view<1x4x8x16x16xf16>
-// INFER-DAG: pto.make_tensor_view {{.*}} shape = {{.*}} {layout = #pto.layout<nz>, pto.inferred_layout = true} : !pto.tensor_view<1x2x8x16x32xi8>
-// INFER-DAG: pto.make_tensor_view {{.*}} shape = {{.*}} {layout = #pto.layout<nz>, pto.inferred_layout = true} : !pto.tensor_view<1x2x8x16x32x!pto.f4E1M2x2>
+// INFER-DAG: pto.make_tensor_view {{.*}} shape = {{.*}} {layout = #pto.layout<nz>, pto.inferred_layout = true} : !pto.tensor_view<1x8x8x16x8xf32, #pto.layout<nz>>
+// INFER-DAG: pto.make_tensor_view {{.*}} shape = {{.*}} {layout = #pto.layout<nz>, pto.inferred_layout = true} : !pto.tensor_view<1x4x8x16x16xf16, #pto.layout<nz>>
+// INFER-DAG: pto.make_tensor_view {{.*}} shape = {{.*}} {layout = #pto.layout<nz>, pto.inferred_layout = true} : !pto.tensor_view<1x2x8x16x32xi8, #pto.layout<nz>>
+// INFER-DAG: pto.make_tensor_view {{.*}} shape = {{.*}} {layout = #pto.layout<nz>, pto.inferred_layout = true} : !pto.tensor_view<1x2x8x16x32x!pto.f4E1M2x2, #pto.layout<nz>>
 // INFER-DAG: pto.make_tensor_view {{.*}} shape = {{.*}} {layout = #pto.layout<nd>, pto.inferred_layout = true} : !pto.tensor_view<8x8x16x8xf32>
 // INFER-DAG: pto.make_tensor_view {{.*}} shape = {{.*}} {layout = #pto.layout<nd>, pto.inferred_layout = true} : !pto.tensor_view<4x1x16x8x16xf32>
 // INFER-DAG: pto.make_tensor_view {{.*}} shape = {{.*}} {layout = #pto.layout<nd>, pto.inferred_layout = true} : !pto.tensor_view<1x1x1x16x8xf32>
-// INFER-DAG: pto.make_tensor_view {{.*}} {layout = #pto.layout<nz>} : !pto.tensor_view<1x1x1x16x8xf32>
+// INFER-DAG: pto.make_tensor_view {{.*}} {layout = #pto.layout<nz>} : !pto.tensor_view<1x1x1x16x8xf32, #pto.layout<nz>>
 // INFER-DAG: pto.make_tensor_view {{.*}} {layout = #pto.layout<nd>} : !pto.tensor_view<1x2x1x16x8xf32>
-// INFER-DAG: pto.make_tensor_view {{.*}} {layout = #pto.layout<nz>} : !pto.tensor_view<1x8x8x16x8xf32>
-// INFER-DAG: pto.make_tensor_view {{.*}} {layout = #pto.layout<nz>} : !pto.tensor_view<1x4x8x16x8xf32>
-// INFER-DAG: pto.make_tensor_view {{.*}} {layout = #pto.layout<nz>} : !pto.tensor_view<32x128x128x16x32xi8>
-// INFER-DAG: pto.partition_view {{.*}} : !pto.tensor_view<32x128x128x16x32xi8>
-// INFER-DAG: pto.partition_view {{.*}} : !pto.partition_tensor_view<1x4x8x16x8xf32>
-// INFER-DAG: pto.make_tensor_view {{.*}} {layout = #pto.layout<nz>} : !pto.tensor_view<1x?x?x16x8xf32>
+// INFER-DAG: pto.make_tensor_view {{.*}} {layout = #pto.layout<nz>} : !pto.tensor_view<1x8x8x16x8xf32, #pto.layout<nz>>
+// INFER-DAG: pto.make_tensor_view {{.*}} {layout = #pto.layout<nz>} : !pto.tensor_view<1x4x8x16x8xf32, #pto.layout<nz>>
+// INFER-DAG: pto.make_tensor_view {{.*}} {layout = #pto.layout<nz>} : !pto.tensor_view<32x128x128x16x32xi8, #pto.layout<nz>>
+// INFER-DAG: pto.partition_view {{.*}} : !pto.tensor_view<32x128x128x16x32xi8, #pto.layout<nz>>
+// INFER-DAG: pto.partition_view {{.*}} : !pto.partition_tensor_view<1x4x8x16x8xf32, #pto.layout<nz>>
+// INFER-DAG: pto.make_tensor_view {{.*}} {layout = #pto.layout<nz>} : !pto.tensor_view<1x?x?x16x8xf32, #pto.layout<nz>>
 // INFER-DAG: pto.mgather
 // INFER-DAG: pto.mscatter
 // INFER-DAG: memref.subview {{.*}} {layout = #pto.layout<nz>}
