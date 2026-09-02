@@ -9740,6 +9740,32 @@ static StringRef getTInsertModeToken(pto::TInsertMode mode) {
   llvm_unreachable("unknown TInsertMode");
 }
 
+static LogicalResult populateTExtractTemplateArgs(
+    pto::TExtractOp op, Value dst, Value src, Value fp, bool hasFp,
+    bool hasMode, MLIRContext *ctx, SmallVectorImpl<Attribute> &args) {
+  auto dstOT = mlir::dyn_cast<emitc::OpaqueType>(dst.getType());
+  auto srcOT = mlir::dyn_cast<emitc::OpaqueType>(src.getType());
+  if (!dstOT || !srcOT) {
+    return failure();
+  }
+  args.push_back(emitc::OpaqueAttr::get(ctx, dstOT.getValue().str()));
+  args.push_back(emitc::OpaqueAttr::get(ctx, srcOT.getValue().str()));
+  if (hasFp) {
+    auto fpOT = mlir::dyn_cast<emitc::OpaqueType>(fp.getType());
+    if (!fpOT) {
+      return failure();
+    }
+    args.push_back(emitc::OpaqueAttr::get(ctx, fpOT.getValue().str()));
+  }
+  if (hasMode) {
+    args.push_back(emitc::OpaqueAttr::get(
+        ctx, getAccToVecModeToken(op.getAccToVecModeAttr().getValue())));
+  }
+  args.push_back(emitc::OpaqueAttr::get(
+      ctx, getReluPreModeToken(op.getReluPreMode())));
+  return success();
+}
+
 struct PTOExtractToEmitC : public OpConversionPattern<pto::TExtractOp> {
   using OpConversionPattern<pto::TExtractOp>::OpConversionPattern;
 
@@ -9768,11 +9794,13 @@ struct PTOExtractToEmitC : public OpConversionPattern<pto::TExtractOp> {
     Value r0 = indices[0];
     Value c0 = indices[1];
     Value preQuantScalar;
-    if (op.getPreQuantScalar())
+    if (op.getPreQuantScalar()) {
       preQuantScalar = adaptor.getPreQuantScalar();
+    }
     Value fp;
-    if (op.getFp())
+    if (op.getFp()) {
       fp = adaptor.getFp();
+    }
 
     auto modeAttr = op.getAccToVecModeAttr();
     const bool hasFp = static_cast<bool>(fp);
@@ -9782,34 +9810,22 @@ struct PTOExtractToEmitC : public OpConversionPattern<pto::TExtractOp> {
         op.getReluPreMode() != pto::ReluPreMode::NoRelu;
 
     SmallVector<Value, 5> operands{dst, src};
-    if (hasFp)
+    if (hasFp) {
       operands.push_back(fp);
-    if (hasPreQuantScalar)
+    }
+    if (hasPreQuantScalar) {
       operands.push_back(preQuantScalar);
+    }
     operands.push_back(r0);
     operands.push_back(c0);
 
     ArrayAttr templateArgs;
     if (hasMode || reluNonDefault) {
-      auto dstOT = mlir::dyn_cast<emitc::OpaqueType>(dst.getType());
-      auto srcOT = mlir::dyn_cast<emitc::OpaqueType>(src.getType());
-      if (!dstOT || !srcOT)
+      SmallVector<Attribute, 4> args;
+      if (failed(populateTExtractTemplateArgs(
+              op, dst, src, fp, hasFp, hasMode, ctx, args)))
         return rewriter.notifyMatchFailure(
             op, "textract template lowering expects opaque dst/src types");
-      SmallVector<Attribute, 4> args{
-          emitc::OpaqueAttr::get(ctx, dstOT.getValue().str()),
-          emitc::OpaqueAttr::get(ctx, srcOT.getValue().str()),
-      };
-      if (hasFp) {
-        auto fpOT = mlir::dyn_cast<emitc::OpaqueType>(fp.getType());
-        if (!fpOT)
-          return rewriter.notifyMatchFailure(
-              op, "textract template lowering expects opaque fp type");
-        args.push_back(emitc::OpaqueAttr::get(ctx, fpOT.getValue().str()));
-      }
-      if (hasMode)
-        args.push_back(emitc::OpaqueAttr::get(ctx, getAccToVecModeToken(modeAttr.getValue())));
-      args.push_back(emitc::OpaqueAttr::get(ctx, getReluPreModeToken(op.getReluPreMode())));
       templateArgs = rewriter.getArrayAttr(args);
     }
 

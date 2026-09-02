@@ -1994,9 +1994,6 @@ def vkernel(py_fn=None, *, target="a5", name=None, verify=True):
 
 _GeneratedTExtractOp = _pto_ops_gen.TExtractOp
 
-_UNSET = object()
-
-
 def _prefer(value, legacy_value):
     return value if value is not None else legacy_value
 
@@ -2011,9 +2008,9 @@ def _optional_operands(fp, pre_quant_scalar, acc_to_vec_mode, relu_pre_mode):
     return {name: value for name, value in values.items() if value is not None}
 
 
-def _resolve_t_extract_operands(
-        index_row, index_col, dst, indices, dsts, indexRow, indexCol):
-    legacy_args = (index_row, index_col, dst, indexRow, indexCol)
+def _resolve_t_extract_operands(index_row, index_col, dst, ranges):
+    indices, dsts = ranges
+    legacy_args = (index_row, index_col, dst)
     has_range_form = indices is not None or dsts is not None
     if has_range_form:
         if any(value is not None for value in legacy_args):
@@ -2023,13 +2020,11 @@ def _resolve_t_extract_operands(
         return (list(indices) if indices is not None else [],
                 list(dsts) if dsts is not None else [])
 
-    row = _prefer(index_row, indexRow)
-    col = _prefer(index_col, indexCol)
-    if row is None or col is None or dst is None:
+    if index_row is None or index_col is None or dst is None:
         raise TypeError(
             "TExtractOp requires index_row/indexRow, index_col/indexCol "
             "and dst for the single-output form")
-    return [row, col], [dst]
+    return [index_row, index_col], [dst]
 
 
 class TExtractOp(_GeneratedTExtractOp):
@@ -2046,19 +2041,33 @@ class TExtractOp(_GeneratedTExtractOp):
     """
 
     def __init__(self, src, index_row=None, index_col=None, dst=None,
-        *, indices=None, dsts=None,
-                 indexRow=None, indexCol=None,
-                 fp=None, pre_quant_scalar=None, preQuantScalar=None,
-                 acc_to_vec_mode=None, accToVecMode=None,
-                 relu_pre_mode=None, reluPreMode=None,
-                 loc=None, ip=None):
+                 **kwargs):
+        indices = kwargs.pop("indices", None)
+        dsts = kwargs.pop("dsts", None)
+        index_row = _prefer(index_row, kwargs.pop("indexRow", None))
+        index_col = _prefer(index_col, kwargs.pop("indexCol", None))
+        fp = kwargs.pop("fp", None)
+        pre_quant_scalar = kwargs.pop("pre_quant_scalar", None)
+        pre_quant_scalar = _prefer(
+            pre_quant_scalar, kwargs.pop("preQuantScalar", None))
+        acc_to_vec_mode = kwargs.pop("acc_to_vec_mode", None)
+        acc_to_vec_mode = _prefer(
+            acc_to_vec_mode, kwargs.pop("accToVecMode", None))
+        relu_pre_mode = kwargs.pop("relu_pre_mode", None)
+        relu_pre_mode = _prefer(
+            relu_pre_mode, kwargs.pop("reluPreMode", None))
+        loc = kwargs.pop("loc", None)
+        ip = kwargs.pop("ip", None)
+        if kwargs:
+            name = next(iter(kwargs))
+            raise TypeError(f"unexpected TExtractOp keyword: {name}")
         # Range-form constructor (design doc 4.4/10) also covers the
         # ND-to-2xNZ dual-output form with four indices and two destinations.
         inds, dss = _resolve_t_extract_operands(
-            index_row, index_col, dst, indices, dsts, indexRow, indexCol)
-        pqs = _prefer(pre_quant_scalar, preQuantScalar)
-        acc = _prefer(acc_to_vec_mode, accToVecMode)
-        relu = _prefer(relu_pre_mode, reluPreMode)
+            index_row, index_col, dst, (indices, dsts))
+        pqs = pre_quant_scalar
+        acc = acc_to_vec_mode
+        relu = relu_pre_mode
         # Only forward optional operands when the caller provided a value:
         # the generated binder builds the operand list positionally from
         # these, and neither an explicit None nor any other non-Value object
@@ -2125,21 +2134,14 @@ setattr(TExtractOp, "indexRow", property(lambda self: self.index_row))
 setattr(TExtractOp, "indexCol", property(lambda self: self.index_col))
 
 
-def textract(src, index_row, index_col, dst, *, fp=None,
-             pre_quant_scalar=None, acc_to_vec_mode=None,
-             relu_pre_mode=None, loc=None, ip=None):
+def textract(src, index_row, index_col, dst, **kwargs):
     """Legacy free-function builder for pto.textract (single-output)."""
     return TExtractOp(
         src,
         index_row,
         index_col,
         dst,
-        fp=fp,
-        pre_quant_scalar=pre_quant_scalar,
-        acc_to_vec_mode=acc_to_vec_mode,
-        relu_pre_mode=relu_pre_mode,
-        loc=loc,
-        ip=ip,
+        **kwargs,
     )
 
 __all__.extend([
