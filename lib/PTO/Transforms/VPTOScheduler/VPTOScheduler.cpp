@@ -187,7 +187,11 @@ static LogicalResult discoverLookaheadSuccessors(
     auto [position, inserted] = remaining.try_emplace(
         neighbor, boundary.getRemainingDependencyCount(*neighbor));
     (void)inserted;
-    if (position->second == 0 || --position->second != 0) {
+    if (position->second == 0) {
+      continue;
+    }
+    --position->second;
+    if (position->second != 0) {
       continue;
     }
     ready.push_back(neighbor);
