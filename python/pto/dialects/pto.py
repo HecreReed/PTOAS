@@ -1994,6 +1994,7 @@ def vkernel(py_fn=None, *, target="a5", name=None, verify=True):
 
 _GeneratedTExtractOp = _pto_ops_gen.TExtractOp
 
+
 def _prefer(value, legacy_value):
     return value if value is not None else legacy_value
 

@@ -1321,21 +1321,11 @@ static LogicalResult runMainPipelineAndValidate(
   return pto::validateTExtractNd2xNzPostPlanningSafety(module.get());
 }
 
-static LogicalResult runMainLoweringPipeline(
-    OwningOpRef<ModuleOp> &module, PTOASContext &context,
-    PTOBackend effectiveBackend, const CompilePipelineState &state,
-    PTOASCompileResult &result, bool emitVPTOHostStub, bool &handled,
-    int &exitCode) {
-  handled = false;
-  exitCode = 0;
-  const bool enableA5EmitCFusionPath = state.enableA5EmitCFusionPath;
-  const bool enableA5VPTOFusionPath = state.enableA5VPTOFusionPath;
+static LogicalResult appendMainFrontendPasses(
+    PassManager &pm, PTOBackend effectiveBackend,
+    const CompilePipelineState &state) {
   const bool isA2A3 = state.isA2A3;
   const bool hasTileOpsToExpand = state.hasTileOpsToExpand;
-  const PTOBuildLevel effectiveLevel = state.level;
-
-  // Main PassManager
-  PassManager pm(module->getContext());
 
   if (failed(applyPassManagerCLOptions(pm))) {
     return failure();
@@ -1372,11 +1362,17 @@ static LogicalResult runMainLoweringPipeline(
     pm.addPass(pto::createInsertTemplateAttributesPass());
   }
 
-  if (failed(appendFusionFrontendPasses(pm, isA2A3, enableA5EmitCFusionPath,
-                                         enableA5VPTOFusionPath))) {
+  if (failed(appendFusionFrontendPasses(
+          pm, isA2A3, state.enableA5EmitCFusionPath,
+          state.enableA5VPTOFusionPath))) {
     return failure();
   }
 
+  return success();
+}
+
+static LogicalResult appendMainPlanningPasses(
+    PassManager &pm, PTOBackend effectiveBackend, PTOBuildLevel effectiveLevel) {
   pm.addNestedPass<mlir::func::FuncOp>(
       pto::createPTOMaterializeImplicitTmpPass(
           effectiveLevel == PTOBuildLevel::Level3));
@@ -1397,20 +1393,20 @@ static LogicalResult runMainLoweringPipeline(
   if (effectiveBackend == PTOBackend::EmitC) {
     pm.addPass(createNarrowUnusedMultiResultProvenancePass());
   }
+  return success();
+}
 
-  if (emitMlirIR) {
-    if (failed(runMainPipelineAndValidate(pm, module))) {
-      return failure();
-    }
-    result.kind = PTOASCompileResultKind::Text;
-    llvm::raw_string_ostream os(result.textOutput);
-    module->print(os);
-    os.flush();
-    handled = true;
-    exitCode = 0;
-    return success();
+static LogicalResult appendMainLoweringPasses(
+    PassManager &pm, PTOBackend effectiveBackend,
+    const CompilePipelineState &state) {
+  if (failed(appendMainFrontendPasses(pm, effectiveBackend, state))) {
+    return failure();
   }
+  return appendMainPlanningPasses(pm, effectiveBackend, state.level);
+}
 
+static LogicalResult appendMainBackendPasses(PassManager &pm,
+                                             PTOBackend effectiveBackend) {
   pm.addPass(createCSEPass());
   // PTODSL backend helpers already use the tile-native ABI.
   pm.addPass(pto::createPTOInlineBackendHelpersPass());
@@ -1419,35 +1415,72 @@ static LogicalResult runMainLoweringPipeline(
   }
   pm.addPass(createCanonicalizerPass());
   pm.addPass(createCSEPass());
-  if (failed(applyConfiguredPassManagerCLOptions(pm, "main PTOAS pipeline"))) {
+  return applyConfiguredPassManagerCLOptions(pm, "main PTOAS pipeline");
+}
+
+static LogicalResult emitMainMlirIR(
+    PassManager &pm, OwningOpRef<ModuleOp> &module,
+    PTOASCompileResult &result, bool &handled, int &exitCode) {
+  if (failed(runMainPipelineAndValidate(pm, module))) {
+    return failure();
+  }
+  result.kind = PTOASCompileResultKind::Text;
+  llvm::raw_string_ostream os(result.textOutput);
+  module->print(os);
+  os.flush();
+  handled = true;
+  exitCode = 0;
+  return success();
+}
+
+static LogicalResult runMainVPTOPipeline(
+    PassManager &pm, OwningOpRef<ModuleOp> &module,
+    PTOASContext &context, PTOASCompileResult &result,
+    bool emitVPTOHostStub, bool hasTileOpsToExpand, bool &handled,
+    int &exitCode) {
+  if (failed(runMainPipelineAndValidate(pm, module))) {
+    return failure();
+  }
+  if (ptoPrintSeamIR) {
+    printSharedPreBackendSeamIR(*module);
+    module->print(llvm::errs());
+    llvm::errs() << "\n";
+  }
+  if (failed(emitSharedPreBackendSeamIR(*module, ptoSeamIRFile))) {
     return failure();
   }
 
-  if (effectiveBackend == PTOBackend::VPTO) {
-    if (failed(runMainPipelineAndValidate(pm, module))) {
-      return failure();
-    }
-
-    if (ptoPrintSeamIR) {
-      printSharedPreBackendSeamIR(*module);
-    }
-    if (ptoPrintSeamIR) {
-      module->print(llvm::errs());
-      llvm::errs() << "\n";
-    }
-    if (failed(emitSharedPreBackendSeamIR(*module, ptoSeamIRFile))) {
-      return failure();
-    }
-
-    if (failed(runVPTOBackendPipeline(module, hasTileOpsToExpand))) {
-      return failure();
-    }
-    handled = true;
-    exitCode = emitVPTOBackendResult(*module, result, emitVPTOHostStub,
-                                     context.getCANNVersionOrDefault());
-    return success();
+  if (failed(runVPTOBackendPipeline(module, hasTileOpsToExpand))) {
+    return failure();
   }
+  handled = true;
+  exitCode = emitVPTOBackendResult(*module, result, emitVPTOHostStub,
+                                   context.getCANNVersionOrDefault());
+  return success();
+}
 
+static LogicalResult runMainLoweringPipeline(
+    OwningOpRef<ModuleOp> &module, PTOASContext &context,
+    PTOBackend effectiveBackend, const CompilePipelineState &state,
+    PTOASCompileResult &result, bool emitVPTOHostStub, bool &handled,
+    int &exitCode) {
+  handled = false;
+  exitCode = 0;
+  PassManager pm(module->getContext());
+  if (failed(appendMainLoweringPasses(pm, effectiveBackend, state))) {
+    return failure();
+  }
+  if (emitMlirIR) {
+    return emitMainMlirIR(pm, module, result, handled, exitCode);
+  }
+  if (failed(appendMainBackendPasses(pm, effectiveBackend))) {
+    return failure();
+  }
+  if (effectiveBackend == PTOBackend::VPTO) {
+    return runMainVPTOPipeline(pm, module, context, result,
+                               emitVPTOHostStub, state.hasTileOpsToExpand,
+                               handled, exitCode);
+  }
   if (failed(runMainPipelineAndValidate(pm, module))) {
     return failure();
   }
