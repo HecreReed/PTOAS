@@ -862,53 +862,77 @@ private:
     return success();
   }
 
-  LogicalResult collectValuesAndSeeds() {
-    module.walk([&](Operation *op) {
-      for (Value result : op->getResults()) {
-        addValue(result);
-      }
-      for (Region &region : op->getRegions()) {
-        for (Block &block : region) {
-          for (BlockArgument argument : block.getArguments()) {
-            addValue(argument);
-          }
+  void collectOperationValues(Operation *op) {
+    for (Value result : op->getResults()) {
+      addValue(result);
+    }
+    for (Region &region : op->getRegions()) {
+      for (Block &block : region) {
+        for (BlockArgument argument : block.getArguments()) {
+          addValue(argument);
         }
       }
-    });
+    }
+  }
 
-    WalkResult makeResult = module.walk([&](MakeTensorViewOp op) {
-      if (auto layout = op.getLayoutAttr()) {
-        if (failed(seed(op.getResult(), layout.getLayout(), op))) {
-          return WalkResult::interrupt();
-        }
+  LogicalResult seedMakeTensorViewLayouts() {
+    WalkResult result = module.walk([&](MakeTensorViewOp op) {
+      auto layout = op.getLayoutAttr();
+      if (!layout) {
+        return WalkResult::advance();
       }
-      return WalkResult::advance();
+      return failed(seed(op.getResult(), layout.getLayout(), op))
+                 ? WalkResult::interrupt()
+                 : WalkResult::advance();
     });
-    if (makeResult.wasInterrupted()) {
+    return failure(result.wasInterrupted());
+  }
+
+  LogicalResult seedReturnLayouts(func::ReturnOp returnOp,
+                                  FunctionType functionType) {
+    for (auto [index, operand] : llvm::enumerate(returnOp.getOperands())) {
+      if (index >= functionType.getNumResults()) {
+        break;
+      }
+      auto layout = getViewTypeLayoutAttr(functionType.getResult(index));
+      if (!layout) {
+        continue;
+      }
+      if (failed(seed(operand, layout.getLayout(), returnOp))) {
+        return failure();
+      }
+    }
+    return success();
+  }
+
+  LogicalResult seedFunctionResultLayouts(func::FuncOp function) {
+    if (function.empty()) {
+      return success();
+    }
+    FunctionType functionType = function.getFunctionType();
+    WalkResult result = function.walk([&](func::ReturnOp returnOp) {
+      return failed(seedReturnLayouts(returnOp, functionType))
+                 ? WalkResult::interrupt()
+                 : WalkResult::advance();
+    });
+    return failure(result.wasInterrupted());
+  }
+
+  LogicalResult seedFunctionResultLayouts() {
+    WalkResult result = module.walk([&](func::FuncOp function) {
+      return failed(seedFunctionResultLayouts(function))
+                 ? WalkResult::interrupt()
+                 : WalkResult::advance();
+    });
+    return failure(result.wasInterrupted());
+  }
+
+  LogicalResult collectValuesAndSeeds() {
+    module.walk([&](Operation *op) { collectOperationValues(op); });
+    if (failed(seedMakeTensorViewLayouts())) {
       return failure();
     }
-    WalkResult functionResult = module.walk([&](func::FuncOp function) {
-      if (function.empty()) {
-        return WalkResult::advance();
-      }
-      FunctionType type = function.getFunctionType();
-      WalkResult nested = function.walk([&](func::ReturnOp returnOp) {
-        for (auto [index, operand] : llvm::enumerate(returnOp.getOperands())) {
-          if (index >= type.getNumResults()) {
-            break;
-          }
-          if (auto layout = getViewTypeLayoutAttr(type.getResult(index))) {
-            if (failed(seed(operand, layout.getLayout(), returnOp))) {
-              return WalkResult::interrupt();
-            }
-          }
-        }
-        return WalkResult::advance();
-      });
-      return nested.wasInterrupted() ? WalkResult::interrupt()
-                                     : WalkResult::advance();
-    });
-    return failure(functionResult.wasInterrupted());
+    return seedFunctionResultLayouts();
   }
 
   LogicalResult addYieldConstraints(ResultRange results, scf::YieldOp yield,
@@ -1098,79 +1122,132 @@ private:
     return failure(result.wasInterrupted());
   }
 
+  LogicalResult addSelectConstraints(arith::SelectOp select) {
+    if (failed(unite(select.getTrueValue(), select.getResult(), select))) {
+      return failure();
+    }
+    return unite(select.getFalseValue(), select.getResult(), select);
+  }
+
+  LogicalResult addCastConstraints(UnrealizedConversionCastOp castOp) {
+    bool hasPairwiseValues =
+        castOp->getNumOperands() == castOp->getNumResults();
+    if (!hasPairwiseValues) {
+      return success();
+    }
+    for (auto [operand, result] :
+         llvm::zip(castOp->getOperands(), castOp->getResults())) {
+      if (failed(unite(operand, result, castOp))) {
+        return failure();
+      }
+    }
+    return success();
+  }
+
+  LogicalResult addForConstraints(scf::ForOp forOp) {
+    return VMIControlFlowSupport::addForConstraints(
+        forOp, [&](Value lhs, Value rhs, Operation *anchor) {
+          return unite(lhs, rhs, anchor);
+        });
+  }
+
+  LogicalResult addWhileConstraints(scf::WhileOp whileOp) {
+    return VMIControlFlowSupport::addWhileConstraints(
+        whileOp, [&](Value lhs, Value rhs, Operation *anchor) {
+          return unite(lhs, rhs, anchor);
+        });
+  }
+
+  LogicalResult addCondBranchConstraints(cf::CondBranchOp branch) {
+    if (failed(addBranchConstraints(branch.getTrueDest(),
+                                    branch.getTrueDestOperands(), branch))) {
+      return failure();
+    }
+    return addBranchConstraints(branch.getFalseDest(),
+                                branch.getFalseDestOperands(), branch);
+  }
+
+  LogicalResult addIndirectCallConstraints(func::CallIndirectOp call) {
+    if (!hasViewValueTypes(call)) {
+      return success();
+    }
+    call.emitError("view-typed indirect calls cannot propagate layout");
+    return failure();
+  }
+
+  LogicalResult addValueFlowConstraint(Operation *op) {
+    if (auto partition = dyn_cast<PartitionViewOp>(op)) {
+      return unite(partition.getSource(), partition.getResult(), partition);
+    }
+    if (auto select = dyn_cast<arith::SelectOp>(op)) {
+      return addSelectConstraints(select);
+    }
+    if (auto castOp = dyn_cast<UnrealizedConversionCastOp>(op)) {
+      return addCastConstraints(castOp);
+    }
+    return success();
+  }
+
+  LogicalResult addSCFConstraint(Operation *op) {
+    if (auto ifOp = dyn_cast<scf::IfOp>(op)) {
+      return addIfConstraints(ifOp);
+    }
+    if (auto execute = dyn_cast<scf::ExecuteRegionOp>(op)) {
+      return addExecuteRegionConstraints(execute);
+    }
+    if (auto indexSwitch = dyn_cast<scf::IndexSwitchOp>(op)) {
+      return addIndexSwitchConstraints(indexSwitch);
+    }
+    if (auto forOp = dyn_cast<scf::ForOp>(op)) {
+      return addForConstraints(forOp);
+    }
+    if (auto whileOp = dyn_cast<scf::WhileOp>(op)) {
+      return addWhileConstraints(whileOp);
+    }
+    return success();
+  }
+
+  LogicalResult addCFConstraint(Operation *op) {
+    if (auto branch = dyn_cast<cf::BranchOp>(op)) {
+      return addBranchConstraints(branch.getDest(), branch.getDestOperands(),
+                                  branch);
+    }
+    if (auto condBranch = dyn_cast<cf::CondBranchOp>(op)) {
+      return addCondBranchConstraints(condBranch);
+    }
+    if (auto switchOp = dyn_cast<cf::SwitchOp>(op)) {
+      return addSwitchConstraints(switchOp);
+    }
+    return success();
+  }
+
+  LogicalResult addFunctionConstraint(Operation *op) {
+    if (auto returnOp = dyn_cast<func::ReturnOp>(op)) {
+      return addReturnConstraints(returnOp);
+    }
+    if (auto callOp = dyn_cast<func::CallOp>(op)) {
+      return addCallConstraints(callOp);
+    }
+    if (auto indirectCall = dyn_cast<func::CallIndirectOp>(op)) {
+      return addIndirectCallConstraints(indirectCall);
+    }
+    return success();
+  }
+
   LogicalResult addConstraint(Operation *op) {
-    return llvm::TypeSwitch<Operation *, LogicalResult>(op)
-        .Case<PartitionViewOp>([&](auto partition) {
-          return unite(partition.getSource(), partition.getResult(), partition);
-        })
-        .Case<arith::SelectOp>([&](auto select) {
-          if (failed(unite(select.getTrueValue(), select.getResult(), select))) {
-            return failure();
-          }
-          return unite(select.getFalseValue(), select.getResult(), select);
-        })
-        .Case<UnrealizedConversionCastOp>([&](auto castOp) {
-          bool hasPairwiseValues =
-              castOp->getNumOperands() == castOp->getNumResults();
-          if (!hasPairwiseValues) {
-            return success();
-          }
-          for (auto [operand, result] :
-               llvm::zip(castOp->getOperands(), castOp->getResults())) {
-            if (failed(unite(operand, result, castOp))) {
-              return failure();
-            }
-          }
-          return success();
-        })
-        .Case<scf::IfOp>(
-            [&](auto controlOp) { return addIfConstraints(controlOp); })
-        .Case<scf::ExecuteRegionOp>([&](auto controlOp) {
-          return addExecuteRegionConstraints(controlOp);
-        })
-        .Case<scf::IndexSwitchOp>([&](auto controlOp) {
-          return addIndexSwitchConstraints(controlOp);
-        })
-        .Case<scf::ForOp>([&](auto controlOp) {
-          return VMIControlFlowSupport::addForConstraints(
-              controlOp, [&](Value lhs, Value rhs, Operation *anchor) {
-                return unite(lhs, rhs, anchor);
-              });
-        })
-        .Case<scf::WhileOp>([&](auto controlOp) {
-          return VMIControlFlowSupport::addWhileConstraints(
-              controlOp, [&](Value lhs, Value rhs, Operation *anchor) {
-                return unite(lhs, rhs, anchor);
-              });
-        })
-        .Case<cf::BranchOp>([&](auto branch) {
-          return addBranchConstraints(branch.getDest(),
-                                      branch.getDestOperands(), branch);
-        })
-        .Case<cf::CondBranchOp>([&](auto branch) {
-          if (failed(addBranchConstraints(branch.getTrueDest(),
-                                          branch.getTrueDestOperands(),
-                                          branch))) {
-            return failure();
-          }
-          return addBranchConstraints(branch.getFalseDest(),
-                                      branch.getFalseDestOperands(), branch);
-        })
-        .Case<cf::SwitchOp>(
-            [&](auto switchOp) { return addSwitchConstraints(switchOp); })
-        .Case<func::ReturnOp>(
-            [&](auto returnOp) { return addReturnConstraints(returnOp); })
-        .Case<func::CallOp>(
-            [&](auto callOp) { return addCallConstraints(callOp); })
-        .Case<func::CallIndirectOp>([&](auto callOp) -> LogicalResult {
-          if (hasViewValueTypes(callOp)) {
-            callOp.emitError(
-                "view-typed indirect calls cannot propagate layout");
-            return failure();
-          }
-          return success();
-        })
-        .Default([](Operation *) { return success(); });
+    if (failed(addValueFlowConstraint(op))) {
+      return failure();
+    }
+    if (failed(addSCFConstraint(op))) {
+      return failure();
+    }
+    if (failed(addCFConstraint(op))) {
+      return failure();
+    }
+    if (failed(addFunctionConstraint(op))) {
+      return failure();
+    }
+    return success();
   }
 
   LogicalResult addConstraints() {
