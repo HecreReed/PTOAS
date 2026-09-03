@@ -195,8 +195,9 @@ static bool verifyExistingLayoutAttr(Operation *op, ArrayRef<int64_t> shape,
                                      unsigned storageElemBytes,
                                      SignalFailureFn signalFailure) {
   auto existing = op->getAttrOfType<LayoutAttr>(kLayoutAttrName);
-  if (!existing)
+  if (!existing) {
     return true;
+  }
 
   Layout layout = existing.getLayout();
   if (!isLayoutCompatible5D(layout, shape, strides, storageElemBytes)) {
@@ -220,8 +221,9 @@ static bool verifyExistingLayoutAttr(Operation *op, ArrayRef<int64_t> shape,
     return false;
   }
 
-  if (op->getAttrOfType<BoolAttr>(kInferredLayoutAttrName))
+  if (op->getAttrOfType<BoolAttr>(kInferredLayoutAttrName)) {
     op->removeAttr(kInferredLayoutAttrName);
+  }
   return true;
 }
 
@@ -562,16 +564,18 @@ static void getValuesOrDynamic(ValueRange values,
                                SmallVectorImpl<int64_t> &result) {
   result.clear();
   result.reserve(values.size());
-  for (Value value : values)
+  for (Value value : values) {
     result.push_back(getConstInt(value).value_or(ShapedType::kDynamic));
+  }
 }
 
 static void getFoldResultsOrDynamic(ArrayRef<OpFoldResult> values,
                                     SmallVectorImpl<int64_t> &result) {
   result.clear();
   result.reserve(values.size());
-  for (OpFoldResult value : values)
+  for (OpFoldResult value : values) {
     result.push_back(getConstInt(value).value_or(ShapedType::kDynamic));
+  }
 }
 
 static void resolveDynamicShape(ValueRange values,
@@ -737,8 +741,9 @@ static void inferMakeTensorViewLayoutAttr(MakeTensorViewOp op,
   SmallVector<int64_t> shape;
   SmallVector<int64_t> strides;
   bool allStatic = false;
-  if (!getShapeAndStride(op, shape, strides, allStatic))
+  if (!getShapeAndStride(op, shape, strides, allStatic)) {
     return;
+  }
 
   if (!op.getLayoutAttr()) {
     if (auto typeLayout = getViewTypeLayoutAttr(op.getResult().getType())) {
@@ -772,8 +777,9 @@ static void inferReinterpretCastLayoutAttr(memref::ReinterpretCastOp op,
   }
 
   const size_t rank = op.getMixedSizes().size();
-  if (rank == 0 || rank > kPTOLayoutRank)
+  if (rank == 0 || rank > kPTOLayoutRank) {
     return;
+  }
 
   SmallVector<int64_t> shape;
   SmallVector<int64_t> strides;
@@ -783,10 +789,11 @@ static void inferReinterpretCastLayoutAttr(memref::ReinterpretCastOp op,
 
   bool isMinor2DAmbiguous = false;
   std::optional<Layout> inferred;
-  if (allStatic)
+  if (allStatic) {
     inferred =
         inferLayout5D(shape, strides, elemByteSize(mrTy.getElementType()),
                       std::nullopt, &isMinor2DAmbiguous);
+  }
   resolveOrInferLayoutAttr(op.getOperation(), shape, strides,
                            elemByteSize(mrTy.getElementType()), inferred,
                            signalFailure);
@@ -1487,8 +1494,9 @@ struct InferPTOLayoutPass
     // ------------------------------------------------------------------
     module.walk([&](PartitionViewOp op) {
       auto sourceInfo = resolveLayoutFromViewValue(op.getSource());
-      if (!sourceInfo.layout)
+      if (!sourceInfo.layout) {
         return;
+      }
       if (*sourceInfo.layout == Layout::NZ && !verifyNZPartitionView(op)) {
         signalPassFailure();
         return;

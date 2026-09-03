@@ -372,6 +372,58 @@ def ast_rewrite_side_effect_kernel():
         pto.pipe_barrier(pto.Pipe.ALL)
 ```
 
+### Short-circuit `and` / `or`
+
+Python `and` / `or` between PTODSL runtime values are not bitwise
+operations: they keep Python's short-circuit semantics, so the right-hand
+side is only evaluated on the device where Python would actually need it.
+The AST rewrite turns `a and b` / `a or b` into a result-bearing `scf.if`
+whose guarded region contains exactly the RHS:
+
+<!-- ptodsl-doc-test: {"mode":"compile","symbol":"ast_rewrite_short_circuit_kernel","compile":{}} -->
+```python
+@pto.jit(target="a5")
+def ast_rewrite_short_circuit_kernel():
+    value = pto.const(10, dtype=pto.i32)
+    divisor = pto.const(2, dtype=pto.i32)
+
+    pred = (divisor != 0) and ((value // divisor) > 0)
+    if pred:
+        pto.pipe_barrier(pto.Pipe.ALL)
+```
+
+`and` returns the left operand when it is falsy and the right operand
+otherwise; `or` returns the left operand when it is truthy and the right
+operand otherwise. Integer-typed operands are tested with non-zero
+truthiness. When one merged branch yields an `i1` and the other an
+integer-like value, the integer type is kept and the `i1` side widens to its
+0/1 integer value, so the integer operand value is preserved; a merge of two
+`i1` values stays `i1`. Python `bool` literals materialize as `i1` and widen
+like any other `i1` when the opposite branch is integer-typed. A Python
+`int` literal can join a runtime merge only when the opposite branch already
+has an integer type to anchor its width (e.g. `x or 2` with `x: pto.i32`);
+against an `i1` branch there is no width to infer, so `flag and 2` /
+`flag or 2` raise an error prompting you to anchor the type explicitly,
+e.g. `flag and pto.const(2, dtype=pto.i32)`. Incompatible branch types keep
+the usual branch-merge diagnostics.
+
+Statically known `bool` / `int` / float operands short-circuit at trace time
+with native Python truthiness: `False and rhs`, `True or rhs`, and
+`0.0 or rhs` never trace the RHS at all. Runtime floating-point controls are
+not valid short-circuit predicates and raise a clear error. Python float
+literals on the RHS of a runtime short-circuit merge are also rejected: the
+merge currently accepts only `bool`/`int` literals and PTO runtime scalar
+values, because a float literal (for example, `flag and 0.5`) has no
+compatible result type when the other branch preserves the left operand. Use
+an explicit `pto.if_` merge with same-typed branch values when a floating-point
+result is required.
+Assignment expressions (`:=`) on a lazily evaluated RHS are rejected because
+the rewrite uses a helper lambda and cannot preserve the Python binding scope.
+
+`and` / `or` compose with every rewritten expression context: assignments,
+call arguments, `return`, and `if` / `while` conditions.
+
+
 ### Runtime loops
 
 Native `range(...)` loops become device-side loops:
@@ -592,10 +644,10 @@ Do not pass conflicting values through both spellings. For example,
 `@pto.jit(ast_rewrite=False, frontend_options={"ast_rewrite": True})` is
 rejected.
 
-When this mode is disabled for a function, native Python `if` / `for` executes
-while tracing that function. Runtime device-side control flow should still use
-the default rewrite mode, or explicit `pto.if_` / `pto.for_` APIs when you need
-manual control.
+When this mode is disabled for a function, native Python `if` / `for` / `and` /
+`or` executes while tracing that function. Runtime device-side control flow
+should still use the default rewrite mode, or explicit `pto.if_` / `pto.for_`
+APIs when you need manual control.
 
 The structured `frontend_options` argument is reserved for frontend rewrite
 debugging and future rewrite passes. Today it accepts the same AST rewrite
@@ -639,3 +691,4 @@ do not use Python `return` as a dynamic loop exit.
 | `pto.for_` | Device-side | Dynamic bounds, runtime loop counts |
 | `pto.for_(...).carry(...)` | Device-side | Loops with accumulated state across iterations |
 | `pto.if_` | Device-side | Runtime conditions, data-dependent branching |
+| Python `and` / `or` | Device-side short-circuit `scf.if` | Runtime predicates with Python short-circuit semantics |

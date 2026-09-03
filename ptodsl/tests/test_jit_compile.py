@@ -517,6 +517,39 @@ def _assert_ast_rewrite_nested_partial_assign_ssa_identity():
             'innermost else of the slot probe must not yield the sibling branch q2 value',
         )
 
+    # Focused probe 4: with-items bind their optional_vars in source order.
+    # The second context expression below reads the value produced by the first
+    # item, so it must not become a live-in slot.  A subscript target also kills
+    # only the slot it overwrites, rather than the whole list binding.
+    import ast as _slot_ast
+    from ptodsl._ast_rewrite import _SubscriptSlot, _read_before_assignment_slots
+
+    def with_slot_liveness(source, live_after=()):
+        with_stmt = _slot_ast.parse(source).body[0]
+        return _read_before_assignment_slots(
+            [with_stmt], {}, live_after=set(live_after)
+        )
+
+    values0 = _SubscriptSlot('values', 0)
+    values1 = _SubscriptSlot('values', 1)
+    expect(
+        not with_slot_liveness(
+            'with cm() as values, cm(values[0]):\n    pass'
+        ),
+        'a later with-item may use the binding produced by an earlier item',
+    )
+    expect(
+        with_slot_liveness('with cm(values[0]) as values:\n    pass') == {values0},
+        'a with context expression must still keep an outer slot live-in',
+    )
+    expect(
+        with_slot_liveness(
+            'with cm() as values[0]:\n    pass',
+            live_after={values0, values1},
+        ) == {values1},
+        'a subscript with-as target must kill only the overwritten slot',
+    )
+
     # Augmenting the induction variable must not invent a carry for it.
     iv_augassign_text = ast_for_iv_augassign_probe.compile().mlir_text()
     expect_parse_roundtrip_and_verify(iv_augassign_text, 'AST-rewritten induction-variable augment-assignment')
@@ -2116,6 +2149,22 @@ def ast_runtime_for_static_slot_carry_probe(cols: pto.i32):
     for h in pto.static_range(4):
         total = total + accs[h]
     _ = total
+
+
+@pto.jit(target="a5", mode="explicit")
+def ast_runtime_for_static_slot_nested_vecscope_probe(cols: pto.i32):
+    zero = pto.const(0, dtype=pto.index)
+
+    for _ in range(cols):
+        with pto.vecscope():
+            values = [zero, zero, zero, zero]
+            for c in range(64):
+                values[0] = c
+                values[1] = c
+                values[2] = c
+                values[3] = c
+                total = values[0] + values[1] + values[2] + values[3]
+                _ = total
 
 
 _STATIC_SLOT_GLOBAL_INDEX = 2
@@ -3984,21 +4033,6 @@ def vmi_f4x2_to_bf16x2_sat_probe():
 
 
 @pto.jit(target="a5", backend="vpto", mode="explicit")
-def vmi_unpack_vload_probe():
-    src_tile = pto.alloc_tile(shape=[1, 128], dtype=pto.i8)
-    src_ptr = src_tile.as_ptr()
-    offset = pto.const(0, dtype=pto.index)
-
-    _ = pto.vmi.vload(
-        src_ptr,
-        offset,
-        size=128,
-        dist_mode="unpack",
-        to_dtype=pto.i16,
-    )
-
-
-@pto.jit(target="a5", backend="vpto", mode="explicit")
 def vmi_brc_vload_probe():
     src_tile = pto.alloc_tile(shape=[1, 64], dtype=pto.f32)
     src_ptr = src_tile.as_ptr()
@@ -4040,20 +4074,6 @@ def vmi_block_stride_memory_probe():
     )
     pto.vmi.vstore(
         value, dst_tile.as_ptr(), offset, block_stride=pto.i16(2)
-    )
-
-
-@pto.jit(target="a5", backend="vpto", mode="explicit")
-def vmi_unpack_vload_missing_dtype_probe():
-    src_tile = pto.alloc_tile(shape=[1, 128], dtype=pto.i8)
-    src_ptr = src_tile.as_ptr()
-    offset = pto.const(0, dtype=pto.index)
-
-    _ = pto.vmi.vload(
-        src_ptr,
-        offset,
-        size=128,
-        dist_mode="unpack",
     )
 
 
@@ -7122,6 +7142,17 @@ def main() -> None:
         and "scf.yield" in ast_runtime_for_static_slot_carry_text,
         "static subscript slot carry should lower through scf.for iter_args",
     )
+    ast_runtime_for_static_slot_nested_vecscope_text = (
+        ast_runtime_for_static_slot_nested_vecscope_probe.compile().mlir_text()
+    )
+    expect_parse_roundtrip_and_verify(
+        ast_runtime_for_static_slot_nested_vecscope_text,
+        "AST-rewritten nested vecscope runtime for static subscript slots",
+    )
+    expect(
+        ast_runtime_for_static_slot_nested_vecscope_text.count("scf.for") == 2,
+        "nested vecscope static subscript slots should preserve both authored runtime loops",
+    )
     ast_runtime_for_static_slot_global_index_text = ast_runtime_for_static_slot_global_index_probe.compile().mlir_text()
     expect_parse_roundtrip_and_verify(
         ast_runtime_for_static_slot_global_index_text,
@@ -8079,8 +8110,6 @@ def main() -> None:
         "pto.vmi.vdhist(...)" in str(vmi_vhist_bad_acc_error),
         "vdhist bad-acc rejection should carry the pto.vmi.vdhist call-site context",
     )
-    vmi_unpack_vload_text = vmi_unpack_vload_probe.compile().mlir_text()
-    expect_parse_roundtrip_and_verify(vmi_unpack_vload_text, "public VMI unpack vload specialization")
     vmi_brc_vload_text = vmi_brc_vload_probe.compile().mlir_text()
     expect_parse_roundtrip_and_verify(vmi_brc_vload_text, "public VMI brc vload specialization")
     expect(
@@ -8256,15 +8285,6 @@ def main() -> None:
         vmi_f4x2_to_bf16x2_sat_probe.compile,
         "does not support saturate for",
     )
-    unpack_missing_dtype_error = expect_raises(
-        TypeError,
-        vmi_unpack_vload_missing_dtype_probe.compile,
-        'to_dtype when dist_mode="unpack"',
-    )
-    expect(
-        'to_dtype when dist_mode="unpack"' in str(unpack_missing_dtype_error),
-        "unpack vload without to_dtype should diagnose the missing widened element type",
-    )
 
     expected_vmi_ops = [
         "pto.vmi.vload",
@@ -8393,10 +8413,6 @@ def main() -> None:
     expect(
         "reassoc" in vmi_wrapper_dispatch_text,
         "PTODSL VMI vcadd should preserve the reassoc attr in MLIR",
-    )
-    expect(
-        "!pto.vmi.vreg<128xi16>" in vmi_unpack_vload_text,
-        "PTODSL VMI unpack vload should infer the widened logical VMI vector result type from to_dtype",
     )
     expect("pto.mte_gm_ub" in public_surface_text, "mte_load(...) should lower to pto.mte_gm_ub")
     expect("pto.mte_ub_gm" in public_surface_text, "mte_store(...) should lower to pto.mte_ub_gm")

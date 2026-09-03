@@ -4551,8 +4551,9 @@ static Value maybeWrapGlobalMemrefAsGlobalTensor(
     ConversionPatternRewriter &rewriter, Location loc, Value loweredValue,
     Type originalType, Operation *anchor, StringRef tag) {
   auto mrTy = dyn_cast<MemRefType>(originalType);
-  if (!mrTy)
+  if (!mrTy) {
     return loweredValue;
+  }
 
   bool isGlobal = true;
   if (auto asAttr =
@@ -4560,16 +4561,19 @@ static Value maybeWrapGlobalMemrefAsGlobalTensor(
     auto as = asAttr.getAddressSpace();
     isGlobal = (as == pto::AddressSpace::GM || as == pto::AddressSpace::Zero);
   }
-  if (!isGlobal)
+  if (!isGlobal) {
     return loweredValue;
+  }
 
   Type loweredType = loweredValue.getType();
-  if (isEmitCGlobalTensorLikeType(loweredType))
+  if (isEmitCGlobalTensorLikeType(loweredType)) {
     return loweredValue;
+  }
 
   if (Value gt = buildGlobalTensorFromMemref(rewriter, loc, loweredValue, mrTy,
-                                             anchor, tag))
+                                             anchor, tag)) {
     return gt;
+  }
   return loweredValue;
 }
 
@@ -4578,8 +4582,9 @@ static Value castToGMBytePointer(ConversionPatternRewriter &rewriter,
   auto *ctx = rewriter.getContext();
   auto targetTy =
       emitc::PointerType::get(emitc::OpaqueType::get(ctx, "__gm__ uint8_t"));
-  if (value.getType() == targetTy)
+  if (value.getType() == targetTy) {
     return value;
+  }
 
   auto castTyAttr =
       rewriter.getArrayAttr({emitc::OpaqueAttr::get(ctx, "__gm__ uint8_t*")});
@@ -7997,10 +8002,11 @@ static FailureOr<Value> buildGlobalTensorViewFromPointer(
                            strideType, ArrayAttr{}, ArrayAttr{}, ValueRange{})
                        .getResult(0);
 
+  // Keep the GlobalTensor template descriptors identical to the constructor
+  // arguments, including the specialized MX shape and stride types.
   std::string gtTypeStr =
-      getGlobalTensorTypeStringFromShapeAndStrides(elemTy, shape,
-                                                   effectiveStrides,
-                                                   layoutEnum);
+      "GlobalTensor<" + getElemTypeStringForGT(elemTy) + ", " + shapeType +
+      ", " + strideType + ", " + layoutEnum.str() + ">";
   auto gtType = emitc::OpaqueType::get(ctx, gtTypeStr);
   auto gt = rewriter.create<emitc::CallOpaqueOp>(
       loc, gtType, gtTypeStr, ArrayAttr{}, ArrayAttr{},
@@ -8163,8 +8169,9 @@ static void eraseDeadPureEmitCValueOps(ModuleOp module) {
     changed = false;
     SmallVector<Operation *> deadOps;
     module.walk([&](Operation *op) {
-      if (isDeadPureEmitCValueOp(op))
+      if (isDeadPureEmitCValueOp(op)) {
         deadOps.push_back(op);
+      }
     });
     for (Operation *op : llvm::reverse(deadOps)) {
       op->erase();
@@ -8175,29 +8182,34 @@ static void eraseDeadPureEmitCValueOps(ModuleOp module) {
 
 static bool partitionViewHasStaticResultShape(pto::PartitionViewOp op) {
   auto resTy = dyn_cast<pto::PartitionTensorViewType>(op.getResult().getType());
-  if (!resTy)
+  if (!resTy) {
     return false;
+  }
 
   int64_t sourceRank = 0;
-  if (auto srcTy = dyn_cast<pto::TensorViewType>(op.getSource().getType()))
+  if (auto srcTy = dyn_cast<pto::TensorViewType>(op.getSource().getType())) {
     sourceRank = srcTy.getRank();
-  else if (auto srcTy =
-               dyn_cast<pto::PartitionTensorViewType>(op.getSource().getType()))
+  } else if (auto srcTy =
+                 dyn_cast<pto::PartitionTensorViewType>(op.getSource().getType())) {
     sourceRank = srcTy.getRank();
-  else
+  } else {
     return false;
+  }
 
   if (op.getOffsets().size() != static_cast<size_t>(sourceRank) ||
-      op.getSizes().size() != static_cast<size_t>(sourceRank))
+      op.getSizes().size() != static_cast<size_t>(sourceRank)) {
     return false;
+  }
 
   for (auto [idx, value] : llvm::enumerate(op.getSizes())) {
     auto cst = getStaticIndexLikeValue(value);
-    if (!cst)
+    if (!cst) {
       return false;
+    }
     int64_t resultDim = resTy.getShape()[idx];
-    if (resultDim != ShapedType::kDynamic && resultDim != *cst)
+    if (resultDim != ShapedType::kDynamic && resultDim != *cst) {
       return false;
+    }
   }
   return true;
 }
@@ -8407,25 +8419,29 @@ struct PTOPartitionViewStaticToEmitC
       srcElemTy = srcTy.getElementType();
       srcRank = srcTy.getRank();
     }
-    if (!srcElemTy || !resTy)
+    if (!srcElemTy || !resTy) {
       return rewriter.notifyMatchFailure(
           op, "expected tensor_view or partition_tensor_view source and "
               "partition_tensor_view result");
+    }
 
     if (op.getOffsets().size() != static_cast<size_t>(srcRank) ||
-        op.getSizes().size() != static_cast<size_t>(srcRank))
+        op.getSizes().size() != static_cast<size_t>(srcRank)) {
       return rewriter.notifyMatchFailure(op, "rank mismatch");
+    }
 
-    if (!partitionViewHasStaticResultShape(op))
+    if (!partitionViewHasStaticResultShape(op)) {
       return rewriter.notifyMatchFailure(
           op, "globaltensor partition_view requires static result shape");
+    }
 
     SmallVector<int64_t> srcStrides;
     if (failed(getStaticTensorViewStrides(op.getSource(), adaptor.getSource(),
-                                          srcRank, srcStrides)))
+                                          srcRank, srcStrides))) {
       return rewriter.notifyMatchFailure(
           op, "cannot resolve exact partition source strides; refusing to "
               "assume a compact layout");
+    }
     int64_t staticLinearOffset = 0;
     SmallVector<std::pair<Value, int64_t>> dynamicOffsetTerms;
     for (auto [idx, values] :
@@ -8433,13 +8449,15 @@ struct PTOPartitionViewStaticToEmitC
       Value originalOffset = std::get<0>(values);
       Value convertedOffset = std::get<1>(values);
       int64_t stride = srcStrides[idx];
-      if (stride == ShapedType::kDynamic)
+      if (stride == ShapedType::kDynamic) {
         return rewriter.notifyMatchFailure(
             op, "dynamic source stride is not supported");
+      }
 
       if (auto cst = getStaticIndexLikeValue(originalOffset)) {
-        if (*cst != 0)
+        if (*cst != 0) {
           staticLinearOffset += (*cst) * stride;
+        }
         continue;
       }
       dynamicOffsetTerms.push_back({convertedOffset, stride});
@@ -8463,8 +8481,9 @@ struct PTOPartitionViewStaticToEmitC
         return makeEmitCIntConstant(rewriter, op.getLoc(), indexTy, value);
       };
       auto asIndex = [&](Value value) -> Value {
-        if (value.getType() == indexTy)
+        if (value.getType() == indexTy) {
           return value;
+        }
         return rewriter.create<emitc::CastOp>(op.getLoc(), indexTy, value)
             .getResult();
       };
@@ -11902,6 +11921,48 @@ struct PTORowSumToEmitC : public OpConversionPattern<pto::TRowSumOp> {
   }
 };
 
+struct PTOTInterleaveToEmitC
+    : public OpConversionPattern<pto::TInterleaveOp> {
+  using OpConversionPattern<pto::TInterleaveOp>::OpConversionPattern;
+
+  LogicalResult matchAndRewrite(
+      pto::TInterleaveOp op, OpAdaptor adaptor,
+      ConversionPatternRewriter &rewriter) const override {
+    createLastUseAwareOpaqueCall(
+        rewriter, op.getOperation(), TypeRange{}, "TINTERLEAVE",
+        ValueRange{adaptor.getDst1(), adaptor.getDst0(), adaptor.getSrc1(),
+                   adaptor.getSrc0()});
+    rewriter.eraseOp(op);
+    return success();
+  }
+};
+
+struct PTOTDeInterleaveToEmitC
+    : public OpConversionPattern<pto::TDeInterleaveOp> {
+  using OpConversionPattern<pto::TDeInterleaveOp>::OpConversionPattern;
+
+  LogicalResult matchAndRewrite(
+      pto::TDeInterleaveOp op, OpAdaptor adaptor,
+      ConversionPatternRewriter &rewriter) const override {
+    Value dst1 = adaptor.getDsts()[1];
+    Value dst0 = adaptor.getDsts()[0];
+    Value src0 = adaptor.getSrcs()[0];
+    bool hasSecondSource = adaptor.getSrcs().size() == 2;
+    if (hasSecondSource) {
+      Value src1 = adaptor.getSrcs()[1];
+      createLastUseAwareOpaqueCall(
+          rewriter, op.getOperation(), TypeRange{}, "TDEINTERLEAVE",
+          ValueRange{dst1, dst0, src1, src0});
+    } else {
+      createLastUseAwareOpaqueCall(
+          rewriter, op.getOperation(), TypeRange{}, "TDEINTERLEAVE",
+          ValueRange{dst1, dst0, src0});
+    }
+    rewriter.eraseOp(op);
+    return success();
+  }
+};
+
 struct PTORowProdToEmitC : public OpConversionPattern<pto::TRowProdOp> {
   using OpConversionPattern<pto::TRowProdOp>::OpConversionPattern;
 
@@ -13694,6 +13755,8 @@ static void populatePTOToEmitCPatterns(RewritePatternSet &patterns,
   patterns.add<ReinterpretCastToEmitC>(typeConverter, ctx);
   patterns.add<PTOTAbsToTABS>(typeConverter, ctx);
   patterns.add<PTOTAddToTADD>(typeConverter, ctx);
+  patterns.add<PTOTInterleaveToEmitC>(typeConverter, ctx);
+  patterns.add<PTOTDeInterleaveToEmitC>(typeConverter, ctx);
   patterns.add<PTOAddSCToTADDSC>(typeConverter, ctx);
   patterns.add<ArithCastOPToEmitC>(typeConverter, ctx);
   patterns.add<ArithTruncIToEmitC>(typeConverter, ctx);

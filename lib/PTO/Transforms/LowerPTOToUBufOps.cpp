@@ -1598,8 +1598,9 @@ private:
   }
 
   static FailureOr<DmaViewInfo> extractDmaViewInfo(pto::TLoadOp op) {
-    if (op.getSrc().getDefiningOp<pto::PartitionViewOp>())
+    if (op.getSrc().getDefiningOp<pto::PartitionViewOp>()) {
       return extractDirectDmaViewInfo(op.getSrc(), op.getOperation());
+    }
     return extractDmaMemRefViewInfo(op.getLoc(), op.getSrc(), op.getContext());
   }
 

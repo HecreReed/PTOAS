@@ -1,0 +1,100 @@
+// Copyright (c) 2026 Huawei Technologies Co., Ltd.
+// This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+// CANN Open Software License Agreement Version 2.0 (the "License").
+// Please refer to the License for details. You may not use this file except in compliance with the License.
+// THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+// INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+// See LICENSE in the root of the software repository for the full text of the License.
+
+// End-to-end regression for issue #1328: a pto.section.simt body outlines into
+// a helper whose scf.if guard computes a long loop-invariant base-address
+// chain.  The full VPTO emission pipeline (VPTOGuardedLICM between soft
+// post-update and the generic LICM) must hoist the whole invariant chain in
+// front of the scf.for, leaving only the IV-dependent i*32 portion and the
+// guarded store inside the guard.
+//
+// RUN: ptoas --pto-backend=vpto --pto-arch=a5 --emit-vpto %s -o - | FileCheck %s
+
+module attributes {pto.target_arch = "a5", pto.kernel_kind = #pto.kernel_kind<vector>} {
+  func.func @simt_guarded_licm(
+      %dst: !pto.ptr<i32, ub>,
+      %w: i32,
+      %valid_end: i32,
+      %local_end: i32,
+      %total_start: i32,
+      %trip_count: index) attributes {pto.entry} {
+    %c0 = arith.constant 0 : index
+    %c1 = arith.constant 1 : index
+    %c31_i32 = arith.constant 31 : i32
+    %c32_i32 = arith.constant 32 : i32
+    %c3_i64 = arith.constant 3 : i64
+    %c31_i64 = arith.constant 31 : i64
+    %c32_i64 = arith.constant 32 : i64
+    %c128_i64 = arith.constant 128 : i64
+    %c1024_i64 = arith.constant 1024 : i64
+    %minus_one = arith.constant -1 : i32
+
+    pto.section.simt<<<512, 1, 1>>> {
+      %tid = pto.get_tid_x : i32
+      %lane = arith.andi %tid, %c31_i32 : i32
+      scf.for %i = %c0 to %trip_count step %c1 {
+        %i32 = arith.index_cast %i : index to i32
+        %iter_offset = arith.muli %i32, %c32_i32 : i32
+        %logical_index = arith.addi %iter_offset, %lane : i32
+        %in_bounds = arith.cmpi slt, %logical_index, %local_end : i32
+        scf.if %in_bounds {
+          %w64 = arith.extsi %w : i32 to i64
+          %slot = arith.andi %w64, %c3_i64 : i64
+          %slot_base = arith.muli %slot, %c1024_i64 : i64
+          %valid64 = arith.extsi %valid_end : i32 to i64
+          %local64 = arith.extsi %local_end : i32 to i64
+          %range_base = arith.minsi %valid64, %local64 : i64
+          %tid64 = arith.extsi %tid : i32 to i64
+          %lane64 = arith.andi %tid64, %c31_i64 : i64
+          %total_start64 = arith.extsi %total_start : i32 to i64
+          %base0 = arith.addi %slot_base, %range_base : i64
+          %base1 = arith.addi %base0, %lane64 : i64
+          %base2 = arith.addi %base1, %c128_i64 : i64
+          %base = arith.subi %base2, %total_start64 : i64
+
+          %i64 = arith.extsi %i32 : i32 to i64
+          %dynamic_offset = arith.muli %i64, %c32_i64 : i64
+          %offset = arith.addi %base, %dynamic_offset : i64
+          %index = arith.index_cast %offset : i64 to index
+          pto.store %minus_one, %dst[%index] : !pto.ptr<i32, ub>, i32
+        }
+      }
+    }
+    return
+  }
+}
+
+// CHECK-LABEL: func.func private @simt_guarded_licm_simt_0
+// The full invariant base chain must be hoisted in front of scf.for.
+// CHECK: %[[TID:.*]] = pto.get_tid_x : i32
+// CHECK: %[[LANE:.*]] = arith.andi %[[TID]], %{{.*}} : i32
+// CHECK: %[[W64:.*]] = arith.extsi %{{.*}} : i32 to i64
+// CHECK: %[[SLOT:.*]] = arith.andi %[[W64]], %{{.*}} : i64
+// CHECK: %[[SLOTBASE:.*]] = arith.muli %[[SLOT]], %{{.*}} : i64
+// CHECK: %[[VALID64:.*]] = arith.extsi %{{.*}} : i32 to i64
+// CHECK: %[[LOCAL64:.*]] = arith.extsi %{{.*}} : i32 to i64
+// CHECK: %[[RANGEBASE:.*]] = arith.minsi %[[VALID64]], %[[LOCAL64]] : i64
+// CHECK: %[[TID64:.*]] = arith.extsi %[[TID]] : i32 to i64
+// CHECK: %[[LANE64:.*]] = arith.andi %[[TID64]], %{{.*}} : i64
+// CHECK: %[[BASE0:.*]] = arith.addi %[[SLOTBASE]], %[[RANGEBASE]] : i64
+// CHECK: %[[BASE1:.*]] = arith.addi %[[BASE0]], %[[LANE64]] : i64
+// CHECK: %[[BASE2:.*]] = arith.addi %[[BASE1]], %{{.*}} : i64
+// CHECK: %[[BASE:.*]] = arith.subi %[[BASE2]], %{{.*}} : i64
+// CHECK: scf.for
+// The guard keeps only the IV-dependent i*32 portion, reusing the hoisted
+// base and lane values.
+// CHECK:   %[[IV32:.*]] = arith.index_cast {{.*}} : index to i32
+// CHECK:   %[[ITEROFF:.*]] = arith.muli %[[IV32]], %{{.*}} : i32
+// CHECK:   %[[LOGICAL:.*]] = arith.addi %[[ITEROFF]], %[[LANE]] : i32
+// CHECK:   arith.cmpi
+// CHECK:   scf.if
+// CHECK:     %[[IV64:.*]] = arith.extsi %[[IV32]] : i32 to i64
+// CHECK:     %[[DYNAMIC:.*]] = arith.muli %[[IV64]], %{{.*}} : i64
+// CHECK:     %[[OFFSET:.*]] = arith.addi %[[BASE]], %[[DYNAMIC]] : i64
+// CHECK:     %[[INDEX:.*]] = arith.index_cast %[[OFFSET]] : i64 to index
+// CHECK:     pto.store %{{.*}}, %{{.*}}[%[[INDEX]]]
