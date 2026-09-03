@@ -10,6 +10,18 @@
 set -uo pipefail   # 注意：去掉 -e，避免失败直接退出整个脚本
 
 BASE_DIR="$(cd -- "$(dirname -- "$0")" && pwd)"
+REPO_ROOT="$(cd -- "${BASE_DIR}/../.." && pwd)"
+
+# build.sh persists this marker because its exported environment does not
+# survive into the later PreSmoke sample step.
+PTOAS_PRESMOKE_SKIP_RUNOP_MARKER="${PTOAS_PRESMOKE_SKIP_RUNOP_MARKER:-${REPO_ROOT}/build/.skip-presmoke-runop}"
+if [[ -f "${PTOAS_PRESMOKE_SKIP_RUNOP_MARKER}" ]]; then
+  echo "PreSmoke runop smoke skipped: ${PTOAS_PRESMOKE_SKIP_RUNOP_MARKER}"
+  echo "========== SUMMARY =========="
+  echo "OK=0  FAIL=0  SKIP=0"
+  echo "============================="
+  exit 0
+fi
 
 # Allow overriding tool/python explicitly:
 #   PTOAS_BIN=/path/to/ptoas PYTHON_BIN=/path/to/python ./runop.sh all

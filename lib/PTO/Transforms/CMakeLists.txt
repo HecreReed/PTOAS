@@ -67,12 +67,15 @@ add_mlir_dialect_library(PTOTransforms
   VPTOScheduler/VPTOSchedModel.cpp
   VPTOScheduler/VPTOSchedRegion.cpp
   VPTOScheduler/VPTOSchedResourceTracker.cpp
+  VPTOScheduler/VPTOSchedStrategy.cpp
+  VPTOScheduler/VPTOScheduler.cpp
   VPTOScheduler/VPTOSchedulerPass.cpp
   PTOVPTOPtrBoundary.cpp
   VPTOBufferMaterialization.cpp
   PTOValidateVPTOIR.cpp
   PTONarrowVPTOLoopCounters.cpp
   PTOConvertSCFToCFWithLoopHintsPass.cpp
+  PTOPromotePersistentFragmentLoopsPass.cpp
   PTOUnrollLoopsPass.cpp
   PTOValidateVMIIR.cpp
   VMIPreAssignmentCombine.cpp
@@ -167,6 +170,7 @@ add_mlir_dialect_library(PTOTransforms
   PUBLIC
   PTOAnalysis
   PTOIR
+  MLIRAnalysis
   MLIRIR
   MLIRPass
   MLIRFuncDialect

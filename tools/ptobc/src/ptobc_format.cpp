@@ -15,6 +15,9 @@
 
 #include "ptobc/leb128.h"
 
+#include "llvm/ADT/SmallString.h"
+#include "llvm/Support/Path.h"
+
 #include <cstring>
 #include <fstream>
 #include <stdexcept>
@@ -203,16 +206,13 @@ std::vector<uint8_t> PTOBCFile::serialize() const {
   return out.bytes;
 }
 
-std::filesystem::path canonicalizeIoPath(const std::string& path) {
-  // weakly_canonical resolves the existing prefix (symlinks, dots) while
-  // tolerating a not-yet-existing tail, which writeFile needs for new outputs.
-  std::error_code ec;
-  std::filesystem::path canonical =
-      std::filesystem::weakly_canonical(std::filesystem::path(path), ec);
-  if (ec || canonical.empty()) {
-    return std::filesystem::path(path).lexically_normal();
-  }
-  return canonical;
+std::string canonicalizeIoPath(const std::string& path) {
+  // Lexically collapse "./", "foo/../" and redundant separators. This is a
+  // pure string rewrite: symlink/absolute resolution is intentionally left to
+  // the stream open below, which still reports unreachable paths.
+  llvm::SmallString<128> normalized(path);
+  llvm::sys::path::remove_dots(normalized, /*remove_dot_dot=*/true);
+  return std::string(normalized);
 }
 
 std::vector<uint8_t> readFile(const std::string& path) {

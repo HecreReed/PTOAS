@@ -236,6 +236,18 @@ inline constexpr llvm::StringLiteral kUnrollFullValue = "full";
 inline constexpr llvm::StringLiteral kUnrollFactorAttrName =
     "pto.unroll_factor";
 
+/// Unit attribute marking an `llvm.alloca` as a persistent SIMT fragment
+/// buffer.  Shared by the persistent-fragment analysis and the loop
+/// promotion pass (used as the discovery entry point).
+inline constexpr llvm::StringLiteral kPersistentAttrName = "pto.persistent";
+
+/// Internal marker set by pto-promote-persistent-fragment-loops on loops it
+/// promoted to {pto.unroll = "full"}: pto-unroll-loops turns its
+/// drop-with-remark fallback into a hard error for marked loops, because a
+/// persistent loop that survives unrolling breaks fragment materialization.
+inline constexpr llvm::StringLiteral kPersistentUnrollMarkerAttrName =
+    "pto.persistent_unroll";
+
 /// Check whether a `pto.unroll_factor` attribute value satisfies the
 /// contract: a signless i32 holding a positive factor.  The factor is read
 /// back as a signed value, so anything wider or non-positive would silently

@@ -193,3 +193,4 @@
   python -m unittest discover -s test/package -v
   git diff --check
   ```
+

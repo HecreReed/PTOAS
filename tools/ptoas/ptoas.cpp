@@ -209,6 +209,11 @@ llvm::cl::opt<VPTOSchedulerCLIMode> vptoSchedulerMode(
         clEnumValN(VPTOSchedulerCLIMode::On, "on", "Run scheduler in on mode")),
     llvm::cl::init(VPTOSchedulerCLIMode::Off));
 
+llvm::cl::opt<bool> vptoSchedulerTrace(
+    "vpto-scheduler-trace",
+    llvm::cl::desc("Print detailed VPTO on-mode scheduling results"),
+    llvm::cl::init(false));
+
 llvm::cl::opt<bool> enableInsertSync("enable-insert-sync",
                                             llvm::cl::desc("Enable automatic synchronization insertion pass"),
                                             llvm::cl::init(false));

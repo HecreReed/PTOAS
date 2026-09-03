@@ -14,7 +14,6 @@
 #pragma once
 
 #include <cstdint>
-#include <filesystem>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -110,9 +109,11 @@ struct PTOBCFile {
   std::vector<uint8_t> serialize() const;
 };
 
-// Normalize a user-supplied path (canonical prefix plus lexically normal
-// tail) before it is handed to file IO.
-std::filesystem::path canonicalizeIoPath(const std::string& path);
+// Lexically normalize a user-supplied path ("." and ".." components, redundant
+// separators) before it is handed to file IO. Purely lexical: no filesystem
+// access, so the header stays usable from toolchains without C++17
+// <filesystem>.
+std::string canonicalizeIoPath(const std::string& path);
 
 // Helpers to read a PTOBC file from disk.
 std::vector<uint8_t> readFile(const std::string& path);
