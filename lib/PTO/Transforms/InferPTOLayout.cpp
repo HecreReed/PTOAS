@@ -36,6 +36,7 @@
 #include "mlir/IR/SymbolTable.h"
 #include "mlir/Pass/Pass.h"
 #include "llvm/ADT/DenseMap.h"
+#include "llvm/ADT/DenseSet.h"
 #include "llvm/ADT/TypeSwitch.h"
 
 namespace mlir {
@@ -258,6 +259,34 @@ static std::optional<Layout> inferFromStaticMemRefTy(MemRefType mrTy) {
                        elemByteSize(mrTy.getElementType()));
 }
 
+static bool isInferredMinor2DAmbiguousLayout(MakeTensorViewOp op) {
+  auto inferred = op->getAttrOfType<BoolAttr>(kInferredLayoutAttrName);
+  if (!inferred || !inferred.getValue()) {
+    return false;
+  }
+  auto layout = op.getLayoutAttr();
+  if (!layout) {
+    return false;
+  }
+  Layout layoutValue = layout.getLayout();
+  if (layoutValue != Layout::ND && layoutValue != Layout::DN) {
+    return false;
+  }
+
+  SmallVector<int64_t> shape;
+  SmallVector<int64_t> strides;
+  if (!getStaticShapeAndStride(op, shape, strides)) {
+    return false;
+  }
+
+  bool ambiguous = false;
+  (void)inferLayout5D(
+      shape, strides,
+      elemByteSize(cast<TensorViewType>(op.getResult().getType()).getElementType()),
+      std::nullopt, &ambiguous);
+  return ambiguous && isMinorColsOne(shape);
+}
+
 template <typename LoadStoreOp, typename ViewGetter, typename TileGetter>
 static void maybeRepairMinor2DLoadStoreLayout(LoadStoreOp op, ViewGetter getView,
                                               TileGetter getTile) {
@@ -278,16 +307,7 @@ static void maybeRepairMinor2DLoadStoreLayout(LoadStoreOp op, ViewGetter getView
     return;
   }
 
-  SmallVector<int64_t> shape, strides;
-  bool ambiguous = false;
-  if (!getStaticShapeAndStride(tv, shape, strides)) {
-    return;
-  }
-  (void)inferLayout5D(
-      shape, strides,
-      elemByteSize(cast<TensorViewType>(tv.getResult().getType()).getElementType()),
-      std::nullopt, &ambiguous);
-  if (ambiguous && isMinorColsOne(shape)) {
+  if (isInferredMinor2DAmbiguousLayout(tv)) {
     setLayoutAttr(viewInfo.owner, *tilePref, /*inferred=*/true);
     setLayoutAttr(op.getOperation(), *tilePref, /*inferred=*/true);
   }
@@ -720,6 +740,13 @@ static void inferMakeTensorViewLayoutAttr(MakeTensorViewOp op,
   if (!getShapeAndStride(op, shape, strides, allStatic))
     return;
 
+  if (!op.getLayoutAttr()) {
+    if (auto typeLayout = getViewTypeLayoutAttr(op.getResult().getType())) {
+      setLayoutAttr(op.getOperation(), typeLayout.getLayout(),
+                    /*inferred=*/false);
+    }
+  }
+
   bool isAmbiguous = false;
   std::optional<Layout> inferred;
   if (allStatic) {
@@ -773,7 +800,9 @@ struct ViewLayoutNode {
 
 /// Whole-module equivalence solver for layouts carried by tensor-view SSA
 /// values. A missing fact is Unknown; uniting different known layouts is a
-/// Conflict. Unknown components materialize as the historical ND default.
+/// Conflict. Inferred minor-2D ND/DN choices stay unknown until vector
+/// consumers are connected. Remaining unknown components use the historical
+/// ND default.
 class ViewLayoutSolver {
 public:
   explicit ViewLayoutSolver(ModuleOp module)
@@ -786,6 +815,10 @@ public:
     if (failed(addConstraints())) {
       return failure();
     }
+    if (failed(resolveAmbiguousConsumerLayouts())) {
+      return failure();
+    }
+    rewriteAmbiguousMakeTensorViewLayouts();
     rewriteValueTypes();
     rewriteFunctionTypes();
     return success();
@@ -881,6 +914,10 @@ private:
       if (!layout) {
         return WalkResult::advance();
       }
+      if (isInferredMinor2DAmbiguousLayout(op)) {
+        ambiguousMakes.push_back(op);
+        return WalkResult::advance();
+      }
       return failed(seed(op.getResult(), layout.getLayout(), op))
                  ? WalkResult::interrupt()
                  : WalkResult::advance();
@@ -933,6 +970,96 @@ private:
       return failure();
     }
     return seedFunctionResultLayouts();
+  }
+
+  LogicalResult reportAmbiguousConsumerConflict(Operation *consumer) {
+    consumer->emitError(
+        "ambiguous tensor view has conflicting ND and DN consumer layouts");
+    return failure();
+  }
+
+  LogicalResult recordAmbiguousConsumerLayout(
+      Value view, Type tileType, Operation *consumer,
+      const llvm::DenseSet<unsigned> &ambiguousRoots,
+      DenseMap<unsigned, LayoutPreference> &preferences) {
+    auto preference = isVectorTileType(tileType)
+                          ? tileBLayoutToGlobalLayout(tileType)
+                          : std::nullopt;
+    if (!preference || (*preference != Layout::ND &&
+                        *preference != Layout::DN)) {
+      return success();
+    }
+
+    auto it = ids.find(view);
+    if (it == ids.end()) {
+      return success();
+    }
+    unsigned root = find(it->second);
+    if (!ambiguousRoots.count(root)) {
+      return success();
+    }
+    if (nodes[root].layout) {
+      return success();
+    }
+
+    LayoutPreference &result = preferences[root];
+    if (result.conflict) {
+      return reportAmbiguousConsumerConflict(consumer);
+    }
+    if (!result.preferred) {
+      result.preferred = preference;
+      return success();
+    }
+    if (*result.preferred != *preference) {
+      result.preferred = std::nullopt;
+      result.conflict = true;
+      return reportAmbiguousConsumerConflict(consumer);
+    }
+    return success();
+  }
+
+  LogicalResult resolveAmbiguousConsumerLayouts() {
+    llvm::DenseSet<unsigned> ambiguousRoots;
+    for (MakeTensorViewOp op : ambiguousMakes) {
+      auto it = ids.find(op.getResult());
+      if (it != ids.end()) {
+        ambiguousRoots.insert(find(it->second));
+      }
+    }
+    if (ambiguousRoots.empty()) {
+      return success();
+    }
+
+    DenseMap<unsigned, LayoutPreference> preferences;
+    WalkResult loads = module.walk([&](pto::TLoadOp op) {
+      return failed(recordAmbiguousConsumerLayout(
+                 op.getSrc(), op.getDst().getType(), op, ambiguousRoots,
+                 preferences))
+                 ? WalkResult::interrupt()
+                 : WalkResult::advance();
+    });
+    if (loads.wasInterrupted()) {
+      return failure();
+    }
+
+    WalkResult stores = module.walk([&](pto::TStoreOp op) {
+      return failed(recordAmbiguousConsumerLayout(
+                 op.getDst(), op.getSrc().getType(), op, ambiguousRoots,
+                 preferences))
+                 ? WalkResult::interrupt()
+                 : WalkResult::advance();
+    });
+    if (stores.wasInterrupted()) {
+      return failure();
+    }
+
+    for (auto &entry : preferences) {
+      LayoutPreference &preference = entry.second;
+      if (preference.preferred) {
+        nodes[entry.first].layout = preference.preferred;
+      }
+    }
+    return success();
   }
 
   LogicalResult addYieldConstraints(ResultRange results, scf::YieldOp yield,
@@ -1266,6 +1393,13 @@ private:
     return nodes[find(it->second)].layout.value_or(Layout::ND);
   }
 
+  void rewriteAmbiguousMakeTensorViewLayouts() {
+    for (MakeTensorViewOp op : ambiguousMakes) {
+      setLayoutAttr(op.getOperation(), getLayout(op.getResult()),
+                    /*inferred=*/true);
+    }
+  }
+
   void rewriteValueTypes() {
     for (ViewLayoutNode &node : nodes) {
       Type newType = getViewTypeWithLayout(node.value.getType(),
@@ -1304,6 +1438,7 @@ private:
   MLIRContext *context;
   DenseMap<Value, unsigned> ids;
   SmallVector<ViewLayoutNode> nodes;
+  SmallVector<MakeTensorViewOp> ambiguousMakes;
   DenseMap<func::FuncOp, SmallVector<Value>> firstReturnOperands;
 };
 
